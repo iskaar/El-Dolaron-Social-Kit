@@ -1,0 +1,14 @@
+{
+  "brand": "El Dolarón",
+  "navy": "#16366B",
+  "red": "#D72B32",
+  "yellow": "#FFD447",
+  "white": "#FFFFFF",
+  "roles": {
+    "navy": "Nombre, títulos y texto",
+    "red": "Subrayados y franjas",
+    "yellow": "Etiquetas de precio y El",
+    "white": "Fondo y espacio alrededor del logo"
+  },
+  "note": "Valores objetivo para nuevas composiciones; las piezas raster incluyen píxeles suavizados y variaciones de renderizado."
+}

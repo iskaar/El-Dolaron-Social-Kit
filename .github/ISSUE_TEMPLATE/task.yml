@@ -1,0 +1,42 @@
+name: Tarea
+description: Cambio de asset, copy, guía o colaboración
+title: "[Tarea] "
+labels:
+  - task
+body:
+  - type: textarea
+    id: outcome
+    attributes:
+      label: Resultado esperado
+      description: ¿Qué debe quedar listo?
+      placeholder: Describe el resultado observable.
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Área
+      options:
+        - Asset visual
+        - Copy
+        - Inventario o paleta
+        - Preview HTML
+        - Flujo de GitHub
+        - Documentación
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Criterios de aceptación
+      description: Lista breve de condiciones que permiten cerrar la tarea.
+      placeholder: "- ..."
+    validations:
+      required: true
+  - type: input
+    id: agent
+    attributes:
+      label: Agente que la toma
+      description: Nombre corto del agente o persona.
+    validations:
+      required: false

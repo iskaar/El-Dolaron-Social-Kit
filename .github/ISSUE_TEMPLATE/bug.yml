@@ -1,0 +1,31 @@
+name: Problema
+description: Asset roto, texto incorrecto o validación fallida
+title: "[Problema] "
+labels:
+  - bug
+body:
+  - type: textarea
+    id: actual
+    attributes:
+      label: Qué ocurre
+      description: Describe el problema y el archivo afectado.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Qué debería ocurrir
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Cómo reproducirlo
+      description: Pasos mínimos o comando de validación.
+    validations:
+      required: true
+  - type: input
+    id: path
+    attributes:
+      label: Ruta afectada
+      placeholder: 03-Publicaciones/archivo.png

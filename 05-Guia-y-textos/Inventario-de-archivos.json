@@ -1,0 +1,91 @@
+{
+  "assets": [
+    {
+      "file": "01-Logos/el-dolaron-logo-horizontal-fondo-blanco.png",
+      "title": "Logo horizontal",
+      "description": "Logo completo sobre fondo blanco; conservar proporciones.",
+      "width": 2172,
+      "height": 724,
+      "format": "PNG",
+      "background": "opaque white"
+    },
+    {
+      "file": "02-Perfiles-y-portadas/el-dolaron-perfil-cuadrado.png",
+      "title": "Foto de perfil",
+      "description": "Mismo avatar para Instagram, Facebook, TikTok y WhatsApp; centrar al recortar en círculo.",
+      "width": 1254,
+      "height": 1254,
+      "format": "PNG",
+      "background": "opaque white"
+    },
+    {
+      "file": "02-Perfiles-y-portadas/el-dolaron-portada-horizontal.png",
+      "title": "Portada horizontal",
+      "description": "Ajustar en el recorte de cada plataforma y revisar que el nombre quede completo.",
+      "width": 2172,
+      "height": 724,
+      "format": "PNG",
+      "background": "opaque white"
+    },
+    {
+      "file": "03-Publicaciones/el-dolaron-bienvenida-4x5.png",
+      "title": "Publicación de bienvenida",
+      "description": "Lista para publicar; acompañar con el texto de bienvenida.",
+      "width": 1122,
+      "height": 1402,
+      "format": "PNG",
+      "background": "opaque white"
+    },
+    {
+      "file": "03-Publicaciones/el-dolaron-producto-4x5.png",
+      "title": "Fondo para un producto",
+      "description": "Agregar foto en el centro, nombre abajo a la izquierda y precio dentro de la etiqueta amarilla.",
+      "width": 1122,
+      "height": 1402,
+      "format": "PNG",
+      "background": "opaque white"
+    },
+    {
+      "file": "03-Publicaciones/el-dolaron-novedades-4x5.png",
+      "title": "Fondo para cuatro novedades",
+      "description": "Agregar una foto en cada recuadro; usar las bandas amarillas para precio y nombre breve.",
+      "width": 1122,
+      "height": 1402,
+      "format": "PNG",
+      "background": "opaque white"
+    },
+    {
+      "file": "04-Historias/el-dolaron-producto-historia-9x16.png",
+      "title": "Historia de producto",
+      "description": "Agregar foto en el espacio central y precio en la etiqueta; también sirve como base para portada de video.",
+      "width": 941,
+      "height": 1672,
+      "format": "PNG",
+      "background": "opaque white"
+    },
+    {
+      "file": "04-Historias/el-dolaron-aviso-historia-9x16.png",
+      "title": "Historia de aviso",
+      "description": "Agregar anuncio breve en el centro; revisar el recorte si se usa como portada de Reel.",
+      "width": 940,
+      "height": 1672,
+      "format": "PNG",
+      "background": "opaque white"
+    },
+    {
+      "file": "01-Logos/el-dolaron-simbolo-transparente.svg",
+      "title": "Símbolo D transparente",
+      "description": "Símbolo independiente; no incluye el nombre completo. SVG vectorial original exportado; PNG con canal alfa real.",
+      "format": "SVG"
+    },
+    {
+      "file": "01-Logos/el-dolaron-simbolo-transparente.png",
+      "title": "Símbolo D transparente",
+      "description": "Símbolo independiente; no incluye el nombre completo. SVG vectorial original exportado; PNG con canal alfa real.",
+      "format": "PNG",
+      "width": 2048,
+      "height": 2048
+    }
+  ],
+  "version": "1.0"
+}

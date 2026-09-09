@@ -1,0 +1,12 @@
+EL DOLARÓN — KIT DE REDES
+
+1. Abre EMPIEZA-AQUI.html en un navegador. Incluye vista previa de los 10 archivos visuales e instrucciones.
+2. Usa el perfil cuadrado y la portada horizontal para configurar tus cuentas.
+3. La bienvenida está lista para publicar; los fondos de productos e historias requieren fotos y texto.
+4. Copia las bios y textos de 05-Guia-y-textos/Textos-para-redes.txt. Completa los campos entre corchetes.
+
+FORMATOS
+Logo completo: PNG con fondo blanco, no vector editable.
+Símbolo D: SVG y PNG transparente.
+Piezas sociales: PNG planos, no archivos por capas.
+No incluye fuentes personalizadas ni cuentas publicadas.
