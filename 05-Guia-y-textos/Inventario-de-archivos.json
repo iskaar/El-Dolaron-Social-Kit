@@ -85,6 +85,20 @@
       "format": "PNG",
       "width": 2048,
       "height": 2048
+    },
+    {
+      "file": "01-Logos/el-dolaron-insignia-social-transparente.svg",
+      "title": "Insignia social transparente",
+      "description": "Insignia circular para superponer en publicaciones, historias y videos; conservar proporciones y margen exterior.",
+      "format": "SVG"
+    },
+    {
+      "file": "01-Logos/el-dolaron-insignia-social-transparente.png",
+      "title": "Insignia social transparente",
+      "description": "PNG de alta resolución con canal alfa real para uso directo en redes sociales.",
+      "format": "PNG",
+      "width": 2048,
+      "height": 2048
     }
   ],
   "version": "1.0"
