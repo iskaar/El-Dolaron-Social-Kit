@@ -1,0 +1,28 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "el-dolaron",
+  "main": "src/worker.ts",
+  "compatibility_date": "2026-09-11",
+  "compatibility_flags": ["nodejs_compat"],
+  "observability": {
+    "enabled": true,
+    "head_sampling_rate": 1
+  },
+  "assets": {
+    "directory": "public"
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "el-dolaron",
+      // Se llena con el id que devuelve `wrangler d1 create el-dolaron`.
+      "database_id": ""
+    }
+  ],
+  "r2_buckets": [
+    {
+      "binding": "FOTOS",
+      "bucket_name": "el-dolaron-fotos"
+    }
+  ]
+}
