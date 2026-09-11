@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 2048 2048" role="img" aria-labelledby="title description">
   <title id="title">Insignia social de El Dolarón</title>
-  <desc id="description">Insignia circular con el símbolo D, el nombre El Dolarón y la frase Productos Americanos.</desc>
+  <desc id="description">Insignia circular con el símbolo D, el nombre El Dolarón y el descriptor Mercancía americana.</desc>
   <defs>
     <path id="top-arc" d="M 346 1024 A 678 678 0 0 1 1702 1024"/>
     <path id="bottom-arc" d="M 346 1072 A 678 678 0 0 0 1702 1072"/>
@@ -11,7 +11,7 @@
     <textPath href="#top-arc" startOffset="50%" text-anchor="middle">EL DOLARÓN</textPath>
   </text>
   <text fill="#D72B32" font-family="Arial, sans-serif" font-size="102" font-weight="700" letter-spacing="8">
-    <textPath href="#bottom-arc" startOffset="50%" text-anchor="middle">PRODUCTOS AMERICANOS</textPath>
+    <textPath href="#bottom-arc" startOffset="50%" text-anchor="middle">MERCANCÍA AMERICANA</textPath>
   </text>
   <path fill="#FFD447" d="m286 1024 18 55 58 0-47 34 18 55-47-34-47 34 18-55-47-34 58 0z"/>
   <path fill="#FFD447" d="m1762 1024 18 55 58 0-47 34 18 55-47-34-47 34 18-55-47-34 58 0z"/>
