@@ -83,9 +83,10 @@ si precio <= 60 → destino = bin más chico que lo cubra, sin etiqueta
 
 - Nunca por encima de `precio_lista`.
 - Todos los porcentajes viven en la configuración del admin, ninguno en el código.
-- Arranque sugerido, a confirmar por Isaac: **50 % para todas las categorías**, **60 % para dañado**,
-  límite de bin **$60**. Todas las categorías empiezan igual a propósito: las diferencias se ajustan
-  con ventas reales, no con suposiciones.
+- Arranque confirmado por Isaac (2026-09-11): **50 % para todas las categorías**, **60 % para
+  dañado**, límite de bin **$60**. Todas las categorías empiezan igual a propósito: las diferencias
+  se ajustan con ventas reales, no con suposiciones. Son valores editables desde el admin, no
+  constantes en el código.
 
 ## 6. Admin
 
