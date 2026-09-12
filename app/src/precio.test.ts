@@ -1,7 +1,7 @@
 // node --test src/precio.test.ts
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { calcularPrecio } from './precio.ts';
+import { calcularPrecio, ajustarManual, redondear5 } from './precio.ts';
 
 // Los valores confirmados por Isaac (2026-09-11).
 const config = {
@@ -43,4 +43,18 @@ test('una categoria desconocida usa el porcentaje de otros', () => {
 
 test('sin precio de lista la pieza espera al admin, no cae al bin mas barato', () => {
   assert.deepEqual(precio(0), { precio: 0, destino: 'etiqueta' });
+});
+
+test('una pieza de bin se vende al precio del bote, no al que se tecleo', () => {
+  // El caso real: bandas de cabello en bin_60 con $40 escrito a mano.
+  assert.equal(ajustarManual({ precio: 4000, destino: 'bin_60', config }), 6000);
+  assert.equal(ajustarManual({ precio: 4000, destino: 'bin_40', config }), 4000);
+  assert.equal(ajustarManual({ precio: 9999, destino: 'bin_20', config }), 2000);
+});
+
+test('un precio escrito a mano tambien se redondea a $5', () => {
+  assert.equal(ajustarManual({ precio: 7200, destino: 'etiqueta', config }), 7500);
+  assert.equal(redondear5(7500), 7500);
+  assert.equal(redondear5(1), 500);
+  assert.equal(redondear5(0), 0);
 });

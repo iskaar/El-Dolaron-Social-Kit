@@ -6,7 +6,7 @@
  */
 
 import { analizarBorrador, MODELO_POR_DEFECTO, type Modelo } from './analisis.ts';
-import { calcularPrecio } from './precio.ts';
+import { calcularPrecio, ajustarManual, type Destino } from './precio.ts';
 
 interface FilaConfig {
   clave: string;
@@ -91,6 +91,7 @@ async function crearBorrador(request: Request, env: Env, ctx: ExecutionContext, 
      on conflict (id) do update set
        estado_fisico = excluded.estado_fisico,
        foto_key = excluded.foto_key,
+       estado_analisis = 'pendiente',
        actualizado_en = excluded.actualizado_en`,
   )
     .bind(id, semanaIngreso(ahora), estadoFisico, fotoKey, ahora.toISOString(), ahora.toISOString())
@@ -165,6 +166,10 @@ async function corregirBorrador(id: string, request: Request, env: Env): Promise
     destino = cambios.destino === undefined ? fila.destino : String(cambios.destino);
     if (!Number.isFinite(precio) || precio < 0) {
       return json({ error: 'Precio invalido.' }, 400);
+    }
+    if (DESTINOS.has(destino)) {
+      // Bin: manda el precio del bote. Etiqueta: se redondea a $5 como el automatico.
+      precio = ajustarManual({ precio, destino: destino as Destino, config });
     }
     // Misma regla que en el calculo automatico: el precio de venta nunca queda
     // por encima del precio de lista.

@@ -52,8 +52,7 @@
 </div>
 
 <script type="module">
-const LADO_MAX = 1024;
-const CALIDAD = 0.8;
+import { aJpeg } from '/foto.js';
 
 const video = document.getElementById('camara');
 const contador = document.getElementById('contador');
@@ -109,14 +108,7 @@ async function encenderCamara() {
 }
 
 /** Reduce la foto antes de guardarla: alcanza para la IA, la etiqueta y el catálogo. */
-function capturar() {
-  const escala = Math.min(1, LADO_MAX / Math.max(video.videoWidth, video.videoHeight));
-  const lienzo = document.createElement('canvas');
-  lienzo.width = Math.round(video.videoWidth * escala);
-  lienzo.height = Math.round(video.videoHeight * escala);
-  lienzo.getContext('2d').drawImage(video, 0, 0, lienzo.width, lienzo.height);
-  return new Promise((resolve) => lienzo.toBlob(resolve, 'image/jpeg', CALIDAD));
-}
+const capturar = () => aJpeg(video, video.videoWidth, video.videoHeight);
 
 function pintarMiniatura(registro) {
   const img = document.createElement('img');
