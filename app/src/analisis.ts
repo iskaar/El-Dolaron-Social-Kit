@@ -96,6 +96,11 @@ const ESQUEMA = {
   additionalProperties: false,
 } as const;
 
+// Gemini acepta un subconjunto de JSON Schema y rechaza `additionalProperties`
+// con un 400; Claude lo necesita para el modo estricto. Mismo esquema, esa llave
+// de menos.
+const { additionalProperties: _noEnGemini, ...ESQUEMA_GEMINI } = ESQUEMA;
+
 function base64(datos: ArrayBuffer): string {
   const bytes = new Uint8Array(datos);
   let binario = '';
@@ -138,7 +143,14 @@ async function conClaude(foto: string, env: Env, instruccion: string): Promise<F
 }
 
 async function conGemini(foto: string, env: Env, instruccion: string): Promise<Ficha> {
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${MODELO_GEMINI}:generateContent?key=${env.GEMINI_API_KEY}`;
+  // Las dos instancias tienen secretos independientes, pero no siempre con el
+  // mismo nombre: se acepta cualquiera de los dos en lugar de obligar a
+  // recapturar la llave.
+  const llave = env.GEMINI_API_KEY || env.GEMINI2_API_KEY;
+  if (!llave) {
+    throw new Error('Falta la llave de Gemini (GEMINI_API_KEY o GEMINI2_API_KEY).');
+  }
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${MODELO_GEMINI}:generateContent?key=${llave}`;
   const respuesta = await fetch(url, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
@@ -152,7 +164,7 @@ async function conGemini(foto: string, env: Env, instruccion: string): Promise<F
           ],
         },
       ],
-      generationConfig: { responseMimeType: 'application/json', responseSchema: ESQUEMA },
+      generationConfig: { responseMimeType: 'application/json', responseSchema: ESQUEMA_GEMINI },
     }),
   });
   if (!respuesta.ok) {

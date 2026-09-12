@@ -103,17 +103,21 @@ async function crearBorrador(request: Request, env: Env, ctx: ExecutionContext, 
     httpMetadata: { contentType: 'image/jpeg' },
   });
 
+  // Cloudflare Access ya identifica a quien sube la foto; se guarda para poder
+  // distinguir lo del vendedor de lo de un desconocido.
+  const capturadoPor = request.headers.get('cf-access-authenticated-user-email') ?? '';
+
   const ahora = new Date();
   await env.DB.prepare(
-    `insert into productos (id, semana_ingreso, estado_fisico, foto_key, creado_en, actualizado_en)
-     values (?, ?, ?, ?, ?, ?)
+    `insert into productos (id, semana_ingreso, estado_fisico, foto_key, capturado_por, creado_en, actualizado_en)
+     values (?, ?, ?, ?, ?, ?, ?)
      on conflict (id) do update set
        estado_fisico = excluded.estado_fisico,
        foto_key = excluded.foto_key,
        estado_analisis = 'pendiente',
        actualizado_en = excluded.actualizado_en`,
   )
-    .bind(id, semanaIngreso(ahora), estadoFisico, fotoKey, ahora.toISOString(), ahora.toISOString())
+    .bind(id, semanaIngreso(ahora), estadoFisico, fotoKey, capturadoPor, ahora.toISOString(), ahora.toISOString())
     .run();
 
   // El analisis corre despues de responder: la camara nunca espera a la IA.
@@ -126,7 +130,7 @@ async function listarBorradores(url: URL, env: Env): Promise<Response> {
   const estado = url.searchParams.get('estado');
   // Los botes son productos para la caja, no piezas que revisar.
   const consulta = `select id, nombre, categoria, precio_lista, precio, estado_fisico,
-                           estado_analisis, destino, semana_ingreso, creado_en
+                           estado_analisis, destino, semana_ingreso, capturado_por, creado_en
                     from productos
                     where sin_inventario = 0 ${estado ? 'and estado_analisis = ?' : ''}
                     order by creado_en desc limit 200`;

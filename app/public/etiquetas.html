@@ -32,7 +32,8 @@
   #hoja { display: none; }
   .etiqueta { width: 57mm; height: 32mm; padding: 2.5mm; border: 0.2mm dashed #bbb;
     display: flex; flex-direction: column; justify-content: space-between; overflow: hidden; }
-  .etiqueta .arriba { display: flex; justify-content: space-between; gap: 1mm; align-items: flex-start; }
+  .etiqueta .arriba { display: flex; justify-content: space-between; gap: 1.5mm; align-items: flex-start; }
+  .etiqueta .marca { flex: 0 0 auto; line-height: 0; }
   .etiqueta .nombre { font-size: 2.6mm; line-height: 1.15; max-height: 6mm; overflow: hidden; }
   .etiqueta .precios { display: flex; align-items: baseline; gap: 2mm; }
   .etiqueta .ahora { font-size: 7mm; font-weight: 800; letter-spacing: -0.2mm; }
@@ -80,6 +81,7 @@
 
 <script type="module">
 import { svgCode128 } from '/code128.js';
+import { svgLogoD } from '/logo.js';
 
 const lista = document.getElementById('lista');
 const hoja = document.getElementById('hoja');
@@ -113,14 +115,16 @@ function etiqueta(p) {
   // Modulo de 0.25 mm = exactamente 2 puntos a los 203 dpi de la TLP 2844.
   // Un modulo que no cae en puntos enteros sale con barras de ancho desparejo
   // y el lector deja de leerlo: aqui la aritmetica de la impresora manda.
+  // La semana baja a la linea del codigo: sigue impresa —de ella dependen las
+  // rebajas por antiguedad— pero el lugar de arriba lo ocupa la D.
   return `<div class="etiqueta">
     <div class="arriba">
       <div class="nombre">${escapar(p.nombre || 'El Dolarón')}</div>
-      <div class="codigo">${p.semana_ingreso}</div>
+      <div class="marca">${svgLogoD({ alto: 6 })}</div>
     </div>
     <div class="precios"><span class="ahora">${pesos(p.precio)}</span>${antes}</div>
     <div class="pie">
-      ${svgCode128(p.codigo, { modulo: 0.25, alto: 8 })}<div class="codigo">${p.codigo}</div>
+      ${svgCode128(p.codigo, { modulo: 0.25, alto: 8 })}<div class="codigo">${p.codigo} · ${p.semana_ingreso}</div>
     </div>
   </div>`;
 }
