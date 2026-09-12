@@ -25,10 +25,12 @@
   .renglon img { width: 56px; height: 56px; object-fit: cover; border-radius: 6px; background: #eceff4; }
   .renglon .precio { font-weight: 700; }
   .vacio { padding: 24px; text-align: center; color: #5b6478; }
+  .ayuda { font-size: 13px; color: #5b6478; line-height: 1.45; margin: 0 0 16px; max-width: 70ch; }
 
-  /* Hoja de etiquetas: 50 x 30 mm, lo que cabe en una etiqueta chica de anaquel. */
+  /* Zebra TLP 2844: rollo de 57 x 32 mm (2.25 x 1.25 in) a 203 dpi.
+     Una etiqueta por pagina; el rollo avanza una etiqueta por pagina impresa. */
   #hoja { display: none; }
-  .etiqueta { width: 50mm; height: 30mm; padding: 2mm; border: 0.2mm dashed #bbb;
+  .etiqueta { width: 57mm; height: 32mm; padding: 2.5mm; border: 0.2mm dashed #bbb;
     display: flex; flex-direction: column; justify-content: space-between; overflow: hidden; }
   .etiqueta .arriba { display: flex; justify-content: space-between; gap: 1mm; align-items: flex-start; }
   .etiqueta .nombre { font-size: 2.6mm; line-height: 1.15; max-height: 6mm; overflow: hidden; }
@@ -41,12 +43,14 @@
   .etiqueta svg { display: block; margin: 0 auto; }
 
   @media print {
-    header, .barra, .lista, .vacio { display: none !important; }
+    header, .barra, .lista, .vacio, .ayuda { display: none !important; }
     body { background: #fff; }
     main { padding: 0; max-width: none; }
-    #hoja { display: flex !important; flex-wrap: wrap; gap: 0; }
-    .etiqueta { border-color: #eee; break-inside: avoid; }
-    @page { size: letter; margin: 6mm; }
+    #hoja { display: block !important; }
+    /* Sin borde en papel termico, y una etiqueta por pagina. */
+    .etiqueta { border: 0; break-inside: avoid; }
+    .etiqueta:not(:last-child) { break-after: page; }
+    @page { size: 57mm 32mm; margin: 0; }
   }
 </style>
 </head>
@@ -63,6 +67,12 @@
     <button id="todas" class="claro" type="button">Seleccionar todas</button>
     <span id="resumen"></span>
   </div>
+
+  <p class="ayuda">
+    Zebra TLP 2844, rollo de 57 × 32 mm. En el diálogo de impresión: impresora
+    <b>ZDesigner TLP 2844</b>, escala <b>100 %</b> y <b>sin</b> «Ajustar a la página»
+    ni márgenes. Escalar la hoja deforma las barras y el lector deja de leerlas.
+  </p>
 
   <div class="lista" id="lista"><div class="vacio">Cargando…</div></div>
   <div id="hoja"></div>
@@ -100,8 +110,9 @@ async function cargar() {
 
 function etiqueta(p) {
   const antes = p.precio_lista > p.precio ? `<span class="antes">${pesos(p.precio_lista)}</span>` : '';
-  // 0.28 mm de modulo: el codigo completo entra en los 46 mm utiles de la etiqueta
-  // y sigue siendo suficientemente grueso para el lector de la caja.
+  // Modulo de 0.25 mm = exactamente 2 puntos a los 203 dpi de la TLP 2844.
+  // Un modulo que no cae en puntos enteros sale con barras de ancho desparejo
+  // y el lector deja de leerlo: aqui la aritmetica de la impresora manda.
   return `<div class="etiqueta">
     <div class="arriba">
       <div class="nombre">${escapar(p.nombre || 'El Dolarón')}</div>
@@ -109,7 +120,7 @@ function etiqueta(p) {
     </div>
     <div class="precios"><span class="ahora">${pesos(p.precio)}</span>${antes}</div>
     <div class="pie">
-      ${svgCode128(p.codigo, { modulo: 0.28, alto: 8 })}<div class="codigo">${p.codigo}</div>
+      ${svgCode128(p.codigo, { modulo: 0.25, alto: 8 })}<div class="codigo">${p.codigo}</div>
     </div>
   </div>`;
 }
