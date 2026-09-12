@@ -31,6 +31,9 @@
   .ficha { display: grid; grid-template-columns: 160px 1fr; gap: 16px; background: #fff;
     border: 1px solid var(--linea); border-radius: 12px; padding: 14px; margin-bottom: 14px; }
   .ficha img { width: 100%; aspect-ratio: 1; object-fit: cover; border-radius: 8px; background: #eceff4; }
+  .retomar { display: block; margin-top: 6px; text-align: center; font-size: 13px; font-weight: 600;
+    color: var(--azul); border: 1px solid var(--linea); border-radius: 8px; padding: 7px; cursor: pointer; }
+  .retomar:hover { background: #eef1f6; }
   .campos { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 10px; }
   .acciones { display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap; align-items: center; }
   .etiqueta { font-size: 12px; padding: 3px 8px; border-radius: 999px; background: #eef1f6; }
@@ -68,6 +71,8 @@
 </main>
 
 <script type="module">
+import { reducirArchivo } from '/foto.js';
+
 const CATEGORIAS = ['ropa', 'hogar', 'electronica', 'juguetes', 'otros'];
 const DESTINOS = [['etiqueta','Etiqueta'], ['bin_20','Bin $20'], ['bin_40','Bin $40'], ['bin_60','Bin $60']];
 const CLAVES_CONFIG = [
@@ -117,7 +122,13 @@ function ficha(p) {
   const nodo = document.createElement('article');
   nodo.className = 'ficha';
   nodo.innerHTML = `
-    <img src="/api/foto/${p.id}" alt="Foto de la pieza" loading="lazy">
+    <div>
+      <img src="/api/foto/${p.id}" alt="Foto de la pieza" loading="lazy">
+      <label class="retomar">
+        Retomar foto
+        <input type="file" accept="image/*" capture="environment" hidden>
+      </label>
+    </div>
     <div>
       <div class="campos">
         <div style="grid-column: 1 / -1"><label>Nombre</label>
@@ -161,6 +172,35 @@ function ficha(p) {
     aviso.textContent = 'Guardado';
     aviso.style.color = '#2c7a3f';
   }
+
+  // Retomar foto: mismo id, asi que reemplaza la foto en R2 sin duplicar la pieza.
+  // El analisis vuelve a correr sobre la foto nueva y **pisa** nombre, categoria y
+  // precio: es lo que se quiere cuando la foto estaba mal, pero si ya corregiste a
+  // mano, corrige otra vez despues del retome.
+  nodo.querySelector('.retomar input').addEventListener('change', async (evento) => {
+    const archivo = evento.target.files?.[0];
+    if (!archivo) return;
+    aviso.textContent = 'Subiendo foto…';
+    aviso.style.color = '';
+    try {
+      const cuerpo = new FormData();
+      cuerpo.append('id', p.id);
+      cuerpo.append('estado_fisico', valor('estado_fisico'));
+      cuerpo.append('foto', await reducirArchivo(archivo), `${p.id}.jpg`);
+      const respuesta = await fetch('/api/borradores', { method: 'POST', body: cuerpo });
+      if (!respuesta.ok) {
+        aviso.textContent = (await respuesta.json()).error ?? 'No se pudo subir la foto.';
+        return;
+      }
+      nodo.querySelector('img').src = `/api/foto/${p.id}?v=${Date.now()}`;  // la foto vieja esta en cache
+      aviso.textContent = 'Foto reemplazada. Analizando de nuevo…';
+      setTimeout(cargarCola, 8000);
+    } catch {
+      aviso.textContent = 'No se pudo leer la imagen.';
+    } finally {
+      evento.target.value = '';
+    }
+  });
 
   nodo.addEventListener('click', async (evento) => {
     const accion = evento.target.dataset?.accion;

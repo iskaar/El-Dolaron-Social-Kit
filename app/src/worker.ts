@@ -91,6 +91,7 @@ async function crearBorrador(request: Request, env: Env, ctx: ExecutionContext, 
      on conflict (id) do update set
        estado_fisico = excluded.estado_fisico,
        foto_key = excluded.foto_key,
+       estado_analisis = 'pendiente',
        actualizado_en = excluded.actualizado_en`,
   )
     .bind(id, semanaIngreso(ahora), estadoFisico, fotoKey, ahora.toISOString(), ahora.toISOString())
