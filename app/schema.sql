@@ -8,6 +8,7 @@ create table if not exists productos (
   categoria       text not null default '',            -- ropa|hogar|electronica|juguetes|otros
   precio_lista    integer not null default 0,          -- centavos MXN
   precio          integer not null default 0,          -- centavos MXN
+  precio_sugerido integer not null default 0,          -- lo que propuso la IA; no se corrige
   estado_fisico   text not null default 'nuevo',       -- nuevo|danado
   estado_analisis text not null default 'pendiente',   -- pendiente|listo|error
   destino         text not null default 'etiqueta',    -- etiqueta|bin_20|bin_40|bin_60

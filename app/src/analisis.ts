@@ -146,12 +146,15 @@ export async function analizarBorrador(id: string, env: Env, modelo: Modelo = MO
       config,
     });
 
+    // `precio_sugerido` queda como testigo de lo que propuso la IA: las
+    // correcciones del admin no lo tocan, y de esa diferencia sale el ajuste
+    // de los porcentajes cuando haya suficientes piezas.
     await env.DB.prepare(
       `update productos set nombre = ?, categoria = ?, precio_lista = ?, precio = ?,
-                            destino = ?, estado_analisis = 'listo', actualizado_en = ?
+                            precio_sugerido = ?, destino = ?, estado_analisis = 'listo', actualizado_en = ?
        where id = ?`,
     )
-      .bind(ficha.nombre, ficha.categoria, ficha.precio_lista_mxn * 100, precio, destino, new Date().toISOString(), id)
+      .bind(ficha.nombre, ficha.categoria, ficha.precio_lista_mxn * 100, precio, precio, destino, new Date().toISOString(), id)
       .run();
 
     console.log(JSON.stringify({ mensaje: 'analisis listo', id, modelo, ms: Date.now() - inicio, ficha }));

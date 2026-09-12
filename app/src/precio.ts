@@ -10,6 +10,28 @@ export type Destino = 'etiqueta' | 'bin_20' | 'bin_40' | 'bin_60';
 
 const REDONDEO = 500; // $5 MXN
 
+/** Redondeo hacia arriba al multiplo de $5, el mismo que usa el calculo automatico. */
+export function redondear5(centavos: number): number {
+  return Math.ceil(Math.max(0, centavos) / REDONDEO) * REDONDEO;
+}
+
+/**
+ * Ajusta un precio escrito a mano por el admin.
+ * Una pieza en un bin se vende al precio del bin: si el destino es `bin_40`, el
+ * precio es $40, aunque en el campo se haya tecleado otra cosa. Un bin con un
+ * precio que no es el del bote es una discrepancia que aparece en la caja.
+ */
+export function ajustarManual({ precio, destino, config }: {
+  precio: number;
+  destino: Destino;
+  config: Record<string, string>;
+}): number {
+  if (destino === 'etiqueta') {
+    return redondear5(precio);
+  }
+  return entero(config, destino, Number.parseInt(destino.replace('bin_', ''), 10) * 100);
+}
+
 export interface EntradaPrecio {
   precioLista: number;
   categoria: string;
