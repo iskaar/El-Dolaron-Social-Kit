@@ -1,0 +1,34 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "el-dolaron",
+  "main": "src/worker.ts",
+  "compatibility_date": "2026-09-11",
+  "compatibility_flags": ["nodejs_compat"],
+  "observability": {
+    "enabled": true,
+    "head_sampling_rate": 1
+  },
+  "assets": {
+    "directory": "public"
+  },
+  // Hostname propio: Cloudflare Access solo protege dominios de una zona, no workers.dev.
+  "routes": [
+    {
+      "pattern": "escaner.viste.com.mx",
+      "custom_domain": true
+    }
+  ],
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "el-dolaron",
+      "database_id": "26435b29-79ae-44bf-942d-3bac138c5805"
+    }
+  ],
+  "r2_buckets": [
+    {
+      "binding": "FOTOS",
+      "bucket_name": "el-dolaron-fotos"
+    }
+  ]
+}
