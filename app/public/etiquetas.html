@@ -1,0 +1,145 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>El Dolarón — etiquetas</title>
+<style>
+  :root { --azul:#16366B; --linea:#dfe3ea; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: #f4f6f9; color: #1a1f2b;
+    font-family: system-ui, -apple-system, sans-serif; }
+  header { background: var(--azul); color: #fff; padding: 14px 20px;
+    display: flex; gap: 16px; align-items: center; flex-wrap: wrap; }
+  header h1 { font-size: 18px; margin: 0; flex: 1; }
+  header a { color: #FFD447; font-size: 14px; }
+  main { padding: 20px; max-width: 1100px; margin: 0 auto; }
+  .barra { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-bottom: 16px; }
+  button { border: 0; border-radius: 8px; padding: 10px 14px; font-size: 14px;
+    font-weight: 600; cursor: pointer; background: var(--azul); color: #fff; }
+  button.claro { background: #fff; color: #1a1f2b; border: 1px solid var(--linea); }
+  .lista { background: #fff; border: 1px solid var(--linea); border-radius: 12px; overflow: hidden; }
+  .renglon { display: grid; grid-template-columns: 34px 56px 1fr 110px 90px;
+    gap: 12px; align-items: center; padding: 10px 14px; border-top: 1px solid var(--linea); }
+  .renglon:first-child { border-top: 0; }
+  .renglon img { width: 56px; height: 56px; object-fit: cover; border-radius: 6px; background: #eceff4; }
+  .renglon .precio { font-weight: 700; }
+  .vacio { padding: 24px; text-align: center; color: #5b6478; }
+
+  /* Hoja de etiquetas: 50 x 30 mm, lo que cabe en una etiqueta chica de anaquel. */
+  #hoja { display: none; }
+  .etiqueta { width: 50mm; height: 30mm; padding: 2mm; border: 0.2mm dashed #bbb;
+    display: flex; flex-direction: column; justify-content: space-between; overflow: hidden; }
+  .etiqueta .arriba { display: flex; justify-content: space-between; gap: 1mm; align-items: flex-start; }
+  .etiqueta .nombre { font-size: 2.6mm; line-height: 1.15; max-height: 6mm; overflow: hidden; }
+  .etiqueta .precios { display: flex; align-items: baseline; gap: 2mm; }
+  .etiqueta .ahora { font-size: 7mm; font-weight: 800; letter-spacing: -0.2mm; }
+  .etiqueta .antes { font-size: 3mm; text-decoration: line-through; color: #555; }
+  /* El codigo de barras ocupa su propio renglon: recortado no lo lee el lector. */
+  .etiqueta .pie { text-align: center; }
+  .etiqueta .codigo { font-size: 2.4mm; font-family: ui-monospace, monospace; letter-spacing: 0.2mm; }
+  .etiqueta svg { display: block; margin: 0 auto; }
+
+  @media print {
+    header, .barra, .lista, .vacio { display: none !important; }
+    body { background: #fff; }
+    main { padding: 0; max-width: none; }
+    #hoja { display: flex !important; flex-wrap: wrap; gap: 0; }
+    .etiqueta { border-color: #eee; break-inside: avoid; }
+    @page { size: letter; margin: 6mm; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>Etiquetas</h1>
+  <a href="/admin">← Cola de revisión</a>
+  <a href="/captura">Capturar →</a>
+</header>
+
+<main>
+  <div class="barra">
+    <button id="imprimir" type="button">Imprimir seleccionadas</button>
+    <button id="todas" class="claro" type="button">Seleccionar todas</button>
+    <span id="resumen"></span>
+  </div>
+
+  <div class="lista" id="lista"><div class="vacio">Cargando…</div></div>
+  <div id="hoja"></div>
+</main>
+
+<script type="module">
+import { svgCode128 } from '/code128.js';
+
+const lista = document.getElementById('lista');
+const hoja = document.getElementById('hoja');
+const resumen = document.getElementById('resumen');
+const pesos = (centavos) => `$${Math.round(centavos / 100)}`;
+const escapar = (texto) => texto.replace(/[<>&"]/g, (c) => ({'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;'}[c]));
+
+/** Solo lo que lleva etiqueta: los bins se cobran con la tarjeta de la caja. */
+async function cargar() {
+  const piezas = (await (await fetch('/api/borradores?estado=listo')).json())
+    .filter((p) => p.destino === 'etiqueta' && p.precio > 0);
+
+  resumen.textContent = `${piezas.length} piezas listas para etiquetar`;
+  if (piezas.length === 0) {
+    lista.innerHTML = '<div class="vacio">Nada para etiquetar. Las piezas de bin no llevan etiqueta.</div>';
+    return;
+  }
+
+  lista.innerHTML = piezas.map((p) => `
+    <label class="renglon">
+      <input type="checkbox" value="${p.id}" checked>
+      <img src="/api/foto/${p.id}" alt="" loading="lazy">
+      <span>${escapar(p.nombre || 'Sin nombre')}</span>
+      <span class="precio">${pesos(p.precio)}${p.precio_lista > p.precio ? ` <s style="font-weight:400;color:#777">${pesos(p.precio_lista)}</s>` : ''}</span>
+      <span>${p.semana_ingreso}</span>
+    </label>`).join('');
+}
+
+function etiqueta(p) {
+  const antes = p.precio_lista > p.precio ? `<span class="antes">${pesos(p.precio_lista)}</span>` : '';
+  // 0.28 mm de modulo: el codigo completo entra en los 46 mm utiles de la etiqueta
+  // y sigue siendo suficientemente grueso para el lector de la caja.
+  return `<div class="etiqueta">
+    <div class="arriba">
+      <div class="nombre">${escapar(p.nombre || 'El Dolarón')}</div>
+      <div class="codigo">${p.semana_ingreso}</div>
+    </div>
+    <div class="precios"><span class="ahora">${pesos(p.precio)}</span>${antes}</div>
+    <div class="pie">
+      ${svgCode128(p.codigo, { modulo: 0.28, alto: 8 })}<div class="codigo">${p.codigo}</div>
+    </div>
+  </div>`;
+}
+
+document.getElementById('todas').addEventListener('click', () => {
+  const casillas = [...lista.querySelectorAll('input')];
+  const marcar = !casillas.every((c) => c.checked);
+  casillas.forEach((c) => { c.checked = marcar; });
+});
+
+document.getElementById('imprimir').addEventListener('click', async () => {
+  const ids = [...lista.querySelectorAll('input:checked')].map((c) => c.value);
+  if (ids.length === 0) return;
+
+  // El codigo se asigna aqui: una pieza sin etiqueta impresa no necesita codigo.
+  const respuesta = await fetch('/api/etiquetas', {
+    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ids }),
+  });
+  const piezas = await respuesta.json();
+  if (!respuesta.ok) {
+    resumen.textContent = piezas.error;
+    return;
+  }
+
+  hoja.innerHTML = piezas.map(etiqueta).join('');
+  print();
+  await cargar();
+});
+
+await cargar();
+</script>
+</body>
+</html>

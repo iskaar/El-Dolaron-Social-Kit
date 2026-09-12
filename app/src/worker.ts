@@ -188,6 +188,39 @@ async function corregirBorrador(id: string, request: Request, env: Env): Promise
   return json({ id, nombre, categoria, precio_lista: precioLista, precio, estado_fisico: estadoFisico, destino });
 }
 
+/**
+ * Asigna el codigo de barras a las piezas que se van a etiquetar y las devuelve.
+ * El codigo se mina una sola vez: una pieza que ya trae etiqueta impresa conserva
+ * el suyo, porque reimprimir con otro codigo deja el papel del anaquel huerfano.
+ */
+async function prepararEtiquetas(request: Request, env: Env): Promise<Response> {
+  const { ids } = (await request.json()) as { ids?: unknown };
+  if (!Array.isArray(ids) || ids.length === 0 || ids.length > 100) {
+    return json({ error: 'Selecciona entre 1 y 100 piezas.' }, 400);
+  }
+  const limpios = ids.map(String).filter((id) => UUID.test(id));
+  if (limpios.length === 0) {
+    return json({ error: 'Identificadores invalidos.' }, 400);
+  }
+
+  const huecos = limpios.map(() => '?').join(',');
+  await env.DB.prepare(
+    `update productos set codigo = 'ED-' || printf('%06d', rowid), actualizado_en = ?
+     where id in (${huecos}) and (codigo is null or codigo = '')`,
+  )
+    .bind(new Date().toISOString(), ...limpios)
+    .run();
+
+  const { results } = await env.DB.prepare(
+    `select id, codigo, nombre, precio, precio_lista, semana_ingreso, destino
+     from productos where id in (${huecos}) order by rowid`,
+  )
+    .bind(...limpios)
+    .all();
+
+  return json(results);
+}
+
 async function descartarBorrador(id: string, env: Env): Promise<Response> {
   if (!UUID.test(id)) {
     return json({ error: 'Identificador invalido.' }, 400);
@@ -265,6 +298,10 @@ export default {
       const foto = pathname.match(/^\/api\/foto\/([^/]+)$/);
       if (foto) {
         return await servirFoto(foto[1], env);
+      }
+
+      if (pathname === '/api/etiquetas' && request.method === 'POST') {
+        return await prepararEtiquetas(request, env);
       }
 
       const pieza = pathname.match(/^\/api\/borradores\/([^/]+)$/);
