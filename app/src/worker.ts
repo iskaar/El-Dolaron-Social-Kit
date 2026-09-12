@@ -6,6 +6,7 @@
  */
 
 import { analizarBorrador, MODELO_POR_DEFECTO, type Modelo } from './analisis.ts';
+import { calcularPrecio } from './precio.ts';
 
 interface FilaConfig {
   clave: string;
@@ -115,6 +116,109 @@ async function listarBorradores(url: URL, env: Env): Promise<Response> {
   return json(results);
 }
 
+const CATEGORIAS = new Set(['ropa', 'hogar', 'electronica', 'juguetes', 'otros']);
+const DESTINOS = new Set(['etiqueta', 'bin_20', 'bin_40', 'bin_60']);
+
+/**
+ * Correcciones del admin. Solo llegan los campos que cambiaron; si no viene un
+ * precio explicito, se recalcula con la configuracion vigente.
+ */
+async function corregirBorrador(id: string, request: Request, env: Env): Promise<Response> {
+  if (!UUID.test(id)) {
+    return json({ error: 'Identificador invalido.' }, 400);
+  }
+  const fila = await env.DB.prepare(
+    'select nombre, categoria, precio_lista, precio, estado_fisico, destino from productos where id = ?',
+  )
+    .bind(id)
+    .first<FilaBorrador>();
+  if (!fila) {
+    return json({ error: 'La pieza no existe.' }, 404);
+  }
+
+  const cambios = (await request.json()) as Record<string, unknown>;
+  const nombre = cambios.nombre === undefined ? fila.nombre : String(cambios.nombre).slice(0, 120);
+  const categoria = cambios.categoria === undefined ? fila.categoria : String(cambios.categoria);
+  const estadoFisico = cambios.estado_fisico === undefined ? fila.estado_fisico : String(cambios.estado_fisico);
+  const precioLista = cambios.precio_lista === undefined ? fila.precio_lista : Math.round(Number(cambios.precio_lista));
+
+  if (categoria && !CATEGORIAS.has(categoria)) {
+    return json({ error: 'Categoria invalida.' }, 400);
+  }
+  if (!ESTADOS_FISICOS.has(estadoFisico)) {
+    return json({ error: 'Estado fisico invalido.' }, 400);
+  }
+  if (!Number.isFinite(precioLista) || precioLista < 0) {
+    return json({ error: 'Precio de lista invalido.' }, 400);
+  }
+
+  const config = await leerConfig(env);
+  let precio: number;
+  let destino: string;
+
+  if (cambios.precio === undefined) {
+    const calculado = calcularPrecio({ precioLista, categoria, estadoFisico, config });
+    precio = calculado.precio;
+    destino = cambios.destino === undefined ? calculado.destino : String(cambios.destino);
+  } else {
+    precio = Math.round(Number(cambios.precio));
+    destino = cambios.destino === undefined ? fila.destino : String(cambios.destino);
+    if (!Number.isFinite(precio) || precio < 0) {
+      return json({ error: 'Precio invalido.' }, 400);
+    }
+    // Misma regla que en el calculo automatico: el precio de venta nunca queda
+    // por encima del precio de lista.
+    if (precioLista > 0 && precio > precioLista) {
+      return json({ error: 'El precio de venta no puede ser mayor al precio de lista.' }, 400);
+    }
+  }
+
+  if (!DESTINOS.has(destino)) {
+    return json({ error: 'Destino invalido.' }, 400);
+  }
+
+  await env.DB.prepare(
+    `update productos set nombre = ?, categoria = ?, precio_lista = ?, precio = ?,
+                          estado_fisico = ?, destino = ?, estado_analisis = 'listo', actualizado_en = ?
+     where id = ?`,
+  )
+    .bind(nombre, categoria, precioLista, precio, estadoFisico, destino, new Date().toISOString(), id)
+    .run();
+
+  return json({ id, nombre, categoria, precio_lista: precioLista, precio, estado_fisico: estadoFisico, destino });
+}
+
+async function descartarBorrador(id: string, env: Env): Promise<Response> {
+  if (!UUID.test(id)) {
+    return json({ error: 'Identificador invalido.' }, 400);
+  }
+  await env.FOTOS.delete(`fotos/${id}.jpg`);
+  await env.DB.prepare('delete from productos where id = ?').bind(id).run();
+  return json({ id, descartado: true });
+}
+
+/** Los porcentajes y limites que gobiernan el precio. Solo enteros. */
+async function guardarConfig(request: Request, env: Env): Promise<Response> {
+  const cambios = (await request.json()) as Record<string, unknown>;
+  const entradas = Object.entries(cambios);
+  if (entradas.length === 0 || entradas.length > 20) {
+    return json({ error: 'Configuracion invalida.' }, 400);
+  }
+  for (const [clave, valor] of entradas) {
+    const numero = Math.round(Number(valor));
+    if (!/^[a-z_0-9]{1,40}$/.test(clave) || !Number.isFinite(numero) || numero < 0) {
+      return json({ error: `Valor invalido para ${clave}.` }, 400);
+    }
+    await env.DB.prepare(
+      `insert into config (clave, valor) values (?, ?)
+       on conflict (clave) do update set valor = excluded.valor`,
+    )
+      .bind(clave, String(numero))
+      .run();
+  }
+  return json(await leerConfig(env));
+}
+
 async function servirFoto(id: string, env: Env): Promise<Response> {
   if (!UUID.test(id)) {
     return json({ error: 'Identificador invalido.' }, 400);
@@ -142,6 +246,9 @@ export default {
       }
 
       if (pathname === '/api/config') {
+        if (request.method === 'PUT') {
+          return await guardarConfig(request, env);
+        }
         return json(await leerConfig(env));
       }
 
@@ -158,6 +265,17 @@ export default {
       const foto = pathname.match(/^\/api\/foto\/([^/]+)$/);
       if (foto) {
         return await servirFoto(foto[1], env);
+      }
+
+      const pieza = pathname.match(/^\/api\/borradores\/([^/]+)$/);
+      if (pieza) {
+        if (request.method === 'PATCH') {
+          return await corregirBorrador(pieza[1], request, env);
+        }
+        if (request.method === 'DELETE') {
+          return await descartarBorrador(pieza[1], env);
+        }
+        return json({ error: 'Metodo no permitido.' }, 405);
       }
 
       // Reintento manual, y la via para la prueba comparativa: ?modelo=gemini

@@ -1,0 +1,210 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>El Dolarón — cola de revisión</title>
+<style>
+  :root { --azul:#16366B; --rojo:#D72B32; --amarillo:#FFD447; --linea:#dfe3ea; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: #f4f6f9; color: #1a1f2b;
+    font-family: system-ui, -apple-system, sans-serif; }
+  header { background: var(--azul); color: #fff; padding: 14px 20px;
+    display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+  header h1 { font-size: 18px; margin: 0; flex: 1; }
+  header a { color: var(--amarillo); font-size: 14px; }
+  main { padding: 20px; max-width: 1100px; margin: 0 auto; }
+  .panel { background: #fff; border: 1px solid var(--linea); border-radius: 12px;
+    padding: 16px; margin-bottom: 20px; }
+  .panel h2 { font-size: 15px; margin: 0 0 12px; }
+  .ajustes { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; }
+  label { display: block; font-size: 12px; color: #5b6478; margin-bottom: 4px; }
+  input, select { width: 100%; padding: 8px 10px; border: 1px solid var(--linea);
+    border-radius: 8px; font-size: 15px; background: #fff; }
+  button { border: 0; border-radius: 8px; padding: 10px 14px; font-size: 14px;
+    font-weight: 600; cursor: pointer; background: var(--azul); color: #fff; }
+  button.claro { background: #eef1f6; color: #1a1f2b; }
+  button.peligro { background: #fff; color: var(--rojo); border: 1px solid var(--rojo); }
+  #filtros { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 16px; }
+  #filtros button { background: #fff; color: #1a1f2b; border: 1px solid var(--linea); }
+  #filtros button[aria-pressed="true"] { background: var(--azul); color: #fff; border-color: var(--azul); }
+  .ficha { display: grid; grid-template-columns: 160px 1fr; gap: 16px; background: #fff;
+    border: 1px solid var(--linea); border-radius: 12px; padding: 14px; margin-bottom: 14px; }
+  .ficha img { width: 100%; aspect-ratio: 1; object-fit: cover; border-radius: 8px; background: #eceff4; }
+  .campos { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 10px; }
+  .acciones { display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap; align-items: center; }
+  .etiqueta { font-size: 12px; padding: 3px 8px; border-radius: 999px; background: #eef1f6; }
+  .etiqueta.error { background: #fdecec; color: var(--rojo); }
+  .etiqueta.pendiente { background: #fff6d9; color: #8a6d00; }
+  .aviso { font-size: 13px; color: var(--rojo); min-height: 18px; }
+  @media (max-width: 640px) { .ficha { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+<header>
+  <h1>Cola de revisión</h1>
+  <a href="/captura">Ir a capturar →</a>
+  <span id="resumen"></span>
+</header>
+
+<main>
+  <section class="panel">
+    <h2>Configuración de precios</h2>
+    <div class="ajustes" id="ajustes"></div>
+    <div class="acciones">
+      <button id="guardar-config" type="button">Guardar configuración</button>
+      <span class="aviso" id="aviso-config"></span>
+    </div>
+  </section>
+
+  <div id="filtros">
+    <button type="button" data-estado="" aria-pressed="true">Todo</button>
+    <button type="button" data-estado="listo" aria-pressed="false">Analizadas</button>
+    <button type="button" data-estado="pendiente" aria-pressed="false">Pendientes</button>
+    <button type="button" data-estado="error" aria-pressed="false">Con error</button>
+  </div>
+
+  <div id="cola"></div>
+</main>
+
+<script type="module">
+const CATEGORIAS = ['ropa', 'hogar', 'electronica', 'juguetes', 'otros'];
+const DESTINOS = [['etiqueta','Etiqueta'], ['bin_20','Bin $20'], ['bin_40','Bin $40'], ['bin_60','Bin $60']];
+const CLAVES_CONFIG = [
+  ['pct_ropa','Ropa %'], ['pct_hogar','Hogar %'], ['pct_electronica','Electrónica %'],
+  ['pct_juguetes','Juguetes %'], ['pct_otros','Otros %'], ['pct_danado','Dañado %'],
+  ['limite_bin','Límite de bin ($)'], ['bin_20','Bin 1 ($)'], ['bin_40','Bin 2 ($)'], ['bin_60','Bin 3 ($)'],
+];
+const EN_PESOS = new Set(['limite_bin', 'bin_20', 'bin_40', 'bin_60']);
+
+const cola = document.getElementById('cola');
+const resumen = document.getElementById('resumen');
+let filtro = '';
+
+const pesos = (centavos) => (centavos / 100).toFixed(0);
+const centavos = (pesos) => Math.round(Number(pesos || 0) * 100);
+
+/* ---------- configuración ---------- */
+
+async function cargarConfig() {
+  const config = await (await fetch('/api/config')).json();
+  document.getElementById('ajustes').innerHTML = CLAVES_CONFIG.map(([clave, titulo]) => {
+    const valor = EN_PESOS.has(clave) ? pesos(Number(config[clave] ?? 0)) : (config[clave] ?? '');
+    return `<div><label for="c-${clave}">${titulo}</label>
+      <input id="c-${clave}" data-clave="${clave}" type="number" min="0" value="${valor}"></div>`;
+  }).join('');
+}
+
+document.getElementById('guardar-config').addEventListener('click', async () => {
+  const aviso = document.getElementById('aviso-config');
+  const cambios = {};
+  for (const input of document.querySelectorAll('#ajustes input')) {
+    const clave = input.dataset.clave;
+    cambios[clave] = EN_PESOS.has(clave) ? centavos(input.value) : Math.round(Number(input.value));
+  }
+  const respuesta = await fetch('/api/config', {
+    method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify(cambios),
+  });
+  const cuerpo = await respuesta.json();
+  aviso.textContent = respuesta.ok ? 'Guardado. Aplica a las piezas que se recalculen desde ahora.' : cuerpo.error;
+  aviso.style.color = respuesta.ok ? '#2c7a3f' : '';
+});
+
+/* ---------- cola ---------- */
+
+function ficha(p) {
+  const estado = p.estado_analisis;
+  const nodo = document.createElement('article');
+  nodo.className = 'ficha';
+  nodo.innerHTML = `
+    <img src="/api/foto/${p.id}" alt="Foto de la pieza" loading="lazy">
+    <div>
+      <div class="campos">
+        <div style="grid-column: 1 / -1"><label>Nombre</label>
+          <input data-campo="nombre" value="${(p.nombre ?? '').replace(/"/g, '&quot;')}"></div>
+        <div><label>Categoría</label><select data-campo="categoria">
+          ${CATEGORIAS.map((c) => `<option value="${c}" ${c === p.categoria ? 'selected' : ''}>${c}</option>`).join('')}
+        </select></div>
+        <div><label>Estado</label><select data-campo="estado_fisico">
+          <option value="nuevo" ${p.estado_fisico === 'nuevo' ? 'selected' : ''}>Nuevo</option>
+          <option value="danado" ${p.estado_fisico === 'danado' ? 'selected' : ''}>Dañado</option>
+        </select></div>
+        <div><label>Precio de lista ($)</label>
+          <input data-campo="precio_lista" type="number" min="0" value="${pesos(p.precio_lista)}"></div>
+        <div><label>Precio de venta ($)</label>
+          <input data-campo="precio" type="number" min="0" value="${pesos(p.precio)}"></div>
+        <div><label>Destino</label><select data-campo="destino">
+          ${DESTINOS.map(([v, t]) => `<option value="${v}" ${v === p.destino ? 'selected' : ''}>${t}</option>`).join('')}
+        </select></div>
+      </div>
+      <div class="acciones">
+        <button type="button" data-accion="guardar">Guardar</button>
+        <button type="button" class="claro" data-accion="recalcular">Recalcular precio</button>
+        <button type="button" class="claro" data-accion="reanalizar">Reintentar análisis</button>
+        <button type="button" class="peligro" data-accion="descartar">Descartar</button>
+        <span class="etiqueta ${estado}">${estado} · ${p.semana_ingreso}</span>
+        <span class="aviso"></span>
+      </div>
+    </div>`;
+
+  const valor = (campo) => nodo.querySelector(`[data-campo="${campo}"]`).value;
+  const aviso = nodo.querySelector('.aviso');
+
+  async function enviar(cuerpo) {
+    const respuesta = await fetch(`/api/borradores/${p.id}`, {
+      method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify(cuerpo),
+    });
+    const datos = await respuesta.json();
+    if (!respuesta.ok) { aviso.textContent = datos.error; aviso.style.color = ''; return; }
+    nodo.querySelector('[data-campo="precio"]').value = pesos(datos.precio);
+    nodo.querySelector('[data-campo="destino"]').value = datos.destino;
+    aviso.textContent = 'Guardado';
+    aviso.style.color = '#2c7a3f';
+  }
+
+  nodo.addEventListener('click', async (evento) => {
+    const accion = evento.target.dataset?.accion;
+    if (!accion) return;
+    const base = {
+      nombre: valor('nombre'), categoria: valor('categoria'),
+      estado_fisico: valor('estado_fisico'), precio_lista: centavos(valor('precio_lista')),
+    };
+    if (accion === 'guardar') {
+      await enviar({ ...base, precio: centavos(valor('precio')), destino: valor('destino') });
+    } else if (accion === 'recalcular') {
+      await enviar(base);   // sin precio: lo recalcula la configuración
+    } else if (accion === 'reanalizar') {
+      aviso.textContent = 'Analizando…';
+      await fetch(`/api/borradores/${p.id}/analizar`, { method: 'POST' });
+      setTimeout(cargarCola, 6000);
+    } else if (accion === 'descartar') {
+      await fetch(`/api/borradores/${p.id}`, { method: 'DELETE' });
+      nodo.remove();
+    }
+  });
+
+  return nodo;
+}
+
+async function cargarCola() {
+  const piezas = await (await fetch(`/api/borradores${filtro ? `?estado=${filtro}` : ''}`)).json();
+  cola.replaceChildren(...piezas.map(ficha));
+  const porEstado = piezas.reduce((acc, p) => ({ ...acc, [p.estado_analisis]: (acc[p.estado_analisis] ?? 0) + 1 }), {});
+  resumen.textContent = `${piezas.length} piezas · ${porEstado.pendiente ?? 0} pendientes · ${porEstado.error ?? 0} con error`;
+}
+
+document.getElementById('filtros').addEventListener('click', (evento) => {
+  const boton = evento.target.closest('button');
+  if (!boton) return;
+  filtro = boton.dataset.estado;
+  for (const b of document.querySelectorAll('#filtros button')) {
+    b.setAttribute('aria-pressed', String(b === boton));
+  }
+  cargarCola();
+});
+
+await cargarConfig();
+await cargarCola();
+</script>
+</body>
+</html>
