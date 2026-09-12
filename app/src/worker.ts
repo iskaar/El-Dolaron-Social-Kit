@@ -5,6 +5,8 @@
  * (docs/ARQUITECTURA-ESCANER.md).
  */
 
+import { analizarBorrador, MODELO_POR_DEFECTO, type Modelo } from './analisis.ts';
+
 interface FilaConfig {
   clave: string;
   valor: string;
@@ -53,7 +55,11 @@ async function leerConfig(env: Env): Promise<Record<string, string>> {
  * Guarda la foto y el borrador. Idempotente por id: el telefono genera el id
  * antes de subir, asi que un reintento tras una red caida no duplica la pieza.
  */
-async function crearBorrador(request: Request, env: Env): Promise<Response> {
+function modeloPedido(url: URL): Modelo {
+  return url.searchParams.get('modelo') === 'gemini' ? 'gemini' : MODELO_POR_DEFECTO;
+}
+
+async function crearBorrador(request: Request, env: Env, ctx: ExecutionContext, url: URL): Promise<Response> {
   const formulario = await request.formData();
   const id = String(formulario.get('id') ?? '');
   const estadoFisico = String(formulario.get('estado_fisico') ?? 'nuevo');
@@ -89,6 +95,9 @@ async function crearBorrador(request: Request, env: Env): Promise<Response> {
     .bind(id, semanaIngreso(ahora), estadoFisico, fotoKey, ahora.toISOString(), ahora.toISOString())
     .run();
 
+  // El analisis corre despues de responder: la camara nunca espera a la IA.
+  ctx.waitUntil(analizarBorrador(id, env, modeloPedido(url)));
+
   return json({ id, estado_analisis: 'pendiente' }, 201);
 }
 
@@ -123,7 +132,7 @@ async function servirFoto(id: string, env: Env): Promise<Response> {
 }
 
 export default {
-  async fetch(request, env): Promise<Response> {
+  async fetch(request, env, ctx): Promise<Response> {
     const url = new URL(request.url);
     const { pathname } = url;
 
@@ -138,7 +147,7 @@ export default {
 
       if (pathname === '/api/borradores') {
         if (request.method === 'POST') {
-          return await crearBorrador(request, env);
+          return await crearBorrador(request, env, ctx, url);
         }
         if (request.method === 'GET') {
           return await listarBorradores(url, env);
@@ -149,6 +158,17 @@ export default {
       const foto = pathname.match(/^\/api\/foto\/([^/]+)$/);
       if (foto) {
         return await servirFoto(foto[1], env);
+      }
+
+      // Reintento manual, y la via para la prueba comparativa: ?modelo=gemini
+      const reintento = pathname.match(/^\/api\/borradores\/([^/]+)\/analizar$/);
+      if (reintento && request.method === 'POST') {
+        if (!UUID.test(reintento[1])) {
+          return json({ error: 'Identificador invalido.' }, 400);
+        }
+        const modelo = modeloPedido(url);
+        ctx.waitUntil(analizarBorrador(reintento[1], env, modelo));
+        return json({ id: reintento[1], modelo, estado_analisis: 'pendiente' }, 202);
       }
 
       return json({ error: 'Ruta no encontrada.' }, 404);

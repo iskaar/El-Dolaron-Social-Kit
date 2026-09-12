@@ -7,6 +7,8 @@
     "types": ["./worker-configuration.d.ts"],
     "strict": true,
     "noEmit": true,
+    // Los imports llevan .ts para que `node --test` corra las pruebas sin compilar.
+    "allowImportingTsExtensions": true,
     "skipLibCheck": true
   },
   // Las pruebas corren en Node (`npm test`), no en el runtime de Workers.
