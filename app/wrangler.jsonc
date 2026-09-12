@@ -25,12 +25,10 @@
       "database_id": "26435b29-79ae-44bf-942d-3bac138c5805"
     }
   ],
-  // R2 se habilita en el panel de Cloudflare antes del paso 2. Sin fotos todavia,
-  // el binding se queda comentado para no bloquear el despliegue del esqueleto.
-  // "r2_buckets": [
-  //   {
-  //     "binding": "FOTOS",
-  //     "bucket_name": "el-dolaron-fotos"
-  //   }
-  // ]
+  "r2_buckets": [
+    {
+      "binding": "FOTOS",
+      "bucket_name": "el-dolaron-fotos"
+    }
+  ]
 }
