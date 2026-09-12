@@ -5,7 +5,7 @@
  * (docs/ARQUITECTURA-ESCANER.md).
  */
 
-import { analizarBorrador, MODELO_POR_DEFECTO, type Modelo } from './analisis.ts';
+import { analizarBorrador, modeloPorDefecto, type Modelo } from './analisis.ts';
 import { calcularPrecio, ajustarManual, type Destino } from './precio.ts';
 
 interface FilaConfig {
@@ -52,14 +52,18 @@ async function leerConfig(env: Env): Promise<Record<string, string>> {
   return Object.fromEntries(results.map((fila) => [fila.clave, fila.valor]));
 }
 
+function modeloPedido(url: URL, env: Env): Modelo {
+  const pedido = url.searchParams.get('modelo');
+  if (pedido === 'gemini' || pedido === 'claude') {
+    return pedido;
+  }
+  return modeloPorDefecto(env);
+}
+
 /**
  * Guarda la foto y el borrador. Idempotente por id: el telefono genera el id
  * antes de subir, asi que un reintento tras una red caida no duplica la pieza.
  */
-function modeloPedido(url: URL): Modelo {
-  return url.searchParams.get('modelo') === 'gemini' ? 'gemini' : MODELO_POR_DEFECTO;
-}
-
 async function crearBorrador(request: Request, env: Env, ctx: ExecutionContext, url: URL): Promise<Response> {
   const formulario = await request.formData();
   const id = String(formulario.get('id') ?? '');
@@ -98,7 +102,7 @@ async function crearBorrador(request: Request, env: Env, ctx: ExecutionContext, 
     .run();
 
   // El analisis corre despues de responder: la camara nunca espera a la IA.
-  ctx.waitUntil(analizarBorrador(id, env, modeloPedido(url)));
+  ctx.waitUntil(analizarBorrador(id, env, modeloPedido(url, env)));
 
   return json({ id, estado_analisis: 'pendiente' }, 201);
 }
@@ -257,6 +261,115 @@ async function guardarConfig(request: Request, env: Env): Promise<Response> {
   return json(await leerConfig(env));
 }
 
+/** Catalogo para la caja: se guarda en el navegador y se cobra sin red. */
+async function catalogo(env: Env): Promise<Response> {
+  const { results } = await env.DB.prepare(
+    `select id, codigo, nombre, precio, sin_inventario, stock
+     from productos where codigo is not null and codigo <> '' and precio > 0
+     order by nombre`,
+  ).all();
+  return json(results);
+}
+
+interface LineaVenta {
+  codigo?: unknown;
+  nombre?: unknown;
+  precio?: unknown;
+  cantidad?: unknown;
+  producto_id?: unknown;
+}
+
+/**
+ * Registra una venta. Idempotente por `id`: la caja lo genera antes de cobrar,
+ * asi que reenviar la cola despues de una red caida no duplica el ticket ni
+ * vuelve a descontar existencias.
+ */
+async function registrarVenta(request: Request, env: Env): Promise<Response> {
+  const venta = (await request.json()) as {
+    id?: unknown; lineas?: unknown; forma_pago?: unknown;
+    efectivo?: unknown; creado_en?: unknown;
+  };
+  const id = String(venta.id ?? '');
+  if (!UUID.test(id)) {
+    return json({ error: 'Identificador de venta invalido.' }, 400);
+  }
+  if (!Array.isArray(venta.lineas) || venta.lineas.length === 0) {
+    return json({ error: 'La venta no tiene piezas.' }, 400);
+  }
+  const formaPago = String(venta.forma_pago ?? 'efectivo');
+  if (formaPago !== 'efectivo' && formaPago !== 'tarjeta') {
+    return json({ error: 'Forma de pago invalida.' }, 400);
+  }
+
+  const yaExiste = await env.DB.prepare('select id from ventas where id = ?').bind(id).first();
+  if (yaExiste) {
+    return json({ id, duplicada: true }, 200);
+  }
+
+  const lineas = (venta.lineas as LineaVenta[]).map((l) => ({
+    producto_id: l.producto_id === undefined || l.producto_id === null ? null : String(l.producto_id),
+    codigo: String(l.codigo ?? ''),
+    nombre: String(l.nombre ?? '').slice(0, 120),
+    precio: Math.max(0, Math.round(Number(l.precio ?? 0))),
+    cantidad: Math.max(1, Math.round(Number(l.cantidad ?? 1))),
+  }));
+  const total = lineas.reduce((suma, l) => suma + l.precio * l.cantidad, 0);
+  const efectivo = Math.max(0, Math.round(Number(venta.efectivo ?? 0)));
+  const ahora = new Date().toISOString();
+  const creadoEn = String(venta.creado_en ?? ahora);
+
+  const sentencias = [
+    env.DB.prepare(
+      `insert into ventas (id, total, forma_pago, efectivo, cambio, creado_en, registrado_en)
+       values (?, ?, ?, ?, ?, ?, ?)`,
+    ).bind(id, total, formaPago, efectivo, Math.max(0, efectivo - total), creadoEn, ahora),
+    ...lineas.map((l) =>
+      env.DB.prepare(
+        `insert into venta_lineas (venta_id, producto_id, codigo, nombre, precio, cantidad)
+         values (?, ?, ?, ?, ?, ?)`,
+      ).bind(id, l.producto_id, l.codigo, l.nombre, l.precio, l.cantidad),
+    ),
+    // Los bins no descuentan: nadie cuenta cuantas piezas quedan en un bote.
+    ...lineas
+      .filter((l) => l.producto_id)
+      .map((l) =>
+        env.DB.prepare(
+          `update productos set stock = stock - ?, actualizado_en = ?
+           where id = ? and sin_inventario = 0`,
+        ).bind(l.cantidad, ahora, l.producto_id),
+      ),
+  ];
+
+  // Todo junto: un ticket a medias descuadra el corte del dia.
+  await env.DB.batch(sentencias);
+  return json({ id, total, cambio: Math.max(0, efectivo - total) }, 201);
+}
+
+/** Corte del dia: lo que hay que cuadrar contra el efectivo en la caja. */
+async function corte(url: URL, env: Env): Promise<Response> {
+  const dia = url.searchParams.get('dia') ?? new Date().toISOString().slice(0, 10);
+  const { results } = await env.DB.prepare(
+    `select forma_pago, count(*) as tickets, sum(total) as total
+     from ventas where substr(creado_en, 1, 10) = ? group by forma_pago`,
+  )
+    .bind(dia)
+    .all<{ forma_pago: string; tickets: number; total: number }>();
+
+  const piezas = await env.DB.prepare(
+    `select coalesce(sum(l.cantidad), 0) as piezas from venta_lineas l
+     join ventas v on v.id = l.venta_id where substr(v.creado_en, 1, 10) = ?`,
+  )
+    .bind(dia)
+    .first<{ piezas: number }>();
+
+  return json({
+    dia,
+    piezas: piezas?.piezas ?? 0,
+    total: results.reduce((suma, fila) => suma + (fila.total ?? 0), 0),
+    por_forma_pago: results,
+  });
+}
+
 async function servirFoto(id: string, env: Env): Promise<Response> {
   if (!UUID.test(id)) {
     return json({ error: 'Identificador invalido.' }, 400);
@@ -305,6 +418,17 @@ export default {
         return await servirFoto(foto[1], env);
       }
 
+      if (pathname === '/api/catalogo') {
+        return await catalogo(env);
+      }
+
+      if (pathname === '/api/ventas') {
+        if (request.method === 'POST') {
+          return await registrarVenta(request, env);
+        }
+        return await corte(url, env);
+      }
+
       if (pathname === '/api/etiquetas' && request.method === 'POST') {
         return await prepararEtiquetas(request, env);
       }
@@ -326,7 +450,7 @@ export default {
         if (!UUID.test(reintento[1])) {
           return json({ error: 'Identificador invalido.' }, 400);
         }
-        const modelo = modeloPedido(url);
+        const modelo = modeloPedido(url, env);
         ctx.waitUntil(analizarBorrador(reintento[1], env, modelo));
         return json({ id: reintento[1], modelo, estado_analisis: 'pendiente' }, 202);
       }

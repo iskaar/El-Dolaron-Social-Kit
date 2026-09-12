@@ -1,0 +1,45 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  // Segunda instancia: mismo codigo, base y fotos aparte.
+  // La separacion es fisica, no un `where`: ninguna consulta puede mezclar sus
+  // piezas con el inventario de El Dolaron porque viven en otra base.
+  //
+  //   npx wrangler deploy --config wrangler.prestado.jsonc
+  //   npx wrangler d1 execute el-dolaron-prestado --remote --file=schema.sql
+  //   npx wrangler secret put GEMINI_API_KEY --config wrangler.prestado.jsonc
+  "name": "el-dolaron-prestado",
+  "main": "src/worker.ts",
+  "compatibility_date": "2026-09-11",
+  "compatibility_flags": ["nodejs_compat"],
+  "observability": {
+    "enabled": true,
+    "head_sampling_rate": 1
+  },
+  "assets": {
+    "directory": "public"
+  },
+  "vars": {
+    // Gemini tiene capa gratuita: esta instancia corre con la llave de su dueño
+    // y no gasta de la cuenta de El Dolaron.
+    "MODELO_ANALISIS": "gemini"
+  },
+  "routes": [
+    {
+      "pattern": "escaner2.viste.com.mx",
+      "custom_domain": true
+    }
+  ],
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "el-dolaron-prestado",
+      "database_id": "cb9611fd-10bf-49d4-92f9-6bbe69dc0ab5"
+    }
+  ],
+  "r2_buckets": [
+    {
+      "binding": "FOTOS",
+      "bucket_name": "el-dolaron-prestado-fotos"
+    }
+  ]
+}
