@@ -26,12 +26,13 @@
       "pattern": "escaner.viste.com.mx",
       "custom_domain": true
     },
-    // captura.viste.com.mx se vuelve a publicar CUANDO exista su aplicacion de
-    // Cloudflare Access. Sin ella, ese hostname acepta fotos de cualquiera.
-    // {
-    //   "pattern": "captura.viste.com.mx",
-    //   "custom_domain": true
-    // }
+    {
+      // Puerta del vendedor, con su propia aplicacion de Access (politica
+      // "Vendedor"). Nunca publicar este hostname sin esa aplicacion: solo
+      // sirve la camara, pero acepta fotos y esas fotos cuestan analisis.
+      "pattern": "captura.viste.com.mx",
+      "custom_domain": true
+    }
   ],
   "d1_databases": [
     {
