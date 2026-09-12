@@ -9,7 +9,9 @@ create table if not exists ventas (
   efectivo       integer not null default 0,
   cambio         integer not null default 0,
   creado_en      text not null,             -- hora de la venta en la caja, no del servidor
-  registrado_en  text not null              -- cuando llego al servidor; difiere si hubo red caida
+  registrado_en  text not null,             -- cuando llego al servidor; difiere si hubo red caida
+  cancelada      integer not null default 0,
+  cancelada_en   text not null default ''
 );
 
 create table if not exists venta_lineas (

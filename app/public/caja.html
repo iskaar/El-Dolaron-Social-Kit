@@ -47,6 +47,16 @@
     background: #fff; color: var(--rojo); border-radius: 10px; cursor: pointer; }
   #aviso { min-height: 20px; font-size: 14px; margin-top: 8px; }
   #pie { padding: 8px 18px 14px; font-size: 13px; color: #5b6478; display: flex; gap: 18px; flex-wrap: wrap; }
+  #tickets { margin-top: 14px; border-top: 1px solid var(--linea); padding-top: 10px; }
+  #tickets summary { font-size: 13px; color: #5b6478; cursor: pointer; }
+  #lista-tickets { max-height: 220px; overflow-y: auto; margin-top: 8px; }
+  .ticket { display: grid; grid-template-columns: 1fr auto; gap: 6px; align-items: center;
+    padding: 8px 2px; border-bottom: 1px solid var(--linea); font-size: 13px; }
+  .ticket .piezas { color: #78839a; font-size: 11px; overflow: hidden; text-overflow: ellipsis;
+    white-space: nowrap; max-width: 190px; }
+  .ticket.cancelada { opacity: .5; text-decoration: line-through; }
+  .ticket button { border: 1px solid var(--rojo); background: #fff; color: var(--rojo);
+    border-radius: 8px; padding: 5px 9px; font-size: 12px; cursor: pointer; }
   @media (max-width: 820px) { main { grid-template-columns: 1fr; } }
 </style>
 </head>
@@ -85,6 +95,11 @@
     <button id="cobrar" type="button" disabled>Cobrar</button>
     <button id="cancelar" type="button">Cancelar venta</button>
     <div id="aviso"></div>
+
+    <details id="tickets">
+      <summary>Ventas de hoy</summary>
+      <div id="lista-tickets"></div>
+    </details>
   </section>
 </main>
 
@@ -180,6 +195,22 @@ function agregarCodigo(codigo) {
     $('aviso').style.color = '#D72B32';
     return;
   }
+
+  // Las piezas son unicas: si ya se vendio, escanear su etiqueta otra vez seria
+  // cobrar algo que no esta en el anaquel y dejar el inventario en negativo.
+  if (!pieza.sin_inventario) {
+    const enTicket = lineas
+      .filter((l) => l.codigo === pieza.codigo)
+      .reduce((suma, l) => suma + l.cantidad, 0);
+    if (pieza.stock - enTicket <= 0) {
+      $('aviso').textContent = enTicket > 0
+        ? `${pieza.nombre}: solo hay ${pieza.stock} en existencia.`
+        : `${pieza.nombre} ya se vendió. Revisa la etiqueta.`;
+      $('aviso').style.color = '#D72B32';
+      return;
+    }
+  }
+
   lineas = agregar(lineas, {
     codigo: pieza.codigo, nombre: pieza.nombre, precio: pieza.precio, producto_id: pieza.id,
   });
@@ -208,6 +239,16 @@ async function cobrar() {
     creado_en: new Date().toISOString(),
   };
   await store('ventas', 'readwrite', (s) => s.put(venta));   // el ticket existe aunque no haya red
+
+  // Bajar existencias en la copia local: sin esto, la misma etiqueta se podria
+  // volver a cobrar mientras no haya red para refrescar el catalogo.
+  for (const l of venta.lineas) {
+    const pieza = catalogo.get(l.codigo);
+    if (pieza && !pieza.sin_inventario) {
+      pieza.stock = Math.max(0, pieza.stock - l.cantidad);
+    }
+  }
+  await store('catalogo', 'readwrite', (s) => s.put({ clave: 'piezas', datos: [...catalogo.values()], fecha: Date.now() }));
 
   $('aviso').textContent = forma === 'efectivo' && efectivo > 0
     ? `Cobrado. Cambio ${pesos(t.cambio)}` : 'Cobrado.';
@@ -248,6 +289,42 @@ async function pendientes() {
   const cola = await store('ventas', 'readonly', (s) => s.getAll());
   $('pendientes').textContent = cola.length ? `${cola.length} ventas por sincronizar` : '';
 }
+
+/** Devoluciones y errores de cobro. Necesita red: deshacer no puede quedar encolado. */
+async function cargarTickets() {
+  if (!$('tickets').open) return;
+  try {
+    const ventas = await (await fetch('/api/ventas?lista=1')).json();
+    $('lista-tickets').innerHTML = ventas.length === 0
+      ? '<p style="font-size:13px;color:#78839a">Todavía no hay ventas hoy.</p>'
+      : ventas.map((v) => `
+        <div class="ticket ${v.cancelada ? 'cancelada' : ''}">
+          <div>
+            <b>${pesos(v.total)}</b> · ${new Date(v.creado_en).toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' })}
+            <div class="piezas">${v.piezas ?? ''}</div>
+          </div>
+          ${v.cancelada ? '<span>cancelada</span>' : `<button type="button" data-cancelar="${v.id}">Cancelar</button>`}
+        </div>`).join('');
+  } catch {
+    $('lista-tickets').innerHTML = '<p style="font-size:13px;color:#D72B32">Sin red: para cancelar una venta hace falta conexión.</p>';
+  }
+}
+
+$('tickets').addEventListener('toggle', cargarTickets);
+$('lista-tickets').addEventListener('click', async (e) => {
+  const id = e.target.dataset?.cancelar;
+  if (!id) return;
+  e.target.disabled = true;
+  const r = await fetch(`/api/ventas/${id}/cancelar`, { method: 'POST' });
+  const cuerpo = await r.json();
+  $('aviso').textContent = r.ok
+    ? `Venta cancelada. Devuelve ${pesos(cuerpo.devuelto ?? 0)} y regresa la pieza al anaquel.`
+    : (cuerpo.error ?? 'No se pudo cancelar.');
+  $('aviso').style.color = r.ok ? '#1f7a4d' : '#D72B32';
+  await cargarTickets();
+  await actualizarCorte();
+  await cargarCatalogo();          // la pieza devuelta vuelve a tener existencia
+});
 
 async function actualizarCorte() {
   try {

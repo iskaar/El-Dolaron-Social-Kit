@@ -330,11 +330,14 @@ async function registrarVenta(request: Request, env: Env): Promise<Response> {
       ).bind(id, l.producto_id, l.codigo, l.nombre, l.precio, l.cantidad),
     ),
     // Los bins no descuentan: nadie cuenta cuantas piezas quedan en un bote.
+    // `max(0, ...)` porque el dinero ya se cobro: una existencia en negativo no
+    // devuelve la pieza, solo ensucia el inventario. La caja evita el caso comun
+    // avisando antes de cobrar algo que ya se vendio.
     ...lineas
       .filter((l) => l.producto_id)
       .map((l) =>
         env.DB.prepare(
-          `update productos set stock = stock - ?, actualizado_en = ?
+          `update productos set stock = max(0, stock - ?), actualizado_en = ?
            where id = ? and sin_inventario = 0`,
         ).bind(l.cantidad, ahora, l.producto_id),
       ),
@@ -345,19 +348,74 @@ async function registrarVenta(request: Request, env: Env): Promise<Response> {
   return json({ id, total, cambio: Math.max(0, efectivo - total) }, 201);
 }
 
+/**
+ * Cancela una venta ya cobrada: devolucion o error de la cajera.
+ * La venta no se borra, se marca: el corte del dia tiene que seguir explicando
+ * todo lo que paso, incluido lo que se deshizo. Las piezas vuelven al inventario.
+ */
+async function cancelarVenta(id: string, env: Env): Promise<Response> {
+  if (!UUID.test(id)) {
+    return json({ error: 'Identificador de venta invalido.' }, 400);
+  }
+  const venta = await env.DB.prepare('select id, total, cancelada from ventas where id = ?')
+    .bind(id)
+    .first<{ id: string; total: number; cancelada: number }>();
+  if (!venta) {
+    return json({ error: 'La venta no existe.' }, 404);
+  }
+  if (venta.cancelada) {
+    return json({ id, cancelada: true, ya_estaba: true });
+  }
+
+  const { results: lineas } = await env.DB.prepare(
+    'select producto_id, cantidad from venta_lineas where venta_id = ? and producto_id is not null',
+  )
+    .bind(id)
+    .all<{ producto_id: string; cantidad: number }>();
+
+  const ahora = new Date().toISOString();
+  await env.DB.batch([
+    env.DB.prepare('update ventas set cancelada = 1, cancelada_en = ? where id = ?').bind(ahora, id),
+    ...lineas.map((l) =>
+      env.DB.prepare(
+        `update productos set stock = stock + ?, actualizado_en = ?
+         where id = ? and sin_inventario = 0`,
+      ).bind(l.cantidad, ahora, l.producto_id),
+    ),
+  ]);
+
+  return json({ id, cancelada: true, devuelto: venta.total });
+}
+
+/** Tickets del dia para la caja: para cancelar el que se cobro mal. */
+async function ventasDelDia(url: URL, env: Env): Promise<Response> {
+  const dia = url.searchParams.get('dia') ?? new Date().toISOString().slice(0, 10);
+  const { results } = await env.DB.prepare(
+    `select v.id, v.total, v.forma_pago, v.cancelada, v.creado_en,
+            (select group_concat(nombre, ' · ') from venta_lineas where venta_id = v.id) as piezas
+     from ventas v where substr(v.creado_en, 1, 10) = ?
+     order by v.creado_en desc limit 50`,
+  )
+    .bind(dia)
+    .all();
+  return json(results);
+}
+
 /** Corte del dia: lo que hay que cuadrar contra el efectivo en la caja. */
 async function corte(url: URL, env: Env): Promise<Response> {
   const dia = url.searchParams.get('dia') ?? new Date().toISOString().slice(0, 10);
+  // Las canceladas no cuentan: el corte es contra el efectivo que hay en el cajon.
   const { results } = await env.DB.prepare(
     `select forma_pago, count(*) as tickets, sum(total) as total
-     from ventas where substr(creado_en, 1, 10) = ? group by forma_pago`,
+     from ventas where substr(creado_en, 1, 10) = ? and cancelada = 0 group by forma_pago`,
   )
     .bind(dia)
     .all<{ forma_pago: string; tickets: number; total: number }>();
 
   const piezas = await env.DB.prepare(
     `select coalesce(sum(l.cantidad), 0) as piezas from venta_lineas l
-     join ventas v on v.id = l.venta_id where substr(v.creado_en, 1, 10) = ?`,
+     join ventas v on v.id = l.venta_id
+     where substr(v.creado_en, 1, 10) = ? and v.cancelada = 0`,
   )
     .bind(dia)
     .first<{ piezas: number }>();
@@ -426,7 +484,12 @@ export default {
         if (request.method === 'POST') {
           return await registrarVenta(request, env);
         }
-        return await corte(url, env);
+        return url.searchParams.get('lista') ? await ventasDelDia(url, env) : await corte(url, env);
+      }
+
+      const cancelacion = pathname.match(/^\/api\/ventas\/([^/]+)\/cancelar$/);
+      if (cancelacion && request.method === 'POST') {
+        return await cancelarVenta(cancelacion[1], env);
       }
 
       if (pathname === '/api/etiquetas' && request.method === 'POST') {
