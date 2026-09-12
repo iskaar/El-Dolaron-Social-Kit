@@ -66,6 +66,14 @@ export function calcularPrecio({ precioLista, categoria, estadoFisico, config }:
   const bruto = (Math.max(0, precioLista) * pctCategoria * pctDanado) / 10000;
   const precio = Math.ceil(bruto / REDONDEO) * REDONDEO;
 
+  return conBin(precio, precioLista, config);
+}
+
+/** Lo barato va al bote mas chico que lo cubra; lo demas lleva etiqueta. */
+function conBin(precio: number, precioLista: number, config: Record<string, string>): {
+  precio: number;
+  destino: Destino;
+} {
   const limite = entero(config, 'limite_bin', 6000);
   if (precio <= limite) {
     const bins: Array<[Destino, number]> = [
@@ -79,5 +87,21 @@ export function calcularPrecio({ precioLista, categoria, estadoFisico, config }:
   }
 
   // Nunca por encima del precio de lista.
-  return { precio: Math.min(precio, Math.ceil(precioLista / REDONDEO) * REDONDEO), destino: 'etiqueta' };
+  return { precio: Math.min(precio, redondear5(precioLista)), destino: 'etiqueta' };
+}
+
+/**
+ * Precio a partir de lo que propuso el modelo mirando como cobra Isaac.
+ * Pasa por las mismas guardas que el calculo por porcentaje: redondeo a $5,
+ * nunca por encima del precio de lista, y bin si cae en el limite o debajo.
+ */
+export function precioDesdeSugerencia({ precioLista, sugerido, config }: {
+  precioLista: number;
+  sugerido: number;
+  config: Record<string, string>;
+}): { precio: number; destino: Destino } {
+  if (sugerido <= 0) {
+    return { precio: 0, destino: 'etiqueta' };
+  }
+  return conBin(redondear5(sugerido), precioLista, config);
 }

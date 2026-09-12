@@ -1,7 +1,7 @@
 // node --test src/precio.test.ts
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { calcularPrecio, ajustarManual, redondear5 } from './precio.ts';
+import { calcularPrecio, ajustarManual, redondear5, precioDesdeSugerencia } from './precio.ts';
 
 // Los valores confirmados por Isaac (2026-09-11).
 const config = {
@@ -43,6 +43,22 @@ test('una categoria desconocida usa el porcentaje de otros', () => {
 
 test('sin precio de lista la pieza espera al admin, no cae al bin mas barato', () => {
   assert.deepEqual(precio(0), { precio: 0, destino: 'etiqueta' });
+});
+
+test('la sugerencia del modelo pasa por las mismas guardas', () => {
+  const desde = (precioLista: number, sugerido: number) =>
+    precioDesdeSugerencia({ precioLista, sugerido, config });
+
+  // El ventilador: lista $350 y el modelo propone los $250 que cobra Isaac.
+  assert.deepEqual(desde(35000, 25000), { precio: 25000, destino: 'etiqueta' });
+  // Redondeo a $5.
+  assert.equal(desde(35000, 24200).precio, 24500);
+  // Nunca por encima del precio de lista, aunque el modelo se pase.
+  assert.equal(desde(10000, 50000).precio, 10000);
+  // Barato: al bote, no a la etiqueta.
+  assert.deepEqual(desde(12000, 4000), { precio: 4000, destino: 'bin_40' });
+  // Sin sugerencia, el que llama usa el porcentaje.
+  assert.deepEqual(desde(35000, 0), { precio: 0, destino: 'etiqueta' });
 });
 
 test('una pieza de bin se vende al precio del bote, no al que se tecleo', () => {
