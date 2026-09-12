@@ -1,0 +1,208 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>El Dolarón — captura</title>
+<style>
+  :root { --azul:#16366B; --rojo:#D72B32; --amarillo:#FFD447; }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; background: #000; color: #fff;
+    font-family: system-ui, -apple-system, sans-serif; overscroll-behavior: none; }
+  #camara { position: fixed; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+  .encima { position: fixed; left: 0; right: 0; z-index: 2; }
+  #contador { top: 0; padding: 10px 14px calc(10px + env(safe-area-inset-top));
+    background: linear-gradient(#000c, #0000); font-size: 15px; font-variant-numeric: tabular-nums; }
+  #miniaturas { bottom: 132px; display: flex; gap: 6px; overflow-x: auto; padding: 6px 10px; }
+  #miniaturas img { height: 56px; width: 56px; object-fit: cover; border-radius: 8px;
+    border: 3px solid transparent; flex: 0 0 auto; }
+  #miniaturas img.danado { border-color: var(--rojo); }
+  #miniaturas img.subida { opacity: .55; }
+  #barra { bottom: 0; display: flex; align-items: center; justify-content: space-between;
+    gap: 12px; padding: 16px 18px calc(18px + env(safe-area-inset-bottom));
+    background: linear-gradient(#0000, #000c); }
+  #estado { flex: 0 0 auto; border: 2px solid #fff; background: #fff; color: #111;
+    border-radius: 999px; padding: 12px 18px; font-size: 16px; font-weight: 700; }
+  #estado.danado { background: var(--rojo); border-color: var(--rojo); color: #fff; }
+  #disparo { width: 78px; height: 78px; border-radius: 50%; border: 5px solid #fff;
+    background: #fff5; flex: 0 0 auto; }
+  #disparo:active { background: #fff; }
+  #ayuda { flex: 1; font-size: 13px; opacity: .85; line-height: 1.3; }
+  #error { position: fixed; inset: 0; z-index: 5; display: none; padding: 24px;
+    background: #111; flex-direction: column; justify-content: center; gap: 16px; }
+  #error button { padding: 14px; font-size: 16px; border: 0; border-radius: 10px;
+    background: var(--amarillo); color: #111; font-weight: 700; }
+</style>
+</head>
+<body>
+<video id="camara" playsinline autoplay muted></video>
+
+<div id="contador" class="encima">0 fotos · 0 subidas</div>
+<div id="miniaturas" class="encima"></div>
+
+<div id="barra" class="encima">
+  <button id="estado" type="button">Nuevo</button>
+  <button id="disparo" type="button" aria-label="Tomar foto"></button>
+  <span id="ayuda">Toca la miniatura para marcarla dañada.</span>
+</div>
+
+<div id="error">
+  <h2 id="error-texto"></h2>
+  <button id="reintentar" type="button">Reintentar</button>
+</div>
+
+<script type="module">
+const LADO_MAX = 1024;
+const CALIDAD = 0.8;
+
+const video = document.getElementById('camara');
+const contador = document.getElementById('contador');
+const miniaturas = document.getElementById('miniaturas');
+const botonEstado = document.getElementById('estado');
+const panelError = document.getElementById('error');
+const textoError = document.getElementById('error-texto');
+
+let estadoFisico = 'nuevo';
+let tomadas = 0;
+let subidas = 0;
+let subiendo = false;
+
+/* ---------- cola local: la foto se guarda antes de intentar subirla ---------- */
+
+function abrirBase() {
+  return new Promise((resolve, reject) => {
+    const solicitud = indexedDB.open('eldolaron', 1);
+    solicitud.onupgradeneeded = () => solicitud.result.createObjectStore('pendientes', { keyPath: 'id' });
+    solicitud.onsuccess = () => resolve(solicitud.result);
+    solicitud.onerror = () => reject(solicitud.error);
+  });
+}
+
+async function conStore(modo, fn) {
+  const base = await abrirBase();
+  return new Promise((resolve, reject) => {
+    const transaccion = base.transaction('pendientes', modo);
+    const solicitud = fn(transaccion.objectStore('pendientes'));
+    solicitud.onsuccess = () => resolve(solicitud.result);
+    solicitud.onerror = () => reject(solicitud.error);
+  });
+}
+
+const guardar = (registro) => conStore('readwrite', (s) => s.put(registro));
+const borrar = (id) => conStore('readwrite', (s) => s.delete(id));
+const pendientes = () => conStore('readonly', (s) => s.getAll());
+
+/* ---------- camara ---------- */
+
+async function encenderCamara() {
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: { ideal: 'environment' }, width: { ideal: 1920 } },
+      audio: false,
+    });
+    video.srcObject = stream;
+    panelError.style.display = 'none';
+  } catch {
+    textoError.textContent = 'No se pudo abrir la cámara. Revisa los permisos del navegador.';
+    panelError.style.display = 'flex';
+  }
+}
+
+/** Reduce la foto antes de guardarla: alcanza para la IA, la etiqueta y el catálogo. */
+function capturar() {
+  const escala = Math.min(1, LADO_MAX / Math.max(video.videoWidth, video.videoHeight));
+  const lienzo = document.createElement('canvas');
+  lienzo.width = Math.round(video.videoWidth * escala);
+  lienzo.height = Math.round(video.videoHeight * escala);
+  lienzo.getContext('2d').drawImage(video, 0, 0, lienzo.width, lienzo.height);
+  return new Promise((resolve) => lienzo.toBlob(resolve, 'image/jpeg', CALIDAD));
+}
+
+function pintarMiniatura(registro) {
+  const img = document.createElement('img');
+  img.src = URL.createObjectURL(registro.foto);
+  img.dataset.id = registro.id;
+  img.className = registro.estado_fisico === 'danado' ? 'danado' : '';
+  img.addEventListener('click', () => alternarEstado(registro.id, img));
+  miniaturas.prepend(img);
+  while (miniaturas.children.length > 20) miniaturas.lastChild.remove();
+}
+
+/** Corrección después del disparo: solo mientras la foto sigue en la cola. */
+async function alternarEstado(id, img) {
+  const cola = await pendientes();
+  const registro = cola.find((r) => r.id === id);
+  if (!registro) {
+    img.classList.add('subida');
+    return;
+  }
+  registro.estado_fisico = registro.estado_fisico === 'danado' ? 'nuevo' : 'danado';
+  await guardar(registro);
+  img.classList.toggle('danado', registro.estado_fisico === 'danado');
+}
+
+async function disparar() {
+  const foto = await capturar();
+  if (!foto) return;
+  const registro = { id: crypto.randomUUID(), foto, estado_fisico: estadoFisico, creado: Date.now() };
+  await guardar(registro);           // primero al disco, siempre
+  tomadas += 1;
+  pintarMiniatura(registro);
+  actualizarContador();
+  procesarCola();                    // sin await: la camara no espera a la red
+}
+
+/* ---------- subida: de una en una, con reintento ---------- */
+
+async function procesarCola() {
+  if (subiendo) return;
+  subiendo = true;
+  try {
+    for (const registro of await pendientes()) {
+      const cuerpo = new FormData();
+      cuerpo.append('id', registro.id);
+      cuerpo.append('estado_fisico', registro.estado_fisico);
+      cuerpo.append('foto', registro.foto, `${registro.id}.jpg`);
+
+      let respuesta;
+      try {
+        respuesta = await fetch('/api/borradores', { method: 'POST', body: cuerpo });
+      } catch {
+        break;                       // sin red: la foto se queda en la cola
+      }
+      if (respuesta.status >= 500) break;
+      await borrar(registro.id);     // 2xx, o 4xx que no mejora reintentando
+      if (respuesta.ok) {
+        subidas += 1;
+        const img = miniaturas.querySelector(`img[data-id="${registro.id}"]`);
+        if (img) img.classList.add('subida');
+      }
+      actualizarContador();
+    }
+  } finally {
+    subiendo = false;
+  }
+}
+
+function actualizarContador() {
+  contador.textContent = `${tomadas} fotos · ${subidas} subidas`;
+}
+
+/* ---------- arranque ---------- */
+
+botonEstado.addEventListener('click', () => {
+  estadoFisico = estadoFisico === 'nuevo' ? 'danado' : 'nuevo';
+  botonEstado.textContent = estadoFisico === 'nuevo' ? 'Nuevo' : 'Dañado';
+  botonEstado.classList.toggle('danado', estadoFisico === 'danado');
+});
+document.getElementById('disparo').addEventListener('click', disparar);
+document.getElementById('reintentar').addEventListener('click', encenderCamara);
+addEventListener('online', procesarCola);
+setInterval(procesarCola, 20000);
+document.addEventListener('visibilitychange', () => { if (!document.hidden) encenderCamara(); });
+
+encenderCamara();
+procesarCola();
+</script>
+</body>
+</html>
