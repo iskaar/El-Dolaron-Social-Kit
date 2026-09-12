@@ -122,6 +122,18 @@ Punto de partida: `claude-haiku-4-5`, decidido con la prueba del paso 3.
 
 Un análisis fallido deja la fila en `error` con su foto intacta. Nunca se borra una foto por un fallo de análisis.
 
+## La impresora manda en la etiqueta
+
+**Zebra TLP 2844**, por USB con el controlador ZDesigner, rollo de **57 × 32 mm** (2.25 × 1.25 in), **203 dpi**.
+
+203 dpi son **8 puntos por milimetro**, asi que el modulo del codigo de barras tiene que medir un numero entero de puntos: **0.25 mm = 2 puntos exactos**. Un modulo que no cae en puntos enteros — 0.28 mm, por ejemplo — se imprime con barras de ancho desparejo y el lector deja de leerlo, aunque en pantalla se vea perfecto. La aritmetica de la impresora manda sobre el diseño.
+
+Con 0.25 mm, un codigo `ED-000123` mide 38.5 mm y entra en los 52 mm utiles de la etiqueta.
+
+Una etiqueta por pagina (`@page { size: 57mm 32mm; margin: 0 }`): el rollo avanza una etiqueta por pagina impresa. En el dialogo de impresion, escala **100 %** y **sin** «Ajustar a la pagina»: escalar deforma las barras.
+
+Esto se verifica con el lector leyendo papel, no con una captura de pantalla.
+
 ## Reglas de Workers que Codex debe respetar
 
 - Nada de bloquear la respuesta con el análisis: `ctx.waitUntil()`, y **sin desestructurar `ctx`**.
