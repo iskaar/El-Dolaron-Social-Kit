@@ -9,12 +9,28 @@
     "head_sampling_rate": 1
   },
   "assets": {
-    "directory": "public"
+    "directory": "public",
+    "binding": "ASSETS",
+    // Sin esto, los HTML se sirven ANTES del Worker y el filtro por hostname
+    // nunca los ve: /admin y /caja quedaban abiertos en la puerta del vendedor.
+    "run_worker_first": true
   },
-  // Hostname propio: Cloudflare Access solo protege dominios de una zona, no workers.dev.
+  "vars": {
+    // Ese hostname solo sirve la camara y la subida de fotos: el vendedor no
+    // llega a precios ni a la caja aunque escriba la ruta.
+    "HOST_VENDEDOR": "captura.viste.com.mx"
+  },
+  // Hostnames propios: Cloudflare Access solo protege dominios de una zona, no workers.dev.
   "routes": [
     {
       "pattern": "escaner.viste.com.mx",
+      "custom_domain": true
+    },
+    {
+      // Puerta del vendedor, con su propia aplicacion de Access (politica
+      // "Vendedor"). Nunca publicar este hostname sin esa aplicacion: solo
+      // sirve la camara, pero acepta fotos y esas fotos cuestan analisis.
+      "pattern": "captura.viste.com.mx",
       "custom_domain": true
     }
   ],

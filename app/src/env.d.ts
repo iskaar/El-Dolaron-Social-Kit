@@ -6,6 +6,8 @@ declare global {
     GEMINI_API_KEY: string;
     /** 'claude' (por defecto) o 'gemini'. Por instancia, en wrangler.jsonc. */
     MODELO_ANALISIS?: string;
+    /** Hostname que solo sirve la camara. Vacio = una sola puerta, como antes. */
+    HOST_VENDEDOR?: string;
   }
 }
 

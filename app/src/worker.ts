@@ -26,6 +26,21 @@ interface FilaBorrador {
   creado_en: string;
 }
 
+/**
+ * El hostname del vendedor solo sirve la camara y la subida de fotos.
+ * Cloudflare Access decide quien entra; esto decide que hay detras, y sigue
+ * valiendo si algun dia la politica de Access queda mal configurada. Los precios
+ * y el inventario no viven en el telefono que anda en el pasillo.
+ */
+const RUTAS_VENDEDOR = new Set(['/captura', '/foto.js', '/api/salud']);
+
+function permitidaParaVendedor(pathname: string, metodo: string): boolean {
+  if (RUTAS_VENDEDOR.has(pathname)) {
+    return metodo === 'GET';
+  }
+  return pathname === '/api/borradores' && metodo === 'POST';
+}
+
 const ESTADOS_FISICOS = new Set(['nuevo', 'danado']);
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const FOTO_MAX_BYTES = 6 * 1024 * 1024;
@@ -109,10 +124,11 @@ async function crearBorrador(request: Request, env: Env, ctx: ExecutionContext, 
 
 async function listarBorradores(url: URL, env: Env): Promise<Response> {
   const estado = url.searchParams.get('estado');
+  // Los botes son productos para la caja, no piezas que revisar.
   const consulta = `select id, nombre, categoria, precio_lista, precio, estado_fisico,
                            estado_analisis, destino, semana_ingreso, creado_en
                     from productos
-                    ${estado ? 'where estado_analisis = ?' : ''}
+                    where sin_inventario = 0 ${estado ? 'and estado_analisis = ?' : ''}
                     order by creado_en desc limit 200`;
   const sentencia = estado
     ? env.DB.prepare(consulta).bind(estado)
@@ -450,6 +466,15 @@ export default {
     const { pathname } = url;
 
     try {
+      if (env.HOST_VENDEDOR && url.hostname === env.HOST_VENDEDOR) {
+        if (pathname === '/') {
+          return Response.redirect(`${url.origin}/captura`, 302);
+        }
+        if (!permitidaParaVendedor(pathname, request.method)) {
+          return json({ error: 'Esta pantalla no esta disponible aqui.' }, 404);
+        }
+      }
+
       if (pathname === '/api/salud') {
         return json({ estado: 'ok' });
       }
@@ -518,7 +543,13 @@ export default {
         return json({ id: reintento[1], modelo, estado_analisis: 'pendiente' }, 202);
       }
 
-      return json({ error: 'Ruta no encontrada.' }, 404);
+      if (pathname.startsWith('/api/')) {
+        return json({ error: 'Ruta no encontrada.' }, 404);
+      }
+
+      // Todo lo demas son las pantallas, servidas por el Worker para que el
+      // filtro de arriba alcance tambien a los HTML.
+      return await env.ASSETS.fetch(request);
     } catch (error) {
       console.error(JSON.stringify({ mensaje: 'fallo en la peticion', pathname, error: String(error) }));
       return json({ error: 'Error interno. Intenta de nuevo.' }, 500);
