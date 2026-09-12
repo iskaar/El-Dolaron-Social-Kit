@@ -5,7 +5,7 @@
  * (docs/ARQUITECTURA-ESCANER.md).
  */
 
-import { analizarBorrador, MODELO_POR_DEFECTO, type Modelo } from './analisis.ts';
+import { analizarBorrador, modeloPorDefecto, type Modelo } from './analisis.ts';
 import { calcularPrecio, ajustarManual, type Destino } from './precio.ts';
 
 interface FilaConfig {
@@ -52,14 +52,18 @@ async function leerConfig(env: Env): Promise<Record<string, string>> {
   return Object.fromEntries(results.map((fila) => [fila.clave, fila.valor]));
 }
 
+function modeloPedido(url: URL, env: Env): Modelo {
+  const pedido = url.searchParams.get('modelo');
+  if (pedido === 'gemini' || pedido === 'claude') {
+    return pedido;
+  }
+  return modeloPorDefecto(env);
+}
+
 /**
  * Guarda la foto y el borrador. Idempotente por id: el telefono genera el id
  * antes de subir, asi que un reintento tras una red caida no duplica la pieza.
  */
-function modeloPedido(url: URL): Modelo {
-  return url.searchParams.get('modelo') === 'gemini' ? 'gemini' : MODELO_POR_DEFECTO;
-}
-
 async function crearBorrador(request: Request, env: Env, ctx: ExecutionContext, url: URL): Promise<Response> {
   const formulario = await request.formData();
   const id = String(formulario.get('id') ?? '');
@@ -98,7 +102,7 @@ async function crearBorrador(request: Request, env: Env, ctx: ExecutionContext, 
     .run();
 
   // El analisis corre despues de responder: la camara nunca espera a la IA.
-  ctx.waitUntil(analizarBorrador(id, env, modeloPedido(url)));
+  ctx.waitUntil(analizarBorrador(id, env, modeloPedido(url, env)));
 
   return json({ id, estado_analisis: 'pendiente' }, 201);
 }
@@ -446,7 +450,7 @@ export default {
         if (!UUID.test(reintento[1])) {
           return json({ error: 'Identificador invalido.' }, 400);
         }
-        const modelo = modeloPedido(url);
+        const modelo = modeloPedido(url, env);
         ctx.waitUntil(analizarBorrador(reintento[1], env, modelo));
         return json({ id: reintento[1], modelo, estado_analisis: 'pendiente' }, 202);
       }

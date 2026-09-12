@@ -11,8 +11,14 @@ import { calcularPrecio, precioDesdeSugerencia } from './precio.ts';
 
 export type Modelo = 'claude' | 'gemini';
 
-/** Punto de partida; la prueba de 20 fotos decide cual se queda. */
-export const MODELO_POR_DEFECTO: Modelo = 'claude';
+/**
+ * Punto de partida; la prueba de 20 fotos decide cual se queda.
+ * Cada instancia elige el suyo con la variable MODELO_ANALISIS: la tienda corre
+ * con Claude y la instancia prestada con Gemini, sobre la llave de su dueño.
+ */
+export function modeloPorDefecto(env: Env): Modelo {
+  return env.MODELO_ANALISIS === 'gemini' ? 'gemini' : 'claude';
+}
 
 const MODELO_CLAUDE = 'claude-haiku-4-5';
 const MODELO_GEMINI = 'gemini-flash-latest';
@@ -163,7 +169,8 @@ async function conGemini(foto: string, env: Env, instruccion: string): Promise<F
  * Analiza la foto de un borrador y escribe el resultado. Nunca lanza: un fallo
  * deja la fila en `error` con su foto intacta, lista para reintentar desde el admin.
  */
-export async function analizarBorrador(id: string, env: Env, modelo: Modelo = MODELO_POR_DEFECTO): Promise<void> {
+export async function analizarBorrador(id: string, env: Env, modeloPedido?: Modelo): Promise<void> {
+  const modelo = modeloPedido ?? modeloPorDefecto(env);
   const inicio = Date.now();
   try {
     const objeto = await env.FOTOS.get(`fotos/${id}.jpg`);

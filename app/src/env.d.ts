@@ -4,6 +4,8 @@ declare global {
   interface Env {
     ANTHROPIC_API_KEY: string;
     GEMINI_API_KEY: string;
+    /** 'claude' (por defecto) o 'gemini'. Por instancia, en wrangler.jsonc. */
+    MODELO_ANALISIS?: string;
   }
 }
 
