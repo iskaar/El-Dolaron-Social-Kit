@@ -24,6 +24,14 @@
   #estado { flex: 0 0 auto; border: 2px solid #fff; background: #fff; color: #111;
     border-radius: 999px; padding: 12px 18px; font-size: 16px; font-weight: 700; }
   #estado.danado { background: var(--rojo); border-color: var(--rojo); color: #fff; }
+  #cantidad { display: flex; align-items: center; gap: 0; flex: 0 0 auto;
+    border: 2px solid #fff; border-radius: 999px; overflow: hidden; background: #0006; }
+  #cantidad button { width: 42px; height: 46px; border: 0; background: none; color: #fff;
+    font-size: 24px; font-weight: 700; }
+  #cantidad button:active { background: #fff3; }
+  #cantidad .valor { min-width: 34px; text-align: center; font-size: 18px; font-weight: 800;
+    font-variant-numeric: tabular-nums; }
+  #cantidad.varias { border-color: var(--amarillo); color: var(--amarillo); }
   #disparo { width: 78px; height: 78px; border-radius: 50%; border: 5px solid #fff;
     background: #fff5; flex: 0 0 auto; }
   #disparo:active { background: #fff; }
@@ -42,6 +50,11 @@
 
 <div id="barra" class="encima">
   <button id="estado" type="button">Nuevo</button>
+  <div id="cantidad">
+    <button type="button" data-paso="-1" aria-label="Menos piezas">−</button>
+    <span class="valor">1</span>
+    <button type="button" data-paso="1" aria-label="Más piezas">+</button>
+  </div>
   <button id="disparo" type="button" aria-label="Tomar foto"></button>
   <span id="ayuda">Toca la miniatura para marcarla dañada.</span>
 </div>
@@ -62,7 +75,9 @@ const panelError = document.getElementById('error');
 const textoError = document.getElementById('error-texto');
 
 let estadoFisico = 'nuevo';
+let cantidad = 1;   // piezas identicas que representa la foto
 let tomadas = 0;
+let piezasTotales = 0;
 let subidas = 0;
 let subiendo = false;
 
@@ -136,9 +151,10 @@ async function alternarEstado(id, img) {
 async function disparar() {
   const foto = await capturar();
   if (!foto) return;
-  const registro = { id: crypto.randomUUID(), foto, estado_fisico: estadoFisico, creado: Date.now() };
+  const registro = { id: crypto.randomUUID(), foto, estado_fisico: estadoFisico, cantidad, creado: Date.now() };
   await guardar(registro);           // primero al disco, siempre
   tomadas += 1;
+  piezasTotales += cantidad;
   pintarMiniatura(registro);
   actualizarContador();
   procesarCola();                    // sin await: la camara no espera a la red
@@ -154,6 +170,7 @@ async function procesarCola() {
       const cuerpo = new FormData();
       cuerpo.append('id', registro.id);
       cuerpo.append('estado_fisico', registro.estado_fisico);
+      cuerpo.append('cantidad', String(registro.cantidad ?? 1));
       cuerpo.append('foto', registro.foto, `${registro.id}.jpg`);
 
       let respuesta;
@@ -177,8 +194,22 @@ async function procesarCola() {
 }
 
 function actualizarContador() {
-  contador.textContent = `${tomadas} fotos · ${subidas} subidas`;
+  const piezas = tomadas === 0 ? '' : ` · ${piezasTotales} piezas`;
+  contador.textContent = `${tomadas} fotos${piezas} · ${subidas} subidas`;
 }
+
+/** El contador se queda donde lo dejes, como el interruptor de estado. */
+function pintarCantidad() {
+  document.querySelector('#cantidad .valor').textContent = cantidad;
+  document.getElementById('cantidad').classList.toggle('varias', cantidad > 1);
+}
+
+document.getElementById('cantidad').addEventListener('click', (evento) => {
+  const paso = Number(evento.target.dataset?.paso ?? 0);
+  if (!paso) return;
+  cantidad = Math.min(99, Math.max(1, cantidad + paso));
+  pintarCantidad();
+});
 
 /* ---------- arranque ---------- */
 
@@ -193,6 +224,7 @@ addEventListener('online', procesarCola);
 setInterval(procesarCola, 20000);
 document.addEventListener('visibilitychange', () => { if (!document.hidden) encenderCamara(); });
 
+pintarCantidad();
 encenderCamara();
 procesarCola();
 </script>

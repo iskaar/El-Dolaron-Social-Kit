@@ -31,6 +31,12 @@ const INSTRUCCION = [
   'no su precio en dolares ni su precio original de tienda americana.',
   'Responde solo con el JSON pedido. Si no reconoces el articulo, deja el nombre vacio y el precio en 0:',
   'inventar un precio cuesta mas que dejarlo para revision manual.',
+  '\n\nCOMO SE ESCRIBE EL NOMBRE. La misma pieza fotografiada dos veces tiene que dar el mismo',
+  'nombre, o el inventario se llena de duplicados que nadie puede juntar.',
+  '\n- Formato: articulo + marca + detalle que lo distinga (capacidad, medida, modelo), en ese orden.',
+  '\n- En espanol, maximo seis palabras, singular, sin articulos ni adjetivos de venta.',
+  '\n- Nada de color, estado, cantidad ni empaque, salvo que sea lo unico que distinga la pieza.',
+  '\n- Ejemplos: "Licuadora Oster 10 velocidades", "Sarten Tramontina 24 cm", "Cafetera Mr. Coffee 12 tazas".',
 ].join(' ');
 
 /** Debajo de esto, los ejemplos son ruido y manda el porcentaje de la configuracion. */
@@ -66,6 +72,33 @@ async function ejemplosDeIsaac(env: Env): Promise<Ejemplo[]> {
     .bind(EJEMPLOS_MAXIMOS)
     .all<Ejemplo>();
   return results;
+}
+
+/**
+ * Nombres que ya existen en el inventario. Si la pieza nueva es la misma que una
+ * de estas, el modelo reutiliza el nombre exacto en lugar de inventar una
+ * variante ("Licuadora Oster" vs "Licuadora Oster negra"), que es como se
+ * generan los duplicados que luego nadie junta.
+ */
+async function nombresExistentes(env: Env): Promise<string[]> {
+  const { results } = await env.DB.prepare(
+    `select distinct nombre from productos
+     where nombre <> '' and sin_inventario = 0
+     order by actualizado_en desc limit 80`,
+  ).all<{ nombre: string }>();
+  return results.map((fila) => fila.nombre);
+}
+
+function bloqueNombres(nombres: string[]): string {
+  if (nombres.length === 0) {
+    return '';
+  }
+  return [
+    '\n\nNombres que ya existen en el inventario:',
+    nombres.map((n) => `- ${n}`).join('\n'),
+    'Si la pieza de la foto es la misma que una de esas, responde con **ese nombre exacto**,',
+    'letra por letra. Solo inventa un nombre nuevo si de verdad es otro articulo.',
+  ].join('\n');
 }
 
 function bloqueEjemplos(ejemplos: Ejemplo[]): string {
@@ -110,6 +143,28 @@ function base64(datos: ArrayBuffer): string {
   return btoa(binario);
 }
 
+/**
+ * La busqueda de Google no convive con `responseSchema`: la API rechaza las dos
+ * juntas. Con busqueda se pide el JSON en el prompt y se extrae del texto.
+ */
+function extraerJson(texto: string): Partial<Ficha> {
+  const limpio = texto.replace(/```json|```/g, '');
+  const inicio = limpio.indexOf('{');
+  const fin = limpio.lastIndexOf('}');
+  if (inicio < 0 || fin <= inicio) {
+    throw new Error(`Respuesta sin JSON: ${texto.slice(0, 200)}`);
+  }
+  return JSON.parse(limpio.slice(inicio, fin + 1)) as Partial<Ficha>;
+}
+
+const PIDE_JSON = [
+  '\n\nAntes de responder, busca el precio actual de este articulo en tiendas mexicanas',
+  '(Amazon Mexico, Mercado Libre, Walmart Mexico, Liverpool). Usa el precio que encuentres,',
+  'no una estimacion de memoria. Si no lo encuentras, deja `precio_lista_mxn` en 0.',
+  '\nResponde SOLO con este JSON, sin texto alrededor:',
+  '{"nombre":"","categoria":"ropa|hogar|electronica|juguetes|otros","precio_lista_mxn":0,"precio_venta_mxn":0,"confianza":0}',
+].join(' ');
+
 function normalizar(cruda: Partial<Ficha>): Ficha {
   const categoria = String(cruda.categoria ?? '');
   return {
@@ -142,7 +197,7 @@ async function conClaude(foto: string, env: Env, instruccion: string): Promise<F
   return normalizar(JSON.parse(texto));
 }
 
-async function conGemini(foto: string, env: Env, instruccion: string): Promise<Ficha> {
+async function conGemini(foto: string, env: Env, instruccion: string, buscar = false): Promise<Ficha> {
   // Las dos instancias tienen secretos independientes, pero no siempre con el
   // mismo nombre: se acepta cualquiera de los dos en lugar de obligar a
   // recapturar la llave.
@@ -155,7 +210,7 @@ async function conGemini(foto: string, env: Env, instruccion: string): Promise<F
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({
-      systemInstruction: { parts: [{ text: instruccion }] },
+      systemInstruction: { parts: [{ text: buscar ? instruccion + PIDE_JSON : instruccion }] },
       contents: [
         {
           parts: [
@@ -164,7 +219,10 @@ async function conGemini(foto: string, env: Env, instruccion: string): Promise<F
           ],
         },
       ],
-      generationConfig: { responseMimeType: 'application/json', responseSchema: ESQUEMA_GEMINI },
+      // Con busqueda, el esquema estructurado no esta permitido: van excluyentes.
+      ...(buscar
+        ? { tools: [{ google_search: {} }] }
+        : { generationConfig: { responseMimeType: 'application/json', responseSchema: ESQUEMA_GEMINI } }),
     }),
   });
   if (!respuesta.ok) {
@@ -173,16 +231,26 @@ async function conGemini(foto: string, env: Env, instruccion: string): Promise<F
   const cuerpo = (await respuesta.json()) as {
     candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
   };
-  const texto = cuerpo.candidates?.[0]?.content?.parts?.[0]?.text ?? '{}';
-  return normalizar(JSON.parse(texto));
+  const texto = (cuerpo.candidates?.[0]?.content?.parts ?? [])
+    .map((parte) => parte.text ?? '')
+    .join('');
+  return normalizar(buscar ? extraerJson(texto) : (JSON.parse(texto || '{}') as Partial<Ficha>));
 }
 
 /**
  * Analiza la foto de un borrador y escribe el resultado. Nunca lanza: un fallo
  * deja la fila en `error` con su foto intacta, lista para reintentar desde el admin.
  */
-export async function analizarBorrador(id: string, env: Env, modeloPedido?: Modelo): Promise<void> {
+export async function analizarBorrador(
+  id: string,
+  env: Env,
+  modeloPedido?: Modelo,
+  buscarPedido?: boolean,
+): Promise<void> {
   const modelo = modeloPedido ?? modeloPorDefecto(env);
+  // Buscar el precio en la web en lugar de estimarlo de memoria. Solo Gemini por
+  // ahora; el analisis corre en segundo plano, asi que la demora no la ve nadie.
+  const buscar = (buscarPedido ?? env.BUSQUEDA_WEB === 'si') && modelo === 'gemini';
   const inicio = Date.now();
   try {
     const objeto = await env.FOTOS.get(`fotos/${id}.jpg`);
@@ -198,11 +266,11 @@ export async function analizarBorrador(id: string, env: Env, modeloPedido?: Mode
       throw new Error('El borrador no existe.');
     }
 
-    const ejemplos = await ejemplosDeIsaac(env);
-    const instruccion = INSTRUCCION + bloqueEjemplos(ejemplos);
+    const [ejemplos, nombres] = await Promise.all([ejemplosDeIsaac(env), nombresExistentes(env)]);
+    const instruccion = INSTRUCCION + bloqueNombres(nombres) + bloqueEjemplos(ejemplos);
 
     const ficha = modelo === 'gemini'
-      ? await conGemini(foto, env, instruccion)
+      ? await conGemini(foto, env, instruccion, buscar)
       : await conClaude(foto, env, instruccion);
 
     const { results } = await env.DB.prepare('select clave, valor from config').all<{ clave: string; valor: string }>();
@@ -230,8 +298,8 @@ export async function analizarBorrador(id: string, env: Env, modeloPedido?: Mode
       .run();
 
     console.log(JSON.stringify({
-      mensaje: 'analisis listo', id, modelo, ms: Date.now() - inicio,
-      ejemplos: ejemplos.length, segun_ejemplos: conEjemplos, ficha,
+      mensaje: 'analisis listo', id, modelo, buscar, ms: Date.now() - inicio,
+      ejemplos: ejemplos.length, nombres: nombres.length, segun_ejemplos: conEjemplos, ficha,
     }));
   } catch (error) {
     console.error(JSON.stringify({ mensaje: 'analisis fallido', id, modelo, error: String(error) }));

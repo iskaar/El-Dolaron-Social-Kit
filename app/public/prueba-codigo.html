@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>El Dolarón — prueba de código</title>
+<style>
+  :root { --azul:#16366B; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: #f4f6f9; color: #1a1f2b; font-family: system-ui, sans-serif; }
+  header { background: var(--azul); color: #fff; padding: 14px 20px; display: flex; gap: 16px; align-items: center; }
+  header h1 { font-size: 18px; margin: 0; flex: 1; }
+  header button { background: #FFD447; border: 0; border-radius: 8px; padding: 9px 14px;
+    font-weight: 700; cursor: pointer; }
+  main { padding: 20px; max-width: 860px; margin: 0 auto; }
+  .ayuda { font-size: 14px; line-height: 1.5; color: #333; max-width: 68ch; }
+  .ayuda ol { padding-left: 20px; }
+  .etiqueta { width: 57mm; height: 32mm; padding: 2mm; border: 0.2mm dashed #bbb;
+    display: flex; flex-direction: column; justify-content: center; align-items: center; gap: 1mm;
+    background: #fff; }
+  .etiqueta .letra { font-size: 5mm; font-weight: 800; }
+  .etiqueta .dato { font-size: 2.6mm; font-family: ui-monospace, monospace; }
+  #hoja { display: flex; flex-wrap: wrap; gap: 4mm; margin-top: 18px; }
+  @media print {
+    header, .ayuda { display: none !important; }
+    body { background: #fff; }
+    main { padding: 0; max-width: none; }
+    #hoja { display: block !important; gap: 0; margin: 0; }
+    .etiqueta { border: 0; break-inside: avoid; }
+    .etiqueta:not(:last-child) { break-after: page; }
+    @page { size: 57mm 32mm; margin: 0; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>Prueba de código de barras</h1>
+  <button type="button" onclick="print()">Imprimir las cuatro</button>
+  <a href="/etiquetas" style="color:#FFD447">← Etiquetas</a>
+</header>
+
+<main>
+  <div class="ayuda">
+    <p>Cuatro etiquetas con barras cada vez más anchas. Imprímelas en la Zebra al
+    <b>100 %</b>, sin «Ajustar a la página», y pásalas con el lector. El código se
+    acorta conforme engordan las barras: en 57 mm no cabe todo, y esa es justo la
+    decisión que hay que tomar.</p>
+    <ol>
+      <li>Anota cuál es la primera que suena. Esa es la que sirve.</li>
+      <li>Si ninguna suena, prueba el lector contra el código de barras de
+      cualquier producto de tienda: si tampoco lo lee, el problema es el lector
+      o su configuración, no la etiqueta.</li>
+      <li>Si la tinta sale gris o borrosa, sube el <i>darkness</i> y baja la
+      velocidad en las preferencias de la impresora antes de repetir.</li>
+    </ol>
+  </div>
+
+  <div id="hoja"></div>
+</main>
+
+<script type="module">
+import { svgCode128 } from '/code128.js';
+
+// 203 dpi = 8 puntos por mm: solo anchos que caen en puntos enteros.
+// A barras mas anchas, codigo mas corto: en 57 mm no cabe todo. Por eso cada
+// variante lleva el codigo mas largo que le entra, no siempre el mismo.
+const VARIANTES = [
+  ['A', 0.25,  '2 puntos', 'ED-000019'],
+  ['B', 0.375, '3 puntos', '000019'],
+  ['C', 0.5,   '4 puntos', '0019'],
+  ['D', 0.625, '5 puntos', '19'],
+];
+
+document.getElementById('hoja').innerHTML = VARIANTES.map(([letra, modulo, puntos, codigo]) => {
+  const svg = svgCode128(codigo, { modulo, alto: 12 });
+  const ancho = svg.match(/width="([\d.]+)mm"/)[1];
+  return `
+    <div class="etiqueta">
+      <div class="letra">${letra}</div>
+      ${svg}
+      <div class="dato">${codigo} · ${modulo} mm · ${puntos} · ${ancho} mm</div>
+    </div>`;
+}).join('');
+</script>
+</body>
+</html>

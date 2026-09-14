@@ -85,6 +85,13 @@ const EN_PESOS = new Set(['limite_bin', 'bin_20', 'bin_40', 'bin_60']);
 const cola = document.getElementById('cola');
 const resumen = document.getElementById('resumen');
 let filtro = '';
+/** Nombre normalizado → pieza ya revisada, para detectar repetidos. */
+let existentes = new Map();
+
+// Mismo nombre con otro acento, otra mayuscula o un espacio de mas sigue siendo
+// la misma pieza: el analisis ya estandariza el nombre, esto cubre el resto.
+const normalizar = (texto) => (texto ?? '').toLowerCase().normalize('NFD')
+  .replace(/[\u0300-\u036f]/g, '').replace(/\s+/g, ' ').trim();
 
 const pesos = (centavos) => (centavos / 100).toFixed(0);
 const centavos = (pesos) => Math.round(Number(pesos || 0) * 100);
@@ -119,6 +126,8 @@ document.getElementById('guardar-config').addEventListener('click', async () => 
 
 function ficha(p) {
   const estado = p.estado_analisis;
+  const gemela = existentes.get(normalizar(p.nombre));
+  const repetida = gemela && gemela.id !== p.id ? gemela : null;
   const nodo = document.createElement('article');
   nodo.className = 'ficha';
   nodo.innerHTML = `
@@ -144,6 +153,8 @@ function ficha(p) {
           <input data-campo="precio_lista" type="number" min="0" value="${pesos(p.precio_lista)}"></div>
         <div><label>Precio de venta ($)</label>
           <input data-campo="precio" type="number" min="0" value="${pesos(p.precio)}"></div>
+        <div><label>Existencia</label>
+          <input data-campo="stock" type="number" min="0" max="999" value="${p.stock ?? 1}"></div>
         <div><label>Destino</label><select data-campo="destino">
           ${DESTINOS.map(([v, t]) => `<option value="${v}" ${v === p.destino ? 'selected' : ''}>${t}</option>`).join('')}
         </select></div>
@@ -152,6 +163,9 @@ function ficha(p) {
         <button type="button" data-accion="guardar">Guardar</button>
         <button type="button" class="claro" data-accion="recalcular">Recalcular precio</button>
         <button type="button" class="claro" data-accion="reanalizar">Reintentar análisis</button>
+        ${repetida ? `<button type="button" class="claro" data-accion="fusionar"
+          title="Suma esta foto a la pieza que ya existe y borra la repetida">
+          Ya existe · sumar a ${repetida.stock ?? 1} pz</button>` : ''}
         <button type="button" class="peligro" data-accion="descartar">Descartar</button>
         <span class="etiqueta ${estado}">${estado} · ${p.semana_ingreso}</span>
         <span class="aviso"></span>
@@ -208,6 +222,7 @@ function ficha(p) {
     const base = {
       nombre: valor('nombre'), categoria: valor('categoria'),
       estado_fisico: valor('estado_fisico'), precio_lista: centavos(valor('precio_lista')),
+      stock: Math.round(Number(valor('stock') || 0)),
     };
     if (accion === 'guardar') {
       await enviar({ ...base, precio: centavos(valor('precio')), destino: valor('destino') });
@@ -217,6 +232,15 @@ function ficha(p) {
       aviso.textContent = 'Analizando…';
       await fetch(`/api/borradores/${p.id}/analizar`, { method: 'POST' });
       setTimeout(cargarCola, 6000);
+    } else if (accion === 'fusionar') {
+      const respuesta = await fetch(`/api/borradores/${p.id}/fusionar`, {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ destino_id: repetida.id }),
+      });
+      const datos = await respuesta.json();
+      if (!respuesta.ok) { aviso.textContent = datos.error; return; }
+      repetida.stock = datos.stock;   // la siguiente repetida ya ve el total nuevo
+      nodo.remove();
     } else if (accion === 'descartar') {
       await fetch(`/api/borradores/${p.id}`, { method: 'DELETE' });
       nodo.remove();
@@ -228,6 +252,13 @@ function ficha(p) {
 
 async function cargarCola() {
   const piezas = await (await fetch(`/api/borradores${filtro ? `?estado=${filtro}` : ''}`)).json();
+
+  // El destino de una fusion siempre es una pieza ya revisada. La lista viene de
+  // la mas nueva a la mas vieja y aqui se pisa, asi que gana la mas vieja: es la
+  // que probablemente ya tiene codigo y etiqueta pegada en el anaquel.
+  const listas = await (await fetch('/api/borradores?estado=listo')).json();
+  existentes = new Map(listas.filter((p) => p.nombre).map((p) => [normalizar(p.nombre), p]));
+
   cola.replaceChildren(...piezas.map(ficha));
   const porEstado = piezas.reduce((acc, p) => ({ ...acc, [p.estado_analisis]: (acc[p.estado_analisis] ?? 0) + 1 }), {});
   resumen.textContent = `${piezas.length} piezas · ${porEstado.pendiente ?? 0} pendientes · ${porEstado.error ?? 0} con error`;
