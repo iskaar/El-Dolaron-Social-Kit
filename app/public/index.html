@@ -3,14 +3,30 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>El Dolarón — escáner</title>
+<title>El Dolarón</title>
 <style>
-  body { font-family: system-ui, sans-serif; margin: 0; padding: 24px; color: #16366B; }
-  p { max-width: 34rem; line-height: 1.5; }
+  :root { --azul: #16366B; --rojo: #D72B32; --linea: #dfe3ea; }
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: system-ui, -apple-system, sans-serif; color: #1a1f2b; background: #f4f6f9; }
+  header { background: var(--azul); color: #fff; padding: 18px 20px; }
+  header h1 { margin: 0; font-size: 20px; }
+  main { max-width: 640px; margin: 0 auto; padding: 18px; display: grid; gap: 12px; }
+  a.tool { display: block; background: #fff; border: 1px solid var(--linea); border-radius: 12px;
+    padding: 16px 18px; text-decoration: none; color: inherit; }
+  a.tool:active { background: #eef1f6; }
+  a.tool b { display: block; font-size: 17px; color: var(--azul); }
+  a.tool span { display: block; font-size: 13px; color: #5b6478; margin-top: 4px; }
 </style>
 </head>
 <body>
-  <h1>El Dolarón</h1>
-  <p>Esqueleto del escáner. La captura desde el teléfono y la cola del admin llegan en los pasos siguientes.</p>
+<header><h1>El Dolarón</h1></header>
+<main>
+  <a class="tool" href="/caja"><b>Caja</b><span>Cobrar ventas, cancelar, corte del día</span></a>
+  <a class="tool" href="/admin"><b>Cola de revisión</b><span>Piezas capturadas: precio, nombre, existencia, configuración</span></a>
+  <a class="tool" href="/etiquetas"><b>Etiquetas</b><span>Imprimir etiquetas por lote (Zebra TLP 2844)</span></a>
+  <a class="tool" href="/captura"><b>Captura</b><span>Cámara para subir fotos de piezas nuevas</span></a>
+  <a class="tool" href="/tarjeta-bins"><b>Tarjeta de botes</b><span>Códigos BIN $20 / $40 / $60 para laminar junto a la caja</span></a>
+  <a class="tool" href="/prueba-codigo"><b>Prueba de código</b><span>Hoja de anchos para calibrar el lector de barras</span></a>
+</main>
 </body>
 </html>
