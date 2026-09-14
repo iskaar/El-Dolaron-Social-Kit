@@ -25,3 +25,13 @@ export function agregar(lineas, pieza) {
   }
   return [...lineas, { ...pieza, cantidad: 1 }];
 }
+
+/**
+ * Efectivo vacio (sin escribir nada) llega como 0, igual que efectivo puesto a
+ * proposito en cero: sin esta funcion la caja los trataba distinto y dejaba
+ * cobrar en efectivo sin dinero de por medio. La usan la caja y el servidor,
+ * para que ninguno acepte lo que el otro rechazaria.
+ */
+export function efectivoAlcanza({ formaPago, total, efectivo }) {
+  return formaPago !== 'efectivo' || efectivo >= total;
+}

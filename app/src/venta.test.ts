@@ -1,7 +1,7 @@
 // node --test src/venta.test.ts
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { totales, agregar } from '../public/venta.js';
+import { totales, agregar, efectivoAlcanza } from '../public/venta.js';
 
 interface Linea { codigo: string; nombre: string; precio: number; cantidad: number }
 const pieza = (codigo: string, precio: number) => ({ codigo, nombre: codigo, precio });
@@ -40,4 +40,18 @@ test('dos piezas distintas son dos renglones', () => {
   lineas = agregar(lineas, pieza('ED-000002', 8500));
   assert.equal(lineas.length, 2);
   assert.equal(totales(lineas).total, 33500);
+});
+
+test('efectivo vacio (0) no alcanza para un total mayor a cero', () => {
+  // Antes: dejar el campo en blanco enviaba efectivo=0 y la guarda no se activaba.
+  assert.equal(efectivoAlcanza({ formaPago: 'efectivo', total: 4000, efectivo: 0 }), false);
+});
+
+test('efectivo exacto o de sobra si alcanza', () => {
+  assert.equal(efectivoAlcanza({ formaPago: 'efectivo', total: 4000, efectivo: 4000 }), true);
+  assert.equal(efectivoAlcanza({ formaPago: 'efectivo', total: 4000, efectivo: 5000 }), true);
+});
+
+test('tarjeta no se valida contra el efectivo', () => {
+  assert.equal(efectivoAlcanza({ formaPago: 'tarjeta', total: 4000, efectivo: 0 }), true);
 });

@@ -7,6 +7,7 @@
 
 import { analizarBorrador, modeloPorDefecto, type Modelo } from './analisis.ts';
 import { calcularPrecio, ajustarManual, type Destino } from './precio.ts';
+import { efectivoAlcanza } from '../public/venta.js';
 
 interface FilaConfig {
   clave: string;
@@ -345,6 +346,59 @@ interface LineaVenta {
   producto_id?: unknown;
 }
 
+interface ProductoVenta {
+  id: string;
+  codigo: string | null;
+  nombre: string;
+  precio: number;
+  sin_inventario: number;
+}
+
+interface LineaPreparada {
+  producto_id: string;
+  codigo: string;
+  nombre: string;
+  precio: number;
+  cantidad: number;
+  sinInventario: boolean;
+}
+
+/**
+ * Del navegador solo se confia el producto y la cantidad: precio, nombre y
+ * codigo salen del catalogo del servidor, nunca de lo que mande la caja. Es
+ * pura a proposito, para poder probarla sin D1: worker.ts solo junta el mapa
+ * de productos antes de llamarla.
+ */
+export function prepararLineas(
+  lineasCliente: LineaVenta[],
+  productos: Map<string, ProductoVenta>,
+): { ok: true; lineas: LineaPreparada[] } | { ok: false; error: string } {
+  if (lineasCliente.length === 0) {
+    return { ok: false, error: 'La venta no tiene piezas.' };
+  }
+  const lineas: LineaPreparada[] = [];
+  for (const l of lineasCliente) {
+    const cantidad = Number(l.cantidad);
+    if (!Number.isInteger(cantidad) || cantidad < 1 || cantidad > 999) {
+      return { ok: false, error: 'Cantidad invalida.' };
+    }
+    const productoId = String(l.producto_id ?? '');
+    const producto = productos.get(productoId);
+    if (!producto) {
+      return { ok: false, error: 'Producto inexistente.' };
+    }
+    lineas.push({
+      producto_id: producto.id,
+      codigo: producto.codigo ?? '',
+      nombre: producto.nombre,
+      precio: producto.precio,
+      cantidad,
+      sinInventario: producto.sin_inventario === 1,
+    });
+  }
+  return { ok: true, lineas };
+}
+
 /**
  * Registra una venta. Idempotente por `id`: la caja lo genera antes de cobrar,
  * asi que reenviar la cola despues de una red caida no duplica el ticket ni
@@ -372,15 +426,29 @@ async function registrarVenta(request: Request, env: Env): Promise<Response> {
     return json({ id, duplicada: true }, 200);
   }
 
-  const lineas = (venta.lineas as LineaVenta[]).map((l) => ({
-    producto_id: l.producto_id === undefined || l.producto_id === null ? null : String(l.producto_id),
-    codigo: String(l.codigo ?? ''),
-    nombre: String(l.nombre ?? '').slice(0, 120),
-    precio: Math.max(0, Math.round(Number(l.precio ?? 0))),
-    cantidad: Math.max(1, Math.round(Number(l.cantidad ?? 1))),
-  }));
-  const total = lineas.reduce((suma, l) => suma + l.precio * l.cantidad, 0);
+  const idsPedidos = [...new Set((venta.lineas as LineaVenta[]).map((l) => String(l.producto_id ?? '')))];
+  if (idsPedidos.some((pid) => !UUID.test(pid))) {
+    return json({ error: 'Producto inexistente.' }, 400);
+  }
+  const huecos = idsPedidos.map(() => '?').join(',');
+  const { results: filas } = await env.DB.prepare(
+    `select id, codigo, nombre, precio, sin_inventario from productos where id in (${huecos})`,
+  )
+    .bind(...idsPedidos)
+    .all<ProductoVenta>();
+  const productos = new Map(filas.map((f) => [f.id, f]));
+
+  const preparado = prepararLineas(venta.lineas as LineaVenta[], productos);
+  if (!preparado.ok) {
+    return json({ error: preparado.error }, 400);
+  }
+
+  const total = preparado.lineas.reduce((suma, l) => suma + l.precio * l.cantidad, 0);
   const efectivo = Math.max(0, Math.round(Number(venta.efectivo ?? 0)));
+  if (!efectivoAlcanza({ formaPago, total, efectivo })) {
+    return json({ error: 'El efectivo no alcanza para el total.' }, 400);
+  }
+
   const ahora = new Date().toISOString();
   const creadoEn = String(venta.creado_en ?? ahora);
 
@@ -389,28 +457,34 @@ async function registrarVenta(request: Request, env: Env): Promise<Response> {
       `insert into ventas (id, total, forma_pago, efectivo, cambio, creado_en, registrado_en)
        values (?, ?, ?, ?, ?, ?, ?)`,
     ).bind(id, total, formaPago, efectivo, Math.max(0, efectivo - total), creadoEn, ahora),
-    ...lineas.map((l) =>
+    ...preparado.lineas.map((l) =>
       env.DB.prepare(
         `insert into venta_lineas (venta_id, producto_id, codigo, nombre, precio, cantidad)
          values (?, ?, ?, ?, ?, ?)`,
       ).bind(id, l.producto_id, l.codigo, l.nombre, l.precio, l.cantidad),
     ),
     // Los bins no descuentan: nadie cuenta cuantas piezas quedan en un bote.
-    // `max(0, ...)` porque el dinero ya se cobro: una existencia en negativo no
-    // devuelve la pieza, solo ensucia el inventario. La caja evita el caso comun
-    // avisando antes de cobrar algo que ya se vendio.
-    ...lineas
-      .filter((l) => l.producto_id)
+    // Sin `max(0, ...)`: si dos ventas concurrentes se pelean la ultima pieza,
+    // el trigger `stock_no_negativo` (migracion 006) aborta esta sentencia y
+    // con ella todo el batch, en vez de dejar que ambas "ganen".
+    ...preparado.lineas
+      .filter((l) => !l.sinInventario)
       .map((l) =>
         env.DB.prepare(
-          `update productos set stock = max(0, stock - ?), actualizado_en = ?
-           where id = ? and sin_inventario = 0`,
+          `update productos set stock = stock - ?, actualizado_en = ? where id = ?`,
         ).bind(l.cantidad, ahora, l.producto_id),
       ),
   ];
 
   // Todo junto: un ticket a medias descuadra el corte del dia.
-  await env.DB.batch(sentencias);
+  try {
+    await env.DB.batch(sentencias);
+  } catch (error) {
+    if (String(error).includes('stock insuficiente')) {
+      return json({ error: 'No hay existencia suficiente para completar la venta.' }, 409);
+    }
+    throw error;
+  }
   return json({ id, total, cambio: Math.max(0, efectivo - total) }, 201);
 }
 
@@ -423,13 +497,25 @@ async function cancelarVenta(id: string, env: Env): Promise<Response> {
   if (!UUID.test(id)) {
     return json({ error: 'Identificador de venta invalido.' }, 400);
   }
-  const venta = await env.DB.prepare('select id, total, cancelada from ventas where id = ?')
+  const venta = await env.DB.prepare('select id, total from ventas where id = ?')
     .bind(id)
-    .first<{ id: string; total: number; cancelada: number }>();
+    .first<{ id: string; total: number }>();
   if (!venta) {
     return json({ error: 'La venta no existe.' }, 404);
   }
-  if (venta.cancelada) {
+
+  const ahora = new Date().toISOString();
+  // La bandera se voltea en una sola sentencia con su propia guarda: D1 sirve
+  // las escrituras de una en una, asi que si dos cancelaciones llegan juntas
+  // solo una de ellas encuentra `cancelada = 0` y de verdad cambia la fila. La
+  // otra ve `changes: 0` y sabe que no le toca devolver existencia otra vez.
+  const resultado = await env.DB.prepare(
+    'update ventas set cancelada = 1, cancelada_en = ? where id = ? and cancelada = 0',
+  )
+    .bind(ahora, id)
+    .run();
+
+  if (resultado.meta.changes === 0) {
     return json({ id, cancelada: true, ya_estaba: true });
   }
 
@@ -439,16 +525,16 @@ async function cancelarVenta(id: string, env: Env): Promise<Response> {
     .bind(id)
     .all<{ producto_id: string; cantidad: number }>();
 
-  const ahora = new Date().toISOString();
-  await env.DB.batch([
-    env.DB.prepare('update ventas set cancelada = 1, cancelada_en = ? where id = ?').bind(ahora, id),
-    ...lineas.map((l) =>
-      env.DB.prepare(
-        `update productos set stock = stock + ?, actualizado_en = ?
-         where id = ? and sin_inventario = 0`,
-      ).bind(l.cantidad, ahora, l.producto_id),
-    ),
-  ]);
+  if (lineas.length > 0) {
+    await env.DB.batch(
+      lineas.map((l) =>
+        env.DB.prepare(
+          `update productos set stock = stock + ?, actualizado_en = ?
+           where id = ? and sin_inventario = 0`,
+        ).bind(l.cantidad, ahora, l.producto_id),
+      ),
+    );
+  }
 
   return json({ id, cancelada: true, devuelto: venta.total });
 }
