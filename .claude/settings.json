@@ -1,0 +1,22 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git status:*)",
+      "Bash(git diff:*)",
+      "Bash(git log:*)",
+      "Bash(git branch:*)",
+      "Bash(git fetch:*)",
+      "Bash(git pull --ff-only)",
+      "Bash(npm test:*)",
+      "Bash(npm run typecheck:*)",
+      "Bash(python tools/validate_assets.py:*)"
+    ],
+    "deny": [
+      "Read(app/.dev.vars)",
+      "Read(app/.env*)",
+      "Edit(app/.dev.vars)",
+      "Edit(app/.env*)",
+      "Bash(git push --force:*)"
+    ]
+  }
+}

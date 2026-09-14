@@ -34,6 +34,19 @@ GitHub es la fuente de verdad compartida para Claude, ChatGPT, Agy y cualquier o
 
 El contrato completo está en [AGENTS.md](AGENTS.md) y la arquitectura en [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
+### Claude Code
+
+Claude Code ya puede trabajar desde la raíz del repositorio y carga `CLAUDE.md` automáticamente:
+
+```powershell
+cd "C:\Users\isaac\Claude\Projects\Viste Boutique\El-Dolaron-Social-Kit"
+git pull --ff-only
+claude
+```
+
+Empieza con: `Lee el Issue #<número>, comenta que lo tomas y crea la rama agent/claude/<número>-<slug>.`
+Claude y Codex se coordinan únicamente mediante Issues, ramas y PRs publicados en GitHub.
+
 ## Límites deliberados
 
 Este repositorio no guarda contraseñas, tokens, datos de clientes ni credenciales de redes sociales. Tampoco inventa horarios, dirección, precios, disponibilidad, descuentos o políticas de entrega.
