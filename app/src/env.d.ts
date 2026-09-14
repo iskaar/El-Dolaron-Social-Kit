@@ -4,8 +4,12 @@ declare global {
   interface Env {
     ANTHROPIC_API_KEY: string;
     GEMINI_API_KEY: string;
+    /** Alterno: alguna instancia guarda la llave con este nombre. */
+    GEMINI2_API_KEY?: string;
     /** 'claude' (por defecto) o 'gemini'. Por instancia, en wrangler.jsonc. */
     MODELO_ANALISIS?: string;
+    /** 'si' = buscar el precio en la web en vez de estimarlo de memoria. */
+    BUSQUEDA_WEB?: string;
     /** Hostname que solo sirve la camara. Vacio = una sola puerta, como antes. */
     HOST_VENDEDOR?: string;
   }

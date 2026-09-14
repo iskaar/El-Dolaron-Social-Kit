@@ -22,6 +22,7 @@ interface FilaBorrador {
   estado_fisico: string;
   estado_analisis: string;
   destino: string;
+  stock: number;
   semana_ingreso: string;
   creado_en: string;
 }
@@ -67,6 +68,12 @@ async function leerConfig(env: Env): Promise<Record<string, string>> {
   return Object.fromEntries(results.map((fila) => [fila.clave, fila.valor]));
 }
 
+/** ?buscar=1 fuerza la busqueda web en una pieza; ?buscar=0 la apaga. */
+function busquedaPedida(url: URL): boolean | undefined {
+  const pedido = url.searchParams.get('buscar');
+  return pedido === null ? undefined : pedido === '1';
+}
+
 function modeloPedido(url: URL, env: Env): Modelo {
   const pedido = url.searchParams.get('modelo');
   if (pedido === 'gemini' || pedido === 'claude') {
@@ -83,6 +90,8 @@ async function crearBorrador(request: Request, env: Env, ctx: ExecutionContext, 
   const formulario = await request.formData();
   const id = String(formulario.get('id') ?? '');
   const estadoFisico = String(formulario.get('estado_fisico') ?? 'nuevo');
+  // Muchas piezas vienen repetidas: una foto puede representar varias.
+  const cantidad = Math.min(999, Math.max(1, Math.round(Number(formulario.get('cantidad') ?? 1)) || 1));
   const foto = formulario.get('foto');
 
   if (!UUID.test(id)) {
@@ -103,21 +112,26 @@ async function crearBorrador(request: Request, env: Env, ctx: ExecutionContext, 
     httpMetadata: { contentType: 'image/jpeg' },
   });
 
+  // Cloudflare Access ya identifica a quien sube la foto; se guarda para poder
+  // distinguir lo del vendedor de lo de un desconocido.
+  const capturadoPor = request.headers.get('cf-access-authenticated-user-email') ?? '';
+
   const ahora = new Date();
   await env.DB.prepare(
-    `insert into productos (id, semana_ingreso, estado_fisico, foto_key, creado_en, actualizado_en)
-     values (?, ?, ?, ?, ?, ?)
+    `insert into productos (id, semana_ingreso, estado_fisico, stock, foto_key, capturado_por, creado_en, actualizado_en)
+     values (?, ?, ?, ?, ?, ?, ?, ?)
      on conflict (id) do update set
        estado_fisico = excluded.estado_fisico,
+       stock = excluded.stock,
        foto_key = excluded.foto_key,
        estado_analisis = 'pendiente',
        actualizado_en = excluded.actualizado_en`,
   )
-    .bind(id, semanaIngreso(ahora), estadoFisico, fotoKey, ahora.toISOString(), ahora.toISOString())
+    .bind(id, semanaIngreso(ahora), estadoFisico, cantidad, fotoKey, capturadoPor, ahora.toISOString(), ahora.toISOString())
     .run();
 
   // El analisis corre despues de responder: la camara nunca espera a la IA.
-  ctx.waitUntil(analizarBorrador(id, env, modeloPedido(url, env)));
+  ctx.waitUntil(analizarBorrador(id, env, modeloPedido(url, env), busquedaPedida(url)));
 
   return json({ id, estado_analisis: 'pendiente' }, 201);
 }
@@ -126,7 +140,7 @@ async function listarBorradores(url: URL, env: Env): Promise<Response> {
   const estado = url.searchParams.get('estado');
   // Los botes son productos para la caja, no piezas que revisar.
   const consulta = `select id, nombre, categoria, precio_lista, precio, estado_fisico,
-                           estado_analisis, destino, semana_ingreso, creado_en
+                           estado_analisis, destino, stock, semana_ingreso, capturado_por, creado_en
                     from productos
                     where sin_inventario = 0 ${estado ? 'and estado_analisis = ?' : ''}
                     order by creado_en desc limit 200`;
@@ -149,7 +163,7 @@ async function corregirBorrador(id: string, request: Request, env: Env): Promise
     return json({ error: 'Identificador invalido.' }, 400);
   }
   const fila = await env.DB.prepare(
-    'select nombre, categoria, precio_lista, precio, estado_fisico, destino from productos where id = ?',
+    'select nombre, categoria, precio_lista, precio, estado_fisico, destino, stock from productos where id = ?',
   )
     .bind(id)
     .first<FilaBorrador>();
@@ -162,6 +176,7 @@ async function corregirBorrador(id: string, request: Request, env: Env): Promise
   const categoria = cambios.categoria === undefined ? fila.categoria : String(cambios.categoria);
   const estadoFisico = cambios.estado_fisico === undefined ? fila.estado_fisico : String(cambios.estado_fisico);
   const precioLista = cambios.precio_lista === undefined ? fila.precio_lista : Math.round(Number(cambios.precio_lista));
+  const stock = cambios.stock === undefined ? fila.stock : Math.round(Number(cambios.stock));
 
   if (categoria && !CATEGORIAS.has(categoria)) {
     return json({ error: 'Categoria invalida.' }, 400);
@@ -171,6 +186,9 @@ async function corregirBorrador(id: string, request: Request, env: Env): Promise
   }
   if (!Number.isFinite(precioLista) || precioLista < 0) {
     return json({ error: 'Precio de lista invalido.' }, 400);
+  }
+  if (!Number.isFinite(stock) || stock < 0 || stock > 999) {
+    return json({ error: 'Existencia invalida.' }, 400);
   }
 
   const config = await leerConfig(env);
@@ -204,13 +222,13 @@ async function corregirBorrador(id: string, request: Request, env: Env): Promise
 
   await env.DB.prepare(
     `update productos set nombre = ?, categoria = ?, precio_lista = ?, precio = ?,
-                          estado_fisico = ?, destino = ?, estado_analisis = 'listo', actualizado_en = ?
+                          estado_fisico = ?, destino = ?, stock = ?, estado_analisis = 'listo', actualizado_en = ?
      where id = ?`,
   )
-    .bind(nombre, categoria, precioLista, precio, estadoFisico, destino, new Date().toISOString(), id)
+    .bind(nombre, categoria, precioLista, precio, estadoFisico, destino, stock, new Date().toISOString(), id)
     .run();
 
-  return json({ id, nombre, categoria, precio_lista: precioLista, precio, estado_fisico: estadoFisico, destino });
+  return json({ id, nombre, categoria, precio_lista: precioLista, precio, estado_fisico: estadoFisico, destino, stock });
 }
 
 /**
@@ -237,13 +255,45 @@ async function prepararEtiquetas(request: Request, env: Env): Promise<Response> 
     .run();
 
   const { results } = await env.DB.prepare(
-    `select id, codigo, nombre, precio, precio_lista, semana_ingreso, destino
+    `select id, codigo, nombre, precio, precio_lista, semana_ingreso, destino, stock
      from productos where id in (${huecos}) order by rowid`,
   )
     .bind(...limpios)
     .all();
 
   return json(results);
+}
+
+/**
+ * Dos fotos de la misma pieza. La repetida suma su existencia a la que ya estaba
+ * y desaparece; la original se queda con su codigo de barras, porque la etiqueta
+ * que ya salio impresa sigue pegada en el anaquel.
+ */
+async function fusionarBorrador(id: string, request: Request, env: Env): Promise<Response> {
+  const { destino_id } = (await request.json()) as { destino_id?: unknown };
+  const destinoId = String(destino_id ?? '');
+  if (!UUID.test(id) || !UUID.test(destinoId) || id === destinoId) {
+    return json({ error: 'Identificador invalido.' }, 400);
+  }
+
+  const repetida = await env.DB.prepare('select stock from productos where id = ?')
+    .bind(id)
+    .first<{ stock: number }>();
+  const original = await env.DB.prepare('select stock from productos where id = ?')
+    .bind(destinoId)
+    .first<{ stock: number }>();
+  if (!repetida || !original) {
+    return json({ error: 'La pieza no existe.' }, 404);
+  }
+
+  await env.DB.batch([
+    env.DB.prepare('update productos set stock = stock + ?, actualizado_en = ? where id = ?')
+      .bind(repetida.stock, new Date().toISOString(), destinoId),
+    env.DB.prepare('delete from productos where id = ?').bind(id),
+  ]);
+  await env.FOTOS.delete(`fotos/${id}.jpg`);
+
+  return json({ id, destino_id: destinoId, stock: original.stock + repetida.stock });
 }
 
 async function descartarBorrador(id: string, env: Env): Promise<Response> {
@@ -532,6 +582,11 @@ export default {
         return json({ error: 'Metodo no permitido.' }, 405);
       }
 
+      const fusion = pathname.match(/^\/api\/borradores\/([^/]+)\/fusionar$/);
+      if (fusion && request.method === 'POST') {
+        return await fusionarBorrador(fusion[1], request, env);
+      }
+
       // Reintento manual, y la via para la prueba comparativa: ?modelo=gemini
       const reintento = pathname.match(/^\/api\/borradores\/([^/]+)\/analizar$/);
       if (reintento && request.method === 'POST') {
@@ -539,7 +594,7 @@ export default {
           return json({ error: 'Identificador invalido.' }, 400);
         }
         const modelo = modeloPedido(url, env);
-        ctx.waitUntil(analizarBorrador(reintento[1], env, modelo));
+        ctx.waitUntil(analizarBorrador(reintento[1], env, modelo, busquedaPedida(url)));
         return json({ id: reintento[1], modelo, estado_analisis: 'pendiente' }, 202);
       }
 
