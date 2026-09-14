@@ -46,6 +46,10 @@
   #cancelar { width: 100%; margin-top: 8px; padding: 10px; font-size: 14px; border: 1px solid var(--rojo);
     background: #fff; color: var(--rojo); border-radius: 10px; cursor: pointer; }
   #aviso { min-height: 20px; font-size: 14px; margin-top: 8px; }
+  #rechazadas:not(:empty) { margin-top: 8px; }
+  #rechazadas .ticket { border: 1px solid var(--rojo); border-radius: 8px; padding: 8px;
+    margin-bottom: 6px; font-size: 13px; color: var(--rojo); }
+  #rechazadas .ticket button { margin-left: 6px; }
   #pie { padding: 8px 18px 14px; font-size: 13px; color: #5b6478; display: flex; gap: 18px; flex-wrap: wrap; }
   #tickets { margin-top: 14px; border-top: 1px solid var(--linea); padding-top: 10px; }
   #tickets summary { font-size: 13px; color: #5b6478; cursor: pointer; }
@@ -95,6 +99,7 @@
     <button id="cobrar" type="button" disabled>Cobrar</button>
     <button id="cancelar" type="button">Cancelar venta</button>
     <div id="aviso"></div>
+    <div id="rechazadas"></div>
 
     <details id="tickets">
       <summary>Ventas de hoy</summary>
@@ -110,13 +115,18 @@
 </footer>
 
 <script type="module">
-import { totales, agregar } from '/venta.js';
+import { totales, agregar, efectivoAlcanza } from '/venta.js';
 
 const $ = (id) => document.getElementById(id);
 const pesos = (centavos) => `$${(centavos / 100).toLocaleString('es-MX')}`;
 
 let catalogo = new Map();
 let lineas = [];
+// Un solo id por ticket: doble clic en Cobrar, o un reintento tras un fallo de
+// red, reusan el mismo id en vez de crear una segunda venta. Cambiar el ticket
+// (agregar, quitar, cancelar) lo invalida: eso ya es una venta distinta.
+let idVenta = null;
+let cobrando = false;
 
 /* ---------- almacen local: catalogo y ventas encoladas ---------- */
 
@@ -214,6 +224,7 @@ function agregarCodigo(codigo) {
   lineas = agregar(lineas, {
     codigo: pieza.codigo, nombre: pieza.nombre, precio: pieza.precio, producto_id: pieza.id,
   });
+  idVenta = null;
   $('aviso').textContent = '';
   pintar();
 }
@@ -221,43 +232,52 @@ function agregarCodigo(codigo) {
 /* ---------- cobro: primero al disco, luego a la red ---------- */
 
 async function cobrar() {
+  if (cobrando) return;                 // doble clic: el primero ya va en camino
   const efectivo = Math.round(Number($('efectivo').value || 0) * 100);
   const forma = $('forma').value;
   const t = totales(lineas, efectivo);
-  if (forma === 'efectivo' && efectivo > 0 && t.falta > 0) {
-    $('aviso').textContent = `Faltan ${pesos(t.falta)}`;
+  if (!efectivoAlcanza({ formaPago: forma, total: t.total, efectivo })) {
+    $('aviso').textContent = efectivo === 0 ? 'Falta el efectivo recibido.' : `Faltan ${pesos(t.falta)}`;
     $('aviso').style.color = '#D72B32';
     return;
   }
 
-  const venta = {
-    id: crypto.randomUUID(),
-    lineas: lineas.map(({ codigo, nombre, precio, cantidad, producto_id }) =>
-      ({ codigo, nombre, precio, cantidad, producto_id })),
-    forma_pago: forma,
-    efectivo: forma === 'efectivo' ? efectivo : 0,
-    creado_en: new Date().toISOString(),
-  };
-  await store('ventas', 'readwrite', (s) => s.put(venta));   // el ticket existe aunque no haya red
+  cobrando = true;
+  $('cobrar').disabled = true;
+  try {
+    idVenta ??= crypto.randomUUID();
+    const venta = {
+      id: idVenta,
+      lineas: lineas.map(({ codigo, nombre, precio, cantidad, producto_id }) =>
+        ({ codigo, nombre, precio, cantidad, producto_id })),
+      forma_pago: forma,
+      efectivo: forma === 'efectivo' ? efectivo : 0,
+      creado_en: new Date().toISOString(),
+    };
+    await store('ventas', 'readwrite', (s) => s.put(venta));   // el ticket existe aunque no haya red
 
-  // Bajar existencias en la copia local: sin esto, la misma etiqueta se podria
-  // volver a cobrar mientras no haya red para refrescar el catalogo.
-  for (const l of venta.lineas) {
-    const pieza = catalogo.get(l.codigo);
-    if (pieza && !pieza.sin_inventario) {
-      pieza.stock = Math.max(0, pieza.stock - l.cantidad);
+    // Bajar existencias en la copia local: sin esto, la misma etiqueta se podria
+    // volver a cobrar mientras no haya red para refrescar el catalogo.
+    for (const l of venta.lineas) {
+      const pieza = catalogo.get(l.codigo);
+      if (pieza && !pieza.sin_inventario) {
+        pieza.stock = Math.max(0, pieza.stock - l.cantidad);
+      }
     }
-  }
-  await store('catalogo', 'readwrite', (s) => s.put({ clave: 'piezas', datos: [...catalogo.values()], fecha: Date.now() }));
+    await store('catalogo', 'readwrite', (s) => s.put({ clave: 'piezas', datos: [...catalogo.values()], fecha: Date.now() }));
 
-  $('aviso').textContent = forma === 'efectivo' && efectivo > 0
-    ? `Cobrado. Cambio ${pesos(t.cambio)}` : 'Cobrado.';
-  $('aviso').style.color = '#1f7a4d';
-  lineas = [];
-  $('efectivo').value = '';
-  pintar();
-  $('codigo').focus();
-  sincronizar();
+    $('aviso').textContent = forma === 'efectivo' && efectivo > 0
+      ? `Cobrado. Cambio ${pesos(t.cambio)}` : 'Cobrado.';
+    $('aviso').style.color = '#1f7a4d';
+    lineas = [];
+    idVenta = null;
+    $('efectivo').value = '';
+    $('codigo').focus();
+    sincronizar();
+  } finally {
+    cobrando = false;
+    pintar();
+  }
 }
 
 let sincronizando = false;
@@ -265,7 +285,8 @@ async function sincronizar() {
   if (sincronizando) return;
   sincronizando = true;
   try {
-    const cola = await store('ventas', 'readonly', (s) => s.getAll());
+    const cola = (await store('ventas', 'readonly', (s) => s.getAll()))
+      .filter((v) => v.estado !== 'rechazada');   // esas ya no se reenvian solas
     for (const venta of cola) {
       let respuesta;
       try {
@@ -276,19 +297,57 @@ async function sincronizar() {
         break;                                   // sin red: la venta se queda encolada
       }
       if (respuesta.status >= 500) break;
+      if (respuesta.status >= 400) {
+        // El servidor la rechazo (precio, existencia, efectivo insuficiente...):
+        // se queda visible con su motivo, no desaparece como si se hubiera cobrado.
+        const cuerpo = await respuesta.json().catch(() => ({}));
+        await store('ventas', 'readwrite', (s) => s.put({
+          ...venta, estado: 'rechazada', motivo: cuerpo.error ?? 'El servidor rechazo la venta.',
+        }));
+        continue;
+      }
       await store('ventas', 'readwrite', (s) => s.delete(venta.id));
     }
   } finally {
     sincronizando = false;
     await pendientes();
+    await pintarRechazadas();
     await actualizarCorte();
   }
 }
 
 async function pendientes() {
   const cola = await store('ventas', 'readonly', (s) => s.getAll());
-  $('pendientes').textContent = cola.length ? `${cola.length} ventas por sincronizar` : '';
+  const porSincronizar = cola.filter((v) => v.estado !== 'rechazada');
+  $('pendientes').textContent = porSincronizar.length ? `${porSincronizar.length} ventas por sincronizar` : '';
 }
+
+/** Ventas que el servidor rechazo: visibles con su motivo, y recuperables a mano. */
+async function pintarRechazadas() {
+  const rechazadas = (await store('ventas', 'readonly', (s) => s.getAll()))
+    .filter((v) => v.estado === 'rechazada');
+  $('rechazadas').innerHTML = rechazadas.map((v) => `
+    <div class="ticket">
+      <div><b>${pesos(totales(v.lineas).total)}</b> rechazada — ${v.motivo}</div>
+      <div>
+        <button type="button" data-reintentar="${v.id}">Reintentar</button>
+        <button type="button" data-descartar="${v.id}">Descartar</button>
+      </div>
+    </div>`).join('');
+}
+$('rechazadas').addEventListener('click', async (e) => {
+  const reintentar = e.target.dataset?.reintentar;
+  const descartar = e.target.dataset?.descartar;
+  if (reintentar) {
+    const venta = await store('ventas', 'readonly', (s) => s.get(reintentar));
+    await store('ventas', 'readwrite', (s) => s.put({ ...venta, estado: undefined, motivo: undefined }));
+    await pintarRechazadas();
+    sincronizar();
+  } else if (descartar) {
+    await store('ventas', 'readwrite', (s) => s.delete(descartar));
+    await pintarRechazadas();
+  }
+});
 
 /** Devoluciones y errores de cobro. Necesita red: deshacer no puede quedar encolado. */
 async function cargarTickets() {
@@ -351,13 +410,14 @@ $('ticket').addEventListener('click', (e) => {
   const linea = lineas[Number(i)];
   if (linea.cantidad > 1) linea.cantidad -= 1;
   else lineas.splice(Number(i), 1);
+  idVenta = null;
   pintar();
 });
 $('efectivo').addEventListener('input', pintar);
 $('forma').addEventListener('change', pintar);
 $('cobrar').addEventListener('click', cobrar);
 $('cancelar').addEventListener('click', () => {
-  lineas = []; $('efectivo').value = ''; $('aviso').textContent = 'Venta cancelada';
+  lineas = []; idVenta = null; $('efectivo').value = ''; $('aviso').textContent = 'Venta cancelada';
   $('aviso').style.color = '#5b6478'; pintar(); $('codigo').focus();
 });
 
@@ -372,6 +432,7 @@ setInterval(sincronizar, 30000);
 pintarRed();
 await cargarCatalogo();
 pintar();
+await pintarRechazadas();
 await sincronizar();
 $('codigo').focus();
 </script>

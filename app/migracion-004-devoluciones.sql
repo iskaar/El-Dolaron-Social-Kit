@@ -2,6 +2,10 @@
 -- La venta no se borra. Se marca, para que el corte del dia siga explicando
 -- todo lo que paso en la caja, incluido lo que se deshizo.
 --
+-- Va justo despues de migracion-003, en una instalacion nueva o existente: la
+-- tabla `ventas` de esa migracion ya no trae estas columnas, para no chocar
+-- con este `alter table`.
+--
 -- Correr una vez:
 --   npx wrangler d1 execute el-dolaron --remote --file=migracion-004-devoluciones.sql
 alter table ventas add column cancelada integer not null default 0;
