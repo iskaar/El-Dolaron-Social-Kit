@@ -116,11 +116,14 @@ async function cargar() {
 
 function etiqueta(p) {
   const antes = p.precio_lista > p.precio ? `<span class="antes">${pesos(p.precio_lista)}</span>` : '';
-  // Modulo de 0.25 mm = exactamente 2 puntos a los 203 dpi de la TLP 2844.
-  // Un modulo que no cae en puntos enteros sale con barras de ancho desparejo
-  // y el lector deja de leerlo: aqui la aritmetica de la impresora manda.
-  // La semana baja a la linea del codigo: sigue impresa —de ella dependen las
-  // rebajas por antiguedad— pero el lugar de arriba lo ocupa la D.
+  // El codigo completo (ED-000123, 9 caracteres) no cabe legible en 57 mm: contra
+  // el lector real, modulo 0.25 mm (2 puntos) no sonaba, 0.375 sonaba a veces y
+  // 0.5 mm (4 puntos) sono siempre. Pero 0.5 mm con los 9 caracteres pediria 77 mm.
+  // La barra codifica solo el numero, sin "ED-" ni ceros (p.ej. "123"): cabe con
+  // margen hasta unos 4-5 digitos (miles de piezas). El texto impreso sigue
+  // mostrando el codigo completo; buscarPieza() en caja.html reconstruye "ED-000123"
+  // a partir del numero que entrega el lector.
+  const numero = String(Number(p.codigo.slice(3)));
   return `<div class="etiqueta">
     <div class="arriba">
       <div class="nombre">${escapar(p.nombre || 'El Dolarón')}</div>
@@ -128,7 +131,7 @@ function etiqueta(p) {
     </div>
     <div class="precios"><span class="ahora">${pesos(p.precio)}</span>${antes}</div>
     <div class="pie">
-      ${svgCode128(p.codigo, { modulo: 0.25, alto: 7 })}<div class="codigo">${p.codigo} · ${p.semana_ingreso}</div>
+      ${svgCode128(numero, { modulo: 0.5, alto: 7 })}<div class="codigo">${p.codigo} · ${p.semana_ingreso}</div>
     </div>
   </div>`;
 }
