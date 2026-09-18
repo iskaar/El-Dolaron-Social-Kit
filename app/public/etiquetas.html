@@ -70,6 +70,7 @@
   <div class="barra">
     <button id="imprimir" type="button">Imprimir seleccionadas</button>
     <button id="todas" class="claro" type="button">Seleccionar todas</button>
+    <button id="ninguna" class="claro" type="button">Deseleccionar todas</button>
     <span id="resumen"></span>
   </div>
 
@@ -134,9 +135,10 @@ function etiqueta(p) {
 }
 
 document.getElementById('todas').addEventListener('click', () => {
-  const casillas = [...lista.querySelectorAll('input')];
-  const marcar = !casillas.every((c) => c.checked);
-  casillas.forEach((c) => { c.checked = marcar; });
+  lista.querySelectorAll('input').forEach((c) => { c.checked = true; });
+});
+document.getElementById('ninguna').addEventListener('click', () => {
+  lista.querySelectorAll('input').forEach((c) => { c.checked = false; });
 });
 
 document.getElementById('imprimir').addEventListener('click', async () => {
