@@ -198,8 +198,21 @@ function pintar() {
   }
 }
 
+/**
+ * La etiqueta impresa codifica solo el numero (ver etiquetas.html: "123", no
+ * "ED-000123") porque el codigo completo no cabe legible en 57 mm a un modulo
+ * que el lector realmente sonara. El catalogo sigue guardando el codigo
+ * completo, asi que un numero suelto se reconstruye antes de buscar.
+ */
+function buscarPieza(codigo) {
+  const limpio = codigo.trim().toUpperCase();
+  if (catalogo.has(limpio)) return catalogo.get(limpio);
+  if (/^\d+$/.test(limpio)) return catalogo.get(`ED-${limpio.padStart(6, '0')}`);
+  return undefined;
+}
+
 function agregarCodigo(codigo) {
-  const pieza = catalogo.get(codigo.trim().toUpperCase());
+  const pieza = buscarPieza(codigo);
   if (!pieza) {
     $('aviso').textContent = `Código no encontrado: ${codigo}`;
     $('aviso').style.color = '#D72B32';
