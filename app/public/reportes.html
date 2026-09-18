@@ -1,0 +1,193 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>El Dolarón — reportes</title>
+<style>
+  :root { --azul:#16366B; --rojo:#D72B32; --verde:#1f7a4d; --linea:#dfe3ea; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: #f4f6f9; color: #1a1f2b;
+    font-family: system-ui, -apple-system, sans-serif; }
+  header { background: var(--azul); color: #fff; padding: 14px 20px;
+    display: flex; gap: 16px; align-items: center; flex-wrap: wrap; }
+  header h1 { font-size: 18px; margin: 0; flex: 1; }
+  header a, header button { color: #FFD447; background: none; border: 0; font-size: 14px; cursor: pointer; }
+  main { padding: 20px; max-width: 1000px; margin: 0 auto; display: grid; gap: 16px; }
+  .barra-rango { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .barra-rango button { border: 1px solid var(--linea); background: #fff; color: #1a1f2b;
+    border-radius: 999px; padding: 6px 14px; font-size: 13px; cursor: pointer; }
+  .barra-rango button.activo { background: var(--azul); color: #fff; border-color: var(--azul); }
+  .tarjetas { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; }
+  .tarjeta { background: #fff; border: 1px solid var(--linea); border-radius: 12px; padding: 14px 16px; }
+  .tarjeta .etiqueta { font-size: 12px; color: #5b6478; }
+  .tarjeta .valor { font-size: 24px; font-weight: 800; color: var(--azul); margin-top: 2px; }
+  .panel { background: #fff; border: 1px solid var(--linea); border-radius: 12px; padding: 16px; }
+  .panel h2 { font-size: 15px; margin: 0 0 12px; color: var(--azul); }
+  .dos-columnas { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  @media (max-width: 640px) { .dos-columnas { grid-template-columns: 1fr; } }
+  .renglon-barra { display: grid; grid-template-columns: 110px 1fr 90px; gap: 10px; align-items: center;
+    padding: 6px 0; font-size: 13px; }
+  .renglon-barra .pista { background: #eef1f6; border-radius: 999px; height: 14px; overflow: hidden; }
+  .renglon-barra .pista > div { background: var(--azul); height: 100%; border-radius: 999px; }
+  .renglon-barra .importe { text-align: right; font-variant-numeric: tabular-nums; font-weight: 600; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--linea); }
+  th { color: #5b6478; font-weight: 600; font-size: 12px; }
+  td.num { text-align: right; font-variant-numeric: tabular-nums; }
+  .vacio { color: #5b6478; font-size: 13px; padding: 8px 0; }
+  .exportar { display: flex; gap: 10px; flex-wrap: wrap; }
+  .exportar a { display: inline-block; border: 1px solid var(--linea); background: #fff; color: #1a1f2b;
+    border-radius: 8px; padding: 9px 14px; font-size: 13px; text-decoration: none; font-weight: 600; }
+  .nota { font-size: 12px; color: #5b6478; margin-top: 8px; line-height: 1.4; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Reportes</h1>
+  <a href="/admin">← Cola de revisión</a>
+  <a href="/caja">Caja →</a>
+</header>
+
+<main>
+  <div class="barra-rango" id="rango"></div>
+
+  <div class="tarjetas">
+    <div class="tarjeta"><div class="etiqueta">Ventas</div><div class="valor" id="t-ventas">—</div></div>
+    <div class="tarjeta"><div class="etiqueta">Total</div><div class="valor" id="t-total">—</div></div>
+    <div class="tarjeta"><div class="etiqueta">Piezas vendidas</div><div class="valor" id="t-piezas">—</div></div>
+    <div class="tarjeta"><div class="etiqueta">Ticket promedio</div><div class="valor" id="t-promedio">—</div></div>
+  </div>
+
+  <div class="panel">
+    <h2>Ventas por día</h2>
+    <div id="por-dia"></div>
+  </div>
+
+  <div class="dos-columnas">
+    <div class="panel">
+      <h2>Ventas por categoría</h2>
+      <div id="por-categoria"></div>
+    </div>
+    <div class="panel">
+      <h2>Forma de pago</h2>
+      <div id="por-forma-pago"></div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <h2>Piezas más vendidas</h2>
+    <div id="top-productos"></div>
+  </div>
+
+  <div class="dos-columnas">
+    <div class="panel">
+      <h2>Precio sugerido vs. precio final</h2>
+      <div id="precio-sugerido"></div>
+      <p class="nota">Qué tan lejos anda la IA del precio que de verdad se cobra. Sirve para
+        ajustar los porcentajes de la configuración con datos, no a ojo.</p>
+    </div>
+    <div class="panel">
+      <h2>Días en venta por categoría</h2>
+      <div id="dias-en-venta"></div>
+      <p class="nota">Días entre la captura y la venta. No incluye bins: no son piezas
+        individuales con fecha de captura propia.</p>
+    </div>
+  </div>
+
+  <div class="panel">
+    <h2>Exportar</h2>
+    <div class="exportar">
+      <a href="/api/reportes/ventas.csv">Exportar ventas (CSV)</a>
+      <a href="/api/reportes/inventario.csv">Exportar inventario (CSV)</a>
+    </div>
+  </div>
+</main>
+
+<script type="module">
+const $ = (id) => document.getElementById(id);
+const pesos = (centavos) => `$${Math.round(centavos / 100).toLocaleString('es-MX')}`;
+const RANGOS = [7, 30, 90, 365];
+let diasActual = 30;
+
+function barra(nombre, valor, maximo, formato) {
+  const ancho = maximo > 0 ? Math.max(2, Math.round((valor / maximo) * 100)) : 0;
+  return `<div class="renglon-barra">
+    <div>${nombre}</div>
+    <div class="pista"><div style="width:${ancho}%"></div></div>
+    <div class="importe">${formato(valor)}</div>
+  </div>`;
+}
+
+function pintarRango() {
+  $('rango').innerHTML = RANGOS.map((d) =>
+    `<button type="button" data-dias="${d}" class="${d === diasActual ? 'activo' : ''}">${d} días</button>`,
+  ).join('');
+}
+
+async function cargar() {
+  const r = await (await fetch(`/api/reportes?dias=${diasActual}`)).json();
+
+  $('t-ventas').textContent = r.resumen.ventas;
+  $('t-total').textContent = pesos(r.resumen.total);
+  $('t-piezas').textContent = r.resumen.piezas;
+  $('t-promedio').textContent = pesos(r.resumen.ticket_promedio);
+
+  $('por-dia').innerHTML = r.por_dia.length === 0
+    ? '<div class="vacio">Sin ventas en este rango.</div>'
+    : (() => {
+        const maximo = Math.max(...r.por_dia.map((f) => f.total));
+        return r.por_dia.map((f) => barra(f.dia.slice(5), f.total, maximo, pesos)).join('');
+      })();
+
+  $('por-categoria').innerHTML = r.por_categoria.length === 0
+    ? '<div class="vacio">Sin ventas en este rango.</div>'
+    : (() => {
+        const maximo = Math.max(...r.por_categoria.map((f) => f.total));
+        return r.por_categoria.map((f) => barra(f.categoria, f.total, maximo, pesos)).join('');
+      })();
+
+  $('por-forma-pago').innerHTML = r.por_forma_pago.length === 0
+    ? '<div class="vacio">Sin ventas en este rango.</div>'
+    : (() => {
+        const maximo = Math.max(...r.por_forma_pago.map((f) => f.total));
+        return r.por_forma_pago.map((f) => barra(f.forma_pago, f.total, maximo, pesos)).join('');
+      })();
+
+  $('top-productos').innerHTML = r.top_productos.length === 0
+    ? '<div class="vacio">Sin ventas en este rango.</div>'
+    : `<table><thead><tr><th>Código</th><th>Nombre</th><th class="num">Piezas</th><th class="num">Importe</th></tr></thead>
+       <tbody>${r.top_productos.map((p) => `
+         <tr><td>${p.codigo}</td><td>${p.nombre}</td><td class="num">${p.cantidad}</td><td class="num">${pesos(p.total)}</td></tr>
+       `).join('')}</tbody></table>`;
+
+  $('precio-sugerido').innerHTML = r.precio_sugerido.n === 0
+    ? '<div class="vacio">Todavía no hay piezas con precio sugerido y precio final.</div>'
+    : (() => {
+        const pct = r.precio_sugerido.promedio_pct;
+        const signo = pct > 0 ? '+' : '';
+        return `<div class="valor" style="font-size:28px;color:${pct < 0 ? 'var(--rojo)' : 'var(--verde)'}">${signo}${pct.toFixed(1)}%</div>
+          <div class="etiqueta">sobre ${r.precio_sugerido.n} piezas · ${pct < 0 ? 'se cobra menos de lo que sugirió la IA' : 'se cobra más de lo que sugirió la IA'}</div>`;
+      })();
+
+  $('dias-en-venta').innerHTML = r.dias_en_venta_por_categoria.length === 0
+    ? '<div class="vacio">Todavía no hay piezas vendidas para medir esto.</div>'
+    : `<table><thead><tr><th>Categoría</th><th class="num">Días promedio</th><th class="num">Piezas</th></tr></thead>
+       <tbody>${r.dias_en_venta_por_categoria.map((f) => `
+         <tr><td>${f.categoria}</td><td class="num">${f.dias_promedio.toFixed(1)}</td><td class="num">${f.n}</td></tr>
+       `).join('')}</tbody></table>`;
+}
+
+$('rango').addEventListener('click', (e) => {
+  const dias = e.target.dataset?.dias;
+  if (!dias) return;
+  diasActual = Number(dias);
+  pintarRango();
+  cargar();
+});
+
+pintarRango();
+await cargar();
+</script>
+</body>
+</html>

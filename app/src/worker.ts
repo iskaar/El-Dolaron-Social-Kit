@@ -580,6 +580,169 @@ async function corte(url: URL, env: Env): Promise<Response> {
   });
 }
 
+/**
+ * Reportes: todo sale de consultas contra D1 en el momento, nada se precalcula
+ * ni vive en otra tabla. `dias` acota lo que tiene sentido por rango (ventas del
+ * dia, categoria, top de piezas); precio sugerido y dias en venta son de
+ * siempre, porque son pocos datos y la pregunta que responden no es "esta
+ * semana" sino "en general".
+ */
+async function reportes(url: URL, env: Env): Promise<Response> {
+  const dias = Math.min(365, Math.max(1, Math.round(Number(url.searchParams.get('dias') ?? 30))));
+  const desde = new Date(Date.now() - dias * 86400000).toISOString();
+
+  const resumen = await env.DB.prepare(
+    `select count(*) as ventas, coalesce(sum(total), 0) as total,
+       (select coalesce(sum(l.cantidad), 0) from venta_lineas l join ventas v on v.id = l.venta_id
+        where v.cancelada = 0 and v.creado_en >= ?) as piezas
+     from ventas where cancelada = 0 and creado_en >= ?`,
+  )
+    .bind(desde, desde)
+    .first<{ ventas: number; total: number; piezas: number }>();
+
+  const { results: porFormaPago } = await env.DB.prepare(
+    `select forma_pago, count(*) as tickets, sum(total) as total
+     from ventas where cancelada = 0 and creado_en >= ? group by forma_pago`,
+  )
+    .bind(desde)
+    .all<{ forma_pago: string; tickets: number; total: number }>();
+
+  const { results: ventasPorDia } = await env.DB.prepare(
+    `select substr(creado_en, 1, 10) as dia, count(*) as tickets, sum(total) as total
+     from ventas where cancelada = 0 and creado_en >= ? group by dia order by dia`,
+  )
+    .bind(desde)
+    .all<{ dia: string; tickets: number; total: number }>();
+  const { results: piezasPorDia } = await env.DB.prepare(
+    `select substr(v.creado_en, 1, 10) as dia, coalesce(sum(l.cantidad), 0) as piezas
+     from venta_lineas l join ventas v on v.id = l.venta_id
+     where v.cancelada = 0 and v.creado_en >= ? group by dia`,
+  )
+    .bind(desde)
+    .all<{ dia: string; piezas: number }>();
+  const piezasPorDiaMapa = new Map(piezasPorDia.map((f) => [f.dia, f.piezas]));
+  const porDia = ventasPorDia.map((f) => ({ ...f, piezas: piezasPorDiaMapa.get(f.dia) ?? 0 }));
+
+  const { results: porCategoria } = await env.DB.prepare(
+    `select case when p.sin_inventario = 1 then 'bins' else coalesce(p.categoria, 'sin categoria') end as categoria,
+       coalesce(sum(l.precio * l.cantidad), 0) as total, coalesce(sum(l.cantidad), 0) as piezas
+     from venta_lineas l join ventas v on v.id = l.venta_id left join productos p on p.id = l.producto_id
+     where v.cancelada = 0 and v.creado_en >= ?
+     group by categoria order by total desc`,
+  )
+    .bind(desde)
+    .all<{ categoria: string; total: number; piezas: number }>();
+
+  const { results: topProductos } = await env.DB.prepare(
+    `select l.codigo, l.nombre, sum(l.cantidad) as cantidad, sum(l.precio * l.cantidad) as total
+     from venta_lineas l join ventas v on v.id = l.venta_id
+     where v.cancelada = 0 and v.creado_en >= ? and l.producto_id is not null
+     group by l.codigo, l.nombre order by cantidad desc, total desc limit 10`,
+  )
+    .bind(desde)
+    .all<{ codigo: string; nombre: string; cantidad: number; total: number }>();
+
+  // Cuanto se aleja lo que de verdad se cobra de lo que propuso la IA: la razon
+  // por la que existe precio_sugerido (migracion 002) es poder responder esto
+  // con datos en vez de ajustar los porcentajes a ojo.
+  const precioSugerido = await env.DB.prepare(
+    `select count(*) as n, avg((precio - precio_sugerido) * 100.0 / precio_sugerido) as promedio_pct
+     from productos where precio_sugerido > 0 and precio > 0`,
+  ).first<{ n: number; promedio_pct: number | null }>();
+
+  // Diferido a proposito en CONTRATO-ESCANER.md hasta que hubiera ventas reales.
+  const { results: diasEnVenta } = await env.DB.prepare(
+    `select coalesce(p.categoria, 'sin categoria') as categoria,
+       avg(julianday(substr(v.creado_en, 1, 10)) - julianday(substr(p.creado_en, 1, 10))) as dias_promedio,
+       count(*) as n
+     from venta_lineas l join ventas v on v.id = l.venta_id join productos p on p.id = l.producto_id
+     where v.cancelada = 0 and p.sin_inventario = 0
+     group by categoria order by dias_promedio desc`,
+  ).all<{ categoria: string; dias_promedio: number; n: number }>();
+
+  return json({
+    dias,
+    resumen: {
+      ventas: resumen?.ventas ?? 0,
+      total: resumen?.total ?? 0,
+      piezas: resumen?.piezas ?? 0,
+      ticket_promedio: resumen?.ventas ? Math.round((resumen.total ?? 0) / resumen.ventas) : 0,
+    },
+    por_forma_pago: porFormaPago,
+    por_dia: porDia,
+    por_categoria: porCategoria,
+    top_productos: topProductos,
+    precio_sugerido: { n: precioSugerido?.n ?? 0, promedio_pct: precioSugerido?.promedio_pct ?? null },
+    dias_en_venta_por_categoria: diasEnVenta,
+  });
+}
+
+/** Una celda de CSV: entre comillas si trae coma, comilla o salto de linea. */
+function celdaCsv(valor: unknown): string {
+  const texto = String(valor ?? '');
+  return /[",\n]/.test(texto) ? `"${texto.replace(/"/g, '""')}"` : texto;
+}
+
+function respuestaCsv(nombreArchivo: string, encabezados: string[], filas: unknown[][]): Response {
+  // BOM: sin el, Excel abre los acentos rotos.
+  const texto = '﻿' + [encabezados, ...filas].map((fila) => fila.map(celdaCsv).join(',')).join('\r\n');
+  return new Response(texto, {
+    headers: {
+      'content-type': 'text/csv; charset=utf-8',
+      'content-disposition': `attachment; filename="${nombreArchivo}"`,
+    },
+  });
+}
+
+const pesosDe = (centavos: number) => (centavos / 100).toFixed(2);
+
+/** Un renglon por linea de venta: es el ledger completo, para lo que ningun dashboard cubre. */
+async function exportarVentasCsv(env: Env): Promise<Response> {
+  const { results } = await env.DB.prepare(
+    `select v.creado_en, v.forma_pago, v.cancelada, l.codigo, coalesce(p.categoria, '') as categoria,
+            l.nombre, l.precio, l.cantidad
+     from venta_lineas l join ventas v on v.id = l.venta_id left join productos p on p.id = l.producto_id
+     order by v.creado_en`,
+  ).all<{
+    creado_en: string; forma_pago: string; cancelada: number; codigo: string;
+    categoria: string; nombre: string; precio: number; cantidad: number;
+  }>();
+
+  const filas = results.map((f) => [
+    f.creado_en, f.forma_pago, f.cancelada ? 'si' : 'no', f.codigo, f.categoria, f.nombre,
+    pesosDe(f.precio), f.cantidad, pesosDe(f.precio * f.cantidad),
+  ]);
+  return respuestaCsv(
+    'ventas.csv',
+    ['fecha', 'forma_pago', 'cancelada', 'codigo', 'categoria', 'nombre', 'precio', 'cantidad', 'importe'],
+    filas,
+  );
+}
+
+async function exportarInventarioCsv(env: Env): Promise<Response> {
+  const { results } = await env.DB.prepare(
+    `select codigo, nombre, categoria, precio_lista, precio, precio_sugerido, estado_fisico,
+            estado_analisis, destino, stock, sin_inventario, semana_ingreso, capturado_por, creado_en
+     from productos order by creado_en`,
+  ).all<{
+    codigo: string; nombre: string; categoria: string; precio_lista: number; precio: number;
+    precio_sugerido: number; estado_fisico: string; estado_analisis: string; destino: string;
+    stock: number; sin_inventario: number; semana_ingreso: string; capturado_por: string; creado_en: string;
+  }>();
+
+  const filas = results.map((f) => [
+    f.codigo ?? '', f.nombre, f.categoria, pesosDe(f.precio_lista), pesosDe(f.precio),
+    f.precio_sugerido ? pesosDe(f.precio_sugerido) : '', f.estado_fisico, f.estado_analisis, f.destino,
+    f.sin_inventario ? '' : f.stock, f.semana_ingreso, f.capturado_por, f.creado_en,
+  ]);
+  return respuestaCsv(
+    'inventario.csv',
+    ['codigo', 'nombre', 'categoria', 'precio_lista', 'precio', 'precio_sugerido', 'estado_fisico',
+      'estado_analisis', 'destino', 'stock', 'semana_ingreso', 'capturado_por', 'creado_en'],
+    filas,
+  );
+}
+
 async function servirFoto(id: string, env: Env): Promise<Response> {
   if (!UUID.test(id)) {
     return json({ error: 'Identificador invalido.' }, 400);
@@ -651,6 +814,16 @@ export default {
       const cancelacion = pathname.match(/^\/api\/ventas\/([^/]+)\/cancelar$/);
       if (cancelacion && request.method === 'POST') {
         return await cancelarVenta(cancelacion[1], env);
+      }
+
+      if (pathname === '/api/reportes') {
+        return await reportes(url, env);
+      }
+      if (pathname === '/api/reportes/ventas.csv') {
+        return await exportarVentasCsv(env);
+      }
+      if (pathname === '/api/reportes/inventario.csv') {
+        return await exportarInventarioCsv(env);
       }
 
       if (pathname === '/api/etiquetas' && request.method === 'POST') {
