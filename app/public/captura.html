@@ -2,13 +2,15 @@
 <html lang="es">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
 <title>El Dolarón — captura</title>
 <style>
   :root { --azul:#16366B; --rojo:#D72B32; --amarillo:#FFD447; }
   * { box-sizing: border-box; }
   html, body { height: 100%; margin: 0; background: #000; color: #fff;
-    font-family: system-ui, -apple-system, sans-serif; overscroll-behavior: none; }
+    font-family: system-ui, -apple-system, sans-serif; overscroll-behavior: none;
+    /* Sin esto, tocar rapido +/- se lee como doble-tap y el navegador hace zoom. */
+    touch-action: manipulation; }
   #camara { position: fixed; inset: 0; width: 100%; height: 100%; object-fit: cover; }
   .encima { position: fixed; left: 0; right: 0; z-index: 2; }
   #contador { top: 0; padding: 10px 14px calc(10px + env(safe-area-inset-top));
@@ -24,14 +26,16 @@
   #estado { flex: 0 0 auto; border: 2px solid #fff; background: #fff; color: #111;
     border-radius: 999px; padding: 12px 18px; font-size: 16px; font-weight: 700; }
   #estado.danado { background: var(--rojo); border-color: var(--rojo); color: #fff; }
-  #cantidad { display: flex; align-items: center; gap: 0; flex: 0 0 auto;
+  .control-cantidad { display: flex; align-items: center; gap: 0; flex: 0 0 auto;
     border: 2px solid #fff; border-radius: 999px; overflow: hidden; background: #0006; }
-  #cantidad button { width: 42px; height: 46px; border: 0; background: none; color: #fff;
+  .control-cantidad button { width: 42px; height: 46px; border: 0; background: none; color: #fff;
     font-size: 24px; font-weight: 700; }
-  #cantidad button:active { background: #fff3; }
-  #cantidad .valor { min-width: 34px; text-align: center; font-size: 18px; font-weight: 800;
-    font-variant-numeric: tabular-nums; }
-  #cantidad.varias { border-color: var(--amarillo); color: var(--amarillo); }
+  .control-cantidad button:active { background: #fff3; }
+  .control-cantidad .valor { min-width: 34px; text-align: center; font-size: 18px; font-weight: 800;
+    font-variant-numeric: tabular-nums; background: none; border: 0; color: #fff; }
+  /* Tocar el numero lo cambia por un input: mas rapido que darle +1 veinte veces. */
+  .control-cantidad .valor.editor { min-width: 34px; width: 34px; background: #fff3; border-radius: 6px; }
+  .control-cantidad.varias { border-color: var(--amarillo); color: var(--amarillo); }
   #disparo { width: 78px; height: 78px; border-radius: 50%; border: 5px solid #fff;
     background: #fff5; flex: 0 0 auto; }
   #disparo:active { background: #fff; }
@@ -40,6 +44,23 @@
     background: #111; flex-direction: column; justify-content: center; gap: 16px; }
   #error button { padding: 14px; font-size: 16px; border: 0; border-radius: 10px;
     background: var(--amarillo); color: #111; font-weight: 700; }
+
+  /* Revisar una foto ya tomada: como tocar la miniatura de la esquina en la
+     camara del iPhone. Mientras siga en la cola local se puede corregir la
+     cantidad, marcarla danada, retomarla o descartarla. Ya subida, solo avisa
+     que la correccion es en la cola de revision. */
+  #revisar { position: fixed; inset: 0; z-index: 6; display: none; flex-direction: column;
+    background: #000; }
+  #revisar.abierto { display: flex; }
+  #revisar-foto { flex: 1; width: 100%; object-fit: contain; min-height: 0; }
+  #revisar-acciones { display: flex; flex-direction: column; gap: 10px; padding: 14px 18px calc(14px + env(safe-area-inset-bottom)); }
+  .fila-revisar { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+  #revisar button { border: 2px solid #fff; background: #0006; color: #fff; border-radius: 999px;
+    padding: 10px 16px; font-size: 14px; font-weight: 700; }
+  #revisar button.peligro { border-color: var(--rojo); color: var(--rojo); }
+  #revisar button.principal { background: var(--amarillo); border-color: var(--amarillo); color: #111; flex: 1; }
+  #revisar-cerrar { position: absolute; top: calc(10px + env(safe-area-inset-top)); right: 14px;
+    width: 40px; height: 40px; border-radius: 50%; font-size: 20px; line-height: 1; }
 </style>
 </head>
 <body>
@@ -50,18 +71,33 @@
 
 <div id="barra" class="encima">
   <button id="estado" type="button">Nuevo</button>
-  <div id="cantidad">
+  <div id="cantidad" class="control-cantidad">
     <button type="button" data-paso="-1" aria-label="Menos piezas">−</button>
-    <span class="valor">1</span>
+    <input class="valor" type="text" inputmode="numeric" value="1" readonly>
     <button type="button" data-paso="1" aria-label="Más piezas">+</button>
   </div>
   <button id="disparo" type="button" aria-label="Tomar foto"></button>
-  <span id="ayuda">Toca la miniatura para marcarla dañada.</span>
+  <span id="ayuda">Toca una miniatura para revisarla, corregir la cantidad o retomarla.</span>
 </div>
 
 <div id="error">
   <h2 id="error-texto"></h2>
   <button id="reintentar" type="button">Reintentar</button>
+</div>
+
+<div id="revisar">
+  <button id="revisar-cerrar" type="button" aria-label="Cerrar">✕</button>
+  <img id="revisar-foto" alt="">
+  <div id="revisar-acciones">
+    <div class="fila-revisar">
+      <button id="revisar-estado" type="button"></button>
+      <div id="revisar-cantidad" class="control-cantidad"></div>
+    </div>
+    <div class="fila-revisar">
+      <button id="revisar-descartar" type="button" class="peligro">Descartar</button>
+      <button id="revisar-retomar" type="button" class="principal">Retomar foto</button>
+    </div>
+  </div>
 </div>
 
 <script type="module">
@@ -130,23 +166,93 @@ function pintarMiniatura(registro) {
   img.src = URL.createObjectURL(registro.foto);
   img.dataset.id = registro.id;
   img.className = registro.estado_fisico === 'danado' ? 'danado' : '';
-  img.addEventListener('click', () => alternarEstado(registro.id, img));
+  img.addEventListener('click', () => abrirRevision(registro.id, img));
   miniaturas.prepend(img);
   while (miniaturas.children.length > 20) miniaturas.lastChild.remove();
 }
 
-/** Corrección después del disparo: solo mientras la foto sigue en la cola. */
-async function alternarEstado(id, img) {
+/* ---------- revisar una foto ya tomada: como la miniatura del iPhone ---------- */
+
+const elRevisar = document.getElementById('revisar');
+const elRevisarFoto = document.getElementById('revisar-foto');
+const elRevisarEstado = document.getElementById('revisar-estado');
+const elRevisarCantidad = document.getElementById('revisar-cantidad');
+const elDescartar = document.getElementById('revisar-descartar');
+let registroActual = null;
+
+function pintarEstadoRevision() {
+  const danado = registroActual.estado_fisico === 'danado';
+  elRevisarEstado.textContent = danado ? 'Dañado' : 'Nuevo';
+  elRevisarEstado.classList.toggle('danado', danado);
+}
+
+/** Solo mientras la foto sigue en la cola local: ya subida, se corrige desde la cola de revision. */
+async function abrirRevision(id, img) {
   const cola = await pendientes();
   const registro = cola.find((r) => r.id === id);
   if (!registro) {
     img.classList.add('subida');
     return;
   }
-  registro.estado_fisico = registro.estado_fisico === 'danado' ? 'nuevo' : 'danado';
-  await guardar(registro);
-  img.classList.toggle('danado', registro.estado_fisico === 'danado');
+  registroActual = registro;
+  elRevisarFoto.src = img.src;
+  elDescartar.textContent = 'Descartar';
+  pintarEstadoRevision();
+  elRevisarCantidad.innerHTML = `<button type="button" data-paso="-1" aria-label="Menos piezas">−</button>
+    <input class="valor" type="text" inputmode="numeric" readonly>
+    <button type="button" data-paso="1" aria-label="Más piezas">+</button>`;
+  activarControlCantidad(elRevisarCantidad, () => registroActual.cantidad, (valor) => {
+    piezasTotales += valor - registroActual.cantidad;
+    registroActual.cantidad = valor;
+    guardar(registroActual);
+    actualizarContador();
+  });
+  elRevisar.classList.add('abierto');
 }
+
+function cerrarRevision() {
+  elRevisar.classList.remove('abierto');
+  registroActual = null;
+}
+
+elRevisarEstado.addEventListener('click', async () => {
+  registroActual.estado_fisico = registroActual.estado_fisico === 'danado' ? 'nuevo' : 'danado';
+  await guardar(registroActual);
+  pintarEstadoRevision();
+  const img = miniaturas.querySelector(`img[data-id="${registroActual.id}"]`);
+  if (img) img.classList.toggle('danado', registroActual.estado_fisico === 'danado');
+});
+
+document.getElementById('revisar-retomar').addEventListener('click', async () => {
+  const foto = await capturar();
+  if (!foto) return;
+  registroActual.foto = foto;
+  await guardar(registroActual);
+  const anterior = elRevisarFoto.src;
+  elRevisarFoto.src = URL.createObjectURL(foto);
+  URL.revokeObjectURL(anterior);
+  const img = miniaturas.querySelector(`img[data-id="${registroActual.id}"]`);
+  if (img) img.src = elRevisarFoto.src;
+  cerrarRevision();
+});
+
+// Un dialogo nativo (confirm()) congela toda la pestana mientras esta abierto,
+// mala idea sobre una camara de pantalla completa. Un segundo toque en el mismo
+// boton confirma en su lugar; alejarse de "revisar" lo resetea.
+elDescartar.addEventListener('click', async () => {
+  if (elDescartar.textContent !== '¿Seguro?') {
+    elDescartar.textContent = '¿Seguro?';
+    return;
+  }
+  tomadas -= 1;
+  piezasTotales -= registroActual.cantidad;
+  await borrar(registroActual.id);
+  miniaturas.querySelector(`img[data-id="${registroActual.id}"]`)?.remove();
+  actualizarContador();
+  cerrarRevision();
+});
+
+document.getElementById('revisar-cerrar').addEventListener('click', cerrarRevision);
 
 async function disparar() {
   const foto = await capturar();
@@ -198,18 +304,40 @@ function actualizarContador() {
   contador.textContent = `${tomadas} fotos${piezas} · ${subidas} subidas`;
 }
 
-/** El contador se queda donde lo dejes, como el interruptor de estado. */
-function pintarCantidad() {
-  document.querySelector('#cantidad .valor').textContent = cantidad;
-  document.getElementById('cantidad').classList.toggle('varias', cantidad > 1);
+/**
+ * Un +/- con el numero editable a mano: tocar el numero lo cambia por un input
+ * en su lugar, en vez de darle +1 hasta veinte veces para llegar a un lote grande.
+ * Mismo patron para la barra de disparo y para la cantidad en "revisar".
+ */
+function activarControlCantidad(contenedor, obtener, fijar) {
+  const entrada = contenedor.querySelector('.valor');
+  const pintar = () => {
+    entrada.value = obtener();
+    contenedor.classList.toggle('varias', obtener() > 1);
+  };
+  contenedor.querySelectorAll('button[data-paso]').forEach((boton) => {
+    boton.addEventListener('click', () => {
+      fijar(Math.min(99, Math.max(1, obtener() + Number(boton.dataset.paso))));
+      pintar();
+    });
+  });
+  entrada.addEventListener('click', () => {
+    entrada.readOnly = false;
+    entrada.classList.add('editor');
+    entrada.select();
+  });
+  const confirmarEdicion = () => {
+    entrada.readOnly = true;
+    entrada.classList.remove('editor');
+    fijar(Math.min(99, Math.max(1, Math.round(Number(entrada.value)) || 1)));
+    pintar();
+  };
+  entrada.addEventListener('blur', confirmarEdicion);
+  entrada.addEventListener('keydown', (evento) => { if (evento.key === 'Enter') entrada.blur(); });
+  pintar();
 }
 
-document.getElementById('cantidad').addEventListener('click', (evento) => {
-  const paso = Number(evento.target.dataset?.paso ?? 0);
-  if (!paso) return;
-  cantidad = Math.min(99, Math.max(1, cantidad + paso));
-  pintarCantidad();
-});
+activarControlCantidad(document.getElementById('cantidad'), () => cantidad, (valor) => { cantidad = valor; });
 
 /* ---------- arranque ---------- */
 
@@ -224,7 +352,6 @@ addEventListener('online', procesarCola);
 setInterval(procesarCola, 20000);
 document.addEventListener('visibilitychange', () => { if (!document.hidden) encenderCamara(); });
 
-pintarCantidad();
 encenderCamara();
 procesarCola();
 </script>
