@@ -31,10 +31,12 @@
   .control-cantidad button { width: 42px; height: 46px; border: 0; background: none; color: #fff;
     font-size: 24px; font-weight: 700; }
   .control-cantidad button:active { background: #fff3; }
-  .control-cantidad .valor { min-width: 34px; text-align: center; font-size: 18px; font-weight: 800;
-    font-variant-numeric: tabular-nums; background: none; border: 0; color: #fff; }
-  /* Tocar el numero lo cambia por un input: mas rapido que darle +1 veinte veces. */
-  .control-cantidad .valor.editor { min-width: 34px; width: 34px; background: #fff3; border-radius: 6px; }
+  /* Un <input> sin "width" toma su ancho nativo (~20 caracteres): sin esto la
+     caja se hace enorme y empuja o tapa el boton de disparo. */
+  .control-cantidad .valor { width: 34px; text-align: center; font-size: 18px; font-weight: 800;
+    font-variant-numeric: tabular-nums; background: none; border: 0; color: #fff; padding: 0; }
+  /* Tocar el numero lo cambia por un input editable: mas rapido que darle +1 veinte veces. */
+  .control-cantidad .valor.editor { background: #fff3; border-radius: 6px; }
   .control-cantidad.varias { border-color: var(--amarillo); color: var(--amarillo); }
   #disparo { width: 78px; height: 78px; border-radius: 50%; border: 5px solid #fff;
     background: #fff5; flex: 0 0 auto; }
