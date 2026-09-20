@@ -383,19 +383,45 @@ async function cargarTickets() {
 }
 
 $('tickets').addEventListener('toggle', cargarTickets);
+// Cancelar pide el motivo en la propia fila (nada de prompt()/confirm() nativos,
+// que congelan la pestana): un clic abre el campo, otro clic ya confirmado envia.
 $('lista-tickets').addEventListener('click', async (e) => {
-  const id = e.target.dataset?.cancelar;
-  if (!id) return;
-  e.target.disabled = true;
-  const r = await fetch(`/api/ventas/${id}/cancelar`, { method: 'POST' });
-  const cuerpo = await r.json();
-  $('aviso').textContent = r.ok
-    ? `Venta cancelada. Devuelve ${pesos(cuerpo.devuelto ?? 0)} y regresa la pieza al anaquel.`
-    : (cuerpo.error ?? 'No se pudo cancelar.');
-  $('aviso').style.color = r.ok ? '#1f7a4d' : '#D72B32';
-  await cargarTickets();
-  await actualizarCorte();
-  await cargarCatalogo();          // la pieza devuelta vuelve a tener existencia
+  const idCancelar = e.target.dataset?.cancelar;
+  const idConfirmar = e.target.dataset?.confirmarCancelar;
+  const idVolver = e.target.dataset?.volverCancelar;
+
+  if (idCancelar) {
+    const fila = e.target.closest('.ticket');
+    fila.innerHTML = `
+      <input type="text" class="motivo-cancelacion" placeholder="Motivo de la cancelación"
+        style="grid-column:1/-1;padding:8px;border:1px solid var(--linea);border-radius:8px;font-size:13px">
+      <div style="grid-column:1/-1;display:flex;gap:6px;justify-content:flex-end">
+        <button type="button" data-volver-cancelar="${idCancelar}"
+          style="border-color:var(--linea);color:#5b6478">Volver</button>
+        <button type="button" data-confirmar-cancelar="${idCancelar}">Confirmar cancelación</button>
+      </div>`;
+    fila.querySelector('.motivo-cancelacion').focus();
+    return;
+  }
+  if (idVolver) { await cargarTickets(); return; }
+  if (idConfirmar) {
+    const fila = e.target.closest('.ticket');
+    const campoMotivo = fila.querySelector('.motivo-cancelacion');
+    const motivo = campoMotivo.value.trim();
+    if (!motivo) { campoMotivo.style.borderColor = 'var(--rojo)'; campoMotivo.focus(); return; }
+    e.target.disabled = true;
+    const r = await fetch(`/api/ventas/${idConfirmar}/cancelar`, {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ motivo }),
+    });
+    const cuerpo = await r.json();
+    $('aviso').textContent = r.ok
+      ? `Venta cancelada. Devuelve ${pesos(cuerpo.devuelto ?? 0)} y regresa la pieza al anaquel.`
+      : (cuerpo.error ?? 'No se pudo cancelar.');
+    $('aviso').style.color = r.ok ? '#1f7a4d' : '#D72B32';
+    await cargarTickets();
+    await actualizarCorte();
+    await cargarCatalogo();          // la pieza devuelta vuelve a tener existencia
+  }
 });
 
 async function actualizarCorte() {

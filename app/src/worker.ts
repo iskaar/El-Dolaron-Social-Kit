@@ -493,10 +493,21 @@ async function registrarVenta(request: Request, env: Env): Promise<Response> {
  * La venta no se borra, se marca: el corte del dia tiene que seguir explicando
  * todo lo que paso, incluido lo que se deshizo. Las piezas vuelven al inventario.
  */
-async function cancelarVenta(id: string, env: Env): Promise<Response> {
+async function cancelarVenta(id: string, request: Request, env: Env): Promise<Response> {
   if (!UUID.test(id)) {
     return json({ error: 'Identificador de venta invalido.' }, 400);
   }
+  // Con dinero real de por medio, una cancelacion sin motivo no se distingue
+  // de una para quedarse el efectivo de una venta que si se cobro. El motivo
+  // y quien la hizo (Cloudflare Access, igual que capturado_por en las fotos)
+  // son lo minimo para poder auditar despues.
+  const cuerpo = (await request.json().catch(() => ({}))) as { motivo?: unknown };
+  const motivo = String(cuerpo.motivo ?? '').trim().slice(0, 200);
+  if (!motivo) {
+    return json({ error: 'Escribe el motivo de la cancelacion.' }, 400);
+  }
+  const canceladaPor = request.headers.get('cf-access-authenticated-user-email') ?? '';
+
   const venta = await env.DB.prepare('select id, total from ventas where id = ?')
     .bind(id)
     .first<{ id: string; total: number }>();
@@ -510,9 +521,10 @@ async function cancelarVenta(id: string, env: Env): Promise<Response> {
   // solo una de ellas encuentra `cancelada = 0` y de verdad cambia la fila. La
   // otra ve `changes: 0` y sabe que no le toca devolver existencia otra vez.
   const resultado = await env.DB.prepare(
-    'update ventas set cancelada = 1, cancelada_en = ? where id = ? and cancelada = 0',
+    `update ventas set cancelada = 1, cancelada_en = ?, cancelada_por = ?, motivo_cancelacion = ?
+     where id = ? and cancelada = 0`,
   )
-    .bind(ahora, id)
+    .bind(ahora, canceladaPor, motivo, id)
     .run();
 
   if (resultado.meta.changes === 0) {
@@ -660,6 +672,21 @@ async function reportes(url: URL, env: Env): Promise<Response> {
      group by categoria order by dias_promedio desc`,
   ).all<{ categoria: string; dias_promedio: number; n: number }>();
 
+  // Devoluciones: el motivo y quien cancelo son la unica huella de una
+  // cancelacion que no fue legitima (cobrar de verdad y "cancelar" para
+  // quedarse el efectivo). Se listan una por una, no solo el total.
+  const { results: cancelaciones } = await env.DB.prepare(
+    `select v.id, v.total, v.forma_pago, v.cancelada_en, v.cancelada_por, v.motivo_cancelacion,
+       (select group_concat(nombre, ' · ') from venta_lineas where venta_id = v.id) as piezas
+     from ventas v where v.cancelada = 1 and v.creado_en >= ?
+     order by v.cancelada_en desc`,
+  )
+    .bind(desde)
+    .all<{
+      id: string; total: number; forma_pago: string; cancelada_en: string;
+      cancelada_por: string; motivo_cancelacion: string; piezas: string;
+    }>();
+
   return json({
     dias,
     resumen: {
@@ -674,6 +701,11 @@ async function reportes(url: URL, env: Env): Promise<Response> {
     top_productos: topProductos,
     precio_sugerido: { n: precioSugerido?.n ?? 0, promedio_pct: precioSugerido?.promedio_pct ?? null },
     dias_en_venta_por_categoria: diasEnVenta,
+    cancelaciones: {
+      n: cancelaciones.length,
+      total: cancelaciones.reduce((suma, c) => suma + c.total, 0),
+      detalle: cancelaciones,
+    },
   });
 }
 
@@ -699,22 +731,24 @@ const pesosDe = (centavos: number) => (centavos / 100).toFixed(2);
 /** Un renglon por linea de venta: es el ledger completo, para lo que ningun dashboard cubre. */
 async function exportarVentasCsv(env: Env): Promise<Response> {
   const { results } = await env.DB.prepare(
-    `select v.creado_en, v.forma_pago, v.cancelada, l.codigo, coalesce(p.categoria, '') as categoria,
-            l.nombre, l.precio, l.cantidad
+    `select v.creado_en, v.forma_pago, v.cancelada, v.cancelada_por, v.motivo_cancelacion,
+            l.codigo, coalesce(p.categoria, '') as categoria, l.nombre, l.precio, l.cantidad
      from venta_lineas l join ventas v on v.id = l.venta_id left join productos p on p.id = l.producto_id
      order by v.creado_en`,
   ).all<{
-    creado_en: string; forma_pago: string; cancelada: number; codigo: string;
-    categoria: string; nombre: string; precio: number; cantidad: number;
+    creado_en: string; forma_pago: string; cancelada: number; cancelada_por: string;
+    motivo_cancelacion: string; codigo: string; categoria: string; nombre: string;
+    precio: number; cantidad: number;
   }>();
 
   const filas = results.map((f) => [
-    f.creado_en, f.forma_pago, f.cancelada ? 'si' : 'no', f.codigo, f.categoria, f.nombre,
-    pesosDe(f.precio), f.cantidad, pesosDe(f.precio * f.cantidad),
+    f.creado_en, f.forma_pago, f.cancelada ? 'si' : 'no', f.cancelada_por, f.motivo_cancelacion,
+    f.codigo, f.categoria, f.nombre, pesosDe(f.precio), f.cantidad, pesosDe(f.precio * f.cantidad),
   ]);
   return respuestaCsv(
     'ventas.csv',
-    ['fecha', 'forma_pago', 'cancelada', 'codigo', 'categoria', 'nombre', 'precio', 'cantidad', 'importe'],
+    ['fecha', 'forma_pago', 'cancelada', 'cancelada_por', 'motivo_cancelacion',
+      'codigo', 'categoria', 'nombre', 'precio', 'cantidad', 'importe'],
     filas,
   );
 }
@@ -813,7 +847,7 @@ export default {
 
       const cancelacion = pathname.match(/^\/api\/ventas\/([^/]+)\/cancelar$/);
       if (cancelacion && request.method === 'POST') {
-        return await cancelarVenta(cancelacion[1], env);
+        return await cancelarVenta(cancelacion[1], request, env);
       }
 
       if (pathname === '/api/reportes') {
