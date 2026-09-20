@@ -65,6 +65,8 @@
     <button type="button" data-estado="listo" aria-pressed="false">Analizadas</button>
     <button type="button" data-estado="pendiente" aria-pressed="false">Pendientes</button>
     <button type="button" data-estado="error" aria-pressed="false">Con error</button>
+    <button id="guardar-todo" type="button" class="claro" style="margin-left: auto">Guardar todo</button>
+    <span class="aviso" id="aviso-todo"></span>
   </div>
 
   <div id="cola"></div>
@@ -175,17 +177,27 @@ function ficha(p) {
   const valor = (campo) => nodo.querySelector(`[data-campo="${campo}"]`).value;
   const aviso = nodo.querySelector('.aviso');
 
+  const base = () => ({
+    nombre: valor('nombre'), categoria: valor('categoria'),
+    estado_fisico: valor('estado_fisico'), precio_lista: centavos(valor('precio_lista')),
+    stock: Math.round(Number(valor('stock') || 0)),
+  });
+
   async function enviar(cuerpo) {
     const respuesta = await fetch(`/api/borradores/${p.id}`, {
       method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify(cuerpo),
     });
     const datos = await respuesta.json();
-    if (!respuesta.ok) { aviso.textContent = datos.error; aviso.style.color = ''; return; }
+    if (!respuesta.ok) { aviso.textContent = datos.error; aviso.style.color = ''; return false; }
     nodo.querySelector('[data-campo="precio"]').value = pesos(datos.precio);
     nodo.querySelector('[data-campo="destino"]').value = datos.destino;
     aviso.textContent = 'Guardado';
     aviso.style.color = '#2c7a3f';
+    return true;
   }
+
+  // Usado por "Guardar todo": misma sentencia que el boton Guardar de esta ficha.
+  nodo.guardarFicha = () => enviar({ ...base(), precio: centavos(valor('precio')), destino: valor('destino') });
 
   // Retomar foto: mismo id, asi que reemplaza la foto en R2 sin duplicar la pieza.
   // El analisis vuelve a correr sobre la foto nueva y **pisa** nombre, categoria y
@@ -219,15 +231,10 @@ function ficha(p) {
   nodo.addEventListener('click', async (evento) => {
     const accion = evento.target.dataset?.accion;
     if (!accion) return;
-    const base = {
-      nombre: valor('nombre'), categoria: valor('categoria'),
-      estado_fisico: valor('estado_fisico'), precio_lista: centavos(valor('precio_lista')),
-      stock: Math.round(Number(valor('stock') || 0)),
-    };
     if (accion === 'guardar') {
-      await enviar({ ...base, precio: centavos(valor('precio')), destino: valor('destino') });
+      await nodo.guardarFicha();
     } else if (accion === 'recalcular') {
-      await enviar(base);   // sin precio: lo recalcula la configuración
+      await enviar(base());   // sin precio: lo recalcula la configuración
     } else if (accion === 'reanalizar') {
       aviso.textContent = 'Analizando…';
       await fetch(`/api/borradores/${p.id}/analizar`, { method: 'POST' });
@@ -266,12 +273,34 @@ async function cargarCola() {
 
 document.getElementById('filtros').addEventListener('click', (evento) => {
   const boton = evento.target.closest('button');
-  if (!boton) return;
+  if (!boton || boton.id === 'guardar-todo') return;
   filtro = boton.dataset.estado;
   for (const b of document.querySelectorAll('#filtros button')) {
     b.setAttribute('aria-pressed', String(b === boton));
   }
   cargarCola();
+});
+
+/** Guarda cada ficha visible con lo que tenga en pantalla, sin tocarlas una por una. */
+document.getElementById('guardar-todo').addEventListener('click', async (evento) => {
+  const boton = evento.currentTarget;
+  const avisoTodo = document.getElementById('aviso-todo');
+  const fichas = [...cola.children];
+  if (fichas.length === 0) return;
+
+  boton.disabled = true;
+  boton.textContent = 'Guardando…';
+  avisoTodo.textContent = '';
+  const resultados = await Promise.allSettled(fichas.map((nodo) => nodo.guardarFicha()));
+  const exitos = resultados.filter((r) => r.status === 'fulfilled' && r.value).length;
+  const fallos = resultados.length - exitos;
+
+  boton.disabled = false;
+  boton.textContent = 'Guardar todo';
+  avisoTodo.textContent = fallos === 0
+    ? `${exitos} guardadas`
+    : `${exitos} guardadas, ${fallos} con error (revisa esa ficha)`;
+  avisoTodo.style.color = fallos === 0 ? '#2c7a3f' : '';
 });
 
 await cargarConfig();
