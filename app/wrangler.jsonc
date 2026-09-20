@@ -22,6 +22,8 @@
     // La busqueda de precio (tiendas mexicanas, ver analisis.ts) solo existe
     // con Gemini: activarla cambia el modelo por defecto de toda la tienda,
     // no solo prende una funcion encima de Claude.
+    // Reactivado 2026-09-20 despues de resolver la facturacion de Gemini
+    // (la cuota 429 de antes era por falta de credito, no un bug).
     "MODELO_ANALISIS": "gemini",
     "BUSQUEDA_WEB": "si"
   },
