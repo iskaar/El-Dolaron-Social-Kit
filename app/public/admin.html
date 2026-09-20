@@ -65,7 +65,8 @@
     <button type="button" data-estado="listo" aria-pressed="false">Analizadas</button>
     <button type="button" data-estado="pendiente" aria-pressed="false">Pendientes</button>
     <button type="button" data-estado="error" aria-pressed="false">Con error</button>
-    <button id="guardar-todo" type="button" class="claro" style="margin-left: auto">Guardar todo</button>
+    <button id="reintentar-todo" type="button" class="claro" style="margin-left: auto">Reintentar con error</button>
+    <button id="guardar-todo" type="button" class="claro">Guardar todo</button>
     <span class="aviso" id="aviso-todo"></span>
   </div>
 
@@ -273,12 +274,47 @@ async function cargarCola() {
 
 document.getElementById('filtros').addEventListener('click', (evento) => {
   const boton = evento.target.closest('button');
-  if (!boton || boton.id === 'guardar-todo') return;
+  if (!boton || boton.id === 'guardar-todo' || boton.id === 'reintentar-todo') return;
   filtro = boton.dataset.estado;
   for (const b of document.querySelectorAll('#filtros button')) {
     b.setAttribute('aria-pressed', String(b === boton));
   }
   cargarCola();
+});
+
+/**
+ * Reintenta el analisis de todas las piezas en error, no solo las que se ven
+ * con el filtro actual. Un lote de fallos (llave sin credito, cuota del
+ * modelo) puede dejar decenas en error de una sentada, y revisarlas una por
+ * una en la ficha es lento.
+ */
+document.getElementById('reintentar-todo').addEventListener('click', async (evento) => {
+  const boton = evento.currentTarget;
+  const avisoTodo = document.getElementById('aviso-todo');
+  const errores = await (await fetch('/api/borradores?estado=error')).json();
+  if (errores.length === 0) {
+    avisoTodo.textContent = 'Nada con error.';
+    avisoTodo.style.color = '';
+    return;
+  }
+
+  boton.disabled = true;
+  avisoTodo.style.color = '';
+  for (let i = 0; i < errores.length; i += 1) {
+    boton.textContent = `Reintentando… ${i + 1}/${errores.length}`;
+    try {
+      await fetch(`/api/borradores/${errores[i].id}/analizar`, { method: 'POST' });
+    } catch { /* sigue con las demas */ }
+    // Una a la vez, no todas de golpe: por si el modelo tiene limite de ritmo
+    // ademas de cuota (la razon original de que esto tronara).
+    await new Promise((resolver) => setTimeout(resolver, 800));
+  }
+
+  boton.disabled = false;
+  boton.textContent = 'Reintentar con error';
+  avisoTodo.textContent = `${errores.length} en reanalisis. Tardan unos segundos; actualiza la cola para verlas.`;
+  avisoTodo.style.color = '#2c7a3f';
+  setTimeout(cargarCola, 12000);
 });
 
 /** Guarda cada ficha visible con lo que tenga en pantalla, sin tocarlas una por una. */
