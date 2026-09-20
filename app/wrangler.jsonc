@@ -18,7 +18,12 @@
   "vars": {
     // Ese hostname solo sirve la camara y la subida de fotos: el vendedor no
     // llega a precios ni a la caja aunque escriba la ruta.
-    "HOST_VENDEDOR": "captura.viste.com.mx"
+    "HOST_VENDEDOR": "captura.viste.com.mx",
+    // La busqueda de precio (tiendas mexicanas, ver analisis.ts) solo existe
+    // con Gemini: activarla cambia el modelo por defecto de toda la tienda,
+    // no solo prende una funcion encima de Claude.
+    "MODELO_ANALISIS": "gemini",
+    "BUSQUEDA_WEB": "si"
   },
   // Hostnames propios: Cloudflare Access solo protege dominios de una zona, no workers.dev.
   "routes": [
