@@ -80,6 +80,15 @@
     <div id="top-productos"></div>
   </div>
 
+  <div class="panel">
+    <h2>Cancelaciones</h2>
+    <div class="tarjetas" id="cancelaciones-resumen" style="margin-bottom: 12px"></div>
+    <div id="cancelaciones-detalle"></div>
+    <p class="nota">Cada cancelación exige un motivo y queda con el correo de quien la hizo.
+      Revisa aquí lo que no cuadre — un patrón de cancelaciones de un mismo correo, o motivos
+      que no convencen.</p>
+  </div>
+
   <div class="dos-columnas">
     <div class="panel">
       <h2>Precio sugerido vs. precio final</h2>
@@ -175,6 +184,17 @@ async function cargar() {
     : `<table><thead><tr><th>Categoría</th><th class="num">Días promedio</th><th class="num">Piezas</th></tr></thead>
        <tbody>${r.dias_en_venta_por_categoria.map((f) => `
          <tr><td>${f.categoria}</td><td class="num">${f.dias_promedio.toFixed(1)}</td><td class="num">${f.n}</td></tr>
+       `).join('')}</tbody></table>`;
+
+  $('cancelaciones-resumen').innerHTML = `
+    <div class="tarjeta"><div class="etiqueta">Cancelaciones</div><div class="valor">${r.cancelaciones.n}</div></div>
+    <div class="tarjeta"><div class="etiqueta">Total devuelto</div><div class="valor">${pesos(r.cancelaciones.total)}</div></div>`;
+  $('cancelaciones-detalle').innerHTML = r.cancelaciones.detalle.length === 0
+    ? '<div class="vacio">Sin cancelaciones en este rango.</div>'
+    : `<table><thead><tr><th>Fecha</th><th>Quién</th><th>Motivo</th><th>Piezas</th><th class="num">Devuelto</th></tr></thead>
+       <tbody>${r.cancelaciones.detalle.map((c) => `
+         <tr><td>${c.cancelada_en.slice(0, 16).replace('T', ' ')}</td><td>${c.cancelada_por || '—'}</td>
+           <td>${c.motivo_cancelacion || '—'}</td><td>${c.piezas ?? ''}</td><td class="num">${pesos(c.total)}</td></tr>
        `).join('')}</tbody></table>`;
 }
 
