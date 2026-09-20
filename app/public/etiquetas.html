@@ -19,8 +19,9 @@
     font-weight: 600; cursor: pointer; background: var(--azul); color: #fff; }
   button.claro { background: #fff; color: #1a1f2b; border: 1px solid var(--linea); }
   .lista { background: #fff; border: 1px solid var(--linea); border-radius: 12px; overflow: hidden; }
-  .renglon { display: grid; grid-template-columns: 34px 56px 1fr 110px 90px;
+  .renglon { display: grid; grid-template-columns: 28px 34px 56px 1fr 110px 90px;
     gap: 12px; align-items: center; padding: 10px 14px; border-top: 1px solid var(--linea); }
+  .renglon .posicion { color: #9aa4b6; font-size: 13px; font-variant-numeric: tabular-nums; text-align: right; }
   .renglon:first-child { border-top: 0; }
   .renglon img { width: 56px; height: 56px; object-fit: cover; border-radius: 6px; background: #eceff4; }
   .renglon .precio { font-weight: 700; }
@@ -105,8 +106,13 @@ async function cargar() {
     return;
   }
 
-  lista.innerHTML = piezas.map((p) => `
+  // El numero es la posicion en el orden de captura: las piezas se quedan
+  // fisicamente donde se tomaron hasta que se les pega la etiqueta, asi que
+  // contar "1, 2, 3..." contra la fila de piezas evita tener que adivinar
+  // cual etiqueta impresa es de cual pieza.
+  lista.innerHTML = piezas.map((p, i) => `
     <label class="renglon">
+      <span class="posicion">${i + 1}</span>
       <input type="checkbox" value="${p.id}" checked>
       <img src="/api/foto/${p.id}" alt="" loading="lazy">
       <span>${escapar(p.nombre || 'Sin nombre')}</span>
