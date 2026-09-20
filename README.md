@@ -9,6 +9,10 @@ Repositorio canónico del kit visual y textual de El Dolarón. Es un paquete est
 3. Publica únicamente las piezas listas y completa los campos entre corchetes en `05-Guia-y-textos/Textos-para-redes.txt`.
 4. Ejecuta `python tools/validate_assets.py` antes de abrir un PR.
 
+## Estrategia de marketing
+
+Consulta [el contexto, investigación y plan de 30 días](docs/MARKETING-30-DIAS.md) antes de continuar el marketing de El Dolarón. Incluye datos confirmados, calendario, presupuesto, fuentes y pendientes de apertura. Seguimiento: [Issue #28](https://github.com/iskaar/El-Dolaron-Social-Kit/issues/28).
+
 ## Mapa del repositorio
 
 | Ruta | Propósito |
