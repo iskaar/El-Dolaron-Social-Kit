@@ -140,11 +140,15 @@ async function crearBorrador(request: Request, env: Env, ctx: ExecutionContext, 
 async function listarBorradores(url: URL, env: Env): Promise<Response> {
   const estado = url.searchParams.get('estado');
   // Los botes son productos para la caja, no piezas que revisar.
+  // Orden de captura (mas vieja primero), no de llegada: las piezas se quedan
+  // fisicamente donde se capturaron hasta que se les pega su etiqueta, asi que
+  // el orden de la pantalla tiene que ser el mismo que el de la mesa o se
+  // vuelve un rompecabezas saber que etiqueta es de que pieza.
   const consulta = `select id, nombre, categoria, precio_lista, precio, estado_fisico,
                            estado_analisis, destino, stock, semana_ingreso, capturado_por, creado_en
                     from productos
                     where sin_inventario = 0 ${estado ? 'and estado_analisis = ?' : ''}
-                    order by creado_en desc limit 200`;
+                    order by creado_en asc limit 200`;
   const sentencia = estado
     ? env.DB.prepare(consulta).bind(estado)
     : env.DB.prepare(consulta);
