@@ -112,10 +112,16 @@
   <span id="corte">Corte del día: —</span>
   <span id="pendientes"></span>
   <span id="catalogo-info"></span>
+  <span id="impresora-estado"></span>
+  <button id="conectar-impresora" type="button" hidden
+    style="border:1px solid #dfe3ea;background:#fff;color:#1a1f2b;border-radius:8px;padding:4px 10px;font-size:12px;cursor:pointer">
+    Conectar impresora
+  </button>
 </footer>
 
 <script type="module">
 import { totales, agregar, efectivoAlcanza } from '/venta.js';
+import { reconectarImpresora, conectarImpresora, impresoraLista, imprimirTicket, abrirCajon } from '/impresora.js';
 
 const $ = (id) => document.getElementById(id);
 const pesos = (centavos) => `$${(centavos / 100).toLocaleString('es-MX')}`;
@@ -268,6 +274,11 @@ async function cobrar() {
       creado_en: new Date().toISOString(),
     };
     await store('ventas', 'readwrite', (s) => s.put(venta));   // el ticket existe aunque no haya red
+
+    // El ticket sale por USB, no por la red: no espera al servidor ni al
+    // catalogo. Si la impresora no esta conectada, imprimirTicket no hace nada.
+    imprimirTicket({ ...venta, total: t.total, cambio: t.cambio }, venta.lineas);
+    if (forma === 'efectivo') abrirCajon();   // una venta con tarjeta no toca el cajon
 
     // Bajar existencias en la copia local: sin esto, la misma etiqueta se podria
     // volver a cobrar mientras no haya red para refrescar el catalogo.
@@ -442,11 +453,27 @@ addEventListener('online', () => { pintarRed(); sincronizar(); cargarCatalogo();
 addEventListener('offline', pintarRed);
 setInterval(sincronizar, 30000);
 
+function pintarImpresora() {
+  const lista = impresoraLista();
+  $('impresora-estado').textContent = lista ? 'Impresora conectada' : 'Impresora no conectada';
+  $('conectar-impresora').hidden = lista;
+}
+$('conectar-impresora').addEventListener('click', async () => {
+  try {
+    await conectarImpresora();   // WebUSB solo permite pedir el permiso desde un clic real
+  } catch {
+    $('impresora-estado').textContent = 'No se pudo conectar la impresora.';
+  }
+  pintarImpresora();
+});
+
 pintarRed();
 await cargarCatalogo();
 pintar();
 await pintarRechazadas();
 await sincronizar();
+await reconectarImpresora();
+pintarImpresora();
 $('codigo').focus();
 </script>
 </body>
