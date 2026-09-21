@@ -148,7 +148,7 @@ async function listarBorradores(url: URL, env: Env): Promise<Response> {
                            estado_analisis, destino, stock, semana_ingreso, capturado_por, creado_en
                     from productos
                     where sin_inventario = 0 ${estado ? 'and estado_analisis = ?' : ''}
-                    order by creado_en asc limit 200`;
+                    order by creado_en asc limit 2000`;
   const sentencia = estado
     ? env.DB.prepare(consulta).bind(estado)
     : env.DB.prepare(consulta);
