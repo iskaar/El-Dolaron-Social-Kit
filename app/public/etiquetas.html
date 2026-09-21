@@ -162,13 +162,11 @@ function etiqueta(p) {
   // otro dpi -- y este valor no esta confirmado en ella. Correr /prueba-codigo
   // en la impresora nueva y ajustar aqui si no lee.
   //
-  // Los bines si necesitan el codigo completo ("BIN-20"): buscarPieza() los
-  // encuentra por coincidencia exacta, sin reconstruccion, asi que acortarlo
-  // rompería el escaneo en caja. Como "BIN-20" (6 caracteres) no cabe a 0.5mm,
-  // llevan un modulo mas angosto -- tambien sin confirmar en esta impresora.
-  const barra = esBin
-    ? svgCode128(p.codigo, { modulo: 0.375, alto: 4.8 })
-    : svgCode128(String(Number(p.codigo.slice(3))), { modulo: 0.5, alto: 4.8 });
+  // Los bines ya tienen codigo corto de fabrica ("B20"): buscarPieza() los
+  // encuentra por coincidencia exacta, sin reconstruccion, y al no ser
+  // puramente digitos nunca se confunden con un numero de producto. Con eso
+  // caben al mismo modulo que los productos -- etiqueta normal, sin caso especial.
+  const barra = svgCode128(esBin ? p.codigo : String(Number(p.codigo.slice(3))), { modulo: 0.5, alto: 4.8 });
   const pie = esBin ? p.codigo : `${p.codigo} · ${p.semana_ingreso}`;
 
   return `<div class="etiqueta">
