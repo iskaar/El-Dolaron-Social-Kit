@@ -102,14 +102,17 @@ const resumen = document.getElementById('resumen');
 const pesos = (centavos) => `$${Math.round(centavos / 100)}`;
 const escapar = (texto) => texto.replace(/[<>&"]/g, (c) => ({'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;'}[c]));
 
-/** Solo lo que lleva etiqueta: los bins se cobran con la tarjeta de la caja. */
+/** Las piezas se seleccionan e imprimen aqui. Los bins solo se listan para
+    referencia: su etiqueta ya sale de /tarjeta-bins, en hoja carta. */
 async function cargar() {
   const piezas = (await (await fetch('/api/borradores?estado=listo')).json())
     .filter((p) => p.destino === 'etiqueta' && p.precio > 0);
+  const bins = (await (await fetch('/api/catalogo')).json())
+    .filter((p) => p.sin_inventario === 1);
 
   resumen.textContent = `${piezas.length} piezas listas para etiquetar`;
-  if (piezas.length === 0) {
-    lista.innerHTML = '<div class="vacio">Nada para etiquetar. Las piezas de bin no llevan etiqueta.</div>';
+  if (piezas.length === 0 && bins.length === 0) {
+    lista.innerHTML = '<div class="vacio">Nada para etiquetar.</div>';
     return;
   }
 
@@ -117,7 +120,7 @@ async function cargar() {
   // fisicamente donde se tomaron hasta que se les pega la etiqueta, asi que
   // contar "1, 2, 3..." contra la fila de piezas evita tener que adivinar
   // cual etiqueta impresa es de cual pieza.
-  lista.innerHTML = piezas.map((p, i) => `
+  const filasPiezas = piezas.map((p, i) => `
     <label class="renglon">
       <span class="posicion">${i + 1}</span>
       <input type="checkbox" value="${p.id}" checked>
@@ -126,6 +129,18 @@ async function cargar() {
       <span class="precio">${pesos(p.precio)}${p.precio_lista > p.precio ? ` <s style="font-weight:400;color:#777">${pesos(p.precio_lista)}</s>` : ''}</span>
       <span>${p.stock > 1 ? `${p.stock} piezas` : p.semana_ingreso}</span>
     </label>`).join('');
+
+  const filasBins = bins.map((p) => `
+    <label class="renglon">
+      <span class="posicion">·</span>
+      <span></span>
+      <span></span>
+      <span>${escapar(p.nombre || p.codigo)}</span>
+      <span class="precio">${pesos(p.precio)}</span>
+      <span><a href="/tarjeta-bins">Imprime en /tarjeta-bins</a></span>
+    </label>`).join('');
+
+  lista.innerHTML = filasPiezas + filasBins;
 }
 
 function etiqueta(p) {
