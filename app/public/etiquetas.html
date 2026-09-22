@@ -25,9 +25,6 @@
   .renglon:first-child { border-top: 0; }
   .renglon img { width: 56px; height: 56px; object-fit: cover; border-radius: 6px; background: #eceff4; }
   .renglon .precio { font-weight: 700; }
-  .renglon.bin { grid-template-columns: 28px 60px 1fr 90px 140px; }
-  .renglon.bin input.cantidad { width: 48px; padding: 5px 6px; border: 1px solid var(--linea);
-    border-radius: 6px; font-size: 14px; }
   .vacio { padding: 24px; text-align: center; color: #5b6478; }
   .ayuda { font-size: 13px; color: #5b6478; line-height: 1.45; margin: 0 0 16px; max-width: 70ch; }
 
@@ -105,20 +102,14 @@ const resumen = document.getElementById('resumen');
 const pesos = (centavos) => `$${Math.round(centavos / 100)}`;
 const escapar = (texto) => texto.replace(/[<>&"]/g, (c) => ({'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;'}[c]));
 
-// Los bines no tienen id de borrador (no pasan por captura): se guardan aparte
-// para que el boton de imprimir sepa cuantas etiquetas de cada uno generar.
-let binesActuales = [];
-
+/** Solo lo que lleva etiqueta: los bins se cobran con la tarjeta de la caja. */
 async function cargar() {
   const piezas = (await (await fetch('/api/borradores?estado=listo')).json())
     .filter((p) => p.destino === 'etiqueta' && p.precio > 0);
-  binesActuales = (await (await fetch('/api/catalogo')).json())
-    .filter((p) => p.sin_inventario === 1);
-  const bins = binesActuales;
 
   resumen.textContent = `${piezas.length} piezas listas para etiquetar`;
-  if (piezas.length === 0 && bins.length === 0) {
-    lista.innerHTML = '<div class="vacio">Nada para etiquetar.</div>';
+  if (piezas.length === 0) {
+    lista.innerHTML = '<div class="vacio">Nada para etiquetar. Las piezas de bin no llevan etiqueta.</div>';
     return;
   }
 
@@ -126,7 +117,7 @@ async function cargar() {
   // fisicamente donde se tomaron hasta que se les pega la etiqueta, asi que
   // contar "1, 2, 3..." contra la fila de piezas evita tener que adivinar
   // cual etiqueta impresa es de cual pieza.
-  const filasPiezas = piezas.map((p, i) => `
+  lista.innerHTML = piezas.map((p, i) => `
     <label class="renglon">
       <span class="posicion">${i + 1}</span>
       <input type="checkbox" value="${p.id}" checked>
@@ -135,50 +126,20 @@ async function cargar() {
       <span class="precio">${pesos(p.precio)}${p.precio_lista > p.precio ? ` <s style="font-weight:400;color:#777">${pesos(p.precio_lista)}</s>` : ''}</span>
       <span>${p.stock > 1 ? `${p.stock} piezas` : p.semana_ingreso}</span>
     </label>`).join('');
-
-  const filasBins = bins.map((p) => `
-    <label class="renglon bin">
-      <span class="posicion">·</span>
-      <input type="number" class="cantidad" min="0" max="99" value="0" data-codigo="${p.codigo}">
-      <span>${escapar(p.nombre || p.codigo)}</span>
-      <span class="precio">${pesos(p.precio)}</span>
-      <span>etiquetas a imprimir</span>
-    </label>`).join('');
-
-  lista.innerHTML = filasPiezas + filasBins;
 }
 
 function etiqueta(p) {
-  const esBin = p.sin_inventario === 1;
-  const antes = !esBin && p.precio_lista > p.precio ? `<span class="antes">${pesos(p.precio_lista)}</span>` : '';
-
+  const antes = p.precio_lista > p.precio ? `<span class="antes">${pesos(p.precio_lista)}</span>` : '';
   // El codigo completo (ED-000123, 9 caracteres) no cabe legible en una etiqueta
   // chica: la barra codifica solo el numero, sin "ED-" ni ceros (p.ej. "123").
   // El texto impreso sigue mostrando el codigo completo; buscarPieza() en
   // caja.html reconstruye "ED-000123" a partir del numero que entrega el lector.
   //
-  // Los bines ("B20") y los codigos manuales (un barcode ya existente, como el
-  // de una pieza que llego con su propio codigo de fabrica) se imprimen tal
-  // cual: buscarPieza() los encuentra por coincidencia exacta, y al no empezar
-  // con "ED-" nunca se confunden con un numero reconstruido.
-  const codigoAsignado = p.codigo.startsWith('ED-');
-  const contenido = codigoAsignado ? String(Number(p.codigo.slice(3))) : p.codigo;
-
-  // ponytail: 0.5mm es lo maximo que sono siempre en la Zebra TLP 2844 (203 dpi)
-  // y sigue sin confirmarse en la impresora de 2026-09-20 (correr /prueba-codigo
-  // y ajustar si no lee). Un codigo largo (un barcode manual, no el numero
-  // corto de siempre) se angosta lo necesario para caber en la etiqueta.
-  //
-  // 2026-09-21: un codigo de 11 digitos a 47mm (el presupuesto original) salio
-  // recortado -- la impresora no imprime hasta el borde declarado de 48.8mm
-  // utiles, tiene su propio margen ciego. 42mm de presupuesto deja mas aire
-  // real; si un codigo largo vuelve a salir cortado, bajar este numero.
-  const modulo = Math.min(0.5, 42 / (11 * contenido.length + 55));
-  const barra = svgCode128(contenido, { modulo, alto: 4.8 });
-  // "· S39" solo cuando el codigo mismo es corto (numero de producto): en un
-  // codigo largo empuja el renglon fuera del ancho y tambien sale cortado.
-  const pie = codigoAsignado ? `${p.codigo} · ${p.semana_ingreso}` : p.codigo;
-
+  // ponytail: modulo 0.5mm fue lo que sono siempre en la Zebra TLP 2844
+  // (203 dpi). La impresora de 2026-09-20 es otra unidad -- probablemente
+  // otro dpi -- y este valor no esta confirmado en ella. Correr /prueba-codigo
+  // en la impresora nueva y ajustar aqui si no lee.
+  const numero = String(Number(p.codigo.slice(3)));
   return `<div class="etiqueta">
     <div class="arriba">
       <div class="nombre">${escapar(p.nombre || 'El Dolarón')}</div>
@@ -186,49 +147,36 @@ function etiqueta(p) {
     </div>
     <div class="precios"><span class="ahora">${pesos(p.precio)}</span>${antes}</div>
     <div class="pie">
-      ${barra}<div class="codigo">${pie}</div>
+      ${svgCode128(numero, { modulo: 0.5, alto: 4.8 })}<div class="codigo">${p.codigo} · ${p.semana_ingreso}</div>
     </div>
   </div>`;
 }
 
 document.getElementById('todas').addEventListener('click', () => {
-  lista.querySelectorAll('input[type=checkbox]').forEach((c) => { c.checked = true; });
+  lista.querySelectorAll('input').forEach((c) => { c.checked = true; });
 });
 document.getElementById('ninguna').addEventListener('click', () => {
-  lista.querySelectorAll('input[type=checkbox]').forEach((c) => { c.checked = false; });
+  lista.querySelectorAll('input').forEach((c) => { c.checked = false; });
 });
 
 document.getElementById('imprimir').addEventListener('click', async () => {
-  const ids = [...lista.querySelectorAll('input[type=checkbox]:checked')].map((c) => c.value);
-  const cantidadesBin = [...lista.querySelectorAll('input.cantidad')]
-    .map((c) => ({ codigo: c.dataset.codigo, cantidad: Math.min(99, Math.max(0, Number(c.value) || 0)) }))
-    .filter((b) => b.cantidad > 0);
+  const ids = [...lista.querySelectorAll('input:checked')].map((c) => c.value);
+  if (ids.length === 0) return;
 
-  if (ids.length === 0 && cantidadesBin.length === 0) return;
-
-  let piezasHoja = [];
-  if (ids.length > 0) {
-    // El codigo se asigna aqui: una pieza sin etiqueta impresa no necesita codigo.
-    const respuesta = await fetch('/api/etiquetas', {
-      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ids }),
-    });
-    const piezas = await respuesta.json();
-    if (!respuesta.ok) {
-      resumen.textContent = piezas.error;
-      return;
-    }
-    // Una etiqueta por pieza: cinco tazas iguales necesitan cinco etiquetas.
-    piezasHoja = piezas.flatMap((p) => Array.from({ length: Math.min(99, Math.max(1, p.stock ?? 1)) }, () => etiqueta(p)));
+  // El codigo se asigna aqui: una pieza sin etiqueta impresa no necesita codigo.
+  const respuesta = await fetch('/api/etiquetas', {
+    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ids }),
+  });
+  const piezas = await respuesta.json();
+  if (!respuesta.ok) {
+    resumen.textContent = piezas.error;
+    return;
   }
 
-  // Los bines no tienen stock: la cantidad la escribe quien va a pegar las
-  // etiquetas en las piezas que va a meter al bote.
-  const binesHoja = cantidadesBin.flatMap(({ codigo, cantidad }) => {
-    const bin = binesActuales.find((b) => b.codigo === codigo);
-    return bin ? Array.from({ length: cantidad }, () => etiqueta(bin)) : [];
-  });
-
-  hoja.innerHTML = piezasHoja.concat(binesHoja).join('');
+  // Una etiqueta por pieza: cinco tazas iguales necesitan cinco etiquetas.
+  hoja.innerHTML = piezas
+    .flatMap((p) => Array.from({ length: Math.min(99, Math.max(1, p.stock ?? 1)) }, () => etiqueta(p)))
+    .join('');
   print();
   await cargar();
 });

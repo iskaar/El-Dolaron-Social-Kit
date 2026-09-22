@@ -55,7 +55,7 @@
 <script type="module">
 import { svgCode128 } from '/code128.js';
 
-const botes = [['B20', 20], ['B40', 40], ['B60', 60]];
+const botes = [['BIN-20', 20], ['BIN-40', 40], ['BIN-60', 60]];
 document.getElementById('botes').innerHTML = botes.map(([codigo, precio]) => `
   <div class="bote">
     <div class="precio">$${precio}</div>
