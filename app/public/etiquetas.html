@@ -161,17 +161,23 @@ function etiqueta(p) {
   // de una pieza que llego con su propio codigo de fabrica) se imprimen tal
   // cual: buscarPieza() los encuentra por coincidencia exacta, y al no empezar
   // con "ED-" nunca se confunden con un numero reconstruido.
-  const contenido = p.codigo.startsWith('ED-') ? String(Number(p.codigo.slice(3))) : p.codigo;
+  const codigoAsignado = p.codigo.startsWith('ED-');
+  const contenido = codigoAsignado ? String(Number(p.codigo.slice(3))) : p.codigo;
 
   // ponytail: 0.5mm es lo maximo que sono siempre en la Zebra TLP 2844 (203 dpi)
   // y sigue sin confirmarse en la impresora de 2026-09-20 (correr /prueba-codigo
   // y ajustar si no lee). Un codigo largo (un barcode manual, no el numero
-  // corto de siempre) se angosta lo necesario para caber en los ~47mm utiles
-  // de la etiqueta -- formula de code128.js: 11 modulos por caracter mas 55 de
-  // encabezado/paro/zona muda.
-  const modulo = Math.min(0.5, 47 / (11 * contenido.length + 55));
+  // corto de siempre) se angosta lo necesario para caber en la etiqueta.
+  //
+  // 2026-09-21: un codigo de 11 digitos a 47mm (el presupuesto original) salio
+  // recortado -- la impresora no imprime hasta el borde declarado de 48.8mm
+  // utiles, tiene su propio margen ciego. 42mm de presupuesto deja mas aire
+  // real; si un codigo largo vuelve a salir cortado, bajar este numero.
+  const modulo = Math.min(0.5, 42 / (11 * contenido.length + 55));
   const barra = svgCode128(contenido, { modulo, alto: 4.8 });
-  const pie = esBin ? p.codigo : `${p.codigo} · ${p.semana_ingreso}`;
+  // "· S39" solo cuando el codigo mismo es corto (numero de producto): en un
+  // codigo largo empuja el renglon fuera del ancho y tambien sale cortado.
+  const pie = codigoAsignado ? `${p.codigo} · ${p.semana_ingreso}` : p.codigo;
 
   return `<div class="etiqueta">
     <div class="arriba">
