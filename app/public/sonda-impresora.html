@@ -1,0 +1,274 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>El Dolarón — sonda de impresora</title>
+<style>
+  :root { --azul:#16366B; --linea:#dfe3ea; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: #f4f6f9; color: #1a1f2b;
+    font-family: system-ui, -apple-system, sans-serif; }
+  header { background: var(--azul); color: #fff; padding: 14px 20px;
+    display: flex; gap: 16px; align-items: center; flex-wrap: wrap; }
+  header h1 { font-size: 18px; margin: 0; flex: 1; }
+  header a { color: #FFD447; font-size: 14px; }
+  main { padding: 20px; max-width: 860px; margin: 0 auto; }
+  .ayuda { font-size: 14px; line-height: 1.5; color: #333; max-width: 68ch; }
+  .paso { background: #fff; border: 1px solid var(--linea); border-radius: 12px;
+    padding: 16px; margin-bottom: 16px; }
+  .paso h2 { font-size: 15px; margin: 0 0 4px; }
+  .paso p { font-size: 13px; color: #5b6478; line-height: 1.45; margin: 0 0 12px; }
+  button { border: 0; border-radius: 8px; padding: 10px 14px; font-size: 14px;
+    font-weight: 600; cursor: pointer; background: var(--azul); color: #fff; }
+  button.claro { background: #fff; color: #1a1f2b; border: 1px solid var(--linea); }
+  button:disabled { opacity: 0.5; cursor: default; }
+  .botones { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  select { padding: 9px; border: 1px solid var(--linea); border-radius: 8px;
+    font-size: 14px; max-width: 100%; }
+  pre { background: #11151c; color: #d8e0ec; padding: 12px; border-radius: 8px;
+    font-size: 12px; line-height: 1.45; overflow-x: auto; white-space: pre-wrap;
+    word-break: break-word; margin: 12px 0 0; }
+  .vacio { color: #5b6478; font-size: 13px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Sonda de impresora</h1>
+  <a href="/etiquetas">← Etiquetas</a>
+</header>
+
+<main>
+  <p class="ayuda">
+    El controlador de Windows de la AE240 no respeta el tamaño de página: la etiqueta sale
+    corrida aunque los números estén bien. Esta pantalla no imprime etiquetas de verdad —
+    averigua <b>por dónde</b> se le puede hablar a la impresora directamente, sin el
+    diálogo de impresión, como ya se hizo con la Epson de tickets.
+    Corre los pasos en orden y mándame el texto del recuadro negro.
+  </p>
+
+  <div class="paso">
+    <h2>1. Buscar por Bluetooth</h2>
+    <p>
+      Prende la impresora y déjala a la mano. Si aparece en la lista, selecciónala.
+      Si no aparece <b>ninguna</b> impresora en la ventana del navegador, esta unidad
+      probablemente usa Bluetooth clásico, que el navegador no alcanza: pasa al paso 2.
+    </p>
+    <div class="botones">
+      <button id="buscar-bt" type="button">Buscar por Bluetooth</button>
+    </div>
+  </div>
+
+  <div class="paso">
+    <h2>2. Buscar por USB</h2>
+    <p>
+      Conecta la impresora a la computadora con el cable USB y selecciónala en la lista.
+      Sirve aunque el Bluetooth no haya funcionado.
+    </p>
+    <div class="botones">
+      <button id="buscar-usb" type="button">Buscar por USB</button>
+    </div>
+  </div>
+
+  <div class="paso">
+    <h2>3. Prueba de impresión</h2>
+    <p>
+      Se llena solo con lo que encuentren los pasos de arriba. Prueba los tres idiomas:
+      basta con que <b>uno</b> saque algo en la etiqueta — anota cuál fue.
+    </p>
+    <div class="botones">
+      <select id="destino"><option value="">Nada encontrado todavía</option></select>
+    </div>
+    <div class="botones" style="margin-top:10px">
+      <button id="probar-tspl" class="claro" type="button" disabled>Probar TSPL</button>
+      <button id="probar-escpos" class="claro" type="button" disabled>Probar ESC/POS</button>
+      <button id="probar-cpcl" class="claro" type="button" disabled>Probar CPCL</button>
+    </div>
+  </div>
+
+  <div class="paso">
+    <h2>Resultado</h2>
+    <div class="botones">
+      <button id="copiar" class="claro" type="button">Copiar todo</button>
+    </div>
+    <pre id="salida">Sin datos todavía.</pre>
+  </div>
+</main>
+
+<script type="module">
+/**
+ * Sonda de transporte y lenguaje de la impresora de etiquetas.
+ *
+ * El controlador de Windows de la AE240 BT no respeta ni el tamano de pagina
+ * ni los margenes: la etiqueta sale corrida y recortada aunque el dialogo de
+ * impresion tenga todo bien. La salida es hablarle directo, como impresora.js
+ * ya le habla a la Epson de tickets por WebUSB -- pero primero hay que saber
+ * por donde entra (BLE o USB) y que idioma entiende (TSPL, ESC/POS o CPCL),
+ * y eso no se adivina desde aqui: se pregunta a la impresora.
+ */
+
+// Web Bluetooth solo deja tocar servicios declarados de antemano. Esta lista
+// son los que usan las impresoras termicas baratas; sobra pedirlos todos.
+const SERVICIOS_CONOCIDOS = [
+  0x18f0, 0xff00, 0xff01, 0xff02, 0xffe0, 0xffe5, 0xfee7, 0xff80, 0xfff0,
+  '49535343-fe7d-4ae5-8fa9-9fafd205e455',
+  'e7810a71-73ae-499d-8c15-faa9aef0c3f2',
+  '0000fff0-0000-1000-8000-00805f9b34fb',
+];
+
+const salida = document.getElementById('salida');
+const destino = document.getElementById('destino');
+const renglones = [];
+// Cada destino encontrado: como escribirle, sin que el boton sepa de BLE ni USB.
+const destinos = new Map();
+
+function anotar(texto) {
+  renglones.push(texto);
+  salida.textContent = renglones.join('\n');
+}
+
+function registrarDestino(etiqueta, escribir) {
+  const clave = `d${destinos.size}`;
+  destinos.set(clave, { etiqueta, escribir });
+  if (destinos.size === 1) destino.innerHTML = '';
+  destino.insertAdjacentHTML('beforeend', `<option value="${clave}">${etiqueta}</option>`);
+  for (const id of ['probar-tspl', 'probar-escpos', 'probar-cpcl']) {
+    document.getElementById(id).disabled = false;
+  }
+}
+
+/* ---------- 1. Bluetooth ---------- */
+
+document.getElementById('buscar-bt').addEventListener('click', async () => {
+  if (!navigator.bluetooth) {
+    anotar('BLUETOOTH: este navegador no tiene Web Bluetooth.');
+    return;
+  }
+  try {
+    anotar('\n=== BLUETOOTH ===');
+    const aparato = await navigator.bluetooth.requestDevice({
+      acceptAllDevices: true, optionalServices: SERVICIOS_CONOCIDOS,
+    });
+    anotar(`aparato: ${aparato.name ?? '(sin nombre)'} · id ${aparato.id}`);
+
+    const servidor = await aparato.gatt.connect();
+    const servicios = await servidor.getPrimaryServices();
+    anotar(`servicios: ${servicios.length}`);
+
+    for (const servicio of servicios) {
+      anotar(`  servicio ${servicio.uuid}`);
+      const caracteristicas = await servicio.getCharacteristics();
+      for (const c of caracteristicas) {
+        const puede = Object.entries({
+          escribir: c.properties.write,
+          'escribir-sin-respuesta': c.properties.writeWithoutResponse,
+          leer: c.properties.read,
+          avisar: c.properties.notify,
+        }).filter(([, si]) => si).map(([nombre]) => nombre).join(', ');
+        anotar(`    caracteristica ${c.uuid} [${puede || 'sin permisos utiles'}]`);
+
+        if (c.properties.write || c.properties.writeWithoutResponse) {
+          registrarDestino(`BLE ${c.uuid.slice(0, 8)}`, async (datos) => {
+            // El MTU por defecto de BLE son 20 bytes: mandar de golpe se pierde.
+            const sinRespuesta = c.properties.writeWithoutResponse;
+            for (let i = 0; i < datos.length; i += 20) {
+              const trozo = datos.slice(i, i + 20);
+              if (sinRespuesta) await c.writeValueWithoutResponse(trozo);
+              else await c.writeValue(trozo);
+              await new Promise((r) => setTimeout(r, 20));
+            }
+          });
+        }
+      }
+    }
+    anotar(servicios.length === 0
+      ? 'NOTA: no expone servicios GATT utiles. Probablemente Bluetooth clasico: usa USB.'
+      : 'Bluetooth listo. Pasa al paso 3.');
+  } catch (error) {
+    anotar(`BLUETOOTH falló: ${error.name} — ${error.message}`);
+  }
+});
+
+/* ---------- 2. USB ---------- */
+
+document.getElementById('buscar-usb').addEventListener('click', async () => {
+  if (!navigator.usb) {
+    anotar('USB: este navegador no tiene WebUSB.');
+    return;
+  }
+  try {
+    anotar('\n=== USB ===');
+    const aparato = await navigator.usb.requestDevice({ filters: [] });
+    anotar(`aparato: ${aparato.productName ?? '(sin nombre)'} · ${aparato.manufacturerName ?? '(sin fabricante)'}`);
+    anotar(`ids: vendor 0x${aparato.vendorId.toString(16)} producto 0x${aparato.productId.toString(16)}`);
+
+    await aparato.open();
+    if (!aparato.configuration) await aparato.selectConfiguration(1);
+
+    for (const interfaz of aparato.configuration.interfaces) {
+      const alterna = interfaz.alternate;
+      anotar(`  interfaz ${interfaz.interfaceNumber} clase ${alterna.interfaceClass}`);
+      for (const punto of alterna.endpoints) {
+        anotar(`    endpoint ${punto.endpointNumber} ${punto.direction} ${punto.type}`);
+        if (punto.direction === 'out') {
+          registrarDestino(`USB interfaz ${interfaz.interfaceNumber} endpoint ${punto.endpointNumber}`,
+            async (datos) => {
+              try { await aparato.claimInterface(interfaz.interfaceNumber); } catch { /* ya reclamada */ }
+              await aparato.transferOut(punto.endpointNumber, datos);
+            });
+        }
+      }
+    }
+    anotar('USB listo. Pasa al paso 3.');
+  } catch (error) {
+    anotar(`USB falló: ${error.name} — ${error.message}`);
+  }
+});
+
+/* ---------- 3. Prueba de impresión ---------- */
+
+// 203 dpi = 8 puntos por mm. La etiqueta de 2 x 1 in son 406 x 203 puntos.
+const PRUEBAS = {
+  tspl: [
+    'SIZE 50.8 mm,25.4 mm', 'GAP 2 mm,0 mm', 'DIRECTION 1', 'CLS',
+    'BOX 8,8,398,195,2',
+    'TEXT 24,28,"3",0,1,1,"PRUEBA TSPL"',
+    'TEXT 24,90,"4",0,1,1,"$123"',
+    'PRINT 1,1', '',
+  ].join('\r\n'),
+  cpcl: [
+    '! 0 200 200 203 1', 'BOX 10 10 390 190 2',
+    'TEXT 4 0 30 30 PRUEBA CPCL', 'TEXT 4 0 30 90 $123',
+    'FORM', 'PRINT', '',
+  ].join('\r\n'),
+  escpos: `\x1b@PRUEBA ESC/POS\n$123\n\n\n`,
+};
+
+async function probar(idioma) {
+  const elegido = destinos.get(destino.value);
+  if (!elegido) {
+    anotar('No hay destino seleccionado.');
+    return;
+  }
+  anotar(`\n--- enviando ${idioma.toUpperCase()} a ${elegido.etiqueta} ---`);
+  try {
+    await elegido.escribir(new TextEncoder().encode(PRUEBAS[idioma]));
+    anotar(`${idioma.toUpperCase()}: enviado sin error. ¿Salió algo en la etiqueta?`);
+  } catch (error) {
+    anotar(`${idioma.toUpperCase()} falló: ${error.name} — ${error.message}`);
+  }
+}
+
+document.getElementById('probar-tspl').addEventListener('click', () => probar('tspl'));
+document.getElementById('probar-escpos').addEventListener('click', () => probar('escpos'));
+document.getElementById('probar-cpcl').addEventListener('click', () => probar('cpcl'));
+
+document.getElementById('copiar').addEventListener('click', async () => {
+  await navigator.clipboard.writeText(salida.textContent);
+  const boton = document.getElementById('copiar');
+  boton.textContent = 'Copiado';
+  setTimeout(() => { boton.textContent = 'Copiar todo'; }, 1500);
+});
+</script>
+</body>
+</html>
