@@ -31,23 +31,23 @@
   /* Impresora de 2 x 1 in (50.8 x 25.4 mm), 2 in a lo ancho del cabezal.
      Reemplaza la Zebra TLP 2844 (57 x 32 mm) del 2026-09-20. Escalado
      proporcional desde ese diseno; el ancho de modulo del codigo de barras
-     sigue pendiente de calibrar en esta impresora con /prueba-codigo. */
+     sigue pendiente de calibrar en esta impresora con /prueba-codigo.
+     Sin logo: Isaac lo quito para darle ese espacio al precio, que es lo
+     que se lee de mas lejos. */
   #hoja { display: none; }
-  .etiqueta { width: 50.8mm; height: 25.4mm; padding: 1.2mm; border: 0.2mm dashed #bbb;
+  .etiqueta { width: 50.8mm; height: 25.4mm; padding: 1mm; border: 0.2mm dashed #bbb;
     display: flex; flex-direction: column; justify-content: space-between; overflow: hidden; }
-  .etiqueta .arriba { display: flex; justify-content: space-between; gap: 1.2mm; align-items: flex-start; }
-  .etiqueta .marca { flex: 0 0 auto; line-height: 0; }
   /* El nombre es lo que se lee de cerca, asi que se lleva el espacio sobrante.
      Dos renglones es lo que cabe sin empujar el codigo de barras, y los
      nombres largos se cortan con puntos suspensivos. */
-  .etiqueta .nombre { font-size: 2.6mm; line-height: 1.15; font-weight: 600;
+  .etiqueta .nombre { font-size: 2.9mm; line-height: 1.15; font-weight: 600;
     display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
   .etiqueta .precios { display: flex; align-items: baseline; gap: 1.5mm; }
-  .etiqueta .ahora { font-size: 5mm; font-weight: 800; letter-spacing: -0.15mm; }
-  .etiqueta .antes { font-size: 2.4mm; text-decoration: line-through; color: #555; }
+  .etiqueta .ahora { font-size: 6.8mm; font-weight: 800; letter-spacing: -0.15mm; }
+  .etiqueta .antes { font-size: 2.6mm; text-decoration: line-through; color: #555; }
   /* El codigo de barras ocupa su propio renglon: recortado no lo lee el lector. */
   .etiqueta .pie { text-align: center; }
-  .etiqueta .codigo { font-size: 2mm; font-family: ui-monospace, monospace; letter-spacing: 0.15mm; }
+  .etiqueta .codigo { font-size: 2.1mm; font-family: ui-monospace, monospace; letter-spacing: 0.15mm; }
   .etiqueta svg { display: block; margin: 0 auto; }
 
   @media print {
@@ -89,7 +89,6 @@
 
 <script type="module">
 import { svgCode128 } from '/code128.js';
-import { svgLogoD } from '/logo.js';
 
 const lista = document.getElementById('lista');
 const hoja = document.getElementById('hoja');
@@ -136,10 +135,7 @@ function etiqueta(p) {
   // en la impresora nueva y ajustar aqui si no lee.
   const numero = String(Number(p.codigo.slice(3)));
   return `<div class="etiqueta">
-    <div class="arriba">
-      <div class="nombre">${escapar(p.nombre || 'El Dolarón')}</div>
-      <div class="marca">${svgLogoD({ alto: 7 })}</div>
-    </div>
+    <div class="nombre">${escapar(p.nombre || 'El Dolarón')}</div>
     <div class="precios"><span class="ahora">${pesos(p.precio)}</span>${antes}</div>
     <div class="pie">
       ${svgCode128(numero, { modulo: 0.5, alto: 5.5 })}<div class="codigo">${p.codigo} · ${p.semana_ingreso}</div>
