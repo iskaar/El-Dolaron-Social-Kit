@@ -73,8 +73,10 @@
   <div class="paso">
     <h2>3. Prueba de impresión</h2>
     <p>
-      Se llena solo con lo que encuentren los pasos de arriba. Prueba los tres idiomas:
-      basta con que <b>uno</b> saque algo en la etiqueta — anota cuál fue.
+      Se llena solo con lo que encuentren los pasos de arriba. Déjalo en
+      <b>TODOS (barrido)</b> y aprieta un idioma: le manda la misma prueba a cada
+      endpoint, uno por uno, con su clave impresa en la etiqueta (<code>TSPL d0</code>,
+      <code>TSPL d1</code>…). Basta con que <b>una</b> salga: anota qué clave dice.
     </p>
     <div class="botones">
       <select id="destino"><option value="">Nada encontrado todavía</option></select>
@@ -129,9 +131,11 @@ function anotar(texto) {
 
 function registrarDestino(etiqueta, escribir) {
   const clave = `d${destinos.size}`;
-  destinos.set(clave, { etiqueta, escribir });
-  if (destinos.size === 1) destino.innerHTML = '';
-  destino.insertAdjacentHTML('beforeend', `<option value="${clave}">${etiqueta}</option>`);
+  destinos.set(clave, { etiqueta: `${clave} · ${etiqueta}`, clave, escribir });
+  if (destinos.size === 1) {
+    destino.innerHTML = '<option value="*">TODOS (barrido)</option>';
+  }
+  destino.insertAdjacentHTML('beforeend', `<option value="${clave}">${clave} · ${etiqueta}</option>`);
   for (const id of ['probar-tspl', 'probar-escpos', 'probar-cpcl']) {
     document.getElementById(id).disabled = false;
   }
@@ -168,7 +172,9 @@ document.getElementById('buscar-bt').addEventListener('click', async () => {
         anotar(`    caracteristica ${c.uuid} [${puede || 'sin permisos utiles'}]`);
 
         if (c.properties.write || c.properties.writeWithoutResponse) {
-          registrarDestino(`BLE ${c.uuid.slice(0, 8)}`, async (datos) => {
+          // Cuatro caracteristicas comparten el prefijo 49535343: hace falta el
+          // segundo grupo del uuid para distinguirlas en la lista y en la etiqueta.
+          registrarDestino(`BLE ${c.uuid.slice(4, 8)}-${c.uuid.slice(9, 13)}`, async (datos) => {
             // El MTU por defecto de BLE son 20 bytes: mandar de golpe se pierde.
             const sinRespuesta = c.properties.writeWithoutResponse;
             for (let i = 0; i < datos.length; i += 20) {
@@ -228,35 +234,44 @@ document.getElementById('buscar-usb').addEventListener('click', async () => {
 /* ---------- 3. Prueba de impresión ---------- */
 
 // 203 dpi = 8 puntos por mm. La etiqueta de 2 x 1 in son 406 x 203 puntos.
+// Cada prueba imprime la clave del destino (d0, d1, ...): en el barrido salen
+// varias etiquetas seguidas y hay que saber cual endpoint saco cual.
 const PRUEBAS = {
-  tspl: [
+  tspl: (clave) => [
     'SIZE 50.8 mm,25.4 mm', 'GAP 2 mm,0 mm', 'DIRECTION 1', 'CLS',
     'BOX 8,8,398,195,2',
-    'TEXT 24,28,"3",0,1,1,"PRUEBA TSPL"',
+    `TEXT 24,28,"3",0,1,1,"TSPL ${clave}"`,
     'TEXT 24,90,"4",0,1,1,"$123"',
     'PRINT 1,1', '',
   ].join('\r\n'),
-  cpcl: [
+  cpcl: (clave) => [
     '! 0 200 200 203 1', 'BOX 10 10 390 190 2',
-    'TEXT 4 0 30 30 PRUEBA CPCL', 'TEXT 4 0 30 90 $123',
+    `TEXT 4 0 30 30 CPCL ${clave}`, 'TEXT 4 0 30 90 $123',
     'FORM', 'PRINT', '',
   ].join('\r\n'),
-  escpos: `\x1b@PRUEBA ESC/POS\n$123\n\n\n`,
+  escpos: (clave) => `\x1b@ESCPOS ${clave}\n$123\n\n\n`,
 };
 
 async function probar(idioma) {
-  const elegido = destinos.get(destino.value);
-  if (!elegido) {
+  const elegidos = destino.value === '*'
+    ? [...destinos.values()]
+    : [destinos.get(destino.value)].filter(Boolean);
+  if (elegidos.length === 0) {
     anotar('No hay destino seleccionado.');
     return;
   }
-  anotar(`\n--- enviando ${idioma.toUpperCase()} a ${elegido.etiqueta} ---`);
-  try {
-    await elegido.escribir(new TextEncoder().encode(PRUEBAS[idioma]));
-    anotar(`${idioma.toUpperCase()}: enviado sin error. ¿Salió algo en la etiqueta?`);
-  } catch (error) {
-    anotar(`${idioma.toUpperCase()} falló: ${error.name} — ${error.message}`);
+  for (const elegido of elegidos) {
+    anotar(`\n--- enviando ${idioma.toUpperCase()} a ${elegido.etiqueta} ---`);
+    try {
+      await elegido.escribir(new TextEncoder().encode(PRUEBAS[idioma](elegido.clave)));
+      anotar(`${idioma.toUpperCase()} ${elegido.clave}: enviado sin error.`);
+    } catch (error) {
+      anotar(`${idioma.toUpperCase()} ${elegido.clave} falló: ${error.name} — ${error.message}`);
+    }
+    // La impresora necesita respirar entre trabajos o se come el siguiente.
+    if (elegidos.length > 1) await new Promise((r) => setTimeout(r, 1200));
   }
+  anotar('¿Salió algo en la etiqueta? Anota la clave impresa.');
 }
 
 document.getElementById('probar-tspl').addEventListener('click', () => probar('tspl'));
