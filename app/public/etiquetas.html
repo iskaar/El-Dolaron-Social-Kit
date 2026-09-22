@@ -27,39 +27,6 @@
   .renglon .precio { font-weight: 700; }
   .vacio { padding: 24px; text-align: center; color: #5b6478; }
   .ayuda { font-size: 13px; color: #5b6478; line-height: 1.45; margin: 0 0 16px; max-width: 70ch; }
-
-  /* Impresora de 2 x 1 in (50.8 x 25.4 mm), 2 in a lo ancho del cabezal.
-     Reemplaza la Zebra TLP 2844 (57 x 32 mm) del 2026-09-20. Escalado
-     proporcional desde ese diseno; el ancho de modulo del codigo de barras
-     sigue pendiente de calibrar en esta impresora con /prueba-codigo.
-     Sin logo: Isaac lo quito para darle ese espacio al precio, que es lo
-     que se lee de mas lejos. */
-  #hoja { display: none; }
-  .etiqueta { width: 50.8mm; height: 25.4mm; padding: 1mm; border: 0.2mm dashed #bbb;
-    display: flex; flex-direction: column; justify-content: space-between; overflow: hidden; }
-  /* El nombre es lo que se lee de cerca, asi que se lleva el espacio sobrante.
-     Dos renglones es lo que cabe sin empujar el codigo de barras, y los
-     nombres largos se cortan con puntos suspensivos. */
-  .etiqueta .nombre { font-size: 2.9mm; line-height: 1.15; font-weight: 600;
-    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
-  .etiqueta .precios { display: flex; align-items: baseline; gap: 1.5mm; }
-  .etiqueta .ahora { font-size: 6.8mm; font-weight: 800; letter-spacing: -0.15mm; }
-  .etiqueta .antes { font-size: 2.6mm; text-decoration: line-through; color: #555; }
-  /* El codigo de barras ocupa su propio renglon: recortado no lo lee el lector. */
-  .etiqueta .pie { text-align: center; }
-  .etiqueta .codigo { font-size: 2.1mm; font-family: ui-monospace, monospace; letter-spacing: 0.15mm; }
-  .etiqueta svg { display: block; margin: 0 auto; }
-
-  @media print {
-    header, .barra, .lista, .vacio, .ayuda { display: none !important; }
-    body { background: #fff; }
-    main { padding: 0; max-width: none; }
-    #hoja { display: block !important; }
-    /* Sin borde en papel termico, y una etiqueta por pagina. */
-    .etiqueta { border: 0; break-inside: avoid; }
-    .etiqueta:not(:last-child) { break-after: page; }
-    @page { size: 50.8mm 25.4mm; margin: 0; }
-  }
 </style>
 </head>
 <body>
@@ -78,20 +45,19 @@
   </div>
 
   <p class="ayuda">
-    Etiqueta de 2 × 1 in (50.8 × 25.4 mm). En el diálogo de impresión: la impresora de
-    etiquetas, escala <b>100 %</b> y <b>sin</b> «Ajustar a la página» ni márgenes.
-    Escalar la hoja deforma las barras y el lector deja de leerlas.
+    Prende la impresora de etiquetas antes de imprimir. La primera vez de cada sesión
+    el navegador pregunta cuál es: escoge <b>AE240-bt</b> en la ventana que sale.
+    Ya no hay diálogo de impresión — la etiqueta se le manda directo, así que no hay
+    escala ni márgenes que ajustar.
   </p>
 
   <div class="lista" id="lista"><div class="vacio">Cargando…</div></div>
-  <div id="hoja"></div>
 </main>
 
 <script type="module">
-import { svgCode128 } from '/code128.js';
+import { conectarEtiquetera, etiqueteraLista, imprimirEtiquetas } from '/etiquetera.js';
 
 const lista = document.getElementById('lista');
-const hoja = document.getElementById('hoja');
 const resumen = document.getElementById('resumen');
 const pesos = (centavos) => `$${Math.round(centavos / 100)}`;
 const escapar = (texto) => texto.replace(/[<>&"]/g, (c) => ({'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;'}[c]));
@@ -122,27 +88,6 @@ async function cargar() {
     </label>`).join('');
 }
 
-function etiqueta(p) {
-  const antes = p.precio_lista > p.precio ? `<span class="antes">${pesos(p.precio_lista)}</span>` : '';
-  // El codigo completo (ED-000123, 9 caracteres) no cabe legible en una etiqueta
-  // chica: la barra codifica solo el numero, sin "ED-" ni ceros (p.ej. "123").
-  // El texto impreso sigue mostrando el codigo completo; buscarPieza() en
-  // caja.html reconstruye "ED-000123" a partir del numero que entrega el lector.
-  //
-  // ponytail: modulo 0.5mm fue lo que sono siempre en la Zebra TLP 2844
-  // (203 dpi). La impresora de 2026-09-20 es otra unidad -- probablemente
-  // otro dpi -- y este valor no esta confirmado en ella. Correr /prueba-codigo
-  // en la impresora nueva y ajustar aqui si no lee.
-  const numero = String(Number(p.codigo.slice(3)));
-  return `<div class="etiqueta">
-    <div class="nombre">${escapar(p.nombre || 'El Dolarón')}</div>
-    <div class="precios"><span class="ahora">${pesos(p.precio)}</span>${antes}</div>
-    <div class="pie">
-      ${svgCode128(numero, { modulo: 0.5, alto: 5.5 })}<div class="codigo">${p.codigo} · ${p.semana_ingreso}</div>
-    </div>
-  </div>`;
-}
-
 document.getElementById('todas').addEventListener('click', () => {
   lista.querySelectorAll('input').forEach((c) => { c.checked = true; });
 });
@@ -154,6 +99,19 @@ document.getElementById('imprimir').addEventListener('click', async () => {
   const ids = [...lista.querySelectorAll('input:checked')].map((c) => c.value);
   if (ids.length === 0) return;
 
+  // Antes que nada, y antes de cualquier espera: pedir la impresora gasta el
+  // permiso del clic, y el navegador ya no lo da despues de un fetch.
+  if (!etiqueteraLista()) {
+    try {
+      await conectarEtiquetera();
+    } catch (error) {
+      resumen.textContent = error.name === 'NotFoundError'
+        ? 'No se escogió impresora. Préndela y vuelve a intentar.'
+        : `No se pudo conectar la impresora: ${error.message}`;
+      return;
+    }
+  }
+
   // El codigo se asigna aqui: una pieza sin etiqueta impresa no necesita codigo.
   const respuesta = await fetch('/api/etiquetas', {
     method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ids }),
@@ -164,11 +122,23 @@ document.getElementById('imprimir').addEventListener('click', async () => {
     return;
   }
 
-  // Una etiqueta por pieza: cinco tazas iguales necesitan cinco etiquetas.
-  hoja.innerHTML = piezas
-    .flatMap((p) => Array.from({ length: Math.min(99, Math.max(1, p.stock ?? 1)) }, () => etiqueta(p)))
-    .join('');
-  print();
+  let impresas = 0;
+  for (const p of piezas) {
+    // Una etiqueta por pieza en existencia: cinco tazas iguales, cinco etiquetas.
+    const copias = Math.min(99, Math.max(1, p.stock ?? 1));
+    resumen.textContent = `Imprimiendo ${impresas + 1} de ${piezas.length}…`;
+    if (!await imprimirEtiquetas(p, copias)) {
+      resumen.textContent = `Se cortó la impresora en la pieza ${impresas + 1} de ${piezas.length}. Las que faltan siguen en la lista.`;
+      break;
+    }
+    impresas += 1;
+    // ponytail: pausa entre piezas para no llenarle el buffer a la AE240. Si un
+    // lote largo sale completo sin ella, sobra; si salen etiquetas en blanco,
+    // subirla antes de tocar cualquier otra cosa.
+    await new Promise((r) => setTimeout(r, 400));
+  }
+
+  if (impresas === piezas.length) resumen.textContent = `${impresas} piezas etiquetadas.`;
   await cargar();
 });
 
