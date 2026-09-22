@@ -41,14 +41,16 @@
     <button id="imprimir" type="button">Imprimir seleccionadas</button>
     <button id="todas" class="claro" type="button">Seleccionar todas</button>
     <button id="ninguna" class="claro" type="button">Deseleccionar todas</button>
+    <button id="otra" class="claro" type="button">¿No aparece la impresora?</button>
     <span id="resumen"></span>
   </div>
 
   <p class="ayuda">
     Prende la impresora de etiquetas antes de imprimir. La primera vez de cada sesión
     el navegador pregunta cuál es: escoge <b>AE240-bt</b> en la ventana que sale.
-    Ya no hay diálogo de impresión — la etiqueta se le manda directo, así que no hay
-    escala ni márgenes que ajustar.
+    Si esa ventana sale vacía, aprieta <b>«¿No aparece la impresora?»</b>, que enseña
+    todos los aparatos Bluetooth cercanos. Ya no hay diálogo de impresión — la etiqueta
+    se le manda directo, así que no hay escala ni márgenes que ajustar.
   </p>
 
   <div class="lista" id="lista"><div class="vacio">Cargando…</div></div>
@@ -95,6 +97,25 @@ document.getElementById('ninguna').addEventListener('click', () => {
   lista.querySelectorAll('input').forEach((c) => { c.checked = false; });
 });
 
+/** Traduce la falla de Bluetooth a algo accionable parado junto a la impresora. */
+function avisarFalla(error) {
+  resumen.textContent = error.name === 'NotFoundError'
+    ? 'No se escogió impresora. Préndela y vuelve a intentar, o usa «¿No aparece la impresora?».'
+    : `No se pudo conectar la impresora: ${error.message}`;
+}
+
+// La lista filtrada por nombre es la de diario. Esta es la salida para cuando
+// la impresora no sale ahi: enseña todos los aparatos Bluetooth cercanos, que
+// es como la sonda la encontro.
+document.getElementById('otra').addEventListener('click', async () => {
+  try {
+    await conectarEtiquetera({ cualquiera: true });
+    resumen.textContent = 'Impresora conectada. Ya puedes imprimir.';
+  } catch (error) {
+    avisarFalla(error);
+  }
+});
+
 document.getElementById('imprimir').addEventListener('click', async () => {
   const ids = [...lista.querySelectorAll('input:checked')].map((c) => c.value);
   if (ids.length === 0) return;
@@ -105,9 +126,7 @@ document.getElementById('imprimir').addEventListener('click', async () => {
     try {
       await conectarEtiquetera();
     } catch (error) {
-      resumen.textContent = error.name === 'NotFoundError'
-        ? 'No se escogió impresora. Préndela y vuelve a intentar.'
-        : `No se pudo conectar la impresora: ${error.message}`;
+      avisarFalla(error);
       return;
     }
   }

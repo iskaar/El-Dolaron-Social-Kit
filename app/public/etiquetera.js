@@ -134,15 +134,23 @@ export function etiqueteraLista() {
  * clic: el permiso para abrir la ventana se vence en cuanto el navegador ve
  * que el clic ya se fue en otra cosa.
  *
+ * El filtro va por NOMBRE, no por servicio. La AE240 no anuncia fff0 en su
+ * publicidad BLE -- ese servicio solo aparece despues de conectarse -- asi que
+ * filtrar por servicio deja la ventana del navegador vacia aunque la impresora
+ * este prendida y a un palmo. El nombre si viene en la publicidad: la sonda lo
+ * leyo como "AE240-bt_1DDE-LE". Con `cualquiera` se cae a la lista completa,
+ * que es exactamente lo que uso la sonda y funciono: es la salida si algun dia
+ * la unidad se llama de otro modo.
+ *
  * ponytail: sin reconexion automatica. getDevices() existe a medias entre
  * versiones de Chrome y se cuelga con la impresora apagada; un clic al
  * principio del turno es mas barato que esa complicacion. Si estorba,
  * ese es el camino.
  */
-export async function conectarEtiquetera() {
-  const aparato = await navigator.bluetooth.requestDevice({
-    filters: [{ services: [SERVICIO] }],
-  });
+export async function conectarEtiquetera({ cualquiera = false } = {}) {
+  const aparato = await navigator.bluetooth.requestDevice(cualquiera
+    ? { acceptAllDevices: true, optionalServices: [SERVICIO] }
+    : { filters: [{ namePrefix: 'AE240' }], optionalServices: [SERVICIO] });
   const servidor = await aparato.gatt.connect();
   const servicio = await servidor.getPrimaryService(SERVICIO);
   caracteristica = await servicio.getCharacteristic(CARACTERISTICA);
