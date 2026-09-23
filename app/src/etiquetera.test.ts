@@ -4,7 +4,7 @@
 // etiqueta, que es donde se rompio todo lo anterior.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { tsplEtiqueta, partirNombre, NOMBRE_MAX, TSPL_REGLA, TSPL_CALIBRAR } from '../public/etiquetera.js';
+import { tsplEtiqueta, tsplMarco, partirNombre, NOMBRE_MAX, TSPL_REGLA, TSPL_CALIBRAR } from '../public/etiquetera.js';
 
 const PIEZA = {
   nombre: 'Taza de ceramica azul',
@@ -117,4 +117,12 @@ test('la regla marca cada 2 mm hasta cubrir la etiqueta', () => {
   // El marco es la referencia: sin el no se sabe donde cree la impresora que
   // esta la etiqueta, que es justo lo que se esta midiendo.
   assert.ok(TSPL_REGLA.includes('BOX 0,0,405,202,2'));
+});
+
+test('el marco de prueba lleva su OFFSET y saca dos etiquetas', () => {
+  const tspl = tsplMarco(-5);
+  assert.ok(tspl.includes('\r\nOFFSET -5 mm\r\n'));
+  assert.ok(tspl.includes('"OFFSET -5 mm"'));
+  // Dos: la primera todavia sale con la parada anterior, la segunda es la buena.
+  assert.ok(tspl.trimEnd().endsWith('PRINT 2,1'));
 });

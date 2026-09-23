@@ -52,29 +52,47 @@
   </div>
 
   <div class="paso">
-    <h2>2. Que la impresora mida el rollo</h2>
+    <h2>2. Cuadrar dónde arranca el trabajo</h2>
     <p>
-      Avanza un par de etiquetas leyendo el sensor y se queda con la altura y la
-      separación reales. Salen una o dos etiquetas en blanco: es normal.
-      <b>Prueba con esto solo primero</b> — puede bastar.
+      Que el botón de avance pare clavado en cada etiqueta quiere decir que el sensor
+      está bien: lo que está corrido es dónde <b>empieza</b> a imprimir. Esto manda un
+      marco del tamaño de la etiqueta con un <b>OFFSET</b> dado. Salen dos etiquetas y
+      <b>la que cuenta es la segunda</b> (la primera todavía trae la parada anterior).
+      Empieza con <b>0</b> para ver de cuánto es el descuadre, y luego sube o baja de
+      milímetro en milímetro hasta que el marco caiga justo sobre el borde del papel.
     </p>
     <div class="botones">
-      <button id="calibrar" class="claro" type="button">Calibrar sensor</button>
+      <input id="offset" type="number" step="0.5" value="0" inputmode="decimal">
+      <button id="marco" type="button">Probar marco</button>
       <button id="probar" class="claro" type="button">Imprimir etiqueta de prueba</button>
     </div>
   </div>
 
   <div class="paso">
-    <h2>3. Si todavía sale corrida, medirlo</h2>
+    <h2>3. Si el OFFSET no mueve nada</h2>
     <p>
-      Imprime una regla: el <b>marco</b> es donde la impresora cree que está la etiqueta
-      y las rayas van cada 2 mm. Mira en qué número cae el <b>borde de arriba del papel</b>
-      y escríbelo aquí. Si el marco quedó arriba del papel, el número va en negativo.
+      Entonces este firmware lo ignora y hay que correr el contenido a mano. La regla
+      imprime rayas cada 2 mm desde donde la impresora cree que empieza la etiqueta:
+      mira en qué número cae el <b>borde de arriba del papel</b> y escríbelo. Negativo
+      si el marco quedó arriba del papel. <b>Dime el número que saliste midiendo</b> —
+      corrimientos de más de 3 mm recortan el renglón de abajo y hay que apretar el
+      diseño, no sólo moverlo.
     </p>
     <div class="botones">
       <button id="regla" class="claro" type="button">Imprimir regla</button>
       <input id="mm" type="number" step="0.5" placeholder="mm" inputmode="decimal">
       <button id="guardar" type="button">Guardar y probar</button>
+    </div>
+  </div>
+
+  <div class="paso">
+    <h2>Si nada de esto cuadra</h2>
+    <p>
+      El sensor se puede remedir por software, aunque el botón de avance dice que no es
+      ahí donde está el problema.
+    </p>
+    <div class="botones">
+      <button id="calibrar" class="claro" type="button">Remedir el rollo (GAPDETECT)</button>
     </div>
     <div class="estado" id="estado"></div>
   </div>
@@ -82,12 +100,13 @@
 
 <script type="module">
 import {
-  conectarEtiquetera, etiqueteraLista, mandarTspl, tsplEtiqueta,
+  conectarEtiquetera, etiqueteraLista, mandarTspl, tsplEtiqueta, tsplMarco,
   corrimiento, guardarCorrimiento, TSPL_CALIBRAR, TSPL_REGLA,
 } from '/etiquetera.js';
 
 const estado = document.getElementById('estado');
 const mm = document.getElementById('mm');
+const offset = document.getElementById('offset');
 
 // 203 dpi: 8 puntos por milimetro. Isaac mide en mm, la impresora cuenta puntos.
 const PUNTOS_POR_MM = 8;
@@ -126,6 +145,8 @@ function alImprimir(id, arma, aviso) {
 document.getElementById('conectar').addEventListener('click', () => conectar(false));
 document.getElementById('conectar-todos').addEventListener('click', () => conectar(true));
 
+alImprimir('marco', () => tsplMarco(Number(offset.value) || 0),
+  'Van dos marcos: mira el SEGUNDO. ¿Sus lados caen sobre el borde del papel?');
 alImprimir('calibrar', () => TSPL_CALIBRAR,
   'Sensor calibrado. Imprime la etiqueta de prueba para ver si ya quedó.');
 alImprimir('regla', () => TSPL_REGLA,

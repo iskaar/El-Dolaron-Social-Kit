@@ -154,6 +154,31 @@ const MEDIDA = ['SIZE 50.8 mm,25.4 mm', 'GAP 2 mm,0 mm', 'DIRECTION 1'];
 export const TSPL_CALIBRAR = `${[...MEDIDA, 'GAPDETECT'].join('\r\n')}\r\n`;
 
 /**
+ * Un marco del tamano declarado de la etiqueta, con un OFFSET dado.
+ *
+ * El sensor de separacion esta bien: el boton de avance para clavado en cada
+ * etiqueta. Lo que esta mal es donde ARRANCA el trabajo — la impresora deja el
+ * papel en la posicion de corte al terminar y empieza el siguiente sin
+ * regresarlo. OFFSET es justamente el comando que corre esa parada.
+ *
+ * El marco es el instrumento: si sus cuatro lados caen sobre el borde del
+ * papel, ese OFFSET es el bueno y no hay nada mas que medir. Imprime dos
+ * etiquetas a proposito — la primera todavia sale con la parada anterior, asi
+ * que la que cuenta es la SEGUNDA.
+ */
+export function tsplMarco(offsetMm) {
+  return `${[
+    'SIZE 50.8 mm,25.4 mm', 'GAP 2 mm,0 mm',
+    `OFFSET ${offsetMm} mm`,
+    'DIRECTION 1', 'CLS',
+    `BOX 0,0,${ANCHO - 1},202,3`,
+    `TEXT ${MARGEN},24,"2",0,1,1,"OFFSET ${offsetMm} mm"`,
+    `TEXT ${MARGEN},150,"2",0,1,1,"abajo"`,
+    'PRINT 2,1', '',
+  ].join('\r\n')}`;
+}
+
+/**
  * Una regla impresa, para medir el descuadre en vez de adivinarlo: el marco es
  * donde la impresora CREE que esta la etiqueta y las rayas van cada 2 mm desde
  * ese borde. Comparando el marco contra el borde real del papel se lee cuanto
