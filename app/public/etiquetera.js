@@ -36,6 +36,27 @@ const MODULO = 2;
 /** Lo que cabe en un renglon de nombre, en caracteres. */
 export const NOMBRE_MAX = Math.floor((ANCHO - MARGEN * 2) / ANCHO_NOMBRE);
 
+const CLAVE_CORRIMIENTO = 'etiqueta-corrimiento';
+
+/**
+ * La AE240 no empieza a imprimir donde empieza la etiqueta: sin corregir, el
+ * primer renglon cae en la etiqueta anterior. Es el mismo descuadre que daba el
+ * controlador de Windows por su lado, asi que viene de la impresora y no del
+ * camino que le manda el trabajo.
+ *
+ * Se mide con /calibrar-etiqueta y se guarda por navegador. El valor por omision
+ * es 0 a proposito: mientras nadie lo mida con la impresora enfrente, no hay un
+ * numero honesto que poner aqui.
+ */
+export function corrimiento() {
+  const guardado = Number(globalThis.localStorage?.getItem(CLAVE_CORRIMIENTO));
+  return Number.isFinite(guardado) ? guardado : 0;
+}
+
+export function guardarCorrimiento(puntos) {
+  globalThis.localStorage?.setItem(CLAVE_CORRIMIENTO, String(Math.round(puntos)));
+}
+
 /**
  * TEXT de TSPL va entre comillas dobles y no tiene escape confiable entre
  * firmwares: la comilla y la diagonal invertida se quitan en vez de arriesgar
@@ -81,8 +102,10 @@ const centrarBarras = (contenido) =>
  *
  * @param pieza {{ nombre: string, precio: number, precio_lista: number, codigo: string, semana_ingreso: string }}
  * @param copias cuantas etiquetas iguales — una por pieza en existencia
+ * @param y0 corrimiento vertical en puntos, de la calibracion
  */
-export function tsplEtiqueta(pieza, copias = 1) {
+export function tsplEtiqueta(pieza, copias = 1, y0 = corrimiento()) {
+  const y = (base) => Math.max(0, base + y0);
   const pesos = (centavos) => `$${Math.round(centavos / 100)}`;
   const [primero, segundo] = partirNombre(pieza.nombre || 'El Dolaron');
   const precio = pesos(pieza.precio);
@@ -96,29 +119,55 @@ export function tsplEtiqueta(pieza, copias = 1) {
     'GAP 2 mm,0 mm',
     'DIRECTION 1',
     'CLS',
-    `TEXT ${MARGEN},8,"2",0,1,1,"${primero}"`,
+    `TEXT ${MARGEN},${y(8)},"2",0,1,1,"${primero}"`,
   ];
-  if (segundo) ordenes.push(`TEXT ${MARGEN},30,"2",0,1,1,"${segundo}"`);
+  if (segundo) ordenes.push(`TEXT ${MARGEN},${y(30)},"2",0,1,1,"${segundo}"`);
 
   // El precio es lo que se lee de lejos: se lleva la fuente mas grande que cabe.
-  ordenes.push(`TEXT ${MARGEN},54,"3",0,2,2,"${precio}"`);
+  ordenes.push(`TEXT ${MARGEN},${y(54)},"3",0,2,2,"${precio}"`);
 
   if (pieza.precio_lista > pieza.precio) {
     const antes = pesos(pieza.precio_lista);
     const x = MARGEN + precio.length * ANCHO_PRECIO + 12;
-    ordenes.push(`TEXT ${x},86,"1",0,1,1,"${antes}"`);
+    ordenes.push(`TEXT ${x},${y(86)},"1",0,1,1,"${antes}"`);
     // TSPL no sabe tachar texto: la linea encima se dibuja a mano.
-    ordenes.push(`BAR ${x},92,${antes.length * ANCHO_PIE},2`);
+    ordenes.push(`BAR ${x},${y(92)},${antes.length * ANCHO_PIE},2`);
   }
 
   // El codigo de barras lo dibuja la impresora, no code128.js: asi las barras
   // caen en puntos enteros del cabezal y no las deforma ningun escalado.
-  ordenes.push(`BARCODE ${centrarBarras(numero)},112,"128",48,0,0,${MODULO},${MODULO * 2},"${numero}"`);
-  ordenes.push(`TEXT ${centrar(pie, ANCHO_PIE)},166,"1",0,1,1,"${pie}"`);
+  ordenes.push(`BARCODE ${centrarBarras(numero)},${y(112)},"128",48,0,0,${MODULO},${MODULO * 2},"${numero}"`);
+  ordenes.push(`TEXT ${centrar(pie, ANCHO_PIE)},${y(166)},"1",0,1,1,"${pie}"`);
   ordenes.push(`PRINT ${copias},1`);
 
   return `${ordenes.join('\r\n')}\r\n`;
 }
+
+const MEDIDA = ['SIZE 50.8 mm,25.4 mm', 'GAP 2 mm,0 mm', 'DIRECTION 1'];
+
+/**
+ * Le pide a la impresora que mida el rollo ella misma. GAPDETECT avanza un par
+ * de etiquetas leyendo el sensor y se queda con la altura y la separacion
+ * reales, en vez de creerle al SIZE que le mandamos. Es la version por software
+ * de apagarla y prenderla con el boton de avance apretado.
+ */
+export const TSPL_CALIBRAR = `${[...MEDIDA, 'GAPDETECT'].join('\r\n')}\r\n`;
+
+/**
+ * Una regla impresa, para medir el descuadre en vez de adivinarlo: el marco es
+ * donde la impresora CREE que esta la etiqueta y las rayas van cada 2 mm desde
+ * ese borde. Comparando el marco contra el borde real del papel se lee cuanto
+ * hay que correr el contenido, y de paso si la altura declarada es la de verdad.
+ */
+export const TSPL_REGLA = `${[
+  ...MEDIDA, 'CLS',
+  `BOX 0,0,${ANCHO - 1},202,2`,
+  ...Array.from({ length: 13 }, (_, i) => {
+    const y = i * 16;   // cada 16 puntos son 2 mm
+    return [`BAR 0,${y},120,2`, `TEXT 128,${Math.min(y, 190)},"1",0,1,1,"${i * 2} mm"`];
+  }).flat(),
+  'PRINT 1,1', '',
+].join('\r\n')}`;
 
 /* ---------- Transporte ---------- */
 
@@ -173,11 +222,11 @@ async function enviar(texto) {
   }
 }
 
-/** Imprime las etiquetas de una pieza. Devuelve false si se cayo el enlace. */
-export async function imprimirEtiquetas(pieza, copias = 1) {
+/** Manda un trabajo TSPL ya armado. Devuelve false si se cayo el enlace. */
+export async function mandarTspl(tspl) {
   if (!caracteristica) return false;
   try {
-    await enviar(tsplEtiqueta(pieza, copias));
+    await enviar(tspl);
     return true;
   } catch (error) {
     console.error('Etiquetera: fallo el envio', error);
@@ -185,3 +234,7 @@ export async function imprimirEtiquetas(pieza, copias = 1) {
     return false;
   }
 }
+
+/** Imprime las etiquetas de una pieza. Devuelve false si se cayo el enlace. */
+export const imprimirEtiquetas = (pieza, copias = 1) =>
+  mandarTspl(tsplEtiqueta(pieza, copias));

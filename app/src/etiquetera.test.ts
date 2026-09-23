@@ -4,7 +4,7 @@
 // etiqueta, que es donde se rompio todo lo anterior.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { tsplEtiqueta, partirNombre, NOMBRE_MAX } from '../public/etiquetera.js';
+import { tsplEtiqueta, partirNombre, NOMBRE_MAX, TSPL_REGLA, TSPL_CALIBRAR } from '../public/etiquetera.js';
 
 const PIEZA = {
   nombre: 'Taza de ceramica azul',
@@ -47,6 +47,25 @@ test('la barra codifica el numero sin "ED-" ni ceros, como lo espera la caja', (
   assert.ok(tsplEtiqueta(PIEZA).includes('"ED-000123 - 2026-S38"'));
 });
 
+test('el corrimiento de calibracion baja todo el contenido igual', () => {
+  const sin = tsplEtiqueta(PIEZA, 1, 0);
+  const con = tsplEtiqueta(PIEZA, 1, 40);
+  const ys = (tspl: string) =>
+    [...tspl.matchAll(/^(?:TEXT|BAR|BARCODE) \d+,(\d+),/gm)].map(([, y]) => Number(y));
+  assert.deepEqual(ys(con), ys(sin).map((y) => y + 40));
+});
+
+test('un corrimiento negativo no saca el contenido por arriba de la etiqueta', () => {
+  const tspl = tsplEtiqueta(PIEZA, 1, -500);
+  for (const [, y] of tspl.matchAll(/^(?:TEXT|BAR|BARCODE) \d+,(-?\d+),/gm)) {
+    assert.ok(Number(y) >= 0, `coordenada y negativa: ${y}`);
+  }
+});
+
+test('sin calibrar, el corrimiento es cero: no hay numero inventado', () => {
+  assert.equal(tsplEtiqueta(PIEZA), tsplEtiqueta(PIEZA, 1, 0));
+});
+
 test('nada se sale del ancho de la etiqueta', () => {
   const largo = tsplEtiqueta({ ...PIEZA, nombre: 'Palabra '.repeat(20), precio: 999900 });
   for (const [, x] of largo.matchAll(/^(?:TEXT|BAR|BARCODE) (\d+),/gm)) {
@@ -84,4 +103,18 @@ test('partirNombre parte una sola palabra larguisima en vez de dejarla salirse',
 
 test('partirNombre nunca devuelve vacio: una etiqueta sin nombre sigue siendo imprimible', () => {
   assert.deepEqual(partirNombre('   '), ['El Dolaron']);
+});
+
+test('la calibracion le pide a la impresora que mida el rollo', () => {
+  assert.ok(TSPL_CALIBRAR.includes('GAPDETECT'));
+  assert.ok(TSPL_CALIBRAR.startsWith('SIZE 50.8 mm,25.4 mm'));
+});
+
+test('la regla marca cada 2 mm hasta cubrir la etiqueta', () => {
+  const rayas = [...TSPL_REGLA.matchAll(/^BAR 0,(\d+),120,2$/gm)].map(([, y]) => Number(y));
+  assert.deepEqual(rayas, Array.from({ length: 13 }, (_, i) => i * 16));
+  assert.ok(TSPL_REGLA.includes('"24 mm"'));
+  // El marco es la referencia: sin el no se sabe donde cree la impresora que
+  // esta la etiqueta, que es justo lo que se esta midiendo.
+  assert.ok(TSPL_REGLA.includes('BOX 0,0,405,202,2'));
 });
