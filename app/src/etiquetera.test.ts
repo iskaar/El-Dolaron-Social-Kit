@@ -4,7 +4,7 @@
 // etiqueta, que es donde se rompio todo lo anterior.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { tsplEtiqueta, tsplMarco, tsplPruebaBarras, partirNombre, NOMBRE_MAX, TSPL_REGLA, TSPL_CALIBRAR } from '../public/etiquetera.js';
+import { tsplEtiqueta, tsplMarco, tsplPruebaCodigo, partirNombre, NOMBRE_MAX, TSPL_REGLA, TSPL_CALIBRAR } from '../public/etiquetera.js';
 
 const PIEZA = {
   nombre: 'Taza de ceramica azul',
@@ -53,12 +53,14 @@ test('la barra angosta es la que sono con el lector, no la estandar', () => {
   assert.ok(tsplEtiqueta(PIEZA, 1, 0, 3).includes(',0,0,3,6,'));
 });
 
-test('la prueba de anchos saca una etiqueta por ancho, con su medida impresa', () => {
-  const tspl = tsplPruebaBarras('17');
-  assert.equal(tspl.match(/^PRINT 1,1$/gm)?.length, 3);
-  for (const barra of [3, 4, 5]) {
-    assert.ok(tspl.includes(`"barra ${barra} pts = ${barra / 8} mm"`));
-    assert.ok(tspl.includes(`,0,0,${barra},${barra * 2},"17"`));
+test('la prueba de codigo saca las cuatro variantes letradas de /prueba-codigo', () => {
+  const tspl = tsplPruebaCodigo();
+  assert.equal(tspl.match(/^PRINT 1,1$/gm)?.length, 4);
+  for (const [letra, barra, numero] of [
+    ['A', 2, 'ED-000019'], ['B', 3, '000019'], ['C', 4, '019'], ['D', 5, '9'],
+  ] as const) {
+    assert.ok(tspl.includes(`"${letra}: ${barra} pts = ${barra / 8} mm"`));
+    assert.ok(tspl.includes(`,0,0,${barra},${barra * 2},"${numero}"`));
   }
 });
 

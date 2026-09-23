@@ -88,14 +88,15 @@
   <div class="paso">
     <h2>4. Que el lector alcance a leer las barras</h2>
     <p>
-      Salen tres etiquetas con las barras cada vez más anchas, con su medida impresa.
-      Pásalas con el lector de la caja: <b>la primera que suene es la buena</b>. Escribe
-      sus puntos aquí y guárdalos. Si no suena ninguna, sube el <i>darkness</i> de la
-      impresora antes de seguir engordando barras: unas barras corridas por el calor no
-      las lee ningún lector por anchas que sean.
+      Salen cuatro etiquetas letradas <b>A a D</b>, cada una con barras más anchas
+      (mismas que <a href="/prueba-codigo">/prueba-codigo</a>). Pásalas con el lector:
+      <b>la primera que suene es la buena</b>. Escribe sus puntos aquí y guárdalos. Si
+      no suena ninguna, sube el <i>darkness</i> de la impresora antes de seguir
+      engordando barras: unas barras corridas por el calor no las lee ningún lector
+      por anchas que sean.
     </p>
     <div class="botones">
-      <button id="barras" class="claro" type="button">Probar tres anchos</button>
+      <button id="barras" class="claro" type="button">Probar A-D</button>
       <input id="pts" type="number" step="1" min="2" max="8" placeholder="puntos" inputmode="numeric">
       <button id="guardar-barra" type="button">Guardar ancho</button>
     </div>
@@ -116,7 +117,7 @@
 
 <script type="module">
 import {
-  conectarEtiquetera, etiqueteraLista, mandarTspl, tsplEtiqueta, tsplMarco, tsplPruebaBarras,
+  conectarEtiquetera, etiqueteraLista, mandarTspl, tsplEtiqueta, tsplMarco, tsplPruebaCodigo,
   corrimiento, guardarCorrimiento, modulo, guardarModulo, TSPL_CALIBRAR, TSPL_REGLA,
 } from '/etiquetera.js';
 
@@ -162,8 +163,8 @@ function alImprimir(id, arma, aviso) {
 document.getElementById('conectar').addEventListener('click', () => conectar(false));
 document.getElementById('conectar-todos').addEventListener('click', () => conectar(true));
 
-alImprimir('barras', () => tsplPruebaBarras(),
-  'Van tres anchos. Pásalas con el lector: la primera que suene es la buena.');
+alImprimir('barras', () => tsplPruebaCodigo(),
+  'Van cuatro (A-D). Pásalas con el lector: la primera que suene es la buena.');
 alImprimir('marco', () => tsplMarco(Number(offset.value) || 0),
   'Van dos marcos: mira el SEGUNDO. ¿Sus lados caen sobre el borde del papel?');
 alImprimir('calibrar', () => TSPL_CALIBRAR,

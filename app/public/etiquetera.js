@@ -200,16 +200,26 @@ export function tsplMarco(offsetMm) {
 }
 
 /**
- * Una etiqueta por ancho de barra, para pasarlas con el lector de la caja.
+ * Cuatro etiquetas, cada una con un ancho de barra distinto y el codigo mas
+ * largo que le cabe a ese ancho en 50.8 mm: a mas ancho, menos digitos, la
+ * misma decision que la etiqueta real tiene que tomar con un codigo largo.
+ * Usado tanto por /prueba-codigo como por el paso 4 de /calibrar-etiqueta,
+ * asi que solo vive una vez.
  *
- * /prueba-codigo ya dijo que 0.5 mm es el ancho que suena, pero eso salio por
- * el dialogo de impresion del navegador — el mismo que deformaba todo. Esto lo
- * vuelve a preguntar por el camino que de verdad se usa. Cada etiqueta trae su
- * ancho impreso: la primera que suene es la buena.
+ * /prueba-codigo ya dijo que la variante C (0.5 mm) es la que suena, pero eso
+ * salio por el dialogo de impresion del navegador — el mismo que deformaba
+ * todo. Esto lo vuelve a preguntar por el camino que de verdad se usa.
  */
-export const tsplPruebaBarras = (numero = '17') => `${[3, 4, 5].map((barra) => [
+const VARIANTES_CODIGO = [
+  ['A', 2, 'ED-000019'],
+  ['B', 3, '000019'],
+  ['C', 4, '019'],
+  ['D', 5, '9'],
+];
+
+export const tsplPruebaCodigo = () => `${VARIANTES_CODIGO.map(([letra, barra, numero]) => [
   ...MEDIDA, 'CLS',
-  `TEXT ${MARGEN},8,"2",0,1,1,"barra ${barra} pts = ${barra / 8} mm"`,
+  `TEXT ${MARGEN},8,"2",0,1,1,"${letra}: ${barra} pts = ${barra / 8} mm"`,
   `BARCODE ${centrarBarras(numero, barra)},40,"128",96,0,0,${barra},${barra * 2},"${numero}"`,
   `TEXT ${MARGEN},${8 + 156},"1",0,1,1,"codigo ${numero}"`,
   'PRINT 1,1',
