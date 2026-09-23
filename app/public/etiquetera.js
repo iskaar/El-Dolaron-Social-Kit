@@ -30,10 +30,10 @@ const PRIMER_RENGLON = 8;  // lo mas alto del diseno, y el tope del corrimiento
 
 // Ancho de la barra angosta, en puntos (8 = 1 mm a 203 dpi).
 //
-// 2 puntos es el estandar de Code 128 y NO lo lee el lector de la caja: Isaac
-// lo probo con /prueba-codigo el 2026-09-22 y la primera variante que sono fue
-// la C, de 0.5 mm — estos 4 puntos. A 2 puntos las barras salen tan juntas que
-// el calor las corre una sobre otra y el lector ya no distingue los espacios.
+// Isaac probo A (2 pts), B (3) y C (4) por BLE con /prueba-codigo el
+// 2026-09-22 y las tres sonaron con el lector de la caja. Se deja en C, no en
+// la mas angosta que paso: da mas margen contra variaciones de darkness o
+// velocidad de un lote a otro sin gastar mas ancho del que hace falta.
 //
 // Se puede pisar desde /calibrar-etiqueta si otra unidad necesita otro ancho.
 const MODULO_POR_OMISION = 4;

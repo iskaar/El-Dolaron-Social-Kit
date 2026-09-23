@@ -47,8 +47,9 @@ test('la barra codifica el numero sin "ED-" ni ceros, como lo espera la caja', (
   assert.ok(tsplEtiqueta(PIEZA).includes('"ED-000123 - 2026-S38"'));
 });
 
-test('la barra angosta es la que sono con el lector, no la estandar', () => {
-  // 2 puntos (variante A de /prueba-codigo) no lo lee el lector de la caja.
+test('el ancho de barra por omision es C (4 pts), no el mas angosto que paso', () => {
+  // A, B y C sonaron con el lector el 2026-09-22; se deja en C por margen, no
+  // porque A o B fallen.
   assert.ok(!tsplEtiqueta(PIEZA).includes(',0,0,2,4,'));
   assert.ok(tsplEtiqueta(PIEZA, 1, 0, 3).includes(',0,0,3,6,'));
 });
