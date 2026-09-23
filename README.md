@@ -43,7 +43,7 @@ El contrato completo está en [AGENTS.md](AGENTS.md) y la arquitectura en [docs/
 Claude Code ya puede trabajar desde la raíz del repositorio y carga `CLAUDE.md` automáticamente:
 
 ```powershell
-cd "C:\Users\isaac\Claude\Projects\Viste Boutique\El-Dolaron-Social-Kit"
+cd "C:\Users\isaac\Claude\Projects\El-Dolaron"
 git pull --ff-only
 claude
 ```
