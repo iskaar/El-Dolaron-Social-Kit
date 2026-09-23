@@ -26,12 +26,27 @@ const MARGEN = 16;
 const ANCHO_NOMBRE = 12;   // fuente "2" sin ampliar
 const ANCHO_PIE = 8;       // fuente "1" sin ampliar
 const ANCHO_PRECIO = 32;   // fuente "3" ampliada x2
+const PRIMER_RENGLON = 8;  // lo mas alto del diseno, y el tope del corrimiento
 
-// ponytail: 2 puntos (0.25 mm) de modulo angosto es el estandar de Code 128 a
-// 203 dpi. Si el lector de la caja no engancha las barras, este es el numero
-// que hay que subir (a 3) — no el tamano de la etiqueta. /prueba-codigo sirve
-// para calibrarlo sin gastar la cola de etiquetas reales.
-const MODULO = 2;
+// Ancho de la barra angosta, en puntos (8 = 1 mm a 203 dpi).
+//
+// 2 puntos es el estandar de Code 128 y NO lo lee el lector de la caja: Isaac
+// lo probo con /prueba-codigo el 2026-09-22 y la primera variante que sono fue
+// la C, de 0.5 mm — estos 4 puntos. A 2 puntos las barras salen tan juntas que
+// el calor las corre una sobre otra y el lector ya no distingue los espacios.
+//
+// Se puede pisar desde /calibrar-etiqueta si otra unidad necesita otro ancho.
+const MODULO_POR_OMISION = 4;
+const CLAVE_MODULO = 'etiqueta-modulo';
+
+export function modulo() {
+  const guardado = Number(globalThis.localStorage?.getItem(CLAVE_MODULO));
+  return Number.isFinite(guardado) && guardado > 0 ? guardado : MODULO_POR_OMISION;
+}
+
+export function guardarModulo(puntos) {
+  globalThis.localStorage?.setItem(CLAVE_MODULO, String(Math.round(puntos)));
+}
 
 /** Lo que cabe en un renglon de nombre, en caracteres. */
 export const NOMBRE_MAX = Math.floor((ANCHO - MARGEN * 2) / ANCHO_NOMBRE);
@@ -94,8 +109,8 @@ const centrar = (texto, anchoLetra) =>
  * caracter son 11 modulos, mas arranque, verificacion y paro. Descuadrarse unos
  * milimetros no afecta la lectura; que se salga de la etiqueta si.
  */
-const centrarBarras = (contenido) =>
-  Math.max(MARGEN, Math.round((ANCHO - (11 * (contenido.length + 2) + 13) * MODULO) / 2));
+const centrarBarras = (contenido, ancho) =>
+  Math.max(MARGEN, Math.round((ANCHO - (11 * (contenido.length + 2) + 13) * ancho) / 2));
 
 /**
  * El trabajo TSPL de una pieza. Exportada para probarla sin impresora enfrente.
@@ -104,8 +119,12 @@ const centrarBarras = (contenido) =>
  * @param copias cuantas etiquetas iguales — una por pieza en existencia
  * @param y0 corrimiento vertical en puntos, de la calibracion
  */
-export function tsplEtiqueta(pieza, copias = 1, y0 = corrimiento()) {
-  const y = (base) => Math.max(0, base + y0);
+export function tsplEtiqueta(pieza, copias = 1, y0 = corrimiento(), barra = modulo()) {
+  // Topar cada coordenada por separado aplastaria el diseno contra el borde de
+  // arriba: los renglones se encimarian en vez de subir juntos. Se topa el
+  // corrimiento entero, una sola vez, contra el elemento mas alto.
+  const desplazamiento = Math.max(y0, -PRIMER_RENGLON);
+  const y = (base) => base + desplazamiento;
   const pesos = (centavos) => `$${Math.round(centavos / 100)}`;
   const [primero, segundo] = partirNombre(pieza.nombre || 'El Dolaron');
   const precio = pesos(pieza.precio);
@@ -119,7 +138,7 @@ export function tsplEtiqueta(pieza, copias = 1, y0 = corrimiento()) {
     'GAP 2 mm,0 mm',
     'DIRECTION 1',
     'CLS',
-    `TEXT ${MARGEN},${y(8)},"2",0,1,1,"${primero}"`,
+    `TEXT ${MARGEN},${y(PRIMER_RENGLON)},"2",0,1,1,"${primero}"`,
   ];
   if (segundo) ordenes.push(`TEXT ${MARGEN},${y(30)},"2",0,1,1,"${segundo}"`);
 
@@ -136,8 +155,10 @@ export function tsplEtiqueta(pieza, copias = 1, y0 = corrimiento()) {
 
   // El codigo de barras lo dibuja la impresora, no code128.js: asi las barras
   // caen en puntos enteros del cabezal y no las deforma ningun escalado.
-  ordenes.push(`BARCODE ${centrarBarras(numero)},${y(112)},"128",48,0,0,${MODULO},${MODULO * 2},"${numero}"`);
-  ordenes.push(`TEXT ${centrar(pie, ANCHO_PIE)},${y(166)},"1",0,1,1,"${pie}"`);
+  // Alto 56 puntos (7 mm): el espacio estaba libre abajo y darle mas altura a
+  // las barras le da mas margen al lector para engancharlas de lado.
+  ordenes.push(`BARCODE ${centrarBarras(numero, barra)},${y(108)},"128",56,0,0,${barra},${barra * 2},"${numero}"`);
+  ordenes.push(`TEXT ${centrar(pie, ANCHO_PIE)},${y(170)},"1",0,1,1,"${pie}"`);
   ordenes.push(`PRINT ${copias},1`);
 
   return `${ordenes.join('\r\n')}\r\n`;
@@ -177,6 +198,22 @@ export function tsplMarco(offsetMm) {
     'PRINT 2,1', '',
   ].join('\r\n')}`;
 }
+
+/**
+ * Una etiqueta por ancho de barra, para pasarlas con el lector de la caja.
+ *
+ * /prueba-codigo ya dijo que 0.5 mm es el ancho que suena, pero eso salio por
+ * el dialogo de impresion del navegador — el mismo que deformaba todo. Esto lo
+ * vuelve a preguntar por el camino que de verdad se usa. Cada etiqueta trae su
+ * ancho impreso: la primera que suene es la buena.
+ */
+export const tsplPruebaBarras = (numero = '17') => `${[3, 4, 5].map((barra) => [
+  ...MEDIDA, 'CLS',
+  `TEXT ${MARGEN},8,"2",0,1,1,"barra ${barra} pts = ${barra / 8} mm"`,
+  `BARCODE ${centrarBarras(numero, barra)},40,"128",96,0,0,${barra},${barra * 2},"${numero}"`,
+  `TEXT ${MARGEN},${8 + 156},"1",0,1,1,"codigo ${numero}"`,
+  'PRINT 1,1',
+].join('\r\n')).join('\r\n')}\r\n`;
 
 /**
  * Una regla impresa, para medir el descuadre en vez de adivinarlo: el marco es

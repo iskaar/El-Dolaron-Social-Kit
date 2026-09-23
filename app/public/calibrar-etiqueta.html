@@ -86,6 +86,22 @@
   </div>
 
   <div class="paso">
+    <h2>4. Que el lector alcance a leer las barras</h2>
+    <p>
+      Salen tres etiquetas con las barras cada vez más anchas, con su medida impresa.
+      Pásalas con el lector de la caja: <b>la primera que suene es la buena</b>. Escribe
+      sus puntos aquí y guárdalos. Si no suena ninguna, sube el <i>darkness</i> de la
+      impresora antes de seguir engordando barras: unas barras corridas por el calor no
+      las lee ningún lector por anchas que sean.
+    </p>
+    <div class="botones">
+      <button id="barras" class="claro" type="button">Probar tres anchos</button>
+      <input id="pts" type="number" step="1" min="2" max="8" placeholder="puntos" inputmode="numeric">
+      <button id="guardar-barra" type="button">Guardar ancho</button>
+    </div>
+  </div>
+
+  <div class="paso">
     <h2>Si nada de esto cuadra</h2>
     <p>
       El sensor se puede remedir por software, aunque el botón de avance dice que no es
@@ -100,13 +116,14 @@
 
 <script type="module">
 import {
-  conectarEtiquetera, etiqueteraLista, mandarTspl, tsplEtiqueta, tsplMarco,
-  corrimiento, guardarCorrimiento, TSPL_CALIBRAR, TSPL_REGLA,
+  conectarEtiquetera, etiqueteraLista, mandarTspl, tsplEtiqueta, tsplMarco, tsplPruebaBarras,
+  corrimiento, guardarCorrimiento, modulo, guardarModulo, TSPL_CALIBRAR, TSPL_REGLA,
 } from '/etiquetera.js';
 
 const estado = document.getElementById('estado');
 const mm = document.getElementById('mm');
 const offset = document.getElementById('offset');
+const pts = document.getElementById('pts');
 
 // 203 dpi: 8 puntos por milimetro. Isaac mide en mm, la impresora cuenta puntos.
 const PUNTOS_POR_MM = 8;
@@ -145,6 +162,8 @@ function alImprimir(id, arma, aviso) {
 document.getElementById('conectar').addEventListener('click', () => conectar(false));
 document.getElementById('conectar-todos').addEventListener('click', () => conectar(true));
 
+alImprimir('barras', () => tsplPruebaBarras(),
+  'Van tres anchos. Pásalas con el lector: la primera que suene es la buena.');
 alImprimir('marco', () => tsplMarco(Number(offset.value) || 0),
   'Van dos marcos: mira el SEGUNDO. ¿Sus lados caen sobre el borde del papel?');
 alImprimir('calibrar', () => TSPL_CALIBRAR,
@@ -168,11 +187,22 @@ document.getElementById('guardar').addEventListener('click', async () => {
     : `Guardado: ${medido} mm, pero se cortó el enlace antes de imprimir.`);
 });
 
-const actual = corrimiento();
-if (actual !== 0) {
-  mm.value = actual / PUNTOS_POR_MM;
-  estado.innerHTML = `Corrimiento guardado ahora mismo: <span class="guardado">${actual / PUNTOS_POR_MM} mm</span>.`;
-}
+document.getElementById('guardar-barra').addEventListener('click', async () => {
+  const puntos = Number(pts.value);
+  if (!Number.isInteger(puntos) || puntos < 2 || puntos > 8) {
+    avisar('Escribe los puntos de la etiqueta que sonó (entre 2 y 8).');
+    return;
+  }
+  guardarModulo(puntos);
+  if (!etiqueteraLista() && !await conectar(false)) return;
+  avisar(await mandarTspl(tsplEtiqueta(PIEZA_DEMO))
+    ? `Guardado: barra de ${puntos} puntos. Va una etiqueta completa — pásala con el lector.`
+    : `Guardado: ${puntos} puntos, pero se cortó el enlace antes de imprimir.`);
+});
+
+mm.value = corrimiento() / PUNTOS_POR_MM;
+pts.value = modulo();
+avisar(`Guardado ahora: corrimiento ${corrimiento() / PUNTOS_POR_MM} mm, barra ${modulo()} puntos.`);
 </script>
 </body>
 </html>

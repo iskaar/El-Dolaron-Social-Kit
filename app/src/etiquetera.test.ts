@@ -4,7 +4,7 @@
 // etiqueta, que es donde se rompio todo lo anterior.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { tsplEtiqueta, tsplMarco, partirNombre, NOMBRE_MAX, TSPL_REGLA, TSPL_CALIBRAR } from '../public/etiquetera.js';
+import { tsplEtiqueta, tsplMarco, tsplPruebaBarras, partirNombre, NOMBRE_MAX, TSPL_REGLA, TSPL_CALIBRAR } from '../public/etiquetera.js';
 
 const PIEZA = {
   nombre: 'Taza de ceramica azul',
@@ -43,8 +43,23 @@ test('sin precio de lista mayor no hay tachado', () => {
 });
 
 test('la barra codifica el numero sin "ED-" ni ceros, como lo espera la caja', () => {
-  assert.ok(tsplEtiqueta(PIEZA).includes(',"128",48,0,0,2,4,"123"'));
+  assert.ok(tsplEtiqueta(PIEZA).includes(',"128",56,0,0,4,8,"123"'));
   assert.ok(tsplEtiqueta(PIEZA).includes('"ED-000123 - 2026-S38"'));
+});
+
+test('la barra angosta es la que sono con el lector, no la estandar', () => {
+  // 2 puntos (variante A de /prueba-codigo) no lo lee el lector de la caja.
+  assert.ok(!tsplEtiqueta(PIEZA).includes(',0,0,2,4,'));
+  assert.ok(tsplEtiqueta(PIEZA, 1, 0, 3).includes(',0,0,3,6,'));
+});
+
+test('la prueba de anchos saca una etiqueta por ancho, con su medida impresa', () => {
+  const tspl = tsplPruebaBarras('17');
+  assert.equal(tspl.match(/^PRINT 1,1$/gm)?.length, 3);
+  for (const barra of [3, 4, 5]) {
+    assert.ok(tspl.includes(`"barra ${barra} pts = ${barra / 8} mm"`));
+    assert.ok(tspl.includes(`,0,0,${barra},${barra * 2},"17"`));
+  }
 });
 
 test('el corrimiento de calibracion baja todo el contenido igual', () => {
@@ -55,11 +70,14 @@ test('el corrimiento de calibracion baja todo el contenido igual', () => {
   assert.deepEqual(ys(con), ys(sin).map((y) => y + 40));
 });
 
-test('un corrimiento negativo no saca el contenido por arriba de la etiqueta', () => {
+test('un corrimiento negativo sube el diseno entero sin encimar renglones', () => {
+  // Topar cada coordenada por separado aplastaba el nombre contra el precio.
   const tspl = tsplEtiqueta(PIEZA, 1, -500);
-  for (const [, y] of tspl.matchAll(/^(?:TEXT|BAR|BARCODE) \d+,(-?\d+),/gm)) {
-    assert.ok(Number(y) >= 0, `coordenada y negativa: ${y}`);
-  }
+  const ys = [...tspl.matchAll(/^(?:TEXT|BAR|BARCODE) \d+,(-?\d+),/gm)].map(([, y]) => Number(y));
+  assert.ok(Math.min(...ys) >= 0, `coordenada y negativa: ${Math.min(...ys)}`);
+  const sin = [...tsplEtiqueta(PIEZA, 1, 0).matchAll(/^(?:TEXT|BAR|BARCODE) \d+,(\d+),/gm)]
+    .map(([, y]) => Number(y));
+  assert.deepEqual(ys, sin.map((y) => y - 8), 'el diseno tiene que subir completo');
 });
 
 test('sin calibrar, el corrimiento es cero: no hay numero inventado', () => {
