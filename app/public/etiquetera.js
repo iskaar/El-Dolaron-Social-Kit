@@ -128,9 +128,16 @@ export function tsplEtiqueta(pieza, copias = 1, y0 = corrimiento(), barra = modu
   const pesos = (centavos) => `$${Math.round(centavos / 100)}`;
   const [primero, segundo] = partirNombre(pieza.nombre || 'El Dolaron');
   const precio = pesos(pieza.precio);
-  // La barra codifica solo el numero, sin "ED-" ni ceros: el codigo completo no
-  // cabe legible en 50.8 mm. buscarPieza() en caja.html lo reconstruye.
-  const numero = String(Number(pieza.codigo.slice(3)));
+  // La barra codifica solo el numero, sin "ED-" ni todos los ceros: el codigo
+  // completo no cabe legible en 50.8 mm. buscarPieza() en caja.html reconstruye
+  // "ED-000123" rellenando con padStart(6, '0'), y eso funciona sin importar
+  // cuantos ceros traiga ya el numero -- por eso es seguro rellenarlo aqui a un
+  // minimo de 4 digitos.
+  //
+  // Sin ese minimo, un codigo bajo como ED-000006 imprime solo "6": un Code128
+  // de un digito, que el lector de la caja no engancha (confirmado en hardware
+  // el 2026-09-22 -- el ancho de barra no tenia nada que ver, ya estaba bien).
+  const numero = String(Number(pieza.codigo.slice(3))).padStart(4, '0');
   const pie = limpiar(`${pieza.codigo} - ${pieza.semana_ingreso}`);
 
   const ordenes = [
@@ -210,11 +217,14 @@ export function tsplMarco(offsetMm) {
  * salio por el dialogo de impresion del navegador — el mismo que deformaba
  * todo. Esto lo vuelve a preguntar por el camino que de verdad se usa.
  */
+// D solia probar "9", un solo digito: eso confundia dos cosas a la vez (barra
+// ancha Y codigo cortisimo) y un codigo de un digito ya se sabe que no suena,
+// aparte del ancho de barra (ver tsplEtiqueta). "0019" prueba solo el ancho.
 const VARIANTES_CODIGO = [
   ['A', 2, 'ED-000019'],
   ['B', 3, '000019'],
   ['C', 4, '019'],
-  ['D', 5, '9'],
+  ['D', 5, '0019'],
 ];
 
 export const tsplPruebaCodigo = () => `${VARIANTES_CODIGO.map(([letra, barra, numero]) => [

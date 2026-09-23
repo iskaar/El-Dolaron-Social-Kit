@@ -42,9 +42,22 @@ test('sin precio de lista mayor no hay tachado', () => {
   assert.ok(!tspl.includes('BAR '));
 });
 
-test('la barra codifica el numero sin "ED-" ni ceros, como lo espera la caja', () => {
-  assert.ok(tsplEtiqueta(PIEZA).includes(',"128",56,0,0,4,8,"123"'));
+test('la barra codifica el numero sin "ED-" ni todos los ceros, como lo espera la caja', () => {
+  assert.ok(tsplEtiqueta(PIEZA).includes(',"128",56,0,0,4,8,"0123"'));
   assert.ok(tsplEtiqueta(PIEZA).includes('"ED-000123 - 2026-S38"'));
+});
+
+test('un codigo bajo no imprime un codigo128 de un digito', () => {
+  // ED-000006 sin relleno seria "6": un Code128 de un solo caracter que el
+  // lector de la caja no engancha (confirmado en hardware el 2026-09-22).
+  const tspl = tsplEtiqueta({ ...PIEZA, codigo: 'ED-000006' });
+  assert.ok(tspl.includes(',"128",56,0,0,4,8,"0006"'));
+  assert.ok(!tspl.includes('"6"'));
+});
+
+test('un codigo de mas de 4 digitos no se recorta', () => {
+  const tspl = tsplEtiqueta({ ...PIEZA, codigo: 'ED-012345' });
+  assert.ok(tspl.includes(',"128",56,0,0,4,8,"12345"'));
 });
 
 test('el ancho de barra por omision es C (4 pts), no el mas angosto que paso', () => {
@@ -58,7 +71,7 @@ test('la prueba de codigo saca las cuatro variantes letradas de /prueba-codigo',
   const tspl = tsplPruebaCodigo();
   assert.equal(tspl.match(/^PRINT 1,1$/gm)?.length, 4);
   for (const [letra, barra, numero] of [
-    ['A', 2, 'ED-000019'], ['B', 3, '000019'], ['C', 4, '019'], ['D', 5, '9'],
+    ['A', 2, 'ED-000019'], ['B', 3, '000019'], ['C', 4, '019'], ['D', 5, '0019'],
   ] as const) {
     assert.ok(tspl.includes(`"${letra}: ${barra} pts = ${barra / 8} mm"`));
     assert.ok(tspl.includes(`,0,0,${barra},${barra * 2},"${numero}"`));
