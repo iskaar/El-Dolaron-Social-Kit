@@ -124,15 +124,35 @@ Un análisis fallido deja la fila en `error` con su foto intacta. Nunca se borra
 
 ## La impresora manda en la etiqueta
 
-**Zebra TLP 2844**, por USB con el controlador ZDesigner, rollo de **57 × 32 mm** (2.25 × 1.25 in), **203 dpi**.
+> Reemplazada el 2026-09-20: **AIYIN AE240 BT**, térmica, Bluetooth, rollo de **2 × 1 in
+> = 50.8 × 25.4 mm**. La Zebra TLP 2844 (57 × 32 mm, USB, controlador ZDesigner) ya no
+> se usa para etiquetas.
 
-203 dpi son **8 puntos por milimetro**, asi que el modulo del codigo de barras tiene que medir un numero entero de puntos: **0.25 mm = 2 puntos exactos**. Un modulo que no cae en puntos enteros — 0.28 mm, por ejemplo — se imprime con barras de ancho desparejo y el lector deja de leerlo, aunque en pantalla se vea perfecto. La aritmetica de la impresora manda sobre el diseño.
+**No se habla con esta impresora por el diálogo de impresión de Windows.** El
+controlador ignora la geometría de página (escala, márgenes, tamaño de papel) sin
+importar cómo se configure; varias sesiones se fueron ajustando esos números antes de
+confirmar que el controlador nunca iba a respetarlos. La sonda (`/sonda-impresora`,
+PR #50) interrogó la unidad en persona y encontró el único canal que funciona: la
+AE240 **solo** acepta datos por la característica BLE `0000fff2` del servicio
+`0000fff0`, y **solo** entiende **TSPL** (ESC/POS y CPCL no imprimen nada; las otras
+cuatro características escribibles del servicio `49535343`, el UART transparente
+típico, tampoco). Esa combinación ya está confirmada en hardware real — no volver a
+probar otra.
 
-Con 0.25 mm, un codigo `ED-000123` mide 38.5 mm y entra en los 52 mm utiles de la etiqueta.
+`app/public/etiquetera.js` (PR #52) le manda el trabajo directo por BLE: arma el
+comando TSPL (`tsplEtiqueta()`, función pura, probada sin hardware en
+`app/src/etiquetera.test.ts`) y lo transmite en trozos de 20 bytes, la cadencia que
+funcionó en la sonda. El botón de imprimir pide la impresora en el mismo clic —antes de
+cualquier `fetch`, o el navegador ya no da el permiso— e imprime pieza por pieza con el
+avance visible. El diálogo de impresión del navegador y el CSS `@page`/`@media print`
+ya no se usan para esta etiqueta.
 
-Una etiqueta por pagina (`@page { size: 57mm 32mm; margin: 0 }`): el rollo avanza una etiqueta por pagina impresa. En el dialogo de impresion, escala **100 %** y **sin** «Ajustar a la pagina»: escalar deforma las barras.
+El módulo del código de barras ya no es un cálculo en milímetros de CSS: la impresora
+lo dibuja con el comando `BARCODE` de TSPL, controlado por `MODULO` (puntos) en
+`etiquetera.js`. Punto de partida `MODULO = 2`; si el lector no engancha, subir a 3.
 
-Esto se verifica con el lector leyendo papel, no con una captura de pantalla.
+Esto se verifica con el lector leyendo papel, no con una captura de pantalla. Si esta
+unidad (u otra) hay que volver a interrogarla, `/sonda-impresora` sigue desplegada.
 
 ## Reglas de Workers que Codex debe respetar
 
