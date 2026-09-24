@@ -6,7 +6,31 @@
 
 export type Categoria = 'ropa' | 'hogar' | 'electronica' | 'juguetes' | 'otros';
 export type EstadoFisico = 'nuevo' | 'danado';
-export type Destino = 'etiqueta' | 'bin_20' | 'bin_40' | 'bin_60';
+export type Familia = 'r' | 'g';
+
+/** Siete precios, compartidos por las dos familias (ropa/general). Ver PLAN-ETIQUETAS-POR-BANDA.md. */
+export const MONTOS_BANDA = [19, 29, 49, 79, 99, 149, 199] as const;
+const FAMILIAS: Familia[] = ['r', 'g'];
+
+export type Destino =
+  | 'etiqueta'
+  | `banda_${Familia}${(typeof MONTOS_BANDA)[number]}`;
+
+/** Las 14 filas de catalogo (7 precios x 2 familias), para poblar DESTINOS y sembrar la migracion. */
+export const DESTINOS_BANDA: Destino[] = FAMILIAS.flatMap(
+  (f) => MONTOS_BANDA.map((p) => `banda_${f}${p}` as Destino),
+);
+
+/** Ropa tiene su propia familia; todo lo demas cae en "general". */
+export function familiaDe(categoria: string): Familia {
+  return categoria === 'ropa' ? 'r' : 'g';
+}
+
+/** El codigo de barras impreso (p.ej. "G79") a partir del destino de banda. */
+export function codigoDeDestino(destino: Destino): string | null {
+  const m = /^banda_([rg])(\d+)$/.exec(destino);
+  return m ? `${m[1].toUpperCase()}${m[2]}` : null;
+}
 
 const REDONDEO = 500; // $5 MXN
 
@@ -17,9 +41,10 @@ export function redondear5(centavos: number): number {
 
 /**
  * Ajusta un precio escrito a mano por el admin.
- * Una pieza en un bin se vende al precio del bin: si el destino es `bin_40`, el
- * precio es $40, aunque en el campo se haya tecleado otra cosa. Un bin con un
- * precio que no es el del bote es una discrepancia que aparece en la caja.
+ * Una pieza en una banda se vende al precio de la banda: si el destino es
+ * `banda_g49`, el precio sale de la configuracion `banda_49` (compartida entre
+ * `r` y `g`), aunque en el campo se haya tecleado otra cosa. Una banda con un
+ * precio que no es el suyo es una discrepancia que aparece en la caja.
  */
 export function ajustarManual({ precio, destino, config }: {
   precio: number;
@@ -29,7 +54,9 @@ export function ajustarManual({ precio, destino, config }: {
   if (destino === 'etiqueta') {
     return redondear5(precio);
   }
-  return entero(config, destino, Number.parseInt(destino.replace('bin_', ''), 10) * 100);
+  const m = /^banda_[rg](\d+)$/.exec(destino);
+  const pesosPorDefecto = m ? Number.parseInt(m[1], 10) : 0;
+  return entero(config, `banda_${pesosPorDefecto}`, pesosPorDefecto * 100);
 }
 
 export interface EntradaPrecio {
@@ -46,16 +73,17 @@ function entero(config: Record<string, string>, clave: string, porDefecto: numbe
 
 /**
  * precio = precio_lista x %categoria x %danado, redondeado hacia arriba a $5.
- * Si cae en el limite de bin o por debajo, la pieza va al bin mas chico que la cubra
- * y no lleva etiqueta.
+ * Si cae en el limite de banda o por debajo, la pieza va a la banda mas chica
+ * que la cubra y no lleva etiqueta individual: se etiqueta con el codigo
+ * compartido de esa banda (ver PLAN-ETIQUETAS-POR-BANDA.md).
  */
 export function calcularPrecio({ precioLista, categoria, estadoFisico, config }: EntradaPrecio): {
   precio: number;
   destino: Destino;
 } {
   // Sin precio de lista no hay precio: la pieza espera al admin en lugar de
-  // caer al bin mas barato. Un articulo de $300 mal leido vendido en $20 es
-  // el error que cuesta dinero.
+  // caer a la banda mas barata. Un articulo de $300 mal leido vendido en $20
+  // es el error que cuesta dinero.
   if (precioLista <= 0) {
     return { precio: 0, destino: 'etiqueta' };
   }
@@ -66,24 +94,24 @@ export function calcularPrecio({ precioLista, categoria, estadoFisico, config }:
   const bruto = (Math.max(0, precioLista) * pctCategoria * pctDanado) / 10000;
   const precio = Math.ceil(bruto / REDONDEO) * REDONDEO;
 
-  return conBin(precio, precioLista, config);
+  return conBanda(precio, precioLista, categoria, config);
 }
 
-/** Lo barato va al bote mas chico que lo cubra; lo demas lleva etiqueta. */
-function conBin(precio: number, precioLista: number, config: Record<string, string>): {
+/** Lo barato va a la banda mas chica que lo cubra; lo demas lleva etiqueta. */
+function conBanda(precio: number, precioLista: number, categoria: string, config: Record<string, string>): {
   precio: number;
   destino: Destino;
 } {
-  const limite = entero(config, 'limite_bin', 6000);
+  const limite = entero(config, 'limite_banda', 20000);
   if (precio <= limite) {
-    const bins: Array<[Destino, number]> = [
-      ['bin_20', entero(config, 'bin_20', 2000)],
-      ['bin_40', entero(config, 'bin_40', 4000)],
-      ['bin_60', entero(config, 'bin_60', 6000)],
-    ];
-    bins.sort((a, b) => a[1] - b[1]);
-    const bin = bins.find(([, monto]) => precio <= monto) ?? bins[bins.length - 1];
-    return { precio: bin[1], destino: bin[0] };
+    const familia = familiaDe(categoria);
+    const bandas: Array<[Destino, number]> = MONTOS_BANDA.map((pesosPorDefecto) => [
+      `banda_${familia}${pesosPorDefecto}` as Destino,
+      entero(config, `banda_${pesosPorDefecto}`, pesosPorDefecto * 100),
+    ]);
+    bandas.sort((a, b) => a[1] - b[1]);
+    const banda = bandas.find(([, monto]) => precio <= monto) ?? bandas[bandas.length - 1];
+    return { precio: banda[1], destino: banda[0] };
   }
 
   // Nunca por encima del precio de lista.
@@ -93,15 +121,16 @@ function conBin(precio: number, precioLista: number, config: Record<string, stri
 /**
  * Precio a partir de lo que propuso el modelo mirando como cobra Isaac.
  * Pasa por las mismas guardas que el calculo por porcentaje: redondeo a $5,
- * nunca por encima del precio de lista, y bin si cae en el limite o debajo.
+ * nunca por encima del precio de lista, y banda si cae en el limite o debajo.
  */
-export function precioDesdeSugerencia({ precioLista, sugerido, config }: {
+export function precioDesdeSugerencia({ precioLista, sugerido, categoria, config }: {
   precioLista: number;
   sugerido: number;
+  categoria: string;
   config: Record<string, string>;
 }): { precio: number; destino: Destino } {
   if (sugerido <= 0) {
     return { precio: 0, destino: 'etiqueta' };
   }
-  return conBin(redondear5(sugerido), precioLista, config);
+  return conBanda(redondear5(sugerido), precioLista, categoria, config);
 }
