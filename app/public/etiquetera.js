@@ -210,7 +210,7 @@ export function tsplBanda(banda, copias = 1, y0 = corrimiento(), barra = modulo(
 
 /** Imprime un lote de una banda. Devuelve false si se cayo el enlace. */
 export const imprimirBanda = (banda, copias = 1, alAvanzar) =>
-  mandarCopias(tsplBanda(banda, 1), copias, alAvanzar);
+  mandarCopias(tsplBanda(banda, 1), copias, alAvanzar, `${banda.familia} ${banda.codigo}`);
 
 const MEDIDA = ['SIZE 50.8 mm,25.4 mm', 'GAP 2 mm,0 mm', 'DIRECTION 1'];
 
@@ -369,16 +369,48 @@ export async function mandarTspl(tspl) {
  * se confirma que la impresora respeta el conteo, vuelve a ser un solo trabajo.
  *
  * @param alAvanzar llamada con (hechas, total) despues de cada etiqueta
+ * @param nombre lo que se anota en el historial de envios
  */
-export async function mandarCopias(tspl, copias, alAvanzar) {
-  for (let i = 1; i <= copias; i += 1) {
-    if (!await mandarTspl(tspl)) return false;
-    alAvanzar?.(i, copias);
-    if (i < copias) await new Promise((r) => setTimeout(r, 300));
+export async function mandarCopias(tspl, copias, alAvanzar, nombre = '') {
+  let enviadas = 0;
+  while (enviadas < copias && await mandarTspl(tspl)) {
+    enviadas += 1;
+    alAvanzar?.(enviadas, copias);
+    if (enviadas < copias) await new Promise((r) => setTimeout(r, 300));
   }
-  return true;
+  anotarEnvio({ hora: new Date().toISOString(), nombre, copias, enviadas });
+  return enviadas === copias;
 }
 
 /** Imprime las etiquetas de una pieza. Devuelve false si se cayo el enlace. */
 export const imprimirEtiquetas = (pieza, copias = 1, alAvanzar) =>
-  mandarCopias(tsplEtiqueta(pieza, 1), copias, alAvanzar);
+  mandarCopias(tsplEtiqueta(pieza, 1), copias, alAvanzar, pieza.nombre || pieza.codigo);
+
+/* ---------- Historial de envios ---------- */
+
+// No hay cola en el software: cada etiqueta se le manda a la impresora por
+// Bluetooth en cuanto se pide. Lo unico que se puede saber es que salio DE AQUI,
+// asi que eso es lo que se anota: si el historial dice que se enviaron y no
+// salio nada, el problema esta en la impresora (papel, sensor, luz de error),
+// no en la pagina. Por navegador, las ultimas 50.
+const CLAVE_HISTORIAL = 'etiqueta-historial';
+
+function historial() {
+  try { return JSON.parse(globalThis.localStorage?.getItem(CLAVE_HISTORIAL)) ?? []; } catch { return []; }
+}
+
+function anotarEnvio(envio) {
+  try {
+    globalThis.localStorage?.setItem(CLAVE_HISTORIAL, JSON.stringify([envio, ...historial()].slice(0, 50)));
+  } catch { /* sin localStorage no hay historial, y no es motivo para fallar */ }
+}
+
+/** El historial en lineas de texto, lo mas nuevo primero. */
+export function historialTexto() {
+  const lineas = historial().map((e) => {
+    const hora = new Date(e.hora).toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    const resultado = e.enviadas === e.copias ? `${e.copias} enviadas` : `SE CORTO (${e.enviadas} de ${e.copias})`;
+    return `${hora}  ${e.nombre || '(sin nombre)'}: ${resultado}`;
+  });
+  return lineas.length ? lineas.join('\n') : 'Todavia no se ha enviado nada desde este navegador.';
+}
