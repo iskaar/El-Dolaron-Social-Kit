@@ -54,11 +54,21 @@
     <span id="resumen"></span>
   </div>
 
+  <details id="historial-envios">
+    <summary>Historial de envíos a la impresora</summary>
+    <p class="ayuda">
+      No hay cola de impresión: cada etiqueta se manda por Bluetooth en cuanto se pide.
+      Aquí se anota lo que salió de esta página. Si dice «enviadas» y no salió nada,
+      el problema está en la impresora (papel, sensor, luz de error), no aquí.
+    </p>
+    <pre id="historial"></pre>
+  </details>
+
   <div id="familias"></div>
 </main>
 
 <script type="module">
-import { conectarEtiquetera, etiqueteraLista, imprimirBanda } from '/etiquetera.js';
+import { conectarEtiquetera, etiqueteraLista, imprimirBanda, historialTexto } from '/etiquetera.js';
 import { semanaIngreso } from '/semana.js';
 
 // Mismos siete precios que app/src/precio.ts (MONTOS_BANDA).
@@ -66,6 +76,8 @@ const MONTOS_BANDA = [19, 29, 49, 79, 99, 149, 199];
 const FAMILIAS = [['r', 'Ropa'], ['g', 'General']];
 const semana = semanaIngreso(new Date());
 const resumen = document.getElementById('resumen');
+const pintarHistorial = () => { document.getElementById('historial').textContent = historialTexto(); };
+pintarHistorial();
 const cantidad = document.getElementById('cantidad');
 
 document.getElementById('familias').innerHTML = FAMILIAS.map(([f, nombre]) => `
@@ -123,7 +135,11 @@ document.getElementById('familias').addEventListener('click', async (e) => {
 
   resumen.textContent = `Imprimiendo ${copias} de ${banda.codigo}…`;
   boton.classList.remove('impresa');
-  if (await imprimirBanda(banda, copias)) {
+  const salio = await imprimirBanda(banda, copias, (hechas) => {
+    resumen.textContent = `Imprimiendo ${banda.codigo}: etiqueta ${hechas} de ${copias}…`;
+  });
+  pintarHistorial();
+  if (salio) {
     resumen.textContent = `${copias} etiquetas de ${banda.codigo} enviadas.`;
     boton.classList.add('impresa');
   } else {

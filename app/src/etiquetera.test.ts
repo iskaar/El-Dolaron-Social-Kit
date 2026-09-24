@@ -204,3 +204,14 @@ test('nada de la banda se sale del ancho de la etiqueta', () => {
     assert.ok(Number(x) < 406, `coordenada x fuera de la etiqueta: ${x}`);
   }
 });
+
+test('el historial anota lo que se envio, y un corte se ve como corte', async () => {
+  const guardado = new Map<string, string>();
+  (globalThis as any).localStorage = { getItem: (k: string) => guardado.get(k) ?? null, setItem: (k: string, v: string) => guardado.set(k, v) };
+  const { mandarCopias, historialTexto } = await import('../public/etiquetera.js');
+  assert.match(historialTexto(), /Todavia no se ha enviado nada/);
+  // Sin impresora conectada mandarTspl devuelve false: nada sale, y asi debe quedar anotado.
+  assert.equal(await mandarCopias('x', 3, undefined, 'Taza azul'), false);
+  assert.match(historialTexto(), /Taza azul: SE CORTO \(0 de 3\)/);
+  delete (globalThis as any).localStorage;
+});
