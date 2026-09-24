@@ -358,12 +358,16 @@ export async function mandarTspl(tspl) {
   }
 }
 
-// Cuanto se espera entre una etiqueta y la siguiente. La impresora no avisa
-// cuando se le llena la memoria: con 22 etiquetas a 300 ms funciono, con 58 se
-// atasco y hubo que apagarla (2026-09-24). Mandar a un ritmo mayor al que
-// imprime la va llenando poco a poco, asi que se deja un margen holgado. Es el
-// numero a ajustar si un lote largo se atora (subirlo) o si sobra tiempo (bajarlo).
-export const PAUSA_ENTRE_ETIQUETAS = 1800;
+// Ritmo de envio. La impresora no avisa cuando se le llena la memoria: con 22
+// etiquetas a 300 ms seguidas funciono, con 58 se atasco y hubo que apagarla
+// (2026-09-24). Una pausa de 1800 ms tras CADA etiqueta lo evito pero fue
+// demasiado lento; el driver de Windows saca 5-6 seguidas. Se manda en tandas de
+// LOTE, casi seguidas, y la pausa larga va entre tandas. Los tres numeros son
+// lo que hay que ajustar: si un lote largo se atora, bajar LOTE o subir
+// PAUSA_ENTRE_LOTES; si sobra tiempo, al reves.
+export const LOTE = 3;
+export const PAUSA_ENTRE_ETIQUETAS = 300;
+export const PAUSA_ENTRE_LOTES = 1500;
 
 let detenido = false;
 
@@ -385,7 +389,9 @@ export async function mandarCopias(tspl, copias, alAvanzar, nombre = '') {
   while (enviadas < copias && !detenido && await mandarTspl(tspl)) {
     enviadas += 1;
     alAvanzar?.(enviadas, copias);
-    if (enviadas < copias) await new Promise((r) => setTimeout(r, PAUSA_ENTRE_ETIQUETAS));
+    if (enviadas < copias) {
+      await new Promise((r) => setTimeout(r, enviadas % LOTE === 0 ? PAUSA_ENTRE_LOTES : PAUSA_ENTRE_ETIQUETAS));
+    }
   }
   anotarEnvio({ hora: new Date().toISOString(), nombre, copias, enviadas });
   return enviadas === copias;
