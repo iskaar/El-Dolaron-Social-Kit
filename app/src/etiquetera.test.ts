@@ -4,7 +4,7 @@
 // etiqueta, que es donde se rompio todo lo anterior.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { tsplEtiqueta, tsplMarco, tsplPruebaCodigo, partirNombre, NOMBRE_MAX, TSPL_REGLA, TSPL_CALIBRAR } from '../public/etiquetera.js';
+import { tsplEtiqueta, tsplBanda, tsplMarco, tsplPruebaCodigo, partirNombre, NOMBRE_MAX, TSPL_REGLA, TSPL_CALIBRAR } from '../public/etiquetera.js';
 
 const PIEZA = {
   nombre: 'Taza de ceramica azul',
@@ -159,4 +159,48 @@ test('el marco de prueba lleva su OFFSET y saca dos etiquetas', () => {
   assert.ok(tspl.includes('"OFFSET -5 mm"'));
   // Dos: la primera todavia sale con la parada anterior, la segunda es la buena.
   assert.ok(tspl.trimEnd().endsWith('PRINT 2,1'));
+});
+
+/* ---------- bandas (docs/PLAN-ETIQUETAS-POR-BANDA.md) ---------- */
+
+const BANDA = { familia: 'General', precioPesos: 49, codigo: 'G49', semana: 'S38' };
+
+test('el trabajo de banda abre con el tamano de la etiqueta y cierra imprimiendo el lote', () => {
+  const tspl = tsplBanda(BANDA, 20);
+  assert.ok(tspl.startsWith('SIZE 50.8 mm,25.4 mm\r\n'));
+  assert.ok(tspl.includes('\r\nCLS\r\n'));
+  assert.ok(tspl.trimEnd().endsWith('PRINT 20,1'));
+  assert.equal(tspl.match(/^PRINT /gm)?.length, 1);
+});
+
+test('la familia va en mayusculas y el precio en pesos, sin nombre de pieza', () => {
+  const tspl = tsplBanda(BANDA);
+  assert.ok(tspl.includes('"GENERAL"'));
+  assert.ok(tspl.includes('"$49"'));
+  assert.ok(!tspl.includes('BAR ')); // sin precio de lista que tachar
+});
+
+test('el codigo de banda se dibuja completo, no se recorta como el de una pieza', () => {
+  const tspl = tsplBanda(BANDA);
+  assert.ok(tspl.includes(',"128",48,0,0,4,8,"G49"'));
+  assert.ok(tspl.includes('"G49 - S38"'));
+});
+
+test('el ancho de barra de banda respeta el mismo parametro que las piezas', () => {
+  assert.ok(tsplBanda(BANDA, 1, 0, 3).includes(',0,0,3,6,'));
+});
+
+test('el corrimiento de calibracion tambien mueve la banda entera', () => {
+  const sin = tsplBanda(BANDA, 1, 0);
+  const con = tsplBanda(BANDA, 1, 40);
+  const ys = (tspl: string) =>
+    [...tspl.matchAll(/^(?:TEXT|BARCODE) \d+,(\d+),/gm)].map(([, y]) => Number(y));
+  assert.deepEqual(ys(con), ys(sin).map((y) => y + 40));
+});
+
+test('nada de la banda se sale del ancho de la etiqueta', () => {
+  const tspl = tsplBanda({ ...BANDA, familia: 'Ropa', precioPesos: 199, codigo: 'R199' });
+  for (const [, x] of tspl.matchAll(/^(?:TEXT|BARCODE) (\d+),/gm)) {
+    assert.ok(Number(x) < 406, `coordenada x fuera de la etiqueta: ${x}`);
+  }
 });

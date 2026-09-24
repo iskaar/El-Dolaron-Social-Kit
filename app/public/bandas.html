@@ -1,0 +1,135 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>El Dolarón — bandas</title>
+<style>
+  :root { --azul:#16366B; --linea:#dfe3ea; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: #f4f6f9; color: #1a1f2b;
+    font-family: system-ui, -apple-system, sans-serif; }
+  header { background: var(--azul); color: #fff; padding: 14px 20px;
+    display: flex; gap: 16px; align-items: center; flex-wrap: wrap; }
+  header h1 { font-size: 18px; margin: 0; flex: 1; }
+  header a { color: #FFD447; font-size: 14px; }
+  main { padding: 20px; max-width: 900px; margin: 0 auto; }
+  .barra { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-bottom: 16px; }
+  .barra label { font-size: 13px; color: #5b6478; }
+  .barra input { width: 80px; padding: 8px 10px; border: 1px solid var(--linea);
+    border-radius: 8px; font-size: 15px; }
+  button { border: 0; border-radius: 8px; padding: 8px 12px; font-size: 13px;
+    font-weight: 600; cursor: pointer; background: var(--azul); color: #fff; }
+  button.claro { background: #fff; color: #1a1f2b; border: 1px solid var(--linea); }
+  .ayuda { font-size: 13px; color: #5b6478; line-height: 1.45; margin: 0 0 16px; max-width: 70ch; }
+  .familia h2 { font-size: 14px; color: var(--azul); margin: 18px 0 8px; }
+  .rejilla { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 10px; }
+  .banda { background: #fff; border: 1px solid var(--linea); border-radius: 10px; padding: 12px;
+    display: flex; flex-direction: column; gap: 6px; align-items: center; }
+  .banda .precio { font-size: 26px; font-weight: 800; color: var(--azul); }
+  .banda .codigo { font-family: ui-monospace, monospace; font-size: 12px; color: #5b6478; }
+  .banda.impresa { border-color: #1f7a4d; }
+  #resumen { font-size: 13px; color: #5b6478; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Bandas</h1>
+  <a href="/admin">← Cola de revisión</a>
+  <a href="/tarjeta-bandas">Tarjeta impresa →</a>
+</header>
+
+<main>
+  <p class="ayuda">
+    Piezas de $200 o menos no llevan etiqueta propia: se les asigna una banda y se
+    pega una de estas, ya impresas por lote. Escoge cuántas etiquetas necesitas y
+    aprieta la banda que corresponde — sale un solo trabajo con esa cantidad.
+    Prende la impresora antes de imprimir.
+  </p>
+
+  <div class="barra">
+    <label for="cantidad">Cantidad por banda</label>
+    <input id="cantidad" type="number" min="1" max="200" value="20">
+    <button id="otra" class="claro" type="button">¿No aparece la impresora?</button>
+    <span id="resumen"></span>
+  </div>
+
+  <div id="familias"></div>
+</main>
+
+<script type="module">
+import { conectarEtiquetera, etiqueteraLista, imprimirBanda } from '/etiquetera.js';
+import { semanaIngreso } from '/semana.js';
+
+// Mismos siete precios que app/src/precio.ts (MONTOS_BANDA).
+const MONTOS_BANDA = [19, 29, 49, 79, 99, 149, 199];
+const FAMILIAS = [['r', 'Ropa'], ['g', 'General']];
+const semana = semanaIngreso(new Date());
+const resumen = document.getElementById('resumen');
+const cantidad = document.getElementById('cantidad');
+
+document.getElementById('familias').innerHTML = FAMILIAS.map(([f, nombre]) => `
+  <div class="familia">
+    <h2>${nombre}</h2>
+    <div class="rejilla">
+      ${MONTOS_BANDA.map((p) => {
+        const codigo = `${f.toUpperCase()}${p}`;
+        return `<button type="button" class="banda claro" data-codigo="${codigo}" data-familia="${nombre}" data-precio="${p}">
+          <span class="precio">$${p}</span>
+          <span class="codigo">${codigo}</span>
+        </button>`;
+      }).join('')}
+    </div>
+  </div>`).join('');
+
+/** Traduce la falla de Bluetooth a algo accionable parado junto a la impresora. */
+function avisarFalla(error) {
+  resumen.textContent = error.name === 'NotFoundError'
+    ? 'No se escogió impresora. Préndela y vuelve a intentar, o usa «¿No aparece la impresora?».'
+    : `No se pudo conectar la impresora: ${error.message}`;
+}
+
+document.getElementById('otra').addEventListener('click', async () => {
+  try {
+    await conectarEtiquetera({ cualquiera: true });
+    resumen.textContent = 'Impresora conectada. Ya puedes imprimir.';
+  } catch (error) {
+    avisarFalla(error);
+  }
+});
+
+document.getElementById('familias').addEventListener('click', async (e) => {
+  const boton = e.target.closest('.banda');
+  if (!boton) return;
+
+  const copias = Math.min(200, Math.max(1, Math.round(Number(cantidad.value)) || 1));
+  const banda = {
+    familia: boton.dataset.familia,
+    precioPesos: Number(boton.dataset.precio),
+    codigo: boton.dataset.codigo,
+    semana,
+  };
+
+  // Antes que nada: pedir la impresora gasta el permiso del clic, y el
+  // navegador ya no lo da despues de una espera.
+  if (!etiqueteraLista()) {
+    try {
+      await conectarEtiquetera();
+    } catch (error) {
+      avisarFalla(error);
+      return;
+    }
+  }
+
+  resumen.textContent = `Imprimiendo ${copias} de ${banda.codigo}…`;
+  boton.classList.remove('impresa');
+  if (await imprimirBanda(banda, copias)) {
+    resumen.textContent = `${copias} etiquetas de ${banda.codigo} enviadas.`;
+    boton.classList.add('impresa');
+  } else {
+    resumen.textContent = `Se cortó la impresora imprimiendo ${banda.codigo}.`;
+  }
+});
+</script>
+</body>
+</html>

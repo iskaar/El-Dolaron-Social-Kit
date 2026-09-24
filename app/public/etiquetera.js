@@ -171,6 +171,42 @@ export function tsplEtiqueta(pieza, copias = 1, y0 = corrimiento(), barra = modu
   return `${ordenes.join('\r\n')}\r\n`;
 }
 
+const ANCHO_PRECIO_BANDA = 48; // fuente "3" ampliada x3 (16 x 3), sin nombre que le dispute el espacio
+
+/**
+ * El trabajo TSPL de un lote de una banda de precio (ver
+ * docs/PLAN-ETIQUETAS-POR-BANDA.md). Sin nombre de pieza ni precio de lista
+ * tachado: el precio se lleva el espacio libre. Imprime `copias` etiquetas
+ * iguales en un solo trabajo -- una banda no es una pieza, es un lote.
+ *
+ * @param banda {{ familia: string, precioPesos: number, codigo: string, semana: string }}
+ * familia va en texto ("Ropa"/"General"); codigo es lo que dibuja el codigo de
+ * barras y lo que despues escanea la caja (p.ej. "R49"), ya corto de por si.
+ */
+export function tsplBanda(banda, copias = 1, y0 = corrimiento(), barra = modulo()) {
+  const desplazamiento = Math.max(y0, -PRIMER_RENGLON);
+  const y = (base) => base + desplazamiento;
+  const precio = `$${Math.round(banda.precioPesos)}`;
+  const pie = limpiar(`${banda.codigo} - ${banda.semana}`);
+
+  const ordenes = [
+    'SIZE 50.8 mm,25.4 mm',
+    'GAP 2 mm,0 mm',
+    'DIRECTION 1',
+    'CLS',
+    `TEXT ${MARGEN},${y(PRIMER_RENGLON)},"2",0,1,1,"${limpiar(banda.familia).toUpperCase()}"`,
+    `TEXT ${centrar(precio, ANCHO_PRECIO_BANDA)},${y(30)},"3",0,3,3,"${precio}"`,
+    `BARCODE ${centrarBarras(banda.codigo, barra)},${y(110)},"128",48,0,0,${barra},${barra * 2},"${banda.codigo}"`,
+    `TEXT ${centrar(pie, ANCHO_PIE)},${y(164)},"1",0,1,1,"${pie}"`,
+    `PRINT ${copias},1`,
+  ];
+
+  return `${ordenes.join('\r\n')}\r\n`;
+}
+
+/** Imprime un lote de una banda. Devuelve false si se cayo el enlace. */
+export const imprimirBanda = (banda, copias = 1) => mandarTspl(tsplBanda(banda, copias));
+
 const MEDIDA = ['SIZE 50.8 mm,25.4 mm', 'GAP 2 mm,0 mm', 'DIRECTION 1'];
 
 /**

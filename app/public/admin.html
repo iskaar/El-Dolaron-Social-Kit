@@ -47,6 +47,7 @@
 <header>
   <h1>Cola de revisión</h1>
   <a href="/captura">Ir a capturar →</a>
+  <a href="/bandas">Imprimir bandas →</a>
   <span id="resumen"></span>
 </header>
 
@@ -77,13 +78,20 @@
 import { reducirArchivo } from '/foto.js';
 
 const CATEGORIAS = ['ropa', 'hogar', 'electronica', 'juguetes', 'otros'];
-const DESTINOS = [['etiqueta','Etiqueta'], ['bin_20','Bin $20'], ['bin_40','Bin $40'], ['bin_60','Bin $60']];
+// Mismos siete precios que app/src/precio.ts (MONTOS_BANDA), por familia r/g.
+const MONTOS_BANDA = [19, 29, 49, 79, 99, 149, 199];
+const DESTINOS = [
+  ['etiqueta', 'Etiqueta individual'],
+  ...['r', 'g'].flatMap((f) => MONTOS_BANDA.map((p) =>
+    [`banda_${f}${p}`, `Banda ${f === 'r' ? 'Ropa' : 'General'} $${p} → ${f.toUpperCase()}${p}`])),
+];
 const CLAVES_CONFIG = [
   ['pct_ropa','Ropa %'], ['pct_hogar','Hogar %'], ['pct_electronica','Electrónica %'],
   ['pct_juguetes','Juguetes %'], ['pct_otros','Otros %'], ['pct_danado','Dañado %'],
-  ['limite_bin','Límite de bin ($)'], ['bin_20','Bin 1 ($)'], ['bin_40','Bin 2 ($)'], ['bin_60','Bin 3 ($)'],
+  ['limite_banda','Límite de banda ($)'],
+  ...MONTOS_BANDA.map((p) => [`banda_${p}`, `Banda $${p}`]),
 ];
-const EN_PESOS = new Set(['limite_bin', 'bin_20', 'bin_40', 'bin_60']);
+const EN_PESOS = new Set(['limite_banda', ...MONTOS_BANDA.map((p) => `banda_${p}`)]);
 
 const cola = document.getElementById('cola');
 const resumen = document.getElementById('resumen');

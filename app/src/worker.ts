@@ -6,8 +6,9 @@
  */
 
 import { analizarBorrador, modeloPorDefecto, type Modelo } from './analisis.ts';
-import { calcularPrecio, ajustarManual, type Destino } from './precio.ts';
+import { calcularPrecio, ajustarManual, DESTINOS_BANDA, type Destino } from './precio.ts';
 import { efectivoAlcanza } from '../public/venta.js';
+import { semanaIngreso } from '../public/semana.js';
 
 interface FilaConfig {
   clave: string;
@@ -52,16 +53,6 @@ function json(cuerpo: unknown, status = 200): Response {
     status,
     headers: { 'content-type': 'application/json; charset=utf-8' },
   });
-}
-
-/** Semana ISO de ingreso, como 'S37'. Va impresa en la etiqueta. */
-export function semanaIngreso(fecha: Date): string {
-  const d = new Date(Date.UTC(fecha.getUTCFullYear(), fecha.getUTCMonth(), fecha.getUTCDate()));
-  // Jueves de esa semana: define el año ISO al que pertenece.
-  d.setUTCDate(d.getUTCDate() + 4 - (d.getUTCDay() || 7));
-  const primeroDeEnero = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
-  const semana = Math.ceil(((d.getTime() - primeroDeEnero.getTime()) / 86400000 + 1) / 7);
-  return `S${String(semana).padStart(2, '0')}`;
 }
 
 async function leerConfig(env: Env): Promise<Record<string, string>> {
@@ -157,7 +148,7 @@ async function listarBorradores(url: URL, env: Env): Promise<Response> {
 }
 
 const CATEGORIAS = new Set(['ropa', 'hogar', 'electronica', 'juguetes', 'otros']);
-const DESTINOS = new Set(['etiqueta', 'bin_20', 'bin_40', 'bin_60']);
+const DESTINOS = new Set<string>(['etiqueta', ...DESTINOS_BANDA]);
 
 /**
  * Correcciones del admin. Solo llegan los campos que cambiaron; si no viene un
@@ -211,7 +202,7 @@ async function corregirBorrador(id: string, request: Request, env: Env): Promise
       return json({ error: 'Precio invalido.' }, 400);
     }
     if (DESTINOS.has(destino)) {
-      // Bin: manda el precio del bote. Etiqueta: se redondea a $5 como el automatico.
+      // Banda: manda el precio de la banda. Etiqueta: se redondea a $5 como el automatico.
       precio = ajustarManual({ precio, destino: destino as Destino, config });
     }
     // Misma regla que en el calculo automatico: el precio de venta nunca queda
@@ -640,7 +631,7 @@ async function reportes(url: URL, env: Env): Promise<Response> {
   const porDia = ventasPorDia.map((f) => ({ ...f, piezas: piezasPorDiaMapa.get(f.dia) ?? 0 }));
 
   const { results: porCategoria } = await env.DB.prepare(
-    `select case when p.sin_inventario = 1 then 'bins' else coalesce(p.categoria, 'sin categoria') end as categoria,
+    `select case when p.sin_inventario = 1 then 'bandas' else coalesce(p.categoria, 'sin categoria') end as categoria,
        coalesce(sum(l.precio * l.cantidad), 0) as total, coalesce(sum(l.cantidad), 0) as piezas
      from venta_lineas l join ventas v on v.id = l.venta_id left join productos p on p.id = l.producto_id
      where v.cancelada = 0 and v.creado_en >= ?

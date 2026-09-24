@@ -2,7 +2,7 @@
 // La semana de ingreso va impresa en la etiqueta y no se puede corregir despues.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { semanaIngreso } from './worker.ts';
+import { semanaIngreso } from '../public/semana.js';
 
 test('semana ISO', () => {
   assert.equal(semanaIngreso(new Date('2026-09-11T00:00:00Z')), 'S37');
