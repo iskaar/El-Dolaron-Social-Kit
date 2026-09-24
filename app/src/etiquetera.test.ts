@@ -34,7 +34,23 @@ test('el precio va en pesos redondeados, no en centavos', () => {
 test('el precio de lista se tacha con una barra encima', () => {
   const tspl = tsplEtiqueta(PIEZA);
   assert.ok(tspl.includes('"$199"'));
-  assert.ok(/^BAR \d+,\d+,\d+,2$/m.test(tspl));
+  assert.ok(/^BAR \d+,\d+,\d+,3$/m.test(tspl));
+});
+
+test('el precio de lista va a la derecha, mas chico que el de venta, sin encimarse', () => {
+  for (const [precio, lista] of [[12000, 19900], [150000, 300000], [25000, 999900]]) {
+    const lineas = tsplEtiqueta({ ...PIEZA, precio, precio_lista: lista }).split('\r\n');
+    // TEXT x,y,"fuente",0,ampliacion,ampliacion,"texto"; ancho de letra: fuente 2 = 12, fuente 3 = 16
+    const texto = (t: string) => {
+      const [, x, fuente, amp] = lineas.find((l) => l.endsWith(`,"${t}"`))!.match(/^TEXT (\d+),\d+,"(\d)",0,(\d),/)!;
+      return { x: Number(x), fuente: Number(fuente), amp: Number(amp), ancho: t.length * (Number(fuente) === 3 ? 16 : 12) * Number(amp) };
+    };
+    const venta = texto(`$${precio / 100}`);
+    const antes = texto(`$${lista / 100}`);
+    assert.ok(antes.fuente < venta.fuente && antes.amp <= venta.amp, 'debe ser mas chico');
+    assert.ok(antes.x + antes.ancho <= 406, 'se sale de la etiqueta');
+    assert.ok(venta.x + venta.ancho < antes.x, 'se encima con el precio de venta');
+  }
 });
 
 test('sin precio de lista mayor no hay tachado', () => {
