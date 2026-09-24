@@ -205,7 +205,8 @@ export function tsplBanda(banda, copias = 1, y0 = corrimiento(), barra = modulo(
 }
 
 /** Imprime un lote de una banda. Devuelve false si se cayo el enlace. */
-export const imprimirBanda = (banda, copias = 1) => mandarTspl(tsplBanda(banda, copias));
+export const imprimirBanda = (banda, copias = 1, alAvanzar) =>
+  mandarCopias(tsplBanda(banda, 1), copias, alAvanzar);
 
 const MEDIDA = ['SIZE 50.8 mm,25.4 mm', 'GAP 2 mm,0 mm', 'DIRECTION 1'];
 
@@ -353,6 +354,27 @@ export async function mandarTspl(tspl) {
   }
 }
 
+/**
+ * Manda el mismo trabajo de UNA etiqueta `copias` veces, en vez de un solo
+ * trabajo con `PRINT n,1`. Con la AE240 enfrente, una pieza con existencia 22
+ * saco una sola etiqueta: el conteo del PRINT no se respeta por este camino.
+ * Un trabajo por etiqueta es lo unico que se ha visto salir bien, y cada uno
+ * arranca donde la calibracion midio el corrimiento.
+ *
+ * ponytail: mas lento que un PRINT n (~1 s por etiqueta por BLE). Si algun dia
+ * se confirma que la impresora respeta el conteo, vuelve a ser un solo trabajo.
+ *
+ * @param alAvanzar llamada con (hechas, total) despues de cada etiqueta
+ */
+export async function mandarCopias(tspl, copias, alAvanzar) {
+  for (let i = 1; i <= copias; i += 1) {
+    if (!await mandarTspl(tspl)) return false;
+    alAvanzar?.(i, copias);
+    if (i < copias) await new Promise((r) => setTimeout(r, 300));
+  }
+  return true;
+}
+
 /** Imprime las etiquetas de una pieza. Devuelve false si se cayo el enlace. */
-export const imprimirEtiquetas = (pieza, copias = 1) =>
-  mandarTspl(tsplEtiqueta(pieza, copias));
+export const imprimirEtiquetas = (pieza, copias = 1, alAvanzar) =>
+  mandarCopias(tsplEtiqueta(pieza, 1), copias, alAvanzar);

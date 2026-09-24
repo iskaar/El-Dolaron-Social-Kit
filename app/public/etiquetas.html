@@ -146,7 +146,10 @@ document.getElementById('imprimir').addEventListener('click', async () => {
     // Una etiqueta por pieza en existencia: cinco tazas iguales, cinco etiquetas.
     const copias = Math.min(99, Math.max(1, p.stock ?? 1));
     resumen.textContent = `Imprimiendo pieza ${impresas + 1} de ${piezas.length}: ${copias} ${copias === 1 ? 'etiqueta' : 'etiquetas'}…`;
-    if (!await imprimirEtiquetas(p, copias)) {
+    const detalle = `pieza ${impresas + 1} de ${piezas.length}`;
+    if (!await imprimirEtiquetas(p, copias, (hechas) => {
+      resumen.textContent = `Imprimiendo ${detalle}: etiqueta ${hechas} de ${copias}…`;
+    })) {
       resumen.textContent = `Se cortó la impresora en la pieza ${impresas + 1} de ${piezas.length}. Las que faltan siguen en la lista.`;
       break;
     }
