@@ -42,6 +42,7 @@
     <button id="todas" class="claro" type="button">Seleccionar todas</button>
     <button id="ninguna" class="claro" type="button">Deseleccionar todas</button>
     <button id="otra" class="claro" type="button">¿No aparece la impresora?</button>
+    <button id="detener" class="claro" type="button">Detener</button>
     <span id="resumen"></span>
   </div>
 
@@ -67,7 +68,7 @@
 </main>
 
 <script type="module">
-import { conectarEtiquetera, etiqueteraLista, imprimirEtiquetas, historialTexto } from '/etiquetera.js';
+import { conectarEtiquetera, etiqueteraLista, imprimirEtiquetas, historialTexto, detenerEnvio, PAUSA_ENTRE_ETIQUETAS } from '/etiquetera.js';
 
 const lista = document.getElementById('lista');
 const resumen = document.getElementById('resumen');
@@ -129,9 +130,12 @@ document.getElementById('otra').addEventListener('click', async () => {
   }
 });
 
+document.getElementById('detener').addEventListener('click', () => detenerEnvio());
+
 document.getElementById('imprimir').addEventListener('click', async () => {
   const ids = [...lista.querySelectorAll('input:checked')].map((c) => c.value);
   if (ids.length === 0) return;
+  detenerEnvio(false);
 
   // Antes que nada, y antes de cualquier espera: pedir la impresora gasta el
   // permiso del clic, y el navegador ya no lo da despues de un fetch.
@@ -172,7 +176,7 @@ document.getElementById('imprimir').addEventListener('click', async () => {
     // ponytail: pausa entre piezas para no llenarle el buffer a la AE240. Si un
     // lote largo sale completo sin ella, sobra; si salen etiquetas en blanco,
     // subirla antes de tocar cualquier otra cosa.
-    await new Promise((r) => setTimeout(r, 400));
+    await new Promise((r) => setTimeout(r, PAUSA_ENTRE_ETIQUETAS));
   }
 
   if (impresas === piezas.length) resumen.textContent = `${impresas} piezas etiquetadas.`;

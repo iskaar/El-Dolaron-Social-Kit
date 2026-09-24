@@ -51,6 +51,7 @@
     <label for="cantidad">Cantidad por banda</label>
     <input id="cantidad" type="number" min="1" max="200" value="20">
     <button id="otra" class="claro" type="button">¿No aparece la impresora?</button>
+    <button id="detener" class="claro" type="button">Detener</button>
     <span id="resumen"></span>
   </div>
 
@@ -68,7 +69,7 @@
 </main>
 
 <script type="module">
-import { conectarEtiquetera, etiqueteraLista, imprimirBanda, historialTexto } from '/etiquetera.js';
+import { conectarEtiquetera, etiqueteraLista, imprimirBanda, historialTexto, detenerEnvio } from '/etiquetera.js';
 import { semanaIngreso } from '/semana.js';
 
 // Mismos siete precios que app/src/precio.ts (MONTOS_BANDA).
@@ -110,10 +111,13 @@ document.getElementById('otra').addEventListener('click', async () => {
   }
 });
 
+document.getElementById('detener').addEventListener('click', () => detenerEnvio());
+
 document.getElementById('familias').addEventListener('click', async (e) => {
   const boton = e.target.closest('.banda');
   if (!boton) return;
 
+  detenerEnvio(false);
   const copias = Math.min(200, Math.max(1, Math.round(Number(cantidad.value)) || 1));
   const banda = {
     familia: boton.dataset.familia,
