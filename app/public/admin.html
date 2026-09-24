@@ -78,12 +78,12 @@
 import { reducirArchivo } from '/foto.js';
 
 const CATEGORIAS = ['ropa', 'hogar', 'electronica', 'juguetes', 'otros'];
-// Mismos siete precios que app/src/precio.ts (MONTOS_BANDA), por familia r/g.
-const MONTOS_BANDA = [19, 29, 49, 79, 99, 149, 199];
+// Los siete montos y las familias de banda salen de la tabla `familias` (GET /api/familias).
+const { montos: MONTOS_BANDA, familias: FAMILIAS } = await (await fetch('/api/familias')).json();
 const DESTINOS = [
   ['etiqueta', 'Etiqueta individual'],
-  ...['r', 'g'].flatMap((f) => MONTOS_BANDA.map((p) =>
-    [`banda_${f}${p}`, `Banda ${f === 'r' ? 'Ropa' : 'General'} $${p} → ${f.toUpperCase()}${p}`])),
+  ...FAMILIAS.flatMap((f) => MONTOS_BANDA.map((p) =>
+    [`banda_${f.prefijo}${p}`, `Banda ${f.nombre} $${p} → ${f.prefijo.toUpperCase()}${p}`])),
 ];
 const CLAVES_CONFIG = [
   ['pct_ropa','Ropa %'], ['pct_hogar','Hogar %'], ['pct_electronica','Electrónica %'],

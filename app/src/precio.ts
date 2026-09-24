@@ -6,30 +6,50 @@
 
 export type Categoria = 'ropa' | 'hogar' | 'electronica' | 'juguetes' | 'otros';
 export type EstadoFisico = 'nuevo' | 'danado';
-export type Familia = 'r' | 'g';
+/** Prefijo de una familia de banda: una o dos letras minusculas ('r', 'ju'). Vive en la tabla `familias`. */
+export type Familia = string;
 
-/** Siete precios, compartidos por las dos familias (ropa/general). Ver PLAN-ETIQUETAS-POR-BANDA.md. */
+/** Siete precios, compartidos por todas las familias. Ver PLAN-ETIQUETAS-POR-BANDA.md. */
 export const MONTOS_BANDA = [19, 29, 49, 79, 99, 149, 199] as const;
-const FAMILIAS: Familia[] = ['r', 'g'];
 
-export type Destino =
-  | 'etiqueta'
-  | `banda_${Familia}${(typeof MONTOS_BANDA)[number]}`;
+export type Destino = 'etiqueta' | `banda_${string}`;
 
-/** Las 14 filas de catalogo (7 precios x 2 familias), para poblar DESTINOS y sembrar la migracion. */
-export const DESTINOS_BANDA: Destino[] = FAMILIAS.flatMap(
-  (f) => MONTOS_BANDA.map((p) => `banda_${f}${p}` as Destino),
-);
+const BANDA = /^banda_([a-z]{1,2})(\d+)$/;
 
-/** Ropa tiene su propia familia; todo lo demas cae en "general". */
+/** Un destino de banda bien formado (p.ej. `banda_ju49`). Que la familia exista lo dice la tabla `familias`. */
+export function esDestinoBanda(destino: string): boolean {
+  const m = BANDA.exec(destino);
+  return m !== null && (MONTOS_BANDA as readonly number[]).includes(Number(m[2]));
+}
+
+/** Ropa tiene su propia familia; todo lo demas cae en "general". El ruteo por IA a mas familias es la fase 2. */
 export function familiaDe(categoria: string): Familia {
   return categoria === 'ropa' ? 'r' : 'g';
 }
 
-/** El codigo de barras impreso (p.ej. "G79") a partir del destino de banda. */
+/** El codigo de barras impreso (p.ej. "JU79") a partir del destino de banda. */
 export function codigoDeDestino(destino: Destino): string | null {
-  const m = /^banda_([rg])(\d+)$/.exec(destino);
+  const m = BANDA.exec(destino);
   return m ? `${m[1].toUpperCase()}${m[2]}` : null;
+}
+
+/**
+ * Prefijo de dos letras para una familia nueva, a partir de su nombre: las dos
+ * primeras letras, o la primera y la siguiente distinta que no este ocupada. "ED" queda
+ * fuera porque es el de las piezas individuales (ED-000123). Con dos letras el
+ * codigo mas largo es "JU199", 5 caracteres, que aun cabe en la etiqueta a
+ * modulo 4 (360 de 406 puntos). Null si el nombre no tiene letras suficientes.
+ */
+export function prefijoParaFamilia(nombre: string, ocupados: Set<string>): string | null {
+  const letras = nombre.normalize('NFD').replace(/[^a-zA-Z]/g, '').toLowerCase();
+  const libre = (p: string) => !ocupados.has(p) && p !== 'ed';
+  for (let i = 0; i < letras.length; i++) {
+    for (let j = i + 1; j < letras.length; j++) {
+      const candidato = letras[i] + letras[j];
+      if (letras[i] !== letras[j] && libre(candidato)) return candidato;
+    }
+  }
+  return null;
 }
 
 const REDONDEO = 500; // $5 MXN
@@ -43,7 +63,7 @@ export function redondear5(centavos: number): number {
  * Ajusta un precio escrito a mano por el admin.
  * Una pieza en una banda se vende al precio de la banda: si el destino es
  * `banda_g49`, el precio sale de la configuracion `banda_49` (compartida entre
- * `r` y `g`), aunque en el campo se haya tecleado otra cosa. Una banda con un
+ * todas las familias), aunque en el campo se haya tecleado otra cosa. Una banda con un
  * precio que no es el suyo es una discrepancia que aparece en la caja.
  */
 export function ajustarManual({ precio, destino, config }: {
@@ -54,8 +74,8 @@ export function ajustarManual({ precio, destino, config }: {
   if (destino === 'etiqueta') {
     return redondear5(precio);
   }
-  const m = /^banda_[rg](\d+)$/.exec(destino);
-  const pesosPorDefecto = m ? Number.parseInt(m[1], 10) : 0;
+  const m = BANDA.exec(destino);
+  const pesosPorDefecto = m ? Number.parseInt(m[2], 10) : 0;
   return entero(config, `banda_${pesosPorDefecto}`, pesosPorDefecto * 100);
 }
 

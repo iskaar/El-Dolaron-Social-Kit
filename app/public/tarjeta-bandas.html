@@ -42,9 +42,9 @@
 
 <main>
   <p class="ayuda">
-    Imprime esta hoja, recórtala y lamínala. Va pegada junto a la caja como respaldo:
-    si el código de banda pegado en la pieza no escanea, la cajera escanea aquí el
-    mismo código en lugar de teclear el precio. Las bandas no descuentan existencias.
+    Referencia de todos los códigos de banda, por familia. La caja ya no tiene botones
+    de banda: si el código pegado en la pieza no escanea, se busca en la caja por su
+    descripción («juguetes 49») o por este código. Las bandas no descuentan existencias.
   </p>
 
   <div class="tarjeta">
@@ -57,15 +57,14 @@
 <script type="module">
 import { svgCode128 } from '/code128.js';
 
-// Mismos siete precios que app/src/precio.ts (MONTOS_BANDA).
-const MONTOS_BANDA = [19, 29, 49, 79, 99, 149, 199];
-const familias = [['r', 'Ropa'], ['g', 'General']];
+// Las familias y los siete montos salen de la tabla `familias` (GET /api/familias).
+const { montos, familias } = await (await fetch('/api/familias')).json();
 
-document.getElementById('familias').innerHTML = familias.map(([f, nombre]) => `
+document.getElementById('familias').innerHTML = familias.map((f) => `
   <div class="familia">
-    <h2>${nombre}</h2>
-    ${MONTOS_BANDA.map((precio) => {
-      const codigo = `${f.toUpperCase()}${precio}`;
+    <h2>${f.nombre}</h2>
+    ${montos.map((precio) => {
+      const codigo = `${f.prefijo.toUpperCase()}${precio}`;
       return `<div class="bote">
         <div class="precio">$${precio}</div>
         <div>

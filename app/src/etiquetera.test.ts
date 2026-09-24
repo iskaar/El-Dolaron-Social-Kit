@@ -231,3 +231,13 @@ test('el historial anota lo que se envio, y un corte se ve como corte', async ()
   assert.match(historialTexto(), /Taza azul: SE CORTO \(0 de 3\)/);
   delete (globalThis as any).localStorage;
 });
+
+test('una banda de familia larga y codigo de 5 caracteres cabe en la etiqueta', () => {
+  const tspl = tsplBanda({ familia: 'Cuidado personal y bebé con un nombre larguísimo de más', precioPesos: 199, codigo: 'CU199', semana: 'S38' }, 1, 0, 4);
+  const nombre = tspl.split('\r\n').find((l) => l.startsWith('TEXT 16,8,'))!;
+  assert.ok(nombre.match(/"([^"]*)"$/)![1].length <= NOMBRE_MAX);
+  // El codigo de barras a modulo 4: (11 x (caracteres + 2) + 13) x 4 puntos, centrado con 16 de margen.
+  const barra = tspl.split('\r\n').find((l) => l.startsWith('BARCODE'))!;
+  const x = Number(barra.match(/^BARCODE (\d+),/)![1]);
+  assert.ok(x >= 16 && x + (11 * (5 + 2) + 13) * 4 <= 406 - 16);
+});

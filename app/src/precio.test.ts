@@ -1,7 +1,7 @@
 // node --test src/precio.test.ts
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { calcularPrecio, ajustarManual, redondear5, precioDesdeSugerencia, codigoDeDestino } from './precio.ts';
+import { calcularPrecio, ajustarManual, redondear5, precioDesdeSugerencia, codigoDeDestino, esDestinoBanda, prefijoParaFamilia } from './precio.ts';
 
 // Los valores confirmados por Isaac: porcentajes 2026-09-11, bandas 2026-09-24
 // (limite subido a $200, ropa/general comparten los siete precios).
@@ -87,4 +87,22 @@ test('codigoDeDestino da el codigo impreso de la banda, o nulo para etiqueta', (
   assert.equal(codigoDeDestino('banda_g79'), 'G79');
   assert.equal(codigoDeDestino('banda_r199'), 'R199');
   assert.equal(codigoDeDestino('etiqueta'), null);
+});
+
+test('destinos de banda: cualquier familia de 1 o 2 letras con uno de los siete montos', () => {
+  assert.ok(esDestinoBanda('banda_r49'));
+  assert.ok(esDestinoBanda('banda_ju199'));
+  assert.ok(!esDestinoBanda('banda_ju50'));      // monto que no es de banda
+  assert.ok(!esDestinoBanda('banda_abc49'));     // prefijo de 3 letras
+  assert.ok(!esDestinoBanda('etiqueta'));
+  assert.equal(codigoDeDestino('banda_ju79'), 'JU79');
+  assert.equal(ajustarManual({ precio: 123, destino: 'banda_ju49', config: {} }), 4900);
+});
+
+test('prefijoParaFamilia: dos primeras letras, y cuando estan ocupadas la primera y la siguiente libre', () => {
+  assert.equal(prefijoParaFamilia('Juguetes', new Set()), 'ju');
+  assert.equal(prefijoParaFamilia('Electrónica ligera', new Set(['el'])), 'ec');
+  assert.equal(prefijoParaFamilia('Mascotas', new Set(['ma'])), 'ms');
+  assert.equal(prefijoParaFamilia('Edición', new Set()), 'ei');   // "ed" es de las piezas ED-000123
+  assert.equal(prefijoParaFamilia('12', new Set()), null);
 });

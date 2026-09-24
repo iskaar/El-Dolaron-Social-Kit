@@ -198,7 +198,7 @@ export function tsplBanda(banda, copias = 1, y0 = corrimiento(), barra = modulo(
     'GAP 2 mm,0 mm',
     'DIRECTION 1',
     'CLS',
-    `TEXT ${MARGEN},${y(PRIMER_RENGLON)},"2",0,1,1,"${limpiar(banda.familia).toUpperCase()}"`,
+    `TEXT ${MARGEN},${y(PRIMER_RENGLON)},"2",0,1,1,"${limpiar(banda.familia).toUpperCase().slice(0, NOMBRE_MAX)}"`,
     `TEXT ${centrar(precio, ANCHO_PRECIO_BANDA)},${y(30)},"3",0,3,3,"${precio}"`,
     `BARCODE ${centrarBarras(banda.codigo, barra)},${y(110)},"128",48,0,0,${barra},${barra * 2},"${banda.codigo}"`,
     `TEXT ${centrar(pie, ANCHO_PIE)},${y(164)},"1",0,1,1,"${pie}"`,
