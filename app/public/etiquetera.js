@@ -26,6 +26,7 @@ const MARGEN = 16;
 const ANCHO_NOMBRE = 12;   // fuente "2" sin ampliar
 const ANCHO_PIE = 8;       // fuente "1" sin ampliar
 const ANCHO_PRECIO = 32;   // fuente "3" ampliada x2
+const ANCHO_PRECIO_LISTA = 24; // fuente "2" ampliada x2
 const PRIMER_RENGLON = 8;  // lo mas alto del diseno, y el tope del corrimiento
 
 // Ancho de la barra angosta, en puntos (8 = 1 mm a 203 dpi).
@@ -153,11 +154,14 @@ export function tsplEtiqueta(pieza, copias = 1, y0 = corrimiento(), barra = modu
   ordenes.push(`TEXT ${MARGEN},${y(54)},"3",0,2,2,"${precio}"`);
 
   if (pieza.precio_lista > pieza.precio) {
+    // Precio de lista a la derecha, un paso mas chico que el de venta (fuente
+    // "2" x2 contra "3" x2) y con la base a la altura de la del precio.
     const antes = pesos(pieza.precio_lista);
-    const x = MARGEN + precio.length * ANCHO_PRECIO + 12;
-    ordenes.push(`TEXT ${x},${y(86)},"1",0,1,1,"${antes}"`);
-    // TSPL no sabe tachar texto: la linea encima se dibuja a mano.
-    ordenes.push(`BAR ${x},${y(92)},${antes.length * ANCHO_PIE},2`);
+    const ancho = antes.length * ANCHO_PRECIO_LISTA;
+    const x = ANCHO - MARGEN - ancho;
+    ordenes.push(`TEXT ${x},${y(62)},"2",0,2,2,"${antes}"`);
+    // TSPL no sabe tachar texto: la linea encima se dibuja a mano, a media altura.
+    ordenes.push(`BAR ${x},${y(81)},${ancho},3`);
   }
 
   // El codigo de barras lo dibuja la impresora, no code128.js: asi las barras
