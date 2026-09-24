@@ -358,16 +358,16 @@ export async function mandarTspl(tspl) {
   }
 }
 
-// Ritmo de envio. La impresora no avisa cuando se le llena la memoria: con 22
-// etiquetas a 300 ms seguidas funciono, con 58 se atasco y hubo que apagarla
-// (2026-09-24). Una pausa de 1800 ms tras CADA etiqueta lo evito pero fue
-// demasiado lento; el driver de Windows saca 5-6 seguidas. Se manda en tandas de
-// LOTE, casi seguidas, y la pausa larga va entre tandas. Los tres numeros son
-// lo que hay que ajustar: si un lote largo se atora, bajar LOTE o subir
-// PAUSA_ENTRE_LOTES; si sobra tiempo, al reves.
-export const LOTE = 3;
+// Ritmo de envio. La impresora no avisa cuando se le llena la memoria: 22
+// etiquetas a 300 ms seguidas salieron bien, pero con 58 se atasco y hubo que
+// apagarla (2026-09-24). Una pausa de 1800 ms tras CADA etiqueta lo evito pero
+// fue demasiado lento. Se manda en tandas de LOTE etiquetas a 300 ms (el tamano
+// que ya se vio salir) y entre tandas se espera a que la impresora vacie lo que
+// tiene. Los tres numeros son lo que hay que ajustar: si un lote largo se atora,
+// bajar LOTE o subir PAUSA_ENTRE_LOTES; si sobra tiempo, al reves.
+export const LOTE = 20;
 export const PAUSA_ENTRE_ETIQUETAS = 300;
-export const PAUSA_ENTRE_LOTES = 1500;
+export const PAUSA_ENTRE_LOTES = 10000;
 
 let detenido = false;
 
