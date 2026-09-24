@@ -358,6 +358,15 @@ export async function mandarTspl(tspl) {
   }
 }
 
+// Cuanto se espera entre una etiqueta y la siguiente. La impresora no avisa
+// cuando se le llena la memoria: con 22 etiquetas a 300 ms funciono, con 58 se
+// atasco y hubo que apagarla (2026-09-24). Mandar a un ritmo mayor al que
+// imprime la va llenando poco a poco, asi que se deja un margen holgado. Es el
+// numero a ajustar si un lote largo se atora (subirlo) o si sobra tiempo (bajarlo).
+export const PAUSA_ENTRE_ETIQUETAS = 1800;
+
+let detenido = false;
+
 /**
  * Manda el mismo trabajo de UNA etiqueta `copias` veces, en vez de un solo
  * trabajo con `PRINT n,1`. Con la AE240 enfrente, una pieza con existencia 22
@@ -373,13 +382,21 @@ export async function mandarTspl(tspl) {
  */
 export async function mandarCopias(tspl, copias, alAvanzar, nombre = '') {
   let enviadas = 0;
-  while (enviadas < copias && await mandarTspl(tspl)) {
+  while (enviadas < copias && !detenido && await mandarTspl(tspl)) {
     enviadas += 1;
     alAvanzar?.(enviadas, copias);
-    if (enviadas < copias) await new Promise((r) => setTimeout(r, 300));
+    if (enviadas < copias) await new Promise((r) => setTimeout(r, PAUSA_ENTRE_ETIQUETAS));
   }
   anotarEnvio({ hora: new Date().toISOString(), nombre, copias, enviadas });
   return enviadas === copias;
+}
+
+/**
+ * Corta el envio en curso despues de la etiqueta que va, y los que le sigan
+ * (un lote de varias piezas). Cada clic de imprimir lo rearma con `detenerEnvio(false)`.
+ */
+export function detenerEnvio(valor = true) {
+  detenido = valor === true;
 }
 
 /** Imprime las etiquetas de una pieza. Devuelve false si se cayo el enlace. */
