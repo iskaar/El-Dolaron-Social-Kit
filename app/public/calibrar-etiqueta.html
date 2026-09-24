@@ -1,0 +1,209 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>El Dolarón — calibrar etiqueta</title>
+<style>
+  :root { --azul:#16366B; --linea:#dfe3ea; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: #f4f6f9; color: #1a1f2b;
+    font-family: system-ui, -apple-system, sans-serif; }
+  header { background: var(--azul); color: #fff; padding: 14px 20px;
+    display: flex; gap: 16px; align-items: center; flex-wrap: wrap; }
+  header h1 { font-size: 18px; margin: 0; flex: 1; }
+  header a { color: #FFD447; font-size: 14px; }
+  main { padding: 20px; max-width: 760px; margin: 0 auto; }
+  .ayuda { font-size: 14px; line-height: 1.5; color: #333; max-width: 66ch; }
+  .paso { background: #fff; border: 1px solid var(--linea); border-radius: 12px;
+    padding: 16px; margin-bottom: 16px; }
+  .paso h2 { font-size: 15px; margin: 0 0 4px; }
+  .paso p { font-size: 13px; color: #5b6478; line-height: 1.45; margin: 0 0 12px; }
+  button { border: 0; border-radius: 8px; padding: 10px 14px; font-size: 14px;
+    font-weight: 600; cursor: pointer; background: var(--azul); color: #fff; }
+  button.claro { background: #fff; color: #1a1f2b; border: 1px solid var(--linea); }
+  .botones { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  input { padding: 9px; border: 1px solid var(--linea); border-radius: 8px;
+    font-size: 16px; width: 7em; }
+  .estado { font-size: 13px; color: #5b6478; margin-top: 12px; min-height: 1.4em; }
+  .guardado { font-weight: 700; color: #1a1f2b; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Calibrar etiqueta</h1>
+  <a href="/etiquetas">← Etiquetas</a>
+</header>
+
+<main>
+  <p class="ayuda">
+    La impresora arranca el trabajo unos milímetros antes de donde empieza la etiqueta:
+    el nombre acaba en la etiqueta de arriba. Esta pantalla lo mide en vez de adivinarlo.
+    Corre los pasos en orden, con la impresora prendida y papel de sobra.
+  </p>
+
+  <div class="paso">
+    <h2>1. Conectar</h2>
+    <p>Escoge <b>AE240-bt</b>. Si no sale, usa «ver todos».</p>
+    <div class="botones">
+      <button id="conectar" type="button">Conectar impresora</button>
+      <button id="conectar-todos" class="claro" type="button">Ver todos</button>
+    </div>
+  </div>
+
+  <div class="paso">
+    <h2>2. Cuadrar dónde arranca el trabajo</h2>
+    <p>
+      Que el botón de avance pare clavado en cada etiqueta quiere decir que el sensor
+      está bien: lo que está corrido es dónde <b>empieza</b> a imprimir. Esto manda un
+      marco del tamaño de la etiqueta con un <b>OFFSET</b> dado. Salen dos etiquetas y
+      <b>la que cuenta es la segunda</b> (la primera todavía trae la parada anterior).
+      Empieza con <b>0</b> para ver de cuánto es el descuadre, y luego sube o baja de
+      milímetro en milímetro hasta que el marco caiga justo sobre el borde del papel.
+    </p>
+    <div class="botones">
+      <input id="offset" type="number" step="0.5" value="0" inputmode="decimal">
+      <button id="marco" type="button">Probar marco</button>
+      <button id="probar" class="claro" type="button">Imprimir etiqueta de prueba</button>
+    </div>
+  </div>
+
+  <div class="paso">
+    <h2>3. Si el OFFSET no mueve nada</h2>
+    <p>
+      Entonces este firmware lo ignora y hay que correr el contenido a mano. La regla
+      imprime rayas cada 2 mm desde donde la impresora cree que empieza la etiqueta:
+      mira en qué número cae el <b>borde de arriba del papel</b> y escríbelo. Negativo
+      si el marco quedó arriba del papel. <b>Dime el número que saliste midiendo</b> —
+      corrimientos de más de 3 mm recortan el renglón de abajo y hay que apretar el
+      diseño, no sólo moverlo.
+    </p>
+    <div class="botones">
+      <button id="regla" class="claro" type="button">Imprimir regla</button>
+      <input id="mm" type="number" step="0.5" placeholder="mm" inputmode="decimal">
+      <button id="guardar" type="button">Guardar y probar</button>
+    </div>
+  </div>
+
+  <div class="paso">
+    <h2>4. Que el lector alcance a leer las barras</h2>
+    <p>
+      Salen cuatro etiquetas letradas <b>A a D</b>, cada una con barras más anchas
+      (mismas que <a href="/prueba-codigo">/prueba-codigo</a>). Pásalas con el lector:
+      <b>la primera que suene es la buena</b>. Escribe sus puntos aquí y guárdalos. Si
+      no suena ninguna, sube el <i>darkness</i> de la impresora antes de seguir
+      engordando barras: unas barras corridas por el calor no las lee ningún lector
+      por anchas que sean.
+    </p>
+    <div class="botones">
+      <button id="barras" class="claro" type="button">Probar A-D</button>
+      <input id="pts" type="number" step="1" min="2" max="8" placeholder="puntos" inputmode="numeric">
+      <button id="guardar-barra" type="button">Guardar ancho</button>
+    </div>
+  </div>
+
+  <div class="paso">
+    <h2>Si nada de esto cuadra</h2>
+    <p>
+      El sensor se puede remedir por software, aunque el botón de avance dice que no es
+      ahí donde está el problema.
+    </p>
+    <div class="botones">
+      <button id="calibrar" class="claro" type="button">Remedir el rollo (GAPDETECT)</button>
+    </div>
+    <div class="estado" id="estado"></div>
+  </div>
+</main>
+
+<script type="module">
+import {
+  conectarEtiquetera, etiqueteraLista, mandarTspl, tsplEtiqueta, tsplMarco, tsplPruebaCodigo,
+  corrimiento, guardarCorrimiento, modulo, guardarModulo, TSPL_CALIBRAR, TSPL_REGLA,
+} from '/etiquetera.js';
+
+const estado = document.getElementById('estado');
+const mm = document.getElementById('mm');
+const offset = document.getElementById('offset');
+const pts = document.getElementById('pts');
+
+// 203 dpi: 8 puntos por milimetro. Isaac mide en mm, la impresora cuenta puntos.
+const PUNTOS_POR_MM = 8;
+
+const PIEZA_DEMO = {
+  nombre: 'Prueba de calibracion El Dolaron',
+  precio: 15000,
+  precio_lista: 39000,
+  codigo: 'ED-000017',
+  semana_ingreso: 'S38',
+};
+
+function avisar(texto) { estado.textContent = texto; }
+
+async function conectar(cualquiera) {
+  try {
+    if (!etiqueteraLista()) await conectarEtiquetera({ cualquiera });
+    avisar('Impresora conectada.');
+    return true;
+  } catch (error) {
+    avisar(error.name === 'NotFoundError'
+      ? 'No se escogió impresora. Préndela y vuelve a intentar, o usa «ver todos».'
+      : `No se pudo conectar: ${error.message}`);
+    return false;
+  }
+}
+
+/** Todo boton que imprime necesita el enlace: pedirlo aqui evita un clic de mas. */
+function alImprimir(id, arma, aviso) {
+  document.getElementById(id).addEventListener('click', async () => {
+    if (!etiqueteraLista() && !await conectar(false)) return;
+    avisar(await mandarTspl(arma()) ? aviso : 'Se cortó el enlace. Vuelve a conectar.');
+  });
+}
+
+document.getElementById('conectar').addEventListener('click', () => conectar(false));
+document.getElementById('conectar-todos').addEventListener('click', () => conectar(true));
+
+alImprimir('barras', () => tsplPruebaCodigo(),
+  'Van cuatro (A-D). Pásalas con el lector: la primera que suene es la buena.');
+alImprimir('marco', () => tsplMarco(Number(offset.value) || 0),
+  'Van dos marcos: mira el SEGUNDO. ¿Sus lados caen sobre el borde del papel?');
+alImprimir('calibrar', () => TSPL_CALIBRAR,
+  'Sensor calibrado. Imprime la etiqueta de prueba para ver si ya quedó.');
+alImprimir('regla', () => TSPL_REGLA,
+  'Regla impresa. ¿En qué número cae el borde de arriba del papel?');
+alImprimir('probar', () => tsplEtiqueta(PIEZA_DEMO),
+  `Etiqueta de prueba enviada, con el corrimiento en ${corrimiento() / PUNTOS_POR_MM} mm.`);
+
+document.getElementById('guardar').addEventListener('click', async () => {
+  const medido = Number(mm.value);
+  if (!Number.isFinite(medido) || mm.value === '') {
+    avisar('Escribe los milímetros que leíste en la regla.');
+    return;
+  }
+  // El contenido tiene que bajar lo mismo que la impresora se adelanto.
+  guardarCorrimiento(medido * PUNTOS_POR_MM);
+  if (!etiqueteraLista() && !await conectar(false)) return;
+  avisar(await mandarTspl(tsplEtiqueta(PIEZA_DEMO))
+    ? `Guardado: ${medido} mm. Va la prueba — si ya quedó, /etiquetas usa este mismo número.`
+    : `Guardado: ${medido} mm, pero se cortó el enlace antes de imprimir.`);
+});
+
+document.getElementById('guardar-barra').addEventListener('click', async () => {
+  const puntos = Number(pts.value);
+  if (!Number.isInteger(puntos) || puntos < 2 || puntos > 8) {
+    avisar('Escribe los puntos de la etiqueta que sonó (entre 2 y 8).');
+    return;
+  }
+  guardarModulo(puntos);
+  if (!etiqueteraLista() && !await conectar(false)) return;
+  avisar(await mandarTspl(tsplEtiqueta(PIEZA_DEMO))
+    ? `Guardado: barra de ${puntos} puntos. Va una etiqueta completa — pásala con el lector.`
+    : `Guardado: ${puntos} puntos, pero se cortó el enlace antes de imprimir.`);
+});
+
+mm.value = corrimiento() / PUNTOS_POR_MM;
+pts.value = modulo();
+avisar(`Guardado ahora: corrimiento ${corrimiento() / PUNTOS_POR_MM} mm, barra ${modulo()} puntos.`);
+</script>
+</body>
+</html>

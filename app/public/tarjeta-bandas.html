@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>El Dolarón — tarjeta de botes</title>
+<title>El Dolarón — tarjeta de bandas</title>
 <style>
   :root { --azul:#16366B; --rojo:#D72B32; }
   * { box-sizing: border-box; }
@@ -18,10 +18,12 @@
     margin-top: 16px; }
   .titulo { text-align: center; font-size: 20px; font-weight: 800; color: var(--azul); }
   .subtitulo { text-align: center; font-size: 12px; color: #5b6478; margin-bottom: 8mm; }
-  .bote { display: flex; align-items: center; justify-content: space-between; gap: 8mm;
-    padding: 6mm 0; border-top: 1px solid #e6e9ef; }
-  .precio { font-size: 34px; font-weight: 800; color: var(--azul); width: 30mm; }
-  .codigo { font-family: ui-monospace, monospace; font-size: 11px; text-align: center; margin-top: 1mm; }
+  .familias { display: grid; grid-template-columns: 1fr 1fr; gap: 0 8mm; }
+  .familia h2 { font-size: 13px; text-align: center; color: var(--azul); margin: 0 0 2mm; }
+  .bote { display: flex; align-items: center; justify-content: space-between; gap: 4mm;
+    padding: 3mm 0; border-top: 1px solid #e6e9ef; }
+  .precio { font-size: 22px; font-weight: 800; color: var(--azul); width: 16mm; }
+  .codigo { font-family: ui-monospace, monospace; font-size: 10px; text-align: center; margin-top: 1mm; }
   @media print {
     header, .ayuda { display: none !important; }
     body { background: #fff; }
@@ -33,36 +35,45 @@
 </head>
 <body>
 <header>
-  <h1>Tarjeta de botes</h1>
+  <h1>Tarjeta de bandas</h1>
   <button type="button" onclick="print()">Imprimir</button>
   <a href="/caja">← Caja</a>
 </header>
 
 <main>
   <p class="ayuda">
-    Imprime esta hoja, recórtala y lamínala. Va pegada junto a la caja: la cajera
-    escanea el código del bote una vez por pieza, en lugar de teclear el precio.
-    Los botes no descuentan existencias.
+    Imprime esta hoja, recórtala y lamínala. Va pegada junto a la caja como respaldo:
+    si el código de banda pegado en la pieza no escanea, la cajera escanea aquí el
+    mismo código en lugar de teclear el precio. Las bandas no descuentan existencias.
   </p>
 
   <div class="tarjeta">
     <div class="titulo">EL DOLARÓN</div>
-    <div class="subtitulo">Botes de precio fijo</div>
-    <div id="botes"></div>
+    <div class="subtitulo">Bandas de precio fijo</div>
+    <div class="familias" id="familias"></div>
   </div>
 </main>
 
 <script type="module">
 import { svgCode128 } from '/code128.js';
 
-const botes = [['BIN-20', 20], ['BIN-40', 40], ['BIN-60', 60]];
-document.getElementById('botes').innerHTML = botes.map(([codigo, precio]) => `
-  <div class="bote">
-    <div class="precio">$${precio}</div>
-    <div>
-      ${svgCode128(codigo, { modulo: 0.5, alto: 14 })}
-      <div class="codigo">${codigo}</div>
-    </div>
+// Mismos siete precios que app/src/precio.ts (MONTOS_BANDA).
+const MONTOS_BANDA = [19, 29, 49, 79, 99, 149, 199];
+const familias = [['r', 'Ropa'], ['g', 'General']];
+
+document.getElementById('familias').innerHTML = familias.map(([f, nombre]) => `
+  <div class="familia">
+    <h2>${nombre}</h2>
+    ${MONTOS_BANDA.map((precio) => {
+      const codigo = `${f.toUpperCase()}${precio}`;
+      return `<div class="bote">
+        <div class="precio">$${precio}</div>
+        <div>
+          ${svgCode128(codigo, { modulo: 0.5, alto: 12 })}
+          <div class="codigo">${codigo}</div>
+        </div>
+      </div>`;
+    }).join('')}
   </div>`).join('');
 </script>
 </body>
