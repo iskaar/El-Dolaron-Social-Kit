@@ -34,6 +34,7 @@ Este documento conserva la investigación y el diseño del sistema de recompensa
 | Portal de clientes | Registro y consulta de saldo en línea; compra y canje en tienda física |
 | Identidad | Membresía QR/PIN y correo verificado para acceso en línea; sin SMS/WhatsApp de autenticación en v1 |
 | Escala prevista | Hasta 1,000 clientes distintos al inicio y 10,000 durante el primer año; no equivale a usuarios simultáneos |
+| Desarrollo y presupuesto inicial | Claude y Codex, usando suscripciones existentes; reducir costos recurrentes hasta que opere la tienda. El plan detalla la propuesta de $50–51 USD/mes de servicios |
 
 ### Regalo de apertura: reparto propuesto ($15,000 exactos)
 

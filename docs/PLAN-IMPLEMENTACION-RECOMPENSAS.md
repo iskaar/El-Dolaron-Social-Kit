@@ -4,6 +4,8 @@ Fecha: 24/09/2026. Propietario: Isaac. [Issue #56](https://github.com/iskaar/El-
 
 **Recomendación:** lanzar un programa pequeño y completo: registro y saldo privados en línea, QR/PIN, acumulación del 10%, canje presencial, devoluciones, regalo de apertura y operación de contingencia. Construirlo sobre la caja existente. Temporadas y gamificación llegan después. Este documento es el plan; el producto todavía no está implementado ni aprobado para producción.
 
+**Ajuste de presupuesto solicitado el 24/09/2026:** desarrollar con Codex y Claude Code usando las suscripciones existentes; Claude Pro cuesta $20/mes. El presupuesto de servicios baja de $94–95 a **$50–51/mes**, con staging gratuito y monitor externo gratuito. Mantener autenticación administrada en producción, respaldo, revisión y pruebas de dinero. El detalle distingue gasto existente, incremento y condiciones para bajar más.
+
 ## 1. Alcance confirmado y decisiones por cerrar
 
 | Confirmado por Isaac | Aplicación |
@@ -14,6 +16,7 @@ Fecha: 24/09/2026. Propietario: Isaac. [Issue #56](https://github.com/iskaar/El-
 | Membresía QR/PIN y correo verificado | Sin gasto de SMS/WhatsApp para autenticación |
 | 1 D = $1 MXN, acumulación 10%, cualquier producto, 12 meses | Conservar; precisar aritmética, devoluciones y disponibilidad antes de programar |
 | Regalo de 15,000 D para los primeros 100 registrados | Mantener tabla de importes; publicar elegibilidad y orden; reparto de espera sin azar |
+| Desarrollo con Claude y Codex; reducir gasto inicial | Usar Claude Pro existente de $20/mes; sin upgrade ni bolsa API por defecto |
 
 Antes de activar reglas comerciales, Isaac debe decidir: día/hora de apertura y registro, +50/+5 y acumulación con el regalo, interpretación de «siguiente visita», base/redondeo, restitución después de vencimiento, manejo de cuentas duplicadas y reparto de remanentes. Las propuestas concretas están en la sección 7 del documento de reglas. También faltan presupuesto mensual, número real de cajas/tiendas y responsable de incidentes. Se presupuesta provisionalmente **una tienda, hasta dos cajas y cinco empleados**; no son datos confirmados.
 
@@ -65,6 +68,8 @@ Membresía presencial: QR aleatorio revocable más PIN elegido por el cliente, c
 
 **Aislamiento de pruebas:** Worker/D1/R2 y proyecto Auth distintos para staging y producción. Solo datos sintéticos en staging. Revisar permisos de cuentas proveedoras, MFA del personal, secretos y revocación. No mover al público la cámara, análisis de fotos, reportes, exportaciones ni APIs administrativas.
 
+Para ahorrar, el proyecto Auth de staging vive en una **organización Supabase Free separada**, dentro de los dos proyectos gratuitos permitidos. Puede pausarse por inactividad: reactivarlo y repetir smoke tests antes de cada entrega. Producción conserva Pro. No compartir clientes, cookies, llaves ni proyecto Auth entre ambientes para ahorrar $10. Supabase permite combinar organizaciones pagadas y gratuitas: [regla de facturación](https://supabase.com/docs/guides/troubleshooting/keeping-free-projects-after-pro-upgrade-Kf9Xm2).
+
 ### Modelo mínimo de datos y operaciones
 
 | Elemento | Función y restricciones |
@@ -88,19 +93,21 @@ Usar importes seguros enteros, validación de entrada y límites de payload/lín
 
 Los nombres siguientes son **roles de ejecución**, no nuevos empleados ni agentes ya iniciados. Se recomienda asignarlos a tareas separadas con sus propios criterios de aceptación. El revisor recibe código y evidencia con contexto independiente. Ningún modelo sustituye aprobación comercial, revisión legal o prueba en la tienda.
 
-**Agrupación recomendada, dos modelos:** `Astra high → Sol high → Sol medium → Astra high`. Son dos cambios de modelo y un cambio de esfuerzo dentro de Sol; se vuelve a Astra al final porque no puede revisar código que aún no existe. Agrupar por modelo no altera dependencias. No usar `max`/`ultra` por defecto.
+**Agrupación recomendada, dos modelos y dos herramientas:** `Codex / Sol high → Claude Code / Sonnet medium → Claude Code / Sonnet high → Codex / Sol high`. Solo dos cambios entre herramientas/modelos; Claude sube esfuerzo una vez para revisar. Cada uno recibe un bloque completo, sin intercambiar archivos a cada paso. Se reutiliza esta revisión como punto de partida, sin pagar otra investigación general. Agrupar por modelo no altera dependencias. No usar `max`, `ultra`, Opus, Fable o Astra por defecto.
 
 | Lote | Agente / responsabilidad | Modelo exacto | Esfuerzo | Actividades agrupadas | Depende de | Evidencia de salida |
 | --- | --- | --- | --- | --- | --- | --- |
-| A | A01 Arquitectura y reglas | `gpt-6-astra` | `high` | R01: cerrar reglas, amenaza, datos, API, plan de pruebas y límites | Respuestas de Isaac | Contrato y ejemplos aprobados; issues implementables |
-| B | A02 Backend, identidad y dinero | `gpt-6-sol` | `high` | R02–R05: migraciones, Auth/permisos/PIN, ledger, ventas/refunds, apertura/folios | A | Integración verde y prueba atómica de todos los flujos críticos |
-| C | A03 Portal y caja | `gpt-6-sol` | `medium` | R06: pantallas, ticket, acceso, canje y recuperación; consumir API definida | B | Recorrido en móvil y caja sin exponer datos ajenos |
-| C | A04 Operación y entrega | `gpt-6-sol` | `medium` | R07: CI, staging, alertas, restauración, despliegue y ensayo | B; integrar C | Restauración probada y evidencia del piloto |
-| C | A05 Contenido y capacitación | `gpt-6-sol` | `medium` | R08: textos aprobados, instrucciones de caja/papel/soporte, actualización docs | A; capturas finales de C | Guía que otro empleado puede seguir y preguntas frecuentes |
-| D | A06 Revisión independiente | `gpt-6-astra` | `high` | R09: seguridad, concurrencia, economía, fallos y decisión de aptitud | B y C completos | Hallazgos resueltos; checklist firmado por Isaac |
-| E | A02 Correcciones, solo si hay hallazgos | `gpt-6-sol` | `high` | Corregir causas, reproducir y revalidar; revisión afectada vuelve a A06 | D | Cero defectos críticos/altos abiertos |
+| A | A01 Codex: arquitectura y reglas | `gpt-6-sol` | `high` | R01: cerrar decisiones del plan, datos, API y ejemplos de aceptación | Respuestas de Isaac | Contrato aprobado; issues implementables |
+| B | A02 Codex: backend, identidad y dinero | `gpt-6-sol` | `high` | R02–R05: migraciones, Auth/permisos/PIN, ledger, ventas/refunds, apertura/folios | A | Integración verde y prueba atómica de flujos críticos |
+| C | A03 Claude Code: portal y caja | `claude-sonnet-5` | `medium` | R06: pantallas, ticket, acceso y recuperación; consumir API definida | B | Recorrido móvil/caja, accesibilidad y errores probados |
+| C | A04 Claude Code: operación y entrega | `claude-sonnet-5` | `medium` | R07: CI, staging, alertas, scripts de restauración y ensayo | B; integrar C | Restauración reproducible y evidencia del piloto |
+| C | A05 Claude Code: contenido y capacitación | `claude-sonnet-5` | `medium` | R08: textos aprobados, instrucciones de caja/papel/soporte y docs | A; capturas finales de C | Guía que otro empleado puede seguir |
+| D | A06 Claude Code: revisión del backend de Codex | `claude-sonnet-5` | `high` | R09: revisar seguridad, concurrencia, devoluciones y presupuesto con contexto nuevo | B y C completos | Casos reproducibles y hallazgos; sin aprobar su propio frontend |
+| E | A07 Codex: revisión del trabajo de Claude e integración | `gpt-6-sol` | `high` | R09: revisar portal/CI/operación; integrar y corregir backend; repetir pruebas afectadas | D | Sin defectos críticos/altos; revisión cruzada completa e Isaac aprueba salida |
 
-Alternativa opcional: `gpt-6-luna` en `high` para A05 si hay bastante contenido repetitivo y reglas ya congeladas. Ahorra tokens, pero añade un modelo: no es necesaria para este lanzamiento. Nunca asignarle en solitario reglas de saldo, migraciones destructivas o aprobación de seguridad. Las recomendaciones se basan en el rol documentado de [Astra/Sol/Luna](https://learn.chatgpt.com/docs/models); los niveles son una elección para este proyecto, no una garantía de calidad.
+Sol y Sonnet cubren el trabajo normal; un modelo más caro solo se considera ante un bloqueo concreto o hallazgo difícil, con presupuesto antes de generar cargos nuevos. Las correcciones críticas reciben una nueva revisión del otro agente: agrupar trabajo no elimina ese regreso necesario. La revisión cruzada reduce puntos ciegos, pero no garantiza seguridad. Fuentes: [modelos Codex](https://learn.chatgpt.com/docs/models), [modelos Claude](https://platform.claude.com/docs/en/models/overview) y [esfuerzo Claude](https://platform.claude.com/docs/en/build-with-claude/effort). Sonnet 5 admite `medium` como ajuste de menor consumo frente a su `high` predeterminado; conservar `high` para revisar dinero/autorización.
+
+Trabajar con una sesión activa por herramienta, tareas acotadas y handoff con commit, archivos/API y pruebas; no pedir dos implementaciones completas del mismo problema. Confirmar disponibilidad de los modelos en las cuentas antes de iniciar. Si se alcanza el límite de Pro/Codex, pausar ese bloque hasta el reinicio o continuar trabajo independiente con la otra suscripción; no activar sobreconsumo ni API automáticamente. Los límites pueden ampliar el calendario, no reducen los criterios de salida.
 
 Cada issue debe contener alcance, archivos dueños, dependencias, ejemplos de aceptación y evidencia. Cada entrega: commit, pruebas ejecutadas, resultados, pendientes y decisiones; no usar memoria privada como contrato. Seguir `AGENTS.md`: issue, rama `agent/<agente>/<issue>-<slug>`, PR y CI. Un agente integra cambios en `worker.ts`/migraciones para evitar ediciones competidoras. Se pueden hacer contenidos y preparativos de operación mientras madura la API, pero el flujo crítico queda secuencial.
 
@@ -124,14 +131,14 @@ No crear todos los issues especulativos ahora: convertir R01–R09 al iniciar im
 
 Hay 7–13 días calendario desde esta revisión hasta la ventana de apertura. Estimación orientativa: **50–80 horas de ingeniería/revisión**, más decisiones, asesoría, alta de proveedores y pruebas físicas. No es una cotización ni una promesa de que un agente termine en ese plazo. Si la apertura es el 1 de octubre, el margen es especialmente pequeño.
 
-Distribución de esa estimación: lote A 4–6 h, B 24–36 h, C 14–24 h y D 8–14 h. Son horas de trabajo supervisado, no tiempo de generación del modelo; defectos nuevos o demoras externas pueden ampliar el calendario.
+Distribución de esa estimación: lote A 4–6 h, B 24–36 h, C 14–24 h y D+E 8–14 h. Son horas de trabajo supervisado, no tiempo de generación del modelo; defectos nuevos, límites de suscripción o demoras externas pueden ampliar el calendario.
 
 | Fecha objetivo | Trabajo | Condición para seguir |
 | --- | --- | --- |
 | 24–25 sep | Lote A, cuentas/dominio de correo, reglas, integrar dependencias de caja | Fecha y reglas publicables; SMTP y ambientes accesibles |
 | 25–28 sep | Lote B, primero una venta completa en staging y luego todos los casos de fallo | Ledger/refunds/Auth pasan integración; ninguna diferencia monetaria |
 | 28–30 sep | Lote C, portal/caja, alertas, restauración y ensayo con 10–20 miembros de prueba | Datos sintéticos; impresión/PIN/conexión real probados; guías listas |
-| 30 sep–2 oct | Lote D, correcciones, piloto supervisado y cierre de hallazgos | Revisor independiente e Isaac aprueban evidencia; sin defectos críticos/altos |
+| 30 sep–2 oct | Lotes D+E, correcciones, piloto supervisado y cierre de hallazgos | Revisión cruzada e Isaac aprueban evidencia; sin defectos críticos/altos |
 | 1–7 oct, día confirmado | Activar solo una versión aprobada, monitorear cada jornada | Para abrir el día 1, todo lo anterior debe terminar el 30; de lo contrario, papel controlado |
 | Días 2–14 de operación | Conciliación diaria, revisión de soporte, uso y costos | Resolver diferencias el mismo día; extender despliegue solo con evidencia |
 | Después de 2–4 semanas estables | Diseñar vitrina, temporadas, visitas/referidos si se aprueban | Presupuesto/margen/cupos revisados; reglas y premios publicados antes de temporada |
@@ -169,6 +176,7 @@ Estos controles son trabajo pendiente, no casillas ya aprobadas por esta revisi�
 - [ ] Dataset sintético de 10,000 miembros y 500,000 movimientos; paginación e índices verificados. Prueba propuesta de 30 minutos con 50 sesiones, 10 solicitudes/s y ráfaga de 30/s por 5 minutos, más 1,000 altas en una hora. Ajustar si se prevé un pico mayor.
 - [ ] Objetivos internos: lectura de saldo p95 <1 s, commit de canje p95 <2 s bajo esa carga (sin tiempo humano de correo), <1% errores inesperados y **cero diferencias de saldo/stock**. Son criterios a medir, no capacidad ya demostrada.
 - [ ] Monitor externo comprueba portal y dependencia de base; alerta llega al responsable. Registrar error rate, latencia, rechazos, fallos SMTP, falta de cron y diferencias de conciliación; sin grabar sesiones de clientes.
+- [ ] Con UptimeRobot Free, comprobar portal y endpoint de salud sin datos personales cada 5 minutos, más heartbeat del respaldo/cron. Probar alerta y recuperación por correo. Ese intervalo puede tardar hasta un ciclo más el procesamiento en detectar una caída; el operador atiende fallos de caja al ocurrir, sin esperar al monitor. No prometer paging por teléfono ni detección de segundos.
 - [ ] Objetivo inicial de recuperación: RTO ≤4 h durante horario atendido; RPO objetivo ≤5 min para incidente recuperable con D1 Time Travel. Probarlo, no tratarlo como SLA del proveedor. Para pérdida de cuenta, exportación diaria separada implica hasta 24 h; conservar tickets para reconstrucción.
 - [ ] Ensayar restauración de exportación en base aislada. Time Travel restaura la base existente, no crea un clon; para el ensayo usar una D1 de prueba y luego verificar ventas/saldos. En incidente real congelar escrituras, preservar tickets/cola, restaurar y conciliar antes de reabrir.
 - [ ] Cuenta de respaldo/copia cifrada fuera del alcance de la credencial de despliegue, retención aprobada, accesos MFA y recuperación de cuentas proveedoras. Reconciliar también vínculo Auth↔D1: un backup de D1 solo no restaura identidades.
@@ -183,7 +191,7 @@ Estos controles son trabajo pendiente, no casillas ya aprobadas por esta revisi�
 
 Consultados el **24/09/2026**, en **USD antes de impuestos**, salvo Dolarones/MXN expresamente indicados. No son una cotización contratada. Verificar tarifas, moneda de cobro y cuotas de la cuenta antes de comprar. No aplicar un tipo de cambio MXN inventado. Infraestructura compartida ya pagada reduce costo incremental; sus cuotas también se comparten con el escáner y otras aplicaciones.
 
-### Operación mensual recomendada
+### Operación mensual de arranque con presupuesto reducido
 
 | Herramienta | Uso | 1,000 registrados | 10,000 registrados | Precio/límite y fuente |
 | --- | --- | ---: | ---: | --- |
@@ -193,15 +201,31 @@ Consultados el **24/09/2026**, en **USD antes de impuestos**, salvo Dolarones/MX
 | Cloudflare Access | Solo empleados, nunca los 10,000 clientes | $0 | $0 | Free hasta 50 usuarios; confirmar total de empleados en la cuenta. [Planes](https://www.cloudflare.com/plans/) |
 | Cloudflare Turnstile | Abuso de registro/login/recuperación | $0 | $0 | Free incluye uso de producción y desafíos ilimitados; hasta 20 widgets. [Planes](https://developers.cloudflare.com/turnstile/plans/) |
 | Supabase Auth Pro | Correo verificado y sesiones administradas | $25 | $25 | 100,000 MAU incluidos; $0.00325 por MAU adicional. Primera instancia Micro cubierta por crédito incluido. [Tarifa](https://supabase.com/pricing) |
-| Segundo proyecto Supabase Micro | Auth de staging aislada | $10 | $10 | Instancia adicional desde $10/mes, no duplicar el crédito incluido. [Tarifa](https://supabase.com/pricing) |
+| Supabase Free, organización separada | Auth de staging aislada | $0 | $0 | Usar uno de los dos proyectos gratuitos disponibles. Puede pausarse tras inactividad; reactivar antes del ensayo. Si no queda cupo, cotizar Micro $10/mes. [Regla oficial](https://supabase.com/docs/guides/troubleshooting/keeping-free-projects-after-pro-upgrade-Kf9Xm2) |
 | Resend Pro transaccional | OTP, recuperación y avisos esenciales | $20 | $20 | 50,000 correos/mes, sin tope diario; excedente $0.90/1,000. Free limita a 100/día, insuficiente para apertura. [Tarifa](https://resend.com/pricing) |
-| Better Stack, un responder | Monitoreo externo, alertas y estado | $34 | $34 | Pago mensual; $29/mes con anualidad. Free se anuncia para proyectos personales: no presupuestarlo para esta tienda. [Tarifa](https://betterstack.com/pricing) |
+| UptimeRobot Free | Monitoreo externo, alertas y página de estado básica | $0 | $0 | 50 monitores, intervalos de 5 min; uso comercial permitido, sujeto a uso razonable. [Plan y condiciones](https://help.uptimerobot.com/en/articles/11604710-who-should-use-uptimerobot-s-free-plan) |
 | GitHub Free + Actions | Repo público actual, issues, PR, CI | $0 previsto | $0 previsto | Dentro de uso permitido de runners estándar para repo público. Si se privatiza o cambia plan, recalcular; Team se anuncia a $4/usuario/mes. [Planes](https://github.com/pricing) |
 | HTML/JS, TypeScript, Node, Python, Wrangler | Desarrollo, validación y despliegue | $0 licencia | $0 licencia | Reutilizar herramientas y pruebas del repo; no nueva plataforma de frontend |
 | Dominio existente y HTTPS | Subdominio de clientes + correo | $0 incremental previsto | $0 incremental previsto | Reutilizar `viste.com.mx`; renovación existente no auditada. Un dominio nuevo tendría tarifa propia |
-| **Subtotal previsto** | **Con staging y monitor externo** | **$94–95/mes** | **$94–95/mes** | Sujeto al volumen supuesto y cuotas compartidas |
+| **Subtotal previsto** | **Con staging y monitor externo gratuitos** | **$50–51/mes** | **$50–51/mes** | Sujeto al volumen supuesto, cupo Free de staging y cuotas compartidas |
 
-Reservar **$100–125/mes** para recompensas, equivalente a **$1,200–1,500/año** como presupuesto, no como tarifa garantizada. El subtotal plano de $94 da $1,128/año antes de variaciones. La base técnica sin monitor ni staging es $50/mes; no es el presupuesto de producción recomendado. No contratar soporte Enterprise, IP dedicada, Redis, Vercel, Firebase, colas, Kubernetes ni una app móvil para este alcance.
+Reservar **$55–60/mes para la aplicación**, equivalente a **$660–720/año** como presupuesto, no tarifa garantizada. El subtotal de $50–51 equivale a $600–612/año. Se eliminan $34 de monitor pagado y $10 de staging pagado: **$44/mes o $528/año menos**, aproximadamente 47% del subtotal anterior. No se elimina staging ni vigilancia; se aceptan la pausa de pruebas y el intervalo de monitor de 5 minutos.
+
+Mantener Workers Paid y Supabase Pro para producción: por ahora no construir autenticación propia ni depender de un proyecto Free que se pueda pausar frente al cliente. Mantener Resend Pro durante apertura por el pico de verificaciones. La reducción conserva backups, conciliación, privacidad, revisión cruzada y pruebas de dinero. No contratar soporte Enterprise, IP dedicada, Redis, Vercel, colas, Kubernetes ni app móvil para este alcance.
+
+El total **aplicación + Claude Pro existente** sería $70–71/mes (presupuesto $75–80), **más el plan Codex ya existente cuyo precio no se ha confirmado**, impuestos y costos separados al final. Claude no agrega otros $20 si ya se está pagando. Si Workers Paid ya está cubierto por el escáner, el incremento de la aplicación sería $45–46, sujeto al consumo compartido. No se contratan ni cambian planes mediante este documento.
+
+### Cuándo gastar menos o subir de plan
+
+| Decisión | Condición medible | Efecto |
+| --- | --- | --- |
+| Bajar Resend a Free después de apertura | Al menos 30 días medidos ≤2,400 correos/mes y ≤80/día, crecimiento previsto compatible con 3,000/mes y 100/día, responsable vigila y puede subir antes de la cuota | Ahorro $20; app $30–31/mes. No es el escenario presupuestado de 5,000/30,000 correos, ni sirve para un pico de 1,000 altas |
+| Mantener/subir correo | Previsión de superar esos umbrales o campaña/registro masivo | Mantener Pro $20; verificar cuotas antes de anunciar; no bloquear acceso por ahorro |
+| Pagar staging | Sin cupo Free o pausas que retrasan entregas de forma repetida | +$10/mes por Micro adicional; presupuesto app $60–61 antes de margen |
+| Pagar monitoreo | Se necesitan alertas más rápidas que 5 min, teléfono o varios operadores | Cotizar al necesitarlo; no requisito inicial para una tienda atendida |
+| Ampliar IA de desarrollo | Límites medidos impiden cumplir una fecha y no basta reordenar tareas | Presentar costo/beneficio y pedir autorización de nuevo gasto; no contratar Max por anticipado |
+
+La bajada de Resend exige previsión y alertas, no esperar a que se rechace un correo. No crear múltiples cuentas para repartir el envío entre límites gratuitos. [Cuotas y precios Resend](https://resend.com/pricing).
 
 **Alta y envío:** el correo por defecto de Supabase no sirve para este lanzamiento: tiene restricciones de destinatarios y 2 correos/hora. Configurar SMTP propio; al configurarlo puede quedar un límite inicial de 30/h. La apertura propuesta necesita al menos 1,000 verificaciones/h más reintentos autorizados, sin levantar cooldown por usuario. Comprobar límites del proveedor y envío efectivo antes de publicidad. Fuentes: [SMTP](https://supabase.com/docs/guides/auth/auth-smtp), [límites Auth](https://supabase.com/docs/guides/auth/rate-limits).
 
@@ -222,23 +246,26 @@ Reservar **$100–125/mes** para recompensas, equivalente a **$1,200–1,500/añ
 | Base D1 estimada | <1 GB | <5 GB total de cuenta |
 | R2 estimado (fotos + backups retenidos) | ≤50 GB-mes | ≤50 GB-mes |
 
-Son hipótesis de diseño, no métricas medidas. Número de clientes no predice análisis de fotos ni emails por sí solo. Si los 10,000 son activos mensuales, duplicar consumo dinámico de referencia; 60,000 emails añadirían aproximadamente $9/mes. Revisar uso semanal, alertar al 50/75/90% de cuotas y al superar $100/mes; la alerta no es un tope duro. Limitar CPU, envíos, tamaño de peticiones y llamadas pagadas desde la aplicación. Nunca apagar silenciosamente canjes ya prometidos para ahorrar una factura.
+Son hipótesis de diseño, no métricas medidas. Número de clientes no predice análisis de fotos ni emails por sí solo. Si los 10,000 son activos mensuales, duplicar consumo dinámico de referencia; 60,000 emails añadirían aproximadamente $9/mes. Revisar uso semanal, alertar al 50/75/90% de cuotas y cuando la proyección de servicios supere $60/mes; la alerta no es un tope duro. Limitar CPU, envíos, tamaño de peticiones y llamadas pagadas desde la aplicación. Nunca apagar silenciosamente canjes ya prometidos para ahorrar una factura.
 
 ### IA de desarrollo: separada del costo por cliente
 
-Los clientes no usan OpenAI para consultar/ganar/canjear D. **Costo de IA de recompensas en producción: $0 por cliente.** Los agentes se usan durante desarrollo y mantenimiento.
+Los clientes no usan OpenAI ni Claude para consultar/ganar/canjear D. **Costo de IA de recompensas en producción: $0 por cliente.** Los agentes se usan durante desarrollo y mantenimiento.
+
+**Ruta elegida: suscripciones existentes; presupuesto incremental de IA de desarrollo $0.** Claude Pro ($20/mes) incluye Claude Code; sus límites se comparten con chat. Usar inicio de sesión con Pro y mantener desactivados créditos adicionales/recargas. Una llave `ANTHROPIC_API_KEY` configurada para Claude Code puede dirigir consumo a API facturable: verificar el modo de acceso sin exponer ni borrar las llaves del escáner. [Claude Code con Pro](https://support.claude.com/en/articles/11145838-use-claude-code-with-your-pro-or-max-plan), [precio Pro](https://support.claude.com/en/articles/8325606-what-is-the-pro-plan).
+
+La reserva API anterior de $150–250 se retira del presupuesto recomendado. Estas tarifas son **solo referencia si después se autoriza API**, no cargos añadidos a las suscripciones:
 
 | Modelo | Entrada / 1 M tokens | Entrada en caché / 1 M | Escritura caché / 1 M | Salida / 1 M | Uso propuesto |
 | --- | ---: | ---: | ---: | ---: | --- |
-| `gpt-6-astra` | $10 | $1 | $12.50 | $50 | Arquitectura y revisión independiente |
-| `gpt-6-sol` | $2 | $0.20 | $2.50 | $10 | Implementación, pruebas, operación y documentación |
-| `gpt-6-luna` | $0.10 | $0.01 | $0.125 | $0.50 | Opcional, contenido repetitivo ya especificado |
+| `gpt-6-sol` | $2 | $0.20 | $2.50 | $10 | Backend y revisión del trabajo de Claude |
+| `claude-sonnet-5` | $2 | $0.20 | $2.50 (5 min) / $4 (1 h) | $10 | Portal, operación, documentación y revisión del backend |
 
-Tarifas API **Standard, contexto corto**; contexto largo, modalidad/velocidad y caché cambian la factura. Salida presupuestada incluye razonamiento facturable, no solo texto visible. [Precios oficiales API](https://developers.openai.com/api/docs/pricing). El esfuerzo mayor no tiene un multiplicador fijo de precio: puede consumir más tokens. No tratar tokens de una suscripción Codex como cargos API adicionales.
+Tarifas API Standard; para Sol se muestra contexto corto. Contexto largo, modalidad/velocidad y caché pueden cambiar la factura. Salida incluye razonamiento facturable, no solo texto visible. [Precios OpenAI](https://developers.openai.com/api/docs/pricing), [precios Claude](https://platform.claude.com/docs/en/about-claude/pricing). El esfuerzo mayor puede consumir más tokens; no tiene un multiplicador universal. No comparar límites de suscripción usando precios API como si fueran la misma facturación.
 
-Ejemplo transparente, no estimación garantizada del trabajo: Astra 2 M entrada + 0.5 M salida = $45; Sol 10 M + 3 M = $50; Luna opcional 4 M + 1 M = $0.90. Total $95 sin Luna, $95.90 con ella, antes de escrituras de caché, herramientas, contextos largos, repeticiones e impuestos. Si se usa API, reservar provisionalmente **$150–250 una vez** y medir consumo por lote; no gastar esa reserva sin necesidad.
+Ejemplo opcional de API: 1 M tokens de entrada ordinaria + 0.2 M salida cuesta $4 con cualquiera de los dos modelos a esas tarifas, antes de caché/herramientas/impuestos. No se afirma que $4 alcance para una fase ni que Pro otorgue una cantidad equivalente de tokens.
 
-Con el acceso Codex existente, el incremento puede ser $0 dentro de límites. Si se necesita contratar: Plus figura a $20/mes y Pro desde $100/mes; Business $25/usuario/mes en mensual o $20 con anualidad y 2+ usuarios. No se ha verificado el plan de Isaac ni créditos disponibles; no presuponer ejecuciones ilimitadas. [Precios Codex](https://learn.chatgpt.com/docs/pricing).
+Conservar también el acceso Codex existente, sin compra nueva; su precio y límites no se han confirmado. No prometer ejecuciones ilimitadas ni cambiar de plan automáticamente. [Precios Codex](https://learn.chatgpt.com/docs/pricing). Si las cuotas se agotan, registrar el bloqueo y replanificar antes de activar cargos adicionales.
 
 ### Costos separados que ya existen o requieren presupuesto
 
