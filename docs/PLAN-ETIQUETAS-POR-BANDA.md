@@ -12,6 +12,17 @@
 > códigos cortos, el formato TSPL, la estructura de datos — sigue vigente tal
 > cual; donde cambia el número, se anota en línea.
 
+> **Actualización 2026-09-24 (Isaac): familias de banda.** Las dos familias fijas
+> (Ropa/General) pasan a **una familia por categoría del plano de la tienda**, cada
+> una con sus siete precios y su código propio (`JU49`, `CU199`…): 18 familias sembradas
+> con `app/migracion-009-familias.sql` (126 productos de catálogo) y las que falten se dan
+> de alta desde `/bandas` con «Otro…» (`POST /api/familias`, que crea la fila y sus siete
+> productos). El prefijo de dos letras sale del nombre; ropa y general conservan `R` y `G`.
+> **La caja ya no tiene botones de banda**: todo se escanea como un producto normal, y si el
+> código no lee se busca en la caja por descripción («juguetes 49») o por código.
+> El ruteo automático por IA sigue como estaba (ropa → R, lo demás → G); ampliarlo a las
+> demás familias es la **fase 2**, aparte.
+
 ## El cambio
 
 Hoy cada pieza cuesta un ciclo completo: foto → análisis → precio → etiqueta con código

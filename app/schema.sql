@@ -10,7 +10,7 @@ create table if not exists productos (
   precio          integer not null default 0,          -- centavos MXN
   estado_fisico   text not null default 'nuevo',       -- nuevo|danado
   estado_analisis text not null default 'pendiente',   -- pendiente|listo|error
-  destino         text not null default 'etiqueta',    -- etiqueta|banda_r19..banda_g199
+  destino         text not null default 'etiqueta',    -- etiqueta|banda_<prefijo><monto>, p.ej. banda_ju49
   stock           integer not null default 1,
   sin_inventario  integer not null default 0,          -- 1 = los bins, no descuentan
   semana_ingreso  text not null,                       -- 'S37'
@@ -46,3 +46,13 @@ insert into config (clave, valor) values
   ('banda_149',       '14900'),
   ('banda_199',       '19900')
 on conflict (clave) do nothing;
+
+-- Familias de banda: cada una lleva sus siete productos de catalogo (ver
+-- migracion-009-familias.sql y crearFamilia en worker.ts). El prefijo es el
+-- de su codigo de barras impreso: R49, G49, JU49.
+create table if not exists familias (
+  clave     text primary key,           -- 'juguetes'
+  nombre    text not null,              -- 'Juguetes'
+  prefijo   text not null unique,       -- 'ju'
+  creado_en text not null
+);

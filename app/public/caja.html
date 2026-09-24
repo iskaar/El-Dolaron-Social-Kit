@@ -21,13 +21,12 @@
     display: flex; flex-direction: column; min-height: 0; }
   #codigo { width: 100%; padding: 14px; font-size: 20px; border: 2px solid var(--azul);
     border-radius: 10px; font-family: ui-monospace, monospace; }
-  #bins { margin: 12px 0; display: flex; flex-direction: column; gap: 6px; }
-  .fila-bandas { display: flex; gap: 6px; align-items: center; }
-  .fila-bandas .etiqueta-familia { width: 34px; flex-shrink: 0; font-size: 11px; font-weight: 700;
-    color: #78839a; text-align: center; }
-  #bins button { flex: 1; padding: 10px 4px; font-size: 15px; font-weight: 800; border: 0;
-    border-radius: 8px; background: #eef1f6; color: var(--azul); cursor: pointer; }
-  #bins button:active { background: var(--azul); color: #fff; }
+  #sugerencias { margin: 8px 0 4px; display: flex; flex-direction: column; gap: 4px; }
+  #sugerencias button { display: flex; justify-content: space-between; gap: 10px; padding: 10px 12px;
+    font-size: 15px; border: 1px solid var(--linea); border-radius: 8px; background: #fff; cursor: pointer;
+    text-align: left; }
+  #sugerencias button:active { background: #eef1f6; }
+  #sugerencias .codigo { font-family: ui-monospace, monospace; color: #78839a; }
   #ticket { flex: 1; overflow-y: auto; margin-top: 4px; }
   .renglon { display: grid; grid-template-columns: 1fr 52px 90px 32px; gap: 8px; align-items: center;
     padding: 9px 4px; border-bottom: 1px solid var(--linea); }
@@ -76,8 +75,8 @@
 
 <main>
   <section class="panel">
-    <input id="codigo" placeholder="Escanea el código o escríbelo" autocomplete="off" autofocus>
-    <div id="bins"></div>
+    <input id="codigo" placeholder="Escanea el código, o busca por descripción o código" autocomplete="off" autofocus>
+    <div id="sugerencias"></div>
     <div id="ticket"></div>
   </section>
 
@@ -124,15 +123,6 @@ import { reconectarImpresora, conectarImpresora, impresoraLista, imprimirTicket,
 
 const $ = (id) => document.getElementById(id);
 const pesos = (centavos) => `$${(centavos / 100).toLocaleString('es-MX')}`;
-
-// Mismos siete precios que app/src/precio.ts (MONTOS_BANDA). Los botones solo
-// mandan el codigo por agregarCodigo(); el catalogo real sale de D1.
-const MONTOS_BANDA = [19, 29, 49, 79, 99, 149, 199];
-$('bins').innerHTML = ['r', 'g'].map((f) => `
-  <div class="fila-bandas">
-    <span class="etiqueta-familia">${f === 'r' ? 'Ropa' : 'Gral'}</span>
-    ${MONTOS_BANDA.map((p) => `<button type="button" data-codigo="${f.toUpperCase()}${p}">$${p}</button>`).join('')}
-  </div>`).join('');
 
 let catalogo = new Map();
 let lineas = [];
@@ -255,6 +245,46 @@ function agregarCodigo(codigo) {
   $('aviso').textContent = '';
   pintar();
 }
+
+/* ---------- busqueda a mano ---------- */
+
+// Las bandas ya no tienen botones: se cobran escaneando su etiqueta como
+// cualquier pieza, y si el codigo no lee se busca aqui por la descripcion
+// generica ("juguetes 49") o por el codigo.
+const sinAcentos = (t) => t.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
+
+function buscarPorTexto(texto) {
+  const palabras = sinAcentos(texto).split(/\s+/).filter(Boolean);
+  if (palabras.length === 0) return [];
+  // Primero los que traen las palabras completas: "49" pone $49 antes que $149.
+  const enteras = (p) => {
+    const suyas = new Set(sinAcentos(`${p.nombre} ${p.codigo}`).split(/[^a-z0-9]+/));
+    return palabras.filter((w) => suyas.has(w)).length;
+  };
+  return [...catalogo.values()]
+    .filter((p) => { const paja = sinAcentos(`${p.nombre} ${p.codigo}`); return palabras.every((w) => paja.includes(w)); })
+    .sort((a, b) => enteras(b) - enteras(a))
+    .slice(0, 10);
+}
+
+function pintarSugerencias() {
+  const texto = $('codigo').value;
+  const piezas = texto.trim().length >= 2 && !buscarPieza(texto) ? buscarPorTexto(texto) : [];
+  $('sugerencias').innerHTML = piezas.map((p) => `
+    <button type="button" data-codigo="${p.codigo}">
+      <span>${p.nombre}</span><span class="codigo">${p.codigo} · ${pesos(p.precio)}</span>
+    </button>`).join('');
+}
+
+$('codigo').addEventListener('input', pintarSugerencias);
+$('sugerencias').addEventListener('click', (e) => {
+  const codigo = e.target.closest('button')?.dataset.codigo;
+  if (!codigo) return;
+  agregarCodigo(codigo);
+  $('codigo').value = '';
+  pintarSugerencias();
+  $('codigo').focus();
+});
 
 /* ---------- cobro: primero al disco, luego a la red ---------- */
 
@@ -457,10 +487,7 @@ $('codigo').addEventListener('keydown', (e) => {
   if (e.key !== 'Enter' || !e.target.value.trim()) return;
   agregarCodigo(e.target.value);
   e.target.value = '';
-});
-$('bins').addEventListener('click', (e) => {
-  const codigo = e.target.dataset?.codigo;
-  if (codigo) { agregarCodigo(codigo); $('codigo').focus(); }
+  pintarSugerencias();
 });
 $('ticket').addEventListener('click', (e) => {
   const i = e.target.dataset?.quitar;

@@ -6,7 +6,7 @@
  */
 
 import { analizarBorrador, modeloPorDefecto, type Modelo } from './analisis.ts';
-import { calcularPrecio, ajustarManual, DESTINOS_BANDA, type Destino } from './precio.ts';
+import { calcularPrecio, ajustarManual, esDestinoBanda, prefijoParaFamilia, MONTOS_BANDA, type Destino } from './precio.ts';
 import { efectivoAlcanza } from '../public/venta.js';
 import { semanaIngreso } from '../public/semana.js';
 
@@ -148,7 +148,14 @@ async function listarBorradores(url: URL, env: Env): Promise<Response> {
 }
 
 const CATEGORIAS = new Set(['ropa', 'hogar', 'electronica', 'juguetes', 'otros']);
-const DESTINOS = new Set<string>(['etiqueta', ...DESTINOS_BANDA]);
+
+/** Etiqueta individual, o una banda de una familia que existe en la tabla `familias`. */
+async function destinoValido(destino: string, env: Env): Promise<boolean> {
+  if (destino === 'etiqueta') return true;
+  if (!esDestinoBanda(destino)) return false;
+  const prefijo = /^banda_([a-z]+)/.exec(destino)![1];
+  return (await env.DB.prepare('select 1 from familias where prefijo = ?').bind(prefijo).first()) !== null;
+}
 
 /**
  * Correcciones del admin. Solo llegan los campos que cambiaron; si no viene un
@@ -201,7 +208,7 @@ async function corregirBorrador(id: string, request: Request, env: Env): Promise
     if (!Number.isFinite(precio) || precio < 0) {
       return json({ error: 'Precio invalido.' }, 400);
     }
-    if (DESTINOS.has(destino)) {
+    if (esDestinoBanda(destino)) {
       // Banda: manda el precio de la banda. Etiqueta: se redondea a $5 como el automatico.
       precio = ajustarManual({ precio, destino: destino as Destino, config });
     }
@@ -212,7 +219,7 @@ async function corregirBorrador(id: string, request: Request, env: Env): Promise
     }
   }
 
-  if (!DESTINOS.has(destino)) {
+  if (!await destinoValido(destino, env)) {
     return json({ error: 'Destino invalido.' }, 400);
   }
 
@@ -321,6 +328,61 @@ async function guardarConfig(request: Request, env: Env): Promise<Response> {
       .run();
   }
   return json(await leerConfig(env));
+}
+
+const FAMILIAS_MAX = 40;
+
+/** Las familias de banda y los siete precios que comparten, para /bandas, el admin y la tarjeta. */
+async function listarFamilias(env: Env): Promise<Response> {
+  const { results } = await env.DB.prepare('select clave, nombre, prefijo from familias order by rowid').all();
+  return json({ montos: MONTOS_BANDA, familias: results });
+}
+
+/**
+ * Da de alta una familia de banda: su fila en `familias` y sus siete productos
+ * de catalogo (sin existencias, como las demas bandas), en un solo batch. El
+ * prefijo del codigo sale del nombre y nunca choca con uno ya usado.
+ */
+async function crearFamilia(request: Request, env: Env): Promise<Response> {
+  const { nombre: crudo } = (await request.json()) as { nombre?: unknown };
+  const nombre = String(crudo ?? '').replace(/["\\]/g, ' ').replace(/\s+/g, ' ').trim();
+  if (nombre.length < 2 || nombre.length > 24) {
+    return json({ error: 'El nombre debe tener entre 2 y 24 caracteres.' }, 400);
+  }
+  const clave = nombre.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+  if (!clave) {
+    return json({ error: 'El nombre necesita letras o numeros.' }, 400);
+  }
+
+  const { results } = await env.DB.prepare('select clave, prefijo from familias').all<{ clave: string; prefijo: string }>();
+  if (results.length >= FAMILIAS_MAX) {
+    return json({ error: `Ya hay ${FAMILIAS_MAX} familias.` }, 400);
+  }
+  if (results.some((f) => f.clave === clave)) {
+    return json({ error: 'Esa familia ya existe.' }, 409);
+  }
+  const prefijo = prefijoParaFamilia(nombre, new Set(results.map((f) => f.prefijo)));
+  if (!prefijo) {
+    return json({ error: 'No se pudo armar un codigo con ese nombre.' }, 400);
+  }
+
+  const config = await leerConfig(env);
+  const ahora = new Date().toISOString();
+  await env.DB.batch([
+    env.DB.prepare('insert into familias (clave, nombre, prefijo, creado_en) values (?, ?, ?, ?)')
+      .bind(clave, nombre, prefijo, ahora),
+    ...MONTOS_BANDA.map((monto) => env.DB.prepare(
+      `insert into productos (id, codigo, nombre, categoria, precio_lista, precio, estado_fisico,
+                              estado_analisis, destino, stock, sin_inventario, semana_ingreso,
+                              foto_key, creado_en, actualizado_en)
+       values (?, ?, ?, 'otros', 0, ?, 'nuevo', 'listo', ?, 0, 1, 'S00', '', ?, ?)`,
+    ).bind(
+      crypto.randomUUID(), `${prefijo.toUpperCase()}${monto}`, `${nombre} $${monto}`,
+      Number.parseInt(config[`banda_${monto}`] ?? '', 10) || monto * 100,
+      `banda_${prefijo}${monto}`, ahora, ahora,
+    )),
+  ]);
+  return json({ clave, nombre, prefijo }, 201);
 }
 
 /** Catalogo para la caja: se guarda en el navegador y se cobra sin red. */
@@ -827,6 +889,13 @@ export default {
       const foto = pathname.match(/^\/api\/foto\/([^/]+)$/);
       if (foto) {
         return await servirFoto(foto[1], env);
+      }
+
+      if (pathname === '/api/familias') {
+        if (request.method === 'POST') {
+          return await crearFamilia(request, env);
+        }
+        return await listarFamilias(env);
       }
 
       if (pathname === '/api/catalogo') {

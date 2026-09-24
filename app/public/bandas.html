@@ -30,6 +30,8 @@
   .banda .codigo { font-family: ui-monospace, monospace; font-size: 12px; color: #5b6478; }
   .banda.impresa { border-color: #1f7a4d; }
   #resumen { font-size: 13px; color: #5b6478; }
+  .barra select { padding: 8px 10px; border: 1px solid var(--linea); border-radius: 8px; font-size: 15px; background: #fff; }
+  .barra #nombre-nueva { width: 220px; }
 </style>
 </head>
 <body>
@@ -42,8 +44,9 @@
 <main>
   <p class="ayuda">
     Piezas de $200 o menos no llevan etiqueta propia: se les asigna una banda y se
-    pega una de estas, ya impresas por lote. Escoge cuántas etiquetas necesitas y
-    aprieta la banda que corresponde — sale un solo trabajo con esa cantidad.
+    pega una de estas, ya impresas por lote. Escoge la categoría, cuántas etiquetas
+    necesitas y aprieta la banda que corresponde — salen todas seguidas.
+    Para una categoría que no está en la lista, escoge «Otro…» y dala de alta.
     Prende la impresora antes de imprimir.
   </p>
 
@@ -65,6 +68,15 @@
     <pre id="historial"></pre>
   </details>
 
+  <div class="barra">
+    <label for="familia">Categoría</label>
+    <select id="familia"></select>
+    <span id="nueva" hidden>
+      <input id="nombre-nueva" type="text" maxlength="24" placeholder="Nombre de la familia nueva" autocomplete="off">
+      <button id="agregar" type="button">Agregar familia</button>
+    </span>
+  </div>
+
   <div id="familias"></div>
 </main>
 
@@ -72,28 +84,66 @@
 import { conectarEtiquetera, etiqueteraLista, imprimirBanda, historialTexto, detenerEnvio } from '/etiquetera.js';
 import { semanaIngreso } from '/semana.js';
 
-// Mismos siete precios que app/src/precio.ts (MONTOS_BANDA).
-const MONTOS_BANDA = [19, 29, 49, 79, 99, 149, 199];
-const FAMILIAS = [['r', 'Ropa'], ['g', 'General']];
 const semana = semanaIngreso(new Date());
 const resumen = document.getElementById('resumen');
 const pintarHistorial = () => { document.getElementById('historial').textContent = historialTexto(); };
 pintarHistorial();
 const cantidad = document.getElementById('cantidad');
+const selector = document.getElementById('familia');
+const escapar = (texto) => texto.replace(/[<>&"]/g, (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;' }[c]));
 
-document.getElementById('familias').innerHTML = FAMILIAS.map(([f, nombre]) => `
-  <div class="familia">
-    <h2>${nombre}</h2>
-    <div class="rejilla">
-      ${MONTOS_BANDA.map((p) => {
-        const codigo = `${f.toUpperCase()}${p}`;
-        return `<button type="button" class="banda claro" data-codigo="${codigo}" data-familia="${nombre}" data-precio="${p}">
-          <span class="precio">$${p}</span>
-          <span class="codigo">${codigo}</span>
-        </button>`;
-      }).join('')}
-    </div>
-  </div>`).join('');
+// Las familias y los siete montos salen de la tabla `familias` (GET /api/familias).
+let montos = [];
+let familias = [];
+
+function pintarFamilia() {
+  document.getElementById('nueva').hidden = selector.value !== '__otro';
+  const f = familias.find((x) => x.prefijo === selector.value);
+  try { if (f) localStorage.setItem('bandas-familia', f.prefijo); } catch { /* sin memoria, no pasa nada */ }
+  document.getElementById('familias').innerHTML = !f ? '' : `
+    <div class="familia">
+      <h2>${escapar(f.nombre)}</h2>
+      <div class="rejilla">
+        ${montos.map((p) => {
+          const codigo = `${f.prefijo.toUpperCase()}${p}`;
+          return `<button type="button" class="banda claro" data-codigo="${codigo}" data-familia="${escapar(f.nombre)}" data-precio="${p}">
+            <span class="precio">$${p}</span>
+            <span class="codigo">${codigo}</span>
+          </button>`;
+        }).join('')}
+      </div>
+    </div>`;
+}
+
+async function cargarFamilias(elegir) {
+  const respuesta = await fetch('/api/familias');
+  ({ montos, familias } = await respuesta.json());
+  selector.innerHTML = familias.map((f) => `<option value="${f.prefijo}">${escapar(f.nombre)} (${f.prefijo.toUpperCase()})</option>`).join('')
+    + '<option value="__otro">Otro…</option>';
+  let recordada = null;
+  try { recordada = localStorage.getItem('bandas-familia'); } catch { /* idem */ }
+  selector.value = [elegir, recordada].find((p) => familias.some((f) => f.prefijo === p)) ?? familias[0]?.prefijo ?? '__otro';
+  pintarFamilia();
+}
+
+selector.addEventListener('change', pintarFamilia);
+
+document.getElementById('agregar').addEventListener('click', async () => {
+  const campo = document.getElementById('nombre-nueva');
+  const respuesta = await fetch('/api/familias', {
+    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ nombre: campo.value }),
+  });
+  const cuerpo = await respuesta.json();
+  if (!respuesta.ok) {
+    resumen.textContent = cuerpo.error;
+    return;
+  }
+  campo.value = '';
+  resumen.textContent = `Familia «${cuerpo.nombre}» creada, con código ${cuerpo.prefijo.toUpperCase()}.`;
+  await cargarFamilias(cuerpo.prefijo);
+});
+
+await cargarFamilias();
 
 /** Traduce la falla de Bluetooth a algo accionable parado junto a la impresora. */
 function avisarFalla(error) {
