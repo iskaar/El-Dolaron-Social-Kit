@@ -17,7 +17,9 @@ const precio = (precioLista: number, categoria = 'ropa', estadoFisico = 'nuevo')
 
 test('mitad del precio de lista, por encima del limite lleva etiqueta y termina en 9', () => {
   assert.deepEqual(precio(50000), { precio: 24900, destino: 'etiqueta' });   // $500 -> $250 -> $249
-  assert.deepEqual(precio(50300), { precio: 25900, destino: 'etiqueta' });   // $503 -> $251.50 -> $259
+  assert.deepEqual(precio(50300), { precio: 24900, destino: 'etiqueta' });   // $503 -> $251.50 -> $250 -> $249
+  assert.deepEqual(precio(51000), { precio: 25900, destino: 'etiqueta' });   // $510 -> $255 -> $260 -> $259
+  assert.deepEqual(precio(46600), { precio: 22900, destino: 'etiqueta' });   // $466 -> $233 -> $230 -> $229
 });
 
 test('una pieza danada baja al 60 % de ese precio', () => {
@@ -33,7 +35,8 @@ test('lo barato cae a la banda mas chica que lo cubra, sin etiqueta individual',
 
 test('$200 justo: sigue en banda, sin banda que lo cubra exacto cae en la mas alta', () => {
   assert.deepEqual(precio(40000), { precio: 19900, destino: 'banda_r199' }); // $400 * 0.5 = $200 justo
-  assert.equal(precio(40100).destino, 'etiqueta'); // un peso mas de lista ya se sale del limite
+  assert.deepEqual(precio(40100), { precio: 19900, destino: 'banda_r199' }); // $200.50 -> $200 -> $199: sigue siendo banda
+  assert.equal(precio(41000).destino, 'etiqueta'); // $205 -> $210 -> $209: ya se sale del limite
 });
 
 test('el precio nunca queda por encima del precio de lista', () => {
@@ -59,8 +62,9 @@ test('la sugerencia del modelo pasa por las mismas guardas', () => {
 
   // El ventilador: lista $350 y el modelo propone los $250 que cobra Isaac.
   assert.deepEqual(desde(35000, 25000), { precio: 24900, destino: 'etiqueta' });
-  // Redondeo a $5 y luego a X9.
-  assert.equal(desde(35000, 24200).precio, 24900);
+  // Al $10 mas cercano menos $1: 242 -> 240 -> 239, 246 -> 250 -> 249.
+  assert.equal(desde(35000, 24200).precio, 23900);
+  assert.equal(desde(35000, 24600).precio, 24900);
   // Nunca por encima del precio de lista, aunque el modelo se pase.
   assert.equal(desde(10000, 50000).precio, 10000);
   // Barato: a la banda que lo cubre, no a la etiqueta ni al monto exacto tecleado.
@@ -79,10 +83,12 @@ test('una pieza de banda se vende al precio de la banda, no al que se tecleo', (
 test('un precio escrito a mano tambien quiebra la decena', () => {
   assert.equal(ajustarManual({ precio: 25000, destino: 'etiqueta', config }), 24900);
   assert.equal(ajustarManual({ precio: 24900, destino: 'etiqueta', config }), 24900);   // idempotente
-  assert.equal(ajustarManual({ precio: 7200, destino: 'etiqueta', config }), 7900);
+  assert.equal(ajustarManual({ precio: 7200, destino: 'etiqueta', config }), 6900);   // 72 -> 70 -> 69
   assert.equal(ajustarManual({ precio: 0, destino: 'etiqueta', config }), 0);
-  assert.equal(quebrarDecena(23300), 23900);
-  assert.equal(quebrarDecena(30100), 30900);
+  assert.equal(quebrarDecena(23300), 22900);   // $233 baja
+  assert.equal(quebrarDecena(23500), 23900);   // $235 sube
+  assert.equal(quebrarDecena(23499), 22900);   // $234.99 todavia baja
+  assert.equal(quebrarDecena(30100), 29900);
   assert.equal(redondear5(7500), 7500);
   assert.equal(redondear5(1), 500);
   assert.equal(redondear5(0), 0);

@@ -55,13 +55,15 @@ export function prefijoParaFamilia(nombre: string, ocupados: Set<string>): strin
 const REDONDEO = 500; // $5 MXN
 
 /**
- * Quiebra la decena: redondeo hacia arriba a $10 y menos $1, asi que un precio
- * de etiqueta siempre termina en 9 ($233 -> $239, $250 -> $249). Idempotente:
- * un precio que ya termina en 9 se queda igual. Las bandas ya son X9 por si
- * solas ($19 ... $199) y no pasan por aqui.
+ * Quiebra la decena: redondea al multiplo de $10 mas cercano (de $5 en adelante
+ * sube, menos de $5 baja) y resta $1, asi que un precio de etiqueta siempre
+ * termina en 9 ($233 -> $229, $235 -> $239, $250 -> $249). Idempotente: un
+ * precio que ya termina en 9 se queda igual. Se aplica al precio SIN redondear
+ * antes a $5, para no redondear dos veces. Las bandas ya son X9 por si solas
+ * ($19 ... $199) y no pasan por aqui.
  */
 export function quebrarDecena(centavos: number): number {
-  return centavos <= 0 ? 0 : Math.ceil(centavos / 1000) * 1000 - 100;
+  return centavos <= 0 ? 0 : Math.max(0, Math.floor((centavos + 500) / 1000) * 1000 - 100);
 }
 
 /** Redondeo hacia arriba al multiplo de $5. Decide la banda; el precio de una etiqueta individual pasa ademas por quebrarDecena. */
@@ -103,7 +105,8 @@ function entero(config: Record<string, string>, clave: string, porDefecto: numbe
 
 /**
  * precio = precio_lista x %categoria x %danado, redondeado hacia arriba a $5.
- * Una etiqueta individual (mas de $200) ademas quiebra la decena: termina en 9.
+ * Una etiqueta individual (mas de $200) no usa ese $5: quiebra la decena sobre
+ * el precio sin redondear y termina en 9.
  * Si cae en el limite de banda o por debajo, la pieza va a la banda mas chica
  * que la cubra y no lleva etiqueta individual: se etiqueta con el codigo
  * compartido de esa banda (ver PLAN-ETIQUETAS-POR-BANDA.md).
@@ -125,16 +128,17 @@ export function calcularPrecio({ precioLista, categoria, estadoFisico, config }:
   const bruto = (Math.max(0, precioLista) * pctCategoria * pctDanado) / 10000;
   const precio = Math.ceil(bruto / REDONDEO) * REDONDEO;
 
-  return conBanda(precio, precioLista, categoria, config);
+  return conBanda(precio, bruto, precioLista, categoria, config);
 }
 
 /** Lo barato va a la banda mas chica que lo cubra; lo demas lleva etiqueta. */
-function conBanda(precio: number, precioLista: number, categoria: string, config: Record<string, string>): {
+function conBanda(precio: number, bruto: number, precioLista: number, categoria: string, config: Record<string, string>): {
   precio: number;
   destino: Destino;
 } {
   const limite = entero(config, 'limite_banda', 20000);
-  if (precio <= limite) {
+  // El precio que de verdad se cobraria como etiqueta ya cabe en la banda mas alta: es banda.
+  if (precio <= limite || quebrarDecena(bruto) <= limite) {
     const familia = familiaDe(categoria);
     const bandas: Array<[Destino, number]> = MONTOS_BANDA.map((pesosPorDefecto) => [
       `banda_${familia}${pesosPorDefecto}` as Destino,
@@ -146,12 +150,13 @@ function conBanda(precio: number, precioLista: number, categoria: string, config
   }
 
   // Nunca por encima del precio de lista.
-  return { precio: Math.min(quebrarDecena(precio), redondear5(precioLista)), destino: 'etiqueta' };
+  return { precio: Math.min(quebrarDecena(bruto), redondear5(precioLista)), destino: 'etiqueta' };
 }
 
 /**
  * Precio a partir de lo que propuso el modelo mirando como cobra Isaac.
- * Pasa por las mismas guardas que el calculo por porcentaje: redondeo a $5,
+ * Pasa por las mismas guardas que el calculo por porcentaje: redondeo a $5
+ * (o X9 si lleva etiqueta),
  * nunca por encima del precio de lista, y banda si cae en el limite o debajo.
  */
 export function precioDesdeSugerencia({ precioLista, sugerido, categoria, config }: {
@@ -163,5 +168,5 @@ export function precioDesdeSugerencia({ precioLista, sugerido, categoria, config
   if (sugerido <= 0) {
     return { precio: 0, destino: 'etiqueta' };
   }
-  return conBanda(redondear5(sugerido), precioLista, categoria, config);
+  return conBanda(redondear5(sugerido), sugerido, precioLista, categoria, config);
 }
