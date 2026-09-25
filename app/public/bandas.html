@@ -194,9 +194,7 @@ document.getElementById('familias').addEventListener('click', async (e) => {
   const salio = await imprimirBanda(banda, copias, (hechas) => {
     resumen.textContent = `Imprimiendo ${banda.codigo}: etiqueta ${hechas} de ${copias}…`;
   }, (segundos) => {
-    resumen.textContent = segundos
-      ? `Pausa de ${segundos} s para que la impresora vacíe lo que tiene (${banda.codigo})…`
-      : `Esperando a que la impresora termine lo que tiene (${banda.codigo})…`;
+    resumen.textContent = `Pausa de ${segundos} s para que la impresora vacíe lo que tiene (${banda.codigo})…`;
   });
   pintarHistorial();
   if (salio) {

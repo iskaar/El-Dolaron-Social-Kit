@@ -315,17 +315,26 @@ export function etiqueteraLista() {
  * que es exactamente lo que uso la sonda y funciono: es la salida si algun dia
  * la unidad se llama de otro modo.
  *
- * ponytail: sin reconexion automatica. getDevices() existe a medias entre
- * versiones de Chrome y se cuelga con la impresora apagada; un clic al
- * principio del turno es mas barato que esa complicacion. Si estorba,
- * ese es el camino.
+ * Escoger la impresora pide clic una vez por pagina abierta; si despues se cae
+ * el enlace, mandarTspl() la reconecta sola (gatt.connect() de un aparato ya
+ * escogido no pide clic).
+ *
+ * ponytail: sin reconexion al recargar la pagina. getDevices() existe a medias
+ * entre versiones de Chrome y se cuelga con la impresora apagada; un clic al
+ * principio del turno es mas barato que esa complicacion.
  */
 export async function conectarEtiquetera({ cualquiera = false } = {}) {
   const aparato = await navigator.bluetooth.requestDevice(cualquiera
     ? { acceptAllDevices: true, optionalServices: [SERVICIO] }
     : { filters: [{ namePrefix: 'AE240' }], optionalServices: [SERVICIO] });
   aparato.addEventListener('gattserverdisconnected', () => { caracteristica = null; });
+  impresora = aparato;
+  await enlazar(aparato);
+}
 
+let impresora = null;   // el aparato escogido, para reconectar sin clic
+
+async function enlazar(aparato) {
   // La AE240 a veces suelta el enlace justo despues de conectar ("GATT Server is
   // disconnected", sobre todo si otra sesion la tenia agarrada o acaba de
   // desconectarse). Casi siempre el segundo o tercer intento entra: se reintenta
@@ -335,7 +344,6 @@ export async function conectarEtiquetera({ cualquiera = false } = {}) {
       const servidor = await aparato.gatt.connect();
       const servicio = await servidor.getPrimaryService(SERVICIO);
       caracteristica = await servicio.getCharacteristic(CARACTERISTICA);
-      await escucharEstado(servicio);
       return;
     } catch (error) {
       if (intento >= 3) throw error;
@@ -351,7 +359,7 @@ export async function conectarEtiquetera({ cualquiera = false } = {}) {
  * volver a probar con la impresora enfrente.
  */
 async function enviar(texto) {
-  const datos = typeof texto === 'string' ? new TextEncoder().encode(texto) : texto;
+  const datos = new TextEncoder().encode(texto);
   const sinRespuesta = caracteristica.properties.writeWithoutResponse;
   for (let i = 0; i < datos.length; i += 20) {
     const trozo = datos.slice(i, i + 20);
@@ -361,108 +369,43 @@ async function enviar(texto) {
   }
 }
 
-/** Manda un trabajo TSPL ya armado. Devuelve false si se cayo el enlace. */
-export async function mandarTspl(tspl) {
-  if (!caracteristica) {
-    ultimoError ||= 'la impresora no esta conectada';
-    return false;
-  }
-  try {
-    await enviar(tspl);
-    return true;
-  } catch (error) {
-    console.error('Etiquetera: fallo el envio', error);
-    ultimoError = `${error.name}: ${error.message}`;
-    caracteristica = null;   // probablemente se apago; el siguiente clic reconecta
-    return false;
-  }
-}
-
-/* ---------- Estado de la impresora ---------- */
-
-// Sin preguntar, la pagina esta ciega: el 2026-09-25 la impresora dejo de sacar
-// papel cerca de la etiqueta 60 de una tanda y la pagina le siguio mandando
-// otras ~46 por Bluetooth como si nada, hasta que se cayo el enlace. TSPL tiene
-// una pregunta inmediata, <ESC>!?, que contesta UN byte con el estado aunque
-// este ocupada imprimiendo. La respuesta llega por una caracteristica de aviso
-// (notify) del mismo servicio.
-//
-// SIN PROBAR EN HARDWARE: la sonda solo probo escribir. Si la AE240 no contesta,
-// estadoImpresora() da null y el envio cae al ritmo fijo; el historial anota
-// cual de los dos caminos se uso.
-// El \r\n de cola es por si NO la entiende: sin el, "<ESC>!?" se pegaria al
-// primer renglon del siguiente trabajo (el SIZE) y lo echaria a perder.
-const PREGUNTA_ESTADO = new Uint8Array([0x1b, 0x21, 0x3f, 0x0d, 0x0a]);
-const IMPRIMIENDO = 0x20;
-// El bit 3 (sin cinta) y el 7 (temperatura) se ignoran: la AE240 es termica
-// directa, no lleva cinta, y un bit que no aplica no debe parar el turno.
-const FALLAS = [
-  [0x01, 'cabezal abierto'],
-  [0x02, 'papel atorado'],
-  [0x04, 'sin papel, o no encuentra la separacion entre etiquetas'],
-  [0x10, 'en pausa: aprieta el boton de la impresora'],
-  [0x40, 'tapa abierta'],
-];
-
-let alContestar = null;
-let contesta = false;   // si contesto alguna vez en esta conexion
-
-async function escucharEstado(servicio) {
-  contesta = false;
-  try {
-    for (const c of await servicio.getCharacteristics()) {
-      if (!c.properties.notify && !c.properties.indicate) continue;
-      c.addEventListener('characteristicvaluechanged', (evento) => {
-        // Solo un byte suelto es una respuesta de estado; un eco u otra cosa
-        // no debe leerse como falla.
-        const valor = evento.target.value;
-        if (valor.byteLength === 1) alContestar?.(valor.getUint8(0));
-      });
-      await c.startNotifications();
-    }
-  } catch (error) {
-    console.warn('Etiquetera: no se pudo escuchar el estado', error);
-  }
-}
-
-/** El byte de estado de la impresora, o null si no contesta. */
-export async function estadoImpresora(ms = 1500) {
-  if (!caracteristica) return null;
-  const respuesta = new Promise((r) => { alContestar = r; });
-  try {
-    await enviar(PREGUNTA_ESTADO);
-  } catch {
-    return null;
-  }
-  const estado = await Promise.race([respuesta, esperar(ms).then(() => null)]);
-  alContestar = null;
-  if (estado !== null) contesta = true;
-  return estado;
-}
-
-/** Lo que significa un byte de estado, en palabras; '' si no hay falla. */
-export function describirEstado(estado) {
-  return FALLAS.filter(([bit]) => estado & bit).map(([, texto]) => texto).join(', ');
-}
+let reconectada = false;   // si mandarCopias tuvo que reconectar a media pieza
 
 /**
- * Espera a que la impresora acabe lo que tiene en memoria. Devuelve '' si ya
- * termino, la falla en palabras si reporta una, o null si nunca ha contestado
- * (entonces no hay forma de saber y se usa el ritmo fijo).
+ * Manda un trabajo TSPL ya armado. Si el enlace se cayo, reconecta una vez al
+ * aparato ya escogido y lo vuelve a mandar. Devuelve false si ni asi salio.
  */
-export async function esperarVacia(maxMs = 120000) {
-  const hasta = Date.now() + maxMs;
-  while (!detenido) {
-    const estado = await estadoImpresora();
-    if (estado === null) return contesta ? 'dejo de contestar (colgada o apagada)' : null;
-    const falla = describirEstado(estado);
-    if (falla) return falla;
-    if (!(estado & IMPRIMIENDO)) return '';
-    if (Date.now() > hasta) return `sigue ocupada despues de ${maxMs / 1000} s`;
-    await esperar(500);
+export async function mandarTspl(tspl) {
+  for (let intento = 1; intento <= 2; intento += 1) {
+    if (!caracteristica && impresora) {
+      try {
+        await enlazar(impresora);
+        reconectada = true;
+      } catch (error) {
+        ultimoError = `se cayo el enlace y no se pudo reconectar (${error.message})`;
+        return false;
+      }
+    }
+    if (!caracteristica) {
+      ultimoError ||= 'la impresora no esta conectada';
+      return false;
+    }
+    try {
+      await enviar(tspl);
+      return true;
+    } catch (error) {
+      console.error('Etiquetera: fallo el envio', error);
+      ultimoError = `${error.name}: ${error.message}`;
+      caracteristica = null;   // se reconecta en la vuelta siguiente
+    }
   }
-  return '';
+  return false;
 }
+
+// 2026-09-25: se probo preguntarle el estado con <ESC>!? de TSPL entre tandas.
+// La AE240 no contesto, y justo en esa pausa se cayo el enlace: no se le vuelve
+// a mandar. La pagina sigue ciega a lo que pasa dentro de la impresora (papel,
+// pausa); para eso esta el historial y "No salio desde aqui" en /etiquetas.
 
 // Ritmo de envio. La impresora no avisa cuando se le llena la memoria: 22
 // etiquetas a 300 ms seguidas salieron bien, pero con 58 se atasco y hubo que
@@ -476,9 +419,7 @@ export async function esperarVacia(maxMs = 120000) {
 //
 // 2026-09-25: con pausas de 10 s la impresora se paro cerca de la etiqueta 60
 // de una tanda de ~110: imprime mas lento de lo que se le manda y la pausa no
-// alcanzaba a vaciarla. Ahora entre tandas se le PREGUNTA si ya termino
-// (esperarVacia). PAUSA_ENTRE_LOTES solo se usa si no contesta, y por eso subio
-// a 30 s: 20 etiquetas a ~1.5 s cada una, con holgura.
+// alcanzaba a vaciarla. Subio a 30 s: 20 etiquetas a ~1.5 s cada una, con holgura.
 export const LOTE = 20;
 export const PAUSA_ENTRE_ETIQUETAS = 300;
 export const PAUSA_ENTRE_LOTES = 30000;
@@ -504,32 +445,22 @@ const esperar = (ms) => new Promise((r) => setTimeout(r, ms));
  */
 export async function mandarCopias(tspl, copias, alAvanzar, nombre = '', alEsperar) {
   let enviadas = 0;
-  let ritmo = '';
   ultimoError = '';
+  reconectada = false;
   while (enviadas < copias && !detenido) {
-    if (enTanda > 0 && enTanda % LOTE === 0) {
-      alEsperar?.();
-      const falla = await esperarVacia();
-      if (falla === null) {
-        ritmo = 'sin respuesta de estado, pausa fija';
-        alEsperar?.(PAUSA_ENTRE_LOTES / 1000);
-        await esperar(PAUSA_ENTRE_LOTES);
-      } else if (falla) {
-        ultimoError = `la impresora dice: ${falla}`;
-        break;
-      } else {
-        ritmo = 'la impresora confirmo que termino';
-      }
-    } else if (enTanda > 0) {
-      await esperar(PAUSA_ENTRE_ETIQUETAS);
+    if (enTanda > 0) {
+      const larga = enTanda % LOTE === 0;
+      if (larga) alEsperar?.(PAUSA_ENTRE_LOTES / 1000);
+      await esperar(larga ? PAUSA_ENTRE_LOTES : PAUSA_ENTRE_ETIQUETAS);
+      if (detenido) break;
     }
-    if (detenido) break;
     if (!await mandarTspl(tspl)) break;
     enviadas += 1;
     enTanda += 1;
     alAvanzar?.(enviadas, copias);
   }
-  const envio = { hora: new Date().toISOString(), nombre, copias, enviadas, ritmo };
+  const envio = { hora: new Date().toISOString(), nombre, copias, enviadas };
+  if (reconectada) envio.ritmo = 'se cayo el enlace y se reconecto solo';
   if (enviadas < copias) envio.error = detenido ? 'detenido a mano' : ultimoError;
   anotarEnvio(envio);
   return enviadas === copias;
@@ -580,7 +511,7 @@ function anotarEnvio(envio) {
 // Para sacarlas de la lista de /etiquetas sin deseleccionarlas una por una:
 // id -> hora en que se termino de enviar. Por navegador, como el historial.
 //
-// ponytail: "enviada" no es "impresa" si la impresora no contesta su estado;
+// ponytail: "enviada" no es "impresa": la impresora no dice si saco el papel;
 // para eso esta desmarcarDesde(). Si algun dia se etiqueta desde dos
 // computadoras, esto se muda a una columna en D1.
 const CLAVE_IMPRESAS = 'etiqueta-impresas';

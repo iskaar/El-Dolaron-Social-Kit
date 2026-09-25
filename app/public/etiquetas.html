@@ -83,7 +83,7 @@
 <script type="module">
 import {
   conectarEtiquetera, etiqueteraLista, imprimirEtiquetas, historialTexto, detenerEnvio, envioDetenido,
-  errorEnvio, esperarVacia, impresas, marcarImpresa, desmarcarDesde,
+  errorEnvio, impresas, marcarImpresa, desmarcarDesde,
 } from '/etiquetera.js';
 
 const lista = document.getElementById('lista');
@@ -227,11 +227,7 @@ document.getElementById('imprimir').addEventListener('click', async () => {
         const salio = await imprimirEtiquetas(
           p, copias,
           (hechas) => { resumen.textContent = `Imprimiendo ${detalle}: etiqueta ${hechas} de ${copias}…`; },
-          (segundos) => {
-            resumen.textContent = segundos
-              ? `Pausa de ${segundos} s para que la impresora vacíe lo que tiene (${detalle})…`
-              : `Esperando a que la impresora termine lo que tiene (${detalle})…`;
-          },
+          (segundos) => { resumen.textContent = `Pausa de ${segundos} s para que la impresora vacíe lo que tiene (${detalle})…`; },
         );
         pintarHistorial();
         if (!salio) {
@@ -244,12 +240,7 @@ document.getElementById('imprimir').addEventListener('click', async () => {
         terminadas += 1;
       }
     }
-    // La ultima tanda nadie la confirmo todavia: se pregunta antes de decir que salio.
-    resumen.textContent = 'Esperando a que la impresora termine…';
-    const falla = await esperarVacia();
-    resumen.textContent = falla
-      ? `Se enviaron ${terminadas} piezas, pero la impresora dice: ${falla}. Revisa las últimas; si faltan, usa «No salió desde aquí».`
-      : `${terminadas} piezas etiquetadas.`;
+    resumen.textContent = `${terminadas} piezas enviadas. Si alguna no salió, usa «Mostrar impresas» y «No salió desde aquí».`;
   } catch (error) {
     // Nada de fallar en silencio: si algo revienta a media lista, se dice donde.
     console.error('Etiquetas: fallo el lote', error);
