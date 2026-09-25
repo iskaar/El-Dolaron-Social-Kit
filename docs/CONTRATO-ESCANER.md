@@ -97,6 +97,7 @@ la pieza es desconocido y **nunca se infiere** (issue #2). No hay precio por cos
 precio = precio_lista × %categoria × (estado_fisico == 'danado' ? %danado : 1)
 precio = redondear hacia arriba al múltiplo de $5
 si precio <= 200 → destino = banda mas chica que lo cubra (familia = ropa|general), sin etiqueta propia
+si no → etiqueta individual, y el precio quiebra la decena: redondeo a $10 menos $1 ($250 → $249, $233 → $239)
 ```
 
 - Nunca por encima de `precio_lista`.

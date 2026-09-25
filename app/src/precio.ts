@@ -54,7 +54,17 @@ export function prefijoParaFamilia(nombre: string, ocupados: Set<string>): strin
 
 const REDONDEO = 500; // $5 MXN
 
-/** Redondeo hacia arriba al multiplo de $5, el mismo que usa el calculo automatico. */
+/**
+ * Quiebra la decena: redondeo hacia arriba a $10 y menos $1, asi que un precio
+ * de etiqueta siempre termina en 9 ($233 -> $239, $250 -> $249). Idempotente:
+ * un precio que ya termina en 9 se queda igual. Las bandas ya son X9 por si
+ * solas ($19 ... $199) y no pasan por aqui.
+ */
+export function quebrarDecena(centavos: number): number {
+  return centavos <= 0 ? 0 : Math.ceil(centavos / 1000) * 1000 - 100;
+}
+
+/** Redondeo hacia arriba al multiplo de $5. Decide la banda; el precio de una etiqueta individual pasa ademas por quebrarDecena. */
 export function redondear5(centavos: number): number {
   return Math.ceil(Math.max(0, centavos) / REDONDEO) * REDONDEO;
 }
@@ -72,7 +82,7 @@ export function ajustarManual({ precio, destino, config }: {
   config: Record<string, string>;
 }): number {
   if (destino === 'etiqueta') {
-    return redondear5(precio);
+    return quebrarDecena(precio);
   }
   const m = BANDA.exec(destino);
   const pesosPorDefecto = m ? Number.parseInt(m[2], 10) : 0;
@@ -93,6 +103,7 @@ function entero(config: Record<string, string>, clave: string, porDefecto: numbe
 
 /**
  * precio = precio_lista x %categoria x %danado, redondeado hacia arriba a $5.
+ * Una etiqueta individual (mas de $200) ademas quiebra la decena: termina en 9.
  * Si cae en el limite de banda o por debajo, la pieza va a la banda mas chica
  * que la cubra y no lleva etiqueta individual: se etiqueta con el codigo
  * compartido de esa banda (ver PLAN-ETIQUETAS-POR-BANDA.md).
@@ -135,7 +146,7 @@ function conBanda(precio: number, precioLista: number, categoria: string, config
   }
 
   // Nunca por encima del precio de lista.
-  return { precio: Math.min(precio, redondear5(precioLista)), destino: 'etiqueta' };
+  return { precio: Math.min(quebrarDecena(precio), redondear5(precioLista)), destino: 'etiqueta' };
 }
 
 /**
