@@ -323,10 +323,24 @@ export async function conectarEtiquetera({ cualquiera = false } = {}) {
   const aparato = await navigator.bluetooth.requestDevice(cualquiera
     ? { acceptAllDevices: true, optionalServices: [SERVICIO] }
     : { filters: [{ namePrefix: 'AE240' }], optionalServices: [SERVICIO] });
-  const servidor = await aparato.gatt.connect();
-  const servicio = await servidor.getPrimaryService(SERVICIO);
-  caracteristica = await servicio.getCharacteristic(CARACTERISTICA);
   aparato.addEventListener('gattserverdisconnected', () => { caracteristica = null; });
+
+  // La AE240 a veces suelta el enlace justo despues de conectar ("GATT Server is
+  // disconnected", sobre todo si otra sesion la tenia agarrada o acaba de
+  // desconectarse). Casi siempre el segundo o tercer intento entra: se reintenta
+  // antes de mandarle el error al usuario.
+  for (let intento = 1; ; intento += 1) {
+    try {
+      const servidor = await aparato.gatt.connect();
+      const servicio = await servidor.getPrimaryService(SERVICIO);
+      caracteristica = await servicio.getCharacteristic(CARACTERISTICA);
+      return;
+    } catch (error) {
+      if (intento >= 3) throw error;
+      if (aparato.gatt.connected) aparato.gatt.disconnect();
+      await esperar(700 * intento);
+    }
+  }
 }
 
 /**

@@ -149,7 +149,9 @@ await cargarFamilias();
 function avisarFalla(error) {
   resumen.textContent = error.name === 'NotFoundError'
     ? 'No se escogió impresora. Préndela y vuelve a intentar, o usa «¿No aparece la impresora?».'
-    : `No se pudo conectar la impresora: ${error.message}`;
+    : /disconnected/i.test(error.message)
+      ? 'La impresora soltó la conexión. Apágala y préndela, cierra cualquier otra pestaña o programa que la use (y desconéctala del Bluetooth de Windows si aparece como conectada) y vuelve a intentar.'
+      : `No se pudo conectar la impresora: ${error.message}`;
 }
 
 document.getElementById('otra').addEventListener('click', async () => {
