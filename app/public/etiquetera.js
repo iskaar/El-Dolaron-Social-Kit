@@ -509,7 +509,10 @@ function anotarEnvio(envio) {
 /* ---------- Piezas ya impresas ---------- */
 
 // Para sacarlas de la lista de /etiquetas sin deseleccionarlas una por una:
-// id -> hora en que se termino de enviar. Por navegador, como el historial.
+// id -> { hora, precio, precio_lista } de la etiqueta que se mando. El precio
+// se guarda porque la etiqueta pegada no se actualiza sola: si en la cola de
+// revision cambia el precio, la pieza tiene que volver a la lista para
+// reimprimirla. Por navegador, como el historial.
 //
 // ponytail: "enviada" no es "impresa": la impresora no dice si saco el papel;
 // para eso esta desmarcarDesde(). Si algun dia se etiqueta desde dos
@@ -517,15 +520,33 @@ function anotarEnvio(envio) {
 const CLAVE_IMPRESAS = 'etiqueta-impresas';
 
 export function impresas() {
-  try { return JSON.parse(globalThis.localStorage?.getItem(CLAVE_IMPRESAS)) ?? {}; } catch { return {}; }
+  let crudo;
+  try { crudo = JSON.parse(globalThis.localStorage?.getItem(CLAVE_IMPRESAS)) ?? {}; } catch { crudo = {}; }
+  // Las primeras marcas eran solo la hora, sin precio.
+  return Object.fromEntries(Object.entries(crudo).map(([id, v]) => [id, typeof v === 'string' ? { hora: v } : v]));
 }
 
 function guardarImpresas(mapa) {
   try { globalThis.localStorage?.setItem(CLAVE_IMPRESAS, JSON.stringify(mapa)); } catch { /* sin localStorage no se recuerda, nada mas */ }
 }
 
-export function marcarImpresa(id, hora = new Date().toISOString()) {
-  guardarImpresas({ ...impresas(), [id]: hora });
+/** @param pieza lo que dice la etiqueta: { precio, precio_lista } */
+export function marcarImpresa(id, hora = new Date().toISOString(), pieza = {}) {
+  guardarImpresas({ ...impresas(), [id]: { hora, precio: pieza.precio, precio_lista: pieza.precio_lista } });
+}
+
+/** Los precios que se ven en la etiqueta: el de lista solo sale si es mayor (tachado). */
+const precioImpreso = (p) => `${p.precio}/${p.precio_lista > p.precio ? p.precio_lista : 0}`;
+
+/**
+ * Si la etiqueta pegada sigue diciendo el precio de hoy. Una marca sin precio
+ * (de antes de guardarlo) se da por buena; una pieza sin existencia no tiene
+ * etiqueta que cambiar.
+ */
+export function etiquetaVigente(marca, pieza) {
+  if (!marca) return false;
+  if (marca.precio === undefined || (pieza.stock ?? 1) <= 0) return true;
+  return precioImpreso(marca) === precioImpreso(pieza);
 }
 
 /**
@@ -534,9 +555,9 @@ export function marcarImpresa(id, hora = new Date().toISOString()) {
  */
 export function desmarcarDesde(id) {
   const mapa = impresas();
-  const desde = mapa[id];
+  const desde = mapa[id]?.hora;
   if (!desde) return;
-  guardarImpresas(Object.fromEntries(Object.entries(mapa).filter(([, hora]) => hora < desde)));
+  guardarImpresas(Object.fromEntries(Object.entries(mapa).filter(([, marca]) => marca.hora < desde)));
 }
 
 /** El historial en lineas de texto, lo mas nuevo primero. */

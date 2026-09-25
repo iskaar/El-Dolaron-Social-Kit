@@ -27,6 +27,8 @@
   .renglon .precio { font-weight: 700; }
   .renglon.impresa { background: #f1f7ef; }
   .renglon.impresa img { opacity: .5; }
+  .renglon.cambiada { background: #fff6d9; }
+  .renglon .marca.aviso { color: #8a6d00; font-weight: 600; }
   .renglon .copias { width: 64px; padding: 6px; font-size: 14px; border: 1px solid var(--linea); border-radius: 6px; }
   .renglon .marca { display: block; font-size: 12px; color: #2f7a3a; margin-top: 4px; }
   .renglon .marca button { padding: 3px 8px; font-size: 12px; margin-left: 6px; }
@@ -66,6 +68,9 @@
     <b>«No salió desde aquí»</b>: esa y las que siguen regresan a la lista.
     Si ya tienen etiqueta de antes, selecciónalas y aprieta
     <b>«Marcar seleccionadas como impresas»</b>: salen de la lista sin imprimir nada.
+    Si le cambias el precio a una pieza ya etiquetada, regresa arriba en amarillo
+    (↻) para reimprimir su etiqueta; el código de barras es el mismo, y la caja
+    cobra el precio nuevo aunque la etiqueta vieja siga pegada.
     La columna <b>Etiquetas</b> es cuántas imprimir; empieza en la existencia,
     pero cambiarla no cambia la existencia (eso se hace en la cola de revisión).
   </p>
@@ -86,7 +91,7 @@
 <script type="module">
 import {
   conectarEtiquetera, etiqueteraLista, imprimirEtiquetas, historialTexto, detenerEnvio, envioDetenido,
-  errorEnvio, impresas, marcarImpresa, desmarcarDesde,
+  errorEnvio, impresas, marcarImpresa, desmarcarDesde, etiquetaVigente,
 } from '/etiquetera.js';
 
 const lista = document.getElementById('lista');
@@ -112,11 +117,26 @@ async function cargar() {
 
 function pintar() {
   const hechas = impresas();
-  const pendientes = piezas.filter((p) => !hechas[p.id]);
-  const visibles = verImpresas ? piezas : pendientes;
+  // Las marcas de antes no guardaban el precio: se les pone el de hoy una vez,
+  // para que un cambio de aqui en adelante si se note.
+  for (const p of piezas) {
+    const marca = hechas[p.id];
+    if (marca && marca.precio === undefined) {
+      marcarImpresa(p.id, marca.hora, p);
+      hechas[p.id] = { ...marca, precio: p.precio, precio_lista: p.precio_lista };
+    }
+  }
+  const vigente = (p) => etiquetaVigente(hechas[p.id], p);
+  // Precio cambiado despues de imprimir: la etiqueta pegada miente. Van arriba,
+  // fuera de la numeracion, porque esas piezas ya no estan en la fila de captura.
+  const cambiadas = piezas.filter((p) => hechas[p.id] && !vigente(p));
+  const nuevas = piezas.filter((p) => !hechas[p.id]);
+  const pendientes = [...cambiadas, ...nuevas];
+  const visibles = verImpresas ? [...cambiadas, ...piezas.filter((p) => !cambiadas.includes(p))] : pendientes;
   verBoton.textContent = verImpresas ? 'Ocultar impresas' : `Mostrar impresas (${piezas.length - pendientes.length})`;
 
-  resumen.textContent = `${pendientes.length} piezas por etiquetar`;
+  resumen.textContent = `${pendientes.length} piezas por etiquetar`
+    + (cambiadas.length ? ` · ${cambiadas.length} con precio cambiado (arriba)` : '');
   if (visibles.length === 0) {
     lista.innerHTML = `<div class="vacio">${piezas.length === 0
       ? 'Nada para etiquetar. Las piezas de bin no llevan etiqueta.'
@@ -132,15 +152,19 @@ function pintar() {
   let posicion = 0;
   lista.innerHTML = '<div class="renglon" style="font-size:12px;color:#5b6478"><span></span><span></span><span></span><span>Pieza</span><span>Precio</span><span>Existencia</span><span>Etiquetas</span></div>'
     + visibles.map((p) => {
-      const impresa = hechas[p.id];
+      const marca = hechas[p.id];
+      const impresa = marca && vigente(p);
+      const cambiada = marca && !impresa;
       return `
-    <label class="renglon${impresa ? ' impresa' : ''}">
-      <span class="posicion">${impresa ? '✓' : ++posicion}</span>
+    <label class="renglon${impresa ? ' impresa' : ''}${cambiada ? ' cambiada' : ''}">
+      <span class="posicion">${impresa ? '✓' : cambiada ? '↻' : ++posicion}</span>
       <input type="checkbox" value="${p.id}" ${impresa ? '' : 'checked'}>
       <img src="/api/foto/${p.id}" alt="" loading="lazy">
       <span>${escapar(p.nombre || 'Sin nombre')}${impresa
-        ? `<span class="marca">Impresa ${hora(impresa)}<button type="button" class="claro" data-desde="${p.id}">No salió desde aquí</button></span>`
-        : ''}</span>
+        ? `<span class="marca">Impresa ${hora(marca.hora)}<button type="button" class="claro" data-desde="${p.id}">No salió desde aquí</button></span>`
+        : cambiada
+          ? `<span class="marca aviso">La etiqueta pegada dice ${pesos(marca.precio)}: reimprime y cámbiala.</span>`
+          : ''}</span>
       <span class="precio">${pesos(p.precio)}${p.precio_lista > p.precio ? ` <s style="font-weight:400;color:#777">${pesos(p.precio_lista)}</s>` : ''}</span>
       <span>${p.stock} ${p.stock === 1 ? 'pieza' : 'piezas'}</span>
       <input type="number" class="copias" data-id="${p.id}" min="1" max="99" value="${copiasDe(p)}" aria-label="Etiquetas a imprimir">
@@ -166,7 +190,8 @@ document.getElementById('marcar').addEventListener('click', () => {
   const ids = [...lista.querySelectorAll('.renglon:not(.impresa) input[type=checkbox]:checked')].map((c) => c.value);
   if (ids.length === 0) return;
   const base = Date.now();
-  ids.forEach((id, i) => marcarImpresa(id, new Date(base + i).toISOString()));
+  const porId = new Map(piezas.map((p) => [p.id, p]));
+  ids.forEach((id, i) => marcarImpresa(id, new Date(base + i).toISOString(), porId.get(id)));
   pintar();
   resumen.textContent = `${ids.length} ${ids.length === 1 ? 'pieza marcada' : 'piezas marcadas'} como impresas. Se regresan con «Mostrar impresas».`;
 });
@@ -252,7 +277,7 @@ document.getElementById('imprimir').addEventListener('click', async () => {
             : `Se cortó en la pieza ${terminadas + 1} de ${ids.length} (${p.nombre}): ${errorEnvio()}. Las que faltan siguen en la lista.`;
           return;
         }
-        marcarImpresa(p.id);
+        marcarImpresa(p.id, undefined, p);
         terminadas += 1;
       }
     }

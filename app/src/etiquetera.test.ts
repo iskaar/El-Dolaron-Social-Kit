@@ -265,3 +265,26 @@ test('"no salio desde aqui" regresa esa pieza y las que se mandaron despues, no 
   assert.deepEqual(Object.keys(impresas()), ['a']);
   delete (globalThis as any).localStorage;
 });
+
+test('un cambio de precio despues de imprimir regresa la pieza a la lista; uno invisible en la etiqueta no', async () => {
+  const guardado = new Map<string, string>();
+  (globalThis as any).localStorage = { getItem: (k: string) => guardado.get(k) ?? null, setItem: (k: string, v: string) => guardado.set(k, v) };
+  const { marcarImpresa, impresas, etiquetaVigente } = await import('../public/etiquetera.js');
+  marcarImpresa('a', '2026-09-25T18:00:00.000Z', { precio: 19900, precio_lista: 39000 });
+  const marca = impresas().a;
+  assert.equal(etiquetaVigente(marca, { precio: 19900, precio_lista: 39000, stock: 3 }), true);
+  assert.equal(etiquetaVigente(marca, { precio: 14900, precio_lista: 39000, stock: 3 }), false);
+  assert.equal(etiquetaVigente(marca, { precio: 19900, precio_lista: 45000, stock: 3 }), false);   // el tachado cambio
+  assert.equal(etiquetaVigente(marca, { precio: 14900, precio_lista: 39000, stock: 0 }), true);    // ya no queda ninguna
+  assert.equal(etiquetaVigente(undefined, { precio: 19900, precio_lista: 0, stock: 1 }), false);   // nunca se imprimio
+
+  // Sin precio de lista mayor, el tachado no sale: cambiarlo por debajo no toca la etiqueta.
+  marcarImpresa('b', '2026-09-25T18:00:01.000Z', { precio: 9900, precio_lista: 0 });
+  assert.equal(etiquetaVigente(impresas().b, { precio: 9900, precio_lista: 5000, stock: 1 }), true);
+
+  // Las marcas viejas eran solo la hora: se leen como impresas.
+  guardado.set('etiqueta-impresas', JSON.stringify({ c: '2026-09-25T17:00:00.000Z' }));
+  assert.deepEqual(impresas().c, { hora: '2026-09-25T17:00:00.000Z' });
+  assert.equal(etiquetaVigente(impresas().c, { precio: 1, precio_lista: 0, stock: 1 }), true);
+  delete (globalThis as any).localStorage;
+});
