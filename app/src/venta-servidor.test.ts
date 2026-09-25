@@ -54,3 +54,14 @@ test('la banda se marca sin inventario: la caja no le descuenta existencia', () 
   assert.equal(resultado.lineas[0].sinInventario, true);
   assert.equal(resultado.lineas[0].precio, 1900);
 });
+
+test('la puerta del vendedor deja corregir la existencia, y nada mas de una pieza', async () => {
+  const { permitidaParaVendedor } = await import('./worker.ts');
+  const id = 'a1111111-1111-4111-8111-111111111111';
+  assert.equal(permitidaParaVendedor(`/api/borradores/${id}/existencia`, 'PATCH'), true);
+  assert.equal(permitidaParaVendedor(`/api/borradores/${id}/existencia`, 'GET'), false);
+  assert.equal(permitidaParaVendedor(`/api/borradores/${id}`, 'PATCH'), false);
+  assert.equal(permitidaParaVendedor(`/api/borradores/${id}`, 'DELETE'), false);
+  assert.equal(permitidaParaVendedor('/api/borradores', 'GET'), false);
+  assert.equal(permitidaParaVendedor('/api/borradores', 'POST'), true);
+});
