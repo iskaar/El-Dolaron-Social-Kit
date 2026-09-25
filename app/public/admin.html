@@ -88,10 +88,9 @@ const DESTINOS = [
 const CLAVES_CONFIG = [
   ['pct_ropa','Ropa %'], ['pct_hogar','Hogar %'], ['pct_electronica','Electrónica %'],
   ['pct_juguetes','Juguetes %'], ['pct_otros','Otros %'], ['pct_danado','Dañado %'],
-  ['limite_banda','Límite de banda ($)'],
   ...MONTOS_BANDA.map((p) => [`banda_${p}`, `Banda $${p}`]),
 ];
-const EN_PESOS = new Set(['limite_banda', ...MONTOS_BANDA.map((p) => `banda_${p}`)]);
+const EN_PESOS = new Set(MONTOS_BANDA.map((p) => `banda_${p}`));
 
 const cola = document.getElementById('cola');
 const resumen = document.getElementById('resumen');

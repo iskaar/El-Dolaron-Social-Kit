@@ -283,7 +283,7 @@ export async function analizarBorrador(
     // —dos piezas de `hogar` fueron a 57 % y a 29 %— pero es un arranque honesto.
     const conEjemplos = ejemplos.length >= EJEMPLOS_MINIMOS && ficha.precio_venta_mxn > 0;
     const { precio, destino } = conEjemplos
-      ? precioDesdeSugerencia({ precioLista, sugerido: ficha.precio_venta_mxn * 100, categoria: ficha.categoria, config })
+      ? precioDesdeSugerencia({ precioLista, sugerido: ficha.precio_venta_mxn * 100 })
       : calcularPrecio({ precioLista, categoria: ficha.categoria, estadoFisico: fila.estado_fisico, config });
 
     // `precio_sugerido` queda como testigo de lo que propuso la IA: las
