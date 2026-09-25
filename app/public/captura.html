@@ -16,10 +16,14 @@
   #contador { top: 0; padding: 10px 14px calc(10px + env(safe-area-inset-top));
     background: linear-gradient(#000c, #0000); font-size: 15px; font-variant-numeric: tabular-nums; }
   #miniaturas { bottom: 132px; display: flex; gap: 6px; overflow-x: auto; padding: 6px 10px; }
-  #miniaturas img { height: 56px; width: 56px; object-fit: cover; border-radius: 8px;
-    border: 3px solid transparent; flex: 0 0 auto; }
-  #miniaturas img.danado { border-color: var(--rojo); }
-  #miniaturas img.subida { opacity: .55; }
+  .mini { position: relative; flex: 0 0 auto; padding: 0; border: 3px solid #fff8; border-radius: 10px;
+    background: none; width: 62px; height: 62px; }
+  .mini img { width: 100%; height: 100%; object-fit: cover; border-radius: 7px; display: block; }
+  /* Verde = ya esta en el servidor; blanco = todavia en el telefono. */
+  .mini.subida { border-color: #4caf50; }
+  .mini.danado { border-color: var(--rojo); }
+  .mini .n { position: absolute; right: -4px; bottom: -4px; min-width: 22px; padding: 1px 5px;
+    border-radius: 999px; background: var(--amarillo); color: #111; font-size: 13px; font-weight: 800; }
   #barra { bottom: 0; display: flex; align-items: center; justify-content: space-between;
     gap: 12px; padding: 16px 18px calc(18px + env(safe-area-inset-bottom));
     background: linear-gradient(#0000, #000c); }
@@ -62,6 +66,7 @@
     padding: 10px 16px; font-size: 14px; font-weight: 700; }
   #revisar button.peligro { border-color: var(--rojo); color: var(--rojo); }
   #revisar button.principal { background: var(--amarillo); border-color: var(--amarillo); color: #111; flex: 1; }
+  #revisar-nota { font-size: 13px; opacity: .85; margin: 0; min-height: 1em; }
   #revisar-cerrar { position: absolute; top: calc(10px + env(safe-area-inset-top)); right: 14px;
     width: 40px; height: 40px; border-radius: 50%; font-size: 20px; line-height: 1; }
 </style>
@@ -80,7 +85,7 @@
     <button type="button" data-paso="1" aria-label="Más piezas">+</button>
   </div>
   <button id="disparo" type="button" aria-label="Tomar foto"></button>
-  <span id="ayuda">Toca una miniatura para revisarla, corregir la cantidad o retomarla.</span>
+  <span id="ayuda">Toca una miniatura para corregir cuántas piezas son.</span>
 </div>
 
 <div id="error">
@@ -96,7 +101,8 @@
       <button id="revisar-estado" type="button"></button>
       <div id="revisar-cantidad" class="control-cantidad"></div>
     </div>
-    <div class="fila-revisar">
+    <p id="revisar-nota"></p>
+    <div class="fila-revisar" id="revisar-local">
       <button id="revisar-descartar" type="button" class="peligro">Descartar</button>
       <button id="revisar-retomar" type="button" class="principal">Retomar foto</button>
     </div>
@@ -142,6 +148,7 @@ async function conStore(modo, fn) {
 }
 
 const guardar = (registro) => conStore('readwrite', (s) => s.put(registro));
+const leer = (id) => conStore('readonly', (s) => s.get(id));
 const borrar = (id) => conStore('readwrite', (s) => s.delete(id));
 const pendientes = () => conStore('readonly', (s) => s.getAll());
 
@@ -164,14 +171,37 @@ async function encenderCamara() {
 /** Reduce la foto antes de guardarla: alcanza para la IA, la etiqueta y el catálogo. */
 const capturar = () => aJpeg(video, video.videoWidth, video.videoHeight);
 
+/**
+ * Todo lo capturado desde que se abrio la pagina, subido o no: id -> registro
+ * (sin la foto, que vive en la miniatura). `subida` dice si ya esta en el
+ * servidor, y con eso a donde va una correccion.
+ *
+ * ponytail: todas las miniaturas se quedan en memoria (~150 KB por foto). Si
+ * una sesion de cientos de fotos pone lento el telefono, recortar las viejas.
+ */
+const sesion = new Map();
+
 function pintarMiniatura(registro) {
-  const img = document.createElement('img');
-  img.src = URL.createObjectURL(registro.foto);
-  img.dataset.id = registro.id;
-  img.className = registro.estado_fisico === 'danado' ? 'danado' : '';
-  img.addEventListener('click', () => abrirRevision(registro.id, img));
-  miniaturas.prepend(img);
-  while (miniaturas.children.length > 20) miniaturas.lastChild.remove();
+  const boton = document.createElement('button');
+  boton.type = 'button';
+  boton.className = 'mini';
+  boton.dataset.id = registro.id;
+  boton.innerHTML = '<img alt=""><span class="n"></span>';
+  boton.querySelector('img').src = URL.createObjectURL(registro.foto);
+  boton.addEventListener('click', () => abrirRevision(registro.id));
+  miniaturas.prepend(boton);
+  const { foto, ...datos } = registro;
+  sesion.set(registro.id, { ...datos, cantidad: registro.cantidad ?? 1, subida: false });
+  repintarMiniatura(registro.id);
+}
+
+function repintarMiniatura(id) {
+  const boton = miniaturas.querySelector(`.mini[data-id="${id}"]`);
+  const datos = sesion.get(id);
+  if (!boton || !datos) return;
+  boton.classList.toggle('danado', datos.estado_fisico === 'danado');
+  boton.classList.toggle('subida', datos.subida);
+  boton.querySelector('.n').textContent = datos.cantidad > 1 ? `×${datos.cantidad}` : '';
 }
 
 /* ---------- revisar una foto ya tomada: como la miniatura del iPhone ---------- */
@@ -180,8 +210,11 @@ const elRevisar = document.getElementById('revisar');
 const elRevisarFoto = document.getElementById('revisar-foto');
 const elRevisarEstado = document.getElementById('revisar-estado');
 const elRevisarCantidad = document.getElementById('revisar-cantidad');
+const elRevisarNota = document.getElementById('revisar-nota');
+const elRevisarLocal = document.getElementById('revisar-local');
 const elDescartar = document.getElementById('revisar-descartar');
-let registroActual = null;
+let idActual = null;
+let registroActual = null;   // el de IndexedDB, solo mientras la foto no se sube
 
 function pintarEstadoRevision() {
   const danado = registroActual.estado_fisico === 'danado';
@@ -189,53 +222,118 @@ function pintarEstadoRevision() {
   elRevisarEstado.classList.toggle('danado', danado);
 }
 
-/** Solo mientras la foto sigue en la cola local: ya subida, se corrige desde la cola de revision. */
-async function abrirRevision(id, img) {
-  const cola = await pendientes();
-  const registro = cola.find((r) => r.id === id);
-  if (!registro) {
-    img.classList.add('subida');
-    return;
+/**
+ * Una correccion a una foto que sigue en el telefono. `version` le avisa a
+ * procesarCola() si la foto cambio mientras se estaba subiendo: en ese caso no
+ * la borra de la cola y la vuelve a mandar (la subida es idempotente por id).
+ */
+async function guardarLocal(registro) {
+  registro.version = (registro.version ?? 0) + 1;
+  await guardar(registro);
+  const datos = sesion.get(registro.id);
+  if (datos) {
+    datos.cantidad = registro.cantidad;
+    datos.estado_fisico = registro.estado_fisico;
   }
-  registroActual = registro;
-  elRevisarFoto.src = img.src;
+  repintarMiniatura(registro.id);
+  procesarCola();
+}
+
+/**
+ * Antes de subirse, todo se corrige en la cola local: cantidad, danado,
+ * retomar, descartar. Ya subida, solo la cantidad, directo al servidor: lo
+ * demas cambia el precio y eso se revisa en la cola de revision.
+ */
+async function abrirRevision(id) {
+  const datos = sesion.get(id);
+  if (!datos) return;
+  idActual = id;
+  registroActual = datos.subida ? null : (await leer(id)) ?? null;
+  elRevisarFoto.src = miniaturas.querySelector(`.mini[data-id="${id}"] img`).src;
   elDescartar.textContent = 'Descartar';
-  pintarEstadoRevision();
+  elRevisarNota.textContent = registroActual ? '' : 'Ya se subió: aquí se corrige cuántas piezas son.';
+  elRevisarEstado.style.display = registroActual ? '' : 'none';
+  elRevisarLocal.style.display = registroActual ? '' : 'none';
+  if (registroActual) pintarEstadoRevision();
   elRevisarCantidad.innerHTML = `<button type="button" data-paso="-1" aria-label="Menos piezas">−</button>
     <input class="valor" type="text" inputmode="numeric" pattern="[0-9]*">
     <button type="button" data-paso="1" aria-label="Más piezas">+</button>`;
-  activarControlCantidad(elRevisarCantidad, () => registroActual.cantidad, (valor) => {
-    piezasTotales += valor - registroActual.cantidad;
-    registroActual.cantidad = valor;
-    guardar(registroActual);
-    actualizarContador();
-  });
+  activarControlCantidad(elRevisarCantidad, () => sesion.get(id)?.cantidad ?? 1, (valor) => cambiarCantidad(id, valor));
   elRevisar.classList.add('abierto');
+}
+
+function cambiarCantidad(id, valor) {
+  const datos = sesion.get(id);
+  if (!datos || valor === datos.cantidad) return;
+  piezasTotales += valor - datos.cantidad;
+  // Antes de cualquier await: un segundo toque rapido de + lee de aqui.
+  datos.cantidad = valor;
+  actualizarContador();
+  if (registroActual?.id === id) {
+    registroActual.cantidad = valor;
+    guardarLocal(registroActual);
+    return;
+  }
+  repintarMiniatura(id);
+  // Tocar + cinco veces no son cinco llamadas: se manda el numero final cuando
+  // se deja de tocar, y en fila por pieza para que una respuesta vieja no gane.
+  if (idActual === id) elRevisarNota.textContent = 'Guardando…';
+  clearTimeout(datos.temporizador);
+  datos.temporizador = setTimeout(() => {
+    datos.envio = (datos.envio ?? Promise.resolve()).then(() => guardarExistencia(id));
+  }, 600);
+}
+
+async function guardarExistencia(id) {
+  const datos = sesion.get(id);
+  const valor = datos.cantidad;
+  if (valor === datos.guardada) return;
+  let aviso;
+  try {
+    const respuesta = await fetch(`/api/borradores/${id}/existencia`, {
+      method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ stock: valor }),
+    });
+    const cuerpo = await respuesta.json().catch(() => ({}));
+    if (!respuesta.ok) throw new Error(cuerpo.error || `error ${respuesta.status}`);
+    datos.guardada = valor;
+    aviso = `Guardado: ${valor} ${valor === 1 ? 'pieza' : 'piezas'}.`;
+  } catch (error) {
+    // No se queda un numero en pantalla que el servidor no tiene.
+    aviso = `No se guardó (${error instanceof TypeError ? 'sin red' : error.message}). Sigue en ${datos.guardada}.`;
+    piezasTotales += datos.guardada - datos.cantidad;
+    datos.cantidad = datos.guardada;
+    actualizarContador();
+    repintarMiniatura(id);
+  }
+  if (idActual === id) {
+    elRevisarNota.textContent = aviso;
+    const entrada = elRevisarCantidad.querySelector('.valor');
+    entrada.value = datos.cantidad;
+    elRevisarCantidad.classList.toggle('varias', datos.cantidad > 1);
+  }
 }
 
 function cerrarRevision() {
   elRevisar.classList.remove('abierto');
+  idActual = null;
   registroActual = null;
 }
 
 elRevisarEstado.addEventListener('click', async () => {
   registroActual.estado_fisico = registroActual.estado_fisico === 'danado' ? 'nuevo' : 'danado';
-  await guardar(registroActual);
+  await guardarLocal(registroActual);
   pintarEstadoRevision();
-  const img = miniaturas.querySelector(`img[data-id="${registroActual.id}"]`);
-  if (img) img.classList.toggle('danado', registroActual.estado_fisico === 'danado');
 });
 
 document.getElementById('revisar-retomar').addEventListener('click', async () => {
   const foto = await capturar();
   if (!foto) return;
   registroActual.foto = foto;
-  await guardar(registroActual);
-  const anterior = elRevisarFoto.src;
-  elRevisarFoto.src = URL.createObjectURL(foto);
+  await guardarLocal(registroActual);
+  const img = miniaturas.querySelector(`.mini[data-id="${registroActual.id}"] img`);
+  const anterior = img.src;
+  img.src = URL.createObjectURL(foto);
   URL.revokeObjectURL(anterior);
-  const img = miniaturas.querySelector(`img[data-id="${registroActual.id}"]`);
-  if (img) img.src = elRevisarFoto.src;
   cerrarRevision();
 });
 
@@ -250,7 +348,8 @@ elDescartar.addEventListener('click', async () => {
   tomadas -= 1;
   piezasTotales -= registroActual.cantidad;
   await borrar(registroActual.id);
-  miniaturas.querySelector(`img[data-id="${registroActual.id}"]`)?.remove();
+  sesion.delete(registroActual.id);
+  miniaturas.querySelector(`.mini[data-id="${registroActual.id}"]`)?.remove();
   actualizarContador();
   cerrarRevision();
 });
@@ -263,7 +362,7 @@ async function disparar() {
   const registro = { id: crypto.randomUUID(), foto, estado_fisico: estadoFisico, cantidad, creado: Date.now() };
   await guardar(registro);           // primero al disco, siempre
   tomadas += 1;
-  piezasTotales += cantidad;
+  piezasTotales += registro.cantidad;   // no `cantidad`: el + pudo tocarse mientras se guardaba
   pintarMiniatura(registro);
   actualizarContador();
   procesarCola();                    // sin await: la camara no espera a la red
@@ -274,6 +373,7 @@ async function disparar() {
 async function procesarCola() {
   if (subiendo) return;
   subiendo = true;
+  let otraVuelta = false;
   try {
     for (const registro of await pendientes()) {
       const cuerpo = new FormData();
@@ -289,17 +389,30 @@ async function procesarCola() {
         break;                       // sin red: la foto se queda en la cola
       }
       if (respuesta.status >= 500) break;
+      // Si se corrigio mientras subia, lo que llego al servidor ya es viejo:
+      // se queda en la cola y sale otra vez con lo nuevo.
+      const actual = await leer(registro.id);
+      if (actual && (actual.version ?? 0) !== (registro.version ?? 0)) {
+        otraVuelta = true;
+        continue;
+      }
       await borrar(registro.id);     // 2xx, o 4xx que no mejora reintentando
-      if (respuesta.ok) {
-        subidas += 1;
-        const img = miniaturas.querySelector(`img[data-id="${registro.id}"]`);
-        if (img) img.classList.add('subida');
+      const datos = sesion.get(registro.id);
+      if (respuesta.ok) subidas += 1;
+      if (respuesta.ok && datos) {
+        datos.subida = true;
+        datos.guardada = registro.cantidad ?? 1;
+        repintarMiniatura(registro.id);
+        // Si estaba abierta, "Descartar" ya no la quitaria del servidor: se
+        // vuelve a pintar en modo subida.
+        if (idActual === registro.id) abrirRevision(registro.id);
       }
       actualizarContador();
     }
   } finally {
     subiendo = false;
   }
+  if (otraVuelta) setTimeout(procesarCola, 1000);
 }
 
 function actualizarContador() {
@@ -350,6 +463,15 @@ document.getElementById('reintentar').addEventListener('click', encenderCamara);
 addEventListener('online', procesarCola);
 setInterval(procesarCola, 20000);
 document.addEventListener('visibilitychange', () => { if (!document.hidden) encenderCamara(); });
+
+// Lo que quedo sin subir de una sesion anterior (pagina cerrada sin red) vuelve
+// al carrusel: si no, esas fotos se subirian sin forma de corregirlas.
+for (const registro of (await pendientes()).sort((a, b) => a.creado - b.creado)) {
+  tomadas += 1;
+  piezasTotales += registro.cantidad ?? 1;
+  pintarMiniatura(registro);
+}
+actualizarContador();
 
 encenderCamara();
 procesarCola();
