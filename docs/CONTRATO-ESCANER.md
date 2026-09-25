@@ -14,6 +14,14 @@
 > lleva etiqueta propia (> $200) o banda (≤ $200). Isaac lo pidió así a
 > propósito — más análisis por pieza, cero juicio de piso que entrenar.
 
+> **Actualizado 2026-09-25 (Isaac): toda pieza fotografiada lleva su etiqueta
+> individual, cueste lo que cueste.** El precio ya no manda a una banda: el análisis
+> da un precio que termina en 9 (mínimo $9) y la pieza sale por `/etiquetas` como
+> cualquier otra. Las **bandas** se imprimen por lote desde `/bandas` y se pegan a lo
+> que se etiqueta **sin fotografiar ni analizar**; se cobran escaneando su código, y
+> siguen disponibles en el admin como destino manual. Donde abajo se lea que el precio
+> enruta a banda, vale esta nota.
+
 ## Decisión de fondo
 
 El escáner **no** es la herramienta de captura del vendedor: la cámara lo es. El análisis con IA
@@ -34,9 +42,8 @@ sin tipo de cambio.
 | Basura | Roto o invendible | Tirar o donar |
 | Escanear | Todo lo demás | Foto en la app |
 
-Ya no hay montón de "bin a ojo": toda pieza vendible se fotografía y la IA decide el
-precio. Ese precio es lo que enruta la pieza a banda o a etiqueta propia (§5), no un
-juicio en el pasillo.
+Toda pieza vendible que se fotografía lleva su etiqueta individual (§5). Lo que se
+quiera etiquetar sin foto, ni análisis, va con una banda (§2).
 
 ## 2. Bandas
 
@@ -96,8 +103,8 @@ la pieza es desconocido y **nunca se infiere** (issue #2). No hay precio por cos
 ```
 precio = precio_lista × %categoria × (estado_fisico == 'danado' ? %danado : 1)
 precio = redondear hacia arriba al múltiplo de $5
-si precio <= 200 → destino = banda mas chica que lo cubra (familia = ropa|general), sin etiqueta propia
-si no → etiqueta individual, y su precio quiebra la decena: al múltiplo de $10 más cercano (de $5 en adelante sube) menos $1 ($233 → $229, $235 → $239, $250 → $249)
+precio = al múltiplo de $10 más cercano (de $5 en adelante sube) menos $1, mínimo $9 ($233 → $229, $235 → $239, $250 → $249, $12 → $9)
+destino = etiqueta individual, siempre (las bandas ya no son destino automático)
 ```
 
 - Nunca por encima de `precio_lista`.

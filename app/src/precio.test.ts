@@ -15,7 +15,7 @@ const config = {
 const precio = (precioLista: number, categoria = 'ropa', estadoFisico = 'nuevo') =>
   calcularPrecio({ precioLista, categoria, estadoFisico, config });
 
-test('mitad del precio de lista, por encima del limite lleva etiqueta y termina en 9', () => {
+test('mitad del precio de lista, quebrado al $10 mas cercano menos $1: siempre termina en 9', () => {
   assert.deepEqual(precio(50000), { precio: 24900, destino: 'etiqueta' });   // $500 -> $250 -> $249
   assert.deepEqual(precio(50300), { precio: 24900, destino: 'etiqueta' });   // $503 -> $251.50 -> $250 -> $249
   assert.deepEqual(precio(51000), { precio: 25900, destino: 'etiqueta' });   // $510 -> $255 -> $260 -> $259
@@ -26,17 +26,16 @@ test('una pieza danada baja al 60 % de ese precio', () => {
   assert.deepEqual(precio(100000, 'ropa', 'danado'), { precio: 29900, destino: 'etiqueta' }); // $1000 * 0.3 = $300 -> $299
 });
 
-test('lo barato cae a la banda mas chica que lo cubra, sin etiqueta individual', () => {
-  assert.deepEqual(precio(3000), { precio: 1900, destino: 'banda_r19' });   // $15 -> R19
-  assert.deepEqual(precio(7000), { precio: 4900, destino: 'banda_r49' });   // $35 -> R49
-  assert.deepEqual(precio(11000), { precio: 7900, destino: 'banda_r79' });  // $55 -> R79
-  assert.deepEqual(precio(3000, 'hogar'), { precio: 1900, destino: 'banda_g19' }); // familia general
+test('toda pieza fotografiada lleva etiqueta, tambien la barata: ya no cae sola a una banda', () => {
+  assert.deepEqual(precio(7000), { precio: 3900, destino: 'etiqueta' });   // $70 -> $35 -> $40 -> $39
+  assert.deepEqual(precio(3000), { precio: 1900, destino: 'etiqueta' });   // $30 -> $15 -> $20 -> $19
+  assert.deepEqual(precio(3000, 'hogar'), { precio: 1900, destino: 'etiqueta' });
+  assert.deepEqual(precio(40000), { precio: 19900, destino: 'etiqueta' }); // $400 -> $200 -> $199, con su propia etiqueta
 });
 
-test('$200 justo: sigue en banda, sin banda que lo cubra exacto cae en la mas alta', () => {
-  assert.deepEqual(precio(40000), { precio: 19900, destino: 'banda_r199' }); // $400 * 0.5 = $200 justo
-  assert.deepEqual(precio(40100), { precio: 19900, destino: 'banda_r199' }); // $200.50 -> $200 -> $199: sigue siendo banda
-  assert.equal(precio(41000).destino, 'etiqueta'); // $205 -> $210 -> $209: ya se sale del limite
+test('lo muy barato no baja de $9, ni queda en $0', () => {
+  assert.deepEqual(precio(600), { precio: 900, destino: 'etiqueta' });     // $6 -> $3 -> minimo $9
+  assert.deepEqual(precio(100), { precio: 500, destino: 'etiqueta' });     // lista $1: el tope del precio de lista (a $5) le gana al minimo
 });
 
 test('el precio nunca queda por encima del precio de lista', () => {
@@ -47,18 +46,16 @@ test('el precio nunca queda por encima del precio de lista', () => {
   assert.equal(resultado, 20000);
 });
 
-test('una categoria desconocida usa el porcentaje de otros y cae en la familia general', () => {
-  assert.equal(precio(100000, 'ferreteria').destino, 'etiqueta');
-  assert.equal(precio(3000, 'ferreteria').destino, 'banda_g19');
+test('una categoria desconocida usa el porcentaje de otros', () => {
+  assert.deepEqual(precio(100000, 'ferreteria'), { precio: 49900, destino: 'etiqueta' });
 });
 
-test('sin precio de lista la pieza espera al admin, no cae a la banda mas barata', () => {
+test('sin precio de lista la pieza espera al admin, no se queda en el minimo', () => {
   assert.deepEqual(precio(0), { precio: 0, destino: 'etiqueta' });
 });
 
 test('la sugerencia del modelo pasa por las mismas guardas', () => {
-  const desde = (precioLista: number, sugerido: number, categoria = 'ropa') =>
-    precioDesdeSugerencia({ precioLista, sugerido, categoria, config });
+  const desde = (precioLista: number, sugerido: number) => precioDesdeSugerencia({ precioLista, sugerido });
 
   // El ventilador: lista $350 y el modelo propone los $250 que cobra Isaac.
   assert.deepEqual(desde(35000, 25000), { precio: 24900, destino: 'etiqueta' });
@@ -67,8 +64,8 @@ test('la sugerencia del modelo pasa por las mismas guardas', () => {
   assert.equal(desde(35000, 24600).precio, 24900);
   // Nunca por encima del precio de lista, aunque el modelo se pase.
   assert.equal(desde(10000, 50000).precio, 10000);
-  // Barato: a la banda que lo cubre, no a la etiqueta ni al monto exacto tecleado.
-  assert.deepEqual(desde(12000, 4000), { precio: 4900, destino: 'banda_r49' });
+  // Lo barato tambien lleva etiqueta.
+  assert.deepEqual(desde(12000, 4000), { precio: 3900, destino: 'etiqueta' });
   // Sin sugerencia, el que llama usa el porcentaje.
   assert.deepEqual(desde(35000, 0), { precio: 0, destino: 'etiqueta' });
 });
@@ -89,6 +86,8 @@ test('un precio escrito a mano tambien quiebra la decena', () => {
   assert.equal(quebrarDecena(23500), 23900);   // $235 sube
   assert.equal(quebrarDecena(23499), 22900);   // $234.99 todavia baja
   assert.equal(quebrarDecena(30100), 29900);
+  assert.equal(quebrarDecena(400), 900);       // minimo $9
+  assert.equal(quebrarDecena(0), 0);
   assert.equal(redondear5(7500), 7500);
   assert.equal(redondear5(1), 500);
   assert.equal(redondear5(0), 0);

@@ -23,6 +23,13 @@
 > El ruteo automático por IA sigue como estaba (ropa → R, lo demás → G); ampliarlo a las
 > demás familias es la **fase 2**, aparte.
 
+> **Actualización 2026-09-25 (Isaac):** el flujo cambió otra vez. **Toda pieza
+> fotografiada lleva su etiqueta individual**, sin importar el precio, y las bandas se
+> imprimen y se pegan **sin foto ni análisis**. Por eso el precio ya no enruta a banda
+> ni la IA escoge familia (la «fase 2» se descartó, PR #65 cerrado). Las bandas y sus
+> familias siguen igual como catálogo escaneable y como destino manual en el admin. Lo de
+> abajo que describa a la IA enrutando piezas baratas a banda quedó superado.
+
 ## El cambio
 
 Hoy cada pieza cuesta un ciclo completo: foto → análisis → precio → etiqueta con código
