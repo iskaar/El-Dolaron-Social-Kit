@@ -6,7 +6,7 @@
  */
 
 import { analizarBorrador, modeloPorDefecto, type Modelo } from './analisis.ts';
-import { calcularPrecio, ajustarManual, esDestinoBanda, prefijoParaFamilia, MONTOS_BANDA, type Destino } from './precio.ts';
+import { calcularPrecio, ajustarManual, esDestinoBanda, familiaDeDestino, prefijoParaFamilia, MONTOS_BANDA, type Destino } from './precio.ts';
 import { efectivoAlcanza } from '../public/venta.js';
 import { semanaIngreso } from '../public/semana.js';
 
@@ -199,7 +199,9 @@ async function corregirBorrador(id: string, request: Request, env: Env): Promise
   let destino: string;
 
   if (cambios.precio === undefined) {
-    const calculado = calcularPrecio({ precioLista, categoria, estadoFisico, config });
+    // Recalcular no le quita la familia a una pieza de banda: sale del destino que ya tiene (o del que se pide).
+    const familia = familiaDeDestino(cambios.destino === undefined ? fila.destino : String(cambios.destino));
+    const calculado = calcularPrecio({ precioLista, categoria, familia, estadoFisico, config });
     precio = calculado.precio;
     destino = cambios.destino === undefined ? calculado.destino : String(cambios.destino);
   } else {

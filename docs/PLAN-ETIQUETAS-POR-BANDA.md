@@ -20,8 +20,12 @@
 > productos). El prefijo de dos letras sale del nombre; ropa y general conservan `R` y `G`.
 > **La caja ya no tiene botones de banda**: todo se escanea como un producto normal, y si el
 > código no lee se busca en la caja por descripción («juguetes 49») o por código.
-> El ruteo automático por IA sigue como estaba (ropa → R, lo demás → G); ampliarlo a las
-> demás familias es la **fase 2**, aparte.
+> **Fase 2 (ruteo por IA):** el análisis de la foto ahora escoge también la **familia**
+> (`familia` en la ficha, entre las de la tabla `familias`, con una pista por familia en el
+> prompt) y esa familia decide la banda. `categoria` (5 valores) sigue mandando los porcentajes
+> de precio. Botadero no lo escoge la IA: es un lugar del piso y lo asigna el admin. Sin familia
+> válida en la respuesta se usa la de siempre (ropa → R, lo demás → G). Recalcular en el admin
+> conserva la familia del destino que ya tiene la pieza.
 
 ## El cambio
 

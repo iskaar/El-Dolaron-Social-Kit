@@ -80,11 +80,12 @@ import { reducirArchivo } from '/foto.js';
 const CATEGORIAS = ['ropa', 'hogar', 'electronica', 'juguetes', 'otros'];
 // Los siete montos y las familias de banda salen de la tabla `familias` (GET /api/familias).
 const { montos: MONTOS_BANDA, familias: FAMILIAS } = await (await fetch('/api/familias')).json();
-const DESTINOS = [
-  ['etiqueta', 'Etiqueta individual'],
-  ...FAMILIAS.flatMap((f) => MONTOS_BANDA.map((p) =>
-    [`banda_${f.prefijo}${p}`, `Banda ${f.nombre} $${p} → ${f.prefijo.toUpperCase()}${p}`])),
-];
+const escaparHtml = (t) => t.replace(/[<>&"]/g, (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;' }[c]));
+// Una opcion por banda, agrupadas por familia: son 18 familias x 7 precios.
+const DESTINOS_HTML = '<option value="etiqueta">Etiqueta individual</option>'
+  + FAMILIAS.map((f) => `<optgroup label="${escaparHtml(f.nombre)}">${MONTOS_BANDA.map((p) =>
+    `<option value="banda_${f.prefijo}${p}">$${p} → ${f.prefijo.toUpperCase()}${p}</option>`).join('')}</optgroup>`).join('');
+const opcionesDestino = (actual) => DESTINOS_HTML.replace(`value="${actual}"`, `value="${actual}" selected`);
 const CLAVES_CONFIG = [
   ['pct_ropa','Ropa %'], ['pct_hogar','Hogar %'], ['pct_electronica','Electrónica %'],
   ['pct_juguetes','Juguetes %'], ['pct_otros','Otros %'], ['pct_danado','Dañado %'],
@@ -167,7 +168,7 @@ function ficha(p) {
         <div><label>Existencia</label>
           <input data-campo="stock" type="number" min="0" max="999" value="${p.stock ?? 1}"></div>
         <div><label>Destino</label><select data-campo="destino">
-          ${DESTINOS.map(([v, t]) => `<option value="${v}" ${v === p.destino ? 'selected' : ''}>${t}</option>`).join('')}
+          ${opcionesDestino(p.destino)}
         </select></div>
       </div>
       <div class="acciones">

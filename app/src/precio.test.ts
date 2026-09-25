@@ -1,7 +1,7 @@
 // node --test src/precio.test.ts
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { calcularPrecio, ajustarManual, redondear5, quebrarDecena, precioDesdeSugerencia, codigoDeDestino, esDestinoBanda, prefijoParaFamilia } from './precio.ts';
+import { calcularPrecio, ajustarManual, redondear5, quebrarDecena, precioDesdeSugerencia, codigoDeDestino, esDestinoBanda, prefijoParaFamilia, familiaDeDestino } from './precio.ts';
 
 // Los valores confirmados por Isaac: porcentajes 2026-09-11, bandas 2026-09-24
 // (limite subido a $200, ropa/general comparten los siete precios).
@@ -116,4 +116,22 @@ test('prefijoParaFamilia: dos primeras letras, y cuando estan ocupadas la primer
   assert.equal(prefijoParaFamilia('Mascotas', new Set(['ma'])), 'ms');
   assert.equal(prefijoParaFamilia('Edición', new Set()), 'ei');   // "ed" es de las piezas ED-000123
   assert.equal(prefijoParaFamilia('12', new Set()), null);
+});
+
+test('la familia elegida decide la banda; sin ella se usa ropa/general', () => {
+  const con = (familia?: string, categoria = 'hogar') =>
+    calcularPrecio({ precioLista: 7000, categoria, familia, estadoFisico: 'nuevo', config });
+  assert.deepEqual(con('ju'), { precio: 4900, destino: 'banda_ju49' });   // $35 -> $49 de juguetes
+  assert.equal(con(undefined).destino, 'banda_g49');                      // sin familia: hogar -> general
+  assert.equal(con(undefined, 'ropa').destino, 'banda_r49');
+  // Lo caro sigue llevando etiqueta, sea cual sea la familia.
+  assert.equal(calcularPrecio({ precioLista: 100000, categoria: 'hogar', familia: 'ju', estadoFisico: 'nuevo', config }).destino, 'etiqueta');
+  // Y la sugerencia del modelo pasa por lo mismo.
+  assert.equal(precioDesdeSugerencia({ precioLista: 12000, sugerido: 4000, categoria: 'hogar', familia: 'co', config }).destino, 'banda_co49');
+});
+
+test('recalcular no le quita la familia a una pieza que ya esta en una banda', () => {
+  assert.equal(familiaDeDestino('banda_ju79'), 'ju');
+  assert.equal(familiaDeDestino('banda_r199'), 'r');
+  assert.equal(familiaDeDestino('etiqueta'), undefined);
 });

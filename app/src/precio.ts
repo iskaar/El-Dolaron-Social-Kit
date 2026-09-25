@@ -22,9 +22,14 @@ export function esDestinoBanda(destino: string): boolean {
   return m !== null && (MONTOS_BANDA as readonly number[]).includes(Number(m[2]));
 }
 
-/** Ropa tiene su propia familia; todo lo demas cae en "general". El ruteo por IA a mas familias es la fase 2. */
+/** Familia por omision cuando nadie escogio una: ropa tiene la suya y todo lo demas cae en "general". */
 export function familiaDe(categoria: string): Familia {
   return categoria === 'ropa' ? 'r' : 'g';
+}
+
+/** El prefijo de familia de un destino de banda (`banda_ju49` -> `ju`), o undefined si es etiqueta. */
+export function familiaDeDestino(destino: string): Familia | undefined {
+  return BANDA.exec(destino)?.[1];
 }
 
 /** El codigo de barras impreso (p.ej. "JU79") a partir del destino de banda. */
@@ -94,6 +99,8 @@ export function ajustarManual({ precio, destino, config }: {
 export interface EntradaPrecio {
   precioLista: number;
   categoria: string;
+  /** Prefijo de la familia de banda elegida (por la IA o por el admin); sin ella, `familiaDe(categoria)`. */
+  familia?: Familia;
   estadoFisico: string;
   config: Record<string, string>;
 }
@@ -111,7 +118,7 @@ function entero(config: Record<string, string>, clave: string, porDefecto: numbe
  * que la cubra y no lleva etiqueta individual: se etiqueta con el codigo
  * compartido de esa banda (ver PLAN-ETIQUETAS-POR-BANDA.md).
  */
-export function calcularPrecio({ precioLista, categoria, estadoFisico, config }: EntradaPrecio): {
+export function calcularPrecio({ precioLista, categoria, familia, estadoFisico, config }: EntradaPrecio): {
   precio: number;
   destino: Destino;
 } {
@@ -128,18 +135,17 @@ export function calcularPrecio({ precioLista, categoria, estadoFisico, config }:
   const bruto = (Math.max(0, precioLista) * pctCategoria * pctDanado) / 10000;
   const precio = Math.ceil(bruto / REDONDEO) * REDONDEO;
 
-  return conBanda(precio, bruto, precioLista, categoria, config);
+  return conBanda(precio, bruto, precioLista, familia ?? familiaDe(categoria), config);
 }
 
 /** Lo barato va a la banda mas chica que lo cubra; lo demas lleva etiqueta. */
-function conBanda(precio: number, bruto: number, precioLista: number, categoria: string, config: Record<string, string>): {
+function conBanda(precio: number, bruto: number, precioLista: number, familia: Familia, config: Record<string, string>): {
   precio: number;
   destino: Destino;
 } {
   const limite = entero(config, 'limite_banda', 20000);
   // El precio que de verdad se cobraria como etiqueta ya cabe en la banda mas alta: es banda.
   if (precio <= limite || quebrarDecena(bruto) <= limite) {
-    const familia = familiaDe(categoria);
     const bandas: Array<[Destino, number]> = MONTOS_BANDA.map((pesosPorDefecto) => [
       `banda_${familia}${pesosPorDefecto}` as Destino,
       entero(config, `banda_${pesosPorDefecto}`, pesosPorDefecto * 100),
@@ -159,14 +165,15 @@ function conBanda(precio: number, bruto: number, precioLista: number, categoria:
  * (o X9 si lleva etiqueta),
  * nunca por encima del precio de lista, y banda si cae en el limite o debajo.
  */
-export function precioDesdeSugerencia({ precioLista, sugerido, categoria, config }: {
+export function precioDesdeSugerencia({ precioLista, sugerido, categoria, familia, config }: {
   precioLista: number;
   sugerido: number;
   categoria: string;
+  familia?: Familia;
   config: Record<string, string>;
 }): { precio: number; destino: Destino } {
   if (sugerido <= 0) {
     return { precio: 0, destino: 'etiqueta' };
   }
-  return conBanda(redondear5(sugerido), sugerido, precioLista, categoria, config);
+  return conBanda(redondear5(sugerido), sugerido, precioLista, familia ?? familiaDe(categoria), config);
 }
