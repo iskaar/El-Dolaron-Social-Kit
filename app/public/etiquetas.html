@@ -46,6 +46,7 @@
     <button id="imprimir" type="button">Imprimir seleccionadas</button>
     <button id="todas" class="claro" type="button">Seleccionar todas</button>
     <button id="ninguna" class="claro" type="button">Deseleccionar todas</button>
+    <button id="marcar" class="claro" type="button">Marcar seleccionadas como impresas</button>
     <button id="ver-impresas" class="claro" type="button">Mostrar impresas</button>
     <button id="otra" class="claro" type="button">¿No aparece la impresora?</button>
     <button id="detener" class="claro" type="button">Detener</button>
@@ -63,6 +64,8 @@
     Lo que ya se imprimió sale de la lista solo. Si la impresora se paró a medias,
     aprieta <b>«Mostrar impresas»</b> y en la primera pieza que no salió,
     <b>«No salió desde aquí»</b>: esa y las que siguen regresan a la lista.
+    Si ya tienen etiqueta de antes, selecciónalas y aprieta
+    <b>«Marcar seleccionadas como impresas»</b>: salen de la lista sin imprimir nada.
     La columna <b>Etiquetas</b> es cuántas imprimir; empieza en la existencia,
     pero cambiarla no cambia la existencia (eso se hace en la cola de revisión).
   </p>
@@ -154,6 +157,19 @@ document.getElementById('ninguna').addEventListener('click', () => {
   casillas().forEach((c) => { c.checked = false; });
 });
 verBoton.addEventListener('click', () => { verImpresas = !verImpresas; pintar(); });
+
+// Para piezas que ya traen etiqueta (impresa antes de que existiera esta marca,
+// o en otra computadora). Cada una se marca un milisegundo despues de la
+// anterior, en el orden de la lista: asi «No salió desde aquí» regresa esa y
+// las de abajo, no el grupo entero.
+document.getElementById('marcar').addEventListener('click', () => {
+  const ids = [...lista.querySelectorAll('.renglon:not(.impresa) input[type=checkbox]:checked')].map((c) => c.value);
+  if (ids.length === 0) return;
+  const base = Date.now();
+  ids.forEach((id, i) => marcarImpresa(id, new Date(base + i).toISOString()));
+  pintar();
+  resumen.textContent = `${ids.length} ${ids.length === 1 ? 'pieza marcada' : 'piezas marcadas'} como impresas. Se regresan con «Mostrar impresas».`;
+});
 lista.addEventListener('click', (e) => {
   const boton = e.target.closest('[data-desde]');
   if (!boton) return;
