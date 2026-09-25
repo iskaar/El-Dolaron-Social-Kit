@@ -209,8 +209,8 @@ export function tsplBanda(banda, copias = 1, y0 = corrimiento(), barra = modulo(
 }
 
 /** Imprime un lote de una banda. Devuelve false si se cayo el enlace. */
-export const imprimirBanda = (banda, copias = 1, alAvanzar) =>
-  mandarCopias(tsplBanda(banda, 1), copias, alAvanzar, `${banda.familia} ${banda.codigo}`);
+export const imprimirBanda = (banda, copias = 1, alAvanzar, alEsperar) =>
+  mandarCopias(tsplBanda(banda, 1), copias, alAvanzar, `${banda.familia} ${banda.codigo}`, alEsperar);
 
 const MEDIDA = ['SIZE 50.8 mm,25.4 mm', 'GAP 2 mm,0 mm', 'DIRECTION 1'];
 
@@ -360,16 +360,21 @@ export async function mandarTspl(tspl) {
 
 // Ritmo de envio. La impresora no avisa cuando se le llena la memoria: 22
 // etiquetas a 300 ms seguidas salieron bien, pero con 58 se atasco y hubo que
-// apagarla (2026-09-24). Una pausa de 1800 ms tras CADA etiqueta lo evito pero
-// fue demasiado lento. Se manda en tandas de LOTE etiquetas a 300 ms (el tamano
-// que ya se vio salir) y entre tandas se espera a que la impresora vacie lo que
-// tiene. Los tres numeros son lo que hay que ajustar: si un lote largo se atora,
-// bajar LOTE o subir PAUSA_ENTRE_LOTES; si sobra tiempo, al reves.
+// apagarla (2026-09-24). Se manda en tandas de LOTE etiquetas a 300 ms (el
+// tamano que ya se vio salir) y entre tandas se espera a que la impresora vacie
+// lo que tiene. La tanda cuenta etiquetas de TODO el clic de imprimir, no por
+// pieza: con muchas piezas de una etiqueta cada una, una pausa por pieza eran
+// 10 s entre etiquetas y parecia que se habia parado. Los tres numeros son lo
+// que hay que ajustar: si un lote largo se atora, bajar LOTE o subir
+// PAUSA_ENTRE_LOTES; si sobra tiempo, al reves.
 export const LOTE = 20;
 export const PAUSA_ENTRE_ETIQUETAS = 300;
 export const PAUSA_ENTRE_LOTES = 10000;
 
 let detenido = false;
+let enTanda = 0;   // etiquetas enviadas desde el ultimo clic de imprimir
+
+const esperar = (ms) => new Promise((r) => setTimeout(r, ms));
 
 /**
  * Manda el mismo trabajo de UNA etiqueta `copias` veces, en vez de un solo
@@ -383,15 +388,21 @@ let detenido = false;
  *
  * @param alAvanzar llamada con (hechas, total) despues de cada etiqueta
  * @param nombre lo que se anota en el historial de envios
+ * @param alEsperar llamada con los segundos de la pausa larga entre tandas
  */
-export async function mandarCopias(tspl, copias, alAvanzar, nombre = '') {
+export async function mandarCopias(tspl, copias, alAvanzar, nombre = '', alEsperar) {
   let enviadas = 0;
-  while (enviadas < copias && !detenido && await mandarTspl(tspl)) {
-    enviadas += 1;
-    alAvanzar?.(enviadas, copias);
-    if (enviadas < copias) {
-      await new Promise((r) => setTimeout(r, enviadas % LOTE === 0 ? PAUSA_ENTRE_LOTES : PAUSA_ENTRE_ETIQUETAS));
+  while (enviadas < copias && !detenido) {
+    if (enTanda > 0) {
+      const larga = enTanda % LOTE === 0;
+      if (larga) alEsperar?.(PAUSA_ENTRE_LOTES / 1000);
+      await esperar(larga ? PAUSA_ENTRE_LOTES : PAUSA_ENTRE_ETIQUETAS);
+      if (detenido) break;
     }
+    if (!await mandarTspl(tspl)) break;
+    enviadas += 1;
+    enTanda += 1;
+    alAvanzar?.(enviadas, copias);
   }
   anotarEnvio({ hora: new Date().toISOString(), nombre, copias, enviadas });
   return enviadas === copias;
@@ -399,15 +410,20 @@ export async function mandarCopias(tspl, copias, alAvanzar, nombre = '') {
 
 /**
  * Corta el envio en curso despues de la etiqueta que va, y los que le sigan
- * (un lote de varias piezas). Cada clic de imprimir lo rearma con `detenerEnvio(false)`.
+ * (un lote de varias piezas). Cada clic de imprimir lo rearma con `detenerEnvio(false)`,
+ * que ademas reinicia la cuenta de la tanda.
  */
 export function detenerEnvio(valor = true) {
   detenido = valor === true;
+  if (!detenido) enTanda = 0;
 }
 
+/** Si el ultimo envio se corto porque se pulso Detener (y no porque se cayo la impresora). */
+export const envioDetenido = () => detenido;
+
 /** Imprime las etiquetas de una pieza. Devuelve false si se cayo el enlace. */
-export const imprimirEtiquetas = (pieza, copias = 1, alAvanzar) =>
-  mandarCopias(tsplEtiqueta(pieza, 1), copias, alAvanzar, pieza.nombre || pieza.codigo);
+export const imprimirEtiquetas = (pieza, copias = 1, alAvanzar, alEsperar) =>
+  mandarCopias(tsplEtiqueta(pieza, 1), copias, alAvanzar, pieza.nombre || pieza.codigo, alEsperar);
 
 /* ---------- Historial de envios ---------- */
 

@@ -68,7 +68,7 @@
 </main>
 
 <script type="module">
-import { conectarEtiquetera, etiqueteraLista, imprimirEtiquetas, historialTexto, detenerEnvio, PAUSA_ENTRE_LOTES } from '/etiquetera.js';
+import { conectarEtiquetera, etiqueteraLista, imprimirEtiquetas, historialTexto, detenerEnvio, envioDetenido } from '/etiquetera.js';
 
 const lista = document.getElementById('lista');
 const resumen = document.getElementById('resumen');
@@ -148,39 +148,49 @@ document.getElementById('imprimir').addEventListener('click', async () => {
     }
   }
 
-  // El codigo se asigna aqui: una pieza sin etiqueta impresa no necesita codigo.
-  const respuesta = await fetch('/api/etiquetas', {
-    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ids }),
-  });
-  const piezas = await respuesta.json();
-  if (!respuesta.ok) {
-    resumen.textContent = piezas.error;
-    return;
-  }
-
+  // El servidor prepara hasta 100 piezas por llamada, asi que se manda por tramos.
   let impresas = 0;
-  for (const p of piezas) {
-    // Una etiqueta por pieza en existencia: cinco tazas iguales, cinco etiquetas.
-    const copias = Math.min(99, Math.max(1, p.stock ?? 1));
-    resumen.textContent = `Imprimiendo pieza ${impresas + 1} de ${piezas.length}: ${copias} ${copias === 1 ? 'etiqueta' : 'etiquetas'}…`;
-    const detalle = `pieza ${impresas + 1} de ${piezas.length}`;
-    if (!await imprimirEtiquetas(p, copias, (hechas) => {
-      resumen.textContent = `Imprimiendo ${detalle}: etiqueta ${hechas} de ${copias}…`;
-    })) {
-      resumen.textContent = `Se cortó la impresora en la pieza ${impresas + 1} de ${piezas.length}. Las que faltan siguen en la lista.`;
-      pintarHistorial();
-      break;
-    }
-    impresas += 1;
-    pintarHistorial();
-    // ponytail: pausa entre piezas para no llenarle el buffer a la AE240. Si un
-    // lote largo sale completo sin ella, sobra; si salen etiquetas en blanco,
-    // subirla antes de tocar cualquier otra cosa.
-    await new Promise((r) => setTimeout(r, PAUSA_ENTRE_LOTES));
-  }
+  try {
+    for (let i = 0; i < ids.length; i += 100) {
+      // El codigo se asigna aqui: una pieza sin etiqueta impresa no necesita codigo.
+      const respuesta = await fetch('/api/etiquetas', {
+        method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ids: ids.slice(i, i + 100) }),
+      });
+      const piezas = await respuesta.json();
+      if (!respuesta.ok) {
+        resumen.textContent = piezas.error;
+        return;
+      }
 
-  if (impresas === piezas.length) resumen.textContent = `${impresas} piezas etiquetadas.`;
-  await cargar();
+      for (const p of piezas) {
+        // Una etiqueta por pieza en existencia: cinco tazas iguales, cinco etiquetas.
+        const copias = Math.min(99, Math.max(1, p.stock ?? 1));
+        const detalle = `pieza ${impresas + 1} de ${ids.length}`;
+        resumen.textContent = `Imprimiendo ${detalle}: ${copias} ${copias === 1 ? 'etiqueta' : 'etiquetas'}…`;
+        const salio = await imprimirEtiquetas(
+          p, copias,
+          (hechas) => { resumen.textContent = `Imprimiendo ${detalle}: etiqueta ${hechas} de ${copias}…`; },
+          (segundos) => { resumen.textContent = `Pausa de ${segundos} s para que la impresora vacíe lo que tiene (${detalle})…`; },
+        );
+        pintarHistorial();
+        if (!salio) {
+          resumen.textContent = envioDetenido()
+            ? `Detenido en la pieza ${impresas + 1} de ${ids.length}. Las que faltan siguen en la lista.`
+            : `Se cortó la impresora en la pieza ${impresas + 1} de ${ids.length}. Las que faltan siguen en la lista.`;
+          return;
+        }
+        impresas += 1;
+      }
+    }
+    resumen.textContent = `${impresas} piezas etiquetadas.`;
+  } catch (error) {
+    // Nada de fallar en silencio: si algo revienta a media lista, se dice donde.
+    console.error('Etiquetas: fallo el lote', error);
+    resumen.textContent = `Se detuvo en la pieza ${impresas + 1} de ${ids.length}: ${error.message}`;
+  } finally {
+    pintarHistorial();
+    await cargar();
+  }
 });
 
 await cargar();
