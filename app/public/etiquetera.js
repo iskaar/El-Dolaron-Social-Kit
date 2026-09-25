@@ -295,6 +295,7 @@ export const TSPL_REGLA = `${[
 /* ---------- Transporte ---------- */
 
 let caracteristica = null;
+let ultimoError = '';   // lo que dijo el navegador la ultima vez que fallo el envio
 
 export function etiqueteraLista() {
   return caracteristica !== null;
@@ -334,6 +335,7 @@ export async function conectarEtiquetera({ cualquiera = false } = {}) {
       const servidor = await aparato.gatt.connect();
       const servicio = await servidor.getPrimaryService(SERVICIO);
       caracteristica = await servicio.getCharacteristic(CARACTERISTICA);
+      await escucharEstado(servicio);
       return;
     } catch (error) {
       if (intento >= 3) throw error;
@@ -349,7 +351,7 @@ export async function conectarEtiquetera({ cualquiera = false } = {}) {
  * volver a probar con la impresora enfrente.
  */
 async function enviar(texto) {
-  const datos = new TextEncoder().encode(texto);
+  const datos = typeof texto === 'string' ? new TextEncoder().encode(texto) : texto;
   const sinRespuesta = caracteristica.properties.writeWithoutResponse;
   for (let i = 0; i < datos.length; i += 20) {
     const trozo = datos.slice(i, i + 20);
@@ -361,15 +363,105 @@ async function enviar(texto) {
 
 /** Manda un trabajo TSPL ya armado. Devuelve false si se cayo el enlace. */
 export async function mandarTspl(tspl) {
-  if (!caracteristica) return false;
+  if (!caracteristica) {
+    ultimoError ||= 'la impresora no esta conectada';
+    return false;
+  }
   try {
     await enviar(tspl);
     return true;
   } catch (error) {
     console.error('Etiquetera: fallo el envio', error);
+    ultimoError = `${error.name}: ${error.message}`;
     caracteristica = null;   // probablemente se apago; el siguiente clic reconecta
     return false;
   }
+}
+
+/* ---------- Estado de la impresora ---------- */
+
+// Sin preguntar, la pagina esta ciega: el 2026-09-25 la impresora dejo de sacar
+// papel cerca de la etiqueta 60 de una tanda y la pagina le siguio mandando
+// otras ~46 por Bluetooth como si nada, hasta que se cayo el enlace. TSPL tiene
+// una pregunta inmediata, <ESC>!?, que contesta UN byte con el estado aunque
+// este ocupada imprimiendo. La respuesta llega por una caracteristica de aviso
+// (notify) del mismo servicio.
+//
+// SIN PROBAR EN HARDWARE: la sonda solo probo escribir. Si la AE240 no contesta,
+// estadoImpresora() da null y el envio cae al ritmo fijo; el historial anota
+// cual de los dos caminos se uso.
+// El \r\n de cola es por si NO la entiende: sin el, "<ESC>!?" se pegaria al
+// primer renglon del siguiente trabajo (el SIZE) y lo echaria a perder.
+const PREGUNTA_ESTADO = new Uint8Array([0x1b, 0x21, 0x3f, 0x0d, 0x0a]);
+const IMPRIMIENDO = 0x20;
+// El bit 3 (sin cinta) y el 7 (temperatura) se ignoran: la AE240 es termica
+// directa, no lleva cinta, y un bit que no aplica no debe parar el turno.
+const FALLAS = [
+  [0x01, 'cabezal abierto'],
+  [0x02, 'papel atorado'],
+  [0x04, 'sin papel, o no encuentra la separacion entre etiquetas'],
+  [0x10, 'en pausa: aprieta el boton de la impresora'],
+  [0x40, 'tapa abierta'],
+];
+
+let alContestar = null;
+let contesta = false;   // si contesto alguna vez en esta conexion
+
+async function escucharEstado(servicio) {
+  contesta = false;
+  try {
+    for (const c of await servicio.getCharacteristics()) {
+      if (!c.properties.notify && !c.properties.indicate) continue;
+      c.addEventListener('characteristicvaluechanged', (evento) => {
+        // Solo un byte suelto es una respuesta de estado; un eco u otra cosa
+        // no debe leerse como falla.
+        const valor = evento.target.value;
+        if (valor.byteLength === 1) alContestar?.(valor.getUint8(0));
+      });
+      await c.startNotifications();
+    }
+  } catch (error) {
+    console.warn('Etiquetera: no se pudo escuchar el estado', error);
+  }
+}
+
+/** El byte de estado de la impresora, o null si no contesta. */
+export async function estadoImpresora(ms = 1500) {
+  if (!caracteristica) return null;
+  const respuesta = new Promise((r) => { alContestar = r; });
+  try {
+    await enviar(PREGUNTA_ESTADO);
+  } catch {
+    return null;
+  }
+  const estado = await Promise.race([respuesta, esperar(ms).then(() => null)]);
+  alContestar = null;
+  if (estado !== null) contesta = true;
+  return estado;
+}
+
+/** Lo que significa un byte de estado, en palabras; '' si no hay falla. */
+export function describirEstado(estado) {
+  return FALLAS.filter(([bit]) => estado & bit).map(([, texto]) => texto).join(', ');
+}
+
+/**
+ * Espera a que la impresora acabe lo que tiene en memoria. Devuelve '' si ya
+ * termino, la falla en palabras si reporta una, o null si nunca ha contestado
+ * (entonces no hay forma de saber y se usa el ritmo fijo).
+ */
+export async function esperarVacia(maxMs = 120000) {
+  const hasta = Date.now() + maxMs;
+  while (!detenido) {
+    const estado = await estadoImpresora();
+    if (estado === null) return contesta ? 'dejo de contestar (colgada o apagada)' : null;
+    const falla = describirEstado(estado);
+    if (falla) return falla;
+    if (!(estado & IMPRIMIENDO)) return '';
+    if (Date.now() > hasta) return `sigue ocupada despues de ${maxMs / 1000} s`;
+    await esperar(500);
+  }
+  return '';
 }
 
 // Ritmo de envio. La impresora no avisa cuando se le llena la memoria: 22
@@ -381,9 +473,15 @@ export async function mandarTspl(tspl) {
 // 10 s entre etiquetas y parecia que se habia parado. Los tres numeros son lo
 // que hay que ajustar: si un lote largo se atora, bajar LOTE o subir
 // PAUSA_ENTRE_LOTES; si sobra tiempo, al reves.
+//
+// 2026-09-25: con pausas de 10 s la impresora se paro cerca de la etiqueta 60
+// de una tanda de ~110: imprime mas lento de lo que se le manda y la pausa no
+// alcanzaba a vaciarla. Ahora entre tandas se le PREGUNTA si ya termino
+// (esperarVacia). PAUSA_ENTRE_LOTES solo se usa si no contesta, y por eso subio
+// a 30 s: 20 etiquetas a ~1.5 s cada una, con holgura.
 export const LOTE = 20;
 export const PAUSA_ENTRE_ETIQUETAS = 300;
-export const PAUSA_ENTRE_LOTES = 10000;
+export const PAUSA_ENTRE_LOTES = 30000;
 
 let detenido = false;
 let enTanda = 0;   // etiquetas enviadas desde el ultimo clic de imprimir
@@ -406,21 +504,39 @@ const esperar = (ms) => new Promise((r) => setTimeout(r, ms));
  */
 export async function mandarCopias(tspl, copias, alAvanzar, nombre = '', alEsperar) {
   let enviadas = 0;
+  let ritmo = '';
+  ultimoError = '';
   while (enviadas < copias && !detenido) {
-    if (enTanda > 0) {
-      const larga = enTanda % LOTE === 0;
-      if (larga) alEsperar?.(PAUSA_ENTRE_LOTES / 1000);
-      await esperar(larga ? PAUSA_ENTRE_LOTES : PAUSA_ENTRE_ETIQUETAS);
-      if (detenido) break;
+    if (enTanda > 0 && enTanda % LOTE === 0) {
+      alEsperar?.();
+      const falla = await esperarVacia();
+      if (falla === null) {
+        ritmo = 'sin respuesta de estado, pausa fija';
+        alEsperar?.(PAUSA_ENTRE_LOTES / 1000);
+        await esperar(PAUSA_ENTRE_LOTES);
+      } else if (falla) {
+        ultimoError = `la impresora dice: ${falla}`;
+        break;
+      } else {
+        ritmo = 'la impresora confirmo que termino';
+      }
+    } else if (enTanda > 0) {
+      await esperar(PAUSA_ENTRE_ETIQUETAS);
     }
+    if (detenido) break;
     if (!await mandarTspl(tspl)) break;
     enviadas += 1;
     enTanda += 1;
     alAvanzar?.(enviadas, copias);
   }
-  anotarEnvio({ hora: new Date().toISOString(), nombre, copias, enviadas });
+  const envio = { hora: new Date().toISOString(), nombre, copias, enviadas, ritmo };
+  if (enviadas < copias) envio.error = detenido ? 'detenido a mano' : ultimoError;
+  anotarEnvio(envio);
   return enviadas === copias;
 }
+
+/** Por que fallo el ultimo envio, en palabras. */
+export const errorEnvio = () => ultimoError;
 
 /**
  * Corta el envio en curso despues de la etiqueta que va, y los que le sigan
@@ -445,7 +561,8 @@ export const imprimirEtiquetas = (pieza, copias = 1, alAvanzar, alEsperar) =>
 // Bluetooth en cuanto se pide. Lo unico que se puede saber es que salio DE AQUI,
 // asi que eso es lo que se anota: si el historial dice que se enviaron y no
 // salio nada, el problema esta en la impresora (papel, sensor, luz de error),
-// no en la pagina. Por navegador, las ultimas 50.
+// no en la pagina. Por navegador, las ultimas 200: una tanda de 100 piezas
+// tiene que caber entera para leer donde se paro.
 const CLAVE_HISTORIAL = 'etiqueta-historial';
 
 function historial() {
@@ -454,8 +571,41 @@ function historial() {
 
 function anotarEnvio(envio) {
   try {
-    globalThis.localStorage?.setItem(CLAVE_HISTORIAL, JSON.stringify([envio, ...historial()].slice(0, 50)));
+    globalThis.localStorage?.setItem(CLAVE_HISTORIAL, JSON.stringify([envio, ...historial()].slice(0, 200)));
   } catch { /* sin localStorage no hay historial, y no es motivo para fallar */ }
+}
+
+/* ---------- Piezas ya impresas ---------- */
+
+// Para sacarlas de la lista de /etiquetas sin deseleccionarlas una por una:
+// id -> hora en que se termino de enviar. Por navegador, como el historial.
+//
+// ponytail: "enviada" no es "impresa" si la impresora no contesta su estado;
+// para eso esta desmarcarDesde(). Si algun dia se etiqueta desde dos
+// computadoras, esto se muda a una columna en D1.
+const CLAVE_IMPRESAS = 'etiqueta-impresas';
+
+export function impresas() {
+  try { return JSON.parse(globalThis.localStorage?.getItem(CLAVE_IMPRESAS)) ?? {}; } catch { return {}; }
+}
+
+function guardarImpresas(mapa) {
+  try { globalThis.localStorage?.setItem(CLAVE_IMPRESAS, JSON.stringify(mapa)); } catch { /* sin localStorage no se recuerda, nada mas */ }
+}
+
+export function marcarImpresa(id, hora = new Date().toISOString()) {
+  guardarImpresas({ ...impresas(), [id]: hora });
+}
+
+/**
+ * "No salio desde aqui": la impresora se paro sin avisar en esta pieza, asi que
+ * esta y todas las que se mandaron despues vuelven a la lista.
+ */
+export function desmarcarDesde(id) {
+  const mapa = impresas();
+  const desde = mapa[id];
+  if (!desde) return;
+  guardarImpresas(Object.fromEntries(Object.entries(mapa).filter(([, hora]) => hora < desde)));
 }
 
 /** El historial en lineas de texto, lo mas nuevo primero. */
@@ -463,7 +613,8 @@ export function historialTexto() {
   const lineas = historial().map((e) => {
     const hora = new Date(e.hora).toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
     const resultado = e.enviadas === e.copias ? `${e.copias} enviadas` : `SE CORTO (${e.enviadas} de ${e.copias})`;
-    return `${hora}  ${e.nombre || '(sin nombre)'}: ${resultado}`;
+    const detalle = [e.error, e.ritmo].filter(Boolean).join(' · ');
+    return `${hora}  ${e.nombre || '(sin nombre)'}: ${resultado}${detalle ? `  [${detalle}]` : ''}`;
   });
   return lineas.length ? lineas.join('\n') : 'Todavia no se ha enviado nada desde este navegador.';
 }

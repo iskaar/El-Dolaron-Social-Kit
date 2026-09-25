@@ -81,7 +81,7 @@
 </main>
 
 <script type="module">
-import { conectarEtiquetera, etiqueteraLista, imprimirBanda, historialTexto, detenerEnvio } from '/etiquetera.js';
+import { conectarEtiquetera, etiqueteraLista, imprimirBanda, historialTexto, detenerEnvio, errorEnvio } from '/etiquetera.js';
 import { semanaIngreso } from '/semana.js';
 
 const semana = semanaIngreso(new Date());
@@ -194,14 +194,16 @@ document.getElementById('familias').addEventListener('click', async (e) => {
   const salio = await imprimirBanda(banda, copias, (hechas) => {
     resumen.textContent = `Imprimiendo ${banda.codigo}: etiqueta ${hechas} de ${copias}…`;
   }, (segundos) => {
-    resumen.textContent = `Pausa de ${segundos} s para que la impresora vacíe lo que tiene (${banda.codigo})…`;
+    resumen.textContent = segundos
+      ? `Pausa de ${segundos} s para que la impresora vacíe lo que tiene (${banda.codigo})…`
+      : `Esperando a que la impresora termine lo que tiene (${banda.codigo})…`;
   });
   pintarHistorial();
   if (salio) {
     resumen.textContent = `${copias} etiquetas de ${banda.codigo} enviadas.`;
     boton.classList.add('impresa');
   } else {
-    resumen.textContent = `Se cortó la impresora imprimiendo ${banda.codigo}.`;
+    resumen.textContent = `Se cortó la impresora imprimiendo ${banda.codigo}: ${errorEnvio() || 'detenido'}.`;
   }
 });
 </script>

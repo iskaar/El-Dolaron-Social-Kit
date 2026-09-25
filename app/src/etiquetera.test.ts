@@ -241,3 +241,36 @@ test('una banda de familia larga y codigo de 5 caracteres cabe en la etiqueta', 
   const x = Number(barra.match(/^BARCODE (\d+),/)![1]);
   assert.ok(x >= 16 && x + (11 * (5 + 2) + 13) * 4 <= 406 - 16);
 });
+
+test('el historial dice POR QUE se corto, no solo que se corto', async () => {
+  const guardado = new Map<string, string>();
+  (globalThis as any).localStorage = { getItem: (k: string) => guardado.get(k) ?? null, setItem: (k: string, v: string) => guardado.set(k, v) };
+  const { mandarCopias, historialTexto, errorEnvio } = await import('../public/etiquetera.js');
+  await mandarCopias('x', 2, undefined, 'Aceite');
+  assert.match(errorEnvio(), /no esta conectada/);
+  assert.match(historialTexto(), /Aceite: SE CORTO \(0 de 2\)  \[la impresora no esta conectada\]/);
+  delete (globalThis as any).localStorage;
+});
+
+test('el byte de estado de TSPL se traduce; imprimir, sin cinta y temperatura no son falla', async () => {
+  const { describirEstado } = await import('../public/etiquetera.js');
+  assert.equal(describirEstado(0x00), '');
+  assert.equal(describirEstado(0x20), '');
+  assert.equal(describirEstado(0x08 | 0x80), '');
+  assert.match(describirEstado(0x04), /sin papel/);
+  assert.match(describirEstado(0x01 | 0x20), /cabezal abierto/);
+});
+
+test('"no salio desde aqui" regresa esa pieza y las que se mandaron despues, no las de antes', async () => {
+  const guardado = new Map<string, string>();
+  (globalThis as any).localStorage = { getItem: (k: string) => guardado.get(k) ?? null, setItem: (k: string, v: string) => guardado.set(k, v) };
+  const { marcarImpresa, desmarcarDesde, impresas } = await import('../public/etiquetera.js');
+  marcarImpresa('a', '2026-09-25T18:28:00.000Z');
+  marcarImpresa('b', '2026-09-25T18:28:25.000Z');
+  marcarImpresa('c', '2026-09-25T18:29:00.000Z');
+  desmarcarDesde('b');
+  assert.deepEqual(Object.keys(impresas()), ['a']);
+  desmarcarDesde('zzz');   // una que no esta marcada no borra nada
+  assert.deepEqual(Object.keys(impresas()), ['a']);
+  delete (globalThis as any).localStorage;
+});
