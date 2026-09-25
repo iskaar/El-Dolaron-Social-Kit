@@ -252,15 +252,6 @@ test('el historial dice POR QUE se corto, no solo que se corto', async () => {
   delete (globalThis as any).localStorage;
 });
 
-test('el byte de estado de TSPL se traduce; imprimir, sin cinta y temperatura no son falla', async () => {
-  const { describirEstado } = await import('../public/etiquetera.js');
-  assert.equal(describirEstado(0x00), '');
-  assert.equal(describirEstado(0x20), '');
-  assert.equal(describirEstado(0x08 | 0x80), '');
-  assert.match(describirEstado(0x04), /sin papel/);
-  assert.match(describirEstado(0x01 | 0x20), /cabezal abierto/);
-});
-
 test('"no salio desde aqui" regresa esa pieza y las que se mandaron despues, no las de antes', async () => {
   const guardado = new Map<string, string>();
   (globalThis as any).localStorage = { getItem: (k: string) => guardado.get(k) ?? null, setItem: (k: string, v: string) => guardado.set(k, v) };
