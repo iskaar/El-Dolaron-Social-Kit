@@ -209,7 +209,7 @@ async function corregirBorrador(id: string, request: Request, env: Env): Promise
       return json({ error: 'Precio invalido.' }, 400);
     }
     if (esDestinoBanda(destino)) {
-      // Banda: manda el precio de la banda. Etiqueta: se redondea a $5 como el automatico.
+      // Banda: manda el precio de la banda. Etiqueta: quiebra la decena (termina en 9) como el automatico.
       precio = ajustarManual({ precio, destino: destino as Destino, config });
     }
     // Misma regla que en el calculo automatico: el precio de venta nunca queda
