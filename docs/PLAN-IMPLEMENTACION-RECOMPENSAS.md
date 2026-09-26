@@ -6,7 +6,21 @@ Fecha: 24/09/2026. Propietario: Isaac. [Issue #56](https://github.com/iskaar/El-
 
 **Ajuste de presupuesto solicitado el 24/09/2026:** desarrollar con Codex y Claude Code usando las suscripciones existentes; Claude Pro cuesta $20/mes. El presupuesto de servicios baja de $94–95 a **$50–51/mes**, con staging gratuito y monitor externo gratuito. Mantener autenticación administrada en producción, respaldo, revisión y pruebas de dinero. El detalle distingue gasto existente, incremento y condiciones para bajar más.
 
-## 1. Alcance confirmado y decisiones por cerrar
+## 0. Revisión del 26/09/2026: decisiones de Isaac y alcance para el 2 de octubre
+
+Isaac cerró las decisiones de R01 (detalle en la sección 2 de las [reglas](RECOMPENSAS-DOLARONES.md)): apertura el **2 de octubre**, uso parcial como monedero, 10 D por cada bloque completo de $100, regalo válido 30 días sin reasignación, sin retroactividad, +50/+5 apagados, 2 cajas y 4 personas, e Isaac resuelve incidencias. El calendario de la sección 5 queda reemplazado.
+
+**Alcance para el 2 de octubre** ([Issue #81](https://github.com/iskaar/El-Dolaron-Social-Kit/issues/81)), dentro del Worker y D1 actuales, sin proveedores nuevos:
+
+- Alta de socios **en la tienda**, hecha por personal con sesión de Access: número de socio consecutivo (define el regalo), nombre, contacto opcional, PIN y aceptación de bases.
+- Saldo por lotes con vencimiento: regalo (30 días) y compras (12 meses, disponibles desde el día siguiente).
+- Caja: identificar al socio, ganar Dolarones (también sin red; se acreditan al sincronizar) y pagar en parte con Dolarones (solo con red y con PIN). Venta, pagos, lotes y existencias se confirman en un solo batch.
+- Cancelación atómica que regresa existencias y Dolarones.
+- Ticket con socio, Dolarones usados y ganados, y saldo.
+
+**Después de la apertura:** portal en línea con correo verificado (Supabase/Resend u otra opción, según la sección 7), consulta de saldo por el cliente, temporadas y premios. Hasta entonces no hace falta ninguna cuenta ni gasto nuevo: el costo mensual de la sección 7 se pospone.
+
+
 
 | Confirmado por Isaac | Aplicación |
 | --- | --- |

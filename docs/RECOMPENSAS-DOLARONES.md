@@ -30,7 +30,15 @@ Este documento conserva la investigación y el diseño del sistema de recompensa
 | Regalo de apertura | $15,000 en Dolarones para los primeros 100 registrados, escalonado (tabla abajo); gastables en cualquier producto |
 | Respaldo sin caja digital | Vales de papel numerados ("dinero físico" de la tienda) |
 | Costo de mercancía | **Desconocido.** El 45–50% que mencionó Isaac es el descuento frente al precio de referencia en EE. UU. (Walmart, Target, JCPenney), no su costo. Registrar el costo de cada pallet queda para después |
-| Apertura prevista | Primera semana de octubre de 2026; día y hora exactos pendientes |
+| Apertura | **2 de octubre de 2026** (confirmado el 26/09); hora pendiente |
+| Uso parcial (26/09) | Los Dolarones se gastan en partes, como un monedero electrónico de supermercado u OXXO: lo que no se usa queda en el saldo |
+| Acumulación por bloques (26/09) | Por **bloques completos de $100** pagados: $99 → 0 D; $250 → 20 D; $1,999 → 190 D |
+| Regalo: vigencia (26/09) | Vale 30 días desde que se otorga; lo no usado vence. **Sin lista de espera ni reasignación** (reemplaza «día 1 / día 2») |
+| Sin retroactividad (26/09) | Las compras previas al lanzamiento no ganan Dolarones |
+| +50 por alta y +5 por visita (26/09) | Apagados en el lanzamiento: Isaac respondió «se queda como está» a la recomendación de apagarlos. Confirmar si la lectura es otra |
+| Registro (26/09) | «Hay que desarrollar este paso desde cero». Para el 2 de octubre: alta en la tienda desde la caja, por personal con sesión; portal en línea después |
+| Bases y aviso de privacidad (26/09) | Los redacta Claude y los revisa un abogado antes de anunciar |
+| Operación (26/09) | 2 cajas, 3 empleados más Isaac; Isaac resuelve las incidencias de saldo |
 | Portal de clientes | Registro y consulta de saldo en línea; compra y canje en tienda física |
 | Identidad | Membresía QR/PIN y correo verificado para acceso en línea; sin SMS/WhatsApp de autenticación en v1 |
 | Escala prevista | Hasta 1,000 clientes distintos al inicio y 10,000 durante el primer año; no equivale a usuarios simultáneos |
@@ -47,7 +55,7 @@ Este documento conserva la investigación y el diseño del sistema de recompensa
 | #51–100 | 50 | 100 | 5,000 |
 | **Total** | **100** | | **15,000** |
 
-Reglas propuestas: canje el día 1; lo no canjeado pasa **a la lista de espera en orden de registro** (#101, #102…) para el día 2; lo no canjeado el día 2 se pierde.
+Regla vigente (26/09): el regalo se asigna por número de socio al registrarse (#1 a #100), se puede usar en partes y vence a los 30 días. No hay lista de espera: lo que no se usa vence y no pasa a nadie.
 
 **Cambio respecto a la idea original:** se sustituyó la reasignación al azar por una lista de espera en orden. La clasificación jurídica debe revisarse con un especialista; no reintroducir azar sin esa revisión y los permisos que correspondan. El detalle de asignación, canje parcial y vencimiento de apertura aún requiere aprobación (sección 7).
 
@@ -269,7 +277,7 @@ Temporadas, misiones, rachas, referidos, rankings, cumpleaños, dobles, vitrina 
 | --- | --- |
 | Unidad | 1 D = $1 MXN. Guardar centésimas enteras: 100 unidades = 1 D. No flotantes |
 | Base | Importe elegible final después de descuentos, pagado en efectivo/tarjeta; no acumular sobre D usados, créditos promocionales ni ventas canceladas. Definir base fiscal con contador |
-| Fórmula | `floor(base_centavos / 10)` centésimas de D, una vez por ticket. $99 → 9.90 D; $250 → 25 D. No bloques completos de $100 |
+| Fórmula | **Decidido 26/09:** `floor(base_centavos / 10000) × 10` D, una vez por ticket. $99 → 0 D; $250 → 20 D |
 | Disponibilidad | Lo ganado se habilita a las 00:00 de la siguiente fecha en America/Mexico_City; evita dividir la misma visita en tickets para reciclar crédito. Apertura tiene ventana propia |
 | Vigencia | Cada lote ganado vence a los 12 meses calendario, conservando fecha/hora local; si falta el día, último día válido del mes. Guardar instante UTC resuelto; no usar 365 días ni extender al hacer nuevos depósitos |
 | Aplicación | Consumir primero el lote que vence antes, con desempate por ID. No usar saldo pendiente, expirado o reservado; máximo el total de compra, sin efectivo de cambio por D |
