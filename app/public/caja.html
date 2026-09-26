@@ -63,6 +63,14 @@
   .ticket.cancelada { opacity: .5; text-decoration: line-through; }
   .ticket button { border: 1px solid var(--rojo); background: #fff; color: var(--rojo);
     border-radius: 8px; padding: 5px 9px; font-size: 12px; cursor: pointer; }
+  .socio-fila { display: flex; gap: 6px; }
+  #socio { flex: 1; min-width: 0; padding: 12px; font-size: 18px; border: 1px solid var(--linea); border-radius: 10px; }
+  .socio-fila button { border: 1px solid var(--azul); background: #fff; color: var(--azul); border-radius: 10px;
+    padding: 0 14px; font-size: 14px; cursor: pointer; }
+  #socio-info { font-size: 14px; margin-top: 6px; min-height: 18px; }
+  #socio-info b { color: var(--azul); }
+  #dolarones, #pin { width: 100%; padding: 12px; font-size: 18px; border: 1px solid var(--linea); border-radius: 10px; }
+  #a-pagar { font-size: 18px; font-weight: 700; color: var(--azul); min-height: 22px; }
   @media (max-width: 820px) { main { grid-template-columns: 1fr; } }
 </style>
 </head>
@@ -70,6 +78,7 @@
 <header>
   <h1>Caja</h1>
   <span id="estado-red">en línea</span>
+  <a href="/socios">Alta de socios</a>
   <a href="/admin">Cola de revisión</a>
 </header>
 
@@ -83,6 +92,21 @@
   <section class="panel">
     <div id="total">$0</div>
     <div id="piezas">0 piezas</div>
+    <div id="a-pagar"></div>
+
+    <label for="socio">Socio: teléfono o número</label>
+    <div class="socio-fila">
+      <input id="socio" inputmode="numeric" autocomplete="off" placeholder="Opcional">
+      <button id="buscar-socio" type="button">Buscar</button>
+      <button id="quitar-socio" type="button" hidden aria-label="Quitar socio">✕</button>
+    </div>
+    <div id="socio-info"></div>
+    <div id="pagar-dolarones" hidden>
+      <label for="dolarones">Pagar con Dolarones</label>
+      <input id="dolarones" type="number" min="0" step="1" inputmode="numeric" placeholder="0">
+      <label for="pin">PIN del cliente (lo escribe el cliente)</label>
+      <input id="pin" type="password" inputmode="numeric" maxlength="4" autocomplete="off">
+    </div>
 
     <label for="forma">Forma de pago</label>
     <select id="forma">
@@ -118,7 +142,7 @@
 </footer>
 
 <script type="module">
-import { totales, agregar, efectivoAlcanza } from '/venta.js';
+import { totales, agregar, efectivoAlcanza, dolaronesGanados } from '/venta.js';
 import { reconectarImpresora, conectarImpresora, impresoraLista, imprimirTicket, abrirCajon, explicarErrorUsb } from '/impresora.js';
 
 const $ = (id) => document.getElementById(id);
@@ -131,6 +155,9 @@ let lineas = [];
 // (agregar, quitar, cancelar) lo invalida: eso ya es una venta distinta.
 let idVenta = null;
 let cobrando = false;
+// Socio de la venta en curso: { id, numero, nombre, disponible, por_liberar } o null.
+let socio = null;
+const dolares = (centavos) => `${(centavos / 100).toLocaleString('es-MX')} D`;
 
 /* ---------- almacen local: catalogo y ventas encoladas ---------- */
 
@@ -185,9 +212,11 @@ function pintar() {
     </div>`).join('');
 
   const efectivo = Math.round(Number($('efectivo').value || 0) * 100);
-  const t = totales(lineas, efectivo);
+  const usados = dolaronesPedidos();
+  const t = totales(lineas, efectivo, usados);
   $('total').textContent = pesos(t.total);
   $('piezas').textContent = `${t.piezas} ${t.piezas === 1 ? 'pieza' : 'piezas'}`;
+  $('a-pagar').textContent = usados ? `Dolarones −${pesos(usados)} · A pagar ${pesos(t.aPagar)}` : '';
   $('cobrar').disabled = t.total === 0;
 
   const cambio = $('cambio');
@@ -286,14 +315,107 @@ $('sugerencias').addEventListener('click', (e) => {
   $('codigo').focus();
 });
 
+/* ---------- socio y Dolarones ---------- */
+
+/** Dolarones a usar, en centavos. Nunca mas que el saldo ni que el total. */
+function dolaronesPedidos() {
+  if (!socio) return 0;
+  const pedidos = Math.round(Number($('dolarones').value || 0) * 100);
+  return Math.max(0, Math.min(pedidos, socio.disponible, totales(lineas).total));
+}
+
+function pintarSocio() {
+  $('quitar-socio').hidden = !socio;
+  $('pagar-dolarones').hidden = !socio || socio.disponible === 0;
+  $('socio-info').innerHTML = socio
+    ? `<b>#${socio.numero} · ${socio.nombre}</b> — ${dolares(socio.disponible)} disponibles`
+      + (socio.por_liberar ? ` (+${dolares(socio.por_liberar)} desde mañana)` : '')
+    : '';
+}
+
+function quitarSocio() {
+  socio = null;
+  $('socio').value = '';
+  $('dolarones').value = '';
+  $('pin').value = '';
+  pintarSocio();
+}
+
+async function buscarSocio() {
+  const q = $('socio').value.trim();
+  if (!q) return;
+  try {
+    const r = await fetch(`/api/socios?q=${encodeURIComponent(q)}`);
+    const cuerpo = await r.json();
+    if (!r.ok) {
+      socio = null;
+      pintarSocio();
+      $('socio-info').textContent = cuerpo.error ?? 'No se encontró el socio.';
+      $('socio-info').style.color = '#D72B32';
+      return;
+    }
+    socio = cuerpo;
+    idVenta = null;
+    $('socio-info').style.color = '';
+    pintarSocio();
+    pintar();
+  } catch {
+    // Sin red no hay saldo que consultar: la venta se cobra sin socio y no gana.
+    $('socio-info').textContent = 'Sin red: no se pueden buscar socios. Cobra sin socio.';
+    $('socio-info').style.color = '#D72B32';
+  }
+}
+
+$('buscar-socio').addEventListener('click', buscarSocio);
+$('socio').addEventListener('keydown', (e) => { if (e.key === 'Enter') buscarSocio(); });
+$('quitar-socio').addEventListener('click', () => { quitarSocio(); idVenta = null; pintar(); });
+$('dolarones').addEventListener('input', () => { idVenta = null; pintar(); });
+
+/**
+ * Con Dolarones el cobro espera al servidor: el saldo solo existe alla, y
+ * mostrar "cobrado" antes de que lo confirme dejaria gastar dos veces. El PIN
+ * nunca se guarda en el disco de la caja.
+ */
+async function cobrarConDolarones(venta, t) {
+  const pin = $('pin').value;
+  if (!/^\d{4}$/.test(pin)) {
+    $('aviso').textContent = 'Falta el PIN del cliente (4 dígitos).';
+    $('aviso').style.color = '#D72B32';
+    return false;
+  }
+  let respuesta;
+  try {
+    respuesta = await fetch('/api/ventas', {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ...venta, pin }),
+    });
+  } catch {
+    $('aviso').textContent = 'Sin red: no se pudo cobrar con Dolarones. Intenta otra vez o cobra sin Dolarones.';
+    $('aviso').style.color = '#D72B32';
+    return false;
+  }
+  const cuerpo = await respuesta.json().catch(() => ({}));
+  if (!respuesta.ok) {
+    $('aviso').textContent = cuerpo.error ?? 'No se pudo cobrar con Dolarones.';
+    $('aviso').style.color = '#D72B32';
+    if (respuesta.status === 403) $('pin').value = '';
+    return false;
+  }
+  // Un reenvio de la misma venta ya confirmada devuelve `duplicada` sin saldo: se imprime lo local.
+  const saldo = cuerpo.saldo ?? { disponible: socio.disponible - venta.dolarones };
+  imprimirTicket({ ...venta, total: t.total, cambio: t.cambio,
+    socio: { numero: socio.numero, ganados: cuerpo.ganados ?? dolaronesGanados(t.aPagar), saldo: saldo.disponible } }, venta.lineas);
+  return true;
+}
+
 /* ---------- cobro: primero al disco, luego a la red ---------- */
 
 async function cobrar() {
   if (cobrando) return;                 // doble clic: el primero ya va en camino
   const efectivo = Math.round(Number($('efectivo').value || 0) * 100);
   const forma = $('forma').value;
-  const t = totales(lineas, efectivo);
-  if (!efectivoAlcanza({ formaPago: forma, total: t.total, efectivo })) {
+  const usados = dolaronesPedidos();
+  const t = totales(lineas, efectivo, usados);
+  if (!efectivoAlcanza({ formaPago: forma, total: t.aPagar, efectivo })) {
     $('aviso').textContent = efectivo === 0 ? 'Falta el efectivo recibido.' : `Faltan ${pesos(t.falta)}`;
     $('aviso').style.color = '#D72B32';
     return;
@@ -310,12 +432,20 @@ async function cobrar() {
       forma_pago: forma,
       efectivo: forma === 'efectivo' ? efectivo : 0,
       creado_en: new Date().toISOString(),
+      cliente_id: socio?.id ?? null,
+      dolarones: usados,
     };
-    await store('ventas', 'readwrite', (s) => s.put(venta));   // el ticket existe aunque no haya red
+    if (usados > 0) {
+      if (!await cobrarConDolarones(venta, t)) return;
+    } else {
+      await store('ventas', 'readwrite', (s) => s.put(venta));   // el ticket existe aunque no haya red
 
-    // El ticket sale por USB, no por la red: no espera al servidor ni al
-    // catalogo. Si la impresora no esta conectada, imprimirTicket no hace nada.
-    imprimirTicket({ ...venta, total: t.total, cambio: t.cambio }, venta.lineas);
+      // El ticket sale por USB, no por la red: no espera al servidor ni al
+      // catalogo. Si la impresora no esta conectada, imprimirTicket no hace nada.
+      imprimirTicket({ ...venta, total: t.total, cambio: t.cambio, socio: socio && {
+        numero: socio.numero, ganados: dolaronesGanados(t.aPagar), saldo: socio.disponible,
+      } }, venta.lineas);
+    }
     if (forma === 'efectivo') abrirCajon();   // una venta con tarjeta no toca el cajon
 
     // Bajar existencias en la copia local: sin esto, la misma etiqueta se podria
@@ -328,11 +458,13 @@ async function cobrar() {
     }
     await store('catalogo', 'readwrite', (s) => s.put({ clave: 'piezas', datos: [...catalogo.values()], fecha: Date.now() }));
 
-    $('aviso').textContent = forma === 'efectivo' && efectivo > 0
-      ? `Cobrado. Cambio ${pesos(t.cambio)}` : 'Cobrado.';
+    const ganados = socio ? dolaronesGanados(t.aPagar) : 0;
+    $('aviso').textContent = (forma === 'efectivo' && efectivo > 0 ? `Cobrado. Cambio ${pesos(t.cambio)}` : 'Cobrado.')
+      + (ganados ? ` · Ganó ${dolares(ganados)}` : '');
     $('aviso').style.color = '#1f7a4d';
     lineas = [];
     idVenta = null;
+    quitarSocio();
     $('efectivo').value = '';
     $('codigo').focus();
     sincronizar();
@@ -465,6 +597,7 @@ $('lista-tickets').addEventListener('click', async (e) => {
     const cuerpo = await r.json();
     $('aviso').textContent = r.ok
       ? `Venta cancelada. Devuelve ${pesos(cuerpo.devuelto ?? 0)} y regresa la pieza al anaquel.`
+        + (cuerpo.dolarones ? ` Los ${dolares(cuerpo.dolarones)} regresaron al saldo del socio.` : '')
       : (cuerpo.error ?? 'No se pudo cancelar.');
     $('aviso').style.color = r.ok ? '#1f7a4d' : '#D72B32';
     await cargarTickets();
@@ -476,7 +609,8 @@ $('lista-tickets').addEventListener('click', async (e) => {
 async function actualizarCorte() {
   try {
     const c = await (await fetch('/api/ventas')).json();
-    $('corte').textContent = `Corte del día: ${pesos(c.total)} · ${c.piezas} piezas`;
+    $('corte').textContent = `Corte del día: ${pesos(c.total)} · ${c.piezas} piezas`
+      + (c.dolarones ? ` · ${dolares(c.dolarones)} en Dolarones` : '');
   } catch { /* sin red, el corte se ve cuando vuelva */ }
 }
 
@@ -502,7 +636,7 @@ $('efectivo').addEventListener('input', pintar);
 $('forma').addEventListener('change', pintar);
 $('cobrar').addEventListener('click', cobrar);
 $('cancelar').addEventListener('click', () => {
-  lineas = []; idVenta = null; $('efectivo').value = ''; $('aviso').textContent = 'Venta cancelada';
+  lineas = []; idVenta = null; quitarSocio(); $('efectivo').value = ''; $('aviso').textContent = 'Venta cancelada';
   $('aviso').style.color = '#5b6478'; pintar(); $('codigo').focus();
 });
 

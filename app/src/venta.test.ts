@@ -18,13 +18,13 @@ test('el total suma precio por cantidad', () => {
 
 test('el cambio y lo que falta nunca son negativos a la vez', () => {
   const lineas: Linea[] = [{ codigo: 'G49', nombre: 'General $49', precio: 4900, cantidad: 1 }];
-  assert.deepEqual(totales(lineas, 10000), { piezas: 1, total: 4900, cambio: 5100, falta: 0 });
-  assert.deepEqual(totales(lineas, 2000), { piezas: 1, total: 4900, cambio: 0, falta: 2900 });
-  assert.deepEqual(totales(lineas, 4900), { piezas: 1, total: 4900, cambio: 0, falta: 0 });
+  assert.deepEqual(totales(lineas, 10000), { piezas: 1, total: 4900, aPagar: 4900, cambio: 5100, falta: 0 });
+  assert.deepEqual(totales(lineas, 2000), { piezas: 1, total: 4900, aPagar: 4900, cambio: 0, falta: 2900 });
+  assert.deepEqual(totales(lineas, 4900), { piezas: 1, total: 4900, aPagar: 4900, cambio: 0, falta: 0 });
 });
 
 test('un ticket vacio no cobra nada', () => {
-  assert.deepEqual(totales([]), { piezas: 0, total: 0, cambio: 0, falta: 0 });
+  assert.deepEqual(totales([]), { piezas: 0, total: 0, aPagar: 0, cambio: 0, falta: 0 });
 });
 
 test('escanear dos veces el mismo bote sube la cantidad, no agrega un renglon', () => {
@@ -54,4 +54,22 @@ test('efectivo exacto o de sobra si alcanza', () => {
 
 test('tarjeta no se valida contra el efectivo', () => {
   assert.equal(efectivoAlcanza({ formaPago: 'tarjeta', total: 4000, efectivo: 0 }), true);
+});
+
+test('10 D por bloque completo de $100 pagado', async () => {
+  const { dolaronesGanados } = await import('../public/venta.js');
+  assert.equal(dolaronesGanados(9900), 0);        // $99 no llega al bloque
+  assert.equal(dolaronesGanados(10000), 1000);    // $100 -> 10 D
+  assert.equal(dolaronesGanados(25000), 2000);    // $250 -> 20 D
+  assert.equal(dolaronesGanados(199900), 19000);  // $1,999 -> 190 D
+  assert.equal(dolaronesGanados(-500), 0);
+});
+
+test('con Dolarones, el efectivo se compara contra lo que falta pagar', () => {
+  const lineas: Linea[] = [{ codigo: 'X', nombre: 'X', precio: 25000, cantidad: 1 }];
+  const t = totales(lineas, 20000, 5000);         // $250, paga 50 D y $200 en efectivo
+  assert.equal(t.total, 25000);
+  assert.equal(t.aPagar, 20000);
+  assert.equal(t.cambio, 0);
+  assert.equal(t.falta, 0);
 });

@@ -189,7 +189,8 @@ export async function abrirCajon() {
 }
 
 /**
- * @param venta {{ total: number, forma_pago: 'efectivo'|'tarjeta', efectivo: number, cambio: number, creado_en: string }}
+ * @param venta {{ total: number, forma_pago: 'efectivo'|'tarjeta', efectivo: number, cambio: number, creado_en: string,
+ *   dolarones?: number, socio?: { numero: number, ganados: number, saldo: number } | null }}
  * @param lineas {{ nombre: string, precio: number, cantidad: number }[]}
  */
 export async function imprimirTicket(venta, lineas) {
@@ -215,6 +216,10 @@ export async function imprimirTicket(venta, lineas) {
   }
   partes.push(separador());
   partes.push(renglonMonto('TOTAL', pesos(venta.total)));
+  if (venta.dolarones > 0) {
+    partes.push(renglonMonto('Dolarones', `-${pesos(venta.dolarones)}`));
+    partes.push(renglonMonto('A pagar', pesos(venta.total - venta.dolarones)));
+  }
   if (venta.forma_pago === 'efectivo') {
     partes.push(renglonMonto('Efectivo', pesos(venta.efectivo)));
     partes.push(renglonMonto('Cambio', pesos(venta.cambio)));
@@ -222,6 +227,13 @@ export async function imprimirTicket(venta, lineas) {
     partes.push(linea('TARJETA'));
   }
   partes.push(separador());
+  if (venta.socio) {
+    const d = (centavos) => `${centavos / 100} D`;
+    partes.push(linea(`Socio #${venta.socio.numero}`));
+    if (venta.socio.ganados) partes.push(renglonMonto('Ganaste (usables desde manana)', d(venta.socio.ganados)));
+    partes.push(renglonMonto('Saldo disponible', d(venta.socio.saldo)));
+    partes.push(separador());
+  }
   partes.push(centrado('Gracias por su compra'));
   partes.push(new Uint8Array([0x0a, 0x0a, 0x0a]));
   partes.push(new Uint8Array([GS, 0x56, 0x42, 0x00]));   // corte con avance de papel
