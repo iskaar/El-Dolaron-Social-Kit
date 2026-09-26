@@ -9,6 +9,9 @@ import { analizarBorrador, modeloPorDefecto, type Modelo } from './analisis.ts';
 import { calcularPrecio, ajustarManual, esDestinoBanda, prefijoParaFamilia, MONTOS_BANDA, type Destino } from './precio.ts';
 import { efectivoAlcanza } from '../public/venta.js';
 import { semanaIngreso } from '../public/semana.js';
+import {
+  permiso, puede, quienEs, leerUsuario, yo, pedirAcceso, listarCuentas, guardarCuenta, resolverSolicitud,
+} from './cuentas.ts';
 
 interface FilaConfig {
   clave: string;
@@ -35,7 +38,7 @@ interface FilaBorrador {
  * valiendo si algun dia la politica de Access queda mal configurada. Los precios
  * y el inventario no viven en el telefono que anda en el pasillo.
  */
-const RUTAS_VENDEDOR = new Set(['/captura', '/foto.js', '/api/salud']);
+const RUTAS_VENDEDOR = new Set(['/captura', '/foto.js', '/api/salud', '/sin-acceso', '/api/yo']);
 const EXISTENCIA = /^\/api\/borradores\/([^/]+)\/existencia$/;
 
 export function permitidaParaVendedor(pathname: string, metodo: string): boolean {
@@ -46,6 +49,10 @@ export function permitidaParaVendedor(pathname: string, metodo: string): boolean
   // limita a lo que esa persona capturo en las ultimas 24 h.
   if (EXISTENCIA.test(pathname)) {
     return metodo === 'PATCH';
+  }
+  // Quien entra por la camara sin cuenta tambien tiene que poder pedirla.
+  if (pathname === '/api/solicitudes/acceso') {
+    return metodo === 'POST';
   }
   return pathname === '/api/borradores' && metodo === 'POST';
 }
@@ -84,7 +91,7 @@ function modeloPedido(url: URL, env: Env): Modelo {
  * Guarda la foto y el borrador. Idempotente por id: el telefono genera el id
  * antes de subir, asi que un reintento tras una red caida no duplica la pieza.
  */
-async function crearBorrador(request: Request, env: Env, ctx: ExecutionContext, url: URL): Promise<Response> {
+async function crearBorrador(request: Request, env: Env, ctx: ExecutionContext, url: URL, correo: string): Promise<Response> {
   const formulario = await request.formData();
   const id = String(formulario.get('id') ?? '');
   const estadoFisico = String(formulario.get('estado_fisico') ?? 'nuevo');
@@ -110,9 +117,9 @@ async function crearBorrador(request: Request, env: Env, ctx: ExecutionContext, 
     httpMetadata: { contentType: 'image/jpeg' },
   });
 
-  // Cloudflare Access ya identifica a quien sube la foto; se guarda para poder
-  // distinguir lo del vendedor de lo de un desconocido.
-  const capturadoPor = request.headers.get('cf-access-authenticated-user-email') ?? '';
+  // El correo verificado de quien sube la foto (ver cuentas.ts): de el salen
+  // las sesiones de captura y la correccion de existencia desde el carrusel.
+  const capturadoPor = correo;
 
   const ahora = new Date();
   await env.DB.prepare(
@@ -249,7 +256,7 @@ const VENTANA_CAPTURA_MS = 24 * 60 * 60 * 1000;
  * es la puerta para ajustar inventario viejo (eso es la cola de revision), y
  * pasado ese rato la pieza ya pudo venderse y un numero absoluto pisaria la venta.
  */
-async function corregirExistencia(id: string, request: Request, env: Env): Promise<Response> {
+async function corregirExistencia(id: string, request: Request, env: Env, correo: string): Promise<Response> {
   if (!UUID.test(id)) {
     return json({ error: 'Identificador invalido.' }, 400);
   }
@@ -258,7 +265,7 @@ async function corregirExistencia(id: string, request: Request, env: Env): Promi
   if (!Number.isInteger(stock) || stock < 1 || stock > 999) {
     return json({ error: 'Existencia invalida.' }, 400);
   }
-  const quien = request.headers.get('cf-access-authenticated-user-email') ?? '';
+  const quien = correo;
   const desde = new Date(Date.now() - VENTANA_CAPTURA_MS).toISOString();
   const resultado = await env.DB.prepare(
     'update productos set stock = ?, actualizado_en = ? where id = ? and capturado_por = ? and creado_en > ?',
@@ -587,7 +594,7 @@ async function registrarVenta(request: Request, env: Env): Promise<Response> {
  * La venta no se borra, se marca: el corte del dia tiene que seguir explicando
  * todo lo que paso, incluido lo que se deshizo. Las piezas vuelven al inventario.
  */
-async function cancelarVenta(id: string, request: Request, env: Env): Promise<Response> {
+async function cancelarVenta(id: string, request: Request, env: Env, correo: string): Promise<Response> {
   if (!UUID.test(id)) {
     return json({ error: 'Identificador de venta invalido.' }, 400);
   }
@@ -600,7 +607,7 @@ async function cancelarVenta(id: string, request: Request, env: Env): Promise<Re
   if (!motivo) {
     return json({ error: 'Escribe el motivo de la cancelacion.' }, 400);
   }
-  const canceladaPor = request.headers.get('cf-access-authenticated-user-email') ?? '';
+  const canceladaPor = correo;
 
   const venta = await env.DB.prepare('select id, total from ventas where id = ?')
     .bind(id)
@@ -906,6 +913,40 @@ export default {
         return json({ estado: 'ok' });
       }
 
+      // Quien es (JWT de Access verificado) y si su cuenta le deja entrar aqui.
+      const regla = permiso(pathname, request.method);
+      const correo = await quienEs(request, env, url.hostname);
+      if (!correo) {
+        return json({ error: 'Sin sesion. Vuelve a entrar.' }, 401);
+      }
+      if (regla !== 'cuenta') {
+        const usuario = await leerUsuario(env, correo);
+        if (!puede(usuario, regla)) {
+          // Una pantalla lleva a donde se pide acceso; una llamada de la API
+          // recibe el error tal cual.
+          if (!pathname.startsWith('/api/') && request.method === 'GET') {
+            return Response.redirect(`${url.origin}/sin-acceso?desde=${encodeURIComponent(pathname)}`, 302);
+          }
+          return json({ error: usuario?.activo ? 'Tu cuenta no tiene permiso para esto.' : 'No tienes cuenta activa.' }, 403);
+        }
+      }
+
+      if (pathname === '/api/yo') {
+        return await yo(env, correo);
+      }
+      if (pathname === '/api/solicitudes/acceso' && request.method === 'POST') {
+        return await pedirAcceso(request, env, correo);
+      }
+      if (pathname === '/api/cuentas') {
+        if (request.method === 'GET') return await listarCuentas(env);
+        if (request.method === 'PUT') return await guardarCuenta(request, env);
+        return json({ error: 'Metodo no permitido.' }, 405);
+      }
+      const resolver = pathname.match(/^\/api\/solicitudes\/([^/]+)\/resolver$/);
+      if (resolver && request.method === 'POST') {
+        return await resolverSolicitud(resolver[1], request, env, correo);
+      }
+
       if (pathname === '/api/config') {
         if (request.method === 'PUT') {
           return await guardarConfig(request, env);
@@ -915,7 +956,7 @@ export default {
 
       if (pathname === '/api/borradores') {
         if (request.method === 'POST') {
-          return await crearBorrador(request, env, ctx, url);
+          return await crearBorrador(request, env, ctx, url, correo);
         }
         if (request.method === 'GET') {
           return await listarBorradores(url, env);
@@ -948,7 +989,7 @@ export default {
 
       const cancelacion = pathname.match(/^\/api\/ventas\/([^/]+)\/cancelar$/);
       if (cancelacion && request.method === 'POST') {
-        return await cancelarVenta(cancelacion[1], request, env);
+        return await cancelarVenta(cancelacion[1], request, env, correo);
       }
 
       if (pathname === '/api/reportes') {
@@ -978,7 +1019,7 @@ export default {
 
       const existencia = pathname.match(EXISTENCIA);
       if (existencia && request.method === 'PATCH') {
-        return await corregirExistencia(existencia[1], request, env);
+        return await corregirExistencia(existencia[1], request, env, correo);
       }
 
       const fusion = pathname.match(/^\/api\/borradores\/([^/]+)\/fusionar$/);

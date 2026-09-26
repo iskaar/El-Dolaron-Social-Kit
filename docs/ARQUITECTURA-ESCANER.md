@@ -168,6 +168,16 @@ unidad (u otra) hay que volver a interrogarla, `/sonda-impresora` sigue desplega
 
 **Cloudflare Access delante del Worker**, gratis hasta 50 usuarios: el vendedor y el admin entran con su correo, sin una línea de código de autenticación en el repositorio. Los precios y el inventario no quedan abiertos en internet.
 
+> Actualizado 2026-09-26 (Issue #75): Access **autentica** (cuenta de Google) y la app
+> **autoriza**. `src/cuentas.ts` verifica la firma del JWT de Access
+> (`Cf-Access-Jwt-Assertion`, equipo y `aud` en `wrangler.jsonc`) en cada petición y
+> busca el correo en la tabla `usuarios` (roles: dueño, cajero, capturista; varios por
+> persona). Cada ruta tiene sus roles en `permiso()`; lo que no está listado es solo del
+> dueño. Sin cuenta activa, la persona solo ve `/sin-acceso`, donde pide acceso con una
+> justificación; el dueño aprueba o rechaza en `/cuentas` (rol por omisión: cajero).
+> `workers_dev` y las URLs de vista previa están apagadas: el Worker solo responde
+> detrás de Access. Para probar local: `wrangler dev --var ACCESS_EQUIPO:local --var DEV_USUARIO:<correo>`.
+
 ## Orden de entrega
 
 1. Esqueleto: Worker desplegado, D1 creada, R2 creado, `GET /api/config` respondiendo. Probar el despliegue antes de escribir funcionalidad.

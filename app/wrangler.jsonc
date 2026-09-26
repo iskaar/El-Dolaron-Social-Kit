@@ -25,8 +25,21 @@
     // Reactivado 2026-09-20 despues de resolver la facturacion de Gemini
     // (la cuota 429 de antes era por falta de credito, no un bug).
     "MODELO_ANALISIS": "gemini",
-    "BUSQUEDA_WEB": "si"
+    "BUSQUEDA_WEB": "si",
+    // Con que se verifica el JWT de Cloudflare Access (src/cuentas.ts). No son
+    // secretos: salen en la redireccion al login de cada hostname. El aud es
+    // por aplicacion de Access; una aplicacion nueva necesita su renglon aqui
+    // o nadie entra por ese hostname.
+    "ACCESS_EQUIPO": "yellow-term-7d99.cloudflareaccess.com",
+    "ACCESS_AUD": {
+      "escaner.viste.com.mx": "8ecef061fac92da30e9b780d70c749c2a4bc91c7a04d3070c35f7d9d23eb451d",
+      "captura.viste.com.mx": "d3ee26fb77afa5141ca79be9eeba23d7cf93e31165b1fc1683396c1296629764"
+    }
   },
+  // El Worker solo debe responder detras de Access: workers.dev y las URLs de
+  // vista previa se saltarian el login.
+  "workers_dev": false,
+  "preview_urls": false,
   // Hostnames propios: Cloudflare Access solo protege dominios de una zona, no workers.dev.
   "routes": [
     {

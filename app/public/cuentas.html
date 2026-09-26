@@ -1,0 +1,163 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>El Dolarón — cuentas</title>
+<style>
+  :root { --azul:#16366B; --rojo:#D72B32; --amarillo:#FFD447; --linea:#dfe3ea; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: #f4f6f9; color: #1a1f2b; font-family: system-ui, -apple-system, sans-serif; }
+  header { background: var(--azul); color: #fff; padding: 14px 20px; display: flex; gap: 16px; align-items: center; flex-wrap: wrap; }
+  header h1 { font-size: 18px; margin: 0; flex: 1; }
+  header a { color: var(--amarillo); font-size: 14px; }
+  main { padding: 20px; max-width: 900px; margin: 0 auto; }
+  .panel { background: #fff; border: 1px solid var(--linea); border-radius: 12px; padding: 16px; margin-bottom: 20px; }
+  .panel h2 { font-size: 15px; margin: 0 0 12px; }
+  .fila { display: grid; grid-template-columns: 1.4fr 1fr auto auto auto; gap: 10px; align-items: center;
+    padding: 10px 0; border-top: 1px solid var(--linea); }
+  .fila:first-of-type { border-top: 0; }
+  .fila.inactiva { opacity: .55; }
+  .correo { font-size: 13px; color: #5b6478; word-break: break-all; }
+  .roles { display: flex; gap: 10px; flex-wrap: wrap; font-size: 14px; }
+  .roles label { display: flex; gap: 4px; align-items: center; }
+  input[type=text], input[type=email] { width: 100%; padding: 8px 10px; border: 1px solid var(--linea); border-radius: 8px; font-size: 14px; }
+  button { border: 0; border-radius: 8px; padding: 9px 14px; font-size: 14px; font-weight: 600; cursor: pointer;
+    background: var(--azul); color: #fff; }
+  button.claro { background: #eef1f6; color: #1a1f2b; }
+  button.peligro { background: #fff; color: var(--rojo); border: 1px solid var(--rojo); }
+  .solicitud { border-top: 1px solid var(--linea); padding: 12px 0; display: grid; gap: 8px; }
+  .solicitud:first-of-type { border-top: 0; }
+  .justificacion { background: #f4f6f9; border-radius: 8px; padding: 8px 10px; font-size: 14px; }
+  .acciones { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  .aviso { font-size: 13px; color: var(--rojo); min-height: 1em; }
+  .vacio { color: #5b6478; font-size: 14px; }
+  @media (max-width: 700px) { .fila { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+<header>
+  <h1>Cuentas</h1>
+  <a href="/">← Inicio</a>
+</header>
+<main>
+  <section class="panel">
+    <h2 id="titulo-solicitudes">Solicitudes de acceso</h2>
+    <div id="solicitudes"></div>
+  </section>
+
+  <section class="panel">
+    <h2>Usuarios</h2>
+    <div id="usuarios"></div>
+  </section>
+
+  <section class="panel">
+    <h2>Dar de alta a alguien</h2>
+    <p class="vacio" style="margin-top:0">Con su correo de Google. Entra la próxima vez que abra la página, sin pedir acceso.</p>
+    <div class="fila" id="alta">
+      <input type="email" data-campo="correo" placeholder="correo@gmail.com">
+      <input type="text" data-campo="nombre" placeholder="Nombre">
+      <div class="roles"></div>
+      <span></span>
+      <button type="button" data-accion="alta">Dar de alta</button>
+    </div>
+    <p class="aviso" id="aviso-alta"></p>
+  </section>
+</main>
+
+<script type="module">
+const escapar = (texto) => String(texto ?? '').replace(/[<>&"]/g, (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;' }[c]));
+const NOMBRES = { dueno: 'Dueño', cajero: 'Cajero', capturista: 'Capturista' };
+let ROLES = [];
+
+const casillas = (marcados) => ROLES.map((r) =>
+  `<label><input type="checkbox" value="${r}" ${marcados.includes(r) ? 'checked' : ''}>${NOMBRES[r] ?? r}</label>`).join('');
+const rolesDe = (nodo) => [...nodo.querySelectorAll('.roles input:checked')].map((c) => c.value);
+const fecha = (iso) => new Date(iso).toLocaleString('es-MX', { dateStyle: 'medium', timeStyle: 'short' });
+
+async function cargar() {
+  const datos = await (await fetch('/api/cuentas')).json();
+  ROLES = datos.roles;
+
+  const solicitudes = datos.solicitudes.filter((s) => s.tipo === 'acceso');
+  document.getElementById('titulo-solicitudes').textContent =
+    `Solicitudes de acceso${solicitudes.length ? ` (${solicitudes.length})` : ''}`;
+  document.getElementById('solicitudes').innerHTML = solicitudes.length === 0
+    ? '<p class="vacio">Nada esperando.</p>'
+    : solicitudes.map((s) => `
+      <div class="solicitud" data-id="${s.id}">
+        <div><b>${escapar(s.nombre)}</b> <span class="correo">${escapar(s.correo)} · ${fecha(s.creado_en)}</span></div>
+        <div class="justificacion">${escapar(s.justificacion)}</div>
+        <div class="acciones">
+          <div class="roles">${casillas(['cajero'])}</div>
+          <button type="button" data-accion="aprobar">Aprobar</button>
+          <button type="button" class="peligro" data-accion="rechazar">Rechazar</button>
+          <span class="aviso"></span>
+        </div>
+      </div>`).join('');
+
+  document.getElementById('usuarios').innerHTML = datos.usuarios.length === 0
+    ? '<p class="vacio">Nadie todavía.</p>'
+    : datos.usuarios.map((u) => `
+      <div class="fila${u.activo ? '' : ' inactiva'}" data-correo="${escapar(u.correo)}">
+        <div><input type="text" data-campo="nombre" value="${escapar(u.nombre)}" placeholder="Nombre">
+          <div class="correo">${escapar(u.correo)}</div></div>
+        <div class="roles">${casillas(u.roles)}</div>
+        <label style="font-size:14px"><input type="checkbox" data-campo="activo" ${u.activo ? 'checked' : ''}> Activo</label>
+        <button type="button" class="claro" data-accion="guardar">Guardar</button>
+        <span class="aviso"></span>
+      </div>`).join('');
+
+  document.querySelector('#alta .roles').innerHTML = casillas(['cajero']);
+}
+
+async function guardar(cuerpo, aviso) {
+  const respuesta = await fetch('/api/cuentas', {
+    method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify(cuerpo),
+  });
+  const datos = await respuesta.json();
+  aviso.textContent = respuesta.ok ? 'Guardado' : datos.error;
+  aviso.style.color = respuesta.ok ? '#2c7a3f' : '';
+  return respuesta.ok;
+}
+
+document.body.addEventListener('click', async (evento) => {
+  const accion = evento.target.dataset?.accion;
+  if (!accion) return;
+
+  if (accion === 'aprobar' || accion === 'rechazar') {
+    const nodo = evento.target.closest('.solicitud');
+    const aviso = nodo.querySelector('.aviso');
+    const cuerpo = accion === 'aprobar' ? { aprobar: true, roles: rolesDe(nodo) } : { aprobar: false };
+    const respuesta = await fetch(`/api/solicitudes/${nodo.dataset.id}/resolver`, {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(cuerpo),
+    });
+    if (!respuesta.ok) { aviso.textContent = (await respuesta.json()).error; return; }
+    await cargar();
+  } else if (accion === 'guardar') {
+    const nodo = evento.target.closest('.fila');
+    const ok = await guardar({
+      correo: nodo.dataset.correo,
+      nombre: nodo.querySelector('[data-campo="nombre"]').value,
+      roles: rolesDe(nodo),
+      activo: nodo.querySelector('[data-campo="activo"]').checked,
+    }, nodo.querySelector('.aviso'));
+    if (ok) nodo.classList.toggle('inactiva', !nodo.querySelector('[data-campo="activo"]').checked);
+  } else if (accion === 'alta') {
+    const nodo = document.getElementById('alta');
+    const ok = await guardar({
+      correo: nodo.querySelector('[data-campo="correo"]').value,
+      nombre: nodo.querySelector('[data-campo="nombre"]').value,
+      roles: rolesDe(nodo),
+    }, document.getElementById('aviso-alta'));
+    if (ok) {
+      nodo.querySelectorAll('input[type=email], input[type=text]').forEach((i) => { i.value = ''; });
+      await cargar();
+    }
+  }
+});
+
+await cargar();
+</script>
+</body>
+</html>

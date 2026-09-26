@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>El Dolarón — acceso</title>
+<style>
+  :root { --azul: #16366B; --rojo: #D72B32; --linea: #dfe3ea; }
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: system-ui, -apple-system, sans-serif; color: #1a1f2b; background: #f4f6f9; }
+  header { background: var(--azul); color: #fff; padding: 18px 20px; }
+  header h1 { margin: 0; font-size: 20px; }
+  main { max-width: 520px; margin: 0 auto; padding: 18px; }
+  .panel { background: #fff; border: 1px solid var(--linea); border-radius: 12px; padding: 18px; }
+  p { line-height: 1.45; }
+  label { display: block; font-size: 13px; color: #5b6478; margin: 12px 0 4px; }
+  input, textarea { width: 100%; padding: 10px; border: 1px solid var(--linea); border-radius: 8px; font: inherit; }
+  textarea { min-height: 96px; resize: vertical; }
+  button { margin-top: 14px; width: 100%; border: 0; border-radius: 8px; padding: 12px; font-size: 15px;
+    font-weight: 600; background: var(--azul); color: #fff; cursor: pointer; }
+  .aviso { color: var(--rojo); min-height: 1.2em; }
+  .correo { font-size: 13px; color: #5b6478; }
+</style>
+</head>
+<body>
+<header><h1>El Dolarón</h1></header>
+<main>
+  <div class="panel" id="panel">Cargando…</div>
+</main>
+<script type="module">
+const panel = document.getElementById('panel');
+const desde = new URLSearchParams(location.search).get('desde');
+const escapar = (texto) => String(texto).replace(/[<>&"]/g, (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;' }[c]));
+const { correo, usuario, solicitud } = await (await fetch('/api/yo')).json();
+const quien = `<p class="correo">Entraste como <b>${escapar(correo)}</b>.</p>`;
+
+function formulario(titulo) {
+  panel.innerHTML = `
+    <h2 style="margin-top:0">${titulo}</h2>
+    ${quien}
+    <p>Pide acceso y el dueño lo revisa. Cuéntale quién eres y para qué lo necesitas.</p>
+    <form id="pedir">
+      <label for="nombre">Tu nombre</label>
+      <input id="nombre" required maxlength="80" autocomplete="name">
+      <label for="justificacion">¿Para qué necesitas entrar?</label>
+      <textarea id="justificacion" required maxlength="500" placeholder="Ej.: Soy cajera del turno de la tarde."></textarea>
+      <button type="submit">Pedir acceso</button>
+      <p class="aviso" id="aviso"></p>
+    </form>`;
+  document.getElementById('pedir').addEventListener('submit', async (evento) => {
+    evento.preventDefault();
+    const respuesta = await fetch('/api/solicitudes/acceso', {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        nombre: document.getElementById('nombre').value,
+        justificacion: document.getElementById('justificacion').value,
+      }),
+    });
+    const cuerpo = await respuesta.json();
+    if (!respuesta.ok) {
+      document.getElementById('aviso').textContent = cuerpo.error;
+      return;
+    }
+    enEspera();
+  });
+}
+
+function enEspera() {
+  panel.innerHTML = `
+    <h2 style="margin-top:0">Solicitud enviada</h2>
+    ${quien}
+    <p>El dueño tiene que aprobarla. Cuando lo haga, vuelve a abrir esta página o el inicio.</p>
+    <button type="button" onclick="location.href='/'">Ya me aprobaron, entrar</button>`;
+}
+
+if (usuario?.activo) {
+  // Tiene cuenta, pero no el rol de esa pantalla.
+  panel.innerHTML = `
+    <h2 style="margin-top:0">Esta pantalla no es de tu rol</h2>
+    ${quien}
+    <p>${desde ? `<b>${escapar(desde)}</b> necesita` : 'Necesitas'} otro rol. Tus roles: <b>${escapar(usuario.roles.join(', '))}</b>.
+    Si te hace falta, pídeselo al dueño.</p>
+    <button type="button" onclick="location.href='/'">Ir al inicio</button>`;
+} else if (usuario && !usuario.activo) {
+  panel.innerHTML = `<h2 style="margin-top:0">Tu cuenta está desactivada</h2>${quien}<p>Habla con el dueño.</p>`;
+} else if (solicitud?.estado === 'pendiente') {
+  enEspera();
+} else {
+  formulario(solicitud?.estado === 'rechazada' ? 'Tu solicitud anterior fue rechazada' : 'Todavía no tienes cuenta');
+}
+</script>
+</body>
+</html>
