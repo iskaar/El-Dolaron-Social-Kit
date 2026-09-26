@@ -5,16 +5,28 @@
  * en el navegador; las pruebas la importan desde aqui.
  */
 
-export function totales(lineas, efectivo = 0) {
+/** `dolarones` es la parte del total pagada con Dolarones: el efectivo se compara contra el resto. */
+export function totales(lineas, efectivo = 0, dolarones = 0) {
   const piezas = lineas.reduce((suma, l) => suma + l.cantidad, 0);
   const total = lineas.reduce((suma, l) => suma + l.precio * l.cantidad, 0);
-  const diferencia = efectivo - total;
+  const aPagar = total - dolarones;
+  const diferencia = efectivo - aPagar;
   return {
     piezas,
     total,
+    aPagar,
     cambio: Math.max(0, diferencia),
     falta: Math.max(0, -diferencia),
   };
+}
+
+/**
+ * 10 D por cada bloque completo de $100 pagado en dinero (decision de Isaac del
+ * 26/09): $99 no gana, $250 gana 20. Lo pagado con Dolarones no cuenta. En
+ * centavos, igual que todo: 1 D = 100.
+ */
+export function dolaronesGanados(pagado) {
+  return Math.floor(Math.max(0, pagado) / 10000) * 1000;
 }
 
 /** Agrega una pieza al ticket, juntando lineas repetidas del mismo codigo. */

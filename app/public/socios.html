@@ -1,0 +1,170 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>El Dolarón — socios</title>
+<style>
+  :root { --azul:#16366B; --rojo:#D72B32; --verde:#1f7a4d; --amarillo:#FFD447; --linea:#dfe3ea; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: #f4f6f9; color: #1a1f2b; font-family: system-ui, -apple-system, sans-serif; }
+  header { background: var(--azul); color: #fff; padding: 10px 18px; display: flex; align-items: center; gap: 14px; }
+  header h1 { font-size: 17px; margin: 0; flex: 1; }
+  header a { color: var(--amarillo); font-size: 13px; }
+  main { max-width: 520px; margin: 0 auto; padding: 16px; }
+  .panel { background: #fff; border: 1px solid var(--linea); border-radius: 12px; padding: 16px; }
+  label { display: block; font-size: 13px; color: #5b6478; margin: 12px 0 4px; }
+  input[type=text], input[type=tel], input[type=email], input[type=password] { width: 100%; padding: 12px;
+    font-size: 18px; border: 1px solid var(--linea); border-radius: 10px; }
+  .pin { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .nota { font-size: 12px; color: #78839a; margin-top: 4px; }
+  .bases { display: flex; gap: 10px; align-items: flex-start; margin-top: 16px; font-size: 14px; }
+  .bases input { width: 22px; height: 22px; margin-top: 1px; flex: none; }
+  button { width: 100%; margin-top: 16px; padding: 16px; font-size: 18px; font-weight: 800; border: 0;
+    border-radius: 12px; background: var(--verde); color: #fff; cursor: pointer; }
+  button:disabled { background: #c8cfda; cursor: not-allowed; }
+  #aviso { min-height: 20px; margin-top: 10px; font-size: 14px; color: var(--rojo); }
+  #listo { text-align: center; }
+  #listo .numero { font-size: 56px; font-weight: 800; color: var(--azul); letter-spacing: -1px; }
+  #listo .regalo { display: inline-block; margin: 10px 0; padding: 8px 14px; border-radius: 999px;
+    background: var(--amarillo); color: var(--azul); font-weight: 800; font-size: 18px; }
+  #listo p { margin: 6px 0; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Socios Dolarones</h1>
+  <a href="/caja">Volver a la caja</a>
+</header>
+
+<main>
+  <form id="alta" class="panel" autocomplete="off">
+    <label for="nombre">Nombre</label>
+    <input id="nombre" type="text" maxlength="80" required>
+
+    <label for="telefono">Teléfono (10 dígitos)</label>
+    <input id="telefono" type="tel" inputmode="numeric" maxlength="14" required>
+    <div class="nota">Con este número lo buscan en la caja. Un teléfono, un socio.</div>
+
+    <label for="correo">Correo (opcional)</label>
+    <input id="correo" type="email" maxlength="200">
+
+    <label>PIN de 4 dígitos — lo escribe el cliente</label>
+    <div class="pin">
+      <input id="pin" type="password" inputmode="numeric" maxlength="4" placeholder="PIN" required>
+      <input id="pin2" type="password" inputmode="numeric" maxlength="4" placeholder="Repetir" required>
+    </div>
+    <div class="nota">Se pide para pagar con Dolarones. Nadie de la tienda debe verlo ni anotarlo.</div>
+
+    <label class="bases">
+      <input id="bases" type="checkbox">
+      <span>El cliente leyó las bases del programa Dolarones y el aviso de privacidad, y los acepta.</span>
+    </label>
+
+    <button id="registrar" type="submit">Registrar socio</button>
+    <div id="aviso" role="status"></div>
+  </form>
+
+  <section id="listo" class="panel" hidden>
+    <p>Socio</p>
+    <div class="numero" id="listo-numero"></div>
+    <p id="listo-nombre"></p>
+    <div class="regalo" id="listo-regalo" hidden></div>
+    <p id="listo-vence"></p>
+    <p id="listo-saldo"></p>
+    <button id="otro" type="button">Registrar a otro cliente</button>
+  </section>
+
+  <details class="panel" style="margin-top:16px">
+    <summary>Olvidó su PIN o se bloqueó (solo el dueño)</summary>
+    <label for="pin-numero">Número de socio</label>
+    <input id="pin-numero" type="text" inputmode="numeric">
+    <label>PIN nuevo — lo escribe el cliente</label>
+    <div class="pin">
+      <input id="pin-nuevo" type="password" inputmode="numeric" maxlength="4" placeholder="PIN">
+      <input id="pin-nuevo2" type="password" inputmode="numeric" maxlength="4" placeholder="Repetir">
+    </div>
+    <button id="cambiar-pin" type="button">Cambiar PIN</button>
+    <div id="aviso-pin" role="status" style="margin-top:10px;font-size:14px"></div>
+  </details>
+</main>
+
+<script type="module">
+const $ = (id) => document.getElementById(id);
+const d = (centavos) => `${(centavos / 100).toLocaleString('es-MX')} Dolarones`;
+// Un id por alta: si la red falla despues de guardar, reintentar no crea otro socio.
+let idAlta = crypto.randomUUID();
+
+$('alta').addEventListener('input', (e) => {
+  if (e.target.id !== 'bases') idAlta = crypto.randomUUID();
+  $('aviso').textContent = '';
+});
+
+$('alta').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const pin = $('pin').value;
+  if (!/^\d{4}$/.test(pin)) { $('aviso').textContent = 'El PIN debe tener 4 dígitos.'; return; }
+  if (pin !== $('pin2').value) { $('aviso').textContent = 'Los dos PIN no coinciden.'; return; }
+  if (!$('bases').checked) { $('aviso').textContent = 'Falta que el cliente acepte las bases y el aviso.'; return; }
+
+  $('registrar').disabled = true;
+  try {
+    const r = await fetch('/api/socios', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        id: idAlta, nombre: $('nombre').value, telefono: $('telefono').value,
+        correo: $('correo').value, pin, acepta_bases: true,
+      }),
+    });
+    const socio = await r.json();
+    if (!r.ok) { $('aviso').textContent = socio.error ?? 'No se pudo registrar.'; return; }
+
+    $('listo-numero').textContent = `#${socio.numero}`;
+    $('listo-nombre').textContent = socio.nombre;
+    $('listo-regalo').hidden = !socio.regalo;
+    $('listo-regalo').textContent = `Regalo de apertura: ${d(socio.regalo ?? 0)}`;
+    $('listo-vence').textContent = socio.regalo_vence
+      ? `Se pueden usar desde hoy, completos o en partes, hasta el ${new Date(socio.regalo_vence).toLocaleDateString('es-MX')}.`
+      : '';
+    $('listo-saldo').textContent = `Saldo: ${d(socio.disponible)}`;
+    $('alta').hidden = true;
+    $('listo').hidden = false;
+  } catch {
+    $('aviso').textContent = 'Sin red: el alta necesita conexión. Intenta de nuevo.';
+  } finally {
+    $('registrar').disabled = false;
+  }
+});
+
+$('otro').addEventListener('click', () => {
+  $('alta').reset();
+  idAlta = crypto.randomUUID();
+  $('listo').hidden = true;
+  $('alta').hidden = false;
+  $('nombre').focus();
+});
+
+$('cambiar-pin').addEventListener('click', async () => {
+  const aviso = $('aviso-pin');
+  const pin = $('pin-nuevo').value;
+  aviso.style.color = '#D72B32';
+  if (!/^\d{4}$/.test(pin) || pin !== $('pin-nuevo2').value) { aviso.textContent = 'Los dos PIN deben ser iguales y de 4 dígitos.'; return; }
+  try {
+    const r = await fetch(`/api/socios/${encodeURIComponent($('pin-numero').value.trim())}/pin`, {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ pin }),
+    });
+    const cuerpo = await r.json().catch(() => ({}));
+    if (!r.ok) { aviso.textContent = cuerpo.error ?? 'No se pudo cambiar el PIN.'; return; }
+    aviso.style.color = '#1f7a4d';
+    aviso.textContent = `Listo: el socio #${cuerpo.numero} ya puede usar su PIN nuevo.`;
+    $('pin-nuevo').value = ''; $('pin-nuevo2').value = '';
+  } catch {
+    aviso.textContent = 'Sin red. Intenta de nuevo.';
+  }
+});
+
+$('nombre').focus();
+</script>
+</body>
+</html>

@@ -12,6 +12,7 @@ import { semanaIngreso } from '../public/semana.js';
 import {
   permiso, puede, quienEs, leerUsuario, yo, pedirAcceso, listarCuentas, guardarCuenta, resolverSolicitud,
 } from './cuentas.ts';
+import { registrarSocio, buscarSocio, cambiarPin, sentenciasDeVenta, sentenciasDeCancelacion, saldo } from './dolarones.ts';
 
 interface FilaConfig {
   clave: string;
@@ -505,10 +506,11 @@ export function prepararLineas(
  * asi que reenviar la cola despues de una red caida no duplica el ticket ni
  * vuelve a descontar existencias.
  */
-async function registrarVenta(request: Request, env: Env): Promise<Response> {
+async function registrarVenta(request: Request, env: Env, correo: string): Promise<Response> {
   const venta = (await request.json()) as {
     id?: unknown; lineas?: unknown; forma_pago?: unknown;
     efectivo?: unknown; creado_en?: unknown;
+    cliente_id?: unknown; dolarones?: unknown; pin?: unknown;
   };
   const id = String(venta.id ?? '');
   if (!UUID.test(id)) {
@@ -546,18 +548,30 @@ async function registrarVenta(request: Request, env: Env): Promise<Response> {
 
   const total = preparado.lineas.reduce((suma, l) => suma + l.precio * l.cantidad, 0);
   const efectivo = Math.max(0, Math.round(Number(venta.efectivo ?? 0)));
-  if (!efectivoAlcanza({ formaPago, total, efectivo })) {
+  const clienteId = venta.cliente_id ? String(venta.cliente_id) : null;
+  const dolarones = Number(venta.dolarones ?? 0);
+  const aPagar = total - (Number.isInteger(dolarones) ? dolarones : 0);
+  if (!efectivoAlcanza({ formaPago, total: aPagar, efectivo })) {
     return json({ error: 'El efectivo no alcanza para el total.' }, 400);
   }
 
-  const ahora = new Date().toISOString();
+  const momento = new Date();
+  const ahora = momento.toISOString();
   const creadoEn = String(venta.creado_en ?? ahora);
+
+  // Valida socio, PIN y saldo antes de tocar nada; sus sentencias van en el mismo batch.
+  const recompensa = await sentenciasDeVenta(env, {
+    ventaId: id, clienteId, dolarones, pin: String(venta.pin ?? ''), total, autor: correo, ahora: momento,
+  });
+  if (!recompensa.ok) {
+    return json({ error: recompensa.error }, recompensa.status);
+  }
 
   const sentencias = [
     env.DB.prepare(
-      `insert into ventas (id, total, forma_pago, efectivo, cambio, creado_en, registrado_en)
-       values (?, ?, ?, ?, ?, ?, ?)`,
-    ).bind(id, total, formaPago, efectivo, Math.max(0, efectivo - total), creadoEn, ahora),
+      `insert into ventas (id, total, forma_pago, efectivo, cambio, creado_en, registrado_en, cliente_id, dolarones)
+       values (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).bind(id, total, formaPago, efectivo, Math.max(0, efectivo - aPagar), creadoEn, ahora, clienteId, dolarones),
     ...preparado.lineas.map((l) =>
       env.DB.prepare(
         `insert into venta_lineas (venta_id, producto_id, codigo, nombre, precio, cantidad)
@@ -575,18 +589,26 @@ async function registrarVenta(request: Request, env: Env): Promise<Response> {
           `update productos set stock = stock - ?, actualizado_en = ? where id = ?`,
         ).bind(l.cantidad, ahora, l.producto_id),
       ),
+    ...recompensa.sentencias,
   ];
 
-  // Todo junto: un ticket a medias descuadra el corte del dia.
+  // Todo junto: un ticket a medias descuadra el corte del dia, y un canje a
+  // medias descuadra el saldo del cliente.
   try {
     await env.DB.batch(sentencias);
   } catch (error) {
     if (String(error).includes('stock insuficiente')) {
       return json({ error: 'No hay existencia suficiente para completar la venta.' }, 409);
     }
+    if (String(error).includes('saldo insuficiente')) {
+      return json({ error: 'El saldo de Dolarones cambio. Vuelve a buscar al socio.' }, 409);
+    }
     throw error;
   }
-  return json({ id, total, cambio: Math.max(0, efectivo - total) }, 201);
+  return json({
+    id, total, dolarones, cambio: Math.max(0, efectivo - aPagar), ganados: recompensa.ganados,
+    saldo: clienteId ? await saldo(env, clienteId, ahora) : null,
+  }, 201);
 }
 
 /**
@@ -609,47 +631,48 @@ async function cancelarVenta(id: string, request: Request, env: Env, correo: str
   }
   const canceladaPor = correo;
 
-  const venta = await env.DB.prepare('select id, total from ventas where id = ?')
+  const venta = await env.DB.prepare('select id, total, dolarones, cancelada from ventas where id = ?')
     .bind(id)
-    .first<{ id: string; total: number }>();
+    .first<{ id: string; total: number; dolarones: number; cancelada: number }>();
   if (!venta) {
     return json({ error: 'La venta no existe.' }, 404);
   }
-
-  const ahora = new Date().toISOString();
-  // La bandera se voltea en una sola sentencia con su propia guarda: D1 sirve
-  // las escrituras de una en una, asi que si dos cancelaciones llegan juntas
-  // solo una de ellas encuentra `cancelada = 0` y de verdad cambia la fila. La
-  // otra ve `changes: 0` y sabe que no le toca devolver existencia otra vez.
-  const resultado = await env.DB.prepare(
-    `update ventas set cancelada = 1, cancelada_en = ?, cancelada_por = ?, motivo_cancelacion = ?
-     where id = ? and cancelada = 0`,
-  )
-    .bind(ahora, canceladaPor, motivo, id)
-    .run();
-
-  if (resultado.meta.changes === 0) {
+  if (venta.cancelada) {
     return json({ id, cancelada: true, ya_estaba: true });
   }
 
+  const ahora = new Date().toISOString();
   const { results: lineas } = await env.DB.prepare(
     'select producto_id, cantidad from venta_lineas where venta_id = ? and producto_id is not null',
   )
     .bind(id)
     .all<{ producto_id: string; cantidad: number }>();
 
-  if (lineas.length > 0) {
-    await env.DB.batch(
-      lineas.map((l) =>
+  // Marca, existencias y Dolarones en un solo batch. Si dos cancelaciones
+  // llegan juntas, el trigger venta_cancelada_una_vez (migracion 011) aborta
+  // la segunda completa: nada se devuelve dos veces.
+  try {
+    await env.DB.batch([
+      env.DB.prepare(
+        `update ventas set cancelada = 1, cancelada_en = ?, cancelada_por = ?, motivo_cancelacion = ? where id = ?`,
+      ).bind(ahora, canceladaPor, motivo, id),
+      ...lineas.map((l) =>
         env.DB.prepare(
           `update productos set stock = stock + ?, actualizado_en = ?
            where id = ? and sin_inventario = 0`,
         ).bind(l.cantidad, ahora, l.producto_id),
       ),
-    );
+      ...(await sentenciasDeCancelacion(env, id, canceladaPor, ahora)),
+    ]);
+  } catch (error) {
+    if (String(error).includes('venta ya cancelada')) {
+      return json({ id, cancelada: true, ya_estaba: true });
+    }
+    throw error;
   }
 
-  return json({ id, cancelada: true, devuelto: venta.total });
+  // Lo que se regresa en dinero; lo pagado con Dolarones regresa al saldo.
+  return json({ id, cancelada: true, devuelto: venta.total - venta.dolarones, dolarones: venta.dolarones });
 }
 
 /** Tickets del dia para la caja: para cancelar el que se cobro mal. */
@@ -671,11 +694,11 @@ async function corte(url: URL, env: Env): Promise<Response> {
   const dia = url.searchParams.get('dia') ?? new Date().toISOString().slice(0, 10);
   // Las canceladas no cuentan: el corte es contra el efectivo que hay en el cajon.
   const { results } = await env.DB.prepare(
-    `select forma_pago, count(*) as tickets, sum(total) as total
+    `select forma_pago, count(*) as tickets, sum(total - dolarones) as total, sum(dolarones) as dolarones
      from ventas where substr(creado_en, 1, 10) = ? and cancelada = 0 group by forma_pago`,
   )
     .bind(dia)
-    .all<{ forma_pago: string; tickets: number; total: number }>();
+    .all<{ forma_pago: string; tickets: number; total: number; dolarones: number }>();
 
   const piezas = await env.DB.prepare(
     `select coalesce(sum(l.cantidad), 0) as piezas from venta_lineas l
@@ -688,7 +711,9 @@ async function corte(url: URL, env: Env): Promise<Response> {
   return json({
     dia,
     piezas: piezas?.piezas ?? 0,
+    // Dinero que debe haber entre cajon y terminal; lo pagado con Dolarones va aparte.
     total: results.reduce((suma, fila) => suma + (fila.total ?? 0), 0),
+    dolarones: results.reduce((suma, fila) => suma + (fila.dolarones ?? 0), 0),
     por_forma_pago: results,
   });
 }
@@ -713,11 +738,15 @@ async function reportes(url: URL, env: Env): Promise<Response> {
     .bind(desde, desde)
     .first<{ ventas: number; total: number; piezas: number }>();
 
+  // Lo cobrado en dinero por forma de pago, y lo pagado con Dolarones como una forma mas.
   const { results: porFormaPago } = await env.DB.prepare(
-    `select forma_pago, count(*) as tickets, sum(total) as total
-     from ventas where cancelada = 0 and creado_en >= ? group by forma_pago`,
+    `select forma_pago, count(*) as tickets, sum(total - dolarones) as total
+     from ventas where cancelada = 0 and creado_en >= ? group by forma_pago
+     union all
+     select 'dolarones', count(*), sum(dolarones)
+     from ventas where cancelada = 0 and creado_en >= ? and dolarones > 0`,
   )
-    .bind(desde)
+    .bind(desde, desde)
     .all<{ forma_pago: string; tickets: number; total: number }>();
 
   const { results: ventasPorDia } = await env.DB.prepare(
@@ -982,9 +1011,20 @@ export default {
 
       if (pathname === '/api/ventas') {
         if (request.method === 'POST') {
-          return await registrarVenta(request, env);
+          return await registrarVenta(request, env, correo);
         }
         return url.searchParams.get('lista') ? await ventasDelDia(url, env) : await corte(url, env);
+      }
+
+      if (pathname === '/api/socios') {
+        if (request.method === 'POST') return await registrarSocio(request, env, correo);
+        if (request.method === 'GET') return await buscarSocio(url, env);
+        return json({ error: 'Metodo no permitido.' }, 405);
+      }
+
+      const nuevoPin = pathname.match(/^\/api\/socios\/(\d+)\/pin$/);
+      if (nuevoPin && request.method === 'POST') {
+        return await cambiarPin(Number(nuevoPin[1]), request, env);
       }
 
       const cancelacion = pathname.match(/^\/api\/ventas\/([^/]+)\/cancelar$/);

@@ -55,6 +55,7 @@ const PANTALLAS: Record<string, Rol[]> = {
   '/prueba-codigo': CAPTURA,
   '/sonda-impresora': CAPTURA,
   '/caja': CAJA,
+  '/socios': CAJA,
   '/tarjeta-bandas': TODOS,
   '/reportes': DUENO,
   '/cuentas': DUENO,
@@ -77,6 +78,7 @@ export function permiso(pathname: string, metodo: string): Regla {
   if (ruta.startsWith('/api/foto/')) return CAPTURA;
   if (ruta === '/api/etiquetas') return CAPTURA;
   if (ruta === '/api/catalogo') return CAJA;
+  if (ruta === '/api/socios') return CAJA;
   // ponytail: cancelar sigue abierto al cajero hasta la fase 2 del Issue #75,
   // que lo pasa por una solicitud aprobada por el dueno.
   if (ruta === '/api/ventas' || ruta.startsWith('/api/ventas/')) return CAJA;
