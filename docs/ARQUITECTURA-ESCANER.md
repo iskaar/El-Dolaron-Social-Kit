@@ -178,6 +178,15 @@ unidad (u otra) hay que volver a interrogarla, `/sonda-impresora` sigue desplega
 > `workers_dev` y las URLs de vista previa están apagadas: el Worker solo responde
 > detrás de Access. Para probar local: `wrangler dev --var ACCESS_EQUIPO:local --var DEV_USUARIO:<correo>`.
 
+## Sandbox (Issue #83)
+
+`https://sandbox.viste.com.mx`: el mismo código con su propia D1 (`el-dolaron-sandbox`) y su propio R2 (`el-dolaron-sandbox-fotos`), configurado en `app/wrangler.sandbox.jsonc`. Cada pantalla lleva una franja roja «SANDBOX». Se entra con el mismo login de Access que el escáner (el dominio está agregado a esa aplicación) y con los mismos usuarios y roles.
+
+- **Desplegar:** `npx wrangler deploy --config wrangler.sandbox.jsonc`, desde `app/`. Probar ahí primero y luego desplegar producción.
+- **Refrescar datos:** `python tools/refrescar_sandbox.py` borra el sandbox y copia desde producción el esquema completo y los datos de catálogo, configuración, familias, usuarios, solicitudes y ventas. **Nunca copia socios ni Dolarones** (datos personales). Producción solo se lee.
+- **Migraciones:** una migración nueva se corre primero en el sandbox (`--config wrangler.sandbox.jsonc`), se prueba y después en producción.
+- **Qué no tiene:** fotos (R2 no se copia) y llaves de IA, así que el análisis de fotos falla ahí sin gastar. Las altas de socios y los números de socio del sandbox no afectan el regalo de producción.
+
 ## Orden de entrega
 
 1. Esqueleto: Worker desplegado, D1 creada, R2 creado, `GET /api/config` respondiendo. Probar el despliegue antes de escribir funcionalidad.
