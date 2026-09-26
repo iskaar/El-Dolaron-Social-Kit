@@ -58,6 +58,9 @@ export function permitidaParaVendedor(pathname: string, metodo: string): boolean
   return pathname === '/api/borradores' && metodo === 'POST';
 }
 
+const FRANJA_SANDBOX = `<div style="background:#D72B32;color:#fff;text-align:center;font:700 14px system-ui,sans-serif;padding:6px">
+  SANDBOX · solo pruebas: aquí no se cobra de verdad ni se registran socios reales</div>`;
+
 const ESTADOS_FISICOS = new Set(['nuevo', 'danado']);
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const FOTO_MAX_BYTES = 6 * 1024 * 1024;
@@ -1084,7 +1087,14 @@ export default {
 
       // Todo lo demas son las pantallas, servidas por el Worker para que el
       // filtro de arriba alcance tambien a los HTML.
-      return await env.ASSETS.fetch(request);
+      const pantalla = await env.ASSETS.fetch(request);
+      // En el sandbox cada pantalla lo dice: ahi no se cobra de verdad.
+      if (env.AMBIENTE === 'sandbox' && pantalla.headers.get('content-type')?.includes('text/html')) {
+        return new HTMLRewriter()
+          .on('body', { element: (e) => { e.prepend(FRANJA_SANDBOX, { html: true }); } })
+          .transform(pantalla);
+      }
+      return pantalla;
     } catch (error) {
       console.error(JSON.stringify({ mensaje: 'fallo en la peticion', pathname, error: String(error) }));
       return json({ error: 'Error interno. Intenta de nuevo.' }, 500);
