@@ -47,6 +47,7 @@
 <header>
   <h1>Cola de revisión</h1>
   <a href="/captura">Ir a capturar →</a>
+  <a href="/bandas">Imprimir bandas →</a>
   <span id="resumen"></span>
 </header>
 
@@ -70,20 +71,36 @@
     <span class="aviso" id="aviso-todo"></span>
   </div>
 
+  <div class="panel ajustes" id="filtros-extra">
+    <div><label for="f-dia">Día de captura</label><input id="f-dia" type="date"></div>
+    <div><label for="f-categoria">Categoría</label><select id="f-categoria"><option value="">Todas</option></select></div>
+    <div><label for="f-min">Precio desde ($)</label><input id="f-min" type="number" min="0"></div>
+    <div><label for="f-max">Precio hasta ($)</label><input id="f-max" type="number" min="0"></div>
+    <div style="grid-column: span 2"><label for="f-sesion">Sesión de captura</label><select id="f-sesion"><option value="">Todas</option></select></div>
+    <div style="align-self: end"><button id="f-limpiar" type="button" class="claro">Quitar filtros</button></div>
+  </div>
+
   <div id="cola"></div>
 </main>
 
 <script type="module">
 import { reducirArchivo } from '/foto.js';
+import { agruparSesiones } from '/sesiones.js';
 
 const CATEGORIAS = ['ropa', 'hogar', 'electronica', 'juguetes', 'otros'];
-const DESTINOS = [['etiqueta','Etiqueta'], ['bin_20','Bin $20'], ['bin_40','Bin $40'], ['bin_60','Bin $60']];
+// Los siete montos y las familias de banda salen de la tabla `familias` (GET /api/familias).
+const { montos: MONTOS_BANDA, familias: FAMILIAS } = await (await fetch('/api/familias')).json();
+const DESTINOS = [
+  ['etiqueta', 'Etiqueta individual'],
+  ...FAMILIAS.flatMap((f) => MONTOS_BANDA.map((p) =>
+    [`banda_${f.prefijo}${p}`, `Banda ${f.nombre} $${p} → ${f.prefijo.toUpperCase()}${p}`])),
+];
 const CLAVES_CONFIG = [
   ['pct_ropa','Ropa %'], ['pct_hogar','Hogar %'], ['pct_electronica','Electrónica %'],
   ['pct_juguetes','Juguetes %'], ['pct_otros','Otros %'], ['pct_danado','Dañado %'],
-  ['limite_bin','Límite de bin ($)'], ['bin_20','Bin 1 ($)'], ['bin_40','Bin 2 ($)'], ['bin_60','Bin 3 ($)'],
+  ...MONTOS_BANDA.map((p) => [`banda_${p}`, `Banda $${p}`]),
 ];
-const EN_PESOS = new Set(['limite_bin', 'bin_20', 'bin_40', 'bin_60']);
+const EN_PESOS = new Set(MONTOS_BANDA.map((p) => `banda_${p}`));
 
 const cola = document.getElementById('cola');
 const resumen = document.getElementById('resumen');
@@ -258,18 +275,63 @@ function ficha(p) {
   return nodo;
 }
 
+/* ---------- filtros ---------- */
+
+const elDia = document.getElementById('f-dia');
+const elCategoria = document.getElementById('f-categoria');
+const elMin = document.getElementById('f-min');
+const elMax = document.getElementById('f-max');
+const elSesion = document.getElementById('f-sesion');
+elCategoria.insertAdjacentHTML('beforeend', CATEGORIAS.map((c) => `<option value="${c}">${c}</option>`).join(''));
+
+// El dia de la tienda, no el de UTC: una foto de las 7 pm ya es "manana" en UTC.
+const diaLocal = (iso) => new Date(iso).toLocaleDateString('en-CA');
+const horaLocal = (iso) => new Date(iso).toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' });
+
+function pintarSesiones(sesiones) {
+  const elegida = elSesion.value;
+  elSesion.innerHTML = '<option value="">Todas</option>' + sesiones.map((s) => {
+    const fecha = new Date(s.inicio).toLocaleDateString('es-MX', { weekday: 'short', day: 'numeric', month: 'short' });
+    const quien = s.quien ? s.quien.split('@')[0] : 'sin correo';
+    return `<option value="${s.clave}">${fecha} ${horaLocal(s.inicio)}–${horaLocal(s.fin)} · ${quien} · ${s.piezas} ${s.piezas === 1 ? 'foto' : 'fotos'}</option>`;
+  }).join('');
+  elSesion.value = elegida;   // si la sesion ya no existe, cae a "Todas"
+}
+
+function pasaFiltros(p, sesionDe) {
+  if (filtro && p.estado_analisis !== filtro) return false;
+  if (elDia.value && diaLocal(p.creado_en) !== elDia.value) return false;
+  if (elCategoria.value && p.categoria !== elCategoria.value) return false;
+  if (elMin.value !== '' && p.precio < centavos(elMin.value)) return false;
+  if (elMax.value !== '' && p.precio > centavos(elMax.value)) return false;
+  if (elSesion.value && sesionDe.get(p.id) !== elSesion.value) return false;
+  return true;
+}
+
+for (const el of [elDia, elCategoria, elMin, elMax, elSesion]) el.addEventListener('change', cargarCola);
+document.getElementById('f-limpiar').addEventListener('click', () => {
+  for (const el of [elDia, elCategoria, elMin, elMax, elSesion]) el.value = '';
+  cargarCola();
+});
+
 async function cargarCola() {
-  const piezas = await (await fetch(`/api/borradores${filtro ? `?estado=${filtro}` : ''}`)).json();
+  // Todo de una vez y se filtra aqui: las sesiones se deducen de todas las
+  // fotos, no solo de las que pasan el filtro de estado.
+  const todas = await (await fetch('/api/borradores')).json();
+  const { porPieza: sesionDe, sesiones } = agruparSesiones(todas);
+  pintarSesiones(sesiones);
+  const piezas = todas.filter((p) => pasaFiltros(p, sesionDe));
 
   // El destino de una fusion siempre es una pieza ya revisada. La lista viene de
   // la mas nueva a la mas vieja y aqui se pisa, asi que gana la mas vieja: es la
   // que probablemente ya tiene codigo y etiqueta pegada en el anaquel.
-  const listas = await (await fetch('/api/borradores?estado=listo')).json();
+  const listas = todas.filter((p) => p.estado_analisis === 'listo');
   existentes = new Map(listas.filter((p) => p.nombre).map((p) => [normalizar(p.nombre), p]));
 
   cola.replaceChildren(...piezas.map(ficha));
   const porEstado = piezas.reduce((acc, p) => ({ ...acc, [p.estado_analisis]: (acc[p.estado_analisis] ?? 0) + 1 }), {});
-  resumen.textContent = `${piezas.length} piezas · ${porEstado.pendiente ?? 0} pendientes · ${porEstado.error ?? 0} con error`;
+  const de = piezas.length === todas.length ? '' : ` de ${todas.length}`;
+  resumen.textContent = `${piezas.length}${de} piezas · ${porEstado.pendiente ?? 0} pendientes · ${porEstado.error ?? 0} con error`;
 }
 
 document.getElementById('filtros').addEventListener('click', (evento) => {

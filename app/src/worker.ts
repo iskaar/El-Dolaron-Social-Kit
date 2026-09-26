@@ -6,8 +6,12 @@
  */
 
 import { analizarBorrador, modeloPorDefecto, type Modelo } from './analisis.ts';
-import { calcularPrecio, ajustarManual, type Destino } from './precio.ts';
+import { calcularPrecio, ajustarManual, esDestinoBanda, prefijoParaFamilia, MONTOS_BANDA, type Destino } from './precio.ts';
 import { efectivoAlcanza } from '../public/venta.js';
+import { semanaIngreso } from '../public/semana.js';
+import {
+  permiso, puede, quienEs, leerUsuario, yo, pedirAcceso, listarCuentas, guardarCuenta, resolverSolicitud,
+} from './cuentas.ts';
 
 interface FilaConfig {
   clave: string;
@@ -34,11 +38,21 @@ interface FilaBorrador {
  * valiendo si algun dia la politica de Access queda mal configurada. Los precios
  * y el inventario no viven en el telefono que anda en el pasillo.
  */
-const RUTAS_VENDEDOR = new Set(['/captura', '/foto.js', '/api/salud']);
+const RUTAS_VENDEDOR = new Set(['/captura', '/foto.js', '/api/salud', '/sin-acceso', '/api/yo']);
+const EXISTENCIA = /^\/api\/borradores\/([^/]+)\/existencia$/;
 
-function permitidaParaVendedor(pathname: string, metodo: string): boolean {
+export function permitidaParaVendedor(pathname: string, metodo: string): boolean {
   if (RUTAS_VENDEDOR.has(pathname)) {
     return metodo === 'GET';
+  }
+  // Corregir cuantas piezas son, desde el carrusel de la camara. El handler
+  // limita a lo que esa persona capturo en las ultimas 24 h.
+  if (EXISTENCIA.test(pathname)) {
+    return metodo === 'PATCH';
+  }
+  // Quien entra por la camara sin cuenta tambien tiene que poder pedirla.
+  if (pathname === '/api/solicitudes/acceso') {
+    return metodo === 'POST';
   }
   return pathname === '/api/borradores' && metodo === 'POST';
 }
@@ -52,16 +66,6 @@ function json(cuerpo: unknown, status = 200): Response {
     status,
     headers: { 'content-type': 'application/json; charset=utf-8' },
   });
-}
-
-/** Semana ISO de ingreso, como 'S37'. Va impresa en la etiqueta. */
-export function semanaIngreso(fecha: Date): string {
-  const d = new Date(Date.UTC(fecha.getUTCFullYear(), fecha.getUTCMonth(), fecha.getUTCDate()));
-  // Jueves de esa semana: define el año ISO al que pertenece.
-  d.setUTCDate(d.getUTCDate() + 4 - (d.getUTCDay() || 7));
-  const primeroDeEnero = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
-  const semana = Math.ceil(((d.getTime() - primeroDeEnero.getTime()) / 86400000 + 1) / 7);
-  return `S${String(semana).padStart(2, '0')}`;
 }
 
 async function leerConfig(env: Env): Promise<Record<string, string>> {
@@ -87,7 +91,7 @@ function modeloPedido(url: URL, env: Env): Modelo {
  * Guarda la foto y el borrador. Idempotente por id: el telefono genera el id
  * antes de subir, asi que un reintento tras una red caida no duplica la pieza.
  */
-async function crearBorrador(request: Request, env: Env, ctx: ExecutionContext, url: URL): Promise<Response> {
+async function crearBorrador(request: Request, env: Env, ctx: ExecutionContext, url: URL, correo: string): Promise<Response> {
   const formulario = await request.formData();
   const id = String(formulario.get('id') ?? '');
   const estadoFisico = String(formulario.get('estado_fisico') ?? 'nuevo');
@@ -113,9 +117,9 @@ async function crearBorrador(request: Request, env: Env, ctx: ExecutionContext, 
     httpMetadata: { contentType: 'image/jpeg' },
   });
 
-  // Cloudflare Access ya identifica a quien sube la foto; se guarda para poder
-  // distinguir lo del vendedor de lo de un desconocido.
-  const capturadoPor = request.headers.get('cf-access-authenticated-user-email') ?? '';
+  // El correo verificado de quien sube la foto (ver cuentas.ts): de el salen
+  // las sesiones de captura y la correccion de existencia desde el carrusel.
+  const capturadoPor = correo;
 
   const ahora = new Date();
   await env.DB.prepare(
@@ -157,7 +161,14 @@ async function listarBorradores(url: URL, env: Env): Promise<Response> {
 }
 
 const CATEGORIAS = new Set(['ropa', 'hogar', 'electronica', 'juguetes', 'otros']);
-const DESTINOS = new Set(['etiqueta', 'bin_20', 'bin_40', 'bin_60']);
+
+/** Etiqueta individual, o una banda de una familia que existe en la tabla `familias`. */
+async function destinoValido(destino: string, env: Env): Promise<boolean> {
+  if (destino === 'etiqueta') return true;
+  if (!esDestinoBanda(destino)) return false;
+  const prefijo = /^banda_([a-z]+)/.exec(destino)![1];
+  return (await env.DB.prepare('select 1 from familias where prefijo = ?').bind(prefijo).first()) !== null;
+}
 
 /**
  * Correcciones del admin. Solo llegan los campos que cambiaron; si no viene un
@@ -210,8 +221,8 @@ async function corregirBorrador(id: string, request: Request, env: Env): Promise
     if (!Number.isFinite(precio) || precio < 0) {
       return json({ error: 'Precio invalido.' }, 400);
     }
-    if (DESTINOS.has(destino)) {
-      // Bin: manda el precio del bote. Etiqueta: se redondea a $5 como el automatico.
+    if (esDestinoBanda(destino)) {
+      // Banda: manda el precio de la banda. Etiqueta: quiebra la decena (termina en 9) como el automatico.
       precio = ajustarManual({ precio, destino: destino as Destino, config });
     }
     // Misma regla que en el calculo automatico: el precio de venta nunca queda
@@ -221,7 +232,7 @@ async function corregirBorrador(id: string, request: Request, env: Env): Promise
     }
   }
 
-  if (!DESTINOS.has(destino)) {
+  if (!await destinoValido(destino, env)) {
     return json({ error: 'Destino invalido.' }, 400);
   }
 
@@ -234,6 +245,37 @@ async function corregirBorrador(id: string, request: Request, env: Env): Promise
     .run();
 
   return json({ id, nombre, categoria, precio_lista: precioLista, precio, estado_fisico: estadoFisico, destino, stock });
+}
+
+/** Cuanto dura abierta la correccion de existencia desde la camara. */
+const VENTANA_CAPTURA_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * La existencia de una pieza recien capturada, desde el carrusel de /captura.
+ * Solo quien la capturo y solo en las primeras 24 h: el telefono del pasillo no
+ * es la puerta para ajustar inventario viejo (eso es la cola de revision), y
+ * pasado ese rato la pieza ya pudo venderse y un numero absoluto pisaria la venta.
+ */
+async function corregirExistencia(id: string, request: Request, env: Env, correo: string): Promise<Response> {
+  if (!UUID.test(id)) {
+    return json({ error: 'Identificador invalido.' }, 400);
+  }
+  const { stock: crudo } = (await request.json()) as { stock?: unknown };
+  const stock = Number(crudo);
+  if (!Number.isInteger(stock) || stock < 1 || stock > 999) {
+    return json({ error: 'Existencia invalida.' }, 400);
+  }
+  const quien = correo;
+  const desde = new Date(Date.now() - VENTANA_CAPTURA_MS).toISOString();
+  const resultado = await env.DB.prepare(
+    'update productos set stock = ?, actualizado_en = ? where id = ? and capturado_por = ? and creado_en > ?',
+  )
+    .bind(stock, new Date().toISOString(), id, quien, desde)
+    .run();
+  if (resultado.meta.changes === 0) {
+    return json({ error: 'Solo puedes cambiar lo que capturaste en las ultimas 24 horas.' }, 404);
+  }
+  return json({ id, stock });
 }
 
 /**
@@ -330,6 +372,61 @@ async function guardarConfig(request: Request, env: Env): Promise<Response> {
       .run();
   }
   return json(await leerConfig(env));
+}
+
+const FAMILIAS_MAX = 40;
+
+/** Las familias de banda y los siete precios que comparten, para /bandas, el admin y la tarjeta. */
+async function listarFamilias(env: Env): Promise<Response> {
+  const { results } = await env.DB.prepare('select clave, nombre, prefijo from familias order by rowid').all();
+  return json({ montos: MONTOS_BANDA, familias: results });
+}
+
+/**
+ * Da de alta una familia de banda: su fila en `familias` y sus siete productos
+ * de catalogo (sin existencias, como las demas bandas), en un solo batch. El
+ * prefijo del codigo sale del nombre y nunca choca con uno ya usado.
+ */
+async function crearFamilia(request: Request, env: Env): Promise<Response> {
+  const { nombre: crudo } = (await request.json()) as { nombre?: unknown };
+  const nombre = String(crudo ?? '').replace(/["\\]/g, ' ').replace(/\s+/g, ' ').trim();
+  if (nombre.length < 2 || nombre.length > 24) {
+    return json({ error: 'El nombre debe tener entre 2 y 24 caracteres.' }, 400);
+  }
+  const clave = nombre.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+  if (!clave) {
+    return json({ error: 'El nombre necesita letras o numeros.' }, 400);
+  }
+
+  const { results } = await env.DB.prepare('select clave, prefijo from familias').all<{ clave: string; prefijo: string }>();
+  if (results.length >= FAMILIAS_MAX) {
+    return json({ error: `Ya hay ${FAMILIAS_MAX} familias.` }, 400);
+  }
+  if (results.some((f) => f.clave === clave)) {
+    return json({ error: 'Esa familia ya existe.' }, 409);
+  }
+  const prefijo = prefijoParaFamilia(nombre, new Set(results.map((f) => f.prefijo)));
+  if (!prefijo) {
+    return json({ error: 'No se pudo armar un codigo con ese nombre.' }, 400);
+  }
+
+  const config = await leerConfig(env);
+  const ahora = new Date().toISOString();
+  await env.DB.batch([
+    env.DB.prepare('insert into familias (clave, nombre, prefijo, creado_en) values (?, ?, ?, ?)')
+      .bind(clave, nombre, prefijo, ahora),
+    ...MONTOS_BANDA.map((monto) => env.DB.prepare(
+      `insert into productos (id, codigo, nombre, categoria, precio_lista, precio, estado_fisico,
+                              estado_analisis, destino, stock, sin_inventario, semana_ingreso,
+                              foto_key, creado_en, actualizado_en)
+       values (?, ?, ?, 'otros', 0, ?, 'nuevo', 'listo', ?, 0, 1, 'S00', '', ?, ?)`,
+    ).bind(
+      crypto.randomUUID(), `${prefijo.toUpperCase()}${monto}`, `${nombre} $${monto}`,
+      Number.parseInt(config[`banda_${monto}`] ?? '', 10) || monto * 100,
+      `banda_${prefijo}${monto}`, ahora, ahora,
+    )),
+  ]);
+  return json({ clave, nombre, prefijo }, 201);
 }
 
 /** Catalogo para la caja: se guarda en el navegador y se cobra sin red. */
@@ -497,7 +594,7 @@ async function registrarVenta(request: Request, env: Env): Promise<Response> {
  * La venta no se borra, se marca: el corte del dia tiene que seguir explicando
  * todo lo que paso, incluido lo que se deshizo. Las piezas vuelven al inventario.
  */
-async function cancelarVenta(id: string, request: Request, env: Env): Promise<Response> {
+async function cancelarVenta(id: string, request: Request, env: Env, correo: string): Promise<Response> {
   if (!UUID.test(id)) {
     return json({ error: 'Identificador de venta invalido.' }, 400);
   }
@@ -510,7 +607,7 @@ async function cancelarVenta(id: string, request: Request, env: Env): Promise<Re
   if (!motivo) {
     return json({ error: 'Escribe el motivo de la cancelacion.' }, 400);
   }
-  const canceladaPor = request.headers.get('cf-access-authenticated-user-email') ?? '';
+  const canceladaPor = correo;
 
   const venta = await env.DB.prepare('select id, total from ventas where id = ?')
     .bind(id)
@@ -640,7 +737,7 @@ async function reportes(url: URL, env: Env): Promise<Response> {
   const porDia = ventasPorDia.map((f) => ({ ...f, piezas: piezasPorDiaMapa.get(f.dia) ?? 0 }));
 
   const { results: porCategoria } = await env.DB.prepare(
-    `select case when p.sin_inventario = 1 then 'bins' else coalesce(p.categoria, 'sin categoria') end as categoria,
+    `select case when p.sin_inventario = 1 then 'bandas' else coalesce(p.categoria, 'sin categoria') end as categoria,
        coalesce(sum(l.precio * l.cantidad), 0) as total, coalesce(sum(l.cantidad), 0) as piezas
      from venta_lineas l join ventas v on v.id = l.venta_id left join productos p on p.id = l.producto_id
      where v.cancelada = 0 and v.creado_en >= ?
@@ -816,6 +913,40 @@ export default {
         return json({ estado: 'ok' });
       }
 
+      // Quien es (JWT de Access verificado) y si su cuenta le deja entrar aqui.
+      const regla = permiso(pathname, request.method);
+      const correo = await quienEs(request, env, url.hostname);
+      if (!correo) {
+        return json({ error: 'Sin sesion. Vuelve a entrar.' }, 401);
+      }
+      if (regla !== 'cuenta') {
+        const usuario = await leerUsuario(env, correo);
+        if (!puede(usuario, regla)) {
+          // Una pantalla lleva a donde se pide acceso; una llamada de la API
+          // recibe el error tal cual.
+          if (!pathname.startsWith('/api/') && request.method === 'GET') {
+            return Response.redirect(`${url.origin}/sin-acceso?desde=${encodeURIComponent(pathname)}`, 302);
+          }
+          return json({ error: usuario?.activo ? 'Tu cuenta no tiene permiso para esto.' : 'No tienes cuenta activa.' }, 403);
+        }
+      }
+
+      if (pathname === '/api/yo') {
+        return await yo(env, correo);
+      }
+      if (pathname === '/api/solicitudes/acceso' && request.method === 'POST') {
+        return await pedirAcceso(request, env, correo);
+      }
+      if (pathname === '/api/cuentas') {
+        if (request.method === 'GET') return await listarCuentas(env);
+        if (request.method === 'PUT') return await guardarCuenta(request, env);
+        return json({ error: 'Metodo no permitido.' }, 405);
+      }
+      const resolver = pathname.match(/^\/api\/solicitudes\/([^/]+)\/resolver$/);
+      if (resolver && request.method === 'POST') {
+        return await resolverSolicitud(resolver[1], request, env, correo);
+      }
+
       if (pathname === '/api/config') {
         if (request.method === 'PUT') {
           return await guardarConfig(request, env);
@@ -825,7 +956,7 @@ export default {
 
       if (pathname === '/api/borradores') {
         if (request.method === 'POST') {
-          return await crearBorrador(request, env, ctx, url);
+          return await crearBorrador(request, env, ctx, url, correo);
         }
         if (request.method === 'GET') {
           return await listarBorradores(url, env);
@@ -836,6 +967,13 @@ export default {
       const foto = pathname.match(/^\/api\/foto\/([^/]+)$/);
       if (foto) {
         return await servirFoto(foto[1], env);
+      }
+
+      if (pathname === '/api/familias') {
+        if (request.method === 'POST') {
+          return await crearFamilia(request, env);
+        }
+        return await listarFamilias(env);
       }
 
       if (pathname === '/api/catalogo') {
@@ -851,7 +989,7 @@ export default {
 
       const cancelacion = pathname.match(/^\/api\/ventas\/([^/]+)\/cancelar$/);
       if (cancelacion && request.method === 'POST') {
-        return await cancelarVenta(cancelacion[1], request, env);
+        return await cancelarVenta(cancelacion[1], request, env, correo);
       }
 
       if (pathname === '/api/reportes') {
@@ -877,6 +1015,11 @@ export default {
           return await descartarBorrador(pieza[1], env);
         }
         return json({ error: 'Metodo no permitido.' }, 405);
+      }
+
+      const existencia = pathname.match(EXISTENCIA);
+      if (existencia && request.method === 'PATCH') {
+        return await corregirExistencia(existencia[1], request, env, correo);
       }
 
       const fusion = pathname.match(/^\/api\/borradores\/([^/]+)\/fusionar$/);

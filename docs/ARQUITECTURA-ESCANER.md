@@ -63,9 +63,9 @@ create table productos (
   precio         integer not null default 0,-- centavos MXN
   estado_fisico  text not null default 'nuevo',   -- nuevo|danado
   estado_analisis text not null default 'pendiente', -- pendiente|listo|error
-  destino        text not null default 'etiqueta',  -- etiqueta|bin_20|bin_40|bin_60
+  destino        text not null default 'etiqueta',  -- etiqueta|banda_r19..banda_g199
   stock          integer not null default 1,
-  sin_inventario integer not null default 0, -- 1 = los bins, no descuentan
+  sin_inventario integer not null default 0, -- 1 = las bandas, no descuentan
   semana_ingreso text not null,              -- 'S37'
   foto_key       text not null default '',   -- llave en R2
   creado_en      text not null,
@@ -77,7 +77,7 @@ create table config (clave text primary key, valor text not null);
 
 **Dinero en centavos, enteros.** Nada de flotantes en precios.
 
-`config` guarda los porcentajes del contrato (`pct_ropa`, `pct_hogar`, …, `pct_danado`, `limite_bin`), con los valores confirmados: 50 % por categoría, 60 % para dañado, límite de bin en $60. Se editan desde el admin. Ninguno vive en el código.
+`config` guarda los porcentajes del contrato (`pct_ropa`, `pct_hogar`, …, `pct_danado`, `limite_banda`, `banda_19`…`banda_199`), con los valores confirmados: 50 % por categoría, 60 % para dañado, límite de banda en $200 (ver `docs/PLAN-ETIQUETAS-POR-BANDA.md`). Se editan desde el admin. Ninguno vive en el código.
 
 Las tablas de ventas llegan con el issue #5, en la misma base. No habrá un segundo maestro de existencias.
 
@@ -167,6 +167,16 @@ unidad (u otra) hay que volver a interrogarla, `/sonda-impresora` sigue desplega
 ## Acceso
 
 **Cloudflare Access delante del Worker**, gratis hasta 50 usuarios: el vendedor y el admin entran con su correo, sin una línea de código de autenticación en el repositorio. Los precios y el inventario no quedan abiertos en internet.
+
+> Actualizado 2026-09-26 (Issue #75): Access **autentica** (cuenta de Google) y la app
+> **autoriza**. `src/cuentas.ts` verifica la firma del JWT de Access
+> (`Cf-Access-Jwt-Assertion`, equipo y `aud` en `wrangler.jsonc`) en cada petición y
+> busca el correo en la tabla `usuarios` (roles: dueño, cajero, capturista; varios por
+> persona). Cada ruta tiene sus roles en `permiso()`; lo que no está listado es solo del
+> dueño. Sin cuenta activa, la persona solo ve `/sin-acceso`, donde pide acceso con una
+> justificación; el dueño aprueba o rechaza en `/cuentas` (rol por omisión: cajero).
+> `workers_dev` y las URLs de vista previa están apagadas: el Worker solo responde
+> detrás de Access. Para probar local: `wrangler dev --var ACCESS_EQUIPO:local --var DEV_USUARIO:<correo>`.
 
 ## Orden de entrega
 

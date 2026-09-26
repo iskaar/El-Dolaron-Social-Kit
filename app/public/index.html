@@ -8,8 +8,11 @@
   :root { --azul: #16366B; --rojo: #D72B32; --linea: #dfe3ea; }
   * { box-sizing: border-box; }
   body { margin: 0; font-family: system-ui, -apple-system, sans-serif; color: #1a1f2b; background: #f4f6f9; }
-  header { background: var(--azul); color: #fff; padding: 18px 20px; }
+  header { background: var(--azul); color: #fff; padding: 18px 20px;
+    display: flex; align-items: baseline; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
   header h1 { margin: 0; font-size: 20px; }
+  #quien { font-size: 13px; opacity: .85; }
+  a.tool[hidden] { display: none; }
   main { max-width: 640px; margin: 0 auto; padding: 18px; display: grid; gap: 12px; }
   a.tool { display: block; background: #fff; border: 1px solid var(--linea); border-radius: 12px;
     padding: 16px 18px; text-decoration: none; color: inherit; }
@@ -19,15 +22,30 @@
 </style>
 </head>
 <body>
-<header><h1>El Dolarón</h1></header>
+<header><h1>El Dolarón</h1><span id="quien"></span></header>
 <main>
-  <a class="tool" href="/caja"><b>Caja</b><span>Cobrar ventas, cancelar, corte del día</span></a>
-  <a class="tool" href="/admin"><b>Cola de revisión</b><span>Piezas capturadas: precio, nombre, existencia, configuración</span></a>
-  <a class="tool" href="/reportes"><b>Reportes</b><span>Ventas por día y categoría, ticket promedio, exportar datos</span></a>
-  <a class="tool" href="/etiquetas"><b>Etiquetas</b><span>Imprimir etiquetas por lote (Zebra TLP 2844)</span></a>
-  <a class="tool" href="/captura"><b>Captura</b><span>Cámara para subir fotos de piezas nuevas</span></a>
-  <a class="tool" href="/tarjeta-bins"><b>Tarjeta de botes</b><span>Códigos BIN $20 / $40 / $60 para laminar junto a la caja</span></a>
-  <a class="tool" href="/prueba-codigo"><b>Prueba de código</b><span>Hoja de anchos para calibrar el lector de barras</span></a>
+  <a class="tool" href="/caja" data-roles="cajero"><b>Caja</b><span>Cobrar ventas, cancelar, corte del día</span></a>
+  <a class="tool" href="/admin" data-roles="capturista"><b>Cola de revisión</b><span>Piezas capturadas: precio, nombre, existencia, configuración</span></a>
+  <a class="tool" href="/reportes" data-roles=""><b>Reportes</b><span>Ventas por día y categoría, ticket promedio, exportar datos</span></a>
+  <a class="tool" href="/etiquetas" data-roles="capturista"><b>Etiquetas</b><span>Imprimir etiquetas individuales por lote (piezas &gt; $200)</span></a>
+  <a class="tool" href="/bandas" data-roles="capturista"><b>Bandas</b><span>Imprimir por lote los 14 códigos de banda ($19–$199, ropa/general)</span></a>
+  <a class="tool" href="/captura" data-roles="capturista"><b>Captura</b><span>Cámara para subir fotos de piezas nuevas</span></a>
+  <a class="tool" href="/tarjeta-bandas" data-roles="cajero capturista"><b>Tarjeta de bandas</b><span>Los 14 códigos de banda para laminar junto a la caja</span></a>
+  <a class="tool" href="/cuentas" data-roles=""><b>Cuentas</b><span>Quién entra y con qué rol; solicitudes por aprobar</span></a>
+  <a class="tool" href="/prueba-codigo" data-roles="capturista"><b>Prueba de código</b><span>Hoja de anchos para calibrar el lector de barras</span></a>
 </main>
+<script type="module">
+// Solo esconde lo que no toca: el permiso de verdad lo cobra el servidor en
+// cada pantalla y cada llamada (src/cuentas.ts). data-roles="" = solo el dueno.
+const { correo, usuario } = await (await fetch('/api/yo')).json();
+const roles = usuario?.activo ? usuario.roles : [];
+if (roles.length === 0) location.replace('/sin-acceso');
+const dueno = roles.includes('dueno');
+for (const a of document.querySelectorAll('a.tool')) {
+  const piden = a.dataset.roles.split(' ').filter(Boolean);
+  a.hidden = !dueno && !piden.some((r) => roles.includes(r));
+}
+document.getElementById('quien').textContent = `${usuario?.nombre || correo} · ${roles.join(', ')}`;
+</script>
 </body>
 </html>

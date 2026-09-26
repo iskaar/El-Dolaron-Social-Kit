@@ -8,8 +8,8 @@ import { prepararLineas } from './worker.ts';
 const catalogo = () => new Map([
   ['a1111111-1111-4111-8111-111111111111',
     { id: 'a1111111-1111-4111-8111-111111111111', codigo: 'ED-000001', nombre: 'Ventilador', precio: 25000, sin_inventario: 0 }],
-  ['00000000-0000-4000-8000-000000000020',
-    { id: '00000000-0000-4000-8000-000000000020', codigo: 'BIN-20', nombre: 'Bin $20', precio: 2000, sin_inventario: 1 }],
+  ['00000000-0000-4000-8000-200000000019',
+    { id: '00000000-0000-4000-8000-200000000019', codigo: 'G19', nombre: 'General $19', precio: 1900, sin_inventario: 1 }],
 ]);
 
 test('un precio alterado por el navegador se ignora: manda el del catalogo', () => {
@@ -45,12 +45,23 @@ test('un ticket vacio no produce lineas', () => {
   assert.equal(resultado.ok, false);
 });
 
-test('el bin se marca sin inventario: la caja no le descuenta existencia', () => {
+test('la banda se marca sin inventario: la caja no le descuenta existencia', () => {
   const resultado = prepararLineas(
-    [{ producto_id: '00000000-0000-4000-8000-000000000020', cantidad: 3 }],
+    [{ producto_id: '00000000-0000-4000-8000-200000000019', cantidad: 3 }],
     catalogo(),
   );
   assert.ok(resultado.ok);
   assert.equal(resultado.lineas[0].sinInventario, true);
-  assert.equal(resultado.lineas[0].precio, 2000);
+  assert.equal(resultado.lineas[0].precio, 1900);
+});
+
+test('la puerta del vendedor deja corregir la existencia, y nada mas de una pieza', async () => {
+  const { permitidaParaVendedor } = await import('./worker.ts');
+  const id = 'a1111111-1111-4111-8111-111111111111';
+  assert.equal(permitidaParaVendedor(`/api/borradores/${id}/existencia`, 'PATCH'), true);
+  assert.equal(permitidaParaVendedor(`/api/borradores/${id}/existencia`, 'GET'), false);
+  assert.equal(permitidaParaVendedor(`/api/borradores/${id}`, 'PATCH'), false);
+  assert.equal(permitidaParaVendedor(`/api/borradores/${id}`, 'DELETE'), false);
+  assert.equal(permitidaParaVendedor('/api/borradores', 'GET'), false);
+  assert.equal(permitidaParaVendedor('/api/borradores', 'POST'), true);
 });

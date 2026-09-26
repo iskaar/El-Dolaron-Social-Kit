@@ -1,0 +1,209 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>El Dolarón — bandas</title>
+<style>
+  :root { --azul:#16366B; --linea:#dfe3ea; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: #f4f6f9; color: #1a1f2b;
+    font-family: system-ui, -apple-system, sans-serif; }
+  header { background: var(--azul); color: #fff; padding: 14px 20px;
+    display: flex; gap: 16px; align-items: center; flex-wrap: wrap; }
+  header h1 { font-size: 18px; margin: 0; flex: 1; }
+  header a { color: #FFD447; font-size: 14px; }
+  main { padding: 20px; max-width: 900px; margin: 0 auto; }
+  .barra { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-bottom: 16px; }
+  .barra label { font-size: 13px; color: #5b6478; }
+  .barra input { width: 80px; padding: 8px 10px; border: 1px solid var(--linea);
+    border-radius: 8px; font-size: 15px; }
+  button { border: 0; border-radius: 8px; padding: 8px 12px; font-size: 13px;
+    font-weight: 600; cursor: pointer; background: var(--azul); color: #fff; }
+  button.claro { background: #fff; color: #1a1f2b; border: 1px solid var(--linea); }
+  .ayuda { font-size: 13px; color: #5b6478; line-height: 1.45; margin: 0 0 16px; max-width: 70ch; }
+  .familia h2 { font-size: 14px; color: var(--azul); margin: 18px 0 8px; }
+  .rejilla { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 10px; }
+  .banda { background: #fff; border: 1px solid var(--linea); border-radius: 10px; padding: 12px;
+    display: flex; flex-direction: column; gap: 6px; align-items: center; }
+  .banda .precio { font-size: 26px; font-weight: 800; color: var(--azul); }
+  .banda .codigo { font-family: ui-monospace, monospace; font-size: 12px; color: #5b6478; }
+  .banda.impresa { border-color: #1f7a4d; }
+  #resumen { font-size: 13px; color: #5b6478; }
+  .barra select { padding: 8px 10px; border: 1px solid var(--linea); border-radius: 8px; font-size: 15px; background: #fff; }
+  .barra #nombre-nueva { width: 220px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Bandas</h1>
+  <a href="/admin">← Cola de revisión</a>
+  <a href="/tarjeta-bandas">Tarjeta impresa →</a>
+</header>
+
+<main>
+  <p class="ayuda">
+    Las bandas son para lo que se etiqueta sin fotografiar ni analizar: se imprimen
+    por lote y se pega una a cada pieza. Escoge la categoría, cuántas etiquetas
+    necesitas y aprieta la banda que corresponde — salen todas seguidas.
+    Para una categoría que no está en la lista, escoge «Otro…» y dala de alta.
+    Prende la impresora antes de imprimir.
+  </p>
+
+  <div class="barra">
+    <label for="cantidad">Cantidad por banda</label>
+    <input id="cantidad" type="number" min="1" max="200" value="20">
+    <button id="otra" class="claro" type="button">¿No aparece la impresora?</button>
+    <button id="detener" class="claro" type="button">Detener</button>
+    <span id="resumen"></span>
+  </div>
+
+  <details id="historial-envios">
+    <summary>Historial de envíos a la impresora</summary>
+    <p class="ayuda">
+      No hay cola de impresión: cada etiqueta se manda por Bluetooth en cuanto se pide.
+      Aquí se anota lo que salió de esta página. Si dice «enviadas» y no salió nada,
+      el problema está en la impresora (papel, sensor, luz de error), no aquí.
+    </p>
+    <pre id="historial"></pre>
+  </details>
+
+  <div class="barra">
+    <label for="familia">Categoría</label>
+    <select id="familia"></select>
+    <span id="nueva" hidden>
+      <input id="nombre-nueva" type="text" maxlength="24" placeholder="Nombre de la familia nueva" autocomplete="off">
+      <button id="agregar" type="button">Agregar familia</button>
+    </span>
+  </div>
+
+  <div id="familias"></div>
+</main>
+
+<script type="module">
+import { conectarEtiquetera, etiqueteraLista, imprimirBanda, historialTexto, detenerEnvio, errorEnvio } from '/etiquetera.js';
+import { semanaIngreso } from '/semana.js';
+
+const semana = semanaIngreso(new Date());
+const resumen = document.getElementById('resumen');
+const pintarHistorial = () => { document.getElementById('historial').textContent = historialTexto(); };
+pintarHistorial();
+const cantidad = document.getElementById('cantidad');
+const selector = document.getElementById('familia');
+const escapar = (texto) => texto.replace(/[<>&"]/g, (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;' }[c]));
+
+// Las familias y los siete montos salen de la tabla `familias` (GET /api/familias).
+let montos = [];
+let familias = [];
+
+function pintarFamilia() {
+  document.getElementById('nueva').hidden = selector.value !== '__otro';
+  const f = familias.find((x) => x.prefijo === selector.value);
+  try { if (f) localStorage.setItem('bandas-familia', f.prefijo); } catch { /* sin memoria, no pasa nada */ }
+  document.getElementById('familias').innerHTML = !f ? '' : `
+    <div class="familia">
+      <h2>${escapar(f.nombre)}</h2>
+      <div class="rejilla">
+        ${montos.map((p) => {
+          const codigo = `${f.prefijo.toUpperCase()}${p}`;
+          return `<button type="button" class="banda claro" data-codigo="${codigo}" data-familia="${escapar(f.nombre)}" data-precio="${p}">
+            <span class="precio">$${p}</span>
+            <span class="codigo">${codigo}</span>
+          </button>`;
+        }).join('')}
+      </div>
+    </div>`;
+}
+
+async function cargarFamilias(elegir) {
+  const respuesta = await fetch('/api/familias');
+  ({ montos, familias } = await respuesta.json());
+  selector.innerHTML = familias.map((f) => `<option value="${f.prefijo}">${escapar(f.nombre)} (${f.prefijo.toUpperCase()})</option>`).join('')
+    + '<option value="__otro">Otro…</option>';
+  let recordada = null;
+  try { recordada = localStorage.getItem('bandas-familia'); } catch { /* idem */ }
+  selector.value = [elegir, recordada].find((p) => familias.some((f) => f.prefijo === p)) ?? familias[0]?.prefijo ?? '__otro';
+  pintarFamilia();
+}
+
+selector.addEventListener('change', pintarFamilia);
+
+document.getElementById('agregar').addEventListener('click', async () => {
+  const campo = document.getElementById('nombre-nueva');
+  const respuesta = await fetch('/api/familias', {
+    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ nombre: campo.value }),
+  });
+  const cuerpo = await respuesta.json();
+  if (!respuesta.ok) {
+    resumen.textContent = cuerpo.error;
+    return;
+  }
+  campo.value = '';
+  resumen.textContent = `Familia «${cuerpo.nombre}» creada, con código ${cuerpo.prefijo.toUpperCase()}.`;
+  await cargarFamilias(cuerpo.prefijo);
+});
+
+await cargarFamilias();
+
+/** Traduce la falla de Bluetooth a algo accionable parado junto a la impresora. */
+function avisarFalla(error) {
+  resumen.textContent = error.name === 'NotFoundError'
+    ? 'No se escogió impresora. Préndela y vuelve a intentar, o usa «¿No aparece la impresora?».'
+    : /disconnected/i.test(error.message)
+      ? 'La impresora soltó la conexión. Apágala y préndela, cierra cualquier otra pestaña o programa que la use (y desconéctala del Bluetooth de Windows si aparece como conectada) y vuelve a intentar.'
+      : `No se pudo conectar la impresora: ${error.message}`;
+}
+
+document.getElementById('otra').addEventListener('click', async () => {
+  try {
+    await conectarEtiquetera({ cualquiera: true });
+    resumen.textContent = 'Impresora conectada. Ya puedes imprimir.';
+  } catch (error) {
+    avisarFalla(error);
+  }
+});
+
+document.getElementById('detener').addEventListener('click', () => detenerEnvio());
+
+document.getElementById('familias').addEventListener('click', async (e) => {
+  const boton = e.target.closest('.banda');
+  if (!boton) return;
+
+  detenerEnvio(false);
+  const copias = Math.min(200, Math.max(1, Math.round(Number(cantidad.value)) || 1));
+  const banda = {
+    familia: boton.dataset.familia,
+    precioPesos: Number(boton.dataset.precio),
+    codigo: boton.dataset.codigo,
+    semana,
+  };
+
+  // Antes que nada: pedir la impresora gasta el permiso del clic, y el
+  // navegador ya no lo da despues de una espera.
+  if (!etiqueteraLista()) {
+    try {
+      await conectarEtiquetera();
+    } catch (error) {
+      avisarFalla(error);
+      return;
+    }
+  }
+
+  resumen.textContent = `Imprimiendo ${copias} de ${banda.codigo}…`;
+  boton.classList.remove('impresa');
+  const salio = await imprimirBanda(banda, copias, (hechas) => {
+    resumen.textContent = `Imprimiendo ${banda.codigo}: etiqueta ${hechas} de ${copias}…`;
+  }, (segundos) => {
+    resumen.textContent = `Pausa de ${segundos} s para que la impresora vacíe lo que tiene (${banda.codigo})…`;
+  });
+  pintarHistorial();
+  if (salio) {
+    resumen.textContent = `${copias} etiquetas de ${banda.codigo} enviadas.`;
+    boton.classList.add('impresa');
+  } else {
+    resumen.textContent = `Se cortó la impresora imprimiendo ${banda.codigo}: ${errorEnvio() || 'detenido'}.`;
+  }
+});
+</script>
+</body>
+</html>

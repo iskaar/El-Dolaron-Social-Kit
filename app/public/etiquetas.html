@@ -19,47 +19,21 @@
     font-weight: 600; cursor: pointer; background: var(--azul); color: #fff; }
   button.claro { background: #fff; color: #1a1f2b; border: 1px solid var(--linea); }
   .lista { background: #fff; border: 1px solid var(--linea); border-radius: 12px; overflow: hidden; }
-  .renglon { display: grid; grid-template-columns: 28px 34px 56px 1fr 110px 90px;
+  .renglon { display: grid; grid-template-columns: 28px 34px 56px 1fr 110px 90px 84px;
     gap: 12px; align-items: center; padding: 10px 14px; border-top: 1px solid var(--linea); }
   .renglon .posicion { color: #9aa4b6; font-size: 13px; font-variant-numeric: tabular-nums; text-align: right; }
   .renglon:first-child { border-top: 0; }
   .renglon img { width: 56px; height: 56px; object-fit: cover; border-radius: 6px; background: #eceff4; }
   .renglon .precio { font-weight: 700; }
+  .renglon.impresa { background: #f1f7ef; }
+  .renglon.impresa img { opacity: .5; }
+  .renglon.cambiada { background: #fff6d9; }
+  .renglon .marca.aviso { color: #8a6d00; font-weight: 600; }
+  .renglon .copias { width: 64px; padding: 6px; font-size: 14px; border: 1px solid var(--linea); border-radius: 6px; }
+  .renglon .marca { display: block; font-size: 12px; color: #2f7a3a; margin-top: 4px; }
+  .renglon .marca button { padding: 3px 8px; font-size: 12px; margin-left: 6px; }
   .vacio { padding: 24px; text-align: center; color: #5b6478; }
   .ayuda { font-size: 13px; color: #5b6478; line-height: 1.45; margin: 0 0 16px; max-width: 70ch; }
-
-  /* Impresora de 2 x 1 in (50.8 x 25.4 mm), 2 in a lo ancho del cabezal.
-     Reemplaza la Zebra TLP 2844 (57 x 32 mm) del 2026-09-20. Escalado
-     proporcional desde ese diseno; el ancho de modulo del codigo de barras
-     sigue pendiente de calibrar en esta impresora con /prueba-codigo.
-     Sin logo: Isaac lo quito para darle ese espacio al precio, que es lo
-     que se lee de mas lejos. */
-  #hoja { display: none; }
-  .etiqueta { width: 50.8mm; height: 25.4mm; padding: 1mm; border: 0.2mm dashed #bbb;
-    display: flex; flex-direction: column; justify-content: space-between; overflow: hidden; }
-  /* El nombre es lo que se lee de cerca, asi que se lleva el espacio sobrante.
-     Dos renglones es lo que cabe sin empujar el codigo de barras, y los
-     nombres largos se cortan con puntos suspensivos. */
-  .etiqueta .nombre { font-size: 2.9mm; line-height: 1.15; font-weight: 600;
-    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
-  .etiqueta .precios { display: flex; align-items: baseline; gap: 1.5mm; }
-  .etiqueta .ahora { font-size: 6.8mm; font-weight: 800; letter-spacing: -0.15mm; }
-  .etiqueta .antes { font-size: 2.6mm; text-decoration: line-through; color: #555; }
-  /* El codigo de barras ocupa su propio renglon: recortado no lo lee el lector. */
-  .etiqueta .pie { text-align: center; }
-  .etiqueta .codigo { font-size: 2.1mm; font-family: ui-monospace, monospace; letter-spacing: 0.15mm; }
-  .etiqueta svg { display: block; margin: 0 auto; }
-
-  @media print {
-    header, .barra, .lista, .vacio, .ayuda { display: none !important; }
-    body { background: #fff; }
-    main { padding: 0; max-width: none; }
-    #hoja { display: block !important; }
-    /* Sin borde en papel termico, y una etiqueta por pagina. */
-    .etiqueta { border: 0; break-inside: avoid; }
-    .etiqueta:not(:last-child) { break-after: page; }
-    @page { size: 50.8mm 25.4mm; margin: 0; }
-  }
 </style>
 </head>
 <body>
@@ -74,102 +48,250 @@
     <button id="imprimir" type="button">Imprimir seleccionadas</button>
     <button id="todas" class="claro" type="button">Seleccionar todas</button>
     <button id="ninguna" class="claro" type="button">Deseleccionar todas</button>
+    <button id="marcar" class="claro" type="button">Marcar seleccionadas como impresas</button>
+    <button id="ver-impresas" class="claro" type="button">Mostrar impresas</button>
+    <button id="otra" class="claro" type="button">¿No aparece la impresora?</button>
+    <button id="detener" class="claro" type="button">Detener</button>
     <span id="resumen"></span>
   </div>
 
   <p class="ayuda">
-    Etiqueta de 2 × 1 in (50.8 × 25.4 mm). En el diálogo de impresión: la impresora de
-    etiquetas, escala <b>100 %</b> y <b>sin</b> «Ajustar a la página» ni márgenes.
-    Escalar la hoja deforma las barras y el lector deja de leerlas.
+    Prende la impresora de etiquetas antes de imprimir. La primera vez de cada sesión
+    el navegador pregunta cuál es: escoge <b>AE240-bt</b> en la ventana que sale.
+    Si esa ventana sale vacía, aprieta <b>«¿No aparece la impresora?»</b>, que enseña
+    todos los aparatos Bluetooth cercanos. Ya no hay diálogo de impresión — la etiqueta
+    se le manda directo, así que no hay escala ni márgenes que ajustar.
+  </p>
+  <p class="ayuda">
+    Lo que ya se imprimió sale de la lista solo. Si la impresora se paró a medias,
+    aprieta <b>«Mostrar impresas»</b> y en la primera pieza que no salió,
+    <b>«No salió desde aquí»</b>: esa y las que siguen regresan a la lista.
+    Si ya tienen etiqueta de antes, selecciónalas y aprieta
+    <b>«Marcar seleccionadas como impresas»</b>: salen de la lista sin imprimir nada.
+    Si le cambias el precio a una pieza ya etiquetada, regresa arriba en amarillo
+    (↻) para reimprimir su etiqueta; el código de barras es el mismo, y la caja
+    cobra el precio nuevo aunque la etiqueta vieja siga pegada.
+    La columna <b>Etiquetas</b> es cuántas imprimir; empieza en la existencia,
+    pero cambiarla no cambia la existencia (eso se hace en la cola de revisión).
   </p>
 
+  <details id="historial-envios">
+    <summary>Historial de envíos a la impresora</summary>
+    <p class="ayuda">
+      No hay cola de impresión: cada etiqueta se manda por Bluetooth en cuanto se pide.
+      Aquí se anota lo que salió de esta página. Si dice «enviadas» y no salió nada,
+      el problema está en la impresora (papel, sensor, luz de error), no aquí.
+    </p>
+    <pre id="historial"></pre>
+  </details>
+
   <div class="lista" id="lista"><div class="vacio">Cargando…</div></div>
-  <div id="hoja"></div>
 </main>
 
 <script type="module">
-import { svgCode128 } from '/code128.js';
+import {
+  conectarEtiquetera, etiqueteraLista, imprimirEtiquetas, historialTexto, detenerEnvio, envioDetenido,
+  errorEnvio, impresas, marcarImpresa, desmarcarDesde, etiquetaVigente,
+} from '/etiquetera.js';
 
 const lista = document.getElementById('lista');
-const hoja = document.getElementById('hoja');
 const resumen = document.getElementById('resumen');
+const historial = document.getElementById('historial');
+const pintarHistorial = () => { historial.textContent = historialTexto(); };
+pintarHistorial();
 const pesos = (centavos) => `$${Math.round(centavos / 100)}`;
 const escapar = (texto) => texto.replace(/[<>&"]/g, (c) => ({'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;'}[c]));
 
+let piezas = [];
+let verImpresas = false;
+const verBoton = document.getElementById('ver-impresas');
+const copiasDe = (p) => Math.min(99, Math.max(1, p.stock ?? 1));
+const hora = (iso) => new Date(iso).toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' });
+
 /** Solo lo que lleva etiqueta: los bins se cobran con la tarjeta de la caja. */
 async function cargar() {
-  const piezas = (await (await fetch('/api/borradores?estado=listo')).json())
+  piezas = (await (await fetch('/api/borradores?estado=listo')).json())
     .filter((p) => p.destino === 'etiqueta' && p.precio > 0);
+  pintar();
+}
 
-  resumen.textContent = `${piezas.length} piezas listas para etiquetar`;
-  if (piezas.length === 0) {
-    lista.innerHTML = '<div class="vacio">Nada para etiquetar. Las piezas de bin no llevan etiqueta.</div>';
+function pintar() {
+  const hechas = impresas();
+  // Las marcas de antes no guardaban el precio: se les pone el de hoy una vez,
+  // para que un cambio de aqui en adelante si se note.
+  for (const p of piezas) {
+    const marca = hechas[p.id];
+    if (marca && marca.precio === undefined) {
+      marcarImpresa(p.id, marca.hora, p);
+      hechas[p.id] = { ...marca, precio: p.precio, precio_lista: p.precio_lista };
+    }
+  }
+  const vigente = (p) => etiquetaVigente(hechas[p.id], p);
+  // Precio cambiado despues de imprimir: la etiqueta pegada miente. Van arriba,
+  // fuera de la numeracion, porque esas piezas ya no estan en la fila de captura.
+  const cambiadas = piezas.filter((p) => hechas[p.id] && !vigente(p));
+  const nuevas = piezas.filter((p) => !hechas[p.id]);
+  const pendientes = [...cambiadas, ...nuevas];
+  const visibles = verImpresas ? [...cambiadas, ...piezas.filter((p) => !cambiadas.includes(p))] : pendientes;
+  verBoton.textContent = verImpresas ? 'Ocultar impresas' : `Mostrar impresas (${piezas.length - pendientes.length})`;
+
+  resumen.textContent = `${pendientes.length} piezas por etiquetar`
+    + (cambiadas.length ? ` · ${cambiadas.length} con precio cambiado (arriba)` : '');
+  if (visibles.length === 0) {
+    lista.innerHTML = `<div class="vacio">${piezas.length === 0
+      ? 'Nada para etiquetar. Las piezas de bin no llevan etiqueta.'
+      : 'Todo lo que había ya se imprimió.'}</div>`;
     return;
   }
 
   // El numero es la posicion en el orden de captura: las piezas se quedan
   // fisicamente donde se tomaron hasta que se les pega la etiqueta, asi que
   // contar "1, 2, 3..." contra la fila de piezas evita tener que adivinar
-  // cual etiqueta impresa es de cual pieza.
-  lista.innerHTML = piezas.map((p, i) => `
-    <label class="renglon">
-      <span class="posicion">${i + 1}</span>
-      <input type="checkbox" value="${p.id}" checked>
+  // cual etiqueta impresa es de cual pieza. Las impresas no cuentan: ya se
+  // etiquetaron y se quitaron de la fila.
+  let posicion = 0;
+  lista.innerHTML = '<div class="renglon" style="font-size:12px;color:#5b6478"><span></span><span></span><span></span><span>Pieza</span><span>Precio</span><span>Existencia</span><span>Etiquetas</span></div>'
+    + visibles.map((p) => {
+      const marca = hechas[p.id];
+      const impresa = marca && vigente(p);
+      const cambiada = marca && !impresa;
+      return `
+    <label class="renglon${impresa ? ' impresa' : ''}${cambiada ? ' cambiada' : ''}">
+      <span class="posicion">${impresa ? '✓' : cambiada ? '↻' : ++posicion}</span>
+      <input type="checkbox" value="${p.id}" ${impresa ? '' : 'checked'}>
       <img src="/api/foto/${p.id}" alt="" loading="lazy">
-      <span>${escapar(p.nombre || 'Sin nombre')}</span>
+      <span>${escapar(p.nombre || 'Sin nombre')}${impresa
+        ? `<span class="marca">Impresa ${hora(marca.hora)}<button type="button" class="claro" data-desde="${p.id}">No salió desde aquí</button></span>`
+        : cambiada
+          ? `<span class="marca aviso">La etiqueta pegada dice ${pesos(marca.precio)}: reimprime y cámbiala.</span>`
+          : ''}</span>
       <span class="precio">${pesos(p.precio)}${p.precio_lista > p.precio ? ` <s style="font-weight:400;color:#777">${pesos(p.precio_lista)}</s>` : ''}</span>
-      <span>${p.stock > 1 ? `${p.stock} piezas` : p.semana_ingreso}</span>
-    </label>`).join('');
+      <span>${p.stock} ${p.stock === 1 ? 'pieza' : 'piezas'}</span>
+      <input type="number" class="copias" data-id="${p.id}" min="1" max="99" value="${copiasDe(p)}" aria-label="Etiquetas a imprimir">
+    </label>`;
+    }).join('');
 }
 
-function etiqueta(p) {
-  const antes = p.precio_lista > p.precio ? `<span class="antes">${pesos(p.precio_lista)}</span>` : '';
-  // El codigo completo (ED-000123, 9 caracteres) no cabe legible en una etiqueta
-  // chica: la barra codifica solo el numero, sin "ED-" ni ceros (p.ej. "123").
-  // El texto impreso sigue mostrando el codigo completo; buscarPieza() en
-  // caja.html reconstruye "ED-000123" a partir del numero que entrega el lector.
-  //
-  // ponytail: modulo 0.5mm fue lo que sono siempre en la Zebra TLP 2844
-  // (203 dpi). La impresora de 2026-09-20 es otra unidad -- probablemente
-  // otro dpi -- y este valor no esta confirmado en ella. Correr /prueba-codigo
-  // en la impresora nueva y ajustar aqui si no lee.
-  const numero = String(Number(p.codigo.slice(3)));
-  return `<div class="etiqueta">
-    <div class="nombre">${escapar(p.nombre || 'El Dolarón')}</div>
-    <div class="precios"><span class="ahora">${pesos(p.precio)}</span>${antes}</div>
-    <div class="pie">
-      ${svgCode128(numero, { modulo: 0.5, alto: 5.5 })}<div class="codigo">${p.codigo} · ${p.semana_ingreso}</div>
-    </div>
-  </div>`;
-}
-
+// Las casillas de seleccion, no los campos de cuantas etiquetas.
+const casillas = () => lista.querySelectorAll('input[type=checkbox]');
 document.getElementById('todas').addEventListener('click', () => {
-  lista.querySelectorAll('input').forEach((c) => { c.checked = true; });
+  casillas().forEach((c) => { c.checked = !c.closest('.impresa'); });
 });
 document.getElementById('ninguna').addEventListener('click', () => {
-  lista.querySelectorAll('input').forEach((c) => { c.checked = false; });
+  casillas().forEach((c) => { c.checked = false; });
+});
+verBoton.addEventListener('click', () => { verImpresas = !verImpresas; pintar(); });
+
+// Para piezas que ya traen etiqueta (impresa antes de que existiera esta marca,
+// o en otra computadora). Cada una se marca un milisegundo despues de la
+// anterior, en el orden de la lista: asi «No salió desde aquí» regresa esa y
+// las de abajo, no el grupo entero.
+document.getElementById('marcar').addEventListener('click', () => {
+  const ids = [...lista.querySelectorAll('.renglon:not(.impresa) input[type=checkbox]:checked')].map((c) => c.value);
+  if (ids.length === 0) return;
+  const base = Date.now();
+  const porId = new Map(piezas.map((p) => [p.id, p]));
+  ids.forEach((id, i) => marcarImpresa(id, new Date(base + i).toISOString(), porId.get(id)));
+  pintar();
+  resumen.textContent = `${ids.length} ${ids.length === 1 ? 'pieza marcada' : 'piezas marcadas'} como impresas. Se regresan con «Mostrar impresas».`;
+});
+lista.addEventListener('click', (e) => {
+  const boton = e.target.closest('[data-desde]');
+  if (!boton) return;
+  e.preventDefault();
+  desmarcarDesde(boton.dataset.desde);
+  pintar();
 });
 
-document.getElementById('imprimir').addEventListener('click', async () => {
-  const ids = [...lista.querySelectorAll('input:checked')].map((c) => c.value);
-  if (ids.length === 0) return;
+/** Traduce la falla de Bluetooth a algo accionable parado junto a la impresora. */
+function avisarFalla(error) {
+  resumen.textContent = error.name === 'NotFoundError'
+    ? 'No se escogió impresora. Préndela y vuelve a intentar, o usa «¿No aparece la impresora?».'
+    : /disconnected/i.test(error.message)
+      ? 'La impresora soltó la conexión. Apágala y préndela, cierra cualquier otra pestaña o programa que la use (y desconéctala del Bluetooth de Windows si aparece como conectada) y vuelve a intentar.'
+      : `No se pudo conectar la impresora: ${error.message}`;
+}
 
-  // El codigo se asigna aqui: una pieza sin etiqueta impresa no necesita codigo.
-  const respuesta = await fetch('/api/etiquetas', {
-    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ids }),
-  });
-  const piezas = await respuesta.json();
-  if (!respuesta.ok) {
-    resumen.textContent = piezas.error;
-    return;
+// La lista filtrada por nombre es la de diario. Esta es la salida para cuando
+// la impresora no sale ahi: enseña todos los aparatos Bluetooth cercanos, que
+// es como la sonda la encontro.
+document.getElementById('otra').addEventListener('click', async () => {
+  try {
+    await conectarEtiquetera({ cualquiera: true });
+    resumen.textContent = 'Impresora conectada. Ya puedes imprimir.';
+  } catch (error) {
+    avisarFalla(error);
+  }
+});
+
+document.getElementById('detener').addEventListener('click', () => detenerEnvio());
+
+document.getElementById('imprimir').addEventListener('click', async () => {
+  const ids = [...lista.querySelectorAll('input[type=checkbox]:checked')].map((c) => c.value);
+  if (ids.length === 0) return;
+  // Cuantas etiquetas pidio el usuario por pieza. Solo se imprimen: la existencia
+  // no cambia aqui, se corrige en la cola de revision.
+  const pedidas = new Map([...lista.querySelectorAll('.copias')]
+    .map((c) => [c.dataset.id, Math.min(99, Math.max(1, Math.round(Number(c.value)) || 1))]));
+  detenerEnvio(false);
+
+  // Antes que nada, y antes de cualquier espera: pedir la impresora gasta el
+  // permiso del clic, y el navegador ya no lo da despues de un fetch.
+  if (!etiqueteraLista()) {
+    try {
+      await conectarEtiquetera();
+    } catch (error) {
+      avisarFalla(error);
+      return;
+    }
   }
 
-  // Una etiqueta por pieza: cinco tazas iguales necesitan cinco etiquetas.
-  hoja.innerHTML = piezas
-    .flatMap((p) => Array.from({ length: Math.min(99, Math.max(1, p.stock ?? 1)) }, () => etiqueta(p)))
-    .join('');
-  print();
-  await cargar();
+  // El servidor prepara hasta 100 piezas por llamada, asi que se manda por tramos.
+  let terminadas = 0;
+  try {
+    for (let i = 0; i < ids.length; i += 100) {
+      // El codigo se asigna aqui: una pieza sin etiqueta impresa no necesita codigo.
+      const respuesta = await fetch('/api/etiquetas', {
+        method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ids: ids.slice(i, i + 100) }),
+      });
+      const preparadas = await respuesta.json();
+      if (!respuesta.ok) {
+        resumen.textContent = preparadas.error;
+        return;
+      }
+
+      for (const p of preparadas) {
+        // Las que se pidieron en la columna Etiquetas; de inicio, una por pieza en existencia.
+        const copias = pedidas.get(p.id) ?? copiasDe(p);
+        const detalle = `pieza ${terminadas + 1} de ${ids.length}`;
+        resumen.textContent = `Imprimiendo ${detalle}: ${copias} ${copias === 1 ? 'etiqueta' : 'etiquetas'}…`;
+        const salio = await imprimirEtiquetas(
+          p, copias,
+          (hechas) => { resumen.textContent = `Imprimiendo ${detalle}: etiqueta ${hechas} de ${copias}…`; },
+          (segundos) => { resumen.textContent = `Pausa de ${segundos} s para que la impresora vacíe lo que tiene (${detalle})…`; },
+        );
+        pintarHistorial();
+        if (!salio) {
+          resumen.textContent = envioDetenido()
+            ? `Detenido en la pieza ${terminadas + 1} de ${ids.length}. Las que faltan siguen en la lista.`
+            : `Se cortó en la pieza ${terminadas + 1} de ${ids.length} (${p.nombre}): ${errorEnvio()}. Las que faltan siguen en la lista.`;
+          return;
+        }
+        marcarImpresa(p.id, undefined, p);
+        terminadas += 1;
+      }
+    }
+    resumen.textContent = `${terminadas} piezas enviadas. Si alguna no salió, usa «Mostrar impresas» y «No salió desde aquí».`;
+  } catch (error) {
+    // Nada de fallar en silencio: si algo revienta a media lista, se dice donde.
+    console.error('Etiquetas: fallo el lote', error);
+    resumen.textContent = `Se detuvo en la pieza ${terminadas + 1} de ${ids.length}: ${error.message}`;
+  } finally {
+    pintarHistorial();
+    const aviso = resumen.textContent;
+    await cargar();
+    resumen.textContent = aviso;   // cargar() pinta el conteo encima; el aviso importa mas
+  }
 });
 
 await cargar();

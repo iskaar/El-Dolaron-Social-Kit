@@ -5,84 +5,87 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>El Dolarón — prueba de código</title>
 <style>
-  :root { --azul:#16366B; }
+  :root { --azul:#16366B; --linea:#dfe3ea; }
   * { box-sizing: border-box; }
   body { margin: 0; background: #f4f6f9; color: #1a1f2b; font-family: system-ui, sans-serif; }
-  header { background: var(--azul); color: #fff; padding: 14px 20px; display: flex; gap: 16px; align-items: center; }
+  header { background: var(--azul); color: #fff; padding: 14px 20px;
+    display: flex; gap: 16px; align-items: center; flex-wrap: wrap; }
   header h1 { font-size: 18px; margin: 0; flex: 1; }
-  header button { background: #FFD447; border: 0; border-radius: 8px; padding: 9px 14px;
-    font-weight: 700; cursor: pointer; }
+  header a { color: #FFD447; font-size: 14px; }
   main { padding: 20px; max-width: 860px; margin: 0 auto; }
   .ayuda { font-size: 14px; line-height: 1.5; color: #333; max-width: 68ch; }
   .ayuda ol { padding-left: 20px; }
-  .etiqueta { width: 50.8mm; height: 25.4mm; padding: 1.2mm; border: 0.2mm dashed #bbb;
-    display: flex; flex-direction: column; justify-content: center; align-items: center; gap: 1mm;
-    background: #fff; }
-  .etiqueta .letra { font-size: 5mm; font-weight: 800; }
-  .etiqueta .dato { font-size: 2.6mm; font-family: ui-monospace, monospace; }
-  #hoja { display: flex; flex-wrap: wrap; gap: 4mm; margin-top: 18px; }
-  @media print {
-    header, .ayuda { display: none !important; }
-    body { background: #fff; }
-    main { padding: 0; max-width: none; }
-    #hoja { display: block !important; gap: 0; margin: 0; }
-    .etiqueta { border: 0; break-inside: avoid; }
-    .etiqueta:not(:last-child) { break-after: page; }
-    @page { size: 50.8mm 25.4mm; margin: 0; }
-  }
+  button { border: 0; border-radius: 8px; padding: 10px 14px; font-size: 14px;
+    font-weight: 600; cursor: pointer; background: var(--azul); color: #fff; }
+  button.claro { background: #fff; color: #1a1f2b; border: 1px solid var(--linea); }
+  .botones { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin: 16px 0; }
+  .estado { font-size: 13px; color: #5b6478; min-height: 1.4em; }
 </style>
 </head>
 <body>
 <header>
   <h1>Prueba de código de barras</h1>
-  <button type="button" onclick="print()">Imprimir las cuatro</button>
-  <a href="/etiquetas" style="color:#FFD447">← Etiquetas</a>
+  <a href="/calibrar-etiqueta">Calibrar →</a>
+  <a href="/etiquetas">← Etiquetas</a>
 </header>
 
 <main>
-  <div class="ayuda">
-    <p>Cuatro etiquetas con barras cada vez más anchas. Imprímelas en la impresora de
-    etiquetas al <b>100 %</b>, sin «Ajustar a la página», y pásalas con el lector. El
-    código se acorta conforme engordan las barras: en 2 × 1 in no cabe todo, y esa es
-    justo la decisión que hay que tomar.</p>
-    <ol>
-      <li>Anota cuál es la primera que suena. Esa es la que sirve.</li>
-      <li>Si ninguna suena, prueba el lector contra el código de barras de
-      cualquier producto de tienda: si tampoco lo lee, el problema es el lector
-      o su configuración, no la etiqueta.</li>
-      <li>Si la tinta sale gris o borrosa, sube el <i>darkness</i> y baja la
-      velocidad en las preferencias de la impresora antes de repetir.</li>
-    </ol>
-  </div>
+  <p class="ayuda">
+    Cuatro etiquetas letradas A a D, con barras cada vez más anchas, mandadas directo
+    a la impresora por Bluetooth — el mismo camino que usa <code>/etiquetas</code>, no
+    el diálogo de impresión del navegador. El código se acorta conforme engordan las
+    barras: en 2 × 1 in no cabe todo, y esa es justo la decisión que hay que tomar.
+  </p>
+  <ol class="ayuda">
+    <li>Prende la impresora y aprieta <b>Conectar e imprimir</b>.</li>
+    <li>Pasa las cuatro con el lector de la caja. Anota cuál es la <b>primera</b> que
+    suena — esa es la que sirve.</li>
+    <li>Ve a <a href="/calibrar-etiqueta">/calibrar-etiqueta</a> y guarda esos puntos:
+    de ahí en adelante <code>/etiquetas</code> los usa solos.</li>
+    <li>Si ninguna suena, prueba el lector contra el código de barras de cualquier
+    producto de tienda: si tampoco lo lee, el problema es el lector o su
+    configuración, no la etiqueta.</li>
+    <li>Si la tinta sale gris o borrosa, sube el <i>darkness</i> y baja la velocidad
+    en las preferencias de la impresora antes de repetir.</li>
+  </ol>
 
-  <div id="hoja"></div>
+  <div class="botones">
+    <button id="imprimir" type="button">Conectar e imprimir</button>
+    <button id="otra" class="claro" type="button">¿No aparece la impresora?</button>
+  </div>
+  <div class="estado" id="estado"></div>
 </main>
 
 <script type="module">
-import { svgCode128 } from '/code128.js';
+import { conectarEtiquetera, etiqueteraLista, mandarTspl, tsplPruebaCodigo } from '/etiquetera.js';
 
-// Cada impresora convierte mm a puntos con su propio dpi, y esta unidad
-// (2026-09-20) no tiene el suyo confirmado: por eso las variantes no le
-// ponen nombre a un numero de puntos, solo prueban anchos crecientes.
-// A barras mas anchas, codigo mas corto: en 2 x 1 in no cabe todo. Por eso
-// cada variante lleva el codigo mas largo que le entra, no siempre el mismo.
-const VARIANTES = [
-  ['A', 0.25,  'ED-000019'],
-  ['B', 0.375, '000019'],
-  ['C', 0.5,   '019'],
-  ['D', 0.625, '9'],
-];
+const estado = document.getElementById('estado');
+const avisar = (texto) => { estado.textContent = texto; };
 
-document.getElementById('hoja').innerHTML = VARIANTES.map(([letra, modulo, codigo]) => {
-  const svg = svgCode128(codigo, { modulo, alto: 10 });
-  const ancho = svg.match(/width="([\d.]+)mm"/)[1];
-  return `
-    <div class="etiqueta">
-      <div class="letra">${letra}</div>
-      ${svg}
-      <div class="dato">${codigo} · ${modulo} mm · ${ancho} mm</div>
-    </div>`;
-}).join('');
+async function conectarSiHaceFalta(cualquiera) {
+  if (etiqueteraLista()) return true;
+  try {
+    await conectarEtiquetera({ cualquiera });
+    return true;
+  } catch (error) {
+    avisar(error.name === 'NotFoundError'
+      ? 'No se escogió impresora. Préndela y vuelve a intentar, o usa «¿No aparece la impresora?».'
+      : `No se pudo conectar: ${error.message}`);
+    return false;
+  }
+}
+
+document.getElementById('imprimir').addEventListener('click', async () => {
+  if (!await conectarSiHaceFalta(false)) return;
+  avisar(await mandarTspl(tsplPruebaCodigo())
+    ? 'Van las cuatro (A-D). Pásalas con el lector: la primera que suene es la buena.'
+    : 'Se cortó el enlace antes de imprimir. Vuelve a intentar.');
+});
+
+document.getElementById('otra').addEventListener('click', async () => {
+  if (!await conectarSiHaceFalta(true)) return;
+  avisar('Impresora conectada. Aprieta «Conectar e imprimir».');
+});
 </script>
 </body>
 </html>
