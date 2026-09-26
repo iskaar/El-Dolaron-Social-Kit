@@ -246,7 +246,7 @@ Tres entregables propuestos:
 2. Plantillas de productos, historias, apertura y apartados usando el kit existente.
 3. Registro sencillo de resultados y guía de atención por WhatsApp.
 
-Primera producción: apertura y días 1–7, usando inventario confirmado. Las siguientes semanas incorporan resultados. Mantener marca, acentos, precios reales, condición y existencias verificadas. No automatizar publicaciones ni agregar servicios o dependencias al kit.
+Primera producción: apertura y días 1–7, usando inventario confirmado. Textos de perfiles, fijas, WhatsApp y guiones de esa primera producción: [MARKETING-APERTURA-SEMANA-1.md](MARKETING-APERTURA-SEMANA-1.md) ([Issue #79](https://github.com/iskaar/El-Dolaron-Social-Kit/issues/79)). Las siguientes semanas incorporan resultados. Mantener marca, acentos, precios reales, condición y existencias verificadas. No automatizar publicaciones ni agregar servicios o dependencias al kit.
 
 ## 8. Kit existente y continuidad en el repositorio
 
