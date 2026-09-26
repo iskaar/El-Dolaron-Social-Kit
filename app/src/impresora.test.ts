@@ -3,7 +3,7 @@
 // y no se puede probar aqui (ver el issue #32 para la validacion fisica).
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { sinAcentos, centrarTexto, renglonMontoTexto, COLUMNAS } from '../public/impresora.js';
+import { sinAcentos, centrarTexto, renglonMontoTexto, explicarErrorUsb, COLUMNAS } from '../public/impresora.js';
 
 test('sinAcentos quita acentos y enye, sin romper el resto del texto', () => {
   assert.equal(sinAcentos('Almohada azúl, Peña'), 'Almohada azul, Pena');
@@ -35,4 +35,11 @@ test('renglonMontoTexto dejando un espacio minimo si etiqueta y monto no caben',
   const etiqueta = 'x'.repeat(COLUMNAS);
   const resultado = renglonMontoTexto(etiqueta, '$1.00');
   assert.equal(resultado, `${etiqueta} $1.00`);
+});
+
+test('explicarErrorUsb siempre trae el error real; Access denied y NetworkError agregan que hacer', () => {
+  const denegado = explicarErrorUsb({ name: 'SecurityError', message: 'Access denied.' });
+  assert.ok(denegado.startsWith('SecurityError: Access denied.') && denegado.includes('WinUSB'));
+  assert.ok(explicarErrorUsb({ name: 'NetworkError', message: 'Unable to claim interface.' }).includes('Otra pestaña'));
+  assert.equal(explicarErrorUsb({ name: 'InvalidStateError', message: 'x' }), 'InvalidStateError: x');
 });

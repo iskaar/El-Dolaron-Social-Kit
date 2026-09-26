@@ -105,6 +105,21 @@ export async function conectarImpresora() {
   await abrir(dev);
 }
 
+/**
+ * Por que no abrio, en palabras de la caja. El navegador ya dio el permiso (la
+ * impresora salio en la lista); lo que falla despues es abrir el puerto USB.
+ */
+export function explicarErrorUsb(error) {
+  const texto = `${error?.name}: ${error?.message}`;
+  if (error?.name === 'SecurityError' || /access denied/i.test(error?.message ?? '')) {
+    return `${texto}. Probablemente Windows tiene su propio controlador en la impresora y el navegador no puede abrirla: hay que cambiarlo a WinUSB.`;
+  }
+  if (error?.name === 'NetworkError') {
+    return `${texto}. Otra pestaña o programa la tiene abierta: ciérralos y apaga y prende la impresora.`;
+  }
+  return texto;
+}
+
 export function impresoraLista() {
   return dispositivo !== null;
 }

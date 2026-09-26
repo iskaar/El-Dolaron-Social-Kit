@@ -119,7 +119,7 @@
 
 <script type="module">
 import { totales, agregar, efectivoAlcanza } from '/venta.js';
-import { reconectarImpresora, conectarImpresora, impresoraLista, imprimirTicket, abrirCajon } from '/impresora.js';
+import { reconectarImpresora, conectarImpresora, impresoraLista, imprimirTicket, abrirCajon, explicarErrorUsb } from '/impresora.js';
 
 const $ = (id) => document.getElementById(id);
 const pesos = (centavos) => `$${(centavos / 100).toLocaleString('es-MX')}`;
@@ -520,12 +520,16 @@ function pintarImpresora() {
   $('conectar-impresora').hidden = lista;
 }
 $('conectar-impresora').addEventListener('click', async () => {
+  let motivo = '';
   try {
     await conectarImpresora();   // WebUSB solo permite pedir el permiso desde un clic real
-  } catch {
-    $('impresora-estado').textContent = 'No se pudo conectar la impresora.';
+  } catch (error) {
+    console.error('Impresora: no se pudo conectar', error);
+    // NotFoundError = cerro el selector sin escoger nada, no es una falla.
+    if (error?.name !== 'NotFoundError') motivo = explicarErrorUsb(error);
   }
   pintarImpresora();
+  if (motivo) $('impresora-estado').textContent = motivo;   // despues de pintar: pintar lo pisaba
 });
 
 pintarRed();
