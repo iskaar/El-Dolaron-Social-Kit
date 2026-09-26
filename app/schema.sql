@@ -56,3 +56,28 @@ create table if not exists familias (
   prefijo   text not null unique,       -- 'ju'
   creado_en text not null
 );
+
+-- Centro de cuentas (migracion-010-cuentas.sql, Issue #75).
+create table if not exists usuarios (
+  correo         text primary key,              -- en minusculas, el de Google
+  nombre         text not null default '',
+  roles          text not null default '',      -- separados por coma: dueno,cajero,capturista
+  activo         integer not null default 1,
+  creado_en      text not null,
+  actualizado_en text not null
+);
+
+create table if not exists solicitudes (
+  id            text primary key,
+  tipo          text not null,                  -- acceso
+  correo        text not null,
+  nombre        text not null default '',
+  justificacion text not null,
+  datos         text not null default '{}',
+  estado        text not null default 'pendiente',  -- pendiente|aprobada|rechazada
+  creado_en     text not null,
+  resuelto_en   text,
+  resuelto_por  text
+);
+
+create index if not exists solicitudes_pendientes on solicitudes (estado, creado_en);
