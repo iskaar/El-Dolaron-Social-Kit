@@ -57,3 +57,70 @@ test('rasterEscPos: encabezado GS v 0 y un bit por punto, oscuro = 1, transparen
   assert.deepEqual([...bytes.slice(0, 8)], [0x1d, 0x76, 0x30, 0, 2, 0, 2, 0]);   // 2 bytes por renglon, 2 renglones
   assert.deepEqual([...bytes.slice(8)], [0b10000000, 0b01000000, 0, 0]);
 });
+
+// ---- Envio por WebUSB con una impresora falsa (Issue #97) ----
+
+function impresoraFalsa() {
+  const pedazos: Uint8Array[] = [];
+  const dev = {
+    opened: false,
+    configuration: { configurationValue: 1 },
+    configurations: [{ interfaces: [{ interfaceNumber: 0, alternates: [{ endpoints: [{ direction: 'out', endpointNumber: 1 }] }] }] }],
+    fallarEn: -1,
+    async open() { dev.opened = true; },
+    async close() { dev.opened = false; },
+    async selectConfiguration() {},
+    async claimInterface() {},
+    async clearHalt() {},
+    async transferOut(_endpoint: number, datos: Uint8Array) {
+      if (pedazos.length === dev.fallarEn) { dev.fallarEn = -1; throw new DOMException('A transfer error has occurred.', 'NetworkError'); }
+      pedazos.push(datos.slice());
+      return { status: 'ok', bytesWritten: datos.length };
+    },
+  };
+  Object.defineProperty(globalThis.navigator, 'usb', { value: { getDevices: async () => [dev] }, configurable: true });
+  return { dev, pedazos };
+}
+
+const ticketLargo = () => ({
+  venta: { total: 99900, forma_pago: 'efectivo', efectivo: 100000, cambio: 100, creado_en: '2026-10-02T17:00:00Z' },
+  lineas: Array.from({ length: 60 }, (_, i) => ({ nombre: `Pieza de prueba ${i}`, precio: 1900, cantidad: 1 })),
+});
+
+test('el ticket sale en pedazos de a lo mas PEDAZO bytes, completo y en orden', async () => {
+  const { pedazos } = impresoraFalsa();
+  const { reconectarImpresora, imprimirTicket, PEDAZO } = await import('../public/impresora.js');
+  assert.equal(await reconectarImpresora(), true);
+  const { venta, lineas } = ticketLargo();
+  assert.equal(await imprimirTicket(venta, lineas), true);
+  assert.ok(pedazos.length > 1, 'un ticket largo va en varios pedazos');
+  assert.ok(pedazos.every((p) => p.length <= PEDAZO));
+  const texto = new TextDecoder().decode(Uint8Array.from(pedazos.flatMap((p) => [...p])));
+  assert.match(texto, /Pieza de prueba 0\n[\s\S]*Pieza de prueba 59\n[\s\S]*Gracias por su compra/);
+});
+
+test('tras una falla, el cajon vuelve a abrir en el siguiente cobro sin recargar', async () => {
+  const { dev, pedazos } = impresoraFalsa();
+  const { reconectarImpresora, imprimirTicket, abrirCajon, errorImpresora, impresoraLista } = await import('../public/impresora.js');
+  await reconectarImpresora();
+  dev.fallarEn = 1;                                   // se corta a media transferencia
+  const { venta, lineas } = ticketLargo();
+  assert.equal(await imprimirTicket(venta, lineas), false);
+  assert.match(errorImpresora(), /NetworkError.*a los 512 de/);
+  assert.equal(impresoraLista(), false);
+  assert.equal(await abrirCajon(), true);             // reabre sola, sin pedir permiso
+  assert.equal(errorImpresora(), '');
+  assert.deepEqual([...pedazos.at(-1)!], [0x1b, 0x70, 0x00, 25, 250]);
+});
+
+test('cajon y ticket van en fila: nunca se enciman en el puerto', async () => {
+  const { pedazos } = impresoraFalsa();
+  const { reconectarImpresora, imprimirTicket, abrirCajon } = await import('../public/impresora.js');
+  await reconectarImpresora();
+  const antes = pedazos.length;
+  const { venta, lineas } = ticketLargo();
+  await Promise.all([abrirCajon(), imprimirTicket(venta, lineas)]);
+  assert.deepEqual([...pedazos[antes]], [0x1b, 0x70, 0x00, 25, 250]);   // el cajon completo, primero
+  assert.equal(pedazos[antes + 1][0], 0x1b);                             // luego arranca el ticket (ESC @)
+  assert.equal(pedazos[antes + 1][1], 0x40);
+});

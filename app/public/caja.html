@@ -144,7 +144,7 @@
 
 <script type="module">
 import { totales, agregar, efectivoAlcanza, dolaronesGanados } from '/venta.js';
-import { reconectarImpresora, conectarImpresora, impresoraLista, imprimirTicket, abrirCajon, explicarErrorUsb } from '/impresora.js';
+import { reconectarImpresora, conectarImpresora, impresoraLista, imprimirTicket, abrirCajon, explicarErrorUsb, errorImpresora } from '/impresora.js';
 
 const $ = (id) => document.getElementById(id);
 // Nombres de piezas (los escribe la IA o el admin), de socios y motivos: texto, nunca HTML.
@@ -405,9 +405,7 @@ async function cobrarConDolarones(venta, t) {
   }
   // Un reenvio de la misma venta ya confirmada devuelve `duplicada` sin saldo: se imprime lo local.
   const saldo = cuerpo.saldo ?? { disponible: socio.disponible - venta.dolarones };
-  imprimirTicket({ ...venta, total: t.total, cambio: t.cambio,
-    socio: { numero: socio.numero, ganados: cuerpo.ganados ?? dolaronesGanados(t.aPagar), saldo: saldo.disponible } }, venta.lineas);
-  return true;
+  return { numero: socio.numero, ganados: cuerpo.ganados ?? dolaronesGanados(t.aPagar), saldo: saldo.disponible };
 }
 
 /* ---------- cobro: primero al disco, luego a la red ---------- */
@@ -438,18 +436,19 @@ async function cobrar() {
       cliente_id: socio?.id ?? null,
       dolarones: usados,
     };
+    let socioTicket = socio && { numero: socio.numero, ganados: dolaronesGanados(t.aPagar), saldo: socio.disponible };
     if (usados > 0) {
-      if (!await cobrarConDolarones(venta, t)) return;
+      socioTicket = await cobrarConDolarones(venta, t);
+      if (!socioTicket) return;
     } else {
       await store('ventas', 'readwrite', (s) => s.put(venta));   // el ticket existe aunque no haya red
-
-      // El ticket sale por USB, no por la red: no espera al servidor ni al
-      // catalogo. Si la impresora no esta conectada, imprimirTicket no hace nada.
-      imprimirTicket({ ...venta, total: t.total, cambio: t.cambio, socio: socio && {
-        numero: socio.numero, ganados: dolaronesGanados(t.aPagar), saldo: socio.disponible,
-      } }, venta.lineas);
     }
-    if (forma === 'efectivo') abrirCajon();   // una venta con tarjeta no toca el cajon
+    // El cajon primero: cajon y ticket van en fila por el mismo USB, y el cajero
+    // no espera a que termine el logo. Una venta con tarjeta no toca el cajon.
+    // Nada de esto espera al servidor ni bloquea el cobro; si falla, el pie lo dice.
+    if (forma === 'efectivo') abrirCajon();
+    imprimirTicket({ ...venta, total: t.total, cambio: t.cambio, socio: socioTicket }, venta.lineas)
+      .then(pintarImpresora);
 
     // Bajar existencias en la copia local: sin esto, la misma etiqueta se podria
     // volver a cobrar mientras no haya red para refrescar el catalogo.
@@ -653,7 +652,13 @@ setInterval(sincronizar, 30000);
 
 function pintarImpresora() {
   const lista = impresoraLista();
-  $('impresora-estado').textContent = lista ? 'Impresora conectada' : 'Impresora no conectada';
+  const error = errorImpresora();
+  // El error se queda a la vista hasta el siguiente ticket bueno: sin esto la
+  // caja decia «conectada» mientras los tickets salian cortados (Issue #97).
+  $('impresora-estado').textContent = error && error !== 'no conectada'
+    ? `Ticket no impreso: ${error}`
+    : (lista ? 'Impresora conectada' : 'Impresora no conectada');
+  $('impresora-estado').style.color = error && error !== 'no conectada' ? '#D72B32' : '';
   $('conectar-impresora').hidden = lista;
 }
 $('conectar-impresora').addEventListener('click', async () => {

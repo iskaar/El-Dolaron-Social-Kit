@@ -1,8 +1,8 @@
 /**
  * Ticket ESC/POS por WebUSB, para la Epson TM-T20 II. Sin driver ni dialogo de
  * impresion del sistema: la venta ya se cobro y se guardo, el ticket es un
- * extra que nunca debe bloquear ni retrasar el cobro. Cualquier falla aqui se
- * traga en silencio — revisa la consola, no la caja.
+ * extra que nunca debe bloquear ni retrasar el cobro. Una falla no detiene la
+ * venta: queda en errorImpresora() para que la caja la muestre.
  *
  * Misma filosofia que code128.js: nada por CDN, protocolo escrito a mano.
  */
@@ -20,6 +20,10 @@ const GS = 0x1d;
 let dispositivo = null;
 let numeroInterfaz = null;
 let numeroEndpointSalida = null;
+let ultimoError = '';
+
+/** Por que fallo el ultimo envio, o '' si salio bien. */
+export const errorImpresora = () => ultimoError;
 
 /**
  * Sin acentos: un ESC/POS mal emparejado con la tabla de codigos del firmware
@@ -123,7 +127,7 @@ async function encontrarEndpointSalida(dev) {
 }
 
 async function abrir(dev) {
-  await dev.open();
+  if (!dev.opened) await dev.open();
   if (dev.configuration === null) await dev.selectConfiguration(1);
   const hallado = await encontrarEndpointSalida(dev);
   if (!hallado) throw new Error('La impresora no tiene un endpoint de salida USB.');
@@ -171,14 +175,47 @@ export function impresoraLista() {
   return dispositivo !== null;
 }
 
-async function enviar(bytes) {
-  if (!dispositivo) return false;
+// Issue #97: el ticket entero (~6 KB con el logo) en un solo transferOut
+// imprimio medio logo y fallo; la TM-T20 II recibe en un bufer de 4 KB. Se
+// manda en pedazos, uno a la vez. ponytail: 512 es holgado, no medido; si la
+// impresora vuelve a cortar a medio ticket, bajarlo (64 es un paquete USB).
+export const PEDAZO = 512;
+
+// En fila: el cajon y el ticket nunca se mezclan en el mismo puerto.
+let cola = Promise.resolve();
+
+function enviar(bytes) {
+  const envio = cola.then(() => enviarAhora(bytes));
+  cola = envio.catch(() => {});
+  return envio;
+}
+
+async function enviarAhora(bytes) {
+  // Tras una falla el puerto queda cerrado: se reabre aqui, sin pedir permiso.
+  // Antes se quedaba en null y ni el cajon volvia a abrir hasta recargar.
+  if (!dispositivo && !(await reconectarImpresora())) {
+    ultimoError = ultimoError || 'no conectada';
+    return false;
+  }
+  let enviados = 0;
   try {
-    await dispositivo.transferOut(numeroEndpointSalida, bytes);
+    while (enviados < bytes.length) {
+      const pedazo = bytes.subarray(enviados, enviados + PEDAZO);
+      const resultado = await dispositivo.transferOut(numeroEndpointSalida, pedazo);
+      if (resultado.status === 'stall') {
+        await dispositivo.clearHalt('out', numeroEndpointSalida);
+        throw new Error('la impresora detuvo la transferencia (stall)');
+      }
+      if (resultado.status !== 'ok') throw new Error(`transferencia ${resultado.status}`);
+      enviados += pedazo.length;
+    }
+    ultimoError = '';
     return true;
   } catch (error) {
-    console.error('Impresora: fallo el envio', error);
-    dispositivo = null;   // probablemente se desconecto; el siguiente intento reconecta
+    ultimoError = `${error?.name ?? 'Error'}: ${error?.message ?? error} (a los ${enviados} de ${bytes.length} bytes)`;
+    console.error('Impresora: fallo el envio', ultimoError, error);
+    try { await dispositivo?.close(); } catch { /* ya estaba cerrada */ }
+    dispositivo = null;
     return false;
   }
 }
