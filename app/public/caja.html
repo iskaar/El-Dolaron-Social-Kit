@@ -136,15 +136,11 @@
   <span id="pendientes"></span>
   <span id="catalogo-info"></span>
   <span id="impresora-estado"></span>
-  <button id="conectar-impresora" type="button" hidden
-    style="border:1px solid #dfe3ea;background:#fff;color:#1a1f2b;border-radius:8px;padding:4px 10px;font-size:12px;cursor:pointer">
-    Conectar impresora
-  </button>
 </footer>
 
 <script type="module">
 import { totales, agregar, efectivoAlcanza, dolaronesGanados } from '/venta.js';
-import { reconectarImpresora, conectarImpresora, impresoraLista, imprimirTicket, abrirCajon, explicarErrorUsb } from '/impresora.js';
+import { imprimirTicket } from '/impresora.js';
 
 const $ = (id) => document.getElementById(id);
 // Nombres de piezas (los escribe la IA o el admin), de socios y motivos: texto, nunca HTML.
@@ -405,9 +401,7 @@ async function cobrarConDolarones(venta, t) {
   }
   // Un reenvio de la misma venta ya confirmada devuelve `duplicada` sin saldo: se imprime lo local.
   const saldo = cuerpo.saldo ?? { disponible: socio.disponible - venta.dolarones };
-  imprimirTicket({ ...venta, total: t.total, cambio: t.cambio,
-    socio: { numero: socio.numero, ganados: cuerpo.ganados ?? dolaronesGanados(t.aPagar), saldo: saldo.disponible } }, venta.lineas);
-  return true;
+  return { numero: socio.numero, ganados: cuerpo.ganados ?? dolaronesGanados(t.aPagar), saldo: saldo.disponible };
 }
 
 /* ---------- cobro: primero al disco, luego a la red ---------- */
@@ -438,18 +432,17 @@ async function cobrar() {
       cliente_id: socio?.id ?? null,
       dolarones: usados,
     };
+    let socioTicket = socio && { numero: socio.numero, ganados: dolaronesGanados(t.aPagar), saldo: socio.disponible };
     if (usados > 0) {
-      if (!await cobrarConDolarones(venta, t)) return;
+      socioTicket = await cobrarConDolarones(venta, t);
+      if (!socioTicket) return;
     } else {
       await store('ventas', 'readwrite', (s) => s.put(venta));   // el ticket existe aunque no haya red
-
-      // El ticket sale por USB, no por la red: no espera al servidor ni al
-      // catalogo. Si la impresora no esta conectada, imprimirTicket no hace nada.
-      imprimirTicket({ ...venta, total: t.total, cambio: t.cambio, socio: socio && {
-        numero: socio.numero, ganados: dolaronesGanados(t.aPagar), saldo: socio.disponible,
-      } }, venta.lineas);
     }
-    if (forma === 'efectivo') abrirCajon();   // una venta con tarjeta no toca el cajon
+    // El ticket sale por la impresora de Windows (impresora.js) y el cajon lo
+    // abre su controlador al imprimir: no espera al servidor ni bloquea el cobro.
+    imprimirTicket({ ...venta, total: t.total, cambio: t.cambio, socio: socioTicket }, venta.lineas)
+      .then((ok) => { $('impresora-estado').textContent = ok ? '' : 'El ticket no se pudo imprimir'; });
 
     // Bajar existencias en la copia local: sin esto, la misma etiqueta se podria
     // volver a cobrar mientras no haya red para refrescar el catalogo.
@@ -651,31 +644,11 @@ addEventListener('online', () => { pintarRed(); sincronizar(); cargarCatalogo();
 addEventListener('offline', pintarRed);
 setInterval(sincronizar, 30000);
 
-function pintarImpresora() {
-  const lista = impresoraLista();
-  $('impresora-estado').textContent = lista ? 'Impresora conectada' : 'Impresora no conectada';
-  $('conectar-impresora').hidden = lista;
-}
-$('conectar-impresora').addEventListener('click', async () => {
-  let motivo = '';
-  try {
-    await conectarImpresora();   // WebUSB solo permite pedir el permiso desde un clic real
-  } catch (error) {
-    console.error('Impresora: no se pudo conectar', error);
-    // NotFoundError = cerro el selector sin escoger nada, no es una falla.
-    if (error?.name !== 'NotFoundError') motivo = explicarErrorUsb(error);
-  }
-  pintarImpresora();
-  if (motivo) $('impresora-estado').textContent = motivo;   // despues de pintar: pintar lo pisaba
-});
-
 pintarRed();
 await cargarCatalogo();
 pintar();
 await pintarRechazadas();
 await sincronizar();
-await reconectarImpresora();
-pintarImpresora();
 $('codigo').focus();
 </script>
 </body>
