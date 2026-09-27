@@ -115,6 +115,8 @@
 
 <script type="module">
 const $ = (id) => document.getElementById(id);
+// Nombres de piezas y motivos de cancelacion los escriben otras personas: texto, nunca HTML.
+const escapar = (texto) => String(texto ?? '').replace(/[<>&"]/g, (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;' }[c]));
 const pesos = (centavos) => `$${Math.round(centavos / 100).toLocaleString('es-MX')}`;
 const RANGOS = [7, 30, 90, 365];
 let diasActual = 30;
@@ -122,7 +124,7 @@ let diasActual = 30;
 function barra(nombre, valor, maximo, formato) {
   const ancho = maximo > 0 ? Math.max(2, Math.round((valor / maximo) * 100)) : 0;
   return `<div class="renglon-barra">
-    <div>${nombre}</div>
+    <div>${escapar(nombre)}</div>
     <div class="pista"><div style="width:${ancho}%"></div></div>
     <div class="importe">${formato(valor)}</div>
   </div>`;
@@ -167,7 +169,7 @@ async function cargar() {
     ? '<div class="vacio">Sin ventas en este rango.</div>'
     : `<table><thead><tr><th>Código</th><th>Nombre</th><th class="num">Piezas</th><th class="num">Importe</th></tr></thead>
        <tbody>${r.top_productos.map((p) => `
-         <tr><td>${p.codigo}</td><td>${p.nombre}</td><td class="num">${p.cantidad}</td><td class="num">${pesos(p.total)}</td></tr>
+         <tr><td>${escapar(p.codigo)}</td><td>${escapar(p.nombre)}</td><td class="num">${p.cantidad}</td><td class="num">${pesos(p.total)}</td></tr>
        `).join('')}</tbody></table>`;
 
   $('precio-sugerido').innerHTML = r.precio_sugerido.n === 0
@@ -193,8 +195,8 @@ async function cargar() {
     ? '<div class="vacio">Sin cancelaciones en este rango.</div>'
     : `<table><thead><tr><th>Fecha</th><th>Quién</th><th>Motivo</th><th>Piezas</th><th class="num">Devuelto</th></tr></thead>
        <tbody>${r.cancelaciones.detalle.map((c) => `
-         <tr><td>${c.cancelada_en.slice(0, 16).replace('T', ' ')}</td><td>${c.cancelada_por || '—'}</td>
-           <td>${c.motivo_cancelacion || '—'}</td><td>${c.piezas ?? ''}</td><td class="num">${pesos(c.total)}</td></tr>
+         <tr><td>${c.cancelada_en.slice(0, 16).replace('T', ' ')}</td><td>${escapar(c.cancelada_por || '—')}</td>
+           <td>${escapar(c.motivo_cancelacion || '—')}</td><td>${escapar(c.piezas)}</td><td class="num">${pesos(c.total)}</td></tr>
        `).join('')}</tbody></table>`;
 }
 

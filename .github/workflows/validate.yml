@@ -19,3 +19,27 @@ jobs:
           python-version: "3.x"
       - name: Validate inventory and assets
         run: python tools/validate_assets.py
+
+  # La app cobra dinero real: sus pruebas (venta, Dolarones, corte, permisos)
+  # y el typecheck corren en cada push, no solo en la maquina de quien cambia.
+  app:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          # node:sqlite y los .ts sin compilar que usa `npm test` necesitan Node 24.
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+      - name: Install
+        run: npm ci
+      - name: Tests
+        run: npm test
+      - name: Typecheck
+        run: npm run typecheck

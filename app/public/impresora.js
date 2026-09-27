@@ -189,7 +189,7 @@ export async function abrirCajon() {
 }
 
 /**
- * @param venta {{ total: number, forma_pago: 'efectivo'|'tarjeta', efectivo: number, cambio: number, creado_en: string,
+ * @param venta {{ total: number, forma_pago: 'efectivo'|'tarjeta'|'transferencia', efectivo: number, cambio: number, creado_en: string,
  *   dolarones?: number, socio?: { numero: number, ganados: number, saldo: number } | null }}
  * @param lineas {{ nombre: string, precio: number, cantidad: number }[]}
  */
@@ -224,7 +224,7 @@ export async function imprimirTicket(venta, lineas) {
     partes.push(renglonMonto('Efectivo', pesos(venta.efectivo)));
     partes.push(renglonMonto('Cambio', pesos(venta.cambio)));
   } else {
-    partes.push(linea('TARJETA'));
+    partes.push(linea(venta.forma_pago === 'transferencia' ? 'TRANSFERENCIA' : 'TARJETA'));
   }
   partes.push(separador());
   if (venta.socio) {
