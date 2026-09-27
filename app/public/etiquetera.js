@@ -45,8 +45,11 @@ export function modulo() {
   return Number.isFinite(guardado) && guardado > 0 ? guardado : MODULO_POR_OMISION;
 }
 
+/** Guarda en la base (para todos) y en este navegador. true si la base lo guardo. */
 export function guardarModulo(puntos) {
-  globalThis.localStorage?.setItem(CLAVE_MODULO, String(Math.round(puntos)));
+  const valor = Math.round(puntos);
+  globalThis.localStorage?.setItem(CLAVE_MODULO, String(valor));
+  return subirCalibracion({ modulo: valor });
 }
 
 /** Lo que cabe en un renglon de nombre, en caracteres. */
@@ -69,8 +72,54 @@ export function corrimiento() {
   return Number.isFinite(guardado) ? guardado : 0;
 }
 
+/** Guarda en la base (para todos) y en este navegador. true si la base lo guardo. */
 export function guardarCorrimiento(puntos) {
-  globalThis.localStorage?.setItem(CLAVE_CORRIMIENTO, String(Math.round(puntos)));
+  const valor = Math.round(puntos);
+  globalThis.localStorage?.setItem(CLAVE_CORRIMIENTO, String(valor));
+  return subirCalibracion({ corrimiento: valor });
+}
+
+/*
+ * La calibracion vive en la base (`config`, Issue #89): la comparten todos los
+ * navegadores y el sandbox. localStorage queda solo como copia para imprimir
+ * sin red, y por eso corrimiento()/modulo() siguen siendo sincronos.
+ */
+async function subirCalibracion(cambios) {
+  try {
+    const respuesta = await fetch('/api/calibracion', {
+      method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify(cambios),
+    });
+    return respuesta.ok;
+  } catch {
+    return false;
+  }
+}
+
+const EN_BASE = [
+  ['etiqueta_corrimiento', CLAVE_CORRIMIENTO, 'corrimiento'],
+  ['etiqueta_modulo', CLAVE_MODULO, 'modulo'],
+];
+
+/**
+ * Trae la calibracion de la base a este navegador. Si la base todavia no la
+ * tiene y este navegador si, la sube una vez: asi se migro la que ya existia.
+ */
+export async function cargarCalibracion() {
+  if (!globalThis.location || !globalThis.localStorage) return;   // node --test
+  let config;
+  try {
+    const respuesta = await fetch('/api/config', { signal: AbortSignal.timeout(4000) });
+    if (!respuesta.ok) return;
+    config = await respuesta.json();
+  } catch {
+    return;   // sin red: se imprime con la copia local
+  }
+  const faltan = {};
+  for (const [clave, local, campo] of EN_BASE) {
+    if (config[clave] !== undefined) localStorage.setItem(local, config[clave]);
+    else if (localStorage.getItem(local) !== null) faltan[campo] = Number(localStorage.getItem(local));
+  }
+  if (Object.keys(faltan).length > 0) await subirCalibracion(faltan);
 }
 
 /**
@@ -583,3 +632,7 @@ export function historialTexto() {
   });
   return lineas.length ? lineas.join('\n') : 'Todavia no se ha enviado nada desde este navegador.';
 }
+
+// Toda pantalla que imprime importa este modulo: al abrirla ya trae la
+// calibracion de la base, antes de que se arme la primera etiqueta.
+await cargarCalibracion();

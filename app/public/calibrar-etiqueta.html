@@ -181,11 +181,12 @@ document.getElementById('guardar').addEventListener('click', async () => {
     return;
   }
   // El contenido tiene que bajar lo mismo que la impresora se adelanto.
-  guardarCorrimiento(medido * PUNTOS_POR_MM);
+  const paraTodos = await guardarCorrimiento(medido * PUNTOS_POR_MM);
+  const donde = paraTodos ? 'para todos los navegadores' : 'solo en este navegador (sin red); vuelve a guardar con red';
   if (!etiqueteraLista() && !await conectar(false)) return;
   avisar(await mandarTspl(tsplEtiqueta(PIEZA_DEMO))
-    ? `Guardado: ${medido} mm. Va la prueba — si ya quedó, /etiquetas usa este mismo número.`
-    : `Guardado: ${medido} mm, pero se cortó el enlace antes de imprimir.`);
+    ? `Guardado ${donde}: ${medido} mm. Va la prueba.`
+    : `Guardado ${donde}: ${medido} mm, pero se cortó el enlace antes de imprimir.`);
 });
 
 document.getElementById('guardar-barra').addEventListener('click', async () => {
@@ -194,16 +195,17 @@ document.getElementById('guardar-barra').addEventListener('click', async () => {
     avisar('Escribe los puntos de la etiqueta que sonó (entre 2 y 8).');
     return;
   }
-  guardarModulo(puntos);
+  const paraTodos = await guardarModulo(puntos);
+  const donde = paraTodos ? 'para todos los navegadores' : 'solo en este navegador (sin red); vuelve a guardar con red';
   if (!etiqueteraLista() && !await conectar(false)) return;
   avisar(await mandarTspl(tsplEtiqueta(PIEZA_DEMO))
-    ? `Guardado: barra de ${puntos} puntos. Va una etiqueta completa — pásala con el lector.`
-    : `Guardado: ${puntos} puntos, pero se cortó el enlace antes de imprimir.`);
+    ? `Guardado ${donde}: barra de ${puntos} puntos. Va una etiqueta completa — pásala con el lector.`
+    : `Guardado ${donde}: ${puntos} puntos, pero se cortó el enlace antes de imprimir.`);
 });
 
 mm.value = corrimiento() / PUNTOS_POR_MM;
 pts.value = modulo();
-avisar(`Guardado ahora: corrimiento ${corrimiento() / PUNTOS_POR_MM} mm, barra ${modulo()} puntos.`);
+avisar(`Guardado en la base: corrimiento ${corrimiento() / PUNTOS_POR_MM} mm, barra ${modulo()} puntos.`);
 </script>
 </body>
 </html>
