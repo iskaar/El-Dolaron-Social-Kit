@@ -89,10 +89,26 @@ export function rasterEscPos(rgba, ancho, alto, umbral = 128) {
   return salida;
 }
 
-// logo-ticket.png ya viene en blanco y negro, recortado y a 432 puntos de ancho
-// (54 mm de los 72 que imprime la TM-T20II), sacado de
-// 01-Logos/el-dolaron-logo-horizontal-fondo-blanco.png. ponytail: si sale
-// grande, chico o empastado en papel, se regenera ese PNG con otro ancho.
+/**
+ * El logo en franjas: un GS v 0 por cada `filas` renglones en vez de uno solo.
+ * Issue #97: en la caja vieja el logo entero (un comando de ~5 KB) salia a la
+ * mitad, y un GS v 0 cortado deja a la impresora esperando el resto de la
+ * imagen: se traga lo que sigue y el ticket no sale. Con franjas cada comando
+ * es chico (~1 KB) y la impresora va imprimiendo mientras llega el resto.
+ */
+export function logoEnFranjas(rgba, ancho, alto, filas = 24) {
+  const franjas = [];
+  for (let y = 0; y < alto; y += filas) {
+    const h = Math.min(filas, alto - y);
+    franjas.push(rasterEscPos(rgba.subarray(y * ancho * 4, (y + h) * ancho * 4), ancho, h));
+  }
+  return concatenar(franjas);
+}
+
+// logo-ticket.png ya viene en blanco y negro, recortado y a 360 puntos de ancho
+// (45 mm de los 72 que imprime la TM-T20II; era de 432 hasta el Issue #97),
+// sacado de 01-Logos/el-dolaron-logo-horizontal-fondo-blanco.png. ponytail: si
+// sale grande, chico o empastado en papel, se regenera ese PNG con otro ancho.
 let logo = null;
 function cargarLogo() {
   logo ??= (async () => {
@@ -105,7 +121,7 @@ function cargarLogo() {
     const contexto = lienzo.getContext('2d');
     contexto.drawImage(imagen, 0, 0);
     const { data } = contexto.getImageData(0, 0, lienzo.width, lienzo.height);
-    return rasterEscPos(data, lienzo.width, lienzo.height);
+    return logoEnFranjas(data, lienzo.width, lienzo.height);
   })().catch((error) => {
     console.error('Impresora: no se pudo preparar el logo, el ticket sale sin el', error);
     logo = null;   // el siguiente ticket lo vuelve a intentar

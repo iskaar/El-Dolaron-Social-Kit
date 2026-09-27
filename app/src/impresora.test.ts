@@ -3,7 +3,7 @@
 // y no se puede probar aqui (ver el issue #32 para la validacion fisica).
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { sinAcentos, centrarTexto, renglonMontoTexto, explicarErrorUsb, rasterEscPos, COLUMNAS } from '../public/impresora.js';
+import { sinAcentos, centrarTexto, renglonMontoTexto, explicarErrorUsb, rasterEscPos, logoEnFranjas, COLUMNAS } from '../public/impresora.js';
 
 test('sinAcentos quita acentos y enye, sin romper el resto del texto', () => {
   assert.equal(sinAcentos('Almohada azúl, Peña'), 'Almohada azul, Pena');
@@ -123,4 +123,21 @@ test('cajon y ticket van en fila: nunca se enciman en el puerto', async () => {
   assert.deepEqual([...pedazos[antes]], [0x1b, 0x70, 0x00, 25, 250]);   // el cajon completo, primero
   assert.equal(pedazos[antes + 1][0], 0x1b);                             // luego arranca el ticket (ESC @)
   assert.equal(pedazos[antes + 1][1], 0x40);
+});
+
+test('logoEnFranjas: un GS v 0 por cada 24 renglones, con la misma imagen', () => {
+  const ancho = 16;
+  const alto = 50;                                   // 24 + 24 + 2
+  const rgba = new Uint8ClampedArray(ancho * alto * 4).fill(255);
+  rgba.set([0, 0, 0, 255], (49 * ancho + 15) * 4);   // ultimo punto, ultimo renglon
+  const bytes = logoEnFranjas(rgba, ancho, alto);
+  const encabezados = [];
+  for (let i = 0; i < bytes.length;) {
+    assert.deepEqual([...bytes.slice(i, i + 4)], [0x1d, 0x76, 0x30, 0]);
+    const renglones = bytes[i + 6] | (bytes[i + 7] << 8);
+    encabezados.push(renglones);
+    i += 8 + 2 * renglones;                          // 2 bytes por renglon
+  }
+  assert.deepEqual(encabezados, [24, 24, 2]);
+  assert.equal(bytes.at(-1), 0b00000001);            // el punto negro sigue en su lugar
 });
