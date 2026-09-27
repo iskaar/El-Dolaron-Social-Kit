@@ -45,6 +45,8 @@
   #cobrar { width: 100%; margin-top: 12px; padding: 18px; font-size: 20px; font-weight: 800;
     border: 0; border-radius: 12px; background: var(--verde); color: #fff; cursor: pointer; }
   #cobrar:disabled { background: #c8cfda; cursor: not-allowed; }
+  #abrir-cajon { width: 100%; margin-top: 8px; padding: 10px; font-size: 14px; border: 1px solid var(--azul);
+    background: #fff; color: var(--azul); border-radius: 10px; cursor: pointer; }
   #cancelar { width: 100%; margin-top: 8px; padding: 10px; font-size: 14px; border: 1px solid var(--rojo);
     background: #fff; color: var(--rojo); border-radius: 10px; cursor: pointer; }
   #aviso { min-height: 20px; font-size: 14px; margin-top: 8px; }
@@ -121,6 +123,7 @@
     <div id="cambio"></div>
     <button id="cobrar" type="button" disabled>Cobrar</button>
     <button id="cancelar" type="button">Cancelar venta</button>
+    <button id="abrir-cajon" type="button">Abrir cajón</button>
     <div id="aviso"></div>
     <div id="rechazadas"></div>
 
@@ -637,6 +640,17 @@ $('ticket').addEventListener('click', (e) => {
 $('efectivo').addEventListener('input', pintar);
 $('forma').addEventListener('change', pintar);
 $('cobrar').addEventListener('click', cobrar);
+// Para cambiar billetes sin cobrar nada. No pasa por el servidor: tiene que
+// abrir aunque no haya red. ponytail: no deja rastro de quien lo abrio; si hace
+// falta auditarlo, se registra como las cancelaciones (motivo y usuario).
+$('abrir-cajon').addEventListener('click', async () => {
+  const abierto = await abrirCajon();
+  $('aviso').textContent = abierto ? 'Cajón abierto.' : `No se abrió el cajón: ${errorImpresora() || 'la impresora no está conectada'}.`;
+  $('aviso').style.color = abierto ? '#5b6478' : '#D72B32';
+  pintarImpresora();
+  $('codigo').focus();
+});
+
 $('cancelar').addEventListener('click', () => {
   lineas = []; idVenta = null; quitarSocio(); $('efectivo').value = ''; $('aviso').textContent = 'Venta cancelada';
   $('aviso').style.color = '#5b6478'; pintar(); $('codigo').focus();
@@ -656,7 +670,7 @@ function pintarImpresora() {
   // El error se queda a la vista hasta el siguiente ticket bueno: sin esto la
   // caja decia «conectada» mientras los tickets salian cortados (Issue #97).
   $('impresora-estado').textContent = error && error !== 'no conectada'
-    ? `Ticket no impreso: ${error}`
+    ? `Impresora: ${error}`
     : (lista ? 'Impresora conectada' : 'Impresora no conectada');
   $('impresora-estado').style.color = error && error !== 'no conectada' ? '#D72B32' : '';
   $('conectar-impresora').hidden = lista;
