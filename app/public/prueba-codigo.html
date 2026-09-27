@@ -65,11 +65,22 @@
   <div class="botones">
     <button id="largos" type="button">Imprimir códigos largos</button>
   </div>
+
+  <h2 style="font-size:16px;margin-top:28px">Código completo en la barra</h2>
+  <p class="ayuda">
+    La etiqueta de un producto de prueba con <code>ED-000123</code> completo en la barra,
+    para que WinCaja lo lea sin reconstruirlo. Con el ancho de barra de siempre (4 puntos)
+    no cabe, así que salen dos: con barras de <b>3</b> y de <b>2</b> puntos. Pásalas con el
+    lector en el Bloc de notas: debe escribir <code>ED-000123</code> completo.
+  </p>
+  <div class="botones">
+    <button id="completo" type="button">Imprimir código completo</button>
+  </div>
   <div class="estado" id="estado"></div>
 </main>
 
 <script type="module">
-import { conectarEtiquetera, etiqueteraLista, mandarTspl, tsplPruebaCodigo, tsplPruebaLargos } from '/etiquetera.js';
+import { conectarEtiquetera, etiqueteraLista, mandarTspl, tsplPruebaCodigo, tsplPruebaLargos, tsplPruebaCompleto } from '/etiquetera.js';
 
 const estado = document.getElementById('estado');
 const avisar = (texto) => { estado.textContent = texto; };
@@ -98,6 +109,13 @@ document.getElementById('largos').addEventListener('click', async () => {
   if (!await conectarSiHaceFalta(false)) return;
   avisar(await mandarTspl(tsplPruebaLargos())
     ? 'Van cinco etiquetas (9999 a 999999). Pásalas con el lector en el Bloc de notas.'
+    : 'Se cortó el enlace antes de imprimir. Vuelve a intentar.');
+});
+
+document.getElementById('completo').addEventListener('click', async () => {
+  if (!await conectarSiHaceFalta(false)) return;
+  avisar(await mandarTspl(tsplPruebaCompleto())
+    ? 'Van dos etiquetas con ED-000123 (3 y 2 puntos). Pásalas con el lector en el Bloc de notas.'
     : 'Se cortó el enlace antes de imprimir. Vuelve a intentar.');
 });
 

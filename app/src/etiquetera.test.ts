@@ -4,7 +4,7 @@
 // etiqueta, que es donde se rompio todo lo anterior.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { tsplEtiqueta, tsplBanda, tsplMarco, tsplPruebaCodigo, tsplPruebaLargos, partirNombre, NOMBRE_MAX, TSPL_REGLA, TSPL_CALIBRAR } from '../public/etiquetera.js';
+import { tsplEtiqueta, tsplBanda, tsplMarco, tsplPruebaCodigo, tsplPruebaLargos, tsplPruebaCompleto, partirNombre, NOMBRE_MAX, TSPL_REGLA, TSPL_CALIBRAR } from '../public/etiquetera.js';
 
 const PIEZA = {
   nombre: 'Taza de ceramica azul',
@@ -295,4 +295,9 @@ test('la prueba de codigos largos usa la etiqueta real y el mismo ancho de barra
   assert.deepEqual(barras.map((b) => b[3]), ['9999', '10000', '99999', '100000', '999999']);
   assert.ok(barras.every((b) => b[2] === '4'), 'mismo modulo que la etiqueta real');
   assert.equal(tspl.match(/PRINT 1,1/g)?.length, 5);
+});
+
+test('la prueba de codigo completo pone ED-000123 en la barra, a 3 y 2 puntos', () => {
+  const barras = [...tsplPruebaCompleto().matchAll(/BARCODE (\d+),\d+,"128",56,0,0,(\d+),\d+,"([^"]+)"/g)];
+  assert.deepEqual(barras.map((b) => [b[2], b[3]]), [['3', 'ED-000123'], ['2', 'ED-000123']]);
 });
