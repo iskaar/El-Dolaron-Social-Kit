@@ -169,10 +169,13 @@ const dolares = (centavos) => `${(centavos / 100).toLocaleString('es-MX')} D`;
 
 function base() {
   return new Promise((resolve, reject) => {
-    const s = indexedDB.open('eldolaron-caja', 1);
+    const s = indexedDB.open('eldolaron-caja', 2);
     s.onupgradeneeded = () => {
-      s.result.createObjectStore('ventas', { keyPath: 'id' });
-      s.result.createObjectStore('catalogo', { keyPath: 'clave' });
+      const existe = (nombre) => s.result.objectStoreNames.contains(nombre);
+      if (!existe('ventas')) s.result.createObjectStore('ventas', { keyPath: 'id' });
+      if (!existe('catalogo')) s.result.createObjectStore('catalogo', { keyPath: 'clave' });
+      // Version 2: aperturas del cajon por registrar, igual que las ventas encoladas.
+      if (!existe('cajon')) s.result.createObjectStore('cajon', { keyPath: 'id' });
     };
     s.onsuccess = () => resolve(s.result);
     s.onerror = () => reject(s.error);
@@ -507,6 +510,19 @@ async function sincronizar() {
       }
       await store('ventas', 'readwrite', (s) => s.delete(venta.id));
     }
+    for (const apertura of await store('cajon', 'readonly', (s) => s.getAll())) {
+      let respuesta;
+      try {
+        respuesta = await fetch('/api/cajon', {
+          method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(apertura),
+        });
+      } catch {
+        break;                                   // sin red: se registra al volver
+      }
+      if (respuesta.status >= 500) break;
+      if (respuesta.status >= 400) console.error('Cajon: el servidor rechazo la apertura', apertura, respuesta.status);
+      await store('cajon', 'readwrite', (s) => s.delete(apertura.id));
+    }
   } finally {
     sincronizando = false;
     await pendientes();
@@ -640,15 +656,19 @@ $('ticket').addEventListener('click', (e) => {
 $('efectivo').addEventListener('input', pintar);
 $('forma').addEventListener('change', pintar);
 $('cobrar').addEventListener('click', cobrar);
-// Para cambiar billetes sin cobrar nada. No pasa por el servidor: tiene que
-// abrir aunque no haya red. ponytail: no deja rastro de quien lo abrio; si hace
-// falta auditarlo, se registra como las cancelaciones (motivo y usuario).
+// Para cambiar billetes sin cobrar nada. Abre sin esperar al servidor (tiene
+// que abrir aunque no haya red) y deja quien y cuando en /reportes: se encola
+// como una venta y sincronizar() la manda.
 $('abrir-cajon').addEventListener('click', async () => {
   const abierto = await abrirCajon();
   $('aviso').textContent = abierto ? 'Cajón abierto.' : `No se abrió el cajón: ${errorImpresora() || 'la impresora no está conectada'}.`;
   $('aviso').style.color = abierto ? '#5b6478' : '#D72B32';
   pintarImpresora();
   $('codigo').focus();
+  if (abierto) {
+    await store('cajon', 'readwrite', (s) => s.put({ id: crypto.randomUUID(), abierto_en: new Date().toISOString() }));
+    sincronizar();
+  }
 });
 
 $('cancelar').addEventListener('click', () => {
