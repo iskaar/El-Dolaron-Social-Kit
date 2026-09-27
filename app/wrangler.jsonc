@@ -19,12 +19,11 @@
     // Ese hostname solo sirve la camara y la subida de fotos: el vendedor no
     // llega a precios ni a la caja aunque escriba la ruta.
     "HOST_VENDEDOR": "captura.viste.com.mx",
-    // La busqueda de precio (tiendas mexicanas, ver analisis.ts) solo existe
-    // con Gemini: activarla cambia el modelo por defecto de toda la tienda,
-    // no solo prende una funcion encima de Claude.
-    // Reactivado 2026-09-20 despues de resolver la facturacion de Gemini
-    // (la cuota 429 de antes era por falta de credito, no un bug).
-    "MODELO_ANALISIS": "gemini",
+    // Claude Haiku 4.5 desde 2026-09-26 (Issue #91): se acabo el credito de
+    // Gemini. Haiku estima el precio de memoria; la busqueda en tiendas
+    // mexicanas (BUSQUEDA_WEB, ver analisis.ts) hoy solo existe con Gemini, asi
+    // que con "claude" no hace nada. Para volver a Gemini: "gemini".
+    "MODELO_ANALISIS": "claude",
     "BUSQUEDA_WEB": "si",
     // Con que se verifica el JWT de Cloudflare Access (src/cuentas.ts). No son
     // secretos: salen en la redireccion al login de cada hostname. El aud es
