@@ -277,6 +277,19 @@ export const tsplPruebaCodigo = () => `${VARIANTES_CODIGO.map(([letra, barra, nu
 ].join('\r\n')).join('\r\n')}\r\n`;
 
 /**
+ * Que pasa despues de ED-009999 (Issue #85): etiquetas REALES (tsplEtiqueta,
+ * con el modulo y corrimiento guardados, sin cambiar tamano) para codigos de 4,
+ * 5 y 6 digitos. La primera es el control que ya se sabe que lee. El numero
+ * impreso abajo es contra lo que se compara lo que escribe el lector.
+ */
+const CODIGOS_LARGOS = ['ED-009999', 'ED-010000', 'ED-099999', 'ED-100000', 'ED-999999'];
+
+export const tsplPruebaLargos = () => CODIGOS_LARGOS.map((codigo) => {
+  const digitos = String(Number(codigo.slice(3))).padStart(4, '0').length;
+  return tsplEtiqueta({ codigo, nombre: `Prueba ${digitos} digitos`, precio: 9900, precio_lista: 0, semana_ingreso: 'S40' });
+}).join('');
+
+/**
  * Una regla impresa, para medir el descuadre en vez de adivinarlo: el marco es
  * donde la impresora CREE que esta la etiqueta y las rayas van cada 2 mm desde
  * ese borde. Comparando el marco contra el borde real del papel se lee cuanto

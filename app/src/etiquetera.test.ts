@@ -4,7 +4,7 @@
 // etiqueta, que es donde se rompio todo lo anterior.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { tsplEtiqueta, tsplBanda, tsplMarco, tsplPruebaCodigo, partirNombre, NOMBRE_MAX, TSPL_REGLA, TSPL_CALIBRAR } from '../public/etiquetera.js';
+import { tsplEtiqueta, tsplBanda, tsplMarco, tsplPruebaCodigo, tsplPruebaLargos, partirNombre, NOMBRE_MAX, TSPL_REGLA, TSPL_CALIBRAR } from '../public/etiquetera.js';
 
 const PIEZA = {
   nombre: 'Taza de ceramica azul',
@@ -287,4 +287,12 @@ test('un cambio de precio despues de imprimir regresa la pieza a la lista; uno i
   assert.deepEqual(impresas().c, { hora: '2026-09-25T17:00:00.000Z' });
   assert.equal(etiquetaVigente(impresas().c, { precio: 1, precio_lista: 0, stock: 1 }), true);
   delete (globalThis as any).localStorage;
+});
+
+test('la prueba de codigos largos usa la etiqueta real y el mismo ancho de barra', () => {
+  const tspl = tsplPruebaLargos();
+  const barras = [...tspl.matchAll(/BARCODE (\d+),\d+,"128",56,0,0,(\d+),\d+,"(\d+)"/g)];
+  assert.deepEqual(barras.map((b) => b[3]), ['9999', '10000', '99999', '100000', '999999']);
+  assert.ok(barras.every((b) => b[2] === '4'), 'mismo modulo que la etiqueta real');
+  assert.equal(tspl.match(/PRINT 1,1/g)?.length, 5);
 });
