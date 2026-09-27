@@ -729,6 +729,26 @@ async function ventasDelDia(url: URL, env: Env): Promise<Response> {
   return json(results);
 }
 
+/**
+ * El boton «Abrir cajon» (Issue #97): quien y cuando. El cajon ya se abrio en
+ * la caja; esto solo lo registra, y puede llegar tarde si no habia red.
+ * Idempotente por id, como las ventas.
+ */
+async function registrarAperturaCajon(request: Request, env: Env, correo: string): Promise<Response> {
+  const cuerpo = (await request.json().catch(() => ({}))) as { id?: unknown; abierto_en?: unknown };
+  const id = String(cuerpo.id ?? '');
+  const abiertoEn = String(cuerpo.abierto_en ?? '');
+  if (!UUID.test(id)) return json({ error: 'Identificador invalido.' }, 400);
+  if (Number.isNaN(Date.parse(abiertoEn))) return json({ error: 'Fecha invalida.' }, 400);
+  await env.DB.prepare(
+    `insert into cajon_aperturas (id, abierto_por, abierto_en, registrado_en) values (?, ?, ?, ?)
+     on conflict (id) do nothing`,
+  )
+    .bind(id, correo, new Date(abiertoEn).toISOString(), new Date().toISOString())
+    .run();
+  return json({ id }, 201);
+}
+
 /** Corte del dia: lo que hay que cuadrar contra el efectivo en la caja. */
 async function corte(url: URL, env: Env): Promise<Response> {
   const dia = url.searchParams.get('dia') ?? hoyTienda();
@@ -857,6 +877,12 @@ async function reportes(url: URL, env: Env): Promise<Response> {
       cancelada_por: string; motivo_cancelacion: string; piezas: string;
     }>();
 
+  const { results: aperturas } = await env.DB.prepare(
+    `select abierto_en, abierto_por from cajon_aperturas where abierto_en >= ? order by abierto_en desc`,
+  )
+    .bind(desde)
+    .all<{ abierto_en: string; abierto_por: string }>();
+
   return json({
     dias,
     resumen: {
@@ -876,6 +902,7 @@ async function reportes(url: URL, env: Env): Promise<Response> {
       total: cancelaciones.reduce((suma, c) => suma + c.total, 0),
       detalle: cancelaciones,
     },
+    aperturas_cajon: aperturas,
   });
 }
 
@@ -1069,6 +1096,10 @@ export default {
       const nuevoPin = pathname.match(/^\/api\/socios\/(\d+)\/pin$/);
       if (nuevoPin && request.method === 'POST') {
         return await cambiarPin(Number(nuevoPin[1]), request, env);
+      }
+
+      if (pathname === '/api/cajon' && request.method === 'POST') {
+        return await registrarAperturaCajon(request, env, correo);
       }
 
       const cancelacion = pathname.match(/^\/api\/ventas\/([^/]+)\/cancelar$/);

@@ -1,8 +1,8 @@
 /**
  * Ticket ESC/POS por WebUSB, para la Epson TM-T20 II. Sin driver ni dialogo de
  * impresion del sistema: la venta ya se cobro y se guardo, el ticket es un
- * extra que nunca debe bloquear ni retrasar el cobro. Cualquier falla aqui se
- * traga en silencio — revisa la consola, no la caja.
+ * extra que nunca debe bloquear ni retrasar el cobro. Una falla no detiene la
+ * venta: queda en errorImpresora() para que la caja la muestre.
  *
  * Misma filosofia que code128.js: nada por CDN, protocolo escrito a mano.
  */
@@ -20,6 +20,10 @@ const GS = 0x1d;
 let dispositivo = null;
 let numeroInterfaz = null;
 let numeroEndpointSalida = null;
+let ultimoError = '';
+
+/** Por que fallo el ultimo envio, o '' si salio bien. */
+export const errorImpresora = () => ultimoError;
 
 /**
  * Sin acentos: un ESC/POS mal emparejado con la tabla de codigos del firmware
@@ -63,53 +67,6 @@ const centrado = (texto) => linea(centrarTexto(texto));
 const separador = () => linea('-'.repeat(COLUMNAS));
 const renglonMonto = (etiqueta, monto) => linea(renglonMontoTexto(etiqueta, monto));
 
-/**
- * Imagen a ESC/POS (GS v 0, raster): un bit por punto, 1 = negro, el bit mas
- * alto a la izquierda. Transparente cuenta como blanco. Exportada para
- * probarla sin impresora.
- * @param rgba Uint8ClampedArray de canvas getImageData, ancho*alto*4
- */
-export function rasterEscPos(rgba, ancho, alto, umbral = 128) {
-  const porRenglon = Math.ceil(ancho / 8);
-  const salida = new Uint8Array(8 + porRenglon * alto);
-  salida.set([GS, 0x76, 0x30, 0, porRenglon & 0xff, porRenglon >> 8, alto & 0xff, alto >> 8]);
-  for (let y = 0; y < alto; y += 1) {
-    for (let x = 0; x < ancho; x += 1) {
-      const i = (y * ancho + x) * 4;
-      const luz = (rgba[i] * 299 + rgba[i + 1] * 587 + rgba[i + 2] * 114) / 1000;
-      if (rgba[i + 3] >= 128 && luz < umbral) {
-        salida[8 + y * porRenglon + (x >> 3)] |= 0x80 >> (x & 7);
-      }
-    }
-  }
-  return salida;
-}
-
-// logo-ticket.png ya viene en blanco y negro, recortado y a 432 puntos de ancho
-// (54 mm de los 72 que imprime la TM-T20II), sacado de
-// 01-Logos/el-dolaron-logo-horizontal-fondo-blanco.png. ponytail: si sale
-// grande, chico o empastado en papel, se regenera ese PNG con otro ancho.
-let logo = null;
-function cargarLogo() {
-  logo ??= (async () => {
-    const imagen = new Image();
-    imagen.src = '/logo-ticket.png';
-    await imagen.decode();
-    const lienzo = document.createElement('canvas');
-    lienzo.width = imagen.naturalWidth;
-    lienzo.height = imagen.naturalHeight;
-    const contexto = lienzo.getContext('2d');
-    contexto.drawImage(imagen, 0, 0);
-    const { data } = contexto.getImageData(0, 0, lienzo.width, lienzo.height);
-    return rasterEscPos(data, lienzo.width, lienzo.height);
-  })().catch((error) => {
-    console.error('Impresora: no se pudo preparar el logo, el ticket sale sin el', error);
-    logo = null;   // el siguiente ticket lo vuelve a intentar
-    return null;
-  });
-  return logo;
-}
-
 async function encontrarEndpointSalida(dev) {
   for (const config of dev.configurations) {
     for (const iface of config.interfaces) {
@@ -123,7 +80,7 @@ async function encontrarEndpointSalida(dev) {
 }
 
 async function abrir(dev) {
-  await dev.open();
+  if (!dev.opened) await dev.open();
   if (dev.configuration === null) await dev.selectConfiguration(1);
   const hallado = await encontrarEndpointSalida(dev);
   if (!hallado) throw new Error('La impresora no tiene un endpoint de salida USB.');
@@ -171,14 +128,47 @@ export function impresoraLista() {
   return dispositivo !== null;
 }
 
-async function enviar(bytes) {
-  if (!dispositivo) return false;
+// Issue #97: el ticket entero (~6 KB con el logo) en un solo transferOut
+// imprimio medio logo y fallo; la TM-T20 II recibe en un bufer de 4 KB. Se
+// manda en pedazos, uno a la vez. ponytail: 512 es holgado, no medido; si la
+// impresora vuelve a cortar a medio ticket, bajarlo (64 es un paquete USB).
+export const PEDAZO = 512;
+
+// En fila: el cajon y el ticket nunca se mezclan en el mismo puerto.
+let cola = Promise.resolve();
+
+function enviar(bytes) {
+  const envio = cola.then(() => enviarAhora(bytes));
+  cola = envio.catch(() => {});
+  return envio;
+}
+
+async function enviarAhora(bytes) {
+  // Tras una falla el puerto queda cerrado: se reabre aqui, sin pedir permiso.
+  // Antes se quedaba en null y ni el cajon volvia a abrir hasta recargar.
+  if (!dispositivo && !(await reconectarImpresora())) {
+    ultimoError = ultimoError || 'no conectada';
+    return false;
+  }
+  let enviados = 0;
   try {
-    await dispositivo.transferOut(numeroEndpointSalida, bytes);
+    while (enviados < bytes.length) {
+      const pedazo = bytes.subarray(enviados, enviados + PEDAZO);
+      const resultado = await dispositivo.transferOut(numeroEndpointSalida, pedazo);
+      if (resultado.status === 'stall') {
+        await dispositivo.clearHalt('out', numeroEndpointSalida);
+        throw new Error('la impresora detuvo la transferencia (stall)');
+      }
+      if (resultado.status !== 'ok') throw new Error(`transferencia ${resultado.status}`);
+      enviados += pedazo.length;
+    }
+    ultimoError = '';
     return true;
   } catch (error) {
-    console.error('Impresora: fallo el envio', error);
-    dispositivo = null;   // probablemente se desconecto; el siguiente intento reconecta
+    ultimoError = `${error?.name ?? 'Error'}: ${error?.message ?? error} (a los ${enviados} de ${bytes.length} bytes)`;
+    console.error('Impresora: fallo el envio', ultimoError, error);
+    try { await dispositivo?.close(); } catch { /* ya estaba cerrada */ }
+    dispositivo = null;
     return false;
   }
 }
@@ -199,12 +189,14 @@ export async function imprimirTicket(venta, lineas) {
     year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit',
   });
 
-  const imagenLogo = await cargarLogo();
+  // Sin logo (Issue #97): en la caja vieja cualquier imagen, aun chica y en
+  // franjas, dejaba la impresora trabada a media imagen. El nombre va en texto
+  // al doble de tamano (ESC ! 0x30), centrado por la propia impresora (ESC a 1).
   const partes = [
     new Uint8Array([ESC, 0x40]),   // inicializa: limpia cualquier estado de un ticket anterior
-    imagenLogo
-      ? concatenar([new Uint8Array([ESC, 0x61, 1]), imagenLogo, new Uint8Array([0x0a, ESC, 0x61, 0])])
-      : centrado('EL DOLARON'),
+    new Uint8Array([ESC, 0x61, 1, ESC, 0x21, 0x30]),
+    linea('EL DOLARON'),
+    new Uint8Array([ESC, 0x21, 0x00, ESC, 0x61, 0]),
     centrado('Productos Americanos'),
     separador(),
     linea(fecha),
