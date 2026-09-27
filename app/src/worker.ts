@@ -381,6 +381,33 @@ async function guardarConfig(request: Request, env: Env): Promise<Response> {
 const FAMILIAS_MAX = 40;
 
 /** Las familias de banda y los siete precios que comparten, para /bandas, el admin y la tarjeta. */
+/**
+ * Calibracion de la etiquetera (Issue #89): la guarda quien imprime, no solo el
+ * dueno, y vive en `config` para que todos los navegadores y el sandbox la
+ * compartan. Corrimiento en puntos (puede ser negativo); ancho de barra 2-8.
+ */
+async function guardarCalibracion(request: Request, env: Env): Promise<Response> {
+  const cuerpo = (await request.json().catch(() => ({}))) as { corrimiento?: unknown; modulo?: unknown };
+  const cambios: [string, number][] = [];
+  if (cuerpo.corrimiento !== undefined) {
+    const puntos = Number(cuerpo.corrimiento);
+    if (!Number.isInteger(puntos) || Math.abs(puntos) > 200) return json({ error: 'Corrimiento invalido.' }, 400);
+    cambios.push(['etiqueta_corrimiento', puntos]);
+  }
+  if (cuerpo.modulo !== undefined) {
+    const puntos = Number(cuerpo.modulo);
+    if (!Number.isInteger(puntos) || puntos < 2 || puntos > 8) return json({ error: 'Ancho de barra invalido.' }, 400);
+    cambios.push(['etiqueta_modulo', puntos]);
+  }
+  if (cambios.length === 0) return json({ error: 'Nada que guardar.' }, 400);
+  await env.DB.batch(cambios.map(([clave, valor]) =>
+    env.DB.prepare(
+      `insert into config (clave, valor) values (?, ?) on conflict (clave) do update set valor = excluded.valor`,
+    ).bind(clave, String(valor))));
+  const config = await leerConfig(env);
+  return json({ corrimiento: Number(config.etiqueta_corrimiento ?? 0), modulo: Number(config.etiqueta_modulo ?? 0) });
+}
+
 async function listarFamilias(env: Env): Promise<Response> {
   const { results } = await env.DB.prepare('select clave, nombre, prefijo from familias order by rowid').all();
   return json({ montos: MONTOS_BANDA, familias: results });
@@ -999,6 +1026,10 @@ export default {
       const foto = pathname.match(/^\/api\/foto\/([^/]+)$/);
       if (foto) {
         return await servirFoto(foto[1], env);
+      }
+
+      if (pathname === '/api/calibracion' && request.method === 'PUT') {
+        return await guardarCalibracion(request, env);
       }
 
       if (pathname === '/api/familias') {
