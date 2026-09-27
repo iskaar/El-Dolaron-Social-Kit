@@ -25,7 +25,7 @@
   "vars": {
     // Pinta la franja SANDBOX en todas las pantallas (worker.ts).
     "AMBIENTE": "sandbox",
-    "MODELO_ANALISIS": "gemini",
+    "MODELO_ANALISIS": "claude",
     "ACCESS_EQUIPO": "yellow-term-7d99.cloudflareaccess.com",
     // El aud es por aplicacion de Access: sandbox.viste.com.mx se agrega como
     // dominio a la MISMA aplicacion que escaner.viste.com.mx, asi que comparte
