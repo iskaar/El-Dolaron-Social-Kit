@@ -1,0 +1,58 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  // Sandbox (Issue #83): el mismo codigo que produccion, con base y fotos
+  // aparte, para probar caja, socios y Dolarones sin tocar la tienda. Como
+  // wrangler.prestado.jsonc, la separacion es fisica: otra D1, otro R2.
+  //
+  //   npx wrangler deploy --config wrangler.sandbox.jsonc
+  //   python ../tools/refrescar_sandbox.py      (copia produccion -> sandbox)
+  //
+  // Sin llaves de IA a proposito: el analisis de fotos falla aqui sin gastar.
+  "name": "el-dolaron-sandbox",
+  "main": "src/worker.ts",
+  "compatibility_date": "2026-09-11",
+  "compatibility_flags": ["nodejs_compat"],
+  "observability": {
+    "enabled": true,
+    "head_sampling_rate": 1
+  },
+  "assets": {
+    "directory": "public",
+    "binding": "ASSETS",
+    // Igual que produccion: los HTML pasan por el Worker (permisos y franja).
+    "run_worker_first": true
+  },
+  "vars": {
+    // Pinta la franja SANDBOX en todas las pantallas (worker.ts).
+    "AMBIENTE": "sandbox",
+    "MODELO_ANALISIS": "gemini",
+    "ACCESS_EQUIPO": "yellow-term-7d99.cloudflareaccess.com",
+    // El aud es por aplicacion de Access: sandbox.viste.com.mx se agrega como
+    // dominio a la MISMA aplicacion que escaner.viste.com.mx, asi que comparte
+    // su aud. Si algun dia tiene aplicacion propia, va su aud aqui.
+    "ACCESS_AUD": {
+      "sandbox.viste.com.mx": "8ecef061fac92da30e9b780d70c749c2a4bc91c7a04d3070c35f7d9d23eb451d"
+    }
+  },
+  "workers_dev": false,
+  "preview_urls": false,
+  "routes": [
+    {
+      "pattern": "sandbox.viste.com.mx",
+      "custom_domain": true
+    }
+  ],
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "el-dolaron-sandbox",
+      "database_id": "f25c3e83-4dfe-4c43-a9b0-3623ffa8d369"
+    }
+  ],
+  "r2_buckets": [
+    {
+      "binding": "FOTOS",
+      "bucket_name": "el-dolaron-sandbox-fotos"
+    }
+  ]
+}

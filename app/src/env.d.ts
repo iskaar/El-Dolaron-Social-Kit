@@ -12,6 +12,8 @@ declare global {
     BUSQUEDA_WEB?: string;
     /** Hostname que solo sirve la camara. Vacio = una sola puerta, como antes. */
     HOST_VENDEDOR?: string;
+    /** 'sandbox' en wrangler.sandbox.jsonc: pinta la franja en todas las pantallas. */
+    AMBIENTE?: string;
     /** Solo `wrangler dev` con `--var ACCESS_EQUIPO:local`: el correo con el que se entra. */
     DEV_USUARIO?: string;
   }
