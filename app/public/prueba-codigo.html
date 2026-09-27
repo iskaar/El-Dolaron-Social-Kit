@@ -53,11 +53,23 @@
     <button id="imprimir" type="button">Conectar e imprimir</button>
     <button id="otra" class="claro" type="button">¿No aparece la impresora?</button>
   </div>
+
+  <h2 style="font-size:16px;margin-top:28px">Códigos de más de 9,999 piezas</h2>
+  <p class="ayuda">
+    Cinco etiquetas reales, con el mismo tamaño y ancho de barra de siempre:
+    <code>9999</code> (control, ya se sabe que lee), <code>10000</code>, <code>99999</code>,
+    <code>100000</code> y <code>999999</code>. Abre el Bloc de notas y pasa cada una con el
+    lector: debe escribir el número completo, igual al de abajo sin «ED-» ni ceros de más.
+    Anota también si alguna barra toca la orilla de la etiqueta.
+  </p>
+  <div class="botones">
+    <button id="largos" type="button">Imprimir códigos largos</button>
+  </div>
   <div class="estado" id="estado"></div>
 </main>
 
 <script type="module">
-import { conectarEtiquetera, etiqueteraLista, mandarTspl, tsplPruebaCodigo } from '/etiquetera.js';
+import { conectarEtiquetera, etiqueteraLista, mandarTspl, tsplPruebaCodigo, tsplPruebaLargos } from '/etiquetera.js';
 
 const estado = document.getElementById('estado');
 const avisar = (texto) => { estado.textContent = texto; };
@@ -79,6 +91,13 @@ document.getElementById('imprimir').addEventListener('click', async () => {
   if (!await conectarSiHaceFalta(false)) return;
   avisar(await mandarTspl(tsplPruebaCodigo())
     ? 'Van las cuatro (A-D). Pásalas con el lector: la primera que suene es la buena.'
+    : 'Se cortó el enlace antes de imprimir. Vuelve a intentar.');
+});
+
+document.getElementById('largos').addEventListener('click', async () => {
+  if (!await conectarSiHaceFalta(false)) return;
+  avisar(await mandarTspl(tsplPruebaLargos())
+    ? 'Van cinco etiquetas (9999 a 999999). Pásalas con el lector en el Bloc de notas.'
     : 'Se cortó el enlace antes de imprimir. Vuelve a intentar.');
 });
 
