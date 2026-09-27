@@ -67,69 +67,6 @@ const centrado = (texto) => linea(centrarTexto(texto));
 const separador = () => linea('-'.repeat(COLUMNAS));
 const renglonMonto = (etiqueta, monto) => linea(renglonMontoTexto(etiqueta, monto));
 
-/**
- * Imagen a ESC/POS (GS v 0, raster): un bit por punto, 1 = negro, el bit mas
- * alto a la izquierda. Transparente cuenta como blanco. Exportada para
- * probarla sin impresora.
- * @param rgba Uint8ClampedArray de canvas getImageData, ancho*alto*4
- */
-export function rasterEscPos(rgba, ancho, alto, umbral = 128) {
-  const porRenglon = Math.ceil(ancho / 8);
-  const salida = new Uint8Array(8 + porRenglon * alto);
-  salida.set([GS, 0x76, 0x30, 0, porRenglon & 0xff, porRenglon >> 8, alto & 0xff, alto >> 8]);
-  for (let y = 0; y < alto; y += 1) {
-    for (let x = 0; x < ancho; x += 1) {
-      const i = (y * ancho + x) * 4;
-      const luz = (rgba[i] * 299 + rgba[i + 1] * 587 + rgba[i + 2] * 114) / 1000;
-      if (rgba[i + 3] >= 128 && luz < umbral) {
-        salida[8 + y * porRenglon + (x >> 3)] |= 0x80 >> (x & 7);
-      }
-    }
-  }
-  return salida;
-}
-
-/**
- * El logo en franjas: un GS v 0 por cada `filas` renglones en vez de uno solo.
- * Issue #97: en la caja vieja el logo entero (un comando de ~5 KB) salia a la
- * mitad, y un GS v 0 cortado deja a la impresora esperando el resto de la
- * imagen: se traga lo que sigue y el ticket no sale. Con franjas cada comando
- * es chico (~1 KB) y la impresora va imprimiendo mientras llega el resto.
- */
-export function logoEnFranjas(rgba, ancho, alto, filas = 24) {
-  const franjas = [];
-  for (let y = 0; y < alto; y += filas) {
-    const h = Math.min(filas, alto - y);
-    franjas.push(rasterEscPos(rgba.subarray(y * ancho * 4, (y + h) * ancho * 4), ancho, h));
-  }
-  return concatenar(franjas);
-}
-
-// logo-ticket.png ya viene en blanco y negro, recortado y a 360 puntos de ancho
-// (45 mm de los 72 que imprime la TM-T20II; era de 432 hasta el Issue #97),
-// sacado de 01-Logos/el-dolaron-logo-horizontal-fondo-blanco.png. ponytail: si
-// sale grande, chico o empastado en papel, se regenera ese PNG con otro ancho.
-let logo = null;
-function cargarLogo() {
-  logo ??= (async () => {
-    const imagen = new Image();
-    imagen.src = '/logo-ticket.png';
-    await imagen.decode();
-    const lienzo = document.createElement('canvas');
-    lienzo.width = imagen.naturalWidth;
-    lienzo.height = imagen.naturalHeight;
-    const contexto = lienzo.getContext('2d');
-    contexto.drawImage(imagen, 0, 0);
-    const { data } = contexto.getImageData(0, 0, lienzo.width, lienzo.height);
-    return logoEnFranjas(data, lienzo.width, lienzo.height);
-  })().catch((error) => {
-    console.error('Impresora: no se pudo preparar el logo, el ticket sale sin el', error);
-    logo = null;   // el siguiente ticket lo vuelve a intentar
-    return null;
-  });
-  return logo;
-}
-
 async function encontrarEndpointSalida(dev) {
   for (const config of dev.configurations) {
     for (const iface of config.interfaces) {
@@ -252,12 +189,14 @@ export async function imprimirTicket(venta, lineas) {
     year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit',
   });
 
-  const imagenLogo = await cargarLogo();
+  // Sin logo (Issue #97): en la caja vieja cualquier imagen, aun chica y en
+  // franjas, dejaba la impresora trabada a media imagen. El nombre va en texto
+  // al doble de tamano (ESC ! 0x30), centrado por la propia impresora (ESC a 1).
   const partes = [
     new Uint8Array([ESC, 0x40]),   // inicializa: limpia cualquier estado de un ticket anterior
-    imagenLogo
-      ? concatenar([new Uint8Array([ESC, 0x61, 1]), imagenLogo, new Uint8Array([0x0a, ESC, 0x61, 0])])
-      : centrado('EL DOLARON'),
+    new Uint8Array([ESC, 0x61, 1, ESC, 0x21, 0x30]),
+    linea('EL DOLARON'),
+    new Uint8Array([ESC, 0x21, 0x00, ESC, 0x61, 0]),
     centrado('Productos Americanos'),
     separador(),
     linea(fecha),
