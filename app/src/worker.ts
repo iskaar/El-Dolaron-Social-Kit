@@ -62,6 +62,9 @@ const FRANJA_SANDBOX = `<div style="background:#D72B32;color:#fff;text-align:cen
   SANDBOX · solo pruebas: aquí no se cobra de verdad ni se registran socios reales</div>`;
 
 const ESTADOS_FISICOS = new Set(['nuevo', 'danado']);
+// Transferencia: confirmada por Isaac como forma de pago; sin ella se capturaba
+// como efectivo o tarjeta y descuadraba el corte (Issue #93).
+const FORMAS_PAGO = new Set(['efectivo', 'tarjeta', 'transferencia']);
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const FOTO_MAX_BYTES = 6 * 1024 * 1024;
 
@@ -550,7 +553,7 @@ async function registrarVenta(request: Request, env: Env, correo: string): Promi
     return json({ error: 'La venta no tiene piezas.' }, 400);
   }
   const formaPago = String(venta.forma_pago ?? 'efectivo');
-  if (formaPago !== 'efectivo' && formaPago !== 'tarjeta') {
+  if (!FORMAS_PAGO.has(formaPago)) {
     return json({ error: 'Forma de pago invalida.' }, 400);
   }
 
@@ -705,13 +708,20 @@ async function cancelarVenta(id: string, request: Request, env: Env, correo: str
   return json({ id, cancelada: true, devuelto: venta.total - venta.dolarones, dolarones: venta.dolarones });
 }
 
+// La tienda esta en America/Mexico_City: UTC-6 fijo desde 2022, sin horario de
+// verano. Las ventas se guardan en UTC, asi que despues de las 18:00 locales ya
+// son "manana" en UTC; el dia de la tienda se saca restando 6 horas. Sin esto,
+// el corte de las 20:00 solo veia lo vendido de 18:00 a 20:00 (Issue #93).
+const diaTienda = (columna: string) => `substr(datetime(${columna}, '-6 hours'), 1, 10)`;
+export const hoyTienda = (ahora = Date.now()) => new Date(ahora - 6 * 3_600_000).toISOString().slice(0, 10);
+
 /** Tickets del dia para la caja: para cancelar el que se cobro mal. */
 async function ventasDelDia(url: URL, env: Env): Promise<Response> {
-  const dia = url.searchParams.get('dia') ?? new Date().toISOString().slice(0, 10);
+  const dia = url.searchParams.get('dia') ?? hoyTienda();
   const { results } = await env.DB.prepare(
     `select v.id, v.total, v.forma_pago, v.cancelada, v.creado_en,
             (select group_concat(nombre, ' · ') from venta_lineas where venta_id = v.id) as piezas
-     from ventas v where substr(v.creado_en, 1, 10) = ?
+     from ventas v where ${diaTienda('v.creado_en')} = ?
      order by v.creado_en desc limit 50`,
   )
     .bind(dia)
@@ -721,11 +731,11 @@ async function ventasDelDia(url: URL, env: Env): Promise<Response> {
 
 /** Corte del dia: lo que hay que cuadrar contra el efectivo en la caja. */
 async function corte(url: URL, env: Env): Promise<Response> {
-  const dia = url.searchParams.get('dia') ?? new Date().toISOString().slice(0, 10);
+  const dia = url.searchParams.get('dia') ?? hoyTienda();
   // Las canceladas no cuentan: el corte es contra el efectivo que hay en el cajon.
   const { results } = await env.DB.prepare(
     `select forma_pago, count(*) as tickets, sum(total - dolarones) as total, sum(dolarones) as dolarones
-     from ventas where substr(creado_en, 1, 10) = ? and cancelada = 0 group by forma_pago`,
+     from ventas where ${diaTienda('creado_en')} = ? and cancelada = 0 group by forma_pago`,
   )
     .bind(dia)
     .all<{ forma_pago: string; tickets: number; total: number; dolarones: number }>();
@@ -733,7 +743,7 @@ async function corte(url: URL, env: Env): Promise<Response> {
   const piezas = await env.DB.prepare(
     `select coalesce(sum(l.cantidad), 0) as piezas from venta_lineas l
      join ventas v on v.id = l.venta_id
-     where substr(v.creado_en, 1, 10) = ? and v.cancelada = 0`,
+     where ${diaTienda('v.creado_en')} = ? and v.cancelada = 0`,
   )
     .bind(dia)
     .first<{ piezas: number }>();
@@ -780,13 +790,13 @@ async function reportes(url: URL, env: Env): Promise<Response> {
     .all<{ forma_pago: string; tickets: number; total: number }>();
 
   const { results: ventasPorDia } = await env.DB.prepare(
-    `select substr(creado_en, 1, 10) as dia, count(*) as tickets, sum(total) as total
+    `select ${diaTienda('creado_en')} as dia, count(*) as tickets, sum(total) as total
      from ventas where cancelada = 0 and creado_en >= ? group by dia order by dia`,
   )
     .bind(desde)
     .all<{ dia: string; tickets: number; total: number }>();
   const { results: piezasPorDia } = await env.DB.prepare(
-    `select substr(v.creado_en, 1, 10) as dia, coalesce(sum(l.cantidad), 0) as piezas
+    `select ${diaTienda('v.creado_en')} as dia, coalesce(sum(l.cantidad), 0) as piezas
      from venta_lineas l join ventas v on v.id = l.venta_id
      where v.cancelada = 0 and v.creado_en >= ? group by dia`,
   )
@@ -836,7 +846,7 @@ async function reportes(url: URL, env: Env): Promise<Response> {
   // cancelacion que no fue legitima (cobrar de verdad y "cancelar" para
   // quedarse el efectivo). Se listan una por una, no solo el total.
   const { results: cancelaciones } = await env.DB.prepare(
-    `select v.id, v.total, v.forma_pago, v.cancelada_en, v.cancelada_por, v.motivo_cancelacion,
+    `select v.id, v.total - v.dolarones as total, v.forma_pago, v.cancelada_en, v.cancelada_por, v.motivo_cancelacion,
        (select group_concat(nombre, ' · ') from venta_lineas where venta_id = v.id) as piezas
      from ventas v where v.cancelada = 1 and v.creado_en >= ?
      order by v.cancelada_en desc`,

@@ -112,6 +112,7 @@
     <select id="forma">
       <option value="efectivo">Efectivo</option>
       <option value="tarjeta">Tarjeta (terminal)</option>
+      <option value="transferencia">Transferencia</option>
     </select>
 
     <label for="efectivo">Efectivo recibido</label>
@@ -146,6 +147,8 @@ import { totales, agregar, efectivoAlcanza, dolaronesGanados } from '/venta.js';
 import { reconectarImpresora, conectarImpresora, impresoraLista, imprimirTicket, abrirCajon, explicarErrorUsb } from '/impresora.js';
 
 const $ = (id) => document.getElementById(id);
+// Nombres de piezas (los escribe la IA o el admin), de socios y motivos: texto, nunca HTML.
+const escapar = (texto) => String(texto ?? '').replace(/[<>&"]/g, (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;' }[c]));
 const pesos = (centavos) => `$${(centavos / 100).toLocaleString('es-MX')}`;
 
 let catalogo = new Map();
@@ -205,7 +208,7 @@ async function cargarCatalogo() {
 function pintar() {
   $('ticket').innerHTML = lineas.map((l, i) => `
     <div class="renglon">
-      <div><div class="nombre">${l.nombre}</div><div class="codigo">${l.codigo}</div></div>
+      <div><div class="nombre">${escapar(l.nombre)}</div><div class="codigo">${escapar(l.codigo)}</div></div>
       <div>x${l.cantidad}</div>
       <div class="importe">${pesos(l.precio * l.cantidad)}</div>
       <button type="button" data-quitar="${i}" aria-label="Quitar">✕</button>
@@ -220,7 +223,7 @@ function pintar() {
   $('cobrar').disabled = t.total === 0;
 
   const cambio = $('cambio');
-  if (!efectivo || $('forma').value === 'tarjeta') {
+  if (!efectivo || $('forma').value !== 'efectivo') {
     cambio.textContent = '';
   } else if (t.falta > 0) {
     cambio.textContent = `Faltan ${pesos(t.falta)}`;
@@ -300,8 +303,8 @@ function pintarSugerencias() {
   const texto = $('codigo').value;
   const piezas = texto.trim().length >= 2 && !buscarPieza(texto) ? buscarPorTexto(texto) : [];
   $('sugerencias').innerHTML = piezas.map((p) => `
-    <button type="button" data-codigo="${p.codigo}">
-      <span>${p.nombre}</span><span class="codigo">${p.codigo} · ${pesos(p.precio)}</span>
+    <button type="button" data-codigo="${escapar(p.codigo)}">
+      <span>${escapar(p.nombre)}</span><span class="codigo">${escapar(p.codigo)} · ${pesos(p.precio)}</span>
     </button>`).join('');
 }
 
@@ -328,7 +331,7 @@ function pintarSocio() {
   $('quitar-socio').hidden = !socio;
   $('pagar-dolarones').hidden = !socio || socio.disponible === 0;
   $('socio-info').innerHTML = socio
-    ? `<b>#${socio.numero} · ${socio.nombre}</b> — ${dolares(socio.disponible)} disponibles`
+    ? `<b>#${socio.numero} · ${escapar(socio.nombre)}</b> — ${dolares(socio.disponible)} disponibles`
       + (socio.por_liberar ? ` (+${dolares(socio.por_liberar)} desde mañana)` : '')
     : '';
 }
@@ -522,7 +525,7 @@ async function pintarRechazadas() {
     .filter((v) => v.estado === 'rechazada');
   $('rechazadas').innerHTML = rechazadas.map((v) => `
     <div class="ticket">
-      <div><b>${pesos(totales(v.lineas).total)}</b> rechazada — ${v.motivo}</div>
+      <div><b>${pesos(totales(v.lineas).total)}</b> rechazada — ${escapar(v.motivo)}</div>
       <div>
         <button type="button" data-reintentar="${v.id}">Reintentar</button>
         <button type="button" data-descartar="${v.id}">Descartar</button>
@@ -554,7 +557,7 @@ async function cargarTickets() {
         <div class="ticket ${v.cancelada ? 'cancelada' : ''}">
           <div>
             <b>${pesos(v.total)}</b> · ${new Date(v.creado_en).toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' })}
-            <div class="piezas">${v.piezas ?? ''}</div>
+            <div class="piezas">${escapar(v.piezas)}</div>
           </div>
           ${v.cancelada ? '<span>cancelada</span>' : `<button type="button" data-cancelar="${v.id}">Cancelar</button>`}
         </div>`).join('');
