@@ -290,6 +290,18 @@ export const tsplPruebaLargos = () => CODIGOS_LARGOS.map((codigo) => {
 }).join('');
 
 /**
+ * Issue #87: la etiqueta real de un producto de prueba, pero con el codigo
+ * COMPLETO en la barra ("ED-000123"), para que otro sistema (WinCaja) lo lea
+ * tal cual. Con el modulo de 4 puntos no cabe en 50.8 mm, asi que sale dos
+ * veces, con barras de 3 y de 2 puntos; el resto del diseno no cambia.
+ */
+export const tsplPruebaCompleto = (codigo = 'ED-000123') => [3, 2].map((barra) =>
+  tsplEtiqueta({ codigo, nombre: `Codigo completo ${barra} puntos`, precio: 9900, precio_lista: 0, semana_ingreso: 'S40' }, 1, undefined, barra)
+    .replace(/BARCODE \d+,(\d+),"128",(\d+),0,0,(\d+),(\d+),"\d+"/,
+      `BARCODE ${centrarBarras(codigo, barra)},$1,"128",$2,0,0,$3,$4,"${codigo}"`),
+).join('');
+
+/**
  * Una regla impresa, para medir el descuadre en vez de adivinarlo: el marco es
  * donde la impresora CREE que esta la etiqueta y las rayas van cada 2 mm desde
  * ese borde. Comparando el marco contra el borde real del papel se lee cuanto
