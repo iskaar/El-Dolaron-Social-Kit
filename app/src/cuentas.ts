@@ -81,6 +81,7 @@ export function permiso(pathname: string, metodo: string): Regla {
 
   if (ruta === '/api/config') return metodo === 'GET' ? CAPTURA : DUENO;
   if (ruta === '/api/familias') return metodo === 'GET' ? TODOS : DUENO;
+  if (ruta === '/api/borradores/manual') return DUENO;   // captura sin foto (Issue #115)
   if (ruta === '/api/borradores' || ruta.startsWith('/api/borradores/')) return CAPTURA;
   if (ruta.startsWith('/api/foto/')) return CAPTURA;
   if (ruta === '/api/etiquetas') return CAPTURA;
