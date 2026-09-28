@@ -87,6 +87,8 @@
     background: var(--azul); color: #fff; font-weight: 700; }
   dialog .acciones button.secundario { background: #fff; color: var(--azul); border: 1px solid var(--azul); font-weight: 400; }
   dialog .acciones button:disabled { background: #c8cfda; cursor: not-allowed; }
+  .abrir-para-contar { width: 100%; padding: 12px; font-size: 16px; border: 1px solid var(--azul); background: #fff;
+    color: var(--azul); border-radius: 10px; cursor: pointer; margin: 4px 0; }
   .aviso-dialogo { min-height: 18px; font-size: 14px; color: var(--rojo); margin-top: 8px; }
   #corte-efectivo { font-size: 26px; font-weight: 700; padding: 12px; }
   .tipo-salida { display: flex; gap: 8px; margin: 4px 0 6px; }
@@ -204,6 +206,8 @@
   <div id="corte-paso-conteo">
     <p class="nota">Cuenta <b>todo</b> el efectivo del cajón, fondo incluido, y escribe el total. Lo que el
       sistema esperaba se ve después de registrarlo, y ya no se puede cambiar.</p>
+    <button id="corte-abrir-cajon" type="button" class="abrir-para-contar">Abrir cajón para contar</button>
+    <div class="aviso-dialogo" id="corte-aviso-cajon"></div>
     <label for="corte-efectivo">Efectivo en el cajón ($)</label>
     <input id="corte-efectivo" type="number" min="0" step="0.5" inputmode="decimal" placeholder="0">
     <label for="corte-terminal">Total de tarjeta según el cierre de la terminal ($)</label>
@@ -782,16 +786,25 @@ $('cobrar').addEventListener('click', cobrar);
 // Para cambiar billetes sin cobrar nada. Abre sin esperar al servidor (tiene
 // que abrir aunque no haya red) y deja quien y cuando en /reportes: se encola
 // como una venta y sincronizar() la manda.
-$('abrir-cajon').addEventListener('click', async () => {
+async function abrirCajonRegistrado(aviso) {
   const abierto = await abrirCajon();
-  $('aviso').textContent = abierto ? 'Cajón abierto.' : `No se abrió el cajón: ${errorImpresora() || 'la impresora no está conectada'}.`;
-  $('aviso').style.color = abierto ? '#5b6478' : '#D72B32';
+  aviso.textContent = abierto ? 'Cajón abierto.' : `No se abrió el cajón: ${errorImpresora() || 'la impresora no está conectada'}.`;
+  aviso.style.color = abierto ? '#5b6478' : '#D72B32';
   pintarImpresora();
-  $('codigo').focus();
   if (abierto) {
     await store('cajon', 'readwrite', (s) => s.put({ id: crypto.randomUUID(), abierto_en: new Date().toISOString(), caja: cajaActual() }));
     sincronizar();
   }
+}
+$('abrir-cajon').addEventListener('click', async () => {
+  await abrirCajonRegistrado($('aviso'));
+  $('codigo').focus();
+});
+// En el corte hay que contar el cajon, y el dialogo tapa el boton de arriba
+// (sugerencia de un cajero, 28/09). Queda registrado igual que el otro.
+$('corte-abrir-cajon').addEventListener('click', async () => {
+  await abrirCajonRegistrado($('corte-aviso-cajon'));
+  $('corte-efectivo').focus();
 });
 
 /* ---------- gasto o retiro de efectivo (Issue #100) ---------- */
@@ -862,6 +875,7 @@ $('abrir-corte').addEventListener('click', async () => {
   idCorte = crypto.randomUUID();
   $('corte-caja').textContent = cajaActual();
   $('corte-efectivo').value = '';
+  $('corte-aviso-cajon').textContent = '';
   $('corte-terminal').value = '';
   $('corte-notas').value = '';
   $('corte-aviso').textContent = '';
