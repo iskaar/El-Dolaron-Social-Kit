@@ -16,6 +16,14 @@ declare global {
     AMBIENTE?: string;
     /** Solo `wrangler dev` con `--var ACCESS_EQUIPO:local`: el correo con el que se entra. */
     DEV_USUARIO?: string;
+    /** Host público exacto. Ausente = portal inaccesible. */
+    HOST_PORTAL?: string;
+    FIREBASE_PROJECT_ID?: string;
+    FIREBASE_WEB_API_KEY?: string;
+    /** Requiere texto legal aprobado y despliegue coordinado. */
+    BASES_APROBADAS_VERSION?: string;
+    PORTAL_REGISTRO_ABIERTO?: string;
+    PROMOCION_INICIO?: string;
   }
 }
 

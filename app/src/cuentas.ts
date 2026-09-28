@@ -85,6 +85,7 @@ export function permiso(pathname: string, metodo: string): Regla {
   if (ruta === '/api/calibracion') return CAPTURA;
   if (ruta === '/api/catalogo') return CAJA;
   if (ruta === '/api/socios') return CAJA;
+  if (ruta === '/api/portal/llegada' && metodo === 'POST') return CAJA;
   if (ruta === '/api/cajon') return CAJA;
   if (ruta === '/api/cortes' || ruta === '/api/retiros') return CAJA;
   // ponytail: cancelar sigue abierto al cajero hasta la fase 2 del Issue #75,

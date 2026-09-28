@@ -14,6 +14,7 @@ import {
 } from './cuentas.ts';
 import { registrarSocio, buscarSocio, cambiarPin, sentenciasDeVenta, sentenciasDeCancelacion, saldo } from './dolarones.ts';
 import { registrarCorte, registrarRetiro, ultimoCorte, cajaDe } from './corte.ts';
+import { portal, llegada } from './portal.ts';
 
 interface FilaConfig {
   clave: string;
@@ -1019,6 +1020,15 @@ export default {
     const { pathname } = url;
 
     try {
+      // Puerta pública cerrada por defecto. Nunca comparte rutas ni assets del personal.
+      if (env.HOST_PORTAL && url.hostname === env.HOST_PORTAL) {
+        if (!pathname.startsWith('/api/portal/') || pathname === '/api/portal/llegada')
+          return json({ error: 'Ruta no encontrada.' }, 404);
+        try { return await portal(request, env, url); }
+        catch { return json({ error: 'Servicio no disponible.' }, 503); }
+      }
+      if (pathname.startsWith('/api/portal/') && pathname !== '/api/portal/llegada')
+        return json({ error: 'Ruta no encontrada.' }, 404);
       if (env.HOST_VENDEDOR && url.hostname === env.HOST_VENDEDOR) {
         if (pathname === '/') {
           return Response.redirect(`${url.origin}/captura`, 302);
@@ -1115,6 +1125,8 @@ export default {
         if (request.method === 'GET') return await buscarSocio(url, env);
         return json({ error: 'Metodo no permitido.' }, 405);
       }
+      if (pathname === '/api/portal/llegada' && request.method === 'POST')
+        return await llegada(request, env, correo);
 
       const nuevoPin = pathname.match(/^\/api\/socios\/(\d+)\/pin$/);
       if (nuevoPin && request.method === 'POST') {

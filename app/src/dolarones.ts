@@ -9,10 +9,6 @@
 
 import { dolaronesGanados, MINIMO_REGALO } from '../public/venta.js';
 
-/** Version de bases y aviso de privacidad que acepta quien se registra. Cambiarla al aprobar el abogado. */
-export const BASES_VERSION = 'borrador-2026-09-26';
-
-const DIA = 86_400_000;
 // America/Mexico_City no tiene horario de verano desde 2022: siempre UTC-6.
 const MX = -6 * 3_600_000;
 const INTENTOS_PIN = 5;
@@ -21,23 +17,7 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /* ---------- reglas, puras para probarlas sin D1 ---------- */
 
-/** Regalo de apertura por numero de socio: 15,000 D entre los primeros 100 (reglas, seccion 2). */
-export const REGALO: readonly { hasta: number; d: number }[] = [
-  { hasta: 1, d: 500 },
-  { hasta: 11, d: 300 },
-  { hasta: 24, d: 200 },
-  { hasta: 50, d: 150 },
-  { hasta: 100, d: 100 },
-];
-const DIAS_REGALO = 30;
 const MESES_COMPRA = 12;
-
-export function regaloPara(numero: number): number {
-  return (REGALO.find((t) => numero <= t.hasta)?.d ?? 0) * 100;
-}
-
-// La misma tabla, para asignar el regalo en el mismo INSERT que da el numero.
-const REGALO_SQL = `case ${REGALO.map((t) => `when numero <= ${t.hasta} then ${t.d * 100}`).join(' ')} else 0 end`;
 
 /** Lo ganado en una compra se usa desde la medianoche siguiente, hora de la tienda. */
 export function disponibleDesde(ahora: Date): string {
@@ -143,6 +123,8 @@ export async function registrarSocio(request: Request, env: Env, autor: string):
   if (correo && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(correo)) return json({ error: 'Correo invalido.' }, 400);
   if (!/^\d{4}$/.test(pin)) return json({ error: 'El PIN debe tener 4 digitos.' }, 400);
   if (cuerpo.acepta_bases !== true) return json({ error: 'El cliente tiene que aceptar las bases y el aviso de privacidad.' }, 400);
+  if (!env.BASES_APROBADAS_VERSION || env.BASES_APROBADAS_VERSION.startsWith('borrador'))
+    return json({ error: 'Altas cerradas hasta aprobar las bases y el aviso.' }, 503);
 
   const leer = (campo: 'id' | 'telefono', valor: string) =>
     env.DB.prepare(`select id, numero, nombre, telefono from clientes where ${campo} = ?`).bind(valor).first<FilaCliente>();
@@ -156,35 +138,20 @@ export async function registrarSocio(request: Request, env: Env, autor: string):
   const pinHash = await hashPin(pin, sal);
   const ahora = new Date();
   const ahoraIso = ahora.toISOString();
-  const loteRegalo = crypto.randomUUID();
-
-  // Numero y regalo en un solo batch: D1 escribe de una en una, asi que dos
-  // altas simultaneas nunca comparten numero (y `unique` lo respalda).
+  // El alta presencial no acredita una llegada ni asigna un premio. #109
+  // exige que personal registre la llegada con la ruta dedicada.
   try {
-    await env.DB.batch([
-      env.DB.prepare(
-        `insert into clientes (id, numero, nombre, telefono, correo, pin_hash, pin_sal, bases_version, registrado_por, creado_en)
-         select ?, coalesce(max(numero), 0) + 1, ?, ?, ?, ?, ?, ?, ?, ? from clientes`,
-      ).bind(id, nombre, telefono, correo, pinHash, sal, BASES_VERSION, autor, ahoraIso),
-      env.DB.prepare(
-        `insert into dolarones_lotes (id, cliente_id, origen, venta_id, importe, restante, disponible_desde, vence_en, creado_en)
-         select ?, id, 'regalo', null, ${REGALO_SQL}, ${REGALO_SQL}, ?, ?, ? from clientes where id = ? and numero <= ${REGALO.at(-1)!.hasta}`,
-      ).bind(loteRegalo, ahoraIso, new Date(ahora.getTime() + DIAS_REGALO * DIA).toISOString(), ahoraIso, id),
-      env.DB.prepare(
-        `insert into dolarones_movimientos (cliente_id, lote_id, venta_id, tipo, importe, autor, creado_en)
-         select cliente_id, id, null, 'regalo', importe, ?, ? from dolarones_lotes where id = ?`,
-      ).bind(autor, ahoraIso, loteRegalo),
-    ]);
+    await env.DB.prepare(
+        `insert into clientes (id, numero, nombre, telefono, correo, pin_hash, pin_sal, bases_version, bases_aceptadas_en, registrado_por, creado_en)
+         select ?, coalesce(max(numero), 0) + 1, ?, ?, ?, ?, ?, ?, ?, ?, ? from clientes`,
+      ).bind(id, nombre, telefono, correo, pinHash, sal, env.BASES_APROBADAS_VERSION, ahoraIso, autor, ahoraIso).run();
   } catch (error) {
     if (String(error).includes('clientes.telefono')) return json({ error: 'Ese telefono ya es socio.' }, 409);
     throw error;
   }
 
   const socio = (await leer('id', id))!;
-  const regalo = await env.DB.prepare('select importe, vence_en from dolarones_lotes where id = ?')
-    .bind(loteRegalo)
-    .first<{ importe: number; vence_en: string }>();
-  return json({ ...(await socioConSaldo(env, socio)), regalo: regalo?.importe ?? 0, regalo_vence: regalo?.vence_en ?? null }, 201);
+  return json({ ...(await socioConSaldo(env, socio)), regalo: 0, regalo_vence: null }, 201);
 }
 
 /** La caja busca por telefono (10 digitos) o por numero de socio. */
