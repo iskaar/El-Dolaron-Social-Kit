@@ -18,6 +18,7 @@ export interface Usuario {
   nombre: string;
   roles: Rol[];
   activo: boolean;
+  caja: string;   // la caja del cajero (Issue #105); '' = la de la computadora
 }
 
 interface FilaUsuario {
@@ -25,7 +26,11 @@ interface FilaUsuario {
   nombre: string;
   roles: string;
   activo: number;
+  caja: string;
 }
+
+/** Las cajas que se pueden asignar; las mismas que ofrece /caja. */
+export const CAJAS = ['Caja 1', 'Caja 2', 'Caja 3'];
 
 /* ---------- permisos por ruta ---------- */
 
@@ -191,10 +196,12 @@ export const leerRoles = (texto: string): Rol[] =>
   texto.split(',').map((r) => r.trim()).filter((r): r is Rol => (ROLES as string[]).includes(r));
 
 export async function leerUsuario(env: Env, correo: string): Promise<Usuario | null> {
-  const fila = await env.DB.prepare('select correo, nombre, roles, activo from usuarios where correo = ?')
+  const fila = await env.DB.prepare('select correo, nombre, roles, activo, caja from usuarios where correo = ?')
     .bind(correo)
     .first<FilaUsuario>();
-  return fila ? { correo: fila.correo, nombre: fila.nombre, roles: leerRoles(fila.roles), activo: fila.activo === 1 } : null;
+  return fila
+    ? { correo: fila.correo, nombre: fila.nombre, roles: leerRoles(fila.roles), activo: fila.activo === 1, caja: fila.caja }
+    : null;
 }
 
 function json(cuerpo: unknown, status = 200): Response {
@@ -252,14 +259,14 @@ export async function pedirAcceso(request: Request, env: Env, correo: string): P
 /** Para /cuentas: todos los usuarios y lo que esta esperando respuesta. */
 export async function listarCuentas(env: Env): Promise<Response> {
   const { results: filas } = await env.DB.prepare(
-    'select correo, nombre, roles, activo, creado_en from usuarios order by activo desc, nombre',
+    'select correo, nombre, roles, activo, caja, creado_en from usuarios order by activo desc, nombre',
   ).all<FilaUsuario & { creado_en: string }>();
   const { results: solicitudes } = await env.DB.prepare(
     `select id, tipo, correo, nombre, justificacion, datos, creado_en from solicitudes
      where estado = 'pendiente' order by creado_en`,
   ).all();
   const usuarios = filas.map((f) => ({ ...f, roles: leerRoles(f.roles), activo: f.activo === 1 }));
-  return json({ usuarios, solicitudes, roles: ROLES });
+  return json({ usuarios, solicitudes, roles: ROLES, cajas: CAJAS });
 }
 
 /**
@@ -288,6 +295,9 @@ export async function guardarCuenta(request: Request, env: Env): Promise<Respons
   const nombre = texto(cuerpo.nombre, 80);
   const roles = validarRoles(cuerpo.roles);
   const activo = cuerpo.activo !== false;
+  // Sin `caja` en el cuerpo (el alta, o una version vieja de /cuentas) no se toca la que tenga.
+  const caja = cuerpo.caja === undefined ? null : String(cuerpo.caja);
+  if (caja !== null && caja !== '' && !CAJAS.includes(caja)) return json({ error: 'Caja invalida.' }, 400);
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(correo)) return json({ error: 'Correo invalido.' }, 400);
   if (!roles) return json({ error: 'Escoge al menos un rol.' }, 400);
   if (await quedariaSinDueno(env, correo, roles, activo)) {
@@ -295,13 +305,15 @@ export async function guardarCuenta(request: Request, env: Env): Promise<Respons
   }
   const ahora = new Date().toISOString();
   await env.DB.prepare(
-    `insert into usuarios (correo, nombre, roles, activo, creado_en, actualizado_en) values (?, ?, ?, ?, ?, ?)
+    `insert into usuarios (correo, nombre, roles, activo, caja, creado_en, actualizado_en)
+     values (?, ?, ?, ?, coalesce(?, ''), ?, ?)
      on conflict (correo) do update set nombre = excluded.nombre, roles = excluded.roles,
-       activo = excluded.activo, actualizado_en = excluded.actualizado_en`,
+       activo = excluded.activo, caja = coalesce(?, usuarios.caja), actualizado_en = excluded.actualizado_en`,
   )
-    .bind(correo, nombre, roles.join(','), activo ? 1 : 0, ahora, ahora)
+    .bind(correo, nombre, roles.join(','), activo ? 1 : 0, caja, ahora, ahora, caja)
     .run();
-  return json({ correo, nombre, roles, activo });
+  const guardado = await leerUsuario(env, correo);
+  return json({ correo, nombre, roles, activo, caja: guardado?.caja ?? '' });
 }
 
 /** Aprobar o rechazar una solicitud. Hoy solo las de acceso (fase 1 del Issue #75). */
