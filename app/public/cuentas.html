@@ -14,7 +14,7 @@
   main { padding: 20px; max-width: 900px; margin: 0 auto; }
   .panel { background: #fff; border: 1px solid var(--linea); border-radius: 12px; padding: 16px; margin-bottom: 20px; }
   .panel h2 { font-size: 15px; margin: 0 0 12px; }
-  .fila { display: grid; grid-template-columns: 1.4fr 1fr auto auto auto; gap: 10px; align-items: center;
+  .fila { display: grid; grid-template-columns: 1.4fr 1fr auto auto auto auto; gap: 10px; align-items: center;
     padding: 10px 0; border-top: 1px solid var(--linea); }
   .fila:first-of-type { border-top: 0; }
   .fila.inactiva { opacity: .55; }
@@ -69,6 +69,12 @@
 const escapar = (texto) => String(texto ?? '').replace(/[<>&"]/g, (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;' }[c]));
 const NOMBRES = { dueno: 'Dueño', cajero: 'Cajero', capturista: 'Capturista' };
 let ROLES = [];
+let CAJAS = [];
+// Issue #105: la caja del cajero. Sin caja, usa la que se elija en la computadora.
+const selectorCaja = (actual) => `<select data-campo="caja" title="Caja del cajero">
+  <option value="">Caja de la computadora</option>
+  ${CAJAS.map((c) => `<option ${c === actual ? 'selected' : ''}>${escapar(c)}</option>`).join('')}
+</select>`;
 
 const casillas = (marcados) => ROLES.map((r) =>
   `<label><input type="checkbox" value="${r}" ${marcados.includes(r) ? 'checked' : ''}>${NOMBRES[r] ?? r}</label>`).join('');
@@ -78,6 +84,7 @@ const fecha = (iso) => new Date(iso).toLocaleString('es-MX', { dateStyle: 'mediu
 async function cargar() {
   const datos = await (await fetch('/api/cuentas')).json();
   ROLES = datos.roles;
+  CAJAS = datos.cajas ?? [];
 
   const solicitudes = datos.solicitudes.filter((s) => s.tipo === 'acceso');
   document.getElementById('titulo-solicitudes').textContent =
@@ -103,6 +110,7 @@ async function cargar() {
         <div><input type="text" data-campo="nombre" value="${escapar(u.nombre)}" placeholder="Nombre">
           <div class="correo">${escapar(u.correo)}</div></div>
         <div class="roles">${casillas(u.roles)}</div>
+        ${selectorCaja(u.caja)}
         <label style="font-size:14px"><input type="checkbox" data-campo="activo" ${u.activo ? 'checked' : ''}> Activo</label>
         <button type="button" class="claro" data-accion="guardar">Guardar</button>
         <span class="aviso"></span>
@@ -141,6 +149,7 @@ document.body.addEventListener('click', async (evento) => {
       nombre: nodo.querySelector('[data-campo="nombre"]').value,
       roles: rolesDe(nodo),
       activo: nodo.querySelector('[data-campo="activo"]').checked,
+      caja: nodo.querySelector('[data-campo="caja"]').value,
     }, nodo.querySelector('.aviso'));
     if (ok) nodo.classList.toggle('inactiva', !nodo.querySelector('[data-campo="activo"]').checked);
   } else if (accion === 'alta') {

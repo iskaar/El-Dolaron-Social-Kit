@@ -13,7 +13,7 @@ import {
   permiso, puede, quienEs, leerUsuario, yo, pedirAcceso, listarCuentas, guardarCuenta, resolverSolicitud,
 } from './cuentas.ts';
 import { registrarSocio, buscarSocio, cambiarPin, sentenciasDeVenta, sentenciasDeCancelacion, saldo } from './dolarones.ts';
-import { registrarCorte, registrarRetiro, ultimoCorte, nombreCaja } from './corte.ts';
+import { registrarCorte, registrarRetiro, ultimoCorte, cajaDe } from './corte.ts';
 
 interface FilaConfig {
   clave: string;
@@ -607,9 +607,9 @@ async function registrarVenta(request: Request, env: Env, correo: string): Promi
                            caja, cajero)
        values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).bind(id, total, formaPago, efectivo, Math.max(0, efectivo - aPagar), creadoEn, ahora, clienteId, dolarones,
-      // La caja la dice la computadora; quien cobro sale de Access, no del navegador.
-      // Una venta encolada antes del corte de caja (Issue #100) llega sin caja: ''.
-      nombreCaja(venta.caja), correo),
+      // Quien cobro sale de Access; la caja es la suya (Issue #105) o la de la
+      // computadora. Una venta encolada antes del corte de caja llega sin caja: ''.
+      await cajaDe(env, correo, venta.caja), correo),
     ...preparado.lineas.map((l) =>
       env.DB.prepare(
         `insert into venta_lineas (venta_id, producto_id, codigo, nombre, precio, cantidad)
@@ -694,7 +694,7 @@ async function cancelarVenta(id: string, request: Request, env: Env, correo: str
       env.DB.prepare(
         `update ventas set cancelada = 1, cancelada_en = ?, cancelada_por = ?, motivo_cancelacion = ?, cancelada_caja = ?
          where id = ?`,
-      ).bind(ahora, canceladaPor, motivo, nombreCaja(cuerpo.caja), id),   // el corte de esa caja cuenta la devolucion
+      ).bind(ahora, canceladaPor, motivo, await cajaDe(env, correo, cuerpo.caja), id),   // el corte de esa caja cuenta la devolucion
       ...lineas.map((l) =>
         env.DB.prepare(
           `update productos set stock = stock + ?, actualizado_en = ?
@@ -750,7 +750,7 @@ async function registrarAperturaCajon(request: Request, env: Env, correo: string
     `insert into cajon_aperturas (id, abierto_por, abierto_en, registrado_en, caja) values (?, ?, ?, ?, ?)
      on conflict (id) do nothing`,
   )
-    .bind(id, correo, new Date(abiertoEn).toISOString(), new Date().toISOString(), nombreCaja(cuerpo.caja))
+    .bind(id, correo, new Date(abiertoEn).toISOString(), new Date().toISOString(), await cajaDe(env, correo, cuerpo.caja))
     .run();
   return json({ id }, 201);
 }
@@ -1123,7 +1123,7 @@ export default {
 
       if (pathname === '/api/cortes') {
         if (request.method === 'POST') return await registrarCorte(request, env, correo);
-        if (request.method === 'GET') return await ultimoCorte(url, env);
+        if (request.method === 'GET') return await ultimoCorte(url, env, correo);
         return json({ error: 'Metodo no permitido.' }, 405);
       }
       if (pathname === '/api/retiros' && request.method === 'POST') {

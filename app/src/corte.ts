@@ -30,6 +30,16 @@ function json(cuerpo: unknown, status = 200): Response {
 /** El nombre de la caja que manda la computadora («Caja 1»). '' si no viene. */
 export const nombreCaja = (valor: unknown) => String(valor ?? '').replace(/\s+/g, ' ').trim().slice(0, 30);
 
+/**
+ * La caja de lo que hace esta persona (Issue #105): la suya si el dueno se la
+ * asigno en /cuentas, entre en la computadora que entre; si no tiene, la que se
+ * eligio en la computadora.
+ */
+export async function cajaDe(env: Env, correo: string, pedida: unknown): Promise<string> {
+  const usuario = await leerUsuario(env, correo);
+  return usuario?.caja || nombreCaja(pedida);
+}
+
 const texto = (valor: unknown, max: number) => String(valor ?? '').replace(/\s+/g, ' ').trim().slice(0, max);
 
 /**
@@ -48,7 +58,7 @@ export async function registrarRetiro(request: Request, env: Env, correo: string
   const cuerpo = (await request.json().catch(() => ({}))) as Record<string, unknown>;
   const id = String(cuerpo.id ?? '');
   const tipo = cuerpo.tipo === 'gasto' ? 'gasto' : cuerpo.tipo === undefined || cuerpo.tipo === 'retiro' ? 'retiro' : '';
-  const caja = nombreCaja(cuerpo.caja);
+  const caja = await cajaDe(env, correo, cuerpo.caja);
   const importe = Number(cuerpo.importe);
   const motivo = texto(cuerpo.motivo, 200);
   if (!UUID.test(id)) return json({ error: 'Identificador invalido.' }, 400);
@@ -91,7 +101,7 @@ const dinero = (forma: string) => `coalesce(sum(case when forma_pago = '${forma}
 export async function registrarCorte(request: Request, env: Env, correo: string): Promise<Response> {
   const cuerpo = (await request.json().catch(() => ({}))) as Record<string, unknown>;
   const id = String(cuerpo.id ?? '');
-  const caja = nombreCaja(cuerpo.caja);
+  const caja = await cajaDe(env, correo, cuerpo.caja);
   const contado = Number(cuerpo.efectivo_contado);
   const terminal = Number(cuerpo.tarjeta_terminal ?? 0);
   const notas = texto(cuerpo.notas, 500);
@@ -152,8 +162,8 @@ export async function registrarCorte(request: Request, env: Env, correo: string)
 }
 
 /** El ultimo corte de una caja, para reimprimirlo. */
-export async function ultimoCorte(url: URL, env: Env): Promise<Response> {
-  const caja = nombreCaja(url.searchParams.get('caja'));
+export async function ultimoCorte(url: URL, env: Env, correo: string): Promise<Response> {
+  const caja = await cajaDe(env, correo, url.searchParams.get('caja'));
   if (!caja) return json({ error: 'Falta la caja.' }, 400);
   const corte = await env.DB.prepare('select * from cortes where caja = ? order by hasta desc limit 1')
     .bind(caja)

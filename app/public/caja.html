@@ -263,6 +263,17 @@ $('caja-nombre').addEventListener('change', () => {
 });
 const cajaActual = () => $('caja-nombre').value;
 
+// Issue #105: si el dueno le asigno una caja a quien entro, esa es la suya en
+// cualquier computadora (el servidor la usa aunque aqui diga otra). Sin red se
+// queda lo que se eligio en esta computadora.
+fetch('/api/yo').then((r) => r.json()).then(({ usuario }) => {
+  if (!usuario?.caja) return;
+  $('caja-nombre').value = usuario.caja;
+  $('caja-nombre').disabled = true;
+  $('caja-nombre').title = 'Tu caja, asignada por el dueño';
+  $('caja-nombre').closest('label').firstChild.textContent = 'Tu caja ';
+}).catch(() => { /* sin red: la de la computadora */ });
+
 function exigirCaja() {
   if (cajaActual()) return true;
   $('aviso').textContent = 'Elige arriba qué caja es esta computadora.';

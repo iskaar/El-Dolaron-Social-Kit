@@ -161,3 +161,34 @@ test('gastos: el cajero registra hasta $100 sin aprobacion; mas de $100, solo el
   assert.deepEqual(r.retiros.map((x: { tipo: string; importe: number }) => [x.tipo, x.importe]).sort(),
     [['gasto', 10000], ['gasto', 35000], ['retiro', 500000]].sort());
 });
+
+test('el cajero con caja asignada cobra, gasta y corta en su caja, entre en la computadora que entre', async () => {
+  const { db, env, pedir } = tienda();
+  db.prepare(`insert into usuarios (correo, nombre, roles, activo, creado_en, actualizado_en) values
+    ('ana@prueba.mx', 'Ana', 'cajero', 1, '', '')`).run();
+  const como = (correo: string) => { (env as unknown as { DEV_USUARIO: string }).DEV_USUARIO = correo; };
+
+  // El dueno le asigna la Caja 1 en /cuentas; una caja que no existe no se guarda.
+  assert.equal((await pedir('/api/cuentas', { correo: 'ana@prueba.mx', nombre: 'Ana', roles: ['cajero'], caja: 'Caja 9' }, 'PUT')).status, 400);
+  const guardada = await pedir('/api/cuentas', { correo: 'ana@prueba.mx', nombre: 'Ana', roles: ['cajero'], caja: 'Caja 1' }, 'PUT');
+  assert.equal(guardada.cuerpo.caja, 'Caja 1');
+  // Guardar sin mandar la caja (el alta, p.ej.) no se la quita.
+  await pedir('/api/cuentas', { correo: 'ana@prueba.mx', nombre: 'Ana L.', roles: ['cajero'] }, 'PUT');
+
+  como('ana@prueba.mx');
+  assert.equal((await pedir('/api/yo')).cuerpo.usuario.caja, 'Caja 1');
+  // Ana esta en la computadora de la Caja 2: todo cae en la Caja 1.
+  const venta = await vender(pedir, 'Caja 2');
+  assert.equal((db.prepare('select caja from ventas where id = ?').get(venta.id) as { caja: string }).caja, 'Caja 1');
+  const gasto = await salida(pedir, 'gasto', 3000, 'Caja 2');
+  assert.equal(gasto.cuerpo.caja, 'Caja 1');
+  const corte = (await cortar(pedir, 'Caja 2', 72000)).cuerpo;
+  assert.equal(corte.caja, 'Caja 1');
+  assert.equal(corte.efectivo_esperado, 50000 + 25000 - 3000);
+  assert.equal(corte.diferencia, 0);
+
+  // El dueno no tiene caja asignada: usa la de la computadora.
+  como(DUENO);
+  const suya = await vender(pedir, 'Caja 2');
+  assert.equal((db.prepare('select caja from ventas where id = ?').get(suya.id) as { caja: string }).caja, 'Caja 2');
+});
