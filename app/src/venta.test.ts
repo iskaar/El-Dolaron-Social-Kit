@@ -18,13 +18,13 @@ test('el total suma precio por cantidad', () => {
 
 test('el cambio y lo que falta nunca son negativos a la vez', () => {
   const lineas: Linea[] = [{ codigo: 'G49', nombre: 'General $49', precio: 4900, cantidad: 1 }];
-  assert.deepEqual(totales(lineas, 10000), { piezas: 1, total: 4900, aPagar: 4900, cambio: 5100, falta: 0 });
-  assert.deepEqual(totales(lineas, 2000), { piezas: 1, total: 4900, aPagar: 4900, cambio: 0, falta: 2900 });
-  assert.deepEqual(totales(lineas, 4900), { piezas: 1, total: 4900, aPagar: 4900, cambio: 0, falta: 0 });
+  assert.deepEqual(totales(lineas, 10000), { piezas: 1, subtotal: 4900, descuento: 0, total: 4900, aPagar: 4900, cambio: 5100, falta: 0 });
+  assert.deepEqual(totales(lineas, 2000), { piezas: 1, subtotal: 4900, descuento: 0, total: 4900, aPagar: 4900, cambio: 0, falta: 2900 });
+  assert.deepEqual(totales(lineas, 4900), { piezas: 1, subtotal: 4900, descuento: 0, total: 4900, aPagar: 4900, cambio: 0, falta: 0 });
 });
 
 test('un ticket vacio no cobra nada', () => {
-  assert.deepEqual(totales([]), { piezas: 0, total: 0, aPagar: 0, cambio: 0, falta: 0 });
+  assert.deepEqual(totales([]), { piezas: 0, subtotal: 0, descuento: 0, total: 0, aPagar: 0, cambio: 0, falta: 0 });
 });
 
 test('escanear dos veces el mismo bote sube la cantidad, no agrega un renglon', () => {
