@@ -123,3 +123,39 @@ test('el ticket arranca con EL DOLARON en texto grande y centrado, sin imagen', 
   assert.ok(!bytes.some((b, i) => b === 0x1d && bytes[i + 1] === 0x76), 'ningun GS v 0 (imagen)');
   void dev;
 });
+
+test('el corte impreso trae lo esperado, lo contado, el faltante en negritas y dos firmas', async () => {
+  const { pedazos } = impresoraFalsa();
+  const { reconectarImpresora, imprimirCorte } = await import('../public/impresora.js');
+  await reconectarImpresora();
+  const antes = pedazos.length;
+  assert.equal(await imprimirCorte({
+    caja: 'Caja 2', cajero: 'caja@prueba.mx', desde: null, hasta: '2026-10-03T02:05:00Z', tickets: 12,
+    fondo_inicial: 50000, efectivo_ventas: 180000, efectivo_devoluciones: 4900, retiros: 100000,
+    efectivo_esperado: 125100, efectivo_contado: 120100, diferencia: -5000,
+    tarjeta_sistema: 60000, tarjeta_terminal: 60000, transferencias: 14900, dolarones: 5000,
+    fondo_siguiente: 50000, entregado: 70100, conteo: JSON.stringify({ 50000: 2, 20000: 1, 100: 1 }),
+    notas: 'Se cayo un billete detras del cajon',
+  }), true);
+  const texto = new TextDecoder().decode(Uint8Array.from(pedazos.slice(antes).flatMap((p) => [...p])));
+  assert.match(texto, /CORTE DE CAJA/);
+  assert.match(texto, /Caja: Caja 2/);
+  assert.match(texto, /primer corte de esta caja/);
+  assert.match(texto, /= Esperado +\$1251\.00/);
+  assert.match(texto, /Contado +\$1201\.00/);
+  assert.match(texto, /\x1bE\x01FALTANTE +\$50\.00/);
+  assert.match(texto, /2 x \$500\.00 +\$1000\.00/);
+  assert.match(texto, /SE ENTREGA +\$701\.00/);
+  assert.match(texto, /Se cayo un billete/);
+  assert.match(texto, /Entrega: _+\n +caja@prueba\.mx[\s\S]*Recibe: +_+/);
+});
+
+test('el retiro impreso trae importe, motivo y firmas', async () => {
+  const { pedazos } = impresoraFalsa();
+  const { reconectarImpresora, imprimirRetiro } = await import('../public/impresora.js');
+  await reconectarImpresora();
+  const antes = pedazos.length;
+  await imprimirRetiro({ caja: 'Caja 1', cajero: 'caja@prueba.mx', creado_en: '2026-10-02T20:00:00Z', importe: 100000, motivo: 'Caja fuerte' });
+  const texto = new TextDecoder().decode(Uint8Array.from(pedazos.slice(antes).flatMap((p) => [...p])));
+  assert.match(texto, /RETIRO DE EFECTIVO[\s\S]*IMPORTE +\$1000\.00[\s\S]*Caja fuerte[\s\S]*Recibe:/);
+});

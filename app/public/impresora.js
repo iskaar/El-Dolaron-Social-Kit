@@ -232,3 +232,105 @@ export async function imprimirTicket(venta, lineas) {
 
   return enviar(concatenar(partes));
 }
+
+/* ---------- Corte de caja y retiros (Issue #100): hojas para firmar ---------- */
+
+const importe = (centavos) => `$${(centavos / 100).toFixed(2)}`;
+const fechaHora = (iso) => new Date(iso).toLocaleString('es-MX', {
+  year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit',
+});
+const negritas = (encendidas) => new Uint8Array([ESC, 0x45, encendidas ? 1 : 0]);
+
+function encabezado(titulo) {
+  return [
+    new Uint8Array([ESC, 0x40]),
+    new Uint8Array([ESC, 0x61, 1, ESC, 0x21, 0x30]),
+    linea('EL DOLARON'),
+    new Uint8Array([ESC, 0x21, 0x00, ESC, 0x61, 0]),
+    centrado(titulo),
+    separador(),
+  ];
+}
+
+// Espacio para dos firmas y el corte del papel.
+function firmas(quienEntrega) {
+  return [
+    linea(), linea(), linea(),
+    linea('Entrega: ______________________________'),
+    linea(`         ${sinAcentos(quienEntrega).slice(0, COLUMNAS - 9)}`),
+    linea(), linea(), linea(),
+    linea('Recibe:  ______________________________'),
+    new Uint8Array([0x0a, 0x0a, 0x0a]),
+    new Uint8Array([GS, 0x56, 0x42, 0x00]),
+  ];
+}
+
+// Texto libre partido al ancho del papel.
+const parrafo = (texto) => (sinAcentos(texto).match(new RegExp(`.{1,${COLUMNAS}}`, 'g')) ?? []).map((l) => linea(l));
+
+/**
+ * El corte impreso, para que el cajero lo firme y lo entregue con el efectivo.
+ * @param corte la fila de `cortes` que regresa /api/cortes
+ */
+export function imprimirCorte(corte) {
+  const conteo = JSON.parse(corte.conteo || '{}');
+  const diferencia = corte.diferencia;
+  const etiquetaDiferencia = diferencia === 0 ? 'Diferencia' : diferencia > 0 ? 'SOBRANTE' : 'FALTANTE';
+  const partes = [
+    ...encabezado('CORTE DE CAJA'),
+    linea(`Caja: ${sinAcentos(corte.caja)}`),
+    linea(`Cajero: ${sinAcentos(corte.cajero)}`.slice(0, COLUMNAS)),
+    linea(`Desde: ${corte.desde ? fechaHora(corte.desde) : 'primer corte de esta caja'}`),
+    linea(`Hasta: ${fechaHora(corte.hasta)}`),
+    linea(`Ventas cobradas: ${corte.tickets}`),
+    separador(),
+    centrado('EFECTIVO'),
+    renglonMonto('Fondo inicial', importe(corte.fondo_inicial)),
+    renglonMonto('+ Ventas en efectivo', importe(corte.efectivo_ventas)),
+    renglonMonto('- Devoluciones', importe(corte.efectivo_devoluciones)),
+    renglonMonto('- Retiros', importe(corte.retiros)),
+    renglonMonto('= Esperado', importe(corte.efectivo_esperado)),
+    renglonMonto('Contado', importe(corte.efectivo_contado)),
+    negritas(diferencia !== 0),
+    renglonMonto(etiquetaDiferencia, importe(Math.abs(diferencia))),
+    negritas(false),
+    separador(),
+    centrado('CONTEO'),
+    ...Object.entries(conteo)
+      .filter(([, piezas]) => piezas > 0)
+      .sort(([a], [b]) => Number(b) - Number(a))
+      .map(([denominacion, piezas]) => renglonMonto(`  ${piezas} x ${importe(Number(denominacion))}`, importe(piezas * Number(denominacion)))),
+    separador(),
+    renglonMonto('Tarjeta (sistema)', importe(corte.tarjeta_sistema)),
+    renglonMonto('Tarjeta (terminal)', importe(corte.tarjeta_terminal)),
+    renglonMonto('Diferencia tarjeta', importe(corte.tarjeta_terminal - corte.tarjeta_sistema)),
+    renglonMonto('Transferencias', importe(corte.transferencias)),
+    renglonMonto('Dolarones usados', `${corte.dolarones / 100} D`),
+    separador(),
+    negritas(true),
+    renglonMonto('SE ENTREGA', importe(corte.entregado)),
+    negritas(false),
+    renglonMonto('Se queda en caja (fondo)', importe(corte.fondo_siguiente)),
+    ...(corte.notas ? [separador(), linea('Notas:'), ...parrafo(corte.notas)] : []),
+    ...firmas(corte.cajero),
+  ];
+  return enviar(concatenar(partes));
+}
+
+/** El comprobante de un retiro de efectivo, firmado por quien lo saca y quien lo recibe. */
+export function imprimirRetiro(retiro) {
+  const partes = [
+    ...encabezado('RETIRO DE EFECTIVO'),
+    linea(`Caja: ${sinAcentos(retiro.caja)}`),
+    linea(`Cajero: ${sinAcentos(retiro.cajero)}`.slice(0, COLUMNAS)),
+    linea(`Fecha: ${fechaHora(retiro.creado_en)}`),
+    separador(),
+    negritas(true),
+    renglonMonto('IMPORTE', importe(retiro.importe)),
+    negritas(false),
+    linea('Motivo:'),
+    ...parrafo(retiro.motivo),
+    ...firmas(retiro.cajero),
+  ];
+  return enviar(concatenar(partes));
+}

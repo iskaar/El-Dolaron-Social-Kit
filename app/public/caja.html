@@ -73,13 +73,49 @@
   #socio-info b { color: var(--azul); }
   #dolarones, #pin { width: 100%; padding: 12px; font-size: 18px; border: 1px solid var(--linea); border-radius: 10px; }
   #a-pagar { font-size: 18px; font-weight: 700; color: var(--azul); min-height: 22px; }
+  .caja-nombre { font-size: 13px; display: flex; align-items: center; gap: 6px; color: #fff; margin: 0; }
+  .caja-nombre select { width: auto; padding: 4px 8px; font-size: 14px; border-radius: 8px; border: 0; }
+  header button { border: 1px solid #FFD447; background: transparent; color: #FFD447; border-radius: 8px;
+    padding: 5px 12px; font-size: 13px; cursor: pointer; }
+  dialog { border: 0; border-radius: 14px; padding: 18px 20px; width: min(560px, 94vw); max-height: 92vh; }
+  dialog::backdrop { background: #16366b99; }
+  dialog h2 { margin: 0 0 8px; font-size: 20px; color: var(--azul); }
+  dialog .nota { font-size: 13px; color: #5b6478; margin: 4px 0 10px; }
+  dialog input { width: 100%; padding: 10px; font-size: 17px; border: 1px solid var(--linea); border-radius: 10px; }
+  dialog .acciones { display: flex; gap: 8px; justify-content: flex-end; margin-top: 14px; flex-wrap: wrap; }
+  dialog .acciones button { padding: 12px 16px; font-size: 15px; border-radius: 10px; border: 0; cursor: pointer;
+    background: var(--azul); color: #fff; font-weight: 700; }
+  dialog .acciones button.secundario { background: #fff; color: var(--azul); border: 1px solid var(--azul); font-weight: 400; }
+  dialog .acciones button:disabled { background: #c8cfda; cursor: not-allowed; }
+  .aviso-dialogo { min-height: 18px; font-size: 14px; color: var(--rojo); margin-top: 8px; }
+  #corte-denominaciones { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+  #corte-denominaciones td { padding: 3px 4px; font-size: 15px; }
+  #corte-denominaciones td:last-child { text-align: right; color: #5b6478; }
+  #corte-denominaciones input { width: 90px; padding: 6px 8px; font-size: 16px; }
+  .total-contado { font-size: 22px; margin: 10px 0 4px; text-align: right; }
+  #corte-resumen table { width: 100%; border-collapse: collapse; font-size: 15px; font-variant-numeric: tabular-nums; }
+  #corte-resumen td { padding: 4px 2px; border-bottom: 1px solid var(--linea); }
+  #corte-resumen td:last-child { text-align: right; }
+  #corte-resumen .fuerte td { font-weight: 800; font-size: 18px; }
+  #corte-resumen .falta td { color: var(--rojo); font-weight: 800; }
+  #corte-resumen .sobra td { color: #b26b00; font-weight: 800; }
   @media (max-width: 820px) { main { grid-template-columns: 1fr; } }
 </style>
 </head>
 <body>
 <header>
   <h1>Caja</h1>
+  <label class="caja-nombre">Esta computadora es
+    <select id="caja-nombre">
+      <option value="">— elige —</option>
+      <option>Caja 1</option>
+      <option>Caja 2</option>
+      <option>Caja 3</option>
+    </select>
+  </label>
   <span id="estado-red">en línea</span>
+  <button id="abrir-retiro" type="button">Retiro</button>
+  <button id="abrir-corte" type="button">Corte</button>
   <a href="/socios">Alta de socios</a>
   <a href="/admin">Cola de revisión</a>
 </header>
@@ -135,7 +171,7 @@
 </main>
 
 <footer id="pie">
-  <span id="corte">Corte del día: —</span>
+  <span id="corte">Hoy: —</span>
   <span id="pendientes"></span>
   <span id="catalogo-info"></span>
   <span id="impresora-estado"></span>
@@ -145,9 +181,54 @@
   </button>
 </footer>
 
+<dialog id="dialogo-retiro">
+  <h2>Retiro de efectivo</h2>
+  <p class="nota">Dinero que sale del cajón a media jornada (caja fuerte, banco). Se descuenta en el corte y se imprime un comprobante para firmar.</p>
+  <label for="retiro-importe">Importe ($)</label>
+  <input id="retiro-importe" type="number" min="1" step="1" inputmode="numeric">
+  <label for="retiro-motivo">Motivo</label>
+  <input id="retiro-motivo" type="text" maxlength="200" placeholder="Caja fuerte, depósito al banco…">
+  <div class="aviso-dialogo" id="retiro-aviso"></div>
+  <div class="acciones">
+    <button id="retiro-salir" type="button" class="secundario">Cancelar</button>
+    <button id="retiro-registrar" type="button">Registrar y abrir cajón</button>
+  </div>
+</dialog>
+
+<dialog id="dialogo-corte">
+  <h2>Corte de <span id="corte-caja"></span></h2>
+  <div id="corte-paso-conteo">
+    <p class="nota">Cuenta <b>todo</b> el efectivo del cajón, fondo incluido. Lo que el sistema esperaba se ve
+      después de registrar el conteo, y el conteo ya no se puede cambiar.</p>
+    <table id="corte-denominaciones"></table>
+    <div class="total-contado">Contado: <b id="corte-contado">$0</b></div>
+    <label for="corte-terminal">Total de tarjeta según el cierre de la terminal ($)</label>
+    <input id="corte-terminal" type="number" min="0" step="0.01" inputmode="decimal" placeholder="0">
+    <label for="corte-notas">Notas (opcional)</label>
+    <input id="corte-notas" type="text" maxlength="500">
+    <div class="aviso-dialogo" id="corte-aviso"></div>
+    <div class="acciones">
+      <button id="corte-reimprimir" type="button" class="secundario">Reimprimir el último corte</button>
+      <button id="corte-salir" type="button" class="secundario">Cancelar</button>
+      <button id="corte-registrar" type="button">Registrar conteo</button>
+    </div>
+  </div>
+  <div id="corte-paso-resultado" hidden>
+    <div id="corte-resumen"></div>
+    <div class="aviso-dialogo" id="corte-aviso-resultado"></div>
+    <div class="acciones">
+      <button id="corte-imprimir" type="button" class="secundario">Imprimir otra vez</button>
+      <button id="corte-cerrar" type="button">Cerrar</button>
+    </div>
+  </div>
+</dialog>
+
 <script type="module">
-import { totales, agregar, efectivoAlcanza, dolaronesGanados } from '/venta.js';
-import { reconectarImpresora, conectarImpresora, impresoraLista, imprimirTicket, abrirCajon, explicarErrorUsb, errorImpresora } from '/impresora.js';
+import { totales, agregar, efectivoAlcanza, dolaronesGanados, DENOMINACIONES, contadoDe } from '/venta.js';
+import {
+  reconectarImpresora, conectarImpresora, impresoraLista, imprimirTicket, abrirCajon, explicarErrorUsb, errorImpresora,
+  imprimirCorte, imprimirRetiro,
+} from '/impresora.js';
 
 const $ = (id) => document.getElementById(id);
 // Nombres de piezas (los escribe la IA o el admin), de socios y motivos: texto, nunca HTML.
@@ -164,6 +245,27 @@ let cobrando = false;
 // Socio de la venta en curso: { id, numero, nombre, disponible, por_liberar } o null.
 let socio = null;
 const dolares = (centavos) => `${(centavos / 100).toLocaleString('es-MX')} D`;
+
+/* ---------- que caja es esta computadora (Issue #100) ---------- */
+
+// Cada venta, cancelacion, retiro y corte lleva la caja: el corte cuenta el
+// dinero de un cajon. Se elige una vez por computadora y se recuerda aqui.
+const CLAVE_CAJA = 'caja-nombre';
+try { $('caja-nombre').value = localStorage.getItem(CLAVE_CAJA) ?? ''; } catch { /* sin memoria: se elige cada vez */ }
+$('caja-nombre').addEventListener('change', () => {
+  try { localStorage.setItem(CLAVE_CAJA, $('caja-nombre').value); } catch { /* idem */ }
+  $('aviso').textContent = '';
+  $('codigo').focus();
+});
+const cajaActual = () => $('caja-nombre').value;
+
+function exigirCaja() {
+  if (cajaActual()) return true;
+  $('aviso').textContent = 'Elige arriba qué caja es esta computadora.';
+  $('aviso').style.color = '#D72B32';
+  $('caja-nombre').focus();
+  return false;
+}
 
 /* ---------- almacen local: catalogo y ventas encoladas ---------- */
 
@@ -418,6 +520,7 @@ async function cobrarConDolarones(venta, t) {
 
 async function cobrar() {
   if (cobrando) return;                 // doble clic: el primero ya va en camino
+  if (!exigirCaja()) return;
   const efectivo = Math.round(Number($('efectivo').value || 0) * 100);
   const forma = $('forma').value;
   const usados = dolaronesPedidos();
@@ -441,6 +544,7 @@ async function cobrar() {
       creado_en: new Date().toISOString(),
       cliente_id: socio?.id ?? null,
       dolarones: usados,
+      caja: cajaActual(),
     };
     let socioTicket = socio && { numero: socio.numero, ganados: dolaronesGanados(t.aPagar), saldo: socio.disponible };
     if (usados > 0) {
@@ -611,9 +715,11 @@ $('lista-tickets').addEventListener('click', async (e) => {
     const campoMotivo = fila.querySelector('.motivo-cancelacion');
     const motivo = campoMotivo.value.trim();
     if (!motivo) { campoMotivo.style.borderColor = 'var(--rojo)'; campoMotivo.focus(); return; }
+    if (!exigirCaja()) return;
     e.target.disabled = true;
+    // La caja donde se devuelve el dinero: su corte cuenta la devolucion.
     const r = await fetch(`/api/ventas/${idConfirmar}/cancelar`, {
-      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ motivo }),
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ motivo, caja: cajaActual() }),
     });
     const cuerpo = await r.json();
     $('aviso').textContent = r.ok
@@ -627,12 +733,14 @@ $('lista-tickets').addEventListener('click', async (e) => {
   }
 });
 
+// Sin importes a la vista: el conteo del corte es ciego (Issue #100). El dueno
+// ve el dinero en /reportes.
 async function actualizarCorte() {
   try {
     const c = await (await fetch('/api/ventas')).json();
-    $('corte').textContent = `Corte del día: ${pesos(c.total)} · ${c.piezas} piezas`
-      + (c.dolarones ? ` · ${dolares(c.dolarones)} en Dolarones` : '');
-  } catch { /* sin red, el corte se ve cuando vuelva */ }
+    const tickets = c.por_forma_pago.reduce((suma, f) => suma + f.tickets, 0);
+    $('corte').textContent = `Hoy: ${tickets} ${tickets === 1 ? 'venta' : 'ventas'} · ${c.piezas} piezas`;
+  } catch { /* sin red, se ve cuando vuelva */ }
 }
 
 /* ---------- eventos ---------- */
@@ -666,8 +774,186 @@ $('abrir-cajon').addEventListener('click', async () => {
   pintarImpresora();
   $('codigo').focus();
   if (abierto) {
-    await store('cajon', 'readwrite', (s) => s.put({ id: crypto.randomUUID(), abierto_en: new Date().toISOString() }));
+    await store('cajon', 'readwrite', (s) => s.put({ id: crypto.randomUUID(), abierto_en: new Date().toISOString(), caja: cajaActual() }));
     sincronizar();
+  }
+});
+
+/* ---------- retiro de efectivo (Issue #100) ---------- */
+
+// Se registra ANTES de abrir el cajon: nunca sale dinero sin rastro. Necesita
+// red. El id se genera al abrir el dialogo: reintentar no duplica el retiro.
+let idRetiro = null;
+$('abrir-retiro').addEventListener('click', () => {
+  if (!exigirCaja()) return;
+  idRetiro = crypto.randomUUID();
+  $('retiro-importe').value = '';
+  $('retiro-motivo').value = '';
+  $('retiro-aviso').textContent = '';
+  $('retiro-registrar').disabled = false;
+  $('dialogo-retiro').showModal();
+  $('retiro-importe').focus();
+});
+$('retiro-salir').addEventListener('click', () => { $('dialogo-retiro').close(); $('codigo').focus(); });
+$('retiro-registrar').addEventListener('click', async () => {
+  const importe = Math.round(Number($('retiro-importe').value || 0) * 100);
+  const motivo = $('retiro-motivo').value.trim();
+  if (importe <= 0) { $('retiro-aviso').textContent = 'Escribe cuánto sale del cajón.'; return; }
+  if (!motivo) { $('retiro-aviso').textContent = 'Escribe el motivo.'; return; }
+  $('retiro-registrar').disabled = true;
+  try {
+    const r = await fetch('/api/retiros', {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ id: idRetiro, caja: cajaActual(), importe, motivo }),
+    });
+    const retiro = await r.json();
+    if (!r.ok) { $('retiro-aviso').textContent = retiro.error ?? 'No se pudo registrar el retiro.'; return; }
+    $('dialogo-retiro').close();
+    await abrirCajon();
+    imprimirRetiro(retiro).then(pintarImpresora);
+    $('aviso').textContent = `Retiro de ${pesos(importe)} registrado. Firmen el comprobante.`;
+    $('aviso').style.color = '#1f7a4d';
+    $('codigo').focus();
+  } catch {
+    $('retiro-aviso').textContent = 'Sin red: el retiro necesita conexión para quedar registrado.';
+  } finally {
+    $('retiro-registrar').disabled = false;
+  }
+});
+
+/* ---------- corte de caja (Issue #100) ---------- */
+
+let idCorte = null;
+let ultimoCorte = null;
+
+function conteoCorte() {
+  const conteo = {};
+  for (const campo of document.querySelectorAll('#corte-denominaciones input')) {
+    const piezas = Number(campo.value || 0);
+    if (piezas) conteo[campo.dataset.denominacion] = piezas;
+  }
+  return conteo;
+}
+
+function pintarContado() {
+  for (const campo of document.querySelectorAll('#corte-denominaciones input')) {
+    const piezas = Number(campo.value || 0);
+    campo.closest('tr').lastElementChild.textContent = Number.isInteger(piezas) && piezas > 0
+      ? pesos(piezas * Number(campo.dataset.denominacion)) : '';
+  }
+  const contado = contadoDe(conteoCorte());
+  $('corte-contado').textContent = contado === null ? 'revisa las piezas' : pesos(contado);
+}
+
+$('corte-denominaciones').innerHTML = DENOMINACIONES.map((d) => `
+  <tr><td>${d === 2000 ? 'Billete o moneda de $20' : d === 50 ? 'Moneda de 50¢' : `${d > 2000 ? 'Billete' : 'Moneda'} de ${pesos(d)}`}</td>
+    <td><input type="number" min="0" step="1" inputmode="numeric" data-denominacion="${d}" placeholder="0"></td>
+    <td></td></tr>`).join('');
+$('corte-denominaciones').addEventListener('input', pintarContado);
+
+$('abrir-corte').addEventListener('click', async () => {
+  if (!exigirCaja()) return;
+  idCorte = crypto.randomUUID();
+  $('corte-caja').textContent = cajaActual();
+  for (const campo of document.querySelectorAll('#corte-denominaciones input')) campo.value = '';
+  $('corte-terminal').value = '';
+  $('corte-notas').value = '';
+  $('corte-aviso').textContent = '';
+  $('corte-paso-conteo').hidden = false;
+  $('corte-paso-resultado').hidden = true;
+  pintarContado();
+  $('dialogo-corte').showModal();
+
+  // Lo que no llego al servidor no entra en el corte: primero se sincroniza, y
+  // si algo sigue pendiente o rechazado no se puede cortar.
+  $('corte-registrar').disabled = true;
+  await sincronizar();
+  const cola = await store('ventas', 'readonly', (s) => s.getAll());
+  const rechazadas = cola.filter((v) => v.estado === 'rechazada').length;
+  const pendientes = cola.length - rechazadas;
+  if (!navigator.onLine || pendientes) {
+    $('corte-aviso').textContent = `Hay ${pendientes} ventas sin sincronizar. Espera a tener red antes del corte.`;
+  } else if (rechazadas) {
+    $('corte-aviso').textContent = `Hay ${rechazadas} ventas rechazadas: reintenta o descarta cada una antes del corte.`;
+  } else {
+    $('corte-registrar').disabled = false;
+  }
+  document.querySelector('#corte-denominaciones input').focus();
+});
+
+$('corte-salir').addEventListener('click', () => { $('dialogo-corte').close(); $('codigo').focus(); });
+$('corte-cerrar').addEventListener('click', () => { $('dialogo-corte').close(); $('codigo').focus(); });
+
+function pintarResultado(c) {
+  const renglon = (etiqueta, valor, clase = '') => `<tr class="${clase}"><td>${etiqueta}</td><td>${valor}</td></tr>`;
+  const diferencia = c.diferencia === 0
+    ? renglon('Diferencia', pesos(0))
+    : renglon(c.diferencia > 0 ? 'Sobrante' : 'Faltante', pesos(Math.abs(c.diferencia)), c.diferencia > 0 ? 'sobra' : 'falta');
+  const tarjeta = c.tarjeta_terminal - c.tarjeta_sistema;
+  $('corte-resumen').innerHTML = `<table>
+    ${renglon('Ventas cobradas', c.tickets)}
+    ${renglon('Fondo inicial', pesos(c.fondo_inicial))}
+    ${renglon('+ Ventas en efectivo', pesos(c.efectivo_ventas))}
+    ${renglon('− Devoluciones', pesos(c.efectivo_devoluciones))}
+    ${renglon('− Retiros', pesos(c.retiros))}
+    ${renglon('= Esperado', pesos(c.efectivo_esperado), 'fuerte')}
+    ${renglon('Contado', pesos(c.efectivo_contado), 'fuerte')}
+    ${diferencia}
+    ${renglon('Tarjeta: sistema / terminal', `${pesos(c.tarjeta_sistema)} / ${pesos(c.tarjeta_terminal)}`, tarjeta ? 'falta' : '')}
+    ${renglon('Transferencias', pesos(c.transferencias))}
+    ${renglon('Dolarones usados', dolares(c.dolarones))}
+    ${renglon('Se entrega', pesos(c.entregado), 'fuerte')}
+    ${renglon('Se queda en la caja (fondo)', pesos(c.fondo_siguiente))}
+  </table>`;
+}
+
+$('corte-registrar').addEventListener('click', async () => {
+  const conteo = conteoCorte();
+  if (contadoDe(conteo) === null) { $('corte-aviso').textContent = 'Revisa las piezas: solo números enteros.'; return; }
+  const terminal = Math.round(Number($('corte-terminal').value || 0) * 100);
+  if (!(terminal >= 0)) { $('corte-aviso').textContent = 'Revisa el total de la terminal.'; return; }
+  $('corte-registrar').disabled = true;
+  try {
+    const r = await fetch('/api/cortes', {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ id: idCorte, caja: cajaActual(), conteo, tarjeta_terminal: terminal, notas: $('corte-notas').value }),
+    });
+    const corte = await r.json();
+    if (!r.ok) { $('corte-aviso').textContent = corte.error ?? 'No se pudo registrar el corte.'; $('corte-registrar').disabled = false; return; }
+    ultimoCorte = corte;
+    pintarResultado(corte);
+    $('corte-paso-conteo').hidden = true;
+    $('corte-paso-resultado').hidden = false;
+    const impreso = await imprimirCorte(corte);
+    pintarImpresora();
+    $('corte-aviso-resultado').textContent = impreso ? '' : 'No se imprimió: revisa la impresora y usa «Imprimir otra vez».';
+    actualizarCorte();
+  } catch {
+    // El id se conserva: reintentar manda el mismo corte, no uno nuevo.
+    $('corte-aviso').textContent = 'Sin red: intenta otra vez.';
+    $('corte-registrar').disabled = false;
+  }
+});
+
+$('corte-imprimir').addEventListener('click', async () => {
+  if (!ultimoCorte) return;
+  const impreso = await imprimirCorte(ultimoCorte);
+  pintarImpresora();
+  $('corte-aviso-resultado').textContent = impreso ? '' : 'No se imprimió: revisa la impresora.';
+});
+
+$('corte-reimprimir').addEventListener('click', async () => {
+  try {
+    const r = await fetch(`/api/cortes?caja=${encodeURIComponent(cajaActual())}`);
+    const corte = await r.json();
+    if (!r.ok) { $('corte-aviso').textContent = corte.error ?? 'No se encontró el corte.'; return; }
+    const impreso = await imprimirCorte(corte);
+    pintarImpresora();
+    $('corte-aviso').textContent = impreso
+      ? `Reimpreso el corte de ${new Date(corte.hasta).toLocaleString('es-MX')}.`
+      : 'No se imprimió: revisa la impresora.';
+  } catch {
+    $('corte-aviso').textContent = 'Sin red: no se pudo traer el último corte.';
   }
 });
 

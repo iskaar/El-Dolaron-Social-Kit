@@ -13,6 +13,7 @@ import {
   permiso, puede, quienEs, leerUsuario, yo, pedirAcceso, listarCuentas, guardarCuenta, resolverSolicitud,
 } from './cuentas.ts';
 import { registrarSocio, buscarSocio, cambiarPin, sentenciasDeVenta, sentenciasDeCancelacion, saldo } from './dolarones.ts';
+import { registrarCorte, registrarRetiro, ultimoCorte, nombreCaja } from './corte.ts';
 
 interface FilaConfig {
   clave: string;
@@ -543,7 +544,7 @@ async function registrarVenta(request: Request, env: Env, correo: string): Promi
   const venta = (await request.json()) as {
     id?: unknown; lineas?: unknown; forma_pago?: unknown;
     efectivo?: unknown; creado_en?: unknown;
-    cliente_id?: unknown; dolarones?: unknown; pin?: unknown;
+    cliente_id?: unknown; dolarones?: unknown; pin?: unknown; caja?: unknown;
   };
   const id = String(venta.id ?? '');
   if (!UUID.test(id)) {
@@ -602,9 +603,13 @@ async function registrarVenta(request: Request, env: Env, correo: string): Promi
 
   const sentencias = [
     env.DB.prepare(
-      `insert into ventas (id, total, forma_pago, efectivo, cambio, creado_en, registrado_en, cliente_id, dolarones)
-       values (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    ).bind(id, total, formaPago, efectivo, Math.max(0, efectivo - aPagar), creadoEn, ahora, clienteId, dolarones),
+      `insert into ventas (id, total, forma_pago, efectivo, cambio, creado_en, registrado_en, cliente_id, dolarones,
+                           caja, cajero)
+       values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).bind(id, total, formaPago, efectivo, Math.max(0, efectivo - aPagar), creadoEn, ahora, clienteId, dolarones,
+      // La caja la dice la computadora; quien cobro sale de Access, no del navegador.
+      // Una venta encolada antes del corte de caja (Issue #100) llega sin caja: ''.
+      nombreCaja(venta.caja), correo),
     ...preparado.lineas.map((l) =>
       env.DB.prepare(
         `insert into venta_lineas (venta_id, producto_id, codigo, nombre, precio, cantidad)
@@ -657,7 +662,7 @@ async function cancelarVenta(id: string, request: Request, env: Env, correo: str
   // de una para quedarse el efectivo de una venta que si se cobro. El motivo
   // y quien la hizo (Cloudflare Access, igual que capturado_por en las fotos)
   // son lo minimo para poder auditar despues.
-  const cuerpo = (await request.json().catch(() => ({}))) as { motivo?: unknown };
+  const cuerpo = (await request.json().catch(() => ({}))) as { motivo?: unknown; caja?: unknown };
   const motivo = String(cuerpo.motivo ?? '').trim().slice(0, 200);
   if (!motivo) {
     return json({ error: 'Escribe el motivo de la cancelacion.' }, 400);
@@ -687,8 +692,9 @@ async function cancelarVenta(id: string, request: Request, env: Env, correo: str
   try {
     await env.DB.batch([
       env.DB.prepare(
-        `update ventas set cancelada = 1, cancelada_en = ?, cancelada_por = ?, motivo_cancelacion = ? where id = ?`,
-      ).bind(ahora, canceladaPor, motivo, id),
+        `update ventas set cancelada = 1, cancelada_en = ?, cancelada_por = ?, motivo_cancelacion = ?, cancelada_caja = ?
+         where id = ?`,
+      ).bind(ahora, canceladaPor, motivo, nombreCaja(cuerpo.caja), id),   // el corte de esa caja cuenta la devolucion
       ...lineas.map((l) =>
         env.DB.prepare(
           `update productos set stock = stock + ?, actualizado_en = ?
@@ -735,16 +741,16 @@ async function ventasDelDia(url: URL, env: Env): Promise<Response> {
  * Idempotente por id, como las ventas.
  */
 async function registrarAperturaCajon(request: Request, env: Env, correo: string): Promise<Response> {
-  const cuerpo = (await request.json().catch(() => ({}))) as { id?: unknown; abierto_en?: unknown };
+  const cuerpo = (await request.json().catch(() => ({}))) as { id?: unknown; abierto_en?: unknown; caja?: unknown };
   const id = String(cuerpo.id ?? '');
   const abiertoEn = String(cuerpo.abierto_en ?? '');
   if (!UUID.test(id)) return json({ error: 'Identificador invalido.' }, 400);
   if (Number.isNaN(Date.parse(abiertoEn))) return json({ error: 'Fecha invalida.' }, 400);
   await env.DB.prepare(
-    `insert into cajon_aperturas (id, abierto_por, abierto_en, registrado_en) values (?, ?, ?, ?)
+    `insert into cajon_aperturas (id, abierto_por, abierto_en, registrado_en, caja) values (?, ?, ?, ?, ?)
      on conflict (id) do nothing`,
   )
-    .bind(id, correo, new Date(abiertoEn).toISOString(), new Date().toISOString())
+    .bind(id, correo, new Date(abiertoEn).toISOString(), new Date().toISOString(), nombreCaja(cuerpo.caja))
     .run();
   return json({ id }, 201);
 }
@@ -878,10 +884,25 @@ async function reportes(url: URL, env: Env): Promise<Response> {
     }>();
 
   const { results: aperturas } = await env.DB.prepare(
-    `select abierto_en, abierto_por from cajon_aperturas where abierto_en >= ? order by abierto_en desc`,
+    `select abierto_en, abierto_por, caja from cajon_aperturas where abierto_en >= ? order by abierto_en desc`,
   )
     .bind(desde)
-    .all<{ abierto_en: string; abierto_por: string }>();
+    .all<{ abierto_en: string; abierto_por: string; caja: string }>();
+
+  const { results: cortes } = await env.DB.prepare(
+    `select id, caja, cajero, desde, hasta, tickets, fondo_inicial, efectivo_ventas, efectivo_devoluciones, retiros,
+            efectivo_esperado, efectivo_contado, diferencia, tarjeta_sistema, tarjeta_terminal, transferencias,
+            dolarones, fondo_siguiente, entregado, notas
+     from cortes where hasta >= ? order by hasta desc`,
+  )
+    .bind(desde)
+    .all();
+
+  const { results: retiros } = await env.DB.prepare(
+    `select creado_en, caja, cajero, importe, motivo from retiros where creado_en >= ? order by creado_en desc`,
+  )
+    .bind(desde)
+    .all();
 
   return json({
     dias,
@@ -903,6 +924,8 @@ async function reportes(url: URL, env: Env): Promise<Response> {
       detalle: cancelaciones,
     },
     aperturas_cajon: aperturas,
+    cortes,
+    retiros,
   });
 }
 
@@ -1096,6 +1119,15 @@ export default {
       const nuevoPin = pathname.match(/^\/api\/socios\/(\d+)\/pin$/);
       if (nuevoPin && request.method === 'POST') {
         return await cambiarPin(Number(nuevoPin[1]), request, env);
+      }
+
+      if (pathname === '/api/cortes') {
+        if (request.method === 'POST') return await registrarCorte(request, env, correo);
+        if (request.method === 'GET') return await ultimoCorte(url, env);
+        return json({ error: 'Metodo no permitido.' }, 405);
+      }
+      if (pathname === '/api/retiros' && request.method === 'POST') {
+        return await registrarRetiro(request, env, correo);
       }
 
       if (pathname === '/api/cajon' && request.method === 'POST') {

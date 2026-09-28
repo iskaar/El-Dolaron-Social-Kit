@@ -47,3 +47,24 @@ export function agregar(lineas, pieza) {
 export function efectivoAlcanza({ formaPago, total, efectivo }) {
   return formaPago !== 'efectivo' || efectivo >= total;
 }
+
+/**
+ * Billetes y monedas del corte (Issue #100), en centavos. El de $20 cuenta
+ * igual si es billete o moneda.
+ */
+export const DENOMINACIONES = [100000, 50000, 20000, 10000, 5000, 2000, 1000, 500, 200, 100, 50];
+
+/**
+ * Lo contado en el corte a partir de cuantas piezas hay de cada denominacion.
+ * null si algo no es valido: la caja no deja enviarlo y el servidor lo rechaza.
+ * @param {Record<string, number>} conteo piezas por denominacion, con la denominacion en centavos como llave
+ */
+export function contadoDe(conteo) {
+  let suma = 0;
+  for (const [denominacion, piezas] of Object.entries(conteo ?? {})) {
+    if (!DENOMINACIONES.includes(Number(denominacion))) return null;
+    if (!Number.isInteger(piezas) || piezas < 0 || piezas > 10000) return null;
+    suma += Number(denominacion) * piezas;
+  }
+  return suma;
+}
