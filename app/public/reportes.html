@@ -23,6 +23,10 @@
   .tarjeta .etiqueta { font-size: 12px; color: #5b6478; }
   .tarjeta .valor { font-size: 24px; font-weight: 800; color: var(--azul); margin-top: 2px; }
   .panel { background: #fff; border: 1px solid var(--linea); border-radius: 12px; padding: 16px; }
+  .fondo-caja { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 12px; font-size: 14px; }
+  .fondo-caja label { flex-basis: 100%; color: #5b6478; font-size: 13px; }
+  .fondo-caja input { width: 120px; padding: 8px 10px; font-size: 16px; border: 1px solid var(--linea); border-radius: 8px; }
+  .fondo-caja button { padding: 8px 14px; font-size: 14px; border: 0; border-radius: 8px; background: var(--azul); color: #fff; cursor: pointer; }
   .panel h2 { font-size: 15px; margin: 0 0 12px; color: var(--azul); }
   .dos-columnas { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
   @media (max-width: 640px) { .dos-columnas { grid-template-columns: 1fr; } }
@@ -91,6 +95,12 @@
 
   <div class="panel">
     <h2>Cortes de caja</h2>
+    <div class="fondo-caja">
+      <label for="fondo-caja">Fondo de caja: lo que se queda en cada cajón después del corte ($)</label>
+      <input id="fondo-caja" type="number" min="0" step="1" inputmode="numeric">
+      <button id="guardar-fondo" type="button">Guardar</button>
+      <span id="aviso-fondo"></span>
+    </div>
     <div id="cortes"></div>
     <p class="nota">Conteo ciego: el cajero registra lo contado antes de ver lo esperado. Diferencia = contado − esperado
       (en rojo lo que falta). «Tarjeta» compara lo cobrado en el sistema con el cierre de la terminal.</p>
@@ -252,6 +262,32 @@ async function cargar() {
            <td>${escapar(x.cajero)}</td><td>${escapar(x.motivo)}</td><td class="num">${pesos2(x.importe)}</td></tr>
        `).join('')}</tbody></table>`;
 }
+
+// El fondo de caja (Issue #100): el mismo valor que «Fondo por caja» del admin.
+// Aplica desde el siguiente corte; los cortes ya hechos no cambian.
+async function cargarFondo() {
+  try {
+    const config = await (await fetch('/api/config')).json();
+    $('fondo-caja').value = Math.round(Number(config.fondo_caja ?? 50000) / 100);
+  } catch { /* sin red: se ve al recargar */ }
+}
+$('guardar-fondo').addEventListener('click', async () => {
+  const pesosFondo = Number($('fondo-caja').value);
+  const aviso = $('aviso-fondo');
+  if (!Number.isFinite(pesosFondo) || pesosFondo < 0 || $('fondo-caja').value === '') {
+    aviso.textContent = 'Escribe una cantidad.';
+    aviso.style.color = 'var(--rojo)';
+    return;
+  }
+  const r = await fetch('/api/config', {
+    method: 'PUT', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ fondo_caja: Math.round(pesosFondo * 100) }),
+  });
+  const cuerpo = await r.json().catch(() => ({}));
+  aviso.textContent = r.ok ? 'Guardado. Aplica desde el siguiente corte de cada caja.' : (cuerpo.error ?? 'No se pudo guardar.');
+  aviso.style.color = r.ok ? 'var(--verde)' : 'var(--rojo)';
+});
+cargarFondo();
 
 $('rango').addEventListener('click', (e) => {
   const dias = e.target.dataset?.dias;
