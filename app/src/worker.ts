@@ -11,7 +11,9 @@ import { efectivoAlcanza } from '../public/venta.js';
 import { semanaIngreso } from '../public/semana.js';
 import {
   permiso, puede, quienEs, leerUsuario, yo, pedirAcceso, listarCuentas, guardarCuenta, resolverSolicitud,
+  esDeCaja, soloComputadora,
 } from './cuentas.ts';
+import { cajeroEnTurno, listarCajeros, entrar, salir, ponerPin } from './cajeros.ts';
 import { registrarSocio, buscarSocio, cambiarPin, sentenciasDeVenta, sentenciasDeCancelacion, saldo } from './dolarones.ts';
 import { registrarCorte, registrarRetiro, ultimoCorte, cajaDe } from './corte.ts';
 
@@ -1034,25 +1036,38 @@ export default {
 
       // Quien es (JWT de Access verificado) y si su cuenta le deja entrar aqui.
       const regla = permiso(pathname, request.method);
-      const correo = await quienEs(request, env, url.hostname);
-      if (!correo) {
+      const acceso = await quienEs(request, env, url.hostname);
+      if (!acceso) {
         return json({ error: 'Sin sesion. Vuelve a entrar.' }, 401);
       }
+      let correo = acceso;
       if (regla !== 'cuenta') {
-        const usuario = await leerUsuario(env, correo);
+        const usuario = await leerUsuario(env, acceso);
         if (!puede(usuario, regla)) {
           // Una pantalla lleva a donde se pide acceso; una llamada de la API
           // recibe el error tal cual.
           if (!pathname.startsWith('/api/') && request.method === 'GET') {
+            if (soloComputadora(usuario)) return Response.redirect(`${url.origin}/caja`, 302);
             return Response.redirect(`${url.origin}/sin-acceso?desde=${encodeURIComponent(pathname)}`, 302);
           }
           return json({ error: usuario?.activo ? 'Tu cuenta no tiene permiso para esto.' : 'No tienes cuenta activa.' }, 403);
         }
+        // Issue #112: la computadora de caja no cobra sola. Lo de caja queda a
+        // nombre del cajero que entro con su PIN; sin el, la API no responde.
+        if (esDeCaja(regla) && soloComputadora(usuario) && !pathname.startsWith('/api/cajeros')) {
+          const cajero = await cajeroEnTurno(request, env);
+          if (cajero) correo = cajero.correo;
+          else if (pathname.startsWith('/api/')) return json({ error: 'Escribe tu PIN de cajero.', pin: true }, 401);
+        }
       }
 
       if (pathname === '/api/yo') {
-        return await yo(env, correo);
+        return await yo(env, correo, soloComputadora(await leerUsuario(env, correo)) ? await cajeroEnTurno(request, env) : null);
       }
+      if (pathname === '/api/cajeros' && request.method === 'GET') return await listarCajeros(env);
+      if (pathname === '/api/cajeros/entrar' && request.method === 'POST') return await entrar(request, env);
+      if (pathname === '/api/cajeros/salir' && request.method === 'POST') return await salir(request, env);
+      if (pathname === '/api/cuentas/pin' && request.method === 'PUT') return await ponerPin(request, env);
       if (pathname === '/api/solicitudes/acceso' && request.method === 'POST') {
         return await pedirAcceso(request, env, correo);
       }

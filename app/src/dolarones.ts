@@ -15,8 +15,8 @@ export const BASES_VERSION = 'borrador-2026-09-26';
 const DIA = 86_400_000;
 // America/Mexico_City no tiene horario de verano desde 2022: siempre UTC-6.
 const MX = -6 * 3_600_000;
-const INTENTOS_PIN = 5;
-const BLOQUEO_PIN = 15 * 60_000;
+export const INTENTOS_PIN = 5;
+export const BLOQUEO_PIN = 15 * 60_000;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /* ---------- reglas, puras para probarlas sin D1 ---------- */
@@ -82,7 +82,7 @@ export function repartir(lotes: Lote[], importe: number, ahora: string): { id: s
   return falta > 0 ? null : reparto;
 }
 
-const hex = (bytes: ArrayBuffer | Uint8Array) =>
+export const hex = (bytes: ArrayBuffer | Uint8Array) =>
   [...new Uint8Array(bytes)].map((b) => b.toString(16).padStart(2, '0')).join('');
 
 /** PBKDF2-SHA256; 100,000 vueltas es el maximo que acepta Workers. */

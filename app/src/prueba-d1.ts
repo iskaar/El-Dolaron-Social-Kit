@@ -45,10 +45,10 @@ export function tienda() {
   db.prepare(`insert into productos (id, codigo, nombre, precio, stock, semana_ingreso, creado_en, actualizado_en)
               values (?, 'ED-000001', 'Ventilador', 25000, 50, 'S40', '', '')`).run(PRODUCTO);
   const env = { DB: d1(db), ACCESS_EQUIPO: 'local', DEV_USUARIO: DUENO } as unknown as Env;
-  const pedir = async (ruta: string, cuerpo?: unknown, metodo = 'POST') => {
+  const pedir = async (ruta: string, cuerpo?: unknown, metodo = 'POST', encabezados: Record<string, string> = {}) => {
     const r = await worker.fetch!(
-      new Request(`https://caja.prueba${ruta}`, cuerpo === undefined ? {} : {
-        method: metodo, headers: { 'content-type': 'application/json' }, body: JSON.stringify(cuerpo),
+      new Request(`https://caja.prueba${ruta}`, cuerpo === undefined ? { headers: encabezados } : {
+        method: metodo, headers: { 'content-type': 'application/json', ...encabezados }, body: JSON.stringify(cuerpo),
       }) as never,
       env,
       { waitUntil() {}, passThroughOnException() {} } as never,
