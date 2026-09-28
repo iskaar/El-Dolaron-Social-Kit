@@ -7,7 +7,7 @@
  * solo baja dentro del mismo batch que registra la venta.
  */
 
-import { dolaronesGanados } from '../public/venta.js';
+import { dolaronesGanados, MINIMO_REGALO } from '../public/venta.js';
 
 /** Version de bases y aviso de privacidad que acepta quien se registra. Cambiarla al aprobar el abogado. */
 export const BASES_VERSION = 'borrador-2026-09-26';
@@ -58,6 +58,7 @@ export function sumarMeses(ahora: Date, meses: number): string {
 
 export interface Lote {
   id: string;
+  origen: string;
   restante: number;
   disponible_desde: string;
   vence_en: string;
@@ -67,9 +68,10 @@ export interface Lote {
  * De que lotes sale un canje: primero el que vence antes. null si no alcanza.
  * Es solo la propuesta: el UPDATE vuelve a comprobar saldo y vigencia.
  */
-export function repartir(lotes: Lote[], importe: number, ahora: string): { id: string; importe: number }[] | null {
+export function repartir(lotes: Lote[], importe: number, ahora: string, total: number): { id: string; importe: number }[] | null {
   const usables = lotes
     .filter((l) => l.restante > 0 && l.disponible_desde <= ahora && l.vence_en > ahora)
+    .filter((l) => l.origen === 'compra' || (l.origen === 'regalo' && total >= MINIMO_REGALO))
     .sort((a, b) => a.vence_en.localeCompare(b.vence_en) || a.id.localeCompare(b.id));
   const reparto: { id: string; importe: number }[] = [];
   let falta = importe;
@@ -103,15 +105,16 @@ function json(cuerpo: unknown, status = 200): Response {
 
 const texto = (valor: unknown, max: number) => String(valor ?? '').replace(/\s+/g, ' ').trim().slice(0, max);
 
-export async function saldo(env: Env, clienteId: string, ahora: string): Promise<{ disponible: number; por_liberar: number }> {
+export async function saldo(env: Env, clienteId: string, ahora: string): Promise<{ disponible: number; por_liberar: number; regalo_disponible: number }> {
   const fila = await env.DB.prepare(
     `select coalesce(sum(case when disponible_desde <= ? then restante end), 0) as disponible,
-            coalesce(sum(case when disponible_desde > ? then restante end), 0) as por_liberar
+            coalesce(sum(case when disponible_desde > ? then restante end), 0) as por_liberar,
+            coalesce(sum(case when disponible_desde <= ? and origen = 'regalo' then restante end), 0) as regalo_disponible
      from dolarones_lotes where cliente_id = ? and vence_en > ?`,
   )
-    .bind(ahora, ahora, clienteId, ahora)
-    .first<{ disponible: number; por_liberar: number }>();
-  return { disponible: fila?.disponible ?? 0, por_liberar: fila?.por_liberar ?? 0 };
+    .bind(ahora, ahora, ahora, clienteId, ahora)
+    .first<{ disponible: number; por_liberar: number; regalo_disponible: number }>();
+  return { disponible: fila?.disponible ?? 0, por_liberar: fila?.por_liberar ?? 0, regalo_disponible: fila?.regalo_disponible ?? 0 };
 }
 
 interface FilaCliente {
@@ -247,21 +250,24 @@ export async function sentenciasDeVenta(env: Env, p: {
     if (!autorizado) return { ok: false, status: 423, error: 'PIN bloqueado o actualizado. Vuelve a buscar al socio o llama a Isaac.' };
 
     const { results: lotes } = await env.DB.prepare(
-      'select id, restante, disponible_desde, vence_en from dolarones_lotes where cliente_id = ? and restante > 0 and vence_en > ?',
+      'select id, origen, restante, disponible_desde, vence_en from dolarones_lotes where cliente_id = ? and restante > 0 and vence_en > ?',
     )
       .bind(cliente.id, ahoraIso)
       .all<Lote>();
-    const reparto = repartir(lotes, p.dolarones, ahoraIso);
-    if (!reparto) return { ok: false, status: 409, error: 'Saldo de Dolarones insuficiente.' };
+    const reparto = repartir(lotes, p.dolarones, ahoraIso, p.total);
+    if (!reparto) return { ok: false, status: 409, error: p.total < MINIMO_REGALO
+      ? 'Saldo canjeable insuficiente. Los regalos de apertura requieren un ticket de $1,000 MXN o mas, antes de descontar Dolarones.'
+      : 'Saldo de Dolarones insuficiente.' };
 
     for (const parte of reparto) {
       // -1 si el lote vencio o aun no se libera entre la lectura y el batch:
       // el trigger lote_no_negativo aborta la venta completa.
       sentencias.push(
         env.DB.prepare(
-          `update dolarones_lotes set restante = case when vence_en > ? and disponible_desde <= ? then restante - ? else -1 end
+          `update dolarones_lotes set restante = case when vence_en > ? and disponible_desde <= ?
+           and (origen = 'compra' or (origen = 'regalo' and ? >= ?)) then restante - ? else -1 end
            where id = ?`,
-        ).bind(ahoraIso, ahoraIso, parte.importe, parte.id),
+        ).bind(ahoraIso, ahoraIso, p.total, MINIMO_REGALO, parte.importe, parte.id),
         env.DB.prepare(
           `insert into dolarones_movimientos (cliente_id, lote_id, venta_id, tipo, importe, autor, creado_en)
            values (?, ?, ?, 'canje', ?, ?, ?)`,

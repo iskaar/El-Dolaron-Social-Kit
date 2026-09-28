@@ -141,6 +141,7 @@
       <button id="quitar-socio" type="button" hidden aria-label="Quitar socio">✕</button>
     </div>
     <div id="socio-info"></div>
+    <p id="regla-regalo" aria-live="polite" hidden></p>
     <div id="pagar-dolarones" hidden>
       <label for="dolarones">Pagar con Dolarones</label>
       <input id="dolarones" type="number" min="0" step="1" inputmode="numeric" placeholder="0">
@@ -232,7 +233,7 @@
 </dialog>
 
 <script type="module">
-import { totales, agregar, efectivoAlcanza, dolaronesGanados } from '/venta.js';
+import { totales, agregar, efectivoAlcanza, dolaronesGanados, saldoCanjeable, MINIMO_REGALO } from '/venta.js';
 import {
   reconectarImpresora, conectarImpresora, impresoraLista, imprimirTicket, abrirCajon, explicarErrorUsb, errorImpresora,
   imprimirCorte, imprimirRetiro,
@@ -250,7 +251,7 @@ let lineas = [];
 // (agregar, quitar, cancelar) lo invalida: eso ya es una venta distinta.
 let idVenta = null;
 let cobrando = false;
-// Socio de la venta en curso: { id, numero, nombre, disponible, por_liberar } o null.
+// Socio de la venta en curso: { id, numero, nombre, disponible, por_liberar, regalo_disponible } o null.
 let socio = null;
 const dolares = (centavos) => `${(centavos / 100).toLocaleString('es-MX')} D`;
 
@@ -347,7 +348,13 @@ function pintar() {
   $('total').textContent = pesos(t.total);
   $('piezas').textContent = `${t.piezas} ${t.piezas === 1 ? 'pieza' : 'piezas'}`;
   $('a-pagar').textContent = usados ? `Dolarones −${pesos(usados)} · A pagar ${pesos(t.aPagar)}` : '';
-  $('cobrar').disabled = t.total === 0;
+  const canjeable = saldoCanjeable(socio, t.total);
+  $('cobrar').disabled = cobrando || t.total === 0 || usados > canjeable;
+  $('regla-regalo').hidden = !socio?.regalo_disponible;
+  $('regla-regalo').textContent = socio?.regalo_disponible
+    ? `${dolares(socio.regalo_disponible)} de apertura: ticket mínimo de ${pesos(MINIMO_REGALO)} MXN antes de descontar Dolarones. Puedes usar ${dolares(Math.min(canjeable, t.total))} en este ticket.`
+      + (usados > canjeable ? ' Reduce los Dolarones solicitados o agrega productos.' : '')
+    : '';
 
   const cambio = $('cambio');
   if (!efectivo || $('forma').value !== 'efectivo') {
@@ -544,6 +551,11 @@ async function cobrar() {
   const forma = $('forma').value;
   const usados = dolaronesPedidos();
   const t = totales(lineas, efectivo, usados);
+  if (usados > saldoCanjeable(socio, t.total)) {
+    $('aviso').textContent = 'Los regalos de apertura requieren un ticket de $1,000 MXN o más antes de descontar Dolarones. Revisa el importe solicitado.';
+    $('aviso').style.color = '#D72B32';
+    return;
+  }
   if (!efectivoAlcanza({ formaPago: forma, total: t.aPagar, efectivo })) {
     $('aviso').textContent = efectivo === 0 ? 'Falta el efectivo recibido.' : `Faltan ${pesos(t.falta)}`;
     $('aviso').style.color = '#D72B32';

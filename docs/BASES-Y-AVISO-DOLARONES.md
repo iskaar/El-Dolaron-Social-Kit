@@ -2,7 +2,7 @@
 
 **Estado: borrador para revisión del abogado.** Redactado por Claude el 26/09/2026 con las decisiones de Isaac ([reglas](RECOMPENSAS-DOLARONES.md), sección 2; [Issue #81](https://github.com/iskaar/El-Dolaron-Social-Kit/issues/81)). No publicar ni entregar a clientes hasta que el abogado lo apruebe y se completen los `[CORCHETES]`. No es asesoría legal.
 
-La caja registra la versión aceptada en cada alta (`BASES_VERSION` en `app/src/dolarones.ts`, hoy `borrador-2026-09-26`). Al aprobarse el texto final, cambiar esa versión.
+La caja registra la versión aceptada en cada alta (`BASES_VERSION` en `app/src/dolarones.ts`, hoy `borrador-2026-09-26`). Al aprobarse el texto final, cambiar esa versión. Este archivo sigue siendo un borrador: el registro web por SMS y los premios de apertura nuevos todavía no están implementados; no publicar hasta completar revisión legal y las notas para el abogado.
 
 ---
 
@@ -14,7 +14,7 @@ La caja registra la versión aceptada en cada alta (`BASES_VERSION` en `app/src/
 
 **3. Quién participa.** Personas físicas `[EDAD MÍNIMA: ¿mayores de 18 años?]`. Registrarse es gratuito y voluntario. Quien no es socio compra igual, a los mismos precios.
 
-**4. Registro.** Se hace en la tienda con nombre, un teléfono celular de 10 dígitos y, si la persona quiere, un correo. El cliente elige un PIN de 4 dígitos que solo él conoce. Hay un registro por persona y un socio por teléfono. El número de socio se asigna en el orden en que se completa el registro.
+**4. Registro.** El portal propuesto permite registrarse con teléfono celular mexicano verificado por SMS; nombre y PIN de 4 dígitos, y correo opcional. La caja conserva el PIN para autorizar canjes. Hay un registro por persona y un socio por teléfono. La secuencia y elegibilidad de cada cupo deben coincidir con las bases publicadas. `[ABOGADO: aprobar datos, medios de verificación, altas en tienda/portal y procedimiento ante teléfono cambiado o reasignado.]`
 
 **5. Qué son los Dolarones.** Son un saldo de recompensa para comprar en El Dolarón. 1 Dolarón equivale a $1.00 MXN en compras en la tienda.
 
@@ -29,21 +29,30 @@ La caja registra la versión aceptada en cada alta (`BASES_VERSION` en `app/src/
 - Lo ganado se puede usar a partir del día siguiente a la compra.
 - Cada Dolarón ganado vence 12 meses después de la compra que lo generó.
 
-**7. Regalo de apertura.** Los primeros 100 socios registrados reciben Dolarones de regalo, según su número de socio:
+**7. Promoción de apertura.** Se entregan 100 premios, por un total de 15,000 Dolarones:
 
-| Número de socio | Dolarones de regalo |
-| --- | ---: |
-| 1 | 500 |
-| 2 al 11 | 300 |
-| 12 al 24 | 200 |
-| 25 al 50 | 150 |
-| 51 al 100 | 100 |
+| Cupos en línea | Cantidad | Dolarones c/u | Total |
+| --- | ---: | ---: | ---: |
+|  | 5 | 300 | 1,500 |
+|  | 6 | 200 | 1,200 |
+|  | 14 | 150 | 2,100 |
+|  | 25 | 100 | 2,500 |
+| **Subtotal en línea** | **50** | | **7,300** |
 
-En total son 15,000 Dolarones para 100 personas. El regalo:
+| Cupos en tienda | Cantidad | Dolarones c/u | Total |
+| --- | ---: | ---: | ---: |
+| Primera llegada física | 1 | 500 | 500 |
+|  | 5 | 300 | 1,500 |
+|  | 7 | 200 | 1,400 |
+|  | 12 | 150 | 1,800 |
+|  | 25 | 100 | 2,500 |
+| **Subtotal en tienda** | **50** | | **7,700** |
+| **Total** | **100** | | **15,000** |
 
-- se puede usar desde el registro, completo o en partes;
-- vence 30 días después del registro; lo que no se use en ese plazo se pierde y no pasa a otra persona;
-- se da una sola vez por persona y por teléfono. Un registro duplicado o con datos falsos no recibe regalo.
+- Solo puede otorgarse un premio de apertura por persona. Los 500 D son exclusivos de la primera persona que llegue físicamente a la tienda. Si ya recibió un premio online, ese premio se sustituye por 500 D y el importe que tenía vuelve a la bolsa online; no acumula ambos premios.
+- Los premios de apertura se pueden gastar en partes en tickets de $1,000 MXN o más, calculados antes de descontar Dolarones. Esta condición no aplica a D ganados por compras.
+- Cada premio vence 30 días después de otorgarse. Lo no usado vence y no se reasigna.
+- `[ABOGADO: completar elegibilidad, orden, cómo se acredita la primera llegada y qué premio sustituye el cupo que vuelve a la bolsa, incluida la fecha límite.]`
 
 **8. Cómo se usan.** Al pagar, el socio da su teléfono o número y escribe su PIN. Los Dolarones se descuentan primero de los que vencen antes. El resto de la compra se paga en efectivo o con tarjeta. El saldo aparece en el ticket.
 
@@ -59,7 +68,9 @@ En total son 15,000 Dolarones para 100 personas. El regalo:
 
 **Responsable.** `[NOMBRE O RAZÓN SOCIAL DEL TITULAR]` (El Dolarón), Jardín Hidalgo 129, Zona Centro, Soledad de Graciano Sánchez, S.L.P., C.P. 78430.
 
-**Datos que tratamos.** Nombre, teléfono celular, correo (opcional) y el historial de compras, Dolarones ganados, usados y saldo. El PIN no se guarda: solo se guarda una huella cifrada que no permite conocerlo. No pedimos datos sensibles, domicilio, fecha de nacimiento ni identificación oficial.
+**Datos que tratamos.** Nombre, teléfono celular, correo (opcional) y el historial de compras, Dolarones ganados, usados y saldo. El PIN no se guarda: solo se guarda una huella criptográfica que no permite conocerlo. No pedimos datos sensibles, domicilio, fecha de nacimiento ni identificación oficial.
+
+El portal propuesto usaría un proveedor de verificación de teléfono por SMS `[Google Firebase Auth / Identity Platform: propuesta por confirmar antes del alta real]`. `[ABOGADO: revisar proveedor, datos tratados, encargado, transferencias y conservación, así como el procedimiento ante un número reciclado o cambio de teléfono.]`
 
 **Para qué los usamos (finalidades necesarias).** Registrarte como socio; identificarte en la caja; calcular, abonar y descontar Dolarones; asignar el regalo de apertura; evitar registros duplicados; y atender aclaraciones. No usamos tus datos para publicidad. Si en el futuro quisiéramos enviarte promociones, te pediremos un consentimiento aparte, y negarte no afectará tu participación.
 

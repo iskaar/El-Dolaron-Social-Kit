@@ -1,10 +1,19 @@
 // node --test src/venta.test.ts
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { totales, agregar, efectivoAlcanza } from '../public/venta.js';
+import { totales, agregar, efectivoAlcanza, saldoCanjeable } from '../public/venta.js';
 
 interface Linea { codigo: string; nombre: string; precio: number; cantidad: number }
 const pieza = (codigo: string, precio: number) => ({ codigo, nombre: codigo, precio });
+
+test('caja: solo el regalo requiere ticket de $1,000, sin descontar los D solicitados', () => {
+  const socio = { disponible: 520_00, regalo_disponible: 500_00 };
+  assert.equal(saldoCanjeable(null, 1000_00), 0);
+  assert.equal(saldoCanjeable(socio, 999_99), 20_00);
+  assert.equal(saldoCanjeable(socio, 1000_00), 520_00);
+  assert.equal(saldoCanjeable(socio, 1000_01), 520_00);
+  assert.equal(saldoCanjeable({ disponible: 20_00, regalo_disponible: 0 }, 20_00), 20_00);
+});
 
 test('el total suma precio por cantidad', () => {
   const lineas: Linea[] = [
