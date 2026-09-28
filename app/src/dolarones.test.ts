@@ -144,6 +144,67 @@ test('cinco PIN incorrectos bloquean, aun con el PIN correcto', async () => {
   assert.equal((await pedir('/api/ventas', venta({ cliente_id: socio.id, dolarones: 10_00, pin: '1234', efectivo: 240_00 }))).status, 423);
 });
 
+test('un importe de Dolarones invalido tampoco se acepta en una venta sin socio', async () => {
+  const { db, pedir } = tienda();
+  for (const dolarones of [-100, 0.5, 'NaN', 'Infinity', 9007199254740992]) {
+    const r = await pedir('/api/ventas', venta({ dolarones, forma_pago: 'tarjeta' }));
+    assert.equal(r.status, 400, String(dolarones));
+  }
+  assert.equal(db.prepare('select count(*) as n from ventas').get()!.n, 0);
+  assert.equal(db.prepare('select stock from productos where id = ?').get(PRODUCTO)!.stock, 50);
+});
+
+test('los PIN incorrectos concurrentes cuentan y no sobrescriben el bloqueo', async () => {
+  const { db, env, pedir } = tienda();
+  const socio = (await alta(pedir)).cuerpo;
+  const ahora = new Date();
+  const intentar = (pin: string, momento = ahora) => sentenciasDeVenta(env, {
+    ventaId: crypto.randomUUID(), clienteId: socio.id, dolarones: 10_00,
+    pin, total: 250_00, autor: DUENO, ahora: momento,
+  });
+  const resultados = await Promise.all(Array.from({ length: 7 }, () => intentar('0000')));
+  assert.ok(resultados.every((r) => !r.ok));
+  const bloqueo = db.prepare('select pin_fallos, pin_bloqueo from clientes where id = ?').get(socio.id);
+  assert.equal(bloqueo!.pin_fallos, 0);
+  assert.equal(bloqueo!.pin_bloqueo, new Date(ahora.getTime() + 15 * 60_000).toISOString());
+  const correcto = await intentar('1234');
+  assert.ok(!correcto.ok && correcto.status === 423);
+  assert.equal((await pedir('/api/socios?q=1')).cuerpo.disponible, 500_00);
+  assert.equal(db.prepare('select count(*) as n from ventas').get()!.n, 0);
+  assert.equal(db.prepare('select stock from productos where id = ?').get(PRODUCTO)!.stock, 50);
+
+  const despues = new Date(ahora.getTime() + 15 * 60_000);
+  assert.equal((await intentar('1234', despues)).ok, true);
+  assert.equal((await intentar('0000', despues)).ok, false);
+  assert.equal(db.prepare('select pin_fallos from clientes where id = ?').get(socio.id)!.pin_fallos, 1);
+});
+
+test('un PIN en vuelo respeta un bloqueo o restablecimiento posterior a su lectura', async () => {
+  const { db, env, pedir } = tienda();
+  const socio = (await alta(pedir)).cuerpo;
+  const ahora = new Date();
+  const intentar = (pin: string) => sentenciasDeVenta(env, {
+    ventaId: crypto.randomUUID(), clienteId: socio.id, dolarones: 10_00,
+    pin, total: 250_00, autor: DUENO, ahora,
+  });
+  // La lectura inicial ya ocurrio; el hash todavia no termino.
+  const correcto = intentar('1234');
+  const bloqueo = new Date(ahora.getTime() + 15 * 60_000).toISOString();
+  db.prepare('update clientes set pin_bloqueo = ? where id = ?').run(bloqueo, socio.id);
+  const r = await correcto;
+  assert.ok(!r.ok && r.status === 423);
+
+  db.prepare("update clientes set pin_bloqueo = '', pin_fallos = 4 where id = ?").run(socio.id);
+  const incorrecto = intentar('0000');
+  const anterior = intentar('1234');
+  db.prepare("update clientes set pin_hash = 'restablecido', pin_fallos = 0 where id = ?").run(socio.id);
+  assert.equal((await incorrecto).ok, false);
+  assert.equal((await anterior).ok, false);
+  const estado = db.prepare('select pin_fallos, pin_bloqueo from clientes where id = ?').get(socio.id);
+  assert.equal(estado!.pin_fallos, 0);
+  assert.equal(estado!.pin_bloqueo, '');
+});
+
 test('reenviar la misma venta no gasta ni gana dos veces', async () => {
   const { pedir } = tienda();
   const socio = (await alta(pedir)).cuerpo;
