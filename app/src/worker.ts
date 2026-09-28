@@ -891,7 +891,7 @@ async function reportes(url: URL, env: Env): Promise<Response> {
 
   const { results: cortes } = await env.DB.prepare(
     `select id, caja, cajero, desde, hasta, tickets, fondo_inicial, efectivo_ventas, efectivo_devoluciones, retiros,
-            efectivo_esperado, efectivo_contado, diferencia, tarjeta_sistema, tarjeta_terminal, transferencias,
+            gastos, efectivo_esperado, efectivo_contado, diferencia, tarjeta_sistema, tarjeta_terminal, transferencias,
             dolarones, fondo_siguiente, entregado, notas
      from cortes where hasta >= ? order by hasta desc`,
   )
@@ -899,7 +899,7 @@ async function reportes(url: URL, env: Env): Promise<Response> {
     .all();
 
   const { results: retiros } = await env.DB.prepare(
-    `select creado_en, caja, cajero, importe, motivo from retiros where creado_en >= ? order by creado_en desc`,
+    `select creado_en, tipo, caja, cajero, importe, motivo from retiros where creado_en >= ? order by creado_en desc`,
   )
     .bind(desde)
     .all();

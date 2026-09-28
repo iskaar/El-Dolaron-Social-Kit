@@ -15,13 +15,16 @@ create index if not exists ventas_cancelacion_corte on ventas (cancelada_caja, c
 
 alter table cajon_aperturas add column caja text not null default '';
 
--- Efectivo que sale de la caja a media jornada (a la caja fuerte, al banco).
+-- Efectivo que sale de la caja a media jornada: retiros (a la caja fuerte, al
+-- banco) y gastos (agua, limpieza...). Gastos de hasta $100 los registra el
+-- cajero sin aprobacion; los mayores, el dueno.
 create table if not exists retiros (
   id        text primary key,               -- crypto.randomUUID() de la caja
+  tipo      text not null default 'retiro', -- retiro|gasto
   caja      text not null,
   cajero    text not null,
   importe   integer not null,               -- centavos
-  motivo    text not null,
+  motivo    text not null,                  -- motivo del retiro o concepto del gasto
   corte_id  text,
   creado_en text not null
 );
@@ -41,7 +44,8 @@ create table if not exists cortes (
   efectivo_ventas       integer not null,   -- cobrado en efectivo (sin la parte en Dolarones)
   efectivo_devoluciones integer not null,   -- devuelto por cancelaciones hechas en esta caja
   retiros               integer not null,
-  efectivo_esperado     integer not null,   -- fondo + ventas - devoluciones - retiros
+  gastos                integer not null default 0,
+  efectivo_esperado     integer not null,   -- fondo + ventas - devoluciones - retiros - gastos
   efectivo_contado      integer not null,
   diferencia            integer not null,   -- contado - esperado: + sobra, - falta
   tarjeta_sistema       integer not null,   -- neto de devoluciones
@@ -50,7 +54,7 @@ create table if not exists cortes (
   dolarones             integer not null,
   fondo_siguiente       integer not null,   -- lo que se queda en la caja
   entregado             integer not null,   -- contado - fondo_siguiente
-  conteo                text not null default '{}',
+  conteo                text not null default '{}',   -- sin uso: el cajero escribe solo el total
   notas                 text not null default '',
   creado_en             text not null
 );

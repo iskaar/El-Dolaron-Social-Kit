@@ -97,7 +97,7 @@
   </div>
 
   <div class="panel">
-    <h2>Retiros de efectivo</h2>
+    <h2>Gastos y retiros de efectivo</h2>
     <div id="retiros"></div>
   </div>
 
@@ -245,11 +245,11 @@ async function cargar() {
        `).join('')}</tbody></table>`;
 
   $('retiros').innerHTML = r.retiros.length === 0
-    ? '<div class="vacio">Sin retiros en este rango.</div>'
-    : `<table><thead><tr><th>Fecha</th><th>Caja</th><th>Quién</th><th>Motivo</th><th class="num">Importe</th></tr></thead>
+    ? '<div class="vacio">Sin gastos ni retiros en este rango.</div>'
+    : `<table><thead><tr><th>Fecha</th><th>Tipo</th><th>Caja</th><th>Quién</th><th>Concepto / motivo</th><th class="num">Importe</th></tr></thead>
        <tbody>${r.retiros.map((x) => `
-         <tr><td>${fechaHora(x.creado_en)}</td><td>${escapar(x.caja)}</td><td>${escapar(x.cajero)}</td>
-           <td>${escapar(x.motivo)}</td><td class="num">${pesos2(x.importe)}</td></tr>
+         <tr><td>${fechaHora(x.creado_en)}</td><td>${x.tipo === 'gasto' ? 'Gasto' : 'Retiro'}</td><td>${escapar(x.caja)}</td>
+           <td>${escapar(x.cajero)}</td><td>${escapar(x.motivo)}</td><td class="num">${pesos2(x.importe)}</td></tr>
        `).join('')}</tbody></table>`;
 }
 

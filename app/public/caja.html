@@ -88,11 +88,11 @@
   dialog .acciones button.secundario { background: #fff; color: var(--azul); border: 1px solid var(--azul); font-weight: 400; }
   dialog .acciones button:disabled { background: #c8cfda; cursor: not-allowed; }
   .aviso-dialogo { min-height: 18px; font-size: 14px; color: var(--rojo); margin-top: 8px; }
-  #corte-denominaciones { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
-  #corte-denominaciones td { padding: 3px 4px; font-size: 15px; }
-  #corte-denominaciones td:last-child { text-align: right; color: #5b6478; }
-  #corte-denominaciones input { width: 90px; padding: 6px 8px; font-size: 16px; }
-  .total-contado { font-size: 22px; margin: 10px 0 4px; text-align: right; }
+  #corte-efectivo { font-size: 26px; font-weight: 700; padding: 12px; }
+  .tipo-salida { display: flex; gap: 8px; margin: 4px 0 6px; }
+  .tipo-salida label { flex: 1; display: flex; align-items: center; gap: 8px; margin: 0; padding: 10px 12px; font-size: 15px;
+    color: #1a1f2b; border: 1px solid var(--linea); border-radius: 10px; cursor: pointer; }
+  .tipo-salida input { width: auto; }
   #corte-resumen table { width: 100%; border-collapse: collapse; font-size: 15px; font-variant-numeric: tabular-nums; }
   #corte-resumen td { padding: 4px 2px; border-bottom: 1px solid var(--linea); }
   #corte-resumen td:last-child { text-align: right; }
@@ -114,7 +114,7 @@
     </select>
   </label>
   <span id="estado-red">en línea</span>
-  <button id="abrir-retiro" type="button">Retiro</button>
+  <button id="abrir-retiro" type="button">Gasto / retiro</button>
   <button id="abrir-corte" type="button">Corte</button>
   <a href="/socios">Alta de socios</a>
   <a href="/admin">Cola de revisión</a>
@@ -182,12 +182,16 @@
 </footer>
 
 <dialog id="dialogo-retiro">
-  <h2>Retiro de efectivo</h2>
-  <p class="nota">Dinero que sale del cajón a media jornada (caja fuerte, banco). Se descuenta en el corte y se imprime un comprobante para firmar.</p>
+  <h2>Sale efectivo del cajón</h2>
+  <div class="tipo-salida">
+    <label><input type="radio" name="tipo-salida" value="gasto" checked> Gasto (hasta $100)</label>
+    <label><input type="radio" name="tipo-salida" value="retiro"> Retiro (caja fuerte, banco)</label>
+  </div>
+  <p class="nota" id="retiro-nota"></p>
   <label for="retiro-importe">Importe ($)</label>
-  <input id="retiro-importe" type="number" min="1" step="1" inputmode="numeric">
-  <label for="retiro-motivo">Motivo</label>
-  <input id="retiro-motivo" type="text" maxlength="200" placeholder="Caja fuerte, depósito al banco…">
+  <input id="retiro-importe" type="number" min="0.5" step="0.5" inputmode="decimal">
+  <label for="retiro-motivo" id="retiro-etiqueta-motivo">Concepto</label>
+  <input id="retiro-motivo" type="text" maxlength="200">
   <div class="aviso-dialogo" id="retiro-aviso"></div>
   <div class="acciones">
     <button id="retiro-salir" type="button" class="secundario">Cancelar</button>
@@ -198,10 +202,10 @@
 <dialog id="dialogo-corte">
   <h2>Corte de <span id="corte-caja"></span></h2>
   <div id="corte-paso-conteo">
-    <p class="nota">Cuenta <b>todo</b> el efectivo del cajón, fondo incluido. Lo que el sistema esperaba se ve
-      después de registrar el conteo, y el conteo ya no se puede cambiar.</p>
-    <table id="corte-denominaciones"></table>
-    <div class="total-contado">Contado: <b id="corte-contado">$0</b></div>
+    <p class="nota">Cuenta <b>todo</b> el efectivo del cajón, fondo incluido, y escribe el total. Lo que el
+      sistema esperaba se ve después de registrarlo, y ya no se puede cambiar.</p>
+    <label for="corte-efectivo">Efectivo en el cajón ($)</label>
+    <input id="corte-efectivo" type="number" min="0" step="0.5" inputmode="decimal" placeholder="0">
     <label for="corte-terminal">Total de tarjeta según el cierre de la terminal ($)</label>
     <input id="corte-terminal" type="number" min="0" step="0.01" inputmode="decimal" placeholder="0">
     <label for="corte-notas">Notas (opcional)</label>
@@ -224,7 +228,7 @@
 </dialog>
 
 <script type="module">
-import { totales, agregar, efectivoAlcanza, dolaronesGanados, DENOMINACIONES, contadoDe } from '/venta.js';
+import { totales, agregar, efectivoAlcanza, dolaronesGanados } from '/venta.js';
 import {
   reconectarImpresora, conectarImpresora, impresoraLista, imprimirTicket, abrirCajon, explicarErrorUsb, errorImpresora,
   imprimirCorte, imprimirRetiro,
@@ -779,14 +783,27 @@ $('abrir-cajon').addEventListener('click', async () => {
   }
 });
 
-/* ---------- retiro de efectivo (Issue #100) ---------- */
+/* ---------- gasto o retiro de efectivo (Issue #100) ---------- */
 
 // Se registra ANTES de abrir el cajon: nunca sale dinero sin rastro. Necesita
-// red. El id se genera al abrir el dialogo: reintentar no duplica el retiro.
+// red. El id se genera al abrir el dialogo: reintentar no duplica la salida.
+// Gastos hasta $100 sin aprobacion (Isaac, 28/09); uno mayor lo registra el dueno.
 let idRetiro = null;
+const tipoSalida = () => document.querySelector('input[name="tipo-salida"]:checked').value;
+function pintarTipoSalida() {
+  const gasto = tipoSalida() === 'gasto';
+  $('retiro-nota').textContent = gasto
+    ? 'Algo que se pagó con dinero del cajón (agua, limpieza, papelería). Hasta $100 no necesita aprobación; guarda el ticket de la compra.'
+    : 'Dinero que se saca del cajón para guardarlo (caja fuerte, banco). Se imprime un comprobante para firmar.';
+  $('retiro-etiqueta-motivo').textContent = gasto ? 'En qué se gastó' : 'Motivo';
+  $('retiro-motivo').placeholder = gasto ? 'Garrafón de agua, jabón…' : 'Caja fuerte, depósito al banco…';
+}
+document.querySelector('.tipo-salida').addEventListener('change', pintarTipoSalida);
 $('abrir-retiro').addEventListener('click', () => {
   if (!exigirCaja()) return;
   idRetiro = crypto.randomUUID();
+  document.querySelector('input[name="tipo-salida"][value="gasto"]').checked = true;
+  pintarTipoSalida();
   $('retiro-importe').value = '';
   $('retiro-motivo').value = '';
   $('retiro-aviso').textContent = '';
@@ -799,23 +816,26 @@ $('retiro-registrar').addEventListener('click', async () => {
   const importe = Math.round(Number($('retiro-importe').value || 0) * 100);
   const motivo = $('retiro-motivo').value.trim();
   if (importe <= 0) { $('retiro-aviso').textContent = 'Escribe cuánto sale del cajón.'; return; }
-  if (!motivo) { $('retiro-aviso').textContent = 'Escribe el motivo.'; return; }
+  const tipo = tipoSalida();
+  if (!motivo) { $('retiro-aviso').textContent = tipo === 'gasto' ? 'Escribe en qué se gastó.' : 'Escribe el motivo.'; return; }
   $('retiro-registrar').disabled = true;
   try {
     const r = await fetch('/api/retiros', {
       method: 'POST', headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ id: idRetiro, caja: cajaActual(), importe, motivo }),
+      body: JSON.stringify({ id: idRetiro, tipo, caja: cajaActual(), importe, motivo }),
     });
     const retiro = await r.json();
-    if (!r.ok) { $('retiro-aviso').textContent = retiro.error ?? 'No se pudo registrar el retiro.'; return; }
+    if (!r.ok) { $('retiro-aviso').textContent = retiro.error ?? 'No se pudo registrar.'; return; }
     $('dialogo-retiro').close();
     await abrirCajon();
     imprimirRetiro(retiro).then(pintarImpresora);
-    $('aviso').textContent = `Retiro de ${pesos(importe)} registrado. Firmen el comprobante.`;
+    $('aviso').textContent = tipo === 'gasto'
+      ? `Gasto de ${pesos(importe)} registrado.`
+      : `Retiro de ${pesos(importe)} registrado. Firmen el comprobante.`;
     $('aviso').style.color = '#1f7a4d';
     $('codigo').focus();
   } catch {
-    $('retiro-aviso').textContent = 'Sin red: el retiro necesita conexión para quedar registrado.';
+    $('retiro-aviso').textContent = 'Sin red: necesita conexión para quedar registrado.';
   } finally {
     $('retiro-registrar').disabled = false;
   }
@@ -826,42 +846,16 @@ $('retiro-registrar').addEventListener('click', async () => {
 let idCorte = null;
 let ultimoCorte = null;
 
-function conteoCorte() {
-  const conteo = {};
-  for (const campo of document.querySelectorAll('#corte-denominaciones input')) {
-    const piezas = Number(campo.value || 0);
-    if (piezas) conteo[campo.dataset.denominacion] = piezas;
-  }
-  return conteo;
-}
-
-function pintarContado() {
-  for (const campo of document.querySelectorAll('#corte-denominaciones input')) {
-    const piezas = Number(campo.value || 0);
-    campo.closest('tr').lastElementChild.textContent = Number.isInteger(piezas) && piezas > 0
-      ? pesos(piezas * Number(campo.dataset.denominacion)) : '';
-  }
-  const contado = contadoDe(conteoCorte());
-  $('corte-contado').textContent = contado === null ? 'revisa las piezas' : pesos(contado);
-}
-
-$('corte-denominaciones').innerHTML = DENOMINACIONES.map((d) => `
-  <tr><td>${d === 2000 ? 'Billete o moneda de $20' : d === 50 ? 'Moneda de 50¢' : `${d > 2000 ? 'Billete' : 'Moneda'} de ${pesos(d)}`}</td>
-    <td><input type="number" min="0" step="1" inputmode="numeric" data-denominacion="${d}" placeholder="0"></td>
-    <td></td></tr>`).join('');
-$('corte-denominaciones').addEventListener('input', pintarContado);
-
 $('abrir-corte').addEventListener('click', async () => {
   if (!exigirCaja()) return;
   idCorte = crypto.randomUUID();
   $('corte-caja').textContent = cajaActual();
-  for (const campo of document.querySelectorAll('#corte-denominaciones input')) campo.value = '';
+  $('corte-efectivo').value = '';
   $('corte-terminal').value = '';
   $('corte-notas').value = '';
   $('corte-aviso').textContent = '';
   $('corte-paso-conteo').hidden = false;
   $('corte-paso-resultado').hidden = true;
-  pintarContado();
   $('dialogo-corte').showModal();
 
   // Lo que no llego al servidor no entra en el corte: primero se sincroniza, y
@@ -878,7 +872,7 @@ $('abrir-corte').addEventListener('click', async () => {
   } else {
     $('corte-registrar').disabled = false;
   }
-  document.querySelector('#corte-denominaciones input').focus();
+  $('corte-efectivo').focus();
 });
 
 $('corte-salir').addEventListener('click', () => { $('dialogo-corte').close(); $('codigo').focus(); });
@@ -896,6 +890,7 @@ function pintarResultado(c) {
     ${renglon('+ Ventas en efectivo', pesos(c.efectivo_ventas))}
     ${renglon('− Devoluciones', pesos(c.efectivo_devoluciones))}
     ${renglon('− Retiros', pesos(c.retiros))}
+    ${renglon('− Gastos', pesos(c.gastos))}
     ${renglon('= Esperado', pesos(c.efectivo_esperado), 'fuerte')}
     ${renglon('Contado', pesos(c.efectivo_contado), 'fuerte')}
     ${diferencia}
@@ -908,15 +903,16 @@ function pintarResultado(c) {
 }
 
 $('corte-registrar').addEventListener('click', async () => {
-  const conteo = conteoCorte();
-  if (contadoDe(conteo) === null) { $('corte-aviso').textContent = 'Revisa las piezas: solo números enteros.'; return; }
+  if ($('corte-efectivo').value === '') { $('corte-aviso').textContent = 'Escribe cuánto efectivo hay en el cajón.'; return; }
+  const contado = Math.round(Number($('corte-efectivo').value) * 100);
+  if (!(contado >= 0)) { $('corte-aviso').textContent = 'Revisa el efectivo del cajón.'; return; }
   const terminal = Math.round(Number($('corte-terminal').value || 0) * 100);
   if (!(terminal >= 0)) { $('corte-aviso').textContent = 'Revisa el total de la terminal.'; return; }
   $('corte-registrar').disabled = true;
   try {
     const r = await fetch('/api/cortes', {
       method: 'POST', headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ id: idCorte, caja: cajaActual(), conteo, tarjeta_terminal: terminal, notas: $('corte-notas').value }),
+      body: JSON.stringify({ id: idCorte, caja: cajaActual(), efectivo_contado: contado, tarjeta_terminal: terminal, notas: $('corte-notas').value }),
     });
     const corte = await r.json();
     if (!r.ok) { $('corte-aviso').textContent = corte.error ?? 'No se pudo registrar el corte.'; $('corte-registrar').disabled = false; return; }

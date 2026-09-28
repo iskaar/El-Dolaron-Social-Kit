@@ -273,7 +273,6 @@ const parrafo = (texto) => (sinAcentos(texto).match(new RegExp(`.{1,${COLUMNAS}}
  * @param corte la fila de `cortes` que regresa /api/cortes
  */
 export function imprimirCorte(corte) {
-  const conteo = JSON.parse(corte.conteo || '{}');
   const diferencia = corte.diferencia;
   const etiquetaDiferencia = diferencia === 0 ? 'Diferencia' : diferencia > 0 ? 'SOBRANTE' : 'FALTANTE';
   const partes = [
@@ -289,17 +288,12 @@ export function imprimirCorte(corte) {
     renglonMonto('+ Ventas en efectivo', importe(corte.efectivo_ventas)),
     renglonMonto('- Devoluciones', importe(corte.efectivo_devoluciones)),
     renglonMonto('- Retiros', importe(corte.retiros)),
+    renglonMonto('- Gastos', importe(corte.gastos ?? 0)),
     renglonMonto('= Esperado', importe(corte.efectivo_esperado)),
     renglonMonto('Contado', importe(corte.efectivo_contado)),
     negritas(diferencia !== 0),
     renglonMonto(etiquetaDiferencia, importe(Math.abs(diferencia))),
     negritas(false),
-    separador(),
-    centrado('CONTEO'),
-    ...Object.entries(conteo)
-      .filter(([, piezas]) => piezas > 0)
-      .sort(([a], [b]) => Number(b) - Number(a))
-      .map(([denominacion, piezas]) => renglonMonto(`  ${piezas} x ${importe(Number(denominacion))}`, importe(piezas * Number(denominacion)))),
     separador(),
     renglonMonto('Tarjeta (sistema)', importe(corte.tarjeta_sistema)),
     renglonMonto('Tarjeta (terminal)', importe(corte.tarjeta_terminal)),
@@ -317,10 +311,11 @@ export function imprimirCorte(corte) {
   return enviar(concatenar(partes));
 }
 
-/** El comprobante de un retiro de efectivo, firmado por quien lo saca y quien lo recibe. */
+/** El comprobante de un retiro o un gasto, firmado por quien saca el dinero y quien lo recibe. */
 export function imprimirRetiro(retiro) {
+  const gasto = retiro.tipo === 'gasto';
   const partes = [
-    ...encabezado('RETIRO DE EFECTIVO'),
+    ...encabezado(gasto ? 'GASTO DE CAJA' : 'RETIRO DE EFECTIVO'),
     linea(`Caja: ${sinAcentos(retiro.caja)}`),
     linea(`Cajero: ${sinAcentos(retiro.cajero)}`.slice(0, COLUMNAS)),
     linea(`Fecha: ${fechaHora(retiro.creado_en)}`),
@@ -328,7 +323,7 @@ export function imprimirRetiro(retiro) {
     negritas(true),
     renglonMonto('IMPORTE', importe(retiro.importe)),
     negritas(false),
-    linea('Motivo:'),
+    linea(gasto ? 'Concepto:' : 'Motivo:'),
     ...parrafo(retiro.motivo),
     ...firmas(retiro.cajero),
   ];
