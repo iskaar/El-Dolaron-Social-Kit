@@ -90,6 +90,18 @@
   </div>
 
   <div class="panel">
+    <h2>Cortes de caja</h2>
+    <div id="cortes"></div>
+    <p class="nota">Conteo ciego: el cajero registra lo contado antes de ver lo esperado. Diferencia = contado − esperado
+      (en rojo lo que falta). «Tarjeta» compara lo cobrado en el sistema con el cierre de la terminal.</p>
+  </div>
+
+  <div class="panel">
+    <h2>Gastos y retiros de efectivo</h2>
+    <div id="retiros"></div>
+  </div>
+
+  <div class="panel">
     <h2>Cajón abierto sin venta</h2>
     <div id="aperturas-cajon"></div>
     <p class="nota">Cada vez que alguien usa «Abrir cajón» en la caja, con su correo y la hora.
@@ -127,6 +139,8 @@ const $ = (id) => document.getElementById(id);
 const fechaHora = (iso) => new Date(iso).toLocaleString('es-MX', { dateStyle: 'short', timeStyle: 'short' });
 const escapar = (texto) => String(texto ?? '').replace(/[<>&"]/g, (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;' }[c]));
 const pesos = (centavos) => `$${Math.round(centavos / 100).toLocaleString('es-MX')}`;
+// Con centavos: en un corte, 50 centavos de diferencia son diferencia.
+const pesos2 = (centavos) => `$${(centavos / 100).toLocaleString('es-MX', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 const RANGOS = [7, 30, 90, 365];
 let diasActual = 30;
 
@@ -194,7 +208,7 @@ async function cargar() {
     ? '<div class="vacio">Todavía no hay piezas vendidas para medir esto.</div>'
     : `<table><thead><tr><th>Categoría</th><th class="num">Días promedio</th><th class="num">Piezas</th></tr></thead>
        <tbody>${r.dias_en_venta_por_categoria.map((f) => `
-         <tr><td>${f.categoria}</td><td class="num">${f.dias_promedio.toFixed(1)}</td><td class="num">${f.n}</td></tr>
+         <tr><td>${escapar(f.categoria)}</td><td class="num">${f.dias_promedio == null ? '—' : f.dias_promedio.toFixed(1)}</td><td class="num">${f.n}</td></tr>
        `).join('')}</tbody></table>`;
 
   $('cancelaciones-resumen').innerHTML = `
@@ -210,9 +224,32 @@ async function cargar() {
 
   $('aperturas-cajon').innerHTML = r.aperturas_cajon.length === 0
     ? '<div class="vacio">Nadie abrió el cajón sin venta en este rango.</div>'
-    : `<table><thead><tr><th>Fecha</th><th>Quién</th></tr></thead>
+    : `<table><thead><tr><th>Fecha</th><th>Caja</th><th>Quién</th></tr></thead>
        <tbody>${r.aperturas_cajon.map((a) => `
-         <tr><td>${fechaHora(a.abierto_en)}</td><td>${escapar(a.abierto_por)}</td></tr>
+         <tr><td>${fechaHora(a.abierto_en)}</td><td>${escapar(a.caja || '—')}</td><td>${escapar(a.abierto_por)}</td></tr>
+       `).join('')}</tbody></table>`;
+
+  const diferencia = (centavos) => centavos === 0 ? pesos2(0)
+    : `<b style="color:${centavos < 0 ? 'var(--rojo)' : '#b26b00'}">${centavos < 0 ? '−' : '+'}${pesos2(Math.abs(centavos))}</b>`;
+  $('cortes').innerHTML = r.cortes.length === 0
+    ? '<div class="vacio">Sin cortes en este rango.</div>'
+    : `<table><thead><tr><th>Fecha</th><th>Caja</th><th>Cajero</th><th class="num">Ventas</th>
+         <th class="num">Esperado</th><th class="num">Contado</th><th class="num">Diferencia</th>
+         <th class="num">Tarjeta (term. − sist.)</th><th class="num">Entregado</th></tr></thead>
+       <tbody>${r.cortes.map((c) => `
+         <tr><td>${fechaHora(c.hasta)}</td><td>${escapar(c.caja)}</td><td>${escapar(c.cajero)}</td>
+           <td class="num">${c.tickets}</td><td class="num">${pesos2(c.efectivo_esperado)}</td>
+           <td class="num">${pesos2(c.efectivo_contado)}</td><td class="num">${diferencia(c.diferencia)}</td>
+           <td class="num">${diferencia(c.tarjeta_terminal - c.tarjeta_sistema)}</td><td class="num">${pesos2(c.entregado)}</td></tr>
+         ${c.notas ? `<tr><td colspan="9" class="nota">Notas: ${escapar(c.notas)}</td></tr>` : ''}
+       `).join('')}</tbody></table>`;
+
+  $('retiros').innerHTML = r.retiros.length === 0
+    ? '<div class="vacio">Sin gastos ni retiros en este rango.</div>'
+    : `<table><thead><tr><th>Fecha</th><th>Tipo</th><th>Caja</th><th>Quién</th><th>Concepto / motivo</th><th class="num">Importe</th></tr></thead>
+       <tbody>${r.retiros.map((x) => `
+         <tr><td>${fechaHora(x.creado_en)}</td><td>${x.tipo === 'gasto' ? 'Gasto' : 'Retiro'}</td><td>${escapar(x.caja)}</td>
+           <td>${escapar(x.cajero)}</td><td>${escapar(x.motivo)}</td><td class="num">${pesos2(x.importe)}</td></tr>
        `).join('')}</tbody></table>`;
 }
 

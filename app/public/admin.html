@@ -99,8 +99,9 @@ const CLAVES_CONFIG = [
   ['pct_ropa','Ropa %'], ['pct_hogar','Hogar %'], ['pct_electronica','Electrónica %'],
   ['pct_juguetes','Juguetes %'], ['pct_otros','Otros %'], ['pct_danado','Dañado %'],
   ...MONTOS_BANDA.map((p) => [`banda_${p}`, `Banda $${p}`]),
+  ['fondo_caja', 'Fondo por caja $'],
 ];
-const EN_PESOS = new Set(MONTOS_BANDA.map((p) => `banda_${p}`));
+const EN_PESOS = new Set([...MONTOS_BANDA.map((p) => `banda_${p}`), 'fondo_caja']);
 
 const cola = document.getElementById('cola');
 const resumen = document.getElementById('resumen');
