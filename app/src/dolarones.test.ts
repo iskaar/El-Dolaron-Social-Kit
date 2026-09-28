@@ -46,13 +46,13 @@ test('12 meses conservan la hora local y caen al ultimo dia si el dia no existe'
 test('el canje sale primero del lote que vence antes y no toca vencidos ni por liberar', () => {
   const ahora = '2026-10-10T00:00:00.000Z';
   const lotes = [
-    { id: 'compra', restante: 2000, disponible_desde: '2026-10-03T06:00:00.000Z', vence_en: '2027-10-02T00:00:00.000Z' },
-    { id: 'regalo', restante: 10000, disponible_desde: '2026-10-02T00:00:00.000Z', vence_en: '2026-11-01T00:00:00.000Z' },
-    { id: 'vencido', restante: 9999, disponible_desde: '2026-01-01T00:00:00.000Z', vence_en: '2026-10-01T00:00:00.000Z' },
-    { id: 'manana', restante: 9999, disponible_desde: '2026-10-11T06:00:00.000Z', vence_en: '2027-10-10T00:00:00.000Z' },
+    { id: 'compra', origen: 'compra', restante: 2000, disponible_desde: '2026-10-03T06:00:00.000Z', vence_en: '2027-10-02T00:00:00.000Z' },
+    { id: 'regalo', origen: 'regalo', restante: 10000, disponible_desde: '2026-10-02T00:00:00.000Z', vence_en: '2026-11-01T00:00:00.000Z' },
+    { id: 'vencido', origen: 'compra', restante: 9999, disponible_desde: '2026-01-01T00:00:00.000Z', vence_en: '2026-10-01T00:00:00.000Z' },
+    { id: 'manana', origen: 'compra', restante: 9999, disponible_desde: '2026-10-11T06:00:00.000Z', vence_en: '2027-10-10T00:00:00.000Z' },
   ];
-  assert.deepEqual(repartir(lotes, 11000, ahora), [{ id: 'regalo', importe: 10000 }, { id: 'compra', importe: 1000 }]);
-  assert.equal(repartir(lotes, 12001, ahora), null);
+  assert.deepEqual(repartir(lotes, 11000, ahora, 1000_00), [{ id: 'regalo', importe: 10000 }, { id: 'compra', importe: 1000 }]);
+  assert.equal(repartir(lotes, 12001, ahora, 1000_00), null);
 });
 
 /* ---------- contra la base ---------- */
@@ -99,21 +99,63 @@ test('comprar $250 gana 20 D, que se liberan hasta manana', async () => {
   const r = await pedir('/api/ventas', venta({ cliente_id: socio.id }));
   assert.equal(r.status, 201);
   assert.equal(r.cuerpo.ganados, 20_00);
-  assert.deepEqual(r.cuerpo.saldo, { disponible: 500_00, por_liberar: 20_00 });
+  assert.deepEqual(r.cuerpo.saldo, { disponible: 500_00, por_liberar: 20_00, regalo_disponible: 500_00 });
+});
+
+test('regalos: $999.99 no alcanza; $1,000 y $1,000.01 antes de D si, con total del servidor', async () => {
+  for (const total of [999_99, 1000_00, 1000_01]) {
+    const { db, pedir } = tienda();
+    const socio = (await alta(pedir)).cuerpo;
+    db.prepare('update productos set precio = ? where id = ?').run(total, PRODUCTO);
+    const r = await pedir('/api/ventas', venta({
+      cliente_id: socio.id, dolarones: 500_00, pin: '1234', forma_pago: 'tarjeta',
+      total: 1000_00, // Campo inventado: no puede sustituir el total real.
+    }));
+    assert.equal(r.status, total < 1000_00 ? 409 : 201, JSON.stringify(r.cuerpo));
+    if (total < 1000_00) {
+      assert.match(r.cuerpo.error, /1,000/);
+      assert.equal(db.prepare('select count(*) as n from ventas').get()!.n, 0);
+      assert.equal(db.prepare('select stock from productos where id = ?').get(PRODUCTO)!.stock, 50);
+      assert.equal((await pedir('/api/socios?q=1')).cuerpo.regalo_disponible, 500_00);
+    } else {
+      assert.equal(r.cuerpo.total, total);
+      assert.equal(r.cuerpo.saldo.disponible, 0);
+      assert.equal(r.cuerpo.ganados, 50_00); // $500 monetarios bastan: minimo sobre el ticket.
+    }
+    db.close();
+  }
+});
+
+test('saldo mixto: una compra menor a $1,000 usa solo lo ganado, aunque el regalo venza antes', async () => {
+  const { db, pedir } = tienda();
+  const socio = (await alta(pedir)).cuerpo;
+  assert.equal((await pedir('/api/ventas', venta({ cliente_id: socio.id }))).status, 201);
+  // Simular el dia siguiente para los 20 D ganados, sin alterar el regalo.
+  db.prepare("update dolarones_lotes set disponible_desde = '2026-01-01' where origen = 'compra'").run();
+  const v = venta({ cliente_id: socio.id, dolarones: 20_00, pin: '1234', efectivo: 230_00 });
+  const r = await pedir('/api/ventas', v);
+  assert.equal(r.status, 201);
+  assert.equal(r.cuerpo.saldo.disponible, 500_00);
+  assert.equal(r.cuerpo.saldo.regalo_disponible, 500_00);
+  assert.equal(db.prepare("select sum(restante) as n from dolarones_lotes where origen = 'regalo'").get()!.n, 500_00);
+  assert.equal((await pedir('/api/ventas', venta({ cliente_id: socio.id, dolarones: 1_00, pin: '1234', efectivo: 249_00 }))).status, 409);
+  // Cancelar devuelve al mismo origen: vuelve a ser gastable en un ticket pequeno.
+  assert.equal((await pedir(`/api/ventas/${v.id}/cancelar`, { motivo: 'prueba' })).status, 200);
+  assert.equal((await pedir('/api/ventas', venta({ ...v, id: crypto.randomUUID() }))).status, 201);
 });
 
 test('pago parcial con Dolarones: descuenta el saldo, gana solo sobre el dinero y cuadra el corte', async () => {
   const { pedir } = tienda();
   const socio = (await alta(pedir)).cuerpo;
-  // $250: 120 D + $130 en efectivo. Gana 10 D (un bloque completo de $100).
-  const r = await pedir('/api/ventas', venta({ cliente_id: socio.id, dolarones: 120_00, pin: '1234', efectivo: 130_00 }));
+  // $1,000: 120 D + $880 en efectivo. Gana 80 D.
+  const r = await pedir('/api/ventas', venta({ cliente_id: socio.id, dolarones: 120_00, pin: '1234', efectivo: 880_00, lineas: [{ producto_id: PRODUCTO, cantidad: 4 }] }));
   assert.equal(r.status, 201, JSON.stringify(r.cuerpo));
   assert.equal(r.cuerpo.cambio, 0);
-  assert.equal(r.cuerpo.ganados, 10_00);
-  assert.deepEqual(r.cuerpo.saldo, { disponible: 380_00, por_liberar: 10_00 });
+  assert.equal(r.cuerpo.ganados, 80_00);
+  assert.deepEqual(r.cuerpo.saldo, { disponible: 380_00, por_liberar: 80_00, regalo_disponible: 380_00 });
 
   const corte = (await pedir('/api/ventas')).cuerpo;
-  assert.equal(corte.total, 130_00);          // el efectivo que debe haber en el cajon
+  assert.equal(corte.total, 880_00);          // el efectivo que debe haber en el cajon
   assert.equal(corte.dolarones, 120_00);
 });
 
@@ -123,16 +165,16 @@ test('Dolarones sin PIN correcto, sin saldo o sin socio: nada cambia', async () 
   const stock = () => (db.prepare('select stock from productos where id = ?').get(PRODUCTO) as { stock: number }).stock;
 
   assert.equal((await pedir('/api/ventas', venta({ cliente_id: socio.id, dolarones: 100_00, pin: '9999', efectivo: 150_00 }))).status, 403);
-  assert.equal((await pedir('/api/ventas', venta({ cliente_id: socio.id, dolarones: 250_00, pin: '1234', efectivo: 0 }))).status, 201);
+  assert.equal((await pedir('/api/ventas', venta({ cliente_id: socio.id, dolarones: 250_00, pin: '1234', efectivo: 750_00, lineas: [{ producto_id: PRODUCTO, cantidad: 4 }] }))).status, 201);
   // Ya gasto 250 de 500: 300 mas no alcanzan (lo ganado aun no se libera).
   const sinSaldo = await pedir('/api/ventas', {
-    ...venta({ cliente_id: socio.id, dolarones: 300_00, pin: '1234', efectivo: 200_00 }),
-    lineas: [{ producto_id: PRODUCTO, cantidad: 2 }],
+    ...venta({ cliente_id: socio.id, dolarones: 300_00, pin: '1234', efectivo: 700_00 }),
+    lineas: [{ producto_id: PRODUCTO, cantidad: 4 }],
   });
   assert.equal(sinSaldo.status, 409);
   assert.equal((await pedir('/api/ventas', venta({ cliente_id: socio.id, dolarones: 250_01, pin: '1234', efectivo: 0 }))).status, 400);
   assert.equal((await pedir('/api/ventas', venta({ dolarones: 100_00, efectivo: 150_00 }))).status, 400);
-  assert.equal(stock(), 49);                   // solo la venta valida bajo existencia
+  assert.equal(stock(), 46);                   // solo la venta valida bajo existencia
 });
 
 test('cinco PIN incorrectos bloquean, aun con el PIN correcto', async () => {
@@ -160,7 +202,7 @@ test('los PIN incorrectos concurrentes cuentan y no sobrescriben el bloqueo', as
   const ahora = new Date();
   const intentar = (pin: string, momento = ahora) => sentenciasDeVenta(env, {
     ventaId: crypto.randomUUID(), clienteId: socio.id, dolarones: 10_00,
-    pin, total: 250_00, autor: DUENO, ahora: momento,
+    pin, total: 1000_00, autor: DUENO, ahora: momento,
   });
   const resultados = await Promise.all(Array.from({ length: 7 }, () => intentar('0000')));
   assert.ok(resultados.every((r) => !r.ok));
@@ -208,12 +250,12 @@ test('un PIN en vuelo respeta un bloqueo o restablecimiento posterior a su lectu
 test('reenviar la misma venta no gasta ni gana dos veces', async () => {
   const { pedir } = tienda();
   const socio = (await alta(pedir)).cuerpo;
-  const v = venta({ cliente_id: socio.id, dolarones: 50_00, pin: '1234', efectivo: 200_00 });
+  const v = venta({ cliente_id: socio.id, dolarones: 50_00, pin: '1234', efectivo: 950_00, lineas: [{ producto_id: PRODUCTO, cantidad: 4 }] });
   assert.equal((await pedir('/api/ventas', v)).status, 201);
   assert.equal((await pedir('/api/ventas', v)).cuerpo.duplicada, true);
   const s = (await pedir('/api/socios?q=1')).cuerpo;
   assert.equal(s.disponible, 450_00);
-  assert.equal(s.por_liberar, 20_00);
+  assert.equal(s.por_liberar, 90_00);
 });
 
 test('dos cajas gastan el mismo saldo a la vez: solo una se confirma', async () => {
@@ -222,11 +264,11 @@ test('dos cajas gastan el mismo saldo a la vez: solo una se confirma', async () 
   const ahora = new Date();
   // Las dos leen el saldo antes de que cualquiera escriba.
   const [a, b] = await Promise.all([crypto.randomUUID(), crypto.randomUUID()].map((ventaId) =>
-    sentenciasDeVenta(env, { ventaId, clienteId: socio.id, dolarones: 400_00, pin: '1234', total: 400_00, autor: DUENO, ahora })));
+    sentenciasDeVenta(env, { ventaId, clienteId: socio.id, dolarones: 400_00, pin: '1234', total: 1000_00, autor: DUENO, ahora })));
   assert.ok(a.ok && b.ok);
   await env.DB.batch(a.sentencias);
   await assert.rejects(env.DB.batch(b.sentencias), /saldo insuficiente/);
-  const { suma } = db.prepare('select sum(restante) as suma from dolarones_lotes where cliente_id = ?').get(socio.id) as { suma: number };
+  const { suma } = db.prepare("select sum(restante) as suma from dolarones_lotes where cliente_id = ? and origen = 'regalo'").get(socio.id) as { suma: number };
   assert.equal(suma, 100_00);
 });
 
@@ -241,17 +283,19 @@ test('un lote vencido no se gasta', async () => {
 test('cancelar regresa existencia y Dolarones, retira lo ganado y no se repite', async () => {
   const { db, pedir } = tienda();
   const socio = (await alta(pedir)).cuerpo;
-  const v = venta({ cliente_id: socio.id, dolarones: 150_00, pin: '1234', efectivo: 100_00 });
+  const v = venta({ cliente_id: socio.id, dolarones: 150_00, pin: '1234', efectivo: 850_00, lineas: [{ producto_id: PRODUCTO, cantidad: 4 }] });
   assert.equal((await pedir('/api/ventas', v)).status, 201);
 
   const cancelada = await pedir(`/api/ventas/${v.id}/cancelar`, { motivo: 'prueba' });
   assert.equal(cancelada.status, 200);
-  assert.equal(cancelada.cuerpo.devuelto, 100_00);   // en dinero; los 150 D regresan al saldo
+  assert.equal(cancelada.cuerpo.devuelto, 850_00);   // en dinero; los 150 D regresan al saldo
   assert.equal(cancelada.cuerpo.dolarones, 150_00);
 
   const s = (await pedir('/api/socios?q=1')).cuerpo;
   assert.equal(s.disponible, 500_00);
   assert.equal(s.por_liberar, 0);
+  assert.equal(s.regalo_disponible, 500_00);
+  assert.equal((await pedir('/api/ventas', venta({ cliente_id: socio.id, dolarones: 1_00, pin: '1234', efectivo: 249_00 }))).status, 409);
   assert.equal((db.prepare('select stock from productos where id = ?').get(PRODUCTO) as { stock: number }).stock, 50);
 
   assert.equal((await pedir(`/api/ventas/${v.id}/cancelar`, { motivo: 'otra vez' })).cuerpo.ya_estaba, true);
@@ -265,7 +309,7 @@ test('el dueno cambia el PIN y desbloquea; un cajero no puede', async () => {
   const socio = (await alta(pedir)).cuerpo;
   for (let i = 0; i < 5; i++) await pedir('/api/ventas', venta({ cliente_id: socio.id, dolarones: 10_00, pin: '0000', efectivo: 240_00 }));
   assert.equal((await pedir('/api/socios/1/pin', { pin: '5678' })).status, 200);
-  assert.equal((await pedir('/api/ventas', venta({ cliente_id: socio.id, dolarones: 10_00, pin: '5678', efectivo: 240_00 }))).status, 201);
+  assert.equal((await pedir('/api/ventas', venta({ cliente_id: socio.id, dolarones: 10_00, pin: '5678', efectivo: 990_00, lineas: [{ producto_id: PRODUCTO, cantidad: 4 }] }))).status, 201);
 
   db.prepare(`insert into usuarios (correo, nombre, roles, activo, creado_en, actualizado_en) values ('caja@prueba.mx', 'Caja', 'cajero', 1, '', '')`).run();
   (env as unknown as { DEV_USUARIO: string }).DEV_USUARIO = 'caja@prueba.mx';

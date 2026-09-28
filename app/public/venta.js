@@ -29,6 +29,15 @@ export function dolaronesGanados(pagado) {
   return Math.floor(Math.max(0, pagado) / 10000) * 1000;
 }
 
+/** Ticket minimo ANTES de descontar Dolarones para usar regalos de apertura. */
+export const MINIMO_REGALO = 1000_00;
+
+/** El saldo ganado por compras no tiene este minimo. Todo en centavos. */
+export function saldoCanjeable(socio, total) {
+  if (!socio) return 0;
+  return total >= MINIMO_REGALO ? socio.disponible : Math.max(0, socio.disponible - socio.regalo_disponible);
+}
+
 /** Agrega una pieza al ticket, juntando lineas repetidas del mismo codigo. */
 export function agregar(lineas, pieza) {
   const existente = lineas.find((l) => l.codigo === pieza.codigo && l.precio === pieza.precio);
