@@ -103,6 +103,7 @@
   #corte-resumen .sobra td { color: #b26b00; font-weight: 800; }
   @media (max-width: 820px) { main { grid-template-columns: 1fr; } }
 </style>
+<script src="/cajero.js"></script>
 </head>
 <body>
 <header>
@@ -269,10 +270,12 @@ const cajaActual = () => $('caja-nombre').value;
 
 // Issue #105: si el dueno le asigno una caja a quien entro, esa es la suya en
 // cualquier computadora (el servidor la usa aunque aqui diga otra). Sin red se
-// queda lo que se eligio en esta computadora.
-fetch('/api/yo').then((r) => r.json()).then(({ usuario }) => {
-  if (!usuario?.caja) return;
-  $('caja-nombre').value = usuario.caja;
+// queda lo que se eligio en esta computadora. En la computadora de la tienda,
+// la del cajero que entro con su PIN (Issue #112).
+fetch('/api/yo').then((r) => r.json()).then(({ usuario, cajero }) => {
+  const caja = (cajero ?? usuario)?.caja;
+  if (!caja) return;
+  $('caja-nombre').value = caja;
   $('caja-nombre').disabled = true;
   $('caja-nombre').title = 'Tu caja, asignada por el dueño';
   $('caja-nombre').closest('label').firstChild.textContent = 'Tu caja ';

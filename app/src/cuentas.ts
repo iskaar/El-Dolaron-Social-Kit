@@ -8,8 +8,10 @@
  * equipo de Zero Trust.
  */
 
-export type Rol = 'dueno' | 'cajero' | 'capturista';
-export const ROLES: readonly Rol[] = ['dueno', 'cajero', 'capturista'];
+// `computadora`: la cuenta de la tienda con la que entra la computadora de caja;
+// sola no cobra, cada cajero entra con su PIN (Issue #112, cajeros.ts).
+export type Rol = 'dueno' | 'cajero' | 'capturista' | 'computadora';
+export const ROLES: readonly Rol[] = ['dueno', 'cajero', 'capturista', 'computadora'];
 /** Lo que recibe alguien al aprobarle el acceso si no se escoge otra cosa. */
 export const ROL_POR_OMISION: Rol = 'cajero';
 
@@ -45,7 +47,7 @@ export const CAJAS = ['Caja 1', 'Caja 2', 'Caja 3'];
 export type Regla = 'libre' | 'cuenta' | Rol[];
 
 const CAPTURA: Rol[] = ['capturista'];
-const CAJA: Rol[] = ['cajero'];
+const CAJA: Rol[] = ['cajero', 'computadora'];
 const TODOS: Rol[] = ['cajero', 'capturista'];
 const DUENO: Rol[] = [];
 
@@ -87,12 +89,20 @@ export function permiso(pathname: string, metodo: string): Regla {
   if (ruta === '/api/socios') return CAJA;
   if (ruta === '/api/cajon') return CAJA;
   if (ruta === '/api/cortes' || ruta === '/api/retiros') return CAJA;
+  if (ruta === '/api/cajeros' || ruta === '/api/cajeros/entrar' || ruta === '/api/cajeros/salir') return CAJA;
   // ponytail: cancelar sigue abierto al cajero hasta la fase 2 del Issue #75,
   // que lo pasa por una solicitud aprobada por el dueno.
   if (ruta === '/api/ventas' || ruta.startsWith('/api/ventas/')) return CAJA;
 
   return DUENO;
 }
+
+/** Lo de caja: lo unico que abre el PIN del cajero. */
+export const esDeCaja = (regla: Regla) => regla === CAJA;
+
+/** La cuenta de la computadora de caja: para cobrar necesita el PIN de un cajero. */
+export const soloComputadora = (usuario: Usuario | null) =>
+  !!usuario?.roles.includes('computadora') && !usuario.roles.includes('cajero') && !usuario.roles.includes('dueno');
 
 export function puede(usuario: Usuario | null, regla: Regla): boolean {
   if (regla === 'libre' || regla === 'cuenta') return true;
@@ -214,7 +224,7 @@ function json(cuerpo: unknown, status = 200): Response {
 const texto = (valor: unknown, max: number) => String(valor ?? '').replace(/\s+/g, ' ').trim().slice(0, max);
 
 /** Quien soy y que puedo hacer: para la pantalla de sin acceso y para esconder lo que no toca. */
-export async function yo(env: Env, correo: string): Promise<Response> {
+export async function yo(env: Env, correo: string, cajero: Usuario | null = null): Promise<Response> {
   const usuario = await leerUsuario(env, correo);
   const solicitud = await env.DB.prepare(
     `select estado, creado_en from solicitudes where tipo = 'acceso' and correo = ?
@@ -222,7 +232,7 @@ export async function yo(env: Env, correo: string): Promise<Response> {
   )
     .bind(correo)
     .first<{ estado: string; creado_en: string }>();
-  return json({ correo, usuario, solicitud });
+  return json({ correo, usuario, solicitud, cajero: cajero && { correo: cajero.correo, nombre: cajero.nombre, caja: cajero.caja } });
 }
 
 /** Alguien sin cuenta pide entrar. Una sola pendiente por persona: pedir otra vez la actualiza. */
@@ -259,13 +269,14 @@ export async function pedirAcceso(request: Request, env: Env, correo: string): P
 /** Para /cuentas: todos los usuarios y lo que esta esperando respuesta. */
 export async function listarCuentas(env: Env): Promise<Response> {
   const { results: filas } = await env.DB.prepare(
-    'select correo, nombre, roles, activo, caja, creado_en from usuarios order by activo desc, nombre',
-  ).all<FilaUsuario & { creado_en: string }>();
+    `select correo, nombre, roles, activo, caja, pin_hash != '' as tiene_pin, creado_en from usuarios
+     order by activo desc, nombre`,
+  ).all<FilaUsuario & { creado_en: string; tiene_pin: number }>();
   const { results: solicitudes } = await env.DB.prepare(
     `select id, tipo, correo, nombre, justificacion, datos, creado_en from solicitudes
      where estado = 'pendiente' order by creado_en`,
   ).all();
-  const usuarios = filas.map((f) => ({ ...f, roles: leerRoles(f.roles), activo: f.activo === 1 }));
+  const usuarios = filas.map((f) => ({ ...f, roles: leerRoles(f.roles), activo: f.activo === 1, tiene_pin: f.tiene_pin === 1 }));
   return json({ usuarios, solicitudes, roles: ROLES, cajas: CAJAS });
 }
 
