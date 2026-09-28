@@ -2,7 +2,7 @@
 
 Fecha: 24/09/2026. Propietario: Isaac. [Issue #56](https://github.com/iskaar/El-Dolaron-Social-Kit/issues/56). Reglas: [RECOMPENSAS-DOLARONES.md](RECOMPENSAS-DOLARONES.md).
 
-**Recomendación:** lanzar un programa pequeño y completo: registro y saldo privados en línea, QR/PIN, acumulación del 10%, canje presencial, devoluciones, regalo de apertura y operación de contingencia. Construirlo sobre la caja existente. Temporadas y gamificación llegan después. Este documento es el plan; el producto todavía no está implementado ni aprobado para producción.
+**Estado actual:** Dolarones v1 presencial está integrado y su despliegue quedó registrado en #81. La sección 0 define el alcance vigente y la sección 0.1 registra avances y pendientes. La propuesta original de portal, proveedores y calendario se conserva como referencia; no describe lo ya desplegado.
 
 **Ajuste de presupuesto solicitado el 24/09/2026:** desarrollar con Codex y Claude Code usando las suscripciones existentes; Claude Pro cuesta $20/mes. El presupuesto de servicios baja de $94–95 a **$50–51/mes**, con staging gratuito y monitor externo gratuito. Mantener autenticación administrada en producción, respaldo, revisión y pruebas de dinero. El detalle distingue gasto existente, incremento y condiciones para bajar más.
 
@@ -20,7 +20,25 @@ Isaac cerró las decisiones de R01 (detalle en la sección 2 de las [reglas](REC
 
 **Después de la apertura:** portal en línea con correo verificado (Supabase/Resend u otra opción, según la sección 7), consulta de saldo por el cliente, temporadas y premios. Hasta entonces no hace falta ninguna cuenta ni gasto nuevo: el costo mensual de la sección 7 se pospone.
 
+### 0.1. Revisión de avance del 27/09/2026
 
+Fuente: Issues y PRs enlazados, más lectura de código en `ec32926`. Esta revisión no consultó datos de clientes ni verificó el entorno de producción en vivo. Isaac confirmó que la revisión legal y los datos del responsable siguen pendientes.
+
+| Frente | Evidencia y estado | Siguiente paso |
+| --- | --- | --- |
+| Socios, regalo, saldo, canje y cancelación | [PR #82](https://github.com/iskaar/El-Dolaron-Social-Kit/pull/82) integrado; migración 011 y despliegue registrados en [#81](https://github.com/iskaar/El-Dolaron-Social-Kit/issues/81) | Ensayar el recorrido completo con dos cajas, lector e impresora en sandbox, con socios sintéticos |
+| Protección del PIN e importes | [#101](https://github.com/iskaar/El-Dolaron-Social-Kit/issues/101): corregir intentos concurrentes perdidos, respetar bloqueos/restablecimientos en curso y rechazar D inválidos incluso sin socio | Revisar PR, CI y ensayo antes de desplegar |
+| Bases y privacidad | Borrador en `BASES-Y-AVISO-DOLARONES.md`; faltan abogado, razón social, RFC y correo de privacidad ([#93](https://github.com/iskaar/El-Dolaron-Social-Kit/issues/93), punto 3) | Completar revisión y datos, publicar el texto aprobado y actualizar `BASES_VERSION` antes de registrar socios reales o anunciar el regalo |
+| Autorización de cancelaciones | Roles y cuentas desplegados; fases 2 y 3 de [#75](https://github.com/iskaar/El-Dolaron-Social-Kit/issues/75) pendientes | Solicitud/aprobación del dueño y después avisos; hoy el cajero puede cancelar |
+| Operación y recuperación | Sandbox integrado (#84), pruebas y typecheck en CI (#94), ticket/cajón corregidos (#98) | Ensayo de Dolarones, responsable/frecuencia de respaldo, restauración y capacitación; no equivalen a estar probados por tener sandbox |
+| Corte de caja | [#100](https://github.com/iskaar/El-Dolaron-Social-Kit/issues/100) en curso por Claude | Integrar y ensayar el corte con ventas/cancelaciones que incluyan Dolarones |
+| Portal, temporadas y premios | Pospuestos expresamente por el alcance del 26/09 | Retomar después de la apertura y de cerrar la operación presencial |
+
+La revisión del código también deja pendientes técnicos para el siguiente bloque: `registrarVenta` reconoce un ID repetido sin comparar el contenido ni recuperar el resultado original; `sentenciasDeVenta` calcula lo ganado sin aplicar la fecha de lanzamiento del 2/10. Las devoluciones de D ya vencidos o ganados y gastados siguen sujetas a definición comercial/legal (ver comentario en `sentenciasDeCancelacion`). No tratar las casillas históricas de la sección 6 como aprobadas ni activar registro real antes de resolver las condiciones de apertura.
+
+### 1. Propuesta original del 24/09 (referencia histórica)
+
+Las decisiones de la sección 0 prevalecen sobre las fechas, reglas, proveedores y alcance propuestos a continuación.
 
 | Confirmado por Isaac | Aplicación |
 | --- | --- |

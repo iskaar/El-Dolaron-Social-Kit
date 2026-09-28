@@ -208,11 +208,11 @@ export async function sentenciasDeVenta(env: Env, p: {
   ventaId: string; clienteId: string | null; dolarones: number; pin: string;
   total: number; autor: string; ahora: Date;
 }): Promise<Resultado> {
+  if (!Number.isSafeInteger(p.dolarones) || p.dolarones < 0 || p.dolarones > p.total) {
+    return { ok: false, status: 400, error: 'Importe de Dolarones invalido.' };
+  }
   if (!p.clienteId) {
     return p.dolarones > 0 ? { ok: false, status: 400, error: 'Para pagar con Dolarones hace falta el socio.' } : { ok: true, sentencias: [], ganados: 0 };
-  }
-  if (!Number.isInteger(p.dolarones) || p.dolarones < 0 || p.dolarones > p.total) {
-    return { ok: false, status: 400, error: 'Importe de Dolarones invalido.' };
   }
   const cliente = await env.DB.prepare('select id, pin_hash, pin_sal, pin_fallos, pin_bloqueo from clientes where id = ?')
     .bind(p.clienteId)
@@ -227,14 +227,24 @@ export async function sentenciasDeVenta(env: Env, p: {
       return { ok: false, status: 423, error: 'PIN bloqueado por intentos fallidos. Espera 15 minutos o llama a Isaac.' };
     }
     if (await hashPin(p.pin, cliente.pin_sal) !== cliente.pin_hash) {
-      const fallos = cliente.pin_fallos + 1;
-      const bloquear = fallos >= INTENTOS_PIN;
-      await env.DB.prepare('update clientes set pin_fallos = ?, pin_bloqueo = ? where id = ?')
-        .bind(bloquear ? 0 : fallos, bloquear ? new Date(p.ahora.getTime() + BLOQUEO_PIN).toISOString() : cliente.pin_bloqueo, cliente.id)
-        .run();
-      return { ok: false, status: 403, error: bloquear ? 'PIN incorrecto. Se bloqueo 15 minutos.' : 'PIN incorrecto.' };
+      // Incrementar sobre el valor actual: varias cajas pueden haber leido el mismo contador.
+      // Un intento en vuelo no debe quitar un bloqueo ni modificar un PIN restablecido.
+      const fallo = await env.DB.prepare(
+        `update clientes set
+           pin_fallos = case when pin_fallos + 1 >= ? then 0 else pin_fallos + 1 end,
+           pin_bloqueo = case when pin_fallos + 1 >= ? then ? else pin_bloqueo end
+         where id = ? and pin_bloqueo <= ? and pin_hash = ?
+         returning pin_bloqueo`,
+      ).bind(INTENTOS_PIN, INTENTOS_PIN, new Date(p.ahora.getTime() + BLOQUEO_PIN).toISOString(),
+        cliente.id, ahoraIso, cliente.pin_hash).first<{ pin_bloqueo: string }>();
+      return { ok: false, status: 403, error: fallo && fallo.pin_bloqueo > ahoraIso ? 'PIN incorrecto. Se bloqueo 15 minutos.' : 'PIN incorrecto.' };
     }
-    if (cliente.pin_fallos > 0) sentencias.push(env.DB.prepare('update clientes set pin_fallos = 0 where id = ?').bind(cliente.id));
+    // Confirmar el PIN y limpiar fallos juntos, antes de preparar la venta:
+    // el hash o el bloqueo pueden haber cambiado durante PBKDF2.
+    const autorizado = await env.DB.prepare(
+      `update clientes set pin_fallos = 0 where id = ? and pin_hash = ? and pin_bloqueo <= ? returning id`,
+    ).bind(cliente.id, cliente.pin_hash, ahoraIso).first();
+    if (!autorizado) return { ok: false, status: 423, error: 'PIN bloqueado o actualizado. Vuelve a buscar al socio o llama a Isaac.' };
 
     const { results: lotes } = await env.DB.prepare(
       'select id, restante, disponible_desde, vence_en from dolarones_lotes where cliente_id = ? and restante > 0 and vence_en > ?',
