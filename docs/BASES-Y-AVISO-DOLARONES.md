@@ -2,7 +2,7 @@
 
 **Estado: borrador para revisión del abogado.** Redactado por Claude el 26/09/2026 con las decisiones de Isaac ([reglas](RECOMPENSAS-DOLARONES.md), sección 2; [Issue #81](https://github.com/iskaar/El-Dolaron-Social-Kit/issues/81)). No publicar ni entregar a clientes hasta que el abogado lo apruebe y se completen los `[CORCHETES]`. No es asesoría legal.
 
-La caja registra la versión aceptada en cada alta (`BASES_VERSION` en `app/src/dolarones.ts`, hoy `borrador-2026-09-26`). Al aprobarse el texto final, cambiar esa versión. Este archivo sigue siendo un borrador: el registro web por SMS y los premios de apertura nuevos todavía no están implementados; no publicar hasta completar revisión legal y las notas para el abogado.
+La caja y el portal registran la versión aceptada en cada alta (`BASES_APROBADAS_VERSION`, ausente hasta aprobación). Este archivo sigue siendo un borrador: el backend del portal permanece cerrado y el proveedor SMS no está configurado; no publicar hasta completar revisión legal y las notas para el abogado.
 
 ---
 

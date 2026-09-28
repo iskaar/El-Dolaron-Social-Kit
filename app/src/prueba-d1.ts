@@ -44,7 +44,9 @@ export function tienda() {
   db.prepare(`insert into usuarios (correo, nombre, roles, activo, creado_en, actualizado_en) values (?, 'Isaac', 'dueno', 1, '', '')`).run(DUENO);
   db.prepare(`insert into productos (id, codigo, nombre, precio, stock, semana_ingreso, creado_en, actualizado_en)
               values (?, 'ED-000001', 'Ventilador', 25000, 50, 'S40', '', '')`).run(PRODUCTO);
-  const env = { DB: d1(db), ACCESS_EQUIPO: 'local', DEV_USUARIO: DUENO } as unknown as Env;
+  const env = { DB: d1(db), ACCESS_EQUIPO: 'local', DEV_USUARIO: DUENO,
+    BASES_APROBADAS_VERSION: 'prueba-1', PORTAL_REGISTRO_ABIERTO: 'si', PROMOCION_INICIO: '2020-01-01T00:00:00Z',
+  } as unknown as Env;
   const pedir = async (ruta: string, cuerpo?: unknown, metodo = 'POST', encabezados: Record<string, string> = {}) => {
     const r = await worker.fetch!(
       new Request(`https://caja.prueba${ruta}`, cuerpo === undefined ? { headers: encabezados } : {

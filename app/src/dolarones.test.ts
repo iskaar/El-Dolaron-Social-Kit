@@ -4,31 +4,27 @@
 // se prueban ellos, no un simulacro.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { regaloPara, REGALO, repartir, disponibleDesde, sumarMeses, sentenciasDeVenta } from './dolarones.ts';
+import { repartir, disponibleDesde, sumarMeses, sentenciasDeVenta } from './dolarones.ts';
 import { tienda, DUENO, PRODUCTO } from './prueba-d1.ts';
 
 let telefonos = 4440000000;
-const alta = (pedir: ReturnType<typeof tienda>['pedir'], extra: Record<string, unknown> = {}) =>
-  pedir('/api/socios', {
+const alta = async (pedir: ReturnType<typeof tienda>['pedir'], extra: Record<string, unknown> = {}) => {
+  const r = await pedir('/api/socios', {
     id: crypto.randomUUID(), nombre: 'Cliente', telefono: String(telefonos++), pin: '1234', acepta_bases: true, ...extra,
   });
+  if (r.status === 201) {
+    const llegada = await pedir('/api/portal/llegada', { cliente_id: r.cuerpo.id });
+    const saldo = await pedir(`/api/socios?q=${r.cuerpo.numero}`);
+    r.cuerpo = { ...saldo.cuerpo, regalo: llegada.cuerpo.premio?.importe ?? 0 };
+  }
+  return r;
+};
 
 const venta = (extra: Record<string, unknown> = {}) => ({
   id: crypto.randomUUID(), lineas: [{ producto_id: PRODUCTO, cantidad: 1 }], forma_pago: 'efectivo', efectivo: 25000, ...extra,
 });
 
 /* ---------- reglas puras ---------- */
-
-test('el regalo reparte exactamente 15,000 D entre los primeros 100', () => {
-  let suma = 0;
-  for (let n = 1; n <= 100; n++) suma += regaloPara(n);
-  assert.equal(suma, 15_000_00);
-  assert.equal(regaloPara(1), 500_00);
-  assert.equal(regaloPara(11), 300_00);
-  assert.equal(regaloPara(12), 200_00);
-  assert.equal(regaloPara(101), 0);
-  assert.equal(REGALO.at(-1)!.hasta, 100);
-});
 
 test('lo ganado se libera a la medianoche siguiente de la tienda (UTC-6)', () => {
   // 10:00 del 2 de oct en la tienda -> 00:00 del 3
@@ -85,12 +81,12 @@ test('altas en orden: numero consecutivo, regalo, telefono unico y reintento ide
   assert.equal((await pedir('/api/socios?q=2')).cuerpo.numero, 2);
 });
 
-test('101 altas: 15,000 D en regalos y el #101 sin regalo', async () => {
+test('51 llegadas: 7,700 D en 50 cupos presenciales y la #51 sin regalo', async () => {
   const { db, pedir } = tienda();
-  for (let i = 0; i < 101; i++) assert.equal((await alta(pedir)).status, 201);
+  for (let i = 0; i < 51; i++) assert.equal((await alta(pedir)).status, 201);
   const { suma } = db.prepare(`select sum(importe) as suma from dolarones_lotes where origen = 'regalo'`).get() as { suma: number };
-  assert.equal(suma, 15_000_00);
-  assert.equal((await pedir('/api/socios?q=101')).cuerpo.disponible, 0);
+  assert.equal(suma, 7_700_00);
+  assert.equal((await pedir('/api/socios?q=51')).cuerpo.disponible, 0);
 });
 
 test('comprar $250 gana 20 D, que se liberan hasta manana', async () => {
