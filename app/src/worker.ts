@@ -184,7 +184,7 @@ async function destinoValido(destino: string, env: Env): Promise<boolean> {
  * Correcciones del admin. Solo llegan los campos que cambiaron; si no viene un
  * precio explicito, se recalcula con la configuracion vigente.
  */
-async function corregirBorrador(id: string, request: Request, env: Env): Promise<Response> {
+async function corregirBorrador(id: string, cambios: Record<string, unknown>, env: Env): Promise<Response> {
   if (!UUID.test(id)) {
     return json({ error: 'Identificador invalido.' }, 400);
   }
@@ -197,7 +197,6 @@ async function corregirBorrador(id: string, request: Request, env: Env): Promise
     return json({ error: 'La pieza no existe.' }, 404);
   }
 
-  const cambios = (await request.json()) as Record<string, unknown>;
   const nombre = cambios.nombre === undefined ? fila.nombre : String(cambios.nombre).slice(0, 120);
   const categoria = cambios.categoria === undefined ? fila.categoria : String(cambios.categoria);
   const estadoFisico = cambios.estado_fisico === undefined ? fila.estado_fisico : String(cambios.estado_fisico);
@@ -255,6 +254,32 @@ async function corregirBorrador(id: string, request: Request, env: Env): Promise
     .run();
 
   return json({ id, nombre, categoria, precio_lista: precioLista, precio, estado_fisico: estadoFisico, destino, stock });
+}
+
+/**
+ * Captura a mano, sin foto (Issue #115; solo el dueno, ver cuentas.ts). Nace
+ * como una pieza de la cola y pasa por la misma correccion: mismas
+ * validaciones y mismo calculo de precio. Idempotente por id, como la foto.
+ */
+async function capturarManual(request: Request, env: Env, correo: string): Promise<Response> {
+  const cuerpo = (await request.json().catch(() => ({}))) as Record<string, unknown>;
+  const id = String(cuerpo.id ?? '');
+  if (!UUID.test(id)) return json({ error: 'Identificador invalido.' }, 400);
+  if (!String(cuerpo.nombre ?? '').trim()) return json({ error: 'Falta el nombre.' }, 400);
+  if (!(Number(cuerpo.precio_lista) > 0) && !(Number(cuerpo.precio) > 0)) {
+    return json({ error: 'Escribe el precio de lista o el de venta.' }, 400);
+  }
+  const ahora = new Date().toISOString();
+  const { meta } = await env.DB.prepare(
+    `insert into productos (id, semana_ingreso, capturado_por, creado_en, actualizado_en) values (?, ?, ?, ?, ?)
+     on conflict (id) do nothing`,
+  )
+    .bind(id, semanaIngreso(new Date()), correo, ahora, ahora)
+    .run();
+  const respuesta = await corregirBorrador(id, cuerpo, env);
+  // Datos invalidos: no queda una pieza vacia (salvo que fuera un reintento de una ya guardada).
+  if (!respuesta.ok && meta.changes > 0) await env.DB.prepare('delete from productos where id = ?').bind(id).run();
+  return respuesta.ok ? json(await respuesta.json(), 201) : respuesta;
 }
 
 /** Cuanto dura abierta la correccion de existencia desde la camara. */
@@ -1168,10 +1193,14 @@ export default {
         return await prepararEtiquetas(request, env);
       }
 
+      if (pathname === '/api/borradores/manual' && request.method === 'POST') {
+        return await capturarManual(request, env, correo);
+      }
+
       const pieza = pathname.match(/^\/api\/borradores\/([^/]+)$/);
       if (pieza) {
         if (request.method === 'PATCH') {
-          return await corregirBorrador(pieza[1], request, env);
+          return await corregirBorrador(pieza[1], await request.json(), env);
         }
         if (request.method === 'DELETE') {
           return await descartarBorrador(pieza[1], env);

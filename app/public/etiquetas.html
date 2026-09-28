@@ -159,7 +159,7 @@ function pintar() {
     <label class="renglon${impresa ? ' impresa' : ''}${cambiada ? ' cambiada' : ''}">
       <span class="posicion">${impresa ? '✓' : cambiada ? '↻' : ++posicion}</span>
       <input type="checkbox" value="${p.id}" ${impresa ? '' : 'checked'}>
-      <img src="/api/foto/${p.id}" alt="" loading="lazy">
+      <img src="/api/foto/${p.id}" alt="" loading="lazy" onerror="this.style.visibility='hidden'">
       <span>${escapar(p.nombre || 'Sin nombre')}${impresa
         ? `<span class="marca">Impresa ${hora(marca.hora)}<button type="button" class="claro" data-desde="${p.id}">No salió desde aquí</button></span>`
         : cambiada

@@ -61,6 +61,25 @@
     </div>
   </section>
 
+  <!-- Issue #115: solo el dueno (la API tambien lo exige). -->
+  <form class="panel" id="manual" hidden autocomplete="off">
+    <h2>Capturar sin foto</h2>
+    <div class="campos">
+      <div style="grid-column: 1 / -1"><label for="m-nombre">Nombre</label><input id="m-nombre" maxlength="120" required></div>
+      <div><label for="m-categoria">Categoría</label><select id="m-categoria"></select></div>
+      <div><label for="m-estado">Estado</label><select id="m-estado">
+        <option value="nuevo">Nuevo</option><option value="danado">Dañado</option></select></div>
+      <div><label for="m-lista">Precio de lista ($)</label><input id="m-lista" type="number" min="0"></div>
+      <div><label for="m-precio">Precio de venta ($)</label><input id="m-precio" type="number" min="0" placeholder="automático"></div>
+      <div><label for="m-stock">Existencia</label><input id="m-stock" type="number" min="1" max="999" value="1"></div>
+      <div><label for="m-destino">Destino</label><select id="m-destino"></select></div>
+    </div>
+    <div class="acciones">
+      <button type="submit">Guardar pieza</button>
+      <span class="aviso" id="m-aviso"></span>
+    </div>
+  </form>
+
   <div id="filtros">
     <button type="button" data-estado="" aria-pressed="true">Todo</button>
     <button type="button" data-estado="listo" aria-pressed="false">Analizadas</button>
@@ -153,7 +172,7 @@ function ficha(p) {
   nodo.className = 'ficha';
   nodo.innerHTML = `
     <div>
-      <img src="/api/foto/${p.id}" alt="Foto de la pieza" loading="lazy">
+      <img src="/api/foto/${p.id}" alt="Sin foto" loading="lazy" onerror="this.removeAttribute('src')">
       <label class="retomar">
         Retomar foto
         <input type="file" accept="image/*" capture="environment" hidden>
@@ -275,6 +294,38 @@ function ficha(p) {
 
   return nodo;
 }
+
+/* ---------- captura sin foto (Issue #115) ---------- */
+
+const manual = document.getElementById('manual');
+fetch('/api/yo').then((r) => r.json()).then(({ usuario }) => { manual.hidden = !usuario?.roles.includes('dueno'); });
+document.getElementById('m-categoria').innerHTML = CATEGORIAS.map((c) => `<option value="${c}">${c}</option>`).join('');
+document.getElementById('m-destino').innerHTML = '<option value="">Automático</option>'
+  + DESTINOS.map(([v, t]) => `<option value="${v}">${t}</option>`).join('');
+let idManual = crypto.randomUUID();   // un id por pieza: doble clic o reintento no la duplican
+manual.addEventListener('submit', async (evento) => {
+  evento.preventDefault();
+  const v = (id) => document.getElementById(id).value;
+  const aviso = document.getElementById('m-aviso');
+  const cuerpo = {
+    id: idManual, nombre: v('m-nombre').trim(), categoria: v('m-categoria'), estado_fisico: v('m-estado'),
+    precio_lista: centavos(v('m-lista')), stock: Math.round(Number(v('m-stock') || 1)),
+  };
+  if (v('m-precio') !== '') cuerpo.precio = centavos(v('m-precio'));
+  if (v('m-destino')) cuerpo.destino = v('m-destino');
+  const respuesta = await fetch('/api/borradores/manual', {
+    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(cuerpo),
+  });
+  const datos = await respuesta.json();
+  if (!respuesta.ok) { aviso.textContent = datos.error; aviso.style.color = ''; return; }
+  aviso.textContent = `Guardada: ${datos.nombre} a $${pesos(datos.precio)}. Su etiqueta sale en Etiquetas.`;
+  aviso.style.color = '#2c7a3f';
+  idManual = crypto.randomUUID();
+  for (const id of ['m-nombre', 'm-lista', 'm-precio']) document.getElementById(id).value = '';
+  document.getElementById('m-stock').value = '1';
+  document.getElementById('m-nombre').focus();
+  cargarCola();
+});
 
 /* ---------- filtros ---------- */
 
