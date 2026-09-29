@@ -185,7 +185,7 @@ test('el trabajo de banda abre con el tamano de la etiqueta y cierra imprimiendo
   const tspl = tsplBanda(BANDA, 20);
   assert.ok(tspl.startsWith('SIZE 50.8 mm,25.4 mm\r\n'));
   assert.ok(tspl.includes('\r\nCLS\r\n'));
-  assert.ok(tspl.trimEnd().endsWith('PRINT 20,1'));
+  assert.ok(tspl.trimEnd().endsWith('PRINT 1,20'));
   assert.equal(tspl.match(/^PRINT /gm)?.length, 1);
 });
 
@@ -297,9 +297,9 @@ test('la prueba de codigos largos usa la etiqueta real y el mismo ancho de barra
   assert.equal(tspl.match(/PRINT 1,1/g)?.length, 5);
 });
 
-test('la banda acepta SPEED solo si se pide, y PRINT n para un lote en un solo trabajo', () => {
+test('la banda acepta SPEED solo si se pide, y PRINT 1,n para un lote en un solo trabajo', () => {
   assert.ok(!tsplBanda(BANDA, 80).includes('SPEED'));
   const rapido = tsplBanda(BANDA, 80, 0, 4, 3);
   assert.ok(rapido.includes('\r\nSPEED 3\r\n'));
-  assert.ok(rapido.trimEnd().endsWith('PRINT 80,1'));
+  assert.ok(rapido.trimEnd().endsWith('PRINT 1,80'));
 });

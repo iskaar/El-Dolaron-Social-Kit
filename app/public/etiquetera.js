@@ -252,39 +252,34 @@ export function tsplBanda(banda, copias = 1, y0 = corrimiento(), barra = modulo(
     `TEXT ${centrar(precio, ANCHO_PRECIO_BANDA)},${y(30)},"3",0,3,3,"${precio}"`,
     `BARCODE ${centrarBarras(banda.codigo, barra)},${y(110)},"128",48,0,0,${barra},${barra * 2},"${banda.codigo}"`,
     `TEXT ${centrar(pie, ANCHO_PIE)},${y(164)},"1",0,1,1,"${pie}"`,
-    `PRINT ${copias},1`,
+    // PRINT m,n = m juegos de n copias. La AE240 respeta n y no m (probado el
+    // 2026-09-29: PRINT 80,1 saco una, PRINT 1,80 saco las 80).
+    `PRINT 1,${copias}`,
   ];
 
   return `${ordenes.join('\r\n')}\r\n`;
 }
 
 /**
- * Imprime un lote de una banda. Devuelve false si se cayo el enlace.
+ * Imprime un lote de una banda en UN solo trabajo (`PRINT 1,n`): la impresora
+ * lleva su cuenta, sin tandas ni pausas, y su memoria no se llena porque el
+ * trabajo son ~300 bytes. Devuelve false si se cayo el enlace.
  *
- * Pruebas de ritmo, activadas desde /bandas (?envio=unico&velocidad=4):
- * - `envio`: `unico` = UN trabajo con `PRINT copias,1`; `copias` = UN trabajo con `PRINT 1,copias` (en vez de
- *   uno por etiqueta). La
- *   impresora lleva su propia cuenta: no hay tandas ni pausas, y su memoria no
- *   se llena porque el trabajo son ~300 bytes. El 2026-09-24 una pieza con
- *   existencia 22 saco una sola etiqueta por este camino, asi que NO es el
- *   modo normal hasta que se confirme con la impresora enfrente.
- * - `lote` y `pausa` (segundos): tandas y pausa larga del modo normal, en vez de LOTE y PAUSA_ENTRE_LOTES.
- * - `velocidad`: comando SPEED de TSPL (pulgadas por segundo). 0 = la de la impresora.
+ * `una` = el modo viejo, un trabajo por etiqueta con pausas (/bandas?envio=una),
+ * por si algun dia un lote largo se atora. `lote` y `pausa` (segundos) cambian
+ * sus tandas. `velocidad` agrega SPEED de TSPL (pulgadas por segundo).
  */
-export async function imprimirBanda(banda, copias = 1, alAvanzar, alEsperar, { envio, velocidad = 0, lote, pausa } = {}) {
+export async function imprimirBanda(banda, copias = 1, alAvanzar, alEsperar, { una = false, velocidad = 0, lote, pausa } = {}) {
   const nombre = `${banda.familia} ${banda.codigo}`;
-  if (!envio) {
+  if (una) {
     return mandarCopias(tsplBanda(banda, 1, corrimiento(), modulo(), velocidad), copias, alAvanzar, nombre, alEsperar, { lote, pausa });
   }
   ultimoError = '';
   reconectada = false;
-  // 'unico' = PRINT n,1 (n juegos); 'copias' = PRINT 1,n (n copias de un juego).
-  // TSPL define las dos igual, pero cada firmware respeta una a su manera.
-  const tspl = tsplBanda(banda, 1, corrimiento(), modulo(), velocidad).replace('PRINT 1,1', envio === 'copias' ? `PRINT 1,${copias}` : `PRINT ${copias},1`);
-  const salio = await mandarTspl(tspl);
-  const registro = { hora: new Date().toISOString(), nombre, copias, enviadas: salio ? copias : 0, ritmo: `un solo trabajo (${envio})` };
-  if (!salio) registro.error = ultimoError;
-  anotarEnvio(registro);
+  const salio = await mandarTspl(tsplBanda(banda, copias, corrimiento(), modulo(), velocidad));
+  const envio = { hora: new Date().toISOString(), nombre, copias, enviadas: salio ? copias : 0, ritmo: 'un solo trabajo' };
+  if (!salio) envio.error = ultimoError;
+  anotarEnvio(envio);
   if (salio) alAvanzar?.(copias, copias);
   return salio;
 }

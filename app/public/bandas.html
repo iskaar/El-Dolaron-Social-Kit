@@ -165,9 +165,9 @@ document.getElementById('otra').addEventListener('click', async () => {
 
 document.getElementById('detener').addEventListener('click', () => detenerEnvio());
 
-// Pruebas de ritmo (ver imprimirBanda): /bandas?envio=unico|copias, ?pausa=10&lote=20, ?velocidad=4
+// Pruebas de ritmo (ver imprimirBanda): /bandas?envio=una (modo viejo: una por una, con ?pausa=10&lote=20), ?velocidad=4
 const parametros = new URLSearchParams(location.search);
-const ritmo = { envio: ['unico', 'copias'].includes(parametros.get('envio')) ? parametros.get('envio') : undefined, velocidad: Number(parametros.get('velocidad')) || 0,
+const ritmo = { una: parametros.get('envio') === 'una', velocidad: Number(parametros.get('velocidad')) || 0,
   lote: Number(parametros.get('lote')) || undefined,
   pausa: parametros.has('pausa') ? Number(parametros.get('pausa')) : undefined };
 
@@ -206,7 +206,7 @@ document.getElementById('familias').addEventListener('click', async (e) => {
   pintarHistorial();
   if (salio) {
     const segundos = Math.round((Date.now() - inicio) / 1000);
-    resumen.textContent = `${copias} etiquetas de ${banda.codigo} enviadas en ${segundos} s (la impresora sigue imprimiendo lo que le falta).`;
+    resumen.textContent = `${copias} etiquetas de ${banda.codigo} enviadas en ${segundos} s (la impresora sigue imprimiendo).`;
     boton.classList.add('impresa');
   } else {
     resumen.textContent = `Se cortó la impresora imprimiendo ${banda.codigo}: ${errorEnvio() || 'detenido'}.`;
