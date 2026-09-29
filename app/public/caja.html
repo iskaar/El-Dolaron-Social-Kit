@@ -21,6 +21,13 @@
     display: flex; flex-direction: column; min-height: 0; }
   #codigo { width: 100%; padding: 14px; font-size: 20px; border: 2px solid var(--azul);
     border-radius: 10px; font-family: ui-monospace, monospace; }
+  .fila-codigo { display: flex; gap: 8px; }
+  .fila-codigo #codigo { flex: 1; min-width: 0; }
+  #abrir-camara { border: 2px solid var(--azul); background: #fff; color: var(--azul); border-radius: 10px;
+    padding: 0 16px; font-size: 16px; font-weight: 700; cursor: pointer; }
+  #lector-camara { width: 100%; min-height: 240px; background: #000; border-radius: 10px; overflow: hidden; }
+  #camara-info { min-height: 22px; margin-top: 8px; font-size: 16px; font-weight: 700; color: var(--azul); }
+  #camara-info.error { color: var(--rojo); }
   #sugerencias { margin: 8px 0 4px; display: flex; flex-direction: column; gap: 4px; }
   #sugerencias button { display: flex; justify-content: space-between; gap: 10px; padding: 10px 12px;
     font-size: 15px; border: 1px solid var(--linea); border-radius: 8px; background: #fff; cursor: pointer;
@@ -125,7 +132,10 @@
 
 <main>
   <section class="panel">
-    <input id="codigo" placeholder="Escanea el código, o busca por descripción o código" autocomplete="off" autofocus>
+    <div class="fila-codigo">
+      <input id="codigo" placeholder="Escanea el código, o busca por descripción o código" autocomplete="off" autofocus>
+      <button id="abrir-camara" type="button">Cámara</button>
+    </div>
     <div id="sugerencias"></div>
     <div id="ticket"></div>
   </section>
@@ -184,6 +194,14 @@
   </button>
 </footer>
 
+<dialog id="dialogo-camara">
+  <h2>Escanear con la cámara</h2>
+  <p class="nota">Apunta al código de barras de la etiqueta. Cada pieza se agrega sola; cierra al terminar.</p>
+  <div id="lector-camara"></div>
+  <div id="camara-info"></div>
+  <div class="acciones"><button id="camara-cerrar" type="button">Listo</button></div>
+</dialog>
+
 <dialog id="dialogo-retiro">
   <h2>Sale efectivo del cajón</h2>
   <div class="tipo-salida">
@@ -234,6 +252,7 @@
 
 <script type="module">
 import { totales, agregar, efectivoAlcanza, dolaronesGanados } from '/venta.js';
+import { abrirCamara } from '/camara.js';
 import {
   reconectarImpresora, conectarImpresora, impresoraLista, imprimirTicket, abrirCajon, explicarErrorUsb, errorImpresora,
   imprimirCorte, imprimirRetiro,
@@ -382,7 +401,7 @@ function agregarCodigo(codigo) {
   if (!pieza) {
     $('aviso').textContent = `Código no encontrado: ${codigo}`;
     $('aviso').style.color = '#D72B32';
-    return;
+    return false;
   }
 
   // Las piezas son unicas: si ya se vendio, escanear su etiqueta otra vez seria
@@ -396,7 +415,7 @@ function agregarCodigo(codigo) {
         ? `${pieza.nombre}: solo hay ${pieza.stock} en existencia.`
         : `${pieza.nombre} ya se vendió. Revisa la etiqueta.`;
       $('aviso').style.color = '#D72B32';
-      return;
+      return false;
     }
   }
 
@@ -406,6 +425,7 @@ function agregarCodigo(codigo) {
   idVenta = null;
   $('aviso').textContent = '';
   pintar();
+  return true;
 }
 
 /* ---------- busqueda a mano ---------- */
@@ -774,6 +794,37 @@ $('codigo').addEventListener('keydown', (e) => {
   e.target.value = '';
   pintarSugerencias();
 });
+
+// Camara del celular o de la computadora: cada lectura nueva entra al ticket
+// como si el lector USB la hubiera tecleado. El dialogo es modal, asi que el
+// resultado se repite dentro de el.
+let apagarCamara = null;
+async function cerrarCamara() {
+  const apagar = apagarCamara;
+  apagarCamara = null;
+  await apagar?.();
+  $('dialogo-camara').close();
+  $('codigo').focus();
+}
+$('abrir-camara').addEventListener('click', async () => {
+  const info = $('camara-info');
+  info.className = ''; info.textContent = 'Abriendo la cámara…';
+  $('dialogo-camara').showModal();
+  try {
+    apagarCamara = await abrirCamara('lector-camara', (codigo) => {
+      const ok = agregarCodigo(codigo);
+      info.className = ok ? '' : 'error';
+      info.textContent = ok ? `✓ ${buscarPieza(codigo).nombre} · ${$('piezas').textContent}` : $('aviso').textContent;
+      navigator.vibrate?.(ok ? 60 : [80, 60, 80]);
+    });
+    info.textContent = 'Lista: apunta al código.';
+  } catch (e) {
+    info.className = 'error'; info.textContent = e.message;
+  }
+});
+$('camara-cerrar').addEventListener('click', cerrarCamara);
+$('dialogo-camara').addEventListener('cancel', (e) => { e.preventDefault(); cerrarCamara(); });
+
 $('ticket').addEventListener('click', (e) => {
   const i = e.target.dataset?.quitar;
   if (i === undefined) return;
