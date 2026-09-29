@@ -165,9 +165,9 @@ document.getElementById('otra').addEventListener('click', async () => {
 
 document.getElementById('detener').addEventListener('click', () => detenerEnvio());
 
-// Pruebas de ritmo (ver imprimirBanda): /bandas?envio=unico, ?pausa=10&lote=20, ?velocidad=4
+// Pruebas de ritmo (ver imprimirBanda): /bandas?envio=unico|copias, ?pausa=10&lote=20, ?velocidad=4
 const parametros = new URLSearchParams(location.search);
-const ritmo = { unico: parametros.get('envio') === 'unico', velocidad: Number(parametros.get('velocidad')) || 0,
+const ritmo = { envio: ['unico', 'copias'].includes(parametros.get('envio')) ? parametros.get('envio') : undefined, velocidad: Number(parametros.get('velocidad')) || 0,
   lote: Number(parametros.get('lote')) || undefined,
   pausa: parametros.has('pausa') ? Number(parametros.get('pausa')) : undefined };
 

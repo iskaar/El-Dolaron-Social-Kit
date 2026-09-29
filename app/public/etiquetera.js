@@ -262,7 +262,8 @@ export function tsplBanda(banda, copias = 1, y0 = corrimiento(), barra = modulo(
  * Imprime un lote de una banda. Devuelve false si se cayo el enlace.
  *
  * Pruebas de ritmo, activadas desde /bandas (?envio=unico&velocidad=4):
- * - `unico`: UN trabajo con `PRINT copias,1` en vez de uno por etiqueta. La
+ * - `envio`: `unico` = UN trabajo con `PRINT copias,1`; `copias` = UN trabajo con `PRINT 1,copias` (en vez de
+ *   uno por etiqueta). La
  *   impresora lleva su propia cuenta: no hay tandas ni pausas, y su memoria no
  *   se llena porque el trabajo son ~300 bytes. El 2026-09-24 una pieza con
  *   existencia 22 saco una sola etiqueta por este camino, asi que NO es el
@@ -270,17 +271,20 @@ export function tsplBanda(banda, copias = 1, y0 = corrimiento(), barra = modulo(
  * - `lote` y `pausa` (segundos): tandas y pausa larga del modo normal, en vez de LOTE y PAUSA_ENTRE_LOTES.
  * - `velocidad`: comando SPEED de TSPL (pulgadas por segundo). 0 = la de la impresora.
  */
-export async function imprimirBanda(banda, copias = 1, alAvanzar, alEsperar, { unico = false, velocidad = 0, lote, pausa } = {}) {
+export async function imprimirBanda(banda, copias = 1, alAvanzar, alEsperar, { envio, velocidad = 0, lote, pausa } = {}) {
   const nombre = `${banda.familia} ${banda.codigo}`;
-  if (!unico) {
+  if (!envio) {
     return mandarCopias(tsplBanda(banda, 1, corrimiento(), modulo(), velocidad), copias, alAvanzar, nombre, alEsperar, { lote, pausa });
   }
   ultimoError = '';
   reconectada = false;
-  const salio = await mandarTspl(tsplBanda(banda, copias, corrimiento(), modulo(), velocidad));
-  const envio = { hora: new Date().toISOString(), nombre, copias, enviadas: salio ? copias : 0, ritmo: 'un solo trabajo' };
-  if (!salio) envio.error = ultimoError;
-  anotarEnvio(envio);
+  // 'unico' = PRINT n,1 (n juegos); 'copias' = PRINT 1,n (n copias de un juego).
+  // TSPL define las dos igual, pero cada firmware respeta una a su manera.
+  const tspl = tsplBanda(banda, 1, corrimiento(), modulo(), velocidad).replace('PRINT 1,1', envio === 'copias' ? `PRINT 1,${copias}` : `PRINT ${copias},1`);
+  const salio = await mandarTspl(tspl);
+  const registro = { hora: new Date().toISOString(), nombre, copias, enviadas: salio ? copias : 0, ritmo: `un solo trabajo (${envio})` };
+  if (!salio) registro.error = ultimoError;
+  anotarEnvio(registro);
   if (salio) alAvanzar?.(copias, copias);
   return salio;
 }
