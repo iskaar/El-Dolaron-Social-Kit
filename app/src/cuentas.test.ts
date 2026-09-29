@@ -44,6 +44,9 @@ test('sin cuenta activa solo se ve lo de pedir acceso', () => {
   assert.equal(permiso('/api/yo', 'GET'), 'cuenta');
   assert.equal(permiso('/api/solicitudes/acceso', 'POST'), 'cuenta');
   assert.equal(permiso('/api/salud', 'GET'), 'libre');
+  assert.equal(permiso('/politica-de-privacidad', 'GET'), 'libre');
+  assert.equal(permiso('/politica-de-privacidad.html', 'GET'), 'libre');
+  assert.deepEqual(permiso('/politica-de-privacidad', 'POST'), []);
   assert.equal(puede(null, permiso('/', 'GET')), false);
   assert.equal(puede(usuario(['dueno'], false), permiso('/caja', 'GET')), false);   // desactivado
   // Un .js dentro de /api no se cuela como archivo de pantalla.

@@ -64,4 +64,7 @@ test('la puerta del vendedor deja corregir la existencia, y nada mas de una piez
   assert.equal(permitidaParaVendedor(`/api/borradores/${id}`, 'DELETE'), false);
   assert.equal(permitidaParaVendedor('/api/borradores', 'GET'), false);
   assert.equal(permitidaParaVendedor('/api/borradores', 'POST'), true);
+  assert.equal(permitidaParaVendedor('/politica-de-privacidad', 'GET'), true);
+  assert.equal(permitidaParaVendedor('/politica-de-privacidad.html', 'GET'), true);
+  assert.equal(permitidaParaVendedor('/politica-de-privacidad', 'POST'), false);
 });
