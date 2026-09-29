@@ -3,11 +3,14 @@
  *
  * Por caja, no por dia ni por cajero: cada cajon tiene su dinero. Un corte
  * junta lo de su caja desde el corte anterior:
- * - lo cobrado en esa caja (la venta suma donde se cobro, aunque despues se cancele);
- * - lo devuelto por cancelaciones hechas en esa caja (resta donde se devolvio);
+ * - lo cobrado en esa caja y todavia vigente: una venta cancelada antes de su
+ *   corte no aparece en ningun corte (Isaac, 28/09);
+ * - lo devuelto en esa caja de ventas que YA se contaron en un corte anterior
+ *   (resta donde se devolvio);
  * - los retiros y gastos de efectivo de esa caja.
- * Asi una venta cancelada en la misma caja y el mismo turno da cero, y una
- * cancelada en otra caja o en otro turno sale del cajon que de verdad pago.
+ * ponytail: una venta cobrada en una caja y cancelada en otra antes de
+ * cualquier corte desaparece de las dos; si de verdad se devolvio efectivo de
+ * otro cajon, en uno sobra y en otro falta lo mismo.
  *
  * Conteo ciego: la caja manda solo el total de efectivo que hay en el cajon.
  * Isaac lo simplifico el 28/09: sin conteo por billete y moneda. Lo esperado se calcula aqui, en
@@ -97,6 +100,8 @@ const leerCorte = (env: Env, id: string) =>
 
 // Lo cobrado (o devuelto) de una forma de pago, sin la parte pagada con Dolarones.
 const dinero = (forma: string) => `coalesce(sum(case when forma_pago = '${forma}' then total - dolarones end), 0)`;
+// Lo cobrado cuenta solo si la venta sigue vigente al hacer el corte.
+const VIGENTES = 'corte_id = ?1 and cancelada = 0';
 
 export async function registrarCorte(request: Request, env: Env, correo: string): Promise<Response> {
   const cuerpo = (await request.json().catch(() => ({}))) as Record<string, unknown>;
@@ -126,8 +131,9 @@ export async function registrarCorte(request: Request, env: Env, correo: string)
       env.DB.prepare('update ventas set corte_id = ? where caja = ? and corte_id is null').bind(id, caja),
       env.DB.prepare(
         `update ventas set corte_cancelacion_id = ?
-         where cancelada = 1 and cancelada_caja = ? and corte_cancelacion_id is null`,
-      ).bind(id, caja),
+         where cancelada = 1 and cancelada_caja = ? and corte_cancelacion_id is null
+           and corte_id is not null and corte_id != ?`,
+      ).bind(id, caja, id),
       env.DB.prepare('update retiros set corte_id = ? where caja = ? and corte_id is null').bind(id, caja),
       env.DB.prepare(
         `insert into cortes (id, caja, cajero, desde, hasta, tickets, fondo_inicial, efectivo_ventas,
@@ -139,16 +145,16 @@ export async function registrarCorte(request: Request, env: Env, correo: string)
          from (select
            (select max(hasta) from cortes where caja = ?2) as desde,
            coalesce((select fondo_siguiente from cortes where caja = ?2 order by hasta desc limit 1), ?7) as fondo,
-           (select count(*) from ventas where corte_id = ?1) as tickets,
-           (select ${dinero('efectivo')} from ventas where corte_id = ?1) as ev,
+           (select count(*) from ventas where ${VIGENTES}) as tickets,
+           (select ${dinero('efectivo')} from ventas where ${VIGENTES}) as ev,
            (select ${dinero('efectivo')} from ventas where corte_cancelacion_id = ?1) as ed,
            (select coalesce(sum(importe), 0) from retiros where corte_id = ?1 and tipo = 'retiro') as re,
            (select coalesce(sum(importe), 0) from retiros where corte_id = ?1 and tipo = 'gasto') as ga,
-           (select ${dinero('tarjeta')} from ventas where corte_id = ?1) as tv,
+           (select ${dinero('tarjeta')} from ventas where ${VIGENTES}) as tv,
            (select ${dinero('tarjeta')} from ventas where corte_cancelacion_id = ?1) as td,
-           (select ${dinero('transferencia')} from ventas where corte_id = ?1) as xv,
+           (select ${dinero('transferencia')} from ventas where ${VIGENTES}) as xv,
            (select ${dinero('transferencia')} from ventas where corte_cancelacion_id = ?1) as xd,
-           (select coalesce(sum(dolarones), 0) from ventas where corte_id = ?1) as dv,
+           (select coalesce(sum(dolarones), 0) from ventas where ${VIGENTES}) as dv,
            (select coalesce(sum(dolarones), 0) from ventas where corte_cancelacion_id = ?1) as dd)`,
       ).bind(id, caja, correo, ahora, contado, terminal, fondoConfig, notas),
     ]);

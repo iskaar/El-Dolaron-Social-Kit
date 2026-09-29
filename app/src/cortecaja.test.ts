@@ -31,21 +31,21 @@ test('el corte cuadra: fondo + efectivo - devoluciones - retiros, y tarjeta, tra
   await vender(pedir, 'Caja 1');                                                      // +250 efectivo
   await vender(pedir, 'Caja 1', { forma_pago: 'tarjeta', efectivo: 0 });              // +250 tarjeta
   await vender(pedir, 'Caja 1', { forma_pago: 'transferencia', efectivo: 0 });        // +250 transferencia
-  const cancelada = await vender(pedir, 'Caja 1');                                    // +250 y luego -250
+  const cancelada = await vender(pedir, 'Caja 1');                                    // cancelada antes del corte: no sale
   assert.equal((await cancelar(pedir, cancelada.id, 'Caja 1')).status, 200);
   await vender(pedir, 'Caja 1', { cliente_id: socio.id, dolarones: 5000, pin: '1234', efectivo: 20000 }); // 50 D + 200
   await vender(pedir, 'Caja 2');                                                      // otra caja: no cuenta
   assert.equal((await salida(pedir, 'retiro', 20000)).status, 201);
   assert.equal((await salida(pedir, 'gasto', 5000)).status, 201);
 
-  // Esperado: 500 + (250 + 250 + 200) - 250 - 200 retiro - 50 gasto = 700
+  // Esperado: 500 + (250 + 200) - 200 retiro - 50 gasto = 700
   const r = await cortar(pedir, 'Caja 1', 70000, { tarjeta_terminal: 25000, notas: 'todo bien' });
   assert.equal(r.status, 201, JSON.stringify(r.cuerpo));
   const c = r.cuerpo;
-  assert.equal(c.tickets, 5);
+  assert.equal(c.tickets, 4);
   assert.equal(c.fondo_inicial, 50000);
-  assert.equal(c.efectivo_ventas, 70000);
-  assert.equal(c.efectivo_devoluciones, 25000);
+  assert.equal(c.efectivo_ventas, 45000);
+  assert.equal(c.efectivo_devoluciones, 0);
   assert.equal(c.retiros, 20000);
   assert.equal(c.gastos, 5000);
   assert.equal(c.efectivo_esperado, 70000);
@@ -60,6 +60,23 @@ test('el corte cuadra: fondo + efectivo - devoluciones - retiros, y tarjeta, tra
   assert.equal(c.cajero, DUENO);
   assert.equal(c.desde, null);
   assert.equal(c.notas, 'todo bien');
+});
+
+test('cobrada en una caja y cancelada en otra antes de cualquier corte: no sale en ninguno', async () => {
+  const { pedir } = tienda();
+  const venta = await vender(pedir, 'Caja 1');
+  await vender(pedir, 'Caja 1');
+  assert.equal((await cancelar(pedir, venta.id, 'Caja 3')).status, 200);
+
+  const caja3 = (await cortar(pedir, 'Caja 3', 50000)).cuerpo;
+  assert.equal(caja3.efectivo_devoluciones, 0);
+  assert.equal(caja3.diferencia, 0);
+
+  const caja1 = (await cortar(pedir, 'Caja 1', 75000)).cuerpo;   // 500 + solo la vigente
+  assert.equal(caja1.tickets, 1);
+  assert.equal(caja1.efectivo_ventas, 25000);
+  assert.equal(caja1.efectivo_devoluciones, 0);
+  assert.equal(caja1.diferencia, 0);
 });
 
 test('cancelar en otra caja o en otro turno resta donde se devuelve el dinero', async () => {
