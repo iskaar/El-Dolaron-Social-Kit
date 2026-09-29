@@ -296,3 +296,10 @@ test('la prueba de codigos largos usa la etiqueta real y el mismo ancho de barra
   assert.ok(barras.every((b) => b[2] === '4'), 'mismo modulo que la etiqueta real');
   assert.equal(tspl.match(/PRINT 1,1/g)?.length, 5);
 });
+
+test('la banda acepta SPEED solo si se pide, y PRINT n para un lote en un solo trabajo', () => {
+  assert.ok(!tsplBanda(BANDA, 80).includes('SPEED'));
+  const rapido = tsplBanda(BANDA, 80, 0, 4, 3);
+  assert.ok(rapido.includes('\r\nSPEED 3\r\n'));
+  assert.ok(rapido.trimEnd().endsWith('PRINT 80,1'));
+});
