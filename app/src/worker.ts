@@ -43,7 +43,10 @@ interface FilaBorrador {
  * valiendo si algun dia la politica de Access queda mal configurada. Los precios
  * y el inventario no viven en el telefono que anda en el pasillo.
  */
-const RUTAS_VENDEDOR = new Set(['/captura', '/foto.js', '/api/salud', '/sin-acceso', '/api/yo']);
+const RUTAS_VENDEDOR = new Set([
+  '/captura', '/foto.js', '/api/salud', '/sin-acceso', '/api/yo',
+  '/politica-de-privacidad', '/politica-de-privacidad.html',
+]);
 const EXISTENCIA = /^\/api\/borradores\/([^/]+)\/existencia$/;
 
 export function permitidaParaVendedor(pathname: string, metodo: string): boolean {
@@ -1074,7 +1077,8 @@ export default {
 
       // Quien es (JWT de Access verificado) y si su cuenta le deja entrar aqui.
       const regla = permiso(pathname, request.method);
-      const acceso = await quienEs(request, env, url.hostname);
+      // La política tiene que poder leerla Meta sin iniciar sesión.
+      const acceso = regla === 'libre' ? 'publico' : await quienEs(request, env, url.hostname);
       if (!acceso) {
         return json({ error: 'Sin sesion. Vuelve a entrar.' }, 401);
       }
@@ -1251,7 +1255,10 @@ export default {
 
       // Todo lo demas son las pantallas, servidas por el Worker para que el
       // filtro de arriba alcance tambien a los HTML.
-      const pantalla = await env.ASSETS.fetch(request);
+      const assetRequest = pathname === '/politica-de-privacidad'
+        ? new Request(new URL('/politica-de-privacidad.html', request.url), request)
+        : request;
+      const pantalla = await env.ASSETS.fetch(assetRequest);
       // En el sandbox cada pantalla lo dice: ahi no se cobra de verdad.
       if (env.AMBIENTE === 'sandbox' && pantalla.headers.get('content-type')?.includes('text/html')) {
         return new HTMLRewriter()

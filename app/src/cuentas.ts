@@ -72,6 +72,7 @@ export function permiso(pathname: string, metodo: string): Regla {
   const ruta = pathname.replace(/\.html$/, '').replace(/(.)\/$/, '$1');
 
   if (ruta === '/api/salud') return 'libre';
+  if (ruta === '/politica-de-privacidad') return metodo === 'GET' ? 'libre' : [];
   if (ruta === '/sin-acceso' || ruta === '/api/yo') return 'cuenta';
   if (ruta === '/api/solicitudes/acceso' && metodo === 'POST') return 'cuenta';
   // Codigo de las pantallas, sin datos: el permiso se cobra en la pantalla y en la API.
