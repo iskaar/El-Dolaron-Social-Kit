@@ -148,7 +148,7 @@ Pantalla `/bandas`, con la conexión BLE de `etiquetera.js`:
 
 - Cuadrícula de 14 celdas (2 familias × 7 precios).
 - Campo de cantidad (por omisión 20).
-- Imprimir → `PRINT n,1` de esa banda, en un solo trabajo.
+- Imprimir → `PRINT 1,n` de esa banda, en un solo trabajo.
 
 El resultado va a una caja de compartimentos, uno por banda. **Etiquetar deja de depender
 de la computadora:** quien etiqueta agarra y pega, y cualquiera puede hacerlo.

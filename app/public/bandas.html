@@ -165,6 +165,12 @@ document.getElementById('otra').addEventListener('click', async () => {
 
 document.getElementById('detener').addEventListener('click', () => detenerEnvio());
 
+// Pruebas de ritmo (ver imprimirBanda): /bandas?envio=una (modo viejo: una por una, con ?pausa=10&lote=20), ?velocidad=4
+const parametros = new URLSearchParams(location.search);
+const ritmo = { una: parametros.get('envio') === 'una', velocidad: Number(parametros.get('velocidad')) || 0,
+  lote: Number(parametros.get('lote')) || undefined,
+  pausa: parametros.has('pausa') ? Number(parametros.get('pausa')) : undefined };
+
 document.getElementById('familias').addEventListener('click', async (e) => {
   const boton = e.target.closest('.banda');
   if (!boton) return;
@@ -191,14 +197,16 @@ document.getElementById('familias').addEventListener('click', async (e) => {
 
   resumen.textContent = `Imprimiendo ${copias} de ${banda.codigo}…`;
   boton.classList.remove('impresa');
+  const inicio = Date.now();
   const salio = await imprimirBanda(banda, copias, (hechas) => {
     resumen.textContent = `Imprimiendo ${banda.codigo}: etiqueta ${hechas} de ${copias}…`;
   }, (segundos) => {
     resumen.textContent = `Pausa de ${segundos} s para que la impresora vacíe lo que tiene (${banda.codigo})…`;
-  });
+  }, ritmo);
   pintarHistorial();
   if (salio) {
-    resumen.textContent = `${copias} etiquetas de ${banda.codigo} enviadas.`;
+    const segundos = Math.round((Date.now() - inicio) / 1000);
+    resumen.textContent = `${copias} etiquetas de ${banda.codigo} enviadas en ${segundos} s (la impresora sigue imprimiendo).`;
     boton.classList.add('impresa');
   } else {
     resumen.textContent = `Se cortó la impresora imprimiendo ${banda.codigo}: ${errorEnvio() || 'detenido'}.`;
