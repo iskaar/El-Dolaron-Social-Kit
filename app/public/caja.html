@@ -102,6 +102,9 @@
   #corte-resumen .falta td { color: var(--rojo); font-weight: 800; }
   #corte-resumen .sobra td { color: #b26b00; font-weight: 800; }
   @media (max-width: 820px) { main { grid-template-columns: 1fr; } }
+  /* El panel de cobro crece con socio, Dolarones y «Ventas de hoy»: con scroll propio no se mete
+     debajo del pie (impresora), que se robaba los clics de la lista. */
+  @media (min-width: 821px) { #cobro { overflow-y: auto; } }
 </style>
 <script src="/cajero.js"></script>
 </head>
@@ -130,7 +133,7 @@
     <div id="ticket"></div>
   </section>
 
-  <section class="panel">
+  <section class="panel" id="cobro">
     <div id="total">$0</div>
     <div id="piezas">0 piezas</div>
     <div id="a-pagar"></div>
