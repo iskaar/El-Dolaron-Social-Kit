@@ -242,11 +242,11 @@
 
 <script type="module">
 import { totales, agregar, efectivoAlcanza, dolaronesGanados } from '/venta.js';
-import { renglonTicket, pintarDetalle, formularioPieza, formularioTodo } from '/ticket.js';
 import {
   reconectarImpresora, conectarImpresora, impresoraLista, imprimirTicket, abrirCajon, explicarErrorUsb, errorImpresora,
   imprimirCorte, imprimirRetiro,
 } from '/impresora.js';
+import { renglonTicket, pintarDetalle, formularioPieza, formularioTodo } from '/ticket.js';
 
 const $ = (id) => document.getElementById(id);
 // Nombres de piezas (los escribe la IA o el admin), de socios y motivos: texto, nunca HTML.

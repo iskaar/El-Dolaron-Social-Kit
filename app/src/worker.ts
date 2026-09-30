@@ -9,6 +9,7 @@ import { analizarBorrador, modeloPorDefecto, type Modelo } from './analisis.ts';
 import { calcularPrecio, ajustarManual, esDestinoBanda, prefijoParaFamilia, MONTOS_BANDA, type Destino } from './precio.ts';
 import { efectivoAlcanza } from '../public/venta.js';
 import { semanaIngreso } from '../public/semana.js';
+import { detalleVenta, cancelarPieza } from './devoluciones.ts';
 import {
   permiso, puede, quienEs, leerUsuario, yo, pedirAcceso, listarCuentas, guardarCuenta, resolverSolicitud,
   esDeCaja, soloComputadora,
@@ -16,7 +17,6 @@ import {
 import { cajeroEnTurno, listarCajeros, entrar, salir, ponerPin } from './cajeros.ts';
 import { registrarSocio, buscarSocio, cambiarPin, sentenciasDeVenta, sentenciasDeCancelacion, saldo } from './dolarones.ts';
 import { registrarCorte, registrarRetiro, ultimoCorte, cajaDe } from './corte.ts';
-import { detalleVenta, cancelarPieza } from './devoluciones.ts';
 
 interface FilaConfig {
   clave: string;
