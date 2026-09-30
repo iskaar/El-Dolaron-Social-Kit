@@ -4,7 +4,8 @@
  * Por caja, no por dia ni por cajero: cada cajon tiene su dinero. Un corte
  * junta lo de su caja desde el corte anterior:
  * - lo cobrado en esa caja (la venta suma donde se cobro, aunque despues se cancele);
- * - lo devuelto por cancelaciones hechas en esa caja (resta donde se devolvio);
+ * - lo devuelto por cancelaciones hechas en esa caja, de ticket completo o de
+ *   piezas sueltas (Issue #138) (resta donde se devolvio);
  * - los retiros y gastos de efectivo de esa caja.
  * Asi una venta cancelada en la misma caja y el mismo turno da cero, y una
  * cancelada en otra caja o en otro turno sale del cajon que de verdad pago.
@@ -96,7 +97,12 @@ const leerCorte = (env: Env, id: string) =>
   env.DB.prepare('select * from cortes where id = ?').bind(id).first<Corte>();
 
 // Lo cobrado (o devuelto) de una forma de pago, sin la parte pagada con Dolarones.
-const dinero = (forma: string) => `coalesce(sum(case when forma_pago = '${forma}' then total - dolarones end), 0)`;
+const dinero = (forma: string, importe = 'total - dolarones') =>
+  `coalesce(sum(case when forma_pago = '${forma}' then ${importe} end), 0)`;
+// Al cancelar el ticket completo sale solo lo que no se devolvio antes por piezas sueltas (Issue #138).
+const restante = (forma: string) => dinero(forma, 'total - dolarones - devuelto');
+// Piezas canceladas sueltas: salen de la caja donde se devolvieron (tabla devoluciones).
+const devuelto = (forma: string) => `(select ${dinero(forma, 'importe')} from devoluciones where corte_id = ?1)`;
 
 export async function registrarCorte(request: Request, env: Env, correo: string): Promise<Response> {
   const cuerpo = (await request.json().catch(() => ({}))) as Record<string, unknown>;
@@ -129,6 +135,7 @@ export async function registrarCorte(request: Request, env: Env, correo: string)
          where cancelada = 1 and cancelada_caja = ? and corte_cancelacion_id is null`,
       ).bind(id, caja),
       env.DB.prepare('update retiros set corte_id = ? where caja = ? and corte_id is null').bind(id, caja),
+      env.DB.prepare('update devoluciones set corte_id = ? where caja = ? and corte_id is null').bind(id, caja),
       env.DB.prepare(
         `insert into cortes (id, caja, cajero, desde, hasta, tickets, fondo_inicial, efectivo_ventas,
            efectivo_devoluciones, retiros, gastos, efectivo_esperado, efectivo_contado, diferencia, tarjeta_sistema,
@@ -141,15 +148,17 @@ export async function registrarCorte(request: Request, env: Env, correo: string)
            coalesce((select fondo_siguiente from cortes where caja = ?2 order by hasta desc limit 1), ?7) as fondo,
            (select count(*) from ventas where corte_id = ?1) as tickets,
            (select ${dinero('efectivo')} from ventas where corte_id = ?1) as ev,
-           (select ${dinero('efectivo')} from ventas where corte_cancelacion_id = ?1) as ed,
+           (select ${restante('efectivo')} from ventas where corte_cancelacion_id = ?1) + ${devuelto('efectivo')} as ed,
            (select coalesce(sum(importe), 0) from retiros where corte_id = ?1 and tipo = 'retiro') as re,
            (select coalesce(sum(importe), 0) from retiros where corte_id = ?1 and tipo = 'gasto') as ga,
            (select ${dinero('tarjeta')} from ventas where corte_id = ?1) as tv,
-           (select ${dinero('tarjeta')} from ventas where corte_cancelacion_id = ?1) as td,
+           (select ${restante('tarjeta')} from ventas where corte_cancelacion_id = ?1) + ${devuelto('tarjeta')} as td,
            (select ${dinero('transferencia')} from ventas where corte_id = ?1) as xv,
-           (select ${dinero('transferencia')} from ventas where corte_cancelacion_id = ?1) as xd,
+           (select ${restante('transferencia')} from ventas where corte_cancelacion_id = ?1)
+             + ${devuelto('transferencia')} as xd,
            (select coalesce(sum(dolarones), 0) from ventas where corte_id = ?1) as dv,
-           (select coalesce(sum(dolarones), 0) from ventas where corte_cancelacion_id = ?1) as dd)`,
+           (select coalesce(sum(dolarones - dolarones_devueltos), 0) from ventas where corte_cancelacion_id = ?1)
+             + (select coalesce(sum(dolarones), 0) from devoluciones where corte_id = ?1) as dd)`,
       ).bind(id, caja, correo, ahora, contado, terminal, fondoConfig, notas),
     ]);
   } catch (error) {

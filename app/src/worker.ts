@@ -16,6 +16,7 @@ import {
 import { cajeroEnTurno, listarCajeros, entrar, salir, ponerPin } from './cajeros.ts';
 import { registrarSocio, buscarSocio, cambiarPin, sentenciasDeVenta, sentenciasDeCancelacion, saldo } from './dolarones.ts';
 import { registrarCorte, registrarRetiro, ultimoCorte, cajaDe } from './corte.ts';
+import { detalleVenta, cancelarPieza } from './devoluciones.ts';
 
 interface FilaConfig {
   clave: string;
@@ -696,9 +697,14 @@ async function cancelarVenta(id: string, request: Request, env: Env, correo: str
   }
   const canceladaPor = correo;
 
-  const venta = await env.DB.prepare('select id, total, dolarones, cancelada from ventas where id = ?')
+  const venta = await env.DB.prepare(
+    'select id, total, dolarones, cancelada, devuelto, dolarones_devueltos, revision from ventas where id = ?',
+  )
     .bind(id)
-    .first<{ id: string; total: number; dolarones: number; cancelada: number }>();
+    .first<{
+      id: string; total: number; dolarones: number; cancelada: number;
+      devuelto: number; dolarones_devueltos: number; revision: number;
+    }>();
   if (!venta) {
     return json({ error: 'La venta no existe.' }, 404);
   }
@@ -707,8 +713,10 @@ async function cancelarVenta(id: string, request: Request, env: Env, correo: str
   }
 
   const ahora = new Date().toISOString();
+  // Solo lo que sigue en el ticket: las piezas ya canceladas sueltas (Issue #138) ya regresaron.
   const { results: lineas } = await env.DB.prepare(
-    'select producto_id, cantidad from venta_lineas where venta_id = ? and producto_id is not null',
+    `select producto_id, cantidad - cancelada_cantidad as cantidad from venta_lineas
+     where venta_id = ? and producto_id is not null and cantidad > cancelada_cantidad`,
   )
     .bind(id)
     .all<{ producto_id: string; cantidad: number }>();
@@ -718,6 +726,8 @@ async function cancelarVenta(id: string, request: Request, env: Env, correo: str
   // la segunda completa: nada se devuelve dos veces.
   try {
     await env.DB.batch([
+      // Candado de migracion 020: si una pieza se cancelo entre la lectura y aqui, aborta todo.
+      env.DB.prepare('update ventas set revision = ? where id = ?').bind(venta.revision + 1, id),
       env.DB.prepare(
         `update ventas set cancelada = 1, cancelada_en = ?, cancelada_por = ?, motivo_cancelacion = ?, cancelada_caja = ?
          where id = ?`,
@@ -734,11 +744,19 @@ async function cancelarVenta(id: string, request: Request, env: Env, correo: str
     if (String(error).includes('venta ya cancelada')) {
       return json({ id, cancelada: true, ya_estaba: true });
     }
+    if (String(error).includes('ticket cambio')) {
+      return json({ error: 'Alguien mas cambio este ticket. Vuelve a abrirlo.' }, 409);
+    }
     throw error;
   }
 
   // Lo que se regresa en dinero; lo pagado con Dolarones regresa al saldo.
-  return json({ id, cancelada: true, devuelto: venta.total - venta.dolarones, dolarones: venta.dolarones });
+  // Sin lo ya devuelto por piezas canceladas sueltas.
+  return json({
+    id, cancelada: true,
+    devuelto: venta.total - venta.dolarones - venta.devuelto,
+    dolarones: venta.dolarones - venta.dolarones_devueltos,
+  });
 }
 
 // La tienda esta en America/Mexico_City: UTC-6 fijo desde 2022, sin horario de
@@ -748,14 +766,17 @@ async function cancelarVenta(id: string, request: Request, env: Env, correo: str
 const diaTienda = (columna: string) => `substr(datetime(${columna}, '-6 hours'), 1, 10)`;
 export const hoyTienda = (ahora = Date.now()) => new Date(ahora - 6 * 3_600_000).toISOString().slice(0, 10);
 
-/** Tickets del dia para la caja: para cancelar el que se cobro mal. */
+/** Tickets de un dia (hoy si no se dice): la caja cancela el que se cobro mal; reportes solo los ve. */
 async function ventasDelDia(url: URL, env: Env): Promise<Response> {
   const dia = url.searchParams.get('dia') ?? hoyTienda();
   const { results } = await env.DB.prepare(
-    `select v.id, v.total, v.forma_pago, v.cancelada, v.creado_en,
-            (select group_concat(nombre, ' · ') from venta_lineas where venta_id = v.id) as piezas
+    `select v.id, v.total, v.forma_pago, v.cancelada, v.creado_en, v.dolarones, v.devuelto, v.dolarones_devueltos,
+            v.caja, v.cajero,
+            (select group_concat(nombre, ' · ') from venta_lineas where venta_id = v.id) as piezas,
+            (select coalesce(sum(cantidad), 0) from venta_lineas where venta_id = v.id) as cantidad,
+            (select coalesce(sum(cancelada_cantidad), 0) from venta_lineas where venta_id = v.id) as cancelada_cantidad
      from ventas v where ${diaTienda('v.creado_en')} = ?
-     order by v.creado_en desc limit 50`,
+     order by v.creado_en desc limit 300`,
   )
     .bind(dia)
     .all();
@@ -787,14 +808,15 @@ async function corte(url: URL, env: Env): Promise<Response> {
   const dia = url.searchParams.get('dia') ?? hoyTienda();
   // Las canceladas no cuentan: el corte es contra el efectivo que hay en el cajon.
   const { results } = await env.DB.prepare(
-    `select forma_pago, count(*) as tickets, sum(total - dolarones) as total, sum(dolarones) as dolarones
+    `select forma_pago, count(*) as tickets, sum(total - dolarones - devuelto) as total,
+            sum(dolarones - dolarones_devueltos) as dolarones
      from ventas where ${diaTienda('creado_en')} = ? and cancelada = 0 group by forma_pago`,
   )
     .bind(dia)
     .all<{ forma_pago: string; tickets: number; total: number; dolarones: number }>();
 
   const piezas = await env.DB.prepare(
-    `select coalesce(sum(l.cantidad), 0) as piezas from venta_lineas l
+    `select coalesce(sum(l.cantidad - l.cancelada_cantidad), 0) as piezas from venta_lineas l
      join ventas v on v.id = l.venta_id
      where ${diaTienda('v.creado_en')} = ? and v.cancelada = 0`,
   )
@@ -823,8 +845,8 @@ async function reportes(url: URL, env: Env): Promise<Response> {
   const desde = new Date(Date.now() - dias * 86400000).toISOString();
 
   const resumen = await env.DB.prepare(
-    `select count(*) as ventas, coalesce(sum(total), 0) as total,
-       (select coalesce(sum(l.cantidad), 0) from venta_lineas l join ventas v on v.id = l.venta_id
+    `select count(*) as ventas, coalesce(sum(total - devuelto - dolarones_devueltos), 0) as total,
+       (select coalesce(sum(l.cantidad - l.cancelada_cantidad), 0) from venta_lineas l join ventas v on v.id = l.venta_id
         where v.cancelada = 0 and v.creado_en >= ?) as piezas
      from ventas where cancelada = 0 and creado_en >= ?`,
   )
@@ -833,23 +855,23 @@ async function reportes(url: URL, env: Env): Promise<Response> {
 
   // Lo cobrado en dinero por forma de pago, y lo pagado con Dolarones como una forma mas.
   const { results: porFormaPago } = await env.DB.prepare(
-    `select forma_pago, count(*) as tickets, sum(total - dolarones) as total
+    `select forma_pago, count(*) as tickets, sum(total - dolarones - devuelto) as total
      from ventas where cancelada = 0 and creado_en >= ? group by forma_pago
      union all
-     select 'dolarones', count(*), sum(dolarones)
-     from ventas where cancelada = 0 and creado_en >= ? and dolarones > 0`,
+     select 'dolarones', count(*), sum(dolarones - dolarones_devueltos)
+     from ventas where cancelada = 0 and creado_en >= ? and dolarones > dolarones_devueltos`,
   )
     .bind(desde, desde)
     .all<{ forma_pago: string; tickets: number; total: number }>();
 
   const { results: ventasPorDia } = await env.DB.prepare(
-    `select ${diaTienda('creado_en')} as dia, count(*) as tickets, sum(total) as total
+    `select ${diaTienda('creado_en')} as dia, count(*) as tickets, sum(total - devuelto - dolarones_devueltos) as total
      from ventas where cancelada = 0 and creado_en >= ? group by dia order by dia`,
   )
     .bind(desde)
     .all<{ dia: string; tickets: number; total: number }>();
   const { results: piezasPorDia } = await env.DB.prepare(
-    `select ${diaTienda('v.creado_en')} as dia, coalesce(sum(l.cantidad), 0) as piezas
+    `select ${diaTienda('v.creado_en')} as dia, coalesce(sum(l.cantidad - l.cancelada_cantidad), 0) as piezas
      from venta_lineas l join ventas v on v.id = l.venta_id
      where v.cancelada = 0 and v.creado_en >= ? group by dia`,
   )
@@ -860,7 +882,8 @@ async function reportes(url: URL, env: Env): Promise<Response> {
 
   const { results: porCategoria } = await env.DB.prepare(
     `select case when p.sin_inventario = 1 then 'bandas' else coalesce(p.categoria, 'sin categoria') end as categoria,
-       coalesce(sum(l.precio * l.cantidad), 0) as total, coalesce(sum(l.cantidad), 0) as piezas
+       coalesce(sum(l.precio * (l.cantidad - l.cancelada_cantidad)), 0) as total,
+       coalesce(sum(l.cantidad - l.cancelada_cantidad), 0) as piezas
      from venta_lineas l join ventas v on v.id = l.venta_id left join productos p on p.id = l.producto_id
      where v.cancelada = 0 and v.creado_en >= ?
      group by categoria order by total desc`,
@@ -869,9 +892,10 @@ async function reportes(url: URL, env: Env): Promise<Response> {
     .all<{ categoria: string; total: number; piezas: number }>();
 
   const { results: topProductos } = await env.DB.prepare(
-    `select l.codigo, l.nombre, sum(l.cantidad) as cantidad, sum(l.precio * l.cantidad) as total
+    `select l.codigo, l.nombre, sum(l.cantidad - l.cancelada_cantidad) as cantidad,
+       sum(l.precio * (l.cantidad - l.cancelada_cantidad)) as total
      from venta_lineas l join ventas v on v.id = l.venta_id
-     where v.cancelada = 0 and v.creado_en >= ? and l.producto_id is not null
+     where v.cancelada = 0 and v.creado_en >= ? and l.producto_id is not null and l.cantidad > l.cancelada_cantidad
      group by l.codigo, l.nombre order by cantidad desc, total desc limit 10`,
   )
     .bind(desde)
@@ -891,20 +915,25 @@ async function reportes(url: URL, env: Env): Promise<Response> {
        avg(julianday(substr(v.creado_en, 1, 10)) - julianday(substr(p.creado_en, 1, 10))) as dias_promedio,
        count(*) as n
      from venta_lineas l join ventas v on v.id = l.venta_id join productos p on p.id = l.producto_id
-     where v.cancelada = 0 and p.sin_inventario = 0
+     where v.cancelada = 0 and p.sin_inventario = 0 and l.cantidad > l.cancelada_cantidad
      group by categoria order by dias_promedio desc`,
   ).all<{ categoria: string; dias_promedio: number; n: number }>();
 
-  // Devoluciones: el motivo y quien cancelo son la unica huella de una
+  // Devoluciones, de ticket completo o de piezas sueltas (Issue #138): el motivo y quien cancelo son la unica huella de una
   // cancelacion que no fue legitima (cobrar de verdad y "cancelar" para
   // quedarse el efectivo). Se listan una por una, no solo el total.
   const { results: cancelaciones } = await env.DB.prepare(
-    `select v.id, v.total - v.dolarones as total, v.forma_pago, v.cancelada_en, v.cancelada_por, v.motivo_cancelacion,
-       (select group_concat(nombre, ' · ') from venta_lineas where venta_id = v.id) as piezas
+    `select v.id, v.total - v.dolarones - v.devuelto as total, v.forma_pago, v.cancelada_en, v.cancelada_por,
+       v.motivo_cancelacion,
+       (select group_concat(nombre, ' · ') from venta_lineas
+        where venta_id = v.id and cantidad > cancelada_cantidad) as piezas
      from ventas v where v.cancelada = 1 and v.creado_en >= ?
-     order by v.cancelada_en desc`,
+     union all
+     select d.venta_id, d.importe, d.forma_pago, d.creado_en, d.autor, d.motivo, d.cantidad || ' × ' || l.nombre
+     from devoluciones d join venta_lineas l on l.id = d.linea_id where d.creado_en >= ?
+     order by 4 desc`,
   )
-    .bind(desde)
+    .bind(desde, desde)
     .all<{
       id: string; total: number; forma_pago: string; cancelada_en: string;
       cancelada_por: string; motivo_cancelacion: string; piezas: string;
@@ -979,23 +1008,24 @@ const pesosDe = (centavos: number) => (centavos / 100).toFixed(2);
 async function exportarVentasCsv(env: Env): Promise<Response> {
   const { results } = await env.DB.prepare(
     `select v.creado_en, v.forma_pago, v.cancelada, v.cancelada_por, v.motivo_cancelacion,
-            l.codigo, coalesce(p.categoria, '') as categoria, l.nombre, l.precio, l.cantidad
+            l.codigo, coalesce(p.categoria, '') as categoria, l.nombre, l.precio, l.cantidad, l.cancelada_cantidad
      from venta_lineas l join ventas v on v.id = l.venta_id left join productos p on p.id = l.producto_id
      order by v.creado_en`,
   ).all<{
     creado_en: string; forma_pago: string; cancelada: number; cancelada_por: string;
     motivo_cancelacion: string; codigo: string; categoria: string; nombre: string;
-    precio: number; cantidad: number;
+    precio: number; cantidad: number; cancelada_cantidad: number;
   }>();
 
   const filas = results.map((f) => [
     f.creado_en, f.forma_pago, f.cancelada ? 'si' : 'no', f.cancelada_por, f.motivo_cancelacion,
     f.codigo, f.categoria, f.nombre, pesosDe(f.precio), f.cantidad, pesosDe(f.precio * f.cantidad),
+    f.cancelada_cantidad,
   ]);
   return respuestaCsv(
     'ventas.csv',
     ['fecha', 'forma_pago', 'cancelada', 'cancelada_por', 'motivo_cancelacion',
-      'codigo', 'categoria', 'nombre', 'precio', 'cantidad', 'importe'],
+      'codigo', 'categoria', 'nombre', 'precio', 'cantidad', 'importe', 'piezas_canceladas'],
     filas,
   );
 }
@@ -1177,6 +1207,14 @@ export default {
       const cancelacion = pathname.match(/^\/api\/ventas\/([^/]+)\/cancelar$/);
       if (cancelacion && request.method === 'POST') {
         return await cancelarVenta(cancelacion[1], request, env, correo);
+      }
+      const cancelacionPieza = pathname.match(/^\/api\/ventas\/([^/]+)\/lineas\/(\d+)\/cancelar$/);
+      if (cancelacionPieza && request.method === 'POST') {
+        return await cancelarPieza(cancelacionPieza[1], Number(cancelacionPieza[2]), request, env, correo);
+      }
+      const ticket = pathname.match(/^\/api\/ventas\/([^/]+)$/);
+      if (ticket && request.method === 'GET') {
+        return await detalleVenta(ticket[1], env);
       }
 
       if (pathname === '/api/reportes') {
