@@ -55,6 +55,10 @@
       <input id="bases" type="checkbox">
       <span>El cliente leyó las bases del programa Dolarones y el aviso de privacidad, y los acepta.</span>
     </label>
+    <label class="bases">
+      <input id="mayor-edad" type="checkbox" required>
+      <span>El cliente declara que es mayor de 18 años.</span>
+    </label>
 
     <button id="registrar" type="submit">Registrar socio</button>
     <div id="aviso" role="status"></div>
@@ -102,13 +106,14 @@ let idAlta = crypto.randomUUID();
 let ultimoSocio = null;
 
 $('alta').addEventListener('input', (e) => {
-  if (e.target.id !== 'bases') idAlta = crypto.randomUUID();
+  if (e.target.id !== 'bases' && e.target.id !== 'mayor-edad') idAlta = crypto.randomUUID();
   $('aviso').textContent = '';
 });
 
 $('alta').addEventListener('submit', async (e) => {
   e.preventDefault();
   if (!$('bases').checked) { $('aviso').textContent = 'Falta que el cliente acepte las bases y el aviso.'; return; }
+  if (!$('mayor-edad').checked) { $('aviso').textContent = 'Falta que el cliente declare ser mayor de 18 años.'; return; }
 
   $('registrar').disabled = true;
   try {
@@ -117,7 +122,7 @@ $('alta').addEventListener('submit', async (e) => {
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
         id: idAlta, nombre: $('nombre').value, telefono: $('telefono').value,
-        correo: $('correo').value, acepta_bases: true,
+        correo: $('correo').value, acepta_bases: true, declara_mayor_edad: true,
       }),
     });
     const socio = await r.json();

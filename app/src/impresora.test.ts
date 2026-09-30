@@ -199,6 +199,17 @@ test('un ticket pendiente no imprime un barcode gastable', async () => {
   const { venta, lineas } = ticketLargo();
   await imprimirTicket({ ...venta, vale_pendiente:true }, lineas);
   const bytes = Uint8Array.from(pedazos.flatMap((p) => [...p]));
-  assert.match(new TextDecoder().decode(bytes), /Vale pendiente de confirmacion/);
+  assert.match(new TextDecoder().decode(bytes), /Elegibilidad de vale sin confirmar/);
   assert.ok(!bytes.some((b,i) => b===0x1d && bytes[i+1]===0x6b));
+});
+
+test('ticket de socio en cola no anuncia Dolarones antes de la respuesta del servidor', async () => {
+  const { pedazos } = impresoraFalsa();
+  const { reconectarImpresora, imprimirTicket } = await import('../public/impresora.js');
+  await reconectarImpresora();
+  const { venta, lineas } = ticketLargo();
+  await imprimirTicket({ ...venta, socio:{ numero:1, ganados:0, saldo:0 }, recompensa_pendiente:true }, lineas);
+  const texto = new TextDecoder().decode(Uint8Array.from(pedazos.flatMap((p) => [...p])));
+  assert.match(texto, /Dolarones de compra sin confirmar/);
+  assert.doesNotMatch(texto, /Ganaste/);
 });

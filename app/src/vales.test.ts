@@ -45,11 +45,27 @@ test('vale anónimo al 5%, 30 días exactos, sin socio, cerrado por defecto y si
   } finally { t.db.close(); }
 });
 
+test('vale de venta en cola usa hora del servidor al sincronizar, no la hora del dispositivo', async () => {
+  const t = abrir();
+  try {
+    t.env.PROMOCION_INICIO = new Date(Date.now() + 60_000).toISOString();
+    const antes = await t.pedir('/api/ventas', venta({ creado_en:'2026-10-02T18:00:00.000Z' }));
+    assert.equal(antes.status, 201);
+    assert.equal(antes.cuerpo.vale_emitido, null);
+    assert.equal((await t.pedir('/api/vales/config', undefined, 'GET')).cuerpo.habilitado, false);
+    t.env.PROMOCION_INICIO = new Date(Date.now() - 60_000).toISOString();
+    const despues = await t.pedir('/api/ventas', venta({ creado_en:'2026-09-01T18:00:00.000Z' }));
+    assert.equal(despues.status, 201);
+    assert.equal(despues.cuerpo.vale_emitido.importe, 1000);
+    assert.equal((await t.pedir('/api/vales/config', undefined, 'GET')).cuerpo.habilitado, true);
+  } finally { t.db.close(); }
+});
+
 test('socios conservan 10%, teléfono sólo acumula y no emite vale en paralelo', async () => {
   const t = abrir();
   try {
     const socio = (await t.pedir('/api/socios', { id:crypto.randomUUID(), nombre:'Cliente',
-      telefono:'4441234567', acepta_bases:true })).cuerpo;
+      telefono:'4441234567', acepta_bases:true, declara_mayor_edad:true })).cuerpo;
     const r = await t.pedir('/api/ventas', venta({ cliente_id:socio.id }));
     assert.equal(r.cuerpo.ganados, 2000);
     assert.equal(r.cuerpo.vale_emitido, null);

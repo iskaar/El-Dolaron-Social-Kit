@@ -1,4 +1,4 @@
-import { saldo, codigoAleatorio, hashCodigo, basesListas } from './dolarones.ts';
+import { saldo, codigoAleatorio, hashCodigo, basesListas, promocionIniciada } from './dolarones.ts';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const DIA = 86_400_000;
@@ -10,10 +10,7 @@ type Identidad = { uid: string; telefono: string };
 type Cliente = { id: string; numero: number; nombre: string; telefono: string; bases_version: string };
 
 function promocionAbierta(env: Env): boolean {
-  const inicio = env.PROMOCION_INICIO;
-  return env.PORTAL_REGISTRO_ABIERTO === 'si' && basesListas(env) && !!inicio &&
-    /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:\.\d{3})?Z$/.test(inicio) &&
-    Number.isFinite(Date.parse(inicio)) && Date.now() >= Date.parse(inicio);
+  return env.PORTAL_REGISTRO_ABIERTO === 'si' && basesListas(env) && promocionIniciada(env, new Date());
 }
 
 // accounts:lookup valida el ID token contra Firebase y devuelve el registro
@@ -99,8 +96,8 @@ export async function registro(request: Request, env: Env, auth: Identidad): Pro
   const body = await request.json().catch(() => ({})) as Record<string, unknown>;
   const nombre = String(body.nombre ?? '').replace(/\s+/g, ' ').trim();
   if (nombre.length < 2 || nombre.length > 80 ||
-    body.bases_version !== env.BASES_APROBADAS_VERSION || body.acepta_bases !== true)
-    return json({ error: 'Nombre y aceptación vigente requeridos.' }, 400);
+    body.bases_version !== env.BASES_APROBADAS_VERSION || body.acepta_bases !== true || body.declara_mayor_edad !== true)
+    return json({ error: 'Nombre, declaración de mayoría de edad y aceptación vigente requeridos.' }, 400);
   let socio = await cliente(env, auth.uid);
   if (socio) {
     try {

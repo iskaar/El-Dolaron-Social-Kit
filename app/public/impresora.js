@@ -262,8 +262,10 @@ export async function imprimirTicket(venta, lineas) {
   }
   if (venta.vale_usado) partes.push(...partesVale(venta.vale_usado, 'SALDO DEL VALE ANTERIOR'));
   if (venta.vale_emitido) partes.push(...partesVale(venta.vale_emitido));
-  if (venta.vale_pendiente) partes.push(linea('Vale pendiente de confirmacion del servidor.'),
-    linea('Vuelve a caja con este ticket para imprimirlo.'));
+  if (venta.vale_pendiente) partes.push(linea('Elegibilidad de vale sin confirmar.'),
+    linea('Consulta en caja con este ticket tras sincronizar.'));
+  if (venta.recompensa_pendiente) partes.push(linea('Dolarones de compra sin confirmar.'),
+    linea('Consulta el saldo tras sincronizar.'));
   partes.push(centrado('Gracias por su compra'));
   partes.push(new Uint8Array([0x0a, 0x0a, 0x0a]));
   partes.push(new Uint8Array([GS, 0x56, 0x42, 0x00]));   // corte con avance de papel

@@ -1,9 +1,9 @@
 import { dolaronesGanados } from '../public/venta.js';
-import { basesListas, codigoAleatorio, disponibleDesde } from './dolarones.ts';
+import { basesListas, codigoAleatorio, disponibleDesde, promocionIniciada } from './dolarones.ts';
 
 const CODIGO = /^DP-[A-Za-z0-9_-]{16}$/;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-export const valesAbiertos = (env: Env) => env.VALES_ABIERTOS === 'si' && basesListas(env);
+export const valesAbiertos = (env: Env, ahora = new Date()) => env.VALES_ABIERTOS === 'si' && basesListas(env) && promocionIniciada(env, ahora);
 type Vale = { id: string; codigo: string; importe: number; restante: number; disponible_desde: string; vence_en: string };
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), {
   status, headers: { 'content-type':'application/json; charset=utf-8', 'cache-control':'no-store' },
@@ -77,7 +77,7 @@ export async function sentenciasVale(env: Env, p: {
   }
   let emitido:Vale | null = null;
   const ganados = dolaronesGanados(p.total - p.dolarones, 5);
-  if (!p.clienteId && valesAbiertos(env) && ganados > 0) {
+  if (!p.clienteId && valesAbiertos(env, p.ahora) && ganados > 0) {
     emitido = { id:crypto.randomUUID(), codigo:codigoAleatorio('DP'), importe:ganados, restante:ganados,
       disponible_desde:disponibleDesde(p.ahora), vence_en:new Date(p.ahora.getTime() + 30 * 86_400_000).toISOString() };
     sentencias.push(

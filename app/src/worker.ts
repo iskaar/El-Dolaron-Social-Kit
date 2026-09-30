@@ -589,7 +589,10 @@ async function registrarVenta(request: Request, env: Env, correo: string): Promi
 
   const yaExiste = await env.DB.prepare('select id from ventas where id = ?').bind(id).first();
   if (yaExiste) {
-    const respuesta = json({ id, duplicada: true, vale_emitido:await valeDeVenta(env, id), vale_usado:await valeUsadoEnVenta(env, id) }, 200);
+    const ganado = await env.DB.prepare(`select coalesce(sum(importe), 0) as importe from dolarones_movimientos
+      where venta_id = ? and tipo = 'compra'`).bind(id).first<{ importe:number }>();
+    const respuesta = json({ id, duplicada: true, ganados:ganado?.importe ?? 0,
+      vale_emitido:await valeDeVenta(env, id), vale_usado:await valeUsadoEnVenta(env, id) }, 200);
     respuesta.headers.set('cache-control', 'no-store');
     return respuesta;
   }

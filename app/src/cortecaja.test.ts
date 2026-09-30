@@ -25,7 +25,7 @@ const salida = (pedir: Pedir, tipo: string, importe: number, caja = 'Caja 1') =>
 test('el corte cuadra: fondo + efectivo - devoluciones - retiros, y tarjeta, transferencia y Dolarones aparte', async () => {
   const { db, pedir } = tienda();
   const socio = (await pedir('/api/socios', {
-    id: crypto.randomUUID(), nombre: 'Cliente', telefono: '4449990000', pin: '1234', acepta_bases: true,
+    id: crypto.randomUUID(), nombre: 'Cliente', telefono: '4449990000', pin: '1234', acepta_bases: true, declara_mayor_edad:true,
   })).cuerpo;
   assert.equal((await pedir('/api/portal/llegada', { cliente_id: socio.id })).status, 200);
 

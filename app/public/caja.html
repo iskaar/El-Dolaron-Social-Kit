@@ -169,6 +169,7 @@
     <button id="abrir-cajon" type="button">Abrir cajón</button>
     <div id="aviso"></div>
     <div id="rechazadas"></div>
+    <div id="vales-conciliados" role="status"></div>
 
     <details id="tickets">
       <summary>Ventas de hoy</summary>
@@ -265,22 +266,25 @@ let cobrando = false;
 let socio = null;
 let codigoSocio = '';
 let busquedaSocio = 0;
-// Sin red al abrir la caja vale el último estado conocido; sin dato se asume
-// encendido, para que el ticket avise «vale pendiente» en vez de callar (#135).
-const vistoVales = () => { try { return localStorage.getItem('vales'); } catch { return null; } };
-let valesHabilitados = vistoVales() !== 'no';
+// La configuración cambia en el servidor; sin consulta vigente sigue desconocida.
+let valesHabilitados = null;
 const notaVales = () => {
-  $('nota-vales').textContent = valesHabilitados
+  $('nota-vales').textContent = valesHabilitados === true
     ? 'Sin socio: 5 D por cada $100 completos, en vale de 30 días. Con socio: 10 D. El teléfono sólo acumula.'
-    : 'El teléfono sólo acumula; para gastar hace falta el código.';
+    : valesHabilitados === false ? 'El teléfono sólo acumula; para gastar hace falta el código.'
+    : 'Sin conexión no se conoce si se emiten vales. El servidor lo confirmará al sincronizar.';
 };
-notaVales();
-fetch('/api/vales/config').then((r) => r.ok ? r.json() : null).then((c) => {
-  if (!c) return;
-  valesHabilitados = c.habilitado === true;
-  try { localStorage.setItem('vales', valesHabilitados ? 'si' : 'no'); } catch { /* sin almacenamiento */ }
+async function cargarConfigVales() {
+  try {
+    const r = await fetch('/api/vales/config');
+    const c = r.ok ? await r.json() : null;
+    valesHabilitados = c && typeof c.habilitado === 'boolean' ? c.habilitado : null;
+  } catch { valesHabilitados = null; }
   notaVales();
-}).catch(() => {});
+}
+notaVales();
+cargarConfigVales();
+setInterval(cargarConfigVales, 60000);
 const dolares = (centavos) => `${(centavos / 100).toLocaleString('es-MX')} D`;
 
 /* ---------- que caja es esta computadora (Issue #100) ---------- */
@@ -321,13 +325,14 @@ function exigirCaja() {
 
 function base() {
   return new Promise((resolve, reject) => {
-    const s = indexedDB.open('eldolaron-caja', 2);
+    const s = indexedDB.open('eldolaron-caja', 3);
     s.onupgradeneeded = () => {
       const existe = (nombre) => s.result.objectStoreNames.contains(nombre);
       if (!existe('ventas')) s.result.createObjectStore('ventas', { keyPath: 'id' });
       if (!existe('catalogo')) s.result.createObjectStore('catalogo', { keyPath: 'clave' });
       // Version 2: aperturas del cajon por registrar, igual que las ventas encoladas.
       if (!existe('cajon')) s.result.createObjectStore('cajon', { keyPath: 'id' });
+      if (!existe('vales_resultados')) s.result.createObjectStore('vales_resultados', { keyPath: 'id' });
     };
     s.onsuccess = () => resolve(s.result);
     s.onerror = () => reject(s.error);
@@ -646,14 +651,14 @@ async function cobrar() {
       dolarones: usados,
       caja: cajaActual(),
     };
-    let socioTicket = socio && !socio.vale && { numero: socio.numero, ganados: dolaronesGanados(t.aPagar), saldo: socio.disponible };
+    let socioTicket = socio && !socio.vale && { numero: socio.numero, ganados: 0, saldo: socio.disponible };
     if (usados > 0) {
       socioTicket = await cobrarConDolarones(venta, t);
       if (!socioTicket) return;
       if (socioTicket.vale) socioTicket = null;
-    } else if ((!socio || socio.vale) && valesHabilitados) {
-      // Confirmar antes de imprimir un vale. Timeout/red caídos conservan la
-      // venta en cola con el MISMO id; el ticket sólo dice «pendiente».
+    } else {
+      // El servidor decide si la promoción ya empezó. Un timeout conserva la
+      // venta en cola con el mismo folio y el ticket deja el beneficio pendiente.
       let r, cuerpo;
       try {
         r = await fetch('/api/ventas', { method:'POST', headers:{ 'content-type':'application/json' },
@@ -665,13 +670,17 @@ async function cobrar() {
         $('aviso').style.color = '#D72B32';
         return;
       }
-      if (r?.ok && cuerpo) venta.vale_emitido = cuerpo.vale_emitido;
-      else {
+      if (r?.ok && cuerpo && Object.hasOwn(cuerpo, 'ganados') && Object.hasOwn(cuerpo, 'vale_emitido')) {
+        venta.vale_emitido = cuerpo.vale_emitido;
+        if (socioTicket) {
+          socioTicket.ganados = cuerpo.ganados ?? 0;
+          socioTicket.saldo = cuerpo.saldo?.disponible ?? socioTicket.saldo;
+        }
+      } else {
+        venta.vale_pendiente = !socioTicket && dolaronesGanados(t.aPagar, 5) > 0;
+        venta.recompensa_pendiente = !!socioTicket && dolaronesGanados(t.aPagar) > 0;
         await store('ventas', 'readwrite', (s) => s.put(venta));
-        venta.vale_pendiente = dolaronesGanados(t.aPagar, 5) > 0;
       }
-    } else {
-      await store('ventas', 'readwrite', (s) => s.put(venta));   // el ticket existe aunque no haya red
     }
     // El cajon primero: cajon y ticket van en fila por el mismo USB, y el cajero
     // no espera a que termine el logo. Una venta con tarjeta no toca el cajon.
@@ -690,10 +699,11 @@ async function cobrar() {
     }
     await store('catalogo', 'readwrite', (s) => s.put({ clave: 'piezas', datos: [...catalogo.values()], fecha: Date.now() }));
 
-    const ganados = socio && !socio.vale ? dolaronesGanados(t.aPagar) : venta.vale_emitido?.importe || 0;
+    const ganados = socioTicket?.ganados || venta.vale_emitido?.importe || 0;
     $('aviso').textContent = (forma === 'efectivo' && efectivo > 0 ? `Cobrado. Cambio ${pesos(t.cambio)}` : 'Cobrado.')
       + (ganados ? ` · Ganó ${dolares(ganados)}` : '');
-    if (venta.vale_pendiente) $('aviso').textContent += ' · Vale pendiente de confirmar; no se imprimió un código de gasto.';
+    if (venta.vale_pendiente) $('aviso').textContent += ' · Se revisará si corresponde un vale al sincronizar; no se imprimió un código de gasto.';
+    if (venta.recompensa_pendiente) $('aviso').textContent += ' · Se revisará si ganó Dolarones al sincronizar.';
     $('aviso').style.color = '#1f7a4d';
     lineas = [];
     idVenta = null;
@@ -732,6 +742,21 @@ async function sincronizar() {
           ...venta, estado: 'rechazada', motivo: cuerpo.error ?? 'El servidor rechazo la venta.',
         }));
         continue;
+      }
+      if (venta.vale_pendiente || venta.recompensa_pendiente) {
+        const cuerpo = await respuesta.json().catch(() => ({}));
+        if (!cuerpo || typeof cuerpo !== 'object' ||
+          !Object.hasOwn(cuerpo, venta.vale_pendiente ? 'vale_emitido' : 'ganados')) break;
+        const emitido = !!cuerpo.vale_emitido;
+        await store('vales_resultados', 'readwrite', (s) => s.put({
+          id:venta.id, emitido, importe:venta.vale_pendiente ? cuerpo.vale_emitido?.importe ?? 0 : cuerpo.ganados,
+          tipo:venta.vale_pendiente ? 'vale' : 'socio',
+        }));
+        $('aviso').textContent = venta.recompensa_pendiente
+          ? `Venta ${venta.id} sincronizada. Dolarones ganados: ${dolares(cuerpo.ganados)}.`
+          : emitido ? `Venta ${venta.id} sincronizada. El vale fue emitido; imprímelo con el folio del ticket.`
+          : `Venta ${venta.id} sincronizada. El servidor confirmó que no se emitió vale.`;
+        await pintarResultadosVales();
       }
       await store('ventas', 'readwrite', (s) => s.delete(venta.id));
     }
@@ -802,6 +827,24 @@ async function reimprimirValeDeVenta(id, boton) {
   finally { boton.disabled = false; }
 }
 $('vale-por-folio').addEventListener('click', () => reimprimirValeDeVenta($('vale-folio').value.trim(), $('vale-por-folio')));
+
+async function pintarResultadosVales() {
+  const resultados = await store('vales_resultados', 'readonly', (s) => s.getAll());
+  $('vales-conciliados').innerHTML = resultados.map((r) => `<div class="ticket">
+    <span>Venta ${escapar(r.id)}: ${r.tipo === 'socio' ? `ganó ${dolares(r.importe)} por compra` : r.emitido ? 'vale emitido' : 'sin vale'}</span>
+    <div>${r.emitido ? `<button type="button" data-imprimir-vale="${escapar(r.id)}">Imprimir</button>` : ''}
+      <button type="button" data-cerrar-vale="${escapar(r.id)}">Enterado</button></div>
+  </div>`).join('');
+}
+$('vales-conciliados').addEventListener('click', async (e) => {
+  const id = e.target.dataset.imprimirVale;
+  if (id) await reimprimirValeDeVenta(id, e.target);
+  const cerrar = e.target.dataset.cerrarVale;
+  if (cerrar) {
+    await store('vales_resultados', 'readwrite', (s) => s.delete(cerrar));
+    await pintarResultadosVales();
+  }
+});
 
 /** Devoluciones y errores de cobro. Necesita red: deshacer no puede quedar encolado. */
 async function cargarTickets() {
@@ -1107,8 +1150,8 @@ function pintarRed() {
   $('estado-red').textContent = navigator.onLine ? 'en línea' : 'sin red · cobrando local';
   $('estado-red').className = navigator.onLine ? '' : 'sin-red';
 }
-addEventListener('online', () => { pintarRed(); sincronizar(); cargarCatalogo(); });
-addEventListener('offline', pintarRed);
+addEventListener('online', () => { pintarRed(); cargarConfigVales(); sincronizar(); cargarCatalogo(); });
+addEventListener('offline', () => { pintarRed(); valesHabilitados = null; notaVales(); });
 setInterval(sincronizar, 30000);
 
 function pintarImpresora() {
@@ -1139,6 +1182,7 @@ pintarRed();
 await cargarCatalogo();
 pintar();
 await pintarRechazadas();
+await pintarResultadosVales();
 await sincronizar();
 await reconectarImpresora();
 pintarImpresora();

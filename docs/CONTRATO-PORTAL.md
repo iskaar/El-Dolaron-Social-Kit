@@ -19,7 +19,7 @@ Todas las respuestas privadas usan `Cache-Control: no-store`. No se manda teléf
 | Método y ruta | Cuerpo o parámetros | Respuesta principal |
 | --- | --- | --- |
 | `GET /api/portal/config` | público | `{firebase, registro_abierto, bases_version, bases, aviso}`. `firebase` es `null` sin proveedor/textos/versiones preparados. La API key web identifica el proyecto, no sustituye autenticación. |
-| `POST /api/portal/registro` | `{nombre, acepta_bases: true, bases_version}` | `{id, numero, nombre, disponible, por_liberar, regalo_disponible, premio}`. Reintento del mismo UID es idempotente; teléfono duplicado con otro UID: 409. `premio` es `null` sin cupos. |
+| `POST /api/portal/registro` | `{nombre, acepta_bases: true, declara_mayor_edad: true, bases_version}` | `{id, numero, nombre, disponible, por_liberar, regalo_disponible, premio}`. Reintento del mismo UID es idempotente; teléfono duplicado con otro UID: 409. `premio` es `null` sin cupos. |
 | `GET /api/portal/yo` | — | `{id, numero, nombre, telefono: "+52...", bases_version}` del UID titular. |
 | `GET /api/portal/saldo` | — | `{disponible_compras, regalo_sujeto_minimo, por_liberar, disponible_total, lotes}` con origen, restante, liberación y vencimiento. El regalo sólo se gasta en ticket de al menos $1,000 antes de D (#108). |
 | `POST /api/portal/codigo` | `{maximo}` centavos enteros, entre cero y saldo disponible | `{codigo, maximo, expira_en}`; 201. Reemisión antes de cinco segundos: 429. Requiere bases vigentes. |
@@ -53,17 +53,19 @@ Aplicar migraciones pendientes antes del Worker: `014-minimo-regalo`, `016-porta
 
 Socios conservan **10 D por cada $100 completos** monetarios, liberados al día siguiente y vigentes 12 meses. Dar el teléfono sólo acumula: no autoriza gasto. Sin socio, la compra puede emitir **5 D por cada $100 completos**, en un vale impreso, sin teléfono, nombre ni alta. Ejemplo $250: 20 D para socio o 10 D en papel, nunca ambos. La parte pagada con D no genera crédito. Se conserva la aritmética por bloques aprobada; no se convierte en porcentaje proporcional sobre centavos.
 
+La elegibilidad de compras para acumular se decide con la hora del servidor cuando acepta la venta, comparada con `PROMOCION_INICIO`. Una venta en cola desde antes del inicio que se sincroniza después sí puede ganar; una fecha futura escrita por el dispositivo no adelanta la promoción. Sin fecha válida, no se acredita compra ni se emite vale. El ticket de socio en cola muestra que sus Dolarones siguen sin confirmar.
+
 - `DP-…` es un identificador aleatorio de 96 bits, no un monto modificable. D1 conserva el código legible **sólo para reimpresión autorizada del personal**, con venta emisora, importe, restante y vigencia. Esto difiere del código temporal del socio, del que sólo se conserva hash. No exponer códigos de papel en logs, listas de ventas, URLs, exports públicos ni portal. Quien tenga el papel o una copia puede gastar; las copias comparten saldo, no generan crédito adicional.
 - Disponible desde la siguiente medianoche de la tienda, como lo ganado por compras. Vence **exactamente 30 días desde la emisión confirmada del servidor** (UTC), no al final del día 30. El ticket imprime disponibilidad y hora de vencimiento en America/Mexico_City. Gasto parcial, reimpresión o devolución no amplían el plazo. El regalo de apertura y su mínimo de $1,000 no se mezclan con estos vales ganados.
 - Un vale o una membresía por ticket; combinar varios o transferir el vale a una cuenta no está implementado. «Usar máximo» aplica el menor de total, saldo elegible y máximo autorizado. Para papel, el máximo es su saldo actual; para socios respeta la autorización del portal. Elegir por teléfono no habilita ese botón ni canje.
-- Emisión, canje, movimiento, venta y stock se confirman en un batch. No imprimir barcode gastable antes de respuesta confirmada; un timeout/red caída conserva el mismo ID en la cola y el ticket dice «vale pendiente». Al sincronizar, «Ventas de hoy → Imprimir vale» o «Reimprimir vale → folio Venta» recupera el mismo vale, incluso de otro día. Una venta rechazada no genera vale; revisar antes de devolver mercancía o dinero.
+- Emisión, canje, movimiento, venta y stock se confirman en un batch. No imprimir barcode gastable antes de respuesta confirmada; un timeout/red caída conserva el mismo ID en la cola y el ticket indica que la elegibilidad del vale aún no se conoce. Al sincronizar, la caja guarda si el servidor emitió el vale y ofrece imprimirlo por folio. «Ventas de hoy → Imprimir vale» o «Reimprimir vale → folio Venta» recupera el mismo vale, incluso de otro día. Una venta rechazada no genera vale; revisar antes de devolver mercancía o dinero.
 - Reimprimir devuelve saldo actual y vencimiento original, no el importe inicial gastado. Cancelar el canje restaura al mismo vale sin ampliar vida; cancelar la compra emisora retira su vale. Si aún tiene crédito gastado, responde 409 y revierte cancelación/stock/dinero: resolución presencial, no ajuste silencioso. Esto no define derechos legales de devolución; completar el procedimiento con Isaac/abogado antes de lanzar.
 
 ### API del personal, aislada del host público
 
 | Ruta | Entrada | Resultado |
 | --- | --- | --- |
-| `GET /api/vales/config` | — | `{habilitado}`: `VALES_ABIERTOS=si` y bases/aviso preparados; apagado por defecto |
+| `GET /api/vales/config` | — | `{habilitado}`: `VALES_ABIERTOS=si`, bases/aviso preparados e inicio de promoción alcanzado; apagado por defecto |
 | `POST /api/vales/buscar` | `{codigo}` por cuerpo, nunca URL | `{vale:true, disponible, maximo, expira_en, regalo_disponible:0, por_liberar:0}`; código aún no disponible/vencido/agotado/cancelado: 403 |
 | `POST /api/ventas` | contrato anterior + `codigo_vale`, `dolarones`, sin `cliente_id` para papel | `vale_emitido` y `vale_usado` con código, importe, restante, disponibilidad y vencimiento. Reintento no emite otro vale |
 | `POST /api/ventas/:id/vale` | folio de venta | Vale vigente para reimpresión, sólo personal con sesión de caja; no recupera vale vencido/agotado/cancelado |

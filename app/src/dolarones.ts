@@ -88,6 +88,13 @@ export const basesListas = (env: Env) => !!env.BASES_APROBADAS_VERSION &&
   !env.BASES_APROBADAS_VERSION.startsWith('borrador') && !!env.PORTAL_BASES_TEXTO?.trim() &&
   !!env.PORTAL_AVISO_TEXTO?.trim();
 
+/** La hora fiable de aceptación de la venta decide si ya inició la promoción. */
+export function promocionIniciada(env: Env, ahora: Date): boolean {
+  const inicio = env.PROMOCION_INICIO;
+  return !!inicio && /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:\.\d{3})?Z$/.test(inicio) &&
+    Number.isFinite(Date.parse(inicio)) && ahora.getTime() >= Date.parse(inicio);
+}
+
 export async function saldo(env: Env, clienteId: string, ahora: string): Promise<{ disponible: number; por_liberar: number; regalo_disponible: number }> {
   const fila = await env.DB.prepare(
     `select coalesce(sum(case when disponible_desde <= ? then restante end), 0) as disponible,
@@ -124,6 +131,7 @@ export async function registrarSocio(request: Request, env: Env, autor: string):
   if (telefono.length !== 10) return json({ error: 'El telefono debe tener 10 digitos.' }, 400);
   if (correo && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(correo)) return json({ error: 'Correo invalido.' }, 400);
   if (cuerpo.acepta_bases !== true) return json({ error: 'El cliente tiene que aceptar las bases y el aviso de privacidad.' }, 400);
+  if (cuerpo.declara_mayor_edad !== true) return json({ error: 'El cliente debe declarar que es mayor de 18 años.' }, 400);
   if (!basesListas(env))
     return json({ error: 'Altas cerradas hasta aprobar las bases y el aviso.' }, 503);
 
@@ -235,7 +243,7 @@ export async function sentenciasDeVenta(env: Env, p: {
     }
   }
 
-  const ganados = dolaronesGanados(p.total - p.dolarones);
+  const ganados = promocionIniciada(env, p.ahora) ? dolaronesGanados(p.total - p.dolarones) : 0;
   if (ganados > 0) {
     const lote = crypto.randomUUID();
     sentencias.push(

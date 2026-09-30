@@ -2,7 +2,7 @@
 // Dinero, lotes y autorización contra SQLite real y todas las migraciones.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { repartir, disponibleDesde, sumarMeses, sentenciasDeVenta } from './dolarones.ts';
+import { repartir, disponibleDesde, sumarMeses, sentenciasDeVenta, promocionIniciada } from './dolarones.ts';
 import { tienda, codigoPrueba, DUENO, PRODUCTO } from './prueba-d1.ts';
 
 let telefonos = 4440000000;
@@ -14,7 +14,7 @@ function abrir() {
   const t = tienda();
   const alta = async (extra: Record<string, unknown> = {}) => {
     const r = await t.pedir('/api/socios', { id:crypto.randomUUID(), nombre:'Cliente',
-      telefono:String(telefonos++), acepta_bases:true, ...extra });
+      telefono:String(telefonos++), acepta_bases:true, declara_mayor_edad:true, ...extra });
     if (r.status === 201) await t.pedir('/api/portal/llegada', { cliente_id:r.cuerpo.id });
     return r;
   };
@@ -39,6 +39,35 @@ test('12 meses conservan la hora local y caen al ultimo dia si el dia no existe'
   assert.equal(sumarMeses(new Date('2028-02-29T18:00:00Z'), 12), '2029-02-28T18:00:00.000Z');
 });
 
+test('inicio de promoción: antes no, en el instante y después sí; configuración inválida cierra', () => {
+  const env = { PROMOCION_INICIO:'2026-10-02T17:00:00.000Z' } as Env;
+  assert.equal(promocionIniciada(env, new Date('2026-10-02T16:59:59.999Z')), false);
+  assert.equal(promocionIniciada(env, new Date('2026-10-02T17:00:00.000Z')), true);
+  assert.equal(promocionIniciada(env, new Date('2026-10-02T17:00:00.001Z')), true);
+  for (const inicio of [undefined, '', 'mañana', '2026-99-99T17:00:00Z']) {
+    env.PROMOCION_INICIO = inicio;
+    assert.equal(promocionIniciada(env, new Date('2026-10-03T17:00:00Z')), false);
+  }
+});
+
+test('venta de socio en cola gana sólo al sincronizar después del inicio del servidor', async () => {
+  const t = abrir();
+  try {
+    const socio = (await t.alta()).cuerpo;
+    t.env.PROMOCION_INICIO = new Date(Date.now() + 60_000).toISOString();
+    const antes = await t.pedir('/api/ventas', venta({ cliente_id:socio.id,
+      creado_en:'2026-10-02T18:00:00.000Z', lineas:[{ producto_id:PRODUCTO, cantidad:1 }], efectivo:25000 }));
+    assert.equal(antes.status, 201);
+    assert.equal(antes.cuerpo.ganados, 0);
+    t.env.PROMOCION_INICIO = new Date(Date.now() - 60_000).toISOString();
+    const despues = await t.pedir('/api/ventas', venta({ cliente_id:socio.id,
+      creado_en:'2026-09-01T18:00:00.000Z', lineas:[{ producto_id:PRODUCTO, cantidad:1 }], efectivo:25000 }));
+    assert.equal(despues.status, 201);
+    assert.equal(despues.cuerpo.ganados, 2000);
+    assert.equal(t.db.prepare("select count(*) as n from dolarones_lotes where origen='compra'").get()!.n, 1);
+  } finally { t.db.close(); }
+});
+
 test('el canje sale primero del lote que vence antes y no toca vencidos ni por liberar', () => {
   const ahora = '2026-10-10T00:00:00.000Z';
   const lotes = [
@@ -58,10 +87,11 @@ test('altas sin PIN: número, teléfono único, aceptación y reintento idempote
   assert.equal(primero.status, 201);
   assert.equal(primero.cuerpo.numero, 1);
   const reintento = await t.pedir('/api/socios', { id:primero.cuerpo.id, nombre:'Cliente',
-    telefono:'4441112222', acepta_bases:true });
+    telefono:'4441112222', acepta_bases:true, declara_mayor_edad:true });
   assert.equal(reintento.cuerpo.numero, 1);
   assert.equal((await t.alta({ telefono:'444-111-2222' })).status, 409);
   assert.equal((await t.alta({ acepta_bases:false })).status, 400);
+  assert.equal((await t.alta({ declara_mayor_edad:false })).status, 400);
   assert.equal((await t.alta()).cuerpo.numero, 2);
   assert.equal((await t.pedir('/api/socios?q=444-111-2222')).cuerpo.disponible, 500_00);
   assert.equal((await t.pedir('/api/socios/1/pin', { pin:'1234' })).status, 404);
@@ -172,6 +202,7 @@ test('reenviar la misma venta no consume ni gana dos veces; otro ticket no reuti
   const v = venta({ cliente_id:socio.id, codigo_socio:await codigoPrueba(t.db, socio.id), dolarones:5000 });
   assert.equal((await t.pedir('/api/ventas', v)).status, 201);
   assert.equal((await t.pedir('/api/ventas', v)).cuerpo.duplicada, true);
+  assert.equal((await t.pedir('/api/ventas', v)).cuerpo.ganados, 9000);
   assert.equal((await t.pedir('/api/ventas', { ...v, id:crypto.randomUUID() })).status, 403);
   const s = (await t.pedir('/api/socios?q=1')).cuerpo;
   assert.equal(s.disponible, 45000);

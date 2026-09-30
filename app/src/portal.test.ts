@@ -34,7 +34,7 @@ function portalDePrueba() {
     return { status: response.status, body: await response.json() as Record<string, any> };
   };
   const registrar = (uid: string, phone: string) => llamar('/api/portal/registro', token(uid, phone), {
-    nombre: 'Cliente', acepta_bases: true, bases_version: 'prueba-1',
+    nombre: 'Cliente', acepta_bases: true, declara_mayor_edad:true, bases_version: 'prueba-1',
   }, 'POST');
   return { db, env, pedir, llamar, registrar, setValidSince: (v: number) => { validSince = v; },
     cerrar: () => { globalThis.fetch = fetchOriginal; db.close(); } };
@@ -97,6 +97,26 @@ test('sólo el UID titular consulta saldo y recibos; teléfono duplicado no enla
   } finally { p.cerrar(); }
 });
 
+test('registro web requiere declaración adulta y conserva versión y hora del consentimiento', async () => {
+  const p = portalDePrueba();
+  try {
+    const auth = token('uid-adulto', '+524441234567');
+    const body = { nombre:'Cliente', acepta_bases:true, bases_version:'prueba-1' };
+    assert.equal((await p.llamar('/api/portal/registro', auth, body, 'POST')).status, 400);
+    assert.equal((await p.llamar('/api/portal/registro', auth,
+      { ...body, declara_mayor_edad:false }, 'POST')).status, 400);
+    assert.equal((await p.llamar('/api/portal/registro', auth,
+      { ...body, declara_mayor_edad:true }, 'POST')).status, 200);
+    const primera = p.db.prepare('select bases_version, bases_aceptadas_en from clientes where auth_uid=?').get('uid-adulto')!;
+    assert.equal(primera.bases_version, 'prueba-1');
+    assert.ok(Date.parse(String(primera.bases_aceptadas_en)) > 0);
+    assert.equal((await p.llamar('/api/portal/registro', auth,
+      { ...body, declara_mayor_edad:true }, 'POST')).status, 200);
+    assert.equal(p.db.prepare('select bases_aceptadas_en from clientes where auth_uid=?').get('uid-adulto')!.bases_aceptadas_en,
+      primera.bases_aceptadas_en);
+  } finally { p.cerrar(); }
+});
+
 test('cupos 50/50, reemplazo atómico, cupo online recuperado y presupuesto', async () => {
   const p = portalDePrueba();
   try {
@@ -113,7 +133,7 @@ test('cupos 50/50, reemplazo atómico, cupo online recuperado y presupuesto', as
     assert.equal((await p.registrar('uid-52', '+524440000052')).body.premio, null);
     for (let n = 1; n <= 50; n++) {
       const staff = await p.pedir('/api/socios', { id: crypto.randomUUID(), nombre: 'Cliente',
-        telefono: `555${String(n).padStart(7, '0')}`, pin: '1234', acepta_bases: true });
+        telefono: `555${String(n).padStart(7, '0')}`, pin: '1234', acepta_bases: true, declara_mayor_edad:true });
       assert.equal(staff.status, 201);
       const arrival = await p.pedir('/api/portal/llegada', { cliente_id: staff.cuerpo.id });
       assert.equal(arrival.cuerpo.premio === null, n === 50);
@@ -137,7 +157,7 @@ test('la primera llegada con premio parcialmente usado queda reservada para reso
     assert.equal(venta.status, 201);
     assert.equal((await p.pedir('/api/portal/llegada', { cliente_id: online.body.id })).status, 409);
     const segundo = await p.pedir('/api/socios', { id: crypto.randomUUID(), nombre: 'Otro',
-      telefono: '5552223333', pin: '1234', acepta_bases: true });
+      telefono: '5552223333', pin: '1234', acepta_bases: true, declara_mayor_edad:true });
     assert.equal((await p.pedir('/api/portal/llegada', { cliente_id: segundo.cuerpo.id })).cuerpo.premio.importe, 300_00);
     assert.equal(p.db.prepare("select count(*) as n from premios_apertura where canal='tienda' and orden=1 and cliente_id is not null").get()!.n, 0);
   } finally { p.cerrar(); }
@@ -159,7 +179,7 @@ test('un regalo del esquema anterior cierra el alta antes de crear socio o cupo'
   const p = portalDePrueba();
   try {
     const anterior = await p.pedir('/api/socios', { id: crypto.randomUUID(), nombre: 'Anterior',
-      telefono: '5551112222', pin: '1234', acepta_bases: true });
+      telefono: '5551112222', pin: '1234', acepta_bases: true, declara_mayor_edad:true });
     assert.equal(anterior.status, 201);
     p.db.prepare(`insert into dolarones_lotes
       (id, cliente_id, origen, importe, restante, disponible_desde, vence_en, creado_en)
@@ -254,7 +274,7 @@ test('logout revoca el código y sólo el dueño vincula un registro presencial,
     const k = await p.llamar('/api/portal/codigo', auth, { maximo:0 }, 'POST');
     assert.equal((await p.llamar('/api/portal/codigo', auth, undefined, 'DELETE')).status, 200);
     assert.equal((await p.pedir('/api/socios/codigo', { codigo:k.body.codigo })).status, 403);
-    const previo = await p.pedir('/api/socios', { id:crypto.randomUUID(), nombre:'Socio previo', telefono:'4445556666', acepta_bases:true });
+    const previo = await p.pedir('/api/socios', { id:crypto.randomUUID(), nombre:'Socio previo', telefono:'4445556666', acepta_bases:true, declara_mayor_edad:true });
     assert.equal(previo.status, 201);
     assert.equal((await p.registrar('nuevo', '+524445556666')).status, 409);
     const vk = await p.llamar('/api/portal/vinculo', token('nuevo', '+524445556666'), {}, 'POST');

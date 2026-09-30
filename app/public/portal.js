@@ -155,7 +155,8 @@ $('cambiar-telefono').addEventListener('click', () => {
 $('registro-form').addEventListener('submit', (e) => {
   e.preventDefault();
   accion($('registrar'), async () => {
-    await api('registro', { nombre:$('nombre').value, acepta_bases:$('acepta').checked, bases_version:config.bases_version });
+    await api('registro', { nombre:$('nombre').value, acepta_bases:$('acepta').checked,
+      declara_mayor_edad:$('mayor-edad').checked, bases_version:config.bases_version });
     await cargarCuenta();
   });
 });
