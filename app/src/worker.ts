@@ -17,6 +17,7 @@ import { cajeroEnTurno, listarCajeros, entrar, salir, ponerPin } from './cajeros
 import { registrarSocio, buscarSocio, buscarPorCodigo, basesListas, sentenciasDeVenta, sentenciasDeCancelacion, saldo } from './dolarones.ts';
 import { registrarCorte, registrarRetiro, ultimoCorte, cajaDe } from './corte.ts';
 import { portal, llegada, vincular } from './portal.ts';
+import { sentenciasVale, cancelarVales, buscarVale, valeDeVenta, valeUsadoEnVenta, reimprimirVale, valesAbiertos } from './vales.ts';
 
 interface FilaConfig {
   clave: string;
@@ -572,7 +573,7 @@ async function registrarVenta(request: Request, env: Env, correo: string): Promi
   const venta = (await request.json()) as {
     id?: unknown; lineas?: unknown; forma_pago?: unknown;
     efectivo?: unknown; creado_en?: unknown;
-    cliente_id?: unknown; dolarones?: unknown; codigo_socio?: unknown; caja?: unknown;
+    cliente_id?: unknown; dolarones?: unknown; codigo_socio?: unknown; codigo_vale?: unknown; caja?: unknown;
   };
   const id = String(venta.id ?? '');
   if (!UUID.test(id)) {
@@ -588,7 +589,9 @@ async function registrarVenta(request: Request, env: Env, correo: string): Promi
 
   const yaExiste = await env.DB.prepare('select id from ventas where id = ?').bind(id).first();
   if (yaExiste) {
-    return json({ id, duplicada: true }, 200);
+    const respuesta = json({ id, duplicada: true, vale_emitido:await valeDeVenta(env, id), vale_usado:await valeUsadoEnVenta(env, id) }, 200);
+    respuesta.headers.set('cache-control', 'no-store');
+    return respuesta;
   }
 
   const idsPedidos = [...new Set((venta.lineas as LineaVenta[]).map((l) => String(l.producto_id ?? '')))];
@@ -611,6 +614,7 @@ async function registrarVenta(request: Request, env: Env, correo: string): Promi
   const total = preparado.lineas.reduce((suma, l) => suma + l.precio * l.cantidad, 0);
   const efectivo = Math.max(0, Math.round(Number(venta.efectivo ?? 0)));
   const clienteId = venta.cliente_id ? String(venta.cliente_id) : null;
+  const codigoVale = String(venta.codigo_vale ?? '');
   const dolarones = Number(venta.dolarones ?? 0);
   const aPagar = total - (Number.isInteger(dolarones) ? dolarones : 0);
   if (!efectivoAlcanza({ formaPago, total: aPagar, efectivo })) {
@@ -623,11 +627,15 @@ async function registrarVenta(request: Request, env: Env, correo: string): Promi
 
   // Valida socio, código y saldo; consumo y venta se confirman en el mismo batch.
   const recompensa = await sentenciasDeVenta(env, {
-    ventaId: id, clienteId, dolarones, codigo: String(venta.codigo_socio ?? ''), total, autor: correo, ahora: momento,
+    ventaId: id, clienteId, dolarones:codigoVale ? 0 : dolarones, codigo: String(venta.codigo_socio ?? ''), total, autor: correo, ahora: momento,
   });
   if (!recompensa.ok) {
     return json({ error: recompensa.error }, recompensa.status);
   }
+  const vale = await sentenciasVale(env, {
+    ventaId:id, clienteId, codigo:codigoVale, dolarones, total, autor:correo, ahora:momento,
+  });
+  if (!vale.ok) return json({ error:vale.error }, vale.status);
 
   const sentencias = [
     env.DB.prepare(
@@ -656,6 +664,7 @@ async function registrarVenta(request: Request, env: Env, correo: string): Promi
         ).bind(l.cantidad, ahora, l.producto_id),
       ),
     ...recompensa.sentencias,
+    ...vale.sentencias,
   ];
 
   // Todo junto: un ticket a medias descuadra el corte del dia, y un canje a
@@ -663,6 +672,8 @@ async function registrarVenta(request: Request, env: Env, correo: string): Promi
   try {
     await env.DB.batch(sentencias);
   } catch (error) {
+    if (String(error).includes('saldo de vale invalido'))
+      return json({ error:'El vale cambió, venció o se agotó. Vuelve a escanearlo.' }, 409);
     if (String(error).includes('codigo de socio invalido')) {
       return json({ error: 'Código de socio usado, vencido o actualizado. Pide otro al cliente.' }, 409);
     }
@@ -674,10 +685,14 @@ async function registrarVenta(request: Request, env: Env, correo: string): Promi
     }
     throw error;
   }
-  return json({
+  const respuesta = json({
     id, total, dolarones, cambio: Math.max(0, efectivo - aPagar), ganados: recompensa.ganados,
     saldo: clienteId ? await saldo(env, clienteId, ahora) : null,
+    vale_emitido:vale.emitido,
+    vale_usado:await valeUsadoEnVenta(env, id),
   }, 201);
+  respuesta.headers.set('cache-control', 'no-store');
+  return respuesta;
 }
 
 /**
@@ -733,8 +748,11 @@ async function cancelarVenta(id: string, request: Request, env: Env, correo: str
         ).bind(l.cantidad, ahora, l.producto_id),
       ),
       ...(await sentenciasDeCancelacion(env, id, canceladaPor, ahora)),
+      ...(await cancelarVales(env, id, canceladaPor, ahora)),
     ]);
   } catch (error) {
+    if (String(error).includes('saldo de vale invalido'))
+      return json({ error:'El vale de esta compra ya se usó. Requiere aclaración presencial antes de cancelar.' }, 409);
     if (String(error).includes('venta ya cancelada')) {
       return json({ id, cancelada: true, ya_estaba: true });
     }
@@ -1195,6 +1213,12 @@ export default {
           throw error;
         }
       }
+      if (pathname === '/api/vales/config' && request.method === 'GET')
+        return json({ habilitado:valesAbiertos(env) });
+      if (pathname === '/api/vales/buscar' && request.method === 'POST')
+        return await buscarVale(request, env);
+      const valeVenta = /^\/api\/ventas\/([^/]+)\/vale$/.exec(pathname);
+      if (valeVenta && request.method === 'POST') return await reimprimirVale(env, valeVenta[1]);
 
       if (pathname === '/api/socios/codigo' && request.method === 'POST')
         return await buscarPorCodigo(request, env);

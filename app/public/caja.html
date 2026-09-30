@@ -72,6 +72,8 @@
   #socio-info { font-size: 14px; margin-top: 6px; min-height: 18px; }
   #socio-info b { color: var(--azul); }
   #dolarones { width: 100%; padding: 12px; font-size: 18px; border: 1px solid var(--linea); border-radius: 10px; }
+  .dolarones-fila { display:flex; gap:6px; }
+  #usar-maximo { border:1px solid var(--azul); background:#fff; color:var(--azul); border-radius:10px; padding:8px 12px; min-height:44px; cursor:pointer; }
   #a-pagar { font-size: 18px; font-weight: 700; color: var(--azul); min-height: 22px; }
   .caja-nombre { font-size: 13px; display: flex; align-items: center; gap: 6px; color: #fff; margin: 0; }
   .caja-nombre select { width: auto; padding: 4px 8px; font-size: 14px; border-radius: 8px; border: 0; }
@@ -135,7 +137,7 @@
     <div id="piezas">0 piezas</div>
     <div id="a-pagar"></div>
 
-    <label for="socio">Socio: código de la web, teléfono o número</label>
+    <label for="socio">Código de la web, vale impreso o teléfono de socio</label>
     <div class="socio-fila">
       <input id="socio" autocomplete="off" placeholder="Escanea su código">
       <button id="buscar-socio" type="button">Buscar</button>
@@ -145,9 +147,11 @@
     <p id="regla-regalo" aria-live="polite" hidden></p>
     <div id="pagar-dolarones" hidden>
       <label for="dolarones">Pagar con Dolarones</label>
-      <input id="dolarones" type="number" min="0" step="1" inputmode="numeric" placeholder="0">
+      <div class="dolarones-fila"><input id="dolarones" type="number" min="0" step="0.01" inputmode="decimal" placeholder="0">
+        <button id="usar-maximo" type="button">Usar máximo</button></div>
       <p id="codigo-autorizacion" aria-live="polite">Para gastar, escanea el código que el cliente genera en su cuenta.</p>
     </div>
+    <p id="nota-vales" style="font-size:12px;color:#5b6478">El teléfono sólo acumula; para gastar hace falta el código.</p>
 
     <label for="forma">Forma de pago</label>
     <select id="forma">
@@ -169,6 +173,12 @@
     <details id="tickets">
       <summary>Ventas de hoy</summary>
       <div id="lista-tickets"></div>
+    </details>
+    <details style="margin-top:10px">
+      <summary>Reimprimir vale de otro día / venta sincronizada</summary>
+      <label for="vale-folio">Folio «Venta» del ticket</label>
+      <div class="socio-fila"><input id="vale-folio" placeholder="Folio completo de la venta" style="min-width:0;flex:1">
+        <button id="vale-por-folio" type="button">Imprimir vale</button></div>
     </details>
   </section>
 </main>
@@ -233,10 +243,10 @@
 </dialog>
 
 <script type="module">
-import { totales, agregar, efectivoAlcanza, dolaronesGanados, saldoCanjeable, MINIMO_REGALO } from '/venta.js';
+import { totales, agregar, efectivoAlcanza, dolaronesGanados, saldoCanjeable, maximoCanje, MINIMO_REGALO } from '/venta.js';
 import {
   reconectarImpresora, conectarImpresora, impresoraLista, imprimirTicket, abrirCajon, explicarErrorUsb, errorImpresora,
-  imprimirCorte, imprimirRetiro,
+  imprimirCorte, imprimirRetiro, imprimirVale,
 } from '/impresora.js';
 
 const $ = (id) => document.getElementById(id);
@@ -255,6 +265,11 @@ let cobrando = false;
 let socio = null;
 let codigoSocio = '';
 let busquedaSocio = 0;
+let valesHabilitados = false;
+fetch('/api/vales/config').then((r) => r.ok ? r.json() : {}).then((c) => {
+  valesHabilitados = c.habilitado === true;
+  if (valesHabilitados) $('nota-vales').textContent = 'Sin socio: 5 D por cada $100 completos, en vale de 30 días. Con socio: 10 D. El teléfono sólo acumula.';
+}).catch(() => {});
 const dolares = (centavos) => `${(centavos / 100).toLocaleString('es-MX')} D`;
 
 /* ---------- que caja es esta computadora (Issue #100) ---------- */
@@ -343,7 +358,7 @@ function pintar() {
       <div><div class="nombre">${escapar(l.nombre)}</div><div class="codigo">${escapar(l.codigo)}</div></div>
       <div>x${l.cantidad}</div>
       <div class="importe">${pesos(l.precio * l.cantidad)}</div>
-      <button type="button" data-quitar="${i}" aria-label="Quitar">✕</button>
+      <button type="button" data-quitar="${i}" aria-label="Quitar" ${cobrando ? 'disabled' : ''}>✕</button>
     </div>`).join('');
 
   const efectivo = Math.round(Number($('efectivo').value || 0) * 100);
@@ -354,8 +369,12 @@ function pintar() {
   $('a-pagar').textContent = usados ? `Dolarones −${pesos(usados)} · A pagar ${pesos(t.aPagar)}` : '';
   const canjeable = saldoCanjeable(socio, t.total);
   const autorizado = !usados || (codigoSocio && usados <= socio.maximo && Date.parse(socio.expira_en) > Date.now());
-  $('cobrar').disabled = cobrando || t.total === 0 || usados > canjeable || !autorizado;
-  $('codigo-autorizacion').textContent = codigoSocio
+  $('usar-maximo').disabled = cobrando || !codigoSocio || maximoCanje(socio, t.total) === 0;
+  for (const id of ['codigo', 'socio', 'buscar-socio', 'quitar-socio', 'dolarones', 'efectivo', 'forma', 'cancelar']) $(id).disabled = cobrando;
+  $('cobrar').disabled = cobrando || t.total === 0 || usados > t.total || usados > canjeable || !autorizado;
+  $('codigo-autorizacion').textContent = socio?.vale
+    ? `Vale impreso: ${dolares(socio.disponible)}. Vence ${new Date(socio.expira_en).toLocaleString('es-MX')}.`
+    : codigoSocio
     ? `El cliente autorizó hasta ${dolares(socio.maximo)}. Su código vence a las ${new Date(socio.expira_en).toLocaleTimeString('es-MX')}.`
       + (!autorizado ? ' Pide otro código o reduce los D solicitados.' : '')
     : 'Para gastar, escanea el código que el cliente genera en su cuenta.';
@@ -391,7 +410,8 @@ function buscarPieza(codigo) {
 }
 
 function agregarCodigo(codigo) {
-  if (codigo.trim().startsWith('DC-')) {
+  if (cobrando) return;
+  if (/^D[CP]-/.test(codigo.trim())) {
     $('socio').value = codigo.trim();
     buscarSocio();
     return;
@@ -479,7 +499,7 @@ function pintarSocio() {
   $('quitar-socio').hidden = !socio;
   $('pagar-dolarones').hidden = !socio || socio.disponible === 0;
   $('socio-info').innerHTML = socio
-    ? `<b>#${socio.numero} · ${escapar(socio.nombre)}</b> — ${dolares(socio.disponible)} disponibles`
+    ? (socio.vale ? '<b>Vale impreso</b>' : `<b>#${socio.numero} · ${escapar(socio.nombre)}</b>`) + ` — ${dolares(socio.disponible)} disponibles`
       + (socio.por_liberar ? ` (+${dolares(socio.por_liberar)} desde mañana)` : '')
     : '';
 }
@@ -494,6 +514,7 @@ function quitarSocio() {
 }
 
 async function buscarSocio() {
+  if (cobrando) return;
   const q = $('socio').value.trim();
   if (!q) return;
   quitarSocio();
@@ -501,8 +522,11 @@ async function buscarSocio() {
   idVenta = null;
   pintar();
   try {
-    const esCodigo = q.startsWith('DC-');
-    const r = esCodigo
+    const esVale = q.startsWith('DP-');
+    const esCodigo = q.startsWith('DC-') || esVale;
+    const r = esVale
+      ? await fetch('/api/vales/buscar', { method:'POST', headers:{ 'content-type':'application/json' }, body:JSON.stringify({ codigo:q }) })
+      : esCodigo
       ? await fetch('/api/socios/codigo', { method:'POST', headers:{ 'content-type':'application/json' }, body:JSON.stringify({ codigo:q }) })
       : await fetch(`/api/socios?q=${encodeURIComponent(q)}`);
     const cuerpo = await r.json();
@@ -516,7 +540,7 @@ async function buscarSocio() {
     }
     socio = cuerpo;
     codigoSocio = esCodigo ? q : '';
-    $('socio').value = '#' + socio.numero;
+    $('socio').value = esVale ? 'Vale impreso' : '#' + socio.numero;
     $('dolarones').value = '';
     idVenta = null;
     $('socio-info').style.color = '';
@@ -534,6 +558,11 @@ $('buscar-socio').addEventListener('click', buscarSocio);
 $('socio').addEventListener('keydown', (e) => { if (e.key === 'Enter') buscarSocio(); });
 $('quitar-socio').addEventListener('click', () => { quitarSocio(); idVenta = null; pintar(); });
 $('dolarones').addEventListener('input', () => { idVenta = null; pintar(); });
+$('usar-maximo').addEventListener('click', () => {
+  $('dolarones').value = String(maximoCanje(socio, totales(lineas).total) / 100);
+  idVenta = null;
+  pintar();
+});
 
 /**
  * Con Dolarones el cobro espera al servidor: el saldo solo existe alla, y
@@ -549,7 +578,8 @@ async function cobrarConDolarones(venta, t) {
   let respuesta;
   try {
     respuesta = await fetch('/api/ventas', {
-      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ...venta, codigo_socio:codigoSocio }),
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ...venta,
+        ...(socio.vale ? { codigo_vale:codigoSocio } : { codigo_socio:codigoSocio }) }),
     });
   } catch {
     $('aviso').textContent = 'Sin red: no se pudo cobrar con Dolarones. Intenta otra vez o cobra sin Dolarones.';
@@ -563,6 +593,9 @@ async function cobrarConDolarones(venta, t) {
     return false;
   }
   // Un reenvio de la misma venta ya confirmada devuelve `duplicada` sin saldo: se imprime lo local.
+  venta.vale_emitido = cuerpo.vale_emitido;
+  venta.vale_usado = cuerpo.vale_usado;
+  if (socio.vale) return { vale:true };
   const saldo = cuerpo.saldo ?? { disponible: socio.disponible - venta.dolarones };
   return { numero: socio.numero, ganados: cuerpo.ganados ?? dolaronesGanados(t.aPagar), saldo: saldo.disponible };
 }
@@ -588,7 +621,7 @@ async function cobrar() {
   }
 
   cobrando = true;
-  $('cobrar').disabled = true;
+  pintar();
   try {
     idVenta ??= crypto.randomUUID();
     const venta = {
@@ -602,10 +635,30 @@ async function cobrar() {
       dolarones: usados,
       caja: cajaActual(),
     };
-    let socioTicket = socio && { numero: socio.numero, ganados: dolaronesGanados(t.aPagar), saldo: socio.disponible };
+    let socioTicket = socio && !socio.vale && { numero: socio.numero, ganados: dolaronesGanados(t.aPagar), saldo: socio.disponible };
     if (usados > 0) {
       socioTicket = await cobrarConDolarones(venta, t);
       if (!socioTicket) return;
+      if (socioTicket.vale) socioTicket = null;
+    } else if ((!socio || socio.vale) && valesHabilitados) {
+      // Confirmar antes de imprimir un vale. Timeout/red caídos conservan la
+      // venta en cola con el MISMO id; el ticket sólo dice «pendiente».
+      let r, cuerpo;
+      try {
+        r = await fetch('/api/ventas', { method:'POST', headers:{ 'content-type':'application/json' },
+          body:JSON.stringify(venta), signal:AbortSignal.timeout(5000) });
+        cuerpo = await r.json();
+      } catch { /* respuesta desconocida: reintento idempotente al sincronizar */ }
+      if (r && cuerpo && !r.ok && r.status < 500) {
+        $('aviso').textContent = cuerpo.error || 'No se pudo confirmar la venta.';
+        $('aviso').style.color = '#D72B32';
+        return;
+      }
+      if (r?.ok && cuerpo) venta.vale_emitido = cuerpo.vale_emitido;
+      else {
+        await store('ventas', 'readwrite', (s) => s.put(venta));
+        venta.vale_pendiente = dolaronesGanados(t.aPagar, 5) > 0;
+      }
     } else {
       await store('ventas', 'readwrite', (s) => s.put(venta));   // el ticket existe aunque no haya red
     }
@@ -626,9 +679,10 @@ async function cobrar() {
     }
     await store('catalogo', 'readwrite', (s) => s.put({ clave: 'piezas', datos: [...catalogo.values()], fecha: Date.now() }));
 
-    const ganados = socio ? dolaronesGanados(t.aPagar) : 0;
+    const ganados = socio && !socio.vale ? dolaronesGanados(t.aPagar) : venta.vale_emitido?.importe || 0;
     $('aviso').textContent = (forma === 'efectivo' && efectivo > 0 ? `Cobrado. Cambio ${pesos(t.cambio)}` : 'Cobrado.')
       + (ganados ? ` · Ganó ${dolares(ganados)}` : '');
+    if (venta.vale_pendiente) $('aviso').textContent += ' · Vale pendiente de confirmar; no se imprimió un código de gasto.';
     $('aviso').style.color = '#1f7a4d';
     lineas = [];
     idVenta = null;
@@ -724,6 +778,20 @@ $('rechazadas').addEventListener('click', async (e) => {
   }
 });
 
+async function reimprimirValeDeVenta(id, boton) {
+  boton.disabled = true;
+  try {
+    const r = await fetch(`/api/ventas/${encodeURIComponent(id)}/vale`, { method:'POST' });
+    const vale = await r.json();
+    if (!r.ok) throw new Error(vale.error || 'No se encontró el vale.');
+    const impreso = await imprimirVale(vale);
+    pintarImpresora();
+    $('aviso').textContent = impreso ? 'Vale reimpreso: mismo saldo y vencimiento.' : 'Revisa la impresora e intenta otra vez.';
+  } catch (error) { $('aviso').textContent = error.message || 'Sin red: no se pudo traer el vale.'; }
+  finally { boton.disabled = false; }
+}
+$('vale-por-folio').addEventListener('click', () => reimprimirValeDeVenta($('vale-folio').value.trim(), $('vale-por-folio')));
+
 /** Devoluciones y errores de cobro. Necesita red: deshacer no puede quedar encolado. */
 async function cargarTickets() {
   if (!$('tickets').open) return;
@@ -737,7 +805,7 @@ async function cargarTickets() {
             <b>${pesos(v.total)}</b> · ${new Date(v.creado_en).toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' })}
             <div class="piezas">${escapar(v.piezas)}</div>
           </div>
-          ${v.cancelada ? '<span>cancelada</span>' : `<button type="button" data-cancelar="${v.id}">Cancelar</button>`}
+          ${v.cancelada ? '<span>cancelada</span>' : `<div><button type="button" data-vale="${v.id}">Imprimir vale</button><button type="button" data-cancelar="${v.id}">Cancelar</button></div>`}
         </div>`).join('');
   } catch {
     $('lista-tickets').innerHTML = '<p style="font-size:13px;color:#D72B32">Sin red: para cancelar una venta hace falta conexión.</p>';
@@ -748,6 +816,10 @@ $('tickets').addEventListener('toggle', cargarTickets);
 // Cancelar pide el motivo en la propia fila (nada de prompt()/confirm() nativos,
 // que congelan la pestana): un clic abre el campo, otro clic ya confirmado envia.
 $('lista-tickets').addEventListener('click', async (e) => {
+  if (e.target.dataset?.vale) {
+    await reimprimirValeDeVenta(e.target.dataset.vale, e.target);
+    return;
+  }
   const idCancelar = e.target.dataset?.cancelar;
   const idConfirmar = e.target.dataset?.confirmarCancelar;
   const idVolver = e.target.dataset?.volverCancelar;
@@ -780,7 +852,7 @@ $('lista-tickets').addEventListener('click', async (e) => {
     const cuerpo = await r.json();
     $('aviso').textContent = r.ok
       ? `Venta cancelada. Devuelve ${pesos(cuerpo.devuelto ?? 0)} y regresa la pieza al anaquel.`
-        + (cuerpo.dolarones ? ` Los ${dolares(cuerpo.dolarones)} regresaron al saldo del socio.` : '')
+        + (cuerpo.dolarones ? ` Los ${dolares(cuerpo.dolarones)} regresaron al socio o al mismo vale, con su vencimiento original.` : '')
       : (cuerpo.error ?? 'No se pudo cancelar.');
     $('aviso').style.color = r.ok ? '#1f7a4d' : '#D72B32';
     await cargarTickets();

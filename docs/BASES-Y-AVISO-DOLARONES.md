@@ -20,7 +20,7 @@ La caja y el portal registran la versión aceptada en cada alta (`BASES_APROBADA
 
 - Sirven para cualquier producto de la tienda.
 - Se pueden usar completos o en partes. Lo que no se usa se queda en el saldo.
-- No se cambian por dinero, no dan cambio, no se venden y no se transfieren a otra persona.
+- No se cambian por dinero ni dan cambio. La cuenta de socio no se vende ni transfiere. `[ABOGADO: revisar tratamiento de los vales anónimos al portador, copias y pérdida del papel.]`
 
 **6. Cómo se ganan.** Por cada $100.00 completos pagados en efectivo o con tarjeta en una misma compra, el socio gana 10 Dolarones. Ejemplos: una compra de $99 no gana; una de $250 gana 20; una de $1,999 gana 190.
 
@@ -28,6 +28,8 @@ La caja y el portal registran la versión aceptada en cada alta (`BASES_APROBADA
 - El socio debe identificarse con su teléfono o número de socio antes de pagar. Una compra ya cobrada no se acumula después, y las compras hechas antes del 2 de octubre de 2026 no generan Dolarones.
 - Lo ganado se puede usar a partir del día siguiente a la compra.
 - Cada Dolarón ganado vence 12 meses después de la compra que lo generó.
+
+**6 bis. Sin registro ni teléfono (decisión de Isaac, #133).** Una compra sin socio genera un vale impreso con barcode por **5 Dolarones por cada $100 completos** pagados en dinero: $99 → 0 D; $250 → 10 D; $1,999 → 95 D. No se otorgan a la vez el crédito de socio y un vale por la misma compra. El vale se puede gastar desde el día siguiente y vence exactamente **30 días desde su emisión confirmada**, a la fecha/hora impresas. Puede usarse en partes; el saldo no usado mantiene ese vencimiento. No se requieren nombre, teléfono ni membresía. El código identifica un saldo en el servidor: copiarlo no aumenta el valor, pero quien tenga el código podría gastar ese saldo. Reimpresión y devolución no reinician el plazo. Sin red, no se entrega un código gastable hasta confirmar la venta; el ticket permite solicitar el vale después con su folio. `[ABOGADO/ISAAC: revisar aviso en caja, elegibilidad, pérdida/copias y procedimiento de devolución cuando ya se gastó el vale.]`
 
 **7. Promoción de apertura.** Se entregan 100 premios, por un total de 15,000 Dolarones:
 
@@ -56,6 +58,8 @@ La caja y el portal registran la versión aceptada en cada alta (`BASES_APROBADA
 
 **8. Cómo se usan.** Al pagar, el socio inicia sesión en el portal, elige el máximo de Dolarones que autoriza y muestra su código de barras en caja. El código dura cinco minutos y permite un solo canje; generar otro invalida el anterior. Un código con máximo cero identifica al socio para acumular, sin autorizar gasto. Dar solo el teléfono o número de socio tampoco autoriza gasto. Los Dolarones se descuentan primero de los que vencen antes. El resto de la compra se paga en efectivo o con tarjeta. El saldo aparece en el ticket.
 
+El cliente sin registro presenta su vale impreso. En caja se consulta su saldo y vigencia; «Usar máximo» cubre el total de la compra o usa el saldo elegible, lo que sea menor. También se puede indicar un importe parcial. En esta versión se usa un vale o una membresía por ticket, no varios a la vez.
+
 **9. Seguridad del acceso.** No compartas códigos SMS, tu sesión ni el código de barras: quien copie un código vigente podría usarlo hasta el máximo autorizado. En dispositivos compartidos, no conserves la sesión y ciérrala al terminar. Generar otro código o cerrar sesión invalida el anterior (requiere conexión). El encargado revisa presencialmente la vinculación de una membresía previa; un teléfono coincidente no la vincula automáticamente. `[ABOGADO: aprobar recuperación ante pérdida de acceso o número reasignado; no hay recuperación automática de una cuenta ya vinculada.]`
 
 **10. Devoluciones y cancelaciones.** Si se cancela o devuelve una compra, los Dolarones usados en ella regresan al saldo y los que se ganaron con ella se retiran. Los derechos del consumidor por ley no cambian por este programa. `[ABOGADO: confirmar redacción y qué pasa si lo ganado ya se gastó o si los Dolarones devueltos ya vencieron.]`
@@ -69,6 +73,8 @@ La caja y el portal registran la versión aceptada en cada alta (`BASES_APROBADA
 **Responsable.** `[NOMBRE O RAZÓN SOCIAL DEL TITULAR]` (El Dolarón), Jardín Hidalgo 129, Zona Centro, Soledad de Graciano Sánchez, S.L.P., C.P. 78430.
 
 **Datos que tratamos.** Nombre, teléfono celular, correo opcional en registros presenciales y el historial de compras, Dolarones ganados, usados y saldo. Para el acceso web se conserva el identificador del proveedor SMS y la versión de bases aceptada. No hay PIN de socio; el servidor conserva una huella del código temporal, su límite, vigencia y uso, no el código legible. No pedimos datos sensibles, domicilio, fecha de nacimiento ni identificación oficial.
+
+Para los vales sin registro se conserva únicamente información de la compra/vale: código legible para reimpresión por el personal autorizado, venta emisora, saldo, movimientos y vigencia; no se crea un perfil de socio ni se pide teléfono o nombre. `[ABOGADO: confirmar aviso y conservación aplicables a estos registros.]`
 
 El portal propuesto usaría un proveedor de verificación de teléfono por SMS `[Google Firebase Auth / Identity Platform: propuesta por confirmar antes del alta real]`. `[ABOGADO: revisar proveedor, datos tratados, encargado, transferencias y conservación, así como el procedimiento ante un número reciclado o cambio de teléfono.]`
 

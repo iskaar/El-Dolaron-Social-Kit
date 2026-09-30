@@ -53,6 +53,14 @@ El cliente elige el máximo autorizado; el código vence en cinco minutos y solo
 
 **Entrega, no despliegue:** código y pruebas para revisión. Sigue pendiente configurar Firebase/SMS y límites, dominio público separado de Access, bases/aviso finales, conciliación de regalos legados, migraciones y ensayo con dos cajas y el lector físico sobre una pantalla. No activar SMS pagado ni registro público durante desarrollo. La caja debe integrar también los cambios pendientes de descuentos antes de desplegar; ver [contrato y pasos de lanzamiento](CONTRATO-PORTAL.md).
 
+### 0.4. Alternativa sin teléfono o registro — #133
+
+Isaac confirmó conservar 10% para socios y dar 5% en vales impresos, con vida de **30 días**, a compradores sin registro. Se conserva la regla por bloques completos de $100 monetarios: 10 D socio / 5 D papel. El teléfono de socio sólo acumula; canje sigue requiriendo barcode autorizado. «Usar máximo» en caja respeta total, saldo elegible y autorización. No cambia el regalo de apertura ni la vigencia de 12 meses de créditos de socio.
+
+Se reutilizan Worker/D1, impresora Epson y lector, sin otro proveedor. Vale al portador `DP-…`, un vale o membresía por ticket, saldo parcial y vencimiento fijo. Emisión sólo después de confirmar venta; cola offline conserva ID y entrega ticket pendiente, nunca barcode sin respaldo. Reimpresión por folio/ticket conserva saldo y fecha. Cancelaciones con vale ya gastado requieren resolución presencial. Contrato y pasos en `CONTRATO-PORTAL.md`.
+
+**No habilitado:** migración 019 y `VALES_ABIERTOS=si` pendientes de revisión, respaldo, términos legales finales y ensayo físico de código/impresión/dos cajas. Sin datos reales, despliegue ni emisión pública en desarrollo. Este bloque depende del PR #132; coordinar descuentos #120 antes de producción.
+
 ### 1. Propuesta original del 24/09 (referencia histórica)
 
 Las decisiones de la sección 0 prevalecen sobre las fechas, reglas, proveedores y alcance propuestos a continuación.

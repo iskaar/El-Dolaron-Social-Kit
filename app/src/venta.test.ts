@@ -1,7 +1,7 @@
 // node --test src/venta.test.ts
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { totales, agregar, efectivoAlcanza, saldoCanjeable } from '../public/venta.js';
+import { totales, agregar, efectivoAlcanza, saldoCanjeable, dolaronesGanados, maximoCanje } from '../public/venta.js';
 
 interface Linea { codigo: string; nombre: string; precio: number; cantidad: number }
 const pieza = (codigo: string, precio: number) => ({ codigo, nombre: codigo, precio });
@@ -81,4 +81,20 @@ test('con Dolarones, el efectivo se compara contra lo que falta pagar', () => {
   assert.equal(t.aPagar, 20000);
   assert.equal(t.cambio, 0);
   assert.equal(t.falta, 0);
+});
+
+test('papel: 5 D por bloque; Usar máximo cubre total o saldo elegible sin exceder autorización', () => {
+  assert.equal(dolaronesGanados(9900, 5), 0);
+  assert.equal(dolaronesGanados(10000, 5), 500);
+  assert.equal(dolaronesGanados(25000, 5), 1000);
+  assert.equal(dolaronesGanados(199900, 5), 9500);
+  const s = { disponible:50000, maximo:50000, regalo_disponible:0, expira_en:'2030-01-01T00:00:00Z' };
+  const ahora = Date.parse('2026-10-02T00:00:00Z');
+  assert.equal(maximoCanje(s, 30000, ahora), 30000);
+  assert.equal(maximoCanje({ ...s, disponible:12000 }, 30000, ahora), 12000);
+  assert.equal(maximoCanje({ ...s, maximo:5000 }, 30000, ahora), 5000);
+  assert.equal(maximoCanje({ ...s, regalo_disponible:49000 }, 30000, ahora), 1000);
+  assert.equal(maximoCanje({ ...s, maximo:undefined }, 30000, ahora), 0, 'teléfono no autoriza');
+  assert.equal(maximoCanje({ ...s, expira_en:'fecha inválida' }, 30000, ahora), 0);
+  assert.equal(maximoCanje(s, 30000, Date.parse(s.expira_en)), 0);
 });

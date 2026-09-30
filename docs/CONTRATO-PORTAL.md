@@ -1,4 +1,4 @@
-# Contrato del portal Dolarones — Issues #109 y #129
+# Contrato del portal Dolarones — Issues #109, #129 y #133
 
 **Estado:** backend y pantallas preparados para revisión; registro público desactivado. Sin proveedor SMS, dominio público ni despliegue de este cambio. Los importes son centavos enteros: `100` = 1 D o $1 MXN. El recibo es comprobante de compra, no factura fiscal. La decisión de Isaac del 29/09 mantiene teléfono + SMS y elimina el PIN del socio; no modifica el PIN de cajeros.
 
@@ -48,3 +48,24 @@ Aplicar migraciones pendientes antes del Worker: `014-minimo-regalo`, `016-porta
 2. Definir hostname público real en `HOST_PORTAL` y agregarlo a `routes` de Wrangler tras verificar DNS y aislamiento; `workers_dev` y preview siguen apagados. No usar Access para clientes.
 3. Obtener revisión legal, razón social/RFC y correo de privacidad. Publicar textos finales, sin corchetes, en `PORTAL_BASES_TEXTO` y `PORTAL_AVISO_TEXTO`; definir versión en `BASES_APROBADAS_VERSION`, instante UTC en `PROMOCION_INICIO`, y sólo al final `PORTAL_REGISTRO_ABIERTO=si`. Estos valores están ausentes en el repositorio.
 4. Conciliar regalos legados, revisión cruzada de #129/#110 y ensayo con dos cajas, impresión, cancelación, red caída, código copiado/vencido y recuperación. Probar el lector físico leyendo Code 128 desde un teléfono: el código existe, pero la compatibilidad del hardware aún no está comprobada. Wallet queda pospuesto.
+
+## Vales sin registro — decisión de Isaac, #133
+
+Socios conservan **10 D por cada $100 completos** monetarios, liberados al día siguiente y vigentes 12 meses. Dar el teléfono sólo acumula: no autoriza gasto. Sin socio, la compra puede emitir **5 D por cada $100 completos**, en un vale impreso, sin teléfono, nombre ni alta. Ejemplo $250: 20 D para socio o 10 D en papel, nunca ambos. La parte pagada con D no genera crédito. Se conserva la aritmética por bloques aprobada; no se convierte en porcentaje proporcional sobre centavos.
+
+- `DP-…` es un identificador aleatorio de 96 bits, no un monto modificable. D1 conserva el código legible **sólo para reimpresión autorizada del personal**, con venta emisora, importe, restante y vigencia. Esto difiere del código temporal del socio, del que sólo se conserva hash. No exponer códigos de papel en logs, listas de ventas, URLs, exports públicos ni portal. Quien tenga el papel o una copia puede gastar; las copias comparten saldo, no generan crédito adicional.
+- Disponible desde la siguiente medianoche de la tienda, como lo ganado por compras. Vence **exactamente 30 días desde la emisión confirmada del servidor** (UTC), no al final del día 30. El ticket imprime disponibilidad y hora de vencimiento en America/Mexico_City. Gasto parcial, reimpresión o devolución no amplían el plazo. El regalo de apertura y su mínimo de $1,000 no se mezclan con estos vales ganados.
+- Un vale o una membresía por ticket; combinar varios o transferir el vale a una cuenta no está implementado. «Usar máximo» aplica el menor de total, saldo elegible y máximo autorizado. Para papel, el máximo es su saldo actual; para socios respeta la autorización del portal. Elegir por teléfono no habilita ese botón ni canje.
+- Emisión, canje, movimiento, venta y stock se confirman en un batch. No imprimir barcode gastable antes de respuesta confirmada; un timeout/red caída conserva el mismo ID en la cola y el ticket dice «vale pendiente». Al sincronizar, «Ventas de hoy → Imprimir vale» o «Reimprimir vale → folio Venta» recupera el mismo vale, incluso de otro día. Una venta rechazada no genera vale; revisar antes de devolver mercancía o dinero.
+- Reimprimir devuelve saldo actual y vencimiento original, no el importe inicial gastado. Cancelar el canje restaura al mismo vale sin ampliar vida; cancelar la compra emisora retira su vale. Si aún tiene crédito gastado, responde 409 y revierte cancelación/stock/dinero: resolución presencial, no ajuste silencioso. Esto no define derechos legales de devolución; completar el procedimiento con Isaac/abogado antes de lanzar.
+
+### API del personal, aislada del host público
+
+| Ruta | Entrada | Resultado |
+| --- | --- | --- |
+| `GET /api/vales/config` | — | `{habilitado}`: `VALES_ABIERTOS=si` y bases/aviso preparados; apagado por defecto |
+| `POST /api/vales/buscar` | `{codigo}` por cuerpo, nunca URL | `{vale:true, disponible, maximo, expira_en, regalo_disponible:0, por_liberar:0}`; código aún no disponible/vencido/agotado/cancelado: 403 |
+| `POST /api/ventas` | contrato anterior + `codigo_vale`, `dolarones`, sin `cliente_id` para papel | `vale_emitido` y `vale_usado` con código, importe, restante, disponibilidad y vencimiento. Reintento no emite otro vale |
+| `POST /api/ventas/:id/vale` | folio de venta | Vale vigente para reimpresión, sólo personal con sesión de caja; no recupera vale vencido/agotado/cancelado |
+
+Aplicar `migracion-019-vales.sql` después de las anteriores, con respaldo y despliegue coordinado. No activa emisión por sí sola: configurar `VALES_ABIERTOS=si` únicamente después de revisar estos términos en los textos legales finales. Cerrar emisión no cancela vales existentes. La Epson usa [Code 128 nativo ESC/POS GS k](https://download4.epson.biz/sec_pubs/pos/reference_en/escpos/gs_lk.html), sin imágenes raster; pendiente ensayo físico de impresión/corte y lector. El módulo de barra está en `MODULO_VALE`, inicialmente 2 puntos para papel de 80 mm. No requiere Firebase ni SMS para el cliente del vale.

@@ -285,7 +285,7 @@ export async function sentenciasDeCancelacion(env: Env, ventaId: string, autor: 
   ];
 }
 
-export const codigoAleatorio = (prefijo: 'DC' | 'DV') => prefijo + '-' +
+export const codigoAleatorio = (prefijo: 'DC' | 'DV' | 'DP') => prefijo + '-' +
   btoa(String.fromCharCode(...crypto.getRandomValues(new Uint8Array(12)))).replace(/\+/g, '-').replace(/\//g, '_');
 
 export async function hashCodigo(codigo: string): Promise<string | null> {

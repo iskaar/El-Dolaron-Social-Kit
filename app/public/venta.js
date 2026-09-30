@@ -25,8 +25,8 @@ export function totales(lineas, efectivo = 0, dolarones = 0) {
  * 26/09): $99 no gana, $250 gana 20. Lo pagado con Dolarones no cuenta. En
  * centavos, igual que todo: 1 D = 100.
  */
-export function dolaronesGanados(pagado) {
-  return Math.floor(Math.max(0, pagado) / 10000) * 1000;
+export function dolaronesGanados(pagado, tasa = 10) {
+  return Math.floor(Math.max(0, pagado) / 10000) * tasa * 100;
 }
 
 /** Ticket minimo ANTES de descontar Dolarones para usar regalos de apertura. */
@@ -36,6 +36,12 @@ export const MINIMO_REGALO = 1000_00;
 export function saldoCanjeable(socio, total) {
   if (!socio) return 0;
   return total >= MINIMO_REGALO ? socio.disponible : Math.max(0, socio.disponible - socio.regalo_disponible);
+}
+
+/** «Usar máximo»: respeta ticket, saldo elegible, autorización y vencimiento. */
+export function maximoCanje(socio, total, ahora = Date.now()) {
+  if (!socio || !Number.isSafeInteger(socio.maximo) || !(Date.parse(socio.expira_en) > ahora)) return 0;
+  return Math.max(0, Math.min(total, saldoCanjeable(socio, total), socio.maximo));
 }
 
 /** Agrega una pieza al ticket, juntando lineas repetidas del mismo codigo. */

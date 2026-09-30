@@ -28,6 +28,8 @@ declare global {
     BASES_APROBADAS_VERSION?: string;
     PORTAL_REGISTRO_ABIERTO?: string;
     PROMOCION_INICIO?: string;
+    /** Emisión de vales anónimos: ausente = apagada, requiere bases finales. */
+    VALES_ABIERTOS?: string;
   }
 }
 

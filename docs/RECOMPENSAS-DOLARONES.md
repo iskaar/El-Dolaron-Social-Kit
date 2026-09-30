@@ -22,7 +22,8 @@ Este documento conserva la investigación y el diseño del sistema de recompensa
 | Día de Descarga (resurtido) | Martes, **tentativo** |
 | Dolarones: valor | 1 Dolarón = $1 MXN |
 | Dolarones: uso | Funcionan como dinero dentro de la tienda (cualquier producto) y también para premios de la vitrina |
-| Dolarones: acumulación | 10 Dolarones por cada $100 de compra (10%) |
+| Dolarones: acumulación | Socios: 10 D por cada $100 completos monetarios (10%). Sin socio: 5 D por cada $100 completos en vale impreso (5%), confirmado en #133; no ambos por la misma compra |
+| Vale sin teléfono/registro (#133) | Barcode impreso al portador, saldo parcial rastreado en servidor, 30 días exactos desde emisión confirmada. Disponible desde el día siguiente, como compras. Reimpresión/canje no amplían vida; teléfono sólo acumula a socio, nunca autoriza gastar |
 | Bono por visita | Compra mínima de $99 |
 | Vigencia | 12 meses desde que se ganan |
 | Hora Dorada | Sí, si la dinámica es atractiva: 60 min antes de abrir el día de descarga, primeros en ver abrir las cajas, máximo 5 pases |

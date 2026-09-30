@@ -88,6 +88,8 @@ export function permiso(pathname: string, metodo: string): Regla {
   if (ruta === '/api/calibracion') return CAPTURA;
   if (ruta === '/api/catalogo') return CAJA;
   if (ruta === '/api/socios') return CAJA;
+  if (ruta === '/api/vales/config' && metodo === 'GET') return CAJA;
+  if (ruta === '/api/vales/buscar' && metodo === 'POST') return CAJA;
   if (ruta === '/api/socios/codigo' && metodo === 'POST') return CAJA;
   if (ruta === '/api/socios/legal' && metodo === 'GET') return CAJA;
   if (ruta === '/api/portal/llegada' && metodo === 'POST') return CAJA;
