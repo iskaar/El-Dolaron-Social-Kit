@@ -42,6 +42,7 @@ Este documento conserva la investigación y el diseño del sistema de recompensa
 | Operación (26/09) | 2 cajas, 3 empleados más Isaac; Isaac resuelve las incidencias de saldo |
 | Portal de clientes | Registro y consulta de saldo en línea; compra y canje en tienda física |
 | Identidad (29/09) | Sin PIN de socio. Login teléfono + SMS; barcode temporal personal en el portal, máximo de gasto elegido por el cliente, cinco minutos y un solo canje. Teléfono/número permiten acumular, no gastar. Firebase Auth/Identity Platform sigue pendiente de configuración; no se han iniciado envíos. Los PIN del personal no cambian |
+| Decisiones del 29/09 (#135) | Titular: Maria Teresa Ferrusca Perez. Inicio de la promoción: 2 oct 2026, 11:00. Edad mínima: 18 años declarados. Aviso de terminación del programa: 30 días. Conservación de datos tras la baja: 12 meses. Medios de privacidad: privacidad@eldolaron.com y WhatsApp 444 543 7754 (el 444 854 5980 es fijo, no WhatsApp). Lo ganado se libera a las 00:00 del día siguiente, no en la siguiente compra. Vale perdido: no se repone. Primera llegada con premio en línea usado o vencido: pierde los 500 D. Cancelar una compra cuyo crédito ya se gastó: se detiene, en socios y vales |
 | Escala prevista | Hasta 1,000 clientes distintos al inicio y 10,000 durante el primer año; no equivale a usuarios simultáneos |
 | Desarrollo y presupuesto inicial | Claude y Codex, usando suscripciones existentes; reducir costos recurrentes hasta que opere la tienda. El plan detalla la propuesta de $50–51 USD/mes de servicios |
 

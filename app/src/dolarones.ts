@@ -256,10 +256,10 @@ export async function sentenciasDeVenta(env: Env, p: {
  * Deshacer una venta: los Dolarones usados regresan a sus lotes y los ganados
  * se retiran. Para el mismo batch que marca la venta cancelada.
  *
- * ponytail: si el cliente ya gasto parte de lo ganado, solo se retira lo que
- * queda y la diferencia (a lo mas 10% de la venta) la absorbe la tienda; el
- * plan propone registrarla como deuda. Y lo que regresa a un lote ya vencido
- * se pierde; la restitucion de 30 dias del plan espera aprobacion.
+ * Decision de Isaac (#135): si el cliente ya gasto parte de lo ganado, la
+ * cancelacion no procede sola (el trigger aborta el batch) y se aclara en la
+ * tienda, igual que con los vales. ponytail: lo que regresa a un lote ya
+ * vencido se pierde; la restitucion de 30 dias del plan espera aprobacion.
  */
 export async function sentenciasDeCancelacion(env: Env, ventaId: string, autor: string, ahora: string): Promise<D1PreparedStatement[]> {
   const { results: canjes } = await env.DB.prepare(
@@ -281,7 +281,8 @@ export async function sentenciasDeCancelacion(env: Env, ventaId: string, autor: 
        select cliente_id, id, venta_id, 'reverso_compra', -restante, ?, ? from dolarones_lotes
        where venta_id = ? and restante > 0`,
     ).bind(autor, ahora, ventaId),
-    env.DB.prepare('update dolarones_lotes set restante = 0 where venta_id = ?').bind(ventaId),
+    // -1 si ya se gasto algo: lote_no_negativo aborta la cancelacion completa.
+    env.DB.prepare('update dolarones_lotes set restante = case when restante = importe then 0 else -1 end where venta_id = ?').bind(ventaId),
   ];
 }
 

@@ -265,10 +265,21 @@ let cobrando = false;
 let socio = null;
 let codigoSocio = '';
 let busquedaSocio = 0;
-let valesHabilitados = false;
-fetch('/api/vales/config').then((r) => r.ok ? r.json() : {}).then((c) => {
+// Sin red al abrir la caja vale el último estado conocido; sin dato se asume
+// encendido, para que el ticket avise «vale pendiente» en vez de callar (#135).
+const vistoVales = () => { try { return localStorage.getItem('vales'); } catch { return null; } };
+let valesHabilitados = vistoVales() !== 'no';
+const notaVales = () => {
+  $('nota-vales').textContent = valesHabilitados
+    ? 'Sin socio: 5 D por cada $100 completos, en vale de 30 días. Con socio: 10 D. El teléfono sólo acumula.'
+    : 'El teléfono sólo acumula; para gastar hace falta el código.';
+};
+notaVales();
+fetch('/api/vales/config').then((r) => r.ok ? r.json() : null).then((c) => {
+  if (!c) return;
   valesHabilitados = c.habilitado === true;
-  if (valesHabilitados) $('nota-vales').textContent = 'Sin socio: 5 D por cada $100 completos, en vale de 30 días. Con socio: 10 D. El teléfono sólo acumula.';
+  try { localStorage.setItem('vales', valesHabilitados ? 'si' : 'no'); } catch { /* sin almacenamiento */ }
+  notaVales();
 }).catch(() => {});
 const dolares = (centavos) => `${(centavos / 100).toLocaleString('es-MX')} D`;
 

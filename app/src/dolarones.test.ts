@@ -121,6 +121,20 @@ test('saldo mixto: ticket menor al mínimo usa sólo compras y cancelar conserva
   t.db.close();
 });
 
+test('cancelar se detiene si lo ganado con esa compra ya se gastó (#135)', async () => {
+  const t = abrir(), socio = (await t.alta()).cuerpo;
+  const compra = venta({ cliente_id:socio.id, codigo_socio:await codigoPrueba(t.db, socio.id), efectivo:1000_00 });
+  assert.equal((await t.pedir('/api/ventas', compra)).status, 201);
+  t.db.prepare("update dolarones_lotes set disponible_desde = '2026-01-01' where origen='compra'").run();
+  t.db.prepare("update dolarones_lotes set restante = 0 where origen='regalo'").run();
+  assert.equal((await t.pagar(socio, { dolarones:100, efectivo:1000_00 })).status, 201);
+  const r = await t.pedir('/api/ventas/' + compra.id + '/cancelar', { motivo:'prueba' });
+  assert.equal(r.status, 409);
+  assert.equal(t.db.prepare('select cancelada from ventas where id=?').get(compra.id)!.cancelada, 0);
+  assert.equal(t.db.prepare("select restante from dolarones_lotes where venta_id=?").get(compra.id)!.restante > 0, true);
+  t.db.close();
+});
+
 test('pago parcial: descuenta, gana sólo sobre dinero y cuadra corte', async () => {
   const t = abrir(), socio = (await t.alta()).cuerpo;
   const r = await t.pagar(socio, { dolarones:12000, efectivo:88000 });

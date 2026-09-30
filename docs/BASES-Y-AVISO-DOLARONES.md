@@ -10,11 +10,11 @@ La caja y el portal registran la versión aceptada en cada alta (`BASES_APROBADA
 
 ## Parte 1. Bases del programa Dolarones
 
-**1. Organizador.** `[NOMBRE O RAZÓN SOCIAL Y RFC DEL TITULAR]`, con nombre comercial El Dolarón, en Jardín Hidalgo 129, Zona Centro, Soledad de Graciano Sánchez, San Luis Potosí, C.P. 78430.
+**1. Organizador.** Maria Teresa Ferrusca Perez, RFC `[RFC DEL TITULAR]`, con nombre comercial El Dolarón, en Jardín Hidalgo 129, Zona Centro, Soledad de Graciano Sánchez, San Luis Potosí, C.P. 78430.
 
-**2. Vigencia del programa.** Del 2 de octubre de 2026 hasta que El Dolarón lo termine con un aviso de `[PLAZO]` días en la tienda. Los Dolarones vigentes al terminar el programa se respetan hasta su vencimiento.
+**2. Vigencia del programa.** Del 2 de octubre de 2026 hasta que El Dolarón lo termine con un aviso de 30 días en la tienda. Los Dolarones vigentes al terminar el programa se respetan hasta su vencimiento.
 
-**3. Quién participa.** Personas físicas `[EDAD MÍNIMA: ¿mayores de 18 años?]`. Registrarse es gratuito y voluntario. Quien no es socio compra igual, a los mismos precios.
+**3. Quién participa.** Personas físicas mayores de 18 años; al registrarse declaran serlo. Registrarse es gratuito y voluntario. Quien no es socio compra igual, a los mismos precios.
 
 **4. Registro.** Hay un socio por persona y por teléfono. No existe PIN de socio. Hay dos formas de registrarse:
 
@@ -58,27 +58,27 @@ Si el número ya pertenece a otro socio, o cambió de dueño, no se vincula ni s
 | **Subtotal en tienda** | **50** | | **7,700** |
 | **Total** | **100** | | **15,000** |
 
-- Solo puede otorgarse un premio de apertura por persona. Los 500 D son exclusivos de la primera persona que llegue físicamente a la tienda. Si ya recibió un premio online, ese premio se sustituye por 500 D y el importe que tenía vuelve a la bolsa online; no acumula ambos premios. Si el premio online ya se usó en parte o ya venció, no se sustituye automáticamente: se resuelve en persona. `[ABOGADO/ISAAC: definir esa resolución antes de publicar.]`
-- No hay prerregistro. El premio en línea se otorga cuando la persona completa su registro, a partir de `[FECHA Y HORA DE INICIO DE LA PROMOCIÓN]`, y sus 30 días cuentan desde ese momento. El orden lo fija el servidor, no el navegador. Los cupos en tienda se otorgan en el orden en que el personal confirma la llegada de cada persona presente. Al agotarse los cupos de un canal no se otorgan más premios en él.
+- Solo puede otorgarse un premio de apertura por persona. Los 500 D son exclusivos de la primera persona que llegue físicamente a la tienda. Si ya recibió un premio online, ese premio se sustituye por 500 D y el importe que tenía vuelve a la bolsa online; no acumula ambos premios. Si el premio online ya se usó en parte o ya venció, esa persona conserva su premio como está y pierde el derecho a los 500 D. `[ISAAC: confirmar si esos 500 D pasan a la siguiente persona presente o quedan sin entregar; hoy el sistema los deja sin asignar.]`
+- No hay prerregistro. El premio en línea se otorga cuando la persona completa su registro, a partir del 2 de octubre de 2026 a las 11:00 (hora de la tienda), y sus 30 días cuentan desde ese momento. El orden lo fija el servidor, no el navegador. Los cupos en tienda se otorgan en el orden en que el personal confirma la llegada de cada persona presente. Al agotarse los cupos de un canal no se otorgan más premios en él.
 - Los premios de apertura se pueden gastar en partes en tickets de $1,000 MXN o más, calculados antes de descontar Dolarones. Esta condición no aplica a D ganados por compras.
 - Cada premio vence 30 días después de otorgarse. Lo no usado vence y no se reasigna.
 - `[ABOGADO: completar elegibilidad, orden, cómo se acredita la primera llegada y qué premio sustituye el cupo que vuelve a la bolsa, incluida la fecha límite.]`
 
 **8. Cómo se usan.** Al pagar, el socio inicia sesión en el portal, elige el máximo de Dolarones que autoriza y muestra su código de barras en caja. El código dura cinco minutos y permite un solo canje; generar otro invalida el anterior. Un código con máximo cero identifica al socio para acumular, sin autorizar gasto. Dar solo el teléfono o número de socio tampoco autoriza gasto. En caja se pueden usar completos o en parte, hasta el máximo autorizado, y el canje requiere conexión. Los Dolarones se descuentan primero de los que vencen antes. El resto de la compra se paga en efectivo o con tarjeta. El saldo aparece en el ticket.
 
-El cliente sin registro presenta su vale impreso. En caja se consulta su saldo y vigencia; «Usar máximo» cubre el total de la compra o usa el saldo elegible, lo que sea menor. También se puede indicar un importe parcial. En esta versión se usa un vale o una membresía por ticket, no varios a la vez, y el vale no se traspasa al saldo de una cuenta. Si el papel se pierde o se daña, `[ABOGADO/ISAAC: definir si se repone]`: el ticket de la compra que lo generó trae el folio con el que el personal puede volver a imprimirlo mientras tenga saldo y vigencia.
+El cliente sin registro presenta su vale impreso. En caja se consulta su saldo y vigencia; «Usar máximo» cubre el total de la compra o usa el saldo elegible, lo que sea menor. También se puede indicar un importe parcial. En esta versión se usa un vale o una membresía por ticket, no varios a la vez, y el vale no se traspasa al saldo de una cuenta. Un vale perdido no se repone: es al portador, como dinero de la tienda. El personal solo lo reimprime si se presenta el papel dañado, o si el ticket de la compra quedó sin vale por una falla de impresión o de conexión; para eso el ticket trae el folio de la venta. `[ABOGADO: revisar esta política.]`
 
 **9. Seguridad del acceso.** No compartas códigos SMS, tu sesión ni el código de barras: quien copie un código vigente podría usarlo hasta el máximo autorizado. En dispositivos compartidos, no conserves la sesión y ciérrala al terminar. Generar otro código o cerrar sesión invalida el anterior (requiere conexión). El encargado revisa presencialmente la vinculación de una membresía previa; un teléfono coincidente no la vincula automáticamente. `[ABOGADO: aprobar recuperación ante pérdida de acceso o número reasignado; no hay recuperación automática de una cuenta ya vinculada.]`
 
-**10. Devoluciones y cancelaciones.** Si se cancela o devuelve una compra, los Dolarones usados en ella regresan al saldo y los que se ganaron con ella se retiran. Los Dolarones que regresan conservan su vencimiento original: la cancelación y las reimpresiones no lo amplían. Con un vale sucede igual: lo usado regresa al mismo vale, y el vale generado por la compra se retira. Si ese vale ya se gastó en todo o en parte, la compra no se cancela sola; se aclara en la tienda antes de devolver dinero o mercancía. Los derechos del consumidor por ley no cambian por este programa. `[ABOGADO: confirmar redacción y qué pasa si lo ganado ya se gastó o si los Dolarones devueltos ya vencieron.]`
+**10. Devoluciones y cancelaciones.** Si se cancela o devuelve una compra, los Dolarones usados en ella regresan al saldo y los que se ganaron con ella se retiran. Los Dolarones que regresan conservan su vencimiento original: la cancelación y las reimpresiones no lo amplían. Con un vale sucede igual: lo usado regresa al mismo vale, y el vale generado por la compra se retira. Si lo que esa compra generó (Dolarones de socio o vale) ya se gastó en todo o en parte, la compra no se cancela sola; se aclara en la tienda antes de devolver dinero o mercancía. Los derechos del consumidor por ley no cambian por este programa. `[ABOGADO: confirmar redacción y qué pasa si los Dolarones devueltos ya vencieron.]`
 
-**11. Aclaraciones.** En la tienda, de 11:00 a 20:00 todos los días, o por WhatsApp al 444 854 5980.
+**11. Aclaraciones.** En la tienda, de 11:00 a 20:00 todos los días, por WhatsApp al 444 543 7754 o por teléfono fijo al 444 854 5980.
 
 ---
 
 ## Parte 2. Aviso de privacidad integral — socios Dolarones
 
-**Responsable.** `[NOMBRE O RAZÓN SOCIAL DEL TITULAR]` (El Dolarón), Jardín Hidalgo 129, Zona Centro, Soledad de Graciano Sánchez, S.L.P., C.P. 78430.
+**Responsable.** Maria Teresa Ferrusca Perez, RFC `[RFC DEL TITULAR]` (El Dolarón), Jardín Hidalgo 129, Zona Centro, Soledad de Graciano Sánchez, S.L.P., C.P. 78430.
 
 **Datos que tratamos.** Nombre, teléfono celular, correo opcional en registros presenciales y el historial de compras, Dolarones ganados, usados y saldo. En tu portal ves tu saldo, sus vencimientos y un recibo de cada compra hecha como socio (piezas, importes y forma de pago); es un comprobante de compra, no una factura fiscal. Para el acceso web se conserva el identificador de tu cuenta con el proveedor SMS, la versión de bases aceptada y la fecha. No hay PIN de socio; el servidor conserva una huella del código temporal, su límite, vigencia y uso, no el código legible. No pedimos datos sensibles, domicilio, fecha de nacimiento ni identificación oficial.
 
@@ -90,9 +90,9 @@ El cliente sin registro presenta su vale impreso. En caja se consulta su saldo y
 
 **Con quién los compartimos.** No vendemos tus datos ni los usamos para publicidad de terceros. Se guardan en servicios de cómputo en la nube `[Cloudflare, Inc.]` que los procesan por cuenta de El Dolarón, y el número con el que entras al portal lo procesa el proveedor de verificación por SMS descrito arriba `[Google]`, junto con el operador que entrega el mensaje. Nadie más recibe tus datos, salvo una autoridad que los pida conforme a la ley. `[ABOGADO: confirmar la redacción sobre los encargados ubicados fuera de México.]`
 
-**Tus derechos (ARCO) y revocación.** Puedes acceder, rectificar, cancelar u oponerte al uso de tus datos, o revocar tu consentimiento, escribiendo a `[CORREO DE PRIVACIDAD]` o en la tienda. Responderemos en los plazos que marca la Ley Federal de Protección de Datos Personales en Posesión de los Particulares vigente. Cancelar tus datos implica dejar el programa y perder el saldo de Dolarones. `[ABOGADO: validar esta consecuencia.]`
+**Tus derechos (ARCO) y revocación.** Puedes acceder, rectificar, cancelar u oponerte al uso de tus datos, o revocar tu consentimiento, escribiendo a privacidad@eldolaron.com, por WhatsApp al 444 543 7754 o en la tienda. Responderemos en los plazos que marca la Ley Federal de Protección de Datos Personales en Posesión de los Particulares vigente. Cancelar tus datos implica dejar el programa y perder el saldo de Dolarones. `[ABOGADO: validar esta consecuencia.]`
 
-**Cuánto tiempo los guardamos.** Mientras seas socio y `[PLAZO]` después, por aclaraciones y obligaciones contables. Los códigos temporales del portal dejan de servir a los cinco minutos. Los registros de vales se conservan mientras tengan saldo vigente y `[PLAZO]` después, por aclaraciones.
+**Cuánto tiempo los guardamos.** Mientras seas socio y 12 meses después, por aclaraciones y obligaciones contables. Los códigos temporales del portal dejan de servir a los cinco minutos. Los registros de vales se conservan mientras tengan saldo vigente y 12 meses después, por aclaraciones.
 
 **Cambios a este aviso.** Se publicarán en la tienda y se te informarán al usar el programa.
 
@@ -105,11 +105,11 @@ El cliente sin registro presenta su vale impreso. En caja se consulta su saldo y
 1. ¿Las bases cumplen con los artículos 46 a 48 de la LFPC para promociones: condiciones, vigencia y número de regalos publicados?
 2. ¿Es válido que el regalo venza a los 30 días y que lo no usado se pierda sin reasignarse?
 3. Devoluciones: ¿cómo redactar el retiro de Dolarones ya gastados y la devolución de Dolarones vencidos?
-4. ¿Hace falta edad mínima? ¿Qué pasa con menores?
+4. Edad mínima: se fijó en 18 años declarados al registrarse, sin verificación. ¿Basta? ¿Qué pasa si un menor se registra?
 5. Aviso de privacidad: ¿cumple con la LFPDPPP de 2025? Revisar el encargado en la nube fuera de México, el plazo de conservación y el medio ARCO.
 6. Fiscal: ¿cómo se factura una venta pagada en parte con Dolarones? ¿Cómo se registra el saldo pendiente? (Con el contador.)
 7. ¿Se necesita algún aviso o registro ante Profeco o una autoridad local antes de anunciar el regalo?
 8. Vales al portador (5%, 30 días): ¿es válido que el papel funcione como saldo de la tienda para quien lo tenga, que las copias compartan saldo y que la tienda no lo reponga si se pierde? ¿Cómo se redacta el aviso en caja?
-9. Compra que generó un vale ya gastado: ¿puede la tienda detener la cancelación hasta aclararlo? Hoy, para socios, la tienda absorbe la diferencia si lo ganado ya se gastó; con vales, la cancelación se detiene. ¿Se unifica el criterio?
+9. Compra cuyos Dolarones o vale ya se gastaron: la cancelación se detiene, para socios y vales, hasta aclararlo en la tienda. ¿Puede la tienda condicionar así una devolución? ¿Cómo se redacta para no afectar los derechos del consumidor?
 10. Verificación por SMS con un proveedor en el extranjero: ¿qué debe decir el aviso y hace falta consentimiento expreso para la transferencia?
-11. Premio de apertura en línea ya usado o vencido cuando la persona resulta ser la primera llegada física: ¿qué se le debe?
+11. Premio de apertura en línea ya usado o vencido cuando la persona resulta ser la primera llegada física: pierde el derecho a los 500 D. ¿Es válido publicarlo así?

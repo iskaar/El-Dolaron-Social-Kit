@@ -753,6 +753,8 @@ async function cancelarVenta(id: string, request: Request, env: Env, correo: str
   } catch (error) {
     if (String(error).includes('saldo de vale invalido'))
       return json({ error:'El vale de esta compra ya se usó. Requiere aclaración presencial antes de cancelar.' }, 409);
+    if (String(error).includes('saldo insuficiente'))
+      return json({ error:'Los Dolarones ganados con esta compra ya se usaron. Requiere aclaración presencial antes de cancelar.' }, 409);
     if (String(error).includes('venta ya cancelada')) {
       return json({ id, cancelada: true, ya_estaba: true });
     }
