@@ -297,8 +297,10 @@ export async function sentenciasDeVenta(env: Env, p: {
  * se pierde; la restitucion de 30 dias del plan espera aprobacion.
  */
 export async function sentenciasDeCancelacion(env: Env, ventaId: string, autor: string, ahora: string): Promise<D1PreparedStatement[]> {
+  // Por lote, lo canjeado menos lo que ya regreso por piezas canceladas sueltas (Issue #138).
   const { results: canjes } = await env.DB.prepare(
-    `select cliente_id, lote_id, -importe as importe from dolarones_movimientos where venta_id = ? and tipo = 'canje'`,
+    `select cliente_id, lote_id, -sum(importe) as importe from dolarones_movimientos
+     where venta_id = ? and tipo in ('canje', 'reverso_canje') group by cliente_id, lote_id having sum(importe) < 0`,
   )
     .bind(ventaId)
     .all<{ cliente_id: string; lote_id: string; importe: number }>();
