@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#16366B">
+  <title>Mis Dolarones · El Dolarón</title>
+  <link rel="stylesheet" href="/portal.css">
+  <script type="module" src="/portal.js"></script>
+</head>
+<body>
+<header>
+  <a class="marca" href="/" aria-label="El Dolarón, inicio"><span>El</span> Dolarón</a>
+  <button id="salir" class="discreto" type="button" hidden>Cerrar sesión</button>
+</header>
+<main>
+  <p id="estado" role="status" aria-live="polite">Cargando tu monedero…</p>
+  <section id="acceso" hidden aria-labelledby="titulo-acceso">
+    <h1 id="titulo-acceso">Tus Dolarones,<br>contigo.</h1>
+    <p>Consulta tu saldo y muestra tu código en caja para acumular o usar Dolarones.</p>
+    <form id="telefono-form">
+      <label for="telefono">Tu número de celular</label>
+      <div class="telefono"><span>+52</span><input id="telefono" type="tel" inputmode="numeric"
+        autocomplete="tel-national" pattern="[0-9]{10}" maxlength="10" placeholder="10 dígitos" required></div>
+      <label class="opcion"><input id="consiente-sms" type="checkbox" required>
+        Acepto la verificación por SMS y el tratamiento de mi número descrito en el aviso de privacidad.</label>
+      <label class="opcion"><input id="recordar" type="checkbox" checked>Este es mi teléfono: mantener mi sesión.</label>
+      <p class="nota">En un dispositivo compartido, desmarca esta opción y cierra sesión al terminar.</p>
+      <div id="recaptcha"></div>
+      <button id="enviar" type="submit">Recibir código por SMS</button>
+    </form>
+    <form id="sms-form" hidden>
+      <label for="sms">Código de 6 dígitos</label>
+      <p id="destino-sms" class="nota"></p>
+      <input id="sms" type="text" inputmode="numeric" autocomplete="one-time-code"
+        pattern="[0-9]{6}" maxlength="6" required>
+      <button id="verificar" type="submit">Entrar a mi cuenta</button>
+      <button id="cambiar-telefono" class="secundario" type="button">Corregir número / reenviar</button>
+    </form>
+  </section>
+  <section id="registro" hidden aria-labelledby="titulo-registro">
+    <h1 id="titulo-registro">Bienvenido a<br>El Dolarón.</h1>
+    <p>Completa tu membresía. El registro es gratuito y voluntario.</p>
+    <form id="registro-form">
+      <label for="nombre">Tu nombre</label><input id="nombre" autocomplete="name" minlength="2" maxlength="80" required>
+      <label class="opcion"><input id="acepta" type="checkbox" required>
+        Leí y acepto las bases de Dolarones y el aviso de privacidad que aparecen abajo.</label>
+      <button id="registrar" type="submit">Crear mi membresía</button>
+    </form>
+    <button id="pedir-vinculo" class="secundario" type="button">Ya me registraron en la tienda</button>
+    <div id="vinculo" hidden>
+      <p>Muestra este código a Isaac en la tienda para vincular tu membresía. Él debe confirmar que eres el titular.</p>
+      <strong id="codigo-vinculo"></strong>
+      <button id="revisar-vinculo" class="secundario" type="button">Ya vincularon mi cuenta</button>
+    </div>
+  </section>
+  <section id="monedero" hidden aria-labelledby="titulo-monedero">
+    <div class="bienvenida"><h1 id="titulo-monedero">Mis Dolarones</h1><p id="titular"></p></div>
+    <section class="membresia" aria-label="Tu membresía">
+      <div class="tarjeta-cabecera"><span>El Dolarón</span><strong id="numero"></strong></div>
+      <div class="saldo"><span>Saldo disponible</span><strong id="saldo"></strong><span>1 Dolarón = $1 MXN en tienda</span></div>
+      <dl><div><dt>Ganados por compras</dt><dd id="saldo-compras"></dd></div>
+        <div><dt>Regalo de apertura</dt><dd id="saldo-regalo"></dd></div>
+        <div><dt>Por liberar</dt><dd id="saldo-pendiente"></dd></div></dl>
+    </section>
+    <p id="minimo" class="nota" hidden>El regalo de apertura se usa en tickets de $1,000 MXN o más antes de descontar Dolarones. Lo ganado por compras no tiene ese mínimo.</p>
+    <form id="codigo-form">
+      <label for="importe">¿Cuántos Dolarones quieres usar como máximo?</label>
+      <input id="importe" type="number" inputmode="decimal" min="0" step="0.01" value="0" required>
+      <p class="nota">Deja 0 para acumular. El resto de la compra se paga en caja.</p>
+      <button id="mostrar-codigo" type="submit">Mostrar mi código para caja</button>
+    </form>
+    <section id="codigo-panel" hidden aria-label="Código para escanear">
+      <div id="barcode" role="img" aria-label="Código de barras de tu membresía"></div>
+      <p id="codigo-legible"></p><p id="codigo-importe"></p>
+      <p id="codigo-tiempo" role="status"></p>
+      <p class="nota">Un solo uso para gastar. No compartas este código. Si vence, genera otro.</p>
+    </section>
+    <button id="actualizar" class="secundario" type="button">Actualizar saldo y compras</button>
+    <details><summary>Vencimientos de mi saldo</summary><ul id="vencimientos"></ul></details>
+    <section class="compras" aria-labelledby="titulo-compras">
+      <h2 id="titulo-compras">Mis compras</h2><div id="recibos"></div>
+      <button id="mas-recibos" class="secundario" type="button" hidden>Ver compras anteriores</button>
+    </section>
+  </section>
+  <section id="legal" hidden>
+    <details><summary>Bases del programa Dolarones</summary><p id="texto-bases" class="texto-legal"></p></details>
+    <details><summary>Aviso de privacidad</summary><p id="texto-aviso" class="texto-legal"></p></details>
+  </section>
+</main>
+<dialog id="recibo-dialogo" aria-labelledby="titulo-recibo">
+  <h2 id="titulo-recibo">Recibo de compra</h2><div id="detalle-recibo"></div>
+  <p class="nota">Comprobante de compra. No es factura fiscal.</p>
+  <form method="dialog"><button>Cerrar recibo</button></form>
+</dialog>
+<footer>El Dolarón · Dolarones para tus próximas compras</footer>
+</body>
+</html>

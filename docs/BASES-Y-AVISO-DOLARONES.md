@@ -14,7 +14,7 @@ La caja y el portal registran la versión aceptada en cada alta (`BASES_APROBADA
 
 **3. Quién participa.** Personas físicas `[EDAD MÍNIMA: ¿mayores de 18 años?]`. Registrarse es gratuito y voluntario. Quien no es socio compra igual, a los mismos precios.
 
-**4. Registro.** El portal propuesto permite registrarse con teléfono celular mexicano verificado por SMS; nombre y PIN de 4 dígitos, y correo opcional. La caja conserva el PIN para autorizar canjes. Hay un registro por persona y un socio por teléfono. La secuencia y elegibilidad de cada cupo deben coincidir con las bases publicadas. `[ABOGADO: aprobar datos, medios de verificación, altas en tienda/portal y procedimiento ante teléfono cambiado o reasignado.]`
+**4. Registro.** El portal propuesto permite registrarse con nombre y teléfono celular mexicano verificado por SMS, sin PIN de socio. La sesión puede conservarse en el dispositivo del cliente. Hay un registro por persona y un socio por teléfono. La secuencia y elegibilidad de cada cupo deben coincidir con las bases publicadas. `[ABOGADO: aprobar datos, medios de verificación, altas en tienda/portal y procedimiento ante teléfono cambiado o reasignado.]`
 
 **5. Qué son los Dolarones.** Son un saldo de recompensa para comprar en El Dolarón. 1 Dolarón equivale a $1.00 MXN en compras en la tienda.
 
@@ -54,9 +54,9 @@ La caja y el portal registran la versión aceptada en cada alta (`BASES_APROBADA
 - Cada premio vence 30 días después de otorgarse. Lo no usado vence y no se reasigna.
 - `[ABOGADO: completar elegibilidad, orden, cómo se acredita la primera llegada y qué premio sustituye el cupo que vuelve a la bolsa, incluida la fecha límite.]`
 
-**8. Cómo se usan.** Al pagar, el socio da su teléfono o número y escribe su PIN. Los Dolarones se descuentan primero de los que vencen antes. El resto de la compra se paga en efectivo o con tarjeta. El saldo aparece en el ticket.
+**8. Cómo se usan.** Al pagar, el socio inicia sesión en el portal, elige el máximo de Dolarones que autoriza y muestra su código de barras en caja. El código dura cinco minutos y permite un solo canje; generar otro invalida el anterior. Un código con máximo cero identifica al socio para acumular, sin autorizar gasto. Dar solo el teléfono o número de socio tampoco autoriza gasto. Los Dolarones se descuentan primero de los que vencen antes. El resto de la compra se paga en efectivo o con tarjeta. El saldo aparece en el ticket.
 
-**9. Seguridad del PIN.** Tras 5 intentos incorrectos, el uso de Dolarones se bloquea 15 minutos. El personal de la tienda nunca pide ni anota el PIN. Si el socio lo olvida o se bloquea, el encargado de la tienda le permite escribir uno nuevo en persona, sin conocerlo.
+**9. Seguridad del acceso.** No compartas códigos SMS, tu sesión ni el código de barras: quien copie un código vigente podría usarlo hasta el máximo autorizado. En dispositivos compartidos, no conserves la sesión y ciérrala al terminar. Generar otro código o cerrar sesión invalida el anterior (requiere conexión). El encargado revisa presencialmente la vinculación de una membresía previa; un teléfono coincidente no la vincula automáticamente. `[ABOGADO: aprobar recuperación ante pérdida de acceso o número reasignado; no hay recuperación automática de una cuenta ya vinculada.]`
 
 **10. Devoluciones y cancelaciones.** Si se cancela o devuelve una compra, los Dolarones usados en ella regresan al saldo y los que se ganaron con ella se retiran. Los derechos del consumidor por ley no cambian por este programa. `[ABOGADO: confirmar redacción y qué pasa si lo ganado ya se gastó o si los Dolarones devueltos ya vencieron.]`
 
@@ -68,7 +68,7 @@ La caja y el portal registran la versión aceptada en cada alta (`BASES_APROBADA
 
 **Responsable.** `[NOMBRE O RAZÓN SOCIAL DEL TITULAR]` (El Dolarón), Jardín Hidalgo 129, Zona Centro, Soledad de Graciano Sánchez, S.L.P., C.P. 78430.
 
-**Datos que tratamos.** Nombre, teléfono celular, correo (opcional) y el historial de compras, Dolarones ganados, usados y saldo. El PIN no se guarda: solo se guarda una huella criptográfica que no permite conocerlo. No pedimos datos sensibles, domicilio, fecha de nacimiento ni identificación oficial.
+**Datos que tratamos.** Nombre, teléfono celular, correo opcional en registros presenciales y el historial de compras, Dolarones ganados, usados y saldo. Para el acceso web se conserva el identificador del proveedor SMS y la versión de bases aceptada. No hay PIN de socio; el servidor conserva una huella del código temporal, su límite, vigencia y uso, no el código legible. No pedimos datos sensibles, domicilio, fecha de nacimiento ni identificación oficial.
 
 El portal propuesto usaría un proveedor de verificación de teléfono por SMS `[Google Firebase Auth / Identity Platform: propuesta por confirmar antes del alta real]`. `[ABOGADO: revisar proveedor, datos tratados, encargado, transferencias y conservación, así como el procedimiento ante un número reciclado o cambio de teléfono.]`
 

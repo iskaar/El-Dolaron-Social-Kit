@@ -4,7 +4,7 @@ Fecha del registro: 24 de septiembre de 2026. Moneda: pesos mexicanos (MXN). Zon
 
 Este documento conserva la investigación y el diseño del sistema de recompensas de El Dolarón (mecánicas de videojuegos aplicadas a la tienda, Dolarones, regalo de apertura, premios y tabla de posiciones). Es la referencia para cualquier agente (Claude, ChatGPT/Codex, Agy u otro). La versión de trabajo original vive en un documento privado de Claude; **este archivo es la copia compartida**: si una decisión cambia, actualízala aquí mediante Issue y PR.
 
-**Estado:** propuesta con decisiones del propietario. Nada de esto está implementado todavía en la caja (`app/`), ni publicado a clientes. No anunciar reglas, montos o fechas sin confirmación de Isaac.
+**Estado:** investigación histórica con decisiones del propietario. Dolarones presencial está integrado; el portal SMS y barcode sin PIN se prepara en [#129](https://github.com/iskaar/El-Dolaron-Social-Kit/issues/129), no está habilitado públicamente. No anunciar reglas, montos o fechas sin confirmación de Isaac. La decisión del 29/09 de la sección 2 sustituye las propuestas históricas QR/PIN y correo de este documento.
 
 **Revisión para producción: 24/09/2026.** Seguimiento: [Issue #56](https://github.com/iskaar/El-Dolaron-Social-Kit/issues/56). El [plan de implementación](PLAN-IMPLEMENTACION-RECOMPENSAS.md) contiene fases, agentes, modelos, esfuerzo, costos y criterios de lanzamiento. Esta revisión es documental; no certifica la seguridad del despliegue actual.
 
@@ -36,11 +36,11 @@ Este documento conserva la investigación y el diseño del sistema de recompensa
 | Regalo: vigencia (26/09) | 30 días desde que se otorga; lo no usado vence y no se reasigna. Un cupo online liberado al reemplazar el premio vuelve a la bolsa online mientras la promoción siga activa |
 | Sin retroactividad (26/09) | Las compras previas al lanzamiento no ganan Dolarones |
 | +50 por alta y +5 por visita (26/09) | Apagados en el lanzamiento: Isaac respondió «se queda como está» a la recomendación de apagarlos. Confirmar si la lectura es otra |
-| Registro | Portal de apertura por teléfono con SMS pagado, autorizado 28/09; Wallet pospuesto. Desarrollo en #109 (backend Codex) y #110 (pantallas/revisión Claude). La autenticación y el alta web aún no están implementados |
+| Registro | Portal por teléfono + SMS, sesión persistente opcional; confirmado nuevamente el 29/09. Wallet pospuesto. #129 reúne backend #109 y pantallas/coordinación #110; falta configurar proveedor, dominio y textos legales antes de habilitarlo |
 | Bases y aviso de privacidad (26/09) | Los redacta Claude y los revisa un abogado antes de anunciar |
 | Operación (26/09) | 2 cajas, 3 empleados más Isaac; Isaac resuelve las incidencias de saldo |
 | Portal de clientes | Registro y consulta de saldo en línea; compra y canje en tienda física |
-| Identidad | Teléfono como identificador visible, SMS para el portal; PIN para gastar D en tienda. Google Firebase Auth/Identity Platform es la propuesta por configurar y cotizar; no se han iniciado envíos |
+| Identidad (29/09) | Sin PIN de socio. Login teléfono + SMS; barcode temporal personal en el portal, máximo de gasto elegido por el cliente, cinco minutos y un solo canje. Teléfono/número permiten acumular, no gastar. Firebase Auth/Identity Platform sigue pendiente de configuración; no se han iniciado envíos. Los PIN del personal no cambian |
 | Escala prevista | Hasta 1,000 clientes distintos al inicio y 10,000 durante el primer año; no equivale a usuarios simultáneos |
 | Desarrollo y presupuesto inicial | Claude y Codex, usando suscripciones existentes; reducir costos recurrentes hasta que opere la tienda. El plan detalla la propuesta de $50–51 USD/mes de servicios |
 

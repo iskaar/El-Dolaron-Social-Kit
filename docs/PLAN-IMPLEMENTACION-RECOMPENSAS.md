@@ -45,6 +45,14 @@ Isaac confirmó el reparto de la promoción y el requisito de compra: 100 premio
 
 **Estado:** #108 está en implementación. #109 y #110 describen las siguientes dependencias. Wallet queda en backlog. No hay proveedor SMS activado ni portal web listo. El borrador de bases y privacidad refleja las condiciones nuevas, sigue sujeto al abogado y no autoriza altas reales.
 
+### 0.3. Portal sin PIN de socio — decisión del 29/09/2026
+
+Isaac pidió reemplazar el PIN por un código personal que se escanee en el mostrador y confirmó mantener teléfono + SMS con sesión persistente. [#129](https://github.com/iskaar/El-Dolaron-Social-Kit/issues/129) reúne el backend de #109 y las pantallas de #110: registro, saldo, vencimientos, recibos, barcode Code 128 temporal y lectura en caja. No cambia el PIN de cajeros. Esta decisión sustituye las referencias QR/PIN y correo de las secciones históricas.
+
+El cliente elige el máximo autorizado; el código vence en cinco minutos y solo permite un canje, consumido en el mismo batch que venta, stock y saldo. Generar otro o cerrar sesión lo invalida. Un barcode copiado sigue siendo una credencial de gasto mientras sea válido: no prueba presencia ni identidad de quien lo muestra. Teléfono/número solo permiten acumular. Se mantiene el mínimo de $1,000 para regalos y el saldo parcial.
+
+**Entrega, no despliegue:** código y pruebas para revisión. Sigue pendiente configurar Firebase/SMS y límites, dominio público separado de Access, bases/aviso finales, conciliación de regalos legados, migraciones y ensayo con dos cajas y el lector físico sobre una pantalla. No activar SMS pagado ni registro público durante desarrollo. La caja debe integrar también los cambios pendientes de descuentos antes de desplegar; ver [contrato y pasos de lanzamiento](CONTRATO-PORTAL.md).
+
 ### 1. Propuesta original del 24/09 (referencia histórica)
 
 Las decisiones de la sección 0 prevalecen sobre las fechas, reglas, proveedores y alcance propuestos a continuación.

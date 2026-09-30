@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import worker from './worker.ts';
 import { tienda, PRODUCTO } from './prueba-d1.ts';
+import { readFileSync } from 'node:fs';
 
 const codificar = (x: unknown) => Buffer.from(JSON.stringify(x)).toString('base64url');
 const token = (uid: string, phone: string, extra: Record<string, unknown> = {}) => {
@@ -33,7 +34,7 @@ function portalDePrueba() {
     return { status: response.status, body: await response.json() as Record<string, any> };
   };
   const registrar = (uid: string, phone: string) => llamar('/api/portal/registro', token(uid, phone), {
-    nombre: 'Cliente', pin: '1234', acepta_bases: true, bases_version: 'prueba-1',
+    nombre: 'Cliente', acepta_bases: true, bases_version: 'prueba-1',
   }, 'POST');
   return { db, env, pedir, llamar, registrar, setValidSince: (v: number) => { validSince = v; },
     cerrar: () => { globalThis.fetch = fetchOriginal; db.close(); } };
@@ -129,9 +130,10 @@ test('la primera llegada con premio parcialmente usado queda reservada para reso
   try {
     const online = await p.registrar('primera', '+524441234567');
     p.db.prepare('update productos set precio = 100000 where id = ?').run(PRODUCTO);
+    const codigo = await p.llamar('/api/portal/codigo', token('primera', '+524441234567'), { maximo:10000 }, 'POST');
     const venta = await p.pedir('/api/ventas', { id: crypto.randomUUID(), cliente_id: online.body.id,
       lineas: [{ producto_id: PRODUCTO, cantidad: 1 }], forma_pago: 'efectivo', efectivo: 90000,
-      dolarones: 10000, pin: '1234' });
+      dolarones: 10000, codigo_socio:codigo.body.codigo });
     assert.equal(venta.status, 201);
     assert.equal((await p.pedir('/api/portal/llegada', { cliente_id: online.body.id })).status, 409);
     const segundo = await p.pedir('/api/socios', { id: crypto.randomUUID(), nombre: 'Otro',
@@ -169,5 +171,124 @@ test('un regalo del esquema anterior cierra el alta antes de crear socio o cupo'
     assert.equal(p.db.prepare("select count(*) as n from clientes where auth_uid = 'nuevo'").get()!.n, 0);
     assert.equal((await p.pedir('/api/portal/llegada', { cliente_id: anterior.cuerpo.id })).status, 409);
     assert.equal(p.db.prepare('select count(cliente_id) as n from premios_apertura').get()!.n, 0);
+  } finally { p.cerrar(); }
+});
+
+test('allowlist pública sirve sólo portal y assets necesarios; no abre caja, archivos ni APIs de personal', async () => {
+  const p = portalDePrueba();
+  try {
+    const leidos: string[] = [];
+    p.env.ASSETS = { async fetch(request: Request) {
+      const ruta = new URL(request.url).pathname;
+      leidos.push(ruta);
+      return new Response(readFileSync('public/' + (ruta === '/portal' ? 'portal.html' : ruta.slice(1))),
+        { headers:{ 'content-type':ruta === '/portal' ? 'text/html' : 'text/javascript' } });
+    } } as unknown as Fetcher;
+    for (const ruta of ['/', '/portal', '/portal.html', '/portal.js', '/portal.css', '/code128.js']) {
+      const r = await worker.fetch!(new Request('https://portal.prueba' + ruta) as never, p.env, {} as never);
+      assert.equal(r.status, 200, ruta);
+      assert.equal(r.headers.get('cache-control'), 'no-store');
+      assert.match(r.headers.get('content-security-policy')!, /frame-ancestors 'none'/);
+      const cuerpo = await r.text();
+      assert.ok(cuerpo.length);
+    }
+    for (const ruta of ['/caja', '/caja.html', '/admin', '/cuentas', '/socios', '/captura',
+      '/cajero.js', '/venta.js', '/api/ventas', '/api/socios/codigo', '/api/socios/vincular',
+      '/api/foto/123', '/api/portal/llegada', '/foo/portal.html'])
+      assert.equal((await p.llamar(ruta, '')).status, 404, ruta);
+    assert.equal(leidos.length, 6);
+    assert.equal((await p.llamar('/portal.js', '', {}, 'POST')).status, 404);
+    assert.equal((await p.pedir('/api/portal/config')).status, 404);
+    const config = await p.llamar('/api/portal/config', '');
+    assert.equal(config.status, 200);
+    assert.ok(config.body.firebase);
+    assert.equal(config.body.bases, 'Bases sintéticas de prueba.');
+    p.env.PORTAL_AVISO_TEXTO = '';
+    assert.equal((await p.llamar('/api/portal/config', '')).body.firebase, null);
+    assert.equal((await p.registrar('nuevo', '+524448887777')).status, 503);
+  } finally { p.cerrar(); }
+});
+
+test('barcode privado: monto limitado, caducidad, un solo uso e idempotencia de la compra', async () => {
+  const p = portalDePrueba();
+  try {
+    const a = await p.registrar('a', '+524440001111'), b = await p.registrar('b', '+524440002222');
+    const auth = token('a', '+524440001111');
+    assert.equal((await p.llamar('/api/portal/codigo', '', { maximo:100 }, 'POST')).status, 401);
+    for (const maximo of [-1, 0.5, '100', null, 9007199254740992])
+      assert.equal((await p.llamar('/api/portal/codigo', auth, { maximo }, 'POST')).status, 400);
+    assert.equal((await p.llamar('/api/portal/codigo', auth, { maximo:30001 }, 'POST')).status, 409);
+    const emitido = await p.llamar('/api/portal/codigo', auth, { maximo:10000 }, 'POST');
+    assert.equal(emitido.status, 201);
+    assert.match(emitido.body.codigo, /^DC-[A-Za-z0-9_-]{16}$/);
+    assert.equal((await p.llamar('/api/portal/codigo', auth, { maximo:10000 }, 'POST')).status, 429);
+    const fila = p.db.prepare('select token_hash from codigos_cliente').get()!;
+    assert.equal(String(fila.token_hash).length, 64);
+    assert.notEqual(fila.token_hash, emitido.body.codigo);
+    const socio = await p.pedir('/api/socios/codigo', { codigo:emitido.body.codigo });
+    assert.equal(socio.status, 200);
+    assert.equal(socio.cuerpo.id, a.body.id);
+    assert.equal(socio.cuerpo.maximo, 10000);
+    const v = { id:crypto.randomUUID(), cliente_id:a.body.id, dolarones:10000,
+      codigo_socio:emitido.body.codigo, lineas:[{ producto_id:PRODUCTO, cantidad:4 }], forma_pago:'tarjeta' };
+    assert.equal((await p.pedir('/api/ventas', { ...v, dolarones:10001 })).status, 403);
+    assert.equal((await p.pedir('/api/ventas', { ...v, cliente_id:b.body.id })).status, 403);
+    assert.equal((await p.pedir('/api/ventas', v)).status, 201);
+    assert.equal((await p.pedir('/api/ventas', v)).cuerpo.duplicada, true);
+    assert.equal((await p.pedir('/api/ventas', { ...v, id:crypto.randomUUID() })).status, 403);
+    assert.equal((await p.pedir('/api/socios/codigo', { codigo:emitido.body.codigo })).status, 403);
+    p.db.prepare("update codigos_cliente set creado_en='2020-01-01'").run();
+    const acumular = await p.llamar('/api/portal/codigo', auth, { maximo:0 }, 'POST');
+    assert.equal(acumular.status, 201);
+    assert.equal((await p.pedir('/api/ventas', { ...v, id:crypto.randomUUID(), codigo_socio:acumular.body.codigo })).status, 403);
+    p.db.prepare("update codigos_cliente set expira_en='2020-01-01'").run();
+    assert.equal((await p.pedir('/api/socios/codigo', { codigo:acumular.body.codigo })).status, 403);
+  } finally { p.cerrar(); }
+});
+
+test('logout revoca el código y sólo el dueño vincula un registro presencial, sin perder historial', async () => {
+  const p = portalDePrueba();
+  try {
+    const a = await p.registrar('a', '+524440001111');
+    const auth = token('a', '+524440001111');
+    const k = await p.llamar('/api/portal/codigo', auth, { maximo:0 }, 'POST');
+    assert.equal((await p.llamar('/api/portal/codigo', auth, undefined, 'DELETE')).status, 200);
+    assert.equal((await p.pedir('/api/socios/codigo', { codigo:k.body.codigo })).status, 403);
+    const previo = await p.pedir('/api/socios', { id:crypto.randomUUID(), nombre:'Socio previo', telefono:'4445556666', acepta_bases:true });
+    assert.equal(previo.status, 201);
+    assert.equal((await p.registrar('nuevo', '+524445556666')).status, 409);
+    const vk = await p.llamar('/api/portal/vinculo', token('nuevo', '+524445556666'), {}, 'POST');
+    assert.equal(vk.status, 201);
+    assert.equal((await p.llamar('/api/portal/yo', token('nuevo', '+524445556666'))).status, 404);
+    const body = { numero:previo.cuerpo.numero, codigo:vk.body.codigo, confirma:true };
+    p.db.prepare(`insert into usuarios (correo, nombre, roles, activo, creado_en, actualizado_en)
+      values ('cajero@prueba.mx', 'Caja', 'cajero', 1, '', '')`).run();
+    p.env.DEV_USUARIO = 'cajero@prueba.mx';
+    assert.equal((await p.pedir('/api/socios/vincular', body)).status, 403);
+    p.env.DEV_USUARIO = 'dueno@prueba.mx';
+    assert.equal((await p.pedir('/api/socios/vincular', { ...body, numero:a.body.numero })).status, 409);
+    assert.equal((await p.pedir('/api/socios/vincular', body)).status, 200);
+    assert.equal((await p.llamar('/api/portal/yo', token('nuevo', '+524445556666'))).body.id, previo.cuerpo.id);
+    assert.equal((await p.pedir('/api/socios/vincular', body)).status, 403);
+    assert.equal(p.db.prepare('select count(*) as n from clientes').get()!.n, 2);
+  } finally { p.cerrar(); }
+});
+
+test('un canje entre lectura y reemplazo aborta regalo, cupo y presupuesto juntos', async () => {
+  const p = portalDePrueba();
+  try {
+    const a = await p.registrar('primera', '+524440009999');
+    const lote = a.body.premio.lote_id;
+    const batch = p.env.DB.batch.bind(p.env.DB);
+    p.env.DB.batch = async (sentencias) => {
+      p.db.prepare('update dolarones_lotes set restante=restante-100 where id=?').run(lote);
+      return batch(sentencias);
+    };
+    const r = await p.pedir('/api/portal/llegada', { cliente_id:a.body.id });
+    assert.equal(r.status, 409);
+    assert.equal(p.db.prepare('select restante from dolarones_lotes where id=?').get(lote)!.restante, 29900);
+    assert.equal(p.db.prepare("select count(*) as n from premios_apertura where canal='tienda' and cliente_id is not null").get()!.n, 0);
+    assert.equal(p.db.prepare("select count(*) as n from dolarones_movimientos where tipo='reemplazo'").get()!.n, 0);
+    assert.equal(p.db.prepare("select count(*) as n from premios_apertura where canal='online' and cliente_id=?").get(a.body.id)!.n, 1);
   } finally { p.cerrar(); }
 });

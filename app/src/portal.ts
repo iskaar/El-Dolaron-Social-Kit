@@ -1,4 +1,4 @@
-import { hashPin, saldo } from './dolarones.ts';
+import { saldo, codigoAleatorio, hashCodigo, basesListas } from './dolarones.ts';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const DIA = 86_400_000;
@@ -11,8 +11,7 @@ type Cliente = { id: string; numero: number; nombre: string; telefono: string; b
 
 function promocionAbierta(env: Env): boolean {
   const inicio = env.PROMOCION_INICIO;
-  return env.PORTAL_REGISTRO_ABIERTO === 'si' && !!env.BASES_APROBADAS_VERSION &&
-    !env.BASES_APROBADAS_VERSION.startsWith('borrador') && !!inicio &&
+  return env.PORTAL_REGISTRO_ABIERTO === 'si' && basesListas(env) && !!inicio &&
     /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:\.\d{3})?Z$/.test(inicio) &&
     Number.isFinite(Date.parse(inicio)) && Date.now() >= Date.parse(inicio);
 }
@@ -99,10 +98,9 @@ export async function registro(request: Request, env: Env, auth: Identidad): Pro
     return json({ error: 'Hay premios anteriores pendientes de conciliación; registro cerrado.' }, 409);
   const body = await request.json().catch(() => ({})) as Record<string, unknown>;
   const nombre = String(body.nombre ?? '').replace(/\s+/g, ' ').trim();
-  const pin = String(body.pin ?? '');
-  if (nombre.length < 2 || nombre.length > 80 || !/^\d{4}$/.test(pin) ||
+  if (nombre.length < 2 || nombre.length > 80 ||
     body.bases_version !== env.BASES_APROBADAS_VERSION || body.acepta_bases !== true)
-    return json({ error: 'Nombre, PIN y aceptación vigente requeridos.' }, 400);
+    return json({ error: 'Nombre y aceptación vigente requeridos.' }, 400);
   let socio = await cliente(env, auth.uid);
   if (socio) {
     try {
@@ -111,19 +109,24 @@ export async function registro(request: Request, env: Env, auth: Identidad): Pro
         where id = ? and auth_uid = ?`)
         .bind(auth.telefono, env.BASES_APROBADAS_VERSION, env.BASES_APROBADAS_VERSION,
           ahora.toISOString(), socio.id, auth.uid).run();
-    } catch { return json({ error: 'El teléfono requiere revisión presencial.' }, 409); }
+    } catch (error) {
+      if (String(error).includes('clientes.telefono')) return json({ error: 'El teléfono requiere revisión presencial.' }, 409);
+      throw error;
+    }
   } else {
     const id = crypto.randomUUID();
-    const sal = Array.from(crypto.getRandomValues(new Uint8Array(16)), (b) => b.toString(16).padStart(2, '0')).join('');
     try {
       await env.DB.prepare(`insert into clientes
-        (id, numero, nombre, telefono, pin_hash, pin_sal, bases_version, bases_aceptadas_en, registrado_por, creado_en, auth_uid)
-        select ?, coalesce(max(numero), 0) + 1, ?, ?, ?, ?, ?, ?, 'portal', ?, ? from clientes`)
-        .bind(id, nombre, auth.telefono, await hashPin(pin, sal), sal,
+        (id, numero, nombre, telefono, bases_version, bases_aceptadas_en, registrado_por, creado_en, auth_uid)
+        select ?, coalesce(max(numero), 0) + 1, ?, ?, ?, ?, 'portal', ?, ? from clientes`)
+        .bind(id, nombre, auth.telefono,
           env.BASES_APROBADAS_VERSION, ahora.toISOString(), ahora.toISOString(), auth.uid).run();
-    } catch {
+    } catch (error) {
       socio = await cliente(env, auth.uid);
-      if (!socio) return json({ error: 'El teléfono requiere revisión presencial.' }, 409);
+      if (!socio) {
+        if (String(error).includes('clientes.telefono')) return json({ error: 'El teléfono requiere revisión presencial.' }, 409);
+        throw error;
+      }
     }
   }
   socio = (await cliente(env, auth.uid))!;
@@ -172,18 +175,98 @@ export async function llegada(request: Request, env: Env, autor: string): Promis
   return json({ premio: await premioActual(env, id) });
 }
 
+/** El dueño coteja al cliente presente antes de vincular un registro previo. */
+export async function vincular(request: Request, env: Env): Promise<Response> {
+  const body = await request.json().catch(() => ({})) as { codigo?: unknown; numero?: unknown; confirma?: unknown };
+  const codigo = String(body.codigo ?? '');
+  const numero = Number(body.numero);
+  if (!codigo.startsWith('DV-') || !Number.isSafeInteger(numero) || numero < 1 || body.confirma !== true)
+    return json({ error: 'Confirma al titular presente, su número de socio y su código de vinculación.' }, 400);
+  const hash = await hashCodigo(codigo);
+  const ahora = new Date().toISOString();
+  const vinculo = await env.DB.prepare('select auth_uid, telefono from vinculos_portal where token_hash = ? and expira_en > ?')
+    .bind(hash, ahora).first<{ auth_uid: string; telefono: string }>();
+  if (!vinculo) return json({ error: 'Código de vinculación inválido o vencido.' }, 403);
+  await env.DB.batch([
+    env.DB.prepare(`update clientes set auth_uid = ? where numero = ? and telefono = ? and auth_uid is null
+      and exists(select 1 from vinculos_portal where token_hash = ? and expira_en > ?)
+      and not exists(select 1 from clientes where auth_uid = ?)`)
+      .bind(vinculo.auth_uid, numero, vinculo.telefono, hash, ahora, vinculo.auth_uid),
+    env.DB.prepare(`update vinculos_portal set expira_en = '' where token_hash = ?
+      and exists(select 1 from clientes where numero = ? and telefono = ? and auth_uid = ?)`)
+      .bind(hash, numero, vinculo.telefono, vinculo.auth_uid),
+  ]);
+  const socio = await cliente(env, vinculo.auth_uid);
+  if (!socio || socio.numero !== numero) return json({ error: 'El socio no coincide o ya tiene otro acceso. Requiere aclaración con Isaac.' }, 409);
+  return json({ numero: socio.numero, nombre: socio.nombre, vinculado: true });
+}
+
 export async function portal(request: Request, env: Env, url: URL): Promise<Response> {
+  if (url.pathname === '/api/portal/config' && request.method === 'GET') {
+    const configurado = basesListas(env) && !!env.FIREBASE_PROJECT_ID && !!env.FIREBASE_WEB_API_KEY;
+    return json({ firebase: configurado ? {
+      projectId: env.FIREBASE_PROJECT_ID, apiKey: env.FIREBASE_WEB_API_KEY,
+      authDomain: env.FIREBASE_AUTH_DOMAIN || `${env.FIREBASE_PROJECT_ID}.firebaseapp.com`,
+    } : null, registro_abierto: promocionAbierta(env),
+      bases_version: env.BASES_APROBADAS_VERSION || '', bases: env.PORTAL_BASES_TEXTO || '',
+      aviso: env.PORTAL_AVISO_TEXTO || '' });
+  }
   const auth = await identidad(request, env);
   if (!auth) return json({ error: 'Sesión inválida.' }, 401);
   if (url.pathname === '/api/portal/registro' && request.method === 'POST') return registro(request, env, auth);
+  if (url.pathname === '/api/portal/vinculo' && request.method === 'POST') {
+    if (!basesListas(env)) return json({ error: 'Portal no disponible.' }, 503);
+    if (await cliente(env, auth.uid)) return json({ error: 'Tu cuenta ya está vinculada.' }, 409);
+    const codigo = codigoAleatorio('DV');
+    const ahora = new Date();
+    const expira = new Date(ahora.getTime() + 5 * 60_000).toISOString();
+    const { meta } = await env.DB.prepare(`insert into vinculos_portal
+      (auth_uid, token_hash, telefono, creado_en, expira_en) values (?, ?, ?, ?, ?)
+      on conflict(auth_uid) do update set token_hash = excluded.token_hash, telefono = excluded.telefono,
+      creado_en = excluded.creado_en, expira_en = excluded.expira_en where vinculos_portal.creado_en <= ?`)
+      .bind(auth.uid, await hashCodigo(codigo), auth.telefono, ahora.toISOString(), expira,
+        new Date(ahora.getTime() - 5_000).toISOString()).run();
+    if (!meta.changes) return json({ error: 'Espera 5 segundos antes de generar otro código.' }, 429);
+    return json({ codigo, expira_en: expira }, 201);
+  }
   const socio = await cliente(env, auth.uid);
   if (!socio) return json({ error: 'Registro requerido.' }, 404);
+  if (url.pathname === '/api/portal/codigo' && request.method === 'DELETE') {
+    await env.DB.prepare("update codigos_cliente set expira_en = '' where cliente_id = ? and auth_uid = ?")
+      .bind(socio.id, auth.uid).run();
+    return json({ ok: true });
+  }
+  if (url.pathname === '/api/portal/codigo' && request.method === 'POST') {
+    if (!basesListas(env) || socio.bases_version !== env.BASES_APROBADAS_VERSION)
+      return json({ error: 'Acepta las bases vigentes antes de generar tu código.' }, 409);
+    const body = await request.json().catch(() => ({})) as { maximo?: unknown };
+    const maximo = body.maximo;
+    if (typeof maximo !== 'number' || !Number.isSafeInteger(maximo) || maximo < 0)
+      return json({ error: 'Importe inválido.' }, 400);
+    const ahora = new Date();
+    if (maximo > (await saldo(env, socio.id, ahora.toISOString())).disponible)
+      return json({ error: 'El importe supera tu saldo disponible.' }, 409);
+    const codigo = codigoAleatorio('DC');
+    const expira = new Date(ahora.getTime() + 5 * 60_000).toISOString();
+    const { meta } = await env.DB.prepare(`insert into codigos_cliente
+      (cliente_id, token_hash, auth_uid, maximo, creado_en, expira_en, venta_id) values (?, ?, ?, ?, ?, ?, '')
+      on conflict (cliente_id) do update set token_hash = excluded.token_hash, auth_uid = excluded.auth_uid,
+      maximo = excluded.maximo, creado_en = excluded.creado_en, expira_en = excluded.expira_en, venta_id = ''
+      where codigos_cliente.creado_en <= ?`)
+      .bind(socio.id, await hashCodigo(codigo), auth.uid, maximo, ahora.toISOString(), expira,
+        new Date(ahora.getTime() - 5_000).toISOString()).run();
+    if (!meta.changes) return json({ error: 'Espera 5 segundos antes de generar otro código.' }, 429);
+    return json({ codigo, maximo, expira_en: expira }, 201);
+  }
   if (url.pathname === '/api/portal/yo' && request.method === 'GET')
     return json({ id: socio.id, numero: socio.numero, nombre: socio.nombre, telefono: `+52${socio.telefono}`, bases_version: socio.bases_version });
   if (url.pathname === '/api/portal/saldo' && request.method === 'GET') {
     const s = await saldo(env, socio.id, new Date().toISOString());
+    const { results: lotes } = await env.DB.prepare(`select origen, restante, disponible_desde, vence_en
+      from dolarones_lotes where cliente_id = ? and restante > 0 and vence_en > ? order by vence_en`)
+      .bind(socio.id, new Date().toISOString()).all();
     return json({ disponible_compras: s.disponible - s.regalo_disponible,
-      regalo_sujeto_minimo: s.regalo_disponible, por_liberar: s.por_liberar, disponible_total: s.disponible });
+      regalo_sujeto_minimo: s.regalo_disponible, por_liberar: s.por_liberar, disponible_total: s.disponible, lotes });
   }
   if (url.pathname === '/api/portal/recibos' && request.method === 'GET') {
     const pedido = Number(url.searchParams.get('limit') ?? 20);

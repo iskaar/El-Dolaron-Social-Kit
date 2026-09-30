@@ -14,9 +14,9 @@ import {
   esDeCaja, soloComputadora,
 } from './cuentas.ts';
 import { cajeroEnTurno, listarCajeros, entrar, salir, ponerPin } from './cajeros.ts';
-import { registrarSocio, buscarSocio, cambiarPin, sentenciasDeVenta, sentenciasDeCancelacion, saldo } from './dolarones.ts';
+import { registrarSocio, buscarSocio, buscarPorCodigo, basesListas, sentenciasDeVenta, sentenciasDeCancelacion, saldo } from './dolarones.ts';
 import { registrarCorte, registrarRetiro, ultimoCorte, cajaDe } from './corte.ts';
-import { portal, llegada } from './portal.ts';
+import { portal, llegada, vincular } from './portal.ts';
 
 interface FilaConfig {
   clave: string;
@@ -572,7 +572,7 @@ async function registrarVenta(request: Request, env: Env, correo: string): Promi
   const venta = (await request.json()) as {
     id?: unknown; lineas?: unknown; forma_pago?: unknown;
     efectivo?: unknown; creado_en?: unknown;
-    cliente_id?: unknown; dolarones?: unknown; pin?: unknown; caja?: unknown;
+    cliente_id?: unknown; dolarones?: unknown; codigo_socio?: unknown; caja?: unknown;
   };
   const id = String(venta.id ?? '');
   if (!UUID.test(id)) {
@@ -621,9 +621,9 @@ async function registrarVenta(request: Request, env: Env, correo: string): Promi
   const ahora = momento.toISOString();
   const creadoEn = String(venta.creado_en ?? ahora);
 
-  // Valida socio, PIN y saldo antes de tocar nada; sus sentencias van en el mismo batch.
+  // Valida socio, código y saldo; consumo y venta se confirman en el mismo batch.
   const recompensa = await sentenciasDeVenta(env, {
-    ventaId: id, clienteId, dolarones, pin: String(venta.pin ?? ''), total, autor: correo, ahora: momento,
+    ventaId: id, clienteId, dolarones, codigo: String(venta.codigo_socio ?? ''), total, autor: correo, ahora: momento,
   });
   if (!recompensa.ok) {
     return json({ error: recompensa.error }, recompensa.status);
@@ -663,6 +663,9 @@ async function registrarVenta(request: Request, env: Env, correo: string): Promi
   try {
     await env.DB.batch(sentencias);
   } catch (error) {
+    if (String(error).includes('codigo de socio invalido')) {
+      return json({ error: 'Código de socio usado, vencido o actualizado. Pide otro al cliente.' }, 409);
+    }
     if (String(error).includes('stock insuficiente')) {
       return json({ error: 'No hay existencia suficiente para completar la venta.' }, 409);
     }
@@ -1049,6 +1052,25 @@ export default {
     try {
       // Puerta pública cerrada por defecto. Nunca comparte rutas ni assets del personal.
       if (env.HOST_PORTAL && url.hostname === env.HOST_PORTAL) {
+        const archivos: Record<string, string> = {
+          '/': '/portal', '/portal': '/portal', '/portal.html': '/portal',
+          '/portal.js': '/portal.js', '/portal.css': '/portal.css', '/code128.js': '/code128.js',
+        };
+        if (archivos[pathname] && (request.method === 'GET' || request.method === 'HEAD')) {
+          const asset = new URL(archivos[pathname], url.origin);
+          const pantalla = await env.ASSETS.fetch(new Request(asset, { method: request.method }));
+          // Assets no hace redirección de HTML hacia el index del personal.
+          if (pantalla.status >= 300 && pantalla.status < 400)
+            return json({ error: 'Página no disponible.' }, 503);
+          const respuesta = new Response(pantalla.body, pantalla);
+          const authDomain = env.FIREBASE_AUTH_DOMAIN || `${env.FIREBASE_PROJECT_ID}.firebaseapp.com`;
+          const frameAuth = /^[a-z0-9.-]+$/.test(authDomain) ? `https://${authDomain}` : '';
+          respuesta.headers.set('content-security-policy', "default-src 'self'; script-src 'self' https://www.gstatic.com https://www.google.com https://www.recaptcha.net https://apis.google.com; style-src 'self' 'unsafe-inline'; connect-src 'self' https://identitytoolkit.googleapis.com https://securetoken.googleapis.com https://www.google.com https://www.recaptcha.net; frame-src https://www.google.com https://www.recaptcha.net " + frameAuth + "; img-src 'self' data: https://www.gstatic.com; object-src 'none'; base-uri 'none'; frame-ancestors 'none'");
+          respuesta.headers.set('cache-control', 'no-store');
+          respuesta.headers.set('referrer-policy', 'no-referrer');
+          respuesta.headers.set('x-content-type-options', 'nosniff');
+          return respuesta;
+        }
         if (!pathname.startsWith('/api/portal/') || pathname === '/api/portal/llegada')
           return json({ error: 'Ruta no encontrada.' }, 404);
         try { return await portal(request, env, url); }
@@ -1165,13 +1187,22 @@ export default {
         if (request.method === 'GET') return await buscarSocio(url, env);
         return json({ error: 'Metodo no permitido.' }, 405);
       }
-      if (pathname === '/api/portal/llegada' && request.method === 'POST')
-        return await llegada(request, env, correo);
-
-      const nuevoPin = pathname.match(/^\/api\/socios\/(\d+)\/pin$/);
-      if (nuevoPin && request.method === 'POST') {
-        return await cambiarPin(Number(nuevoPin[1]), request, env);
+      if (pathname === '/api/portal/llegada' && request.method === 'POST') {
+        try { return await llegada(request, env, correo); }
+        catch (error) {
+          if (String(error).includes('saldo insuficiente'))
+            return json({ error: 'El premio cambió durante la acreditación. Requiere revisión presencial.' }, 409);
+          throw error;
+        }
       }
+
+      if (pathname === '/api/socios/codigo' && request.method === 'POST')
+        return await buscarPorCodigo(request, env);
+      if (pathname === '/api/socios/legal' && request.method === 'GET')
+        return json({ disponible:basesListas(env), bases:env.PORTAL_BASES_TEXTO || '', aviso:env.PORTAL_AVISO_TEXTO || '' });
+      // Sin entrada en cuentas.ts: únicamente el dueño puede aprobar un vínculo.
+      if (pathname === '/api/socios/vincular' && request.method === 'POST')
+        return await vincular(request, env);
 
       if (pathname === '/api/cortes') {
         if (request.method === 'POST') return await registrarCorte(request, env, correo);

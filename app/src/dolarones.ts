@@ -67,7 +67,7 @@ export function repartir(lotes: Lote[], importe: number, ahora: string, total: n
 export const hex = (bytes: ArrayBuffer | Uint8Array) =>
   [...new Uint8Array(bytes)].map((b) => b.toString(16).padStart(2, '0')).join('');
 
-/** PBKDF2-SHA256; 100,000 vueltas es el maximo que acepta Workers. */
+/** PIN de CAJEROS; ya no se usa para socios. PBKDF2-SHA256, 100,000 vueltas. */
 export async function hashPin(pin: string, salHex: string): Promise<string> {
   const llave = await crypto.subtle.importKey('raw', new TextEncoder().encode(pin), 'PBKDF2', false, ['deriveBits']);
   const sal = Uint8Array.from(salHex.match(/../g)!.map((h) => parseInt(h, 16)));
@@ -84,6 +84,9 @@ function json(cuerpo: unknown, status = 200): Response {
 }
 
 const texto = (valor: unknown, max: number) => String(valor ?? '').replace(/\s+/g, ' ').trim().slice(0, max);
+export const basesListas = (env: Env) => !!env.BASES_APROBADAS_VERSION &&
+  !env.BASES_APROBADAS_VERSION.startsWith('borrador') && !!env.PORTAL_BASES_TEXTO?.trim() &&
+  !!env.PORTAL_AVISO_TEXTO?.trim();
 
 export async function saldo(env: Env, clienteId: string, ahora: string): Promise<{ disponible: number; por_liberar: number; regalo_disponible: number }> {
   const fila = await env.DB.prepare(
@@ -115,15 +118,13 @@ export async function registrarSocio(request: Request, env: Env, autor: string):
   const nombre = texto(cuerpo.nombre, 80);
   const telefono = String(cuerpo.telefono ?? '').replace(/\D/g, '');
   const correo = texto(cuerpo.correo, 200).toLowerCase();
-  const pin = String(cuerpo.pin ?? '');
 
   if (!UUID.test(id)) return json({ error: 'Identificador invalido.' }, 400);
   if (nombre.length < 2) return json({ error: 'Escribe el nombre del cliente.' }, 400);
   if (telefono.length !== 10) return json({ error: 'El telefono debe tener 10 digitos.' }, 400);
   if (correo && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(correo)) return json({ error: 'Correo invalido.' }, 400);
-  if (!/^\d{4}$/.test(pin)) return json({ error: 'El PIN debe tener 4 digitos.' }, 400);
   if (cuerpo.acepta_bases !== true) return json({ error: 'El cliente tiene que aceptar las bases y el aviso de privacidad.' }, 400);
-  if (!env.BASES_APROBADAS_VERSION || env.BASES_APROBADAS_VERSION.startsWith('borrador'))
+  if (!basesListas(env))
     return json({ error: 'Altas cerradas hasta aprobar las bases y el aviso.' }, 503);
 
   const leer = (campo: 'id' | 'telefono', valor: string) =>
@@ -134,17 +135,15 @@ export async function registrarSocio(request: Request, env: Env, autor: string):
   const mismoTelefono = await leer('telefono', telefono);
   if (mismoTelefono) return json({ error: `Ese telefono ya es el socio #${mismoTelefono.numero}.` }, 409);
 
-  const sal = hex(crypto.getRandomValues(new Uint8Array(16)));
-  const pinHash = await hashPin(pin, sal);
   const ahora = new Date();
   const ahoraIso = ahora.toISOString();
   // El alta presencial no acredita una llegada ni asigna un premio. #109
   // exige que personal registre la llegada con la ruta dedicada.
   try {
     await env.DB.prepare(
-        `insert into clientes (id, numero, nombre, telefono, correo, pin_hash, pin_sal, bases_version, bases_aceptadas_en, registrado_por, creado_en)
-         select ?, coalesce(max(numero), 0) + 1, ?, ?, ?, ?, ?, ?, ?, ?, ? from clientes`,
-      ).bind(id, nombre, telefono, correo, pinHash, sal, env.BASES_APROBADAS_VERSION, ahoraIso, autor, ahoraIso).run();
+        `insert into clientes (id, numero, nombre, telefono, correo, bases_version, bases_aceptadas_en, registrado_por, creado_en)
+         select ?, coalesce(max(numero), 0) + 1, ?, ?, ?, ?, ?, ?, ? from clientes`,
+      ).bind(id, nombre, telefono, correo, env.BASES_APROBADAS_VERSION, ahoraIso, autor, ahoraIso).run();
   } catch (error) {
     if (String(error).includes('clientes.telefono')) return json({ error: 'Ese telefono ya es socio.' }, 409);
     throw error;
@@ -171,11 +170,10 @@ type Resultado = { ok: true; sentencias: D1PreparedStatement[]; ganados: number 
 
 /**
  * Lo que una venta le hace al saldo, como sentencias para el MISMO batch que
- * inserta la venta: o todo o nada. Aqui se valida el PIN (sus fallos si se
- * guardan aparte, aunque la venta no ocurra).
+ * inserta la venta: o todo o nada. La autorización se consume en ese batch.
  */
 export async function sentenciasDeVenta(env: Env, p: {
-  ventaId: string; clienteId: string | null; dolarones: number; pin: string;
+  ventaId: string; clienteId: string | null; dolarones: number; codigo: string;
   total: number; autor: string; ahora: Date;
 }): Promise<Resultado> {
   if (!Number.isSafeInteger(p.dolarones) || p.dolarones < 0 || p.dolarones > p.total) {
@@ -184,37 +182,31 @@ export async function sentenciasDeVenta(env: Env, p: {
   if (!p.clienteId) {
     return p.dolarones > 0 ? { ok: false, status: 400, error: 'Para pagar con Dolarones hace falta el socio.' } : { ok: true, sentencias: [], ganados: 0 };
   }
-  const cliente = await env.DB.prepare('select id, pin_hash, pin_sal, pin_fallos, pin_bloqueo from clientes where id = ?')
+  const cliente = await env.DB.prepare('select id from clientes where id = ?')
     .bind(p.clienteId)
-    .first<{ id: string; pin_hash: string; pin_sal: string; pin_fallos: number; pin_bloqueo: string }>();
+    .first<{ id: string }>();
   if (!cliente) return { ok: false, status: 400, error: 'El socio no existe.' };
 
   const ahoraIso = p.ahora.toISOString();
   const sentencias: D1PreparedStatement[] = [];
 
   if (p.dolarones > 0) {
-    if (cliente.pin_bloqueo > ahoraIso) {
-      return { ok: false, status: 423, error: 'PIN bloqueado por intentos fallidos. Espera 15 minutos o llama a Isaac.' };
-    }
-    if (await hashPin(p.pin, cliente.pin_sal) !== cliente.pin_hash) {
-      // Incrementar sobre el valor actual: varias cajas pueden haber leido el mismo contador.
-      // Un intento en vuelo no debe quitar un bloqueo ni modificar un PIN restablecido.
-      const fallo = await env.DB.prepare(
-        `update clientes set
-           pin_fallos = case when pin_fallos + 1 >= ? then 0 else pin_fallos + 1 end,
-           pin_bloqueo = case when pin_fallos + 1 >= ? then ? else pin_bloqueo end
-         where id = ? and pin_bloqueo <= ? and pin_hash = ?
-         returning pin_bloqueo`,
-      ).bind(INTENTOS_PIN, INTENTOS_PIN, new Date(p.ahora.getTime() + BLOQUEO_PIN).toISOString(),
-        cliente.id, ahoraIso, cliente.pin_hash).first<{ pin_bloqueo: string }>();
-      return { ok: false, status: 403, error: fallo && fallo.pin_bloqueo > ahoraIso ? 'PIN incorrecto. Se bloqueo 15 minutos.' : 'PIN incorrecto.' };
-    }
-    // Confirmar el PIN y limpiar fallos juntos, antes de preparar la venta:
-    // el hash o el bloqueo pueden haber cambiado durante PBKDF2.
-    const autorizado = await env.DB.prepare(
-      `update clientes set pin_fallos = 0 where id = ? and pin_hash = ? and pin_bloqueo <= ? returning id`,
-    ).bind(cliente.id, cliente.pin_hash, ahoraIso).first();
-    if (!autorizado) return { ok: false, status: 423, error: 'PIN bloqueado o actualizado. Vuelve a buscar al socio o llama a Isaac.' };
+    const tokenHash = await hashCodigo(p.codigo);
+    if (!tokenHash) return { ok: false, status: 403, error: 'Escanea un código vigente autorizado por el cliente.' };
+    const autorizado = await env.DB.prepare(`select 1 from codigos_cliente k join clientes c on c.id = k.cliente_id
+      where k.cliente_id = ? and token_hash = ? and venta_id = '' and expira_en > ?
+      and maximo >= ? and k.auth_uid = c.auth_uid`)
+      .bind(cliente.id, tokenHash, ahoraIso, p.dolarones).first();
+    if (!autorizado) return { ok: false, status: 403, error: 'Código vencido, usado o importe no autorizado. El cliente debe generar otro.' };
+    // Volver a comprobar dentro del batch: otro cajero, un nuevo código o el
+    // reloj real pueden invalidar lo leído. NULL dispara el trigger y revierte
+    // también venta, existencias y saldo. Cerrar sesión revoca sin borrar la fila.
+    sentencias.push(env.DB.prepare(`update codigos_cliente set venta_id = case
+      when token_hash = ? and venta_id = '' and expira_en > ?
+      and expira_en > strftime('%Y-%m-%dT%H:%M:%fZ', 'now') and maximo >= ?
+      and auth_uid = (select auth_uid from clientes where id = ?)
+      then ? else null end where cliente_id = ?`)
+      .bind(tokenHash, ahoraIso, p.dolarones, cliente.id, p.ventaId, cliente.id));
 
     const { results: lotes } = await env.DB.prepare(
       'select id, origen, restante, disponible_desde, vence_en from dolarones_lotes where cliente_id = ? and restante > 0 and vence_en > ?',
@@ -293,20 +285,26 @@ export async function sentenciasDeCancelacion(env: Env, ventaId: string, autor: 
   ];
 }
 
-/**
- * El socio olvido su PIN o se bloqueo: el dueno, con el cliente enfrente, deja
- * que escriba uno nuevo. Ruta solo del dueno (no esta listada en cuentas.ts).
- */
-export async function cambiarPin(numero: number, request: Request, env: Env): Promise<Response> {
-  const cuerpo = (await request.json().catch(() => ({}))) as { pin?: unknown };
-  const pin = String(cuerpo.pin ?? '');
-  if (!/^\d{4}$/.test(pin)) return json({ error: 'El PIN debe tener 4 digitos.' }, 400);
-  const sal = hex(crypto.getRandomValues(new Uint8Array(16)));
-  const { meta } = await env.DB.prepare(
-    `update clientes set pin_hash = ?, pin_sal = ?, pin_fallos = 0, pin_bloqueo = '' where numero = ?`,
-  )
-    .bind(await hashPin(pin, sal), sal, numero)
-    .run();
-  if (meta.changes === 0) return json({ error: 'No hay socio con ese numero.' }, 404);
-  return json({ numero, pin_cambiado: true });
+export const codigoAleatorio = (prefijo: 'DC' | 'DV') => prefijo + '-' +
+  btoa(String.fromCharCode(...crypto.getRandomValues(new Uint8Array(12)))).replace(/\+/g, '-').replace(/\//g, '_');
+
+export async function hashCodigo(codigo: string): Promise<string | null> {
+  if (!/^D[CV]-[A-Za-z0-9_-]{16}$/.test(codigo)) return null;
+  return hex(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(codigo)));
+}
+
+/** El lector manda el código por POST: nunca tokens en URL, historial o logs. */
+export async function buscarPorCodigo(request: Request, env: Env): Promise<Response> {
+  const body = await request.json().catch(() => ({})) as { codigo?: unknown };
+  const codigo = String(body.codigo ?? '');
+  const hash = await hashCodigo(codigo);
+  if (!hash || !codigo.startsWith('DC-')) return json({ error: 'Código de socio inválido.' }, 400);
+  const cliente = await env.DB.prepare(`select c.id, c.numero, c.nombre, c.telefono, k.maximo, k.expira_en
+    from codigos_cliente k join clientes c on c.id = k.cliente_id
+    where token_hash = ? and venta_id = '' and expira_en > ? and k.auth_uid = c.auth_uid`)
+    .bind(hash, new Date().toISOString()).first<FilaCliente & { maximo: number; expira_en: string }>();
+  if (!cliente) return json({ error: 'Código vencido o usado. Pide al cliente que genere otro.' }, 403);
+  const respuesta = json(await socioConSaldo(env, cliente));
+  respuesta.headers.set('cache-control', 'no-store');
+  return respuesta;
 }

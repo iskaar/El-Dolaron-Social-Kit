@@ -2,7 +2,7 @@
 // Corte de caja (Issue #100) contra SQLite real con todas las migraciones.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { tienda, PRODUCTO, DUENO } from './prueba-d1.ts';
+import { tienda, codigoPrueba, PRODUCTO, DUENO } from './prueba-d1.ts';
 
 type Pedir = ReturnType<typeof tienda>['pedir'];
 
@@ -23,7 +23,7 @@ const salida = (pedir: Pedir, tipo: string, importe: number, caja = 'Caja 1') =>
   pedir('/api/retiros', { id: crypto.randomUUID(), tipo, caja, importe, motivo: tipo === 'gasto' ? 'garrafon de agua' : 'caja fuerte' });
 
 test('el corte cuadra: fondo + efectivo - devoluciones - retiros, y tarjeta, transferencia y Dolarones aparte', async () => {
-  const { pedir } = tienda();
+  const { db, pedir } = tienda();
   const socio = (await pedir('/api/socios', {
     id: crypto.randomUUID(), nombre: 'Cliente', telefono: '4449990000', pin: '1234', acepta_bases: true,
   })).cuerpo;
@@ -35,7 +35,7 @@ test('el corte cuadra: fondo + efectivo - devoluciones - retiros, y tarjeta, tra
   const cancelada = await vender(pedir, 'Caja 1');                                    // +250 y luego -250
   assert.equal((await cancelar(pedir, cancelada.id, 'Caja 1')).status, 200);
   assert.equal((await vender(pedir, 'Caja 1', {
-    cliente_id: socio.id, dolarones: 5000, pin: '1234', efectivo: 95000,
+    cliente_id: socio.id, dolarones: 5000, codigo_socio:await codigoPrueba(db, socio.id), efectivo: 95000,
     lineas: [{ producto_id: PRODUCTO, cantidad: 4 }],
   })).status, 201); // Ticket de $1,000: 50 D de apertura + $950.
   await vender(pedir, 'Caja 2');                                                      // otra caja: no cuenta

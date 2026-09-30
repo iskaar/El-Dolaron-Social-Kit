@@ -16,7 +16,6 @@
   label { display: block; font-size: 13px; color: #5b6478; margin: 12px 0 4px; }
   input[type=text], input[type=tel], input[type=email], input[type=password] { width: 100%; padding: 12px;
     font-size: 18px; border: 1px solid var(--linea); border-radius: 10px; }
-  .pin { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
   .nota { font-size: 12px; color: #78839a; margin-top: 4px; }
   .bases { display: flex; gap: 10px; align-items: flex-start; margin-top: 16px; font-size: 14px; }
   .bases input { width: 22px; height: 22px; margin-top: 1px; flex: none; }
@@ -50,12 +49,7 @@
     <label for="correo">Correo (opcional)</label>
     <input id="correo" type="email" maxlength="200">
 
-    <label>PIN de 4 dígitos — lo escribe el cliente</label>
-    <div class="pin">
-      <input id="pin" type="password" inputmode="numeric" maxlength="4" placeholder="PIN" required>
-      <input id="pin2" type="password" inputmode="numeric" maxlength="4" placeholder="Repetir" required>
-    </div>
-    <div class="nota">Se pide para pagar con Dolarones. Nadie de la tienda debe verlo ni anotarlo.</div>
+    <div class="nota">Para consultar y gastar, el cliente entra en la web con SMS y muestra su código. No se crea PIN.</div>
 
     <label class="bases">
       <input id="bases" type="checkbox">
@@ -73,20 +67,30 @@
     <div class="regalo" id="listo-regalo" hidden></div>
     <p id="listo-vence"></p>
     <p id="listo-saldo"></p>
+    <button id="acreditar-alta" type="button">Acreditar llegada física</button>
     <button id="otro" type="button">Registrar a otro cliente</button>
   </section>
 
   <details class="panel" style="margin-top:16px">
-    <summary>Olvidó su PIN o se bloqueó (solo el dueño)</summary>
-    <label for="pin-numero">Número de socio</label>
-    <input id="pin-numero" type="text" inputmode="numeric">
-    <label>PIN nuevo — lo escribe el cliente</label>
-    <div class="pin">
-      <input id="pin-nuevo" type="password" inputmode="numeric" maxlength="4" placeholder="PIN">
-      <input id="pin-nuevo2" type="password" inputmode="numeric" maxlength="4" placeholder="Repetir">
-    </div>
-    <button id="cambiar-pin" type="button">Cambiar PIN</button>
-    <div id="aviso-pin" role="status" style="margin-top:10px;font-size:14px"></div>
+    <summary>Acreditar llegada de un socio ya registrado en línea</summary>
+    <label for="llegada-numero">Número de socio</label>
+    <input id="llegada-numero" type="text" inputmode="numeric">
+    <button id="acreditar-llegada" type="button">Buscar y confirmar llegada</button>
+    <div id="aviso-llegada" role="status"></div>
+  </details>
+  <details class="panel" style="margin-top:16px" id="vincular-panel" hidden>
+    <summary>Vincular una membresía previa (sólo el dueño, en persona)</summary>
+    <label for="vincular-numero">Número de socio</label><input id="vincular-numero" type="text" inputmode="numeric">
+    <label for="vincular-codigo">Código de vinculación que muestra el cliente</label>
+    <input id="vincular-codigo" type="text" autocomplete="off" autocapitalize="none" spellcheck="false">
+    <p class="nota">Confirma que la persona presente es el titular de la membresía. Controlar un teléfono no basta si cambió de dueño.</p>
+    <button id="vincular" type="button">Confirmar titular y vincular</button>
+    <div id="aviso-vinculo" role="status"></div>
+  </details>
+  <details class="panel" style="margin-top:16px">
+    <summary>Bases y aviso para leer antes del alta</summary>
+    <p id="texto-bases" style="white-space:pre-wrap"></p>
+    <p id="texto-aviso" style="white-space:pre-wrap"></p>
   </details>
 </main>
 
@@ -95,6 +99,7 @@ const $ = (id) => document.getElementById(id);
 const d = (centavos) => `${(centavos / 100).toLocaleString('es-MX')} Dolarones`;
 // Un id por alta: si la red falla despues de guardar, reintentar no crea otro socio.
 let idAlta = crypto.randomUUID();
+let ultimoSocio = null;
 
 $('alta').addEventListener('input', (e) => {
   if (e.target.id !== 'bases') idAlta = crypto.randomUUID();
@@ -103,9 +108,6 @@ $('alta').addEventListener('input', (e) => {
 
 $('alta').addEventListener('submit', async (e) => {
   e.preventDefault();
-  const pin = $('pin').value;
-  if (!/^\d{4}$/.test(pin)) { $('aviso').textContent = 'El PIN debe tener 4 dígitos.'; return; }
-  if (pin !== $('pin2').value) { $('aviso').textContent = 'Los dos PIN no coinciden.'; return; }
   if (!$('bases').checked) { $('aviso').textContent = 'Falta que el cliente acepte las bases y el aviso.'; return; }
 
   $('registrar').disabled = true;
@@ -115,11 +117,13 @@ $('alta').addEventListener('submit', async (e) => {
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
         id: idAlta, nombre: $('nombre').value, telefono: $('telefono').value,
-        correo: $('correo').value, pin, acepta_bases: true,
+        correo: $('correo').value, acepta_bases: true,
       }),
     });
     const socio = await r.json();
     if (!r.ok) { $('aviso').textContent = socio.error ?? 'No se pudo registrar.'; return; }
+    ultimoSocio = socio;
+    $('acreditar-alta').disabled = false;
 
     $('listo-numero').textContent = `#${socio.numero}`;
     $('listo-nombre').textContent = socio.nombre;
@@ -146,24 +150,55 @@ $('otro').addEventListener('click', () => {
   $('nombre').focus();
 });
 
-$('cambiar-pin').addEventListener('click', async () => {
-  const aviso = $('aviso-pin');
-  const pin = $('pin-nuevo').value;
-  aviso.style.color = '#D72B32';
-  if (!/^\d{4}$/.test(pin) || pin !== $('pin-nuevo2').value) { aviso.textContent = 'Los dos PIN deben ser iguales y de 4 dígitos.'; return; }
-  try {
-    const r = await fetch(`/api/socios/${encodeURIComponent($('pin-numero').value.trim())}/pin`, {
-      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ pin }),
-    });
-    const cuerpo = await r.json().catch(() => ({}));
-    if (!r.ok) { aviso.textContent = cuerpo.error ?? 'No se pudo cambiar el PIN.'; return; }
-    aviso.style.color = '#1f7a4d';
-    aviso.textContent = `Listo: el socio #${cuerpo.numero} ya puede usar su PIN nuevo.`;
-    $('pin-nuevo').value = ''; $('pin-nuevo2').value = '';
-  } catch {
-    aviso.textContent = 'Sin red. Intenta de nuevo.';
-  }
+async function acreditar(socio, aviso) {
+  if (!confirm(`¿Confirmas la llegada física de #${socio.numero}, ${socio.nombre}? La primera llegada define el premio de 500 D y no se puede cambiar desde esta pantalla.`)) return;
+  const r = await fetch('/api/portal/llegada', { method:'POST', headers:{ 'content-type':'application/json' },
+    body:JSON.stringify({ cliente_id:socio.id }) });
+  const cuerpo = await r.json();
+  if (!r.ok) throw new Error(cuerpo.error || 'No se pudo acreditar. Intenta otra vez.');
+  aviso.textContent = cuerpo.premio ? `Llegada acreditada. Premio: ${d(cuerpo.premio.importe)}, vigente hasta ${new Date(cuerpo.premio.vence_en).toLocaleDateString('es-MX')}.` : 'Llegada acreditada; sin premio nuevo disponible.';
+}
+$('acreditar-alta').addEventListener('click', async () => {
+  $('acreditar-alta').disabled = true;
+  try { await acreditar(ultimoSocio, $('listo-saldo')); }
+  catch (e) { $('listo-saldo').textContent = e.message; }
+  finally { $('acreditar-alta').disabled = false; }
 });
+$('acreditar-llegada').addEventListener('click', async () => {
+  $('acreditar-llegada').disabled = true;
+  try {
+    const r = await fetch('/api/socios?q=' + encodeURIComponent($('llegada-numero').value.trim()));
+    const socio = await r.json();
+    if (!r.ok) throw new Error(socio.error);
+    await acreditar(socio, $('aviso-llegada'));
+  } catch (e) { $('aviso-llegada').textContent = e.message || 'Sin red. Intenta de nuevo.'; }
+  finally { $('acreditar-llegada').disabled = false; }
+});
+$('vincular').addEventListener('click', async () => {
+  const numero = Number($('vincular-numero').value);
+  if (!confirm(`¿Confirmas que el cliente presente es el titular del socio #${numero} y autorizas vincular su acceso?`)) return;
+  $('vincular').disabled = true;
+  try {
+    const r = await fetch('/api/socios/vincular', { method:'POST', headers:{ 'content-type':'application/json' },
+      body:JSON.stringify({ numero, codigo:$('vincular-codigo').value.trim(), confirma:true }) });
+    const cuerpo = await r.json();
+    if (!r.ok) throw new Error(cuerpo.error);
+    $('aviso-vinculo').textContent = `Acceso vinculado a #${cuerpo.numero}, ${cuerpo.nombre}.`;
+    $('vincular-codigo').value = '';
+  } catch (e) { $('aviso-vinculo').textContent = e.message || 'Sin red. Intenta de nuevo.'; }
+  finally { $('vincular').disabled = false; }
+});
+try {
+  const yo = await (await fetch('/api/yo')).json();
+  $('vincular-panel').hidden = !yo.usuario?.roles?.includes('dueno');
+  const legal = await (await fetch('/api/socios/legal')).json();
+  $('texto-bases').textContent = legal.bases;
+  $('texto-aviso').textContent = legal.aviso;
+  if (!legal.disponible) {
+    $('registrar').disabled = true;
+    $('aviso').textContent = 'Altas cerradas hasta publicar las bases y el aviso aprobados.';
+  }
+} catch { $('registrar').disabled = true; $('aviso').textContent = 'No se pudieron cargar las bases. Recarga con conexión.'; }
 
 $('nombre').focus();
 </script>

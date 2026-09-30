@@ -71,7 +71,7 @@
     padding: 0 14px; font-size: 14px; cursor: pointer; }
   #socio-info { font-size: 14px; margin-top: 6px; min-height: 18px; }
   #socio-info b { color: var(--azul); }
-  #dolarones, #pin { width: 100%; padding: 12px; font-size: 18px; border: 1px solid var(--linea); border-radius: 10px; }
+  #dolarones { width: 100%; padding: 12px; font-size: 18px; border: 1px solid var(--linea); border-radius: 10px; }
   #a-pagar { font-size: 18px; font-weight: 700; color: var(--azul); min-height: 22px; }
   .caja-nombre { font-size: 13px; display: flex; align-items: center; gap: 6px; color: #fff; margin: 0; }
   .caja-nombre select { width: auto; padding: 4px 8px; font-size: 14px; border-radius: 8px; border: 0; }
@@ -135,9 +135,9 @@
     <div id="piezas">0 piezas</div>
     <div id="a-pagar"></div>
 
-    <label for="socio">Socio: teléfono o número</label>
+    <label for="socio">Socio: código de la web, teléfono o número</label>
     <div class="socio-fila">
-      <input id="socio" inputmode="numeric" autocomplete="off" placeholder="Opcional">
+      <input id="socio" autocomplete="off" placeholder="Escanea su código">
       <button id="buscar-socio" type="button">Buscar</button>
       <button id="quitar-socio" type="button" hidden aria-label="Quitar socio">✕</button>
     </div>
@@ -146,8 +146,7 @@
     <div id="pagar-dolarones" hidden>
       <label for="dolarones">Pagar con Dolarones</label>
       <input id="dolarones" type="number" min="0" step="1" inputmode="numeric" placeholder="0">
-      <label for="pin">PIN del cliente (lo escribe el cliente)</label>
-      <input id="pin" type="password" inputmode="numeric" maxlength="4" autocomplete="off">
+      <p id="codigo-autorizacion" aria-live="polite">Para gastar, escanea el código que el cliente genera en su cuenta.</p>
     </div>
 
     <label for="forma">Forma de pago</label>
@@ -254,6 +253,8 @@ let idVenta = null;
 let cobrando = false;
 // Socio de la venta en curso: { id, numero, nombre, disponible, por_liberar, regalo_disponible } o null.
 let socio = null;
+let codigoSocio = '';
+let busquedaSocio = 0;
 const dolares = (centavos) => `${(centavos / 100).toLocaleString('es-MX')} D`;
 
 /* ---------- que caja es esta computadora (Issue #100) ---------- */
@@ -352,7 +353,12 @@ function pintar() {
   $('piezas').textContent = `${t.piezas} ${t.piezas === 1 ? 'pieza' : 'piezas'}`;
   $('a-pagar').textContent = usados ? `Dolarones −${pesos(usados)} · A pagar ${pesos(t.aPagar)}` : '';
   const canjeable = saldoCanjeable(socio, t.total);
-  $('cobrar').disabled = cobrando || t.total === 0 || usados > canjeable;
+  const autorizado = !usados || (codigoSocio && usados <= socio.maximo && Date.parse(socio.expira_en) > Date.now());
+  $('cobrar').disabled = cobrando || t.total === 0 || usados > canjeable || !autorizado;
+  $('codigo-autorizacion').textContent = codigoSocio
+    ? `El cliente autorizó hasta ${dolares(socio.maximo)}. Su código vence a las ${new Date(socio.expira_en).toLocaleTimeString('es-MX')}.`
+      + (!autorizado ? ' Pide otro código o reduce los D solicitados.' : '')
+    : 'Para gastar, escanea el código que el cliente genera en su cuenta.';
   $('regla-regalo').hidden = !socio?.regalo_disponible;
   $('regla-regalo').textContent = socio?.regalo_disponible
     ? `${dolares(socio.regalo_disponible)} de apertura: ticket mínimo de ${pesos(MINIMO_REGALO)} MXN antes de descontar Dolarones. Puedes usar ${dolares(Math.min(canjeable, t.total))} en este ticket.`
@@ -385,6 +391,11 @@ function buscarPieza(codigo) {
 }
 
 function agregarCodigo(codigo) {
+  if (codigo.trim().startsWith('DC-')) {
+    $('socio').value = codigo.trim();
+    buscarSocio();
+    return;
+  }
   const pieza = buscarPieza(codigo);
   if (!pieza) {
     $('aviso').textContent = `Código no encontrado: ${codigo}`;
@@ -461,7 +472,7 @@ $('sugerencias').addEventListener('click', (e) => {
 function dolaronesPedidos() {
   if (!socio) return 0;
   const pedidos = Math.round(Number($('dolarones').value || 0) * 100);
-  return Math.max(0, Math.min(pedidos, socio.disponible, totales(lineas).total));
+  return Math.max(0, pedidos);
 }
 
 function pintarSocio() {
@@ -475,18 +486,27 @@ function pintarSocio() {
 
 function quitarSocio() {
   socio = null;
+  codigoSocio = '';
+  busquedaSocio++;
   $('socio').value = '';
   $('dolarones').value = '';
-  $('pin').value = '';
   pintarSocio();
 }
 
 async function buscarSocio() {
   const q = $('socio').value.trim();
   if (!q) return;
+  quitarSocio();
+  const busqueda = busquedaSocio;
+  idVenta = null;
+  pintar();
   try {
-    const r = await fetch(`/api/socios?q=${encodeURIComponent(q)}`);
+    const esCodigo = q.startsWith('DC-');
+    const r = esCodigo
+      ? await fetch('/api/socios/codigo', { method:'POST', headers:{ 'content-type':'application/json' }, body:JSON.stringify({ codigo:q }) })
+      : await fetch(`/api/socios?q=${encodeURIComponent(q)}`);
     const cuerpo = await r.json();
+    if (busqueda !== busquedaSocio) return;
     if (!r.ok) {
       socio = null;
       pintarSocio();
@@ -495,11 +515,15 @@ async function buscarSocio() {
       return;
     }
     socio = cuerpo;
+    codigoSocio = esCodigo ? q : '';
+    $('socio').value = '#' + socio.numero;
+    $('dolarones').value = '';
     idVenta = null;
     $('socio-info').style.color = '';
     pintarSocio();
     pintar();
   } catch {
+    if (busqueda !== busquedaSocio) return;
     // Sin red no hay saldo que consultar: la venta se cobra sin socio y no gana.
     $('socio-info').textContent = 'Sin red: no se pueden buscar socios. Cobra sin socio.';
     $('socio-info').style.color = '#D72B32';
@@ -513,20 +537,19 @@ $('dolarones').addEventListener('input', () => { idVenta = null; pintar(); });
 
 /**
  * Con Dolarones el cobro espera al servidor: el saldo solo existe alla, y
- * mostrar "cobrado" antes de que lo confirme dejaria gastar dos veces. El PIN
- * nunca se guarda en el disco de la caja.
+ * mostrar "cobrado" antes de confirmarlo dejaría gastar dos veces. El código
+ * de autorización sólo vive en memoria; nunca se encola en el disco.
  */
 async function cobrarConDolarones(venta, t) {
-  const pin = $('pin').value;
-  if (!/^\d{4}$/.test(pin)) {
-    $('aviso').textContent = 'Falta el PIN del cliente (4 dígitos).';
+  if (!codigoSocio || venta.dolarones > socio.maximo || Date.parse(socio.expira_en) <= Date.now()) {
+    $('aviso').textContent = 'El cliente debe autorizar este importe y mostrar un código vigente desde su cuenta.';
     $('aviso').style.color = '#D72B32';
     return false;
   }
   let respuesta;
   try {
     respuesta = await fetch('/api/ventas', {
-      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ...venta, pin }),
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ...venta, codigo_socio:codigoSocio }),
     });
   } catch {
     $('aviso').textContent = 'Sin red: no se pudo cobrar con Dolarones. Intenta otra vez o cobra sin Dolarones.';
@@ -537,7 +560,6 @@ async function cobrarConDolarones(venta, t) {
   if (!respuesta.ok) {
     $('aviso').textContent = cuerpo.error ?? 'No se pudo cobrar con Dolarones.';
     $('aviso').style.color = '#D72B32';
-    if (respuesta.status === 403) $('pin').value = '';
     return false;
   }
   // Un reenvio de la misma venta ya confirmada devuelve `duplicada` sin saldo: se imprime lo local.
