@@ -329,3 +329,36 @@ export function imprimirRetiro(retiro) {
   ];
   return enviar(concatenar(partes));
 }
+
+/**
+ * El comprobante de una devolucion (Issue #138): piezas canceladas sueltas o el
+ * resto del ticket. Lo firma el cajero que entrega el dinero y el cliente que
+ * lo recibe; se guarda con el corte.
+ * @param d {{ titulo: string, caja: string, cajero: string, creado_en: string, ticket_creado_en: string,
+ *   forma_pago: string, piezas: { nombre: string, cantidad: number, importe: number }[],
+ *   dinero: number, dolarones: number, motivo: string }}
+ */
+export function imprimirDevolucion(d) {
+  const salida = d.forma_pago === 'efectivo' ? 'EFECTIVO' : d.forma_pago === 'transferencia' ? 'TRANSFERENCIA' : 'TARJETA';
+  const partes = [
+    ...encabezado(d.titulo),
+    linea(`Caja: ${sinAcentos(d.caja || 'sin caja')}`),
+    linea(`Cajero: ${sinAcentos(d.cajero)}`.slice(0, COLUMNAS)),
+    linea(`Fecha: ${fechaHora(d.creado_en)}`),
+    linea(`Ticket original: ${fechaHora(d.ticket_creado_en)}`),
+    separador(),
+    ...d.piezas.flatMap((p) => [
+      linea(sinAcentos(p.nombre).slice(0, COLUMNAS)),
+      renglonMonto(`  ${p.cantidad} pieza${p.cantidad > 1 ? 's' : ''}`, importe(p.importe)),
+    ]),
+    separador(),
+    negritas(true),
+    renglonMonto(`DEVUELTO EN ${salida}`, importe(d.dinero)),
+    negritas(false),
+    ...(d.dolarones ? [renglonMonto('Regresado al saldo (Dolarones)', `${d.dolarones / 100} D`)] : []),
+    linea('Motivo:'),
+    ...parrafo(d.motivo),
+    ...firmas(d.cajero),
+  ];
+  return enviar(concatenar(partes));
+}

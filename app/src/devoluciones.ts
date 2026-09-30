@@ -38,14 +38,14 @@ export function repartirDevolucion(p: {
 
 interface VentaFila {
   id: string; total: number; forma_pago: string; efectivo: number; cambio: number; dolarones: number;
-  cancelada: number; cancelada_en: string; cancelada_por: string; motivo_cancelacion: string;
+  cancelada: number; cancelada_en: string; cancelada_por: string; cancelada_caja: string; motivo_cancelacion: string;
   creado_en: string; caja: string; cajero: string; cliente_id: string | null;
   devuelto: number; dolarones_devueltos: number; revision: number;
 }
 
 const leerVenta = (env: Env, id: string) =>
   env.DB.prepare(
-    `select id, total, forma_pago, efectivo, cambio, dolarones, cancelada, cancelada_en, cancelada_por,
+    `select id, total, forma_pago, efectivo, cambio, dolarones, cancelada, cancelada_en, cancelada_por, cancelada_caja,
             motivo_cancelacion, creado_en, caja, cajero, cliente_id, devuelto, dolarones_devueltos, revision
      from ventas where id = ?`,
   ).bind(id).first<VentaFila>();
@@ -61,7 +61,7 @@ export async function detalleVenta(id: string, env: Env): Promise<Response> {
      from venta_lineas where venta_id = ? order by id`,
   ).bind(id).all();
   const { results: devoluciones } = await env.DB.prepare(
-    `select d.creado_en, d.autor, d.motivo, d.cantidad, d.importe, d.dolarones, d.caja, l.nombre
+    `select d.id, d.creado_en, d.autor, d.motivo, d.cantidad, d.importe, d.dolarones, d.caja, l.nombre
      from devoluciones d join venta_lineas l on l.id = d.linea_id
      where d.venta_id = ? order by d.creado_en`,
   ).bind(id).all();

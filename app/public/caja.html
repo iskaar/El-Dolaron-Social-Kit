@@ -249,7 +249,10 @@ import {
   reconectarImpresora, conectarImpresora, impresoraLista, imprimirTicket, abrirCajon, explicarErrorUsb, errorImpresora,
   imprimirCorte, imprimirRetiro,
 } from '/impresora.js';
-import { renglonTicket, pintarDetalle, formularioPieza, formularioTodo } from '/ticket.js';
+import {
+  renglonTicket, pintarDetalle, formularioPieza, formularioTodo, comprobanteDevolucion, comprobanteCancelacion,
+} from '/ticket.js';
+import { imprimirDevolucion } from '/impresora.js';
 
 const $ = (id) => document.getElementById(id);
 // Nombres de piezas (los escribe la IA o el admin), de socios y motivos: texto, nunca HTML.
@@ -765,6 +768,15 @@ $('ticket-contenido').addEventListener('click', async (e) => {
     return;
   }
   if (d.volver !== undefined) { cerrarFormularios(); return; }
+  if (d.imprimirDevolucion !== undefined || d.imprimirCancelacion !== undefined) {
+    $('ticket-aviso').textContent = '';
+    boton.disabled = true;
+    await imprimirComprobante(d.imprimirCancelacion !== undefined
+      ? comprobanteCancelacion(ticketAbierto)
+      : comprobanteDevolucion(ticketAbierto, Number(d.imprimirDevolucion)));
+    boton.disabled = false;
+    return;
+  }
 
   if (d.confirmarLinea || d.confirmarTodo !== undefined) {
     const form = boton.closest('.form-cancelar');
@@ -809,11 +821,29 @@ $('ticket-contenido').addEventListener('click', async (e) => {
     const aviso = $('ticket-aviso').textContent;
     await abrirTicket(ticketAbierto.id);
     $('ticket-aviso').textContent = aviso;
+    // El comprobante sale solo la primera vez; un reenvio (duplicada, ya_estaba) se reimprime con su boton.
+    if (r.ok && !cuerpo.duplicada && !cuerpo.ya_estaba && ticketAbierto) {
+      const i = ticketAbierto.devoluciones.findIndex((x) => x.id === cuerpo.id);
+      if (!d.confirmarLinea || i >= 0) {
+        await imprimirComprobante(d.confirmarLinea ? comprobanteDevolucion(ticketAbierto, i) : comprobanteCancelacion(ticketAbierto));
+      }
+    }
     await cargarTickets();
     await actualizarCorte();
     await cargarCatalogo();          // la pieza devuelta vuelve a tener existencia
   }
 });
+
+/** Hoja de la devolucion para que el cliente firme; se guarda con el corte. */
+async function imprimirComprobante(datos) {
+  const ok = await imprimirDevolucion(datos);
+  const aviso = $('ticket-aviso');
+  aviso.textContent = `${aviso.textContent} ${ok
+    ? 'Comprobante impreso: que lo firme el cliente y guárdalo con el corte.'
+    : `No se imprimió el comprobante (${errorImpresora() || 'impresora no conectada'}). Conéctala y usa «Imprimir comprobante».`}`.trim();
+  if (!ok) aviso.style.color = '#D72B32';
+  pintarImpresora();
+}
 
 function cerrarFormularios() {
   for (const f of $('ticket-contenido').querySelectorAll('.form-linea, #form-todo')) f.hidden = true;

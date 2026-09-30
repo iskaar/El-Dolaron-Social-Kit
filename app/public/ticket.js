@@ -64,8 +64,9 @@ export function pintarDetalle(t, { editable = false } = {}) {
 
   const historial = t.devoluciones.length === 0 ? '' : `
     <h3>Piezas canceladas</h3>
-    <ul class="historial">${t.devoluciones.map((d) => `
+    <ul class="historial">${t.devoluciones.map((d, i) => `
       <li><b>${d.cantidad} × ${escapar(d.nombre)}</b> — ${pesos(d.importe)}${d.dolarones ? ` + ${dolares(d.dolarones)}` : ''}
+        ${editable ? `<button type="button" class="secundario" data-imprimir-devolucion="${i}">Imprimir comprobante</button>` : ''}
         <div>${fecha(d.creado_en)} ${hora(d.creado_en)} · ${escapar(d.caja || 'sin caja')} · ${escapar(d.autor)} · «${escapar(d.motivo)}»</div></li>`).join('')}
     </ul>`;
 
@@ -74,7 +75,8 @@ export function pintarDetalle(t, { editable = false } = {}) {
     <p class="nota">${fecha(t.creado_en)} · ${FORMAS[t.forma_pago] ?? escapar(t.forma_pago)} · ${escapar(t.caja || 'sin caja')}
       · cobró ${escapar(t.cajero || '—')}${socio}</p>
     ${t.cancelada ? `<p class="ticket-cancelado">Ticket cancelado completo ${fecha(t.cancelada_en)} ${hora(t.cancelada_en)}
-      por ${escapar(t.cancelada_por)}: «${escapar(t.motivo_cancelacion)}»</p>` : ''}
+      por ${escapar(t.cancelada_por)}: «${escapar(t.motivo_cancelacion)}»
+      ${editable ? '<button type="button" class="secundario" data-imprimir-cancelacion>Imprimir comprobante</button>' : ''}</p>` : ''}
     <table class="desglose">
       <thead><tr><th>Pieza</th><th class="num">Cant.</th><th class="num">Precio</th><th class="num">Importe</th><th></th></tr></thead>
       <tbody>${renglones}</tbody>
@@ -86,6 +88,29 @@ export function pintarDetalle(t, { editable = false } = {}) {
         <button type="button" class="quitar" data-cancelar-todo>Cancelar todo lo que queda (${quedan} pieza${quedan > 1 ? 's' : ''})</button>
         <div id="form-todo" hidden></div>
       </div>` : ''}`;
+}
+
+/** Lo que imprime imprimirDevolucion para la devolucion `i` del ticket (piezas sueltas). */
+export function comprobanteDevolucion(t, i) {
+  const d = t.devoluciones[i];
+  return {
+    titulo: 'DEVOLUCION DE PIEZAS', caja: d.caja, cajero: d.autor, creado_en: d.creado_en,
+    ticket_creado_en: t.creado_en, forma_pago: t.forma_pago,
+    piezas: [{ nombre: d.nombre, cantidad: d.cantidad, importe: d.importe + d.dolarones }],
+    dinero: d.importe, dolarones: d.dolarones, motivo: d.motivo,
+  };
+}
+
+/** Lo que imprime imprimirDevolucion al cancelar el ticket completo: solo lo que quedaba. */
+export function comprobanteCancelacion(t) {
+  return {
+    titulo: 'CANCELACION DE TICKET', caja: t.cancelada_caja, cajero: t.cancelada_por, creado_en: t.cancelada_en,
+    ticket_creado_en: t.creado_en, forma_pago: t.forma_pago,
+    piezas: t.lineas.filter((l) => l.cantidad > l.cancelada_cantidad).map((l) => ({
+      nombre: l.nombre, cantidad: l.cantidad - l.cancelada_cantidad, importe: l.precio * (l.cantidad - l.cancelada_cantidad),
+    })),
+    dinero: t.total - t.dolarones - t.devuelto, dolarones: t.dolarones - t.dolarones_devueltos, motivo: t.motivo_cancelacion,
+  };
 }
 
 /** El formulario de una pieza: cuantas (si hay mas de una) y el motivo. */
@@ -144,6 +169,8 @@ function asegurarEstilos() {
     .ventana-ticket .cancelar-todo { margin-top: 14px; }
     .ventana-ticket .historial { margin: 0; padding-left: 18px; font-size: 13px; }
     .ventana-ticket .historial div { color: #5b6478; font-size: 12px; }
+    .ventana-ticket .historial li { margin-bottom: 6px; }
+    .ventana-ticket .historial button, .ventana-ticket .ticket-cancelado button { margin-left: 6px; padding: 3px 8px; font-size: 12px; }
     .ventana-ticket .ticket-cancelado { background: #fdecec; color: #D72B32; border-radius: 8px; padding: 8px 10px; font-size: 13px; }
     .ticket-fila { display: flex; justify-content: space-between; align-items: center; gap: 8px; width: 100%;
       padding: 8px 4px; border: 0; border-bottom: 1px solid #dfe3ea; background: none; font: inherit; font-size: 13px;
