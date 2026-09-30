@@ -297,8 +297,13 @@ export async function sentenciasDeVenta(env: Env, p: {
  * se pierde; la restitucion de 30 dias del plan espera aprobacion.
  */
 export async function sentenciasDeCancelacion(env: Env, ventaId: string, autor: string, ahora: string): Promise<D1PreparedStatement[]> {
-  // Por lote, lo canjeado menos lo que ya regreso por piezas canceladas (Issue #138).
-  const canjes = await canjesPendientes(env, ventaId);
+  // Por lote, lo canjeado menos lo que ya regreso por piezas canceladas sueltas (Issue #138).
+  const { results: canjes } = await env.DB.prepare(
+    `select cliente_id, lote_id, -sum(importe) as importe from dolarones_movimientos
+     where venta_id = ? and tipo in ('canje', 'reverso_canje') group by cliente_id, lote_id having sum(importe) < 0`,
+  )
+    .bind(ventaId)
+    .all<{ cliente_id: string; lote_id: string; importe: number }>();
   return [
     ...canjes.flatMap((c) => [
       env.DB.prepare('update dolarones_lotes set restante = restante + ? where id = ?').bind(c.importe, c.lote_id),
@@ -315,73 +320,6 @@ export async function sentenciasDeCancelacion(env: Env, ventaId: string, autor: 
     ).bind(autor, ahora, ventaId),
     env.DB.prepare('update dolarones_lotes set restante = 0 where venta_id = ?').bind(ventaId),
   ];
-}
-
-/** Lo canjeado en una venta que todavia no regresa a su lote, por lote; el que vence al ultimo primero. */
-async function canjesPendientes(env: Env, ventaId: string) {
-  const { results } = await env.DB.prepare(
-    `select m.cliente_id, m.lote_id, -sum(m.importe) as importe
-     from dolarones_movimientos m join dolarones_lotes l on l.id = m.lote_id
-     where m.venta_id = ? and m.tipo in ('canje', 'reverso_canje')
-     group by m.cliente_id, m.lote_id having sum(m.importe) < 0
-     order by max(l.vence_en) desc, m.lote_id`,
-  )
-    .bind(ventaId)
-    .all<{ cliente_id: string; lote_id: string; importe: number }>();
-  return results;
-}
-
-/**
- * Cancelar una pieza del ticket (Issue #138): regresan `dolarones` al saldo y
- * lo ganado se recalcula sobre `pagadoRestante`, el dinero que el ticket sigue
- * teniendo cobrado. Para el mismo batch que registra la devolucion.
- *
- * Lo que regresa va al lote que vence al ultimo: al cliente le dura mas. Lo
- * ganado de mas se retira hasta donde alcance `restante`, igual que al
- * cancelar el ticket completo (ver el ponytail de sentenciasDeCancelacion).
- */
-export async function sentenciasDeDevolucion(env: Env, p: {
-  ventaId: string; dolarones: number; pagadoRestante: number; autor: string; ahora: string;
-}): Promise<D1PreparedStatement[]> {
-  const sentencias: D1PreparedStatement[] = [];
-
-  let falta = p.dolarones;
-  for (const canje of falta > 0 ? await canjesPendientes(env, p.ventaId) : []) {
-    if (falta === 0) break;
-    const regresa = Math.min(canje.importe, falta);
-    falta -= regresa;
-    sentencias.push(
-      env.DB.prepare('update dolarones_lotes set restante = restante + ? where id = ?').bind(regresa, canje.lote_id),
-      env.DB.prepare(
-        `insert into dolarones_movimientos (cliente_id, lote_id, venta_id, tipo, importe, autor, creado_en)
-         values (?, ?, ?, 'reverso_canje', ?, ?, ?)`,
-      ).bind(canje.cliente_id, canje.lote_id, p.ventaId, regresa, p.autor, p.ahora),
-    );
-  }
-
-  const compra = await env.DB.prepare(
-    `select l.id, l.cliente_id, l.importe, l.restante,
-       coalesce((select -sum(importe) from dolarones_movimientos
-                 where lote_id = l.id and tipo = 'reverso_compra'), 0) as retirado
-     from dolarones_lotes l where l.venta_id = ?`,
-  )
-    .bind(p.ventaId)
-    .first<{ id: string; cliente_id: string; importe: number; restante: number; retirado: number }>();
-  if (compra) {
-    const retira = Math.min(compra.restante,
-      Math.max(0, compra.importe - compra.retirado - dolaronesGanados(p.pagadoRestante)));
-    if (retira > 0) {
-      sentencias.push(
-        // Si el socio gasta ese saldo en otra caja al mismo tiempo, lote_no_negativo aborta el batch.
-        env.DB.prepare('update dolarones_lotes set restante = restante - ? where id = ?').bind(retira, compra.id),
-        env.DB.prepare(
-          `insert into dolarones_movimientos (cliente_id, lote_id, venta_id, tipo, importe, autor, creado_en)
-           values (?, ?, ?, 'reverso_compra', ?, ?, ?)`,
-        ).bind(compra.cliente_id, compra.id, p.ventaId, -retira, p.autor, p.ahora),
-      );
-    }
-  }
-  return sentencias;
 }
 
 /**
