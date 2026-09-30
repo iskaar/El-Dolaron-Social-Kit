@@ -97,6 +97,11 @@ export async function cancelarPieza(
   const venta = await leerVenta(env, ventaId);
   if (!venta) return json({ error: 'La venta no existe.' }, 404);
   if (venta.cancelada) return json({ error: 'El ticket ya estaba cancelado completo.' }, 409);
+  // Dolarones sin socio son de un vale (PR #134): aqui solo se sabe regresarlos
+  // a los lotes de un socio. Hasta integrarlo, ese ticket se cancela completo.
+  if (venta.dolarones > 0 && !venta.cliente_id) {
+    return json({ error: 'Este ticket se pagó con un vale: cancélalo completo.' }, 409);
+  }
 
   const linea = await env.DB.prepare(
     `select l.id, l.producto_id, l.precio, l.cantidad, l.cancelada_cantidad
