@@ -13,12 +13,15 @@ function promocionAbierta(env: Env): boolean {
   return env.PORTAL_REGISTRO_ABIERTO === 'si' && basesListas(env) && promocionIniciada(env, new Date());
 }
 
+// Sólo el motivo (nunca token ni teléfono): para saber por qué alguien ve «Sesión inválida».
+const rechazo = (motivo: string) => { console.warn(`portal: sesión rechazada (${motivo})`); return null; };
+
 // accounts:lookup valida el ID token contra Firebase y devuelve el registro
 // vigente; validSince permite rechazar una sesión revocada en cada petición.
 export async function identidad(request: Request, env: Env): Promise<Identidad | null> {
   const authorization = request.headers.get('authorization') ?? '';
   const match = /^Bearer ([A-Za-z0-9._-]{1,8192})$/.exec(authorization);
-  if (!match || !env.FIREBASE_PROJECT_ID || !env.FIREBASE_WEB_API_KEY) return null;
+  if (!match || !env.FIREBASE_PROJECT_ID || !env.FIREBASE_WEB_API_KEY) return rechazo(match ? 'sin config' : 'sin token');
   const token = match[1];
   let claims: Record<string, unknown>;
   try {
@@ -27,28 +30,30 @@ export async function identidad(request: Request, env: Env): Promise<Identidad |
     const header = JSON.parse(atob(partes[0].replace(/-/g, '+').replace(/_/g, '/'))) as { alg?: string };
     claims = JSON.parse(atob(partes[1].replace(/-/g, '+').replace(/_/g, '/'))) as Record<string, unknown>;
     const now = Math.floor(Date.now() / 1000);
-    if (header.alg !== 'RS256' || claims.aud !== env.FIREBASE_PROJECT_ID ||
-      claims.iss !== `https://securetoken.google.com/${env.FIREBASE_PROJECT_ID}` ||
-      typeof claims.sub !== 'string' || !claims.sub ||
-      typeof claims.exp !== 'number' || claims.exp <= now ||
-      typeof claims.iat !== 'number' || claims.iat > now ||
-      typeof claims.auth_time !== 'number' || claims.auth_time > now ||
-      (claims.firebase as { sign_in_provider?: string } | undefined)?.sign_in_provider !== 'phone') return null;
-  } catch { return null; }
+    const motivo = header.alg !== 'RS256' ? 'alg' : claims.aud !== env.FIREBASE_PROJECT_ID ? 'aud' :
+      claims.iss !== `https://securetoken.google.com/${env.FIREBASE_PROJECT_ID}` ? 'iss' :
+      typeof claims.sub !== 'string' || !claims.sub ? 'sub' :
+      typeof claims.exp !== 'number' || claims.exp <= now ? `exp ${Number(claims.exp) - now}s` :
+      typeof claims.iat !== 'number' || claims.iat > now ? `iat ${Number(claims.iat) - now}s` :
+      typeof claims.auth_time !== 'number' || claims.auth_time > now ? `auth_time ${Number(claims.auth_time) - now}s` :
+      (claims.firebase as { sign_in_provider?: string } | undefined)?.sign_in_provider !== 'phone' ? 'proveedor' : '';
+    if (motivo) return rechazo(motivo);
+  } catch { return rechazo('token ilegible'); }
   let response: Response;
   try {
     response = await fetch(`https://identitytoolkit.googleapis.com/v1/accounts:lookup?key=${encodeURIComponent(env.FIREBASE_WEB_API_KEY)}`, {
       method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ idToken: token }),
     });
-  } catch { return null; }
-  if (!response.ok) return null;
+  } catch { return rechazo('lookup sin red'); }
+  if (!response.ok) return rechazo(`lookup ${response.status}`);
   const data = await response.json() as { users?: { localId?: string; phoneNumber?: string; validSince?: string; disabled?: boolean }[] };
   const user = data.users?.[0];
-  if (!user || user.disabled || user.localId !== claims.sub ||
-    !/^\+52\d{10}$/.test(user.phoneNumber ?? '') ||
-    user.phoneNumber !== claims.phone_number ||
-    !Number.isFinite(Number(user.validSince)) || Number(user.validSince) > Number(claims.auth_time)) return null;
-  return { uid: user.localId, telefono: user.phoneNumber!.slice(3) };
+  const motivo = !user ? 'sin usuario' : user.disabled ? 'deshabilitado' : user.localId !== claims.sub ? 'uid' :
+    !/^\+52\d{10}$/.test(user.phoneNumber ?? '') ? 'no +52' : user.phoneNumber !== claims.phone_number ? 'telefono' :
+    !Number.isFinite(Number(user.validSince)) || Number(user.validSince) > Number(claims.auth_time)
+      ? `validSince ${Number(user.validSince) - Number(claims.auth_time)}s` : '';
+  if (motivo) return rechazo(motivo);
+  return { uid: user!.localId!, telefono: user!.phoneNumber!.slice(3) };
 }
 
 async function cliente(env: Env, uid: string): Promise<Cliente | null> {
