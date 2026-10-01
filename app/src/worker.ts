@@ -10,6 +10,7 @@ import { calcularPrecio, ajustarManual, esDestinoBanda, prefijoParaFamilia, MONT
 import { efectivoAlcanza } from '../public/venta.js';
 import { semanaIngreso } from '../public/semana.js';
 import { detalleVenta, cancelarPieza } from './devoluciones.ts';
+import { BASES, AVISO } from './legal.ts';
 import {
   permiso, puede, quienEs, leerUsuario, yo, pedirAcceso, listarCuentas, guardarCuenta, resolverSolicitud,
   esDeCaja, soloComputadora,
@@ -1129,6 +1130,10 @@ export default {
   async fetch(request, env, ctx): Promise<Response> {
     const url = new URL(request.url);
     const { pathname } = url;
+    // Los textos aprobados viven en legal.ts: una variable de Cloudflare no pasa
+    // de 5 KB. Siguen cerrados hasta que exista BASES_APROBADAS_VERSION.
+    env.PORTAL_BASES_TEXTO ||= BASES;
+    env.PORTAL_AVISO_TEXTO ||= AVISO;
 
     try {
       // Puerta pública cerrada por defecto. Nunca comparte rutas ni assets del personal.
