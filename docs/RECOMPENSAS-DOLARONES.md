@@ -23,7 +23,7 @@ Este documento conserva la investigación y el diseño del sistema de recompensa
 | Dolarones: valor | 1 Dolarón = $1 MXN |
 | Dolarones: uso | Funcionan como dinero dentro de la tienda (cualquier producto) y también para premios de la vitrina |
 | Dolarones: acumulación | Socios: 10 D por cada $100 completos monetarios (10%). Sin socio: 5 D por cada $100 completos en vale impreso (5%), confirmado en #133; no ambos por la misma compra |
-| Vale sin teléfono/registro (#133) | Barcode impreso al portador, saldo parcial rastreado en servidor, 30 días exactos desde emisión confirmada. Disponible desde el día siguiente, como compras. Reimpresión/canje no amplían vida; teléfono sólo acumula a socio, nunca autoriza gastar |
+| Vale sin teléfono/registro (#133) | Barcode impreso al portador, saldo parcial rastreado en servidor, 30 días exactos desde emisión confirmada. Disponible a partir de la siguiente compra, nunca en la que lo generó (Isaac, 01/10/2026). Reimpresión/canje no amplían vida; teléfono sólo acumula a socio, nunca autoriza gastar |
 | Bono por visita | Compra mínima de $99 |
 | Vigencia | 12 meses desde que se ganan |
 | Hora Dorada | Sí, si la dinámica es atractiva: 60 min antes de abrir el día de descarga, primeros en ver abrir las cajas, máximo 5 pases |
@@ -42,7 +42,7 @@ Este documento conserva la investigación y el diseño del sistema de recompensa
 | Operación (26/09) | 2 cajas, 3 empleados más Isaac; Isaac resuelve las incidencias de saldo |
 | Portal de clientes | Registro y consulta de saldo en línea; compra y canje en tienda física |
 | Identidad (29/09) | Sin PIN de socio. Login teléfono + SMS; barcode temporal personal en el portal, máximo de gasto elegido por el cliente, cinco minutos y un solo canje. Teléfono/número permiten acumular, no gastar. Firebase Auth/Identity Platform sigue pendiente de configuración; no se han iniciado envíos. Los PIN del personal no cambian |
-| Decisiones del 29/09 (#135) | Titular: María Teresa Ferrusca Pérez. Inicio de la promoción: 2 oct 2026, 11:00. Edad mínima: 18 años declarados. Aviso de terminación del programa: 30 días. Conservación de datos tras la baja: 12 meses. Medios de privacidad: privacidad@eldolaron.com y WhatsApp 444 543 7754 (el 444 854 5980 es fijo, no WhatsApp). Lo ganado se libera a las 00:00 del día siguiente, no en la siguiente compra. Vale perdido: no se repone. Primera llegada con premio en línea usado o vencido: pierde los 500 D. Cancelar una compra cuyo crédito ya se gastó: se detiene, en socios y vales |
+| Decisiones del 29/09 (#135) | Titular: María Teresa Ferrusca Pérez. Inicio de la promoción: 2 oct 2026, 11:00. Edad mínima: 18 años declarados. Aviso de terminación del programa: 30 días. Conservación de datos tras la baja: 12 meses. Medios de privacidad: privacidad@eldolaron.com y WhatsApp 444 543 7754 (el 444 854 5980 es fijo, no WhatsApp). Lo ganado por socios se libera a las 00:00 del día siguiente, no en la siguiente compra; para vales rige la decisión del 01/10 arriba. Vale perdido: no se repone. Primera llegada con premio en línea usado o vencido: pierde los 500 D. Cancelar una compra cuyo crédito ya se gastó: se detiene, en socios y vales |
 | Escala prevista | Hasta 1,000 clientes distintos al inicio y 10,000 durante el primer año; no equivale a usuarios simultáneos |
 | Desarrollo y presupuesto inicial | Claude y Codex, usando suscripciones existentes; reducir costos recurrentes hasta que opere la tienda. El plan detalla la propuesta de $50–51 USD/mes de servicios |
 
@@ -289,7 +289,7 @@ Temporadas, misiones, rachas, referidos, rankings, cumpleaños, dobles, vitrina 
 | Unidad | 1 D = $1 MXN. Guardar centésimas enteras: 100 unidades = 1 D. No flotantes |
 | Base | Importe elegible final después de descuentos, pagado en efectivo/tarjeta; no acumular sobre D usados, créditos promocionales ni ventas canceladas. Definir base fiscal con contador |
 | Fórmula | **Decidido 26/09:** `floor(base_centavos / 10000) × 10` D, una vez por ticket. $99 → 0 D; $250 → 20 D |
-| Disponibilidad | Lo ganado se habilita a las 00:00 de la siguiente fecha en America/Mexico_City; evita dividir la misma visita en tickets para reciclar crédito. Apertura tiene ventana propia |
+| Disponibilidad | Lo ganado por socios se habilita a las 00:00 de la siguiente fecha en America/Mexico_City; los vales anónimos desde la siguiente compra (Isaac, 01/10/2026), lo que permite dividir la misma visita en tickets para usar el vale. Apertura tiene ventana propia |
 | Vigencia | Cada lote ganado vence a los 12 meses calendario, conservando fecha/hora local; si falta el día, último día válido del mes. Guardar instante UTC resuelto; no usar 365 días ni extender al hacer nuevos depósitos |
 | Aplicación | Consumir primero el lote que vence antes, con desempate por ID. No usar saldo pendiente, expirado o reservado; máximo el total de compra, sin efectivo de cambio por D |
 | Pago mixto | `efectivo_aplicado + tarjeta_aplicada + D_aplicados = total`. El cambio solo proviene del efectivo entregado de más. Registrar importes, no solo una etiqueta de forma de pago |

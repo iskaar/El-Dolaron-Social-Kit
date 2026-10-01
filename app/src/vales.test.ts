@@ -2,6 +2,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { tienda, PRODUCTO, DUENO } from './prueba-d1.ts';
+import { sentenciasVale } from './vales.ts';
 
 const venta = (extra:Record<string, unknown> = {}) => ({ id:crypto.randomUUID(),
   lineas:[{ producto_id:PRODUCTO, cantidad:1 }], forma_pago:'efectivo', efectivo:25000, caja:'Caja 1', ...extra });
@@ -14,17 +15,16 @@ function abrir() {
     assert.equal(r.status, 201);
     return { v, vale:r.cuerpo.vale_emitido };
   };
-  const liberar = (id:string) => t.db.prepare("update vales_dolarones set disponible_desde='2000-01-01T00:00:00.000Z' where id=?").run(id);
   const canjear = (codigo:string, usados=1000, extra:Record<string, unknown> = {}) =>
     t.pedir('/api/ventas', venta({ codigo_vale:codigo, dolarones:usados, efectivo:25000-usados, ...extra }));
   const cancelar = (id:string) => t.pedir(`/api/ventas/${id}/cancelar`, { motivo:'prueba', caja:'Caja 1' });
-  return { ...t, emitir, liberar, canjear, cancelar };
+  return { ...t, emitir, canjear, cancelar };
 }
 
 test('ticket pagado con vale: pieza responde 409; completo devuelve dinero, stock y saldo una sola vez', async () => {
   const t = abrir();
   try {
-    const { vale } = await t.emitir(); t.liberar(vale.id);
+    const { vale } = await t.emitir();
     const canje = await t.canjear(vale.codigo, 500);
     const ruta = `/api/ventas/${canje.cuerpo.id}`;
     const antes = (await t.pedir(ruta)).cuerpo;
@@ -61,7 +61,7 @@ test('emisor con crédito gastado: pieza y ticket completo responden 409, tambi�
     const t = abrir();
     try {
       const v = venta({ lineas:[{ producto_id:PRODUCTO, cantidad:2 }], efectivo:50000 });
-      const vale = (await t.pedir('/api/ventas', v)).cuerpo.vale_emitido; t.liberar(vale.id);
+      const vale = (await t.pedir('/api/ventas', v)).cuerpo.vale_emitido;
       const antes = (await t.pedir(`/api/ventas/${v.id}`)).cuerpo;
       if (concurrente) {
         const batch = t.env.DB.batch.bind(t.env.DB);
@@ -138,7 +138,9 @@ test('vale anónimo al 5%, 30 días exactos, sin socio, cerrado por defecto y si
     assert.equal(Date.parse(String(row.vence_en)) - Date.parse(String(row.creado_en)), 30 * 86400000);
     assert.equal(t.db.prepare('select count(*) as n from clientes').get()!.n, 0);
     assert.equal(t.db.prepare('select count(*) as n from dolarones_lotes').get()!.n, 0);
-    assert.equal((await t.pedir('/api/vales/buscar', { codigo:vale.codigo })).status, 403, 'aún no disponible');
+    assert.equal(row.disponible_desde, row.creado_en);
+    assert.equal(row.creado_en, t.db.prepare('select registrado_en from ventas where id=?').get(v.id)!.registrado_en);
+    assert.equal((await t.pedir('/api/vales/buscar', { codigo:vale.codigo })).status, 200, 'disponible para la siguiente compra');
     const reintento = await t.pedir('/api/ventas', v);
     assert.equal(reintento.cuerpo.vale_emitido.codigo, vale.codigo);
     assert.equal(t.db.prepare('select count(*) as n from vales_dolarones').get()!.n, 1);
@@ -155,10 +157,66 @@ test('vale de venta en cola usa hora del servidor al sincronizar, no la hora del
     assert.equal(antes.cuerpo.vale_emitido, null);
     assert.equal((await t.pedir('/api/vales/config', undefined, 'GET')).cuerpo.habilitado, false);
     t.env.PROMOCION_INICIO = new Date(Date.now() - 60_000).toISOString();
-    const despues = await t.pedir('/api/ventas', venta({ creado_en:'2026-09-01T18:00:00.000Z' }));
+    const v = venta({ creado_en:'2026-09-01T18:00:00.000Z' });
+    const despues = await t.pedir('/api/ventas', v);
     assert.equal(despues.status, 201);
     assert.equal(despues.cuerpo.vale_emitido.importe, 1000);
+    const confirmado = t.db.prepare('select registrado_en from ventas where id=?').get(v.id)!.registrado_en;
+    assert.equal(despues.cuerpo.vale_emitido.disponible_desde, confirmado);
+    assert.equal(despues.cuerpo.vale_emitido.creado_en, confirmado);
+    assert.equal(Date.parse(despues.cuerpo.vale_emitido.vence_en) - Date.parse(String(confirmado)), 30 * 86400000);
+    assert.deepEqual((await t.pedir('/api/ventas', v)).cuerpo.vale_emitido, despues.cuerpo.vale_emitido);
     assert.equal((await t.pedir('/api/vales/config', undefined, 'GET')).cuerpo.habilitado, true);
+  } finally { t.db.close(); }
+});
+
+test('vale de venta A se canjea en B un segundo después, en el mismo minuto; A no admite su propio vale', async (ctx) => {
+  const ahora = Math.floor(Date.now() / 60000) * 60000 + 10000;
+  ctx.mock.timers.enable({ apis:['Date'], now:ahora });
+  const t = abrir();
+  try {
+    const { v, vale } = await t.emitir();
+    assert.equal(vale.disponible_desde, new Date(ahora).toISOString());
+    assert.equal((await t.canjear(vale.codigo, 500, { id:v.id })).status, 409);
+    assert.equal(t.db.prepare("select count(*) as n from vales_movimientos where tipo='canje'").get()!.n, 0);
+    assert.equal(t.db.prepare('select restante from vales_dolarones where id=?').get(vale.id)!.restante, 1000);
+    ctx.mock.timers.tick(1000);
+    const b = await t.canjear(vale.codigo, 500);
+    assert.equal(b.status, 201);
+    assert.equal(b.cuerpo.vale_usado.restante, 500);
+    const confirmado = t.db.prepare('select registrado_en from ventas where id=?').get(b.cuerpo.id)!.registrado_en;
+    assert.equal(confirmado, new Date(ahora + 1000).toISOString());
+    assert.equal(String(confirmado).slice(0, 16), vale.creado_en.slice(0, 16));
+    assert.equal(t.db.prepare('select count(*) as n from ventas').get()!.n, 2);
+    assert.equal(t.db.prepare('select stock from productos where id=?').get(PRODUCTO)!.stock, 48);
+  } finally { t.db.close(); }
+});
+
+test('el vale aún no confirmado en el batch no puede canjearse en la venta que lo emite', async () => {
+  const t = abrir();
+  try {
+    const p = { ventaId:crypto.randomUUID(), clienteId:null, codigo:'', dolarones:0,
+      total:25000, autor:DUENO, ahora:new Date() };
+    const emision = await sentenciasVale(t.env, p);
+    assert.ok(emision.ok && emision.emitido);
+    assert.equal(t.db.prepare('select count(*) as n from vales_dolarones').get()!.n, 0);
+    const intento = await sentenciasVale(t.env, { ...p, codigo:emision.emitido.codigo, dolarones:500 });
+    assert.ok(!intento.ok);
+    assert.equal(intento.status, 409);
+    assert.equal(t.db.prepare('select count(*) as n from vales_movimientos').get()!.n, 0);
+  } finally { t.db.close(); }
+});
+
+test('vale antiguo conserva su disponibilidad futura para consulta y canje', async () => {
+  const t = abrir();
+  try {
+    const { v, vale } = await t.emitir();
+    const futuro = new Date(Date.now() + 86400000).toISOString();
+    t.db.prepare('update vales_dolarones set disponible_desde=? where id=?').run(futuro, vale.id);
+    assert.equal((await t.pedir('/api/vales/buscar', { codigo:vale.codigo })).status, 403);
+    assert.equal((await t.canjear(vale.codigo, 500)).status, 409);
+    assert.equal((await t.pedir(`/api/ventas/${v.id}/vale`, {})).cuerpo.disponible_desde, futuro);
+    assert.equal(t.db.prepare('select restante from vales_dolarones where id=?').get(vale.id)!.restante, 1000);
   } finally { t.db.close(); }
 });
 
@@ -175,7 +233,7 @@ test('socios conservan 10%, teléfono sólo acumula y no emite vale en paralelo'
     const encontrado = (await t.pedir('/api/socios?q=4441234567')).cuerpo;
     assert.equal(encontrado.disponible, 2000);
     assert.equal((await t.pedir('/api/ventas', venta({ cliente_id:encontrado.id, dolarones:1000 }))).status, 403);
-    const { vale } = await t.emitir(); t.liberar(vale.id);
+    const { vale } = await t.emitir();
     assert.equal((await t.canjear(vale.codigo, 500, { cliente_id:socio.id })).status, 400);
   } finally { t.db.close(); }
 });
@@ -183,7 +241,7 @@ test('socios conservan 10%, teléfono sólo acumula y no emite vale en paralelo'
 test('canje parcial y copia comparten saldo; ticket pagado con D no genera otros D', async () => {
   const t = abrir();
   try {
-    const { v, vale } = await t.emitir(); t.liberar(vale.id);
+    const { v, vale } = await t.emitir();
     t.db.prepare('update productos set precio=10000 where id=?').run(PRODUCTO);
     const id = crypto.randomUUID();
     const r = await t.canjear(vale.codigo, 500, { id, efectivo:9500 });
@@ -207,7 +265,7 @@ test('canje parcial y copia comparten saldo; ticket pagado con D no genera otros
 test('dos cajas leen el vale antes de gastar: el segundo batch revierte venta, stock y emisión', async () => {
   const t = abrir();
   try {
-    const { vale } = await t.emitir(); t.liberar(vale.id);
+    const { vale } = await t.emitir();
     const batch = t.env.DB.batch.bind(t.env.DB);
     let inyectar = true;
     t.env.DB.batch = async (sentencias) => {
@@ -229,7 +287,7 @@ test('dos cajas leen el vale antes de gastar: el segundo batch revierte venta, s
 test('caducar en vuelo o fallar stock revierte canje y emisión; valores inválidos no tocan nada', async () => {
   const t = abrir();
   try {
-    const { vale } = await t.emitir(); t.liberar(vale.id);
+    const { vale } = await t.emitir();
     for (const usados of [-1, 1.1, 25001]) assert.equal((await t.canjear(vale.codigo, usados)).status, 400);
     assert.equal((await t.canjear('DP-inventado')).status, 400);
     t.db.prepare('update productos set stock=0 where id=?').run(PRODUCTO);
@@ -251,7 +309,7 @@ test('caducar en vuelo o fallar stock revierte canje y emisión; valores inváli
 test('cancelación revierte canje sin ampliar vida, retira emisión y no devuelve dos veces', async () => {
   const t = abrir();
   try {
-    const { v, vale } = await t.emitir(); t.liberar(vale.id);
+    const { v, vale } = await t.emitir();
     const canje = await t.canjear(vale.codigo, 500);
     assert.equal(canje.status, 201);
     assert.equal((await t.cancelar(v.id)).status, 409, 'emisor con saldo gastado requiere resolución');
@@ -271,7 +329,7 @@ test('cancelación revierte canje sin ampliar vida, retira emisión y no devuelv
 test('cancelar el emisor mientras otro cajero tiene el vale leído aborta el canje completo', async () => {
   const t = abrir();
   try {
-    const { v, vale } = await t.emitir(); t.liberar(vale.id);
+    const { v, vale } = await t.emitir();
     const batch = t.env.DB.batch.bind(t.env.DB);
     let inyectar = true;
     t.env.DB.batch = async (sentencias) => {
@@ -287,7 +345,7 @@ test('cancelar el emisor mientras otro cajero tiene el vale leído aborta el can
 test('vale no expone saldo/código al portal público ni a capturistas; al cerrar emisión respeta vales previos', async () => {
   const t = abrir();
   try {
-    const { v, vale } = await t.emitir(); t.liberar(vale.id);
+    const { v, vale } = await t.emitir();
     t.env.VALES_ABIERTOS = 'no';
     assert.equal((await t.canjear(vale.codigo, 500)).status, 201);
     assert.equal(t.db.prepare('select count(*) as n from vales_dolarones').get()!.n, 1);

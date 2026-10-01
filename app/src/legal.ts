@@ -1,10 +1,10 @@
 // Bases y aviso de privacidad de Dolarones que ve el cliente en el portal.
-// Version 2026-10-v1, aprobada por el abogado el 01/10/2026 (redaccion pulida,
-// misma esencia). Viven aqui y no en variables porque Cloudflare limita cada
+// Version 2026-10-v2, 1 de octubre de 2026: Isaac autoriza el vale desde la
+// siguiente compra. Viven aqui y no en variables porque Cloudflare limita cada
 // variable a 5 KB. Cambiar este texto exige subir BASES_APROBADAS_VERSION.
 
 export const BASES = `BASES DEL PROGRAMA DOLARONES
-Versión 2026-10-v1, 1 de octubre de 2026
+Versión 2026-10-v2, 1 de octubre de 2026
 
 1. Organizador
 María Teresa Ferrusca Pérez, RFC FEPT660329TH4, con nombre comercial El Dolarón, en Jardín Hidalgo 129, Zona Centro, Soledad de Graciano Sánchez, San Luis Potosí, C.P. 78430.
@@ -39,7 +39,7 @@ Por cada $100.00 completos pagados en efectivo o con tarjeta en una misma compra
 Una compra sin socio genera un vale impreso con código de barras por 5 Dolarones por cada $100 completos pagados en dinero: $99 dan 0; $250 dan 10; $1,999 dan 95.
 - No se otorgan a la vez el crédito de socio y un vale por la misma compra.
 - No se requieren nombre, teléfono ni membresía.
-- El vale se puede gastar desde el día siguiente y vence exactamente 30 días después de su emisión confirmada, a la fecha y hora impresas. Puede usarse en partes; el saldo no usado mantiene ese vencimiento. La reimpresión y la devolución no reinician el plazo.
+- El vale se puede gastar a partir de tu siguiente compra (no en la compra que lo generó) y vence exactamente 30 días después de su emisión confirmada, a la fecha y hora impresas. Puede usarse en partes; el saldo no usado mantiene ese vencimiento. La reimpresión y la devolución no reinician el plazo.
 - El vale solo se usa en la tienda y con conexión. El ticket impreso muestra su saldo, desde cuándo se puede usar y cuándo vence (hora de la tienda).
 - Si una compra se paga en parte con un vale, la parte pagada con Dolarones no genera un vale nuevo.
 - El código identifica un saldo en el servidor: copiarlo no aumenta el valor, pero quien tenga el código podría gastar ese saldo.
@@ -86,7 +86,7 @@ Si se cancela o devuelve una compra, los Dolarones usados en ella regresan al sa
 En la tienda, de 11:00 a 20:00 todos los días, por WhatsApp al 444 543 7754 o por teléfono fijo al 444 854 5980.`;
 
 export const AVISO = `AVISO DE PRIVACIDAD INTEGRAL - SOCIOS DOLARONES
-Versión 2026-10-v1, 1 de octubre de 2026
+Versión 2026-10-v2, 1 de octubre de 2026
 
 Responsable
 María Teresa Ferrusca Pérez, RFC FEPT660329TH4 (El Dolarón), Jardín Hidalgo 129, Zona Centro, Soledad de Graciano Sánchez, S.L.P., C.P. 78430.
@@ -115,4 +115,4 @@ Mientras seas socio y 12 meses después, por aclaraciones y obligaciones contabl
 Cambios a este aviso
 Se publicarán en la tienda y se te informarán al usar el programa.
 
-Versión 2026-10-v1, 1 de octubre de 2026`;
+Versión 2026-10-v2, 1 de octubre de 2026`;
