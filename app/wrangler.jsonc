@@ -25,6 +25,12 @@
     // que con "claude" no hace nada. Para volver a Gemini: "gemini".
     "MODELO_ANALISIS": "claude",
     "BUSQUEDA_WEB": "si",
+    // Portal de clientes de Dolarones (#129). Sin Access: el cliente entra con
+    // su telefono (Firebase). Sin bases aprobadas el portal responde cerrado.
+    // El apiKey web no es secreto: solo identifica el proyecto Firebase.
+    "HOST_PORTAL": "dolarones.eldolaron.com",
+    "FIREBASE_PROJECT_ID": "el-dolaron",
+    "FIREBASE_WEB_API_KEY": "AIzaSyBNauTOpaIaRagXrz0mn3yV1n4MrA4cab4",
     // Con que se verifica el JWT de Cloudflare Access (src/cuentas.ts). No son
     // secretos: salen en la redireccion al login de cada hostname. El aud es
     // por aplicacion de Access; una aplicacion nueva necesita su renglon aqui
@@ -50,6 +56,11 @@
       // "Vendedor"). Nunca publicar este hostname sin esa aplicacion: solo
       // sirve la camara, pero acepta fotos y esas fotos cuestan analisis.
       "pattern": "captura.viste.com.mx",
+      "custom_domain": true
+    },
+    {
+      // Portal de clientes: NUNCA detras de Access, lo abre el publico.
+      "pattern": "dolarones.eldolaron.com",
       "custom_domain": true
     }
   ],
