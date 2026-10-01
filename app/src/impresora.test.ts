@@ -168,3 +168,48 @@ test('el gasto impreso dice GASTO DE CAJA y el concepto', async () => {
   const texto = new TextDecoder().decode(Uint8Array.from(pedazos.slice(antes).flatMap((p) => [...p])));
   assert.match(texto, /GASTO DE CAJA[\s\S]*IMPORTE +\$45\.00[\s\S]*Concepto:\nGarrafon de agua/);
 });
+
+test('vale usa Code128 nativo con longitud, saldo y vencimiento; no raster ni comandos inyectados', async () => {
+  const { pedazos } = impresoraFalsa();
+  const { reconectarImpresora, imprimirTicket, imprimirVale, codigoBarrasVale } = await import('../public/impresora.js');
+  await reconectarImpresora();
+  const vale = { codigo:'DP-abcdefghijklmnop', restante:1000,
+    disponible_desde:'2026-10-03T06:00:00Z', vence_en:'2026-11-01T18:00:00Z' };
+  const codigo = codigoBarrasVale(vale.codigo);
+  const pos = [...codigo].findIndex((b,i) => b===0x1d && codigo[i+1]===0x6b);
+  assert.deepEqual([...codigo.slice(pos,pos+4)], [0x1d,0x6b,73,21]);
+  assert.equal(new TextDecoder().decode(codigo.slice(pos+4,pos+25)), '{BDP-abcdefghijklmnop');
+  assert.throws(() => codigoBarrasVale('DP-abc\x1b@'), /inválido/);
+  const { venta, lineas } = ticketLargo();
+  await imprimirTicket({ ...venta, vale_emitido:vale }, lineas);
+  await imprimirVale(vale);
+  const bytes = Uint8Array.from(pedazos.flatMap((p) => [...p]));
+  const texto = new TextDecoder().decode(bytes);
+  assert.match(texto, /Saldo del vale +10\.00 D/);
+  assert.match(texto, /Vence:.*2026/);
+  assert.match(texto, /Copias comparten el saldo/);
+  assert.equal(texto.split('{BDP-abcdefghijklmnop').length-1, 2);
+  assert.ok(!bytes.some((b,i) => b===0x1d && bytes[i+1]===0x76), 'sin imagen raster');
+});
+
+test('un ticket pendiente no imprime un barcode gastable', async () => {
+  const { pedazos } = impresoraFalsa();
+  const { reconectarImpresora, imprimirTicket } = await import('../public/impresora.js');
+  await reconectarImpresora();
+  const { venta, lineas } = ticketLargo();
+  await imprimirTicket({ ...venta, vale_pendiente:true }, lineas);
+  const bytes = Uint8Array.from(pedazos.flatMap((p) => [...p]));
+  assert.match(new TextDecoder().decode(bytes), /Elegibilidad de vale sin confirmar/);
+  assert.ok(!bytes.some((b,i) => b===0x1d && bytes[i+1]===0x6b));
+});
+
+test('ticket de socio en cola no anuncia Dolarones antes de la respuesta del servidor', async () => {
+  const { pedazos } = impresoraFalsa();
+  const { reconectarImpresora, imprimirTicket } = await import('../public/impresora.js');
+  await reconectarImpresora();
+  const { venta, lineas } = ticketLargo();
+  await imprimirTicket({ ...venta, socio:{ numero:1, ganados:0, saldo:0 }, recompensa_pendiente:true }, lineas);
+  const texto = new TextDecoder().decode(Uint8Array.from(pedazos.flatMap((p) => [...p])));
+  assert.match(texto, /Dolarones de compra sin confirmar/);
+  assert.doesNotMatch(texto, /Ganaste/);
+});

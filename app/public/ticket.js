@@ -83,6 +83,7 @@ export function pintarDetalle(t, { editable = false } = {}) {
     </table>
     <table class="cifras">${cifras.map(([a, b, clase = '']) => `<tr class="${clase}"><td>${a}</td><td class="num">${b}</td></tr>`).join('')}</table>
     ${historial}
+    ${editable && !t.cancelada && !t.socio ? '<button type="button" class="secundario" data-imprimir-vale>Imprimir vale</button>' : ''}
     ${puedeCancelar ? `
       <div class="cancelar-todo">
         <button type="button" class="quitar" data-cancelar-todo>Cancelar todo lo que queda (${quedan} pieza${quedan > 1 ? 's' : ''})</button>

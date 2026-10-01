@@ -14,6 +14,7 @@
 
 import { cajaDe } from './corte.ts';
 import { dolaronesGanados } from '../public/venta.js';
+import { retirarVale } from './vales.ts';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -98,7 +99,7 @@ export async function cancelarPieza(
   if (!venta) return json({ error: 'La venta no existe.' }, 404);
   if (venta.cancelada) return json({ error: 'El ticket ya estaba cancelado completo.' }, 409);
   // Dolarones sin socio son de un vale (PR #134): aqui solo se sabe regresarlos
-  // a los lotes de un socio. Hasta integrarlo, ese ticket se cancela completo.
+  // a los lotes de un socio. Ese ticket se cancela completo, sin restitución parcial al vale.
   if (venta.dolarones > 0 && !venta.cliente_id) {
     return json({ error: 'Este ticket se pagó con un vale: cancélalo completo.' }, 409);
   }
@@ -146,7 +147,7 @@ export async function cancelarPieza(
           ventaId, dolarones: reparto.dolarones, pagadoRestante: pagado - venta.devuelto - reparto.dinero,
           autor: correo, ahora,
         })
-        : []),
+        : await retirarVale(env, ventaId, correo, ahora, pagado - venta.devuelto - reparto.dinero)),
     ]);
   } catch (error) {
     const texto = String(error);
@@ -158,7 +159,10 @@ export async function cancelarPieza(
       return json({ error: 'Alguien mas cambio este ticket. Vuelve a abrirlo.' }, 409);
     }
     if (texto.includes('saldo insuficiente')) {
-      return json({ error: 'El saldo de Dolarones del socio cambio. Intenta de nuevo.' }, 409);
+      return json({ error: 'Los Dolarones ganados con esta compra ya se usaron. Requiere aclaración presencial antes de cancelar.' }, 409);
+    }
+    if (texto.includes('saldo de vale invalido')) {
+      return json({ error: 'El vale de esta compra ya se usó. Requiere aclaración presencial antes de cancelar.' }, 409);
     }
     throw error;
   }
@@ -186,8 +190,8 @@ async function canjesPendientes(env: Env, ventaId: string) {
  * teniendo cobrado. Para el mismo batch que registra la devolucion.
  *
  * Lo que regresa va al lote que vence al ultimo: al cliente le dura mas. Lo
- * ganado de mas se retira hasta donde alcance `restante`, igual que al
- * cancelar el ticket completo (ver el ponytail de sentenciasDeCancelacion).
+ * ganado de más se retira; si ya se gastó, el batch aborta como al cancelar
+ * el ticket completo (decisión de Isaac, #135).
  */
 async function sentenciasDeDevolucion(env: Env, p: {
   ventaId: string; dolarones: number; pagadoRestante: number; autor: string; ahora: string;
@@ -217,12 +221,16 @@ async function sentenciasDeDevolucion(env: Env, p: {
     .bind(p.ventaId)
     .first<{ id: string; cliente_id: string; importe: number; restante: number; retirado: number }>();
   if (compra) {
-    const retira = Math.min(compra.restante,
-      Math.max(0, compra.importe - compra.retirado - dolaronesGanados(p.pagadoRestante)));
+    const retira = Math.max(0, compra.importe - compra.retirado - dolaronesGanados(p.pagadoRestante));
+    sentencias.push(
+      // Si ya se gastó crédito (también desde otra caja), aborta todo.
+      env.DB.prepare(`update dolarones_lotes set restante = case
+        when restante = importe + coalesce((select sum(importe) from dolarones_movimientos
+          where lote_id = dolarones_lotes.id and tipo = 'reverso_compra'), 0)
+        then restante - ? else -1 end where id = ?`).bind(retira, compra.id),
+    );
     if (retira > 0) {
       sentencias.push(
-        // Si el socio gasta ese saldo en otra caja al mismo tiempo, lote_no_negativo aborta el batch.
-        env.DB.prepare('update dolarones_lotes set restante = restante - ? where id = ?').bind(retira, compra.id),
         env.DB.prepare(
           `insert into dolarones_movimientos (cliente_id, lote_id, venta_id, tipo, importe, autor, creado_en)
            values (?, ?, ?, 'reverso_compra', ?, ?, ?)`,

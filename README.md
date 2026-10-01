@@ -1,6 +1,6 @@
 # El Dolarón — Kit de redes
 
-Repositorio canónico del kit visual y textual de El Dolarón. Es un paquete estático para preparar perfiles y publicaciones; no es una aplicación ni publica contenido por sí solo.
+Repositorio canónico del kit visual y textual de El Dolarón y de la aplicación de tienda en `app/`. El kit es estático y no publica contenido por sí solo. El portal móvil Dolarones, su aislamiento y los requisitos antes de habilitarlo están en [docs/CONTRATO-PORTAL.md](docs/CONTRATO-PORTAL.md).
 
 ## Empezar
 
@@ -24,6 +24,7 @@ Consulta [el contexto, investigación y plan de 30 días](docs/MARKETING-30-DIAS
 | `05-Guia-y-textos/` | Inventario, paleta y copy |
 | `EMPIEZA-AQUI.html` | Preview y guía visual autocontenida |
 | `tools/` | Validaciones sin dependencias externas |
+| `app/` | Caja, inventario y portal Dolarones (Worker + D1) |
 | `.github/` | Flujo de Issues, PRs, ownership y CI |
 
 ## Trabajo entre agentes

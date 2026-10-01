@@ -4,7 +4,7 @@ Fecha del registro: 24 de septiembre de 2026. Moneda: pesos mexicanos (MXN). Zon
 
 Este documento conserva la investigación y el diseño del sistema de recompensas de El Dolarón (mecánicas de videojuegos aplicadas a la tienda, Dolarones, regalo de apertura, premios y tabla de posiciones). Es la referencia para cualquier agente (Claude, ChatGPT/Codex, Agy u otro). La versión de trabajo original vive en un documento privado de Claude; **este archivo es la copia compartida**: si una decisión cambia, actualízala aquí mediante Issue y PR.
 
-**Estado:** propuesta con decisiones del propietario. Nada de esto está implementado todavía en la caja (`app/`), ni publicado a clientes. No anunciar reglas, montos o fechas sin confirmación de Isaac.
+**Estado:** investigación histórica con decisiones del propietario. Dolarones presencial está integrado; el portal SMS y barcode sin PIN se prepara en [#129](https://github.com/iskaar/El-Dolaron-Social-Kit/issues/129), no está habilitado públicamente. No anunciar reglas, montos o fechas sin confirmación de Isaac. La decisión del 29/09 de la sección 2 sustituye las propuestas históricas QR/PIN y correo de este documento.
 
 **Revisión para producción: 24/09/2026.** Seguimiento: [Issue #56](https://github.com/iskaar/El-Dolaron-Social-Kit/issues/56). El [plan de implementación](PLAN-IMPLEMENTACION-RECOMPENSAS.md) contiene fases, agentes, modelos, esfuerzo, costos y criterios de lanzamiento. Esta revisión es documental; no certifica la seguridad del despliegue actual.
 
@@ -22,42 +22,53 @@ Este documento conserva la investigación y el diseño del sistema de recompensa
 | Día de Descarga (resurtido) | Martes, **tentativo** |
 | Dolarones: valor | 1 Dolarón = $1 MXN |
 | Dolarones: uso | Funcionan como dinero dentro de la tienda (cualquier producto) y también para premios de la vitrina |
-| Dolarones: acumulación | 10 Dolarones por cada $100 de compra (10%) |
+| Dolarones: acumulación | Socios: 10 D por cada $100 completos monetarios (10%). Sin socio: 5 D por cada $100 completos en vale impreso (5%), confirmado en #133; no ambos por la misma compra |
+| Vale sin teléfono/registro (#133) | Barcode impreso al portador, saldo parcial rastreado en servidor, 30 días exactos desde emisión confirmada. Disponible desde el día siguiente, como compras. Reimpresión/canje no amplían vida; teléfono sólo acumula a socio, nunca autoriza gastar |
 | Bono por visita | Compra mínima de $99 |
 | Vigencia | 12 meses desde que se ganan |
 | Hora Dorada | Sí, si la dinámica es atractiva: 60 min antes de abrir el día de descarga, primeros en ver abrir las cajas, máximo 5 pases |
 | Rebaja semanal | Baja una banda de precio a las 3 semanas; a Bolsa Sorpresa a las 6 semanas (propuesta aceptada como sugerencia) |
-| Regalo de apertura | $15,000 en Dolarones para los primeros 100 registrados, escalonado (tabla abajo); gastables en cualquier producto |
+| Promoción de apertura (confirmada 28/09) | 100 premios, $15,000 D: 50 cupos en línea por 7,300 D y 50 en tienda por 7,700 D. Los 500 D son para la primera llegada física; si ya ganó en línea, la reemplazan y el importe anterior vuelve a la bolsa online |
 | Respaldo sin caja digital | Vales de papel numerados ("dinero físico" de la tienda) |
 | Costo de mercancía | **Desconocido.** El 45–50% que mencionó Isaac es el descuento frente al precio de referencia en EE. UU. (Walmart, Target, JCPenney), no su costo. Registrar el costo de cada pallet queda para después |
 | Apertura | **2 de octubre de 2026** (confirmado el 26/09); hora pendiente |
 | Uso parcial (26/09) | Los Dolarones se gastan en partes, como un monedero electrónico de supermercado u OXXO: lo que no se usa queda en el saldo |
 | Acumulación por bloques (26/09) | Por **bloques completos de $100** pagados: $99 → 0 D; $250 → 20 D; $1,999 → 190 D |
-| Regalo: vigencia (26/09) | Vale 30 días desde que se otorga; lo no usado vence. **Sin lista de espera ni reasignación** (reemplaza «día 1 / día 2») |
+| Regalo: vigencia (26/09) | 30 días desde que se otorga; lo no usado vence y no se reasigna. Un cupo online liberado al reemplazar el premio vuelve a la bolsa online mientras la promoción siga activa |
 | Sin retroactividad (26/09) | Las compras previas al lanzamiento no ganan Dolarones |
 | +50 por alta y +5 por visita (26/09) | Apagados en el lanzamiento: Isaac respondió «se queda como está» a la recomendación de apagarlos. Confirmar si la lectura es otra |
-| Registro (26/09) | «Hay que desarrollar este paso desde cero». Para el 2 de octubre: alta en la tienda desde la caja, por personal con sesión; portal en línea después |
+| Registro | Portal por teléfono + SMS, sesión persistente opcional; confirmado nuevamente el 29/09. Wallet pospuesto. #129 reúne backend #109 y pantallas/coordinación #110; falta configurar proveedor, dominio y textos legales antes de habilitarlo |
 | Bases y aviso de privacidad (26/09) | Los redacta Claude y los revisa un abogado antes de anunciar |
 | Operación (26/09) | 2 cajas, 3 empleados más Isaac; Isaac resuelve las incidencias de saldo |
 | Portal de clientes | Registro y consulta de saldo en línea; compra y canje en tienda física |
-| Identidad | Membresía QR/PIN y correo verificado para acceso en línea; sin SMS/WhatsApp de autenticación en v1 |
+| Identidad (29/09) | Sin PIN de socio. Login teléfono + SMS; barcode temporal personal en el portal, máximo de gasto elegido por el cliente, cinco minutos y un solo canje. Teléfono/número permiten acumular, no gastar. Firebase Auth/Identity Platform sigue pendiente de configuración; no se han iniciado envíos. Los PIN del personal no cambian |
+| Decisiones del 29/09 (#135) | Titular: María Teresa Ferrusca Pérez. Inicio de la promoción: 2 oct 2026, 11:00. Edad mínima: 18 años declarados. Aviso de terminación del programa: 30 días. Conservación de datos tras la baja: 12 meses. Medios de privacidad: privacidad@eldolaron.com y WhatsApp 444 543 7754 (el 444 854 5980 es fijo, no WhatsApp). Lo ganado se libera a las 00:00 del día siguiente, no en la siguiente compra. Vale perdido: no se repone. Primera llegada con premio en línea usado o vencido: pierde los 500 D. Cancelar una compra cuyo crédito ya se gastó: se detiene, en socios y vales |
 | Escala prevista | Hasta 1,000 clientes distintos al inicio y 10,000 durante el primer año; no equivale a usuarios simultáneos |
 | Desarrollo y presupuesto inicial | Claude y Codex, usando suscripciones existentes; reducir costos recurrentes hasta que opere la tienda. El plan detalla la propuesta de $50–51 USD/mes de servicios |
 
-### Regalo de apertura: reparto propuesto ($15,000 exactos)
+### Promoción de apertura: reparto aprobado el 28/09 ($15,000 exactos)
 
-| Orden de registro | Personas | Dolarones c/u | Subtotal |
-| --- | --- | --- | --- |
-| #1 | 1 | 500 | 500 |
-| #2–11 | 10 | 300 | 3,000 |
-| #12–24 | 13 | 200 | 2,600 |
-| #25–50 | 26 | 150 | 3,900 |
-| #51–100 | 50 | 100 | 5,000 |
+| Cupos en línea | Personas | Dolarones c/u | Total |
+| --- | ---: | ---: | ---: |
+|  | 5 | 300 | 1,500 |
+|  | 6 | 200 | 1,200 |
+|  | 14 | 150 | 2,100 |
+|  | 25 | 100 | 2,500 |
+| **Subtotal en línea** | **50** | | **7,300** |
+
+| Cupos en tienda | Personas | Dolarones c/u | Total |
+| --- | ---: | ---: | ---: |
+| Primera llegada física | 1 | 500 | 500 |
+|  | 5 | 300 | 1,500 |
+|  | 7 | 200 | 1,400 |
+|  | 12 | 150 | 1,800 |
+|  | 25 | 100 | 2,500 |
+| **Subtotal en tienda** | **50** | | **7,700** |
 | **Total** | **100** | | **15,000** |
 
-Regla vigente (26/09): el regalo se asigna por número de socio al registrarse (#1 a #100), se puede usar en partes y vence a los 30 días. No hay lista de espera: lo que no se usa vence y no pasa a nadie.
+El premio de 500 D es exclusivo de la primera persona que llegue físicamente a la tienda. Si esa persona ya recibió un premio online, los 500 D lo sustituyen; el importe anterior vuelve a la bolsa online y no se acumulan premios. Cada premio de apertura puede gastarse en partes en tickets de $1,000 MXN o más, calculados antes de descontar Dolarones. El mínimo no aplica a D ganados por compras. Cada premio vence 30 días después de otorgarse y lo vencido no se reasigna. El procedimiento para acreditar la primera llegada y devolver el cupo anterior debe quedar detallado en las bases aprobadas antes de publicarse.
 
-**Cambio respecto a la idea original:** se sustituyó la reasignación al azar por una lista de espera en orden. La clasificación jurídica debe revisarse con un especialista; no reintroducir azar sin esa revisión y los permisos que correspondan. El detalle de asignación, canje parcial y vencimiento de apertura aún requiere aprobación (sección 7).
+Esto reemplaza el reparto anterior por número de socio #1–100 que aparece en la versión del 26/09. No hay sorteo ni desempate al azar. La clasificación jurídica y criterios finales de elegibilidad requieren revisión profesional.
 
 ## 3. Pendientes
 

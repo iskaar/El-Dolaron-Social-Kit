@@ -178,6 +178,39 @@ export async function abrirCajon() {
   return enviar(new Uint8Array([ESC, 0x70, 0x00, 25, 250]));
 }
 
+// Epson GS k, función B, Code 128 (73), conjunto B. Nada de imagen raster:
+// https://download4.epson.biz/sec_pubs/pos/reference_en/escpos/gs_lk.html
+// ponytail: módulo 2 puntos para papel de 80 mm; calibrar con el lector real.
+export const MODULO_VALE = 2;
+export function codigoBarrasVale(codigo) {
+  if (!/^DP-[A-Za-z0-9_-]{16}$/.test(codigo)) throw new Error('Código de vale inválido.');
+  const datos = codificar('{B' + codigo);
+  return concatenar([
+    new Uint8Array([ESC, 0x61, 1, GS, 0x48, 0, GS, 0x77, MODULO_VALE, GS, 0x68, 72, GS, 0x6b, 73, datos.length]),
+    datos, new Uint8Array([0x0a, ESC, 0x61, 0]),
+  ]);
+}
+
+function partesVale(vale, titulo = 'VALE DOLARONES - SIN REGISTRO') {
+  return [
+    separador(), centrado(titulo),
+    renglonMonto('Saldo del vale', `${(vale.restante / 100).toFixed(2)} D`),
+    linea(`Disponible: ${fechaHora(vale.disponible_desde)}`),
+    linea(`Vence: ${fechaHora(vale.vence_en)}`),
+    ...(vale.restante > 0 ? [codigoBarrasVale(vale.codigo), centrado(vale.codigo)] : []),
+    linea('Conserva el papel. Copias comparten el saldo.'),
+    linea('Solo en El Dolaron. No canjeable por efectivo.'),
+  ];
+}
+
+/** Reimprimir conserva código, saldo actual y vencimiento del servidor. */
+export function imprimirVale(vale) {
+  return enviar(concatenar([
+    ...encabezado('VALE DOLARONES'), ...partesVale(vale),
+    new Uint8Array([0x0a, 0x0a, 0x0a, GS, 0x56, 0x42, 0x00]),
+  ]));
+}
+
 /**
  * @param venta {{ total: number, forma_pago: 'efectivo'|'tarjeta'|'transferencia', efectivo: number, cambio: number, creado_en: string,
  *   dolarones?: number, socio?: { numero: number, ganados: number, saldo: number } | null }}
@@ -200,6 +233,7 @@ export async function imprimirTicket(venta, lineas) {
     centrado('Productos Americanos'),
     separador(),
     linea(fecha),
+    ...(venta.id ? [linea('Venta: ' + venta.id)] : []),
     separador(),
   ];
   for (const l of lineas) {
@@ -226,6 +260,12 @@ export async function imprimirTicket(venta, lineas) {
     partes.push(renglonMonto('Saldo disponible', d(venta.socio.saldo)));
     partes.push(separador());
   }
+  if (venta.vale_usado) partes.push(...partesVale(venta.vale_usado, 'SALDO DEL VALE ANTERIOR'));
+  if (venta.vale_emitido) partes.push(...partesVale(venta.vale_emitido));
+  if (venta.vale_pendiente) partes.push(linea('Elegibilidad de vale sin confirmar.'),
+    linea('Consulta en caja con este ticket tras sincronizar.'));
+  if (venta.recompensa_pendiente) partes.push(linea('Dolarones de compra sin confirmar.'),
+    linea('Consulta el saldo tras sincronizar.'));
   partes.push(centrado('Gracias por su compra'));
   partes.push(new Uint8Array([0x0a, 0x0a, 0x0a]));
   partes.push(new Uint8Array([GS, 0x56, 0x42, 0x00]));   // corte con avance de papel
@@ -237,6 +277,7 @@ export async function imprimirTicket(venta, lineas) {
 
 const importe = (centavos) => `$${(centavos / 100).toFixed(2)}`;
 const fechaHora = (iso) => new Date(iso).toLocaleString('es-MX', {
+  timeZone: 'America/Mexico_City',
   year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit',
 });
 const negritas = (encendidas) => new Uint8Array([ESC, 0x45, encendidas ? 1 : 0]);

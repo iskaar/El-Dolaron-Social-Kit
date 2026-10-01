@@ -2,7 +2,9 @@
 // Desglose del ticket y cancelacion por pieza (Issue #138) contra SQLite real.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { tienda, PRODUCTO } from './prueba-d1.ts';
+import { readFileSync, readdirSync } from 'node:fs';
+import { DatabaseSync } from 'node:sqlite';
+import { tienda, PRODUCTO, codigoPrueba } from './prueba-d1.ts';
 import { repartirDevolucion } from './devoluciones.ts';
 
 type Pedir = ReturnType<typeof tienda>['pedir'];
@@ -117,12 +119,16 @@ test('cancelar el ticket completo despues de una pieza devuelve solo lo que qued
 test('con Dolarones: primero sale el dinero; lo pagado con D regresa al saldo y lo ganado se recalcula', async () => {
   const { db, pedir } = tienda();
   const socio = (await pedir('/api/socios', {
-    id: crypto.randomUUID(), nombre: 'Cliente', telefono: '4449990000', pin: '1234', acepta_bases: true,
+    id: crypto.randomUUID(), nombre: 'Cliente', telefono: '4449990000', acepta_bases: true, declara_mayor_edad: true,
   })).cuerpo;
+  // Compra previa: las altas ya no entregan regalo automático ni aceptan PIN de socio.
+  await vender(pedir, { cliente_id: socio.id });
+  db.prepare("update dolarones_lotes set disponible_desde = '2000-01-01T00:00:00Z'").run();
   const saldoInicial = (await pedir('/api/socios?q=4449990000')).cuerpo.disponible;
 
-  // $500: 100 D + $400 en efectivo. Gana 40 D.
-  const id = await vender(pedir, { cliente_id: socio.id, dolarones: 10000, pin: '1234', efectivo: 40000 });
+  // $500: 50 D + $450 en efectivo. Gana 40 D.
+  const id = await vender(pedir, { cliente_id: socio.id, dolarones: 5000,
+    codigo_socio: await codigoPrueba(db, socio.id), efectivo: 45000 });
   const ganado = () => (db.prepare('select restante from dolarones_lotes where venta_id = ?').get(id) as { restante: number }).restante;
   assert.equal(ganado(), 4000);
   const linea = (await detalle(pedir, id)).lineas[0].id;
@@ -130,18 +136,44 @@ test('con Dolarones: primero sale el dinero; lo pagado con D regresa al saldo y 
   const primera = (await cancelarPieza(pedir, id, linea)).cuerpo;
   assert.equal(primera.devuelto, 25000);
   assert.equal(primera.dolarones, 0);
-  assert.equal(ganado(), 1000);                     // quedan $150 pagados: 10 D
+  assert.equal(ganado(), 2000);                     // quedan $200 pagados: 20 D
 
   const segunda = (await cancelarPieza(pedir, id, linea)).cuerpo;
-  assert.equal(segunda.devuelto, 15000);
-  assert.equal(segunda.dolarones, 10000);
+  assert.equal(segunda.devuelto, 20000);
+  assert.equal(segunda.dolarones, 5000);
   assert.equal(ganado(), 0);
   assert.equal((await pedir('/api/socios?q=4449990000')).cuerpo.disponible, saldoInicial);
 
-  const c = (await cortar(pedir, 50000)).cuerpo;    // 500 + 400 - 250 - 150
-  assert.equal(c.efectivo_devoluciones, 40000);
-  assert.equal(c.dolarones, 0);                     // 100 D cobrados y 100 D devueltos
+  const c = (await cortar(pedir, 100000)).cuerpo;   // fondo + compra previa + 450 - 250 - 200
+  assert.equal(c.efectivo_devoluciones, 45000);
+  assert.equal(c.dolarones, 0);                     // 50 D cobrados y 50 D devueltos
   assert.equal(c.diferencia, 0);
+});
+
+test('socio: cancelar completo tras una pieza reconoce retiros previos; gastar crédito bloquea la pieza', async () => {
+  const t = tienda();
+  try {
+    const socio = (await t.pedir('/api/socios', { id:crypto.randomUUID(), nombre:'Cliente',
+      telefono:'4449990000', acepta_bases:true, declara_mayor_edad:true })).cuerpo;
+    const id = await vender(t.pedir, { cliente_id:socio.id });
+    const linea = (await detalle(t.pedir, id)).lineas[0].id;
+    assert.equal((await cancelarPieza(t.pedir, id, linea)).status, 201);
+    const r = await t.pedir(`/api/ventas/${id}/cancelar`, { motivo:'resto', caja:'Caja 1' });
+    assert.equal(r.status, 200, JSON.stringify(r.cuerpo));
+    assert.equal(r.cuerpo.devuelto, 25000);
+    assert.equal(stock(t.db), 50);
+    assert.equal(t.db.prepare('select restante from dolarones_lotes where venta_id=?').get(id)!.restante, 0);
+
+    const otro = await vender(t.pedir, { cliente_id:socio.id });
+    t.db.prepare("update dolarones_lotes set disponible_desde='2000-01-01' where venta_id=?").run(otro);
+    assert.equal((await t.pedir('/api/ventas', { id:crypto.randomUUID(),
+      lineas:[{ producto_id:PRODUCTO, cantidad:1 }], forma_pago:'efectivo', efectivo:24900,
+      cliente_id:socio.id, dolarones:100, codigo_socio:await codigoPrueba(t.db, socio.id) })).status, 201);
+    const antes = await detalle(t.pedir, otro);
+    assert.equal((await cancelarPieza(t.pedir, otro, antes.lineas[0].id)).status, 409);
+    assert.deepEqual(await detalle(t.pedir, otro), antes);
+    assert.equal(stock(t.db), 47);
+  } finally { t.db.close(); }
 });
 
 test('el candado de revision rechaza una cancelacion que leyo un ticket ya cambiado', async () => {
@@ -151,6 +183,56 @@ test('el candado de revision rechaza una cancelacion que leyo un ticket ya cambi
   assert.throws(() => db.prepare('update ventas set revision = 1 where id = ?').run(id), /ticket cambio/);
   assert.throws(() => db.prepare('update venta_lineas set cancelada_cantidad = 3 where venta_id = ?').run(id),
     /pieza ya cancelada/);
+});
+
+test('base de main con 015 y 020 admite 016 → 018 → 019 → 021 sin perder ventas ni PIN de cajero', () => {
+  const db = new DatabaseSync(':memory:');
+  try {
+    const pendientes = ['016', '018', '019', '021'];
+    const migraciones = readdirSync('.').filter((f) => /^migracion-\d+/.test(f)).sort();
+    const aplicar = (f: string) => db.exec(readFileSync(f, 'utf8'));
+    aplicar('schema.sql');
+    for (const f of migraciones.filter((f) => !pendientes.includes(f.slice(10, 13)))) aplicar(f);
+    const id = crypto.randomUUID();
+    db.prepare("insert into ventas (id, total, forma_pago, efectivo, cambio, creado_en, registrado_en) values (?, 25000, 'efectivo', 25000, 0, '', '')").run(id);
+    db.prepare("insert into usuarios (correo, nombre, roles, pin_hash, pin_sal, creado_en, actualizado_en) values ('caja@prueba.mx', 'Caja', 'cajero', 'hash-prueba', 'sal-prueba', '', '')").run();
+    for (const numero of pendientes) aplicar(migraciones.find((f) => f.startsWith(`migracion-${numero}-`))!);
+    assert.equal(db.prepare('select total, pedido_hash, revision from ventas where id = ?').get(id)!.total, 25000);
+    assert.equal(db.prepare('select pedido_hash from ventas where id = ?').get(id)!.pedido_hash, null);
+    assert.equal(db.prepare("select pin_hash from usuarios where correo = 'caja@prueba.mx'").get()!.pin_hash, 'hash-prueba');
+    assert.equal(db.prepare('select count(*) as n from premios_apertura').get()!.n, 100);
+    for (const tabla of ['codigos_cliente', 'vales_dolarones', 'devoluciones'])
+      assert.equal(db.prepare(`select count(*) as n from ${tabla}`).get()!.n, 0);
+    db.prepare('update ventas set revision = 1 where id = ?').run(id);
+    assert.throws(() => db.prepare('update ventas set revision = 1 where id = ?').run(id), /ticket cambio/);
+  } finally { db.close(); }
+});
+
+test('configuración por defecto: caja monetaria sigue vendiendo; alta, portal, SMS y emisión permanecen cerrados', async () => {
+  const t = tienda();
+  try {
+    for (const clave of ['BASES_APROBADAS_VERSION', 'PORTAL_REGISTRO_ABIERTO', 'PROMOCION_INICIO',
+      'PORTAL_BASES_TEXTO', 'PORTAL_AVISO_TEXTO', 'VALES_ABIERTOS', 'FIREBASE_PROJECT_ID', 'FIREBASE_WEB_API_KEY', 'HOST_PORTAL'] as const)
+      delete t.env[clave];
+    const id = await vender(t.pedir);
+    assert.equal(stock(t.db), 48);
+    assert.equal((await t.pedir(`/api/ventas/${id}/vale`, {})).status, 404);
+    assert.equal((await t.pedir('/api/vales/config')).cuerpo.habilitado, false);
+    const alta = await t.pedir('/api/socios', { id: crypto.randomUUID(), nombre: 'Cliente', telefono: '4449990000',
+      acepta_bases: true, declara_mayor_edad: true });
+    assert.equal(alta.status, 503);
+    assert.equal((await t.pedir('/api/portal/config')).status, 404);
+    assert.equal((await t.pedir('/api/vales/buscar', { codigo: 'DP-AAAAAAAAAAAAAAAA' })).status, 403);
+    assert.equal((await t.pedir('/api/ventas', { id: crypto.randomUUID(), lineas: [{ producto_id: PRODUCTO, cantidad: 1 }],
+      forma_pago: 'efectivo', efectivo: 24900, codigo_vale: 'DP-AAAAAAAAAAAAAAAA', dolarones: 100 })).status, 409);
+    t.env.HOST_PORTAL = 'caja.prueba'; // Incluso con host, no ofrece Firebase/SMS ni registro.
+    const config = (await t.pedir('/api/portal/config')).cuerpo;
+    assert.equal(config.firebase, null);
+    assert.equal(config.registro_abierto, false);
+    assert.equal((await t.pedir('/api/portal/registro', {})).status, 401);
+    assert.equal(t.db.prepare('select count(*) as n from clientes').get()!.n, 0);
+    assert.equal(t.db.prepare('select count(*) as n from vales_dolarones').get()!.n, 0);
+  } finally { t.db.close(); }
 });
 
 test('el comprobante de devolucion sale con piezas, lo devuelto, el motivo y las firmas', async () => {
@@ -188,4 +270,30 @@ test('el comprobante de devolucion sale con piezas, lo devuelto, el motivo y las
   texto = new TextDecoder().decode(Uint8Array.from(pedazos.flatMap((p) => [...p])));
   assert.match(texto, /CANCELACION DE TICKET[\s\S]*Caja: Caja 2/);
   assert.match(texto, /DEVUELTO EN EFECTIVO +\$150\.00\n[\s\S]*Regresado al saldo \(Dolarones\) +100 D/);
+});
+
+test('Ventas de hoy abre el detalle: Imprimir vale aparece una sola vez en la ventana editable sin socio', async () => {
+  const previo = Object.getOwnPropertyDescriptor(globalThis, 'document');
+  Object.defineProperty(globalThis, 'document', { configurable: true, value: {
+    createElement: () => ({ textContent: '' }), head: { append() {} },
+  } });
+  try {
+    const { pintarDetalle, renglonTicket } = await import('../public/ticket.js');
+    const t = { id: crypto.randomUUID(), creado_en: new Date().toISOString(), forma_pago: 'efectivo',
+      total: 25000, devuelto: 0, dolarones_devueltos: 0, cancelada: 0,
+      lineas: [{ id: 1, nombre: '<script>', codigo: 'ED-1', precio: 25000, cantidad: 1, cancelada_cantidad: 0 }],
+      devoluciones: [] };
+    assert.match(renglonTicket(t), /data-ticket=/);
+    assert.doesNotMatch(renglonTicket(t), /Imprimir vale/);
+    const editable = pintarDetalle(t, { editable: true });
+    assert.equal(editable.match(/Imprimir vale/g)?.length, 1);
+    assert.match(editable, /data-imprimir-vale/);
+    assert.match(editable, /&lt;script&gt;/);
+    assert.doesNotMatch(pintarDetalle(t), /Imprimir vale/);
+    assert.doesNotMatch(pintarDetalle({ ...t, socio: { numero: 1, nombre: 'Cliente' } }, { editable: true }), /Imprimir vale/);
+    assert.doesNotMatch(pintarDetalle({ ...t, cancelada: 1 }, { editable: true }), /Imprimir vale/);
+  } finally {
+    if (previo) Object.defineProperty(globalThis, 'document', previo);
+    else delete (globalThis as any).document;
+  }
 });

@@ -15,8 +15,10 @@ import {
   esDeCaja, soloComputadora,
 } from './cuentas.ts';
 import { cajeroEnTurno, listarCajeros, entrar, salir, ponerPin } from './cajeros.ts';
-import { registrarSocio, buscarSocio, cambiarPin, sentenciasDeVenta, sentenciasDeCancelacion, saldo } from './dolarones.ts';
+import { registrarSocio, buscarSocio, buscarPorCodigo, basesListas, sentenciasDeVenta, sentenciasDeCancelacion, saldo } from './dolarones.ts';
 import { registrarCorte, registrarRetiro, ultimoCorte, cajaDe } from './corte.ts';
+import { portal, llegada, vincular } from './portal.ts';
+import { sentenciasVale, cancelarVales, buscarVale, valeDeVenta, valeUsadoEnVenta, reimprimirVale, valesAbiertos } from './vales.ts';
 
 interface FilaConfig {
   clave: string;
@@ -572,7 +574,7 @@ async function registrarVenta(request: Request, env: Env, correo: string): Promi
   const venta = (await request.json()) as {
     id?: unknown; lineas?: unknown; forma_pago?: unknown;
     efectivo?: unknown; creado_en?: unknown;
-    cliente_id?: unknown; dolarones?: unknown; pin?: unknown; caja?: unknown;
+    cliente_id?: unknown; dolarones?: unknown; codigo_socio?: unknown; codigo_vale?: unknown; caja?: unknown;
   };
   const id = String(venta.id ?? '');
   if (!UUID.test(id)) {
@@ -586,10 +588,33 @@ async function registrarVenta(request: Request, env: Env, correo: string): Promi
     return json({ error: 'Forma de pago invalida.' }, 400);
   }
 
-  const yaExiste = await env.DB.prepare('select id from ventas where id = ?').bind(id).first();
-  if (yaExiste) {
-    return json({ id, duplicada: true }, 200);
-  }
+  // Se compara el pedido que mando la caja, no el catalogo actual: un precio
+  // cambiado despues de una venta no debe romper un reintento legitimo.
+  const pedido = JSON.stringify({
+    lineas:(venta.lineas as LineaVenta[]).map((l) => [String(l.producto_id ?? ''), l.cantidad]),
+    forma_pago:formaPago, efectivo:venta.efectivo ?? 0, creado_en:venta.creado_en ?? null,
+    cliente_id:venta.cliente_id ?? null, dolarones:venta.dolarones ?? 0,
+    codigo_socio:venta.codigo_socio ?? '', codigo_vale:venta.codigo_vale ?? '',
+    caja:venta.caja ?? null,
+  });
+  const pedidoHash = [...new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(pedido)))]
+    .map((b) => b.toString(16).padStart(2, '0')).join('');
+  const reintento = async (): Promise<Response | null> => {
+    const previo = await env.DB.prepare('select pedido_hash from ventas where id = ?').bind(id)
+      .first<{ pedido_hash:string | null }>();
+    if (!previo) return null;
+    // null: venta registrada antes de la migracion 021, se acepta como antes.
+    if (previo.pedido_hash !== null && previo.pedido_hash !== pedidoHash)
+      return json({ error:'El folio ya pertenece a otra venta. Revisa la venta original antes de reintentar.' }, 409);
+    const ganado = await env.DB.prepare(`select coalesce(sum(importe), 0) as importe from dolarones_movimientos
+      where venta_id = ? and tipo = 'compra'`).bind(id).first<{ importe:number }>();
+    const respuesta = json({ id, duplicada:true, ganados:ganado?.importe ?? 0,
+      vale_emitido:await valeDeVenta(env, id), vale_usado:await valeUsadoEnVenta(env, id) }, 200);
+    respuesta.headers.set('cache-control', 'no-store');
+    return respuesta;
+  };
+  const yaExiste = await reintento();
+  if (yaExiste) return yaExiste;
 
   const idsPedidos = [...new Set((venta.lineas as LineaVenta[]).map((l) => String(l.producto_id ?? '')))];
   if (idsPedidos.some((pid) => !UUID.test(pid))) {
@@ -611,6 +636,7 @@ async function registrarVenta(request: Request, env: Env, correo: string): Promi
   const total = preparado.lineas.reduce((suma, l) => suma + l.precio * l.cantidad, 0);
   const efectivo = Math.max(0, Math.round(Number(venta.efectivo ?? 0)));
   const clienteId = venta.cliente_id ? String(venta.cliente_id) : null;
+  const codigoVale = String(venta.codigo_vale ?? '');
   const dolarones = Number(venta.dolarones ?? 0);
   const aPagar = total - (Number.isInteger(dolarones) ? dolarones : 0);
   if (!efectivoAlcanza({ formaPago, total: aPagar, efectivo })) {
@@ -621,23 +647,33 @@ async function registrarVenta(request: Request, env: Env, correo: string): Promi
   const ahora = momento.toISOString();
   const creadoEn = String(venta.creado_en ?? ahora);
 
-  // Valida socio, PIN y saldo antes de tocar nada; sus sentencias van en el mismo batch.
+  // Valida socio, código y saldo; consumo y venta se confirman en el mismo batch.
   const recompensa = await sentenciasDeVenta(env, {
-    ventaId: id, clienteId, dolarones, pin: String(venta.pin ?? ''), total, autor: correo, ahora: momento,
+    ventaId: id, clienteId, dolarones:codigoVale ? 0 : dolarones, codigo: String(venta.codigo_socio ?? ''), total, autor: correo, ahora: momento,
   });
   if (!recompensa.ok) {
+    const concurrente = await reintento();
+    if (concurrente) return concurrente;
     return json({ error: recompensa.error }, recompensa.status);
+  }
+  const vale = await sentenciasVale(env, {
+    ventaId:id, clienteId, codigo:codigoVale, dolarones, total, autor:correo, ahora:momento,
+  });
+  if (!vale.ok) {
+    const concurrente = await reintento();
+    if (concurrente) return concurrente;
+    return json({ error:vale.error }, vale.status);
   }
 
   const sentencias = [
     env.DB.prepare(
       `insert into ventas (id, total, forma_pago, efectivo, cambio, creado_en, registrado_en, cliente_id, dolarones,
-                           caja, cajero)
-       values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                           caja, cajero, pedido_hash)
+       values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).bind(id, total, formaPago, efectivo, Math.max(0, efectivo - aPagar), creadoEn, ahora, clienteId, dolarones,
       // Quien cobro sale de Access; la caja es la suya (Issue #105) o la de la
       // computadora. Una venta encolada antes del corte de caja llega sin caja: ''.
-      await cajaDe(env, correo, venta.caja), correo),
+      await cajaDe(env, correo, venta.caja), correo, pedidoHash),
     ...preparado.lineas.map((l) =>
       env.DB.prepare(
         `insert into venta_lineas (venta_id, producto_id, codigo, nombre, precio, cantidad)
@@ -656,6 +692,7 @@ async function registrarVenta(request: Request, env: Env, correo: string): Promi
         ).bind(l.cantidad, ahora, l.producto_id),
       ),
     ...recompensa.sentencias,
+    ...vale.sentencias,
   ];
 
   // Todo junto: un ticket a medias descuadra el corte del dia, y un canje a
@@ -663,6 +700,15 @@ async function registrarVenta(request: Request, env: Env, correo: string): Promi
   try {
     await env.DB.batch(sentencias);
   } catch (error) {
+    // Un segundo cajero pudo confirmar este folio despues de la lectura inicial.
+    // Solo el mismo pedido obtiene respuesta idempotente; otros errores siguen visibles.
+    const concurrente = await reintento();
+    if (concurrente) return concurrente;
+    if (String(error).includes('saldo de vale invalido'))
+      return json({ error:'El vale cambió, venció o se agotó. Vuelve a escanearlo.' }, 409);
+    if (String(error).includes('codigo de socio invalido')) {
+      return json({ error: 'Código de socio usado, vencido o actualizado. Pide otro al cliente.' }, 409);
+    }
     if (String(error).includes('stock insuficiente')) {
       return json({ error: 'No hay existencia suficiente para completar la venta.' }, 409);
     }
@@ -671,10 +717,14 @@ async function registrarVenta(request: Request, env: Env, correo: string): Promi
     }
     throw error;
   }
-  return json({
+  const respuesta = json({
     id, total, dolarones, cambio: Math.max(0, efectivo - aPagar), ganados: recompensa.ganados,
     saldo: clienteId ? await saldo(env, clienteId, ahora) : null,
+    vale_emitido:vale.emitido,
+    vale_usado:await valeUsadoEnVenta(env, id),
   }, 201);
+  respuesta.headers.set('cache-control', 'no-store');
+  return respuesta;
 }
 
 /**
@@ -739,8 +789,13 @@ async function cancelarVenta(id: string, request: Request, env: Env, correo: str
         ).bind(l.cantidad, ahora, l.producto_id),
       ),
       ...(await sentenciasDeCancelacion(env, id, canceladaPor, ahora)),
+      ...(await cancelarVales(env, id, canceladaPor, ahora)),
     ]);
   } catch (error) {
+    if (String(error).includes('saldo de vale invalido'))
+      return json({ error:'El vale de esta compra ya se usó. Requiere aclaración presencial antes de cancelar.' }, 409);
+    if (String(error).includes('saldo insuficiente'))
+      return json({ error:'Los Dolarones ganados con esta compra ya se usaron. Requiere aclaración presencial antes de cancelar.' }, 409);
     if (String(error).includes('venta ya cancelada')) {
       return json({ id, cancelada: true, ya_estaba: true });
     }
@@ -1076,6 +1131,34 @@ export default {
     const { pathname } = url;
 
     try {
+      // Puerta pública cerrada por defecto. Nunca comparte rutas ni assets del personal.
+      if (env.HOST_PORTAL && url.hostname === env.HOST_PORTAL) {
+        const archivos: Record<string, string> = {
+          '/': '/portal', '/portal': '/portal', '/portal.html': '/portal',
+          '/portal.js': '/portal.js', '/portal.css': '/portal.css', '/code128.js': '/code128.js',
+        };
+        if (archivos[pathname] && (request.method === 'GET' || request.method === 'HEAD')) {
+          const asset = new URL(archivos[pathname], url.origin);
+          const pantalla = await env.ASSETS.fetch(new Request(asset, { method: request.method }));
+          // Assets no hace redirección de HTML hacia el index del personal.
+          if (pantalla.status >= 300 && pantalla.status < 400)
+            return json({ error: 'Página no disponible.' }, 503);
+          const respuesta = new Response(pantalla.body, pantalla);
+          const authDomain = env.FIREBASE_AUTH_DOMAIN || `${env.FIREBASE_PROJECT_ID}.firebaseapp.com`;
+          const frameAuth = /^[a-z0-9.-]+$/.test(authDomain) ? `https://${authDomain}` : '';
+          respuesta.headers.set('content-security-policy', "default-src 'self'; script-src 'self' https://www.gstatic.com https://www.google.com https://www.recaptcha.net https://apis.google.com; style-src 'self' 'unsafe-inline'; connect-src 'self' https://identitytoolkit.googleapis.com https://securetoken.googleapis.com https://www.google.com https://www.recaptcha.net; frame-src https://www.google.com https://www.recaptcha.net " + frameAuth + "; img-src 'self' data: https://www.gstatic.com; object-src 'none'; base-uri 'none'; frame-ancestors 'none'");
+          respuesta.headers.set('cache-control', 'no-store');
+          respuesta.headers.set('referrer-policy', 'no-referrer');
+          respuesta.headers.set('x-content-type-options', 'nosniff');
+          return respuesta;
+        }
+        if (!pathname.startsWith('/api/portal/') || pathname === '/api/portal/llegada')
+          return json({ error: 'Ruta no encontrada.' }, 404);
+        try { return await portal(request, env, url); }
+        catch { return json({ error: 'Servicio no disponible.' }, 503); }
+      }
+      if (pathname.startsWith('/api/portal/') && pathname !== '/api/portal/llegada')
+        return json({ error: 'Ruta no encontrada.' }, 404);
       if (env.HOST_VENDEDOR && url.hostname === env.HOST_VENDEDOR) {
         if (pathname === '/') {
           return Response.redirect(`${url.origin}/captura`, 302);
@@ -1185,11 +1268,28 @@ export default {
         if (request.method === 'GET') return await buscarSocio(url, env);
         return json({ error: 'Metodo no permitido.' }, 405);
       }
-
-      const nuevoPin = pathname.match(/^\/api\/socios\/(\d+)\/pin$/);
-      if (nuevoPin && request.method === 'POST') {
-        return await cambiarPin(Number(nuevoPin[1]), request, env);
+      if (pathname === '/api/portal/llegada' && request.method === 'POST') {
+        try { return await llegada(request, env, correo); }
+        catch (error) {
+          if (String(error).includes('saldo insuficiente'))
+            return json({ error: 'El premio cambió durante la acreditación. Requiere revisión presencial.' }, 409);
+          throw error;
+        }
       }
+      if (pathname === '/api/vales/config' && request.method === 'GET')
+        return json({ habilitado:valesAbiertos(env) });
+      if (pathname === '/api/vales/buscar' && request.method === 'POST')
+        return await buscarVale(request, env);
+      const valeVenta = /^\/api\/ventas\/([^/]+)\/vale$/.exec(pathname);
+      if (valeVenta && request.method === 'POST') return await reimprimirVale(env, valeVenta[1]);
+
+      if (pathname === '/api/socios/codigo' && request.method === 'POST')
+        return await buscarPorCodigo(request, env);
+      if (pathname === '/api/socios/legal' && request.method === 'GET')
+        return json({ disponible:basesListas(env), bases:env.PORTAL_BASES_TEXTO || '', aviso:env.PORTAL_AVISO_TEXTO || '' });
+      // Sin entrada en cuentas.ts: únicamente el dueño puede aprobar un vínculo.
+      if (pathname === '/api/socios/vincular' && request.method === 'POST')
+        return await vincular(request, env);
 
       if (pathname === '/api/cortes') {
         if (request.method === 'POST') return await registrarCorte(request, env, correo);

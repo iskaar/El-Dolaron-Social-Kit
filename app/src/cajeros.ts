@@ -62,7 +62,7 @@ export async function entrar(request: Request, env: Env): Promise<Response> {
   const ahoraIso = ahora.toISOString();
   if (fila.pin_bloqueo > ahoraIso) return json({ error: 'PIN bloqueado por intentos fallidos. Espera 15 minutos o llama a Isaac.' }, 423);
   if (await hashPin(pin, fila.pin_sal) !== fila.pin_hash) {
-    // Igual que el PIN de socios: incremento atomico, sin tocar un PIN recien cambiado.
+    // Incremento atómico, sin tocar un PIN recién cambiado.
     const fallo = await env.DB.prepare(
       `update usuarios set
          pin_fallos = case when pin_fallos + 1 >= ? then 0 else pin_fallos + 1 end,
