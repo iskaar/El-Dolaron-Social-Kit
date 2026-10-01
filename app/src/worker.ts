@@ -283,7 +283,15 @@ async function capturarManual(request: Request, env: Env, correo: string): Promi
   const respuesta = await corregirBorrador(id, cuerpo, env);
   // Datos invalidos: no queda una pieza vacia (salvo que fuera un reintento de una ya guardada).
   if (!respuesta.ok && meta.changes > 0) await env.DB.prepare('delete from productos where id = ?').bind(id).run();
-  return respuesta.ok ? json(await respuesta.json(), 201) : respuesta;
+  if (!respuesta.ok) return respuesta;
+  // El dueno la da de alta para venderla ya: sin codigo la caja no la recibe. Es
+  // el mismo que le pondria Etiquetas, asi que la etiqueta impresa despues coincide.
+  // Las de banda se cobran con el codigo de la banda.
+  await env.DB.prepare(
+    `update productos set codigo = 'ED-' || printf('%06d', rowid)
+     where id = ? and (codigo is null or codigo = '') and destino not like 'banda%'`,
+  ).bind(id).run();
+  return json(await respuesta.json(), 201);
 }
 
 /** Cuanto dura abierta la correccion de existencia desde la camara. */

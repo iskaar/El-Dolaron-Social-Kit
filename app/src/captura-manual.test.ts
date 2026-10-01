@@ -19,6 +19,18 @@ test('el dueno captura sin foto: la pieza queda revisada, con precio calculado y
   assert.equal((db.prepare('select count(*) n from productos where nombre = ?').get('Licuadora Oster') as { n: number }).n, 1);
 });
 
+test('la pieza sin foto sale en la caja de inmediato, con el codigo que llevara su etiqueta', async () => {
+  const { db, pedir } = tienda();
+  const cuerpo = pieza({ nombre: 'Asador', destino: 'etiqueta' });
+  assert.equal((await pedir('/api/borradores/manual', cuerpo)).status, 201);
+  const { codigo } = db.prepare('select codigo from productos where id = ?').get(cuerpo.id) as { codigo: string };
+  assert.match(codigo, /^ED-\d{6}$/);
+  const catalogo = (await pedir('/api/catalogo')).cuerpo as { id: string; codigo: string }[];
+  assert.equal(catalogo.find((p) => p.id === cuerpo.id)?.codigo, codigo);
+  const etiquetas = (await pedir('/api/etiquetas', { ids: [cuerpo.id] })).cuerpo as { codigo: string }[];
+  assert.equal(etiquetas[0].codigo, codigo);
+});
+
 test('datos malos no dejan pieza vacia; un capturista no puede', async () => {
   const { db, env, pedir } = tienda();
   const antes = (db.prepare('select count(*) n from productos').get() as { n: number }).n;
