@@ -187,10 +187,7 @@ export function codigoBarrasVale(codigo) {
   const datos = codificar('{B' + codigo);
   return concatenar([
     new Uint8Array([ESC, 0x61, 1, GS, 0x48, 0, GS, 0x77, MODULO_VALE, GS, 0x68, 72, GS, 0x6b, 73, datos.length]),
-    // El NUL cierra el código de barras: la impresora de la tienda lo lee como
-    // función A (hasta NUL) y se tragaba el resto del ticket, corte incluido,
-    // hasta el 0x00 del GS V. Con la longitud bien leída, el NUL se ignora.
-    datos, new Uint8Array([0x00, 0x0a, ESC, 0x61, 0]),
+    datos, new Uint8Array([0x0a, ESC, 0x61, 0]),
   ]);
 }
 
