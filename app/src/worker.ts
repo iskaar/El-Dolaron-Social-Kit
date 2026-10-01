@@ -584,6 +584,9 @@ async function registrarVenta(request: Request, env: Env, correo: string): Promi
   if (!Array.isArray(venta.lineas) || venta.lineas.length === 0) {
     return json({ error: 'La venta no tiene piezas.' }, 400);
   }
+  if (venta.lineas.some((l) => !l || typeof l !== 'object' || Array.isArray(l))) {
+    return json({ error: 'Línea de venta inválida.' }, 400);
+  }
   const formaPago = String(venta.forma_pago ?? 'efectivo');
   if (!FORMAS_PAGO.has(formaPago)) {
     return json({ error: 'Forma de pago invalida.' }, 400);

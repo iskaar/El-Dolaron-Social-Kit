@@ -176,6 +176,73 @@ test('socio: cancelar completo tras una pieza reconoce retiros previos; gastar c
   } finally { t.db.close(); }
 });
 
+for (const medio of ['vale', 'socio']) {
+  for (const concurrente of [false, true]) {
+    for (const precio of [500, 25000]) {
+      test(`${medio}: cancelar $${precio / 100} de $255 con 1 D gastado${concurrente ? ' entre lectura y batch' : ''}`, async () => {
+        const t = tienda();
+        try {
+          t.env.VALES_ABIERTOS = medio === 'vale' ? 'si' : 'no';
+          const socio = medio === 'socio' ? (await t.pedir('/api/socios', {
+            id:crypto.randomUUID(), nombre:'Cliente', telefono:'4449990000',
+            acepta_bases:true, declara_mayor_edad:true,
+          })).cuerpo : null;
+          const barato = crypto.randomUUID();
+          t.db.prepare(`insert into productos (id, codigo, nombre, precio, stock, semana_ingreso, creado_en, actualizado_en)
+            values (?, 'ED-000005', 'Pieza de $5', 500, 3, 'S40', '', '')`).run(barato);
+          const id = await vender(t.pedir, { lineas:[
+            { producto_id:PRODUCTO, cantidad:1 }, { producto_id:barato, cantidad:1 },
+          ], efectivo:25500, cliente_id:socio?.id });
+          const tabla = medio === 'vale' ? 'vales_dolarones' : 'dolarones_lotes';
+          const credito = t.db.prepare(`select * from ${tabla} where venta_id=?`).get(id)!;
+          assert.equal(credito.importe, medio === 'vale' ? 1000 : 2000);
+          t.db.prepare(`update ${tabla} set disponible_desde='2000-01-01T00:00:00Z' where id=?`).run(credito.id);
+          const ticket = await detalle(t.pedir, id);
+          const linea = ticket.lineas.find((l: { precio:number }) => l.precio === precio);
+          const estado = () => ['ventas', 'venta_lineas', 'productos', 'devoluciones',
+            'vales_dolarones', 'vales_movimientos', 'dolarones_lotes', 'dolarones_movimientos', 'codigos_cliente']
+            .map((tabla) => t.db.prepare(`select * from ${tabla} order by 1`).all());
+          let antes: ReturnType<typeof estado>;
+          const gastar = async () => {
+            const canje = await t.pedir('/api/ventas', {
+              id:crypto.randomUUID(), lineas:[{ producto_id:PRODUCTO, cantidad:1 }],
+              forma_pago:'efectivo', efectivo:24900, dolarones:100, caja:'Caja 2',
+              ...(socio ? { cliente_id:socio.id, codigo_socio:await codigoPrueba(t.db, socio.id) }
+                : { codigo_vale:credito.codigo }),
+            });
+            assert.equal(canje.status, 201, JSON.stringify(canje.cuerpo));
+            antes = estado();
+          };
+          if (concurrente) {
+            const batch = t.env.DB.batch.bind(t.env.DB);
+            t.env.DB.batch = async (sentencias) => {
+              t.env.DB.batch = batch;
+              await gastar();
+              return batch(sentencias);
+            };
+          } else await gastar();
+          const r = await cancelarPieza(t.pedir, id, linea.id);
+          assert.equal(r.status, precio === 500 ? 201 : 409, JSON.stringify(r.cuerpo));
+          if (precio === 25000) {
+            assert.deepEqual(estado(), antes!); // Dinero, stock, crédito y autorización: rollback completo.
+          } else {
+            assert.equal(r.cuerpo.devuelto, 500);
+            assert.equal(r.cuerpo.dolarones, 0);
+            const despues = await detalle(t.pedir, id);
+            assert.equal(despues.devuelto, 500);
+            assert.equal(despues.revision, ticket.revision + 1);
+            assert.equal(despues.lineas.find((l: { id:number }) => l.id === linea.id).cancelada_cantidad, 1);
+            assert.equal(despues.devoluciones.length, 1);
+            assert.equal(t.db.prepare('select stock from productos where id=?').get(barato)!.stock, 3);
+            assert.equal(stock(t.db), 48);
+            assert.deepEqual(estado().slice(4), antes!.slice(4)); // Sin retiro ni movimiento cero.
+          }
+        } finally { t.db.close(); }
+      });
+    }
+  }
+}
+
 test('el candado de revision rechaza una cancelacion que leyo un ticket ya cambiado', async () => {
   const { db, pedir } = tienda();
   const id = await vender(pedir);

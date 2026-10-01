@@ -222,15 +222,13 @@ async function sentenciasDeDevolucion(env: Env, p: {
     .first<{ id: string; cliente_id: string; importe: number; restante: number; retirado: number }>();
   if (compra) {
     const retira = Math.max(0, compra.importe - compra.retirado - dolaronesGanados(p.pagadoRestante));
-    sentencias.push(
-      // Si ya se gastó crédito (también desde otra caja), aborta todo.
-      env.DB.prepare(`update dolarones_lotes set restante = case
-        when restante = importe + coalesce((select sum(importe) from dolarones_movimientos
-          where lote_id = dolarones_lotes.id and tipo = 'reverso_compra'), 0)
-        then restante - ? else -1 end where id = ?`).bind(retira, compra.id),
-    );
     if (retira > 0) {
       sentencias.push(
+        // Si ya se gastó crédito (también desde otra caja), aborta todo.
+        env.DB.prepare(`update dolarones_lotes set restante = case
+          when restante = importe + coalesce((select sum(importe) from dolarones_movimientos
+            where lote_id = dolarones_lotes.id and tipo = 'reverso_compra'), 0)
+          then restante - ? else -1 end where id = ?`).bind(retira, compra.id),
         env.DB.prepare(
           `insert into dolarones_movimientos (cliente_id, lote_id, venta_id, tipo, importe, autor, creado_en)
            values (?, ?, ?, 'reverso_compra', ?, ?, ?)`,
