@@ -264,6 +264,7 @@ import {
   renglonTicket, pintarDetalle, formularioPieza, formularioTodo, comprobanteDevolucion, comprobanteCancelacion,
 } from '/ticket.js';
 import { imprimirDevolucion } from '/impresora.js';
+import { codigoDeDigitos } from '/code128.js';
 
 const $ = (id) => document.getElementById(id);
 // Nombres de piezas (los escribe la IA o el admin), de socios y motivos: texto, nunca HTML.
@@ -441,8 +442,9 @@ function buscarPieza(codigo) {
   return undefined;
 }
 
-function agregarCodigo(codigo) {
+function agregarCodigo(leido) {
   if (cobrando) return;
+  const codigo = codigoDeDigitos(leido) ?? leido;
   if (/^D[CP]-/.test(codigo.trim())) {
     $('socio').value = codigo.trim();
     buscarSocio();
@@ -547,7 +549,8 @@ function quitarSocio() {
 
 async function buscarSocio() {
   if (cobrando) return;
-  const q = $('socio').value.trim();
+  // El lector manda vales y codigos de socio solo en digitos (code128.js).
+  const q = codigoDeDigitos($('socio').value) ?? $('socio').value.trim();
   if (!q) return;
   quitarSocio();
   const busqueda = busquedaSocio;
