@@ -45,6 +45,8 @@
 
 <main>
   <div class="barra">
+    <span id="impresora-estado" style="font-size:13px"></span>
+    <button id="conectar-impresora" type="button">Conectar impresora</button>
     <button id="imprimir" type="button">Imprimir seleccionadas</button>
     <button id="todas" class="claro" type="button">Seleccionar todas</button>
     <button id="ninguna" class="claro" type="button">Deseleccionar todas</button>
@@ -56,7 +58,7 @@
   </div>
 
   <p class="ayuda">
-    Prende la impresora de etiquetas antes de imprimir. La primera vez de cada sesión
+    Prende la impresora de etiquetas y aprieta <b>«Conectar impresora»</b> (en Chrome o Edge). La primera vez de cada sesión
     el navegador pregunta cuál es: escoge <b>AE240-bt</b> en la ventana que sale.
     Si esa ventana sale vacía, aprieta <b>«¿No aparece la impresora?»</b>, que enseña
     todos los aparatos Bluetooth cercanos. Ya no hay diálogo de impresión — la etiqueta
@@ -215,14 +217,33 @@ function avisarFalla(error) {
 // La lista filtrada por nombre es la de diario. Esta es la salida para cuando
 // la impresora no sale ahi: enseña todos los aparatos Bluetooth cercanos, que
 // es como la sonda la encontro.
-document.getElementById('otra').addEventListener('click', async () => {
+const estado = document.getElementById('impresora-estado');
+const botonConectar = document.getElementById('conectar-impresora');
+function pintarImpresora() {
+  const lista = etiqueteraLista();
+  estado.textContent = lista ? 'Impresora conectada' : 'Impresora no conectada';
+  estado.style.color = lista ? '#2f7a3a' : '#D72B32';
+  botonConectar.hidden = lista;
+}
+pintarImpresora();
+setInterval(pintarImpresora, 2000);   // el enlace se puede caer solo
+
+// Web Bluetooth solo existe en Chrome/Edge y solo pide permiso desde un clic real.
+async function conectarDesdeClic(cualquiera) {
+  if (!navigator.bluetooth) {
+    resumen.textContent = 'Este navegador no tiene Bluetooth web. Abre esta página en Chrome o Edge, en la computadora que tiene Bluetooth prendido.';
+    return;
+  }
   try {
-    await conectarEtiquetera({ cualquiera: true });
+    await conectarEtiquetera({ cualquiera });
     resumen.textContent = 'Impresora conectada. Ya puedes imprimir.';
   } catch (error) {
     avisarFalla(error);
   }
-});
+  pintarImpresora();
+}
+botonConectar.addEventListener('click', () => conectarDesdeClic(false));
+document.getElementById('otra').addEventListener('click', () => conectarDesdeClic(true));
 
 document.getElementById('detener').addEventListener('click', () => detenerEnvio());
 
@@ -243,6 +264,8 @@ document.getElementById('imprimir').addEventListener('click', async () => {
     } catch (error) {
       avisarFalla(error);
       return;
+    } finally {
+      pintarImpresora();
     }
   }
 
