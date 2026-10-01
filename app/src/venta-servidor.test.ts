@@ -70,6 +70,20 @@ test('la puerta del vendedor deja corregir la existencia, y nada mas de una piez
   assert.equal(permitidaParaVendedor('/api/borradores', 'POST'), true);
 });
 
+test('líneas nulas o no objetos responden 400 sin registrar venta ni descontar stock', async () => {
+  const t = tienda();
+  try {
+    for (const linea of [null, false, 1, 'pieza', [], {}]) {
+      const r = await t.pedir('/api/ventas', { id:crypto.randomUUID(),
+        lineas:[{ producto_id:PRODUCTO, cantidad:1 }, linea], efectivo:25000 });
+      assert.equal(r.status, 400, JSON.stringify({ linea, respuesta:r.cuerpo }));
+      assert.equal(t.db.prepare('select count(*) as n from ventas').get()!.n, 0);
+      assert.equal(t.db.prepare('select count(*) as n from venta_lineas').get()!.n, 0);
+      assert.equal(t.db.prepare('select stock from productos where id=?').get(PRODUCTO)!.stock, 50);
+    }
+  } finally { t.db.close(); }
+});
+
 test('un folio acepta sólo el mismo pedido; el catálogo posterior no altera el reintento', async () => {
   const t = tienda();
   try {

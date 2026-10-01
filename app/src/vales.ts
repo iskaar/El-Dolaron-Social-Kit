@@ -99,16 +99,17 @@ export async function retirarVale(env: Env, ventaId:string, autor:string, ahora:
     .first<{ id:string; importe:number; retirado:number }>();
   if (!vale) return [];
   const retira = Math.max(0, vale.importe - vale.retirado - dolaronesGanados(pagadoRestante, 5));
+  if (retira === 0) return [];
   return [
     // También se comprueba dentro del batch: un canje en otra caja aborta todo.
     env.DB.prepare(`update vales_dolarones set restante = case
       when restante = importe + coalesce((select sum(importe) from vales_movimientos
         where vale_id = vales_dolarones.id and tipo = 'retiro'), 0)
       then restante - ? else -1 end where id = ?`).bind(retira, vale.id),
-    ...(retira > 0 ? [env.DB.prepare(`insert into vales_movimientos (vale_id, venta_id, tipo, importe, autor, creado_en)
+    env.DB.prepare(`insert into vales_movimientos (vale_id, venta_id, tipo, importe, autor, creado_en)
       values (?, ?, 'retiro', ?, ?, ?)
       on conflict (vale_id, venta_id, tipo) do update set importe = importe + excluded.importe,
-        autor = excluded.autor, creado_en = excluded.creado_en`).bind(vale.id, ventaId, -retira, autor, ahora)] : []),
+        autor = excluded.autor, creado_en = excluded.creado_en`).bind(vale.id, ventaId, -retira, autor, ahora),
   ];
 }
 
