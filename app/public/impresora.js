@@ -195,7 +195,8 @@ function partesVale(vale, titulo = 'VALE DOLARONES - SIN REGISTRO') {
   return [
     separador(), centrado(titulo),
     renglonMonto('Saldo del vale', `${(vale.restante / 100).toFixed(2)} D`),
-    linea(`Disponible: ${fechaHora(vale.disponible_desde)}`),
+    linea(Date.parse(vale.disponible_desde) <= Date.parse(vale.creado_en)
+      ? 'Usalo en tu siguiente compra' : `Disponible: ${fechaHora(vale.disponible_desde)}`),
     linea(`Vence: ${fechaHora(vale.vence_en)}`),
     ...(vale.restante > 0 ? [codigoBarrasVale(vale.codigo), centrado(vale.codigo)] : []),
     linea('Conserva el papel. Copias comparten el saldo.'),

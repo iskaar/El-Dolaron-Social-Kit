@@ -142,7 +142,6 @@ test('caja reintenta un canje tras perder la respuesta con el mismo folio, fecha
     const emitida = await t.pedir('/api/ventas', { id: crypto.randomUUID(),
       lineas: [{ producto_id: PRODUCTO, cantidad: 1 }], efectivo: 25000, caja: 'Caja 1' });
     const vale = emitida.cuerpo.vale_emitido;
-    t.db.prepare("update vales_dolarones set disponible_desde = '2000-01-01T00:00:00Z'").run();
     const fuente = readFileSync('public/caja.html', 'utf8');
     const cobrar = fuente.slice(fuente.indexOf('async function cobrar()'), fuente.indexOf('let sincronizando = false;'));
     const respuestas: number[] = [];

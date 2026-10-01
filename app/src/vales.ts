@@ -1,10 +1,10 @@
 import { dolaronesGanados } from '../public/venta.js';
-import { basesListas, codigoAleatorio, disponibleDesde, promocionIniciada } from './dolarones.ts';
+import { basesListas, codigoAleatorio, promocionIniciada } from './dolarones.ts';
 
 const CODIGO = /^DP-[A-Za-z0-9_-]{16}$/;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 export const valesAbiertos = (env: Env, ahora = new Date()) => env.VALES_ABIERTOS === 'si' && basesListas(env) && promocionIniciada(env, ahora);
-type Vale = { id: string; codigo: string; importe: number; restante: number; disponible_desde: string; vence_en: string };
+type Vale = { id: string; codigo: string; importe: number; restante: number; disponible_desde: string; vence_en: string; creado_en: string };
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), {
   status, headers: { 'content-type':'application/json; charset=utf-8', 'cache-control':'no-store' },
 });
@@ -12,13 +12,13 @@ const json = (body: unknown, status = 200) => new Response(JSON.stringify(body),
 // ponytail: el código al portador se conserva para reimprimir desde otra caja.
 // Sólo APIs del personal autorizado lo exponen, no listas, portal ni logs.
 export async function valeDeVenta(env: Env, id: string): Promise<Vale | null> {
-  return env.DB.prepare(`select k.id, k.codigo, k.importe, k.restante, k.disponible_desde, k.vence_en
+  return env.DB.prepare(`select k.id, k.codigo, k.importe, k.restante, k.disponible_desde, k.vence_en, k.creado_en
     from vales_dolarones k join ventas v on v.id = k.venta_id where v.id = ? and v.cancelada = 0`)
     .bind(id).first<Vale>();
 }
 
 export async function valeUsadoEnVenta(env: Env, id: string): Promise<Vale | null> {
-  return env.DB.prepare(`select k.id, k.codigo, k.importe, k.restante, k.disponible_desde, k.vence_en
+  return env.DB.prepare(`select k.id, k.codigo, k.importe, k.restante, k.disponible_desde, k.vence_en, k.creado_en
     from vales_dolarones k join vales_movimientos m on m.vale_id = k.id
     join ventas v on v.id = m.venta_id where m.venta_id = ? and m.tipo = 'canje' and v.cancelada = 0`)
     .bind(id).first<Vale>();
@@ -79,7 +79,7 @@ export async function sentenciasVale(env: Env, p: {
   const ganados = dolaronesGanados(p.total - p.dolarones, 5);
   if (!p.clienteId && valesAbiertos(env, p.ahora) && ganados > 0) {
     emitido = { id:crypto.randomUUID(), codigo:codigoAleatorio('DP'), importe:ganados, restante:ganados,
-      disponible_desde:disponibleDesde(p.ahora), vence_en:new Date(p.ahora.getTime() + 30 * 86_400_000).toISOString() };
+      disponible_desde:ahora, vence_en:new Date(p.ahora.getTime() + 30 * 86_400_000).toISOString(), creado_en:ahora };
     sentencias.push(
       env.DB.prepare(`insert into vales_dolarones
         (id, venta_id, codigo, importe, restante, disponible_desde, vence_en, creado_en) values (?, ?, ?, ?, ?, ?, ?, ?)`)
