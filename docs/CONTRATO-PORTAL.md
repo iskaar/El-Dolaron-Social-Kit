@@ -40,7 +40,46 @@ Ejecutar `app/migracion-016-portal.sql` antes del Worker. Las filas de `premios_
 
 El registro online y la acreditación de llegada responden 409 **antes de crear socio o premio** si D1 contiene regalos anteriores a esta migración sin reconciliar. Hay que revisar esos lotes y ventas antes de encenderla; no ejecutamos reasignación automática. La alta presencial ya no concede premio por número global: personal registra y confirma la llegada explícitamente en `/socios`.
 
-Aplicar migraciones pendientes antes del Worker: `014-minimo-regalo`, `016-portal` y `018-codigo-socio`. La 018 elimina las cuatro columnas del PIN de socios y crea códigos/desafíos; **no elimina PIN de cajeros ni ventas/lotes**. Respaldar D1 y ensayar restauración antes de aplicarla remotamente. Una versión anterior del Worker con PIN no funciona sobre el esquema 018: preparar despliegue coordinado y reversión con respaldo, no desplegar sólo el código viejo. Para instalación limpia, `schema.sql` y todas las `migracion-*.sql` de esta rama en orden numérico; la prueba D1 usa esa secuencia. La migración 017 de descuentos pertenece al PR #120: integrar y verificar descuentos/recibos antes de desplegar esta rama sobre producción.
+La base de `main` (`d864810`) ya incluye las migraciones **015-pin-cajero** y **020-devoluciones-por-pieza**, además de las anteriores. Sobre esa base, aplicar únicamente **016 → 018 → 019 → 021**, en ese orden, antes del Worker integrado. La prueba de actualización en `devoluciones.test.ts` parte de ese esquema con ventas y PIN de cajero; verifica que 020 no depende de las columnas nuevas de 016/018/019/021. Para instalación limpia, aplicar `schema.sql` y todas las `migracion-*.sql` en orden numérico.
+
+Comandos previstos desde `app/`, **documentados, no ejecutados en remoto por A07**:
+
+```sh
+npx wrangler d1 execute el-dolaron --remote --file=migracion-016-portal.sql
+npx wrangler d1 execute el-dolaron --remote --file=migracion-018-codigo-socio.sql
+npx wrangler d1 execute el-dolaron --remote --file=migracion-019-vales.sql
+npx wrangler d1 execute el-dolaron --remote --file=migracion-021-pedido-hash.sql
+```
+
+016 agrega identidad/aceptación y cupos; 018 elimina las cuatro columnas de PIN **de socios** y crea códigos/desafíos, conservando el PIN de cajeros de 015; 019 crea vales; 021 agrega `ventas.pedido_hash` sin cambiar los folios históricos (quedan en `NULL`). Ninguna requiere una migración 017: no existe en este clon. No repetir 015/020 ni las cuatro pendientes sobre una base que ya las tenga. Respaldar D1 y ensayar restauración antes de la ejecución autorizada. Coordinar migraciones y Worker: código anterior que use PIN de socio no funciona después de 018; la reversión necesita respaldo, no sólo desplegar el Worker viejo. Descuentos #120 siguen siendo una revisión aparte antes de producción.
+
+### Cierre por defecto y variables de activación
+
+`wrangler.jsonc` no define las variables siguientes. Con todas ausentes, no hay alta presencial, registro público, configuración Firebase/SMS ni emisión/acumulación nueva; sin `HOST_PORTAL` las APIs del portal responden 404. La caja monetaria conserva las ventas, existencias, bandas, cancelaciones/corte y PIN de cajero de `main`, sin necesitar Firebase.
+
+| Variables | Puerta que controlan | Evidencia en este clon |
+| --- | --- | --- |
+| `BASES_APROBADAS_VERSION`, `PORTAL_BASES_TEXTO`, `PORTAL_AVISO_TEXTO` | Alta presencial y textos legales: versión no vacía que no empiece con `borrador`, bases y aviso no vacíos. | `app/src/dolarones.ts:87` y `:135` |
+| `PROMOCION_INICIO` | Instante UTC válido alcanzado según el servidor: acumulación por compras, emisión de vales y apertura del registro/promoción. | `app/src/dolarones.ts:92` y `:246` |
+| `PORTAL_REGISTRO_ABIERTO=si` | Registro/promoción pública, además de bases e inicio; no habilita SMS por sí sola. | `app/src/portal.ts:13` |
+| `FIREBASE_PROJECT_ID`, `FIREBASE_WEB_API_KEY` | Configuración y validación de identidad del portal; proveedor Phone, dominio autorizado, cuotas y presupuesto de SMS requieren configuración externa aprobada. | `app/src/portal.ts:21` y `:203`; sin configuración, el frontend se detiene en `app/public/portal.js:206` |
+| `FIREBASE_AUTH_DOMAIN` | Dominio de autenticación opcional; por defecto `<projectId>.firebaseapp.com`. | `app/src/portal.ts:206` y `app/src/worker.ts:1147` |
+| `HOST_PORTAL` | Host público aislado; también necesita DNS/ruta autorizados. | `app/src/worker.ts:1135`; rutas en `app/wrangler.jsonc:43` |
+| `VALES_ABIERTOS=si` | Emisión nueva de papel, además de bases e inicio. | `app/src/vales.ts:6` y `:80` |
+
+**Matiz de canje:** sin vales emitidos, el canje falla cerrado (403 al buscar / 409 al cobrar). `VALES_ABIERTOS` controla emisión, **no bloquea vales previos válidos**, tampoco al apagar la promoción o las bases; #134 conserva su canje/reimpresión/cancelación hasta vencimiento. No interpretar estas variables como un interruptor de emergencia del saldo ya prometido. A06 debe revisar ese comportamiento; si Isaac requiere suspender también vales vigentes, debe decidirlo expresamente antes de cambiarlo.
+
+La prueba de configuración ausente usa ventas monetarias y una base sin vales; no certifica la configuración remota. «La caja vende igual» se refiere a precios del catálogo, pago, stock, bandas, PIN y corte. La cadena cambia el transporte del cobro monetario: intenta confirmar con un timeout de cinco segundos y conserva la venta en cola si pierde la respuesta. El folio y `creado_en` se mantienen juntos al reintentar un canje, para no rechazar el mismo pedido por la huella de 021. Ensayar latencia y pérdida de respuesta en las cajas físicas antes del despliegue.
+
+### Entrega local A07 — 01/10/2026
+
+Estado: listo para revisión; Claude completa el merge en Git.
+
+Hecho: merge de `origin/main` (`d864810`) sobre `99e4597`, sin rebase. Conflicto textual resuelto conservando filas que abren el desglose y colocando «Imprimir vale» en `pintarDetalle`, con avisos dentro de la ventana. Cancelar por pieza un pago con vale sigue devolviendo 409; la emisión se recalcula al devolver piezas y el crédito gastado aborta toda cancelación. Cancelación completa reconoce retiros previos de vale y socio. `registrarVenta` conserva huella y recuperación de reintento; caja conserva la fecha del pedido al reintentar para no provocar un 409 espurio.
+
+Validación: `npm test` pasa 178/178 pruebas (8 nuevas frente a las 170 iniciales) y `npm run typecheck` pasa. Incluye Worker/SQLite de dinero, stock, saldo, reintento y carrera entre cajas; actualización desde main con 020 aplicada; configuración cerrada; detalle/impresión y respuesta perdida en caja. Sintaxis del script de caja, ausencia de marcadores y `git diff --check` correctos. Los 12 assets pasan una comprobación equivalente con Node; `python tools/validate_assets.py` no se pudo ejecutar porque no hay intérprete Python disponible en este entorno. Sin migraciones remotas ni activación de servicios.
+
+Pendiente: por instrucción de Isaac, A07 no ejecuta git de escritura. El índice aún marca `app/public/caja.html` como conflicto aunque el archivo no tiene marcadores; Claude debe marcarlo resuelto, revisar el diff y completar el commit, por ejemplo `Integra main y corrige cancelaciones y reintentos de Dolarones`. Claude/CI debe ejecutar `python tools/validate_assets.py` con un intérprete disponible y publicar el contexto en el Issue/PR correspondiente. No hacer push/PR/despliegue en esta entrega. A06 debe revisar las restricciones SQL dentro del batch y el retiro acumulado del vale (cada pieza queda en `devoluciones`); falta ensayo autorizado en D1/sandbox y con dos cajas, lector e impresora físicos. Isaac mantiene pendiente la autorización comercial/legal y cualquier suspensión de vales vigentes.
 
 ## Configuración pendiente
 
@@ -58,8 +97,9 @@ La elegibilidad de compras para acumular se decide con la hora del servidor cuan
 - `DP-…` es un identificador aleatorio de 96 bits, no un monto modificable. D1 conserva el código legible **sólo para reimpresión autorizada del personal**, con venta emisora, importe, restante y vigencia. Esto difiere del código temporal del socio, del que sólo se conserva hash. No exponer códigos de papel en logs, listas de ventas, URLs, exports públicos ni portal. Quien tenga el papel o una copia puede gastar; las copias comparten saldo, no generan crédito adicional.
 - Disponible desde la siguiente medianoche de la tienda, como lo ganado por compras. Vence **exactamente 30 días desde la emisión confirmada del servidor** (UTC), no al final del día 30. El ticket imprime disponibilidad y hora de vencimiento en America/Mexico_City. Gasto parcial, reimpresión o devolución no amplían el plazo. El regalo de apertura y su mínimo de $1,000 no se mezclan con estos vales ganados.
 - Un vale o una membresía por ticket; combinar varios o transferir el vale a una cuenta no está implementado. «Usar máximo» aplica el menor de total, saldo elegible y máximo autorizado. Para papel, el máximo es su saldo actual; para socios respeta la autorización del portal. Elegir por teléfono no habilita ese botón ni canje.
-- Emisión, canje, movimiento, venta y stock se confirman en un batch. No imprimir barcode gastable antes de respuesta confirmada; un timeout/red caída conserva el mismo ID en la cola y el ticket indica que la elegibilidad del vale aún no se conoce. Al sincronizar, la caja guarda si el servidor emitió el vale y ofrece imprimirlo por folio. «Ventas de hoy → Imprimir vale» o «Reimprimir vale → folio Venta» recupera el mismo vale, incluso de otro día. Una venta rechazada no genera vale; revisar antes de devolver mercancía o dinero.
+- Emisión, canje, movimiento, venta y stock se confirman en un batch. No imprimir barcode gastable antes de respuesta confirmada; un timeout/red caída conserva el mismo ID en la cola y el ticket indica que la elegibilidad del vale aún no se conoce. Al sincronizar, la caja guarda si el servidor emitió el vale y ofrece imprimirlo por folio. «Ventas de hoy → abrir ticket → Imprimir vale» o «Reimprimir vale → folio Venta» recupera el mismo vale, incluso de otro día. Una venta rechazada no genera vale; revisar antes de devolver mercancía o dinero.
 - Reimprimir devuelve saldo actual y vencimiento original, no el importe inicial gastado. Cancelar el canje restaura al mismo vale sin ampliar vida; cancelar la compra emisora retira su vale. Si aún tiene crédito gastado, responde 409 y revierte cancelación/stock/dinero: resolución presencial, no ajuste silencioso. Esto no define derechos legales de devolución; completar el procedimiento con Isaac/abogado antes de lanzar.
+- Un ticket pagado con vale (`dolarones > 0`, sin socio) sigue rechazando cancelación por pieza con 409 «cancélalo completo»; sólo la cancelación completa restaura ese saldo. En una compra emisora pagada en dinero, devolver piezas recalcula lo ganado sobre el dinero que queda cobrado (5 D por bloque), retira el exceso y conserva código, importe original y vencimiento. Los retiros se acumulan en su movimiento `retiro`; `devoluciones` conserva cada pieza, autor y motivo. Si el crédito emitido sigue gastado, incluso por un canje concurrente, se aborta el batch entero. Cancelar después todo lo restante reconoce esos retiros previos sin devolver dinero/stock dos veces; la misma regla de crédito gastado se aplica a socios (#135).
 
 ### API del personal, aislada del host público
 

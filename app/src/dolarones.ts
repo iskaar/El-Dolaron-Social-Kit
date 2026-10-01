@@ -270,8 +270,10 @@ export async function sentenciasDeVenta(env: Env, p: {
  * vencido se pierde; la restitucion de 30 dias del plan espera aprobacion.
  */
 export async function sentenciasDeCancelacion(env: Env, ventaId: string, autor: string, ahora: string): Promise<D1PreparedStatement[]> {
+  // Por lote, lo canjeado menos lo que ya regreso por piezas canceladas sueltas (Issue #138).
   const { results: canjes } = await env.DB.prepare(
-    `select cliente_id, lote_id, -importe as importe from dolarones_movimientos where venta_id = ? and tipo = 'canje'`,
+    `select cliente_id, lote_id, -sum(importe) as importe from dolarones_movimientos
+     where venta_id = ? and tipo in ('canje', 'reverso_canje') group by cliente_id, lote_id having sum(importe) < 0`,
   )
     .bind(ventaId)
     .all<{ cliente_id: string; lote_id: string; importe: number }>();
@@ -289,8 +291,12 @@ export async function sentenciasDeCancelacion(env: Env, ventaId: string, autor: 
        select cliente_id, id, venta_id, 'reverso_compra', -restante, ?, ? from dolarones_lotes
        where venta_id = ? and restante > 0`,
     ).bind(autor, ahora, ventaId),
-    // -1 si ya se gasto algo: lote_no_negativo aborta la cancelacion completa.
-    env.DB.prepare('update dolarones_lotes set restante = case when restante = importe then 0 else -1 end where venta_id = ?').bind(ventaId),
+    // La bitácora ya incluye el retiro final y los retiros por piezas previas.
+    // Si no cubren el importe original, hay crédito gastado: abortar todo.
+    env.DB.prepare(`update dolarones_lotes set restante = case
+      when importe + coalesce((select sum(importe) from dolarones_movimientos
+        where lote_id = dolarones_lotes.id and tipo = 'reverso_compra'), 0) = 0
+      then 0 else -1 end where venta_id = ?`).bind(ventaId),
   ];
 }
 

@@ -44,6 +44,12 @@
   .exportar a { display: inline-block; border: 1px solid var(--linea); background: #fff; color: #1a1f2b;
     border-radius: 8px; padding: 9px 14px; font-size: 13px; text-decoration: none; font-weight: 600; }
   .nota { font-size: 12px; color: #5b6478; margin-top: 8px; line-height: 1.4; }
+  dialog { border: 0; border-radius: 14px; padding: 18px 20px; width: min(600px, 94vw); max-height: 92vh; }
+  dialog::backdrop { background: #16366b99; }
+  dialog h2 { margin: 0 0 6px; font-size: 20px; color: var(--azul); }
+  dialog .acciones { display: flex; justify-content: flex-end; margin-top: 14px; }
+  dialog .acciones button { padding: 10px 16px; font-size: 15px; border-radius: 10px; border: 0; cursor: pointer;
+    background: var(--azul); color: #fff; font-weight: 700; }
 </style>
 </head>
 <body>
@@ -66,6 +72,15 @@
   <div class="panel">
     <h2>Ventas por día</h2>
     <div id="por-dia"></div>
+  </div>
+
+  <div class="panel">
+    <h2>Tickets del día</h2>
+    <div class="fondo-caja">
+      <input id="dia-tickets" type="date" style="width:auto">
+    </div>
+    <div id="tickets-dia" style="max-height: 360px; overflow-y: auto"></div>
+    <p class="nota">Toca un ticket para ver sus piezas y lo que se devolvió. Las piezas se cancelan desde la caja.</p>
   </div>
 
   <div class="dos-columnas">
@@ -142,7 +157,13 @@
   </div>
 </main>
 
+<dialog id="dialogo-ticket" class="ventana-ticket">
+  <div id="ticket-contenido"></div>
+  <div class="acciones"><button id="ticket-cerrar" type="button">Cerrar</button></div>
+</dialog>
+
 <script type="module">
+import { renglonTicket, pintarDetalle } from '/ticket.js';
 const $ = (id) => document.getElementById(id);
 // Nombres de piezas y motivos de cancelacion los escriben otras personas: texto, nunca HTML.
 // Hora de la tienda (la del navegador), no UTC como se guarda.
@@ -297,7 +318,38 @@ $('rango').addEventListener('click', (e) => {
   cargar();
 });
 
+/* ---------- tickets de un dia, con su desglose (Issue #138) ---------- */
+
+// Hoy en la hora de la tienda (UTC-6 fijo), como el servidor.
+$('dia-tickets').value = new Date(Date.now() - 6 * 3_600_000).toISOString().slice(0, 10);
+
+async function cargarTickets() {
+  try {
+    const tickets = await (await fetch(`/api/ventas?lista=1&dia=${$('dia-tickets').value}`)).json();
+    $('tickets-dia').innerHTML = tickets.length === 0
+      ? '<div class="vacio">Sin ventas ese día.</div>'
+      : tickets.map(renglonTicket).join('');
+  } catch {
+    $('tickets-dia').innerHTML = '<div class="vacio">No se pudieron cargar los tickets.</div>';
+  }
+}
+$('dia-tickets').addEventListener('change', cargarTickets);
+
+$('tickets-dia').addEventListener('click', async (e) => {
+  const fila = e.target.closest('[data-ticket]');
+  if (!fila) return;
+  $('ticket-contenido').innerHTML = '<p class="nota">Cargando…</p>';
+  $('dialogo-ticket').showModal();
+  const r = await fetch(`/api/ventas/${fila.dataset.ticket}`);
+  const cuerpo = await r.json().catch(() => ({}));
+  $('ticket-contenido').innerHTML = r.ok
+    ? pintarDetalle(cuerpo)
+    : `<p class="nota" style="color:var(--rojo)">${escapar(cuerpo.error ?? 'No se pudo abrir el ticket.')}</p>`;
+});
+$('ticket-cerrar').addEventListener('click', () => $('dialogo-ticket').close());
+
 pintarRango();
+cargarTickets();
 await cargar();
 </script>
 </body>

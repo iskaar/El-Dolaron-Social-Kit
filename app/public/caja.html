@@ -104,6 +104,9 @@
   #corte-resumen .falta td { color: var(--rojo); font-weight: 800; }
   #corte-resumen .sobra td { color: #b26b00; font-weight: 800; }
   @media (max-width: 820px) { main { grid-template-columns: 1fr; } }
+  /* El panel de cobro crece con socio, Dolarones y «Ventas de hoy»: con scroll propio no se mete
+     debajo del pie (impresora), que se robaba los clics de la lista. */
+  @media (min-width: 821px) { #cobro { overflow-y: auto; } }
 </style>
 <script src="/cajero.js"></script>
 </head>
@@ -132,7 +135,7 @@
     <div id="ticket"></div>
   </section>
 
-  <section class="panel">
+  <section class="panel" id="cobro">
     <div id="total">$0</div>
     <div id="piezas">0 piezas</div>
     <div id="a-pagar"></div>
@@ -172,7 +175,7 @@
     <div id="vales-conciliados" role="status"></div>
 
     <details id="tickets">
-      <summary>Ventas de hoy</summary>
+      <summary>Ventas de hoy (toca un ticket para ver el desglose)</summary>
       <div id="lista-tickets"></div>
     </details>
     <details style="margin-top:10px">
@@ -243,12 +246,24 @@
   </div>
 </dialog>
 
+<dialog id="dialogo-ticket" class="ventana-ticket">
+  <div id="ticket-contenido"></div>
+  <div class="aviso-dialogo" id="ticket-aviso"></div>
+  <div class="acciones">
+    <button id="ticket-cerrar" type="button">Cerrar</button>
+  </div>
+</dialog>
+
 <script type="module">
 import { totales, agregar, efectivoAlcanza, dolaronesGanados, saldoCanjeable, maximoCanje, MINIMO_REGALO } from '/venta.js';
 import {
   reconectarImpresora, conectarImpresora, impresoraLista, imprimirTicket, abrirCajon, explicarErrorUsb, errorImpresora,
   imprimirCorte, imprimirRetiro, imprimirVale,
 } from '/impresora.js';
+import {
+  renglonTicket, pintarDetalle, formularioPieza, formularioTodo, comprobanteDevolucion, comprobanteCancelacion,
+} from '/ticket.js';
+import { imprimirDevolucion } from '/impresora.js';
 
 const $ = (id) => document.getElementById(id);
 // Nombres de piezas (los escribe la IA o el admin), de socios y motivos: texto, nunca HTML.
@@ -261,6 +276,7 @@ let lineas = [];
 // red, reusan el mismo id en vez de crear una segunda venta. Cambiar el ticket
 // (agregar, quitar, cancelar) lo invalida: eso ya es una venta distinta.
 let idVenta = null;
+let creadoEnVenta = null;
 let cobrando = false;
 // Socio de la venta en curso: { id, numero, nombre, disponible, por_liberar, regalo_disponible } o null.
 let socio = null;
@@ -639,14 +655,17 @@ async function cobrar() {
   cobrando = true;
   pintar();
   try {
-    idVenta ??= crypto.randomUUID();
+    if (!idVenta) {
+      idVenta = crypto.randomUUID();
+      creadoEnVenta = new Date().toISOString();
+    }
     const venta = {
       id: idVenta,
       lineas: lineas.map(({ codigo, nombre, precio, cantidad, producto_id }) =>
         ({ codigo, nombre, precio, cantidad, producto_id })),
       forma_pago: forma,
       efectivo: forma === 'efectivo' ? efectivo : 0,
-      creado_en: new Date().toISOString(),
+      creado_en: creadoEnVenta,
       cliente_id: socio?.id ?? null,
       dolarones: usados,
       caja: cajaActual(),
@@ -814,7 +833,7 @@ $('rechazadas').addEventListener('click', async (e) => {
   }
 });
 
-async function reimprimirValeDeVenta(id, boton) {
+async function reimprimirValeDeVenta(id, boton, aviso = $('aviso')) {
   boton.disabled = true;
   try {
     const r = await fetch(`/api/ventas/${encodeURIComponent(id)}/vale`, { method:'POST' });
@@ -822,8 +841,8 @@ async function reimprimirValeDeVenta(id, boton) {
     if (!r.ok) throw new Error(vale.error || 'No se encontró el vale.');
     const impreso = await imprimirVale(vale);
     pintarImpresora();
-    $('aviso').textContent = impreso ? 'Vale reimpreso: mismo saldo y vencimiento.' : 'Revisa la impresora e intenta otra vez.';
-  } catch (error) { $('aviso').textContent = error.message || 'Sin red: no se pudo traer el vale.'; }
+    aviso.textContent = impreso ? 'Vale reimpreso: mismo saldo y vencimiento.' : 'Revisa la impresora e intenta otra vez.';
+  } catch (error) { aviso.textContent = error.message || 'Sin red: no se pudo traer el vale.'; }
   finally { boton.disabled = false; }
 }
 $('vale-por-folio').addEventListener('click', () => reimprimirValeDeVenta($('vale-folio').value.trim(), $('vale-por-folio')));
@@ -853,67 +872,147 @@ async function cargarTickets() {
     const ventas = await (await fetch('/api/ventas?lista=1')).json();
     $('lista-tickets').innerHTML = ventas.length === 0
       ? '<p style="font-size:13px;color:#78839a">Todavía no hay ventas hoy.</p>'
-      : ventas.map((v) => `
-        <div class="ticket ${v.cancelada ? 'cancelada' : ''}">
-          <div>
-            <b>${pesos(v.total)}</b> · ${new Date(v.creado_en).toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' })}
-            <div class="piezas">${escapar(v.piezas)}</div>
-          </div>
-          ${v.cancelada ? '<span>cancelada</span>' : `<div><button type="button" data-vale="${v.id}">Imprimir vale</button><button type="button" data-cancelar="${v.id}">Cancelar</button></div>`}
-        </div>`).join('');
+      : ventas.map(renglonTicket).join('');
   } catch {
     $('lista-tickets').innerHTML = '<p style="font-size:13px;color:#D72B32">Sin red: para cancelar una venta hace falta conexión.</p>';
   }
 }
 
 $('tickets').addEventListener('toggle', cargarTickets);
-// Cancelar pide el motivo en la propia fila (nada de prompt()/confirm() nativos,
-// que congelan la pestana): un clic abre el campo, otro clic ya confirmado envia.
-$('lista-tickets').addEventListener('click', async (e) => {
-  if (e.target.dataset?.vale) {
-    await reimprimirValeDeVenta(e.target.dataset.vale, e.target);
-    return;
-  }
-  const idCancelar = e.target.dataset?.cancelar;
-  const idConfirmar = e.target.dataset?.confirmarCancelar;
-  const idVolver = e.target.dataset?.volverCancelar;
 
-  if (idCancelar) {
-    const fila = e.target.closest('.ticket');
-    fila.innerHTML = `
-      <input type="text" class="motivo-cancelacion" placeholder="Motivo de la cancelación"
-        style="grid-column:1/-1;padding:8px;border:1px solid var(--linea);border-radius:8px;font-size:13px">
-      <div style="grid-column:1/-1;display:flex;gap:6px;justify-content:flex-end">
-        <button type="button" data-volver-cancelar="${idCancelar}"
-          style="border-color:var(--linea);color:#5b6478">Volver</button>
-        <button type="button" data-confirmar-cancelar="${idCancelar}">Confirmar cancelación</button>
-      </div>`;
-    fila.querySelector('.motivo-cancelacion').focus();
+/* ---------- ventana del ticket: desglose y cancelacion por pieza (Issue #138) ---------- */
+
+// Ticket abierto en la ventana, y el id de la cancelacion en curso: se genera
+// al abrir el formulario, asi un doble clic o un reintento no devuelven dos veces.
+let ticketAbierto = null;
+let idCancelacion = null;
+
+$('lista-tickets').addEventListener('click', (e) => {
+  const fila = e.target.closest('[data-ticket]');
+  if (fila) abrirTicket(fila.dataset.ticket);
+});
+
+async function abrirTicket(id) {
+  $('ticket-aviso').textContent = '';
+  $('ticket-contenido').innerHTML = '<p class="nota">Cargando…</p>';
+  if (!$('dialogo-ticket').open) $('dialogo-ticket').showModal();
+  try {
+    const r = await fetch(`/api/ventas/${id}`);
+    const cuerpo = await r.json();
+    if (!r.ok) throw new Error(cuerpo.error ?? 'No se pudo abrir el ticket.');
+    ticketAbierto = cuerpo;
+    $('ticket-contenido').innerHTML = pintarDetalle(cuerpo, { editable: true });
+  } catch (error) {
+    $('ticket-contenido').innerHTML = `<p class="nota" style="color:#D72B32">${escapar(error.message || 'Sin red: para ver el ticket hace falta conexión.')}</p>`;
+  }
+}
+
+$('ticket-cerrar').addEventListener('click', () => $('dialogo-ticket').close());
+$('dialogo-ticket').addEventListener('close', () => { ticketAbierto = null; idCancelacion = null; $('codigo').focus(); });
+
+// Cancelar pide el motivo dentro de la ventana (nada de prompt()/confirm() nativos,
+// que congelan la pestana): un clic abre el campo, otro clic ya confirmado envia.
+$('ticket-contenido').addEventListener('click', async (e) => {
+  const boton = e.target.closest('button');
+  if (!boton || !ticketAbierto) return;
+  const d = boton.dataset;
+
+  if (d.imprimirVale !== undefined) {
+    await reimprimirValeDeVenta(ticketAbierto.id, boton, $('ticket-aviso'));
     return;
   }
-  if (idVolver) { await cargarTickets(); return; }
-  if (idConfirmar) {
-    const fila = e.target.closest('.ticket');
-    const campoMotivo = fila.querySelector('.motivo-cancelacion');
+
+  if (d.cancelarLinea || d.cancelarTodo !== undefined) {
+    cerrarFormularios();
+    idCancelacion = crypto.randomUUID();
+    const destino = d.cancelarLinea ? $(`form-linea-${d.cancelarLinea}`) : $('form-todo');
+    const celda = d.cancelarLinea ? destino.firstElementChild : destino;
+    celda.innerHTML = d.cancelarLinea ? formularioPieza(d.cancelarLinea, Number(d.quedan)) : formularioTodo();
+    destino.hidden = false;
+    celda.querySelector('.motivo-cancelar').focus();
+    return;
+  }
+  if (d.volver !== undefined) { cerrarFormularios(); return; }
+  if (d.imprimirDevolucion !== undefined || d.imprimirCancelacion !== undefined) {
+    $('ticket-aviso').textContent = '';
+    boton.disabled = true;
+    await imprimirComprobante(d.imprimirCancelacion !== undefined
+      ? comprobanteCancelacion(ticketAbierto)
+      : comprobanteDevolucion(ticketAbierto, Number(d.imprimirDevolucion)));
+    boton.disabled = false;
+    return;
+  }
+
+  if (d.confirmarLinea || d.confirmarTodo !== undefined) {
+    const form = boton.closest('.form-cancelar');
+    const campoMotivo = form.querySelector('.motivo-cancelar');
     const motivo = campoMotivo.value.trim();
     if (!motivo) { campoMotivo.style.borderColor = 'var(--rojo)'; campoMotivo.focus(); return; }
-    if (!exigirCaja()) return;
-    e.target.disabled = true;
+    const campoCantidad = form.querySelector('.cantidad-cancelar');
+    const cantidad = campoCantidad ? Number(campoCantidad.value) : 1;
+    if (campoCantidad && (!Number.isInteger(cantidad) || cantidad < 1 || cantidad > Number(campoCantidad.max))) {
+      campoCantidad.style.borderColor = 'var(--rojo)'; campoCantidad.focus(); return;
+    }
+    if (!cajaActual()) {
+      $('ticket-aviso').textContent = 'Elige arriba qué caja es esta computadora.';
+      $('ticket-aviso').style.color = '#D72B32';
+      return;
+    }
+    boton.disabled = true;
     // La caja donde se devuelve el dinero: su corte cuenta la devolucion.
-    const r = await fetch(`/api/ventas/${idConfirmar}/cancelar`, {
-      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ motivo, caja: cajaActual() }),
-    });
-    const cuerpo = await r.json();
-    $('aviso').textContent = r.ok
-      ? `Venta cancelada. Devuelve ${pesos(cuerpo.devuelto ?? 0)} y regresa la pieza al anaquel.`
+    const ruta = d.confirmarLinea
+      ? `/api/ventas/${ticketAbierto.id}/lineas/${d.confirmarLinea}/cancelar`
+      : `/api/ventas/${ticketAbierto.id}/cancelar`;
+    let r, cuerpo;
+    try {
+      r = await fetch(ruta, {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ id: idCancelacion, cantidad, motivo, caja: cajaActual() }),
+      });
+      cuerpo = await r.json();
+    } catch {
+      boton.disabled = false;
+      $('ticket-aviso').textContent = 'Sin red: no se pudo confirmar la cancelación. Reabre el ticket antes de devolver dinero o mercancía.';
+      $('ticket-aviso').style.color = '#D72B32';
+      return;
+    }
+    const pieza = d.confirmarLinea ? (cantidad > 1 ? 'las piezas' : 'la pieza') : 'las piezas';
+    $('ticket-aviso').textContent = r.ok
+      ? `${d.confirmarLinea ? 'Pieza cancelada' : 'Ticket cancelado'}. Devuelve ${pesos(cuerpo.devuelto ?? 0)} y regresa ${pieza} al anaquel.`
         + (cuerpo.dolarones ? ` Los ${dolares(cuerpo.dolarones)} regresaron al socio o al mismo vale, con su vencimiento original.` : '')
       : (cuerpo.error ?? 'No se pudo cancelar.');
-    $('aviso').style.color = r.ok ? '#1f7a4d' : '#D72B32';
+    $('ticket-aviso').style.color = r.ok ? '#1f7a4d' : '#D72B32';
+    idCancelacion = null;
+    const aviso = $('ticket-aviso').textContent;
+    await abrirTicket(ticketAbierto.id);
+    $('ticket-aviso').textContent = aviso;
+    // El comprobante sale solo la primera vez; un reenvio (duplicada, ya_estaba) se reimprime con su boton.
+    if (r.ok && !cuerpo.duplicada && !cuerpo.ya_estaba && ticketAbierto) {
+      const i = ticketAbierto.devoluciones.findIndex((x) => x.id === cuerpo.id);
+      if (!d.confirmarLinea || i >= 0) {
+        await imprimirComprobante(d.confirmarLinea ? comprobanteDevolucion(ticketAbierto, i) : comprobanteCancelacion(ticketAbierto));
+      }
+    }
     await cargarTickets();
     await actualizarCorte();
     await cargarCatalogo();          // la pieza devuelta vuelve a tener existencia
   }
 });
+
+/** Hoja de la devolucion para que el cliente firme; se guarda con el corte. */
+async function imprimirComprobante(datos) {
+  const ok = await imprimirDevolucion(datos);
+  const aviso = $('ticket-aviso');
+  aviso.textContent = `${aviso.textContent} ${ok
+    ? 'Comprobante impreso: que lo firme el cliente y guárdalo con el corte.'
+    : `No se imprimió el comprobante (${errorImpresora() || 'impresora no conectada'}). Conéctala y usa «Imprimir comprobante».`}`.trim();
+  if (!ok) aviso.style.color = '#D72B32';
+  pintarImpresora();
+}
+
+function cerrarFormularios() {
+  for (const f of $('ticket-contenido').querySelectorAll('.form-linea, #form-todo')) f.hidden = true;
+}
 
 // Sin importes a la vista: el conteo del corte es ciego (Issue #100). El dueno
 // ve el dinero en /reportes.

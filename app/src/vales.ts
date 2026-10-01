@@ -91,17 +91,34 @@ export async function sentenciasVale(env: Env, p: {
   return { ok:true, sentencias, emitido };
 }
 
+/** Retira lo ganado de más; importe original y vencimiento quedan intactos. */
+export async function retirarVale(env: Env, ventaId:string, autor:string, ahora:string, pagadoRestante = 0): Promise<D1PreparedStatement[]> {
+  const vale = await env.DB.prepare(`select k.id, k.importe,
+    coalesce((select -sum(importe) from vales_movimientos where vale_id = k.id and tipo = 'retiro'), 0) as retirado
+    from vales_dolarones k where k.venta_id = ?`).bind(ventaId)
+    .first<{ id:string; importe:number; retirado:number }>();
+  if (!vale) return [];
+  const retira = Math.max(0, vale.importe - vale.retirado - dolaronesGanados(pagadoRestante, 5));
+  return [
+    // También se comprueba dentro del batch: un canje en otra caja aborta todo.
+    env.DB.prepare(`update vales_dolarones set restante = case
+      when restante = importe + coalesce((select sum(importe) from vales_movimientos
+        where vale_id = vales_dolarones.id and tipo = 'retiro'), 0)
+      then restante - ? else -1 end where id = ?`).bind(retira, vale.id),
+    ...(retira > 0 ? [env.DB.prepare(`insert into vales_movimientos (vale_id, venta_id, tipo, importe, autor, creado_en)
+      values (?, ?, 'retiro', ?, ?, ?)
+      on conflict (vale_id, venta_id, tipo) do update set importe = importe + excluded.importe,
+        autor = excluded.autor, creado_en = excluded.creado_en`).bind(vale.id, ventaId, -retira, autor, ahora)] : []),
+  ];
+}
+
 export async function cancelarVales(env: Env, ventaId:string, autor:string, ahora:string): Promise<D1PreparedStatement[]> {
   const { results:canjes } = await env.DB.prepare(`select vale_id, -importe as importe from vales_movimientos
     where venta_id = ? and tipo = 'canje'`).bind(ventaId).all<{ vale_id:string; importe:number }>();
   return [
     // Una compra emisora con crédito aún gastado requiere resolución, no crear
     // dinero al cancelar ni retirar silenciosamente una deuda del cliente.
-    env.DB.prepare(`update vales_dolarones set restante = case when restante = importe then 0 else -1 end where venta_id = ?`)
-      .bind(ventaId),
-    env.DB.prepare(`insert into vales_movimientos (vale_id, venta_id, tipo, importe, autor, creado_en)
-      select id, venta_id, 'retiro', -importe, ?, ? from vales_dolarones where venta_id = ?`)
-      .bind(autor, ahora, ventaId),
+    ...(await retirarVale(env, ventaId, autor, ahora)),
     ...canjes.flatMap((c) => [
       env.DB.prepare('update vales_dolarones set restante = restante + ? where id = ?').bind(c.importe, c.vale_id),
       env.DB.prepare(`insert into vales_movimientos (vale_id, venta_id, tipo, importe, autor, creado_en)
