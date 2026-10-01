@@ -20,11 +20,12 @@ function portalDePrueba() {
   env.FIREBASE_PROJECT_ID = 'prueba-firebase';
   env.FIREBASE_WEB_API_KEY = 'clave-de-prueba';
   const fetchOriginal = globalThis.fetch;
-  let validSince = 0;
+  // Como Google: una cuenta nunca revocada no trae validSince.
+  let validSince: number | undefined;
   globalThis.fetch = async (_url, options) => {
     const t = JSON.parse(String(options?.body ?? '{}')).idToken as string;
     const claims = JSON.parse(Buffer.from(t.split('.')[1], 'base64url').toString()) as { sub: string; phone_number: string };
-    return Response.json({ users: [{ localId: claims.sub, phoneNumber: claims.phone_number, validSince: String(validSince) }] });
+    return Response.json({ users: [{ localId: claims.sub, phoneNumber: claims.phone_number, ...(validSince === undefined ? {} : { validSince: String(validSince) }) }] });
   };
   const llamar = async (ruta: string, auth: string, body?: unknown, method = 'GET') => {
     const response = await worker.fetch!(new Request(`https://portal.prueba${ruta}`, {
@@ -36,7 +37,7 @@ function portalDePrueba() {
   const registrar = (uid: string, phone: string) => llamar('/api/portal/registro', token(uid, phone), {
     nombre: 'Cliente', acepta_bases: true, declara_mayor_edad:true, bases_version: 'prueba-1',
   }, 'POST');
-  return { db, env, pedir, llamar, registrar, setValidSince: (v: number) => { validSince = v; },
+  return { db, env, pedir, llamar, registrar, setValidSince: (v: number | undefined) => { validSince = v; },
     cerrar: () => { globalThis.fetch = fetchOriginal; db.close(); } };
 }
 
