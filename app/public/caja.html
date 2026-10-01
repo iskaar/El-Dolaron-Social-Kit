@@ -49,6 +49,15 @@
     background: #fff; color: var(--azul); border-radius: 10px; cursor: pointer; }
   #cancelar { width: 100%; margin-top: 8px; padding: 10px; font-size: 14px; border: 1px solid var(--rojo);
     background: #fff; color: var(--rojo); border-radius: 10px; cursor: pointer; }
+  #pedir-descuento { width: 100%; margin-top: 8px; padding: 10px; font-size: 14px; border: 1px solid var(--azul);
+    background: #fff; color: var(--azul); border-radius: 10px; cursor: pointer; }
+  #descuento-form { display: grid; gap: 8px; margin-top: 8px; }
+  #descuento-form[hidden] { display: none; }
+  #descuento-form input, #descuento-form select { padding: 12px; font-size: 16px; border: 1px solid var(--linea); border-radius: 10px; }
+  #descuento-form button { padding: 10px; font-size: 14px; border: 1px solid var(--azul); border-radius: 10px;
+    background: var(--azul); color: #fff; cursor: pointer; }
+  #descuento-form button.claro { background: #fff; color: var(--azul); }
+  #descuento-estado { font-size: 14px; margin-top: 6px; }
   #aviso { min-height: 20px; font-size: 14px; margin-top: 8px; }
   #rechazadas:not(:empty) { margin-top: 8px; }
   #rechazadas .ticket { border: 1px solid var(--rojo); border-radius: 8px; padding: 8px;
@@ -137,6 +146,21 @@
     <div id="total">$0</div>
     <div id="piezas">0 piezas</div>
     <div id="a-pagar"></div>
+
+    <button id="pedir-descuento" type="button" hidden>Pedir descuento</button>
+    <div id="descuento-form" hidden>
+      <select id="descuento-tipo" aria-label="Tipo de descuento">
+        <option value="porcentaje">% del ticket</option>
+        <option value="monto">$ de descuento</option>
+      </select>
+      <input id="descuento-valor" type="number" min="1" step="1" inputmode="numeric" placeholder="Cuánto" aria-label="Cuánto">
+      <input id="descuento-motivo" maxlength="200" placeholder="Motivo (obligatorio)" autocomplete="off">
+      <button id="enviar-descuento" type="button">Enviar al dueño</button>
+      <button id="cerrar-descuento" class="claro" type="button">Cerrar</button>
+    </div>
+    <div id="descuento-estado"></div>
+    <button id="quitar-descuento" type="button" hidden
+      style="margin-top:6px;padding:6px 10px;font-size:13px;border:1px solid #dfe3ea;background:#fff;border-radius:8px;cursor:pointer">Quitar descuento</button>
 
     <label for="socio">Socio: teléfono o número</label>
     <div class="socio-fila">
@@ -244,7 +268,7 @@
 </dialog>
 
 <script type="module">
-import { totales, agregar, efectivoAlcanza, dolaronesGanados } from '/venta.js';
+import { totales, agregar, efectivoAlcanza, dolaronesGanados, descuentoDe, TOPE_DESCUENTO } from '/venta.js';
 import {
   reconectarImpresora, conectarImpresora, impresoraLista, imprimirTicket, abrirCajon, explicarErrorUsb, errorImpresora,
   imprimirCorte, imprimirRetiro,
@@ -351,6 +375,17 @@ async function cargarCatalogo() {
 /* ---------- ticket ---------- */
 
 function pintar() {
+  // Un descuento se aprueba para ese ticket exacto: si cambia, hay que pedir otro.
+  const subtotal = totales(lineas).subtotal;
+  if (descuento && descuento.subtotal !== subtotal) {
+    const habiaSolicitud = descuento.estado !== 'rechazada';
+    descuento = null;
+    idVenta = null;
+    pintarDescuento(habiaSolicitud && subtotal > 0 ? 'El ticket cambió: el descuento ya no aplica. Pide otro.' : '');
+  }
+  $('pedir-descuento').hidden = subtotal === 0 || (!!descuento && descuento.estado !== 'rechazada');
+  if (subtotal === 0) $('descuento-form').hidden = true;
+
   $('ticket').innerHTML = lineas.map((l, i) => `
     <div class="renglon">
       <div><div class="nombre">${escapar(l.nombre)}</div><div class="codigo">${escapar(l.codigo)}</div></div>
@@ -361,10 +396,13 @@ function pintar() {
 
   const efectivo = Math.round(Number($('efectivo').value || 0) * 100);
   const usados = dolaronesPedidos();
-  const t = totales(lineas, efectivo, usados);
+  const t = totales(lineas, efectivo, usados, descuentoAplicado());
   $('total').textContent = pesos(t.total);
   $('piezas').textContent = `${t.piezas} ${t.piezas === 1 ? 'pieza' : 'piezas'}`;
-  $('a-pagar').textContent = usados ? `Dolarones −${pesos(usados)} · A pagar ${pesos(t.aPagar)}` : '';
+  $('a-pagar').textContent = [
+    t.descuento ? `Descuento −${pesos(t.descuento)}` : '',
+    usados ? `Dolarones −${pesos(usados)} · A pagar ${pesos(t.aPagar)}` : '',
+  ].filter(Boolean).join(' · ');
   $('cobrar').disabled = t.total === 0;
 
   const cambio = $('cambio');
@@ -469,8 +507,82 @@ $('sugerencias').addEventListener('click', (e) => {
 function dolaronesPedidos() {
   if (!socio) return 0;
   const pedidos = Math.round(Number($('dolarones').value || 0) * 100);
-  return Math.max(0, Math.min(pedidos, socio.disponible, totales(lineas).total));
+  return Math.max(0, Math.min(pedidos, socio.disponible, totales(lineas, 0, 0, descuentoAplicado()).total));
 }
+
+/* ---------- descuentos con aprobacion del dueno (Issue #119) ---------- */
+
+// { id, tipo, valor, subtotal, monto, estado: pendiente|aprobada|rechazada } o null.
+let descuento = null;
+let sondeoDescuento = null;
+const descuentoAplicado = () => (descuento?.estado === 'aprobada' ? descuento.monto : 0);
+
+function pintarDescuento(aviso = '') {
+  clearInterval(sondeoDescuento);
+  $('quitar-descuento').hidden = !descuento;
+  const el = $('descuento-estado');
+  el.style.color = '';
+  if (!descuento) { el.textContent = aviso; el.style.color = aviso ? '#D72B32' : ''; return; }
+  if (descuento.estado === 'pendiente') {
+    el.textContent = `Descuento de ${pesos(descuento.monto)} esperando al dueño…`;
+    sondeoDescuento = setInterval(consultarDescuento, 3000);
+  } else if (descuento.estado === 'aprobada') {
+    el.textContent = `Descuento aprobado: −${pesos(descuento.monto)}`;
+    el.style.color = '#1f7a4d';
+  } else {
+    el.textContent = 'El dueño rechazó el descuento.';
+    el.style.color = '#D72B32';
+  }
+}
+
+async function consultarDescuento() {
+  if (descuento?.estado !== 'pendiente') return;
+  try {
+    const r = await fetch(`/api/descuentos/${descuento.id}`);
+    if (!r.ok) return;
+    const { estado } = await r.json();
+    if (estado === 'pendiente' || descuento?.estado !== 'pendiente') return;
+    descuento.estado = estado;
+    idVenta = null;
+    pintarDescuento();
+    pintar();
+  } catch { /* sin red: se vuelve a preguntar en 3 s */ }
+}
+
+$('quitar-descuento').addEventListener('click', () => { descuento = null; idVenta = null; pintarDescuento(); pintar(); });
+$('pedir-descuento').addEventListener('click', () => {
+  $('descuento-form').hidden = false;
+  $('descuento-valor').focus();
+});
+$('cerrar-descuento').addEventListener('click', () => { $('descuento-form').hidden = true; $('codigo').focus(); });
+$('enviar-descuento').addEventListener('click', async () => {
+  const tipo = $('descuento-tipo').value;
+  const escrito = Number($('descuento-valor').value);
+  const valor = tipo === 'monto' ? Math.round(escrito * 100) : escrito;
+  const motivo = $('descuento-motivo').value.trim();
+  const subtotal = totales(lineas).subtotal;
+  const calculo = descuentoDe({ tipo, valor }, subtotal);
+  const falla = (texto) => { $('descuento-estado').textContent = texto; $('descuento-estado').style.color = '#D72B32'; };
+  if (calculo.error) return falla(calculo.error);
+  if (!motivo) return falla('Escribe el motivo del descuento.');
+  try {
+    const r = await fetch('/api/descuentos', {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ tipo, valor, motivo, subtotal }),
+    });
+    const cuerpo = await r.json().catch(() => ({}));
+    if (!r.ok) return falla(cuerpo.error ?? 'No se pudo pedir el descuento.');
+    descuento = { id: cuerpo.id, tipo, valor, subtotal, monto: cuerpo.monto, estado: 'pendiente' };
+    $('descuento-form').hidden = true;
+    $('descuento-valor').value = '';
+    $('descuento-motivo').value = '';
+    pintarDescuento();
+    pintar();
+  } catch {
+    falla('Sin red: no se pueden pedir descuentos. Cobra a precio normal.');
+  }
+});
+$('descuento-valor').placeholder = `Máximo ${TOPE_DESCUENTO}% del ticket`;
 
 function pintarSocio() {
   $('quitar-socio').hidden = !socio;
@@ -561,7 +673,12 @@ async function cobrar() {
   const efectivo = Math.round(Number($('efectivo').value || 0) * 100);
   const forma = $('forma').value;
   const usados = dolaronesPedidos();
-  const t = totales(lineas, efectivo, usados);
+  if (descuento?.estado === 'pendiente') {
+    $('aviso').textContent = 'El descuento sigue esperando al dueño. Espera su respuesta o aprieta «Quitar descuento».';
+    $('aviso').style.color = '#D72B32';
+    return;
+  }
+  const t = totales(lineas, efectivo, usados, descuentoAplicado());
   if (!efectivoAlcanza({ formaPago: forma, total: t.aPagar, efectivo })) {
     $('aviso').textContent = efectivo === 0 ? 'Falta el efectivo recibido.' : `Faltan ${pesos(t.falta)}`;
     $('aviso').style.color = '#D72B32';
@@ -582,6 +699,7 @@ async function cobrar() {
       cliente_id: socio?.id ?? null,
       dolarones: usados,
       caja: cajaActual(),
+      descuento_id: descuentoAplicado() ? descuento.id : null,
     };
     let socioTicket = socio && { numero: socio.numero, ganados: dolaronesGanados(t.aPagar), saldo: socio.disponible };
     if (usados > 0) {
@@ -594,7 +712,7 @@ async function cobrar() {
     // no espera a que termine el logo. Una venta con tarjeta no toca el cajon.
     // Nada de esto espera al servidor ni bloquea el cobro; si falla, el pie lo dice.
     if (forma === 'efectivo') abrirCajon();
-    imprimirTicket({ ...venta, total: t.total, cambio: t.cambio, socio: socioTicket }, venta.lineas)
+    imprimirTicket({ ...venta, total: t.total, descuento: t.descuento, cambio: t.cambio, socio: socioTicket }, venta.lineas)
       .then(pintarImpresora);
 
     // Bajar existencias en la copia local: sin esto, la misma etiqueta se podria
@@ -613,6 +731,8 @@ async function cobrar() {
     $('aviso').style.color = '#1f7a4d';
     lineas = [];
     idVenta = null;
+    descuento = null;
+    pintarDescuento();
     quitarSocio();
     $('efectivo').value = '';
     $('codigo').focus();
@@ -1076,7 +1196,7 @@ $('corte-reimprimir').addEventListener('click', async () => {
 });
 
 $('cancelar').addEventListener('click', () => {
-  lineas = []; idVenta = null; quitarSocio(); $('efectivo').value = ''; $('aviso').textContent = 'Venta cancelada';
+  lineas = []; idVenta = null; descuento = null; pintarDescuento(); quitarSocio(); $('efectivo').value = ''; $('aviso').textContent = 'Venta cancelada';
   $('aviso').style.color = '#5b6478'; pintar(); $('codigo').focus();
 });
 

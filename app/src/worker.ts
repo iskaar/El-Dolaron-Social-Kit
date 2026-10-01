@@ -17,6 +17,7 @@ import {
 import { cajeroEnTurno, listarCajeros, entrar, salir, ponerPin } from './cajeros.ts';
 import { registrarSocio, buscarSocio, cambiarPin, sentenciasDeVenta, sentenciasDeCancelacion, saldo } from './dolarones.ts';
 import { registrarCorte, registrarRetiro, ultimoCorte, cajaDe } from './corte.ts';
+import { pedirDescuento, estadoDescuento, validarDescuento } from './descuentos.ts';
 
 interface FilaConfig {
   clave: string;
@@ -572,7 +573,7 @@ async function registrarVenta(request: Request, env: Env, correo: string): Promi
   const venta = (await request.json()) as {
     id?: unknown; lineas?: unknown; forma_pago?: unknown;
     efectivo?: unknown; creado_en?: unknown;
-    cliente_id?: unknown; dolarones?: unknown; pin?: unknown; caja?: unknown;
+    cliente_id?: unknown; dolarones?: unknown; pin?: unknown; caja?: unknown; descuento_id?: unknown;
   };
   const id = String(venta.id ?? '');
   if (!UUID.test(id)) {
@@ -608,7 +609,16 @@ async function registrarVenta(request: Request, env: Env, correo: string): Promi
     return json({ error: preparado.error }, 400);
   }
 
-  const total = preparado.lineas.reduce((suma, l) => suma + l.precio * l.cantidad, 0);
+  const subtotal = preparado.lineas.reduce((suma, l) => suma + l.precio * l.cantidad, 0);
+  // Un descuento solo entra si el dueno lo aprobo para este mismo ticket (Issue #119).
+  const descuentoId = venta.descuento_id ? String(venta.descuento_id) : null;
+  let descuento = 0;
+  if (descuentoId) {
+    const valido = await validarDescuento(env, descuentoId, subtotal);
+    if (!valido.ok) return json({ error: valido.error }, valido.status);
+    descuento = valido.monto;
+  }
+  const total = subtotal - descuento;
   const efectivo = Math.max(0, Math.round(Number(venta.efectivo ?? 0)));
   const clienteId = venta.cliente_id ? String(venta.cliente_id) : null;
   const dolarones = Number(venta.dolarones ?? 0);
@@ -632,12 +642,12 @@ async function registrarVenta(request: Request, env: Env, correo: string): Promi
   const sentencias = [
     env.DB.prepare(
       `insert into ventas (id, total, forma_pago, efectivo, cambio, creado_en, registrado_en, cliente_id, dolarones,
-                           caja, cajero)
-       values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                           caja, cajero, descuento, descuento_id)
+       values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).bind(id, total, formaPago, efectivo, Math.max(0, efectivo - aPagar), creadoEn, ahora, clienteId, dolarones,
       // Quien cobro sale de Access; la caja es la suya (Issue #105) o la de la
       // computadora. Una venta encolada antes del corte de caja llega sin caja: ''.
-      await cajaDe(env, correo, venta.caja), correo),
+      await cajaDe(env, correo, venta.caja), correo, descuento, descuentoId),
     ...preparado.lineas.map((l) =>
       env.DB.prepare(
         `insert into venta_lineas (venta_id, producto_id, codigo, nombre, precio, cantidad)
@@ -669,10 +679,13 @@ async function registrarVenta(request: Request, env: Env, correo: string): Promi
     if (String(error).includes('saldo insuficiente')) {
       return json({ error: 'El saldo de Dolarones cambio. Vuelve a buscar al socio.' }, 409);
     }
+    if (descuentoId && String(error).includes('descuento_id')) {
+      return json({ error: 'Ese descuento ya se uso en otra venta.' }, 409);
+    }
     throw error;
   }
   return json({
-    id, total, dolarones, cambio: Math.max(0, efectivo - aPagar), ganados: recompensa.ganados,
+    id, total, descuento, dolarones, cambio: Math.max(0, efectivo - aPagar), ganados: recompensa.ganados,
     saldo: clienteId ? await saldo(env, clienteId, ahora) : null,
   }, 201);
 }
@@ -1131,6 +1144,9 @@ export default {
         if (request.method === 'PUT') return await guardarCuenta(request, env);
         return json({ error: 'Metodo no permitido.' }, 405);
       }
+      if (pathname === '/api/descuentos' && request.method === 'POST') return await pedirDescuento(request, env, correo);
+      const descuento = pathname.match(/^\/api\/descuentos\/([^/]+)$/);
+      if (descuento && request.method === 'GET') return await estadoDescuento(descuento[1], env, correo);
       const resolver = pathname.match(/^\/api\/solicitudes\/([^/]+)\/resolver$/);
       if (resolver && request.method === 'POST') {
         return await resolverSolicitud(resolver[1], request, env, correo);

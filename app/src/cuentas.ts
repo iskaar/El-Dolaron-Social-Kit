@@ -91,6 +91,7 @@ export function permiso(pathname: string, metodo: string): Regla {
   if (ruta === '/api/cajon') return CAJA;
   if (ruta === '/api/cortes' || ruta === '/api/retiros') return CAJA;
   if (ruta === '/api/cajeros' || ruta === '/api/cajeros/entrar' || ruta === '/api/cajeros/salir') return CAJA;
+  if (ruta === '/api/descuentos' || ruta.startsWith('/api/descuentos/')) return CAJA;   // pedir y ver estado (Issue #119)
   // ponytail: cancelar sigue abierto al cajero hasta la fase 2 del Issue #75,
   // que lo pasa por una solicitud aprobada por el dueno.
   if (ruta === '/api/ventas' || ruta.startsWith('/api/ventas/')) return CAJA;
@@ -328,7 +329,7 @@ export async function guardarCuenta(request: Request, env: Env): Promise<Respons
   return json({ correo, nombre, roles, activo, caja: guardado?.caja ?? '' });
 }
 
-/** Aprobar o rechazar una solicitud. Hoy solo las de acceso (fase 1 del Issue #75). */
+/** Aprobar o rechazar una solicitud: de acceso (fase 1 del Issue #75) o de descuento (Issue #119). */
 export async function resolverSolicitud(id: string, request: Request, env: Env, dueno: string): Promise<Response> {
   const cuerpo = (await request.json().catch(() => ({}))) as { aprobar?: unknown; roles?: unknown };
   const solicitud = await env.DB.prepare(
@@ -338,7 +339,7 @@ export async function resolverSolicitud(id: string, request: Request, env: Env, 
     .first<{ id: string; tipo: string; correo: string; nombre: string; estado: string }>();
   if (!solicitud) return json({ error: 'La solicitud no existe.' }, 404);
   if (solicitud.estado !== 'pendiente') return json({ error: `Ya estaba ${solicitud.estado}.` }, 409);
-  if (solicitud.tipo !== 'acceso') return json({ error: 'Tipo de solicitud desconocido.' }, 400);
+  if (solicitud.tipo !== 'acceso' && solicitud.tipo !== 'descuento') return json({ error: 'Tipo de solicitud desconocido.' }, 400);
 
   const aprobar = cuerpo.aprobar === true;
   const ahora = new Date().toISOString();
@@ -346,9 +347,9 @@ export async function resolverSolicitud(id: string, request: Request, env: Env, 
     `update solicitudes set estado = ?, resuelto_en = ?, resuelto_por = ? where id = ? and estado = 'pendiente'`,
   ).bind(aprobar ? 'aprobada' : 'rechazada', ahora, dueno, id);
 
-  if (!aprobar) {
+  if (!aprobar || solicitud.tipo === 'descuento') {
     await marcar.run();
-    return json({ id, estado: 'rechazada' });
+    return json({ id, estado: aprobar ? 'aprobada' : 'rechazada' });
   }
   const roles = cuerpo.roles === undefined ? [ROL_POR_OMISION] : validarRoles(cuerpo.roles);
   if (!roles) return json({ error: 'Escoge al menos un rol.' }, 400);

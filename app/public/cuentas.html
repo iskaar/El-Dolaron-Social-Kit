@@ -42,6 +42,11 @@
 </header>
 <main>
   <section class="panel">
+    <h2 id="titulo-descuentos">Descuentos por aprobar</h2>
+    <div id="descuentos"></div>
+  </section>
+
+  <section class="panel">
     <h2 id="titulo-solicitudes">Solicitudes de acceso</h2>
     <div id="solicitudes"></div>
   </section>
@@ -81,10 +86,42 @@ const casillas = (marcados) => ROLES.map((r) =>
 const rolesDe = (nodo) => [...nodo.querySelectorAll('.roles input:checked')].map((c) => c.value);
 const fecha = (iso) => new Date(iso).toLocaleString('es-MX', { dateStyle: 'medium', timeStyle: 'short' });
 
+const pesos = (centavos) => `$${(centavos / 100).toLocaleString('es-MX')}`;
+
+// Issue #119: los descuentos que pide la caja. Se refrescan solos (abajo) sin
+// tocar el resto de la pagina, para no borrar lo que se este escribiendo.
+function pintarDescuentos(solicitudes) {
+  const pedidos = solicitudes.filter((s) => s.tipo === 'descuento');
+  document.title = `${pedidos.length ? `(${pedidos.length}) ` : ''}Cuentas`;
+  document.getElementById('titulo-descuentos').textContent =
+    `Descuentos por aprobar${pedidos.length ? ` (${pedidos.length})` : ''}`;
+  document.getElementById('descuentos').innerHTML = pedidos.length === 0
+    ? '<p class="vacio">Nada esperando.</p>'
+    : pedidos.map((s) => {
+      const d = JSON.parse(s.datos);
+      const cuanto = d.tipo === 'porcentaje' ? `${d.valor}% (${pesos(d.monto)})` : pesos(d.monto);
+      return `
+      <div class="solicitud" data-id="${s.id}">
+        <div><b>${escapar(s.nombre || s.correo)}</b> pide <b>${cuanto}</b> de descuento
+          <span class="correo">${fecha(s.creado_en)}</span></div>
+        <div class="justificacion">Ticket ${pesos(d.subtotal)} → ${pesos(d.subtotal - d.monto)}. Motivo: ${escapar(s.justificacion)}</div>
+        <div class="acciones">
+          <button type="button" data-accion="aprobar">Aprobar</button>
+          <button type="button" class="peligro" data-accion="rechazar">Rechazar</button>
+          <span class="aviso"></span>
+        </div>
+      </div>`;
+    }).join('');
+}
+setInterval(async () => {
+  try { pintarDescuentos((await (await fetch('/api/cuentas')).json()).solicitudes); } catch { /* sin red: la proxima */ }
+}, 5000);
+
 async function cargar() {
   const datos = await (await fetch('/api/cuentas')).json();
   ROLES = datos.roles;
   CAJAS = datos.cajas ?? [];
+  pintarDescuentos(datos.solicitudes);
 
   const solicitudes = datos.solicitudes.filter((s) => s.tipo === 'acceso');
   document.getElementById('titulo-solicitudes').textContent =
