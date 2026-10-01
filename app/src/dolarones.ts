@@ -86,7 +86,9 @@ function json(cuerpo: unknown, status = 200): Response {
 const texto = (valor: unknown, max: number) => String(valor ?? '').replace(/\s+/g, ' ').trim().slice(0, max);
 export const basesListas = (env: Env) => !!env.BASES_APROBADAS_VERSION &&
   !env.BASES_APROBADAS_VERSION.startsWith('borrador') && !!env.PORTAL_BASES_TEXTO?.trim() &&
-  !!env.PORTAL_AVISO_TEXTO?.trim();
+  !!env.PORTAL_AVISO_TEXTO?.trim() &&
+  // Un dato sin llenar ({{RFC}}) nunca llega al cliente: el portal sigue cerrado.
+  !`${env.PORTAL_BASES_TEXTO}${env.PORTAL_AVISO_TEXTO}`.includes('{{');
 
 /** La hora fiable de aceptación de la venta decide si ya inició la promoción. */
 export function promocionIniciada(env: Env, ahora: Date): boolean {
