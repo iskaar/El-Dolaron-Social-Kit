@@ -104,6 +104,7 @@
 
 <script type="module">
 import { reducirArchivo } from '/foto.js';
+import { copiarParaMarketplace } from '/compartir.js';
 import { agruparSesiones } from '/sesiones.js';
 
 const CATEGORIAS = ['ropa', 'hogar', 'electronica', 'juguetes', 'otros'];
@@ -203,6 +204,8 @@ function ficha(p) {
         <button type="button" data-accion="guardar">Guardar</button>
         <button type="button" class="claro" data-accion="recalcular">Recalcular precio</button>
         <button type="button" class="claro" data-accion="reanalizar">Reintentar análisis</button>
+        <button type="button" class="claro" data-accion="compartir"
+          title="Copia precio, nombre y foto; pégalos con Win+V">Compartir</button>
         ${repetida ? `<button type="button" class="claro" data-accion="fusionar"
           title="Suma esta foto a la pieza que ya existe y borra la repetida">
           Ya existe · sumar a ${repetida.stock ?? 1} pz</button>` : ''}
@@ -273,6 +276,17 @@ function ficha(p) {
       await nodo.guardarFicha();
     } else if (accion === 'recalcular') {
       await enviar(base());   // sin precio: lo recalcula la configuración
+    } else if (accion === 'compartir') {
+      try {
+        const { conFoto } = await copiarParaMarketplace({
+          img: nodo.querySelector('img'), nombre: valor('nombre').trim(), precio: valor('precio'),
+        });
+        aviso.textContent = conFoto ? 'Copiado: precio, nombre y foto. Pégalos con Win+V.' : 'Copiado: precio y nombre (esta pieza no tiene foto).';
+        aviso.style.color = '#2c7a3f';
+      } catch {
+        aviso.textContent = 'El navegador no dejó copiar. Vuelve a intentar.';
+        aviso.style.color = '';
+      }
     } else if (accion === 'reanalizar') {
       aviso.textContent = 'Analizando…';
       await fetch(`/api/borradores/${p.id}/analizar`, { method: 'POST' });
