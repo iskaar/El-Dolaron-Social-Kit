@@ -587,15 +587,33 @@ async function registrarVenta(request: Request, env: Env, correo: string): Promi
     return json({ error: 'Forma de pago invalida.' }, 400);
   }
 
-  const yaExiste = await env.DB.prepare('select id from ventas where id = ?').bind(id).first();
-  if (yaExiste) {
+  // Se compara el pedido que mando la caja, no el catalogo actual: un precio
+  // cambiado despues de una venta no debe romper un reintento legitimo.
+  const pedido = JSON.stringify({
+    lineas:(venta.lineas as LineaVenta[]).map((l) => [String(l.producto_id ?? ''), l.cantidad]),
+    forma_pago:formaPago, efectivo:venta.efectivo ?? 0, creado_en:venta.creado_en ?? null,
+    cliente_id:venta.cliente_id ?? null, dolarones:venta.dolarones ?? 0,
+    codigo_socio:venta.codigo_socio ?? '', codigo_vale:venta.codigo_vale ?? '',
+    caja:venta.caja ?? null,
+  });
+  const pedidoHash = [...new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(pedido)))]
+    .map((b) => b.toString(16).padStart(2, '0')).join('');
+  const reintento = async (): Promise<Response | null> => {
+    const previo = await env.DB.prepare('select pedido_hash from ventas where id = ?').bind(id)
+      .first<{ pedido_hash:string | null }>();
+    if (!previo) return null;
+    // null: venta registrada antes de la migracion 021, se acepta como antes.
+    if (previo.pedido_hash !== null && previo.pedido_hash !== pedidoHash)
+      return json({ error:'El folio ya pertenece a otra venta. Revisa la venta original antes de reintentar.' }, 409);
     const ganado = await env.DB.prepare(`select coalesce(sum(importe), 0) as importe from dolarones_movimientos
       where venta_id = ? and tipo = 'compra'`).bind(id).first<{ importe:number }>();
-    const respuesta = json({ id, duplicada: true, ganados:ganado?.importe ?? 0,
+    const respuesta = json({ id, duplicada:true, ganados:ganado?.importe ?? 0,
       vale_emitido:await valeDeVenta(env, id), vale_usado:await valeUsadoEnVenta(env, id) }, 200);
     respuesta.headers.set('cache-control', 'no-store');
     return respuesta;
-  }
+  };
+  const yaExiste = await reintento();
+  if (yaExiste) return yaExiste;
 
   const idsPedidos = [...new Set((venta.lineas as LineaVenta[]).map((l) => String(l.producto_id ?? '')))];
   if (idsPedidos.some((pid) => !UUID.test(pid))) {
@@ -633,22 +651,28 @@ async function registrarVenta(request: Request, env: Env, correo: string): Promi
     ventaId: id, clienteId, dolarones:codigoVale ? 0 : dolarones, codigo: String(venta.codigo_socio ?? ''), total, autor: correo, ahora: momento,
   });
   if (!recompensa.ok) {
+    const concurrente = await reintento();
+    if (concurrente) return concurrente;
     return json({ error: recompensa.error }, recompensa.status);
   }
   const vale = await sentenciasVale(env, {
     ventaId:id, clienteId, codigo:codigoVale, dolarones, total, autor:correo, ahora:momento,
   });
-  if (!vale.ok) return json({ error:vale.error }, vale.status);
+  if (!vale.ok) {
+    const concurrente = await reintento();
+    if (concurrente) return concurrente;
+    return json({ error:vale.error }, vale.status);
+  }
 
   const sentencias = [
     env.DB.prepare(
       `insert into ventas (id, total, forma_pago, efectivo, cambio, creado_en, registrado_en, cliente_id, dolarones,
-                           caja, cajero)
-       values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                           caja, cajero, pedido_hash)
+       values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).bind(id, total, formaPago, efectivo, Math.max(0, efectivo - aPagar), creadoEn, ahora, clienteId, dolarones,
       // Quien cobro sale de Access; la caja es la suya (Issue #105) o la de la
       // computadora. Una venta encolada antes del corte de caja llega sin caja: ''.
-      await cajaDe(env, correo, venta.caja), correo),
+      await cajaDe(env, correo, venta.caja), correo, pedidoHash),
     ...preparado.lineas.map((l) =>
       env.DB.prepare(
         `insert into venta_lineas (venta_id, producto_id, codigo, nombre, precio, cantidad)
@@ -675,6 +699,10 @@ async function registrarVenta(request: Request, env: Env, correo: string): Promi
   try {
     await env.DB.batch(sentencias);
   } catch (error) {
+    // Un segundo cajero pudo confirmar este folio despues de la lectura inicial.
+    // Solo el mismo pedido obtiene respuesta idempotente; otros errores siguen visibles.
+    const concurrente = await reintento();
+    if (concurrente) return concurrente;
     if (String(error).includes('saldo de vale invalido'))
       return json({ error:'El vale cambió, venció o se agotó. Vuelve a escanearlo.' }, 409);
     if (String(error).includes('codigo de socio invalido')) {
