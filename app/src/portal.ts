@@ -48,10 +48,11 @@ export async function identidad(request: Request, env: Env): Promise<Identidad |
   if (!response.ok) return rechazo(`lookup ${response.status}`);
   const data = await response.json() as { users?: { localId?: string; phoneNumber?: string; validSince?: string; disabled?: boolean }[] };
   const user = data.users?.[0];
+  // Google sólo manda validSince si la sesión se revocó alguna vez; sin él no hay revocación.
+  const revocada = user?.validSince === undefined ? 0 : Number(user.validSince);
   const motivo = !user ? 'sin usuario' : user.disabled ? 'deshabilitado' : user.localId !== claims.sub ? 'uid' :
     !/^\+52\d{10}$/.test(user.phoneNumber ?? '') ? 'no +52' : user.phoneNumber !== claims.phone_number ? 'telefono' :
-    !Number.isFinite(Number(user.validSince)) || Number(user.validSince) > Number(claims.auth_time)
-      ? `validSince ${Number(user.validSince) - Number(claims.auth_time)}s` : '';
+    !Number.isFinite(revocada) ? 'validSince ilegible' : revocada > Number(claims.auth_time) ? `revocada ${revocada - Number(claims.auth_time)}s` : '';
   if (motivo) return rechazo(motivo);
   return { uid: user!.localId!, telefono: user!.phoneNumber!.slice(3) };
 }
