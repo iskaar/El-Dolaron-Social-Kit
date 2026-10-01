@@ -7,7 +7,7 @@ export const BASES = `BASES DEL PROGRAMA DOLARONES
 Versión 2026-10-v1, 1 de octubre de 2026
 
 1. Organizador
-María Teresa Ferrusca Pérez, RFC {{RFC}}, con nombre comercial El Dolarón, en Jardín Hidalgo 129, Zona Centro, Soledad de Graciano Sánchez, San Luis Potosí, C.P. 78430.
+María Teresa Ferrusca Pérez, RFC FEPT660329TH4, con nombre comercial El Dolarón, en Jardín Hidalgo 129, Zona Centro, Soledad de Graciano Sánchez, San Luis Potosí, C.P. 78430.
 
 2. Vigencia del programa
 Del 2 de octubre de 2026 hasta que El Dolarón lo termine con un aviso de 30 días en la tienda. Los Dolarones vigentes al terminar el programa se respetan hasta su vencimiento.
@@ -89,7 +89,7 @@ export const AVISO = `AVISO DE PRIVACIDAD INTEGRAL - SOCIOS DOLARONES
 Versión 2026-10-v1, 1 de octubre de 2026
 
 Responsable
-María Teresa Ferrusca Pérez, RFC {{RFC}} (El Dolarón), Jardín Hidalgo 129, Zona Centro, Soledad de Graciano Sánchez, S.L.P., C.P. 78430.
+María Teresa Ferrusca Pérez, RFC FEPT660329TH4 (El Dolarón), Jardín Hidalgo 129, Zona Centro, Soledad de Graciano Sánchez, S.L.P., C.P. 78430.
 
 Datos que tratamos
 Nombre, teléfono celular, correo opcional en registros presenciales y el historial de compras, Dolarones ganados, usados y saldo. En tu portal ves tu saldo, sus vencimientos y un recibo de cada compra hecha como socio (piezas, importes y forma de pago); es un comprobante de compra, no una factura fiscal. Para el acceso web se conserva el identificador de tu cuenta con el proveedor SMS, la versión de bases aceptada y la fecha. No hay PIN de socio; el servidor conserva una huella del código temporal, su límite, vigencia y uso, no el código legible. No pedimos datos sensibles, domicilio, fecha de nacimiento ni identificación oficial.

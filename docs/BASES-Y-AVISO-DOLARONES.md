@@ -9,4 +9,4 @@ El texto que ve el cliente vive solo en estos dos archivos de texto plano, que s
 
 Este documento ya no contiene el cuerpo del texto, para que no haya dos versiones que puedan divergir. Cualquier cambio a las bases o al aviso se hace en esos archivos, con nueva versión y revisión del abogado.
 
-Pendiente antes de publicar: sustituir `{{RFC}}` por el RFC del titular en ambos archivos. Las reglas del sistema están en [RECOMPENSAS-DOLARONES.md](RECOMPENSAS-DOLARONES.md) y el contrato técnico en [CONTRATO-PORTAL.md](CONTRATO-PORTAL.md).
+RFC del titular completado el 01/10/2026. Las reglas del sistema están en [RECOMPENSAS-DOLARONES.md](RECOMPENSAS-DOLARONES.md) y el contrato técnico en [CONTRATO-PORTAL.md](CONTRATO-PORTAL.md).
