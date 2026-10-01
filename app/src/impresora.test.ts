@@ -179,6 +179,7 @@ test('vale usa Code128 nativo con longitud, saldo y vencimiento; no raster ni co
   const pos = [...codigo].findIndex((b,i) => b===0x1d && codigo[i+1]===0x6b);
   assert.deepEqual([...codigo.slice(pos,pos+4)], [0x1d,0x6b,73,21]);
   assert.equal(new TextDecoder().decode(codigo.slice(pos+4,pos+25)), '{BDP-abcdefghijklmnop');
+  assert.equal(codigo[pos+25], 0x00, 'NUL tras los datos: si no, la impresora se traga el resto y no corta');
   assert.throws(() => codigoBarrasVale('DP-abc\x1b@'), /inválido/);
   const { venta, lineas } = ticketLargo();
   await imprimirTicket({ ...venta, vale_emitido:vale }, lineas);
