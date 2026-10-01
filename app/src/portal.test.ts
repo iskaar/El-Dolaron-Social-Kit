@@ -223,7 +223,10 @@ test('allowlist pública sirve sólo portal y assets necesarios; no abre caja, a
     assert.equal(config.status, 200);
     assert.ok(config.body.firebase);
     assert.equal(config.body.bases, 'Bases sintéticas de prueba.');
-    p.env.PORTAL_AVISO_TEXTO = '';
+    p.env.PORTAL_AVISO_TEXTO = 'Responsable, RFC {{RFC}}.';
+    assert.equal((await p.llamar('/api/portal/config', '')).body.firebase, null);
+    p.env.PORTAL_AVISO_TEXTO = 'Aviso sintético de prueba.';
+    delete p.env.BASES_APROBADAS_VERSION;
     assert.equal((await p.llamar('/api/portal/config', '')).body.firebase, null);
     assert.equal((await p.registrar('nuevo', '+524448887777')).status, 503);
   } finally { p.cerrar(); }

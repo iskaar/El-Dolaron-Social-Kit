@@ -31,6 +31,13 @@
     "HOST_PORTAL": "dolarones.eldolaron.com",
     "FIREBASE_PROJECT_ID": "el-dolaron",
     "FIREBASE_WEB_API_KEY": "AIzaSyBNauTOpaIaRagXrz0mn3yV1n4MrA4cab4",
+    // Encendido de Dolarones (Isaac, 01/10). Altas, vales y premios esperan a
+    // PROMOCION_INICIO: lunes 5/10/2026, 11:00 hora de la tienda (UTC-6).
+    // Apagado de emergencia: quitar PORTAL_REGISTRO_ABIERTO o VALES_ABIERTOS y desplegar.
+    "BASES_APROBADAS_VERSION": "2026-10-v1",
+    "PROMOCION_INICIO": "2026-10-05T17:00:00Z",
+    "VALES_ABIERTOS": "si",
+    "PORTAL_REGISTRO_ABIERTO": "si",
     // Con que se verifica el JWT de Cloudflare Access (src/cuentas.ts). No son
     // secretos: salen en la redireccion al login de cada hostname. El aud es
     // por aplicacion de Access; una aplicacion nueva necesita su renglon aqui

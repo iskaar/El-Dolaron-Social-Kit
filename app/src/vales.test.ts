@@ -128,9 +128,9 @@ test('vale anónimo al 5%, 30 días exactos, sin socio, cerrado por defecto y si
     delete t.env.VALES_ABIERTOS;
     assert.equal((await t.pedir('/api/ventas', venta())).cuerpo.vale_emitido, null);
     t.env.VALES_ABIERTOS = 'si';
-    t.env.PORTAL_BASES_TEXTO = '';
+    const version = t.env.BASES_APROBADAS_VERSION; delete t.env.BASES_APROBADAS_VERSION;
     assert.equal((await t.pedir('/api/ventas', venta())).cuerpo.vale_emitido, null);
-    t.env.PORTAL_BASES_TEXTO = 'Bases sintéticas.';
+    t.env.BASES_APROBADAS_VERSION = version;
     const { v, vale } = await t.emitir();
     assert.match(vale.codigo, /^DP-[A-Za-z0-9_-]{16}$/);
     assert.equal(vale.importe, 1000); // $250: dos bloques, 5 D c/u
