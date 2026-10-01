@@ -130,9 +130,9 @@ export function impresoraLista() {
 
 // Issue #97: el ticket entero (~6 KB con el logo) en un solo transferOut
 // imprimio medio logo y fallo; la TM-T20 II recibe en un bufer de 4 KB. Se
-// manda en pedazos, uno a la vez. ponytail: 512 es holgado, no medido; si la
-// impresora vuelve a cortar a medio ticket, bajarlo (64 es un paquete USB).
-export const PEDAZO = 512;
+// manda en pedazos, uno a la vez. Bajado de 512 a 64 (un paquete USB) porque
+// la caja vieja se detenia tras el codigo de barras del vale (bug-log #9).
+export const PEDAZO = 64;
 
 // En fila: el cajon y el ticket nunca se mezclan en el mismo puerto.
 let cola = Promise.resolve();

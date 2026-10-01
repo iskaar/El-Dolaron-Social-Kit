@@ -87,12 +87,12 @@ test('el ticket sale en pedazos de a lo mas PEDAZO bytes, completo y en orden', 
 
 test('tras una falla, el cajon vuelve a abrir en el siguiente cobro sin recargar', async () => {
   const { dev, pedazos } = impresoraFalsa();
-  const { reconectarImpresora, imprimirTicket, abrirCajon, errorImpresora, impresoraLista } = await import('../public/impresora.js');
+  const { reconectarImpresora, imprimirTicket, abrirCajon, errorImpresora, impresoraLista, PEDAZO } = await import('../public/impresora.js');
   await reconectarImpresora();
   dev.fallarEn = 1;                                   // se corta a media transferencia
   const { venta, lineas } = ticketLargo();
   assert.equal(await imprimirTicket(venta, lineas), false);
-  assert.match(errorImpresora(), /NetworkError.*a los 512 de/);
+  assert.match(errorImpresora(), new RegExp(`NetworkError.*a los ${PEDAZO} de`));
   assert.equal(impresoraLista(), false);
   assert.equal(await abrirCajon(), true);             // reabre sola, sin pedir permiso
   assert.equal(errorImpresora(), '');
