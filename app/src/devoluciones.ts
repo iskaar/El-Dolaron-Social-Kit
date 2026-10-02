@@ -14,7 +14,8 @@
 
 import { cajaDe } from './corte.ts';
 import { dolaronesGanados } from '../public/venta.js';
-import { retirarVale } from './vales.ts';
+import { retirarVale, valeDeVenta, valeUsadoEnVenta } from './vales.ts';
+import { saldo } from './dolarones.ts';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -42,17 +43,18 @@ interface VentaFila {
   cancelada: number; cancelada_en: string; cancelada_por: string; cancelada_caja: string; motivo_cancelacion: string;
   creado_en: string; caja: string; cajero: string; cliente_id: string | null;
   devuelto: number; dolarones_devueltos: number; revision: number;
+  imprimir_en: string | null; impreso_en: string | null;
 }
 
 const leerVenta = (env: Env, id: string) =>
   env.DB.prepare(
     `select id, total, forma_pago, efectivo, cambio, dolarones, cancelada, cancelada_en, cancelada_por, cancelada_caja,
-            motivo_cancelacion, creado_en, caja, cajero, cliente_id, devuelto, dolarones_devueltos, revision
+            motivo_cancelacion, creado_en, caja, cajero, cliente_id, devuelto, dolarones_devueltos, revision, imprimir_en, impreso_en
      from ventas where id = ?`,
   ).bind(id).first<VentaFila>();
 
 /** El ticket con sus piezas y lo que ya se devolvio: para la ventana de la caja y de reportes. */
-export async function detalleVenta(id: string, env: Env): Promise<Response> {
+export async function detalleVenta(id: string, env: Env, paraImprimir = false): Promise<Response> {
   if (!UUID.test(id)) return json({ error: 'Identificador de venta invalido.' }, 400);
   const venta = await leerVenta(env, id);
   if (!venta) return json({ error: 'La venta no existe.' }, 404);
@@ -67,10 +69,17 @@ export async function detalleVenta(id: string, env: Env): Promise<Response> {
      where d.venta_id = ? order by d.creado_en`,
   ).bind(id).all();
   const socio = venta.cliente_id
-    ? await env.DB.prepare('select numero, nombre from clientes where id = ?').bind(venta.cliente_id).first()
+    ? await env.DB.prepare('select numero, nombre from clientes where id = ?').bind(venta.cliente_id).first<{ numero:number; nombre:string }>()
     : null;
-
-  return json({ ...venta, cliente_id: undefined, socio, lineas, devoluciones });
+  if (!paraImprimir) return json({ ...venta, cliente_id:undefined, socio, lineas, devoluciones });
+  const ganados = socio ? await env.DB.prepare(`select coalesce(sum(importe), 0) as importe
+    from dolarones_movimientos where venta_id = ? and tipo = 'compra'`).bind(id).first<{ importe:number }>() : null;
+  const saldoActual = venta.cliente_id ? await saldo(env, venta.cliente_id, new Date().toISOString()) : null;
+  const respuesta = json({ ...venta, cliente_id: undefined,
+    socio:socio && { ...socio, ganados:ganados?.importe ?? 0, saldo:saldoActual?.disponible ?? 0 }, lineas, devoluciones,
+    vale_emitido:await valeDeVenta(env, id), vale_usado:await valeUsadoEnVenta(env, id) });
+  respuesta.headers.set('cache-control', 'no-store');
+  return respuesta;
 }
 
 /**
