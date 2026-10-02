@@ -7,6 +7,8 @@
  * Misma filosofia que code128.js: nada por CDN, protocolo escrito a mano.
  */
 
+import { codigoEnDigitos } from './code128.js';
+
 const VENDOR_ID_EPSON = 0x04b8;
 
 // ponytail: 48 columnas es lo documentado para la TM-T20 II en Fuente A sobre
@@ -134,6 +136,10 @@ export function impresoraLista() {
 // la caja vieja se detenia tras el codigo de barras del vale (bug-log #9).
 export const PEDAZO = 64;
 
+// ponytail: 2 s alcanza para que salga y se corte un ticket normal; si el vale
+// vuelve a salir incompleto despues de un ticket largo, subirlo.
+export const PAUSA_VALE_MS = 2000;
+
 // En fila: el cajon y el ticket nunca se mezclan en el mismo puerto.
 let cola = Promise.resolve();
 
@@ -182,23 +188,26 @@ export async function abrirCajon() {
 // https://download4.epson.biz/sec_pubs/pos/reference_en/escpos/gs_lk.html
 // ponytail: módulo 2 puntos para papel de 80 mm; calibrar con el lector real.
 export const MODULO_VALE = 2;
+// Conjunto C (pares de dígitos): sólo dígitos, que el lector escribe igual con
+// cualquier distribución de teclado (ver codigoEnDigitos), y más angosto.
 export function codigoBarrasVale(codigo) {
   if (!/^DP-[A-Za-z0-9_-]{16}$/.test(codigo)) throw new Error('Código de vale inválido.');
-  const datos = codificar('{B' + codigo);
+  const digitos = codigoEnDigitos(codigo);
+  const datos = Uint8Array.from([0x7b, 0x43, ...digitos.match(/../g).map(Number)]);   // {C + pares
   return concatenar([
     new Uint8Array([ESC, 0x61, 1, GS, 0x48, 0, GS, 0x77, MODULO_VALE, GS, 0x68, 72, GS, 0x6b, 73, datos.length]),
     datos, new Uint8Array([0x0a, ESC, 0x61, 0]),
   ]);
 }
 
-function partesVale(vale, titulo = 'VALE DOLARONES - SIN REGISTRO') {
+function partesVale(vale, titulo = 'VALE DOLARONES - SIN REGISTRO', conCodigo = false) {
   return [
     separador(), centrado(titulo),
     renglonMonto('Saldo del vale', `${(vale.restante / 100).toFixed(2)} D`),
     linea(Date.parse(vale.disponible_desde) <= Date.parse(vale.creado_en)
       ? 'Usalo en tu siguiente compra' : `Disponible: ${fechaHora(vale.disponible_desde)}`),
     linea(`Vence: ${fechaHora(vale.vence_en)}`),
-    ...(vale.restante > 0 ? [codigoBarrasVale(vale.codigo), centrado(vale.codigo)] : []),
+    ...(conCodigo && vale.restante > 0 ? [codigoBarrasVale(vale.codigo)] : []), centrado(vale.codigo),
     linea('Conserva el papel. Copias comparten el saldo.'),
     linea('Solo en El Dolaron. No canjeable por efectivo.'),
   ];
@@ -207,7 +216,7 @@ function partesVale(vale, titulo = 'VALE DOLARONES - SIN REGISTRO') {
 /** Reimprimir conserva código, saldo actual y vencimiento del servidor. */
 export function imprimirVale(vale) {
   return enviar(concatenar([
-    ...encabezado('VALE DOLARONES'), ...partesVale(vale),
+    ...encabezado('VALE DOLARONES'), ...partesVale(vale, undefined, true),
     new Uint8Array([0x0a, 0x0a, 0x0a, GS, 0x56, 0x42, 0x00]),
   ]));
 }
@@ -271,7 +280,13 @@ export async function imprimirTicket(venta, lineas) {
   partes.push(new Uint8Array([0x0a, 0x0a, 0x0a]));
   partes.push(new Uint8Array([GS, 0x56, 0x42, 0x00]));   // corte con avance de papel
 
-  return enviar(concatenar(partes));
+  const impreso = await enviar(concatenar(partes));
+  // El codigo de barras dentro de un ticket largo trababa la impresora de la caja
+  // (no imprimia lo que seguia ni cortaba; bug-log #9). El vale sale en su papel,
+  // como la reimpresion, que si funciona, cuando la impresora ya vacio el ticket.
+  if (!venta.vale_emitido || venta.vale_emitido.restante <= 0) return impreso;
+  await new Promise((listo) => setTimeout(listo, PAUSA_VALE_MS));
+  return (await imprimirVale(venta.vale_emitido)) && impreso;
 }
 
 /* ---------- Corte de caja y retiros (Issue #100): hojas para firmar ---------- */

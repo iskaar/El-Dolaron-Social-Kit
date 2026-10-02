@@ -177,8 +177,13 @@ test('vale usa Code128 nativo con longitud, saldo y vencimiento; no raster ni co
     disponible_desde:'2026-10-03T06:00:00Z', vence_en:'2026-11-01T18:00:00Z', creado_en:'2026-10-02T18:00:00Z' };
   const codigo = codigoBarrasVale(vale.codigo);
   const pos = [...codigo].findIndex((b,i) => b===0x1d && codigo[i+1]===0x6b);
-  assert.deepEqual([...codigo.slice(pos,pos+4)], [0x1d,0x6b,73,21]);
-  assert.equal(new TextDecoder().decode(codigo.slice(pos+4,pos+25)), '{BDP-abcdefghijklmnop');
+  // Conjunto C: {C + 15 pares de los 30 dígitos que el lector escribe y la caja traduce.
+  const { codigoEnDigitos, codigoDeDigitos } = await import('../public/code128.js');
+  const digitos = codigoEnDigitos(vale.codigo);
+  assert.deepEqual([...codigo.slice(pos,pos+4)], [0x1d,0x6b,73,17]);
+  assert.deepEqual([...codigo.slice(pos+4,pos+21)], [0x7b,0x43,...digitos.match(/../g)!.map(Number)]);
+  assert.equal(codigoDeDigitos(digitos), vale.codigo);
+  assert.equal(codigoDeDigitos('000123'), null);   // etiqueta de pieza: sigue siendo pieza
   assert.throws(() => codigoBarrasVale('DP-abc\x1b@'), /inválido/);
   const { venta, lineas } = ticketLargo();
   await imprimirTicket({ ...venta, vale_emitido:vale }, lineas);
@@ -190,7 +195,9 @@ test('vale usa Code128 nativo con longitud, saldo y vencimiento; no raster ni co
   assert.match(texto, /Disponible: 03\/10\/2026, (00:00|12:00 a\.m\.)/);
   assert.doesNotMatch(texto, /Usalo en tu siguiente compra/);
   assert.match(texto, /Copias comparten el saldo/);
-  assert.equal(texto.split('{BDP-abcdefghijklmnop').length-1, 2);
+  // El ticket no lleva código de barras; el vale sale aparte, más la reimpresión: 2.
+  assert.equal(bytes.filter((b,i) => b===0x1d && bytes[i+1]===0x6b).length, 2);
+  assert.equal(texto.split('DP-abcdefghijklmnop').length-1, 3);
   assert.ok(!bytes.some((b,i) => b===0x1d && bytes[i+1]===0x76), 'sin imagen raster');
 });
 
@@ -205,7 +212,7 @@ test('vale nuevo anuncia siguiente compra en ticket y reimpresión; socio conser
     socio:{ numero:1, ganados:2000, saldo:0 } }, lineas);
   await imprimirVale({ ...vale, disponible_desde:'2026-10-02T17:59:59Z' });
   const texto = new TextDecoder().decode(Uint8Array.from(pedazos.flatMap((p) => [...p])));
-  assert.equal(texto.split('Usalo en tu siguiente compra').length - 1, 3);
+  assert.equal(texto.split('Usalo en tu siguiente compra').length - 1, 4);   // ticket x2, vale aparte, reimpresión
   assert.doesNotMatch(texto, /Disponible:/);
   assert.match(texto, /Ganaste \(usables desde manana\)/);
   assert.match(texto, /Vence: 01\/11\/2026, 12:00/);
