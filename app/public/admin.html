@@ -29,7 +29,8 @@
   #filtros button { background: #fff; color: #1a1f2b; border: 1px solid var(--linea); }
   #filtros button[aria-pressed="true"] { background: var(--azul); color: #fff; border-color: var(--azul); }
   .ficha { display: grid; grid-template-columns: 160px 1fr; gap: 16px; background: #fff;
-    border: 1px solid var(--linea); border-radius: 12px; padding: 14px; margin-bottom: 14px; }
+    border: 1px solid var(--linea); border-radius: 12px; padding: 14px; margin-bottom: 14px;
+    content-visibility: auto; contain-intrinsic-size: auto 260px; }   /* el navegador no pinta las que no se ven */
   .ficha img { width: 100%; aspect-ratio: 1; object-fit: cover; border-radius: 8px; background: #eceff4; }
   .retomar { display: block; margin-top: 6px; text-align: center; font-size: 13px; font-weight: 600;
     color: var(--azul); border: 1px solid var(--linea); border-radius: 8px; padding: 7px; cursor: pointer; }
@@ -100,6 +101,7 @@
   </div>
 
   <div id="cola"></div>
+  <div id="cola-fin"></div>
 </main>
 
 <script type="module">
@@ -366,10 +368,27 @@ document.getElementById('f-limpiar').addEventListener('click', () => {
   cargarCola();
 });
 
+// Cada ficha es un formulario completo: armar cientos de golpe congelaba la página.
+// Se pintan de 24 en 24 y la siguiente tanda entra al acercarse al final.
+const TANDA = 24;
+let porPintar = [];
+const finCola = document.getElementById('cola-fin');
+const observador = new IntersectionObserver(([fin]) => { if (fin.isIntersecting) pintarTanda(); }, { rootMargin: '1500px' });
+function pintarTanda() {
+  if (porPintar.length === 0) return;
+  cola.append(...porPintar.slice(0, TANDA).map(ficha));
+  porPintar = porPintar.slice(TANDA);
+  // Volver a observar avisa otra vez si el final sigue a la vista (pantalla alta).
+  observador.unobserve(finCola);
+  observador.observe(finCola);
+}
+
 async function cargarCola() {
   // Todo de una vez y se filtra aqui: las sesiones se deducen de todas las
   // fotos, no solo de las que pasan el filtro de estado.
-  const todas = await (await fetch('/api/borradores')).json();
+  // El servidor las da en orden de captura (Etiquetas lo necesita así); aquí se
+  // revisa lo nuevo, así que va de la más nueva a la más vieja.
+  const todas = (await (await fetch('/api/borradores')).json()).reverse();
   const { porPieza: sesionDe, sesiones } = agruparSesiones(todas);
   pintarSesiones(sesiones);
   const piezas = todas.filter((p) => pasaFiltros(p, sesionDe));
@@ -380,7 +399,9 @@ async function cargarCola() {
   const listas = todas.filter((p) => p.estado_analisis === 'listo');
   existentes = new Map(listas.filter((p) => p.nombre).map((p) => [normalizar(p.nombre), p]));
 
-  cola.replaceChildren(...piezas.map(ficha));
+  cola.replaceChildren();
+  porPintar = piezas;
+  pintarTanda();
   const porEstado = piezas.reduce((acc, p) => ({ ...acc, [p.estado_analisis]: (acc[p.estado_analisis] ?? 0) + 1 }), {});
   const de = piezas.length === todas.length ? '' : ` de ${todas.length}`;
   resumen.textContent = `${piezas.length}${de} piezas · ${porEstado.pendiente ?? 0} pendientes · ${porEstado.error ?? 0} con error`;
@@ -431,7 +452,7 @@ document.getElementById('reintentar-todo').addEventListener('click', async (even
   setTimeout(cargarCola, 12000);
 });
 
-/** Guarda cada ficha visible con lo que tenga en pantalla, sin tocarlas una por una. */
+/** Guarda cada ficha ya pintada (las que se han visto) con lo que tenga en pantalla, sin tocarlas una por una. */
 document.getElementById('guardar-todo').addEventListener('click', async (evento) => {
   const boton = evento.currentTarget;
   const avisoTodo = document.getElementById('aviso-todo');
