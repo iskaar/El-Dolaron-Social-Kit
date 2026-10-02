@@ -442,7 +442,7 @@ function buscarPieza(codigo) {
   return undefined;
 }
 
-function agregarCodigo(leido) {
+function agregarCodigo(leido, reintento = false) {
   if (cobrando) return;
   const codigo = codigoDeDigitos(leido) ?? leido;
   if (/^D[CP]-/.test(codigo.trim())) {
@@ -454,6 +454,8 @@ function agregarCodigo(leido) {
   if (!pieza) {
     $('aviso').textContent = `Código no encontrado: ${codigo}`;
     $('aviso').style.color = '#D72B32';
+    // La pieza pudo etiquetarse después de abrir la caja: se baja el catálogo y se reintenta una vez.
+    if (!reintento && navigator.onLine) cargarCatalogo().then(() => { if (buscarPieza(codigo)) agregarCodigo(leido, true); });
     return;
   }
 
@@ -1255,6 +1257,9 @@ function pintarRed() {
 addEventListener('online', () => { pintarRed(); cargarConfigVales(); sincronizar(); cargarCatalogo(); });
 addEventListener('offline', () => { pintarRed(); valesHabilitados = null; notaVales(); });
 setInterval(sincronizar, 30000);
+// Lo etiquetado durante el día también aparece en la búsqueda por nombre sin recargar la caja.
+// ponytail: catálogo completo cada 5 min; pedir sólo lo cambiado si el catálogo crece mucho.
+setInterval(() => { if (navigator.onLine) cargarCatalogo(); }, 5 * 60_000);
 
 function pintarImpresora() {
   const lista = impresoraLista();
