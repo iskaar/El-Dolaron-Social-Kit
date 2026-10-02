@@ -49,8 +49,12 @@ export async function abrirCamara(idElemento, alLeer) {
   try {
     await lector.start(
       { facingMode: 'environment' },
-      // Caja ancha y baja: un Code128 es una tira, no un cuadrado.
-      { fps: 10, qrbox: (ancho, alto) => ({ width: Math.floor(ancho * 0.9), height: Math.floor(alto * 0.45) }) },
+      // Caja ancha y baja: un Code128 es una tira, no un cuadrado. Sin pedir
+      // resolucion la camara abre a ~640x480 y sin enfoque continuo: las barras
+      // finas de la etiqueta y del vale no se distinguen (Isaac, 01/10).
+      { fps: 15, qrbox: (ancho, alto) => ({ width: Math.floor(ancho * 0.9), height: Math.floor(alto * 0.45) }),
+        videoConstraints: { facingMode: 'environment', width: { ideal: 1920 }, height: { ideal: 1080 },
+          advanced: [{ focusMode: 'continuous' }] } },
       (texto) => {
         const codigo = texto.trim();
         const ahora = Date.now();
