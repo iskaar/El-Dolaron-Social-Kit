@@ -166,6 +166,16 @@
     </div>
     <p id="nota-vales" style="font-size:12px;color:#5b6478">El teléfono sólo acumula; para gastar hace falta el código.</p>
 
+    <!-- Impresión remota: controles independientes del escáner/cámara. -->
+    <div id="opcion-impresion-remota">
+      <label><input id="modo-remoto" type="checkbox"> Imprimir en otra caja</label>
+      <div id="destino-impresion" hidden>
+        <label for="imprimir-en">Imprimir en:</label>
+        <select id="imprimir-en"></select>
+        <p>En el celular sólo tarjeta o transferencia</p>
+      </div>
+    </div>
+
     <label for="forma">Forma de pago</label>
     <select id="forma">
       <option value="efectivo">Efectivo</option>
@@ -181,6 +191,8 @@
     <button id="cancelar" type="button">Cancelar venta</button>
     <button id="abrir-cajon" type="button">Abrir cajón</button>
     <div id="aviso"></div>
+    <div id="impresiones-aviso" role="alert"></div>
+    <button id="abrir-impresion-fallida" type="button" hidden>Abrir venta para reimprimir</button>
     <div id="rechazadas"></div>
     <div id="vales-conciliados" role="status"></div>
 
@@ -349,6 +361,31 @@ fetch('/api/yo').then((r) => r.json()).then(({ usuario, cajero }) => {
   $('caja-nombre').closest('label').firstChild.textContent = 'Tu caja ';
 }).catch(() => { /* sin red: la de la computadora */ });
 
+/* ---------- impresión remota: destino recordado y sin efectivo ---------- */
+const impresionRemota = () => !impresoraLista() && $('modo-remoto').checked;
+// Reusar las estaciones del selector existente, sin otra lista de cajas.
+for (const opcion of $('caja-nombre').options) {
+  if (opcion.value) $('imprimir-en').add(opcion.cloneNode(true));
+}
+$('imprimir-en').value = 'Caja 1';
+try { $('imprimir-en').value = localStorage.getItem('imprimir-en') || 'Caja 1'; } catch { /* se elige cada vez */ }
+if (!$('imprimir-en').value) $('imprimir-en').value = 'Caja 1';
+$('imprimir-en').addEventListener('change', () => {
+  try { localStorage.setItem('imprimir-en', $('imprimir-en').value); } catch { /* idem */ }
+});
+$('modo-remoto').addEventListener('change', pintar);
+function pintarImpresionRemota() {
+  const remota = impresionRemota();
+  $('opcion-impresion-remota').hidden = impresoraLista();
+  $('destino-impresion').hidden = !remota;
+  $('modo-remoto').disabled = cobrando;
+  $('imprimir-en').disabled = cobrando;
+  $('forma').querySelector('[value="efectivo"]').disabled = remota;
+  if (remota && $('forma').value === 'efectivo') $('forma').value = 'tarjeta';
+  $('efectivo').disabled = cobrando || remota;
+  for (const id of ['abrir-cajon', 'abrir-retiro', 'abrir-corte']) $(id).disabled = remota;
+}
+
 function exigirCaja() {
   if (cajaActual()) return true;
   $('aviso').textContent = 'Elige arriba qué caja es esta computadora.';
@@ -423,6 +460,7 @@ function pintar() {
   const autorizado = !usados || (codigoSocio && usados <= socio.maximo && Date.parse(socio.expira_en) > Date.now());
   $('usar-maximo').disabled = cobrando || !codigoSocio || maximoCanje(socio, t.total) === 0;
   for (const id of ['codigo', 'socio', 'buscar-socio', 'quitar-socio', 'dolarones', 'efectivo', 'forma', 'cancelar']) $(id).disabled = cobrando;
+  pintarImpresionRemota();
   $('cobrar').disabled = cobrando || t.total === 0 || usados > t.total || usados > canjeable || !autorizado;
   $('codigo-autorizacion').textContent = socio?.vale
     ? `Vale impreso: ${dolares(socio.disponible)}. Vence ${new Date(socio.expira_en).toLocaleString('es-MX')}.`
@@ -648,6 +686,7 @@ async function cobrarConDolarones(venta, t) {
     return false;
   }
   // Un reenvio de la misma venta ya confirmada devuelve `duplicada` sin saldo: se imprime lo local.
+  if (Object.hasOwn(cuerpo, 'imprimir_en')) venta.imprimir_en = cuerpo.imprimir_en;
   venta.vale_emitido = cuerpo.vale_emitido;
   venta.vale_usado = cuerpo.vale_usado;
   if (socio.vale) return { vale:true };
@@ -662,6 +701,11 @@ async function cobrar() {
   if (!exigirCaja()) return;
   const efectivo = Math.round(Number($('efectivo').value || 0) * 100);
   const forma = $('forma').value;
+  const imprimirEn = impresionRemota() ? $('imprimir-en').value : undefined;
+  if (imprimirEn && forma === 'efectivo') {
+    $('aviso').textContent = 'En el celular sólo tarjeta o transferencia';
+    return;
+  }
   const usados = dolaronesPedidos();
   const t = totales(lineas, efectivo, usados);
   if (usados > saldoCanjeable(socio, t.total)) {
@@ -692,6 +736,7 @@ async function cobrar() {
       cliente_id: socio?.id ?? null,
       dolarones: usados,
       caja: cajaActual(),
+      ...(imprimirEn ? { imprimir_en: imprimirEn } : {}),
     };
     let socioTicket = socio && !socio.vale && { numero: socio.numero, ganados: 0, saldo: socio.disponible };
     if (usados > 0) {
@@ -713,6 +758,7 @@ async function cobrar() {
         return;
       }
       if (r?.ok && cuerpo && Object.hasOwn(cuerpo, 'ganados') && Object.hasOwn(cuerpo, 'vale_emitido')) {
+        if (Object.hasOwn(cuerpo, 'imprimir_en')) venta.imprimir_en = cuerpo.imprimir_en;
         venta.vale_emitido = cuerpo.vale_emitido;
         if (socioTicket) {
           socioTicket.ganados = cuerpo.ganados ?? 0;
@@ -727,9 +773,11 @@ async function cobrar() {
     // El cajon primero: cajon y ticket van en fila por el mismo USB, y el cajero
     // no espera a que termine el logo. Una venta con tarjeta no toca el cajon.
     // Nada de esto espera al servidor ni bloquea el cobro; si falla, el pie lo dice.
-    if (forma === 'efectivo') abrirCajon();
-    imprimirTicket({ ...venta, total: t.total, cambio: t.cambio, socio: socioTicket }, venta.lineas)
-      .then(pintarImpresora);
+    if (!venta.imprimir_en) {
+      if (forma === 'efectivo') abrirCajon();
+      imprimirTicket({ ...venta, total: t.total, cambio: t.cambio, socio: socioTicket }, venta.lineas)
+        .then(pintarImpresora);
+    }
 
     // Bajar existencias en la copia local: sin esto, la misma etiqueta se podria
     // volver a cobrar mientras no haya red para refrescar el catalogo.
@@ -744,7 +792,11 @@ async function cobrar() {
     const ganados = socioTicket?.ganados || venta.vale_emitido?.importe || 0;
     $('aviso').textContent = (forma === 'efectivo' && efectivo > 0 ? `Cobrado. Cambio ${pesos(t.cambio)}` : 'Cobrado.')
       + (ganados ? ` · Ganó ${dolares(ganados)}` : '');
-    if (venta.vale_pendiente) $('aviso').textContent += ' · Se revisará si corresponde un vale al sincronizar; no se imprimió un código de gasto.';
+    if (venta.imprimir_en) $('aviso').textContent += ` Ticket enviado a ${venta.imprimir_en}.`;
+    if (venta.imprimir_en && (venta.vale_pendiente || venta.recompensa_pendiente)) $('aviso').textContent += ' Sin red: se enviará al sincronizar.';
+    if (venta.vale_pendiente) $('aviso').textContent += venta.imprimir_en
+      ? ' · El vale se revisará y se imprimirá en esa caja al sincronizar.'
+      : ' · Se revisará si corresponde un vale al sincronizar; no se imprimió un código de gasto.';
     if (venta.recompensa_pendiente) $('aviso').textContent += ' · Se revisará si ganó Dolarones al sincronizar.';
     $('aviso').style.color = '#1f7a4d';
     lineas = [];
@@ -790,7 +842,7 @@ async function sincronizar() {
         if (!cuerpo || typeof cuerpo !== 'object' ||
           !Object.hasOwn(cuerpo, venta.vale_pendiente ? 'vale_emitido' : 'ganados')) break;
         const emitido = !!cuerpo.vale_emitido;
-        await store('vales_resultados', 'readwrite', (s) => s.put({
+        if (!venta.imprimir_en) await store('vales_resultados', 'readwrite', (s) => s.put({
           id:venta.id, emitido, importe:venta.vale_pendiente ? cuerpo.vale_emitido?.importe ?? 0 : cuerpo.ganados,
           tipo:venta.vale_pendiente ? 'vale' : 'socio',
         }));
@@ -798,6 +850,7 @@ async function sincronizar() {
           ? `Venta ${venta.id} sincronizada. Dolarones ganados: ${dolares(cuerpo.ganados)}.`
           : emitido ? `Venta ${venta.id} sincronizada. El vale fue emitido; imprímelo con el folio del ticket.`
           : `Venta ${venta.id} sincronizada. El servidor confirmó que no se emitió vale.`;
+        if (venta.imprimir_en) $('aviso').textContent = `Venta ${venta.id} sincronizada. Ticket enviado a ${cuerpo.imprimir_en || venta.imprimir_en}.`;
         await pintarResultadosVales();
       }
       await store('ventas', 'readwrite', (s) => s.delete(venta.id));
@@ -925,6 +978,8 @@ async function abrirTicket(id) {
     if (!r.ok) throw new Error(cuerpo.error ?? 'No se pudo abrir el ticket.');
     ticketAbierto = cuerpo;
     $('ticket-contenido').innerHTML = pintarDetalle(cuerpo, { editable: true });
+    if (!cuerpo.cancelada) $('ticket-contenido').insertAdjacentHTML('beforeend',
+      `<p class="nota">Venta: ${escapar(cuerpo.id)}</p><button type="button" data-imprimir-ticket>Reimprimir ticket</button>`);
   } catch (error) {
     $('ticket-contenido').innerHTML = `<p class="nota" style="color:#D72B32">${escapar(error.message || 'Sin red: para ver el ticket hace falta conexión.')}</p>`;
   }
@@ -939,6 +994,30 @@ $('ticket-contenido').addEventListener('click', async (e) => {
   const boton = e.target.closest('button');
   if (!boton || !ticketAbierto) return;
   const d = boton.dataset;
+
+  // Recuperación manual del papel original, incluido su vale, tras fallar el USB.
+  if (d.imprimirTicket !== undefined) {
+    if (!impresoraLista()) { $('ticket-aviso').textContent = 'Conecta la impresora para reimprimir.'; return; }
+    boton.disabled = true;
+    try {
+      const r = await fetch(`/api/ventas/${ticketAbierto.id}?imprimir=1`);
+      const venta = await r.json();
+      if (!r.ok || venta.cancelada) throw new Error(venta.error || 'El ticket está cancelado.');
+      if (venta.imprimir_en && !venta.impreso_en) {
+        const toma = await fetch(`/api/impresiones/${venta.id}/tomar`, { method:'POST',
+          headers:{ 'content-type':'application/json' }, body:JSON.stringify({ caja:cajaActual() }) });
+        if (!toma.ok) throw new Error('No se tomó el ticket. Reabre la venta para revisar si ya se imprimió o pertenece a otra estación.');
+      }
+      const ok = await imprimirTicket(venta, venta.lineas);
+      $('ticket-aviso').textContent = ok ? 'Ticket reimpreso.' : `No se imprimió la venta ${venta.id}: ${errorImpresora() || 'revisa la impresora'}.`;
+      if (ok && $('abrir-impresion-fallida').dataset.folio === venta.id) {
+        $('impresiones-aviso').textContent = '';
+        $('abrir-impresion-fallida').hidden = true;
+      }
+    } catch (error) { $('ticket-aviso').textContent = error.message || 'No se pudo reimprimir.'; }
+    finally { boton.disabled = false; pintarImpresora(); }
+    return;
+  }
 
   if (d.imprimirVale !== undefined) {
     await reimprimirValeDeVenta(ticketAbierto.id, boton, $('ticket-aviso'));
@@ -1104,6 +1183,7 @@ $('cobrar').addEventListener('click', cobrar);
 // que abrir aunque no haya red) y deja quien y cuando en /reportes: se encola
 // como una venta y sincronizar() la manda.
 async function abrirCajonRegistrado(aviso) {
+  if (impresionRemota()) { aviso.textContent = 'El cajón no se abre a distancia.'; return; }
   const abierto = await abrirCajon();
   aviso.textContent = abierto ? 'Cajón abierto.' : `No se abrió el cajón: ${errorImpresora() || 'la impresora no está conectada'}.`;
   aviso.style.color = abierto ? '#5b6478' : '#D72B32';
@@ -1308,6 +1388,40 @@ addEventListener('online', () => { pintarRed(); cargarConfigVales(); sincronizar
 addEventListener('offline', () => { pintarRed(); valesHabilitados = null; notaVales(); });
 setInterval(sincronizar, 30000);
 
+/* ---------- impresión remota: consumidor de esta estación (cajaActual) ---------- */
+let imprimiendoRemotas = false;
+async function imprimirPendientes() {
+  if (imprimiendoRemotas || document.visibilityState !== 'visible' || !impresoraLista() || !cajaActual()) return;
+  imprimiendoRemotas = true;
+  let tomada = null;
+  try {
+    const caja = cajaActual();
+    const r = await fetch(`/api/impresiones?caja=${encodeURIComponent(caja)}`, { cache:'no-store', signal:AbortSignal.timeout(5000) });
+    if (!r.ok) return;
+    const tickets = await r.json();
+    for (const venta of tickets) {
+      if (document.visibilityState !== 'visible' || !impresoraLista() || cajaActual() !== caja) break;
+      tomada = venta.id; // Una respuesta perdida también puede haber confirmado la toma.
+      const toma = await fetch(`/api/impresiones/${venta.id}/tomar`, { method:'POST',
+        headers:{ 'content-type':'application/json' }, body:JSON.stringify({ caja }), signal:AbortSignal.timeout(5000) });
+      if (toma.status === 409) { tomada = null; continue; }
+      if (!toma.ok) { tomada = null; break; }
+      if (!await imprimirTicket(venta, venta.lineas)) throw new Error(errorImpresora() || 'revisa la impresora');
+      tomada = null;
+    }
+  } catch (error) {
+    if (tomada) {
+      $('impresiones-aviso').textContent = `No se imprimió la venta ${tomada}: ${error.message}. Reimprime desde «Ventas de hoy».`;
+      $('abrir-impresion-fallida').dataset.folio = tomada;
+      $('abrir-impresion-fallida').hidden = false;
+    }
+    // Sin red antes de tomar: la venta sigue pendiente para la siguiente consulta.
+  } finally { imprimiendoRemotas = false; pintarImpresora(); }
+}
+setInterval(imprimirPendientes, 4000);
+document.addEventListener('visibilitychange', imprimirPendientes);
+$('abrir-impresion-fallida').addEventListener('click', () => abrirTicket($('abrir-impresion-fallida').dataset.folio));
+
 function pintarImpresora() {
   const lista = impresoraLista();
   const error = errorImpresora();
@@ -1318,6 +1432,7 @@ function pintarImpresora() {
     : (lista ? 'Impresora conectada' : 'Impresora no conectada');
   $('impresora-estado').style.color = error && error !== 'no conectada' ? '#D72B32' : '';
   $('conectar-impresora').hidden = lista;
+  pintarImpresionRemota();
 }
 $('conectar-impresora').addEventListener('click', async () => {
   let motivo = '';
