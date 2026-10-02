@@ -186,9 +186,20 @@ verBoton.addEventListener('click', () => { verImpresas = !verImpresas; pintar();
 // o en otra computadora). Cada una se marca un milisegundo despues de la
 // anterior, en el orden de la lista: asi «No salió desde aquí» regresa esa y
 // las de abajo, no el grupo entero.
-document.getElementById('marcar').addEventListener('click', () => {
+document.getElementById('marcar').addEventListener('click', async () => {
   const ids = [...lista.querySelectorAll('.renglon:not(.impresa) input[type=checkbox]:checked')].map((c) => c.value);
   if (ids.length === 0) return;
+  // También se pide el código, como al imprimir: marcada sin código salía de esta
+  // lista y nunca llegaba a la caja (bug-log #11). A la que ya tiene se le respeta.
+  for (let i = 0; i < ids.length; i += 100) {
+    const respuesta = await fetch('/api/etiquetas', {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ids: ids.slice(i, i + 100) }),
+    }).catch(() => null);
+    if (!respuesta?.ok) {
+      resumen.textContent = (await respuesta?.json().catch(() => ({})))?.error ?? 'No se pudieron marcar: revisa la red e intenta otra vez.';
+      return;
+    }
+  }
   const base = Date.now();
   const porId = new Map(piezas.map((p) => [p.id, p]));
   ids.forEach((id, i) => marcarImpresa(id, new Date(base + i).toISOString(), porId.get(id)));
