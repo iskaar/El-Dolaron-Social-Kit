@@ -31,7 +31,7 @@
     "HOST_PORTAL": "sandbox.eldolaron.com",
     "FIREBASE_PROJECT_ID": "el-dolaron",
     "FIREBASE_WEB_API_KEY": "AIzaSyBNauTOpaIaRagXrz0mn3yV1n4MrA4cab4",
-    "BASES_APROBADAS_VERSION": "2026-10-v2",
+    "BASES_APROBADAS_VERSION": "2026-10-v3",
     "PROMOCION_INICIO": "2026-10-01T00:00:00Z",
     "VALES_ABIERTOS": "si",
     "PORTAL_REGISTRO_ABIERTO": "si",
