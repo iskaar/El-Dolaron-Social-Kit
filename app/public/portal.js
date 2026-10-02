@@ -1,3 +1,4 @@
+import qrcode from './vendor/qrcode-generator.js';
 import { svgCode128, codigoEnDigitos } from './code128.js';
 
 const $ = (id) => document.getElementById(id);
@@ -78,7 +79,6 @@ async function actualizarSaldo() {
   $('saldo-compras').textContent = d(s.disponible_compras);
   $('saldo-regalo').textContent = d(s.regalo_sujeto_minimo);
   $('saldo-pendiente').textContent = d(s.por_liberar);
-  $('importe').max = String(s.disponible_total / 100);
   $('minimo').hidden = !s.regalo_sujeto_minimo;
   $('vencimientos').replaceChildren(...s.lotes.map((l) => {
     const li = document.createElement('li');
@@ -165,12 +165,16 @@ $('codigo-form').addEventListener('submit', (e) => {
   accion($('mostrar-codigo'), async () => {
     const uid = auth.currentUser?.uid;
     ocultarCodigo();
-    const r = await api('codigo', { maximo:Math.round(Number($('importe').value) * 100) });
+    const r = await api('codigo', {});
     if (!uid || uid !== auth.currentUser?.uid) return;
     if (!/^DC-[A-Za-z0-9_-]{16}$/.test(r.codigo)) throw new Error('No se pudo generar el código. Intenta otra vez.');
-    $('barcode').innerHTML = svgCode128(codigoEnDigitos(r.codigo), { alto:24 });
+    const digitos = codigoEnDigitos(r.codigo);
+    const qr = qrcode(0, 'M'); qr.addData(digitos, 'Numeric'); qr.make();
+    // margin 4 = zona muda mínima del estándar; el tamaño lo da el CSS.
+    $('qr').innerHTML = qr.createSvgTag({ cellSize:1, margin:4, scalable:true });
+    $('barcode').innerHTML = svgCode128(digitos, { alto:24 });
     $('codigo-legible').textContent = r.codigo;
-    $('codigo-importe').textContent = r.maximo ? 'Autorizaste hasta ' + d(r.maximo) + ' para esta compra.' : 'Sólo acumular Dolarones.';
+    $('codigo-importe').textContent = r.maximo ? 'Puedes usar hasta ' + d(r.maximo) + '. En caja te preguntan si los usas.' : 'Esta compra acumula Dolarones.';
     venceCodigo = Math.min(Date.parse(r.expira_en), Date.now() + 5 * 60_000);
     $('codigo-panel').hidden = false; cuentaRegresiva(); estado('Muestra tu código en caja.');
   });

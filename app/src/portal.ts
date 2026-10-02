@@ -2,6 +2,8 @@ import { saldo, codigoAleatorio, hashCodigo, basesListas, promocionIniciada } fr
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const DIA = 86_400_000;
+// Bases 2026-10-v3: cada premio de apertura vence 24 h después de otorgarse.
+const VIGENCIA_PREMIO = DIA;
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), {
   status, headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' },
 });
@@ -65,7 +67,7 @@ async function cliente(env: Env, uid: string): Promise<Cliente | null> {
 async function premio(env: Env, canal: 'online' | 'tienda', clienteId: string, ahora: Date, orden?: number): Promise<void> {
   const lote = crypto.randomUUID();
   const iso = ahora.toISOString();
-  const vence = new Date(ahora.getTime() + 30 * DIA).toISOString();
+  const vence = new Date(ahora.getTime() + VIGENCIA_PREMIO).toISOString();
   await env.DB.batch([
     env.DB.prepare(`update premios_apertura set cliente_id = ?, lote_id = ? where rowid = (
       select rowid from premios_apertura where canal = ? and cliente_id is null
@@ -169,7 +171,7 @@ export async function llegada(request: Request, env: Env, autor: string): Promis
           .bind(id, nuevo),
         env.DB.prepare(`insert into dolarones_lotes (id, cliente_id, origen, importe, restante, disponible_desde, vence_en, creado_en)
           select lote_id, cliente_id, 'regalo', importe, importe, ?, ?, ? from premios_apertura where lote_id = ?`)
-          .bind(iso, new Date(ahora.getTime() + 30 * DIA).toISOString(), iso, nuevo),
+          .bind(iso, new Date(ahora.getTime() + VIGENCIA_PREMIO).toISOString(), iso, nuevo),
         env.DB.prepare(`insert into dolarones_movimientos (cliente_id, lote_id, tipo, importe, autor, creado_en)
           select cliente_id, id, 'regalo', importe, ?, ? from dolarones_lotes where id = ?`).bind(autor, iso, nuevo),
       ]);
@@ -243,11 +245,13 @@ export async function portal(request: Request, env: Env, url: URL): Promise<Resp
     if (!basesListas(env) || socio.bases_version !== env.BASES_APROBADAS_VERSION)
       return json({ error: 'Acepta las bases vigentes antes de generar tu código.' }, 409);
     const body = await request.json().catch(() => ({})) as { maximo?: unknown };
-    const maximo = body.maximo;
+    const ahora = new Date();
+    const disponible = (await saldo(env, socio.id, ahora.toISOString())).disponible;
+    // Sin máximo = todo el saldo: el cliente sólo muestra el código y en caja le preguntan si los usa.
+    const maximo = body.maximo === undefined ? disponible : body.maximo;
     if (typeof maximo !== 'number' || !Number.isSafeInteger(maximo) || maximo < 0)
       return json({ error: 'Importe inválido.' }, 400);
-    const ahora = new Date();
-    if (maximo > (await saldo(env, socio.id, ahora.toISOString())).disponible)
+    if (maximo > disponible)
       return json({ error: 'El importe supera tu saldo disponible.' }, 409);
     const codigo = codigoAleatorio('DC');
     const expira = new Date(ahora.getTime() + 5 * 60_000).toISOString();

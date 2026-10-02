@@ -205,7 +205,7 @@ test('allowlist pública sirve sólo portal y assets necesarios; no abre caja, a
       return new Response(readFileSync('public/' + (ruta === '/portal' ? 'portal.html' : ruta.slice(1))),
         { headers:{ 'content-type':ruta === '/portal' ? 'text/html' : 'text/javascript' } });
     } } as unknown as Fetcher;
-    for (const ruta of ['/', '/portal', '/portal.html', '/portal.js', '/portal.css', '/code128.js']) {
+    for (const ruta of ['/', '/portal', '/portal.html', '/portal.js', '/portal.css', '/code128.js', '/vendor/qrcode-generator.js']) {
       const r = await worker.fetch!(new Request('https://portal.prueba' + ruta) as never, p.env, {} as never);
       assert.equal(r.status, 200, ruta);
       assert.equal(r.headers.get('cache-control'), 'no-store');
@@ -217,7 +217,7 @@ test('allowlist pública sirve sólo portal y assets necesarios; no abre caja, a
       '/cajero.js', '/venta.js', '/api/ventas', '/api/socios/codigo', '/api/socios/vincular',
       '/api/foto/123', '/api/portal/llegada', '/foo/portal.html'])
       assert.equal((await p.llamar(ruta, '')).status, 404, ruta);
-    assert.equal(leidos.length, 6);
+    assert.equal(leidos.length, 7);
     assert.equal((await p.llamar('/portal.js', '', {}, 'POST')).status, 404);
     assert.equal((await p.pedir('/api/portal/config')).status, 404);
     const config = await p.llamar('/api/portal/config', '');
@@ -267,6 +267,14 @@ test('barcode privado: monto limitado, caducidad, un solo uso e idempotencia de 
     assert.equal((await p.pedir('/api/ventas', { ...v, id:crypto.randomUUID(), codigo_socio:acumular.body.codigo })).status, 403);
     p.db.prepare("update codigos_cliente set expira_en='2020-01-01'").run();
     assert.equal((await p.pedir('/api/socios/codigo', { codigo:acumular.body.codigo })).status, 403);
+    // Bases v3: sin máximo, el código autoriza todo el saldo (en caja se pregunta si se usa).
+    p.db.prepare("update codigos_cliente set creado_en='2020-01-01'").run();
+    const todo = await p.llamar('/api/portal/codigo', auth, {}, 'POST');
+    assert.equal(todo.status, 201);
+    assert.equal(todo.body.maximo, (await p.llamar('/api/portal/saldo', auth)).body.disponible_total);
+    // Bases v3: el premio de apertura vence 24 h después de otorgarse.
+    const premio = p.db.prepare("select creado_en, vence_en from dolarones_lotes where cliente_id = ? and origen = 'regalo'").get(a.body.id)!;
+    assert.equal(Date.parse(String(premio.vence_en)) - Date.parse(String(premio.creado_en)), 86_400_000);
   } finally { p.cerrar(); }
 });
 

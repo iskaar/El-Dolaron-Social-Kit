@@ -67,12 +67,11 @@
     </section>
     <p id="minimo" class="nota" hidden>El regalo de apertura se usa en tickets de $1,000 MXN o más antes de descontar Dolarones. Lo ganado por compras no tiene ese mínimo.</p>
     <form id="codigo-form">
-      <label for="importe">¿Cuántos Dolarones quieres usar como máximo?</label>
-      <input id="importe" type="number" inputmode="decimal" min="0" step="0.01" value="0" required>
-      <p class="nota">Deja 0 para acumular. El resto de la compra se paga en caja.</p>
+      <p class="nota">Al pagar, muestra tu código en caja. Ahí te preguntan si quieres usar tus Dolarones.</p>
       <button id="mostrar-codigo" type="submit">Mostrar mi código para caja</button>
     </form>
     <section id="codigo-panel" hidden aria-label="Código para escanear">
+      <div id="qr" role="img" aria-label="Código QR de tu membresía"></div>
       <div id="barcode" role="img" aria-label="Código de barras de tu membresía"></div>
       <p id="codigo-legible"></p><p id="codigo-importe"></p>
       <p id="codigo-tiempo" role="status"></p>

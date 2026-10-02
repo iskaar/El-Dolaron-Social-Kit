@@ -154,6 +154,7 @@ test('caja reintenta un canje tras perder la respuesta con el mismo folio, fecha
       socio: { vale: true, disponible: 1000 },
       $: (id: string) => ({ value: id === 'efectivo' ? '245' : 'efectivo', style: {} }),
       exigirCaja: () => true, cajaActual: () => 'Caja 1', dolaronesPedidos: () => 500,
+      impresionRemota: () => false,
       totales, efectivoAlcanza, saldoCanjeable, pintar() {},
       cobrarConDolarones: async (venta: Record<string, unknown>) => {
         respuestas.push((await t.pedir('/api/ventas', { ...venta, codigo_vale: vale.codigo })).status);

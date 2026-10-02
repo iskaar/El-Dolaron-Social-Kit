@@ -99,6 +99,7 @@ export function permiso(pathname: string, metodo: string): Regla {
   // ponytail: cancelar sigue abierto al cajero hasta la fase 2 del Issue #75,
   // que lo pasa por una solicitud aprobada por el dueno.
   if (ruta === '/api/ventas' || ruta.startsWith('/api/ventas/')) return CAJA;
+  if (ruta === '/api/impresiones' || ruta.startsWith('/api/impresiones/')) return CAJA;
 
   return DUENO;
 }

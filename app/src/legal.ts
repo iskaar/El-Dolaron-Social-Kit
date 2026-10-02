@@ -1,10 +1,13 @@
 // Bases y aviso de privacidad de Dolarones que ve el cliente en el portal.
 // Version 2026-10-v2, 1 de octubre de 2026: Isaac autoriza el vale desde la
-// siguiente compra. Viven aqui y no en variables porque Cloudflare limita cada
+// siguiente compra. Version 2026-10-v3, 2 de octubre de 2026: con visto bueno
+// del abogado, los premios de apertura vencen en 24 horas y el cliente ya no
+// elige un maximo en el portal; en caja se le pregunta si usa sus Dolarones.
+// Viven aqui y no en variables porque Cloudflare limita cada
 // variable a 5 KB. Cambiar este texto exige subir BASES_APROBADAS_VERSION.
 
 export const BASES = `BASES DEL PROGRAMA DOLARONES
-Versión 2026-10-v2, 1 de octubre de 2026
+Versión 2026-10-v3, 2 de octubre de 2026
 
 1. Organizador
 María Teresa Ferrusca Pérez, RFC FEPT660329TH4, con nombre comercial El Dolarón, en Jardín Hidalgo 129, Zona Centro, Soledad de Graciano Sánchez, San Luis Potosí, C.P. 78430.
@@ -65,19 +68,19 @@ Total: 100 premios = 15,000 Dolarones
 Reglas de la promoción:
 - Solo puede otorgarse un premio de apertura por persona.
 - Los 500 Dolarones son exclusivos de la primera persona que llegue físicamente a la tienda. Si esa persona ya recibió un premio en línea, ese premio se sustituye por los 500 Dolarones, el importe que tenía vuelve a la bolsa en línea y no se acumulan ambos premios. Si su premio en línea ya se usó en parte o ya venció, conserva ese premio como está, pierde el derecho a los 500 Dolarones y estos quedan sin asignar.
-- No hay prerregistro. El premio en línea se otorga cuando la persona completa su registro, a partir del 2 de octubre de 2026 a las 11:00 (hora de la tienda), y sus 30 días cuentan desde ese momento. El orden lo fija el servidor, no el navegador.
+- No hay prerregistro. El premio en línea se otorga cuando la persona completa su registro, a partir del 5 de octubre de 2026 a las 11:00 (hora de la tienda), y sus 24 horas cuentan desde ese momento. El orden lo fija el servidor, no el navegador.
 - Los cupos en tienda se otorgan en el orden en que el personal confirma la llegada de cada persona presente.
 - Al agotarse los cupos de un canal no se otorgan más premios en él.
 - Los premios de apertura se pueden gastar en partes en tickets de $1,000 MXN o más, calculados antes de descontar Dolarones. Esta condición no aplica a los Dolarones ganados por compras.
-- Cada premio vence 30 días después de otorgarse. Lo no usado vence y no se reasigna.
+- Cada premio vence 24 horas después de otorgarse. Lo no usado vence y no se reasigna.
 
 8. Cómo se usan
-Al pagar, el socio inicia sesión en el portal, elige el máximo de Dolarones que autoriza y muestra su código de barras en caja. El código dura cinco minutos y permite un solo canje; generar otro invalida el anterior. Un código con máximo cero identifica al socio para acumular, sin autorizar gasto. Dar solo el teléfono o número de socio tampoco autoriza gasto. En caja se pueden usar los Dolarones completos o en parte, hasta el máximo autorizado, y el canje requiere conexión. Los Dolarones se descuentan primero de los que vencen antes. El resto de la compra se paga en efectivo o con tarjeta. El saldo aparece en el ticket.
+Al pagar, el socio inicia sesión en el portal y muestra su código en caja. Ahí se le pregunta si quiere usar sus Dolarones: todos los que apliquen a la compra, una parte o ninguno. El código dura cinco minutos y permite un solo canje; generar otro invalida el anterior. Dar solo el teléfono o número de socio no autoriza gasto. El canje requiere conexión. Los Dolarones se descuentan primero de los que vencen antes. El resto de la compra se paga en efectivo o con tarjeta. El saldo aparece en el ticket.
 
 El cliente sin registro presenta su vale impreso. En caja se consulta su saldo y vigencia; «Usar máximo» cubre el total de la compra o usa el saldo elegible, lo que sea menor. También se puede indicar un importe parcial. En esta versión se usa un vale o una membresía por ticket, no varios a la vez, y el vale no se traspasa al saldo de una cuenta. Un vale perdido no se repone: es al portador, como dinero de la tienda. El personal solo lo reimprime si se presenta el papel dañado, o si el ticket de la compra quedó sin vale por una falla de impresión o de conexión; para eso el ticket trae el folio de la venta.
 
 9. Seguridad del acceso
-No compartas códigos SMS, tu sesión ni el código de barras: quien copie un código vigente podría usarlo hasta el máximo autorizado. En dispositivos compartidos, no conserves la sesión y ciérrala al terminar. Generar otro código o cerrar sesión invalida el anterior (requiere conexión). El encargado revisa presencialmente la vinculación de una membresía previa; un teléfono coincidente no la vincula automáticamente. No hay recuperación automática de una cuenta ya vinculada.
+No compartas códigos SMS, tu sesión ni el código de barras: quien copie un código vigente podría gastar tu saldo disponible. En dispositivos compartidos, no conserves la sesión y ciérrala al terminar. Generar otro código o cerrar sesión invalida el anterior (requiere conexión). El encargado revisa presencialmente la vinculación de una membresía previa; un teléfono coincidente no la vincula automáticamente. No hay recuperación automática de una cuenta ya vinculada.
 
 10. Devoluciones y cancelaciones
 Si se cancela o devuelve una compra, los Dolarones usados en ella regresan al saldo y los que se ganaron con ella se retiran. Los Dolarones que regresan conservan su vencimiento original: la cancelación y las reimpresiones no lo amplían. Con un vale sucede igual: lo usado regresa al mismo vale, y el vale generado por la compra se retira. Si lo que esa compra generó (Dolarones de socio o vale) ya se gastó en todo o en parte, la compra no se cancela sola; se aclara en la tienda antes de devolver dinero o mercancía. Los derechos del consumidor por ley no cambian por este programa.
