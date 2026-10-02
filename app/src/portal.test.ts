@@ -267,6 +267,14 @@ test('barcode privado: monto limitado, caducidad, un solo uso e idempotencia de 
     assert.equal((await p.pedir('/api/ventas', { ...v, id:crypto.randomUUID(), codigo_socio:acumular.body.codigo })).status, 403);
     p.db.prepare("update codigos_cliente set expira_en='2020-01-01'").run();
     assert.equal((await p.pedir('/api/socios/codigo', { codigo:acumular.body.codigo })).status, 403);
+    // Bases v3: sin máximo, el código autoriza todo el saldo (en caja se pregunta si se usa).
+    p.db.prepare("update codigos_cliente set creado_en='2020-01-01'").run();
+    const todo = await p.llamar('/api/portal/codigo', auth, {}, 'POST');
+    assert.equal(todo.status, 201);
+    assert.equal(todo.body.maximo, (await p.llamar('/api/portal/saldo', auth)).body.disponible_total);
+    // Bases v3: el premio de apertura vence 24 h después de otorgarse.
+    const premio = p.db.prepare("select creado_en, vence_en from dolarones_lotes where cliente_id = ? and origen = 'regalo'").get(a.body.id)!;
+    assert.equal(Date.parse(String(premio.vence_en)) - Date.parse(String(premio.creado_en)), 86_400_000);
   } finally { p.cerrar(); }
 });
 
