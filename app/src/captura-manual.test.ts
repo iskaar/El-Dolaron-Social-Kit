@@ -43,3 +43,16 @@ test('datos malos no dejan pieza vacia; un capturista no puede', async () => {
   (env as unknown as { DEV_USUARIO: string }).DEV_USUARIO = 'cap@prueba.mx';
   assert.equal((await pedir('/api/borradores/manual', pieza())).status, 403);
 });
+
+test('marca y categorias nuevas (#159): se guardan, salen en la cola y en el inventario', async () => {
+  const { db, pedir } = tienda();
+  const cuerpo = pieza({ nombre: 'Bálsamo labial', marca: '  e.l.f.  ', categoria: 'belleza' });
+  assert.equal((await pedir('/api/borradores/manual', cuerpo)).status, 201);
+  assert.deepEqual({ ...db.prepare('select marca, categoria from productos where id = ?').get(cuerpo.id) as object },
+    { marca: 'e.l.f.', categoria: 'belleza' });
+  const cola = (await pedir('/api/borradores')).cuerpo as { id: string; marca: string }[];
+  assert.equal(cola.find((p) => p.id === cuerpo.id)?.marca, 'e.l.f.');
+  const r = await pedir(`/api/borradores/${cuerpo.id}`, { marca: 'Elf' }, 'PATCH');
+  assert.equal(r.status, 200);
+  assert.equal((db.prepare('select marca from productos where id = ?').get(cuerpo.id) as { marca: string }).marca, 'Elf');
+});

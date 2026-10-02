@@ -67,6 +67,7 @@
     <h2>Capturar sin foto</h2>
     <div class="campos">
       <div style="grid-column: 1 / -1"><label for="m-nombre">Nombre</label><input id="m-nombre" maxlength="120" required></div>
+      <div><label for="m-marca">Marca</label><input id="m-marca" maxlength="60"></div>
       <div><label for="m-categoria">Categoría</label><select id="m-categoria"></select></div>
       <div><label for="m-estado">Estado</label><select id="m-estado">
         <option value="nuevo">Nuevo</option><option value="danado">Dañado</option></select></div>
@@ -108,7 +109,9 @@
 import { reducirArchivo } from '/foto.js';
 import { agruparSesiones } from '/sesiones.js';
 
-const CATEGORIAS = ['ropa', 'hogar', 'electronica', 'juguetes', 'otros'];
+import { CATEGORIAS } from '/categorias.js';
+const opcionesCategoria = (elegida) =>
+  CATEGORIAS.map(([c, nombre]) => `<option value="${c}" ${c === elegida ? 'selected' : ''}>${nombre}</option>`).join('');
 // Los siete montos y las familias de banda salen de la tabla `familias` (GET /api/familias).
 const { montos: MONTOS_BANDA, familias: FAMILIAS } = await (await fetch('/api/familias')).json();
 const DESTINOS = [
@@ -117,8 +120,7 @@ const DESTINOS = [
     [`banda_${f.prefijo}${p}`, `Banda ${f.nombre} $${p} → ${f.prefijo.toUpperCase()}${p}`])),
 ];
 const CLAVES_CONFIG = [
-  ['pct_ropa','Ropa %'], ['pct_hogar','Hogar %'], ['pct_electronica','Electrónica %'],
-  ['pct_juguetes','Juguetes %'], ['pct_otros','Otros %'], ['pct_danado','Dañado %'],
+  ...CATEGORIAS.map(([c, nombre]) => [`pct_${c}`, `${nombre} %`]), ['pct_danado','Dañado %'],
   ...MONTOS_BANDA.map((p) => [`banda_${p}`, `Banda $${p}`]),
   ['fondo_caja', 'Fondo por caja $'],
 ];
@@ -184,9 +186,9 @@ function ficha(p) {
       <div class="campos">
         <div style="grid-column: 1 / -1"><label>Nombre</label>
           <input data-campo="nombre" value="${(p.nombre ?? '').replace(/"/g, '&quot;')}"></div>
-        <div><label>Categoría</label><select data-campo="categoria">
-          ${CATEGORIAS.map((c) => `<option value="${c}" ${c === p.categoria ? 'selected' : ''}>${c}</option>`).join('')}
-        </select></div>
+        <div><label>Marca</label>
+          <input data-campo="marca" maxlength="60" value="${(p.marca ?? '').replace(/"/g, '&quot;')}"></div>
+        <div><label>Categoría</label><select data-campo="categoria">${opcionesCategoria(p.categoria)}</select></div>
         <div><label>Estado</label><select data-campo="estado_fisico">
           <option value="nuevo" ${p.estado_fisico === 'nuevo' ? 'selected' : ''}>Nuevo</option>
           <option value="danado" ${p.estado_fisico === 'danado' ? 'selected' : ''}>Dañado</option>
@@ -218,7 +220,7 @@ function ficha(p) {
   const aviso = nodo.querySelector('.aviso');
 
   const base = () => ({
-    nombre: valor('nombre'), categoria: valor('categoria'),
+    nombre: valor('nombre'), marca: valor('marca'), categoria: valor('categoria'),
     estado_fisico: valor('estado_fisico'), precio_lista: centavos(valor('precio_lista')),
     stock: Math.round(Number(valor('stock') || 0)),
   });
@@ -301,7 +303,7 @@ function ficha(p) {
 
 const manual = document.getElementById('manual');
 fetch('/api/yo').then((r) => r.json()).then(({ usuario }) => { manual.hidden = !usuario?.roles.includes('dueno'); });
-document.getElementById('m-categoria').innerHTML = CATEGORIAS.map((c) => `<option value="${c}">${c}</option>`).join('');
+document.getElementById('m-categoria').innerHTML = opcionesCategoria('');
 document.getElementById('m-destino').innerHTML = '<option value="">Automático</option>'
   + DESTINOS.map(([v, t]) => `<option value="${v}">${t}</option>`).join('');
 let idManual = crypto.randomUUID();   // un id por pieza: doble clic o reintento no la duplican
@@ -310,7 +312,7 @@ manual.addEventListener('submit', async (evento) => {
   const v = (id) => document.getElementById(id).value;
   const aviso = document.getElementById('m-aviso');
   const cuerpo = {
-    id: idManual, nombre: v('m-nombre').trim(), categoria: v('m-categoria'), estado_fisico: v('m-estado'),
+    id: idManual, nombre: v('m-nombre').trim(), marca: v('m-marca').trim(), categoria: v('m-categoria'), estado_fisico: v('m-estado'),
     precio_lista: centavos(v('m-lista')), stock: Math.round(Number(v('m-stock') || 1)),
   };
   if (v('m-precio') !== '') cuerpo.precio = centavos(v('m-precio'));
@@ -336,7 +338,7 @@ const elCategoria = document.getElementById('f-categoria');
 const elMin = document.getElementById('f-min');
 const elMax = document.getElementById('f-max');
 const elSesion = document.getElementById('f-sesion');
-elCategoria.insertAdjacentHTML('beforeend', CATEGORIAS.map((c) => `<option value="${c}">${c}</option>`).join(''));
+elCategoria.insertAdjacentHTML('beforeend', opcionesCategoria(''));
 
 // El dia de la tienda, no el de UTC: una foto de las 7 pm ya es "manana" en UTC.
 const diaLocal = (iso) => new Date(iso).toLocaleDateString('en-CA');

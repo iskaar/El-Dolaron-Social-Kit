@@ -11,6 +11,7 @@ import { efectivoAlcanza } from '../public/venta.js';
 import { semanaIngreso } from '../public/semana.js';
 import { detalleVenta, cancelarPieza } from './devoluciones.ts';
 import { BASES, AVISO } from './legal.ts';
+import { CLAVES_CATEGORIA } from '../public/categorias.js';
 import {
   permiso, puede, quienEs, leerUsuario, yo, pedirAcceso, listarCuentas, guardarCuenta, resolverSolicitud,
   esDeCaja, soloComputadora, CAJAS,
@@ -30,6 +31,7 @@ interface FilaBorrador {
   id: string;
   nombre: string;
   categoria: string;
+  marca: string;
   precio_lista: number;
   precio: number;
   estado_fisico: string;
@@ -164,7 +166,7 @@ async function listarBorradores(url: URL, env: Env): Promise<Response> {
   // fisicamente donde se capturaron hasta que se les pega su etiqueta, asi que
   // el orden de la pantalla tiene que ser el mismo que el de la mesa o se
   // vuelve un rompecabezas saber que etiqueta es de que pieza.
-  const consulta = `select id, nombre, categoria, precio_lista, precio, estado_fisico,
+  const consulta = `select id, nombre, categoria, marca, precio_lista, precio, estado_fisico,
                            estado_analisis, destino, stock, semana_ingreso, capturado_por, creado_en
                     from productos
                     where sin_inventario = 0 ${estado ? 'and estado_analisis = ?' : ''}
@@ -176,7 +178,7 @@ async function listarBorradores(url: URL, env: Env): Promise<Response> {
   return json(results);
 }
 
-const CATEGORIAS = new Set(['ropa', 'hogar', 'electronica', 'juguetes', 'otros']);
+const CATEGORIAS = new Set(CLAVES_CATEGORIA);
 
 /** Etiqueta individual, o una banda de una familia que existe en la tabla `familias`. */
 async function destinoValido(destino: string, env: Env): Promise<boolean> {
@@ -195,7 +197,7 @@ async function corregirBorrador(id: string, cambios: Record<string, unknown>, en
     return json({ error: 'Identificador invalido.' }, 400);
   }
   const fila = await env.DB.prepare(
-    'select nombre, categoria, precio_lista, precio, estado_fisico, destino, stock from productos where id = ?',
+    'select nombre, categoria, marca, precio_lista, precio, estado_fisico, destino, stock from productos where id = ?',
   )
     .bind(id)
     .first<FilaBorrador>();
@@ -205,6 +207,7 @@ async function corregirBorrador(id: string, cambios: Record<string, unknown>, en
 
   const nombre = cambios.nombre === undefined ? fila.nombre : String(cambios.nombre).slice(0, 120);
   const categoria = cambios.categoria === undefined ? fila.categoria : String(cambios.categoria);
+  const marca = cambios.marca === undefined ? fila.marca : String(cambios.marca).trim().slice(0, 60);
   const estadoFisico = cambios.estado_fisico === undefined ? fila.estado_fisico : String(cambios.estado_fisico);
   const precioLista = cambios.precio_lista === undefined ? fila.precio_lista : Math.round(Number(cambios.precio_lista));
   const stock = cambios.stock === undefined ? fila.stock : Math.round(Number(cambios.stock));
@@ -252,14 +255,14 @@ async function corregirBorrador(id: string, cambios: Record<string, unknown>, en
   }
 
   await env.DB.prepare(
-    `update productos set nombre = ?, categoria = ?, precio_lista = ?, precio = ?,
+    `update productos set nombre = ?, categoria = ?, marca = ?, precio_lista = ?, precio = ?,
                           estado_fisico = ?, destino = ?, stock = ?, estado_analisis = 'listo', actualizado_en = ?
      where id = ?`,
   )
-    .bind(nombre, categoria, precioLista, precio, estadoFisico, destino, stock, new Date().toISOString(), id)
+    .bind(nombre, categoria, marca, precioLista, precio, estadoFisico, destino, stock, new Date().toISOString(), id)
     .run();
 
-  return json({ id, nombre, categoria, precio_lista: precioLista, precio, estado_fisico: estadoFisico, destino, stock });
+  return json({ id, nombre, categoria, marca, precio_lista: precioLista, precio, estado_fisico: estadoFisico, destino, stock });
 }
 
 /**
@@ -405,7 +408,7 @@ async function descartarBorrador(id: string, env: Env): Promise<Response> {
 async function guardarConfig(request: Request, env: Env): Promise<Response> {
   const cambios = (await request.json()) as Record<string, unknown>;
   const entradas = Object.entries(cambios);
-  if (entradas.length === 0 || entradas.length > 20) {
+  if (entradas.length === 0 || entradas.length > 40) {
     return json({ error: 'Configuracion invalida.' }, 400);
   }
   for (const [clave, valor] of entradas) {
@@ -1143,23 +1146,23 @@ async function exportarVentasCsv(env: Env): Promise<Response> {
 
 async function exportarInventarioCsv(env: Env): Promise<Response> {
   const { results } = await env.DB.prepare(
-    `select codigo, nombre, categoria, precio_lista, precio, precio_sugerido, estado_fisico,
+    `select codigo, nombre, categoria, marca, precio_lista, precio, precio_sugerido, estado_fisico,
             estado_analisis, destino, stock, sin_inventario, semana_ingreso, capturado_por, creado_en
      from productos order by creado_en`,
   ).all<{
-    codigo: string; nombre: string; categoria: string; precio_lista: number; precio: number;
+    codigo: string; nombre: string; categoria: string; marca: string; precio_lista: number; precio: number;
     precio_sugerido: number; estado_fisico: string; estado_analisis: string; destino: string;
     stock: number; sin_inventario: number; semana_ingreso: string; capturado_por: string; creado_en: string;
   }>();
 
   const filas = results.map((f) => [
-    f.codigo ?? '', f.nombre, f.categoria, pesosDe(f.precio_lista), pesosDe(f.precio),
+    f.codigo ?? '', f.nombre, f.categoria, f.marca, pesosDe(f.precio_lista), pesosDe(f.precio),
     f.precio_sugerido ? pesosDe(f.precio_sugerido) : '', f.estado_fisico, f.estado_analisis, f.destino,
     f.sin_inventario ? '' : f.stock, f.semana_ingreso, f.capturado_por, f.creado_en,
   ]);
   return respuestaCsv(
     'inventario.csv',
-    ['codigo', 'nombre', 'categoria', 'precio_lista', 'precio', 'precio_sugerido', 'estado_fisico',
+    ['codigo', 'nombre', 'categoria', 'marca', 'precio_lista', 'precio', 'precio_sugerido', 'estado_fisico',
       'estado_analisis', 'destino', 'stock', 'semana_ingreso', 'capturado_por', 'creado_en'],
     filas,
   );
