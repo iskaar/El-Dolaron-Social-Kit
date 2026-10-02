@@ -80,6 +80,13 @@
   #socio-info b { color: var(--azul); }
   #dolarones { width: 100%; padding: 12px; font-size: 18px; border: 1px solid var(--linea); border-radius: 10px; }
   .dolarones-fila { display:flex; gap:6px; }
+  #dlg-dolarones { border:2px solid var(--azul); border-radius:14px; padding:18px; max-width:min(92vw,420px); }
+  #dlg-dolarones::backdrop { background:rgba(22,54,107,.5); }
+  #dlg-dolarones h2 { margin:0 0 8px; color:var(--azul); font-size:20px; }
+  #dlg-dolarones p { margin:0 0 14px; font-size:16px; }
+  .dlg-botones { display:flex; flex-direction:column; gap:8px; }
+  .dlg-botones button { min-height:52px; font-size:18px; border:1px solid var(--azul); background:#fff; color:var(--azul); border-radius:10px; cursor:pointer; }
+  .dlg-botones button.primario { background:var(--azul); color:#fff; }
   #usar-maximo { border:1px solid var(--azul); background:#fff; color:var(--azul); border-radius:10px; padding:8px 12px; min-height:44px; cursor:pointer; }
   #a-pagar { font-size: 18px; font-weight: 700; color: var(--azul); min-height: 22px; }
   .caja-nombre { font-size: 13px; display: flex; align-items: center; gap: 6px; color: #fff; margin: 0; }
@@ -284,6 +291,15 @@
   </div>
 </dialog>
 
+<dialog id="dlg-dolarones" aria-labelledby="dlg-titulo">
+  <h2 id="dlg-titulo">¿Usar Dolarones?</h2>
+  <p id="dlg-texto"></p>
+  <div class="dlg-botones">
+    <button id="dlg-todos" type="button" class="primario"></button>
+    <button id="dlg-otra" type="button">Otra cantidad</button>
+    <button id="dlg-no" type="button">No usar</button>
+  </div>
+</dialog>
 <script type="module">
 import { totales, agregar, efectivoAlcanza, dolaronesGanados, saldoCanjeable, maximoCanje, MINIMO_REGALO } from '/venta.js';
 import { abrirCamara } from '/camara.js';
@@ -313,6 +329,9 @@ let cobrando = false;
 // Socio de la venta en curso: { id, numero, nombre, disponible, por_liberar, regalo_disponible } o null.
 let socio = null;
 let codigoSocio = '';
+// Ticket vacío + «Usar todos»: se recuerda la elección y pintar() reaplica el máximo en cada cambio
+// (nunca más que maximoCanje, así no se cobra de más). Se apaga al teclear a mano o quitar socio.
+let usarTodos = false;
 let busquedaSocio = 0;
 // La configuración cambia en el servidor; sin consulta vigente sigue desconocida.
 let valesHabilitados = null;
@@ -450,6 +469,11 @@ function pintar() {
       <button type="button" data-quitar="${i}" aria-label="Quitar" ${cobrando ? 'disabled' : ''}>✕</button>
     </div>`).join('');
 
+  // «Usar todos» elegido en el pop-up: el campo sigue al máximo mientras cambie el ticket.
+  if (usarTodos && socio) {
+    const m = maximoCanje(socio, totales(lineas).total);
+    $('dolarones').value = m ? String(m / 100) : '';
+  }
   const efectivo = Math.round(Number($('efectivo').value || 0) * 100);
   const usados = dolaronesPedidos();
   const t = totales(lineas, efectivo, usados);
@@ -599,6 +623,7 @@ function pintarSocio() {
 function quitarSocio() {
   socio = null;
   codigoSocio = '';
+  usarTodos = false;
   busquedaSocio++;
   $('socio').value = '';
   $('dolarones').value = '';
@@ -639,6 +664,7 @@ async function buscarSocio() {
     $('socio-info').style.color = '';
     pintarSocio();
     pintar();
+    preguntarDolarones();
   } catch {
     if (busqueda !== busquedaSocio) return;
     // Sin red no hay saldo que consultar: la venta se cobra sin socio y no gana.
@@ -650,7 +676,35 @@ async function buscarSocio() {
 $('buscar-socio').addEventListener('click', buscarSocio);
 $('socio').addEventListener('keydown', (e) => { if (e.key === 'Enter') buscarSocio(); });
 $('quitar-socio').addEventListener('click', () => { quitarSocio(); idVenta = null; pintar(); });
-$('dolarones').addEventListener('input', () => { idVenta = null; pintar(); });
+$('dolarones').addEventListener('input', () => { usarTodos = false; idVenta = null; pintar(); });
+
+/** Pop-up al cargar socio con código o vale: sólo si realmente puede gastar. */
+function preguntarDolarones() {
+  const total = totales(lineas).total;
+  if (!socio || !codigoSocio || cobrando || !(socio.maximo > 0) || !(socio.disponible > 0)) return;
+  const usable = total ? maximoCanje(socio, total) : Math.min(socio.disponible, socio.maximo);
+  if (!usable) return;
+  $('dlg-texto').textContent = `El cliente tiene ${dolares(socio.disponible)} disponibles.`
+    + (total
+      ? (usable < socio.disponible ? ` En este ticket puede usar ${dolares(usable)}.` : '')
+      : ' Aún no hay piezas en el ticket: si los usas todos, se aplicarán hasta cubrir el total al escanearlas.');
+  $('dlg-todos').textContent = `Usar todos (${dolares(usable)})`;
+  $('dlg-dolarones').showModal();
+  $('dlg-todos').focus();
+}
+function cerrarDialogo(usar) {
+  $('dlg-dolarones').close();
+  if (usar === 'todos') usarTodos = true;
+  idVenta = null;
+  pintar();
+  if (usar === 'otra') $('dolarones').focus();
+  else if (usar === 'no') $('codigo').focus();
+}
+$('dlg-todos').addEventListener('click', () => cerrarDialogo('todos'));
+$('dlg-otra').addEventListener('click', () => cerrarDialogo('otra'));
+$('dlg-no').addEventListener('click', () => cerrarDialogo('no'));
+// Escape = «No usar» (el campo ya está vacío).
+$('dlg-dolarones').addEventListener('cancel', () => $('codigo').focus());
 $('usar-maximo').addEventListener('click', () => {
   $('dolarones').value = String(maximoCanje(socio, totales(lineas).total) / 100);
   idVenta = null;
