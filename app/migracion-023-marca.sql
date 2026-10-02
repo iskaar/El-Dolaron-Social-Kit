@@ -11,8 +11,6 @@ create index productos_categoria on productos (categoria);
 -- El admin guarda un porcentaje por categoria: las nuevas arrancan con el de
 -- «otros» (con el que ya se calculaban), para que nadie guarde un 0 vacio.
 insert or ignore into config (clave, valor)
-  select 'pct_' || c.clave, o.valor
-  from config o, (select 'accesorios' clave union all select 'belleza' union all select 'jardin'
-    union all select 'mascotas' union all select 'papeleria' union all select 'despensa'
-    union all select 'deportes') c
-  where o.clave = 'pct_otros';
+  select 'pct_' || c.value, o.valor
+  from config o, json_each('["accesorios","belleza","jardin","mascotas","papeleria","despensa","deportes"]') c
+  where o.clave = 'pct_otros';   -- json_each: D1 limita los «union all» de un select
