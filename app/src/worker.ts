@@ -13,11 +13,11 @@ import { detalleVenta, cancelarPieza } from './devoluciones.ts';
 import { BASES, AVISO } from './legal.ts';
 import {
   permiso, puede, quienEs, leerUsuario, yo, pedirAcceso, listarCuentas, guardarCuenta, resolverSolicitud,
-  esDeCaja, soloComputadora,
+  esDeCaja, soloComputadora, CAJAS,
 } from './cuentas.ts';
 import { cajeroEnTurno, listarCajeros, entrar, salir, ponerPin } from './cajeros.ts';
 import { registrarSocio, buscarSocio, buscarPorCodigo, basesListas, sentenciasDeVenta, sentenciasDeCancelacion, saldo } from './dolarones.ts';
-import { registrarCorte, registrarRetiro, ultimoCorte, cajaDe, nombreCaja } from './corte.ts';
+import { registrarCorte, registrarRetiro, ultimoCorte, cajaDe } from './corte.ts';
 import { portal, llegada, vincular } from './portal.ts';
 import { sentenciasVale, cancelarVales, buscarVale, valeDeVenta, valeUsadoEnVenta, reimprimirVale, valesAbiertos } from './vales.ts';
 
@@ -72,9 +72,8 @@ const ESTADOS_FISICOS = new Set(['nuevo', 'danado']);
 // Transferencia: confirmada por Isaac como forma de pago; sin ella se capturaba
 // como efectivo o tarjeta y descuadraba el corte (Issue #93).
 const FORMAS_PAGO = new Set(['efectivo', 'tarjeta', 'transferencia']);
-const ESTACION = /^[\p{L}\p{N}][\p{L}\p{N} _.-]{0,29}$/u;
 const estacionValida = (valor: unknown): valor is string =>
-  typeof valor === 'string' && ESTACION.test(valor) && nombreCaja(valor) === valor;
+  typeof valor === 'string' && CAJAS.includes(valor);
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const FOTO_MAX_BYTES = 6 * 1024 * 1024;
 
@@ -604,7 +603,7 @@ async function registrarVenta(request: Request, env: Env, correo: string): Promi
   }
   const imprimirEn = venta.imprimir_en === undefined ? null : venta.imprimir_en;
   if (venta.imprimir_en !== undefined && !estacionValida(imprimirEn)) {
-    return json({ error: 'Estación inválida: usa de 1 a 30 letras, números, espacios, punto, guion o guion bajo.' }, 400);
+    return json({ error: 'Caja invalida.' }, 400);
   }
   if (imprimirEn && formaPago === 'efectivo') {
     return json({ error: 'En el celular sólo tarjeta o transferencia; no se puede cobrar efectivo con impresión remota.' }, 400);
@@ -751,15 +750,15 @@ async function registrarVenta(request: Request, env: Env, correo: string): Promi
   return respuesta;
 }
 
-/** Últimas 24 h desde la aceptación: una venta sin red entra al sincronizar. */
+/** Últimas 3 h desde la aceptación: una venta sin red entra al sincronizar. */
 async function listarImpresiones(url: URL, env: Env, correo: string): Promise<Response> {
   const pedida = url.searchParams.get('caja');
   if (!estacionValida(pedida)) return json({ error: 'Estación de impresión inválida.' }, 400);
   const caja = await cajaDe(env, correo, pedida);
   const { results } = await env.DB.prepare(`select id from ventas
     where imprimir_en = ? and impreso_en is null and cancelada = 0 and registrado_en >= ?
-    order by registrado_en, id limit 50`)
-    .bind(caja, new Date(Date.now() - 86_400_000).toISOString()).all<{ id:string }>();
+    order by registrado_en, id limit 10`)
+    .bind(caja, new Date(Date.now() - 3 * 3600_000).toISOString()).all<{ id:string }>();
   const tickets = [];
   for (const { id } of results) tickets.push(await (await detalleVenta(id, env, true)).json());
   const respuesta = json(tickets);

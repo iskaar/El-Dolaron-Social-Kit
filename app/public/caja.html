@@ -56,6 +56,7 @@
     background: #fff; color: var(--azul); border-radius: 10px; cursor: pointer; }
   #cancelar { width: 100%; margin-top: 8px; padding: 10px; font-size: 14px; border: 1px solid var(--rojo);
     background: #fff; color: var(--rojo); border-radius: 10px; cursor: pointer; }
+  #impresiones-destino { font-size: 12px; color: #666; margin-top: 4px; }
   #aviso { min-height: 20px; font-size: 14px; margin-top: 8px; }
   #rechazadas:not(:empty) { margin-top: 8px; }
   #rechazadas .ticket { border: 1px solid var(--rojo); border-radius: 8px; padding: 8px;
@@ -198,6 +199,7 @@
     <button id="cancelar" type="button">Cancelar venta</button>
     <button id="abrir-cajon" type="button">Abrir cajón</button>
     <div id="aviso"></div>
+    <div id="impresiones-destino" hidden></div>
     <div id="impresiones-aviso" role="alert"></div>
     <button id="abrir-impresion-fallida" type="button" hidden>Abrir venta para reimprimir</button>
     <div id="rechazadas"></div>
@@ -363,6 +365,7 @@ try { $('caja-nombre').value = localStorage.getItem(CLAVE_CAJA) ?? ''; } catch {
 $('caja-nombre').addEventListener('change', () => {
   try { localStorage.setItem(CLAVE_CAJA, $('caja-nombre').value); } catch { /* idem */ }
   $('aviso').textContent = '';
+  pintarImpresora();
   $('codigo').focus();
 });
 const cajaActual = () => $('caja-nombre').value;
@@ -378,6 +381,7 @@ fetch('/api/yo').then((r) => r.json()).then(({ usuario, cajero }) => {
   $('caja-nombre').disabled = true;
   $('caja-nombre').title = 'Tu caja, asignada por el dueño';
   $('caja-nombre').closest('label').firstChild.textContent = 'Tu caja ';
+  pintarImpresora();
 }).catch(() => { /* sin red: la de la computadora */ });
 
 /* ---------- impresión remota: destino recordado y sin efectivo ---------- */
@@ -1486,6 +1490,9 @@ function pintarImpresora() {
     : (lista ? 'Impresora conectada' : 'Impresora no conectada');
   $('impresora-estado').style.color = error && error !== 'no conectada' ? '#D72B32' : '';
   $('conectar-impresora').hidden = lista;
+  // Es la misma caja con la que imprimirPendientes consulta /api/impresiones.
+  $('impresiones-destino').hidden = !lista || !cajaActual();
+  $('impresiones-destino').textContent = `Imprimiendo tickets para: ${cajaActual()}`;
   pintarImpresionRemota();
 }
 $('conectar-impresora').addEventListener('click', async () => {

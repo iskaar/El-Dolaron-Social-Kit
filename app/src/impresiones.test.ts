@@ -43,12 +43,14 @@ test('efectivo remoto y estaciones inválidas responden 400 sin vender ni descon
     const efectivo = await t.pedir('/api/ventas', venta({ forma_pago:'efectivo', efectivo:25000 }));
     assert.equal(efectivo.status, 400);
     assert.match(efectivo.cuerpo.error, /sólo tarjeta o transferencia/);
-    for (const imprimir_en of ['', null, 1, {}, ' Caja 1', 'Caja 1 ', 'Caja  1', 'Caja\n1', '../Caja', 'a'.repeat(31), 'Caja/1']) {
-      assert.equal((await t.pedir('/api/ventas', venta({ imprimir_en }))).status, 400, String(imprimir_en));
+    for (const imprimir_en of ['', null, 1, {}, ' Caja 1', 'Caja 1 ', 'Caja  1', 'Caja\n1', '../Caja', 'a'.repeat(31), 'Caja/1', 'Caja 9', 'Estación-Á_2.1']) {
+      const r = await t.pedir('/api/ventas', venta({ imprimir_en }));
+      assert.equal(r.status, 400, String(imprimir_en));
+      assert.equal(r.cuerpo.error, 'Caja invalida.');
     }
     assert.equal(t.db.prepare('select count(*) as n from ventas').get()!.n, 0);
     assert.equal(t.db.prepare('select stock from productos where id=?').get(PRODUCTO)!.stock, 50);
-    assert.equal((await t.pedir('/api/ventas', venta({ imprimir_en:'Estación-Á_2.1', forma_pago:'transferencia' }))).status, 201);
+    assert.equal((await t.pedir('/api/ventas', venta({ imprimir_en:'Caja 3', forma_pago:'transferencia' }))).status, 201);
   } finally { t.db.close(); }
 });
 
@@ -100,7 +102,7 @@ test('dos tomas concurrentes dan 200 y 409; la venta impresa deja de aparecer', 
   } finally { t.db.close(); }
 });
 
-test('no aparecen canceladas, tomadas, locales, de otra estación ni aceptadas hace más de 24 h', async () => {
+test('no aparecen canceladas, tomadas, locales, de otra estación ni aceptadas hace más de 3 h', async () => {
   const t = tienda();
   try {
     const cancelada = venta(), impresa = venta(), vieja = venta(), vigente = venta();
@@ -110,8 +112,29 @@ test('no aparecen canceladas, tomadas, locales, de otra estación ni aceptadas h
     assert.equal((await t.pedir(`/api/ventas/${cancelada.id}/cancelar`, { motivo:'prueba', caja:'Caja 1' })).status, 200);
     assert.equal((await t.pedir(`/api/impresiones/${cancelada.id}/tomar`, { caja:'Caja 1' })).status, 409);
     await t.pedir(`/api/impresiones/${impresa.id}/tomar`, { caja:'Caja 1' });
-    t.db.prepare('update ventas set registrado_en=? where id=?').run(new Date(Date.now() - 25 * 3600_000).toISOString(), vieja.id);
+    const ahora = Date.now();
+    t.db.prepare('update ventas set registrado_en=? where id=?').run(new Date(ahora - 3 * 3600_000 - 60_000).toISOString(), vieja.id);
+    t.db.prepare('update ventas set registrado_en=? where id=?').run(new Date(ahora - 3 * 3600_000 + 60_000).toISOString(), vigente.id);
     assert.deepEqual((await t.pedir(pendientes)).cuerpo.map((p: any) => p.id), [vigente.id]);
+  } finally { t.db.close(); }
+});
+
+test('listado devuelve hasta 10 pendientes, los más viejos primero', async () => {
+  const t = tienda();
+  try {
+    const ventas = Array.from({ length:12 }, () => venta());
+    const ahora = Date.now();
+    for (const [i, v] of ventas.entries()) {
+      assert.equal((await t.pedir('/api/ventas', v)).status, 201);
+      t.db.prepare('update ventas set registrado_en=? where id=?').run(new Date(ahora - (i + 1) * 60_000).toISOString(), v.id);
+    }
+    const ordenadas = ventas.map((v) => v.id).reverse();
+    const p = (await t.pedir(pendientes)).cuerpo;
+    assert.deepEqual(p.map((v: any) => v.id), ordenadas.slice(0, 10));
+    for (const v of p) {
+      assert.equal((await t.pedir(`/api/impresiones/${v.id}/tomar`, { caja:'Caja 1' })).status, 200);
+    }
+    assert.deepEqual((await t.pedir(pendientes)).cuerpo.map((v: any) => v.id), ordenadas.slice(10));
   } finally { t.db.close(); }
 });
 
@@ -157,7 +180,7 @@ test('mismos permisos que cobrar y caja asignada prevalece para consultar y toma
       assert.equal((await t.pedir(`/api/impresiones/${v.id}/tomar`, { caja:'Caja 1' })).status, status);
     }
     t.env.DEV_USUARIO = DUENO;
-    for (const caja of ['', 'a'.repeat(31), 'Caja/1']) {
+    for (const caja of ['', 'a'.repeat(31), 'Caja/1', 'Caja 9']) {
       assert.equal((await t.pedir('/api/impresiones?caja=' + encodeURIComponent(caja))).status, 400);
       assert.equal((await t.pedir(`/api/impresiones/${v.id}/tomar`, { caja })).status, 400);
     }
