@@ -13,7 +13,7 @@ import { detalleVenta, cancelarPieza } from './devoluciones.ts';
 import { BASES, AVISO } from './legal.ts';
 import {
   permiso, puede, quienEs, leerUsuario, yo, pedirAcceso, listarCuentas, guardarCuenta, resolverSolicitud,
-  esDeCaja, soloComputadora,
+  esDeCaja, soloComputadora, CAJAS,
 } from './cuentas.ts';
 import { cajeroEnTurno, listarCajeros, entrar, salir, ponerPin } from './cajeros.ts';
 import { registrarSocio, buscarSocio, buscarPorCodigo, basesListas, sentenciasDeVenta, sentenciasDeCancelacion, saldo } from './dolarones.ts';
@@ -72,6 +72,8 @@ const ESTADOS_FISICOS = new Set(['nuevo', 'danado']);
 // Transferencia: confirmada por Isaac como forma de pago; sin ella se capturaba
 // como efectivo o tarjeta y descuadraba el corte (Issue #93).
 const FORMAS_PAGO = new Set(['efectivo', 'tarjeta', 'transferencia']);
+const estacionValida = (valor: unknown): valor is string =>
+  typeof valor === 'string' && CAJAS.includes(valor);
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const FOTO_MAX_BYTES = 6 * 1024 * 1024;
 
@@ -583,7 +585,7 @@ async function registrarVenta(request: Request, env: Env, correo: string): Promi
   const venta = (await request.json()) as {
     id?: unknown; lineas?: unknown; forma_pago?: unknown;
     efectivo?: unknown; creado_en?: unknown;
-    cliente_id?: unknown; dolarones?: unknown; codigo_socio?: unknown; codigo_vale?: unknown; caja?: unknown;
+    cliente_id?: unknown; dolarones?: unknown; codigo_socio?: unknown; codigo_vale?: unknown; caja?: unknown; imprimir_en?: unknown;
   };
   const id = String(venta.id ?? '');
   if (!UUID.test(id)) {
@@ -599,9 +601,18 @@ async function registrarVenta(request: Request, env: Env, correo: string): Promi
   if (!FORMAS_PAGO.has(formaPago)) {
     return json({ error: 'Forma de pago invalida.' }, 400);
   }
+  const imprimirEn = venta.imprimir_en === undefined ? null : venta.imprimir_en;
+  if (venta.imprimir_en !== undefined && !estacionValida(imprimirEn)) {
+    return json({ error: 'Caja invalida.' }, 400);
+  }
+  if (imprimirEn && formaPago === 'efectivo') {
+    return json({ error: 'En el celular sólo tarjeta o transferencia; no se puede cobrar efectivo con impresión remota.' }, 400);
+  }
 
   // Se compara el pedido que mando la caja, no el catalogo actual: un precio
   // cambiado despues de una venta no debe romper un reintento legitimo.
+  // imprimir_en es el destino del papel, no el pedido: el primer registro lo
+  // fija; reintentar desde otra estación no mueve ni duplica el ticket.
   const pedido = JSON.stringify({
     lineas:(venta.lineas as LineaVenta[]).map((l) => [String(l.producto_id ?? ''), l.cantidad]),
     forma_pago:formaPago, efectivo:venta.efectivo ?? 0, creado_en:venta.creado_en ?? null,
@@ -612,15 +623,15 @@ async function registrarVenta(request: Request, env: Env, correo: string): Promi
   const pedidoHash = [...new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(pedido)))]
     .map((b) => b.toString(16).padStart(2, '0')).join('');
   const reintento = async (): Promise<Response | null> => {
-    const previo = await env.DB.prepare('select pedido_hash from ventas where id = ?').bind(id)
-      .first<{ pedido_hash:string | null }>();
+    const previo = await env.DB.prepare('select pedido_hash, imprimir_en from ventas where id = ?').bind(id)
+      .first<{ pedido_hash:string | null; imprimir_en:string | null }>();
     if (!previo) return null;
     // null: venta registrada antes de la migracion 021, se acepta como antes.
     if (previo.pedido_hash !== null && previo.pedido_hash !== pedidoHash)
       return json({ error:'El folio ya pertenece a otra venta. Revisa la venta original antes de reintentar.' }, 409);
     const ganado = await env.DB.prepare(`select coalesce(sum(importe), 0) as importe from dolarones_movimientos
       where venta_id = ? and tipo = 'compra'`).bind(id).first<{ importe:number }>();
-    const respuesta = json({ id, duplicada:true, ganados:ganado?.importe ?? 0,
+    const respuesta = json({ id, duplicada:true, imprimir_en:previo.imprimir_en, ganados:ganado?.importe ?? 0,
       vale_emitido:await valeDeVenta(env, id), vale_usado:await valeUsadoEnVenta(env, id) }, 200);
     respuesta.headers.set('cache-control', 'no-store');
     return respuesta;
@@ -680,12 +691,12 @@ async function registrarVenta(request: Request, env: Env, correo: string): Promi
   const sentencias = [
     env.DB.prepare(
       `insert into ventas (id, total, forma_pago, efectivo, cambio, creado_en, registrado_en, cliente_id, dolarones,
-                           caja, cajero, pedido_hash)
-       values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                           caja, cajero, pedido_hash, imprimir_en)
+       values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).bind(id, total, formaPago, efectivo, Math.max(0, efectivo - aPagar), creadoEn, ahora, clienteId, dolarones,
       // Quien cobro sale de Access; la caja es la suya (Issue #105) o la de la
       // computadora. Una venta encolada antes del corte de caja llega sin caja: ''.
-      await cajaDe(env, correo, venta.caja), correo, pedidoHash),
+      await cajaDe(env, correo, venta.caja), correo, pedidoHash, imprimirEn),
     ...preparado.lineas.map((l) =>
       env.DB.prepare(
         `insert into venta_lineas (venta_id, producto_id, codigo, nombre, precio, cantidad)
@@ -730,13 +741,46 @@ async function registrarVenta(request: Request, env: Env, correo: string): Promi
     throw error;
   }
   const respuesta = json({
-    id, total, dolarones, cambio: Math.max(0, efectivo - aPagar), ganados: recompensa.ganados,
+    id, total, dolarones, imprimir_en:imprimirEn, cambio: Math.max(0, efectivo - aPagar), ganados: recompensa.ganados,
     saldo: clienteId ? await saldo(env, clienteId, ahora) : null,
     vale_emitido:vale.emitido,
     vale_usado:await valeUsadoEnVenta(env, id),
   }, 201);
   respuesta.headers.set('cache-control', 'no-store');
   return respuesta;
+}
+
+/** Últimas 3 h desde la aceptación: una venta sin red entra al sincronizar. */
+async function listarImpresiones(url: URL, env: Env, correo: string): Promise<Response> {
+  const pedida = url.searchParams.get('caja');
+  if (!estacionValida(pedida)) return json({ error: 'Estación de impresión inválida.' }, 400);
+  const caja = await cajaDe(env, correo, pedida);
+  const { results } = await env.DB.prepare(`select id from ventas
+    where imprimir_en = ? and impreso_en is null and cancelada = 0 and registrado_en >= ?
+    order by registrado_en, id limit 10`)
+    .bind(caja, new Date(Date.now() - 3 * 3600_000).toISOString()).all<{ id:string }>();
+  const tickets = [];
+  for (const { id } of results) tickets.push(await (await detalleVenta(id, env, true)).json());
+  const respuesta = json(tickets);
+  respuesta.headers.set('cache-control', 'no-store');
+  return respuesta;
+}
+
+async function tomarImpresion(id: string, request: Request, env: Env, correo: string): Promise<Response> {
+  if (!UUID.test(id)) return json({ error: 'Identificador de venta inválido.' }, 400);
+  const cuerpo = await request.json().catch(() => ({})) as { caja?: unknown } | null;
+  const pedida = cuerpo?.caja;
+  if (!estacionValida(pedida))
+    return json({ error: 'Estación de impresión inválida.' }, 400);
+  const caja = await cajaDe(env, correo, pedida);
+  const ahora = new Date().toISOString();
+  // ponytail: tomar antes del USB evita duplicados; si falla o se cierra la
+  // pestaña después, se reimprime manualmente desde Ventas de hoy.
+  const { meta } = await env.DB.prepare(`update ventas set impreso_en = ?
+    where id = ? and imprimir_en = ? and impreso_en is null and cancelada = 0`)
+    .bind(ahora, id, caja).run();
+  if (!meta.changes) return json({ error: 'Ticket ya tomado, cancelado o no pendiente en esta estación.' }, 409);
+  return json({ id, impreso_en:ahora });
 }
 
 /**
@@ -1151,7 +1195,7 @@ export default {
       if (env.HOST_PORTAL && url.hostname === env.HOST_PORTAL) {
         const archivos: Record<string, string> = {
           '/': '/portal', '/portal': '/portal', '/portal.html': '/portal',
-          '/portal.js': '/portal.js', '/portal.css': '/portal.css', '/code128.js': '/code128.js',
+          '/portal.js': '/portal.js', '/portal.css': '/portal.css', '/code128.js': '/code128.js', '/vendor/qrcode-generator.js': '/vendor/qrcode-generator.js',
         };
         if (archivos[pathname] && (request.method === 'GET' || request.method === 'HEAD')) {
           const asset = new URL(archivos[pathname], url.origin);
@@ -1279,6 +1323,10 @@ export default {
         return url.searchParams.get('lista') ? await ventasDelDia(url, env) : await corte(url, env);
       }
 
+      if (pathname === '/api/impresiones' && request.method === 'GET') return await listarImpresiones(url, env, correo);
+      const impresion = /^\/api\/impresiones\/([^/]+)\/tomar$/.exec(pathname);
+      if (impresion && request.method === 'POST') return await tomarImpresion(impresion[1], request, env, correo);
+
       if (pathname === '/api/socios') {
         if (request.method === 'POST') return await registrarSocio(request, env, correo);
         if (request.method === 'GET') return await buscarSocio(url, env);
@@ -1330,7 +1378,7 @@ export default {
       }
       const ticket = pathname.match(/^\/api\/ventas\/([^/]+)$/);
       if (ticket && request.method === 'GET') {
-        return await detalleVenta(ticket[1], env);
+        return await detalleVenta(ticket[1], env, url.searchParams.get('imprimir') === '1');
       }
 
       if (pathname === '/api/reportes') {

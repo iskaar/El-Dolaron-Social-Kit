@@ -205,7 +205,7 @@ test('allowlist pública sirve sólo portal y assets necesarios; no abre caja, a
       return new Response(readFileSync('public/' + (ruta === '/portal' ? 'portal.html' : ruta.slice(1))),
         { headers:{ 'content-type':ruta === '/portal' ? 'text/html' : 'text/javascript' } });
     } } as unknown as Fetcher;
-    for (const ruta of ['/', '/portal', '/portal.html', '/portal.js', '/portal.css', '/code128.js']) {
+    for (const ruta of ['/', '/portal', '/portal.html', '/portal.js', '/portal.css', '/code128.js', '/vendor/qrcode-generator.js']) {
       const r = await worker.fetch!(new Request('https://portal.prueba' + ruta) as never, p.env, {} as never);
       assert.equal(r.status, 200, ruta);
       assert.equal(r.headers.get('cache-control'), 'no-store');
@@ -217,7 +217,7 @@ test('allowlist pública sirve sólo portal y assets necesarios; no abre caja, a
       '/cajero.js', '/venta.js', '/api/ventas', '/api/socios/codigo', '/api/socios/vincular',
       '/api/foto/123', '/api/portal/llegada', '/foo/portal.html'])
       assert.equal((await p.llamar(ruta, '')).status, 404, ruta);
-    assert.equal(leidos.length, 6);
+    assert.equal(leidos.length, 7);
     assert.equal((await p.llamar('/portal.js', '', {}, 'POST')).status, 404);
     assert.equal((await p.pedir('/api/portal/config')).status, 404);
     const config = await p.llamar('/api/portal/config', '');

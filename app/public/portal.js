@@ -1,3 +1,4 @@
+import qrcode from './vendor/qrcode-generator.js';
 import { svgCode128, codigoEnDigitos } from './code128.js';
 
 const $ = (id) => document.getElementById(id);
@@ -168,7 +169,11 @@ $('codigo-form').addEventListener('submit', (e) => {
     const r = await api('codigo', { maximo:Math.round(Number($('importe').value) * 100) });
     if (!uid || uid !== auth.currentUser?.uid) return;
     if (!/^DC-[A-Za-z0-9_-]{16}$/.test(r.codigo)) throw new Error('No se pudo generar el código. Intenta otra vez.');
-    $('barcode').innerHTML = svgCode128(codigoEnDigitos(r.codigo), { alto:24 });
+    const digitos = codigoEnDigitos(r.codigo);
+    const qr = qrcode(0, 'M'); qr.addData(digitos, 'Numeric'); qr.make();
+    // margin 4 = zona muda mínima del estándar; el tamaño lo da el CSS.
+    $('qr').innerHTML = qr.createSvgTag({ cellSize:1, margin:4, scalable:true });
+    $('barcode').innerHTML = svgCode128(digitos, { alto:24 });
     $('codigo-legible').textContent = r.codigo;
     $('codigo-importe').textContent = r.maximo ? 'Autorizaste hasta ' + d(r.maximo) + ' para esta compra.' : 'Sólo acumular Dolarones.';
     venceCodigo = Math.min(Date.parse(r.expira_en), Date.now() + 5 * 60_000);
