@@ -41,7 +41,7 @@ export async function abrirCamara(idElemento, alLeer) {
   await cargarLibreria();
   const { Html5Qrcode, Html5QrcodeSupportedFormats } = window;
   const lector = new Html5Qrcode(idElemento, {
-    formatsToSupport: [Html5QrcodeSupportedFormats.CODE_128],
+    formatsToSupport: [Html5QrcodeSupportedFormats.CODE_128, Html5QrcodeSupportedFormats.QR_CODE],
     useBarCodeDetectorIfSupported: true,
     verbose: false,
   });
@@ -49,10 +49,10 @@ export async function abrirCamara(idElemento, alLeer) {
   try {
     await lector.start(
       { facingMode: 'environment' },
-      // Caja ancha y baja: un Code128 es una tira, no un cuadrado. Sin pedir
-      // resolucion la camara abre a ~640x480 y sin enfoque continuo: las barras
-      // finas de la etiqueta y del vale no se distinguen (Isaac, 01/10).
-      { fps: 15, qrbox: (ancho, alto) => ({ width: Math.floor(ancho * 0.9), height: Math.floor(alto * 0.45) }),
+      // Recuadro 80% x 60%: ancho para la tira del Code128 y alto para que quepa un
+      // QR (cuadrado) sin recortarlo. Sin pedir resolucion la camara abre a
+      // ~640x480 y sin enfoque continuo: las barras finas no se distinguen (Isaac, 01/10).
+      { fps: 15, qrbox: (ancho, alto) => ({ width: Math.floor(ancho * 0.8), height: Math.floor(alto * 0.6) }),
         videoConstraints: { facingMode: 'environment', width: { ideal: 1920 }, height: { ideal: 1080 },
           advanced: [{ focusMode: 'continuous' }] } },
       (texto) => {

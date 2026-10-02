@@ -200,6 +200,25 @@ export function codigoBarrasVale(codigo) {
   ]);
 }
 
+// QR nativo Epson (GS ( k, modelo 2, función 165-181): mismo texto de 30 dígitos que
+// el Code128, para que la cámara del celular lo lea. Nada de imagen raster.
+// ponytail: módulo 6 puntos, corrección M; calibrar con el lector.
+export const MODULO_QR_VALE = 6;
+export function codigoQrVale(codigo) {
+  if (!/^DP-[A-Za-z0-9_-]{16}$/.test(codigo)) throw new Error('Código de vale inválido.');
+  const datos = new TextEncoder().encode(codigoEnDigitos(codigo));
+  const k = datos.length + 3;
+  return concatenar([
+    new Uint8Array([ESC, 0x61, 1,
+      GS, 0x28, 0x6b, 4, 0, 49, 65, 50, 0,                 // modelo 2
+      GS, 0x28, 0x6b, 3, 0, 49, 67, MODULO_QR_VALE,        // tamaño de módulo
+      GS, 0x28, 0x6b, 3, 0, 49, 69, 49,                    // corrección M
+      GS, 0x28, 0x6b, k & 255, k >> 8, 49, 80, 48]),       // guardar datos
+    datos,
+    new Uint8Array([GS, 0x28, 0x6b, 3, 0, 49, 81, 48, 0x0a, ESC, 0x61, 0]),   // imprimir
+  ]);
+}
+
 function partesVale(vale, titulo = 'VALE DOLARONES - SIN REGISTRO', conCodigo = false) {
   return [
     separador(), centrado(titulo),
@@ -207,7 +226,7 @@ function partesVale(vale, titulo = 'VALE DOLARONES - SIN REGISTRO', conCodigo = 
     linea(Date.parse(vale.disponible_desde) <= Date.parse(vale.creado_en)
       ? 'Usalo en tu siguiente compra' : `Disponible: ${fechaHora(vale.disponible_desde)}`),
     linea(`Vence: ${fechaHora(vale.vence_en)}`),
-    ...(conCodigo && vale.restante > 0 ? [codigoBarrasVale(vale.codigo)] : []), centrado(vale.codigo),
+    ...(conCodigo && vale.restante > 0 ? [codigoQrVale(vale.codigo), codigoBarrasVale(vale.codigo)] : []), centrado(vale.codigo),
     linea('Conserva el papel. Copias comparten el saldo.'),
     linea('Solo en El Dolaron. No canjeable por efectivo.'),
   ];

@@ -1196,7 +1196,7 @@ export default {
       if (env.HOST_PORTAL && url.hostname === env.HOST_PORTAL) {
         const archivos: Record<string, string> = {
           '/': '/portal', '/portal': '/portal', '/portal.html': '/portal',
-          '/portal.js': '/portal.js', '/portal.css': '/portal.css', '/code128.js': '/code128.js',
+          '/portal.js': '/portal.js', '/portal.css': '/portal.css', '/code128.js': '/code128.js', '/vendor/qrcode-generator.js': '/vendor/qrcode-generator.js',
         };
         if (archivos[pathname] && (request.method === 'GET' || request.method === 'HEAD')) {
           const asset = new URL(archivos[pathname], url.origin);
