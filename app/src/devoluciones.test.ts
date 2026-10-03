@@ -58,10 +58,10 @@ test('cancelar una pieza: regresa la existencia, deja huella y el corte resta so
   assert.equal(despues.devoluciones[0].motivo, 'no le quedo');
   assert.equal(despues.devoluciones[0].caja, 'Caja 1');
 
-  // 500 de fondo + 500 cobrados - 250 devueltos
+  // 500 de fondo + 250 que quedaron vendidos: la pieza se devolvio antes del corte (#123)
   const c = (await cortar(pedir, 75000)).cuerpo;
-  assert.equal(c.efectivo_ventas, 50000);
-  assert.equal(c.efectivo_devoluciones, 25000);
+  assert.equal(c.efectivo_ventas, 25000);
+  assert.equal(c.efectivo_devoluciones, 0);
   assert.equal(c.diferencia, 0);
 
   // El dia de la caja y los reportes cuentan lo que quedo vendido.
@@ -108,8 +108,9 @@ test('cancelar el ticket completo despues de una pieza devuelve solo lo que qued
   // Y ya no se pueden cancelar piezas de un ticket cancelado.
   assert.equal((await cancelarPieza(pedir, id, (await detalle(pedir, id)).lineas[0].id)).status, 409);
 
-  const c = (await cortar(pedir, 50000)).cuerpo;    // 500 + 500 - 250 - 250
-  assert.equal(c.efectivo_devoluciones, 50000);
+  const c = (await cortar(pedir, 50000)).cuerpo;    // cancelado antes del corte: solo el fondo (#123)
+  assert.equal(c.efectivo_ventas, 0);
+  assert.equal(c.efectivo_devoluciones, 0);
   assert.equal(c.diferencia, 0);
 
   const rep = (await pedir('/api/reportes')).cuerpo;
@@ -144,8 +145,8 @@ test('con Dolarones: primero sale el dinero; lo pagado con D regresa al saldo y 
   assert.equal(ganado(), 0);
   assert.equal((await pedir('/api/socios?q=4449990000')).cuerpo.disponible, saldoInicial);
 
-  const c = (await cortar(pedir, 100000)).cuerpo;   // fondo + compra previa + 450 - 250 - 200
-  assert.equal(c.efectivo_devoluciones, 45000);
+  const c = (await cortar(pedir, 100000)).cuerpo;   // fondo + compra previa; lo de 450 se devolvio antes del corte
+  assert.equal(c.efectivo_devoluciones, 0);
   assert.equal(c.dolarones, 0);                     // 50 D cobrados y 50 D devueltos
   assert.equal(c.diferencia, 0);
 });
