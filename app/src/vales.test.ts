@@ -49,8 +49,8 @@ test('ticket pagado con vale: pieza responde 409; completo devuelve dinero, stoc
     assert.equal(t.db.prepare('select stock from productos where id=?').get(PRODUCTO)!.stock, 49);
     const corte = (await t.pedir('/api/cortes', { id:crypto.randomUUID(), caja:'Caja 1',
       efectivo_contado:75000, tarjeta_terminal:0 })).cuerpo;
-    assert.equal(corte.efectivo_ventas, 49500);
-    assert.equal(corte.efectivo_devoluciones, 24500);
+    assert.equal(corte.efectivo_ventas, 25000);        // el canje se cancelo antes del corte: no cuenta (#123)
+    assert.equal(corte.efectivo_devoluciones, 0);
     assert.equal(corte.dolarones, 0);
     assert.equal(corte.diferencia, 0);
   } finally { t.db.close(); }
@@ -116,7 +116,7 @@ test('emisor: piezas sucesivas y cancelación completa recalculan el vale sin du
       if (!completo) assert.equal((await t.cancelar(v.id)).status, 200, 'completar tras devolver todas las piezas');
       const corte = (await t.pedir('/api/cortes', { id:crypto.randomUUID(), caja:'Caja 1',
         efectivo_contado:50000, tarjeta_terminal:0 })).cuerpo;
-      assert.equal(corte.efectivo_devoluciones, 50000);
+      assert.equal(corte.efectivo_devoluciones, 0);     // devuelto antes del corte: no cuenta (#123)
       assert.equal(corte.diferencia, 0);
     } finally { t.db.close(); }
   }
