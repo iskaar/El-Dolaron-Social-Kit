@@ -18,6 +18,7 @@
     }
   }
   * { box-sizing: border-box; }
+  [hidden] { display: none !important; }   /* los botones con display propio ignoraban `hidden` */
   body { margin: 0; background: var(--fondo); color: var(--texto);
     font-family: system-ui, -apple-system, sans-serif; }
   header { background: #16366B; color: #fff; padding: 14px 20px;
@@ -229,12 +230,12 @@ async function cargarEstado() {
   }
   caja.append(linea, formularioConfig());
   pintarBanner();
-  if (estado.conectado) {
-    $('panel-piezas').hidden = false;
-    $('panel-ventas').hidden = false;
-    cargarPiezas(true);
-    cargarVentas(true);
-  }
+  // Siempre a la vista, conectada o no: una venta en conflicto no puede esconderse
+  // porque la sesion de ML vencio. Publicar sin conexion responde con su error.
+  $('panel-piezas').hidden = false;
+  $('panel-ventas').hidden = false;
+  cargarPiezas(true);
+  cargarVentas(true);
 }
 
 // Recargo y tipo de publicacion: se guardan aqui (PUT /api/ml/config) y aplican a lo que se publique desde ahora.
@@ -293,6 +294,7 @@ function fechaLegible(iso) {
 
 function infoVenta(v) {
   if (v.estado === 'cancelada') return ['neutro', '✖', 'Cancelada'];
+  if (v.estado === 'descontada' && v.conflicto) return ['mal', '⚠', 'Pagada, sin pieza en tienda'];
   if (v.estado === 'descontada') return ['ok', '✔', 'Pagada y descontada de la tienda'];
   if (v.estado === 'recibida') return ['pausa', '⏳', 'Recibida, procesando'];
   return ['neutro', '•', String(v.estado ?? '—')];
