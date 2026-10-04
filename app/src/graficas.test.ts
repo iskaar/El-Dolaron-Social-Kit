@@ -2,7 +2,10 @@
 // Dinero al centavo, escalas y cuadre de /reportes (Issue #166): lo que no toca el DOM.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { pesos, dolarones, pesosEje, pesosConSigno, escala, cambio, rellenarDias, textoPeriodo, verificarCuadre } from '../public/graficas.js';
+import {
+  pesos, dolarones, pesosEje, pesosConSigno, escala, cambio, rellenarDias, textoPeriodo, verificarCuadre,
+  PASOS_CALOR, pasoCalor, pasosDeLaEscala, horasConVentas, textoHora, rangoHora, mapaCalor, mapaCalorHtml, tablaCalor,
+} from '../public/graficas.js';
 import { rangoDias } from './worker.ts';
 
 test('pesos siempre lleva centavos, sin pasar por decimales', () => {
@@ -60,6 +63,7 @@ const reporte = (extra = {}) => ({
   resumen: { total: 10_000 },
   cuadre: { bruto: 13_000, devoluciones_pieza: 1_000, cancelados: 2_000, vendido: 10_000 },
   por_dia: [{ total: 6_000 }, { total: 4_000 }],
+  por_hora: [{ total: 3_000 }, { total: 3_000 }, { total: 4_000 }],
   por_forma_pago: [{ total: 7_000 }, { total: 2_000 }, { total: 1_000 }],
   por_categoria: [{ total: 9_000 }, { total: 1_000 }],
   ...extra,
@@ -72,4 +76,60 @@ test('verificarCuadre: todo suma lo mismo, o muestra la diferencia en centavos',
   assert.equal(categoria.ok, false);
   assert.equal(categoria.diferencia, 1);
   assert.equal(mal.filter((c) => !c.ok).length, 1);
+  const hora = verificarCuadre(reporte({ por_hora: [{ total: 9_999 }] })).find((c) => c.nombre === 'Suma por hora')!;
+  assert.equal(hora.ok, false);
+  assert.equal(hora.diferencia, -1);
+});
+
+test('mapa de calor: el paso de cada celda en la escala, de 1 a 6, y 0 si no hay ventas', () => {
+  assert.equal(PASOS_CALOR, 6);
+  assert.equal(pasoCalor(0, 10_000), 0);
+  assert.equal(pasoCalor(1, 10_000), 1);                // lo minimo que se vendio ya se pinta
+  assert.equal(pasoCalor(1_666, 10_000), 1);
+  assert.equal(pasoCalor(1_667, 10_000), 2);
+  assert.equal(pasoCalor(5_000, 10_000), 3);
+  assert.equal(pasoCalor(10_000, 10_000), 6);           // el maximo cae en el ultimo paso
+  assert.equal(pasoCalor(500, 0), 0);                   // sin maximo no hay escala
+  const escalon = pasosDeLaEscala(120_000);
+  assert.deepEqual(escalon.map((p) => p.hasta), [20_000, 40_000, 60_000, 80_000, 100_000, 120_000]);
+  assert.ok(escalon.every((p) => pasoCalor(p.hasta, 120_000) === p.paso), 'cada tope cae en su propio paso');
+});
+
+test('mapa de calor: horas con ventas, etiquetas y semana de lunes a domingo', () => {
+  assert.deepEqual(horasConVentas([]), { desde: 9, hasta: 21 });
+  assert.deepEqual(horasConVentas([{ hora: 13, tickets: 2 }, { hora: 11, tickets: 1 }, { hora: 17, tickets: 4 }]), { desde: 11, hasta: 17 });
+  assert.equal(textoHora(9), '09:00');
+  assert.equal(rangoHora(14), '14:00–15:00');
+  assert.equal(rangoHora(23), '23:00–00:00');
+
+  const mapa = mapaCalor([
+    { dia_semana: 2, hora: 14, tickets: 5, total: 123_456 },   // martes
+    { dia_semana: 0, hora: 12, tickets: 1, total: 25_000 },    // domingo
+    { dia_semana: 6, hora: 16, tickets: 3, total: 50_000 },
+  ]);
+  assert.deepEqual(mapa.horas, [12, 13, 14, 15, 16]);
+  assert.deepEqual(mapa.filas.map((f) => f.nombre), ['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado', 'Domingo']);
+  assert.equal(mapa.maximo, 123_456);
+  const martes14 = mapa.filas[1].celdas[2];
+  assert.equal(martes14.titulo, 'Martes 14:00–15:00');
+  assert.equal(martes14.detalle, '5 tickets');
+  assert.equal(martes14.paso, 6);
+  assert.equal(mapa.mejor, martes14);
+  assert.equal(mapa.filas[6].celdas[0].detalle, '1 ticket');
+  assert.equal(mapa.filas[0].celdas[0].paso, 0);              // lunes: sin ventas
+  assert.equal(mapa.filas[0].celdas[0].detalle, 'Sin ventas');
+  assert.equal(mapa.filas.reduce((s, f) => s + f.total, 0), 198_456);
+  assert.equal(mapaCalor([]).mejor, null);
+});
+
+test('mapa de calor: el HTML y la tabla llevan los importes con centavos', () => {
+  const mapa = mapaCalor([{ dia_semana: 2, hora: 14, tickets: 5, total: 123_456 }, { dia_semana: 3, hora: 15, tickets: 1, total: 100 }]);
+  const html = mapaCalorHtml(mapa);
+  assert.match(html, /data-tip="Martes 14:00–15:00\n\$1,234\.56\n5 tickets"/);
+  assert.match(html, /aria-label="Miércoles 15:00–16:00: \$1\.00, 1 ticket"/);
+  assert.equal(html.match(/class="celda p\d[^"]*" data-tip/g)!.length, 2);       // solo las celdas con ventas se pintan
+  assert.equal(html.match(/ mejor"/g)!.length, 1);                                  // y una sola lleva su importe
+  assert.match(html, />\$1,235<\/div>/);
+  assert.match(tablaCalor(mapa), /<td class="num">\$1,234\.56<\/td>/);
+  assert.match(tablaCalor(mapa), /<th class="num">Total<\/th>/);
 });

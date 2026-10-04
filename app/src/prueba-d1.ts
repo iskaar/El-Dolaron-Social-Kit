@@ -61,15 +61,23 @@ export function tienda() {
     BASES_APROBADAS_VERSION: 'prueba-1', PORTAL_REGISTRO_ABIERTO: 'si', PROMOCION_INICIO: '2020-01-01T00:00:00Z',
     PORTAL_BASES_TEXTO: 'Bases sintéticas de prueba.', PORTAL_AVISO_TEXTO: 'Aviso sintético de prueba.',
   } as unknown as Env;
-  const pedir = async (ruta: string, cuerpo?: unknown, metodo = 'POST', encabezados: Record<string, string> = {}) => {
-    const r = await worker.fetch!(
+  const enviar = (ruta: string, cuerpo?: unknown, metodo = 'POST', encabezados: Record<string, string> = {}) =>
+    worker.fetch!(
       new Request(`https://caja.prueba${ruta}`, cuerpo === undefined ? { headers: encabezados } : {
         method: metodo, headers: { 'content-type': 'application/json', ...encabezados }, body: JSON.stringify(cuerpo),
       }) as never,
       env,
       { waitUntil() {}, passThroughOnException() {} } as never,
     );
+  const pedir = async (ruta: string, cuerpo?: unknown, metodo = 'POST', encabezados: Record<string, string> = {}) => {
+    const r = await enviar(ruta, cuerpo, metodo, encabezados);
     return { status: r.status, cuerpo: (await r.json()) as Record<string, any> };
   };
-  return { db, env, pedir };
+  // Para lo que no es JSON (los CSV): el cuerpo en texto y las cabeceras.
+  const pedirTexto = async (ruta: string) => {
+    const r = await enviar(ruta);
+    // ignoreBOM: text() se come el BOM y las pruebas quieren verlo.
+    return { status: r.status, texto: new TextDecoder('utf-8', { ignoreBOM: true }).decode(await r.arrayBuffer()), tipo: r.headers.get('content-type') ?? '' };
+  };
+  return { db, env, pedir, pedirTexto };
 }

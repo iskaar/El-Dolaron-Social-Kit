@@ -58,6 +58,31 @@ test('con ventas de todo tipo, el reporte cuadra al centavo y bruto - devolucion
   assert.equal(r.dia_desde <= r.dia_hasta, true);
   assert.equal(rellenarDias(r.por_dia, r.dia_desde, r.dia_hasta).length, 7);
   assert.equal(r.anterior.total, 0);
+
+  // Mapa de calor: lo mismo vendido, por dia de la semana y hora, sin la cancelada.
+  assert.equal(r.por_hora.reduce((s: number, f: { total: number }) => s + f.total, 0), 200000);
+  assert.equal(r.por_hora.reduce((s: number, f: { tickets: number }) => s + f.tickets, 0), 5);
+});
+
+test('por_hora usa el dia de la semana y la hora de la tienda (UTC-6) y no cuenta cancelados', async () => {
+  const { db, pedir } = tienda();
+  db.prepare('update productos set stock = 100 where id = ?').run(PRODUCTO);
+  const ids = [(await vender(pedir, 'Caja 1')).id, (await vender(pedir, 'Caja 1')).id, (await vender(pedir, 'Caja 1')).id];
+  assert.equal((await pedir(`/api/ventas/${ids[1]}/cancelar`, { motivo: 'prueba', caja: 'Caja 1' })).status, 200);
+  // Hace 3 dias a las 03:30 UTC es la noche anterior en la tienda (21:30, UTC-6): otro dia de la semana.
+  const base = new Date(Date.now() - 3 * 86_400_000);
+  base.setUTCHours(3, 30, 0, 0);
+  const noche = base.toISOString();
+  const manana = new Date(base.getTime() + 8 * 3_600_000).toISOString();   // 11:30 UTC = 05:30 en la tienda
+  for (const [id, cuando] of [[ids[0], noche], [ids[1], noche], [ids[2], manana]]) {
+    db.prepare('update ventas set creado_en = ?, registrado_en = ? where id = ?').run(cuando, cuando, id);
+  }
+
+  const { por_hora: horas, resumen } = (await pedir('/api/reportes?dias=7')).cuerpo;
+  const diaNoche = new Date(base.getTime() - 6 * 3_600_000).getUTCDay();
+  assert.deepEqual(horas.find((f: { hora: number }) => f.hora === 21), { dia_semana: diaNoche, hora: 21, tickets: 1, total: 25000 });   // la cancelada no cuenta
+  assert.equal(horas.find((f: { hora: number }) => f.hora === 5).dia_semana, (diaNoche + 1) % 7);
+  assert.equal(horas.reduce((s: number, f: { total: number }) => s + f.total, 0), resumen.total);
 });
 
 test('el periodo anterior suma lo de los dias justo antes, sin traslape', async () => {
