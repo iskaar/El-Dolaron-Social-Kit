@@ -92,7 +92,7 @@ const cantidad = document.getElementById('cantidad');
 const selector = document.getElementById('familia');
 const escapar = (texto) => texto.replace(/[<>&"]/g, (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;' }[c]));
 
-// Las familias y los siete montos salen de la tabla `familias` (GET /api/familias).
+// Las familias y los montos salen de la tabla `familias` (GET /api/familias).
 let montos = [];
 let familias = [];
 
