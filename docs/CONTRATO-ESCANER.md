@@ -49,8 +49,8 @@ quiera etiquetar sin foto, ni análisis, va con una banda (§2).
 
 Detalle completo en `docs/PLAN-ETIQUETAS-POR-BANDA.md`. Resumen:
 
-- Catorce productos fijos en el POS — siete precios ($19/$29/$49/$79/$99/$149/$199) ×
-  dos familias (ropa/general). Sus catorce códigos de barras viven en una tarjeta
+- Productos fijos en el POS — nueve precios ($19/$29/$49/$79/$99/$119/$129/$149/$199, desde el 4/10) ×
+  las familias de banda (hoy 18, ver `PLAN-ETIQUETAS-POR-BANDA.md`). Sus catorce códigos de barras viven en una tarjeta
   laminada junto a la caja, como respaldo si el código pegado en la pieza no escanea.
 - Impresión por lote desde `/bandas`, no por pieza: se elige cuántas etiquetas de una
   banda hacen falta y sale un solo trabajo. Las piezas nunca esperan su propia etiqueta.
@@ -119,7 +119,7 @@ destino = etiqueta individual, siempre (las bandas ya no son destino automático
 
 ### Configuración
 Una pantalla, una tabla: porcentaje por categoría (ropa, hogar, electrónica, juguetes, otros),
-porcentaje de dañado, límite de banda y los siete precios de banda (compartidos por ropa/general).
+porcentaje de dañado, límite de banda y los nueve precios de banda (compartidos por todas las familias).
 
 ### Cola de revisión
 Lo capturado, con foto y precio sugerido. Editar cualquier precio o campo, marcar a una banda
