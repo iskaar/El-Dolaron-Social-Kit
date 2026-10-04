@@ -40,7 +40,8 @@ const dormir = (ms: number) => new Promise((resolver) => setTimeout(resolver, ms
 
 /* ---------- errores de ML ---------- */
 
-interface Causa { codigo: string; mensaje: string }
+/** `mensaje` es el de ML; `texto` ya viene en espanol (para mostrarlo al dueno). */
+interface Causa { codigo: string; mensaje: string; texto: string }
 
 /** Un fallo de ML (o de nuestra configuracion) con texto que el dueno entiende. */
 export class ErrorML extends Error {
@@ -76,7 +77,7 @@ const TRADUCCIONES: [RegExp, string][] = [
   [/invalid_grant/i, 'La autorización de Mercado Libre venció o ya se usó; vuelve a conectarla.'],
 ];
 
-function traducir(c: Causa): string {
+function traducir(c: { codigo: string; mensaje: string }): string {
   const hallada = TRADUCCIONES.find(([patron]) => patron.test(`${c.codigo} ${c.mensaje}`));
   const original = c.mensaje || c.codigo;
   return hallada ? (original ? `${hallada[1]} (${original})` : hallada[1]) : original;
@@ -85,10 +86,13 @@ function traducir(c: Causa): string {
 function errorDe(status: number, cuerpo: any, texto: string): ErrorML {
   const causas: Causa[] = (Array.isArray(cuerpo?.cause) ? cuerpo.cause : [])
     .filter((c: any) => c && c.type !== 'warning')
-    .map((c: any) => ({ codigo: String(c.code ?? c.cause_id ?? ''), mensaje: String(c.message ?? '') }));
+    .map((c: any) => {
+      const causa = { codigo: String(c.code ?? c.cause_id ?? ''), mensaje: String(c.message ?? '') };
+      return { ...causa, texto: traducir(causa) };
+    });
   const codigo = String(cuerpo?.error ?? '');
   const base = String(cuerpo?.message ?? cuerpo?.error_description ?? texto.slice(0, 200));
-  const partes = causas.length ? causas.map(traducir) : [traducir({ codigo, mensaje: base })];
+  const partes = causas.length ? causas.map((c) => c.texto) : [traducir({ codigo, mensaje: base })];
   return new ErrorML(status, codigo, [...new Set(partes)].join(' '), causas);
 }
 
@@ -368,6 +372,37 @@ async function estado(env: Env): Promise<Response> {
     user_product_seller: tags.includes('user_product_seller'),
     config: await config(env),
     faltan: faltantes(env),
+    // Para avisar al dueno: que empacar y que cancelar en ML.
+    ventas_sin_despachar: (await env.DB.prepare(
+      `select count(*) as n from ml_ventas where estado = 'descontada' and recibido_en >= ?`,
+    ).bind(new Date(Date.now() - 7 * 86_400_000).toISOString()).first<{ n: number }>())?.n ?? 0,
+    conflictos: await contarConflictos(env),
+  });
+}
+
+const contarConflictos = async (env: Env) => (await env.DB.prepare(
+  `select count(*) as n from ml_ventas where conflicto = 1 and estado <> 'cancelada'`,
+).first<{ n: number }>())?.n ?? 0;
+
+/** Las ventas hechas en ML, las mas nuevas primero. `conflicto` = se vendio algo que en tienda ya no habia. */
+async function listarVentas(env: Env, url: URL): Promise<Response> {
+  const pagina = Math.max(1, Math.floor(Number(url.searchParams.get('pagina') ?? 1)) || 1);
+  const { results } = await env.DB.prepare(
+    `select v.order_id, v.ml_item_id, v.cantidad, v.descontado, v.estado, v.conflicto, v.recibido_en,
+            v.producto_id, p.codigo, p.nombre, p.marca, p.precio, m.permalink
+     from ml_ventas v left join productos p on p.id = v.producto_id left join ml_publicaciones m on m.producto_id = v.producto_id
+     order by v.recibido_en desc, v.order_id desc, v.ml_item_id
+     limit 51 offset ?`,
+  ).bind((pagina - 1) * 50).all<Record<string, any>>();
+  return json({
+    ventas: results.slice(0, 50).map((f) => ({
+      order_id: f.order_id, ml_item_id: f.ml_item_id,
+      producto: { id: f.producto_id, codigo: f.codigo ?? null, nombre: f.nombre ?? '', marca: f.marca ?? '', precio: f.precio ?? 0 },
+      cantidad: f.cantidad, descontado: f.descontado, estado: f.estado, conflicto: f.conflicto,
+      recibido_en: f.recibido_en, permalink: f.permalink ?? '',
+    })),
+    pendientes_conflicto: await contarConflictos(env),
+    hay_mas: results.length > 50,
   });
 }
 
@@ -952,6 +987,7 @@ export async function rutaML(request: Request, env: Env, url: URL): Promise<Resp
   if (pathname === '/api/ml/config' && metodo === 'PUT') return guardarConfig(request, env);
   if (pathname === '/api/ml/conectar' && metodo === 'GET') return conectar(env, url);
   if (pathname === '/api/ml/piezas' && metodo === 'GET') return listarPiezas(env, url);
+  if (pathname === '/api/ml/ventas' && metodo === 'GET') return listarVentas(env, url);
   const accion = /^\/api\/ml\/(preparar|publicar|pausar|reactivar)\/([^/]+)$/.exec(pathname);
   if (accion && metodo === 'POST') {
     if (accion[1] === 'preparar') return preparar(env, accion[2], request);

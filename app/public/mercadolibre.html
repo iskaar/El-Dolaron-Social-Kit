@@ -59,6 +59,20 @@
   .insignia.ok { color: var(--verde); } .insignia.pausa { color: var(--ambar); }
   .insignia.mal { color: var(--rojo); } .insignia.neutro { color: var(--suave); }
   .error-texto { color: var(--rojo); font-size: 12px; margin-top: 4px; overflow-wrap: anywhere; }
+  .banner-conflicto { border: 2px solid var(--rojo); background: var(--error-fondo); border-radius: 12px;
+    padding: 14px 16px; font-size: 15px; line-height: 1.45; display: flex; gap: 12px; align-items: flex-start; }
+  .banner-conflicto .icono { font-size: 24px; line-height: 1; }
+  .venta { display: flex; gap: 12px; justify-content: space-between; align-items: flex-start; padding: 12px 0;
+    border-top: 1px solid var(--linea); }
+  .venta:first-child { border-top: 0; }
+  .venta .nombre { font-weight: 700; overflow-wrap: anywhere; }
+  .venta .meta { font-size: 12px; color: var(--suave); margin-top: 2px; overflow-wrap: anywhere; }
+  .config-form { display: flex; flex-wrap: wrap; gap: 10px 16px; align-items: flex-end; margin-top: 14px;
+    padding-top: 12px; border-top: 1px solid var(--linea); }
+  .config-form label { display: grid; gap: 4px; font-size: 13px; font-weight: 600; }
+  .config-form input, .config-form select { font: inherit; font-size: 16px; padding: 8px 10px; border: 1px solid var(--linea);
+    border-radius: 8px; background: var(--fondo); color: var(--texto); }
+  .config-form input { width: 120px; }
   @media (max-width: 560px) {
     main { padding: 12px; }
     .pieza { grid-template-columns: 56px 1fr; }
@@ -94,6 +108,7 @@
 </header>
 
 <main>
+  <div id="banner" role="alert"></div>
   <div id="avisos" role="status" aria-live="polite"></div>
 
   <section class="panel" id="panel-conexion" aria-labelledby="h-conexion">
@@ -106,8 +121,15 @@
     <div class="pestanas" role="tablist" aria-label="Filtro de piezas" id="pestanas"></div>
     <div id="lista" role="tabpanel" aria-live="polite"></div>
     <div style="margin-top:12px"><button type="button" id="ver-mas" hidden>Ver más</button></div>
-    <p class="nota">Solo piezas individuales con foto ya revisadas. Las bandas no se publican. El precio, el
-      recargo y el tipo de publicación se cambian en la configuración de la cola de revisión.</p>
+    <p class="nota">Solo piezas individuales con foto ya revisadas. Las bandas no se publican. El recargo y el
+      tipo de publicación se cambian arriba, en Conexión; aplican a las publicaciones nuevas.</p>
+  </section>
+
+  <section class="panel" id="panel-ventas" aria-labelledby="h-ventas" hidden>
+    <h2 id="h-ventas">Ventas en Mercado Libre</h2>
+    <div id="recordatorio"></div>
+    <div id="lista-ventas" aria-live="polite"></div>
+    <div style="margin-top:12px"><button type="button" id="ver-mas-ventas" hidden>Ver más</button></div>
   </section>
 </main>
 
@@ -205,17 +227,116 @@ async function cargarEstado() {
     linea.append(h('span', {}, 'No conectado.'),
       h('a', { class: 'boton primario', href: '/api/ml/conectar' }, 'Conectar con Mercado Libre'));
   }
-  const pct = estado.config?.ml_pct;
-  const tipo = estado.config?.ml_tipo_publicacion;
-  linea.append(
-    h('span', {}, 'Recargo sobre el precio de tienda: ', h('b', {}, pct == null ? '—' : `${pct}%`)),
-    h('span', {}, 'Tipo de publicación: ', h('b', {}, TIPOS[tipo] ?? tipo ?? '—')));
-  caja.append(linea);
+  caja.append(linea, formularioConfig());
+  pintarBanner();
   if (estado.conectado) {
     $('panel-piezas').hidden = false;
+    $('panel-ventas').hidden = false;
     cargarPiezas(true);
+    cargarVentas(true);
   }
 }
+
+// Recargo y tipo de publicacion: se guardan aqui (PUT /api/ml/config) y aplican a lo que se publique desde ahora.
+function formularioConfig() {
+  const pct = h('input', { id: 'cfg-pct', type: 'number', min: 0, max: 300, step: 1, inputMode: 'numeric',
+    value: String(estado.config?.ml_pct ?? 20) });
+  const actual = estado.config?.ml_tipo_publicacion;
+  const tipo = h('select', { id: 'cfg-tipo' },
+    Object.entries(TIPOS).filter(([k]) => k !== 'free' || actual === 'free')
+      .map(([k, texto]) => h('option', { value: k, selected: k === actual }, texto)));
+  const mensaje = h('span', { class: 'nota', role: 'status', 'aria-live': 'polite' });
+  const guardar = h('button', { type: 'submit' }, 'Guardar');
+  return h('form', {
+    class: 'config-form',
+    onsubmit: async (e) => {
+      e.preventDefault();
+      const n = Number(pct.value);
+      if (pct.value.trim() === '' || !Number.isInteger(n) || n < 0 || n > 300) {
+        mensaje.textContent = 'El recargo debe ser un número entero entre 0 y 300.';
+        return;
+      }
+      guardar.disabled = true;
+      const r = await api('/api/ml/config', { metodo: 'PUT', cuerpo: { ml_pct: n, ml_tipo_publicacion: tipo.value } });
+      guardar.disabled = false;
+      if (r.ok && r.datos) {
+        estado.config = r.datos;
+        mensaje.textContent = 'Guardado. Aplica a las publicaciones nuevas; las ya publicadas conservan su precio.';
+      } else mensaje.textContent = textoError(r, 'No se pudo guardar.');
+    },
+  },
+  h('label', { htmlFor: 'cfg-pct' }, 'Recargo sobre el precio de tienda (%)', pct),
+  h('label', { htmlFor: 'cfg-tipo' }, 'Tipo de publicación', tipo),
+  guardar, mensaje);
+}
+
+/* ---------- ventas en Mercado Libre ---------- */
+
+function pintarBanner() {
+  const n = estado?.conflictos ?? 0;
+  $('banner').replaceChildren(...(n > 0 ? [h('div', { class: 'banner-conflicto' },
+    h('span', { class: 'icono', 'aria-hidden': 'true' }, '⚠'),
+    h('div', {},
+      h('b', {}, 'Se vendió en Mercado Libre una pieza que ya no había en tienda: cancela esa venta en Mercado Libre y avisa al comprador.'),
+      h('div', { class: 'nota', style: 'margin-top:4px' },
+        `${n} venta${n === 1 ? '' : 's'} por resolver; se marcan abajo en «Ventas en Mercado Libre».`)))] : []));
+}
+
+let ventas = [];
+let paginaVentas = 1;
+let hayMasVentas = false;
+
+function fechaLegible(iso) {
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime()) ? String(iso ?? '') : d.toLocaleString('es-MX', { dateStyle: 'medium', timeStyle: 'short' });
+}
+
+function infoVenta(v) {
+  if (v.estado === 'cancelada') return ['neutro', '✖', 'Cancelada'];
+  if (v.estado === 'descontada') return ['ok', '✔', 'Pagada y descontada de la tienda'];
+  if (v.estado === 'recibida') return ['pausa', '⏳', 'Recibida, procesando'];
+  return ['neutro', '•', String(v.estado ?? '—')];
+}
+
+function filaVenta(v) {
+  const [clase, icono, texto] = infoVenta(v);
+  const reciente = Date.now() - new Date(v.recibido_en).getTime() < 7 * 86_400_000;
+  const conflicto = v.conflicto && v.estado !== 'cancelada';
+  return h('div', { class: 'venta' },
+    h('div', {},
+      h('div', { class: 'nombre' }, [v.producto.codigo, v.producto.nombre].filter(Boolean).join(' · ')),
+      h('div', { class: 'meta' }, `${v.cantidad} ${v.cantidad === 1 ? 'pieza' : 'piezas'} · ${fechaLegible(v.recibido_en)} · Orden ${v.order_id}`),
+      h('span', { class: `insignia ${clase}` }, `${icono} ${texto}`),
+      conflicto
+        ? h('div', { class: 'error-texto' }, '⚠ Ya no había esta pieza en tienda: cancela la venta en Mercado Libre y avisa al comprador.')
+        : (v.estado === 'descontada' && reciente
+          ? h('div', { class: 'nota', style: 'margin-top:4px' }, '📦 Saca la pieza del piso de venta y empácala.') : null)),
+    v.permalink ? h('a', { class: 'boton', href: v.permalink, target: '_blank', rel: 'noopener noreferrer' }, 'Ver en ML ↗') : null);
+}
+
+function pintarVentas() {
+  const n = estado?.ventas_sin_despachar ?? 0;
+  $('recordatorio').replaceChildren(...(n > 0 ? [h('div', { class: 'aviso', style: 'margin-bottom:12px' },
+    `📦 ${n} venta${n === 1 ? '' : 's'} de los últimos 7 días. Saca la pieza del piso de venta y empácala.`)] : []));
+  $('lista-ventas').replaceChildren(...(ventas.length ? ventas.map(filaVenta)
+    : [h('div', { class: 'vacio' }, 'Todavía no hay ventas en Mercado Libre.')]));
+  $('ver-mas-ventas').hidden = !hayMasVentas;
+}
+
+async function cargarVentas(desdeCero) {
+  if (desdeCero) { paginaVentas = 1; ventas = []; } else paginaVentas += 1;
+  const r = await api(`/api/ml/ventas?pagina=${paginaVentas}`);
+  if (!r.ok || !r.datos) {
+    if (!desdeCero) paginaVentas -= 1;
+    $('lista-ventas').replaceChildren(h('div', { class: 'aviso error' }, textoError(r, 'No se pudieron cargar las ventas.')));
+    $('ver-mas-ventas').hidden = true;
+    return;
+  }
+  ventas = ventas.concat(r.datos.ventas ?? []);
+  hayMasVentas = Boolean(r.datos.hay_mas);
+  pintarVentas();
+}
+$('ver-mas-ventas').addEventListener('click', () => cargarVentas(false));
 
 /* ---------- piezas ---------- */
 
@@ -241,6 +362,7 @@ function infoEstado(e) {
   if (['pausada_por_venta', 'pausada_venta', 'paused_sale'].includes(k)) return ['pausa', '⏸', 'Pausada por venta'];
   if (['vendida', 'sold'].includes(k)) return ['neutro', '🏷', 'Vendida'];
   if (['cerrada', 'closed'].includes(k)) return ['neutro', '✖', 'Cerrada'];
+  if (k === 'publicando') return ['neutro', '⏳', 'Publicando…'];
   if (k === 'error') return ['mal', '⚠', 'Error'];
   return ['neutro', '•', String(e ?? '—')];
 }
@@ -345,7 +467,9 @@ function prellenar(a) {
   if (!v) return { sel: '', txt: '' };
   if (!a.valores?.length) return { sel: '', txt: v.nombre };
   const m = a.valores.find((x) => (v.id && String(x.id) === v.id) || String(x.nombre).toLowerCase() === v.nombre.toLowerCase());
-  return m ? { sel: String(m.id), txt: '' } : { sel: OTRO, txt: v.nombre };
+  if (m) return { sel: String(m.id), txt: '' };
+  // Una lista cerrada no acepta texto libre: sin coincidencia, el dueno elige.
+  return a.tipo === 'list' ? { sel: '', txt: '' } : { sel: OTRO, txt: v.nombre };
 }
 
 function cargarPropuesta(respuesta, conservar) {
@@ -418,7 +542,8 @@ function campoAtributo(a) {
     onchange: (e) => { st.sel = e.target.value; otro.hidden = st.sel !== OTRO; if (!otro.hidden) otro.focus(); revisar(); } },
     h('option', { value: '' }, 'Elige…'),
     a.valores.map((v) => h('option', { value: String(v.id), selected: st.sel === String(v.id) }, v.nombre)),
-    h('option', { value: OTRO, selected: st.sel === OTRO }, 'Otro…'));
+    // «Otro…» solo si el atributo no es una lista cerrada: ML rechaza texto libre en las listas.
+    a.tipo === 'list' ? null : h('option', { value: OTRO, selected: st.sel === OTRO }, 'Otro…'));
   const fila = campo(etiqueta, sel, { requerido: a.requerido });
   fila.append(otro);
   return fila;
@@ -551,9 +676,13 @@ async function enviar(e) {
   ref.enviando = false;
   ref.enviar.textContent = 'Publicar';
   const detalle = r.datos?.detalle;
-  const textoDetalle = detalle == null ? '' : typeof detalle === 'string' ? detalle : JSON.stringify(detalle);
+  // Cada causa de ML en su renglon (ya en español en `texto`); sin causas, el detalle completo.
+  const causas = (Array.isArray(r.datos?.causas) ? r.datos.causas : [])
+    .map((c) => (typeof c === 'string' ? c : c?.texto || c?.mensaje || c?.codigo)).filter(Boolean);
+  const textoDetalle = causas.length || detalle == null ? '' : typeof detalle === 'string' ? detalle : JSON.stringify(detalle);
   ref.error.replaceChildren(h('div', { class: 'aviso error', role: 'alert' },
     h('b', {}, textoError(r, r.status === 409 ? 'Esta pieza ya está publicada o en proceso.' : 'Mercado Libre no aceptó la publicación.')),
+    causas.length ? h('ul', {}, causas.map((c) => h('li', { style: 'overflow-wrap:anywhere' }, c))) : null,
     textoDetalle ? h('div', { class: 'nota', style: 'margin-top:4px;overflow-wrap:anywhere' }, textoDetalle) : null));
   revisar();
 }

@@ -417,6 +417,8 @@ test('publicar: error de validación de ML -> 422 en español, estado error, y s
     assert.match(r.cuerpo.detalle, /no está autorizada para vender esta marca/);
     assert.ok(!r.cuerpo.detalle.includes('solo un aviso'));
     assert.equal(r.cuerpo.causas.length, 1);
+    assert.match(r.cuerpo.causas[0].texto, /no está autorizada/);
+    assert.equal(r.cuerpo.causas[0].mensaje, 'Seller is not authorized for this brand and category');
     const fila = t.db.prepare('select estado, ml_item_id, ultimo_error from ml_publicaciones where producto_id = ?').get(id) as any;
     assert.equal(fila.estado, 'error');
     assert.equal(fila.ml_item_id, null);
@@ -624,6 +626,55 @@ test('venta en ML de la última pieza: stock 0 y publicación vendida; si D1 ya 
   });
 });
 
+test('ventas en ML: lista (nuevas primero), conflictos y conteos del estado', async () => {
+  await conML(async (t) => {
+    const vacio = (await t.pedir('/api/ml/ventas')).cuerpo;
+    assert.deepEqual(vacio, { ventas: [], pendientes_conflicto: 0, hay_mas: false });
+    assert.deepEqual([(await t.pedir('/api/ml/estado')).cuerpo.ventas_sin_despachar, (await t.pedir('/api/ml/estado')).cuerpo.conflictos], [0, 0]);
+
+    const { id, itemId } = await publicarPieza(t, pieza(t, { stock: 1 }));
+    const otra = await publicarPieza(t, pieza(t, { stock: 5, nombre: 'Playera azul' }));
+    t.sim.ordenes.set('9301', orden(9301, 'paid', [[itemId, 1]]));
+    t.sim.ordenes.set('9302', orden(9302, 'paid', [[itemId, 1]]));         // ya no habia: conflicto
+    t.sim.ordenes.set('9303', orden(9303, 'paid', [[otra.itemId, 2]]));
+    for (const n of [9301, 9302, 9303]) { await avisar(t, `/orders/${n}`); await t.esperar(); }
+
+    const r = (await t.pedir('/api/ml/ventas')).cuerpo;
+    assert.equal(r.hay_mas, false);
+    assert.equal(r.pendientes_conflicto, 1);
+    assert.deepEqual(r.ventas.map((v: any) => v.order_id), ['9303', '9302', '9301']);
+    const v = r.ventas[1];
+    assert.deepEqual(Object.keys(v).sort(), ['cantidad', 'conflicto', 'descontado', 'estado', 'ml_item_id', 'order_id', 'permalink', 'producto', 'recibido_en']);
+    assert.deepEqual({ ...v, recibido_en: 'x', producto: { ...v.producto, codigo: 'x' } }, {
+      order_id: '9302', ml_item_id: itemId, cantidad: 1, descontado: 0, estado: 'descontada', conflicto: 1, recibido_en: 'x',
+      permalink: `https://articulo.mercadolibre.com.mx/${itemId}`,
+      producto: { id, codigo: 'x', nombre: "Jeans Levi's 501 Hombre", marca: "Levi's", precio: 25000 },
+    });
+    assert.equal(r.ventas[0].descontado, 2);
+    const e = (await t.pedir('/api/ml/estado')).cuerpo;
+    assert.equal(e.ventas_sin_despachar, 3);
+    assert.equal(e.conflictos, 1);
+
+    // Las de hace mas de 7 dias ya no estan "sin despachar"; cancelada no es conflicto.
+    t.db.prepare(`update ml_ventas set recibido_en = '2020-01-01T00:00:00.000Z' where order_id = '9301'`).run();
+    t.sim.ordenes.set('9302', orden(9302, 'cancelled', [[itemId, 1]]));
+    await avisar(t, '/orders/9302'); await t.esperar();
+    const despues = (await t.pedir('/api/ml/estado')).cuerpo;
+    assert.deepEqual([despues.ventas_sin_despachar, despues.conflictos], [1, 0]);
+    assert.equal((await t.pedir('/api/ml/ventas')).cuerpo.pendientes_conflicto, 0);
+
+    // 50 por pagina.
+    for (let i = 0; i < 50; i++) {
+      t.db.prepare(`insert into ml_ventas (order_id, ml_item_id, producto_id, cantidad, estado, recibido_en) values (?, 'MLM1', ?, 1, 'descontada', ?)`)
+        .run(`8${String(i).padStart(3, '0')}`, id, new Date(Date.now() + i * 1000).toISOString());
+    }
+    const p1 = (await t.pedir('/api/ml/ventas')).cuerpo;
+    assert.equal(p1.ventas.length, 50);
+    assert.equal(p1.hay_mas, true);
+    assert.equal((await t.pedir('/api/ml/ventas?pagina=2')).cuerpo.ventas.length, 3);
+  });
+});
+
 test('notificación de items: refleja lo que el dueño hizo en ML', async () => {
   await conML(async (t) => {
     const { id, itemId } = await publicarPieza(t);
@@ -717,7 +768,7 @@ test('permisos: cajero y capturista reciben 403 en /api/ml/*; el dueño entra', 
     for (const correo of ['cajero@prueba.mx', 'cap@prueba.mx']) {
       (t.env as any).DEV_USUARIO = correo;
       for (const [ruta, cuerpo, metodo] of [
-        ['/api/ml/estado', undefined, 'GET'], ['/api/ml/piezas', undefined, 'GET'], ['/api/ml/conectar', undefined, 'GET'],
+        ['/api/ml/estado', undefined, 'GET'], ['/api/ml/piezas', undefined, 'GET'], ['/api/ml/ventas', undefined, 'GET'], ['/api/ml/conectar', undefined, 'GET'],
         [`/api/ml/preparar/${id}`, {}, 'POST'], [`/api/ml/publicar/${id}`, cuerpoPublicar(), 'POST'],
         [`/api/ml/pausar/${id}`, {}, 'POST'], [`/api/ml/reactivar/${id}`, {}, 'POST'], ['/api/ml/config', { ml_pct: 50 }, 'PUT'],
       ] as [string, unknown, string][]) {
