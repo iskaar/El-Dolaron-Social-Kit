@@ -112,7 +112,7 @@ import { agruparSesiones } from '/sesiones.js';
 import { CATEGORIAS } from '/categorias.js';
 const opcionesCategoria = (elegida) =>
   CATEGORIAS.map(([c, nombre]) => `<option value="${c}" ${c === elegida ? 'selected' : ''}>${nombre}</option>`).join('');
-// Los siete montos y las familias de banda salen de la tabla `familias` (GET /api/familias).
+// Los montos y las familias de banda salen de la tabla `familias` (GET /api/familias).
 const { montos: MONTOS_BANDA, familias: FAMILIAS } = await (await fetch('/api/familias')).json();
 const DESTINOS = [
   ['etiqueta', 'Etiqueta individual'],
