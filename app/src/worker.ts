@@ -21,6 +21,7 @@ import { registrarSocio, buscarSocio, buscarPorCodigo, basesListas, sentenciasDe
 import { registrarCorte, registrarRetiro, ultimoCorte, cajaDe } from './corte.ts';
 import { portal, llegada, vincular } from './portal.ts';
 import { sentenciasVale, cancelarVales, buscarVale, valeDeVenta, valeUsadoEnVenta, reimprimirVale, valesAbiertos } from './vales.ts';
+import { rutaML, recibirNotificacion, conciliarSeguro, sincronizar } from './mercadolibre.ts';
 
 interface FilaConfig {
   clave: string;
@@ -584,7 +585,7 @@ export function prepararLineas(
  * asi que reenviar la cola despues de una red caida no duplica el ticket ni
  * vuelve a descontar existencias.
  */
-async function registrarVenta(request: Request, env: Env, correo: string): Promise<Response> {
+async function registrarVenta(request: Request, env: Env, ctx: ExecutionContext, correo: string): Promise<Response> {
   const venta = (await request.json()) as {
     id?: unknown; lineas?: unknown; forma_pago?: unknown;
     efectivo?: unknown; creado_en?: unknown;
@@ -743,6 +744,8 @@ async function registrarVenta(request: Request, env: Env, correo: string): Promi
     }
     throw error;
   }
+  // Si una pieza publicada en Mercado Libre se agoto, se pausa alla (D1 manda). Despues de responder.
+  ctx.waitUntil(conciliarSeguro(env, { productoIds: preparado.lineas.filter((l) => !l.sinInventario).map((l) => l.producto_id) }));
   const respuesta = json({
     id, total, dolarones, imprimir_en:imprimirEn, cambio: Math.max(0, efectivo - aPagar), ganados: recompensa.ganados,
     saldo: clienteId ? await saldo(env, clienteId, ahora) : null,
@@ -1194,6 +1197,10 @@ export default {
     env.PORTAL_AVISO_TEXTO ||= AVISO;
 
     try {
+      // Mercado Libre avisa aquí, sin Access: la ruta secreta es la puerta. También
+      // llega por el host público del portal (único fuera de Access), por eso va antes.
+      const aviso = pathname.match(/^\/api\/ml\/notificaciones\/([^/]+)$/);
+      if (aviso && request.method === 'POST') return await recibirNotificacion(aviso[1], request, env, ctx);
       // Puerta pública cerrada por defecto. Nunca comparte rutas ni assets del personal.
       if (env.HOST_PORTAL && url.hostname === env.HOST_PORTAL) {
         const archivos: Record<string, string> = {
@@ -1282,6 +1289,11 @@ export default {
         return await resolverSolicitud(resolver[1], request, env, correo);
       }
 
+      if (pathname.startsWith('/api/ml/') || pathname === '/ml/callback') {
+        const respuestaML = await rutaML(request, env, url);
+        if (respuestaML) return respuestaML;
+      }
+
       if (pathname === '/api/config') {
         if (request.method === 'PUT') {
           return await guardarConfig(request, env);
@@ -1321,7 +1333,7 @@ export default {
 
       if (pathname === '/api/ventas') {
         if (request.method === 'POST') {
-          return await registrarVenta(request, env, correo);
+          return await registrarVenta(request, env, ctx, correo);
         }
         return url.searchParams.get('lista') ? await ventasDelDia(url, env) : await corte(url, env);
       }
@@ -1452,5 +1464,11 @@ export default {
       console.error(JSON.stringify({ mensaje: 'fallo en la peticion', pathname, error: String(error) }));
       return json({ error: 'Error interno. Intenta de nuevo.' }, 500);
     }
+  },
+
+  // Cron de wrangler.jsonc, cada 15 min: ordenes de Mercado Libre perdidas y
+  // conciliacion de existencias. Sin cuenta conectada no hace nada.
+  async scheduled(_evento, env, ctx): Promise<void> {
+    ctx.waitUntil(sincronizar(env));
   },
 } satisfies ExportedHandler<Env>;

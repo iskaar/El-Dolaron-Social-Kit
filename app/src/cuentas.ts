@@ -72,6 +72,8 @@ export function permiso(pathname: string, metodo: string): Regla {
   const ruta = pathname.replace(/\.html$/, '').replace(/(.)\/$/, '$1');
 
   if (ruta === '/api/salud') return 'libre';
+  // Lo llama Mercado Libre, sin sesion: lo protege la ruta secreta (mercadolibre.ts).
+  if (metodo === 'POST' && /^\/api\/ml\/notificaciones\/[^/]+$/.test(ruta)) return 'libre';
   if (ruta === '/sin-acceso' || ruta === '/api/yo') return 'cuenta';
   if (ruta === '/api/solicitudes/acceso' && metodo === 'POST') return 'cuenta';
   // Codigo de las pantallas, sin datos: el permiso se cobra en la pantalla y en la API.
