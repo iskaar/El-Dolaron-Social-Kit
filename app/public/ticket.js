@@ -5,8 +5,10 @@
 // Nombres de piezas, correos y motivos los escriben otras personas: texto, nunca HTML.
 export const escapar = (texto) =>
   String(texto ?? '').replace(/[<>&"]/g, (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;' }[c]));
-const pesos = (centavos) => `$${(centavos / 100).toLocaleString('es-MX')}`;
-const dolares = (centavos) => `${(centavos / 100).toLocaleString('es-MX')} D`;
+// Siempre con centavos (Issue #166): lo que se ve aqui debe coincidir con el ticket impreso y con los reportes.
+const dos = (centavos) => (centavos / 100).toLocaleString('es-MX', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const pesos = (centavos) => `$${dos(centavos)}`;
+const dolares = (centavos) => `${dos(centavos)} D`;
 const hora = (iso) => new Date(iso).toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' });
 const fecha = (iso) => new Date(iso).toLocaleDateString('es-MX', { weekday: 'short', day: 'numeric', month: 'short' });
 const FORMAS = { efectivo: 'Efectivo', tarjeta: 'Tarjeta', transferencia: 'Transferencia' };

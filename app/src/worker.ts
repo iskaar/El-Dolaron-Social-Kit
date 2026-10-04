@@ -880,6 +880,21 @@ async function cancelarVenta(id: string, request: Request, env: Env, correo: str
 const diaTienda = (columna: string) => `substr(datetime(${columna}, '-6 hours'), 1, 10)`;
 export const hoyTienda = (ahora = Date.now()) => new Date(ahora - 6 * 3_600_000).toISOString().slice(0, 10);
 
+/**
+ * Los `dias` dias completos de la tienda que terminan hoy (Issue #166): el primero
+ * empieza a las 00:00 de la tienda, no «hace N x 24 h», para que un dia nunca salga
+ * a medias. `anterior_desde` abre el periodo de igual largo justo antes, para comparar.
+ */
+export function rangoDias(dias: number, ahora = Date.now()) {
+  const apertura = (dia: string) => `${dia}T06:00:00.000Z`;   // 00:00 en UTC-6
+  const primero = hoyTienda(ahora - (dias - 1) * 86_400_000);
+  return {
+    dias, dia_desde: primero, dia_hasta: hoyTienda(ahora), desde: apertura(primero),
+    anterior_desde: apertura(hoyTienda(ahora - (2 * dias - 1) * 86_400_000)),
+  };
+}
+const rangoDe = (url: URL) => rangoDias(Math.min(365, Math.max(1, Math.round(Number(url.searchParams.get('dias') ?? 30)))));
+
 // Lo que lleva un renglon de la lista de tickets (ticket.js `renglonTicket`), del dia o del rango.
 const COLUMNAS_TICKET = `v.id, v.total, v.forma_pago, v.cancelada, v.creado_en, v.dolarones, v.devuelto, v.dolarones_devueltos,
             v.caja, v.cajero, v.cliente_id is not null as con_socio,
@@ -958,8 +973,8 @@ async function corte(url: URL, env: Env): Promise<Response> {
  * semana" sino "en general".
  */
 async function reportes(url: URL, env: Env): Promise<Response> {
-  const dias = Math.min(365, Math.max(1, Math.round(Number(url.searchParams.get('dias') ?? 30))));
-  const desde = new Date(Date.now() - dias * 86400000).toISOString();
+  const rango = rangoDe(url);
+  const { dias, desde } = rango;
 
   const resumen = await env.DB.prepare(
     `select count(*) as ventas, coalesce(sum(total - devuelto - dolarones_devueltos), 0) as total,
@@ -969,6 +984,27 @@ async function reportes(url: URL, env: Env): Promise<Response> {
   )
     .bind(desde, desde)
     .first<{ ventas: number; total: number; piezas: number }>();
+
+  // El periodo de igual largo justo antes, para las flechas de «vs periodo anterior».
+  const anterior = await env.DB.prepare(
+    `select count(*) as ventas, coalesce(sum(total - devuelto - dolarones_devueltos), 0) as total,
+       (select coalesce(sum(l.cantidad - l.cancelada_cantidad), 0) from venta_lineas l join ventas v on v.id = l.venta_id
+        where v.cancelada = 0 and v.creado_en >= ? and v.creado_en < ?) as piezas
+     from ventas where cancelada = 0 and creado_en >= ? and creado_en < ?`,
+  )
+    .bind(rango.anterior_desde, desde, rango.anterior_desde, desde)
+    .first<{ ventas: number; total: number; piezas: number }>();
+
+  // De bruto a vendido, sin que sobre ni falte un centavo: lo cobrado en todos los
+  // tickets, menos lo devuelto por piezas, menos lo que valian los cancelados completos.
+  const cuadre = await env.DB.prepare(
+    `select coalesce(sum(total), 0) as bruto,
+       coalesce(sum(devuelto + dolarones_devueltos), 0) as devoluciones_pieza,
+       coalesce(sum(case when cancelada = 1 then total - devuelto - dolarones_devueltos end), 0) as cancelados
+     from ventas where creado_en >= ?`,
+  )
+    .bind(desde)
+    .first<{ bruto: number; devoluciones_pieza: number; cancelados: number }>();
 
   // Lo cobrado en dinero por forma de pago, y lo pagado con Dolarones como una forma mas.
   const { results: porFormaPago } = await env.DB.prepare(
@@ -1040,20 +1076,22 @@ async function reportes(url: URL, env: Env): Promise<Response> {
   // cancelacion que no fue legitima (cobrar de verdad y "cancelar" para
   // quedarse el efectivo). Se listan una por una, no solo el total.
   const { results: cancelaciones } = await env.DB.prepare(
-    `select v.id, v.total - v.dolarones - v.devuelto as total, v.forma_pago, v.cancelada_en, v.cancelada_por,
-       v.motivo_cancelacion,
+    `select v.id, v.total - v.dolarones - v.devuelto as total, v.dolarones - v.dolarones_devueltos as dolarones,
+       v.forma_pago, v.cancelada_en, v.cancelada_por, v.motivo_cancelacion,
        (select group_concat(nombre, ' · ') from venta_lineas
-        where venta_id = v.id and cantidad > cancelada_cantidad) as piezas
+        where venta_id = v.id and cantidad > cancelada_cantidad) as piezas, 'ticket' as tipo
      from ventas v where v.cancelada = 1 and v.creado_en >= ?
      union all
-     select d.venta_id, d.importe, d.forma_pago, d.creado_en, d.autor, d.motivo, d.cantidad || ' × ' || l.nombre
-     from devoluciones d join venta_lineas l on l.id = d.linea_id where d.creado_en >= ?
-     order by 4 desc`,
+     select d.venta_id, d.importe, d.dolarones, d.forma_pago, d.creado_en, d.autor, d.motivo,
+       d.cantidad || ' × ' || l.nombre, 'pieza'
+     from devoluciones d join venta_lineas l on l.id = d.linea_id join ventas v on v.id = d.venta_id
+     where v.creado_en >= ?
+     order by 5 desc`,
   )
     .bind(desde, desde)
     .all<{
-      id: string; total: number; forma_pago: string; cancelada_en: string;
-      cancelada_por: string; motivo_cancelacion: string; piezas: string;
+      id: string; total: number; dolarones: number; forma_pago: string; cancelada_en: string;
+      cancelada_por: string; motivo_cancelacion: string; piezas: string; tipo: string;
     }>();
 
   const { results: aperturas } = await env.DB.prepare(
@@ -1078,12 +1116,24 @@ async function reportes(url: URL, env: Env): Promise<Response> {
     .all();
 
   return json({
-    dias,
+    dias, dia_desde: rango.dia_desde, dia_hasta: rango.dia_hasta,
     resumen: {
       ventas: resumen?.ventas ?? 0,
       total: resumen?.total ?? 0,
       piezas: resumen?.piezas ?? 0,
       ticket_promedio: resumen?.ventas ? Math.round((resumen.total ?? 0) / resumen.ventas) : 0,
+    },
+    anterior: {
+      ventas: anterior?.ventas ?? 0,
+      total: anterior?.total ?? 0,
+      piezas: anterior?.piezas ?? 0,
+      ticket_promedio: anterior?.ventas ? Math.round((anterior.total ?? 0) / anterior.ventas) : 0,
+    },
+    cuadre: {
+      bruto: cuadre?.bruto ?? 0,
+      devoluciones_pieza: cuadre?.devoluciones_pieza ?? 0,
+      cancelados: cuadre?.cancelados ?? 0,
+      vendido: (cuadre?.bruto ?? 0) - (cuadre?.devoluciones_pieza ?? 0) - (cuadre?.cancelados ?? 0),
     },
     por_forma_pago: porFormaPago,
     por_dia: porDia,
@@ -1094,6 +1144,7 @@ async function reportes(url: URL, env: Env): Promise<Response> {
     cancelaciones: {
       n: cancelaciones.length,
       total: cancelaciones.reduce((suma, c) => suma + c.total, 0),
+      dolarones: cancelaciones.reduce((suma, c) => suma + c.dolarones, 0),
       detalle: cancelaciones,
     },
     aperturas_cajon: aperturas,
@@ -1129,8 +1180,7 @@ const TICKETS_POR_PAGINA = 50;
  */
 async function ticketsDelRango(url: URL, env: Env): Promise<Response> {
   const q = url.searchParams;
-  const dias = Math.min(365, Math.max(1, Math.round(Number(q.get('dias') ?? 30))));
-  const desde = new Date(Date.now() - dias * 86400000).toISOString();
+  const { desde } = rangoDe(url);
   const pagina = Math.min(1000, Math.max(0, Math.floor(Number(q.get('pagina'))) || 0));
 
   const filtros = ['v.creado_en >= ?'];
@@ -1147,6 +1197,8 @@ async function ticketsDelRango(url: URL, env: Env): Promise<Response> {
   if (estado === 'devolucion') {
     filtros.push('v.cancelada = 0 and exists (select 1 from venta_lineas where venta_id = v.id and cancelada_cantidad > 0)');
   }
+  const dia = q.get('dia') ?? '';
+  if (/^\d{4}-\d{2}-\d{2}$/.test(dia)) { filtros.push(`${diaTienda('v.creado_en')} = ?`); datos.push(dia); }
   if (q.get('socio') === '1') filtros.push('v.cliente_id is not null');
   if (q.get('dolarones') === '1') filtros.push('v.dolarones > 0');
   const donde = filtros.join(' and ');
