@@ -1,0 +1,565 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>El Dolarón — Mercado Libre</title>
+<style>
+  :root {
+    --azul:#16366B; --rojo:#D72B32; --verde:#1f7a4d; --ambar:#8a5a00;
+    --fondo:#f4f6f9; --panel:#fff; --texto:#1a1f2b; --suave:#5b6478; --linea:#dfe3ea;
+    --titulo:#16366B; --boton:#16366B; --aviso-fondo:#fff6dc; --aviso-borde:#e6c36a; --error-fondo:#fdeceb;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --verde:#5fd39a; --rojo:#ff8087; --ambar:#f0c060;
+      --fondo:#11151d; --panel:#1a202b; --texto:#e8ecf3; --suave:#a2abbd; --linea:#2c3442;
+      --titulo:#a9c1ff; --boton:#2f5fc4; --aviso-fondo:#33290f; --aviso-borde:#7a6125; --error-fondo:#3a1b1d;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--fondo); color: var(--texto);
+    font-family: system-ui, -apple-system, sans-serif; }
+  header { background: #16366B; color: #fff; padding: 14px 20px;
+    display: flex; gap: 16px; align-items: center; flex-wrap: wrap; }
+  header h1 { font-size: 18px; margin: 0; flex: 1; }
+  header a { color: #FFD447; font-size: 14px; }
+  main { padding: 20px; max-width: 1000px; margin: 0 auto; display: grid; gap: 16px; }
+  .panel { background: var(--panel); border: 1px solid var(--linea); border-radius: 12px; padding: 16px; }
+  .panel h2 { font-size: 15px; margin: 0 0 12px; color: var(--titulo); }
+  .nota { font-size: 12px; color: var(--suave); line-height: 1.4; }
+  .vacio { color: var(--suave); font-size: 14px; padding: 8px 0; }
+  .aviso { background: var(--aviso-fondo); border: 1px solid var(--aviso-borde); border-radius: 10px;
+    padding: 10px 14px; font-size: 14px; line-height: 1.45; }
+  .aviso.error { background: var(--error-fondo); border-color: var(--rojo); }
+  .aviso ul { margin: 6px 0 0; padding-left: 20px; }
+  button, .boton { font: inherit; font-size: 14px; border-radius: 8px; padding: 8px 14px; cursor: pointer;
+    border: 1px solid var(--linea); background: var(--panel); color: var(--texto); text-decoration: none; display: inline-block; }
+  button.primario, .boton.primario { background: var(--boton); border-color: var(--boton); color: #fff; font-weight: 700; }
+  button:disabled { opacity: .5; cursor: not-allowed; }
+  :focus-visible { outline: 3px solid #FFD447; outline-offset: 2px; }
+  a { color: var(--titulo); }
+  .conexion { display: flex; flex-wrap: wrap; gap: 8px 24px; align-items: center; font-size: 14px; }
+  .conexion b { color: var(--titulo); }
+  .pestanas { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
+  .pestanas button { border-radius: 999px; padding: 6px 14px; font-size: 13px; }
+  .pestanas button[aria-selected="true"] { background: var(--boton); border-color: var(--boton); color: #fff; }
+  .pieza { display: grid; grid-template-columns: 72px 1fr auto; gap: 12px; align-items: start;
+    padding: 12px 0; border-top: 1px solid var(--linea); }
+  .pieza:first-child { border-top: 0; }
+  .pieza img, .foto-dialogo { background: var(--linea); border-radius: 8px; object-fit: cover; }
+  .pieza img { width: 72px; height: 72px; }
+  .pieza .nombre { font-weight: 700; overflow-wrap: anywhere; }
+  .pieza .meta { font-size: 12px; color: var(--suave); margin-top: 2px; overflow-wrap: anywhere; }
+  .pieza .precios { font-size: 13px; margin-top: 6px; display: flex; gap: 4px 14px; flex-wrap: wrap;
+    font-variant-numeric: tabular-nums; }
+  .pieza .acciones { display: flex; flex-direction: column; gap: 6px; align-items: stretch; }
+  .insignia { display: inline-block; font-size: 12px; font-weight: 700; padding: 2px 8px; border-radius: 999px;
+    border: 1px solid currentColor; margin-top: 6px; }
+  .insignia.ok { color: var(--verde); } .insignia.pausa { color: var(--ambar); }
+  .insignia.mal { color: var(--rojo); } .insignia.neutro { color: var(--suave); }
+  .error-texto { color: var(--rojo); font-size: 12px; margin-top: 4px; overflow-wrap: anywhere; }
+  @media (max-width: 560px) {
+    main { padding: 12px; }
+    .pieza { grid-template-columns: 56px 1fr; }
+    .pieza img { width: 56px; height: 56px; }
+    .pieza .acciones { grid-column: 1 / -1; flex-direction: row; flex-wrap: wrap; }
+  }
+  dialog { border: 0; border-radius: 14px; padding: 18px 20px; width: min(640px, 94vw); max-height: 92vh;
+    background: var(--panel); color: var(--texto); }
+  dialog::backdrop { background: #16366b99; }
+  dialog h2 { margin: 0 0 10px; font-size: 20px; color: var(--titulo); }
+  .cabeza-dialogo { display: flex; gap: 12px; align-items: center; margin-bottom: 12px; }
+  .foto-dialogo { width: 88px; height: 88px; flex: none; }
+  .campo { display: grid; gap: 4px; margin-bottom: 12px; }
+  .campo > label, .campo > .etiqueta { font-size: 13px; font-weight: 600; }
+  .campo .req { color: var(--rojo); }
+  .campo input, .campo select, .campo textarea { font: inherit; font-size: 16px; padding: 8px 10px; width: 100%;
+    border: 1px solid var(--linea); border-radius: 8px; background: var(--fondo); color: var(--texto); }
+  .campo textarea { min-height: 80px; resize: vertical; }
+  .campo .otro { margin-top: 6px; }
+  .fila-dos { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  @media (max-width: 480px) { .fila-dos { grid-template-columns: 1fr; } }
+  .pie-dialogo { display: flex; gap: 10px; justify-content: flex-end; flex-wrap: wrap; margin-top: 14px; align-items: center; }
+  .pie-dialogo .falta { flex: 1; min-width: 180px; font-size: 12px; color: var(--suave); }
+  fieldset { border: 1px solid var(--linea); border-radius: 10px; padding: 10px 12px 2px; margin: 0 0 12px; }
+  legend { font-size: 13px; font-weight: 700; padding: 0 6px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Mercado Libre</h1>
+  <a href="/admin">← Cola de revisión</a>
+  <a href="/reportes">Reportes</a>
+</header>
+
+<main>
+  <div id="avisos" role="status" aria-live="polite"></div>
+
+  <section class="panel" id="panel-conexion" aria-labelledby="h-conexion">
+    <h2 id="h-conexion">Conexión</h2>
+    <div id="conexion"><p class="vacio">Cargando…</p></div>
+  </section>
+
+  <section class="panel" id="panel-piezas" aria-labelledby="h-piezas" hidden>
+    <h2 id="h-piezas">Piezas</h2>
+    <div class="pestanas" role="tablist" aria-label="Filtro de piezas" id="pestanas"></div>
+    <div id="lista" role="tabpanel" aria-live="polite"></div>
+    <div style="margin-top:12px"><button type="button" id="ver-mas" hidden>Ver más</button></div>
+    <p class="nota">Solo piezas individuales con foto ya revisadas. Las bandas no se publican. El precio, el
+      recargo y el tipo de publicación se cambian en la configuración de la cola de revisión.</p>
+  </section>
+</main>
+
+<dialog id="dialogo" aria-labelledby="dialogo-titulo">
+  <h2 id="dialogo-titulo">Publicar en Mercado Libre</h2>
+  <div id="dialogo-cuerpo"></div>
+</dialog>
+
+<script type="module">
+const $ = (id) => document.getElementById(id);
+const OTRO = '__otro';
+
+// Todo lo que viene de otras personas o de Mercado Libre (nombres, marcas, errores) entra como
+// texto (nodos de texto / textContent), nunca como HTML: por eso aqui no hace falta `escapar`.
+function h(tag, props = {}, ...hijos) {
+  const el = document.createElement(tag);
+  for (const [k, v] of Object.entries(props)) {
+    if (v == null || v === false) continue;
+    if (k === 'class') el.className = v;
+    else if (k.startsWith('on')) el.addEventListener(k.slice(2), v);
+    else if (k in el) el[k] = v;
+    else el.setAttribute(k, v === true ? '' : v);
+  }
+  el.append(...hijos.flat().filter((x) => x != null && x !== false));
+  return el;
+}
+
+// Dinero en centavos enteros; solo se formatea, nunca se hacen cuentas con flotantes.
+const pesos = (c) => `$${Math.floor(c / 100).toLocaleString('es-MX')}.${String(c % 100).padStart(2, '0')}`;
+// "1,234.5" -> 123450; null si no es una cantidad valida de pesos (maximo 2 decimales).
+function aCentavos(texto) {
+  const m = /^(\d+)(?:\.(\d{1,2}))?$/.exec(String(texto).trim().replace(/^\$/, '').replace(/,/g, ''));
+  return m ? Number(m[1]) * 100 + Number((m[2] ?? '').padEnd(2, '0') || 0) : null;
+}
+const centavosATexto = (c) => `${Math.floor(c / 100)}.${String(c % 100).padStart(2, '0')}`;
+
+const TIPOS = { gold_special: 'Clásica', gold_pro: 'Premium', free: 'Gratuita' };
+
+// fetch + JSON tolerante: nunca lanza; `cuerpo` es null si la respuesta no es JSON.
+async function api(ruta, { metodo = 'GET', cuerpo } = {}) {
+  try {
+    const r = await fetch(ruta, {
+      method: metodo,
+      headers: cuerpo === undefined ? {} : { 'content-type': 'application/json' },
+      body: cuerpo === undefined ? undefined : JSON.stringify(cuerpo),
+    });
+    const datos = await r.json().catch(() => null);
+    return { ok: r.ok, status: r.status, datos };
+  } catch {
+    return { ok: false, status: 0, datos: null };
+  }
+}
+const textoError = (r, porOmision) => {
+  const e = r.datos?.error;
+  return typeof e === 'string' && e ? e : porOmision;
+};
+
+/* ---------- avisos de la URL (una sola vez) ---------- */
+
+const params = new URLSearchParams(location.search);
+if (params.has('conectado') || params.has('error')) {
+  $('avisos').append(params.has('error')
+    ? h('div', { class: 'aviso error' }, `No se pudo conectar con Mercado Libre: ${params.get('error')}`)
+    : h('div', { class: 'aviso' }, 'Mercado Libre quedó conectado.'));
+  history.replaceState(null, '', location.pathname);
+}
+
+/* ---------- conexion ---------- */
+
+let estado = null;
+
+async function cargarEstado() {
+  const r = await api('/api/ml/estado');
+  if (r.status === 404 || (r.ok && !r.datos)) {
+    $('conexion').replaceChildren(h('div', { class: 'aviso' },
+      'La integración con Mercado Libre todavía no está instalada.'));
+    return;
+  }
+  if (!r.ok) {
+    $('conexion').replaceChildren(h('div', { class: 'aviso error' }, textoError(r, 'No se pudo consultar el estado de Mercado Libre.')));
+    return;
+  }
+  estado = r.datos;
+  const caja = $('conexion');
+  caja.replaceChildren();
+  if (estado.faltan?.length) {
+    caja.append(h('div', { class: 'aviso', style: 'margin-bottom:12px' },
+      'Falta terminar la configuración:',
+      h('ul', {}, estado.faltan.map((x) => h('li', {}, x)))));
+  }
+  const linea = h('div', { class: 'conexion' });
+  if (estado.conectado) {
+    linea.append(h('span', {}, 'Cuenta: ', h('b', {}, estado.usuario?.nickname ?? '—')));
+  } else {
+    linea.append(h('span', {}, 'No conectado.'),
+      h('a', { class: 'boton primario', href: '/api/ml/conectar' }, 'Conectar con Mercado Libre'));
+  }
+  const pct = estado.config?.ml_pct;
+  const tipo = estado.config?.ml_tipo_publicacion;
+  linea.append(
+    h('span', {}, 'Recargo sobre el precio de tienda: ', h('b', {}, pct == null ? '—' : `${pct}%`)),
+    h('span', {}, 'Tipo de publicación: ', h('b', {}, TIPOS[tipo] ?? tipo ?? '—')));
+  caja.append(linea);
+  if (estado.conectado) {
+    $('panel-piezas').hidden = false;
+    cargarPiezas(true);
+  }
+}
+
+/* ---------- piezas ---------- */
+
+const FILTROS = [['pendientes', 'Por publicar'], ['publicadas', 'Publicadas'], ['todas', 'Todas']];
+let filtro = 'pendientes';
+let piezas = [];
+let pagina = 1;   // ASUNCION: paginas desde 1
+let hayMas = false;
+
+function pintarPestanas() {
+  $('pestanas').replaceChildren(...FILTROS.map(([clave, texto]) =>
+    h('button', {
+      type: 'button', role: 'tab', 'aria-selected': String(clave === filtro),
+      onclick: () => { filtro = clave; pintarPestanas(); cargarPiezas(true); },
+    }, texto)));
+}
+
+// Estados de la publicacion: icono + texto, nunca solo color.
+function infoEstado(e) {
+  const k = String(e ?? '').toLowerCase().replace(/[\s-]+/g, '_');
+  if (['activa', 'active'].includes(k)) return ['ok', '✔', 'Activa'];
+  if (['pausada', 'paused'].includes(k)) return ['pausa', '⏸', 'Pausada'];
+  if (['pausada_por_venta', 'pausada_venta', 'paused_sale'].includes(k)) return ['pausa', '⏸', 'Pausada por venta'];
+  if (['vendida', 'sold'].includes(k)) return ['neutro', '🏷', 'Vendida'];
+  if (['cerrada', 'closed'].includes(k)) return ['neutro', '✖', 'Cerrada'];
+  if (k === 'error') return ['mal', '⚠', 'Error'];
+  return ['neutro', '•', String(e ?? '—')];
+}
+const esPausada = (e) => ['pausada', 'paused'].includes(String(e ?? '').toLowerCase());
+
+function filaPieza(item) {
+  const { producto: p, publicacion: pub } = item;
+  const info = h('div', {},
+    h('div', { class: 'nombre' }, p.nombre),
+    h('div', { class: 'meta' }, [p.codigo, p.marca, p.categoria].filter(Boolean).join(' · ')),
+    h('div', { class: 'precios' },
+      h('span', {}, `Tienda ${pesos(p.precio)}`),
+      pub?.precio_ml != null ? h('span', {}, `Mercado Libre ${pesos(pub.precio_ml)}`) : null));
+  const acciones = h('div', { class: 'acciones' });
+  const publicable = !pub || (pub.estado === 'error' && !pub.ml_item_id);
+  if (pub) {
+    const [clase, icono, texto] = infoEstado(pub.estado);
+    info.append(h('span', { class: `insignia ${clase}` }, `${icono} ${texto}`));
+    if (pub.ultimo_error) info.append(h('div', { class: 'error-texto' }, pub.ultimo_error));
+    if (pub.permalink) {
+      acciones.append(h('a', { class: 'boton', href: pub.permalink, target: '_blank', rel: 'noopener noreferrer' }, 'Ver en ML ↗'));
+    }
+    const k = String(pub.estado ?? '').toLowerCase();
+    if (['activa', 'active'].includes(k)) acciones.append(botonCambio(p, 'pausar', 'Pausar'));
+    if (esPausada(pub.estado)) acciones.append(botonCambio(p, 'reactivar', 'Reactivar'));
+  }
+  if (publicable) {
+    acciones.append(h('button', { type: 'button', class: 'primario', onclick: () => abrirPublicar(p) },
+      pub ? 'Reintentar publicar…' : 'Publicar…'));
+  }
+  return h('div', { class: 'pieza' },
+    h('img', { src: `/api/foto/${encodeURIComponent(p.id)}`, alt: `Foto de ${p.nombre}`, loading: 'lazy', width: 72, height: 72 }),
+    info, acciones);
+}
+
+function botonCambio(p, accion, texto) {
+  return h('button', {
+    type: 'button',
+    onclick: async (e) => {
+      const boton = e.currentTarget;
+      boton.disabled = true;
+      const r = await api(`/api/ml/${accion}/${encodeURIComponent(p.id)}`, { metodo: 'POST' });
+      if (r.ok && r.datos?.publicacion) actualizarFila(p.id, r.datos.publicacion);
+      else { boton.disabled = false; aviso(textoError(r, `No se pudo ${texto.toLowerCase()} la publicación.`), true); }
+    },
+  }, texto);
+}
+
+function aviso(texto, error = false) {
+  $('avisos').replaceChildren(h('div', { class: error ? 'aviso error' : 'aviso' }, texto));
+}
+
+function pintarLista() {
+  $('lista').replaceChildren(...(piezas.length
+    ? piezas.map(filaPieza)
+    : [h('div', { class: 'vacio' }, filtro === 'pendientes' ? 'No hay piezas por publicar.' : 'No hay piezas en esta lista.')]));
+  $('ver-mas').hidden = !hayMas;
+}
+
+function actualizarFila(id, publicacion) {
+  const i = piezas.findIndex((x) => x.producto.id === id);
+  if (i < 0) return;
+  piezas[i] = { ...piezas[i], publicacion };
+  // Ya publicada deja de ser "por publicar".
+  if (filtro === 'pendientes' && publicacion.ml_item_id) piezas.splice(i, 1);
+  pintarLista();
+}
+
+async function cargarPiezas(desdeCero) {
+  if (desdeCero) { pagina = 1; piezas = []; $('lista').replaceChildren(h('p', { class: 'vacio' }, 'Cargando…')); }
+  else pagina += 1;
+  const r = await api(`/api/ml/piezas?filtro=${filtro}&pagina=${pagina}`);
+  if (!r.ok || !r.datos) {
+    if (!desdeCero) pagina -= 1;
+    $('lista').replaceChildren(h('div', { class: 'aviso error' }, textoError(r, 'No se pudieron cargar las piezas.')));
+    $('ver-mas').hidden = true;
+    return;
+  }
+  piezas = piezas.concat(r.datos.piezas ?? []);
+  hayMas = Boolean(r.datos.hay_mas);
+  pintarLista();
+}
+$('ver-mas').addEventListener('click', () => cargarPiezas(false));
+
+/* ---------- dialogo de publicacion ---------- */
+
+const dialogo = $('dialogo');
+let p = null;      // producto
+let prop = null;   // propuesta vigente (cambia al cambiar de categoria)
+let f = null;      // lo que el dueno va escribiendo; sobrevive al cambio de categoria
+let ref = {};      // nodos que se actualizan sin reconstruir el formulario
+
+dialogo.addEventListener('close', () => { p = prop = f = null; });
+
+function normalizar(v) {
+  if (v && typeof v === 'object') return { id: v.id != null ? String(v.id) : null, nombre: v.nombre ?? v.name ?? '' };
+  return v == null || v === '' ? null : { id: null, nombre: String(v) };
+}
+
+function prellenar(a) {
+  const v = normalizar(a.valor_sugerido);
+  if (!v) return { sel: '', txt: '' };
+  if (!a.valores?.length) return { sel: '', txt: v.nombre };
+  const m = a.valores.find((x) => (v.id && String(x.id) === v.id) || String(x.nombre).toLowerCase() === v.nombre.toLowerCase());
+  return m ? { sel: String(m.id), txt: '' } : { sel: OTRO, txt: v.nombre };
+}
+
+function cargarPropuesta(respuesta, conservar) {
+  prop = respuesta.propuesta;
+  p = respuesta.producto ?? p;
+  const antes = f?.attr ?? {};
+  f = {
+    titulo: conservar ? f.titulo : prop.titulo ?? '',
+    precio: conservar ? f.precio : centavosATexto(prop.precio_ml ?? p.precio),
+    descripcion: conservar ? f.descripcion : '',
+    categoria_id: prop.categoria_id,
+    attr: Object.fromEntries((prop.atributos ?? []).map((a) => [a.id, antes[a.id] ?? prellenar(a)])),
+    guia: '', fila: '',
+  };
+}
+
+async function abrirPublicar(producto) {
+  p = producto; prop = null; f = null;
+  $('dialogo-cuerpo').replaceChildren(h('p', { class: 'vacio' }, 'Preparando la publicación…'));
+  dialogo.showModal();
+  const r = await api(`/api/ml/preparar/${encodeURIComponent(producto.id)}`, { metodo: 'POST' });
+  if (!dialogo.open) return;
+  if (!r.ok || !r.datos?.propuesta) return errorEnDialogo(textoError(r, 'No se pudo preparar la publicación.'));
+  cargarPropuesta(r.datos, false);
+  pintarFormulario();
+}
+
+function errorEnDialogo(texto) {
+  $('dialogo-cuerpo').replaceChildren(
+    h('div', { class: 'aviso error', role: 'alert' }, texto),
+    h('div', { class: 'pie-dialogo' }, h('button', { type: 'button', onclick: () => dialogo.close() }, 'Cerrar')));
+}
+
+async function cambiarCategoria(id) {
+  const anterior = f.categoria_id;
+  ref.categoria.disabled = true;
+  const r = await api(`/api/ml/preparar/${encodeURIComponent(p.id)}`, { metodo: 'POST', cuerpo: { categoria_id: id } });
+  if (!dialogo.open || !f) return;
+  if (!r.ok || !r.datos?.propuesta) {
+    ref.categoria.disabled = false;
+    ref.categoria.value = anterior;
+    ref.error.replaceChildren(h('div', { class: 'aviso error', role: 'alert' }, textoError(r, 'No se pudo cambiar de categoría.')));
+    return;
+  }
+  cargarPropuesta(r.datos, true);
+  pintarFormulario();
+}
+
+let contador = 0;
+function campo(etiqueta, control, { requerido = false, ayuda = null } = {}) {
+  const id = `c${++contador}`;
+  control.id = id;
+  return h('div', { class: 'campo' },
+    h('label', { htmlFor: id }, etiqueta, requerido ? h('span', { class: 'req', 'aria-hidden': 'true' }, ' *') : null),
+    control, ayuda ? h('div', { class: 'nota' }, ayuda) : null);
+}
+
+function campoAtributo(a) {
+  const st = f.attr[a.id];
+  const etiqueta = a.nombre || a.id;
+  if (!a.valores?.length) {
+    const entrada = h('input', { type: 'text', value: st.txt, required: a.requerido, autocomplete: 'off',
+      oninput: (e) => { st.txt = e.target.value; revisar(); } });
+    return campo(etiqueta, entrada, { requerido: a.requerido });
+  }
+  const otro = h('input', { type: 'text', class: 'otro', value: st.txt, hidden: st.sel !== OTRO, autocomplete: 'off',
+    'aria-label': `${etiqueta}: otro valor`, placeholder: 'Escribe el valor',
+    oninput: (e) => { st.txt = e.target.value; revisar(); } });
+  const sel = h('select', { required: a.requerido,
+    onchange: (e) => { st.sel = e.target.value; otro.hidden = st.sel !== OTRO; if (!otro.hidden) otro.focus(); revisar(); } },
+    h('option', { value: '' }, 'Elige…'),
+    a.valores.map((v) => h('option', { value: String(v.id), selected: st.sel === String(v.id) }, v.nombre)),
+    h('option', { value: OTRO, selected: st.sel === OTRO }, 'Otro…'));
+  const fila = campo(etiqueta, sel, { requerido: a.requerido });
+  fila.append(otro);
+  return fila;
+}
+
+function valorAtributo(a) {
+  const st = f.attr[a.id];
+  if (!a.valores?.length || st.sel === OTRO) return st.txt.trim() ? { id: a.id, value_name: st.txt.trim() } : null;
+  return st.sel ? { id: a.id, value_id: st.sel } : null;
+}
+
+function guias() { return prop.guia_tallas?.guias ?? []; }
+
+function faltante() {
+  const falta = [];
+  if (!f.titulo.trim()) falta.push(prop.usa_family_name ? 'nombre del producto' : 'título');
+  const c = aCentavos(f.precio);
+  if (!c) falta.push('precio válido');
+  for (const a of prop.atributos ?? []) if (a.requerido && !valorAtributo(a)) falta.push(a.nombre || a.id);
+  if (prop.guia_tallas?.requerida && !f.fila) falta.push('guía de tallas');
+  return falta;
+}
+
+// Todo lo que cambia mientras se escribe, sin reconstruir el formulario.
+function revisar() {
+  ref.contador.textContent = `${f.titulo.length}/60`;
+  const c = aCentavos(f.precio);
+  ref.precioNota.textContent = c
+    ? `Precio en tienda ${pesos(p.precio)} · diferencia ${p.precio > 0 ? ((c - p.precio) * 100 / p.precio).toFixed(1) : '—'}%`
+    : `Precio en tienda ${pesos(p.precio)}`;
+  const falta = faltante();
+  ref.enviar.disabled = ref.enviando || falta.length > 0;
+  ref.falta.textContent = falta.length ? `Falta: ${falta.join(', ')}.` : '';
+}
+
+function pintarFormulario() {
+  ref = { enviando: false };
+  const cuerpo = $('dialogo-cuerpo');
+  const titulo = h('input', { type: 'text', maxLength: 60, value: f.titulo, required: true, autocomplete: 'off',
+    oninput: (e) => { f.titulo = e.target.value; revisar(); } });
+  ref.contador = h('span', {});
+  const sugerencias = [{ categoria_id: prop.categoria_id, categoria_nombre: prop.categoria_nombre ?? prop.categoria_id, dominio: prop.dominio },
+    ...(prop.sugerencias ?? []).filter((s) => s.categoria_id !== prop.categoria_id)];
+  ref.categoria = h('select', { onchange: (e) => cambiarCategoria(e.target.value) },
+    sugerencias.map((s) => h('option', { value: s.categoria_id, selected: s.categoria_id === prop.categoria_id },
+      `${s.categoria_nombre}${s.dominio ? ` (${s.dominio})` : ''}`)));
+  const precio = h('input', { type: 'text', inputMode: 'decimal', value: f.precio, required: true, autocomplete: 'off',
+    oninput: (e) => { f.precio = e.target.value; revisar(); } });
+  ref.precioNota = h('div', { class: 'nota' });
+  const descripcion = h('textarea', { value: f.descripcion, maxLength: 5000,
+    oninput: (e) => { f.descripcion = e.target.value; } });
+  ref.falta = h('span', { class: 'falta', 'aria-live': 'polite' });
+  ref.error = h('div', { 'aria-live': 'assertive' });
+  ref.enviar = h('button', { type: 'submit', class: 'primario' }, 'Publicar');
+
+  const requeridos = (prop.atributos ?? []).filter((a) => a.requerido);
+  const opcionales = (prop.atributos ?? []).filter((a) => !a.requerido);
+
+  const hijos = [
+    h('div', { class: 'cabeza-dialogo' },
+      h('img', { class: 'foto-dialogo', src: `/api/foto/${encodeURIComponent(p.id)}`, alt: `Foto de ${p.nombre}`, width: 88, height: 88 }),
+      h('div', {}, h('div', { style: 'font-weight:700;overflow-wrap:anywhere' }, p.nombre),
+        h('div', { class: 'nota' }, [p.codigo, p.marca].filter(Boolean).join(' · ')))),
+    ...(prop.avisos ?? []).map((t) => h('div', { class: 'aviso', role: 'alert', style: 'margin-bottom:12px' }, t)),
+    campo(prop.usa_family_name ? 'Nombre del producto' : 'Título de la publicación', titulo, {
+      requerido: true,
+      ayuda: prop.usa_family_name
+        ? 'Mercado Libre arma el título final con este nombre y los atributos.' : null }),
+    h('div', { class: 'nota', style: 'margin:-8px 0 12px' }, 'Caracteres: ', ref.contador),
+    campo('Categoría', ref.categoria, { ayuda: 'Si la categoría no es la correcta, cámbiala: se recargan los atributos.' }),
+    campo('Precio en Mercado Libre (pesos)', precio, { requerido: true }),
+    ref.precioNota,
+  ];
+  if (requeridos.length) hijos.push(h('fieldset', {}, h('legend', {}, 'Atributos obligatorios'), requeridos.map(campoAtributo)));
+  if (opcionales.length) hijos.push(h('fieldset', {}, h('legend', {}, 'Atributos opcionales'), opcionales.map(campoAtributo)));
+  if (prop.guia_tallas?.requerida) hijos.push(pintarGuia());
+  hijos.push(campo('Descripción (opcional)', descripcion), ref.error,
+    h('div', { class: 'pie-dialogo' }, ref.falta,
+      h('button', { type: 'button', onclick: () => dialogo.close() }, 'Cancelar'), ref.enviar));
+
+  cuerpo.replaceChildren(h('form', { onsubmit: enviar, novalidate: true }, ...hijos));
+  revisar();
+  titulo.focus();
+}
+
+function pintarGuia() {
+  const lista = guias();
+  if (!lista.length) {
+    return h('div', { class: 'aviso', role: 'alert', style: 'margin-bottom:12px' },
+      'Esta categoría exige guía de tallas y todavía no hay ninguna. Créala una sola vez en Mercado Libre ' +
+      '(Mi cuenta → Guía de tallas); después no se puede borrar. Luego vuelve a abrir esta ventana.');
+  }
+  const filas = h('select', { onchange: (e) => { f.fila = e.target.value; revisar(); } });
+  const llenar = () => {
+    const g = lista.find((x) => String(x.id) === f.guia);
+    filas.replaceChildren(h('option', { value: '' }, g ? 'Elige la talla…' : 'Primero elige la guía'),
+      ...(g?.filas ?? []).map((x) => h('option', { value: String(x.id), selected: f.fila === String(x.id) }, x.talla)));
+    filas.disabled = !g;
+  };
+  const guia = h('select', { onchange: (e) => { f.guia = e.target.value; f.fila = ''; llenar(); revisar(); } },
+    h('option', { value: '' }, 'Elige…'),
+    lista.map((g) => h('option', { value: String(g.id), selected: f.guia === String(g.id) }, g.nombre)));
+  llenar();
+  return h('fieldset', {}, h('legend', {}, 'Guía de tallas (obligatoria)'),
+    h('div', { class: 'fila-dos' }, campo('Guía', guia, { requerido: true }), campo('Talla de la pieza', filas, { requerido: true })));
+}
+
+async function enviar(e) {
+  e.preventDefault();
+  if (ref.enviando || faltante().length) return;
+  ref.enviando = true;
+  ref.enviar.disabled = true;
+  ref.enviar.textContent = 'Publicando…';
+  ref.error.replaceChildren();
+  const cuerpo = {
+    titulo: f.titulo.trim(),
+    categoria_id: f.categoria_id,
+    precio_ml: aCentavos(f.precio),
+    atributos: (prop.atributos ?? []).map(valorAtributo).filter(Boolean),
+  };
+  if (prop.guia_tallas?.requerida) cuerpo.guia_fila_id = f.fila;
+  if (f.descripcion.trim()) cuerpo.descripcion = f.descripcion.trim();
+  const r = await api(`/api/ml/publicar/${encodeURIComponent(p.id)}`, { metodo: 'POST', cuerpo });
+  if (r.status === 201 && r.datos?.publicacion) {
+    actualizarFila(p.id, r.datos.publicacion);
+    dialogo.close();
+    aviso('Pieza publicada en Mercado Libre.');
+    return;
+  }
+  ref.enviando = false;
+  ref.enviar.textContent = 'Publicar';
+  const detalle = r.datos?.detalle;
+  const textoDetalle = detalle == null ? '' : typeof detalle === 'string' ? detalle : JSON.stringify(detalle);
+  ref.error.replaceChildren(h('div', { class: 'aviso error', role: 'alert' },
+    h('b', {}, textoError(r, r.status === 409 ? 'Esta pieza ya está publicada o en proceso.' : 'Mercado Libre no aceptó la publicación.')),
+    textoDetalle ? h('div', { class: 'nota', style: 'margin-top:4px;overflow-wrap:anywhere' }, textoDetalle) : null));
+  revisar();
+}
+
+pintarPestanas();
+await cargarEstado();
+</script>
+</body>
+</html>

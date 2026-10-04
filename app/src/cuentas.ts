@@ -65,6 +65,7 @@ const PANTALLAS: Record<string, Rol[]> = {
   '/socios': CAJA,
   '/tarjeta-bandas': TODOS,
   '/reportes': DUENO,
+  '/mercadolibre': DUENO,
   '/cuentas': DUENO,
 };
 
