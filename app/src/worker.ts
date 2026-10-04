@@ -880,15 +880,18 @@ async function cancelarVenta(id: string, request: Request, env: Env, correo: str
 const diaTienda = (columna: string) => `substr(datetime(${columna}, '-6 hours'), 1, 10)`;
 export const hoyTienda = (ahora = Date.now()) => new Date(ahora - 6 * 3_600_000).toISOString().slice(0, 10);
 
+// Lo que lleva un renglon de la lista de tickets (ticket.js `renglonTicket`), del dia o del rango.
+const COLUMNAS_TICKET = `v.id, v.total, v.forma_pago, v.cancelada, v.creado_en, v.dolarones, v.devuelto, v.dolarones_devueltos,
+            v.caja, v.cajero, v.cliente_id is not null as con_socio,
+            (select group_concat(nombre, ' · ') from venta_lineas where venta_id = v.id) as piezas,
+            (select coalesce(sum(cantidad), 0) from venta_lineas where venta_id = v.id) as cantidad,
+            (select coalesce(sum(cancelada_cantidad), 0) from venta_lineas where venta_id = v.id) as cancelada_cantidad`;
+
 /** Tickets de un dia (hoy si no se dice): la caja cancela el que se cobro mal; reportes solo los ve. */
 async function ventasDelDia(url: URL, env: Env): Promise<Response> {
   const dia = url.searchParams.get('dia') ?? hoyTienda();
   const { results } = await env.DB.prepare(
-    `select v.id, v.total, v.forma_pago, v.cancelada, v.creado_en, v.dolarones, v.devuelto, v.dolarones_devueltos,
-            v.caja, v.cajero,
-            (select group_concat(nombre, ' · ') from venta_lineas where venta_id = v.id) as piezas,
-            (select coalesce(sum(cantidad), 0) from venta_lineas where venta_id = v.id) as cantidad,
-            (select coalesce(sum(cancelada_cantidad), 0) from venta_lineas where venta_id = v.id) as cancelada_cantidad
+    `select ${COLUMNAS_TICKET}
      from ventas v where ${diaTienda('v.creado_en')} = ?
      order by v.creado_en desc limit 300`,
   )
@@ -1113,6 +1116,72 @@ function respuestaCsv(nombreArchivo: string, encabezados: string[], filas: unkno
       'content-type': 'text/csv; charset=utf-8',
       'content-disposition': `attachment; filename="${nombreArchivo}"`,
     },
+  });
+}
+
+const TICKETS_POR_PAGINA = 50;
+
+/**
+ * Tickets del rango de /reportes (Issue #164), con filtros y paginacion. El rango
+ * es el mismo de las tarjetas (`dias`), para que los totales cuadren. El detalle de
+ * cada ticket es GET /api/ventas/:id. «Vendido» es lo que el ticket sigue valiendo:
+ * sin los cancelados ni lo devuelto por piezas.
+ */
+async function ticketsDelRango(url: URL, env: Env): Promise<Response> {
+  const q = url.searchParams;
+  const dias = Math.min(365, Math.max(1, Math.round(Number(q.get('dias') ?? 30))));
+  const desde = new Date(Date.now() - dias * 86400000).toISOString();
+  const pagina = Math.min(1000, Math.max(0, Math.floor(Number(q.get('pagina'))) || 0));
+
+  const filtros = ['v.creado_en >= ?'];
+  const datos: string[] = [desde];
+  const forma = q.get('forma_pago') ?? '';
+  if (FORMAS_PAGO.has(forma)) { filtros.push('v.forma_pago = ?'); datos.push(forma); }
+  for (const campo of ['caja', 'cajero']) {
+    const valor = q.get(campo);
+    if (valor) { filtros.push(`v.${campo} = ?`); datos.push(valor); }
+  }
+  const estado = q.get('estado');
+  if (estado === 'vigente') filtros.push('v.cancelada = 0');
+  if (estado === 'cancelado') filtros.push('v.cancelada = 1');
+  if (estado === 'devolucion') {
+    filtros.push('v.cancelada = 0 and exists (select 1 from venta_lineas where venta_id = v.id and cancelada_cantidad > 0)');
+  }
+  if (q.get('socio') === '1') filtros.push('v.cliente_id is not null');
+  if (q.get('dolarones') === '1') filtros.push('v.dolarones > 0');
+  const donde = filtros.join(' and ');
+
+  const resumen = await env.DB.prepare(
+    `select count(*) as tickets,
+            coalesce(sum(case when v.cancelada = 0 then v.total - v.devuelto - v.dolarones_devueltos end), 0) as vendido,
+            coalesce(sum(case when v.cancelada = 0 then v.dolarones - v.dolarones_devueltos end), 0) as dolarones,
+            coalesce(sum(case when v.cancelada = 1 then 1 end), 0) as cancelados,
+            coalesce((select sum(l.cantidad - l.cancelada_cantidad) from venta_lineas l join ventas v on v.id = l.venta_id
+                      where v.cancelada = 0 and ${donde}), 0) as piezas
+     from ventas v where ${donde}`,
+  )
+    .bind(...datos, ...datos)
+    .first();
+  const { results } = await env.DB.prepare(
+    `select ${COLUMNAS_TICKET} from ventas v where ${donde}
+     order by v.creado_en desc, v.id desc limit ? offset ?`,
+  )
+    .bind(...datos, TICKETS_POR_PAGINA + 1, pagina * TICKETS_POR_PAGINA)
+    .all();
+  // Para los selectores: lo que hubo en el rango, sin importar los filtros.
+  const { results: cajas } = await env.DB.prepare(
+    `select distinct caja as valor from ventas where creado_en >= ? and caja != '' order by caja`,
+  ).bind(desde).all<{ valor: string }>();
+  const { results: cajeros } = await env.DB.prepare(
+    `select distinct cajero as valor from ventas where creado_en >= ? and cajero != '' order by cajero`,
+  ).bind(desde).all<{ valor: string }>();
+
+  return json({
+    resumen,
+    tickets: results.slice(0, TICKETS_POR_PAGINA),
+    hay_mas: results.length > TICKETS_POR_PAGINA,
+    cajas: cajas.map((f) => f.valor),
+    cajeros: cajeros.map((f) => f.valor),
   });
 }
 
@@ -1386,6 +1455,9 @@ export default {
 
       if (pathname === '/api/reportes') {
         return await reportes(url, env);
+      }
+      if (pathname === '/api/reportes/tickets') {
+        return await ticketsDelRango(url, env);
       }
       if (pathname === '/api/reportes/ventas.csv') {
         return await exportarVentasCsv(env);

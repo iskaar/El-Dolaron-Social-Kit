@@ -43,6 +43,11 @@
   .exportar { display: flex; gap: 10px; flex-wrap: wrap; }
   .exportar a { display: inline-block; border: 1px solid var(--linea); background: #fff; color: #1a1f2b;
     border-radius: 8px; padding: 9px 14px; font-size: 13px; text-decoration: none; font-weight: 600; }
+  .filtros-tickets { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 8px; font-size: 13px; }
+  .filtros-tickets select { padding: 7px 8px; font-size: 13px; border: 1px solid var(--linea); border-radius: 8px; background: #fff; max-width: 100%; }
+  .filtros-tickets label { display: flex; gap: 4px; align-items: center; color: #5b6478; }
+  .ver-mas { margin-top: 8px; padding: 8px 14px; font-size: 13px; border: 1px solid var(--linea); border-radius: 8px;
+    background: #fff; cursor: pointer; }
   .nota { font-size: 12px; color: #5b6478; margin-top: 8px; line-height: 1.4; }
   dialog { border: 0; border-radius: 14px; padding: 18px 20px; width: min(600px, 94vw); max-height: 92vh; }
   dialog::backdrop { background: #16366b99; }
@@ -75,12 +80,27 @@
   </div>
 
   <div class="panel">
-    <h2>Tickets del día</h2>
-    <div class="fondo-caja">
-      <input id="dia-tickets" type="date" style="width:auto">
+    <h2>Tickets</h2>
+    <div class="tarjetas" id="tickets-resumen" style="margin-bottom: 12px"></div>
+    <div class="filtros-tickets">
+      <select id="f-forma" aria-label="Forma de pago">
+        <option value="">Todas las formas de pago</option>
+        <option value="efectivo">Efectivo</option><option value="tarjeta">Tarjeta</option>
+        <option value="transferencia">Transferencia</option>
+      </select>
+      <select id="f-caja" aria-label="Caja"></select>
+      <select id="f-cajero" aria-label="Cajero"></select>
+      <select id="f-estado" aria-label="Estado">
+        <option value="">Todos los estados</option><option value="vigente">Vigentes</option>
+        <option value="devolucion">Con devoluciones</option><option value="cancelado">Cancelados</option>
+      </select>
+      <label><input id="f-socio" type="checkbox"> Con socio</label>
+      <label><input id="f-dolarones" type="checkbox"> Con Dolarones</label>
     </div>
-    <div id="tickets-dia" style="max-height: 360px; overflow-y: auto"></div>
-    <p class="nota">Toca un ticket para ver sus piezas y lo que se devolvió. Las piezas se cancelan desde la caja.</p>
+    <div id="tickets-rango"></div>
+    <button id="tickets-mas" type="button" class="ver-mas" hidden>Ver más tickets</button>
+    <p class="nota">Del rango de arriba. Toca un ticket para ver sus piezas, el cobro y lo que se devolvió.
+      Las piezas se cancelan desde la caja. «Vendido» es lo que los tickets siguen valiendo, sin cancelados ni devoluciones.</p>
   </div>
 
   <div class="dos-columnas">
@@ -316,26 +336,54 @@ $('rango').addEventListener('click', (e) => {
   diasActual = Number(dias);
   pintarRango();
   cargar();
+  cargarTickets();
 });
 
-/* ---------- tickets de un dia, con su desglose (Issue #138) ---------- */
+/* ---------- tickets del rango, con filtros y su desglose (Issues #138, #164) ---------- */
 
-// Hoy en la hora de la tienda (UTC-6 fijo), como el servidor.
-$('dia-tickets').value = new Date(Date.now() - 6 * 3_600_000).toISOString().slice(0, 10);
+let paginaTickets = 0;
 
-async function cargarTickets() {
+function opciones(selector, todas, valores) {
+  const actual = selector.value;
+  selector.innerHTML = `<option value="">${todas}</option>` +
+    valores.map((v) => `<option value="${escapar(v)}">${escapar(v)}</option>`).join('');
+  selector.value = valores.includes(actual) ? actual : '';
+}
+
+// `mas`: la siguiente pagina de los mismos filtros, que se agrega a la lista.
+async function cargarTickets(mas = false) {
+  paginaTickets = mas ? paginaTickets + 1 : 0;
+  const params = new URLSearchParams({ dias: diasActual, pagina: paginaTickets });
+  for (const [campo, id] of [['forma_pago', 'f-forma'], ['caja', 'f-caja'], ['cajero', 'f-cajero'], ['estado', 'f-estado']]) {
+    if ($(id).value) params.set(campo, $(id).value);
+  }
+  if ($('f-socio').checked) params.set('socio', '1');
+  if ($('f-dolarones').checked) params.set('dolarones', '1');
   try {
-    const tickets = await (await fetch(`/api/ventas?lista=1&dia=${$('dia-tickets').value}`)).json();
-    $('tickets-dia').innerHTML = tickets.length === 0
-      ? '<div class="vacio">Sin ventas ese día.</div>'
-      : tickets.map(renglonTicket).join('');
+    const r = await (await fetch(`/api/reportes/tickets?${params}`)).json();
+    if (!mas) {
+      opciones($('f-caja'), 'Todas las cajas', r.cajas);
+      opciones($('f-cajero'), 'Todos los cajeros', r.cajeros);
+      const x = r.resumen;
+      $('tickets-resumen').innerHTML = [
+        ['Tickets', x.tickets], ['Vendido', pesos(x.vendido)], ['Piezas', x.piezas],
+        ['Dolarones usados', `${Math.round(x.dolarones / 100).toLocaleString('es-MX')} D`], ['Cancelados', x.cancelados],
+      ].map(([e, v]) => `<div class="tarjeta"><div class="etiqueta">${e}</div><div class="valor">${v}</div></div>`).join('');
+      $('tickets-rango').innerHTML = '';
+    }
+    if (!mas && r.tickets.length === 0) $('tickets-rango').innerHTML = '<div class="vacio">Sin tickets con esos filtros.</div>';
+    $('tickets-rango').insertAdjacentHTML('beforeend', r.tickets.map((t) => renglonTicket(t, { completo: true })).join(''));
+    $('tickets-mas').hidden = !r.hay_mas;
   } catch {
-    $('tickets-dia').innerHTML = '<div class="vacio">No se pudieron cargar los tickets.</div>';
+    $('tickets-rango').innerHTML = '<div class="vacio">No se pudieron cargar los tickets.</div>';
   }
 }
-$('dia-tickets').addEventListener('change', cargarTickets);
+for (const id of ['f-forma', 'f-caja', 'f-cajero', 'f-estado', 'f-socio', 'f-dolarones']) {
+  $(id).addEventListener('change', () => cargarTickets());
+}
+$('tickets-mas').addEventListener('click', () => cargarTickets(true));
 
-$('tickets-dia').addEventListener('click', async (e) => {
+$('tickets-rango').addEventListener('click', async (e) => {
   const fila = e.target.closest('[data-ticket]');
   if (!fila) return;
   $('ticket-contenido').innerHTML = '<p class="nota">Cargando…</p>';

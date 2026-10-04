@@ -14,8 +14,11 @@ const FORMAS = { efectivo: 'Efectivo', tarjeta: 'Tarjeta', transferencia: 'Trans
 /** Lo que el ticket sigue valiendo: total menos lo devuelto por piezas, en dinero y en Dolarones. */
 export const vigente = (t) => (t.cancelada ? 0 : t.total - t.devuelto - t.dolarones_devueltos);
 
-/** Un renglon de la lista de tickets del dia. `data-ticket` abre la ventana. */
-export function renglonTicket(t) {
+/**
+ * Un renglon de la lista de tickets. `data-ticket` abre la ventana. Con `completo`
+ * (reportes, donde la lista cruza dias y cajas) lleva fecha, caja, socio y Dolarones.
+ */
+export function renglonTicket(t, { completo = false } = {}) {
   asegurarEstilos();
   const parcial = !t.cancelada && t.cancelada_cantidad > 0;
   const estado = t.cancelada ? 'cancelado' : parcial ? `${t.cancelada_cantidad} de ${t.cantidad} devueltas` : '';
@@ -23,7 +26,8 @@ export function renglonTicket(t) {
     <button type="button" class="ticket-fila ${t.cancelada ? 'cancelada' : ''}" data-ticket="${escapar(t.id)}">
       <span class="ticket-principal">
         <b>${pesos(vigente(t))}</b>${parcial ? ` <s>${pesos(t.total)}</s>` : ''}
-        · ${hora(t.creado_en)} · ${FORMAS[t.forma_pago] ?? escapar(t.forma_pago)}
+        · ${completo ? `${fecha(t.creado_en)} ` : ''}${hora(t.creado_en)} · ${FORMAS[t.forma_pago] ?? escapar(t.forma_pago)}
+        ${completo ? `· ${escapar(t.caja || 'sin caja')}${t.con_socio ? ' · socio' : ''}${t.dolarones ? ` · ${dolares(t.dolarones)}` : ''}` : ''}
         <span class="piezas">${escapar(t.piezas)}</span>
       </span>
       <span class="ticket-estado">${estado}</span>
