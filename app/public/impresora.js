@@ -349,6 +349,7 @@ const parrafo = (texto) => (sinAcentos(texto).match(new RegExp(`.{1,${COLUMNAS}}
  * @param corte la fila de `cortes` que regresa /api/cortes
  */
 export function imprimirCorte(corte) {
+  const conteo = JSON.parse(corte.conteo || '{}');
   const diferencia = corte.diferencia;
   const etiquetaDiferencia = diferencia === 0 ? 'Diferencia' : diferencia > 0 ? 'SOBRANTE' : 'FALTANTE';
   const partes = [
@@ -371,6 +372,14 @@ export function imprimirCorte(corte) {
     renglonMonto(etiquetaDiferencia, importe(Math.abs(diferencia))),
     negritas(false),
     separador(),
+    ...(Object.keys(conteo).length ? [
+      centrado('CONTEO'),
+      ...Object.entries(conteo)
+        .filter(([, piezas]) => piezas > 0)
+        .sort(([a], [b]) => Number(b) - Number(a))
+        .map(([denominacion, piezas]) => renglonMonto(`  ${piezas} x ${importe(Number(denominacion))}`, importe(piezas * Number(denominacion)))),
+      separador(),
+    ] : []),
     renglonMonto('Tarjeta (sistema)', importe(corte.tarjeta_sistema)),
     renglonMonto('Tarjeta (terminal)', importe(corte.tarjeta_terminal)),
     renglonMonto('Diferencia tarjeta', importe(corte.tarjeta_terminal - corte.tarjeta_sistema)),

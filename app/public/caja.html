@@ -107,7 +107,11 @@
   .abrir-para-contar { width: 100%; padding: 12px; font-size: 16px; border: 1px solid var(--azul); background: #fff;
     color: var(--azul); border-radius: 10px; cursor: pointer; margin: 4px 0; }
   .aviso-dialogo { min-height: 18px; font-size: 14px; color: var(--rojo); margin-top: 8px; }
-  #corte-efectivo { font-size: 26px; font-weight: 700; padding: 12px; }
+  #corte-denominaciones { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+  #corte-denominaciones td { padding: 3px 4px; font-size: 15px; }
+  #corte-denominaciones td:last-child { text-align: right; color: #5b6478; }
+  #corte-denominaciones input { width: 90px; padding: 6px 8px; font-size: 16px; }
+  .total-contado { font-size: 22px; margin: 10px 0 4px; text-align: right; }
   .tipo-salida { display: flex; gap: 8px; margin: 4px 0 6px; }
   .tipo-salida label { flex: 1; display: flex; align-items: center; gap: 8px; margin: 0; padding: 10px 12px; font-size: 15px;
     color: #1a1f2b; border: 1px solid var(--linea); border-radius: 10px; cursor: pointer; }
@@ -258,12 +262,12 @@
 <dialog id="dialogo-corte">
   <h2>Corte de <span id="corte-caja"></span></h2>
   <div id="corte-paso-conteo">
-    <p class="nota">Cuenta <b>todo</b> el efectivo del cajón, fondo incluido, y escribe el total. Lo que el
-      sistema esperaba se ve después de registrarlo, y ya no se puede cambiar.</p>
+    <p class="nota">Cuenta <b>todo</b> el efectivo del cajón, fondo incluido. Lo que el sistema esperaba se ve
+      después de registrar el conteo, y el conteo ya no se puede cambiar.</p>
     <button id="corte-abrir-cajon" type="button" class="abrir-para-contar">Abrir cajón para contar</button>
     <div class="aviso-dialogo" id="corte-aviso-cajon"></div>
-    <label for="corte-efectivo">Efectivo en el cajón ($)</label>
-    <input id="corte-efectivo" type="number" min="0" step="0.5" inputmode="decimal" placeholder="0">
+    <table id="corte-denominaciones"></table>
+    <div class="total-contado">Contado: <b id="corte-contado">$0</b></div>
     <label for="corte-terminal">Total de tarjeta según el cierre de la terminal ($)</label>
     <input id="corte-terminal" type="number" min="0" step="0.01" inputmode="decimal" placeholder="0">
     <label for="corte-notas">Notas (opcional)</label>
@@ -303,7 +307,7 @@
   </div>
 </dialog>
 <script type="module">
-import { totales, agregar, efectivoAlcanza, dolaronesGanados, saldoCanjeable, maximoCanje, MINIMO_REGALO } from '/venta.js';
+import { totales, agregar, efectivoAlcanza, dolaronesGanados, saldoCanjeable, maximoCanje, MINIMO_REGALO, DENOMINACIONES, contadoDe } from '/venta.js';
 import { abrirCamara } from '/camara.js';
 import {
   reconectarImpresora, conectarImpresora, impresoraLista, imprimirTicket, abrirCajon, explicarErrorUsb, errorImpresora,
@@ -1261,7 +1265,7 @@ $('abrir-cajon').addEventListener('click', async () => {
 // (sugerencia de un cajero, 28/09). Queda registrado igual que el otro.
 $('corte-abrir-cajon').addEventListener('click', async () => {
   await abrirCajonRegistrado($('corte-aviso-cajon'));
-  $('corte-efectivo').focus();
+  document.querySelector('#corte-denominaciones input').focus();
 });
 
 /* ---------- gasto o retiro de efectivo (Issue #100) ---------- */
@@ -1326,23 +1330,63 @@ $('retiro-registrar').addEventListener('click', async () => {
 
 let idCorte = null;
 let ultimoCorte = null;
+// Un corte pegado al anterior casi siempre es un descuido: se avisa y pide confirmar (Issue #162).
+const CORTE_RECIENTE_MIN = 30;
+let corteReciente = null;   // minutos desde el ultimo corte de esta caja, si fue hace poco
+let corteConfirmado = false;
+
+function conteoCorte() {
+  const conteo = {};
+  for (const campo of document.querySelectorAll('#corte-denominaciones input')) {
+    const piezas = Number(campo.value || 0);
+    if (piezas) conteo[campo.dataset.denominacion] = piezas;
+  }
+  return conteo;
+}
+
+function pintarContado() {
+  for (const campo of document.querySelectorAll('#corte-denominaciones input')) {
+    const piezas = Number(campo.value || 0);
+    campo.closest('tr').lastElementChild.textContent = Number.isInteger(piezas) && piezas > 0
+      ? pesos(piezas * Number(campo.dataset.denominacion)) : '';
+  }
+  const contado = contadoDe(conteoCorte());
+  $('corte-contado').textContent = contado === null ? 'revisa las piezas' : pesos(contado);
+}
+
+$('corte-denominaciones').innerHTML = DENOMINACIONES.map((d) => `
+  <tr><td>${d === 2000 ? 'Billete o moneda de $20' : d === 50 ? 'Moneda de 50¢' : `${d > 2000 ? 'Billete' : 'Moneda'} de ${pesos(d)}`}</td>
+    <td><input type="number" min="0" step="1" inputmode="numeric" data-denominacion="${d}" placeholder="0"></td>
+    <td></td></tr>`).join('');
+$('corte-denominaciones').addEventListener('input', pintarContado);
 
 $('abrir-corte').addEventListener('click', async () => {
   if (!exigirCaja()) return;
   idCorte = crypto.randomUUID();
   $('corte-caja').textContent = cajaActual();
-  $('corte-efectivo').value = '';
+  for (const campo of document.querySelectorAll('#corte-denominaciones input')) campo.value = '';
   $('corte-aviso-cajon').textContent = '';
   $('corte-terminal').value = '';
   $('corte-notas').value = '';
   $('corte-aviso').textContent = '';
   $('corte-paso-conteo').hidden = false;
   $('corte-paso-resultado').hidden = true;
+  $('corte-registrar').textContent = 'Registrar conteo';
+  corteReciente = null;
+  corteConfirmado = false;
+  pintarContado();
   $('dialogo-corte').showModal();
 
   // Lo que no llego al servidor no entra en el corte: primero se sincroniza, y
   // si algo sigue pendiente o rechazado no se puede cortar.
   $('corte-registrar').disabled = true;
+  try {
+    const previo = await fetch(`/api/cortes?caja=${encodeURIComponent(cajaActual())}`);
+    if (previo.ok) {
+      const minutos = Math.floor((Date.now() - Date.parse((await previo.json()).hasta)) / 60000);
+      if (minutos < CORTE_RECIENTE_MIN) corteReciente = Math.max(minutos, 0);
+    }
+  } catch { /* sin red el corte tampoco se puede registrar; el aviso de abajo lo dice */ }
   await sincronizar();
   const cola = await store('ventas', 'readonly', (s) => s.getAll());
   const rechazadas = cola.filter((v) => v.estado === 'rechazada').length;
@@ -1354,7 +1398,7 @@ $('abrir-corte').addEventListener('click', async () => {
   } else {
     $('corte-registrar').disabled = false;
   }
-  $('corte-efectivo').focus();
+  document.querySelector('#corte-denominaciones input').focus();
 });
 
 $('corte-salir').addEventListener('click', () => { $('dialogo-corte').close(); $('codigo').focus(); });
@@ -1385,16 +1429,21 @@ function pintarResultado(c) {
 }
 
 $('corte-registrar').addEventListener('click', async () => {
-  if ($('corte-efectivo').value === '') { $('corte-aviso').textContent = 'Escribe cuánto efectivo hay en el cajón.'; return; }
-  const contado = Math.round(Number($('corte-efectivo').value) * 100);
-  if (!(contado >= 0)) { $('corte-aviso').textContent = 'Revisa el efectivo del cajón.'; return; }
+  const conteo = conteoCorte();
+  if (contadoDe(conteo) === null) { $('corte-aviso').textContent = 'Revisa las piezas: solo números enteros.'; return; }
   const terminal = Math.round(Number($('corte-terminal').value || 0) * 100);
   if (!(terminal >= 0)) { $('corte-aviso').textContent = 'Revisa el total de la terminal.'; return; }
+  if (corteReciente !== null && !corteConfirmado) {
+    corteConfirmado = true;
+    $('corte-aviso').textContent = `El último corte de esta caja fue hace ${corteReciente} min. Si ya contaste y entregaste, no hace falta otro; si de veras es otro corte, vuelve a registrar.`;
+    $('corte-registrar').textContent = 'Registrar otro corte';
+    return;
+  }
   $('corte-registrar').disabled = true;
   try {
     const r = await fetch('/api/cortes', {
       method: 'POST', headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ id: idCorte, caja: cajaActual(), efectivo_contado: contado, tarjeta_terminal: terminal, notas: $('corte-notas').value }),
+      body: JSON.stringify({ id: idCorte, caja: cajaActual(), conteo, tarjeta_terminal: terminal, notas: $('corte-notas').value }),
     });
     const corte = await r.json();
     if (!r.ok) { $('corte-aviso').textContent = corte.error ?? 'No se pudo registrar el corte.'; $('corte-registrar').disabled = false; return; }

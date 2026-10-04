@@ -239,3 +239,20 @@ test('ticket de socio en cola no anuncia Dolarones antes de la respuesta del ser
   assert.match(texto, /Dolarones de compra sin confirmar/);
   assert.doesNotMatch(texto, /Ganaste/);
 });
+
+test('el corte impreso lista las piezas del conteo, de mayor a menor', async () => {
+  const { pedazos } = impresoraFalsa();
+  const { reconectarImpresora, imprimirCorte } = await import('../public/impresora.js');
+  await reconectarImpresora();
+  const antes = pedazos.length;
+  await imprimirCorte({
+    caja: 'Caja 1', cajero: 'caja@prueba.mx', desde: null, hasta: '2026-10-03T02:05:00Z', tickets: 1,
+    fondo_inicial: 50000, efectivo_ventas: 25000, efectivo_devoluciones: 0, retiros: 0, gastos: 0,
+    efectivo_esperado: 75000, efectivo_contado: 75000, diferencia: 0,
+    tarjeta_sistema: 0, tarjeta_terminal: 0, transferencias: 0, dolarones: 0,
+    fondo_siguiente: 50000, entregado: 25000, notas: '',
+    conteo: JSON.stringify({ '5000': 1, '50000': 1, '10000': 2 }),
+  });
+  const texto = new TextDecoder().decode(Uint8Array.from(pedazos.slice(antes).flatMap((p) => [...p])));
+  assert.match(texto, /CONTEO\n +1 x \$500\.00 +\$500\.00\n +2 x \$100\.00 +\$200\.00\n +1 x \$50\.00 +\$50\.00/);
+});

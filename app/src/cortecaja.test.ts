@@ -226,3 +226,20 @@ test('#123: una pieza devuelta despues del corte de su venta resta en la caja do
   assert.equal(caja2.efectivo_devoluciones, 25000);
   assert.equal(caja2.diferencia, 0);
 });
+
+test('el conteo por billete y moneda suma lo contado y se guarda; uno invalido no hace corte', async () => {
+  const { db, pedir } = tienda();
+  await vender(pedir, 'Caja 1');
+  const conteo = { '50000': 1, '10000': 2, '5000': 1 };   // $500 + 2 x $100 + $50 = $750 = fondo + venta
+  const r = await pedir('/api/cortes', { id: crypto.randomUUID(), caja: 'Caja 1', conteo, tarjeta_terminal: 0 });
+  assert.equal(r.status, 201, JSON.stringify(r.cuerpo));
+  assert.equal(r.cuerpo.efectivo_contado, 75000);
+  assert.equal(r.cuerpo.diferencia, 0);
+  assert.deepEqual(JSON.parse(r.cuerpo.conteo), conteo);
+
+  for (const malo of [{ '777': 1 }, { '10000': 1.5 }, { '10000': -1 }]) {
+    const x = await pedir('/api/cortes', { id: crypto.randomUUID(), caja: 'Caja 1', conteo: malo, tarjeta_terminal: 0 });
+    assert.equal(x.status, 400);
+  }
+  assert.equal((db.prepare('select count(*) as n from cortes').get() as { n: number }).n, 1);
+});
