@@ -16,6 +16,9 @@
     --acento: #16366B; --apagado: #c3c2b7;
     --serie-1: #2a78d6; --serie-2: #eb6834; --serie-3: #1baf7a; --serie-4: #eda100;
     --bien: #006300; --mal: #d03b3b; --aviso: #b26b00;
+    /* Escala secuencial de un solo tono (pasos 100, 200, 300, 450, 550 y 700 del azul): mas oscuro = mas vendido. */
+    --calor-1: #cde2fb; --calor-2: #9ec5f4; --calor-3: #6da7ec; --calor-4: #2a78d6; --calor-5: #1c5cab; --calor-6: #0d366b;
+    --calor-texto: #ffffff;
   }
   @media (prefers-color-scheme: dark) {
     :root:where(:not([data-theme="light"])) {
@@ -25,6 +28,8 @@
       --acento: #3987e5; --apagado: #383835;
       --serie-1: #3987e5; --serie-2: #d95926; --serie-3: #199e70; --serie-4: #c98500;
       --bien: #0ca30c; --mal: #e66767; --aviso: #fab219;
+      --calor-1: #104281; --calor-2: #1c5cab; --calor-3: #3987e5; --calor-4: #6da7ec; --calor-5: #9ec5f4; --calor-6: #cde2fb;
+      --calor-texto: #0d366b;
     }
   }
   :root[data-theme="dark"] {
@@ -34,6 +39,8 @@
     --acento: #3987e5; --apagado: #383835;
     --serie-1: #3987e5; --serie-2: #d95926; --serie-3: #199e70; --serie-4: #c98500;
     --bien: #0ca30c; --mal: #e66767; --aviso: #fab219;
+    --calor-1: #104281; --calor-2: #1c5cab; --calor-3: #3987e5; --calor-4: #6da7ec; --calor-5: #9ec5f4; --calor-6: #cde2fb;
+    --calor-texto: #0d366b;
   }
 
   * { box-sizing: border-box; }
@@ -124,6 +131,20 @@
   table.leyenda { width: 100%; border-collapse: collapse; margin-top: 12px; font-size: 13px; }
   table.leyenda td { padding: 6px 4px; border-bottom: 1px solid var(--rejilla); }
   table.leyenda .llave { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 8px; }
+  /* ---- mapa de calor: dia de la semana x hora ---- */
+  .calor { display: grid; grid-template-columns: 84px repeat(var(--horas), minmax(40px, 76px)); gap: 4px; width: max-content; min-width: 100%; }
+  .calor-hora { font-size: 11px; color: var(--tinta-2); text-align: center; align-self: end; font-variant-numeric: tabular-nums; }
+  .calor-dia { font-size: 12px; color: var(--tinta-2); align-self: center; position: sticky; left: 0; background: var(--superficie); z-index: 1; }
+  .celda { height: 40px; border-radius: 7px; display: flex; align-items: center; justify-content: center; font-size: 10.5px;
+    font-weight: 700; color: var(--calor-texto); font-variant-numeric: tabular-nums; }
+  .celda.vacia { border: 1px solid var(--rejilla); }
+  .celda.p1 { background: var(--calor-1); } .celda.p2 { background: var(--calor-2); } .celda.p3 { background: var(--calor-3); }
+  .celda.p4 { background: var(--calor-4); } .celda.p5 { background: var(--calor-5); } .celda.p6 { background: var(--calor-6); }
+  .calor .celda:hover, .calor .celda:focus-visible { outline: 2px solid var(--tinta); outline-offset: 1px; }
+  .calor-leyenda { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 4px; margin-top: 14px; font-size: 12px; color: var(--tinta-2); }
+  .calor-leyenda .celda { width: 22px; height: 14px; border-radius: 4px; }
+  .calor-paso { display: inline-flex; align-items: center; gap: 4px; margin-right: 8px; white-space: nowrap; }
+  .calor-paso .celda { display: inline-block; }
   .globo { position: fixed; z-index: 50; pointer-events: none; background: var(--superficie); color: var(--tinta);
     border: 1px solid var(--borde); border-radius: 10px; padding: 8px 12px; box-shadow: 0 6px 24px rgba(0,0,0,.18); max-width: 260px; }
   .globo[hidden] { display: none; }
@@ -218,6 +239,12 @@
         <p class="nota">Lo cobrado en dinero por forma de pago y lo pagado con Dolarones: juntos suman lo vendido.</p>
       </article>
     </div>
+    <article class="panel" id="p-horas" style="margin-top:16px">
+      <header><h3>Ventas por hora y día <span class="subtitulo">hora de la tienda</span></h3><button type="button" class="alterna">Ver tabla</button></header>
+      <div class="vista-grafica" id="mapa-horas"></div>
+      <div class="vista-tabla" id="tabla-horas"></div>
+      <p class="nota" id="horas-nota"></p>
+    </article>
     <div class="malla iguales" style="margin-top:16px">
       <article class="panel" id="p-cat">
         <header><h3>Por categoría</h3><button type="button" class="alterna">Ver tabla</button></header>
@@ -253,6 +280,7 @@
       <div id="chip-dia" hidden></div>
       <div class="lista-tickets" id="tickets-rango"></div>
       <button id="tickets-mas" type="button" class="ver-mas" hidden>Ver más tickets</button>
+      <div class="exportar" style="margin-top: 10px"><a id="exportar-tickets" href="/api/reportes/tickets.csv">Exportar estos tickets (CSV)</a></div>
       <p class="nota">Toca un ticket para ver sus piezas, el cobro y lo que se devolvió. Las piezas se cancelan desde la caja.
         «Vendido» es lo que los tickets siguen valiendo, sin cancelados ni devoluciones.</p>
     </article>
@@ -329,7 +357,7 @@
 import { renglonTicket, pintarDetalle } from '/ticket.js';
 import {
   escapar, pesos, pesosConSigno, dolarones, cambio, rellenarDias, sumarDias, diaCorto, diaLargo, diaSemana, textoPeriodo,
-  verificarCuadre, graficaDias, activarLinea, activarGlobos, barrasHorizontales, apilada, tabla,
+  verificarCuadre, mapaCalor, mapaCalorHtml, tablaCalor, graficaDias, activarLinea, activarGlobos, barrasHorizontales, apilada, tabla,
 } from '/graficas.js';
 
 const $ = (id) => document.getElementById(id);
@@ -428,6 +456,16 @@ $('graf-dias').addEventListener('keydown', (e) => {
 
 /* ---------- el resto de ventas ---------- */
 
+// La suma de todo el periodo: con 30 dias, unos dias de la semana se repiten 5 veces y otros 4.
+function pintarHoras(porHora) {
+  const mapa = mapaCalor(porHora);
+  $('mapa-horas').innerHTML = mapa.mejor ? mapaCalorHtml(mapa) : '<div class="vacio">Sin ventas en este periodo.</div>';
+  $('tabla-horas').innerHTML = tablaCalor(mapa);
+  $('horas-nota').textContent = mapa.mejor
+    ? `La celda más fuerte: ${mapa.mejor.titulo} · ${pesos(mapa.mejor.total)} · ${mapa.mejor.detalle}. Cada celda suma todo el periodo, así que un día que se repite más veces pesa más.`
+    : '';
+}
+
 function pintarVentas(r) {
   datosDias = rellenarDias(r.por_dia, r.dia_desde, r.dia_hasta);
   $('dias-sub').textContent = `${cuenta(datosDias.length, 'día', 'días')} · ${datosDias.filter((d) => d.tickets).length} con ventas`;
@@ -435,6 +473,8 @@ function pintarVentas(r) {
   pintarDias();
   $('tabla-dias').innerHTML = tabla(['Fecha', 'Vendido', 'Tickets', 'Piezas'],
     [...datosDias].reverse().map((d) => [mayuscula(diaLargo(d.dia)), pesos(d.total), d.tickets, d.piezas]), [1, 2, 3]);
+
+  pintarHoras(r.por_hora);
 
   const total = r.resumen.total;
   $('por-forma-pago').innerHTML = apilada(FORMAS.map(([clave, nombre, color]) => {
@@ -605,6 +645,10 @@ async function cargarTickets(mas = false) {
   if ($('f-socio').checked) params.set('socio', '1');
   if ($('f-dolarones').checked) params.set('dolarones', '1');
   if (diaElegido) params.set('dia', diaElegido);
+  // El CSV lleva los mismos filtros que la lista, sin la pagina: todos los tickets, no los 50 de la vista.
+  const paraCsv = new URLSearchParams(params);
+  paraCsv.delete('pagina');
+  $('exportar-tickets').href = `/api/reportes/tickets.csv?${paraCsv}`;
   $('chip-dia').hidden = !diaElegido;
   $('chip-dia').innerHTML = diaElegido
     ? `<span class="chip-dia">Solo ${escapar(diaLargo(diaElegido))} <button type="button" id="quitar-dia" aria-label="Quitar el filtro de día">×</button></span>` : '';

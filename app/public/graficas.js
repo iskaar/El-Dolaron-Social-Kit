@@ -99,10 +99,98 @@ export function verificarCuadre(r) {
     ['Suma de los días', 'Lo vendido día por día', vendido, suma(r.por_dia)],
     ['Suma de las formas de pago', 'Efectivo + tarjeta + transferencia + Dolarones', vendido, suma(r.por_forma_pago)],
     ['Suma de las categorías', 'Lo vendido pieza por pieza', vendido, suma(r.por_categoria)],
+    ['Suma por hora', 'Lo vendido por día de la semana y hora', vendido, suma(r.por_hora)],
   ];
   return revisiones.map(([nombre, detalle, esperado, obtenido]) => ({
     nombre, detalle, esperado, obtenido, diferencia: obtenido - esperado, ok: obtenido === esperado,
   }));
+}
+
+/* ---------- ventas por hora y dia de la semana (mapa de calor) ---------- */
+
+export const PASOS_CALOR = 6;   // pasos de la escala: mas de seis no se distinguen a simple vista
+const HORAS_SIN_VENTAS = [9, 21];   // el rango que se dibuja cuando aun no hay ventas
+// Semana mexicana, lunes primero. El numero es el %w de SQLite (0 = domingo), como llega de /api/reportes.
+const SEMANA = [[1, 'Lunes'], [2, 'Martes'], [3, 'Miércoles'], [4, 'Jueves'], [5, 'Viernes'], [6, 'Sábado'], [0, 'Domingo']];
+
+/** 14 -> «14:00»; 14 -> «14:00–15:00» con `rangoHora`. La hora 23 cierra a las 00:00. */
+export const textoHora = (h) => `${String(h).padStart(2, '0')}:00`;
+export const rangoHora = (h) => `${textoHora(h)}–${textoHora((h + 1) % 24)}`;
+
+/** De la primera a la ultima hora con ventas; sin ventas, de 9 a 21. */
+export function horasConVentas(porHora) {
+  const horas = porHora.filter((f) => f.tickets > 0).map((f) => f.hora);
+  return horas.length ? { desde: Math.min(...horas), hasta: Math.max(...horas) } : { desde: HORAS_SIN_VENTAS[0], hasta: HORAS_SIN_VENTAS[1] };
+}
+
+/**
+ * El paso (1 a 6) de una celda en la escala secuencial: lineal de $0 al maximo, y 0 para
+ * una celda sin ventas, que no se pinta. El maximo siempre cae en el ultimo paso.
+ */
+export const pasoCalor = (total, maximo) =>
+  total > 0 && maximo > 0 ? Math.min(PASOS_CALOR, Math.max(1, Math.ceil((total * PASOS_CALOR) / maximo))) : 0;
+
+/** Los rangos de la escala para la leyenda: [{ paso, hasta }], con `hasta` en centavos. El ultimo es el maximo. */
+export const pasosDeLaEscala = (maximo) =>
+  Array.from({ length: PASOS_CALOR }, (_, i) => ({ paso: i + 1, hasta: Math.round((maximo * (i + 1)) / PASOS_CALOR) }));
+
+const tickets = (n) => `${n.toLocaleString('es-MX')} ${n === 1 ? 'ticket' : 'tickets'}`;
+
+/**
+ * Del reporte (`por_hora`: [{ dia_semana, hora, tickets, total }]) al mapa: siete filas, de lunes a
+ * domingo, y una columna por hora del rango. `mejor` es la celda mas fuerte (la primera si empatan).
+ */
+export function mapaCalor(porHora) {
+  const { desde, hasta } = horasConVentas(porHora);
+  const horas = Array.from({ length: hasta - desde + 1 }, (_, i) => desde + i);
+  const celda = new Map(porHora.map((f) => [`${f.dia_semana}-${f.hora}`, f]));
+  const maximo = Math.max(0, ...porHora.filter((f) => f.hora >= desde && f.hora <= hasta).map((f) => f.total));
+  let mejor = null;
+  const filas = SEMANA.map(([dia, nombre]) => {
+    const celdas = horas.map((hora) => {
+      const f = celda.get(`${dia}-${hora}`);
+      const c = { dia_semana: dia, dia: nombre, hora, tickets: f?.tickets ?? 0, total: f?.total ?? 0 };
+      c.paso = pasoCalor(c.total, maximo);
+      c.titulo = `${nombre} ${rangoHora(hora)}`;
+      c.detalle = c.tickets ? tickets(c.tickets) : 'Sin ventas';
+      if (c.total > 0 && (!mejor || c.total > mejor.total)) mejor = c;
+      return c;
+    });
+    return { dia_semana: dia, nombre, celdas, total: celdas.reduce((s, c) => s + c.total, 0) };
+  });
+  return { horas, filas, maximo, mejor };
+}
+
+/**
+ * El mapa de calor como HTML: una cuadricula con los dias a la izquierda y las horas arriba. Cada celda
+ * con ventas es un cuadro redondeado en su paso de la escala (clase `p1`..`p6`, los colores viven en la
+ * pagina) y se puede enfocar; las vacias solo llevan borde. Solo la celda mas fuerte lleva su importe escrito.
+ */
+export function mapaCalorHtml(mapa) {
+  const { horas, filas, maximo, mejor } = mapa;
+  const encabezado = horas.map((h) => `<div class="calor-hora">${h}</div>`).join('');
+  const cuerpo = filas.map((f) => `<div class="calor-dia">${escapar(f.nombre)}</div>` + f.celdas.map((c) => {
+    const valor = c.total > 0 ? pesos(c.total) : 'Sin ventas';
+    const aria = escapar(`${c.titulo}: ${valor}, ${c.detalle}`);
+    const tip = escapar([c.titulo, valor, ...(c.total > 0 ? [c.detalle] : [])].join('\n'));
+    // ponytail: solo las celdas con ventas entran al tabulador (168 paradas serian un castigo); la tabla cubre el resto.
+    return c.paso
+      ? `<div class="celda p${c.paso}${c === mejor ? ' mejor' : ''}" data-tip="${tip}" tabindex="0" role="img" aria-label="${aria}">${c === mejor ? escapar(pesosEje(c.total)) : ''}</div>`
+      : `<div class="celda vacia" data-tip="${tip}" role="img" aria-label="${aria}"></div>`;
+  }).join('')).join('');
+  const leyenda = pasosDeLaEscala(maximo).map((p, i, todos) =>
+    `<span class="calor-paso"><i class="celda p${p.paso}"></i>${escapar(i === 0 ? `hasta ${pesosEje(p.hasta)}` : `${pesosEje(todos[i - 1].hasta)}–${pesosEje(p.hasta)}`)}</span>`).join('');
+  return `<div class="calor" style="--horas:${horas.length}" role="group" aria-label="Ventas por día de la semana y hora">
+      <div></div>${encabezado}${cuerpo}</div>
+    <div class="calor-leyenda" aria-label="Escala: más oscuro es más vendido"><span class="calor-paso sec">Sin ventas</span><i class="celda vacia"></i>${leyenda}</div>`;
+}
+
+/** La misma informacion en tabla: dia por hora (importes con centavos) y el total de cada dia. */
+export function tablaCalor(mapa) {
+  const celda = (c) => (c.total > 0 ? pesos(c.total) : '—');
+  return tabla(['Día', ...mapa.horas.map(textoHora), 'Total'],
+    mapa.filas.map((f) => [f.nombre, ...f.celdas.map(celda), pesos(f.total)]),
+    mapa.horas.map((_, i) => i + 1).concat(mapa.horas.length + 1));
 }
 
 /* ---------- tooltip: un solo globo para todo /reportes ---------- */

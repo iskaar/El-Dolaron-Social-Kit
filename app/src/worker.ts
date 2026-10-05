@@ -1033,6 +1033,16 @@ async function reportes(url: URL, env: Env): Promise<Response> {
   const piezasPorDiaMapa = new Map(piezasPorDia.map((f) => [f.dia, f.piezas]));
   const porDia = ventasPorDia.map((f) => ({ ...f, piezas: piezasPorDiaMapa.get(f.dia) ?? 0 }));
 
+  // Mapa de calor de /reportes: dia de la semana (0 = domingo, como %w) y hora, ambos de la tienda (UTC-6).
+  const { results: porHora } = await env.DB.prepare(
+    `select cast(strftime('%w', datetime(creado_en, '-6 hours')) as integer) as dia_semana,
+       cast(strftime('%H', datetime(creado_en, '-6 hours')) as integer) as hora,
+       count(*) as tickets, sum(total - devuelto - dolarones_devueltos) as total
+     from ventas where cancelada = 0 and creado_en >= ? group by dia_semana, hora order by dia_semana, hora`,
+  )
+    .bind(desde)
+    .all<{ dia_semana: number; hora: number; tickets: number; total: number }>();
+
   const { results: porCategoria } = await env.DB.prepare(
     `select case when p.sin_inventario = 1 then 'bandas' else coalesce(p.categoria, 'sin categoria') end as categoria,
        coalesce(sum(l.precio * (l.cantidad - l.cancelada_cantidad)), 0) as total,
@@ -1137,6 +1147,7 @@ async function reportes(url: URL, env: Env): Promise<Response> {
     },
     por_forma_pago: porFormaPago,
     por_dia: porDia,
+    por_hora: porHora,
     por_categoria: porCategoria,
     top_productos: topProductos,
     precio_sugerido: { n: precioSugerido?.n ?? 0, promedio_pct: precioSugerido?.promedio_pct ?? null },
@@ -1173,15 +1184,12 @@ function respuestaCsv(nombreArchivo: string, encabezados: string[], filas: unkno
 const TICKETS_POR_PAGINA = 50;
 
 /**
- * Tickets del rango de /reportes (Issue #164), con filtros y paginacion. El rango
- * es el mismo de las tarjetas (`dias`), para que los totales cuadren. El detalle de
- * cada ticket es GET /api/ventas/:id. «Vendido» es lo que el ticket sigue valiendo:
- * sin los cancelados ni lo devuelto por piezas.
+ * Los filtros de la lista de tickets de /reportes, en un solo lugar: la lista y su
+ * exportacion a CSV tienen que ver exactamente los mismos tickets.
  */
-async function ticketsDelRango(url: URL, env: Env): Promise<Response> {
+function filtrosTickets(url: URL) {
   const q = url.searchParams;
   const { desde } = rangoDe(url);
-  const pagina = Math.min(1000, Math.max(0, Math.floor(Number(q.get('pagina'))) || 0));
 
   const filtros = ['v.creado_en >= ?'];
   const datos: string[] = [desde];
@@ -1202,6 +1210,18 @@ async function ticketsDelRango(url: URL, env: Env): Promise<Response> {
   if (q.get('socio') === '1') filtros.push('v.cliente_id is not null');
   if (q.get('dolarones') === '1') filtros.push('v.dolarones > 0');
   const donde = filtros.join(' and ');
+  return { desde, donde, datos };
+}
+
+/**
+ * Tickets del rango de /reportes (Issue #164), con filtros y paginacion. El rango
+ * es el mismo de las tarjetas (`dias`), para que los totales cuadren. El detalle de
+ * cada ticket es GET /api/ventas/:id. «Vendido» es lo que el ticket sigue valiendo:
+ * sin los cancelados ni lo devuelto por piezas.
+ */
+async function ticketsDelRango(url: URL, env: Env): Promise<Response> {
+  const { desde, donde, datos } = filtrosTickets(url);
+  const pagina = Math.min(1000, Math.max(0, Math.floor(Number(url.searchParams.get('pagina'))) || 0));
 
   const resumen = await env.DB.prepare(
     `select count(*) as tickets,
@@ -1238,6 +1258,41 @@ async function ticketsDelRango(url: URL, env: Env): Promise<Response> {
 }
 
 const pesosDe = (centavos: number) => (centavos / 100).toFixed(2);
+
+// ponytail: tope de filas del CSV de tickets; un rango de 12 meses lo rebasaria solo con mucho volumen. Si
+// pasa, hay que avisarlo en la pantalla o pasar a un export por tramos (hoy el tope ya cubre ~14 tickets al dia).
+const TICKETS_CSV_MAX = 5000;
+
+/** Los tickets de la lista de /reportes con sus mismos filtros, sin paginar, para abrirlos en una hoja de calculo. */
+async function exportarTicketsCsv(url: URL, env: Env): Promise<Response> {
+  const { donde, datos } = filtrosTickets(url);
+  const { results } = await env.DB.prepare(
+    `select ${COLUMNAS_TICKET} from ventas v where ${donde} order by v.creado_en desc, v.id desc limit ?`,
+  )
+    .bind(...datos, TICKETS_CSV_MAX)
+    .all<{
+      id: string; total: number; forma_pago: string; cancelada: number; creado_en: string; dolarones: number;
+      devuelto: number; dolarones_devueltos: number; caja: string; cajero: string; con_socio: number;
+      piezas: string | null; cantidad: number; cancelada_cantidad: number;
+    }>();
+
+  const filas = results.map((f) => [
+    // Hora de la tienda (UTC-6), no la UTC con que se guarda: es la que el dueno reconoce.
+    new Date(Date.parse(f.creado_en) - 6 * 3_600_000).toISOString().slice(0, 16).replace('T', ' '),
+    f.id, f.caja, f.cajero, f.forma_pago,
+    f.cancelada ? 'cancelado' : f.cancelada_cantidad > 0 ? 'con devoluciones' : 'vigente',
+    f.piezas ?? '', f.cantidad, pesosDe(f.total), pesosDe(f.devuelto), pesosDe(f.dolarones), pesosDe(f.dolarones_devueltos),
+    // Igual que «Vendido» en la lista: un cancelado ya no vale nada.
+    pesosDe(f.cancelada ? 0 : f.total - f.devuelto - f.dolarones_devueltos),
+    f.con_socio ? 'sí' : 'no',
+  ]);
+  return respuestaCsv(
+    'tickets.csv',
+    ['fecha', 'ticket', 'caja', 'cajero', 'forma_pago', 'estado', 'piezas', 'cantidad', 'total', 'devuelto',
+      'dolarones', 'dolarones_devueltos', 'vendido', 'socio'],
+    filas,
+  );
+}
 
 /** Un renglon por linea de venta: es el ledger completo, para lo que ningun dashboard cubre. */
 async function exportarVentasCsv(env: Env): Promise<Response> {
@@ -1510,6 +1565,9 @@ export default {
       }
       if (pathname === '/api/reportes/tickets') {
         return await ticketsDelRango(url, env);
+      }
+      if (pathname === '/api/reportes/tickets.csv') {
+        return await exportarTicketsCsv(url, env);
       }
       if (pathname === '/api/reportes/ventas.csv') {
         return await exportarVentasCsv(env);
