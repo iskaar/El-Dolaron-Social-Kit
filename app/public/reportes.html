@@ -5,176 +5,319 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>El Dolarón — reportes</title>
 <style>
-  :root { --azul:#16366B; --rojo:#D72B32; --verde:#1f7a4d; --linea:#dfe3ea; }
+  /* Colores por rol, claro y oscuro (skill dataviz). Series validadas con validate_palette.js:
+     azul, naranja, aqua y amarillo pasan los seis chequeos en los dos modos; el contraste
+     bajo de aqua/amarillo en claro se compensa con la leyenda con importes y la tabla. */
+  :root {
+    color-scheme: light;
+    --marca: #16366B; --marca-claro: #FFD447;
+    --pagina: #f9f9f7; --superficie: #fcfcfb; --tinta: #0b0b0b; --tinta-2: #52514e;
+    --rejilla: #e1e0d9; --eje: #c3c2b7; --borde: rgba(11,11,11,.10); --lavado: rgba(11,11,11,.045);
+    --acento: #16366B; --apagado: #c3c2b7;
+    --serie-1: #2a78d6; --serie-2: #eb6834; --serie-3: #1baf7a; --serie-4: #eda100;
+    --bien: #006300; --mal: #d03b3b; --aviso: #b26b00;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:where(:not([data-theme="light"])) {
+      color-scheme: dark;
+      --pagina: #0d0d0d; --superficie: #1a1a19; --tinta: #ffffff; --tinta-2: #c3c2b7;
+      --rejilla: #2c2c2a; --eje: #383835; --borde: rgba(255,255,255,.10); --lavado: rgba(255,255,255,.06);
+      --acento: #3987e5; --apagado: #383835;
+      --serie-1: #3987e5; --serie-2: #d95926; --serie-3: #199e70; --serie-4: #c98500;
+      --bien: #0ca30c; --mal: #e66767; --aviso: #fab219;
+    }
+  }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --pagina: #0d0d0d; --superficie: #1a1a19; --tinta: #ffffff; --tinta-2: #c3c2b7;
+    --rejilla: #2c2c2a; --eje: #383835; --borde: rgba(255,255,255,.10); --lavado: rgba(255,255,255,.06);
+    --acento: #3987e5; --apagado: #383835;
+    --serie-1: #3987e5; --serie-2: #d95926; --serie-3: #199e70; --serie-4: #c98500;
+    --bien: #0ca30c; --mal: #e66767; --aviso: #fab219;
+  }
+
   * { box-sizing: border-box; }
-  body { margin: 0; background: #f4f6f9; color: #1a1f2b;
-    font-family: system-ui, -apple-system, sans-serif; }
-  header { background: var(--azul); color: #fff; padding: 14px 20px;
-    display: flex; gap: 16px; align-items: center; flex-wrap: wrap; }
-  header h1 { font-size: 18px; margin: 0; flex: 1; }
-  header a, header button { color: #FFD447; background: none; border: 0; font-size: 14px; cursor: pointer; }
-  main { padding: 20px; max-width: 1000px; margin: 0 auto; display: grid; gap: 16px; }
-  .barra-rango { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
-  .barra-rango button { border: 1px solid var(--linea); background: #fff; color: #1a1f2b;
-    border-radius: 999px; padding: 6px 14px; font-size: 13px; cursor: pointer; }
-  .barra-rango button.activo { background: var(--azul); color: #fff; border-color: var(--azul); }
+  body { margin: 0; background: var(--pagina); color: var(--tinta);
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif; -webkit-text-size-adjust: 100%; }
+  a { color: inherit; }
+  .sec { color: var(--tinta-2); }
+  .num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+  /* ---- barra superior y filtros ---- */
+  header.barra { background: var(--marca); color: #fff; padding: 12px 20px; display: flex; gap: 16px;
+    align-items: center; flex-wrap: wrap; }
+  header.barra h1 { font-size: 18px; margin: 0; flex: 1; font-weight: 700; letter-spacing: .01em; }
+  header.barra a { color: var(--marca-claro); text-decoration: none; font-size: 14px; }
+  header.barra a:hover { text-decoration: underline; }
+  .filtros { position: sticky; top: 0; z-index: 5; background: var(--pagina); border-bottom: 1px solid var(--borde); }
+  .filtros > div { max-width: 1120px; margin: 0 auto; padding: 10px 20px; display: flex; gap: 14px; align-items: center; flex-wrap: wrap; }
+  .segmentos { display: inline-flex; border: 1px solid var(--borde); border-radius: 10px; background: var(--superficie); padding: 2px; }
+  .segmentos button { border: 0; background: none; color: var(--tinta-2); font: inherit; font-size: 13px; padding: 6px 12px;
+    border-radius: 8px; cursor: pointer; }
+  .segmentos button:hover { background: var(--lavado); }
+  .segmentos button[aria-pressed="true"] { background: var(--acento); color: #fff; font-weight: 600; }
+  .periodo { font-size: 13px; color: var(--tinta-2); display: flex; gap: 4px 14px; flex-wrap: wrap; flex: 1; }
+  .periodo b { color: var(--tinta); font-weight: 600; }
+  .filtros button.imprimir { border: 1px solid var(--borde); background: var(--superficie); color: var(--tinta); font: inherit;
+    font-size: 13px; padding: 6px 12px; border-radius: 10px; cursor: pointer; }
+
+  main { max-width: 1120px; margin: 0 auto; padding: 20px; display: grid; grid-template-columns: minmax(0, 1fr); gap: 28px; transition: opacity .15s; }
+  main.cargando { opacity: .55; }
+  h2.titulo-bloque { font-size: 13px; font-weight: 700; margin: 0 0 12px; color: var(--tinta-2); text-transform: uppercase; letter-spacing: .08em; }
+  .malla { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; }
+  @media (min-width: 861px) { .malla.dos { grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); } .malla.iguales { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); } }
+
+  .panel { background: var(--superficie); border: 1px solid var(--borde); border-radius: 14px; padding: 18px 20px; min-width: 0; overflow-x: auto; }
+  .panel header { display: flex; align-items: baseline; gap: 10px; margin-bottom: 14px; }
+  .panel h3 { font-size: 15px; margin: 0; font-weight: 650; flex: 1; }
+  .panel .subtitulo { font-size: 12px; color: var(--tinta-2); font-weight: 400; margin-left: 8px; }
+  .alterna { border: 0; background: none; color: var(--tinta-2); font: inherit; font-size: 12px; cursor: pointer; text-decoration: underline;
+    text-underline-offset: 3px; padding: 2px 0; }
+  .panel .vista-tabla { display: none; max-height: 380px; overflow: auto; }
+  .panel.en-tabla .vista-tabla { display: block; }
+  .panel.en-tabla .vista-grafica { display: none; }
+  .nota { font-size: 12px; color: var(--tinta-2); margin: 12px 0 0; line-height: 1.45; }
+  .vacio { color: var(--tinta-2); font-size: 13px; padding: 6px 0; }
+
+  /* ---- cifra principal y tarjetas ---- */
+  .principal { display: grid; gap: 14px; }
+  .hero { padding: 6px 2px 2px; }
+  .hero .etq { font-size: 13px; color: var(--tinta-2); }
+  .hero .valor { font-size: clamp(38px, 8vw, 58px); font-weight: 700; line-height: 1.05; margin: 4px 0 6px; letter-spacing: -.01em; }
+  .delta { font-size: 13px; color: var(--tinta-2); }
+  .delta .chip { font-weight: 700; margin-right: 6px; white-space: nowrap; }
+  .delta .sube { color: var(--bien); } .delta .baja { color: var(--mal); }
   .tarjetas { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; }
-  .tarjeta { background: #fff; border: 1px solid var(--linea); border-radius: 12px; padding: 14px 16px; }
-  .tarjeta .etiqueta { font-size: 12px; color: #5b6478; }
-  .tarjeta .valor { font-size: 24px; font-weight: 800; color: var(--azul); margin-top: 2px; }
-  .panel { background: #fff; border: 1px solid var(--linea); border-radius: 12px; padding: 16px; }
-  .fondo-caja { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 12px; font-size: 14px; }
-  .fondo-caja label { flex-basis: 100%; color: #5b6478; font-size: 13px; }
-  .fondo-caja input { width: 120px; padding: 8px 10px; font-size: 16px; border: 1px solid var(--linea); border-radius: 8px; }
-  .fondo-caja button { padding: 8px 14px; font-size: 14px; border: 0; border-radius: 8px; background: var(--azul); color: #fff; cursor: pointer; }
-  .panel h2 { font-size: 15px; margin: 0 0 12px; color: var(--azul); }
-  .dos-columnas { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
-  @media (max-width: 640px) { .dos-columnas { grid-template-columns: 1fr; } }
-  .renglon-barra { display: grid; grid-template-columns: 110px 1fr 90px; gap: 10px; align-items: center;
-    padding: 6px 0; font-size: 13px; }
-  .renglon-barra .pista { background: #eef1f6; border-radius: 999px; height: 14px; overflow: hidden; }
-  .renglon-barra .pista > div { background: var(--azul); height: 100%; border-radius: 999px; }
-  .renglon-barra .importe { text-align: right; font-variant-numeric: tabular-nums; font-weight: 600; }
-  table { width: 100%; border-collapse: collapse; font-size: 13px; }
-  th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--linea); }
-  th { color: #5b6478; font-weight: 600; font-size: 12px; }
-  td.num { text-align: right; font-variant-numeric: tabular-nums; }
-  .vacio { color: #5b6478; font-size: 13px; padding: 8px 0; }
+  .tarjeta { background: var(--superficie); border: 1px solid var(--borde); border-radius: 14px; padding: 14px 16px; min-width: 0; }
+  .tarjeta .etq { font-size: 12px; color: var(--tinta-2); }
+  .tarjeta .valor { font-size: 24px; font-weight: 650; margin-top: 3px; overflow-wrap: anywhere; }
+  .tarjeta .delta { margin-top: 3px; font-size: 12px; }
+
+  /* ---- graficas ---- */
+  .svg-grafica { display: block; width: 100%; height: auto; overflow: visible; }
+  .svg-grafica .rejilla { stroke: var(--rejilla); stroke-width: 1; }
+  .svg-grafica .eje { stroke: var(--eje); stroke-width: 1; }
+  .svg-grafica .marca { fill: var(--tinta-2); font-size: 11px; font-family: inherit; }
+  .svg-grafica .valor-max { fill: var(--tinta); font-size: 11px; font-weight: 650; }
+  .svg-grafica .barra { fill: var(--acento); }
+  .svg-grafica .barra.apagada { fill: var(--apagado); }
+  .svg-grafica .col:hover .barra, .svg-grafica .col:focus-within .barra { opacity: .78; }
+  .svg-grafica .elegida .barra { opacity: 1; }
+  .svg-grafica .hit { fill: transparent; cursor: pointer; }
+  .svg-grafica .hit:focus-visible { outline: 2px solid var(--acento); outline-offset: -2px; }
+  .svg-grafica .trazo { fill: none; stroke: var(--acento); stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+  .svg-grafica .area { fill: var(--acento); fill-opacity: .10; stroke: none; }
+  .svg-grafica .mira { stroke: var(--eje); stroke-width: 1; }
+  .svg-grafica .punto-fin, .svg-grafica .punto-mira { fill: var(--acento); stroke: var(--superficie); stroke-width: 2; }
+  .svg-grafica .hit-linea { fill: transparent; }
+  .hbarras { display: grid; gap: 9px; }
+  .hbarra { display: grid; grid-template-columns: minmax(80px, 150px) 1fr minmax(84px, auto); gap: 12px; align-items: center; font-size: 13px; border-radius: 6px; }
+  .hbarra:hover, .hbarra:focus-visible { background: var(--lavado); outline: none; }
+  .hbarra .hn { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .hbarra .hpista { height: 12px; display: block; }
+  .hbarra .hpista i { display: block; height: 100%; background: var(--acento); border-radius: 0 4px 4px 0; }
+  .hbarra .hv { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .apilada { display: flex; gap: 2px; height: 22px; }
+  .apilada .segmento { height: 100%; border-radius: 4px; min-width: 3px; }
+  .apilada .segmento:first-child { border-radius: 4px 4px 4px 4px; }
+  .apilada .segmento:hover, .apilada .segmento:focus-visible { opacity: .8; outline: none; }
+  table.leyenda { width: 100%; border-collapse: collapse; margin-top: 12px; font-size: 13px; }
+  table.leyenda td { padding: 6px 4px; border-bottom: 1px solid var(--rejilla); }
+  table.leyenda .llave { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 8px; }
+  .globo { position: fixed; z-index: 50; pointer-events: none; background: var(--superficie); color: var(--tinta);
+    border: 1px solid var(--borde); border-radius: 10px; padding: 8px 12px; box-shadow: 0 6px 24px rgba(0,0,0,.18); max-width: 260px; }
+  .globo[hidden] { display: none; }
+  .globo .g-titulo { font-size: 12px; color: var(--tinta-2); }
+  .globo .g-valor { font-size: 16px; font-weight: 700; margin: 1px 0; }
+  .globo .g-detalle { font-size: 12px; color: var(--tinta-2); }
+
+  /* ---- tablas y filtros de tickets ---- */
+  table.tabla { width: 100%; border-collapse: collapse; font-size: 13px; }
+  .tabla th, .tabla td { text-align: left; padding: 7px 8px; border-bottom: 1px solid var(--rejilla); vertical-align: top; }
+  .tabla th { color: var(--tinta-2); font-weight: 600; font-size: 12px; position: sticky; top: 0; background: var(--superficie); }
+  .tabla th.num, .tabla td.num { text-align: right; }
+  .tabla tr.nota-fila td { color: var(--tinta-2); font-size: 12px; padding-top: 0; }
+  .estado { white-space: nowrap; font-weight: 600; }
+  .estado .icono { display: inline-block; width: 1.1em; text-align: center; }
+  .estado.ok .icono { color: var(--bien); } .estado.mal .icono { color: var(--mal); } .estado.aviso .icono { color: var(--aviso); }
+  .filtros-tickets { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 10px; font-size: 13px; }
+  .filtros-tickets select { padding: 7px 8px; font: inherit; font-size: 13px; border: 1px solid var(--borde); border-radius: 8px;
+    background: var(--superficie); color: var(--tinta); max-width: 100%; }
+  .filtros-tickets label { display: flex; gap: 4px; align-items: center; color: var(--tinta-2); }
+  .chip-dia { display: inline-flex; gap: 8px; align-items: center; background: var(--lavado); border-radius: 999px; padding: 4px 6px 4px 12px;
+    font-size: 12px; margin-bottom: 10px; }
+  .chip-dia button { border: 0; background: var(--eje); color: var(--tinta); border-radius: 999px; width: 20px; height: 20px; cursor: pointer; line-height: 1; }
+  .lista-tickets { max-height: 520px; overflow-y: auto; }
+  .ver-mas, .fondo-caja button, .exportar a { padding: 8px 14px; font: inherit; font-size: 13px; border: 1px solid var(--borde); border-radius: 10px;
+    background: var(--superficie); color: var(--tinta); cursor: pointer; text-decoration: none; font-weight: 600; display: inline-block; }
+  .ver-mas { margin-top: 10px; }
+  .fondo-caja { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 14px; font-size: 14px; }
+  .fondo-caja label { flex-basis: 100%; color: var(--tinta-2); font-size: 13px; }
+  .fondo-caja input { width: 130px; padding: 8px 10px; font: inherit; font-size: 15px; border: 1px solid var(--borde); border-radius: 8px;
+    background: var(--superficie); color: var(--tinta); }
   .exportar { display: flex; gap: 10px; flex-wrap: wrap; }
-  .exportar a { display: inline-block; border: 1px solid var(--linea); background: #fff; color: #1a1f2b;
-    border-radius: 8px; padding: 9px 14px; font-size: 13px; text-decoration: none; font-weight: 600; }
-  .filtros-tickets { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 8px; font-size: 13px; }
-  .filtros-tickets select { padding: 7px 8px; font-size: 13px; border: 1px solid var(--linea); border-radius: 8px; background: #fff; max-width: 100%; }
-  .filtros-tickets label { display: flex; gap: 4px; align-items: center; color: #5b6478; }
-  .ver-mas { margin-top: 8px; padding: 8px 14px; font-size: 13px; border: 1px solid var(--linea); border-radius: 8px;
-    background: #fff; cursor: pointer; }
-  .nota { font-size: 12px; color: #5b6478; margin-top: 8px; line-height: 1.4; }
-  dialog { border: 0; border-radius: 14px; padding: 18px 20px; width: min(600px, 94vw); max-height: 92vh; }
+  .cuadre-ok { color: var(--bien); } .cuadre-mal { color: var(--mal); }
+  .banda-cuadre { display: flex; gap: 10px; align-items: center; font-size: 14px; margin-bottom: 14px; font-weight: 600; }
+
+  /* La ventana del ticket comparte estilos con la caja (ticket.js), que son de modo claro: siempre clara. */
+  dialog { border: 0; border-radius: 14px; padding: 18px 20px; width: min(600px, 94vw); max-height: 92vh; background: #fff; color: #1a1f2b; color-scheme: light; }
+  .lista-tickets .ticket-fila { border-bottom-color: var(--rejilla); }
+  .lista-tickets .ticket-fila:hover { background: var(--lavado); }
   dialog::backdrop { background: #16366b99; }
-  dialog h2 { margin: 0 0 6px; font-size: 20px; color: var(--azul); }
+  dialog h2 { margin: 0 0 6px; font-size: 20px; color: var(--marca); }
   dialog .acciones { display: flex; justify-content: flex-end; margin-top: 14px; }
-  dialog .acciones button { padding: 10px 16px; font-size: 15px; border-radius: 10px; border: 0; cursor: pointer;
-    background: var(--azul); color: #fff; font-weight: 700; }
+  dialog .acciones button { padding: 10px 16px; font-size: 15px; border-radius: 10px; border: 0; cursor: pointer; background: var(--marca); color: #fff; font-weight: 700; }
+
+  @media print {
+    header.barra a, .filtros button, .alterna, .ver-mas, .exportar, .fondo-caja, .filtros-tickets { display: none !important; }
+    .filtros { position: static; border: 0; }
+    :root { color-scheme: light; }
+    body { background: #fff; }
+    .panel, .tarjeta { break-inside: avoid; box-shadow: none; }
+    .lista-tickets, .panel .vista-tabla { max-height: none; overflow: visible; }
+  }
 </style>
 </head>
 <body>
-<header>
-  <h1>Reportes</h1>
+<header class="barra">
+  <h1>El Dolarón · Reportes</h1>
   <a href="/admin">← Cola de revisión</a>
   <a href="/caja">Caja →</a>
 </header>
 
-<main>
-  <div class="barra-rango" id="rango"></div>
+<div class="filtros"><div>
+  <div class="segmentos" id="rango" role="group" aria-label="Periodo"></div>
+  <div class="periodo"><span>Del <b id="p-texto">—</b></span><span id="p-anterior"></span></div>
+  <button type="button" class="imprimir" id="imprimir">Imprimir o guardar PDF</button>
+</div></div>
 
-  <div class="tarjetas">
-    <div class="tarjeta"><div class="etiqueta">Ventas</div><div class="valor" id="t-ventas">—</div></div>
-    <div class="tarjeta"><div class="etiqueta">Total</div><div class="valor" id="t-total">—</div></div>
-    <div class="tarjeta"><div class="etiqueta">Piezas vendidas</div><div class="valor" id="t-piezas">—</div></div>
-    <div class="tarjeta"><div class="etiqueta">Ticket promedio</div><div class="valor" id="t-promedio">—</div></div>
-  </div>
+<main id="principal">
 
-  <div class="panel">
-    <h2>Ventas por día</h2>
-    <div id="por-dia"></div>
-  </div>
-
-  <div class="panel">
-    <h2>Tickets</h2>
-    <div class="tarjetas" id="tickets-resumen" style="margin-bottom: 12px"></div>
-    <div class="filtros-tickets">
-      <select id="f-forma" aria-label="Forma de pago">
-        <option value="">Todas las formas de pago</option>
-        <option value="efectivo">Efectivo</option><option value="tarjeta">Tarjeta</option>
-        <option value="transferencia">Transferencia</option>
-      </select>
-      <select id="f-caja" aria-label="Caja"></select>
-      <select id="f-cajero" aria-label="Cajero"></select>
-      <select id="f-estado" aria-label="Estado">
-        <option value="">Todos los estados</option><option value="vigente">Vigentes</option>
-        <option value="devolucion">Con devoluciones</option><option value="cancelado">Cancelados</option>
-      </select>
-      <label><input id="f-socio" type="checkbox"> Con socio</label>
-      <label><input id="f-dolarones" type="checkbox"> Con Dolarones</label>
+  <section class="principal" aria-labelledby="t-resumen">
+    <h2 class="titulo-bloque" id="t-resumen">Resumen</h2>
+    <div class="hero">
+      <div class="etq">Vendido</div>
+      <div class="valor" id="h-total">—</div>
+      <div class="delta" id="h-delta"></div>
     </div>
-    <div id="tickets-rango"></div>
-    <button id="tickets-mas" type="button" class="ver-mas" hidden>Ver más tickets</button>
-    <p class="nota">Del rango de arriba. Toca un ticket para ver sus piezas, el cobro y lo que se devolvió.
-      Las piezas se cancelan desde la caja. «Vendido» es lo que los tickets siguen valiendo, sin cancelados ni devoluciones.</p>
-  </div>
+    <div class="tarjetas" id="tarjetas"></div>
+  </section>
 
-  <div class="dos-columnas">
-    <div class="panel">
-      <h2>Ventas por categoría</h2>
-      <div id="por-categoria"></div>
+  <section aria-labelledby="t-ventas">
+    <h2 class="titulo-bloque" id="t-ventas">Ventas</h2>
+    <div class="malla dos">
+      <article class="panel" id="p-dias">
+        <header><h3>Ventas por día <span class="subtitulo" id="dias-sub"></span></h3><button type="button" class="alterna">Ver tabla</button></header>
+        <div class="vista-grafica"><div id="graf-dias"></div>
+          <p class="nota" id="dias-nota">Toca una columna para ver solo los tickets de ese día.</p></div>
+        <div class="vista-tabla" id="tabla-dias"></div>
+      </article>
+      <article class="panel" id="p-pago">
+        <header><h3>Forma de pago</h3></header>
+        <div id="por-forma-pago"></div>
+        <p class="nota">Lo cobrado en dinero por forma de pago y lo pagado con Dolarones: juntos suman lo vendido.</p>
+      </article>
     </div>
-    <div class="panel">
-      <h2>Forma de pago</h2>
-      <div id="por-forma-pago"></div>
+    <div class="malla iguales" style="margin-top:16px">
+      <article class="panel" id="p-cat">
+        <header><h3>Por categoría</h3><button type="button" class="alterna">Ver tabla</button></header>
+        <div class="vista-grafica" id="por-categoria"></div>
+        <div class="vista-tabla" id="tabla-cat"></div>
+      </article>
+      <article class="panel">
+        <header><h3>Piezas más vendidas</h3></header>
+        <div id="top-productos"></div>
+      </article>
     </div>
-  </div>
+  </section>
 
-  <div class="panel">
-    <h2>Piezas más vendidas</h2>
-    <div id="top-productos"></div>
-  </div>
+  <section aria-labelledby="t-tickets">
+    <h2 class="titulo-bloque" id="t-tickets">Tickets</h2>
+    <article class="panel">
+      <div class="tarjetas" id="tickets-resumen" style="margin-bottom: 14px"></div>
+      <div class="filtros-tickets">
+        <select id="f-forma" aria-label="Forma de pago">
+          <option value="">Todas las formas de pago</option>
+          <option value="efectivo">Efectivo</option><option value="tarjeta">Tarjeta</option>
+          <option value="transferencia">Transferencia</option>
+        </select>
+        <select id="f-caja" aria-label="Caja"></select>
+        <select id="f-cajero" aria-label="Cajero"></select>
+        <select id="f-estado" aria-label="Estado">
+          <option value="">Todos los estados</option><option value="vigente">Vigentes</option>
+          <option value="devolucion">Con devoluciones</option><option value="cancelado">Cancelados</option>
+        </select>
+        <label><input id="f-socio" type="checkbox"> Con socio</label>
+        <label><input id="f-dolarones" type="checkbox"> Con Dolarones</label>
+      </div>
+      <div id="chip-dia" hidden></div>
+      <div class="lista-tickets" id="tickets-rango"></div>
+      <button id="tickets-mas" type="button" class="ver-mas" hidden>Ver más tickets</button>
+      <p class="nota">Toca un ticket para ver sus piezas, el cobro y lo que se devolvió. Las piezas se cancelan desde la caja.
+        «Vendido» es lo que los tickets siguen valiendo, sin cancelados ni devoluciones.</p>
+    </article>
+  </section>
 
-  <div class="panel">
-    <h2>Cancelaciones</h2>
-    <div class="tarjetas" id="cancelaciones-resumen" style="margin-bottom: 12px"></div>
-    <div id="cancelaciones-detalle"></div>
-    <p class="nota">Cada cancelación exige un motivo y queda con el correo de quien la hizo.
-      Revisa aquí lo que no cuadre — un patrón de cancelaciones de un mismo correo, o motivos
-      que no convencen.</p>
-  </div>
+  <section aria-labelledby="t-cuadre">
+    <h2 class="titulo-bloque" id="t-cuadre">Cuadre al centavo</h2>
+    <article class="panel">
+      <div class="banda-cuadre" id="cuadre-banda"></div>
+      <div id="cuadre"></div>
+      <p class="nota">Cada sección se suma por su lado y se compara con lo vendido. Si alguna diferencia no es $0.00 aparece aquí
+        en centavos: es algo que revisar (un descuento, una devolución mal registrada), no un redondeo que se esconda.</p>
+    </article>
+  </section>
 
-  <div class="panel">
-    <h2>Cortes de caja</h2>
-    <div class="fondo-caja">
-      <label for="fondo-caja">Fondo de caja: lo que se queda en cada cajón después del corte ($)</label>
-      <input id="fondo-caja" type="number" min="0" step="1" inputmode="numeric">
-      <button id="guardar-fondo" type="button">Guardar</button>
-      <span id="aviso-fondo"></span>
+  <section aria-labelledby="t-caja">
+    <h2 class="titulo-bloque" id="t-caja">Caja y efectivo</h2>
+    <div class="malla">
+      <article class="panel">
+        <header><h3>Cortes de caja</h3></header>
+        <div class="fondo-caja">
+          <label for="fondo-caja">Fondo de caja: lo que se queda en cada cajón después del corte ($)</label>
+          <input id="fondo-caja" type="number" min="0" step="1" inputmode="numeric">
+          <button id="guardar-fondo" type="button">Guardar</button>
+          <span id="aviso-fondo"></span>
+        </div>
+        <div id="cortes" style="overflow-x:auto"></div>
+        <p class="nota">Conteo ciego: el cajero registra lo contado antes de ver lo esperado. Diferencia = contado − esperado.
+          «Tarjeta» compara lo cobrado en el sistema con el cierre de la terminal.</p>
+      </article>
+      <div class="malla iguales">
+        <article class="panel"><header><h3>Gastos y retiros de efectivo</h3></header><div id="retiros" style="overflow-x:auto"></div></article>
+        <article class="panel"><header><h3>Cajón abierto sin venta</h3></header><div id="aperturas-cajon" style="overflow-x:auto"></div>
+          <p class="nota">Cada vez que alguien usa «Abrir cajón» en la caja, con su correo y la hora. Una venta en efectivo abre el cajón sola y no aparece aquí.</p></article>
+      </div>
     </div>
-    <div id="cortes"></div>
-    <p class="nota">Conteo ciego: el cajero registra lo contado antes de ver lo esperado. Diferencia = contado − esperado
-      (en rojo lo que falta). «Tarjeta» compara lo cobrado en el sistema con el cierre de la terminal.</p>
-  </div>
+  </section>
 
-  <div class="panel">
-    <h2>Gastos y retiros de efectivo</h2>
-    <div id="retiros"></div>
-  </div>
+  <section aria-labelledby="t-control">
+    <h2 class="titulo-bloque" id="t-control">Cancelaciones y devoluciones</h2>
+    <article class="panel">
+      <div class="tarjetas" id="cancelaciones-resumen" style="margin-bottom: 14px"></div>
+      <div id="cancelaciones-detalle" style="overflow-x:auto"></div>
+      <p class="nota">Cada cancelación exige un motivo y queda con el correo de quien la hizo. Revisa aquí lo que no cuadre: un patrón de
+        cancelaciones de un mismo correo, o motivos que no convencen.</p>
+    </article>
+  </section>
 
-  <div class="panel">
-    <h2>Cajón abierto sin venta</h2>
-    <div id="aperturas-cajon"></div>
-    <p class="nota">Cada vez que alguien usa «Abrir cajón» en la caja, con su correo y la hora.
-      Una venta en efectivo abre el cajón sola y no aparece aquí.</p>
-  </div>
-
-  <div class="dos-columnas">
-    <div class="panel">
-      <h2>Precio sugerido vs. precio final</h2>
-      <div id="precio-sugerido"></div>
-      <p class="nota">Qué tan lejos anda la IA del precio que de verdad se cobra. Sirve para
-        ajustar los porcentajes de la configuración con datos, no a ojo.</p>
+  <section aria-labelledby="t-inventario">
+    <h2 class="titulo-bloque" id="t-inventario">Precios e inventario</h2>
+    <div class="malla iguales">
+      <article class="panel"><header><h3>Precio sugerido vs. precio final</h3></header><div id="precio-sugerido"></div>
+        <p class="nota">Qué tan lejos anda la IA del precio que de verdad se cobra. Sirve para ajustar los porcentajes de la configuración con datos, no a ojo.</p></article>
+      <article class="panel"><header><h3>Días en venta por categoría</h3></header><div id="dias-en-venta"></div>
+        <p class="nota">Días entre la captura y la venta. No incluye bins: no son piezas individuales con fecha de captura propia.</p></article>
     </div>
-    <div class="panel">
-      <h2>Días en venta por categoría</h2>
-      <div id="dias-en-venta"></div>
-      <p class="nota">Días entre la captura y la venta. No incluye bins: no son piezas
-        individuales con fecha de captura propia.</p>
-    </div>
-  </div>
+  </section>
 
-  <div class="panel">
-    <h2>Exportar</h2>
+  <section aria-labelledby="t-exportar">
+    <h2 class="titulo-bloque" id="t-exportar">Exportar</h2>
     <div class="exportar">
       <a href="/api/reportes/ventas.csv">Exportar ventas (CSV)</a>
       <a href="/api/reportes/inventario.csv">Exportar inventario (CSV)</a>
     </div>
-  </div>
+  </section>
 </main>
 
 <dialog id="dialogo-ticket" class="ventana-ticket">
@@ -184,128 +327,240 @@
 
 <script type="module">
 import { renglonTicket, pintarDetalle } from '/ticket.js';
+import {
+  escapar, pesos, pesosConSigno, dolarones, cambio, rellenarDias, sumarDias, diaCorto, diaLargo, diaSemana, textoPeriodo,
+  verificarCuadre, graficaDias, activarLinea, activarGlobos, barrasHorizontales, apilada, tabla,
+} from '/graficas.js';
+
 const $ = (id) => document.getElementById(id);
-// Nombres de piezas y motivos de cancelacion los escriben otras personas: texto, nunca HTML.
 // Hora de la tienda (la del navegador), no UTC como se guarda.
 const fechaHora = (iso) => new Date(iso).toLocaleString('es-MX', { dateStyle: 'short', timeStyle: 'short' });
-const escapar = (texto) => String(texto ?? '').replace(/[<>&"]/g, (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;' }[c]));
-const pesos = (centavos) => `$${Math.round(centavos / 100).toLocaleString('es-MX')}`;
-// Con centavos: en un corte, 50 centavos de diferencia son diferencia.
-const pesos2 = (centavos) => `$${(centavos / 100).toLocaleString('es-MX', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-const RANGOS = [7, 30, 90, 365];
-let diasActual = 30;
+const RANGOS = [[7, '7 días'], [30, '30 días'], [90, '90 días'], [365, '12 meses']];
+const FORMAS = [
+  ['efectivo', 'Efectivo', 'var(--serie-1)'], ['tarjeta', 'Tarjeta', 'var(--serie-2)'],
+  ['transferencia', 'Transferencia', 'var(--serie-3)'], ['dolarones', 'Dolarones', 'var(--serie-4)'],
+];
+const mayuscula = (t) => (t ? t[0].toUpperCase() + t.slice(1) : t);
+const cuenta = (n, uno, varios) => `${n.toLocaleString('es-MX')} ${n === 1 ? uno : varios}`;
 
-function barra(nombre, valor, maximo, formato) {
-  const ancho = maximo > 0 ? Math.max(2, Math.round((valor / maximo) * 100)) : 0;
-  return `<div class="renglon-barra">
-    <div>${escapar(nombre)}</div>
-    <div class="pista"><div style="width:${ancho}%"></div></div>
-    <div class="importe">${formato(valor)}</div>
-  </div>`;
-}
+let diasActual = 30;
+let datosDias = [];        // los dias del rango, con ceros, para la grafica
+let diaElegido = null;     // un dia (clic en su columna) que filtra los tickets
+let ultimoReporte = null;
+
+/* ---------- periodo ---------- */
 
 function pintarRango() {
-  $('rango').innerHTML = RANGOS.map((d) =>
-    `<button type="button" data-dias="${d}" class="${d === diasActual ? 'activo' : ''}">${d} días</button>`,
-  ).join('');
+  $('rango').innerHTML = RANGOS.map(([d, texto]) =>
+    `<button type="button" data-dias="${d}" aria-pressed="${d === diasActual}">${texto}</button>`).join('');
+}
+$('rango').addEventListener('click', (e) => {
+  const dias = e.target.dataset?.dias;
+  if (!dias || Number(dias) === diasActual) return;
+  diasActual = Number(dias);
+  diaElegido = null;
+  pintarRango();
+  cargar();
+  cargarTickets();
+});
+$('imprimir').addEventListener('click', () => window.print());
+
+/* ---------- tarjetas ---------- */
+
+// `sube` es bueno: tickets, ticket promedio y piezas. Dolarones y devoluciones no se comparan.
+function deltaHtml(actual, previo, formato) {
+  const c = cambio(actual, previo);
+  if (!c) return '<div class="delta">Sin periodo anterior para comparar</div>';
+  const icono = c.direccion === 'sube' ? '▲' : c.direccion === 'baja' ? '▼' : '=';
+  return `<div class="delta"><span class="chip ${c.direccion}">${icono} ${c.texto}</span>antes: ${escapar(formato(previo))}</div>`;
 }
 
-async function cargar() {
-  const r = await (await fetch(`/api/reportes?dias=${diasActual}`)).json();
+function tarjeta(etiqueta, valor, extra = '') {
+  return `<div class="tarjeta"><div class="etq">${escapar(etiqueta)}</div><div class="valor">${escapar(valor)}</div>${extra}</div>`;
+}
 
-  $('t-ventas').textContent = r.resumen.ventas;
-  $('t-total').textContent = pesos(r.resumen.total);
-  $('t-piezas').textContent = r.resumen.piezas;
-  $('t-promedio').textContent = pesos(r.resumen.ticket_promedio);
+function pintarResumen(r) {
+  const { resumen: x, anterior: a } = r;
+  const antes = `${diaCorto(sumarDias(r.dia_desde, -r.dias))} – ${diaCorto(sumarDias(r.dia_desde, -1))}`;
+  $('p-texto').textContent = textoPeriodo(r.dia_desde, r.dia_hasta);
+  $('p-anterior').textContent = `Comparado con ${antes}`;
+  $('h-total').textContent = pesos(x.total);
+  const c = cambio(x.total, a.total);
+  $('h-delta').innerHTML = c
+    ? `<span class="chip ${c.direccion}">${c.direccion === 'sube' ? '▲' : c.direccion === 'baja' ? '▼' : '='} ${c.texto}</span>${escapar(`vs ${pesos(a.total)} del periodo anterior (${antes}) · ${pesosConSigno(x.total - a.total)}`)}`
+    : `${escapar(cuenta(x.ventas, 'ticket', 'tickets'))} · sin periodo anterior para comparar`;
+  const usados = r.por_forma_pago.find((f) => f.forma_pago === 'dolarones')?.total ?? 0;
+  $('tarjetas').innerHTML = [
+    tarjeta('Tickets', x.ventas.toLocaleString('es-MX'), deltaHtml(x.ventas, a.ventas, (v) => v.toLocaleString('es-MX'))),
+    tarjeta('Ticket promedio', pesos(x.ticket_promedio), deltaHtml(x.ticket_promedio, a.ticket_promedio, pesos)),
+    tarjeta('Piezas vendidas', x.piezas.toLocaleString('es-MX'), deltaHtml(x.piezas, a.piezas, (v) => v.toLocaleString('es-MX'))),
+    tarjeta('Dolarones usados', dolarones(usados), `<div class="delta">${escapar(pesos(usados))} del total</div>`),
+    tarjeta('Devuelto y cancelado', pesos(r.cancelaciones.total), `<div class="delta">${escapar(cuenta(r.cancelaciones.n, 'movimiento', 'movimientos'))}</div>`),
+  ].join('');
+}
 
-  $('por-dia').innerHTML = r.por_dia.length === 0
-    ? '<div class="vacio">Sin ventas en este rango.</div>'
-    : (() => {
-        const maximo = Math.max(...r.por_dia.map((f) => f.total));
-        return r.por_dia.map((f) => barra(f.dia.slice(5), f.total, maximo, pesos)).join('');
-      })();
+/* ---------- ventas por dia ---------- */
 
-  $('por-categoria').innerHTML = r.por_categoria.length === 0
-    ? '<div class="vacio">Sin ventas en este rango.</div>'
-    : (() => {
-        const maximo = Math.max(...r.por_categoria.map((f) => f.total));
-        return r.por_categoria.map((f) => barra(f.categoria, f.total, maximo, pesos)).join('');
-      })();
+function pintarDias() {
+  const caja = $('graf-dias');
+  const ancho = Math.floor(caja.clientWidth);
+  if (!ancho || !datosDias.length) return;
+  const datos = datosDias.map((d) => ({
+    clave: d.dia, etiqueta: datosDias.length <= 10 ? `${diaSemana(d.dia)} ${d.dia.slice(8).replace(/^0/, '')}` : diaCorto(d.dia),
+    titulo: mayuscula(diaLargo(d.dia)), valor: d.total,
+    detalle: [cuenta(d.tickets, 'ticket', 'tickets'), cuenta(d.piezas, 'pieza', 'piezas')],
+  }));
+  caja.innerHTML = graficaDias(datos, { ancho, seleccion: diaElegido });
+  activarLinea(caja, datos);
+}
+new ResizeObserver(() => pintarDias()).observe($('graf-dias'));
 
-  $('por-forma-pago').innerHTML = r.por_forma_pago.length === 0
-    ? '<div class="vacio">Sin ventas en este rango.</div>'
-    : (() => {
-        const maximo = Math.max(...r.por_forma_pago.map((f) => f.total));
-        return r.por_forma_pago.map((f) => barra(f.forma_pago, f.total, maximo, pesos)).join('');
-      })();
+$('graf-dias').addEventListener('click', (e) => {
+  const dia = e.target.closest?.('[data-dia]')?.dataset.dia;
+  if (!dia) return;
+  diaElegido = diaElegido === dia ? null : dia;
+  pintarDias();
+  cargarTickets();
+});
+$('graf-dias').addEventListener('keydown', (e) => {
+  if ((e.key === 'Enter' || e.key === ' ') && e.target.dataset?.dia) { e.preventDefault(); e.target.dispatchEvent(new MouseEvent('click', { bubbles: true })); }
+});
 
-  $('top-productos').innerHTML = r.top_productos.length === 0
-    ? '<div class="vacio">Sin ventas en este rango.</div>'
-    : `<table><thead><tr><th>Código</th><th>Nombre</th><th class="num">Piezas</th><th class="num">Importe</th></tr></thead>
-       <tbody>${r.top_productos.map((p) => `
-         <tr><td>${escapar(p.codigo)}</td><td>${escapar(p.nombre)}</td><td class="num">${p.cantidad}</td><td class="num">${pesos(p.total)}</td></tr>
-       `).join('')}</tbody></table>`;
+/* ---------- el resto de ventas ---------- */
 
+function pintarVentas(r) {
+  datosDias = rellenarDias(r.por_dia, r.dia_desde, r.dia_hasta);
+  $('dias-sub').textContent = `${cuenta(datosDias.length, 'día', 'días')} · ${datosDias.filter((d) => d.tickets).length} con ventas`;
+  $('dias-nota').hidden = datosDias.length > 45 ? true : false;
+  pintarDias();
+  $('tabla-dias').innerHTML = tabla(['Fecha', 'Vendido', 'Tickets', 'Piezas'],
+    [...datosDias].reverse().map((d) => [mayuscula(diaLargo(d.dia)), pesos(d.total), d.tickets, d.piezas]), [1, 2, 3]);
+
+  const total = r.resumen.total;
+  $('por-forma-pago').innerHTML = apilada(FORMAS.map(([clave, nombre, color]) => {
+    const valor = r.por_forma_pago.find((f) => f.forma_pago === clave)?.total ?? 0;
+    return { nombre, valor, color, texto: clave === 'dolarones' ? `${dolarones(valor)}` : pesos(valor) };
+  }));
+
+  const nombreCat = (c) => mayuscula(c === 'sin categoria' ? 'sin categoría' : c);
+  const principales = r.por_categoria.slice(0, r.por_categoria.length > 9 ? 8 : 9);
+  const resto = r.por_categoria.slice(principales.length);
+  const cats = resto.length
+    ? [...principales, { categoria: `Otras (${resto.length})`, total: resto.reduce((s, f) => s + f.total, 0), piezas: resto.reduce((s, f) => s + f.piezas, 0), literal: true }]
+    : principales;
+  const pct = (v) => (total > 0 ? ((v / total) * 100).toLocaleString('es-MX', { minimumFractionDigits: 1, maximumFractionDigits: 1 }) : '0.0');
+  $('por-categoria').innerHTML = cats.length === 0 ? '<div class="vacio">Sin ventas en este periodo.</div>'
+    : barrasHorizontales(cats.map((f) => {
+      const nombre = f.literal ? f.categoria : nombreCat(f.categoria);
+      return { nombre, valor: f.total, texto: pesos(f.total),
+        tip: `${nombre}\n${pesos(f.total)}\n${cuenta(f.piezas, 'pieza', 'piezas')} · ${pct(f.total)}% del total` };
+    }));
+  $('tabla-cat').innerHTML = tabla(['Categoría', 'Vendido', 'Piezas', '% del total'],
+    r.por_categoria.map((f) => [nombreCat(f.categoria), pesos(f.total), f.piezas, `${pct(f.total)}%`]), [1, 2, 3]);
+
+  $('top-productos').innerHTML = r.top_productos.length === 0 ? '<div class="vacio">Sin ventas en este periodo.</div>'
+    : tabla(['Código', 'Pieza', 'Piezas', 'Importe'], r.top_productos.map((p) => [p.codigo, p.nombre, p.cantidad, pesos(p.total)]), [2, 3]);
+}
+
+/* ---------- cuadre ---------- */
+
+function pintarCuadre(r) {
+  const filas = verificarCuadre(r);
+  const mal = filas.filter((f) => !f.ok);
+  $('cuadre-banda').innerHTML = mal.length === 0
+    ? `<span class="cuadre-ok">✓</span> Todo cuadra al centavo: ${escapar(pesos(r.resumen.total))} vendidos`
+    : `<span class="cuadre-mal">✗</span> ${cuenta(mal.length, 'sección no cuadra', 'secciones no cuadran')}: revisa la diferencia`;
+  const c = r.cuadre;
+  $('cuadre').innerHTML = `
+    <table class="tabla" style="margin-bottom:16px"><tbody>
+      <tr><td>Bruto: lo cobrado en todos los tickets</td><td class="num">${pesos(c.bruto)}</td></tr>
+      <tr><td>− Devoluciones de piezas</td><td class="num">${pesos(c.devoluciones_pieza)}</td></tr>
+      <tr><td>− Tickets cancelados completos</td><td class="num">${pesos(c.cancelados)}</td></tr>
+      <tr><td><b>= Vendido</b></td><td class="num"><b>${pesos(c.vendido)}</b></td></tr>
+    </tbody></table>
+    <table class="tabla"><thead><tr><th>Comprobación</th><th class="num">Debe sumar</th><th class="num">Suma</th><th class="num">Diferencia</th><th>Estado</th></tr></thead><tbody>
+      ${filas.map((f) => `<tr><td>${escapar(f.nombre)}<div class="sec" style="font-size:12px">${escapar(f.detalle)}</div></td>
+        <td class="num">${pesos(f.esperado)}</td><td class="num">${pesos(f.obtenido)}</td><td class="num">${pesosConSigno(f.diferencia)}</td>
+        <td class="estado ${f.ok ? 'ok' : 'mal'}"><span class="icono">${f.ok ? '✓' : '✗'}</span> ${f.ok ? 'Cuadra' : 'Revisar'}</td></tr>`).join('')}
+    </tbody></table>`;
+}
+
+/* ---------- caja, cancelaciones, inventario ---------- */
+
+// Icono y palabra: el color nunca lleva solo el significado.
+function diferencia(centavos) {
+  if (centavos === 0) return `<span class="estado ok"><span class="icono">✓</span> ${pesos(0)}</span>`;
+  const falta = centavos < 0;
+  return `<span class="estado ${falta ? 'mal' : 'aviso'}"><span class="icono">${falta ? '▼' : '▲'}</span> ${falta ? 'Faltante' : 'Sobrante'} ${pesos(Math.abs(centavos))}</span>`;
+}
+
+function pintarCaja(r) {
+  $('cortes').innerHTML = r.cortes.length === 0 ? '<div class="vacio">Sin cortes en este periodo.</div>'
+    : `<table class="tabla"><thead><tr><th>Fecha</th><th>Caja</th><th>Cajero</th><th class="num">Tickets</th><th class="num">Esperado</th>
+         <th class="num">Contado</th><th>Diferencia</th><th>Tarjeta (term. − sist.)</th><th class="num">Entregado</th></tr></thead>
+       <tbody>${r.cortes.map((c) => `
+         <tr><td>${fechaHora(c.hasta)}</td><td>${escapar(c.caja)}</td><td>${escapar(c.cajero)}</td>
+           <td class="num">${c.tickets}</td><td class="num">${pesos(c.efectivo_esperado)}</td>
+           <td class="num">${pesos(c.efectivo_contado)}</td><td>${diferencia(c.diferencia)}</td>
+           <td>${diferencia(c.tarjeta_terminal - c.tarjeta_sistema)}</td><td class="num">${pesos(c.entregado)}</td></tr>
+         ${c.notas ? `<tr class="nota-fila"><td colspan="9">Notas: ${escapar(c.notas)}</td></tr>` : ''}`).join('')}</tbody></table>`;
+  $('retiros').innerHTML = r.retiros.length === 0 ? '<div class="vacio">Sin gastos ni retiros en este periodo.</div>'
+    : `<table class="tabla"><thead><tr><th>Fecha</th><th>Tipo</th><th>Caja</th><th>Quién</th><th>Concepto / motivo</th><th class="num">Importe</th></tr></thead>
+       <tbody>${r.retiros.map((x) => `
+         <tr><td>${fechaHora(x.creado_en)}</td><td>${x.tipo === 'gasto' ? 'Gasto' : 'Retiro'}</td><td>${escapar(x.caja)}</td>
+           <td>${escapar(x.cajero)}</td><td>${escapar(x.motivo)}</td><td class="num">${pesos(x.importe)}</td></tr>`).join('')}</tbody></table>`;
+  $('aperturas-cajon').innerHTML = r.aperturas_cajon.length === 0 ? '<div class="vacio">Nadie abrió el cajón sin venta en este periodo.</div>'
+    : `<table class="tabla"><thead><tr><th>Fecha</th><th>Caja</th><th>Quién</th></tr></thead>
+       <tbody>${r.aperturas_cajon.map((a) => `
+         <tr><td>${fechaHora(a.abierto_en)}</td><td>${escapar(a.caja || '—')}</td><td>${escapar(a.abierto_por)}</td></tr>`).join('')}</tbody></table>`;
+}
+
+function pintarCancelaciones(r) {
+  const c = r.cancelaciones;
+  $('cancelaciones-resumen').innerHTML = [
+    tarjeta('Movimientos', c.n.toLocaleString('es-MX')),
+    tarjeta('Devuelto en dinero', pesos(c.total)),
+    tarjeta('Regresado en Dolarones', dolarones(c.dolarones)),
+  ].join('');
+  $('cancelaciones-detalle').innerHTML = c.detalle.length === 0 ? '<div class="vacio">Sin cancelaciones ni devoluciones en este periodo.</div>'
+    : `<table class="tabla"><thead><tr><th>Fecha</th><th>Tipo</th><th>Quién</th><th>Motivo</th><th>Piezas</th><th class="num">Dinero</th><th class="num">Dolarones</th></tr></thead>
+       <tbody>${c.detalle.map((d) => `
+         <tr><td>${fechaHora(d.cancelada_en)}</td><td>${d.tipo === 'ticket' ? 'Ticket completo' : 'Pieza'}</td><td>${escapar(d.cancelada_por || '—')}</td>
+           <td>${escapar(d.motivo_cancelacion || '—')}</td><td>${escapar(d.piezas)}</td>
+           <td class="num">${pesos(d.total)}</td><td class="num">${d.dolarones ? dolarones(d.dolarones) : '—'}</td></tr>`).join('')}</tbody></table>`;
+}
+
+function pintarInventario(r) {
   $('precio-sugerido').innerHTML = r.precio_sugerido.n === 0
     ? '<div class="vacio">Todavía no hay piezas con precio sugerido y precio final.</div>'
     : (() => {
         const pct = r.precio_sugerido.promedio_pct;
-        const signo = pct > 0 ? '+' : '';
-        return `<div class="valor" style="font-size:28px;color:${pct < 0 ? 'var(--rojo)' : 'var(--verde)'}">${signo}${pct.toFixed(1)}%</div>
-          <div class="etiqueta">sobre ${r.precio_sugerido.n} piezas · ${pct < 0 ? 'se cobra menos de lo que sugirió la IA' : 'se cobra más de lo que sugirió la IA'}</div>`;
+        const signo = pct > 0 ? '+' : pct < 0 ? '−' : '';
+        return `<div class="tarjeta" style="border:0;padding:0"><div class="valor" style="font-size:34px">${signo}${Math.abs(pct).toFixed(1)}%</div>
+          <div class="etq">sobre ${r.precio_sugerido.n} piezas · ${pct < 0 ? 'se cobra menos de lo que sugirió la IA' : 'se cobra más de lo que sugirió la IA'}</div></div>`;
       })();
-
   $('dias-en-venta').innerHTML = r.dias_en_venta_por_categoria.length === 0
     ? '<div class="vacio">Todavía no hay piezas vendidas para medir esto.</div>'
-    : `<table><thead><tr><th>Categoría</th><th class="num">Días promedio</th><th class="num">Piezas</th></tr></thead>
-       <tbody>${r.dias_en_venta_por_categoria.map((f) => `
-         <tr><td>${escapar(f.categoria)}</td><td class="num">${f.dias_promedio == null ? '—' : f.dias_promedio.toFixed(1)}</td><td class="num">${f.n}</td></tr>
-       `).join('')}</tbody></table>`;
-
-  $('cancelaciones-resumen').innerHTML = `
-    <div class="tarjeta"><div class="etiqueta">Cancelaciones</div><div class="valor">${r.cancelaciones.n}</div></div>
-    <div class="tarjeta"><div class="etiqueta">Total devuelto</div><div class="valor">${pesos(r.cancelaciones.total)}</div></div>`;
-  $('cancelaciones-detalle').innerHTML = r.cancelaciones.detalle.length === 0
-    ? '<div class="vacio">Sin cancelaciones en este rango.</div>'
-    : `<table><thead><tr><th>Fecha</th><th>Quién</th><th>Motivo</th><th>Piezas</th><th class="num">Devuelto</th></tr></thead>
-       <tbody>${r.cancelaciones.detalle.map((c) => `
-         <tr><td>${fechaHora(c.cancelada_en)}</td><td>${escapar(c.cancelada_por || '—')}</td>
-           <td>${escapar(c.motivo_cancelacion || '—')}</td><td>${escapar(c.piezas)}</td><td class="num">${pesos(c.total)}</td></tr>
-       `).join('')}</tbody></table>`;
-
-  $('aperturas-cajon').innerHTML = r.aperturas_cajon.length === 0
-    ? '<div class="vacio">Nadie abrió el cajón sin venta en este rango.</div>'
-    : `<table><thead><tr><th>Fecha</th><th>Caja</th><th>Quién</th></tr></thead>
-       <tbody>${r.aperturas_cajon.map((a) => `
-         <tr><td>${fechaHora(a.abierto_en)}</td><td>${escapar(a.caja || '—')}</td><td>${escapar(a.abierto_por)}</td></tr>
-       `).join('')}</tbody></table>`;
-
-  const diferencia = (centavos) => centavos === 0 ? pesos2(0)
-    : `<b style="color:${centavos < 0 ? 'var(--rojo)' : '#b26b00'}">${centavos < 0 ? '−' : '+'}${pesos2(Math.abs(centavos))}</b>`;
-  $('cortes').innerHTML = r.cortes.length === 0
-    ? '<div class="vacio">Sin cortes en este rango.</div>'
-    : `<table><thead><tr><th>Fecha</th><th>Caja</th><th>Cajero</th><th class="num">Ventas</th>
-         <th class="num">Esperado</th><th class="num">Contado</th><th class="num">Diferencia</th>
-         <th class="num">Tarjeta (term. − sist.)</th><th class="num">Entregado</th></tr></thead>
-       <tbody>${r.cortes.map((c) => `
-         <tr><td>${fechaHora(c.hasta)}</td><td>${escapar(c.caja)}</td><td>${escapar(c.cajero)}</td>
-           <td class="num">${c.tickets}</td><td class="num">${pesos2(c.efectivo_esperado)}</td>
-           <td class="num">${pesos2(c.efectivo_contado)}</td><td class="num">${diferencia(c.diferencia)}</td>
-           <td class="num">${diferencia(c.tarjeta_terminal - c.tarjeta_sistema)}</td><td class="num">${pesos2(c.entregado)}</td></tr>
-         ${c.notas ? `<tr><td colspan="9" class="nota">Notas: ${escapar(c.notas)}</td></tr>` : ''}
-       `).join('')}</tbody></table>`;
-
-  $('retiros').innerHTML = r.retiros.length === 0
-    ? '<div class="vacio">Sin gastos ni retiros en este rango.</div>'
-    : `<table><thead><tr><th>Fecha</th><th>Tipo</th><th>Caja</th><th>Quién</th><th>Concepto / motivo</th><th class="num">Importe</th></tr></thead>
-       <tbody>${r.retiros.map((x) => `
-         <tr><td>${fechaHora(x.creado_en)}</td><td>${x.tipo === 'gasto' ? 'Gasto' : 'Retiro'}</td><td>${escapar(x.caja)}</td>
-           <td>${escapar(x.cajero)}</td><td>${escapar(x.motivo)}</td><td class="num">${pesos2(x.importe)}</td></tr>
-       `).join('')}</tbody></table>`;
+    : barrasHorizontales(r.dias_en_venta_por_categoria.map((f) => {
+      const dias = f.dias_promedio ?? 0;
+      const nombre = mayuscula(f.categoria === 'sin categoria' ? 'sin categoría' : f.categoria);
+      return { nombre, valor: dias, texto: `${dias.toFixed(1)} días`, tip: `${nombre}\n${dias.toFixed(1)} días en promedio\n${cuenta(f.n, 'pieza', 'piezas')}` };
+    }));
 }
 
-// El fondo de caja (Issue #100): el mismo valor que «Fondo por caja» del admin.
-// Aplica desde el siguiente corte; los cortes ya hechos no cambian.
+async function cargar() {
+  $('principal').classList.add('cargando');   // se queda el cuadro anterior, atenuado: sin saltos
+  try {
+    const r = await (await fetch(`/api/reportes?dias=${diasActual}`)).json();
+    ultimoReporte = r;
+    pintarResumen(r); pintarVentas(r); pintarCuadre(r); pintarCaja(r); pintarCancelaciones(r); pintarInventario(r);
+  } finally {
+    $('principal').classList.remove('cargando');
+  }
+}
+
+/* ---------- fondo de caja (Issue #100) ---------- */
+// El mismo valor que «Fondo por caja» del admin. Aplica desde el siguiente corte; los cortes ya hechos no cambian.
 async function cargarFondo() {
   try {
     const config = await (await fetch('/api/config')).json();
@@ -317,7 +572,7 @@ $('guardar-fondo').addEventListener('click', async () => {
   const aviso = $('aviso-fondo');
   if (!Number.isFinite(pesosFondo) || pesosFondo < 0 || $('fondo-caja').value === '') {
     aviso.textContent = 'Escribe una cantidad.';
-    aviso.style.color = 'var(--rojo)';
+    aviso.style.color = 'var(--mal)';
     return;
   }
   const r = await fetch('/api/config', {
@@ -326,20 +581,10 @@ $('guardar-fondo').addEventListener('click', async () => {
   });
   const cuerpo = await r.json().catch(() => ({}));
   aviso.textContent = r.ok ? 'Guardado. Aplica desde el siguiente corte de cada caja.' : (cuerpo.error ?? 'No se pudo guardar.');
-  aviso.style.color = r.ok ? 'var(--verde)' : 'var(--rojo)';
-});
-cargarFondo();
-
-$('rango').addEventListener('click', (e) => {
-  const dias = e.target.dataset?.dias;
-  if (!dias) return;
-  diasActual = Number(dias);
-  pintarRango();
-  cargar();
-  cargarTickets();
+  aviso.style.color = r.ok ? 'var(--bien)' : 'var(--mal)';
 });
 
-/* ---------- tickets del rango, con filtros y su desglose (Issues #138, #164) ---------- */
+/* ---------- tickets del periodo, con filtros y su desglose (Issues #138, #164) ---------- */
 
 let paginaTickets = 0;
 
@@ -359,6 +604,10 @@ async function cargarTickets(mas = false) {
   }
   if ($('f-socio').checked) params.set('socio', '1');
   if ($('f-dolarones').checked) params.set('dolarones', '1');
+  if (diaElegido) params.set('dia', diaElegido);
+  $('chip-dia').hidden = !diaElegido;
+  $('chip-dia').innerHTML = diaElegido
+    ? `<span class="chip-dia">Solo ${escapar(diaLargo(diaElegido))} <button type="button" id="quitar-dia" aria-label="Quitar el filtro de día">×</button></span>` : '';
   try {
     const r = await (await fetch(`/api/reportes/tickets?${params}`)).json();
     if (!mas) {
@@ -366,9 +615,10 @@ async function cargarTickets(mas = false) {
       opciones($('f-cajero'), 'Todos los cajeros', r.cajeros);
       const x = r.resumen;
       $('tickets-resumen').innerHTML = [
-        ['Tickets', x.tickets], ['Vendido', pesos(x.vendido)], ['Piezas', x.piezas],
-        ['Dolarones usados', `${Math.round(x.dolarones / 100).toLocaleString('es-MX')} D`], ['Cancelados', x.cancelados],
-      ].map(([e, v]) => `<div class="tarjeta"><div class="etiqueta">${e}</div><div class="valor">${v}</div></div>`).join('');
+        tarjeta('Tickets', x.tickets.toLocaleString('es-MX')), tarjeta('Vendido', pesos(x.vendido)),
+        tarjeta('Piezas', x.piezas.toLocaleString('es-MX')), tarjeta('Dolarones usados', dolarones(x.dolarones)),
+        tarjeta('Cancelados', x.cancelados.toLocaleString('es-MX')),
+      ].join('');
       $('tickets-rango').innerHTML = '';
     }
     if (!mas && r.tickets.length === 0) $('tickets-rango').innerHTML = '<div class="vacio">Sin tickets con esos filtros.</div>';
@@ -382,6 +632,12 @@ for (const id of ['f-forma', 'f-caja', 'f-cajero', 'f-estado', 'f-socio', 'f-dol
   $(id).addEventListener('change', () => cargarTickets());
 }
 $('tickets-mas').addEventListener('click', () => cargarTickets(true));
+$('chip-dia').addEventListener('click', (e) => {
+  if (e.target.id !== 'quitar-dia') return;
+  diaElegido = null;
+  pintarDias();
+  cargarTickets();
+});
 
 $('tickets-rango').addEventListener('click', async (e) => {
   const fila = e.target.closest('[data-ticket]');
@@ -392,11 +648,22 @@ $('tickets-rango').addEventListener('click', async (e) => {
   const cuerpo = await r.json().catch(() => ({}));
   $('ticket-contenido').innerHTML = r.ok
     ? pintarDetalle(cuerpo)
-    : `<p class="nota" style="color:var(--rojo)">${escapar(cuerpo.error ?? 'No se pudo abrir el ticket.')}</p>`;
+    : `<p class="nota" style="color:var(--mal)">${escapar(cuerpo.error ?? 'No se pudo abrir el ticket.')}</p>`;
 });
 $('ticket-cerrar').addEventListener('click', () => $('dialogo-ticket').close());
 
+// «Ver tabla» / «Ver gráfica»: la tabla es la misma informacion sin depender de color ni de puntero.
+document.addEventListener('click', (e) => {
+  const boton = e.target.closest?.('.alterna');
+  if (!boton) return;
+  const enTabla = boton.closest('.panel').classList.toggle('en-tabla');
+  boton.textContent = enTabla ? 'Ver gráfica' : 'Ver tabla';
+  if (!enTabla) pintarDias();
+});
+
+activarGlobos(document.body);
 pintarRango();
+cargarFondo();
 cargarTickets();
 await cargar();
 </script>
