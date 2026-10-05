@@ -1102,6 +1102,11 @@ async function reportes(url: URL, env: Env): Promise<Response> {
 /** Una celda de CSV: entre comillas si trae coma, comilla o salto de linea. */
 function celdaCsv(valor: unknown): string {
   const texto = String(valor ?? '');
+  // Evitar inyeccion de formulas: si es texto y empieza con un caracter peligroso, prefijo con apostrofe.
+  // Excepto si es un numero decimal (que puede ser negativo), que se deja tal cual.
+  if (typeof valor === 'string' && /^[=+\-@\t\r]/.test(texto) && !/^-?\d+(\.\d+)?$/.test(texto)) {
+    return /[",\n]/.test(texto) ? `"'${texto.replace(/"/g, '""')}"` : `'${texto}`;
+  }
   return /[",\n]/.test(texto) ? `"${texto.replace(/"/g, '""')}"` : texto;
 }
 

@@ -71,5 +71,13 @@ export function tienda() {
     );
     return { status: r.status, cuerpo: (await r.json()) as Record<string, any> };
   };
-  return { db, env, pedir };
+  const pedirTexto = async (ruta: string, metodo = 'GET') => {
+    const r = await worker.fetch!(
+      new Request(`https://caja.prueba${ruta}`, { method: metodo }) as never,
+      env,
+      { waitUntil() {}, passThroughOnException() {} } as never,
+    );
+    return { status: r.status, texto: await r.text() };
+  };
+  return { db, env, pedir, pedirTexto };
 }
