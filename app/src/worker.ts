@@ -1127,7 +1127,7 @@ async function reportes(url: URL, env: Env): Promise<Response> {
 
   // Diferido a proposito en CONTRATO-ESCANER.md hasta que hubiera ventas reales.
   const { results: diasEnVenta } = await env.DB.prepare(
-    `select coalesce(p.categoria, 'sin categoria') as categoria,
+    `select coalesce(nullif(p.categoria, ''), 'sin categoria') as categoria,
        avg(julianday(substr(v.creado_en, 1, 10)) - julianday(substr(p.creado_en, 1, 10))) as dias_promedio,
        count(*) as n
      from venta_lineas l join ventas v on v.id = l.venta_id join productos p on p.id = l.producto_id

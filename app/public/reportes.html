@@ -384,6 +384,7 @@
 
 <script type="module">
 import { renglonTicket, pintarDetalle } from '/ticket.js';
+import { CATEGORIAS } from '/categorias.js';
 import {
   escapar, pesos, pesosConSigno, dolarones, cambio, rellenarDias, sumarDias, diaCorto, diaLargo, diaSemana, textoPeriodo,
   verificarCuadre, mapaCalor, mapaCalorHtml, tablaCalor, graficaDias, activarLinea, activarGlobos, barrasHorizontales, apilada, tabla,
@@ -400,7 +401,9 @@ const FORMAS = [
 ];
 const mayuscula = (t) => (t ? t[0].toUpperCase() + t.slice(1) : t);
 const cuenta = (n, uno, varios) => `${n.toLocaleString('es-MX')} ${n === 1 ? uno : varios}`;
-const nombreCat = (c) => mayuscula(c === 'sin categoria' ? 'sin categoría' : c);
+// El nombre con acentos de categorias.js (la clave es ASCII); «bandas» y «sin categoria» no estan en la lista.
+const NOMBRES_CAT = new Map(CATEGORIAS);
+const nombreCat = (c) => NOMBRES_CAT.get(c) ?? mayuscula(c === 'sin categoria' ? 'sin categoría' : c);
 const decimal = (n) => n.toLocaleString('es-MX', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
 
 let diasActual = 30;
@@ -672,7 +675,7 @@ function pintarInventario(r) {
     ? '<div class="vacio">Todavía no hay piezas vendidas para medir esto.</div>'
     : barrasHorizontales(r.dias_en_venta_por_categoria.map((f) => {
       const dias = f.dias_promedio ?? 0;
-      const nombre = mayuscula(f.categoria === 'sin categoria' ? 'sin categoría' : f.categoria);
+      const nombre = nombreCat(f.categoria);
       return { nombre, valor: dias, texto: `${dias.toFixed(1)} días`, tip: `${nombre}\n${dias.toFixed(1)} días en promedio\n${cuenta(f.n, 'pieza', 'piezas')}` };
     }));
 }
