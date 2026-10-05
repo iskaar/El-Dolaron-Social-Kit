@@ -5,6 +5,7 @@ import assert from 'node:assert/strict';
 import {
   pesos, dolarones, pesosEje, pesosConSigno, escala, cambio, rellenarDias, textoPeriodo, verificarCuadre,
   PASOS_CALOR, pasoCalor, pasosDeLaEscala, horasConVentas, textoHora, rangoHora, mapaCalor, mapaCalorHtml, tablaCalor,
+  TRAMOS_ANTIGUEDAD, tramoDeDias, pasoOrdinal, flechaCambio, barrasHorizontales, apilada,
 } from '../public/graficas.js';
 import { rangoDias } from './worker.ts';
 
@@ -132,4 +133,44 @@ test('mapa de calor: el HTML y la tabla llevan los importes con centavos', () =>
   assert.match(html, />\$1,235<\/div>/);
   assert.match(tablaCalor(mapa), /<td class="num">\$1,234\.56<\/td>/);
   assert.match(tablaCalor(mapa), /<th class="num">Total<\/th>/);
+});
+
+test('antiguedad: el tramo va por semanas completas y los limites no se mueven', () => {
+  assert.deepEqual(TRAMOS_ANTIGUEDAD.map(([clave]) => clave), ['0-2', '3-4', '5-8', '9+']);
+  const casos: [number, string][] = [
+    [0, '0-2'], [6, '0-2'], [14, '0-2'], [15, '0-2'], [20, '0-2'],   // 20 dias = 2 semanas y 6 dias: aun son 2
+    [21, '3-4'], [34, '3-4'], [35, '5-8'], [62, '5-8'], [63, '9+'], [400, '9+'],
+    [-3, '0-2'],                                                    // una fecha a futuro no da un tramo inventado
+  ];
+  for (const [dias, tramo] of casos) assert.equal(tramoDeDias(dias), tramo, `${dias} dias`);
+});
+
+test('antiguedad: la escala ordinal va del paso mas claro al mas oscuro, en orden y sin repetir', () => {
+  assert.deepEqual([0, 1, 2, 3].map((i) => pasoOrdinal(i, 4)), [1, 3, 4, 6]);
+  assert.deepEqual([0, 1].map((i) => pasoOrdinal(i, 2)), [1, 6]);
+  assert.equal(pasoOrdinal(0, 1), PASOS_CALOR);
+  const pasos = [0, 1, 2, 3].map((i) => pasoOrdinal(i, 4));
+  assert.deepEqual(pasos, [...new Set(pasos)].sort((a, b) => a - b));
+});
+
+test('flechaCambio escribe la flecha y el signo: el color nunca es lo unico', () => {
+  assert.equal(flechaCambio(cambio(112_30, 100_00)!), '▲ +12.3%');
+  assert.equal(flechaCambio(cambio(50, 100)!), '▼ −50.0%');
+  assert.equal(flechaCambio(cambio(100, 100)!), '= 0.0%');
+});
+
+test('barras horizontales: la linea chica bajo el valor es texto escapado', () => {
+  const html = barrasHorizontales([{ nombre: 'Ropa', valor: 100, texto: '$1.00', tip: 'Ropa', sub: '▲ +5.0% <b>', direccion: 'sube' }, { nombre: 'Hogar', valor: 50, texto: '$0.50', tip: 'Hogar' }]);
+  assert.match(html, /<small class="hs sube">▲ \+5\.0% &lt;b&gt;<\/small>/);
+  assert.equal(html.match(/<small/g)!.length, 1);   // sin `sub`, nada
+});
+
+test('apilada: la columna extra (piezas) entra en todas las filas de la leyenda', () => {
+  const html = apilada([
+    { nombre: '0–2 semanas', valor: 7_500, color: 'var(--calor-1)', texto: '$75.00', extra: '3 piezas' },
+    { nombre: '9 o más semanas', valor: 2_500, color: 'var(--calor-6)', texto: '$25.00', extra: '1 pieza' },
+  ]);
+  assert.match(html, /<td class="num sec">3 piezas<\/td><td class="num">\$75\.00<\/td><td class="num sec">75\.0%<\/td>/);
+  assert.equal(html.match(/<tr>/g)!.length, 2);
+  assert.equal(apilada([{ nombre: 'a', valor: 1, color: 'x', texto: '$0.01' }]).includes('piezas'), false);
 });
