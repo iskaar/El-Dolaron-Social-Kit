@@ -56,6 +56,9 @@ export function cambio(actual, previo) {
   };
 }
 
+/** «▲ +12.3%»: la flecha y el signo van escritos, el color solo los refuerza. */
+export const flechaCambio = (c) => `${c.direccion === 'sube' ? '▲' : c.direccion === 'baja' ? '▼' : '='} ${c.texto}`;
+
 const MS_DIA = 86_400_000;
 export const sumarDias = (dia, n) => new Date(Date.parse(`${dia}T00:00:00Z`) + n * MS_DIA).toISOString().slice(0, 10);
 
@@ -192,6 +195,20 @@ export function tablaCalor(mapa) {
     mapa.filas.map((f) => [f.nombre, ...f.celdas.map(celda), pesos(f.total)]),
     mapa.horas.map((_, i) => i + 1).concat(mapa.horas.length + 1));
 }
+
+/* ---------- inventario en piso: antiguedad (Issue #174) ---------- */
+
+// Los tramos, en orden: son categorias ORDENADAS, asi que se pintan con la escala secuencial, no con tonos.
+export const TRAMOS_ANTIGUEDAD = [['0-2', '0–2 semanas'], ['3-4', '3–4 semanas'], ['5-8', '5–8 semanas'], ['9+', '9 o más semanas']];
+
+/** Dias desde la captura -> tramo, por semanas COMPLETAS (floor): 20 dias = 2 semanas = '0-2'; 21 = '3-4'; 63 = '9+'. */
+export function tramoDeDias(dias) {
+  const semanas = Math.floor(Math.max(0, dias) / 7);
+  return semanas <= 2 ? '0-2' : semanas <= 4 ? '3-4' : semanas <= 8 ? '5-8' : '9+';
+}
+
+/** El paso (1 a 6) de la escala secuencial para el tramo `i` de `n`: el mas claro al primero, el mas oscuro al ultimo. */
+export const pasoOrdinal = (i, n) => (n <= 1 ? PASOS_CALOR : 1 + Math.round((i * (PASOS_CALOR - 1)) / (n - 1)));
 
 /* ---------- tooltip: un solo globo para todo /reportes ---------- */
 
@@ -345,7 +362,8 @@ export function activarLinea(contenedor, datos) {
 
 /**
  * Barras horizontales de una sola serie: un color, el valor en la punta. El orden ya viene
- * del servidor (de mayor a menor). `items`: [{ nombre, valor, texto, tip }].
+ * del servidor (de mayor a menor). `items`: [{ nombre, valor, texto, tip, sub?, direccion? }]. `sub` es una linea
+ * chica bajo el valor (p. ej. «▲ +12.3%»); `direccion` ('sube'|'baja'|'igual') solo la colorea: el signo ya va escrito.
  */
 export function barrasHorizontales(items) {
   const maximo = Math.max(1, ...items.map((i) => i.valor));
@@ -353,27 +371,28 @@ export function barrasHorizontales(items) {
     <div class="hbarra" data-tip="${escapar(i.tip)}" tabindex="0">
       <span class="hn">${escapar(i.nombre)}</span>
       <span class="hpista"><i style="width:${Math.max(i.valor > 0 ? 0.5 : 0, (i.valor / maximo) * 100)}%"></i></span>
-      <span class="hv">${escapar(i.texto)}</span>
+      <span class="hv">${escapar(i.texto)}${i.sub ? `<small class="hs ${escapar(i.direccion ?? '')}">${escapar(i.sub)}</small>` : ''}</span>
     </div>`).join('')}</div>`;
 }
 
 /**
  * Parte de un todo: una sola barra apilada con 2 px de aire entre segmentos y debajo la leyenda
  * con importe y porcentaje (la leyenda ES la tabla: nada depende del color). `items`:
- * [{ nombre, valor, color, texto }].
+ * [{ nombre, valor, color, texto, extra? }]. `extra` agrega una columna de texto (p. ej. las piezas) a la leyenda.
  */
 export function apilada(items) {
   const total = suma(items, 'valor');
   if (total <= 0) return '<div class="vacio">Sin ventas en este periodo.</div>';
   const activos = items.filter((i) => i.valor > 0);
-  const pct = (v) => ((v / total) * 100).toLocaleString('es-MX', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+  const conExtra = items.some((i) => i.extra !== undefined);
+  const pct =(v) => ((v / total) * 100).toLocaleString('es-MX', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
   return `<div class="apilada" role="img" aria-label="${escapar(activos.map((i) => `${i.nombre} ${pct(i.valor)}%`).join(', '))}">
       ${activos.map((i) => `<span class="segmento" style="flex:${i.valor};background:${i.color}"
         data-tip="${escapar(`${i.nombre}\n${i.texto}\n${pct(i.valor)}% del total`)}" tabindex="0"></span>`).join('')}
     </div>
     <table class="leyenda"><tbody>${items.map((i) => `
       <tr><td><span class="llave" style="background:${i.color}"></span>${escapar(i.nombre)}</td>
-        <td class="num">${escapar(i.texto)}</td><td class="num sec">${i.valor > 0 ? `${pct(i.valor)}%` : '—'}</td></tr>`).join('')}
+        ${conExtra ? `<td class="num sec">${escapar(i.extra ?? '')}</td>` : ''}<td class="num">${escapar(i.texto)}</td><td class="num sec">${i.valor > 0 ? `${pct(i.valor)}%` : '—'}</td></tr>`).join('')}
     </tbody></table>`;
 }
 

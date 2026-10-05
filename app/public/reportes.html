@@ -118,12 +118,15 @@
   .svg-grafica .punto-fin, .svg-grafica .punto-mira { fill: var(--acento); stroke: var(--superficie); stroke-width: 2; }
   .svg-grafica .hit-linea { fill: transparent; }
   .hbarras { display: grid; gap: 9px; }
-  .hbarra { display: grid; grid-template-columns: minmax(80px, 150px) 1fr minmax(84px, auto); gap: 12px; align-items: center; font-size: 13px; border-radius: 6px; }
+  .hbarra { display: grid; grid-template-columns: minmax(80px, 150px) 1fr minmax(96px, auto); gap: 12px; align-items: center; font-size: 13px; border-radius: 6px; }
   .hbarra:hover, .hbarra:focus-visible { background: var(--lavado); outline: none; }
   .hbarra .hn { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .hbarra .hpista { height: 12px; display: block; }
   .hbarra .hpista i { display: block; height: 100%; background: var(--acento); border-radius: 0 4px 4px 0; }
   .hbarra .hv { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  #piso-viejas td:first-child { white-space: nowrap; }
+  .hbarra .hs { display: block; font-size: 11px; font-weight: 600; color: var(--tinta-2); }
+  .hbarra .hs.sube { color: var(--bien); } .hbarra .hs.baja { color: var(--mal); }
   .apilada { display: flex; gap: 2px; height: 22px; }
   .apilada .segmento { height: 100%; border-radius: 4px; min-width: 3px; }
   .apilada .segmento:first-child { border-radius: 4px 4px 4px 4px; }
@@ -248,7 +251,7 @@
     <div class="malla iguales" style="margin-top:16px">
       <article class="panel" id="p-cat">
         <header><h3>Por categoría</h3><button type="button" class="alterna">Ver tabla</button></header>
-        <div class="vista-grafica" id="por-categoria"></div>
+        <div class="vista-grafica"><div id="por-categoria"></div><p class="nota" id="cat-nota"></p></div>
         <div class="vista-tabla" id="tabla-cat"></div>
       </article>
       <article class="panel">
@@ -331,11 +334,37 @@
 
   <section aria-labelledby="t-inventario">
     <h2 class="titulo-bloque" id="t-inventario">Precios e inventario</h2>
-    <div class="malla iguales">
-      <article class="panel"><header><h3>Precio sugerido vs. precio final</h3></header><div id="precio-sugerido"></div>
-        <p class="nota">Qué tan lejos anda la IA del precio que de verdad se cobra. Sirve para ajustar los porcentajes de la configuración con datos, no a ojo.</p></article>
-      <article class="panel"><header><h3>Días en venta por categoría</h3></header><div id="dias-en-venta"></div>
-        <p class="nota">Días entre la captura y la venta. No incluye bins: no son piezas individuales con fecha de captura propia.</p></article>
+    <div class="malla">
+      <article class="panel" id="p-piso">
+        <header><h3>Inventario en piso <span class="subtitulo">piezas individuales con etiqueta y existencia</span></h3></header>
+        <div class="tarjetas" id="piso-resumen"></div>
+        <p class="nota">Foto del momento: no depende del periodo de arriba. No incluye bandas (no tienen fecha de captura propia) ni piezas agotadas
+          o aún sin etiqueta. Las dañadas sí cuentan: siguen en piso. El valor es precio de tienda × existencia.</p>
+      </article>
+      <div class="malla iguales">
+        <article class="panel" id="p-antiguedad">
+          <header><h3>Antigüedad <span class="subtitulo">semanas desde la captura</span></h3></header>
+          <div id="piso-antiguedad"></div>
+          <p class="nota">La barra y el porcentaje son por valor a precio de tienda; de las piezas más nuevas a las más viejas.
+            La leyenda es la tabla: trae las piezas y el importe de cada tramo.</p>
+        </article>
+        <article class="panel" id="p-piso-cat">
+          <header><h3>Por categoría <span class="subtitulo">valor en piso</span></h3><button type="button" class="alterna">Ver tabla</button></header>
+          <div class="vista-grafica" id="piso-categoria"></div>
+          <div class="vista-tabla" id="tabla-piso-cat"></div>
+        </article>
+      </div>
+      <article class="panel" id="p-viejas">
+        <header><h3>Las más viejas <span class="subtitulo">candidatas a rebaja</span></h3></header>
+        <div id="piso-viejas"></div>
+        <p class="nota">Las 15 piezas con más días en piso desde su captura (días de la tienda, no horas).</p>
+      </article>
+      <div class="malla iguales">
+        <article class="panel"><header><h3>Precio sugerido vs. precio final</h3></header><div id="precio-sugerido"></div>
+          <p class="nota">Qué tan lejos anda la IA del precio que de verdad se cobra. Sirve para ajustar los porcentajes de la configuración con datos, no a ojo.</p></article>
+        <article class="panel"><header><h3>Días en venta por categoría</h3></header><div id="dias-en-venta"></div>
+          <p class="nota">Días entre la captura y la venta. No incluye bins: no son piezas individuales con fecha de captura propia.</p></article>
+      </div>
     </div>
   </section>
 
@@ -358,6 +387,7 @@ import { renglonTicket, pintarDetalle } from '/ticket.js';
 import {
   escapar, pesos, pesosConSigno, dolarones, cambio, rellenarDias, sumarDias, diaCorto, diaLargo, diaSemana, textoPeriodo,
   verificarCuadre, mapaCalor, mapaCalorHtml, tablaCalor, graficaDias, activarLinea, activarGlobos, barrasHorizontales, apilada, tabla,
+  flechaCambio, TRAMOS_ANTIGUEDAD, pasoOrdinal,
 } from '/graficas.js';
 
 const $ = (id) => document.getElementById(id);
@@ -370,6 +400,8 @@ const FORMAS = [
 ];
 const mayuscula = (t) => (t ? t[0].toUpperCase() + t.slice(1) : t);
 const cuenta = (n, uno, varios) => `${n.toLocaleString('es-MX')} ${n === 1 ? uno : varios}`;
+const nombreCat = (c) => mayuscula(c === 'sin categoria' ? 'sin categoría' : c);
+const decimal = (n) => n.toLocaleString('es-MX', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
 
 let diasActual = 30;
 let datosDias = [];        // los dias del rango, con ceros, para la grafica
@@ -399,8 +431,7 @@ $('imprimir').addEventListener('click', () => window.print());
 function deltaHtml(actual, previo, formato) {
   const c = cambio(actual, previo);
   if (!c) return '<div class="delta">Sin periodo anterior para comparar</div>';
-  const icono = c.direccion === 'sube' ? '▲' : c.direccion === 'baja' ? '▼' : '=';
-  return `<div class="delta"><span class="chip ${c.direccion}">${icono} ${c.texto}</span>antes: ${escapar(formato(previo))}</div>`;
+  return `<div class="delta"><span class="chip ${c.direccion}">${flechaCambio(c)}</span>antes: ${escapar(formato(previo))}</div>`;
 }
 
 function tarjeta(etiqueta, valor, extra = '') {
@@ -415,7 +446,7 @@ function pintarResumen(r) {
   $('h-total').textContent = pesos(x.total);
   const c = cambio(x.total, a.total);
   $('h-delta').innerHTML = c
-    ? `<span class="chip ${c.direccion}">${c.direccion === 'sube' ? '▲' : c.direccion === 'baja' ? '▼' : '='} ${c.texto}</span>${escapar(`vs ${pesos(a.total)} del periodo anterior (${antes}) · ${pesosConSigno(x.total - a.total)}`)}`
+    ? `<span class="chip ${c.direccion}">${flechaCambio(c)}</span>${escapar(`vs ${pesos(a.total)} del periodo anterior (${antes}) · ${pesosConSigno(x.total - a.total)}`)}`
     : `${escapar(cuenta(x.ventas, 'ticket', 'tickets'))} · sin periodo anterior para comparar`;
   const usados = r.por_forma_pago.find((f) => f.forma_pago === 'dolarones')?.total ?? 0;
   $('tarjetas').innerHTML = [
@@ -482,21 +513,42 @@ function pintarVentas(r) {
     return { nombre, valor, color, texto: clave === 'dolarones' ? `${dolarones(valor)}` : pesos(valor) };
   }));
 
-  const nombreCat = (c) => mayuscula(c === 'sin categoria' ? 'sin categoría' : c);
   const principales = r.por_categoria.slice(0, r.por_categoria.length > 9 ? 8 : 9);
   const resto = r.por_categoria.slice(principales.length);
   const cats = resto.length
     ? [...principales, { categoria: `Otras (${resto.length})`, total: resto.reduce((s, f) => s + f.total, 0), piezas: resto.reduce((s, f) => s + f.piezas, 0), literal: true }]
     : principales;
-  const pct = (v) => (total > 0 ? ((v / total) * 100).toLocaleString('es-MX', { minimumFractionDigits: 1, maximumFractionDigits: 1 }) : '0.0');
+  const pct = (v) => (total > 0 ? decimal((v / total) * 100) : '0.0');
+
+  // Contra el periodo anterior de igual largo. Sin ventas antes en NINGUNA categoria no hay con que comparar
+  // (todo saldria «nueva»); con ventas antes y 0 en esta categoria, «nueva». El signo y la flecha van escritos.
+  const antes = new Map(r.por_categoria_anterior.map((f) => [f.categoria, f.total]));
+  const hayAntes = antes.size > 0;
+  const contra = (actual, previo) => {
+    if (!hayAntes) return null;
+    const c = cambio(actual, previo);
+    if (c) return { texto: flechaCambio(c), direccion: c.direccion };
+    return actual > 0 ? { texto: 'nueva', direccion: 'igual' } : null;
+  };
+  const previoDe = (f) => (f.literal ? resto.reduce((s, x) => s + (antes.get(x.categoria) ?? 0), 0) : antes.get(f.categoria) ?? 0);
   $('por-categoria').innerHTML = cats.length === 0 ? '<div class="vacio">Sin ventas en este periodo.</div>'
     : barrasHorizontales(cats.map((f) => {
       const nombre = f.literal ? f.categoria : nombreCat(f.categoria);
-      return { nombre, valor: f.total, texto: pesos(f.total),
-        tip: `${nombre}\n${pesos(f.total)}\n${cuenta(f.piezas, 'pieza', 'piezas')} · ${pct(f.total)}% del total` };
+      const previo = previoDe(f), c = contra(f.total, previo);
+      return { nombre, valor: f.total, texto: pesos(f.total), sub: c?.texto, direccion: c?.direccion,
+        tip: `${nombre}\n${pesos(f.total)}\n${cuenta(f.piezas, 'pieza', 'piezas')} · ${pct(f.total)}% del total`
+          + (hayAntes ? `\nPeriodo anterior: ${previo > 0 ? pesos(previo) : 'sin ventas'}${c ? ` · ${c.texto}` : ''}` : '') };
     }));
-  $('tabla-cat').innerHTML = tabla(['Categoría', 'Vendido', 'Piezas', '% del total'],
-    r.por_categoria.map((f) => [nombreCat(f.categoria), pesos(f.total), f.piezas, `${pct(f.total)}%`]), [1, 2, 3]);
+  $('cat-nota').textContent = cats.length === 0 ? '' : hayAntes
+    ? `El cambio compara con el periodo anterior de igual largo (${$('p-anterior').textContent.replace('Comparado con ', '')}); «nueva» es una categoría que antes no vendió.`
+    : 'No hubo ventas en el periodo anterior: no hay con qué comparar.';
+  // En la tabla tambien entran las categorias que vendieron antes y ahora no (−100%): en las barras no hay nada que dibujar.
+  const soloAntes = r.por_categoria_anterior.filter((f) => !r.por_categoria.some((x) => x.categoria === f.categoria));
+  $('tabla-cat').innerHTML = tabla(['Categoría', 'Vendido', 'Piezas', '% del total', 'Periodo anterior', 'Cambio'],
+    [...r.por_categoria.map((f) => [f, f.total, f.piezas]), ...soloAntes.map((f) => [f, 0, 0])].map(([f, vendido, piezas]) => {
+      const previo = antes.get(f.categoria) ?? 0, c = contra(vendido, previo);
+      return [nombreCat(f.categoria), pesos(vendido), piezas, `${pct(vendido)}%`, hayAntes ? pesos(previo) : '—', c ? c.texto : '—'];
+    }), [1, 2, 3, 4, 5]);
 
   $('top-productos').innerHTML = r.top_productos.length === 0 ? '<div class="vacio">Sin ventas en este periodo.</div>'
     : tabla(['Código', 'Pieza', 'Piezas', 'Importe'], r.top_productos.map((p) => [p.codigo, p.nombre, p.cantidad, pesos(p.total)]), [2, 3]);
@@ -570,7 +622,44 @@ function pintarCancelaciones(r) {
            <td class="num">${pesos(d.total)}</td><td class="num">${d.dolarones ? dolarones(d.dolarones) : '—'}</td></tr>`).join('')}</tbody></table>`;
 }
 
+// El inventario en piso es una foto de ahora (Issue #174): no cambia con el periodo.
+function pintarPiso(inv) {
+  const vacio = '<div class="vacio">No hay piezas con etiqueta y existencia en piso.</div>';
+  const piezas = (n) => cuenta(n, 'pieza', 'piezas');
+  $('piso-resumen').innerHTML = [
+    tarjeta('Piezas en piso', inv.piezas.toLocaleString('es-MX'),
+      inv.sin_fecha.piezas ? `<div class="delta">${escapar(piezas(inv.sin_fecha.piezas))} sin fecha de captura</div>` : ''),
+    tarjeta('Unidades', inv.unidades.toLocaleString('es-MX'), '<div class="delta">suma de las existencias</div>'),
+    tarjeta('Valor a precio de tienda', pesos(inv.valor)),
+  ].join('');
+
+  // Categorias ordenadas: una sola escala secuencial, del paso mas claro (nuevas) al mas fuerte (viejas), no un tono por tramo.
+  const tramos = TRAMOS_ANTIGUEDAD.map(([clave, nombre], i) => {
+    const t = inv.por_antiguedad.find((x) => x.tramo === clave);
+    return { nombre, valor: t.valor, texto: pesos(t.valor), extra: piezas(t.piezas), color: `var(--calor-${pasoOrdinal(i, TRAMOS_ANTIGUEDAD.length)})` };
+  });
+  if (inv.sin_fecha.piezas) {
+    tramos.push({ nombre: 'Sin fecha de captura', valor: inv.sin_fecha.valor, texto: pesos(inv.sin_fecha.valor), extra: piezas(inv.sin_fecha.piezas), color: 'repeating-linear-gradient(135deg, var(--tinta-2) 0 2px, transparent 2px 5px)' });   // rayado: «sin dato», no un tramo
+  }
+  $('piso-antiguedad').innerHTML = inv.valor > 0 ? apilada(tramos) : vacio;
+
+  $('piso-categoria').innerHTML = inv.por_categoria.length === 0 ? vacio
+    : barrasHorizontales(inv.por_categoria.map((c) => {
+      const nombre = nombreCat(c.categoria);
+      const dias = c.dias_promedio === null ? null : Math.round(c.dias_promedio);
+      return { nombre, valor: c.valor, texto: pesos(c.valor), sub: dias === null ? 'sin fecha' : `prom. ${cuenta(dias, 'día', 'días')}`,
+        tip: `${nombre}\n${pesos(c.valor)}\n${piezas(c.piezas)} · ${c.dias_promedio === null ? 'sin fecha de captura' : `${decimal(c.dias_promedio)} días en promedio`}` };
+    }));
+  $('tabla-piso-cat').innerHTML = tabla(['Categoría', 'Piezas', 'Valor', 'Días promedio'],
+    inv.por_categoria.map((c) => [nombreCat(c.categoria), c.piezas, pesos(c.valor), c.dias_promedio === null ? '—' : decimal(c.dias_promedio)]), [1, 2, 3]);
+
+  $('piso-viejas').innerHTML = inv.mas_viejas.length === 0 ? '<div class="vacio">Ninguna pieza en piso tiene fecha de captura.</div>'
+    : tabla(['Código', 'Pieza', 'Categoría', 'Días', 'Existencia', 'Precio'],
+      inv.mas_viejas.map((p) => [p.codigo, p.nombre || '—', nombreCat(p.categoria), p.dias, p.stock, pesos(p.precio)]), [3, 4, 5]);
+}
+
 function pintarInventario(r) {
+  pintarPiso(r.inventario);
   $('precio-sugerido').innerHTML = r.precio_sugerido.n === 0
     ? '<div class="vacio">Todavía no hay piezas con precio sugerido y precio final.</div>'
     : (() => {

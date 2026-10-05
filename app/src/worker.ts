@@ -9,6 +9,7 @@ import { analizarBorrador, modeloPorDefecto, type Modelo } from './analisis.ts';
 import { calcularPrecio, ajustarManual, esDestinoBanda, prefijoParaFamilia, MONTOS_BANDA, type Destino } from './precio.ts';
 import { efectivoAlcanza } from '../public/venta.js';
 import { semanaIngreso } from '../public/semana.js';
+import { tramoDeDias, TRAMOS_ANTIGUEDAD } from '../public/graficas.js';
 import { detalleVenta, cancelarPieza } from './devoluciones.ts';
 import { BASES, AVISO } from './legal.ts';
 import { CLAVES_CATEGORIA } from '../public/categorias.js';
@@ -966,11 +967,60 @@ async function corte(url: URL, env: Env): Promise<Response> {
 }
 
 /**
+ * Foto de lo que hay en piso AHORA (Issue #174), sin importar el periodo del reporte: piezas individuales
+ * ya etiquetadas (con codigo) y con existencia. Quedan fuera las bandas (no tienen fecha de captura propia),
+ * lo agotado y lo que aun esta en la cola de revision sin etiqueta. Las danadas SI cuentan: estan en piso.
+ * Antiguedad = dias de la tienda (UTC-6) desde `creado_en`, y los tramos van por semanas completas.
+ * Una fecha vacia o invalida no se adivina: va aparte, en `sin_fecha`.
+ */
+async function inventarioEnPiso(env: Env, ahora = Date.now()) {
+  // ponytail: se trae toda la lista y se suma en JS; con decenas de miles de piezas en piso conviene agrupar en SQL.
+  const { results } = await env.DB.prepare(
+    `select id, codigo, nombre, coalesce(nullif(categoria, ''), 'sin categoria') as categoria, precio, stock, creado_en,
+       case when julianday(creado_en) is null then null
+            else max(0, cast(julianday(?) - julianday(substr(datetime(creado_en, '-6 hours'), 1, 10)) as integer)) end as dias
+     from productos
+     where sin_inventario = 0 and stock > 0 and destino = 'etiqueta' and codigo is not null and codigo != ''`,
+  )
+    .bind(hoyTienda(ahora))
+    .all<{ id: string; codigo: string; nombre: string; categoria: string; precio: number; stock: number; creado_en: string; dias: number | null }>();
+
+  const valorDe = (f: { precio: number; stock: number }) => f.precio * f.stock;
+  const tramos = new Map(TRAMOS_ANTIGUEDAD.map(([clave]) => [clave, { tramo: clave, piezas: 0, valor: 0 }]));
+  const sinFecha = { piezas: 0, valor: 0 };
+  const categorias = new Map<string, { categoria: string; piezas: number; valor: number; sumaDias: number; fechadas: number }>();
+  for (const f of results) {
+    const grupo = (f.dias === null ? sinFecha : tramos.get(tramoDeDias(f.dias)))!;
+    grupo.piezas += 1;
+    grupo.valor += valorDe(f);
+    const c = categorias.get(f.categoria) ?? { categoria: f.categoria, piezas: 0, valor: 0, sumaDias: 0, fechadas: 0 };
+    c.piezas += 1;
+    c.valor += valorDe(f);
+    if (f.dias !== null) { c.sumaDias += f.dias; c.fechadas += 1; }
+    categorias.set(f.categoria, c);
+  }
+  return {
+    piezas: results.length,
+    unidades: results.reduce((suma, f) => suma + f.stock, 0),
+    valor: results.reduce((suma, f) => suma + valorDe(f), 0),
+    por_antiguedad: [...tramos.values()],
+    sin_fecha: sinFecha,
+    por_categoria: [...categorias.values()]
+      .map(({ sumaDias, fechadas, ...c }) => ({ ...c, dias_promedio: fechadas ? sumaDias / fechadas : null }))
+      .sort((a, b) => b.valor - a.valor || a.categoria.localeCompare(b.categoria)),
+    mas_viejas: results.filter((f) => f.dias !== null)
+      .sort((a, b) => b.dias! - a.dias! || valorDe(b) - valorDe(a) || a.codigo.localeCompare(b.codigo))
+      .slice(0, 15)
+      .map(({ id, codigo, nombre, categoria, precio, stock, creado_en, dias }) => ({ id, codigo, nombre, categoria, precio, stock, creado_en, dias })),
+  };
+}
+
+/**
  * Reportes: todo sale de consultas contra D1 en el momento, nada se precalcula
  * ni vive en otra tabla. `dias` acota lo que tiene sentido por rango (ventas del
  * dia, categoria, top de piezas); precio sugerido y dias en venta son de
  * siempre, porque son pocos datos y la pregunta que responden no es "esta
- * semana" sino "en general".
+ * semana" sino "en general". `inventario` es la foto de ahora: tampoco depende de `dias`.
  */
 async function reportes(url: URL, env: Env): Promise<Response> {
   const rango = rangoDe(url);
@@ -1043,16 +1093,19 @@ async function reportes(url: URL, env: Env): Promise<Response> {
     .bind(desde)
     .all<{ dia_semana: number; hora: number; tickets: number; total: number }>();
 
-  const { results: porCategoria } = await env.DB.prepare(
-    `select case when p.sin_inventario = 1 then 'bandas' else coalesce(p.categoria, 'sin categoria') end as categoria,
+  // Lo vendido por categoria (las bandas juntas), del periodo y del anterior de igual largo: mismas reglas en los dos.
+  const ventasPorCategoria = (anteriorAlPeriodo: boolean) => env.DB.prepare(
+    `select case when p.sin_inventario = 1 then 'bandas' else coalesce(nullif(p.categoria, ''), 'sin categoria') end as categoria,
        coalesce(sum(l.precio * (l.cantidad - l.cancelada_cantidad)), 0) as total,
        coalesce(sum(l.cantidad - l.cancelada_cantidad), 0) as piezas
      from venta_lineas l join ventas v on v.id = l.venta_id left join productos p on p.id = l.producto_id
-     where v.cancelada = 0 and v.creado_en >= ?
+     where v.cancelada = 0 and v.creado_en >= ? ${anteriorAlPeriodo ? 'and v.creado_en < ?' : ''}
      group by categoria order by total desc`,
   )
-    .bind(desde)
+    .bind(...(anteriorAlPeriodo ? [rango.anterior_desde, desde] : [desde]))
     .all<{ categoria: string; total: number; piezas: number }>();
+  const { results: porCategoria } = await ventasPorCategoria(false);
+  const { results: porCategoriaAnterior } = await ventasPorCategoria(true);
 
   const { results: topProductos } = await env.DB.prepare(
     `select l.codigo, l.nombre, sum(l.cantidad - l.cancelada_cantidad) as cantidad,
@@ -1149,6 +1202,8 @@ async function reportes(url: URL, env: Env): Promise<Response> {
     por_dia: porDia,
     por_hora: porHora,
     por_categoria: porCategoria,
+    por_categoria_anterior: porCategoriaAnterior,
+    inventario: await inventarioEnPiso(env),
     top_productos: topProductos,
     precio_sugerido: { n: precioSugerido?.n ?? 0, promedio_pct: precioSugerido?.promedio_pct ?? null },
     dias_en_venta_por_categoria: diasEnVenta,
