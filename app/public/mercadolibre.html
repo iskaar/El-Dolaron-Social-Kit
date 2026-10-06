@@ -485,6 +485,7 @@ function cargarPropuesta(respuesta, conservar) {
     categoria_id: prop.categoria_id,
     attr: Object.fromEntries((prop.atributos ?? []).map((a) => [a.id, antes[a.id] ?? prellenar(a)])),
     guia: '', fila: '',
+    catalogo_id: conservar ? f.catalogo_id ?? '' : '',
   };
 }
 
@@ -565,8 +566,11 @@ function faltante() {
   if (!f.categoria_id) falta.push('categoría');
   const c = aCentavos(f.precio);
   if (!c) falta.push('precio válido');
-  for (const a of prop.atributos ?? []) if (a.requerido && !valorAtributo(a)) falta.push(a.nombre || a.id);
-  if (prop.guia_tallas?.requerida && !f.fila) falta.push('guía de tallas');
+  // En catalogo la ficha tecnica la pone ML.
+  if (!f.catalogo_id) {
+    for (const a of prop.atributos ?? []) if (a.requerido && !valorAtributo(a)) falta.push(a.nombre || a.id);
+    if (prop.guia_tallas?.requerida && !f.fila) falta.push('guía de tallas');
+  }
   return falta;
 }
 
@@ -582,16 +586,21 @@ function revisar() {
   ref.falta.textContent = falta.length ? `Falta: ${falta.join(', ')}.` : '';
 }
 
-// #192 fase 1: candidatos del catalogo de ML (fotos oficiales). Solo para ver.
+// #192: productos del catalogo de ML. Elegir uno publica con sus fotos y ficha oficiales.
 function pintarCatalogo() {
   const c = prop.catalogo;
   if (!c) return null;
   const caja = (...hijos) => h('fieldset', {}, h('legend', {}, 'Catálogo de Mercado Libre'), ...hijos);
   if (c.error) return caja(h('div', { class: 'aviso' }, c.error));
   if (!c.candidatos.length) return caja(h('div', { class: 'nota' }, 'No hay productos de catálogo parecidos a esta pieza.'));
+  const elegir = (id) => { f.catalogo_id = id; pintarFormulario(); };
+  const opcion = (id, ...contenido) => h('label', { style: 'display:flex;gap:10px;align-items:center;margin-bottom:8px;cursor:pointer' },
+    h('input', { type: 'radio', name: 'catalogo', checked: (f.catalogo_id ?? '') === id, onchange: () => elegir(id) }), ...contenido);
   return caja(
-    h('div', { class: 'nota', style: 'margin-bottom:8px' }, 'Productos oficiales parecidos. Publicar en catálogo todavía no está disponible: por ahora es para revisar.'),
-    c.candidatos.map((x) => h('div', { style: 'display:flex;gap:10px;align-items:center;margin-bottom:8px' },
+    h('div', { class: 'nota', style: 'margin-bottom:8px' },
+      'Si tu pieza es exactamente uno de estos productos (mismo modelo y versión), elígelo: se publica con las fotos y la ficha oficiales de Mercado Libre. Si no coincide puede haber reclamos.'),
+    opcion('', h('div', {}, 'No usar catálogo: publicar con mi foto')),
+    c.candidatos.map((x) => opcion(x.id,
       x.foto ? h('img', { src: x.foto, alt: '', width: 56, height: 56, referrerPolicy: 'no-referrer', style: 'object-fit:contain;background:#fff;border-radius:6px' }) : null,
       h('div', {}, h('div', { style: 'overflow-wrap:anywhere' }, x.nombre),
         h('div', { class: 'nota' }, [x.marca, x.id, x.catalogo_obligatorio ? 'debe publicarse en catálogo' : ''].filter(Boolean).join(' · '))))));
@@ -648,9 +657,11 @@ function pintarFormulario() {
     campo('Precio en Mercado Libre (pesos)', precio, { requerido: true }),
     ref.precioNota,
   ];
-  if (requeridos.length) hijos.push(h('fieldset', {}, h('legend', {}, 'Atributos obligatorios'), requeridos.map(campoAtributo)));
-  if (opcionales.length) hijos.push(h('fieldset', {}, h('legend', {}, 'Atributos opcionales'), opcionales.map(campoAtributo)));
-  if (prop.guia_tallas?.requerida) hijos.push(pintarGuia());
+  if (!f.catalogo_id) {   // en catálogo la ficha es la oficial: sin atributos ni guía propios
+    if (requeridos.length) hijos.push(h('fieldset', {}, h('legend', {}, 'Atributos obligatorios'), requeridos.map(campoAtributo)));
+    if (opcionales.length) hijos.push(h('fieldset', {}, h('legend', {}, 'Atributos opcionales'), opcionales.map(campoAtributo)));
+    if (prop.guia_tallas?.requerida) hijos.push(pintarGuia());
+  }
   hijos.push(campo('Descripción (opcional)', descripcion), ref.error,
     h('div', { class: 'pie-dialogo' }, ref.falta,
       h('button', { type: 'button', onclick: () => dialogo.close() }, 'Cancelar'), ref.enviar));
@@ -695,7 +706,8 @@ async function enviar(e) {
     precio_ml: aCentavos(f.precio),
     atributos: (prop.atributos ?? []).map(valorAtributo).filter(Boolean),
   };
-  if (prop.guia_tallas?.requerida) cuerpo.guia_fila_id = f.fila;
+  if (prop.guia_tallas?.requerida && !f.catalogo_id) cuerpo.guia_fila_id = f.fila;
+  if (f.catalogo_id) cuerpo.catalogo_id = f.catalogo_id;
   if (f.descripcion.trim()) cuerpo.descripcion = f.descripcion.trim();
   const r = await api(`/api/ml/publicar/${encodeURIComponent(p.id)}`, { metodo: 'POST', cuerpo });
   if (r.status === 201 && r.datos?.publicacion) {

@@ -610,6 +610,13 @@ async function candidatosCatalogo(env: Env, texto: string): Promise<{ candidatos
   }
 }
 
+/** Si la categoria pertenece al dominio de catalogo del producto (GET /categories/:id es publico). */
+async function categoriaEnDominio(env: Env, categoriaId: string, dominio: string): Promise<boolean> {
+  const c = await mlPublico(env, `/categories/${categoriaId}`).catch(() => null);
+  const enCategoria = String(c?.settings?.catalog_domain ?? '');
+  return !!enCategoria && enCategoria === dominio;
+}
+
 async function yaPublicada(env: Env, id: string): Promise<boolean> {
   const previa = await leerPublicacion(env, id);
   return !!previa && !(previa.estado === 'cerrada' || (previa.estado === 'error' && !previa.ml_item_id));
@@ -723,6 +730,9 @@ async function publicar(env: Env, id: string, request: Request): Promise<Respons
     .slice(0, 60);
   const fila = cuerpo?.guia_fila_id === undefined || cuerpo.guia_fila_id === null ? '' : String(cuerpo.guia_fila_id);
   if (fila && !/^[\w-]+:[\w-]+$/.test(fila)) return json({ error: 'Fila de la guía de tallas inválida.' }, 400);
+  // #192: con producto de catalogo, ML pone fotos y ficha tecnica oficiales.
+  const catalogoId = cuerpo?.catalogo_id ? String(cuerpo.catalogo_id) : '';
+  if (catalogoId && !/^MLM\d+$/.test(catalogoId)) return json({ error: 'Producto de catálogo inválido.' }, 400);
 
   const hallada = await piezaPublicable(env, id);
   if (!hallada.ok) return json({ error: hallada.error }, hallada.status);
@@ -744,13 +754,29 @@ async function publicar(env: Env, id: string, request: Request): Promise<Respons
   try {
     const perfil = await perfilML(env);
     const { ml_tipo_publicacion } = await config(env);
-    const foto = await env.FOTOS.get(p.foto_key);
-    if (!foto) throw errorLocal(409, 'sin_foto', 'La foto de la pieza no está en el almacén.');
-    const formulario = new FormData();
-    formulario.append('file', new Blob([await foto.arrayBuffer()], { type: 'image/jpeg' }), 'pieza.jpg');
-    const subida = await mlFetch(env, '/pictures/items/upload', { method: 'POST', body: formulario });
+    let categoria = categoriaId;
+    let pictures: { id: string }[] = [];
+    if (catalogoId) {
+      // La busqueda ya lo mostro; aqui se confirma que sigue activo y se toma una
+      // categoria de su dominio (ML rechaza con 417 si no coinciden).
+      const producto = await mlPublico(env, `/products/${catalogoId}`);
+      if (producto?.status !== 'active') throw errorLocal(409, 'catalogo_inactivo', 'Ese producto del catálogo ya no está activo en Mercado Libre.');
+      const dominio = String(producto?.domain_id ?? '');
+      if (dominio && !(await categoriaEnDominio(env, categoria, dominio))) {
+        const halladas: any[] = await mlPublico(env, `/sites/MLM/domain_discovery/search?q=${encodeURIComponent(String(producto?.name ?? titulo))}&limit=8`).catch(() => []);
+        const delDominio = (Array.isArray(halladas) ? halladas : []).find((s) => s.domain_id === dominio);
+        if (delDominio) categoria = String(delDominio.category_id);
+      }
+    } else {
+      const foto = await env.FOTOS.get(p.foto_key);
+      if (!foto) throw errorLocal(409, 'sin_foto', 'La foto de la pieza no está en el almacén.');
+      const formulario = new FormData();
+      formulario.append('file', new Blob([await foto.arrayBuffer()], { type: 'image/jpeg' }), 'pieza.jpg');
+      const subida = await mlFetch(env, '/pictures/items/upload', { method: 'POST', body: formulario });
+      pictures = [{ id: String(subida?.id) }];
+    }
 
-    const attrsCategoria: any[] = await mlFetch(env, `/categories/${categoriaId}/attributes`).catch(() => []);
+    const attrsCategoria: any[] = await mlPublico(env, `/categories/${categoria}/attributes`).catch(() => []);
     const propios = [
       // `condition` esta por desaparecer a favor de este atributo; se mandan los dos.
       ...(attrsCategoria.some((a) => a.id === 'ITEM_CONDITION') ? [{ id: 'ITEM_CONDITION', value_id: '2230284' }] : []),
@@ -760,29 +786,34 @@ async function publicar(env: Env, id: string, request: Request): Promise<Respons
       method: 'POST',
       json: {
         ...(perfil.usaFamilyName ? { family_name: titulo } : { title: titulo }),
-        category_id: categoriaId,
+        category_id: categoria,
         price: precio / 100,
         currency_id: 'MXN',
         available_quantity: p.stock,
         buying_mode: 'buy_it_now',
         condition: 'new',
         listing_type_id: ml_tipo_publicacion,
-        pictures: [{ id: String(subida?.id) }],
-        attributes: [...atributos, ...propios],
+        pictures,
+        // En catalogo la ficha tecnica es la del producto: solo va la condicion.
+        attributes: catalogoId ? propios : [...atributos, ...propios],
         shipping: { mode: 'me2', local_pick_up: false, free_shipping: false },
+        ...(catalogoId ? { catalog_product_id: catalogoId, catalog_listing: true } : {}),
       },
     });
     itemId = String(creado?.id ?? '');
     if (!itemId) throw errorLocal(502, 'sin_id', 'Mercado Libre no devolvió el identificador del artículo.');
 
     // La descripcion va despues de crear el articulo; si falla, el articulo ya existe y se avisa.
+    // En catalogo la pone ML.
     let ultimoError = '';
-    const descripcion = sinEmojis(String(cuerpo?.descripcion ?? '')).trim()
-      || [p.nombre, p.marca ? `Marca: ${p.marca}` : '', 'Condición: nuevo.'].filter(Boolean).join('\n');
-    try {
-      await mlFetch(env, `/items/${itemId}/description`, { method: 'POST', json: { plain_text: descripcion.slice(0, 50_000) } });
-    } catch (error) {
-      ultimoError = `Descripción: ${error instanceof ErrorML ? error.detalle : String(error)}`;
+    if (!catalogoId) {
+      const descripcion = sinEmojis(String(cuerpo?.descripcion ?? '')).trim()
+        || [p.nombre, p.marca ? `Marca: ${p.marca}` : '', 'Condición: nuevo.'].filter(Boolean).join('\n');
+      try {
+        await mlFetch(env, `/items/${itemId}/description`, { method: 'POST', json: { plain_text: descripcion.slice(0, 50_000) } });
+      } catch (error) {
+        ultimoError = `Descripción: ${error instanceof ErrorML ? error.detalle : String(error)}`;
+      }
     }
 
     const estadoML = String(creado?.status ?? 'active');
@@ -792,7 +823,7 @@ async function publicar(env: Env, id: string, request: Request): Promise<Respons
       await env.DB.prepare(
         `update ml_publicaciones set ml_item_id = ?, estado = ?, precio_ml = ?, categoria_id = ?, permalink = ?,
                 ultimo_error = ?, publicado_en = ?, actualizado_en = ? where producto_id = ?`,
-      ).bind(itemId, estado, precio, categoriaId, String(creado?.permalink ?? ''), ultimoError, ahora, new Date().toISOString(), id).run();
+      ).bind(itemId, estado, precio, categoria, String(creado?.permalink ?? ''), ultimoError, ahora, new Date().toISOString(), id).run();
     } catch (error) {
       // Sin su fila el articulo quedaria vivo y sin dueno: se cierra antes de fallar.
       await mlFetch(env, `/items/${itemId}`, { method: 'PUT', json: { status: 'closed' } }).catch(() => undefined);

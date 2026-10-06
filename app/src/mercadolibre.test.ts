@@ -38,6 +38,7 @@ class SimML {
   rechazarItem: unknown = null;
   items = new Map<string, { id: string; status: string; available_quantity: number }>();
   ordenes = new Map<string, unknown>();
+  productoActivo = true;
   catalogo: { status?: number; cuerpo: unknown } = { cuerpo: { results: [{
     id: 'MLM2001', name: 'Lanzador SplatRball 800 Pyro', settings: { listing_strategy: 'catalog_required' },
     pictures: [{ url: 'http://http2.mlstatic.com/a.jpg', secure_url: 'https://http2.mlstatic.com/a.jpg' }],
@@ -75,6 +76,10 @@ class SimML {
       ] };
     }
     if (metodo === 'GET' && ruta.startsWith('/products/search?')) return this.catalogo;
+    const producto = /^\/products\/(MLM\d+)$/.exec(ruta);
+    if (metodo === 'GET' && producto) return { cuerpo: { id: producto[1], status: this.productoActivo ? 'active' : 'inactive', domain_id: 'MLM-SHORTS', name: 'Lanzador SplatRball 800' } };
+    const cat = /^\/categories\/(MLM\d+)$/.exec(ruta);
+    if (metodo === 'GET' && cat) return { cuerpo: { id: cat[1], settings: { catalog_domain: cat[1] === 'MLM1234' ? 'MLM-SHORTS' : 'MLM-PANTS' } } };
     if (metodo === 'GET' && ruta === '/categories/MLM194175/attributes') return { cuerpo: ATRIBUTOS };
     if (metodo === 'GET' && /^\/categories\/MLM\d+\/attributes$/.test(ruta)) return { cuerpo: [{ id: 'BRAND', name: 'Marca', value_type: 'string', tags: { required: true } }] };
     if (metodo === 'POST' && ruta === '/catalog/charts/search') {
@@ -879,4 +884,29 @@ test('preparar: si ML niega el catálogo, lo dice sin romper la propuesta', () =
   assert.deepEqual(r.cuerpo.propuesta.catalogo.candidatos, []);
   assert.match(r.cuerpo.propuesta.catalogo.error, /no dejó buscar en su catálogo \(403/);
   assert.equal(t.sim.de('GET', /^\/products\/search/).length, 2, 'con token y luego sin token');
+}));
+
+test('publicar en catálogo: sin foto propia, categoría del dominio del producto y ficha oficial', () => conML(async (t) => {
+  const id = juguete(t);
+  const r = await t.pedir(`/api/ml/publicar/${id}`, cuerpoPublicar({ catalogo_id: 'MLM2001' }));
+  assert.equal(r.status, 201, JSON.stringify(r.cuerpo));
+  const [post] = t.sim.de('POST', /^\/items$/);
+  assert.equal(post.cuerpo.catalog_product_id, 'MLM2001');
+  assert.equal(post.cuerpo.catalog_listing, true);
+  assert.deepEqual(post.cuerpo.pictures, []);
+  assert.equal(post.cuerpo.category_id, 'MLM1234', 'MLM194175 es de otro dominio: toma la del dominio del producto');
+  assert.ok(!post.cuerpo.attributes.some((a: any) => a.id === 'BRAND'), 'no manda atributos propios');
+  assert.equal(t.sim.de('POST', /^\/pictures/).length, 0, 'no sube la foto de la tienda');
+  assert.equal(t.sim.de('POST', /\/description$/).length, 0, 'la descripción la pone ML');
+  assert.equal(r.cuerpo.publicacion.categoria_id, 'MLM1234');
+}));
+
+test('publicar en catálogo: producto inactivo o id inválido no publica', () => conML(async (t) => {
+  const id = juguete(t);
+  assert.equal((await t.pedir(`/api/ml/publicar/${id}`, cuerpoPublicar({ catalogo_id: 'x; drop' }))).status, 400);
+  t.sim.productoActivo = false;
+  const r = await t.pedir(`/api/ml/publicar/${id}`, cuerpoPublicar({ catalogo_id: 'MLM2001' }));
+  assert.equal(r.status, 409, JSON.stringify(r.cuerpo));
+  assert.equal(t.sim.de('POST', /^\/items$/).length, 0);
+  assert.equal(estadoDe(t, id), 'error');
 }));
