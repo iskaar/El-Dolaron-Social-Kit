@@ -189,17 +189,25 @@ export async function resolverCancelacion(env: Env, id: string, aprobar: boolean
     `update solicitudes set estado = ?, resuelto_en = ?, resuelto_por = ? where id = ? and estado = 'pendiente'`,
   ).bind(estado, ahora, dueno, id);
 
+  const yaResuelta = () => json({ error: 'Otro dueño ya la resolvió.' }, 409);
   if (!aprobar) {
-    await marcar('rechazada').run();
+    if (!(await marcar('rechazada').run()).meta.changes) return yaResuelta();
     return json({ id, estado: 'rechazada' });
   }
+  // Se reclama antes de cancelar: si otro dueño la rechaza al mismo tiempo, solo
+  // gana uno. Si la cancelacion falla (409), la solicitud vuelve a pendiente.
+  // ponytail: entre reclamar y cancelar no hay transaccion; si el Worker muere en
+  // ese hueco queda aprobada sin cancelar y se ve en /cuentas como aprobada.
+  if (!(await marcar('aprobada').run()).meta.changes) return yaResuelta();
   const datos = JSON.parse(solicitud.datos) as { venta_id: string; caja?: string };
-  // Se cancela a nombre de quien la pidio; si algo falla (409) la solicitud sigue pendiente.
-  const r = await cancelarCore(env, datos.venta_id, solicitud.justificacion, solicitud.correo, datos.caja,
-    (ahora) => [marcar('aprobada', ahora)]);
-  if (r.status !== 200) return responder(r);
-  // Ya cancelada por otro lado (el trigger deshizo el batch): se cierra la solicitud aparte.
-  if (r.cuerpo.ya_estaba) await marcar('aprobada').run();
+  const r = await cancelarCore(env, datos.venta_id, solicitud.justificacion, solicitud.correo, datos.caja);
+  if (r.status !== 200) {
+    await env.DB.prepare(
+      `update solicitudes set estado = 'pendiente', resuelto_en = null, resuelto_por = null
+       where id = ? and estado = 'aprobada' and resuelto_por = ?`,
+    ).bind(id, dueno).run();
+    return responder(r);
+  }
   return json({ ...r.cuerpo, id: datos.venta_id, solicitud_id: id, estado: 'aprobada' });
 }
 
