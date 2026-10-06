@@ -506,10 +506,26 @@ function errorEnDialogo(texto) {
     h('div', { class: 'pie-dialogo' }, h('button', { type: 'button', onclick: () => dialogo.close() }, 'Cerrar')));
 }
 
+async function buscarCatalogo(texto) {
+  if (texto.trim().length < 2) return;
+  const r = await api(`/api/ml/preparar/${encodeURIComponent(p.id)}`,
+    { metodo: 'POST', cuerpo: { categoria_id: f.categoria_id ?? '', consulta: prop.consulta, consulta_catalogo: texto.trim() } });
+  if (!dialogo.open || !f) return;
+  if (!r.ok || !r.datos?.propuesta) {
+    ref.error.replaceChildren(h('div', { class: 'aviso error', role: 'alert' }, textoError(r, 'No se pudo buscar en el catálogo.')));
+    return;
+  }
+  cargarPropuesta(r.datos, true);
+  // Lo elegido antes solo sigue si esta entre los resultados nuevos.
+  if (!(prop.catalogo?.candidatos ?? []).some((x) => x.id === f.catalogo_id)) f.catalogo_id = '';
+  pintarFormulario();
+}
+
 async function cambiarCategoria(id, consulta = prop.consulta) {
   const anterior = f.categoria_id ?? '';
   ref.categoria.disabled = true;
-  const r = await api(`/api/ml/preparar/${encodeURIComponent(p.id)}`, { metodo: 'POST', cuerpo: { categoria_id: id, consulta } });
+  const r = await api(`/api/ml/preparar/${encodeURIComponent(p.id)}`,
+    { metodo: 'POST', cuerpo: { categoria_id: id, consulta, consulta_catalogo: prop.catalogo?.consulta } });
   if (!dialogo.open || !f) return;
   if (!r.ok || !r.datos?.propuesta) {
     ref.categoria.disabled = false;
@@ -590,7 +606,15 @@ function revisar() {
 function pintarCatalogo() {
   const c = prop.catalogo;
   if (!c) return null;
-  const caja = (...hijos) => h('fieldset', {}, h('legend', {}, 'Catálogo de Mercado Libre'), ...hijos);
+  // #195: buscar con otras palabras o pegar el enlace /p/MLM... del producto.
+  const entrada = h('input', { id: 'buscar-catalogo', type: 'search', maxLength: 300, value: c.consulta ?? '', autocomplete: 'off',
+    placeholder: 'otras palabras, o el enlace del producto en ML',
+    onkeydown: (e) => { if (e.key === 'Enter') { e.preventDefault(); buscarCatalogo(entrada.value); } } });
+  const buscador = h('div', { style: 'margin-bottom:10px' },
+    h('label', { htmlFor: 'buscar-catalogo' }, 'Buscar en el catálogo'),
+    h('div', { style: 'display:flex;gap:8px' }, entrada, h('button', { type: 'button', onclick: () => buscarCatalogo(entrada.value) }, 'Buscar')),
+    h('div', { class: 'nota' }, '¿No sale tu producto? Búscalo con otras palabras, o ábrelo en Mercado Libre y pega aquí el enlace de su página (el que tiene /p/MLM…).'));
+  const caja = (...hijos) => h('fieldset', {}, h('legend', {}, 'Catálogo de Mercado Libre'), buscador, ...hijos);
   if (c.error) return caja(h('div', { class: 'aviso' }, c.error));
   if (!c.candidatos.length) return caja(h('div', { class: 'nota' }, 'No hay productos de catálogo parecidos a esta pieza.'));
   const elegir = (id) => { f.catalogo_id = id; pintarFormulario(); };
