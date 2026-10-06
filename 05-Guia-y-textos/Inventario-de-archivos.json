@@ -141,6 +141,20 @@
       "format": "PNG",
       "width": 2048,
       "height": 2048
+    },
+    {
+      "file": "app/public/marketplace.html",
+      "title": "Catálogo privado de Marketplace",
+      "description": "Pantalla del personal autorizada por el Worker; consulta inventario actual sin guardar fotos ni snapshots en el kit.",
+      "format": "HTML"
+    },
+    {
+      "file": "app/public/marketplace-redes.png",
+      "title": "Cierre de redes para Marketplace",
+      "description": "Imagen de redes aprobada para descargar desde el catálogo privado del personal.",
+      "format": "PNG",
+      "width": 1254,
+      "height": 1254
     }
   ],
   "version": "1.0"

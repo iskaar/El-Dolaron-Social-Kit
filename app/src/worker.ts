@@ -1337,6 +1337,31 @@ async function exportarInventarioCsv(env: Env): Promise<Response> {
   );
 }
 
+// Issue #202: esta pieza azul sigue retenida hasta corregir la identificación gato/perro.
+const RETENIDO_MARKETPLACE = '87ddd327-2058-435d-98ea-651a6e54c09a';
+const ELEGIBLE_MARKETPLACE = `stock >= 1 and sin_inventario = 0 and precio > 0
+  and typeof(precio) = 'integer' and trim(nombre) != '' and destino = 'etiqueta'
+  and foto_key = 'fotos/' || id || '.jpg' and estado_analisis = 'listo' and id != ?`;
+
+async function marketplace(env: Env): Promise<Response> {
+  const { results } = await env.DB.prepare(`select id, codigo, nombre, categoria, marca, precio,
+    estado_fisico, estado_analisis, destino, stock, sin_inventario, foto_key from productos
+    where ${ELEGIBLE_MARKETPLACE} order by nombre`).bind(RETENIDO_MARKETPLACE).all();
+  const respuesta = json({ products: results, updated_at: new Date().toISOString() });
+  respuesta.headers.set('cache-control', 'no-store');
+  return respuesta;
+}
+
+async function fotoMarketplace(id: string, env: Env): Promise<Response> {
+  if (!UUID.test(id)) return json({ error: 'Identificador invalido.' }, 400);
+  const producto = await env.DB.prepare(`select id from productos where ${ELEGIBLE_MARKETPLACE} and id = ?`)
+    .bind(RETENIDO_MARKETPLACE, id).first();
+  if (!producto) return json({ error: 'Pieza no disponible para Marketplace.' }, 404);
+  const respuesta = await servirFoto(id, env);
+  respuesta.headers.set('cache-control', 'no-store');
+  return respuesta;
+}
+
 async function servirFoto(id: string, env: Env): Promise<Response> {
   if (!UUID.test(id)) {
     return json({ error: 'Identificador invalido.' }, 400);
@@ -1481,6 +1506,12 @@ export default {
           return await listarBorradores(url, env);
         }
         return json({ error: 'Metodo no permitido.' }, 405);
+      }
+
+      const fotoMarket = pathname.match(/^\/api\/marketplace\/foto\/([^/]+)$/);
+      if (pathname === '/api/marketplace' || fotoMarket) {
+        if (request.method !== 'GET') return json({ error: 'Metodo no permitido.' }, 405);
+        return fotoMarket ? await fotoMarketplace(fotoMarket[1], env) : await marketplace(env);
       }
 
       const foto = pathname.match(/^\/api\/foto\/([^/]+)$/);
@@ -1630,7 +1661,11 @@ export default {
 
       // Todo lo demas son las pantallas, servidas por el Worker para que el
       // filtro de arriba alcance tambien a los HTML.
-      const pantalla = await env.ASSETS.fetch(request);
+      let pantalla = await env.ASSETS.fetch(request);
+      if (/^\/marketplace(?:\.html)?\/?$/.test(pathname)) {
+        pantalla = new Response(pantalla.body, pantalla);
+        pantalla.headers.set('cache-control', 'no-store');
+      }
       // En el sandbox cada pantalla lo dice: ahi no se cobra de verdad.
       if (env.AMBIENTE === 'sandbox' && pantalla.headers.get('content-type')?.includes('text/html')) {
         return new HTMLRewriter()
