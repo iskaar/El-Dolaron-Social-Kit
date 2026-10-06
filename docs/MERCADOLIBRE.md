@@ -21,8 +21,10 @@ En https://developers.mercadolibre.com.mx, sección "Mis aplicaciones":
 3. **Logo**: carga el logo de El Dolarón (es opcional; recomendado para confianza)
 4. **Redirect URI**: registra exactamente `https://escaner.viste.com.mx/ml/callback` (sin cambios)
 5. **Notificaciones callbacks URL**: registra exactamente `https://dolarones.eldolaron.com/api/ml/notificaciones/<RUTA_SECRETA>`  
-   Sustituye `<RUTA_SECRETA>` con un valor que generes tú en el paso 3 (no es la URL visible, tú lo defines).
-6. **Scopes**: marca `read` (leer), `write` (escribir), `offline_access` (para refrescar tokens sin pedir autenticación cada 3 horas).
+   Sustituye `<RUTA_SECRETA>` con el valor del paso 3.b. ML solo acepta minúsculas y rechaza la URL si lleva espacios (cuidado con un espacio al pegar).
+   Los dos dominios son a propósito: el Redirect URI vive en `escaner.viste.com.mx` porque ahí está tu sesión de dueño; las notificaciones llegan a `dolarones.eldolaron.com` porque es el único host público, sin Access.
+6. **Flujos OAuth**: `Authorization Code` y `Refresh Token` (renueva el token, que dura unas horas, sin volver a autorizar). `Client Credentials` no hace falta.
+   **Unidad de negocio**: Mercado Libre. **Permisos**: Usuarios (lectura y escritura), Publicación y sincronización (lectura y escritura), Venta y envíos (lectura); los demás, sin acceso.
 7. **Tópicos de notificaciones**: marca `orders_v2` (cuando se vende en ML) y `items` (cambios en tus publicaciones).
 8. **PKCE**: actívalo (la app lo usa por defecto). Si lo dejas apagado y la conexión falla, avísale a Claude para poner `ML_PKCE=no`.
 
@@ -43,8 +45,9 @@ Copia el resultado (una cadena larga con letras y números). Este es tu `ML_LLAV
 
 ### b. Generar `ML_RUTA_NOTIFICACIONES` (una ruta secreta aleatoria):
 ```powershell
--join ((0..31) | % { [char][int][Math]::Floor(Get-Random -Minimum 65 -Maximum 122) })
+-join ((48..57)+(97..122) | Get-Random -Count 32 | % {[char]$_})
 ```
+Solo minúsculas y números: ML rechaza mayúsculas en la URL y otros símbolos se rompen dentro de una ruta.
 Copia el resultado. Este es tu `ML_RUTA_NOTIFICACIONES`. Anótalo **en el mismo lugar** donde ya lo registraste en la URL de notificaciones del paso 2.
 
 ---

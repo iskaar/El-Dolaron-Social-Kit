@@ -79,16 +79,24 @@ export function tienda() {
   const pendientes: Promise<unknown>[] = [];
   const ctx = { waitUntil(p: Promise<unknown>) { pendientes.push(p); }, passThroughOnException() {} };
   const esperar = async () => { await Promise.allSettled(pendientes.splice(0)); };
-  const pedir = async (ruta: string, cuerpo?: unknown, metodo = 'POST', encabezados: Record<string, string> = {}) => {
-    const r = await worker.fetch!(
+  const enviar = (ruta: string, cuerpo?: unknown, metodo = 'POST', encabezados: Record<string, string> = {}) =>
+    worker.fetch!(
       new Request(`https://caja.prueba${ruta}`, cuerpo === undefined ? { headers: encabezados } : {
         method: metodo, headers: { 'content-type': 'application/json', ...encabezados }, body: JSON.stringify(cuerpo),
       }) as never,
       env,
       ctx as never,
     );
+  const pedir = async (ruta: string, cuerpo?: unknown, metodo = 'POST', encabezados: Record<string, string> = {}) => {
+    const r = await enviar(ruta, cuerpo, metodo, encabezados);
     // Las redirecciones (OAuth) no traen cuerpo: `ubicacion` es su destino.
     return { status: r.status, cuerpo: (await r.json().catch(() => ({}))) as Record<string, any>, ubicacion: r.headers.get('location') };
   };
-  return { db, env, pedir, esperar, ctx };
+  // Para lo que no es JSON (los CSV): el cuerpo en texto y las cabeceras.
+  const pedirTexto = async (ruta: string) => {
+    const r = await enviar(ruta);
+    // ignoreBOM: text() se come el BOM y las pruebas quieren verlo.
+    return { status: r.status, texto: new TextDecoder('utf-8', { ignoreBOM: true }).decode(await r.arrayBuffer()), tipo: r.headers.get('content-type') ?? '' };
+  };
+  return { db, env, pedir, pedirTexto, esperar, ctx };
 }
