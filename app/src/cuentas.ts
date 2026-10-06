@@ -59,6 +59,7 @@ const PANTALLAS: Record<string, Rol[]> = {
   '/index': TODOS,
   '/captura': CAPTURA,
   '/admin': CAPTURA,
+  '/marketplace': CAPTURA,
   '/etiquetas': CAPTURA,
   '/bandas': CAPTURA,
   '/calibrar-etiqueta': CAPTURA,
@@ -80,6 +81,7 @@ export function permiso(pathname: string, metodo: string): Regla {
   if (metodo === 'POST' && /^\/api\/ml\/notificaciones\/[^/]+$/.test(ruta)) return 'libre';
   if (ruta === '/sin-acceso' || ruta === '/api/yo') return 'cuenta';
   if (ruta === '/api/solicitudes/acceso' && metodo === 'POST') return 'cuenta';
+  if (ruta === '/marketplace-redes.png') return CAPTURA;
   // Codigo de las pantallas, sin datos: el permiso se cobra en la pantalla y en la API.
   if (!ruta.startsWith('/api/') && /\.(js|css|png|svg|ico)$/.test(ruta)) return 'cuenta';
 
@@ -92,6 +94,7 @@ export function permiso(pathname: string, metodo: string): Regla {
   if (ruta.startsWith('/api/foto/')) return CAPTURA;
   if (ruta === '/api/etiquetas') return CAPTURA;
   if (ruta === '/api/calibracion') return CAPTURA;
+  if (ruta === '/api/marketplace' || /^\/api\/marketplace\/foto\/[^/]+$/.test(ruta)) return CAPTURA;
   if (ruta === '/api/catalogo') return CAJA;
   if (ruta === '/api/socios') return CAJA;
   if (ruta === '/api/vales/config' && metodo === 'GET') return CAJA;
