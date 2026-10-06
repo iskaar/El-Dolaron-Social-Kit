@@ -80,8 +80,10 @@ Cloudflare los encripta y los mantiene seguros. No los verás de nuevo.
 Antes de que El Dolarón publique, la base de datos D1 necesita una migración. **En sandbox primero**, luego en producción:
 
 ```powershell
-# Desde app/:
-npm run migrate -- migracion-025-mercadolibre.sql
+# Desde app/. Sandbox:
+npx wrangler d1 execute el-dolaron-sandbox --remote -c wrangler.sandbox.jsonc --file=migracion-025-mercadolibre.sql
+# Produccion:
+npx wrangler d1 execute el-dolaron --remote --file=migracion-025-mercadolibre.sql
 ```
 
 Esto crea las tablas y columnas necesarias para guardar tokens, piezas publicadas y órdenes. Solo se corre una vez.
