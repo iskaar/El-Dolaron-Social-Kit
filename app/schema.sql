@@ -5,7 +5,7 @@ create table if not exists productos (
   id              text primary key,                    -- crypto.randomUUID() del cliente
   codigo          text unique,                         -- codigo de barras real o MK-000123
   nombre          text not null default '',
-  categoria       text not null default '',            -- ropa|hogar|electronica|juguetes|otros
+  categoria       text not null default '',            -- clave de public/categorias.js; marca: migracion-023
   precio_lista    integer not null default 0,          -- centavos MXN
   precio          integer not null default 0,          -- centavos MXN
   estado_fisico   text not null default 'nuevo',       -- nuevo|danado
@@ -69,7 +69,7 @@ create table if not exists usuarios (
 
 create table if not exists solicitudes (
   id            text primary key,
-  tipo          text not null,                  -- acceso
+  tipo          text not null,                  -- acceso|cancelacion
   correo        text not null,
   nombre        text not null default '',
   justificacion text not null,

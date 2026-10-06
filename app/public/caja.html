@@ -21,6 +21,13 @@
     display: flex; flex-direction: column; min-height: 0; }
   #codigo { width: 100%; padding: 14px; font-size: 20px; border: 2px solid var(--azul);
     border-radius: 10px; font-family: ui-monospace, monospace; }
+  .fila-codigo { display: flex; gap: 8px; }
+  .fila-codigo #codigo { flex: 1; min-width: 0; }
+  #abrir-camara { border: 2px solid var(--azul); background: #fff; color: var(--azul); border-radius: 10px;
+    padding: 0 16px; min-height: 52px; min-width: 88px; font-size: 16px; font-weight: 700; cursor: pointer; }
+  #lector-camara { width: 100%; min-height: 240px; background: #000; border-radius: 10px; overflow: hidden; }
+  #camara-info { min-height: 22px; margin-top: 8px; font-size: 16px; font-weight: 700; color: var(--azul); }
+  #camara-info.error { color: var(--rojo); }
   #sugerencias { margin: 8px 0 4px; display: flex; flex-direction: column; gap: 4px; }
   #sugerencias button { display: flex; justify-content: space-between; gap: 10px; padding: 10px 12px;
     font-size: 15px; border: 1px solid var(--linea); border-radius: 8px; background: #fff; cursor: pointer;
@@ -58,6 +65,10 @@
     background: var(--azul); color: #fff; cursor: pointer; }
   #descuento-form button.claro { background: #fff; color: var(--azul); }
   #descuento-estado { font-size: 14px; margin-top: 6px; }
+  #impresiones-destino { font-size: 12px; color: #666; margin-top: 4px; }
+  #descuento-pin { display: grid; gap: 6px; border-top: 1px solid var(--linea); padding-top: 8px; }
+  #descuento-pin h3 { margin: 0; font-size: 13px; color: #5b6478; }
+  #descuento-pin[hidden] { display: none; }
   #aviso { min-height: 20px; font-size: 14px; margin-top: 8px; }
   #rechazadas:not(:empty) { margin-top: 8px; }
   #rechazadas .ticket { border: 1px solid var(--rojo); border-radius: 8px; padding: 8px;
@@ -80,7 +91,16 @@
     padding: 0 14px; font-size: 14px; cursor: pointer; }
   #socio-info { font-size: 14px; margin-top: 6px; min-height: 18px; }
   #socio-info b { color: var(--azul); }
-  #dolarones, #pin { width: 100%; padding: 12px; font-size: 18px; border: 1px solid var(--linea); border-radius: 10px; }
+  #dolarones { width: 100%; padding: 12px; font-size: 18px; border: 1px solid var(--linea); border-radius: 10px; }
+  .dolarones-fila { display:flex; gap:6px; }
+  #dlg-dolarones { border:2px solid var(--azul); border-radius:14px; padding:18px; max-width:min(92vw,420px); }
+  #dlg-dolarones::backdrop { background:rgba(22,54,107,.5); }
+  #dlg-dolarones h2 { margin:0 0 8px; color:var(--azul); font-size:20px; }
+  #dlg-dolarones p { margin:0 0 14px; font-size:16px; }
+  .dlg-botones { display:flex; flex-direction:column; gap:8px; }
+  .dlg-botones button { min-height:52px; font-size:18px; border:1px solid var(--azul); background:#fff; color:var(--azul); border-radius:10px; cursor:pointer; }
+  .dlg-botones button.primario { background:var(--azul); color:#fff; }
+  #usar-maximo { border:1px solid var(--azul); background:#fff; color:var(--azul); border-radius:10px; padding:8px 12px; min-height:44px; cursor:pointer; }
   #a-pagar { font-size: 18px; font-weight: 700; color: var(--azul); min-height: 22px; }
   .caja-nombre { font-size: 13px; display: flex; align-items: center; gap: 6px; color: #fff; margin: 0; }
   .caja-nombre select { width: auto; padding: 4px 8px; font-size: 14px; border-radius: 8px; border: 0; }
@@ -111,6 +131,9 @@
   #corte-resumen .falta td { color: var(--rojo); font-weight: 800; }
   #corte-resumen .sobra td { color: #b26b00; font-weight: 800; }
   @media (max-width: 820px) { main { grid-template-columns: 1fr; } }
+  /* El panel de cobro crece con socio, Dolarones y «Ventas de hoy»: con scroll propio no se mete
+     debajo del pie (impresora), que se robaba los clics de la lista. */
+  @media (min-width: 821px) { #cobro { overflow-y: auto; } }
 </style>
 <script src="/cajero.js"></script>
 </head>
@@ -134,12 +157,15 @@
 
 <main>
   <section class="panel">
-    <input id="codigo" placeholder="Escanea el código, o busca por descripción o código" autocomplete="off" autofocus>
+    <div class="fila-codigo">
+      <input id="codigo" placeholder="Escanea el código, o busca por descripción o código" autocomplete="off" autofocus>
+      <button id="abrir-camara" type="button">Cámara</button>
+    </div>
     <div id="sugerencias"></div>
     <div id="ticket"></div>
   </section>
 
-  <section class="panel">
+  <section class="panel" id="cobro">
     <div id="total">$0</div>
     <div id="piezas">0 piezas</div>
     <div id="a-pagar"></div>
@@ -153,24 +179,43 @@
       <input id="descuento-valor" type="number" min="1" step="1" inputmode="numeric" placeholder="Cuánto" aria-label="Cuánto">
       <input id="descuento-motivo" maxlength="200" placeholder="Motivo (obligatorio)" autocomplete="off">
       <button id="enviar-descuento" type="button">Enviar al dueño</button>
+      <div id="descuento-pin">
+        <h3>O aprobar aquí con PIN del dueño</h3>
+        <select id="descuento-aprobador" aria-label="Dueño que aprueba"></select>
+        <input id="descuento-pin-dueno" type="password" inputmode="numeric" maxlength="6" autocomplete="off"
+          placeholder="PIN del dueño (6 dígitos)" aria-label="PIN del dueño">
+        <button id="aprobar-descuento-pin" type="button">Aprobar con PIN</button>
+      </div>
       <button id="cerrar-descuento" class="claro" type="button">Cerrar</button>
     </div>
     <div id="descuento-estado"></div>
     <button id="quitar-descuento" type="button" hidden
       style="margin-top:6px;padding:6px 10px;font-size:13px;border:1px solid #dfe3ea;background:#fff;border-radius:8px;cursor:pointer">Quitar descuento</button>
 
-    <label for="socio">Socio: teléfono o número</label>
+    <label for="socio">Código de la web, vale impreso o teléfono de socio</label>
     <div class="socio-fila">
-      <input id="socio" inputmode="numeric" autocomplete="off" placeholder="Opcional">
+      <input id="socio" autocomplete="off" placeholder="Escanea su código">
       <button id="buscar-socio" type="button">Buscar</button>
       <button id="quitar-socio" type="button" hidden aria-label="Quitar socio">✕</button>
     </div>
     <div id="socio-info"></div>
+    <p id="regla-regalo" aria-live="polite" hidden></p>
     <div id="pagar-dolarones" hidden>
       <label for="dolarones">Pagar con Dolarones</label>
-      <input id="dolarones" type="number" min="0" step="1" inputmode="numeric" placeholder="0">
-      <label for="pin">PIN del cliente (lo escribe el cliente)</label>
-      <input id="pin" type="password" inputmode="numeric" maxlength="4" autocomplete="off">
+      <div class="dolarones-fila"><input id="dolarones" type="number" min="0" step="0.01" inputmode="decimal" placeholder="0">
+        <button id="usar-maximo" type="button">Usar máximo</button></div>
+      <p id="codigo-autorizacion" aria-live="polite">Para gastar, escanea el código que el cliente genera en su cuenta.</p>
+    </div>
+    <p id="nota-vales" style="font-size:12px;color:#5b6478">El teléfono sólo acumula; para gastar hace falta el código.</p>
+
+    <!-- Impresión remota: controles independientes del escáner/cámara. -->
+    <div id="opcion-impresion-remota">
+      <label><input id="modo-remoto" type="checkbox"> Imprimir en otra caja</label>
+      <div id="destino-impresion" hidden>
+        <label for="imprimir-en">Imprimir en:</label>
+        <select id="imprimir-en"></select>
+        <p>En el celular sólo tarjeta o transferencia</p>
+      </div>
     </div>
 
     <label for="forma">Forma de pago</label>
@@ -188,11 +233,21 @@
     <button id="cancelar" type="button">Cancelar venta</button>
     <button id="abrir-cajon" type="button">Abrir cajón</button>
     <div id="aviso"></div>
+    <div id="impresiones-destino" hidden></div>
+    <div id="impresiones-aviso" role="alert"></div>
+    <button id="abrir-impresion-fallida" type="button" hidden>Abrir venta para reimprimir</button>
     <div id="rechazadas"></div>
+    <div id="vales-conciliados" role="status"></div>
 
     <details id="tickets">
-      <summary>Ventas de hoy</summary>
+      <summary>Ventas de hoy (toca un ticket para ver el desglose)</summary>
       <div id="lista-tickets"></div>
+    </details>
+    <details style="margin-top:10px">
+      <summary>Reimprimir vale de otro día / venta sincronizada</summary>
+      <label for="vale-folio">Folio «Venta» del ticket</label>
+      <div class="socio-fila"><input id="vale-folio" placeholder="Folio completo de la venta" style="min-width:0;flex:1">
+        <button id="vale-por-folio" type="button">Imprimir vale</button></div>
     </details>
   </section>
 </main>
@@ -207,6 +262,14 @@
     Conectar impresora
   </button>
 </footer>
+
+<dialog id="dialogo-camara">
+  <h2>Escanear con la cámara</h2>
+  <p class="nota">Apunta al código de barras de la etiqueta. Cada pieza se agrega sola; cierra al terminar.</p>
+  <div id="lector-camara"></div>
+  <div id="camara-info"></div>
+  <div class="acciones"><button id="camara-cerrar" type="button">Listo</button></div>
+</dialog>
 
 <dialog id="dialogo-retiro">
   <h2>Sale efectivo del cajón</h2>
@@ -256,12 +319,35 @@
   </div>
 </dialog>
 
+<dialog id="dialogo-ticket" class="ventana-ticket">
+  <div id="ticket-contenido"></div>
+  <div class="aviso-dialogo" id="ticket-aviso"></div>
+  <div class="acciones">
+    <button id="ticket-cerrar" type="button">Cerrar</button>
+  </div>
+</dialog>
+
+<dialog id="dlg-dolarones" aria-labelledby="dlg-titulo">
+  <h2 id="dlg-titulo">¿Usar Dolarones?</h2>
+  <p id="dlg-texto"></p>
+  <div class="dlg-botones">
+    <button id="dlg-todos" type="button" class="primario"></button>
+    <button id="dlg-otra" type="button">Otra cantidad</button>
+    <button id="dlg-no" type="button">No usar</button>
+  </div>
+</dialog>
 <script type="module">
-import { totales, agregar, efectivoAlcanza, dolaronesGanados, descuentoDe, TOPE_DESCUENTO } from '/venta.js';
+import { totales, agregar, efectivoAlcanza, dolaronesGanados, saldoCanjeable, maximoCanje, MINIMO_REGALO, descuentoDe, TOPE_DESCUENTO } from '/venta.js';
+import { abrirCamara } from '/camara.js';
 import {
   reconectarImpresora, conectarImpresora, impresoraLista, imprimirTicket, abrirCajon, explicarErrorUsb, errorImpresora,
-  imprimirCorte, imprimirRetiro,
+  imprimirCorte, imprimirRetiro, imprimirVale,
 } from '/impresora.js';
+import {
+  renglonTicket, pintarDetalle, formularioPieza, formularioTodo, comprobanteDevolucion, comprobanteCancelacion,
+} from '/ticket.js';
+import { imprimirDevolucion } from '/impresora.js';
+import { codigoDeDigitos } from '/code128.js';
 
 const $ = (id) => document.getElementById(id);
 // Nombres de piezas (los escribe la IA o el admin), de socios y motivos: texto, nunca HTML.
@@ -274,9 +360,34 @@ let lineas = [];
 // red, reusan el mismo id en vez de crear una segunda venta. Cambiar el ticket
 // (agregar, quitar, cancelar) lo invalida: eso ya es una venta distinta.
 let idVenta = null;
+let creadoEnVenta = null;
 let cobrando = false;
-// Socio de la venta en curso: { id, numero, nombre, disponible, por_liberar } o null.
+// Socio de la venta en curso: { id, numero, nombre, disponible, por_liberar, regalo_disponible } o null.
 let socio = null;
+let codigoSocio = '';
+// Ticket vacío + «Usar todos»: se recuerda la elección y pintar() reaplica el máximo en cada cambio
+// (nunca más que maximoCanje, así no se cobra de más). Se apaga al teclear a mano o quitar socio.
+let usarTodos = false;
+let busquedaSocio = 0;
+// La configuración cambia en el servidor; sin consulta vigente sigue desconocida.
+let valesHabilitados = null;
+const notaVales = () => {
+  $('nota-vales').textContent = valesHabilitados === true
+    ? 'Sin socio: 5 D por cada $100 completos, en vale de 30 días. Con socio: 10 D. El teléfono sólo acumula.'
+    : valesHabilitados === false ? 'El teléfono sólo acumula; para gastar hace falta el código.'
+    : 'Sin conexión no se conoce si se emiten vales. El servidor lo confirmará al sincronizar.';
+};
+async function cargarConfigVales() {
+  try {
+    const r = await fetch('/api/vales/config');
+    const c = r.ok ? await r.json() : null;
+    valesHabilitados = c && typeof c.habilitado === 'boolean' ? c.habilitado : null;
+  } catch { valesHabilitados = null; }
+  notaVales();
+}
+notaVales();
+cargarConfigVales();
+setInterval(cargarConfigVales, 60000);
 const dolares = (centavos) => `${(centavos / 100).toLocaleString('es-MX')} D`;
 
 /* ---------- que caja es esta computadora (Issue #100) ---------- */
@@ -288,6 +399,7 @@ try { $('caja-nombre').value = localStorage.getItem(CLAVE_CAJA) ?? ''; } catch {
 $('caja-nombre').addEventListener('change', () => {
   try { localStorage.setItem(CLAVE_CAJA, $('caja-nombre').value); } catch { /* idem */ }
   $('aviso').textContent = '';
+  pintarImpresora();
   $('codigo').focus();
 });
 const cajaActual = () => $('caja-nombre').value;
@@ -303,7 +415,33 @@ fetch('/api/yo').then((r) => r.json()).then(({ usuario, cajero }) => {
   $('caja-nombre').disabled = true;
   $('caja-nombre').title = 'Tu caja, asignada por el dueño';
   $('caja-nombre').closest('label').firstChild.textContent = 'Tu caja ';
+  pintarImpresora();
 }).catch(() => { /* sin red: la de la computadora */ });
+
+/* ---------- impresión remota: destino recordado y sin efectivo ---------- */
+const impresionRemota = () => !impresoraLista() && $('modo-remoto').checked;
+// Reusar las estaciones del selector existente, sin otra lista de cajas.
+for (const opcion of $('caja-nombre').options) {
+  if (opcion.value) $('imprimir-en').add(opcion.cloneNode(true));
+}
+$('imprimir-en').value = 'Caja 1';
+try { $('imprimir-en').value = localStorage.getItem('imprimir-en') || 'Caja 1'; } catch { /* se elige cada vez */ }
+if (!$('imprimir-en').value) $('imprimir-en').value = 'Caja 1';
+$('imprimir-en').addEventListener('change', () => {
+  try { localStorage.setItem('imprimir-en', $('imprimir-en').value); } catch { /* idem */ }
+});
+$('modo-remoto').addEventListener('change', pintar);
+function pintarImpresionRemota() {
+  const remota = impresionRemota();
+  $('opcion-impresion-remota').hidden = impresoraLista();
+  $('destino-impresion').hidden = !remota;
+  $('modo-remoto').disabled = cobrando;
+  $('imprimir-en').disabled = cobrando;
+  $('forma').querySelector('[value="efectivo"]').disabled = remota;
+  if (remota && $('forma').value === 'efectivo') $('forma').value = 'tarjeta';
+  $('efectivo').disabled = cobrando || remota;
+  for (const id of ['abrir-cajon', 'abrir-retiro', 'abrir-corte']) $(id).disabled = remota;
+}
 
 function exigirCaja() {
   if (cajaActual()) return true;
@@ -317,13 +455,14 @@ function exigirCaja() {
 
 function base() {
   return new Promise((resolve, reject) => {
-    const s = indexedDB.open('eldolaron-caja', 2);
+    const s = indexedDB.open('eldolaron-caja', 3);
     s.onupgradeneeded = () => {
       const existe = (nombre) => s.result.objectStoreNames.contains(nombre);
       if (!existe('ventas')) s.result.createObjectStore('ventas', { keyPath: 'id' });
       if (!existe('catalogo')) s.result.createObjectStore('catalogo', { keyPath: 'clave' });
       // Version 2: aperturas del cajon por registrar, igual que las ventas encoladas.
       if (!existe('cajon')) s.result.createObjectStore('cajon', { keyPath: 'id' });
+      if (!existe('vales_resultados')) s.result.createObjectStore('vales_resultados', { keyPath: 'id' });
     };
     s.onsuccess = () => resolve(s.result);
     s.onerror = () => reject(s.error);
@@ -376,9 +515,14 @@ function pintar() {
       <div><div class="nombre">${escapar(l.nombre)}</div><div class="codigo">${escapar(l.codigo)}</div></div>
       <div>x${l.cantidad}</div>
       <div class="importe">${pesos(l.precio * l.cantidad)}</div>
-      <button type="button" data-quitar="${i}" aria-label="Quitar">✕</button>
+      <button type="button" data-quitar="${i}" aria-label="Quitar" ${cobrando ? 'disabled' : ''}>✕</button>
     </div>`).join('');
 
+  // «Usar todos» elegido en el pop-up: el campo sigue al máximo mientras cambie el ticket.
+  if (usarTodos && socio) {
+    const m = maximoCanje(socio, totalNeto());
+    $('dolarones').value = m ? String(m / 100) : '';
+  }
   const efectivo = Math.round(Number($('efectivo').value || 0) * 100);
   const usados = dolaronesPedidos();
   const t = totales(lineas, efectivo, usados, descuentoAplicado());
@@ -388,7 +532,23 @@ function pintar() {
     t.descuento ? `Descuento −${pesos(t.descuento)}` : '',
     usados ? `Dolarones −${pesos(usados)} · A pagar ${pesos(t.aPagar)}` : '',
   ].filter(Boolean).join(' · ');
-  $('cobrar').disabled = t.total === 0;
+  const canjeable = saldoCanjeable(socio, t.total);
+  const autorizado = !usados || (codigoSocio && usados <= socio.maximo && Date.parse(socio.expira_en) > Date.now());
+  $('usar-maximo').disabled = cobrando || !codigoSocio || maximoCanje(socio, t.total) === 0;
+  for (const id of ['codigo', 'socio', 'buscar-socio', 'quitar-socio', 'dolarones', 'efectivo', 'forma', 'cancelar', 'pedir-descuento', 'quitar-descuento']) $(id).disabled = cobrando;
+  pintarImpresionRemota();
+  $('cobrar').disabled = cobrando || t.total === 0 || usados > t.total || usados > canjeable || !autorizado;
+  $('codigo-autorizacion').textContent = socio?.vale
+    ? `Vale impreso: ${dolares(socio.disponible)}. Vence ${new Date(socio.expira_en).toLocaleString('es-MX')}.`
+    : codigoSocio
+    ? `El cliente autorizó hasta ${dolares(socio.maximo)}. Su código vence a las ${new Date(socio.expira_en).toLocaleTimeString('es-MX')}.`
+      + (!autorizado ? ' Pide otro código o reduce los D solicitados.' : '')
+    : 'Para gastar, escanea el código que el cliente genera en su cuenta.';
+  $('regla-regalo').hidden = !socio?.regalo_disponible;
+  $('regla-regalo').textContent = socio?.regalo_disponible
+    ? `${dolares(socio.regalo_disponible)} de apertura: ticket mínimo de ${pesos(MINIMO_REGALO)} MXN antes de descontar Dolarones. Puedes usar ${dolares(Math.min(canjeable, t.total))} en este ticket.`
+      + (usados > canjeable ? ' Reduce los Dolarones solicitados o agrega productos.' : '')
+    : '';
 
   const cambio = $('cambio');
   if (!efectivo || $('forma').value !== 'efectivo') {
@@ -415,12 +575,21 @@ function buscarPieza(codigo) {
   return undefined;
 }
 
-function agregarCodigo(codigo) {
+function agregarCodigo(leido, reintento = false) {
+  if (cobrando) return;
+  const codigo = codigoDeDigitos(leido) ?? leido;
+  if (/^D[CP]-/.test(codigo.trim())) {
+    $('socio').value = codigo.trim();
+    buscarSocio();
+    return 'socio'; // la camara se cierra para dejar ver el pop-up de Dolarones
+  }
   const pieza = buscarPieza(codigo);
   if (!pieza) {
     $('aviso').textContent = `Código no encontrado: ${codigo}`;
     $('aviso').style.color = '#D72B32';
-    return;
+    // La pieza pudo etiquetarse después de abrir la caja: se baja el catálogo y se reintenta una vez.
+    if (!reintento && navigator.onLine) cargarCatalogo().then(() => { if (buscarPieza(codigo)) agregarCodigo(leido, true); });
+    return false;
   }
 
   // Las piezas son unicas: si ya se vendio, escanear su etiqueta otra vez seria
@@ -434,7 +603,7 @@ function agregarCodigo(codigo) {
         ? `${pieza.nombre}: solo hay ${pieza.stock} en existencia.`
         : `${pieza.nombre} ya se vendió. Revisa la etiqueta.`;
       $('aviso').style.color = '#D72B32';
-      return;
+      return false;
     }
   }
 
@@ -444,6 +613,7 @@ function agregarCodigo(codigo) {
   idVenta = null;
   $('aviso').textContent = '';
   pintar();
+  return true;
 }
 
 /* ---------- busqueda a mano ---------- */
@@ -492,7 +662,7 @@ $('sugerencias').addEventListener('click', (e) => {
 function dolaronesPedidos() {
   if (!socio) return 0;
   const pedidos = Math.round(Number($('dolarones').value || 0) * 100);
-  return Math.max(0, Math.min(pedidos, socio.disponible, totales(lineas, 0, 0, descuentoAplicado()).total));
+  return Math.max(0, pedidos);
 }
 
 /* ---------- descuentos con aprobacion del dueno (Issue #119) ---------- */
@@ -501,6 +671,8 @@ function dolaronesPedidos() {
 let descuento = null;
 let sondeoDescuento = null;
 const descuentoAplicado = () => (descuento?.estado === 'aprobada' ? descuento.monto : 0);
+/** Lo que vale el ticket ya con el descuento aprobado: contra esto se canjean Dolarones. */
+const totalNeto = () => totales(lineas, 0, 0, descuentoAplicado()).total;
 
 function pintarDescuento(aviso = '') {
   clearInterval(sondeoDescuento);
@@ -523,7 +695,7 @@ function pintarDescuento(aviso = '') {
 async function consultarDescuento() {
   if (descuento?.estado !== 'pendiente') return;
   try {
-    const r = await fetch(`/api/descuentos/${descuento.id}`);
+    const r = await fetch(`/api/solicitudes/${descuento.id}`);
     if (!r.ok) return;
     const { estado } = await r.json();
     if (estado === 'pendiente' || descuento?.estado !== 'pendiente') return;
@@ -534,13 +706,31 @@ async function consultarDescuento() {
   } catch { /* sin red: se vuelve a preguntar en 3 s */ }
 }
 
+// Los dueños con PIN, para aprobar aqui mismo. Se piden al abrir el formulario.
+async function cargarDuenos() {
+  const lista = $('descuento-aprobador');
+  try {
+    const r = await fetch('/api/descuentos/duenos');
+    const duenos = r.ok ? await r.json() : [];
+    lista.innerHTML = duenos.map((u) => `<option value="${escapar(u.correo)}">${escapar(u.nombre || u.correo)}</option>`).join('');
+    $('descuento-pin').hidden = duenos.length === 0;
+  } catch { $('descuento-pin').hidden = true; }   // sin red tampoco se piden descuentos
+}
+
 $('quitar-descuento').addEventListener('click', () => { descuento = null; idVenta = null; pintarDescuento(); pintar(); });
 $('pedir-descuento').addEventListener('click', () => {
   $('descuento-form').hidden = false;
+  cargarDuenos();
   $('descuento-valor').focus();
 });
-$('cerrar-descuento').addEventListener('click', () => { $('descuento-form').hidden = true; $('codigo').focus(); });
-$('enviar-descuento').addEventListener('click', async () => {
+$('cerrar-descuento').addEventListener('click', () => {
+  $('descuento-form').hidden = true;
+  $('descuento-pin-dueno').value = '';
+  $('codigo').focus();
+});
+
+/** Pide el descuento; `aprobacion` ({ aprobador, pin }) lo aprueba el dueño aqui con su PIN. */
+async function enviarDescuento(aprobacion = {}) {
   const tipo = $('descuento-tipo').value;
   const escrito = Number($('descuento-valor').value);
   const valor = tipo === 'monto' ? Math.round(escrito * 100) : escrito;
@@ -550,14 +740,18 @@ $('enviar-descuento').addEventListener('click', async () => {
   const falla = (texto) => { $('descuento-estado').textContent = texto; $('descuento-estado').style.color = '#D72B32'; };
   if (calculo.error) return falla(calculo.error);
   if (!motivo) return falla('Escribe el motivo del descuento.');
+  if (aprobacion.pin !== undefined && !/^\d{6}$/.test(aprobacion.pin)) return falla('El PIN es de 6 dígitos.');
   try {
     const r = await fetch('/api/descuentos', {
       method: 'POST', headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ tipo, valor, motivo, subtotal }),
+      body: JSON.stringify({ tipo, valor, motivo, subtotal, ...aprobacion }),
     });
     const cuerpo = await r.json().catch(() => ({}));
+    $('descuento-pin-dueno').value = '';
     if (!r.ok) return falla(cuerpo.error ?? 'No se pudo pedir el descuento.');
-    descuento = { id: cuerpo.id, tipo, valor, subtotal, monto: cuerpo.monto, estado: 'pendiente' };
+    // Pendiente (va al dueño), o ya aprobado: con el PIN del dueño, o porque quien cobra es el dueño.
+    descuento = { id: cuerpo.id, tipo, valor, subtotal, monto: cuerpo.monto, estado: cuerpo.estado };
+    idVenta = null;
     $('descuento-form').hidden = true;
     $('descuento-valor').value = '';
     $('descuento-motivo').value = '';
@@ -566,32 +760,51 @@ $('enviar-descuento').addEventListener('click', async () => {
   } catch {
     falla('Sin red: no se pueden pedir descuentos. Cobra a precio normal.');
   }
-});
+}
+$('enviar-descuento').addEventListener('click', () => enviarDescuento());
+$('aprobar-descuento-pin').addEventListener('click', () => enviarDescuento({
+  aprobador: $('descuento-aprobador').value, pin: $('descuento-pin-dueno').value,
+}));
 $('descuento-valor').placeholder = `Máximo ${TOPE_DESCUENTO}% del ticket`;
 
 function pintarSocio() {
   $('quitar-socio').hidden = !socio;
   $('pagar-dolarones').hidden = !socio || socio.disponible === 0;
   $('socio-info').innerHTML = socio
-    ? `<b>#${socio.numero} · ${escapar(socio.nombre)}</b> — ${dolares(socio.disponible)} disponibles`
+    ? (socio.vale ? '<b>Vale impreso</b>' : `<b>#${socio.numero} · ${escapar(socio.nombre)}</b>`) + ` — ${dolares(socio.disponible)} disponibles`
       + (socio.por_liberar ? ` (+${dolares(socio.por_liberar)} desde mañana)` : '')
     : '';
 }
 
 function quitarSocio() {
   socio = null;
+  codigoSocio = '';
+  usarTodos = false;
+  busquedaSocio++;
   $('socio').value = '';
   $('dolarones').value = '';
-  $('pin').value = '';
   pintarSocio();
 }
 
 async function buscarSocio() {
-  const q = $('socio').value.trim();
+  if (cobrando) return;
+  // El lector manda vales y codigos de socio solo en digitos (code128.js).
+  const q = codigoDeDigitos($('socio').value) ?? $('socio').value.trim();
   if (!q) return;
+  quitarSocio();
+  const busqueda = busquedaSocio;
+  idVenta = null;
+  pintar();
   try {
-    const r = await fetch(`/api/socios?q=${encodeURIComponent(q)}`);
+    const esVale = q.startsWith('DP-');
+    const esCodigo = q.startsWith('DC-') || esVale;
+    const r = esVale
+      ? await fetch('/api/vales/buscar', { method:'POST', headers:{ 'content-type':'application/json' }, body:JSON.stringify({ codigo:q }) })
+      : esCodigo
+      ? await fetch('/api/socios/codigo', { method:'POST', headers:{ 'content-type':'application/json' }, body:JSON.stringify({ codigo:q }) })
+      : await fetch(`/api/socios?q=${encodeURIComponent(q)}`);
     const cuerpo = await r.json();
+    if (busqueda !== busquedaSocio) return;
     if (!r.ok) {
       socio = null;
       pintarSocio();
@@ -600,11 +813,16 @@ async function buscarSocio() {
       return;
     }
     socio = cuerpo;
+    codigoSocio = esCodigo ? q : '';
+    $('socio').value = esVale ? 'Vale impreso' : '#' + socio.numero;
+    $('dolarones').value = '';
     idVenta = null;
     $('socio-info').style.color = '';
     pintarSocio();
     pintar();
+    preguntarDolarones();
   } catch {
+    if (busqueda !== busquedaSocio) return;
     // Sin red no hay saldo que consultar: la venta se cobra sin socio y no gana.
     $('socio-info').textContent = 'Sin red: no se pueden buscar socios. Cobra sin socio.';
     $('socio-info').style.color = '#D72B32';
@@ -614,24 +832,57 @@ async function buscarSocio() {
 $('buscar-socio').addEventListener('click', buscarSocio);
 $('socio').addEventListener('keydown', (e) => { if (e.key === 'Enter') buscarSocio(); });
 $('quitar-socio').addEventListener('click', () => { quitarSocio(); idVenta = null; pintar(); });
-$('dolarones').addEventListener('input', () => { idVenta = null; pintar(); });
+$('dolarones').addEventListener('input', () => { usarTodos = false; idVenta = null; pintar(); });
+
+/** Pop-up al cargar socio con código o vale: sólo si realmente puede gastar. */
+function preguntarDolarones() {
+  const total = totalNeto();
+  if (!socio || !codigoSocio || cobrando || !(socio.maximo > 0) || !(socio.disponible > 0)) return;
+  const usable = total ? maximoCanje(socio, total) : Math.min(socio.disponible, socio.maximo);
+  if (!usable) return;
+  $('dlg-texto').textContent = `El cliente tiene ${dolares(socio.disponible)} disponibles.`
+    + (total
+      ? (usable < socio.disponible ? ` En este ticket puede usar ${dolares(usable)}.` : '')
+      : ' Aún no hay piezas en el ticket: si los usas todos, se aplicarán hasta cubrir el total al escanearlas.');
+  $('dlg-todos').textContent = `Usar todos (${dolares(usable)})`;
+  $('dlg-dolarones').showModal();
+  $('dlg-todos').focus();
+}
+function cerrarDialogo(usar) {
+  $('dlg-dolarones').close();
+  if (usar === 'todos') usarTodos = true;
+  idVenta = null;
+  pintar();
+  if (usar === 'otra') $('dolarones').focus();
+  else if (usar === 'no') $('codigo').focus();
+}
+$('dlg-todos').addEventListener('click', () => cerrarDialogo('todos'));
+$('dlg-otra').addEventListener('click', () => cerrarDialogo('otra'));
+$('dlg-no').addEventListener('click', () => cerrarDialogo('no'));
+// Escape = «No usar» (el campo ya está vacío).
+$('dlg-dolarones').addEventListener('cancel', () => $('codigo').focus());
+$('usar-maximo').addEventListener('click', () => {
+  $('dolarones').value = String(maximoCanje(socio, totalNeto()) / 100);
+  idVenta = null;
+  pintar();
+});
 
 /**
  * Con Dolarones el cobro espera al servidor: el saldo solo existe alla, y
- * mostrar "cobrado" antes de que lo confirme dejaria gastar dos veces. El PIN
- * nunca se guarda en el disco de la caja.
+ * mostrar "cobrado" antes de confirmarlo dejaría gastar dos veces. El código
+ * de autorización sólo vive en memoria; nunca se encola en el disco.
  */
 async function cobrarConDolarones(venta, t) {
-  const pin = $('pin').value;
-  if (!/^\d{4}$/.test(pin)) {
-    $('aviso').textContent = 'Falta el PIN del cliente (4 dígitos).';
+  if (!codigoSocio || venta.dolarones > socio.maximo || Date.parse(socio.expira_en) <= Date.now()) {
+    $('aviso').textContent = 'El cliente debe autorizar este importe y mostrar un código vigente desde su cuenta.';
     $('aviso').style.color = '#D72B32';
     return false;
   }
   let respuesta;
   try {
     respuesta = await fetch('/api/ventas', {
-      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ...venta, pin }),
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ...venta,
+        ...(socio.vale ? { codigo_vale:codigoSocio } : { codigo_socio:codigoSocio }) }),
     });
   } catch {
     $('aviso').textContent = 'Sin red: no se pudo cobrar con Dolarones. Intenta otra vez o cobra sin Dolarones.';
@@ -642,10 +893,13 @@ async function cobrarConDolarones(venta, t) {
   if (!respuesta.ok) {
     $('aviso').textContent = cuerpo.error ?? 'No se pudo cobrar con Dolarones.';
     $('aviso').style.color = '#D72B32';
-    if (respuesta.status === 403) $('pin').value = '';
     return false;
   }
   // Un reenvio de la misma venta ya confirmada devuelve `duplicada` sin saldo: se imprime lo local.
+  if (Object.hasOwn(cuerpo, 'imprimir_en')) venta.imprimir_en = cuerpo.imprimir_en;
+  venta.vale_emitido = cuerpo.vale_emitido;
+  venta.vale_usado = cuerpo.vale_usado;
+  if (socio.vale) return { vale:true };
   const saldo = cuerpo.saldo ?? { disponible: socio.disponible - venta.dolarones };
   return { numero: socio.numero, ganados: cuerpo.ganados ?? dolaronesGanados(t.aPagar), saldo: saldo.disponible };
 }
@@ -657,6 +911,11 @@ async function cobrar() {
   if (!exigirCaja()) return;
   const efectivo = Math.round(Number($('efectivo').value || 0) * 100);
   const forma = $('forma').value;
+  const imprimirEn = impresionRemota() ? $('imprimir-en').value : undefined;
+  if (imprimirEn && forma === 'efectivo') {
+    $('aviso').textContent = 'En el celular sólo tarjeta o transferencia';
+    return;
+  }
   const usados = dolaronesPedidos();
   if (descuento?.estado === 'pendiente') {
     $('aviso').textContent = 'El descuento sigue esperando al dueño. Espera su respuesta o aprieta «Quitar descuento».';
@@ -664,6 +923,11 @@ async function cobrar() {
     return;
   }
   const t = totales(lineas, efectivo, usados, descuentoAplicado());
+  if (usados > saldoCanjeable(socio, t.total)) {
+    $('aviso').textContent = 'Los regalos de apertura requieren un ticket de $1,000 MXN o más antes de descontar Dolarones. Revisa el importe solicitado.';
+    $('aviso').style.color = '#D72B32';
+    return;
+  }
   if (!efectivoAlcanza({ formaPago: forma, total: t.aPagar, efectivo })) {
     $('aviso').textContent = efectivo === 0 ? 'Falta el efectivo recibido.' : `Faltan ${pesos(t.falta)}`;
     $('aviso').style.color = '#D72B32';
@@ -671,34 +935,65 @@ async function cobrar() {
   }
 
   cobrando = true;
-  $('cobrar').disabled = true;
+  pintar();
   try {
-    idVenta ??= crypto.randomUUID();
+    if (!idVenta) {
+      idVenta = crypto.randomUUID();
+      creadoEnVenta = new Date().toISOString();
+    }
     const venta = {
       id: idVenta,
       lineas: lineas.map(({ codigo, nombre, precio, cantidad, producto_id }) =>
         ({ codigo, nombre, precio, cantidad, producto_id })),
       forma_pago: forma,
       efectivo: forma === 'efectivo' ? efectivo : 0,
-      creado_en: new Date().toISOString(),
+      creado_en: creadoEnVenta,
       cliente_id: socio?.id ?? null,
       dolarones: usados,
       caja: cajaActual(),
       descuento_id: descuentoAplicado() ? descuento.id : null,
+      ...(imprimirEn ? { imprimir_en: imprimirEn } : {}),
     };
-    let socioTicket = socio && { numero: socio.numero, ganados: dolaronesGanados(t.aPagar), saldo: socio.disponible };
+    let socioTicket = socio && !socio.vale && { numero: socio.numero, ganados: 0, saldo: socio.disponible };
     if (usados > 0) {
       socioTicket = await cobrarConDolarones(venta, t);
       if (!socioTicket) return;
+      if (socioTicket.vale) socioTicket = null;
     } else {
-      await store('ventas', 'readwrite', (s) => s.put(venta));   // el ticket existe aunque no haya red
+      // El servidor decide si la promoción ya empezó. Un timeout conserva la
+      // venta en cola con el mismo folio y el ticket deja el beneficio pendiente.
+      let r, cuerpo;
+      try {
+        r = await fetch('/api/ventas', { method:'POST', headers:{ 'content-type':'application/json' },
+          body:JSON.stringify(venta), signal:AbortSignal.timeout(5000) });
+        cuerpo = await r.json();
+      } catch { /* respuesta desconocida: reintento idempotente al sincronizar */ }
+      if (r && cuerpo && !r.ok && r.status < 500) {
+        $('aviso').textContent = cuerpo.error || 'No se pudo confirmar la venta.';
+        $('aviso').style.color = '#D72B32';
+        return;
+      }
+      if (r?.ok && cuerpo && Object.hasOwn(cuerpo, 'ganados') && Object.hasOwn(cuerpo, 'vale_emitido')) {
+        if (Object.hasOwn(cuerpo, 'imprimir_en')) venta.imprimir_en = cuerpo.imprimir_en;
+        venta.vale_emitido = cuerpo.vale_emitido;
+        if (socioTicket) {
+          socioTicket.ganados = cuerpo.ganados ?? 0;
+          socioTicket.saldo = cuerpo.saldo?.disponible ?? socioTicket.saldo;
+        }
+      } else {
+        venta.vale_pendiente = !socioTicket && dolaronesGanados(t.aPagar, 5) > 0;
+        venta.recompensa_pendiente = !!socioTicket && dolaronesGanados(t.aPagar) > 0;
+        await store('ventas', 'readwrite', (s) => s.put(venta));
+      }
     }
     // El cajon primero: cajon y ticket van en fila por el mismo USB, y el cajero
     // no espera a que termine el logo. Una venta con tarjeta no toca el cajon.
     // Nada de esto espera al servidor ni bloquea el cobro; si falla, el pie lo dice.
-    if (forma === 'efectivo') abrirCajon();
-    imprimirTicket({ ...venta, total: t.total, descuento: t.descuento, cambio: t.cambio, socio: socioTicket }, venta.lineas)
-      .then(pintarImpresora);
+    if (!venta.imprimir_en) {
+      if (forma === 'efectivo') abrirCajon();
+      imprimirTicket({ ...venta, total: t.total, descuento: t.descuento, cambio: t.cambio, socio: socioTicket }, venta.lineas)
+        .then(pintarImpresora);
+    }
 
     // Bajar existencias en la copia local: sin esto, la misma etiqueta se podria
     // volver a cobrar mientras no haya red para refrescar el catalogo.
@@ -710,9 +1005,15 @@ async function cobrar() {
     }
     await store('catalogo', 'readwrite', (s) => s.put({ clave: 'piezas', datos: [...catalogo.values()], fecha: Date.now() }));
 
-    const ganados = socio ? dolaronesGanados(t.aPagar) : 0;
+    const ganados = socioTicket?.ganados || venta.vale_emitido?.importe || 0;
     $('aviso').textContent = (forma === 'efectivo' && efectivo > 0 ? `Cobrado. Cambio ${pesos(t.cambio)}` : 'Cobrado.')
       + (ganados ? ` · Ganó ${dolares(ganados)}` : '');
+    if (venta.imprimir_en) $('aviso').textContent += ` Ticket enviado a ${venta.imprimir_en}.`;
+    if (venta.imprimir_en && (venta.vale_pendiente || venta.recompensa_pendiente)) $('aviso').textContent += ' Sin red: se enviará al sincronizar.';
+    if (venta.vale_pendiente) $('aviso').textContent += venta.imprimir_en
+      ? ' · El vale se revisará y se imprimirá en esa caja al sincronizar.'
+      : ' · Se revisará si corresponde un vale al sincronizar; no se imprimió un código de gasto.';
+    if (venta.recompensa_pendiente) $('aviso').textContent += ' · Se revisará si ganó Dolarones al sincronizar.';
     $('aviso').style.color = '#1f7a4d';
     lineas = [];
     idVenta = null;
@@ -753,6 +1054,22 @@ async function sincronizar() {
           ...venta, estado: 'rechazada', motivo: cuerpo.error ?? 'El servidor rechazo la venta.',
         }));
         continue;
+      }
+      if (venta.vale_pendiente || venta.recompensa_pendiente) {
+        const cuerpo = await respuesta.json().catch(() => ({}));
+        if (!cuerpo || typeof cuerpo !== 'object' ||
+          !Object.hasOwn(cuerpo, venta.vale_pendiente ? 'vale_emitido' : 'ganados')) break;
+        const emitido = !!cuerpo.vale_emitido;
+        if (!venta.imprimir_en) await store('vales_resultados', 'readwrite', (s) => s.put({
+          id:venta.id, emitido, importe:venta.vale_pendiente ? cuerpo.vale_emitido?.importe ?? 0 : cuerpo.ganados,
+          tipo:venta.vale_pendiente ? 'vale' : 'socio',
+        }));
+        $('aviso').textContent = venta.recompensa_pendiente
+          ? `Venta ${venta.id} sincronizada. Dolarones ganados: ${dolares(cuerpo.ganados)}.`
+          : emitido ? `Venta ${venta.id} sincronizada. El vale fue emitido; imprímelo con el folio del ticket.`
+          : `Venta ${venta.id} sincronizada. El servidor confirmó que no se emitió vale.`;
+        if (venta.imprimir_en) $('aviso').textContent = `Venta ${venta.id} sincronizada. Ticket enviado a ${cuerpo.imprimir_en || venta.imprimir_en}.`;
+        await pintarResultadosVales();
       }
       await store('ventas', 'readwrite', (s) => s.delete(venta.id));
     }
@@ -810,6 +1127,38 @@ $('rechazadas').addEventListener('click', async (e) => {
   }
 });
 
+async function reimprimirValeDeVenta(id, boton, aviso = $('aviso')) {
+  boton.disabled = true;
+  try {
+    const r = await fetch(`/api/ventas/${encodeURIComponent(id)}/vale`, { method:'POST' });
+    const vale = await r.json();
+    if (!r.ok) throw new Error(vale.error || 'No se encontró el vale.');
+    const impreso = await imprimirVale(vale);
+    pintarImpresora();
+    aviso.textContent = impreso ? 'Vale reimpreso: mismo saldo y vencimiento.' : 'Revisa la impresora e intenta otra vez.';
+  } catch (error) { aviso.textContent = error.message || 'Sin red: no se pudo traer el vale.'; }
+  finally { boton.disabled = false; }
+}
+$('vale-por-folio').addEventListener('click', () => reimprimirValeDeVenta($('vale-folio').value.trim(), $('vale-por-folio')));
+
+async function pintarResultadosVales() {
+  const resultados = await store('vales_resultados', 'readonly', (s) => s.getAll());
+  $('vales-conciliados').innerHTML = resultados.map((r) => `<div class="ticket">
+    <span>Venta ${escapar(r.id)}: ${r.tipo === 'socio' ? `ganó ${dolares(r.importe)} por compra` : r.emitido ? 'vale emitido' : 'sin vale'}</span>
+    <div>${r.emitido ? `<button type="button" data-imprimir-vale="${escapar(r.id)}">Imprimir</button>` : ''}
+      <button type="button" data-cerrar-vale="${escapar(r.id)}">Enterado</button></div>
+  </div>`).join('');
+}
+$('vales-conciliados').addEventListener('click', async (e) => {
+  const id = e.target.dataset.imprimirVale;
+  if (id) await reimprimirValeDeVenta(id, e.target);
+  const cerrar = e.target.dataset.cerrarVale;
+  if (cerrar) {
+    await store('vales_resultados', 'readwrite', (s) => s.delete(cerrar));
+    await pintarResultadosVales();
+  }
+});
+
 /** Devoluciones y errores de cobro. Necesita red: deshacer no puede quedar encolado. */
 async function cargarTickets() {
   if (!$('tickets').open) return;
@@ -817,63 +1166,286 @@ async function cargarTickets() {
     const ventas = await (await fetch('/api/ventas?lista=1')).json();
     $('lista-tickets').innerHTML = ventas.length === 0
       ? '<p style="font-size:13px;color:#78839a">Todavía no hay ventas hoy.</p>'
-      : ventas.map((v) => `
-        <div class="ticket ${v.cancelada ? 'cancelada' : ''}">
-          <div>
-            <b>${pesos(v.total)}</b> · ${new Date(v.creado_en).toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' })}
-            <div class="piezas">${escapar(v.piezas)}</div>
-          </div>
-          ${v.cancelada ? '<span>cancelada</span>' : `<button type="button" data-cancelar="${v.id}">Cancelar</button>`}
-        </div>`).join('');
+      : ventas.map(renglonTicket).join('');
   } catch {
     $('lista-tickets').innerHTML = '<p style="font-size:13px;color:#D72B32">Sin red: para cancelar una venta hace falta conexión.</p>';
   }
 }
 
 $('tickets').addEventListener('toggle', cargarTickets);
-// Cancelar pide el motivo en la propia fila (nada de prompt()/confirm() nativos,
-// que congelan la pestana): un clic abre el campo, otro clic ya confirmado envia.
-$('lista-tickets').addEventListener('click', async (e) => {
-  const idCancelar = e.target.dataset?.cancelar;
-  const idConfirmar = e.target.dataset?.confirmarCancelar;
-  const idVolver = e.target.dataset?.volverCancelar;
 
-  if (idCancelar) {
-    const fila = e.target.closest('.ticket');
-    fila.innerHTML = `
-      <input type="text" class="motivo-cancelacion" placeholder="Motivo de la cancelación"
-        style="grid-column:1/-1;padding:8px;border:1px solid var(--linea);border-radius:8px;font-size:13px">
-      <div style="grid-column:1/-1;display:flex;gap:6px;justify-content:flex-end">
-        <button type="button" data-volver-cancelar="${idCancelar}"
-          style="border-color:var(--linea);color:#5b6478">Volver</button>
-        <button type="button" data-confirmar-cancelar="${idCancelar}">Confirmar cancelación</button>
-      </div>`;
-    fila.querySelector('.motivo-cancelacion').focus();
+/* ---------- ventana del ticket: desglose y cancelacion por pieza (Issue #138) ---------- */
+
+// Ticket abierto en la ventana, y el id de la cancelacion en curso: se genera
+// al abrir el formulario, asi un doble clic o un reintento no devuelven dos veces.
+let ticketAbierto = null;
+let idCancelacion = null;
+// Cancelacion de ticket completo que paso los 5 minutos y espera al dueño (Issue #200).
+let aprobacionCancelar = null;
+let esperando = null;
+
+$('lista-tickets').addEventListener('click', (e) => {
+  const fila = e.target.closest('[data-ticket]');
+  if (fila) abrirTicket(fila.dataset.ticket);
+});
+
+async function abrirTicket(id) {
+  $('ticket-aviso').textContent = '';
+  $('ticket-contenido').innerHTML = '<p class="nota">Cargando…</p>';
+  if (!$('dialogo-ticket').open) $('dialogo-ticket').showModal();
+  try {
+    const r = await fetch(`/api/ventas/${id}`);
+    const cuerpo = await r.json();
+    if (!r.ok) throw new Error(cuerpo.error ?? 'No se pudo abrir el ticket.');
+    ticketAbierto = cuerpo;
+    $('ticket-contenido').innerHTML = pintarDetalle(cuerpo, { editable: true });
+    if (!cuerpo.cancelada) $('ticket-contenido').insertAdjacentHTML('beforeend',
+      `<p class="nota">Venta: ${escapar(cuerpo.id)}</p><button type="button" data-imprimir-ticket>Reimprimir ticket</button>`);
+  } catch (error) {
+    $('ticket-contenido').innerHTML = `<p class="nota" style="color:#D72B32">${escapar(error.message || 'Sin red: para ver el ticket hace falta conexión.')}</p>`;
+  }
+}
+
+$('ticket-cerrar').addEventListener('click', () => $('dialogo-ticket').close());
+$('dialogo-ticket').addEventListener('close', () => { ticketAbierto = null; idCancelacion = null; aprobacionCancelar = null; $('codigo').focus(); });
+
+// Cancelar pide el motivo dentro de la ventana (nada de prompt()/confirm() nativos,
+// que congelan la pestana): un clic abre el campo, otro clic ya confirmado envia.
+$('ticket-contenido').addEventListener('click', async (e) => {
+  const boton = e.target.closest('button');
+  if (!boton || !ticketAbierto) return;
+  const d = boton.dataset;
+
+  // Recuperación manual del papel original, incluido su vale, tras fallar el USB.
+  if (d.imprimirTicket !== undefined) {
+    if (!impresoraLista()) { $('ticket-aviso').textContent = 'Conecta la impresora para reimprimir.'; return; }
+    boton.disabled = true;
+    try {
+      const r = await fetch(`/api/ventas/${ticketAbierto.id}?imprimir=1`);
+      const venta = await r.json();
+      if (!r.ok || venta.cancelada) throw new Error(venta.error || 'El ticket está cancelado.');
+      if (venta.imprimir_en && !venta.impreso_en) {
+        const toma = await fetch(`/api/impresiones/${venta.id}/tomar`, { method:'POST',
+          headers:{ 'content-type':'application/json' }, body:JSON.stringify({ caja:cajaActual() }) });
+        if (!toma.ok) throw new Error('No se tomó el ticket. Reabre la venta para revisar si ya se imprimió o pertenece a otra estación.');
+      }
+      const ok = await imprimirTicket(venta, venta.lineas);
+      $('ticket-aviso').textContent = ok ? 'Ticket reimpreso.' : `No se imprimió la venta ${venta.id}: ${errorImpresora() || 'revisa la impresora'}.`;
+      if (ok && $('abrir-impresion-fallida').dataset.folio === venta.id) {
+        $('impresiones-aviso').textContent = '';
+        $('abrir-impresion-fallida').hidden = true;
+      }
+    } catch (error) { $('ticket-aviso').textContent = error.message || 'No se pudo reimprimir.'; }
+    finally { boton.disabled = false; pintarImpresora(); }
     return;
   }
-  if (idVolver) { await cargarTickets(); return; }
-  if (idConfirmar) {
-    const fila = e.target.closest('.ticket');
-    const campoMotivo = fila.querySelector('.motivo-cancelacion');
+
+  if (d.imprimirVale !== undefined) {
+    await reimprimirValeDeVenta(ticketAbierto.id, boton, $('ticket-aviso'));
+    return;
+  }
+
+  if (d.cancelarLinea || d.cancelarTodo !== undefined) {
+    cerrarFormularios();
+    idCancelacion = crypto.randomUUID();
+    const destino = d.cancelarLinea ? $(`form-linea-${d.cancelarLinea}`) : $('form-todo');
+    const celda = d.cancelarLinea ? destino.firstElementChild : destino;
+    celda.innerHTML = d.cancelarLinea ? formularioPieza(d.cancelarLinea, Number(d.quedan)) : formularioTodo();
+    destino.hidden = false;
+    celda.querySelector('.motivo-cancelar').focus();
+    return;
+  }
+  if (d.volver !== undefined) { cerrarFormularios(); return; }
+  if (d.imprimirDevolucion !== undefined || d.imprimirCancelacion !== undefined) {
+    $('ticket-aviso').textContent = '';
+    boton.disabled = true;
+    await imprimirComprobante(d.imprimirCancelacion !== undefined
+      ? comprobanteCancelacion(ticketAbierto)
+      : comprobanteDevolucion(ticketAbierto, Number(d.imprimirDevolucion)));
+    boton.disabled = false;
+    return;
+  }
+
+  if (d.aprobarPin !== undefined || d.enviarDueno !== undefined) {
+    const panel = boton.closest('.aprobacion');
+    const aviso = panel.querySelector('.aviso-aprobacion');
+    aviso.textContent = '';
+    const peticion = { motivo: aprobacionCancelar.motivo, caja: cajaActual() };
+    if (d.aprobarPin !== undefined) {
+      const campoPin = panel.querySelector('.pin-dueno');
+      if (!/^\d{6}$/.test(campoPin.value)) { aviso.textContent = 'El PIN es de 6 dígitos.'; campoPin.focus(); return; }
+      peticion.aprobador = panel.querySelector('.aprobador').value;
+      peticion.pin = campoPin.value;
+    } else {
+      peticion.solicitar = true;
+    }
+    for (const b of panel.querySelectorAll('button')) b.disabled = true;
+    let r, cuerpo;
+    try {
+      r = await fetch(`/api/ventas/${ticketAbierto.id}/cancelar`, {
+        method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(peticion),
+      });
+      cuerpo = await r.json();
+    } catch {
+      for (const b of panel.querySelectorAll('button')) b.disabled = false;
+      aviso.textContent = 'Sin red: no se pudo confirmar la cancelación. Reabre el ticket antes de devolver dinero o mercancía.';
+      return;
+    }
+    if (r.status === 202) {
+      panel.innerHTML = `<p class="esperando">Esperando aprobación del dueño…</p>
+        <p class="nota">Puedes cerrar esta ventana: avisaremos aquí cuando responda.</p>`;
+      esperarAprobacion(cuerpo.solicitud_id, ticketAbierto.id);
+      return;
+    }
+    if (!r.ok) {
+      for (const b of panel.querySelectorAll('button')) b.disabled = false;
+      aviso.textContent = cuerpo.error ?? 'No se pudo cancelar.';
+      if (d.aprobarPin !== undefined) { panel.querySelector('.pin-dueno').value = ''; panel.querySelector('.pin-dueno').focus(); }
+      return;
+    }
+    await terminarCancelacion(r, cuerpo, { linea: undefined, cantidad: 1 });
+    return;
+  }
+
+  if (d.confirmarLinea || d.confirmarTodo !== undefined) {
+    const form = boton.closest('.form-cancelar');
+    const campoMotivo = form.querySelector('.motivo-cancelar');
     const motivo = campoMotivo.value.trim();
     if (!motivo) { campoMotivo.style.borderColor = 'var(--rojo)'; campoMotivo.focus(); return; }
-    if (!exigirCaja()) return;
-    e.target.disabled = true;
+    const campoCantidad = form.querySelector('.cantidad-cancelar');
+    const cantidad = campoCantidad ? Number(campoCantidad.value) : 1;
+    if (campoCantidad && (!Number.isInteger(cantidad) || cantidad < 1 || cantidad > Number(campoCantidad.max))) {
+      campoCantidad.style.borderColor = 'var(--rojo)'; campoCantidad.focus(); return;
+    }
+    if (!cajaActual()) {
+      $('ticket-aviso').textContent = 'Elige arriba qué caja es esta computadora.';
+      $('ticket-aviso').style.color = '#D72B32';
+      return;
+    }
+    boton.disabled = true;
     // La caja donde se devuelve el dinero: su corte cuenta la devolucion.
-    const r = await fetch(`/api/ventas/${idConfirmar}/cancelar`, {
-      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ motivo, caja: cajaActual() }),
-    });
-    const cuerpo = await r.json();
-    $('aviso').textContent = r.ok
-      ? `Venta cancelada. Devuelve ${pesos(cuerpo.devuelto ?? 0)} y regresa la pieza al anaquel.`
-        + (cuerpo.dolarones ? ` Los ${dolares(cuerpo.dolarones)} regresaron al saldo del socio.` : '')
-      : (cuerpo.error ?? 'No se pudo cancelar.');
-    $('aviso').style.color = r.ok ? '#1f7a4d' : '#D72B32';
-    await cargarTickets();
-    await actualizarCorte();
-    await cargarCatalogo();          // la pieza devuelta vuelve a tener existencia
+    const ruta = d.confirmarLinea
+      ? `/api/ventas/${ticketAbierto.id}/lineas/${d.confirmarLinea}/cancelar`
+      : `/api/ventas/${ticketAbierto.id}/cancelar`;
+    let r, cuerpo;
+    try {
+      r = await fetch(ruta, {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ id: idCancelacion, cantidad, motivo, caja: cajaActual() }),
+      });
+      cuerpo = await r.json();
+    } catch {
+      boton.disabled = false;
+      $('ticket-aviso').textContent = 'Sin red: no se pudo confirmar la cancelación. Reabre el ticket antes de devolver dinero o mercancía.';
+      $('ticket-aviso').style.color = '#D72B32';
+      return;
+    }
+    // Pasados 5 minutos del cobro el cajero necesita al dueño: se le ofrece en esta misma ventana.
+    if (d.confirmarTodo !== undefined && r.status === 403 && cuerpo.requiere_aprobacion) {
+      aprobacionCancelar = { motivo };
+      idCancelacion = null;
+      $('ticket-aviso').textContent = '';
+      $('form-todo').innerHTML = panelAprobacion(cuerpo);
+      $('form-todo').querySelector('.pin-dueno')?.focus();
+      return;
+    }
+    await terminarCancelacion(r, cuerpo, { linea: d.confirmarLinea, cantidad });
   }
 });
+
+/** Lo que sigue a una cancelacion enviada (pieza o ticket): aviso, ticket al dia, comprobante y existencias. */
+async function terminarCancelacion(r, cuerpo, { linea, cantidad }) {
+  const pieza = linea ? (cantidad > 1 ? 'las piezas' : 'la pieza') : 'las piezas';
+  $('ticket-aviso').textContent = r.ok
+    ? `${linea ? 'Pieza cancelada' : 'Ticket cancelado'}. Devuelve ${pesos(cuerpo.devuelto ?? 0)} y regresa ${pieza} al anaquel.`
+      + (cuerpo.dolarones ? ` Los ${dolares(cuerpo.dolarones)} regresaron al socio o al mismo vale, con su vencimiento original.` : '')
+    : (cuerpo.error ?? 'No se pudo cancelar.');
+  $('ticket-aviso').style.color = r.ok ? '#1f7a4d' : '#D72B32';
+  idCancelacion = null;
+  const aviso = $('ticket-aviso').textContent;
+  await abrirTicket(ticketAbierto.id);
+  $('ticket-aviso').textContent = aviso;
+  // El comprobante sale solo la primera vez; un reenvio (duplicada, ya_estaba) se reimprime con su boton.
+  if (r.ok && !cuerpo.duplicada && !cuerpo.ya_estaba && ticketAbierto) {
+    const i = ticketAbierto.devoluciones.findIndex((x) => x.id === cuerpo.id);
+    if (!linea || i >= 0) {
+      await imprimirComprobante(linea ? comprobanteDevolucion(ticketAbierto, i) : comprobanteCancelacion(ticketAbierto));
+    }
+  }
+  await cargarTickets();
+  await actualizarCorte();
+  await cargarCatalogo();          // la pieza devuelta vuelve a tener existencia
+}
+
+/** Las dos salidas cuando el ticket ya paso la ventana de 5 minutos: PIN del dueño aquí, o pedirlo a distancia. */
+function panelAprobacion({ error, duenos = [] }) {
+  return `<div class="aprobacion form-cancelar">
+    <p class="nota" style="color:#D72B32;margin:0">${escapar(error)}</p>
+    <h3>Aprobar aquí con PIN del dueño</h3>
+    ${duenos.length === 0
+      ? '<p class="nota">Ningún dueño tiene PIN. Usa «Enviar al dueño».</p>'
+      : `<select class="aprobador">${duenos.map((u) => `<option value="${escapar(u.correo)}">${escapar(u.nombre || u.correo)}</option>`).join('')}</select>
+         <input type="password" class="pin-dueno" inputmode="numeric" maxlength="6" autocomplete="off" placeholder="PIN del dueño (6 dígitos)">
+         <div class="botones"><button type="button" class="quitar" data-aprobar-pin>Aprobar con PIN</button></div>`}
+    <h3>O que lo apruebe a distancia</h3>
+    <div class="botones"><button type="button" class="secundario" data-enviar-dueno>Enviar al dueño</button></div>
+    <div class="aviso-dialogo aviso-aprobacion"></div>
+  </div>`;
+}
+
+/** Pregunta cada 5 s si el dueño ya respondió; la caja puede seguir cobrando mientras tanto. */
+function esperarAprobacion(solicitudId, ticketId) {
+  clearInterval(esperando?.timer);
+  esperando = { solicitudId, ticketId, consultando: false, timer: setInterval(consultarAprobacion, 5000) };
+}
+
+async function consultarAprobacion() {
+  if (!esperando || esperando.consultando) return;
+  const { solicitudId, ticketId } = esperando;
+  esperando.consultando = true;
+  let estado;
+  try {
+    const r = await fetch(`/api/solicitudes/${solicitudId}`);
+    const cuerpo = await r.json();
+    estado = r.ok ? cuerpo.estado : (r.status === 404 ? 'perdida' : 'pendiente');
+  } catch { estado = 'pendiente'; }   // sin red: se vuelve a preguntar
+  if (!esperando || esperando.solicitudId !== solicitudId) return;
+  esperando.consultando = false;
+  if (estado === 'pendiente') return;
+
+  clearInterval(esperando.timer);
+  esperando = null;
+  const aprobada = estado === 'aprobada';
+  const texto = aprobada ? 'El dueño aprobó la cancelación del ticket.'
+    : estado === 'rechazada' ? 'El dueño rechazó la cancelación: el ticket sigue vigente.'
+    : 'No se encontró la solicitud de cancelación.';
+  const abierto = $('dialogo-ticket').open && ticketAbierto?.id === ticketId;
+  if (abierto) {
+    await abrirTicket(ticketId);
+    $('ticket-aviso').textContent = aprobada
+      ? `${texto} Devuelve ${pesos(comprobanteCancelacion(ticketAbierto).dinero)} y regresa las piezas al anaquel.` : texto;
+    $('ticket-aviso').style.color = aprobada ? '#1f7a4d' : '#D72B32';
+    if (aprobada && ticketAbierto?.cancelada) await imprimirComprobante(comprobanteCancelacion(ticketAbierto));
+  } else {
+    $('aviso').textContent = `${texto} (ticket ${ticketId.slice(0, 8)})`;
+  }
+  if (aprobada) { await cargarTickets(); await actualizarCorte(); await cargarCatalogo(); }
+}
+
+/** Hoja de la devolucion para que el cliente firme; se guarda con el corte. */
+async function imprimirComprobante(datos) {
+  const ok = await imprimirDevolucion(datos);
+  const aviso = $('ticket-aviso');
+  aviso.textContent = `${aviso.textContent} ${ok
+    ? 'Comprobante impreso: que lo firme el cliente y guárdalo con el corte.'
+    : `No se imprimió el comprobante (${errorImpresora() || 'impresora no conectada'}). Conéctala y usa «Imprimir comprobante».`}`.trim();
+  if (!ok) aviso.style.color = '#D72B32';
+  pintarImpresora();
+}
+
+function cerrarFormularios() {
+  for (const f of $('ticket-contenido').querySelectorAll('.form-linea, #form-todo')) f.hidden = true;
+}
 
 // Sin importes a la vista: el conteo del corte es ciego (Issue #100). El dueno
 // ve el dinero en /reportes.
@@ -894,6 +1466,38 @@ $('codigo').addEventListener('keydown', (e) => {
   e.target.value = '';
   pintarSugerencias();
 });
+
+// Camara del celular o de la computadora: cada lectura nueva entra al ticket
+// como si el lector USB la hubiera tecleado. El dialogo es modal, asi que el
+// resultado se repite dentro de el.
+let apagarCamara = null;
+async function cerrarCamara() {
+  const apagar = apagarCamara;
+  apagarCamara = null;
+  await apagar?.();
+  $('dialogo-camara').close();
+  $('codigo').focus();
+}
+$('abrir-camara').addEventListener('click', async () => {
+  const info = $('camara-info');
+  info.className = ''; info.textContent = 'Abriendo la cámara…';
+  $('dialogo-camara').showModal();
+  try {
+    apagarCamara = await abrirCamara('lector-camara', (codigo) => {
+      const ok = agregarCodigo(codigo);
+      navigator.vibrate?.(ok ? 60 : [80, 60, 80]);
+      if (ok === 'socio') { cerrarCamara(); return; }
+      info.className = ok ? '' : 'error';
+      info.textContent = ok ? `✓ ${buscarPieza(codigoDeDigitos(codigo) ?? codigo).nombre} · ${$('piezas').textContent}` : $('aviso').textContent;
+    });
+    info.textContent = 'Lista: apunta al código.';
+  } catch (e) {
+    info.className = 'error'; info.textContent = e.message;
+  }
+});
+$('camara-cerrar').addEventListener('click', cerrarCamara);
+$('dialogo-camara').addEventListener('cancel', (e) => { e.preventDefault(); cerrarCamara(); });
+
 $('ticket').addEventListener('click', (e) => {
   const i = e.target.dataset?.quitar;
   if (i === undefined) return;
@@ -910,6 +1514,7 @@ $('cobrar').addEventListener('click', cobrar);
 // que abrir aunque no haya red) y deja quien y cuando en /reportes: se encola
 // como una venta y sincronizar() la manda.
 async function abrirCajonRegistrado(aviso) {
+  if (impresionRemota()) { aviso.textContent = 'El cajón no se abre a distancia.'; return; }
   const abierto = await abrirCajon();
   aviso.textContent = abierto ? 'Cajón abierto.' : `No se abrió el cajón: ${errorImpresora() || 'la impresora no está conectada'}.`;
   aviso.style.color = abierto ? '#5b6478' : '#D72B32';
@@ -1110,9 +1715,46 @@ function pintarRed() {
   $('estado-red').textContent = navigator.onLine ? 'en línea' : 'sin red · cobrando local';
   $('estado-red').className = navigator.onLine ? '' : 'sin-red';
 }
-addEventListener('online', () => { pintarRed(); sincronizar(); cargarCatalogo(); });
-addEventListener('offline', pintarRed);
+addEventListener('online', () => { pintarRed(); cargarConfigVales(); sincronizar(); cargarCatalogo(); });
+addEventListener('offline', () => { pintarRed(); valesHabilitados = null; notaVales(); });
 setInterval(sincronizar, 30000);
+// Lo etiquetado durante el día también aparece en la búsqueda por nombre sin recargar la caja.
+// ponytail: catálogo completo cada 5 min; pedir sólo lo cambiado si el catálogo crece mucho.
+setInterval(() => { if (navigator.onLine) cargarCatalogo(); }, 5 * 60_000);
+
+/* ---------- impresión remota: consumidor de esta estación (cajaActual) ---------- */
+let imprimiendoRemotas = false;
+async function imprimirPendientes() {
+  if (imprimiendoRemotas || document.visibilityState !== 'visible' || !impresoraLista() || !cajaActual()) return;
+  imprimiendoRemotas = true;
+  let tomada = null;
+  try {
+    const caja = cajaActual();
+    const r = await fetch(`/api/impresiones?caja=${encodeURIComponent(caja)}`, { cache:'no-store', signal:AbortSignal.timeout(5000) });
+    if (!r.ok) return;
+    const tickets = await r.json();
+    for (const venta of tickets) {
+      if (document.visibilityState !== 'visible' || !impresoraLista() || cajaActual() !== caja) break;
+      tomada = venta.id; // Una respuesta perdida también puede haber confirmado la toma.
+      const toma = await fetch(`/api/impresiones/${venta.id}/tomar`, { method:'POST',
+        headers:{ 'content-type':'application/json' }, body:JSON.stringify({ caja }), signal:AbortSignal.timeout(5000) });
+      if (toma.status === 409) { tomada = null; continue; }
+      if (!toma.ok) { tomada = null; break; }
+      if (!await imprimirTicket(venta, venta.lineas)) throw new Error(errorImpresora() || 'revisa la impresora');
+      tomada = null;
+    }
+  } catch (error) {
+    if (tomada) {
+      $('impresiones-aviso').textContent = `No se imprimió la venta ${tomada}: ${error.message}. Reimprime desde «Ventas de hoy».`;
+      $('abrir-impresion-fallida').dataset.folio = tomada;
+      $('abrir-impresion-fallida').hidden = false;
+    }
+    // Sin red antes de tomar: la venta sigue pendiente para la siguiente consulta.
+  } finally { imprimiendoRemotas = false; pintarImpresora(); }
+}
+setInterval(imprimirPendientes, 4000);
+document.addEventListener('visibilitychange', imprimirPendientes);
+$('abrir-impresion-fallida').addEventListener('click', () => abrirTicket($('abrir-impresion-fallida').dataset.folio));
 
 function pintarImpresora() {
   const lista = impresoraLista();
@@ -1124,6 +1766,10 @@ function pintarImpresora() {
     : (lista ? 'Impresora conectada' : 'Impresora no conectada');
   $('impresora-estado').style.color = error && error !== 'no conectada' ? '#D72B32' : '';
   $('conectar-impresora').hidden = lista;
+  // Es la misma caja con la que imprimirPendientes consulta /api/impresiones.
+  $('impresiones-destino').hidden = !lista || !cajaActual();
+  $('impresiones-destino').textContent = `Imprimiendo tickets para: ${cajaActual()}`;
+  pintarImpresionRemota();
 }
 $('conectar-impresora').addEventListener('click', async () => {
   let motivo = '';
@@ -1142,6 +1788,7 @@ pintarRed();
 await cargarCatalogo();
 pintar();
 await pintarRechazadas();
+await pintarResultadosVales();
 await sincronizar();
 await reconectarImpresora();
 pintarImpresora();

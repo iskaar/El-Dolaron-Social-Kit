@@ -236,7 +236,7 @@ const ANCHO_PRECIO_BANDA = 48; // fuente "3" ampliada x3 (16 x 3), sin nombre qu
  * familia va en texto ("Ropa"/"General"); codigo es lo que dibuja el codigo de
  * barras y lo que despues escanea la caja (p.ej. "R49"), ya corto de por si.
  */
-export function tsplBanda(banda, copias = 1, y0 = corrimiento(), barra = modulo()) {
+export function tsplBanda(banda, copias = 1, y0 = corrimiento(), barra = modulo(), velocidad = 0) {
   const desplazamiento = Math.max(y0, -PRIMER_RENGLON);
   const y = (base) => base + desplazamiento;
   const precio = `$${Math.round(banda.precioPesos)}`;
@@ -246,20 +246,43 @@ export function tsplBanda(banda, copias = 1, y0 = corrimiento(), barra = modulo(
     'SIZE 50.8 mm,25.4 mm',
     'GAP 2 mm,0 mm',
     'DIRECTION 1',
+    ...(velocidad > 0 ? [`SPEED ${velocidad}`] : []),
     'CLS',
     `TEXT ${MARGEN},${y(PRIMER_RENGLON)},"2",0,1,1,"${limpiar(banda.familia).toUpperCase().slice(0, NOMBRE_MAX)}"`,
     `TEXT ${centrar(precio, ANCHO_PRECIO_BANDA)},${y(30)},"3",0,3,3,"${precio}"`,
     `BARCODE ${centrarBarras(banda.codigo, barra)},${y(110)},"128",48,0,0,${barra},${barra * 2},"${banda.codigo}"`,
     `TEXT ${centrar(pie, ANCHO_PIE)},${y(164)},"1",0,1,1,"${pie}"`,
-    `PRINT ${copias},1`,
+    // PRINT m,n = m juegos de n copias. La AE240 respeta n y no m (probado el
+    // 2026-09-29: PRINT 80,1 saco una, PRINT 1,80 saco las 80).
+    `PRINT 1,${copias}`,
   ];
 
   return `${ordenes.join('\r\n')}\r\n`;
 }
 
-/** Imprime un lote de una banda. Devuelve false si se cayo el enlace. */
-export const imprimirBanda = (banda, copias = 1, alAvanzar, alEsperar) =>
-  mandarCopias(tsplBanda(banda, 1), copias, alAvanzar, `${banda.familia} ${banda.codigo}`, alEsperar);
+/**
+ * Imprime un lote de una banda en UN solo trabajo (`PRINT 1,n`): la impresora
+ * lleva su cuenta, sin tandas ni pausas, y su memoria no se llena porque el
+ * trabajo son ~300 bytes. Devuelve false si se cayo el enlace.
+ *
+ * `una` = el modo viejo, un trabajo por etiqueta con pausas (/bandas?envio=una),
+ * por si algun dia un lote largo se atora. `lote` y `pausa` (segundos) cambian
+ * sus tandas. `velocidad` agrega SPEED de TSPL (pulgadas por segundo).
+ */
+export async function imprimirBanda(banda, copias = 1, alAvanzar, alEsperar, { una = false, velocidad = 0, lote, pausa } = {}) {
+  const nombre = `${banda.familia} ${banda.codigo}`;
+  if (una) {
+    return mandarCopias(tsplBanda(banda, 1, corrimiento(), modulo(), velocidad), copias, alAvanzar, nombre, alEsperar, { lote, pausa });
+  }
+  ultimoError = '';
+  reconectada = false;
+  const salio = await mandarTspl(tsplBanda(banda, copias, corrimiento(), modulo(), velocidad));
+  const envio = { hora: new Date().toISOString(), nombre, copias, enviadas: salio ? copias : 0, ritmo: 'un solo trabajo' };
+  if (!salio) envio.error = ultimoError;
+  anotarEnvio(envio);
+  if (salio) alAvanzar?.(copias, copias);
+  return salio;
+}
 
 const MEDIDA = ['SIZE 50.8 mm,25.4 mm', 'GAP 2 mm,0 mm', 'DIRECTION 1'];
 
@@ -504,16 +527,19 @@ const esperar = (ms) => new Promise((r) => setTimeout(r, ms));
  * @param alAvanzar llamada con (hechas, total) despues de cada etiqueta
  * @param nombre lo que se anota en el historial de envios
  * @param alEsperar llamada con los segundos de la pausa larga entre tandas
+ * @param ritmo { lote, pausa } para probar otro ritmo que LOTE / PAUSA_ENTRE_LOTES (pausa en segundos)
  */
-export async function mandarCopias(tspl, copias, alAvanzar, nombre = '', alEsperar) {
+export async function mandarCopias(tspl, copias, alAvanzar, nombre = '', alEsperar, ritmo = {}) {
+  const lote = ritmo.lote > 0 ? ritmo.lote : LOTE;
+  const pausaLote = ritmo.pausa >= 0 ? ritmo.pausa * 1000 : PAUSA_ENTRE_LOTES;
   let enviadas = 0;
   ultimoError = '';
   reconectada = false;
   while (enviadas < copias && !detenido) {
     if (enTanda > 0) {
-      const larga = enTanda % LOTE === 0;
-      if (larga) alEsperar?.(PAUSA_ENTRE_LOTES / 1000);
-      await esperar(larga ? PAUSA_ENTRE_LOTES : PAUSA_ENTRE_ETIQUETAS);
+      const larga = enTanda % lote === 0;
+      if (larga && pausaLote > 0) alEsperar?.(pausaLote / 1000);
+      await esperar(larga ? pausaLote : PAUSA_ENTRE_ETIQUETAS);
       if (detenido) break;
     }
     if (!await mandarTspl(tspl)) break;

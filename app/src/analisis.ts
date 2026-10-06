@@ -8,6 +8,7 @@
  */
 import Anthropic from '@anthropic-ai/sdk';
 import { calcularPrecio, precioDesdeSugerencia } from './precio.ts';
+import { CATEGORIAS as LISTA_CATEGORIAS, CLAVES_CATEGORIA } from '../public/categorias.js';
 
 export type Modelo = 'claude' | 'gemini';
 
@@ -23,7 +24,7 @@ export function modeloPorDefecto(env: Env): Modelo {
 const MODELO_CLAUDE = 'claude-haiku-4-5';
 const MODELO_GEMINI = 'gemini-flash-latest';
 
-const CATEGORIAS = ['ropa', 'hogar', 'electronica', 'juguetes', 'otros'] as const;
+const CATEGORIAS = CLAVES_CATEGORIA;
 
 const INSTRUCCION = [
   'Eres el inspector de una tienda de mercancia americana de liquidacion en San Luis Potosi, Mexico.',
@@ -37,6 +38,9 @@ const INSTRUCCION = [
   '\n- En espanol, maximo seis palabras, singular, sin articulos ni adjetivos de venta.',
   '\n- Nada de color, estado, cantidad ni empaque, salvo que sea lo unico que distinga la pieza.',
   '\n- Ejemplos: "Licuadora Oster 10 velocidades", "Sarten Tramontina 24 cm", "Cafetera Mr. Coffee 12 tazas".',
+  '\n\nMARCA: la del fabricante tal como se escribe ("Room Essentials", "e.l.f.", "Fiskars"); vacia si no se ve.',
+  '\n\nCATEGORIA: la que usaria una tienda en linea para encontrarlo. "otros" solo si no cabe en ninguna:',
+  ...LISTA_CATEGORIAS.map(([clave, nombre]) => `\n- ${clave}: ${nombre}`),
 ].join(' ');
 
 /** Debajo de esto, los ejemplos son ruido y manda el porcentaje de la configuracion. */
@@ -45,6 +49,7 @@ const EJEMPLOS_MAXIMOS = 30;
 
 export interface Ficha {
   nombre: string;
+  marca: string;
   categoria: string;
   precio_lista_mxn: number;
   precio_venta_mxn: number;
@@ -120,12 +125,13 @@ const ESQUEMA = {
   type: 'object',
   properties: {
     nombre: { type: 'string', description: 'Nombre corto del articulo, en espanol.' },
+    marca: { type: 'string', description: 'Marca del fabricante; vacia si no se ve.' },
     categoria: { type: 'string', enum: [...CATEGORIAS] },
     precio_lista_mxn: { type: 'number', description: 'Precio nuevo en Mexico, en pesos. 0 si no lo reconoces.' },
     precio_venta_mxn: { type: 'number', description: 'Lo que cobraria Isaac segun sus ejemplos. 0 si no hay ejemplos parecidos.' },
     confianza: { type: 'number', description: 'De 0 a 1.' },
   },
-  required: ['nombre', 'categoria', 'precio_lista_mxn', 'precio_venta_mxn', 'confianza'],
+  required: ['nombre', 'marca', 'categoria', 'precio_lista_mxn', 'precio_venta_mxn', 'confianza'],
   additionalProperties: false,
 } as const;
 
@@ -162,14 +168,15 @@ const PIDE_JSON = [
   '(Amazon Mexico, Mercado Libre, Walmart Mexico, Liverpool). Usa el precio que encuentres,',
   'no una estimacion de memoria. Si no lo encuentras, deja `precio_lista_mxn` en 0.',
   '\nResponde SOLO con este JSON, sin texto alrededor:',
-  '{"nombre":"","categoria":"ropa|hogar|electronica|juguetes|otros","precio_lista_mxn":0,"precio_venta_mxn":0,"confianza":0}',
+  `{"nombre":"","marca":"","categoria":"${CATEGORIAS.join('|')}","precio_lista_mxn":0,"precio_venta_mxn":0,"confianza":0}`,
 ].join(' ');
 
 function normalizar(cruda: Partial<Ficha>): Ficha {
   const categoria = String(cruda.categoria ?? '');
   return {
     nombre: String(cruda.nombre ?? '').slice(0, 120),
-    categoria: (CATEGORIAS as readonly string[]).includes(categoria) ? categoria : 'otros',
+    marca: String(cruda.marca ?? '').trim().slice(0, 60),
+    categoria: CATEGORIAS.includes(categoria) ? categoria : 'otros',
     precio_lista_mxn: Math.max(0, Math.round(Number(cruda.precio_lista_mxn ?? 0))),
     precio_venta_mxn: Math.max(0, Math.round(Number(cruda.precio_venta_mxn ?? 0))),
     confianza: Math.min(1, Math.max(0, Number(cruda.confianza ?? 0))),
@@ -290,11 +297,11 @@ export async function analizarBorrador(
     // correcciones del admin no lo tocan, y de esa diferencia sale el ajuste
     // de los porcentajes cuando haya suficientes piezas.
     await env.DB.prepare(
-      `update productos set nombre = ?, categoria = ?, precio_lista = ?, precio = ?,
+      `update productos set nombre = ?, marca = ?, categoria = ?, precio_lista = ?, precio = ?,
                             precio_sugerido = ?, destino = ?, estado_analisis = 'listo', actualizado_en = ?
        where id = ?`,
     )
-      .bind(ficha.nombre, ficha.categoria, precioLista, precio, precio, destino, new Date().toISOString(), id)
+      .bind(ficha.nombre, ficha.marca, ficha.categoria, precioLista, precio, precio, destino, new Date().toISOString(), id)
       .run();
 
     console.log(JSON.stringify({

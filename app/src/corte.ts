@@ -3,11 +3,18 @@
  *
  * Por caja, no por dia ni por cajero: cada cajon tiene su dinero. Un corte
  * junta lo de su caja desde el corte anterior:
- * - lo cobrado en esa caja (la venta suma donde se cobro, aunque despues se cancele);
- * - lo devuelto por cancelaciones hechas en esa caja (resta donde se devolvio);
+ * - lo cobrado en esa caja y todavia vigente al cortar, sin lo ya devuelto de
+ *   ella por piezas sueltas: una venta cancelada antes de su corte no aparece
+ *   en ningun corte (Isaac, 28/09, Issue #123);
+ * - lo devuelto en esa caja, de ticket completo o de piezas sueltas (Issue
+ *   #138), solo de ventas que ya se contaron en un corte ANTERIOR a la
+ *   devolucion: dinero de otro turno que sale de este cajon;
  * - los retiros y gastos de efectivo de esa caja.
- * Asi una venta cancelada en la misma caja y el mismo turno da cero, y una
- * cancelada en otra caja o en otro turno sale del cajon que de verdad pago.
+ * El orden de los cortes de cada caja no importa: se compara la hora del
+ * corte que conto la venta con la hora de la devolucion.
+ * ponytail: una venta cobrada en una caja y devuelta en otra antes de
+ * cualquier corte no sale en ninguna; si de verdad se devolvio efectivo de
+ * otro cajon, en uno sobra y en otro falta lo mismo (regla de Isaac).
  *
  * Conteo ciego: la caja manda solo el total de efectivo que hay en el cajon.
  * Isaac lo simplifico el 28/09: sin conteo por billete y moneda. Lo esperado se calcula aqui, en
@@ -96,7 +103,19 @@ const leerCorte = (env: Env, id: string) =>
   env.DB.prepare('select * from cortes where id = ?').bind(id).first<Corte>();
 
 // Lo cobrado (o devuelto) de una forma de pago, sin la parte pagada con Dolarones.
-const dinero = (forma: string) => `coalesce(sum(case when forma_pago = '${forma}' then total - dolarones end), 0)`;
+const dinero = (forma: string, importe = 'total - dolarones') =>
+  `coalesce(sum(case when forma_pago = '${forma}' then ${importe} end), 0)`;
+// Lo que queda de un ticket despues de lo devuelto por piezas sueltas (Issue #138).
+const NETO = 'total - dolarones - devuelto';
+// Lo cobrado: ventas de este corte que siguen vigentes, netas de lo ya devuelto.
+const VIGENTES = 'corte_id = ?1 and cancelada = 0';
+// La venta ya se habia contado en un corte anterior a `cuando` (la hora de la devolucion).
+const contadaAntes = (cuando: string) => `corte_id in (select id from cortes where hasta < ${cuando})`;
+// Ticket completo cancelado en esta caja, de una venta ya contada: sale lo que quedaba.
+const CANCELADAS = `corte_cancelacion_id = ?1 and ${contadaAntes('cancelada_en')}`;
+// Piezas sueltas devueltas en esta caja, de una venta ya contada (tabla devoluciones).
+const DEVUELTAS = `d.corte_id = ?1 and d.venta_id in (select id from ventas where ${contadaAntes('d.creado_en')})`;
+const devuelto = (forma: string) => `(select ${dinero(forma, 'importe')} from devoluciones d where ${DEVUELTAS})`;
 
 export async function registrarCorte(request: Request, env: Env, correo: string): Promise<Response> {
   const cuerpo = (await request.json().catch(() => ({}))) as Record<string, unknown>;
@@ -129,6 +148,7 @@ export async function registrarCorte(request: Request, env: Env, correo: string)
          where cancelada = 1 and cancelada_caja = ? and corte_cancelacion_id is null`,
       ).bind(id, caja),
       env.DB.prepare('update retiros set corte_id = ? where caja = ? and corte_id is null').bind(id, caja),
+      env.DB.prepare('update devoluciones set corte_id = ? where caja = ? and corte_id is null').bind(id, caja),
       env.DB.prepare(
         `insert into cortes (id, caja, cajero, desde, hasta, tickets, fondo_inicial, efectivo_ventas,
            efectivo_devoluciones, retiros, gastos, efectivo_esperado, efectivo_contado, diferencia, tarjeta_sistema,
@@ -139,17 +159,19 @@ export async function registrarCorte(request: Request, env: Env, correo: string)
          from (select
            (select max(hasta) from cortes where caja = ?2) as desde,
            coalesce((select fondo_siguiente from cortes where caja = ?2 order by hasta desc limit 1), ?7) as fondo,
-           (select count(*) from ventas where corte_id = ?1) as tickets,
-           (select ${dinero('efectivo')} from ventas where corte_id = ?1) as ev,
-           (select ${dinero('efectivo')} from ventas where corte_cancelacion_id = ?1) as ed,
+           (select count(*) from ventas where ${VIGENTES}) as tickets,
+           (select ${dinero('efectivo', NETO)} from ventas where ${VIGENTES}) as ev,
+           (select ${dinero('efectivo', NETO)} from ventas where ${CANCELADAS}) + ${devuelto('efectivo')} as ed,
            (select coalesce(sum(importe), 0) from retiros where corte_id = ?1 and tipo = 'retiro') as re,
            (select coalesce(sum(importe), 0) from retiros where corte_id = ?1 and tipo = 'gasto') as ga,
-           (select ${dinero('tarjeta')} from ventas where corte_id = ?1) as tv,
-           (select ${dinero('tarjeta')} from ventas where corte_cancelacion_id = ?1) as td,
-           (select ${dinero('transferencia')} from ventas where corte_id = ?1) as xv,
-           (select ${dinero('transferencia')} from ventas where corte_cancelacion_id = ?1) as xd,
-           (select coalesce(sum(dolarones), 0) from ventas where corte_id = ?1) as dv,
-           (select coalesce(sum(dolarones), 0) from ventas where corte_cancelacion_id = ?1) as dd)`,
+           (select ${dinero('tarjeta', NETO)} from ventas where ${VIGENTES}) as tv,
+           (select ${dinero('tarjeta', NETO)} from ventas where ${CANCELADAS}) + ${devuelto('tarjeta')} as td,
+           (select ${dinero('transferencia', NETO)} from ventas where ${VIGENTES}) as xv,
+           (select ${dinero('transferencia', NETO)} from ventas where ${CANCELADAS})
+             + ${devuelto('transferencia')} as xd,
+           (select coalesce(sum(dolarones - dolarones_devueltos), 0) from ventas where ${VIGENTES}) as dv,
+           (select coalesce(sum(dolarones - dolarones_devueltos), 0) from ventas where ${CANCELADAS})
+             + (select coalesce(sum(d.dolarones), 0) from devoluciones d where ${DEVUELTAS}) as dd)`,
       ).bind(id, caja, correo, ahora, contado, terminal, fondoConfig, notas),
     ]);
   } catch (error) {

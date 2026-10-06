@@ -23,7 +23,8 @@ ORIGEN = "el-dolaron"
 DESTINO = "el-dolaron-sandbox"
 CONFIG_DESTINO = "wrangler.sandbox.jsonc"
 # Nunca se copian: datos personales de clientes. Las internas de D1/SQLite tampoco.
-PRIVADAS = {"clientes", "dolarones_lotes", "dolarones_movimientos"}
+PRIVADAS = {"clientes", "dolarones_lotes", "dolarones_movimientos", "codigos_cliente",
+            "vinculos_portal", "primera_llegada", "vales_dolarones", "vales_movimientos"}
 INTERNAS = ("sqlite_", "_cf_", "d1_")
 
 
@@ -73,7 +74,8 @@ def main() -> None:
         if datos.stat().st_size > 0:
             wrangler("d1", "execute", DESTINO, "--remote", "--file", str(datos), *config)
         # Sin socios en el sandbox, ninguna venta apunta a uno.
-        wrangler("d1", "execute", DESTINO, "--remote", "--command", "update ventas set cliente_id = null", *config)
+        wrangler("d1", "execute", DESTINO, "--remote", "--command", "update ventas set cliente_id = null; "
+                 "update premios_apertura set cliente_id = null, lote_id = null", *config)
 
     # Un solo renglon: D1 limita cuantos SELECT se pueden unir con UNION.
     conteo = "select " + ", ".join(f'(select count(*) from "{t}") as "{t}"' for t in tablas)

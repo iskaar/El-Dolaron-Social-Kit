@@ -1,3 +1,6 @@
+import { resolverCancelacion } from './cancelaciones.ts';
+import { resolverDescuento } from './descuentos.ts';
+
 /**
  * Centro de cuentas (Issue #75). Cloudflare Access (con Google) dice QUIEN es
  * la persona; la tabla `usuarios` dice si entra y QUE puede hacer.
@@ -65,6 +68,7 @@ const PANTALLAS: Record<string, Rol[]> = {
   '/socios': CAJA,
   '/tarjeta-bandas': TODOS,
   '/reportes': DUENO,
+  '/mercadolibre': DUENO,
   '/cuentas': DUENO,
 };
 
@@ -72,6 +76,8 @@ export function permiso(pathname: string, metodo: string): Regla {
   const ruta = pathname.replace(/\.html$/, '').replace(/(.)\/$/, '$1');
 
   if (ruta === '/api/salud') return 'libre';
+  // Lo llama Mercado Libre, sin sesion: lo protege la ruta secreta (mercadolibre.ts).
+  if (metodo === 'POST' && /^\/api\/ml\/notificaciones\/[^/]+$/.test(ruta)) return 'libre';
   if (ruta === '/sin-acceso' || ruta === '/api/yo') return 'cuenta';
   if (ruta === '/api/solicitudes/acceso' && metodo === 'POST') return 'cuenta';
   // Codigo de las pantallas, sin datos: el permiso se cobra en la pantalla y en la API.
@@ -88,13 +94,21 @@ export function permiso(pathname: string, metodo: string): Regla {
   if (ruta === '/api/calibracion') return CAPTURA;
   if (ruta === '/api/catalogo') return CAJA;
   if (ruta === '/api/socios') return CAJA;
+  if (ruta === '/api/vales/config' && metodo === 'GET') return CAJA;
+  if (ruta === '/api/vales/buscar' && metodo === 'POST') return CAJA;
+  if (ruta === '/api/socios/codigo' && metodo === 'POST') return CAJA;
+  if (ruta === '/api/socios/legal' && metodo === 'GET') return CAJA;
+  if (ruta === '/api/portal/llegada' && metodo === 'POST') return CAJA;
   if (ruta === '/api/cajon') return CAJA;
   if (ruta === '/api/cortes' || ruta === '/api/retiros') return CAJA;
   if (ruta === '/api/cajeros' || ruta === '/api/cajeros/entrar' || ruta === '/api/cajeros/salir') return CAJA;
-  if (ruta === '/api/descuentos' || ruta.startsWith('/api/descuentos/')) return CAJA;   // pedir y ver estado (Issue #119)
-  // ponytail: cancelar sigue abierto al cajero hasta la fase 2 del Issue #75,
-  // que lo pasa por una solicitud aprobada por el dueno.
+  if (ruta === '/api/descuentos' || ruta === '/api/descuentos/duenos') return CAJA;   // pedir un descuento (Issue #119, descuentos.ts)
+  // Cancelar una venta completa: el cajero solo en los primeros minutos; despues
+  // pide aprobacion del dueno (Issue #200, cancelaciones.ts).
+  if (ruta === '/api/solicitudes/cancelaciones' || ruta === '/api/solicitudes/descuentos') return DUENO;
+  if (/^\/api\/solicitudes\/[^/]+$/.test(ruta) && metodo === 'GET') return CAJA;   // la caja ve como va la suya
   if (ruta === '/api/ventas' || ruta.startsWith('/api/ventas/')) return CAJA;
+  if (ruta === '/api/impresiones' || ruta.startsWith('/api/impresiones/')) return CAJA;
 
   return DUENO;
 }
@@ -329,7 +343,7 @@ export async function guardarCuenta(request: Request, env: Env): Promise<Respons
   return json({ correo, nombre, roles, activo, caja: guardado?.caja ?? '' });
 }
 
-/** Aprobar o rechazar una solicitud: de acceso (fase 1 del Issue #75) o de descuento (Issue #119). */
+/** Aprobar o rechazar una solicitud: de acceso (Issue #75), de cancelacion (Issue #200) o de descuento (Issue #119). */
 export async function resolverSolicitud(id: string, request: Request, env: Env, dueno: string): Promise<Response> {
   const cuerpo = (await request.json().catch(() => ({}))) as { aprobar?: unknown; roles?: unknown };
   const solicitud = await env.DB.prepare(
@@ -339,7 +353,9 @@ export async function resolverSolicitud(id: string, request: Request, env: Env, 
     .first<{ id: string; tipo: string; correo: string; nombre: string; estado: string }>();
   if (!solicitud) return json({ error: 'La solicitud no existe.' }, 404);
   if (solicitud.estado !== 'pendiente') return json({ error: `Ya estaba ${solicitud.estado}.` }, 409);
-  if (solicitud.tipo !== 'acceso' && solicitud.tipo !== 'descuento') return json({ error: 'Tipo de solicitud desconocido.' }, 400);
+  if (solicitud.tipo === 'cancelacion') return resolverCancelacion(env, id, cuerpo.aprobar === true, dueno);
+  if (solicitud.tipo === 'descuento') return resolverDescuento(env, id, cuerpo.aprobar === true, dueno);
+  if (solicitud.tipo !== 'acceso') return json({ error: 'Tipo de solicitud desconocido.' }, 400);
 
   const aprobar = cuerpo.aprobar === true;
   const ahora = new Date().toISOString();
@@ -347,9 +363,9 @@ export async function resolverSolicitud(id: string, request: Request, env: Env, 
     `update solicitudes set estado = ?, resuelto_en = ?, resuelto_por = ? where id = ? and estado = 'pendiente'`,
   ).bind(aprobar ? 'aprobada' : 'rechazada', ahora, dueno, id);
 
-  if (!aprobar || solicitud.tipo === 'descuento') {
+  if (!aprobar) {
     await marcar.run();
-    return json({ id, estado: aprobar ? 'aprobada' : 'rechazada' });
+    return json({ id, estado: 'rechazada' });
   }
   const roles = cuerpo.roles === undefined ? [ROL_POR_OMISION] : validarRoles(cuerpo.roles);
   if (!roles) return json({ error: 'Escoge al menos un rol.' }, 400);

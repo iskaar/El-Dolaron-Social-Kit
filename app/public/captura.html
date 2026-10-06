@@ -11,7 +11,9 @@
     font-family: system-ui, -apple-system, sans-serif; overscroll-behavior: none;
     /* Sin esto, tocar rapido +/- se lee como doble-tap y el navegador hace zoom. */
     touch-action: manipulation; }
-  #camara { position: fixed; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+  /* contain, no cover: cover recortaba las orillas y la vista se veía más cerca que la foto. */
+  #camara { position: fixed; inset: 0; width: 100%; height: 100%; object-fit: contain; }
+  #zoom { bottom: 214px; left: 24px; right: 24px; width: auto; accent-color: #fff; }
   .encima { position: fixed; left: 0; right: 0; z-index: 2; }
   #contador { top: 0; padding: 10px 14px calc(10px + env(safe-area-inset-top));
     background: linear-gradient(#000c, #0000); font-size: 15px; font-variant-numeric: tabular-nums; }
@@ -76,6 +78,7 @@
 
 <div id="contador" class="encima">0 fotos · 0 subidas</div>
 <div id="miniaturas" class="encima"></div>
+<input id="zoom" class="encima" type="range" aria-label="Zoom de la cámara" hidden>
 
 <div id="barra" class="encima">
   <button id="estado" type="button">Nuevo</button>
@@ -157,15 +160,40 @@ const pendientes = () => conStore('readonly', (s) => s.getAll());
 async function encenderCamara() {
   try {
     const stream = await navigator.mediaDevices.getUserMedia({
-      video: { facingMode: { ideal: 'environment' }, width: { ideal: 1920 } },
+      // 4:3 es el sensor completo: 16:9 lo recorta y se ve más cerca.
+      // zoom:true pide permiso de zoom donde existe (Chrome en Android); los demás lo ignoran.
+      video: { facingMode: { ideal: 'environment' }, width: { ideal: 1920 }, aspectRatio: { ideal: 4 / 3 }, zoom: true },
       audio: false,
     });
     video.srcObject = stream;
     panelError.style.display = 'none';
+    prepararZoom(stream.getVideoTracks()[0]);
   } catch {
     textoError.textContent = 'No se pudo abrir la cámara. Revisa los permisos del navegador.';
     panelError.style.display = 'flex';
   }
+}
+
+/**
+ * Barra de zoom sólo si el navegador deja controlarlo (getCapabilities().zoom).
+ * Arranca en lo más abierto, o en lo último que se eligió en este teléfono.
+ */
+const CLAVE_ZOOM = 'captura-zoom';
+const barraZoom = document.getElementById('zoom');
+function prepararZoom(pista) {
+  const rango = pista?.getCapabilities?.().zoom;
+  barraZoom.hidden = !rango || rango.max <= rango.min;
+  if (barraZoom.hidden) return;
+  let guardado = NaN;
+  try { guardado = Number(localStorage.getItem(CLAVE_ZOOM) ?? NaN); } catch { /* sin localStorage: lo más abierto */ }
+  Object.assign(barraZoom, { min: rango.min, max: rango.max, step: rango.step || 0.1 });
+  barraZoom.value = Number.isFinite(guardado) ? Math.min(rango.max, Math.max(rango.min, guardado)) : rango.min;
+  const aplicar = () => pista.applyConstraints({ advanced: [{ zoom: Number(barraZoom.value) }] }).catch(() => {});
+  barraZoom.oninput = () => {
+    aplicar();
+    try { localStorage.setItem(CLAVE_ZOOM, barraZoom.value); } catch { /* idem */ }
+  };
+  aplicar();
 }
 
 /** Reduce la foto antes de guardarla: alcanza para la IA, la etiqueta y el catálogo. */
