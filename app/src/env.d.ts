@@ -30,6 +30,17 @@ declare global {
     PROMOCION_INICIO?: string;
     /** Emisión de vales anónimos: ausente = apagada, requiere bases finales. */
     VALES_ABIERTOS?: string;
+    /** Mercado Libre (Issue #170). Secretos con `wrangler secret put`; ML_REDIRECT_URI es var. */
+    ML_CLIENT_ID?: string;
+    ML_CLIENT_SECRET?: string;
+    /** base64 de 32 bytes: cifra los tokens de ML en D1 (AES-GCM). */
+    ML_LLAVE_TOKENS?: string;
+    /** Segmento secreto de la URL de notificaciones: /api/ml/notificaciones/<esto>. */
+    ML_RUTA_NOTIFICACIONES?: string;
+    /** Debe ser identica a la registrada en la app de ML. */
+    ML_REDIRECT_URI?: string;
+    /** 'no' = no usar PKCE (solo si la app de ML se creo sin esa casilla). */
+    ML_PKCE?: string;
   }
 }
 
