@@ -69,7 +69,7 @@ create table if not exists usuarios (
 
 create table if not exists solicitudes (
   id            text primary key,
-  tipo          text not null,                  -- acceso
+  tipo          text not null,                  -- acceso|cancelacion
   correo        text not null,
   nombre        text not null default '',
   justificacion text not null,

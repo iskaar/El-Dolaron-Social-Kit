@@ -42,6 +42,11 @@
 </header>
 <main>
   <section class="panel">
+    <h2 id="titulo-cancelaciones">Cancelaciones por aprobar</h2>
+    <div id="cancelaciones"></div>
+  </section>
+
+  <section class="panel">
     <h2 id="titulo-solicitudes">Solicitudes de acceso</h2>
     <div id="solicitudes"></div>
   </section>
@@ -80,6 +85,40 @@ const casillas = (marcados) => ROLES.map((r) =>
   `<label><input type="checkbox" value="${r}" ${marcados.includes(r) ? 'checked' : ''}>${NOMBRES[r] ?? r}</label>`).join('');
 const rolesDe = (nodo) => [...nodo.querySelectorAll('.roles input:checked')].map((c) => c.value);
 const fecha = (iso) => new Date(iso).toLocaleString('es-MX', { dateStyle: 'medium', timeStyle: 'short' });
+const pesos = (centavos) => (centavos / 100).toLocaleString('es-MX', { style: 'currency', currency: 'MXN' });
+
+// Cancelaciones que el cajero pidio pasados 5 minutos de la venta (Issue #200).
+// Se revisa cada 5 s mientras la pagina esta abierta; si nada cambio no se repinta,
+// asi un error a la vista no se borra solo.
+let cancelacionesPintadas = '';
+const erroresCancelacion = {};
+async function cargarCancelaciones() {
+  let lista;
+  try {
+    const r = await fetch('/api/solicitudes/cancelaciones');
+    if (!r.ok) return;
+    lista = await r.json();
+  } catch { return; }
+  const firma = JSON.stringify(lista);
+  if (firma === cancelacionesPintadas) return;
+  cancelacionesPintadas = firma;
+  document.getElementById('titulo-cancelaciones').textContent =
+    `Cancelaciones por aprobar${lista.length ? ` (${lista.length})` : ''}`;
+  document.getElementById('cancelaciones').innerHTML = lista.length === 0
+    ? '<p class="vacio">Nada esperando.</p>'
+    : lista.map((s) => `
+      <div class="solicitud" data-id="${escapar(s.id)}">
+        <div><b>${escapar(s.nombre || s.correo)}</b> <span class="correo">${escapar(s.correo)} · pidió ${fecha(s.creado_en)}</span></div>
+        <div>Ticket <span class="correo">${escapar(String(s.venta_id ?? '').slice(0, 8))}</span> · <b>${s.total == null ? '—' : pesos(s.total)}</b>
+          · vendido ${s.venta_creado_en ? fecha(s.venta_creado_en) : '—'}</div>
+        <div class="justificacion">${escapar(s.motivo)}</div>
+        <div class="acciones">
+          <button type="button" data-accion="aprobar-cancelacion">Aprobar</button>
+          <button type="button" class="peligro" data-accion="rechazar-cancelacion">Rechazar</button>
+          <span class="aviso">${escapar(erroresCancelacion[s.id] ?? '')}</span>
+        </div>
+      </div>`).join('');
+}
 
 async function cargar() {
   const datos = await (await fetch('/api/cuentas')).json();
@@ -136,7 +175,31 @@ document.body.addEventListener('click', async (evento) => {
   const accion = evento.target.dataset?.accion;
   if (!accion) return;
 
-  if (accion === 'aprobar' || accion === 'rechazar') {
+  if (accion === 'aprobar-cancelacion' || accion === 'rechazar-cancelacion') {
+    const nodo = evento.target.closest('.solicitud');
+    const aviso = nodo.querySelector('.aviso');
+    for (const b of nodo.querySelectorAll('button')) b.disabled = true;
+    try {
+      const respuesta = await fetch(`/api/solicitudes/${nodo.dataset.id}/resolver`, {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ aprobar: accion === 'aprobar-cancelacion' }),
+      });
+      const datos = await respuesta.json().catch(() => ({}));
+      if (!respuesta.ok) {
+        erroresCancelacion[nodo.dataset.id] = datos.error ?? 'No se pudo resolver.';
+        aviso.textContent = erroresCancelacion[nodo.dataset.id];
+        for (const b of nodo.querySelectorAll('button')) b.disabled = false;
+        return;
+      }
+    } catch {
+      aviso.textContent = 'Sin red. Intenta otra vez.';
+      for (const b of nodo.querySelectorAll('button')) b.disabled = false;
+      return;
+    }
+    delete erroresCancelacion[nodo.dataset.id];
+    cancelacionesPintadas = '';
+    await cargarCancelaciones();
+  } else if (accion === 'aprobar' || accion === 'rechazar') {
     const nodo = evento.target.closest('.solicitud');
     const aviso = nodo.querySelector('.aviso');
     const cuerpo = accion === 'aprobar' ? { aprobar: true, roles: rolesDe(nodo) } : { aprobar: false };
@@ -181,6 +244,8 @@ document.body.addEventListener('click', async (evento) => {
 });
 
 await cargar();
+await cargarCancelaciones();
+setInterval(cargarCancelaciones, 5000);
 </script>
 </body>
 </html>

@@ -1022,6 +1022,9 @@ $('tickets').addEventListener('toggle', cargarTickets);
 // al abrir el formulario, asi un doble clic o un reintento no devuelven dos veces.
 let ticketAbierto = null;
 let idCancelacion = null;
+// Cancelacion de ticket completo que paso los 5 minutos y espera al dueño (Issue #200).
+let aprobacionCancelar = null;
+let esperando = null;
 
 $('lista-tickets').addEventListener('click', (e) => {
   const fila = e.target.closest('[data-ticket]');
@@ -1046,7 +1049,7 @@ async function abrirTicket(id) {
 }
 
 $('ticket-cerrar').addEventListener('click', () => $('dialogo-ticket').close());
-$('dialogo-ticket').addEventListener('close', () => { ticketAbierto = null; idCancelacion = null; $('codigo').focus(); });
+$('dialogo-ticket').addEventListener('close', () => { ticketAbierto = null; idCancelacion = null; aprobacionCancelar = null; $('codigo').focus(); });
 
 // Cancelar pide el motivo dentro de la ventana (nada de prompt()/confirm() nativos,
 // que congelan la pestana): un clic abre el campo, otro clic ya confirmado envia.
@@ -1105,6 +1108,47 @@ $('ticket-contenido').addEventListener('click', async (e) => {
     return;
   }
 
+  if (d.aprobarPin !== undefined || d.enviarDueno !== undefined) {
+    const panel = boton.closest('.aprobacion');
+    const aviso = panel.querySelector('.aviso-aprobacion');
+    aviso.textContent = '';
+    const peticion = { motivo: aprobacionCancelar.motivo, caja: cajaActual() };
+    if (d.aprobarPin !== undefined) {
+      const campoPin = panel.querySelector('.pin-dueno');
+      if (!/^\d{6}$/.test(campoPin.value)) { aviso.textContent = 'El PIN es de 6 dígitos.'; campoPin.focus(); return; }
+      peticion.aprobador = panel.querySelector('.aprobador').value;
+      peticion.pin = campoPin.value;
+    } else {
+      peticion.solicitar = true;
+    }
+    for (const b of panel.querySelectorAll('button')) b.disabled = true;
+    let r, cuerpo;
+    try {
+      r = await fetch(`/api/ventas/${ticketAbierto.id}/cancelar`, {
+        method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(peticion),
+      });
+      cuerpo = await r.json();
+    } catch {
+      for (const b of panel.querySelectorAll('button')) b.disabled = false;
+      aviso.textContent = 'Sin red: no se pudo confirmar la cancelación. Reabre el ticket antes de devolver dinero o mercancía.';
+      return;
+    }
+    if (r.status === 202) {
+      panel.innerHTML = `<p class="esperando">Esperando aprobación del dueño…</p>
+        <p class="nota">Puedes cerrar esta ventana: avisaremos aquí cuando responda.</p>`;
+      esperarAprobacion(cuerpo.solicitud_id, ticketAbierto.id);
+      return;
+    }
+    if (!r.ok) {
+      for (const b of panel.querySelectorAll('button')) b.disabled = false;
+      aviso.textContent = cuerpo.error ?? 'No se pudo cancelar.';
+      if (d.aprobarPin !== undefined) { panel.querySelector('.pin-dueno').value = ''; panel.querySelector('.pin-dueno').focus(); }
+      return;
+    }
+    await terminarCancelacion(r, cuerpo, { linea: undefined, cantidad: 1 });
+    return;
+  }
+
   if (d.confirmarLinea || d.confirmarTodo !== undefined) {
     const form = boton.closest('.form-cancelar');
     const campoMotivo = form.querySelector('.motivo-cancelar');
@@ -1138,28 +1182,97 @@ $('ticket-contenido').addEventListener('click', async (e) => {
       $('ticket-aviso').style.color = '#D72B32';
       return;
     }
-    const pieza = d.confirmarLinea ? (cantidad > 1 ? 'las piezas' : 'la pieza') : 'las piezas';
-    $('ticket-aviso').textContent = r.ok
-      ? `${d.confirmarLinea ? 'Pieza cancelada' : 'Ticket cancelado'}. Devuelve ${pesos(cuerpo.devuelto ?? 0)} y regresa ${pieza} al anaquel.`
-        + (cuerpo.dolarones ? ` Los ${dolares(cuerpo.dolarones)} regresaron al socio o al mismo vale, con su vencimiento original.` : '')
-      : (cuerpo.error ?? 'No se pudo cancelar.');
-    $('ticket-aviso').style.color = r.ok ? '#1f7a4d' : '#D72B32';
-    idCancelacion = null;
-    const aviso = $('ticket-aviso').textContent;
-    await abrirTicket(ticketAbierto.id);
-    $('ticket-aviso').textContent = aviso;
-    // El comprobante sale solo la primera vez; un reenvio (duplicada, ya_estaba) se reimprime con su boton.
-    if (r.ok && !cuerpo.duplicada && !cuerpo.ya_estaba && ticketAbierto) {
-      const i = ticketAbierto.devoluciones.findIndex((x) => x.id === cuerpo.id);
-      if (!d.confirmarLinea || i >= 0) {
-        await imprimirComprobante(d.confirmarLinea ? comprobanteDevolucion(ticketAbierto, i) : comprobanteCancelacion(ticketAbierto));
-      }
+    // Pasados 5 minutos del cobro el cajero necesita al dueño: se le ofrece en esta misma ventana.
+    if (d.confirmarTodo !== undefined && r.status === 403 && cuerpo.requiere_aprobacion) {
+      aprobacionCancelar = { motivo };
+      idCancelacion = null;
+      $('ticket-aviso').textContent = '';
+      $('form-todo').innerHTML = panelAprobacion(cuerpo);
+      $('form-todo').querySelector('.pin-dueno')?.focus();
+      return;
     }
-    await cargarTickets();
-    await actualizarCorte();
-    await cargarCatalogo();          // la pieza devuelta vuelve a tener existencia
+    await terminarCancelacion(r, cuerpo, { linea: d.confirmarLinea, cantidad });
   }
 });
+
+/** Lo que sigue a una cancelacion enviada (pieza o ticket): aviso, ticket al dia, comprobante y existencias. */
+async function terminarCancelacion(r, cuerpo, { linea, cantidad }) {
+  const pieza = linea ? (cantidad > 1 ? 'las piezas' : 'la pieza') : 'las piezas';
+  $('ticket-aviso').textContent = r.ok
+    ? `${linea ? 'Pieza cancelada' : 'Ticket cancelado'}. Devuelve ${pesos(cuerpo.devuelto ?? 0)} y regresa ${pieza} al anaquel.`
+      + (cuerpo.dolarones ? ` Los ${dolares(cuerpo.dolarones)} regresaron al socio o al mismo vale, con su vencimiento original.` : '')
+    : (cuerpo.error ?? 'No se pudo cancelar.');
+  $('ticket-aviso').style.color = r.ok ? '#1f7a4d' : '#D72B32';
+  idCancelacion = null;
+  const aviso = $('ticket-aviso').textContent;
+  await abrirTicket(ticketAbierto.id);
+  $('ticket-aviso').textContent = aviso;
+  // El comprobante sale solo la primera vez; un reenvio (duplicada, ya_estaba) se reimprime con su boton.
+  if (r.ok && !cuerpo.duplicada && !cuerpo.ya_estaba && ticketAbierto) {
+    const i = ticketAbierto.devoluciones.findIndex((x) => x.id === cuerpo.id);
+    if (!linea || i >= 0) {
+      await imprimirComprobante(linea ? comprobanteDevolucion(ticketAbierto, i) : comprobanteCancelacion(ticketAbierto));
+    }
+  }
+  await cargarTickets();
+  await actualizarCorte();
+  await cargarCatalogo();          // la pieza devuelta vuelve a tener existencia
+}
+
+/** Las dos salidas cuando el ticket ya paso la ventana de 5 minutos: PIN del dueño aquí, o pedirlo a distancia. */
+function panelAprobacion({ error, duenos = [] }) {
+  return `<div class="aprobacion form-cancelar">
+    <p class="nota" style="color:#D72B32;margin:0">${escapar(error)}</p>
+    <h3>Aprobar aquí con PIN del dueño</h3>
+    ${duenos.length === 0
+      ? '<p class="nota">Ningún dueño tiene PIN. Usa «Enviar al dueño».</p>'
+      : `<select class="aprobador">${duenos.map((u) => `<option value="${escapar(u.correo)}">${escapar(u.nombre || u.correo)}</option>`).join('')}</select>
+         <input type="password" class="pin-dueno" inputmode="numeric" maxlength="6" autocomplete="off" placeholder="PIN del dueño (6 dígitos)">
+         <div class="botones"><button type="button" class="quitar" data-aprobar-pin>Aprobar con PIN</button></div>`}
+    <h3>O que lo apruebe a distancia</h3>
+    <div class="botones"><button type="button" class="secundario" data-enviar-dueno>Enviar al dueño</button></div>
+    <div class="aviso-dialogo aviso-aprobacion"></div>
+  </div>`;
+}
+
+/** Pregunta cada 5 s si el dueño ya respondió; la caja puede seguir cobrando mientras tanto. */
+function esperarAprobacion(solicitudId, ticketId) {
+  clearInterval(esperando?.timer);
+  esperando = { solicitudId, ticketId, consultando: false, timer: setInterval(consultarAprobacion, 5000) };
+}
+
+async function consultarAprobacion() {
+  if (!esperando || esperando.consultando) return;
+  const { solicitudId, ticketId } = esperando;
+  esperando.consultando = true;
+  let estado;
+  try {
+    const r = await fetch(`/api/solicitudes/${solicitudId}`);
+    const cuerpo = await r.json();
+    estado = r.ok ? cuerpo.estado : (r.status === 404 ? 'perdida' : 'pendiente');
+  } catch { estado = 'pendiente'; }   // sin red: se vuelve a preguntar
+  if (!esperando || esperando.solicitudId !== solicitudId) return;
+  esperando.consultando = false;
+  if (estado === 'pendiente') return;
+
+  clearInterval(esperando.timer);
+  esperando = null;
+  const aprobada = estado === 'aprobada';
+  const texto = aprobada ? 'El dueño aprobó la cancelación del ticket.'
+    : estado === 'rechazada' ? 'El dueño rechazó la cancelación: el ticket sigue vigente.'
+    : 'No se encontró la solicitud de cancelación.';
+  const abierto = $('dialogo-ticket').open && ticketAbierto?.id === ticketId;
+  if (abierto) {
+    await abrirTicket(ticketId);
+    $('ticket-aviso').textContent = aprobada
+      ? `${texto} Devuelve ${pesos(comprobanteCancelacion(ticketAbierto).dinero)} y regresa las piezas al anaquel.` : texto;
+    $('ticket-aviso').style.color = aprobada ? '#1f7a4d' : '#D72B32';
+    if (aprobada && ticketAbierto?.cancelada) await imprimirComprobante(comprobanteCancelacion(ticketAbierto));
+  } else {
+    $('aviso').textContent = `${texto} (ticket ${ticketId.slice(0, 8)})`;
+  }
+  if (aprobada) { await cargarTickets(); await actualizarCorte(); await cargarCatalogo(); }
+}
 
 /** Hoja de la devolucion para que el cliente firme; se guarda con el corte. */
 async function imprimirComprobante(datos) {
