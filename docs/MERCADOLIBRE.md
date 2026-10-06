@@ -38,7 +38,8 @@ Abre PowerShell y ejecuta estos comandos desde tu computadora (solo necesitas ha
 
 ### a. Generar `ML_LLAVE_TOKENS` (32 bytes en base64):
 ```powershell
-$bytes = [System.Security.Cryptography.RandomNumberGenerator]::GetBytes(32)
+$bytes = New-Object byte[] 32
+[System.Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($bytes)
 [Convert]::ToBase64String($bytes)
 ```
 Copia el resultado (una cadena larga con letras y números). Este es tu `ML_LLAVE_TOKENS`.
