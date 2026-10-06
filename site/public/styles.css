@@ -25,7 +25,6 @@ p { line-height: 1.6; }
 .brand { width: 222px; flex-shrink: 0; }
 .header nav, .footer nav { display: flex; align-items: center; gap: 36px; font-weight: 700; }
 .header nav a { text-decoration: none; }
-.header nav a:hover, .footer a:hover { text-decoration: underline; }
 .portal-link { background: var(--yellow); border-radius: 4px; padding: 12px 18px; }
 .hero { display: grid; grid-template-columns: 48% 52%; min-height: 550px; background: var(--navy); color: var(--white); }
 .hero-copy { padding: 52px 48px 52px max(56px, calc((100vw - 1280px) / 2)); align-self: center; }
@@ -34,20 +33,21 @@ p { line-height: 1.6; }
 .hero .location::before { background: var(--yellow); }
 .hero .location { margin-bottom: 16px; }
 h1 { font-size: clamp(46px, 6.1vw, 88px); line-height: 1.03; letter-spacing: -.055em; }
-h1 span { color: var(--yellow); }
+h1 .title-line { display: block; }
+h1 .title-line:last-child { color: var(--yellow); }
 .intro { max-width: 445px; font-size: 18px; margin-top: 24px; }
 .actions { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-top: 24px; }
 .hero-hours { margin-top: 18px; font-size: 14px; }
 .button { display: inline-flex; align-items: center; justify-content: center; gap: 12px; min-height: 54px; padding: 15px 22px; border: 2px solid transparent; border-radius: 4px; text-decoration: none; font-size: 16px; font-weight: 700; line-height: 1.3; }
 .button svg { width: 24px; height: 24px; }
-.button:hover { transform: translateY(-2px); }
 .button-navy { background: var(--navy); color: var(--white); }
 .button-yellow { background: var(--yellow); color: var(--navy); }
 .button-outline { border-color: var(--white); color: var(--white); }
 .hero a:focus-visible, .dolarones a:focus-visible { outline-color: var(--yellow); }
 .text-link { font-weight: 700; line-height: 1.5; }
-.hero-art { position: relative; min-width: 0; overflow: hidden; }
-.hero-art > img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; object-position: 48% center; }
+.hero-art { position: relative; min-width: 0; }
+.hero-image { position: absolute; inset: 0; overflow: hidden; }
+.hero-image > img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; object-position: 48% center; }
 .hero-art figcaption { position: absolute; inset: auto 0 0; padding: 12px 20px; background: var(--navy); color: var(--white); font-size: 12px; line-height: 1.5; }
 .discovery-strip { background: var(--yellow); padding: 15px 24px; text-align: center; }
 .discovery-strip p { font-size: 17px; font-weight: 700; line-height: 1.4; }
@@ -57,7 +57,7 @@ h2 { font-size: clamp(36px, 3.35vw, 50px); line-height: 1.12; letter-spacing: -.
 .discover-heading p { max-width: 470px; font-size: 18px; margin-block: 25px 22px; }
 .assortment-intro { font-size: 17px; margin-bottom: 14px; }
 .assortment ul { list-style: none; margin: 0; padding: 0; }
-.assortment li { border-top: 1px solid var(--navy); padding: 22px 0; display: flex; align-items: center; justify-content: space-between; gap: 20px; font-size: clamp(23px, 2.1vw, 30px); font-weight: 700; letter-spacing: -.035em; }
+.assortment li { border-top: 1px solid var(--navy); font-size: clamp(23px, 2.1vw, 30px); font-weight: 700; letter-spacing: -.035em; }
 .assortment li:last-child { border-bottom: 1px solid var(--navy); }
 .assortment svg { width: 38px; height: 38px; color: var(--red); }
 .availability { margin-top: 16px; font-size: 14px; max-width: 380px; }
@@ -93,6 +93,48 @@ dd { margin: 0; line-height: 1.5; }
 .footer { display: flex; align-items: center; justify-content: space-between; gap: 24px; padding-block: 36px; font-size: 13px; }
 .footer-brand { width: 160px; flex-shrink: 0; }
 .footer nav { gap: 24px; }
+/* A printed visit tag: only its paper moves, the link stays put. */
+.visit-tag { position: absolute; top: 28px; right: 32px; width: 148px; z-index: 1; text-decoration: none; }
+.visit-tag-paper { position: relative; display: block; padding: 34px 18px 24px; background: var(--red); color: var(--white); text-align: center; border-radius: 18px 18px 3px 3px; transform: rotate(-7deg); transform-origin: 50% 12px; box-shadow: 4px 6px 0 rgb(22 54 107 / .2); }
+.visit-tag-paper::before { content: ""; position: absolute; top: 10px; left: calc(50% - 4px); width: 8px; height: 8px; border-radius: 50%; background: var(--white); }
+.visit-tag small { display: block; margin-bottom: 9px; font-size: 12px; font-weight: 700; }
+.visit-tag strong { display: block; font-family: "Arial Black", "Segoe UI", sans-serif; font-size: 24px; line-height: 1.05; letter-spacing: -.045em; }
+.category-link { position: relative; display: flex; align-items: center; justify-content: space-between; gap: 20px; padding: 22px 0; text-decoration: none; }
+.category-link > span { position: relative; isolation: isolate; }
+.category-link > span::before { content: ""; position: absolute; inset: 0 -5px; background: var(--yellow); z-index: -1; transform: scaleX(0); transform-origin: left; }
+.discovery-strip span { display: inline-block; }
+.button, .portal-link { transition: background-color 150ms ease, color 150ms ease, box-shadow 180ms ease; }
+.button > span, .button > svg, .portal-link > span, .text-link > span { display: inline-block; transition: transform 180ms ease; }
+.category-link svg, .category-link > span::before, .visit-tag-paper { transition: transform 180ms ease; }
+a:focus-visible, a:focus-visible > *, a:focus-visible > span::before { transition: none; }
+.category-link:focus-visible > span::before { transform: scaleX(1); }
+@media (hover: hover) and (pointer: fine) {
+  .header nav a:hover, .footer a:hover { text-decoration: underline; }
+  .button:hover, .portal-link:hover { box-shadow: 0 4px 0 rgb(22 54 107 / .25); }
+  .button-yellow:hover, .portal-link:hover { background: var(--white); }
+  .button-navy:hover { background: var(--red); }
+  .button-outline:hover { background: var(--white); color: var(--navy); }
+  .button:hover > span, .portal-link:hover > span, .text-link:hover > span { transform: translate(2px, -2px); }
+  .button:hover > svg { transform: translateX(2px); }
+  .category-link:hover > span::before { transform: scaleX(1); }
+  .category-link:hover svg { transform: rotate(7deg); }
+  .visit-tag:hover .visit-tag-paper { transform: rotate(-4deg); }
+}
+@media (prefers-reduced-motion: no-preference) {
+  .title-line { animation: title-settle 650ms cubic-bezier(.165,.84,.44,1) backwards; }
+  .title-line:last-child { animation-delay: 80ms; }
+  .hero-image > img { animation: image-settle 1000ms cubic-bezier(.165,.84,.44,1) backwards; }
+  .visit-tag-paper { animation: tag-settle 750ms 160ms cubic-bezier(.165,.84,.44,1) backwards; }
+  .discovery-strip .motion-enter { animation: star-settle 550ms cubic-bezier(.165,.84,.44,1); }
+  .visit-details.motion-enter { animation: paper-settle 650ms cubic-bezier(.165,.84,.44,1); }
+  .dolarones-symbol.motion-enter { animation: symbol-settle 650ms cubic-bezier(.165,.84,.44,1); }
+  @keyframes title-settle { from { transform: translateY(16px); } to { transform: translateY(0); } }
+  @keyframes image-settle { from { transform: scale(1.045); } to { transform: scale(1); } }
+  @keyframes tag-settle { from { transform: translateY(-12px) rotate(-16deg); } to { transform: translateY(0) rotate(-7deg); } }
+  @keyframes star-settle { from { transform: rotate(-30deg) scale(.85); } to { transform: rotate(0) scale(1); } }
+  @keyframes paper-settle { from { transform: translateY(12px) rotate(2deg); } to { transform: translateY(0) rotate(0); } }
+  @keyframes symbol-settle { from { transform: rotate(-14deg); } to { transform: rotate(-8deg); } }
+}
 @media (max-width: 1100px) {
   .wrap { width: calc(100% - 64px); }
   .hero-copy { padding: 46px 28px 46px 32px; }
@@ -123,7 +165,7 @@ dd { margin: 0; line-height: 1.5; }
   .button { font-size: 15px; min-height: 52px; padding: 13px 18px; }
   .hero .button { gap: 8px; padding-inline: 12px; }
   .hero-hours { margin-top: 16px; font-size: 13px; }
-  .hero-art > img { position: static; height: auto; aspect-ratio: 1.5; object-fit: cover; }
+  .hero-image { position: relative; aspect-ratio: 1.5; }
   .hero-art figcaption { position: static; padding: 10px 24px; font-size: 11px; }
   .discovery-strip { padding: 13px 15px; }
   .discovery-strip p { font-size: 12px; }
@@ -131,7 +173,12 @@ dd { margin: 0; line-height: 1.5; }
   .discover { grid-template-columns: 1fr; gap: 38px; padding-block: 52px; }
   h2 { font-size: 37px; }
   .discover-heading p { font-size: 17px; margin-block: 20px; }
-  .assortment li { font-size: 25px; padding-block: 18px; }
+  .assortment li { font-size: 25px; }
+  .category-link { padding-block: 18px; }
+  .visit-tag { width: 100px; top: 16px; right: 18px; }
+  .visit-tag-paper { padding: 24px 10px 16px; }
+  .visit-tag strong { font-size: 16px; }
+  .visit-tag small { font-size: 10px; }
   .assortment svg { width: 32px; height: 32px; }
   .how { padding-block: 28px 50px; }
   .how-heading h2 { font-size: 30px; }
@@ -171,5 +218,7 @@ dd { margin: 0; line-height: 1.5; }
 }
 @media (prefers-reduced-motion: reduce) {
   html { scroll-behavior: auto; }
-  .button:hover { transform: none; }
+  .button > span, .button > svg, .portal-link > span, .text-link > span, .category-link svg { transform: none !important; }
+  .visit-tag-paper { transform: rotate(-7deg) !important; }
+  *, *::before, *::after { animation: none !important; transition: none !important; }
 }

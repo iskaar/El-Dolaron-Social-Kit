@@ -114,6 +114,12 @@
       "format": "CSS"
     },
     {
+      "file": "site/public/motion.js",
+      "title": "Movimiento puntual del sitio público",
+      "description": "Activa una sola entrada por acento visible; respeta movimiento reducido y conserva el contenido sin JavaScript.",
+      "format": "JS"
+    },
+    {
       "file": "site/public/assets/hero-still-life.webp",
       "title": "Ilustración del sitio público",
       "description": "Composición generada con IA para la portada del sitio; es ilustrativa y no representa inventario real. Mostrar con la aclaración de disponibilidad.",
