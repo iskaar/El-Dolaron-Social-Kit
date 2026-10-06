@@ -38,6 +38,8 @@ class SimML {
   rechazarItem: unknown = null;
   items = new Map<string, { id: string; status: string; available_quantity: number }>();
   ordenes = new Map<string, unknown>();
+  /** Categorias que con el token de la app responden 403 y sin token si (#186). 'todo' = tambien sin token. */
+  publicasSoloSinToken: false | true | 'todo' = false;
   busqueda: { status?: number; cuerpo: unknown } = { cuerpo: { paging: { total: 0 }, results: [] } };
 
   de(metodo: string, patron: RegExp) { return this.llamadas.filter((l) => l.metodo === metodo && patron.test(l.ruta)); }
@@ -57,7 +59,12 @@ class SimML {
     }
     if (this.fallar401 > 0 && ruta === '/users/me') { this.fallar401--; return { status: 401, cuerpo: { message: 'invalid access token', error: 'not_found', status: 401 } }; }
     if (metodo === 'GET' && ruta === '/users/me') return { cuerpo: { id: 555, nickname: 'TIENDA', tags: this.tags } };
+    const publica = ruta.startsWith('/sites/MLM/domain_discovery/search') || /^\/categories\//.test(ruta);
+    if (metodo === 'GET' && publica && this.publicasSoloSinToken && (l.auth || this.publicasSoloSinToken === 'todo')) {
+      return { status: 403, cuerpo: { message: 'forbidden', error: 'forbidden', status: 403, cause: [] } };
+    }
     if (metodo === 'GET' && ruta.startsWith('/sites/MLM/domain_discovery/search')) {
+      if (ruta.includes('sin-resultados')) return { cuerpo: [] };
       return { cuerpo: [
         { domain_id: 'MLM-PANTS', domain_name: 'Pantalones', category_id: 'MLM194175', category_name: 'Pantalones' },
         { domain_id: 'MLM-SHORTS', domain_name: 'Shorts', category_id: 'MLM1234', category_name: 'Shorts' },
@@ -853,3 +860,37 @@ test('referencia: sin cuenta conectada responde disponible false', () => conML(a
   assert.equal(r.cuerpo.disponible, false);
   assert.equal(t.sim.de('GET', /^\/sites\/MLM\/search/).length, 0);
 }, false));
+
+/* ---------- categoria (Issue #186) ---------- */
+
+test('preparar: si ML rechaza categorías con el token, las pide sin token', () => conML(async (t) => {
+  t.sim.publicasSoloSinToken = true;
+  const r = await t.pedir(`/api/ml/preparar/${pieza(t)}`, {});
+  assert.equal(r.status, 200, JSON.stringify(r.cuerpo));
+  assert.equal(r.cuerpo.propuesta.categoria_id, 'MLM194175');
+  assert.ok(r.cuerpo.propuesta.atributos.length > 0, 'los atributos también llegan sin token');
+  const sinToken = t.sim.llamadas.filter((l) => l.auth === null).map((l) => l.ruta.split('?')[0]);
+  assert.deepEqual(sinToken, ['/sites/MLM/domain_discovery/search', '/categories/MLM194175/attributes']);
+}));
+
+test('preparar: si ML no contesta categorías, lo dice y no inventa una', () => conML(async (t) => {
+  t.sim.publicasSoloSinToken = 'todo';
+  const r = await t.pedir(`/api/ml/preparar/${pieza(t)}`, {});
+  assert.equal(r.status, 200, JSON.stringify(r.cuerpo));
+  assert.equal(r.cuerpo.propuesta.categoria_id, null);
+  assert.ok(r.cuerpo.propuesta.avisos.some((a: string) => a.startsWith('No se pudieron pedir categorías')));
+  assert.ok(r.cuerpo.propuesta.avisos.some((a: string) => a.includes('Buscar categoría')));
+}));
+
+test('preparar: busca categorías con otro texto y lo devuelve', () => conML(async (t) => {
+  const id = pieza(t);
+  const sin = await t.pedir(`/api/ml/preparar/${id}`, { consulta: 'sin-resultados' });
+  assert.equal(sin.cuerpo.propuesta.categoria_id, null);
+  const r = await t.pedir(`/api/ml/preparar/${id}`, { consulta: '  pantalon   de   mezclilla ' });
+  assert.equal(r.cuerpo.propuesta.consulta, 'pantalon de mezclilla');
+  assert.equal(r.cuerpo.propuesta.categoria_id, 'MLM194175');
+  const ultima = t.sim.de('GET', /^\/sites\/MLM\/domain_discovery/).at(-1)!;
+  assert.equal(ultima.ruta, '/sites/MLM/domain_discovery/search?q=pantalon%20de%20mezclilla&limit=4');
+  // Categoria vacia = sin elegir, no un error.
+  assert.equal((await t.pedir(`/api/ml/preparar/${id}`, { categoria_id: '', consulta: 'jeans' })).status, 200);
+}));
