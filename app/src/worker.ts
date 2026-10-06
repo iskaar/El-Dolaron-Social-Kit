@@ -23,6 +23,7 @@ import { registrarSocio, buscarSocio, buscarPorCodigo, basesListas, sentenciasDe
 import { registrarCorte, registrarRetiro, ultimoCorte, cajaDe } from './corte.ts';
 import { portal, llegada, vincular } from './portal.ts';
 import { sentenciasVale, buscarVale, valeDeVenta, valeUsadoEnVenta, reimprimirVale, valesAbiertos } from './vales.ts';
+import { catalogoPublico } from './catalogo.ts';
 import { rutaML, recibirNotificacion, conciliarSeguro, sincronizar } from './mercadolibre.ts';
 import { pedirDescuento, validarDescuento, listarDescuentos, listarDuenos } from './descuentos.ts';
 
@@ -1413,6 +1414,8 @@ export default {
           respuesta.headers.set('x-content-type-options', 'nosniff');
           return respuesta;
         }
+        const publico = await catalogoPublico(request, env, url);
+        if (publico) return publico;
         if (!pathname.startsWith('/api/portal/') || pathname === '/api/portal/llegada')
           return json({ error: 'Ruta no encontrada.' }, 404);
         try { return await portal(request, env, url); }
