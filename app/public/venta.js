@@ -5,14 +5,42 @@
  * en el navegador; las pruebas la importan desde aqui.
  */
 
-/** `dolarones` es la parte del total pagada con Dolarones: el efectivo se compara contra el resto. */
-export function totales(lineas, efectivo = 0, dolarones = 0) {
+/** Tope de un descuento, en % del ticket (decision de Isaac del 28/09, Issue #119). */
+export const TOPE_DESCUENTO = 50;
+
+/**
+ * Cuanto se descuenta, en centavos, para un descuento pedido ({ tipo, valor }:
+ * 'porcentaje' con valor en % entero, o 'monto' con valor en centavos) sobre un
+ * ticket de `subtotal` centavos. La usan la caja (para mostrar) y el servidor
+ * (para cobrar): ninguno acepta lo que el otro rechazaria.
+ */
+export function descuentoDe({ tipo, valor }, subtotal) {
+  if (!Number.isInteger(subtotal) || subtotal <= 0) return { error: 'El ticket esta vacio.' };
+  if (tipo !== 'porcentaje' && tipo !== 'monto') return { error: 'Tipo de descuento invalido.' };
+  if (!Number.isInteger(valor) || valor < 1) {
+    return { error: tipo === 'porcentaje' ? 'El porcentaje debe ser un entero.' : 'El monto debe ser mayor a cero.' };
+  }
+  const monto = tipo === 'porcentaje' ? Math.floor((subtotal * valor) / 100) : valor;
+  if (monto < 1) return { error: 'El descuento es menor a un centavo.' };
+  if (monto * 100 > subtotal * TOPE_DESCUENTO) return { error: `El descuento no puede pasar de ${TOPE_DESCUENTO}% del ticket.` };
+  return { monto };
+}
+
+/**
+ * `dolarones` es la parte del total pagada con Dolarones: el efectivo se compara
+ * contra el resto. `descuento` ya viene aprobado y en centavos: `total` es lo
+ * que vale el ticket despues de restarlo.
+ */
+export function totales(lineas, efectivo = 0, dolarones = 0, descuento = 0) {
   const piezas = lineas.reduce((suma, l) => suma + l.cantidad, 0);
-  const total = lineas.reduce((suma, l) => suma + l.precio * l.cantidad, 0);
+  const subtotal = lineas.reduce((suma, l) => suma + l.precio * l.cantidad, 0);
+  const total = subtotal - descuento;
   const aPagar = total - dolarones;
   const diferencia = efectivo - aPagar;
   return {
     piezas,
+    subtotal,
+    descuento,
     total,
     aPagar,
     cambio: Math.max(0, diferencia),

@@ -47,6 +47,11 @@
   </section>
 
   <section class="panel">
+    <h2 id="titulo-descuentos">Descuentos por aprobar</h2>
+    <div id="descuentos"></div>
+  </section>
+
+  <section class="panel">
     <h2 id="titulo-solicitudes">Solicitudes de acceso</h2>
     <div id="solicitudes"></div>
   </section>
@@ -91,7 +96,13 @@ const pesos = (centavos) => (centavos / 100).toLocaleString('es-MX', { style: 'c
 // Se revisa cada 5 s mientras la pagina esta abierta; si nada cambio no se repinta,
 // asi un error a la vista no se borra solo.
 let cancelacionesPintadas = '';
-const erroresCancelacion = {};
+const erroresSolicitud = {};   // por id de solicitud (cancelaciones y descuentos)
+// La pestana cuenta lo que espera al dueno, aunque la tenga en segundo plano.
+const esperando = { cancelaciones: 0, descuentos: 0 };
+const contar = () => {
+  const n = esperando.cancelaciones + esperando.descuentos;
+  document.title = `${n ? `(${n}) ` : ''}El Dolarón — cuentas`;
+};
 async function cargarCancelaciones() {
   let lista;
   try {
@@ -102,6 +113,8 @@ async function cargarCancelaciones() {
   const firma = JSON.stringify(lista);
   if (firma === cancelacionesPintadas) return;
   cancelacionesPintadas = firma;
+  esperando.cancelaciones = lista.length;
+  contar();
   document.getElementById('titulo-cancelaciones').textContent =
     `Cancelaciones por aprobar${lista.length ? ` (${lista.length})` : ''}`;
   document.getElementById('cancelaciones').innerHTML = lista.length === 0
@@ -115,16 +128,51 @@ async function cargarCancelaciones() {
         <div class="acciones">
           <button type="button" data-accion="aprobar-cancelacion">Aprobar</button>
           <button type="button" class="peligro" data-accion="rechazar-cancelacion">Rechazar</button>
-          <span class="aviso">${escapar(erroresCancelacion[s.id] ?? '')}</span>
+          <span class="aviso">${escapar(erroresSolicitud[s.id] ?? '')}</span>
         </div>
       </div>`).join('');
+}
+
+// Descuentos que el cajero pide para el ticket en curso (Issue #119): mismo
+// patron que las cancelaciones, se revisa cada 5 s sin repintar si nada cambio.
+let descuentosPintados = '';
+async function cargarDescuentos() {
+  let lista;
+  try {
+    const r = await fetch('/api/solicitudes/descuentos');
+    if (!r.ok) return;
+    lista = await r.json();
+  } catch { return; }
+  const firma = JSON.stringify(lista);
+  if (firma === descuentosPintados) return;
+  descuentosPintados = firma;
+  esperando.descuentos = lista.length;
+  contar();
+  document.getElementById('titulo-descuentos').textContent =
+    `Descuentos por aprobar${lista.length ? ` (${lista.length})` : ''}`;
+  document.getElementById('descuentos').innerHTML = lista.length === 0
+    ? '<p class="vacio">Nada esperando.</p>'
+    : lista.map((s) => {
+      const cuanto = s.tipo === 'porcentaje' ? `${s.valor}% (${pesos(s.monto)})` : pesos(s.monto);
+      return `
+      <div class="solicitud" data-id="${escapar(s.id)}">
+        <div><b>${escapar(s.nombre || s.correo)}</b> pide <b>${cuanto}</b> de descuento
+          <span class="correo">${escapar(s.correo)} · pidió ${fecha(s.creado_en)}</span></div>
+        <div>Ticket ${pesos(s.subtotal)} → <b>${pesos(s.subtotal - s.monto)}</b></div>
+        <div class="justificacion">${escapar(s.motivo)}</div>
+        <div class="acciones">
+          <button type="button" data-accion="aprobar-descuento">Aprobar</button>
+          <button type="button" class="peligro" data-accion="rechazar-descuento">Rechazar</button>
+          <span class="aviso">${escapar(erroresSolicitud[s.id] ?? '')}</span>
+        </div>
+      </div>`;
+    }).join('');
 }
 
 async function cargar() {
   const datos = await (await fetch('/api/cuentas')).json();
   ROLES = datos.roles;
   CAJAS = datos.cajas ?? [];
-
   const solicitudes = datos.solicitudes.filter((s) => s.tipo === 'acceso');
   document.getElementById('titulo-solicitudes').textContent =
     `Solicitudes de acceso${solicitudes.length ? ` (${solicitudes.length})` : ''}`;
@@ -175,19 +223,20 @@ document.body.addEventListener('click', async (evento) => {
   const accion = evento.target.dataset?.accion;
   if (!accion) return;
 
-  if (accion === 'aprobar-cancelacion' || accion === 'rechazar-cancelacion') {
+  const resolucion = /^(aprobar|rechazar)-(cancelacion|descuento)$/.exec(accion);
+  if (resolucion) {
     const nodo = evento.target.closest('.solicitud');
     const aviso = nodo.querySelector('.aviso');
     for (const b of nodo.querySelectorAll('button')) b.disabled = true;
     try {
       const respuesta = await fetch(`/api/solicitudes/${nodo.dataset.id}/resolver`, {
         method: 'POST', headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ aprobar: accion === 'aprobar-cancelacion' }),
+        body: JSON.stringify({ aprobar: resolucion[1] === 'aprobar' }),
       });
       const datos = await respuesta.json().catch(() => ({}));
       if (!respuesta.ok) {
-        erroresCancelacion[nodo.dataset.id] = datos.error ?? 'No se pudo resolver.';
-        aviso.textContent = erroresCancelacion[nodo.dataset.id];
+        erroresSolicitud[nodo.dataset.id] = datos.error ?? 'No se pudo resolver.';
+        aviso.textContent = erroresSolicitud[nodo.dataset.id];
         for (const b of nodo.querySelectorAll('button')) b.disabled = false;
         return;
       }
@@ -196,9 +245,10 @@ document.body.addEventListener('click', async (evento) => {
       for (const b of nodo.querySelectorAll('button')) b.disabled = false;
       return;
     }
-    delete erroresCancelacion[nodo.dataset.id];
+    delete erroresSolicitud[nodo.dataset.id];
     cancelacionesPintadas = '';
-    await cargarCancelaciones();
+    descuentosPintados = '';
+    await Promise.all([cargarCancelaciones(), cargarDescuentos()]);
   } else if (accion === 'aprobar' || accion === 'rechazar') {
     const nodo = evento.target.closest('.solicitud');
     const aviso = nodo.querySelector('.aviso');
@@ -244,8 +294,8 @@ document.body.addEventListener('click', async (evento) => {
 });
 
 await cargar();
-await cargarCancelaciones();
-setInterval(cargarCancelaciones, 5000);
+await Promise.all([cargarCancelaciones(), cargarDescuentos()]);
+setInterval(() => { cargarCancelaciones(); cargarDescuentos(); }, 5000);
 </script>
 </body>
 </html>

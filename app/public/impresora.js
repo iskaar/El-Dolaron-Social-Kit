@@ -270,6 +270,10 @@ export async function imprimirTicket(venta, lineas) {
     partes.push(renglonMonto(`  ${l.cantidad} x ${pesos(l.precio)}`, pesos(l.precio * l.cantidad)));
   }
   partes.push(separador());
+  if (venta.descuento > 0) {
+    partes.push(renglonMonto('Subtotal', pesos(venta.total + venta.descuento)));
+    partes.push(renglonMonto('Descuento', `-${pesos(venta.descuento)}`));
+  }
   partes.push(renglonMonto('TOTAL', pesos(venta.total)));
   if (venta.dolarones > 0) {
     partes.push(renglonMonto('Dolarones', `-${pesos(venta.dolarones)}`));

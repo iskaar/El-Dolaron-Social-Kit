@@ -60,6 +60,8 @@ export function pintarDetalle(t, { editable = false } = {}) {
   }).join('');
 
   const cifras = [
+    t.descuento ? ['Subtotal', pesos(t.total + t.descuento)] : null,
+    t.descuento ? ['Descuento', `− ${pesos(t.descuento)}`] : null,
     ['Total cobrado', pesos(t.total)],
     t.dolarones ? ['Pagado con Dolarones', dolares(t.dolarones)] : null,
     t.efectivo ? ['Efectivo recibido / cambio', `${pesos(t.efectivo)} / ${pesos(t.cambio)}`] : null,

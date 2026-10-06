@@ -1,4 +1,5 @@
 import { resolverCancelacion } from './cancelaciones.ts';
+import { resolverDescuento } from './descuentos.ts';
 
 /**
  * Centro de cuentas (Issue #75). Cloudflare Access (con Google) dice QUIEN es
@@ -101,9 +102,10 @@ export function permiso(pathname: string, metodo: string): Regla {
   if (ruta === '/api/cajon') return CAJA;
   if (ruta === '/api/cortes' || ruta === '/api/retiros') return CAJA;
   if (ruta === '/api/cajeros' || ruta === '/api/cajeros/entrar' || ruta === '/api/cajeros/salir') return CAJA;
+  if (ruta === '/api/descuentos' || ruta === '/api/descuentos/duenos') return CAJA;   // pedir un descuento (Issue #119, descuentos.ts)
   // Cancelar una venta completa: el cajero solo en los primeros minutos; despues
   // pide aprobacion del dueno (Issue #200, cancelaciones.ts).
-  if (ruta === '/api/solicitudes/cancelaciones') return DUENO;
+  if (ruta === '/api/solicitudes/cancelaciones' || ruta === '/api/solicitudes/descuentos') return DUENO;
   if (/^\/api\/solicitudes\/[^/]+$/.test(ruta) && metodo === 'GET') return CAJA;   // la caja ve como va la suya
   if (ruta === '/api/ventas' || ruta.startsWith('/api/ventas/')) return CAJA;
   if (ruta === '/api/impresiones' || ruta.startsWith('/api/impresiones/')) return CAJA;
@@ -341,7 +343,7 @@ export async function guardarCuenta(request: Request, env: Env): Promise<Respons
   return json({ correo, nombre, roles, activo, caja: guardado?.caja ?? '' });
 }
 
-/** Aprobar o rechazar una solicitud: de acceso (Issue #75) o de cancelacion (Issue #200). */
+/** Aprobar o rechazar una solicitud: de acceso (Issue #75), de cancelacion (Issue #200) o de descuento (Issue #119). */
 export async function resolverSolicitud(id: string, request: Request, env: Env, dueno: string): Promise<Response> {
   const cuerpo = (await request.json().catch(() => ({}))) as { aprobar?: unknown; roles?: unknown };
   const solicitud = await env.DB.prepare(
@@ -352,6 +354,7 @@ export async function resolverSolicitud(id: string, request: Request, env: Env, 
   if (!solicitud) return json({ error: 'La solicitud no existe.' }, 404);
   if (solicitud.estado !== 'pendiente') return json({ error: `Ya estaba ${solicitud.estado}.` }, 409);
   if (solicitud.tipo === 'cancelacion') return resolverCancelacion(env, id, cuerpo.aprobar === true, dueno);
+  if (solicitud.tipo === 'descuento') return resolverDescuento(env, id, cuerpo.aprobar === true, dueno);
   if (solicitud.tipo !== 'acceso') return json({ error: 'Tipo de solicitud desconocido.' }, 400);
 
   const aprobar = cuerpo.aprobar === true;

@@ -24,6 +24,7 @@ import { registrarCorte, registrarRetiro, ultimoCorte, cajaDe } from './corte.ts
 import { portal, llegada, vincular } from './portal.ts';
 import { sentenciasVale, buscarVale, valeDeVenta, valeUsadoEnVenta, reimprimirVale, valesAbiertos } from './vales.ts';
 import { rutaML, recibirNotificacion, conciliarSeguro, sincronizar } from './mercadolibre.ts';
+import { pedirDescuento, validarDescuento, listarDescuentos, listarDuenos } from './descuentos.ts';
 
 interface FilaConfig {
   clave: string;
@@ -592,6 +593,7 @@ async function registrarVenta(request: Request, env: Env, ctx: ExecutionContext,
     id?: unknown; lineas?: unknown; forma_pago?: unknown;
     efectivo?: unknown; creado_en?: unknown;
     cliente_id?: unknown; dolarones?: unknown; codigo_socio?: unknown; codigo_vale?: unknown; caja?: unknown; imprimir_en?: unknown;
+    descuento_id?: unknown;
   };
   const id = String(venta.id ?? '');
   if (!UUID.test(id)) {
@@ -625,6 +627,8 @@ async function registrarVenta(request: Request, env: Env, ctx: ExecutionContext,
     cliente_id:venta.cliente_id ?? null, dolarones:venta.dolarones ?? 0,
     codigo_socio:venta.codigo_socio ?? '', codigo_vale:venta.codigo_vale ?? '',
     caja:venta.caja ?? null,
+    // Solo si lo trae: el hash de las ventas sin descuento no cambia y sus reintentos siguen valiendo.
+    ...(venta.descuento_id ? { descuento_id:venta.descuento_id } : {}),
   });
   const pedidoHash = [...new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(pedido)))]
     .map((b) => b.toString(16).padStart(2, '0')).join('');
@@ -662,7 +666,16 @@ async function registrarVenta(request: Request, env: Env, ctx: ExecutionContext,
     return json({ error: preparado.error }, 400);
   }
 
-  const total = preparado.lineas.reduce((suma, l) => suma + l.precio * l.cantidad, 0);
+  const subtotal = preparado.lineas.reduce((suma, l) => suma + l.precio * l.cantidad, 0);
+  // Un descuento solo entra si el dueno lo aprobo para este mismo ticket (Issue #119).
+  const descuentoId = venta.descuento_id ? String(venta.descuento_id) : null;
+  let descuento = 0;
+  if (descuentoId) {
+    const valido = await validarDescuento(env, descuentoId, subtotal);
+    if (!valido.ok) return json({ error: valido.error }, valido.status);
+    descuento = valido.monto;
+  }
+  const total = subtotal - descuento;
   const efectivo = Math.max(0, Math.round(Number(venta.efectivo ?? 0)));
   const clienteId = venta.cliente_id ? String(venta.cliente_id) : null;
   const codigoVale = String(venta.codigo_vale ?? '');
@@ -697,12 +710,12 @@ async function registrarVenta(request: Request, env: Env, ctx: ExecutionContext,
   const sentencias = [
     env.DB.prepare(
       `insert into ventas (id, total, forma_pago, efectivo, cambio, creado_en, registrado_en, cliente_id, dolarones,
-                           caja, cajero, pedido_hash, imprimir_en)
-       values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                           caja, cajero, pedido_hash, imprimir_en, descuento, descuento_id)
+       values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).bind(id, total, formaPago, efectivo, Math.max(0, efectivo - aPagar), creadoEn, ahora, clienteId, dolarones,
       // Quien cobro sale de Access; la caja es la suya (Issue #105) o la de la
       // computadora. Una venta encolada antes del corte de caja llega sin caja: ''.
-      await cajaDe(env, correo, venta.caja), correo, pedidoHash, imprimirEn),
+      await cajaDe(env, correo, venta.caja), correo, pedidoHash, imprimirEn, descuento, descuentoId),
     ...preparado.lineas.map((l) =>
       env.DB.prepare(
         `insert into venta_lineas (venta_id, producto_id, codigo, nombre, precio, cantidad)
@@ -744,12 +757,15 @@ async function registrarVenta(request: Request, env: Env, ctx: ExecutionContext,
     if (String(error).includes('saldo insuficiente')) {
       return json({ error: 'El saldo de Dolarones cambio. Vuelve a buscar al socio.' }, 409);
     }
+    if (descuentoId && String(error).includes('descuento_id')) {
+      return json({ error: 'Ese descuento ya se uso en otra venta.' }, 409);
+    }
     throw error;
   }
   // Si una pieza publicada en Mercado Libre se agoto, se pausa alla (D1 manda). Despues de responder.
   ctx.waitUntil(conciliarSeguro(env, { productoIds: preparado.lineas.filter((l) => !l.sinInventario).map((l) => l.producto_id) }));
   const respuesta = json({
-    id, total, dolarones, imprimir_en:imprimirEn, cambio: Math.max(0, efectivo - aPagar), ganados: recompensa.ganados,
+    id, total, descuento, dolarones, imprimir_en:imprimirEn, cambio: Math.max(0, efectivo - aPagar), ganados: recompensa.ganados,
     saldo: clienteId ? await saldo(env, clienteId, ahora) : null,
     vale_emitido:vale.emitido,
     vale_usado:await valeUsadoEnVenta(env, id),
@@ -1434,6 +1450,9 @@ export default {
         if (request.method === 'PUT') return await guardarCuenta(request, env);
         return json({ error: 'Metodo no permitido.' }, 405);
       }
+      if (pathname === '/api/descuentos' && request.method === 'POST') return await pedirDescuento(request, env, correo);
+      if (pathname === '/api/descuentos/duenos' && request.method === 'GET') return await listarDuenos(env);
+      if (pathname === '/api/solicitudes/descuentos' && request.method === 'GET') return await listarDescuentos(env);
       if (pathname === '/api/solicitudes/cancelaciones' && request.method === 'GET') return await listarCancelaciones(env);
       const solicitud = pathname.match(/^\/api\/solicitudes\/([^/]+)$/);
       if (solicitud && request.method === 'GET') return await estadoSolicitud(env, solicitud[1], correo);
