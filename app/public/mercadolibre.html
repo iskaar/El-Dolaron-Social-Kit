@@ -505,10 +505,10 @@ function errorEnDialogo(texto) {
     h('div', { class: 'pie-dialogo' }, h('button', { type: 'button', onclick: () => dialogo.close() }, 'Cerrar')));
 }
 
-async function cambiarCategoria(id) {
-  const anterior = f.categoria_id;
+async function cambiarCategoria(id, consulta = prop.consulta) {
+  const anterior = f.categoria_id ?? '';
   ref.categoria.disabled = true;
-  const r = await api(`/api/ml/preparar/${encodeURIComponent(p.id)}`, { metodo: 'POST', cuerpo: { categoria_id: id } });
+  const r = await api(`/api/ml/preparar/${encodeURIComponent(p.id)}`, { metodo: 'POST', cuerpo: { categoria_id: id, consulta } });
   if (!dialogo.open || !f) return;
   if (!r.ok || !r.datos?.propuesta) {
     ref.categoria.disabled = false;
@@ -562,6 +562,7 @@ function guias() { return prop.guia_tallas?.guias ?? []; }
 function faltante() {
   const falta = [];
   if (!f.titulo.trim()) falta.push(prop.usa_family_name ? 'nombre del producto' : 'título');
+  if (!f.categoria_id) falta.push('categoría');
   const c = aCentavos(f.precio);
   if (!c) falta.push('precio válido');
   for (const a of prop.atributos ?? []) if (a.requerido && !valorAtributo(a)) falta.push(a.nombre || a.id);
@@ -587,11 +588,21 @@ function pintarFormulario() {
   const titulo = h('input', { type: 'text', maxLength: 60, value: f.titulo, required: true, autocomplete: 'off',
     oninput: (e) => { f.titulo = e.target.value; revisar(); } });
   ref.contador = h('span', {});
-  const sugerencias = [{ categoria_id: prop.categoria_id, categoria_nombre: prop.categoria_nombre ?? prop.categoria_id, dominio: prop.dominio },
+  // Sin categoria, la primera opcion pide elegir (antes se pintaba "null").
+  const sugerencias = [
+    prop.categoria_id
+      ? { categoria_id: prop.categoria_id, categoria_nombre: prop.categoria_nombre || prop.categoria_id, dominio: prop.dominio }
+      : { categoria_id: '', categoria_nombre: 'Elige una categoría', dominio: '' },
     ...(prop.sugerencias ?? []).filter((s) => s.categoria_id !== prop.categoria_id)];
-  ref.categoria = h('select', { onchange: (e) => cambiarCategoria(e.target.value) },
-    sugerencias.map((s) => h('option', { value: s.categoria_id, selected: s.categoria_id === prop.categoria_id },
+  ref.categoria = h('select', { onchange: (e) => e.target.value && cambiarCategoria(e.target.value) },
+    sugerencias.map((s) => h('option', { value: s.categoria_id, selected: s.categoria_id === (prop.categoria_id ?? ''), disabled: !s.categoria_id },
       `${s.categoria_nombre}${s.dominio ? ` (${s.dominio})` : ''}`)));
+  const buscar = () => { const texto = ref.busqueda.value.trim(); if (texto.length >= 2) cambiarCategoria('', texto); };
+  ref.busqueda = h('input', { id: 'buscar-categoria', type: 'search', maxLength: 80, value: prop.consulta ?? '', autocomplete: 'off',
+    placeholder: 'p. ej. lanzador de hidrogel',
+    onkeydown: (e) => { if (e.key === 'Enter') { e.preventDefault(); buscar(); } } });
+  const filaBusqueda = h('div', { style: 'display:flex;gap:8px' }, ref.busqueda,
+    h('button', { type: 'button', onclick: buscar }, 'Buscar'));
   const precio = h('input', { type: 'text', inputMode: 'decimal', value: f.precio, required: true, autocomplete: 'off',
     oninput: (e) => { f.precio = e.target.value; revisar(); } });
   ref.precioNota = h('div', { class: 'nota' });
@@ -616,6 +627,8 @@ function pintarFormulario() {
         ? 'Mercado Libre arma el título final con este nombre y los atributos.' : null }),
     h('div', { class: 'nota', style: 'margin:-8px 0 12px' }, 'Caracteres: ', ref.contador),
     campo('Categoría', ref.categoria, { ayuda: 'Si la categoría no es la correcta, cámbiala: se recargan los atributos.' }),
+    h('div', { class: 'campo' }, h('label', { htmlFor: 'buscar-categoria' }, 'Buscar categoría'), filaBusqueda,
+      h('div', { class: 'nota' }, 'Describe la pieza con otras palabras y Mercado Libre sugiere categorías.')),
     campo('Precio en Mercado Libre (pesos)', precio, { requerido: true }),
     ref.precioNota,
   ];

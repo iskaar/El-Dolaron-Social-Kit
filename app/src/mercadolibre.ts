@@ -275,6 +275,25 @@ export async function mlFetch(env: Env, ruta: string, init: RequestInit & { json
   throw errorLocal(401, 'no_autorizado', 'Mercado Libre rechazó la sesión.');
 }
 
+/**
+ * Para consultas que ML tambien atiende sin sesion (categorias y sus atributos).
+ * Con el token de esta app algunas responden 403 aunque sin token si contesten
+ * (#186): en ese caso se reintenta sin token. Cualquier otro error se lanza.
+ */
+async function mlPublico(env: Env, ruta: string): Promise<any> {
+  try {
+    return await mlFetch(env, ruta);
+  } catch (error) {
+    if (!(error instanceof ErrorML) || error.local || error.status !== 403) throw error;
+    const respuesta = await fetch(`${API}${ruta}`, { headers: { accept: 'application/json' } });
+    const texto = await respuesta.text();
+    let cuerpo: any = null;
+    try { cuerpo = texto ? JSON.parse(texto) : null; } catch { /* no era JSON */ }
+    if (!respuesta.ok) throw errorDe(respuesta.status, cuerpo, texto);
+    return cuerpo;
+  }
+}
+
 /** Quien es el vendedor y si publica con el modelo de User Products (family_name). */
 async function perfilML(env: Env): Promise<{ id: string; nickname: string; usaFamilyName: boolean }> {
   const yo = await mlFetch(env, '/users/me');
@@ -616,8 +635,10 @@ async function yaPublicada(env: Env, id: string): Promise<boolean> {
 }
 
 async function preparar(env: Env, id: string, request: Request): Promise<Response> {
-  const cuerpo = (await request.json().catch(() => ({}))) as { categoria_id?: unknown } | null;
-  const elegida = cuerpo?.categoria_id === undefined ? '' : String(cuerpo.categoria_id);
+  const cuerpo = (await request.json().catch(() => ({}))) as { categoria_id?: unknown; consulta?: unknown } | null;
+  const elegida = cuerpo?.categoria_id === undefined || cuerpo.categoria_id === '' ? '' : String(cuerpo.categoria_id);
+  // Texto para pedir categorias; sin el, el nombre de la pieza.
+  const buscada = typeof cuerpo?.consulta === 'string' ? cuerpo.consulta.trim().replace(/\s+/g, ' ').slice(0, 80) : '';
   if (elegida && !/^MLM\d+$/.test(elegida)) return json({ error: 'Categoría inválida.' }, 400);
 
   const hallada = await piezaPublicable(env, id);
@@ -630,17 +651,22 @@ async function preparar(env: Env, id: string, request: Request): Promise<Respons
     const { ml_pct, ml_tipo_publicacion } = await config(env);
     const avisos: string[] = [];
 
-    const consulta = encodeURIComponent(tituloML(p.nombre, p.marca) || p.nombre);
-    const encontradas: any[] = await mlFetch(env, `/sites/MLM/domain_discovery/search?q=${consulta}&limit=4`).catch(() => []);
+    const consulta = buscada || tituloML(p.nombre, p.marca) || p.nombre;
+    let encontradas: any[] = [];
+    try {
+      encontradas = await mlPublico(env, `/sites/MLM/domain_discovery/search?q=${encodeURIComponent(consulta)}&limit=4`);
+    } catch (error) {
+      avisos.push(`No se pudieron pedir categorías a Mercado Libre (${error instanceof ErrorML ? error.detalle : String(error)}).`);
+    }
     const sugerencias: Sugerencia[] = (Array.isArray(encontradas) ? encontradas : []).map((s) => ({
       categoria_id: String(s.category_id), categoria_nombre: String(s.category_name ?? ''), dominio: String(s.domain_id ?? ''),
     }));
     const categoria = elegida
       ? sugerencias.find((s) => s.categoria_id === elegida) ?? { categoria_id: elegida, categoria_nombre: '', dominio: '' }
       : sugerencias[0];
-    if (!categoria) avisos.push('Mercado Libre no sugirió ninguna categoría para esta pieza; elige una a mano.');
+    if (!categoria) avisos.push('Mercado Libre no sugirió ninguna categoría; búscala con otras palabras en «Buscar categoría».');
 
-    const attrs: any[] = categoria ? await mlFetch(env, `/categories/${categoria.categoria_id}/attributes`) : [];
+    const attrs: any[] = categoria ? await mlPublico(env, `/categories/${categoria.categoria_id}/attributes`) : [];
     const exigeGuia = attrs.some((a) => (a.id === 'SIZE_GRID_ID' && a.tags?.required) || a.tags?.grid_template_required);
     let guia: { requerida: boolean; guias: any[] } | null = null;
     if (exigeGuia) {
@@ -673,6 +699,7 @@ async function preparar(env: Env, id: string, request: Request): Promise<Respons
         categoria_nombre: categoria?.categoria_nombre ?? null,
         dominio: categoria?.dominio ?? null,
         sugerencias,
+        consulta,
         precio_ml: precio,
         tipo_publicacion: ml_tipo_publicacion,
         atributos: atributosPedidos(attrs, p.marca.trim()),
