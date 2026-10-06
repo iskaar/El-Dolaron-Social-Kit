@@ -406,6 +406,50 @@ async function listarVentas(env: Env, url: URL): Promise<Response> {
   });
 }
 
+/* ---------- referencia de precios del mercado (Issue #182) ---------- */
+
+// Filtro ITEM_CONDITION de la busqueda de ML (ids de valor del sitio MLM).
+const CONDICION_ML: Record<string, string> = { usado: '2230581', nuevo: '2230284' };
+
+/**
+ * GET /api/ml/referencia?q=...&condicion=usado|nuevo|todas. Solo lee: busca en ML
+ * articulos parecidos y resume sus precios en centavos. Si ML no deja buscar
+ * (sin token responde 403), avisa con `disponible: false` en vez de fallar.
+ */
+async function referenciaPrecios(env: Env, url: URL): Promise<Response> {
+  const q = (url.searchParams.get('q') ?? '').trim().replace(/\s+/g, ' ');
+  if (q.length < 2 || q.length > 80) return json({ error: 'Escribe de 2 a 80 caracteres para buscar.' }, 400);
+  const condicion = url.searchParams.get('condicion') ?? 'usado';
+  if (condicion !== 'todas' && !CONDICION_ML[condicion]) return json({ error: 'Condición inválida.' }, 400);
+
+  const filtro = condicion === 'todas' ? '' : `&ITEM_CONDITION=${CONDICION_ML[condicion]}`;
+  const enlace = `https://listado.mercadolibre.com.mx/${encodeURIComponent(q.toLowerCase().replace(/ /g, '-'))}`;
+  let r: any;
+  try {
+    r = await mlFetch(env, `/sites/MLM/search?q=${encodeURIComponent(q)}&limit=50${filtro}`);
+  } catch (error) {
+    const e = error instanceof ErrorML ? error : null;
+    return json({ disponible: false, q, condicion, enlace, status_ml: e?.status ?? 0, detalle: e?.detalle ?? String(error) });
+  }
+  const resultados: any[] = Array.isArray(r?.results) ? r.results : [];
+  const precios = resultados
+    .map((x) => Math.round(Number(x.price) * 100))
+    .filter((c) => Number.isFinite(c) && c > 0)
+    .sort((a, b) => a - b);
+  const mitad = precios.length >> 1;
+  const mediana = precios.length === 0 ? 0
+    : precios.length % 2 ? precios[mitad] : Math.round((precios[mitad - 1] + precios[mitad]) / 2);
+  return json({
+    disponible: true, q, condicion, enlace,
+    total: Number(r?.paging?.total ?? resultados.length),
+    n: precios.length, min: precios[0] ?? 0, mediana, max: precios[precios.length - 1] ?? 0,
+    muestras: resultados.slice(0, 5).map((x) => ({
+      titulo: String(x.title ?? ''), precio: Math.round(Number(x.price) * 100) || 0,
+      condicion: String(x.condition ?? ''), enlace: String(x.permalink ?? ''),
+    })),
+  });
+}
+
 async function guardarConfig(request: Request, env: Env): Promise<Response> {
   const cuerpo = (await request.json().catch(() => ({}))) as { ml_pct?: unknown; ml_tipo_publicacion?: unknown };
   const cambios: [string, string][] = [];
@@ -988,6 +1032,7 @@ export async function rutaML(request: Request, env: Env, url: URL): Promise<Resp
   if (pathname === '/api/ml/conectar' && metodo === 'GET') return conectar(env, url);
   if (pathname === '/api/ml/piezas' && metodo === 'GET') return listarPiezas(env, url);
   if (pathname === '/api/ml/ventas' && metodo === 'GET') return listarVentas(env, url);
+  if (pathname === '/api/ml/referencia' && metodo === 'GET') return referenciaPrecios(env, url);
   const accion = /^\/api\/ml\/(preparar|publicar|pausar|reactivar)\/([^/]+)$/.exec(pathname);
   if (accion && metodo === 'POST') {
     if (accion[1] === 'preparar') return preparar(env, accion[2], request);
