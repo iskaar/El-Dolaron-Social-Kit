@@ -585,6 +585,31 @@ async function guiasDelVendedor(env: Env, vendedor: string, dominio: string): Pr
   }
 }
 
+/* ---------- catalogo (Issue #192) ---------- */
+
+interface CandidatoCatalogo { id: string; nombre: string; foto: string; marca: string; catalogo_obligatorio: boolean }
+
+/**
+ * Productos del catalogo de ML que se parecen a la pieza: traen fotos y datos
+ * oficiales. Solo lectura. Si ML lo niega, el motivo va en `error`.
+ */
+async function candidatosCatalogo(env: Env, texto: string): Promise<{ candidatos: CandidatoCatalogo[]; error?: string }> {
+  try {
+    const r = await mlPublico(env, `/products/search?status=active&site_id=MLM&q=${encodeURIComponent(texto)}&limit=5`);
+    const lista: any[] = Array.isArray(r?.results) ? r.results : [];
+    return {
+      candidatos: lista.slice(0, 5).map((x) => ({
+        id: String(x.id), nombre: String(x.name ?? x.id),
+        foto: String(x.pictures?.[0]?.secure_url ?? x.pictures?.[0]?.url ?? ''),
+        marca: String((Array.isArray(x.attributes) ? x.attributes : []).find((a: any) => a.id === 'BRAND')?.value_name ?? ''),
+        catalogo_obligatorio: x.settings?.listing_strategy === 'catalog_required',
+      })),
+    };
+  } catch (error) {
+    return { candidatos: [], error: `Mercado Libre no dejó buscar en su catálogo (${error instanceof ErrorML ? `${error.status} ${error.detalle}` : String(error)}).` };
+  }
+}
+
 async function yaPublicada(env: Env, id: string): Promise<boolean> {
   const previa = await leerPublicacion(env, id);
   return !!previa && !(previa.estado === 'cerrada' || (previa.estado === 'error' && !previa.ml_item_id));
@@ -632,6 +657,9 @@ async function preparar(env: Env, id: string, request: Request): Promise<Respons
       else if (guias.length === 0) avisos.push('Esta categoría exige guía de tallas y no tienes ninguna: créala en Mercado Libre antes de publicar.');
     }
 
+    // Lo nuevo de marca puede ir al catalogo con fotos oficiales; la ropa, con fotos propias.
+    const catalogo = p.categoria !== 'ropa' && p.marca.trim() ? await candidatosCatalogo(env, consulta) : null;
+
     const precio = precioML(p.precio, ml_pct);
     if (p.precio > 0 && Math.round((p.precio * (100 + ml_pct)) / 100) < PRECIO_MINIMO) {
       avisos.push('El precio queda por debajo del mínimo de Mercado Libre ($35); se subió a $35.');
@@ -656,6 +684,7 @@ async function preparar(env: Env, id: string, request: Request): Promise<Respons
         dominio: categoria?.dominio ?? null,
         sugerencias,
         consulta,
+        catalogo,
         precio_ml: precio,
         tipo_publicacion: ml_tipo_publicacion,
         atributos: atributosPedidos(attrs, p.marca.trim()),

@@ -38,6 +38,11 @@ class SimML {
   rechazarItem: unknown = null;
   items = new Map<string, { id: string; status: string; available_quantity: number }>();
   ordenes = new Map<string, unknown>();
+  catalogo: { status?: number; cuerpo: unknown } = { cuerpo: { results: [{
+    id: 'MLM2001', name: 'Lanzador SplatRball 800 Pyro', settings: { listing_strategy: 'catalog_required' },
+    pictures: [{ url: 'http://http2.mlstatic.com/a.jpg', secure_url: 'https://http2.mlstatic.com/a.jpg' }],
+    attributes: [{ id: 'BRAND', value_name: 'Splat R Ball' }],
+  }] } };
   /** Categorias que con el token de la app responden 403 y sin token si (#186). 'todo' = tambien sin token. */
   publicasSoloSinToken: false | true | 'todo' = false;
 
@@ -69,6 +74,7 @@ class SimML {
         { domain_id: 'MLM-SHORTS', domain_name: 'Shorts', category_id: 'MLM1234', category_name: 'Shorts' },
       ] };
     }
+    if (metodo === 'GET' && ruta.startsWith('/products/search?')) return this.catalogo;
     if (metodo === 'GET' && ruta === '/categories/MLM194175/attributes') return { cuerpo: ATRIBUTOS };
     if (metodo === 'GET' && /^\/categories\/MLM\d+\/attributes$/.test(ruta)) return { cuerpo: [{ id: 'BRAND', name: 'Marca', value_type: 'string', tags: { required: true } }] };
     if (metodo === 'POST' && ruta === '/catalog/charts/search') {
@@ -843,4 +849,34 @@ test('preparar: busca categorías con otro texto y lo devuelve', () => conML(asy
   assert.equal(ultima.ruta, '/sites/MLM/domain_discovery/search?q=pantalon%20de%20mezclilla&limit=4');
   // Categoria vacia = sin elegir, no un error.
   assert.equal((await t.pedir(`/api/ml/preparar/${id}`, { categoria_id: '', consulta: 'jeans' })).status, 200);
+}));
+
+/* ---------- catalogo (Issue #192) ---------- */
+
+const juguete = (t: Tienda) => pieza(t, { categoria: 'juguetes', nombre: 'SplatRball 800 Pyro Blaster Kit', marca: 'Splat R Ball' });
+
+test('preparar: lo nuevo de marca trae candidatos del catálogo con foto oficial', () => conML(async (t) => {
+  const r = await t.pedir(`/api/ml/preparar/${juguete(t)}`, {});
+  assert.equal(r.status, 200, JSON.stringify(r.cuerpo));
+  assert.deepEqual(r.cuerpo.propuesta.catalogo, { candidatos: [{
+    id: 'MLM2001', nombre: 'Lanzador SplatRball 800 Pyro', foto: 'https://http2.mlstatic.com/a.jpg', marca: 'Splat R Ball', catalogo_obligatorio: true,
+  }] });
+  const [busqueda] = t.sim.de('GET', /^\/products\/search/);
+  assert.match(busqueda.ruta, /^\/products\/search\?status=active&site_id=MLM&q=Splat/);
+  assert.equal(t.sim.de('POST', /^\/items/).length, 0, 'no publica nada');
+}));
+
+test('preparar: la ropa no busca en el catálogo', () => conML(async (t) => {
+  const r = await t.pedir(`/api/ml/preparar/${pieza(t)}`, {});
+  assert.equal(r.cuerpo.propuesta.catalogo, null);
+  assert.equal(t.sim.de('GET', /^\/products\/search/).length, 0);
+}));
+
+test('preparar: si ML niega el catálogo, lo dice sin romper la propuesta', () => conML(async (t) => {
+  t.sim.catalogo = { status: 403, cuerpo: { message: 'forbidden', error: 'forbidden', status: 403, cause: [] } };
+  const r = await t.pedir(`/api/ml/preparar/${juguete(t)}`, {});
+  assert.equal(r.status, 200, JSON.stringify(r.cuerpo));
+  assert.deepEqual(r.cuerpo.propuesta.catalogo.candidatos, []);
+  assert.match(r.cuerpo.propuesta.catalogo.error, /no dejó buscar en su catálogo \(403/);
+  assert.equal(t.sim.de('GET', /^\/products\/search/).length, 2, 'con token y luego sin token');
 }));
