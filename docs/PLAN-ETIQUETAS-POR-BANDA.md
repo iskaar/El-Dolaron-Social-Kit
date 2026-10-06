@@ -20,6 +20,11 @@
 > productos). El prefijo de dos letras sale del nombre; ropa y general conservan `R` y `G`.
 > **La caja ya no tiene botones de banda**: todo se escanea como un producto normal, y si el
 > código no lee se busca en la caja por descripción («juguetes 49») o por código.
+
+> **Actualización 2026-10-04 (Isaac): $119 y $129.** Los montos pasan de siete a **nueve**
+> (19, 29, 49, 79, 99, 119, 129, 149, 199) para todas las familias. Las familias existentes
+> reciben sus dos productos nuevos con `app/migracion-024-bandas-119-129.sql` (Issue #168);
+> las nuevas ya nacen con los nueve. Donde este documento dice «siete», léase «nueve».
 > El ruteo automático por IA sigue como estaba (ropa → R, lo demás → G); ampliarlo a las
 > demás familias es la **fase 2**, aparte.
 
@@ -148,7 +153,7 @@ Pantalla `/bandas`, con la conexión BLE de `etiquetera.js`:
 
 - Cuadrícula de 14 celdas (2 familias × 7 precios).
 - Campo de cantidad (por omisión 20).
-- Imprimir → `PRINT n,1` de esa banda, en un solo trabajo.
+- Imprimir → `PRINT 1,n` de esa banda, en un solo trabajo.
 
 El resultado va a una caja de compartimentos, uno por banda. **Etiquetar deja de depender
 de la computadora:** quien etiqueta agarra y pega, y cualquiera puede hacerlo.

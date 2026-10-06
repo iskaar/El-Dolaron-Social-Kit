@@ -1,0 +1,54 @@
+:root { --azul:#16366B; --rojo:#D72B32; --amarillo:#FFD447; --blanco:#FFFFFF; --linea:#dfe3ea; }
+* { box-sizing:border-box; }
+[hidden] { display:none !important; }
+body { margin:0; font-family:Arial, Helvetica, sans-serif; color:var(--azul); background:var(--blanco); line-height:1.5; }
+header { padding:18px 24px; border-bottom:4px solid var(--rojo); display:flex; align-items:center; justify-content:space-between; gap:16px; }
+.marca { font-size:25px; font-weight:900; color:var(--azul); text-decoration:none; letter-spacing:-1px; }
+.marca span { background:var(--amarillo); padding:1px 5px; border-radius:4px; }
+main { max-width:520px; margin:auto; padding:24px 24px 40px; }
+h1 { font-size:38px; line-height:1.12; letter-spacing:-1.3px; margin:12px 0 20px; }
+h2 { font-size:24px; line-height:1.2; margin:24px 0 12px; }
+p { margin:12px 0; }
+#estado { font-size:15px; min-height:24px; margin:0 0 16px; }
+#estado.error { color:var(--rojo); font-weight:700; }
+label { display:block; margin:20px 0 6px; font-weight:700; }
+input:not([type=checkbox]) { width:100%; padding:13px 14px; font:inherit; font-size:20px; border:1px solid #96a5bc; border-radius:6px; color:var(--azul); }
+.telefono { display:flex; border:1px solid #96a5bc; border-radius:6px; align-items:center; overflow:hidden; }
+.telefono span { padding:12px; background:#eef2f8; font-weight:700; }
+.telefono input { border:0; border-radius:0; min-width:0; }
+.opcion { font-size:14px; font-weight:400; display:flex; align-items:flex-start; gap:10px; }
+.opcion input { width:20px; height:20px; flex-shrink:0; accent-color:var(--azul); }
+button { min-height:48px; width:100%; margin:16px 0 0; padding:12px 18px; border:0; border-radius:6px; font:inherit; font-weight:700; cursor:pointer; background:var(--azul); color:white; }
+button:disabled { opacity:.55; cursor:wait; }
+button.secundario { background:white; border:1px solid var(--azul); color:var(--azul); }
+button.discreto { width:auto; min-height:44px; padding:6px; margin:0; color:var(--azul); background:white; font-size:14px; text-decoration:underline; }
+:focus-visible { outline:3px solid var(--rojo); outline-offset:4px; }
+.nota { color:#4e617d; font-size:14px; }
+.bienvenida h1 { font-size:32px; margin-bottom:6px; }
+.bienvenida p { margin:0 0 20px; }
+.membresia { border-radius:14px; overflow:hidden; border:2px solid var(--azul); }
+.tarjeta-cabecera { display:flex; justify-content:space-between; padding:14px 20px; background:var(--azul); color:white; font-weight:700; }
+.saldo { display:flex; align-items:center; flex-direction:column; background:var(--amarillo); padding:24px 14px; }
+.saldo strong { font-size:54px; letter-spacing:-2px; line-height:1.2; }
+.saldo span:last-child { font-size:13px; margin-top:8px; }
+dl { margin:0; padding:12px 20px; }
+dl div { display:flex; justify-content:space-between; gap:12px; padding:6px 0; }
+dt { font-size:14px; } dd { margin:0; font-weight:700; white-space:nowrap; }
+#codigo-panel { text-align:center; border:2px solid var(--azul); border-radius:6px; padding:22px 8px 12px; margin-top:16px; background:white; }
+#qr svg { width:min(80vw, 260px); min-width:200px; aspect-ratio:1; display:block; margin:0 auto 12px; background:white; }
+#barcode svg { width:100%; height:86px; display:block; }
+#codigo-legible { font-size:13px; overflow-wrap:anywhere; }
+#codigo-importe { font-weight:700; }
+#codigo-tiempo { color:var(--rojo); }
+details { padding:16px 0; border-bottom:1px solid var(--linea); }
+summary { cursor:pointer; font-weight:700; }
+ul { padding-left:20px; }
+li { margin:10px 0; }
+#recibos button { margin:0; border-bottom:1px solid var(--linea); border-radius:0; background:white; color:var(--azul); text-align:left; display:flex; flex-wrap:wrap; justify-content:space-between; gap:4px 16px; }
+#codigo-vinculo { display:block; overflow-wrap:anywhere; padding:14px; border:2px solid var(--azul); text-align:center; }
+.texto-legal { white-space:pre-wrap; font-size:14px; overflow-wrap:anywhere; }
+dialog { width:min(500px, 94vw); max-height:90vh; border:2px solid var(--azul); border-radius:10px; padding:24px; color:var(--azul); }
+dialog::backdrop { background:#16366b99; }
+#detalle-recibo p { border-bottom:1px solid var(--linea); padding-bottom:8px; }
+footer { padding:20px; border-top:1px solid var(--linea); text-align:center; font-size:13px; color:#4e617d; }
+@media (max-width:360px) { header, main { padding-left:16px; padding-right:16px; } h1 { font-size:32px; } }

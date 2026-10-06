@@ -15,6 +15,6 @@
     "allowJs": true
   },
   // Las pruebas corren en Node (`npm test`), no en el runtime de Workers.
-  "include": ["src/**/*.ts", "worker-configuration.d.ts", "public/venta.js"],
+  "include": ["src/**/*.ts", "worker-configuration.d.ts", "public/venta.js", "public/categorias.js"],
   "exclude": ["src/**/*.test.ts", "src/prueba-d1.ts"]
 }

@@ -29,7 +29,8 @@
   #filtros button { background: #fff; color: #1a1f2b; border: 1px solid var(--linea); }
   #filtros button[aria-pressed="true"] { background: var(--azul); color: #fff; border-color: var(--azul); }
   .ficha { display: grid; grid-template-columns: 160px 1fr; gap: 16px; background: #fff;
-    border: 1px solid var(--linea); border-radius: 12px; padding: 14px; margin-bottom: 14px; }
+    border: 1px solid var(--linea); border-radius: 12px; padding: 14px; margin-bottom: 14px;
+    content-visibility: auto; contain-intrinsic-size: auto 260px; }   /* el navegador no pinta las que no se ven */
   .ficha img { width: 100%; aspect-ratio: 1; object-fit: cover; border-radius: 8px; background: #eceff4; }
   .retomar { display: block; margin-top: 6px; text-align: center; font-size: 13px; font-weight: 600;
     color: var(--azul); border: 1px solid var(--linea); border-radius: 8px; padding: 7px; cursor: pointer; }
@@ -37,6 +38,8 @@
   .campos { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 10px; }
   .acciones { display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap; align-items: center; }
   .etiqueta { font-size: 12px; padding: 3px 8px; border-radius: 999px; background: #eef1f6; }
+  /* Issue #189: lo del dueno se oculta a capturistas (/admin tambien es suyo). */
+  body:not(.dueno) .solo-dueno { display: none; }
   .etiqueta.error { background: #fdecec; color: var(--rojo); }
   .etiqueta.pendiente { background: #fff6d9; color: #8a6d00; }
   .aviso { font-size: 13px; color: var(--rojo); min-height: 18px; }
@@ -66,6 +69,7 @@
     <h2>Capturar sin foto</h2>
     <div class="campos">
       <div style="grid-column: 1 / -1"><label for="m-nombre">Nombre</label><input id="m-nombre" maxlength="120" required></div>
+      <div><label for="m-marca">Marca</label><input id="m-marca" maxlength="60"></div>
       <div><label for="m-categoria">Categoría</label><select id="m-categoria"></select></div>
       <div><label for="m-estado">Estado</label><select id="m-estado">
         <option value="nuevo">Nuevo</option><option value="danado">Dañado</option></select></div>
@@ -76,6 +80,7 @@
     </div>
     <div class="acciones">
       <button type="submit">Guardar pieza</button>
+      <button type="button" class="claro" id="m-precios-ml">Ver precios en Mercado Libre</button>
       <span class="aviso" id="m-aviso"></span>
     </div>
   </form>
@@ -100,15 +105,19 @@
   </div>
 
   <div id="cola"></div>
+  <div id="cola-fin"></div>
 </main>
 
 <script type="module">
 import { reducirArchivo } from '/foto.js';
 import { copiarParaMarketplace } from '/compartir.js';
 import { agruparSesiones } from '/sesiones.js';
+import { enlacePreciosML } from '/precios-ml.js';
 
-const CATEGORIAS = ['ropa', 'hogar', 'electronica', 'juguetes', 'otros'];
-// Los siete montos y las familias de banda salen de la tabla `familias` (GET /api/familias).
+import { CATEGORIAS } from '/categorias.js';
+const opcionesCategoria = (elegida) =>
+  CATEGORIAS.map(([c, nombre]) => `<option value="${c}" ${c === elegida ? 'selected' : ''}>${nombre}</option>`).join('');
+// Los montos y las familias de banda salen de la tabla `familias` (GET /api/familias).
 const { montos: MONTOS_BANDA, familias: FAMILIAS } = await (await fetch('/api/familias')).json();
 const DESTINOS = [
   ['etiqueta', 'Etiqueta individual'],
@@ -116,8 +125,7 @@ const DESTINOS = [
     [`banda_${f.prefijo}${p}`, `Banda ${f.nombre} $${p} → ${f.prefijo.toUpperCase()}${p}`])),
 ];
 const CLAVES_CONFIG = [
-  ['pct_ropa','Ropa %'], ['pct_hogar','Hogar %'], ['pct_electronica','Electrónica %'],
-  ['pct_juguetes','Juguetes %'], ['pct_otros','Otros %'], ['pct_danado','Dañado %'],
+  ...CATEGORIAS.map(([c, nombre]) => [`pct_${c}`, `${nombre} %`]), ['pct_danado','Dañado %'],
   ...MONTOS_BANDA.map((p) => [`banda_${p}`, `Banda $${p}`]),
   ['fondo_caja', 'Fondo por caja $'],
 ];
@@ -183,9 +191,9 @@ function ficha(p) {
       <div class="campos">
         <div style="grid-column: 1 / -1"><label>Nombre</label>
           <input data-campo="nombre" value="${(p.nombre ?? '').replace(/"/g, '&quot;')}"></div>
-        <div><label>Categoría</label><select data-campo="categoria">
-          ${CATEGORIAS.map((c) => `<option value="${c}" ${c === p.categoria ? 'selected' : ''}>${c}</option>`).join('')}
-        </select></div>
+        <div><label>Marca</label>
+          <input data-campo="marca" maxlength="60" value="${(p.marca ?? '').replace(/"/g, '&quot;')}"></div>
+        <div><label>Categoría</label><select data-campo="categoria">${opcionesCategoria(p.categoria)}</select></div>
         <div><label>Estado</label><select data-campo="estado_fisico">
           <option value="nuevo" ${p.estado_fisico === 'nuevo' ? 'selected' : ''}>Nuevo</option>
           <option value="danado" ${p.estado_fisico === 'danado' ? 'selected' : ''}>Dañado</option>
@@ -203,6 +211,7 @@ function ficha(p) {
       <div class="acciones">
         <button type="button" data-accion="guardar">Guardar</button>
         <button type="button" class="claro" data-accion="recalcular">Recalcular precio</button>
+        <button type="button" class="claro solo-dueno" data-accion="precios-ml">Ver precios en ML</button>
         <button type="button" class="claro" data-accion="reanalizar">Reintentar análisis</button>
         <button type="button" class="claro" data-accion="compartir"
           title="Copia precio, nombre y foto; pégalos con Win+V">Compartir</button>
@@ -219,7 +228,7 @@ function ficha(p) {
   const aviso = nodo.querySelector('.aviso');
 
   const base = () => ({
-    nombre: valor('nombre'), categoria: valor('categoria'),
+    nombre: valor('nombre'), marca: valor('marca'), categoria: valor('categoria'),
     estado_fisico: valor('estado_fisico'), precio_lista: centavos(valor('precio_lista')),
     stock: Math.round(Number(valor('stock') || 0)),
   });
@@ -300,6 +309,10 @@ function ficha(p) {
       if (!respuesta.ok) { aviso.textContent = datos.error; return; }
       repetida.stock = datos.stock;   // la siguiente repetida ya ve el total nuevo
       nodo.remove();
+    } else if (accion === 'precios-ml') {
+      const enlace = enlacePreciosML(valor('nombre'), valor('marca'));
+      if (enlace) window.open(enlace, '_blank', 'noopener');
+      else { aviso.textContent = 'Escribe el nombre para buscarlo en Mercado Libre.'; aviso.style.color = ''; }
     } else if (accion === 'descartar') {
       await fetch(`/api/borradores/${p.id}`, { method: 'DELETE' });
       nodo.remove();
@@ -312,8 +325,12 @@ function ficha(p) {
 /* ---------- captura sin foto (Issue #115) ---------- */
 
 const manual = document.getElementById('manual');
-fetch('/api/yo').then((r) => r.json()).then(({ usuario }) => { manual.hidden = !usuario?.roles.includes('dueno'); });
-document.getElementById('m-categoria').innerHTML = CATEGORIAS.map((c) => `<option value="${c}">${c}</option>`).join('');
+fetch('/api/yo').then((r) => r.json()).then(({ usuario }) => {
+  const dueno = !!usuario?.roles.includes('dueno');
+  manual.hidden = !dueno;
+  document.body.classList.toggle('dueno', dueno);
+});
+document.getElementById('m-categoria').innerHTML = opcionesCategoria('');
 document.getElementById('m-destino').innerHTML = '<option value="">Automático</option>'
   + DESTINOS.map(([v, t]) => `<option value="${v}">${t}</option>`).join('');
 let idManual = crypto.randomUUID();   // un id por pieza: doble clic o reintento no la duplican
@@ -322,7 +339,7 @@ manual.addEventListener('submit', async (evento) => {
   const v = (id) => document.getElementById(id).value;
   const aviso = document.getElementById('m-aviso');
   const cuerpo = {
-    id: idManual, nombre: v('m-nombre').trim(), categoria: v('m-categoria'), estado_fisico: v('m-estado'),
+    id: idManual, nombre: v('m-nombre').trim(), marca: v('m-marca').trim(), categoria: v('m-categoria'), estado_fisico: v('m-estado'),
     precio_lista: centavos(v('m-lista')), stock: Math.round(Number(v('m-stock') || 1)),
   };
   if (v('m-precio') !== '') cuerpo.precio = centavos(v('m-precio'));
@@ -341,6 +358,13 @@ manual.addEventListener('submit', async (evento) => {
   cargarCola();
 });
 
+// Issue #182: ML no deja buscar por API a esta app; se abre su listado web.
+document.getElementById('m-precios-ml').addEventListener('click', () => {
+  const enlace = enlacePreciosML(document.getElementById('m-nombre').value, document.getElementById('m-marca').value);
+  if (enlace) window.open(enlace, '_blank', 'noopener');
+  else document.getElementById('m-aviso').textContent = 'Escribe el nombre para buscarlo en Mercado Libre.';
+});
+
 /* ---------- filtros ---------- */
 
 const elDia = document.getElementById('f-dia');
@@ -348,7 +372,7 @@ const elCategoria = document.getElementById('f-categoria');
 const elMin = document.getElementById('f-min');
 const elMax = document.getElementById('f-max');
 const elSesion = document.getElementById('f-sesion');
-elCategoria.insertAdjacentHTML('beforeend', CATEGORIAS.map((c) => `<option value="${c}">${c}</option>`).join(''));
+elCategoria.insertAdjacentHTML('beforeend', opcionesCategoria(''));
 
 // El dia de la tienda, no el de UTC: una foto de las 7 pm ya es "manana" en UTC.
 const diaLocal = (iso) => new Date(iso).toLocaleDateString('en-CA');
@@ -380,10 +404,27 @@ document.getElementById('f-limpiar').addEventListener('click', () => {
   cargarCola();
 });
 
+// Cada ficha es un formulario completo: armar cientos de golpe congelaba la página.
+// Se pintan de 24 en 24 y la siguiente tanda entra al acercarse al final.
+const TANDA = 24;
+let porPintar = [];
+const finCola = document.getElementById('cola-fin');
+const observador = new IntersectionObserver(([fin]) => { if (fin.isIntersecting) pintarTanda(); }, { rootMargin: '1500px' });
+function pintarTanda() {
+  if (porPintar.length === 0) return;
+  cola.append(...porPintar.slice(0, TANDA).map(ficha));
+  porPintar = porPintar.slice(TANDA);
+  // Volver a observar avisa otra vez si el final sigue a la vista (pantalla alta).
+  observador.unobserve(finCola);
+  observador.observe(finCola);
+}
+
 async function cargarCola() {
   // Todo de una vez y se filtra aqui: las sesiones se deducen de todas las
   // fotos, no solo de las que pasan el filtro de estado.
-  const todas = await (await fetch('/api/borradores')).json();
+  // El servidor las da en orden de captura (Etiquetas lo necesita así); aquí se
+  // revisa lo nuevo, así que va de la más nueva a la más vieja.
+  const todas = (await (await fetch('/api/borradores')).json()).reverse();
   const { porPieza: sesionDe, sesiones } = agruparSesiones(todas);
   pintarSesiones(sesiones);
   const piezas = todas.filter((p) => pasaFiltros(p, sesionDe));
@@ -394,7 +435,9 @@ async function cargarCola() {
   const listas = todas.filter((p) => p.estado_analisis === 'listo');
   existentes = new Map(listas.filter((p) => p.nombre).map((p) => [normalizar(p.nombre), p]));
 
-  cola.replaceChildren(...piezas.map(ficha));
+  cola.replaceChildren();
+  porPintar = piezas;
+  pintarTanda();
   const porEstado = piezas.reduce((acc, p) => ({ ...acc, [p.estado_analisis]: (acc[p.estado_analisis] ?? 0) + 1 }), {});
   const de = piezas.length === todas.length ? '' : ` de ${todas.length}`;
   resumen.textContent = `${piezas.length}${de} piezas · ${porEstado.pendiente ?? 0} pendientes · ${porEstado.error ?? 0} con error`;
@@ -445,7 +488,7 @@ document.getElementById('reintentar-todo').addEventListener('click', async (even
   setTimeout(cargarCola, 12000);
 });
 
-/** Guarda cada ficha visible con lo que tenga en pantalla, sin tocarlas una por una. */
+/** Guarda cada ficha ya pintada (las que se han visto) con lo que tenga en pantalla, sin tocarlas una por una. */
 document.getElementById('guardar-todo').addEventListener('click', async (evento) => {
   const boton = evento.currentTarget;
   const avisoTodo = document.getElementById('aviso-todo');
