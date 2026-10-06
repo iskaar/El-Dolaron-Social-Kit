@@ -135,6 +135,15 @@
       "format": "PNG",
       "width": 2048,
       "height": 2048
+    },
+    {
+      "file": "03-Publicaciones/el-dolaron-cierre-redes-cuadrado.png",
+      "title": "Cierre de redes y contacto",
+      "description": "Imagen cuadrada lista para usar como última diapositiva de publicaciones; conservar proporciones y revisar los contactos antes de reutilizar.",
+      "format": "PNG",
+      "width": 1254,
+      "height": 1254,
+      "background": "opaque white"
     }
   ],
   "version": "1.0"
