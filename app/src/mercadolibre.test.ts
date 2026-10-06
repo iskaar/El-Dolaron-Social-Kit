@@ -38,6 +38,7 @@ class SimML {
   rechazarItem: unknown = null;
   items = new Map<string, { id: string; status: string; available_quantity: number }>();
   ordenes = new Map<string, unknown>();
+  busqueda: { status?: number; cuerpo: unknown } = { cuerpo: { paging: { total: 0 }, results: [] } };
 
   de(metodo: string, patron: RegExp) { return this.llamadas.filter((l) => l.metodo === metodo && patron.test(l.ruta)); }
 
@@ -62,6 +63,7 @@ class SimML {
         { domain_id: 'MLM-SHORTS', domain_name: 'Shorts', category_id: 'MLM1234', category_name: 'Shorts' },
       ] };
     }
+    if (metodo === 'GET' && ruta.startsWith('/sites/MLM/search?')) return this.busqueda;
     if (metodo === 'GET' && ruta === '/categories/MLM194175/attributes') return { cuerpo: ATRIBUTOS };
     if (metodo === 'GET' && /^\/categories\/MLM\d+\/attributes$/.test(ruta)) return { cuerpo: [{ id: 'BRAND', name: 'Marca', value_type: 'string', tags: { required: true } }] };
     if (metodo === 'POST' && ruta === '/catalog/charts/search') {
@@ -768,7 +770,7 @@ test('permisos: cajero y capturista reciben 403 en /api/ml/*; el dueño entra', 
     for (const correo of ['cajero@prueba.mx', 'cap@prueba.mx']) {
       (t.env as any).DEV_USUARIO = correo;
       for (const [ruta, cuerpo, metodo] of [
-        ['/api/ml/estado', undefined, 'GET'], ['/api/ml/piezas', undefined, 'GET'], ['/api/ml/ventas', undefined, 'GET'], ['/api/ml/conectar', undefined, 'GET'],
+        ['/api/ml/estado', undefined, 'GET'], ['/api/ml/piezas', undefined, 'GET'], ['/api/ml/ventas', undefined, 'GET'], ['/api/ml/referencia?q=jeans', undefined, 'GET'], ['/api/ml/conectar', undefined, 'GET'],
         [`/api/ml/preparar/${id}`, {}, 'POST'], [`/api/ml/publicar/${id}`, cuerpoPublicar(), 'POST'],
         [`/api/ml/pausar/${id}`, {}, 'POST'], [`/api/ml/reactivar/${id}`, {}, 'POST'], ['/api/ml/config', { ml_pct: 50 }, 'PUT'],
       ] as [string, unknown, string][]) {
@@ -803,3 +805,51 @@ test('tokens: sin ML_LLAVE_TOKENS válida no se guarda nada en claro', async () 
   await assert.rejects(guardarTokens(t.env, { access_token: 'AT-0', refresh_token: 'RT-0', expires_in: 10 }), /ML_LLAVE_TOKENS/);
   assert.equal((t.db.prepare('select count(*) n from ml_cuenta').get() as any).n, 0);
 });
+
+/* ---------- referencia de precios (Issue #182) ---------- */
+
+test('referencia: resume precios en centavos y filtra usado por defecto', () => conML(async (t) => {
+  t.sim.busqueda = { cuerpo: { paging: { total: 812 }, results: [
+    { title: 'Jeans Levis 501', price: 450, condition: 'used', permalink: 'https://articulo.mercadolibre.com.mx/MLM1' },
+    { title: 'Jeans Levis 505', price: 199.5, condition: 'used', permalink: 'https://articulo.mercadolibre.com.mx/MLM2' },
+    { title: 'Jeans Levis 511', price: 320, condition: 'used', permalink: 'https://articulo.mercadolibre.com.mx/MLM3' },
+    { title: 'Jeans sin precio', price: null, condition: 'used', permalink: '' },
+  ] } };
+  const r = await t.pedir('/api/ml/referencia?q=%20Jeans%20%20Levis%20', undefined, 'GET');
+  assert.equal(r.status, 200);
+  assert.equal(r.cuerpo.disponible, true);
+  assert.equal(r.cuerpo.q, 'Jeans Levis');
+  assert.deepEqual([r.cuerpo.total, r.cuerpo.n, r.cuerpo.min, r.cuerpo.mediana, r.cuerpo.max], [812, 3, 19950, 32000, 45000]);
+  assert.equal(r.cuerpo.muestras.length, 4);
+  assert.equal(r.cuerpo.muestras[1].precio, 19950);
+  assert.equal(r.cuerpo.enlace, 'https://listado.mercadolibre.com.mx/jeans-levis');
+  const [llamada] = t.sim.de('GET', /^\/sites\/MLM\/search/);
+  assert.equal(llamada.ruta, '/sites/MLM/search?q=Jeans%20Levis&limit=50&ITEM_CONDITION=2230581');
+  assert.equal(llamada.auth, 'Bearer AT-0', 'busca con el token de la cuenta');
+  // Solo lee: no publica ni escribe nada.
+  assert.equal(t.sim.llamadas.filter((l) => l.metodo !== 'GET').length, 0);
+}));
+
+test('referencia: mediana con numero par, condicion todas y validaciones', () => conML(async (t) => {
+  t.sim.busqueda = { cuerpo: { results: [{ price: 100 }, { price: 300 }] } };
+  const r = await t.pedir('/api/ml/referencia?q=sueter&condicion=todas', undefined, 'GET');
+  assert.deepEqual([r.cuerpo.n, r.cuerpo.mediana, r.cuerpo.total], [2, 20000, 2]);
+  assert.equal(t.sim.de('GET', /^\/sites\/MLM\/search/)[0].ruta, '/sites/MLM/search?q=sueter&limit=50');
+  assert.equal((await t.pedir('/api/ml/referencia?q=a', undefined, 'GET')).status, 400);
+  assert.equal((await t.pedir('/api/ml/referencia?q=jeans&condicion=rota', undefined, 'GET')).status, 400);
+}));
+
+test('referencia: si ML no deja buscar, avisa sin fallar', () => conML(async (t) => {
+  t.sim.busqueda = { status: 403, cuerpo: { message: 'forbidden', error: 'forbidden', status: 403, cause: [] } };
+  const r = await t.pedir('/api/ml/referencia?q=jeans', undefined, 'GET');
+  assert.equal(r.status, 200);
+  assert.equal(r.cuerpo.disponible, false);
+  assert.equal(r.cuerpo.status_ml, 403);
+  assert.ok(r.cuerpo.enlace.startsWith('https://listado.mercadolibre.com.mx/'));
+}));
+
+test('referencia: sin cuenta conectada responde disponible false', () => conML(async (t) => {
+  const r = await t.pedir('/api/ml/referencia?q=jeans', undefined, 'GET');
+  assert.equal(r.cuerpo.disponible, false);
+  assert.equal(t.sim.de('GET', /^\/sites\/MLM\/search/).length, 0);
+}, false));
