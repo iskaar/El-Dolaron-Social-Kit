@@ -37,6 +37,10 @@
     "BASES_APROBADAS_VERSION": "2026-10-v3",
     "PROMOCION_INICIO": "2026-10-05T17:00:00Z",
     "VALES_ABIERTOS": "si",
+    // Mercado Libre (Issue #170): debe ser identica a la URI de redireccion de la
+    // app en el DevCenter. ML_CLIENT_ID, ML_CLIENT_SECRET, ML_LLAVE_TOKENS y
+    // ML_RUTA_NOTIFICACIONES son secretos (wrangler secret put), no van aqui.
+    "ML_REDIRECT_URI": "https://escaner.viste.com.mx/ml/callback",
     "PORTAL_REGISTRO_ABIERTO": "si",
     // Con que se verifica el JWT de Cloudflare Access (src/cuentas.ts). No son
     // secretos: salen en la redireccion al login de cada hostname. El aud es
@@ -47,6 +51,10 @@
       "escaner.viste.com.mx": "8ecef061fac92da30e9b780d70c749c2a4bc91c7a04d3070c35f7d9d23eb451d",
       "captura.viste.com.mx": "d3ee26fb77afa5141ca79be9eeba23d7cf93e31165b1fc1683396c1296629764"
     }
+  },
+  // Concilia existencias con Mercado Libre y recoge ordenes perdidas; sin cuenta conectada no hace nada.
+  "triggers": {
+    "crons": ["*/15 * * * *"]
   },
   // El Worker solo debe responder detras de Access: workers.dev y las URLs de
   // vista previa se saltarian el login.

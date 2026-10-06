@@ -19,6 +19,8 @@ jobs:
           python-version: "3.x"
       - name: Validate inventory and assets
         run: python tools/validate_assets.py
+      - name: Validate public storefront
+        run: python tools/validate_site.py
 
   # La app cobra dinero real: sus pruebas (venta, Dolarones, corte, permisos)
   # y el typecheck corren en cada push, no solo en la maquina de quien cambia.
