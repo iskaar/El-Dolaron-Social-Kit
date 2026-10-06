@@ -11,6 +11,7 @@ import { efectivoAlcanza } from '../public/venta.js';
 import { semanaIngreso } from '../public/semana.js';
 import { tramoDeDias, TRAMOS_ANTIGUEDAD } from '../public/graficas.js';
 import { detalleVenta, cancelarPieza } from './devoluciones.ts';
+import { cancelarVenta, listarCancelaciones, estadoSolicitud } from './cancelaciones.ts';
 import { BASES, AVISO } from './legal.ts';
 import { CLAVES_CATEGORIA } from '../public/categorias.js';
 import {
@@ -18,10 +19,10 @@ import {
   esDeCaja, soloComputadora, CAJAS,
 } from './cuentas.ts';
 import { cajeroEnTurno, listarCajeros, entrar, salir, ponerPin } from './cajeros.ts';
-import { registrarSocio, buscarSocio, buscarPorCodigo, basesListas, sentenciasDeVenta, sentenciasDeCancelacion, saldo } from './dolarones.ts';
+import { registrarSocio, buscarSocio, buscarPorCodigo, basesListas, sentenciasDeVenta, saldo } from './dolarones.ts';
 import { registrarCorte, registrarRetiro, ultimoCorte, cajaDe } from './corte.ts';
 import { portal, llegada, vincular } from './portal.ts';
-import { sentenciasVale, cancelarVales, buscarVale, valeDeVenta, valeUsadoEnVenta, reimprimirVale, valesAbiertos } from './vales.ts';
+import { sentenciasVale, buscarVale, valeDeVenta, valeUsadoEnVenta, reimprimirVale, valesAbiertos } from './vales.ts';
 import { rutaML, recibirNotificacion, conciliarSeguro, sincronizar } from './mercadolibre.ts';
 
 interface FilaConfig {
@@ -790,93 +791,6 @@ async function tomarImpresion(id: string, request: Request, env: Env, correo: st
   return json({ id, impreso_en:ahora });
 }
 
-/**
- * Cancela una venta ya cobrada: devolucion o error de la cajera.
- * La venta no se borra, se marca: el corte del dia tiene que seguir explicando
- * todo lo que paso, incluido lo que se deshizo. Las piezas vuelven al inventario.
- */
-async function cancelarVenta(id: string, request: Request, env: Env, correo: string): Promise<Response> {
-  if (!UUID.test(id)) {
-    return json({ error: 'Identificador de venta invalido.' }, 400);
-  }
-  // Con dinero real de por medio, una cancelacion sin motivo no se distingue
-  // de una para quedarse el efectivo de una venta que si se cobro. El motivo
-  // y quien la hizo (Cloudflare Access, igual que capturado_por en las fotos)
-  // son lo minimo para poder auditar despues.
-  const cuerpo = (await request.json().catch(() => ({}))) as { motivo?: unknown; caja?: unknown };
-  const motivo = String(cuerpo.motivo ?? '').trim().slice(0, 200);
-  if (!motivo) {
-    return json({ error: 'Escribe el motivo de la cancelacion.' }, 400);
-  }
-  const canceladaPor = correo;
-
-  const venta = await env.DB.prepare(
-    'select id, total, dolarones, cancelada, devuelto, dolarones_devueltos, revision from ventas where id = ?',
-  )
-    .bind(id)
-    .first<{
-      id: string; total: number; dolarones: number; cancelada: number;
-      devuelto: number; dolarones_devueltos: number; revision: number;
-    }>();
-  if (!venta) {
-    return json({ error: 'La venta no existe.' }, 404);
-  }
-  if (venta.cancelada) {
-    return json({ id, cancelada: true, ya_estaba: true });
-  }
-
-  const ahora = new Date().toISOString();
-  // Solo lo que sigue en el ticket: las piezas ya canceladas sueltas (Issue #138) ya regresaron.
-  const { results: lineas } = await env.DB.prepare(
-    `select producto_id, cantidad - cancelada_cantidad as cantidad from venta_lineas
-     where venta_id = ? and producto_id is not null and cantidad > cancelada_cantidad`,
-  )
-    .bind(id)
-    .all<{ producto_id: string; cantidad: number }>();
-
-  // Marca, existencias y Dolarones en un solo batch. Si dos cancelaciones
-  // llegan juntas, el trigger venta_cancelada_una_vez (migracion 011) aborta
-  // la segunda completa: nada se devuelve dos veces.
-  try {
-    await env.DB.batch([
-      // Candado de migracion 020: si una pieza se cancelo entre la lectura y aqui, aborta todo.
-      env.DB.prepare('update ventas set revision = ? where id = ?').bind(venta.revision + 1, id),
-      env.DB.prepare(
-        `update ventas set cancelada = 1, cancelada_en = ?, cancelada_por = ?, motivo_cancelacion = ?, cancelada_caja = ?
-         where id = ?`,
-      ).bind(ahora, canceladaPor, motivo, await cajaDe(env, correo, cuerpo.caja), id),   // el corte de esa caja cuenta la devolucion
-      ...lineas.map((l) =>
-        env.DB.prepare(
-          `update productos set stock = stock + ?, actualizado_en = ?
-           where id = ? and sin_inventario = 0`,
-        ).bind(l.cantidad, ahora, l.producto_id),
-      ),
-      ...(await sentenciasDeCancelacion(env, id, canceladaPor, ahora)),
-      ...(await cancelarVales(env, id, canceladaPor, ahora)),
-    ]);
-  } catch (error) {
-    if (String(error).includes('saldo de vale invalido'))
-      return json({ error:'El vale de esta compra ya se usó. Requiere aclaración presencial antes de cancelar.' }, 409);
-    if (String(error).includes('saldo insuficiente'))
-      return json({ error:'Los Dolarones ganados con esta compra ya se usaron. Requiere aclaración presencial antes de cancelar.' }, 409);
-    if (String(error).includes('venta ya cancelada')) {
-      return json({ id, cancelada: true, ya_estaba: true });
-    }
-    if (String(error).includes('ticket cambio')) {
-      return json({ error: 'Alguien mas cambio este ticket. Vuelve a abrirlo.' }, 409);
-    }
-    throw error;
-  }
-
-  // Lo que se regresa en dinero; lo pagado con Dolarones regresa al saldo.
-  // Sin lo ya devuelto por piezas canceladas sueltas.
-  return json({
-    id, cancelada: true,
-    devuelto: venta.total - venta.dolarones - venta.devuelto,
-    dolarones: venta.dolarones - venta.dolarones_devueltos,
-  });
-}
-
 // La tienda esta en America/Mexico_City: UTC-6 fijo desde 2022, sin horario de
 // verano. Las ventas se guardan en UTC, asi que despues de las 18:00 locales ya
 // son "manana" en UTC; el dia de la tienda se saca restando 6 horas. Sin esto,
@@ -1520,6 +1434,9 @@ export default {
         if (request.method === 'PUT') return await guardarCuenta(request, env);
         return json({ error: 'Metodo no permitido.' }, 405);
       }
+      if (pathname === '/api/solicitudes/cancelaciones' && request.method === 'GET') return await listarCancelaciones(env);
+      const solicitud = pathname.match(/^\/api\/solicitudes\/([^/]+)$/);
+      if (solicitud && request.method === 'GET') return await estadoSolicitud(env, solicitud[1], correo);
       const resolver = pathname.match(/^\/api\/solicitudes\/([^/]+)\/resolver$/);
       if (resolver && request.method === 'POST') {
         return await resolverSolicitud(resolver[1], request, env, correo);

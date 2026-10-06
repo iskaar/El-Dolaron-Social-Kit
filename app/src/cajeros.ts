@@ -45,22 +45,28 @@ export async function listarCajeros(env: Env): Promise<Response> {
   return json(results.filter((u) => puedeCobrar(leerRoles(u.roles))).map(({ correo, nombre }) => ({ correo, nombre })));
 }
 
-export async function entrar(request: Request, env: Env): Promise<Response> {
-  const cuerpo = (await request.json().catch(() => ({}))) as { correo?: unknown; pin?: unknown };
-  const correo = String(cuerpo.correo ?? '').trim().toLowerCase();
-  const pin = String(cuerpo.pin ?? '');
-  if (!/^\d{6}$/.test(pin)) return json({ error: 'El PIN es de 6 digitos.' }, 400);
+interface FilaPin { correo: string; nombre: string; roles: string; caja: string; pin_hash: string; pin_sal: string; pin_bloqueo: string }
+
+/**
+ * Verifica el PIN de 6 digitos de `correo` (PBKDF2, contador de fallos y bloqueo
+ * de 15 minutos). Lo usan el acceso del cajero y la aprobacion del dueno
+ * (cancelaciones.ts): mismas reglas en los dos. `admite` filtra los roles validos.
+ */
+export async function verificarPin(
+  env: Env, correo: string, pin: string, admite: (roles: Rol[]) => boolean = puedeCobrar,
+): Promise<{ fila: FilaPin } | { error: string; status: number }> {
+  if (!/^\d{6}$/.test(pin)) return { error: 'El PIN es de 6 digitos.', status: 400 };
   const fila = await env.DB.prepare(
     `select correo, nombre, roles, caja, pin_hash, pin_sal, pin_bloqueo from usuarios
      where correo = ? and activo = 1 and pin_hash != ''`,
   )
     .bind(correo)
-    .first<{ correo: string; nombre: string; roles: string; caja: string; pin_hash: string; pin_sal: string; pin_bloqueo: string }>();
-  if (!fila || !puedeCobrar(leerRoles(fila.roles))) return json({ error: 'Sin PIN. Pideselo al dueno.' }, 404);
+    .first<FilaPin>();
+  if (!fila || !admite(leerRoles(fila.roles))) return { error: 'Sin PIN. Pideselo al dueno.', status: 404 };
 
   const ahora = new Date();
   const ahoraIso = ahora.toISOString();
-  if (fila.pin_bloqueo > ahoraIso) return json({ error: 'PIN bloqueado por intentos fallidos. Espera 15 minutos o llama a Isaac.' }, 423);
+  if (fila.pin_bloqueo > ahoraIso) return { error: 'PIN bloqueado por intentos fallidos. Espera 15 minutos o llama a Isaac.', status: 423 };
   if (await hashPin(pin, fila.pin_sal) !== fila.pin_hash) {
     // Incremento atómico, sin tocar un PIN recién cambiado.
     const fallo = await env.DB.prepare(
@@ -71,14 +77,25 @@ export async function entrar(request: Request, env: Env): Promise<Response> {
        returning pin_bloqueo`,
     ).bind(INTENTOS_PIN, INTENTOS_PIN, new Date(ahora.getTime() + BLOQUEO_PIN).toISOString(),
       correo, ahoraIso, fila.pin_hash).first<{ pin_bloqueo: string }>();
-    return json({ error: fallo && fallo.pin_bloqueo > ahoraIso ? 'PIN incorrecto. Se bloqueo 15 minutos.' : 'PIN incorrecto.' }, 403);
+    return { error: fallo && fallo.pin_bloqueo > ahoraIso ? 'PIN incorrecto. Se bloqueo 15 minutos.' : 'PIN incorrecto.', status: 403 };
   }
 
   // Confirmar y limpiar fallos juntos: el PIN o el bloqueo pudieron cambiar durante PBKDF2.
   const autorizado = await env.DB.prepare(
     `update usuarios set pin_fallos = 0 where correo = ? and pin_hash = ? and pin_bloqueo <= ? returning correo`,
   ).bind(correo, fila.pin_hash, ahoraIso).first();
-  if (!autorizado) return json({ error: 'PIN bloqueado o recien cambiado. Intenta otra vez.' }, 423);
+  if (!autorizado) return { error: 'PIN bloqueado o recien cambiado. Intenta otra vez.', status: 423 };
+  return { fila };
+}
+
+export async function entrar(request: Request, env: Env): Promise<Response> {
+  const cuerpo = (await request.json().catch(() => ({}))) as { correo?: unknown; pin?: unknown };
+  const correo = String(cuerpo.correo ?? '').trim().toLowerCase();
+  const verificado = await verificarPin(env, correo, String(cuerpo.pin ?? ''));
+  if ('error' in verificado) return json({ error: verificado.error }, verificado.status);
+  const { fila } = verificado;
+  const ahora = new Date();
+  const ahoraIso = ahora.toISOString();
 
   const token = crypto.randomUUID() + crypto.randomUUID();
   await env.DB.batch([
