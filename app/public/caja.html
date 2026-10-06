@@ -140,6 +140,10 @@
   @media (min-width: 821px) { #cobro { overflow-y: auto; } }
 </style>
 <script src="/cajero.js"></script>
+<script>
+// Issue #206: con el service worker, /caja abre aunque se recargue sin internet.
+if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw-caja.js', { scope: '/caja' }).catch(() => {});
+</script>
 </head>
 <body>
 <header>
