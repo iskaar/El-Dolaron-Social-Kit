@@ -78,6 +78,7 @@
     </div>
     <div class="acciones">
       <button type="submit">Guardar pieza</button>
+      <button type="button" class="claro" id="m-precios-ml">Ver precios en Mercado Libre</button>
       <span class="aviso" id="m-aviso"></span>
     </div>
   </form>
@@ -329,6 +330,17 @@ manual.addEventListener('submit', async (evento) => {
   document.getElementById('m-stock').value = '1';
   document.getElementById('m-nombre').focus();
   cargarCola();
+});
+
+// Issue #182: ML no deja buscar por API a esta app, asi que se abre su listado
+// web con el nombre (y la marca) para comparar precios a ojo.
+document.getElementById('m-precios-ml').addEventListener('click', () => {
+  const nombre = document.getElementById('m-nombre').value.trim();
+  const marca = document.getElementById('m-marca').value.trim();
+  if (!nombre) { document.getElementById('m-aviso').textContent = 'Escribe el nombre para buscarlo en Mercado Libre.'; return; }
+  const texto = normalizar(nombre).includes(normalizar(marca)) ? nombre : `${marca} ${nombre}`;
+  const slug = normalizar(texto).replace(/'/g, '').replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+  window.open(`https://listado.mercadolibre.com.mx/${slug}`, '_blank', 'noopener');
 });
 
 /* ---------- filtros ---------- */
