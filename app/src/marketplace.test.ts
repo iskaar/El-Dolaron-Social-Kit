@@ -89,17 +89,18 @@ test('Marketplace: autorización antes de HTML/API/fotos y elegibilidad actual e
 test('Actualizar se vuelve a habilitar; un fallo limpia datos anteriores y permite reintentar', async () => {
  const refresh={disabled:false},snapshot={textContent:''},counter={textContent:''};
  const category={value:'',options:[],replaceChildren(){this.options=[];},append(option){this.options.push(option);}};
- const context={products:[], CatalogLogic:logic, counter, elements:{category}, categoryLabel:x=>x,
+ const edits=new Map([[product.id,{amount:"1",description:"Precio anterior"}]]);
+ const context={products:[], edits, CatalogLogic:logic, counter, elements:{category}, categoryLabel:x=>x,
   document:{getElementById:id=>id==='refresh' ? refresh : snapshot, createElement:()=>({})},
   Option:function(text,value){this.text=text;this.value=value;}, filter(){}, fetch:null};
  vm.createContext(context);
  const loadSource=html.slice(html.indexOf('async function load()'),html.indexOf("document.getElementById('refresh').addEventListener"));
  vm.runInContext(loadSource,context);
  context.fetch=async()=>({ok:true,json:async()=>({products:[product],updated_at:new Date().toISOString()})});
- await context.load();assert.equal(refresh.disabled,false);assert.equal(context.products.length,1);
+ await context.load();assert.equal(refresh.disabled,false);assert.equal(context.products.length,1);assert.equal(edits.size,0);
  context.fetch=async()=>({ok:false});
  await context.load();assert.equal(refresh.disabled,false);assert.equal(context.products.length,0);
  assert.match(snapshot.textContent,/No se pudo consultar/);
  context.fetch=async()=>({ok:true,json:async()=>({products:[product],updated_at:new Date().toISOString()})});
- await context.load();assert.equal(refresh.disabled,false);assert.equal(context.products.length,1);
+ await context.load();assert.equal(refresh.disabled,false);assert.equal(context.products.length,1);assert.equal(edits.size,0);
 });
