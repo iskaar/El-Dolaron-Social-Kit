@@ -114,6 +114,15 @@
       "format": "CSS"
     },
     {
+      "file": "site/public/assets/hero-still-life.webp",
+      "title": "Ilustración del sitio público",
+      "description": "Composición generada con IA para la portada del sitio; es ilustrativa y no representa inventario real. Mostrar con la aclaración de disponibilidad.",
+      "width": 1440,
+      "height": 960,
+      "format": "WEBP",
+      "background": "opaque"
+    },
+    {
       "file": "01-Logos/el-dolaron-insignia-social-transparente.svg",
       "title": "Insignia social transparente",
       "description": "Insignia circular para superponer en publicaciones, historias y videos; conservar proporciones y margen exterior.",
