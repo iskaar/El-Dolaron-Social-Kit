@@ -140,6 +140,7 @@
 </dialog>
 
 <script type="module">
+import { enlacePreciosML } from '/precios-ml.js';
 const $ = (id) => document.getElementById(id);
 const OTRO = '__otro';
 
@@ -631,6 +632,11 @@ function pintarFormulario() {
       h('div', { class: 'nota' }, 'Describe la pieza con otras palabras y Mercado Libre sugiere categorías.')),
     campo('Precio en Mercado Libre (pesos)', precio, { requerido: true }),
     ref.precioNota,
+    // #189: comparar con la competencia antes de subirla.
+    h('div', { style: 'margin:-4px 0 12px' }, h('button', { type: 'button', onclick: () => {
+      const enlace = enlacePreciosML(f.titulo || p.nombre, p.marca);
+      if (enlace) window.open(enlace, '_blank', 'noopener');
+    } }, 'Ver precios en Mercado Libre')),
   ];
   if (requeridos.length) hijos.push(h('fieldset', {}, h('legend', {}, 'Atributos obligatorios'), requeridos.map(campoAtributo)));
   if (opcionales.length) hijos.push(h('fieldset', {}, h('legend', {}, 'Atributos opcionales'), opcionales.map(campoAtributo)));
