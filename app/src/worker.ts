@@ -9,7 +9,9 @@ import { analizarBorrador, modeloPorDefecto, type Modelo } from './analisis.ts';
 import { calcularPrecio, ajustarManual, esDestinoBanda, prefijoParaFamilia, MONTOS_BANDA, type Destino } from './precio.ts';
 import { efectivoAlcanza } from '../public/venta.js';
 import { semanaIngreso } from '../public/semana.js';
+import { tramoDeDias, TRAMOS_ANTIGUEDAD } from '../public/graficas.js';
 import { detalleVenta, cancelarPieza } from './devoluciones.ts';
+import { cancelarVenta, listarCancelaciones, estadoSolicitud } from './cancelaciones.ts';
 import { BASES, AVISO } from './legal.ts';
 import { CLAVES_CATEGORIA } from '../public/categorias.js';
 import {
@@ -17,10 +19,12 @@ import {
   esDeCaja, soloComputadora, CAJAS,
 } from './cuentas.ts';
 import { cajeroEnTurno, listarCajeros, entrar, salir, ponerPin } from './cajeros.ts';
-import { registrarSocio, buscarSocio, buscarPorCodigo, basesListas, sentenciasDeVenta, sentenciasDeCancelacion, saldo } from './dolarones.ts';
+import { registrarSocio, buscarSocio, buscarPorCodigo, basesListas, sentenciasDeVenta, saldo } from './dolarones.ts';
 import { registrarCorte, registrarRetiro, ultimoCorte, cajaDe } from './corte.ts';
 import { portal, llegada, vincular } from './portal.ts';
-import { sentenciasVale, cancelarVales, buscarVale, valeDeVenta, valeUsadoEnVenta, reimprimirVale, valesAbiertos } from './vales.ts';
+import { sentenciasVale, buscarVale, valeDeVenta, valeUsadoEnVenta, reimprimirVale, valesAbiertos } from './vales.ts';
+import { rutaML, recibirNotificacion, conciliarSeguro, sincronizar } from './mercadolibre.ts';
+import { pedirDescuento, validarDescuento, listarDescuentos, listarDuenos } from './descuentos.ts';
 
 interface FilaConfig {
   clave: string;
@@ -584,11 +588,12 @@ export function prepararLineas(
  * asi que reenviar la cola despues de una red caida no duplica el ticket ni
  * vuelve a descontar existencias.
  */
-async function registrarVenta(request: Request, env: Env, correo: string): Promise<Response> {
+async function registrarVenta(request: Request, env: Env, ctx: ExecutionContext, correo: string): Promise<Response> {
   const venta = (await request.json()) as {
     id?: unknown; lineas?: unknown; forma_pago?: unknown;
     efectivo?: unknown; creado_en?: unknown;
     cliente_id?: unknown; dolarones?: unknown; codigo_socio?: unknown; codigo_vale?: unknown; caja?: unknown; imprimir_en?: unknown;
+    descuento_id?: unknown;
   };
   const id = String(venta.id ?? '');
   if (!UUID.test(id)) {
@@ -622,6 +627,8 @@ async function registrarVenta(request: Request, env: Env, correo: string): Promi
     cliente_id:venta.cliente_id ?? null, dolarones:venta.dolarones ?? 0,
     codigo_socio:venta.codigo_socio ?? '', codigo_vale:venta.codigo_vale ?? '',
     caja:venta.caja ?? null,
+    // Solo si lo trae: el hash de las ventas sin descuento no cambia y sus reintentos siguen valiendo.
+    ...(venta.descuento_id ? { descuento_id:venta.descuento_id } : {}),
   });
   const pedidoHash = [...new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(pedido)))]
     .map((b) => b.toString(16).padStart(2, '0')).join('');
@@ -659,7 +666,16 @@ async function registrarVenta(request: Request, env: Env, correo: string): Promi
     return json({ error: preparado.error }, 400);
   }
 
-  const total = preparado.lineas.reduce((suma, l) => suma + l.precio * l.cantidad, 0);
+  const subtotal = preparado.lineas.reduce((suma, l) => suma + l.precio * l.cantidad, 0);
+  // Un descuento solo entra si el dueno lo aprobo para este mismo ticket (Issue #119).
+  const descuentoId = venta.descuento_id ? String(venta.descuento_id) : null;
+  let descuento = 0;
+  if (descuentoId) {
+    const valido = await validarDescuento(env, descuentoId, subtotal);
+    if (!valido.ok) return json({ error: valido.error }, valido.status);
+    descuento = valido.monto;
+  }
+  const total = subtotal - descuento;
   const efectivo = Math.max(0, Math.round(Number(venta.efectivo ?? 0)));
   const clienteId = venta.cliente_id ? String(venta.cliente_id) : null;
   const codigoVale = String(venta.codigo_vale ?? '');
@@ -694,12 +710,12 @@ async function registrarVenta(request: Request, env: Env, correo: string): Promi
   const sentencias = [
     env.DB.prepare(
       `insert into ventas (id, total, forma_pago, efectivo, cambio, creado_en, registrado_en, cliente_id, dolarones,
-                           caja, cajero, pedido_hash, imprimir_en)
-       values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                           caja, cajero, pedido_hash, imprimir_en, descuento, descuento_id)
+       values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).bind(id, total, formaPago, efectivo, Math.max(0, efectivo - aPagar), creadoEn, ahora, clienteId, dolarones,
       // Quien cobro sale de Access; la caja es la suya (Issue #105) o la de la
       // computadora. Una venta encolada antes del corte de caja llega sin caja: ''.
-      await cajaDe(env, correo, venta.caja), correo, pedidoHash, imprimirEn),
+      await cajaDe(env, correo, venta.caja), correo, pedidoHash, imprimirEn, descuento, descuentoId),
     ...preparado.lineas.map((l) =>
       env.DB.prepare(
         `insert into venta_lineas (venta_id, producto_id, codigo, nombre, precio, cantidad)
@@ -741,10 +757,15 @@ async function registrarVenta(request: Request, env: Env, correo: string): Promi
     if (String(error).includes('saldo insuficiente')) {
       return json({ error: 'El saldo de Dolarones cambio. Vuelve a buscar al socio.' }, 409);
     }
+    if (descuentoId && String(error).includes('descuento_id')) {
+      return json({ error: 'Ese descuento ya se uso en otra venta.' }, 409);
+    }
     throw error;
   }
+  // Si una pieza publicada en Mercado Libre se agoto, se pausa alla (D1 manda). Despues de responder.
+  ctx.waitUntil(conciliarSeguro(env, { productoIds: preparado.lineas.filter((l) => !l.sinInventario).map((l) => l.producto_id) }));
   const respuesta = json({
-    id, total, dolarones, imprimir_en:imprimirEn, cambio: Math.max(0, efectivo - aPagar), ganados: recompensa.ganados,
+    id, total, descuento, dolarones, imprimir_en:imprimirEn, cambio: Math.max(0, efectivo - aPagar), ganados: recompensa.ganados,
     saldo: clienteId ? await saldo(env, clienteId, ahora) : null,
     vale_emitido:vale.emitido,
     vale_usado:await valeUsadoEnVenta(env, id),
@@ -786,93 +807,6 @@ async function tomarImpresion(id: string, request: Request, env: Env, correo: st
   return json({ id, impreso_en:ahora });
 }
 
-/**
- * Cancela una venta ya cobrada: devolucion o error de la cajera.
- * La venta no se borra, se marca: el corte del dia tiene que seguir explicando
- * todo lo que paso, incluido lo que se deshizo. Las piezas vuelven al inventario.
- */
-async function cancelarVenta(id: string, request: Request, env: Env, correo: string): Promise<Response> {
-  if (!UUID.test(id)) {
-    return json({ error: 'Identificador de venta invalido.' }, 400);
-  }
-  // Con dinero real de por medio, una cancelacion sin motivo no se distingue
-  // de una para quedarse el efectivo de una venta que si se cobro. El motivo
-  // y quien la hizo (Cloudflare Access, igual que capturado_por en las fotos)
-  // son lo minimo para poder auditar despues.
-  const cuerpo = (await request.json().catch(() => ({}))) as { motivo?: unknown; caja?: unknown };
-  const motivo = String(cuerpo.motivo ?? '').trim().slice(0, 200);
-  if (!motivo) {
-    return json({ error: 'Escribe el motivo de la cancelacion.' }, 400);
-  }
-  const canceladaPor = correo;
-
-  const venta = await env.DB.prepare(
-    'select id, total, dolarones, cancelada, devuelto, dolarones_devueltos, revision from ventas where id = ?',
-  )
-    .bind(id)
-    .first<{
-      id: string; total: number; dolarones: number; cancelada: number;
-      devuelto: number; dolarones_devueltos: number; revision: number;
-    }>();
-  if (!venta) {
-    return json({ error: 'La venta no existe.' }, 404);
-  }
-  if (venta.cancelada) {
-    return json({ id, cancelada: true, ya_estaba: true });
-  }
-
-  const ahora = new Date().toISOString();
-  // Solo lo que sigue en el ticket: las piezas ya canceladas sueltas (Issue #138) ya regresaron.
-  const { results: lineas } = await env.DB.prepare(
-    `select producto_id, cantidad - cancelada_cantidad as cantidad from venta_lineas
-     where venta_id = ? and producto_id is not null and cantidad > cancelada_cantidad`,
-  )
-    .bind(id)
-    .all<{ producto_id: string; cantidad: number }>();
-
-  // Marca, existencias y Dolarones en un solo batch. Si dos cancelaciones
-  // llegan juntas, el trigger venta_cancelada_una_vez (migracion 011) aborta
-  // la segunda completa: nada se devuelve dos veces.
-  try {
-    await env.DB.batch([
-      // Candado de migracion 020: si una pieza se cancelo entre la lectura y aqui, aborta todo.
-      env.DB.prepare('update ventas set revision = ? where id = ?').bind(venta.revision + 1, id),
-      env.DB.prepare(
-        `update ventas set cancelada = 1, cancelada_en = ?, cancelada_por = ?, motivo_cancelacion = ?, cancelada_caja = ?
-         where id = ?`,
-      ).bind(ahora, canceladaPor, motivo, await cajaDe(env, correo, cuerpo.caja), id),   // el corte de esa caja cuenta la devolucion
-      ...lineas.map((l) =>
-        env.DB.prepare(
-          `update productos set stock = stock + ?, actualizado_en = ?
-           where id = ? and sin_inventario = 0`,
-        ).bind(l.cantidad, ahora, l.producto_id),
-      ),
-      ...(await sentenciasDeCancelacion(env, id, canceladaPor, ahora)),
-      ...(await cancelarVales(env, id, canceladaPor, ahora)),
-    ]);
-  } catch (error) {
-    if (String(error).includes('saldo de vale invalido'))
-      return json({ error:'El vale de esta compra ya se usó. Requiere aclaración presencial antes de cancelar.' }, 409);
-    if (String(error).includes('saldo insuficiente'))
-      return json({ error:'Los Dolarones ganados con esta compra ya se usaron. Requiere aclaración presencial antes de cancelar.' }, 409);
-    if (String(error).includes('venta ya cancelada')) {
-      return json({ id, cancelada: true, ya_estaba: true });
-    }
-    if (String(error).includes('ticket cambio')) {
-      return json({ error: 'Alguien mas cambio este ticket. Vuelve a abrirlo.' }, 409);
-    }
-    throw error;
-  }
-
-  // Lo que se regresa en dinero; lo pagado con Dolarones regresa al saldo.
-  // Sin lo ya devuelto por piezas canceladas sueltas.
-  return json({
-    id, cancelada: true,
-    devuelto: venta.total - venta.dolarones - venta.devuelto,
-    dolarones: venta.dolarones - venta.dolarones_devueltos,
-  });
-}
-
 // La tienda esta en America/Mexico_City: UTC-6 fijo desde 2022, sin horario de
 // verano. Las ventas se guardan en UTC, asi que despues de las 18:00 locales ya
 // son "manana" en UTC; el dia de la tienda se saca restando 6 horas. Sin esto,
@@ -880,15 +814,33 @@ async function cancelarVenta(id: string, request: Request, env: Env, correo: str
 const diaTienda = (columna: string) => `substr(datetime(${columna}, '-6 hours'), 1, 10)`;
 export const hoyTienda = (ahora = Date.now()) => new Date(ahora - 6 * 3_600_000).toISOString().slice(0, 10);
 
+/**
+ * Los `dias` dias completos de la tienda que terminan hoy (Issue #166): el primero
+ * empieza a las 00:00 de la tienda, no «hace N x 24 h», para que un dia nunca salga
+ * a medias. `anterior_desde` abre el periodo de igual largo justo antes, para comparar.
+ */
+export function rangoDias(dias: number, ahora = Date.now()) {
+  const apertura = (dia: string) => `${dia}T06:00:00.000Z`;   // 00:00 en UTC-6
+  const primero = hoyTienda(ahora - (dias - 1) * 86_400_000);
+  return {
+    dias, dia_desde: primero, dia_hasta: hoyTienda(ahora), desde: apertura(primero),
+    anterior_desde: apertura(hoyTienda(ahora - (2 * dias - 1) * 86_400_000)),
+  };
+}
+const rangoDe = (url: URL) => rangoDias(Math.min(365, Math.max(1, Math.round(Number(url.searchParams.get('dias') ?? 30)))));
+
+// Lo que lleva un renglon de la lista de tickets (ticket.js `renglonTicket`), del dia o del rango.
+const COLUMNAS_TICKET = `v.id, v.total, v.forma_pago, v.cancelada, v.creado_en, v.dolarones, v.devuelto, v.dolarones_devueltos,
+            v.caja, v.cajero, v.cliente_id is not null as con_socio,
+            (select group_concat(nombre, ' · ') from venta_lineas where venta_id = v.id) as piezas,
+            (select coalesce(sum(cantidad), 0) from venta_lineas where venta_id = v.id) as cantidad,
+            (select coalesce(sum(cancelada_cantidad), 0) from venta_lineas where venta_id = v.id) as cancelada_cantidad`;
+
 /** Tickets de un dia (hoy si no se dice): la caja cancela el que se cobro mal; reportes solo los ve. */
 async function ventasDelDia(url: URL, env: Env): Promise<Response> {
   const dia = url.searchParams.get('dia') ?? hoyTienda();
   const { results } = await env.DB.prepare(
-    `select v.id, v.total, v.forma_pago, v.cancelada, v.creado_en, v.dolarones, v.devuelto, v.dolarones_devueltos,
-            v.caja, v.cajero,
-            (select group_concat(nombre, ' · ') from venta_lineas where venta_id = v.id) as piezas,
-            (select coalesce(sum(cantidad), 0) from venta_lineas where venta_id = v.id) as cantidad,
-            (select coalesce(sum(cancelada_cantidad), 0) from venta_lineas where venta_id = v.id) as cancelada_cantidad
+    `select ${COLUMNAS_TICKET}
      from ventas v where ${diaTienda('v.creado_en')} = ?
      order by v.creado_en desc limit 300`,
   )
@@ -948,15 +900,64 @@ async function corte(url: URL, env: Env): Promise<Response> {
 }
 
 /**
+ * Foto de lo que hay en piso AHORA (Issue #174), sin importar el periodo del reporte: piezas individuales
+ * ya etiquetadas (con codigo) y con existencia. Quedan fuera las bandas (no tienen fecha de captura propia),
+ * lo agotado y lo que aun esta en la cola de revision sin etiqueta. Las danadas SI cuentan: estan en piso.
+ * Antiguedad = dias de la tienda (UTC-6) desde `creado_en`, y los tramos van por semanas completas.
+ * Una fecha vacia o invalida no se adivina: va aparte, en `sin_fecha`.
+ */
+async function inventarioEnPiso(env: Env, ahora = Date.now()) {
+  // ponytail: se trae toda la lista y se suma en JS; con decenas de miles de piezas en piso conviene agrupar en SQL.
+  const { results } = await env.DB.prepare(
+    `select id, codigo, nombre, coalesce(nullif(categoria, ''), 'sin categoria') as categoria, precio, stock, creado_en,
+       case when julianday(creado_en) is null then null
+            else max(0, cast(julianday(?) - julianday(substr(datetime(creado_en, '-6 hours'), 1, 10)) as integer)) end as dias
+     from productos
+     where sin_inventario = 0 and stock > 0 and destino = 'etiqueta' and codigo is not null and codigo != ''`,
+  )
+    .bind(hoyTienda(ahora))
+    .all<{ id: string; codigo: string; nombre: string; categoria: string; precio: number; stock: number; creado_en: string; dias: number | null }>();
+
+  const valorDe = (f: { precio: number; stock: number }) => f.precio * f.stock;
+  const tramos = new Map(TRAMOS_ANTIGUEDAD.map(([clave]) => [clave, { tramo: clave, piezas: 0, valor: 0 }]));
+  const sinFecha = { piezas: 0, valor: 0 };
+  const categorias = new Map<string, { categoria: string; piezas: number; valor: number; sumaDias: number; fechadas: number }>();
+  for (const f of results) {
+    const grupo = (f.dias === null ? sinFecha : tramos.get(tramoDeDias(f.dias)))!;
+    grupo.piezas += 1;
+    grupo.valor += valorDe(f);
+    const c = categorias.get(f.categoria) ?? { categoria: f.categoria, piezas: 0, valor: 0, sumaDias: 0, fechadas: 0 };
+    c.piezas += 1;
+    c.valor += valorDe(f);
+    if (f.dias !== null) { c.sumaDias += f.dias; c.fechadas += 1; }
+    categorias.set(f.categoria, c);
+  }
+  return {
+    piezas: results.length,
+    unidades: results.reduce((suma, f) => suma + f.stock, 0),
+    valor: results.reduce((suma, f) => suma + valorDe(f), 0),
+    por_antiguedad: [...tramos.values()],
+    sin_fecha: sinFecha,
+    por_categoria: [...categorias.values()]
+      .map(({ sumaDias, fechadas, ...c }) => ({ ...c, dias_promedio: fechadas ? sumaDias / fechadas : null }))
+      .sort((a, b) => b.valor - a.valor || a.categoria.localeCompare(b.categoria)),
+    mas_viejas: results.filter((f) => f.dias !== null)
+      .sort((a, b) => b.dias! - a.dias! || valorDe(b) - valorDe(a) || a.codigo.localeCompare(b.codigo))
+      .slice(0, 15)
+      .map(({ id, codigo, nombre, categoria, precio, stock, creado_en, dias }) => ({ id, codigo, nombre, categoria, precio, stock, creado_en, dias })),
+  };
+}
+
+/**
  * Reportes: todo sale de consultas contra D1 en el momento, nada se precalcula
  * ni vive en otra tabla. `dias` acota lo que tiene sentido por rango (ventas del
  * dia, categoria, top de piezas); precio sugerido y dias en venta son de
  * siempre, porque son pocos datos y la pregunta que responden no es "esta
- * semana" sino "en general".
+ * semana" sino "en general". `inventario` es la foto de ahora: tampoco depende de `dias`.
  */
 async function reportes(url: URL, env: Env): Promise<Response> {
-  const dias = Math.min(365, Math.max(1, Math.round(Number(url.searchParams.get('dias') ?? 30))));
-  const desde = new Date(Date.now() - dias * 86400000).toISOString();
+  const rango = rangoDe(url);
+  const { dias, desde } = rango;
 
   const resumen = await env.DB.prepare(
     `select count(*) as ventas, coalesce(sum(total - devuelto - dolarones_devueltos), 0) as total,
@@ -966,6 +967,27 @@ async function reportes(url: URL, env: Env): Promise<Response> {
   )
     .bind(desde, desde)
     .first<{ ventas: number; total: number; piezas: number }>();
+
+  // El periodo de igual largo justo antes, para las flechas de «vs periodo anterior».
+  const anterior = await env.DB.prepare(
+    `select count(*) as ventas, coalesce(sum(total - devuelto - dolarones_devueltos), 0) as total,
+       (select coalesce(sum(l.cantidad - l.cancelada_cantidad), 0) from venta_lineas l join ventas v on v.id = l.venta_id
+        where v.cancelada = 0 and v.creado_en >= ? and v.creado_en < ?) as piezas
+     from ventas where cancelada = 0 and creado_en >= ? and creado_en < ?`,
+  )
+    .bind(rango.anterior_desde, desde, rango.anterior_desde, desde)
+    .first<{ ventas: number; total: number; piezas: number }>();
+
+  // De bruto a vendido, sin que sobre ni falte un centavo: lo cobrado en todos los
+  // tickets, menos lo devuelto por piezas, menos lo que valian los cancelados completos.
+  const cuadre = await env.DB.prepare(
+    `select coalesce(sum(total), 0) as bruto,
+       coalesce(sum(devuelto + dolarones_devueltos), 0) as devoluciones_pieza,
+       coalesce(sum(case when cancelada = 1 then total - devuelto - dolarones_devueltos end), 0) as cancelados
+     from ventas where creado_en >= ?`,
+  )
+    .bind(desde)
+    .first<{ bruto: number; devoluciones_pieza: number; cancelados: number }>();
 
   // Lo cobrado en dinero por forma de pago, y lo pagado con Dolarones como una forma mas.
   const { results: porFormaPago } = await env.DB.prepare(
@@ -994,16 +1016,29 @@ async function reportes(url: URL, env: Env): Promise<Response> {
   const piezasPorDiaMapa = new Map(piezasPorDia.map((f) => [f.dia, f.piezas]));
   const porDia = ventasPorDia.map((f) => ({ ...f, piezas: piezasPorDiaMapa.get(f.dia) ?? 0 }));
 
-  const { results: porCategoria } = await env.DB.prepare(
-    `select case when p.sin_inventario = 1 then 'bandas' else coalesce(p.categoria, 'sin categoria') end as categoria,
+  // Mapa de calor de /reportes: dia de la semana (0 = domingo, como %w) y hora, ambos de la tienda (UTC-6).
+  const { results: porHora } = await env.DB.prepare(
+    `select cast(strftime('%w', datetime(creado_en, '-6 hours')) as integer) as dia_semana,
+       cast(strftime('%H', datetime(creado_en, '-6 hours')) as integer) as hora,
+       count(*) as tickets, sum(total - devuelto - dolarones_devueltos) as total
+     from ventas where cancelada = 0 and creado_en >= ? group by dia_semana, hora order by dia_semana, hora`,
+  )
+    .bind(desde)
+    .all<{ dia_semana: number; hora: number; tickets: number; total: number }>();
+
+  // Lo vendido por categoria (las bandas juntas), del periodo y del anterior de igual largo: mismas reglas en los dos.
+  const ventasPorCategoria = (anteriorAlPeriodo: boolean) => env.DB.prepare(
+    `select case when p.sin_inventario = 1 then 'bandas' else coalesce(nullif(p.categoria, ''), 'sin categoria') end as categoria,
        coalesce(sum(l.precio * (l.cantidad - l.cancelada_cantidad)), 0) as total,
        coalesce(sum(l.cantidad - l.cancelada_cantidad), 0) as piezas
      from venta_lineas l join ventas v on v.id = l.venta_id left join productos p on p.id = l.producto_id
-     where v.cancelada = 0 and v.creado_en >= ?
+     where v.cancelada = 0 and v.creado_en >= ? ${anteriorAlPeriodo ? 'and v.creado_en < ?' : ''}
      group by categoria order by total desc`,
   )
-    .bind(desde)
+    .bind(...(anteriorAlPeriodo ? [rango.anterior_desde, desde] : [desde]))
     .all<{ categoria: string; total: number; piezas: number }>();
+  const { results: porCategoria } = await ventasPorCategoria(false);
+  const { results: porCategoriaAnterior } = await ventasPorCategoria(true);
 
   const { results: topProductos } = await env.DB.prepare(
     `select l.codigo, l.nombre, sum(l.cantidad - l.cancelada_cantidad) as cantidad,
@@ -1025,7 +1060,7 @@ async function reportes(url: URL, env: Env): Promise<Response> {
 
   // Diferido a proposito en CONTRATO-ESCANER.md hasta que hubiera ventas reales.
   const { results: diasEnVenta } = await env.DB.prepare(
-    `select coalesce(p.categoria, 'sin categoria') as categoria,
+    `select coalesce(nullif(p.categoria, ''), 'sin categoria') as categoria,
        avg(julianday(substr(v.creado_en, 1, 10)) - julianday(substr(p.creado_en, 1, 10))) as dias_promedio,
        count(*) as n
      from venta_lineas l join ventas v on v.id = l.venta_id join productos p on p.id = l.producto_id
@@ -1037,20 +1072,22 @@ async function reportes(url: URL, env: Env): Promise<Response> {
   // cancelacion que no fue legitima (cobrar de verdad y "cancelar" para
   // quedarse el efectivo). Se listan una por una, no solo el total.
   const { results: cancelaciones } = await env.DB.prepare(
-    `select v.id, v.total - v.dolarones - v.devuelto as total, v.forma_pago, v.cancelada_en, v.cancelada_por,
-       v.motivo_cancelacion,
+    `select v.id, v.total - v.dolarones - v.devuelto as total, v.dolarones - v.dolarones_devueltos as dolarones,
+       v.forma_pago, v.cancelada_en, v.cancelada_por, v.motivo_cancelacion,
        (select group_concat(nombre, ' · ') from venta_lineas
-        where venta_id = v.id and cantidad > cancelada_cantidad) as piezas
+        where venta_id = v.id and cantidad > cancelada_cantidad) as piezas, 'ticket' as tipo
      from ventas v where v.cancelada = 1 and v.creado_en >= ?
      union all
-     select d.venta_id, d.importe, d.forma_pago, d.creado_en, d.autor, d.motivo, d.cantidad || ' × ' || l.nombre
-     from devoluciones d join venta_lineas l on l.id = d.linea_id where d.creado_en >= ?
-     order by 4 desc`,
+     select d.venta_id, d.importe, d.dolarones, d.forma_pago, d.creado_en, d.autor, d.motivo,
+       d.cantidad || ' × ' || l.nombre, 'pieza'
+     from devoluciones d join venta_lineas l on l.id = d.linea_id join ventas v on v.id = d.venta_id
+     where v.creado_en >= ?
+     order by 5 desc`,
   )
     .bind(desde, desde)
     .all<{
-      id: string; total: number; forma_pago: string; cancelada_en: string;
-      cancelada_por: string; motivo_cancelacion: string; piezas: string;
+      id: string; total: number; dolarones: number; forma_pago: string; cancelada_en: string;
+      cancelada_por: string; motivo_cancelacion: string; piezas: string; tipo: string;
     }>();
 
   const { results: aperturas } = await env.DB.prepare(
@@ -1075,22 +1112,38 @@ async function reportes(url: URL, env: Env): Promise<Response> {
     .all();
 
   return json({
-    dias,
+    dias, dia_desde: rango.dia_desde, dia_hasta: rango.dia_hasta,
     resumen: {
       ventas: resumen?.ventas ?? 0,
       total: resumen?.total ?? 0,
       piezas: resumen?.piezas ?? 0,
       ticket_promedio: resumen?.ventas ? Math.round((resumen.total ?? 0) / resumen.ventas) : 0,
     },
+    anterior: {
+      ventas: anterior?.ventas ?? 0,
+      total: anterior?.total ?? 0,
+      piezas: anterior?.piezas ?? 0,
+      ticket_promedio: anterior?.ventas ? Math.round((anterior.total ?? 0) / anterior.ventas) : 0,
+    },
+    cuadre: {
+      bruto: cuadre?.bruto ?? 0,
+      devoluciones_pieza: cuadre?.devoluciones_pieza ?? 0,
+      cancelados: cuadre?.cancelados ?? 0,
+      vendido: (cuadre?.bruto ?? 0) - (cuadre?.devoluciones_pieza ?? 0) - (cuadre?.cancelados ?? 0),
+    },
     por_forma_pago: porFormaPago,
     por_dia: porDia,
+    por_hora: porHora,
     por_categoria: porCategoria,
+    por_categoria_anterior: porCategoriaAnterior,
+    inventario: await inventarioEnPiso(env),
     top_productos: topProductos,
     precio_sugerido: { n: precioSugerido?.n ?? 0, promedio_pct: precioSugerido?.promedio_pct ?? null },
     dias_en_venta_por_categoria: diasEnVenta,
     cancelaciones: {
       n: cancelaciones.length,
       total: cancelaciones.reduce((suma, c) => suma + c.total, 0),
+      dolarones: cancelaciones.reduce((suma, c) => suma + c.dolarones, 0),
       detalle: cancelaciones,
     },
     aperturas_cajon: aperturas,
@@ -1102,6 +1155,11 @@ async function reportes(url: URL, env: Env): Promise<Response> {
 /** Una celda de CSV: entre comillas si trae coma, comilla o salto de linea. */
 function celdaCsv(valor: unknown): string {
   const texto = String(valor ?? '');
+  // Evitar inyeccion de formulas: si es texto y empieza con un caracter peligroso, prefijo con apostrofe.
+  // Excepto si es un numero decimal (que puede ser negativo), que se deja tal cual.
+  if (typeof valor === 'string' && /^[=+\-@\t\r]/.test(texto) && !/^-?\d+(\.\d+)?$/.test(texto)) {
+    return /[",\n]/.test(texto) ? `"'${texto.replace(/"/g, '""')}"` : `'${texto}`;
+  }
   return /[",\n]/.test(texto) ? `"${texto.replace(/"/g, '""')}"` : texto;
 }
 
@@ -1116,7 +1174,118 @@ function respuestaCsv(nombreArchivo: string, encabezados: string[], filas: unkno
   });
 }
 
+const TICKETS_POR_PAGINA = 50;
+
+/**
+ * Los filtros de la lista de tickets de /reportes, en un solo lugar: la lista y su
+ * exportacion a CSV tienen que ver exactamente los mismos tickets.
+ */
+function filtrosTickets(url: URL) {
+  const q = url.searchParams;
+  const { desde } = rangoDe(url);
+
+  const filtros = ['v.creado_en >= ?'];
+  const datos: string[] = [desde];
+  const forma = q.get('forma_pago') ?? '';
+  if (FORMAS_PAGO.has(forma)) { filtros.push('v.forma_pago = ?'); datos.push(forma); }
+  for (const campo of ['caja', 'cajero']) {
+    const valor = q.get(campo);
+    if (valor) { filtros.push(`v.${campo} = ?`); datos.push(valor); }
+  }
+  const estado = q.get('estado');
+  if (estado === 'vigente') filtros.push('v.cancelada = 0');
+  if (estado === 'cancelado') filtros.push('v.cancelada = 1');
+  if (estado === 'devolucion') {
+    filtros.push('v.cancelada = 0 and exists (select 1 from venta_lineas where venta_id = v.id and cancelada_cantidad > 0)');
+  }
+  const dia = q.get('dia') ?? '';
+  if (/^\d{4}-\d{2}-\d{2}$/.test(dia)) { filtros.push(`${diaTienda('v.creado_en')} = ?`); datos.push(dia); }
+  if (q.get('socio') === '1') filtros.push('v.cliente_id is not null');
+  if (q.get('dolarones') === '1') filtros.push('v.dolarones > 0');
+  const donde = filtros.join(' and ');
+  return { desde, donde, datos };
+}
+
+/**
+ * Tickets del rango de /reportes (Issue #164), con filtros y paginacion. El rango
+ * es el mismo de las tarjetas (`dias`), para que los totales cuadren. El detalle de
+ * cada ticket es GET /api/ventas/:id. «Vendido» es lo que el ticket sigue valiendo:
+ * sin los cancelados ni lo devuelto por piezas.
+ */
+async function ticketsDelRango(url: URL, env: Env): Promise<Response> {
+  const { desde, donde, datos } = filtrosTickets(url);
+  const pagina = Math.min(1000, Math.max(0, Math.floor(Number(url.searchParams.get('pagina'))) || 0));
+
+  const resumen = await env.DB.prepare(
+    `select count(*) as tickets,
+            coalesce(sum(case when v.cancelada = 0 then v.total - v.devuelto - v.dolarones_devueltos end), 0) as vendido,
+            coalesce(sum(case when v.cancelada = 0 then v.dolarones - v.dolarones_devueltos end), 0) as dolarones,
+            coalesce(sum(case when v.cancelada = 1 then 1 end), 0) as cancelados,
+            coalesce((select sum(l.cantidad - l.cancelada_cantidad) from venta_lineas l join ventas v on v.id = l.venta_id
+                      where v.cancelada = 0 and ${donde}), 0) as piezas
+     from ventas v where ${donde}`,
+  )
+    .bind(...datos, ...datos)
+    .first();
+  const { results } = await env.DB.prepare(
+    `select ${COLUMNAS_TICKET} from ventas v where ${donde}
+     order by v.creado_en desc, v.id desc limit ? offset ?`,
+  )
+    .bind(...datos, TICKETS_POR_PAGINA + 1, pagina * TICKETS_POR_PAGINA)
+    .all();
+  // Para los selectores: lo que hubo en el rango, sin importar los filtros.
+  const { results: cajas } = await env.DB.prepare(
+    `select distinct caja as valor from ventas where creado_en >= ? and caja != '' order by caja`,
+  ).bind(desde).all<{ valor: string }>();
+  const { results: cajeros } = await env.DB.prepare(
+    `select distinct cajero as valor from ventas where creado_en >= ? and cajero != '' order by cajero`,
+  ).bind(desde).all<{ valor: string }>();
+
+  return json({
+    resumen,
+    tickets: results.slice(0, TICKETS_POR_PAGINA),
+    hay_mas: results.length > TICKETS_POR_PAGINA,
+    cajas: cajas.map((f) => f.valor),
+    cajeros: cajeros.map((f) => f.valor),
+  });
+}
+
 const pesosDe = (centavos: number) => (centavos / 100).toFixed(2);
+
+// ponytail: tope de filas del CSV de tickets; un rango de 12 meses lo rebasaria solo con mucho volumen. Si
+// pasa, hay que avisarlo en la pantalla o pasar a un export por tramos (hoy el tope ya cubre ~14 tickets al dia).
+const TICKETS_CSV_MAX = 5000;
+
+/** Los tickets de la lista de /reportes con sus mismos filtros, sin paginar, para abrirlos en una hoja de calculo. */
+async function exportarTicketsCsv(url: URL, env: Env): Promise<Response> {
+  const { donde, datos } = filtrosTickets(url);
+  const { results } = await env.DB.prepare(
+    `select ${COLUMNAS_TICKET} from ventas v where ${donde} order by v.creado_en desc, v.id desc limit ?`,
+  )
+    .bind(...datos, TICKETS_CSV_MAX)
+    .all<{
+      id: string; total: number; forma_pago: string; cancelada: number; creado_en: string; dolarones: number;
+      devuelto: number; dolarones_devueltos: number; caja: string; cajero: string; con_socio: number;
+      piezas: string | null; cantidad: number; cancelada_cantidad: number;
+    }>();
+
+  const filas = results.map((f) => [
+    // Hora de la tienda (UTC-6), no la UTC con que se guarda: es la que el dueno reconoce.
+    new Date(Date.parse(f.creado_en) - 6 * 3_600_000).toISOString().slice(0, 16).replace('T', ' '),
+    f.id, f.caja, f.cajero, f.forma_pago,
+    f.cancelada ? 'cancelado' : f.cancelada_cantidad > 0 ? 'con devoluciones' : 'vigente',
+    f.piezas ?? '', f.cantidad, pesosDe(f.total), pesosDe(f.devuelto), pesosDe(f.dolarones), pesosDe(f.dolarones_devueltos),
+    // Igual que «Vendido» en la lista: un cancelado ya no vale nada.
+    pesosDe(f.cancelada ? 0 : f.total - f.devuelto - f.dolarones_devueltos),
+    f.con_socio ? 'sí' : 'no',
+  ]);
+  return respuestaCsv(
+    'tickets.csv',
+    ['fecha', 'ticket', 'caja', 'cajero', 'forma_pago', 'estado', 'piezas', 'cantidad', 'total', 'devuelto',
+      'dolarones', 'dolarones_devueltos', 'vendido', 'socio'],
+    filas,
+  );
+}
 
 /** Un renglon por linea de venta: es el ledger completo, para lo que ningun dashboard cubre. */
 async function exportarVentasCsv(env: Env): Promise<Response> {
@@ -1194,6 +1363,10 @@ export default {
     env.PORTAL_AVISO_TEXTO ||= AVISO;
 
     try {
+      // Mercado Libre avisa aquí, sin Access: la ruta secreta es la puerta. También
+      // llega por el host público del portal (único fuera de Access), por eso va antes.
+      const aviso = pathname.match(/^\/api\/ml\/notificaciones\/([^/]+)$/);
+      if (aviso && request.method === 'POST') return await recibirNotificacion(aviso[1], request, env, ctx);
       // Puerta pública cerrada por defecto. Nunca comparte rutas ni assets del personal.
       if (env.HOST_PORTAL && url.hostname === env.HOST_PORTAL) {
         const archivos: Record<string, string> = {
@@ -1277,9 +1450,20 @@ export default {
         if (request.method === 'PUT') return await guardarCuenta(request, env);
         return json({ error: 'Metodo no permitido.' }, 405);
       }
+      if (pathname === '/api/descuentos' && request.method === 'POST') return await pedirDescuento(request, env, correo);
+      if (pathname === '/api/descuentos/duenos' && request.method === 'GET') return await listarDuenos(env);
+      if (pathname === '/api/solicitudes/descuentos' && request.method === 'GET') return await listarDescuentos(env);
+      if (pathname === '/api/solicitudes/cancelaciones' && request.method === 'GET') return await listarCancelaciones(env);
+      const solicitud = pathname.match(/^\/api\/solicitudes\/([^/]+)$/);
+      if (solicitud && request.method === 'GET') return await estadoSolicitud(env, solicitud[1], correo);
       const resolver = pathname.match(/^\/api\/solicitudes\/([^/]+)\/resolver$/);
       if (resolver && request.method === 'POST') {
         return await resolverSolicitud(resolver[1], request, env, correo);
+      }
+
+      if (pathname.startsWith('/api/ml/') || pathname === '/ml/callback') {
+        const respuestaML = await rutaML(request, env, url);
+        if (respuestaML) return respuestaML;
       }
 
       if (pathname === '/api/config') {
@@ -1321,7 +1505,7 @@ export default {
 
       if (pathname === '/api/ventas') {
         if (request.method === 'POST') {
-          return await registrarVenta(request, env, correo);
+          return await registrarVenta(request, env, ctx, correo);
         }
         return url.searchParams.get('lista') ? await ventasDelDia(url, env) : await corte(url, env);
       }
@@ -1386,6 +1570,12 @@ export default {
 
       if (pathname === '/api/reportes') {
         return await reportes(url, env);
+      }
+      if (pathname === '/api/reportes/tickets') {
+        return await ticketsDelRango(url, env);
+      }
+      if (pathname === '/api/reportes/tickets.csv') {
+        return await exportarTicketsCsv(url, env);
       }
       if (pathname === '/api/reportes/ventas.csv') {
         return await exportarVentasCsv(env);
@@ -1452,5 +1642,11 @@ export default {
       console.error(JSON.stringify({ mensaje: 'fallo en la peticion', pathname, error: String(error) }));
       return json({ error: 'Error interno. Intenta de nuevo.' }, 500);
     }
+  },
+
+  // Cron de wrangler.jsonc, cada 15 min: ordenes de Mercado Libre perdidas y
+  // conciliacion de existencias. Sin cuenta conectada no hace nada.
+  async scheduled(_evento, env, ctx): Promise<void> {
+    ctx.waitUntil(sincronizar(env));
   },
 } satisfies ExportedHandler<Env>;

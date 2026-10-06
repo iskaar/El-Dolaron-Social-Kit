@@ -39,7 +39,7 @@ export function repartirDevolucion(p: {
 }
 
 interface VentaFila {
-  id: string; total: number; forma_pago: string; efectivo: number; cambio: number; dolarones: number;
+  id: string; total: number; descuento: number; forma_pago: string; efectivo: number; cambio: number; dolarones: number;
   cancelada: number; cancelada_en: string; cancelada_por: string; cancelada_caja: string; motivo_cancelacion: string;
   creado_en: string; caja: string; cajero: string; cliente_id: string | null;
   devuelto: number; dolarones_devueltos: number; revision: number;
@@ -48,7 +48,7 @@ interface VentaFila {
 
 const leerVenta = (env: Env, id: string) =>
   env.DB.prepare(
-    `select id, total, forma_pago, efectivo, cambio, dolarones, cancelada, cancelada_en, cancelada_por, cancelada_caja,
+    `select id, total, descuento, forma_pago, efectivo, cambio, dolarones, cancelada, cancelada_en, cancelada_por, cancelada_caja,
             motivo_cancelacion, creado_en, caja, cajero, cliente_id, devuelto, dolarones_devueltos, revision, imprimir_en, impreso_en
      from ventas where id = ?`,
   ).bind(id).first<VentaFila>();
@@ -125,8 +125,19 @@ export async function cancelarPieza(
   if (cantidad > quedan) return json({ error: `Solo quedan ${quedan} de esa pieza en el ticket.` }, 400);
 
   const pagado = venta.total - venta.dolarones;
+  // Con descuento (Issue #119) `total` ya viene descontado: cada pieza vale su parte de
+  // lo cobrado, no su precio de lista, y la ultima se lleva el resto (sin perder centavos).
+  let importe = linea.precio * cantidad;
+  if (venta.descuento > 0) {
+    const { restan } = (await env.DB.prepare(
+      'select sum(cantidad - cancelada_cantidad) as restan from venta_lineas where venta_id = ?',
+    ).bind(ventaId).first<{ restan: number }>())!;
+    importe = cantidad === restan
+      ? Math.max(0, venta.total - venta.devuelto - venta.dolarones_devueltos)
+      : Math.round((importe * venta.total) / (venta.total + venta.descuento));
+  }
   const reparto = repartirDevolucion({
-    importe: linea.precio * cantidad, pagado, devuelto: venta.devuelto,
+    importe, pagado, devuelto: venta.devuelto,
     dolarones: venta.dolarones, dolaronesDevueltos: venta.dolarones_devueltos,
   });
   const ahora = new Date().toISOString();

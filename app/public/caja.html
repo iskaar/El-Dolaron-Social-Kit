@@ -56,7 +56,19 @@
     background: #fff; color: var(--azul); border-radius: 10px; cursor: pointer; }
   #cancelar { width: 100%; margin-top: 8px; padding: 10px; font-size: 14px; border: 1px solid var(--rojo);
     background: #fff; color: var(--rojo); border-radius: 10px; cursor: pointer; }
+  #pedir-descuento { width: 100%; margin-top: 8px; padding: 10px; font-size: 14px; border: 1px solid var(--azul);
+    background: #fff; color: var(--azul); border-radius: 10px; cursor: pointer; }
+  #descuento-form { display: grid; gap: 8px; margin-top: 8px; }
+  #descuento-form[hidden] { display: none; }
+  #descuento-form input, #descuento-form select { padding: 12px; font-size: 16px; border: 1px solid var(--linea); border-radius: 10px; }
+  #descuento-form button { padding: 10px; font-size: 14px; border: 1px solid var(--azul); border-radius: 10px;
+    background: var(--azul); color: #fff; cursor: pointer; }
+  #descuento-form button.claro { background: #fff; color: var(--azul); }
+  #descuento-estado { font-size: 14px; margin-top: 6px; }
   #impresiones-destino { font-size: 12px; color: #666; margin-top: 4px; }
+  #descuento-pin { display: grid; gap: 6px; border-top: 1px solid var(--linea); padding-top: 8px; }
+  #descuento-pin h3 { margin: 0; font-size: 13px; color: #5b6478; }
+  #descuento-pin[hidden] { display: none; }
   #aviso { min-height: 20px; font-size: 14px; margin-top: 8px; }
   #rechazadas:not(:empty) { margin-top: 8px; }
   #rechazadas .ticket { border: 1px solid var(--rojo); border-radius: 8px; padding: 8px;
@@ -161,6 +173,28 @@
     <div id="total">$0</div>
     <div id="piezas">0 piezas</div>
     <div id="a-pagar"></div>
+
+    <button id="pedir-descuento" type="button" hidden>Pedir descuento</button>
+    <div id="descuento-form" hidden>
+      <select id="descuento-tipo" aria-label="Tipo de descuento">
+        <option value="porcentaje">% del ticket</option>
+        <option value="monto">$ de descuento</option>
+      </select>
+      <input id="descuento-valor" type="number" min="1" step="1" inputmode="numeric" placeholder="Cuánto" aria-label="Cuánto">
+      <input id="descuento-motivo" maxlength="200" placeholder="Motivo (obligatorio)" autocomplete="off">
+      <button id="enviar-descuento" type="button">Enviar al dueño</button>
+      <div id="descuento-pin">
+        <h3>O aprobar aquí con PIN del dueño</h3>
+        <select id="descuento-aprobador" aria-label="Dueño que aprueba"></select>
+        <input id="descuento-pin-dueno" type="password" inputmode="numeric" maxlength="6" autocomplete="off"
+          placeholder="PIN del dueño (6 dígitos)" aria-label="PIN del dueño">
+        <button id="aprobar-descuento-pin" type="button">Aprobar con PIN</button>
+      </div>
+      <button id="cerrar-descuento" class="claro" type="button">Cerrar</button>
+    </div>
+    <div id="descuento-estado"></div>
+    <button id="quitar-descuento" type="button" hidden
+      style="margin-top:6px;padding:6px 10px;font-size:13px;border:1px solid #dfe3ea;background:#fff;border-radius:8px;cursor:pointer">Quitar descuento</button>
 
     <label for="socio">Código de la web, vale impreso o teléfono de socio</label>
     <div class="socio-fila">
@@ -307,7 +341,7 @@
   </div>
 </dialog>
 <script type="module">
-import { totales, agregar, efectivoAlcanza, dolaronesGanados, saldoCanjeable, maximoCanje, MINIMO_REGALO, DENOMINACIONES, contadoDe } from '/venta.js';
+import { totales, agregar, efectivoAlcanza, dolaronesGanados, saldoCanjeable, maximoCanje, MINIMO_REGALO, descuentoDe, TOPE_DESCUENTO, DENOMINACIONES, contadoDe } from '/venta.js';
 import { abrirCamara } from '/camara.js';
 import {
   reconectarImpresora, conectarImpresora, impresoraLista, imprimirTicket, abrirCajon, explicarErrorUsb, errorImpresora,
@@ -469,6 +503,17 @@ async function cargarCatalogo() {
 /* ---------- ticket ---------- */
 
 function pintar() {
+  // Un descuento se aprueba para ese ticket exacto: si cambia, hay que pedir otro.
+  const subtotal = totales(lineas).subtotal;
+  if (descuento && descuento.subtotal !== subtotal) {
+    const habiaSolicitud = descuento.estado !== 'rechazada';
+    descuento = null;
+    idVenta = null;
+    pintarDescuento(habiaSolicitud && subtotal > 0 ? 'El ticket cambió: el descuento ya no aplica. Pide otro.' : '');
+  }
+  $('pedir-descuento').hidden = subtotal === 0 || (!!descuento && descuento.estado !== 'rechazada');
+  if (subtotal === 0) $('descuento-form').hidden = true;
+
   $('ticket').innerHTML = lineas.map((l, i) => `
     <div class="renglon">
       <div><div class="nombre">${escapar(l.nombre)}</div><div class="codigo">${escapar(l.codigo)}</div></div>
@@ -479,19 +524,22 @@ function pintar() {
 
   // «Usar todos» elegido en el pop-up: el campo sigue al máximo mientras cambie el ticket.
   if (usarTodos && socio) {
-    const m = maximoCanje(socio, totales(lineas).total);
+    const m = maximoCanje(socio, totalNeto());
     $('dolarones').value = m ? String(m / 100) : '';
   }
   const efectivo = Math.round(Number($('efectivo').value || 0) * 100);
   const usados = dolaronesPedidos();
-  const t = totales(lineas, efectivo, usados);
+  const t = totales(lineas, efectivo, usados, descuentoAplicado());
   $('total').textContent = pesos(t.total);
   $('piezas').textContent = `${t.piezas} ${t.piezas === 1 ? 'pieza' : 'piezas'}`;
-  $('a-pagar').textContent = usados ? `Dolarones −${pesos(usados)} · A pagar ${pesos(t.aPagar)}` : '';
+  $('a-pagar').textContent = [
+    t.descuento ? `Descuento −${pesos(t.descuento)}` : '',
+    usados ? `Dolarones −${pesos(usados)} · A pagar ${pesos(t.aPagar)}` : '',
+  ].filter(Boolean).join(' · ');
   const canjeable = saldoCanjeable(socio, t.total);
   const autorizado = !usados || (codigoSocio && usados <= socio.maximo && Date.parse(socio.expira_en) > Date.now());
   $('usar-maximo').disabled = cobrando || !codigoSocio || maximoCanje(socio, t.total) === 0;
-  for (const id of ['codigo', 'socio', 'buscar-socio', 'quitar-socio', 'dolarones', 'efectivo', 'forma', 'cancelar']) $(id).disabled = cobrando;
+  for (const id of ['codigo', 'socio', 'buscar-socio', 'quitar-socio', 'dolarones', 'efectivo', 'forma', 'cancelar', 'pedir-descuento', 'quitar-descuento']) $(id).disabled = cobrando;
   pintarImpresionRemota();
   $('cobrar').disabled = cobrando || t.total === 0 || usados > t.total || usados > canjeable || !autorizado;
   $('codigo-autorizacion').textContent = socio?.vale
@@ -621,6 +669,108 @@ function dolaronesPedidos() {
   return Math.max(0, pedidos);
 }
 
+/* ---------- descuentos con aprobacion del dueno (Issue #119) ---------- */
+
+// { id, tipo, valor, subtotal, monto, estado: pendiente|aprobada|rechazada } o null.
+let descuento = null;
+let sondeoDescuento = null;
+const descuentoAplicado = () => (descuento?.estado === 'aprobada' ? descuento.monto : 0);
+/** Lo que vale el ticket ya con el descuento aprobado: contra esto se canjean Dolarones. */
+const totalNeto = () => totales(lineas, 0, 0, descuentoAplicado()).total;
+
+function pintarDescuento(aviso = '') {
+  clearInterval(sondeoDescuento);
+  $('quitar-descuento').hidden = !descuento;
+  const el = $('descuento-estado');
+  el.style.color = '';
+  if (!descuento) { el.textContent = aviso; el.style.color = aviso ? '#D72B32' : ''; return; }
+  if (descuento.estado === 'pendiente') {
+    el.textContent = `Descuento de ${pesos(descuento.monto)} esperando al dueño…`;
+    sondeoDescuento = setInterval(consultarDescuento, 3000);
+  } else if (descuento.estado === 'aprobada') {
+    el.textContent = `Descuento aprobado: −${pesos(descuento.monto)}`;
+    el.style.color = '#1f7a4d';
+  } else {
+    el.textContent = 'El dueño rechazó el descuento.';
+    el.style.color = '#D72B32';
+  }
+}
+
+async function consultarDescuento() {
+  if (descuento?.estado !== 'pendiente') return;
+  try {
+    const r = await fetch(`/api/solicitudes/${descuento.id}`);
+    if (!r.ok) return;
+    const { estado } = await r.json();
+    if (estado === 'pendiente' || descuento?.estado !== 'pendiente') return;
+    descuento.estado = estado;
+    idVenta = null;
+    pintarDescuento();
+    pintar();
+  } catch { /* sin red: se vuelve a preguntar en 3 s */ }
+}
+
+// Los dueños con PIN, para aprobar aqui mismo. Se piden al abrir el formulario.
+async function cargarDuenos() {
+  const lista = $('descuento-aprobador');
+  try {
+    const r = await fetch('/api/descuentos/duenos');
+    const duenos = r.ok ? await r.json() : [];
+    lista.innerHTML = duenos.map((u) => `<option value="${escapar(u.correo)}">${escapar(u.nombre || u.correo)}</option>`).join('');
+    $('descuento-pin').hidden = duenos.length === 0;
+  } catch { $('descuento-pin').hidden = true; }   // sin red tampoco se piden descuentos
+}
+
+$('quitar-descuento').addEventListener('click', () => { descuento = null; idVenta = null; pintarDescuento(); pintar(); });
+$('pedir-descuento').addEventListener('click', () => {
+  $('descuento-form').hidden = false;
+  cargarDuenos();
+  $('descuento-valor').focus();
+});
+$('cerrar-descuento').addEventListener('click', () => {
+  $('descuento-form').hidden = true;
+  $('descuento-pin-dueno').value = '';
+  $('codigo').focus();
+});
+
+/** Pide el descuento; `aprobacion` ({ aprobador, pin }) lo aprueba el dueño aqui con su PIN. */
+async function enviarDescuento(aprobacion = {}) {
+  const tipo = $('descuento-tipo').value;
+  const escrito = Number($('descuento-valor').value);
+  const valor = tipo === 'monto' ? Math.round(escrito * 100) : escrito;
+  const motivo = $('descuento-motivo').value.trim();
+  const subtotal = totales(lineas).subtotal;
+  const calculo = descuentoDe({ tipo, valor }, subtotal);
+  const falla = (texto) => { $('descuento-estado').textContent = texto; $('descuento-estado').style.color = '#D72B32'; };
+  if (calculo.error) return falla(calculo.error);
+  if (!motivo) return falla('Escribe el motivo del descuento.');
+  if (aprobacion.pin !== undefined && !/^\d{6}$/.test(aprobacion.pin)) return falla('El PIN es de 6 dígitos.');
+  try {
+    const r = await fetch('/api/descuentos', {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ tipo, valor, motivo, subtotal, ...aprobacion }),
+    });
+    const cuerpo = await r.json().catch(() => ({}));
+    $('descuento-pin-dueno').value = '';
+    if (!r.ok) return falla(cuerpo.error ?? 'No se pudo pedir el descuento.');
+    // Pendiente (va al dueño), o ya aprobado: con el PIN del dueño, o porque quien cobra es el dueño.
+    descuento = { id: cuerpo.id, tipo, valor, subtotal, monto: cuerpo.monto, estado: cuerpo.estado };
+    idVenta = null;
+    $('descuento-form').hidden = true;
+    $('descuento-valor').value = '';
+    $('descuento-motivo').value = '';
+    pintarDescuento();
+    pintar();
+  } catch {
+    falla('Sin red: no se pueden pedir descuentos. Cobra a precio normal.');
+  }
+}
+$('enviar-descuento').addEventListener('click', () => enviarDescuento());
+$('aprobar-descuento-pin').addEventListener('click', () => enviarDescuento({
+  aprobador: $('descuento-aprobador').value, pin: $('descuento-pin-dueno').value,
+}));
+$('descuento-valor').placeholder = `Máximo ${TOPE_DESCUENTO}% del ticket`;
+
 function pintarSocio() {
   $('quitar-socio').hidden = !socio;
   $('pagar-dolarones').hidden = !socio || socio.disponible === 0;
@@ -690,7 +840,7 @@ $('dolarones').addEventListener('input', () => { usarTodos = false; idVenta = nu
 
 /** Pop-up al cargar socio con código o vale: sólo si realmente puede gastar. */
 function preguntarDolarones() {
-  const total = totales(lineas).total;
+  const total = totalNeto();
   if (!socio || !codigoSocio || cobrando || !(socio.maximo > 0) || !(socio.disponible > 0)) return;
   const usable = total ? maximoCanje(socio, total) : Math.min(socio.disponible, socio.maximo);
   if (!usable) return;
@@ -716,7 +866,7 @@ $('dlg-no').addEventListener('click', () => cerrarDialogo('no'));
 // Escape = «No usar» (el campo ya está vacío).
 $('dlg-dolarones').addEventListener('cancel', () => $('codigo').focus());
 $('usar-maximo').addEventListener('click', () => {
-  $('dolarones').value = String(maximoCanje(socio, totales(lineas).total) / 100);
+  $('dolarones').value = String(maximoCanje(socio, totalNeto()) / 100);
   idVenta = null;
   pintar();
 });
@@ -771,7 +921,12 @@ async function cobrar() {
     return;
   }
   const usados = dolaronesPedidos();
-  const t = totales(lineas, efectivo, usados);
+  if (descuento?.estado === 'pendiente') {
+    $('aviso').textContent = 'El descuento sigue esperando al dueño. Espera su respuesta o aprieta «Quitar descuento».';
+    $('aviso').style.color = '#D72B32';
+    return;
+  }
+  const t = totales(lineas, efectivo, usados, descuentoAplicado());
   if (usados > saldoCanjeable(socio, t.total)) {
     $('aviso').textContent = 'Los regalos de apertura requieren un ticket de $1,000 MXN o más antes de descontar Dolarones. Revisa el importe solicitado.';
     $('aviso').style.color = '#D72B32';
@@ -800,6 +955,7 @@ async function cobrar() {
       cliente_id: socio?.id ?? null,
       dolarones: usados,
       caja: cajaActual(),
+      descuento_id: descuentoAplicado() ? descuento.id : null,
       ...(imprimirEn ? { imprimir_en: imprimirEn } : {}),
     };
     let socioTicket = socio && !socio.vale && { numero: socio.numero, ganados: 0, saldo: socio.disponible };
@@ -839,7 +995,7 @@ async function cobrar() {
     // Nada de esto espera al servidor ni bloquea el cobro; si falla, el pie lo dice.
     if (!venta.imprimir_en) {
       if (forma === 'efectivo') abrirCajon();
-      imprimirTicket({ ...venta, total: t.total, cambio: t.cambio, socio: socioTicket }, venta.lineas)
+      imprimirTicket({ ...venta, total: t.total, descuento: t.descuento, cambio: t.cambio, socio: socioTicket }, venta.lineas)
         .then(pintarImpresora);
     }
 
@@ -865,6 +1021,8 @@ async function cobrar() {
     $('aviso').style.color = '#1f7a4d';
     lineas = [];
     idVenta = null;
+    descuento = null;
+    pintarDescuento();
     quitarSocio();
     $('efectivo').value = '';
     $('codigo').focus();
@@ -1026,6 +1184,9 @@ $('tickets').addEventListener('toggle', cargarTickets);
 // al abrir el formulario, asi un doble clic o un reintento no devuelven dos veces.
 let ticketAbierto = null;
 let idCancelacion = null;
+// Cancelacion de ticket completo que paso los 5 minutos y espera al dueño (Issue #200).
+let aprobacionCancelar = null;
+let esperando = null;
 
 $('lista-tickets').addEventListener('click', (e) => {
   const fila = e.target.closest('[data-ticket]');
@@ -1050,7 +1211,7 @@ async function abrirTicket(id) {
 }
 
 $('ticket-cerrar').addEventListener('click', () => $('dialogo-ticket').close());
-$('dialogo-ticket').addEventListener('close', () => { ticketAbierto = null; idCancelacion = null; $('codigo').focus(); });
+$('dialogo-ticket').addEventListener('close', () => { ticketAbierto = null; idCancelacion = null; aprobacionCancelar = null; $('codigo').focus(); });
 
 // Cancelar pide el motivo dentro de la ventana (nada de prompt()/confirm() nativos,
 // que congelan la pestana): un clic abre el campo, otro clic ya confirmado envia.
@@ -1109,6 +1270,47 @@ $('ticket-contenido').addEventListener('click', async (e) => {
     return;
   }
 
+  if (d.aprobarPin !== undefined || d.enviarDueno !== undefined) {
+    const panel = boton.closest('.aprobacion');
+    const aviso = panel.querySelector('.aviso-aprobacion');
+    aviso.textContent = '';
+    const peticion = { motivo: aprobacionCancelar.motivo, caja: cajaActual() };
+    if (d.aprobarPin !== undefined) {
+      const campoPin = panel.querySelector('.pin-dueno');
+      if (!/^\d{6}$/.test(campoPin.value)) { aviso.textContent = 'El PIN es de 6 dígitos.'; campoPin.focus(); return; }
+      peticion.aprobador = panel.querySelector('.aprobador').value;
+      peticion.pin = campoPin.value;
+    } else {
+      peticion.solicitar = true;
+    }
+    for (const b of panel.querySelectorAll('button')) b.disabled = true;
+    let r, cuerpo;
+    try {
+      r = await fetch(`/api/ventas/${ticketAbierto.id}/cancelar`, {
+        method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(peticion),
+      });
+      cuerpo = await r.json();
+    } catch {
+      for (const b of panel.querySelectorAll('button')) b.disabled = false;
+      aviso.textContent = 'Sin red: no se pudo confirmar la cancelación. Reabre el ticket antes de devolver dinero o mercancía.';
+      return;
+    }
+    if (r.status === 202) {
+      panel.innerHTML = `<p class="esperando">Esperando aprobación del dueño…</p>
+        <p class="nota">Puedes cerrar esta ventana: avisaremos aquí cuando responda.</p>`;
+      esperarAprobacion(cuerpo.solicitud_id, ticketAbierto.id);
+      return;
+    }
+    if (!r.ok) {
+      for (const b of panel.querySelectorAll('button')) b.disabled = false;
+      aviso.textContent = cuerpo.error ?? 'No se pudo cancelar.';
+      if (d.aprobarPin !== undefined) { panel.querySelector('.pin-dueno').value = ''; panel.querySelector('.pin-dueno').focus(); }
+      return;
+    }
+    await terminarCancelacion(r, cuerpo, { linea: undefined, cantidad: 1 });
+    return;
+  }
+
   if (d.confirmarLinea || d.confirmarTodo !== undefined) {
     const form = boton.closest('.form-cancelar');
     const campoMotivo = form.querySelector('.motivo-cancelar');
@@ -1142,28 +1344,97 @@ $('ticket-contenido').addEventListener('click', async (e) => {
       $('ticket-aviso').style.color = '#D72B32';
       return;
     }
-    const pieza = d.confirmarLinea ? (cantidad > 1 ? 'las piezas' : 'la pieza') : 'las piezas';
-    $('ticket-aviso').textContent = r.ok
-      ? `${d.confirmarLinea ? 'Pieza cancelada' : 'Ticket cancelado'}. Devuelve ${pesos(cuerpo.devuelto ?? 0)} y regresa ${pieza} al anaquel.`
-        + (cuerpo.dolarones ? ` Los ${dolares(cuerpo.dolarones)} regresaron al socio o al mismo vale, con su vencimiento original.` : '')
-      : (cuerpo.error ?? 'No se pudo cancelar.');
-    $('ticket-aviso').style.color = r.ok ? '#1f7a4d' : '#D72B32';
-    idCancelacion = null;
-    const aviso = $('ticket-aviso').textContent;
-    await abrirTicket(ticketAbierto.id);
-    $('ticket-aviso').textContent = aviso;
-    // El comprobante sale solo la primera vez; un reenvio (duplicada, ya_estaba) se reimprime con su boton.
-    if (r.ok && !cuerpo.duplicada && !cuerpo.ya_estaba && ticketAbierto) {
-      const i = ticketAbierto.devoluciones.findIndex((x) => x.id === cuerpo.id);
-      if (!d.confirmarLinea || i >= 0) {
-        await imprimirComprobante(d.confirmarLinea ? comprobanteDevolucion(ticketAbierto, i) : comprobanteCancelacion(ticketAbierto));
-      }
+    // Pasados 5 minutos del cobro el cajero necesita al dueño: se le ofrece en esta misma ventana.
+    if (d.confirmarTodo !== undefined && r.status === 403 && cuerpo.requiere_aprobacion) {
+      aprobacionCancelar = { motivo };
+      idCancelacion = null;
+      $('ticket-aviso').textContent = '';
+      $('form-todo').innerHTML = panelAprobacion(cuerpo);
+      $('form-todo').querySelector('.pin-dueno')?.focus();
+      return;
     }
-    await cargarTickets();
-    await actualizarCorte();
-    await cargarCatalogo();          // la pieza devuelta vuelve a tener existencia
+    await terminarCancelacion(r, cuerpo, { linea: d.confirmarLinea, cantidad });
   }
 });
+
+/** Lo que sigue a una cancelacion enviada (pieza o ticket): aviso, ticket al dia, comprobante y existencias. */
+async function terminarCancelacion(r, cuerpo, { linea, cantidad }) {
+  const pieza = linea ? (cantidad > 1 ? 'las piezas' : 'la pieza') : 'las piezas';
+  $('ticket-aviso').textContent = r.ok
+    ? `${linea ? 'Pieza cancelada' : 'Ticket cancelado'}. Devuelve ${pesos(cuerpo.devuelto ?? 0)} y regresa ${pieza} al anaquel.`
+      + (cuerpo.dolarones ? ` Los ${dolares(cuerpo.dolarones)} regresaron al socio o al mismo vale, con su vencimiento original.` : '')
+    : (cuerpo.error ?? 'No se pudo cancelar.');
+  $('ticket-aviso').style.color = r.ok ? '#1f7a4d' : '#D72B32';
+  idCancelacion = null;
+  const aviso = $('ticket-aviso').textContent;
+  await abrirTicket(ticketAbierto.id);
+  $('ticket-aviso').textContent = aviso;
+  // El comprobante sale solo la primera vez; un reenvio (duplicada, ya_estaba) se reimprime con su boton.
+  if (r.ok && !cuerpo.duplicada && !cuerpo.ya_estaba && ticketAbierto) {
+    const i = ticketAbierto.devoluciones.findIndex((x) => x.id === cuerpo.id);
+    if (!linea || i >= 0) {
+      await imprimirComprobante(linea ? comprobanteDevolucion(ticketAbierto, i) : comprobanteCancelacion(ticketAbierto));
+    }
+  }
+  await cargarTickets();
+  await actualizarCorte();
+  await cargarCatalogo();          // la pieza devuelta vuelve a tener existencia
+}
+
+/** Las dos salidas cuando el ticket ya paso la ventana de 5 minutos: PIN del dueño aquí, o pedirlo a distancia. */
+function panelAprobacion({ error, duenos = [] }) {
+  return `<div class="aprobacion form-cancelar">
+    <p class="nota" style="color:#D72B32;margin:0">${escapar(error)}</p>
+    <h3>Aprobar aquí con PIN del dueño</h3>
+    ${duenos.length === 0
+      ? '<p class="nota">Ningún dueño tiene PIN. Usa «Enviar al dueño».</p>'
+      : `<select class="aprobador">${duenos.map((u) => `<option value="${escapar(u.correo)}">${escapar(u.nombre || u.correo)}</option>`).join('')}</select>
+         <input type="password" class="pin-dueno" inputmode="numeric" maxlength="6" autocomplete="off" placeholder="PIN del dueño (6 dígitos)">
+         <div class="botones"><button type="button" class="quitar" data-aprobar-pin>Aprobar con PIN</button></div>`}
+    <h3>O que lo apruebe a distancia</h3>
+    <div class="botones"><button type="button" class="secundario" data-enviar-dueno>Enviar al dueño</button></div>
+    <div class="aviso-dialogo aviso-aprobacion"></div>
+  </div>`;
+}
+
+/** Pregunta cada 5 s si el dueño ya respondió; la caja puede seguir cobrando mientras tanto. */
+function esperarAprobacion(solicitudId, ticketId) {
+  clearInterval(esperando?.timer);
+  esperando = { solicitudId, ticketId, consultando: false, timer: setInterval(consultarAprobacion, 5000) };
+}
+
+async function consultarAprobacion() {
+  if (!esperando || esperando.consultando) return;
+  const { solicitudId, ticketId } = esperando;
+  esperando.consultando = true;
+  let estado;
+  try {
+    const r = await fetch(`/api/solicitudes/${solicitudId}`);
+    const cuerpo = await r.json();
+    estado = r.ok ? cuerpo.estado : (r.status === 404 ? 'perdida' : 'pendiente');
+  } catch { estado = 'pendiente'; }   // sin red: se vuelve a preguntar
+  if (!esperando || esperando.solicitudId !== solicitudId) return;
+  esperando.consultando = false;
+  if (estado === 'pendiente') return;
+
+  clearInterval(esperando.timer);
+  esperando = null;
+  const aprobada = estado === 'aprobada';
+  const texto = aprobada ? 'El dueño aprobó la cancelación del ticket.'
+    : estado === 'rechazada' ? 'El dueño rechazó la cancelación: el ticket sigue vigente.'
+    : 'No se encontró la solicitud de cancelación.';
+  const abierto = $('dialogo-ticket').open && ticketAbierto?.id === ticketId;
+  if (abierto) {
+    await abrirTicket(ticketId);
+    $('ticket-aviso').textContent = aprobada
+      ? `${texto} Devuelve ${pesos(comprobanteCancelacion(ticketAbierto).dinero)} y regresa las piezas al anaquel.` : texto;
+    $('ticket-aviso').style.color = aprobada ? '#1f7a4d' : '#D72B32';
+    if (aprobada && ticketAbierto?.cancelada) await imprimirComprobante(comprobanteCancelacion(ticketAbierto));
+  } else {
+    $('aviso').textContent = `${texto} (ticket ${ticketId.slice(0, 8)})`;
+  }
+  if (aprobada) { await cargarTickets(); await actualizarCorte(); await cargarCatalogo(); }
+}
 
 /** Hoja de la devolucion para que el cliente firme; se guarda con el corte. */
 async function imprimirComprobante(datos) {
@@ -1485,7 +1756,7 @@ $('corte-reimprimir').addEventListener('click', async () => {
 });
 
 $('cancelar').addEventListener('click', () => {
-  lineas = []; idVenta = null; quitarSocio(); $('efectivo').value = ''; $('aviso').textContent = 'Venta cancelada';
+  lineas = []; idVenta = null; descuento = null; pintarDescuento(); quitarSocio(); $('efectivo').value = ''; $('aviso').textContent = 'Venta cancelada';
   $('aviso').style.color = '#5b6478'; pintar(); $('codigo').focus();
 });
 

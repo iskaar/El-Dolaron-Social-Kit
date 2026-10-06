@@ -38,6 +38,8 @@
   .campos { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 10px; }
   .acciones { display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap; align-items: center; }
   .etiqueta { font-size: 12px; padding: 3px 8px; border-radius: 999px; background: #eef1f6; }
+  /* Issue #189: lo del dueno se oculta a capturistas (/admin tambien es suyo). */
+  body:not(.dueno) .solo-dueno { display: none; }
   .etiqueta.error { background: #fdecec; color: var(--rojo); }
   .etiqueta.pendiente { background: #fff6d9; color: #8a6d00; }
   .aviso { font-size: 13px; color: var(--rojo); min-height: 18px; }
@@ -78,6 +80,7 @@
     </div>
     <div class="acciones">
       <button type="submit">Guardar pieza</button>
+      <button type="button" class="claro" id="m-precios-ml">Ver precios en Mercado Libre</button>
       <span class="aviso" id="m-aviso"></span>
     </div>
   </form>
@@ -108,11 +111,12 @@
 <script type="module">
 import { reducirArchivo } from '/foto.js';
 import { agruparSesiones } from '/sesiones.js';
+import { enlacePreciosML } from '/precios-ml.js';
 
 import { CATEGORIAS } from '/categorias.js';
 const opcionesCategoria = (elegida) =>
   CATEGORIAS.map(([c, nombre]) => `<option value="${c}" ${c === elegida ? 'selected' : ''}>${nombre}</option>`).join('');
-// Los siete montos y las familias de banda salen de la tabla `familias` (GET /api/familias).
+// Los montos y las familias de banda salen de la tabla `familias` (GET /api/familias).
 const { montos: MONTOS_BANDA, familias: FAMILIAS } = await (await fetch('/api/familias')).json();
 const DESTINOS = [
   ['etiqueta', 'Etiqueta individual'],
@@ -206,6 +210,7 @@ function ficha(p) {
       <div class="acciones">
         <button type="button" data-accion="guardar">Guardar</button>
         <button type="button" class="claro" data-accion="recalcular">Recalcular precio</button>
+        <button type="button" class="claro solo-dueno" data-accion="precios-ml">Ver precios en ML</button>
         <button type="button" class="claro" data-accion="reanalizar">Reintentar análisis</button>
         ${repetida ? `<button type="button" class="claro" data-accion="fusionar"
           title="Suma esta foto a la pieza que ya existe y borra la repetida">
@@ -290,6 +295,10 @@ function ficha(p) {
       if (!respuesta.ok) { aviso.textContent = datos.error; return; }
       repetida.stock = datos.stock;   // la siguiente repetida ya ve el total nuevo
       nodo.remove();
+    } else if (accion === 'precios-ml') {
+      const enlace = enlacePreciosML(valor('nombre'), valor('marca'));
+      if (enlace) window.open(enlace, '_blank', 'noopener');
+      else { aviso.textContent = 'Escribe el nombre para buscarlo en Mercado Libre.'; aviso.style.color = ''; }
     } else if (accion === 'descartar') {
       await fetch(`/api/borradores/${p.id}`, { method: 'DELETE' });
       nodo.remove();
@@ -302,7 +311,11 @@ function ficha(p) {
 /* ---------- captura sin foto (Issue #115) ---------- */
 
 const manual = document.getElementById('manual');
-fetch('/api/yo').then((r) => r.json()).then(({ usuario }) => { manual.hidden = !usuario?.roles.includes('dueno'); });
+fetch('/api/yo').then((r) => r.json()).then(({ usuario }) => {
+  const dueno = !!usuario?.roles.includes('dueno');
+  manual.hidden = !dueno;
+  document.body.classList.toggle('dueno', dueno);
+});
 document.getElementById('m-categoria').innerHTML = opcionesCategoria('');
 document.getElementById('m-destino').innerHTML = '<option value="">Automático</option>'
   + DESTINOS.map(([v, t]) => `<option value="${v}">${t}</option>`).join('');
@@ -329,6 +342,13 @@ manual.addEventListener('submit', async (evento) => {
   document.getElementById('m-stock').value = '1';
   document.getElementById('m-nombre').focus();
   cargarCola();
+});
+
+// Issue #182: ML no deja buscar por API a esta app; se abre su listado web.
+document.getElementById('m-precios-ml').addEventListener('click', () => {
+  const enlace = enlacePreciosML(document.getElementById('m-nombre').value, document.getElementById('m-marca').value);
+  if (enlace) window.open(enlace, '_blank', 'noopener');
+  else document.getElementById('m-aviso').textContent = 'Escribe el nombre para buscarlo en Mercado Libre.';
 });
 
 /* ---------- filtros ---------- */

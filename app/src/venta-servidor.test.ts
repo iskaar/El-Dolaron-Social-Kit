@@ -156,6 +156,7 @@ test('caja reintenta un canje tras perder la respuesta con el mismo folio, fecha
       exigirCaja: () => true, cajaActual: () => 'Caja 1', dolaronesPedidos: () => 500,
       impresionRemota: () => false,
       totales, efectivoAlcanza, saldoCanjeable, pintar() {},
+      descuento: null, descuentoAplicado: () => 0, pintarDescuento() {},
       cobrarConDolarones: async (venta: Record<string, unknown>) => {
         respuestas.push((await t.pedir('/api/ventas', { ...venta, codigo_vale: vale.codigo })).status);
         return false;
