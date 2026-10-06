@@ -1,0 +1,134 @@
+(() => {
+  const WHATSAPP = "https://wa.me/524445437754";
+  const API = "https://dolarones.eldolaron.com";
+  // Copia de app/public/categorias.js: el sitio no importa código de otras carpetas.
+  const CATEGORIAS = [
+    ["", "Todo"], ["ropa", "Ropa y calzado"], ["accesorios", "Bolsas y accesorios"],
+    ["belleza", "Belleza y cuidado personal"], ["hogar", "Hogar y cocina"],
+    ["jardin", "Jardín y exteriores"], ["electronica", "Electrónica"], ["juguetes", "Juguetes"],
+    ["mascotas", "Mascotas"], ["papeleria", "Papelería y libros"], ["despensa", "Despensa"],
+    ["deportes", "Deportes"], ["otros", "Otros"],
+  ];
+
+  // Los precios llegan en centavos MXN enteros.
+  function precio(centavos) {
+    const cents = Number(centavos) || 0;
+    return new Intl.NumberFormat("es-MX", {
+      style: "currency", currency: "MXN",
+      minimumFractionDigits: cents % 100 === 0 ? 0 : 2, maximumFractionDigits: 2,
+    }).format(cents / 100);
+  }
+
+  function consulta(pieza) {
+    const texto = `Hola, me interesa ${pieza.nombre} (${pieza.codigo}) de ${precio(pieza.precio)}. ¿Sigue disponible?`;
+    return `${WHATSAPP}?text=${encodeURIComponent(texto)}`;
+  }
+
+  // ?api= solo sirve para desarrollo: únicamente acepta http(s) hacia esta misma máquina.
+  function apiBase(search) {
+    try {
+      const url = new URL(new URLSearchParams(search).get("api"));
+      if (/^https?:$/.test(url.protocol) && ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname)) return url.origin;
+    } catch {}
+    return API;
+  }
+
+  if (typeof module !== "undefined") module.exports = { precio, consulta, apiBase };
+  const root = typeof document !== "undefined" && document.getElementById("catalogo");
+  if (!root) return;
+
+  const base = apiBase(location.search);
+  const chips = root.querySelector(".chips");
+  const grid = root.querySelector(".catalog-grid");
+  const status = root.querySelector(".catalog-status");
+  const more = root.querySelector(".catalog-more");
+  const fallback = root.querySelector(".catalog-fallback");
+  let categoria = "";
+  let pagina = 1;
+  let controller = null;
+  let cargado = false;
+
+  const el = (tag, className, text) => {
+    const node = document.createElement(tag);
+    if (className) node.className = className;
+    if (text !== undefined) node.textContent = text;
+    return node;
+  };
+
+  function tarjeta(pieza) {
+    const li = el("li", "piece");
+    const photo = el("div", "piece-photo");
+    if (/^https?:\/\//.test(pieza.foto || "")) {
+      const img = new Image();
+      img.alt = "";
+      img.loading = "lazy";
+      img.decoding = "async";
+      img.addEventListener("error", () => img.remove());
+      img.src = pieza.foto;
+      photo.append(img);
+    }
+    const body = el("div", "piece-body");
+    body.append(el("h3", "", pieza.nombre));
+    if (pieza.marca) body.append(el("p", "piece-brand", pieza.marca));
+    const price = el("p", "piece-price", precio(pieza.precio));
+    if (pieza.precio_lista > pieza.precio) {
+      const lista = el("s", "", precio(pieza.precio_lista));
+      lista.prepend(el("span", "sr-only", "Precio de lista "));
+      price.append(lista);
+    }
+    const ask = el("a", "button button-yellow piece-ask", "Preguntar por WhatsApp");
+    ask.href = consulta(pieza);
+    ask.setAttribute("aria-label", `Preguntar por WhatsApp: ${pieza.nombre}`);
+    body.append(price, ask);
+    li.append(photo, body);
+    return li;
+  }
+
+  async function cargar(reiniciar) {
+    if (controller) controller.abort();
+    const mio = (controller = new AbortController());
+    if (reiniciar) { pagina = 1; grid.replaceChildren(); }
+    fallback.hidden = true;
+    more.hidden = true;
+    status.textContent = "Cargando piezas…";
+    root.setAttribute("aria-busy", "true");
+    const params = new URLSearchParams({ pagina });
+    if (categoria) params.set("categoria", categoria);
+    try {
+      const response = await fetch(`${base}/api/catalogo?${params}`, { signal: mio.signal, headers: { accept: "application/json" } });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const data = await response.json();
+      if (!data || !Array.isArray(data.piezas)) throw new Error("Respuesta inesperada");
+      if (mio.signal.aborted) return;
+      cargado = true;
+      grid.append(...data.piezas.map(tarjeta));
+      more.hidden = !data.hay_mas;
+      status.textContent = grid.children.length
+        ? `${grid.children.length} de ${Number(data.total) || grid.children.length} piezas`
+        : "Por ahora no hay piezas en esta categoría. Prueba otra o pregunta por WhatsApp.";
+    } catch (error) {
+      if (mio.signal.aborted) return;
+      status.textContent = "";
+      if (!cargado) chips.hidden = true;
+      if (!grid.children.length) fallback.hidden = false;
+      else { more.hidden = false; status.textContent = "No pudimos cargar más piezas. Intenta de nuevo."; }
+    } finally {
+      if (controller === mio) root.removeAttribute("aria-busy");
+    }
+  }
+
+  for (const [clave, nombre] of CATEGORIAS) {
+    const chip = el("button", "chip", nombre);
+    chip.type = "button";
+    chip.setAttribute("aria-pressed", String(clave === categoria));
+    chip.addEventListener("click", () => {
+      if (clave === categoria) return;
+      categoria = clave;
+      for (const other of chips.children) other.setAttribute("aria-pressed", String(other === chip));
+      cargar(true);
+    });
+    chips.append(chip);
+  }
+  more.addEventListener("click", () => { pagina += 1; cargar(false); });
+  cargar(true);
+})();

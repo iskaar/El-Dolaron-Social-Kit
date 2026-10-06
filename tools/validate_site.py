@@ -11,6 +11,8 @@ PUBLIC = Path(__file__).resolve().parents[1] / "site" / "public"
 ADDRESS = "Jardín Hidalgo 129, Zona Centro, Soledad de Graciano Sánchez, San Luis Potosí, 78430"
 EXPECTED_LINKS = {
     "https://wa.me/524445437754",
+    "https://eldolaron.com/ropa",
+    "https://eldolaron.com/general",
     "https://dolarones.eldolaron.com/",
     "https://www.facebook.com/eldolaronmx/about",
     "https://www.instagram.com/el_dolaron/",
@@ -65,6 +67,10 @@ def main():
     maps = [urlsplit(link) for link in page.references if link.startswith("https://www.google.com/maps/dir/")]
     if not maps or any(parse_qs(url.query).get("destination") != [ADDRESS] for url in maps):
         errors.append("Missing or incorrect Google Maps destination")
+    html = (PUBLIC / "index.html").read_text(encoding="utf-8")
+    image = re.search(r'property="og:image" content="https://eldolaron.com/([^"]+)"', html)
+    if not image or not (PUBLIC / image.group(1)).is_file():
+        errors.append("Missing or unpublished og:image")
     css = (PUBLIC / "styles.css").read_text(encoding="utf-8")
     for reference in re.findall(r"url\(['\"]?([^)'\"]+)", css):
         if not urlsplit(reference).scheme and not (PUBLIC / reference).is_file():
