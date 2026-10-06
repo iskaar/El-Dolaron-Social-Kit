@@ -593,20 +593,41 @@ interface CandidatoCatalogo { id: string; nombre: string; foto: string; marca: s
  * Productos del catalogo de ML que se parecen a la pieza: traen fotos y datos
  * oficiales. Solo lectura. Si ML lo niega, el motivo va en `error`.
  */
-async function candidatosCatalogo(env: Env, texto: string): Promise<{ candidatos: CandidatoCatalogo[]; error?: string }> {
+const candidatoDe = (x: any): CandidatoCatalogo => ({
+  id: String(x.id), nombre: String(x.name ?? x.id),
+  foto: String(x.pictures?.[0]?.secure_url ?? x.pictures?.[0]?.url ?? ''),
+  marca: String((Array.isArray(x.attributes) ? x.attributes : []).find((a: any) => a.id === 'BRAND')?.value_name ?? ''),
+  catalogo_obligatorio: x.settings?.listing_strategy === 'catalog_required',
+});
+
+/** Id de producto de catalogo en un texto: `MLM123` solo, o un enlace con `/p/MLM123`. */
+export function idProductoML(texto: string): string {
+  const t = texto.trim();
+  const id = /^MLM\d+$/i.test(t) ? t : /\/p\/(MLM\d+)(?:[/?#]|$)/i.exec(t)?.[1] ?? '';
+  return id.toUpperCase();
+}
+
+/**
+ * Productos del catalogo de ML para la pieza: por texto, o uno solo si el texto
+ * es su id o el enlace de su pagina (/p/MLM...). Solo lectura. Si ML lo niega,
+ * el motivo va en `error`.
+ */
+async function candidatosCatalogo(env: Env, texto: string): Promise<{ candidatos: CandidatoCatalogo[]; consulta: string; error?: string }> {
+  const id = idProductoML(texto);
   try {
+    if (id) {
+      const producto = await mlPublico(env, `/products/${id}`);
+      if (producto?.status !== 'active') return { candidatos: [], consulta: texto, error: `El producto ${id} no está activo en el catálogo de Mercado Libre.` };
+      return { candidatos: [candidatoDe(producto)], consulta: texto };
+    }
+    if (/mercadolibre\.com\.mx\/MLM-?\d+/i.test(texto)) {
+      return { candidatos: [], consulta: texto, error: 'Ese enlace es de una publicación, no de un producto del catálogo: abre el producto y copia el enlace que tiene /p/MLM…' };
+    }
     const r = await mlPublico(env, `/products/search?status=active&site_id=MLM&q=${encodeURIComponent(texto)}&limit=5`);
     const lista: any[] = Array.isArray(r?.results) ? r.results : [];
-    return {
-      candidatos: lista.slice(0, 5).map((x) => ({
-        id: String(x.id), nombre: String(x.name ?? x.id),
-        foto: String(x.pictures?.[0]?.secure_url ?? x.pictures?.[0]?.url ?? ''),
-        marca: String((Array.isArray(x.attributes) ? x.attributes : []).find((a: any) => a.id === 'BRAND')?.value_name ?? ''),
-        catalogo_obligatorio: x.settings?.listing_strategy === 'catalog_required',
-      })),
-    };
+    return { candidatos: lista.slice(0, 5).map(candidatoDe), consulta: texto };
   } catch (error) {
-    return { candidatos: [], error: `Mercado Libre no dejó buscar en su catálogo (${error instanceof ErrorML ? `${error.status} ${error.detalle}` : String(error)}).` };
+    return { candidatos: [], consulta: texto, error: `Mercado Libre no dejó buscar en su catálogo (${error instanceof ErrorML ? `${error.status} ${error.detalle}` : String(error)}).` };
   }
 }
 
@@ -623,10 +644,12 @@ async function yaPublicada(env: Env, id: string): Promise<boolean> {
 }
 
 async function preparar(env: Env, id: string, request: Request): Promise<Response> {
-  const cuerpo = (await request.json().catch(() => ({}))) as { categoria_id?: unknown; consulta?: unknown } | null;
+  const cuerpo = (await request.json().catch(() => ({}))) as { categoria_id?: unknown; consulta?: unknown; consulta_catalogo?: unknown } | null;
   const elegida = cuerpo?.categoria_id === undefined || cuerpo.categoria_id === '' ? '' : String(cuerpo.categoria_id);
   // Texto para pedir categorias; sin el, el nombre de la pieza.
   const buscada = typeof cuerpo?.consulta === 'string' ? cuerpo.consulta.trim().replace(/\s+/g, ' ').slice(0, 80) : '';
+  // Texto (o enlace/id del producto) para el catalogo; sin el, el mismo de categorias.
+  const enCatalogo = typeof cuerpo?.consulta_catalogo === 'string' ? cuerpo.consulta_catalogo.trim().replace(/\s+/g, ' ').slice(0, 300) : '';
   if (elegida && !/^MLM\d+$/.test(elegida)) return json({ error: 'Categoría inválida.' }, 400);
 
   const hallada = await piezaPublicable(env, id);
@@ -664,8 +687,8 @@ async function preparar(env: Env, id: string, request: Request): Promise<Respons
       else if (guias.length === 0) avisos.push('Esta categoría exige guía de tallas y no tienes ninguna: créala en Mercado Libre antes de publicar.');
     }
 
-    // Lo nuevo de marca puede ir al catalogo con fotos oficiales; la ropa, con fotos propias.
-    const catalogo = p.categoria !== 'ropa' && p.marca.trim() ? await candidatosCatalogo(env, consulta) : null;
+    // Lo que no es ropa puede ir al catalogo con fotos oficiales; la ropa, con fotos propias.
+    const catalogo = p.categoria !== 'ropa' ? await candidatosCatalogo(env, enCatalogo || consulta) : null;
 
     const precio = precioML(p.precio, ml_pct);
     if (p.precio > 0 && Math.round((p.precio * (100 + ml_pct)) / 100) < PRECIO_MINIMO) {

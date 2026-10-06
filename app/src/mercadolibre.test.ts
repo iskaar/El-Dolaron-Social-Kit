@@ -5,7 +5,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import worker from './worker.ts';
 import { tienda, DUENO } from './prueba-d1.ts';
-import { guardarTokens, mlFetch, precioML, tituloML, dimensionesJpeg } from './mercadolibre.ts';
+import { guardarTokens, mlFetch, precioML, tituloML, dimensionesJpeg, idProductoML } from './mercadolibre.ts';
 
 const LLAVE = Buffer.from(crypto.getRandomValues(new Uint8Array(32))).toString('base64');
 const RUTA = 'ruta-secreta-de-prueba';
@@ -863,9 +863,9 @@ const juguete = (t: Tienda) => pieza(t, { categoria: 'juguetes', nombre: 'SplatR
 test('preparar: lo nuevo de marca trae candidatos del catálogo con foto oficial', () => conML(async (t) => {
   const r = await t.pedir(`/api/ml/preparar/${juguete(t)}`, {});
   assert.equal(r.status, 200, JSON.stringify(r.cuerpo));
-  assert.deepEqual(r.cuerpo.propuesta.catalogo, { candidatos: [{
+  assert.deepEqual(r.cuerpo.propuesta.catalogo.candidatos, [{
     id: 'MLM2001', nombre: 'Lanzador SplatRball 800 Pyro', foto: 'https://http2.mlstatic.com/a.jpg', marca: 'Splat R Ball', catalogo_obligatorio: true,
-  }] });
+  }]);
   const [busqueda] = t.sim.de('GET', /^\/products\/search/);
   assert.match(busqueda.ruta, /^\/products\/search\?status=active&site_id=MLM&q=Splat/);
   assert.equal(t.sim.de('POST', /^\/items/).length, 0, 'no publica nada');
@@ -909,4 +909,38 @@ test('publicar en catálogo: producto inactivo o id inválido no publica', () =>
   assert.equal(r.status, 409, JSON.stringify(r.cuerpo));
   assert.equal(t.sim.de('POST', /^\/items$/).length, 0);
   assert.equal(estadoDe(t, id), 'error');
+}));
+
+/* ---------- buscar en el catalogo (Issue #195) ---------- */
+
+test('idProductoML: id solo o enlace /p/, nunca una publicación', () => {
+  assert.equal(idProductoML('MLM15149561'), 'MLM15149561');
+  assert.equal(idProductoML(' mlm15149561 '), 'MLM15149561');
+  assert.equal(idProductoML('https://www.mercadolibre.com.mx/lanzador-splatrball/p/MLM15149561?pdp_filters=item_id:MLM1'), 'MLM15149561');
+  assert.equal(idProductoML('https://www.mercadolibre.com.mx/x/p/MLM42#reviews'), 'MLM42');
+  assert.equal(idProductoML('https://articulo.mercadolibre.com.mx/MLM-123456-lanzador-_JM'), '');
+  assert.equal(idProductoML('lanzador de hidrogel'), '');
+});
+
+test('preparar: busca en el catálogo con otras palabras', () => conML(async (t) => {
+  const r = await t.pedir(`/api/ml/preparar/${juguete(t)}`, { consulta_catalogo: '  lanzador   hidrogel ' });
+  assert.equal(r.cuerpo.propuesta.catalogo.consulta, 'lanzador hidrogel');
+  assert.equal(t.sim.de('GET', /^\/products\/search/).at(-1)!.ruta, '/products/search?status=active&site_id=MLM&q=lanzador%20hidrogel&limit=5');
+}));
+
+test('preparar: con el enlace del producto lo trae directo', () => conML(async (t) => {
+  const r = await t.pedir(`/api/ml/preparar/${juguete(t)}`, { consulta_catalogo: 'https://www.mercadolibre.com.mx/lanzador/p/MLM2002' });
+  assert.deepEqual(r.cuerpo.propuesta.catalogo.candidatos.map((x: any) => x.id), ['MLM2002']);
+  assert.equal(t.sim.de('GET', /^\/products\/search/).length, 0);
+  t.sim.productoActivo = false;
+  const inactivo = await t.pedir(`/api/ml/preparar/${juguete(t)}`, { consulta_catalogo: 'MLM2002' });
+  assert.match(inactivo.cuerpo.propuesta.catalogo.error, /no está activo/);
+}));
+
+test('preparar: el enlace de una publicación explica qué copiar; sin marca también busca', () => conML(async (t) => {
+  const r = await t.pedir(`/api/ml/preparar/${juguete(t)}`, { consulta_catalogo: 'https://articulo.mercadolibre.com.mx/MLM-123456-lanzador-_JM' });
+  assert.match(r.cuerpo.propuesta.catalogo.error, /\/p\/MLM/);
+  assert.equal(t.sim.de('GET', /^\/products/).length, 0);
+  const sinMarca = await t.pedir(`/api/ml/preparar/${pieza(t, { categoria: 'juguetes', nombre: 'Lanzador de hidrogel', marca: '' })}`, {});
+  assert.equal(sinMarca.cuerpo.propuesta.catalogo.candidatos.length, 1);
 }));
