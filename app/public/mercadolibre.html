@@ -582,6 +582,21 @@ function revisar() {
   ref.falta.textContent = falta.length ? `Falta: ${falta.join(', ')}.` : '';
 }
 
+// #192 fase 1: candidatos del catalogo de ML (fotos oficiales). Solo para ver.
+function pintarCatalogo() {
+  const c = prop.catalogo;
+  if (!c) return null;
+  const caja = (...hijos) => h('fieldset', {}, h('legend', {}, 'Catálogo de Mercado Libre'), ...hijos);
+  if (c.error) return caja(h('div', { class: 'aviso' }, c.error));
+  if (!c.candidatos.length) return caja(h('div', { class: 'nota' }, 'No hay productos de catálogo parecidos a esta pieza.'));
+  return caja(
+    h('div', { class: 'nota', style: 'margin-bottom:8px' }, 'Productos oficiales parecidos. Publicar en catálogo todavía no está disponible: por ahora es para revisar.'),
+    c.candidatos.map((x) => h('div', { style: 'display:flex;gap:10px;align-items:center;margin-bottom:8px' },
+      x.foto ? h('img', { src: x.foto, alt: '', width: 56, height: 56, referrerPolicy: 'no-referrer', style: 'object-fit:contain;background:#fff;border-radius:6px' }) : null,
+      h('div', {}, h('div', { style: 'overflow-wrap:anywhere' }, x.nombre),
+        h('div', { class: 'nota' }, [x.marca, x.id, x.catalogo_obligatorio ? 'debe publicarse en catálogo' : ''].filter(Boolean).join(' · '))))));
+}
+
 function pintarFormulario() {
   ref = { enviando: false };
   const cuerpo = $('dialogo-cuerpo');
@@ -621,6 +636,7 @@ function pintarFormulario() {
       h('div', {}, h('div', { style: 'font-weight:700;overflow-wrap:anywhere' }, p.nombre),
         h('div', { class: 'nota' }, [p.codigo, p.marca].filter(Boolean).join(' · ')))),
     ...(prop.avisos ?? []).map((t) => h('div', { class: 'aviso', role: 'alert', style: 'margin-bottom:12px' }, t)),
+    pintarCatalogo(),
     campo(prop.usa_family_name ? 'Nombre del producto' : 'Título de la publicación', titulo, {
       requerido: true,
       ayuda: prop.usa_family_name
