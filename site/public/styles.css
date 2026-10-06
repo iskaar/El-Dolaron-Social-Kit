@@ -27,14 +27,17 @@ p { line-height: 1.6; }
 .header nav a { text-decoration: none; }
 .header nav a:hover, .footer a:hover { text-decoration: underline; }
 .portal-link { background: var(--yellow); border-radius: 4px; padding: 12px 18px; }
-.hero { display: grid; grid-template-columns: 46% 54%; background: var(--navy); color: var(--white); }
-.hero-copy { padding: 64px 48px 68px max(56px, calc((100vw - 1280px) / 2)); align-self: center; }
+.hero { display: grid; grid-template-columns: 48% 52%; min-height: 550px; background: var(--navy); color: var(--white); }
+.hero-copy { padding: 52px 48px 52px max(56px, calc((100vw - 1280px) / 2)); align-self: center; }
 .location { font-size: 15px; font-weight: 700; margin-bottom: 24px; display: flex; gap: 10px; align-items: center; }
 .location::before { content: ""; width: 9px; height: 9px; border-radius: 50%; background: var(--red); }
 .hero .location::before { background: var(--yellow); }
-h1 { font-size: clamp(44px, 4.65vw, 70px); line-height: 1.03; letter-spacing: -.055em; max-width: 560px; }
-.intro { max-width: 445px; font-size: 18px; margin-top: 27px; }
-.actions { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-top: 30px; }
+.hero .location { margin-bottom: 16px; }
+h1 { font-size: clamp(46px, 6.1vw, 88px); line-height: 1.03; letter-spacing: -.055em; }
+h1 span { color: var(--yellow); }
+.intro { max-width: 445px; font-size: 18px; margin-top: 24px; }
+.actions { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-top: 24px; }
+.hero-hours { margin-top: 18px; font-size: 14px; }
 .button { display: inline-flex; align-items: center; justify-content: center; gap: 12px; min-height: 54px; padding: 15px 22px; border: 2px solid transparent; border-radius: 4px; text-decoration: none; font-size: 16px; font-weight: 700; line-height: 1.3; }
 .button svg { width: 24px; height: 24px; }
 .button:hover { transform: translateY(-2px); }
@@ -43,8 +46,8 @@ h1 { font-size: clamp(44px, 4.65vw, 70px); line-height: 1.03; letter-spacing: -.
 .button-outline { border-color: var(--white); color: var(--white); }
 .hero a:focus-visible, .dolarones a:focus-visible { outline-color: var(--yellow); }
 .text-link { font-weight: 700; line-height: 1.5; }
-.hero-art { position: relative; min-width: 0; }
-.hero-art > img { width: 100%; height: 100%; object-fit: cover; object-position: 48% center; }
+.hero-art { position: relative; min-width: 0; overflow: hidden; }
+.hero-art > img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; object-position: 48% center; }
 .hero-art figcaption { position: absolute; inset: auto 0 0; padding: 12px 20px; background: var(--navy); color: var(--white); font-size: 12px; line-height: 1.5; }
 .discovery-strip { background: var(--yellow); padding: 15px 24px; text-align: center; }
 .discovery-strip p { font-size: 17px; font-weight: 700; line-height: 1.4; }
@@ -92,8 +95,8 @@ dd { margin: 0; line-height: 1.5; }
 .footer nav { gap: 24px; }
 @media (max-width: 1100px) {
   .wrap { width: calc(100% - 64px); }
-  .hero-copy { padding: 46px 28px 54px 32px; }
-  h1 { font-size: clamp(44px, 5vw, 56px); }
+  .hero-copy { padding: 46px 28px 46px 32px; }
+  h1 { font-size: clamp(46px, 6.1vw, 67px); }
   .intro { font-size: 17px; }
   .actions { gap: 10px; }
   .button { padding: 14px 17px; }
@@ -111,14 +114,16 @@ dd { margin: 0; line-height: 1.5; }
   .brand { width: 160px; }
   .header nav { gap: 18px; font-size: 13px; }
   .portal-link { padding: 10px 12px; }
-  .hero { grid-template-columns: 1fr; }
-  .hero-copy { padding: 34px 24px 36px; }
+  .hero { grid-template-columns: 1fr; min-height: 0; }
+  .hero-copy { padding: 30px 24px; }
   .location { font-size: 14px; margin-bottom: 20px; }
-  h1 { font-size: clamp(42px, 11.5vw, 70px); max-width: 600px; }
-  .intro { font-size: 16px; max-width: 470px; margin-top: 22px; }
-  .actions { margin-top: 24px; }
+  h1 { font-size: clamp(42px, 11.5vw, 70px); }
+  .intro { font-size: 16px; max-width: 470px; margin-top: 18px; }
+  .actions { margin-top: 20px; }
   .button { font-size: 15px; min-height: 52px; padding: 13px 18px; }
-  .hero-art > img { height: auto; aspect-ratio: 1.5; object-fit: cover; }
+  .hero .button { gap: 8px; padding-inline: 12px; }
+  .hero-hours { margin-top: 16px; font-size: 13px; }
+  .hero-art > img { position: static; height: auto; aspect-ratio: 1.5; object-fit: cover; }
   .hero-art figcaption { position: static; padding: 10px 24px; font-size: 11px; }
   .discovery-strip { padding: 13px 15px; }
   .discovery-strip p { font-size: 12px; }
@@ -157,6 +162,7 @@ dd { margin: 0; line-height: 1.5; }
   .portal-link { padding-inline: 10px; white-space: nowrap; }
   .visit-link { display: none; }
   .hero-copy { padding-inline: 20px; }
+  .hero .button { gap: 6px; padding-inline: 8px; }
   h1 { font-size: clamp(39px, 11.8vw, 49px); }
   .discovery-strip span { margin-inline: 5px; }
   .discovery-strip p { font-size: 11px; }
