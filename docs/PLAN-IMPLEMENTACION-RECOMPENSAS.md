@@ -18,7 +18,7 @@ Isaac cerró las decisiones de R01 (detalle en la sección 2 de las [reglas](REC
 - Cancelación atómica que regresa existencias y Dolarones.
 - Ticket con socio, Dolarones usados y ganados, y saldo.
 
-**Después de la apertura:** portal en línea con correo verificado (Supabase/Resend u otra opción, según la sección 7), consulta de saldo por el cliente, temporadas y premios. Hasta entonces no hace falta ninguna cuenta ni gasto nuevo: el costo mensual de la sección 7 se pospone.
+**Portal y SMS pagado (decisión del 28/09):** registro móvil con teléfono como ID visible, verificación por SMS, saldo y recibos en web; canjes siguen en tienda con PIN. Wallet se pospone. Firebase Auth / Identity Platform es la propuesta inicial para verificar teléfonos; cuenta, límites y pago aún no están configurados. No contratar ni mandar SMS reales durante desarrollo. La propuesta histórica de correo en la sección 7 no presupuesta este cambio.
 
 ### 0.1. Revisión de avance del 27/09/2026
 
@@ -27,14 +27,39 @@ Fuente: Issues y PRs enlazados, más lectura de código en `ec32926`. Esta revis
 | Frente | Evidencia y estado | Siguiente paso |
 | --- | --- | --- |
 | Socios, regalo, saldo, canje y cancelación | [PR #82](https://github.com/iskaar/El-Dolaron-Social-Kit/pull/82) integrado; migración 011 y despliegue registrados en [#81](https://github.com/iskaar/El-Dolaron-Social-Kit/issues/81) | Ensayar el recorrido completo con dos cajas, lector e impresora en sandbox, con socios sintéticos |
-| Protección del PIN e importes | [#101](https://github.com/iskaar/El-Dolaron-Social-Kit/issues/101): corregir intentos concurrentes perdidos, respetar bloqueos/restablecimientos en curso y rechazar D inválidos incluso sin socio | Revisar PR, CI y ensayo antes de desplegar |
+| Protección del PIN e importes | [PR #102](https://github.com/iskaar/El-Dolaron-Social-Kit/pull/102) integrado: corregir intentos concurrentes perdidos, respetar bloqueos/restablecimientos en curso y rechazar D inválidos incluso sin socio | Confirmar despliegue de #102 y ensayo antes de canjes reales |
 | Bases y privacidad | Borrador en `BASES-Y-AVISO-DOLARONES.md`; faltan abogado, razón social, RFC y correo de privacidad ([#93](https://github.com/iskaar/El-Dolaron-Social-Kit/issues/93), punto 3) | Completar revisión y datos, publicar el texto aprobado y actualizar `BASES_VERSION` antes de registrar socios reales o anunciar el regalo |
 | Autorización de cancelaciones | Roles y cuentas desplegados; fases 2 y 3 de [#75](https://github.com/iskaar/El-Dolaron-Social-Kit/issues/75) pendientes | Solicitud/aprobación del dueño y después avisos; hoy el cajero puede cancelar |
 | Operación y recuperación | Sandbox integrado (#84), pruebas y typecheck en CI (#94), ticket/cajón corregidos (#98) | Ensayo de Dolarones, responsable/frecuencia de respaldo, restauración y capacitación; no equivalen a estar probados por tener sandbox |
-| Corte de caja | [#100](https://github.com/iskaar/El-Dolaron-Social-Kit/issues/100) en curso por Claude | Integrar y ensayar el corte con ventas/cancelaciones que incluyan Dolarones |
-| Portal, temporadas y premios | Pospuestos expresamente por el alcance del 26/09 | Retomar después de la apertura y de cerrar la operación presencial |
+| Corte de caja | [PR #107](https://github.com/iskaar/El-Dolaron-Social-Kit/pull/107) integrado (incluye caja y cajón); #100 | Ensayar el corte con ventas/cancelaciones que incluyan Dolarones |
+| Portal: identidad, alta, saldo y recibos | Autorizado el 28/09; #109 Codex depende de #108; #110 Claude depende del contrato backend | Configurar/cotizar proveedor SMS y dominio; legal y seguridad antes de altas reales |
+| Wallet | Pospuesto expresamente el 28/09 | Retomar después del portal |
 
 La revisión del código también deja pendientes técnicos para el siguiente bloque: `registrarVenta` reconoce un ID repetido sin comparar el contenido ni recuperar el resultado original; `sentenciasDeVenta` calcula lo ganado sin aplicar la fecha de lanzamiento del 2/10. Las devoluciones de D ya vencidos o ganados y gastados siguen sujetas a definición comercial/legal (ver comentario en `sentenciasDeCancelacion`). No tratar las casillas históricas de la sección 6 como aprobadas ni activar registro real antes de resolver las condiciones de apertura.
+
+### 0.2. Actualización autorizada por Isaac — 28/09/2026
+
+Isaac confirmó el reparto de la promoción y el requisito de compra: 100 premios por 15,000 D: **50 cupos en línea por 7,300 D** (5×300, 6×200, 14×150, 25×100); **50 en tienda por 7,700 D** (1×500, 5×300, 7×200, 12×150, 25×100). Los 500 D son solo para quien llegue primero a la tienda. Si esa persona ya recibió un premio en línea, lo sustituye y el premio online anterior regresa a su cupo. Regalos vencidos no se reasignan. Para gastar cualquier premio de apertura, el ticket debe sumar **$1,000 MXN o más antes de descontar Dolarones**. El mínimo no aplica a D ganados por compras.
+
+**Modelo de trabajo (asignación, no tareas ya ejecutadas por Claude):** Codex / `gpt-6-sol` / `high` lleva backend, saldo, seguridad e importes; #108 aplica el mínimo en caja y motor de canje; #109 define y desarrolla registro por SMS, promoción y API de saldo/recibos. Claude Code / `claude-sonnet-5` / `medium` toma #110 después del contrato de #109 para móvil, registro, acceso, saldo, recibos y conexión con caja; `high` para revisar el backend. Codex / `gpt-6-sol` / `high` revisa frontend e integración. Se trabaja una sesión por herramienta y los Issues/PR son el handoff; este plan no ha iniciado una sesión de Claude.
+
+**Estado:** #108 está en implementación. #109 y #110 describen las siguientes dependencias. Wallet queda en backlog. No hay proveedor SMS activado ni portal web listo. El borrador de bases y privacidad refleja las condiciones nuevas, sigue sujeto al abogado y no autoriza altas reales.
+
+### 0.3. Portal sin PIN de socio — decisión del 29/09/2026
+
+Isaac pidió reemplazar el PIN por un código personal que se escanee en el mostrador y confirmó mantener teléfono + SMS con sesión persistente. [#129](https://github.com/iskaar/El-Dolaron-Social-Kit/issues/129) reúne el backend de #109 y las pantallas de #110: registro, saldo, vencimientos, recibos, barcode Code 128 temporal y lectura en caja. No cambia el PIN de cajeros. Esta decisión sustituye las referencias QR/PIN y correo de las secciones históricas.
+
+El cliente elige el máximo autorizado; el código vence en cinco minutos y solo permite un canje, consumido en el mismo batch que venta, stock y saldo. Generar otro o cerrar sesión lo invalida. Un barcode copiado sigue siendo una credencial de gasto mientras sea válido: no prueba presencia ni identidad de quien lo muestra. Teléfono/número solo permiten acumular. Se mantiene el mínimo de $1,000 para regalos y el saldo parcial.
+
+**Entrega, no despliegue:** código y pruebas para revisión. Sigue pendiente configurar Firebase/SMS y límites, dominio público separado de Access, bases/aviso finales, conciliación de regalos legados, migraciones y ensayo con dos cajas y el lector físico sobre una pantalla. No activar SMS pagado ni registro público durante desarrollo. La caja debe integrar también los cambios pendientes de descuentos antes de desplegar; ver [contrato y pasos de lanzamiento](CONTRATO-PORTAL.md).
+
+### 0.4. Alternativa sin teléfono o registro — #133
+
+Isaac confirmó conservar 10% para socios y dar 5% en vales impresos, con vida de **30 días**, a compradores sin registro. Se conserva la regla por bloques completos de $100 monetarios: 10 D socio / 5 D papel. El teléfono de socio sólo acumula; canje sigue requiriendo barcode autorizado. «Usar máximo» en caja respeta total, saldo elegible y autorización. No cambia el regalo de apertura ni la vigencia de 12 meses de créditos de socio.
+
+Se reutilizan Worker/D1, impresora Epson y lector, sin otro proveedor. Vale al portador `DP-…`, un vale o membresía por ticket, saldo parcial y vencimiento fijo. Emisión sólo después de confirmar venta; cola offline conserva ID y entrega ticket pendiente, nunca barcode sin respaldo. Reimpresión por folio/ticket conserva saldo y fecha. Cancelaciones con vale ya gastado requieren resolución presencial. Contrato y pasos en `CONTRATO-PORTAL.md`.
+
+**No habilitado:** migración 019 y `VALES_ABIERTOS=si` pendientes de revisión, respaldo, términos legales finales y ensayo físico de código/impresión/dos cajas. Sin datos reales, despliegue ni emisión pública en desarrollo. Este bloque depende del PR #132; coordinar descuentos #120 antes de producción.
 
 ### 1. Propuesta original del 24/09 (referencia histórica)
 
@@ -224,6 +249,8 @@ Estos controles son trabajo pendiente, no casillas ya aprobadas por esta revisi�
 Consultados el **24/09/2026**, en **USD antes de impuestos**, salvo Dolarones/MXN expresamente indicados. No son una cotización contratada. Verificar tarifas, moneda de cobro y cuotas de la cuenta antes de comprar. No aplicar un tipo de cambio MXN inventado. Infraestructura compartida ya pagada reduce costo incremental; sus cuotas también se comparten con el escáner y otras aplicaciones.
 
 ### Operación mensual de arranque con presupuesto reducido
+
+> **Nota de vigencia:** los renglones históricos de Supabase Auth y Resend que siguen no cotizan el portal por SMS aprobado el 28/09. Firebase Auth / Identity Platform y el costo SMS se cotizan al configurar la cuenta; no se han contratado.
 
 | Herramienta | Uso | 1,000 registrados | 10,000 registrados | Precio/límite y fuente |
 | --- | --- | ---: | ---: | --- |

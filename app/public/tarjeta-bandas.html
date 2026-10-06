@@ -19,6 +19,7 @@
   .titulo { text-align: center; font-size: 20px; font-weight: 800; color: var(--azul); }
   .subtitulo { text-align: center; font-size: 12px; color: #5b6478; margin-bottom: 8mm; }
   .familias { display: grid; grid-template-columns: 1fr 1fr; gap: 0 8mm; }
+  .familia { break-inside: avoid; }
   .familia h2 { font-size: 13px; text-align: center; color: var(--azul); margin: 0 0 2mm; }
   .bote { display: flex; align-items: center; justify-content: space-between; gap: 4mm;
     padding: 3mm 0; border-top: 1px solid #e6e9ef; }
@@ -57,7 +58,7 @@
 <script type="module">
 import { svgCode128 } from '/code128.js';
 
-// Las familias y los siete montos salen de la tabla `familias` (GET /api/familias).
+// Las familias y los montos salen de la tabla `familias` (GET /api/familias).
 const { montos, familias } = await (await fetch('/api/familias')).json();
 
 document.getElementById('familias').innerHTML = familias.map((f) => `

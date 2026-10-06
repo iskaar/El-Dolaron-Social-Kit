@@ -8,6 +8,19 @@ import worker from './worker.ts';
 export const DUENO = 'dueno@prueba.mx';
 export const PRODUCTO = 'a1111111-1111-4111-8111-111111111111';
 
+/** Autorización sintética; las pruebas de portal ejercitan la emisión real. */
+export async function codigoPrueba(db: DatabaseSync, clienteId: string, maximo = 1_000_000): Promise<string> {
+  const codigo = 'DC-' + Buffer.from(crypto.getRandomValues(new Uint8Array(12))).toString('base64url');
+  const hash = Buffer.from(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(codigo))).toString('hex');
+  db.prepare('update clientes set auth_uid = coalesce(auth_uid, ?) where id = ?').run('prueba-' + clienteId, clienteId);
+  const uid = db.prepare('select auth_uid from clientes where id = ?').get(clienteId)!.auth_uid;
+  db.prepare(`insert into codigos_cliente (cliente_id, token_hash, auth_uid, maximo, creado_en, expira_en, venta_id)
+    values (?, ?, ?, ?, ?, ?, '') on conflict(cliente_id) do update set token_hash=excluded.token_hash,
+    maximo=excluded.maximo, creado_en=excluded.creado_en, expira_en=excluded.expira_en, venta_id=''`)
+    .run(clienteId, hash, uid, maximo, new Date().toISOString(), new Date(Date.now() + 300_000).toISOString());
+  return codigo;
+}
+
 function d1(db: DatabaseSync) {
   const preparar = (sql: string) => {
     let args: unknown[] = [];
@@ -37,6 +50,20 @@ function d1(db: DatabaseSync) {
   };
 }
 
+/** R2 en memoria: lo minimo que usa la app (get/put/delete). */
+function r2() {
+  const objetos = new Map<string, ArrayBuffer>();
+  return {
+    objetos,
+    async get(llave: string) {
+      const datos = objetos.get(llave);
+      return datos ? { body: new Response(datos).body, arrayBuffer: async () => datos.slice(0) } : null;
+    },
+    async put(llave: string, valor: BodyInit) { objetos.set(llave, await new Response(valor).arrayBuffer()); },
+    async delete(llave: string) { objetos.delete(llave); },
+  };
+}
+
 export function tienda() {
   const db = new DatabaseSync(':memory:');
   const archivos = ['schema.sql', ...readdirSync('.').filter((f) => /^migracion-\d+/.test(f)).sort()];
@@ -44,16 +71,32 @@ export function tienda() {
   db.prepare(`insert into usuarios (correo, nombre, roles, activo, creado_en, actualizado_en) values (?, 'Isaac', 'dueno', 1, '', '')`).run(DUENO);
   db.prepare(`insert into productos (id, codigo, nombre, precio, stock, semana_ingreso, creado_en, actualizado_en)
               values (?, 'ED-000001', 'Ventilador', 25000, 50, 'S40', '', '')`).run(PRODUCTO);
-  const env = { DB: d1(db), ACCESS_EQUIPO: 'local', DEV_USUARIO: DUENO } as unknown as Env;
-  const pedir = async (ruta: string, cuerpo?: unknown, metodo = 'POST', encabezados: Record<string, string> = {}) => {
-    const r = await worker.fetch!(
+  const env = { DB: d1(db), FOTOS: r2(), ACCESS_EQUIPO: 'local', DEV_USUARIO: DUENO,
+    BASES_APROBADAS_VERSION: 'prueba-1', PORTAL_REGISTRO_ABIERTO: 'si', PROMOCION_INICIO: '2020-01-01T00:00:00Z',
+    PORTAL_BASES_TEXTO: 'Bases sintéticas de prueba.', PORTAL_AVISO_TEXTO: 'Aviso sintético de prueba.',
+  } as unknown as Env;
+  // Lo que la app deja para despues de responder (ctx.waitUntil): `esperar()` lo termina.
+  const pendientes: Promise<unknown>[] = [];
+  const ctx = { waitUntil(p: Promise<unknown>) { pendientes.push(p); }, passThroughOnException() {} };
+  const esperar = async () => { await Promise.allSettled(pendientes.splice(0)); };
+  const enviar = (ruta: string, cuerpo?: unknown, metodo = 'POST', encabezados: Record<string, string> = {}) =>
+    worker.fetch!(
       new Request(`https://caja.prueba${ruta}`, cuerpo === undefined ? { headers: encabezados } : {
         method: metodo, headers: { 'content-type': 'application/json', ...encabezados }, body: JSON.stringify(cuerpo),
       }) as never,
       env,
-      { waitUntil() {}, passThroughOnException() {} } as never,
+      ctx as never,
     );
-    return { status: r.status, cuerpo: (await r.json()) as Record<string, any> };
+  const pedir = async (ruta: string, cuerpo?: unknown, metodo = 'POST', encabezados: Record<string, string> = {}) => {
+    const r = await enviar(ruta, cuerpo, metodo, encabezados);
+    // Las redirecciones (OAuth) no traen cuerpo: `ubicacion` es su destino.
+    return { status: r.status, cuerpo: (await r.json().catch(() => ({}))) as Record<string, any>, ubicacion: r.headers.get('location') };
   };
-  return { db, env, pedir };
+  // Para lo que no es JSON (los CSV): el cuerpo en texto y las cabeceras.
+  const pedirTexto = async (ruta: string) => {
+    const r = await enviar(ruta);
+    // ignoreBOM: text() se come el BOM y las pruebas quieren verlo.
+    return { status: r.status, texto: new TextDecoder('utf-8', { ignoreBOM: true }).decode(await r.arrayBuffer()), tipo: r.headers.get('content-type') ?? '' };
+  };
+  return { db, env, pedir, pedirTexto, esperar, ctx };
 }

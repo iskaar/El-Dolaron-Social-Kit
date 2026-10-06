@@ -7,6 +7,8 @@
  * Misma filosofia que code128.js: nada por CDN, protocolo escrito a mano.
  */
 
+import { codigoEnDigitos } from './code128.js';
+
 const VENDOR_ID_EPSON = 0x04b8;
 
 // ponytail: 48 columnas es lo documentado para la TM-T20 II en Fuente A sobre
@@ -130,9 +132,13 @@ export function impresoraLista() {
 
 // Issue #97: el ticket entero (~6 KB con el logo) en un solo transferOut
 // imprimio medio logo y fallo; la TM-T20 II recibe en un bufer de 4 KB. Se
-// manda en pedazos, uno a la vez. ponytail: 512 es holgado, no medido; si la
-// impresora vuelve a cortar a medio ticket, bajarlo (64 es un paquete USB).
-export const PEDAZO = 512;
+// manda en pedazos, uno a la vez. Bajado de 512 a 64 (un paquete USB) porque
+// la caja vieja se detenia tras el codigo de barras del vale (bug-log #9).
+export const PEDAZO = 64;
+
+// ponytail: 2 s alcanza para que salga y se corte un ticket normal; si el vale
+// vuelve a salir incompleto despues de un ticket largo, subirlo.
+export const PAUSA_VALE_MS = 2000;
 
 // En fila: el cajon y el ticket nunca se mezclan en el mismo puerto.
 let cola = Promise.resolve();
@@ -178,6 +184,62 @@ export async function abrirCajon() {
   return enviar(new Uint8Array([ESC, 0x70, 0x00, 25, 250]));
 }
 
+// Epson GS k, función B, Code 128 (73), conjunto B. Nada de imagen raster:
+// https://download4.epson.biz/sec_pubs/pos/reference_en/escpos/gs_lk.html
+// ponytail: módulo 2 puntos para papel de 80 mm; calibrar con el lector real.
+export const MODULO_VALE = 2;
+// Conjunto C (pares de dígitos): sólo dígitos, que el lector escribe igual con
+// cualquier distribución de teclado (ver codigoEnDigitos), y más angosto.
+export function codigoBarrasVale(codigo) {
+  if (!/^DP-[A-Za-z0-9_-]{16}$/.test(codigo)) throw new Error('Código de vale inválido.');
+  const digitos = codigoEnDigitos(codigo);
+  const datos = Uint8Array.from([0x7b, 0x43, ...digitos.match(/../g).map(Number)]);   // {C + pares
+  return concatenar([
+    new Uint8Array([ESC, 0x61, 1, GS, 0x48, 0, GS, 0x77, MODULO_VALE, GS, 0x68, 72, GS, 0x6b, 73, datos.length]),
+    datos, new Uint8Array([0x0a, ESC, 0x61, 0]),
+  ]);
+}
+
+// QR nativo Epson (GS ( k, modelo 2, función 165-181): mismo texto de 30 dígitos que
+// el Code128, para que la cámara del celular lo lea. Nada de imagen raster.
+// ponytail: módulo 6 puntos, corrección M; calibrar con el lector.
+export const MODULO_QR_VALE = 6;
+export function codigoQrVale(codigo) {
+  if (!/^DP-[A-Za-z0-9_-]{16}$/.test(codigo)) throw new Error('Código de vale inválido.');
+  const datos = new TextEncoder().encode(codigoEnDigitos(codigo));
+  const k = datos.length + 3;
+  return concatenar([
+    new Uint8Array([ESC, 0x61, 1,
+      GS, 0x28, 0x6b, 4, 0, 49, 65, 50, 0,                 // modelo 2
+      GS, 0x28, 0x6b, 3, 0, 49, 67, MODULO_QR_VALE,        // tamaño de módulo
+      GS, 0x28, 0x6b, 3, 0, 49, 69, 49,                    // corrección M
+      GS, 0x28, 0x6b, k & 255, k >> 8, 49, 80, 48]),       // guardar datos
+    datos,
+    new Uint8Array([GS, 0x28, 0x6b, 3, 0, 49, 81, 48, 0x0a, ESC, 0x61, 0]),   // imprimir
+  ]);
+}
+
+function partesVale(vale, titulo = 'VALE DOLARONES - SIN REGISTRO', conCodigo = false) {
+  return [
+    separador(), centrado(titulo),
+    renglonMonto('Saldo del vale', `${(vale.restante / 100).toFixed(2)} D`),
+    linea(Date.parse(vale.disponible_desde) <= Date.parse(vale.creado_en)
+      ? 'Usalo en tu siguiente compra' : `Disponible: ${fechaHora(vale.disponible_desde)}`),
+    linea(`Vence: ${fechaHora(vale.vence_en)}`),
+    ...(conCodigo && vale.restante > 0 ? [codigoQrVale(vale.codigo), codigoBarrasVale(vale.codigo)] : []), centrado(vale.codigo),
+    linea('Conserva el papel. Copias comparten el saldo.'),
+    linea('Solo en El Dolaron. No canjeable por efectivo.'),
+  ];
+}
+
+/** Reimprimir conserva código, saldo actual y vencimiento del servidor. */
+export function imprimirVale(vale) {
+  return enviar(concatenar([
+    ...encabezado('VALE DOLARONES'), ...partesVale(vale, undefined, true),
+    new Uint8Array([0x0a, 0x0a, 0x0a, GS, 0x56, 0x42, 0x00]),
+  ]));
+}
+
 /**
  * @param venta {{ total: number, forma_pago: 'efectivo'|'tarjeta'|'transferencia', efectivo: number, cambio: number, creado_en: string,
  *   dolarones?: number, socio?: { numero: number, ganados: number, saldo: number } | null }}
@@ -200,6 +262,7 @@ export async function imprimirTicket(venta, lineas) {
     centrado('Productos Americanos'),
     separador(),
     linea(fecha),
+    ...(venta.id ? [linea('Venta: ' + venta.id)] : []),
     separador(),
   ];
   for (const l of lineas) {
@@ -207,6 +270,10 @@ export async function imprimirTicket(venta, lineas) {
     partes.push(renglonMonto(`  ${l.cantidad} x ${pesos(l.precio)}`, pesos(l.precio * l.cantidad)));
   }
   partes.push(separador());
+  if (venta.descuento > 0) {
+    partes.push(renglonMonto('Subtotal', pesos(venta.total + venta.descuento)));
+    partes.push(renglonMonto('Descuento', `-${pesos(venta.descuento)}`));
+  }
   partes.push(renglonMonto('TOTAL', pesos(venta.total)));
   if (venta.dolarones > 0) {
     partes.push(renglonMonto('Dolarones', `-${pesos(venta.dolarones)}`));
@@ -226,17 +293,30 @@ export async function imprimirTicket(venta, lineas) {
     partes.push(renglonMonto('Saldo disponible', d(venta.socio.saldo)));
     partes.push(separador());
   }
+  if (venta.vale_usado) partes.push(...partesVale(venta.vale_usado, 'SALDO DEL VALE ANTERIOR'));
+  if (venta.vale_emitido) partes.push(...partesVale(venta.vale_emitido));
+  if (venta.vale_pendiente) partes.push(linea('Elegibilidad de vale sin confirmar.'),
+    linea('Consulta en caja con este ticket tras sincronizar.'));
+  if (venta.recompensa_pendiente) partes.push(linea('Dolarones de compra sin confirmar.'),
+    linea('Consulta el saldo tras sincronizar.'));
   partes.push(centrado('Gracias por su compra'));
   partes.push(new Uint8Array([0x0a, 0x0a, 0x0a]));
   partes.push(new Uint8Array([GS, 0x56, 0x42, 0x00]));   // corte con avance de papel
 
-  return enviar(concatenar(partes));
+  const impreso = await enviar(concatenar(partes));
+  // El codigo de barras dentro de un ticket largo trababa la impresora de la caja
+  // (no imprimia lo que seguia ni cortaba; bug-log #9). El vale sale en su papel,
+  // como la reimpresion, que si funciona, cuando la impresora ya vacio el ticket.
+  if (!venta.vale_emitido || venta.vale_emitido.restante <= 0) return impreso;
+  await new Promise((listo) => setTimeout(listo, PAUSA_VALE_MS));
+  return (await imprimirVale(venta.vale_emitido)) && impreso;
 }
 
 /* ---------- Corte de caja y retiros (Issue #100): hojas para firmar ---------- */
 
 const importe = (centavos) => `$${(centavos / 100).toFixed(2)}`;
 const fechaHora = (iso) => new Date(iso).toLocaleString('es-MX', {
+  timeZone: 'America/Mexico_City',
   year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit',
 });
 const negritas = (encendidas) => new Uint8Array([ESC, 0x45, encendidas ? 1 : 0]);
@@ -273,6 +353,7 @@ const parrafo = (texto) => (sinAcentos(texto).match(new RegExp(`.{1,${COLUMNAS}}
  * @param corte la fila de `cortes` que regresa /api/cortes
  */
 export function imprimirCorte(corte) {
+  const conteo = JSON.parse(corte.conteo || '{}');
   const diferencia = corte.diferencia;
   const etiquetaDiferencia = diferencia === 0 ? 'Diferencia' : diferencia > 0 ? 'SOBRANTE' : 'FALTANTE';
   const partes = [
@@ -295,6 +376,14 @@ export function imprimirCorte(corte) {
     renglonMonto(etiquetaDiferencia, importe(Math.abs(diferencia))),
     negritas(false),
     separador(),
+    ...(Object.keys(conteo).length ? [
+      centrado('CONTEO'),
+      ...Object.entries(conteo)
+        .filter(([, piezas]) => piezas > 0)
+        .sort(([a], [b]) => Number(b) - Number(a))
+        .map(([denominacion, piezas]) => renglonMonto(`  ${piezas} x ${importe(Number(denominacion))}`, importe(piezas * Number(denominacion)))),
+      separador(),
+    ] : []),
     renglonMonto('Tarjeta (sistema)', importe(corte.tarjeta_sistema)),
     renglonMonto('Tarjeta (terminal)', importe(corte.tarjeta_terminal)),
     renglonMonto('Diferencia tarjeta', importe(corte.tarjeta_terminal - corte.tarjeta_sistema)),
@@ -326,6 +415,39 @@ export function imprimirRetiro(retiro) {
     linea(gasto ? 'Concepto:' : 'Motivo:'),
     ...parrafo(retiro.motivo),
     ...firmas(retiro.cajero),
+  ];
+  return enviar(concatenar(partes));
+}
+
+/**
+ * El comprobante de una devolucion (Issue #138): piezas canceladas sueltas o el
+ * resto del ticket. Lo firma el cajero que entrega el dinero y el cliente que
+ * lo recibe; se guarda con el corte.
+ * @param d {{ titulo: string, caja: string, cajero: string, creado_en: string, ticket_creado_en: string,
+ *   forma_pago: string, piezas: { nombre: string, cantidad: number, importe: number }[],
+ *   dinero: number, dolarones: number, motivo: string }}
+ */
+export function imprimirDevolucion(d) {
+  const salida = d.forma_pago === 'efectivo' ? 'EFECTIVO' : d.forma_pago === 'transferencia' ? 'TRANSFERENCIA' : 'TARJETA';
+  const partes = [
+    ...encabezado(d.titulo),
+    linea(`Caja: ${sinAcentos(d.caja || 'sin caja')}`),
+    linea(`Cajero: ${sinAcentos(d.cajero)}`.slice(0, COLUMNAS)),
+    linea(`Fecha: ${fechaHora(d.creado_en)}`),
+    linea(`Ticket original: ${fechaHora(d.ticket_creado_en)}`),
+    separador(),
+    ...d.piezas.flatMap((p) => [
+      linea(sinAcentos(p.nombre).slice(0, COLUMNAS)),
+      renglonMonto(`  ${p.cantidad} pieza${p.cantidad > 1 ? 's' : ''}`, importe(p.importe)),
+    ]),
+    separador(),
+    negritas(true),
+    renglonMonto(`DEVUELTO EN ${salida}`, importe(d.dinero)),
+    negritas(false),
+    ...(d.dolarones ? [renglonMonto('Regresado al saldo (Dolarones)', `${d.dolarones / 100} D`)] : []),
+    linea('Motivo:'),
+    ...parrafo(d.motivo),
+    ...firmas(d.cajero),
   ];
   return enviar(concatenar(partes));
 }

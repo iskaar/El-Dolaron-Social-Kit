@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Productos para Marketplace — El Dolarón</title><style>
+*{box-sizing:border-box}body{margin:0;background:#f4f6fa;color:#16366B;font-family:Arial,sans-serif}header,main{max-width:1000px;margin:auto;padding:24px}header h1{margin:0 0 12px;font-size:clamp(26px,5vw,38px)}p{line-height:1.5}a{color:#16366B}.filters{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;background:white;border:1px solid #d6deea;border-radius:12px;padding:20px}.filters label{margin:0}.filters .search{grid-column:span 2}label{display:block;margin-top:18px;font-weight:bold}input,select,textarea{display:block;width:100%;margin-top:6px;padding:10px;border:1px solid #aab8cf;border-radius:5px;font:inherit;color:#16366B;background:white}textarea{resize:vertical;line-height:1.5}.navigation,.buttons{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:16px 0}button{background:#16366B;color:white;border:0;border-radius:6px;padding:12px;font:inherit;cursor:pointer}button:hover{background:#D72B32}button:disabled{opacity:.45;cursor:default}.navigation span{flex:1;text-align:center}article{display:grid;grid-template-columns:40% 60%;background:white;border:1px solid #d6deea;border-radius:12px;overflow:hidden;margin-bottom:24px}.photo{display:flex;align-items:center;padding:16px;background:#eef1f6}.photo img{width:100%;height:auto;max-height:480px;object-fit:contain}.details{padding:24px}h2{margin-top:0;font-size:23px}.price{font-size:28px;font-weight:bold;margin:12px 0}.download{display:inline-block;background:#FFD447;padding:12px 16px;border-radius:6px;font-weight:bold;text-decoration:none}.status{min-height:20px;font-size:14px;margin-bottom:0}.inventory{font-size:14px;overflow-wrap:anywhere}.notice{font-size:14px}a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible{outline:3px solid #D72B32;outline-offset:3px}[hidden]{display:none!important}@media(max-width:650px){article{grid-template-columns:1fr}header,main{padding:16px}.details{padding:18px}.photo img{max-height:330px}.filters{grid-template-columns:repeat(2,1fr)}.filters .search{grid-column:span 2}}
+#products{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:20px}header,main{max-width:1280px}article{display:flex;flex-direction:column;margin:0;min-width:0}.photo{aspect-ratio:4/3;padding:12px;flex:none}.photo img{width:100%;height:100%;max-height:none;aspect-ratio:4/3}.details{padding:18px;flex:1}h2{font-size:20px;line-height:1.3}.details label{margin-top:12px}.details .buttons{gap:6px}.details button{font-size:13px;padding:10px}.details details{margin-top:16px}.details summary{cursor:pointer;font-weight:bold}.navigation{justify-content:center}.inventory{margin:10px 0}.price{margin:10px 0}#sentinel{height:1px}@media(max-width:1000px){#products{grid-template-columns:repeat(2,minmax(0,1fr))}}@media(max-width:650px){#products{grid-template-columns:1fr}.photo img{max-height:none}}
+</style></head><body>
+<header><h1>Productos para Marketplace</h1><p>Descarga la foto y copia los datos de cada producto. Al actualizar el inventario se restablecen los textos y precios editados.</p><div class="buttons"><a href="/">Volver al menú</a><a class="download" href="/marketplace-redes.png" download>Descargar imagen de redes</a><button id="refresh" type="button">Actualizar inventario</button></div><p class="notice" id="snapshot">Cargando inventario…</p></header>
+<main><form class="filters" id="filters">
+<label class="search">Nombre, código o marca<input id="search" type="search" placeholder="Buscar sin importar acentos"></label>
+<label>Categoría<select id="category"><option value="">Todas las categorías</option></select></label>
+<label>Precio mínimo (MXN)<input id="priceMin" type="number" min="0" step="0.01" placeholder="Sin mínimo"></label>
+<label>Precio máximo (MXN)<input id="priceMax" type="number" min="0" step="0.01" placeholder="Sin máximo"></label>
+<label>Cantidad mínima en stock<input id="stockMin" type="number" min="1" step="1" value="1"></label>
+<label>Cantidad máxima en stock<input id="stockMax" type="number" min="1" step="1" placeholder="Sin máximo"></label>
+<div class="buttons"><button type="reset">Limpiar filtros</button></div></form>
+<p id="counter" role="status" aria-live="polite">Cargando…</p>
+<p id="empty" hidden>No hay productos con estos filtros. Prueba otros valores o limpia los filtros.</p><div id="products"></div><div id="sentinel" aria-hidden="true"></div><div class="navigation"><button id="more" type="button" hidden>Mostrar más</button></div></main>
+<template id="card"><article><a class="photo" download><img width="640" height="480" decoding="async" loading="lazy"></a><div class="details"><h2></h2><p class="inventory"></p><p class="price"></p><a class="download" download>Descargar foto</a><label>Título<input class="title"></label><label>Precio (MXN)<input class="amount" inputmode="decimal"></label><details><summary>Ver o editar descripción</summary><label>Descripción<textarea class="description" rows="6"></textarea></label></details><div class="buttons"><button type="button" data-copy="title">Copiar título</button><button type="button" data-copy="amount">Copiar precio</button><button type="button" data-copy="description">Copiar descripción</button></div><p class="status" role="status" aria-live="polite"></p></div></article></template>
+<script id="catalog-logic">
+globalThis.CatalogLogic = {
+ normalize: value => String(value ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLocaleLowerCase('es'),
+ eligible: product => Number(product.stock) >= 1 && Number.isInteger(Number(product.precio)) && Number(product.precio) > 0 && product.foto_key === 'fotos/'+product.id+'.jpg' && Boolean(String(product.nombre || '').trim()) && product.destino === 'etiqueta' && product.estado_analisis === 'listo' && Number(product.sin_inventario) === 0 && product.id !== '87ddd327-2058-435d-98ea-651a6e54c09a',
+ condition: product => product.estado_fisico === 'nuevo' ? 'Nuevo' : product.estado_fisico === 'danado' ? 'Estado: dañado (según inventario). Consulta los detalles por Messenger' : `Estado: ${product.estado_fisico || 'sin especificar'} (según inventario). Consulta los detalles por Messenger`,
+ matches(product, filters) {
+  const amount = Number(product.precio) / 100;
+  return this.eligible(product) && (!filters.category || product.categoria === filters.category)
+   && this.normalize([product.nombre,product.codigo,product.marca,product.id].join(' ')).includes(this.normalize(filters.search))
+   && (filters.priceMin === '' || amount >= Number(filters.priceMin))
+   && (filters.priceMax === '' || amount <= Number(filters.priceMax))
+   && Number(product.stock) >= Math.max(1,Number(filters.stockMin) || 1)
+   && (filters.stockMax === '' || Number(product.stock) <= Number(filters.stockMax));
+ },
+ batch(products,start) { return products.slice(start,start + 9); }
+};
+</script><script>
+const ids=['search','category','priceMin','priceMax','stockMin','stockMax'];
+const elements=Object.fromEntries(ids.map(id=>[id,document.getElementById(id)]));
+const cards=document.getElementById('products'),counter=document.getElementById('counter');
+const edits=new Map();
+let products=[],filtered=[],shown=0;
+const sentinel=document.getElementById('sentinel'),more=document.getElementById('more');
+const imageObserver=typeof IntersectionObserver==='undefined' ? null : new IntersectionObserver(entries=>{
+ for(const entry of entries)if(entry.isIntersecting){const img=entry.target;img.src=img.dataset.src;imageObserver.unobserve(img);}
+},{rootMargin:'150px'});
+const moreObserver=typeof IntersectionObserver==='undefined' ? null : new IntersectionObserver(entries=>{
+ if(entries.some(entry=>entry.isIntersecting)&&shown<filtered.length)appendBatch();
+},{rootMargin:'300px'});
+const amount=product=>String(Number(product.precio)/100);
+const priceLabel=product=>'MX$'+(Number(product.precio)/100).toLocaleString('es-MX',{maximumFractionDigits:2});
+const categoryLabel=category=>({electronica:'Electrónica',jardin:'Jardín',bebes:'Bebés',musica:'Música'}[category] || (category ? category[0].toLocaleUpperCase('es')+category.slice(1) : 'Sin categoría'));
+function description(product) {
+ return `${product.nombre}. ${CatalogLogic.condition(product)}. $${amount(product)} MXN. Recoge en El Dolarón, Jardín Hidalgo 129, Zona Centro, Soledad de Graciano Sánchez, SLP. Todos los días de 11 am a 8 pm. Escríbenos por Messenger.`;
+}
+function appendBatch() {
+ moreObserver?.unobserve(sentinel);
+ const batch=CatalogLogic.batch(filtered,shown);
+ for(const product of batch) {
+  const card=document.getElementById('card').content.cloneNode(true),article=card.querySelector('article');
+  const saved=edits.get(product.id);
+  article.dataset.id=product.id;
+  const title=product.title || product.nombre;
+  card.querySelector('h2').textContent=title;
+  card.querySelector('.inventory').textContent=`Inventario: ${product.nombre} · Categoría: ${categoryLabel(product.categoria)} · ${CatalogLogic.condition(product)} · Stock: ${product.stock}${product.codigo ? ' · '+product.codigo : ''}`;
+  card.querySelector('.price').textContent=priceLabel(product);
+  const photo='/api/marketplace/foto/'+encodeURIComponent(product.id);
+  for(const link of card.querySelectorAll('a')){link.href=photo;link.download=product.id+'.jpg';}
+  const img=card.querySelector('img');img.alt=title;img.dataset.src=photo;
+  img.addEventListener('error',()=>{article.querySelector('.status').textContent='No se pudo cargar la foto. Intenta descargarla.';});
+  card.querySelector('.title').value=saved?.title ?? title;
+  card.querySelector('.amount').value=saved?.amount ?? amount(product);
+  card.querySelector('.description').value=saved?.description ?? product.description ?? description(product);
+  cards.append(card);
+  if(imageObserver)imageObserver.observe(img);else img.src=img.dataset.src;
+ }
+ shown+=batch.length;
+ counter.textContent=`Mostrando ${shown} de ${filtered.length} resultados · ${products.length} en el inventario consultado`;
+ document.getElementById('empty').hidden=filtered.length>0;
+ more.hidden=shown>=filtered.length;
+ if(shown<filtered.length)requestAnimationFrame(()=>moreObserver?.observe(sentinel));
+}
+function filter() {
+ const filters=Object.fromEntries(ids.map(id=>[id,elements[id].value]));
+ filtered=products.filter(product=>CatalogLogic.matches(product,filters));
+ imageObserver?.disconnect();moreObserver?.disconnect();cards.replaceChildren();shown=0;appendBatch();
+}
+document.getElementById('filters').addEventListener('submit',event=>event.preventDefault());
+document.getElementById('filters').addEventListener('input',filter);
+document.getElementById('filters').addEventListener('reset',()=>setTimeout(filter,0));
+more.addEventListener('click',appendBatch);
+cards.addEventListener('input',event=>{
+ const card=event.target.closest('article');if(!card)return;
+ edits.set(card.dataset.id,Object.fromEntries(['title','amount','description'].map(key=>[key,card.querySelector('.'+key).value])));
+});
+cards.addEventListener('click',async event=>{
+ const button=event.target.closest('button[data-copy]');if(!button)return;
+ const card=button.closest('article'),field=card.querySelector('.'+button.dataset.copy),status=card.querySelector('.status');
+ try{await navigator.clipboard.writeText(field.value);status.textContent='Copiado.';}
+ catch(error){const details=field.closest('details');if(details)details.open=true;field.focus();field.select();status.textContent='No se pudo copiar automáticamente. El texto está seleccionado: usa Ctrl+C o la opción Copiar de tu dispositivo.';}
+});
+async function load() {
+ const refresh=document.getElementById('refresh');refresh.disabled=true;
+ try {
+  const response=await fetch('/api/marketplace',{cache:'no-store'});
+  if(!response.ok)throw new Error('No se pudo consultar el inventario.');
+  const catalog=await response.json();
+  edits.clear();
+  products=catalog.products.filter(product=>CatalogLogic.eligible(product));
+  products.sort((a,b)=>a.nombre.localeCompare(b.nombre,'es'));
+  const selectedCategory=elements.category.value;
+  elements.category.replaceChildren(new Option('Todas las categorías',''));
+  for(const category of [...new Set(products.map(product=>product.categoria||'').filter(Boolean))].sort((a,b)=>a.localeCompare(b,'es'))){const option=document.createElement('option');option.value=category;option.textContent=categoryLabel(category);elements.category.append(option);}
+  elements.category.value=[...elements.category.options].some(option=>option.value===selectedCategory) ? selectedCategory : '';
+  const timestamp=new Date(catalog.updated_at);
+  document.getElementById('snapshot').textContent=`Inventario consultado: ${Number.isNaN(timestamp.getTime()) ? 'fecha no disponible' : timestamp.toLocaleString('es-MX')} · ${products.length} productos con stock ≥ 1. El stock corresponde a esa consulta; confirma la existencia antes de publicar.`;
+  filter();
+ }catch(error){products=[];filter();counter.textContent='No se pudo cargar el catálogo.';document.getElementById('snapshot').textContent='No se pudo consultar el inventario. Vuelve a entrar o intenta actualizar.';}
+ finally{refresh.disabled=false;}
+}
+document.getElementById('refresh').addEventListener('click',load);
+load();
+</script></body></html>

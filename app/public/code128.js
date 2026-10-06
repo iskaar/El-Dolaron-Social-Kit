@@ -65,3 +65,32 @@ export function svgCode128(texto, { modulo = 0.33, alto = 12 } = {}) {
     <g fill="#000" transform="translate(${muda.toFixed(3)} 0)">${barras.join('')}</g>
   </svg>`;
 }
+
+/*
+ * Los lectores escriben como un teclado: con la distribucion latinoamericana un
+ * '-' llega como otra tecla, y Bloq Mayus invierte las letras. Por eso los codigos
+ * DC-/DP-/DV- viajan en el codigo de barras solo como digitos: 1 de tipo + los
+ * 96 bits del codigo en decimal (29 digitos). Ida y vuelta exactas.
+ */
+const B64 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_';
+const TIPOS = ['DC', 'DP', 'DV'];
+
+/** 'DP-abc…' (16) -> '2' + 29 digitos. */
+export function codigoEnDigitos(codigo) {
+  const m = /^(D[CPV])-([A-Za-z0-9_-]{16})$/.exec(codigo);
+  if (!m) throw new Error('Codigo invalido.');
+  let n = 0n;
+  for (const c of m[2]) n = n * 64n + BigInt(B64.indexOf(c));
+  return String(TIPOS.indexOf(m[1]) + 1) + n.toString().padStart(29, '0');
+}
+
+/** Lo que escribio el lector -> 'DP-abc…', o null si no es uno de estos codigos. */
+export function codigoDeDigitos(texto) {
+  const m = /^([123])(\d{29})$/.exec(String(texto).trim());
+  if (!m) return null;
+  let n = BigInt(m[2]);
+  if (n >= 1n << 96n) return null;
+  let cuerpo = '';
+  for (let i = 0; i < 16; i++) { cuerpo = B64[Number(n % 64n)] + cuerpo; n /= 64n; }
+  return `${TIPOS[Number(m[1]) - 1]}-${cuerpo}`;
+}
