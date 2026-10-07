@@ -131,6 +131,14 @@ dd { margin: 0; line-height: 1.5; }
 .dolarones h2 { font-size: clamp(40px, 4.5vw, 64px); }
 .dolarones p { margin-block: 20px 27px; font-size: 18px; }
 .dolarones-symbol { width: 246px; height: 246px; padding: 36px; background: var(--white); border-radius: 50%; margin-right: 55px; transform: rotate(-8deg); }
+.dolarones-kicker { margin: 0 0 12px !important; font-size: 13px !important; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--yellow); }
+.dolarones-pasos { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 20px; margin: 0; padding: 0 0 28px; list-style: none; }
+.dolarones-pasos li { padding: 26px 24px; border-top: 4px solid var(--yellow); background: rgba(255, 255, 255, .07); }
+.dolarones-cifra { display: block; font-size: 56px; font-weight: 800; line-height: 1; color: var(--yellow); }
+.dolarones-pasos h3 { margin: 12px 0 8px; font-size: 20px; }
+.dolarones .dolarones-pasos p { margin: 0; font-size: 16px; line-height: 1.55; }
+.dolarones .dolarones-nota { margin: 0; padding-bottom: 56px; font-size: 14px; opacity: .9; }
+.dolarones-nota a { color: var(--yellow); font-weight: 700; }
 .footer { display: flex; align-items: center; justify-content: space-between; gap: 24px; padding-block: 36px; font-size: 13px; }
 .footer-brand { width: 160px; flex-shrink: 0; }
 .footer nav { gap: 24px; }
@@ -266,6 +274,8 @@ a:focus-visible, a:focus-visible > *, a:focus-visible > span::before { transitio
   dl > div { grid-template-columns: 72px 1fr; gap: 16px; }
   .visit-details .text-link { font-size: 15px; }
   .dolarones-layout { padding-block: 48px; gap: 24px; }
+  .dolarones-pasos { grid-template-columns: 1fr; gap: 14px; }
+  .dolarones-cifra { font-size: 44px; }
   .dolarones h2 { font-size: 42px; }
   .dolarones p { font-size: 16px; max-width: 300px; }
   .dolarones-symbol { display: none; }
