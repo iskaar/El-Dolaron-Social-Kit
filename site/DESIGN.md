@@ -21,11 +21,13 @@ lectura claro. Nunca «startup»: nada de degradados, vidrio esmerilado ni tarje
 
 Dominante papel + tinta azul; rojo y amarillo como acentos fuertes, nunca repartidos por igual.
 
-## Tipografía (autohospedada en `assets/fonts/`, solo latin)
+## Tipografía (autohospedada en `assets/fonts/`, solo latin) — combinación C, elegida por Isaac el 6/10
 
-- **Anton**: titulares, precios, cintas en mayúsculas. Condensada y pesada, de tabloide.
-- **Archivo** (variable 400–800): texto corrido y botones.
-- **Abril Fatface** y **Alfa Slab One**: solo para letras recortadas del título tipo «carta de rescate».
+- **Fraunces** variable (`"SOFT" 100, "WONK" 1`, peso 800–900, en altas y bajas): titulares, cintas, nombres de cupón,
+  pasos y dirección. Cursiva solo para el «Vale por…» de los cupones. Usar `var(--display)` y `var(--display-axes)`.
+- **Anton**: precios, sellos, marquesina, categorías y botones de sello (lo que en un tabloide va estampado).
+- **Archivo** (variable 400–800): texto corrido, etiquetas de sección y botones.
+- **Abril Fatface**, **Alfa Slab One**, Anton y Archivo 900: solo en las letras recortadas del título.
 - Prohibido: Inter, Roboto, Arial como tipografía de diseño, Space Grotesk.
 
 ## Recursos

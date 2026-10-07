@@ -1,6 +1,8 @@
 @font-face { font-family: "Anton"; src: url("assets/fonts/anton-400.woff2") format("woff2"); font-display: swap; }
 @font-face { font-family: "Abril Fatface"; src: url("assets/fonts/abril-fatface-400.woff2") format("woff2"); font-display: swap; }
 @font-face { font-family: "Alfa Slab One"; src: url("assets/fonts/alfa-slab-one-400.woff2") format("woff2"); font-display: swap; }
+@font-face { font-family: "Fraunces"; src: url("assets/fonts/fraunces-normal.woff2") format("woff2"); font-weight: 100 900; font-display: swap; }
+@font-face { font-family: "Fraunces"; src: url("assets/fonts/fraunces-italic.woff2") format("woff2"); font-weight: 100 900; font-style: italic; font-display: swap; }
 @font-face { font-family: "Archivo"; src: url("assets/fonts/archivo-variable.woff2") format("woff2"); font-weight: 100 900; font-display: swap; }
 /* Tabloide de ofertas: la guía completa vive en site/DESIGN.md. */
 :root {
@@ -10,6 +12,8 @@
   --white: #FFFFFF;
   --paper: #EDE6D3;
   --shadow: rgb(22 54 107 / .26);
+  --display: "Fraunces", Georgia, serif;
+  --display-axes: "SOFT" 100, "WONK" 1;
   color: var(--navy);
   font-family: "Archivo", "Trebuchet MS", sans-serif;
   font-size: 16px;
@@ -46,7 +50,7 @@ p { line-height: 1.6; }
 .portal-link { padding: 11px 16px; background: var(--yellow); border: 2px solid var(--navy); box-shadow: 3px 3px 0 var(--navy); }
 
 /* Piezas comunes */
-.tape { display: inline-block; padding: .38em .85em .32em; font-family: "Anton", Impact, sans-serif; font-weight: 400; text-transform: uppercase; letter-spacing: .02em; line-height: 1.1;
+.tape { display: inline-block; padding: .34em .85em .36em; font-family: var(--display); font-variation-settings: var(--display-axes); font-weight: 800; letter-spacing: -.01em; line-height: 1.1;
   clip-path: polygon(0 8%, 3% 0, 22% 5%, 48% 0, 74% 6%, 97% 0, 100% 10%, 98% 52%, 100% 92%, 96% 100%, 70% 95%, 45% 100%, 20% 94%, 2% 100%, 0 88%, 2% 47%); }
 .tape-yellow { background: var(--yellow); color: var(--navy); rotate: -2deg; }
 .tape-navy { background: var(--navy); color: var(--white); rotate: 1.2deg; }
@@ -65,7 +69,7 @@ p { line-height: 1.6; }
 .section-head { position: relative; display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: end; gap: 6px 40px; padding-top: 16px; border-top: 6px solid currentColor; }
 .section-head::before { content: ""; position: absolute; inset: 4px 0 auto; border-top: 1px solid currentColor; }
 .section-label { grid-column: 1 / -1; margin-bottom: 10px; font-size: 13px; font-weight: 800; letter-spacing: .16em; text-transform: uppercase; }
-h2 { font-family: "Anton", Impact, sans-serif; font-weight: 400; font-size: clamp(46px, 6.4vw, 96px); line-height: .95; text-transform: uppercase; }
+h2 { font-family: var(--display); font-variation-settings: var(--display-axes); font-weight: 900; font-size: clamp(44px, 6vw, 92px); line-height: .98; letter-spacing: -.025em; }
 .section-lede { max-width: 380px; padding-bottom: 6px; font-size: 17px; font-weight: 500; }
 
 /* Portada */
@@ -133,8 +137,8 @@ h2 { font-family: "Anton", Impact, sans-serif; font-weight: 400; font-size: clam
 .coupon-cream .coupon-stub { background: var(--red); color: var(--white); border-left-color: var(--coupon); }
 .coupon-stub span:last-child { font-family: "Archivo", sans-serif; font-size: 12px; font-weight: 800; letter-spacing: .12em; }
 .coupon-body { display: grid; gap: 4px; margin: 10px 14px 10px 12px; padding: 18px 22px 16px; border: 2px solid var(--navy); box-shadow: inset 0 0 0 3px var(--coupon), inset 0 0 0 4px var(--navy); }
-.coupon-kicker { font-family: "Abril Fatface", serif; font-size: 17px; font-style: italic; color: var(--red); }
-.group-name { font-family: "Anton", sans-serif; font-size: clamp(28px, 2.6vw, 38px); line-height: 1.05; text-transform: uppercase; }
+.coupon-kicker { font-family: var(--display); font-variation-settings: var(--display-axes); font-size: 18px; font-style: italic; font-weight: 500; color: var(--red); }
+.group-name { font-family: var(--display); font-variation-settings: var(--display-axes); font-weight: 900; font-size: clamp(28px, 2.6vw, 38px); line-height: 1.05; letter-spacing: -.02em; }
 .group-text { font-size: 15px; font-weight: 600; }
 .group-go { justify-self: start; margin-top: 10px; padding: 6px 12px 5px; border: 2px solid var(--navy); border-radius: 3px; font-family: "Anton", sans-serif; font-size: 15px; letter-spacing: .06em; text-transform: uppercase; rotate: -2deg; }
 
@@ -159,7 +163,7 @@ h2 { font-family: "Anton", Impact, sans-serif; font-weight: 400; font-size: clam
 .piece-ask { min-height: 44px; margin-top: 16px; padding: 8px 10px; background: var(--navy); color: var(--white); box-shadow: none; font-size: 14px; }
 .catalog-more { margin: 40px auto 0; display: flex; }
 .catalog-fallback { max-width: 580px; margin-top: 28px; padding: 28px; background: var(--white); box-shadow: 4px 5px 0 var(--shadow); }
-.catalog-fallback h3 { font-family: "Anton", sans-serif; font-weight: 400; font-size: 26px; line-height: 1.15; text-transform: uppercase; }
+.catalog-fallback h3 { font-family: var(--display); font-variation-settings: var(--display-axes); font-weight: 900; font-size: 26px; line-height: 1.15; }
 .catalog-fallback p { margin-top: 10px; }
 
 /* Ropa: etiquetas de precio colgadas */
@@ -203,7 +207,7 @@ h2 { font-family: "Anton", Impact, sans-serif; font-weight: 400; font-size: clam
 .steps li:first-child { padding-left: 0; }
 .steps li + li { border-left: 1px solid var(--navy); }
 .steps li::before { content: counter(step); display: block; color: var(--red); font-family: "Anton", sans-serif; font-size: 64px; line-height: 1; }
-.steps h3 { margin: 6px 0 10px; font-family: "Anton", sans-serif; font-weight: 400; font-size: 26px; line-height: 1.1; text-transform: uppercase; }
+.steps h3 { margin: 6px 0 10px; font-family: var(--display); font-variation-settings: var(--display-axes); font-weight: 900; font-size: 26px; line-height: 1.1; letter-spacing: -.02em; }
 .steps p { max-width: 300px; font-size: 16px; }
 
 /* Visítanos: recorte pegado con cinta */
@@ -211,7 +215,7 @@ h2 { font-family: "Anton", Impact, sans-serif; font-weight: 400; font-size: clam
 .visit-layout { display: grid; grid-template-columns: 1.05fr 1fr; gap: 80px; align-items: center; padding-block: 24px 96px; }
 .address-block { display: flex; gap: 16px; align-items: flex-start; margin-top: 30px; }
 .pin { width: 28px; height: 35px; color: var(--red); margin-top: 3px; }
-.address-block h3 { margin-bottom: 6px; font-family: "Anton", sans-serif; font-weight: 400; font-size: 30px; text-transform: uppercase; }
+.address-block h3 { margin-bottom: 6px; font-family: var(--display); font-variation-settings: var(--display-axes); font-weight: 900; font-size: 30px; letter-spacing: -.02em; }
 address { font-style: normal; font-size: 17px; line-height: 1.6; }
 .visit-heading .button { margin-top: 28px; }
 .visit-details { position: relative; padding: 46px 42px 38px; background: var(--white); box-shadow: 5px 6px 0 var(--shadow); rotate: 1.5deg; }
