@@ -33,7 +33,7 @@ function json(cuerpo: unknown, status = 200, extra: Record<string, string> = {})
 
 function aPieza(p: Record<string, any>, url: URL) {
   return {
-    codigo: p.codigo, nombre: p.nombre, marca: p.marca, categoria: p.categoria,
+    codigo: p.codigo, nombre: p.nombre, marca: p.marca, categoria: p.categoria, talla: p.talla ?? null,
     precio: p.precio, precio_lista: p.precio_lista > p.precio ? p.precio_lista : 0,
     foto: `${url.origin}/api/catalogo/foto/${p.codigo}`,
   };
@@ -42,7 +42,7 @@ function aPieza(p: Record<string, any>, url: URL) {
 /** Portada del sitio: lo que mas se vendio en 14 dias y sigue a la venta; si faltan, lo mas nuevo. */
 async function destacados(env: Env, url: URL): Promise<Response> {
   const desde = new Date(Date.now() - DIAS_DESTACADOS * 86_400_000).toISOString();
-  const filas = await env.DB.prepare(`select p.codigo, p.nombre, p.marca, p.categoria, p.precio, p.precio_lista from productos p
+  const filas = await env.DB.prepare(`select p.codigo, p.nombre, p.marca, p.categoria, p.talla, p.precio, p.precio_lista from productos p
     left join (select l.codigo, sum(l.cantidad) as n from venta_lineas l join ventas v on v.id = l.venta_id
       where v.cancelada = 0 and v.creado_en >= ? group by l.codigo) s on s.codigo = p.codigo
     where ${VENDIBLE} order by coalesce(s.n, 0) desc, p.creado_en desc, p.codigo limit ?`)
@@ -60,7 +60,7 @@ async function listar(env: Env, url: URL): Promise<Response> {
   const filtro = `${VENDIBLE}${categoria === null ? '' : ' and p.categoria = ?'}`;
   const args = categoria === null ? [] : [categoria];
   const [filas, cuenta] = await Promise.all([
-    env.DB.prepare(`select p.codigo, p.nombre, p.marca, p.categoria, p.precio, p.precio_lista from productos p
+    env.DB.prepare(`select p.codigo, p.nombre, p.marca, p.categoria, p.talla, p.precio, p.precio_lista from productos p
       where ${filtro} order by p.creado_en desc, p.codigo limit ? offset ?`)
       .bind(...args, POR_PAGINA + 1, (pagina - 1) * POR_PAGINA).all<Record<string, any>>(),
     env.DB.prepare(`select count(*) as n from productos p where ${filtro}`).bind(...args).first<{ n: number }>(),
