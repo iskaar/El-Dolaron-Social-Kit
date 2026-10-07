@@ -102,12 +102,13 @@ h2 { font-family: var(--display); font-variation-settings: var(--display-axes); 
   clip-path: polygon(50% 0, 61% 12%, 75% 7%, 79% 21%, 93% 25%, 88% 39%, 100% 50%, 88% 61%, 93% 75%, 79% 79%, 75% 93%, 61% 88%, 50% 100%, 39% 88%, 25% 93%, 21% 79%, 7% 75%, 12% 61%, 0 50%, 12% 39%, 7% 25%, 21% 21%, 25% 7%, 39% 12%); }
 
 /* Estampas en vivo: las piezas más vendidas, pegadas como fotos instantáneas */
-.hero-art.en-vivo > img { visibility: hidden; }
+.hero-art > img { transition: opacity 600ms ease; }
+.hero-art.en-vivo > img { opacity: 0; }
 .stickers { position: absolute; inset: 0; }
 .sticker { position: absolute; display: block; padding: 7px 7px 34px; background: var(--white); box-shadow: 3px 5px 0 var(--shadow); transition: rotate 180ms ease, translate 180ms ease; }
 .sticker img { width: 100%; aspect-ratio: 1; object-fit: cover; background: #E6DEC8; }
 .sticker::before { content: ""; position: absolute; z-index: 1; top: -10px; left: 50%; width: 70px; height: 22px; translate: -50% 0; rotate: -5deg; background: rgb(255 212 71 / .78); }
-.sticker-price { position: absolute; left: 6px; bottom: 3px; padding: 2px 9px 1px; background: var(--yellow); font-family: "Anton", sans-serif; font-size: clamp(16px, 1.6vw, 22px); line-height: 1.2; rotate: -6deg; box-shadow: 2px 2px 0 var(--shadow); }
+.sticker-price { position: absolute; right: 6px; bottom: 3px; padding: 2px 9px 1px; background: var(--yellow); font-family: "Anton", sans-serif; font-size: clamp(16px, 1.6vw, 22px); line-height: 1.2; rotate: 4deg; box-shadow: 2px 2px 0 var(--shadow); }
 .sticker:nth-child(1) { left: 5%; top: 4%; width: 31%; rotate: -6deg; }
 .sticker:nth-child(2) { left: 35%; top: 0; width: 31%; rotate: 3deg; }
 .sticker:nth-child(3) { left: 68%; top: 5%; width: 30%; rotate: -3deg; }
@@ -255,8 +256,8 @@ dd { margin: 0; line-height: 1.5; }
   .hero-sub, .new-stamp { animation: cut-drop 560ms 560ms cubic-bezier(.2, .9, .3, 1.3) backwards; }
   .price-tag { animation: tag-swing 1400ms 700ms cubic-bezier(.3, 1.6, .5, 1) backwards; }
   .ticker-track { animation: ticker 38s linear infinite; }
-  .sticker { animation: cut-drop 520ms cubic-bezier(.2, .9, .3, 1.3) backwards; }
-  .sticker:nth-child(2) { animation-delay: 70ms; } .sticker:nth-child(3) { animation-delay: 140ms; } .sticker:nth-child(4) { animation-delay: 210ms; } .sticker:nth-child(5) { animation-delay: 280ms; }
+  .sticker { animation: cut-drop 520ms 150ms cubic-bezier(.2, .9, .3, 1.3) backwards; }
+  .sticker:nth-child(2) { animation-delay: 220ms; } .sticker:nth-child(3) { animation-delay: 290ms; } .sticker:nth-child(4) { animation-delay: 360ms; } .sticker:nth-child(5) { animation-delay: 430ms; }
   @keyframes tag-swing { from { rotate: 14deg; opacity: 0; } 30% { opacity: 1; } }
   @keyframes ticker { to { translate: -50% 0; } }
   .visit-details.motion-enter, .dolarones-symbol.motion-enter { animation: paper-settle 650ms cubic-bezier(.2, .9, .3, 1.3); }
