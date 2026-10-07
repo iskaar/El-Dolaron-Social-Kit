@@ -34,6 +34,44 @@
   }
 
   if (typeof module !== "undefined") module.exports = { precio, consulta, apiBase };
+
+  // Portada: las piezas más vendidas (o más nuevas) como estampas. Si la API falla
+  // o trae menos de 4, se queda el collage fijo. ponytail: posiciones fijas para 5; la etiqueta de ropa ocupa la esquina libre.
+  async function destacados(arte) {
+    try {
+      const response = await fetch(`${apiBase(location.search)}/api/catalogo/destacados`, { headers: { accept: "application/json" } });
+      if (!response.ok) return;
+      const { piezas } = await response.json();
+      if (!Array.isArray(piezas) || piezas.length < 4) return;
+      const capa = document.createElement("div");
+      capa.className = "stickers";
+      for (const pieza of piezas.slice(0, 5)) {
+        if (!/^https?:\/\//.test(pieza.foto || "")) continue;
+        const a = document.createElement("a");
+        a.className = "sticker";
+        a.href = consulta(pieza);
+        a.setAttribute("aria-label", `Preguntar por WhatsApp: ${pieza.nombre}, ${precio(pieza.precio)}`);
+        const img = new Image();
+        img.alt = "";
+        img.decoding = "async";
+        img.src = pieza.foto;
+        const etiqueta = document.createElement("span");
+        etiqueta.className = "sticker-price";
+        etiqueta.textContent = precio(pieza.precio);
+        a.append(img, etiqueta);
+        capa.append(a);
+      }
+      // Solo cambia el collage cuando las fotos ya cargaron: nunca deja marcos vacíos.
+      const espera = new Promise((listo) => setTimeout(listo, 6000));
+      await Promise.race([Promise.allSettled([...capa.querySelectorAll("img")].map((img) => img.decode().catch(() => img.closest("a").remove()))), espera]);
+      for (const img of capa.querySelectorAll("img")) if (!img.complete || !img.naturalWidth) img.closest("a").remove();
+      if (capa.children.length < 4) return;
+      arte.append(capa);
+      arte.classList.add("en-vivo");
+    } catch {}
+  }
+  const arte = typeof document !== "undefined" && document.querySelector(".hero-art");
+  if (arte) destacados(arte);
   const root = typeof document !== "undefined" && document.getElementById("catalogo");
   if (!root) return;
 
