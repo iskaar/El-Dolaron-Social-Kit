@@ -71,6 +71,7 @@ const PANTALLAS: Record<string, Rol[]> = {
   '/reportes': DUENO,
   '/mercadolibre': DUENO,
   '/cuentas': DUENO,
+  '/conteo': TODOS,
 };
 
 export function permiso(pathname: string, metodo: string): Regla {
@@ -105,6 +106,8 @@ export function permiso(pathname: string, metodo: string): Regla {
   if (ruta === '/api/cajon') return CAJA;
   if (ruta === '/api/cortes' || ruta === '/api/retiros') return CAJA;
   if (ruta === '/api/cajeros' || ruta === '/api/cajeros/entrar' || ruta === '/api/cajeros/salir') return CAJA;
+  // Contar piezas de alto valor (Issue #219): cualquier cuenta de piso. Ajustar y ver el rastro es del dueno (default).
+  if (ruta === '/api/conteo') return TODOS;
   if (ruta === '/api/descuentos' || ruta === '/api/descuentos/duenos') return CAJA;   // pedir un descuento (Issue #119, descuentos.ts)
   // Cancelar una venta completa: el cajero solo en los primeros minutos; despues
   // pide aprobacion del dueno (Issue #200, cancelaciones.ts).

@@ -41,6 +41,8 @@
     // domingo 12/10 hora de la tienda (UTC-6). Para apagarla antes: quitar las dos y desplegar.
     "PROMO_DESDE": "2026-10-07T06:00:00Z",
     "PROMO_HASTA": "2026-10-13T06:00:00Z",
+    // Conteo de alto valor (Issue #219): piezas en existencia con precio >= este monto, en centavos.
+    "CONTEO_UMBRAL": "30000",
     // Mercado Libre (Issue #170): debe ser identica a la URI de redireccion de la
     // app en el DevCenter. ML_CLIENT_ID, ML_CLIENT_SECRET, ML_LLAVE_TOKENS y
     // ML_RUTA_NOTIFICACIONES son secretos (wrangler secret put), no van aqui.

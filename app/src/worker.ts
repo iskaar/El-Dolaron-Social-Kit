@@ -31,6 +31,7 @@ import { sentenciasVale, buscarVale, valeDeVenta, valeUsadoEnVenta, reimprimirVa
 import { catalogoPublico } from './catalogo.ts';
 import { rutaML, recibirNotificacion, conciliarSeguro, sincronizar } from './mercadolibre.ts';
 import { pedirDescuento, validarDescuento, listarDescuentos, listarDuenos } from './descuentos.ts';
+import { listarAltoValor, revisarConteo, ajustarExistencia, listarAjustes } from './conteo.ts';
 
 interface FilaConfig {
   clave: string;
@@ -1499,6 +1500,12 @@ export default {
       if (resolver && request.method === 'POST') {
         return await resolverSolicitud(resolver[1], request, env, correo);
       }
+
+      // Conteo de piezas de alto valor (Issue #219, conteo.ts). Contar: cualquier cuenta de piso; ajustar y el rastro: dueno.
+      if (pathname === '/api/conteo' && request.method === 'GET') return await listarAltoValor(env);
+      if (pathname === '/api/conteo' && request.method === 'POST') return await revisarConteo(request, env);
+      if (pathname === '/api/conteo/ajustes' && request.method === 'GET') return await listarAjustes(env);
+      if (pathname === '/api/conteo/ajustes' && request.method === 'POST') return await ajustarExistencia(request, env, correo);
 
       if (pathname.startsWith('/api/ml/') || pathname === '/ml/callback') {
         const respuestaML = await rutaML(request, env, url);
