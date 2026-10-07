@@ -120,11 +120,11 @@
       "format": "JS"
     },
     {
-      "file": "site/public/assets/hero-still-life.webp",
-      "title": "Ilustración del sitio público",
-      "description": "Composición generada con IA para la portada del sitio; es ilustrativa y no representa inventario real. Mostrar con la aclaración de disponibilidad.",
-      "width": 1440,
-      "height": 960,
+      "file": "site/public/assets/hallazgos.webp",
+      "title": "Recortes de la portada del sitio",
+      "description": "Collage de recortes (ropa y productos reales de la tienda) generado a partir del collage de la campaña; fondo blanco que se muestra con mix-blend-mode multiply sobre el papel.",
+      "width": 1024,
+      "height": 1024,
       "format": "WEBP",
       "background": "opaque"
     },
