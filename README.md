@@ -17,7 +17,7 @@ Consulta [el contexto, investigación y plan de 30 días](docs/MARKETING-30-DIAS
 
 | Ruta | Propósito |
 | --- | --- |
-| `01-Logos/` | Logo completo y símbolo D |
+| `01-Logos/` | Logo oficial (horizontal, vertical e ícono «EL»); el logo anterior con símbolo D está retirado |
 | `02-Perfiles-y-portadas/` | Avatar y portada |
 | `03-Publicaciones/` | Plantillas 4:5 |
 | `04-Historias/` | Plantillas 9:16 |

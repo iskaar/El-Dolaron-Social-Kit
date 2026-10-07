@@ -4,7 +4,7 @@
 body { margin:0; font-family:Arial, Helvetica, sans-serif; color:var(--azul); background:var(--blanco); line-height:1.5; }
 header { padding:18px 24px; border-bottom:4px solid var(--rojo); display:flex; align-items:center; justify-content:space-between; gap:16px; }
 .marca { font-size:25px; font-weight:900; color:var(--azul); text-decoration:none; letter-spacing:-1px; }
-.marca span { background:var(--amarillo); padding:1px 5px; border-radius:4px; }
+.marca img { display:block; width:150px; height:auto; }
 main { max-width:520px; margin:auto; padding:24px 24px 40px; }
 h1 { font-size:38px; line-height:1.12; letter-spacing:-1.3px; margin:12px 0 20px; }
 h2 { font-size:24px; line-height:1.2; margin:24px 0 12px; }
