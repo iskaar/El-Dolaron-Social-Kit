@@ -37,9 +37,9 @@
     "BASES_APROBADAS_VERSION": "2026-10-v3",
     "PROMOCION_INICIO": "2026-10-05T17:00:00Z",
     "VALES_ABIERTOS": "si",
-    // Promo de inauguracion (Isaac, 7/10): $100 menos en tickets de $300 o mas, miercoles 7 al
+    // Promo de inauguracion (Isaac, 7/10): $100 menos en tickets de $300 o mas. Pausada el 7/10: viernes 9 al
     // domingo 12/10 hora de la tienda (UTC-6). Para apagarla antes: quitar las dos y desplegar.
-    "PROMO_DESDE": "2026-10-07T06:00:00Z",
+    "PROMO_DESDE": "2026-10-09T06:00:00Z",
     "PROMO_HASTA": "2026-10-13T06:00:00Z",
     // Mercado Libre (Issue #170): debe ser identica a la URI de redireccion de la
     // app en el DevCenter. ML_CLIENT_ID, ML_CLIENT_SECRET, ML_LLAVE_TOKENS y
