@@ -30,6 +30,13 @@ Dominante papel + tinta azul; rojo y amarillo como acentos fuertes, nunca repart
 - **Abril Fatface**, **Alfa Slab One**, Anton y Archivo 900: solo en las letras recortadas del título.
 - Prohibido: Inter, Roboto, Arial como tipografía de diseño, Space Grotesk.
 
+## Logo
+
+Único logo vigente (Isaac, 7/10/2026): `assets/el-dolaron-logo.png` (horizontal, transparente con contorno
+blanco), `assets/el-dolaron-logo-vertical.png` y el ícono «EL» (`assets/favicon.png`). Originales en `01-Logos/`.
+El logo anterior (símbolo D con franjas, «El» en etiqueta y nombre en cursiva) y la insignia circular están
+retirados: no usarlos en el sitio, la app, el kit ni los anuncios.
+
 ## Recursos
 
 - Papel: CSS (`.paper`) con líneas finas horizontales y medianiles de columna; sin imágenes.

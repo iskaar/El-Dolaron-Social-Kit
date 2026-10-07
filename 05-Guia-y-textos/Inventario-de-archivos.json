@@ -1,13 +1,31 @@
 {
   "assets": [
     {
-      "file": "01-Logos/el-dolaron-logo-horizontal-fondo-blanco.png",
-      "title": "Logo horizontal",
-      "description": "Logo completo sobre fondo blanco; conservar proporciones.",
-      "width": 2172,
-      "height": 724,
+      "file": "01-Logos/el-dolaron-logo.png",
+      "title": "Logo oficial",
+      "description": "Logo oficial desde el 7/10/2026: «EL» en etiqueta amarilla, «Dolarón» azul con contorno blanco, subrayado y acento rojos. Fondo transparente; conservar proporciones. Único logo vigente.",
+      "width": 2056,
+      "height": 537,
       "format": "PNG",
-      "background": "opaque white"
+      "background": "transparent"
+    },
+    {
+      "file": "01-Logos/el-dolaron-logo-vertical.png",
+      "title": "Logo vertical",
+      "description": "El mismo logo con «EL» arriba de «Dolarón», para avatares y formatos cuadrados. Fondo transparente.",
+      "width": 1711,
+      "height": 996,
+      "format": "PNG",
+      "background": "transparent"
+    },
+    {
+      "file": "01-Logos/el-dolaron-icono-el.png",
+      "title": "Ícono «EL»",
+      "description": "Etiqueta «EL» del logo, solo para tamaños muy pequeños (favicon, íconos). Fondo transparente.",
+      "width": 414,
+      "height": 396,
+      "format": "PNG",
+      "background": "transparent"
     },
     {
       "file": "02-Perfiles-y-portadas/el-dolaron-perfil-cuadrado.png",
@@ -71,35 +89,6 @@
       "height": 1672,
       "format": "PNG",
       "background": "opaque white"
-    },
-    {
-      "file": "01-Logos/el-dolaron-simbolo-transparente.svg",
-      "title": "Símbolo D transparente",
-      "description": "Símbolo independiente; no incluye el nombre completo. SVG vectorial original exportado; PNG con canal alfa real.",
-      "format": "SVG"
-    },
-    {
-      "file": "01-Logos/el-dolaron-simbolo-transparente.png",
-      "title": "Símbolo D transparente",
-      "description": "Símbolo independiente; no incluye el nombre completo. SVG vectorial original exportado; PNG con canal alfa real.",
-      "format": "PNG",
-      "width": 2048,
-      "height": 2048
-    },
-    {
-      "file": "site/public/assets/el-dolaron-logo-horizontal-fondo-blanco.png",
-      "title": "Logo del sitio público",
-      "description": "Copia del logo horizontal original para servir el sitio de forma independiente.",
-      "width": 2172,
-      "height": 724,
-      "format": "PNG",
-      "background": "opaque white"
-    },
-    {
-      "file": "site/public/assets/el-dolaron-simbolo-transparente.svg",
-      "title": "Favicon del sitio público",
-      "description": "Copia del símbolo D original para el icono del navegador.",
-      "format": "SVG"
     },
     {
       "file": "site/public/index.html",
@@ -174,20 +163,6 @@
       "background": "opaque"
     },
     {
-      "file": "01-Logos/el-dolaron-insignia-social-transparente.svg",
-      "title": "Insignia social transparente",
-      "description": "Insignia circular para superponer en publicaciones, historias y videos; conservar proporciones y margen exterior.",
-      "format": "SVG"
-    },
-    {
-      "file": "01-Logos/el-dolaron-insignia-social-transparente.png",
-      "title": "Insignia social transparente",
-      "description": "PNG de alta resolución con canal alfa real para uso directo en redes sociales.",
-      "format": "PNG",
-      "width": 2048,
-      "height": 2048
-    },
-    {
       "file": "app/public/marketplace.html",
       "title": "Catálogo privado de Marketplace",
       "description": "Pantalla del personal autorizada por el Worker; consulta inventario actual sin guardar fotos ni snapshots en el kit.",
@@ -200,6 +175,51 @@
       "format": "PNG",
       "width": 1254,
       "height": 1254
+    },
+    {
+      "file": "site/public/assets/el-dolaron-logo.png",
+      "title": "Logo del sitio público",
+      "description": "Logo oficial reducido para la cabecera y el pie de eldolaron.com.",
+      "width": 900,
+      "height": 235,
+      "format": "PNG",
+      "background": "transparent"
+    },
+    {
+      "file": "site/public/assets/el-dolaron-logo-vertical.png",
+      "title": "Logo vertical del sitio",
+      "description": "Logo vertical reducido para la sección Dolarones.",
+      "width": 500,
+      "height": 291,
+      "format": "PNG",
+      "background": "transparent"
+    },
+    {
+      "file": "site/public/assets/favicon.png",
+      "title": "Favicon del sitio público",
+      "description": "Ícono «EL» a 64 px.",
+      "width": 64,
+      "height": 64,
+      "format": "PNG",
+      "background": "transparent"
+    },
+    {
+      "file": "site/public/assets/apple-touch-icon.png",
+      "title": "Ícono para iPhone",
+      "description": "Ícono «EL» sobre azul, 180 px.",
+      "width": 180,
+      "height": 180,
+      "format": "PNG",
+      "background": "opaque"
+    },
+    {
+      "file": "app/public/el-dolaron-logo.png",
+      "title": "Logo del portal Dolarones",
+      "description": "Logo oficial reducido para la cabecera de dolarones.eldolaron.com.",
+      "width": 600,
+      "height": 156,
+      "format": "PNG",
+      "background": "transparent"
     }
   ],
   "version": "1.0"

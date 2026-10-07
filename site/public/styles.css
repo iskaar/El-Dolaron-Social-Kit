@@ -44,7 +44,7 @@ p { line-height: 1.6; }
 .masthead { border-bottom: 5px double var(--navy); }
 .header { display: flex; align-items: center; justify-content: space-between; min-height: 106px; gap: 24px; }
 .brand { width: 222px; flex-shrink: 0; }
-.brand img, .footer-brand img { mix-blend-mode: multiply; }
+.brand img, .footer-brand img { filter: drop-shadow(2px 3px 0 rgb(22 54 107 / .18)); }
 .header nav { display: flex; align-items: center; gap: 32px; font-size: 14px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
 .header nav a { text-decoration: none; }
 .portal-link { padding: 11px 16px; background: var(--yellow); border: 2px solid var(--navy); box-shadow: 3px 3px 0 var(--navy); }
@@ -191,7 +191,7 @@ h2 { font-family: var(--display); font-variation-settings: var(--display-axes); 
 .dolarones-layout { display: flex; justify-content: space-between; align-items: center; gap: 48px; }
 .dolarones-copy { flex: 1; }
 .dolarones-copy > p:not(.section-label) { max-width: 560px; margin-block: 18px 24px; font-size: 18px; font-weight: 500; }
-.dolarones-symbol { width: 220px; height: 220px; padding: 34px; margin-right: 40px; background: var(--white); border-radius: 50%; outline: 3px dashed var(--navy); outline-offset: -12px; rotate: -8deg; }
+.dolarones-symbol { width: 300px; height: auto; margin-right: 30px; rotate: -6deg; filter: drop-shadow(5px 6px 0 rgb(22 54 107 / .25)); }
 .dolarones-pasos { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 26px; margin: 40px 0 26px; padding: 0; list-style: none; }
 .dolarones-pasos li { padding: 26px 26px 24px; background: var(--white); outline: 2px dashed var(--navy); outline-offset: -10px; box-shadow: 4px 5px 0 var(--shadow); }
 .dolarones-pasos li:nth-child(2) { rotate: .8deg; }
@@ -271,7 +271,7 @@ dd { margin: 0; line-height: 1.5; }
   .header nav { gap: 20px; }
   .tiers { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 28px; }
   .groups-layout, .visit-layout { gap: 48px; }
-  .dolarones-symbol { width: 180px; height: 180px; margin-right: 12px; }
+  .dolarones-symbol { width: 220px; margin-right: 8px; }
 }
 @media (max-width: 900px) {
   .hero { grid-template-columns: 1fr; padding: 24px 20px 32px; gap: 8px; }
