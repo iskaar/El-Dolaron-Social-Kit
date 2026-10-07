@@ -120,11 +120,56 @@
       "format": "JS"
     },
     {
-      "file": "site/public/assets/hero-still-life.webp",
-      "title": "Ilustración del sitio público",
-      "description": "Composición generada con IA para la portada del sitio; es ilustrativa y no representa inventario real. Mostrar con la aclaración de disponibilidad.",
-      "width": 1440,
-      "height": 960,
+      "file": "site/public/assets/hallazgos.webp",
+      "title": "Recortes de la portada del sitio",
+      "description": "Collage de recortes (ropa y productos reales de la tienda) generado en 2k a partir de las fotos reales de los productos; fondo blanco que se muestra con mix-blend-mode multiply sobre el papel.",
+      "width": 1200,
+      "height": 1200,
+      "format": "WEBP",
+      "background": "opaque"
+    },
+    {
+      "file": "site/public/assets/etiqueta-ropa-desde-50.webp",
+      "title": "Etiqueta vintage «Ropa desde $50»",
+      "description": "Etiqueta de precio vintage con fondo transparente para la portada del sitio; enlaza a la sección de ropa.",
+      "width": 474,
+      "height": 888,
+      "format": "WEBP",
+      "background": "transparent"
+    },
+    {
+      "file": "site/public/assets/etiqueta-150.webp",
+      "title": "Etiqueta vintage $150",
+      "description": "Etiqueta de precio vintage para la sección de ropa ($150 por prenda); fondo blanco que se muestra con mix-blend-mode multiply sobre el papel.",
+      "width": 266,
+      "height": 465,
+      "format": "WEBP",
+      "background": "opaque"
+    },
+    {
+      "file": "site/public/assets/etiqueta-100.webp",
+      "title": "Etiqueta vintage $100",
+      "description": "Etiqueta de precio vintage para la sección de ropa ($100 por prenda); fondo blanco que se muestra con mix-blend-mode multiply sobre el papel.",
+      "width": 266,
+      "height": 465,
+      "format": "WEBP",
+      "background": "opaque"
+    },
+    {
+      "file": "site/public/assets/etiqueta-80.webp",
+      "title": "Etiqueta vintage $80",
+      "description": "Etiqueta de precio vintage para la sección de ropa ($80 por prenda); fondo blanco que se muestra con mix-blend-mode multiply sobre el papel.",
+      "width": 268,
+      "height": 473,
+      "format": "WEBP",
+      "background": "opaque"
+    },
+    {
+      "file": "site/public/assets/etiqueta-50.webp",
+      "title": "Etiqueta vintage $50",
+      "description": "Etiqueta de precio vintage para la sección de ropa ($50 por prenda); fondo blanco que se muestra con mix-blend-mode multiply sobre el papel.",
+      "width": 269,
+      "height": 472,
       "format": "WEBP",
       "background": "opaque"
     },
