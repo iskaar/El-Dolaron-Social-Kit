@@ -7,7 +7,12 @@
 
 import { analizarBorrador, modeloPorDefecto, type Modelo } from './analisis.ts';
 import { calcularPrecio, ajustarManual, esDestinoBanda, prefijoParaFamilia, MONTOS_BANDA, type Destino } from './precio.ts';
-import { efectivoAlcanza } from '../public/venta.js';
+import { efectivoAlcanza, promoInauguracion } from '../public/venta.js';
+
+/** Ventana de la promo de inauguracion; null si no esta configurada. */
+const promoDe = (env: Env) =>
+  env.PROMO_DESDE && env.PROMO_HASTA && Date.parse(env.PROMO_DESDE) < Date.parse(env.PROMO_HASTA)
+    ? { desde: env.PROMO_DESDE, hasta: env.PROMO_HASTA } : null;
 import { semanaIngreso } from '../public/semana.js';
 import { tramoDeDias, TRAMOS_ANTIGUEDAD } from '../public/graficas.js';
 import { detalleVenta, cancelarPieza } from './devoluciones.ts';
@@ -676,6 +681,11 @@ async function registrarVenta(request: Request, env: Env, ctx: ExecutionContext,
     if (!valido.ok) return json({ error: valido.error }, valido.status);
     descuento = valido.monto;
   }
+  // Promo de inauguracion con la hora de la venta en la caja (una venta encolada
+  // sin red conserva la promo que vio el cliente); una hora futura no se acepta.
+  // Se guarda sumada en `descuento`: devoluciones la prorratea igual.
+  const horaCaja = Date.parse(String(venta.creado_en ?? ''));
+  descuento += promoInauguracion(subtotal, Number.isFinite(horaCaja) && horaCaja <= Date.now() + 300_000 ? horaCaja : Date.now(), promoDe(env));
   const total = subtotal - descuento;
   const efectivo = Math.max(0, Math.round(Number(venta.efectivo ?? 0)));
   const clienteId = venta.cliente_id ? String(venta.cliente_id) : null;
@@ -1562,7 +1572,7 @@ export default {
         }
       }
       if (pathname === '/api/vales/config' && request.method === 'GET')
-        return json({ habilitado:valesAbiertos(env) });
+        return json({ habilitado:valesAbiertos(env), promo:promoDe(env) });
       if (pathname === '/api/vales/buscar' && request.method === 'POST')
         return await buscarVale(request, env);
       const valeVenta = /^\/api\/ventas\/([^/]+)\/vale$/.exec(pathname);

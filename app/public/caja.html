@@ -345,7 +345,7 @@ if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw-caja.js'
   </div>
 </dialog>
 <script type="module">
-import { totales, agregar, efectivoAlcanza, dolaronesGanados, saldoCanjeable, maximoCanje, MINIMO_REGALO, descuentoDe, TOPE_DESCUENTO, DENOMINACIONES, contadoDe } from '/venta.js';
+import { totales, agregar, efectivoAlcanza, dolaronesGanados, saldoCanjeable, maximoCanje, MINIMO_REGALO, descuentoDe, TOPE_DESCUENTO, DENOMINACIONES, contadoDe, promoInauguracion } from '/venta.js';
 import { abrirCamara } from '/camara.js';
 import {
   reconectarImpresora, conectarImpresora, impresoraLista, imprimirTicket, abrirCajon, explicarErrorUsb, errorImpresora,
@@ -379,6 +379,8 @@ let usarTodos = false;
 let busquedaSocio = 0;
 // La configuración cambia en el servidor; sin consulta vigente sigue desconocida.
 let valesHabilitados = null;
+// Ventana de la promo de inauguracion (/api/vales/config); la ultima conocida sirve sin red.
+let promoConfig = (() => { try { return JSON.parse(localStorage.getItem('promo-inauguracion')) || null; } catch { return null; } })();
 const notaVales = () => {
   $('nota-vales').textContent = valesHabilitados === true
     ? 'Sin socio: 5 D por cada $100 completos, en vale de 30 días. Con socio: 10 D. El teléfono sólo acumula.'
@@ -390,6 +392,11 @@ async function cargarConfigVales() {
     const r = await fetch('/api/vales/config');
     const c = r.ok ? await r.json() : null;
     valesHabilitados = c && typeof c.habilitado === 'boolean' ? c.habilitado : null;
+    if (c && 'promo' in c) {
+      promoConfig = c.promo;
+      try { localStorage.setItem('promo-inauguracion', JSON.stringify(promoConfig)); } catch {}
+      pintar();
+    }
   } catch { valesHabilitados = null; }
   notaVales();
 }
@@ -533,11 +540,13 @@ function pintar() {
   }
   const efectivo = Math.round(Number($('efectivo').value || 0) * 100);
   const usados = dolaronesPedidos();
-  const t = totales(lineas, efectivo, usados, descuentoAplicado());
+  const promo = promoActual();
+  const t = totales(lineas, efectivo, usados, descuentoAplicado() + promo);
   $('total').textContent = pesos(t.total);
   $('piezas').textContent = `${t.piezas} ${t.piezas === 1 ? 'pieza' : 'piezas'}`;
   $('a-pagar').textContent = [
-    t.descuento ? `Descuento −${pesos(t.descuento)}` : '',
+    promo ? `Promo inauguración −${pesos(promo)}` : '',
+    t.descuento - promo ? `Descuento −${pesos(t.descuento - promo)}` : '',
     usados ? `Dolarones −${pesos(usados)} · A pagar ${pesos(t.aPagar)}` : '',
   ].filter(Boolean).join(' · ');
   const canjeable = saldoCanjeable(socio, t.total);
@@ -679,8 +688,10 @@ function dolaronesPedidos() {
 let descuento = null;
 let sondeoDescuento = null;
 const descuentoAplicado = () => (descuento?.estado === 'aprobada' ? descuento.monto : 0);
-/** Lo que vale el ticket ya con el descuento aprobado: contra esto se canjean Dolarones. */
-const totalNeto = () => totales(lineas, 0, 0, descuentoAplicado()).total;
+/** Promo de inauguracion del ticket actual; el servidor la vuelve a calcular al cobrar. */
+const promoActual = () => promoInauguracion(totales(lineas).subtotal, creadoEnVenta ? Date.parse(creadoEnVenta) : Date.now(), promoConfig);
+/** Lo que vale el ticket ya con descuento aprobado y promo: contra esto se canjean Dolarones. */
+const totalNeto = () => totales(lineas, 0, 0, descuentoAplicado() + promoActual()).total;
 
 function pintarDescuento(aviso = '') {
   clearInterval(sondeoDescuento);
@@ -930,7 +941,7 @@ async function cobrar() {
     $('aviso').style.color = '#D72B32';
     return;
   }
-  const t = totales(lineas, efectivo, usados, descuentoAplicado());
+  const t = totales(lineas, efectivo, usados, descuentoAplicado() + promoActual());
   if (usados > saldoCanjeable(socio, t.total)) {
     $('aviso').textContent = 'Los regalos de apertura requieren un ticket de $1,000 MXN o más antes de descontar Dolarones. Revisa el importe solicitado.';
     $('aviso').style.color = '#D72B32';

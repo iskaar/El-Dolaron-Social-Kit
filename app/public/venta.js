@@ -27,6 +27,23 @@ export function descuentoDe({ tipo, valor }, subtotal) {
 }
 
 /**
+ * Promo de inauguracion (decision de Isaac del 7/10): $100 menos en cualquier
+ * ticket de $300 o mas, una vez por ticket. Las fechas vienen del servidor
+ * (PROMO_DESDE/PROMO_HASTA): sin ellas no hay promo. Se suma a un descuento
+ * aprobado y se siguen ganando y usando Dolarones y vales. La usan la caja (para
+ * mostrar) y el servidor (para cobrar), con la hora de la venta.
+ * @param {{ desde: string, hasta: string } | null} promo
+ */
+export const PROMO_MINIMO = 300_00;
+export const PROMO_MONTO = 100_00;
+
+export function promoInauguracion(subtotal, momento, promo) {
+  if (!promo) return 0;
+  const desde = Date.parse(promo.desde), hasta = Date.parse(promo.hasta);
+  return momento >= desde && momento < hasta && subtotal >= PROMO_MINIMO ? PROMO_MONTO : 0;
+}
+
+/**
  * `dolarones` es la parte del total pagada con Dolarones: el efectivo se compara
  * contra el resto. `descuento` ya viene aprobado y en centavos: `total` es lo
  * que vale el ticket despues de restarlo.

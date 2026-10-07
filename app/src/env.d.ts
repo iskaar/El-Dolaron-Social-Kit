@@ -30,6 +30,9 @@ declare global {
     PROMOCION_INICIO?: string;
     /** Emisión de vales anónimos: ausente = apagada, requiere bases finales. */
     VALES_ABIERTOS?: string;
+    /** Promo de inauguracion (ISO, UTC): ambas o ninguna. Quitarlas y desplegar la apaga. */
+    PROMO_DESDE?: string;
+    PROMO_HASTA?: string;
     /** Mercado Libre (Issue #170). Secretos con `wrangler secret put`; ML_REDIRECT_URI es var. */
     ML_CLIENT_ID?: string;
     ML_CLIENT_SECRET?: string;
