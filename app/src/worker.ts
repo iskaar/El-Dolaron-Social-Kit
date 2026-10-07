@@ -28,7 +28,7 @@ import { registrarSocio, buscarSocio, buscarPorCodigo, basesListas, sentenciasDe
 import { registrarCorte, registrarRetiro, ultimoCorte, cajaDe } from './corte.ts';
 import { portal, llegada, vincular } from './portal.ts';
 import { sentenciasVale, buscarVale, valeDeVenta, valeUsadoEnVenta, reimprimirVale, valesAbiertos } from './vales.ts';
-import { catalogoPublico } from './catalogo.ts';
+import { catalogoPublico, revisionCatalogo } from './catalogo.ts';
 import { rutaML, recibirNotificacion, conciliarSeguro, sincronizar } from './mercadolibre.ts';
 import { pedirDescuento, validarDescuento, listarDescuentos, listarDuenos } from './descuentos.ts';
 
@@ -1546,6 +1546,10 @@ export default {
 
       if (pathname === '/api/catalogo') {
         return await catalogo(env);
+      }
+      // Issue #220: piezas que no pueden salir en el sitio, para corregir en /admin. Solo el dueno (cuentas.ts).
+      if (pathname === '/api/catalogo/revision' && request.method === 'GET') {
+        return await revisionCatalogo(env);
       }
 
       if (pathname === '/api/ventas') {
