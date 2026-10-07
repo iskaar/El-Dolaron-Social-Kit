@@ -64,6 +64,7 @@ async function cargarCuenta() {
     if (uid !== auth.currentUser?.uid) return;
     $('monedero').hidden = false;
     estado();
+    novedades();
   } catch (e) {
     if (!uid || uid !== auth.currentUser?.uid) return;
     $('monedero').hidden = true;
@@ -72,6 +73,26 @@ async function cargarCuenta() {
     $('salir').hidden = false;
     estado(e.status === 404 ? (config.registro_abierto ? 'Completa tu membresía para continuar.' : 'Las nuevas membresías todavía no están abiertas.') : errorDeAuth(e), e.status !== 404);
   }
+}
+// Mismo origen que /api/catalogo (#205). Si falla, la sección simplemente no aparece.
+async function novedades() {
+  if ($('novedades-lista').childElementCount) return;
+  try {
+    const r = await fetch('/api/catalogo?pagina=1', { headers:{ accept:'application/json' } });
+    if (!r.ok) return;
+    const { piezas } = await r.json();
+    $('novedades-lista').replaceChildren(...(piezas || []).slice(0, 6).map((p) => {
+      const li = document.createElement('li'), a = document.createElement('a');
+      a.href = 'https://wa.me/524445437754?text=' + encodeURIComponent('Hola, me interesa ' + p.nombre + ' (' + p.codigo + ') de ' + pesos(p.precio) + '. ¿Sigue disponible?');
+      const img = new Image(); img.alt = ''; img.loading = 'lazy'; img.src = p.foto;
+      img.addEventListener('error', () => img.remove());
+      const nombre = document.createElement('span'), precio = document.createElement('strong');
+      nombre.textContent = p.nombre; precio.textContent = pesos(p.precio);
+      if (p.precio_lista > p.precio) { const s = document.createElement('s'); s.textContent = pesos(p.precio_lista); precio.append(s); }
+      a.append(img, nombre, precio); li.append(a); return li;
+    }));
+    $('novedades').hidden = !$('novedades-lista').childElementCount;
+  } catch { /* Sin catálogo, el monedero sigue igual. */ }
 }
 async function actualizarSaldo() {
   const s = await api('saldo');
