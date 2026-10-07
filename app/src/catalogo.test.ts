@@ -157,3 +157,36 @@ test('catalogo: el host publico no abre rutas del personal', async () => {
     }
   } finally { t.db.close(); }
 });
+
+test('catalogo destacados: mas vendido en 14 dias y vendible primero; completa con lo mas nuevo', async () => {
+  const t = publica();
+  try {
+    pieza(t, { nombre: 'Vieja' });
+    const hot = pieza(t, { nombre: 'Hot' });
+    const tibia = pieza(t, { nombre: 'Tibia' });
+    const cancelada = pieza(t, { nombre: 'Cancelada' });
+    const agotada = pieza(t, { nombre: 'Agotada', stock: 0 });
+    const antigua = pieza(t, { nombre: 'Antigua' });
+    pieza(t, { nombre: 'Nueva' });
+    const hoy = new Date().toISOString();
+    const mes = new Date(Date.now() - 30 * 86_400_000).toISOString();
+    let v = 0;
+    const venta = (codigo: string, cantidad: number, creado: string, canc = 0) => {
+      const id = `v${++v}`;
+      t.db.prepare(`insert into ventas (id, total, forma_pago, efectivo, cambio, creado_en, registrado_en, cancelada)
+        values (?, 100, 'efectivo', 100, 0, ?, ?, ?)`).run(id, creado, creado, canc);
+      t.db.prepare('insert into venta_lineas (venta_id, codigo, nombre, precio, cantidad) values (?, ?, ?, 100, ?)').run(id, codigo, 'x', cantidad);
+    };
+    venta(hot, 3, hoy);
+    venta(tibia, 1, hoy);
+    venta(cancelada, 9, hoy, 1);
+    venta(agotada, 9, hoy);
+    venta(antigua, 9, mes);
+    const r = await t.llamar('/api/catalogo/destacados');
+    assert.equal(r.status, 200);
+    assert.equal(r.headers.get('access-control-allow-origin'), 'https://eldolaron.com');
+    const nombres = (await leer(r)).piezas.map((p: any) => p.nombre);
+    assert.deepEqual(nombres, ['Hot', 'Tibia', 'Nueva', 'Antigua', 'Cancelada', 'Vieja']);
+    assert.ok(!nombres.includes('Agotada'));
+  } finally { t.db.close(); }
+});
