@@ -338,3 +338,31 @@ test('el desglose del ticket trae el descuento para la caja y los reportes', asy
   assert.equal(detalle.cuerpo.total, 22500);
   assert.equal(detalle.cuerpo.descuento, 2500);
 });
+
+test('promo de inauguracion: $100 menos en tickets de $300 o mas dentro de la ventana, una vez, y se suma al descuento aprobado', async () => {
+  const { env, venta, pedidoResuelto, pedir, ana } = await montar();
+  // Sin fechas configuradas no hay promo, ni en la caja ni al cobrar.
+  assert.equal((await venta({}, 2)).cuerpo.total, 50000);
+  assert.equal((await pedir('/api/vales/config', undefined, 'GET', ana)).cuerpo.promo, null);
+
+  Object.assign(env, { PROMO_DESDE: '2026-01-01T06:00:00Z', PROMO_HASTA: '2026-01-08T06:00:00Z' });
+  assert.deepEqual((await pedir('/api/vales/config', undefined, 'GET', ana)).cuerpo.promo,
+    { desde: '2026-01-01T06:00:00Z', hasta: '2026-01-08T06:00:00Z' });
+  const dentro = '2026-01-03T20:00:00Z';
+  const con = await venta({ creado_en: dentro }, 2);
+  assert.equal(con.status, 201, JSON.stringify(con.cuerpo));
+  assert.equal(con.cuerpo.descuento, 10000);
+  assert.equal(con.cuerpo.total, 40000);
+  // Una vez por ticket: $750 tambien baja solo $100.
+  assert.equal((await venta({ creado_en: dentro, efectivo: 80000 }, 3)).cuerpo.total, 65000);
+  assert.equal((await venta({ creado_en: dentro }, 1)).cuerpo.total, 25000, '$250 no alcanza los $300');
+  assert.equal((await venta({ creado_en: '2026-01-01T05:59:59Z' }, 2)).cuerpo.total, 50000, 'antes de empezar');
+  assert.equal((await venta({ creado_en: '2026-01-08T06:00:00Z' }, 2)).cuerpo.total, 50000, 'ya termino');
+  // Una hora futura de la caja no cuenta: se usa la del servidor, fuera de la ventana.
+  assert.equal((await venta({ creado_en: '2999-01-01T00:00:00Z' }, 2)).cuerpo.total, 50000);
+  // Con un descuento aprobado, se suman los dos.
+  const id = await pedidoResuelto({ tipo: 'monto', valor: 5000, subtotal: 50000 }, true);
+  const ambos = await venta({ creado_en: dentro, descuento_id: id }, 2);
+  assert.equal(ambos.cuerpo.descuento, 15000);
+  assert.equal(ambos.cuerpo.total, 35000);
+});
