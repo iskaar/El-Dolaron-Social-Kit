@@ -64,7 +64,7 @@ p { line-height: 1.6; }
 /* Encabezado de sección: filete grueso y fino, etiqueta y titular de tabloide */
 .section-head { position: relative; display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: end; gap: 6px 40px; padding-top: 16px; border-top: 6px solid currentColor; }
 .section-head::before { content: ""; position: absolute; inset: 4px 0 auto; border-top: 1px solid currentColor; }
-.section-label { grid-column: 1 / -1; font-size: 13px; font-weight: 800; letter-spacing: .16em; text-transform: uppercase; }
+.section-label { grid-column: 1 / -1; margin-bottom: 10px; font-size: 13px; font-weight: 800; letter-spacing: .16em; text-transform: uppercase; }
 h2 { font-family: "Anton", Impact, sans-serif; font-weight: 400; font-size: clamp(46px, 6.4vw, 96px); line-height: .95; text-transform: uppercase; }
 .section-lede { max-width: 380px; padding-bottom: 6px; font-size: 17px; font-weight: 500; }
 
@@ -94,17 +94,36 @@ h2 { font-family: "Anton", Impact, sans-serif; font-weight: 400; font-size: clam
 .hero-stamp span { font-family: "Archivo", sans-serif; font-size: 12px; font-weight: 800; letter-spacing: .14em; }
 .hero-art { position: relative; min-width: 0; }
 .hero-art img { width: 100%; mix-blend-mode: multiply; }
-.price-tag { position: absolute; left: -3%; bottom: 12%; width: 128px; padding: 26px 10px 14px; background: var(--yellow); color: var(--navy); text-align: center; text-decoration: none; rotate: -9deg;
-  clip-path: polygon(50% 0, 100% 16%, 100% 100%, 0 100%, 0 16%); }
-.price-tag::before { content: ""; position: absolute; top: 12px; left: calc(50% - 6px); width: 12px; height: 12px; border-radius: 50%; background: var(--paper); box-shadow: inset 0 0 0 2px var(--navy); }
-.price-tag small, .price-tag span { display: block; font-size: 12px; font-weight: 800; text-transform: uppercase; letter-spacing: .06em; }
-.price-tag strong { display: block; font-family: "Anton", sans-serif; font-size: 56px; font-weight: 400; line-height: 1; }
 .new-stamp { position: absolute; right: 0; top: 2%; display: grid; place-items: center; width: 118px; height: 118px; background: var(--red); color: var(--white); font-family: "Anton", sans-serif; font-size: 22px; line-height: 1; text-align: center; text-transform: uppercase; text-decoration: none; rotate: 12deg;
   clip-path: polygon(50% 0, 61% 12%, 75% 7%, 79% 21%, 93% 25%, 88% 39%, 100% 50%, 88% 61%, 93% 75%, 79% 79%, 75% 93%, 61% 88%, 50% 100%, 39% 88%, 25% 93%, 21% 79%, 7% 75%, 12% 61%, 0 50%, 12% 39%, 7% 25%, 21% 21%, 25% 7%, 39% 12%); }
-.price-tag, .new-stamp { transition: rotate 180ms ease; }
-.discovery-strip { background: var(--navy); padding: 14px 24px; text-align: center; }
-.discovery-strip p { color: var(--white); font-family: "Anton", sans-serif; font-size: 20px; line-height: 1.4; letter-spacing: .06em; text-transform: uppercase; }
-.discovery-strip span { display: inline-block; margin-inline: 34px; color: var(--yellow); }
+
+.price-tag { position: absolute; left: -4%; bottom: 6%; width: 150px; rotate: -10deg; transform-origin: 50% 4%; filter: drop-shadow(5px 9px 6px rgb(22 54 107 / .32)); transition: rotate 220ms ease; }
+.price-tag img { width: 100%; }
+.new-stamp { transition: rotate 180ms ease; }
+/* Franja: dos cintas cruzadas, la de enfrente corre como marquesina */
+.ticker { position: relative; z-index: 2; height: 96px; margin-top: -28px; overflow: clip; }
+.ticker-back, .ticker-band { position: absolute; left: -5%; width: 110%; }
+.ticker-back { top: 30px; height: 44px; background: repeating-linear-gradient(-45deg, var(--red) 0 22px, var(--yellow) 22px 44px); rotate: 1.6deg; }
+.ticker-band { top: 22px; padding: 11px 0 9px; background: var(--navy); border-block: 3px solid var(--yellow); rotate: -1.4deg; box-shadow: 0 6px 0 rgb(22 54 107 / .18); }
+.ticker-track { display: flex; width: max-content; margin: 0; color: var(--white); font-family: "Anton", sans-serif; font-size: 22px; line-height: 1.3; letter-spacing: .06em; text-transform: uppercase; white-space: nowrap; }
+.ticker-run { display: flex; align-items: center; }
+.ticker-run b { margin-inline: 26px; color: var(--yellow); font-weight: 400; }
+/* Cupones vintage: talón perforado, bordes dentados, doble filete */
+.group-card { --coupon: #F3E6BF; display: grid; grid-template-columns: 70px 1fr; color: var(--navy); text-decoration: none; rotate: -1.2deg; transition: rotate 180ms ease, translate 180ms ease;
+  background: var(--coupon) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 .35 0 0 0 0 .28 0 0 0 0 .16 0 0 0 .22 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url%28%23n%29'/%3E%3C/svg%3E");
+  -webkit-mask: radial-gradient(circle 6px at 0 50%, #0000 97%, #000) 0 0 / 51% 16px repeat-y, radial-gradient(circle 6px at 100% 50%, #0000 97%, #000) 100% 0 / 51% 16px repeat-y;
+  mask: radial-gradient(circle 6px at 0 50%, #0000 97%, #000) 0 0 / 51% 16px repeat-y, radial-gradient(circle 6px at 100% 50%, #0000 97%, #000) 100% 0 / 51% 16px repeat-y; }
+.group-card + .group-card { rotate: 1deg; }
+.groups-cards { filter: drop-shadow(5px 7px 0 rgb(0 0 0 / .28)); }
+.coupon-stub { display: flex; align-items: center; justify-content: space-between; padding: 18px 0; writing-mode: vertical-rl; rotate: 180deg; border-left: 3px dashed var(--navy); font-family: "Anton", sans-serif; font-size: 20px; letter-spacing: .18em; text-transform: uppercase; }
+.coupon-yellow .coupon-stub { background: var(--yellow); }
+.coupon-cream .coupon-stub { background: var(--red); color: var(--white); border-left-color: var(--coupon); }
+.coupon-stub span:last-child { font-family: "Archivo", sans-serif; font-size: 12px; font-weight: 800; letter-spacing: .12em; }
+.coupon-body { display: grid; gap: 4px; margin: 10px 14px 10px 12px; padding: 18px 22px 16px; border: 2px solid var(--navy); box-shadow: inset 0 0 0 3px var(--coupon), inset 0 0 0 4px var(--navy); }
+.coupon-kicker { font-family: "Abril Fatface", serif; font-size: 17px; font-style: italic; color: var(--red); }
+.group-name { font-family: "Anton", sans-serif; font-size: clamp(28px, 2.6vw, 38px); line-height: 1.05; text-transform: uppercase; }
+.group-text { font-size: 15px; font-weight: 600; }
+.group-go { justify-self: start; margin-top: 10px; padding: 6px 12px 5px; border: 2px solid var(--navy); border-radius: 3px; font-family: "Anton", sans-serif; font-size: 15px; letter-spacing: .06em; text-transform: uppercase; rotate: -2deg; }
 
 /* Novedades: recortes pegados con cinta */
 .catalog { padding-block: 24px 88px; scroll-margin-top: 16px; }
@@ -147,12 +166,6 @@ h2 { font-family: "Anton", Impact, sans-serif; font-weight: 400; font-size: clam
 .groups-layout { display: grid; grid-template-columns: 1fr 1.1fr; gap: 72px; align-items: center; padding-block: 84px; }
 .groups-copy .section-lede { margin-top: 18px; max-width: 440px; }
 .groups-cards { display: grid; gap: 26px; }
-.group-card { position: relative; display: grid; gap: 6px; padding: 30px 32px 26px; background: var(--yellow); color: var(--navy); outline: 3px dashed var(--navy); outline-offset: -12px; text-decoration: none; rotate: -1deg; transition: rotate 180ms ease, translate 180ms ease; }
-.group-card + .group-card { background: var(--white); rotate: 1deg; }
-.coupon-cut { position: absolute; top: 0; left: 26px; padding: 0 4px; background: inherit; font-size: 26px; line-height: 1; rotate: 180deg; }
-.group-name { font-family: "Anton", sans-serif; font-size: clamp(28px, 2.6vw, 38px); line-height: 1.05; text-transform: uppercase; }
-.group-text { font-size: 16px; font-weight: 600; }
-.group-go { margin-top: 8px; font-weight: 800; text-decoration: underline; text-underline-offset: .25em; }
 
 /* Dolarones: vales sobre papel amarillo */
 .dolarones { background: var(--yellow); }
@@ -210,21 +223,24 @@ dd { margin: 0; line-height: 1.5; }
   .button-navy:hover { background: var(--red); }
   .button:hover > span, .text-link:hover > span, .portal-link:hover > span { transform: translate(2px, -2px); }
   .chip:hover { background: var(--yellow); }
+  .price-tag:hover { rotate: -3deg; }
+  .group-card:hover { rotate: 0deg; translate: 0 -4px; }
+  .group-card:hover .group-go { background: var(--navy); color: var(--white); }
   .chip[aria-pressed="true"]:hover { background: var(--red); }
   .piece:hover { rotate: 0deg; translate: 0 -4px; }
   .piece-ask:hover { box-shadow: none; transform: none; background: var(--red); }
-  .group-card:hover { rotate: 0deg; translate: 0 -4px; }
-  .price-tag:hover { rotate: -4deg; }
   .tiers li img:hover { rotate: 6deg; }
   .new-stamp:hover { rotate: 20deg; }
 }
 @media (prefers-reduced-motion: no-preference) {
   .cut { animation: cut-drop 560ms var(--d) cubic-bezier(.2, .9, .3, 1.3) backwards; }
-  .hero-sub, .price-tag, .new-stamp { animation: cut-drop 560ms 560ms cubic-bezier(.2, .9, .3, 1.3) backwards; }
-  .discovery-strip .motion-enter { animation: star-settle 550ms cubic-bezier(.165, .84, .44, 1); }
+  .hero-sub, .new-stamp { animation: cut-drop 560ms 560ms cubic-bezier(.2, .9, .3, 1.3) backwards; }
+  .price-tag { animation: tag-swing 1400ms 700ms cubic-bezier(.3, 1.6, .5, 1) backwards; }
+  .ticker-track { animation: ticker 38s linear infinite; }
+  @keyframes tag-swing { from { rotate: 14deg; opacity: 0; } 30% { opacity: 1; } }
+  @keyframes ticker { to { translate: -50% 0; } }
   .visit-details.motion-enter, .dolarones-symbol.motion-enter { animation: paper-settle 650ms cubic-bezier(.2, .9, .3, 1.3); }
   @keyframes cut-drop { from { opacity: 0; translate: 0 -36px; scale: 1.15; } }
-  @keyframes star-settle { from { rotate: -30deg; scale: .85; } }
   @keyframes paper-settle { from { translate: 0 -18px; rotate: -6deg; } }
 }
 @media (max-width: 1100px) {
@@ -244,12 +260,11 @@ dd { margin: 0; line-height: 1.5; }
   .hero .button { padding-inline: 14px; }
   .hero-stamp { font-size: 19px; }
   .hero-art { width: min(100%, 520px); margin: 8px auto 0; }
-  .price-tag { width: 96px; padding: 22px 8px 10px; left: 0; }
-  .price-tag strong { font-size: 40px; }
-  .price-tag small, .price-tag span { font-size: 10px; }
   .new-stamp { width: 88px; height: 88px; font-size: 17px; }
-  .discovery-strip p { font-size: 14px; }
-  .discovery-strip span { margin-inline: 10px; }
+  .price-tag { width: 104px; left: -2%; }
+  .ticker { height: 80px; margin-top: -18px; }
+  .ticker-track { font-size: 17px; }
+  .ticker-run b { margin-inline: 16px; }
   .section-head { grid-template-columns: 1fr; }
   .groups-layout, .visit-layout { grid-template-columns: 1fr; }
   .dolarones-symbol { display: none; }
@@ -276,8 +291,10 @@ dd { margin: 0; line-height: 1.5; }
   .chip { flex-shrink: 0; font-size: 14px; padding-inline: 10px; }
   .ropa { padding-block: 52px 56px; }
   .tiers { gap: 20px 14px; }
+  .group-card { grid-template-columns: 52px 1fr; }
+  .coupon-stub { font-size: 16px; }
+  .coupon-body { padding: 14px 16px 12px; margin: 8px 10px 8px 8px; }
   .groups-layout { padding-block: 60px; }
-  .group-card { padding: 26px 24px 22px; }
   .dolarones .wrap { padding-block: 56px 48px; }
   .how { padding-block: 60px; }
   .visit-layout { padding-bottom: 72px; }

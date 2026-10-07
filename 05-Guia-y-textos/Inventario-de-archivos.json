@@ -122,11 +122,20 @@
     {
       "file": "site/public/assets/hallazgos.webp",
       "title": "Recortes de la portada del sitio",
-      "description": "Collage de recortes (ropa y productos reales de la tienda) generado a partir del collage de la campaña; fondo blanco que se muestra con mix-blend-mode multiply sobre el papel.",
-      "width": 1024,
-      "height": 1024,
+      "description": "Collage de recortes (ropa y productos reales de la tienda) generado en 2k a partir de las fotos reales de los productos; fondo blanco que se muestra con mix-blend-mode multiply sobre el papel.",
+      "width": 1400,
+      "height": 1400,
       "format": "WEBP",
       "background": "opaque"
+    },
+    {
+      "file": "site/public/assets/etiqueta-ropa-desde-50.webp",
+      "title": "Etiqueta vintage «Ropa desde $50»",
+      "description": "Etiqueta de precio vintage con fondo transparente para la portada del sitio; enlaza a la sección de ropa.",
+      "width": 474,
+      "height": 888,
+      "format": "WEBP",
+      "background": "transparent"
     },
     {
       "file": "site/public/assets/etiqueta-150.webp",

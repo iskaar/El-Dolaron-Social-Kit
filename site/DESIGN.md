@@ -35,7 +35,11 @@ Dominante papel + tinta azul; rojo y amarillo como acentos fuertes, nunca repart
   El texto real va en un `.sr-only`; las letras decorativas llevan `aria-hidden`.
 - Cinta (`.tape`): tira de color con giro leve y bordes dentados.
 - Etiqueta de precio (`.price-tag`): amarilla, con perforación y giro. Solo precios confirmados.
-- Productos: fotos reales recortadas sobre blanco, mostradas con `mix-blend-mode: multiply` sobre el papel.
+- Productos: fotos reales recortadas sobre blanco, mostradas con `mix-blend-mode: multiply` sobre el papel
+  (nunca dentro de un elemento girado: el giro aísla la mezcla y aparece el fondo blanco).
+- Etiquetas vintage (`assets/etiqueta-*.webp`): solo el precio, generadas a partir de una misma referencia.
+- Cupones (`.group-card`): talón perforado, bordes dentados con `mask`, doble filete y sello de acción.
+- Marquesina (`.ticker`): cinta azul que corre sobre una cinta de advertencia cruzada; se detiene con movimiento reducido.
 
 ## Movimiento
 
