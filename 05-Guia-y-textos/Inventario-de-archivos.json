@@ -129,6 +129,42 @@
       "background": "opaque"
     },
     {
+      "file": "site/public/assets/etiqueta-150.webp",
+      "title": "Etiqueta vintage $150",
+      "description": "Etiqueta de precio vintage para la sección de ropa ($150 por prenda); fondo blanco que se muestra con mix-blend-mode multiply sobre el papel.",
+      "width": 266,
+      "height": 465,
+      "format": "WEBP",
+      "background": "opaque"
+    },
+    {
+      "file": "site/public/assets/etiqueta-100.webp",
+      "title": "Etiqueta vintage $100",
+      "description": "Etiqueta de precio vintage para la sección de ropa ($100 por prenda); fondo blanco que se muestra con mix-blend-mode multiply sobre el papel.",
+      "width": 266,
+      "height": 465,
+      "format": "WEBP",
+      "background": "opaque"
+    },
+    {
+      "file": "site/public/assets/etiqueta-80.webp",
+      "title": "Etiqueta vintage $80",
+      "description": "Etiqueta de precio vintage para la sección de ropa ($80 por prenda); fondo blanco que se muestra con mix-blend-mode multiply sobre el papel.",
+      "width": 268,
+      "height": 473,
+      "format": "WEBP",
+      "background": "opaque"
+    },
+    {
+      "file": "site/public/assets/etiqueta-50.webp",
+      "title": "Etiqueta vintage $50",
+      "description": "Etiqueta de precio vintage para la sección de ropa ($50 por prenda); fondo blanco que se muestra con mix-blend-mode multiply sobre el papel.",
+      "width": 269,
+      "height": 472,
+      "format": "WEBP",
+      "background": "opaque"
+    },
+    {
       "file": "01-Logos/el-dolaron-insignia-social-transparente.svg",
       "title": "Insignia social transparente",
       "description": "Insignia circular para superponer en publicaciones, historias y videos; conservar proporciones y margen exterior.",

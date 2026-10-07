@@ -96,7 +96,7 @@ h2 { font-family: "Anton", Impact, sans-serif; font-weight: 400; font-size: clam
 .hero-art img { width: 100%; mix-blend-mode: multiply; }
 .price-tag { position: absolute; left: -3%; bottom: 12%; width: 128px; padding: 26px 10px 14px; background: var(--yellow); color: var(--navy); text-align: center; text-decoration: none; rotate: -9deg;
   clip-path: polygon(50% 0, 100% 16%, 100% 100%, 0 100%, 0 16%); }
-.price-tag::before, .tier::before { content: ""; position: absolute; top: 12px; left: calc(50% - 6px); width: 12px; height: 12px; border-radius: 50%; background: var(--paper); box-shadow: inset 0 0 0 2px var(--navy); }
+.price-tag::before { content: ""; position: absolute; top: 12px; left: calc(50% - 6px); width: 12px; height: 12px; border-radius: 50%; background: var(--paper); box-shadow: inset 0 0 0 2px var(--navy); }
 .price-tag small, .price-tag span { display: block; font-size: 12px; font-weight: 800; text-transform: uppercase; letter-spacing: .06em; }
 .price-tag strong { display: block; font-family: "Anton", sans-serif; font-size: 56px; font-weight: 400; line-height: 1; }
 .new-stamp { position: absolute; right: 0; top: 2%; display: grid; place-items: center; width: 118px; height: 118px; background: var(--red); color: var(--white); font-family: "Anton", sans-serif; font-size: 22px; line-height: 1; text-align: center; text-transform: uppercase; text-decoration: none; rotate: 12deg;
@@ -132,14 +132,14 @@ h2 { font-family: "Anton", Impact, sans-serif; font-weight: 400; font-size: clam
 
 /* Ropa: etiquetas de precio colgadas */
 .ropa { padding-block: 72px 80px; scroll-margin-top: 16px; }
-.tiers { list-style: none; margin: 46px 0 32px; padding: 0; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 28px; filter: drop-shadow(4px 5px 0 var(--shadow)); }
-.tier { position: relative; padding: 44px 22px 26px; background: var(--yellow); text-align: center; rotate: -2deg; clip-path: polygon(50% 0, 100% 11%, 100% 100%, 0 100%, 0 11%); }
-.tier:nth-child(2) { background: var(--white); rotate: 1.5deg; }
-.tier:nth-child(3) { background: var(--red); color: var(--white); rotate: -1deg; }
-.tier:nth-child(4) { background: var(--navy); color: var(--white); rotate: 2deg; }
-.tier-price { font-family: "Anton", sans-serif; font-size: clamp(64px, 6.4vw, 100px); line-height: .95; }
-.tier-price small { display: block; margin-top: 4px; font-family: "Archivo", sans-serif; font-size: 13px; font-weight: 800; letter-spacing: .12em; text-transform: uppercase; }
-.tier-items { margin-top: 16px; padding-top: 14px; border-top: 2px dashed currentColor; font-size: 16px; font-weight: 700; line-height: 1.45; overflow-wrap: anywhere; }
+.tiers { list-style: none; margin: 40px 0 28px; padding: 0; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 32px; align-items: start; }
+.tiers li { display: flex; justify-content: center; }
+.tiers li:nth-child(2) { margin-top: 18px; }
+.tiers li:nth-child(4) { margin-top: 12px; }
+.tiers img { width: min(100%, 230px); mix-blend-mode: multiply; rotate: -3deg; transform-origin: 50% 6%; transition: rotate 220ms ease; }
+.tiers li:nth-child(2) img { rotate: 2deg; }
+.tiers li:nth-child(3) img { rotate: -1.5deg; }
+.tiers li:nth-child(4) img { rotate: 3deg; }
 
 /* Grupos: cupones para recortar sobre tinta azul */
 .groups { background: var(--navy) radial-gradient(rgb(255 255 255 / .07) 1.2px, transparent 1.4px) 0 0 / 9px 9px; color: var(--white); }
@@ -215,6 +215,7 @@ dd { margin: 0; line-height: 1.5; }
   .piece-ask:hover { box-shadow: none; transform: none; background: var(--red); }
   .group-card:hover { rotate: 0deg; translate: 0 -4px; }
   .price-tag:hover { rotate: -4deg; }
+  .tiers li img:hover { rotate: 6deg; }
   .new-stamp:hover { rotate: 20deg; }
 }
 @media (prefers-reduced-motion: no-preference) {
@@ -231,7 +232,7 @@ dd { margin: 0; line-height: 1.5; }
   .hero { padding: 32px 32px 44px; gap: 20px; }
   .hero h1 { font-size: clamp(48px, 8.6vw, 96px); }
   .header nav { gap: 20px; }
-  .tiers { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 34px 28px; }
+  .tiers { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 28px; }
   .groups-layout, .visit-layout { gap: 48px; }
   .dolarones-symbol { width: 180px; height: 180px; margin-right: 12px; }
 }
@@ -274,9 +275,7 @@ dd { margin: 0; line-height: 1.5; }
   .chips { flex-wrap: nowrap; overflow-x: auto; margin-inline: -20px; padding: 0 20px 6px; scrollbar-width: none; }
   .chip { flex-shrink: 0; font-size: 14px; padding-inline: 10px; }
   .ropa { padding-block: 52px 56px; }
-  .tiers { gap: 26px 16px; }
-  .tier { padding: 40px 12px 20px; }
-  .tier-items { font-size: 14px; }
+  .tiers { gap: 20px 14px; }
   .groups-layout { padding-block: 60px; }
   .group-card { padding: 26px 24px 22px; }
   .dolarones .wrap { padding-block: 56px 48px; }
