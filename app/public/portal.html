@@ -10,7 +10,7 @@
 </head>
 <body>
 <header>
-  <a class="marca" href="/" aria-label="El Dolarón, inicio"><span>El</span> Dolarón</a>
+  <a class="marca" href="https://eldolaron.com/" aria-label="El Dolarón, ir a la tienda en línea"><span>El</span> Dolarón</a>
   <button id="salir" class="discreto" type="button" hidden>Cerrar sesión</button>
 </header>
 <main>
@@ -76,6 +76,12 @@
       <p id="codigo-legible"></p><p id="codigo-importe"></p>
       <p id="codigo-tiempo" role="status"></p>
       <p class="nota">Un solo uso para gastar. No compartas este código. Si vence, genera otro.</p>
+    </section>
+    <section id="novedades" class="novedades" hidden aria-labelledby="titulo-novedades">
+      <h2 id="titulo-novedades">Lo nuevo en tienda</h2>
+      <p class="nota">Úsalos en tu próxima visita. Pregunta por WhatsApp si sigue disponible.</p>
+      <ul id="novedades-lista"></ul>
+      <a class="boton-enlace" href="https://eldolaron.com/#catalogo">Ver todo el catálogo</a>
     </section>
     <button id="actualizar" class="secundario" type="button">Actualizar saldo y compras</button>
     <details><summary>Vencimientos de mi saldo</summary><ul id="vencimientos"></ul></details>
