@@ -8,6 +8,7 @@
 :root {
   --navy: #16366B;
   --red: #D72B32;
+  --red-text: #B3141B;   /* rojo para letra chica: 4.5:1 o más sobre amarillo, papel y cupón (Issue #241) */
   --yellow: #FFD447;
   --white: #FFFFFF;
   --paper: #EDE6D3;
@@ -94,7 +95,7 @@ h2 { font-family: var(--display); font-variation-settings: var(--display-axes); 
 .cut-i { --d: 420ms; font-family: "Anton", sans-serif; background: var(--yellow); color: var(--red); rotate: -4deg; }
 .hero-sub { margin-top: 16px; font-size: clamp(20px, 2.1vw, 30px); }
 .intro { max-width: 470px; margin-top: 18px; font-size: 18px; font-weight: 500; }
-.hero-stamp { display: inline-flex; flex-direction: column; margin-top: 24px; padding: 8px 14px 6px; border: 3px solid var(--red); border-radius: 4px; color: var(--red); font-family: "Anton", sans-serif; font-size: 22px; line-height: 1.1; text-transform: uppercase; rotate: -3deg; }
+.hero-stamp { display: inline-flex; flex-direction: column; margin-top: 24px; padding: 8px 14px 6px; border: 3px solid var(--red); border-radius: 4px; color: var(--red-text); font-family: "Anton", sans-serif; font-size: 22px; line-height: 1.1; text-transform: uppercase; rotate: -3deg; }
 .hero-stamp span { font-family: "Archivo", sans-serif; font-size: 12px; font-weight: 800; letter-spacing: .14em; }
 .hero-art { position: relative; min-width: 0; }
 .hero-art img { width: 100%; mix-blend-mode: multiply; }
@@ -126,6 +127,10 @@ h2 { font-family: var(--display); font-variation-settings: var(--display-axes); 
 .ticker-track { display: flex; width: max-content; margin: 0; color: var(--white); font-family: "Anton", sans-serif; font-size: 22px; line-height: 1.3; letter-spacing: .06em; text-transform: uppercase; white-space: nowrap; }
 .ticker-run { display: flex; align-items: center; }
 .ticker-run b { margin-inline: 26px; color: var(--yellow); font-weight: 400; }
+.ticker-pause { position: absolute; z-index: 3; right: 14px; top: 17px; display: grid; place-items: center; width: 34px; height: 34px; padding: 0; border: 2px solid var(--yellow); border-radius: 50%; background: var(--navy); color: var(--yellow); font: 900 11px/1 "Archivo", sans-serif; cursor: pointer; }
+.ticker-pause[aria-pressed="true"]::after { content: "▶"; }
+.ticker-pause[aria-pressed="false"]::after { content: "❚❚"; }
+.ticker.pausada .ticker-track { animation-play-state: paused; }
 /* Cupones vintage: talón perforado, bordes dentados, doble filete */
 .group-card { --coupon: #F3E6BF; display: grid; grid-template-columns: 70px 1fr; color: var(--navy); text-decoration: none; rotate: -1.2deg; transition: rotate 180ms ease, translate 180ms ease;
   background: var(--coupon) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 .35 0 0 0 0 .28 0 0 0 0 .16 0 0 0 .22 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url%28%23n%29'/%3E%3C/svg%3E");
@@ -138,7 +143,7 @@ h2 { font-family: var(--display); font-variation-settings: var(--display-axes); 
 .coupon-cream .coupon-stub { background: var(--red); color: var(--white); border-left-color: var(--coupon); }
 .coupon-stub span:last-child { font-family: "Archivo", sans-serif; font-size: 12px; font-weight: 800; letter-spacing: .12em; }
 .coupon-body { display: grid; gap: 4px; margin: 10px 14px 10px 12px; padding: 18px 22px 16px; border: 2px solid var(--navy); box-shadow: inset 0 0 0 3px var(--coupon), inset 0 0 0 4px var(--navy); }
-.coupon-kicker { font-family: var(--display); font-variation-settings: var(--display-axes); font-size: 18px; font-style: italic; font-weight: 500; color: var(--red); }
+.coupon-kicker { font-family: var(--display); font-variation-settings: var(--display-axes); font-size: 18px; font-style: italic; font-weight: 500; color: var(--red-text); }
 .group-name { font-family: var(--display); font-variation-settings: var(--display-axes); font-weight: 900; font-size: clamp(28px, 2.6vw, 38px); line-height: 1.05; letter-spacing: -.02em; }
 .group-text { font-size: 15px; font-weight: 600; }
 .group-go { justify-self: start; margin-top: 10px; padding: 6px 12px 5px; border: 2px solid var(--navy); border-radius: 3px; font-family: "Anton", sans-serif; font-size: 15px; letter-spacing: .06em; text-transform: uppercase; rotate: -2deg; }
@@ -159,8 +164,9 @@ h2 { font-family: var(--display); font-variation-settings: var(--display-axes); 
 .piece-body { display: flex; flex-direction: column; flex: 1; gap: 4px; padding: 12px 4px 0; }
 .piece h3 { font-size: 16px; font-weight: 700; line-height: 1.3; overflow-wrap: anywhere; }
 .piece-brand { font-size: 13px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; opacity: .8; }
+.piece-size { font-size: 14px; font-weight: 800; }
 .piece-price { align-self: flex-start; margin-top: auto; padding: 4px 12px 2px; background: var(--yellow); font-family: "Anton", sans-serif; font-size: 30px; line-height: 1.15; rotate: -3deg; translate: 0 6px; }
-.piece-price s { margin-left: 8px; color: var(--red); font-family: "Archivo", sans-serif; font-size: 14px; font-weight: 700; }
+.piece-price s { margin-left: 8px; color: var(--red-text); font-family: "Archivo", sans-serif; font-size: 14px; font-weight: 700; }
 .piece-ask { min-height: 44px; margin-top: 16px; padding: 8px 10px; background: var(--navy); color: var(--white); box-shadow: none; font-size: 14px; }
 .catalog-more { margin: 40px auto 0; display: flex; }
 .catalog-fallback { max-width: 580px; margin-top: 28px; padding: 28px; background: var(--white); box-shadow: 4px 5px 0 var(--shadow); }
@@ -181,6 +187,9 @@ h2 { font-family: var(--display); font-variation-settings: var(--display-axes); 
 /* Grupos: cupones para recortar sobre tinta azul */
 .groups { background: var(--navy) radial-gradient(rgb(255 255 255 / .07) 1.2px, transparent 1.4px) 0 0 / 9px 9px; color: var(--white); }
 .groups a:focus-visible { outline-color: var(--yellow); }
+/* La máscara del cupón recorta todo lo de afuera: el foco va dentro (Issue #241). */
+.groups .group-card:focus-visible { outline: none; }
+.groups .group-card:focus-visible .coupon-body { outline: 4px solid var(--red-text); outline-offset: 4px; }
 .groups-layout { display: grid; grid-template-columns: 1fr 1.1fr; gap: 72px; align-items: center; padding-block: 84px; }
 .groups-copy .section-lede { margin-top: 18px; max-width: 440px; }
 .groups-cards { display: grid; gap: 26px; }
@@ -284,6 +293,7 @@ dd { margin: 0; line-height: 1.5; }
   .new-stamp { width: 88px; height: 88px; font-size: 17px; }
   .price-tag { width: 104px; left: -2%; bottom: -3%; }
   .ticker { height: 80px; margin-top: -18px; }
+  .ticker-pause { top: 18px; right: 8px; width: 30px; height: 30px; }
   .ticker-track { font-size: 17px; }
   .ticker-run b { margin-inline: 16px; }
   .section-head { grid-template-columns: 1fr; }
@@ -331,4 +341,5 @@ dd { margin: 0; line-height: 1.5; }
 @media (prefers-reduced-motion: reduce) {
   html { scroll-behavior: auto; }
   *, *::before, *::after { animation: none !important; transition: none !important; }
+  .ticker-pause { display: none; }
 }

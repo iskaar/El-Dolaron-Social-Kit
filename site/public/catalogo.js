@@ -20,7 +20,8 @@
   }
 
   function consulta(pieza) {
-    const texto = `Hola, me interesa ${pieza.nombre} (${pieza.codigo}) de ${precio(pieza.precio)}. ¿Sigue disponible?`;
+    const talla = pieza.talla ? ` talla ${pieza.talla}` : "";
+    const texto = `Hola, me interesa ${pieza.nombre}${talla} (${pieza.codigo}) de ${precio(pieza.precio)}. ¿Sigue disponible?`;
     return `${WHATSAPP}?text=${encodeURIComponent(texto)}`;
   }
 
@@ -70,6 +71,12 @@
       arte.classList.add("en-vivo");
     } catch {}
   }
+  // Pausar la cinta que corre (Issue #241, WCAG «pausar, detener, ocultar»).
+  const pausa = typeof document !== "undefined" && document.querySelector(".ticker-pause");
+  if (pausa) pausa.addEventListener("click", () => {
+    const pausada = pausa.closest(".ticker").classList.toggle("pausada");
+    pausa.setAttribute("aria-pressed", String(pausada));
+  });
   const arte = typeof document !== "undefined" && document.querySelector(".hero-art");
   if (arte) destacados(arte);
   const root = typeof document !== "undefined" && document.getElementById("catalogo");
@@ -81,9 +88,14 @@
   const status = root.querySelector(".catalog-status");
   const more = root.querySelector(".catalog-more");
   const fallback = root.querySelector(".catalog-fallback");
+  const retry = root.querySelector(".catalog-retry");
   let categoria = "";
-  let pagina = 1;
+  // Cursor de la última página que SÍ llegó: un fallo reintenta la misma (Issue #241).
+  // `pagina` solo por si el sitio se publica antes que la API con cursor: la API nueva lo ignora con `despues`.
+  let siguiente = null;
+  let proxima = 1;
   let controller = null;
+  const TIEMPO = "tiempo";
   let cargado = false;
 
   const el = (tag, className, text) => {
@@ -108,6 +120,7 @@
     const body = el("div", "piece-body");
     body.append(el("h3", "", pieza.nombre));
     if (pieza.marca) body.append(el("p", "piece-brand", pieza.marca));
+    if (pieza.talla) body.append(el("p", "piece-size", `Talla ${pieza.talla}`));
     const price = el("p", "piece-price", precio(pieza.precio));
     if (pieza.precio_lista > pieza.precio) {
       const lista = el("s", "", precio(pieza.precio_lista));
@@ -125,32 +138,41 @@
   async function cargar(reiniciar) {
     if (controller) controller.abort();
     const mio = (controller = new AbortController());
-    if (reiniciar) { pagina = 1; grid.replaceChildren(); }
+    // 15 s y se da por fallida: una red lenta no deja «Cargando…» para siempre.
+    const reloj = setTimeout(() => mio.abort(TIEMPO), 15000);
+    if (reiniciar) { siguiente = null; proxima = 1; grid.replaceChildren(); }
+    const pedida = proxima;
     fallback.hidden = true;
     more.hidden = true;
     status.textContent = "Cargando piezas…";
     root.setAttribute("aria-busy", "true");
-    const params = new URLSearchParams({ pagina });
+    const params = new URLSearchParams();
+    if (pedida > 1) params.set("pagina", pedida);
+    if (siguiente) params.set("despues", siguiente);
     if (categoria) params.set("categoria", categoria);
     try {
       const response = await fetch(`${base}/api/catalogo?${params}`, { signal: mio.signal, headers: { accept: "application/json" } });
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       const data = await response.json();
       if (!data || !Array.isArray(data.piezas)) throw new Error("Respuesta inesperada");
-      if (mio.signal.aborted) return;
+      if (mio.signal.aborted) throw new Error("Cancelada");
       cargado = true;
+      proxima = pedida + 1;
+      chips.hidden = false;
+      siguiente = data.siguiente || null;
       grid.append(...data.piezas.map(tarjeta));
       more.hidden = !data.hay_mas;
       status.textContent = grid.children.length
         ? `${grid.children.length} de ${Number(data.total) || grid.children.length} piezas`
         : "Por ahora no hay piezas en esta categoría. Prueba otra o pregunta por WhatsApp.";
     } catch (error) {
-      if (mio.signal.aborted) return;
+      if (mio.signal.aborted && mio.signal.reason !== TIEMPO) return;   // otra búsqueda la reemplazó
       status.textContent = "";
       if (!cargado) chips.hidden = true;
       if (!grid.children.length) fallback.hidden = false;
       else { more.hidden = false; status.textContent = "No pudimos cargar más piezas. Intenta de nuevo."; }
     } finally {
+      clearTimeout(reloj);
       if (controller === mio) root.removeAttribute("aria-busy");
     }
   }
@@ -167,6 +189,7 @@
     });
     chips.append(chip);
   }
-  more.addEventListener("click", () => { pagina += 1; cargar(false); });
+  more.addEventListener("click", () => cargar(false));
+  retry.addEventListener("click", () => cargar(true));
   cargar(true);
 })();

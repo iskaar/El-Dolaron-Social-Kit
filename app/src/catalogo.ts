@@ -18,8 +18,13 @@ const CODIGO = /^ED-\d{1,10}$/;
 // Presentable (Issue #220): precio, foto y nombre que se pueda leer. Nombres
 // internos = los que parecen codigo de banda ("DAMA 150 12") o llevan precio
 // ("Juguetes $49"). Sin campo que lo diga: es un patron de texto.
-// ponytail: falsos positivos si una pieza real trae mayusculas y numeros ("TV 55 PULGADAS"); la revision en /admin la deja corregir. Subir a columna `interna` si pasa seguido.
-const NOMBRE_INTERNO = `(p.nombre glob '*[0-9]*' and upper(p.nombre) = p.nombre)`;
+// Dos formas: todo en mayusculas con numeros, o una palabra seguida solo de numeros/$
+// en cualquier caja ("dama 50", "Juguetes $49"; Issue #241: "dama 50" se colaba).
+// ponytail: falsos positivos si una pieza real trae mayusculas y numeros ("TV 55 PULGADAS") o es
+// marca + modelo ("Xbox 360"); la revision en /admin la deja corregir. Subir a columna `interna` si pasa seguido.
+const RESTO_NOMBRE = `ltrim(substr(trim(p.nombre), instr(trim(p.nombre), ' ')))`;
+const NOMBRE_INTERNO = `((p.nombre glob '*[0-9]*' and upper(p.nombre) = p.nombre)
+  or (instr(trim(p.nombre), ' ') > 0 and ${RESTO_NOMBRE} glob '[0-9$]*' and not ${RESTO_NOMBRE} glob '*[A-Za-zÁÉÍÓÚÑáéíóúñ]*'))`;
 const PRESENTABLE = `p.precio > 0 and p.foto_key <> '' and trim(p.nombre) <> '' and not ${NOMBRE_INTERNO}`;
 // Lo mismo que se publica en Mercado Libre, mas presentable: el sitio nunca muestra $0, sin foto ni nombre interno.
 const VENDIBLE = `${PUBLICABLE} and ${PRESENTABLE}`;
@@ -80,23 +85,35 @@ export async function revisionCatalogo(env: Env): Promise<Response> {
   });
 }
 
+// Cursor = fecha de alta + codigo de la ultima pieza entregada (Issue #241): con `pagina`
+// (offset), una venta entre paginas recorria las filas y se saltaba una pieza.
+// La fecha va tal cual la guarda D1 (siempre como parametro, nunca en el SQL).
+const CURSOR = /^([^~]{1,40})~(ED-\d{1,10})$/;
+
 async function listar(env: Env, url: URL): Promise<Response> {
   const categoria = url.searchParams.get('categoria');
   if (categoria !== null && !CLAVES_CATEGORIA.includes(categoria)) return json({ error: 'Categoría no válida.' }, 400);
   const texto = url.searchParams.get('pagina') ?? '1';
   const pagina = Number(texto);
   if (!/^\d+$/.test(texto) || !Number.isSafeInteger(pagina) || pagina < 1) return json({ error: 'Página no válida.' }, 400);
+  const despues = url.searchParams.get('despues');
+  const cursor = despues === null ? null : CURSOR.exec(despues);
+  if (despues !== null && !cursor) return json({ error: 'Cursor no válido.' }, 400);
 
   const filtro = `${VENDIBLE}${categoria === null ? '' : ' and p.categoria = ?'}`;
   const args = categoria === null ? [] : [categoria];
+  const desde = cursor ? ' and (p.creado_en < ? or (p.creado_en = ? and p.codigo > ?))' : '';
   const [filas, cuenta] = await Promise.all([
-    env.DB.prepare(`select p.codigo, p.nombre, p.marca, p.categoria, p.talla, p.precio, p.precio_lista from productos p
-      where ${filtro} order by p.creado_en desc, p.codigo limit ? offset ?`)
-      .bind(...args, POR_PAGINA + 1, (pagina - 1) * POR_PAGINA).all<Record<string, any>>(),
+    env.DB.prepare(`select p.codigo, p.nombre, p.marca, p.categoria, p.talla, p.precio, p.precio_lista, p.creado_en from productos p
+      where ${filtro}${desde} order by p.creado_en desc, p.codigo limit ? offset ?`)
+      .bind(...args, ...(cursor ? [cursor[1], cursor[1], cursor[2]] : []), POR_PAGINA + 1, cursor ? 0 : (pagina - 1) * POR_PAGINA)
+      .all<Record<string, any>>(),
     env.DB.prepare(`select count(*) as n from productos p where ${filtro}`).bind(...args).first<{ n: number }>(),
   ]);
+  const hayMas = filas.results.length > POR_PAGINA;
+  const ultima = filas.results[POR_PAGINA - 1];
   const piezas = filas.results.slice(0, POR_PAGINA).map((p) => aPieza(p, url));
-  return json({ piezas, pagina, hay_mas: filas.results.length > POR_PAGINA, total: cuenta?.n ?? 0 }, 200,
+  return json({ piezas, pagina, hay_mas: hayMas, siguiente: hayMas ? `${ultima.creado_en}~${ultima.codigo}` : null, total: cuenta?.n ?? 0 }, 200,
     { 'cache-control': 'public, max-age=300' });
 }
 
