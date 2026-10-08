@@ -152,6 +152,16 @@ async function crearBorrador(request: Request, env: Env, ctx: ExecutionContext, 
     httpMetadata: { contentType: 'image/jpeg' },
   });
 
+  // "Retomar foto" del admin: solo cambia la imagen. Existencia, talla, estado y
+  // lo que el dueno ya corrigio se quedan; para volver a analizar esta "Reintentar
+  // analisis". La camara no manda esta marca: su reenvio si actualiza todo.
+  if (formulario.get('solo_foto') === '1') {
+    const { meta } = await env.DB.prepare('update productos set foto_key = ?, actualizado_en = ? where id = ?')
+      .bind(fotoKey, new Date().toISOString(), id)
+      .run();
+    if (meta.changes > 0) return json({ id });
+  }
+
   // El correo verificado de quien sube la foto (ver cuentas.ts): de el salen
   // las sesiones de captura y la correccion de existencia desde el carrusel.
   const capturadoPor = correo;
@@ -276,15 +286,18 @@ async function corregirBorrador(id: string, cambios: Record<string, unknown>, en
     return json({ error: 'Destino invalido.' }, 400);
   }
 
-  await env.DB.prepare(
+  const guardada = await env.DB.prepare(
     `update productos set nombre = ?, categoria = ?, marca = ?, talla = ?, precio_lista = ?, precio = ?,
-                          estado_fisico = ?, destino = ?, stock = ?, estado_analisis = 'listo', actualizado_en = ?
-     where id = ?`,
+                          estado_fisico = ?, destino = ?, stock = coalesce(?, stock), estado_analisis = 'listo', actualizado_en = ?
+     where id = ?
+     returning stock`,
   )
-    .bind(nombre, categoria, marca, talla, precioLista, precio, estadoFisico, destino, stock, new Date().toISOString(), id)
-    .run();
+    .bind(nombre, categoria, marca, talla, precioLista, precio, estadoFisico, destino,
+      // Sin `stock` en el cuerpo no se toca: la caja pudo vender piezas desde que se abrio la ficha.
+      cambios.stock === undefined ? null : stock, new Date().toISOString(), id)
+    .first<{ stock: number }>();
 
-  return json({ id, nombre, categoria, marca, talla, precio_lista: precioLista, precio, estado_fisico: estadoFisico, destino, stock });
+  return json({ id, nombre, categoria, marca, talla, precio_lista: precioLista, precio, estado_fisico: estadoFisico, destino, stock: guardada?.stock ?? stock });
 }
 
 /**
