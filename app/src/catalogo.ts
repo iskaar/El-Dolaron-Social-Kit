@@ -20,7 +20,7 @@ const CODIGO = /^ED-\d{1,10}$/;
 // ("Juguetes $49"). Sin campo que lo diga: es un patron de texto.
 // ponytail: falsos positivos si una pieza real trae mayusculas y numeros ("TV 55 PULGADAS"); la revision en /admin la deja corregir. Subir a columna `interna` si pasa seguido.
 const NOMBRE_INTERNO = `(p.nombre glob '*[0-9]*' and upper(p.nombre) = p.nombre)`;
-const PRESENTABLE = `p.precio > 0 and p.foto_key <> '' and not ${NOMBRE_INTERNO}`;
+const PRESENTABLE = `p.precio > 0 and p.foto_key <> '' and trim(p.nombre) <> '' and not ${NOMBRE_INTERNO}`;
 // Lo mismo que se publica en Mercado Libre, mas presentable: el sitio nunca muestra $0, sin foto ni nombre interno.
 const VENDIBLE = `${PUBLICABLE} and ${PRESENTABLE}`;
 
@@ -60,17 +60,18 @@ async function destacados(env: Env, url: URL): Promise<Response> {
 export async function revisionCatalogo(env: Env): Promise<Response> {
   const filas = await env.DB.prepare(`select p.id, p.codigo, p.nombre, p.marca, p.categoria, p.estado_fisico, p.estado_analisis,
       p.precio_lista, p.precio, p.stock, p.destino, p.semana_ingreso, p.creado_en,
-      (p.foto_key = '') as sin_foto, (p.precio <= 0) as sin_precio, ${NOMBRE_INTERNO} as nombre_interno
+      (p.foto_key = '') as sin_foto, (p.precio <= 0) as sin_precio, (trim(p.nombre) = '') as sin_nombre, ${NOMBRE_INTERNO} as nombre_interno
     from productos p
     where p.destino = 'etiqueta' and p.sin_inventario = 0 and p.estado_analisis = 'listo' and p.stock > 0
       and p.estado_fisico <> 'danado' and p.codigo like 'ED-%'
-      and (p.precio <= 0 or p.foto_key = '' or ${NOMBRE_INTERNO})
+      and (p.precio <= 0 or p.foto_key = '' or trim(p.nombre) = '' or ${NOMBRE_INTERNO})
     order by p.creado_en desc, p.codigo`).all<Record<string, any>>();
-  const piezas = filas.results.map(({ sin_foto, sin_precio, nombre_interno, ...p }) => ({
+  const piezas = filas.results.map(({ sin_foto, sin_precio, sin_nombre, nombre_interno, ...p }) => ({
     ...p,
     motivos: [
       ...(sin_foto ? ['sin_foto'] : []),
       ...(sin_precio ? ['sin_precio'] : []),
+      ...(sin_nombre ? ['sin_nombre'] : []),
       ...(nombre_interno ? ['nombre_interno'] : []),
     ],
   }));

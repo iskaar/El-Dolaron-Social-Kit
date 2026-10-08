@@ -261,10 +261,8 @@ async function corregirBorrador(id: string, cambios: Record<string, unknown>, en
     if (!Number.isFinite(precio) || precio < 0) {
       return json({ error: 'Precio invalido.' }, 400);
     }
-    if (esDestinoBanda(destino)) {
-      // Banda: manda el precio de la banda. Etiqueta: quiebra la decena (termina en 9) como el automatico.
-      precio = ajustarManual({ precio, destino: destino as Destino, config });
-    }
+    // Banda: manda el precio de la banda. Etiqueta: quiebra la decena (termina en 9) como el automatico.
+    precio = ajustarManual({ precio, destino: destino as Destino, config });
     // Misma regla que en el calculo automatico: el precio de venta nunca queda
     // por encima del precio de lista.
     if (precioLista > 0 && precio > precioLista) {
@@ -397,20 +395,30 @@ async function fusionarBorrador(id: string, request: Request, env: Env): Promise
     return json({ error: 'Identificador invalido.' }, 400);
   }
 
-  const repetida = await env.DB.prepare('select stock from productos where id = ?')
+  const repetida = await env.DB.prepare('select stock, codigo from productos where id = ?')
     .bind(id)
-    .first<{ stock: number }>();
-  const original = await env.DB.prepare('select stock from productos where id = ?')
+    .first<{ stock: number; codigo: string | null }>();
+  const original = await env.DB.prepare('select stock, codigo from productos where id = ?')
     .bind(destinoId)
-    .first<{ stock: number }>();
+    .first<{ stock: number; codigo: string | null }>();
   if (!repetida || !original) {
     return json({ error: 'La pieza no existe.' }, 404);
   }
+  // Mas de 999 no cabe en una pieza: el admin ya no podria guardarla (corregirBorrador).
+  if (original.stock + repetida.stock > 999) {
+    return json({ error: 'Con esa suma pasa de 999 piezas en existencia.' }, 409);
+  }
 
+  // Si la original no tiene etiqueta, hereda la de la repetida (la que ya esta pegada):
+  // sin eso la etiqueta impresa apunta a una pieza borrada y la caja no la encuentra.
+  // El borrado va primero: el codigo es unico y no puede existir dos veces a la vez.
   await env.DB.batch([
-    env.DB.prepare('update productos set stock = stock + ?, actualizado_en = ? where id = ?')
-      .bind(repetida.stock, new Date().toISOString(), destinoId),
     env.DB.prepare('delete from productos where id = ?').bind(id),
+    env.DB.prepare(
+      `update productos set stock = stock + ?, actualizado_en = ?,
+         codigo = case when codigo is null or codigo = '' then ? else codigo end
+       where id = ?`,
+    ).bind(repetida.stock, new Date().toISOString(), repetida.codigo ?? null, destinoId),
   ]);
   await env.FOTOS.delete(`fotos/${id}.jpg`);
 

@@ -56,3 +56,42 @@ test('marca y categorias nuevas (#159): se guardan, salen en la cola y en el inv
   assert.equal(r.status, 200);
   assert.equal((db.prepare('select marca from productos where id = ?').get(cuerpo.id) as { marca: string }).marca, 'Elf');
 });
+
+test('precio de venta escrito a mano en una etiqueta: queda con la decena quebrada, como el automatico', async () => {
+  const { db, pedir } = tienda();
+  const cuerpo = pieza();
+  assert.equal((await pedir('/api/borradores/manual', cuerpo)).status, 201);
+  const r = await pedir(`/api/borradores/${cuerpo.id}`, { precio: 25000 }, 'PATCH');
+  assert.equal(r.status, 200);
+  assert.equal(r.cuerpo.precio, 24900);   // $250 -> $249, como ajustarManual
+  assert.equal((db.prepare('select precio from productos where id = ?').get(cuerpo.id) as { precio: number }).precio, 24900);
+});
+
+test('fusionar dos fotos de la misma pieza: la que se queda conserva la etiqueta que ya salio impresa', async () => {
+  const { db, pedir } = tienda();
+  const original = crypto.randomUUID();
+  const repetida = crypto.randomUUID();
+  const alta = (id: string, codigo: string, stock: number) => db.prepare(
+    `insert into productos (id, codigo, nombre, precio, precio_lista, stock, estado_analisis, destino, foto_key, semana_ingreso, creado_en, actualizado_en)
+     values (?, ?, 'Tenis', 19900, 0, ?, 'listo', 'etiqueta', ?, 'S40', '', '')`).run(id, codigo, stock, `fotos/${id}.jpg`);
+  alta(original, '', 2);            // la foto original aun no tiene etiqueta
+  alta(repetida, 'ED-000900', 3);   // la repetida ya trae la suya, pegada en el anaquel
+  const r = await pedir(`/api/borradores/${repetida}/fusionar`, { destino_id: original });
+  assert.equal(r.status, 200);
+  const fila = db.prepare('select codigo, stock from productos where id = ?').get(original) as { codigo: string; stock: number };
+  assert.deepEqual({ ...fila }, { codigo: 'ED-000900', stock: 5 });
+});
+
+test('fusionar no deja pasar las 999 piezas: la suma se rechaza y no se pierde ninguna foto', async () => {
+  const { db, pedir } = tienda();
+  const original = crypto.randomUUID();
+  const repetida = crypto.randomUUID();
+  const alta = (id: string, stock: number) => db.prepare(
+    `insert into productos (id, nombre, precio, stock, estado_analisis, destino, foto_key, semana_ingreso, creado_en, actualizado_en)
+     values (?, 'Calcetines', 9900, ?, 'listo', 'etiqueta', ?, 'S40', '', '')`).run(id, stock, `fotos/${id}.jpg`);
+  alta(original, 600);
+  alta(repetida, 500);
+  assert.equal((await pedir(`/api/borradores/${repetida}/fusionar`, { destino_id: original })).status, 409);
+  assert.equal((db.prepare('select count(*) n from productos where id in (?, ?)').get(original, repetida) as { n: number }).n, 2);
+  assert.equal((db.prepare('select stock from productos where id = ?').get(original) as { stock: number }).stock, 600);
+});

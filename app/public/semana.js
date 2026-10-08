@@ -4,8 +4,12 @@
  * Compartida entre el servidor (worker.ts) y el navegador (p.ej. /bandas, que
  * necesita "la semana de hoy" para el lote que va a imprimir).
  */
+// La tienda es UTC-6 fijo (America/Mexico_City desde 2022): el dia se cuenta en su hora, no en UTC.
+const MX = -6 * 3_600_000;
+
 export function semanaIngreso(fecha) {
-  const d = new Date(Date.UTC(fecha.getUTCFullYear(), fecha.getUTCMonth(), fecha.getUTCDate()));
+  const local = new Date(fecha.getTime() + MX);
+  const d = new Date(Date.UTC(local.getUTCFullYear(), local.getUTCMonth(), local.getUTCDate()));
   // Jueves de esa semana: define el año ISO al que pertenece.
   d.setUTCDate(d.getUTCDate() + 4 - (d.getUTCDay() || 7));
   const primeroDeEnero = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));

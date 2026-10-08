@@ -338,7 +338,7 @@ function ficha(p) {
 
 /* ---------- revisión del catálogo público (Issue #220) ---------- */
 
-const MOTIVOS = { sin_foto: 'Sin foto', sin_precio: 'Sin precio', nombre_interno: 'Nombre interno' };
+const MOTIVOS = { sin_foto: 'Sin foto', sin_precio: 'Sin precio', sin_nombre: 'Sin nombre', nombre_interno: 'Nombre interno' };
 async function cargarRevision() {
   const { piezas } = await (await fetch('/api/catalogo/revision')).json();
   const lista = document.getElementById('revision-lista');
