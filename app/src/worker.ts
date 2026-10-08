@@ -61,7 +61,7 @@ interface FilaBorrador {
  * valiendo si algun dia la politica de Access queda mal configurada. Los precios
  * y el inventario no viven en el telefono que anda en el pasillo.
  */
-const RUTAS_VENDEDOR = new Set(['/captura', '/foto.js', '/api/salud', '/sin-acceso', '/api/yo']);
+const RUTAS_VENDEDOR = new Set(['/captura', '/foto.js', '/tallas.js', '/api/salud', '/sin-acceso', '/api/yo']);
 const EXISTENCIA = /^\/api\/borradores\/([^/]+)\/existencia$/;
 
 export function permitidaParaVendedor(pathname: string, metodo: string): boolean {

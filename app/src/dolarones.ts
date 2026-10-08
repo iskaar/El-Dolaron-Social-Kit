@@ -122,7 +122,7 @@ async function socioConSaldo(env: Env, cliente: FilaCliente) {
 
 /** Alta en la tienda, por alguien con sesion en la caja. Reintentar con el mismo id devuelve el mismo socio. */
 export async function registrarSocio(request: Request, env: Env, autor: string): Promise<Response> {
-  const cuerpo = (await request.json().catch(() => ({}))) as Record<string, unknown>;
+  const cuerpo = (await request.json().then((c) => c ?? {}, () => ({}))) as Record<string, unknown>;
   const id = String(cuerpo.id ?? '');
   const nombre = texto(cuerpo.nombre, 80);
   const telefono = String(cuerpo.telefono ?? '').replace(/\D/g, '');
@@ -312,7 +312,7 @@ export async function hashCodigo(codigo: string): Promise<string | null> {
 
 /** El lector manda el código por POST: nunca tokens en URL, historial o logs. */
 export async function buscarPorCodigo(request: Request, env: Env): Promise<Response> {
-  const body = await request.json().catch(() => ({})) as { codigo?: unknown };
+  const body = await request.json().then((c) => c ?? {}, () => ({})) as { codigo?: unknown };
   const codigo = String(body.codigo ?? '');
   const hash = await hashCodigo(codigo);
   if (!hash || !codigo.startsWith('DC-')) return json({ error: 'Código de socio inválido.' }, 400);

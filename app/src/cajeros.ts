@@ -66,18 +66,31 @@ export async function verificarPin(
 
   const ahora = new Date();
   const ahoraIso = ahora.toISOString();
-  if (fila.pin_bloqueo > ahoraIso) return { error: 'PIN bloqueado por intentos fallidos. Espera 15 minutos o llama a Isaac.', status: 423 };
+  const bloqueado = { error: 'PIN bloqueado por intentos fallidos. Espera 15 minutos o llama a Isaac.', status: 423 };
+  if (fila.pin_bloqueo > ahoraIso) return bloqueado;
+
+  // El intento se cuenta ANTES de comparar: si se contara despues, una rafaga en
+  // paralelo (todas leyeron "sin bloqueo") probaria cientos de PIN por ventana y
+  // el 423 delataria el correcto. Asi solo INTENTOS_PIN comparan por ventana.
+  const reservado = await env.DB.prepare(
+    `update usuarios set pin_fallos = pin_fallos + 1
+     where correo = ? and pin_hash = ? and pin_bloqueo <= ? and pin_fallos < ? returning pin_fallos`,
+  ).bind(correo, fila.pin_hash, ahoraIso, INTENTOS_PIN).first();
+  if (!reservado) {
+    // Los intentos ya estan repartidos: se cierra la ventana (tambien repara un contador que quedo en el tope).
+    await env.DB.prepare(
+      `update usuarios set pin_bloqueo = ?, pin_fallos = 0 where correo = ? and pin_hash = ? and pin_fallos >= ? and pin_bloqueo <= ?`,
+    ).bind(new Date(ahora.getTime() + BLOQUEO_PIN).toISOString(), correo, fila.pin_hash, INTENTOS_PIN, ahoraIso).run();
+    return bloqueado;
+  }
+
   if (await hashPin(pin, fila.pin_sal) !== fila.pin_hash) {
-    // Incremento atómico, sin tocar un PIN recién cambiado.
-    const fallo = await env.DB.prepare(
-      `update usuarios set
-         pin_fallos = case when pin_fallos + 1 >= ? then 0 else pin_fallos + 1 end,
-         pin_bloqueo = case when pin_fallos + 1 >= ? then ? else pin_bloqueo end
-       where correo = ? and pin_bloqueo <= ? and pin_hash = ?
-       returning pin_bloqueo`,
-    ).bind(INTENTOS_PIN, INTENTOS_PIN, new Date(ahora.getTime() + BLOQUEO_PIN).toISOString(),
-      correo, ahoraIso, fila.pin_hash).first<{ pin_bloqueo: string }>();
-    return { error: fallo && fallo.pin_bloqueo > ahoraIso ? 'PIN incorrecto. Se bloqueo 15 minutos.' : 'PIN incorrecto.', status: 403 };
+    // El ultimo intento permitido que falla bloquea; sin tocar un PIN recien cambiado.
+    const cierre = await env.DB.prepare(
+      `update usuarios set pin_bloqueo = ?, pin_fallos = 0
+       where correo = ? and pin_hash = ? and pin_fallos >= ? and pin_bloqueo <= ? returning pin_bloqueo`,
+    ).bind(new Date(ahora.getTime() + BLOQUEO_PIN).toISOString(), correo, fila.pin_hash, INTENTOS_PIN, ahoraIso).first();
+    return { error: cierre ? 'PIN incorrecto. Se bloqueo 15 minutos.' : 'PIN incorrecto.', status: 403 };
   }
 
   // Confirmar y limpiar fallos juntos: el PIN o el bloqueo pudieron cambiar durante PBKDF2.
@@ -89,7 +102,7 @@ export async function verificarPin(
 }
 
 export async function entrar(request: Request, env: Env): Promise<Response> {
-  const cuerpo = (await request.json().catch(() => ({}))) as { correo?: unknown; pin?: unknown };
+  const cuerpo = (await request.json().then((c) => c ?? {}, () => ({}))) as { correo?: unknown; pin?: unknown };
   const correo = String(cuerpo.correo ?? '').trim().toLowerCase();
   const verificado = await verificarPin(env, correo, String(cuerpo.pin ?? ''));
   if ('error' in verificado) return json({ error: verificado.error }, verificado.status);
@@ -114,7 +127,7 @@ export async function salir(request: Request, env: Env): Promise<Response> {
 
 /** El dueno pone o cambia el PIN desde /cuentas. Cambiarlo cierra las sesiones abiertas de esa persona. */
 export async function ponerPin(request: Request, env: Env): Promise<Response> {
-  const cuerpo = (await request.json().catch(() => ({}))) as { correo?: unknown; pin?: unknown };
+  const cuerpo = (await request.json().then((c) => c ?? {}, () => ({}))) as { correo?: unknown; pin?: unknown };
   const correo = String(cuerpo.correo ?? '').trim().toLowerCase();
   const pin = String(cuerpo.pin ?? '');
   if (!/^\d{6}$/.test(pin)) return json({ error: 'El PIN debe tener 6 digitos.' }, 400);
