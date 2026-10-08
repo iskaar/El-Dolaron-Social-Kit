@@ -195,15 +195,15 @@ test('catalogo (Issue #220): nombre interno o sin foto o sin precio no sale en l
   const t = publica();
   try {
     const buena = pieza(t, { nombre: 'Blusa floreada' });
+    const tarjeta = pieza(t, { nombre: 'Tarjeta regalo PlayStation Store $100' });
     pieza(t, { nombre: 'DAMA 150 12' });
-    pieza(t, { nombre: 'Juguetes $49' });
     pieza(t, { nombre: 'Sin foto', foto_key: '' });
     pieza(t, { nombre: 'Sin precio', precio: 0 });
     const lista = await leer(await t.llamar('/api/catalogo'));
-    assert.deepEqual(lista.piezas.map((p: any) => p.codigo), [buena]);
-    assert.equal(lista.total, 1);
+    assert.deepEqual(lista.piezas.map((p: any) => p.codigo).sort(), [buena, tarjeta].sort());
+    assert.equal(lista.total, 2);
     const dest = await leer(await t.llamar('/api/catalogo/destacados'));
-    assert.deepEqual(dest.piezas.map((p: any) => p.codigo), [buena]);
+    assert.deepEqual(dest.piezas.map((p: any) => p.codigo).sort(), [buena, tarjeta].sort());
   } finally { t.db.close(); }
 });
 

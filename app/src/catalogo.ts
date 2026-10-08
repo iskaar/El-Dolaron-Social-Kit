@@ -19,7 +19,7 @@ const CODIGO = /^ED-\d{1,10}$/;
 // internos = los que parecen codigo de banda ("DAMA 150 12") o llevan precio
 // ("Juguetes $49"). Sin campo que lo diga: es un patron de texto.
 // ponytail: falsos positivos si una pieza real trae mayusculas y numeros ("TV 55 PULGADAS"); la revision en /admin la deja corregir. Subir a columna `interna` si pasa seguido.
-const NOMBRE_INTERNO = `(p.nombre glob '*[0-9]*' and upper(p.nombre) = p.nombre or p.nombre glob '*$[0-9]*')`;
+const NOMBRE_INTERNO = `(p.nombre glob '*[0-9]*' and upper(p.nombre) = p.nombre)`;
 const PRESENTABLE = `p.precio > 0 and p.foto_key <> '' and not ${NOMBRE_INTERNO}`;
 // Lo mismo que se publica en Mercado Libre, mas presentable: el sitio nunca muestra $0, sin foto ni nombre interno.
 const VENDIBLE = `${PUBLICABLE} and ${PRESENTABLE}`;
