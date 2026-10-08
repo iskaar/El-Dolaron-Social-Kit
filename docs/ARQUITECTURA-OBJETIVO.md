@@ -10,7 +10,7 @@ Mantener un monolito modular: un Worker, D1 como maestro de datos operativos y R
 
 `Eventos externos y tareas programadas → registro durable → mismo módulo de negocio`
 
-La segunda línea es un objetivo de F2; el registro durable no se presume implementado. No confirmar una tarea al usuario o al proveedor antes de guardar lo necesario para recuperarla. R2, D1 y una API externa no comparten una transacción: modelar estados intermedios y reparación, no simular éxito conjunto.
+La segunda línea existe hoy solo para Mercado Libre: `ml_notificaciones` guarda cada aviso antes de responder y el cron reintenta los fallidos (#254). El análisis de fotos aún no tiene registro durable (F2.3). No confirmar una tarea al usuario o al proveedor antes de guardar lo necesario para recuperarla. R2, D1 y una API externa no comparten una transacción: modelar estados intermedios y reparación, no simular éxito conjunto.
 
 ## Dueño de cada regla
 

@@ -20,7 +20,7 @@ Las instrucciones explícitas vigentes del usuario prevalecen. El plan describe 
 - Denegar acceso por defecto; verificar host, identidad, rol y alcance en servidor. Mantener separados usuarios, terminales, portal público y entornos.
 - No leer, mostrar ni confirmar .dev.vars, .env*, credenciales o exportaciones privadas. No copiar sesiones, PINs o tokens de producción al sandbox.
 - Mantener rutas, respuestas API, almacenamiento de navegador y ventas pendientes compatibles. No borrar IndexedDB/caché para ocultar una falla. Respetar instalación/actualización del service worker y uso sin red.
-- Migraciones aditivas y con registro; no editar SQL ya ejecutado ni renumerar archivos históricos. Validar base vacía, actualización y claves foráneas.
+- Migraciones: archivo nuevo `app/migracion-NNN-*.sql`, aditivo, con la instrucción de ejecución en su encabezado; Isaac lo corre en sandbox y luego en prod ANTES del deploy. No hay tabla de registro. No editar SQL ya ejecutado ni renumerar. Las pruebas (`src/prueba-d1.ts`) y `npm run db:local` aplican schema + todas las migraciones: una base vacía debe quedar completa.
 - Conservar manejo de errores, validación, accesibilidad y calibración de hardware al mover código. Reutilizar venta.js y módulos existentes.
 - Un PR por arreglo o extracción coherente. No añadir dependencias, servicios, automatización de publicación ni credenciales para implementar este plan; una propuesta de capacidad no es autorización.
 
@@ -30,4 +30,4 @@ Ejecutar siempre python tools/validate_assets.py desde raíz. Para código/confi
 
 Resolver decisiones rutinarias dentro del Issue sin pedir aprobación repetida. Escalar cuando falte una decisión de negocio, se contradiga un contrato, se requiera infraestructura/costo fuera del alcance o haya una operación remota sin autorización vigente. Preparar primero diagnóstico y propuesta revisables; explicar la regla concreta que exige la decisión. No desplegar, migrar remoto, cambiar Access ni hacer force push sin instrucción explícita vigente de Isaac.
 
-Si se acerca el límite de sesión, cerrar la unidad y dejar continuidad en GitHub siguiendo el runbook. Informar por separado lo implementado, lo probado y lo pendiente. Abrir PR enlazado al Issue; main queda publicable. No marcar realizado un paso del plan porque solo se escribió documentación.
+Si se acerca el límite de sesión, cerrar la unidad y dejar continuidad en GitHub siguiendo el runbook. Informar por separado lo implementado, lo probado y lo pendiente. Abrir PR enlazado al Issue; con CI verde el agente lo mergea (Isaac es el único revisor) y deja el despliegue y las migraciones remotas a Isaac. main queda publicable. No marcar realizado un paso del plan porque solo se escribió documentación.

@@ -6,7 +6,7 @@ Runbook objetivo del [plan](PLAN-REESTRUCTURACION.md). Los controles futuros deb
 
 | Entorno | Configuración versionada | Contrato que debe verificarse |
 | --- | --- | --- |
-| Local | app/wrangler.jsonc con ejecución local explícita | Datos sintéticos; esquema y migraciones completos. No usar db:remote para preparar desarrollo. |
+| Local | app/wrangler.jsonc con ejecución local explícita | Datos sintéticos; `npm run db:local` arma schema + todas las migraciones. |
 | Sandbox | app/wrangler.sandbox.jsonc | D1/R2 y sesiones aislados; datos mínimos/sanitizados; integraciones externas de prueba o desactivadas. Confirmar destino antes de refrescar. |
 | Prestado | app/wrangler.prestado.jsonc | Entorno temporal: verificar propósito, hosts, Access, assets y bindings. No asumir paridad ni desplegar configuración incompleta. |
 | Producción | app/wrangler.jsonc | Hosts, políticas, bindings y versión comprobados contra despliegue real; no inferirlos solo del archivo. |
@@ -26,7 +26,7 @@ En un checkout limpio, `npm ci` prepara dependencias. La CI existente ejecuta am
 | Cambio | Evidencia adicional necesaria |
 | --- | --- |
 | Stock, dinero, permisos o reintentos | Regresión del fallo; dos operaciones intercaladas, repetición y fallo parcial cuando aplique; integración D1 local/sandbox si el doble SQLite no representa la conducta relevante. |
-| Esquema/provisionamiento | Base vacía + actualización desde versión anterior, registro de migraciones, claves foráneas activas, datos antes/después y compatibilidad del Worker anterior. |
+| Esquema/provisionamiento | Base vacía (`npm run db:local` / pruebas) + actualización desde versión anterior, migración nueva con su instrucción de ejecución, claves foráneas activas, datos antes/después y compatibilidad del Worker anterior. |
 | Wrangler, hosts, Access o assets | Dry run de cada configuración afectada y smoke HTTP: ruta pública permitida, API protegida, identidad/rol/host incorrecto denegados. Usar recursos de prueba; no debilitar Access para conseguir verde. |
 | Caja, service worker o IndexedDB | Primera instalación, recarga offline, actualización con venta pendiente y reintento tras pérdida de respuesta; sin borrar datos del navegador. |
 | Impresión, lector, efectivo o terminal | Prueba física del flujo afectado y calibraciones preservadas. Si falta dispositivo, registrarlo como pendiente; no declarar validado hardware con una captura. |
@@ -34,7 +34,7 @@ En un checkout limpio, `npm ci` prepara dependencias. La CI existente ejecuta am
 
 ## Secuencia de entrega
 
-1. Issue y PR describen cambio observable, riesgo, pruebas y alcance; revisión y CI verde antes de merge. F0.3 debe hacer exigible esa protección en GitHub.
+1. Issue y PR describen cambio observable, riesgo, pruebas y alcance. Con CI verde, el agente mergea su propio PR; Isaac es el único revisor y el despliegue lo corre él. F0.3 hace exigibles en GitHub el PR y los checks (0 aprobaciones requeridas).
 2. Antes de una entrega remota, confirmar autorización vigente para esa acción y destino. No volver a pedirla si ya existe. Documentar commit, versión actual, recursos destino, compatibilidad de datos y forma de recuperación.
 3. Ensayar con datos sintéticos/sanitizados en sandbox. Para migraciones, probar avance y compatibilidad anterior; separar ampliación de esquema, transición de código y eliminación posterior cuando sea necesario. No ejecutar automáticamente todos los SQL históricos sobre una base viva.
 4. Verificar respaldo/recuperación disponible y su alcance. Si hay cambio incompatible o pérdida de datos posible, resolver el plan antes de ejecutar. Programar la ventana fuera de cobro si el Issue identifica interrupción.
@@ -45,25 +45,13 @@ En un checkout limpio, `npm ci` prepara dependencias. La CI existente ejecuta am
 
 Un [rollback de Worker](https://developers.cloudflare.com/workers/versions-and-deployments/rollbacks/) no restaura D1 ni R2. Por ello, la reversión preferida de código requiere esquema compatible; para datos, decidir reparación hacia adelante o restauración ensayada con conciliación de operaciones posteriores. Nunca prometer recuperar ventas recientes a partir de un respaldo anterior sin reconciliarlas.
 
-F4 debe ensayar restauración en destino aislado, medir duración, verificar claves foráneas, conteos y sumas de ventas/stock, y comprobar referencias de fotos R2. Registrar qué cubre el respaldo, cuánto se pierde y quién puede ejecutar recuperación. No restaurar sobre producción como ejercicio.
+Restauración de datos: [D1 Time Travel](https://developers.cloudflare.com/d1/reference/time-travel/) restaura la base a un minuto anterior (`npx wrangler d1 time-travel restore el-dolaron --timestamp=<ISO>`). Restaura en sitio: todo lo escrito después se pierde, así que antes se exportan las ventas posteriores para reconciliarlas. Solo Isaac la ejecuta, y nunca como ejercicio en producción. Las fotos en R2 no tienen esa red: no se borran objetos de R2 que alguna fila referencie.
 
 ## Medición y capacidad
 
-Empezar con logs y métricas de la plataforma existente, sin comprar observabilidad. Registrar request ID, entorno, versión, tipo de operación, duración y resultado; para tareas, ID no sensible, intento, edad y último error saneado. Nunca payloads completos de clientes, fotos, PINs o tokens.
+Escala actual: una tienda, dos cajas, una cuenta dueño. No se mide por medir: se mide cuando hay un síntoma (caja lenta, errores, pendientes que no bajan) o antes de una segunda tienda, empezando con los logs y métricas de Cloudflare que ya existen, sin comprar observabilidad. En logs, nunca payloads de clientes, fotos, PINs ni tokens.
 
-F4 medirá al menos siete días representativos: pico de cajas concurrentes y solicitudes, ventas/día, p95 y error por operación, consultas lentas/filas leídas, edad de pendientes, consumo de almacenamiento y costo. Fijar presupuesto de IA/integraciones y volumen previsto con Isaac. Probar carga únicamente en entorno aislado.
-
-Objetivos iniciales propuestos para acordar en el Issue de F4; no son SLOs ya medidos ni garantías:
-
-| Señal | Objetivo / acción propuesta |
-| --- | --- |
-| Integridad | Cero cobros/abonos duplicados, stock negativo o acceso cruzado; cualquier caso abre incidente prioritario. |
-| API interactiva | p95 menor a 1 segundo, excluyendo IA/proveedor externo; error inesperado menor a 1% en ventanas pico de 15 minutos. Registrar también conteo; poco tráfico no permite concluir capacidad. |
-| Trabajo externo | Antigüedad de pendiente menor a 5 minutos para sincronización/análisis ordinario; excedente visible para revisión. Proveedor caído requiere política de pausa/reintento y recuperación, no éxito ficticio. |
-| Recuperación | Proponer RPO máximo 15 minutos y RTO 60 minutos; validar contra restauración real y recuperación de ventas. Si plataforma/operación no lo permite, acordar objetivo viable antes de prometerlo. |
-| Capacidad | Ensayo a 2× pico observado o demanda prevista, el mayor; conservar invariantes y objetivos anteriores. Costo dentro del presupuesto acordado. |
-
-Si un objetivo falla, abrir Issue con medición, consulta/flujo causante y opción mínima. Los umbrales del [diseño objetivo](ARQUITECTURA-OBJETIVO.md) activan evaluación; no activan servicios automáticamente.
+Integridad sí es objetivo permanente: cero cobros o abonos duplicados, stock negativo o acceso cruzado. Cualquier caso abre un Issue prioritario con la medición, el flujo causante y la opción mínima. Los umbrales del [diseño objetivo](ARQUITECTURA-OBJETIVO.md) activan evaluación; no activan servicios automáticamente.
 
 ## Continuidad entre agentes y límite de sesión
 
