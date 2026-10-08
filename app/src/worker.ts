@@ -723,7 +723,8 @@ async function registrarVenta(request: Request, env: Env, ctx: ExecutionContext,
   // sin red conserva la promo que vio el cliente); una hora futura no se acepta.
   // Se guarda sumada en `descuento`: devoluciones la prorratea igual.
   const horaCaja = Date.parse(String(venta.creado_en ?? ''));
-  descuento += promoInauguracion(subtotal, Number.isFinite(horaCaja) && horaCaja <= Date.now() + 300_000 ? horaCaja : Date.now(), promoDe(env));
+  const horaVenta = Number.isFinite(horaCaja) && horaCaja <= Date.now() + 300_000 ? horaCaja : Date.now();
+  descuento += promoInauguracion(subtotal, horaVenta, promoDe(env));
   const total = subtotal - descuento;
   const efectivo = Math.max(0, Math.round(Number(venta.efectivo ?? 0)));
   const clienteId = venta.cliente_id ? String(venta.cliente_id) : null;
@@ -736,7 +737,9 @@ async function registrarVenta(request: Request, env: Env, ctx: ExecutionContext,
 
   const momento = new Date();
   const ahora = momento.toISOString();
-  const creadoEn = String(venta.creado_en ?? ahora);
+  // La misma hora fiable: una fecha ilegible o futura (reloj de la caja mal puesto) mandaria la venta a otro
+  // dia y fuera de los reportes y de la ventana de cancelacion. Una venta sin red conserva su hora.
+  const creadoEn = new Date(horaVenta).toISOString();
 
   // Valida socio, código y saldo; consumo y venta se confirman en el mismo batch.
   const recompensa = await sentenciasDeVenta(env, {
