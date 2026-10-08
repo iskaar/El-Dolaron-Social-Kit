@@ -272,7 +272,7 @@ test('sincronizar reenvía el destino remoto y elimina la venta sólo después d
         const r = await t.pedir(ruta, enviada);
         return { status:r.status, json:async () => r.cuerpo };
       },
-      $:() => ({ textContent:'' }), dolares:String,
+      $:() => ({ textContent:'' }), dolares:String, AbortSignal,
       pintarResultadosVales() {}, pendientes() {}, pintarRechazadas() {}, actualizarCorte() {},
     });
     await sincronizar();
