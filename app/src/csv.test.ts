@@ -168,3 +168,24 @@ test('stock (numero entero) no esta escapado', async () => {
   }
   assert.ok(hayStock, 'Debe encontrar el Ventilador en el inventario');
 });
+
+test('CSV: una celda con retorno de carro (sin salto de linea) va entre comillas', async () => {
+  const { db, pedir, pedirTexto } = tienda();
+  const id = crypto.randomUUID();
+  db.prepare(
+    'insert into productos (id, codigo, nombre, precio, stock, semana_ingreso, creado_en, actualizado_en) values (?, ?, ?, ?, ?, ?, ?, ?)'
+  ).run(id, 'ED-CR', 'Playera\rnegra', 25000, 10, 'S40', new Date().toISOString(), new Date().toISOString());
+  await pedir('/api/ventas', { id: crypto.randomUUID(), lineas: [{ producto_id: id, cantidad: 1 }], forma_pago: 'efectivo', efectivo: 25000, caja: 'Caja 1' });
+  const { texto } = await pedirTexto('/api/reportes/ventas.csv');
+  assert.ok(texto.includes('"Playera\rnegra"'), texto);
+});
+
+test('ventas.csv: la fecha es la hora de la tienda (UTC-6), igual que los tickets', async () => {
+  const { db, pedir, pedirTexto } = tienda();
+  const id = crypto.randomUUID();
+  await pedir('/api/ventas', { id, lineas: [{ producto_id: PRODUCTO, cantidad: 1 }], forma_pago: 'efectivo', efectivo: 25000, caja: 'Caja 1' });
+  // 01:30 UTC del 8 = 19:30 del 7 en la tienda: el dia de la venta es el 7.
+  db.prepare('update ventas set creado_en = ? where id = ?').run('2026-10-08T01:30:00.000Z', id);
+  const { texto } = await pedirTexto('/api/reportes/ventas.csv');
+  assert.match(texto, /\r\n2026-10-07 19:30,efectivo,/);
+});

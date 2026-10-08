@@ -850,7 +850,11 @@ export function rangoDias(dias: number, ahora = Date.now()) {
     anterior_desde: apertura(hoyTienda(ahora - (2 * dias - 1) * 86_400_000)),
   };
 }
-const rangoDe = (url: URL) => rangoDias(Math.min(365, Math.max(1, Math.round(Number(url.searchParams.get('dias') ?? 30)))));
+// `dias=abc` daba NaN y tumbaba el reporte con 500: un valor que no es numero vale el de omision.
+const rangoDe = (url: URL) => {
+  const dias = Math.round(Number(url.searchParams.get('dias') ?? 30));
+  return rangoDias(Number.isFinite(dias) ? Math.min(365, Math.max(1, dias)) : 30);
+};
 
 // Lo que lleva un renglon de la lista de tickets (ticket.js `renglonTicket`), del dia o del rango.
 const COLUMNAS_TICKET = `v.id, v.total, v.forma_pago, v.cancelada, v.creado_en, v.dolarones, v.devuelto, v.dolarones_devueltos,
@@ -1181,9 +1185,9 @@ function celdaCsv(valor: unknown): string {
   // Evitar inyeccion de formulas: si es texto y empieza con un caracter peligroso, prefijo con apostrofe.
   // Excepto si es un numero decimal (que puede ser negativo), que se deja tal cual.
   if (typeof valor === 'string' && /^[=+\-@\t\r]/.test(texto) && !/^-?\d+(\.\d+)?$/.test(texto)) {
-    return /[",\n]/.test(texto) ? `"'${texto.replace(/"/g, '""')}"` : `'${texto}`;
+    return /[",\r\n]/.test(texto) ? `"'${texto.replace(/"/g, '""')}"` : `'${texto}`;
   }
-  return /[",\n]/.test(texto) ? `"${texto.replace(/"/g, '""')}"` : texto;
+  return /[",\r\n]/.test(texto) ? `"${texto.replace(/"/g, '""')}"` : texto;
 }
 
 function respuestaCsv(nombreArchivo: string, encabezados: string[], filas: unknown[][]): Response {
@@ -1324,7 +1328,9 @@ async function exportarVentasCsv(env: Env): Promise<Response> {
   }>();
 
   const filas = results.map((f) => [
-    f.creado_en, f.forma_pago, f.cancelada ? 'si' : 'no', f.cancelada_por, f.motivo_cancelacion,
+    // Hora de la tienda (UTC-6), como en tickets.csv: en UTC, una venta de la tarde caia al dia siguiente.
+    new Date(Date.parse(f.creado_en) - 6 * 3_600_000).toISOString().slice(0, 16).replace('T', ' '),
+    f.forma_pago, f.cancelada ? 'si' : 'no', f.cancelada_por, f.motivo_cancelacion,
     f.codigo, f.categoria, f.nombre, pesosDe(f.precio), f.cantidad, pesosDe(f.precio * f.cantidad),
     f.cancelada_cantidad,
   ]);
@@ -1516,7 +1522,7 @@ export default {
       if (pathname === '/api/conteo' && request.method === 'GET') return await listarAltoValor(env);
       if (pathname === '/api/conteo' && request.method === 'POST') return await revisarConteo(request, env);
       if (pathname === '/api/conteo/ajustes' && request.method === 'GET') return await listarAjustes(env);
-      if (pathname === '/api/conteo/ajustes' && request.method === 'POST') return await ajustarExistencia(request, env, correo);
+      if (pathname === '/api/conteo/ajustes' && request.method === 'POST') return await ajustarExistencia(request, env, correo, ctx);
 
       if (pathname.startsWith('/api/ml/') || pathname === '/ml/callback') {
         const respuestaML = await rutaML(request, env, url);
