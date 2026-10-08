@@ -13,7 +13,18 @@ function debeCachear(request, response, origen = self.location.origin) {
   return response.type === 'basic' && response.status === 200 && !response.redirected;
 }
 
-self.addEventListener('install', (e) => { e.waitUntil(self.skipWaiting()); });
+// Primera visita (Issue #253): la pagina se cargo antes que el worker, asi que sin
+// esto no habria copia hasta la siguiente carga con red. Lo que falle, se queda sin copia.
+async function precargar() {
+  const cache = await caches.open(CACHE);
+  await Promise.all(RUTAS.map(async (ruta) => {
+    const peticion = new Request(ruta);
+    const respuesta = await fetch(peticion).catch(() => null);
+    if (respuesta && debeCachear(peticion, respuesta)) await cache.put(ruta, respuesta);
+  }));
+}
+
+self.addEventListener('install', (e) => { e.waitUntil(precargar().catch(() => {}).then(() => self.skipWaiting())); });
 
 self.addEventListener('activate', (e) => {
   e.waitUntil((async () => {

@@ -1055,10 +1055,24 @@ async function traerOrdenesRecientes(env: Env, vendedor: string): Promise<string
   return tocados;
 }
 
-/** El cron (cada 15 min): ordenes perdidas y luego conciliacion. No hace nada sin cuenta conectada. */
+/**
+ * Avisos que fallaron o murieron a medias (Issue #253): la busqueda de 24 h no
+ * ve la cancelacion de una orden vieja. procesarOrden es idempotente.
+ */
+async function reintentarAvisos(env: Env): Promise<void> {
+  const hace = (min: number) => new Date(Date.now() - min * 60_000).toISOString();
+  // ponytail: sin contador de intentos; un aviso roto se repite cada 15 min por 7 dias, 20 por corrida.
+  const { results } = await env.DB.prepare(
+    `select id from ml_notificaciones where (error != '' or procesado_en = '') and recibido_en between ? and ? order by id limit 20`,
+  ).bind(hace(7 * 24 * 60), hace(5)).all<{ id: number }>();
+  for (const { id } of results) await procesarNotificacion(env, id);
+}
+
+/** El cron (cada 15 min): avisos fallidos, ordenes perdidas y luego conciliacion. No hace nada sin cuenta conectada. */
 export async function sincronizar(env: Env): Promise<void> {
   const cuenta = await leerCuenta(env);
   if (!conectada(cuenta)) return;
+  await reintentarAvisos(env);
   try { await traerOrdenesRecientes(env, cuenta.ml_user_id); }
   catch (error) { console.error(JSON.stringify({ mensaje: 'ordenes recientes de ML', error: String(error) })); }
   await conciliarSeguro(env);
