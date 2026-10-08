@@ -171,7 +171,7 @@ export async function reclamarVale(env: Env, clienteId: string, codigo: string):
       // vale_saldo_valido y deshace el batch completo.
       env.DB.prepare(`update vales_dolarones set restante = case
           when restante = importe and reclamado_por is null and vence_en > ?
-            and (select cancelada from ventas where id = venta_id) = 0
+            and (select cancelada = 0 and cliente_id is null from ventas where id = venta_id)
             and (select count(*) from vales_dolarones where reclamado_por = ? and reclamado_en > ?) < ?
           then 0 else -1 end,
         reclamado_por = ?, reclamado_en = ? where id = ?`)
