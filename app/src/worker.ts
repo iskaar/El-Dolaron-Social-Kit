@@ -62,15 +62,15 @@ interface FilaBorrador {
  * y el inventario no viven en el telefono que anda en el pasillo.
  */
 const RUTAS_VENDEDOR = new Set(['/captura', '/foto.js', '/tallas.js', '/api/salud', '/sin-acceso', '/api/yo']);
-const EXISTENCIA = /^\/api\/borradores\/([^/]+)\/existencia$/;
+const CORRECCION_CAPTURA = /^\/api\/borradores\/([^/]+)\/(existencia|talla)$/;
 
 export function permitidaParaVendedor(pathname: string, metodo: string): boolean {
   if (RUTAS_VENDEDOR.has(pathname)) {
     return metodo === 'GET';
   }
-  // Corregir cuantas piezas son, desde el carrusel de la camara. El handler
-  // limita a lo que esa persona capturo en las ultimas 24 h.
-  if (EXISTENCIA.test(pathname)) {
+  // Corregir cuantas piezas son o la talla, desde el carrusel de la camara. El
+  // handler limita a lo que esa persona capturo en las ultimas 24 h.
+  if (CORRECCION_CAPTURA.test(pathname)) {
     return metodo === 'PATCH';
   }
   // Quien entra por la camara sin cuenta tambien tiene que poder pedirla.
@@ -321,35 +321,44 @@ async function capturarManual(request: Request, env: Env, correo: string): Promi
   return json(await respuesta.json(), 201);
 }
 
-/** Cuanto dura abierta la correccion de existencia desde la camara. */
+/** Cuanto dura abierta la correccion desde la camara. */
 const VENTANA_CAPTURA_MS = 24 * 60 * 60 * 1000;
 
 /**
- * La existencia de una pieza recien capturada, desde el carrusel de /captura.
- * Solo quien la capturo y solo en las primeras 24 h: el telefono del pasillo no
- * es la puerta para ajustar inventario viejo (eso es la cola de revision), y
- * pasado ese rato la pieza ya pudo venderse y un numero absoluto pisaria la venta.
+ * La existencia o la talla de una pieza recien capturada, desde el carrusel de
+ * /captura. Solo quien la capturo y solo en las primeras 24 h: el telefono del
+ * pasillo no es la puerta para ajustar inventario viejo (eso es la cola de
+ * revision), y pasado ese rato la pieza ya pudo venderse y un numero absoluto
+ * pisaria la venta.
  */
-async function corregirExistencia(id: string, request: Request, env: Env, correo: string): Promise<Response> {
+async function corregirCaptura(id: string, campo: string, request: Request, env: Env, correo: string): Promise<Response> {
   if (!UUID.test(id)) {
     return json({ error: 'Identificador invalido.' }, 400);
   }
-  const { stock: crudo } = (await request.json()) as { stock?: unknown };
-  const stock = Number(crudo);
-  if (!Number.isInteger(stock) || stock < 1 || stock > 999) {
-    return json({ error: 'Existencia invalida.' }, 400);
+  const cuerpo = (await request.json()) as { stock?: unknown; talla?: unknown };
+  let valor: number | string;
+  if (campo === 'existencia') {
+    valor = Number(cuerpo.stock);
+    if (!Number.isInteger(valor) || valor < 1 || valor > 999) {
+      return json({ error: 'Existencia invalida.' }, 400);
+    }
+  } else {
+    valor = String(cuerpo.talla ?? '');
+    if (!tallaValida(valor)) {
+      return json({ error: 'Talla invalida.' }, 400);
+    }
   }
-  const quien = correo;
+  const columna = campo === 'existencia' ? 'stock' : 'talla';
   const desde = new Date(Date.now() - VENTANA_CAPTURA_MS).toISOString();
   const resultado = await env.DB.prepare(
-    'update productos set stock = ?, actualizado_en = ? where id = ? and capturado_por = ? and creado_en > ?',
+    `update productos set ${columna} = ?, actualizado_en = ? where id = ? and capturado_por = ? and creado_en > ?`,
   )
-    .bind(stock, new Date().toISOString(), id, quien, desde)
+    .bind(valor, new Date().toISOString(), id, correo, desde)
     .run();
   if (resultado.meta.changes === 0) {
     return json({ error: 'Solo puedes cambiar lo que capturaste en las ultimas 24 horas.' }, 404);
   }
-  return json({ id, stock });
+  return json({ id, [columna]: valor });
 }
 
 /**
@@ -1737,9 +1746,9 @@ export default {
         return json({ error: 'Metodo no permitido.' }, 405);
       }
 
-      const existencia = pathname.match(EXISTENCIA);
-      if (existencia && request.method === 'PATCH') {
-        return await corregirExistencia(existencia[1], request, env, correo);
+      const correccion = pathname.match(CORRECCION_CAPTURA);
+      if (correccion && request.method === 'PATCH') {
+        return await corregirCaptura(correccion[1], correccion[2], request, env, correo);
       }
 
       const fusion = pathname.match(/^\/api\/borradores\/([^/]+)\/fusionar$/);

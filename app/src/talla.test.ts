@@ -86,3 +86,22 @@ test('el catalogo publico devuelve la talla; la etiqueta la imprime', async () =
   assert.match(tsplEtiqueta({ nombre: 'Playera', precio: 15000, precio_lista: 0, codigo: 'ED-000777', semana_ingreso: 'S40' }),
     /"ED-000777 - S40"/);
 });
+
+test('la camara corrige la talla de lo que acaba de capturar; una talla que no existe no pasa', async () => {
+  const { permitidaParaVendedor } = await import('./worker.ts');
+  const t = tienda();
+  const id = crypto.randomUUID();
+  assert.equal((await capturar(t, id, 'M')).status, 201);
+  assert.equal(permitidaParaVendedor(`/api/borradores/${id}/talla`, 'PATCH'), true);
+  const patch = (cuerpo: unknown, pieza = id) => worker.fetch!(new Request(`https://caja.prueba/api/borradores/${pieza}/talla`, {
+    method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify(cuerpo),
+  }) as never, t.env, t.ctx as never);
+  assert.equal((await patch({ talla: 'Niño 18-24 meses / XL' })).status, 200);
+  assert.equal(talla(t, id), 'Niño 18-24 meses / XL');
+  assert.equal((await patch({ talla: 'XXXL' })).status, 400);
+  assert.equal((await patch({ talla: '' })).status, 400);
+  assert.equal(talla(t, id), 'Niño 18-24 meses / XL');
+  // Fuera de las 24 h ya no se toca desde la camara.
+  t.db.prepare("update productos set creado_en = '2020-01-01T00:00:00Z' where id = ?").run(id);
+  assert.equal((await patch({ talla: 'S' })).status, 404);
+});
