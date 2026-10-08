@@ -2,6 +2,7 @@
 
 @AGENTS.md
 @README.md
+@app/AGENTS.md
 
 ## Contexto técnico
 

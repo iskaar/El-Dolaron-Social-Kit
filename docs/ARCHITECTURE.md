@@ -1,5 +1,7 @@
 # Arquitectura del proyecto
 
+> Este documento describe el kit estático original; “fuera de alcance de v1” se refiere a ese kit. La tienda existente vive en app/. Su evolución se documenta en el [plan de reestructuración](PLAN-REESTRUCTURACION.md) y la [arquitectura objetivo](ARQUITECTURA-OBJETIVO.md).
+
 ## Propósito
 
 El Dolarón es un kit social estático. La arquitectura optimiza tres cosas: que una persona pueda usar el kit sin instalar nada, que los assets tengan una fuente de verdad clara y que varios agentes puedan colaborar sin pisarse.
