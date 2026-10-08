@@ -41,6 +41,7 @@ test('Marketplace: autorización antes de HTML/API/fotos y elegibilidad actual e
  t.env.ASSETS={fetch:async()=>{pantallas++;return new Response('pantalla');}} as Fetcher;
  const pedir=async(path:string,method='GET',host='escaner.viste.com.mx')=>worker.fetch!(
    new Request(`https://${host}${path}`,{method}) as never,t.env,{waitUntil(){}} as never);
+ t.db.exec('drop trigger siempre_un_dueno');   // la prueba le cambia el rol a la unica cuenta
  try {
   t.db.prepare("update productos set estado_analisis='listo', foto_key=? where id=?").run(`fotos/${PRODUCTO}.jpg`,PRODUCTO);
   for(const path of ['/marketplace','/marketplace.html','/marketplace/','/marketplace-redes.png','/api/marketplace',`/api/marketplace/foto/${PRODUCTO}`]) {

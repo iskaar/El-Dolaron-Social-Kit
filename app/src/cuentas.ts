@@ -304,14 +304,13 @@ export async function listarCuentas(env: Env): Promise<Response> {
 
 /**
  * Nunca se queda la tienda sin dueno activo: quitarse el rol o desactivarse a
- * uno mismo siendo el ultimo dejaria a todos sin poder aprobar a nadie.
+ * uno mismo siendo el ultimo dejaria a todos sin poder aprobar a nadie. Lo
+ * cuida el trigger `siempre_un_dueno` (migracion 031) dentro de la escritura,
+ * asi dos cambios a la vez no pasan los dos (Issue #253); aqui solo se traduce.
  */
-async function quedariaSinDueno(env: Env, correo: string, roles: Rol[], activo: boolean): Promise<boolean> {
-  if (activo && roles.includes('dueno')) return false;
-  const { results } = await env.DB.prepare(
-    `select correo from usuarios where activo = 1 and (',' || roles || ',') like '%,dueno,%'`,
-  ).all<{ correo: string }>();
-  return results.every((r) => r.correo === correo);
+function sinDueno(error: unknown): Response {
+  if (String(error).includes('sin_dueno')) return json({ error: 'Tiene que quedar al menos un dueno activo.' }, 400);
+  throw error;
 }
 
 function validarRoles(crudo: unknown): Rol[] | null {
@@ -333,13 +332,10 @@ export async function guardarCuenta(request: Request, env: Env): Promise<Respons
   if (caja !== null && caja !== '' && !CAJAS.includes(caja)) return json({ error: 'Caja invalida.' }, 400);
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(correo)) return json({ error: 'Correo invalido.' }, 400);
   if (!roles) return json({ error: 'Escoge al menos un rol.' }, 400);
-  if (await quedariaSinDueno(env, correo, roles, activo)) {
-    return json({ error: 'Tiene que quedar al menos un dueno activo.' }, 400);
-  }
   const ahora = new Date().toISOString();
   // Sin cuenta activa o sin rol de caja, su sesion de PIN muere con el cambio: reactivarla despues no la revive.
   const cobra = activo && (roles.includes('cajero') || roles.includes('dueno'));
-  await env.DB.batch([
+  const fallo = await env.DB.batch([
     env.DB.prepare(
       `insert into usuarios (correo, nombre, roles, activo, caja, creado_en, actualizado_en)
        values (?, ?, ?, ?, coalesce(?, ''), ?, ?)
@@ -347,7 +343,8 @@ export async function guardarCuenta(request: Request, env: Env): Promise<Respons
          activo = excluded.activo, caja = coalesce(?, usuarios.caja), actualizado_en = excluded.actualizado_en`,
     ).bind(correo, nombre, roles.join(','), activo ? 1 : 0, caja, ahora, ahora, caja),
     ...(cobra ? [] : [env.DB.prepare('delete from sesiones_cajero where correo = ?').bind(correo)]),
-  ]);
+  ]).then(() => null, sinDueno);
+  if (fallo) return fallo;
   const guardado = await leerUsuario(env, correo);
   return json({ correo, nombre, roles, activo, caja: guardado?.caja ?? '' });
 }
@@ -379,15 +376,13 @@ export async function resolverSolicitud(id: string, request: Request, env: Env, 
   const roles = cuerpo.roles === undefined ? [ROL_POR_OMISION] : validarRoles(cuerpo.roles);
   if (!roles) return json({ error: 'Escoge al menos un rol.' }, 400);
   // La cuenta pudo darse de alta por otra via despues de la solicitud: aprobar la reemplazaria.
-  if (await quedariaSinDueno(env, solicitud.correo, roles, true)) {
-    return json({ error: 'Tiene que quedar al menos un dueno activo.' }, 400);
-  }
-  await env.DB.batch([
+  const fallo = await env.DB.batch([
     marcar,
     env.DB.prepare(
       `insert into usuarios (correo, nombre, roles, activo, creado_en, actualizado_en) values (?, ?, ?, 1, ?, ?)
        on conflict (correo) do update set roles = excluded.roles, activo = 1, actualizado_en = excluded.actualizado_en`,
     ).bind(solicitud.correo, solicitud.nombre, roles.join(','), ahora, ahora),
-  ]);
+  ]).then(() => null, sinDueno);
+  if (fallo) return fallo;
   return json({ id, estado: 'aprobada', correo: solicitud.correo, roles });
 }

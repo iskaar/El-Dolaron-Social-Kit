@@ -349,6 +349,7 @@ test('vale no expone saldo/código al portal público ni a capturistas; al cerra
     t.env.VALES_ABIERTOS = 'no';
     assert.equal((await t.canjear(vale.codigo, 500)).status, 201);
     assert.equal(t.db.prepare('select count(*) as n from vales_dolarones').get()!.n, 1);
+    t.db.exec('drop trigger siempre_un_dueno');   // la prueba le cambia el rol a la unica cuenta
     t.db.prepare("update usuarios set roles='capturista' where correo=?").run(DUENO);
     assert.equal((await t.pedir('/api/vales/buscar', { codigo:vale.codigo })).status, 403);
     assert.equal((await t.pedir(`/api/ventas/${v.id}/vale`, {})).status, 403);
