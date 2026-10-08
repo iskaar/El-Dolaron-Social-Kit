@@ -21,7 +21,7 @@ export function modeloPorDefecto(env: Env): Modelo {
   return env.MODELO_ANALISIS === 'gemini' ? 'gemini' : 'claude';
 }
 
-const MODELO_CLAUDE = 'claude-haiku-4-5';
+const MODELO_CLAUDE = 'claude-haiku-5-5';
 const MODELO_GEMINI = 'gemini-flash-latest';
 
 const CATEGORIAS = CLAVES_CATEGORIA;
@@ -187,9 +187,11 @@ async function conClaude(foto: string, env: Env, instruccion: string): Promise<F
   const cliente = new Anthropic({ apiKey: env.ANTHROPIC_API_KEY });
   const respuesta = await cliente.messages.create({
     model: MODELO_CLAUDE,
-    max_tokens: 512,
+    // Haiku 5.5 piensa por omision y lo pensado cuenta aqui: con 512 una foto
+    // dificil se quedaba sin JSON. `low` piensa poco o nada en una foto clara.
+    max_tokens: 2048,
     system: instruccion,
-    output_config: { format: { type: 'json_schema', schema: ESQUEMA } },
+    output_config: { effort: 'low', format: { type: 'json_schema', schema: ESQUEMA } },
     messages: [
       {
         role: 'user',
@@ -201,6 +203,11 @@ async function conClaude(foto: string, env: Env, instruccion: string): Promise<F
     ],
   });
   const texto = respuesta.content.map((bloque) => (bloque.type === 'text' ? bloque.text : '')).join('');
+  // Un rechazo (filtros de seguridad) o el tope de tokens llegan sin JSON: que
+  // el error en la fila lo diga en vez de un "Unexpected end of JSON input".
+  if (respuesta.stop_reason === 'refusal' || respuesta.stop_reason === 'max_tokens') {
+    throw new Error(`Claude no respondio la ficha (${respuesta.stop_reason}).`);
+  }
   return normalizar(JSON.parse(texto));
 }
 
