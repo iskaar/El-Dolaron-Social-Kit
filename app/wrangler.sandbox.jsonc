@@ -36,7 +36,7 @@
     "PROMOCION_INICIO": "2026-10-01T00:00:00Z",
     "VALES_ABIERTOS": "si",
     // Promo de inauguracion: en el sandbox ya esta corriendo y con cupo de 3, para probar
-    // en la caja que se agota antes de la inauguracion (prod: sabado 10/10 11:00, cupo 100).
+    // en la caja que se agota antes de la inauguracion (prod: sabado 10/10 10:00, cupo 100).
     "PROMO_DESDE": "2026-10-08T06:00:00Z",
     "PROMO_HASTA": "2026-10-13T06:00:00Z",
     "PROMO_CUPO": "3",
