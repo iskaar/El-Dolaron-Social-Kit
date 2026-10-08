@@ -25,6 +25,7 @@
   "vars": {
     // Pinta la franja SANDBOX en todas las pantallas (worker.ts).
     "AMBIENTE": "sandbox",
+    "CONTEO_UMBRAL": "30000",
     "MODELO_ANALISIS": "claude",
     // Ensayo de Dolarones: portal propio, mismo proyecto Firebase (usar los
     // numeros de prueba de Firebase, no gastan SMS) y promocion ya iniciada.
