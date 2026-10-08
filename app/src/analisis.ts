@@ -24,6 +24,15 @@ export function modeloPorDefecto(env: Env): Modelo {
 const MODELO_CLAUDE = 'claude-haiku-5-5';
 const MODELO_GEMINI = 'gemini-flash-latest';
 
+/**
+ * El analisis corre en ctx.waitUntil(), que el runtime corta a los 30 s: si lo
+ * matan, la fila se queda en `pendiente` para siempre. Una sola llamada al
+ * modelo por analisis; el peor caso con Claude es 2 intentos x 11 s + espera
+ * del reintento (~1 s) = 23 s, y Gemini (con busqueda) un intento de 22 s;
+ * debajo de ~27 s queda lo demas (R2, D1). Mutable solo para las pruebas.
+ */
+export const LIMITES_MS = { claude: 11_000, gemini: 22_000 };
+
 const CATEGORIAS = CLAVES_CATEGORIA;
 
 const INSTRUCCION = [
@@ -184,7 +193,8 @@ function normalizar(cruda: Partial<Ficha>): Ficha {
 }
 
 async function conClaude(foto: string, env: Env, instruccion: string): Promise<Ficha> {
-  const cliente = new Anthropic({ apiKey: env.ANTHROPIC_API_KEY });
+  // Un reintento (no los 2 de fabrica) cubre un 429/529 en la captura por lotes.
+  const cliente = new Anthropic({ apiKey: env.ANTHROPIC_API_KEY, timeout: LIMITES_MS.claude, maxRetries: 1 });
   const respuesta = await cliente.messages.create({
     model: MODELO_CLAUDE,
     // Haiku 5.5 piensa por omision y lo pensado cuenta aqui: con 512 una foto
@@ -222,6 +232,7 @@ async function conGemini(foto: string, env: Env, instruccion: string, buscar = f
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${MODELO_GEMINI}:generateContent?key=${llave}`;
   const respuesta = await fetch(url, {
     method: 'POST',
+    signal: AbortSignal.timeout(LIMITES_MS.gemini),
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({
       systemInstruction: { parts: [{ text: buscar ? instruccion + PIDE_JSON : instruccion }] },
