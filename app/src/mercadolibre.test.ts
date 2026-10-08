@@ -35,6 +35,8 @@ class SimML {
   refrescos = 0;
   refreshVigente = 'RT-0';
   fallar401 = 0;
+  /** Se corre antes de contestar cada peticion (para simular que pasa algo en medio). */
+  antesDe: ((l: Llamada) => Promise<void>) | null = null;
   rechazarItem: unknown = null;
   items = new Map<string, { id: string; status: string; available_quantity: number }>();
   ordenes = new Map<string, unknown>();
@@ -121,6 +123,7 @@ function instalar(sim: SimML) {
       : init.body ? JSON.parse(String(init.body)) : undefined;
     const llamada = { metodo: init.method ?? 'GET', ruta: u.pathname + u.search, cuerpo, auth: new Headers(init.headers).get('authorization') };
     sim.llamadas.push(llamada);
+    await sim.antesDe?.(llamada);
     const { status = 200, cuerpo: respuesta } = sim.responder(llamada);
     return new Response(JSON.stringify(respuesta), { status, headers: { 'content-type': 'application/json' } });
   }) as typeof fetch;
@@ -624,6 +627,26 @@ test('venta en ML: descuenta una sola vez por orden, aunque el aviso llegue repe
   });
 });
 
+test('publicar: si la pieza se vende en tienda mientras ML la crea, queda pausada en ML (no se vende de mas)', async () => {
+  await conML(async (t) => {
+    const id = pieza(t, { stock: 1 });
+    let vendida = false;
+    t.sim.antesDe = async (l) => {
+      if (l.metodo === 'POST' && l.ruta === '/items' && !vendida) {
+        vendida = true;
+        const r = await t.pedir('/api/ventas', { id: crypto.randomUUID(), lineas: [{ producto_id: id, cantidad: 1 }], forma_pago: 'tarjeta' });
+        assert.equal(r.status, 201);
+        await t.esperar();
+      }
+    };
+    const { itemId } = await publicarPieza(t, id);
+    await t.esperar();
+    assert.equal(stockDe(t, id), 0);
+    assert.equal(estadoDe(t, id), 'pausada_por_venta');
+    assert.equal(t.sim.items.get(itemId)!.status, 'paused');
+  });
+});
+
 test('venta en ML de la última pieza: stock 0 y publicación vendida; si D1 ya no tenía, queda en conflicto', async () => {
   await conML(async (t) => {
     const { id, itemId } = await publicarPieza(t, pieza(t, { stock: 1 }));
@@ -954,3 +977,15 @@ test('preparar: el enlace de una publicación explica qué copiar; sin marca tam
   const sinMarca = await t.pedir(`/api/ml/preparar/${pieza(t, { categoria: 'juguetes', nombre: 'Lanzador de hidrogel', marca: '' })}`, {});
   assert.equal(sinMarca.cuerpo.propuesta.catalogo.candidatos.length, 1);
 }));
+
+test('conteo: un faltante (robo) que deja la pieza sin existencias la pausa en ML', async () => {
+  await conML(async (t) => {
+    const { id, itemId } = await publicarPieza(t, pieza(t, { stock: 1 }));
+    const r = await t.pedir('/api/conteo/ajustes', { producto_id: id, cantidad: 1, motivo: 'robo' });
+    assert.equal(r.status, 201, JSON.stringify(r.cuerpo));
+    await t.esperar();
+    assert.equal(stockDe(t, id), 0);
+    assert.equal(estadoDe(t, id), 'pausada_por_venta');
+    assert.equal(t.sim.items.get(itemId)!.status, 'paused');
+  });
+});

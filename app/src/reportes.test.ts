@@ -235,3 +235,10 @@ test('por_categoria_anterior: lo vendido por categoria en el periodo de igual la
   assert.deepEqual(sin.por_categoria.map((c: { categoria: string }) => c.categoria), ['sin categoria']);
   assert.deepEqual(sin.por_categoria_anterior.map((c: { categoria: string }) => c.categoria), ['sin categoria']);
 });
+
+test('reportes con dias basura no se caen: dias invalidos usan el valor por omision', async () => {
+  const { pedir } = tienda();
+  const r = await pedir('/api/reportes?dias=abc', undefined, 'GET');
+  assert.equal(r.status, 200, JSON.stringify(r.cuerpo));
+  assert.equal(r.cuerpo.dias, 30);
+});

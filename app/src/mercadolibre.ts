@@ -859,6 +859,9 @@ async function publicar(env: Env, id: string, request: Request): Promise<Respons
       itemId = '';
       throw error;
     }
+    // Si la tienda vendio la pieza mientras ML la creaba, la venta no la vio (aun no tenia
+    // articulo que pausar): se concilia aqui para no dejarla activa con existencias de mas.
+    await conciliarSeguro(env, { productoIds: [id] });
     return json({ publicacion: await leerPublicacion(env, id) }, 201);
   } catch (error) {
     if (!itemId) {

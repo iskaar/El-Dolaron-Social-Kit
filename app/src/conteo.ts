@@ -7,6 +7,8 @@
  * ver el rastro, solo el dueno.
  */
 
+import { conciliarSeguro } from './mercadolibre.ts';
+
 /** $300 en centavos, si la configuracion no trae CONTEO_UMBRAL. */
 const UMBRAL_POR_OMISION = 30000;
 export const MOTIVOS = ['robo', 'merma', 'error de captura'] as const;
@@ -65,7 +67,7 @@ export async function revisarConteo(request: Request, env: Env): Promise<Respons
  * solo batch: si el stock no alcanza, el trigger stock_no_negativo (migracion-006)
  * aborta todo y no queda rastro de un ajuste que no ocurrio.
  */
-export async function ajustarExistencia(request: Request, env: Env, correo: string): Promise<Response> {
+export async function ajustarExistencia(request: Request, env: Env, correo: string, ctx: ExecutionContext): Promise<Response> {
   const cuerpo = (await request.json().catch(() => ({}))) as Record<string, unknown>;
   const id = String(cuerpo.producto_id ?? '');
   const cantidad = Number(cuerpo.cantidad);
@@ -96,6 +98,8 @@ export async function ajustarExistencia(request: Request, env: Env, correo: stri
     if (String(error).includes('stock insuficiente')) return json({ error: 'No hay tantas piezas en existencia.' }, 409);
     throw error;
   }
+  // Si el faltante deja la pieza sin existencias, su publicacion en ML se pausa (D1 manda).
+  ctx.waitUntil(conciliarSeguro(env, { productoIds: [id] }));
   return json({ producto_id: id, antes: pieza.stock, despues: pieza.stock - cantidad }, 201);
 }
 
