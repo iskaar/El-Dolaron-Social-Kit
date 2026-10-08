@@ -4,6 +4,8 @@
 > Issue: #2. Rama: `agent/codex/2-operations-scanner-rebaseline`.
 > Alcance funcional: `docs/CONTRATO-ESCANER.md`. Este archivo decide **con qué** se construye.
 
+> Evolución desde 2026-10-08: consultar el [plan de reestructuración](PLAN-REESTRUCTURACION.md) y la [arquitectura objetivo](ARQUITECTURA-OBJETIVO.md). Conservan las decisiones funcionales y calibraciones de este documento; los módulos propuestos no se presumen implementados.
+
 ## Decisiones de Isaac (2026-09-11)
 
 | Decisión | Elegido |

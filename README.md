@@ -60,3 +60,12 @@ Claude y Codex se coordinan únicamente mediante Issues, ramas y PRs publicados 
 ## Límites deliberados
 
 Este repositorio no guarda contraseñas, tokens, datos de clientes ni credenciales de redes sociales. Tampoco inventa horarios, dirección, precios, disponibilidad, descuentos o políticas de entrega.
+
+## Evolución de la herramienta de tienda
+
+- [Plan de reestructuración](docs/PLAN-REESTRUCTURACION.md): fases, dependencias, hallazgos y criterios de salida.
+- [Arquitectura objetivo](docs/ARQUITECTURA-OBJETIVO.md): límites de módulos y condiciones para crecer.
+- [Operación y entregas](docs/OPERACION-Y-ENTREGAS.md): entornos, validación, recuperación y continuidad.
+- [Guardrails de la app](app/AGENTS.md): reglas para modelos y desarrolladores que cambian la tienda.
+
+Estos documentos son el plan de evolución; no significan que la reestructuración o sus correcciones ya estén implementadas.
