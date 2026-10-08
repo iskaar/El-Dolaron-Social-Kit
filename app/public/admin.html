@@ -318,12 +318,13 @@ function ficha(p) {
       await fetch(`/api/borradores/${p.id}/analizar`, { method: 'POST' });
       setTimeout(cargarCola, 6000);
     } else if (accion === 'fusionar') {
+      evento.target.disabled = true;   // un segundo clic mientras viaja sumaria dos veces
       const respuesta = await fetch(`/api/borradores/${p.id}/fusionar`, {
         method: 'POST', headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ destino_id: repetida.id }),
       });
       const datos = await respuesta.json();
-      if (!respuesta.ok) { aviso.textContent = datos.error; return; }
+      if (!respuesta.ok) { aviso.textContent = datos.error; evento.target.disabled = false; return; }
       repetida.stock = datos.stock;   // la siguiente repetida ya ve el total nuevo
       nodo.remove();
     } else if (accion === 'precios-ml') {

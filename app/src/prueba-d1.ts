@@ -39,7 +39,7 @@ function d1(db: DatabaseSync) {
     async batch(sentencias: ReturnType<typeof preparar>[]) {
       db.exec('begin');
       try {
-        const salida = sentencias.map((s) => s.ejecutar());
+        const salida = sentencias.map((s) => ({ meta: { changes: Number(s.ejecutar().changes) } }));
         db.exec('commit');
         return salida;
       } catch (error) {
