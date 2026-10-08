@@ -44,6 +44,16 @@ export function promoInauguracion(subtotal, momento, promo) {
 }
 
 /**
+ * Minutos de desfase del reloj de la caja contra el del servidor (cabecera Date):
+ * positivo adelantado, negativo atrasado, 0 si dentro de 10 min o ilegible.
+ */
+export function desfaseReloj(ahora, fechaServidor) {
+  const servidor = Date.parse(fechaServidor);
+  if (!Number.isFinite(servidor) || Math.abs(ahora - servidor) <= 10 * 60_000) return 0;
+  return Math.round((ahora - servidor) / 60_000);
+}
+
+/**
  * `dolarones` es la parte del total pagada con Dolarones: el efectivo se compara
  * contra el resto. `descuento` ya viene aprobado y en centavos: `total` es lo
  * que vale el ticket despues de restarlo.
