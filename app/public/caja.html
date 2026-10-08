@@ -564,6 +564,7 @@ function pintar() {
   $('usar-maximo').disabled = cobrando || !codigoSocio || maximoCanje(socio, t.total) === 0;
   for (const id of ['codigo', 'socio', 'buscar-socio', 'quitar-socio', 'dolarones', 'efectivo', 'forma', 'cancelar', 'pedir-descuento', 'quitar-descuento']) $(id).disabled = cobrando;
   pintarImpresionRemota();
+  $('cobrar').textContent = `Cobrar · ${$('forma').selectedOptions[0].textContent}`;
   $('cobrar').disabled = cobrando || t.total === 0 || usados > t.total || usados > canjeable || !autorizado;
   $('codigo-autorizacion').textContent = socio?.vale
     ? `Vale impreso: ${dolares(socio.disponible)}. Vence ${new Date(socio.expira_en).toLocaleString('es-MX')}.`
@@ -1063,6 +1064,7 @@ async function cobrar() {
     pintarDescuento();
     quitarSocio();
     $('efectivo').value = '';
+    $('forma').value = 'efectivo';      // cada venta empieza en efectivo: la forma anterior descuadraba el corte (#260)
     $('codigo').focus();
     sincronizar();
   } finally {
@@ -1560,7 +1562,11 @@ $('ticket').addEventListener('click', (e) => {
   idVenta = null;
   pintar();
 });
-$('efectivo').addEventListener('input', pintar);
+$('efectivo').addEventListener('input', () => {
+  // Si escribe lo que le dieron, la venta es en efectivo aunque olvidara cambiar la forma (#260).
+  if (Number($('efectivo').value) > 0) $('forma').value = 'efectivo';
+  pintar();
+});
 $('forma').addEventListener('change', pintar);
 $('cobrar').addEventListener('click', cobrar);
 // Para cambiar billetes sin cobrar nada. Abre sin esperar al servidor (tiene
@@ -1805,7 +1811,7 @@ $('corte-reimprimir').addEventListener('click', async () => {
 });
 
 $('cancelar').addEventListener('click', () => {
-  lineas = []; idVenta = null; descuento = null; pintarDescuento(); quitarSocio(); $('efectivo').value = ''; $('aviso').textContent = 'Venta cancelada';
+  lineas = []; idVenta = null; descuento = null; pintarDescuento(); quitarSocio(); $('efectivo').value = ''; $('forma').value = 'efectivo'; $('aviso').textContent = 'Venta cancelada';
   $('aviso').style.color = '#5b6478'; pintar(); $('codigo').focus();
 });
 
