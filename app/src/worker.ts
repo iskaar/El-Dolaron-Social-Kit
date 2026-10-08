@@ -409,7 +409,8 @@ async function prepararEtiquetas(request: Request, env: Env): Promise<Response> 
   const ahora = new Date().toISOString();
   if (porCodificar.length) {
     await env.DB.batch(porCodificar.map(({ id }) => env.DB.prepare(
-      `update productos set codigo = ${CODIGO_NUEVO}, actualizado_en = ? where id = ?`,
+      `update productos set codigo = ${CODIGO_NUEVO}, actualizado_en = ?
+       where id = ? and (codigo is null or codigo = '')`,
     ).bind(ahora, id)));
   }
 
@@ -449,20 +450,37 @@ async function fusionarBorrador(id: string, request: Request, env: Env): Promise
     return json({ error: 'Con esa suma pasa de 999 piezas en existencia.' }, 409);
   }
 
+  // La suma sale de la fila de la repetida DENTRO del batch, no de lo leido arriba: dos
+  // fusiones en paralelo leen lo mismo, pero solo la que borra la repetida la consume.
+  // `ahora` marca la suma aplicada; el borrado y el codigo dependen de esa marca.
   // Si la original no tiene etiqueta, hereda la de la repetida (la que ya esta pegada):
   // sin eso la etiqueta impresa apunta a una pieza borrada y la caja no la encuentra.
-  // El borrado va primero: el codigo es unico y no puede existir dos veces a la vez.
-  await env.DB.batch([
-    env.DB.prepare('delete from productos where id = ?').bind(id),
+  // El codigo va despues del borrado: es unico y no puede existir dos veces a la vez.
+  const ahora = new Date().toISOString();
+  const [, borrado] = await env.DB.batch([
     env.DB.prepare(
-      `update productos set stock = stock + ?, actualizado_en = ?,
-         codigo = case when codigo is null or codigo = '' then ? else codigo end
-       where id = ?`,
-    ).bind(repetida.stock, new Date().toISOString(), repetida.codigo ?? null, destinoId),
+      `update productos set stock = stock + (select stock from productos where id = ?1), actualizado_en = ?3
+       where id = ?2 and exists (select 1 from productos where id = ?1)
+         and stock + (select stock from productos where id = ?1) <= 999`,
+    ).bind(id, destinoId, ahora),
+    env.DB.prepare(
+      'delete from productos where id = ? and exists (select 1 from productos where id = ? and actualizado_en = ?)',
+    ).bind(id, destinoId, ahora),
+    env.DB.prepare(
+      `update productos set codigo = ? where id = ? and actualizado_en = ? and (codigo is null or codigo = '')`,
+    ).bind(repetida.codigo ?? null, destinoId, ahora),
   ]);
+  if (!borrado.meta.changes) {
+    // Otra fusion ya consumio la repetida (404) o la suma ya no cabe (409).
+    const sigue = await env.DB.prepare('select 1 as x from productos where id = ?').bind(id).first();
+    return sigue
+      ? json({ error: 'Con esa suma pasa de 999 piezas en existencia.' }, 409)
+      : json({ error: 'La pieza no existe.' }, 404);
+  }
   await env.FOTOS.delete(`fotos/${id}.jpg`);
 
-  return json({ id, destino_id: destinoId, stock: original.stock + repetida.stock });
+  const final = await env.DB.prepare('select stock from productos where id = ?').bind(destinoId).first<{ stock: number }>();
+  return json({ id, destino_id: destinoId, stock: final?.stock ?? original.stock + repetida.stock });
 }
 
 async function descartarBorrador(id: string, env: Env): Promise<Response> {
