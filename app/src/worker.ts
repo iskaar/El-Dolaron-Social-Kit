@@ -19,6 +19,7 @@ import { detalleVenta, cancelarPieza } from './devoluciones.ts';
 import { cancelarVenta, listarCancelaciones, estadoSolicitud } from './cancelaciones.ts';
 import { BASES, AVISO } from './legal.ts';
 import { CLAVES_CATEGORIA } from '../public/categorias.js';
+import { tallaValida } from '../public/tallas.js';
 import {
   permiso, puede, quienEs, leerUsuario, yo, pedirAcceso, listarCuentas, guardarCuenta, resolverSolicitud,
   esDeCaja, soloComputadora, CAJAS,
@@ -42,6 +43,7 @@ interface FilaBorrador {
   nombre: string;
   categoria: string;
   marca: string;
+  talla: string | null;
   precio_lista: number;
   precio: number;
   estado_fisico: string;
@@ -126,12 +128,16 @@ async function crearBorrador(request: Request, env: Env, ctx: ExecutionContext, 
   // Muchas piezas vienen repetidas: una foto puede representar varias.
   const cantidad = Math.min(999, Math.max(1, Math.round(Number(formulario.get('cantidad') ?? 1)) || 1));
   const foto = formulario.get('foto');
+  const talla = String(formulario.get('talla') ?? '').trim() || null;
 
   if (!UUID.test(id)) {
     return json({ error: 'Identificador invalido.' }, 400);
   }
   if (!ESTADOS_FISICOS.has(estadoFisico)) {
     return json({ error: 'Estado fisico invalido.' }, 400);
+  }
+  if (talla !== null && !tallaValida(talla)) {
+    return json({ error: 'Talla invalida.' }, 400);
   }
   if (!(foto instanceof File) || foto.size === 0) {
     return json({ error: 'Falta la foto.' }, 400);
@@ -151,16 +157,17 @@ async function crearBorrador(request: Request, env: Env, ctx: ExecutionContext, 
 
   const ahora = new Date();
   await env.DB.prepare(
-    `insert into productos (id, semana_ingreso, estado_fisico, stock, foto_key, capturado_por, creado_en, actualizado_en)
-     values (?, ?, ?, ?, ?, ?, ?, ?)
+    `insert into productos (id, semana_ingreso, estado_fisico, stock, talla, foto_key, capturado_por, creado_en, actualizado_en)
+     values (?, ?, ?, ?, ?, ?, ?, ?, ?)
      on conflict (id) do update set
        estado_fisico = excluded.estado_fisico,
        stock = excluded.stock,
+       talla = excluded.talla,
        foto_key = excluded.foto_key,
        estado_analisis = 'pendiente',
        actualizado_en = excluded.actualizado_en`,
   )
-    .bind(id, semanaIngreso(ahora), estadoFisico, cantidad, fotoKey, capturadoPor, ahora.toISOString(), ahora.toISOString())
+    .bind(id, semanaIngreso(ahora), estadoFisico, cantidad, talla, fotoKey, capturadoPor, ahora.toISOString(), ahora.toISOString())
     .run();
 
   // El analisis corre despues de responder: la camara nunca espera a la IA.
@@ -176,7 +183,7 @@ async function listarBorradores(url: URL, env: Env): Promise<Response> {
   // fisicamente donde se capturaron hasta que se les pega su etiqueta, asi que
   // el orden de la pantalla tiene que ser el mismo que el de la mesa o se
   // vuelve un rompecabezas saber que etiqueta es de que pieza.
-  const consulta = `select id, nombre, categoria, marca, precio_lista, precio, estado_fisico,
+  const consulta = `select id, nombre, categoria, marca, talla, precio_lista, precio, estado_fisico,
                            estado_analisis, destino, stock, semana_ingreso, capturado_por, creado_en
                     from productos
                     where sin_inventario = 0 ${estado ? 'and estado_analisis = ?' : ''}
@@ -207,7 +214,7 @@ async function corregirBorrador(id: string, cambios: Record<string, unknown>, en
     return json({ error: 'Identificador invalido.' }, 400);
   }
   const fila = await env.DB.prepare(
-    'select nombre, categoria, marca, precio_lista, precio, estado_fisico, destino, stock from productos where id = ?',
+    'select nombre, categoria, marca, talla, precio_lista, precio, estado_fisico, destino, stock from productos where id = ?',
   )
     .bind(id)
     .first<FilaBorrador>();
@@ -218,6 +225,7 @@ async function corregirBorrador(id: string, cambios: Record<string, unknown>, en
   const nombre = cambios.nombre === undefined ? fila.nombre : String(cambios.nombre).slice(0, 120);
   const categoria = cambios.categoria === undefined ? fila.categoria : String(cambios.categoria);
   const marca = cambios.marca === undefined ? fila.marca : String(cambios.marca).trim().slice(0, 60);
+  const talla = cambios.talla === undefined ? fila.talla : String(cambios.talla).trim() || null;
   const estadoFisico = cambios.estado_fisico === undefined ? fila.estado_fisico : String(cambios.estado_fisico);
   const precioLista = cambios.precio_lista === undefined ? fila.precio_lista : Math.round(Number(cambios.precio_lista));
   const stock = cambios.stock === undefined ? fila.stock : Math.round(Number(cambios.stock));
@@ -227,6 +235,9 @@ async function corregirBorrador(id: string, cambios: Record<string, unknown>, en
   }
   if (!ESTADOS_FISICOS.has(estadoFisico)) {
     return json({ error: 'Estado fisico invalido.' }, 400);
+  }
+  if (talla !== null && !tallaValida(talla)) {
+    return json({ error: 'Talla invalida.' }, 400);
   }
   if (!Number.isFinite(precioLista) || precioLista < 0) {
     return json({ error: 'Precio de lista invalido.' }, 400);
@@ -265,14 +276,14 @@ async function corregirBorrador(id: string, cambios: Record<string, unknown>, en
   }
 
   await env.DB.prepare(
-    `update productos set nombre = ?, categoria = ?, marca = ?, precio_lista = ?, precio = ?,
+    `update productos set nombre = ?, categoria = ?, marca = ?, talla = ?, precio_lista = ?, precio = ?,
                           estado_fisico = ?, destino = ?, stock = ?, estado_analisis = 'listo', actualizado_en = ?
      where id = ?`,
   )
-    .bind(nombre, categoria, marca, precioLista, precio, estadoFisico, destino, stock, new Date().toISOString(), id)
+    .bind(nombre, categoria, marca, talla, precioLista, precio, estadoFisico, destino, stock, new Date().toISOString(), id)
     .run();
 
-  return json({ id, nombre, categoria, marca, precio_lista: precioLista, precio, estado_fisico: estadoFisico, destino, stock });
+  return json({ id, nombre, categoria, marca, talla, precio_lista: precioLista, precio, estado_fisico: estadoFisico, destino, stock });
 }
 
 /**
@@ -364,7 +375,7 @@ async function prepararEtiquetas(request: Request, env: Env): Promise<Response> 
     .run();
 
   const { results } = await env.DB.prepare(
-    `select id, codigo, nombre, precio, precio_lista, semana_ingreso, destino, stock
+    `select id, codigo, nombre, talla, precio, precio_lista, semana_ingreso, destino, stock
      from productos where id in (${huecos}) order by rowid`,
   )
     .bind(...limpios)

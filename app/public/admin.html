@@ -122,6 +122,11 @@ import { agruparSesiones } from '/sesiones.js';
 import { enlacePreciosML } from '/precios-ml.js';
 
 import { CATEGORIAS } from '/categorias.js';
+import { TALLAS } from '/tallas.js';
+
+// Una sola lista para todas las fichas; el servidor es quien valida la talla.
+document.body.insertAdjacentHTML('beforeend',
+  `<datalist id="tallas-lista">${TALLAS.map((t) => `<option value="${t}">`).join('')}</datalist>`);
 const opcionesCategoria = (elegida) =>
   CATEGORIAS.map(([c, nombre]) => `<option value="${c}" ${c === elegida ? 'selected' : ''}>${nombre}</option>`).join('');
 // Los montos y las familias de banda salen de la tabla `familias` (GET /api/familias).
@@ -201,6 +206,7 @@ function ficha(p) {
         <div><label>Marca</label>
           <input data-campo="marca" maxlength="60" value="${(p.marca ?? '').replace(/"/g, '&quot;')}"></div>
         <div><label>Categoría</label><select data-campo="categoria">${opcionesCategoria(p.categoria)}</select></div>
+        <div><label>Talla</label><input data-campo="talla" list="tallas-lista" maxlength="30" placeholder="ropa" value="${(p.talla ?? '').replace(/"/g, '&quot;')}"></div>
         <div><label>Estado</label><select data-campo="estado_fisico">
           <option value="nuevo" ${p.estado_fisico === 'nuevo' ? 'selected' : ''}>Nuevo</option>
           <option value="danado" ${p.estado_fisico === 'danado' ? 'selected' : ''}>Dañado</option>
@@ -235,7 +241,7 @@ function ficha(p) {
   const aviso = nodo.querySelector('.aviso');
 
   const base = () => ({
-    nombre: valor('nombre'), marca: valor('marca'), categoria: valor('categoria'),
+    nombre: valor('nombre'), marca: valor('marca'), categoria: valor('categoria'), talla: valor('talla'),
     estado_fisico: valor('estado_fisico'), precio_lista: centavos(valor('precio_lista')),
     stock: Math.round(Number(valor('stock') || 0)),
   });

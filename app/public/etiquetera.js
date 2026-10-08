@@ -188,7 +188,7 @@ export function tsplEtiqueta(pieza, copias = 1, y0 = corrimiento(), barra = modu
   // de un digito, que el lector de la caja no engancha (confirmado en hardware
   // el 2026-09-22 -- el ancho de barra no tenia nada que ver, ya estaba bien).
   const numero = String(Number(pieza.codigo.slice(3))).padStart(4, '0');
-  const pie = limpiar(`${pieza.codigo} - ${pieza.semana_ingreso}`);
+  const pie = limpiar(`${pieza.codigo}${pieza.talla ? ` / ${pieza.talla}` : ''} - ${pieza.semana_ingreso}`);
 
   const ordenes = [
     'SIZE 50.8 mm,25.4 mm',

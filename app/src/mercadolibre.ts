@@ -310,11 +310,12 @@ async function perfilML(env: Env): Promise<{ id: string; nickname: string; usaFa
 interface Pieza {
   id: string; codigo: string | null; nombre: string; categoria: string; marca: string; precio: number;
   estado_fisico: string; stock: number; destino: string; sin_inventario: number; estado_analisis: string; foto_key: string;
+  talla: string | null;
 }
 
 const productoDe = (p: Pieza) => ({
   id: p.id, codigo: p.codigo, nombre: p.nombre, categoria: p.categoria, marca: p.marca,
-  precio: p.precio, estado_fisico: p.estado_fisico, stock: p.stock,
+  precio: p.precio, estado_fisico: p.estado_fisico, stock: p.stock, talla: p.talla?.trim() || null,
 });
 
 // Lo que se puede publicar: pieza individual, revisada, con foto y existencias; nunca bandas ni danadas.
@@ -324,7 +325,7 @@ export const PUBLICABLE = `p.destino = 'etiqueta' and p.sin_inventario = 0 and p
 async function piezaPublicable(env: Env, id: string): Promise<{ ok: true; pieza: Pieza } | { ok: false; status: number; error: string }> {
   if (!ID_PIEZA.test(id)) return { ok: false, status: 404, error: 'La pieza no existe.' };
   const p = await env.DB.prepare(
-    `select id, codigo, nombre, categoria, marca, precio, estado_fisico, stock, destino, sin_inventario, estado_analisis, foto_key
+    `select id, codigo, nombre, categoria, marca, precio, estado_fisico, stock, destino, sin_inventario, estado_analisis, foto_key, talla
      from productos where id = ?`,
   ).bind(id).first<Pieza>();
   if (!p) return { ok: false, status: 404, error: 'La pieza no existe.' };
@@ -537,7 +538,7 @@ interface Sugerencia { categoria_id: string; categoria_nombre: string; dominio: 
 // Los pone el sistema (o la guia de tallas), no el dueno.
 const ATRIBUTOS_PROPIOS = new Set(['ITEM_CONDITION', 'SIZE_GRID_ID', 'SIZE_GRID_ROW_ID']);
 
-function atributosPedidos(attrs: any[], marca: string) {
+function atributosPedidos(attrs: any[], marca: string, talla: string) {
   const ids = new Set(attrs.map((a) => a.id));
   const clave = (a: any) => a.tags?.required || a.tags?.catalog_required || a.tags?.conditional_required;
   return attrs
@@ -551,6 +552,11 @@ function atributosPedidos(attrs: any[], marca: string) {
       } else if (a.id === 'EMPTY_GTIN_REASON') {
         const sinCodigo = valores.find((v: { id: string }) => v.id === '17055160');
         if (sinCodigo) sugerido = sinCodigo;   // «El producto no tiene código registrado»
+      } else if (a.id === 'SIZE' && talla) {
+        // Talla de niño «Niño 6 años / S» -> «6 años»; la de adulto va tal cual.
+        const valor = talla.replace(/^Niño /, '').split(' / ')[0];
+        const igual = valores.find((v: { nombre: string }) => v.nombre.toLowerCase() === valor.toLowerCase());
+        sugerido = { id: igual?.id ?? null, nombre: igual?.nombre ?? valor };
       }
       return {
         id: String(a.id), nombre: String(a.name ?? a.id), tipo: String(a.value_type ?? 'string'),
@@ -717,7 +723,7 @@ async function preparar(env: Env, id: string, request: Request): Promise<Respons
         catalogo,
         precio_ml: precio,
         tipo_publicacion: ml_tipo_publicacion,
-        atributos: atributosPedidos(attrs, p.marca.trim()),
+        atributos: atributosPedidos(attrs, p.marca.trim(), p.talla?.trim() ?? ''),
         guia_tallas: guia,
         avisos,
       },

@@ -163,10 +163,10 @@ function pieza(t: Tienda, extra: Record<string, unknown> = {}): string {
   fila.foto_key = extra.foto_key ?? `fotos/${fila.id}.jpg`;
   t.db.prepare(
     `insert into productos (id, codigo, nombre, marca, categoria, precio, estado_fisico, estado_analisis, destino, sin_inventario,
-                            stock, foto_key, semana_ingreso, creado_en, actualizado_en)
-     values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'S40', ?, '')`,
+                            stock, foto_key, talla, semana_ingreso, creado_en, actualizado_en)
+     values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'S40', ?, '')`,
   ).run(fila.id, fila.codigo, fila.nombre, fila.marca, fila.categoria, fila.precio, fila.estado_fisico, fila.estado_analisis,
-    fila.destino, fila.sin_inventario, fila.stock, fila.foto_key, new Date(2026, 9, 1, 0, 0, n).toISOString());
+    fila.destino, fila.sin_inventario, fila.stock, fila.foto_key, fila.talla ?? null, new Date(2026, 9, 1, 0, 0, n).toISOString());
   if (fila.foto_key) (t.env.FOTOS as any).objetos.set(fila.foto_key, jpeg(1200, 1200).buffer);
   return fila.id;
 }
@@ -312,7 +312,7 @@ test('preparar: categoría, atributos pedidos, precio con ml_pct, guía de talla
     const r = await t.pedir(`/api/ml/preparar/${id}`, {});
     assert.equal(r.status, 200, JSON.stringify(r.cuerpo));
     const { producto, propuesta: p } = r.cuerpo;
-    assert.deepEqual(producto, { id, codigo: producto.codigo, nombre: "Jeans Levi's 501 Hombre", categoria: 'ropa', marca: "Levi's", precio: 25000, estado_fisico: 'nuevo', stock: 3 });
+    assert.deepEqual(producto, { id, codigo: producto.codigo, nombre: "Jeans Levi's 501 Hombre", categoria: 'ropa', marca: "Levi's", precio: 25000, estado_fisico: 'nuevo', stock: 3, talla: null });
     assert.equal(p.titulo, 'Jeans Levis 501 Hombre');
     assert.equal(p.usa_family_name, false);
     assert.deepEqual([p.categoria_id, p.categoria_nombre, p.dominio], ['MLM194175', 'Pantalones', 'MLM-PANTS']);
@@ -339,6 +339,16 @@ test('preparar: categoría, atributos pedidos, precio con ml_pct, guía de talla
     assert.equal(q.usa_family_name, true);
   });
 });
+
+test('preparar: la talla de la pieza va en producto y llena SIZE (adulto y de niño)', () => conML(async (t) => {
+  const adulto = (await t.pedir(`/api/ml/preparar/${pieza(t, { talla: 'M' })}`, {})).cuerpo;
+  assert.equal(adulto.producto.talla, 'M');
+  assert.deepEqual(adulto.propuesta.atributos.find((a: any) => a.id === 'SIZE').valor_sugerido, { id: null, nombre: 'M' });
+  const nino = (await t.pedir(`/api/ml/preparar/${pieza(t, { talla: 'Niño 6 años / S' })}`, {})).cuerpo;
+  assert.equal(nino.producto.talla, 'Niño 6 años / S');
+  assert.deepEqual(nino.propuesta.atributos.find((a: any) => a.id === 'SIZE').valor_sugerido, { id: null, nombre: '6 años' });
+  assert.equal((await t.pedir(`/api/ml/preparar/${pieza(t)}`, {})).cuerpo.producto.talla, null);
+}));
 
 test('preparar: avisos de marca restringida, sin marca, precio mínimo y foto chica', async () => {
   await conML(async (t) => {

@@ -57,7 +57,7 @@ test('catalogo: lista solo piezas vendibles, sin campos internos', async () => {
     assert.equal(c.pagina, 1);
     assert.equal(c.hay_mas, false);
     assert.deepEqual(c.piezas, [{
-      codigo: buena, nombre: 'Buena', marca: 'Levis', categoria: 'ropa', precio: 25000, precio_lista: 0,
+      codigo: buena, nombre: 'Buena', marca: 'Levis', categoria: 'ropa', talla: null, precio: 25000, precio_lista: 0,
       foto: `https://${HOST}/api/catalogo/foto/${buena}`,
     }]);
   } finally { t.db.close(); }

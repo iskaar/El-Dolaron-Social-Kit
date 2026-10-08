@@ -701,6 +701,18 @@ function pintarFormulario() {
   titulo.focus();
 }
 
+// Talla de la pieza -> fila de la guía. Niño: «Niño 6 años / S» prueba «S» y luego «6 años».
+function filaDeTalla(g) {
+  const t = (p.talla ?? '').trim();
+  if (!t) return '';
+  const candidatos = [t, t.split(' / ')[1], t.replace(/^Niño /, '').split(' / ')[0]];
+  for (const c of candidatos) {
+    const fila = (g.filas ?? []).find((x) => String(x.talla).trim().toLowerCase() === (c ?? '').trim().toLowerCase());
+    if (fila) return String(fila.id);
+  }
+  return '';
+}
+
 function pintarGuia() {
   const lista = guias();
   if (!lista.length) {
@@ -711,6 +723,8 @@ function pintarGuia() {
   const filas = h('select', { onchange: (e) => { f.fila = e.target.value; revisar(); } });
   const llenar = () => {
     const g = lista.find((x) => String(x.id) === f.guia);
+    // Preselecciona la talla de la pieza; el dueño la puede cambiar.
+    if (g && !f.fila) f.fila = filaDeTalla(g);
     filas.replaceChildren(h('option', { value: '' }, g ? 'Elige la talla…' : 'Primero elige la guía'),
       ...(g?.filas ?? []).map((x) => h('option', { value: String(x.id), selected: f.fila === String(x.id) }, x.talla)));
     filas.disabled = !g;
@@ -720,6 +734,7 @@ function pintarGuia() {
     lista.map((g) => h('option', { value: String(g.id), selected: f.guia === String(g.id) }, g.nombre)));
   llenar();
   return h('fieldset', {}, h('legend', {}, 'Guía de tallas (obligatoria)'),
+    p.talla ? h('div', { class: 'nota', style: 'margin:-4px 0 8px' }, `Talla de la pieza: ${p.talla}`) : null,
     h('div', { class: 'fila-dos' }, campo('Guía', guia, { requerido: true }), campo('Talla de la pieza', filas, { requerido: true })));
 }
 
