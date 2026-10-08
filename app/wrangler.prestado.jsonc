@@ -5,7 +5,8 @@
   // piezas con el inventario de El Dolaron porque viven en otra base.
   //
   //   npx wrangler deploy --config wrangler.prestado.jsonc
-  //   npx wrangler d1 execute el-dolaron-prestado --remote --file=schema.sql
+  //   npm run db:esquema    (schema.sql + todas las migraciones, solo para base vacia)
+  //   npx wrangler d1 execute el-dolaron-prestado --remote --file=.wrangler/esquema-completo.sql
   //   npx wrangler secret put GEMINI_API_KEY --config wrangler.prestado.jsonc
   "name": "el-dolaron-prestado",
   "main": "src/worker.ts",
