@@ -689,7 +689,8 @@ let descuento = null;
 let sondeoDescuento = null;
 const descuentoAplicado = () => (descuento?.estado === 'aprobada' ? descuento.monto : 0);
 /** Promo de inauguracion del ticket actual; el servidor la vuelve a calcular al cobrar. */
-const promoActual = () => promoInauguracion(totales(lineas).subtotal, creadoEnVenta ? Date.parse(creadoEnVenta) : Date.now(), promoConfig);
+// La hora guardada solo vale mientras el ticket conserva su folio (reintento); sin folio, cobrar() fijara la de ahora.
+const promoActual = () => promoInauguracion(totales(lineas).subtotal, idVenta && creadoEnVenta ? Date.parse(creadoEnVenta) : Date.now(), promoConfig);
 /** Lo que vale el ticket ya con descuento aprobado y promo: contra esto se canjean Dolarones. */
 const totalNeto = () => totales(lineas, 0, 0, descuentoAplicado() + promoActual()).total;
 
@@ -1067,19 +1068,22 @@ async function sincronizar() {
         break;                                   // sin red: la venta se queda encolada
       }
       if (respuesta.status >= 500) break;
-      if (respuesta.status >= 400) {
+      // Respuesta que no es de la aplicacion (portal cautivo, proxy, Access): JSON sin `error` ni `id` de esta venta.
+      const cuerpo = await respuesta.json().catch(() => null);
+      // Sesion o PIN caducados (401) o saturacion pasajera: no es un rechazo de la venta, se reintenta sola.
+      if ([401, 408, 429].includes(respuesta.status)) break;
+      if (respuesta.status >= 400 && cuerpo?.error) {
         // El servidor la rechazo (precio, existencia, efectivo insuficiente...):
         // se queda visible con su motivo, no desaparece como si se hubiera cobrado.
-        const cuerpo = await respuesta.json().catch(() => ({}));
         await store('ventas', 'readwrite', (s) => s.put({
           ...venta, estado: 'rechazada', motivo: cuerpo.error ?? 'El servidor rechazo la venta.',
         }));
         continue;
       }
+      // Solo se descarta de la cola una venta que el servidor confirma con su folio.
+      if (cuerpo?.id !== venta.id) break;
       if (venta.vale_pendiente || venta.recompensa_pendiente) {
-        const cuerpo = await respuesta.json().catch(() => ({}));
-        if (!cuerpo || typeof cuerpo !== 'object' ||
-          !Object.hasOwn(cuerpo, venta.vale_pendiente ? 'vale_emitido' : 'ganados')) break;
+        if (!Object.hasOwn(cuerpo, venta.vale_pendiente ? 'vale_emitido' : 'ganados')) break;
         const emitido = !!cuerpo.vale_emitido;
         if (!venta.imprimir_en) await store('vales_resultados', 'readwrite', (s) => s.put({
           id:venta.id, emitido, importe:venta.vale_pendiente ? cuerpo.vale_emitido?.importe ?? 0 : cuerpo.ganados,
