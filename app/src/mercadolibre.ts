@@ -644,6 +644,20 @@ async function categoriaEnDominio(env: Env, categoriaId: string, dominio: string
   return !!enCategoria && enCategoria === dominio;
 }
 
+/**
+ * Si ML todavia puede vender la pieza: tiene articulo (activa, pausada, vendida o con
+ * error, que se reactivan solas) o se esta publicando ahora. `cerrada` y el error sin
+ * articulo no cuentan. Borrar o fusionar la pieza antes la dejaria huerfana: la
+ * conciliacion une con `productos` y ya no la veria.
+ */
+export async function publicacionViva(env: Env, productoId: string): Promise<boolean> {
+  const fila = await env.DB.prepare(
+    `select 1 as x from ml_publicaciones where producto_id = ? and estado <> 'cerrada'
+       and (ml_item_id is not null or (estado = 'publicando' and actualizado_en >= ?))`,
+  ).bind(productoId, new Date(Date.now() - 120_000).toISOString()).first();
+  return !!fila;
+}
+
 async function yaPublicada(env: Env, id: string): Promise<boolean> {
   const previa = await leerPublicacion(env, id);
   return !!previa && !(previa.estado === 'cerrada' || (previa.estado === 'error' && !previa.ml_item_id));
@@ -946,7 +960,9 @@ export async function conciliarPublicaciones(env: Env, filtro: Filtro = {}): Pro
           await poner(f.producto_id, 'activa');
         } else if (f.estado === 'activa') {
           if (ml.status === 'paused') await poner(f.producto_id, 'pausada');   // la pauso el dueno en ML
-          else if (ml.available_quantity !== f.stock) await poner_ml({ available_quantity: f.stock });
+          // Solo baja: ML descuenta al crear la orden y D1 hasta que se paga, subirla ofreceria otra vez la pieza vendida.
+          // Subir la cantidad tras un resurtido de varias piezas se hace a mano en ML.
+          else if (ml.available_quantity > f.stock) await poner_ml({ available_quantity: f.stock });
         } else if ((f.estado === 'pausada' || f.estado === 'error') && ml.status === 'active') {
           await poner(f.producto_id, 'activa');                                // la reactivo el dueno en ML
         }
