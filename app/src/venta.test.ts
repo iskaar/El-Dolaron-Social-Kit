@@ -1,7 +1,7 @@
 // node --test src/venta.test.ts
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { totales, agregar, efectivoAlcanza, saldoCanjeable, dolaronesGanados, maximoCanje } from '../public/venta.js';
+import { totales, agregar, efectivoAlcanza, saldoCanjeable, dolaronesGanados, maximoCanje, desfaseReloj } from '../public/venta.js';
 
 interface Linea { codigo: string; nombre: string; precio: number; cantidad: number }
 const pieza = (codigo: string, precio: number) => ({ codigo, nombre: codigo, precio });
@@ -97,4 +97,15 @@ test('papel: 5 D por bloque; Usar máximo cubre total o saldo elegible sin exced
   assert.equal(maximoCanje({ ...s, maximo:undefined }, 30000, ahora), 0, 'teléfono no autoriza');
   assert.equal(maximoCanje({ ...s, expira_en:'fecha inválida' }, 30000, ahora), 0);
   assert.equal(maximoCanje(s, 30000, Date.parse(s.expira_en)), 0);
+});
+
+test('reloj de la caja: avisa solo pasados 10 min, con signo, y una cabecera ilegible no avisa', () => {
+  const servidor = 'Wed, 07 Oct 2026 18:00:00 GMT';
+  const t = Date.parse(servidor);
+  assert.equal(desfaseReloj(t, servidor), 0);
+  assert.equal(desfaseReloj(t + 10 * 60_000, servidor), 0);
+  assert.equal(desfaseReloj(t + 25 * 60_000, servidor), 25);     // adelantado
+  assert.equal(desfaseReloj(t - 90 * 60_000, servidor), -90);    // atrasado
+  assert.equal(desfaseReloj(t, null), 0);
+  assert.equal(desfaseReloj(t, 'basura'), 0);
 });

@@ -580,7 +580,12 @@ interface ProductoVenta {
   nombre: string;
   precio: number;
   sin_inventario: number;
+  precio_anterior?: number | null;
+  precio_cambiado_en?: string | null;
 }
+
+// El precio que mostro la caja gana si es el anterior y el cambio es reciente (decision 7/10).
+const VENTANA_PRECIO_ANTERIOR = 10 * 60_000;
 
 interface LineaPreparada {
   producto_id: string;
@@ -593,13 +598,16 @@ interface LineaPreparada {
 
 /**
  * Del navegador solo se confia el producto y la cantidad: precio, nombre y
- * codigo salen del catalogo del servidor, nunca de lo que mande la caja. Es
+ * codigo salen del catalogo del servidor. Unica excepcion: el precio de la caja
+ * vale si es exactamente el precio anterior y el cambio fue hace menos de 10
+ * min de la hora de la venta (la caja aun no refrescaba el catalogo). Es
  * pura a proposito, para poder probarla sin D1: worker.ts solo junta el mapa
  * de productos antes de llamarla.
  */
 export function prepararLineas(
   lineasCliente: LineaVenta[],
   productos: Map<string, ProductoVenta>,
+  horaVenta = Date.now(),
 ): { ok: true; lineas: LineaPreparada[] } | { ok: false; error: string } {
   if (lineasCliente.length === 0) {
     return { ok: false, error: 'La venta no tiene piezas.' };
@@ -615,11 +623,14 @@ export function prepararLineas(
     if (!producto) {
       return { ok: false, error: 'Producto inexistente.' };
     }
+    const cambio = Date.parse(producto.precio_cambiado_en ?? '');
+    const precioCaja = Number.isInteger(l.precio) && l.precio === producto.precio_anterior
+      && horaVenta <= cambio + VENTANA_PRECIO_ANTERIOR;
     lineas.push({
       producto_id: producto.id,
       codigo: producto.codigo ?? '',
       nombre: producto.nombre,
-      precio: producto.precio,
+      precio: precioCaja ? (l.precio as number) : producto.precio,
       cantidad,
       sinInventario: producto.sin_inventario === 1,
     });
@@ -699,13 +710,16 @@ async function registrarVenta(request: Request, env: Env, ctx: ExecutionContext,
   }
   const huecos = idsPedidos.map(() => '?').join(',');
   const { results: filas } = await env.DB.prepare(
-    `select id, codigo, nombre, precio, sin_inventario from productos where id in (${huecos})`,
+    `select id, codigo, nombre, precio, sin_inventario, precio_anterior, precio_cambiado_en from productos where id in (${huecos})`,
   )
     .bind(...idsPedidos)
     .all<ProductoVenta>();
   const productos = new Map(filas.map((f) => [f.id, f]));
 
-  const preparado = prepararLineas(venta.lineas as LineaVenta[], productos);
+  // Hora fiable de la venta (la de la caja): una hora futura no se acepta.
+  const horaCaja = Date.parse(String(venta.creado_en ?? ''));
+  const horaVenta = Number.isFinite(horaCaja) && horaCaja <= Date.now() + 300_000 ? horaCaja : Date.now();
+  const preparado = prepararLineas(venta.lineas as LineaVenta[], productos, horaVenta);
   if (!preparado.ok) {
     return json({ error: preparado.error }, 400);
   }
@@ -720,10 +734,8 @@ async function registrarVenta(request: Request, env: Env, ctx: ExecutionContext,
     descuento = valido.monto;
   }
   // Promo de inauguracion con la hora de la venta en la caja (una venta encolada
-  // sin red conserva la promo que vio el cliente); una hora futura no se acepta.
-  // Se guarda sumada en `descuento`: devoluciones la prorratea igual.
-  const horaCaja = Date.parse(String(venta.creado_en ?? ''));
-  const horaVenta = Number.isFinite(horaCaja) && horaCaja <= Date.now() + 300_000 ? horaCaja : Date.now();
+  // sin red conserva la promo que vio el cliente). Se guarda sumada en
+  // `descuento`: devoluciones la prorratea igual.
   descuento += promoInauguracion(subtotal, horaVenta, promoDe(env));
   const total = subtotal - descuento;
   const efectivo = Math.max(0, Math.round(Number(venta.efectivo ?? 0)));
@@ -1005,6 +1017,28 @@ async function inventarioEnPiso(env: Env, ahora = Date.now()) {
 }
 
 /**
+ * CTE `netas`: cada pieza vendida (no cancelada) con lo que de verdad aporta a
+ * `resumen.total`. Cada ticket cuenta `total - devuelto - dolarones_devueltos`
+ * (ya con descuento y promo restados); ese neto se reparte entre sus lineas en
+ * proporcion a su importe, y los centavos que sobran del redondeo hacia abajo
+ * van uno a uno a las lineas con mayor resto, asi cada ticket suma exacto.
+ * `filtro` es la condicion sobre `v` (ventas) y trae sus propios `?`.
+ */
+const lineasNetas = (filtro: string) => `with base as (
+    select v.id as venta, l.id, l.producto_id, l.codigo, l.nombre, l.cantidad - l.cancelada_cantidad as cant,
+      l.precio * (l.cantidad - l.cancelada_cantidad) as importe, v.total - v.devuelto - v.dolarones_devueltos as neto
+    from venta_lineas l join ventas v on v.id = l.venta_id where v.cancelada = 0 and ${filtro}),
+  piso as (
+    select *, sum(importe) over (partition by venta) as suma,
+      case when sum(importe) over (partition by venta) > 0 then neto * importe / sum(importe) over (partition by venta) else 0 end as base_neta,
+      case when sum(importe) over (partition by venta) > 0 then neto * importe % sum(importe) over (partition by venta) else 0 end as resto
+    from base),
+  netas as (
+    select *, base_neta + case when resto > 0 and row_number() over (partition by venta order by resto desc, id)
+        <= neto - sum(base_neta) over (partition by venta) then 1 else 0 end as neta
+    from piso)`;
+
+/**
  * Reportes: todo sale de consultas contra D1 en el momento, nada se precalcula
  * ni vive en otra tabla. `dias` acota lo que tiene sentido por rango (ventas del
  * dia, categoria, top de piezas); precio sugerido y dias en venta son de
@@ -1084,11 +1118,10 @@ async function reportes(url: URL, env: Env): Promise<Response> {
 
   // Lo vendido por categoria (las bandas juntas), del periodo y del anterior de igual largo: mismas reglas en los dos.
   const ventasPorCategoria = (anteriorAlPeriodo: boolean) => env.DB.prepare(
-    `select case when p.sin_inventario = 1 then 'bandas' else coalesce(nullif(p.categoria, ''), 'sin categoria') end as categoria,
-       coalesce(sum(l.precio * (l.cantidad - l.cancelada_cantidad)), 0) as total,
-       coalesce(sum(l.cantidad - l.cancelada_cantidad), 0) as piezas
-     from venta_lineas l join ventas v on v.id = l.venta_id left join productos p on p.id = l.producto_id
-     where v.cancelada = 0 and v.creado_en >= ? ${anteriorAlPeriodo ? 'and v.creado_en < ?' : ''}
+    `${lineasNetas(`v.creado_en >= ? ${anteriorAlPeriodo ? 'and v.creado_en < ?' : ''}`)}
+     select case when p.sin_inventario = 1 then 'bandas' else coalesce(nullif(p.categoria, ''), 'sin categoria') end as categoria,
+       coalesce(sum(n.neta), 0) as total, coalesce(sum(n.cant), 0) as piezas
+     from netas n left join productos p on p.id = n.producto_id
      group by categoria order by total desc`,
   )
     .bind(...(anteriorAlPeriodo ? [rango.anterior_desde, desde] : [desde]))
@@ -1097,11 +1130,10 @@ async function reportes(url: URL, env: Env): Promise<Response> {
   const { results: porCategoriaAnterior } = await ventasPorCategoria(true);
 
   const { results: topProductos } = await env.DB.prepare(
-    `select l.codigo, l.nombre, sum(l.cantidad - l.cancelada_cantidad) as cantidad,
-       sum(l.precio * (l.cantidad - l.cancelada_cantidad)) as total
-     from venta_lineas l join ventas v on v.id = l.venta_id
-     where v.cancelada = 0 and v.creado_en >= ? and l.producto_id is not null and l.cantidad > l.cancelada_cantidad
-     group by l.codigo, l.nombre order by cantidad desc, total desc limit 10`,
+    `${lineasNetas('v.creado_en >= ?')}
+     select codigo, nombre, sum(cant) as cantidad, sum(neta) as total
+     from netas where producto_id is not null and cant > 0
+     group by codigo, nombre order by cantidad desc, total desc limit 10`,
   )
     .bind(desde)
     .all<{ codigo: string; nombre: string; cantidad: number; total: number }>();

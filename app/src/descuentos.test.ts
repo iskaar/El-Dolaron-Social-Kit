@@ -6,6 +6,7 @@ import assert from 'node:assert/strict';
 import { tienda, PRODUCTO, DUENO } from './prueba-d1.ts';
 import { descuentoDe, totales } from '../public/venta.js';
 import { resolverDescuento } from './descuentos.ts';
+import { verificarCuadre } from '../public/graficas.js';
 
 const TIENDA = 'tienda@prueba.mx';
 const ANA = 'ana@prueba.mx';
@@ -365,4 +366,41 @@ test('promo de inauguracion: $100 menos en tickets de $300 o mas dentro de la ve
   const ambos = await venta({ creado_en: dentro, descuento_id: id }, 2);
   assert.equal(ambos.cuerpo.descuento, 15000);
   assert.equal(ambos.cuerpo.total, 35000);
+});
+
+test('/reportes: con promo, descuento aprobado, pieza devuelta y ticket cancelado, categorias y top suman lo mismo que el total', async () => {
+  const { db, env, pedirDescuento, venta, pedir, ana, como } = await montar();
+  const Q = crypto.randomUUID();
+  db.prepare(`insert into productos (id, codigo, nombre, categoria, precio, stock, semana_ingreso, creado_en, actualizado_en)
+              values (?, 'ED-000002', 'Mesa', 'hogar', 33333, 50, 'S40', '', '')`).run(Q);
+  db.prepare(`update productos set categoria = 'ropa' where id = ?`).run(PRODUCTO);
+  const lineas = (p: number, q: number) => [{ producto_id: PRODUCTO, cantidad: p }, ...(q ? [{ producto_id: Q, cantidad: q }] : [])];
+  const aprobar = async (subtotal: number) =>
+    (await pedirDescuento({ subtotal, valor: 7, aprobador: DUENO, pin: PIN_DUENO })).cuerpo.id as string;
+
+  // A: solo promo ($100 menos, desde una hora antes hasta manana)
+  Object.assign(env, { PROMO_DESDE: new Date(Date.now() - 3_600_000).toISOString(), PROMO_HASTA: new Date(Date.now() + 86_400_000).toISOString() });
+  const a = await venta({ lineas: lineas(1, 1), efectivo: 100000 });
+  assert.equal(a.cuerpo.descuento, 10000);
+  // B: promo + descuento aprobado
+  const b = await venta({ lineas: lineas(2, 1), efectivo: 100000, descuento_id: await aprobar(83333) });
+  assert.equal(b.status, 201, JSON.stringify(b.cuerpo));
+  // C: sin promo, descuento aprobado y una pieza devuelta
+  delete (env as any).PROMO_DESDE;
+  const folioC = crypto.randomUUID();
+  assert.equal((await venta({ id: folioC, lineas: lineas(2, 1), efectivo: 100000, descuento_id: await aprobar(83333) })).status, 201);
+  const lineaC = (db.prepare('select id from venta_lineas where venta_id = ? and producto_id = ?').get(folioC, PRODUCTO) as any).id;
+  assert.equal((await pedir(`/api/ventas/${folioC}/lineas/${lineaC}/cancelar`,
+    { id: crypto.randomUUID(), cantidad: 1, motivo: 'defecto', caja: 'Caja 1' }, 'POST', ana)).status, 201);
+  // D: cancelado completo
+  const d = await venta({ lineas: lineas(1, 0) });
+  assert.equal((await pedir(`/api/ventas/${d.cuerpo.id}/cancelar`, { motivo: 'prueba', caja: 'Caja 1' }, 'POST', ana)).status, 200);
+
+  como(DUENO);
+  const r = (await pedir('/api/reportes?dias=7')).cuerpo;
+  const suma = (filas: { total: number }[]) => filas.reduce((s, f) => s + f.total, 0);
+  assert.ok(r.resumen.total > 0 && r.resumen.total < 58333 + 83333 * 2, 'hay descuentos de por medio');
+  assert.equal(suma(r.por_categoria), r.resumen.total);
+  assert.equal(suma(r.top_productos), r.resumen.total);
+  assert.deepEqual(verificarCuadre(r).filter((c: { ok: boolean }) => !c.ok), []);
 });

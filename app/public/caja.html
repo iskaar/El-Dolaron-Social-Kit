@@ -263,6 +263,7 @@ if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw-caja.js'
 <footer id="pie">
   <span id="corte">Hoy: —</span>
   <span id="pendientes"></span>
+  <span id="reloj" style="color:#D72B32;font-weight:700"></span>
   <span id="catalogo-info"></span>
   <span id="impresora-estado"></span>
   <button id="conectar-impresora" type="button" hidden
@@ -345,7 +346,7 @@ if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw-caja.js'
   </div>
 </dialog>
 <script type="module">
-import { totales, agregar, efectivoAlcanza, dolaronesGanados, saldoCanjeable, maximoCanje, MINIMO_REGALO, descuentoDe, TOPE_DESCUENTO, DENOMINACIONES, contadoDe, promoInauguracion } from '/venta.js';
+import { totales, agregar, efectivoAlcanza, dolaronesGanados, saldoCanjeable, maximoCanje, MINIMO_REGALO, descuentoDe, TOPE_DESCUENTO, DENOMINACIONES, contadoDe, promoInauguracion, desfaseReloj } from '/venta.js';
 import { abrirCamara } from '/camara.js';
 import {
   reconectarImpresora, conectarImpresora, impresoraLista, imprimirTicket, abrirCajon, explicarErrorUsb, errorImpresora,
@@ -390,6 +391,9 @@ const notaVales = () => {
 async function cargarConfigVales() {
   try {
     const r = await fetch('/api/vales/config');
+    // Las ventas se guardan con la hora de esta computadora: si esta mal puesta, avisa.
+    const min = desfaseReloj(Date.now(), r.headers.get('date'));
+    $('reloj').textContent = min ? `⚠ El reloj de esta computadora está ${Math.abs(min)} min ${min > 0 ? 'adelantado' : 'atrasado'}. Corrígelo en la configuración de Windows: las ventas se guardan con esa hora.` : '';
     const c = r.ok ? await r.json() : null;
     valesHabilitados = c && typeof c.habilitado === 'boolean' ? c.habilitado : null;
     if (c && 'promo' in c) {
@@ -1795,8 +1799,9 @@ addEventListener('online', () => { pintarRed(); cargarConfigVales(); sincronizar
 addEventListener('offline', () => { pintarRed(); valesHabilitados = null; notaVales(); });
 setInterval(sincronizar, 30000);
 // Lo etiquetado durante el día también aparece en la búsqueda por nombre sin recargar la caja.
-// ponytail: catálogo completo cada 5 min; pedir sólo lo cambiado si el catálogo crece mucho.
-setInterval(() => { if (navigator.onLine) cargarCatalogo(); }, 5 * 60_000);
+// 7/10: cada 60 s para que un precio nuevo llegue pronto (el servidor honra el precio anterior 10 min).
+// ponytail: catálogo completo cada 60 s; pedir sólo lo cambiado si el catálogo crece mucho.
+setInterval(() => { if (navigator.onLine) cargarCatalogo(); }, 60_000);
 
 /* ---------- impresión remota: consumidor de esta estación (cajaActual) ---------- */
 let imprimiendoRemotas = false;
