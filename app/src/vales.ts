@@ -25,7 +25,7 @@ export async function valeUsadoEnVenta(env: Env, id: string): Promise<Vale | nul
 }
 
 export async function buscarVale(request: Request, env: Env): Promise<Response> {
-  const body = await request.json().catch(() => ({})) as { codigo?: unknown };
+  const body = await request.json().then((c) => c ?? {}, () => ({})) as { codigo?: unknown };
   const codigo = String(body.codigo ?? '');
   if (!CODIGO.test(codigo)) return json({ error:'Código de vale inválido.' }, 400);
   const ahora = new Date().toISOString();

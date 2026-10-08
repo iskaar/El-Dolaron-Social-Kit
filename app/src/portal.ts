@@ -101,7 +101,7 @@ export async function registro(request: Request, env: Env, auth: Identidad): Pro
   if (!promocionAbierta(env)) return json({ error: 'Registro no disponible.' }, 503);
   if (await hayRegalosLegados(env))
     return json({ error: 'Hay premios anteriores pendientes de conciliación; registro cerrado.' }, 409);
-  const body = await request.json().catch(() => ({})) as Record<string, unknown>;
+  const body = await request.json().then((c) => c ?? {}, () => ({})) as Record<string, unknown>;
   const nombre = String(body.nombre ?? '').replace(/\s+/g, ' ').trim();
   if (nombre.length < 2 || nombre.length > 80 ||
     body.bases_version !== env.BASES_APROBADAS_VERSION || body.acepta_bases !== true || body.declara_mayor_edad !== true)
@@ -142,7 +142,7 @@ export async function registro(request: Request, env: Env, auth: Identidad): Pro
 
 export async function llegada(request: Request, env: Env, autor: string): Promise<Response> {
   if (!promocionAbierta(env)) return json({ error: 'Promoción no disponible.' }, 503);
-  const body = await request.json().catch(() => ({})) as { cliente_id?: unknown };
+  const body = await request.json().then((c) => c ?? {}, () => ({})) as { cliente_id?: unknown };
   const id = String(body.cliente_id ?? '');
   if (!UUID.test(id)) return json({ error: 'Socio inválido.' }, 400);
   if (!await env.DB.prepare('select 1 from clientes where id = ?').bind(id).first()) return json({ error: 'Socio no encontrado.' }, 404);
@@ -182,7 +182,7 @@ export async function llegada(request: Request, env: Env, autor: string): Promis
 
 /** El dueño coteja al cliente presente antes de vincular un registro previo. */
 export async function vincular(request: Request, env: Env): Promise<Response> {
-  const body = await request.json().catch(() => ({})) as { codigo?: unknown; numero?: unknown; confirma?: unknown };
+  const body = await request.json().then((c) => c ?? {}, () => ({})) as { codigo?: unknown; numero?: unknown; confirma?: unknown };
   const codigo = String(body.codigo ?? '');
   const numero = Number(body.numero);
   if (!codigo.startsWith('DV-') || !Number.isSafeInteger(numero) || numero < 1 || body.confirma !== true)
@@ -244,7 +244,7 @@ export async function portal(request: Request, env: Env, url: URL): Promise<Resp
   if (url.pathname === '/api/portal/codigo' && request.method === 'POST') {
     if (!basesListas(env) || socio.bases_version !== env.BASES_APROBADAS_VERSION)
       return json({ error: 'Acepta las bases vigentes antes de generar tu código.' }, 409);
-    const body = await request.json().catch(() => ({})) as { maximo?: unknown };
+    const body = await request.json().then((c) => c ?? {}, () => ({})) as { maximo?: unknown };
     const ahora = new Date();
     const disponible = (await saldo(env, socio.id, ahora.toISOString())).disponible;
     // Sin máximo = todo el saldo: el cliente sólo muestra el código y en caja le preguntan si los usa.

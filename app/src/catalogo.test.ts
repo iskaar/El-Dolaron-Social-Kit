@@ -240,3 +240,16 @@ test('catalogo (Issue #220): revision no existe en el host publico', async () =>
     assert.equal((await t.llamar('/api/catalogo/revision')).status, 404);
   } finally { t.db.close(); }
 });
+
+test('catalogo: una pieza sin nombre no sale en el sitio, y la revision lo dice', async () => {
+  const t = publica();
+  const personal = (ruta: string) => worker.fetch!(new Request(`https://personal.prueba${ruta}`) as never, t.env, t.ctx as never);
+  try {
+    const buena = pieza(t, { nombre: 'Blusa' });
+    const sinNombre = pieza(t, { nombre: '   ' });   // la IA a veces devuelve el nombre vacio
+    const lista = await leer(await t.llamar('/api/catalogo'));
+    assert.deepEqual(lista.piezas.map((p: any) => p.codigo), [buena]);
+    const { piezas } = await leer(await personal('/api/catalogo/revision'));
+    assert.deepEqual(piezas.find((p: any) => p.codigo === sinNombre)?.motivos, ['sin_nombre']);
+  } finally { t.db.close(); }
+});

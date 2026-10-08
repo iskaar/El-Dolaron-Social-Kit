@@ -61,7 +61,7 @@ interface FilaBorrador {
  * valiendo si algun dia la politica de Access queda mal configurada. Los precios
  * y el inventario no viven en el telefono que anda en el pasillo.
  */
-const RUTAS_VENDEDOR = new Set(['/captura', '/foto.js', '/api/salud', '/sin-acceso', '/api/yo']);
+const RUTAS_VENDEDOR = new Set(['/captura', '/foto.js', '/tallas.js', '/api/salud', '/sin-acceso', '/api/yo']);
 const EXISTENCIA = /^\/api\/borradores\/([^/]+)\/existencia$/;
 
 export function permitidaParaVendedor(pathname: string, metodo: string): boolean {
@@ -262,7 +262,7 @@ async function corregirBorrador(id: string, cambios: Record<string, unknown>, en
       return json({ error: 'Precio invalido.' }, 400);
     }
     if (esDestinoBanda(destino)) {
-      // Banda: manda el precio de la banda. Etiqueta: quiebra la decena (termina en 9) como el automatico.
+      // Banda: manda el precio de la banda. Etiqueta: el precio tecleado por el dueno se respeta tal cual.
       precio = ajustarManual({ precio, destino: destino as Destino, config });
     }
     // Misma regla que en el calculo automatico: el precio de venta nunca queda
@@ -315,7 +315,7 @@ async function capturarManual(request: Request, env: Env, correo: string): Promi
   // el mismo que le pondria Etiquetas, asi que la etiqueta impresa despues coincide.
   // Las de banda se cobran con el codigo de la banda.
   await env.DB.prepare(
-    `update productos set codigo = 'ED-' || printf('%06d', rowid)
+    `update productos set codigo = ${CODIGO_NUEVO}
      where id = ? and (codigo is null or codigo = '') and destino not like 'banda%'`,
   ).bind(id).run();
   return json(await respuesta.json(), 201);
@@ -353,6 +353,16 @@ async function corregirExistencia(id: string, request: Request, env: Env, correo
 }
 
 /**
+ * Codigo ED- nuevo: el rowid, o el siguiente al mayor que ya existe si ese rowid ya
+ * se uso. SQLite reutiliza el rowid mas alto al borrar (fusionar/descartar), y una
+ * fusion deja vivo el codigo de la borrada: sin esto, la siguiente pieza chocaria
+ * con el indice unico o heredaria una etiqueta ya pegada.
+ * ponytail: max() recorre los codigos ED-; un contador en config si el catalogo crece mucho.
+ */
+const CODIGO_NUEVO = `'ED-' || printf('%06d', max(rowid,
+  (select coalesce(max(cast(substr(codigo, 4) as integer)), 0) + 1 from productos where codigo like 'ED-%')))`;
+
+/**
  * Asigna el codigo de barras a las piezas que se van a etiquetar y las devuelve.
  * El codigo se mina una sola vez: una pieza que ya trae etiqueta impresa conserva
  * el suyo, porque reimprimir con otro codigo deja el papel del anaquel huerfano.
@@ -368,12 +378,18 @@ async function prepararEtiquetas(request: Request, env: Env): Promise<Response> 
   }
 
   const huecos = limpios.map(() => '?').join(',');
-  await env.DB.prepare(
-    `update productos set codigo = 'ED-' || printf('%06d', rowid), actualizado_en = ?
-     where id in (${huecos}) and (codigo is null or codigo = '')`,
+  // Una por una y en orden de captura: cada codigo nuevo ve el anterior (CODIGO_NUEVO).
+  const { results: porCodificar } = await env.DB.prepare(
+    `select id from productos where id in (${huecos}) and (codigo is null or codigo = '') order by rowid`,
   )
-    .bind(new Date().toISOString(), ...limpios)
-    .run();
+    .bind(...limpios)
+    .all<{ id: string }>();
+  const ahora = new Date().toISOString();
+  if (porCodificar.length) {
+    await env.DB.batch(porCodificar.map(({ id }) => env.DB.prepare(
+      `update productos set codigo = ${CODIGO_NUEVO}, actualizado_en = ? where id = ?`,
+    ).bind(ahora, id)));
+  }
 
   const { results } = await env.DB.prepare(
     `select id, codigo, nombre, talla, precio, precio_lista, semana_ingreso, destino, stock
@@ -397,20 +413,30 @@ async function fusionarBorrador(id: string, request: Request, env: Env): Promise
     return json({ error: 'Identificador invalido.' }, 400);
   }
 
-  const repetida = await env.DB.prepare('select stock from productos where id = ?')
+  const repetida = await env.DB.prepare('select stock, codigo from productos where id = ?')
     .bind(id)
-    .first<{ stock: number }>();
-  const original = await env.DB.prepare('select stock from productos where id = ?')
+    .first<{ stock: number; codigo: string | null }>();
+  const original = await env.DB.prepare('select stock, codigo from productos where id = ?')
     .bind(destinoId)
-    .first<{ stock: number }>();
+    .first<{ stock: number; codigo: string | null }>();
   if (!repetida || !original) {
     return json({ error: 'La pieza no existe.' }, 404);
   }
+  // Mas de 999 no cabe en una pieza: el admin ya no podria guardarla (corregirBorrador).
+  if (original.stock + repetida.stock > 999) {
+    return json({ error: 'Con esa suma pasa de 999 piezas en existencia.' }, 409);
+  }
 
+  // Si la original no tiene etiqueta, hereda la de la repetida (la que ya esta pegada):
+  // sin eso la etiqueta impresa apunta a una pieza borrada y la caja no la encuentra.
+  // El borrado va primero: el codigo es unico y no puede existir dos veces a la vez.
   await env.DB.batch([
-    env.DB.prepare('update productos set stock = stock + ?, actualizado_en = ? where id = ?')
-      .bind(repetida.stock, new Date().toISOString(), destinoId),
     env.DB.prepare('delete from productos where id = ?').bind(id),
+    env.DB.prepare(
+      `update productos set stock = stock + ?, actualizado_en = ?,
+         codigo = case when codigo is null or codigo = '' then ? else codigo end
+       where id = ?`,
+    ).bind(repetida.stock, new Date().toISOString(), repetida.codigo ?? null, destinoId),
   ]);
   await env.FOTOS.delete(`fotos/${id}.jpg`);
 
@@ -697,7 +723,8 @@ async function registrarVenta(request: Request, env: Env, ctx: ExecutionContext,
   // sin red conserva la promo que vio el cliente); una hora futura no se acepta.
   // Se guarda sumada en `descuento`: devoluciones la prorratea igual.
   const horaCaja = Date.parse(String(venta.creado_en ?? ''));
-  descuento += promoInauguracion(subtotal, Number.isFinite(horaCaja) && horaCaja <= Date.now() + 300_000 ? horaCaja : Date.now(), promoDe(env));
+  const horaVenta = Number.isFinite(horaCaja) && horaCaja <= Date.now() + 300_000 ? horaCaja : Date.now();
+  descuento += promoInauguracion(subtotal, horaVenta, promoDe(env));
   const total = subtotal - descuento;
   const efectivo = Math.max(0, Math.round(Number(venta.efectivo ?? 0)));
   const clienteId = venta.cliente_id ? String(venta.cliente_id) : null;
@@ -710,7 +737,9 @@ async function registrarVenta(request: Request, env: Env, ctx: ExecutionContext,
 
   const momento = new Date();
   const ahora = momento.toISOString();
-  const creadoEn = String(venta.creado_en ?? ahora);
+  // La misma hora fiable: una fecha ilegible o futura (reloj de la caja mal puesto) mandaria la venta a otro
+  // dia y fuera de los reportes y de la ventana de cancelacion. Una venta sin red conserva su hora.
+  const creadoEn = new Date(horaVenta).toISOString();
 
   // Valida socio, código y saldo; consumo y venta se confirman en el mismo batch.
   const recompensa = await sentenciasDeVenta(env, {
@@ -850,7 +879,11 @@ export function rangoDias(dias: number, ahora = Date.now()) {
     anterior_desde: apertura(hoyTienda(ahora - (2 * dias - 1) * 86_400_000)),
   };
 }
-const rangoDe = (url: URL) => rangoDias(Math.min(365, Math.max(1, Math.round(Number(url.searchParams.get('dias') ?? 30)))));
+// `dias=abc` daba NaN y tumbaba el reporte con 500: un valor que no es numero vale el de omision.
+const rangoDe = (url: URL) => {
+  const dias = Math.round(Number(url.searchParams.get('dias') ?? 30));
+  return rangoDias(Number.isFinite(dias) ? Math.min(365, Math.max(1, dias)) : 30);
+};
 
 // Lo que lleva un renglon de la lista de tickets (ticket.js `renglonTicket`), del dia o del rango.
 const COLUMNAS_TICKET = `v.id, v.total, v.forma_pago, v.cancelada, v.creado_en, v.dolarones, v.devuelto, v.dolarones_devueltos,
@@ -1181,9 +1214,9 @@ function celdaCsv(valor: unknown): string {
   // Evitar inyeccion de formulas: si es texto y empieza con un caracter peligroso, prefijo con apostrofe.
   // Excepto si es un numero decimal (que puede ser negativo), que se deja tal cual.
   if (typeof valor === 'string' && /^[=+\-@\t\r]/.test(texto) && !/^-?\d+(\.\d+)?$/.test(texto)) {
-    return /[",\n]/.test(texto) ? `"'${texto.replace(/"/g, '""')}"` : `'${texto}`;
+    return /[",\r\n]/.test(texto) ? `"'${texto.replace(/"/g, '""')}"` : `'${texto}`;
   }
-  return /[",\n]/.test(texto) ? `"${texto.replace(/"/g, '""')}"` : texto;
+  return /[",\r\n]/.test(texto) ? `"${texto.replace(/"/g, '""')}"` : texto;
 }
 
 function respuestaCsv(nombreArchivo: string, encabezados: string[], filas: unknown[][]): Response {
@@ -1324,7 +1357,9 @@ async function exportarVentasCsv(env: Env): Promise<Response> {
   }>();
 
   const filas = results.map((f) => [
-    f.creado_en, f.forma_pago, f.cancelada ? 'si' : 'no', f.cancelada_por, f.motivo_cancelacion,
+    // Hora de la tienda (UTC-6), como en tickets.csv: en UTC, una venta de la tarde caia al dia siguiente.
+    new Date(Date.parse(f.creado_en) - 6 * 3_600_000).toISOString().slice(0, 16).replace('T', ' '),
+    f.forma_pago, f.cancelada ? 'si' : 'no', f.cancelada_por, f.motivo_cancelacion,
     f.codigo, f.categoria, f.nombre, pesosDe(f.precio), f.cantidad, pesosDe(f.precio * f.cantidad),
     f.cancelada_cantidad,
   ]);
@@ -1516,7 +1551,7 @@ export default {
       if (pathname === '/api/conteo' && request.method === 'GET') return await listarAltoValor(env);
       if (pathname === '/api/conteo' && request.method === 'POST') return await revisarConteo(request, env);
       if (pathname === '/api/conteo/ajustes' && request.method === 'GET') return await listarAjustes(env);
-      if (pathname === '/api/conteo/ajustes' && request.method === 'POST') return await ajustarExistencia(request, env, correo);
+      if (pathname === '/api/conteo/ajustes' && request.method === 'POST') return await ajustarExistencia(request, env, correo, ctx);
 
       if (pathname.startsWith('/api/ml/') || pathname === '/ml/callback') {
         const respuestaML = await rutaML(request, env, url);

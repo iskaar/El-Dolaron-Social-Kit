@@ -56,3 +56,50 @@ test('marca y categorias nuevas (#159): se guardan, salen en la cola y en el inv
   assert.equal(r.status, 200);
   assert.equal((db.prepare('select marca from productos where id = ?').get(cuerpo.id) as { marca: string }).marca, 'Elf');
 });
+
+test('fusionar dos fotos de la misma pieza: la que se queda conserva la etiqueta que ya salio impresa', async () => {
+  const { db, pedir } = tienda();
+  const original = crypto.randomUUID();
+  const repetida = crypto.randomUUID();
+  const alta = (id: string, codigo: string, stock: number) => db.prepare(
+    `insert into productos (id, codigo, nombre, precio, precio_lista, stock, estado_analisis, destino, foto_key, semana_ingreso, creado_en, actualizado_en)
+     values (?, ?, 'Tenis', 19900, 0, ?, 'listo', 'etiqueta', ?, 'S40', '', '')`).run(id, codigo, stock, `fotos/${id}.jpg`);
+  alta(original, '', 2);            // la foto original aun no tiene etiqueta
+  alta(repetida, 'ED-000900', 3);   // la repetida ya trae la suya, pegada en el anaquel
+  const r = await pedir(`/api/borradores/${repetida}/fusionar`, { destino_id: original });
+  assert.equal(r.status, 200);
+  const fila = db.prepare('select codigo, stock from productos where id = ?').get(original) as { codigo: string; stock: number };
+  assert.deepEqual({ ...fila }, { codigo: 'ED-000900', stock: 5 });
+});
+
+test('fusionar no deja pasar las 999 piezas: la suma se rechaza y no se pierde ninguna foto', async () => {
+  const { db, pedir } = tienda();
+  const original = crypto.randomUUID();
+  const repetida = crypto.randomUUID();
+  const alta = (id: string, stock: number) => db.prepare(
+    `insert into productos (id, nombre, precio, stock, estado_analisis, destino, foto_key, semana_ingreso, creado_en, actualizado_en)
+     values (?, 'Calcetines', 9900, ?, 'listo', 'etiqueta', ?, 'S40', '', '')`).run(id, stock, `fotos/${id}.jpg`);
+  alta(original, 600);
+  alta(repetida, 500);
+  assert.equal((await pedir(`/api/borradores/${repetida}/fusionar`, { destino_id: original })).status, 409);
+  assert.equal((db.prepare('select count(*) n from productos where id in (?, ?)').get(original, repetida) as { n: number }).n, 2);
+  assert.equal((db.prepare('select stock from productos where id = ?').get(original) as { stock: number }).stock, 600);
+});
+
+test('un codigo nunca se repite aunque SQLite reutilice el rowid de una pieza borrada', async () => {
+  const { db, pedir } = tienda();
+  const alta = (id: string) => db.prepare(
+    `insert into productos (id, nombre, precio, stock, estado_analisis, destino, foto_key, semana_ingreso, creado_en, actualizado_en)
+     values (?, 'Taza', 4900, 1, 'listo', 'etiqueta', ?, 'S40', '', '')`).run(id, `fotos/${id}.jpg`);
+  const original = crypto.randomUUID(), repetida = crypto.randomUUID(), nueva = crypto.randomUUID();
+  alta(original); alta(repetida);
+  await pedir('/api/etiquetas', { ids: [repetida] });
+  const impreso = (db.prepare('select codigo from productos where id = ?').get(repetida) as { codigo: string }).codigo;
+  assert.equal((await pedir(`/api/borradores/${repetida}/fusionar`, { destino_id: original })).status, 200);
+  alta(nueva);   // toma el rowid de la repetida
+  const r = await pedir('/api/etiquetas', { ids: [nueva] });
+  assert.equal(r.status, 200);
+  const codigos = (db.prepare(`select codigo from productos where codigo like 'ED-%'`).all() as { codigo: string }[]).map((f) => f.codigo);
+  assert.equal(new Set(codigos).size, codigos.length);
+  assert.ok(codigos.includes(impreso));
+});
