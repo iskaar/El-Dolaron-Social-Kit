@@ -1552,7 +1552,7 @@ export default {
       // Puerta pública cerrada por defecto. Nunca comparte rutas ni assets del personal.
       if (env.HOST_PORTAL && url.hostname === env.HOST_PORTAL) {
         const archivos: Record<string, string> = {
-          '/': '/portal', '/portal': '/portal', '/portal.html': '/portal',
+          '/': '/portal', '/portal': '/portal', '/portal.html': '/portal', '/v': '/portal',
           '/portal.js': '/portal.js', '/portal.css': '/portal.css', '/code128.js': '/code128.js', '/vendor/qrcode-generator.js': '/vendor/qrcode-generator.js',
           '/el-dolaron-logo.png': '/el-dolaron-logo.png',
         };

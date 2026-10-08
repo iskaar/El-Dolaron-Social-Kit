@@ -24,6 +24,7 @@ button.secundario { background:white; border:1px solid var(--azul); color:var(--
 button.discreto { width:auto; min-height:44px; padding:6px; margin:0; color:var(--azul); background:white; font-size:14px; text-decoration:underline; }
 :focus-visible { outline:3px solid var(--rojo); outline-offset:4px; }
 .nota { color:#4e617d; font-size:14px; }
+.vale-aviso { margin:0 0 16px; padding:12px 14px; border:2px dashed var(--rojo); border-radius:8px; font-size:15px; font-weight:700; }
 .bienvenida h1 { font-size:32px; margin-bottom:6px; }
 .bienvenida p { margin:0 0 20px; }
 .membresia { border-radius:14px; overflow:hidden; border:2px solid var(--azul); }

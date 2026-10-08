@@ -84,9 +84,10 @@ export function codigoEnDigitos(codigo) {
   return String(TIPOS.indexOf(m[1]) + 1) + n.toString().padStart(29, '0');
 }
 
-/** Lo que escribio el lector -> 'DP-abc…', o null si no es uno de estos codigos. */
+/** Lo que escribio el lector -> 'DP-abc…', o null si no es uno de estos codigos.
+ * Tambien acepta el QR del vale, que es una URL al portal con los digitos despues de '#'. */
 export function codigoDeDigitos(texto) {
-  const m = /^([123])(\d{29})$/.exec(String(texto).trim());
+  const m = /^([123])(\d{29})$/.exec(String(texto).trim().replace(/^https:\/\/[^#\s]*#/, ''));
   if (!m) return null;
   let n = BigInt(m[2]);
   if (n >= 1n << 96n) return null;

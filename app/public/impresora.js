@@ -200,13 +200,17 @@ export function codigoBarrasVale(codigo) {
   ]);
 }
 
-// QR nativo Epson (GS ( k, modelo 2, función 165-181): mismo texto de 30 dígitos que
-// el Code128, para que la cámara del celular lo lea. Nada de imagen raster.
-// ponytail: módulo 6 puntos, corrección M; calibrar con el lector.
+// QR nativo Epson (GS ( k, modelo 2, función 165-181). Nada de imagen raster.
+// Issue #258: el QR es una URL al portal con los mismos 30 dígitos después de '#'
+// (nunca llegan al servidor): la cámara del celular abre el registro y el vale pasa
+// a la cuenta. La caja lo sigue leyendo (code128.js quita la URL).
+// ponytail: módulo 6 puntos, corrección M; calibrar con el lector. Host fijo de prod,
+// también en el sandbox.
 export const MODULO_QR_VALE = 6;
+export const URL_VALE = 'https://dolarones.eldolaron.com/v#';
 export function codigoQrVale(codigo) {
   if (!/^DP-[A-Za-z0-9_-]{16}$/.test(codigo)) throw new Error('Código de vale inválido.');
-  const datos = new TextEncoder().encode(codigoEnDigitos(codigo));
+  const datos = new TextEncoder().encode(URL_VALE + codigoEnDigitos(codigo));
   const k = datos.length + 3;
   return concatenar([
     new Uint8Array([ESC, 0x61, 1,
@@ -227,6 +231,8 @@ function partesVale(vale, titulo = 'VALE DOLARONES - SIN REGISTRO', conCodigo = 
       ? 'Usalo en tu siguiente compra' : `Disponible: ${fechaHora(vale.disponible_desde)}`),
     linea(`Vence: ${fechaHora(vale.vence_en)}`),
     ...(conCodigo && vale.restante > 0 ? [codigoQrVale(vale.codigo), codigoBarrasVale(vale.codigo)] : []), centrado(vale.codigo),
+    ...(conCodigo && vale.restante > 0 && vale.restante === vale.importe
+      ? [centrado('Escanea el QR con tu celular:'), centrado('registrate y recibe el doble en tu cuenta.')] : []),
     linea('Conserva el papel. Copias comparten el saldo.'),
     linea('Solo en El Dolaron. No canjeable por efectivo.'),
   ];

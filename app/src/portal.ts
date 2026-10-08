@@ -1,4 +1,5 @@
 import { saldo, codigoAleatorio, hashCodigo, basesListas, promocionIniciada } from './dolarones.ts';
+import { reclamarVale } from './vales.ts';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const DIA = 86_400_000;
@@ -264,6 +265,13 @@ export async function portal(request: Request, env: Env, url: URL): Promise<Resp
         new Date(ahora.getTime() - 5_000).toISOString()).run();
     if (!meta.changes) return json({ error: 'Espera 5 segundos antes de generar otro código.' }, 429);
     return json({ codigo, maximo, expira_en: expira }, 201);
+  }
+  // El QR del vale abre el portal; al entrar o registrarse, el portal lo manda aquí (Issue #258).
+  if (url.pathname === '/api/portal/vale' && request.method === 'POST') {
+    if (!basesListas(env) || socio.bases_version !== env.BASES_APROBADAS_VERSION)
+      return json({ error: 'Acepta las bases vigentes antes de pasar tu vale.' }, 409);
+    const body = await request.json().then((c) => c ?? {}, () => ({})) as { codigo?: unknown };
+    return reclamarVale(env, socio.id, String(body.codigo ?? ''));
   }
   if (url.pathname === '/api/portal/yo' && request.method === 'GET')
     return json({ id: socio.id, numero: socio.numero, nombre: socio.nombre, telefono: `+52${socio.telefono}`, bases_version: socio.bases_version });
