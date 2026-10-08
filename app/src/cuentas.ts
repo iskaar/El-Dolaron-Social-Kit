@@ -261,7 +261,7 @@ export async function yo(env: Env, correo: string, cajero: Usuario | null = null
 export async function pedirAcceso(request: Request, env: Env, correo: string): Promise<Response> {
   const usuario = await leerUsuario(env, correo);
   if (usuario?.activo) return json({ error: 'Ya tienes cuenta.' }, 409);
-  const cuerpo = (await request.json().catch(() => ({}))) as { nombre?: unknown; justificacion?: unknown };
+  const cuerpo = (await request.json().then((c) => c ?? {}, () => ({}))) as { nombre?: unknown; justificacion?: unknown };
   const nombre = texto(cuerpo.nombre, 80);
   const justificacion = texto(cuerpo.justificacion, 500);
   if (!nombre || !justificacion) {
@@ -323,7 +323,7 @@ function validarRoles(crudo: unknown): Rol[] | null {
 
 /** Alta o cambio de una cuenta desde /cuentas. */
 export async function guardarCuenta(request: Request, env: Env): Promise<Response> {
-  const cuerpo = (await request.json().catch(() => ({}))) as Record<string, unknown>;
+  const cuerpo = (await request.json().then((c) => c ?? {}, () => ({}))) as Record<string, unknown>;
   const correo = texto(cuerpo.correo, 200).toLowerCase();
   const nombre = texto(cuerpo.nombre, 80);
   const roles = validarRoles(cuerpo.roles);
@@ -337,21 +337,24 @@ export async function guardarCuenta(request: Request, env: Env): Promise<Respons
     return json({ error: 'Tiene que quedar al menos un dueno activo.' }, 400);
   }
   const ahora = new Date().toISOString();
-  await env.DB.prepare(
-    `insert into usuarios (correo, nombre, roles, activo, caja, creado_en, actualizado_en)
-     values (?, ?, ?, ?, coalesce(?, ''), ?, ?)
-     on conflict (correo) do update set nombre = excluded.nombre, roles = excluded.roles,
-       activo = excluded.activo, caja = coalesce(?, usuarios.caja), actualizado_en = excluded.actualizado_en`,
-  )
-    .bind(correo, nombre, roles.join(','), activo ? 1 : 0, caja, ahora, ahora, caja)
-    .run();
+  // Sin cuenta activa o sin rol de caja, su sesion de PIN muere con el cambio: reactivarla despues no la revive.
+  const cobra = activo && (roles.includes('cajero') || roles.includes('dueno'));
+  await env.DB.batch([
+    env.DB.prepare(
+      `insert into usuarios (correo, nombre, roles, activo, caja, creado_en, actualizado_en)
+       values (?, ?, ?, ?, coalesce(?, ''), ?, ?)
+       on conflict (correo) do update set nombre = excluded.nombre, roles = excluded.roles,
+         activo = excluded.activo, caja = coalesce(?, usuarios.caja), actualizado_en = excluded.actualizado_en`,
+    ).bind(correo, nombre, roles.join(','), activo ? 1 : 0, caja, ahora, ahora, caja),
+    ...(cobra ? [] : [env.DB.prepare('delete from sesiones_cajero where correo = ?').bind(correo)]),
+  ]);
   const guardado = await leerUsuario(env, correo);
   return json({ correo, nombre, roles, activo, caja: guardado?.caja ?? '' });
 }
 
 /** Aprobar o rechazar una solicitud: de acceso (Issue #75), de cancelacion (Issue #200) o de descuento (Issue #119). */
 export async function resolverSolicitud(id: string, request: Request, env: Env, dueno: string): Promise<Response> {
-  const cuerpo = (await request.json().catch(() => ({}))) as { aprobar?: unknown; roles?: unknown };
+  const cuerpo = (await request.json().then((c) => c ?? {}, () => ({}))) as { aprobar?: unknown; roles?: unknown };
   const solicitud = await env.DB.prepare(
     `select id, tipo, correo, nombre, estado from solicitudes where id = ?`,
   )
@@ -375,6 +378,10 @@ export async function resolverSolicitud(id: string, request: Request, env: Env, 
   }
   const roles = cuerpo.roles === undefined ? [ROL_POR_OMISION] : validarRoles(cuerpo.roles);
   if (!roles) return json({ error: 'Escoge al menos un rol.' }, 400);
+  // La cuenta pudo darse de alta por otra via despues de la solicitud: aprobar la reemplazaria.
+  if (await quedariaSinDueno(env, solicitud.correo, roles, true)) {
+    return json({ error: 'Tiene que quedar al menos un dueno activo.' }, 400);
+  }
   await env.DB.batch([
     marcar,
     env.DB.prepare(
