@@ -1058,8 +1058,10 @@ async function sincronizar() {
     for (const venta of cola) {
       let respuesta;
       try {
+        // Con limite: una peticion colgada dejaba `sincronizando` en true y la cola sin enviar hasta recargar.
         respuesta = await fetch('/api/ventas', {
           method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(venta),
+          signal: AbortSignal.timeout(15000),
         });
       } catch {
         break;                                   // sin red: la venta se queda encolada
@@ -1116,7 +1118,13 @@ async function sincronizar() {
 async function pendientes() {
   const cola = await store('ventas', 'readonly', (s) => s.getAll());
   const porSincronizar = cola.filter((v) => v.estado !== 'rechazada');
-  $('pendientes').textContent = porSincronizar.length ? `${porSincronizar.length} ventas por sincronizar` : '';
+  // 7/10: 14 ventas pasaron 4 h en la caja sin llegar al servidor y nadie lo noto. Pasados 10 min, en rojo y con que hacer.
+  const desde = Math.min(...porSincronizar.map((v) => Date.parse(v.creado_en) || Date.now()));
+  const atorada = porSincronizar.length && Date.now() - desde > 10 * 60_000;
+  $('pendientes').textContent = !porSincronizar.length ? ''
+    : atorada ? `⚠ ${porSincronizar.length} ventas sin enviar desde las ${new Date(desde).toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' })}. Recarga la página (F5); si pide iniciar sesión, entra.`
+    : `${porSincronizar.length} ventas por sincronizar`;
+  $('pendientes').style.cssText = atorada ? 'color:#D72B32;font-weight:700' : '';
 }
 
 /** Ventas que el servidor rechazo: visibles con su motivo, y recuperables a mano. */
