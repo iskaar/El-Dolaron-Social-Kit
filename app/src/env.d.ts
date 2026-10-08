@@ -33,6 +33,8 @@ declare global {
     /** Promo de inauguracion (ISO, UTC): ambas o ninguna. Quitarlas y desplegar la apaga. */
     PROMO_DESDE?: string;
     PROMO_HASTA?: string;
+    /** Cuantos tickets reciben la promo (Issue #250). Ausente = sin tope. */
+    PROMO_CUPO?: string;
     /** Conteo de alto valor (Issue #219): precio minimo en centavos. Ausente = 30000. */
     CONTEO_UMBRAL?: string;
     /** Mercado Libre (Issue #170). Secretos con `wrangler secret put`; ML_REDIRECT_URI es var. */

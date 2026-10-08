@@ -37,10 +37,13 @@
     "BASES_APROBADAS_VERSION": "2026-10-v3",
     "PROMOCION_INICIO": "2026-10-05T17:00:00Z",
     "VALES_ABIERTOS": "si",
-    // Promo de inauguracion (Isaac, 7/10): $100 menos en tickets de $300 o mas. Pausada el 7/10: viernes 9 al
-    // domingo 12/10 hora de la tienda (UTC-6). Para apagarla antes: quitar las dos y desplegar.
-    "PROMO_DESDE": "2026-10-09T06:00:00Z",
+    // Promo de inauguracion (Isaac, 7/10): $100 menos en tickets de $300 o mas. Inauguracion el sabado 10/10
+    // (Isaac, 8/10): del sabado 10 a las 11:00 al domingo 12/10 al cierre, hora de la tienda (UTC-6).
+    // Para apagarla antes: quitar las dos y desplegar.
+    "PROMO_DESDE": "2026-10-10T17:00:00Z",
     "PROMO_HASTA": "2026-10-13T06:00:00Z",
+    // «A las primeras 100 personas» (Issue #250): tickets no cancelados con la promo. Quitarla = sin tope.
+    "PROMO_CUPO": "100",
     // Conteo de alto valor (Issue #219): piezas en existencia con precio >= este monto, en centavos.
     "CONTEO_UMBRAL": "30000",
     // Mercado Libre (Issue #170): debe ser identica a la URI de redireccion de la

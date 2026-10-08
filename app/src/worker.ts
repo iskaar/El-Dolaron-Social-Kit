@@ -13,6 +13,17 @@ import { efectivoAlcanza, promoInauguracion } from '../public/venta.js';
 const promoDe = (env: Env) =>
   env.PROMO_DESDE && env.PROMO_HASTA && Date.parse(env.PROMO_DESDE) < Date.parse(env.PROMO_HASTA)
     ? { desde: env.PROMO_DESDE, hasta: env.PROMO_HASTA } : null;
+/**
+ * Cuantas promos quedan del cupo (Issue #250, «a las primeras 100 personas»); null sin PROMO_CUPO = sin tope.
+ * Un ticket cancelado devuelve su lugar.
+ */
+async function promoRestantes(env: Env): Promise<number | null> {
+  const cupo = Number(env.PROMO_CUPO);
+  if (!env.PROMO_CUPO || !Number.isInteger(cupo) || cupo < 0) return null;
+  // ponytail: recorre ventas sin indice; un indice parcial en (promo) si la tabla crece a cientos de miles.
+  const fila = await env.DB.prepare('select count(*) as n from ventas where promo > 0 and cancelada = 0').first<{ n:number }>();
+  return Math.max(0, cupo - (fila?.n ?? 0));
+}
 import { semanaIngreso } from '../public/semana.js';
 import { tramoDeDias, TRAMOS_ANTIGUEDAD } from '../public/graficas.js';
 import { detalleVenta, cancelarPieza } from './devoluciones.ts';
@@ -695,7 +706,7 @@ async function registrarVenta(request: Request, env: Env, ctx: ExecutionContext,
     id?: unknown; lineas?: unknown; forma_pago?: unknown;
     efectivo?: unknown; creado_en?: unknown;
     cliente_id?: unknown; dolarones?: unknown; codigo_socio?: unknown; codigo_vale?: unknown; caja?: unknown; imprimir_en?: unknown;
-    descuento_id?: unknown;
+    descuento_id?: unknown; promo?: unknown; sin_red?: unknown;
   };
   const id = String(venta.id ?? '');
   if (!UUID.test(id)) {
@@ -731,6 +742,7 @@ async function registrarVenta(request: Request, env: Env, ctx: ExecutionContext,
     caja:venta.caja ?? null,
     // Solo si lo trae: el hash de las ventas sin descuento no cambia y sus reintentos siguen valiendo.
     ...(venta.descuento_id ? { descuento_id:venta.descuento_id } : {}),
+    ...(venta.promo ? { promo:venta.promo } : {}),
   });
   const pedidoHash = [...new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(pedido)))]
     .map((b) => b.toString(16).padStart(2, '0')).join('');
@@ -783,7 +795,15 @@ async function registrarVenta(request: Request, env: Env, ctx: ExecutionContext,
   // Promo de inauguracion con la hora de la venta en la caja (una venta encolada
   // sin red conserva la promo que vio el cliente). Se guarda sumada en
   // `descuento`: devoluciones la prorratea igual.
-  descuento += promoInauguracion(subtotal, horaVenta, promoDe(env));
+  // La caja manda la promo que mostro (una caja vieja no la manda: se asume la que corresponde).
+  const elegible = promoInauguracion(subtotal, horaVenta, promoDe(env));
+  const promo = venta.promo === undefined || Number(venta.promo) > 0 ? elegible : 0;
+  // Con cupo agotado, un cobro en linea se rechaza y la caja vuelve a cobrar sin promo. Una venta
+  // cobrada sin red ya se pago con la promo: se respeta aunque pase del tope (nunca se pierde).
+  // ponytail: contar y luego insertar deja que dos cajas al mismo instante tomen el ultimo lugar; pasa por uno.
+  if (promo && venta.sin_red !== true && await promoRestantes(env) === 0)
+    return json({ error:'Ya se entregaron todos los descuentos de inauguración. Vuelve a cobrar: el ticket queda sin promo.', promo_agotada:true }, 409);
+  descuento += promo;
   const total = subtotal - descuento;
   const efectivo = Math.max(0, Math.round(Number(venta.efectivo ?? 0)));
   const clienteId = venta.cliente_id ? String(venta.cliente_id) : null;
@@ -821,12 +841,12 @@ async function registrarVenta(request: Request, env: Env, ctx: ExecutionContext,
   const sentencias = [
     env.DB.prepare(
       `insert into ventas (id, total, forma_pago, efectivo, cambio, creado_en, registrado_en, cliente_id, dolarones,
-                           caja, cajero, pedido_hash, imprimir_en, descuento, descuento_id)
-       values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                           caja, cajero, pedido_hash, imprimir_en, descuento, descuento_id, promo)
+       values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).bind(id, total, formaPago, efectivo, Math.max(0, efectivo - aPagar), creadoEn, ahora, clienteId, dolarones,
       // Quien cobro sale de Access; la caja es la suya (Issue #105) o la de la
       // computadora. Una venta encolada antes del corte de caja llega sin caja: ''.
-      await cajaDe(env, correo, venta.caja), correo, pedidoHash, imprimirEn, descuento, descuentoId),
+      await cajaDe(env, correo, venta.caja), correo, pedidoHash, imprimirEn, descuento, descuentoId, promo),
     ...preparado.lineas.map((l) =>
       env.DB.prepare(
         `insert into venta_lineas (venta_id, producto_id, codigo, nombre, precio, cantidad)
@@ -1709,7 +1729,10 @@ export default {
         }
       }
       if (pathname === '/api/vales/config' && request.method === 'GET')
-        return json({ habilitado:valesAbiertos(env), promo:promoDe(env) });
+      {
+        const promo = promoDe(env), restantes = promo && await promoRestantes(env);
+        return json({ habilitado:valesAbiertos(env), promo:promo && (restantes === null ? promo : { ...promo, restantes }) });
+      }
       if (pathname === '/api/vales/buscar' && request.method === 'POST')
         return await buscarVale(request, env);
       const valeVenta = /^\/api\/ventas\/([^/]+)\/vale$/.exec(pathname);

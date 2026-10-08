@@ -404,6 +404,12 @@ async function cargarConfigVales() {
   } catch { valesHabilitados = null; }
   notaVales();
 }
+/** El servidor dice que el cupo se acabo: el ticket se repinta sin promo ya, sin esperar la consulta. */
+function promoAgotada() {
+  promoConfig = { ...promoConfig, restantes: 0 };
+  pintar();
+  cargarConfigVales();
+}
 notaVales();
 cargarConfigVales();
 setInterval(cargarConfigVales, 60000);
@@ -549,7 +555,7 @@ function pintar() {
   $('total').textContent = pesos(t.total);
   $('piezas').textContent = `${t.piezas} ${t.piezas === 1 ? 'pieza' : 'piezas'}`;
   $('a-pagar').textContent = [
-    promo ? `Promo inauguración −${pesos(promo)}` : '',
+    promo ? `Promo inauguración −${pesos(promo)}${promoConfig.restantes != null ? ` (quedan ${promoConfig.restantes})` : ''}` : '',
     t.descuento - promo ? `Descuento −${pesos(t.descuento - promo)}` : '',
     usados ? `Dolarones −${pesos(usados)} · A pagar ${pesos(t.aPagar)}` : '',
   ].filter(Boolean).join(' · ');
@@ -694,7 +700,8 @@ let sondeoDescuento = null;
 const descuentoAplicado = () => (descuento?.estado === 'aprobada' ? descuento.monto : 0);
 /** Promo de inauguracion del ticket actual; el servidor la vuelve a calcular al cobrar. */
 // La hora guardada solo vale mientras el ticket conserva su folio (reintento); sin folio, cobrar() fijara la de ahora.
-const promoActual = () => promoInauguracion(totales(lineas).subtotal, idVenta && creadoEnVenta ? Date.parse(creadoEnVenta) : Date.now(), promoConfig);
+// Con cupo (Issue #250) la caja deja de darla al llegar a 0; sin red sigue con lo último que supo.
+const promoActual = () => promoConfig?.restantes === 0 ? 0 : promoInauguracion(totales(lineas).subtotal, idVenta && creadoEnVenta ? Date.parse(creadoEnVenta) : Date.now(), promoConfig);
 /** Lo que vale el ticket ya con descuento aprobado y promo: contra esto se canjean Dolarones. */
 const totalNeto = () => totales(lineas, 0, 0, descuentoAplicado() + promoActual()).total;
 
@@ -915,6 +922,7 @@ async function cobrarConDolarones(venta, t) {
   }
   const cuerpo = await respuesta.json().catch(() => ({}));
   if (!respuesta.ok) {
+    if (cuerpo.promo_agotada) promoAgotada();
     $('aviso').textContent = cuerpo.error ?? 'No se pudo cobrar con Dolarones.';
     $('aviso').style.color = '#D72B32';
     return false;
@@ -976,6 +984,7 @@ async function cobrar() {
       dolarones: usados,
       caja: cajaActual(),
       descuento_id: descuentoAplicado() ? descuento.id : null,
+      promo: promoActual(),
       ...(imprimirEn ? { imprimir_en: imprimirEn } : {}),
     };
     let socioTicket = socio && !socio.vale && { numero: socio.numero, ganados: 0, saldo: socio.disponible };
@@ -993,6 +1002,7 @@ async function cobrar() {
         cuerpo = await r.json();
       } catch { /* respuesta desconocida: reintento idempotente al sincronizar */ }
       if (r && cuerpo && !r.ok && r.status < 500) {
+        if (cuerpo.promo_agotada) promoAgotada();
         $('aviso').textContent = cuerpo.error || 'No se pudo confirmar la venta.';
         $('aviso').style.color = '#D72B32';
         return;
@@ -1005,6 +1015,8 @@ async function cobrar() {
           socioTicket.saldo = cuerpo.saldo?.disponible ?? socioTicket.saldo;
         }
       } else {
+        // Ya se cobro asi: el servidor respeta la promo que vio el cliente aunque el cupo se haya acabado.
+        venta.sin_red = true;
         venta.vale_pendiente = !socioTicket && dolaronesGanados(t.aPagar, 5) > 0;
         venta.recompensa_pendiente = !!socioTicket && dolaronesGanados(t.aPagar) > 0;
         await store('ventas', 'readwrite', (s) => s.put(venta));
@@ -1017,6 +1029,12 @@ async function cobrar() {
       if (forma === 'efectivo') abrirCajon();
       imprimirTicket({ ...venta, total: t.total, descuento: t.descuento, cambio: t.cambio, socio: socioTicket }, venta.lineas)
         .then(pintarImpresora);
+    }
+
+    // Un lugar menos del cupo: sin red, la caja no sigue dando la promo sin fin. La consulta de cada minuto corrige.
+    if (venta.promo && promoConfig?.restantes) {
+      promoConfig.restantes--;
+      try { localStorage.setItem('promo-inauguracion', JSON.stringify(promoConfig)); } catch {}
     }
 
     // Bajar existencias en la copia local: sin esto, la misma etiqueta se podria
