@@ -1,5 +1,15 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
+  // DORMIDA desde 8/10/2026 (Isaac): escaner2.viste.com.mx ya no se usa. Se
+  // conservan este archivo, la D1 y el R2 por si se abre una segunda sucursal.
+  // NO desplegar asi (auditoria #233 punto 11): le falta lo que hoy exige el
+  // Worker y la API responderia 401. Antes de reusarla, copiar de wrangler.jsonc:
+  //   - assets: binding "ASSETS" + run_worker_first: true
+  //   - ACCESS_EQUIPO / ACCESS_AUD de su propia aplicacion de Access
+  //   - HOST_* y demas vars que apliquen; correr todas las migraciones en su D1
+  //   - decidir con un Issue si una sucursal es otra base (esto) o tienda_id
+  //     (docs/ARQUITECTURA-OBJETIVO.md, «Segunda tienda»)
+  //
   // Segunda instancia: mismo codigo, base y fotos aparte.
   // La separacion es fisica, no un `where`: ninguna consulta puede mezclar sus
   // piezas con el inventario de El Dolaron porque viven en otra base.

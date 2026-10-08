@@ -8,7 +8,7 @@ Runbook objetivo del [plan](PLAN-REESTRUCTURACION.md). Los controles futuros deb
 | --- | --- | --- |
 | Local | app/wrangler.jsonc con ejecución local explícita | Datos sintéticos; `npm run db:local` arma schema + todas las migraciones. |
 | Sandbox | app/wrangler.sandbox.jsonc | D1/R2 y sesiones aislados; datos mínimos/sanitizados; integraciones externas de prueba o desactivadas. Confirmar destino antes de refrescar. |
-| Prestado | app/wrangler.prestado.jsonc | Entorno temporal: verificar propósito, hosts, Access, assets y bindings. No asumir paridad ni desplegar configuración incompleta. |
+| Prestado | app/wrangler.prestado.jsonc | Dormida desde 8/10: escaner2 ya no se usa; D1/R2 conservados para una posible segunda sucursal. No desplegar sin completar la lista del encabezado del archivo. |
 | Producción | app/wrangler.jsonc | Hosts, políticas, bindings y versión comprobados contra despliegue real; no inferirlos solo del archivo. |
 
 No guardar secretos ni exportaciones de clientes en git. Para revisar configuración bastan nombres de bindings, destinos no sensibles, presencia del secreto y versión; nunca su valor. Una copia de sandbox no debe reutilizar sesiones/PINs/tokens OAuth de producción. Aplicar mínimos datos y retención explícita de cualquier exportación temporal.
