@@ -73,6 +73,15 @@
       "background": "opaque white"
     },
     {
+      "file": "03-Publicaciones/el-dolaron-cierre-redes-cuadrado.png",
+      "title": "Cierre de redes y contacto",
+      "description": "Última diapositiva para carruseles y publicaciones: logo oficial, redes y contacto. Es la misma imagen que el cierre de Marketplace (app/public/marketplace-redes.png); revisar los contactos antes de reutilizar.",
+      "width": 1254,
+      "height": 1254,
+      "format": "PNG",
+      "background": "opaque white"
+    },
+    {
       "file": "04-Historias/el-dolaron-producto-historia-9x16.png",
       "title": "Historia de producto",
       "description": "Agregar foto en el espacio central y precio en la etiqueta; también sirve como base para portada de video.",
