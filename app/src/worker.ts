@@ -13,6 +13,17 @@ import { efectivoAlcanza, promoInauguracion } from '../public/venta.js';
 const promoDe = (env: Env) =>
   env.PROMO_DESDE && env.PROMO_HASTA && Date.parse(env.PROMO_DESDE) < Date.parse(env.PROMO_HASTA)
     ? { desde: env.PROMO_DESDE, hasta: env.PROMO_HASTA } : null;
+/**
+ * Cuantas promos quedan del cupo (Issue #250, «a las primeras 100 personas»); null sin PROMO_CUPO = sin tope.
+ * Un ticket cancelado devuelve su lugar.
+ */
+async function promoRestantes(env: Env): Promise<number | null> {
+  const cupo = Number(env.PROMO_CUPO);
+  if (!env.PROMO_CUPO || !Number.isInteger(cupo) || cupo < 0) return null;
+  // ponytail: recorre ventas sin indice; un indice parcial en (promo) si la tabla crece a cientos de miles.
+  const fila = await env.DB.prepare('select count(*) as n from ventas where promo > 0 and cancelada = 0').first<{ n:number }>();
+  return Math.max(0, cupo - (fila?.n ?? 0));
+}
 import { semanaIngreso } from '../public/semana.js';
 import { tramoDeDias, TRAMOS_ANTIGUEDAD } from '../public/graficas.js';
 import { detalleVenta, cancelarPieza } from './devoluciones.ts';
@@ -30,7 +41,7 @@ import { registrarCorte, registrarRetiro, ultimoCorte, cajaDe } from './corte.ts
 import { portal, llegada, vincular } from './portal.ts';
 import { sentenciasVale, buscarVale, valeDeVenta, valeUsadoEnVenta, reimprimirVale, valesAbiertos } from './vales.ts';
 import { catalogoPublico, revisionCatalogo } from './catalogo.ts';
-import { rutaML, recibirNotificacion, conciliarSeguro, sincronizar } from './mercadolibre.ts';
+import { rutaML, recibirNotificacion, conciliarSeguro, sincronizar, publicacionViva } from './mercadolibre.ts';
 import { pedirDescuento, validarDescuento, listarDescuentos, listarDuenos } from './descuentos.ts';
 import { listarAltoValor, revisarConteo, ajustarExistencia, listarAjustes } from './conteo.ts';
 
@@ -62,15 +73,15 @@ interface FilaBorrador {
  * y el inventario no viven en el telefono que anda en el pasillo.
  */
 const RUTAS_VENDEDOR = new Set(['/captura', '/foto.js', '/tallas.js', '/api/salud', '/sin-acceso', '/api/yo']);
-const EXISTENCIA = /^\/api\/borradores\/([^/]+)\/existencia$/;
+const CORRECCION_CAPTURA = /^\/api\/borradores\/([^/]+)\/(existencia|talla)$/;
 
 export function permitidaParaVendedor(pathname: string, metodo: string): boolean {
   if (RUTAS_VENDEDOR.has(pathname)) {
     return metodo === 'GET';
   }
-  // Corregir cuantas piezas son, desde el carrusel de la camara. El handler
-  // limita a lo que esa persona capturo en las ultimas 24 h.
-  if (EXISTENCIA.test(pathname)) {
+  // Corregir cuantas piezas son o la talla, desde el carrusel de la camara. El
+  // handler limita a lo que esa persona capturo en las ultimas 24 h.
+  if (CORRECCION_CAPTURA.test(pathname)) {
     return metodo === 'PATCH';
   }
   // Quien entra por la camara sin cuenta tambien tiene que poder pedirla.
@@ -151,6 +162,16 @@ async function crearBorrador(request: Request, env: Env, ctx: ExecutionContext, 
   await env.FOTOS.put(fotoKey, foto.stream(), {
     httpMetadata: { contentType: 'image/jpeg' },
   });
+
+  // "Retomar foto" del admin: solo cambia la imagen. Existencia, talla, estado y
+  // lo que el dueno ya corrigio se quedan; para volver a analizar esta "Reintentar
+  // analisis". La camara no manda esta marca: su reenvio si actualiza todo.
+  if (formulario.get('solo_foto') === '1') {
+    const { meta } = await env.DB.prepare('update productos set foto_key = ?, actualizado_en = ? where id = ?')
+      .bind(fotoKey, new Date().toISOString(), id)
+      .run();
+    if (meta.changes > 0) return json({ id });
+  }
 
   // El correo verificado de quien sube la foto (ver cuentas.ts): de el salen
   // las sesiones de captura y la correccion de existencia desde el carrusel.
@@ -276,15 +297,18 @@ async function corregirBorrador(id: string, cambios: Record<string, unknown>, en
     return json({ error: 'Destino invalido.' }, 400);
   }
 
-  await env.DB.prepare(
+  const guardada = await env.DB.prepare(
     `update productos set nombre = ?, categoria = ?, marca = ?, talla = ?, precio_lista = ?, precio = ?,
-                          estado_fisico = ?, destino = ?, stock = ?, estado_analisis = 'listo', actualizado_en = ?
-     where id = ?`,
+                          estado_fisico = ?, destino = ?, stock = coalesce(?, stock), estado_analisis = 'listo', actualizado_en = ?
+     where id = ?
+     returning stock`,
   )
-    .bind(nombre, categoria, marca, talla, precioLista, precio, estadoFisico, destino, stock, new Date().toISOString(), id)
-    .run();
+    .bind(nombre, categoria, marca, talla, precioLista, precio, estadoFisico, destino,
+      // Sin `stock` en el cuerpo no se toca: la caja pudo vender piezas desde que se abrio la ficha.
+      cambios.stock === undefined ? null : stock, new Date().toISOString(), id)
+    .first<{ stock: number }>();
 
-  return json({ id, nombre, categoria, marca, talla, precio_lista: precioLista, precio, estado_fisico: estadoFisico, destino, stock });
+  return json({ id, nombre, categoria, marca, talla, precio_lista: precioLista, precio, estado_fisico: estadoFisico, destino, stock: guardada?.stock ?? stock });
 }
 
 /**
@@ -321,35 +345,44 @@ async function capturarManual(request: Request, env: Env, correo: string): Promi
   return json(await respuesta.json(), 201);
 }
 
-/** Cuanto dura abierta la correccion de existencia desde la camara. */
+/** Cuanto dura abierta la correccion desde la camara. */
 const VENTANA_CAPTURA_MS = 24 * 60 * 60 * 1000;
 
 /**
- * La existencia de una pieza recien capturada, desde el carrusel de /captura.
- * Solo quien la capturo y solo en las primeras 24 h: el telefono del pasillo no
- * es la puerta para ajustar inventario viejo (eso es la cola de revision), y
- * pasado ese rato la pieza ya pudo venderse y un numero absoluto pisaria la venta.
+ * La existencia o la talla de una pieza recien capturada, desde el carrusel de
+ * /captura. Solo quien la capturo y solo en las primeras 24 h: el telefono del
+ * pasillo no es la puerta para ajustar inventario viejo (eso es la cola de
+ * revision), y pasado ese rato la pieza ya pudo venderse y un numero absoluto
+ * pisaria la venta.
  */
-async function corregirExistencia(id: string, request: Request, env: Env, correo: string): Promise<Response> {
+async function corregirCaptura(id: string, campo: string, request: Request, env: Env, correo: string): Promise<Response> {
   if (!UUID.test(id)) {
     return json({ error: 'Identificador invalido.' }, 400);
   }
-  const { stock: crudo } = (await request.json()) as { stock?: unknown };
-  const stock = Number(crudo);
-  if (!Number.isInteger(stock) || stock < 1 || stock > 999) {
-    return json({ error: 'Existencia invalida.' }, 400);
+  const cuerpo = (await request.json()) as { stock?: unknown; talla?: unknown };
+  let valor: number | string;
+  if (campo === 'existencia') {
+    valor = Number(cuerpo.stock);
+    if (!Number.isInteger(valor) || valor < 1 || valor > 999) {
+      return json({ error: 'Existencia invalida.' }, 400);
+    }
+  } else {
+    valor = String(cuerpo.talla ?? '');
+    if (!tallaValida(valor)) {
+      return json({ error: 'Talla invalida.' }, 400);
+    }
   }
-  const quien = correo;
+  const columna = campo === 'existencia' ? 'stock' : 'talla';
   const desde = new Date(Date.now() - VENTANA_CAPTURA_MS).toISOString();
   const resultado = await env.DB.prepare(
-    'update productos set stock = ?, actualizado_en = ? where id = ? and capturado_por = ? and creado_en > ?',
+    `update productos set ${columna} = ?, actualizado_en = ? where id = ? and capturado_por = ? and creado_en > ?`,
   )
-    .bind(stock, new Date().toISOString(), id, quien, desde)
+    .bind(valor, new Date().toISOString(), id, correo, desde)
     .run();
   if (resultado.meta.changes === 0) {
     return json({ error: 'Solo puedes cambiar lo que capturaste en las ultimas 24 horas.' }, 404);
   }
-  return json({ id, stock });
+  return json({ id, [columna]: valor });
 }
 
 /**
@@ -387,7 +420,8 @@ async function prepararEtiquetas(request: Request, env: Env): Promise<Response> 
   const ahora = new Date().toISOString();
   if (porCodificar.length) {
     await env.DB.batch(porCodificar.map(({ id }) => env.DB.prepare(
-      `update productos set codigo = ${CODIGO_NUEVO}, actualizado_en = ? where id = ?`,
+      `update productos set codigo = ${CODIGO_NUEVO}, actualizado_en = ?
+       where id = ? and (codigo is null or codigo = '')`,
     ).bind(ahora, id)));
   }
 
@@ -427,25 +461,49 @@ async function fusionarBorrador(id: string, request: Request, env: Env): Promise
     return json({ error: 'Con esa suma pasa de 999 piezas en existencia.' }, 409);
   }
 
+  if (await publicacionViva(env, id)) {
+    return json({ error: 'Tiene publicación en Mercado Libre: ciérrala primero.' }, 409);
+  }
+
+  // La suma sale de la fila de la repetida DENTRO del batch, no de lo leido arriba: dos
+  // fusiones en paralelo leen lo mismo, pero solo la que borra la repetida la consume.
+  // `ahora` marca la suma aplicada; el borrado y el codigo dependen de esa marca.
   // Si la original no tiene etiqueta, hereda la de la repetida (la que ya esta pegada):
   // sin eso la etiqueta impresa apunta a una pieza borrada y la caja no la encuentra.
-  // El borrado va primero: el codigo es unico y no puede existir dos veces a la vez.
-  await env.DB.batch([
-    env.DB.prepare('delete from productos where id = ?').bind(id),
+  // El codigo va despues del borrado: es unico y no puede existir dos veces a la vez.
+  const ahora = new Date().toISOString();
+  const [, borrado] = await env.DB.batch([
     env.DB.prepare(
-      `update productos set stock = stock + ?, actualizado_en = ?,
-         codigo = case when codigo is null or codigo = '' then ? else codigo end
-       where id = ?`,
-    ).bind(repetida.stock, new Date().toISOString(), repetida.codigo ?? null, destinoId),
+      `update productos set stock = stock + (select stock from productos where id = ?1), actualizado_en = ?3
+       where id = ?2 and exists (select 1 from productos where id = ?1)
+         and stock + (select stock from productos where id = ?1) <= 999`,
+    ).bind(id, destinoId, ahora),
+    env.DB.prepare(
+      'delete from productos where id = ? and exists (select 1 from productos where id = ? and actualizado_en = ?)',
+    ).bind(id, destinoId, ahora),
+    env.DB.prepare(
+      `update productos set codigo = ? where id = ? and actualizado_en = ? and (codigo is null or codigo = '')`,
+    ).bind(repetida.codigo ?? null, destinoId, ahora),
   ]);
+  if (!borrado.meta.changes) {
+    // Otra fusion ya consumio la repetida (404) o la suma ya no cabe (409).
+    const sigue = await env.DB.prepare('select 1 as x from productos where id = ?').bind(id).first();
+    return sigue
+      ? json({ error: 'Con esa suma pasa de 999 piezas en existencia.' }, 409)
+      : json({ error: 'La pieza no existe.' }, 404);
+  }
   await env.FOTOS.delete(`fotos/${id}.jpg`);
 
-  return json({ id, destino_id: destinoId, stock: original.stock + repetida.stock });
+  const final = await env.DB.prepare('select stock from productos where id = ?').bind(destinoId).first<{ stock: number }>();
+  return json({ id, destino_id: destinoId, stock: final?.stock ?? original.stock + repetida.stock });
 }
 
 async function descartarBorrador(id: string, env: Env): Promise<Response> {
   if (!UUID.test(id)) {
     return json({ error: 'Identificador invalido.' }, 400);
+  }
+  if (await publicacionViva(env, id)) {
+    return json({ error: 'Tiene publicación en Mercado Libre: ciérrala primero.' }, 409);
   }
   await env.FOTOS.delete(`fotos/${id}.jpg`);
   await env.DB.prepare('delete from productos where id = ?').bind(id).run();
@@ -648,7 +706,7 @@ async function registrarVenta(request: Request, env: Env, ctx: ExecutionContext,
     id?: unknown; lineas?: unknown; forma_pago?: unknown;
     efectivo?: unknown; creado_en?: unknown;
     cliente_id?: unknown; dolarones?: unknown; codigo_socio?: unknown; codigo_vale?: unknown; caja?: unknown; imprimir_en?: unknown;
-    descuento_id?: unknown;
+    descuento_id?: unknown; promo?: unknown; sin_red?: unknown;
   };
   const id = String(venta.id ?? '');
   if (!UUID.test(id)) {
@@ -684,6 +742,7 @@ async function registrarVenta(request: Request, env: Env, ctx: ExecutionContext,
     caja:venta.caja ?? null,
     // Solo si lo trae: el hash de las ventas sin descuento no cambia y sus reintentos siguen valiendo.
     ...(venta.descuento_id ? { descuento_id:venta.descuento_id } : {}),
+    ...(venta.promo ? { promo:venta.promo } : {}),
   });
   const pedidoHash = [...new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(pedido)))]
     .map((b) => b.toString(16).padStart(2, '0')).join('');
@@ -736,7 +795,15 @@ async function registrarVenta(request: Request, env: Env, ctx: ExecutionContext,
   // Promo de inauguracion con la hora de la venta en la caja (una venta encolada
   // sin red conserva la promo que vio el cliente). Se guarda sumada en
   // `descuento`: devoluciones la prorratea igual.
-  descuento += promoInauguracion(subtotal, horaVenta, promoDe(env));
+  // La caja manda la promo que mostro (una caja vieja no la manda: se asume la que corresponde).
+  const elegible = promoInauguracion(subtotal, horaVenta, promoDe(env));
+  const promo = venta.promo === undefined || Number(venta.promo) > 0 ? elegible : 0;
+  // Con cupo agotado, un cobro en linea se rechaza y la caja vuelve a cobrar sin promo. Una venta
+  // cobrada sin red ya se pago con la promo: se respeta aunque pase del tope (nunca se pierde).
+  // ponytail: contar y luego insertar deja que dos cajas al mismo instante tomen el ultimo lugar; pasa por uno.
+  if (promo && venta.sin_red !== true && await promoRestantes(env) === 0)
+    return json({ error:'Ya se entregaron todos los descuentos de inauguración. Vuelve a cobrar: el ticket queda sin promo.', promo_agotada:true }, 409);
+  descuento += promo;
   const total = subtotal - descuento;
   const efectivo = Math.max(0, Math.round(Number(venta.efectivo ?? 0)));
   const clienteId = venta.cliente_id ? String(venta.cliente_id) : null;
@@ -774,12 +841,12 @@ async function registrarVenta(request: Request, env: Env, ctx: ExecutionContext,
   const sentencias = [
     env.DB.prepare(
       `insert into ventas (id, total, forma_pago, efectivo, cambio, creado_en, registrado_en, cliente_id, dolarones,
-                           caja, cajero, pedido_hash, imprimir_en, descuento, descuento_id)
-       values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                           caja, cajero, pedido_hash, imprimir_en, descuento, descuento_id, promo)
+       values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).bind(id, total, formaPago, efectivo, Math.max(0, efectivo - aPagar), creadoEn, ahora, clienteId, dolarones,
       // Quien cobro sale de Access; la caja es la suya (Issue #105) o la de la
       // computadora. Una venta encolada antes del corte de caja llega sin caja: ''.
-      await cajaDe(env, correo, venta.caja), correo, pedidoHash, imprimirEn, descuento, descuentoId),
+      await cajaDe(env, correo, venta.caja), correo, pedidoHash, imprimirEn, descuento, descuentoId, promo),
     ...preparado.lineas.map((l) =>
       env.DB.prepare(
         `insert into venta_lineas (venta_id, producto_id, codigo, nombre, precio, cantidad)
@@ -1662,7 +1729,10 @@ export default {
         }
       }
       if (pathname === '/api/vales/config' && request.method === 'GET')
-        return json({ habilitado:valesAbiertos(env), promo:promoDe(env) });
+      {
+        const promo = promoDe(env), restantes = promo && await promoRestantes(env);
+        return json({ habilitado:valesAbiertos(env), promo:promo && (restantes === null ? promo : { ...promo, restantes }) });
+      }
       if (pathname === '/api/vales/buscar' && request.method === 'POST')
         return await buscarVale(request, env);
       const valeVenta = /^\/api\/ventas\/([^/]+)\/vale$/.exec(pathname);
@@ -1737,9 +1807,9 @@ export default {
         return json({ error: 'Metodo no permitido.' }, 405);
       }
 
-      const existencia = pathname.match(EXISTENCIA);
-      if (existencia && request.method === 'PATCH') {
-        return await corregirExistencia(existencia[1], request, env, correo);
+      const correccion = pathname.match(CORRECCION_CAPTURA);
+      if (correccion && request.method === 'PATCH') {
+        return await corregirCaptura(correccion[1], correccion[2], request, env, correo);
       }
 
       const fusion = pathname.match(/^\/api\/borradores\/([^/]+)\/fusionar$/);

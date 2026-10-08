@@ -644,6 +644,21 @@ async function categoriaEnDominio(env: Env, categoriaId: string, dominio: string
   return !!enCategoria && enCategoria === dominio;
 }
 
+/**
+ * Si ML todavia puede vender la pieza: tiene articulo (activa, pausada o con error,
+ * que se reactivan) o se esta publicando ahora. `cerrada`, `vendida` (sin existencia en
+ * ML; solo la conciliacion la reactivaria, y ya no veria la pieza) y el error sin
+ * articulo no cuentan. Borrar o fusionar la pieza antes la dejaria huerfana: la
+ * conciliacion une con `productos` y ya no la veria.
+ */
+export async function publicacionViva(env: Env, productoId: string): Promise<boolean> {
+  const fila = await env.DB.prepare(
+    `select 1 as x from ml_publicaciones where producto_id = ? and estado not in ('cerrada', 'vendida')
+       and (ml_item_id is not null or (estado = 'publicando' and actualizado_en >= ?))`,
+  ).bind(productoId, new Date(Date.now() - 120_000).toISOString()).first();
+  return !!fila;
+}
+
 async function yaPublicada(env: Env, id: string): Promise<boolean> {
   const previa = await leerPublicacion(env, id);
   return !!previa && !(previa.estado === 'cerrada' || (previa.estado === 'error' && !previa.ml_item_id));
@@ -946,7 +961,9 @@ export async function conciliarPublicaciones(env: Env, filtro: Filtro = {}): Pro
           await poner(f.producto_id, 'activa');
         } else if (f.estado === 'activa') {
           if (ml.status === 'paused') await poner(f.producto_id, 'pausada');   // la pauso el dueno en ML
-          else if (ml.available_quantity !== f.stock) await poner_ml({ available_quantity: f.stock });
+          // Solo baja: ML descuenta al crear la orden y D1 hasta que se paga, subirla ofreceria otra vez la pieza vendida.
+          // Subir la cantidad tras un resurtido de varias piezas se hace a mano en ML.
+          else if (ml.available_quantity > f.stock) await poner_ml({ available_quantity: f.stock });
         } else if ((f.estado === 'pausada' || f.estado === 'error') && ml.status === 'active') {
           await poner(f.producto_id, 'activa');                                // la reactivo el dueno en ML
         }
@@ -1038,10 +1055,24 @@ async function traerOrdenesRecientes(env: Env, vendedor: string): Promise<string
   return tocados;
 }
 
-/** El cron (cada 15 min): ordenes perdidas y luego conciliacion. No hace nada sin cuenta conectada. */
+/**
+ * Avisos que fallaron o murieron a medias (Issue #253): la busqueda de 24 h no
+ * ve la cancelacion de una orden vieja. procesarOrden es idempotente.
+ */
+async function reintentarAvisos(env: Env): Promise<void> {
+  const hace = (min: number) => new Date(Date.now() - min * 60_000).toISOString();
+  // ponytail: sin contador de intentos; un aviso roto se repite cada 15 min por 7 dias, 20 por corrida.
+  const { results } = await env.DB.prepare(
+    `select id from ml_notificaciones where (error != '' or procesado_en = '') and recibido_en between ? and ? order by id limit 20`,
+  ).bind(hace(7 * 24 * 60), hace(5)).all<{ id: number }>();
+  for (const { id } of results) await procesarNotificacion(env, id);
+}
+
+/** El cron (cada 15 min): avisos fallidos, ordenes perdidas y luego conciliacion. No hace nada sin cuenta conectada. */
 export async function sincronizar(env: Env): Promise<void> {
   const cuenta = await leerCuenta(env);
   if (!conectada(cuenta)) return;
+  await reintentarAvisos(env);
   try { await traerOrdenesRecientes(env, cuenta.ml_user_id); }
   catch (error) { console.error(JSON.stringify({ mensaje: 'ordenes recientes de ML', error: String(error) })); }
   await conciliarSeguro(env);

@@ -368,6 +368,34 @@ test('promo de inauguracion: $100 menos en tickets de $300 o mas dentro de la ve
   assert.equal(ambos.cuerpo.total, 35000);
 });
 
+test('promo con cupo (Issue #250): en linea se rechaza al agotarse, sin red se respeta y cancelar devuelve el lugar', async () => {
+  const { db, env, venta, pedir, ana } = await montar();
+  Object.assign(env, { PROMO_DESDE: '2026-01-01T06:00:00Z', PROMO_HASTA: '2026-01-08T06:00:00Z', PROMO_CUPO: '2' });
+  const dentro = '2026-01-03T20:00:00Z';
+  const restantes = async () => (await pedir('/api/vales/config', undefined, 'GET', ana)).cuerpo.promo.restantes;
+  assert.equal(await restantes(), 2);
+  const primera = await venta({ creado_en: dentro, promo: 10000 }, 2);
+  assert.equal(primera.cuerpo.total, 40000);
+  // Una caja vieja no manda `promo`: cuenta igual.
+  assert.equal((await venta({ creado_en: dentro }, 2)).cuerpo.total, 40000);
+  assert.equal(await restantes(), 0);
+
+  const agotada = await venta({ creado_en: dentro, promo: 10000 }, 2);
+  assert.equal(agotada.status, 409);
+  assert.equal(agotada.cuerpo.promo_agotada, true);
+  // La caja ya sabe que se acabo: cobra completo.
+  assert.equal((await venta({ creado_en: dentro, promo: 0 }, 2)).cuerpo.total, 50000);
+  // Cobrada sin red con la promo: el cliente ya pago asi, se respeta aunque pase del tope.
+  assert.equal((await venta({ creado_en: dentro, promo: 10000, sin_red: true }, 2)).cuerpo.total, 40000);
+  assert.equal(await restantes(), 0);
+
+  // Un ticket con promo cancelado devuelve su lugar (la ventana de cancelar ya paso para enero: directo en D1).
+  db.prepare('update ventas set cancelada = 1 where id = ?').run(primera.cuerpo.id);
+  assert.equal(await restantes(), 0, '3 con promo (una sin red) y una cancelada: siguen 2 de 2');
+  db.prepare(`update ventas set cancelada = 1 where id = (select id from ventas where promo > 0 and cancelada = 0 limit 1)`).run();
+  assert.equal(await restantes(), 1);
+});
+
 test('/reportes: con promo, descuento aprobado, pieza devuelta y ticket cancelado, categorias y top suman lo mismo que el total', async () => {
   const { db, env, pedirDescuento, venta, pedir, ana, como } = await montar();
   const Q = crypto.randomUUID();

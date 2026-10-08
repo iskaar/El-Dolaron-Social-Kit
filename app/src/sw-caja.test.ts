@@ -40,3 +40,20 @@ test('el worker sirve /sw-caja.js como JavaScript a la cuenta de caja', async ()
   assert.match(r.headers.get('content-type') ?? '', /javascript/);
   assert.match(await r.text(), /caja-v1/);
 });
+
+test('al instalarse precarga la caja y sus scripts; lo que Access redirige no se guarda (Issue #253)', async () => {
+  const oyentes: Record<string, (e: any) => void> = {};
+  const guardado = new Map<string, unknown>();
+  const sw: any = {
+    URL,
+    Request: class { method = 'GET'; url: string; constructor(ruta: string) { this.url = 'https://caja.prueba' + ruta; } },
+    fetch: async (p: { url: string }) => p.url.endsWith('/caja') ? { ...ok, redirected: true } : ok,
+    caches: { open: async () => ({ put: async (ruta: string, r: unknown) => { guardado.set(ruta, r); } }) },
+    self: { location: { origin: 'https://caja.prueba' }, addEventListener: (n: string, f: (e: any) => void) => { oyentes[n] = f; }, skipWaiting: async () => {} },
+  };
+  vm.runInNewContext(fuente, sw);
+  let espera: Promise<unknown> = Promise.resolve();
+  oyentes.install({ waitUntil: (p: Promise<unknown>) => { espera = p; } });
+  await espera;
+  assert.deepEqual([...guardado.keys()].sort(), ['/cajero.js', '/camara.js', '/code128.js', '/impresora.js', '/ticket.js', '/venta.js']);
+});

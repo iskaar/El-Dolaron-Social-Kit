@@ -809,6 +809,31 @@ test('cron: pausa lo agotado, iguala cantidades, respeta pausas del dueño y rec
   });
 });
 
+test('cron: reintenta el aviso que fallo, aunque la orden sea vieja (Issue #253)', async () => {
+  await conML(async (t) => {
+    const { id, itemId } = await publicarPieza(t);
+    t.sim.ordenes.set('9301', orden(9301, 'paid', [[itemId, 1]]));
+    await avisar(t, '/orders/9301');
+    await t.esperar();
+    assert.equal(stockDe(t, id), 2);
+    // La cancelacion llega dos dias despues y su unico intento falla (ML caido): queda con error.
+    t.sim.ordenes.delete('9301');
+    await avisar(t, '/orders/9301');
+    await t.esperar();
+    const vieja = new Date(Date.now() - 3_600_000).toISOString();
+    t.db.prepare(`update ml_notificaciones set recibido_en = ?`).run(vieja);
+    assert.equal((t.db.prepare(`select count(*) n from ml_notificaciones where error != ''`).get() as any).n, 1);
+    // La busqueda de 24 h no la ve; el reintento si.
+    t.sim.ordenes.set('9301', orden(9301, 'cancelled', [[itemId, 1]]));
+    const buscar = t.sim.responder.bind(t.sim);
+    t.sim.responder = (l) => l.ruta.startsWith('/orders/search') ? { cuerpo: { results: [] } } : buscar(l);
+    await worker.scheduled!({} as never, t.env, t.ctx as never);
+    await t.esperar();
+    assert.equal(stockDe(t, id), 3);
+    assert.equal((t.db.prepare(`select count(*) n from ml_notificaciones where error != ''`).get() as any).n, 0);
+  });
+});
+
 /* ---------- permisos ---------- */
 
 test('permisos: cajero y capturista reciben 403 en /api/ml/*; el dueño entra', async () => {

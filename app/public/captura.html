@@ -61,14 +61,15 @@
   #modo[aria-pressed="true"] { background: var(--amarillo); border-color: var(--amarillo); color: #111; }
   /* Un toque por talla y se queda puesta entre fotos: un rack de M son N disparos seguidos. */
   #talla-panel { top: calc(56px + env(safe-area-inset-top)); display: flex; flex-direction: column; gap: 8px; padding: 0 14px; }
-  #talla-panel[hidden], #nino[hidden] { display: none; }
+  #talla-panel[hidden], .nino[hidden], #revisar-talla[hidden] { display: none; }
   .chips { display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px; }
-  .chips button { padding: 10px 0; font-size: 16px; font-weight: 800; border-radius: 10px;
+  /* Con id en el selector: "#revisar button" (pastillas de revisar) no les gana. */
+  :is(#talla-panel, #revisar-talla) .chips button { padding: 10px 0; font-size: 16px; font-weight: 800; border-radius: 10px;
     border: 2px solid #fff; background: #0009; color: #fff; }
-  .chips button[aria-checked="true"] { background: var(--amarillo); border-color: var(--amarillo); color: #111; }
-  #tallas.falta button { border-color: var(--rojo); }
-  #nino { display: flex; gap: 8px; align-items: center; }
-  #talla-nino { flex: 1; grid-template-columns: repeat(3, 1fr); }
+  :is(#talla-panel, #revisar-talla) .chips button[aria-checked="true"] { background: var(--amarillo); border-color: var(--amarillo); color: #111; }
+  :is(#talla-panel, #revisar-talla) .tallas.falta button { border-color: var(--rojo); }
+  .nino { display: flex; gap: 8px; align-items: center; }
+  .talla-nino { flex: 1; grid-template-columns: repeat(3, 1fr); }
   /* La edad, como el candado de una maleta: se gira con el dedo y vale la fila del centro. */
   .rodillo { --fila: 40px; flex: 0 0 130px; height: calc(var(--fila) * 3); padding: var(--fila) 0;
     overflow-y: auto; scroll-snap-type: y mandatory; scrollbar-width: none; border-radius: 12px;
@@ -107,13 +108,7 @@
 <div id="miniaturas" class="encima"></div>
 <input id="zoom" class="encima" type="range" aria-label="Zoom de la cámara" hidden>
 
-<div id="talla-panel" class="encima" hidden>
-  <div id="tallas" class="chips" role="radiogroup" aria-label="Talla"></div>
-  <div id="nino" hidden>
-    <div id="edad" class="rodillo" role="listbox" aria-label="Edad"></div>
-    <div id="talla-nino" class="chips" role="radiogroup" aria-label="Talla de niño"></div>
-  </div>
-</div>
+<div id="talla-panel" class="encima" hidden></div>
 
 <div id="barra" class="encima">
   <button id="estado" type="button">Nuevo</button>
@@ -124,7 +119,7 @@
     <button type="button" data-paso="1" aria-label="Más piezas">+</button>
   </div>
   <button id="disparo" type="button" aria-label="Tomar foto"></button>
-  <span id="ayuda">Toca una miniatura para corregir cuántas piezas son.</span>
+  <span id="ayuda">Toca una miniatura para corregir piezas o talla.</span>
 </div>
 
 <div id="error">
@@ -140,6 +135,7 @@
       <button id="revisar-estado" type="button"></button>
       <div id="revisar-cantidad" class="control-cantidad"></div>
     </div>
+    <div id="revisar-talla" hidden></div>
     <p id="revisar-nota"></p>
     <div class="fila-revisar" id="revisar-local">
       <button id="revisar-descartar" type="button" class="peligro">Descartar</button>
@@ -158,9 +154,6 @@ const miniaturas = document.getElementById('miniaturas');
 const botonEstado = document.getElementById('estado');
 const botonModo = document.getElementById('modo');
 const panelTalla = document.getElementById('talla-panel');
-const panelTallas = document.getElementById('tallas');
-const panelNino = document.getElementById('nino');
-const rodillo = document.getElementById('edad');
 const panelError = document.getElementById('error');
 const textoError = document.getElementById('error-texto');
 
@@ -174,10 +167,6 @@ let modoRopa = false;   // Issue #218: con el modo Ropa, cada foto lleva su tall
 
 /* ---------- talla (modo Ropa) ---------- */
 
-let talla = null;                          // 'M', o 'Niño' para usar la edad del rodillo
-let edad = EDADES_NINO.indexOf('4 años');  // arranca a media lista: menos giro hacia bebé o hacia 16
-let tallaNino = '';                        // opcional
-
 /** Botones de una sola eleccion; `elegido` marca el que arranca puesto. */
 function chips(contenedor, opciones, elegido, alElegir) {
   contenedor.innerHTML = opciones.map(([valor, texto]) =>
@@ -190,41 +179,90 @@ function chips(contenedor, opciones, elegido, alElegir) {
   });
 }
 
-chips(panelTallas, [...TALLAS_ADULTO.map((t) => [t, t]), ['Niño', 'Niño']], null, (valor) => {
-  talla = valor;
-  panelTallas.classList.remove('falta');
-  panelNino.hidden = valor !== 'Niño';
-  // Un rodillo oculto no se puede girar: se acomoda en la edad al mostrarse.
-  if (!panelNino.hidden) rodillo.scrollTop = edad * filaRodillo();
-});
-chips(document.getElementById('talla-nino'), [['', 'Sin'], ...TALLAS_NINO.map((t) => [t, t])], '', (valor) => { tallaNino = valor; });
+/**
+ * Botones de adulto + Niño, que abre el rodillo de edad y la talla de nino
+ * opcional. Uno arriba, para disparar; otro en "revisar", para corregir.
+ * `alCambiar` recibe la talla completa ("M", "Niño 6 años / S") a cada cambio.
+ */
+function selectorTalla(raiz, alCambiar) {
+  raiz.innerHTML = `<div class="chips tallas" role="radiogroup" aria-label="Talla"></div>
+    <div class="nino" hidden>
+      <div class="rodillo" role="listbox" aria-label="Edad"></div>
+      <div class="chips talla-nino" role="radiogroup" aria-label="Talla de niño"></div>
+    </div>`;
+  const [panelTallas, panelNino, rodillo, panelTallaNino] =
+    ['.tallas', '.nino', '.rodillo', '.talla-nino'].map((selector) => raiz.querySelector(selector));
+  let talla = null;                          // 'M', o 'Niño' para usar la edad del rodillo
+  let edad = EDADES_NINO.indexOf('4 años');  // arranca a media lista: menos giro hacia bebé o hacia 16
+  let tallaNino = '';                        // opcional
 
-rodillo.innerHTML = EDADES_NINO.map((e) => `<div role="option">${e}</div>`).join('');
-const filaRodillo = () => rodillo.firstElementChild.offsetHeight;
-function pintarEdad() {
-  [...rodillo.children].forEach((fila, i) => {
-    fila.classList.toggle('elegida', i === edad);
-    fila.setAttribute('aria-selected', String(i === edad));
+  /** Adulto "M", nino "Niño 6 años / S" o "Niño 6 años". */
+  const valor = () => {
+    if (talla !== 'Niño') return talla;
+    const base = `Niño ${EDADES_NINO[edad]}`;
+    return tallaNino ? `${base} / ${tallaNino}` : base;
+  };
+  const fila = () => rodillo.firstElementChild.offsetHeight;
+  const marcar = (contenedor, elegido) => {
+    for (const b of contenedor.children) b.setAttribute('aria-checked', String(b.dataset.valor === elegido));
+  };
+  function pintarEdad() {
+    [...rodillo.children].forEach((renglon, i) => {
+      renglon.classList.toggle('elegida', i === edad);
+      renglon.setAttribute('aria-selected', String(i === edad));
+    });
+  }
+  function mostrarNino() {
+    panelNino.hidden = talla !== 'Niño';
+    // Un rodillo oculto no se puede girar: se acomoda en la edad al mostrarse.
+    if (!panelNino.hidden) rodillo.scrollTop = edad * fila();
+  }
+
+  chips(panelTallas, [...TALLAS_ADULTO.map((t) => [t, t]), ['Niño', 'Niño']], null, (elegido) => {
+    talla = elegido;
+    panelTallas.classList.remove('falta');
+    mostrarNino();
+    alCambiar(valor());
   });
-}
-// La fila del centro es la elegida mientras gira, sin esperar a que se detenga.
-rodillo.addEventListener('scroll', () => {
-  edad = Math.min(EDADES_NINO.length - 1, Math.max(0, Math.round(rodillo.scrollTop / filaRodillo())));
-  pintarEdad();
-}, { passive: true });
-// Tocar una fila la lleva al centro: sirve tambien para quien no gira.
-rodillo.addEventListener('click', (evento) => {
-  const i = [...rodillo.children].indexOf(evento.target);
-  if (i >= 0) rodillo.scrollTo({ top: i * filaRodillo(), behavior: 'smooth' });
-});
-pintarEdad();
+  chips(panelTallaNino, [['', 'Sin'], ...TALLAS_NINO.map((t) => [t, t])], '', (elegido) => {
+    tallaNino = elegido;
+    alCambiar(valor());
+  });
 
-/** La talla que se guarda con la foto: adulto "M", nino "Niño 6 años / S" o "Niño 6 años". */
-function tallaElegida() {
-  if (talla !== 'Niño') return talla;
-  const base = `Niño ${EDADES_NINO[edad]}`;
-  return tallaNino ? `${base} / ${tallaNino}` : base;
+  rodillo.innerHTML = EDADES_NINO.map((e) => `<div role="option">${e}</div>`).join('');
+  // La fila del centro es la elegida mientras gira, sin esperar a que se detenga.
+  rodillo.addEventListener('scroll', () => {
+    const i = Math.min(EDADES_NINO.length - 1, Math.max(0, Math.round(rodillo.scrollTop / fila())));
+    if (i === edad) return;
+    edad = i;
+    pintarEdad();
+    alCambiar(valor());
+  }, { passive: true });
+  // Tocar una fila la lleva al centro: sirve tambien para quien no gira.
+  rodillo.addEventListener('click', (evento) => {
+    const i = [...rodillo.children].indexOf(evento.target);
+    if (i >= 0) rodillo.scrollTo({ top: i * fila(), behavior: 'smooth' });
+  });
+  pintarEdad();
+
+  return {
+    valor,
+    faltante: () => panelTallas.classList.add('falta'),
+    /** Pinta una talla ya guardada, sin avisar a `alCambiar`. La raiz tiene que estar a la vista. */
+    poner(texto) {
+      const [base, nino = ''] = texto.split(' / ');
+      talla = base.startsWith('Niño ') ? 'Niño' : base;
+      if (talla === 'Niño') edad = EDADES_NINO.indexOf(base.slice('Niño '.length));
+      tallaNino = nino;
+      marcar(panelTallas, talla);
+      marcar(panelTallaNino, tallaNino);
+      pintarEdad();
+      mostrarNino();
+    },
+  };
 }
+
+const selector = selectorTalla(panelTalla, () => {});
 
 // El telefono abre en el ultimo modo usado: quien captura ropa todo el dia no lo vuelve a tocar.
 // La talla no se recuerda: la de ayer puesta sin querer es peor que un toque.
@@ -324,9 +362,6 @@ function pintarMiniatura(registro) {
   boton.className = 'mini';
   boton.dataset.id = registro.id;
   boton.innerHTML = '<img alt=""><span class="t"></span><span class="n"></span>';
-  // "Niño 18-24 meses / XL" no cabe en 62 px: "18-24m XL".
-  boton.querySelector('.t').textContent = (registro.talla ?? '')
-    .replace('Niño ', '').replace(' años', 'a').replace(' meses', 'm').replace(' / ', ' ');
   boton.querySelector('img').src = URL.createObjectURL(registro.foto);
   boton.addEventListener('click', () => abrirRevision(registro.id));
   miniaturas.prepend(boton);
@@ -339,6 +374,9 @@ function repintarMiniatura(id) {
   const boton = miniaturas.querySelector(`.mini[data-id="${id}"]`);
   const datos = sesion.get(id);
   if (!boton || !datos) return;
+  // "Niño 18-24 meses / XL" no cabe en 62 px: "18-24m XL".
+  boton.querySelector('.t').textContent = (datos.talla ?? '')
+    .replace('Niño ', '').replace(' años', 'a').replace(' meses', 'm').replace(' / ', ' ');
   boton.classList.toggle('danado', datos.estado_fisico === 'danado');
   boton.classList.toggle('subida', datos.subida);
   boton.querySelector('.n').textContent = datos.cantidad > 1 ? `×${datos.cantidad}` : '';
@@ -351,6 +389,8 @@ const elRevisarFoto = document.getElementById('revisar-foto');
 const elRevisarEstado = document.getElementById('revisar-estado');
 const elRevisarCantidad = document.getElementById('revisar-cantidad');
 const elRevisarNota = document.getElementById('revisar-nota');
+const elRevisarTalla = document.getElementById('revisar-talla');
+const selectorRevision = selectorTalla(elRevisarTalla, (valor) => cambiarTalla(idActual, valor));
 const elRevisarLocal = document.getElementById('revisar-local');
 const elDescartar = document.getElementById('revisar-descartar');
 let idActual = null;
@@ -391,7 +431,8 @@ async function abrirRevision(id) {
   registroActual = datos.subida ? null : (await leer(id)) ?? null;
   elRevisarFoto.src = miniaturas.querySelector(`.mini[data-id="${id}"] img`).src;
   elDescartar.textContent = 'Descartar';
-  elRevisarNota.textContent = registroActual ? '' : 'Ya se subió: aquí se corrige cuántas piezas son.';
+  elRevisarNota.textContent = registroActual ? ''
+    : `Ya se subió: aquí se corrige cuántas piezas son${datos.talla ? ' y la talla' : ''}.`;
   elRevisarEstado.style.display = registroActual ? '' : 'none';
   elRevisarLocal.style.display = registroActual ? '' : 'none';
   if (registroActual) pintarEstadoRevision();
@@ -400,6 +441,48 @@ async function abrirRevision(id) {
     <button type="button" data-paso="1" aria-label="Más piezas">+</button>`;
   activarControlCantidad(elRevisarCantidad, () => sesion.get(id)?.cantidad ?? 1, (valor) => cambiarCantidad(id, valor));
   elRevisar.classList.add('abierto');
+  // Solo las fotos de Ropa traen talla; despues de abrir, porque el rodillo oculto no se acomoda.
+  elRevisarTalla.hidden = !datos.talla;
+  if (datos.talla) selectorRevision.poner(datos.talla);
+}
+
+/**
+ * Corregir la talla desde "revisar". El rodillo cambia la talla a cada fila que
+ * pasa: lo que se guarda es la ultima, un momento despues de soltarlo. Antes de
+ * subirse va a la cola local; ya subida, al servidor (mismas 24 h que la cantidad).
+ */
+function cambiarTalla(id, valor) {
+  const datos = sesion.get(id);
+  if (!datos || !valor || valor === datos.talla) return;
+  datos.talla = valor;
+  repintarMiniatura(id);
+  clearTimeout(datos.temporizadorTalla);
+  datos.temporizadorTalla = setTimeout(async () => {
+    // Sin registro local es que se acaba de subir: va al servidor.
+    const registro = datos.subida ? null : registroActual?.id === id ? registroActual : await leer(id);
+    if (registro) {
+      registro.talla = datos.talla;
+      await guardarLocal(registro);
+      return;
+    }
+    let aviso;
+    try {
+      const respuesta = await fetch(`/api/borradores/${id}/talla`, {
+        method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ talla: datos.talla }),
+      });
+      const cuerpo = await respuesta.json().catch(() => ({}));
+      if (!respuesta.ok) throw new Error(cuerpo.error || `error ${respuesta.status}`);
+      datos.tallaGuardada = datos.talla;
+      aviso = `Guardado: talla ${datos.talla}.`;
+    } catch (error) {
+      // No se queda en pantalla una talla que el servidor no tiene.
+      aviso = `No se guardó (${error instanceof TypeError ? 'sin red' : error.message}). Sigue en ${datos.tallaGuardada}.`;
+      datos.talla = datos.tallaGuardada;
+      repintarMiniatura(id);
+      if (idActual === id) selectorRevision.poner(datos.talla);
+    }
+    if (idActual === id) elRevisarNota.textContent = aviso;
+  }, 600);
 }
 
 function cambiarCantidad(id, valor) {
@@ -498,14 +581,14 @@ document.getElementById('revisar-cerrar').addEventListener('click', cerrarRevisi
 
 async function disparar() {
   // Modo Ropa sin talla: no se toma la foto; la talla es lo que se pide primero.
-  if (modoRopa && !tallaElegida()) {
-    panelTallas.classList.add('falta');
+  if (modoRopa && !selector.valor()) {
+    selector.faltante();
     return;
   }
   const foto = await capturar();
   if (!foto) return;
   const registro = { id: crypto.randomUUID(), foto, estado_fisico: estadoFisico, cantidad, creado: Date.now(),
-    talla: modoRopa ? tallaElegida() : null };
+    talla: modoRopa ? selector.valor() : null };
   await guardar(registro);           // primero al disco, siempre
   tomadas += 1;
   piezasTotales += registro.cantidad;   // no `cantidad`: el + pudo tocarse mientras se guardaba
@@ -549,6 +632,7 @@ async function procesarCola() {
       if (respuesta.ok && datos) {
         datos.subida = true;
         datos.guardada = registro.cantidad ?? 1;
+        datos.tallaGuardada = registro.talla;
         repintarMiniatura(registro.id);
         // Si estaba abierta, "Descartar" ya no la quitaria del servidor: se
         // vuelve a pintar en modo subida.

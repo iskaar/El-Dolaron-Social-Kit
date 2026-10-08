@@ -113,6 +113,7 @@ Costo aproximado por foto (≈1.5 k tokens de entrada, ≈300 de salida) y por p
 | `claude-opus-5` | $0.015 | ~$15 USD |
 | `claude-sonnet-5` | $0.006 | ~$6 USD |
 | `claude-haiku-4-5` | $0.003 | ~$3 USD |
+| `claude-haiku-5-5` | ~$0.0006 | ~$0.60 USD |
 | Gemini Flash | ~$0.001 | ~$1 USD |
 | GPT económico | ~$0.001 | ~$1 USD |
 
@@ -120,7 +121,8 @@ Costo aproximado por foto (≈1.5 k tokens de entrada, ≈300 de salida) y por p
 
 Diferencia técnica real: Gemini puede apoyarse en búsqueda de Google, lo que para "cuánto cuesta esto nuevo en México" es una ventaja sobre un modelo que responde de memoria. Cuesta latencia, y aquí la latencia no importa porque el análisis corre en segundo plano.
 
-Punto de partida: `claude-haiku-4-5`, decidido con la prueba del paso 3.
+Punto de partida: `claude-haiku-4-5`, decidido con la prueba del paso 3. Desde el 8/10/2026 corre
+`claude-haiku-5-5` (Issue #239): mismo prompt y esquema, ~85 % más barato, con `effort: low`.
 
 Un análisis fallido deja la fila en `error` con su foto intacta. Nunca se borra una foto por un fallo de análisis.
 

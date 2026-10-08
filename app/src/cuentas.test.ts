@@ -4,6 +4,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { permiso, puede, verificarJwt, leerRoles, type Usuario } from './cuentas.ts';
+import { tienda, DUENO } from './prueba-d1.ts';
 
 const usuario = (roles: Usuario['roles'], activo = true): Usuario => ({ correo: 'a@b.mx', nombre: 'A', roles, activo });
 
@@ -103,4 +104,25 @@ test('se rechaza el JWT de otra aplicacion, otro equipo, vencido, sin correo o m
   const [cabeza, , firma] = (await firmar(BUENA)).split('.');
   const alterado = `${cabeza}.${b64url(JSON.stringify({ ...BUENA, email: 'dueno@gmail.com' }))}.${firma}`;
   assert.equal(await verificarJwt(alterado, AUD, EMISOR, llave, AHORA), null);
+});
+
+test('dos dueños quitandose el rol a la vez: uno pasa y el otro no; nunca queda la tienda sin dueño (Issue #253)', async () => {
+  const { db, env, pedir } = tienda();
+  const OTRO = 'otro@prueba.mx';
+  db.prepare(`insert into usuarios (correo, nombre, roles, activo, creado_en, actualizado_en) values (?, 'Otro', 'dueno', 1, '', '')`).run(OTRO);
+  const duenos = () => (db.prepare(`select count(*) n from usuarios where activo = 1 and roles like '%dueno%'`).get() as { n: number }).n;
+  const quitar = (correo: string, extra = {}) => pedir('/api/cuentas', { correo, nombre: 'X', roles: ['cajero'], ...extra }, 'PUT');
+
+  const estados = (await Promise.all([quitar(DUENO), quitar(OTRO)])).map((r) => r.status).sort();
+  assert.deepEqual(estados, [200, 400]);
+  assert.equal(duenos(), 1);
+  const queda = (db.prepare(`select correo from usuarios where roles like '%dueno%'`).get() as { correo: string }).correo;
+  (env as unknown as { DEV_USUARIO: string }).DEV_USUARIO = queda;
+  assert.equal((await pedir('/api/cuentas', { correo: queda, nombre: 'X', roles: ['dueno'], activo: false }, 'PUT')).status, 400);
+
+  // Aprobar una solicitud que le quitaria el rol al ultimo: 400 y la solicitud sigue pendiente (todo el batch se deshace).
+  db.prepare(`insert into solicitudes (id, tipo, correo, nombre, justificacion, creado_en) values ('s1', 'acceso', ?, 'X', '', '')`).run(queda);
+  assert.equal((await pedir('/api/solicitudes/s1/resolver', { aprobar: true, roles: ['cajero'] })).status, 400);
+  assert.equal((db.prepare(`select estado from solicitudes where id = 's1'`).get() as { estado: string }).estado, 'pendiente');
+  assert.equal(duenos(), 1);
 });
