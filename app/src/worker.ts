@@ -30,7 +30,7 @@ import { registrarCorte, registrarRetiro, ultimoCorte, cajaDe } from './corte.ts
 import { portal, llegada, vincular } from './portal.ts';
 import { sentenciasVale, buscarVale, valeDeVenta, valeUsadoEnVenta, reimprimirVale, valesAbiertos } from './vales.ts';
 import { catalogoPublico, revisionCatalogo } from './catalogo.ts';
-import { rutaML, recibirNotificacion, conciliarSeguro, sincronizar } from './mercadolibre.ts';
+import { rutaML, recibirNotificacion, conciliarSeguro, sincronizar, publicacionViva } from './mercadolibre.ts';
 import { pedirDescuento, validarDescuento, listarDescuentos, listarDuenos } from './descuentos.ts';
 import { listarAltoValor, revisarConteo, ajustarExistencia, listarAjustes } from './conteo.ts';
 
@@ -450,6 +450,10 @@ async function fusionarBorrador(id: string, request: Request, env: Env): Promise
     return json({ error: 'Con esa suma pasa de 999 piezas en existencia.' }, 409);
   }
 
+  if (await publicacionViva(env, id)) {
+    return json({ error: 'Tiene publicación en Mercado Libre: ciérrala primero.' }, 409);
+  }
+
   // La suma sale de la fila de la repetida DENTRO del batch, no de lo leido arriba: dos
   // fusiones en paralelo leen lo mismo, pero solo la que borra la repetida la consume.
   // `ahora` marca la suma aplicada; el borrado y el codigo dependen de esa marca.
@@ -486,6 +490,9 @@ async function fusionarBorrador(id: string, request: Request, env: Env): Promise
 async function descartarBorrador(id: string, env: Env): Promise<Response> {
   if (!UUID.test(id)) {
     return json({ error: 'Identificador invalido.' }, 400);
+  }
+  if (await publicacionViva(env, id)) {
+    return json({ error: 'Tiene publicación en Mercado Libre: ciérrala primero.' }, 409);
   }
   await env.FOTOS.delete(`fotos/${id}.jpg`);
   await env.DB.prepare('delete from productos where id = ?').bind(id).run();

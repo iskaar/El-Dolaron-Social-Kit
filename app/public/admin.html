@@ -332,7 +332,8 @@ function ficha(p) {
       if (enlace) window.open(enlace, '_blank', 'noopener');
       else { aviso.textContent = 'Escribe el nombre para buscarlo en Mercado Libre.'; aviso.style.color = ''; }
     } else if (accion === 'descartar') {
-      await fetch(`/api/borradores/${p.id}`, { method: 'DELETE' });
+      const respuesta = await fetch(`/api/borradores/${p.id}`, { method: 'DELETE' });
+      if (!respuesta.ok) { aviso.textContent = (await respuesta.json()).error; return; }
       nodo.remove();
     }
   });
