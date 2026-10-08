@@ -64,6 +64,13 @@
     </div>
   </section>
 
+  <!-- Issue #220: piezas en existencia que no pueden salir en eldolaron.com. Solo el dueno. -->
+  <section class="panel solo-dueno" id="revision">
+    <h2>Revisión del catálogo público</h2>
+    <p class="aviso" style="color:#5b6478">Estas piezas no salen en eldolaron.com. Corrige y recarga la página para ver la lista al día.</p>
+    <div id="revision-lista"></div>
+  </section>
+
   <!-- Issue #115: solo el dueno (la API tambien lo exige). -->
   <form class="panel" id="manual" hidden autocomplete="off">
     <h2>Capturar sin foto</h2>
@@ -322,6 +329,35 @@ function ficha(p) {
   return nodo;
 }
 
+/* ---------- revisión del catálogo público (Issue #220) ---------- */
+
+const MOTIVOS = { sin_foto: 'Sin foto', sin_precio: 'Sin precio', nombre_interno: 'Nombre interno' };
+async function cargarRevision() {
+  const { piezas } = await (await fetch('/api/catalogo/revision')).json();
+  const lista = document.getElementById('revision-lista');
+  if (piezas.length === 0) { lista.textContent = 'Nada que corregir.'; return; }
+  lista.replaceChildren(...piezas.map((p) => {
+    const fila = document.createElement('div');
+    fila.className = 'acciones';
+    fila.innerHTML = `<strong></strong> <code></code>`;
+    fila.querySelector('strong').textContent = p.nombre || '(sin nombre)';
+    fila.querySelector('code').textContent = p.codigo;
+    for (const m of p.motivos) {
+      const etiqueta = document.createElement('span');
+      etiqueta.className = 'etiqueta error';
+      etiqueta.textContent = MOTIVOS[m];
+      fila.append(etiqueta);
+    }
+    const editar = document.createElement('button');
+    editar.type = 'button';
+    editar.className = 'claro';
+    editar.textContent = 'Editar';
+    editar.addEventListener('click', () => { editar.replaceWith(ficha(p)); });   // la misma ficha de la cola
+    fila.append(editar);
+    return fila;
+  }));
+}
+
 /* ---------- captura sin foto (Issue #115) ---------- */
 
 const manual = document.getElementById('manual');
@@ -329,6 +365,7 @@ fetch('/api/yo').then((r) => r.json()).then(({ usuario }) => {
   const dueno = !!usuario?.roles.includes('dueno');
   manual.hidden = !dueno;
   document.body.classList.toggle('dueno', dueno);
+  if (dueno) cargarRevision();
 });
 document.getElementById('m-categoria').innerHTML = opcionesCategoria('');
 document.getElementById('m-destino').innerHTML = '<option value="">Automático</option>'

@@ -190,3 +190,53 @@ test('catalogo destacados: mas vendido en 14 dias y vendible primero; completa c
     assert.ok(!nombres.includes('Agotada'));
   } finally { t.db.close(); }
 });
+
+test('catalogo (Issue #220): nombre interno o sin foto o sin precio no sale en lista ni en destacados', async () => {
+  const t = publica();
+  try {
+    const buena = pieza(t, { nombre: 'Blusa floreada' });
+    const tarjeta = pieza(t, { nombre: 'Tarjeta regalo PlayStation Store $100' });
+    pieza(t, { nombre: 'DAMA 150 12' });
+    pieza(t, { nombre: 'Sin foto', foto_key: '' });
+    pieza(t, { nombre: 'Sin precio', precio: 0 });
+    const lista = await leer(await t.llamar('/api/catalogo'));
+    assert.deepEqual(lista.piezas.map((p: any) => p.codigo).sort(), [buena, tarjeta].sort());
+    assert.equal(lista.total, 2);
+    const dest = await leer(await t.llamar('/api/catalogo/destacados'));
+    assert.deepEqual(dest.piezas.map((p: any) => p.codigo).sort(), [buena, tarjeta].sort());
+  } finally { t.db.close(); }
+});
+
+test('catalogo (Issue #220): revision solo para el personal, con los motivos', async () => {
+  const t = tienda();
+  const personal = (ruta: string) => worker.fetch!(new Request(`https://personal.prueba${ruta}`) as never, t.env, t.ctx as never);
+  try {
+    const bien = pieza(t, { nombre: 'Blusa' });
+    const banda = pieza(t, { nombre: 'DAMA 150 12' });
+    const sinFoto = pieza(t, { nombre: 'Gorra', foto_key: '' });
+    const sinPrecio = pieza(t, { nombre: 'Cinto', precio: 0 });
+    const todo = pieza(t, { nombre: 'CAJA 9', precio: 0, foto_key: '' });
+    pieza(t, { nombre: 'Agotada', stock: 0 });
+    const r = await personal('/api/catalogo/revision');
+    assert.equal(r.status, 200);
+    assert.equal(r.headers.get('cache-control'), 'no-store');
+    const { piezas } = await leer(r);
+    const motivos = Object.fromEntries(piezas.map((p: any) => [p.codigo, p.motivos]));
+    assert.deepEqual(Object.keys(motivos).sort(), [banda, sinFoto, sinPrecio, todo].sort());
+    assert.ok(!(bien in motivos));
+    assert.deepEqual(motivos[banda], ['nombre_interno']);
+    assert.deepEqual(motivos[sinFoto], ['sin_foto']);
+    assert.deepEqual(motivos[sinPrecio], ['sin_precio']);
+    assert.deepEqual(motivos[todo], ['sin_foto', 'sin_precio', 'nombre_interno']);
+    assert.equal(piezas.find((p: any) => p.codigo === banda).nombre, 'DAMA 150 12');
+    assert.equal(piezas.find((p: any) => p.codigo === banda).id.length, 36);
+  } finally { t.db.close(); }
+});
+
+test('catalogo (Issue #220): revision no existe en el host publico', async () => {
+  const t = publica();
+  try {
+    pieza(t, { nombre: 'DAMA 150 12' });
+    assert.equal((await t.llamar('/api/catalogo/revision')).status, 404);
+  } finally { t.db.close(); }
+});
