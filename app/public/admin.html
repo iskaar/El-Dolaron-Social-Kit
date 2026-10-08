@@ -241,10 +241,12 @@ function ficha(p) {
   const valor = (campo) => nodo.querySelector(`[data-campo="${campo}"]`).value;
   const aviso = nodo.querySelector('.aviso');
 
+  // La existencia solo viaja si la tocaste: la caja pudo vender desde que se abrio la ficha.
+  let stockMostrado = String(p.stock ?? 1);
   const base = () => ({
     nombre: valor('nombre'), marca: valor('marca'), categoria: valor('categoria'), talla: valor('talla'),
     estado_fisico: valor('estado_fisico'), precio_lista: centavos(valor('precio_lista')),
-    stock: Math.round(Number(valor('stock') || 0)),
+    ...(valor('stock') === stockMostrado ? {} : { stock: Math.round(Number(valor('stock') || 0)) }),
   });
 
   async function enviar(cuerpo) {
@@ -255,6 +257,8 @@ function ficha(p) {
     if (!respuesta.ok) { aviso.textContent = datos.error; aviso.style.color = ''; return false; }
     nodo.querySelector('[data-campo="precio"]').value = pesos(datos.precio);
     nodo.querySelector('[data-campo="destino"]').value = datos.destino;
+    stockMostrado = String(datos.stock);
+    nodo.querySelector('[data-campo="stock"]').value = stockMostrado;
     aviso.textContent = 'Guardado';
     aviso.style.color = '#2c7a3f';
     return true;
@@ -264,9 +268,8 @@ function ficha(p) {
   nodo.guardarFicha = () => enviar({ ...base(), precio: centavos(valor('precio')), destino: valor('destino') });
 
   // Retomar foto: mismo id, asi que reemplaza la foto en R2 sin duplicar la pieza.
-  // El analisis vuelve a correr sobre la foto nueva y **pisa** nombre, categoria y
-  // precio: es lo que se quiere cuando la foto estaba mal, pero si ya corregiste a
-  // mano, corrige otra vez despues del retome.
+  // `solo_foto`: no toca existencia, talla ni lo que ya corregiste, y no vuelve a
+  // analizar; si la foto nueva cambia el nombre o el precio, usa "Reintentar análisis".
   nodo.querySelector('.retomar input').addEventListener('change', async (evento) => {
     const archivo = evento.target.files?.[0];
     if (!archivo) return;
@@ -276,6 +279,7 @@ function ficha(p) {
       const cuerpo = new FormData();
       cuerpo.append('id', p.id);
       cuerpo.append('estado_fisico', valor('estado_fisico'));
+      cuerpo.append('solo_foto', '1');
       cuerpo.append('foto', await reducirArchivo(archivo), `${p.id}.jpg`);
       const respuesta = await fetch('/api/borradores', { method: 'POST', body: cuerpo });
       if (!respuesta.ok) {
@@ -283,8 +287,7 @@ function ficha(p) {
         return;
       }
       nodo.querySelector('img').src = `/api/foto/${p.id}?v=${Date.now()}`;  // la foto vieja esta en cache
-      aviso.textContent = 'Foto reemplazada. Analizando de nuevo…';
-      setTimeout(cargarCola, 8000);
+      aviso.textContent = 'Foto reemplazada. Si cambia el nombre o el precio, usa Reintentar análisis.';
     } catch {
       aviso.textContent = 'No se pudo leer la imagen.';
     } finally {
