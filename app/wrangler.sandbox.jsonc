@@ -35,13 +35,11 @@
     "BASES_APROBADAS_VERSION": "2026-10-v3",
     "PROMOCION_INICIO": "2026-10-01T00:00:00Z",
     "VALES_ABIERTOS": "si",
-    // Promo de inauguracion (Isaac, 7/10): $100 menos en tickets de $300 o mas. Inauguracion el sabado 10/10
-    // (Isaac, 8/10): del sabado 10 a las 11:00 al domingo 12/10 al cierre, hora de la tienda (UTC-6).
-    // Para apagarla antes: quitar las dos y desplegar.
-    "PROMO_DESDE": "2026-10-10T17:00:00Z",
+    // Promo de inauguracion: en el sandbox ya esta corriendo y con cupo de 3, para probar
+    // en la caja que se agota antes de la inauguracion (prod: sabado 10/10 11:00, cupo 100).
+    "PROMO_DESDE": "2026-10-08T06:00:00Z",
     "PROMO_HASTA": "2026-10-13T06:00:00Z",
-    // «A las primeras 100 personas» (Issue #250): tickets no cancelados con la promo. Quitarla = sin tope.
-    "PROMO_CUPO": "100",
+    "PROMO_CUPO": "3",
     "PORTAL_REGISTRO_ABIERTO": "si",
     "ACCESS_EQUIPO": "yellow-term-7d99.cloudflareaccess.com",
     // El aud es por aplicacion de Access: sandbox.viste.com.mx se agrega como
