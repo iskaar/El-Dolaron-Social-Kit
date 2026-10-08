@@ -38,11 +38,13 @@ test('descartar una pieza con publicacion viva en ML: 409 y no se borra', async 
   assert.ok(existe(t, PRODUCTO));
 });
 
-test('descartar sin publicacion (o con la publicacion cerrada) sigue funcionando', async () => {
-  const t = tienda();
-  publicar(t, PRODUCTO, 'cerrada');
-  assert.equal((await t.pedir(`/api/borradores/${PRODUCTO}`, {}, 'DELETE')).status, 200);
-  assert.ok(!existe(t, PRODUCTO));
+test('descartar sin publicacion (o cerrada, o vendida) sigue funcionando', async () => {
+  for (const estado of ['cerrada', 'vendida']) {
+    const t = tienda();
+    publicar(t, PRODUCTO, estado);
+    assert.equal((await t.pedir(`/api/borradores/${PRODUCTO}`, {}, 'DELETE')).status, 200, estado);
+    assert.ok(!existe(t, PRODUCTO));
+  }
   const u = tienda();
   assert.equal((await u.pedir(`/api/borradores/${PRODUCTO}`, {}, 'DELETE')).status, 200);
   assert.ok(!existe(u, PRODUCTO));

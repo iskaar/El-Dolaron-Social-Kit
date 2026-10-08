@@ -645,14 +645,15 @@ async function categoriaEnDominio(env: Env, categoriaId: string, dominio: string
 }
 
 /**
- * Si ML todavia puede vender la pieza: tiene articulo (activa, pausada, vendida o con
- * error, que se reactivan solas) o se esta publicando ahora. `cerrada` y el error sin
+ * Si ML todavia puede vender la pieza: tiene articulo (activa, pausada o con error,
+ * que se reactivan) o se esta publicando ahora. `cerrada`, `vendida` (sin existencia en
+ * ML; solo la conciliacion la reactivaria, y ya no veria la pieza) y el error sin
  * articulo no cuentan. Borrar o fusionar la pieza antes la dejaria huerfana: la
  * conciliacion une con `productos` y ya no la veria.
  */
 export async function publicacionViva(env: Env, productoId: string): Promise<boolean> {
   const fila = await env.DB.prepare(
-    `select 1 as x from ml_publicaciones where producto_id = ? and estado <> 'cerrada'
+    `select 1 as x from ml_publicaciones where producto_id = ? and estado not in ('cerrada', 'vendida')
        and (ml_item_id is not null or (estado = 'publicando' and actualizado_en >= ?))`,
   ).bind(productoId, new Date(Date.now() - 120_000).toISOString()).first();
   return !!fila;
