@@ -256,3 +256,20 @@ test('el corte impreso lista las piezas del conteo, de mayor a menor', async () 
   const texto = new TextDecoder().decode(Uint8Array.from(pedazos.slice(antes).flatMap((p) => [...p])));
   assert.match(texto, /CONTEO\n +1 x \$500\.00 +\$500\.00\n +2 x \$100\.00 +\$200\.00\n +1 x \$50\.00 +\$50\.00/);
 });
+
+test('QR del vale (Issue #258): URL al portal con el código tras #; la caja lo sigue leyendo; invita solo si está completo', async () => {
+  const { pedazos } = impresoraFalsa();
+  const { reconectarImpresora, imprimirVale, codigoQrVale, URL_VALE } = await import('../public/impresora.js');
+  const { codigoEnDigitos, codigoDeDigitos } = await import('../public/code128.js');
+  await reconectarImpresora();
+  const vale = { codigo:'DP-abcdefghijklmnop', importe:1000, restante:1000, creado_en:'2026-10-02T18:00:00.000Z',
+    disponible_desde:'2026-10-02T18:00:00Z', vence_en:'2026-11-01T18:00:00Z' };
+  const url = URL_VALE + codigoEnDigitos(vale.codigo);
+  assert.equal(url, 'https://dolarones.eldolaron.com/v#' + codigoEnDigitos(vale.codigo));
+  assert.ok(new TextDecoder().decode(codigoQrVale(vale.codigo)).includes(url));
+  assert.equal(codigoDeDigitos(url), vale.codigo);   // la cámara de la caja lee el QR nuevo
+  await imprimirVale(vale);
+  await imprimirVale({ ...vale, restante:400 });      // usado en parte: ya no se puede pasar
+  const texto = new TextDecoder().decode(Uint8Array.from(pedazos.flatMap((p) => [...p])));
+  assert.equal(texto.split('registrate y recibe el doble').length - 1, 1);
+});

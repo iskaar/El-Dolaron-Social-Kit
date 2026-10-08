@@ -1,5 +1,5 @@
 import { dolaronesGanados } from '../public/venta.js';
-import { basesListas, codigoAleatorio, promocionIniciada } from './dolarones.ts';
+import { basesListas, codigoAleatorio, disponibleDesde, promocionIniciada, sumarMeses } from './dolarones.ts';
 
 const CODIGO = /^DP-[A-Za-z0-9_-]{16}$/;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -91,11 +91,12 @@ export async function sentenciasVale(env: Env, p: {
   return { ok:true, sentencias, emitido };
 }
 
-/** Retira lo ganado de más; importe original y vencimiento quedan intactos. */
+/** Retira lo ganado de más; importe original y vencimiento quedan intactos. Un vale ya pasado a una
+ * cuenta no se toca: su venta ya es de socio y la ajusta su lote (dolarones.ts, devoluciones.ts). */
 export async function retirarVale(env: Env, ventaId:string, autor:string, ahora:string, pagadoRestante = 0): Promise<D1PreparedStatement[]> {
   const vale = await env.DB.prepare(`select k.id, k.importe,
     coalesce((select -sum(importe) from vales_movimientos where vale_id = k.id and tipo = 'retiro'), 0) as retirado
-    from vales_dolarones k where k.venta_id = ?`).bind(ventaId)
+    from vales_dolarones k where k.venta_id = ? and k.reclamado_por is null`).bind(ventaId)
     .first<{ id:string; importe:number; retirado:number }>();
   if (!vale) return [];
   const retira = Math.max(0, vale.importe - vale.retirado - dolaronesGanados(pagadoRestante, 5));
@@ -126,4 +127,67 @@ export async function cancelarVales(env: Env, ventaId:string, autor:string, ahor
         values (?, ?, 'reverso_canje', ?, ?, ?)`).bind(c.vale_id, ventaId, c.importe, autor, ahora),
     ]),
   ];
+}
+
+// Pasar el vale a la cuenta (Issue #258). Isaac: solo vales completos y vigentes,
+// lo abonado sigue las reglas de cuenta y hay un tope por semana.
+// ponytail: tope fijo; volverlo variable si Isaac lo cambia seguido.
+export const RECLAMOS_POR_SEMANA = 2;
+const SEMANA = 7 * 86_400_000;
+
+export async function reclamarVale(env: Env, clienteId: string, codigo: string): Promise<Response> {
+  if (!CODIGO.test(codigo)) return json({ error:'Código de vale inválido.' }, 400);
+  const ahora = new Date();
+  const iso = ahora.toISOString();
+  const haceUnaSemana = new Date(ahora.getTime() - SEMANA).toISOString();
+  const k = await env.DB.prepare(`select k.id, k.venta_id, k.importe, k.restante, k.vence_en, k.creado_en, k.reclamado_por,
+      v.total, v.dolarones, v.devuelto, v.cancelada, v.cliente_id
+    from vales_dolarones k join ventas v on v.id = k.venta_id where k.codigo = ?`).bind(codigo).first<{
+      id:string; venta_id:string; importe:number; restante:number; vence_en:string; creado_en:string; reclamado_por:string | null;
+      total:number; dolarones:number; devuelto:number; cancelada:number; cliente_id:string | null }>();
+  if (!k) return json({ error:'No encontramos ese vale.' }, 404);
+  if (k.reclamado_por === clienteId) {
+    const lote = await env.DB.prepare('select importe, disponible_desde, vence_en from dolarones_lotes where venta_id = ?')
+      .bind(k.venta_id).first();
+    return json({ ya_estaba:true, ...lote });
+  }
+  if (k.reclamado_por) return json({ error:'Este vale ya se pasó a otra cuenta.' }, 409);
+  if (k.cancelada) return json({ error:'La compra de este vale se canceló.' }, 409);
+  if (k.vence_en <= iso) return json({ error:'Este vale ya venció.' }, 409);
+  if (k.restante !== k.importe || k.dolarones > 0 || k.cliente_id)
+    return json({ error:'Solo se puede pasar un vale completo y sin usar, de una compra pagada en dinero.' }, 409);
+  const usados = await env.DB.prepare('select count(*) as n from vales_dolarones where reclamado_por = ? and reclamado_en > ?')
+    .bind(clienteId, haceUnaSemana).first<{ n:number }>();
+  if ((usados?.n ?? 0) >= RECLAMOS_POR_SEMANA)
+    return json({ error:`Puedes pasar hasta ${RECLAMOS_POR_SEMANA} vales por semana. Intenta en unos días.` }, 429);
+
+  // Tarifa de socio sobre lo cobrado en dinero; disponible y vencimiento como cuenta, desde la compra.
+  const compra = new Date(k.creado_en);
+  const importe = dolaronesGanados(k.total - k.dolarones - k.devuelto);
+  const lote = { id:crypto.randomUUID(), disponible_desde:disponibleDesde(compra), vence_en:sumarMeses(compra, 12) };
+  try {
+    await env.DB.batch([
+      // Todo se vuelve a comprobar aquí (otro teléfono, la caja, el tope): -1 dispara
+      // vale_saldo_valido y deshace el batch completo.
+      env.DB.prepare(`update vales_dolarones set restante = case
+          when restante = importe and reclamado_por is null and vence_en > ?
+            and (select cancelada from ventas where id = venta_id) = 0
+            and (select count(*) from vales_dolarones where reclamado_por = ? and reclamado_en > ?) < ?
+          then 0 else -1 end,
+        reclamado_por = ?, reclamado_en = ? where id = ?`)
+        .bind(iso, clienteId, haceUnaSemana, RECLAMOS_POR_SEMANA, clienteId, iso, k.id),
+      // La venta pasa a ser del socio: recibos, cancelación y devoluciones siguen las reglas de cuenta.
+      env.DB.prepare('update ventas set cliente_id = ? where id = ? and cliente_id is null').bind(clienteId, k.venta_id),
+      env.DB.prepare(`insert into dolarones_lotes (id, cliente_id, origen, venta_id, importe, restante, disponible_desde, vence_en, creado_en)
+        values (?, ?, 'compra', ?, ?, ?, ?, ?, ?)`)
+        .bind(lote.id, clienteId, k.venta_id, importe, importe, lote.disponible_desde, lote.vence_en, iso),
+      env.DB.prepare(`insert into dolarones_movimientos (cliente_id, lote_id, venta_id, tipo, importe, autor, creado_en)
+        values (?, ?, ?, 'compra', ?, 'portal-vale', ?)`).bind(clienteId, lote.id, k.venta_id, importe, iso),
+    ]);
+  } catch (error) {
+    if (String(error).includes('saldo de vale invalido') || String(error).includes('UNIQUE'))
+      return json({ error:'El vale cambió mientras lo pasábamos. Vuelve a escanearlo.' }, 409);
+    throw error;
+  }
+  return json({ importe, disponible_desde:lote.disponible_desde, vence_en:lote.vence_en }, 201);
 }

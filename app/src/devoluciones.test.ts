@@ -260,11 +260,14 @@ test('base de main con 015 y 020 admite 016 → 018 → 019 → 021 sin perder v
     const migraciones = readdirSync('.').filter((f) => /^migracion-\d+/.test(f)).sort();
     const aplicar = (f: string) => db.exec(readFileSync(f, 'utf8'));
     aplicar('schema.sql');
-    for (const f of migraciones.filter((f) => !pendientes.includes(f.slice(10, 13)))) aplicar(f);
+    // La base de entonces llegaba hasta la 021; las posteriores (p. ej. 032 altera vales_dolarones) van al final.
+    const posteriores = migraciones.filter((f) => f.slice(10, 13) > '021');
+    for (const f of migraciones.filter((f) => !pendientes.includes(f.slice(10, 13)) && !posteriores.includes(f))) aplicar(f);
     const id = crypto.randomUUID();
     db.prepare("insert into ventas (id, total, forma_pago, efectivo, cambio, creado_en, registrado_en) values (?, 25000, 'efectivo', 25000, 0, '', '')").run(id);
     db.prepare("insert into usuarios (correo, nombre, roles, pin_hash, pin_sal, creado_en, actualizado_en) values ('caja@prueba.mx', 'Caja', 'cajero', 'hash-prueba', 'sal-prueba', '', '')").run();
     for (const numero of pendientes) aplicar(migraciones.find((f) => f.startsWith(`migracion-${numero}-`))!);
+    for (const f of posteriores) aplicar(f);
     assert.equal(db.prepare('select total, pedido_hash, revision from ventas where id = ?').get(id)!.total, 25000);
     assert.equal(db.prepare('select pedido_hash from ventas where id = ?').get(id)!.pedido_hash, null);
     assert.equal(db.prepare("select pin_hash from usuarios where correo = 'caja@prueba.mx'").get()!.pin_hash, 'hash-prueba');
