@@ -253,3 +253,36 @@ test('catalogo: una pieza sin nombre no sale en el sitio, y la revision lo dice'
     assert.deepEqual(piezas.find((p: any) => p.codigo === sinNombre)?.motivos, ['sin_nombre']);
   } finally { t.db.close(); }
 });
+
+test('catalogo (Issue #241): nombre interno en minusculas o con $ tampoco sale; un nombre normal si', async () => {
+  const t = publica();
+  try {
+    const buena = pieza(t, { nombre: 'Tarjeta regalo PlayStation Store $100' });
+    const jeans = pieza(t, { nombre: "Jeans Levi's 501 Hombre" });
+    for (const nombre of ['dama 50', 'Dama 150 12', 'Juguetes $49', '  caballero 80  ']) pieza(t, { nombre });
+    const lista = await leer(await t.llamar('/api/catalogo'));
+    assert.deepEqual(lista.piezas.map((p: any) => p.codigo).sort(), [buena, jeans].sort());
+  } finally { t.db.close(); }
+});
+
+test('catalogo (Issue #241): con cursor, una venta entre paginas no se salta ninguna pieza', async () => {
+  const t = publica();
+  try {
+    const codigos = Array.from({ length: 26 }, () => pieza(t));
+    const p1 = await leer(await t.llamar('/api/catalogo'));
+    assert.equal(p1.piezas.length, 24);
+    assert.equal(typeof p1.siguiente, 'string');
+    // Se vende la mas nueva (ya mostrada en la pagina 1).
+    t.db.prepare('update productos set stock = 0 where codigo = ?').run(codigos[25]);
+    const p2 = await leer(await t.llamar(`/api/catalogo?despues=${encodeURIComponent(p1.siguiente)}`));
+    assert.deepEqual(p2.piezas.map((p: any) => p.codigo), [codigos[1], codigos[0]]);
+    assert.equal(p2.hay_mas, false);
+    assert.equal(p2.siguiente, null);
+    // Con pagina (offset) se hubiera saltado codigos[1]: lo que el sitio hacia antes.
+    const viejo = await leer(await t.llamar('/api/catalogo?pagina=2'));
+    assert.deepEqual(viejo.piezas.map((p: any) => p.codigo), [codigos[0]]);
+    for (const malo of ['x', 'sin-tilde', '2026~ED-1;drop', '~ED-1']) {
+      assert.equal((await t.llamar(`/api/catalogo?despues=${encodeURIComponent(malo)}`)).status, 400, malo);
+    }
+  } finally { t.db.close(); }
+});
