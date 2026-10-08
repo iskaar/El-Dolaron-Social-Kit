@@ -26,6 +26,10 @@
   .mini.danado { border-color: var(--rojo); }
   .mini .n { position: absolute; right: -4px; bottom: -4px; min-width: 22px; padding: 1px 5px;
     border-radius: 999px; background: var(--amarillo); color: #111; font-size: 13px; font-weight: 800; }
+  /* La talla a la vista en cada miniatura: una talla equivocada se ve al momento, no en el admin. */
+  .mini .t { position: absolute; left: 0; right: 0; top: 0; padding: 1px 2px; border-radius: 7px 7px 0 0;
+    background: #000b; color: #fff; font-size: 11px; font-weight: 800; white-space: nowrap; overflow: hidden; }
+  .mini .t:empty { display: none; }
   #barra { bottom: 0; display: flex; align-items: center; justify-content: space-between;
     gap: 12px; padding: 16px 18px calc(18px + env(safe-area-inset-bottom));
     background: linear-gradient(#0000, #000c); }
@@ -222,11 +226,17 @@ function tallaElegida() {
   return tallaNino ? `${base} / ${tallaNino}` : base;
 }
 
-botonModo.addEventListener('click', () => {
-  modoRopa = !modoRopa;
+// El telefono abre en el ultimo modo usado: quien captura ropa todo el dia no lo vuelve a tocar.
+// La talla no se recuerda: la de ayer puesta sin querer es peor que un toque.
+const CLAVE_MODO = 'captura-modo';
+function fijarModo(ropa) {
+  modoRopa = ropa;
   botonModo.setAttribute('aria-pressed', String(modoRopa));
   panelTalla.hidden = !modoRopa;
-});
+  try { localStorage.setItem(CLAVE_MODO, modoRopa ? 'ropa' : 'mercancia'); } catch { /* sin localStorage: abre en Mercancía */ }
+}
+botonModo.addEventListener('click', () => fijarModo(!modoRopa));
+try { if (localStorage.getItem(CLAVE_MODO) === 'ropa') fijarModo(true); } catch { /* idem */ }
 
 /* ---------- cola local: la foto se guarda antes de intentar subirla ---------- */
 
@@ -313,7 +323,10 @@ function pintarMiniatura(registro) {
   boton.type = 'button';
   boton.className = 'mini';
   boton.dataset.id = registro.id;
-  boton.innerHTML = '<img alt=""><span class="n"></span>';
+  boton.innerHTML = '<img alt=""><span class="t"></span><span class="n"></span>';
+  // "Niño 18-24 meses / XL" no cabe en 62 px: "18-24m XL".
+  boton.querySelector('.t').textContent = (registro.talla ?? '')
+    .replace('Niño ', '').replace(' años', 'a').replace(' meses', 'm').replace(' / ', ' ');
   boton.querySelector('img').src = URL.createObjectURL(registro.foto);
   boton.addEventListener('click', () => abrirRevision(registro.id));
   miniaturas.prepend(boton);
