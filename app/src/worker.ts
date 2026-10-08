@@ -261,8 +261,10 @@ async function corregirBorrador(id: string, cambios: Record<string, unknown>, en
     if (!Number.isFinite(precio) || precio < 0) {
       return json({ error: 'Precio invalido.' }, 400);
     }
-    // Banda: manda el precio de la banda. Etiqueta: quiebra la decena (termina en 9) como el automatico.
-    precio = ajustarManual({ precio, destino: destino as Destino, config });
+    if (esDestinoBanda(destino)) {
+      // Banda: manda el precio de la banda. Etiqueta: el precio tecleado por el dueno se respeta tal cual.
+      precio = ajustarManual({ precio, destino: destino as Destino, config });
+    }
     // Misma regla que en el calculo automatico: el precio de venta nunca queda
     // por encima del precio de lista.
     if (precioLista > 0 && precio > precioLista) {
@@ -313,7 +315,7 @@ async function capturarManual(request: Request, env: Env, correo: string): Promi
   // el mismo que le pondria Etiquetas, asi que la etiqueta impresa despues coincide.
   // Las de banda se cobran con el codigo de la banda.
   await env.DB.prepare(
-    `update productos set codigo = 'ED-' || printf('%06d', rowid)
+    `update productos set codigo = ${CODIGO_NUEVO}
      where id = ? and (codigo is null or codigo = '') and destino not like 'banda%'`,
   ).bind(id).run();
   return json(await respuesta.json(), 201);
@@ -351,6 +353,16 @@ async function corregirExistencia(id: string, request: Request, env: Env, correo
 }
 
 /**
+ * Codigo ED- nuevo: el rowid, o el siguiente al mayor que ya existe si ese rowid ya
+ * se uso. SQLite reutiliza el rowid mas alto al borrar (fusionar/descartar), y una
+ * fusion deja vivo el codigo de la borrada: sin esto, la siguiente pieza chocaria
+ * con el indice unico o heredaria una etiqueta ya pegada.
+ * ponytail: max() recorre los codigos ED-; un contador en config si el catalogo crece mucho.
+ */
+const CODIGO_NUEVO = `'ED-' || printf('%06d', max(rowid,
+  (select coalesce(max(cast(substr(codigo, 4) as integer)), 0) + 1 from productos where codigo like 'ED-%')))`;
+
+/**
  * Asigna el codigo de barras a las piezas que se van a etiquetar y las devuelve.
  * El codigo se mina una sola vez: una pieza que ya trae etiqueta impresa conserva
  * el suyo, porque reimprimir con otro codigo deja el papel del anaquel huerfano.
@@ -366,12 +378,18 @@ async function prepararEtiquetas(request: Request, env: Env): Promise<Response> 
   }
 
   const huecos = limpios.map(() => '?').join(',');
-  await env.DB.prepare(
-    `update productos set codigo = 'ED-' || printf('%06d', rowid), actualizado_en = ?
-     where id in (${huecos}) and (codigo is null or codigo = '')`,
+  // Una por una y en orden de captura: cada codigo nuevo ve el anterior (CODIGO_NUEVO).
+  const { results: porCodificar } = await env.DB.prepare(
+    `select id from productos where id in (${huecos}) and (codigo is null or codigo = '') order by rowid`,
   )
-    .bind(new Date().toISOString(), ...limpios)
-    .run();
+    .bind(...limpios)
+    .all<{ id: string }>();
+  const ahora = new Date().toISOString();
+  if (porCodificar.length) {
+    await env.DB.batch(porCodificar.map(({ id }) => env.DB.prepare(
+      `update productos set codigo = ${CODIGO_NUEVO}, actualizado_en = ? where id = ?`,
+    ).bind(ahora, id)));
+  }
 
   const { results } = await env.DB.prepare(
     `select id, codigo, nombre, talla, precio, precio_lista, semana_ingreso, destino, stock
