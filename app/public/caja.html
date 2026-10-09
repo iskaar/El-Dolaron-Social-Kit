@@ -336,6 +336,17 @@ if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw-caja.js'
   </div>
 </dialog>
 
+<dialog id="dlg-forma" aria-labelledby="dlg-forma-titulo">
+  <h2 id="dlg-forma-titulo">¿Es en efectivo?</h2>
+  <p id="dlg-forma-texto"></p>
+  <form method="dialog" class="dlg-botones">
+    <button value="efectivo" class="primario" autofocus>Sí, efectivo exacto</button>
+    <button value="tarjeta">No, fue con tarjeta</button>
+    <button value="transferencia">No, fue transferencia</button>
+    <button value="">Regresar</button>
+  </form>
+</dialog>
+
 <dialog id="dlg-dolarones" aria-labelledby="dlg-titulo">
   <h2 id="dlg-titulo">¿Usar Dolarones?</h2>
   <p id="dlg-texto"></p>
@@ -371,6 +382,7 @@ let lineas = [];
 let idVenta = null;
 let creadoEnVenta = null;
 let cobrando = false;
+let formaElegida = false;       // la cajera tocó la forma de pago en esta venta (#260)
 // Socio de la venta en curso: { id, numero, nombre, disponible, por_liberar, regalo_disponible } o null.
 let socio = null;
 let codigoSocio = '';
@@ -939,11 +951,20 @@ async function cobrarConDolarones(venta, t) {
 
 /* ---------- cobro: primero al disco, luego a la red ---------- */
 
+// Ventana propia, no confirm() nativo (congela la pestaña). Devuelve la forma elegida o '' si regresa.
+function preguntarForma(aPagar) {
+  const d = $('dlg-forma');
+  $('dlg-forma-texto').textContent = `No escribiste el efectivo recibido. Si es efectivo, se registra ${pesos(aPagar)} exacto, sin cambio.`;
+  d.returnValue = '';
+  d.showModal();
+  return new Promise((listo) => d.addEventListener('close', () => listo(d.returnValue), { once: true }));
+}
+
 async function cobrar() {
   if (cobrando) return;                 // doble clic: el primero ya va en camino
   if (!exigirCaja()) return;
-  const efectivo = Math.round(Number($('efectivo').value || 0) * 100);
-  const forma = $('forma').value;
+  let efectivo = Math.round(Number($('efectivo').value || 0) * 100);
+  let forma = $('forma').value;
   const imprimirEn = impresionRemota() ? $('imprimir-en').value : undefined;
   if (imprimirEn && forma === 'efectivo') {
     $('aviso').textContent = 'En el celular sólo tarjeta o transferencia';
@@ -955,11 +976,19 @@ async function cobrar() {
     $('aviso').style.color = '#D72B32';
     return;
   }
-  const t = totales(lineas, efectivo, usados, descuentoAplicado() + promoActual());
+  let t = totales(lineas, efectivo, usados, descuentoAplicado() + promoActual());
   if (usados > saldoCanjeable(socio, t.total)) {
     $('aviso').textContent = 'Los regalos de apertura requieren un ticket de $1,000 MXN o más antes de descontar Dolarones. Revisa el importe solicitado.';
     $('aviso').style.color = '#D72B32';
     return;
+  }
+  // Efectivo sin monto (#260): si la cajera no eligió la forma, se pregunta; si la eligió, es el importe exacto.
+  if (forma === 'efectivo' && efectivo === 0 && t.aPagar > 0) {
+    const elegida = formaElegida ? 'efectivo' : await preguntarForma(t.aPagar);
+    if (!elegida) { $('efectivo').focus(); return; }
+    forma = $('forma').value = elegida;
+    if (forma === 'efectivo') efectivo = t.aPagar;
+    t = totales(lineas, efectivo, usados, descuentoAplicado() + promoActual());
   }
   if (!efectivoAlcanza({ formaPago: forma, total: t.aPagar, efectivo })) {
     $('aviso').textContent = efectivo === 0 ? 'Falta el efectivo recibido.' : `Faltan ${pesos(t.falta)}`;
@@ -1064,7 +1093,7 @@ async function cobrar() {
     pintarDescuento();
     quitarSocio();
     $('efectivo').value = '';
-    $('forma').value = 'efectivo';      // cada venta empieza en efectivo: la forma anterior descuadraba el corte (#260)
+    $('forma').value = 'efectivo'; formaElegida = false;      // cada venta empieza en efectivo: la forma anterior descuadraba el corte (#260)
     $('codigo').focus();
     sincronizar();
   } finally {
@@ -1567,7 +1596,7 @@ $('efectivo').addEventListener('input', () => {
   if (Number($('efectivo').value) > 0) $('forma').value = 'efectivo';
   pintar();
 });
-$('forma').addEventListener('change', pintar);
+$('forma').addEventListener('change', () => { formaElegida = true; pintar(); });
 $('cobrar').addEventListener('click', cobrar);
 // Para cambiar billetes sin cobrar nada. Abre sin esperar al servidor (tiene
 // que abrir aunque no haya red) y deja quien y cuando en /reportes: se encola
@@ -1811,7 +1840,7 @@ $('corte-reimprimir').addEventListener('click', async () => {
 });
 
 $('cancelar').addEventListener('click', () => {
-  lineas = []; idVenta = null; descuento = null; pintarDescuento(); quitarSocio(); $('efectivo').value = ''; $('forma').value = 'efectivo'; $('aviso').textContent = 'Venta cancelada';
+  lineas = []; idVenta = null; descuento = null; pintarDescuento(); quitarSocio(); $('efectivo').value = ''; $('forma').value = 'efectivo'; formaElegida = false; $('aviso').textContent = 'Venta cancelada';
   $('aviso').style.color = '#5b6478'; pintar(); $('codigo').focus();
 });
 
