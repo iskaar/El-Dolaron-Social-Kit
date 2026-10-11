@@ -48,14 +48,24 @@
     <span id="impresora-estado" style="font-size:13px"></span>
     <button id="conectar-impresora" type="button">Conectar impresora</button>
     <button id="imprimir" type="button">Imprimir seleccionadas</button>
+    <button id="automatica" type="button" hidden>Iniciar impresión automática</button>
+    <button id="nueva-sesion" class="claro" type="button" hidden>Nueva sesión</button>
     <button id="todas" class="claro" type="button">Seleccionar todas</button>
     <button id="ninguna" class="claro" type="button">Deseleccionar todas</button>
     <button id="marcar" class="claro" type="button">Marcar seleccionadas como impresas</button>
     <button id="ver-impresas" class="claro" type="button">Mostrar impresas</button>
     <button id="otra" class="claro" type="button">¿No aparece la impresora?</button>
     <button id="detener" class="claro" type="button">Detener</button>
-    <span id="resumen"></span>
+    <span id="resumen" role="status" aria-live="polite"></span>
   </div>
+
+  <p id="ayuda-automatica" class="ayuda" hidden>
+    En sandbox: inicia aquí y toma las fotos en <a href="/captura" target="_blank" rel="noopener">la cámara del sandbox</a> desde el teléfono.
+    Cada prenda nueva se imprime cuando su nombre y precio están listos, una etiqueta por pieza en existencia.
+    Deja esta página abierta en la computadora. Al detener o recargar, puedes retomar la misma sesión.
+    «Nueva sesión» deja las pendientes anteriores para impresión manual y empieza con las próximas fotos.
+    El precio debe estar asignado antes de imprimir; las piezas sin nombre o precio esperan en la cola.
+  </p>
 
   <p class="ayuda">
     Prende la impresora de etiquetas y aprieta <b>«Conectar impresora»</b> (en Chrome o Edge). La primera vez de cada sesión
@@ -112,13 +122,16 @@ const hora = (iso) => new Date(iso).toLocaleTimeString('es-MX', { hour: '2-digit
 
 /** Solo lo que lleva etiqueta: los bins se cobran con la tarjeta de la caja. */
 async function cargar() {
-  piezas = (await (await fetch('/api/borradores?estado=listo')).json())
+  const respuesta = await fetch('/api/borradores?estado=listo', { cache: 'no-store', signal: AbortSignal.timeout(15000) });
+  if (!respuesta.ok) throw new Error('No se pudo cargar la lista. Revisa la red y la sesión.');
+  piezas = (await respuesta.json())
     .filter((p) => p.destino === 'etiqueta' && p.precio > 0);
   pintar();
 }
 
 function pintar() {
   const hechas = impresas();
+  const idDudoso = localStorage.getItem(CLAVE_DUDOSA);
   // Las marcas de antes no guardaban el precio: se les pone el de hoy una vez,
   // para que un cambio de aqui en adelante si se note.
   for (const p of piezas) {
@@ -157,12 +170,15 @@ function pintar() {
       const marca = hechas[p.id];
       const impresa = marca && vigente(p);
       const cambiada = marca && !impresa;
+      const dudosa = p.id === idDudoso;
       return `
-    <label class="renglon${impresa ? ' impresa' : ''}${cambiada ? ' cambiada' : ''}">
+    <label class="renglon${impresa ? ' impresa' : ''}${cambiada || dudosa ? ' cambiada' : ''}">
       <span class="posicion">${impresa ? '✓' : cambiada ? '↻' : ++posicion}</span>
       <input type="checkbox" value="${p.id}" ${impresa ? '' : 'checked'}>
       <img src="/api/foto/${p.id}" alt="" loading="lazy" onerror="this.style.visibility='hidden'">
-      <span>${escapar(p.nombre || 'Sin nombre')}${impresa
+      <span>${escapar(p.nombre || 'Sin nombre')}${p.talla ? ` · ${escapar(p.talla)}` : ''}${dudosa
+        ? '<span class="marca aviso">Envío incierto: revisa el papel y recupera esta pieza manualmente.</span>'
+        : impresa
         ? `<span class="marca">Impresa ${hora(marca.hora)}<button type="button" class="claro" data-desde="${p.id}">No salió desde aquí</button></span>`
         : cambiada
           ? `<span class="marca aviso">La etiqueta pegada dice ${pesos(marca.precio)}: reimprime y cámbiala.</span>`
@@ -205,6 +221,8 @@ document.getElementById('marcar').addEventListener('click', async () => {
   const base = Date.now();
   const porId = new Map(piezas.map((p) => [p.id, p]));
   ids.forEach((id, i) => marcarImpresa(id, new Date(base + i).toISOString(), porId.get(id)));
+  const dudosa = localStorage.getItem(CLAVE_DUDOSA);
+  if (ids.includes(dudosa) && impresas()[dudosa]) localStorage.removeItem(CLAVE_DUDOSA);
   pintar();
   resumen.textContent = `${ids.length} ${ids.length === 1 ? 'pieza marcada' : 'piezas marcadas'} como impresas. Se regresan con «Mostrar impresas».`;
 });
@@ -256,49 +274,71 @@ async function conectarDesdeClic(cualquiera) {
 botonConectar.addEventListener('click', () => conectarDesdeClic(false));
 document.getElementById('otra').addEventListener('click', () => conectarDesdeClic(true));
 
-document.getElementById('detener').addEventListener('click', () => detenerEnvio());
+document.getElementById('detener').addEventListener('click', () => {
+  pausarAutomatica();
+  detenerEnvio();
+});
 
-document.getElementById('imprimir').addEventListener('click', async () => {
+let imprimiendo = false;
+document.getElementById('imprimir').addEventListener('click', () => {
+  if (automaticaActiva) return;
   const ids = [...lista.querySelectorAll('input[type=checkbox]:checked')].map((c) => c.value);
-  if (ids.length === 0) return;
   // Cuantas etiquetas pidio el usuario por pieza. Solo se imprimen: la existencia
   // no cambia aqui, se corrige en la cola de revision.
   const pedidas = new Map([...lista.querySelectorAll('.copias')]
     .map((c) => [c.dataset.id, Math.min(99, Math.max(1, Math.round(Number(c.value)) || 1))]));
-  detenerEnvio(false);
+  return imprimir(ids, pedidas);
+});
 
-  // Antes que nada, y antes de cualquier espera: pedir la impresora gasta el
-  // permiso del clic, y el navegador ya no lo da despues de un fetch.
-  if (!etiqueteraLista()) {
-    try {
-      await conectarEtiquetera();
-    } catch (error) {
-      avisarFalla(error);
-      return;
-    } finally {
-      pintarImpresora();
-    }
-  }
-
-  // El servidor prepara hasta 100 piezas por llamada, asi que se manda por tramos.
+async function imprimir(ids, pedidas = new Map(), automatico = false) {
+  if (imprimiendo || ids.length === 0) return false;
+  imprimiendo = true;
+  pintarControles();
+  if (!automatico) detenerEnvio(false);
   let terminadas = 0;
   try {
+    // Pedir la impresora necesita un clic real, nunca el temporizador automático.
+    if (!etiqueteraLista()) {
+      if (automatico) {
+        resumen.textContent = 'La impresora se desconectó. Conéctala y retoma la impresión automática.';
+        return false;
+      }
+      try {
+        await conectarEtiquetera();
+      } catch (error) {
+        avisarFalla(error);
+        return false;
+      } finally {
+        pintarImpresora();
+      }
+    }
+
+    // El servidor prepara hasta 100 piezas por llamada, asi que se manda por tramos.
     for (let i = 0; i < ids.length; i += 100) {
+      if (envioDetenido()) return false;
       // El codigo se asigna aqui: una pieza sin etiqueta impresa no necesita codigo.
       const respuesta = await fetch('/api/etiquetas', {
         method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ids: ids.slice(i, i + 100) }),
+        signal: AbortSignal.timeout(15000),
       });
       const preparadas = await respuesta.json();
       if (!respuesta.ok) {
         resumen.textContent = preparadas.error;
-        return;
+        return false;
       }
 
       for (const p of preparadas) {
+        if (envioDetenido()) return false;
+        if (automatico && (!p.nombre?.trim() || p.precio <= 0 || p.stock <= 0 || p.destino !== 'etiqueta')) {
+          resumen.textContent = 'La pieza cambió antes de imprimir. Revisa la cola y retoma la sesión.';
+          return false;
+        }
         // Las que se pidieron en la columna Etiquetas; de inicio, una por pieza en existencia.
-        const copias = pedidas.get(p.id) ?? copiasDe(p);
+        const copias = automatico ? p.stock : pedidas.get(p.id) ?? copiasDe(p);
         const detalle = `pieza ${terminadas + 1} de ${ids.length}`;
         resumen.textContent = `Imprimiendo ${detalle}: ${copias} ${copias === 1 ? 'etiqueta' : 'etiquetas'}…`;
+        // Si se cierra la página durante BLE, no se reenvía una etiqueta incierta a ciegas.
+        if (automatico) localStorage.setItem(CLAVE_DUDOSA, p.id);
         const salio = await imprimirEtiquetas(
           p, copias,
           (hechas) => { resumen.textContent = `Imprimiendo ${detalle}: etiqueta ${hechas} de ${copias}…`; },
@@ -309,24 +349,165 @@ document.getElementById('imprimir').addEventListener('click', async () => {
           resumen.textContent = envioDetenido()
             ? `Detenido en la pieza ${terminadas + 1} de ${ids.length}. Las que faltan siguen en la lista.`
             : `Se cortó en la pieza ${terminadas + 1} de ${ids.length} (${p.nombre}): ${errorEnvio()}. Las que faltan siguen en la lista.`;
-          return;
+          return false;
         }
         marcarImpresa(p.id, undefined, p);
+        if ((automatico || localStorage.getItem(CLAVE_DUDOSA) === p.id) && !impresas()[p.id]) {
+          throw new Error('No se pudo recordar el envío. Revisa el almacenamiento del navegador y la etiqueta.');
+        }
+        if (localStorage.getItem(CLAVE_DUDOSA) === p.id) localStorage.removeItem(CLAVE_DUDOSA);
         terminadas += 1;
       }
     }
     resumen.textContent = `${terminadas} piezas enviadas. Si alguna no salió, usa «Mostrar impresas» y «No salió desde aquí».`;
+    return true;
   } catch (error) {
     // Nada de fallar en silencio: si algo revienta a media lista, se dice donde.
     console.error('Etiquetas: fallo el lote', error);
     resumen.textContent = `Se detuvo en la pieza ${terminadas + 1} de ${ids.length}: ${error.message}`;
+    return false;
   } finally {
     pintarHistorial();
     const aviso = resumen.textContent;
-    await cargar();
+    try { await cargar(); } catch { /* el aviso del envío conserva prioridad */ }
     resumen.textContent = aviso;   // cargar() pinta el conteo encima; el aviso importa mas
+    imprimiendo = false;
+    pintarControles();
   }
+}
+
+/* ---------- impresión automática: solo sandbox, en la computadora ---------- */
+
+const CLAVE_SESION = 'etiqueta-automatica-desde';
+const CLAVE_DUDOSA = 'etiqueta-automatica-dudosa';
+const botonAutomatica = document.getElementById('automatica');
+let ambiente = null;
+let automaticaDesde = '';
+let automaticaActiva = false;
+let consultandoAutomatica = false;
+
+function pintarControles() {
+  document.getElementById('imprimir').disabled = imprimiendo || automaticaActiva;
+  document.getElementById('marcar').disabled = imprimiendo || automaticaActiva;
+  botonAutomatica.disabled = !automaticaActiva && (imprimiendo || consultandoAutomatica);
+  document.getElementById('nueva-sesion').disabled = automaticaActiva || imprimiendo || consultandoAutomatica;
+  botonAutomatica.textContent = automaticaActiva ? 'Pausar impresión automática' : 'Retomar / iniciar impresión automática';
+}
+
+function pausarAutomatica() {
+  automaticaActiva = false;
+  pintarControles();
+}
+
+async function iniciarAutomatica() {
+  if (ambiente?.ambiente !== 'sandbox') return;
+  if (automaticaActiva) {
+    pausarAutomatica();
+    detenerEnvio();
+    resumen.textContent = 'Impresión automática pausada. Las pendientes siguen en la sesión.';
+    return;
+  }
+  if (imprimiendo || consultandoAutomatica) return;
+  if (!navigator.bluetooth || !navigator.locks) {
+    resumen.textContent = 'Abre esta página en Chrome o Edge en la computadora con Bluetooth.';
+    return;
+  }
+  consultandoAutomatica = true;
+  pintarControles();
+  try {
+    // El permiso se pide en el clic, antes de consultar el servidor.
+    if (!etiqueteraLista()) await conectarEtiquetera();
+    const dudosa = localStorage.getItem(CLAVE_DUDOSA);
+    if (dudosa) {
+      resumen.textContent = `Envío incierto (${dudosa}). Revisa el papel y la foto; imprime esa pieza manualmente o márcala como impresa antes de retomar.`;
+      return;
+    }
+    const respuesta = await fetch('/api/salud', { cache: 'no-store', signal: AbortSignal.timeout(15000) });
+    if (!respuesta.ok) throw new Error('No se pudo iniciar la sesión.');
+    const salud = await respuesta.json();
+    if (salud.ambiente !== 'sandbox') return;
+    automaticaDesde = localStorage.getItem(CLAVE_SESION) || salud.ahora;
+    localStorage.setItem(CLAVE_SESION, automaticaDesde);
+    automaticaActiva = true;
+    detenerEnvio(false);
+    resumen.textContent = 'Automática activa. Toma las fotos en la cámara del sandbox; esperando nombre y precio.';
+  } catch (error) {
+    avisarFalla(error);
+  } finally {
+    consultandoAutomatica = false;
+    pintarImpresora();
+    pintarControles();
+  }
+  await imprimirNuevas();
+}
+
+async function imprimirNuevas() {
+  if (!automaticaActiva || consultandoAutomatica || imprimiendo) return;
+  consultandoAutomatica = true;
+  pintarControles();
+  try {
+    // Una sola pestaña de este navegador consume la sesión a la vez.
+    await navigator.locks.request('etiqueta-automatica', { ifAvailable: true }, async (lock) => {
+      if (!lock) return;
+      if (localStorage.getItem(CLAVE_DUDOSA)) {
+        pausarAutomatica();
+        resumen.textContent = 'Hay un envío incierto. Revisa el papel y recupera esa pieza manualmente antes de retomar.';
+        return;
+      }
+      const respuesta = await fetch(`/api/borradores?desde=${encodeURIComponent(automaticaDesde)}`, {
+        cache: 'no-store', signal: AbortSignal.timeout(15000),
+      });
+      if (!respuesta.ok) throw new Error('No se pudo consultar la cola. Revisa la red y la sesión.');
+      const nuevas = await respuesta.json();
+      if (!automaticaActiva) return;
+      const hechas = impresas();
+      const cola = [];
+      let esperando = '';
+      for (const p of nuevas) {
+        if (hechas[p.id] || p.stock <= 0 || p.destino !== 'etiqueta') continue;
+        // Conservar el orden de la mesa aunque un análisis posterior termine primero.
+        if (p.estado_analisis !== 'listo' || !p.nombre?.trim() || p.precio <= 0) {
+          esperando = p.estado_analisis === 'error'
+            ? 'Una foto necesita revisión. Completa nombre y precio en la cola de revisión.'
+            : 'Esperando el nombre y precio de la siguiente foto.';
+          break;
+        }
+        cola.push(p);
+      }
+      if (cola.length) {
+        if (!await imprimir(cola.map((p) => p.id), new Map(), true)) pausarAutomatica();
+      } else {
+        resumen.textContent = esperando || 'Automática activa. Esperando la siguiente foto.';
+      }
+      // shortcut: el endpoint limita a 2000 capturas por sesión; empezar otra al alcanzar el tope.
+      if (nuevas.length === 2000) {
+        pausarAutomatica();
+        resumen.textContent = 'La sesión llegó a 2000 fotos. Termina las pendientes manualmente y empieza otra sesión.';
+      }
+    });
+  } catch (error) {
+    pausarAutomatica();
+    resumen.textContent = `${error.message} La impresión automática está pausada; retoma cuando se resuelva.`;
+  } finally {
+    consultandoAutomatica = false;
+    pintarControles();
+  }
+}
+
+botonAutomatica.addEventListener('click', iniciarAutomatica);
+document.getElementById('nueva-sesion').addEventListener('click', () => {
+  if (ambiente?.ambiente !== 'sandbox' || automaticaActiva || imprimiendo || consultandoAutomatica) return;
+  localStorage.removeItem(CLAVE_SESION);
+  resumen.textContent = 'Nueva sesión preparada. Inicia la impresión automática antes de tomar las próximas fotos; las pendientes anteriores quedan para impresión manual.';
 });
+setInterval(imprimirNuevas, 2000);
+try {
+  const respuesta = await fetch('/api/salud', { cache: 'no-store', signal: AbortSignal.timeout(15000) });
+  if (respuesta.ok) ambiente = await respuesta.json();
+  botonAutomatica.hidden = ambiente?.ambiente !== 'sandbox';
+  document.getElementById('nueva-sesion').hidden = botonAutomatica.hidden;
+  document.getElementById('ayuda-automatica').hidden = botonAutomatica.hidden;
+} catch { /* sin confirmar sandbox, solo queda la impresión manual */ }
 
 await cargar();
 </script>

@@ -62,6 +62,13 @@
   /* Un toque por talla y se queda puesta entre fotos: un rack de M son N disparos seguidos. */
   #talla-panel { top: calc(56px + env(safe-area-inset-top)); display: flex; flex-direction: column; gap: 8px; padding: 0 14px; }
   #talla-panel[hidden], .nino[hidden], #revisar-talla[hidden] { display: none; }
+  #precio-panel { top: calc(56px + env(safe-area-inset-top)); padding: 0 14px; }
+  #precio-panel[hidden] { display: none; }
+  body.con-precios #talla-panel { top: calc(126px + env(safe-area-inset-top)); }
+  #precio-panel button { padding: 10px 0; border: 2px solid #fff; border-radius: 10px;
+    background: #0009; color: #fff; font-size: 16px; font-weight: 800; }
+  #precio-panel button[aria-checked="true"] { background: var(--amarillo); border-color: var(--amarillo); color: #111; }
+  #precio-panel.falta button { border-color: var(--rojo); }
   .chips { display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px; }
   /* Con id en el selector: "#revisar button" (pastillas de revisar) no les gana. */
   :is(#talla-panel, #revisar-talla) .chips button { padding: 10px 0; font-size: 16px; font-weight: 800; border-radius: 10px;
@@ -109,6 +116,10 @@
 <input id="zoom" class="encima" type="range" aria-label="Zoom de la cámara" hidden>
 
 <div id="talla-panel" class="encima" hidden></div>
+<div id="precio-panel" class="encima" hidden>
+  <div>Precio de ropa</div>
+  <div id="precios-ropa" class="chips" role="radiogroup" aria-label="Precio final en pesos"></div>
+</div>
 
 <div id="barra" class="encima">
   <button id="estado" type="button">Nuevo</button>
@@ -163,7 +174,11 @@ let tomadas = 0;
 let piezasTotales = 0;
 let subidas = 0;
 let subiendo = false;
+let idSubiendo = null;
 let modoRopa = false;   // Issue #218: con el modo Ropa, cada foto lleva su talla
+const preciosRopa = JSON.parse(document.body.dataset.preciosRopa || '[]');
+const panelPrecio = document.getElementById('precio-panel');
+let precioRopa = null;
 
 /* ---------- talla (modo Ropa) ---------- */
 
@@ -263,6 +278,11 @@ function selectorTalla(raiz, alCambiar) {
 }
 
 const selector = selectorTalla(panelTalla, () => {});
+chips(document.getElementById('precios-ropa'), preciosRopa.map((p) => [String(p), `$${p / 100}`]), null, (valor) => {
+  precioRopa = Number(valor);
+  panelPrecio.classList.remove('falta');
+  document.getElementById('ayuda').textContent = 'El precio se conserva entre fotos. Revísalo antes de disparar.';
+});
 
 // El telefono abre en el ultimo modo usado: quien captura ropa todo el dia no lo vuelve a tocar.
 // La talla no se recuerda: la de ayer puesta sin querer es peor que un toque.
@@ -271,10 +291,13 @@ function fijarModo(ropa) {
   modoRopa = ropa;
   botonModo.setAttribute('aria-pressed', String(modoRopa));
   panelTalla.hidden = !modoRopa;
+  panelPrecio.hidden = !modoRopa || preciosRopa.length === 0;
+  document.body.classList.toggle('con-precios', !panelPrecio.hidden);
   try { localStorage.setItem(CLAVE_MODO, modoRopa ? 'ropa' : 'mercancia'); } catch { /* sin localStorage: abre en Mercancía */ }
 }
 botonModo.addEventListener('click', () => fijarModo(!modoRopa));
 try { if (localStorage.getItem(CLAVE_MODO) === 'ropa') fijarModo(true); } catch { /* idem */ }
+if (preciosRopa.length) fijarModo(true);
 
 /* ---------- cola local: la foto se guarda antes de intentar subirla ---------- */
 
@@ -427,6 +450,10 @@ async function guardarLocal(registro) {
 async function abrirRevision(id) {
   const datos = sesion.get(id);
   if (!datos) return;
+  if (id === idSubiendo && datos.precio_ropa != null) {
+    document.getElementById('ayuda').textContent = 'Esta prenda se está subiendo para etiquetar. Espera a que termine para corregirla.';
+    return;
+  }
   idActual = id;
   registroActual = datos.subida ? null : (await leer(id)) ?? null;
   elRevisarFoto.src = miniaturas.querySelector(`.mini[data-id="${id}"] img`).src;
@@ -580,15 +607,22 @@ elDescartar.addEventListener('click', async () => {
 document.getElementById('revisar-cerrar').addEventListener('click', cerrarRevision);
 
 async function disparar() {
+  if (modoRopa && preciosRopa.length && precioRopa === null) {
+    panelPrecio.classList.add('falta');
+    document.getElementById('ayuda').textContent = 'Escoge el precio de esta prenda antes de tomar la foto.';
+    return;
+  }
   // Modo Ropa sin talla: no se toma la foto; la talla es lo que se pide primero.
   if (modoRopa && !selector.valor()) {
     selector.faltante();
     return;
   }
+  const precioElegido = precioRopa;
   const foto = await capturar();
   if (!foto) return;
   const registro = { id: crypto.randomUUID(), foto, estado_fisico: estadoFisico, cantidad, creado: Date.now(),
-    talla: modoRopa ? selector.valor() : null };
+    talla: modoRopa ? selector.valor() : null,
+    precio_ropa: modoRopa && preciosRopa.length ? precioElegido : null };
   await guardar(registro);           // primero al disco, siempre
   tomadas += 1;
   piezasTotales += registro.cantidad;   // no `cantidad`: el + pudo tocarse mientras se guardaba
@@ -605,11 +639,14 @@ async function procesarCola() {
   let otraVuelta = false;
   try {
     for (const registro of await pendientes()) {
+      idSubiendo = registro.id;
+      if (registro.precio_ropa != null && idActual === registro.id) cerrarRevision();
       const cuerpo = new FormData();
       cuerpo.append('id', registro.id);
       cuerpo.append('estado_fisico', registro.estado_fisico);
       cuerpo.append('cantidad', String(registro.cantidad ?? 1));
       if (registro.talla) cuerpo.append('talla', registro.talla);
+      if (registro.precio_ropa != null) cuerpo.append('precio_ropa', String(registro.precio_ropa));
       cuerpo.append('foto', registro.foto, `${registro.id}.jpg`);
 
       let respuesta;
@@ -619,6 +656,11 @@ async function procesarCola() {
         break;                       // sin red: la foto se queda en la cola
       }
       if (respuesta.status >= 500) break;
+      if (registro.precio_ropa != null && !respuesta.ok) {
+        document.getElementById('ayuda').textContent = 'No se subió la prenda. Revisa la sesión del sandbox; la foto sigue guardada en este teléfono.';
+        break;
+      }
+      const guardada = registro.precio_ropa != null && respuesta.ok ? await respuesta.json() : null;
       // Si se corrigio mientras subia, lo que llego al servidor ya es viejo:
       // se queda en la cola y sale otra vez con lo nuevo.
       const actual = await leer(registro.id);
@@ -631,8 +673,14 @@ async function procesarCola() {
       if (respuesta.ok) subidas += 1;
       if (respuesta.ok && datos) {
         datos.subida = true;
-        datos.guardada = registro.cantidad ?? 1;
-        datos.tallaGuardada = registro.talla;
+        datos.guardada = guardada?.stock ?? registro.cantidad ?? 1;
+        datos.tallaGuardada = guardada?.talla ?? registro.talla;
+        if (guardada) {
+          piezasTotales += guardada.stock - datos.cantidad;
+          datos.cantidad = guardada.stock;
+          datos.talla = guardada.talla;
+          datos.precio_ropa = guardada.precio;
+        }
         repintarMiniatura(registro.id);
         // Si estaba abierta, "Descartar" ya no la quitaria del servidor: se
         // vuelve a pintar en modo subida.
@@ -642,6 +690,7 @@ async function procesarCola() {
     }
   } finally {
     subiendo = false;
+    idSubiendo = null;
   }
   if (otraVuelta) setTimeout(procesarCola, 1000);
 }
