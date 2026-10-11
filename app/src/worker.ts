@@ -1920,6 +1920,16 @@ export default {
         return json({ id: reintento[1], modelo, estado_analisis: 'pendiente' }, 202);
       }
 
+      // Issue #281: errores de JavaScript de la caja, al mismo log que los del servidor.
+      if (pathname === '/api/errores' && request.method === 'POST') {
+        const cuerpo = await request.json().catch(() => ({})) as Record<string, unknown>;
+        const campo = (valor: unknown, max: number) => String(valor ?? '').slice(0, max);
+        console.error(JSON.stringify({ mensaje: 'error en el navegador', origen: campo(cuerpo.origen, 40),
+          pantalla: campo(cuerpo.pantalla, 200), error: campo(cuerpo.error, 500), pila: campo(cuerpo.pila, 2000),
+          caja: campo(cuerpo.caja, 40), correo: acceso }));
+        return new Response(null, { status: 204 });
+      }
+
       if (pathname.startsWith('/api/')) {
         return json({ error: 'Ruta no encontrada.' }, 404);
       }
@@ -1942,7 +1952,8 @@ export default {
       }
       return pantalla;
     } catch (error) {
-      console.error(JSON.stringify({ mensaje: 'fallo en la peticion', pathname, error: String(error) }));
+      console.error(JSON.stringify({ mensaje: 'fallo en la peticion', pathname, error: String(error),
+        pila: error instanceof Error ? error.stack?.slice(0, 2000) : undefined }));
       return json({ error: 'Error interno. Intenta de nuevo.' }, 500);
     }
   },

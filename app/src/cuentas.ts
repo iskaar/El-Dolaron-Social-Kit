@@ -82,6 +82,8 @@ export function permiso(pathname: string, metodo: string): Regla {
   if (metodo === 'POST' && /^\/api\/ml\/notificaciones\/[^/]+$/.test(ruta)) return 'libre';
   if (ruta === '/sin-acceso' || ruta === '/api/yo') return 'cuenta';
   if (ruta === '/api/solicitudes/acceso' && metodo === 'POST') return 'cuenta';
+  // Issue #281: cualquier cuenta que entro puede reportar un error de su pantalla, tambien la caja sin PIN.
+  if (ruta === '/api/errores' && metodo === 'POST') return 'cuenta';
   if (ruta === '/marketplace-redes.png') return CAPTURA;
   // Codigo de las pantallas, sin datos: el permiso se cobra en la pantalla y en la API.
   if (!ruta.startsWith('/api/') && /\.(js|css|png|svg|ico)$/.test(ruta)) return 'cuenta';
