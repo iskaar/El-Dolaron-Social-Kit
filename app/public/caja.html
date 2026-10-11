@@ -372,6 +372,17 @@ import {
 import { imprimirDevolucion } from '/impresora.js';
 import { codigoDeDigitos } from '/code128.js';
 
+// Issue #281: los errores de JavaScript de la caja llegan a los logs del servidor (/api/errores).
+// Sin red no se pueden enviar; el error igual aparece en la consola de la caja.
+function reportarError(error, origen) {
+  try {
+    fetch('/api/errores', { method:'POST', keepalive:true, headers:{ 'content-type':'application/json' },
+      body:JSON.stringify({ origen, pantalla:location.pathname, error:String(error?.message ?? error), pila:error?.stack ?? '' }) }).catch(() => {});
+  } catch {}
+}
+window.addEventListener('error', (e) => reportarError(e.error ?? e.message, 'excepcion'));
+window.addEventListener('unhandledrejection', (e) => reportarError(e.reason, 'promesa'));
+
 const $ = (id) => document.getElementById(id);
 // Nombres de piezas (los escribe la IA o el admin), de socios y motivos: texto, nunca HTML.
 const escapar = (texto) => String(texto ?? '').replace(/[<>&"]/g, (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;' }[c]));
