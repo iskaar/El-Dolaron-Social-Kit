@@ -1822,7 +1822,7 @@ export default {
       if (pathname === '/api/vales/config' && request.method === 'GET')
       {
         const promo = promoDe(env), restantes = promo && await promoRestantes(env);
-        return json({ habilitado:valesAbiertos(env), promo:promo && (restantes === null ? promo : { ...promo, restantes }) });
+        return json({ habilitado:valesAbiertos(env), prueba:env.AMBIENTE === 'sandbox', promo:promo && (restantes === null ? promo : { ...promo, restantes }) });
       }
       if (pathname === '/api/vales/buscar' && request.method === 'POST')
         return await buscarVale(request, env);
