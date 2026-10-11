@@ -464,7 +464,7 @@ async function imprimirNuevas() {
       const cola = [];
       let esperando = '';
       for (const p of nuevas) {
-        if (hechas[p.id] || p.stock <= 0 || p.destino !== 'etiqueta') continue;
+        if (etiquetaVigente(hechas[p.id], p) || p.stock <= 0 || p.destino !== 'etiqueta') continue;
         // Conservar el orden de la mesa aunque un análisis posterior termine primero.
         if (p.estado_analisis !== 'listo' || !p.nombre?.trim() || p.precio <= 0) {
           esperando = p.estado_analisis === 'error'

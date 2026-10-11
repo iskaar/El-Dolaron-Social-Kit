@@ -81,6 +81,14 @@ Detalle completo en `docs/PLAN-ETIQUETAS-POR-BANDA.md`. Resumen:
   que existe la IA.
 - Una foto = una pieza.
 
+En el sandbox, tocar una miniatura permite cambiar el precio final entre
+$200/$150/$100/$80/$50 MXN y Nuevo/Dañado con «Guardar cambios», también después
+de subir. La condición no recalcula ese precio elegido. «Eliminar captura»
+descarta la captura completa tras un segundo toque; requiere conexión y no
+elimina piezas con venta o publicación. El servidor limita estas operaciones
+a capturas propias de las últimas 24 horas. Si ya salió una etiqueta, reemplazarla
+cuando cambie el precio o descartarla cuando se elimine la captura.
+
 ### Reglas que no se negocian
 
 1. **La foto se guarda local antes que nada** (IndexedDB), antes de subirla o analizarla. Es lo único

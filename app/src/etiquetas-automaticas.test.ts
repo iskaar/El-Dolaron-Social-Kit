@@ -5,7 +5,7 @@ import { readFileSync } from 'node:fs';
 import { runInNewContext } from 'node:vm';
 import { tienda } from './prueba-d1.ts';
 import worker from './worker.ts';
-import { tsplEtiqueta } from '../public/etiquetera.js';
+import { tsplEtiqueta, etiquetaVigente } from '../public/etiquetera.js';
 
 const fuente = readFileSync('public/etiquetas.html', 'utf8').match(/<script type="module">([\s\S]*?)<\/script>/)![1]
   .replace(/import\s*\{[\s\S]*?\}\s*from\s*'[^']+';/, '');
@@ -80,7 +80,7 @@ async function pagina(t: ReturnType<typeof tienda>, ambiente = 'sandbox', almace
     impresas: marcas, marcarImpresa: (id: string, hora?: string, p?: any) => {
       if (!estado.falloMarca) almacen.set('etiqueta-impresas', JSON.stringify({ ...marcas(), [id]: { hora: hora || DESDE, ...p } }));
     },
-    etiquetaVigente: (marca: any) => !!marca, desmarcarDesde() {}, historialTexto: () => '',
+    etiquetaVigente, desmarcarDesde() {}, historialTexto: () => '',
     detenerEnvio: (valor = true) => { estado.detenido = valor; }, envioDetenido: () => estado.detenido, errorEnvio: () => 'BLE falló',
     setInterval() {}, AbortSignal, encodeURIComponent, Date, Map, console,
   });
@@ -187,7 +187,7 @@ test('una foto sin red o con sesión vencida conserva su precio local y lo reenv
   const cola = new Map([[registro.id, registro]]), sesion = new Map([[registro.id, { ...registro, subida: false }]]);
   let sinRed = true, sesionVencida = false, precioEnviado: unknown;
   const procesar = runInNewContext(`${camara.slice(camara.indexOf('async function procesarCola()'), camara.indexOf('function actualizarContador()'))}; procesarCola`, {
-    subiendo: false, idSubiendo: null, subidas: 0, idActual: null, sesion, FormData,
+    subiendo: false, idSubiendo: null, subidas: 0, idActual: null, sesion, FormData, preciosRopa: [5000],
     pendientes: async () => [...cola.values()], leer: async (id: string) => cola.get(id), borrar: async (id: string) => cola.delete(id),
     fetch: async (_ruta: string, opciones: any) => {
       if (sinRed) throw new Error('sin red');
@@ -228,6 +228,32 @@ test('automática imprime lo nuevo una sola vez, con código estable y una copia
     await recarga.iniciarAutomatica();
     assert.deepEqual(recarga.estado.enviadas, []);
     assert.equal(t.db.prepare('select codigo from productos where id=?').get(nueva)!.codigo, codigo);
+  } finally { t.db.close(); }
+});
+
+test('corregir un precio reimprime una vez con el mismo código; condición sola y capturas eliminadas no imprimen', async () => {
+  const t = tienda();
+  try {
+    t.env.AMBIENTE = 'sandbox';
+    const id = crypto.randomUUID();
+    await capturarRopa(t, id, '15000');
+    const p = await pagina(t);
+    await p.iniciarAutomatica();
+    const codigo = t.db.prepare('select codigo from productos where id=?').get(id)!.codigo;
+    assert.equal(p.estado.enviadas.length, 1);
+    await t.pedir(`/api/borradores/${id}/revision`, { precio: 8000, estado_fisico: 'danado' }, 'PATCH');
+    await p.imprimirNuevas(); await p.imprimirNuevas();
+    assert.equal(p.estado.enviadas.length, 2);
+    assert.equal(JSON.parse(p.almacen.get('etiqueta-impresas')!)[id].precio, 8000);
+    assert.equal(t.db.prepare('select codigo from productos where id=?').get(id)!.codigo, codigo);
+    await t.pedir(`/api/borradores/${id}/revision`, { estado_fisico: 'nuevo' }, 'PATCH');
+    await p.imprimirNuevas(); assert.equal(p.estado.enviadas.length, 2);
+    await t.pedir(`/api/borradores/${id}/revision`, {}, 'DELETE');
+    await p.imprimirNuevas(); assert.equal(p.estado.enviadas.length, 2);
+    const otra = crypto.randomUUID();
+    await capturarRopa(t, otra, '5000');
+    p.estado.antesDePreparar = async () => { await t.pedir(`/api/borradores/${otra}/revision`, {}, 'DELETE'); };
+    await p.imprimirNuevas(); assert.equal(p.estado.enviadas.length, 2);
   } finally { t.db.close(); }
 });
 
