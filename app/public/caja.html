@@ -568,12 +568,13 @@ function pintar() {
   const promo = promoActual();
   const t = totales(lineas, efectivo, usados, descuentoAplicado() + promo);
   $('original').textContent = t.descuento ? `Original ${pesos(t.subtotal)}` : '';
-  $('total').textContent = pesos(t.total);
+  // Con Dolarones, el total grande es lo que se cobra en dinero; el bruto queda en la linea de abajo.
+  $('total').textContent = pesos(usados ? t.aPagar : t.total);
   $('piezas').textContent = `${t.piezas} ${t.piezas === 1 ? 'pieza' : 'piezas'}`;
   $('a-pagar').textContent = [
     promo ? `Promo inauguración −${pesos(promo)}${promoConfig.restantes != null ? ` (quedan ${promoConfig.restantes})` : ''}` : '',
     t.descuento - promo ? `Descuento −${pesos(t.descuento - promo)}` : '',
-    usados ? `Dolarones −${pesos(usados)} · A pagar ${pesos(t.aPagar)}` : '',
+    usados ? `Antes ${pesos(t.total)} · Dolarones −${pesos(usados)}` : '',
   ].filter(Boolean).join(' · ');
   const canjeable = saldoCanjeable(socio, t.total);
   const autorizado = !usados || (codigoSocio && usados <= socio.maximo && Date.parse(socio.expira_en) > Date.now());
