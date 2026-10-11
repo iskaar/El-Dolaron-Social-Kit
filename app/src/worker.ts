@@ -73,7 +73,7 @@ interface FilaBorrador {
  * y el inventario no viven en el telefono que anda en el pasillo.
  */
 const RUTAS_VENDEDOR = new Set(['/captura', '/foto.js', '/tallas.js', '/api/salud', '/sin-acceso', '/api/yo']);
-const CORRECCION_CAPTURA = /^\/api\/borradores\/([^/]+)\/(existencia|talla)$/;
+const CORRECCION_CAPTURA = /^\/api\/borradores\/([^/]+)\/(existencia|talla|revision)$/;
 
 export function permitidaParaVendedor(pathname: string, metodo: string): boolean {
   if (RUTAS_VENDEDOR.has(pathname)) {
@@ -82,7 +82,7 @@ export function permitidaParaVendedor(pathname: string, metodo: string): boolean
   // Corregir cuantas piezas son o la talla, desde el carrusel de la camara. El
   // handler limita a lo que esa persona capturo en las ultimas 24 h.
   if (CORRECCION_CAPTURA.test(pathname)) {
-    return metodo === 'PATCH';
+    return metodo === 'PATCH' || (pathname.endsWith('/revision') && ['GET', 'DELETE'].includes(metodo));
   }
   // Quien entra por la camara sin cuenta tambien tiene que poder pedirla.
   if (pathname === '/api/solicitudes/acceso') {
@@ -164,6 +164,12 @@ async function crearBorrador(request: Request, env: Env, ctx: ExecutionContext, 
     return json({ error: 'La foto pesa demasiado.' }, 413);
   }
 
+  const existente = await env.DB.prepare('select id, nombre, precio, estado_fisico, estado_analisis, stock, talla from productos where id = ?')
+    .bind(id).first<{ estado_analisis: string }>();
+  if (existente?.estado_analisis === 'descartado' || (precioRopa !== null && existente && formulario.get('solo_foto') !== '1')) {
+    return json(existente, 201);
+  }
+
   const fotoKey = `fotos/${id}.jpg`;
   await env.FOTOS.put(fotoKey, foto.stream(), {
     httpMetadata: { contentType: 'image/jpeg' },
@@ -193,8 +199,9 @@ async function crearBorrador(request: Request, env: Env, ctx: ExecutionContext, 
        on conflict (id) do nothing`,
     ).bind(id, precioRopa, semanaIngreso(ahora), estadoFisico, cantidad, talla, fotoKey,
       capturadoPor, ahora.toISOString(), ahora.toISOString()).run();
-    const guardada = await env.DB.prepare('select id, nombre, precio, estado_analisis, stock, talla from productos where id = ?')
-      .bind(id).first();
+    const guardada = await env.DB.prepare('select id, nombre, precio, estado_fisico, estado_analisis, stock, talla from productos where id = ?')
+      .bind(id).first<{ estado_analisis: string }>();
+    if (guardada?.estado_analisis === 'descartado') await env.FOTOS.delete(fotoKey);
     return json(guardada, 201);
   }
   await env.DB.prepare(
@@ -206,10 +213,17 @@ async function crearBorrador(request: Request, env: Env, ctx: ExecutionContext, 
        talla = excluded.talla,
        foto_key = excluded.foto_key,
        estado_analisis = 'pendiente',
-       actualizado_en = excluded.actualizado_en`,
+       actualizado_en = excluded.actualizado_en
+       where productos.estado_analisis <> 'descartado'`,
   )
     .bind(id, semanaIngreso(ahora), estadoFisico, cantidad, talla, fotoKey, capturadoPor, ahora.toISOString(), ahora.toISOString())
     .run();
+
+  const descartada = await env.DB.prepare("select id, estado_analisis, stock from productos where id = ? and estado_analisis = 'descartado'").bind(id).first();
+  if (descartada) {
+    await env.FOTOS.delete(fotoKey);
+    return json(descartada, 201);
+  }
 
   // El analisis corre despues de responder: la camara nunca espera a la IA.
   ctx.waitUntil(analizarBorrador(id, env, modeloPedido(url, env), busquedaPedida(url)));
@@ -231,7 +245,7 @@ async function listarBorradores(url: URL, env: Env): Promise<Response> {
   const consulta = `select id, nombre, categoria, marca, talla, precio_lista, precio, estado_fisico,
                            estado_analisis, destino, stock, semana_ingreso, capturado_por, creado_en
                     from productos
-                    where sin_inventario = 0 ${estado ? 'and estado_analisis = ?' : ''} ${desde ? 'and creado_en >= ?' : ''}
+                    where sin_inventario = 0 and estado_analisis <> 'descartado' ${estado ? 'and estado_analisis = ?' : ''} ${desde ? 'and creado_en >= ?' : ''}
                     order by creado_en asc limit 2000`;
   const filtros = [...(estado ? [estado] : []), ...(desde ? [desde] : [])];
   const sentencia = filtros.length ? env.DB.prepare(consulta).bind(...filtros) : env.DB.prepare(consulta);
@@ -258,7 +272,7 @@ async function corregirBorrador(id: string, cambios: Record<string, unknown>, en
     return json({ error: 'Identificador invalido.' }, 400);
   }
   const fila = await env.DB.prepare(
-    'select nombre, categoria, marca, talla, precio_lista, precio, estado_fisico, destino, stock from productos where id = ?',
+    "select nombre, categoria, marca, talla, precio_lista, precio, estado_fisico, destino, stock from productos where id = ? and estado_analisis <> 'descartado'",
   )
     .bind(id)
     .first<FilaBorrador>();
@@ -323,6 +337,7 @@ async function corregirBorrador(id: string, cambios: Record<string, unknown>, en
     `update productos set nombre = ?, categoria = ?, marca = ?, talla = ?, precio_lista = ?, precio = ?,
                           estado_fisico = ?, destino = ?, stock = coalesce(?, stock), estado_analisis = 'listo', actualizado_en = ?
      where id = ?
+       and estado_analisis <> 'descartado'
      returning stock`,
   )
     .bind(nombre, categoria, marca, talla, precioLista, precio, estadoFisico, destino,
@@ -330,7 +345,8 @@ async function corregirBorrador(id: string, cambios: Record<string, unknown>, en
       cambios.stock === undefined ? null : stock, new Date().toISOString(), id)
     .first<{ stock: number }>();
 
-  return json({ id, nombre, categoria, marca, talla, precio_lista: precioLista, precio, estado_fisico: estadoFisico, destino, stock: guardada?.stock ?? stock });
+  if (!guardada) return json({ error: 'La pieza ya fue eliminada.' }, 409);
+  return json({ id, nombre, categoria, marca, talla, precio_lista: precioLista, precio, estado_fisico: estadoFisico, destino, stock: guardada.stock });
 }
 
 /**
@@ -397,7 +413,7 @@ async function corregirCaptura(id: string, campo: string, request: Request, env:
   const columna = campo === 'existencia' ? 'stock' : 'talla';
   const desde = new Date(Date.now() - VENTANA_CAPTURA_MS).toISOString();
   const resultado = await env.DB.prepare(
-    `update productos set ${columna} = ?, actualizado_en = ? where id = ? and capturado_por = ? and creado_en > ?`,
+    `update productos set ${columna} = ?, actualizado_en = ? where id = ? and capturado_por = ? and creado_en > ? and estado_analisis <> 'descartado'`,
   )
     .bind(valor, new Date().toISOString(), id, correo, desde)
     .run();
@@ -405,6 +421,54 @@ async function corregirCaptura(id: string, campo: string, request: Request, env:
     return json({ error: 'Solo puedes cambiar lo que capturaste en las ultimas 24 horas.' }, 404);
   }
   return json({ id, [columna]: valor });
+}
+
+/** Corrección desde la miniatura del sandbox; nunca cambia stock al editar precio/condición. */
+async function revisarCaptura(id: string, request: Request, env: Env, correo: string): Promise<Response> {
+  if (env.AMBIENTE !== 'sandbox') return json({ error: 'Ruta no encontrada.' }, 404);
+  if (!UUID.test(id)) return json({ error: 'Identificador invalido.' }, 400);
+  const ahora = new Date().toISOString();
+  const desde = new Date(Date.now() - VENTANA_CAPTURA_MS).toISOString();
+  const alcance = 'id = ? and capturado_por = ? and creado_en > ? and sin_inventario = 0';
+  // Conserva el UUID incluso si aún no llegó el POST: una subida retrasada no revive la captura.
+  if (request.method === 'DELETE') {
+    await env.DB.prepare(`insert into productos (id, stock, estado_analisis, semana_ingreso, capturado_por, creado_en, actualizado_en)
+      values (?, 0, 'descartado', ?, ?, ?, ?) on conflict(id) do nothing`)
+      .bind(id, semanaIngreso(new Date()), correo, ahora, ahora).run();
+  }
+  const fila = await env.DB.prepare(`select id, precio, estado_fisico, estado_analisis, stock, talla, codigo from productos where ${alcance}`)
+    .bind(id, correo, desde).first<{ estado_analisis: string }>();
+  if (!fila) return json({ error: 'Solo puedes corregir lo que capturaste en las últimas 24 horas.' }, 404);
+  if (request.method === 'GET') return json(fila);
+  if (request.method === 'DELETE') {
+    const resultado = await env.DB.prepare(`update productos set stock = 0, precio = 0, foto_key = '',
+        estado_analisis = 'descartado', actualizado_en = ? where ${alcance}
+        and not exists (select 1 from venta_lineas where producto_id = productos.id)
+        and not exists (select 1 from ml_publicaciones where producto_id = productos.id)`)
+      .bind(ahora, id, correo, desde).run();
+    if (!resultado.meta.changes) return json({ error: 'Tiene una venta o publicación. Revisa la pieza en el admin; no se eliminó.' }, 409);
+    await env.FOTOS.delete(`fotos/${id}.jpg`);
+    return json({ id, descartado: true });
+  }
+  if (request.method !== 'PATCH') return json({ error: 'Metodo no permitido.' }, 405);
+  const cambios = await request.json().catch(() => null) as Record<string, unknown> | null;
+  if (!cambios || Array.isArray(cambios) || typeof cambios !== 'object' || !Object.keys(cambios).length
+      || Object.keys(cambios).some((k) => !['precio', 'estado_fisico'].includes(k))) {
+    return json({ error: 'Corrección invalida.' }, 400);
+  }
+  if (cambios.precio !== undefined && (typeof cambios.precio !== 'number' || !PRECIOS_ROPA.includes(cambios.precio))) {
+    return json({ error: 'Escoge $200, $150, $100, $80 o $50 MXN.' }, 400);
+  }
+  if (cambios.estado_fisico !== undefined && (typeof cambios.estado_fisico !== 'string' || !ESTADOS_FISICOS.has(cambios.estado_fisico))) {
+    return json({ error: 'Estado fisico invalido.' }, 400);
+  }
+  const resultado = await env.DB.prepare(`update productos set precio = coalesce(?, precio),
+      estado_fisico = coalesce(?, estado_fisico), actualizado_en = ? where ${alcance} and estado_analisis = 'listo'
+      and (? is null or precio_lista = 0 or precio_lista >= ?)`)
+    .bind(cambios.precio ?? null, cambios.estado_fisico ?? null, ahora, id, correo, desde, cambios.precio ?? null, cambios.precio ?? null).run();
+  if (!resultado.meta.changes) return json({ error: 'La captura no está lista, fue eliminada o el precio supera el de lista.' }, 409);
+  return json(await env.DB.prepare(`select id, precio, estado_fisico, estado_analisis, stock, talla, codigo from productos where ${alcance}`)
+    .bind(id, correo, desde).first());
 }
 
 /**
@@ -435,7 +499,7 @@ async function prepararEtiquetas(request: Request, env: Env): Promise<Response> 
   const huecos = limpios.map(() => '?').join(',');
   // Una por una y en orden de captura: cada codigo nuevo ve el anterior (CODIGO_NUEVO).
   const { results: porCodificar } = await env.DB.prepare(
-    `select id from productos where id in (${huecos}) and (codigo is null or codigo = '') order by rowid`,
+    `select id from productos where id in (${huecos}) and estado_analisis <> 'descartado' and (codigo is null or codigo = '') order by rowid`,
   )
     .bind(...limpios)
     .all<{ id: string }>();
@@ -443,13 +507,13 @@ async function prepararEtiquetas(request: Request, env: Env): Promise<Response> 
   if (porCodificar.length) {
     await env.DB.batch(porCodificar.map(({ id }) => env.DB.prepare(
       `update productos set codigo = ${CODIGO_NUEVO}, actualizado_en = ?
-       where id = ? and (codigo is null or codigo = '')`,
+       where id = ? and estado_analisis <> 'descartado' and (codigo is null or codigo = '')`,
     ).bind(ahora, id)));
   }
 
   const { results } = await env.DB.prepare(
     `select id, codigo, nombre, talla, precio, precio_lista, semana_ingreso, destino, stock
-     from productos where id in (${huecos}) order by rowid`,
+     from productos where id in (${huecos}) and estado_analisis <> 'descartado' order by rowid`,
   )
     .bind(...limpios)
     .all();
@@ -524,6 +588,8 @@ async function descartarBorrador(id: string, env: Env): Promise<Response> {
   if (!UUID.test(id)) {
     return json({ error: 'Identificador invalido.' }, 400);
   }
+  const descartada = await env.DB.prepare("select id from productos where id = ? and estado_analisis = 'descartado'").bind(id).first();
+  if (descartada) return json({ id, descartado: true });
   if (await publicacionViva(env, id)) {
     return json({ error: 'Tiene publicación en Mercado Libre: ciérrala primero.' }, 409);
   }
@@ -1545,6 +1611,9 @@ async function servirFoto(id: string, env: Env): Promise<Response> {
   if (!UUID.test(id)) {
     return json({ error: 'Identificador invalido.' }, 400);
   }
+  if (await env.DB.prepare("select id from productos where id = ? and estado_analisis = 'descartado'").bind(id).first()) {
+    return json({ error: 'Foto no encontrada.' }, 404);
+  }
   const objeto = await env.FOTOS.get(`fotos/${id}.jpg`);
   if (!objeto) {
     return json({ error: 'Foto no encontrada.' }, 404);
@@ -1830,6 +1899,7 @@ export default {
       }
 
       const correccion = pathname.match(CORRECCION_CAPTURA);
+      if (correccion?.[2] === 'revision') return await revisarCaptura(correccion[1], request, env, correo);
       if (correccion && request.method === 'PATCH') {
         return await corregirCaptura(correccion[1], correccion[2], request, env, correo);
       }

@@ -224,6 +224,29 @@ calibración en hardware real.
 El árbol de decisiones por prenda se definirá después. Los cinco precios
 confirmados permiten probar el flujo completo sin agregar llaves de IA al sandbox.
 
+### Corrección desde miniatura (Issue #275)
+
+En `/captura`, tocar una miniatura muestra los cinco precios y Nuevo/Dañado;
+«Guardar cambios» conserva el precio elegido sin descuento automático por condición.
+Antes de subir, se guarda en IndexedDB junto a la foto. La revisión abierta pausa
+esa subida; al cerrar, la cola aplica también la corrección explícita al servidor
+para cubrir una respuesta de alta perdida. Después de subir, se lee el precio y
+condición actuales desde `GET /api/borradores/:id/revision`; PATCH cambia únicamente
+esos campos, sin reponer stock ni cambiar código. API y controles nuevos solo en sandbox.
+
+«Eliminar captura» requiere dos toques y conexión. DELETE de esa misma ruta deja
+el UUID con `estado_analisis = descartado`, stock/precio cero y sin foto; retiene el
+UUID para que un POST retrasado no la reviva. No aparece en revisión ni etiquetas.
+El archivo de R2 se borra después de quitar su referencia; análisis y correcciones
+no reabren un descarte. El handler comprueba identidad y ventana de 24 h en las
+mutaciones; rechaza eliminar piezas con venta o publicación. No hay migración nueva.
+
+La computadora detecta cambios de precio contra su marca de impresión y envía una
+etiqueta nueva con el mismo código. Reemplazar la anterior. Una eliminación no puede
+retirar papel ya enviado a la impresora: descartar esa etiqueta físicamente. Precio
+y condición locales sobreviven sin red; una eliminación fallida conserva la foto
+para reintentar con conexión.
+
 ## Orden de entrega
 
 1. Esqueleto: Worker desplegado, D1 creada, R2 creado, `GET /api/config` respondiendo. Probar el despliegue antes de escribir funcionalidad.
