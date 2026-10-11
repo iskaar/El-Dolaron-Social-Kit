@@ -102,6 +102,8 @@ const estacionValida = (valor: unknown): valor is string =>
   typeof valor === 'string' && CAJAS.includes(valor);
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const FOTO_MAX_BYTES = 6 * 1024 * 1024;
+// Isaac, Issue #273: precios finales de ropa; el árbol por prenda se define después.
+const PRECIOS_ROPA = [20000, 15000, 10000, 8000, 5000];
 
 function json(cuerpo: unknown, status = 200): Response {
   return new Response(JSON.stringify(cuerpo), {
@@ -141,6 +143,7 @@ async function crearBorrador(request: Request, env: Env, ctx: ExecutionContext, 
   const cantidad = Math.min(999, Math.max(1, Math.round(Number(formulario.get('cantidad') ?? 1)) || 1));
   const foto = formulario.get('foto');
   const talla = String(formulario.get('talla') ?? '').trim() || null;
+  const precioRopa = formulario.has('precio_ropa') ? Number(formulario.get('precio_ropa')) : null;
 
   if (!UUID.test(id)) {
     return json({ error: 'Identificador invalido.' }, 400);
@@ -150,6 +153,9 @@ async function crearBorrador(request: Request, env: Env, ctx: ExecutionContext, 
   }
   if (talla !== null && !tallaValida(talla)) {
     return json({ error: 'Talla invalida.' }, 400);
+  }
+  if (precioRopa !== null && (env.AMBIENTE !== 'sandbox' || !PRECIOS_ROPA.includes(precioRopa))) {
+    return json({ error: 'Precio de ropa invalido o fuera del sandbox.' }, 400);
   }
   if (!(foto instanceof File) || foto.size === 0) {
     return json({ error: 'Falta la foto.' }, 400);
@@ -178,6 +184,19 @@ async function crearBorrador(request: Request, env: Env, ctx: ExecutionContext, 
   const capturadoPor = correo;
 
   const ahora = new Date();
+  if (precioRopa !== null) {
+    // El reenvío de una foto conserva el precio revisado, el código y el stock ya vendido.
+    await env.DB.prepare(
+      `insert into productos (id, nombre, categoria, precio, estado_analisis, destino, semana_ingreso,
+                              estado_fisico, stock, talla, foto_key, capturado_por, creado_en, actualizado_en)
+       values (?, 'Ropa', 'ropa', ?, 'listo', 'etiqueta', ?, ?, ?, ?, ?, ?, ?, ?)
+       on conflict (id) do nothing`,
+    ).bind(id, precioRopa, semanaIngreso(ahora), estadoFisico, cantidad, talla, fotoKey,
+      capturadoPor, ahora.toISOString(), ahora.toISOString()).run();
+    const guardada = await env.DB.prepare('select id, nombre, precio, estado_analisis, stock, talla from productos where id = ?')
+      .bind(id).first();
+    return json(guardada, 201);
+  }
   await env.DB.prepare(
     `insert into productos (id, semana_ingreso, estado_fisico, stock, talla, foto_key, capturado_por, creado_en, actualizado_en)
      values (?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -200,6 +219,10 @@ async function crearBorrador(request: Request, env: Env, ctx: ExecutionContext, 
 
 async function listarBorradores(url: URL, env: Env): Promise<Response> {
   const estado = url.searchParams.get('estado');
+  const desde = url.searchParams.get('desde');
+  if (desde !== null && (!Number.isFinite(Date.parse(desde)) || new Date(desde).toISOString() !== desde)) {
+    return json({ error: 'Fecha de captura invalida.' }, 400);
+  }
   // Los botes son productos para la caja, no piezas que revisar.
   // Orden de captura (mas vieja primero), no de llegada: las piezas se quedan
   // fisicamente donde se capturaron hasta que se les pega su etiqueta, asi que
@@ -208,11 +231,10 @@ async function listarBorradores(url: URL, env: Env): Promise<Response> {
   const consulta = `select id, nombre, categoria, marca, talla, precio_lista, precio, estado_fisico,
                            estado_analisis, destino, stock, semana_ingreso, capturado_por, creado_en
                     from productos
-                    where sin_inventario = 0 ${estado ? 'and estado_analisis = ?' : ''}
+                    where sin_inventario = 0 ${estado ? 'and estado_analisis = ?' : ''} ${desde ? 'and creado_en >= ?' : ''}
                     order by creado_en asc limit 2000`;
-  const sentencia = estado
-    ? env.DB.prepare(consulta).bind(estado)
-    : env.DB.prepare(consulta);
+  const filtros = [...(estado ? [estado] : []), ...(desde ? [desde] : [])];
+  const sentencia = filtros.length ? env.DB.prepare(consulta).bind(...filtros) : env.DB.prepare(consulta);
   const { results } = await sentencia.all<FilaBorrador>();
   return json(results);
 }
@@ -1590,7 +1612,7 @@ export default {
       }
 
       if (pathname === '/api/salud') {
-        return json({ estado: 'ok' });
+        return json({ estado: 'ok', ambiente: env.AMBIENTE || 'produccion', ahora: new Date().toISOString() });
       }
 
       // Quien es (JWT de Access verificado) y si su cuenta le deja entrar aqui.
@@ -1842,7 +1864,10 @@ export default {
       // En el sandbox cada pantalla lo dice: ahi no se cobra de verdad.
       if (env.AMBIENTE === 'sandbox' && pantalla.headers.get('content-type')?.includes('text/html')) {
         return new HTMLRewriter()
-          .on('body', { element: (e) => { e.prepend(FRANJA_SANDBOX, { html: true }); } })
+          .on('body', { element: (e) => {
+            e.setAttribute('data-precios-ropa', JSON.stringify(PRECIOS_ROPA));
+            e.prepend(FRANJA_SANDBOX, { html: true });
+          } })
           .transform(pantalla);
       }
       return pantalla;

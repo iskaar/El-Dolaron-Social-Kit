@@ -191,6 +191,39 @@ unidad (u otra) hay que volver a interrogarla, `/sonda-impresora` sigue desplega
 - **Migraciones:** una migración nueva se corre primero en el sandbox (`--config wrangler.sandbox.jsonc`), se prueba y después en producción.
 - **Qué no tiene:** fotos (R2 no se copia) y llaves de IA, así que el análisis de fotos falla ahí sin gastar. Las altas de socios y los números de socio del sandbox no afectan el regalo de producción.
 
+## Ensayo de foto → etiqueta de ropa (Issue #273)
+
+1. En la computadora, abrir `/etiquetas` del **sandbox** en Chrome/Edge,
+   conectar la AE240-bt y pulsar «Iniciar / retomar impresión automática».
+2. En el teléfono, abrir `/captura` del **mismo sandbox**. Modo Ropa ofrece
+   $200/$150/$100/$80/$50 MXN y las tallas existentes; escoger ambos antes de disparar.
+   El precio se conserva entre fotos, no entre recargas. La foto y el precio se
+   guardan juntos en IndexedDB antes de subir, también sin red.
+3. `POST /api/borradores` acepta `precio_ropa` en centavos únicamente en sandbox
+   y únicamente para esos cinco importes. Guarda nombre `Ropa`, talla, precio
+   final exacto y estado `listo`, sin IA ni precio de lista supuesto. Un reenvío
+   por el mismo UUID conserva stock, precio revisado y código.
+4. La computadora consulta cada 2 s las capturas desde el inicio de la sesión,
+   usando la hora del servidor (`/api/salud`) y `GET /api/borradores?desde=<ISO>`.
+   Espera nombre/precio en orden de captura y reutiliza `/api/etiquetas`, TSPL,
+   calibración y pausas de la AE240; una etiqueta por unidad en existencia.
+5. «Detener» pausa la sesión. Una recarga permite retomarla sin imprimir el
+   inventario anterior. «Nueva sesión», estando pausada, deja las anteriores
+   para impresión manual; cada sesión admite hasta 2000 fotos.
+
+Antes del envío automático se guarda su UUID en el navegador. Si BLE falla o la
+página se cierra a medias, la sesión se pausa: revisar el papel y la foto, imprimir
+manualmente esa pieza o marcarla como impresa, y retomar. Un envío completo se
+marca con las funciones existentes y desaparece de la cola. Las pestañas del mismo
+navegador coordinan el consumidor con Web Locks; las marcas son por navegador,
+como antes, así que se usa **una sola computadora/navegador** para esta sesión.
+La AE240 no confirma que salió el papel: «Mostrar impresas» / «No salió desde aquí»
+sigue siendo la recuperación física. No se ha cambiado ni validado de nuevo su
+calibración en hardware real.
+
+El árbol de decisiones por prenda se definirá después. Los cinco precios
+confirmados permiten probar el flujo completo sin agregar llaves de IA al sandbox.
+
 ## Orden de entrega
 
 1. Esqueleto: Worker desplegado, D1 creada, R2 creado, `GET /api/config` respondiendo. Probar el despliegue antes de escribir funcionalidad.

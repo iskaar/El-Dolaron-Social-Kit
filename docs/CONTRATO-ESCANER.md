@@ -22,6 +22,17 @@
 > siguen disponibles en el admin como destino manual. Donde abajo se lea que el precio
 > enruta a banda, vale esta nota.
 
+> **Ensayo en sandbox, 2026-10-11 (Isaac, Issue #273):** la ropa ya tiene precios
+> finales de **$200, $150, $100, $80 y $50 MXN**. En modo Ropa se escogen precio y
+> talla antes de fotografiar; la foto conserva ese precio en la cola local. El
+> servidor valida la categoría de precio y deja la pieza lista, sin estimación de IA,
+> porcentaje ni redondeo a 9. Cada foto lleva nombre **Ropa**, su talla y código
+> individual; no se inventa un precio de lista. El árbol de decisiones por tipo de
+> prenda y los nombres específicos quedan para una definición posterior de Isaac.
+> La computadora con la etiquetera imprime automáticamente al quedar guardada la
+> foto con nombre y precio. Este ensayo se habilita solo en sandbox; las reglas de
+> producción descritas abajo siguen vigentes.
+
 ## Decisión de fondo
 
 El escáner **no** es la herramienta de captura del vendedor: la cámara lo es. El análisis con IA
