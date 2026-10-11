@@ -53,6 +53,17 @@
     background: #fff5; flex: 0 0 auto; }
   #disparo:active { background: #fff; }
   #ayuda { flex: 1; font-size: 13px; opacity: .85; line-height: 1.3; }
+  /* El texto de ayuda puede crecer sobre las miniaturas: sólo los controles reciben toques. */
+  #barra { pointer-events: none; }
+  #barra button, #barra input { pointer-events: auto; }
+  @media (max-width: 600px) {
+    #barra { flex-wrap: wrap; gap: 6px; padding: 10px 10px calc(10px + env(safe-area-inset-bottom)); }
+    #ayuda { flex: 0 0 100%; order: -1; }
+    #estado, #modo { padding: 10px; font-size: 14px; }
+    #cantidad button { width: 30px; height: 40px; }
+    #cantidad .valor { width: 28px; font-size: 16px; }
+    #disparo { width: 60px; height: 60px; }
+  }
   #error { position: fixed; inset: 0; z-index: 5; display: none; padding: 24px;
     background: #111; flex-direction: column; justify-content: center; gap: 16px; }
   /* Modo Ropa (Issue #218): el boton y la talla en la parte de arriba, fuera del disparo. */
