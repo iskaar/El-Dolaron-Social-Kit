@@ -55,13 +55,14 @@ export function desfaseReloj(ahora, fechaServidor) {
 /**
  * `dolarones` es la parte del total pagada con Dolarones: el efectivo se compara
  * contra el resto. `descuento` ya viene aprobado y en centavos: `total` es lo
- * que vale el ticket despues de restarlo.
+ * que vale el ticket despues de restarlo. `anticipo` es la parte pagada con el
+ * saldo de un pedido (Issue #269): tambien sale de lo que se cobra ahora.
  */
-export function totales(lineas, efectivo = 0, dolarones = 0, descuento = 0) {
+export function totales(lineas, efectivo = 0, dolarones = 0, descuento = 0, anticipo = 0) {
   const piezas = lineas.reduce((suma, l) => suma + l.cantidad, 0);
   const subtotal = lineas.reduce((suma, l) => suma + l.precio * l.cantidad, 0);
   const total = subtotal - descuento;
-  const aPagar = total - dolarones;
+  const aPagar = total - dolarones - anticipo;
   const diferencia = efectivo - aPagar;
   return {
     piezas,
@@ -73,6 +74,21 @@ export function totales(lineas, efectivo = 0, dolarones = 0, descuento = 0) {
     falta: Math.max(0, -diferencia),
   };
 }
+
+/**
+ * Cuanto del saldo de un pedido se aplica a este ticket (Issue #269): todo el saldo
+ * o lo que falte tras los Dolarones, lo que sea menos. El servidor exige lo mismo
+ * (anticipo <= total - dolarones).
+ */
+export function anticipoDePedido(saldo, total, dolarones = 0) {
+  return Math.max(0, Math.min(saldo, total - dolarones));
+}
+
+/** Pedidos por WhatsApp (Isaac, Issue #269): anticipo minimo y envio fijo, gratis desde $1,000 de piezas. */
+export const ANTICIPO_MINIMO = 100_00;
+export const ENVIO_COSTO = 99_00;
+export const ENVIO_GRATIS_DESDE = 1000_00;
+export const envioDe = (subtotal) => (subtotal > 0 && subtotal < ENVIO_GRATIS_DESDE ? ENVIO_COSTO : 0);
 
 /**
  * 10 D por cada bloque completo de $100 pagado en dinero (decision de Isaac del

@@ -103,6 +103,11 @@
   .dlg-botones button { min-height:52px; font-size:18px; border:1px solid var(--azul); background:#fff; color:var(--azul); border-radius:10px; cursor:pointer; }
   .dlg-botones button.primario { background:var(--azul); color:#fff; }
   #usar-maximo { border:1px solid var(--azul); background:#fff; color:var(--azul); border-radius:10px; padding:8px 12px; min-height:44px; cursor:pointer; }
+  #pedido-cargado { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 10px;
+    padding: 8px 10px; border: 1px solid var(--azul); border-radius: 10px; font-size: 14px; color: var(--azul); font-weight: 700; }
+  #pedido-cargado[hidden] { display: none; }
+  #pedido-cargado button { border: 1px solid var(--azul); background: #fff; color: var(--azul); border-radius: 8px;
+    padding: 6px 10px; min-height: 36px; font-size: 13px; cursor: pointer; }
   #a-pagar { font-size: 18px; font-weight: 700; color: var(--azul); min-height: 22px; }
   .caja-nombre { font-size: 13px; display: flex; align-items: center; gap: 6px; color: #fff; margin: 0; }
   .caja-nombre select { width: auto; padding: 4px 8px; font-size: 14px; border-radius: 8px; border: 0; }
@@ -168,7 +173,7 @@ if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw-caja.js'
 <main>
   <section class="panel">
     <div class="fila-codigo">
-      <input id="codigo" placeholder="Escanea el código, o busca por descripción o código" autocomplete="off" autofocus>
+      <input id="codigo" placeholder="Escanea el código, escribe P-17 de un pedido, o busca por descripción" autocomplete="off" autofocus>
       <button id="abrir-camara" type="button">Cámara</button>
     </div>
     <div id="sugerencias"></div>
@@ -202,6 +207,11 @@ if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw-caja.js'
     <div id="descuento-estado"></div>
     <button id="quitar-descuento" type="button" hidden
       style="margin-top:6px;padding:6px 10px;font-size:13px;border:1px solid #dfe3ea;background:#fff;border-radius:8px;cursor:pointer">Quitar descuento</button>
+
+    <div id="pedido-cargado" hidden>
+      <span id="pedido-info" role="status"></span>
+      <button id="quitar-pedido" type="button">Quitar pedido</button>
+    </div>
 
     <label for="socio">Código de la web, vale impreso o teléfono de socio</label>
     <div class="socio-fila">
@@ -360,7 +370,7 @@ if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw-caja.js'
   </div>
 </dialog>
 <script type="module">
-import { totales, agregar, efectivoAlcanza, dolaronesGanados, saldoCanjeable, maximoCanje, MINIMO_REGALO, descuentoDe, TOPE_DESCUENTO, DENOMINACIONES, contadoDe, promoInauguracion, desfaseReloj } from '/venta.js';
+import { totales, agregar, efectivoAlcanza, dolaronesGanados, saldoCanjeable, maximoCanje, MINIMO_REGALO, descuentoDe, TOPE_DESCUENTO, DENOMINACIONES, contadoDe, promoInauguracion, desfaseReloj, anticipoDePedido } from '/venta.js';
 import { abrirCamara } from '/camara.js';
 import {
   reconectarImpresora, conectarImpresora, impresoraLista, imprimirTicket, abrirCajon, explicarErrorUsb, errorImpresora,
@@ -386,6 +396,9 @@ let idVenta = null;
 let creadoEnVenta = null;
 let cobrando = false;
 let formaElegida = false;       // la cajera tocó la forma de pago en esta venta (#260)
+// Pedido por WhatsApp cargado en el ticket (Issue #269): { id, folio, saldo } o null. Su saldo solo
+// existe en el servidor, así que con pedido el cobro espera al servidor y nunca se encola.
+let pedidoCargado = null;
 // Socio de la venta en curso: { id, numero, nombre, disponible, por_liberar, regalo_disponible } o null.
 let socio = null;
 let codigoSocio = '';
@@ -566,19 +579,24 @@ function pintar() {
   const efectivo = Math.round(Number($('efectivo').value || 0) * 100);
   const usados = dolaronesPedidos();
   const promo = promoActual();
-  const t = totales(lineas, efectivo, usados, descuentoAplicado() + promo);
+  const anticipo = pedidoCargado ? anticipoDePedido(pedidoCargado.saldo, totalNeto(), usados) : 0;
+  const t = totales(lineas, efectivo, usados, descuentoAplicado() + promo, anticipo);
+  $('pedido-cargado').hidden = !pedidoCargado;
+  if (pedidoCargado) $('pedido-info').textContent = `Pedido P-${pedidoCargado.folio} · saldo ${pesos(pedidoCargado.saldo)}`;
   $('original').textContent = t.descuento ? `Original ${pesos(t.subtotal)}` : '';
   $('total').textContent = pesos(t.total);
   $('piezas').textContent = `${t.piezas} ${t.piezas === 1 ? 'pieza' : 'piezas'}`;
   $('a-pagar').textContent = [
     promo ? `Promo inauguración −${pesos(promo)}${promoConfig.restantes != null ? ` (quedan ${promoConfig.restantes})` : ''}` : '',
     t.descuento - promo ? `Descuento −${pesos(t.descuento - promo)}` : '',
-    usados ? `Dolarones −${pesos(usados)} · A pagar ${pesos(t.aPagar)}` : '',
+    usados ? `Dolarones −${pesos(usados)}` : '',
+    anticipo ? `Anticipo P-${pedidoCargado.folio} −${pesos(anticipo)}` : '',
+    usados || anticipo ? `A pagar ${pesos(t.aPagar)}` : '',
   ].filter(Boolean).join(' · ');
   const canjeable = saldoCanjeable(socio, t.total);
   const autorizado = !usados || (codigoSocio && usados <= socio.maximo && Date.parse(socio.expira_en) > Date.now());
   $('usar-maximo').disabled = cobrando || !codigoSocio || maximoCanje(socio, t.total) === 0;
-  for (const id of ['codigo', 'socio', 'buscar-socio', 'quitar-socio', 'dolarones', 'efectivo', 'forma', 'cancelar', 'pedir-descuento', 'quitar-descuento']) $(id).disabled = cobrando;
+  for (const id of ['codigo', 'socio', 'buscar-socio', 'quitar-socio', 'dolarones', 'efectivo', 'forma', 'cancelar', 'pedir-descuento', 'quitar-descuento', 'quitar-pedido']) $(id).disabled = cobrando;
   pintarImpresionRemota();
   $('cobrar').textContent = `Cobrar · ${$('forma').selectedOptions[0].textContent}`;
   $('cobrar').disabled = cobrando || t.total === 0 || usados > t.total || usados > canjeable || !autorizado;
@@ -622,6 +640,11 @@ function buscarPieza(codigo) {
 function agregarCodigo(leido, reintento = false) {
   if (cobrando) return;
   const codigo = codigoDeDigitos(leido) ?? leido;
+  // Folio de un pedido por WhatsApp (P-17): trae sus piezas apartadas y su saldo (Issue #269).
+  if (/^P-?\d+$/i.test(codigo.trim())) {
+    cargarPedido(Number(codigo.trim().replace(/\D/g, '')));
+    return 'pedido';   // la camara se cierra para dejar ver el aviso
+  }
   if (/^D[CP]-/.test(codigo.trim())) {
     $('socio').value = codigo.trim();
     buscarSocio();
@@ -645,7 +668,7 @@ function agregarCodigo(leido, reintento = false) {
     if (pieza.stock - enTicket <= 0) {
       $('aviso').textContent = enTicket > 0
         ? `${pieza.nombre}: solo hay ${pieza.stock} en existencia.`
-        : `${pieza.nombre} ya se vendió. Revisa la etiqueta.`;
+        : `${pieza.nombre} ya se vendió o está apartada. Revisa la etiqueta.`;
       $('aviso').style.color = '#D72B32';
       return false;
     }
@@ -948,9 +971,88 @@ async function cobrarConDolarones(venta, t) {
   if (Object.hasOwn(cuerpo, 'imprimir_en')) venta.imprimir_en = cuerpo.imprimir_en;
   venta.vale_emitido = cuerpo.vale_emitido;
   venta.vale_usado = cuerpo.vale_usado;
+  venta.saldo_pedido = cuerpo.saldo_pedido;
   if (socio.vale) return { vale:true };
   const saldo = cuerpo.saldo ?? { disponible: socio.disponible - venta.dolarones };
   return { numero: socio.numero, ganados: cuerpo.ganados ?? dolaronesGanados(t.aPagar), saldo: saldo.disponible };
+}
+
+/* ---------- pedidos por WhatsApp (Issue #269) ---------- */
+
+const avisoRojo = (texto) => { $('aviso').textContent = texto; $('aviso').style.color = '#D72B32'; return false; };
+
+/**
+ * Escribir o escanear P-17: un apartado trae sus piezas al ticket (en el catálogo local ya están
+ * en 0, por eso no pasan por la verificación de existencia) y, si va por envío, la línea ENVIO.
+ * Con saldo a favor vigente (apartado, vencido o cancelado) el pedido paga parte del ticket.
+ */
+async function cargarPedido(folio) {
+  if (cobrando) return;
+  if (pedidoCargado) return avisoRojo(`El pedido P-${pedidoCargado.folio} ya está en este ticket. Cóbralo o quítalo antes de cargar otro.`);
+  let r, cuerpo;
+  try {
+    r = await fetch(`/api/pedidos/${folio}`);
+    cuerpo = await r.json();
+  } catch {
+    return avisoRojo('Sin red: no se puede cargar un pedido. Intenta otra vez cuando haya conexión.');
+  }
+  if (!r.ok) return avisoRojo(cuerpo.error ?? `No se encontró el pedido P-${folio}.`);
+  const p = cuerpo.pedido;
+  if (cobrando || pedidoCargado) return;   // otro escaneo ganó mientras se esperaba
+  if (!(p.saldo > 0 && Date.parse(p.saldo_vence_en) > Date.now())) {
+    return avisoRojo(`El pedido P-${p.folio} ${p.saldo > 0 ? 'ya no tiene saldo vigente: el saldo venció' : 'no tiene saldo a favor'}.`);
+  }
+  const apartado = p.estado === 'apartado';
+  const envio = apartado && p.entrega === 'envio' && p.envio > 0 ? catalogo.get('ENVIO') : null;
+  if (apartado && p.entrega === 'envio' && p.envio > 0 && !envio) {
+    return avisoRojo('Falta el producto ENVIO en el catálogo de la caja. Recarga la página con red.');
+  }
+  if (apartado) {
+    for (const l of p.lineas) {
+      for (let i = 0; i < l.cantidad; i++) {
+        lineas = agregar(lineas, { codigo: l.codigo, nombre: l.nombre, precio: l.precio, producto_id: l.producto_id, dePedido: true });
+      }
+    }
+    if (envio) lineas = agregar(lineas, { codigo: envio.codigo, nombre: envio.nombre, precio: envio.precio, producto_id: envio.id, dePedido: true });
+  }
+  pedidoCargado = { id: p.id, folio: p.folio, saldo: p.saldo };
+  idVenta = null;
+  $('aviso').textContent = `Pedido P-${p.folio} de ${p.cliente}: ${apartado ? 'piezas y ' : ''}saldo ${pesos(p.saldo)} cargados.`;
+  $('aviso').style.color = '#1f7a4d';
+  pintar();
+}
+
+/** Quita el pedido y, si era un apartado, también sus piezas del ticket. */
+function quitarPedido() {
+  lineas = lineas.filter((l) => !l.dePedido);
+  pedidoCargado = null;
+  idVenta = null;
+  pintar();
+  $('codigo').focus();
+}
+$('quitar-pedido').addEventListener('click', quitarPedido);
+
+/**
+ * Con pedido el cobro espera al servidor, como con Dolarones: el saldo solo existe allá y
+ * encolar la venta dejaría gastarlo dos veces. Un fallo de red deja el ticket abierto con el
+ * mismo folio: reintentar no cobra doble.
+ */
+async function cobrarConPedido(venta) {
+  let respuesta;
+  try {
+    respuesta = await fetch('/api/ventas', {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(venta),
+      signal: AbortSignal.timeout(15000),
+    });
+  } catch {
+    return avisoRojo('Sin red: una venta con pedido no se cobra sin conexión. Intenta otra vez, o quita el pedido y cobra normal.');
+  }
+  const cuerpo = await respuesta.json().catch(() => ({}));
+  if (!respuesta.ok) {
+    if (cuerpo.promo_agotada) promoAgotada();
+    return avisoRojo(cuerpo.error ?? 'No se pudo cobrar el pedido.');
+  }
+  return cuerpo;
 }
 
 /* ---------- cobro: primero al disco, luego a la red ---------- */
@@ -980,7 +1082,8 @@ async function cobrar() {
     $('aviso').style.color = '#D72B32';
     return;
   }
-  let t = totales(lineas, efectivo, usados, descuentoAplicado() + promoActual());
+  const anticipo = pedidoCargado ? anticipoDePedido(pedidoCargado.saldo, totalNeto(), usados) : 0;
+  let t = totales(lineas, efectivo, usados, descuentoAplicado() + promoActual(), anticipo);
   if (usados > saldoCanjeable(socio, t.total)) {
     $('aviso').textContent = 'Los regalos de apertura requieren un ticket de $1,000 MXN o más antes de descontar Dolarones. Revisa el importe solicitado.';
     $('aviso').style.color = '#D72B32';
@@ -992,7 +1095,7 @@ async function cobrar() {
     if (!elegida) { $('efectivo').focus(); return; }
     forma = $('forma').value = elegida;
     if (forma === 'efectivo') efectivo = t.aPagar;
-    t = totales(lineas, efectivo, usados, descuentoAplicado() + promoActual());
+    t = totales(lineas, efectivo, usados, descuentoAplicado() + promoActual(), anticipo);
   }
   if (!efectivoAlcanza({ formaPago: forma, total: t.aPagar, efectivo })) {
     $('aviso').textContent = efectivo === 0 ? 'Falta el efectivo recibido.' : `Faltan ${pesos(t.falta)}`;
@@ -1019,6 +1122,7 @@ async function cobrar() {
       caja: cajaActual(),
       descuento_id: descuentoAplicado() ? descuento.id : null,
       promo: promoActual(),
+      ...(pedidoCargado ? { pedido_id: pedidoCargado.id, anticipo } : {}),
       ...(imprimirEn ? { imprimir_en: imprimirEn } : {}),
     };
     let socioTicket = socio && !socio.vale && { numero: socio.numero, ganados: 0, saldo: socio.disponible };
@@ -1026,6 +1130,16 @@ async function cobrar() {
       socioTicket = await cobrarConDolarones(venta, t);
       if (!socioTicket) return;
       if (socioTicket.vale) socioTicket = null;
+    } else if (pedidoCargado) {
+      const cuerpo = await cobrarConPedido(venta);
+      if (!cuerpo) return;
+      if (Object.hasOwn(cuerpo, 'imprimir_en')) venta.imprimir_en = cuerpo.imprimir_en;
+      venta.vale_emitido = cuerpo.vale_emitido;
+      venta.saldo_pedido = cuerpo.saldo_pedido;
+      if (socioTicket) {
+        socioTicket.ganados = cuerpo.ganados ?? 0;
+        socioTicket.saldo = cuerpo.saldo?.disponible ?? socioTicket.saldo;
+      }
     } else {
       // El servidor decide si la promoción ya empezó. Un timeout conserva la
       // venta en cola con el mismo folio y el ticket deja el beneficio pendiente.
@@ -1061,7 +1175,8 @@ async function cobrar() {
     // Nada de esto espera al servidor ni bloquea el cobro; si falla, el pie lo dice.
     if (!venta.imprimir_en) {
       if (forma === 'efectivo') abrirCajon();
-      imprimirTicket({ ...venta, total: t.total, descuento: t.descuento, cambio: t.cambio, socio: socioTicket }, venta.lineas)
+      imprimirTicket({ ...venta, total: t.total, descuento: t.descuento, cambio: t.cambio, socio: socioTicket,
+        ...(pedidoCargado ? { pedido_folio: pedidoCargado.folio } : {}) }, venta.lineas)
         .then(pintarImpresora);
     }
 
@@ -1084,6 +1199,11 @@ async function cobrar() {
     const ganados = socioTicket?.ganados || venta.vale_emitido?.importe || 0;
     $('aviso').textContent = (forma === 'efectivo' && efectivo > 0 ? `Cobrado. Cambio ${pesos(t.cambio)}` : 'Cobrado.')
       + (ganados ? ` · Ganó ${dolares(ganados)}` : '');
+    if (pedidoCargado) {
+      $('aviso').textContent += ` · Anticipo P-${pedidoCargado.folio} −${pesos(anticipo)}`
+        + (venta.saldo_pedido > 0 ? `; le quedan ${pesos(venta.saldo_pedido)} a favor.` : '.');
+      cargarCatalogo();   // las piezas apartadas que no se llevó vuelven a la venta
+    }
     if (venta.imprimir_en) $('aviso').textContent += ` Ticket enviado a ${venta.imprimir_en}.`;
     if (venta.imprimir_en && (venta.vale_pendiente || venta.recompensa_pendiente)) $('aviso').textContent += ' Sin red: se enviará al sincronizar.';
     if (venta.vale_pendiente) $('aviso').textContent += venta.imprimir_en
@@ -1093,6 +1213,7 @@ async function cobrar() {
     $('aviso').style.color = '#1f7a4d';
     lineas = [];
     idVenta = null;
+    pedidoCargado = null;
     descuento = null;
     pintarDescuento();
     quitarSocio();
@@ -1574,7 +1695,7 @@ $('abrir-camara').addEventListener('click', async () => {
     apagarCamara = await abrirCamara('lector-camara', (codigo) => {
       const ok = agregarCodigo(codigo);
       navigator.vibrate?.(ok ? 60 : [80, 60, 80]);
-      if (ok === 'socio') { cerrarCamara(); return; }
+      if (ok === 'socio' || ok === 'pedido') { cerrarCamara(); return; }
       info.className = ok ? '' : 'error';
       info.textContent = ok ? `✓ ${buscarPieza(codigoDeDigitos(codigo) ?? codigo).nombre} · ${$('piezas').textContent}` : $('aviso').textContent;
     });
@@ -1844,7 +1965,7 @@ $('corte-reimprimir').addEventListener('click', async () => {
 });
 
 $('cancelar').addEventListener('click', () => {
-  lineas = []; idVenta = null; descuento = null; pintarDescuento(); quitarSocio(); $('efectivo').value = ''; $('forma').value = 'efectivo'; formaElegida = false; $('aviso').textContent = 'Venta cancelada';
+  lineas = []; idVenta = null; pedidoCargado = null; descuento = null; pintarDescuento(); quitarSocio(); $('efectivo').value = ''; $('forma').value = 'efectivo'; formaElegida = false; $('aviso').textContent = 'Venta cancelada';
   $('aviso').style.color = '#5b6478'; pintar(); $('codigo').focus();
 });
 

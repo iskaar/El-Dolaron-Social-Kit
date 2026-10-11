@@ -151,7 +151,7 @@ test('caja reintenta un canje tras perder la respuesta con el mismo folio, fecha
       ${cobrar}; cobrar`, {
       crypto, Date: class extends Date { constructor() { super(1760000000000 + reloj++ * 1000); } },
       lineas: [{ producto_id: PRODUCTO, codigo: 'ED-000001', nombre: 'Ventilador', precio: 25000, cantidad: 1 }],
-      socio: { vale: true, disponible: 1000 },
+      socio: { vale: true, disponible: 1000 }, pedidoCargado: null,
       $: (id: string) => ({ value: id === 'efectivo' ? '245' : 'efectivo', style: {} }),
       exigirCaja: () => true, cajaActual: () => 'Caja 1', dolaronesPedidos: () => 500,
       impresionRemota: () => false,

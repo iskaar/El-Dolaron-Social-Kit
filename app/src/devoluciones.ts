@@ -16,6 +16,7 @@ import { cajaDe } from './corte.ts';
 import { dolaronesGanados } from '../public/venta.js';
 import { retirarVale, valeDeVenta, valeUsadoEnVenta } from './vales.ts';
 import { saldo } from './dolarones.ts';
+import { TICKET_CON_ANTICIPO } from './pedidos.ts';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -41,7 +42,7 @@ export function repartirDevolucion(p: {
 interface VentaFila {
   id: string; total: number; descuento: number; forma_pago: string; efectivo: number; cambio: number; dolarones: number;
   cancelada: number; cancelada_en: string; cancelada_por: string; cancelada_caja: string; motivo_cancelacion: string;
-  creado_en: string; caja: string; cajero: string; cliente_id: string | null;
+  creado_en: string; caja: string; cajero: string; cliente_id: string | null; anticipo: number; pedido_id: string | null;
   devuelto: number; dolarones_devueltos: number; revision: number;
   imprimir_en: string | null; impreso_en: string | null;
 }
@@ -49,7 +50,7 @@ interface VentaFila {
 const leerVenta = (env: Env, id: string) =>
   env.DB.prepare(
     `select id, total, descuento, forma_pago, efectivo, cambio, dolarones, cancelada, cancelada_en, cancelada_por, cancelada_caja,
-            motivo_cancelacion, creado_en, caja, cajero, cliente_id, devuelto, dolarones_devueltos, revision, imprimir_en, impreso_en
+            motivo_cancelacion, creado_en, caja, cajero, cliente_id, anticipo, pedido_id, devuelto, dolarones_devueltos, revision, imprimir_en, impreso_en
      from ventas where id = ?`,
   ).bind(id).first<VentaFila>();
 
@@ -71,11 +72,15 @@ export async function detalleVenta(id: string, env: Env, paraImprimir = false): 
   const socio = venta.cliente_id
     ? await env.DB.prepare('select numero, nombre from clientes where id = ?').bind(venta.cliente_id).first<{ numero:number; nombre:string }>()
     : null;
-  if (!paraImprimir) return json({ ...venta, cliente_id:undefined, socio, lineas, devoluciones });
+  // Para reimprimir el renglon «Anticipo P-17»: el folio del pedido que pago parte del ticket.
+  const folio = venta.pedido_id
+    ? (await env.DB.prepare('select folio from pedidos where id = ?').bind(venta.pedido_id).first<{ folio:number }>())?.folio ?? null
+    : null;
+  if (!paraImprimir) return json({ ...venta, cliente_id:undefined, pedido_id:undefined, pedido_folio:folio, socio, lineas, devoluciones });
   const ganados = socio ? await env.DB.prepare(`select coalesce(sum(importe), 0) as importe
     from dolarones_movimientos where venta_id = ? and tipo = 'compra'`).bind(id).first<{ importe:number }>() : null;
   const saldoActual = venta.cliente_id ? await saldo(env, venta.cliente_id, new Date().toISOString()) : null;
-  const respuesta = json({ ...venta, cliente_id: undefined,
+  const respuesta = json({ ...venta, cliente_id: undefined, pedido_id: undefined, pedido_folio: folio,
     socio:socio && { ...socio, ganados:ganados?.importe ?? 0, saldo:saldoActual?.disponible ?? 0 }, lineas, devoluciones,
     vale_emitido:await valeDeVenta(env, id), vale_usado:await valeUsadoEnVenta(env, id) });
   respuesta.headers.set('cache-control', 'no-store');
@@ -107,6 +112,8 @@ export async function cancelarPieza(
   const venta = await leerVenta(env, ventaId);
   if (!venta) return json({ error: 'La venta no existe.' }, 404);
   if (venta.cancelada) return json({ error: 'El ticket ya estaba cancelado completo.' }, 409);
+  // Devolver dinero de un ticket que uso saldo de pedido descuadra el corte de dos cajas (pedidos.ts).
+  if (venta.anticipo > 0) return json({ error: TICKET_CON_ANTICIPO }, 409);
   // Dolarones sin socio son de un vale (PR #134): aqui solo se sabe regresarlos
   // a los lotes de un socio. Ese ticket se cancela completo, sin restitución parcial al vale.
   if (venta.dolarones > 0 && !venta.cliente_id) {

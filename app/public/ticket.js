@@ -64,6 +64,7 @@ export function pintarDetalle(t, { editable = false } = {}) {
     t.descuento ? ['Descuento', `− ${pesos(t.descuento)}`] : null,
     ['Total cobrado', pesos(t.total)],
     t.dolarones ? ['Pagado con Dolarones', dolares(t.dolarones)] : null,
+    t.anticipo ? [`Anticipo${t.pedido_folio ? ` P-${t.pedido_folio}` : ' de pedido'}`, `− ${pesos(t.anticipo)}`] : null,
     t.efectivo ? ['Efectivo recibido / cambio', `${pesos(t.efectivo)} / ${pesos(t.cambio)}`] : null,
     t.devuelto ? ['Devuelto en dinero', `− ${pesos(t.devuelto)}`] : null,
     t.dolarones_devueltos ? ['Regresado al saldo', `− ${dolares(t.dolarones_devueltos)}`] : null,
