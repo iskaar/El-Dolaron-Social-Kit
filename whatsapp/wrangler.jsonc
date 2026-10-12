@@ -1,0 +1,15 @@
+{
+  "name": "el-dolaron-whatsapp",
+  "account_id": "3722419129a69768442e7dd737102387",
+  "main": "worker.mjs",
+  "compatibility_date": "2026-10-10",
+  "workers_dev": false,
+  "preview_urls": false,
+  "routes": [{ "pattern": "whatsapp.eldolaron.com", "custom_domain": true }],
+  "kv_namespaces": [{ "binding": "EVENTS", "id": "d6cbf480b05d47c7a17d53d8e4b461a8" }],
+  "observability": {
+    "enabled": true,
+    "logs": { "enabled": true, "invocation_logs": false },
+    "traces": { "enabled": true }
+  }
+}
