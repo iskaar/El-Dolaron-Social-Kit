@@ -104,6 +104,7 @@
   </div>
 
   <div class="panel ajustes" id="filtros-extra">
+    <div style="grid-column: 1 / -1"><label for="f-nombre">Buscar por nombre</label><input id="f-nombre" type="search" placeholder="Nombre de la prenda" autocomplete="off"></div>
     <div><label for="f-dia">Día de captura</label><input id="f-dia" type="date"></div>
     <div><label for="f-categoria">Categoría</label><select id="f-categoria"><option value="">Todas</option></select></div>
     <div><label for="f-min">Precio desde ($)</label><input id="f-min" type="number" min="0"></div>
@@ -416,6 +417,7 @@ document.getElementById('m-precios-ml').addEventListener('click', () => {
 
 /* ---------- filtros ---------- */
 
+const elNombre = document.getElementById('f-nombre');
 const elDia = document.getElementById('f-dia');
 const elCategoria = document.getElementById('f-categoria');
 const elMin = document.getElementById('f-min');
@@ -439,6 +441,7 @@ function pintarSesiones(sesiones) {
 
 function pasaFiltros(p, sesionDe) {
   if (filtro && p.estado_analisis !== filtro) return false;
+  if (elNombre.value && !normalizar(p.nombre).includes(normalizar(elNombre.value))) return false;
   if (elDia.value && diaLocal(p.creado_en) !== elDia.value) return false;
   if (elCategoria.value && p.categoria !== elCategoria.value) return false;
   if (elMin.value !== '' && p.precio < centavos(elMin.value)) return false;
@@ -448,8 +451,9 @@ function pasaFiltros(p, sesionDe) {
 }
 
 for (const el of [elDia, elCategoria, elMin, elMax, elSesion]) el.addEventListener('change', cargarCola);
+elNombre.addEventListener('input', pintarCola);
 document.getElementById('f-limpiar').addEventListener('click', () => {
-  for (const el of [elDia, elCategoria, elMin, elMax, elSesion]) el.value = '';
+  for (const el of [elNombre, elDia, elCategoria, elMin, elMax, elSesion]) el.value = '';
   cargarCola();
 });
 
@@ -457,6 +461,7 @@ document.getElementById('f-limpiar').addEventListener('click', () => {
 // Se pintan de 24 en 24 y la siguiente tanda entra al acercarse al final.
 const TANDA = 24;
 let porPintar = [];
+let todas = [];
 const finCola = document.getElementById('cola-fin');
 const observador = new IntersectionObserver(([fin]) => { if (fin.isIntersecting) pintarTanda(); }, { rootMargin: '1500px' });
 function pintarTanda() {
@@ -473,7 +478,11 @@ async function cargarCola() {
   // fotos, no solo de las que pasan el filtro de estado.
   // El servidor las da en orden de captura (Etiquetas lo necesita así); aquí se
   // revisa lo nuevo, así que va de la más nueva a la más vieja.
-  const todas = (await (await fetch('/api/borradores')).json()).reverse();
+  todas = (await (await fetch('/api/borradores')).json()).reverse();
+  pintarCola();
+}
+
+function pintarCola() {
   const { porPieza: sesionDe, sesiones } = agruparSesiones(todas);
   pintarSesiones(sesiones);
   const piezas = todas.filter((p) => pasaFiltros(p, sesionDe));
