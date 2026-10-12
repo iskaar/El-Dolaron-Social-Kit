@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>El Dolarón — mensajes de WhatsApp</title>
+<style>
+  :root { --azul:#16366B; --amarillo:#FFD447; --linea:#dfe3ea; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: #f4f6f9; color: #1a1f2b; font-family: system-ui, -apple-system, sans-serif; }
+  header { background: var(--azul); color: #fff; padding: 14px 20px; display: flex; gap: 16px; align-items: center; flex-wrap: wrap; }
+  header h1 { font-size: 18px; margin: 0; flex: 1; }
+  header a { color: var(--amarillo); font-size: 14px; }
+  main { padding: 20px; max-width: 900px; margin: 0 auto; }
+  .panel { background: #fff; border: 1px solid var(--linea); border-radius: 12px; padding: 16px; }
+  .aviso { font-size: 13px; color: #5b6478; margin: 0 0 12px; }
+  button { border: 0; border-radius: 8px; padding: 9px 14px; font-size: 14px; font-weight: 600; cursor: pointer; background: var(--azul); color: #fff; }
+  .mensaje { border-top: 1px solid var(--linea); padding: 12px 0; }
+  .mensaje:first-of-type { border-top: 0; }
+  .cabecera { display: flex; gap: 10px; flex-wrap: wrap; font-size: 13px; color: #5b6478; }
+  .cabecera b { color: #1a1f2b; font-size: 14px; }
+  .texto { margin-top: 6px; white-space: pre-wrap; word-break: break-word; font-size: 15px; }
+  .tipo { color: #8a93a6; font-style: italic; }
+  .vacio, .error { padding: 16px 0; color: #5b6478; }
+  .error { color: #D72B32; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Mensajes de WhatsApp</h1>
+  <button id="actualizar" type="button">Actualizar</button>
+  <a href="/">Inicio</a>
+</header>
+<main>
+  <section class="panel">
+    <p class="aviso">Solo lectura. Cada mensaje se borra a los 7 días. Los números y los nombres son datos personales: no los compartas.</p>
+    <div id="lista"><p class="vacio">Cargando…</p></div>
+  </section>
+</main>
+<script>
+const $ = (id) => document.getElementById(id);
+const hora = (iso) => new Date(iso).toLocaleString('es-MX', { dateStyle: 'short', timeStyle: 'short' });
+
+/** Todo el texto del cliente entra con textContent: nunca como HTML. */
+function fila(m) {
+  const div = document.createElement('div');
+  div.className = 'mensaje';
+  const cab = document.createElement('div');
+  cab.className = 'cabecera';
+  const quien = document.createElement('b');
+  quien.textContent = m.nombre || 'Sin nombre';
+  const numero = document.createElement('span');
+  numero.textContent = '+' + m.de;
+  const cuando = document.createElement('span');
+  cuando.textContent = hora(m.recibido) + (m.vence ? ' · se borra ' + hora(m.vence) : '');
+  cab.append(quien, numero, cuando);
+  const texto = document.createElement('div');
+  texto.className = 'texto' + (m.tipo !== 'text' ? ' tipo' : '');
+  texto.textContent = m.texto;
+  div.append(cab, texto);
+  return div;
+}
+
+async function cargar() {
+  const lista = $('lista');
+  lista.innerHTML = '<p class="vacio">Cargando…</p>';
+  try {
+    const r = await fetch('/api/mensajes', { cache: 'no-store' });
+    const cuerpo = await r.json().catch(() => ({}));
+    if (!r.ok) { lista.innerHTML = ''; const p = document.createElement('p'); p.className = 'error'; p.textContent = cuerpo.error ?? 'No se pudieron cargar los mensajes.'; lista.append(p); return; }
+    lista.innerHTML = '';
+    if (!cuerpo.mensajes.length) { lista.innerHTML = '<p class="vacio">No hay mensajes recientes.</p>'; return; }
+    for (const m of cuerpo.mensajes) lista.append(fila(m));
+  } catch {
+    lista.innerHTML = '<p class="error">Sin conexión: no se pudieron cargar los mensajes.</p>';
+  }
+}
+
+$('actualizar').addEventListener('click', cargar);
+cargar();
+</script>
+</body>
+</html>
