@@ -1,4 +1,5 @@
 import { respuestaPara } from './respuestas.mjs';
+import { esFinDeConversacion, estaPausado, generarRespuesta, guardarTurno, interpretar, leerHistorial, pausar, RETENCION_SEGUNDOS } from './asistente.mjs';
 
 const encoder = new TextEncoder();
 const maxBytes = 1024 * 1024;
@@ -94,26 +95,63 @@ export default {
   },
 };
 
-/** Responde solo a mensajes de texto que el cliente envio; cada mensaje se contesta una vez. */
+/**
+ * Responde a cada mensaje del cliente una sola vez: con el asistente si hay clave y el modelo
+ * contesta; si no, con el FAQ fijo. Si el asistente escala, la conversacion queda pausada.
+ */
 async function responderMensajes(event, env) {
   if (!env.WHATSAPP_ACCESS_TOKEN || !env.WHATSAPP_PHONE_NUMBER_ID) return;
   for (const entrada of event.entry) {
     for (const cambio of entrada.changes ?? []) {
       if (cambio.field !== 'messages') continue;
       for (const mensaje of cambio.value?.messages ?? []) {
-        if (mensaje.type !== 'text' || !mensaje.id || !mensaje.from) continue;
+        if ((mensaje.type !== 'text' && mensaje.type !== 'image') || !mensaje.id || !mensaje.from) continue;
         // Meta reintenta los eventos; la marca evita contestar dos veces el mismo mensaje.
         const marca = `respondido:${mensaje.id}`;
         if (await env.EVENTS.get(marca)) continue;
         await env.EVENTS.put(marca, '1', { expirationTtl: 7 * 86400 });
-        const envio = await fetch(`https://graph.facebook.com/v26.0/${env.WHATSAPP_PHONE_NUMBER_ID}/messages`, {
-          method: 'POST',
-          headers: { authorization: `Bearer ${env.WHATSAPP_ACCESS_TOKEN}`, 'content-type': 'application/json' },
-          body: JSON.stringify({ messaging_product: 'whatsapp', to: mensaje.from, type: 'text',
-            text: { body: respuestaPara(mensaje.text?.body) } }),
-        });
-        if (!envio.ok) console.error(JSON.stringify({ event: 'whatsapp_reply_failed', status: envio.status }));
+        const de = mensaje.from;
+        if (await estaPausado(env.EVENTS, de)) continue;
+
+        if (mensaje.type === 'image') {
+          await enviarYGuardar(env, de, IMAGEN);
+          continue;
+        }
+        const texto = String(mensaje.text?.body ?? '');
+        const historial = await leerHistorial(env.EVENTS, de);
+        if (esFinDeConversacion(texto, historial.length > 0)) continue;
+
+        let respuesta;
+        try {
+          if (!env.ANTHROPIC_API_KEY) throw new Error('sin clave');
+          respuesta = interpretar(await generarRespuesta(historial, texto, env.ANTHROPIC_API_KEY));
+        } catch {
+          respuesta = { texto: respuestaPara(texto), puntaje: 0, escalar: false };
+        }
+        if (!respuesta.texto) continue;
+        if (!await enviarYGuardar(env, de, respuesta.texto)) continue;
+        await guardarTurno(env.EVENTS, de, texto, respuesta.texto);
+        if (respuesta.escalar) await pausar(env.EVENTS, de);
       }
     }
   }
+}
+
+const IMAGEN = 'Recibimos tu imagen. Escríbenos tu pregunta por texto y te ayudamos.';
+
+/** Envia el texto por Meta y lo registra para la vista de mensajes. Nunca registra el texto en logs. */
+async function enviarYGuardar(env, para, texto) {
+  const envio = await fetch(`https://graph.facebook.com/v26.0/${env.WHATSAPP_PHONE_NUMBER_ID}/messages`, {
+    method: 'POST',
+    headers: { authorization: `Bearer ${env.WHATSAPP_ACCESS_TOKEN}`, 'content-type': 'application/json' },
+    body: JSON.stringify({ messaging_product: 'whatsapp', to: para, type: 'text', text: { body: texto } }),
+  });
+  if (!envio.ok) {
+    console.error(JSON.stringify({ event: 'whatsapp_reply_failed', status: envio.status }));
+    return false;
+  }
+  const id = String((await envio.json().catch(() => ({})))?.messages?.[0]?.id ?? crypto.randomUUID());
+  await env.EVENTS.put(`saliente:${id}`, JSON.stringify({ id, para, texto, enviado_por: 'asistente automático',
+    creado: new Date().toISOString() }), { expirationTtl: RETENCION_SEGUNDOS });
+  return true;
 }
