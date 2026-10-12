@@ -6,6 +6,7 @@
   "workers_dev": false,
   "preview_urls": false,
   "routes": [{ "pattern": "whatsapp.eldolaron.com", "custom_domain": true }],
+  "vars": { "WHATSAPP_PHONE_NUMBER_ID": "1433484303171531" },
   "kv_namespaces": [{ "binding": "EVENTS", "id": "d6cbf480b05d47c7a17d53d8e4b461a8" }],
   "observability": {
     "enabled": true,
