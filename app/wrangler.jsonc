@@ -16,6 +16,8 @@
     "run_worker_first": true
   },
   "vars": {
+    // Numero de WhatsApp para responder desde /mensajes (Issue #290). Publico, no secreto.
+    "WHATSAPP_PHONE_NUMBER_ID": "1433484303171531",
     // Ese hostname solo sirve la camara y la subida de fotos: el vendedor no
     // llega a precios ni a la caja aunque escriba la ruta.
     "HOST_VENDEDOR": "captura.viste.com.mx",
