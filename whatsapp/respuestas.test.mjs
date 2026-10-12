@@ -65,7 +65,7 @@ test('sin token de envio o con mensajes que no son texto no se contesta nada', a
     await Promise.all(pendientes.splice(0));
     assert.equal(envio.llamadas.length, 0);
     const conToken = { ...env, WHATSAPP_ACCESS_TOKEN: 't', WHATSAPP_PHONE_NUMBER_ID: 'p' };
-    await worker.fetch(firmado(evento([{ id: 'wamid.3', from: '1', type: 'image', image: {} }])), conToken, ctx);
+    await worker.fetch(firmado(evento([{ id: 'wamid.3', from: '1', type: 'audio', audio: {} }])), conToken, ctx);
     await Promise.all(pendientes.splice(0));
     assert.equal(envio.llamadas.length, 0);
   } finally { envio.restaurar(); }
