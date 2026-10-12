@@ -39,7 +39,7 @@ import { cajeroEnTurno, listarCajeros, entrar, salir, ponerPin } from './cajeros
 import { registrarSocio, buscarSocio, buscarPorCodigo, basesListas, sentenciasDeVenta, saldo } from './dolarones.ts';
 import { registrarCorte, registrarRetiro, ultimoCorte, cajaDe } from './corte.ts';
 import { portal, llegada, vincular } from './portal.ts';
-import { mensajesApi } from './mensajes.ts';
+import { mensajesApi, responderApi } from './mensajes.ts';
 import { sentenciasVale, buscarVale, valeDeVenta, valeUsadoEnVenta, reimprimirVale, valesAbiertos } from './vales.ts';
 import { catalogoPublico, revisionCatalogo } from './catalogo.ts';
 import { rutaML, recibirNotificacion, conciliarSeguro, sincronizar, publicacionViva } from './mercadolibre.ts';
@@ -1808,6 +1808,7 @@ export default {
       if (impresion && request.method === 'POST') return await tomarImpresion(impresion[1], request, env, correo);
 
       if (pathname === '/api/mensajes' && request.method === 'GET') return await mensajesApi(env);
+      if (pathname === '/api/mensajes/responder' && request.method === 'POST') return await responderApi(request, env, correo);
       if (pathname === '/api/socios') {
         if (request.method === 'POST') return await registrarSocio(request, env, correo);
         if (request.method === 'GET') return await buscarSocio(url, env);
