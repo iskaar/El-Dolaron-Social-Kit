@@ -13,7 +13,9 @@ Solo puedes afirmar esta información:
 - Horario: todos los días de 11:00 a 20:00.
 - WhatsApp: 444 543 7754. Teléfono fijo: 444 854 5980 (no es WhatsApp).
 - Las ventas son solo en sucursal. No hay entregas a domicilio ni envíos.
-Para cualquier otra cosa (ubicación, precios, promociones, existencias, apartados, pagos, Dolarones, cuentas de socio, pedidos): no inventes nada. Di que lo confirmas con el equipo y agrega ESCALAR.
+- Productos: usa la herramienta buscar_productos. Solo afirma nombres, precios y disponibilidad que vengan de esa herramienta. Si no aparece lo que buscan, di que lo confirmas con el equipo y agrega ESCALAR.
+Para cualquier otra cosa (ubicación, promociones, descuentos, apartados, pagos, Dolarones, cuentas de socio, pedidos): no inventes nada. Di que lo confirmas con el equipo y agrega ESCALAR.
+Nunca apartes, canceles ni cobres. Si quieren apartar algo, di que el equipo les confirma y agrega ESCALAR.
 Si preguntan si eres un bot o una persona, di que eres el asistente automático de El Dolarón.
 Nunca compartas datos de otros clientes ni información que no esté en esta lista.
 Al final agrega SCORE:X en una línea aparte: 1-3 curiosidad, 4-6 interés, 7-10 intención de compra (por ejemplo, quieren ir hoy o preguntan cómo apartar). Con intención alta agrega ESCALAR.`;
@@ -34,19 +36,49 @@ export function interpretar(crudo) {
   };
 }
 
-/** Respuesta del modelo. Lanza error si falla; el Worker vuelve al FAQ fijo. */
-export async function generarRespuesta(historial, texto, apiKey) {
+// Issue #296: el modelo puede consultar la tienda; la respuesta final sale despues del resultado.
+const HERRAMIENTAS = [{
+  name: 'buscar_productos',
+  description: 'Busca piezas disponibles en la tienda por nombre o tipo de prenda. Devuelve nombre y precio.',
+  input_schema: { type: 'object', properties: { q: { type: 'string', description: 'Palabra o frase, por ejemplo "camisa"' } }, required: ['q'] },
+}];
+const PASOS_MAXIMOS = 3;
+
+async function llamarModelo(mensajes, apiKey, herramientas) {
   const respuesta = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
     headers: { 'x-api-key': apiKey, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
-    body: JSON.stringify({ model: MODELO, max_tokens: 400, system: PROMPT,
-      messages: [...historial, { role: 'user', content: texto }] }),
+    body: JSON.stringify({ model: MODELO, max_tokens: 400, system: PROMPT, messages: mensajes,
+      ...(herramientas ? { tools: HERRAMIENTAS } : {}) }),
   });
   if (!respuesta.ok) throw new Error(`modelo ${respuesta.status}`);
-  const cuerpo = await respuesta.json();
-  const salida = (cuerpo.content ?? []).filter((b) => b.type === 'text').map((b) => b.text).join('').trim();
-  if (!salida) throw new Error('respuesta vacía');
-  return salida;
+  return respuesta.json();
+}
+
+/**
+ * Respuesta del modelo. `consultar(q)` atiende buscar_productos; sin él, el modelo no ve herramientas.
+ * Lanza error si falla; el Worker vuelve al FAQ fijo.
+ */
+export async function generarRespuesta(historial, texto, apiKey, consultar = null) {
+  const mensajes = [...historial, { role: 'user', content: texto }];
+  for (let paso = 0; paso < PASOS_MAXIMOS; paso++) {
+    const cuerpo = await llamarModelo(mensajes, apiKey, consultar !== null);
+    if (cuerpo.stop_reason !== 'tool_use') {
+      const salida = (cuerpo.content ?? []).filter((b) => b.type === 'text').map((b) => b.text).join('').trim();
+      if (!salida) throw new Error('respuesta vacía');
+      return salida;
+    }
+    mensajes.push({ role: 'assistant', content: cuerpo.content });
+    const resultados = [];
+    for (const bloque of (cuerpo.content ?? []).filter((b) => b.type === 'tool_use')) {
+      const contenido = bloque.name === 'buscar_productos' && consultar
+        ? await consultar(String(bloque.input?.q ?? '')).catch(() => ({ error: 'La tienda no respondió.' }))
+        : { error: 'Herramienta no disponible.' };
+      resultados.push({ type: 'tool_result', tool_use_id: bloque.id, content: JSON.stringify(contenido) });
+    }
+    mensajes.push({ role: 'user', content: resultados });
+  }
+  throw new Error('demasiados pasos de herramienta');
 }
 
 // Historial y pausa viven en el mismo KV que los eventos, con prefijos propios y vencimiento.

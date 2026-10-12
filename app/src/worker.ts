@@ -40,6 +40,7 @@ import { registrarSocio, buscarSocio, buscarPorCodigo, basesListas, sentenciasDe
 import { registrarCorte, registrarRetiro, ultimoCorte, cajaDe } from './corte.ts';
 import { portal, llegada, vincular } from './portal.ts';
 import { mensajesApi, responderApi } from './mensajes.ts';
+import { rutaAsistente } from './asistente.ts';
 import { sentenciasVale, buscarVale, valeDeVenta, valeUsadoEnVenta, reimprimirVale, valesAbiertos } from './vales.ts';
 import { catalogoPublico, revisionCatalogo } from './catalogo.ts';
 import { rutaML, recibirNotificacion, conciliarSeguro, sincronizar, publicacionViva } from './mercadolibre.ts';
@@ -1684,6 +1685,10 @@ export default {
       if (pathname === '/api/salud') {
         return json({ estado: 'ok', ambiente: env.AMBIENTE || 'produccion', ahora: new Date().toISOString() });
       }
+
+      // Issue #296: el Worker de WhatsApp consulta la tienda por service binding, sin Access, con token.
+      // Va antes de quienEs; cualquier otra ruta /api/asistente/* responde 404 dentro de rutaAsistente.
+      if (pathname.startsWith('/api/asistente/')) return await rutaAsistente(request, env, url);
 
       // Quien es (JWT de Access verificado) y si su cuenta le deja entrar aqui.
       const regla = permiso(pathname, request.method);
