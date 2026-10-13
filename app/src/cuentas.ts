@@ -13,8 +13,9 @@ import { resolverDescuento } from './descuentos.ts';
 
 // `computadora`: la cuenta de la tienda con la que entra la computadora de caja;
 // sola no cobra, cada cajero entra con su PIN (Issue #112, cajeros.ts).
-export type Rol = 'dueno' | 'cajero' | 'capturista' | 'computadora';
-export const ROLES: readonly Rol[] = ['dueno', 'cajero', 'capturista', 'computadora'];
+// `finanzas`: FEP. Toma fotos y ve solo sus piezas (propietario 'fep'); ver propietarioDe.
+export type Rol = 'dueno' | 'cajero' | 'capturista' | 'computadora' | 'finanzas';
+export const ROLES: readonly Rol[] = ['dueno', 'cajero', 'capturista', 'computadora', 'finanzas'];
 /** Lo que recibe alguien al aprobarle el acceso si no se escoge otra cosa. */
 export const ROL_POR_OMISION: Rol = 'cajero';
 
@@ -50,6 +51,7 @@ export const CAJAS = ['Caja 1', 'Caja 2', 'Caja 3'];
 export type Regla = 'libre' | 'cuenta' | Rol[];
 
 const CAPTURA: Rol[] = ['capturista'];
+const CAPTURA_FEP: Rol[] = ['capturista', 'finanzas'];
 const CAJA: Rol[] = ['cajero', 'computadora'];
 const TODOS: Rol[] = ['cajero', 'capturista'];
 const DUENO: Rol[] = [];
@@ -57,7 +59,7 @@ const DUENO: Rol[] = [];
 const PANTALLAS: Record<string, Rol[]> = {
   '/': TODOS,
   '/index': TODOS,
-  '/captura': CAPTURA,
+  '/captura': CAPTURA_FEP,
   '/admin': CAPTURA,
   '/marketplace': CAPTURA,
   '/etiquetas': CAPTURA,
@@ -93,11 +95,11 @@ export function permiso(pathname: string, metodo: string): Regla {
   if (ruta in PANTALLAS) return PANTALLAS[ruta];
 
   if (ruta === '/api/mensajes' || ruta === '/api/mensajes/responder') return DUENO;
-  if (ruta === '/api/config') return metodo === 'GET' ? CAPTURA : DUENO;
+  if (ruta === '/api/config') return metodo === 'GET' ? CAPTURA_FEP : DUENO;
   if (ruta === '/api/familias') return metodo === 'GET' ? TODOS : DUENO;
   if (ruta === '/api/borradores/manual') return DUENO;   // captura sin foto (Issue #115)
-  if (ruta === '/api/borradores' || ruta.startsWith('/api/borradores/')) return CAPTURA;
-  if (ruta.startsWith('/api/foto/')) return CAPTURA;
+  if (ruta === '/api/borradores' || ruta.startsWith('/api/borradores/')) return CAPTURA_FEP;
+  if (ruta.startsWith('/api/foto/')) return CAPTURA_FEP;
   if (ruta === '/api/etiquetas') return CAPTURA;
   if (ruta === '/api/calibracion') return CAPTURA;
   if (ruta === '/api/marketplace' || /^\/api\/marketplace\/foto\/[^/]+$/.test(ruta)) return CAPTURA;
@@ -130,6 +132,14 @@ export const esDeCaja = (regla: Regla) => regla === CAJA;
 /** La cuenta de la computadora de caja: para cobrar necesita el PIN de un cajero. */
 export const soloComputadora = (usuario: Usuario | null) =>
   !!usuario?.roles.includes('computadora') && !usuario.roles.includes('cajero') && !usuario.roles.includes('dueno');
+
+/**
+ * De quien son las piezas que esta persona captura y ve (Issue #298). FEP solo
+ * ve y captura lo suyo; el resto de la tienda, lo de El Dolaron. El corte y la
+ * caja no cambian: el cobro es de la tienda, lo de FEP se le debe aparte.
+ */
+export const propietarioDe = (usuario: Usuario | null): 'dolaron' | 'fep' =>
+  usuario?.roles.includes('finanzas') ? 'fep' : 'dolaron';
 
 export function puede(usuario: Usuario | null, regla: Regla): boolean {
   if (regla === 'libre' || regla === 'cuenta') return true;
