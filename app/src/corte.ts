@@ -23,6 +23,7 @@
  * se puede volver a contar para que cuadre.
  */
 
+import { lineasNetas } from './netas.ts';
 import { contadoDe } from '../public/venta.js';
 import { leerUsuario } from './cuentas.ts';
 
@@ -176,13 +177,11 @@ export async function registrarCorte(request: Request, env: Env, correo: string)
            (select coalesce(sum(dolarones - dolarones_devueltos), 0) from ventas where ${VIGENTES}) as dv,
            (select coalesce(sum(dolarones - dolarones_devueltos), 0) from ventas where ${CANCELADAS})
              + (select coalesce(sum(d.dolarones), 0) from devoluciones d where ${DEVUELTAS}) as dd,
-           -- FEP: lo vendido de sus piezas en esta caja, al precio de la venta (la tienda paga el cashback aparte).
-           -- Un ticket de FEP cancelado despues resta de este corte; lo cancelado en el mismo turno no cuenta.
-           (select coalesce(sum(case when v.cancelada = 0 then 1 else -1 end * l.precio * (l.cantidad - l.cancelada_cantidad)), 0)
-              from venta_lineas l join ventas v on v.id = l.venta_id
-              where l.propietario = 'fep'
-                and ((v.corte_id = ?1 and v.cancelada = 0)
-                  or (v.cancelada = 1 and v.corte_cancelacion_id = ?1 and v.corte_id != ?1))) as fp)`,
+           -- FEP: lo cobrado (efectivo, tarjeta, transferencia) de sus piezas en esta caja; lo pagado con Dolarones
+           -- se descuenta. Un ticket de FEP cancelado despues resta de este corte; el cancelado en el mismo turno no cuenta.
+           -- Mismo reparto por pieza que los reportes (netas.ts).
+           (${lineasNetas('v.corte_id = ?1')} select coalesce(sum(cobrado), 0) from cobros where propietario = 'fep')
+           - (${lineasNetas('v.corte_cancelacion_id = ?1 and v.corte_id != ?1', true)} select coalesce(sum(cobrado), 0) from cobros where propietario = 'fep') as fp)`,
       ).bind(id, caja, correo, ahora, contado, terminal, fondoConfig, notas, JSON.stringify(conteo ?? {})),
     ]);
   } catch (error) {
