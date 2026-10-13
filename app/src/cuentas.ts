@@ -62,7 +62,7 @@ const PANTALLAS: Record<string, Rol[]> = {
   '/captura': CAPTURA_FEP,
   '/admin': CAPTURA,
   '/marketplace': CAPTURA,
-  '/etiquetas': CAPTURA,
+  '/etiquetas': CAPTURA_FEP,
   '/bandas': CAPTURA,
   '/calibrar-etiqueta': CAPTURA,
   '/prueba-codigo': CAPTURA,
@@ -100,7 +100,7 @@ export function permiso(pathname: string, metodo: string): Regla {
   if (ruta === '/api/borradores/manual') return DUENO;   // captura sin foto (Issue #115)
   if (ruta === '/api/borradores' || ruta.startsWith('/api/borradores/')) return CAPTURA_FEP;
   if (ruta.startsWith('/api/foto/')) return CAPTURA_FEP;
-  if (ruta === '/api/etiquetas') return CAPTURA;
+  if (ruta === '/api/etiquetas') return CAPTURA_FEP;
   if (ruta === '/api/calibracion') return CAPTURA;
   if (ruta === '/api/marketplace' || /^\/api\/marketplace\/foto\/[^/]+$/.test(ruta)) return CAPTURA;
   if (ruta === '/api/catalogo') return CAJA;

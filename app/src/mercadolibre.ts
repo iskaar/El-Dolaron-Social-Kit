@@ -320,7 +320,7 @@ const productoDe = (p: Pieza) => ({
 
 // Lo que se puede publicar: pieza individual, revisada, con foto y existencias; nunca bandas ni danadas.
 export const PUBLICABLE = `p.destino = 'etiqueta' and p.sin_inventario = 0 and p.estado_analisis = 'listo' and p.stock > 0
-  and p.foto_key <> '' and p.codigo like 'ED-%' and p.estado_fisico <> 'danado'`;
+  and p.foto_key <> '' and p.codigo like 'ED-%' and p.estado_fisico <> 'danado' and p.propietario = 'dolaron'`;
 
 async function piezaPublicable(env: Env, id: string): Promise<{ ok: true; pieza: Pieza } | { ok: false; status: number; error: string }> {
   if (!ID_PIEZA.test(id)) return { ok: false, status: 404, error: 'La pieza no existe.' };

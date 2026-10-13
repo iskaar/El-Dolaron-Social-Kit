@@ -489,7 +489,7 @@ const CODIGO_NUEVO = `'ED-' || printf('%06d', max(rowid,
  * El codigo se mina una sola vez: una pieza que ya trae etiqueta impresa conserva
  * el suyo, porque reimprimir con otro codigo deja el papel del anaquel huerfano.
  */
-async function prepararEtiquetas(request: Request, env: Env): Promise<Response> {
+async function prepararEtiquetas(request: Request, env: Env, propietario: string): Promise<Response> {
   const { ids } = (await request.json()) as { ids?: unknown };
   if (!Array.isArray(ids) || ids.length === 0 || ids.length > 100) {
     return json({ error: 'Selecciona entre 1 y 100 piezas.' }, 400);
@@ -502,9 +502,9 @@ async function prepararEtiquetas(request: Request, env: Env): Promise<Response> 
   const huecos = limpios.map(() => '?').join(',');
   // Una por una y en orden de captura: cada codigo nuevo ve el anterior (CODIGO_NUEVO).
   const { results: porCodificar } = await env.DB.prepare(
-    `select id from productos where id in (${huecos}) and estado_analisis <> 'descartado' and (codigo is null or codigo = '') order by rowid`,
+    `select id from productos where id in (${huecos}) and propietario = ? and estado_analisis <> 'descartado' and (codigo is null or codigo = '') order by rowid`,
   )
-    .bind(...limpios)
+    .bind(...limpios, propietario)
     .all<{ id: string }>();
   const ahora = new Date().toISOString();
   if (porCodificar.length) {
@@ -516,9 +516,9 @@ async function prepararEtiquetas(request: Request, env: Env): Promise<Response> 
 
   const { results } = await env.DB.prepare(
     `select id, codigo, nombre, talla, precio, precio_lista, semana_ingreso, destino, stock
-     from productos where id in (${huecos}) and estado_analisis <> 'descartado' order by rowid`,
+     from productos where id in (${huecos}) and propietario = ? and estado_analisis <> 'descartado' order by rowid`,
   )
-    .bind(...limpios)
+    .bind(...limpios, propietario)
     .all();
 
   return json(results);
@@ -1189,7 +1189,7 @@ async function inventarioEnPiso(env: Env, ahora = Date.now()) {
 const lineasNetas = (filtro: string) => `with base as (
     select v.id as venta, l.id, l.producto_id, l.codigo, l.nombre, l.cantidad - l.cancelada_cantidad as cant,
       l.precio * (l.cantidad - l.cancelada_cantidad) as importe, v.total - v.devuelto - v.dolarones_devueltos as neto,
-      l.propietario, v.forma_pago, v.creado_en
+      l.propietario, v.forma_pago, v.creado_en, v.total - v.dolarones - v.devuelto as pago
     from venta_lineas l join ventas v on v.id = l.venta_id where v.cancelada = 0 and ${filtro}),
   piso as (
     select *, sum(importe) over (partition by venta) as suma,
@@ -1199,7 +1199,18 @@ const lineasNetas = (filtro: string) => `with base as (
   netas as (
     select *, base_neta + case when resto > 0 and row_number() over (partition by venta order by resto desc, id)
         <= neto - sum(base_neta) over (partition by venta) then 1 else 0 end as neta
-    from piso)`;
+    from piso),
+  -- Lo cobrado en efectivo, tarjeta o transferencia (sin Dolarones), repartido por pieza igual que el neto:
+  -- asi lo cobrado mas los Dolarones de cada pieza suman exacto su neta.
+  cobro as (
+    select *, sum(importe) over (partition by venta) as suma_c,
+      case when sum(importe) over (partition by venta) > 0 then pago * importe / sum(importe) over (partition by venta) else 0 end as base_c,
+      case when sum(importe) over (partition by venta) > 0 then pago * importe % sum(importe) over (partition by venta) else 0 end as resto_c
+    from netas),
+  cobros as (
+    select *, base_c + case when resto_c > 0 and row_number() over (partition by venta order by resto_c desc, id)
+        <= pago - sum(base_c) over (partition by venta) then 1 else 0 end as cobrado
+    from cobro)`;
 
 /**
  * Reportes: todo sale de consultas contra D1 en el momento, nada se precalcula
@@ -1233,23 +1244,25 @@ async function reportes(url: URL, env: Env): Promise<Response> {
   // De bruto a vendido, sin que sobre ni falte un centavo: lo cobrado en todos los
   // tickets, menos lo devuelto por piezas, menos lo que valian los cancelados completos.
   const cuadre = await env.DB.prepare(
-    `select coalesce(sum(total), 0) as bruto,
-       coalesce(sum(devuelto + dolarones_devueltos), 0) as devoluciones_pieza,
-       coalesce(sum(case when cancelada = 1 then total - devuelto - dolarones_devueltos end), 0) as cancelados
-     from ventas where creado_en >= ?`,
+    `${lineasNetas('v.creado_en >= ?')}
+     select (select coalesce(sum(total), 0) from ventas where creado_en >= ?) as bruto,
+       (select coalesce(sum(devuelto + dolarones_devueltos), 0) from ventas where creado_en >= ?) as devoluciones_pieza,
+       (select coalesce(sum(case when cancelada = 1 then total - devuelto - dolarones_devueltos end), 0) from ventas where creado_en >= ?) as cancelados,
+       (select coalesce(sum(neta), 0) from netas where propietario = 'fep') as fep`,
   )
-    .bind(desde)
-    .first<{ bruto: number; devoluciones_pieza: number; cancelados: number }>();
+    .bind(desde, desde, desde, desde)
+    .first<{ bruto: number; devoluciones_pieza: number; cancelados: number; fep: number }>();
 
   // Lo cobrado en dinero por forma de pago, y lo pagado con Dolarones como una forma mas.
   const { results: porFormaPago } = await env.DB.prepare(
-    `select forma_pago, count(*) as tickets, sum(total - dolarones - devuelto) as total
-     from ventas where cancelada = 0 and creado_en >= ? group by forma_pago
+    `${lineasNetas('v.creado_en >= ?')}
+     select forma_pago, count(distinct venta) as tickets, coalesce(sum(cobrado), 0) as total
+     from cobros where propietario = 'dolaron' group by forma_pago
      union all
-     select 'dolarones', count(*), sum(dolarones - dolarones_devueltos)
-     from ventas where cancelada = 0 and creado_en >= ? and dolarones > dolarones_devueltos`,
+     select 'dolarones', count(distinct case when neta - cobrado <> 0 then venta end), coalesce(sum(neta - cobrado), 0)
+     from cobros where propietario = 'dolaron'`,
   )
-    .bind(desde, desde)
+    .bind(desde)
     .all<{ forma_pago: string; tickets: number; total: number }>();
 
   const { results: ventasPorDia } = await env.DB.prepare(
@@ -1382,7 +1395,8 @@ async function reportes(url: URL, env: Env): Promise<Response> {
       bruto: cuadre?.bruto ?? 0,
       devoluciones_pieza: cuadre?.devoluciones_pieza ?? 0,
       cancelados: cuadre?.cancelados ?? 0,
-      vendido: (cuadre?.bruto ?? 0) - (cuadre?.devoluciones_pieza ?? 0) - (cuadre?.cancelados ?? 0),
+      fep: cuadre?.fep ?? 0,
+      vendido: (cuadre?.bruto ?? 0) - (cuadre?.devoluciones_pieza ?? 0) - (cuadre?.cancelados ?? 0) - (cuadre?.fep ?? 0),
     },
     por_forma_pago: porFormaPago,
     por_dia: porDia,
@@ -1596,7 +1610,7 @@ async function exportarInventarioCsv(env: Env): Promise<Response> {
 const RETENIDO_MARKETPLACE = '87ddd327-2058-435d-98ea-651a6e54c09a';
 const ELEGIBLE_MARKETPLACE = `stock >= 1 and sin_inventario = 0 and precio > 0
   and typeof(precio) = 'integer' and trim(nombre) != '' and destino = 'etiqueta'
-  and foto_key = 'fotos/' || id || '.jpg' and estado_analisis = 'listo' and id != ?`;
+  and foto_key = 'fotos/' || id || '.jpg' and estado_analisis = 'listo' and id != ? and propietario = 'dolaron'`;
 
 async function marketplace(env: Env): Promise<Response> {
   const { results } = await env.DB.prepare(`select id, codigo, nombre, categoria, marca, precio,
@@ -1899,7 +1913,7 @@ export default {
       }
 
       if (pathname === '/api/etiquetas' && request.method === 'POST') {
-        return await prepararEtiquetas(request, env);
+        return await prepararEtiquetas(request, env, propietarioDe(await leerUsuario(env, correo)));
       }
 
       if (pathname === '/api/borradores/manual' && request.method === 'POST') {
