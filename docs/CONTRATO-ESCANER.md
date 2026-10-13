@@ -22,7 +22,8 @@
 > siguen disponibles en el admin como destino manual. Donde abajo se lea que el precio
 > enruta a banda, vale esta nota.
 
-> **Ensayo en sandbox, 2026-10-11 (Isaac, Issue #273):** la ropa ya tiene precios
+> **Ropa, probada en sandbox el 2026-10-11 y autorizada para producción el
+> 2026-10-13 (Isaac, Issues #273 y #302):** la ropa ya tiene precios
 > finales de **$200, $150, $100, $80 y $50 MXN**. En modo Ropa se escogen precio y
 > talla antes de fotografiar; la foto conserva ese precio en la cola local. El
 > servidor valida la categoría de precio y deja la pieza lista, sin estimación de IA,
@@ -30,8 +31,8 @@
 > individual; no se inventa un precio de lista. El árbol de decisiones por tipo de
 > prenda y los nombres específicos quedan para una definición posterior de Isaac.
 > La computadora con la etiquetera imprime automáticamente al quedar guardada la
-> foto con nombre y precio. Este ensayo se habilita solo en sandbox; las reglas de
-> producción descritas abajo siguen vigentes.
+> foto con nombre y precio. Esta regla rige en sandbox y producción; para otra
+> mercancía siguen vigentes las reglas de análisis descritas abajo.
 
 ## Decisión de fondo
 
@@ -81,7 +82,7 @@ Detalle completo en `docs/PLAN-ETIQUETAS-POR-BANDA.md`. Resumen:
   que existe la IA.
 - Una foto = una pieza.
 
-En el sandbox, tocar una miniatura permite cambiar el precio final entre
+En sandbox y producción, tocar una miniatura permite cambiar el precio final entre
 $200/$150/$100/$80/$50 MXN y Nuevo/Dañado con «Guardar cambios», también después
 de subir. La condición no recalcula ese precio elegido. «Eliminar captura»
 descarta la captura completa tras un segundo toque; requiere conexión y no
@@ -154,7 +155,7 @@ desde `/bandas` (`docs/PLAN-ETIQUETAS-POR-BANDA.md`).
 
 ## 7. Límites de este alcance
 
-- Sin credenciales, sin servicios de pago, sin despliegue a producción, sin publicar en redes.
+- Sin credenciales, sin servicios de pago ni publicación en redes; producción requiere autorización explícita.
 - Un solo maestro de existencias. Ningún otro lugar guarda una cantidad.
 - Sin segunda fórmula de redondeo ni de precio en ningún otro archivo.
 
