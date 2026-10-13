@@ -32,7 +32,7 @@ import { BASES, AVISO } from './legal.ts';
 import { CLAVES_CATEGORIA } from '../public/categorias.js';
 import { tallaValida } from '../public/tallas.js';
 import {
-  permiso, puede, quienEs, leerUsuario, yo, pedirAcceso, listarCuentas, guardarCuenta, resolverSolicitud,
+  permiso, puede, quienEs, leerUsuario, yo, pedirAcceso, listarCuentas, guardarCuenta, resolverSolicitud, propietarioDe,
   esDeCaja, soloComputadora, CAJAS,
 } from './cuentas.ts';
 import { cajeroEnTurno, listarCajeros, entrar, salir, ponerPin } from './cajeros.ts';
@@ -165,8 +165,10 @@ async function crearBorrador(request: Request, env: Env, ctx: ExecutionContext, 
     return json({ error: 'La foto pesa demasiado.' }, 413);
   }
 
-  const existente = await env.DB.prepare('select id, nombre, precio, estado_fisico, estado_analisis, stock, talla from productos where id = ?')
-    .bind(id).first<{ estado_analisis: string }>();
+  const propietario = propietarioDe(await leerUsuario(env, correo));
+  const existente = await env.DB.prepare('select id, nombre, precio, estado_fisico, estado_analisis, stock, talla, propietario from productos where id = ?')
+    .bind(id).first<{ estado_analisis: string; propietario: string }>();
+  if (existente && existente.propietario !== propietario) return json({ error: 'Pieza no encontrada.' }, 404);
   if (existente?.estado_analisis === 'descartado' || (precioRopa !== null && existente && formulario.get('solo_foto') !== '1')) {
     return json(existente, 201);
   }
@@ -195,19 +197,19 @@ async function crearBorrador(request: Request, env: Env, ctx: ExecutionContext, 
     // El reenvío de una foto conserva el precio revisado, el código y el stock ya vendido.
     await env.DB.prepare(
       `insert into productos (id, nombre, categoria, precio, estado_analisis, destino, semana_ingreso,
-                              estado_fisico, stock, talla, foto_key, capturado_por, creado_en, actualizado_en)
-       values (?, 'Ropa', 'ropa', ?, 'listo', 'etiqueta', ?, ?, ?, ?, ?, ?, ?, ?)
+                              estado_fisico, stock, talla, foto_key, capturado_por, creado_en, actualizado_en, propietario)
+       values (?, 'Ropa', 'ropa', ?, 'listo', 'etiqueta', ?, ?, ?, ?, ?, ?, ?, ?, ?)
        on conflict (id) do nothing`,
     ).bind(id, precioRopa, semanaIngreso(ahora), estadoFisico, cantidad, talla, fotoKey,
-      capturadoPor, ahora.toISOString(), ahora.toISOString()).run();
+      capturadoPor, ahora.toISOString(), ahora.toISOString(), propietario).run();
     const guardada = await env.DB.prepare('select id, nombre, precio, estado_fisico, estado_analisis, stock, talla from productos where id = ?')
       .bind(id).first<{ estado_analisis: string }>();
     if (guardada?.estado_analisis === 'descartado') await env.FOTOS.delete(fotoKey);
     return json(guardada, 201);
   }
   await env.DB.prepare(
-    `insert into productos (id, semana_ingreso, estado_fisico, stock, talla, foto_key, capturado_por, creado_en, actualizado_en)
-     values (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `insert into productos (id, semana_ingreso, estado_fisico, stock, talla, foto_key, capturado_por, creado_en, actualizado_en, propietario)
+     values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
      on conflict (id) do update set
        estado_fisico = excluded.estado_fisico,
        stock = excluded.stock,
@@ -217,7 +219,7 @@ async function crearBorrador(request: Request, env: Env, ctx: ExecutionContext, 
        actualizado_en = excluded.actualizado_en
        where productos.estado_analisis <> 'descartado'`,
   )
-    .bind(id, semanaIngreso(ahora), estadoFisico, cantidad, talla, fotoKey, capturadoPor, ahora.toISOString(), ahora.toISOString())
+    .bind(id, semanaIngreso(ahora), estadoFisico, cantidad, talla, fotoKey, capturadoPor, ahora.toISOString(), ahora.toISOString(), propietario)
     .run();
 
   const descartada = await env.DB.prepare("select id, estado_analisis, stock from productos where id = ? and estado_analisis = 'descartado'").bind(id).first();
@@ -232,7 +234,7 @@ async function crearBorrador(request: Request, env: Env, ctx: ExecutionContext, 
   return json({ id, estado_analisis: 'pendiente' }, 201);
 }
 
-async function listarBorradores(url: URL, env: Env): Promise<Response> {
+async function listarBorradores(url: URL, env: Env, propietario: string): Promise<Response> {
   const estado = url.searchParams.get('estado');
   const desde = url.searchParams.get('desde');
   if (desde !== null && (!Number.isFinite(Date.parse(desde)) || new Date(desde).toISOString() !== desde)) {
@@ -246,10 +248,10 @@ async function listarBorradores(url: URL, env: Env): Promise<Response> {
   const consulta = `select id, nombre, categoria, marca, talla, precio_lista, precio, estado_fisico,
                            estado_analisis, destino, stock, semana_ingreso, capturado_por, creado_en
                     from productos
-                    where sin_inventario = 0 and estado_analisis <> 'descartado' ${estado ? 'and estado_analisis = ?' : ''} ${desde ? 'and creado_en >= ?' : ''}
+                    where sin_inventario = 0 and propietario = ? and estado_analisis <> 'descartado' ${estado ? 'and estado_analisis = ?' : ''} ${desde ? 'and creado_en >= ?' : ''}
                     order by creado_en asc limit 2000`;
-  const filtros = [...(estado ? [estado] : []), ...(desde ? [desde] : [])];
-  const sentencia = filtros.length ? env.DB.prepare(consulta).bind(...filtros) : env.DB.prepare(consulta);
+  const filtros = [propietario, ...(estado ? [estado] : []), ...(desde ? [desde] : [])];
+  const sentencia = env.DB.prepare(consulta).bind(...filtros);
   const { results } = await sentencia.all<FilaBorrador>();
   return json(results);
 }
@@ -727,6 +729,7 @@ interface ProductoVenta {
   nombre: string;
   precio: number;
   sin_inventario: number;
+  propietario?: string;
   precio_anterior?: number | null;
   precio_cambiado_en?: string | null;
 }
@@ -741,6 +744,7 @@ interface LineaPreparada {
   precio: number;
   cantidad: number;
   sinInventario: boolean;
+  propietario: string;
 }
 
 /**
@@ -780,6 +784,7 @@ export function prepararLineas(
       precio: precioCaja ? (l.precio as number) : producto.precio,
       cantidad,
       sinInventario: producto.sin_inventario === 1,
+      propietario: producto.propietario ?? 'dolaron',
     });
   }
   return { ok: true, lineas };
@@ -858,7 +863,7 @@ async function registrarVenta(request: Request, env: Env, ctx: ExecutionContext,
   }
   const huecos = idsPedidos.map(() => '?').join(',');
   const { results: filas } = await env.DB.prepare(
-    `select id, codigo, nombre, precio, sin_inventario, precio_anterior, precio_cambiado_en from productos where id in (${huecos})`,
+    `select id, codigo, nombre, precio, sin_inventario, propietario, precio_anterior, precio_cambiado_en from productos where id in (${huecos})`,
   )
     .bind(...idsPedidos)
     .all<ProductoVenta>();
@@ -938,9 +943,9 @@ async function registrarVenta(request: Request, env: Env, ctx: ExecutionContext,
       await cajaDe(env, correo, venta.caja), correo, pedidoHash, imprimirEn, descuento, descuentoId, promo),
     ...preparado.lineas.map((l) =>
       env.DB.prepare(
-        `insert into venta_lineas (venta_id, producto_id, codigo, nombre, precio, cantidad)
-         values (?, ?, ?, ?, ?, ?)`,
-      ).bind(id, l.producto_id, l.codigo, l.nombre, l.precio, l.cantidad),
+        `insert into venta_lineas (venta_id, producto_id, codigo, nombre, precio, cantidad, propietario)
+         values (?, ?, ?, ?, ?, ?, ?)`,
+      ).bind(id, l.producto_id, l.codigo, l.nombre, l.precio, l.cantidad, l.propietario),
     ),
     // Los bins no descuentan: nadie cuenta cuantas piezas quedan en un bote.
     // Sin `max(0, ...)`: si dos ventas concurrentes se pelean la ultima pieza,
@@ -1137,7 +1142,8 @@ async function inventarioEnPiso(env: Env, ahora = Date.now()) {
        case when julianday(creado_en) is null then null
             else max(0, cast(julianday(?) - julianday(substr(datetime(creado_en, '-6 hours'), 1, 10)) as integer)) end as dias
      from productos
-     where sin_inventario = 0 and stock > 0 and destino = 'etiqueta' and codigo is not null and codigo != ''`,
+     where sin_inventario = 0 and stock > 0 and destino = 'etiqueta' and codigo is not null and codigo != ''
+       and propietario = 'dolaron'`,
   )
     .bind(hoyTienda(ahora))
     .all<{ id: string; codigo: string; nombre: string; categoria: string; precio: number; stock: number; creado_en: string; dias: number | null }>();
@@ -1182,7 +1188,8 @@ async function inventarioEnPiso(env: Env, ahora = Date.now()) {
  */
 const lineasNetas = (filtro: string) => `with base as (
     select v.id as venta, l.id, l.producto_id, l.codigo, l.nombre, l.cantidad - l.cancelada_cantidad as cant,
-      l.precio * (l.cantidad - l.cancelada_cantidad) as importe, v.total - v.devuelto - v.dolarones_devueltos as neto
+      l.precio * (l.cantidad - l.cancelada_cantidad) as importe, v.total - v.devuelto - v.dolarones_devueltos as neto,
+      l.propietario, v.forma_pago, v.creado_en
     from venta_lineas l join ventas v on v.id = l.venta_id where v.cancelada = 0 and ${filtro}),
   piso as (
     select *, sum(importe) over (partition by venta) as suma,
@@ -1205,23 +1212,22 @@ async function reportes(url: URL, env: Env): Promise<Response> {
   const rango = rangoDe(url);
   const { dias, desde } = rango;
 
+  // Solo lo de la tienda (propietario 'dolaron', Issue #298): el neto de cada ticket va repartido por pieza.
   const resumen = await env.DB.prepare(
-    `select count(*) as ventas, coalesce(sum(total - devuelto - dolarones_devueltos), 0) as total,
-       (select coalesce(sum(l.cantidad - l.cancelada_cantidad), 0) from venta_lineas l join ventas v on v.id = l.venta_id
-        where v.cancelada = 0 and v.creado_en >= ?) as piezas
-     from ventas where cancelada = 0 and creado_en >= ?`,
+    `${lineasNetas('v.creado_en >= ?')}
+     select count(distinct venta) as ventas, coalesce(sum(neta), 0) as total, coalesce(sum(cant), 0) as piezas
+     from netas where propietario = 'dolaron'`,
   )
-    .bind(desde, desde)
+    .bind(desde)
     .first<{ ventas: number; total: number; piezas: number }>();
 
   // El periodo de igual largo justo antes, para las flechas de «vs periodo anterior».
   const anterior = await env.DB.prepare(
-    `select count(*) as ventas, coalesce(sum(total - devuelto - dolarones_devueltos), 0) as total,
-       (select coalesce(sum(l.cantidad - l.cancelada_cantidad), 0) from venta_lineas l join ventas v on v.id = l.venta_id
-        where v.cancelada = 0 and v.creado_en >= ? and v.creado_en < ?) as piezas
-     from ventas where cancelada = 0 and creado_en >= ? and creado_en < ?`,
+    `${lineasNetas('v.creado_en >= ? and v.creado_en < ?')}
+     select count(distinct venta) as ventas, coalesce(sum(neta), 0) as total, coalesce(sum(cant), 0) as piezas
+     from netas where propietario = 'dolaron'`,
   )
-    .bind(rango.anterior_desde, desde, rango.anterior_desde, desde)
+    .bind(rango.anterior_desde, desde)
     .first<{ ventas: number; total: number; piezas: number }>();
 
   // De bruto a vendido, sin que sobre ni falte un centavo: lo cobrado en todos los
@@ -1247,15 +1253,16 @@ async function reportes(url: URL, env: Env): Promise<Response> {
     .all<{ forma_pago: string; tickets: number; total: number }>();
 
   const { results: ventasPorDia } = await env.DB.prepare(
-    `select ${diaTienda('creado_en')} as dia, count(*) as tickets, sum(total - devuelto - dolarones_devueltos) as total
-     from ventas where cancelada = 0 and creado_en >= ? group by dia order by dia`,
+    `${lineasNetas('v.creado_en >= ?')}
+     select ${diaTienda('creado_en')} as dia, count(distinct venta) as tickets, sum(neta) as total
+     from netas where propietario = 'dolaron' group by dia order by dia`,
   )
     .bind(desde)
     .all<{ dia: string; tickets: number; total: number }>();
   const { results: piezasPorDia } = await env.DB.prepare(
     `select ${diaTienda('v.creado_en')} as dia, coalesce(sum(l.cantidad - l.cancelada_cantidad), 0) as piezas
      from venta_lineas l join ventas v on v.id = l.venta_id
-     where v.cancelada = 0 and v.creado_en >= ? group by dia`,
+     where v.cancelada = 0 and v.creado_en >= ? and l.propietario = 'dolaron' group by dia`,
   )
     .bind(desde)
     .all<{ dia: string; piezas: number }>();
@@ -1264,10 +1271,11 @@ async function reportes(url: URL, env: Env): Promise<Response> {
 
   // Mapa de calor de /reportes: dia de la semana (0 = domingo, como %w) y hora, ambos de la tienda (UTC-6).
   const { results: porHora } = await env.DB.prepare(
-    `select cast(strftime('%w', datetime(creado_en, '-6 hours')) as integer) as dia_semana,
+    `${lineasNetas('v.creado_en >= ?')}
+     select cast(strftime('%w', datetime(creado_en, '-6 hours')) as integer) as dia_semana,
        cast(strftime('%H', datetime(creado_en, '-6 hours')) as integer) as hora,
-       count(*) as tickets, sum(total - devuelto - dolarones_devueltos) as total
-     from ventas where cancelada = 0 and creado_en >= ? group by dia_semana, hora order by dia_semana, hora`,
+       count(distinct venta) as tickets, sum(neta) as total
+     from netas where propietario = 'dolaron' group by dia_semana, hora order by dia_semana, hora`,
   )
     .bind(desde)
     .all<{ dia_semana: number; hora: number; tickets: number; total: number }>();
@@ -1278,6 +1286,7 @@ async function reportes(url: URL, env: Env): Promise<Response> {
      select case when p.sin_inventario = 1 then 'bandas' else coalesce(nullif(p.categoria, ''), 'sin categoria') end as categoria,
        coalesce(sum(n.neta), 0) as total, coalesce(sum(n.cant), 0) as piezas
      from netas n left join productos p on p.id = n.producto_id
+     where n.propietario = 'dolaron'
      group by categoria order by total desc`,
   )
     .bind(...(anteriorAlPeriodo ? [rango.anterior_desde, desde] : [desde]))
@@ -1288,7 +1297,7 @@ async function reportes(url: URL, env: Env): Promise<Response> {
   const { results: topProductos } = await env.DB.prepare(
     `${lineasNetas('v.creado_en >= ?')}
      select codigo, nombre, sum(cant) as cantidad, sum(neta) as total
-     from netas where producto_id is not null and cant > 0
+     from netas where producto_id is not null and cant > 0 and propietario = 'dolaron'
      group by codigo, nombre order by cantidad desc, total desc limit 10`,
   )
     .bind(desde)
@@ -1299,7 +1308,7 @@ async function reportes(url: URL, env: Env): Promise<Response> {
   // con datos en vez de ajustar los porcentajes a ojo.
   const precioSugerido = await env.DB.prepare(
     `select count(*) as n, avg((precio - precio_sugerido) * 100.0 / precio_sugerido) as promedio_pct
-     from productos where precio_sugerido > 0 and precio > 0`,
+     from productos where precio_sugerido > 0 and precio > 0 and propietario = 'dolaron'`,
   ).first<{ n: number; promedio_pct: number | null }>();
 
   // Diferido a proposito en CONTRATO-ESCANER.md hasta que hubiera ventas reales.
@@ -1308,7 +1317,7 @@ async function reportes(url: URL, env: Env): Promise<Response> {
        avg(julianday(substr(v.creado_en, 1, 10)) - julianday(substr(p.creado_en, 1, 10))) as dias_promedio,
        count(*) as n
      from venta_lineas l join ventas v on v.id = l.venta_id join productos p on p.id = l.producto_id
-     where v.cancelada = 0 and p.sin_inventario = 0 and l.cantidad > l.cancelada_cantidad
+     where v.cancelada = 0 and p.sin_inventario = 0 and l.cantidad > l.cancelada_cantidad and l.propietario = 'dolaron'
      group by categoria order by dias_promedio desc`,
   ).all<{ categoria: string; dias_promedio: number; n: number }>();
 
@@ -1563,7 +1572,7 @@ async function exportarInventarioCsv(env: Env): Promise<Response> {
   const { results } = await env.DB.prepare(
     `select codigo, nombre, categoria, marca, precio_lista, precio, precio_sugerido, estado_fisico,
             estado_analisis, destino, stock, sin_inventario, semana_ingreso, capturado_por, creado_en
-     from productos order by creado_en`,
+     from productos where propietario = 'dolaron' order by creado_en`,
   ).all<{
     codigo: string; nombre: string; categoria: string; marca: string; precio_lista: number; precio: number;
     precio_sugerido: number; estado_fisico: string; estado_analisis: string; destino: string;
@@ -1761,9 +1770,16 @@ export default {
           return await crearBorrador(request, env, ctx, url, correo);
         }
         if (request.method === 'GET') {
-          return await listarBorradores(url, env);
+          return await listarBorradores(url, env, propietarioDe(await leerUsuario(env, correo)));
         }
         return json({ error: 'Metodo no permitido.' }, 405);
+      }
+
+      // Issue #298: una pieza de FEP no se abre ni se cambia desde la cuenta de la tienda, y al revés.
+      const idPieza = pathname.match(/^\/api\/(?:borradores|foto)\/([0-9a-f-]{36})(?:\/|$)/);
+      if (idPieza) {
+        const fila = await env.DB.prepare('select propietario from productos where id = ?').bind(idPieza[1]).first<{ propietario: string }>();
+        if (fila && fila.propietario !== propietarioDe(await leerUsuario(env, correo))) return json({ error: 'Pieza no encontrada.' }, 404);
       }
 
       const fotoMarket = pathname.match(/^\/api\/marketplace\/foto\/([^/]+)$/);
