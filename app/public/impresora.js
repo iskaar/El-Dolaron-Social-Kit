@@ -389,6 +389,7 @@ export function imprimirCorte(corte) {
     renglonMonto('Diferencia tarjeta', importe(corte.tarjeta_terminal - corte.tarjeta_sistema)),
     renglonMonto('Transferencias', importe(corte.transferencias)),
     renglonMonto('Dolarones usados', `${corte.dolarones / 100} D`),
+    ...(corte.fep_por_pagar ? [renglonMonto('De lo que se entrega, para FEP', importe(corte.fep_por_pagar))] : []),
     separador(),
     negritas(true),
     renglonMonto('SE ENTREGA', importe(corte.entregado)),

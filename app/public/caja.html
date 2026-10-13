@@ -1797,6 +1797,7 @@ function pintarResultado(c) {
     ${renglon('Tarjeta: sistema / terminal', `${pesos(c.tarjeta_sistema)} / ${pesos(c.tarjeta_terminal)}`, tarjeta ? 'falta' : '')}
     ${renglon('Transferencias', pesos(c.transferencias))}
     ${renglon('Dolarones usados', dolares(c.dolarones))}
+    ${c.fep_por_pagar ? renglon('De lo que se entrega, para FEP', pesos(c.fep_por_pagar)) : ''}
     ${renglon('Se entrega', pesos(c.entregado), 'fuerte')}
     ${renglon('Se queda en la caja (fondo)', pesos(c.fondo_siguiente))}
   </table>`;
