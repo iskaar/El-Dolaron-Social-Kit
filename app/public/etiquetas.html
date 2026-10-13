@@ -60,7 +60,7 @@
   </div>
 
   <p id="ayuda-automatica" class="ayuda" hidden>
-    En sandbox: inicia aquí y toma las fotos en <a href="/captura" target="_blank" rel="noopener">la cámara del sandbox</a> desde el teléfono.
+    Inicia aquí y toma las fotos en <a href="/captura" target="_blank" rel="noopener">la cámara</a> desde el teléfono en el mismo entorno.
     Cada prenda nueva se imprime cuando su nombre y precio están listos, una etiqueta por pieza en existencia.
     Deja esta página abierta en la computadora. Al detener o recargar, puedes retomar la misma sesión.
     «Nueva sesión» deja las pendientes anteriores para impresión manual y empieza con las próximas fotos.
@@ -376,12 +376,13 @@ async function imprimir(ids, pedidas = new Map(), automatico = false) {
   }
 }
 
-/* ---------- impresión automática: solo sandbox, en la computadora ---------- */
+/* ---------- impresión automática en la computadora ---------- */
 
 const CLAVE_SESION = 'etiqueta-automatica-desde';
 const CLAVE_DUDOSA = 'etiqueta-automatica-dudosa';
 const botonAutomatica = document.getElementById('automatica');
 let ambiente = null;
+const automaticaDisponible = () => ambiente?.ambiente === 'sandbox' || ambiente?.ambiente === 'produccion';
 let automaticaDesde = '';
 let automaticaActiva = false;
 let consultandoAutomatica = false;
@@ -400,7 +401,7 @@ function pausarAutomatica() {
 }
 
 async function iniciarAutomatica() {
-  if (ambiente?.ambiente !== 'sandbox') return;
+  if (!automaticaDisponible()) return;
   if (automaticaActiva) {
     pausarAutomatica();
     detenerEnvio();
@@ -425,12 +426,12 @@ async function iniciarAutomatica() {
     const respuesta = await fetch('/api/salud', { cache: 'no-store', signal: AbortSignal.timeout(15000) });
     if (!respuesta.ok) throw new Error('No se pudo iniciar la sesión.');
     const salud = await respuesta.json();
-    if (salud.ambiente !== 'sandbox') return;
+    if (!automaticaDisponible() || salud.ambiente !== ambiente.ambiente) return;
     automaticaDesde = localStorage.getItem(CLAVE_SESION) || salud.ahora;
     localStorage.setItem(CLAVE_SESION, automaticaDesde);
     automaticaActiva = true;
     detenerEnvio(false);
-    resumen.textContent = 'Automática activa. Toma las fotos en la cámara del sandbox; esperando nombre y precio.';
+    resumen.textContent = 'Automática activa. Toma las fotos en la cámara del mismo entorno; esperando nombre y precio.';
   } catch (error) {
     avisarFalla(error);
   } finally {
@@ -496,7 +497,7 @@ async function imprimirNuevas() {
 
 botonAutomatica.addEventListener('click', iniciarAutomatica);
 document.getElementById('nueva-sesion').addEventListener('click', () => {
-  if (ambiente?.ambiente !== 'sandbox' || automaticaActiva || imprimiendo || consultandoAutomatica) return;
+  if (!automaticaDisponible() || automaticaActiva || imprimiendo || consultandoAutomatica) return;
   localStorage.removeItem(CLAVE_SESION);
   resumen.textContent = 'Nueva sesión preparada. Inicia la impresión automática antes de tomar las próximas fotos; las pendientes anteriores quedan para impresión manual.';
 });
@@ -504,10 +505,10 @@ setInterval(imprimirNuevas, 2000);
 try {
   const respuesta = await fetch('/api/salud', { cache: 'no-store', signal: AbortSignal.timeout(15000) });
   if (respuesta.ok) ambiente = await respuesta.json();
-  botonAutomatica.hidden = ambiente?.ambiente !== 'sandbox';
+  botonAutomatica.hidden = !automaticaDisponible();
   document.getElementById('nueva-sesion').hidden = botonAutomatica.hidden;
   document.getElementById('ayuda-automatica').hidden = botonAutomatica.hidden;
-} catch { /* sin confirmar sandbox, solo queda la impresión manual */ }
+} catch { /* sin confirmar el entorno, solo queda la impresión manual */ }
 
 await cargar();
 </script>

@@ -191,15 +191,15 @@ unidad (u otra) hay que volver a interrogarla, `/sonda-impresora` sigue desplega
 - **Migraciones:** una migración nueva se corre primero en el sandbox (`--config wrangler.sandbox.jsonc`), se prueba y después en producción.
 - **Qué no tiene:** fotos (R2 no se copia) y llaves de IA, así que el análisis de fotos falla ahí sin gastar. Las altas de socios y los números de socio del sandbox no afectan el regalo de producción.
 
-## Ensayo de foto → etiqueta de ropa (Issue #273)
+## Foto → etiqueta de ropa (Issues #273 y #302)
 
-1. En la computadora, abrir `/etiquetas` del **sandbox** en Chrome/Edge,
+1. En la computadora, abrir `/etiquetas` del **mismo entorno** en Chrome/Edge,
    conectar la AE240-bt y pulsar «Iniciar / retomar impresión automática».
-2. En el teléfono, abrir `/captura` del **mismo sandbox**. Modo Ropa ofrece
+2. En el teléfono, abrir `/captura` del **mismo entorno**. Modo Ropa ofrece
    $200/$150/$100/$80/$50 MXN y las tallas existentes; escoger ambos antes de disparar.
    El precio se conserva entre fotos, no entre recargas. La foto y el precio se
    guardan juntos en IndexedDB antes de subir, también sin red.
-3. `POST /api/borradores` acepta `precio_ropa` en centavos únicamente en sandbox
+3. `POST /api/borradores` acepta `precio_ropa` en centavos en sandbox y producción
    y únicamente para esos cinco importes. Guarda nombre `Ropa`, talla, precio
    final exacto y estado `listo`, sin IA ni precio de lista supuesto. Un reenvío
    por el mismo UUID conserva stock, precio revisado y código.
@@ -222,7 +222,7 @@ sigue siendo la recuperación física. No se ha cambiado ni validado de nuevo su
 calibración en hardware real.
 
 El árbol de decisiones por prenda se definirá después. Los cinco precios
-confirmados permiten probar el flujo completo sin agregar llaves de IA al sandbox.
+confirmados permiten usar el flujo completo sin gastar IA en ropa.
 
 ### Corrección desde miniatura (Issue #275)
 
@@ -232,7 +232,7 @@ Antes de subir, se guarda en IndexedDB junto a la foto. La revisión abierta pau
 esa subida; al cerrar, la cola aplica también la corrección explícita al servidor
 para cubrir una respuesta de alta perdida. Después de subir, se lee el precio y
 condición actuales desde `GET /api/borradores/:id/revision`; PATCH cambia únicamente
-esos campos, sin reponer stock ni cambiar código. API y controles nuevos solo en sandbox.
+esos campos, sin reponer stock ni cambiar código. API y controles disponibles en sandbox y producción.
 
 «Eliminar captura» requiere dos toques y conexión. DELETE de esa misma ruta deja
 el UUID con `estado_analisis = descartado`, stock/precio cero y sin foto; retiene el

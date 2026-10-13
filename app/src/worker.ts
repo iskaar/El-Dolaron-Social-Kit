@@ -106,6 +106,7 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const FOTO_MAX_BYTES = 6 * 1024 * 1024;
 // Isaac, Issue #273: precios finales de ropa; el árbol por prenda se define después.
 const PRECIOS_ROPA = [20000, 15000, 10000, 8000, 5000];
+const capturaRopaDisponible = (env: Env) => !env.AMBIENTE || env.AMBIENTE === 'produccion' || env.AMBIENTE === 'sandbox';
 
 function json(cuerpo: unknown, status = 200): Response {
   return new Response(JSON.stringify(cuerpo), {
@@ -156,8 +157,8 @@ async function crearBorrador(request: Request, env: Env, ctx: ExecutionContext, 
   if (talla !== null && !tallaValida(talla)) {
     return json({ error: 'Talla invalida.' }, 400);
   }
-  if (precioRopa !== null && (env.AMBIENTE !== 'sandbox' || !PRECIOS_ROPA.includes(precioRopa))) {
-    return json({ error: 'Precio de ropa invalido o fuera del sandbox.' }, 400);
+  if (precioRopa !== null && (!capturaRopaDisponible(env) || !PRECIOS_ROPA.includes(precioRopa))) {
+    return json({ error: 'Precio de ropa invalido.' }, 400);
   }
   if (!(foto instanceof File) || foto.size === 0) {
     return json({ error: 'Falta la foto.' }, 400);
@@ -427,9 +428,9 @@ async function corregirCaptura(id: string, campo: string, request: Request, env:
   return json({ id, [columna]: valor });
 }
 
-/** Corrección desde la miniatura del sandbox; nunca cambia stock al editar precio/condición. */
+/** Corrección desde la miniatura; nunca cambia stock al editar precio/condición. */
 async function revisarCaptura(id: string, request: Request, env: Env, correo: string): Promise<Response> {
-  if (env.AMBIENTE !== 'sandbox') return json({ error: 'Ruta no encontrada.' }, 404);
+  if (!capturaRopaDisponible(env)) return json({ error: 'Ruta no encontrada.' }, 404);
   if (!UUID.test(id)) return json({ error: 'Identificador invalido.' }, 400);
   const ahora = new Date().toISOString();
   const desde = new Date(Date.now() - VENTANA_CAPTURA_MS).toISOString();
@@ -1941,12 +1942,13 @@ export default {
         pantalla = new Response(pantalla.body, pantalla);
         pantalla.headers.set('cache-control', 'no-store');
       }
-      // En el sandbox cada pantalla lo dice: ahi no se cobra de verdad.
-      if (env.AMBIENTE === 'sandbox' && pantalla.headers.get('content-type')?.includes('text/html')) {
+      // Los precios llegan del servidor; solo sandbox lleva la franja de pruebas.
+      if (pantalla.headers.get('content-type')?.includes('text/html')
+          && (env.AMBIENTE === 'sandbox' || (capturaRopaDisponible(env) && /^\/captura(?:\.html)?\/?$/.test(pathname)))) {
         return new HTMLRewriter()
           .on('body', { element: (e) => {
             e.setAttribute('data-precios-ropa', JSON.stringify(PRECIOS_ROPA));
-            e.prepend(FRANJA_SANDBOX, { html: true });
+            if (env.AMBIENTE === 'sandbox') e.prepend(FRANJA_SANDBOX, { html: true });
           } })
           .transform(pantalla);
       }

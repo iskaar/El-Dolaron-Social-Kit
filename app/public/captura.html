@@ -488,7 +488,7 @@ async function guardarLocal(registro) {
 }
 
 /**
- * El sandbox permite corregir precio/condición y descartar también después de subir.
+ * La revisión permite corregir precio/condición y descartar también después de subir.
  */
 async function abrirRevision(id) {
   const datos = sesion.get(id);
@@ -782,7 +782,7 @@ async function procesarCola() {
       }
       if (respuesta.status >= 500) break;
       if (registro.precio_ropa != null && !respuesta.ok) {
-        document.getElementById('ayuda').textContent = 'No se subió la prenda. Revisa la sesión del sandbox; la foto sigue guardada en este teléfono.';
+        document.getElementById('ayuda').textContent = 'No se subió la prenda. Revisa tu sesión; la foto sigue guardada en este teléfono.';
         break;
       }
       const guardada = registro.precio_ropa != null && respuesta.ok ? await respuesta.json() : null;

@@ -39,16 +39,17 @@ test('revisión valida cinco precios y condición; no recalcula precio ni repone
   } finally { t.db.close(); }
 });
 
-test('revisión sólo en sandbox, con rol, captura propia reciente y métodos permitidos', async () => {
+test('revisión en producción y sandbox, con rol, captura propia reciente y métodos permitidos', async () => {
   const t = tienda(); t.env.AMBIENTE = 'sandbox';
   try {
     const { id } = await captura(t), ruta = `/api/borradores/${id}/revision`;
     for (const metodo of ['GET', 'PATCH', 'DELETE']) assert.equal(permitidaParaVendedor(ruta, metodo), true);
     assert.equal(permitidaParaVendedor(ruta, 'POST'), false);
     t.env.AMBIENTE = 'produccion';
-    assert.equal((await t.pedir(ruta)).status, 404);
-    assert.equal((await t.pedir(ruta, { precio: 5000 }, 'PATCH')).status, 404);
-    assert.equal((await t.pedir(ruta, {}, 'DELETE')).status, 404);
+    const prod = await captura(t), rutaProd = `/api/borradores/${prod.id}/revision`;
+    assert.equal((await t.pedir(rutaProd)).status, 200);
+    assert.equal((await t.pedir(rutaProd, { precio: 5000 }, 'PATCH')).cuerpo.precio, 5000);
+    assert.equal((await t.pedir(rutaProd, {}, 'DELETE')).status, 200);
     t.env.AMBIENTE = 'sandbox';
     t.db.prepare("insert into usuarios(correo, roles, activo, creado_en, actualizado_en) values ('otro@prueba.mx', 'capturista', 1, '', '')").run();
     t.env.DEV_USUARIO = 'otro@prueba.mx';

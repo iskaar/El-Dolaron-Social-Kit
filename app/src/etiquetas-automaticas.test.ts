@@ -49,6 +49,31 @@ test('salud identifica sandbox y da la hora del servidor sin credenciales', asyn
   } finally { t.db.close(); }
 });
 
+test('la cámara recibe precios en producción y sandbox; solo sandbox lleva franja', async () => {
+  const t = tienda(), anterior = (globalThis as any).HTMLRewriter;
+  t.env.ASSETS = { fetch: async () => new Response('<html><body></body></html>', { headers: { 'content-type': 'text/html' } }) } as Fetcher;
+  (globalThis as any).HTMLRewriter = class {
+    handler: any;
+    on(_selector: string, handler: any) { this.handler = handler; return this; }
+    transform() {
+      const datos = { precios: '', franja: '' };
+      this.handler.element({ setAttribute: (nombre: string, valor: string) => { assert.equal(nombre, 'data-precios-ropa'); datos.precios = valor; },
+        prepend: (html: string) => { datos.franja = html; } });
+      return new Response(JSON.stringify(datos));
+    }
+  };
+  try {
+    for (const ambiente of [undefined, 'sandbox']) {
+      t.env.AMBIENTE = ambiente;
+      const r = await worker.fetch!(new Request('https://caja.prueba/captura') as never, t.env, t.ctx as never);
+      assert.equal(r.status, 200);
+      const datos = await r.json() as any;
+      assert.deepEqual(JSON.parse(datos.precios), [20000, 15000, 10000, 8000, 5000]);
+      assert.equal(datos.franja.includes('SANDBOX'), ambiente === 'sandbox');
+    }
+  } finally { (globalThis as any).HTMLRewriter = anterior; t.db.close(); }
+});
+
 async function pagina(t: ReturnType<typeof tienda>, ambiente = 'sandbox', almacen = new Map<string, string>()) {
   const elementos = new Map<string, any>();
   const $ = (id: string) => {
@@ -124,19 +149,20 @@ test('las cinco categorías se guardan con foto, talla y precio exacto, sin IA, 
   } finally { t.db.close(); }
 });
 
-test('precio de ropa sólo en sandbox y con rol de captura; valores alterados no guardan foto ni producto', async () => {
+test('precio de ropa en producción y sandbox con rol de captura; valores alterados no guardan foto ni producto', async () => {
   const t = tienda();
   try {
     const antes = t.db.prepare('select count(*) n from productos').get()!.n;
     const prod = crypto.randomUUID();
-    assert.equal((await capturarRopa(t, prod, '20000')).status, 400);
+    assert.equal((await capturarRopa(t, prod, '20000')).status, 201);
+    assert.equal(t.db.prepare('select precio from productos where id=?').get(prod)!.precio, 20000);
     t.env.AMBIENTE = 'sandbox';
     for (const precio of ['', 'NaN', '-5000', '5001', '19900', '50', '8000.5']) {
       const id = crypto.randomUUID();
       assert.equal((await capturarRopa(t, id, precio)).status, 400);
       assert.equal(await t.env.FOTOS.get(`fotos/${id}.jpg`), null);
     }
-    assert.equal(t.db.prepare('select count(*) n from productos').get()!.n, antes);
+    assert.equal(t.db.prepare('select count(*) n from productos').get()!.n, antes + 1);
     t.db.prepare(`insert into usuarios (correo, nombre, roles, activo, creado_en, actualizado_en)
                   values ('caja@prueba.mx', 'Caja', 'cajero', 1, '', '')`).run();
     t.env.DEV_USUARIO = 'caja@prueba.mx';
@@ -316,22 +342,28 @@ test('sin red pausa sin perder la sesión; al retomar imprime la pendiente', asy
   } finally { t.db.close(); }
 });
 
-test('producción no ofrece automática ni pide permiso; desconexión no abre un selector desde el timer', async () => {
-  const t = tienda();
+test('producción ofrece automática sin imprimir inventario anterior; desconexión no abre un selector desde el timer', async () => {
+  const t = tienda(), sandbox = tienda();
   try {
+    agregar(t, ANTES);
     const prod = await pagina(t, 'produccion');
     await prod.iniciarAutomatica();
-    assert.equal(prod.$('automatica').hidden, true);
+    assert.equal(prod.$('automatica').hidden, false);
+    assert.equal(prod.activa(), true);
     assert.equal(prod.estado.permiso, 0);
-    const p = await pagina(t);
+    assert.deepEqual(prod.estado.enviadas, []);
+    const nueva = agregar(t);
+    await prod.imprimirNuevas();
+    assert.deepEqual(prod.estado.enviadas, [{ id: nueva, copias: 1 }]);
+    const p = await pagina(sandbox);
     await p.iniciarAutomatica();
-    agregar(t);
+    agregar(sandbox);
     p.estado.conectada = false;
     await p.imprimirNuevas();
     assert.equal(p.activa(), false);
     assert.equal(p.estado.permiso, 0);
     assert.deepEqual(p.estado.enviadas, []);
-  } finally { t.db.close(); }
+  } finally { t.db.close(); sandbox.db.close(); }
 });
 
 test('Detener durante la preparación evita el envío y una marca fallida conserva la recuperación', async () => {
