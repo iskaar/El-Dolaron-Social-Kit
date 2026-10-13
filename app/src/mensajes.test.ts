@@ -56,7 +56,7 @@ test('sin almacén (sandbox) no hay conversaciones', async () => {
 });
 
 test('responde dentro de 24 h, guarda la respuesta y no registra el texto en logs', async () => {
-  const { kv, guardados } = almacen({ 'event:1': entrante('a', '5214421234567', '2026-10-12T19:00:00Z') });
+  const { kv, guardados } = almacen({ 'event:1': entrante('a', '5214421234567', new Date(Date.now() - 60_000).toISOString()) });
   const envios = enviosReales(200, 'wamid.nuevo');
   const errores: unknown[] = [];
   const original = console.error; console.error = (...a: unknown[]) => { errores.push(a); };
@@ -99,7 +99,7 @@ test('entradas inválidas y falta de configuración se rechazan sin enviar', asy
 });
 
 test('si Meta rechaza el envío, no se guarda como enviado', async () => {
-  const { kv, guardados } = almacen({ 'event:1': entrante('a', '5214421234567', '2026-10-12T19:00:00Z') });
+  const { kv, guardados } = almacen({ 'event:1': entrante('a', '5214421234567', new Date(Date.now() - 60_000).toISOString()) });
   const envios = enviosReales(500);
   const original = console.error; console.error = () => {};
   try {
