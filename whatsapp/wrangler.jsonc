@@ -8,6 +8,8 @@
   "routes": [{ "pattern": "whatsapp.eldolaron.com", "custom_domain": true }],
   "vars": { "WHATSAPP_PHONE_NUMBER_ID": "1433484303171531" },
   "kv_namespaces": [{ "binding": "EVENTS", "id": "d6cbf480b05d47c7a17d53d8e4b461a8" }],
+  // Issue #296: consulta de productos en la app principal, por enlace privado (sin Access).
+  "services": [{ "binding": "TIENDA", "service": "el-dolaron" }],
   "observability": {
     "enabled": true,
     "logs": { "enabled": true, "invocation_logs": false },

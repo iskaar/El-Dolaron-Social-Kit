@@ -124,7 +124,8 @@ async function responderMensajes(event, env) {
         let respuesta;
         try {
           if (!env.ANTHROPIC_API_KEY) throw new Error('sin clave');
-          respuesta = interpretar(await generarRespuesta(historial, texto, env.ANTHROPIC_API_KEY));
+          const consultar = env.TIENDA && env.ASISTENTE_TOKEN ? (q) => consultarTienda(env, q) : null;
+          respuesta = interpretar(await generarRespuesta(historial, texto, env.ANTHROPIC_API_KEY, consultar));
         } catch {
           respuesta = { texto: respuestaPara(texto), puntaje: 0, escalar: false };
         }
@@ -138,6 +139,15 @@ async function responderMensajes(event, env) {
 }
 
 const IMAGEN = 'Recibimos tu imagen. Escríbenos tu pregunta por texto y te ayudamos.';
+
+/** Consulta de productos en la app principal (Issue #296). Solo nombre y precio; el token nunca sale a logs. */
+async function consultarTienda(env, q) {
+  const respuesta = await env.TIENDA.fetch(new Request(`https://tienda.interno/api/asistente/productos?q=${encodeURIComponent(q)}`, {
+    headers: { 'x-asistente-token': env.ASISTENTE_TOKEN },
+  }));
+  if (!respuesta.ok) throw new Error(`tienda ${respuesta.status}`);
+  return respuesta.json();
+}
 
 /** Envia el texto por Meta y lo registra para la vista de mensajes. Nunca registra el texto en logs. */
 async function enviarYGuardar(env, para, texto) {

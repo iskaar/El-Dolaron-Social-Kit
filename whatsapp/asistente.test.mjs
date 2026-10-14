@@ -142,3 +142,74 @@ test('una imagen recibe la respuesta corta, sin el modelo', async () => {
     assert.equal(r.llamadas.modelo.length, 0);
   } finally { r.restaurar(); }
 });
+
+/** Modelo que responde en secuencia (herramienta, luego texto) y Meta que registra envíos. */
+function redSecuencia(respuestas) {
+  const modelo = [];
+  const meta = [];
+  const original = globalThis.fetch;
+  globalThis.fetch = async (url, opciones) => {
+    if (String(url).includes('anthropic')) {
+      modelo.push(JSON.parse(opciones.body));
+      const siguiente = respuestas.shift();
+      return new Response(JSON.stringify(siguiente), { status: 200 });
+    }
+    meta.push(JSON.parse(opciones.body));
+    return new Response(JSON.stringify({ messages: [{ id: `wamid.${meta.length}` }] }), { status: 200 });
+  };
+  return { modelo, meta, restaurar: () => { globalThis.fetch = original; } };
+}
+const herramienta = (q) => ({ stop_reason: 'tool_use', content: [{ type: 'tool_use', id: 't1', name: 'buscar_productos', input: { q } }] });
+const textoFinal = (t) => ({ stop_reason: 'end_turn', content: [{ type: 'text', text: t }] });
+
+test('el modelo consulta productos y la respuesta usa lo que devolvió la tienda', async () => {
+  const consultas = [];
+  const r = redSecuencia([herramienta('camisa'), textoFinal('Tenemos Camisa polo a $250.00.\nSCORE: 4')]);
+  try {
+    const texto = await generarRespuesta([], '¿tienen camisas?', 'clave', async (q) => {
+      consultas.push(q);
+      return { productos: [{ nombre: 'Camisa polo', precio: '$250.00' }] };
+    });
+    assert.equal(texto, 'Tenemos Camisa polo a $250.00.\nSCORE: 4');
+    assert.deepEqual(consultas, ['camisa']);
+    assert.equal(r.modelo[0].tools[0].name, 'buscar_productos');
+    const resultado = r.modelo[1].messages.at(-1).content[0];
+    assert.equal(resultado.type, 'tool_result');
+    assert.match(resultado.content, /Camisa polo/);
+  } finally { r.restaurar(); }
+});
+
+test('sin consulta disponible el modelo no recibe herramientas', async () => {
+  const r = redSecuencia([textoFinal('Lo confirmo con el equipo. ESCALAR')]);
+  try {
+    await generarRespuesta([], '¿tienen camisas?', 'clave', null);
+    assert.equal(r.modelo[0].tools, undefined);
+  } finally { r.restaurar(); }
+});
+
+test('el ciclo de herramientas tiene un tope', async () => {
+  const r = redSecuencia([herramienta('a'), herramienta('b'), herramienta('c')]);
+  try {
+    await assert.rejects(generarRespuesta([], 'hola', 'clave', async () => ({ productos: [] })), /demasiados pasos/);
+    assert.equal(r.modelo.length, 3);
+  } finally { r.restaurar(); }
+});
+
+test('el Worker atiende la consulta por el enlace privado con el token y responde al cliente', async () => {
+  const r = redSecuencia([herramienta('camisa'), textoFinal('Tenemos Camisa polo a $250.00.\nSCORE: 3')]);
+  const llamadasTienda = [];
+  const env = entorno({}, {
+    ANTHROPIC_API_KEY: 'clave', ASISTENTE_TOKEN: 'token-enlace',
+    TIENDA: { fetch: async (peticion) => {
+      llamadasTienda.push({ url: peticion.url, token: peticion.headers.get('x-asistente-token') });
+      return new Response(JSON.stringify({ productos: [{ nombre: 'Camisa polo', precio: '$250.00' }] }), { status: 200 });
+    } },
+  });
+  try {
+    await correr(env, [texto('m7', '5214421234567', '¿tienen camisas?')]);
+    assert.equal(llamadasTienda.length, 1);
+    assert.match(llamadasTienda[0].url, /\/api\/asistente\/productos\?q=camisa$/);
+    assert.equal(llamadasTienda[0].token, 'token-enlace');
+    assert.equal(r.meta[0].text.body, 'Tenemos Camisa polo a $250.00.');
+  } finally { r.restaurar(); }
+});
