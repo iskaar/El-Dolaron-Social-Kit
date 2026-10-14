@@ -260,7 +260,7 @@ test('base de main con 015 y 020 admite 016 → 018 → 019 → 021 sin perder v
     const migraciones = readdirSync('.').filter((f) => /^migracion-\d+/.test(f)).sort();
     const aplicar = (f: string) => db.exec(readFileSync(f, 'utf8'));
     aplicar('schema.sql');
-    // La base de entonces llegaba hasta la 021; las posteriores (p. ej. 032 altera vales_dolarones) van al final.
+    // La base de entonces llegaba hasta la 021; las posteriores (p. ej. 033 altera vales_dolarones) van al final.
     const posteriores = migraciones.filter((f) => f.slice(10, 13) > '021');
     for (const f of migraciones.filter((f) => !pendientes.includes(f.slice(10, 13)) && !posteriores.includes(f))) aplicar(f);
     const id = crypto.randomUUID();

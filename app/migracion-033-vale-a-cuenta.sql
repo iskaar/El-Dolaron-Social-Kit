@@ -3,7 +3,7 @@
 -- reclamado_por = clientes.id; con el se cuenta el limite por semana.
 --
 -- Correr una vez, ANTES de desplegar el codigo que la usa (sandbox primero, luego prod):
---   npx wrangler d1 execute el-dolaron --remote --file=migracion-032-vale-a-cuenta.sql
+--   npx wrangler d1 execute el-dolaron --remote --file=migracion-033-vale-a-cuenta.sql
 --
 -- Las columnas fallan si se corre de nuevo (no pasa nada, ya estan); el indice es repetible.
 
