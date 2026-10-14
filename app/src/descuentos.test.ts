@@ -340,7 +340,7 @@ test('el desglose del ticket trae el descuento para la caja y los reportes', asy
   assert.equal(detalle.cuerpo.descuento, 2500);
 });
 
-test('promo de inauguracion: $100 menos en tickets de $300 o mas dentro de la ventana, una vez, y se suma al descuento aprobado', async () => {
+test('promo de inauguracion: 10% del ticket sin minimo dentro de la ventana, una vez, y se suma al descuento aprobado', async () => {
   const { env, venta, pedidoResuelto, pedir, ana } = await montar();
   // Sin fechas configuradas no hay promo, ni en la caja ni al cobrar.
   assert.equal((await venta({}, 2)).cuerpo.total, 50000);
@@ -352,11 +352,10 @@ test('promo de inauguracion: $100 menos en tickets de $300 o mas dentro de la ve
   const dentro = '2026-01-03T20:00:00Z';
   const con = await venta({ creado_en: dentro }, 2);
   assert.equal(con.status, 201, JSON.stringify(con.cuerpo));
-  assert.equal(con.cuerpo.descuento, 10000);
-  assert.equal(con.cuerpo.total, 40000);
-  // Una vez por ticket: $750 tambien baja solo $100.
-  assert.equal((await venta({ creado_en: dentro, efectivo: 80000 }, 3)).cuerpo.total, 65000);
-  assert.equal((await venta({ creado_en: dentro }, 1)).cuerpo.total, 25000, '$250 no alcanza los $300');
+  assert.equal(con.cuerpo.descuento, 5000);
+  assert.equal(con.cuerpo.total, 45000);
+  assert.equal((await venta({ creado_en: dentro, efectivo: 80000 }, 3)).cuerpo.total, 67500);
+  assert.equal((await venta({ creado_en: dentro }, 1)).cuerpo.total, 22500, 'sin minimo');
   assert.equal((await venta({ creado_en: '2026-01-01T05:59:59Z' }, 2)).cuerpo.total, 50000, 'antes de empezar');
   assert.equal((await venta({ creado_en: '2026-01-08T06:00:00Z' }, 2)).cuerpo.total, 50000, 'ya termino');
   // Una hora futura de la caja no cuenta: se usa la del servidor, fuera de la ventana.
@@ -364,8 +363,8 @@ test('promo de inauguracion: $100 menos en tickets de $300 o mas dentro de la ve
   // Con un descuento aprobado, se suman los dos.
   const id = await pedidoResuelto({ tipo: 'monto', valor: 5000, subtotal: 50000 }, true);
   const ambos = await venta({ creado_en: dentro, descuento_id: id }, 2);
-  assert.equal(ambos.cuerpo.descuento, 15000);
-  assert.equal(ambos.cuerpo.total, 35000);
+  assert.equal(ambos.cuerpo.descuento, 10000);
+  assert.equal(ambos.cuerpo.total, 40000);
 });
 
 test('promo con cupo (Issue #250): en linea se rechaza al agotarse, sin red se respeta y cancelar devuelve el lugar', async () => {
@@ -374,19 +373,19 @@ test('promo con cupo (Issue #250): en linea se rechaza al agotarse, sin red se r
   const dentro = '2026-01-03T20:00:00Z';
   const restantes = async () => (await pedir('/api/vales/config', undefined, 'GET', ana)).cuerpo.promo.restantes;
   assert.equal(await restantes(), 2);
-  const primera = await venta({ creado_en: dentro, promo: 10000 }, 2);
-  assert.equal(primera.cuerpo.total, 40000);
+  const primera = await venta({ creado_en: dentro, promo: 5000 }, 2);
+  assert.equal(primera.cuerpo.total, 45000);
   // Una caja vieja no manda `promo`: cuenta igual.
-  assert.equal((await venta({ creado_en: dentro }, 2)).cuerpo.total, 40000);
+  assert.equal((await venta({ creado_en: dentro }, 2)).cuerpo.total, 45000);
   assert.equal(await restantes(), 0);
 
-  const agotada = await venta({ creado_en: dentro, promo: 10000 }, 2);
+  const agotada = await venta({ creado_en: dentro, promo: 5000 }, 2);
   assert.equal(agotada.status, 409);
   assert.equal(agotada.cuerpo.promo_agotada, true);
   // La caja ya sabe que se acabo: cobra completo.
   assert.equal((await venta({ creado_en: dentro, promo: 0 }, 2)).cuerpo.total, 50000);
   // Cobrada sin red con la promo: el cliente ya pago asi, se respeta aunque pase del tope.
-  assert.equal((await venta({ creado_en: dentro, promo: 10000, sin_red: true }, 2)).cuerpo.total, 40000);
+  assert.equal((await venta({ creado_en: dentro, promo: 5000, sin_red: true }, 2)).cuerpo.total, 45000);
   assert.equal(await restantes(), 0);
 
   // Un ticket con promo cancelado devuelve su lugar (la ventana de cancelar ya paso para enero: directo en D1).
@@ -406,10 +405,10 @@ test('/reportes: con promo, descuento aprobado, pieza devuelta y ticket cancelad
   const aprobar = async (subtotal: number) =>
     (await pedirDescuento({ subtotal, valor: 7, aprobador: DUENO, pin: PIN_DUENO })).cuerpo.id as string;
 
-  // A: solo promo ($100 menos, desde una hora antes hasta manana)
+  // A: solo promo (10%, desde una hora antes hasta manana)
   Object.assign(env, { PROMO_DESDE: new Date(Date.now() - 3_600_000).toISOString(), PROMO_HASTA: new Date(Date.now() + 86_400_000).toISOString() });
   const a = await venta({ lineas: lineas(1, 1), efectivo: 100000 });
-  assert.equal(a.cuerpo.descuento, 10000);
+  assert.equal(a.cuerpo.descuento, 5833);
   // B: promo + descuento aprobado
   const b = await venta({ lineas: lineas(2, 1), efectivo: 100000, descuento_id: await aprobar(83333) });
   assert.equal(b.status, 201, JSON.stringify(b.cuerpo));

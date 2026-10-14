@@ -42,6 +42,8 @@
   .renglon .importe { text-align: right; font-weight: 700; font-variant-numeric: tabular-nums; }
   .renglon button { border: 0; background: none; color: var(--rojo); font-size: 18px; cursor: pointer; }
   #total { font-size: 44px; font-weight: 800; letter-spacing: -1px; font-variant-numeric: tabular-nums; }
+  #original { color: #5b6478; font-size: 18px; font-variant-numeric: tabular-nums; }
+  #original:empty { display: none; }
   #piezas { color: #5b6478; font-size: 13px; margin-bottom: 10px; }
   label { display: block; font-size: 12px; color: #5b6478; margin: 10px 0 4px; }
   select, #efectivo { width: 100%; padding: 12px; font-size: 18px; border: 1px solid var(--linea);
@@ -174,6 +176,7 @@ if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw-caja.js'
   </section>
 
   <section class="panel" id="cobro">
+    <div id="original"></div>
     <div id="total">$0</div>
     <div id="piezas">0 piezas</div>
     <div id="a-pagar"></div>
@@ -336,6 +339,17 @@ if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw-caja.js'
   </div>
 </dialog>
 
+<dialog id="dlg-forma" aria-labelledby="dlg-forma-titulo">
+  <h2 id="dlg-forma-titulo">¿Es en efectivo?</h2>
+  <p id="dlg-forma-texto"></p>
+  <form method="dialog" class="dlg-botones">
+    <button value="efectivo" class="primario" autofocus>Sí, efectivo exacto</button>
+    <button value="tarjeta">No, fue con tarjeta</button>
+    <button value="transferencia">No, fue transferencia</button>
+    <button value="">Regresar</button>
+  </form>
+</dialog>
+
 <dialog id="dlg-dolarones" aria-labelledby="dlg-titulo">
   <h2 id="dlg-titulo">¿Usar Dolarones?</h2>
   <p id="dlg-texto"></p>
@@ -358,6 +372,17 @@ import {
 import { imprimirDevolucion } from '/impresora.js';
 import { codigoDeDigitos } from '/code128.js';
 
+// Issue #281: los errores de JavaScript de la caja llegan a los logs del servidor (/api/errores).
+// Sin red no se pueden enviar; el error igual aparece en la consola de la caja.
+function reportarError(error, origen) {
+  try {
+    fetch('/api/errores', { method:'POST', keepalive:true, headers:{ 'content-type':'application/json' },
+      body:JSON.stringify({ origen, pantalla:location.pathname, error:String(error?.message ?? error), pila:error?.stack ?? '' }) }).catch(() => {});
+  } catch {}
+}
+window.addEventListener('error', (e) => reportarError(e.error ?? e.message, 'excepcion'));
+window.addEventListener('unhandledrejection', (e) => reportarError(e.reason, 'promesa'));
+
 const $ = (id) => document.getElementById(id);
 // Nombres de piezas (los escribe la IA o el admin), de socios y motivos: texto, nunca HTML.
 const escapar = (texto) => String(texto ?? '').replace(/[<>&"]/g, (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;' }[c]));
@@ -371,6 +396,7 @@ let lineas = [];
 let idVenta = null;
 let creadoEnVenta = null;
 let cobrando = false;
+let formaElegida = false;       // la cajera tocó la forma de pago en esta venta (#260)
 // Socio de la venta en curso: { id, numero, nombre, disponible, por_liberar, regalo_disponible } o null.
 let socio = null;
 let codigoSocio = '';
@@ -380,6 +406,8 @@ let usarTodos = false;
 let busquedaSocio = 0;
 // La configuración cambia en el servidor; sin consulta vigente sigue desconocida.
 let valesHabilitados = null;
+// Sandbox (Issue #279): el servidor acepta vales de prueba de 6 digitos.
+let valesPrueba = false;
 // Ventana de la promo de inauguracion (/api/vales/config); la ultima conocida sirve sin red.
 let promoConfig = (() => { try { return JSON.parse(localStorage.getItem('promo-inauguracion')) || null; } catch { return null; } })();
 const notaVales = () => {
@@ -396,6 +424,7 @@ async function cargarConfigVales() {
     $('reloj').textContent = min ? `⚠ El reloj de esta computadora está ${Math.abs(min)} min ${min > 0 ? 'adelantado' : 'atrasado'}. Corrígelo en la configuración de Windows: las ventas se guardan con esa hora.` : '';
     const c = r.ok ? await r.json() : null;
     valesHabilitados = c && typeof c.habilitado === 'boolean' ? c.habilitado : null;
+    valesPrueba = c?.prueba === true;
     if (c && 'promo' in c) {
       promoConfig = c.promo;
       try { localStorage.setItem('promo-inauguracion', JSON.stringify(promoConfig)); } catch {}
@@ -552,18 +581,21 @@ function pintar() {
   const usados = dolaronesPedidos();
   const promo = promoActual();
   const t = totales(lineas, efectivo, usados, descuentoAplicado() + promo);
-  $('total').textContent = pesos(t.total);
+  $('original').textContent = t.descuento ? `Original ${pesos(t.subtotal)}` : '';
+  // Con Dolarones, el total grande es lo que se cobra en dinero; el bruto queda en la linea de abajo.
+  $('total').textContent = pesos(usados ? t.aPagar : t.total);
   $('piezas').textContent = `${t.piezas} ${t.piezas === 1 ? 'pieza' : 'piezas'}`;
   $('a-pagar').textContent = [
     promo ? `Promo inauguración −${pesos(promo)}${promoConfig.restantes != null ? ` (quedan ${promoConfig.restantes})` : ''}` : '',
     t.descuento - promo ? `Descuento −${pesos(t.descuento - promo)}` : '',
-    usados ? `Dolarones −${pesos(usados)} · A pagar ${pesos(t.aPagar)}` : '',
+    usados ? `Antes ${pesos(t.total)} · Dolarones −${pesos(usados)}` : '',
   ].filter(Boolean).join(' · ');
   const canjeable = saldoCanjeable(socio, t.total);
   const autorizado = !usados || (codigoSocio && usados <= socio.maximo && Date.parse(socio.expira_en) > Date.now());
   $('usar-maximo').disabled = cobrando || !codigoSocio || maximoCanje(socio, t.total) === 0;
   for (const id of ['codigo', 'socio', 'buscar-socio', 'quitar-socio', 'dolarones', 'efectivo', 'forma', 'cancelar', 'pedir-descuento', 'quitar-descuento']) $(id).disabled = cobrando;
   pintarImpresionRemota();
+  $('cobrar').textContent = `Cobrar · ${$('forma').selectedOptions[0].textContent}`;
   $('cobrar').disabled = cobrando || t.total === 0 || usados > t.total || usados > canjeable || !autorizado;
   $('codigo-autorizacion').textContent = socio?.vale
     ? `Vale impreso: ${dolares(socio.disponible)}. Vence ${new Date(socio.expira_en).toLocaleString('es-MX')}.`
@@ -827,7 +859,7 @@ async function buscarSocio() {
   idVenta = null;
   pintar();
   try {
-    const esVale = q.startsWith('DP-');
+    const esVale = q.startsWith('DP-') || (valesPrueba && /^\d{6}$/.test(q));
     const esCodigo = q.startsWith('DC-') || esVale;
     const r = esVale
       ? await fetch('/api/vales/buscar', { method:'POST', headers:{ 'content-type':'application/json' }, body:JSON.stringify({ codigo:q }) })
@@ -938,11 +970,20 @@ async function cobrarConDolarones(venta, t) {
 
 /* ---------- cobro: primero al disco, luego a la red ---------- */
 
+// Ventana propia, no confirm() nativo (congela la pestaña). Devuelve la forma elegida o '' si regresa.
+function preguntarForma(aPagar) {
+  const d = $('dlg-forma');
+  $('dlg-forma-texto').textContent = `No escribiste el efectivo recibido. Si es efectivo, se registra ${pesos(aPagar)} exacto, sin cambio.`;
+  d.returnValue = '';
+  d.showModal();
+  return new Promise((listo) => d.addEventListener('close', () => listo(d.returnValue), { once: true }));
+}
+
 async function cobrar() {
   if (cobrando) return;                 // doble clic: el primero ya va en camino
   if (!exigirCaja()) return;
-  const efectivo = Math.round(Number($('efectivo').value || 0) * 100);
-  const forma = $('forma').value;
+  let efectivo = Math.round(Number($('efectivo').value || 0) * 100);
+  let forma = $('forma').value;
   const imprimirEn = impresionRemota() ? $('imprimir-en').value : undefined;
   if (imprimirEn && forma === 'efectivo') {
     $('aviso').textContent = 'En el celular sólo tarjeta o transferencia';
@@ -954,11 +995,19 @@ async function cobrar() {
     $('aviso').style.color = '#D72B32';
     return;
   }
-  const t = totales(lineas, efectivo, usados, descuentoAplicado() + promoActual());
+  let t = totales(lineas, efectivo, usados, descuentoAplicado() + promoActual());
   if (usados > saldoCanjeable(socio, t.total)) {
     $('aviso').textContent = 'Los regalos de apertura requieren un ticket de $1,000 MXN o más antes de descontar Dolarones. Revisa el importe solicitado.';
     $('aviso').style.color = '#D72B32';
     return;
+  }
+  // Efectivo sin monto (#260): si la cajera no eligió la forma, se pregunta; si la eligió, es el importe exacto.
+  if (forma === 'efectivo' && efectivo === 0 && t.aPagar > 0) {
+    const elegida = formaElegida ? 'efectivo' : await preguntarForma(t.aPagar);
+    if (!elegida) { $('efectivo').focus(); return; }
+    forma = $('forma').value = elegida;
+    if (forma === 'efectivo') efectivo = t.aPagar;
+    t = totales(lineas, efectivo, usados, descuentoAplicado() + promoActual());
   }
   if (!efectivoAlcanza({ formaPago: forma, total: t.aPagar, efectivo })) {
     $('aviso').textContent = efectivo === 0 ? 'Falta el efectivo recibido.' : `Faltan ${pesos(t.falta)}`;
@@ -1063,6 +1112,7 @@ async function cobrar() {
     pintarDescuento();
     quitarSocio();
     $('efectivo').value = '';
+    $('forma').value = 'efectivo'; formaElegida = false;      // cada venta empieza en efectivo: la forma anterior descuadraba el corte (#260)
     $('codigo').focus();
     sincronizar();
   } finally {
@@ -1560,8 +1610,12 @@ $('ticket').addEventListener('click', (e) => {
   idVenta = null;
   pintar();
 });
-$('efectivo').addEventListener('input', pintar);
-$('forma').addEventListener('change', pintar);
+$('efectivo').addEventListener('input', () => {
+  // Si escribe lo que le dieron, la venta es en efectivo aunque olvidara cambiar la forma (#260).
+  if (Number($('efectivo').value) > 0) $('forma').value = 'efectivo';
+  pintar();
+});
+$('forma').addEventListener('change', () => { formaElegida = true; pintar(); });
 $('cobrar').addEventListener('click', cobrar);
 // Para cambiar billetes sin cobrar nada. Abre sin esperar al servidor (tiene
 // que abrir aunque no haya red) y deja quien y cuando en /reportes: se encola
@@ -1743,6 +1797,7 @@ function pintarResultado(c) {
     ${renglon('Tarjeta: sistema / terminal', `${pesos(c.tarjeta_sistema)} / ${pesos(c.tarjeta_terminal)}`, tarjeta ? 'falta' : '')}
     ${renglon('Transferencias', pesos(c.transferencias))}
     ${renglon('Dolarones usados', dolares(c.dolarones))}
+    ${c.fep_por_pagar ? renglon('De lo que se entrega, para FEP', pesos(c.fep_por_pagar)) : ''}
     ${renglon('Se entrega', pesos(c.entregado), 'fuerte')}
     ${renglon('Se queda en la caja (fondo)', pesos(c.fondo_siguiente))}
   </table>`;
@@ -1805,7 +1860,7 @@ $('corte-reimprimir').addEventListener('click', async () => {
 });
 
 $('cancelar').addEventListener('click', () => {
-  lineas = []; idVenta = null; descuento = null; pintarDescuento(); quitarSocio(); $('efectivo').value = ''; $('aviso').textContent = 'Venta cancelada';
+  lineas = []; idVenta = null; descuento = null; pintarDescuento(); quitarSocio(); $('efectivo').value = ''; $('forma').value = 'efectivo'; formaElegida = false; $('aviso').textContent = 'Venta cancelada';
   $('aviso').style.color = '#5b6478'; pintar(); $('codigo').focus();
 });
 

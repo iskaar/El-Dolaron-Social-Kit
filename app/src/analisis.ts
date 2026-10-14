@@ -317,7 +317,7 @@ export async function analizarBorrador(
     await env.DB.prepare(
       `update productos set nombre = ?, marca = ?, categoria = ?, precio_lista = ?, precio = ?,
                             precio_sugerido = ?, destino = ?, estado_analisis = 'listo', actualizado_en = ?
-       where id = ?`,
+       where id = ? and estado_analisis <> 'descartado'`,
     )
       .bind(ficha.nombre, ficha.marca, ficha.categoria, precioLista, precio, precio, destino, new Date().toISOString(), id)
       .run();
@@ -329,7 +329,7 @@ export async function analizarBorrador(
   } catch (error) {
     console.error(JSON.stringify({ mensaje: 'analisis fallido', id, modelo, error: String(error) }));
     await env.DB.prepare(
-      `update productos set estado_analisis = 'error', actualizado_en = ? where id = ?`,
+      `update productos set estado_analisis = 'error', actualizado_en = ? where id = ? and estado_analisis <> 'descartado'`,
     )
       .bind(new Date().toISOString(), id)
       .run();

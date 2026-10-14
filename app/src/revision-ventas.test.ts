@@ -38,7 +38,7 @@ test('la promo del ticket nuevo se mide con la hora de ahora, no con la hora de 
   });
   // La venta anterior se cobro a las 10:00, antes de que empezara la promo; ya no hay ticket en curso.
   caja.fijar(null, '2026-10-07T10:00:00.000Z');
-  assert.equal(caja.promoActual(), 10000);
+  assert.equal(caja.promoActual(), 4000);
   // Un reintento del mismo ticket (mismo folio) si conserva su hora.
   caja.fijar(crypto.randomUUID(), '2026-10-07T10:00:00.000Z');
   assert.equal(caja.promoActual(), 0);

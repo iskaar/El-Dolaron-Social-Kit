@@ -2,6 +2,10 @@ import { dolaronesGanados } from '../public/venta.js';
 import { basesListas, codigoAleatorio, disponibleDesde, promocionIniciada, sumarMeses } from './dolarones.ts';
 
 const CODIGO = /^DP-[A-Za-z0-9_-]{16}$/;
+// ponytail: vale de prueba de 6 digitos (Issue #279), solo en el sandbox; produccion acepta solo DP-.
+const CODIGO_PRUEBA = /^\d{6}$/;
+export const codigoValeValido = (env: Env, codigo: string) =>
+  CODIGO.test(codigo) || (env.AMBIENTE === 'sandbox' && CODIGO_PRUEBA.test(codigo));
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 export const valesAbiertos = (env: Env, ahora = new Date()) => env.VALES_ABIERTOS === 'si' && basesListas(env) && promocionIniciada(env, ahora);
 type Vale = { id: string; codigo: string; importe: number; restante: number; disponible_desde: string; vence_en: string; creado_en: string };
@@ -27,7 +31,7 @@ export async function valeUsadoEnVenta(env: Env, id: string): Promise<Vale | nul
 export async function buscarVale(request: Request, env: Env): Promise<Response> {
   const body = await request.json().then((c) => c ?? {}, () => ({})) as { codigo?: unknown };
   const codigo = String(body.codigo ?? '');
-  if (!CODIGO.test(codigo)) return json({ error:'Código de vale inválido.' }, 400);
+  if (!codigoValeValido(env, codigo)) return json({ error:'Código de vale inválido.' }, 400);
   const ahora = new Date().toISOString();
   const vale = await env.DB.prepare(`select k.restante, k.vence_en from vales_dolarones k
     join ventas v on v.id = k.venta_id where k.codigo = ? and v.cancelada = 0
@@ -56,7 +60,7 @@ export async function sentenciasVale(env: Env, p: {
   if (!Number.isSafeInteger(p.total) || p.total < 0 || !Number.isSafeInteger(p.dolarones) || p.dolarones < 0 || p.dolarones > p.total)
     return { ok:false, status:400, error:'Importe de Dolarones inválido.' };
   // ponytail: un vale por ticket; combinar varios sólo cuando se solicite.
-  if (p.codigo && (!CODIGO.test(p.codigo) || p.clienteId))
+  if (p.codigo && (!codigoValeValido(env, p.codigo) || p.clienteId))
     return { ok:false, status:400, error:'Usa un vale o una membresía, no ambos en el mismo ticket.' };
   const ahora = p.ahora.toISOString();
   const sentencias:D1PreparedStatement[] = [];

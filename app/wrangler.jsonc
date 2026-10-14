@@ -16,6 +16,8 @@
     "run_worker_first": true
   },
   "vars": {
+    // Numero de WhatsApp para responder desde /mensajes (Issue #290). Publico, no secreto.
+    "WHATSAPP_PHONE_NUMBER_ID": "1433484303171531",
     // Ese hostname solo sirve la camara y la subida de fotos: el vendedor no
     // llega a precios ni a la caja aunque escriba la ruta.
     "HOST_VENDEDOR": "captura.viste.com.mx",
@@ -37,13 +39,11 @@
     "BASES_APROBADAS_VERSION": "2026-10-v4",
     "PROMOCION_INICIO": "2026-10-05T17:00:00Z",
     "VALES_ABIERTOS": "si",
-    // Promo de inauguracion (Isaac, 7/10): $100 menos en tickets de $300 o mas. Inauguracion el sabado 10/10
-    // (Isaac, 8/10): «el 10 del 10 a las 10»: del sabado 10 a las 10:00 al domingo 12/10 al cierre, hora de la tienda (UTC-6).
-    // Para apagarla antes: quitar las dos y desplegar.
+    // Promo de inauguracion (Isaac, 9/10, Issue #263): 10% directo en todo el ticket, sin tope de tickets.
+    // «El 10 del 10 a las 10»: del sabado 10/10 a las 10:00 al domingo 11/10 a las 23:59, hora de la tienda (UTC-6).
+    // Para apagarla antes: quitar las dos y desplegar. PROMO_CUPO (Issue #250) pondria tope de tickets; sin ella no hay.
     "PROMO_DESDE": "2026-10-10T16:00:00Z",
-    "PROMO_HASTA": "2026-10-13T06:00:00Z",
-    // «A las primeras 100 personas» (Issue #250): tickets no cancelados con la promo. Quitarla = sin tope.
-    "PROMO_CUPO": "100",
+    "PROMO_HASTA": "2026-10-12T06:00:00Z",
     // Conteo de alto valor (Issue #219): piezas en existencia con precio >= este monto, en centavos.
     "CONTEO_UMBRAL": "30000",
     // Mercado Libre (Issue #170): debe ser identica a la URI de redireccion de la
@@ -94,6 +94,9 @@
       "database_name": "el-dolaron",
       "database_id": "26435b29-79ae-44bf-942d-3bac138c5805"
     }
+  ],
+  "kv_namespaces": [
+    { "binding": "WHATSAPP_EVENTOS", "id": "d6cbf480b05d47c7a17d53d8e4b461a8" }
   ],
   "r2_buckets": [
     {

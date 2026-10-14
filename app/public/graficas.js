@@ -98,7 +98,7 @@ export function verificarCuadre(r) {
   const vendido = r.resumen.total;
   const c = r.cuadre;
   const revisiones = [
-    ['De bruto a vendido', 'Bruto − devoluciones por pieza − cancelados', vendido, c.bruto - c.devoluciones_pieza - c.cancelados],
+    ['De bruto a vendido', 'Bruto − devoluciones por pieza − cancelados − piezas de FEP', vendido, c.bruto - c.devoluciones_pieza - c.cancelados - (c.fep ?? 0)],
     ['Suma de los días', 'Lo vendido día por día', vendido, suma(r.por_dia)],
     ['Suma de las formas de pago', 'Efectivo + tarjeta + transferencia + Dolarones', vendido, suma(r.por_forma_pago)],
     ['Suma de las categorías', 'Lo vendido pieza por pieza', vendido, suma(r.por_categoria)],

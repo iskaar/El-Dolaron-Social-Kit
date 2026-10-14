@@ -1,0 +1,213 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>El Dolarón — WhatsApp</title>
+<style>
+  :root { --azul:#16366B; --azul-claro:#e8eef8; --rojo:#D72B32; --amarillo:#FFD447;
+    --fondo:#f4f6f9; --panel:#ffffff; --linea:#dfe3ea; --texto:#1a1f2b; --suave:#5b6478; }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--fondo); color:var(--texto); font-family: system-ui, -apple-system, "Segoe UI", sans-serif; height:100vh; display:flex; flex-direction:column; }
+  header { background:var(--azul); color:#fff; padding:12px 20px; display:flex; align-items:center; gap:16px; }
+  header h1 { font-size:17px; margin:0; font-weight:600; flex:1; }
+  header a, header button.ghost { color:var(--amarillo); font-size:14px; text-decoration:none; background:none; border:0; cursor:pointer; padding:6px; }
+  .layout { flex:1; display:grid; grid-template-columns: minmax(260px, 340px) 1fr; min-height:0; }
+  aside { background:var(--panel); border-right:1px solid var(--linea); overflow-y:auto; }
+  .buscar { padding:12px; border-bottom:1px solid var(--linea); position:sticky; top:0; background:var(--panel); }
+  .buscar input { width:100%; padding:9px 12px; border:1px solid var(--linea); border-radius:20px; font-size:14px; }
+  .conv { display:block; width:100%; text-align:left; background:none; border:0; border-bottom:1px solid var(--linea); padding:12px 14px; cursor:pointer; font:inherit; color:inherit; }
+  .conv:hover, .conv.activa { background:var(--azul-claro); }
+  .conv .fila1 { display:flex; justify-content:space-between; gap:8px; }
+  .conv .nombre { font-weight:600; font-size:15px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .conv .hora { font-size:12px; color:var(--suave); white-space:nowrap; }
+  .conv .vista { font-size:13px; color:var(--suave); margin-top:3px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .chip { display:inline-block; font-size:11px; padding:1px 7px; border-radius:10px; margin-top:4px; }
+  .chip.ok { background:#e5f6ec; color:#17653a; }
+  .chip.cerrada { background:#f1f2f5; color:var(--suave); }
+  section.hilo { display:flex; flex-direction:column; min-width:0; min-height:0; }
+  .cabecera { padding:14px 20px; background:var(--panel); border-bottom:1px solid var(--linea); }
+  .cabecera .nombre { font-weight:600; font-size:16px; }
+  .cabecera .numero { font-size:13px; color:var(--suave); }
+  .mensajes { flex:1; overflow-y:auto; padding:18px 20px; display:flex; flex-direction:column; gap:8px; background:#eef2f7; }
+  .burbuja { max-width:72%; padding:9px 12px; border-radius:12px; font-size:15px; line-height:1.35; white-space:pre-wrap; word-break:break-word; box-shadow:0 1px 1px rgba(0,0,0,.05); }
+  .burbuja.entrante { background:#fff; align-self:flex-start; border-bottom-left-radius:4px; }
+  .burbuja.saliente { background:#dcf3fb; align-self:flex-end; border-bottom-right-radius:4px; }
+  .burbuja .meta { display:block; font-size:11px; color:var(--suave); margin-top:4px; text-align:right; }
+  .burbuja.tipo { font-style:italic; color:var(--suave); }
+  .compositor { background:var(--panel); border-top:1px solid var(--linea); padding:12px 16px; }
+  .compositor .aviso { font-size:13px; color:var(--suave); margin:0 0 8px; }
+  .compositor .aviso.error { color:var(--rojo); }
+  .compositor form { display:flex; gap:10px; align-items:flex-end; }
+  .compositor textarea { flex:1; resize:none; min-height:42px; max-height:140px; padding:10px 12px; border:1px solid var(--linea); border-radius:12px; font:inherit; font-size:15px; }
+  .compositor textarea:disabled { background:#f4f6f9; }
+  .compositor button { background:var(--azul); color:#fff; border:0; border-radius:12px; padding:0 18px; height:42px; font-weight:600; font-size:15px; cursor:pointer; }
+  .compositor button:disabled { opacity:.45; cursor:not-allowed; }
+  .vacio { margin:auto; color:var(--suave); text-align:center; padding:24px; }
+  .atras { display:none; }
+  @media (max-width: 760px) {
+    .layout { grid-template-columns: 1fr; }
+    body.con-hilo aside { display:none; }
+    body:not(.con-hilo) section.hilo { display:none; }
+    .atras { display:inline-block; }
+    .burbuja { max-width:88%; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <button class="ghost atras" id="atras" type="button">← Conversaciones</button>
+  <h1>WhatsApp · El Dolarón</h1>
+  <button class="ghost" id="actualizar" type="button">Actualizar</button>
+  <a href="/">Inicio</a>
+</header>
+<div class="layout">
+  <aside>
+    <div class="buscar"><input id="buscar" type="search" placeholder="Buscar por nombre o número" aria-label="Buscar conversación"></div>
+    <div id="lista"></div>
+  </aside>
+  <section class="hilo" id="hilo">
+    <div class="cabecera" id="cabecera"></div>
+    <div class="mensajes" id="mensajes"><p class="vacio">Elige una conversación.</p></div>
+    <div class="compositor">
+      <p class="aviso" id="aviso">Solo lectura hasta que elijas una conversación. Los datos de clientes son personales: no los compartas.</p>
+      <form id="formulario">
+        <textarea id="texto" rows="1" maxlength="1000" placeholder="Escribe una respuesta" disabled aria-label="Respuesta"></textarea>
+        <button id="enviar" type="submit" disabled>Enviar</button>
+      </form>
+    </div>
+  </section>
+</div>
+<script>
+const $ = (id) => document.getElementById(id);
+const estado = { conversaciones: [], activa: null, filtro: '' };
+
+const etiquetaHora = (iso) => {
+  const f = new Date(iso);
+  const hoy = new Date();
+  return f.toDateString() === hoy.toDateString()
+    ? f.toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' })
+    : f.toLocaleDateString('es-MX', { day: 'numeric', month: 'short' });
+};
+const nombreVisible = (c) => c.nombre || '+' + c.de;
+const ultimoTexto = (c) => {
+  const m = c.mensajes[c.mensajes.length - 1];
+  const prefijo = m.sentido === 'saliente' ? 'Tú: ' : '';
+  return prefijo + m.texto;
+};
+function elemento(tag, clase, texto) {
+  const e = document.createElement(tag);
+  if (clase) e.className = clase;
+  if (texto !== undefined) e.textContent = texto;
+  return e;
+}
+
+/** Todo el texto del cliente entra con textContent: nunca como HTML. */
+function dibujarLista() {
+  const lista = $('lista');
+  lista.innerHTML = '';
+  const q = estado.filtro.trim().toLowerCase();
+  const visibles = estado.conversaciones.filter((c) => !q || nombreVisible(c).toLowerCase().includes(q) || c.de.includes(q));
+  if (!visibles.length) { lista.append(elemento('p', 'vacio', q ? 'Sin resultados.' : 'No hay conversaciones recientes.')); return; }
+  for (const c of visibles) {
+    const b = elemento('button', 'conv' + (c.de === estado.activa ? ' activa' : ''));
+    b.type = 'button';
+    const f1 = elemento('div', 'fila1');
+    f1.append(elemento('span', 'nombre', nombreVisible(c)), elemento('span', 'hora', etiquetaHora(c.ultimo)));
+    const vista = elemento('div', 'vista', ultimoTexto(c));
+    const chip = elemento('span', 'chip ' + (c.puede_responder ? 'ok' : 'cerrada'),
+      c.puede_responder ? 'Puedes responder' : 'Fuera de 24 h');
+    b.append(f1, vista, chip);
+    b.addEventListener('click', () => abrir(c.de));
+    lista.append(b);
+  }
+}
+
+function dibujarHilo() {
+  const c = estado.conversaciones.find((x) => x.de === estado.activa);
+  const cab = $('cabecera'); cab.innerHTML = '';
+  const mensajes = $('mensajes'); mensajes.innerHTML = '';
+  if (!c) {
+    mensajes.append(elemento('p', 'vacio', 'Elige una conversación.'));
+    $('texto').disabled = true; $('enviar').disabled = true;
+    $('aviso').textContent = 'Solo lectura hasta que elijas una conversación. Los datos de clientes son personales: no los compartas.';
+    $('aviso').className = 'aviso';
+    return;
+  }
+  cab.append(elemento('div', 'nombre', nombreVisible(c)), elemento('div', 'numero', '+' + c.de));
+  for (const m of c.mensajes) {
+    const b = elemento('div', 'burbuja ' + m.sentido + (m.tipo !== 'text' ? ' tipo' : ''));
+    b.append(document.createTextNode(m.texto));
+    const meta = elemento('span', 'meta', etiquetaHora(m.hora) + (m.sentido === 'saliente' && m.enviado_por ? ' · ' + m.enviado_por : ''));
+    b.append(meta);
+    mensajes.append(b);
+  }
+  mensajes.scrollTop = mensajes.scrollHeight;
+  const puede = c.puede_responder;
+  $('texto').disabled = !puede;
+  $('enviar').disabled = !puede;
+  $('aviso').className = 'aviso' + (puede ? '' : ' error');
+  $('aviso').textContent = puede
+    ? 'Solo texto. Meta permite responder hasta 24 h después del último mensaje del cliente.'
+    : 'Han pasado más de 24 h desde el último mensaje del cliente. Pídele que vuelva a escribir para responder.';
+}
+
+async function cargar() {
+  try {
+    const r = await fetch('/api/mensajes', { cache: 'no-store' });
+    const cuerpo = await r.json().catch(() => ({}));
+    if (!r.ok) { $('lista').innerHTML = ''; $('lista').append(elemento('p', 'vacio', cuerpo.error ?? 'No se pudieron cargar los mensajes.')); return; }
+    estado.conversaciones = cuerpo.conversaciones;
+    dibujarLista();
+    dibujarHilo();
+  } catch {
+    $('lista').innerHTML = ''; $('lista').append(elemento('p', 'vacio', 'Sin conexión: no se pudieron cargar los mensajes.'));
+  }
+}
+
+function abrir(de) {
+  estado.activa = de;
+  $('texto').value = '';
+  document.body.classList.add('con-hilo');
+  dibujarLista();
+  dibujarHilo();
+}
+
+$('formulario').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const texto = $('texto').value.trim();
+  if (!texto || !estado.activa) return;
+  $('enviar').disabled = true;
+  $('texto').disabled = true;
+  try {
+    const r = await fetch('/api/mensajes/responder', {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ de: estado.activa, texto }),
+    });
+    const cuerpo = await r.json().catch(() => ({}));
+    if (!r.ok) {
+      $('aviso').className = 'aviso error';
+      $('aviso').textContent = cuerpo.error ?? 'No se pudo enviar.';
+      $('texto').disabled = false; $('enviar').disabled = false;
+      return;
+    }
+    $('texto').value = '';
+    await cargar();
+  } catch {
+    $('aviso').className = 'aviso error';
+    $('aviso').textContent = 'Sin conexión: el mensaje no se envió. Intenta de nuevo.';
+    $('texto').disabled = false; $('enviar').disabled = false;
+  }
+});
+
+$('texto').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); $('formulario').requestSubmit(); }
+});
+$('buscar').addEventListener('input', (e) => { estado.filtro = e.target.value; dibujarLista(); });
+$('atras').addEventListener('click', () => document.body.classList.remove('con-hilo'));
+$('actualizar').addEventListener('click', cargar);
+cargar();
+setInterval(() => { if (!document.hidden && !$('texto').value) cargar(); }, 60000);
+</script>
+</body>
+</html>
