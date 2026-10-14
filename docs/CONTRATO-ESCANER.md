@@ -24,7 +24,7 @@
 
 > **Ropa, probada en sandbox el 2026-10-11 y autorizada para producción el
 > 2026-10-13 (Isaac, Issues #273 y #302):** la ropa ya tiene precios
-> finales de **$200, $150, $100, $80 y $50 MXN**. En modo Ropa se escogen precio y
+> finales de **$300, $200, $150, $120, $100, $80 y $50 MXN**. En modo Ropa se escogen precio y
 > talla antes de fotografiar; la foto conserva ese precio en la cola local. El
 > servidor valida la categoría de precio y deja la pieza lista, sin estimación de IA,
 > porcentaje ni redondeo a 9. Cada foto lleva nombre **Ropa**, su talla y código
@@ -83,7 +83,7 @@ Detalle completo en `docs/PLAN-ETIQUETAS-POR-BANDA.md`. Resumen:
 - Una foto = una pieza.
 
 En sandbox y producción, tocar una miniatura permite cambiar el precio final entre
-$200/$150/$100/$80/$50 MXN y Nuevo/Dañado con «Guardar cambios», también después
+$300/$200/$150/$120/$100/$80/$50 MXN y Nuevo/Dañado con «Guardar cambios», también después
 de subir. La condición no recalcula ese precio elegido. «Eliminar captura»
 descarta la captura completa tras un segundo toque; requiere conexión y no
 elimina piezas con venta o publicación. El servidor limita estas operaciones
