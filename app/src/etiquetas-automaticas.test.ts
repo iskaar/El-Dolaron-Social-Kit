@@ -68,7 +68,7 @@ test('la cámara recibe precios en producción y sandbox; solo sandbox lleva fra
       const r = await worker.fetch!(new Request('https://caja.prueba/captura') as never, t.env, t.ctx as never);
       assert.equal(r.status, 200);
       const datos = await r.json() as any;
-      assert.deepEqual(JSON.parse(datos.precios), [20000, 15000, 10000, 8000, 5000]);
+      assert.deepEqual(JSON.parse(datos.precios), [30000, 20000, 15000, 12000, 10000, 8000, 5000]);
       assert.equal(datos.franja.includes('SANDBOX'), ambiente === 'sandbox');
     }
   } finally { (globalThis as any).HTMLRewriter = anterior; t.db.close(); }
@@ -124,11 +124,11 @@ function capturarRopa(t: ReturnType<typeof tienda>, id: string, precio: string) 
     t.env, { waitUntil() { assert.fail('La ropa con precio asignado no necesita IA'); } } as never);
 }
 
-test('las cinco categorías se guardan con foto, talla y precio exacto, sin IA, redondeo ni precio de lista inventado', async () => {
+test('las siete categorías se guardan con foto, talla y precio exacto, sin IA, redondeo ni precio de lista inventado', async () => {
   const t = tienda();
   try {
     t.env.AMBIENTE = 'sandbox';
-    for (const precio of [20000, 15000, 10000, 8000, 5000]) {
+    for (const precio of [30000, 20000, 15000, 12000, 10000, 8000, 5000]) {
       const id = crypto.randomUUID();
       const captura = await capturarRopa(t, id, String(precio));
       assert.equal(captura.status, 201);
@@ -144,7 +144,7 @@ test('las cinco categorías se guardan con foto, talla y precio exacto, sin IA, 
     }
     const p = await pagina(t);
     await p.iniciarAutomatica();
-    assert.equal(p.estado.enviadas.length, 5);
+    assert.equal(p.estado.enviadas.length, 7);
     assert.ok(p.estado.enviadas.every((p: any) => p.copias === 2));
   } finally { t.db.close(); }
 });
@@ -189,7 +189,7 @@ const camara = readFileSync('public/captura.html', 'utf8');
 test('cámara exige precio y talla y guarda la categoría junto a la foto antes de subir', async () => {
   const llamadas: string[] = [], guardadas: any[] = [];
   const contexto = {
-    modoRopa: true, preciosRopa: [20000, 15000, 10000, 8000, 5000], precioRopa: null as number | null,
+    modoRopa: true, preciosRopa: [30000, 20000, 15000, 12000, 10000, 8000, 5000], precioRopa: null as number | null,
     panelPrecio: { classList: { add() { llamadas.push('falta precio'); } } }, document: { getElementById: () => ({ textContent: '' }) },
     selector: { valor: () => 'M', faltante() { assert.fail('talla ya elegida'); } },
     capturar: async () => { llamadas.push('foto'); contexto.precioRopa = 5000; return new Blob(['foto']); },

@@ -106,7 +106,7 @@ const estacionValida = (valor: unknown): valor is string =>
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const FOTO_MAX_BYTES = 6 * 1024 * 1024;
 // Isaac, Issue #273: precios finales de ropa; el árbol por prenda se define después.
-const PRECIOS_ROPA = [20000, 15000, 10000, 8000, 5000];
+const PRECIOS_ROPA = [30000, 20000, 15000, 12000, 10000, 8000, 5000];
 const capturaRopaDisponible = (env: Env) => !env.AMBIENTE || env.AMBIENTE === 'produccion' || env.AMBIENTE === 'sandbox';
 
 function json(cuerpo: unknown, status = 200): Response {

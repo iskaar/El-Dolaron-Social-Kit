@@ -196,7 +196,7 @@ unidad (u otra) hay que volver a interrogarla, `/sonda-impresora` sigue desplega
 1. En la computadora, abrir `/etiquetas` del **mismo entorno** en Chrome/Edge,
    conectar la AE240-bt y pulsar «Iniciar / retomar impresión automática».
 2. En el teléfono, abrir `/captura` del **mismo entorno**. Modo Ropa ofrece
-   $200/$150/$100/$80/$50 MXN y las tallas existentes; escoger ambos antes de disparar.
+   $300/$200/$150/$120/$100/$80/$50 MXN y las tallas existentes; escoger ambos antes de disparar.
    El precio se conserva entre fotos, no entre recargas. La foto y el precio se
    guardan juntos en IndexedDB antes de subir, también sin red.
 3. `POST /api/borradores` acepta `precio_ropa` en centavos en sandbox y producción
