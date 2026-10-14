@@ -324,3 +324,63 @@ test('un canje entre lectura y reemplazo aborta regalo, cupo y presupuesto junto
     assert.equal(p.db.prepare("select count(*) as n from premios_apertura where canal='online' and cliente_id=?").get(a.body.id)!.n, 1);
   } finally { p.cerrar(); }
 });
+
+test('vale de papel a la cuenta (Issue #258): doble, una vez, tope semanal y reglas de socio', async () => {
+  const p = portalDePrueba();
+  p.env.VALES_ABIERTOS = 'si';
+  try {
+    const venta = (extra: Record<string, unknown> = {}) => p.pedir('/api/ventas', { id: crypto.randomUUID(),
+      lineas: [{ producto_id: PRODUCTO, cantidad: 1 }], forma_pago: 'efectivo', efectivo: 25000, caja: 'Caja 1', ...extra });
+    const emitir = async () => { const r = await venta(); assert.equal(r.status, 201); return { id: r.cuerpo.id as string, vale: r.cuerpo.vale_emitido }; };
+    const ta = token('uid-a', '+524441112222'), tb = token('uid-b', '+524443334444');
+    const a = (await p.registrar('uid-a', '+524441112222')).body;
+    await p.registrar('uid-b', '+524443334444');
+    const pasar = (t: string, codigo: string) => p.llamar('/api/portal/vale', t, { codigo }, 'POST');
+
+    // $250 sin socio: vale de 10 D. En la cuenta: 20 D, con las reglas de compra de socio.
+    const uno = await emitir();
+    assert.equal(uno.vale.importe, 1000);
+    const r = await pasar(ta, uno.vale.codigo);
+    assert.equal(r.status, 201, JSON.stringify(r.body));
+    assert.equal(r.body.importe, 2000);
+    const k = p.db.prepare('select restante, reclamado_por from vales_dolarones where id = ?').get(uno.vale.id) as any;
+    assert.deepEqual([k.restante, k.reclamado_por], [0, a.id]);
+    assert.equal((p.db.prepare('select cliente_id from ventas where id = ?').get(uno.id) as any).cliente_id, a.id);
+    const lote = p.db.prepare(`select origen, importe, vence_en from dolarones_lotes where venta_id = ?`).get(uno.id) as any;
+    assert.equal(lote.origen, 'compra');
+    assert.ok(lote.vence_en > new Date(Date.now() + 360 * 86_400_000).toISOString());
+    assert.equal((await p.llamar('/api/portal/saldo', ta)).body.por_liberar, 2000);
+    assert.deepEqual((await p.llamar('/api/portal/recibos', ta)).body.recibos.map((x: any) => x.id), [uno.id]);
+    // Repetir (otra pestaña, recargar) no abona dos veces; otra cuenta no se lo lleva; el papel ya no sirve.
+    assert.equal((await pasar(ta, uno.vale.codigo)).body.ya_estaba, true);
+    assert.equal((await pasar(tb, uno.vale.codigo)).status, 409);
+    assert.equal((await p.pedir('/api/vales/buscar', { codigo: uno.vale.codigo })).status, 403);
+    assert.equal((p.db.prepare('select count(*) n from dolarones_lotes where venta_id = ?').get(uno.id) as any).n, 1);
+
+    // Vale usado en parte: no se pasa.
+    const usado = await emitir();
+    p.db.prepare(`update vales_dolarones set disponible_desde = '2020-01-01T00:00:00Z' where id = ?`).run(usado.vale.id);
+    assert.equal((await venta({ codigo_vale: usado.vale.codigo, dolarones: 500, efectivo: 24500 })).status, 201);
+    assert.equal((await pasar(ta, usado.vale.codigo)).status, 409);
+    // Vencido: no se pasa.
+    const viejo = await emitir();
+    p.db.prepare(`update vales_dolarones set vence_en = '2020-01-01T00:00:00Z' where id = ?`).run(viejo.vale.id);
+    assert.equal((await pasar(ta, viejo.vale.codigo)).status, 409);
+
+    // Tope: 2 por semana por cuenta.
+    const dos = await emitir();
+    assert.equal((await pasar(ta, dos.vale.codigo)).status, 201);
+    const tres = await emitir();
+    const tope = await pasar(ta, tres.vale.codigo);
+    assert.equal(tope.status, 429);
+    assert.equal((p.db.prepare('select restante from vales_dolarones where id = ?').get(tres.vale.id) as any).restante, 1000);
+    assert.equal((await pasar(tb, tres.vale.codigo)).status, 201);   // otra cuenta sí puede
+
+    // Cancelar la compra ya pasada: se retira lo abonado de la cuenta, sin tropezar con el vale.
+    const cancelada = await p.pedir(`/api/ventas/${dos.id}/cancelar`, { motivo: 'prueba', caja: 'Caja 1' });
+    assert.equal(cancelada.status, 200, JSON.stringify(cancelada.cuerpo));
+    assert.equal((p.db.prepare('select restante from dolarones_lotes where venta_id = ?').get(dos.id) as any).restante, 0);
+    // Y su vale no revive.
+    assert.equal((p.db.prepare('select restante from vales_dolarones where id = ?').get(dos.vale.id) as any).restante, 0);
+  } finally { p.cerrar(); }
+});
