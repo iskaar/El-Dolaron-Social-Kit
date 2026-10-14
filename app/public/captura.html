@@ -81,6 +81,10 @@
   :is(#precio-panel, #revisar-precio) button[aria-checked="true"] { background: var(--amarillo); border-color: var(--amarillo); color: #111; }
   #precio-panel.falta button { border-color: var(--rojo); }
   .chips { display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px; }
+  /* Precio y talla: una fila que se desliza con el dedo, como el rodillo de edad; cada opcion se toca. */
+  .chips.fila { display: flex; gap: 6px; overflow-x: auto; scroll-snap-type: x mandatory; scrollbar-width: none; padding: 2px 2px 6px; }
+  .chips.fila::-webkit-scrollbar { display: none; }
+  .chips.fila > button { flex: 0 0 auto; min-width: 68px; scroll-snap-align: center; }
   /* Con id en el selector: "#revisar button" (pastillas de revisar) no les gana. */
   :is(#talla-panel, #revisar-talla) .chips button { padding: 10px 0; font-size: 16px; font-weight: 800; border-radius: 10px;
     border: 2px solid #fff; background: #0009; color: #fff; }
@@ -129,7 +133,7 @@
 <div id="talla-panel" class="encima" hidden></div>
 <div id="precio-panel" class="encima" hidden>
   <div>Precio de ropa</div>
-  <div id="precios-ropa" class="chips" role="radiogroup" aria-label="Precio final en pesos"></div>
+  <div id="precios-ropa" class="chips fila" role="radiogroup" aria-label="Precio final en pesos"></div>
 </div>
 
 <div id="barra" class="encima">
@@ -160,7 +164,7 @@
     <div id="revisar-talla" hidden></div>
     <div id="revisar-precio" hidden>
       <div>Precio final</div>
-      <div id="revisar-precios" class="chips" role="radiogroup" aria-label="Corregir precio final en pesos"></div>
+      <div id="revisar-precios" class="chips fila" role="radiogroup" aria-label="Corregir precio final en pesos"></div>
     </div>
     <button id="revisar-guardar" type="button" class="principal" hidden>Guardar cambios</button>
     <p id="revisar-nota" role="status"></p>
@@ -216,7 +220,7 @@ function chips(contenedor, opciones, elegido, alElegir) {
  * `alCambiar` recibe la talla completa ("M", "Niño 6 años / S") a cada cambio.
  */
 function selectorTalla(raiz, alCambiar) {
-  raiz.innerHTML = `<div class="chips tallas" role="radiogroup" aria-label="Talla"></div>
+  raiz.innerHTML = `<div class="chips fila tallas" role="radiogroup" aria-label="Talla"></div>
     <div class="nino" hidden>
       <div class="rodillo" role="listbox" aria-label="Edad"></div>
       <div class="chips talla-nino" role="radiogroup" aria-label="Talla de niño"></div>
