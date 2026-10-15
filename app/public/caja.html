@@ -302,6 +302,8 @@ if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw-caja.js'
   <p class="nota" id="retiro-nota"></p>
   <label for="retiro-importe">Importe ($)</label>
   <input id="retiro-importe" type="number" min="0.5" step="0.5" inputmode="decimal">
+  <label for="retiro-categoria" id="retiro-etiqueta-categoria">Categoría</label>
+  <select id="retiro-categoria"></select>
   <label for="retiro-motivo" id="retiro-etiqueta-motivo">Concepto</label>
   <input id="retiro-motivo" type="text" maxlength="200">
   <div class="aviso-dialogo" id="retiro-aviso"></div>
@@ -370,6 +372,7 @@ if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw-caja.js'
   </div>
 </dialog>
 <script type="module">
+import { CATEGORIAS_GASTO } from '/categorias.js';
 import { totales, agregar, efectivoAlcanza, dolaronesGanados, saldoCanjeable, maximoCanje, MINIMO_REGALO, descuentoDe, TOPE_DESCUENTO, DENOMINACIONES, contadoDe, promoInauguracion, desfaseReloj, anticipoDePedido } from '/venta.js';
 import { abrirCamara } from '/camara.js';
 import {
@@ -381,6 +384,10 @@ import {
 } from '/ticket.js';
 import { imprimirDevolucion } from '/impresora.js';
 import { codigoDeDigitos } from '/code128.js';
+
+// Issue #326: la categoria del gasto sale de la lista compartida con el servidor.
+document.getElementById('retiro-categoria').innerHTML = '<option value="">Elige categoría</option>' + CATEGORIAS_GASTO
+  .map(([clave, nombre]) => `<option value="${clave}">${nombre}</option>`).join('');
 
 // Issue #281: los errores de JavaScript de la caja llegan a los logs del servidor (/api/errores).
 // Sin red no se pueden enviar; el error igual aparece en la consola de la caja.
@@ -1772,6 +1779,8 @@ let idRetiro = null;
 const tipoSalida = () => document.querySelector('input[name="tipo-salida"]:checked').value;
 function pintarTipoSalida() {
   const gasto = tipoSalida() === 'gasto';
+  $('retiro-etiqueta-categoria').hidden = !gasto;
+  $('retiro-categoria').hidden = !gasto;
   $('retiro-nota').textContent = gasto
     ? 'Algo que se pagó con dinero del cajón (agua, limpieza, papelería). Hasta $100 no necesita aprobación; guarda el ticket de la compra.'
     : 'Dinero que se saca del cajón para guardarlo (caja fuerte, banco). Se imprime un comprobante para firmar.';
@@ -1784,6 +1793,7 @@ $('abrir-retiro').addEventListener('click', () => {
   idRetiro = crypto.randomUUID();
   document.querySelector('input[name="tipo-salida"][value="gasto"]').checked = true;
   pintarTipoSalida();
+  $('retiro-categoria').value = '';
   $('retiro-importe').value = '';
   $('retiro-motivo').value = '';
   $('retiro-aviso').textContent = '';
@@ -1797,12 +1807,14 @@ $('retiro-registrar').addEventListener('click', async () => {
   const motivo = $('retiro-motivo').value.trim();
   if (importe <= 0) { $('retiro-aviso').textContent = 'Escribe cuánto sale del cajón.'; return; }
   const tipo = tipoSalida();
+  const categoria = $('retiro-categoria').value;
+  if (tipo === 'gasto' && !categoria) { $('retiro-aviso').textContent = 'Elige una categoría.'; return; }
   if (!motivo) { $('retiro-aviso').textContent = tipo === 'gasto' ? 'Escribe en qué se gastó.' : 'Escribe el motivo.'; return; }
   $('retiro-registrar').disabled = true;
   try {
     const r = await fetch('/api/retiros', {
       method: 'POST', headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ id: idRetiro, tipo, caja: cajaActual(), importe, motivo }),
+      body: JSON.stringify({ id: idRetiro, tipo, caja: cajaActual(), importe, motivo, categoria: tipo === 'gasto' ? categoria : undefined }),
     });
     const retiro = await r.json();
     if (!r.ok) { $('retiro-aviso').textContent = retiro.error ?? 'No se pudo registrar.'; return; }

@@ -78,6 +78,7 @@ const PANTALLAS: Record<string, Rol[]> = {
   '/conteo': TODOS,
   // Issue #287: mensajes de clientes por WhatsApp; datos personales, solo el dueño.
   '/mensajes': DUENO,
+  '/gastos': DUENO,
 };
 
 export function permiso(pathname: string, metodo: string): Regla {
@@ -97,6 +98,7 @@ export function permiso(pathname: string, metodo: string): Regla {
   if (ruta in PANTALLAS) return PANTALLAS[ruta];
 
   if (ruta === '/api/mensajes' || ruta === '/api/mensajes/responder') return DUENO;
+  if (ruta === '/api/gastos' || /^\/api\/gastos\/[^/]+$/.test(ruta)) return DUENO;
   if (ruta === '/api/config') return metodo === 'GET' ? CAPTURA_FEP : DUENO;
   if (ruta === '/api/familias') return metodo === 'GET' ? TODOS : DUENO;
   if (ruta === '/api/borradores/manual') return DUENO;   // captura sin foto (Issue #115)
