@@ -214,9 +214,9 @@ async function crearBorrador(request: Request, env: Env, ctx: ExecutionContext, 
   await env.DB.prepare(
     `insert into productos (id, semana_ingreso, estado_fisico, stock, talla, foto_key, capturado_por, creado_en, actualizado_en, propietario)
      values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+     -- El stock no se toca: el reenvio de una foto no repone lo que la caja ya vendio (#312).
      on conflict (id) do update set
        estado_fisico = excluded.estado_fisico,
-       stock = excluded.stock,
        talla = excluded.talla,
        foto_key = excluded.foto_key,
        estado_analisis = 'pendiente',
