@@ -123,7 +123,7 @@ const hora = (iso) => new Date(iso).toLocaleTimeString('es-MX', { hour: '2-digit
 /** Solo lo que lleva etiqueta: los bins se cobran con la tarjeta de la caja. */
 async function cargar() {
   const respuesta = await fetch('/api/borradores?estado=listo', { cache: 'no-store', signal: AbortSignal.timeout(15000) });
-  if (!respuesta.ok) throw new Error('No se pudo cargar la lista. Revisa la red y la sesión.');
+  if (!respuesta.ok) throw new Error(`Error HTTP ${respuesta.status}. Revisa la red y la sesión.`);
   piezas = (await respuesta.json())
     .filter((p) => p.destino === 'etiqueta' && p.precio > 0);
   pintar();
@@ -458,7 +458,7 @@ async function imprimirNuevas() {
       const respuesta = await fetch(`/api/borradores?desde=${encodeURIComponent(automaticaDesde)}`, {
         cache: 'no-store', signal: AbortSignal.timeout(15000),
       });
-      if (!respuesta.ok) throw new Error('No se pudo consultar la cola. Revisa la red y la sesión.');
+      if (!respuesta.ok) throw new Error(`No se pudo consultar la cola (error HTTP ${respuesta.status}). Revisa la red y la sesión.`);
       const nuevas = await respuesta.json();
       if (!automaticaActiva) return;
       const hechas = impresas();
@@ -501,7 +501,9 @@ document.getElementById('nueva-sesion').addEventListener('click', () => {
   localStorage.removeItem(CLAVE_SESION);
   resumen.textContent = 'Nueva sesión preparada. Inicia la impresión automática antes de tomar las próximas fotos; las pendientes anteriores quedan para impresión manual.';
 });
-setInterval(imprimirNuevas, 2000);
+// Cada consulta relee las capturas de la sesión en D1: a 2 s agotó la cuota diaria (#313).
+const CONSULTA_AUTOMATICA_MS = 30000;
+setInterval(imprimirNuevas, CONSULTA_AUTOMATICA_MS);
 try {
   const respuesta = await fetch('/api/salud', { cache: 'no-store', signal: AbortSignal.timeout(15000) });
   if (respuesta.ok) ambiente = await respuesta.json();
@@ -510,7 +512,13 @@ try {
   document.getElementById('ayuda-automatica').hidden = botonAutomatica.hidden;
 } catch { /* sin confirmar el entorno, solo queda la impresión manual */ }
 
-await cargar();
+try {
+  await cargar();
+} catch (error) {
+  console.error('Etiquetas: falló la carga inicial', error);
+  lista.innerHTML = '<div class="vacio">No se pudo cargar la lista.</div>';
+  resumen.textContent = `No se pudo cargar la lista de etiquetas: ${error.message} Recarga la página para intentar de nuevo.`;
+}
 </script>
 </body>
 </html>
