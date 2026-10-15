@@ -16,7 +16,7 @@ const DESPUES = '2026-10-11T16:00:00.000Z';
 function agregar(t: ReturnType<typeof tienda>, creado = DESPUES, estado = 'listo', stock = 1) {
   const id = crypto.randomUUID();
   t.db.prepare(`insert into productos (id, nombre, categoria, estado_analisis, precio, stock, semana_ingreso, creado_en, actualizado_en)
-                values (?, 'Camisa', 'ropa', ?, 7900, ?, '2026-S41', ?, ?)`).run(id, estado, stock, creado, creado);
+                values (?, 'Camisa', 'ropa', ?, 7900, ?, '2026-S41', ?, ?)`).run(id, estado, stock, creado, new Date().toISOString());   // como la app: actualizado_en es ahora
   return id;
 }
 
@@ -290,13 +290,13 @@ test('espera el nombre y precio en orden; sin precio, con error o stock cero no 
     const p = await pagina(t);
     await p.iniciarAutomatica();
     assert.deepEqual(p.estado.enviadas, []);
-    t.db.prepare('update productos set estado_analisis=?, precio=0 where id=?').run('listo', primera);
+    t.db.prepare("update productos set estado_analisis=?, precio=0, actualizado_en=strftime('%Y-%m-%dT%H:%M:%fZ','now') where id=?").run('listo', primera);
     await p.imprimirNuevas();
     assert.deepEqual(p.estado.enviadas, []);
-    t.db.prepare('update productos set estado_analisis=? where id=?').run('error', primera);
+    t.db.prepare("update productos set estado_analisis=?, actualizado_en=strftime('%Y-%m-%dT%H:%M:%fZ','now') where id=?").run('error', primera);
     await p.imprimirNuevas();
     assert.match(p.$('resumen').textContent, /revisión/);
-    t.db.prepare('update productos set estado_analisis=?, precio=7900 where id=?').run('listo', primera);
+    t.db.prepare("update productos set estado_analisis=?, precio=7900, actualizado_en=strftime('%Y-%m-%dT%H:%M:%fZ','now') where id=?").run('listo', primera);
     await p.imprimirNuevas();
     assert.deepEqual(p.estado.enviadas.map((p: any) => p.id), [primera, segunda]);
     agregar(t, DESPUES, 'listo', 0);
@@ -380,5 +380,21 @@ test('Detener durante la preparación evita el envío y una marca fallida conser
     await p.iniciarAutomatica();
     assert.equal(p.almacen.get('etiqueta-automatica-dudosa'), id);
     assert.equal(p.activa(), false);
+  } finally { t.db.close(); }
+});
+
+test('cambios trae solo lo modificado de la sesión, incluidas las descartadas (cuota de D1, 15/10)', async () => {
+  const t = tienda();
+  try {
+    const vieja = agregar(t), cambiada = agregar(t), quitada = agregar(t);
+    t.db.prepare("update productos set actualizado_en='2026-10-11T16:00:00.000Z' where id in (?, ?, ?)").run(vieja, cambiada, quitada);
+    t.db.prepare("update productos set precio=9900, actualizado_en='2026-10-11T17:00:00.000Z' where id=?").run(cambiada);
+    t.db.prepare("update productos set estado_analisis='descartado', actualizado_en='2026-10-11T17:00:00.000Z' where id=?").run(quitada);
+    const r = await t.pedir(`/api/borradores?desde=${DESDE}&cambios=2026-10-11T16:30:00.000Z`);
+    assert.equal(r.status, 200);
+    assert.deepEqual(r.cuerpo.map((p: any) => [p.id, p.estado_analisis]).sort(), [[cambiada, 'listo'], [quitada, 'descartado']].sort());
+    assert.equal((await t.pedir(`/api/borradores?desde=${DESDE}&cambios=ayer`)).status, 400);
+    // Sin `cambios`, la lista de siempre: sin descartadas.
+    assert.equal((await t.pedir(`/api/borradores?desde=${DESDE}`)).cuerpo.some((p: any) => p.id === quitada), false);
   } finally { t.db.close(); }
 });
