@@ -723,7 +723,7 @@ async function crearFamilia(request: Request, env: Env): Promise<Response> {
 /** Catalogo para la caja: se guarda en el navegador y se cobra sin red. */
 async function catalogo(env: Env): Promise<Response> {
   const { results } = await env.DB.prepare(
-    `select id, codigo, nombre, precio, sin_inventario, stock
+    `select id, codigo, nombre, precio, sin_inventario, stock, propietario
      from productos where codigo is not null and codigo <> '' and precio > 0
      order by nombre`,
   ).all();

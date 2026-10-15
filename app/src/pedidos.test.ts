@@ -355,6 +355,17 @@ function piezaFep(db: DatabaseSync, precio: number, stock: number) {
   return id;
 }
 
+test('catalogo de caja entrega el propietario de piezas FEP y de la tienda', async () => {
+  const { db, pedir } = tienda();
+  try {
+    const fep = piezaFep(db, 25000, 5);
+    const r = await pedir('/api/catalogo', undefined, 'GET');
+    assert.equal(r.status, 200);
+    assert.equal(r.cuerpo.find((p: any) => p.id === fep)?.propietario, 'fep');
+    assert.equal(r.cuerpo.find((p: any) => p.id === PRODUCTO)?.propietario, 'dolaron');
+  } finally { db.close(); }
+});
+
 test('anticipo y Dolarones en un mismo ticket: la fila dolarones del reporte no cuenta el anticipo y las formas suman el resumen', async () => {
   const { db, pedir } = tienda();
   // Un socio con $20 de Dolarones: una compra de $250 en efectivo le da $20 (8%) al dia siguiente.
