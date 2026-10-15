@@ -47,6 +47,7 @@ import { catalogoPublico, revisionCatalogo } from './catalogo.ts';
 import { rutaML, recibirNotificacion, conciliarSeguro, sincronizar, publicacionViva } from './mercadolibre.ts';
 import { pedirDescuento, validarDescuento, listarDescuentos, listarDuenos } from './descuentos.ts';
 import { listarAltoValor, revisarConteo, ajustarExistencia, listarAjustes } from './conteo.ts';
+import { rutaPedidos, vencerPedidos, sentenciasDePedido, saldoDe, enPedido } from './pedidos.ts';
 
 interface FilaConfig {
   clave: string;
@@ -556,6 +557,9 @@ async function fusionarBorrador(id: string, request: Request, env: Env): Promise
   if (await publicacionViva(env, id)) {
     return json({ error: 'Tiene publicación en Mercado Libre: ciérrala primero.' }, 409);
   }
+  if (await enPedido(env, id)) {
+    return json({ error: 'Está en un pedido: no se puede borrar.' }, 409);
+  }
 
   // La suma sale de la fila de la repetida DENTRO del batch, no de lo leido arriba: dos
   // fusiones en paralelo leen lo mismo, pero solo la que borra la repetida la consume.
@@ -598,6 +602,9 @@ async function descartarBorrador(id: string, env: Env): Promise<Response> {
   if (descartada) return json({ id, descartado: true });
   if (await publicacionViva(env, id)) {
     return json({ error: 'Tiene publicación en Mercado Libre: ciérrala primero.' }, 409);
+  }
+  if (await enPedido(env, id)) {
+    return json({ error: 'Está en un pedido: no se puede borrar.' }, 409);
   }
   await env.FOTOS.delete(`fotos/${id}.jpg`);
   await env.DB.prepare('delete from productos where id = ?').bind(id).run();
@@ -803,7 +810,7 @@ async function registrarVenta(request: Request, env: Env, ctx: ExecutionContext,
     id?: unknown; lineas?: unknown; forma_pago?: unknown;
     efectivo?: unknown; creado_en?: unknown;
     cliente_id?: unknown; dolarones?: unknown; codigo_socio?: unknown; codigo_vale?: unknown; caja?: unknown; imprimir_en?: unknown;
-    descuento_id?: unknown; promo?: unknown; sin_red?: unknown;
+    descuento_id?: unknown; promo?: unknown; sin_red?: unknown; pedido_id?: unknown; anticipo?: unknown;
   };
   const id = String(venta.id ?? '');
   if (!UUID.test(id)) {
@@ -840,12 +847,13 @@ async function registrarVenta(request: Request, env: Env, ctx: ExecutionContext,
     // Solo si lo trae: el hash de las ventas sin descuento no cambia y sus reintentos siguen valiendo.
     ...(venta.descuento_id ? { descuento_id:venta.descuento_id } : {}),
     ...(venta.promo ? { promo:venta.promo } : {}),
+    ...(venta.pedido_id ? { pedido_id:venta.pedido_id, anticipo:venta.anticipo ?? 0 } : {}),
   });
   const pedidoHash = [...new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(pedido)))]
     .map((b) => b.toString(16).padStart(2, '0')).join('');
   const reintento = async (): Promise<Response | null> => {
-    const previo = await env.DB.prepare('select pedido_hash, imprimir_en from ventas where id = ?').bind(id)
-      .first<{ pedido_hash:string | null; imprimir_en:string | null }>();
+    const previo = await env.DB.prepare('select pedido_hash, imprimir_en, anticipo, pedido_id from ventas where id = ?').bind(id)
+      .first<{ pedido_hash:string | null; imprimir_en:string | null; anticipo:number; pedido_id:string | null }>();
     if (!previo) return null;
     // null: venta registrada antes de la migracion 021, se acepta como antes.
     if (previo.pedido_hash !== null && previo.pedido_hash !== pedidoHash)
@@ -853,6 +861,7 @@ async function registrarVenta(request: Request, env: Env, ctx: ExecutionContext,
     const ganado = await env.DB.prepare(`select coalesce(sum(importe), 0) as importe from dolarones_movimientos
       where venta_id = ? and tipo = 'compra'`).bind(id).first<{ importe:number }>();
     const respuesta = json({ id, duplicada:true, imprimir_en:previo.imprimir_en, ganados:ganado?.importe ?? 0,
+      anticipo:previo.anticipo, saldo_pedido:previo.pedido_id ? await saldoDe(env, previo.pedido_id) : null,
       vale_emitido:await valeDeVenta(env, id), vale_usado:await valeUsadoEnVenta(env, id) }, 200);
     respuesta.headers.set('cache-control', 'no-store');
     return respuesta;
@@ -906,7 +915,14 @@ async function registrarVenta(request: Request, env: Env, ctx: ExecutionContext,
   const clienteId = venta.cliente_id ? String(venta.cliente_id) : null;
   const codigoVale = String(venta.codigo_vale ?? '');
   const dolarones = Number(venta.dolarones ?? 0);
-  const aPagar = total - (Number.isInteger(dolarones) ? dolarones : 0);
+  // Anticipo = saldo de un pedido que paga parte del ticket (Issue #269). Sin pedido no hay anticipo.
+  const pedidoId = venta.pedido_id ? String(venta.pedido_id) : null;
+  const anticipo = pedidoId ? Number(venta.anticipo ?? 0) : 0;
+  if (pedidoId ? !UUID.test(pedidoId) || !Number.isInteger(anticipo) || anticipo < 0 : Number(venta.anticipo ?? 0) !== 0)
+    return json({ error: 'Pedido o anticipo invalido.' }, 400);
+  const porPagar = total - (Number.isInteger(dolarones) ? dolarones : 0);
+  if (anticipo > porPagar) return json({ error: 'El anticipo no puede pasar de lo que se cobra.' }, 400);
+  const aPagar = porPagar - anticipo;
   if (!efectivoAlcanza({ formaPago, total: aPagar, efectivo })) {
     return json({ error: 'El efectivo no alcanza para el total.' }, 400);
   }
@@ -935,21 +951,31 @@ async function registrarVenta(request: Request, env: Env, ctx: ExecutionContext,
     return json({ error:vale.error }, vale.status);
   }
 
+  const conPedido = pedidoId ? await sentenciasDePedido(env, { pedidoId, ventaId: id, anticipo, ahora }) : null;
+  if (conPedido && !conPedido.ok) {
+    const concurrente = await reintento();
+    if (concurrente) return concurrente;
+    return json({ error: conPedido.error }, conPedido.status);
+  }
+
   const sentencias = [
     env.DB.prepare(
       `insert into ventas (id, total, forma_pago, efectivo, cambio, creado_en, registrado_en, cliente_id, dolarones,
-                           caja, cajero, pedido_hash, imprimir_en, descuento, descuento_id, promo)
-       values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                           caja, cajero, pedido_hash, imprimir_en, descuento, descuento_id, promo, anticipo, pedido_id)
+       values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).bind(id, total, formaPago, efectivo, Math.max(0, efectivo - aPagar), creadoEn, ahora, clienteId, dolarones,
       // Quien cobro sale de Access; la caja es la suya (Issue #105) o la de la
       // computadora. Una venta encolada antes del corte de caja llega sin caja: ''.
-      await cajaDe(env, correo, venta.caja), correo, pedidoHash, imprimirEn, descuento, descuentoId, promo),
+      await cajaDe(env, correo, venta.caja), correo, pedidoHash, imprimirEn, descuento, descuentoId, promo, anticipo, pedidoId),
     ...preparado.lineas.map((l) =>
       env.DB.prepare(
         `insert into venta_lineas (venta_id, producto_id, codigo, nombre, precio, cantidad, propietario)
          values (?, ?, ?, ?, ?, ?, ?)`,
       ).bind(id, l.producto_id, l.codigo, l.nombre, l.precio, l.cantidad, l.propietario),
     ),
+    // Con pedido: sus piezas apartadas vuelven a la venta y se gasta el saldo ANTES de descontar las de
+    // este ticket (si no, el trigger de stock aborta), pero despues del insert de la venta (FK pedidos.venta_id).
+    ...(conPedido?.sentencias ?? []),
     // Los bins no descuentan: nadie cuenta cuantas piezas quedan en un bote.
     // Sin `max(0, ...)`: si dos ventas concurrentes se pelean la ultima pieza,
     // el trigger `stock_no_negativo` (migracion 006) aborta esta sentencia y
@@ -985,6 +1011,10 @@ async function registrarVenta(request: Request, env: Env, ctx: ExecutionContext,
     if (String(error).includes('saldo insuficiente')) {
       return json({ error: 'El saldo de Dolarones cambio. Vuelve a buscar al socio.' }, 409);
     }
+    // Trigger pedido_saldo_valido (migracion 033): otra venta gasto el saldo o ya vencio.
+    if (pedidoId && String(error).includes('saldo de pedido invalido')) {
+      return json({ error: 'El saldo del pedido cambió o venció. Vuelve a cargarlo.' }, 409);
+    }
     if (descuentoId && String(error).includes('descuento_id')) {
       return json({ error: 'Ese descuento ya se uso en otra venta.' }, 409);
     }
@@ -994,6 +1024,7 @@ async function registrarVenta(request: Request, env: Env, ctx: ExecutionContext,
   ctx.waitUntil(conciliarSeguro(env, { productoIds: preparado.lineas.filter((l) => !l.sinInventario).map((l) => l.producto_id) }));
   const respuesta = json({
     id, total, descuento, dolarones, imprimir_en:imprimirEn, cambio: Math.max(0, efectivo - aPagar), ganados: recompensa.ganados,
+    anticipo, saldo_pedido: pedidoId ? await saldoDe(env, pedidoId) : null,
     saldo: clienteId ? await saldo(env, clienteId, ahora) : null,
     vale_emitido:vale.emitido,
     vale_usado:await valeUsadoEnVenta(env, id),
@@ -1106,11 +1137,15 @@ async function corte(url: URL, env: Env): Promise<Response> {
   const dia = url.searchParams.get('dia') ?? hoyTienda();
   // Las canceladas no cuentan: el corte es contra el efectivo que hay en el cajon.
   const { results } = await env.DB.prepare(
-    `select forma_pago, count(*) as tickets, sum(total - dolarones - devuelto) as total,
-            sum(dolarones - dolarones_devueltos) as dolarones
-     from ventas where ${diaTienda('creado_en')} = ? and cancelada = 0 group by forma_pago`,
+    `select forma_pago, sum(tickets) as tickets, sum(total) as total, sum(dolarones) as dolarones from (
+       select forma_pago, count(*) as tickets, sum(total - dolarones - anticipo - devuelto) as total,
+              sum(dolarones - dolarones_devueltos) as dolarones
+       from ventas where ${diaTienda('creado_en')} = ? and cancelada = 0 group by forma_pago
+       union all
+       select forma_pago, 0, sum(anticipo), 0 from pedidos where ${diaTienda('creado_en')} = ? group by forma_pago
+     ) group by forma_pago`,
   )
-    .bind(dia)
+    .bind(dia, dia)
     .all<{ forma_pago: string; tickets: number; total: number; dolarones: number }>();
 
   const piezas = await env.DB.prepare(
@@ -1124,7 +1159,8 @@ async function corte(url: URL, env: Env): Promise<Response> {
   return json({
     dia,
     piezas: piezas?.piezas ?? 0,
-    // Dinero que debe haber entre cajon y terminal; lo pagado con Dolarones va aparte.
+    // Dinero que debe haber entre cajon y terminal; lo pagado con Dolarones va aparte. Los anticipos de
+    // pedidos entran el dia que se recibieron y las ventas restan el saldo que gastaron (Issue #269).
     total: results.reduce((suma, fila) => suma + (fila.total ?? 0), 0),
     dolarones: results.reduce((suma, fila) => suma + (fila.dolarones ?? 0), 0),
     por_forma_pago: results,
@@ -1224,14 +1260,22 @@ async function reportes(url: URL, env: Env): Promise<Response> {
 
   // Lo cobrado en dinero por forma de pago, y lo pagado con Dolarones como una forma mas.
   const { results: porFormaPago } = await env.DB.prepare(
+    // Cobrado en el ticket (netas.ts ya descuenta el anticipo) mas el anticipo de los pedidos recibidos
+    // en el periodo: el dinero entra el dia del apartado, no el de la venta. Los Dolarones usados
+    // (neta - cobrado - anticipo) van en su propia fila.
     `${lineasNetas('v.creado_en >= ?')}
-     select forma_pago, count(distinct venta) as tickets, coalesce(sum(cobrado), 0) as total
-     from cobros where propietario = 'dolaron' group by forma_pago
-     union all
-     select 'dolarones', count(distinct case when neta - cobrado <> 0 then venta end), coalesce(sum(neta - cobrado), 0)
-     from cobros where propietario = 'dolaron'`,
+     select forma_pago, sum(tickets) as tickets, sum(total) as total from (
+       select forma_pago, count(distinct venta) as tickets, coalesce(sum(cobrado), 0) as total
+       from cobros where propietario = 'dolaron' group by forma_pago
+       union all
+       select forma_pago, 0, coalesce(sum(anticipo), 0) from pedidos where creado_en >= ? group by forma_pago
+       union all
+       select 'dolarones', count(distinct case when neta - cobrado - anticipo_linea <> 0 then venta end),
+         coalesce(sum(neta - cobrado - anticipo_linea), 0)
+       from cobros where propietario = 'dolaron'
+     ) group by forma_pago`,
   )
-    .bind(desde)
+    .bind(desde, desde)
     .all<{ forma_pago: string; tickets: number; total: number }>();
 
   const { results: ventasPorDia } = await env.DB.prepare(
@@ -1799,6 +1843,11 @@ export default {
         return await revisionCatalogo(env);
       }
 
+      if (pathname.startsWith('/api/pedidos')) {
+        const respuestaPedidos = await rutaPedidos(request, env, ctx, pathname, correo);
+        if (respuestaPedidos) return respuestaPedidos;
+      }
+
       if (pathname === '/api/ventas') {
         if (request.method === 'POST') {
           return await registrarVenta(request, env, ctx, correo);
@@ -1969,5 +2018,7 @@ export default {
   // conciliacion de existencias. Sin cuenta conectada no hace nada.
   async scheduled(_evento, env, ctx): Promise<void> {
     ctx.waitUntil(sincronizar(env));
+    // Apartados cuyo plazo llego: vuelven a la venta (Issue #269). Aparte, para que uno no frene al otro.
+    ctx.waitUntil(vencerPedidos(env));
   },
 } satisfies ExportedHandler<Env>;

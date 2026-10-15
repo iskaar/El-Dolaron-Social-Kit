@@ -10,6 +10,7 @@ import { leerUsuario, leerRoles } from './cuentas.ts';
 import { verificarPin } from './cajeros.ts';
 import { sentenciasDeCancelacion } from './dolarones.ts';
 import { cancelarVales } from './vales.ts';
+import { TICKET_CON_ANTICIPO } from './pedidos.ts';
 
 /** Lo que tiene el cajero para cancelar solo, contado desde la hora de la venta. */
 export const VENTANA_CANCELACION_MS = 5 * 60_000;
@@ -36,15 +37,17 @@ export async function cancelarCore(
   extra: (ahora: string) => D1PreparedStatement[] = () => [],
 ): Promise<Resultado> {
   const venta = await env.DB.prepare(
-    'select id, total, dolarones, cancelada, devuelto, dolarones_devueltos, revision from ventas where id = ?',
+    'select id, total, dolarones, anticipo, cancelada, devuelto, dolarones_devueltos, revision from ventas where id = ?',
   )
     .bind(id)
     .first<{
-      id: string; total: number; dolarones: number; cancelada: number;
+      id: string; total: number; dolarones: number; anticipo: number; cancelada: number;
       devuelto: number; dolarones_devueltos: number; revision: number;
     }>();
   if (!venta) return { status: 404, cuerpo: { error: 'La venta no existe.' } };
   if (venta.cancelada) return { status: 200, cuerpo: { id, cancelada: true, ya_estaba: true } };
+  // Unica puerta de las cancelaciones completas (cajero, PIN del dueno y aprobacion remota); ver pedidos.ts.
+  if (venta.anticipo > 0) return { status: 409, cuerpo: { error: TICKET_CON_ANTICIPO } };
 
   const ahora = new Date().toISOString();
   // Solo lo que sigue en el ticket: las piezas ya canceladas sueltas (Issue #138) ya regresaron.
@@ -129,11 +132,13 @@ export async function cancelarVenta(id: string, request: Request, env: Env, corr
     return json({ error: 'Escribe el motivo de la cancelacion.' }, 400);
   }
 
-  const venta = await env.DB.prepare('select creado_en, cancelada from ventas where id = ?')
+  const venta = await env.DB.prepare('select creado_en, cancelada, anticipo from ventas where id = ?')
     .bind(id)
-    .first<{ creado_en: string; cancelada: number }>();
+    .first<{ creado_en: string; cancelada: number; anticipo: number }>();
   if (!venta) return json({ error: 'La venta no existe.' }, 404);
   if (venta.cancelada) return json({ id, cancelada: true, ya_estaba: true });
+  // Antes de pedir aprobacion: no tiene caso mandar al dueno una solicitud que cancelarCore rechazaria.
+  if (venta.anticipo > 0) return json({ error: TICKET_CON_ANTICIPO }, 409);
 
   const usuario = await leerUsuario(env, correo);
   // Una hora ilegible o del futuro no abre la ventana: cae en pedir aprobacion.

@@ -69,6 +69,7 @@ const PANTALLAS: Record<string, Rol[]> = {
   '/sonda-impresora': CAPTURA,
   '/caja': CAJA,
   '/socios': CAJA,
+  '/pedidos': CAJA,
   '/tarjeta-bandas': TODOS,
   '/reportes': DUENO,
   '/mercadolibre': DUENO,
@@ -121,6 +122,7 @@ export function permiso(pathname: string, metodo: string): Regla {
   if (ruta === '/api/solicitudes/cancelaciones' || ruta === '/api/solicitudes/descuentos') return DUENO;
   if (/^\/api\/solicitudes\/[^/]+$/.test(ruta) && metodo === 'GET') return CAJA;   // la caja ve como va la suya
   if (ruta === '/api/ventas' || ruta.startsWith('/api/ventas/')) return CAJA;
+  if (ruta === '/api/pedidos' || ruta.startsWith('/api/pedidos/')) return CAJA;   // pedidos por WhatsApp (Issue #269, pedidos.ts)
   if (ruta === '/api/impresiones' || ruta.startsWith('/api/impresiones/')) return CAJA;
 
   return DUENO;

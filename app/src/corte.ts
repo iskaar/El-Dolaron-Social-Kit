@@ -109,8 +109,11 @@ const leerCorte = (env: Env, id: string) =>
 // Lo cobrado (o devuelto) de una forma de pago, sin la parte pagada con Dolarones.
 const dinero = (forma: string, importe = 'total - dolarones') =>
   `coalesce(sum(case when forma_pago = '${forma}' then ${importe} end), 0)`;
-// Lo que queda de un ticket despues de lo devuelto por piezas sueltas (Issue #138).
-const NETO = 'total - dolarones - devuelto';
+// Lo que queda de un ticket despues de lo devuelto por piezas sueltas (Issue #138) y de lo que
+// pago el saldo de un pedido (Issue #269): ese dinero entro antes, con el anticipo.
+const NETO = 'total - dolarones - anticipo - devuelto';
+// Anticipos de pedidos recibidos en esta caja desde su corte anterior, aunque el pedido ya se haya cancelado o vencido.
+const anticipos = (forma: string) => `(select ${dinero(forma, 'anticipo')} from pedidos where corte_id = ?1)`;
 // Lo cobrado: ventas de este corte que siguen vigentes, netas de lo ya devuelto.
 const VIGENTES = 'corte_id = ?1 and cancelada = 0';
 // La venta ya se habia contado en un corte anterior a `cuando` (la hora de la devolucion).
@@ -152,6 +155,7 @@ export async function registrarCorte(request: Request, env: Env, correo: string)
         `update ventas set corte_cancelacion_id = ?
          where cancelada = 1 and cancelada_caja = ? and corte_cancelacion_id is null`,
       ).bind(id, caja),
+      env.DB.prepare('update pedidos set corte_id = ? where caja = ? and corte_id is null').bind(id, caja),
       env.DB.prepare('update retiros set corte_id = ? where caja = ? and corte_id is null').bind(id, caja),
       env.DB.prepare('update devoluciones set corte_id = ? where caja = ? and corte_id is null').bind(id, caja),
       env.DB.prepare(
@@ -165,13 +169,13 @@ export async function registrarCorte(request: Request, env: Env, correo: string)
            (select max(hasta) from cortes where caja = ?2) as desde,
            coalesce((select fondo_siguiente from cortes where caja = ?2 order by hasta desc limit 1), ?7) as fondo,
            (select count(*) from ventas where ${VIGENTES}) as tickets,
-           (select ${dinero('efectivo', NETO)} from ventas where ${VIGENTES}) as ev,
+           (select ${dinero('efectivo', NETO)} from ventas where ${VIGENTES}) + ${anticipos('efectivo')} as ev,
            (select ${dinero('efectivo', NETO)} from ventas where ${CANCELADAS}) + ${devuelto('efectivo')} as ed,
            (select coalesce(sum(importe), 0) from retiros where corte_id = ?1 and tipo = 'retiro') as re,
            (select coalesce(sum(importe), 0) from retiros where corte_id = ?1 and tipo = 'gasto') as ga,
-           (select ${dinero('tarjeta', NETO)} from ventas where ${VIGENTES}) as tv,
+           (select ${dinero('tarjeta', NETO)} from ventas where ${VIGENTES}) + ${anticipos('tarjeta')} as tv,
            (select ${dinero('tarjeta', NETO)} from ventas where ${CANCELADAS}) + ${devuelto('tarjeta')} as td,
-           (select ${dinero('transferencia', NETO)} from ventas where ${VIGENTES}) as xv,
+           (select ${dinero('transferencia', NETO)} from ventas where ${VIGENTES}) + ${anticipos('transferencia')} as xv,
            (select ${dinero('transferencia', NETO)} from ventas where ${CANCELADAS})
              + ${devuelto('transferencia')} as xd,
            (select coalesce(sum(dolarones - dolarones_devueltos), 0) from ventas where ${VIGENTES}) as dv,

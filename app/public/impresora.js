@@ -281,9 +281,11 @@ export async function imprimirTicket(venta, lineas) {
     partes.push(renglonMonto('Descuento', `-${pesos(venta.descuento)}`));
   }
   partes.push(renglonMonto('TOTAL', pesos(venta.total)));
-  if (venta.dolarones > 0) {
-    partes.push(renglonMonto('Dolarones', `-${pesos(venta.dolarones)}`));
-    partes.push(renglonMonto('A pagar', pesos(venta.total - venta.dolarones)));
+  // Issue #269: lo pagado con el saldo de un pedido (reimpresion: viene del detalle de la venta).
+  if (venta.dolarones > 0) partes.push(renglonMonto('Dolarones', `-${pesos(venta.dolarones)}`));
+  if (venta.anticipo > 0) partes.push(renglonMonto(venta.pedido_folio ? `Anticipo P-${venta.pedido_folio}` : 'Anticipo', `-${pesos(venta.anticipo)}`));
+  if (venta.dolarones > 0 || venta.anticipo > 0) {
+    partes.push(renglonMonto('A pagar', pesos(venta.total - (venta.dolarones || 0) - (venta.anticipo || 0))));
   }
   if (venta.forma_pago === 'efectivo') {
     partes.push(renglonMonto('Efectivo', pesos(venta.efectivo)));
