@@ -286,6 +286,63 @@ export async function imprimirBanda(banda, copias = 1, alAvanzar, alEsperar, { u
 
 const MEDIDA = ['SIZE 50.8 mm,25.4 mm', 'GAP 2 mm,0 mm', 'DIRECTION 1'];
 
+/* ---------- Codigos ajenos (/codigos, Issue #321) ---------- */
+
+// Barras de 1 punto (0.125 mm) no las engancha el lector: 2 es lo minimo.
+const BARRA_MINIMA = 2;
+
+/**
+ * El ancho de barra mas grande que cabe en la etiqueta, sin pasar del calibrado.
+ * Estima con el subset B de Code 128 (11 modulos por caracter), como centrarBarras:
+ * con digitos la impresora usa el subset C y sale mas angosto, nunca mas ancho.
+ * ponytail: por eso un codigo numerico largo sale con barras mas finas de lo que cabria.
+ */
+export const barraQueCabe = (codigo, barra = modulo()) =>
+  Math.min(barra, Math.floor((ANCHO - MARGEN * 2) / (11 * (codigo.length + 2) + 13)));
+
+/**
+ * Lo que se puede imprimir tal cual: ASCII visible (Code 128) sin la comilla ni
+ * la diagonal invertida, que TSPL no escapa (ver limpiar), y que quepa legible.
+ */
+export const codigoImprimible = (codigo) =>
+  /^[\x21-\x7E]+$/.test(codigo) && !/["\\]/.test(codigo) && barraQueCabe(codigo, 99) >= BARRA_MINIMA;
+
+/**
+ * Una etiqueta con solo un codigo de barras ajeno (el que ya usa otra tienda) y
+ * el mismo codigo en texto abajo. No sale de la base ni entra a ella.
+ */
+export function tsplCodigo(codigo, y0 = corrimiento(), barra = modulo()) {
+  const desplazamiento = Math.max(y0, -PRIMER_RENGLON);
+  const y = (base) => base + desplazamiento;
+  const ancho = Math.max(BARRA_MINIMA, barraQueCabe(codigo, barra));
+  const [fuente, letra] = codigo.length * 16 <= ANCHO - MARGEN * 2 ? ['3', 16] : ['2', 12];
+  return `${[
+    ...MEDIDA,
+    'CLS',
+    `BARCODE ${centrarBarras(codigo, ancho)},${y(PRIMER_RENGLON + 16)},"128",112,0,0,${ancho},${ancho * 2},"${codigo}"`,
+    `TEXT ${centrar(codigo, letra)},${y(152)},"${fuente}",0,1,1,"${codigo}"`,
+    'PRINT 1,1',
+  ].join('\r\n')}\r\n`;
+}
+
+/**
+ * Lo pegado de Excel: un renglon por codigo, y la cantidad en la columna de al
+ * lado (tabulador, coma o punto y coma; sin cantidad = 1). Lo que no se puede
+ * imprimir (encabezados, codigos con acentos o muy largos) regresa en `malas`.
+ */
+export function leerCodigos(texto) {
+  const filas = [];
+  const malas = [];
+  for (const renglon of String(texto).split(/\r?\n/)) {
+    if (!renglon.trim()) continue;
+    const [codigo = '', cantidad = '1'] = renglon.split(/[\t;,]/).map((c) => c.trim());
+    const n = Number(cantidad || 1);
+    if (!codigoImprimible(codigo) || !Number.isInteger(n) || n < 1 || n > 999) malas.push(renglon.trim());
+    else filas.push({ codigo, cantidad: n });
+  }
+  return { filas, malas };
+}
+
 /**
  * Le pide a la impresora que mida el rollo ella misma. GAPDETECT avanza un par
  * de etiquetas leyendo el sensor y se queda con la altura y la separacion
