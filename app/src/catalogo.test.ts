@@ -286,3 +286,19 @@ test('catalogo (Issue #241): con cursor, una venta entre paginas no se salta nin
     }
   } finally { t.db.close(); }
 });
+
+test('la caja pide solo lo cambiado del catalogo, incluidas las piezas que salen de venta', async () => {
+  const t = tienda();
+  const PRODUCTO = 'a1111111-1111-4111-8111-111111111111';
+  t.db.prepare(`update productos set actualizado_en = '2026-10-15T10:00:00.000Z' where id = ?`).run(PRODUCTO);
+  const otra = crypto.randomUUID();
+  t.db.prepare(`insert into productos (id, codigo, nombre, precio, stock, semana_ingreso, creado_en, actualizado_en)
+    values (?, 'ED-000002', 'Lampara', 0, 1, 'S41', '', '2026-10-15T12:00:00.000Z')`).run(otra);
+  const r = await t.pedir('/api/catalogo?desde=2026-10-15T11:00:00.000Z', undefined, 'GET');
+  assert.equal(r.status, 200);
+  assert.ok(Date.parse(r.cuerpo.ahora));
+  assert.deepEqual(r.cuerpo.piezas.map((p: any) => [p.codigo, p.precio]), [['ED-000002', 0]]);
+  assert.equal((await t.pedir('/api/catalogo?desde=ayer', undefined, 'GET')).status, 400);
+  // Sin `desde`, la lista completa de siempre (la usan pedidos y la carga inicial de la caja).
+  assert.ok(Array.isArray((await t.pedir('/api/catalogo', undefined, 'GET')).cuerpo));
+});
