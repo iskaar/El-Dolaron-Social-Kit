@@ -214,7 +214,7 @@ let enviando = false;
 async function cargarCatalogo() {
   try {
     const lista = await (await fetch('/api/catalogo')).json();
-    catalogo = new Map(lista.map((p) => [p.codigo, p]));
+    catalogo = new Map(lista.filter((p) => p.propietario !== 'fep').map((p) => [p.codigo, p]));
   } catch { /* sin red: se avisa al buscar */ }
 }
 
