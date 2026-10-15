@@ -161,8 +161,11 @@ async function crearPedido(request: Request, env: Env, ctx: ExecutionContext, co
 
   const ids = [...cantidades.keys()];
   const { results: filas } = await env.DB.prepare(
-    `select id, codigo, precio, sin_inventario from productos where id in (${ids.map(() => '?').join(',')})`,
-  ).bind(...ids).all<{ id: string; codigo: string | null; precio: number; sin_inventario: number }>();
+    `select id, codigo, precio, sin_inventario, propietario from productos where id in (${ids.map(() => '?').join(',')})`,
+  ).bind(...ids).all<{ id: string; codigo: string | null; precio: number; sin_inventario: number; propietario: string }>();
+  // FEP no acepta anticipos en tienda (decision de Isaac, #269): el anticipo no tiene a donde ir en su caja.
+  if (filas.some((p) => p.propietario === 'fep'))
+    return json({ error: 'Las piezas de FEP no se pueden apartar: no aceptamos anticipos de FEP en tienda.' }, 400);
   if (filas.length !== ids.length || filas.some((p) => !p.codigo || !(p.precio > 0) || p.sin_inventario !== 0))
     return json({ error: 'Solo piezas con etiqueta.' }, 400);
 

@@ -404,21 +404,26 @@ test('corte FEP: el anticipo de un pedido de la tienda entra al cajon una sola v
   assert.equal(corte.cuerpo.diferencia, 0);
 });
 
-// BUG (revision de #272). pedidos.ts no rechaza piezas de FEP al apartar (pedidos.html toma el catalogo
-// completo), pero el anticipo se reparte solo entre las lineas de ventas (netas.ts) y `fp` de corte.ts lo
-// deja fuera. Resultado: a FEP se le debe menos que lo cobrado por su pieza y el reporte de la tienda cuenta
-// el anticipo completo como efectivo. Quitar el `todo` al decidir la regla (rechazar FEP en pedidos, o
-// repartir el anticipo a FEP en corte y reportes).
-test('BUG pendiente: un pedido con pieza de FEP reparte su anticipo a FEP y no lo cuenta en la tienda', { todo: 'revision #272: pieza FEP en pedido pierde su parte del anticipo' }, async () => {
+// Decision de Isaac (#269): las piezas de FEP no entran a un pedido; FEP no acepta anticipos en tienda.
+test('un pedido con pieza de FEP se rechaza: no se crea, no baja existencia y no entra al corte', async () => {
   const { db, pedir } = tienda();
   const fep = piezaFep(db, 25000, 5);
-  const ped = await apartar(pedir, { lineas: [{ producto_id: fep, cantidad: 1 }], anticipo: 10000, forma_pago: 'efectivo' });
-  assert.equal(ped.status, 201);
-  assert.equal((await vender(pedir, { pedido_id: ped.id, anticipo: 10000, efectivo: 15000,
-    lineas: [{ producto_id: fep, cantidad: 1 }] })).status, 201);
+  const r = await apartar(pedir, { lineas: [{ producto_id: fep, cantidad: 1 }], anticipo: 10000, forma_pago: 'efectivo' });
+  assert.equal(r.status, 400);
+  assert.equal(r.cuerpo.error, 'Las piezas de FEP no se pueden apartar: no aceptamos anticipos de FEP en tienda.');
+  assert.equal(stockDe(db, fep), 5);
+  assert.equal((db.prepare('select count(*) as n from pedidos').get() as { n: number }).n, 0);
+  assert.equal((db.prepare('select count(*) as n from pedido_lineas').get() as { n: number }).n, 0);
+});
 
-  const corte = await pedir('/api/cortes', { id: crypto.randomUUID(), caja: 'Caja 1', efectivo_contado: 75000, tarjeta_terminal: 0 });
-  assert.equal(corte.cuerpo.fep_por_pagar, 25000);
-  const r = (await pedir('/api/reportes?dias=7', undefined, 'GET')).cuerpo;
-  assert.equal(r.por_forma_pago.find((f: any) => f.forma_pago === 'efectivo')?.total ?? 0, 0);
+test('una pieza de tienda sigue apartandose aunque el pedido venga con una pieza de FEP en otra linea', async () => {
+  const { db, pedir } = tienda();
+  const fep = piezaFep(db, 25000, 5);
+  const b = pieza(db, 25000, 5);
+  const mezcla = await apartar(pedir, { lineas: [{ producto_id: b, cantidad: 1 }, { producto_id: fep, cantidad: 1 }], anticipo: 10000 });
+  assert.equal(mezcla.status, 400);
+  assert.equal(stockDe(db, b), 5);
+  const solo = await apartar(pedir, { lineas: [{ producto_id: b, cantidad: 1 }], anticipo: 10000 });
+  assert.equal(solo.status, 201, JSON.stringify(solo.cuerpo));
+  assert.equal(stockDe(db, b), 4);
 });
