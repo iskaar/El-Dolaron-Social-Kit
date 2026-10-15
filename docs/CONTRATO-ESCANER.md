@@ -22,6 +22,18 @@
 > siguen disponibles en el admin como destino manual. Donde abajo se lea que el precio
 > enruta a banda, vale esta nota.
 
+> **Ropa, probada en sandbox el 2026-10-11 y autorizada para producción el
+> 2026-10-13 (Isaac, Issues #273 y #302):** la ropa ya tiene precios
+> finales de **$300, $200, $150, $120, $100, $80 y $50 MXN**. En modo Ropa se escogen precio y
+> talla antes de fotografiar; la foto conserva ese precio en la cola local. El
+> servidor valida la categoría de precio y deja la pieza lista, sin estimación de IA,
+> porcentaje ni redondeo a 9. Cada foto lleva nombre **Ropa**, su talla y código
+> individual; no se inventa un precio de lista. El árbol de decisiones por tipo de
+> prenda y los nombres específicos quedan para una definición posterior de Isaac.
+> La computadora con la etiquetera imprime automáticamente al quedar guardada la
+> foto con nombre y precio. Esta regla rige en sandbox y producción; para otra
+> mercancía siguen vigentes las reglas de análisis descritas abajo.
+
 ## Decisión de fondo
 
 El escáner **no** es la herramienta de captura del vendedor: la cámara lo es. El análisis con IA
@@ -69,6 +81,14 @@ Detalle completo en `docs/PLAN-ETIQUETAS-POR-BANDA.md`. Resumen:
 - Tira de miniaturas abajo y un contador discreto: `24 fotos · 19 analizadas`. Es la única señal de
   que existe la IA.
 - Una foto = una pieza.
+
+En sandbox y producción, tocar una miniatura permite cambiar el precio final entre
+$300/$200/$150/$120/$100/$80/$50 MXN y Nuevo/Dañado con «Guardar cambios», también después
+de subir. La condición no recalcula ese precio elegido. «Eliminar captura»
+descarta la captura completa tras un segundo toque; requiere conexión y no
+elimina piezas con venta o publicación. El servidor limita estas operaciones
+a capturas propias de las últimas 24 horas. Si ya salió una etiqueta, reemplazarla
+cuando cambie el precio o descartarla cuando se elimine la captura.
 
 ### Reglas que no se negocian
 
@@ -135,7 +155,7 @@ desde `/bandas` (`docs/PLAN-ETIQUETAS-POR-BANDA.md`).
 
 ## 7. Límites de este alcance
 
-- Sin credenciales, sin servicios de pago, sin despliegue a producción, sin publicar en redes.
+- Sin credenciales, sin servicios de pago ni publicación en redes; producción requiere autorización explícita.
 - Un solo maestro de existencias. Ningún otro lugar guarda una cantidad.
 - Sin segunda fórmula de redondeo ni de precio en ningún otro archivo.
 

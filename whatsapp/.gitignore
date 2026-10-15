@@ -1,0 +1,5 @@
+.secrets.json
+.dev.vars*
+.env*
+.wrangler/
+worker-configuration.d.ts

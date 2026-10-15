@@ -1,5 +1,5 @@
 import qrcode from './vendor/qrcode-generator.js';
-import { svgCode128, codigoEnDigitos } from './code128.js';
+import { svgCode128, codigoEnDigitos, codigoDeDigitos } from './code128.js';
 
 const $ = (id) => document.getElementById(id);
 const d = (c) => (c / 100).toLocaleString('es-MX', { maximumFractionDigits:2 }) + ' D';
@@ -7,6 +7,39 @@ const pesos = (c) => (c / 100).toLocaleString('es-MX', { style:'currency', curre
 const fecha = (iso) => new Date(iso).toLocaleDateString('es-MX', { timeZone:'America/Mexico_City' });
 let auth, sdk, config, confirmacion, verificador, siguiente = null, venceCodigo = 0, reenviarDesde = 0;
 
+// Vale de papel (Issue #258): su QR abre /v#<dígitos>. Se guarda en este teléfono hasta
+// entrar o registrarse, y entonces pasa a la cuenta sin volver a escanear. El código va
+// después de '#': nunca llega al servidor ni a sus registros.
+const VALE = 'vale-pendiente';
+const valePendiente = () => { try { return localStorage.getItem(VALE); } catch { return null; } };
+function guardarVale(codigo) {
+  try { codigo ? localStorage.setItem(VALE, codigo) : localStorage.removeItem(VALE); } catch { /* sin almacenamiento: sigue en memoria */ }
+  valeEnMemoria = codigo;
+  $('vale-aviso').hidden = !codigo;
+}
+let valeEnMemoria = null;
+{
+  const leido = codigoDeDigitos(location.hash.slice(1));
+  if (leido?.startsWith('DP-')) { guardarVale(leido); history.replaceState(null, '', '/'); }
+  else if (valePendiente()) guardarVale(valePendiente());
+}
+async function pasarVale() {
+  const codigo = valeEnMemoria;
+  if (!codigo) return;
+  try {
+    const r = await api('vale', { codigo });
+    guardarVale(null);
+    estado(r.ya_estaba ? 'Ese vale ya estaba en tu cuenta.'
+      : '¡Listo! Pasamos ' + d(r.importe) + ' a tu cuenta. Los puedes usar desde el ' + fecha(r.disponible_desde) + '.');
+    await actualizarSaldo();
+    siguiente = null;
+    await recibos();
+  } catch (e) {
+    // Vencido, usado, de otra cuenta o tope semanal: reintentar no cambia nada. Sin red o sesión, se queda.
+    if (e.status >= 400 && e.status < 500 && e.status !== 401) guardarVale(null);
+    estado(e.message, true);
+  }
+}
 function estado(mensaje = '', error = false) {
   $('estado').textContent = mensaje;
   $('estado').classList.toggle('error', error);
@@ -65,6 +98,7 @@ async function cargarCuenta() {
     $('monedero').hidden = false;
     estado();
     novedades();
+    await pasarVale();
   } catch (e) {
     if (!uid || uid !== auth.currentUser?.uid) return;
     $('monedero').hidden = true;

@@ -14,6 +14,13 @@ declare global {
     HOST_VENDEDOR?: string;
     /** 'sandbox' en wrangler.sandbox.jsonc: pinta la franja en todas las pantallas. */
     AMBIENTE?: string;
+    /** Eventos de WhatsApp guardados por el Worker del WhatsApp (Issue #287). Solo produccion. */
+    WHATSAPP_EVENTOS?: KVNamespace;
+    /** Envio de respuestas desde el sitio de personal (Issue #290). Secreto: wrangler secret put. */
+    WHATSAPP_ACCESS_TOKEN?: string;
+    WHATSAPP_PHONE_NUMBER_ID?: string;
+    /** Token del asistente de WhatsApp (Issue #296). Secreto: el mismo valor va en el Worker de WhatsApp. */
+    ASISTENTE_TOKEN?: string;
     /** Solo `wrangler dev` con `--var ACCESS_EQUIPO:local`: el correo con el que se entra. */
     DEV_USUARIO?: string;
     /** Host público exacto. Ausente = portal inaccesible. */

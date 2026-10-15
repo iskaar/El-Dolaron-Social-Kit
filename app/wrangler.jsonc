@@ -16,6 +16,8 @@
     "run_worker_first": true
   },
   "vars": {
+    // Numero de WhatsApp para responder desde /mensajes (Issue #290). Publico, no secreto.
+    "WHATSAPP_PHONE_NUMBER_ID": "1433484303171531",
     // Ese hostname solo sirve la camara y la subida de fotos: el vendedor no
     // llega a precios ni a la caja aunque escriba la ruta.
     "HOST_VENDEDOR": "captura.viste.com.mx",
@@ -34,7 +36,7 @@
     // Encendido de Dolarones (Isaac, 01/10). Altas, vales y premios esperan a
     // PROMOCION_INICIO: lunes 5/10/2026, 11:00 hora de la tienda (UTC-6).
     // Apagado de emergencia: quitar PORTAL_REGISTRO_ABIERTO o VALES_ABIERTOS y desplegar.
-    "BASES_APROBADAS_VERSION": "2026-10-v3",
+    "BASES_APROBADAS_VERSION": "2026-10-v4",
     "PROMOCION_INICIO": "2026-10-05T17:00:00Z",
     "VALES_ABIERTOS": "si",
     // Promo de inauguracion (Isaac, 9/10, Issue #263): 10% directo en todo el ticket, sin tope de tickets.
@@ -92,6 +94,9 @@
       "database_name": "el-dolaron",
       "database_id": "26435b29-79ae-44bf-942d-3bac138c5805"
     }
+  ],
+  "kv_namespaces": [
+    { "binding": "WHATSAPP_EVENTOS", "id": "d6cbf480b05d47c7a17d53d8e4b461a8" }
   ],
   "r2_buckets": [
     {

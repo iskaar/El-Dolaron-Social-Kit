@@ -23,6 +23,7 @@
  * se puede volver a contar para que cuadre.
  */
 
+import { lineasNetas } from './netas.ts';
 import { contadoDe } from '../public/venta.js';
 import { leerUsuario } from './cuentas.ts';
 
@@ -99,6 +100,7 @@ export interface Corte {
   efectivo_esperado: number; efectivo_contado: number; diferencia: number;
   tarjeta_sistema: number; tarjeta_terminal: number; transferencias: number; dolarones: number;
   fondo_siguiente: number; entregado: number; conteo: string; notas: string; creado_en: string;
+  fep_por_pagar: number;   // lo cobrado de piezas de FEP en esta caja, a pagarle a FEP (Issue #298)
 }
 
 const leerCorte = (env: Env, id: string) =>
@@ -159,10 +161,10 @@ export async function registrarCorte(request: Request, env: Env, correo: string)
       env.DB.prepare(
         `insert into cortes (id, caja, cajero, desde, hasta, tickets, fondo_inicial, efectivo_ventas,
            efectivo_devoluciones, retiros, gastos, efectivo_esperado, efectivo_contado, diferencia, tarjeta_sistema,
-           tarjeta_terminal, transferencias, dolarones, fondo_siguiente, entregado, conteo, notas, creado_en)
+           tarjeta_terminal, transferencias, dolarones, fondo_siguiente, entregado, conteo, notas, creado_en, fep_por_pagar)
          select ?1, ?2, ?3, desde, ?4, tickets, fondo, ev, ed, re, ga,
                 fondo + ev - ed - re - ga, ?5, ?5 - (fondo + ev - ed - re - ga), tv - td,
-                ?6, xv - xd, dv - dd, min(?5, ?7), ?5 - min(?5, ?7), ?9, ?8, ?4
+                ?6, xv - xd, dv - dd, min(?5, ?7), ?5 - min(?5, ?7), ?9, ?8, ?4, fp
          from (select
            (select max(hasta) from cortes where caja = ?2) as desde,
            coalesce((select fondo_siguiente from cortes where caja = ?2 order by hasta desc limit 1), ?7) as fondo,
@@ -178,7 +180,12 @@ export async function registrarCorte(request: Request, env: Env, correo: string)
              + ${devuelto('transferencia')} as xd,
            (select coalesce(sum(dolarones - dolarones_devueltos), 0) from ventas where ${VIGENTES}) as dv,
            (select coalesce(sum(dolarones - dolarones_devueltos), 0) from ventas where ${CANCELADAS})
-             + (select coalesce(sum(d.dolarones), 0) from devoluciones d where ${DEVUELTAS}) as dd)`,
+             + (select coalesce(sum(d.dolarones), 0) from devoluciones d where ${DEVUELTAS}) as dd,
+           -- FEP: lo cobrado (efectivo, tarjeta, transferencia) de sus piezas en esta caja; lo pagado con Dolarones
+           -- se descuenta. Un ticket de FEP cancelado despues resta de este corte; el cancelado en el mismo turno no cuenta.
+           -- Mismo reparto por pieza que los reportes (netas.ts).
+           (${lineasNetas('v.corte_id = ?1')} select coalesce(sum(cobrado), 0) from cobros where propietario = 'fep')
+           - (${lineasNetas('v.corte_cancelacion_id = ?1 and v.corte_id != ?1', true)} select coalesce(sum(cobrado), 0) from cobros where propietario = 'fep') as fp)`,
       ).bind(id, caja, correo, ahora, contado, terminal, fondoConfig, notas, JSON.stringify(conteo ?? {})),
     ]);
   } catch (error) {
