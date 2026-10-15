@@ -243,8 +243,13 @@ async function crearBorrador(request: Request, env: Env, ctx: ExecutionContext, 
 async function listarBorradores(url: URL, env: Env, propietario: string): Promise<Response> {
   const estado = url.searchParams.get('estado');
   const desde = url.searchParams.get('desde');
-  if (desde !== null && (!Number.isFinite(Date.parse(desde)) || new Date(desde).toISOString() !== desde)) {
-    return json({ error: 'Fecha de captura invalida.' }, 400);
+  // `cambios`: solo lo modificado despues (indice de la migracion 038), con las descartadas
+  // para que la pantalla las quite. Es lo que pide /etiquetas cada 30 s en automatica.
+  const cambios = url.searchParams.get('cambios');
+  for (const fecha of [desde, cambios]) {
+    if (fecha !== null && (!Number.isFinite(Date.parse(fecha)) || new Date(fecha).toISOString() !== fecha)) {
+      return json({ error: 'Fecha de captura invalida.' }, 400);
+    }
   }
   // Los botes son productos para la caja, no piezas que revisar.
   // Orden de captura (mas vieja primero), no de llegada: las piezas se quedan
@@ -254,9 +259,10 @@ async function listarBorradores(url: URL, env: Env, propietario: string): Promis
   const consulta = `select id, nombre, categoria, marca, talla, precio_lista, precio, estado_fisico,
                            estado_analisis, destino, stock, semana_ingreso, capturado_por, creado_en
                     from productos
-                    where sin_inventario = 0 and propietario = ? and estado_analisis <> 'descartado' ${estado ? 'and estado_analisis = ?' : ''} ${desde ? 'and creado_en >= ?' : ''}
+                    where sin_inventario = 0 and propietario = ? ${cambios ? 'and actualizado_en > ?' : "and estado_analisis <> 'descartado'"}
+                      ${estado ? 'and estado_analisis = ?' : ''} ${desde ? 'and creado_en >= ?' : ''}
                     order by creado_en asc limit 2000`;
-  const filtros = [propietario, ...(estado ? [estado] : []), ...(desde ? [desde] : [])];
+  const filtros = [propietario, ...(cambios ? [cambios] : []), ...(estado ? [estado] : []), ...(desde ? [desde] : [])];
   const sentencia = env.DB.prepare(consulta).bind(...filtros);
   const { results } = await sentencia.all<FilaBorrador>();
   return json(results);
@@ -391,9 +397,9 @@ async function capturarManual(request: Request, env: Env, correo: string): Promi
   // el mismo que le pondria Etiquetas, asi que la etiqueta impresa despues coincide.
   // Las de banda se cobran con el codigo de la banda.
   await env.DB.prepare(
-    `update productos set codigo = ${CODIGO_NUEVO}
+    `update productos set codigo = ${CODIGO_NUEVO}, actualizado_en = ?
      where id = ? and (codigo is null or codigo = '') and destino not like 'banda%'`,
-  ).bind(id).run();
+  ).bind(new Date().toISOString(), id).run();
   return json(await respuesta.json(), 201);
 }
 
@@ -722,8 +728,23 @@ async function crearFamilia(request: Request, env: Env): Promise<Response> {
   return json({ clave, nombre, prefijo }, 201);
 }
 
-/** Catalogo para la caja: se guarda en el navegador y se cobra sin red. */
-async function catalogo(env: Env): Promise<Response> {
+/**
+ * Catalogo para la caja: se guarda en el navegador y se cobra sin red.
+ * Con `?desde=` solo lo que cambio despues (indice de la migracion 038), incluidas
+ * las piezas que ya no se venden (precio 0) para que la caja las quite. Traer las
+ * ~3000 piezas cada minuto agotaba la cuota diaria de lecturas de D1 (15/10).
+ */
+async function catalogo(env: Env, url: URL): Promise<Response> {
+  const desde = url.searchParams.get('desde');
+  if (desde !== null) {
+    if (!Number.isFinite(Date.parse(desde))) return json({ error: 'Fecha invalida.' }, 400);
+    const ahora = new Date().toISOString();
+    const { results } = await env.DB.prepare(
+      `select id, codigo, nombre, precio, sin_inventario, stock, propietario
+       from productos where actualizado_en > ? and codigo is not null and codigo <> ''`,
+    ).bind(new Date(desde).toISOString()).all();
+    return json({ ahora, piezas: results });
+  }
   const { results } = await env.DB.prepare(
     `select id, codigo, nombre, precio, sin_inventario, stock, propietario
      from productos where codigo is not null and codigo <> '' and precio > 0
@@ -1079,6 +1100,16 @@ async function tomarImpresion(id: string, request: Request, env: Env, correo: st
 // el corte de las 20:00 solo veia lo vendido de 18:00 a 20:00 (Issue #93).
 const diaTienda = (columna: string) => `substr(datetime(${columna}, '-6 hours'), 1, 10)`;
 export const hoyTienda = (ahora = Date.now()) => new Date(ahora - 6 * 3_600_000).toISOString().slice(0, 10);
+const DIA = /^\d{4}-\d{2}-\d{2}$/;
+/**
+ * [00:00, 24:00) de un dia de la tienda, en UTC. Para filtrar se compara la columna
+ * tal cual: diaTienda() en el WHERE obliga a D1 a leer toda la tabla en cada
+ * consulta, y la caja pide el corte del dia seguido (agoto la cuota diaria, 15/10).
+ */
+const delDia = (dia: string) => {
+  const apertura = (d: string) => `${d}T06:00:00.000Z`;
+  return [apertura(dia), apertura(new Date(Date.parse(`${dia}T12:00:00Z`) + 86_400_000).toISOString().slice(0, 10))];
+};
 
 /**
  * Los `dias` dias completos de la tienda que terminan hoy (Issue #166): el primero
@@ -1109,12 +1140,13 @@ const COLUMNAS_TICKET = `v.id, v.total, v.forma_pago, v.cancelada, v.creado_en, 
 /** Tickets de un dia (hoy si no se dice): la caja cancela el que se cobro mal; reportes solo los ve. */
 async function ventasDelDia(url: URL, env: Env): Promise<Response> {
   const dia = url.searchParams.get('dia') ?? hoyTienda();
+  if (!DIA.test(dia)) return json({ error: 'Dia invalido.' }, 400);
   const { results } = await env.DB.prepare(
     `select ${COLUMNAS_TICKET}
-     from ventas v where ${diaTienda('v.creado_en')} = ?
+     from ventas v where v.creado_en >= ? and v.creado_en < ?
      order by v.creado_en desc limit 300`,
   )
-    .bind(dia)
+    .bind(...delDia(dia))
     .all();
   return json(results);
 }
@@ -1142,25 +1174,27 @@ async function registrarAperturaCajon(request: Request, env: Env, correo: string
 /** Corte del dia: lo que hay que cuadrar contra el efectivo en la caja. */
 async function corte(url: URL, env: Env): Promise<Response> {
   const dia = url.searchParams.get('dia') ?? hoyTienda();
+  if (!DIA.test(dia)) return json({ error: 'Dia invalido.' }, 400);
+  const rango = delDia(dia);
   // Las canceladas no cuentan: el corte es contra el efectivo que hay en el cajon.
   const { results } = await env.DB.prepare(
     `select forma_pago, sum(tickets) as tickets, sum(total) as total, sum(dolarones) as dolarones from (
        select forma_pago, count(*) as tickets, sum(total - dolarones - anticipo - devuelto) as total,
               sum(dolarones - dolarones_devueltos) as dolarones
-       from ventas where ${diaTienda('creado_en')} = ? and cancelada = 0 group by forma_pago
+       from ventas where creado_en >= ? and creado_en < ? and cancelada = 0 group by forma_pago
        union all
-       select forma_pago, 0, sum(anticipo), 0 from pedidos where ${diaTienda('creado_en')} = ? group by forma_pago
+       select forma_pago, 0, sum(anticipo), 0 from pedidos where creado_en >= ? and creado_en < ? group by forma_pago
      ) group by forma_pago`,
   )
-    .bind(dia, dia)
+    .bind(...rango, ...rango)
     .all<{ forma_pago: string; tickets: number; total: number; dolarones: number }>();
 
   const piezas = await env.DB.prepare(
     `select coalesce(sum(l.cantidad - l.cancelada_cantidad), 0) as piezas from venta_lineas l
      join ventas v on v.id = l.venta_id
-     where ${diaTienda('v.creado_en')} = ? and v.cancelada = 0`,
+     where v.creado_en >= ? and v.creado_en < ? and v.cancelada = 0`,
   )
-    .bind(dia)
+    .bind(...rango)
     .first<{ piezas: number }>();
 
   return json({
@@ -1486,7 +1520,7 @@ function filtrosTickets(url: URL) {
     filtros.push('v.cancelada = 0 and exists (select 1 from venta_lineas where venta_id = v.id and cancelada_cantidad > 0)');
   }
   const dia = q.get('dia') ?? '';
-  if (/^\d{4}-\d{2}-\d{2}$/.test(dia)) { filtros.push(`${diaTienda('v.creado_en')} = ?`); datos.push(dia); }
+  if (DIA.test(dia)) { filtros.push('v.creado_en >= ? and v.creado_en < ?'); datos.push(...delDia(dia)); }
   if (q.get('socio') === '1') filtros.push('v.cliente_id is not null');
   if (q.get('dolarones') === '1') filtros.push('v.dolarones > 0');
   const donde = filtros.join(' and ');
@@ -1853,7 +1887,7 @@ export default {
       }
 
       if (pathname === '/api/catalogo') {
-        return await catalogo(env);
+        return await catalogo(env, url);
       }
       // Issue #220: piezas que no pueden salir en el sitio, para corregir en /admin. Solo el dueno (cuentas.ts).
       if (pathname === '/api/catalogo/revision' && request.method === 'GET') {
