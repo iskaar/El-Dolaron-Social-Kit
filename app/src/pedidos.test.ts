@@ -3,7 +3,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import type { DatabaseSync } from 'node:sqlite';
-import { tienda, PRODUCTO } from './prueba-d1.ts';
+import { tienda, PRODUCTO, codigoPrueba } from './prueba-d1.ts';
 import { permiso } from './cuentas.ts';
 import { PUBLICABLE } from './mercadolibre.ts';
 import { vencerPedidos, telefonoDe } from './pedidos.ts';
@@ -344,4 +344,81 @@ test('si otra caja gasta el saldo entre la lectura y el batch, el CHECK aborta l
   assert.equal((db.prepare('select count(*) as n from ventas').get() as { n: number }).n, 0);
   assert.equal(stockDe(db, PRODUCTO), 49);   // el apartado sigue reteniendo su pieza: el batch se deshizo
   assert.equal((db.prepare('select estado from pedidos where id = ?').get(ped.id) as any).estado, 'apartado');
+});
+
+// Pieza de FEP (Issue #298): propietario 'fep', como la pone la migracion 032 al marcarla.
+function piezaFep(db: DatabaseSync, precio: number, stock: number) {
+  const id = crypto.randomUUID();
+  db.prepare(`insert into productos (id, codigo, nombre, precio, stock, estado_analisis, foto_key, semana_ingreso, creado_en, actualizado_en, propietario)
+              values (?, ?, 'Bolsa FEP', ?, ?, 'listo', 'fotos/x.jpg', 'S41', '', '', 'fep')`)
+    .run(id, `ED-${String(++consecutivo).padStart(6, '0')}`, precio, stock);
+  return id;
+}
+
+test('anticipo y Dolarones en un mismo ticket: la fila dolarones del reporte no cuenta el anticipo y las formas suman el resumen', async () => {
+  const { db, pedir } = tienda();
+  // Un socio con $20 de Dolarones: una compra de $250 en efectivo le da $20 (8%) al dia siguiente.
+  const socio = (await pedir('/api/socios', { id: crypto.randomUUID(), nombre: 'Cliente', telefono: '4449990001',
+    acepta_bases: true, declara_mayor_edad: true })).cuerpo;
+  await pedir('/api/portal/llegada', { cliente_id: socio.id });
+  assert.equal((await pedir('/api/ventas', { id: crypto.randomUUID(), cliente_id: socio.id, lineas: [{ producto_id: PRODUCTO, cantidad: 1 }],
+    forma_pago: 'efectivo', efectivo: 25000, caja: 'Caja 1' })).status, 201);
+  db.prepare("update dolarones_lotes set disponible_desde = '2026-01-01' where origen = 'compra'").run();
+
+  // Pedido de $250 con $100 de anticipo en tarjeta. El ticket de $250 se paga con $20 de Dolarones,
+  // $100 del anticipo y $130 en efectivo.
+  const ped = await apartar(pedir, { forma_pago: 'tarjeta', anticipo: 10000 });
+  assert.equal(ped.status, 201);
+  const v = await pedir('/api/ventas', { id: crypto.randomUUID(), cliente_id: socio.id, codigo_socio: await codigoPrueba(db, socio.id),
+    lineas: [{ producto_id: PRODUCTO, cantidad: 1 }], forma_pago: 'efectivo', efectivo: 13000, caja: 'Caja 1',
+    dolarones: 2000, pedido_id: ped.id, anticipo: 10000 });
+  assert.equal(v.status, 201, JSON.stringify(v.cuerpo));
+  assert.equal(v.cuerpo.cambio, 0);
+
+  const r = (await pedir('/api/reportes?dias=7', undefined, 'GET')).cuerpo;
+  const formas = Object.fromEntries(r.por_forma_pago.map((f: any) => [f.forma_pago, f.total]));
+  // Ventas: $250 de la compra previa + $250 de este ticket.
+  assert.equal(r.resumen.total, 50000);
+  assert.equal(formas.efectivo, 38000);   // $250 de la compra previa + $130 de este ticket
+  assert.equal(formas.tarjeta, 10000);    // el anticipo entro el dia que se aparto, una sola vez
+  assert.equal(formas.dolarones, 2000);   // solo los Dolarones: sin los $100 de anticipo
+  assert.equal(Object.values(formas).reduce((suma: number, n) => suma + n, 0), r.resumen.total);
+  assert.equal(r.por_forma_pago.find((f: any) => f.forma_pago === 'dolarones').tickets, 1);
+});
+
+test('corte FEP: el anticipo de un pedido de la tienda entra al cajon una sola vez y no se le debe a FEP', async () => {
+  const { db, pedir } = tienda();
+  const fep = piezaFep(db, 30000, 5);
+  const b = pieza(db, 25000, 5);
+  // Pedido de la tienda con $100 de anticipo en efectivo.
+  assert.equal((await apartar(pedir, { lineas: [{ producto_id: b, cantidad: 1 }], anticipo: 10000, forma_pago: 'efectivo' })).status, 201);
+  // Dos piezas de FEP cobradas en efectivo, sin pedido.
+  assert.equal((await pedir('/api/ventas', { id: crypto.randomUUID(), lineas: [{ producto_id: fep, cantidad: 2 }],
+    forma_pago: 'efectivo', efectivo: 60000, caja: 'Caja 1' })).status, 201);
+
+  const corte = await pedir('/api/cortes', { id: crypto.randomUUID(), caja: 'Caja 1', efectivo_contado: 120000, tarjeta_terminal: 0 });
+  assert.equal(corte.status, 201, JSON.stringify(corte.cuerpo));
+  assert.equal(corte.cuerpo.efectivo_ventas, 70000);      // $100 del anticipo + $600 de FEP
+  assert.equal(corte.cuerpo.fep_por_pagar, 60000);        // solo lo cobrado de sus piezas
+  assert.equal(corte.cuerpo.efectivo_esperado, 120000);   // fondo $500 + $700
+  assert.equal(corte.cuerpo.diferencia, 0);
+});
+
+// BUG (revision de #272). pedidos.ts no rechaza piezas de FEP al apartar (pedidos.html toma el catalogo
+// completo), pero el anticipo se reparte solo entre las lineas de ventas (netas.ts) y `fp` de corte.ts lo
+// deja fuera. Resultado: a FEP se le debe menos que lo cobrado por su pieza y el reporte de la tienda cuenta
+// el anticipo completo como efectivo. Quitar el `todo` al decidir la regla (rechazar FEP en pedidos, o
+// repartir el anticipo a FEP en corte y reportes).
+test('BUG pendiente: un pedido con pieza de FEP reparte su anticipo a FEP y no lo cuenta en la tienda', { todo: 'revision #272: pieza FEP en pedido pierde su parte del anticipo' }, async () => {
+  const { db, pedir } = tienda();
+  const fep = piezaFep(db, 25000, 5);
+  const ped = await apartar(pedir, { lineas: [{ producto_id: fep, cantidad: 1 }], anticipo: 10000, forma_pago: 'efectivo' });
+  assert.equal(ped.status, 201);
+  assert.equal((await vender(pedir, { pedido_id: ped.id, anticipo: 10000, efectivo: 15000,
+    lineas: [{ producto_id: fep, cantidad: 1 }] })).status, 201);
+
+  const corte = await pedir('/api/cortes', { id: crypto.randomUUID(), caja: 'Caja 1', efectivo_contado: 75000, tarjeta_terminal: 0 });
+  assert.equal(corte.cuerpo.fep_por_pagar, 25000);
+  const r = (await pedir('/api/reportes?dias=7', undefined, 'GET')).cuerpo;
+  assert.equal(r.por_forma_pago.find((f: any) => f.forma_pago === 'efectivo')?.total ?? 0, 0);
 });
