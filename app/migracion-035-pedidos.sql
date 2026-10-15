@@ -5,10 +5,9 @@
 -- anticipo de lo que se cobra (ventas.anticipo).
 --
 -- Correr una vez, ANTES de desplegar el codigo que la usa (sandbox primero, luego prod):
---   npx wrangler d1 execute el-dolaron --remote --file=migracion-033-pedidos.sql
+--   npx wrangler d1 execute el-dolaron --remote --file=migracion-035-pedidos.sql
 --
 -- Aditiva. Falla si se corre de nuevo (las columnas de ventas ya existen): no pasa nada.
--- (032 la usa el PR #259.)
 
 create table if not exists pedidos (
   id             text primary key,                 -- uuid del cliente: reintentar no duplica
