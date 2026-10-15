@@ -189,7 +189,8 @@ h2 { font-family: var(--display); font-variation-settings: var(--display-axes); 
 .groups a:focus-visible { outline-color: var(--yellow); }
 /* La máscara del cupón recorta todo lo de afuera: el foco va dentro (Issue #241). */
 .groups .group-card:focus-visible { outline: none; }
-.groups .group-card:focus-visible .coupon-body { outline: 4px solid var(--red-text); outline-offset: 4px; }
+/* Foco de dos trazos (Issue #311): blanco contra el azul del cupón 11.84:1; azul contra el crema 9.52:1. */
+.groups .group-card:focus-visible .coupon-body { outline: 3px solid var(--navy); outline-offset: 3px; box-shadow: 0 0 0 3px var(--white), inset 0 0 0 3px var(--coupon), inset 0 0 0 4px var(--navy); }
 .groups-layout { display: grid; grid-template-columns: 1fr 1.1fr; gap: 72px; align-items: center; padding-block: 84px; }
 .groups-copy .section-lede { margin-top: 18px; max-width: 440px; }
 .groups-cards { display: grid; gap: 26px; }
