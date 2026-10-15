@@ -273,16 +273,18 @@ async function destinoValido(destino: string, env: Env): Promise<boolean> {
 /**
  * Correcciones del admin. Solo llegan los campos que cambiaron; si no viene un
  * precio explicito, se recalcula con la configuracion vigente.
+ * Con etiqueta (codigo) la pieza ya esta a la venta con ese precio impreso: solo
+ * el dueno lo cambia (Issue #75). Antes de etiquetar, poner precio es parte de la captura.
  */
-async function corregirBorrador(id: string, cambios: Record<string, unknown>, env: Env): Promise<Response> {
+async function corregirBorrador(id: string, cambios: Record<string, unknown>, env: Env, esDueno: boolean): Promise<Response> {
   if (!UUID.test(id)) {
     return json({ error: 'Identificador invalido.' }, 400);
   }
   const fila = await env.DB.prepare(
-    "select nombre, categoria, marca, talla, precio_lista, precio, estado_fisico, destino, stock from productos where id = ? and estado_analisis <> 'descartado'",
+    "select nombre, categoria, marca, talla, precio_lista, precio, estado_fisico, destino, stock, codigo from productos where id = ? and estado_analisis <> 'descartado'",
   )
     .bind(id)
-    .first<FilaBorrador>();
+    .first<FilaBorrador & { codigo: string | null }>();
   if (!fila) {
     return json({ error: 'La pieza no existe.' }, 404);
   }
@@ -339,6 +341,9 @@ async function corregirBorrador(id: string, cambios: Record<string, unknown>, en
   if (!await destinoValido(destino, env)) {
     return json({ error: 'Destino invalido.' }, 400);
   }
+  if (!esDueno && fila.codigo && precio !== fila.precio) {
+    return json({ error: 'Esta pieza ya tiene etiqueta: solo el dueño cambia su precio.' }, 403);
+  }
 
   const guardada = await env.DB.prepare(
     `update productos set nombre = ?, categoria = ?, marca = ?, talla = ?, precio_lista = ?, precio = ?,
@@ -376,7 +381,7 @@ async function capturarManual(request: Request, env: Env, correo: string): Promi
   )
     .bind(id, semanaIngreso(new Date()), correo, ahora, ahora)
     .run();
-  const respuesta = await corregirBorrador(id, cuerpo, env);
+  const respuesta = await corregirBorrador(id, cuerpo, env, true);
   // Datos invalidos: no queda una pieza vacia (salvo que fuera un reintento de una ya guardada).
   if (!respuesta.ok && meta.changes > 0) await env.DB.prepare('delete from productos where id = ?').bind(id).run();
   if (!respuesta.ok) return respuesta;
@@ -1945,7 +1950,8 @@ export default {
       const pieza = pathname.match(/^\/api\/borradores\/([^/]+)$/);
       if (pieza) {
         if (request.method === 'PATCH') {
-          return await corregirBorrador(pieza[1], await request.json(), env);
+          const esDueno = !!(await leerUsuario(env, correo))?.roles.includes('dueno');
+          return await corregirBorrador(pieza[1], await request.json(), env, esDueno);
         }
         if (request.method === 'DELETE') {
           return await descartarBorrador(pieza[1], env);
