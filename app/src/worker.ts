@@ -39,6 +39,7 @@ import { cajeroEnTurno, listarCajeros, entrar, salir, ponerPin } from './cajeros
 import { registrarSocio, buscarSocio, buscarPorCodigo, basesListas, sentenciasDeVenta, saldo } from './dolarones.ts';
 import { registrarCorte, registrarRetiro, ultimoCorte, cajaDe } from './corte.ts';
 import { rutaGastos } from './gastos.ts';
+import { devengarNomina, rutaNomina } from './nomina.ts';
 import { lineasNetas } from './netas.ts';
 import { portal, llegada, vincular } from './portal.ts';
 import { mensajesApi, responderApi } from './mensajes.ts';
@@ -1383,7 +1384,7 @@ async function reportes(url: URL, env: Env): Promise<Response> {
 
   const { results: cortes } = await env.DB.prepare(
     `select id, caja, cajero, desde, hasta, tickets, fondo_inicial, efectivo_ventas, efectivo_devoluciones, retiros,
-            gastos, efectivo_esperado, efectivo_contado, diferencia, tarjeta_sistema, tarjeta_terminal, transferencias,
+            gastos, nomina, efectivo_esperado, efectivo_contado, diferencia, tarjeta_sistema, tarjeta_terminal, transferencias,
             dolarones, fondo_siguiente, entregado, notas
      from cortes where hasta >= ? order by hasta desc`,
   )
@@ -1918,6 +1919,9 @@ export default {
       if (pathname === '/api/gastos' || pathname.startsWith('/api/gastos/')) {
         return await rutaGastos(request, env, url, correo);
       }
+      if (pathname === '/api/nomina' || pathname.startsWith('/api/nomina/')) {
+        return await rutaNomina(request, env, url, correo);
+      }
 
       if (pathname === '/api/cajon' && request.method === 'POST') {
         return await registrarAperturaCajon(request, env, correo);
@@ -2035,6 +2039,7 @@ export default {
   // Cron de wrangler.jsonc, cada 15 min: ordenes de Mercado Libre perdidas y
   // conciliacion de existencias. Sin cuenta conectada no hace nada.
   async scheduled(_evento, env, ctx): Promise<void> {
+    ctx.waitUntil(devengarNomina(env));
     ctx.waitUntil(sincronizar(env));
     // Apartados cuyo plazo llego: vuelven a la venta (Issue #269). Aparte, para que uno no frene al otro.
     ctx.waitUntil(vencerPedidos(env));

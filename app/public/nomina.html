@@ -1,0 +1,312 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>El Dolarón — nómina</title>
+<style>
+  :root { --azul:#16366B; --rojo:#D72B32; --linea:#dfe3ea; --suave:#5b6478; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:#f4f6f9; color:#1a1f2b; font-family:system-ui,-apple-system,sans-serif; }
+  header { background:var(--azul); color:white; padding:14px 20px; display:flex; gap:14px; align-items:center; }
+  header h1 { margin:0; font-size:19px; flex:1; }
+  header a { color:#FFD447; }
+  main { width:min(900px,100%); margin:auto; padding:16px; display:grid; gap:16px; }
+  section { background:white; border:1px solid var(--linea); border-radius:12px; padding:16px; }
+  h2 { margin:0 0 12px; color:var(--azul); font-size:17px; }
+  form { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px 12px; }
+  label { display:grid; gap:5px; color:var(--suave); font-size:13px; }
+  input,select,button { font:inherit; }
+  input,select { width:100%; min-height:44px; padding:10px; border:1px solid var(--linea); border-radius:8px; background:white; }
+  button { min-height:44px; padding:9px 14px; border:0; border-radius:8px; background:var(--azul); color:white; font-weight:650; cursor:pointer; }
+  button.claro { background:white; color:var(--azul); border:1px solid var(--linea); }
+  button.peligro { background:white; color:var(--rojo); border:1px solid var(--rojo); }
+  button:disabled { opacity:.6; }
+  .ancho { grid-column:1/-1; }
+  .ayuda, .muted { color:var(--suave); font-size:13px; line-height:1.45; }
+  .persona { display:grid; gap:8px; }
+  .fila { display:flex; justify-content:space-between; gap:8px; }
+  .acciones { display:flex; gap:8px; flex-wrap:wrap; }
+  .acciones button { flex:1 1 120px; }
+  #resumen { background:#f4f6f9; border-radius:8px; padding:10px 12px; font-variant-numeric:tabular-nums; }
+  #estado { min-height:20px; color:var(--suave); font-size:14px; }
+  table { width:100%; border-collapse:collapse; font-size:14px; }
+  th, td { text-align:left; padding:8px; border-bottom:1px solid var(--linea); }
+  td.num { text-align:right; font-variant-numeric:tabular-nums; }
+  @media (max-width:560px) { main { padding:10px; } form { grid-template-columns:1fr; } }
+  @media print {
+    body * { visibility:hidden !important; }
+    #recibo, #recibo * { visibility:visible !important; }
+    #recibo { position:absolute; inset:0; padding:24px; border:0; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>Nómina</h1>
+  <a href="/gastos">Gastos</a>
+  <a href="/">Inicio</a>
+</header>
+<main>
+  <p id="estado" role="status" aria-live="polite"></p>
+  <div id="empleados"></div>
+
+  <section id="accion" hidden>
+    <h2 id="accion-titulo"></h2>
+    <form id="accion-form">
+      <label class="solo-editar">Nombre<input name="nombre" maxlength="80"></label>
+      <label class="solo-editar">Periodo
+        <select name="periodo"><option value="diario">Diario</option><option value="quincenal">Quincenal</option></select>
+      </label>
+      <label class="solo-editar">Sueldo del periodo ($)<input name="sueldo" type="number" min="0.01" step="0.01"></label>
+      <label class="solo-falta">Día que no trabajó<input name="fecha" type="date"></label>
+      <label class="con-dinero" id="etiqueta-importe">Efectivo que se entrega ($)<input name="importe" type="number" min="0.01" step="0.01"></label>
+      <label class="solo-pago">Abono a adelantos ($)<input name="abono" type="number" min="0" step="0.01" value="0"></label>
+      <label class="con-dinero">Sale de
+        <select name="origen"><option value="caja">El cajón (lo descuenta el corte)</option><option value="fuera">Fuera de caja</option></select>
+      </label>
+      <label class="con-dinero" id="campo-caja">Caja
+        <select name="caja"><option>Caja 1</option><option>Caja 2</option><option>Caja 3</option></select>
+      </label>
+      <label class="ancho sin-editar">Nota<input name="nota" maxlength="200"></label>
+      <p class="ancho solo-pago" id="resumen"></p>
+      <div class="ancho acciones">
+        <button id="confirmar">Confirmar</button>
+        <button type="button" class="claro" id="cancelar">Cancelar</button>
+      </div>
+    </form>
+  </section>
+
+  <section>
+    <h2>Historial</h2>
+    <div id="historial" class="muted">Toca «Historial» en un empleado.</div>
+  </section>
+
+  <section>
+    <h2>Alta de empleado</h2>
+    <form id="alta">
+      <label>Nombre<input id="nombre" required maxlength="80"></label>
+      <label>Periodo
+        <select id="periodo"><option value="diario">Diario</option><option value="quincenal">Quincenal</option></select>
+      </label>
+      <label>Sueldo del periodo ($)<input id="sueldo" type="number" min="0.01" step="0.01" required></label>
+      <button>Guardar empleado</button>
+    </form>
+    <p class="ayuda">
+      El sueldo se suma solo: cada día al de pago diario y el 15 y el último día del mes al de quincena.
+      Un día que no trabajó (también su descanso, si es de pago diario) se registra como <b>falta</b> y descuenta
+      un día de sueldo (la quincena entre 15).
+    </p>
+  </section>
+
+  <section id="recibo" hidden></section>
+</main>
+
+<script type="module">
+const $ = (id) => document.getElementById(id);
+const pesos = (centavos) => (centavos / 100).toLocaleString('es-MX', { style: 'currency', currency: 'MXN' });
+const centavos = (valor) => Math.round(Number(valor || 0) * 100);
+const hoy = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Mexico_City' }).format(new Date());
+const escapar = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const avisar = (texto) => { $('estado').textContent = texto; };
+
+let personas = [];
+let actual = null;          // { empleado, tipo } de la accion abierta
+let idPendiente = null;     // mismo id hasta que se guarde: reintentar no registra dos veces
+let bajaPedida = null;      // la baja pide un segundo toque
+
+async function api(url, cuerpo, metodo = cuerpo ? 'POST' : 'GET') {
+  const r = await fetch(url, {
+    method: metodo, cache: 'no-store',
+    headers: cuerpo ? { 'content-type': 'application/json' } : {},
+    body: cuerpo ? JSON.stringify(cuerpo) : undefined,
+  });
+  const datos = await r.json();
+  if (!r.ok) throw new Error(datos.error || 'No se pudo guardar.');
+  return datos;
+}
+
+/* ---------- Lista ---------- */
+
+async function cargar() {
+  personas = (await api('/api/nomina')).empleados;
+  $('empleados').replaceChildren(...personas.filter((e) => e.activo).map(tarjeta));
+}
+
+function tarjeta(e) {
+  const nodo = document.createElement('section');
+  nodo.className = 'persona';
+  nodo.innerHTML = `
+    <div class="fila"><b>${escapar(e.nombre)}</b><span class="muted">${e.periodo} · ${pesos(e.sueldo)}</span></div>
+    <div class="fila"><span>Se le debe</span><b>${pesos(e.debe)}</b></div>
+    <div class="fila"><span>Adelantos por descontar</span><b>${pesos(e.adelantos)}</b></div>
+    <div class="acciones">
+      <button data-tipo="pago">Pagar</button>
+      <button data-tipo="adelanto" class="claro">Adelanto</button>
+      <button data-tipo="falta" class="claro">Falta</button>
+      <button data-tipo="historial" class="claro">Historial</button>
+      <button data-tipo="editar" class="claro">Editar</button>
+      <button data-tipo="baja" class="peligro">Baja</button>
+    </div>`;
+  nodo.addEventListener('click', (ev) => {
+    const tipo = ev.target.dataset?.tipo;
+    if (tipo === 'historial') historial(e).catch((error) => avisar(error.message));
+    else if (tipo === 'baja') baja(e, ev.target).catch((error) => avisar(error.message));
+    else if (tipo) abrir(e, tipo);
+  });
+  return nodo;
+}
+
+/* ---------- Acciones: pago, adelanto, falta, editar ---------- */
+
+const TITULOS = { pago: 'Pagar a', adelanto: 'Adelanto a', falta: 'Falta de', editar: 'Editar a' };
+
+function abrir(empleado, tipo) {
+  actual = { empleado, tipo };
+  idPendiente = crypto.randomUUID();
+  const f = $('accion-form');
+  f.reset();
+  f.elements.fecha.value = hoy();
+  f.elements.nombre.value = empleado.nombre;
+  f.elements.periodo.value = empleado.periodo;
+  f.elements.sueldo.value = empleado.sueldo / 100;
+  if (tipo === 'pago') f.elements.importe.value = Math.max(0, empleado.debe) / 100 || '';
+  $('etiqueta-importe').firstChild.textContent = tipo === 'adelanto' ? 'Importe del adelanto ($)' : 'Efectivo que se entrega ($)';
+  const ver = (clase, visible) => f.querySelectorAll(clase).forEach((n) => { n.hidden = !visible; });
+  ver('.solo-editar', tipo === 'editar');
+  ver('.sin-editar', tipo !== 'editar');
+  ver('.solo-falta', tipo === 'falta');
+  ver('.con-dinero', tipo === 'pago' || tipo === 'adelanto');
+  ver('.solo-pago', tipo === 'pago');
+  mostrarCaja();
+  resumir();
+  $('accion-titulo').textContent = `${TITULOS[tipo]} ${empleado.nombre}`;
+  $('accion').hidden = false;
+  $('accion').scrollIntoView({ behavior: 'smooth' });
+}
+
+function mostrarCaja() {
+  const f = $('accion-form');
+  $('campo-caja').hidden = f.elements.origen.value !== 'caja' || f.elements.origen.closest('label').hidden;
+}
+
+/** Antes de confirmar un pago: cuanto se le debe, cuanto se abona y cuanto efectivo sale. */
+function resumir() {
+  if (actual?.tipo !== 'pago') return;
+  const f = $('accion-form');
+  const neto = centavos(f.elements.importe.value);
+  const abono = centavos(f.elements.abono.value);
+  const queda = actual.empleado.debe - neto - abono;
+  $('resumen').innerHTML = `Se le debe ${pesos(actual.empleado.debe)}<br>`
+    + `− Abono a adelantos ${pesos(abono)} (le quedan ${pesos(actual.empleado.adelantos - abono)})<br>`
+    + `− <b>Efectivo que se entrega ${pesos(neto)}</b><br>`
+    + `= Queda debiéndosele ${pesos(queda)}`;
+}
+
+$('accion-form').addEventListener('input', resumir);
+$('accion-form').elements.origen.addEventListener('change', mostrarCaja);
+$('cancelar').addEventListener('click', () => { $('accion').hidden = true; actual = null; });
+
+$('accion-form').addEventListener('submit', async (ev) => {
+  ev.preventDefault();
+  const f = ev.target;
+  const { empleado, tipo } = actual;
+  $('confirmar').disabled = true;
+  try {
+    if (tipo === 'editar') {
+      await api(`/api/nomina/empleados/${empleado.id}`, {
+        nombre: f.elements.nombre.value, periodo: f.elements.periodo.value, sueldo: centavos(f.elements.sueldo.value),
+      }, 'PUT');
+    } else {
+      const cuerpo = { id: idPendiente, empleado_id: empleado.id, tipo, nota: f.elements.nota.value };
+      if (tipo === 'falta') cuerpo.fecha = f.elements.fecha.value;
+      else Object.assign(cuerpo, {
+        fecha: hoy(), importe: centavos(f.elements.importe.value), origen: f.elements.origen.value, caja: f.elements.caja.value,
+        abono: tipo === 'pago' ? centavos(f.elements.abono.value) : 0,
+      });
+      await api('/api/nomina/movimientos', cuerpo);
+      if (tipo === 'pago') await recibo(empleado, idPendiente, cuerpo);
+    }
+    $('accion').hidden = true;
+    actual = null;
+    avisar('Guardado.');
+    await cargar();
+  } catch (error) {
+    avisar(error.message);
+  } finally {
+    $('confirmar').disabled = false;
+  }
+});
+
+async function baja(empleado, boton) {
+  if (bajaPedida !== empleado.id) {
+    bajaPedida = empleado.id;
+    boton.textContent = '¿Seguro? Toca otra vez';
+    return;
+  }
+  bajaPedida = null;
+  await api(`/api/nomina/empleados/${empleado.id}`, null, 'DELETE');
+  avisar(`${empleado.nombre} dado de baja.`);
+  await cargar();
+}
+
+/* ---------- Historial y recibo ---------- */
+
+const movimientosDe = async (empleado) =>
+  (await api(`/api/nomina/${empleado.id}/movimientos?desde=2020-01-01&hasta=2099-12-31`)).movimientos;
+
+async function historial(empleado) {
+  const movimientos = await movimientosDe(empleado);
+  $('historial').innerHTML = `<p><b>${escapar(empleado.nombre)}</b></p>
+    <table>
+      <thead><tr><th>Fecha</th><th>Tipo</th><th class="num">Importe</th><th>Nota</th></tr></thead>
+      <tbody>${movimientos.map((m) => `<tr>
+        <td>${escapar(m.fecha)}</td><td>${escapar(m.tipo)}</td>
+        <td class="num">${pesos(m.importe)}</td><td>${escapar(m.nota)}</td>
+      </tr>`).join('')}</tbody>
+    </table>`;
+}
+
+/** Recibo para firmar: lo devengado y las faltas desde el pago anterior hasta este. */
+async function recibo(empleado, idPago, pago) {
+  const movimientos = await movimientosDe(empleado);
+  const este = movimientos.find((m) => m.id === idPago);
+  const anterior = movimientos.find((m) => m.tipo === 'pago' && m.creado_en < este.creado_en);
+  const periodo = movimientos.filter((m) => m.creado_en <= este.creado_en && (!anterior || m.creado_en > anterior.creado_en));
+  const suma = (tipo) => periodo.filter((m) => m.tipo === tipo).reduce((s, m) => s + m.importe, 0);
+  const desde = periodo.at(-1)?.fecha ?? este.fecha;
+  $('recibo').innerHTML = `
+    <h1>El Dolarón — recibo de nómina</h1>
+    <p>Empleado: ${escapar(empleado.nombre)}</p>
+    <p>Periodo: ${desde} al ${este.fecha}</p>
+    <p>Devengado: ${pesos(suma('devengo'))}</p>
+    <p>Faltas: ${pesos(-suma('falta'))}</p>
+    <p>Abono a adelantos: ${pesos(pago.abono)}</p>
+    <p><b>Neto entregado: ${pesos(pago.importe)}</b></p>
+    <p>Sale de: ${pago.origen === 'caja' ? pago.caja : 'Fuera de caja'}</p>
+    <br><p>Firma de recibido: ____________________________________</p>`;
+  $('recibo').hidden = false;
+  window.print();
+  $('recibo').hidden = true;
+}
+
+/* ---------- Alta ---------- */
+
+$('alta').addEventListener('submit', async (ev) => {
+  ev.preventDefault();
+  try {
+    await api(`/api/nomina/empleados/${crypto.randomUUID()}`, {
+      nombre: $('nombre').value, periodo: $('periodo').value, sueldo: centavos($('sueldo').value),
+    });
+    $('alta').reset();
+    avisar('Empleado guardado.');
+    await cargar();
+  } catch (error) {
+    avisar(error.message);
+  }
+});
+
+cargar().catch((error) => avisar(error.message));
+</script>
+</body>
+</html>

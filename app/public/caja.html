@@ -1924,6 +1924,7 @@ function pintarResultado(c) {
     ${renglon('− Devoluciones', pesos(c.efectivo_devoluciones))}
     ${renglon('− Retiros', pesos(c.retiros))}
     ${renglon('− Gastos', pesos(c.gastos))}
+    ${renglon('− Nómina', pesos(c.nomina ?? 0))}
     ${renglon('= Esperado', pesos(c.efectivo_esperado), 'fuerte')}
     ${renglon('Contado', pesos(c.efectivo_contado), 'fuerte')}
     ${diferencia}

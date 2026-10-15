@@ -15,8 +15,9 @@ import { avisarDueno } from './avisos.ts';
 // `computadora`: la cuenta de la tienda con la que entra la computadora de caja;
 // sola no cobra, cada cajero entra con su PIN (Issue #112, cajeros.ts).
 // `finanzas`: FEP. Toma fotos y ve solo sus piezas (propietario 'fep'); ver propietarioDe.
-export type Rol = 'dueno' | 'cajero' | 'capturista' | 'computadora' | 'finanzas';
-export const ROLES: readonly Rol[] = ['dueno', 'cajero', 'capturista', 'computadora', 'finanzas'];
+// `auxiliar`: lleva gastos y nomina (Issue #326); no ve reportes, cuentas ni lo demas del dueno.
+export type Rol = 'dueno' | 'cajero' | 'capturista' | 'computadora' | 'finanzas' | 'auxiliar';
+export const ROLES: readonly Rol[] = ['dueno', 'cajero', 'capturista', 'computadora', 'finanzas', 'auxiliar'];
 /** Lo que recibe alguien al aprobarle el acceso si no se escoge otra cosa. */
 export const ROL_POR_OMISION: Rol = 'cajero';
 
@@ -56,6 +57,7 @@ const CAPTURA_FEP: Rol[] = ['capturista', 'finanzas'];
 const CAJA: Rol[] = ['cajero', 'computadora'];
 const TODOS: Rol[] = ['cajero', 'capturista'];
 const DUENO: Rol[] = [];
+const AUXILIAR: Rol[] = ['auxiliar'];
 
 const PANTALLAS: Record<string, Rol[]> = {
   '/': TODOS,
@@ -78,7 +80,8 @@ const PANTALLAS: Record<string, Rol[]> = {
   '/conteo': TODOS,
   // Issue #287: mensajes de clientes por WhatsApp; datos personales, solo el dueño.
   '/mensajes': DUENO,
-  '/gastos': DUENO,
+  '/gastos': AUXILIAR,
+  '/nomina': AUXILIAR,
 };
 
 export function permiso(pathname: string, metodo: string): Regla {
@@ -98,7 +101,8 @@ export function permiso(pathname: string, metodo: string): Regla {
   if (ruta in PANTALLAS) return PANTALLAS[ruta];
 
   if (ruta === '/api/mensajes' || ruta === '/api/mensajes/responder') return DUENO;
-  if (ruta === '/api/gastos' || /^\/api\/gastos\/[^/]+$/.test(ruta)) return DUENO;
+  if (ruta === '/api/gastos' || /^\/api\/gastos\/[^/]+$/.test(ruta)) return AUXILIAR;
+  if (ruta === '/api/nomina' || ruta.startsWith('/api/nomina/')) return AUXILIAR;
   if (ruta === '/api/config') return metodo === 'GET' ? CAPTURA_FEP : DUENO;
   if (ruta === '/api/familias') return metodo === 'GET' ? TODOS : DUENO;
   if (ruta === '/api/borradores/manual') return DUENO;   // captura sin foto (Issue #115)

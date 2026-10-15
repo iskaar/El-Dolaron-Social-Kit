@@ -99,7 +99,7 @@ export async function registrarRetiro(request: Request, env: Env, correo: string
 
 export interface Corte {
   id: string; caja: string; cajero: string; desde: string | null; hasta: string; tickets: number;
-  fondo_inicial: number; efectivo_ventas: number; efectivo_devoluciones: number; retiros: number; gastos: number;
+  fondo_inicial: number; efectivo_ventas: number; efectivo_devoluciones: number; retiros: number; gastos: number; nomina: number;
   efectivo_esperado: number; efectivo_contado: number; diferencia: number;
   tarjeta_sistema: number; tarjeta_terminal: number; transferencias: number; dolarones: number;
   fondo_siguiente: number; entregado: number; conteo: string; notas: string; creado_en: string;
@@ -163,10 +163,10 @@ export async function registrarCorte(request: Request, env: Env, correo: string)
       env.DB.prepare('update devoluciones set corte_id = ? where caja = ? and corte_id is null').bind(id, caja),
       env.DB.prepare(
         `insert into cortes (id, caja, cajero, desde, hasta, tickets, fondo_inicial, efectivo_ventas,
-           efectivo_devoluciones, retiros, gastos, efectivo_esperado, efectivo_contado, diferencia, tarjeta_sistema,
+           efectivo_devoluciones, retiros, gastos, nomina, efectivo_esperado, efectivo_contado, diferencia, tarjeta_sistema,
            tarjeta_terminal, transferencias, dolarones, fondo_siguiente, entregado, conteo, notas, creado_en, fep_por_pagar)
-         select ?1, ?2, ?3, desde, ?4, tickets, fondo, ev, ed, re, ga,
-                fondo + ev - ed - re - ga, ?5, ?5 - (fondo + ev - ed - re - ga), tv - td,
+         select ?1, ?2, ?3, desde, ?4, tickets, fondo, ev, ed, re, ga, no,
+                fondo + ev - ed - re - ga - no, ?5, ?5 - (fondo + ev - ed - re - ga - no), tv - td,
                 ?6, xv - xd, dv - dd, min(?5, ?7), ?5 - min(?5, ?7), ?9, ?8, ?4, fp
          from (select
            (select max(hasta) from cortes where caja = ?2) as desde,
@@ -176,6 +176,7 @@ export async function registrarCorte(request: Request, env: Env, correo: string)
            (select ${dinero('efectivo', NETO)} from ventas where ${CANCELADAS}) + ${devuelto('efectivo')} as ed,
            (select coalesce(sum(importe), 0) from retiros where corte_id = ?1 and tipo = 'retiro') as re,
            (select coalesce(sum(importe), 0) from retiros where corte_id = ?1 and tipo = 'gasto') as ga,
+           (select coalesce(sum(importe), 0) from retiros where corte_id = ?1 and tipo = 'nomina') as no,
            (select ${dinero('tarjeta', NETO)} from ventas where ${VIGENTES}) + ${anticipos('tarjeta')} as tv,
            (select ${dinero('tarjeta', NETO)} from ventas where ${CANCELADAS}) + ${devuelto('tarjeta')} as td,
            (select ${dinero('transferencia', NETO)} from ventas where ${VIGENTES}) + ${anticipos('transferencia')} as xv,
