@@ -51,6 +51,19 @@
   <p id="estado" role="status" aria-live="polite"></p>
   <div id="empleados"></div>
 
+  <section id="configuracion">
+    <h2>Checador y bono</h2>
+    <label><input id="checador-activo" type="checkbox"> Activar checador y bono de asistencia</label>
+    <form id="config-bono" hidden>
+      <label>Monto del bono ($)<input name="bono" type="number" min="0" step="0.01"></label>
+      <label>Tolerancia (minutos)<input name="tolerancia" type="number" min="0" max="240" step="1"></label>
+      <label>Retardos permitidos<input name="retardos" type="number" min="0" max="31" step="1"></label>
+      <label>Faltas permitidas<input name="faltas" type="number" min="0" max="31" step="1"></label>
+      <button>Guardar configuración</button>
+    </form>
+    <p class="ayuda">Apagado por omisión. El devengo manual sigue disponible.</p>
+  </section>
+
   <section id="accion" hidden>
     <h2 id="accion-titulo"></h2>
     <form id="accion-form">
@@ -58,10 +71,17 @@
       <label class="solo-editar">Periodo
         <select name="periodo"><option value="diario">Diario</option><option value="quincenal">Quincenal</option></select>
       </label>
-      <label class="solo-editar">Sueldo del periodo ($)<input name="sueldo" type="number" min="0.01" step="0.01"></label>
-      <label class="solo-falta">Día que no trabajó<input name="fecha" type="date"></label>
+      <label class="solo-editar">Pago diario prorrateado ($)<input name="pago_dia" type="number" min="0.01" step="0.01"></label>
+      <label class="solo-editar">D&iacute;as asignados<select name="dias" multiple>
+        <option value="0">Domingo</option><option value="1">Lunes</option><option value="2">Martes</option>
+        <option value="3">Mi&eacute;rcoles</option><option value="4">Jueves</option><option value="5">Viernes</option><option value="6">S&aacute;bado</option>
+      </select></label>
+      <label class="solo-editar">Hora de entrada<input name="hora_entrada" type="time"></label>
+      <label class="solo-editar">PIN propio (6 d&iacute;gitos)<input name="pin" type="password" inputmode="numeric" maxlength="6" autocomplete="new-password"></label>
+      <label class="solo-devengo">Fecha<input name="fecha" type="date"></label>
       <label class="con-dinero" id="etiqueta-importe">Efectivo que se entrega ($)<input name="importe" type="number" min="0.01" step="0.01"></label>
       <label class="solo-pago">Abono a adelantos ($)<input name="abono" type="number" min="0" step="0.01" value="0"></label>
+      <label class="solo-pago solo-bono">Bono ($)<input name="bono" type="number" min="0" step="0.01" value="0"></label>
       <label class="con-dinero">Sale de
         <select name="origen"><option value="caja">El cajón (lo descuenta el corte)</option><option value="fuera">Fuera de caja</option></select>
       </label>
@@ -89,14 +109,15 @@
       <label>Periodo
         <select id="periodo"><option value="diario">Diario</option><option value="quincenal">Quincenal</option></select>
       </label>
-      <label>Sueldo del periodo ($)<input id="sueldo" type="number" min="0.01" step="0.01" required></label>
+      <label>Pago diario prorrateado ($)<input id="pago-dia" type="number" min="0.01" step="0.01" required></label>
+      <label>D&iacute;as asignados<select id="dias" multiple><option value="0">Domingo</option><option value="1">Lunes</option>
+        <option value="2">Martes</option><option value="3">Mi&eacute;rcoles</option><option value="4">Jueves</option>
+        <option value="5">Viernes</option><option value="6">S&aacute;bado</option></select></label>
+      <label>Hora de entrada<input id="hora-entrada" type="time"></label>
+      <label>PIN propio (6 d&iacute;gitos)<input id="pin-alta" type="password" inputmode="numeric" maxlength="6" autocomplete="new-password"></label>
       <button>Guardar empleado</button>
     </form>
-    <p class="ayuda">
-      El sueldo se suma solo: cada día al de pago diario y el 15 y el último día del mes al de quincena.
-      Un día que no trabajó (también su descanso, si es de pago diario) se registra como <b>falta</b> y descuenta
-      un día de sueldo (la quincena entre 15).
-    </p>
+    <p class="ayuda">El pago diario ya incluye la parte del s&eacute;ptimo d&iacute;a. Cada entrada o d&iacute;a trabajado manual suma ese pago. Los d&iacute;as asignados sirven para el bono; nunca descuentan sueldo.</p>
   </section>
 
   <section id="recibo" hidden></section>
@@ -111,6 +132,7 @@ const escapar = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;
 const avisar = (texto) => { $('estado').textContent = texto; };
 
 let personas = [];
+let config = null;
 let actual = null;          // { empleado, tipo } de la accion abierta
 let idPendiente = null;     // mismo id hasta que se guarde: reintentar no registra dos veces
 let bajaPedida = null;      // la baja pide un segundo toque
@@ -129,7 +151,15 @@ async function api(url, cuerpo, metodo = cuerpo ? 'POST' : 'GET') {
 /* ---------- Lista ---------- */
 
 async function cargar() {
-  personas = (await api('/api/nomina')).empleados;
+  const datos = await api('/api/nomina');
+  personas = datos.empleados;
+  config = datos.config;
+  $('checador-activo').checked = !!config.checador_activo;
+  $('config-bono').hidden = !config.checador_activo;
+  $('config-bono').elements.bono.value = config.bono_centavos / 100;
+  $('config-bono').elements.tolerancia.value = config.tolerancia_minutos;
+  $('config-bono').elements.retardos.value = config.retardos_permitidos;
+  $('config-bono').elements.faltas.value = config.faltas_permitidas;
   $('empleados').replaceChildren(...personas.filter((e) => e.activo).map(tarjeta));
 }
 
@@ -137,13 +167,14 @@ function tarjeta(e) {
   const nodo = document.createElement('section');
   nodo.className = 'persona';
   nodo.innerHTML = `
-    <div class="fila"><b>${escapar(e.nombre)}</b><span class="muted">${e.periodo} · ${pesos(e.sueldo)}</span></div>
+    <div class="fila"><b>${escapar(e.nombre)}</b><span class="muted">${e.periodo} · ${pesos(e.pago_dia)} por día</span></div>
     <div class="fila"><span>Se le debe</span><b>${pesos(e.debe)}</b></div>
     <div class="fila"><span>Adelantos por descontar</span><b>${pesos(e.adelantos)}</b></div>
     <div class="acciones">
       <button data-tipo="pago">Pagar</button>
       <button data-tipo="adelanto" class="claro">Adelanto</button>
-      <button data-tipo="falta" class="claro">Falta</button>
+      <button data-tipo="devengo" class="claro">Día trabajado</button>
+      <button data-tipo="ajuste" class="claro">Quitar día</button>
       <button data-tipo="historial" class="claro">Historial</button>
       <button data-tipo="editar" class="claro">Editar</button>
       <button data-tipo="baja" class="peligro">Baja</button>
@@ -159,7 +190,7 @@ function tarjeta(e) {
 
 /* ---------- Acciones: pago, adelanto, falta, editar ---------- */
 
-const TITULOS = { pago: 'Pagar a', adelanto: 'Adelanto a', falta: 'Falta de', editar: 'Editar a' };
+const TITULOS = { pago: 'Pagar a', adelanto: 'Adelanto a', devengo: 'Día trabajado de', ajuste: 'Quitar día de', editar: 'Editar a' };
 
 function abrir(empleado, tipo) {
   actual = { empleado, tipo };
@@ -169,21 +200,32 @@ function abrir(empleado, tipo) {
   f.elements.fecha.value = hoy();
   f.elements.nombre.value = empleado.nombre;
   f.elements.periodo.value = empleado.periodo;
-  f.elements.sueldo.value = empleado.sueldo / 100;
+  f.elements.pago_dia.value = empleado.pago_dia / 100;
+  [...f.elements.dias.options].forEach((o) => { o.selected = JSON.parse(empleado.dias).includes(Number(o.value)); });
+  f.elements.hora_entrada.value = empleado.hora_entrada || '';
   if (tipo === 'pago') f.elements.importe.value = Math.max(0, empleado.debe) / 100 || '';
   $('etiqueta-importe').firstChild.textContent = tipo === 'adelanto' ? 'Importe del adelanto ($)' : 'Efectivo que se entrega ($)';
   const ver = (clase, visible) => f.querySelectorAll(clase).forEach((n) => { n.hidden = !visible; });
   ver('.solo-editar', tipo === 'editar');
   ver('.sin-editar', tipo !== 'editar');
-  ver('.solo-falta', tipo === 'falta');
+  ver('.solo-devengo', tipo === 'devengo' || tipo === 'ajuste');
   ver('.con-dinero', tipo === 'pago' || tipo === 'adelanto');
   ver('.solo-pago', tipo === 'pago');
+  ver('.solo-bono', tipo === 'pago' && !!config.checador_activo);
   mostrarCaja();
   resumir();
   $('accion-titulo').textContent = `${TITULOS[tipo]} ${empleado.nombre}`;
   $('accion').hidden = false;
   $('accion').scrollIntoView({ behavior: 'smooth' });
+  if (tipo === 'pago') cargarPeriodo(empleado).then((p) => {
+    f.elements.bono.value = (p.bono_sugerido || 0) / 100;
+    f.elements.importe.value = (empleado.debe + (p.bono_sugerido || 0)) / 100;
+    actual.periodo = p;
+    resumir();
+  }).catch((error) => avisar(error.message));
 }
+
+const cargarPeriodo = (empleado) => api(`/api/nomina/${empleado.id}/periodo`);
 
 function mostrarCaja() {
   const f = $('accion-form');
@@ -196,8 +238,10 @@ function resumir() {
   const f = $('accion-form');
   const neto = centavos(f.elements.importe.value);
   const abono = centavos(f.elements.abono.value);
-  const queda = actual.empleado.debe - neto - abono;
+  const bono = centavos(f.elements.bono.value);
+  const queda = actual.empleado.debe + bono - neto - abono;
   $('resumen').innerHTML = `Se le debe ${pesos(actual.empleado.debe)}<br>`
+    + `+ Bono ${pesos(bono)}<br>`
     + `− Abono a adelantos ${pesos(abono)} (le quedan ${pesos(actual.empleado.adelantos - abono)})<br>`
     + `− <b>Efectivo que se entrega ${pesos(neto)}</b><br>`
     + `= Queda debiéndosele ${pesos(queda)}`;
@@ -207,6 +251,31 @@ $('accion-form').addEventListener('input', resumir);
 $('accion-form').elements.origen.addEventListener('change', mostrarCaja);
 $('cancelar').addEventListener('click', () => { $('accion').hidden = true; actual = null; });
 
+$('checador-activo').addEventListener('change', async () => {
+  $('config-bono').hidden = !$('checador-activo').checked;
+  if (!$('checador-activo').checked) {
+    try { await guardarConfig(); }
+    catch (error) { avisar(error.message); $('checador-activo').checked = true; $('config-bono').hidden = false; }
+  }
+});
+
+$('config-bono').addEventListener('submit', async (ev) => {
+  ev.preventDefault();
+  try { await guardarConfig(); avisar('Configuración guardada.'); }
+  catch (error) { avisar(error.message); }
+});
+
+async function guardarConfig() {
+  const f = $('config-bono');
+  config = await api('/api/nomina/config', {
+    checador_activo: $('checador-activo').checked,
+    bono_centavos: centavos(f.elements.bono.value),
+    tolerancia_minutos: Number(f.elements.tolerancia.value || 0),
+    retardos_permitidos: Number(f.elements.retardos.value || 0),
+    faltas_permitidas: Number(f.elements.faltas.value || 0),
+  }, 'PUT');
+}
+
 $('accion-form').addEventListener('submit', async (ev) => {
   ev.preventDefault();
   const f = ev.target;
@@ -215,17 +284,23 @@ $('accion-form').addEventListener('submit', async (ev) => {
   try {
     if (tipo === 'editar') {
       await api(`/api/nomina/empleados/${empleado.id}`, {
-        nombre: f.elements.nombre.value, periodo: f.elements.periodo.value, sueldo: centavos(f.elements.sueldo.value),
+        nombre: f.elements.nombre.value, periodo: f.elements.periodo.value, pago_dia: centavos(f.elements.pago_dia.value),
+        dias: [...f.elements.dias.selectedOptions].map((o) => Number(o.value)),
+        hora_entrada: f.elements.hora_entrada.value, pin: f.elements.pin.value,
       }, 'PUT');
     } else {
       const cuerpo = { id: idPendiente, empleado_id: empleado.id, tipo, nota: f.elements.nota.value };
-      if (tipo === 'falta') cuerpo.fecha = f.elements.fecha.value;
-      else Object.assign(cuerpo, {
+      if (tipo === 'devengo' || tipo === 'ajuste') {
+        cuerpo.fecha = f.elements.fecha.value;
+        cuerpo.importe = centavos(empleado.pago_dia / 100);
+        if (tipo === 'devengo') cuerpo.origen = 'manual';
+      } else Object.assign(cuerpo, {
         fecha: hoy(), importe: centavos(f.elements.importe.value), origen: f.elements.origen.value, caja: f.elements.caja.value,
         abono: tipo === 'pago' ? centavos(f.elements.abono.value) : 0,
+        bono: tipo === 'pago' ? centavos(f.elements.bono.value) : 0,
       });
       await api('/api/nomina/movimientos', cuerpo);
-      if (tipo === 'pago') await recibo(empleado, idPendiente, cuerpo);
+      if (tipo === 'pago') await recibo(empleado, idPendiente, cuerpo, actual.periodo);
     }
     $('accion').hidden = true;
     actual = null;
@@ -268,19 +343,24 @@ async function historial(empleado) {
 }
 
 /** Recibo para firmar: lo devengado y las faltas desde el pago anterior hasta este. */
-async function recibo(empleado, idPago, pago) {
+async function recibo(empleado, idPago, pago, asistencia) {
   const movimientos = await movimientosDe(empleado);
   const este = movimientos.find((m) => m.id === idPago);
   const anterior = movimientos.find((m) => m.tipo === 'pago' && m.creado_en < este.creado_en);
   const periodo = movimientos.filter((m) => m.creado_en <= este.creado_en && (!anterior || m.creado_en > anterior.creado_en));
   const suma = (tipo) => periodo.filter((m) => m.tipo === tipo).reduce((s, m) => s + m.importe, 0);
+  const diasTrabajados = new Set(periodo.filter((m) => m.tipo === 'devengo').map((m) => m.fecha));
+  periodo.filter((m) => m.tipo === 'ajuste').forEach((m) => diasTrabajados.delete(m.fecha));
   const desde = periodo.at(-1)?.fecha ?? este.fecha;
   $('recibo').innerHTML = `
     <h1>El Dolarón — recibo de nómina</h1>
     <p>Empleado: ${escapar(empleado.nombre)}</p>
     <p>Periodo: ${desde} al ${este.fecha}</p>
-    <p>Devengado: ${pesos(suma('devengo'))}</p>
-    <p>Faltas: ${pesos(-suma('falta'))}</p>
+    <p>Devengado: ${pesos(suma('devengo') + suma('ajuste'))}</p>
+    <p>Días trabajados: ${diasTrabajados.size}</p>
+    <p>Faltas: ${asistencia?.faltas ?? 0}</p>
+    <p>Retardos: ${asistencia?.retardos ?? 0}</p>
+    <p>Bono: ${pesos(pago.bono)}</p>
     <p>Abono a adelantos: ${pesos(pago.abono)}</p>
     <p><b>Neto entregado: ${pesos(pago.importe)}</b></p>
     <p>Sale de: ${pago.origen === 'caja' ? pago.caja : 'Fuera de caja'}</p>
@@ -296,7 +376,9 @@ $('alta').addEventListener('submit', async (ev) => {
   ev.preventDefault();
   try {
     await api(`/api/nomina/empleados/${crypto.randomUUID()}`, {
-      nombre: $('nombre').value, periodo: $('periodo').value, sueldo: centavos($('sueldo').value),
+      nombre: $('nombre').value, periodo: $('periodo').value, pago_dia: centavos($('pago-dia').value),
+      dias: [...$('dias').selectedOptions].map((o) => Number(o.value)), hora_entrada: $('hora-entrada').value,
+      pin: $('pin-alta').value,
     });
     $('alta').reset();
     avisar('Empleado guardado.');

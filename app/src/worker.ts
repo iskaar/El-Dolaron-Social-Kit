@@ -39,7 +39,7 @@ import { cajeroEnTurno, listarCajeros, entrar, salir, ponerPin } from './cajeros
 import { registrarSocio, buscarSocio, buscarPorCodigo, basesListas, sentenciasDeVenta, saldo } from './dolarones.ts';
 import { registrarCorte, registrarRetiro, ultimoCorte, cajaDe } from './corte.ts';
 import { rutaGastos } from './gastos.ts';
-import { devengarNomina, rutaNomina } from './nomina.ts';
+import { rutaNomina } from './nomina.ts';
 import { lineasNetas } from './netas.ts';
 import { portal, llegada, vincular } from './portal.ts';
 import { mensajesApi, responderApi } from './mensajes.ts';
@@ -1752,7 +1752,8 @@ export default {
         }
         // Issue #112: la computadora de caja no cobra sola. Lo de caja queda a
         // nombre del cajero que entro con su PIN; sin el, la API no responde.
-        if (esDeCaja(regla) && soloComputadora(usuario) && !pathname.startsWith('/api/cajeros')) {
+        if (esDeCaja(regla) && soloComputadora(usuario) && !pathname.startsWith('/api/cajeros')
+            && pathname !== '/api/nomina/entrada' && pathname !== '/api/nomina/checador') {
           const cajero = await cajeroEnTurno(request, env);
           if (cajero) correo = cajero.correo;
           else if (pathname.startsWith('/api/')) return json({ error: 'Escribe tu PIN de cajero.', pin: true }, 401);
@@ -2039,7 +2040,6 @@ export default {
   // Cron de wrangler.jsonc, cada 15 min: ordenes de Mercado Libre perdidas y
   // conciliacion de existencias. Sin cuenta conectada no hace nada.
   async scheduled(_evento, env, ctx): Promise<void> {
-    ctx.waitUntil(devengarNomina(env));
     ctx.waitUntil(sincronizar(env));
     // Apartados cuyo plazo llego: vuelven a la venta (Issue #269). Aparte, para que uno no frene al otro.
     ctx.waitUntil(vencerPedidos(env));

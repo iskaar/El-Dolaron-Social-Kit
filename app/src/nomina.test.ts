@@ -1,64 +1,124 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { DUENO, tienda } from './prueba-d1.ts';
-import { devengarNomina } from './nomina.ts';
+import { tienda } from './prueba-d1.ts';
 
-const idDiario = '11111111-1111-4111-8111-111111111111';
-const idQuincena = '22222222-2222-4222-8222-222222222222';
+const id = '11111111-1111-4111-8111-111111111111';
+const fechaLocal = (dias = 0) => new Date(Date.now() - 6 * 3600_000 + dias * 86400_000).toISOString().slice(0, 10);
+const diaSemana = (fecha: string) => new Date(`${fecha}T12:00:00Z`).getUTCDay();
+const pin = '123456';
 
-test('devengo diario y quincenal idempotente por el día de México', async () => {
+async function empleado(t, opciones: Record<string, unknown> = {}) {
+  const hoy = fechaLocal();
+  const ayer = fechaLocal(-1);
+  const horaActual = new Date(Date.now() - 6 * 3600_000).toISOString().slice(11, 16);
+  const [hora, minuto] = horaActual.split(':').map(Number);
+  const minutos = (hora * 60 + minuto + 1439) % 1440;
+  const horaEntrada = `${String(Math.floor(minutos / 60)).padStart(2, '0')}:${String(minutos % 60).padStart(2, '0')}`;
+  await t.pedir(`/api/nomina/empleados/${id}`, {
+    nombre: 'Empleado prueba', periodo: 'quincenal', pago_dia: 10000,
+    dias: [...new Set([diaSemana(ayer), diaSemana(hoy)])], hora_entrada: horaEntrada, pin,
+    ...opciones,
+  });
+  t.db.prepare('update empleados set creado_en=? where id=?').run(`${ayer}T12:00:00-06:00`, id);
+  return { hoy, ayer };
+}
+
+async function activar(t, config = {}) {
+  return t.pedir('/api/nomina/config', {
+    checador_activo: true, bono_centavos: 5000, tolerancia_minutos: 0, retardos_permitidos: 1,
+    faltas_permitidas: 1, ...config,
+  }, 'PUT');
+}
+
+test('checador apagado responde 404 y el día trabajado manual devenga una sola vez', async () => {
   const t = tienda();
-  t.db.prepare(`insert into empleados (id,nombre,periodo,sueldo,creado_en) values (?, 'Diario','diario',1000,''), (?, 'Quincena','quincenal',150000,'')`).run(idDiario,idQuincena);
-  const local15 = Date.UTC(2026, 9, 15, 6);
-  await devengarNomina(t.env, local15); await devengarNomina(t.env, local15);
-  assert.equal(t.db.prepare('select count(*) n from nomina_movimientos').get()!.n, 2);
-  assert.equal(t.db.prepare('select importe from nomina_movimientos where empleado_id=?').get(idDiario)!.importe, 1000);
-  assert.equal(t.db.prepare('select importe from nomina_movimientos where empleado_id=?').get(idQuincena)!.importe, 150000);
+  await empleado(t);
+  const apagado = await t.pedir('/api/nomina/entrada', { empleado_id: id, pin });
+  assert.equal(apagado.status, 404);
+  const manual = await t.pedir('/api/nomina/movimientos', {
+    id: crypto.randomUUID(), empleado_id: id, tipo: 'devengo', fecha: fechaLocal(), importe: 10000, origen: 'manual',
+  });
+  assert.equal(manual.status, 201, JSON.stringify(manual.cuerpo));
+  const repetido = await t.pedir('/api/nomina/movimientos', {
+    id: crypto.randomUUID(), empleado_id: id, tipo: 'devengo', fecha: fechaLocal(), importe: 10000, origen: 'manual',
+  });
+  assert.equal(repetido.status, 409);
+  assert.equal(t.db.prepare("select count(*) n from nomina_movimientos where tipo='devengo'").get()!.n, 1);
+  const ajuste = await t.pedir('/api/nomina/movimientos', {
+    id: crypto.randomUUID(), empleado_id: id, tipo: 'ajuste', fecha: fechaLocal(), importe: 10000, nota: 'Marcado por error',
+  });
+  assert.equal(ajuste.status, 201);
+  assert.equal(t.db.prepare("select importe from nomina_movimientos where tipo='ajuste'").get()!.importe, -10000);
+  assert.equal(t.db.prepare('select count(*) n from asistencias where empleado_id=?').get(id)!.n, 0);
 });
 
-test('falta quincenal descuenta sueldo entre 15; adelanto y pago de caja se reflejan en saldo y corte', async () => {
+test('checador marca una vez; calcula faltas, retardos y bono sugerido que se suma al pago', async () => {
   const t = tienda();
-  t.db.prepare(`insert into empleados (id,nombre,periodo,sueldo,creado_en) values (?, 'Quincena','quincenal',150000,'')`).run(idDiario);
-  t.db.prepare(`insert into nomina_movimientos (id,empleado_id,fecha,tipo,importe,creado_por,creado_en) values ('dev',?,'2026-10-15','devengo',150000,?, '')`).run(idDiario,DUENO);
-  const falta = await t.pedir('/api/nomina/movimientos',{id:crypto.randomUUID(),empleado_id:idDiario,tipo:'falta',fecha:'2026-10-15'});
-  assert.equal(falta.status,201,JSON.stringify(falta.cuerpo));
-  assert.equal(falta.cuerpo.importe,-10000);
-  const adelanto = await t.pedir('/api/nomina/movimientos',{id:crypto.randomUUID(),empleado_id:idDiario,tipo:'adelanto',fecha:'2026-10-15',importe:1000,origen:'caja',caja:'Caja 2'});
-  assert.equal(adelanto.status,201);
-  // Nueva devengo para tener saldo disponible después de la falta.
-  t.db.prepare(`insert into nomina_movimientos (id,empleado_id,fecha,tipo,importe,creado_por,creado_en) values ('dev2',?,'2026-10-16','devengo',150000,?, '')`).run(idDiario,DUENO);
-  const pago = await t.pedir('/api/nomina/movimientos',{id:crypto.randomUUID(),empleado_id:idDiario,tipo:'pago',fecha:'2026-10-16',importe:400,abono:100,origen:'caja',caja:'Caja 2'});
-  assert.equal(pago.status,201);
-  assert.equal(pago.cuerpo.neto,400);
-  const lista=await t.pedir('/api/nomina',undefined,'GET');
-  assert.equal(lista.cuerpo.empleados[0].debe,289500);
-  assert.equal(lista.cuerpo.empleados[0].adelantos,900);
-  const corte=await t.pedir('/api/cortes',{id:crypto.randomUUID(),caja:'Caja 2',efectivo_contado:48600});
-  assert.equal(corte.status,201,JSON.stringify(corte.cuerpo));
-  assert.equal(corte.cuerpo.nomina,1400);
-  assert.equal(corte.cuerpo.efectivo_esperado,48600);
+  const { hoy } = await empleado(t);
+  await activar(t);
+  assert.equal((await t.pedir('/api/nomina/entrada', { empleado_id: id, pin: '000000' })).status, 401);
+  const marcada = await t.pedir('/api/nomina/entrada', { empleado_id: id, pin });
+  assert.equal(marcada.status, 201);
+  assert.equal((await t.pedir('/api/nomina/entrada', { empleado_id: id, pin })).cuerpo.repetida, true);
+  const periodo = await t.pedir(`/api/nomina/${id}/periodo`, undefined, 'GET');
+  assert.equal(periodo.cuerpo.faltas, 1);
+  assert.ok(periodo.cuerpo.retardos >= 1);
+  assert.equal(periodo.cuerpo.bono_sugerido, 5000, JSON.stringify(periodo.cuerpo));
+  const pago = await t.pedir('/api/nomina/movimientos', {
+    id: crypto.randomUUID(), empleado_id: id, tipo: 'pago', fecha: hoy, importe: 15000,
+    bono: periodo.cuerpo.bono_sugerido, abono: 0, origen: 'fuera', nota: 'Bono sugerido',
+  });
+  assert.equal(pago.status, 201, JSON.stringify(pago.cuerpo));
+  assert.equal(pago.cuerpo.bono, 5000);
+  assert.equal(t.db.prepare("select importe from nomina_movimientos where tipo='bono'").get()!.importe, 5000);
+  const lista = await t.pedir('/api/nomina', undefined, 'GET');
+  assert.equal(lista.cuerpo.empleados[0].debe, 0);
 });
 
-test('movimiento fuera de caja no crea retiro y nomina niega a cajero', async () => {
-  const t=tienda();
-  t.db.prepare(`insert into empleados (id,nombre,periodo,sueldo,creado_en) values (?, 'Diario','diario',10000,'')`).run(idDiario);
-  t.db.prepare(`insert into nomina_movimientos (id,empleado_id,fecha,tipo,importe,creado_por,creado_en) values ('dev',?,'2026-10-15','devengo',10000,?, '')`).run(idDiario,DUENO);
-  const r=await t.pedir('/api/nomina/movimientos',{id:crypto.randomUUID(),empleado_id:idDiario,tipo:'adelanto',fecha:'2026-10-15',importe:500,origen:'fuera'});
-  assert.equal(r.status,201);
-  assert.equal(t.db.prepare('select count(*) n from retiros').get()!.n,0);
-  const corte=await t.pedir('/api/cortes',{id:crypto.randomUUID(),caja:'Caja 1',efectivo_contado:50000});
-  assert.equal(corte.cuerpo.nomina,0);
-  assert.equal(corte.cuerpo.efectivo_esperado,50000);
-  t.db.prepare(`insert into usuarios (correo,nombre,roles,activo,creado_en,actualizado_en) values ('cajero@prueba.mx','Cajero','cajero',1,'','')`).run();
-  t.env.DEV_USUARIO='cajero@prueba.mx';
-  assert.equal((await t.pedir('/api/nomina',undefined,'GET')).status,403);
+test('adelanto y pago de caja siguen restándose en el corte; el pago incluye bono', async () => {
+  const t = tienda();
+  const { hoy } = await empleado(t);
+  await activar(t);
+  await t.pedir('/api/nomina/movimientos', {
+    id: crypto.randomUUID(), empleado_id: id, tipo: 'devengo', fecha: hoy, importe: 10000, origen: 'manual',
+  });
+  const adelanto = await t.pedir('/api/nomina/movimientos', {
+    id: crypto.randomUUID(), empleado_id: id, tipo: 'adelanto', fecha: hoy, importe: 1000, origen: 'caja', caja: 'Caja 2',
+  });
+  assert.equal(adelanto.status, 201);
+  const pago = await t.pedir('/api/nomina/movimientos', {
+    id: crypto.randomUUID(), empleado_id: id, tipo: 'pago', fecha: hoy, importe: 10000,
+    bono: 1000, abono: 1000, origen: 'caja', caja: 'Caja 2', nota: 'Bono por ventas',
+  });
+  assert.equal(pago.status, 201, JSON.stringify(pago.cuerpo));
+  const corte = await t.pedir('/api/cortes', { id: crypto.randomUUID(), caja: 'Caja 2', efectivo_contado: 47600 });
+  assert.equal(corte.status, 201, JSON.stringify(corte.cuerpo));
+  assert.equal(corte.cuerpo.nomina, 11000);
 });
 
-test('el auxiliar entra a nomina y gastos, y a nada mas del dueno', async () => {
+test('el auxiliar entra a nómina, cajero no, y checador permite la caja sin PIN de cajero', async () => {
   const t = tienda();
+  await activar(t);
   t.db.prepare(`insert into usuarios (correo, nombre, roles, activo, creado_en, actualizado_en)
     values ('aux@prueba.mx', 'Auxiliar', 'auxiliar', 1, '', '')`).run();
   t.env.DEV_USUARIO = 'aux@prueba.mx';
-  for (const ruta of ['/api/nomina', `/api/gastos?mes=2026-10`]) assert.equal((await t.pedir(ruta, undefined, 'GET')).status, 200, ruta);
-  for (const ruta of ['/api/reportes', '/api/cuentas', '/api/mensajes']) assert.equal((await t.pedir(ruta, undefined, 'GET')).status, 403, ruta);
+  assert.equal((await t.pedir('/api/nomina', undefined, 'GET')).status, 200);
+  t.db.prepare(`insert into usuarios (correo,nombre,roles,activo,creado_en,actualizado_en)
+    values ('cajero@prueba.mx','Cajero','cajero',1,'','')`).run();
+  t.env.DEV_USUARIO = 'cajero@prueba.mx';
+  assert.equal((await t.pedir('/api/nomina', undefined, 'GET')).status, 403);
+  t.db.prepare(`insert into usuarios (correo,nombre,roles,activo,creado_en,actualizado_en)
+    values ('pc@prueba.mx','Caja','computadora',1,'','')`).run();
+  t.env.DEV_USUARIO = 'pc@prueba.mx';
+  assert.equal((await t.pedir('/api/nomina/checador', undefined, 'GET')).status, 200);
+});
+
+test('el checador bloquea el PIN 15 minutos tras 5 intentos fallidos', async () => {
+  const t = tienda();
+  await empleado(t);
+  await activar(t);
+  for (let i = 0; i < 5; i++) assert.equal((await t.pedir('/api/nomina/entrada', { empleado_id: id, pin: '000000' })).status, 401);
+  // Bloqueado: ni el PIN correcto marca la entrada (cada entrada vale un día de sueldo).
+  assert.equal((await t.pedir('/api/nomina/entrada', { empleado_id: id, pin })).status, 423);
+  assert.equal(t.db.prepare('select count(*) n from asistencias').get()!.n, 0);
 });
