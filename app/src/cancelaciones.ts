@@ -11,9 +11,12 @@ import { verificarPin } from './cajeros.ts';
 import { sentenciasDeCancelacion } from './dolarones.ts';
 import { cancelarVales } from './vales.ts';
 import { TICKET_CON_ANTICIPO } from './pedidos.ts';
+import { avisarDueno } from './avisos.ts';
 
 /** Lo que tiene el cajero para cancelar solo, contado desde la hora de la venta. */
 export const VENTANA_CANCELACION_MS = 5 * 60_000;
+
+const hora = (iso: string) => new Date(iso).toLocaleString('es-MX', { timeZone: 'America/Mexico_City', dateStyle: 'short', timeStyle: 'short' });
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -116,7 +119,7 @@ const insertarSolicitud = (
  * La venta no se borra, se marca: el corte del dia tiene que seguir explicando
  * todo lo que paso, incluido lo que se deshizo. Las piezas vuelven al inventario.
  */
-export async function cancelarVenta(id: string, request: Request, env: Env, correo: string): Promise<Response> {
+export async function cancelarVenta(id: string, request: Request, env: Env, correo: string, ctx?: ExecutionContext): Promise<Response> {
   if (!UUID.test(id)) {
     return json({ error: 'Identificador de venta invalido.' }, 400);
   }
@@ -132,9 +135,9 @@ export async function cancelarVenta(id: string, request: Request, env: Env, corr
     return json({ error: 'Escribe el motivo de la cancelacion.' }, 400);
   }
 
-  const venta = await env.DB.prepare('select creado_en, cancelada, anticipo from ventas where id = ?')
+  const venta = await env.DB.prepare('select creado_en, cancelada, anticipo, total from ventas where id = ?')
     .bind(id)
-    .first<{ creado_en: string; cancelada: number; anticipo: number }>();
+    .first<{ creado_en: string; cancelada: number; anticipo: number; total: number }>();
   if (!venta) return json({ error: 'La venta no existe.' }, 404);
   if (venta.cancelada) return json({ id, cancelada: true, ya_estaba: true });
   // Antes de pedir aprobacion: no tiene caso mandar al dueno una solicitud que cancelarCore rechazaria.
@@ -171,6 +174,8 @@ export async function cancelarVenta(id: string, request: Request, env: Env, corr
     const solicitudId = crypto.randomUUID();
     await insertarSolicitud(env, solicitudId, correo, nombre, motivo, { ...datos, via: 'remoto' },
       new Date().toISOString(), null).run();
+    avisarDueno(env, ctx, request, `Cancelación por aprobar: $${(venta.total / 100).toFixed(2)}`,
+      `${nombre || correo} pide cancelar una venta de $${(venta.total / 100).toFixed(2)} del ${hora(venta.creado_en)}.\nMotivo: ${motivo}`);
     return json({ pendiente: true, solicitud_id: solicitudId }, 202);
   }
 

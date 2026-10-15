@@ -62,6 +62,8 @@
       "custom_domain": true
     }
   ],
+  // Avisos al dueno (Issue #75): mismo remitente; el asunto lleva [Sandbox].
+  "send_email": [{ "name": "CORREO", "allowed_sender_addresses": ["avisos@eldolaron.com"] }],
   "d1_databases": [
     {
       "binding": "DB",

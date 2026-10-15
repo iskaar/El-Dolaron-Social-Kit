@@ -431,3 +431,14 @@ test('/reportes: con promo, descuento aprobado, pieza devuelta y ticket cancelad
   assert.equal(suma(r.top_productos), r.resumen.total);
   assert.deepEqual(verificarCuadre(r).filter((c: { ok: boolean }) => !c.ok), []);
 });
+
+test('el descuento que queda pendiente avisa al dueno por correo (#75)', async () => {
+  const t = await montar();
+  const enviados: any[] = [];
+  t.env.CORREO = { async send(m: unknown) { enviados.push(m); return { messageId: 'x' }; } } as never;
+  assert.equal((await t.pedirDescuento()).cuerpo.estado, 'pendiente');
+  await t.esperar();
+  assert.equal(enviados.length, 1);
+  assert.equal(enviados[0].subject, 'Descuento por aprobar: $25.00');
+  assert.match(enviados[0].text, /Ana pide \$25\.00 de descuento sobre un ticket de \$250\.00\.\nMotivo: cliente frecuente/);
+});

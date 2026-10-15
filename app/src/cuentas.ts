@@ -1,5 +1,6 @@
 import { resolverCancelacion } from './cancelaciones.ts';
 import { resolverDescuento } from './descuentos.ts';
+import { avisarDueno } from './avisos.ts';
 
 /**
  * Centro de cuentas (Issue #75). Cloudflare Access (con Google) dice QUIEN es
@@ -275,7 +276,7 @@ export async function yo(env: Env, correo: string, cajero: Usuario | null = null
 }
 
 /** Alguien sin cuenta pide entrar. Una sola pendiente por persona: pedir otra vez la actualiza. */
-export async function pedirAcceso(request: Request, env: Env, correo: string): Promise<Response> {
+export async function pedirAcceso(request: Request, env: Env, correo: string, ctx?: ExecutionContext): Promise<Response> {
   const usuario = await leerUsuario(env, correo);
   if (usuario?.activo) return json({ error: 'Ya tienes cuenta.' }, 409);
   const cuerpo = (await request.json().then((c) => c ?? {}, () => ({}))) as { nombre?: unknown; justificacion?: unknown };
@@ -302,6 +303,7 @@ export async function pedirAcceso(request: Request, env: Env, correo: string): P
   )
     .bind(id, correo, nombre, justificacion, ahora)
     .run();
+  avisarDueno(env, ctx, request, `Solicitud de acceso: ${nombre}`, `${nombre} (${correo}) pide entrar.\nPara qué: ${justificacion}`);
   return json({ id, estado: 'pendiente' }, 201);
 }
 

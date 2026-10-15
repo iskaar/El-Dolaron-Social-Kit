@@ -1765,14 +1765,14 @@ export default {
       if (pathname === '/api/cajeros/salir' && request.method === 'POST') return await salir(request, env);
       if (pathname === '/api/cuentas/pin' && request.method === 'PUT') return await ponerPin(request, env);
       if (pathname === '/api/solicitudes/acceso' && request.method === 'POST') {
-        return await pedirAcceso(request, env, correo);
+        return await pedirAcceso(request, env, correo, ctx);
       }
       if (pathname === '/api/cuentas') {
         if (request.method === 'GET') return await listarCuentas(env);
         if (request.method === 'PUT') return await guardarCuenta(request, env);
         return json({ error: 'Metodo no permitido.' }, 405);
       }
-      if (pathname === '/api/descuentos' && request.method === 'POST') return await pedirDescuento(request, env, correo);
+      if (pathname === '/api/descuentos' && request.method === 'POST') return await pedirDescuento(request, env, correo, ctx);
       if (pathname === '/api/descuentos/duenos' && request.method === 'GET') return await listarDuenos(env);
       if (pathname === '/api/solicitudes/descuentos' && request.method === 'GET') return await listarDescuentos(env);
       if (pathname === '/api/solicitudes/cancelaciones' && request.method === 'GET') return await listarCancelaciones(env);
@@ -1912,7 +1912,7 @@ export default {
 
       const cancelacion = pathname.match(/^\/api\/ventas\/([^/]+)\/cancelar$/);
       if (cancelacion && request.method === 'POST') {
-        return await cancelarVenta(cancelacion[1], request, env, correo);
+        return await cancelarVenta(cancelacion[1], request, env, correo, ctx);
       }
       const cancelacionPieza = pathname.match(/^\/api\/ventas\/([^/]+)\/lineas\/(\d+)\/cancelar$/);
       if (cancelacionPieza && request.method === 'POST') {

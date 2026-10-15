@@ -21,6 +21,8 @@ declare global {
     WHATSAPP_PHONE_NUMBER_ID?: string;
     /** Token del asistente de WhatsApp (Issue #296). Secreto: el mismo valor va en el Worker de WhatsApp. */
     ASISTENTE_TOKEN?: string;
+    /** Avisos al dueno por correo (Issue #75, avisos.ts). Binding send_email; ausente en pruebas. */
+    CORREO?: SendEmail;
     /** Solo `wrangler dev` con `--var ACCESS_EQUIPO:local`: el correo con el que se entra. */
     DEV_USUARIO?: string;
     /** Host público exacto. Ausente = portal inaccesible. */
