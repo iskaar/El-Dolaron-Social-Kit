@@ -10,9 +10,12 @@
 import { descuentoDe } from '../public/venta.js';
 import { leerUsuario, leerRoles } from './cuentas.ts';
 import { verificarPin } from './cajeros.ts';
+import { avisarDueno } from './avisos.ts';
 
 const json = (cuerpo: unknown, status = 200) =>
   new Response(JSON.stringify(cuerpo), { status, headers: { 'content-type': 'application/json; charset=utf-8' } });
+
+const pesos = (centavos: number) => `$${(centavos / 100).toFixed(2)}`;
 
 interface Datos { tipo: string; valor: number; subtotal: number; monto: number; via?: string }
 
@@ -21,7 +24,7 @@ interface Datos { tipo: string; valor: number; subtotal: number; monto: number; 
  * reemplaza la anterior. Con `aprobador` + `pin` (dueno) o siendo dueno quien
  * pide, nace aprobado; si no, queda pendiente para /cuentas.
  */
-export async function pedirDescuento(request: Request, env: Env, correo: string): Promise<Response> {
+export async function pedirDescuento(request: Request, env: Env, correo: string, ctx?: ExecutionContext): Promise<Response> {
   const cuerpo = (await request.json().catch(() => ({}))) as Record<string, unknown>;
   const motivo = String(cuerpo.motivo ?? '').replace(/\s+/g, ' ').trim().slice(0, 200);
   if (!motivo) return json({ error: 'Escribe el motivo del descuento.' }, 400);
@@ -55,6 +58,10 @@ export async function pedirDescuento(request: Request, env: Env, correo: string)
     ).bind(id, correo, usuario?.nombre ?? '', motivo, JSON.stringify(datos), aprobo ? 'aprobada' : 'pendiente', ahora,
       aprobo ? ahora : null, aprobo?.por ?? null),
   ]);
+  if (!aprobo) {
+    avisarDueno(env, ctx, request, `Descuento por aprobar: ${pesos(calculo.monto)}`,
+      `${usuario?.nombre || correo} pide ${pesos(calculo.monto)} de descuento sobre un ticket de ${pesos(subtotal)}.\nMotivo: ${motivo}`);
+  }
   return json({ id, estado: aprobo ? 'aprobada' : 'pendiente', monto: calculo.monto }, 201);
 }
 

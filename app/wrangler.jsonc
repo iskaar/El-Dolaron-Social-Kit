@@ -88,6 +88,8 @@
       "custom_domain": true
     }
   ],
+  // Avisos al dueno (Issue #75, avisos.ts): remitente avisos@eldolaron.com, destinatarios desde D1.
+  "send_email": [{ "name": "CORREO", "allowed_sender_addresses": ["avisos@eldolaron.com"] }],
   "d1_databases": [
     {
       "binding": "DB",
