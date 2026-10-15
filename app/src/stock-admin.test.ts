@@ -51,11 +51,12 @@ test('Retomar foto conserva existencia, talla, estado y lo ya revisado', async (
   assert.deepEqual({ ...fila }, { stock: 40, talla: 'M', estado_fisico: 'danado', nombre: 'Playera Gap', precio: 9900, estado_analisis: 'listo' });
 });
 
-test('la camara reenvia el mismo id con cantidad y talla: sigue actualizando ambas', async () => {
+test('la camara reenvia el mismo id: actualiza la talla pero conserva el stock (#312)', async () => {
   const t = tienda();
   const id = crypto.randomUUID();
   assert.equal((await subir(t, foto(id, { cantidad: '2', talla: 'S' }))).status, 201);
+  t.db.prepare('update productos set stock = 1 where id = ?').run(id);   // la caja vendio 1 antes del reenvio
   assert.equal((await subir(t, foto(id, { cantidad: '5', talla: 'L' }))).status, 201);
   const fila = t.db.prepare('select stock, talla from productos where id = ?').get(id);
-  assert.deepEqual({ ...fila }, { stock: 5, talla: 'L' });
+  assert.deepEqual({ ...fila }, { stock: 1, talla: 'L' });
 });
