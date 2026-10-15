@@ -1812,10 +1812,19 @@ export default {
       }
 
       // Issue #298: una pieza de FEP no se abre ni se cambia desde la cuenta de la tienda, y al revés.
+      const fusion = pathname.match(/^\/api\/borradores\/([^/]+)\/fusionar$/);
       const idPieza = pathname.match(/^\/api\/(?:borradores|foto)\/([0-9a-f-]{36})(?:\/|$)/);
       if (idPieza) {
-        const fila = await env.DB.prepare('select propietario from productos where id = ?').bind(idPieza[1]).first<{ propietario: string }>();
-        if (fila && fila.propietario !== propietarioDe(await leerUsuario(env, correo))) return json({ error: 'Pieza no encontrada.' }, 404);
+        const ids = [idPieza[1]];
+        if (fusion && request.method === 'POST') {
+          const { destino_id } = await request.clone().json() as { destino_id?: unknown };
+          ids.push(String(destino_id ?? ''));
+        }
+        const propietario = propietarioDe(await leerUsuario(env, correo));
+        for (const id of ids) {
+          const fila = await env.DB.prepare('select propietario from productos where id = ?').bind(id).first<{ propietario: string }>();
+          if (fila && fila.propietario !== propietario) return json({ error: 'Pieza no encontrada.' }, 404);
+        }
       }
 
       const fotoMarket = pathname.match(/^\/api\/marketplace\/foto\/([^/]+)$/);
@@ -1965,7 +1974,6 @@ export default {
         return await corregirCaptura(correccion[1], correccion[2], request, env, correo);
       }
 
-      const fusion = pathname.match(/^\/api\/borradores\/([^/]+)\/fusionar$/);
       if (fusion && request.method === 'POST') {
         return await fusionarBorrador(fusion[1], request, env);
       }

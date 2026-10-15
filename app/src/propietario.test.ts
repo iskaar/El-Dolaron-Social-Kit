@@ -9,6 +9,35 @@ import { codigoPrueba } from './prueba-d1.ts';
 
 const FEP = 'b2222222-2222-4222-8222-222222222222';
 
+test('finanzas no modifica piezas de la tienda y puede corregir las suyas', async () => {
+  const { db, env, pedir, esperar } = tienda();
+  db.prepare(`insert into usuarios (correo, nombre, roles, activo, creado_en, actualizado_en)
+              values ('fep@prueba.mx', 'FEP', 'finanzas', 1, '', '')`).run();
+  db.prepare(`insert into productos (id, nombre, precio, stock, semana_ingreso, creado_en, actualizado_en, propietario)
+              values (?, 'Bolsa FEP', 30000, 2, 'S41', '', '', 'fep')`).run(FEP);
+  env.DEV_USUARIO = 'fep@prueba.mx';
+
+  const piezaTienda = db.prepare('select nombre, stock, estado_analisis, propietario from productos where id = ?').get(PRODUCTO);
+  const ruta = `/api/borradores/${PRODUCTO}`;
+  for (const [url, cuerpo, metodo] of [
+    [ruta, { nombre: 'Cambiado' }, 'PATCH'],
+    [ruta, {}, 'DELETE'],
+    [`${ruta}/fusionar`, { destino_id: FEP }, 'POST'],
+    [`${ruta}/analizar`, {}, 'POST'],
+    [`/api/borradores/${FEP}/fusionar`, { destino_id: PRODUCTO }, 'POST'],
+  ] as const) {
+    const respuesta = await pedir(url, cuerpo, metodo);
+    assert.equal(respuesta.status, 404, `${metodo} ${url}`);
+    assert.deepEqual(respuesta.cuerpo, { error: 'Pieza no encontrada.' });
+  }
+  await esperar();
+  assert.deepEqual(db.prepare('select nombre, stock, estado_analisis, propietario from productos where id = ?').get(PRODUCTO), piezaTienda);
+  assert.equal((db.prepare('select stock from productos where id = ?').get(FEP) as { stock: number }).stock, 2);
+
+  assert.equal((await pedir(`/api/borradores/${FEP}`, { nombre: 'Bolsa corregida' }, 'PATCH')).status, 200);
+  assert.equal((db.prepare('select nombre from productos where id = ?').get(FEP) as { nombre: string }).nombre, 'Bolsa corregida');
+});
+
 test('una pieza de FEP se cobra en la caja, no sale en los reportes de la tienda y el corte se la debe', async () => {
   const { db, pedir } = tienda();
   db.prepare(`insert into productos (id, codigo, nombre, precio, stock, semana_ingreso, creado_en, actualizado_en, propietario)
