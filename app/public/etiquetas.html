@@ -384,6 +384,11 @@ const botonAutomatica = document.getElementById('automatica');
 let ambiente = null;
 const automaticaDisponible = () => ambiente?.ambiente === 'sandbox' || ambiente?.ambiente === 'produccion';
 let automaticaDesde = '';
+// La sesión vive aquí: al empezar se lee completa una vez y después solo lo que cambió
+// (`cambios`). Releerla entera cada 30 s agotaba la cuota diaria de lecturas de D1 (15/10).
+let piezasSesion = new Map();
+let cambiosDesde = null;   // hora del SERVIDOR de la última consulta, menos un traslape
+const TRASLAPE_MS = 2 * 60_000;
 let automaticaActiva = false;
 let consultandoAutomatica = false;
 
@@ -429,6 +434,7 @@ async function iniciarAutomatica() {
     if (!automaticaDisponible() || salud.ambiente !== ambiente.ambiente) return;
     automaticaDesde = localStorage.getItem(CLAVE_SESION) || salud.ahora;
     localStorage.setItem(CLAVE_SESION, automaticaDesde);
+    cambiosDesde = null;
     automaticaActiva = true;
     detenerEnvio(false);
     resumen.textContent = 'Automática activa. Toma las fotos en la cámara del mismo entorno; esperando nombre y precio.';
@@ -455,12 +461,21 @@ async function imprimirNuevas() {
         resumen.textContent = 'Hay un envío incierto. Revisa el papel y recupera esa pieza manualmente antes de retomar.';
         return;
       }
-      const respuesta = await fetch(`/api/borradores?desde=${encodeURIComponent(automaticaDesde)}`, {
+      const cambios = cambiosDesde ? `&cambios=${encodeURIComponent(cambiosDesde)}` : '';
+      const respuesta = await fetch(`/api/borradores?desde=${encodeURIComponent(automaticaDesde)}${cambios}`, {
         cache: 'no-store', signal: AbortSignal.timeout(15000),
       });
       if (!respuesta.ok) throw new Error(`No se pudo consultar la cola (error HTTP ${respuesta.status}). Revisa la red y la sesión.`);
-      const nuevas = await respuesta.json();
+      const llegadas = await respuesta.json();
       if (!automaticaActiva) return;
+      if (!cambios) piezasSesion = new Map();
+      for (const p of llegadas) {
+        if (p.estado_analisis === 'descartado') piezasSesion.delete(p.id);
+        else piezasSesion.set(p.id, p);
+      }
+      const servidor = Date.parse(respuesta.headers?.get?.('date') ?? '');
+      cambiosDesde = new Date((Number.isFinite(servidor) ? servidor : Date.now()) - TRASLAPE_MS).toISOString();
+      const nuevas = [...piezasSesion.values()].sort((a, b) => a.creado_en.localeCompare(b.creado_en));
       const hechas = impresas();
       const cola = [];
       let esperando = '';
@@ -481,7 +496,7 @@ async function imprimirNuevas() {
         resumen.textContent = esperando || 'Automática activa. Esperando la siguiente foto.';
       }
       // shortcut: el endpoint limita a 2000 capturas por sesión; empezar otra al alcanzar el tope.
-      if (nuevas.length === 2000) {
+      if (!cambios && llegadas.length === 2000) {
         pausarAutomatica();
         resumen.textContent = 'La sesión llegó a 2000 fotos. Termina las pendientes manualmente y empieza otra sesión.';
       }
