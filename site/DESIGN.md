@@ -27,7 +27,7 @@ Dominante papel + tinta azul; rojo y amarillo como acentos fuertes, nunca repart
   pasos y dirección. Cursiva solo para el «Vale por…» de los cupones. Usar `var(--display)` y `var(--display-axes)`.
 - **Anton**: precios, sellos, marquesina, categorías y botones de sello (lo que en un tabloide va estampado).
 - **Archivo** (variable 400–800): texto corrido, etiquetas de sección y botones.
-- **Abril Fatface**, **Alfa Slab One**, Anton y Archivo 900: solo en las letras recortadas del título.
+- **Rye** (OFL, Google Fonts): solo el «Se busca» de los carteles de «Los más buscados» (Issue #339).
 - Prohibido: Inter, Roboto, Arial como tipografía de diseño, Space Grotesk.
 
 ## Logo

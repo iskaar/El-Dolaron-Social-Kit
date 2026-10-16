@@ -1,6 +1,8 @@
 (() => {
   const WHATSAPP = "https://wa.me/524445437754";
   const API = "https://dolarones.eldolaron.com";
+  // El mismo ícono del botón de WhatsApp de la portada (index.html).
+  const WHATSAPP_ICONO = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M20 11.5a8 8 0 0 1-11.7 7.1L4 20l1.4-4.3A8 8 0 1 1 20 11.5Z"/><path d="M8.7 7.7c-.8 2.8 2.8 6.4 5.6 5.6l1-1.1-2-1.3-.9.8a6.6 6.6 0 0 1-2.2-2.2l.8-.9-1.3-2-1 1.1Z"/></svg>';
   // Copia de app/public/categorias.js: el sitio no importa código de otras carpetas.
   const CATEGORIAS = [
     ["", "Todo"], ["ropa", "Ropa y calzado"], ["accesorios", "Bolsas y accesorios"],
@@ -19,9 +21,9 @@
     }).format(cents / 100);
   }
 
-  function consulta(pieza) {
+  function consulta(pieza, quiero = "me interesa") {
     const talla = pieza.talla ? ` talla ${pieza.talla}` : "";
-    const texto = `Hola, me interesa ${pieza.nombre}${talla} (${pieza.codigo}) de ${precio(pieza.precio)}. ¿Sigue disponible?`;
+    const texto = `Hola, ${quiero} ${pieza.nombre}${talla} (${pieza.codigo}) de ${precio(pieza.precio)}. ¿Sigue disponible?`;
     return `${WHATSAPP}?text=${encodeURIComponent(texto)}`;
   }
 
@@ -61,27 +63,38 @@
       const lista = seccion.querySelector(".wanted-grid");
       for (const pieza of conFoto) {
         const li = document.createElement("li");
-        const a = document.createElement("a");
-        a.className = "poster";
-        a.href = consulta(pieza);
-        a.setAttribute("aria-label", `Preguntar por WhatsApp: ${pieza.nombre}, ${precio(pieza.precio)}`);
-        const cabeza = document.createElement("span");
+        const cartel = document.createElement("article");
+        cartel.className = "poster";
+        cartel.setAttribute("aria-label", pieza.nombre);
+        const cabeza = document.createElement("p");
         cabeza.className = "poster-head";
         cabeza.textContent = "Se busca";
+        const nombre = document.createElement("h3");
+        nombre.className = "poster-name";
+        nombre.textContent = pieza.nombre;
         const img = new Image();
         img.alt = "";
         img.loading = "lazy";
         img.decoding = "async";
         img.addEventListener("error", () => li.remove());
         img.src = pieza.foto;
-        const nombre = document.createElement("span");
-        nombre.className = "poster-name";
-        nombre.textContent = pieza.nombre;
-        const valor = document.createElement("span");
+        const visto = document.createElement("p");
+        visto.className = "poster-seen";
+        visto.textContent = "Visto por última vez en Jardín Hidalgo 129";
+        const pie = document.createElement("div");
+        pie.className = "poster-foot";
+        const valor = document.createElement("p");
         valor.className = "poster-price";
         pintarPrecio(valor, pieza);
-        a.append(cabeza, img, nombre, valor);
-        li.append(a);
+        const apartar = document.createElement("a");
+        apartar.className = "button button-navy poster-ask";
+        apartar.href = consulta(pieza, "quiero apartar");
+        apartar.setAttribute("aria-label", `Apartar por WhatsApp: ${pieza.nombre}`);
+        apartar.innerHTML = WHATSAPP_ICONO;
+        apartar.append("Apartar por WhatsApp");
+        pie.append(valor, apartar);
+        cartel.append(cabeza, nombre, img, visto, pie);
+        li.append(cartel);
         lista.append(li);
       }
       seccion.hidden = false;

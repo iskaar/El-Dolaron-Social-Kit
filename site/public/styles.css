@@ -1,6 +1,5 @@
 @font-face { font-family: "Anton"; src: url("assets/fonts/anton-400.woff2") format("woff2"); font-display: swap; }
-@font-face { font-family: "Abril Fatface"; src: url("assets/fonts/abril-fatface-400.woff2") format("woff2"); font-display: swap; }
-@font-face { font-family: "Alfa Slab One"; src: url("assets/fonts/alfa-slab-one-400.woff2") format("woff2"); font-display: swap; }
+@font-face { font-family: "Rye"; src: url("assets/fonts/rye-400.woff2") format("woff2"); font-display: swap; }
 @font-face { font-family: "Fraunces"; src: url("assets/fonts/fraunces-normal.woff2") format("woff2"); font-weight: 100 900; font-display: swap; }
 @font-face { font-family: "Fraunces"; src: url("assets/fonts/fraunces-italic.woff2") format("woff2"); font-weight: 100 900; font-style: italic; font-display: swap; }
 @font-face { font-family: "Archivo"; src: url("assets/fonts/archivo-variable.woff2") format("woff2"); font-weight: 100 900; font-display: swap; }
@@ -83,17 +82,33 @@ h2 { font-family: var(--display); font-variation-settings: var(--display-axes); 
 .hero-art { position: relative; min-width: 0; }
 .hero-art > img { width: 100%; mix-blend-mode: multiply; }
 
-/* Se busca (Issue #339): lo de mayor precio en carteles del viejo oeste */
+/* Se busca (Issue #339): carteles del viejo oeste clavados en la pared, con lo de mayor precio.
+   Papel envejecido = grano + manchas + orillas tostadas; orilla rasgada con clip-path, sombra en el <li>. */
 .wanted { padding-block: 64px 72px; scroll-margin-top: 16px; }
-.wanted-grid { list-style: none; margin: 36px 0 0; padding: 0; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 32px 28px; }
-.poster { --coupon: #F3E6BF; display: flex; flex-direction: column; height: 100%; padding: 18px 18px 20px; color: var(--navy); text-align: center; text-decoration: none;
-  background: var(--coupon) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 .35 0 0 0 0 .28 0 0 0 0 .16 0 0 0 .22 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url%28%23n%29'/%3E%3C/svg%3E");
-  border: 2px solid var(--navy); box-shadow: inset 0 0 0 5px var(--coupon), inset 0 0 0 6px var(--navy), 5px 5px 0 var(--navy); transition: translate 150ms ease, box-shadow 150ms ease; }
-.poster-head { padding-block: 4px 12px; font-family: "Alfa Slab One", serif; font-size: clamp(30px, 3.4vw, 46px); line-height: 1; letter-spacing: .05em; text-transform: uppercase; }
-.poster img { width: 100%; aspect-ratio: 1; object-fit: cover; border: 2px solid var(--navy); background: var(--white); }
-.poster-name { margin-top: 14px; font-family: var(--display); font-variation-settings: var(--display-axes); font-weight: 800; font-size: 19px; line-height: 1.2; overflow-wrap: anywhere; }
-.poster-price { margin-top: auto; padding-top: 10px; color: var(--red-text); font-family: "Anton", sans-serif; font-size: 36px; line-height: 1.1; }
-.poster-price s { margin-left: 10px; color: var(--navy); font-family: "Archivo", sans-serif; font-size: 15px; font-weight: 700; }
+.wanted-grid { list-style: none; margin: 40px 0 0; padding: 0; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 44px 32px; }
+.wanted-grid li { filter: drop-shadow(2px 7px 7px rgb(60 40 15 / .32)); rotate: -.8deg; }
+.wanted-grid li:nth-child(3n + 2) { rotate: .7deg; }
+.wanted-grid li:nth-child(3n) { rotate: -.3deg; }
+.poster { --aged: #E9D9AE; --ink: #2B2116; position: relative; display: flex; flex-direction: column; height: 100%; padding: 30px 24px 22px; color: var(--ink); text-align: center;
+  background:
+    radial-gradient(ellipse 60% 40% at 18% 78%, rgb(150 100 40 / .14), transparent 70%),
+    radial-gradient(ellipse at 50% 45%, transparent 52%, rgb(120 75 25 / .38) 100%),
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='220' height='220'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.7' numOctaves='3' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 .38 0 0 0 0 .26 0 0 0 0 .12 0 0 0 .34 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url%28%23n%29'/%3E%3C/svg%3E"),
+    var(--aged);
+  clip-path: polygon(0 1%, 6% 0, 19% .8%, 33% 0, 47% .6%, 62% 0, 78% .9%, 91% 0, 100% .7%, 99.4% 14%, 100% 31%, 99.3% 52%, 100% 70%, 99.5% 86%, 100% 99%, 88% 100%, 72% 99.2%, 55% 100%, 39% 99.3%, 22% 100%, 8% 99.4%, 0 100%, .6% 83%, 0 64%, .7% 45%, 0 27%, .5% 12%); }
+.poster::before { content: ""; position: absolute; top: 9px; left: 50%; width: 11px; height: 11px; translate: -50% 0; border-radius: 50%; background: radial-gradient(circle at 35% 35%, #CFC8BC, #6B6256 60%, #3B342C); box-shadow: 1px 2px 2px rgb(0 0 0 / .4); }
+.poster::after { content: ""; position: absolute; inset: 22px 12px 12px; border: 3px double rgb(43 33 22 / .55); pointer-events: none; }
+.poster-head { font-family: "Rye", Georgia, serif; font-size: clamp(34px, 3.6vw, 52px); font-weight: 400; line-height: 1; letter-spacing: .02em; text-transform: uppercase; text-shadow: 1px 1px 0 rgb(43 33 22 / .18); }
+.poster-name { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; min-height: 2.4em; margin: 10px 4px 14px; font-family: var(--display); font-variation-settings: var(--display-axes); font-weight: 800; font-size: 20px; line-height: 1.2; overflow-wrap: anywhere; }
+.poster img { width: 100%; aspect-ratio: 1; object-fit: cover; border: 3px solid var(--ink); background: var(--white); filter: sepia(.12) contrast(1.04); }
+.poster-seen { margin-top: 8px; font-family: var(--display); font-style: italic; font-size: 14px; line-height: 1.3; }
+.poster-foot { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 14px; margin-top: auto; padding-top: 16px; }
+.poster-price { position: relative; display: flex; flex-direction: column; align-items: flex-start; padding: 6px 16px 6px 30px; background: var(--yellow); color: var(--navy); font-family: "Anton", sans-serif; font-size: 42px; line-height: 1; rotate: -3deg;
+  clip-path: polygon(18px 0, 100% 0, 100% 100%, 18px 100%, 0 50%); }
+.poster-price::before { content: ""; position: absolute; left: 11px; top: 50%; width: 8px; height: 8px; translate: 0 -50%; border-radius: 50%; background: var(--aged); }
+.poster-price s { margin-top: 2px; font-family: "Archivo", sans-serif; font-size: 13px; font-weight: 700; color: var(--red-text); }
+.poster-ask { flex: 1 1 150px; min-height: 48px; padding: 10px 14px; font-size: 15px; }
+.poster-ask svg { width: 20px; height: 20px; }
 
 /* Franja: dos cintas cruzadas, la de enfrente corre como marquesina */
 .ticker { position: relative; z-index: 2; height: 96px; margin-top: -28px; overflow: clip; }
@@ -248,8 +263,7 @@ dd { margin: 0; line-height: 1.5; }
   .group-card:hover { rotate: 0deg; translate: 0 -4px; }
   .group-card:hover .group-go { background: var(--navy); color: var(--white); }
   .chip[aria-pressed="true"]:hover { background: var(--red); }
-  .poster:hover, .piece:hover { translate: -2px -2px; box-shadow: 7px 7px 0 var(--navy); }
-  .poster:hover { box-shadow: inset 0 0 0 5px var(--coupon), inset 0 0 0 6px var(--navy), 7px 7px 0 var(--navy); }
+  .piece:hover { translate: -2px -2px; box-shadow: 7px 7px 0 var(--navy); }
   .piece-link:hover { color: var(--red-text); }
   .piece-ask:hover { box-shadow: none; transform: none; background: var(--red); }
   .tiers li img:hover { rotate: 6deg; }
@@ -301,11 +315,18 @@ dd { margin: 0; line-height: 1.5; }
   .catalog { padding-block: 16px 64px; }
   .wanted { padding-block: 44px 52px; }
   .wanted-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 22px 14px; }
-  .poster { padding: 12px 12px 14px; }
-  .poster-head { font-size: 20px; letter-spacing: .02em; white-space: nowrap; padding-bottom: 8px; }
-  .poster-name { margin-top: 10px; font-size: 15px; }
-  .poster-price { font-size: 26px; }
-  .poster-price s { display: block; margin-left: 0; font-size: 12px; }
+  .wanted-grid li, .wanted-grid li:nth-child(n) { rotate: 0deg; }
+  .poster { padding: 24px 12px 14px; }
+  .poster::after { inset: 18px 6px 6px; border-width: 2px; }
+  .poster-head { font-size: 21px; white-space: nowrap; }
+  .poster-name { margin: 8px 0 10px; font-size: 14px; }
+  .poster-seen { display: none; }
+  .poster-foot { flex-direction: column; align-items: stretch; gap: 10px; padding-top: 12px; }
+  .poster-price { align-self: center; font-size: 28px; padding: 4px 10px 4px 22px; clip-path: polygon(13px 0, 100% 0, 100% 100%, 13px 100%, 0 50%); }
+  .poster-price::before { left: 7px; width: 6px; height: 6px; }
+  .poster-price s { font-size: 11px; }
+  .poster-ask { flex: none; min-height: 44px; padding: 8px 6px; font-size: 13px; gap: 6px; }
+  .poster-ask svg { width: 16px; height: 16px; }
   .catalog-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 26px 14px; }
   .piece-body { padding: 10px 10px 12px; }
   .piece h3 { font-size: 14px; }
