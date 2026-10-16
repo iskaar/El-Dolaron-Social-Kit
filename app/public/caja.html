@@ -164,6 +164,7 @@ if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw-caja.js'
     </select>
   </label>
   <span id="estado-red">en línea</span>
+  <button id="marcar-entrada" type="button" hidden>Marcar entrada</button>
   <button id="abrir-retiro" type="button">Gasto / retiro</button>
   <button id="abrir-corte" type="button">Corte</button>
   <a href="/socios">Alta de socios</a>
@@ -351,6 +352,19 @@ if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw-caja.js'
   </div>
 </dialog>
 
+<dialog id="dialogo-entrada">
+  <h2>Marcar entrada</h2>
+  <label for="entrada-empleado">Empleado</label>
+  <select id="entrada-empleado"></select>
+  <label for="entrada-pin">PIN de 6 d&iacute;gitos</label>
+  <input id="entrada-pin" type="password" inputmode="numeric" maxlength="6" autocomplete="off">
+  <p id="entrada-estado" role="status" aria-live="polite"></p>
+  <div class="acciones">
+    <button id="entrada-confirmar" type="button">Marcar</button>
+    <button id="entrada-cancelar" type="button" class="secundario">Cancelar</button>
+  </div>
+</dialog>
+
 <dialog id="dlg-forma" aria-labelledby="dlg-forma-titulo">
   <h2 id="dlg-forma-titulo">¿Es en efectivo?</h2>
   <p id="dlg-forma-texto"></p>
@@ -401,6 +415,33 @@ window.addEventListener('error', (e) => reportarError(e.error ?? e.message, 'exc
 window.addEventListener('unhandledrejection', (e) => reportarError(e.reason, 'promesa'));
 
 const $ = (id) => document.getElementById(id);
+async function prepararChecador() {
+  const respuesta = await fetch('/api/nomina/checador', { cache: 'no-store' }).catch(() => null);
+  if (!respuesta?.ok) return;
+  const { empleados } = await respuesta.json();
+  $('entrada-empleado').replaceChildren(...empleados.map((e) => new Option(e.nombre, e.id)));
+  $('marcar-entrada').hidden = false;
+}
+$('marcar-entrada').addEventListener('click', () => $('dialogo-entrada').showModal());
+$('entrada-cancelar').addEventListener('click', () => $('dialogo-entrada').close());
+$('entrada-confirmar').addEventListener('click', async () => {
+  $('entrada-confirmar').disabled = true;
+  try {
+    const respuesta = await fetch('/api/nomina/entrada', {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ empleado_id: $('entrada-empleado').value, pin: $('entrada-pin').value }),
+    });
+    const datos = await respuesta.json();
+    if (!respuesta.ok) throw new Error(datos.error || 'No se pudo marcar la entrada.');
+    $('entrada-pin').value = '';
+    $('entrada-estado').textContent = datos.repetida ? 'La entrada ya estaba marcada hoy.' : 'Entrada marcada.';
+  } catch (error) {
+    $('entrada-estado').textContent = error.message;
+  } finally {
+    $('entrada-confirmar').disabled = false;
+  }
+});
+prepararChecador();
 // Nombres de piezas (los escribe la IA o el admin), de socios y motivos: texto, nunca HTML.
 const escapar = (texto) => String(texto ?? '').replace(/[<>&"]/g, (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;' }[c]));
 const pesos = (centavos) => `$${(centavos / 100).toLocaleString('es-MX')}`;
@@ -1974,6 +2015,7 @@ function pintarResultado(c) {
     ${renglon('− Devoluciones', pesos(c.efectivo_devoluciones))}
     ${renglon('− Retiros', pesos(c.retiros))}
     ${renglon('− Gastos', pesos(c.gastos))}
+    ${renglon('− Nómina', pesos(c.nomina ?? 0))}
     ${renglon('= Esperado', pesos(c.efectivo_esperado), 'fuerte')}
     ${renglon('Contado', pesos(c.efectivo_contado), 'fuerte')}
     ${diferencia}

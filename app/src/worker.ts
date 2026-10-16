@@ -39,6 +39,7 @@ import { cajeroEnTurno, listarCajeros, entrar, salir, ponerPin } from './cajeros
 import { registrarSocio, buscarSocio, buscarPorCodigo, basesListas, sentenciasDeVenta, saldo } from './dolarones.ts';
 import { registrarCorte, registrarRetiro, ultimoCorte, cajaDe } from './corte.ts';
 import { rutaGastos } from './gastos.ts';
+import { rutaNomina } from './nomina.ts';
 import { lineasNetas } from './netas.ts';
 import { portal, llegada, vincular } from './portal.ts';
 import { mensajesApi, responderApi } from './mensajes.ts';
@@ -1417,7 +1418,7 @@ async function reportes(url: URL, env: Env): Promise<Response> {
 
   const { results: cortes } = await env.DB.prepare(
     `select id, caja, cajero, desde, hasta, tickets, fondo_inicial, efectivo_ventas, efectivo_devoluciones, retiros,
-            gastos, efectivo_esperado, efectivo_contado, diferencia, tarjeta_sistema, tarjeta_terminal, transferencias,
+            gastos, nomina, efectivo_esperado, efectivo_contado, diferencia, tarjeta_sistema, tarjeta_terminal, transferencias,
             dolarones, fondo_siguiente, entregado, notas
      from cortes where hasta >= ? order by hasta desc`,
   )
@@ -1785,7 +1786,8 @@ export default {
         }
         // Issue #112: la computadora de caja no cobra sola. Lo de caja queda a
         // nombre del cajero que entro con su PIN; sin el, la API no responde.
-        if (esDeCaja(regla) && soloComputadora(usuario) && !pathname.startsWith('/api/cajeros')) {
+        if (esDeCaja(regla) && soloComputadora(usuario) && !pathname.startsWith('/api/cajeros')
+            && pathname !== '/api/nomina/entrada' && pathname !== '/api/nomina/checador') {
           const cajero = await cajeroEnTurno(request, env);
           if (cajero) correo = cajero.correo;
           else if (pathname.startsWith('/api/')) return json({ error: 'Escribe tu PIN de cajero.', pin: true }, 401);
@@ -1951,6 +1953,9 @@ export default {
       }
       if (pathname === '/api/gastos' || pathname.startsWith('/api/gastos/')) {
         return await rutaGastos(request, env, url, correo);
+      }
+      if (pathname === '/api/nomina' || pathname.startsWith('/api/nomina/')) {
+        return await rutaNomina(request, env, url, correo);
       }
 
       if (pathname === '/api/cajon' && request.method === 'POST') {

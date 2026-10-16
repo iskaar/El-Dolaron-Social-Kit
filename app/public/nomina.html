@@ -1,0 +1,394 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>El Dolarón — nómina</title>
+<style>
+  :root { --azul:#16366B; --rojo:#D72B32; --linea:#dfe3ea; --suave:#5b6478; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:#f4f6f9; color:#1a1f2b; font-family:system-ui,-apple-system,sans-serif; }
+  header { background:var(--azul); color:white; padding:14px 20px; display:flex; gap:14px; align-items:center; }
+  header h1 { margin:0; font-size:19px; flex:1; }
+  header a { color:#FFD447; }
+  main { width:min(900px,100%); margin:auto; padding:16px; display:grid; gap:16px; }
+  section { background:white; border:1px solid var(--linea); border-radius:12px; padding:16px; }
+  h2 { margin:0 0 12px; color:var(--azul); font-size:17px; }
+  form { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px 12px; }
+  label { display:grid; gap:5px; color:var(--suave); font-size:13px; }
+  input,select,button { font:inherit; }
+  input,select { width:100%; min-height:44px; padding:10px; border:1px solid var(--linea); border-radius:8px; background:white; }
+  button { min-height:44px; padding:9px 14px; border:0; border-radius:8px; background:var(--azul); color:white; font-weight:650; cursor:pointer; }
+  button.claro { background:white; color:var(--azul); border:1px solid var(--linea); }
+  button.peligro { background:white; color:var(--rojo); border:1px solid var(--rojo); }
+  button:disabled { opacity:.6; }
+  .ancho { grid-column:1/-1; }
+  .ayuda, .muted { color:var(--suave); font-size:13px; line-height:1.45; }
+  .persona { display:grid; gap:8px; }
+  .fila { display:flex; justify-content:space-between; gap:8px; }
+  .acciones { display:flex; gap:8px; flex-wrap:wrap; }
+  .acciones button { flex:1 1 120px; }
+  #resumen { background:#f4f6f9; border-radius:8px; padding:10px 12px; font-variant-numeric:tabular-nums; }
+  #estado { min-height:20px; color:var(--suave); font-size:14px; }
+  table { width:100%; border-collapse:collapse; font-size:14px; }
+  th, td { text-align:left; padding:8px; border-bottom:1px solid var(--linea); }
+  td.num { text-align:right; font-variant-numeric:tabular-nums; }
+  @media (max-width:560px) { main { padding:10px; } form { grid-template-columns:1fr; } }
+  @media print {
+    body * { visibility:hidden !important; }
+    #recibo, #recibo * { visibility:visible !important; }
+    #recibo { position:absolute; inset:0; padding:24px; border:0; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>Nómina</h1>
+  <a href="/gastos">Gastos</a>
+  <a href="/">Inicio</a>
+</header>
+<main>
+  <p id="estado" role="status" aria-live="polite"></p>
+  <div id="empleados"></div>
+
+  <section id="configuracion">
+    <h2>Checador y bono</h2>
+    <label><input id="checador-activo" type="checkbox"> Activar checador y bono de asistencia</label>
+    <form id="config-bono" hidden>
+      <label>Monto del bono ($)<input name="bono" type="number" min="0" step="0.01"></label>
+      <label>Tolerancia (minutos)<input name="tolerancia" type="number" min="0" max="240" step="1"></label>
+      <label>Retardos permitidos<input name="retardos" type="number" min="0" max="31" step="1"></label>
+      <label>Faltas permitidas<input name="faltas" type="number" min="0" max="31" step="1"></label>
+      <button>Guardar configuración</button>
+    </form>
+    <p class="ayuda">Apagado por omisión. El devengo manual sigue disponible.</p>
+  </section>
+
+  <section id="accion" hidden>
+    <h2 id="accion-titulo"></h2>
+    <form id="accion-form">
+      <label class="solo-editar">Nombre<input name="nombre" maxlength="80"></label>
+      <label class="solo-editar">Periodo
+        <select name="periodo"><option value="diario">Diario</option><option value="quincenal">Quincenal</option></select>
+      </label>
+      <label class="solo-editar">Pago diario prorrateado ($)<input name="pago_dia" type="number" min="0.01" step="0.01"></label>
+      <label class="solo-editar">D&iacute;as asignados<select name="dias" multiple>
+        <option value="0">Domingo</option><option value="1">Lunes</option><option value="2">Martes</option>
+        <option value="3">Mi&eacute;rcoles</option><option value="4">Jueves</option><option value="5">Viernes</option><option value="6">S&aacute;bado</option>
+      </select></label>
+      <label class="solo-editar">Hora de entrada<input name="hora_entrada" type="time"></label>
+      <label class="solo-editar">PIN propio (6 d&iacute;gitos)<input name="pin" type="password" inputmode="numeric" maxlength="6" autocomplete="new-password"></label>
+      <label class="solo-devengo">Fecha<input name="fecha" type="date"></label>
+      <label class="con-dinero" id="etiqueta-importe">Efectivo que se entrega ($)<input name="importe" type="number" min="0.01" step="0.01"></label>
+      <label class="solo-pago">Abono a adelantos ($)<input name="abono" type="number" min="0" step="0.01" value="0"></label>
+      <label class="solo-pago solo-bono">Bono ($)<input name="bono" type="number" min="0" step="0.01" value="0"></label>
+      <label class="con-dinero">Sale de
+        <select name="origen"><option value="caja">El cajón (lo descuenta el corte)</option><option value="fuera">Fuera de caja</option></select>
+      </label>
+      <label class="con-dinero" id="campo-caja">Caja
+        <select name="caja"><option>Caja 1</option><option>Caja 2</option><option>Caja 3</option></select>
+      </label>
+      <label class="ancho sin-editar">Nota<input name="nota" maxlength="200"></label>
+      <p class="ancho solo-pago" id="resumen"></p>
+      <div class="ancho acciones">
+        <button id="confirmar">Confirmar</button>
+        <button type="button" class="claro" id="cancelar">Cancelar</button>
+      </div>
+    </form>
+  </section>
+
+  <section>
+    <h2>Historial</h2>
+    <div id="historial" class="muted">Toca «Historial» en un empleado.</div>
+  </section>
+
+  <section>
+    <h2>Alta de empleado</h2>
+    <form id="alta">
+      <label>Nombre<input id="nombre" required maxlength="80"></label>
+      <label>Periodo
+        <select id="periodo"><option value="diario">Diario</option><option value="quincenal">Quincenal</option></select>
+      </label>
+      <label>Pago diario prorrateado ($)<input id="pago-dia" type="number" min="0.01" step="0.01" required></label>
+      <label>D&iacute;as asignados<select id="dias" multiple><option value="0">Domingo</option><option value="1">Lunes</option>
+        <option value="2">Martes</option><option value="3">Mi&eacute;rcoles</option><option value="4">Jueves</option>
+        <option value="5">Viernes</option><option value="6">S&aacute;bado</option></select></label>
+      <label>Hora de entrada<input id="hora-entrada" type="time"></label>
+      <label>PIN propio (6 d&iacute;gitos)<input id="pin-alta" type="password" inputmode="numeric" maxlength="6" autocomplete="new-password"></label>
+      <button>Guardar empleado</button>
+    </form>
+    <p class="ayuda">El pago diario ya incluye la parte del s&eacute;ptimo d&iacute;a. Cada entrada o d&iacute;a trabajado manual suma ese pago. Los d&iacute;as asignados sirven para el bono; nunca descuentan sueldo.</p>
+  </section>
+
+  <section id="recibo" hidden></section>
+</main>
+
+<script type="module">
+const $ = (id) => document.getElementById(id);
+const pesos = (centavos) => (centavos / 100).toLocaleString('es-MX', { style: 'currency', currency: 'MXN' });
+const centavos = (valor) => Math.round(Number(valor || 0) * 100);
+const hoy = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Mexico_City' }).format(new Date());
+const escapar = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const avisar = (texto) => { $('estado').textContent = texto; };
+
+let personas = [];
+let config = null;
+let actual = null;          // { empleado, tipo } de la accion abierta
+let idPendiente = null;     // mismo id hasta que se guarde: reintentar no registra dos veces
+let bajaPedida = null;      // la baja pide un segundo toque
+
+async function api(url, cuerpo, metodo = cuerpo ? 'POST' : 'GET') {
+  const r = await fetch(url, {
+    method: metodo, cache: 'no-store',
+    headers: cuerpo ? { 'content-type': 'application/json' } : {},
+    body: cuerpo ? JSON.stringify(cuerpo) : undefined,
+  });
+  const datos = await r.json();
+  if (!r.ok) throw new Error(datos.error || 'No se pudo guardar.');
+  return datos;
+}
+
+/* ---------- Lista ---------- */
+
+async function cargar() {
+  const datos = await api('/api/nomina');
+  personas = datos.empleados;
+  config = datos.config;
+  $('checador-activo').checked = !!config.checador_activo;
+  $('config-bono').hidden = !config.checador_activo;
+  $('config-bono').elements.bono.value = config.bono_centavos / 100;
+  $('config-bono').elements.tolerancia.value = config.tolerancia_minutos;
+  $('config-bono').elements.retardos.value = config.retardos_permitidos;
+  $('config-bono').elements.faltas.value = config.faltas_permitidas;
+  $('empleados').replaceChildren(...personas.filter((e) => e.activo).map(tarjeta));
+}
+
+function tarjeta(e) {
+  const nodo = document.createElement('section');
+  nodo.className = 'persona';
+  nodo.innerHTML = `
+    <div class="fila"><b>${escapar(e.nombre)}</b><span class="muted">${e.periodo} · ${pesos(e.pago_dia)} por día</span></div>
+    <div class="fila"><span>Se le debe</span><b>${pesos(e.debe)}</b></div>
+    <div class="fila"><span>Adelantos por descontar</span><b>${pesos(e.adelantos)}</b></div>
+    <div class="acciones">
+      <button data-tipo="pago">Pagar</button>
+      <button data-tipo="adelanto" class="claro">Adelanto</button>
+      <button data-tipo="devengo" class="claro">Día trabajado</button>
+      <button data-tipo="ajuste" class="claro">Quitar día</button>
+      <button data-tipo="historial" class="claro">Historial</button>
+      <button data-tipo="editar" class="claro">Editar</button>
+      <button data-tipo="baja" class="peligro">Baja</button>
+    </div>`;
+  nodo.addEventListener('click', (ev) => {
+    const tipo = ev.target.dataset?.tipo;
+    if (tipo === 'historial') historial(e).catch((error) => avisar(error.message));
+    else if (tipo === 'baja') baja(e, ev.target).catch((error) => avisar(error.message));
+    else if (tipo) abrir(e, tipo);
+  });
+  return nodo;
+}
+
+/* ---------- Acciones: pago, adelanto, falta, editar ---------- */
+
+const TITULOS = { pago: 'Pagar a', adelanto: 'Adelanto a', devengo: 'Día trabajado de', ajuste: 'Quitar día de', editar: 'Editar a' };
+
+function abrir(empleado, tipo) {
+  actual = { empleado, tipo };
+  idPendiente = crypto.randomUUID();
+  const f = $('accion-form');
+  f.reset();
+  f.elements.fecha.value = hoy();
+  f.elements.nombre.value = empleado.nombre;
+  f.elements.periodo.value = empleado.periodo;
+  f.elements.pago_dia.value = empleado.pago_dia / 100;
+  [...f.elements.dias.options].forEach((o) => { o.selected = JSON.parse(empleado.dias).includes(Number(o.value)); });
+  f.elements.hora_entrada.value = empleado.hora_entrada || '';
+  if (tipo === 'pago') f.elements.importe.value = Math.max(0, empleado.debe) / 100 || '';
+  $('etiqueta-importe').firstChild.textContent = tipo === 'adelanto' ? 'Importe del adelanto ($)' : 'Efectivo que se entrega ($)';
+  const ver = (clase, visible) => f.querySelectorAll(clase).forEach((n) => { n.hidden = !visible; });
+  ver('.solo-editar', tipo === 'editar');
+  ver('.sin-editar', tipo !== 'editar');
+  ver('.solo-devengo', tipo === 'devengo' || tipo === 'ajuste');
+  ver('.con-dinero', tipo === 'pago' || tipo === 'adelanto');
+  ver('.solo-pago', tipo === 'pago');
+  ver('.solo-bono', tipo === 'pago' && !!config.checador_activo);
+  mostrarCaja();
+  resumir();
+  $('accion-titulo').textContent = `${TITULOS[tipo]} ${empleado.nombre}`;
+  $('accion').hidden = false;
+  $('accion').scrollIntoView({ behavior: 'smooth' });
+  if (tipo === 'pago') cargarPeriodo(empleado).then((p) => {
+    f.elements.bono.value = (p.bono_sugerido || 0) / 100;
+    f.elements.importe.value = (empleado.debe + (p.bono_sugerido || 0)) / 100;
+    actual.periodo = p;
+    resumir();
+  }).catch((error) => avisar(error.message));
+}
+
+const cargarPeriodo = (empleado) => api(`/api/nomina/${empleado.id}/periodo`);
+
+function mostrarCaja() {
+  const f = $('accion-form');
+  $('campo-caja').hidden = f.elements.origen.value !== 'caja' || f.elements.origen.closest('label').hidden;
+}
+
+/** Antes de confirmar un pago: cuanto se le debe, cuanto se abona y cuanto efectivo sale. */
+function resumir() {
+  if (actual?.tipo !== 'pago') return;
+  const f = $('accion-form');
+  const neto = centavos(f.elements.importe.value);
+  const abono = centavos(f.elements.abono.value);
+  const bono = centavos(f.elements.bono.value);
+  const queda = actual.empleado.debe + bono - neto - abono;
+  $('resumen').innerHTML = `Se le debe ${pesos(actual.empleado.debe)}<br>`
+    + `+ Bono ${pesos(bono)}<br>`
+    + `− Abono a adelantos ${pesos(abono)} (le quedan ${pesos(actual.empleado.adelantos - abono)})<br>`
+    + `− <b>Efectivo que se entrega ${pesos(neto)}</b><br>`
+    + `= Queda debiéndosele ${pesos(queda)}`;
+}
+
+$('accion-form').addEventListener('input', resumir);
+$('accion-form').elements.origen.addEventListener('change', mostrarCaja);
+$('cancelar').addEventListener('click', () => { $('accion').hidden = true; actual = null; });
+
+$('checador-activo').addEventListener('change', async () => {
+  $('config-bono').hidden = !$('checador-activo').checked;
+  if (!$('checador-activo').checked) {
+    try { await guardarConfig(); }
+    catch (error) { avisar(error.message); $('checador-activo').checked = true; $('config-bono').hidden = false; }
+  }
+});
+
+$('config-bono').addEventListener('submit', async (ev) => {
+  ev.preventDefault();
+  try { await guardarConfig(); avisar('Configuración guardada.'); }
+  catch (error) { avisar(error.message); }
+});
+
+async function guardarConfig() {
+  const f = $('config-bono');
+  config = await api('/api/nomina/config', {
+    checador_activo: $('checador-activo').checked,
+    bono_centavos: centavos(f.elements.bono.value),
+    tolerancia_minutos: Number(f.elements.tolerancia.value || 0),
+    retardos_permitidos: Number(f.elements.retardos.value || 0),
+    faltas_permitidas: Number(f.elements.faltas.value || 0),
+  }, 'PUT');
+}
+
+$('accion-form').addEventListener('submit', async (ev) => {
+  ev.preventDefault();
+  const f = ev.target;
+  const { empleado, tipo } = actual;
+  $('confirmar').disabled = true;
+  try {
+    if (tipo === 'editar') {
+      await api(`/api/nomina/empleados/${empleado.id}`, {
+        nombre: f.elements.nombre.value, periodo: f.elements.periodo.value, pago_dia: centavos(f.elements.pago_dia.value),
+        dias: [...f.elements.dias.selectedOptions].map((o) => Number(o.value)),
+        hora_entrada: f.elements.hora_entrada.value, pin: f.elements.pin.value,
+      }, 'PUT');
+    } else {
+      const cuerpo = { id: idPendiente, empleado_id: empleado.id, tipo, nota: f.elements.nota.value };
+      if (tipo === 'devengo' || tipo === 'ajuste') {
+        cuerpo.fecha = f.elements.fecha.value;
+        cuerpo.importe = centavos(empleado.pago_dia / 100);
+        if (tipo === 'devengo') cuerpo.origen = 'manual';
+      } else Object.assign(cuerpo, {
+        fecha: hoy(), importe: centavos(f.elements.importe.value), origen: f.elements.origen.value, caja: f.elements.caja.value,
+        abono: tipo === 'pago' ? centavos(f.elements.abono.value) : 0,
+        bono: tipo === 'pago' ? centavos(f.elements.bono.value) : 0,
+      });
+      await api('/api/nomina/movimientos', cuerpo);
+      if (tipo === 'pago') await recibo(empleado, idPendiente, cuerpo, actual.periodo);
+    }
+    $('accion').hidden = true;
+    actual = null;
+    avisar('Guardado.');
+    await cargar();
+  } catch (error) {
+    avisar(error.message);
+  } finally {
+    $('confirmar').disabled = false;
+  }
+});
+
+async function baja(empleado, boton) {
+  if (bajaPedida !== empleado.id) {
+    bajaPedida = empleado.id;
+    boton.textContent = '¿Seguro? Toca otra vez';
+    return;
+  }
+  bajaPedida = null;
+  await api(`/api/nomina/empleados/${empleado.id}`, null, 'DELETE');
+  avisar(`${empleado.nombre} dado de baja.`);
+  await cargar();
+}
+
+/* ---------- Historial y recibo ---------- */
+
+const movimientosDe = async (empleado) =>
+  (await api(`/api/nomina/${empleado.id}/movimientos?desde=2020-01-01&hasta=2099-12-31`)).movimientos;
+
+async function historial(empleado) {
+  const movimientos = await movimientosDe(empleado);
+  $('historial').innerHTML = `<p><b>${escapar(empleado.nombre)}</b></p>
+    <table>
+      <thead><tr><th>Fecha</th><th>Tipo</th><th class="num">Importe</th><th>Nota</th></tr></thead>
+      <tbody>${movimientos.map((m) => `<tr>
+        <td>${escapar(m.fecha)}</td><td>${escapar(m.tipo)}</td>
+        <td class="num">${pesos(m.importe)}</td><td>${escapar(m.nota)}</td>
+      </tr>`).join('')}</tbody>
+    </table>`;
+}
+
+/** Recibo para firmar: lo devengado y las faltas desde el pago anterior hasta este. */
+async function recibo(empleado, idPago, pago, asistencia) {
+  const movimientos = await movimientosDe(empleado);
+  const este = movimientos.find((m) => m.id === idPago);
+  const anterior = movimientos.find((m) => m.tipo === 'pago' && m.creado_en < este.creado_en);
+  const periodo = movimientos.filter((m) => m.creado_en <= este.creado_en && (!anterior || m.creado_en > anterior.creado_en));
+  const suma = (tipo) => periodo.filter((m) => m.tipo === tipo).reduce((s, m) => s + m.importe, 0);
+  const diasTrabajados = new Set(periodo.filter((m) => m.tipo === 'devengo').map((m) => m.fecha));
+  periodo.filter((m) => m.tipo === 'ajuste').forEach((m) => diasTrabajados.delete(m.fecha));
+  const desde = periodo.at(-1)?.fecha ?? este.fecha;
+  $('recibo').innerHTML = `
+    <h1>El Dolarón — recibo de nómina</h1>
+    <p>Empleado: ${escapar(empleado.nombre)}</p>
+    <p>Periodo: ${desde} al ${este.fecha}</p>
+    <p>Devengado: ${pesos(suma('devengo') + suma('ajuste'))}</p>
+    <p>Días trabajados: ${diasTrabajados.size}</p>
+    <p>Faltas: ${asistencia?.faltas ?? 0}</p>
+    <p>Retardos: ${asistencia?.retardos ?? 0}</p>
+    <p>Bono: ${pesos(pago.bono)}</p>
+    <p>Abono a adelantos: ${pesos(pago.abono)}</p>
+    <p><b>Neto entregado: ${pesos(pago.importe)}</b></p>
+    <p>Sale de: ${pago.origen === 'caja' ? pago.caja : 'Fuera de caja'}</p>
+    <br><p>Firma de recibido: ____________________________________</p>`;
+  $('recibo').hidden = false;
+  window.print();
+  $('recibo').hidden = true;
+}
+
+/* ---------- Alta ---------- */
+
+$('alta').addEventListener('submit', async (ev) => {
+  ev.preventDefault();
+  try {
+    await api(`/api/nomina/empleados/${crypto.randomUUID()}`, {
+      nombre: $('nombre').value, periodo: $('periodo').value, pago_dia: centavos($('pago-dia').value),
+      dias: [...$('dias').selectedOptions].map((o) => Number(o.value)), hora_entrada: $('hora-entrada').value,
+      pin: $('pin-alta').value,
+    });
+    $('alta').reset();
+    avisar('Empleado guardado.');
+    await cargar();
+  } catch (error) {
+    avisar(error.message);
+  }
+});
+
+cargar().catch((error) => avisar(error.message));
+</script>
+</body>
+</html>
