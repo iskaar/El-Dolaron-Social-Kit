@@ -68,6 +68,10 @@ test('corregir una etiqueta no la deja lista sin nombre o sin precio (#335)', as
     `insert into productos (id, nombre, precio, estado_analisis, destino, semana_ingreso, creado_en, actualizado_en)
      values (?, 'Licuadora', 0, 'error', 'etiqueta', 'S40', '', '')`).run(id);
   const estado = () => (db.prepare('select estado_analisis from productos where id = ?').get(id) as { estado_analisis: string }).estado_analisis;
+  // La cola del admin (donde Isaac revisa la mercancia general) la sigue mostrando: sin filtro y con ?estado=error.
+  for (const ruta of ['/api/borradores', '/api/borradores?estado=error']) {
+    assert.ok(((await pedir(ruta)).cuerpo as { id: string }[]).some((p) => p.id === id), ruta);
+  }
   assert.equal((await pedir(`/api/borradores/${id}`, { marca: 'Oster' }, 'PATCH')).status, 400);
   assert.equal((await pedir(`/api/borradores/${id}`, { nombre: ' ', precio: 5000 }, 'PATCH')).status, 400);
   assert.equal(estado(), 'error');
