@@ -26,7 +26,7 @@ async function promoRestantes(env: Env): Promise<number | null> {
 }
 import { semanaIngreso } from '../public/semana.js';
 import { tramoDeDias, TRAMOS_ANTIGUEDAD } from '../public/graficas.js';
-import { detalleVenta, cancelarPieza } from './devoluciones.ts';
+import { detalleVenta, cancelarPieza, devolverEnCupon, reimprimirCupon } from './devoluciones.ts';
 import { cancelarVenta, listarCancelaciones, estadoSolicitud } from './cancelaciones.ts';
 import { BASES, AVISO } from './legal.ts';
 import { CLAVES_CATEGORIA } from '../public/categorias.js';
@@ -42,7 +42,7 @@ import { lineasNetas } from './netas.ts';
 import { portal, llegada, vincular } from './portal.ts';
 import { mensajesApi, responderApi } from './mensajes.ts';
 import { rutaAsistente } from './asistente.ts';
-import { sentenciasVale, buscarVale, valeDeVenta, valeUsadoEnVenta, reimprimirVale, valesAbiertos } from './vales.ts';
+import { sentenciasVale, buscarVale, valeDeVenta, valeUsadoEnVenta, reimprimirVale, valesAbiertos, emitirCuponManual, porcentajeCupon } from './vales.ts';
 import { catalogoPublico, revisionCatalogo } from './catalogo.ts';
 import { rutaML, recibirNotificacion, conciliarSeguro, sincronizar, publicacionViva } from './mercadolibre.ts';
 import { pedirDescuento, validarDescuento, listarDescuentos, listarDuenos } from './descuentos.ts';
@@ -1177,7 +1177,8 @@ async function corte(url: URL, env: Env): Promise<Response> {
   // Las canceladas no cuentan: el corte es contra el efectivo que hay en el cajon.
   const { results } = await env.DB.prepare(
     `select forma_pago, sum(tickets) as tickets, sum(total) as total, sum(dolarones) as dolarones from (
-       select forma_pago, count(*) as tickets, sum(total - dolarones - anticipo - devuelto) as total,
+       -- Lo devuelto en cupón (Issue #330) se quedó en el cajón.
+       select forma_pago, count(*) as tickets, sum(total - dolarones - anticipo - devuelto + devuelto_cupon) as total,
               sum(dolarones - dolarones_devueltos) as dolarones
        from ventas where creado_en >= ? and creado_en < ? and cancelada = 0 group by forma_pago
        union all
@@ -1925,7 +1926,8 @@ export default {
       if (pathname === '/api/vales/config' && request.method === 'GET')
       {
         const promo = promoDe(env), restantes = promo && await promoRestantes(env);
-        return json({ habilitado:valesAbiertos(env), prueba:env.AMBIENTE === 'sandbox', promo:promo && (restantes === null ? promo : { ...promo, restantes }) });
+        return json({ habilitado:valesAbiertos(env), prueba:env.AMBIENTE === 'sandbox', promo:promo && (restantes === null ? promo : { ...promo, restantes }),
+          cupon_porcentaje:await porcentajeCupon(env) });
       }
       if (pathname === '/api/vales/buscar' && request.method === 'POST')
         return await buscarVale(request, env);
@@ -1961,6 +1963,12 @@ export default {
       if (cancelacionPieza && request.method === 'POST') {
         return await cancelarPieza(cancelacionPieza[1], Number(cancelacionPieza[2]), request, env, correo);
       }
+      // Cupones en lugar de devolver dinero (Issue #330).
+      const cupon = pathname.match(/^\/api\/ventas\/([^/]+)\/cupon(?:\/([^/]+))?$/);
+      if (cupon && request.method === 'POST') {
+        return cupon[2] ? await reimprimirCupon(cupon[1], cupon[2], env) : await devolverEnCupon(cupon[1], request, env, correo);
+      }
+      if (pathname === '/api/cupones' && request.method === 'POST') return await emitirCuponManual(request, env, correo);
       const ticket = pathname.match(/^\/api\/ventas\/([^/]+)$/);
       if (ticket && request.method === 'GET') {
         return await detalleVenta(ticket[1], env, url.searchParams.get('imprimir') === '1');

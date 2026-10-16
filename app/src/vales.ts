@@ -1,5 +1,7 @@
 import { dolaronesGanados } from '../public/venta.js';
 import { basesListas, codigoAleatorio, disponibleDesde, promocionIniciada, sumarMeses } from './dolarones.ts';
+import { verificarPin } from './cajeros.ts';
+import { leerUsuario } from './cuentas.ts';
 
 const CODIGO = /^DP-[A-Za-z0-9_-]{16}$/;
 // ponytail: vale de prueba de 6 digitos (Issue #279), solo en el sandbox; produccion acepta solo DP-.
@@ -34,7 +36,7 @@ export async function buscarVale(request: Request, env: Env): Promise<Response> 
   if (!codigoValeValido(env, codigo)) return json({ error:'Código de vale inválido.' }, 400);
   const ahora = new Date().toISOString();
   const vale = await env.DB.prepare(`select k.restante, k.vence_en from vales_dolarones k
-    join ventas v on v.id = k.venta_id where k.codigo = ? and v.cancelada = 0
+    left join ventas v on v.id = k.venta_id where k.codigo = ? and coalesce(v.cancelada, 0) = 0
     and k.restante > 0 and k.disponible_desde <= ? and k.vence_en > ?`)
     .bind(codigo, ahora, ahora).first<{ restante: number; vence_en: string }>();
   if (!vale) return json({ error:'Vale no disponible: aún no liberado, vencido, agotado o cancelado.' }, 403);
@@ -65,15 +67,15 @@ export async function sentenciasVale(env: Env, p: {
   const ahora = p.ahora.toISOString();
   const sentencias:D1PreparedStatement[] = [];
   if (p.codigo && p.dolarones > 0) {
-    const vale = await env.DB.prepare(`select k.id from vales_dolarones k join ventas v on v.id = k.venta_id
-      where k.codigo = ? and v.cancelada = 0 and k.restante >= ?
+    const vale = await env.DB.prepare(`select k.id from vales_dolarones k left join ventas v on v.id = k.venta_id
+      where k.codigo = ? and coalesce(v.cancelada, 0) = 0 and k.restante >= ?
       and k.disponible_desde <= ? and k.vence_en > ?`)
       .bind(p.codigo, p.dolarones, ahora, ahora).first<{ id:string }>();
     if (!vale) return { ok:false, status:409, error:'Vale no disponible o saldo insuficiente. Vuelve a escanearlo.' };
     sentencias.push(
       env.DB.prepare(`update vales_dolarones set restante = case
         when disponible_desde <= ? and vence_en > ? and vence_en > strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
-        and (select cancelada from ventas where id = venta_id) = 0
+        and coalesce((select cancelada from ventas where id = venta_id), 0) = 0
         then restante - ? else -1 end where id = ?`).bind(ahora, ahora, p.dolarones, vale.id),
       env.DB.prepare(`insert into vales_movimientos (vale_id, venta_id, tipo, importe, autor, creado_en)
         values (?, ?, 'canje', ?, ?, ?)`).bind(vale.id, p.ventaId, -p.dolarones, p.autor, ahora),
@@ -144,12 +146,13 @@ export async function reclamarVale(env: Env, clienteId: string, codigo: string):
   const ahora = new Date();
   const iso = ahora.toISOString();
   const haceUnaSemana = new Date(ahora.getTime() - SEMANA).toISOString();
-  const k = await env.DB.prepare(`select k.id, k.venta_id, k.importe, k.restante, k.vence_en, k.creado_en, k.reclamado_por,
+  const k = await env.DB.prepare(`select k.id, k.venta_id, k.importe, k.restante, k.vence_en, k.creado_en, k.reclamado_por, k.origen,
       v.total, v.dolarones, v.devuelto, v.cancelada, v.cliente_id
-    from vales_dolarones k join ventas v on v.id = k.venta_id where k.codigo = ?`).bind(codigo).first<{
+    from vales_dolarones k left join ventas v on v.id = k.venta_id where k.codigo = ?`).bind(codigo).first<{
       id:string; venta_id:string; importe:number; restante:number; vence_en:string; creado_en:string; reclamado_por:string | null;
-      total:number; dolarones:number; devuelto:number; cancelada:number; cliente_id:string | null }>();
+      origen:string; total:number; dolarones:number; devuelto:number; cancelada:number; cliente_id:string | null }>();
   if (!k) return json({ error:'No encontramos ese vale.' }, 404);
+  if (k.origen !== 'compra') return json({ error:'Este es un cupón: se usa directo en la caja, no se pasa a una cuenta.' }, 409);
   if (k.reclamado_por === clienteId) {
     const lote = await env.DB.prepare('select importe, disponible_desde, vence_en from dolarones_lotes where venta_id = ?')
       .bind(k.venta_id).first();
@@ -194,4 +197,66 @@ export async function reclamarVale(env: Env, clienteId: string, codigo: string):
     throw error;
   }
   return json({ importe, disponible_desde:lote.disponible_desde, vence_en:lote.vence_en }, 201);
+}
+
+/* ---------- cupones (Issue #330) ---------- */
+
+export const VIGENCIA_CUPON = 30 * 86_400_000;
+/** Lo que se regresa en cupón por cada peso devuelto; lo elige el dueño en /reportes (config `cupon_porcentaje`). */
+export async function porcentajeCupon(env: Env): Promise<number> {
+  const fila = await env.DB.prepare(`select valor from config where clave = 'cupon_porcentaje'`).first<{ valor:string }>();
+  const n = Number(fila?.valor);
+  return Number.isInteger(n) && n >= 1 && n <= 200 ? n : 100;
+}
+
+export type Cupon = Vale & { origen:'devolucion' | 'manual' };
+
+/** Un cupón nuevo: un vale sin compra, disponible ya y por 30 días. Su `id` lo pone quien lo pide (reenviar no duplica). */
+export function nuevoCupon(env: Env, p: {
+  id:string; origen:'devolucion' | 'manual'; importe:number; ahora:Date; ventaOrigen?:string; motivo:string; autor:string; aprobadoPor?:string;
+}): { cupon:Cupon; sentencia:D1PreparedStatement } {
+  const creado = p.ahora.toISOString();
+  const cupon:Cupon = { id:p.id, codigo:codigoAleatorio('DP'), importe:p.importe, restante:p.importe, disponible_desde:creado,
+    vence_en:new Date(p.ahora.getTime() + VIGENCIA_CUPON).toISOString(), creado_en:creado, origen:p.origen };
+  return { cupon, sentencia:env.DB.prepare(`insert into vales_dolarones (id, venta_id, codigo, importe, restante, disponible_desde,
+      vence_en, creado_en, origen, venta_origen, motivo, autor, aprobado_por) values (?, null, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+    .bind(cupon.id, cupon.codigo, cupon.importe, cupon.importe, creado, cupon.vence_en, creado, p.origen,
+      p.ventaOrigen ?? null, p.motivo, p.autor, p.aprobadoPor ?? null) };
+}
+
+export const leerCupon = (env: Env, id: string) => env.DB.prepare(`select id, codigo, importe, restante, disponible_desde,
+  vence_en, creado_en, origen from vales_dolarones where id = ? and origen != 'compra'`).bind(id).first<Cupon>();
+
+const MAXIMO_CUPON = 1_000_000;   // ponytail: $10,000 por cupón manual; subirlo si Isaac lo pide
+
+/**
+ * Cupón de monto libre (cortesía, aclaración): lo emite la caja con el PIN de un dueño,
+ * o sin PIN si quien cobra es dueño. `id` de la caja: un reenvío no emite dos.
+ */
+export async function emitirCuponManual(request: Request, env: Env, correo: string): Promise<Response> {
+  const cuerpo = await request.json().then((c) => c ?? {}, () => ({})) as Record<string, unknown>;
+  const id = String(cuerpo.id ?? '');
+  if (!UUID.test(id)) return json({ error:'Identificador inválido.' }, 400);
+  const importe = Number(cuerpo.importe);
+  if (!Number.isInteger(importe) || importe < 100 || importe > MAXIMO_CUPON)
+    return json({ error:'El cupón va de 1 a 10,000 Dolarones.' }, 400);
+  const motivo = String(cuerpo.motivo ?? '').replace(/\s+/g, ' ').trim().slice(0, 200);
+  if (!motivo) return json({ error:'Escribe el motivo del cupón.' }, 400);
+  const previo = await leerCupon(env, id);
+  if (previo) return json({ cupon:previo, duplicada:true });
+
+  let aprobo = correo;
+  if (!(await leerUsuario(env, correo))?.roles.includes('dueno')) {
+    aprobo = String(cuerpo.aprobador ?? '').trim().toLowerCase();
+    const verificado = await verificarPin(env, aprobo, String(cuerpo.pin ?? ''), (roles) => roles.includes('dueno'));
+    if ('error' in verificado) return json({ error:verificado.error }, verificado.status);
+  }
+  const { cupon, sentencia } = nuevoCupon(env, { id, origen:'manual', importe, ahora:new Date(), motivo, autor:correo, aprobadoPor:aprobo });
+  try { await sentencia.run(); }
+  catch (error) {
+    const ya = await leerCupon(env, id);
+    if (ya) return json({ cupon:ya, duplicada:true });
+    throw error;
+  }
+  return json({ cupon }, 201);
 }

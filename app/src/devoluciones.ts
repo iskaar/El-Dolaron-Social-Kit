@@ -14,7 +14,7 @@
 
 import { cajaDe } from './corte.ts';
 import { dolaronesGanados } from '../public/venta.js';
-import { retirarVale, valeDeVenta, valeUsadoEnVenta } from './vales.ts';
+import { leerCupon, nuevoCupon, porcentajeCupon, retirarVale, valeDeVenta, valeUsadoEnVenta } from './vales.ts';
 import { saldo } from './dolarones.ts';
 import { TICKET_CON_ANTICIPO } from './pedidos.ts';
 
@@ -39,18 +39,31 @@ export function repartirDevolucion(p: {
   return { dinero, dolarones };
 }
 
+/**
+ * Lo que vale `cantidad` de una linea. Con descuento (Issue #119) `total` ya viene descontado:
+ * cada pieza vale su parte de lo cobrado, y la ultima se lleva el resto (sin perder centavos).
+ */
+export function importePiezas(p: {
+  precio: number; cantidad: number; restan: number; total: number; descuento: number; devuelto: number; dolaronesDevueltos: number;
+}): number {
+  if (p.descuento <= 0) return p.precio * p.cantidad;
+  return p.cantidad === p.restan
+    ? Math.max(0, p.total - p.devuelto - p.dolaronesDevueltos)
+    : Math.round((p.precio * p.cantidad * p.total) / (p.total + p.descuento));
+}
+
 interface VentaFila {
   id: string; total: number; descuento: number; forma_pago: string; efectivo: number; cambio: number; dolarones: number;
   cancelada: number; cancelada_en: string; cancelada_por: string; cancelada_caja: string; motivo_cancelacion: string;
   creado_en: string; caja: string; cajero: string; cliente_id: string | null; anticipo: number; pedido_id: string | null;
-  devuelto: number; dolarones_devueltos: number; revision: number;
+  devuelto: number; devuelto_cupon: number; dolarones_devueltos: number; revision: number;
   imprimir_en: string | null; impreso_en: string | null;
 }
 
 const leerVenta = (env: Env, id: string) =>
   env.DB.prepare(
     `select id, total, descuento, forma_pago, efectivo, cambio, dolarones, cancelada, cancelada_en, cancelada_por, cancelada_caja,
-            motivo_cancelacion, creado_en, caja, cajero, cliente_id, anticipo, pedido_id, devuelto, dolarones_devueltos, revision, imprimir_en, impreso_en
+            motivo_cancelacion, creado_en, caja, cajero, cliente_id, anticipo, pedido_id, devuelto, devuelto_cupon, dolarones_devueltos, revision, imprimir_en, impreso_en
      from ventas where id = ?`,
   ).bind(id).first<VentaFila>();
 
@@ -65,7 +78,7 @@ export async function detalleVenta(id: string, env: Env, paraImprimir = false): 
      from venta_lineas where venta_id = ? order by id`,
   ).bind(id).all();
   const { results: devoluciones } = await env.DB.prepare(
-    `select d.id, d.creado_en, d.autor, d.motivo, d.cantidad, d.importe, d.dolarones, d.caja, l.nombre
+    `select d.id, d.creado_en, d.autor, d.motivo, d.cantidad, d.importe, d.dolarones, d.cupon, d.vale_id, d.caja, l.nombre
      from devoluciones d join venta_lineas l on l.id = d.linea_id
      where d.venta_id = ? order by d.creado_en`,
   ).bind(id).all();
@@ -132,17 +145,10 @@ export async function cancelarPieza(
   if (cantidad > quedan) return json({ error: `Solo quedan ${quedan} de esa pieza en el ticket.` }, 400);
 
   const pagado = venta.total - venta.dolarones;
-  // Con descuento (Issue #119) `total` ya viene descontado: cada pieza vale su parte de
-  // lo cobrado, no su precio de lista, y la ultima se lleva el resto (sin perder centavos).
-  let importe = linea.precio * cantidad;
-  if (venta.descuento > 0) {
-    const { restan } = (await env.DB.prepare(
-      'select sum(cantidad - cancelada_cantidad) as restan from venta_lineas where venta_id = ?',
-    ).bind(ventaId).first<{ restan: number }>())!;
-    importe = cantidad === restan
-      ? Math.max(0, venta.total - venta.devuelto - venta.dolarones_devueltos)
-      : Math.round((importe * venta.total) / (venta.total + venta.descuento));
-  }
+  const importe = importePiezas({
+    precio: linea.precio, cantidad, restan: venta.descuento > 0 ? await piezasQueQuedan(env, ventaId) : 0,
+    total: venta.total, descuento: venta.descuento, devuelto: venta.devuelto, dolaronesDevueltos: venta.dolarones_devueltos,
+  });
   const reparto = repartirDevolucion({
     importe, pagado, devuelto: venta.devuelto,
     dolarones: venta.dolarones, dolaronesDevueltos: venta.dolarones_devueltos,
@@ -195,6 +201,142 @@ export async function cancelarPieza(
   }
 
   return json({ id, venta_id: ventaId, cantidad, devuelto: reparto.dinero, dolarones: reparto.dolarones }, 201);
+}
+
+const piezasQueQuedan = async (env: Env, ventaId: string) => (await env.DB.prepare(
+  'select sum(cantidad - cancelada_cantidad) as restan from venta_lineas where venta_id = ?',
+).bind(ventaId).first<{ restan: number }>())!.restan;
+
+/**
+ * Devolver piezas con un cupón de Dolarones en lugar de dinero (Issue #330). Como
+ * cancelarPieza, pieza por pieza y en un solo batch, pero el dinero no sale del cajon:
+ * queda en `devoluciones.cupon` y `ventas.devuelto_cupon` (el corte lo vuelve a sumar) y
+ * sale un cupón por `porcentajeCupon` de ese dinero. Lo pagado con Dolarones regresa al socio
+ * como siempre. `id` (de la caja) es el id del cupón: un reenvio no emite dos.
+ * `lineas`: [{ linea, cantidad }] o 'todo' (lo que queda del ticket).
+ */
+export async function devolverEnCupon(ventaId: string, request: Request, env: Env, correo: string): Promise<Response> {
+  if (!UUID.test(ventaId)) return json({ error: 'Identificador de venta invalido.' }, 400);
+  const cuerpo = (await request.json().catch(() => ({}))) as { id?: unknown; lineas?: unknown; motivo?: unknown; caja?: unknown };
+  const id = String(cuerpo.id ?? '');
+  if (!UUID.test(id)) return json({ error: 'Identificador invalido.' }, 400);
+  const motivo = String(cuerpo.motivo ?? '').trim().slice(0, 200);
+  if (!motivo) return json({ error: 'Escribe el motivo de la devolucion.' }, 400);
+
+  const previo = await leerCupon(env, id);
+  if (previo) return json({ id, venta_id: ventaId, cupon: previo, duplicada: true });
+
+  const venta = await leerVenta(env, ventaId);
+  if (!venta) return json({ error: 'La venta no existe.' }, 404);
+  if (venta.cancelada) return json({ error: 'El ticket ya estaba cancelado completo.' }, 409);
+  if (venta.anticipo > 0) return json({ error: TICKET_CON_ANTICIPO }, 409);
+  if (venta.dolarones > 0 && !venta.cliente_id) {
+    return json({ error: 'Este ticket se pagó con un vale: cancélalo completo, en dinero.' }, 409);
+  }
+
+  const { results: todas } = await env.DB.prepare(
+    'select id, producto_id, precio, cantidad, cancelada_cantidad from venta_lineas where venta_id = ? order by id',
+  ).bind(ventaId).all<{ id: number; producto_id: string | null; precio: number; cantidad: number; cancelada_cantidad: number }>();
+  const pedidas = cuerpo.lineas === 'todo'
+    ? todas.filter((l) => l.cantidad > l.cancelada_cantidad).map((l) => ({ linea: l.id, cantidad: l.cantidad - l.cancelada_cantidad }))
+    : Array.isArray(cuerpo.lineas)
+      ? (cuerpo.lineas as { linea?: unknown; cantidad?: unknown }[]).map((l) => ({ linea: Number(l?.linea), cantidad: Number(l?.cantidad ?? 1) }))
+      : [];
+  if (pedidas.length === 0 || pedidas.length > 100) return json({ error: 'Elige las piezas que se devuelven.' }, 400);
+  if (new Set(pedidas.map((p) => p.linea)).size !== pedidas.length) return json({ error: 'Pieza repetida.' }, 400);
+
+  // Pieza por pieza, como si se cancelaran una tras otra (mismo reparto que cancelarPieza).
+  const pagado = venta.total - venta.dolarones;
+  let devuelto = venta.devuelto;
+  let dolaronesDevueltos = venta.dolarones_devueltos;
+  let restan = todas.reduce((n, l) => n + l.cantidad - l.cancelada_cantidad, 0);
+  let base = 0;
+  const ahora = new Date();
+  const iso = ahora.toISOString();
+  const caja = await cajaDe(env, correo, cuerpo.caja);
+  const sentencias: D1PreparedStatement[] = [];
+  for (const p of pedidas) {
+    const linea = todas.find((l) => l.id === p.linea);
+    if (!linea) return json({ error: 'La pieza no es de este ticket.' }, 404);
+    const quedan = linea.cantidad - linea.cancelada_cantidad;
+    if (!Number.isInteger(p.cantidad) || p.cantidad < 1) return json({ error: 'Cantidad invalida.' }, 400);
+    if (quedan <= 0) return json({ error: 'Esa pieza ya estaba cancelada.' }, 409);
+    if (p.cantidad > quedan) return json({ error: `Solo quedan ${quedan} de esa pieza en el ticket.` }, 400);
+    const importe = importePiezas({ precio: linea.precio, cantidad: p.cantidad, restan, total: venta.total,
+      descuento: venta.descuento, devuelto, dolaronesDevueltos });
+    const reparto = repartirDevolucion({ importe, pagado, devuelto, dolarones: venta.dolarones, dolaronesDevueltos });
+    devuelto += reparto.dinero;
+    dolaronesDevueltos += reparto.dolarones;
+    restan -= p.cantidad;
+    base += reparto.dinero;
+    sentencias.push(
+      env.DB.prepare('update venta_lineas set cancelada_cantidad = cancelada_cantidad + ? where id = ?').bind(p.cantidad, linea.id),
+      env.DB.prepare(
+        `insert into devoluciones (id, venta_id, linea_id, cantidad, importe, dolarones, cupon, vale_id, forma_pago, caja, autor, motivo, creado_en)
+         values (?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ).bind(crypto.randomUUID(), ventaId, linea.id, p.cantidad, reparto.dolarones, reparto.dinero, id, venta.forma_pago,
+        caja, correo, motivo, iso),
+      // Los bins no regresan existencia: nadie cuenta cuantas piezas hay en un bote.
+      ...(linea.producto_id
+        ? [env.DB.prepare('update productos set stock = stock + ?, actualizado_en = ? where id = ? and sin_inventario = 0')
+          .bind(p.cantidad, iso, linea.producto_id)]
+        : []),
+    );
+  }
+  const porcentaje = await porcentajeCupon(env);
+  const importeCupon = Math.round((base * porcentaje) / 100);
+  if (importeCupon <= 0) {
+    return json({ error: 'Esas piezas se pagaron con Dolarones: no hay dinero que pasar a cupón. Cancélalas normal.' }, 409);
+  }
+  const { cupon, sentencia } = nuevoCupon(env, {
+    id, origen: 'devolucion', importe: importeCupon, ahora, ventaOrigen: ventaId, motivo, autor: correo,
+  });
+
+  try {
+    await env.DB.batch([
+      // Primero el candado: si otra cancelacion de este ticket se adelanto, aborta todo.
+      env.DB.prepare(
+        `update ventas set revision = ?, devuelto = devuelto + ?, devuelto_cupon = devuelto_cupon + ?,
+           dolarones_devueltos = dolarones_devueltos + ? where id = ?`,
+      ).bind(venta.revision + 1, base, base, dolaronesDevueltos - venta.dolarones_devueltos, ventaId),
+      ...sentencias,
+      ...(venta.cliente_id
+        ? await sentenciasDeDevolucion(env, {
+          ventaId, dolarones: dolaronesDevueltos - venta.dolarones_devueltos, pagadoRestante: pagado - devuelto, autor: correo, ahora: iso,
+        })
+        : await retirarVale(env, ventaId, correo, iso, pagado - devuelto)),
+      sentencia,
+    ]);
+  } catch (error) {
+    const texto = String(error);
+    if (texto.includes('UNIQUE') && texto.includes('vales_dolarones')) {
+      const ya = await leerCupon(env, id);
+      if (ya) return json({ id, venta_id: ventaId, cupon: ya, duplicada: true });
+    }
+    if (texto.includes('ticket cambio') || texto.includes('pieza ya cancelada')) {
+      return json({ error: 'Alguien mas cambio este ticket. Vuelve a abrirlo.' }, 409);
+    }
+    if (texto.includes('saldo insuficiente')) {
+      return json({ error: 'Los Dolarones ganados con esta compra ya se usaron. Requiere aclaración presencial.' }, 409);
+    }
+    if (texto.includes('saldo de vale invalido')) {
+      return json({ error: 'El vale de esta compra ya se usó. Requiere aclaración presencial.' }, 409);
+    }
+    throw error;
+  }
+  return json({ id, venta_id: ventaId, cupon, base, porcentaje, dolarones: dolaronesDevueltos - venta.dolarones_devueltos }, 201);
+}
+
+/** Reimprimir el cupón de una devolucion de este ticket: mismo codigo, saldo y vencimiento. */
+export async function reimprimirCupon(ventaId: string, valeId: string, env: Env): Promise<Response> {
+  if (!UUID.test(ventaId) || !UUID.test(valeId)) return json({ error: 'Identificador invalido.' }, 400);
+  const cupon = await env.DB.prepare(`select id, codigo, importe, restante, disponible_desde, vence_en, creado_en, origen
+    from vales_dolarones where id = ? and venta_origen = ? and restante > 0 and vence_en > ?`)
+    .bind(valeId, ventaId, new Date().toISOString()).first();
+  if (!cupon) return json({ error: 'Ese cupón ya se usó o venció.' }, 404);
+  const respuesta = json(cupon);
+  respuesta.headers.set('cache-control', 'no-store');
+  return respuesta;
 }
 
 /** Lo canjeado en una venta que todavia no regresa a su lote, por lote; el que vence al ultimo primero. */

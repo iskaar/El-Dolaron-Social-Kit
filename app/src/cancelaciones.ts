@@ -40,17 +40,22 @@ export async function cancelarCore(
   extra: (ahora: string) => D1PreparedStatement[] = () => [],
 ): Promise<Resultado> {
   const venta = await env.DB.prepare(
-    'select id, total, dolarones, anticipo, cancelada, devuelto, dolarones_devueltos, revision from ventas where id = ?',
+    'select id, total, dolarones, anticipo, cancelada, devuelto, devuelto_cupon, dolarones_devueltos, revision from ventas where id = ?',
   )
     .bind(id)
     .first<{
       id: string; total: number; dolarones: number; anticipo: number; cancelada: number;
-      devuelto: number; dolarones_devueltos: number; revision: number;
+      devuelto: number; devuelto_cupon: number; dolarones_devueltos: number; revision: number;
     }>();
   if (!venta) return { status: 404, cuerpo: { error: 'La venta no existe.' } };
   if (venta.cancelada) return { status: 200, cuerpo: { id, cancelada: true, ya_estaba: true } };
   // Unica puerta de las cancelaciones completas (cajero, PIN del dueno y aprobacion remota); ver pedidos.ts.
   if (venta.anticipo > 0) return { status: 409, cuerpo: { error: TICKET_CON_ANTICIPO } };
+  // El dinero de un cupón se quedó en el cajón (Issue #330): cancelado completo, el corte del mismo turno
+  // ya no contaría la venta y faltaría ese dinero. Lo que queda se devuelve pieza por pieza.
+  if (venta.devuelto_cupon > 0) {
+    return { status: 409, cuerpo: { error: 'Este ticket ya tiene piezas devueltas en cupón: devuelve lo que queda pieza por pieza.' } };
+  }
 
   const ahora = new Date().toISOString();
   // Solo lo que sigue en el ticket: las piezas ya canceladas sueltas (Issue #138) ya regresaron.

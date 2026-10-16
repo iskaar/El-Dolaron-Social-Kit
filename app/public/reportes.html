@@ -310,6 +310,12 @@
           <button id="guardar-fondo" type="button">Guardar</button>
           <span id="aviso-fondo"></span>
         </div>
+        <div class="fondo-caja">
+          <label for="cupon-porcentaje">Devolución en cupón: % de lo pagado que se regresa en Dolarones (100 = lo mismo)</label>
+          <input id="cupon-porcentaje" type="number" min="1" max="200" step="1" inputmode="numeric">
+          <button id="guardar-cupon" type="button">Guardar</button>
+          <span id="aviso-cupon"></span>
+        </div>
         <div id="cortes" style="overflow-x:auto"></div>
         <p class="nota">Conteo ciego: el cajero registra lo contado antes de ver lo esperado. Diferencia = contado − esperado.
           «Tarjeta» compara lo cobrado en el sistema con el cierre de la terminal.</p>
@@ -697,6 +703,7 @@ async function cargarFondo() {
   try {
     const config = await (await fetch('/api/config')).json();
     $('fondo-caja').value = Math.round(Number(config.fondo_caja ?? 50000) / 100);
+    $('cupon-porcentaje').value = config.cupon_porcentaje ?? 100;
   } catch { /* sin red: se ve al recargar */ }
 }
 $('guardar-fondo').addEventListener('click', async () => {
@@ -713,6 +720,23 @@ $('guardar-fondo').addEventListener('click', async () => {
   });
   const cuerpo = await r.json().catch(() => ({}));
   aviso.textContent = r.ok ? 'Guardado. Aplica desde el siguiente corte de cada caja.' : (cuerpo.error ?? 'No se pudo guardar.');
+  aviso.style.color = r.ok ? 'var(--bien)' : 'var(--mal)';
+});
+
+// Issue #330: la caja lo lee de /api/vales/config (cada minuto) y lo aplica a la siguiente devolución en cupón.
+$('guardar-cupon').addEventListener('click', async () => {
+  const porcentaje = Number($('cupon-porcentaje').value);
+  const aviso = $('aviso-cupon');
+  if (!Number.isInteger(porcentaje) || porcentaje < 1 || porcentaje > 200) {
+    aviso.textContent = 'Escribe un entero de 1 a 200.';
+    aviso.style.color = 'var(--mal)';
+    return;
+  }
+  const r = await fetch('/api/config', {
+    method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ cupon_porcentaje: porcentaje }),
+  });
+  const cuerpo = await r.json().catch(() => ({}));
+  aviso.textContent = r.ok ? 'Guardado. Las cajas lo toman en menos de un minuto.' : (cuerpo.error ?? 'No se pudo guardar.');
   aviso.style.color = r.ok ? 'var(--bien)' : 'var(--mal)';
 });
 

@@ -223,15 +223,20 @@ export function codigoQrVale(codigo) {
   ]);
 }
 
+// Un cupón (Issue #330) no salió de una compra: no se pasa a una cuenta, así que va sin QR.
+const esCupon = (vale) => vale.origen === 'devolucion' || vale.origen === 'manual';
+
 function partesVale(vale, titulo = 'VALE DOLARONES - SIN REGISTRO', conCodigo = false) {
+  const qr = conCodigo && vale.restante > 0 && !esCupon(vale);
   return [
     separador(), centrado(titulo),
     renglonMonto('Saldo del vale', `${(vale.restante / 100).toFixed(2)} D`),
     linea(Date.parse(vale.disponible_desde) <= Date.parse(vale.creado_en)
       ? 'Usalo en tu siguiente compra' : `Disponible: ${fechaHora(vale.disponible_desde)}`),
     linea(`Vence: ${fechaHora(vale.vence_en)}`),
-    ...(conCodigo && vale.restante > 0 ? [codigoQrVale(vale.codigo), codigoBarrasVale(vale.codigo)] : []), centrado(vale.codigo),
-    ...(conCodigo && vale.restante > 0 && vale.restante === vale.importe
+    ...(qr ? [codigoQrVale(vale.codigo)] : []), ...(conCodigo && vale.restante > 0 ? [codigoBarrasVale(vale.codigo)] : []),
+    centrado(vale.codigo),
+    ...(qr && vale.restante === vale.importe
       ? [centrado('Escanea el QR con tu celular:'), centrado('registrate y recibe el doble en tu cuenta.')] : []),
     linea('Conserva el papel. Copias comparten el saldo.'),
     linea('Solo en El Dolaron. No canjeable por efectivo.'),
@@ -241,7 +246,9 @@ function partesVale(vale, titulo = 'VALE DOLARONES - SIN REGISTRO', conCodigo = 
 /** Reimprimir conserva código, saldo actual y vencimiento del servidor. */
 export function imprimirVale(vale) {
   return enviar(concatenar([
-    ...encabezado('VALE DOLARONES'), ...partesVale(vale, undefined, true),
+    ...(esCupon(vale)
+      ? [...encabezado('CUPON DOLARONES'), ...partesVale(vale, 'CUPON - VALE COMO DINERO EN TIENDA', true)]
+      : [...encabezado('VALE DOLARONES'), ...partesVale(vale, undefined, true)]),
     new Uint8Array([0x0a, 0x0a, 0x0a, GS, 0x56, 0x42, 0x00]),
   ]));
 }
@@ -451,7 +458,8 @@ export function imprimirDevolucion(d) {
     ]),
     separador(),
     negritas(true),
-    renglonMonto(`DEVUELTO EN ${salida}`, importe(d.dinero)),
+    ...(d.dinero || !d.cupon ? [renglonMonto(`DEVUELTO EN ${salida}`, importe(d.dinero))] : []),
+    ...(d.cupon ? [renglonMonto('CAMBIADO POR CUPON', importe(d.cupon))] : []),
     negritas(false),
     ...(d.dolarones ? [renglonMonto('Regresado al saldo (Dolarones)', `${d.dolarones / 100} D`)] : []),
     linea('Motivo:'),
