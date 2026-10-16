@@ -36,47 +36,55 @@
 
   if (typeof module !== "undefined") module.exports = { precio, consulta, apiBase };
 
-  // Portada: las piezas más vendidas (o más nuevas) como estampas. Si la API falla
-  // o trae menos de 4, se queda el collage fijo. ponytail: posiciones fijas para 5; la etiqueta de ropa ocupa la esquina libre.
-  async function destacados(arte) {
+  // Los precios con su precio de lista tachado, igual en carteles, tarjetas y visor.
+  function pintarPrecio(nodo, pieza) {
+    nodo.textContent = precio(pieza.precio);
+    if (pieza.precio_lista > pieza.precio) {
+      const lista = document.createElement("s");
+      const aviso = document.createElement("span");
+      aviso.className = "sr-only";
+      aviso.textContent = "Precio de lista ";
+      lista.append(aviso, precio(pieza.precio_lista));
+      nodo.append(lista);
+    }
+  }
+
+  // «Los más buscados» (Issue #339): lo de mayor precio que sigue a la venta, en carteles de «Se busca».
+  // Si la API falla o trae menos de 3 con foto, la sección se queda oculta.
+  async function buscados(seccion) {
     try {
-      const response = await fetch(`${apiBase(location.search)}/api/catalogo?categoria=ropa`, { headers: { accept: "application/json" } });
+      const response = await fetch(`${apiBase(location.search)}/api/catalogo/destacados?orden=precio`, { headers: { accept: "application/json" } });
       if (!response.ok) return;
       const { piezas } = await response.json();
-      if (!Array.isArray(piezas) || piezas.length < 4) return;
-      const capa = document.createElement("div");
-      capa.className = "stickers";
-      for (const pieza of piezas.slice(0, 4)) {
-        if (!/^https?:\/\//.test(pieza.foto || "")) continue;
+      const conFoto = (Array.isArray(piezas) ? piezas : []).filter((p) => /^https?:\/\//.test(p.foto || ""));
+      if (conFoto.length < 3) return;
+      const lista = seccion.querySelector(".wanted-grid");
+      for (const pieza of conFoto) {
+        const li = document.createElement("li");
         const a = document.createElement("a");
-        a.className = "sticker";
+        a.className = "poster";
         a.href = consulta(pieza);
         a.setAttribute("aria-label", `Preguntar por WhatsApp: ${pieza.nombre}, ${precio(pieza.precio)}`);
+        const cabeza = document.createElement("span");
+        cabeza.className = "poster-head";
+        cabeza.textContent = "Se busca";
         const img = new Image();
         img.alt = "";
+        img.loading = "lazy";
         img.decoding = "async";
+        img.addEventListener("error", () => li.remove());
         img.src = pieza.foto;
-        const etiqueta = document.createElement("span");
-        etiqueta.className = "sticker-price";
-        etiqueta.textContent = precio(pieza.precio);
-        if (pieza.precio_lista > pieza.precio) {
-          const lista = document.createElement("s");
-          const aviso = document.createElement("span");
-          aviso.className = "sr-only";
-          aviso.textContent = "Precio de lista ";
-          lista.append(aviso, precio(pieza.precio_lista));
-          etiqueta.append(lista);
-        }
-        a.append(img, etiqueta);
-        capa.append(a);
+        const nombre = document.createElement("span");
+        nombre.className = "poster-name";
+        nombre.textContent = pieza.nombre;
+        const valor = document.createElement("span");
+        valor.className = "poster-price";
+        pintarPrecio(valor, pieza);
+        a.append(cabeza, img, nombre, valor);
+        li.append(a);
+        lista.append(li);
       }
-      // Solo cambia el collage cuando las fotos ya cargaron: nunca deja marcos vacíos.
-      const espera = new Promise((listo) => setTimeout(listo, 6000));
-      await Promise.race([Promise.allSettled([...capa.querySelectorAll("img")].map((img) => img.decode().catch(() => img.closest("a").remove()))), espera]);
-      for (const img of capa.querySelectorAll("img")) if (!img.complete || !img.naturalWidth) img.closest("a").remove();
-      if (capa.children.length < 4) return;
-      arte.append(capa);
-      arte.classList.add("en-vivo");
+      seccion.hidden = false;
     } catch {}
   }
   // Pausar la cinta que corre (Issue #241, WCAG «pausar, detener, ocultar»).
@@ -85,8 +93,8 @@
     const pausada = pausa.closest(".ticker").classList.toggle("pausada");
     pausa.setAttribute("aria-pressed", String(pausada));
   });
-  const arte = typeof document !== "undefined" && document.querySelector(".hero-art");
-  if (arte) destacados(arte);
+  const cartel = typeof document !== "undefined" && document.getElementById("buscados");
+  if (cartel) buscados(cartel);
   const root = typeof document !== "undefined" && document.getElementById("catalogo");
   if (!root) return;
 
@@ -124,15 +132,6 @@
     if (text !== undefined) node.textContent = text;
     return node;
   };
-
-  function pintarPrecio(nodo, pieza) {
-    nodo.textContent = precio(pieza.precio);
-    if (pieza.precio_lista > pieza.precio) {
-      const lista = el("s", "", precio(pieza.precio_lista));
-      lista.prepend(el("span", "sr-only", "Precio de lista "));
-      nodo.append(lista);
-    }
-  }
 
   function abrirVisor(pieza, disparador) {
     if (!dialog) return;
