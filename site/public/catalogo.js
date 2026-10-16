@@ -72,12 +72,28 @@
         const nombre = document.createElement("h3");
         nombre.className = "poster-name";
         nombre.textContent = pieza.nombre;
+        // Marca (lo que vende «calidad americana») o, si no hay, la categoría.
+        const rubro = pieza.marca || (CATEGORIAS.find(([k]) => k === pieza.categoria) || [])[1];
+        const linea = document.createElement("p");
+        linea.className = "poster-kicker";
+        linea.textContent = rubro && rubro !== "Otros" ? rubro : "";
+        // La foto abre el visor grande (el mismo del catálogo): las fotos de celular se ven recortadas en cuadro.
+        const foto = document.createElement("button");
+        foto.type = "button";
+        foto.className = "poster-photo";
+        foto.setAttribute("aria-label", `Ver foto completa: ${pieza.nombre}`);
         const img = new Image();
         img.alt = "";
         img.loading = "lazy";
         img.decoding = "async";
         img.addEventListener("error", () => li.remove());
         img.src = pieza.foto;
+        const zoom = document.createElement("span");
+        zoom.className = "poster-zoom";
+        zoom.setAttribute("aria-hidden", "true");
+        zoom.textContent = "Ver foto";
+        foto.append(img, zoom);
+        foto.addEventListener("click", () => abrirVisor(pieza, foto));
         const visto = document.createElement("p");
         visto.className = "poster-seen";
         visto.textContent = "Visto por última vez en Jardín Hidalgo 129";
@@ -85,7 +101,21 @@
         pie.className = "poster-foot";
         const valor = document.createElement("p");
         valor.className = "poster-price";
-        pintarPrecio(valor, pieza);
+        valor.textContent = precio(pieza.precio);
+        if (pieza.precio_lista > pieza.precio) {
+          // Precio de lista tachado y el ahorro en pesos, calculado con los mismos centavos que manda la API.
+          const antes = document.createElement("span");
+          antes.className = "poster-was";
+          const lista = document.createElement("s");
+          const aviso = document.createElement("span");
+          aviso.className = "sr-only";
+          aviso.textContent = "Precio de lista ";
+          lista.append(aviso, precio(pieza.precio_lista));
+          const ahorro = document.createElement("b");
+          ahorro.textContent = `Ahorras ${precio(pieza.precio_lista - pieza.precio)}`;
+          antes.append(lista, ahorro);
+          valor.append(antes);
+        }
         const apartar = document.createElement("a");
         apartar.className = "button button-navy poster-ask";
         apartar.href = consulta(pieza, "quiero apartar");
@@ -93,7 +123,7 @@
         apartar.innerHTML = WHATSAPP_ICONO;
         apartar.append("Apartar por WhatsApp");
         pie.append(valor, apartar);
-        cartel.append(cabeza, nombre, img, visto, pie);
+        cartel.append(cabeza, linea, nombre, foto, visto, pie);
         li.append(cartel);
         lista.append(li);
       }

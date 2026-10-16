@@ -94,14 +94,21 @@ h2 { font-family: var(--display); font-variation-settings: var(--display-axes); 
 /* Cabeza del clavo sobre el agujero que trae la hoja (49 % del ancho, 5 % del alto). */
 .poster::before { content: ""; position: absolute; top: 5%; left: 49%; width: 13px; height: 13px; translate: -50% -50%; border-radius: 50%; background: radial-gradient(circle at 35% 35%, #CFC8BC, #6B6256 60%, #3B342C); box-shadow: 1px 2px 2px rgb(0 0 0 / .4); }
 .poster-head { font-family: "Rye", Georgia, serif; font-size: clamp(34px, 3.6vw, 52px); font-weight: 400; line-height: 1; letter-spacing: .02em; text-transform: uppercase; text-shadow: 1px 1px 0 rgb(43 33 22 / .18); }
-.poster-name { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; min-height: 2.4em; margin: 10px 4px 14px; font-family: var(--display); font-variation-settings: var(--display-axes); font-weight: 800; font-size: 20px; line-height: 1.2; overflow-wrap: anywhere; }
-.poster img { width: 100%; aspect-ratio: 1; object-fit: cover; border: 3px solid var(--ink); background: var(--white); filter: sepia(.12) contrast(1.04); }
-.poster-seen { margin-top: 8px; font-family: var(--display); font-style: italic; font-size: 14px; line-height: 1.3; }
-.poster-foot { display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: 12px 20px; margin-top: auto; padding-top: 16px; }
-.poster-price { display: flex; flex-direction: column; align-items: center; color: var(--red); font-family: "Anton", sans-serif; font-size: 46px; line-height: 1; }
-.poster-price s { margin-top: 4px; color: var(--ink); font-family: "Archivo", sans-serif; font-size: 13px; font-weight: 700; }
-.poster-ask { min-height: 52px; padding: 8px 16px; gap: 8px; font-size: 14px; }
-.poster-ask svg { width: 20px; height: 20px; }
+.poster-kicker { margin-top: 10px; font-family: "Archivo", sans-serif; font-size: 12px; font-weight: 800; letter-spacing: .14em; line-height: 1.2; text-transform: uppercase; }
+.poster-kicker:empty { display: none; }
+.poster-name { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden; min-height: 2.4em; margin: 4px 4px 12px; font-family: var(--display); font-variation-settings: var(--display-axes); font-weight: 800; font-size: 20px; line-height: 1.2; overflow-wrap: anywhere; text-wrap: balance; }
+/* La foto es un botón (abre el visor grande); el chip «Ver foto» avisa que se puede tocar. */
+.poster-photo { position: relative; display: block; width: 100%; aspect-ratio: 1; padding: 0; overflow: hidden; border: 3px solid var(--ink); background: var(--white); cursor: pointer; }
+.poster-photo img { width: 100%; height: 100%; object-fit: cover; filter: sepia(.12) contrast(1.04); }
+.poster-zoom { position: absolute; right: 6px; bottom: 6px; padding: 4px 8px 3px; border: 1.5px solid var(--ink); background: rgb(246 238 216 / .94); color: var(--ink); font: 800 12px/1.1 "Archivo", sans-serif; letter-spacing: .04em; text-transform: uppercase; pointer-events: none; }
+.poster-seen { margin-top: 10px; font-family: var(--display); font-style: italic; font-size: 15px; line-height: 1.3; text-wrap: balance; }
+.poster-foot { display: flex; flex-direction: column; align-items: center; gap: 14px; margin-top: auto; padding-top: 14px; }
+.poster-price { display: flex; flex-direction: column; align-items: center; gap: 6px; color: var(--red); font-family: "Anton", sans-serif; font-size: 46px; line-height: 1; }
+.poster-was { display: flex; flex-wrap: wrap; justify-content: center; align-items: baseline; gap: 2px 10px; color: var(--ink); font-family: "Archivo", sans-serif; font-size: 15px; font-weight: 700; line-height: 1.2; }
+.poster-was b { font-weight: 800; }
+.poster-ask { min-height: 52px; padding: 8px 18px; gap: 8px; font-size: 15px; }
+.poster-ask svg { width: 20px; height: 20px; flex: none; }
+.wanted-hint { display: none; }
 
 /* Etiqueta de cartón (Issue #339): la etiqueta es imagen y el precio es texto rojo, así sirve para cualquier precio. */
 .tag { display: flex; flex-direction: column; align-items: center; justify-content: center; aspect-ratio: 2 / 1; padding: 0 4% 0 27%; color: var(--red); font-family: "Anton", sans-serif; line-height: 1; rotate: -3deg;
@@ -161,7 +168,8 @@ h2 { font-family: var(--display); font-variation-settings: var(--display-axes); 
 .piece-brand { font-size: 13px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; opacity: .8; }
 .piece-size { font-size: 14px; font-weight: 800; }
 .piece-price { align-self: flex-start; margin-top: auto; padding-top: 8px; font-family: "Anton", sans-serif; font-size: 30px; line-height: 1.15; }
-.piece-link { margin-top: 6px; font-size: 14px; font-weight: 800; }
+/* Objetivo táctil de 44 px (NN/g, WCAG 2.5.8): antes era una línea de texto de 14 px. */
+.piece-link { display: flex; align-items: center; justify-content: center; min-height: 44px; margin-top: 12px; padding: 8px 10px; border: 2px solid var(--navy); background: var(--white); box-shadow: 2px 2px 0 var(--navy); font-size: 14px; font-weight: 800; text-align: center; text-decoration: none; }
 .piece-price s { margin-left: 8px; color: var(--red-text); font-family: "Archivo", sans-serif; font-size: 14px; font-weight: 700; }
 .piece-ask { min-height: 44px; margin-top: 16px; padding: 8px 10px; background: var(--navy); color: var(--white); box-shadow: none; font-size: 14px; }
 .catalog-more { margin: 40px auto 0; display: flex; }
@@ -308,24 +316,18 @@ dd { margin: 0; line-height: 1.5; }
   h2 { font-size: clamp(40px, 12vw, 64px); }
   .catalog { padding-block: 16px 64px; }
   .wanted { padding-block: 44px 52px; }
-  .wanted-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 22px 14px; }
-  .wanted-grid li, .wanted-grid li:nth-child(n) { rotate: 0deg; }
-  .poster { padding: 26px 11% 28px; }
-  .poster::before { width: 10px; height: 10px; }
-  .poster-head { font-size: 21px; white-space: nowrap; }
-  .poster-name { margin: 8px 0 10px; font-size: 14px; }
-  .poster-seen { display: none; }
-  .poster-foot { flex-direction: column; gap: 10px; padding-top: 10px; }
-  .poster-price { font-size: 30px; }
-  .poster-price s { font-size: 11px; }
-  .poster-ask { width: 100%; min-height: 44px; padding: 6px 4px; font-size: 12px; gap: 4px; box-shadow: 3px 3px 0 var(--navy); }
-  .poster-ask svg { width: 16px; height: 16px; }
+  /* Fila deslizable con el siguiente cartel asomando: un cartel a la vez se lee completo en 390 px. */
+  .wanted-hint { display: block; margin-top: 18px; font-size: 14px; font-weight: 800; }
+  .wanted-grid { display: flex; gap: 18px; margin: 4px -20px 0; padding: 14px 20px 30px; overflow-x: auto; scroll-snap-type: x mandatory; scroll-padding-inline: 20px; overscroll-behavior-x: contain; }
+  .wanted-grid li, .wanted-grid li:nth-child(n) { flex: 0 0 min(80vw, 330px); scroll-snap-align: start; rotate: 0deg; }
+  .poster { padding-bottom: 14%; }
+  .poster-ask { align-self: stretch; }
   .catalog-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 26px 14px; }
   .piece-body { padding: 10px 10px 12px; }
   .piece h3 { font-size: 14px; }
   .piece-price { font-size: 24px; }
   .piece-price s { display: block; margin-left: 0; font-size: 12px; }
-  .piece-link { font-size: 12px; }
+  .piece-link { font-size: 13px; }
   .chips-wrap { margin-inline: -20px; -webkit-mask-image: linear-gradient(90deg, #000 0, #000 calc(100% - 38px), transparent 100%); mask-image: linear-gradient(90deg, #000 0, #000 calc(100% - 38px), transparent 100%); }
   .chips { flex-wrap: nowrap; overflow-x: auto; padding: 0 38px 6px 20px; scrollbar-width: none; }
   .chip { flex-shrink: 0; font-size: 14px; padding-inline: 10px; }
