@@ -34,7 +34,7 @@ test('finanzas no modifica piezas de la tienda y puede corregir las suyas', asyn
   assert.deepEqual(db.prepare('select nombre, stock, estado_analisis, propietario from productos where id = ?').get(PRODUCTO), piezaTienda);
   assert.equal((db.prepare('select stock from productos where id = ?').get(FEP) as { stock: number }).stock, 2);
 
-  assert.equal((await pedir(`/api/borradores/${FEP}`, { nombre: 'Bolsa corregida' }, 'PATCH')).status, 200);
+  assert.equal((await pedir(`/api/borradores/${FEP}`, { nombre: 'Bolsa corregida', precio: 30000 }, 'PATCH')).status, 200);
   assert.equal((db.prepare('select nombre from productos where id = ?').get(FEP) as { nombre: string }).nombre, 'Bolsa corregida');
 });
 

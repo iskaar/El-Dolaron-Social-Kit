@@ -349,6 +349,10 @@ async function corregirBorrador(id: string, cambios: Record<string, unknown>, en
   if (!await destinoValido(destino, env)) {
     return json({ error: 'Destino invalido.' }, 400);
   }
+  // Guardar deja la pieza `listo`: una etiqueta sin nombre o sin precio bloquearia la cola de impresion (#335).
+  if (destino === 'etiqueta' && (!nombre.trim() || precio <= 0)) {
+    return json({ error: 'Una pieza con etiqueta necesita nombre y un precio mayor a cero para quedar lista.' }, 400);
+  }
   if (!esDueno && fila.codigo && precio !== fila.precio) {
     return json({ error: 'Esta pieza ya tiene etiqueta: solo el dueño cambia su precio.' }, 403);
   }

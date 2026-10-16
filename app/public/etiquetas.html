@@ -61,7 +61,7 @@
 
   <p id="ayuda-automatica" class="ayuda" hidden>
     Inicia aquí y toma las fotos en <a href="/captura" target="_blank" rel="noopener">la cámara</a> desde el teléfono en el mismo entorno.
-    Cada prenda nueva se imprime cuando su nombre y precio están listos, una etiqueta por pieza en existencia.
+    Solo se imprime ropa, una etiqueta por pieza en existencia, cuando su precio está listo; la mercancía general se imprime a mano.
     Deja esta página abierta en la computadora. Al detener o recargar, puedes retomar la misma sesión.
     «Nueva sesión» deja las pendientes anteriores para impresión manual y empieza con las próximas fotos.
     El precio debe estar asignado antes de imprimir; las piezas sin nombre o precio esperan en la cola.
@@ -480,12 +480,14 @@ async function imprimirNuevas() {
       const cola = [];
       let esperando = '';
       for (const p of nuevas) {
-        if (etiquetaVigente(hechas[p.id], p) || p.stock <= 0 || p.destino !== 'etiqueta') continue;
+        // La automática solo imprime ropa; la mercancía general se imprime a mano y nunca detiene la cola (#335).
+        if (p.categoria !== 'ropa' || etiquetaVigente(hechas[p.id], p) || p.stock <= 0 || p.destino !== 'etiqueta') continue;
         // Conservar el orden de la mesa aunque un análisis posterior termine primero.
         if (p.estado_analisis !== 'listo' || !p.nombre?.trim() || p.precio <= 0) {
+          const quien = `${p.nombre?.trim() || 'pieza sin nombre'} (capturada ${hora(p.creado_en)})`;
           esperando = p.estado_analisis === 'error'
-            ? 'Una foto necesita revisión. Completa nombre y precio en la cola de revisión.'
-            : 'Esperando el nombre y precio de la siguiente foto.';
+            ? `Una foto necesita revisión: ${quien}. Completa nombre y precio en la cola de revisión.`
+            : `Esperando precio de: ${quien}.`;
           break;
         }
         cola.push(p);

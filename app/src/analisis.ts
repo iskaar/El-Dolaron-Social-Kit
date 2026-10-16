@@ -314,16 +314,21 @@ export async function analizarBorrador(
     // `precio_sugerido` queda como testigo de lo que propuso la IA: las
     // correcciones del admin no lo tocan, y de esa diferencia sale el ajuste
     // de los porcentajes cuando haya suficientes piezas.
+    // Sin nombre o con precio 0 la pieza no esta lista: queda en `error`
+    // para revisarla, con lo que se encontro. Si no, la cola automatica de /etiquetas
+    // se queda esperando una pieza que nadie va a completar (#335).
+    const completa = ficha.nombre.trim() !== '' && precio > 0;
     await env.DB.prepare(
       `update productos set nombre = ?, marca = ?, categoria = ?, precio_lista = ?, precio = ?,
-                            precio_sugerido = ?, destino = ?, estado_analisis = 'listo', actualizado_en = ?
+                            precio_sugerido = ?, destino = ?, estado_analisis = ?, actualizado_en = ?
        where id = ? and estado_analisis <> 'descartado'`,
     )
-      .bind(ficha.nombre, ficha.marca, ficha.categoria, precioLista, precio, precio, destino, new Date().toISOString(), id)
+      .bind(ficha.nombre, ficha.marca, ficha.categoria, precioLista, precio, precio, destino,
+        completa ? 'listo' : 'error', new Date().toISOString(), id)
       .run();
 
     console.log(JSON.stringify({
-      mensaje: 'analisis listo', id, modelo, buscar, ms: Date.now() - inicio,
+      mensaje: completa ? 'analisis listo' : 'analisis incompleto', id, modelo, buscar, ms: Date.now() - inicio,
       ejemplos: ejemplos.length, nombres: nombres.length, segun_ejemplos: conEjemplos, ficha,
     }));
   } catch (error) {
