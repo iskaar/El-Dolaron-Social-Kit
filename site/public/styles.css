@@ -262,7 +262,7 @@ dd { margin: 0; line-height: 1.5; }
 /* Pie */
 .footer { display: flex; align-items: center; justify-content: space-between; gap: 24px; padding-block: 32px 40px; border-top: 5px double var(--navy); font-size: 13px; font-weight: 600; }
 .footer-brand { width: 160px; flex-shrink: 0; }
-.footer nav { display: flex; gap: 24px; font-weight: 800; }
+.footer nav { display: flex; flex-wrap: wrap; gap: 8px 24px; font-weight: 800; }
 
 @media (hover: hover) and (pointer: fine) {
   .header nav a:hover, .footer a:hover { text-decoration: underline; }
