@@ -40,13 +40,13 @@
   // o trae menos de 4, se queda el collage fijo. ponytail: posiciones fijas para 5; la etiqueta de ropa ocupa la esquina libre.
   async function destacados(arte) {
     try {
-      const response = await fetch(`${apiBase(location.search)}/api/catalogo/destacados`, { headers: { accept: "application/json" } });
+      const response = await fetch(`${apiBase(location.search)}/api/catalogo?categoria=ropa`, { headers: { accept: "application/json" } });
       if (!response.ok) return;
       const { piezas } = await response.json();
       if (!Array.isArray(piezas) || piezas.length < 4) return;
       const capa = document.createElement("div");
       capa.className = "stickers";
-      for (const pieza of piezas.slice(0, 5)) {
+      for (const pieza of piezas.slice(0, 4)) {
         if (!/^https?:\/\//.test(pieza.foto || "")) continue;
         const a = document.createElement("a");
         a.className = "sticker";
@@ -181,12 +181,13 @@
       photo.addEventListener("click", () => abrirVisor(pieza, photo));
     }
     const body = el("div", "piece-body");
-    body.append(el("h3", "", pieza.nombre));
+    // ponytail: la ropa se captura sin nombre propio; hasta tener marca/equipo dice «Ropa americana».
+    body.append(el("h3", "", pieza.nombre === "Ropa" ? "Ropa americana" : pieza.nombre));
     if (pieza.marca) body.append(el("p", "piece-brand", pieza.marca));
     if (pieza.talla) body.append(el("p", "piece-size", `Talla ${pieza.talla}`));
     const price = el("p", "piece-price");
     pintarPrecio(price, pieza);
-    const ask = el("a", "button button-yellow piece-ask", "Preguntar por WhatsApp");
+    const ask = el("a", "piece-link", "Preguntar por WhatsApp ↗");
     ask.href = consulta(pieza);
     ask.setAttribute("aria-label", `Preguntar por WhatsApp: ${pieza.nombre}`);
     body.append(price, ask);

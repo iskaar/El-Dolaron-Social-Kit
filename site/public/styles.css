@@ -12,6 +12,7 @@
   --yellow: #FFD447;
   --white: #FFFFFF;
   --paper: #EDE6D3;
+  --mist: #F2F5FA;
   --shadow: rgb(22 54 107 / .26);
   --display: "Fraunces", Georgia, serif;
   --display-axes: "SOFT" 100, "WONK" 1;
@@ -23,11 +24,7 @@
 html { scroll-behavior: smooth; }
 body {
   margin: 0;
-  background-color: var(--paper);
-  background-image:
-    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 .35 0 0 0 0 .28 0 0 0 0 .16 0 0 0 .22 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url%28%23n%29'/%3E%3C/svg%3E"),
-    repeating-linear-gradient(90deg, transparent 0 230px, var(--paper) 230px 256px),
-    repeating-linear-gradient(0deg, rgb(22 54 107 / .075) 0 1px, transparent 1px 7px);
+  background: var(--white);
 }
 a { color: inherit; text-underline-offset: .25em; }
 a:focus-visible, button:focus-visible { outline: 3px solid var(--red); outline-offset: 4px; }
@@ -77,7 +74,8 @@ h2 { font-family: var(--display); font-variation-settings: var(--display-axes); 
 .hero { position: relative; overflow: hidden; display: grid; grid-template-columns: minmax(0, 1.08fr) minmax(0, .92fr); align-items: center; gap: 32px; padding: 36px max(56px, calc((100vw - 1280px) / 2)) 52px; }
 .hero-copy { position: relative; z-index: 1; min-width: 0; }
 .hero-kicker { font-size: 18px; margin-bottom: 14px; }
-.hero h1 { font-size: clamp(52px, 8vw, 118px); font-weight: 400; line-height: 1; }
+.hero-title { max-width: 11ch; font-family: var(--display); font-variation-settings: var(--display-axes); font-weight: 900; font-size: clamp(48px, 6.2vw, 96px); line-height: .98; letter-spacing: -.03em; }
+.hero-title em { color: var(--red); font-style: italic; }
 .ransom { display: block; filter: drop-shadow(3px 4px 0 rgb(22 54 107 / .28)); }
 .ransom-el { display: block; margin: 0 0 .04em .06em; font-size: .5em; }
 .ransom-main { display: flex; }
@@ -104,17 +102,11 @@ h2 { font-family: var(--display); font-variation-settings: var(--display-axes); 
 
 /* Estampas en vivo: las piezas más vendidas, pegadas como fotos instantáneas */
 .hero-art.en-vivo > img { opacity: 0; }
-.stickers { position: absolute; inset: 0; }
-.sticker { position: absolute; display: block; padding: 7px 7px 34px; background: var(--white); box-shadow: 3px 5px 0 var(--shadow); transition: rotate 180ms ease, translate 180ms ease; }
-.sticker img { width: 100%; aspect-ratio: 1; object-fit: contain; background: #E6DEC8; }
-.sticker::before { content: ""; position: absolute; z-index: 1; top: -10px; left: 50%; width: 70px; height: 22px; translate: -50% 0; rotate: -5deg; background: rgb(255 212 71 / .78); }
-.sticker-price { position: absolute; right: 6px; bottom: 3px; padding: 2px 9px 1px; background: var(--yellow); font-family: "Anton", sans-serif; font-size: clamp(16px, 1.6vw, 22px); line-height: 1.2; rotate: 4deg; box-shadow: 2px 2px 0 var(--shadow); }
+.stickers { position: absolute; inset: 0; display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+.sticker { position: relative; display: block; overflow: hidden; border: 2px solid var(--navy); background: var(--white); box-shadow: 5px 5px 0 var(--navy); transition: translate 150ms ease, box-shadow 150ms ease; }
+.sticker img { width: 100%; height: 100%; object-fit: cover; }
+.sticker-price { position: absolute; left: 0; bottom: 0; padding: 4px 12px 2px; background: var(--yellow); border-top: 2px solid var(--navy); border-right: 2px solid var(--navy); font-family: "Anton", sans-serif; font-size: clamp(18px, 1.8vw, 26px); line-height: 1.2; }
 .sticker-price s { margin-left: 6px; color: var(--red-text); font-family: "Archivo", sans-serif; font-size: 12px; font-weight: 700; }
-.sticker:nth-child(1) { left: 3%; top: 3%; width: 31%; rotate: -6deg; }
-.sticker:nth-child(2) { left: 34%; top: 0; width: 31%; rotate: 3deg; }
-.sticker:nth-child(3) { left: 64%; top: 14%; width: 29%; rotate: -3deg; }
-.sticker:nth-child(4) { left: 26%; top: 48%; width: 31%; rotate: -4deg; }
-.sticker:nth-child(5) { left: 61%; top: 53%; width: 31%; rotate: 5deg; }
 .price-tag, .new-stamp { z-index: 3; }
 .price-tag { position: absolute; left: -4%; bottom: 6%; width: 150px; rotate: -10deg; transform-origin: 50% 4%; filter: drop-shadow(5px 9px 6px rgb(22 54 107 / .32)); transition: rotate 220ms ease; }
 .price-tag img { width: 100%; }
@@ -149,7 +141,7 @@ h2 { font-family: var(--display); font-variation-settings: var(--display-axes); 
 .group-go { justify-self: start; margin-top: 10px; padding: 6px 12px 5px; border: 2px solid var(--navy); border-radius: 3px; font-family: "Anton", sans-serif; font-size: 15px; letter-spacing: .06em; text-transform: uppercase; rotate: -2deg; }
 
 /* Novedades: recortes pegados con cinta */
-.catalog { padding-block: 44px 80px; scroll-margin-top: 16px; }
+.catalog { padding-block: 44px 80px; scroll-margin-top: 16px; background: var(--mist); }
 .catalog-search { margin-top: 26px; max-width: 680px; }
 .search-label { display: block; margin-bottom: 6px; font-size: 13px; font-weight: 800; letter-spacing: .1em; text-transform: uppercase; }
 .search-row { display: flex; flex-wrap: wrap; gap: 10px; }
@@ -162,18 +154,16 @@ h2 { font-family: var(--display); font-variation-settings: var(--display-axes); 
 .chip[aria-pressed="true"] { background: var(--red); color: var(--white); }
 .catalog-status { margin-top: 22px; min-height: 26px; font-size: 15px; font-weight: 700; }
 .catalog-grid { list-style: none; margin: 18px 0 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(214px, 1fr)); gap: 34px 26px; }
-.piece { position: relative; display: flex; flex-direction: column; padding: 10px 10px 14px; background: var(--white); box-shadow: 3px 4px 0 var(--shadow); rotate: -1deg; transition: rotate 180ms ease, translate 180ms ease; }
-.piece:nth-child(3n + 2) { rotate: 1.2deg; }
-.piece:nth-child(3n) { rotate: -.4deg; }
-.piece::before { content: ""; position: absolute; z-index: 1; top: -11px; left: 50%; width: 82px; height: 24px; translate: -50% 0; rotate: -4deg; background: rgb(255 212 71 / .78); }
-.piece-photo { position: relative; display: block; width: 100%; padding: 0; border: 0; aspect-ratio: 1; overflow: hidden; background: #E6DEC8; cursor: pointer; }
-.piece-photo img { width: 100%; height: 100%; object-fit: contain; }
+.piece { position: relative; display: flex; flex-direction: column; overflow: hidden; background: var(--white); border: 2px solid var(--navy); box-shadow: 4px 4px 0 var(--navy); transition: translate 150ms ease, box-shadow 150ms ease; }
+.piece-photo { position: relative; display: block; width: 100%; padding: 0; border: 0; border-bottom: 2px solid var(--navy); aspect-ratio: 4 / 5; overflow: hidden; background: #F1F1EF; cursor: pointer; }
+.piece-photo img { width: 100%; height: 100%; object-fit: cover; }
 .piece-zoom { position: absolute; right: 6px; bottom: 6px; padding: 3px 7px 2px; border: 1.5px solid var(--navy); background: rgb(255 255 255 / .92); color: var(--navy); font: 800 11px/1.1 "Archivo", sans-serif; letter-spacing: .04em; text-transform: uppercase; pointer-events: none; }
-.piece-body { display: flex; flex-direction: column; flex: 1; gap: 4px; padding: 12px 4px 0; }
+.piece-body { display: flex; flex-direction: column; flex: 1; gap: 2px; padding: 12px 14px 14px; }
 .piece h3 { font-size: 16px; font-weight: 700; line-height: 1.3; overflow-wrap: anywhere; }
 .piece-brand { font-size: 13px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; opacity: .8; }
 .piece-size { font-size: 14px; font-weight: 800; }
-.piece-price { align-self: flex-start; margin-top: auto; padding: 4px 12px 2px; background: var(--yellow); font-family: "Anton", sans-serif; font-size: 30px; line-height: 1.15; rotate: -3deg; translate: 0 6px; }
+.piece-price { align-self: flex-start; margin-top: auto; padding-top: 8px; font-family: "Anton", sans-serif; font-size: 30px; line-height: 1.15; }
+.piece-link { margin-top: 6px; font-size: 14px; font-weight: 800; }
 .piece-price s { margin-left: 8px; color: var(--red-text); font-family: "Archivo", sans-serif; font-size: 14px; font-weight: 700; }
 .piece-ask { min-height: 44px; margin-top: 16px; padding: 8px 10px; background: var(--navy); color: var(--white); box-shadow: none; font-size: 14px; }
 .catalog-more { margin: 40px auto 0; display: flex; }
@@ -190,7 +180,7 @@ h2 { font-family: var(--display); font-variation-settings: var(--display-axes); 
 .piece-dialog-img { width: auto; max-width: 100%; max-height: 62vh; object-fit: contain; }
 .piece-dialog-foot { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; }
 .piece-dialog-meta { width: 100%; font-size: 14px; font-weight: 800; }
-.piece-dialog-price { margin-top: 0; translate: 0 0; }
+.piece-dialog-price { margin-top: 0; padding: 4px 12px 2px; background: var(--yellow); }
 .piece-dialog-ask { margin-top: 0; padding-inline: 16px; }
 
 /* Ropa: etiquetas de precio colgadas */
@@ -272,11 +262,11 @@ dd { margin: 0; line-height: 1.5; }
   .button:hover > span, .text-link:hover > span, .portal-link:hover > span { transform: translate(2px, -2px); }
   .chip:hover { background: var(--yellow); }
   .price-tag:hover { rotate: -3deg; }
-  .sticker:hover { z-index: 2; rotate: 0deg; translate: 0 -4px; }
+  .sticker:hover, .piece:hover { translate: -2px -2px; box-shadow: 7px 7px 0 var(--navy); }
   .group-card:hover { rotate: 0deg; translate: 0 -4px; }
   .group-card:hover .group-go { background: var(--navy); color: var(--white); }
   .chip[aria-pressed="true"]:hover { background: var(--red); }
-  .piece:hover { rotate: 0deg; translate: 0 -4px; }
+  .piece-link:hover { color: var(--red-text); }
   .piece-ask:hover { box-shadow: none; transform: none; background: var(--red); }
   .tiers li img:hover { rotate: 6deg; }
   .new-stamp:hover { rotate: 20deg; }
@@ -297,7 +287,7 @@ dd { margin: 0; line-height: 1.5; }
 @media (max-width: 1100px) {
   .wrap { width: calc(100% - 64px); }
   .hero { padding: 32px 32px 44px; gap: 20px; }
-  .hero h1 { font-size: clamp(48px, 8.6vw, 96px); }
+  .hero-title { font-size: clamp(44px, 7vw, 80px); }
   .header nav { gap: 20px; }
   .tiers { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 28px; }
   .groups-layout, .visit-layout { gap: 48px; }
@@ -306,7 +296,7 @@ dd { margin: 0; line-height: 1.5; }
 @media (max-width: 900px) {
   .hero { grid-template-columns: 1fr; padding: 24px 20px 32px; gap: 8px; }
   .hero-kicker { font-size: 15px; }
-  .hero h1 { font-size: clamp(36px, 12.2vw, 88px); }
+  .hero-title { font-size: clamp(40px, 11vw, 72px); }
   .intro { font-size: 16px; }
   .hero .button { padding-inline: 14px; }
   .hero-stamp { font-size: 19px; }
@@ -334,11 +324,11 @@ dd { margin: 0; line-height: 1.5; }
   h2 { font-size: clamp(40px, 12vw, 64px); }
   .catalog { padding-block: 16px 64px; }
   .catalog-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 26px 14px; }
-  .piece { padding: 7px 7px 10px; }
+  .piece-body { padding: 10px 10px 12px; }
   .piece h3 { font-size: 14px; }
-  .piece-price { font-size: 24px; padding-inline: 8px; }
+  .piece-price { font-size: 24px; }
   .piece-price s { display: block; margin-left: 0; font-size: 12px; }
-  .piece-ask { font-size: 12px; padding-inline: 6px; }
+  .piece-link { font-size: 12px; }
   .chips-wrap { margin-inline: -20px; -webkit-mask-image: linear-gradient(90deg, #000 0, #000 calc(100% - 38px), transparent 100%); mask-image: linear-gradient(90deg, #000 0, #000 calc(100% - 38px), transparent 100%); }
   .chips { flex-wrap: nowrap; overflow-x: auto; padding: 0 38px 6px 20px; scrollbar-width: none; }
   .chip { flex-shrink: 0; font-size: 14px; padding-inline: 10px; }
