@@ -1,8 +1,9 @@
 // Service worker de la caja (Issue #206): recargar /caja sin internet.
 // Red primero: con red siempre llega la version nueva; sin red, la ultima copia buena.
 // Las ventas sin red NO pasan por aqui: siguen en la cola de IndexedDB de caja.html.
-const CACHE = 'caja-v1';   // ponytail: subir el numero si cambia esta logica; activate borra los demas
-const RUTAS = ['/caja', '/cajero.js', '/venta.js', '/camara.js', '/impresora.js', '/ticket.js', '/code128.js'];
+const CACHE = 'caja-v2';   // ponytail: subir el numero si cambia esta logica; activate borra los demas
+// Todo modulo que importe caja.html va aqui: uno sin copia tumba la pagina entera sin red.
+const RUTAS = ['/caja', '/cajero.js', '/venta.js', '/camara.js', '/impresora.js', '/ticket.js', '/code128.js', '/categorias.js'];
 
 // Solo GET del mismo origen, de la lista, con 200 directo (ni redireccion de Access ni opaca).
 function debeCachear(request, response, origen = self.location.origin) {

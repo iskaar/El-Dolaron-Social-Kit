@@ -38,6 +38,7 @@ import {
 import { cajeroEnTurno, listarCajeros, entrar, salir, ponerPin } from './cajeros.ts';
 import { registrarSocio, buscarSocio, buscarPorCodigo, basesListas, sentenciasDeVenta, saldo } from './dolarones.ts';
 import { registrarCorte, registrarRetiro, ultimoCorte, cajaDe } from './corte.ts';
+import { rutaGastos } from './gastos.ts';
 import { lineasNetas } from './netas.ts';
 import { portal, llegada, vincular } from './portal.ts';
 import { mensajesApi, responderApi } from './mensajes.ts';
@@ -1947,6 +1948,9 @@ export default {
       }
       if (pathname === '/api/retiros' && request.method === 'POST') {
         return await registrarRetiro(request, env, correo);
+      }
+      if (pathname === '/api/gastos' || pathname.startsWith('/api/gastos/')) {
+        return await rutaGastos(request, env, url, correo);
       }
 
       if (pathname === '/api/cajon' && request.method === 'POST') {

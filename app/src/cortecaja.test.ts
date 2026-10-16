@@ -20,7 +20,7 @@ const cancelar = (pedir: Pedir, id: string, caja: string) =>
 const cortar = (pedir: Pedir, caja: string, contado: number, extra: Record<string, unknown> = {}) =>
   pedir('/api/cortes', { id: crypto.randomUUID(), caja, efectivo_contado: contado, tarjeta_terminal: 0, ...extra });
 const salida = (pedir: Pedir, tipo: string, importe: number, caja = 'Caja 1') =>
-  pedir('/api/retiros', { id: crypto.randomUUID(), tipo, caja, importe, motivo: tipo === 'gasto' ? 'garrafon de agua' : 'caja fuerte' });
+  pedir('/api/retiros', { id: crypto.randomUUID(), tipo, caja, importe, motivo: tipo === 'gasto' ? 'garrafon de agua' : 'caja fuerte', ...(tipo === 'gasto' ? { categoria: 'agua' } : {}) });
 
 test('el corte cuadra: fondo + efectivo - devoluciones - retiros, y tarjeta, transferencia y Dolarones aparte', async () => {
   const { db, pedir } = tienda();
