@@ -57,11 +57,11 @@ test('el admin corrige la talla y rechaza una que no existe', async () => {
   const patch = (cuerpo: unknown) => worker.fetch!(new Request(`https://caja.prueba/api/borradores/${id}`, {
     method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify(cuerpo),
   }) as never, t.env, t.ctx as never);
-  assert.equal((await patch({ talla: 'L' })).status, 200);
+  assert.equal((await patch({ talla: 'L', nombre: 'Camisa', precio: 5000 })).status, 200);
   assert.equal(talla(t, id), 'L');
   assert.equal((await patch({ talla: 'Niño 2 años / XXL' })).status, 400);
   assert.equal(talla(t, id), 'L');
-  assert.equal((await patch({ talla: '' })).status, 200);
+  assert.equal((await patch({ talla: '', nombre: 'Camisa', precio: 5000 })).status, 200);
   assert.equal(talla(t, id), null);
 });
 
@@ -99,7 +99,7 @@ test('la camara corrige la talla de lo que acaba de capturar; una talla que no e
   assert.equal((await patch({ talla: 'Niño 18-24 meses / XL' })).status, 200);
   assert.equal(talla(t, id), 'Niño 18-24 meses / XL');
   assert.equal((await patch({ talla: 'XXXL' })).status, 400);
-  assert.equal((await patch({ talla: '' })).status, 400);
+  assert.equal((await patch({ talla: '', nombre: 'Camisa', precio: 5000 })).status, 400);
   assert.equal(talla(t, id), 'Niño 18-24 meses / XL');
   // Fuera de las 24 h ya no se toca desde la camara.
   t.db.prepare("update productos set creado_en = '2020-01-01T00:00:00Z' where id = ?").run(id);

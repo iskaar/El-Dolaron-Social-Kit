@@ -20,9 +20,9 @@ test('PATCH sin stock conserva la existencia que bajo la caja; la respuesta trae
 
 test('PATCH con stock explicito sigue fijando la existencia', async () => {
   const t = tienda();
-  assert.equal((await t.pedir(`/api/borradores/${PRODUCTO}`, { stock: 12 }, 'PATCH')).cuerpo.stock, 12);
+  assert.equal((await t.pedir(`/api/borradores/${PRODUCTO}`, { stock: 12, precio: 25000 }, 'PATCH')).cuerpo.stock, 12);
   assert.equal(stock(t), 12);
-  assert.equal((await t.pedir(`/api/borradores/${PRODUCTO}`, { stock: 1000 }, 'PATCH')).status, 400);
+  assert.equal((await t.pedir(`/api/borradores/${PRODUCTO}`, { stock: 1000, precio: 25000 }, 'PATCH')).status, 400);
   assert.equal(stock(t), 12);
 });
 

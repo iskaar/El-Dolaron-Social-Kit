@@ -305,6 +305,39 @@ test('espera el nombre y precio en orden; sin precio, con error o stock cero no 
   } finally { t.db.close(); }
 });
 
+test('la automática solo imprime ropa: mercancía general sin precio o nombre no detiene la cola (#335)', async () => {
+  const t = tienda();
+  try {
+    const sinPrecio = agregar(t, DESPUES), sinNombre = agregar(t, DESPUES), error = agregar(t, DESPUES, 'error'), conPrecio = agregar(t, DESPUES);
+    t.db.prepare("update productos set categoria='hogar', precio=0 where id=?").run(sinPrecio);
+    t.db.prepare("update productos set categoria='hogar', nombre='' where id=?").run(sinNombre);
+    t.db.prepare("update productos set categoria='hogar' where id in (?, ?)").run(error, conPrecio);
+    const ropa = agregar(t, '2026-10-11T17:00:00.000Z');
+    const p = await pagina(t);
+    await p.iniciarAutomatica();
+    // Ni siquiera la general lista con precio sale sola: se imprime a mano.
+    assert.deepEqual(p.estado.enviadas, [{ id: ropa, copias: 1 }]);
+    assert.equal(t.db.prepare('select codigo from productos where id=?').get(conPrecio)!.codigo, null);
+    assert.equal(p.activa(), true);
+  } finally { t.db.close(); }
+});
+
+test('si una prenda espera su precio, el aviso dice cuál es y a qué hora se capturó', async () => {
+  const t = tienda();
+  try {
+    const pieza = agregar(t, DESPUES, 'pendiente');
+    t.db.prepare("update productos set nombre='Chamarra azul', precio=0 where id=?").run(pieza);
+    const p = await pagina(t);
+    await p.iniciarAutomatica();
+    const hora = new Date(DESPUES).toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' });
+    assert.equal(p.$('resumen').textContent, `Esperando precio de: Chamarra azul (capturada ${hora}).`);
+    t.db.prepare("update productos set nombre='', estado_analisis='error', actualizado_en=strftime('%Y-%m-%dT%H:%M:%fZ','now') where id=?").run(pieza);
+    await p.imprimirNuevas();
+    assert.ok(p.$('resumen').textContent.includes(`revisión: pieza sin nombre (capturada ${hora})`));
+    assert.deepEqual(p.estado.enviadas, []);
+  } finally { t.db.close(); }
+});
+
 test('fallo de BLE pausa y una recarga no reenvía una pieza incierta', async () => {
   const t = tienda();
   try {
