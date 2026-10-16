@@ -25,22 +25,31 @@ const { join } = require("node:path");
 const vm = require("node:vm");
 const fuente = readFileSync(join(__dirname, "../site/public/catalogo.js"), "utf8");
 class Nodo {
-  constructor() { this.children = []; this.listeners = {}; this.attrs = {}; this.hidden = false; this.textContent = ""; }
+  constructor() { this.children = []; this.listeners = {}; this.attrs = {}; this.hidden = false; this.textContent = ""; this.value = ""; this.open = false; this.focused = false; }
   append(...xs) { this.children.push(...xs); }
   prepend(...xs) { this.children.unshift(...xs); }
   replaceChildren(...xs) { this.children = xs; }
   setAttribute(k, v) { this.attrs[k] = v; }
   removeAttribute(k) { delete this.attrs[k]; }
   addEventListener(k, fn) { this.listeners[k] = fn; }
+  focus() { this.focused = true; }
+  showModal() { this.open = true; }
+  close() { this.open = false; if (this.listeners.close) this.listeners.close(); }
 }
 function pagina(fetcher) {
-  const partes = Object.fromEntries([".chips", ".catalog-grid", ".catalog-status", ".catalog-more", ".catalog-fallback", ".catalog-retry"].map((k) => [k, new Nodo()]));
+  const selectores = [
+    ".chips", ".catalog-grid", ".catalog-status", ".catalog-more", ".catalog-fallback", ".catalog-retry",
+    ".catalog-search", ".search-input", ".catalog-clear", ".piece-dialog", ".piece-dialog-close",
+    ".piece-dialog-img", ".piece-dialog-title", ".piece-dialog-meta", ".piece-dialog-price", ".piece-dialog-ask",
+  ];
+  const partes = Object.fromEntries(selectores.map((k) => [k, new Nodo()]));
+  partes[".catalog-clear"].hidden = true;
   const root = new Nodo();
   root.querySelector = (k) => partes[k];
   const relojes = [];
   vm.runInNewContext(fuente, {
     document: { querySelector: () => null, getElementById: () => root, createElement: () => new Nodo() },
-    location: { search: "" }, Image: class extends Nodo {}, fetch: fetcher, AbortController, URL, URLSearchParams, Intl, Number, encodeURIComponent,
+    location: { search: "" }, Image: class extends Nodo {}, fetch: fetcher, AbortController, URL, URLSearchParams, Intl, Number, String, encodeURIComponent,
     setTimeout: (fn) => relojes.push(fn), clearTimeout: () => {},
   });
   const textos = () => partes[".catalog-grid"].children.map((li) => li.children[1].children.map((n) => n.textContent));
@@ -51,13 +60,24 @@ const tick = () => new Promise((r) => setImmediate(r));
 (async () => {
   // Página 2 falla una vez: el reintento pide la MISMA (mismo cursor) y no se salta piezas.
   const pedidas = [];
+  const busquedas = [];
   let falla = true;
   const p = pagina(async (url) => {
-    const despues = new URL(url).searchParams.get("despues");
+    const params = new URL(url).searchParams;
+    const despues = params.get("despues");
+    const q = params.get("q");
     pedidas.push(despues);
+    busquedas.push(q);
+    if (q === "nada") return { ok: true, json: async () => ({ piezas: [], total: 0, hay_mas: false, siguiente: null }) };
     if (despues === "c1" && falla) { falla = false; throw new Error("red"); }
     const n = despues === "c1" ? 2 : 1;
-    return { ok: true, json: async () => ({ piezas: [{ nombre: "Pieza " + n, codigo: "ED-" + n, precio: 10000, talla: n === 1 ? "M" : null }], total: 2, hay_mas: n === 1, siguiente: n === 1 ? "c1" : null }) };
+    return {
+      ok: true,
+      json: async () => ({
+        piezas: [{ nombre: "Pieza " + n, codigo: "ED-" + n, marca: "Levis", precio: 10000, talla: n === 1 ? "M" : null, foto: "https://dolarones.eldolaron.com/api/catalogo/foto/ED-" + n }],
+        total: 2, hay_mas: n === 1, siguiente: n === 1 ? "c1" : null,
+      }),
+    };
   });
   await tick();
   p.partes[".catalog-more"].listeners.click(); await tick();
@@ -65,8 +85,31 @@ const tick = () => new Promise((r) => setImmediate(r));
   p.partes[".catalog-more"].listeners.click(); await tick();
   assert.deepEqual(pedidas, [null, "c1", "c1"]);
   assert.deepEqual(p.textos().map((t) => t[0]), ["Pieza 1", "Pieza 2"]);
-  assert.deepEqual(p.textos()[0].slice(0, 2), ["Pieza 1", "Talla M"]);   // talla visible
-  assert.ok(!p.textos()[1].some((t) => /Talla/.test(t)));               // sin talla, sin etiqueta vacía
+  assert.deepEqual(p.textos()[0].slice(0, 3), ["Pieza 1", "Levis", "Talla M"]);   // marca y talla visibles
+  assert.ok(!p.textos()[1].some((t) => /Talla/.test(t)));                         // sin talla, sin etiqueta vacía
+
+  // Visor de foto completa: abre el diálogo, enfoca Cerrar y al cerrar devuelve el foco a la foto.
+  const fotoBtn = p.partes[".catalog-grid"].children[0].children[0];
+  fotoBtn.listeners.click();
+  assert.equal(p.partes[".piece-dialog"].open, true);
+  assert.equal(p.partes[".piece-dialog-title"].textContent, "Pieza 1");
+  assert.equal(p.partes[".piece-dialog-meta"].textContent, "Levis · Talla M · ED-1");
+  assert.equal(p.partes[".piece-dialog-close"].focused, true);
+  p.partes[".piece-dialog-close"].listeners.click();
+  assert.equal(p.partes[".piece-dialog"].open, false);
+  assert.equal(fotoBtn.focused, true);
+
+  // Búsqueda por ?q= y botón Limpiar.
+  p.partes[".search-input"].value = "  nada  ";
+  p.partes[".catalog-search"].listeners.submit({ preventDefault() {} });
+  await tick();
+  assert.equal(busquedas.at(-1), "nada");
+  assert.equal(p.partes[".catalog-clear"].hidden, false);
+  assert.match(p.partes[".catalog-status"].textContent, /No encontramos piezas para «nada»/);
+  p.partes[".catalog-clear"].listeners.click();
+  await tick();
+  assert.equal(busquedas.at(-1), null);
+  assert.equal(p.partes[".catalog-clear"].hidden, true);
 
   // Sin respuesta: a los 15 s se rinde, muestra el respaldo y «Reintentar» vuelve a cargar con los filtros.
   let responde = false;
@@ -79,11 +122,13 @@ const tick = () => new Promise((r) => setImmediate(r));
   await tick();
   assert.equal(lenta.partes[".catalog-fallback"].hidden, false);
   assert.equal(lenta.partes[".chips"].hidden, true);
+  assert.equal(lenta.partes[".catalog-search"].hidden, true);
   assert.equal(lenta.root.attrs["aria-busy"], undefined);
   responde = true;
   lenta.partes[".catalog-retry"].listeners.click(); await tick();
   assert.equal(lenta.partes[".chips"].hidden, false);
+  assert.equal(lenta.partes[".catalog-search"].hidden, false);
   assert.equal(lenta.partes[".catalog-fallback"].hidden, true);
   assert.deepEqual(lenta.textos().map((t) => t[0]), ["Ya"]);
-  console.log("Validated catalog prices in centavos, WhatsApp text, development-only API override, retry, size and timeout");
+  console.log("Validated catalog prices in centavos, WhatsApp text, development-only API override, search, photo viewer, retry, size and timeout");
 })().catch((error) => { console.error(error); process.exitCode = 1; });

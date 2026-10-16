@@ -649,6 +649,7 @@ function pintar() {
   }
   $('pedir-descuento').hidden = subtotal === 0 || (!!descuento && descuento.estado !== 'rechazada');
   if (subtotal === 0) $('descuento-form').hidden = true;
+  guardarTicket();
 
   $('ticket').innerHTML = lineas.map((l, i) => `
     <div class="renglon">
@@ -825,6 +826,30 @@ function dolaronesPedidos() {
 // { id, tipo, valor, subtotal, monto, estado: pendiente|aprobada|rechazada } o null.
 let descuento = null;
 let sondeoDescuento = null;
+
+// Issue #332: el ticket en curso sobrevive a recargar la caja (piezas, descuento pendiente o aprobado,
+// folio y pedido). Se guarda en cada pintar(). Con el mismo folio, cobrar otra vez no duplica la venta.
+// El socio no: su código es de un solo uso y se vuelve a pedir.
+// ponytail: un ticket por computadora; dos pestañas de caja se pisan (la última que pinta gana).
+const CLAVE_TICKET = 'caja-ticket';
+const TICKET_VIGENTE_MS = 4 * 3600_000;   // uno olvidado de otro turno no reaparece
+let ticketRecuperado = false;
+try {
+  const g = JSON.parse(localStorage.getItem(CLAVE_TICKET));
+  if (g && Date.now() - g.guardado < TICKET_VIGENTE_MS && Array.isArray(g.lineas) && g.lineas.length) {
+    lineas = g.lineas;
+    descuento = g.descuento ?? null;
+    idVenta = g.idVenta ?? null;
+    creadoEnVenta = g.creadoEnVenta ?? null;
+    pedidoCargado = g.pedidoCargado ?? null;
+    ticketRecuperado = true;
+  }
+} catch { /* sin memoria: empieza vacío */ }
+function guardarTicket() {
+  try {
+    localStorage.setItem(CLAVE_TICKET, JSON.stringify({ guardado: Date.now(), lineas, descuento, idVenta, creadoEnVenta, pedidoCargado }));
+  } catch { /* sin memoria: no se recupera al recargar */ }
+}
 const descuentoAplicado = () => (descuento?.estado === 'aprobada' ? descuento.monto : 0);
 /** Promo de inauguracion del ticket actual; el servidor la vuelve a calcular al cobrar. */
 // La hora guardada solo vale mientras el ticket conserva su folio (reintento); sin folio, cobrar() fijara la de ahora.
@@ -2059,6 +2084,15 @@ $('corte-reimprimir').addEventListener('click', async () => {
   }
 });
 
+// Doble Esc borra el ticket completo, igual que «Cancelar» (Issue #332). Con una ventana abierta, Esc solo la cierra.
+let ultimoEsc = 0;
+document.addEventListener('keydown', (e) => {
+  if (e.key !== 'Escape' || e.repeat || document.querySelector('dialog[open]')) return;
+  if (e.timeStamp - ultimoEsc < 800) { ultimoEsc = 0; $('cancelar').click(); return; }
+  ultimoEsc = e.timeStamp;
+  if (lineas.length) { $('aviso').textContent = 'Esc otra vez para borrar el ticket.'; $('aviso').style.color = '#5b6478'; }
+});
+
 $('cancelar').addEventListener('click', () => {
   lineas = []; idVenta = null; pedidoCargado = null; descuento = null; pintarDescuento(); quitarSocio(); $('efectivo').value = ''; $('forma').value = 'efectivo'; formaElegida = false; $('aviso').textContent = 'Venta cancelada';
   $('aviso').style.color = '#5b6478'; pintar(); $('codigo').focus();
@@ -2140,6 +2174,11 @@ $('conectar-impresora').addEventListener('click', async () => {
 
 pintarRed();
 await cargarCatalogo();
+if (ticketRecuperado) {
+  pintarDescuento();   // si seguía esperando al dueño, vuelve a preguntar
+  $('aviso').textContent = 'Se recuperó el ticket que estaba en curso. Para borrarlo: «Cancelar venta» o Esc dos veces.';
+  $('aviso').style.color = '#5b6478';
+}
 pintar();
 await pintarRechazadas();
 await pintarResultadosVales();

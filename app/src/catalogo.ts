@@ -89,10 +89,22 @@ export async function revisionCatalogo(env: Env): Promise<Response> {
 // (offset), una venta entre paginas recorria las filas y se saltaba una pieza.
 // La fecha va tal cual la guarda D1 (siempre como parametro, nunca en el SQL).
 const CURSOR = /^([^~]{1,40})~(ED-\d{1,10})$/;
+const ACENTOS: readonly [string, string][] = [
+  ['á', 'a'], ['é', 'e'], ['í', 'i'], ['ó', 'o'], ['ú', 'u'], ['ü', 'u'], ['ñ', 'n'],
+  ['Á', 'a'], ['É', 'e'], ['Í', 'i'], ['Ó', 'o'], ['Ú', 'u'], ['Ü', 'u'], ['Ñ', 'n'],
+];
+const sinAcentosSql = (expr: string) =>
+  ACENTOS.reduce((sql, [de, a]) => `replace(${sql}, '${de}', '${a}')`, `lower(${expr})`);
+const CAMPO_BUSQUEDA = sinAcentosSql(`p.nombre || ' ' || p.marca || ' ' || p.codigo || ' ' || coalesce(p.talla, '')`);
+const normalizarBusqueda = (q: string) =>
+  q.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[\\%_]/g, (c) => `\\${c}`);
 
 async function listar(env: Env, url: URL): Promise<Response> {
   const categoria = url.searchParams.get('categoria');
   if (categoria !== null && !CLAVES_CATEGORIA.includes(categoria)) return json({ error: 'Categoría no válida.' }, 400);
+  const qCruda = url.searchParams.get('q');
+  const q = qCruda === null ? '' : qCruda.trim().replace(/\s+/g, ' ');
+  if (q.length > 80) return json({ error: 'Búsqueda no válida.' }, 400);
   const texto = url.searchParams.get('pagina') ?? '1';
   const pagina = Number(texto);
   if (!/^\d+$/.test(texto) || !Number.isSafeInteger(pagina) || pagina < 1) return json({ error: 'Página no válida.' }, 400);
@@ -100,8 +112,8 @@ async function listar(env: Env, url: URL): Promise<Response> {
   const cursor = despues === null ? null : CURSOR.exec(despues);
   if (despues !== null && !cursor) return json({ error: 'Cursor no válido.' }, 400);
 
-  const filtro = `${VENDIBLE}${categoria === null ? '' : ' and p.categoria = ?'}`;
-  const args = categoria === null ? [] : [categoria];
+  const filtro = `${VENDIBLE}${categoria === null ? '' : ' and p.categoria = ?'}${q ? ` and ${CAMPO_BUSQUEDA} like ? escape '\\'` : ''}`;
+  const args: unknown[] = [...(categoria === null ? [] : [categoria]), ...(q ? [`%${normalizarBusqueda(q)}%`] : [])];
   const desde = cursor ? ' and (p.creado_en < ? or (p.creado_en = ? and p.codigo > ?))' : '';
   const [filas, cuenta] = await Promise.all([
     env.DB.prepare(`select p.codigo, p.nombre, p.marca, p.categoria, p.talla, p.precio, p.precio_lista, p.creado_en from productos p
