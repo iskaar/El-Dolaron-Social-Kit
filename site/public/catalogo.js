@@ -84,7 +84,7 @@
         const pie = document.createElement("div");
         pie.className = "poster-foot";
         const valor = document.createElement("p");
-        valor.className = "poster-price";
+        valor.className = "tag poster-price";
         pintarPrecio(valor, pieza);
         const apartar = document.createElement("a");
         apartar.className = "button button-navy poster-ask";

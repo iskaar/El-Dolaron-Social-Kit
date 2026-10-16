@@ -89,26 +89,24 @@ h2 { font-family: var(--display); font-variation-settings: var(--display-axes); 
 .wanted-grid li { filter: drop-shadow(2px 7px 7px rgb(60 40 15 / .32)); rotate: -.8deg; }
 .wanted-grid li:nth-child(3n + 2) { rotate: .7deg; }
 .wanted-grid li:nth-child(3n) { rotate: -.3deg; }
-.poster { --aged: #E9D9AE; --ink: #2B2116; position: relative; display: flex; flex-direction: column; height: 100%; padding: 30px 24px 22px; color: var(--ink); text-align: center;
-  background:
-    radial-gradient(ellipse 60% 40% at 18% 78%, rgb(150 100 40 / .14), transparent 70%),
-    radial-gradient(ellipse at 50% 45%, transparent 52%, rgb(120 75 25 / .38) 100%),
-    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='220' height='220'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.7' numOctaves='3' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 .38 0 0 0 0 .26 0 0 0 0 .12 0 0 0 .34 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url%28%23n%29'/%3E%3C/svg%3E"),
-    var(--aged);
-  clip-path: polygon(0 1%, 6% 0, 19% .8%, 33% 0, 47% .6%, 62% 0, 78% .9%, 91% 0, 100% .7%, 99.4% 14%, 100% 31%, 99.3% 52%, 100% 70%, 99.5% 86%, 100% 99%, 88% 100%, 72% 99.2%, 55% 100%, 39% 99.3%, 22% 100%, 8% 99.4%, 0 100%, .6% 83%, 0 64%, .7% 45%, 0 27%, .5% 12%); }
-.poster::before { content: ""; position: absolute; top: 9px; left: 50%; width: 11px; height: 11px; translate: -50% 0; border-radius: 50%; background: radial-gradient(circle at 35% 35%, #CFC8BC, #6B6256 60%, #3B342C); box-shadow: 1px 2px 2px rgb(0 0 0 / .4); }
-.poster::after { content: ""; position: absolute; inset: 22px 12px 12px; border: 3px double rgb(43 33 22 / .55); pointer-events: none; }
+.poster { --ink: #2B2116; position: relative; display: flex; flex-direction: column; height: 100%; padding: 15% 11% 11%; color: var(--ink); text-align: center;
+  background: url("assets/cartel-se-busca.webp") center / 100% 100% no-repeat; }
+/* Cabeza del clavo sobre el agujero que trae la hoja (49 % del ancho, 5 % del alto). */
+.poster::before { content: ""; position: absolute; top: 5%; left: 49%; width: 13px; height: 13px; translate: -50% -50%; border-radius: 50%; background: radial-gradient(circle at 35% 35%, #CFC8BC, #6B6256 60%, #3B342C); box-shadow: 1px 2px 2px rgb(0 0 0 / .4); }
 .poster-head { font-family: "Rye", Georgia, serif; font-size: clamp(34px, 3.6vw, 52px); font-weight: 400; line-height: 1; letter-spacing: .02em; text-transform: uppercase; text-shadow: 1px 1px 0 rgb(43 33 22 / .18); }
 .poster-name { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; min-height: 2.4em; margin: 10px 4px 14px; font-family: var(--display); font-variation-settings: var(--display-axes); font-weight: 800; font-size: 20px; line-height: 1.2; overflow-wrap: anywhere; }
 .poster img { width: 100%; aspect-ratio: 1; object-fit: cover; border: 3px solid var(--ink); background: var(--white); filter: sepia(.12) contrast(1.04); }
 .poster-seen { margin-top: 8px; font-family: var(--display); font-style: italic; font-size: 14px; line-height: 1.3; }
 .poster-foot { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 14px; margin-top: auto; padding-top: 16px; }
-.poster-price { position: relative; display: flex; flex-direction: column; align-items: flex-start; padding: 6px 16px 6px 30px; background: var(--yellow); color: var(--navy); font-family: "Anton", sans-serif; font-size: 42px; line-height: 1; rotate: -3deg;
-  clip-path: polygon(18px 0, 100% 0, 100% 100%, 18px 100%, 0 50%); }
-.poster-price::before { content: ""; position: absolute; left: 11px; top: 50%; width: 8px; height: 8px; translate: 0 -50%; border-radius: 50%; background: var(--aged); }
-.poster-price s { margin-top: 2px; font-family: "Archivo", sans-serif; font-size: 13px; font-weight: 700; color: var(--red-text); }
-.poster-ask { flex: 1 1 150px; min-height: 48px; padding: 10px 14px; font-size: 15px; }
+.poster-price { flex: none; width: 160px; font-size: 40px; }
+.poster-ask { flex: 1 1 120px; min-height: 52px; padding: 8px 10px; gap: 8px; font-size: 14px; }
 .poster-ask svg { width: 20px; height: 20px; }
+
+/* Etiqueta de cartón (Issue #339): la etiqueta es imagen y el precio es texto rojo, así sirve para cualquier precio. */
+.tag { display: flex; flex-direction: column; align-items: center; justify-content: center; aspect-ratio: 2 / 1; padding: 0 4% 0 27%; color: var(--red); font-family: "Anton", sans-serif; line-height: 1; rotate: -3deg;
+  background: url("assets/etiqueta-vacia.webp") center / 100% 100% no-repeat; filter: drop-shadow(1px 3px 3px rgb(60 40 15 / .3)); }
+.tag s, .tag small { margin-top: .12em; color: var(--navy); font-family: "Archivo", sans-serif; font-size: max(11px, .3em); font-weight: 800; }
+.tag small { letter-spacing: .06em; text-transform: uppercase; }
 
 /* Franja: dos cintas cruzadas, la de enfrente corre como marquesina */
 .ticker { position: relative; z-index: 2; height: 96px; margin-top: -28px; overflow: clip; }
@@ -184,14 +182,9 @@ h2 { font-family: var(--display); font-variation-settings: var(--display-axes); 
 
 /* Ropa: etiquetas de precio colgadas */
 .ropa { padding-block: 72px 80px; scroll-margin-top: 16px; }
-.tiers { list-style: none; margin: 40px 0 28px; padding: 0; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 32px; align-items: start; }
-.tiers li { display: flex; justify-content: center; }
-.tiers li:nth-child(2) { margin-top: 18px; }
-.tiers li:nth-child(4) { margin-top: 12px; }
-.tiers img { width: min(100%, 230px); mix-blend-mode: multiply; rotate: -3deg; transform-origin: 50% 6%; transition: rotate 220ms ease; }
-.tiers li:nth-child(2) img { rotate: 2deg; }
-.tiers li:nth-child(3) img { rotate: -1.5deg; }
-.tiers li:nth-child(4) img { rotate: 3deg; }
+.tiers { list-style: none; margin: 40px 0 28px; padding: 0; display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 28px 24px; }
+.tiers .tag { font-size: clamp(34px, 3.4vw, 50px); transition: rotate 220ms ease; }
+.tiers .tag:nth-child(even) { rotate: 2deg; }
 
 /* Grupos: cupones para recortar sobre tinta azul */
 .groups { background: var(--navy) radial-gradient(rgb(255 255 255 / .07) 1.2px, transparent 1.4px) 0 0 / 9px 9px; color: var(--white); }
@@ -266,7 +259,7 @@ dd { margin: 0; line-height: 1.5; }
   .piece:hover { translate: -2px -2px; box-shadow: 7px 7px 0 var(--navy); }
   .piece-link:hover { color: var(--red-text); }
   .piece-ask:hover { box-shadow: none; transform: none; background: var(--red); }
-  .tiers li img:hover { rotate: 6deg; }
+  .tiers .tag:hover { rotate: 0deg; }
 }
 @media (prefers-reduced-motion: no-preference) {
   .hero-sub { animation: cut-drop 560ms 560ms cubic-bezier(.2, .9, .3, 1.3) backwards; }
@@ -281,7 +274,7 @@ dd { margin: 0; line-height: 1.5; }
   .hero { padding: 32px 32px 44px; gap: 20px; }
   .hero-title { font-size: clamp(44px, 7vw, 80px); }
   .header nav { gap: 20px; }
-  .tiers { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 28px; }
+  .tiers { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .groups-layout, .visit-layout { gap: 48px; }
   .dolarones-symbol { width: 220px; margin-right: 8px; }
 }
@@ -316,15 +309,13 @@ dd { margin: 0; line-height: 1.5; }
   .wanted { padding-block: 44px 52px; }
   .wanted-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 22px 14px; }
   .wanted-grid li, .wanted-grid li:nth-child(n) { rotate: 0deg; }
-  .poster { padding: 24px 12px 14px; }
-  .poster::after { inset: 18px 6px 6px; border-width: 2px; }
+  .poster { padding: 26px 14px 18px; }
+  .poster::before { width: 10px; height: 10px; }
   .poster-head { font-size: 21px; white-space: nowrap; }
   .poster-name { margin: 8px 0 10px; font-size: 14px; }
   .poster-seen { display: none; }
   .poster-foot { flex-direction: column; align-items: stretch; gap: 10px; padding-top: 12px; }
-  .poster-price { align-self: center; font-size: 28px; padding: 4px 10px 4px 22px; clip-path: polygon(13px 0, 100% 0, 100% 100%, 13px 100%, 0 50%); }
-  .poster-price::before { left: 7px; width: 6px; height: 6px; }
-  .poster-price s { font-size: 11px; }
+  .poster-price { align-self: center; width: min(100%, 140px); font-size: 28px; }
   .poster-ask { flex: none; min-height: 44px; padding: 8px 6px; font-size: 13px; gap: 6px; }
   .poster-ask svg { width: 16px; height: 16px; }
   .catalog-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 26px 14px; }
@@ -337,7 +328,7 @@ dd { margin: 0; line-height: 1.5; }
   .chips { flex-wrap: nowrap; overflow-x: auto; padding: 0 38px 6px 20px; scrollbar-width: none; }
   .chip { flex-shrink: 0; font-size: 14px; padding-inline: 10px; }
   .ropa { padding-block: 52px 56px; }
-  .tiers { gap: 20px 14px; }
+  .tiers { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px 14px; }
   .group-card { grid-template-columns: 52px 1fr; }
   .coupon-stub { font-size: 16px; }
   .coupon-body { padding: 14px 16px 12px; margin: 8px 10px 8px 8px; }

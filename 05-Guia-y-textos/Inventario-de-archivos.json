@@ -127,49 +127,22 @@
       "background": "opaque"
     },
     {
-      "file": "site/public/assets/etiqueta-ropa-desde-50.webp",
-      "title": "Etiqueta vintage «Ropa desde $50»",
-      "description": "Etiqueta de precio vintage con fondo transparente para la portada del sitio; enlaza a la sección de ropa.",
-      "width": 474,
-      "height": 888,
+      "file": "site/public/assets/cartel-se-busca.webp",
+      "title": "Hoja de cartel «Se busca» (vacía)",
+      "description": "Papel envejecido con orillas rasgadas, doble filete y agujero de clavo, sin texto; fondo de los carteles de «Los más buscados» del sitio (Issue #339). Generada con Codex.",
+      "width": 760,
+      "height": 1140,
       "format": "WEBP",
       "background": "transparent"
     },
     {
-      "file": "site/public/assets/etiqueta-150.webp",
-      "title": "Etiqueta vintage $150",
-      "description": "Etiqueta de precio vintage para la sección de ropa ($150 por prenda); fondo blanco que se muestra con mix-blend-mode multiply sobre el papel.",
-      "width": 266,
-      "height": 465,
+      "file": "site/public/assets/etiqueta-vacia.webp",
+      "title": "Etiqueta de cartón vacía",
+      "description": "Etiqueta colgante de cartón con hilo, sin texto; el sitio escribe el precio encima en rojo (carteles y sección de ropa, Issue #339). Generada con Codex.",
+      "width": 640,
+      "height": 320,
       "format": "WEBP",
-      "background": "opaque"
-    },
-    {
-      "file": "site/public/assets/etiqueta-100.webp",
-      "title": "Etiqueta vintage $100",
-      "description": "Etiqueta de precio vintage para la sección de ropa ($100 por prenda); fondo blanco que se muestra con mix-blend-mode multiply sobre el papel.",
-      "width": 266,
-      "height": 465,
-      "format": "WEBP",
-      "background": "opaque"
-    },
-    {
-      "file": "site/public/assets/etiqueta-80.webp",
-      "title": "Etiqueta vintage $80",
-      "description": "Etiqueta de precio vintage para la sección de ropa ($80 por prenda); fondo blanco que se muestra con mix-blend-mode multiply sobre el papel.",
-      "width": 268,
-      "height": 473,
-      "format": "WEBP",
-      "background": "opaque"
-    },
-    {
-      "file": "site/public/assets/etiqueta-50.webp",
-      "title": "Etiqueta vintage $50",
-      "description": "Etiqueta de precio vintage para la sección de ropa ($50 por prenda); fondo blanco que se muestra con mix-blend-mode multiply sobre el papel.",
-      "width": 269,
-      "height": 472,
-      "format": "WEBP",
-      "background": "opaque"
+      "background": "transparent"
     },
     {
       "file": "app/public/marketplace.html",
