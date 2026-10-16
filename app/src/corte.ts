@@ -115,6 +115,8 @@ const dinero = (forma: string, importe = 'total - dolarones') =>
 // Lo que queda de un ticket despues de lo devuelto por piezas sueltas (Issue #138) y de lo que
 // pago el saldo de un pedido (Issue #269): ese dinero entro antes, con el anticipo.
 const NETO = 'total - dolarones - anticipo - devuelto';
+// Lo devuelto en cupón (Issue #330) se quedó en el cajón: para lo cobrado vigente se vuelve a sumar.
+const COBRADO = `${NETO} + devuelto_cupon`;
 // Anticipos de pedidos recibidos en esta caja desde su corte anterior, aunque el pedido ya se haya cancelado o vencido.
 const anticipos = (forma: string) => `(select ${dinero(forma, 'anticipo')} from pedidos where corte_id = ?1)`;
 // Lo cobrado: ventas de este corte que siguen vigentes, netas de lo ya devuelto.
@@ -172,14 +174,14 @@ export async function registrarCorte(request: Request, env: Env, correo: string)
            (select max(hasta) from cortes where caja = ?2) as desde,
            coalesce((select fondo_siguiente from cortes where caja = ?2 order by hasta desc limit 1), ?7) as fondo,
            (select count(*) from ventas where ${VIGENTES}) as tickets,
-           (select ${dinero('efectivo', NETO)} from ventas where ${VIGENTES}) + ${anticipos('efectivo')} as ev,
+           (select ${dinero('efectivo', COBRADO)} from ventas where ${VIGENTES}) + ${anticipos('efectivo')} as ev,
            (select ${dinero('efectivo', NETO)} from ventas where ${CANCELADAS}) + ${devuelto('efectivo')} as ed,
            (select coalesce(sum(importe), 0) from retiros where corte_id = ?1 and tipo = 'retiro') as re,
            (select coalesce(sum(importe), 0) from retiros where corte_id = ?1 and tipo = 'gasto') as ga,
            (select coalesce(sum(importe), 0) from retiros where corte_id = ?1 and tipo = 'nomina') as no,
-           (select ${dinero('tarjeta', NETO)} from ventas where ${VIGENTES}) + ${anticipos('tarjeta')} as tv,
+           (select ${dinero('tarjeta', COBRADO)} from ventas where ${VIGENTES}) + ${anticipos('tarjeta')} as tv,
            (select ${dinero('tarjeta', NETO)} from ventas where ${CANCELADAS}) + ${devuelto('tarjeta')} as td,
-           (select ${dinero('transferencia', NETO)} from ventas where ${VIGENTES}) + ${anticipos('transferencia')} as xv,
+           (select ${dinero('transferencia', COBRADO)} from ventas where ${VIGENTES}) + ${anticipos('transferencia')} as xv,
            (select ${dinero('transferencia', NETO)} from ventas where ${CANCELADAS})
              + ${devuelto('transferencia')} as xd,
            (select coalesce(sum(dolarones - dolarones_devueltos), 0) from ventas where ${VIGENTES}) as dv,

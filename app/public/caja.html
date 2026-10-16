@@ -271,6 +271,17 @@ if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw-caja.js'
       <div class="socio-fila"><input id="vale-folio" placeholder="Folio completo de la venta" style="min-width:0;flex:1">
         <button id="vale-por-folio" type="button">Imprimir vale</button></div>
     </details>
+    <details id="cupon-manual" style="margin-top:10px">
+      <summary>Cupón de Dolarones (lo autoriza el dueño)</summary>
+      <div class="socio-fila">
+        <input id="cupon-importe" type="number" min="1" max="10000" step="1" inputmode="numeric" placeholder="Dolarones (1 D = $1)" style="min-width:0;flex:1">
+        <input id="cupon-motivo" maxlength="200" placeholder="Motivo (obligatorio)" autocomplete="off" style="min-width:0;flex:2"></div>
+      <div class="socio-fila">
+        <select id="cupon-aprobador" aria-label="Dueño que autoriza" style="min-width:0;flex:1"></select>
+        <input id="cupon-pin" type="password" inputmode="numeric" maxlength="6" autocomplete="off" placeholder="PIN del dueño" style="min-width:0;flex:1"></div>
+      <button id="emitir-cupon" type="button">Emitir e imprimir cupón</button>
+      <div id="cupon-aviso" role="status"></div>
+    </details>
   </section>
 </main>
 
@@ -469,6 +480,8 @@ let busquedaSocio = 0;
 let valesHabilitados = null;
 // Sandbox (Issue #279): el servidor acepta vales de prueba de 6 digitos.
 let valesPrueba = false;
+// % que el dueño regresa en cupón al devolver (Issue #330); null sin red: entonces solo se devuelve dinero.
+let cuponPorcentaje = null;
 // Ventana de la promo de inauguracion (/api/vales/config); la ultima conocida sirve sin red.
 let promoConfig = (() => { try { return JSON.parse(localStorage.getItem('promo-inauguracion')) || null; } catch { return null; } })();
 const notaVales = () => {
@@ -486,6 +499,7 @@ async function cargarConfigVales() {
     const c = r.ok ? await r.json() : null;
     valesHabilitados = c && typeof c.habilitado === 'boolean' ? c.habilitado : null;
     valesPrueba = c?.prueba === true;
+    cuponPorcentaje = Number.isInteger(c?.cupon_porcentaje) ? c.cupon_porcentaje : null;
     if (c && 'promo' in c) {
       promoConfig = c.promo;
       try { localStorage.setItem('promo-inauguracion', JSON.stringify(promoConfig)); } catch {}
@@ -1463,6 +1477,49 @@ async function reimprimirValeDeVenta(id, boton, aviso = $('aviso')) {
 }
 $('vale-por-folio').addEventListener('click', () => reimprimirValeDeVenta($('vale-folio').value.trim(), $('vale-por-folio')));
 
+// Cupón de monto libre (Issue #330): cortesía o aclaración, con PIN del dueño. Mismo id hasta que salga: reenviar no emite dos.
+let idCuponManual = null;
+$('cupon-manual').addEventListener('toggle', async () => {
+  if (!$('cupon-manual').open) return;
+  try {
+    const r = await fetch('/api/descuentos/duenos');
+    const duenos = r.ok ? await r.json() : [];
+    $('cupon-aprobador').innerHTML = duenos.map((u) => `<option value="${escapar(u.correo)}">${escapar(u.nombre || u.correo)}</option>`).join('');
+  } catch { $('cupon-aviso').textContent = 'Sin red: el cupón necesita conexión.'; }
+});
+for (const id of ['cupon-importe', 'cupon-motivo']) $(id).addEventListener('input', () => { idCuponManual = null; });
+$('emitir-cupon').addEventListener('click', async () => {
+  const aviso = $('cupon-aviso');
+  aviso.style.color = '#D72B32';
+  const importe = Number($('cupon-importe').value);
+  const motivo = $('cupon-motivo').value.trim();
+  if (!Number.isInteger(importe) || importe < 1 || importe > 10000) { aviso.textContent = 'Escribe de 1 a 10,000 Dolarones, sin centavos.'; return; }
+  if (!motivo) { aviso.textContent = 'Escribe el motivo.'; $('cupon-motivo').focus(); return; }
+  const pin = $('cupon-pin').value;
+  if (pin && !/^\d{6}$/.test(pin)) { aviso.textContent = 'El PIN es de 6 dígitos.'; return; }
+  idCuponManual ??= crypto.randomUUID();
+  $('emitir-cupon').disabled = true;
+  aviso.textContent = '';
+  try {
+    const r = await fetch('/api/cupones', { method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ id: idCuponManual, importe: importe * 100, motivo, aprobador: $('cupon-aprobador').value, pin }) });
+    const cuerpo = await r.json();
+    if (!r.ok) throw new Error(cuerpo.error || 'No se pudo emitir el cupón.');
+    $('cupon-pin').value = '';
+    const impreso = await imprimirVale(cuerpo.cupon);
+    pintarImpresora();
+    if (!impreso) { aviso.textContent = 'El cupón quedó emitido pero no se imprimió: revisa la impresora y vuelve a tocar el botón (no se emite otro).'; return; }
+    idCuponManual = null;
+    $('cupon-importe').value = '';
+    $('cupon-motivo').value = '';
+    aviso.style.color = '#1f7a4d';
+    aviso.textContent = `Cupón de ${dolares(cuerpo.cupon.importe)} impreso. Vence en 30 días.`;
+  } catch (error) {
+    $('cupon-pin').value = '';
+    aviso.textContent = error.message || 'Sin red: no se pudo emitir el cupón.';
+  } finally { $('emitir-cupon').disabled = false; }
+});
+
 async function pintarResultadosVales() {
   const resultados = await store('vales_resultados', 'readonly', (s) => s.getAll());
   $('vales-conciliados').innerHTML = resultados.map((r) => `<div class="ticket">
@@ -1572,7 +1629,7 @@ $('ticket-contenido').addEventListener('click', async (e) => {
     idCancelacion = crypto.randomUUID();
     const destino = d.cancelarLinea ? $(`form-linea-${d.cancelarLinea}`) : $('form-todo');
     const celda = d.cancelarLinea ? destino.firstElementChild : destino;
-    celda.innerHTML = d.cancelarLinea ? formularioPieza(d.cancelarLinea, Number(d.quedan)) : formularioTodo();
+    celda.innerHTML = d.cancelarLinea ? formularioPieza(d.cancelarLinea, Number(d.quedan), cuponPorcentaje) : formularioTodo(cuponPorcentaje);
     destino.hidden = false;
     celda.querySelector('.motivo-cancelar').focus();
     return;
@@ -1626,6 +1683,69 @@ $('ticket-contenido').addEventListener('click', async (e) => {
       return;
     }
     await terminarCancelacion(r, cuerpo, { linea: undefined, cantidad: 1 });
+    return;
+  }
+
+  if (d.reimprimirCupon) {
+    boton.disabled = true;
+    try {
+      const r = await fetch(`/api/ventas/${ticketAbierto.id}/cupon/${encodeURIComponent(d.reimprimirCupon)}`, { method: 'POST' });
+      const cupon = await r.json();
+      if (!r.ok) throw new Error(cupon.error || 'No se encontró el cupón.');
+      $('ticket-aviso').textContent = (await imprimirVale(cupon)) ? 'Cupón reimpreso: mismo código, saldo y vencimiento.' : 'Revisa la impresora e intenta otra vez.';
+    } catch (error) { $('ticket-aviso').textContent = error.message || 'Sin red: no se pudo traer el cupón.'; }
+    finally { boton.disabled = false; pintarImpresora(); }
+    return;
+  }
+
+  // Devolver en cupón (Issue #330): la pieza regresa, el dinero se queda en el cajón y sale un cupón.
+  if (d.cuponLinea || d.cuponTodo !== undefined) {
+    const form = boton.closest('.form-cancelar');
+    const campoMotivo = form.querySelector('.motivo-cancelar');
+    const motivo = campoMotivo.value.trim();
+    if (!motivo) { campoMotivo.style.borderColor = 'var(--rojo)'; campoMotivo.focus(); return; }
+    const campoCantidad = form.querySelector('.cantidad-cancelar');
+    const cantidad = campoCantidad ? Number(campoCantidad.value) : 1;
+    if (campoCantidad && (!Number.isInteger(cantidad) || cantidad < 1 || cantidad > Number(campoCantidad.max))) {
+      campoCantidad.style.borderColor = 'var(--rojo)'; campoCantidad.focus(); return;
+    }
+    if (!cajaActual()) {
+      $('ticket-aviso').textContent = 'Elige arriba qué caja es esta computadora.';
+      $('ticket-aviso').style.color = '#D72B32';
+      return;
+    }
+    for (const b of form.querySelectorAll('button')) b.disabled = true;
+    let r, cuerpo;
+    try {
+      r = await fetch(`/api/ventas/${ticketAbierto.id}/cupon`, {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ id: idCancelacion, motivo, caja: cajaActual(),
+          lineas: d.cuponLinea ? [{ linea: Number(d.cuponLinea), cantidad }] : 'todo' }),
+      });
+      cuerpo = await r.json();
+    } catch {
+      for (const b of form.querySelectorAll('button')) b.disabled = false;
+      $('ticket-aviso').textContent = 'Sin red: no se pudo dar el cupón. Reabre el ticket antes de entregar nada.';
+      $('ticket-aviso').style.color = '#D72B32';
+      return;
+    }
+    if (!r.ok) {
+      for (const b of form.querySelectorAll('button')) b.disabled = false;
+      $('ticket-aviso').textContent = cuerpo.error ?? 'No se pudo dar el cupón.';
+      $('ticket-aviso').style.color = '#D72B32';
+      return;
+    }
+    idCancelacion = null;
+    await abrirTicket(ticketAbierto.id);
+    const impreso = await imprimirVale(cuerpo.cupon);
+    pintarImpresora();
+    $('ticket-aviso').textContent = `Cupón de ${dolares(cuerpo.cupon.importe)} ${impreso ? 'impreso' : 'listo, pero no se imprimió: usa «Reimprimir cupón»'}.`
+      + ' No sale dinero del cajón: regresa la pieza al anaquel y entrega el cupón.'
+      + (cuerpo.dolarones ? ` Los ${dolares(cuerpo.dolarones)} pagados con Dolarones regresaron al socio.` : '');
+    $('ticket-aviso').style.color = impreso ? '#1f7a4d' : '#D72B32';
+    await cargarTickets();
+    await actualizarCorte();
+    await cargarCatalogo();
     return;
   }
 

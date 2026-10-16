@@ -116,6 +116,8 @@ export function permiso(pathname: string, metodo: string): Regla {
   if (ruta === '/api/socios') return CAJA;
   if (ruta === '/api/vales/config' && metodo === 'GET') return CAJA;
   if (ruta === '/api/vales/buscar' && metodo === 'POST') return CAJA;
+  // Cupón de monto libre (Issue #330): la caja lo emite con el PIN de un dueño (vales.ts).
+  if (ruta === '/api/cupones' && metodo === 'POST') return CAJA;
   if (ruta === '/api/socios/codigo' && metodo === 'POST') return CAJA;
   if (ruta === '/api/socios/legal' && metodo === 'GET') return CAJA;
   if (ruta === '/api/portal/llegada' && metodo === 'POST') return CAJA;
