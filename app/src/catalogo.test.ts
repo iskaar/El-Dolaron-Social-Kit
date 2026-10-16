@@ -20,15 +20,15 @@ function pieza(t: Tienda, extra: Record<string, unknown> = {}): string {
   n++;
   const f = {
     id: `c${String(n).padStart(7, '0')}-1111-4111-8111-111111111111`, codigo: `ED-${String(n + 100).padStart(6, '0')}`,
-    nombre: 'Jeans', marca: 'Levis', categoria: 'ropa', precio: 25000, precio_lista: 0, estado_fisico: 'nuevo',
+    nombre: 'Jeans', marca: 'Levis', categoria: 'ropa', talla: null, precio: 25000, precio_lista: 0, estado_fisico: 'nuevo',
     estado_analisis: 'listo', destino: 'etiqueta', sin_inventario: 0, stock: 3, ...extra,
   } as Record<string, any>;
   f.foto_key = 'foto_key' in extra ? extra.foto_key : `fotos/${f.id}.jpg`;
   t.db.prepare(
-    `insert into productos (id, codigo, nombre, marca, categoria, precio, precio_lista, estado_fisico, estado_analisis, destino,
+    `insert into productos (id, codigo, nombre, marca, categoria, talla, precio, precio_lista, estado_fisico, estado_analisis, destino,
        sin_inventario, stock, foto_key, semana_ingreso, creado_en, actualizado_en)
-     values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'S40', ?, '')`,
-  ).run(f.id, f.codigo, f.nombre, f.marca, f.categoria, f.precio, f.precio_lista, f.estado_fisico, f.estado_analisis, f.destino,
+     values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'S40', ?, '')`,
+  ).run(f.id, f.codigo, f.nombre, f.marca, f.categoria, f.talla, f.precio, f.precio_lista, f.estado_fisico, f.estado_analisis, f.destino,
     f.sin_inventario, f.stock, f.foto_key, new Date(2026, 9, 1, 0, 0, n).toISOString());
   if (f.foto_key) (t.env.FOTOS as any).objetos.set(f.foto_key, Uint8Array.from([0xff, 0xd8, 0xff, 0xd9]).buffer);
   return f.codigo;
@@ -302,3 +302,20 @@ test('la caja pide solo lo cambiado del catalogo, incluidas las piezas que salen
   // Sin `desde`, la lista completa de siempre (la usan pedidos y la carga inicial de la caja).
   assert.ok(Array.isArray((await t.pedir('/api/catalogo', undefined, 'GET')).cuerpo));
 });
+
+test('catalogo (Issue #241): busqueda ?q= por nombre, marca, codigo o talla sin importar acentos y escapando comodines', async () => {
+  const t = publica();
+  try {
+    const jabon = pieza(t, { nombre: 'Jabón corporal Dove', marca: 'Dove', categoria: 'belleza' });
+    const nino = pieza(t, { nombre: 'Ropa', marca: '', categoria: 'ropa', talla: 'Niño 10 años / L' });
+    const cien = pieza(t, { nombre: 'Jugo 100% manzana', marca: 'Tree Top', categoria: 'despensa' });
+    assert.deepEqual((await leer(await t.llamar('/api/catalogo?q=jabon'))).piezas.map((p: any) => p.codigo), [jabon]);
+    assert.deepEqual((await leer(await t.llamar('/api/catalogo?q=DOVE'))).piezas.map((p: any) => p.codigo), [jabon]);
+    assert.deepEqual((await leer(await t.llamar(`/api/catalogo?q=${jabon}`))).piezas.map((p: any) => p.codigo), [jabon]);
+    assert.deepEqual((await leer(await t.llamar('/api/catalogo?q=nino+10'))).piezas.map((p: any) => p.codigo), [nino]);
+    assert.deepEqual((await leer(await t.llamar('/api/catalogo?q=100%25'))).piezas.map((p: any) => p.codigo), [cien]);
+    assert.deepEqual((await leer(await t.llamar('/api/catalogo?categoria=ropa&q=dove'))).piezas, []);
+    assert.equal((await t.llamar('/api/catalogo?q=' + 'a'.repeat(81))).status, 400);
+  } finally { t.db.close(); }
+});
+

@@ -98,23 +98,23 @@ h2 { font-family: var(--display); font-variation-settings: var(--display-axes); 
 .hero-stamp { display: inline-flex; flex-direction: column; margin-top: 24px; padding: 8px 14px 6px; border: 3px solid var(--red); border-radius: 4px; color: var(--red-text); font-family: "Anton", sans-serif; font-size: 22px; line-height: 1.1; text-transform: uppercase; rotate: -3deg; }
 .hero-stamp span { font-family: "Archivo", sans-serif; font-size: 12px; font-weight: 800; letter-spacing: .14em; }
 .hero-art { position: relative; min-width: 0; }
-.hero-art img { width: 100%; mix-blend-mode: multiply; }
+.hero-art > img { width: 100%; mix-blend-mode: multiply; transition: opacity 600ms ease; }
 .new-stamp { position: absolute; right: 0; top: 2%; display: grid; place-items: center; width: 118px; height: 118px; background: var(--red); color: var(--white); font-family: "Anton", sans-serif; font-size: 22px; line-height: 1; text-align: center; text-transform: uppercase; text-decoration: none; rotate: 12deg;
   clip-path: polygon(50% 0, 61% 12%, 75% 7%, 79% 21%, 93% 25%, 88% 39%, 100% 50%, 88% 61%, 93% 75%, 79% 79%, 75% 93%, 61% 88%, 50% 100%, 39% 88%, 25% 93%, 21% 79%, 7% 75%, 12% 61%, 0 50%, 12% 39%, 7% 25%, 21% 21%, 25% 7%, 39% 12%); }
 
 /* Estampas en vivo: las piezas más vendidas, pegadas como fotos instantáneas */
-.hero-art > img { transition: opacity 600ms ease; }
 .hero-art.en-vivo > img { opacity: 0; }
 .stickers { position: absolute; inset: 0; }
 .sticker { position: absolute; display: block; padding: 7px 7px 34px; background: var(--white); box-shadow: 3px 5px 0 var(--shadow); transition: rotate 180ms ease, translate 180ms ease; }
-.sticker img { width: 100%; aspect-ratio: 1; object-fit: cover; background: #E6DEC8; }
+.sticker img { width: 100%; aspect-ratio: 1; object-fit: contain; background: #E6DEC8; }
 .sticker::before { content: ""; position: absolute; z-index: 1; top: -10px; left: 50%; width: 70px; height: 22px; translate: -50% 0; rotate: -5deg; background: rgb(255 212 71 / .78); }
 .sticker-price { position: absolute; right: 6px; bottom: 3px; padding: 2px 9px 1px; background: var(--yellow); font-family: "Anton", sans-serif; font-size: clamp(16px, 1.6vw, 22px); line-height: 1.2; rotate: 4deg; box-shadow: 2px 2px 0 var(--shadow); }
-.sticker:nth-child(1) { left: 5%; top: 4%; width: 31%; rotate: -6deg; }
-.sticker:nth-child(2) { left: 35%; top: 0; width: 31%; rotate: 3deg; }
-.sticker:nth-child(3) { left: 68%; top: 5%; width: 30%; rotate: -3deg; }
-.sticker:nth-child(4) { left: 36%; top: 49%; width: 30%; rotate: -4deg; }
-.sticker:nth-child(5) { left: 69%; top: 53%; width: 29%; rotate: 5deg; }
+.sticker-price s { margin-left: 6px; color: var(--red-text); font-family: "Archivo", sans-serif; font-size: 12px; font-weight: 700; }
+.sticker:nth-child(1) { left: 3%; top: 3%; width: 31%; rotate: -6deg; }
+.sticker:nth-child(2) { left: 34%; top: 0; width: 31%; rotate: 3deg; }
+.sticker:nth-child(3) { left: 64%; top: 14%; width: 29%; rotate: -3deg; }
+.sticker:nth-child(4) { left: 26%; top: 48%; width: 31%; rotate: -4deg; }
+.sticker:nth-child(5) { left: 61%; top: 53%; width: 31%; rotate: 5deg; }
 .price-tag, .new-stamp { z-index: 3; }
 .price-tag { position: absolute; left: -4%; bottom: 6%; width: 150px; rotate: -10deg; transform-origin: 50% 4%; filter: drop-shadow(5px 9px 6px rgb(22 54 107 / .32)); transition: rotate 220ms ease; }
 .price-tag img { width: 100%; }
@@ -149,8 +149,15 @@ h2 { font-family: var(--display); font-variation-settings: var(--display-axes); 
 .group-go { justify-self: start; margin-top: 10px; padding: 6px 12px 5px; border: 2px solid var(--navy); border-radius: 3px; font-family: "Anton", sans-serif; font-size: 15px; letter-spacing: .06em; text-transform: uppercase; rotate: -2deg; }
 
 /* Novedades: recortes pegados con cinta */
-.catalog { padding-block: 24px 88px; scroll-margin-top: 16px; }
-.chips { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 30px; }
+.catalog { padding-block: 44px 80px; scroll-margin-top: 16px; }
+.catalog-search { margin-top: 26px; max-width: 680px; }
+.search-label { display: block; margin-bottom: 6px; font-size: 13px; font-weight: 800; letter-spacing: .1em; text-transform: uppercase; }
+.search-row { display: flex; flex-wrap: wrap; gap: 10px; }
+.search-input { flex: 1 1 240px; min-height: 50px; padding: 10px 14px; border: 2px solid var(--navy); border-radius: 2px; background: var(--white); color: var(--navy); box-shadow: 3px 3px 0 var(--navy); font: 600 16px/1.3 "Archivo", sans-serif; }
+.search-input::placeholder { color: rgb(22 54 107 / .65); font-weight: 500; }
+.search-submit, .catalog-clear { min-height: 50px; padding: 10px 18px; box-shadow: 3px 3px 0 var(--navy); }
+.chips-wrap { position: relative; margin-top: 18px; }
+.chips { display: flex; flex-wrap: wrap; gap: 10px; }
 .chip { min-height: 44px; padding: 8px 14px 6px; border: 2px solid var(--navy); border-radius: 2px; background: var(--white); color: var(--navy); box-shadow: 2px 2px 0 var(--navy); font-family: "Anton", sans-serif; font-size: 16px; letter-spacing: .03em; text-transform: uppercase; cursor: pointer; transition: background-color 150ms ease, color 150ms ease; }
 .chip[aria-pressed="true"] { background: var(--red); color: var(--white); }
 .catalog-status { margin-top: 22px; min-height: 26px; font-size: 15px; font-weight: 700; }
@@ -159,8 +166,9 @@ h2 { font-family: var(--display); font-variation-settings: var(--display-axes); 
 .piece:nth-child(3n + 2) { rotate: 1.2deg; }
 .piece:nth-child(3n) { rotate: -.4deg; }
 .piece::before { content: ""; position: absolute; z-index: 1; top: -11px; left: 50%; width: 82px; height: 24px; translate: -50% 0; rotate: -4deg; background: rgb(255 212 71 / .78); }
-.piece-photo { aspect-ratio: 1; overflow: hidden; background: #E6DEC8; }
-.piece-photo img { width: 100%; height: 100%; object-fit: cover; }
+.piece-photo { position: relative; display: block; width: 100%; padding: 0; border: 0; aspect-ratio: 1; overflow: hidden; background: #E6DEC8; cursor: pointer; }
+.piece-photo img { width: 100%; height: 100%; object-fit: contain; }
+.piece-zoom { position: absolute; right: 6px; bottom: 6px; padding: 3px 7px 2px; border: 1.5px solid var(--navy); background: rgb(255 255 255 / .92); color: var(--navy); font: 800 11px/1.1 "Archivo", sans-serif; letter-spacing: .04em; text-transform: uppercase; pointer-events: none; }
 .piece-body { display: flex; flex-direction: column; flex: 1; gap: 4px; padding: 12px 4px 0; }
 .piece h3 { font-size: 16px; font-weight: 700; line-height: 1.3; overflow-wrap: anywhere; }
 .piece-brand { font-size: 13px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; opacity: .8; }
@@ -172,6 +180,18 @@ h2 { font-family: var(--display); font-variation-settings: var(--display-axes); 
 .catalog-fallback { max-width: 580px; margin-top: 28px; padding: 28px; background: var(--white); box-shadow: 4px 5px 0 var(--shadow); }
 .catalog-fallback h3 { font-family: var(--display); font-variation-settings: var(--display-axes); font-weight: 900; font-size: 26px; line-height: 1.15; }
 .catalog-fallback p { margin-top: 10px; }
+.piece-dialog { width: min(560px, calc(100vw - 28px)); max-height: calc(100vh - 28px); margin: auto; padding: 0; border: 3px solid var(--navy); background: var(--white); color: var(--navy); box-shadow: 8px 10px 0 rgb(22 54 107 / .4); }
+.piece-dialog::backdrop { background: rgb(22 54 107 / .68); }
+.piece-dialog-box { display: grid; gap: 12px; padding: 16px; }
+.piece-dialog-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.piece-dialog-title { font-family: var(--display); font-variation-settings: var(--display-axes); font-weight: 900; font-size: 22px; line-height: 1.15; }
+.piece-dialog-close { min-height: 40px; padding: 6px 14px; font-size: 14px; box-shadow: 2px 2px 0 var(--navy); }
+.piece-dialog-photo { background: #E6DEC8; display: grid; place-items: center; max-height: 62vh; overflow: hidden; }
+.piece-dialog-img { width: auto; max-width: 100%; max-height: 62vh; object-fit: contain; }
+.piece-dialog-foot { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; }
+.piece-dialog-meta { width: 100%; font-size: 14px; font-weight: 800; }
+.piece-dialog-price { margin-top: 0; translate: 0 0; }
+.piece-dialog-ask { margin-top: 0; padding-inline: 16px; }
 
 /* Ropa: etiquetas de precio colgadas */
 .ropa { padding-block: 72px 80px; scroll-margin-top: 16px; }
@@ -319,7 +339,8 @@ dd { margin: 0; line-height: 1.5; }
   .piece-price { font-size: 24px; padding-inline: 8px; }
   .piece-price s { display: block; margin-left: 0; font-size: 12px; }
   .piece-ask { font-size: 12px; padding-inline: 6px; }
-  .chips { flex-wrap: nowrap; overflow-x: auto; margin-inline: -20px; padding: 0 20px 6px; scrollbar-width: none; }
+  .chips-wrap { margin-inline: -20px; -webkit-mask-image: linear-gradient(90deg, #000 0, #000 calc(100% - 38px), transparent 100%); mask-image: linear-gradient(90deg, #000 0, #000 calc(100% - 38px), transparent 100%); }
+  .chips { flex-wrap: nowrap; overflow-x: auto; padding: 0 38px 6px 20px; scrollbar-width: none; }
   .chip { flex-shrink: 0; font-size: 14px; padding-inline: 10px; }
   .ropa { padding-block: 52px 56px; }
   .tiers { gap: 20px 14px; }
@@ -334,7 +355,8 @@ dd { margin: 0; line-height: 1.5; }
   .footer { flex-direction: column; align-items: flex-start; }
 }
 @media (max-width: 420px) {
-  .brand { width: 132px; }
+  .brand { width: 124px; }
+  .header nav { gap: 10px; }
   .visit-link { display: none; }
   .portal-link { white-space: nowrap; }
   .hero .button { gap: 6px; padding-inline: 10px; }

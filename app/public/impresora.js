@@ -385,6 +385,7 @@ export function imprimirCorte(corte) {
     renglonMonto('- Devoluciones', importe(corte.efectivo_devoluciones)),
     renglonMonto('- Retiros', importe(corte.retiros)),
     renglonMonto('- Gastos', importe(corte.gastos ?? 0)),
+    renglonMonto('- Nomina', importe(corte.nomina ?? 0)),
     renglonMonto('= Esperado', importe(corte.efectivo_esperado)),
     renglonMonto('Contado', importe(corte.efectivo_contado)),
     negritas(diferencia !== 0),

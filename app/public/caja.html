@@ -164,6 +164,7 @@ if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw-caja.js'
     </select>
   </label>
   <span id="estado-red">en línea</span>
+  <button id="marcar-entrada" type="button" hidden>Marcar entrada</button>
   <button id="abrir-retiro" type="button">Gasto / retiro</button>
   <button id="abrir-corte" type="button">Corte</button>
   <a href="/socios">Alta de socios</a>
@@ -313,6 +314,8 @@ if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw-caja.js'
   <p class="nota" id="retiro-nota"></p>
   <label for="retiro-importe">Importe ($)</label>
   <input id="retiro-importe" type="number" min="0.5" step="0.5" inputmode="decimal">
+  <label for="retiro-categoria" id="retiro-etiqueta-categoria">Categoría</label>
+  <select id="retiro-categoria"></select>
   <label for="retiro-motivo" id="retiro-etiqueta-motivo">Concepto</label>
   <input id="retiro-motivo" type="text" maxlength="200">
   <div class="aviso-dialogo" id="retiro-aviso"></div>
@@ -360,6 +363,19 @@ if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw-caja.js'
   </div>
 </dialog>
 
+<dialog id="dialogo-entrada">
+  <h2>Marcar entrada</h2>
+  <label for="entrada-empleado">Empleado</label>
+  <select id="entrada-empleado"></select>
+  <label for="entrada-pin">PIN de 6 d&iacute;gitos</label>
+  <input id="entrada-pin" type="password" inputmode="numeric" maxlength="6" autocomplete="off">
+  <p id="entrada-estado" role="status" aria-live="polite"></p>
+  <div class="acciones">
+    <button id="entrada-confirmar" type="button">Marcar</button>
+    <button id="entrada-cancelar" type="button" class="secundario">Cancelar</button>
+  </div>
+</dialog>
+
 <dialog id="dlg-forma" aria-labelledby="dlg-forma-titulo">
   <h2 id="dlg-forma-titulo">¿Es en efectivo?</h2>
   <p id="dlg-forma-texto"></p>
@@ -381,6 +397,7 @@ if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw-caja.js'
   </div>
 </dialog>
 <script type="module">
+import { CATEGORIAS_GASTO } from '/categorias.js';
 import { totales, agregar, efectivoAlcanza, dolaronesGanados, saldoCanjeable, maximoCanje, MINIMO_REGALO, descuentoDe, TOPE_DESCUENTO, DENOMINACIONES, contadoDe, promoInauguracion, desfaseReloj, anticipoDePedido } from '/venta.js';
 import { abrirCamara } from '/camara.js';
 import {
@@ -392,6 +409,10 @@ import {
 } from '/ticket.js';
 import { imprimirDevolucion } from '/impresora.js';
 import { codigoDeDigitos } from '/code128.js';
+
+// Issue #326: la categoria del gasto sale de la lista compartida con el servidor.
+document.getElementById('retiro-categoria').innerHTML = '<option value="">Elige categoría</option>' + CATEGORIAS_GASTO
+  .map(([clave, nombre]) => `<option value="${clave}">${nombre}</option>`).join('');
 
 // Issue #281: los errores de JavaScript de la caja llegan a los logs del servidor (/api/errores).
 // Sin red no se pueden enviar; el error igual aparece en la consola de la caja.
@@ -405,6 +426,33 @@ window.addEventListener('error', (e) => reportarError(e.error ?? e.message, 'exc
 window.addEventListener('unhandledrejection', (e) => reportarError(e.reason, 'promesa'));
 
 const $ = (id) => document.getElementById(id);
+async function prepararChecador() {
+  const respuesta = await fetch('/api/nomina/checador', { cache: 'no-store' }).catch(() => null);
+  if (!respuesta?.ok) return;
+  const { empleados } = await respuesta.json();
+  $('entrada-empleado').replaceChildren(...empleados.map((e) => new Option(e.nombre, e.id)));
+  $('marcar-entrada').hidden = false;
+}
+$('marcar-entrada').addEventListener('click', () => $('dialogo-entrada').showModal());
+$('entrada-cancelar').addEventListener('click', () => $('dialogo-entrada').close());
+$('entrada-confirmar').addEventListener('click', async () => {
+  $('entrada-confirmar').disabled = true;
+  try {
+    const respuesta = await fetch('/api/nomina/entrada', {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ empleado_id: $('entrada-empleado').value, pin: $('entrada-pin').value }),
+    });
+    const datos = await respuesta.json();
+    if (!respuesta.ok) throw new Error(datos.error || 'No se pudo marcar la entrada.');
+    $('entrada-pin').value = '';
+    $('entrada-estado').textContent = datos.repetida ? 'La entrada ya estaba marcada hoy.' : 'Entrada marcada.';
+  } catch (error) {
+    $('entrada-estado').textContent = error.message;
+  } finally {
+    $('entrada-confirmar').disabled = false;
+  }
+});
+prepararChecador();
 // Nombres de piezas (los escribe la IA o el admin), de socios y motivos: texto, nunca HTML.
 const escapar = (texto) => String(texto ?? '').replace(/[<>&"]/g, (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;' }[c]));
 const pesos = (centavos) => `$${(centavos / 100).toLocaleString('es-MX')}`;
@@ -615,6 +663,7 @@ function pintar() {
   }
   $('pedir-descuento').hidden = subtotal === 0 || (!!descuento && descuento.estado !== 'rechazada');
   if (subtotal === 0) $('descuento-form').hidden = true;
+  guardarTicket();
 
   $('ticket').innerHTML = lineas.map((l, i) => `
     <div class="renglon">
@@ -791,6 +840,30 @@ function dolaronesPedidos() {
 // { id, tipo, valor, subtotal, monto, estado: pendiente|aprobada|rechazada } o null.
 let descuento = null;
 let sondeoDescuento = null;
+
+// Issue #332: el ticket en curso sobrevive a recargar la caja (piezas, descuento pendiente o aprobado,
+// folio y pedido). Se guarda en cada pintar(). Con el mismo folio, cobrar otra vez no duplica la venta.
+// El socio no: su código es de un solo uso y se vuelve a pedir.
+// ponytail: un ticket por computadora; dos pestañas de caja se pisan (la última que pinta gana).
+const CLAVE_TICKET = 'caja-ticket';
+const TICKET_VIGENTE_MS = 4 * 3600_000;   // uno olvidado de otro turno no reaparece
+let ticketRecuperado = false;
+try {
+  const g = JSON.parse(localStorage.getItem(CLAVE_TICKET));
+  if (g && Date.now() - g.guardado < TICKET_VIGENTE_MS && Array.isArray(g.lineas) && g.lineas.length) {
+    lineas = g.lineas;
+    descuento = g.descuento ?? null;
+    idVenta = g.idVenta ?? null;
+    creadoEnVenta = g.creadoEnVenta ?? null;
+    pedidoCargado = g.pedidoCargado ?? null;
+    ticketRecuperado = true;
+  }
+} catch { /* sin memoria: empieza vacío */ }
+function guardarTicket() {
+  try {
+    localStorage.setItem(CLAVE_TICKET, JSON.stringify({ guardado: Date.now(), lineas, descuento, idVenta, creadoEnVenta, pedidoCargado }));
+  } catch { /* sin memoria: no se recupera al recargar */ }
+}
 const descuentoAplicado = () => (descuento?.estado === 'aprobada' ? descuento.monto : 0);
 /** Promo de inauguracion del ticket actual; el servidor la vuelve a calcular al cobrar. */
 // La hora guardada solo vale mientras el ticket conserva su folio (reintento); sin folio, cobrar() fijara la de ahora.
@@ -1917,6 +1990,8 @@ let idRetiro = null;
 const tipoSalida = () => document.querySelector('input[name="tipo-salida"]:checked').value;
 function pintarTipoSalida() {
   const gasto = tipoSalida() === 'gasto';
+  $('retiro-etiqueta-categoria').hidden = !gasto;
+  $('retiro-categoria').hidden = !gasto;
   $('retiro-nota').textContent = gasto
     ? 'Algo que se pagó con dinero del cajón (agua, limpieza, papelería). Hasta $100 no necesita aprobación; guarda el ticket de la compra.'
     : 'Dinero que se saca del cajón para guardarlo (caja fuerte, banco). Se imprime un comprobante para firmar.';
@@ -1929,6 +2004,7 @@ $('abrir-retiro').addEventListener('click', () => {
   idRetiro = crypto.randomUUID();
   document.querySelector('input[name="tipo-salida"][value="gasto"]').checked = true;
   pintarTipoSalida();
+  $('retiro-categoria').value = '';
   $('retiro-importe').value = '';
   $('retiro-motivo').value = '';
   $('retiro-aviso').textContent = '';
@@ -1942,12 +2018,14 @@ $('retiro-registrar').addEventListener('click', async () => {
   const motivo = $('retiro-motivo').value.trim();
   if (importe <= 0) { $('retiro-aviso').textContent = 'Escribe cuánto sale del cajón.'; return; }
   const tipo = tipoSalida();
+  const categoria = $('retiro-categoria').value;
+  if (tipo === 'gasto' && !categoria) { $('retiro-aviso').textContent = 'Elige una categoría.'; return; }
   if (!motivo) { $('retiro-aviso').textContent = tipo === 'gasto' ? 'Escribe en qué se gastó.' : 'Escribe el motivo.'; return; }
   $('retiro-registrar').disabled = true;
   try {
     const r = await fetch('/api/retiros', {
       method: 'POST', headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ id: idRetiro, tipo, caja: cajaActual(), importe, motivo }),
+      body: JSON.stringify({ id: idRetiro, tipo, caja: cajaActual(), importe, motivo, categoria: tipo === 'gasto' ? categoria : undefined }),
     });
     const retiro = await r.json();
     if (!r.ok) { $('retiro-aviso').textContent = retiro.error ?? 'No se pudo registrar.'; return; }
@@ -2057,6 +2135,7 @@ function pintarResultado(c) {
     ${renglon('− Devoluciones', pesos(c.efectivo_devoluciones))}
     ${renglon('− Retiros', pesos(c.retiros))}
     ${renglon('− Gastos', pesos(c.gastos))}
+    ${renglon('− Nómina', pesos(c.nomina ?? 0))}
     ${renglon('= Esperado', pesos(c.efectivo_esperado), 'fuerte')}
     ${renglon('Contado', pesos(c.efectivo_contado), 'fuerte')}
     ${diferencia}
@@ -2123,6 +2202,15 @@ $('corte-reimprimir').addEventListener('click', async () => {
   } catch {
     $('corte-aviso').textContent = 'Sin red: no se pudo traer el último corte.';
   }
+});
+
+// Doble Esc borra el ticket completo, igual que «Cancelar» (Issue #332). Con una ventana abierta, Esc solo la cierra.
+let ultimoEsc = 0;
+document.addEventListener('keydown', (e) => {
+  if (e.key !== 'Escape' || e.repeat || document.querySelector('dialog[open]')) return;
+  if (e.timeStamp - ultimoEsc < 800) { ultimoEsc = 0; $('cancelar').click(); return; }
+  ultimoEsc = e.timeStamp;
+  if (lineas.length) { $('aviso').textContent = 'Esc otra vez para borrar el ticket.'; $('aviso').style.color = '#5b6478'; }
 });
 
 $('cancelar').addEventListener('click', () => {
@@ -2206,6 +2294,11 @@ $('conectar-impresora').addEventListener('click', async () => {
 
 pintarRed();
 await cargarCatalogo();
+if (ticketRecuperado) {
+  pintarDescuento();   // si seguía esperando al dueño, vuelve a preguntar
+  $('aviso').textContent = 'Se recuperó el ticket que estaba en curso. Para borrarlo: «Cancelar venta» o Esc dos veces.';
+  $('aviso').style.color = '#5b6478';
+}
 pintar();
 await pintarRechazadas();
 await pintarResultadosVales();

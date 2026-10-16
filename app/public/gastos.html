@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>El Dolarón — gastos</title>
+<style>
+  :root { --azul:#16366B; --rojo:#D72B32; --linea:#dfe3ea; --suave:#5b6478; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:#f4f6f9; color:#1a1f2b; font-family:system-ui,-apple-system,sans-serif; }
+  header { background:var(--azul); color:white; padding:14px 20px; display:flex; gap:14px; align-items:center; flex-wrap:wrap; }
+  header h1 { margin:0; font-size:19px; flex:1; }
+  header a { color:#FFD447; }
+  main { width:min(900px,100%); margin:auto; padding:16px; display:grid; gap:16px; }
+  section { background:white; border:1px solid var(--linea); border-radius:12px; padding:16px; }
+  h2 { margin:0 0 12px; color:var(--azul); font-size:17px; }
+  form { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px 12px; }
+  label { display:grid; gap:5px; color:var(--suave); font-size:13px; }
+  input,select,textarea,button { font:inherit; }
+  input,select,textarea { width:100%; min-height:44px; padding:10px; border:1px solid var(--linea); border-radius:8px; color:#1a1f2b; background:white; }
+  textarea { resize:vertical; }
+  .ancho { grid-column:1/-1; }
+  button { min-height:44px; padding:9px 14px; border:0; border-radius:8px; background:var(--azul); color:white; font-weight:650; cursor:pointer; }
+  button:disabled { opacity:.6; }
+  button.borrar { min-height:36px; padding:5px 9px; background:white; border:1px solid var(--rojo); color:var(--rojo); font-size:13px; }
+  .barra-mes { display:flex; align-items:end; gap:10px; flex-wrap:wrap; }
+  .barra-mes label { min-width:180px; }
+  #estado { min-height:20px; color:var(--suave); font-size:14px; }
+  #total { margin:14px 0; font-size:26px; font-weight:750; font-variant-numeric:tabular-nums; }
+  #categorias { display:grid; grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); gap:8px; margin:0 0 16px; }
+  .categoria { padding:10px 12px; border:1px solid var(--linea); border-radius:9px; display:flex; justify-content:space-between; gap:8px; }
+  .categoria b { font-variant-numeric:tabular-nums; white-space:nowrap; }
+  .tabla { overflow-x:auto; }
+  table { width:100%; border-collapse:collapse; font-size:14px; }
+  th,td { padding:10px 8px; border-bottom:1px solid var(--linea); text-align:left; vertical-align:top; }
+  th { color:var(--suave); font-size:12px; }
+  td.importe { text-align:right; white-space:nowrap; font-variant-numeric:tabular-nums; }
+  td.acciones { text-align:right; }
+  @media(max-width:560px) {
+    main { padding:10px; gap:10px; }
+    section { padding:13px; }
+    form { grid-template-columns:1fr; }
+    .ancho { grid-column:auto; }
+    table,tbody,tr,td { display:block; width:100%; }
+    thead { display:none; }
+    tr { padding:9px 0; border-bottom:1px solid var(--linea); }
+    td { display:flex; justify-content:space-between; gap:12px; border:0; padding:4px 2px; }
+    td::before { content:attr(data-label); color:var(--suave); font-size:12px; }
+    td.importe,td.acciones { text-align:left; }
+  }
+</style>
+</head>
+<body>
+<header><h1>Gastos</h1><a href="/">Inicio</a></header>
+<main>
+  <section>
+    <h2>Registrar gasto</h2>
+    <form id="formulario">
+      <label>Fecha<input id="fecha" type="date" required></label>
+      <label>Categoría<select id="categoria" required></select></label>
+      <label>Importe ($)<input id="importe" type="number" min="0.01" step="0.01" inputmode="decimal" required></label>
+      <label>Origen<select id="origen"><option value="fuera">Fuera de caja</option><option value="caja">Del cajón</option></select></label>
+      <label id="caja-campo" hidden>Caja<select id="caja"><option>Caja 1</option><option>Caja 2</option><option>Caja 3</option></select></label>
+      <label class="ancho">Nota<textarea id="nota" maxlength="200" rows="2"></textarea></label>
+      <button class="ancho" id="guardar" type="submit">Registrar gasto</button>
+    </form>
+    <p id="estado" role="status" aria-live="polite"></p>
+  </section>
+  <section>
+    <div class="barra-mes"><h2 style="flex:1">Gastos del mes</h2><label>Mes<input id="mes" type="month"></label></div>
+    <div id="total"></div>
+    <div id="categorias"></div>
+    <div class="tabla"><table><thead><tr><th>Fecha</th><th>Categoría</th><th>Nota</th><th>Origen</th><th class="importe">Importe</th><th></th></tr></thead><tbody id="filas"></tbody></table></div>
+  </section>
+</main>
+<script type="module">
+import { CATEGORIAS_GASTO } from '/categorias.js';
+const $ = (id) => document.getElementById(id);
+const nombres = new Map(CATEGORIAS_GASTO);
+const pesos = (centavos) => (centavos / 100).toLocaleString('es-MX', { style:'currency', currency:'MXN' });
+const hoy = new Intl.DateTimeFormat('en-CA', { timeZone:'America/Mexico_City' }).format(new Date());
+$('fecha').value = hoy;
+$('mes').value = hoy.slice(0, 7);
+$('categoria').innerHTML = '<option value="">Elige categoría</option>' + CATEGORIAS_GASTO.map(([clave, nombre]) => `<option value="${clave}">${nombre}</option>`).join('');
+$('origen').addEventListener('change', () => { $('caja-campo').hidden = $('origen').value !== 'caja'; });
+
+async function cargar() {
+  const r = await fetch(`/api/gastos?mes=${encodeURIComponent($('mes').value)}`, { cache:'no-store' });
+  const datos = await r.json();
+  if (!r.ok) throw new Error(datos.error || 'No se pudieron cargar los gastos.');
+  $('total').textContent = `Total: ${pesos(datos.total)}`;
+  $('categorias').innerHTML = datos.por_categoria.map((x) => `<div class="categoria"><span>${escapar(nombres.get(x.categoria) || (x.categoria === 'sin_categoria' ? 'Sin categoría' : x.categoria))}</span><b>${pesos(x.importe)}</b></div>`).join('') || '<span>Sin gastos este mes.</span>';
+  $('filas').innerHTML = datos.gastos.map((g) => `<tr>
+    <td data-label="Fecha">${escapar(g.fecha)}</td><td data-label="Categoría">${escapar(nombres.get(g.categoria) || (g.categoria === 'sin_categoria' ? 'Sin categoría' : g.categoria))}</td>
+    <td data-label="Nota">${escapar(g.nota || '—')}${g.caja ? ` · ${escapar(g.caja)}` : ''}</td><td data-label="Origen">${g.origen === 'caja' ? 'Caja' : 'Fuera'}</td>
+    <td class="importe" data-label="Importe">${pesos(g.importe)}</td><td class="acciones">${g.origen === 'fuera' ? `<button class="borrar" data-borrar="${g.id}">Borrar</button>` : ''}</td></tr>`).join('') || '<tr><td>Sin gastos este mes.</td></tr>';
+}
+function escapar(texto) { return String(texto).replace(/[&<>"']/g, (c) => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' })[c]); }
+$('mes').addEventListener('change', () => cargar().catch((e) => { $('estado').textContent = e.message; }));
+$('filas').addEventListener('click', async (e) => {
+  const boton = e.target.closest('[data-borrar]');
+  if (!boton) return;
+  boton.disabled = true;
+  try {
+    const r = await fetch(`/api/gastos/${encodeURIComponent(boton.dataset.borrar)}`, { method:'DELETE' });
+    const datos = await r.json();
+    if (!r.ok) throw new Error(datos.error);
+    await cargar();
+  } catch (error) { $('estado').textContent = error.message; boton.disabled = false; }
+});
+// Mismo id hasta que se guarde: reintentar con mala señal no registra el gasto dos veces.
+let idPendiente = crypto.randomUUID();
+$('formulario').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const boton = $('guardar'); boton.disabled = true; $('estado').textContent = '';
+  try {
+    const cuerpo = { id:idPendiente, fecha:$('fecha').value, categoria:$('categoria').value, importe:Math.round(Number($('importe').value) * 100), nota:$('nota').value, origen:$('origen').value };
+    if (cuerpo.origen === 'caja') cuerpo.caja = $('caja').value;
+    const r = await fetch('/api/gastos', { method:'POST', headers:{ 'content-type':'application/json' }, body:JSON.stringify(cuerpo) });
+    const datos = await r.json();
+    if (!r.ok) throw new Error(datos.error || 'No se pudo registrar.');
+    idPendiente = crypto.randomUUID();
+    $('importe').value = ''; $('nota').value = ''; $('categoria').value = '';
+    $('estado').textContent = 'Gasto registrado.';
+    $('mes').value = cuerpo.fecha.slice(0, 7);
+    await cargar();
+  } catch (error) { $('estado').textContent = error.message; }
+  finally { boton.disabled = false; }
+});
+cargar().catch((e) => { $('estado').textContent = e.message; });
+</script>
+</body>
+</html>

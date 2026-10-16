@@ -26,6 +26,7 @@
 import { lineasNetas } from './netas.ts';
 import { contadoDe } from '../public/venta.js';
 import { leerUsuario } from './cuentas.ts';
+import { CATEGORIAS_GASTO } from '../public/categorias.js';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const FONDO_POR_OMISION = 50000;
@@ -71,8 +72,10 @@ export async function registrarRetiro(request: Request, env: Env, correo: string
   const caja = await cajaDe(env, correo, cuerpo.caja);
   const importe = Number(cuerpo.importe);
   const motivo = texto(cuerpo.motivo, 200);
+  const categoria = tipo === 'gasto' ? String(cuerpo.categoria ?? '') : '';
   if (!UUID.test(id)) return json({ error: 'Identificador invalido.' }, 400);
   if (!tipo) return json({ error: 'Tipo invalido.' }, 400);
+  if (tipo === 'gasto' && !CATEGORIAS_GASTO.some(([clave]) => clave === categoria)) return json({ error: 'Categoría invalida.' }, 400);
   if (!caja) return json({ error: 'Falta la caja.' }, 400);
   if (!Number.isInteger(importe) || importe <= 0 || importe > 10_000_000) return json({ error: 'Importe invalido.' }, 400);
   if (!motivo) return json({ error: tipo === 'gasto' ? 'Escribe en que se gasto.' : 'Escribe el motivo del retiro.' }, 400);
@@ -83,12 +86,12 @@ export async function registrarRetiro(request: Request, env: Env, correo: string
     }
   }
   await env.DB.prepare(
-    `insert into retiros (id, tipo, caja, cajero, importe, motivo, creado_en) values (?, ?, ?, ?, ?, ?, ?)
+    `insert into retiros (id, tipo, caja, cajero, importe, motivo, creado_en, categoria) values (?, ?, ?, ?, ?, ?, ?, ?)
      on conflict (id) do nothing`,
   )
-    .bind(id, tipo, caja, correo, importe, motivo, new Date().toISOString())
+    .bind(id, tipo, caja, correo, importe, motivo, new Date().toISOString(), categoria)
     .run();
-  const retiro = await env.DB.prepare('select id, tipo, caja, cajero, importe, motivo, creado_en from retiros where id = ?')
+  const retiro = await env.DB.prepare('select id, tipo, caja, cajero, importe, motivo, creado_en, categoria from retiros where id = ?')
     .bind(id)
     .first();
   return json(retiro, 201);
@@ -96,7 +99,7 @@ export async function registrarRetiro(request: Request, env: Env, correo: string
 
 export interface Corte {
   id: string; caja: string; cajero: string; desde: string | null; hasta: string; tickets: number;
-  fondo_inicial: number; efectivo_ventas: number; efectivo_devoluciones: number; retiros: number; gastos: number;
+  fondo_inicial: number; efectivo_ventas: number; efectivo_devoluciones: number; retiros: number; gastos: number; nomina: number;
   efectivo_esperado: number; efectivo_contado: number; diferencia: number;
   tarjeta_sistema: number; tarjeta_terminal: number; transferencias: number; dolarones: number;
   fondo_siguiente: number; entregado: number; conteo: string; notas: string; creado_en: string;
@@ -162,10 +165,10 @@ export async function registrarCorte(request: Request, env: Env, correo: string)
       env.DB.prepare('update devoluciones set corte_id = ? where caja = ? and corte_id is null').bind(id, caja),
       env.DB.prepare(
         `insert into cortes (id, caja, cajero, desde, hasta, tickets, fondo_inicial, efectivo_ventas,
-           efectivo_devoluciones, retiros, gastos, efectivo_esperado, efectivo_contado, diferencia, tarjeta_sistema,
+           efectivo_devoluciones, retiros, gastos, nomina, efectivo_esperado, efectivo_contado, diferencia, tarjeta_sistema,
            tarjeta_terminal, transferencias, dolarones, fondo_siguiente, entregado, conteo, notas, creado_en, fep_por_pagar)
-         select ?1, ?2, ?3, desde, ?4, tickets, fondo, ev, ed, re, ga,
-                fondo + ev - ed - re - ga, ?5, ?5 - (fondo + ev - ed - re - ga), tv - td,
+         select ?1, ?2, ?3, desde, ?4, tickets, fondo, ev, ed, re, ga, no,
+                fondo + ev - ed - re - ga - no, ?5, ?5 - (fondo + ev - ed - re - ga - no), tv - td,
                 ?6, xv - xd, dv - dd, min(?5, ?7), ?5 - min(?5, ?7), ?9, ?8, ?4, fp
          from (select
            (select max(hasta) from cortes where caja = ?2) as desde,
@@ -175,6 +178,7 @@ export async function registrarCorte(request: Request, env: Env, correo: string)
            (select ${dinero('efectivo', NETO)} from ventas where ${CANCELADAS}) + ${devuelto('efectivo')} as ed,
            (select coalesce(sum(importe), 0) from retiros where corte_id = ?1 and tipo = 'retiro') as re,
            (select coalesce(sum(importe), 0) from retiros where corte_id = ?1 and tipo = 'gasto') as ga,
+           (select coalesce(sum(importe), 0) from retiros where corte_id = ?1 and tipo = 'nomina') as no,
            (select ${dinero('tarjeta', COBRADO)} from ventas where ${VIGENTES}) + ${anticipos('tarjeta')} as tv,
            (select ${dinero('tarjeta', NETO)} from ventas where ${CANCELADAS}) + ${devuelto('tarjeta')} as td,
            (select ${dinero('transferencia', COBRADO)} from ventas where ${VIGENTES}) + ${anticipos('transferencia')} as xv,
