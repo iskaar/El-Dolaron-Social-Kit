@@ -91,6 +91,9 @@ test('adelanto y pago de caja siguen restándose en el corte; el pago incluye bo
     bono: 1000, abono: 1000, origen: 'caja', caja: 'Caja 2', nota: 'Bono por ventas',
   });
   assert.equal(pago.status, 201, JSON.stringify(pago.cuerpo));
+  const lista = await t.pedir('/api/nomina', undefined, 'GET');
+  assert.equal(lista.cuerpo.empleados[0].debe, 0);
+  assert.equal(lista.cuerpo.empleados[0].adelantos, 0);
   const corte = await t.pedir('/api/cortes', { id: crypto.randomUUID(), caja: 'Caja 2', efectivo_contado: 47600 });
   assert.equal(corte.status, 201, JSON.stringify(corte.cuerpo));
   assert.equal(corte.cuerpo.nomina, 11000);

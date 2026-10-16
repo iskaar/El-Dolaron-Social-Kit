@@ -1,6 +1,6 @@
 /** Nómina interna (Issue #326): centavos MXN y un libro de movimientos por empleado.
  * Devengo, adelanto y bono son positivos; pago, abono y ajuste son negativos.
- * Se le debe = devengo + pago + ajuste + bono. Adelantos por descontar = adelanto + abono.
+ * Se le debe = devengo + pago + abono + ajuste + bono. Adelantos por descontar = adelanto + abono.
  * Pago y adelanto de caja crean un retiro 'nomina' que el corte resta; fuera no toca el corte.
  */
 import { CAJAS } from './cuentas.ts';
@@ -18,7 +18,7 @@ const fechaValida = (v: unknown): v is string => typeof v === 'string' && /^\d{4
   && !Number.isNaN(Date.parse(`${v}T12:00:00Z`)) && new Date(`${v}T12:00:00Z`).toISOString().slice(0, 10) === v;
 const hoyTienda = (ahora = Date.now()) => new Date(ahora - 6 * 3600_000).toISOString().slice(0, 10);
 const DEBE = `coalesce(sum(case tipo when 'devengo' then importe when 'pago' then importe
-  when 'ajuste' then importe when 'bono' then importe else 0 end), 0)`;
+  when 'abono' then importe when 'ajuste' then importe when 'bono' then importe else 0 end), 0)`;
 const ADELANTOS = `coalesce(sum(case tipo when 'adelanto' then importe when 'abono' then importe else 0 end), 0)`;
 
 interface ConfigNomina {
@@ -174,7 +174,8 @@ async function resumenPeriodo(env: Env, empleadoId: string): Promise<Response> {
   const config = await configNomina(env);
   const pago = await env.DB.prepare(`select fecha from nomina_movimientos where empleado_id=? and tipo='pago'
     order by creado_en desc limit 1`).bind(empleadoId).first<{ fecha: string }>();
-  const desde = pago?.fecha ?? (empleado.creado_en.slice(0, 10) || hoyTienda());
+  const creadoMs = Date.parse(empleado.creado_en);
+  const desde = pago?.fecha ?? (Number.isNaN(creadoMs) ? (empleado.creado_en.slice(0, 10) || hoyTienda()) : hoyTienda(creadoMs));
   const hasta = hoyTienda();
   const inicio = new Date(`${desde}T12:00:00Z`);
   if (pago) inicio.setUTCDate(inicio.getUTCDate() + 1);
