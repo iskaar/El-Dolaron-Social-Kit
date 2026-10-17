@@ -193,6 +193,7 @@
 </div>
 
 <script type="module">
+import { PRECIO_PRENDA } from './ropa.js';
 import { aJpeg } from '/foto.js';
 import { TALLAS_ADULTO, EDADES_NINO, TALLAS_NINO } from '/tallas.js';
 
@@ -356,7 +357,14 @@ function pintarMarcasRecientes(marcas) {
   const lista = document.getElementById('marcas-recientes');
   lista.replaceChildren(...marcas.slice(0, 10).map((marca) => { const opcion = document.createElement('option'); opcion.value = marca; return opcion; }));
 }
-function ponerPrenda(valor) { prendaRopa = valor; guardarPreferencia(CLAVE_PRENDA, valor); }
+function ponerPrenda(valor) {
+  prendaRopa = valor;
+  guardarPreferencia(CLAVE_PRENDA, valor);
+  if (PRECIO_PRENDA[valor]) {
+    precioRopa = PRECIO_PRENDA[valor];
+    document.querySelector(`#precios-ropa [data-valor="${precioRopa}"]`)?.click();
+  }
+}
 function ponerMarca(valor) {
   marcaRopa = valor.trim().slice(0, 40);
   guardarPreferencia(CLAVE_MARCA, marcaRopa);

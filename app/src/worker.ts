@@ -6,6 +6,7 @@
  */
 
 import { analizarBorrador, modeloPorDefecto, type Modelo } from './analisis.ts';
+import { PRENDAS_ROPA, PRECIOS_ROPA } from '../public/ropa.js';
 import { calcularPrecio, ajustarManual, esDestinoBanda, prefijoParaFamilia, MONTOS_BANDA, type Destino } from './precio.ts';
 import { efectivoAlcanza, promoInauguracion } from '../public/venta.js';
 
@@ -108,9 +109,6 @@ const estacionValida = (valor: unknown): valor is string =>
   typeof valor === 'string' && CAJAS.includes(valor);
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const FOTO_MAX_BYTES = 6 * 1024 * 1024;
-// Isaac, Issue #273: precios finales de ropa; el árbol por prenda se define después.
-const PRECIOS_ROPA = [30000, 20000, 15000, 12000, 10000, 8000, 5000];
-const PRENDAS_ROPA = ['Playera', 'Blusa', 'Camisa', 'Sudadera', 'Suéter', 'Chamarra', 'Vestido', 'Falda', 'Short', 'Jeans', 'Pantalón', 'Leggings', 'Pants', 'Pijama', 'Traje de baño', 'Conjunto'];
 const textoCapturaRopa = (valor: unknown) => typeof valor === 'string' && valor.trim().length <= 40 && !/[\r\n]/.test(valor);
 const nombreRopa = (prenda: string, marca: string) => [prenda || 'Ropa', marca].filter(Boolean).join(' ');
 const prendaDeNombre = (nombre: string, marca: string) => {
