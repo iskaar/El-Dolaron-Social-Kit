@@ -59,6 +59,7 @@ test('catalogo: lista solo piezas vendibles, sin campos internos', async () => {
     assert.deepEqual(c.piezas, [{
       codigo: buena, nombre: 'Buena', marca: 'Levis', categoria: 'ropa', talla: null, precio: 25000, precio_lista: 0,
       foto: `https://${HOST}/api/catalogo/foto/${buena}`,
+      recorte: null,
     }]);
   } finally { t.db.close(); }
 });
@@ -74,6 +75,23 @@ test('catalogo: precio_lista solo si es mayor que el precio', async () => {
     assert.equal(lista(mayor), 19900);
     assert.equal(lista(igual), 0);
     assert.equal(lista(menor), 0);
+  } finally { t.db.close(); }
+});
+
+test('catalogo: publica el recorte solo cuando listo y protege la ruta con CORS y vendibilidad', async () => {
+  const t = publica();
+  try {
+    const buena = pieza(t, { nombre: 'Con recorte' });
+    const id = t.db.prepare('select id from productos where codigo=?').get(buena)!.id;
+    t.db.prepare("update productos set recorte_estado='listo' where id=?").run(id);
+    (t.env.FOTOS as any).objetos.set(`recortes/${id}.webp`, new Uint8Array([1]).buffer);
+    const listado = await leer(await t.llamar('/api/catalogo'));
+    assert.match(listado.piezas.find((p: any) => p.codigo === buena).recorte, /\/api\/catalogo\/recorte\//);
+    const r = await t.llamar(`/api/catalogo/recorte/${buena}`);
+    assert.equal(r.status, 200); assert.equal(r.headers.get('content-type'), 'image/webp');
+    assert.equal(r.headers.get('access-control-allow-origin'), 'https://eldolaron.com');
+    assert.equal((await t.llamar('/api/catalogo/recorte/ED-999999')).status, 404);
+    assert.equal((await t.llamar('/api/catalogo/recorte/ED-999999', 'OPTIONS')).status, 204);
   } finally { t.db.close(); }
 });
 

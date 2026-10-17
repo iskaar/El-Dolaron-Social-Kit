@@ -27,7 +27,7 @@ const NOMBRE_INTERNO = `((p.nombre glob '*[0-9]*' and upper(p.nombre) = p.nombre
   or (instr(trim(p.nombre), ' ') > 0 and ${RESTO_NOMBRE} glob '[0-9$]*' and not ${RESTO_NOMBRE} glob '*[A-Za-zÁÉÍÓÚÑáéíóúñ]*'))`;
 const PRESENTABLE = `p.precio > 0 and p.foto_key <> '' and trim(p.nombre) <> '' and not ${NOMBRE_INTERNO}`;
 // Lo mismo que se publica en Mercado Libre, mas presentable: el sitio nunca muestra $0, sin foto ni nombre interno.
-const VENDIBLE = `${PUBLICABLE} and ${PRESENTABLE}`;
+export const VENDIBLE = `${PUBLICABLE} and ${PRESENTABLE}`;
 
 const CORS = {
   'access-control-allow-origin': ORIGEN_SITIO,
@@ -47,6 +47,7 @@ function aPieza(p: Record<string, any>, url: URL) {
     codigo: p.codigo, nombre: p.nombre, marca: p.marca, categoria: p.categoria, talla: p.talla ?? null,
     precio: p.precio, precio_lista: p.precio_lista > p.precio ? p.precio_lista : 0,
     foto: `${url.origin}/api/catalogo/foto/${p.codigo}`,
+    recorte: p.recorte_estado === 'listo' ? `${url.origin}/api/catalogo/recorte/${p.codigo}` : null,
   };
 }
 
@@ -57,12 +58,12 @@ function aPieza(p: Record<string, any>, url: URL) {
  */
 async function destacados(env: Env, url: URL): Promise<Response> {
   if (url.searchParams.get('orden') === 'precio') {
-    const filas = await env.DB.prepare(`select p.codigo, p.nombre, p.marca, p.categoria, p.talla, p.precio, p.precio_lista, p.stock from productos p
+    const filas = await env.DB.prepare(`select p.codigo, p.nombre, p.marca, p.categoria, p.talla, p.precio, p.precio_lista, p.stock, p.recorte_estado from productos p
       where ${VENDIBLE} order by p.precio desc, p.creado_en desc, p.codigo limit ?`).bind(DESTACADOS).all<Record<string, any>>();
     return json({ piezas: filas.results.map((p) => ({ ...aPieza(p, url), ultima: p.stock === 1 })) }, 200, { 'cache-control': 'public, max-age=300' });
   }
   const desde = new Date(Date.now() - DIAS_DESTACADOS * 86_400_000).toISOString();
-  const filas = await env.DB.prepare(`select p.codigo, p.nombre, p.marca, p.categoria, p.talla, p.precio, p.precio_lista from productos p
+  const filas = await env.DB.prepare(`select p.codigo, p.nombre, p.marca, p.categoria, p.talla, p.precio, p.precio_lista, p.recorte_estado from productos p
     left join (select l.codigo, sum(l.cantidad) as n from venta_lineas l join ventas v on v.id = l.venta_id
       where v.cancelada = 0 and v.creado_en >= ? group by l.codigo) s on s.codigo = p.codigo
     where ${VENDIBLE} order by coalesce(s.n, 0) desc, p.creado_en desc, p.codigo limit ?`)
@@ -125,7 +126,7 @@ async function listar(env: Env, url: URL): Promise<Response> {
   const args: unknown[] = [...(categoria === null ? [] : [categoria]), ...(q ? [`%${normalizarBusqueda(q)}%`] : [])];
   const desde = cursor ? ' and (p.creado_en < ? or (p.creado_en = ? and p.codigo > ?))' : '';
   const [filas, cuenta] = await Promise.all([
-    env.DB.prepare(`select p.codigo, p.nombre, p.marca, p.categoria, p.talla, p.precio, p.precio_lista, p.creado_en from productos p
+    env.DB.prepare(`select p.codigo, p.nombre, p.marca, p.categoria, p.talla, p.precio, p.precio_lista, p.creado_en, p.recorte_estado from productos p
       where ${filtro}${desde} order by p.creado_en desc, p.codigo limit ? offset ?`)
       .bind(...args, ...(cursor ? [cursor[1], cursor[1], cursor[2]] : []), POR_PAGINA + 1, cursor ? 0 : (pagina - 1) * POR_PAGINA)
       .all<Record<string, any>>(),
@@ -138,12 +139,12 @@ async function listar(env: Env, url: URL): Promise<Response> {
     { 'cache-control': 'public, max-age=300' });
 }
 
-async function foto(env: Env, codigo: string): Promise<Response> {
+async function foto(env: Env, codigo: string, recorte = false): Promise<Response> {
   const no = () => json({ error: 'Foto no encontrada.' }, 404);
   if (!CODIGO.test(codigo)) return no();
-  const p = await env.DB.prepare(`select p.foto_key from productos p where ${VENDIBLE} and p.codigo = ?`)
-    .bind(codigo).first<{ foto_key: string }>();
-  const objeto = p && await env.FOTOS.get(p.foto_key);
+  const p = await env.DB.prepare(`select p.id, p.foto_key, p.recorte_estado from productos p where ${VENDIBLE} and p.codigo = ?`)
+    .bind(codigo).first<{ id: string; foto_key: string; recorte_estado: string | null }>();
+  const objeto = p && (!recorte || p.recorte_estado === 'listo') && await env.FOTOS.get(recorte ? `recortes/${p.id}.webp` : p.foto_key);
   if (!objeto) return no();
   return new Response(objeto.body, {
     headers: {
@@ -159,14 +160,16 @@ async function foto(env: Env, codigo: string): Promise<Response> {
 export async function catalogoPublico(request: Request, env: Env, url: URL): Promise<Response | null> {
   const { pathname } = url;
   const esFoto = pathname.startsWith('/api/catalogo/foto/');
+  const esRecorte = pathname.startsWith('/api/catalogo/recorte/');
   const esDestacados = pathname === '/api/catalogo/destacados';
-  if (pathname !== '/api/catalogo' && !esFoto && !esDestacados) return null;
+  if (pathname !== '/api/catalogo' && !esFoto && !esRecorte && !esDestacados) return null;
   if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: CORS });
   if (request.method !== 'GET' && request.method !== 'HEAD') {
     return json({ error: 'Método no permitido.' }, 405, { allow: 'GET, HEAD, OPTIONS' });
   }
   try {
     if (esFoto) return await foto(env, pathname.slice('/api/catalogo/foto/'.length));
+    if (esRecorte) return await foto(env, pathname.slice('/api/catalogo/recorte/'.length), true);
     return esDestacados ? await destacados(env, url) : await listar(env, url);
   } catch {
     return json({ error: 'Servicio no disponible.' }, 503);
