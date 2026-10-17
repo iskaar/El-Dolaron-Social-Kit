@@ -44,7 +44,7 @@
   #total { font-size: 44px; font-weight: 800; letter-spacing: -1px; font-variant-numeric: tabular-nums; }
   #original { color: #5b6478; font-size: 18px; font-variant-numeric: tabular-nums; }
   #original:empty { display: none; }
-  #piezas { color: #5b6478; font-size: 13px; margin-bottom: 10px; }
+  #piezas { font-size: 20px; font-weight: 700; margin-bottom: 10px; font-variant-numeric: tabular-nums; }   /* el cajero cuenta lo que tiene enfrente contra esto */
   label { display: block; font-size: 12px; color: #5b6478; margin: 10px 0 4px; }
   select, #efectivo { width: 100%; padding: 12px; font-size: 18px; border: 1px solid var(--linea);
     border-radius: 10px; }
@@ -672,7 +672,13 @@ function pintar() {
       <div>x${l.cantidad}</div>
       <div class="importe">${pesos(l.precio * l.cantidad)}</div>
       <button type="button" data-quitar="${i}" aria-label="Quitar" ${cobrando ? 'disabled' : ''}>✕</button>
-    </div>`).join('');
+    </div>`).join('') + (descuento && descuento.estado !== 'rechazada' ? `
+    <div class="renglon">
+      <div><div class="nombre">Descuento</div><div class="codigo">${descuento.estado === 'aprobada' ? 'aprobado' : 'esperando al dueño'}</div></div>
+      <div></div>
+      <div class="importe">−${pesos(descuento.monto)}</div>
+      <button type="button" data-quitar-descuento aria-label="Quitar descuento" ${cobrando ? 'disabled' : ''}>✕</button>
+    </div>` : '');
 
   // «Usar todos» elegido en el pop-up: el campo sigue al máximo mientras cambie el ticket.
   if (usarTodos && socio) {
@@ -1948,6 +1954,7 @@ $('camara-cerrar').addEventListener('click', cerrarCamara);
 $('dialogo-camara').addEventListener('cancel', (e) => { e.preventDefault(); cerrarCamara(); });
 
 $('ticket').addEventListener('click', (e) => {
+  if (e.target.dataset?.quitarDescuento !== undefined) return $('quitar-descuento').click();
   const i = e.target.dataset?.quitar;
   if (i === undefined) return;
   const linea = lineas[Number(i)];
