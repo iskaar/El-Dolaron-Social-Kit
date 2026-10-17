@@ -653,9 +653,10 @@ async function cargarCatalogo() {
 /* ---------- ticket ---------- */
 
 function pintar() {
-  // Un descuento se aprueba para ese ticket exacto: si cambia, hay que pedir otro.
+  // Uno en % se aprueba para ese ticket exacto: si cambia, hay que pedir otro. Uno en
+  // pesos se queda en el ticket hasta vaciarlo o quitarlo (Isaac, 17/10).
   const subtotal = totales(lineas).subtotal;
-  if (descuento && descuento.subtotal !== subtotal) {
+  if (descuento && (subtotal === 0 || (descuento.tipo !== 'monto' && descuento.subtotal !== subtotal))) {
     const habiaSolicitud = descuento.estado !== 'rechazada';
     descuento = null;
     idVenta = null;
@@ -1206,6 +1207,12 @@ async function cobrar() {
   const usados = dolaronesPedidos();
   if (descuento?.estado === 'pendiente') {
     $('aviso').textContent = 'El descuento sigue esperando al dueño. Espera su respuesta o aprieta «Quitar descuento».';
+    $('aviso').style.color = '#D72B32';
+    return;
+  }
+  // Uno en pesos sobrevive a quitar piezas: si ya pasa del tope, no se cobra a escondidas sin él.
+  if (descuentoAplicado() && 'error' in descuentoDe(descuento, totales(lineas).subtotal)) {
+    $('aviso').textContent = `El descuento pasa del ${TOPE_DESCUENTO}% del ticket. Agrega piezas o aprieta «Quitar descuento».`;
     $('aviso').style.color = '#D72B32';
     return;
   }

@@ -5,7 +5,8 @@
  * (cancelaciones.ts): a distancia desde /cuentas (via 'remoto'), con su PIN en la
  * misma caja (via 'pin') o directo, si quien cobra es el dueno (via 'dueno').
  * Al cobrar, el servidor lo valida otra vez y lo resta: la aprobacion vale para
- * ese ticket exacto (mismo subtotal), una sola venta y hasta 50%.
+ * una sola venta y hasta 50%. Uno en % vale para ese ticket exacto (mismo
+ * subtotal); uno en pesos se queda en el ticket aunque cambie (Isaac, 17/10).
  */
 import { descuentoDe } from '../public/venta.js';
 import { leerUsuario, leerRoles } from './cuentas.ts';
@@ -95,8 +96,8 @@ export async function listarDescuentos(env: Env): Promise<Response> {
 }
 
 /**
- * Al cobrar: la solicitud tiene que estar aprobada, ser de este mismo ticket y
- * no haberse usado. El monto se recalcula aqui, no se le cree a la caja.
+ * Al cobrar: la solicitud tiene que estar aprobada, ser de este mismo ticket
+ * (si es en %) y no haberse usado. El monto se recalcula aqui, no se le cree a la caja.
  */
 export async function validarDescuento(
   env: Env, id: string, subtotal: number,
@@ -109,7 +110,7 @@ export async function validarDescuento(
     return { ok: false, error: `El descuento esta ${fila.estado}: pide otro.`, status: 409 };
   }
   const datos = JSON.parse(fila.datos) as Datos;
-  if (datos.subtotal !== subtotal) {
+  if (datos.tipo !== 'monto' && datos.subtotal !== subtotal) {
     return { ok: false, error: 'El ticket cambio despues de aprobar el descuento: pide otro.', status: 409 };
   }
   const calculo = descuentoDe(datos, subtotal);
