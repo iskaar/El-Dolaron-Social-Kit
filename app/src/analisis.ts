@@ -193,7 +193,7 @@ function normalizar(cruda: Partial<Ficha>): Ficha {
   };
 }
 
-async function conClaude(foto: string, env: Env, instruccion: string, esquema: any = ESQUEMA): Promise<unknown> {
+export async function conClaude(foto: string | string[], env: Env, instruccion: string, esquema: any = ESQUEMA, textoUsuario = 'Identifica este articulo.'): Promise<unknown> {
   // Un reintento (no los 2 de fabrica) cubre un 429/529 en la captura por lotes.
   const cliente = new Anthropic({ apiKey: env.ANTHROPIC_API_KEY, timeout: LIMITES_MS.claude, maxRetries: 1 });
   const respuesta = await cliente.messages.create({
@@ -207,8 +207,8 @@ async function conClaude(foto: string, env: Env, instruccion: string, esquema: a
       {
         role: 'user',
         content: [
-          { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: foto } },
-          { type: 'text', text: 'Identifica este articulo.' },
+          ...(Array.isArray(foto) ? foto : [foto]).map((data) => ({ type: 'image' as const, source: { type: 'base64' as const, media_type: 'image/jpeg' as const, data } })),
+          { type: 'text', text: textoUsuario },
         ],
       },
     ],

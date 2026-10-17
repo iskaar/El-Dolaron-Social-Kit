@@ -625,6 +625,18 @@ async function cargarRecortes() {
       const img = document.createElement('img'); img.src = src; img.alt = alt; img.style.objectFit = 'contain'; imagenes.append(img);
     }
     const cuerpo = document.createElement('div'); const titulo = document.createElement('p'); titulo.textContent = `${p.codigo} · ${p.nombre} · ${p.recorte_estado}`;
+    if (p.recorte_estado === 'listo' && p.recorte_revision === null) titulo.textContent += ' · Revisando…';
+    if (p.recorte_revision && p.recorte_revision !== 'ok') {
+      let revision = {};
+      try { revision = JSON.parse(p.recorte_revision); } catch { /* valor inválido: se conserva visible en el título */ }
+      titulo.textContent = `Revisar: ${(revision.problemas || [p.recorte_revision]).join(', ')}`;
+      const aprobar = document.createElement('button'); aprobar.type = 'button'; aprobar.textContent = 'El recorte está bien';
+      aprobar.addEventListener('click', async () => {
+        const r = await fetch(`/api/recortes/${p.id}/aprobar`, { method: 'POST' });
+        if (r.ok) cargarRecortes(); else titulo.textContent = 'No se pudo actualizar el recorte.';
+      });
+      cuerpo.append(aprobar);
+    }
     const boton = document.createElement('button'); boton.type = 'button';
     boton.textContent = p.recorte_estado === 'error' ? 'Volver a intentar' : 'Usar foto original';
     boton.addEventListener('click', async () => {

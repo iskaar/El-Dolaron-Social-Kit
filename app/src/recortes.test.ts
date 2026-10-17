@@ -1,11 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { procesarRecortes, rutaRecortesAdmin, reiniciarRecorte } from './recortes.ts';
+import { procesarRecortes, revisarRecortes, rutaRecortesAdmin, reiniciarRecorte } from './recortes.ts';
 import { tienda } from './prueba-d1.ts';
+import { catalogoPublico } from './catalogo.ts';
 
 // Las rutas de admin solo aceptan UUID.
 const uuid = (i: number) => `00000000-0000-4000-8000-${String(i).padStart(12, '0')}`;
 const ID0 = uuid(0);
+const catalogo = (env: Env, ruta = '/api/catalogo') => catalogoPublico(new Request(`https://eldolaron.com${ruta}`), env, new URL(`https://eldolaron.com${ruta}`));
 
 function preparar(n = 1) {
   const t = tienda();
@@ -62,4 +64,63 @@ test('recortes: admin limita al dueño, original borra R2 y reintentar devuelve 
     await reiniciarRecorte(t.env as Env, ID0);
     assert.equal(t.db.prepare('select recorte_estado from productos where id=?').get(ID0)?.recorte_estado, null);
   } finally { t.db.close(); }
+});
+
+test('revisión: aprueba y el catálogo publica recorte solo con ok', async () => {
+  const x = preparar();
+  (x.env as any).ANTHROPIC_API_KEY = 'prueba';
+  (x.env as any).IMAGES = { input() { return { transform() { return { async output() { return { response: () => new Response(new Uint8Array([4, 5])) }; } }; } }; } };
+  x.db.prepare(`update productos set recorte_estado='listo',recorte_fecha='2026-10-16' where id=?`).run(ID0);
+  (x.env.FOTOS as any).objetos.set(`recortes/${ID0}.webp`, new Uint8Array([1, 2]).buffer);
+  try {
+    await revisarRecortes(x.env as Env, async () => ({ ok: true, problemas: [], instruccion: '' }));
+    assert.equal(x.db.prepare('select recorte_revision from productos where id=?').get(ID0)?.recorte_revision, 'ok');
+    const lista = await (await catalogo(x.env as Env))!.json() as any;
+    assert.ok(lista.piezas.some((p: any) => p.codigo === 'ED-1' && p.recorte));
+  } finally { x.db.close(); }
+});
+
+test('revisión: marca problemas, lo oculta, lo ordena y aprobar publica', async () => {
+  const x = preparar(2);
+  (x.env as any).ANTHROPIC_API_KEY = 'prueba';
+  (x.env as any).IMAGES = { input() { return { transform() { return { async output() { return new Response(new Uint8Array([4, 5])); } }; } }; } };
+  x.db.prepare("update productos set recorte_estado='listo',recorte_fecha='2026-10-16' where id=?").run(uuid(0));
+  x.db.prepare("update productos set recorte_estado='listo',recorte_fecha='2026-10-15' where id=?").run(uuid(1));
+  for (let i = 0; i < 2; i++) (x.env.FOTOS as any).objetos.set(`recortes/${uuid(i)}.webp`, new Uint8Array([1]).buffer);
+  try {
+    await revisarRecortes(x.env as Env, async () => ({ ok: false, problemas: ['gancho visible'], instruccion: 'Remove the hook.' }));
+    const revision = x.db.prepare('select recorte_revision from productos where id=?').get(ID0)?.recorte_revision;
+    assert.deepEqual(JSON.parse(revision), { problemas: ['gancho visible'], instruccion: 'Remove the hook.' });
+    const publico = await (await catalogo(x.env as Env))!.json() as any;
+    assert.ok(publico.piezas.every((p: any) => p.recorte === null));
+    const listaResp = await rutaRecortesAdmin(new Request('https://x/api/recortes'), x.env as Env, '/api/recortes');
+    assert.equal((await listaResp!.json() as any[])[0].id, ID0);
+    assert.equal((await catalogo(x.env as Env, '/api/catalogo/recorte/ED-1'))!.status, 404);
+    assert.equal((await rutaRecortesAdmin(new Request('https://x', { method: 'POST' }), x.env as Env, `/api/recortes/${ID0}/aprobar`))!.status, 200);
+    assert.ok(((await (await catalogo(x.env as Env))!.json() as any).piezas.find((p: any) => p.codigo === 'ED-1')).recorte);
+  } finally { x.db.close(); }
+});
+
+test('revisión: error de Claude pasa a revisión manual y reintentar limpia la revisión', async () => {
+  const x = preparar();
+  (x.env as any).ANTHROPIC_API_KEY = 'prueba';
+  (x.env as any).IMAGES = images();
+  x.db.prepare("update productos set recorte_estado='listo',recorte_fecha='2026-10-16' where id=?").run(ID0);
+  (x.env.FOTOS as any).objetos.set(`recortes/${ID0}.webp`, new Uint8Array([1]).buffer);
+  try {
+    await revisarRecortes(x.env as Env, async () => { throw new Error('Claude no disponible'); });
+    assert.deepEqual(JSON.parse(x.db.prepare('select recorte_revision from productos where id=?').get(ID0)?.recorte_revision).problemas, ['No se pudo revisar automáticamente']);
+    x.db.prepare("update productos set recorte_estado='error'").run();
+    await rutaRecortesAdmin(new Request('https://x', { method: 'POST' }), x.env as Env, `/api/recortes/${ID0}/reintentar`);
+    assert.equal(x.db.prepare('select recorte_revision from productos where id=?').get(ID0)?.recorte_revision ?? null, null);
+  } finally { x.db.close(); }
+});
+
+test('un recorte listo sin revisión no se publica', async () => {
+  const x = preparar();
+  try {
+    x.db.prepare("update productos set recorte_estado='listo',recorte_revision=null where id=?").run(ID0);
+    const lista = await (await catalogo(x.env as Env))!.json() as any;
+    assert.equal(lista.piezas.find((p: any) => p.codigo === 'ED-1').recorte, null);
+  } finally { x.db.close(); }
 });

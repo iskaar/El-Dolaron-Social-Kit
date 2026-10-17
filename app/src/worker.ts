@@ -48,7 +48,7 @@ import { mensajesApi, responderApi } from './mensajes.ts';
 import { rutaAsistente } from './asistente.ts';
 import { sentenciasVale, buscarVale, valeDeVenta, valeUsadoEnVenta, reimprimirVale, valesAbiertos, emitirCuponManual, porcentajeCupon } from './vales.ts';
 import { catalogoPublico, revisionCatalogo } from './catalogo.ts';
-import { procesarRecortes, reiniciarRecorte, rutaRecortesAdmin } from './recortes.ts';
+import { procesarRecortes, revisarRecortes, reiniciarRecorte, rutaRecortesAdmin } from './recortes.ts';
 import { rutaML, recibirNotificacion, conciliarSeguro, sincronizar, publicacionViva } from './mercadolibre.ts';
 import { pedirDescuento, validarDescuento, listarDescuentos, listarDuenos } from './descuentos.ts';
 import { listarAltoValor, revisarConteo, ajustarExistencia, listarAjustes } from './conteo.ts';
@@ -202,7 +202,7 @@ async function crearBorrador(request: Request, env: Env, ctx: ExecutionContext, 
   // lo que el dueno ya corrigio se quedan; para volver a analizar esta "Reintentar
   // analisis". La camara no manda esta marca: su reenvio si actualiza todo.
   if (formulario.get('solo_foto') === '1') {
-    const { meta } = await env.DB.prepare("update productos set foto_key = ?, actualizado_en = ?, recorte_estado=case when recorte_estado='original' then 'original' else null end, recorte_fecha=null where id = ?")
+    const { meta } = await env.DB.prepare("update productos set foto_key = ?, actualizado_en = ?, recorte_estado=case when recorte_estado='original' then 'original' else null end, recorte_fecha=null, recorte_revision=null where id = ?")
       .bind(fotoKey, new Date().toISOString(), id)
       .run();
     if (meta.changes) await reiniciarRecorte(env, id);
@@ -237,6 +237,7 @@ async function crearBorrador(request: Request, env: Env, ctx: ExecutionContext, 
        talla = excluded.talla,
        foto_key = excluded.foto_key,
        recorte_estado = case when productos.recorte_estado='original' then 'original' else null end,
+       recorte_revision = null,
        recorte_fecha = null,
        estado_analisis = 'pendiente',
        actualizado_en = excluded.actualizado_en
@@ -2119,6 +2120,6 @@ export default {
     // Apartados cuyo plazo llego: vuelven a la venta (Issue #269). Aparte, para que uno no frene al otro.
     ctx.waitUntil(vencerPedidos(env));
     ctx.waitUntil(procesarColaRopa(env));
-    ctx.waitUntil(procesarRecortes(env));
+    ctx.waitUntil((async () => { await procesarRecortes(env); await revisarRecortes(env); })());
   },
 } satisfies ExportedHandler<Env>;

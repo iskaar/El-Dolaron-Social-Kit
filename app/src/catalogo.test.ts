@@ -83,7 +83,7 @@ test('catalogo: publica el recorte solo cuando listo y protege la ruta con CORS 
   try {
     const buena = pieza(t, { nombre: 'Con recorte' });
     const id = t.db.prepare('select id from productos where codigo=?').get(buena)!.id;
-    t.db.prepare("update productos set recorte_estado='listo' where id=?").run(id);
+    t.db.prepare("update productos set recorte_estado='listo',recorte_revision='ok' where id=?").run(id);
     (t.env.FOTOS as any).objetos.set(`recortes/${id}.webp`, new Uint8Array([1]).buffer);
     const listado = await leer(await t.llamar('/api/catalogo'));
     assert.match(listado.piezas.find((p: any) => p.codigo === buena).recorte, /\/api\/catalogo\/recorte\//);
