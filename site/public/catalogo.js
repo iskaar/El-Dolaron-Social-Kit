@@ -60,6 +60,8 @@
       const { piezas } = await response.json();
       const conFoto = (Array.isArray(piezas) ? piezas : []).filter((p) => /^https?:\/\//.test(p.foto || ""));
       if (conFoto.length < 3) return;
+      // Un Worker anterior a #339 ignora ?orden=precio y manda los más vendidos sin `ultima`: no son «los más buscados».
+      if (!conFoto.every((p) => typeof p.ultima === "boolean")) return;
       const lista = seccion.querySelector(".wanted-grid");
       for (const pieza of conFoto) {
         const li = document.createElement("li");
