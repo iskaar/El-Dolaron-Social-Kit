@@ -86,7 +86,8 @@
         img.alt = "";
         img.loading = "lazy";
         img.decoding = "async";
-        img.addEventListener("error", () => li.remove());
+        // Una foto rota quita su cartel; con menos de 3 la sección vuelve a ocultarse.
+        img.addEventListener("error", () => { li.remove(); if (lista.children.length < 3) seccion.hidden = true; });
         img.src = pieza.foto;
         const zoom = document.createElement("span");
         zoom.className = "poster-zoom";
