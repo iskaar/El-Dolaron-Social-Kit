@@ -57,9 +57,10 @@ p { line-height: 1.6; }
 .button-yellow { background: var(--yellow); }
 .button-paper { background: var(--white); }
 /* WhatsApp (#345): verde de la marca con su logo en círculo blanco; borde y sombra azul como todos los botones. */
-.button-whatsapp { background: linear-gradient(180deg, #3BE07A, var(--wa) 55%, #1FC25C); color: var(--wa-ink); }
-.wa-logo { display: grid; place-items: center; flex: none; width: 28px; height: 28px; border-radius: 50%; background: var(--white); box-shadow: 0 0 0 1.5px var(--wa-ink); }
-.wa-logo svg { width: 18px; height: 18px; fill: var(--wa); }
+.button-whatsapp { text-align: center; background: linear-gradient(180deg, #3BE07A, var(--wa) 55%, #1FC25C); color: var(--wa-ink); }
+/* `.button > span` (más arriba) lo vuelve inline-block: por eso el selector lleva .button. */
+.button .wa-logo { display: grid; place-items: center; flex: none; width: 28px; height: 28px; border-radius: 50%; background: var(--white); box-shadow: 0 0 0 1.5px var(--wa-ink); }
+.button .wa-logo svg { width: 18px; height: 18px; fill: var(--wa); }
 .button-navy { background: var(--navy); color: var(--white); }
 .text-link { font-weight: 800; line-height: 1.5; }
 .button > span, .text-link > span, .portal-link > span { display: inline-block; transition: transform 180ms ease; }
@@ -270,7 +271,7 @@ dd { margin: 0; line-height: 1.5; }
   .button-paper:hover { background: var(--yellow); }
   .button-navy:hover { background: var(--red); }
   .button-whatsapp:hover { background: var(--wa); }
-  .button:hover > span, .text-link:hover > span, .portal-link:hover > span { transform: translate(2px, -2px); }
+  .button:hover > span:not(.wa-logo), .text-link:hover > span, .portal-link:hover > span { transform: translate(2px, -2px); }
   .chip:hover { background: var(--yellow); }
   .group-card:hover { rotate: 0deg; translate: 0 -4px; }
   .group-card:hover .group-go { background: var(--navy); color: var(--white); }
@@ -341,7 +342,7 @@ dd { margin: 0; line-height: 1.5; }
   .piece-price s { display: block; margin-left: 0; font-size: 12px; }
   .piece-link { font-size: 12px; gap: 6px; padding-inline: 8px 6px; }
   .piece-link .wa-logo { width: 24px; height: 24px; }
-  .piece-link .wa-logo svg { width: 15px; height: 15px; }
+  .button.piece-link .wa-logo svg { width: 15px; height: 15px; }
   .chips-wrap { margin-inline: -20px; -webkit-mask-image: linear-gradient(90deg, #000 0, #000 calc(100% - 38px), transparent 100%); mask-image: linear-gradient(90deg, #000 0, #000 calc(100% - 38px), transparent 100%); }
   .chips { flex-wrap: nowrap; overflow-x: auto; padding: 0 38px 6px 20px; scrollbar-width: none; }
   .chip { flex-shrink: 0; font-size: 14px; padding-inline: 10px; }
