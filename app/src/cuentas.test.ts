@@ -37,8 +37,8 @@ test('cada rol entra a lo suyo y el dueno a todo', () => {
 test('una pantalla o API que nadie listo es solo del dueno', () => {
   assert.deepEqual(permiso('/pantalla-nueva', 'GET'), []);
   assert.deepEqual(permiso('/api/algo-nuevo', 'POST'), []);
-  assert.equal(permiso('/api/ropa-ia', 'GET'), permiso('/api/borradores', 'GET'));
-  assert.equal(permiso('/api/ropa-ia/abc/aceptar', 'POST'), permiso('/api/borradores/abc', 'PATCH'));
+  assert.deepEqual(permiso('/api/ropa-ia', 'GET'), ['capturista']);
+  assert.deepEqual(permiso('/api/ropa-ia/abc/aceptar', 'POST'), ['capturista']);
   assert.equal(puede(usuario(['cajero', 'capturista']), permiso('/pantalla-nueva', 'GET')), false);
 });
 

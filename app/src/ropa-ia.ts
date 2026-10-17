@@ -8,16 +8,17 @@ type EnvRopa = Env & { DB: D1Database; FOTOS: R2Bucket };
 export async function procesarColaRopa(env: EnvRopa, analizar = analizarFotoRopa): Promise<void> {
   const activa = await env.DB.prepare("select valor from config where clave='ropa_ia_activo'").first<{ valor: string }>();
   if (activa?.valor !== '1') return;
-  const { results } = await env.DB.prepare(`select id, precio, ropa_ia_sugerencia from productos indexed by productos_ropa_ia_pendiente
-    where ropa_ia_estado is null and categoria='ropa' and nombre='Ropa' and foto_key<>'' and stock>0
-    order by creado_en limit 10`).all<{ id: string; precio: number; ropa_ia_sugerencia: string | null }>();
+  const { results } = await env.DB.prepare(`select id, precio, foto_key, ropa_ia_sugerencia from productos indexed by productos_ropa_ia_pendiente
+    where ropa_ia_estado is null and categoria='ropa' and nombre='Ropa' and foto_key<>'' and stock>0 and propietario='dolaron'
+    order by creado_en limit 10`).all<{ id: string; precio: number; foto_key: string; ropa_ia_sugerencia: string | null }>();
+  if (!results.length) return;
   const { results: marcas } = await env.DB.prepare("select distinct marca from productos where categoria='ropa' and marca<>'' limit 200").all<{ marca: string }>();
   const conocidas = new Set([...MARCAS_ROPA, ...marcas.map((m) => m.marca.toLocaleLowerCase())].map((m) => m.toLocaleLowerCase()));
   for (const fila of results) {
     const anterior = fila.ropa_ia_sugerencia ? JSON.parse(fila.ropa_ia_sugerencia) : {};
     const intentos = Number(anterior.intentos || 0);
     try {
-      const foto = await env.FOTOS.get(`fotos/${fila.id}.jpg`);
+      const foto = await env.FOTOS.get(fila.foto_key);
       if (!foto) throw new Error('Foto no encontrada en R2.');
       const s = await analizar(await foto.arrayBuffer(), env);
       const banderas: string[] = [];
@@ -45,13 +46,13 @@ export async function procesarColaRopa(env: EnvRopa, analizar = analizarFotoRopa
 export async function rutaRopaAdmin(request: Request, env: EnvRopa, pathname: string): Promise<Response | null> {
   if (pathname === '/api/ropa-ia' && request.method === 'GET') {
     const { results } = await env.DB.prepare(`select id,nombre,marca,precio,ropa_ia_estado,ropa_ia_sugerencia,ropa_ia_fecha
-      from productos where ropa_ia_estado='revisar' and categoria='ropa' order by ropa_ia_fecha limit 200`).all();
+      from productos where ropa_ia_estado='revisar' and categoria='ropa' and propietario='dolaron' order by ropa_ia_fecha limit 200`).all();
     return resp(results);
   }
   const match = pathname.match(/^\/api\/ropa-ia\/([0-9a-f-]{36})\/(aceptar|corregir|descartar)$/);
   if (!match || request.method !== 'POST') return null;
   const [, id, accion] = match;
-  const fila = await env.DB.prepare("select nombre, marca, ropa_ia_sugerencia from productos where id=? and categoria='ropa' and ropa_ia_estado='revisar'").bind(id).first<{ nombre:string; marca:string; ropa_ia_sugerencia:string }>();
+  const fila = await env.DB.prepare("select nombre, marca, ropa_ia_sugerencia from productos where id=? and categoria='ropa' and propietario='dolaron' and ropa_ia_estado='revisar'").bind(id).first<{ nombre:string; marca:string; ropa_ia_sugerencia:string }>();
   if (!fila) return resp({ error: 'La sugerencia no está pendiente de revisión.' }, 409);
   const s = JSON.parse(fila.ropa_ia_sugerencia) as SugerenciaRopa & { intentos:number };
   if (accion === 'descartar') await env.DB.prepare("update productos set ropa_ia_estado='descartado', ropa_ia_fecha=? where id=? and ropa_ia_estado='revisar'").bind(ahora(), id).run();
