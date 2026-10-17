@@ -238,6 +238,18 @@ test('si el ticket cambia despues de aprobar, la aprobacion ya no vale (aprobada
   assert.equal((await venta({ descuento_id: conPin })).status, 201);
 });
 
+test('uno en pesos sigue valiendo si el ticket cambia, mientras no pase del tope', async () => {
+  const { db, pedidoResuelto, venta } = await montar();
+  const id = await pedidoResuelto({ tipo: 'monto', valor: 7000 }, true);   // aprobado sobre $250
+  const r = await venta({ descuento_id: id, efectivo: 100000 }, 3);       // cobrado sobre $750
+  assert.equal(r.status, 201, JSON.stringify(r.cuerpo));
+  assert.deepEqual({ ...db.prepare('select total, descuento from ventas').get() }, { total: 68000, descuento: 7000 });
+
+  const tope = await pedidoResuelto({ tipo: 'monto', valor: 12500 }, true); // 50% de $250
+  db.prepare(`update productos set precio = 20000 where id = ?`).run(PRODUCTO);
+  assert.equal((await venta({ descuento_id: tope })).status, 400);          // ya seria 62.5% del ticket
+});
+
 test('el servidor recalcula: una aprobacion manipulada por encima del tope no se cobra', async () => {
   const { db, pedidoResuelto, venta } = await montar();
   const id = await pedidoResuelto({ valor: 10 }, true);

@@ -948,7 +948,7 @@ async function registrarVenta(request: Request, env: Env, ctx: ExecutionContext,
   }
 
   const subtotal = preparado.lineas.reduce((suma, l) => suma + l.precio * l.cantidad, 0);
-  // Un descuento solo entra si el dueno lo aprobo para este mismo ticket (Issue #119).
+  // Un descuento solo entra si el dueno lo aprobo (Issue #119); validarDescuento dice para que ticket.
   const descuentoId = venta.descuento_id ? String(venta.descuento_id) : null;
   let descuento = 0;
   if (descuentoId) {
