@@ -1,6 +1,8 @@
 (() => {
   const WHATSAPP = "https://wa.me/524445437754";
   const API = "https://dolarones.eldolaron.com";
+  // El mismo ícono del botón de WhatsApp de la portada (index.html).
+  const WHATSAPP_ICONO = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M20 11.5a8 8 0 0 1-11.7 7.1L4 20l1.4-4.3A8 8 0 1 1 20 11.5Z"/><path d="M8.7 7.7c-.8 2.8 2.8 6.4 5.6 5.6l1-1.1-2-1.3-.9.8a6.6 6.6 0 0 1-2.2-2.2l.8-.9-1.3-2-1 1.1Z"/></svg>';
   // Copia de app/public/categorias.js: el sitio no importa código de otras carpetas.
   const CATEGORIAS = [
     ["", "Todo"], ["ropa", "Ropa y calzado"], ["accesorios", "Bolsas y accesorios"],
@@ -19,9 +21,9 @@
     }).format(cents / 100);
   }
 
-  function consulta(pieza) {
+  function consulta(pieza, quiero = "me interesa") {
     const talla = pieza.talla ? ` talla ${pieza.talla}` : "";
-    const texto = `Hola, me interesa ${pieza.nombre}${talla} (${pieza.codigo}) de ${precio(pieza.precio)}. ¿Sigue disponible?`;
+    const texto = `Hola, ${quiero} ${pieza.nombre}${talla} (${pieza.codigo}) de ${precio(pieza.precio)}. ¿Sigue disponible?`;
     return `${WHATSAPP}?text=${encodeURIComponent(texto)}`;
   }
 
@@ -36,47 +38,107 @@
 
   if (typeof module !== "undefined") module.exports = { precio, consulta, apiBase };
 
-  // Portada: las piezas más vendidas (o más nuevas) como estampas. Si la API falla
-  // o trae menos de 4, se queda el collage fijo. ponytail: posiciones fijas para 5; la etiqueta de ropa ocupa la esquina libre.
-  async function destacados(arte) {
+  // Los precios con su precio de lista tachado, igual en carteles, tarjetas y visor.
+  function pintarPrecio(nodo, pieza) {
+    nodo.textContent = precio(pieza.precio);
+    if (pieza.precio_lista > pieza.precio) {
+      const lista = document.createElement("s");
+      const aviso = document.createElement("span");
+      aviso.className = "sr-only";
+      aviso.textContent = "Precio de lista ";
+      lista.append(aviso, precio(pieza.precio_lista));
+      nodo.append(lista);
+    }
+  }
+
+  // «Los más buscados» (Issue #339): lo de mayor precio que sigue a la venta, en carteles de «Se busca».
+  // Si la API falla o trae menos de 3 con foto, la sección se queda oculta.
+  async function buscados(seccion) {
     try {
-      const response = await fetch(`${apiBase(location.search)}/api/catalogo/destacados`, { headers: { accept: "application/json" } });
+      const response = await fetch(`${apiBase(location.search)}/api/catalogo/destacados?orden=precio`, { headers: { accept: "application/json" } });
       if (!response.ok) return;
       const { piezas } = await response.json();
-      if (!Array.isArray(piezas) || piezas.length < 4) return;
-      const capa = document.createElement("div");
-      capa.className = "stickers";
-      for (const pieza of piezas.slice(0, 5)) {
-        if (!/^https?:\/\//.test(pieza.foto || "")) continue;
-        const a = document.createElement("a");
-        a.className = "sticker";
-        a.href = consulta(pieza);
-        a.setAttribute("aria-label", `Preguntar por WhatsApp: ${pieza.nombre}, ${precio(pieza.precio)}`);
+      const conFoto = (Array.isArray(piezas) ? piezas : []).filter((p) => /^https?:\/\//.test(p.foto || ""));
+      if (conFoto.length < 3) return;
+      // Un Worker anterior a #339 ignora ?orden=precio y manda los más vendidos sin `ultima`: no son «los más buscados».
+      if (!conFoto.every((p) => typeof p.ultima === "boolean")) return;
+      const lista = seccion.querySelector(".wanted-grid");
+      for (const pieza of conFoto) {
+        const li = document.createElement("li");
+        const cartel = document.createElement("article");
+        cartel.className = "poster";
+        cartel.setAttribute("aria-label", pieza.ultima ? `${pieza.nombre}, última pieza` : pieza.nombre);
+        const cabeza = document.createElement("p");
+        cabeza.className = "poster-head";
+        cabeza.textContent = "Se busca";
+        const nombre = document.createElement("h3");
+        nombre.className = "poster-name";
+        nombre.textContent = pieza.nombre;
+        // Marca (lo que vende «calidad americana») o, si no hay, la categoría.
+        const rubro = pieza.marca || (CATEGORIAS.find(([k]) => k === pieza.categoria) || [])[1];
+        const linea = document.createElement("p");
+        linea.className = "poster-kicker";
+        linea.textContent = rubro && rubro !== "Otros" ? rubro : "";
+        // La foto abre el visor grande (el mismo del catálogo): las fotos de celular se ven recortadas en cuadro.
+        const foto = document.createElement("button");
+        foto.type = "button";
+        foto.className = "poster-photo";
+        foto.setAttribute("aria-label", `Ver foto completa: ${pieza.nombre}`);
         const img = new Image();
         img.alt = "";
+        img.loading = "lazy";
         img.decoding = "async";
+        // Una foto rota quita su cartel; con menos de 3 la sección vuelve a ocultarse.
+        img.addEventListener("error", () => { li.remove(); if (lista.children.length < 3) seccion.hidden = true; });
         img.src = pieza.foto;
-        const etiqueta = document.createElement("span");
-        etiqueta.className = "sticker-price";
-        etiqueta.textContent = precio(pieza.precio);
+        const zoom = document.createElement("span");
+        zoom.className = "poster-zoom";
+        zoom.setAttribute("aria-hidden", "true");
+        zoom.textContent = "Ver foto";
+        foto.append(img, zoom);
+        if (pieza.ultima) {
+          // Sello de goma sobre la foto: lo dice el servidor cuando queda una sola pieza.
+          const sello = document.createElement("span");
+          sello.className = "poster-stamp";
+          sello.setAttribute("aria-hidden", "true");
+          sello.textContent = "¡Última pieza!";
+          foto.append(sello);
+        }
+        foto.addEventListener("click", () => abrirVisor(pieza, foto));
+        const visto = document.createElement("p");
+        visto.className = "poster-seen";
+        visto.textContent = "Visto por última vez en Jardín Hidalgo 129";
+        const pie = document.createElement("div");
+        pie.className = "poster-foot";
+        const valor = document.createElement("p");
+        valor.className = "poster-price";
+        valor.textContent = precio(pieza.precio);
         if (pieza.precio_lista > pieza.precio) {
+          // Precio de lista tachado y el ahorro en pesos, calculado con los mismos centavos que manda la API.
+          const antes = document.createElement("span");
+          antes.className = "poster-was";
           const lista = document.createElement("s");
           const aviso = document.createElement("span");
           aviso.className = "sr-only";
           aviso.textContent = "Precio de lista ";
           lista.append(aviso, precio(pieza.precio_lista));
-          etiqueta.append(lista);
+          const ahorro = document.createElement("b");
+          ahorro.textContent = `Ahorras ${precio(pieza.precio_lista - pieza.precio)}`;
+          antes.append(lista, ahorro);
+          valor.append(antes);
         }
-        a.append(img, etiqueta);
-        capa.append(a);
+        const apartar = document.createElement("a");
+        apartar.className = "button button-navy poster-ask";
+        apartar.href = consulta(pieza, "quiero apartar");
+        apartar.setAttribute("aria-label", `Apartar por WhatsApp: ${pieza.nombre}`);
+        apartar.innerHTML = WHATSAPP_ICONO;
+        apartar.append("Apartar por WhatsApp");
+        pie.append(valor, apartar);
+        cartel.append(cabeza, linea, nombre, foto, visto, pie);
+        li.append(cartel);
+        lista.append(li);
       }
-      // Solo cambia el collage cuando las fotos ya cargaron: nunca deja marcos vacíos.
-      const espera = new Promise((listo) => setTimeout(listo, 6000));
-      await Promise.race([Promise.allSettled([...capa.querySelectorAll("img")].map((img) => img.decode().catch(() => img.closest("a").remove()))), espera]);
-      for (const img of capa.querySelectorAll("img")) if (!img.complete || !img.naturalWidth) img.closest("a").remove();
-      if (capa.children.length < 4) return;
-      arte.append(capa);
-      arte.classList.add("en-vivo");
+      seccion.hidden = false;
     } catch {}
   }
   // Pausar la cinta que corre (Issue #241, WCAG «pausar, detener, ocultar»).
@@ -85,8 +147,8 @@
     const pausada = pausa.closest(".ticker").classList.toggle("pausada");
     pausa.setAttribute("aria-pressed", String(pausada));
   });
-  const arte = typeof document !== "undefined" && document.querySelector(".hero-art");
-  if (arte) destacados(arte);
+  const cartel = typeof document !== "undefined" && document.getElementById("buscados");
+  if (cartel) buscados(cartel);
   const root = typeof document !== "undefined" && document.getElementById("catalogo");
   if (!root) return;
 
@@ -124,15 +186,6 @@
     if (text !== undefined) node.textContent = text;
     return node;
   };
-
-  function pintarPrecio(nodo, pieza) {
-    nodo.textContent = precio(pieza.precio);
-    if (pieza.precio_lista > pieza.precio) {
-      const lista = el("s", "", precio(pieza.precio_lista));
-      lista.prepend(el("span", "sr-only", "Precio de lista "));
-      nodo.append(lista);
-    }
-  }
 
   function abrirVisor(pieza, disparador) {
     if (!dialog) return;
@@ -181,12 +234,13 @@
       photo.addEventListener("click", () => abrirVisor(pieza, photo));
     }
     const body = el("div", "piece-body");
-    body.append(el("h3", "", pieza.nombre));
+    // ponytail: la ropa se captura sin nombre propio; hasta tener marca/equipo dice «Ropa americana».
+    body.append(el("h3", "", pieza.nombre === "Ropa" ? "Ropa americana" : pieza.nombre));
     if (pieza.marca) body.append(el("p", "piece-brand", pieza.marca));
     if (pieza.talla) body.append(el("p", "piece-size", `Talla ${pieza.talla}`));
     const price = el("p", "piece-price");
     pintarPrecio(price, pieza);
-    const ask = el("a", "button button-yellow piece-ask", "Preguntar por WhatsApp");
+    const ask = el("a", "piece-link", "Preguntar por WhatsApp ↗");
     ask.href = consulta(pieza);
     ask.setAttribute("aria-label", `Preguntar por WhatsApp: ${pieza.nombre}`);
     body.append(price, ask);

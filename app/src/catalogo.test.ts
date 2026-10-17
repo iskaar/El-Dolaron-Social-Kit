@@ -191,6 +191,23 @@ test('catalogo destacados: mas vendido en 14 dias y vendible primero; completa c
   } finally { t.db.close(); }
 });
 
+test('catalogo destacados ?orden=precio (Issue #339): lo de mayor precio que sigue a la venta', async () => {
+  const t = publica();
+  try {
+    pieza(t, { nombre: 'Barata', precio: 5000 });
+    pieza(t, { nombre: 'Cara', precio: 150000, categoria: 'mascotas', stock: 1 });
+    pieza(t, { nombre: 'Agotada', precio: 900000, stock: 0 });
+    pieza(t, { nombre: 'Media', precio: 99900 });
+    const r = await t.llamar('/api/catalogo/destacados?orden=precio');
+    assert.equal(r.headers.get('access-control-allow-origin'), 'https://eldolaron.com');
+    const piezas = (await leer(r)).piezas;
+    assert.deepEqual(piezas.map((p: any) => p.nombre), ['Cara', 'Media', 'Barata']);
+    // Solo la marca de última pieza; la existencia no sale.
+    assert.deepEqual(piezas.map((p: any) => p.ultima), [true, false, false]);
+    assert.ok(piezas.every((p: any) => !('stock' in p)));
+  } finally { t.db.close(); }
+});
+
 test('catalogo (Issue #220): nombre interno o sin foto o sin precio no sale en lista ni en destacados', async () => {
   const t = publica();
   try {

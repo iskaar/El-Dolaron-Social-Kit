@@ -1,17 +1,16 @@
 @font-face { font-family: "Anton"; src: url("assets/fonts/anton-400.woff2") format("woff2"); font-display: swap; }
-@font-face { font-family: "Abril Fatface"; src: url("assets/fonts/abril-fatface-400.woff2") format("woff2"); font-display: swap; }
-@font-face { font-family: "Alfa Slab One"; src: url("assets/fonts/alfa-slab-one-400.woff2") format("woff2"); font-display: swap; }
+@font-face { font-family: "Rye"; src: url("assets/fonts/rye-400.woff2") format("woff2"); font-display: swap; }
 @font-face { font-family: "Fraunces"; src: url("assets/fonts/fraunces-normal.woff2") format("woff2"); font-weight: 100 900; font-display: swap; }
 @font-face { font-family: "Fraunces"; src: url("assets/fonts/fraunces-italic.woff2") format("woff2"); font-weight: 100 900; font-style: italic; font-display: swap; }
 @font-face { font-family: "Archivo"; src: url("assets/fonts/archivo-variable.woff2") format("woff2"); font-weight: 100 900; font-display: swap; }
-/* Tabloide de ofertas: la guía completa vive en site/DESIGN.md. */
+/* La guía de diseño vive en site/DESIGN.md. */
 :root {
   --navy: #16366B;
   --red: #D72B32;
-  --red-text: #B3141B;   /* rojo para letra chica: 4.5:1 o más sobre amarillo, papel y cupón (Issue #241) */
+  --red-text: #B3141B;   /* rojo para letra chica: 4.5:1 o más sobre blanco, amarillo y cupón; en carteles y etiquetas de cartón da 3:1 o más para precios grandes (Issues #241, #339) */
   --yellow: #FFD447;
   --white: #FFFFFF;
-  --paper: #EDE6D3;
+  --mist: #F2F5FA;
   --shadow: rgb(22 54 107 / .26);
   --display: "Fraunces", Georgia, serif;
   --display-axes: "SOFT" 100, "WONK" 1;
@@ -23,11 +22,7 @@
 html { scroll-behavior: smooth; }
 body {
   margin: 0;
-  background-color: var(--paper);
-  background-image:
-    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 .35 0 0 0 0 .28 0 0 0 0 .16 0 0 0 .22 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url%28%23n%29'/%3E%3C/svg%3E"),
-    repeating-linear-gradient(90deg, transparent 0 230px, var(--paper) 230px 256px),
-    repeating-linear-gradient(0deg, rgb(22 54 107 / .075) 0 1px, transparent 1px 7px);
+  background: var(--white);
 }
 a { color: inherit; text-underline-offset: .25em; }
 a:focus-visible, button:focus-visible { outline: 3px solid var(--red); outline-offset: 4px; }
@@ -55,7 +50,6 @@ p { line-height: 1.6; }
   clip-path: polygon(0 8%, 3% 0, 22% 5%, 48% 0, 74% 6%, 97% 0, 100% 10%, 98% 52%, 100% 92%, 96% 100%, 70% 95%, 45% 100%, 20% 94%, 2% 100%, 0 88%, 2% 47%); }
 .tape-yellow { background: var(--yellow); color: var(--navy); rotate: -2deg; }
 .tape-navy { background: var(--navy); color: var(--white); rotate: 1.2deg; }
-.tape-red { background: var(--red); color: var(--white); rotate: 2deg; }
 .button { display: inline-flex; align-items: center; justify-content: center; gap: 12px; min-height: 54px; padding: 14px 22px; border: 2px solid var(--navy); border-radius: 2px; color: var(--navy); box-shadow: 4px 4px 0 var(--navy); text-decoration: none; font-size: 16px; font-weight: 800; line-height: 1.3; transition: transform 150ms ease, box-shadow 150ms ease, background-color 150ms ease; }
 .button svg { width: 24px; height: 24px; }
 .button-ticket, .button-yellow { background: var(--yellow); }
@@ -77,48 +71,56 @@ h2 { font-family: var(--display); font-variation-settings: var(--display-axes); 
 .hero { position: relative; overflow: hidden; display: grid; grid-template-columns: minmax(0, 1.08fr) minmax(0, .92fr); align-items: center; gap: 32px; padding: 36px max(56px, calc((100vw - 1280px) / 2)) 52px; }
 .hero-copy { position: relative; z-index: 1; min-width: 0; }
 .hero-kicker { font-size: 18px; margin-bottom: 14px; }
-.hero h1 { font-size: clamp(52px, 8vw, 118px); font-weight: 400; line-height: 1; }
-.ransom { display: block; filter: drop-shadow(3px 4px 0 rgb(22 54 107 / .28)); }
-.ransom-el { display: block; margin: 0 0 .04em .06em; font-size: .5em; }
-.ransom-main { display: flex; }
-.cut { --d: 0ms; display: inline-block; padding: .08em .13em .02em; margin-right: .035em; line-height: .95;
-  clip-path: polygon(3% 5%, 28% 0, 61% 4%, 100% 0, 96% 36%, 100% 74%, 97% 100%, 63% 96%, 31% 100%, 0 97%, 4% 60%, 0 27%); }
-.cut:nth-child(even) { clip-path: polygon(0 2%, 39% 5%, 72% 0, 97% 4%, 100% 45%, 96% 100%, 58% 95%, 22% 100%, 2% 96%, 5% 51%); }
-.cut-a { font-family: "Abril Fatface", serif; background: var(--white); color: var(--navy); rotate: -6deg; }
-.cut-b { --d: 50ms; font-family: "Anton", sans-serif; background: var(--red); color: var(--white); rotate: 4deg; }
-.cut-c { --d: 120ms; font-family: "Alfa Slab One", serif; background: var(--navy); color: var(--yellow); rotate: -4deg; font-size: 1.04em; }
-.cut-d { --d: 170ms; font-family: "Abril Fatface", serif; background: var(--yellow); color: var(--navy); rotate: 3deg; }
-.cut-e { --d: 220ms; font-family: "Anton", sans-serif; background: var(--white); color: var(--red); rotate: -3deg; }
-.cut-f { --d: 270ms; font-family: "Archivo", sans-serif; font-weight: 900; background: var(--red); color: var(--white); rotate: 5deg; }
-.cut-g { --d: 320ms; font-family: "Alfa Slab One", serif; background: #D8CDAF; color: var(--navy); rotate: -5deg; }
-.cut-h { --d: 370ms; font-family: "Abril Fatface", serif; background: var(--navy); color: var(--white); rotate: 2deg; padding-top: .2em; font-size: 1.06em; }
-.cut-i { --d: 420ms; font-family: "Anton", sans-serif; background: var(--yellow); color: var(--red); rotate: -4deg; }
+.hero-title { max-width: 11ch; font-family: var(--display); font-variation-settings: var(--display-axes); font-weight: 900; font-size: clamp(48px, 6.2vw, 96px); line-height: .98; letter-spacing: -.03em; }
+.hero-title em { color: var(--red); font-style: italic; }
 .hero-sub { margin-top: 16px; font-size: clamp(20px, 2.1vw, 30px); }
 .intro { max-width: 470px; margin-top: 18px; font-size: 18px; font-weight: 500; }
 .hero-stamp { display: inline-flex; flex-direction: column; margin-top: 24px; padding: 8px 14px 6px; border: 3px solid var(--red); border-radius: 4px; color: var(--red-text); font-family: "Anton", sans-serif; font-size: 22px; line-height: 1.1; text-transform: uppercase; rotate: -3deg; }
 .hero-stamp span { font-family: "Archivo", sans-serif; font-size: 12px; font-weight: 800; letter-spacing: .14em; }
 .hero-art { position: relative; min-width: 0; }
-.hero-art > img { width: 100%; mix-blend-mode: multiply; transition: opacity 600ms ease; }
-.new-stamp { position: absolute; right: 0; top: 2%; display: grid; place-items: center; width: 118px; height: 118px; background: var(--red); color: var(--white); font-family: "Anton", sans-serif; font-size: 22px; line-height: 1; text-align: center; text-transform: uppercase; text-decoration: none; rotate: 12deg;
-  clip-path: polygon(50% 0, 61% 12%, 75% 7%, 79% 21%, 93% 25%, 88% 39%, 100% 50%, 88% 61%, 93% 75%, 79% 79%, 75% 93%, 61% 88%, 50% 100%, 39% 88%, 25% 93%, 21% 79%, 7% 75%, 12% 61%, 0 50%, 12% 39%, 7% 25%, 21% 21%, 25% 7%, 39% 12%); }
+.hero-art > img { width: 100%; }
 
-/* Estampas en vivo: las piezas más vendidas, pegadas como fotos instantáneas */
-.hero-art.en-vivo > img { opacity: 0; }
-.stickers { position: absolute; inset: 0; }
-.sticker { position: absolute; display: block; padding: 7px 7px 34px; background: var(--white); box-shadow: 3px 5px 0 var(--shadow); transition: rotate 180ms ease, translate 180ms ease; }
-.sticker img { width: 100%; aspect-ratio: 1; object-fit: contain; background: #E6DEC8; }
-.sticker::before { content: ""; position: absolute; z-index: 1; top: -10px; left: 50%; width: 70px; height: 22px; translate: -50% 0; rotate: -5deg; background: rgb(255 212 71 / .78); }
-.sticker-price { position: absolute; right: 6px; bottom: 3px; padding: 2px 9px 1px; background: var(--yellow); font-family: "Anton", sans-serif; font-size: clamp(16px, 1.6vw, 22px); line-height: 1.2; rotate: 4deg; box-shadow: 2px 2px 0 var(--shadow); }
-.sticker-price s { margin-left: 6px; color: var(--red-text); font-family: "Archivo", sans-serif; font-size: 12px; font-weight: 700; }
-.sticker:nth-child(1) { left: 3%; top: 3%; width: 31%; rotate: -6deg; }
-.sticker:nth-child(2) { left: 34%; top: 0; width: 31%; rotate: 3deg; }
-.sticker:nth-child(3) { left: 64%; top: 14%; width: 29%; rotate: -3deg; }
-.sticker:nth-child(4) { left: 26%; top: 48%; width: 31%; rotate: -4deg; }
-.sticker:nth-child(5) { left: 61%; top: 53%; width: 31%; rotate: 5deg; }
-.price-tag, .new-stamp { z-index: 3; }
-.price-tag { position: absolute; left: -4%; bottom: 6%; width: 150px; rotate: -10deg; transform-origin: 50% 4%; filter: drop-shadow(5px 9px 6px rgb(22 54 107 / .32)); transition: rotate 220ms ease; }
-.price-tag img { width: 100%; }
-.new-stamp { transition: rotate 180ms ease; }
+/* Se busca (Issue #339): carteles del viejo oeste clavados en la pared, con lo de mayor precio.
+   Papel envejecido = grano + manchas + orillas tostadas; orilla rasgada con clip-path, sombra en el <li>. */
+.wanted { padding-block: 64px 72px; scroll-margin-top: 16px; }
+.wanted-grid { list-style: none; margin: 40px 0 0; padding: 0; display: flex; flex-wrap: wrap; justify-content: center; gap: 44px 32px; }
+.wanted-grid li { flex: 0 0 calc((100% - 64px) / 3); filter: drop-shadow(2px 7px 7px rgb(60 40 15 / .32)); rotate: -.8deg; }
+.wanted-grid li:nth-child(3n + 2) { rotate: .7deg; }
+.wanted-grid li:nth-child(3n) { rotate: -.3deg; }
+.poster { --ink: #2B2116; position: relative; display: flex; flex-direction: column; height: 100%; padding: 15% 11% 11%; color: var(--ink); text-align: center;
+  background: url("assets/cartel-se-busca.webp") center / 100% 100% no-repeat; }
+/* Cabeza del clavo sobre el agujero que trae la hoja (49 % del ancho, 5 % del alto). */
+.poster::before { content: ""; position: absolute; top: 5%; left: 49%; width: 13px; height: 13px; translate: -50% -50%; border-radius: 50%; background: radial-gradient(circle at 35% 35%, #CFC8BC, #6B6256 60%, #3B342C); box-shadow: 1px 2px 2px rgb(0 0 0 / .4); }
+.poster-head { font-family: "Rye", Georgia, serif; font-size: clamp(34px, 3.6vw, 52px); font-weight: 400; line-height: 1; letter-spacing: .02em; text-transform: uppercase; text-shadow: 1px 1px 0 rgb(43 33 22 / .18); }
+.poster-kicker { margin-top: 10px; font-family: "Archivo", sans-serif; font-size: 12px; font-weight: 800; letter-spacing: .14em; line-height: 1.2; text-transform: uppercase; }
+.poster-kicker:empty { display: none; }
+.poster-name { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden; min-height: 2.4em; margin: 4px 4px 12px; font-family: var(--display); font-variation-settings: var(--display-axes); font-weight: 800; font-size: 20px; line-height: 1.2; overflow-wrap: anywhere; text-wrap: balance; }
+/* La foto es un botón (abre el visor grande); el chip «Ver foto» avisa que se puede tocar. */
+.poster-photo { position: relative; display: block; width: 100%; aspect-ratio: 1; padding: 0; overflow: hidden; border: 3px solid var(--ink); background: var(--white); cursor: pointer; }
+.poster-photo img { width: 100%; height: 100%; object-fit: cover; filter: sepia(.12) contrast(1.04); }
+.poster-zoom { position: absolute; right: 6px; bottom: 6px; padding: 4px 8px 3px; border: 1.5px solid var(--ink); background: rgb(246 238 216 / .94); color: var(--ink); font: 800 12px/1.1 "Archivo", sans-serif; letter-spacing: .04em; text-transform: uppercase; pointer-events: none; }
+/* Sello de goma «¡Última pieza!» (Issue #339): tinta roja gastada, chueco, encima de la foto. */
+.poster-stamp { position: absolute; top: 14px; left: 10px; padding: 8px 14px 5px; border: 3px solid var(--red); outline: 1.5px solid var(--red); outline-offset: 2px; border-radius: 4px;
+  background: rgb(246 238 216 / .9); color: var(--red-text); font-family: "Anton", sans-serif; font-size: clamp(22px, 2.2vw, 30px); line-height: 1.1; letter-spacing: .05em; text-transform: uppercase; rotate: -8deg; pointer-events: none;
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.55' numOctaves='2'/%3E%3CfeColorMatrix values='0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 -1.3 1.65'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url%28%23n%29'/%3E%3C/svg%3E");
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.55' numOctaves='2'/%3E%3CfeColorMatrix values='0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 -1.3 1.65'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url%28%23n%29'/%3E%3C/svg%3E"); }
+.poster-seen { margin-top: 10px; font-family: var(--display); font-style: italic; font-size: 15px; line-height: 1.3; text-wrap: balance; }
+.poster-foot { display: flex; flex-direction: column; align-items: center; gap: 14px; margin-top: auto; padding-top: 14px; }
+.poster-price { display: flex; flex-direction: column; align-items: center; gap: 6px; color: var(--red-text); font-family: "Anton", sans-serif; font-size: 46px; line-height: 1; }
+.poster-was { display: flex; flex-wrap: wrap; justify-content: center; align-items: baseline; gap: 2px 10px; color: var(--ink); font-family: "Archivo", sans-serif; font-size: 15px; font-weight: 700; line-height: 1.2; }
+.poster-was b { font-weight: 800; }
+.poster-ask { min-height: 52px; padding: 8px 18px; gap: 8px; font-size: 15px; }
+.poster-ask svg { width: 20px; height: 20px; flex: none; }
+.wanted-hint { display: none; }
+/* El rojo de foco casi no se distingue del papel tostado: sobre el cartel el foco es azul. */
+.poster a:focus-visible, .poster button:focus-visible { outline-color: var(--navy); }
+.wanted-grid:focus-visible { outline: 3px solid var(--navy); outline-offset: -3px; }
+
+/* Etiqueta de cartón (Issue #339): la etiqueta es imagen y el precio es texto rojo, así sirve para cualquier precio. */
+.tag { display: flex; flex-direction: column; align-items: center; justify-content: center; aspect-ratio: 2 / 1; padding: 0 4% 0 27%; color: var(--red-text); font-family: "Anton", sans-serif; line-height: 1; rotate: -3deg;
+  background: url("assets/etiqueta-vacia.webp") center / 100% 100% no-repeat; filter: drop-shadow(1px 3px 3px rgb(60 40 15 / .3)); }
+.tag small { margin-top: .12em; color: var(--navy); font-family: "Archivo", sans-serif; font-size: max(11px, .3em); font-weight: 800; letter-spacing: .06em; text-transform: uppercase; }
+
 /* Franja: dos cintas cruzadas, la de enfrente corre como marquesina */
 .ticker { position: relative; z-index: 2; height: 96px; margin-top: -28px; overflow: clip; }
 .ticker-back, .ticker-band { position: absolute; left: -5%; width: 110%; }
@@ -149,7 +151,7 @@ h2 { font-family: var(--display); font-variation-settings: var(--display-axes); 
 .group-go { justify-self: start; margin-top: 10px; padding: 6px 12px 5px; border: 2px solid var(--navy); border-radius: 3px; font-family: "Anton", sans-serif; font-size: 15px; letter-spacing: .06em; text-transform: uppercase; rotate: -2deg; }
 
 /* Novedades: recortes pegados con cinta */
-.catalog { padding-block: 44px 80px; scroll-margin-top: 16px; }
+.catalog { padding-block: 44px 80px; scroll-margin-top: 16px; background: var(--mist); }
 .catalog-search { margin-top: 26px; max-width: 680px; }
 .search-label { display: block; margin-bottom: 6px; font-size: 13px; font-weight: 800; letter-spacing: .1em; text-transform: uppercase; }
 .search-row { display: flex; flex-wrap: wrap; gap: 10px; }
@@ -162,18 +164,17 @@ h2 { font-family: var(--display); font-variation-settings: var(--display-axes); 
 .chip[aria-pressed="true"] { background: var(--red); color: var(--white); }
 .catalog-status { margin-top: 22px; min-height: 26px; font-size: 15px; font-weight: 700; }
 .catalog-grid { list-style: none; margin: 18px 0 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(214px, 1fr)); gap: 34px 26px; }
-.piece { position: relative; display: flex; flex-direction: column; padding: 10px 10px 14px; background: var(--white); box-shadow: 3px 4px 0 var(--shadow); rotate: -1deg; transition: rotate 180ms ease, translate 180ms ease; }
-.piece:nth-child(3n + 2) { rotate: 1.2deg; }
-.piece:nth-child(3n) { rotate: -.4deg; }
-.piece::before { content: ""; position: absolute; z-index: 1; top: -11px; left: 50%; width: 82px; height: 24px; translate: -50% 0; rotate: -4deg; background: rgb(255 212 71 / .78); }
-.piece-photo { position: relative; display: block; width: 100%; padding: 0; border: 0; aspect-ratio: 1; overflow: hidden; background: #E6DEC8; cursor: pointer; }
-.piece-photo img { width: 100%; height: 100%; object-fit: contain; }
+.piece { position: relative; display: flex; flex-direction: column; overflow: hidden; background: var(--white); border: 2px solid var(--navy); box-shadow: 4px 4px 0 var(--navy); transition: translate 150ms ease, box-shadow 150ms ease; }
+.piece-photo { position: relative; display: block; width: 100%; padding: 0; border: 0; border-bottom: 2px solid var(--navy); aspect-ratio: 4 / 5; overflow: hidden; background: #F1F1EF; cursor: pointer; }
+.piece-photo img { width: 100%; height: 100%; object-fit: cover; }
 .piece-zoom { position: absolute; right: 6px; bottom: 6px; padding: 3px 7px 2px; border: 1.5px solid var(--navy); background: rgb(255 255 255 / .92); color: var(--navy); font: 800 11px/1.1 "Archivo", sans-serif; letter-spacing: .04em; text-transform: uppercase; pointer-events: none; }
-.piece-body { display: flex; flex-direction: column; flex: 1; gap: 4px; padding: 12px 4px 0; }
+.piece-body { display: flex; flex-direction: column; flex: 1; gap: 2px; padding: 12px 14px 14px; }
 .piece h3 { font-size: 16px; font-weight: 700; line-height: 1.3; overflow-wrap: anywhere; }
 .piece-brand { font-size: 13px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; opacity: .8; }
 .piece-size { font-size: 14px; font-weight: 800; }
-.piece-price { align-self: flex-start; margin-top: auto; padding: 4px 12px 2px; background: var(--yellow); font-family: "Anton", sans-serif; font-size: 30px; line-height: 1.15; rotate: -3deg; translate: 0 6px; }
+.piece-price { align-self: flex-start; margin-top: auto; padding-top: 8px; font-family: "Anton", sans-serif; font-size: 30px; line-height: 1.15; }
+/* Objetivo táctil de 44 px (NN/g, WCAG 2.5.8): antes era una línea de texto de 14 px. */
+.piece-link { display: flex; align-items: center; justify-content: center; min-height: 44px; margin-top: 12px; padding: 8px 10px; border: 2px solid var(--navy); background: var(--white); box-shadow: 2px 2px 0 var(--navy); font-size: 14px; font-weight: 800; text-align: center; text-decoration: none; }
 .piece-price s { margin-left: 8px; color: var(--red-text); font-family: "Archivo", sans-serif; font-size: 14px; font-weight: 700; }
 .piece-ask { min-height: 44px; margin-top: 16px; padding: 8px 10px; background: var(--navy); color: var(--white); box-shadow: none; font-size: 14px; }
 .catalog-more { margin: 40px auto 0; display: flex; }
@@ -186,23 +187,18 @@ h2 { font-family: var(--display); font-variation-settings: var(--display-axes); 
 .piece-dialog-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
 .piece-dialog-title { font-family: var(--display); font-variation-settings: var(--display-axes); font-weight: 900; font-size: 22px; line-height: 1.15; }
 .piece-dialog-close { min-height: 40px; padding: 6px 14px; font-size: 14px; box-shadow: 2px 2px 0 var(--navy); }
-.piece-dialog-photo { background: #E6DEC8; display: grid; place-items: center; max-height: 62vh; overflow: hidden; }
+.piece-dialog-photo { background: #F1F1EF; display: grid; place-items: center; max-height: 62vh; overflow: hidden; }
 .piece-dialog-img { width: auto; max-width: 100%; max-height: 62vh; object-fit: contain; }
 .piece-dialog-foot { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; }
 .piece-dialog-meta { width: 100%; font-size: 14px; font-weight: 800; }
-.piece-dialog-price { margin-top: 0; translate: 0 0; }
+.piece-dialog-price { margin-top: 0; padding: 4px 12px 2px; background: var(--yellow); }
 .piece-dialog-ask { margin-top: 0; padding-inline: 16px; }
 
 /* Ropa: etiquetas de precio colgadas */
 .ropa { padding-block: 72px 80px; scroll-margin-top: 16px; }
-.tiers { list-style: none; margin: 40px 0 28px; padding: 0; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 32px; align-items: start; }
-.tiers li { display: flex; justify-content: center; }
-.tiers li:nth-child(2) { margin-top: 18px; }
-.tiers li:nth-child(4) { margin-top: 12px; }
-.tiers img { width: min(100%, 230px); mix-blend-mode: multiply; rotate: -3deg; transform-origin: 50% 6%; transition: rotate 220ms ease; }
-.tiers li:nth-child(2) img { rotate: 2deg; }
-.tiers li:nth-child(3) img { rotate: -1.5deg; }
-.tiers li:nth-child(4) img { rotate: 3deg; }
+.tiers { list-style: none; margin: 40px 0 28px; padding: 0; display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 28px 24px; }
+.tiers .tag { font-size: clamp(34px, 3.4vw, 50px); transition: rotate 220ms ease; }
+.tiers .tag:nth-child(even) { rotate: 2deg; }
 
 /* Grupos: cupones para recortar sobre tinta azul */
 .groups { background: var(--navy) radial-gradient(rgb(255 255 255 / .07) 1.2px, transparent 1.4px) 0 0 / 9px 9px; color: var(--white); }
@@ -271,24 +267,17 @@ dd { margin: 0; line-height: 1.5; }
   .button-navy:hover { background: var(--red); }
   .button:hover > span, .text-link:hover > span, .portal-link:hover > span { transform: translate(2px, -2px); }
   .chip:hover { background: var(--yellow); }
-  .price-tag:hover { rotate: -3deg; }
-  .sticker:hover { z-index: 2; rotate: 0deg; translate: 0 -4px; }
   .group-card:hover { rotate: 0deg; translate: 0 -4px; }
   .group-card:hover .group-go { background: var(--navy); color: var(--white); }
   .chip[aria-pressed="true"]:hover { background: var(--red); }
-  .piece:hover { rotate: 0deg; translate: 0 -4px; }
+  .piece:hover { translate: -2px -2px; box-shadow: 7px 7px 0 var(--navy); }
+  .piece-link:hover { color: var(--red-text); }
   .piece-ask:hover { box-shadow: none; transform: none; background: var(--red); }
-  .tiers li img:hover { rotate: 6deg; }
-  .new-stamp:hover { rotate: 20deg; }
+  .tiers .tag:hover { rotate: 0deg; }
 }
 @media (prefers-reduced-motion: no-preference) {
-  .cut { animation: cut-drop 560ms var(--d) cubic-bezier(.2, .9, .3, 1.3) backwards; }
-  .hero-sub, .new-stamp { animation: cut-drop 560ms 560ms cubic-bezier(.2, .9, .3, 1.3) backwards; }
-  .price-tag { animation: tag-swing 1400ms 700ms cubic-bezier(.3, 1.6, .5, 1) backwards; }
+  .hero-sub { animation: cut-drop 560ms 560ms cubic-bezier(.2, .9, .3, 1.3) backwards; }
   .ticker-track { animation: ticker 38s linear infinite; }
-  .sticker { animation: cut-drop 520ms 150ms cubic-bezier(.2, .9, .3, 1.3) backwards; }
-  .sticker:nth-child(2) { animation-delay: 220ms; } .sticker:nth-child(3) { animation-delay: 290ms; } .sticker:nth-child(4) { animation-delay: 360ms; } .sticker:nth-child(5) { animation-delay: 430ms; }
-  @keyframes tag-swing { from { rotate: 14deg; opacity: 0; } 30% { opacity: 1; } }
   @keyframes ticker { to { translate: -50% 0; } }
   .visit-details.motion-enter, .dolarones-symbol.motion-enter { animation: paper-settle 650ms cubic-bezier(.2, .9, .3, 1.3); }
   @keyframes cut-drop { from { opacity: 0; translate: 0 -36px; scale: 1.15; } }
@@ -297,22 +286,24 @@ dd { margin: 0; line-height: 1.5; }
 @media (max-width: 1100px) {
   .wrap { width: calc(100% - 64px); }
   .hero { padding: 32px 32px 44px; gap: 20px; }
-  .hero h1 { font-size: clamp(48px, 8.6vw, 96px); }
+  .hero-title { font-size: clamp(44px, 7vw, 80px); }
   .header nav { gap: 20px; }
-  .tiers { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 28px; }
+  .tiers { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .groups-layout, .visit-layout { gap: 48px; }
   .dolarones-symbol { width: 220px; margin-right: 8px; }
+}
+@media (max-width: 1000px) {
+  /* Con tres por fila los carteles de 761 a 1000 px quedan angostos: de dos en dos. */
+  .wanted-grid li { flex-basis: calc((100% - 32px) / 2); }
 }
 @media (max-width: 900px) {
   .hero { grid-template-columns: 1fr; padding: 24px 20px 32px; gap: 8px; }
   .hero-kicker { font-size: 15px; }
-  .hero h1 { font-size: clamp(36px, 12.2vw, 88px); }
+  .hero-title { font-size: clamp(40px, 11vw, 72px); }
   .intro { font-size: 16px; }
   .hero .button { padding-inline: 14px; }
   .hero-stamp { font-size: 19px; }
   .hero-art { width: min(100%, 520px); margin: 8px auto 0; }
-  .new-stamp { width: 88px; height: 88px; font-size: 17px; }
-  .price-tag { width: 104px; left: -2%; bottom: -3%; }
   .ticker { height: 80px; margin-top: -18px; }
   .ticker-pause { top: 18px; right: 8px; width: 30px; height: 30px; }
   .ticker-track { font-size: 17px; }
@@ -333,17 +324,24 @@ dd { margin: 0; line-height: 1.5; }
   .portal-link { padding: 9px 11px; }
   h2 { font-size: clamp(40px, 12vw, 64px); }
   .catalog { padding-block: 16px 64px; }
+  .wanted { padding-block: 44px 52px; }
+  /* Fila deslizable con el siguiente cartel asomando: un cartel a la vez se lee completo en 390 px. */
+  .wanted-hint { display: block; margin-top: 18px; font-size: 14px; font-weight: 800; }
+  .wanted-grid { flex-wrap: nowrap; justify-content: flex-start; gap: 18px; margin: 4px -20px 0; padding: 14px 20px 30px; overflow-x: auto; scroll-snap-type: x mandatory; scroll-padding-inline: 20px; overscroll-behavior-x: contain; }
+  .wanted-grid li, .wanted-grid li:nth-child(n) { flex: 0 0 min(80vw, 330px); scroll-snap-align: start; rotate: 0deg; }
+  .poster { padding-bottom: 14%; }
+  .poster-ask { align-self: stretch; }
   .catalog-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 26px 14px; }
-  .piece { padding: 7px 7px 10px; }
+  .piece-body { padding: 10px 10px 12px; }
   .piece h3 { font-size: 14px; }
-  .piece-price { font-size: 24px; padding-inline: 8px; }
+  .piece-price { font-size: 24px; }
   .piece-price s { display: block; margin-left: 0; font-size: 12px; }
-  .piece-ask { font-size: 12px; padding-inline: 6px; }
+  .piece-link { font-size: 13px; }
   .chips-wrap { margin-inline: -20px; -webkit-mask-image: linear-gradient(90deg, #000 0, #000 calc(100% - 38px), transparent 100%); mask-image: linear-gradient(90deg, #000 0, #000 calc(100% - 38px), transparent 100%); }
   .chips { flex-wrap: nowrap; overflow-x: auto; padding: 0 38px 6px 20px; scrollbar-width: none; }
   .chip { flex-shrink: 0; font-size: 14px; padding-inline: 10px; }
   .ropa { padding-block: 52px 56px; }
-  .tiers { gap: 20px 14px; }
+  .tiers { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px 14px; }
   .group-card { grid-template-columns: 52px 1fr; }
   .coupon-stub { font-size: 16px; }
   .coupon-body { padding: 14px 16px 12px; margin: 8px 10px 8px 8px; }
@@ -354,12 +352,18 @@ dd { margin: 0; line-height: 1.5; }
   .visit-details { padding: 38px 26px 30px; }
   .footer { flex-direction: column; align-items: flex-start; }
 }
-@media (max-width: 420px) {
+@media (max-width: 480px) {
+  .header { gap: 12px; }
   .brand { width: 124px; }
   .header nav { gap: 10px; }
   .visit-link { display: none; }
-  .portal-link { white-space: nowrap; }
+  .header nav { font-size: 11px; letter-spacing: .04em; }
+  .portal-link { white-space: nowrap; padding-inline: 9px; }
+  .portal-link > span { display: none; }
   .hero .button { gap: 6px; padding-inline: 10px; }
+}
+@media (max-width: 340px) {
+  .catalog-link { display: none; }
 }
 @media (prefers-reduced-motion: reduce) {
   html { scroll-behavior: auto; }
