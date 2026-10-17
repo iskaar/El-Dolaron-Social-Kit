@@ -32,6 +32,7 @@
     border: 1px solid var(--linea); border-radius: 12px; padding: 14px; margin-bottom: 14px;
     content-visibility: auto; contain-intrinsic-size: auto 260px; }   /* el navegador no pinta las que no se ven */
   .ficha img { width: 100%; aspect-ratio: 1; object-fit: cover; border-radius: 8px; background: #eceff4; }
+  .recorte-par { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
   .retomar { display: block; margin-top: 6px; text-align: center; font-size: 13px; font-weight: 600;
     color: var(--azul); border: 1px solid var(--linea); border-radius: 8px; padding: 7px; cursor: pointer; }
   .retomar:hover { background: #eef1f6; }
@@ -75,6 +76,11 @@
   <section class="panel" id="ropa-ia">
     <h2>Revisar ropa</h2>
     <div id="ropa-ia-lista"></div>
+  </section>
+
+  <section class="panel solo-dueno" id="recortes">
+    <h2>Recortes</h2>
+    <div id="recortes-lista"></div>
   </section>
 
   <!-- Issue #115: solo el dueno (la API tambien lo exige). -->
@@ -605,6 +611,30 @@ async function cargarRopaIA() {
   }
 }
 await cargarRopaIA();
+
+async function cargarRecortes() {
+  const raiz = document.getElementById('recortes-lista');
+  const respuesta = await fetch('/api/recortes');
+  if (!respuesta.ok) { raiz.textContent = 'No se pudieron cargar los recortes.'; return; }
+  const piezas = await respuesta.json(); raiz.replaceChildren();
+  if (!piezas.length) { raiz.textContent = 'No hay recortes recientes ni errores.'; return; }
+  for (const p of piezas) {
+    const ficha = document.createElement('article'); ficha.className = 'ficha';
+    const imagenes = document.createElement('div'); imagenes.className = 'recorte-par';
+    for (const [src, alt] of [[`/api/catalogo/recorte/${p.codigo}`, 'Recorte'], [`/api/foto/${p.id}`, 'Foto original']]) {
+      const img = document.createElement('img'); img.src = src; img.alt = alt; img.style.objectFit = 'contain'; imagenes.append(img);
+    }
+    const cuerpo = document.createElement('div'); const titulo = document.createElement('p'); titulo.textContent = `${p.codigo} · ${p.nombre} · ${p.recorte_estado}`;
+    const boton = document.createElement('button'); boton.type = 'button';
+    boton.textContent = p.recorte_estado === 'error' ? 'Volver a intentar' : 'Usar foto original';
+    boton.addEventListener('click', async () => {
+      const r = await fetch(`/api/recortes/${p.id}/${p.recorte_estado === 'error' ? 'reintentar' : 'original'}`, { method: 'POST' });
+      if (r.ok) cargarRecortes(); else titulo.textContent = 'No se pudo actualizar el recorte.';
+    });
+    cuerpo.append(titulo, boton); ficha.append(imagenes, cuerpo); raiz.append(ficha);
+  }
+}
+await cargarRecortes();
 </script>
 </body>
 </html>

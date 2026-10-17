@@ -100,6 +100,7 @@
   "kv_namespaces": [
     { "binding": "WHATSAPP_EVENTOS", "id": "d6cbf480b05d47c7a17d53d8e4b461a8" }
   ],
+  "images": { "binding": "IMAGES" },
   "r2_buckets": [
     {
       "binding": "FOTOS",

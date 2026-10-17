@@ -51,6 +51,7 @@ El logo anterior (símbolo D con franjas) y la insignia circular están retirado
   y «Apartar por WhatsApp». Aparece solo con 3 o más; con 3 a 5 las filas quedan centradas. En celular es una fila
   deslizable con el siguiente cartel asomando. El foco de teclado sobre el cartel es azul.
 - **Tarjetas de catálogo** (`.piece`): rectas, borde azul y sombra dura; foto 4:5, precio en Anton, precio de lista tachado.
+- Las fotos con recorte transparente se contienen sobre fondo claro en catálogo y se imprimen sin marco sobre el papel de los carteles.
 - **Etiquetas de cartón** (`.tag`, sección de ropa): imagen en blanco (`etiqueta-vacia.webp`) y el precio como texto rojo,
   así sirve para cualquier monto. Solo precios confirmados.
 - **Cupones** (`.group-card`): talón perforado, bordes dentados con `mask` y doble filete, sobre fondo azul.

@@ -25,7 +25,7 @@ const { join } = require("node:path");
 const vm = require("node:vm");
 const fuente = readFileSync(join(__dirname, "../site/public/catalogo.js"), "utf8");
 class Nodo {
-  constructor() { this.children = []; this.listeners = {}; this.attrs = {}; this.hidden = false; this.textContent = ""; this.value = ""; this.open = false; this.focused = false; }
+  constructor() { this.children = []; this.listeners = {}; this.attrs = {}; this.hidden = false; this.textContent = ""; this.value = ""; this.open = false; this.focused = false; this.classes = new Set(); this.classList = { add: (v) => this.classes.add(v), remove: (v) => this.classes.delete(v) }; }
   append(...xs) { this.children.push(...xs); }
   prepend(...xs) { this.children.unshift(...xs); }
   replaceChildren(...xs) { this.children = xs; }
@@ -74,7 +74,7 @@ const tick = () => new Promise((r) => setImmediate(r));
     return {
       ok: true,
       json: async () => ({
-        piezas: [{ nombre: "Pieza " + n, codigo: "ED-" + n, marca: "Levis", precio: 10000, talla: n === 1 ? "M" : null, foto: "https://dolarones.eldolaron.com/api/catalogo/foto/ED-" + n }],
+        piezas: [{ nombre: "Pieza " + n, codigo: "ED-" + n, marca: "Levis", precio: 10000, talla: n === 1 ? "M" : null, foto: "https://dolarones.eldolaron.com/api/catalogo/foto/ED-" + n, recorte: "https://dolarones.eldolaron.com/api/catalogo/recorte/ED-" + n }],
         total: 2, hay_mas: n === 1, siguiente: n === 1 ? "c1" : null,
       }),
     };
@@ -90,6 +90,8 @@ const tick = () => new Promise((r) => setImmediate(r));
 
   // Visor de foto completa: abre el diálogo, enfoca Cerrar y al cerrar devuelve el foco a la foto.
   const fotoBtn = p.partes[".catalog-grid"].children[0].children[0];
+  assert.ok(fotoBtn.classes.has("con-recorte"));
+  assert.match(fotoBtn.children[0].src, /recorte/);
   fotoBtn.listeners.click();
   assert.equal(p.partes[".piece-dialog"].open, true);
   assert.equal(p.partes[".piece-dialog-title"].textContent, "Pieza 1");

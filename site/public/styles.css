@@ -9,6 +9,8 @@
   --red: #D72B32;
   --red-text: #B3141B;   /* rojo para letra chica: 4.5:1 o más sobre blanco, amarillo y cupón; en carteles y etiquetas de cartón da 3:1 o más para precios grandes (Issues #241, #339) */
   --yellow: #FFD447;
+  --wa: #25D366;         /* verde WhatsApp: botones que abren WhatsApp */
+  --wa-ink: #0A3B26;     /* letra sobre --wa: 6.5:1 */
   --white: #FFFFFF;
   --mist: #F2F5FA;
   --shadow: rgb(22 54 107 / .26);
@@ -52,9 +54,13 @@ p { line-height: 1.6; }
 .tape-navy { background: var(--navy); color: var(--white); rotate: 1.2deg; }
 .button { display: inline-flex; align-items: center; justify-content: center; gap: 12px; min-height: 54px; padding: 14px 22px; border: 2px solid var(--navy); border-radius: 2px; color: var(--navy); box-shadow: 4px 4px 0 var(--navy); text-decoration: none; font-size: 16px; font-weight: 800; line-height: 1.3; transition: transform 150ms ease, box-shadow 150ms ease, background-color 150ms ease; }
 .button svg { width: 24px; height: 24px; }
-.button-ticket, .button-yellow { background: var(--yellow); }
-.button-ticket { outline: 2px dashed var(--navy); outline-offset: -7px; }
+.button-yellow { background: var(--yellow); }
 .button-paper { background: var(--white); }
+/* WhatsApp (#345): verde de la marca con su logo en círculo blanco; borde y sombra azul como todos los botones. */
+.button-whatsapp { text-align: center; background: linear-gradient(180deg, #3BE07A, var(--wa) 55%, #1FC25C); color: var(--wa-ink); }
+/* `.button > span` (más arriba) lo vuelve inline-block: por eso el selector lleva .button. */
+.button .wa-logo { display: grid; place-items: center; flex: none; width: 28px; height: 28px; border-radius: 50%; background: var(--white); box-shadow: 0 0 0 1.5px var(--wa-ink); }
+.button .wa-logo svg { width: 18px; height: 18px; fill: var(--wa); }
 .button-navy { background: var(--navy); color: var(--white); }
 .text-link { font-weight: 800; line-height: 1.5; }
 .button > span, .text-link > span, .portal-link > span { display: inline-block; transition: transform 180ms ease; }
@@ -98,6 +104,8 @@ h2 { font-family: var(--display); font-variation-settings: var(--display-axes); 
 /* La foto es un botón (abre el visor grande); el chip «Ver foto» avisa que se puede tocar. */
 .poster-photo { position: relative; display: block; width: 100%; aspect-ratio: 1; padding: 0; overflow: hidden; border: 3px solid var(--ink); background: var(--white); cursor: pointer; }
 .poster-photo img { width: 100%; height: 100%; object-fit: cover; filter: sepia(.12) contrast(1.04); }
+.poster-photo.con-recorte { border: 0; background: transparent; }
+.poster-photo.con-recorte img { object-fit: contain; filter: drop-shadow(0 8px 7px rgb(60 40 15 / .38)); }
 .poster-zoom { position: absolute; right: 6px; bottom: 6px; padding: 4px 8px 3px; border: 1.5px solid var(--ink); background: rgb(246 238 216 / .94); color: var(--ink); font: 800 12px/1.1 "Archivo", sans-serif; letter-spacing: .04em; text-transform: uppercase; pointer-events: none; }
 /* Sello de goma «¡Última pieza!» (Issue #339): tinta roja gastada, chueco, encima de la foto. */
 .poster-stamp { position: absolute; top: 14px; left: 10px; padding: 8px 14px 5px; border: 3px solid var(--red); outline: 1.5px solid var(--red); outline-offset: 2px; border-radius: 4px;
@@ -110,7 +118,6 @@ h2 { font-family: var(--display); font-variation-settings: var(--display-axes); 
 .poster-was { display: flex; flex-wrap: wrap; justify-content: center; align-items: baseline; gap: 2px 10px; color: var(--ink); font-family: "Archivo", sans-serif; font-size: 15px; font-weight: 700; line-height: 1.2; }
 .poster-was b { font-weight: 800; }
 .poster-ask { min-height: 52px; padding: 8px 18px; gap: 8px; font-size: 15px; }
-.poster-ask svg { width: 20px; height: 20px; flex: none; }
 .wanted-hint { display: none; }
 /* El rojo de foco casi no se distingue del papel tostado: sobre el cartel el foco es azul. */
 .poster a:focus-visible, .poster button:focus-visible { outline-color: var(--navy); }
@@ -167,6 +174,8 @@ h2 { font-family: var(--display); font-variation-settings: var(--display-axes); 
 .piece { position: relative; display: flex; flex-direction: column; overflow: hidden; background: var(--white); border: 2px solid var(--navy); box-shadow: 4px 4px 0 var(--navy); transition: translate 150ms ease, box-shadow 150ms ease; }
 .piece-photo { position: relative; display: block; width: 100%; padding: 0; border: 0; border-bottom: 2px solid var(--navy); aspect-ratio: 4 / 5; overflow: hidden; background: #F1F1EF; cursor: pointer; }
 .piece-photo img { width: 100%; height: 100%; object-fit: cover; }
+.piece-photo.con-recorte { padding: 8%; background: #F4F5F8; }
+.piece-photo.con-recorte img { object-fit: contain; filter: drop-shadow(0 6px 6px rgb(22 54 107 / .18)); }
 .piece-zoom { position: absolute; right: 6px; bottom: 6px; padding: 3px 7px 2px; border: 1.5px solid var(--navy); background: rgb(255 255 255 / .92); color: var(--navy); font: 800 11px/1.1 "Archivo", sans-serif; letter-spacing: .04em; text-transform: uppercase; pointer-events: none; }
 .piece-body { display: flex; flex-direction: column; flex: 1; gap: 2px; padding: 12px 14px 14px; }
 .piece h3 { font-size: 16px; font-weight: 700; line-height: 1.3; overflow-wrap: anywhere; }
@@ -174,9 +183,9 @@ h2 { font-family: var(--display); font-variation-settings: var(--display-axes); 
 .piece-size { font-size: 14px; font-weight: 800; }
 .piece-price { align-self: flex-start; margin-top: auto; padding-top: 8px; font-family: "Anton", sans-serif; font-size: 30px; line-height: 1.15; }
 /* Objetivo táctil de 44 px (NN/g, WCAG 2.5.8): antes era una línea de texto de 14 px. */
-.piece-link { display: flex; align-items: center; justify-content: center; min-height: 44px; margin-top: 12px; padding: 8px 10px; border: 2px solid var(--navy); background: var(--white); box-shadow: 2px 2px 0 var(--navy); font-size: 14px; font-weight: 800; text-align: center; text-decoration: none; }
+.piece-link { min-height: 46px; margin-top: 12px; padding: 6px 10px; gap: 8px; font-size: 14px; box-shadow: 3px 3px 0 var(--navy); }
 .piece-price s { margin-left: 8px; color: var(--red-text); font-family: "Archivo", sans-serif; font-size: 14px; font-weight: 700; }
-.piece-ask { min-height: 44px; margin-top: 16px; padding: 8px 10px; background: var(--navy); color: var(--white); box-shadow: none; font-size: 14px; }
+.piece-ask { min-height: 46px; margin-top: 16px; padding: 6px 12px; gap: 8px; font-size: 14px; }
 .catalog-more { margin: 40px auto 0; display: flex; }
 .catalog-fallback { max-width: 580px; margin-top: 28px; padding: 28px; background: var(--white); box-shadow: 4px 5px 0 var(--shadow); }
 .catalog-fallback h3 { font-family: var(--display); font-variation-settings: var(--display-axes); font-weight: 900; font-size: 26px; line-height: 1.15; }
@@ -265,14 +274,13 @@ dd { margin: 0; line-height: 1.5; }
   .button:hover, .portal-link:hover { transform: translate(-2px, -2px); box-shadow: 6px 6px 0 var(--navy); }
   .button-paper:hover { background: var(--yellow); }
   .button-navy:hover { background: var(--red); }
-  .button:hover > span, .text-link:hover > span, .portal-link:hover > span { transform: translate(2px, -2px); }
+  .button-whatsapp:hover { background: var(--wa); }
+  .button:hover > span:not(.wa-logo), .text-link:hover > span, .portal-link:hover > span { transform: translate(2px, -2px); }
   .chip:hover { background: var(--yellow); }
   .group-card:hover { rotate: 0deg; translate: 0 -4px; }
   .group-card:hover .group-go { background: var(--navy); color: var(--white); }
   .chip[aria-pressed="true"]:hover { background: var(--red); }
   .piece:hover { translate: -2px -2px; box-shadow: 7px 7px 0 var(--navy); }
-  .piece-link:hover { color: var(--red-text); }
-  .piece-ask:hover { box-shadow: none; transform: none; background: var(--red); }
   .tiers .tag:hover { rotate: 0deg; }
 }
 @media (prefers-reduced-motion: no-preference) {
@@ -336,7 +344,9 @@ dd { margin: 0; line-height: 1.5; }
   .piece h3 { font-size: 14px; }
   .piece-price { font-size: 24px; }
   .piece-price s { display: block; margin-left: 0; font-size: 12px; }
-  .piece-link { font-size: 13px; }
+  .piece-link { font-size: 12px; gap: 6px; padding-inline: 8px 6px; }
+  .piece-link .wa-logo { width: 24px; height: 24px; }
+  .button.piece-link .wa-logo svg { width: 15px; height: 15px; }
   .chips-wrap { margin-inline: -20px; -webkit-mask-image: linear-gradient(90deg, #000 0, #000 calc(100% - 38px), transparent 100%); mask-image: linear-gradient(90deg, #000 0, #000 calc(100% - 38px), transparent 100%); }
   .chips { flex-wrap: nowrap; overflow-x: auto; padding: 0 38px 6px 20px; scrollbar-width: none; }
   .chip { flex-shrink: 0; font-size: 14px; padding-inline: 10px; }

@@ -39,6 +39,8 @@ test('una pantalla o API que nadie listo es solo del dueno', () => {
   assert.deepEqual(permiso('/api/algo-nuevo', 'POST'), []);
   assert.deepEqual(permiso('/api/ropa-ia', 'GET'), ['capturista']);
   assert.deepEqual(permiso('/api/ropa-ia/abc/aceptar', 'POST'), ['capturista']);
+  assert.deepEqual(permiso('/api/recortes', 'GET'), ['capturista']);
+  assert.deepEqual(permiso('/api/recortes/abc/original', 'POST'), ['capturista']);
   assert.equal(puede(usuario(['cajero', 'capturista']), permiso('/pantalla-nueva', 'GET')), false);
 });
 

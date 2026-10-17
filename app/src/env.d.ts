@@ -3,6 +3,7 @@
 declare global {
   interface Env {
     ANTHROPIC_API_KEY: string;
+    IMAGES: ImagesBinding;
     GEMINI_API_KEY: string;
     /** Alterno: alguna instancia guarda la llave con este nombre. */
     GEMINI2_API_KEY?: string;

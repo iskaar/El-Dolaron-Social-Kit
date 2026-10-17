@@ -48,6 +48,7 @@ import { mensajesApi, responderApi } from './mensajes.ts';
 import { rutaAsistente } from './asistente.ts';
 import { sentenciasVale, buscarVale, valeDeVenta, valeUsadoEnVenta, reimprimirVale, valesAbiertos, emitirCuponManual, porcentajeCupon } from './vales.ts';
 import { catalogoPublico, revisionCatalogo } from './catalogo.ts';
+import { procesarRecortes, reiniciarRecorte, rutaRecortesAdmin } from './recortes.ts';
 import { rutaML, recibirNotificacion, conciliarSeguro, sincronizar, publicacionViva } from './mercadolibre.ts';
 import { pedirDescuento, validarDescuento, listarDescuentos, listarDuenos } from './descuentos.ts';
 import { listarAltoValor, revisarConteo, ajustarExistencia, listarAjustes } from './conteo.ts';
@@ -201,9 +202,10 @@ async function crearBorrador(request: Request, env: Env, ctx: ExecutionContext, 
   // lo que el dueno ya corrigio se quedan; para volver a analizar esta "Reintentar
   // analisis". La camara no manda esta marca: su reenvio si actualiza todo.
   if (formulario.get('solo_foto') === '1') {
-    const { meta } = await env.DB.prepare('update productos set foto_key = ?, actualizado_en = ? where id = ?')
+    const { meta } = await env.DB.prepare("update productos set foto_key = ?, actualizado_en = ?, recorte_estado=case when recorte_estado='original' then 'original' else null end, recorte_fecha=null where id = ?")
       .bind(fotoKey, new Date().toISOString(), id)
       .run();
+    if (meta.changes) await reiniciarRecorte(env, id);
     if (meta.changes > 0) return json({ id });
   }
 
@@ -234,12 +236,15 @@ async function crearBorrador(request: Request, env: Env, ctx: ExecutionContext, 
        estado_fisico = excluded.estado_fisico,
        talla = excluded.talla,
        foto_key = excluded.foto_key,
+       recorte_estado = case when productos.recorte_estado='original' then 'original' else null end,
+       recorte_fecha = null,
        estado_analisis = 'pendiente',
        actualizado_en = excluded.actualizado_en
        where productos.estado_analisis <> 'descartado'`,
   )
     .bind(id, semanaIngreso(ahora), estadoFisico, cantidad, talla, fotoKey, capturadoPor, ahora.toISOString(), ahora.toISOString(), propietario)
     .run();
+  await reiniciarRecorte(env, id);
 
   const descartada = await env.DB.prepare("select id, estado_analisis, stock from productos where id = ? and estado_analisis = 'descartado'").bind(id).first();
   if (descartada) {
@@ -1824,6 +1829,8 @@ export default {
       }
       const respuestaRopaIA = await rutaRopaAdmin(request, env, pathname);
       if (respuestaRopaIA) return respuestaRopaIA;
+      const respuestaRecortes = await rutaRecortesAdmin(request, env, pathname);
+      if (respuestaRecortes) return respuestaRecortes;
       if (pathname === '/api/cajeros' && request.method === 'GET') return await listarCajeros(env);
       if (pathname === '/api/cajeros/entrar' && request.method === 'POST') return await entrar(request, env);
       if (pathname === '/api/cajeros/salir' && request.method === 'POST') return await salir(request, env);
@@ -2112,5 +2119,6 @@ export default {
     // Apartados cuyo plazo llego: vuelven a la venta (Issue #269). Aparte, para que uno no frene al otro.
     ctx.waitUntil(vencerPedidos(env));
     ctx.waitUntil(procesarColaRopa(env));
+    ctx.waitUntil(procesarRecortes(env));
   },
 } satisfies ExportedHandler<Env>;
