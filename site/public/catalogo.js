@@ -90,8 +90,12 @@
         img.loading = "lazy";
         img.decoding = "async";
         // Una foto rota quita su cartel; con menos de 3 la sección vuelve a ocultarse.
-        img.addEventListener("error", () => { li.remove(); if (lista.children.length < 3) seccion.hidden = true; });
-        img.src = pieza.foto;
+        if (pieza.recorte) foto.classList.add("con-recorte");
+        img.addEventListener("error", () => {
+          if (pieza.recorte && img.src === pieza.recorte) { foto.classList.remove("con-recorte"); img.src = pieza.foto; return; }
+          li.remove(); if (lista.children.length < 3) seccion.hidden = true;
+        });
+        img.src = pieza.recorte || pieza.foto;
         const zoom = document.createElement("span");
         zoom.className = "poster-zoom";
         zoom.setAttribute("aria-hidden", "true");
@@ -221,14 +225,18 @@
     const conFoto = /^https?:\/\//.test(pieza.foto || "");
     const photo = el(conFoto ? "button" : "div", "piece-photo");
     if (conFoto) {
+      if (pieza.recorte) photo.classList.add("con-recorte");
       photo.type = "button";
       photo.setAttribute("aria-label", `Ver foto completa: ${pieza.nombre}`);
       const img = new Image();
       img.alt = "";
       img.loading = "lazy";
       img.decoding = "async";
-      img.addEventListener("error", () => img.remove());
-      img.src = pieza.foto;
+      img.addEventListener("error", () => {
+        if (pieza.recorte && img.src === pieza.recorte) { photo.classList.remove("con-recorte"); img.src = pieza.foto; }
+        else img.remove();
+      });
+      img.src = pieza.recorte || pieza.foto;
       const zoom = el("span", "piece-zoom", "Ver foto");
       zoom.setAttribute("aria-hidden", "true");
       photo.append(img, zoom);
