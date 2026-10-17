@@ -193,7 +193,7 @@
 </div>
 
 <script type="module">
-import { PRECIO_PRENDA } from './ropa.js';
+import { PRECIO_PRENDA, MARCAS_ROPA } from './ropa.js';
 import { aJpeg } from '/foto.js';
 import { TALLAS_ADULTO, EDADES_NINO, TALLAS_NINO } from '/tallas.js';
 
@@ -218,7 +218,7 @@ const preciosRopa = JSON.parse(document.body.dataset.preciosRopa || '[]');
 const panelPrecio = document.getElementById('precio-panel');
 let precioRopa = null;
 const prendasRopa = ['Playera', 'Blusa', 'Camisa', 'Sudadera', 'Suéter', 'Chamarra', 'Vestido', 'Falda', 'Short', 'Jeans', 'Pantalón', 'Leggings', 'Pants', 'Pijama', 'Traje de baño', 'Conjunto'];
-const marcasRopa = ['All in Motion', 'Cat & Jack', 'Universal Thread', 'Wild Fable', 'Goodfellow & Co', 'A New Day', 'Art Class', 'Auden', 'Original Use', 'Shade & Shore', 'Xhilaration', 'Stars Above'];
+const marcasRopa = MARCAS_ROPA;
 const panelIdentidad = document.getElementById('identidad-panel');
 let prendaRopa = '', marcaRopa = '';
 
@@ -387,6 +387,7 @@ try {
   prendaRopa = localStorage.getItem(CLAVE_PRENDA) || '';
   marcaRopa = localStorage.getItem(CLAVE_MARCA) || '';
   for (const b of botonesPrenda.children) b.setAttribute('aria-pressed', String(b.dataset.valor === prendaRopa));
+  if (prendaRopa) ponerPrenda(prendaRopa);
   ponerMarca(marcaRopa);
   pintarMarcasRecientes(JSON.parse(localStorage.getItem(CLAVE_MARCAS_RECIENTES) || '[]'));
 } catch { /* preferencias opcionales */ }

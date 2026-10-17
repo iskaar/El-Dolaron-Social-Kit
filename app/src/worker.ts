@@ -7,6 +7,7 @@
 
 import { analizarBorrador, modeloPorDefecto, type Modelo } from './analisis.ts';
 import { PRENDAS_ROPA, PRECIOS_ROPA } from '../public/ropa.js';
+import { procesarColaRopa, rutaRopaAdmin } from './ropa-ia.ts';
 import { calcularPrecio, ajustarManual, esDestinoBanda, prefijoParaFamilia, MONTOS_BANDA, type Destino } from './precio.ts';
 import { efectivoAlcanza, promoInauguracion } from '../public/venta.js';
 
@@ -1821,6 +1822,8 @@ export default {
       if (pathname === '/api/yo') {
         return await yo(env, correo, soloComputadora(await leerUsuario(env, correo)) ? await cajeroEnTurno(request, env) : null);
       }
+      const respuestaRopaIA = await rutaRopaAdmin(request, env, pathname);
+      if (respuestaRopaIA) return respuestaRopaIA;
       if (pathname === '/api/cajeros' && request.method === 'GET') return await listarCajeros(env);
       if (pathname === '/api/cajeros/entrar' && request.method === 'POST') return await entrar(request, env);
       if (pathname === '/api/cajeros/salir' && request.method === 'POST') return await salir(request, env);
@@ -2108,5 +2111,6 @@ export default {
     ctx.waitUntil(sincronizar(env));
     // Apartados cuyo plazo llego: vuelven a la venta (Issue #269). Aparte, para que uno no frene al otro.
     ctx.waitUntil(vencerPedidos(env));
+    ctx.waitUntil(procesarColaRopa(env));
   },
 } satisfies ExportedHandler<Env>;
