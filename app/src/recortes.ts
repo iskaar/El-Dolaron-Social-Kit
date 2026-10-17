@@ -6,14 +6,15 @@ const resp = (body: unknown, status = 200) => new Response(JSON.stringify(body),
 export async function procesarRecortes(env: Env): Promise<void> {
   const activa = await env.DB.prepare("select valor from config where clave='recortes_activo'").first<{ valor: string }>();
   if (activa?.valor !== '1') return;
-  const { results } = await env.DB.prepare(`select id, foto_key from productos indexed by productos_recortes_pendientes
-    where recorte_estado is null and ${VENDIBLE} order by creado_en limit 20`).all<{ id: string; foto_key: string }>();
+  const { results } = await env.DB.prepare(`select p.id, p.foto_key from productos p indexed by productos_recortes_pendientes
+    where p.recorte_estado is null and ${VENDIBLE} order by creado_en limit 20`).all<{ id: string; foto_key: string }>();
   for (const fila of results) {
     try {
       const foto = await env.FOTOS.get(fila.foto_key);
       if (!foto) throw new Error('Foto no encontrada en R2.');
       const salida = await (env.IMAGES as any).input(foto.body).transform({ segment: 'foreground' }).output({ format: 'image/webp', quality: 82 });
       const bytes = salida instanceof Response ? salida.body : salida.response().body;
+      if (!bytes) throw new Error('Recorte vacío.');
       await env.FOTOS.put(`recortes/${fila.id}.webp`, bytes, { httpMetadata: { contentType: 'image/webp' } });
       await env.DB.prepare("update productos set recorte_estado='listo', recorte_fecha=? where id=? and recorte_estado is null").bind(ahora(), fila.id).run();
     } catch (error) {

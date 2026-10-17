@@ -148,7 +148,7 @@ async function foto(env: Env, codigo: string, recorte = false): Promise<Response
   if (!objeto) return no();
   return new Response(objeto.body, {
     headers: {
-      'content-type': objeto.httpMetadata?.contentType || 'image/jpeg',
+      'content-type': objeto.httpMetadata?.contentType || (recorte ? 'image/webp' : 'image/jpeg'),
       'cache-control': 'public, max-age=86400',
       'x-content-type-options': 'nosniff',
       'access-control-allow-origin': ORIGEN_SITIO,
