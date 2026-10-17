@@ -72,6 +72,11 @@
     <div id="revision-lista"></div>
   </section>
 
+  <section class="panel" id="ropa-ia">
+    <h2>Revisar ropa</h2>
+    <div id="ropa-ia-lista"></div>
+  </section>
+
   <!-- Issue #115: solo el dueno (la API tambien lo exige). -->
   <form class="panel" id="manual" hidden autocomplete="off">
     <h2>Capturar sin foto</h2>
@@ -570,6 +575,36 @@ document.getElementById('guardar-todo').addEventListener('click', async (evento)
 
 await cargarConfig();
 await cargarCola();
+
+async function cargarRopaIA() {
+  const raiz = document.getElementById('ropa-ia-lista');
+  const respuesta = await fetch('/api/ropa-ia');
+  if (!respuesta.ok) { raiz.textContent = 'No se pudo cargar la revisión de ropa.'; return; }
+  const piezas = await respuesta.json();
+  raiz.replaceChildren();
+  if (!piezas.length) { raiz.textContent = 'No hay prendas pendientes.'; return; }
+  for (const p of piezas) {
+    const s = JSON.parse(p.ropa_ia_sugerencia || '{}');
+    const ficha = document.createElement('article'); ficha.className = 'ficha';
+    const img = document.createElement('img'); img.src = `/api/foto/${p.id}`; img.alt = 'Foto de la prenda';
+    const cuerpo = document.createElement('div');
+    const detalle = document.createElement('p');
+    detalle.textContent = `${s.prenda || 'Sin prenda'} (${s.prenda_confianza || 'baja'}) · ${s.marca || 'Sin marca'} (${s.marca_confianza || 'baja'}) · Banderas: ${(s.banderas || []).join(', ') || 'ninguna'} · ${s.motivo || ''}`;
+    const prenda = document.createElement('input'); prenda.value = s.prenda || ''; prenda.setAttribute('aria-label', 'Prenda corregida');
+    const marca = document.createElement('input'); marca.value = s.marca || ''; marca.maxLength = 60; marca.setAttribute('aria-label', 'Marca corregida');
+    const botones = document.createElement('div'); botones.className = 'acciones';
+    const accion = async (nombre, datos = {}) => {
+      const r = await fetch(`/api/ropa-ia/${p.id}/${nombre}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(datos) });
+      if (!r.ok) { detalle.textContent = (await r.json()).error || 'No se guardó.'; return; }
+      await cargarRopaIA();
+    };
+    for (const [texto, fn] of [['Aceptar', () => accion('aceptar')], ['Corregir', () => accion('corregir', { prenda: prenda.value, marca: marca.value })], ['Descartar', () => accion('descartar')]]) {
+      const b = document.createElement('button'); b.type = 'button'; b.textContent = texto; b.addEventListener('click', fn); botones.append(b);
+    }
+    cuerpo.append(detalle, prenda, marca, botones); ficha.append(img, cuerpo); raiz.append(ficha);
+  }
+}
+await cargarRopaIA();
 </script>
 </body>
 </html>

@@ -162,6 +162,7 @@ function miniatura(subida: boolean) {
        guardar: () => elGuardarRevision.eventos.get('click')(), condicion: () => elRevisarEstado.eventos.get('click')(),
        eliminar: () => elDescartar.eventos.get('click')() })`, {
     document: { getElementById: $ }, sesion, preciosRopa: [20000, 15000, 10000, 8000, 5000], idSubiendo: null,
+    prendasRopa: ['Playera'], marcasRopa: ['All in Motion'], elegirOpcion() {},
     chips() {}, selectorTalla: () => ({ poner() {} }), activarControlCantidad() {},
     leer: async (id: string) => structuredClone(cola.get(id)), guardar: async (r: any) => cola.set(r.id, structuredClone(r)),
     borrar: async (id: string) => cola.delete(id), procesarCola() {}, repintarMiniatura() {}, actualizarContador() {},

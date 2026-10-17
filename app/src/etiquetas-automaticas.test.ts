@@ -5,7 +5,7 @@ import { readFileSync } from 'node:fs';
 import { runInNewContext } from 'node:vm';
 import { tienda } from './prueba-d1.ts';
 import worker from './worker.ts';
-import { tsplEtiqueta, etiquetaVigente } from '../public/etiquetera.js';
+import { tsplEtiqueta, etiquetaVigente, partirNombre, NOMBRE_MAX } from '../public/etiquetera.js';
 
 const fuente = readFileSync('public/etiquetas.html', 'utf8').match(/<script type="module">([\s\S]*?)<\/script>/)![1]
   .replace(/import\s*\{[\s\S]*?\}\s*from\s*'[^']+';/, '');
@@ -112,13 +112,15 @@ async function pagina(t: ReturnType<typeof tienda>, ambiente = 'sandbox', almace
   return { ...api, estado, $, almacen };
 }
 
-function capturarRopa(t: ReturnType<typeof tienda>, id: string, precio: string) {
+function capturarRopa(t: ReturnType<typeof tienda>, id: string, precio: string, datos: { prenda?: string; marca?: string } = {}) {
   const cuerpo = new FormData();
   cuerpo.append('id', id);
   cuerpo.append('estado_fisico', 'nuevo');
   cuerpo.append('cantidad', '2');
   cuerpo.append('talla', 'M');
   cuerpo.append('precio_ropa', precio);
+  if (datos.prenda !== undefined) cuerpo.append('prenda', datos.prenda);
+  if (datos.marca !== undefined) cuerpo.append('marca', datos.marca);
   cuerpo.append('foto', new File([new Uint8Array([0xff, 0xd8, 0xff, 0xd9])], `${id}.jpg`, { type: 'image/jpeg' }));
   return worker.fetch!(new Request('https://caja.prueba/api/borradores', { method: 'POST', body: cuerpo }) as never,
     t.env, { waitUntil() { assert.fail('La ropa con precio asignado no necesita IA'); } } as never);
@@ -149,6 +151,37 @@ test('las siete categorías se guardan con foto, talla y precio exacto, sin IA, 
   } finally { t.db.close(); }
 });
 
+test('ropa guarda nombre y marca con prenda+marca, solo prenda, solo marca o ninguna; rechaza datos invalidos', async () => {
+  const t = tienda();
+  try {
+    t.env.AMBIENTE = 'sandbox';
+    const casos = [
+      [{ prenda: '  Sudadera ', marca: ' All in Motion  ' }, 'Sudadera All in Motion', 'All in Motion'],
+      [{ prenda: 'Vestido' }, 'Vestido', ''],
+      [{ marca: 'Universal Thread' }, 'Ropa Universal Thread', 'Universal Thread'],
+      [{}, 'Ropa', ''],
+    ] as const;
+    for (const [datos, nombre, marca] of casos) {
+      const id = crypto.randomUUID();
+      assert.equal((await capturarRopa(t, id, '15000', datos)).status, 201);
+      assert.deepEqual({ ...t.db.prepare('select nombre, marca from productos where id=?').get(id)! }, { nombre, marca });
+    }
+    for (const datos of [{ prenda: 'Abrigo' }, { prenda: 'Sudadera\n' }, { marca: 'x'.repeat(41) }, { marca: 'Marca\nX' }]) {
+      const id = crypto.randomUUID();
+      assert.equal((await capturarRopa(t, id, '15000', datos)).status, 400);
+      assert.equal(t.db.prepare('select count(*) n from productos where id=?').get(id)!.n, 0);
+    }
+  } finally { t.db.close(); }
+});
+
+test('nombre largo de ropa cabe en los dos renglones actuales de AE240', () => {
+  const [primero, segundo] = partirNombre('Traje de baño Universal Thread');
+  assert.equal(primero, 'Traje de bano Universal Thread');
+  assert.equal(segundo, undefined);
+  assert.ok(primero.length <= NOMBRE_MAX);
+  assert.ok(tsplEtiqueta({ codigo: 'ED-000001', nombre: 'Traje de baño Universal Thread', precio: 15000, precio_lista: 0, semana_ingreso: '2026-S41' }).includes('Universal Thread'));
+});
+
 test('precio de ropa en producción y sandbox con rol de captura; valores alterados no guardan foto ni producto', async () => {
   const t = tienda();
   try {
@@ -177,10 +210,10 @@ test('reintentar la foto de ropa no repone ventas ni pisa nombre, precio, talla 
     const id = crypto.randomUUID();
     assert.equal((await capturarRopa(t, id, '20000')).status, 201);
     const codigo = (await t.pedir('/api/etiquetas', { ids: [id] })).cuerpo[0].codigo;
-    t.db.prepare("update productos set stock=1, nombre='Camisa', precio=15000, talla='L' where id=?").run(id);
-    assert.equal((await capturarRopa(t, id, '20000')).status, 201);
-    const fila = t.db.prepare('select nombre, precio, stock, talla, codigo, estado_analisis from productos where id=?').get(id)!;
-    assert.deepEqual({ ...fila }, { nombre: 'Camisa', precio: 15000, stock: 1, talla: 'L', codigo, estado_analisis: 'listo' });
+    t.db.prepare("update productos set stock=1, nombre='Camisa All in Motion', marca='All in Motion', precio=15000, talla='L' where id=?").run(id);
+    assert.equal((await capturarRopa(t, id, '20000', { prenda: 'Playera', marca: 'Cat & Jack' })).status, 201);
+    const fila = t.db.prepare('select nombre, marca, precio, stock, talla, codigo, estado_analisis from productos where id=?').get(id)!;
+    assert.deepEqual({ ...fila }, { nombre: 'Camisa All in Motion', marca: 'All in Motion', precio: 15000, stock: 1, talla: 'L', codigo, estado_analisis: 'listo' });
   } finally { t.db.close(); }
 });
 
@@ -195,7 +228,7 @@ test('cámara exige precio y talla y guarda la categoría junto a la foto antes 
     capturar: async () => { llamadas.push('foto'); contexto.precioRopa = 5000; return new Blob(['foto']); },
     guardar: async (p: any) => { llamadas.push('guardar'); guardadas.push(p); },
     pintarMiniatura() {}, actualizarContador() {}, procesarCola() { llamadas.push('subir'); },
-    crypto, Date, estadoFisico: 'nuevo', cantidad: 2, tomadas: 0, piezasTotales: 0,
+    crypto, Date, estadoFisico: 'nuevo', cantidad: 2, tomadas: 0, piezasTotales: 0, prendaRopa: 'Sudadera', marcaRopa: 'All in Motion',
   };
   const disparar = runInNewContext(`${camara.slice(camara.indexOf('async function disparar()'), camara.indexOf('/* ---------- subida:'))}; disparar`, contexto);
   await disparar();
@@ -206,6 +239,8 @@ test('cámara exige precio y talla y guarda la categoría junto a la foto antes 
   assert.equal(guardadas[0].precio_ropa, 10000);
   assert.equal(guardadas[0].talla, 'M');
   assert.equal(guardadas[0].cantidad, 2);
+  assert.equal(guardadas[0].prenda, 'Sudadera');
+  assert.equal(guardadas[0].marca, 'All in Motion');
 });
 
 test('una foto sin red o con sesión vencida conserva su precio local y lo reenvía al volver la conexión', async () => {
@@ -267,6 +302,9 @@ test('corregir un precio reimprime una vez con el mismo código; condición sola
     await p.iniciarAutomatica();
     const codigo = t.db.prepare('select codigo from productos where id=?').get(id)!.codigo;
     assert.equal(p.estado.enviadas.length, 1);
+    assert.equal((await t.pedir(`/api/borradores/${id}/revision`, { prenda: 'Sudadera', marca: 'All in Motion' }, 'PATCH')).status, 200);
+    assert.deepEqual({ ...t.db.prepare('select nombre, marca from productos where id=?').get(id)! }, { nombre: 'Sudadera All in Motion', marca: 'All in Motion' });
+    assert.equal((await t.pedir(`/api/borradores/${id}/revision`, { prenda: 'Abrigo' }, 'PATCH')).status, 400);
     await t.pedir(`/api/borradores/${id}/revision`, { precio: 8000, estado_fisico: 'danado' }, 'PATCH');
     await p.imprimirNuevas(); await p.imprimirNuevas();
     assert.equal(p.estado.enviadas.length, 2);

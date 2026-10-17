@@ -75,7 +75,17 @@
   #talla-panel[hidden], .nino[hidden], #revisar-talla[hidden] { display: none; }
   #precio-panel { top: calc(56px + env(safe-area-inset-top)); padding: 0 14px; }
   #precio-panel[hidden] { display: none; }
-  body.con-precios #talla-panel { top: calc(126px + env(safe-area-inset-top)); }
+  #identidad-panel { top: calc(56px + env(safe-area-inset-top)); display: flex; flex-direction: column; gap: 5px; padding: 0 14px; max-height: 145px; }
+  #identidad-panel[hidden] { display: none; }
+  .ropa-fila { display: flex; align-items: center; gap: 6px; min-width: 0; }
+  .ropa-fila strong { flex: 0 0 58px; font-size: 12px; }
+  .ropa-fila .chips { min-width: 0; }
+  .ropa-fila .chips.fila > button { min-width: max-content; font-size: 13px; }
+  .ropa-fila input { min-width: 0; width: 125px; padding: 8px; border-radius: 8px; }
+  .ropa-fila button { flex: 0 0 auto; padding: 8px 10px; border: 2px solid #fff; border-radius: 10px; background: #0009; color: #fff; font-weight: 700; white-space: nowrap; }
+  .ropa-fila button[aria-pressed="true"] { background: var(--amarillo); border-color: var(--amarillo); color: #111; }
+  #talla-panel, #precio-panel { top: calc(210px + env(safe-area-inset-top)); }
+  body.con-precios #talla-panel { top: calc(280px + env(safe-area-inset-top)); }
   :is(#precio-panel, #revisar-precio) button { padding: 10px 0; border: 2px solid #fff; border-radius: 10px;
     background: #0009; color: #fff; font-size: 16px; font-weight: 800; }
   :is(#precio-panel, #revisar-precio) button[aria-checked="true"] { background: var(--amarillo); border-color: var(--amarillo); color: #111; }
@@ -116,6 +126,7 @@
   .fila-revisar { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
   #revisar button { border: 2px solid #fff; background: #0006; color: #fff; border-radius: 999px;
     padding: 10px 16px; font-size: 14px; font-weight: 700; }
+  #revisar [role="group"] button[aria-pressed="true"] { background: var(--amarillo); border-color: var(--amarillo); color: #111; }
   #revisar button.peligro { border-color: var(--rojo); color: var(--rojo); }
   #revisar button.principal { background: var(--amarillo); border-color: var(--amarillo); color: #111; flex: 1; }
   #revisar-nota { font-size: 13px; opacity: .85; margin: 0; min-height: 1em; }
@@ -130,6 +141,10 @@
 <div id="miniaturas" class="encima"></div>
 <input id="zoom" class="encima" type="range" aria-label="Zoom de la cámara" hidden>
 
+<div id="identidad-panel" class="encima" hidden>
+  <div class="ropa-fila"><strong>Prenda</strong><div id="prendas-ropa" class="chips fila" role="group" aria-label="Tipo de prenda"></div><button id="quitar-prenda" type="button" aria-label="Quitar prenda">Quitar</button></div>
+  <div class="ropa-fila"><strong>Marca</strong><div id="marcas-ropa" class="chips fila" role="group" aria-label="Marca"></div><button id="quitar-marca" type="button" aria-label="Quitar marca">Quitar</button><input id="otra-marca" list="marcas-recientes" placeholder="Otra marca" aria-label="Otra marca" maxlength="40"><datalist id="marcas-recientes"></datalist></div>
+</div>
 <div id="talla-panel" class="encima" hidden></div>
 <div id="precio-panel" class="encima" hidden>
   <div>Precio de ropa</div>
@@ -162,6 +177,8 @@
       <div id="revisar-cantidad" class="control-cantidad"></div>
     </div>
     <div id="revisar-talla" hidden></div>
+    <div id="revisar-prenda" hidden><strong>Prenda</strong><div id="revisar-prendas" class="chips fila" role="group" aria-label="Corregir prenda"></div><button id="revisar-quitar-prenda" type="button" aria-label="Quitar prenda">Sin prenda</button></div>
+    <div id="revisar-marca" hidden><strong>Marca</strong><div id="revisar-marcas" class="chips fila" role="group" aria-label="Corregir marca"></div><input id="revisar-otra-marca" list="marcas-recientes" aria-label="Corregir otra marca" placeholder="Otra marca" maxlength="40"><button id="revisar-quitar-marca" type="button" aria-label="Quitar marca">Sin marca</button></div>
     <div id="revisar-precio" hidden>
       <div>Precio final</div>
       <div id="revisar-precios" class="chips fila" role="radiogroup" aria-label="Corregir precio final en pesos"></div>
@@ -176,6 +193,7 @@
 </div>
 
 <script type="module">
+import { PRECIO_PRENDA, MARCAS_ROPA } from './ropa.js';
 import { aJpeg } from '/foto.js';
 import { TALLAS_ADULTO, EDADES_NINO, TALLAS_NINO } from '/tallas.js';
 
@@ -199,6 +217,10 @@ let modoRopa = false;   // Issue #218: con el modo Ropa, cada foto lleva su tall
 const preciosRopa = JSON.parse(document.body.dataset.preciosRopa || '[]');
 const panelPrecio = document.getElementById('precio-panel');
 let precioRopa = null;
+const prendasRopa = ['Playera', 'Blusa', 'Camisa', 'Sudadera', 'Suéter', 'Chamarra', 'Vestido', 'Falda', 'Short', 'Jeans', 'Pantalón', 'Leggings', 'Pants', 'Pijama', 'Traje de baño', 'Conjunto'];
+const marcasRopa = MARCAS_ROPA;
+const panelIdentidad = document.getElementById('identidad-panel');
+let prendaRopa = '', marcaRopa = '';
 
 /* ---------- talla (modo Ropa) ---------- */
 
@@ -318,6 +340,59 @@ function fijarModo(ropa) {
 botonModo.addEventListener('click', () => fijarModo(!modoRopa));
 try { if (localStorage.getItem(CLAVE_MODO) === 'ropa') fijarModo(true); } catch { /* idem */ }
 if (preciosRopa.length) fijarModo(true);
+
+const CLAVE_PRENDA = 'captura-prenda', CLAVE_MARCA = 'captura-marca', CLAVE_MARCAS_RECIENTES = 'captura-marcas-recientes';
+function guardarPreferencia(clave, valor) { try { if (valor) localStorage.setItem(clave, valor); else localStorage.removeItem(clave); } catch { /* preferencia opcional */ } }
+function elegirOpcion(contenedor, opciones, elegido, cambiar) {
+  contenedor.innerHTML = opciones.map((valor) => `<button type="button" data-valor="${valor}" aria-pressed="${valor === elegido}">${valor}</button>`).join('');
+  contenedor.addEventListener('click', (evento) => {
+    const boton = evento.target.closest('button');
+    if (!boton) return;
+    cambiar(boton.dataset.valor);
+    for (const b of contenedor.children) b.setAttribute('aria-pressed', String(b === boton));
+  });
+}
+const botonesPrenda = document.getElementById('prendas-ropa'), botonesMarca = document.getElementById('marcas-ropa'), campoMarca = document.getElementById('otra-marca');
+function pintarMarcasRecientes(marcas) {
+  const lista = document.getElementById('marcas-recientes');
+  lista.replaceChildren(...marcas.slice(0, 10).map((marca) => { const opcion = document.createElement('option'); opcion.value = marca; return opcion; }));
+}
+function ponerPrenda(valor) {
+  prendaRopa = valor;
+  guardarPreferencia(CLAVE_PRENDA, valor);
+  if (PRECIO_PRENDA[valor]) {
+    precioRopa = PRECIO_PRENDA[valor];
+    document.querySelector(`#precios-ropa [data-valor="${precioRopa}"]`)?.click();
+  }
+}
+function ponerMarca(valor) {
+  marcaRopa = valor.trim().slice(0, 40);
+  guardarPreferencia(CLAVE_MARCA, marcaRopa);
+  for (const b of botonesMarca.children) b.setAttribute('aria-pressed', String(b.dataset.valor === marcaRopa));
+  campoMarca.value = marcasRopa.includes(marcaRopa) ? '' : marcaRopa;
+  if (marcaRopa && !marcasRopa.includes(marcaRopa)) {
+    try {
+      const recientes = JSON.parse(localStorage.getItem(CLAVE_MARCAS_RECIENTES) || '[]');
+      localStorage.setItem(CLAVE_MARCAS_RECIENTES, JSON.stringify([marcaRopa, ...recientes.filter((m) => m !== marcaRopa)].slice(0, 10)));
+      pintarMarcasRecientes([marcaRopa, ...recientes]);
+    } catch { /* lista opcional */ }
+  }
+}
+elegirOpcion(botonesPrenda, prendasRopa, '', ponerPrenda);
+elegirOpcion(botonesMarca, marcasRopa, '', ponerMarca);
+document.getElementById('quitar-prenda').addEventListener('click', () => { ponerPrenda(''); for (const b of botonesPrenda.children) b.setAttribute('aria-pressed', 'false'); });
+document.getElementById('quitar-marca').addEventListener('click', () => { campoMarca.value = ''; ponerMarca(''); });
+campoMarca.addEventListener('input', () => ponerMarca(campoMarca.value));
+try {
+  prendaRopa = localStorage.getItem(CLAVE_PRENDA) || '';
+  marcaRopa = localStorage.getItem(CLAVE_MARCA) || '';
+  for (const b of botonesPrenda.children) b.setAttribute('aria-pressed', String(b.dataset.valor === prendaRopa));
+  if (prendaRopa) ponerPrenda(prendaRopa);
+  ponerMarca(marcaRopa);
+  pintarMarcasRecientes(JSON.parse(localStorage.getItem(CLAVE_MARCAS_RECIENTES) || '[]'));
+} catch { /* preferencias opcionales */ }
+botonModo.addEventListener('click', () => { panelIdentidad.hidden = !modoRopa; });
+if (modoRopa) panelIdentidad.hidden = false;
 
 /* ---------- cola local: la foto se guarda antes de intentar subirla ---------- */
 
@@ -442,6 +517,22 @@ let fichaRevision = null;
 let revisionOcupada = false;
 let idActual = null;
 let registroActual = null;   // el de IndexedDB, solo mientras la foto no se sube
+const contenedorPrendaRevision = document.getElementById('revisar-prendas');
+const contenedorMarcaRevision = document.getElementById('revisar-marcas');
+elegirOpcion(contenedorPrendaRevision, prendasRopa, '', (valor) => { if (fichaRevision) fichaRevision.prenda = valor; });
+elegirOpcion(contenedorMarcaRevision, marcasRopa, '', (valor) => {
+  if (!fichaRevision) return;
+  fichaRevision.marca = valor;
+  document.getElementById('revisar-otra-marca').value = '';
+});
+document.getElementById('revisar-quitar-prenda').addEventListener('click', () => { if (fichaRevision) fichaRevision.prenda = ''; for (const b of contenedorPrendaRevision.children) b.setAttribute('aria-pressed', 'false'); });
+document.getElementById('revisar-quitar-marca').addEventListener('click', () => { if (fichaRevision) fichaRevision.marca = ''; document.getElementById('revisar-otra-marca').value = ''; for (const b of contenedorMarcaRevision.children) b.setAttribute('aria-pressed', 'false'); });
+document.getElementById('revisar-otra-marca').addEventListener('input', (evento) => { if (fichaRevision) fichaRevision.marca = evento.target.value.trim().slice(0, 40); for (const b of contenedorMarcaRevision.children) b.setAttribute('aria-pressed', 'false'); });
+function pintarFichaRopa() {
+  for (const b of contenedorPrendaRevision.children) b.setAttribute('aria-pressed', String(b.dataset.valor === fichaRevision?.prenda));
+  for (const b of contenedorMarcaRevision.children) b.setAttribute('aria-pressed', String(b.dataset.valor === fichaRevision?.marca));
+  document.getElementById('revisar-otra-marca').value = marcasRopa.includes(fichaRevision?.marca) ? '' : fichaRevision?.marca || '';
+}
 
 function pintarEstadoRevision() {
   const danado = (fichaRevision ?? registroActual).estado_fisico === 'danado';
@@ -486,6 +577,8 @@ async function guardarLocal(registro) {
     datos.cantidad = registro.cantidad;
     datos.estado_fisico = registro.estado_fisico;
     datos.precio_ropa = registro.precio_ropa;
+    datos.prenda = registro.prenda || '';
+    datos.marca = registro.marca || '';
   }
   repintarMiniatura(registro.id);
   procesarCola();
@@ -503,7 +596,7 @@ async function abrirRevision(id) {
   }
   idActual = id;
   registroActual = datos.subida ? null : (await leer(id)) ?? null;
-  fichaRevision = preciosRopa.length ? { precio: datos.precio_ropa, estado_fisico: datos.estado_fisico } : null;
+  fichaRevision = preciosRopa.length && datos.precio_ropa != null ? { precio: datos.precio_ropa, estado_fisico: datos.estado_fisico, prenda: datos.prenda || '', marca: datos.marca || '' } : null;
   elRevisarFoto.src = miniaturas.querySelector(`.mini[data-id="${id}"] img`).src;
   elDescartar.textContent = preciosRopa.length ? 'Eliminar captura' : 'Descartar';
   elRevisarNota.textContent = registroActual ? ''
@@ -513,8 +606,11 @@ async function abrirRevision(id) {
   document.getElementById('revisar-retomar').hidden = !registroActual;
   elGuardarRevision.hidden = !fichaRevision;
   elPrecioRevision.hidden = !fichaRevision;
+  document.getElementById('revisar-prenda').hidden = !fichaRevision;
+  document.getElementById('revisar-marca').hidden = !fichaRevision;
   ocuparRevision(false);
   if (registroActual || fichaRevision) pintarEstadoRevision();
+  if (fichaRevision) pintarFichaRopa();
   elRevisarCantidad.innerHTML = `<button type="button" data-paso="-1" aria-label="Menos piezas">−</button>
     <input class="valor" type="text" inputmode="numeric" pattern="[0-9]*">
     <button type="button" data-paso="1" aria-label="Más piezas">+</button>`;
@@ -531,9 +627,12 @@ async function abrirRevision(id) {
       if (idActual !== id) return;
       if (actual.estado_analisis === 'descartado') { quitarCaptura(id); return; }
       datos.precio_ropa = actual.precio;
+      datos.prenda = actual.prenda || '';
+      datos.marca = actual.marca || '';
       datos.estado_fisico = actual.estado_fisico;
-      fichaRevision = { precio: actual.precio, estado_fisico: actual.estado_fisico };
+      fichaRevision = { precio: actual.precio, estado_fisico: actual.estado_fisico, prenda: actual.prenda || '', marca: actual.marca || '' };
       pintarEstadoRevision();
+      pintarFichaRopa();
       repintarMiniatura(id);
       ocuparRevision(false);
     } catch (error) {
@@ -658,6 +757,8 @@ elGuardarRevision.addEventListener('click', async () => {
   const id = idActual, datos = sesion.get(id), cambios = {};
   if (fichaRevision.precio !== datos.precio_ropa) cambios.precio = fichaRevision.precio;
   if (fichaRevision.estado_fisico !== datos.estado_fisico) cambios.estado_fisico = fichaRevision.estado_fisico;
+  if (fichaRevision.prenda !== (datos.prenda || '')) cambios.prenda = fichaRevision.prenda;
+  if (fichaRevision.marca !== (datos.marca || '')) cambios.marca = fichaRevision.marca;
   if (!Object.keys(cambios).length) { elRevisarNota.textContent = 'No hay cambios por guardar.'; return; }
   ocuparRevision(true);
   try {
@@ -665,6 +766,8 @@ elGuardarRevision.addEventListener('click', async () => {
       const registro = { ...registroActual,
         precio_ropa: cambios.precio ?? registroActual.precio_ropa,
         estado_fisico: cambios.estado_fisico ?? registroActual.estado_fisico,
+        prenda: cambios.prenda ?? registroActual.prenda ?? '',
+        marca: cambios.marca ?? registroActual.marca ?? '',
         correccion_ficha: registroActual.precio_ropa != null || cambios.precio != null
           ? { ...registroActual.correccion_ficha, ...cambios } : undefined };
       await guardarLocal(registro);
@@ -672,6 +775,8 @@ elGuardarRevision.addEventListener('click', async () => {
     } else {
       const guardada = await pedirRevision(id, 'PATCH', cambios);
       datos.precio_ropa = guardada.precio;
+      datos.prenda = guardada.prenda || '';
+      datos.marca = guardada.marca || '';
       datos.estado_fisico = guardada.estado_fisico;
       repintarMiniatura(id);
     }
@@ -750,6 +855,7 @@ async function disparar() {
   if (!foto) return;
   const registro = { id: crypto.randomUUID(), foto, estado_fisico: estadoFisico, cantidad, creado: Date.now(),
     talla: modoRopa ? selector.valor() : null,
+    prenda: modoRopa ? prendaRopa : '', marca: modoRopa ? marcaRopa : '',
     precio_ropa: modoRopa && preciosRopa.length ? precioElegido : null };
   await guardar(registro);           // primero al disco, siempre
   tomadas += 1;
@@ -775,6 +881,8 @@ async function procesarCola() {
       cuerpo.append('estado_fisico', registro.estado_fisico);
       cuerpo.append('cantidad', String(registro.cantidad ?? 1));
       if (registro.talla) cuerpo.append('talla', registro.talla);
+      if (registro.prenda) cuerpo.append('prenda', registro.prenda);
+      if (registro.marca) cuerpo.append('marca', registro.marca);
       if (registro.precio_ropa != null) cuerpo.append('precio_ropa', String(registro.precio_ropa));
       cuerpo.append('foto', registro.foto, `${registro.id}.jpg`);
 

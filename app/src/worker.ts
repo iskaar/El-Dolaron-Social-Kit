@@ -6,6 +6,8 @@
  */
 
 import { analizarBorrador, modeloPorDefecto, type Modelo } from './analisis.ts';
+import { PRENDAS_ROPA, PRECIOS_ROPA } from '../public/ropa.js';
+import { procesarColaRopa, rutaRopaAdmin } from './ropa-ia.ts';
 import { calcularPrecio, ajustarManual, esDestinoBanda, prefijoParaFamilia, MONTOS_BANDA, type Destino } from './precio.ts';
 import { efectivoAlcanza, promoInauguracion } from '../public/venta.js';
 
@@ -108,8 +110,12 @@ const estacionValida = (valor: unknown): valor is string =>
   typeof valor === 'string' && CAJAS.includes(valor);
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const FOTO_MAX_BYTES = 6 * 1024 * 1024;
-// Isaac, Issue #273: precios finales de ropa; el árbol por prenda se define después.
-const PRECIOS_ROPA = [30000, 20000, 15000, 12000, 10000, 8000, 5000];
+const textoCapturaRopa = (valor: unknown) => typeof valor === 'string' && valor.trim().length <= 40 && !/[\r\n]/.test(valor);
+const nombreRopa = (prenda: string, marca: string) => [prenda || 'Ropa', marca].filter(Boolean).join(' ');
+const prendaDeNombre = (nombre: string, marca: string) => {
+  const base = marca && nombre.endsWith(` ${marca}`) ? nombre.slice(0, -(marca.length + 1)) : nombre;
+  return base === 'Ropa' ? '' : base;
+};
 const capturaRopaDisponible = (env: Env) => !env.AMBIENTE || env.AMBIENTE === 'produccion' || env.AMBIENTE === 'sandbox';
 
 function json(cuerpo: unknown, status = 200): Response {
@@ -151,6 +157,10 @@ async function crearBorrador(request: Request, env: Env, ctx: ExecutionContext, 
   const foto = formulario.get('foto');
   const talla = String(formulario.get('talla') ?? '').trim() || null;
   const precioRopa = formulario.has('precio_ropa') ? Number(formulario.get('precio_ropa')) : null;
+  const prendaRaw = formulario.get('prenda') ?? '';
+  const marcaRaw = formulario.get('marca') ?? '';
+  const prenda = typeof prendaRaw === 'string' ? prendaRaw.trim() : '\n';
+  const marca = typeof marcaRaw === 'string' ? marcaRaw.trim() : '\n';
 
   if (!UUID.test(id)) {
     return json({ error: 'Identificador invalido.' }, 400);
@@ -163,6 +173,9 @@ async function crearBorrador(request: Request, env: Env, ctx: ExecutionContext, 
   }
   if (precioRopa !== null && (!capturaRopaDisponible(env) || !PRECIOS_ROPA.includes(precioRopa))) {
     return json({ error: 'Precio de ropa invalido.' }, 400);
+  }
+  if (!textoCapturaRopa(prendaRaw) || (prenda && !PRENDAS_ROPA.includes(prenda)) || !textoCapturaRopa(marcaRaw)) {
+    return json({ error: 'Prenda o marca invalida.' }, 400);
   }
   if (!(foto instanceof File) || foto.size === 0) {
     return json({ error: 'Falta la foto.' }, 400);
@@ -202,16 +215,16 @@ async function crearBorrador(request: Request, env: Env, ctx: ExecutionContext, 
   if (precioRopa !== null) {
     // El reenvío de una foto conserva el precio revisado, el código y el stock ya vendido.
     await env.DB.prepare(
-      `insert into productos (id, nombre, categoria, precio, estado_analisis, destino, semana_ingreso,
+      `insert into productos (id, nombre, marca, categoria, precio, estado_analisis, destino, semana_ingreso,
                               estado_fisico, stock, talla, foto_key, capturado_por, creado_en, actualizado_en, propietario)
-       values (?, 'Ropa', 'ropa', ?, 'listo', 'etiqueta', ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       values (?, ?, ?, 'ropa', ?, 'listo', 'etiqueta', ?, ?, ?, ?, ?, ?, ?, ?, ?)
        on conflict (id) do nothing`,
-    ).bind(id, precioRopa, semanaIngreso(ahora), estadoFisico, cantidad, talla, fotoKey,
+    ).bind(id, nombreRopa(prenda, marca), marca, precioRopa, semanaIngreso(ahora), estadoFisico, cantidad, talla, fotoKey,
       capturadoPor, ahora.toISOString(), ahora.toISOString(), propietario).run();
-    const guardada = await env.DB.prepare('select id, nombre, precio, estado_fisico, estado_analisis, stock, talla from productos where id = ?')
-      .bind(id).first<{ estado_analisis: string }>();
+    const guardada = await env.DB.prepare('select id, nombre, marca, precio, estado_fisico, estado_analisis, stock, talla from productos where id = ?')
+      .bind(id).first<{ estado_analisis: string; nombre: string; marca: string }>();
     if (guardada?.estado_analisis === 'descartado') await env.FOTOS.delete(fotoKey);
-    return json(guardada, 201);
+    return json(guardada ? { ...guardada, prenda: prendaDeNombre(guardada.nombre, guardada.marca) } : guardada, 201);
   }
   await env.DB.prepare(
     `insert into productos (id, semana_ingreso, estado_fisico, stock, talla, foto_key, capturado_por, creado_en, actualizado_en, propietario)
@@ -460,10 +473,10 @@ async function revisarCaptura(id: string, request: Request, env: Env, correo: st
       values (?, 0, 'descartado', ?, ?, ?, ?) on conflict(id) do nothing`)
       .bind(id, semanaIngreso(new Date()), correo, ahora, ahora).run();
   }
-  const fila = await env.DB.prepare(`select id, precio, estado_fisico, estado_analisis, stock, talla, codigo from productos where ${alcance}`)
-    .bind(id, correo, desde).first<{ estado_analisis: string }>();
+  const fila = await env.DB.prepare(`select id, precio, estado_fisico, estado_analisis, stock, talla, codigo, nombre, marca, categoria from productos where ${alcance}`)
+    .bind(id, correo, desde).first<{ id: string; nombre: string; marca: string; categoria: string; estado_analisis: string; precio: number; estado_fisico: string; stock: number; talla: string | null; codigo: string | null }>();
   if (!fila) return json({ error: 'Solo puedes corregir lo que capturaste en las últimas 24 horas.' }, 404);
-  if (request.method === 'GET') return json(fila);
+  if (request.method === 'GET') return json({ ...fila, prenda: prendaDeNombre(fila.nombre, fila.marca) });
   if (request.method === 'DELETE') {
     const resultado = await env.DB.prepare(`update productos set stock = 0, precio = 0, foto_key = '',
         estado_analisis = 'descartado', actualizado_en = ? where ${alcance}
@@ -477,7 +490,7 @@ async function revisarCaptura(id: string, request: Request, env: Env, correo: st
   if (request.method !== 'PATCH') return json({ error: 'Metodo no permitido.' }, 405);
   const cambios = await request.json().catch(() => null) as Record<string, unknown> | null;
   if (!cambios || Array.isArray(cambios) || typeof cambios !== 'object' || !Object.keys(cambios).length
-      || Object.keys(cambios).some((k) => !['precio', 'estado_fisico'].includes(k))) {
+      || Object.keys(cambios).some((k) => !['precio', 'estado_fisico', 'prenda', 'marca'].includes(k))) {
     return json({ error: 'Corrección invalida.' }, 400);
   }
   if (cambios.precio !== undefined && (typeof cambios.precio !== 'number' || !PRECIOS_ROPA.includes(cambios.precio))) {
@@ -486,13 +499,20 @@ async function revisarCaptura(id: string, request: Request, env: Env, correo: st
   if (cambios.estado_fisico !== undefined && (typeof cambios.estado_fisico !== 'string' || !ESTADOS_FISICOS.has(cambios.estado_fisico))) {
     return json({ error: 'Estado fisico invalido.' }, 400);
   }
+  if ((cambios.prenda !== undefined && (!textoCapturaRopa(cambios.prenda) || (String(cambios.prenda).trim() !== '' && !PRENDAS_ROPA.includes(String(cambios.prenda).trim()))))
+      || (cambios.marca !== undefined && !textoCapturaRopa(cambios.marca))) return json({ error: 'Prenda o marca invalida.' }, 400);
+  if ((cambios.prenda !== undefined || cambios.marca !== undefined) && fila.categoria !== 'ropa') return json({ error: 'Solo se corrige prenda y marca en ropa.' }, 400);
+  const prenda = cambios.prenda === undefined ? prendaDeNombre(fila.nombre, fila.marca) : cambios.prenda as string;
+  const marca = cambios.marca === undefined ? fila.marca : cambios.marca as string;
+  const nombre = cambios.prenda === undefined && cambios.marca === undefined ? fila.nombre : nombreRopa(prenda.trim(), marca.trim());
   const resultado = await env.DB.prepare(`update productos set precio = coalesce(?, precio),
-      estado_fisico = coalesce(?, estado_fisico), actualizado_en = ? where ${alcance} and estado_analisis = 'listo'
+      estado_fisico = coalesce(?, estado_fisico), nombre = ?, marca = ?, actualizado_en = ? where ${alcance} and estado_analisis = 'listo'
       and (? is null or precio_lista = 0 or precio_lista >= ?)`)
-    .bind(cambios.precio ?? null, cambios.estado_fisico ?? null, ahora, id, correo, desde, cambios.precio ?? null, cambios.precio ?? null).run();
+    .bind(cambios.precio ?? null, cambios.estado_fisico ?? null, nombre, marca.trim(), ahora, id, correo, desde, cambios.precio ?? null, cambios.precio ?? null).run();
   if (!resultado.meta.changes) return json({ error: 'La captura no está lista, fue eliminada o el precio supera el de lista.' }, 409);
-  return json(await env.DB.prepare(`select id, precio, estado_fisico, estado_analisis, stock, talla, codigo from productos where ${alcance}`)
-    .bind(id, correo, desde).first());
+  const guardada = await env.DB.prepare(`select id, precio, estado_fisico, estado_analisis, stock, talla, codigo, nombre, marca from productos where ${alcance}`)
+    .bind(id, correo, desde).first<{ nombre: string; marca: string }>();
+  return json(guardada ? { ...guardada, prenda: prendaDeNombre(guardada.nombre, guardada.marca) } : guardada);
 }
 
 /**
@@ -1802,6 +1822,8 @@ export default {
       if (pathname === '/api/yo') {
         return await yo(env, correo, soloComputadora(await leerUsuario(env, correo)) ? await cajeroEnTurno(request, env) : null);
       }
+      const respuestaRopaIA = await rutaRopaAdmin(request, env, pathname);
+      if (respuestaRopaIA) return respuestaRopaIA;
       if (pathname === '/api/cajeros' && request.method === 'GET') return await listarCajeros(env);
       if (pathname === '/api/cajeros/entrar' && request.method === 'POST') return await entrar(request, env);
       if (pathname === '/api/cajeros/salir' && request.method === 'POST') return await salir(request, env);
@@ -2089,5 +2111,6 @@ export default {
     ctx.waitUntil(sincronizar(env));
     // Apartados cuyo plazo llego: vuelven a la venta (Issue #269). Aparte, para que uno no frene al otro.
     ctx.waitUntil(vencerPedidos(env));
+    ctx.waitUntil(procesarColaRopa(env));
   },
 } satisfies ExportedHandler<Env>;

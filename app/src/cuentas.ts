@@ -105,6 +105,8 @@ export function permiso(pathname: string, metodo: string): Regla {
   if (ruta === '/api/nomina/entrada' || ruta === '/api/nomina/checador') return CAJA;
   if (ruta === '/api/nomina' || ruta.startsWith('/api/nomina/')) return AUXILIAR;
   if (ruta === '/api/config') return metodo === 'GET' ? CAPTURA_FEP : DUENO;
+  // Ropa de El Dolarón: FEP (finanzas) no ve ni renombra piezas ajenas (Issue #318).
+  if (ruta === '/api/ropa-ia' || ruta.startsWith('/api/ropa-ia/')) return CAPTURA;
   if (ruta === '/api/familias') return metodo === 'GET' ? TODOS : DUENO;
   if (ruta === '/api/borradores/manual') return DUENO;   // captura sin foto (Issue #115)
   if (ruta === '/api/borradores' || ruta.startsWith('/api/borradores/')) return CAPTURA_FEP;
