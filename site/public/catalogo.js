@@ -65,7 +65,7 @@
         const li = document.createElement("li");
         const cartel = document.createElement("article");
         cartel.className = "poster";
-        cartel.setAttribute("aria-label", pieza.nombre);
+        cartel.setAttribute("aria-label", pieza.ultima ? `${pieza.nombre}, última pieza` : pieza.nombre);
         const cabeza = document.createElement("p");
         cabeza.className = "poster-head";
         cabeza.textContent = "Se busca";
@@ -93,6 +93,14 @@
         zoom.setAttribute("aria-hidden", "true");
         zoom.textContent = "Ver foto";
         foto.append(img, zoom);
+        if (pieza.ultima) {
+          // Sello de goma sobre la foto: lo dice el servidor cuando queda una sola pieza.
+          const sello = document.createElement("span");
+          sello.className = "poster-stamp";
+          sello.setAttribute("aria-hidden", "true");
+          sello.textContent = "¡Última pieza!";
+          foto.append(sello);
+        }
         foto.addEventListener("click", () => abrirVisor(pieza, foto));
         const visto = document.createElement("p");
         visto.className = "poster-seen";

@@ -101,6 +101,11 @@ h2 { font-family: var(--display); font-variation-settings: var(--display-axes); 
 .poster-photo { position: relative; display: block; width: 100%; aspect-ratio: 1; padding: 0; overflow: hidden; border: 3px solid var(--ink); background: var(--white); cursor: pointer; }
 .poster-photo img { width: 100%; height: 100%; object-fit: cover; filter: sepia(.12) contrast(1.04); }
 .poster-zoom { position: absolute; right: 6px; bottom: 6px; padding: 4px 8px 3px; border: 1.5px solid var(--ink); background: rgb(246 238 216 / .94); color: var(--ink); font: 800 12px/1.1 "Archivo", sans-serif; letter-spacing: .04em; text-transform: uppercase; pointer-events: none; }
+/* Sello de goma «¡Última pieza!» (Issue #339): tinta roja gastada, chueco, encima de la foto. */
+.poster-stamp { position: absolute; top: 14px; left: 10px; padding: 8px 14px 5px; border: 3px solid var(--red); outline: 1.5px solid var(--red); outline-offset: 2px; border-radius: 4px;
+  background: rgb(246 238 216 / .9); color: var(--red); font-family: "Anton", sans-serif; font-size: clamp(22px, 2.2vw, 30px); line-height: 1.1; letter-spacing: .05em; text-transform: uppercase; rotate: -8deg; pointer-events: none;
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.55' numOctaves='2'/%3E%3CfeColorMatrix values='0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 -1.3 1.65'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url%28%23n%29'/%3E%3C/svg%3E");
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.55' numOctaves='2'/%3E%3CfeColorMatrix values='0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 -1.3 1.65'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url%28%23n%29'/%3E%3C/svg%3E"); }
 .poster-seen { margin-top: 10px; font-family: var(--display); font-style: italic; font-size: 15px; line-height: 1.3; text-wrap: balance; }
 .poster-foot { display: flex; flex-direction: column; align-items: center; gap: 14px; margin-top: auto; padding-top: 14px; }
 .poster-price { display: flex; flex-direction: column; align-items: center; gap: 6px; color: var(--red); font-family: "Anton", sans-serif; font-size: 46px; line-height: 1; }
