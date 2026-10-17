@@ -48,7 +48,7 @@ function pagina(fetcher) {
   root.querySelector = (k) => partes[k];
   const relojes = [];
   vm.runInNewContext(fuente, {
-    document: { querySelector: () => null, getElementById: () => root, createElement: () => new Nodo() },
+    document: { querySelector: () => null, getElementById: (id) => (id === "catalogo" ? root : null), createElement: () => new Nodo() },
     location: { search: "" }, Image: class extends Nodo {}, fetch: fetcher, AbortController, URL, URLSearchParams, Intl, Number, String, encodeURIComponent,
     setTimeout: (fn) => relojes.push(fn), clearTimeout: () => {},
   });

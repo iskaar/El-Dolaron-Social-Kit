@@ -11,9 +11,9 @@
 <style>
   @font-face { font-family: Archivo; src: url("assets/fonts/archivo-variable.woff2") format("woff2"); font-weight: 100 900; font-display: swap; }
   @font-face { font-family: Fraunces; src: url("assets/fonts/fraunces-normal.woff2") format("woff2"); font-weight: 100 900; font-display: swap; }
-  :root { --azul: #16366B; --rojo: #D72B32; --papel: #EDE6D3; --amarillo: #FFD447; }
+  :root { --azul: #16366B; --rojo: #D72B32; --bruma: #F2F5FA; --amarillo: #FFD447; }
   * { box-sizing: border-box; }
-  body { margin: 0; color: var(--azul); background: var(--papel); font: 16px/1.7 Archivo, "Trebuchet MS", sans-serif; }
+  body { margin: 0; color: var(--azul); background: #fff; font: 16px/1.7 Archivo, "Trebuchet MS", sans-serif; }
   .wrap { width: min(1120px, calc(100% - 40px)); margin-inline: auto; }
   header { border-bottom: 5px double var(--azul); }
   .cabecera { display: flex; align-items: center; justify-content: space-between; gap: 20px; padding-block: 20px; }
@@ -36,12 +36,12 @@
   .indice p { font-weight: 750; margin-bottom: 10px; }
   .indice ul { list-style: none; padding: 0; margin: 0; }
   .indice a { display: block; padding-block: 7px; }
-  article { min-width: 0; padding: clamp(22px, 4vw, 42px); background: #fff; border-top: 6px solid var(--azul); }
+  article { min-width: 0; padding: clamp(22px, 4vw, 42px); background: #fff; border: 2px solid var(--azul); box-shadow: 5px 5px 0 var(--azul); }
   section { scroll-margin-top: 24px; }
   section + section { margin-top: 32px; padding-top: 32px; border-top: 1px solid #cfd6e0; }
   ul, ol { margin: 0 0 16px; padding-left: 24px; }
   li + li { margin-top: 9px; }
-  .nota { padding: 16px 20px; background: var(--papel); border-left: 4px solid var(--azul); }
+  .nota { padding: 16px 20px; background: var(--bruma); border-left: 4px solid var(--azul); }
   footer { padding-block: 28px; border-top: 5px double var(--azul); font-size: 14px; }
   footer p { margin-bottom: 8px; }
   @media (max-width: 760px) {
@@ -57,7 +57,7 @@
     .wrap { width: 100%; }
     .indice, .acciones, .saltar, .cabecera > a:last-child { display: none; }
     .contenido { display: block; }
-    article { padding: 0; border: 0; }
+    article { padding: 0; border: 0; box-shadow: none; }
     h2 { break-after: avoid; }
   }
 </style>

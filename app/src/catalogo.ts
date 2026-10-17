@@ -50,8 +50,17 @@ function aPieza(p: Record<string, any>, url: URL) {
   };
 }
 
-/** Portada del sitio: lo que mas se vendio en 14 dias y sigue a la venta; si faltan, lo mas nuevo. */
+/**
+ * Lo que mas se vendio en 14 dias y sigue a la venta; si faltan, lo mas nuevo.
+ * Con ?orden=precio (Issue #339, «Los más buscados» del sitio): lo de mayor precio, con `ultima` si queda una sola
+ * pieza. Solo esa marca, nunca la existencia: el sitio no debe enseñar cuánto inventario hay.
+ */
 async function destacados(env: Env, url: URL): Promise<Response> {
+  if (url.searchParams.get('orden') === 'precio') {
+    const filas = await env.DB.prepare(`select p.codigo, p.nombre, p.marca, p.categoria, p.talla, p.precio, p.precio_lista, p.stock from productos p
+      where ${VENDIBLE} order by p.precio desc, p.creado_en desc, p.codigo limit ?`).bind(DESTACADOS).all<Record<string, any>>();
+    return json({ piezas: filas.results.map((p) => ({ ...aPieza(p, url), ultima: p.stock === 1 })) }, 200, { 'cache-control': 'public, max-age=300' });
+  }
   const desde = new Date(Date.now() - DIAS_DESTACADOS * 86_400_000).toISOString();
   const filas = await env.DB.prepare(`select p.codigo, p.nombre, p.marca, p.categoria, p.talla, p.precio, p.precio_lista from productos p
     left join (select l.codigo, sum(l.cantidad) as n from venta_lineas l join ventas v on v.id = l.venta_id
