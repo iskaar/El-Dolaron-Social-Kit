@@ -289,6 +289,23 @@ test('un cambio de precio despues de imprimir regresa la pieza a la lista; uno i
   delete (globalThis as any).localStorage;
 });
 
+test('corregir nombre o talla despues de imprimir regresa la pieza para reimprimir (#361)', async () => {
+  const guardado = new Map<string, string>();
+  (globalThis as any).localStorage = { getItem: (k: string) => guardado.get(k) ?? null, setItem: (k: string, v: string) => guardado.set(k, v) };
+  const { marcarImpresa, impresas, etiquetaVigente } = await import('../public/etiquetera.js');
+  const pieza = { precio: 10000, precio_lista: 0, nombre: 'Playera Cat & Jack', talla: 'M', stock: 1 };
+  marcarImpresa('a', '2026-10-18T18:00:00.000Z', pieza);
+  const marca = impresas().a;
+  assert.equal(etiquetaVigente(marca, pieza), true);
+  assert.equal(etiquetaVigente(marca, { ...pieza, nombre: 'Sudadera All in Motion' }), false);
+  assert.equal(etiquetaVigente(marca, { ...pieza, talla: 'L' }), false);
+  assert.equal(etiquetaVigente(marca, { ...pieza, nombre: ' Playera Cat & Jack ' }), true);   // espacios no se imprimen
+  // Marca de antes de guardar el nombre: solo el precio decide.
+  guardado.set('etiqueta-impresas', JSON.stringify({ b: { hora: '2026-10-18T17:00:00.000Z', precio: 10000, precio_lista: 0 } }));
+  assert.equal(etiquetaVigente(impresas().b, { ...pieza, nombre: 'Otra cosa' }), true);
+  delete (globalThis as any).localStorage;
+});
+
 test('la prueba de codigos largos usa la etiqueta real y el mismo ancho de barra', () => {
   const tspl = tsplPruebaLargos();
   const barras = [...tspl.matchAll(/BARCODE (\d+),\d+,"128",56,0,0,(\d+),\d+,"(\d+)"/g)];
