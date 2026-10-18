@@ -3,7 +3,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { runInNewContext } from 'node:vm';
-import { totales, agregar, efectivoAlcanza, saldoCanjeable, dolaronesGanados, maximoCanje, desfaseReloj, anticipoDePedido, envioDe } from '../public/venta.js';
+import { totales, agregar, leerMultiplicador, efectivoAlcanza, saldoCanjeable, dolaronesGanados, maximoCanje, desfaseReloj, anticipoDePedido, envioDe } from '../public/venta.js';
 
 interface Linea { codigo: string; nombre: string; precio: number; cantidad: number }
 const pieza = (codigo: string, precio: number) => ({ codigo, nombre: codigo, precio });
@@ -217,4 +217,17 @@ test('cobro con pedido rechazado por el servidor deja el ticket y el pedido para
   assert.match(c.$('aviso').textContent, /Vuelve a cargarlo/);
   assert.equal((c.contexto.pedidoCargado as any).folio, 17);
   assert.equal(c.guardadas.length, 0);
+});
+
+test('3* antes del codigo agrega 3 piezas en un renglon (#358)', () => {
+  assert.deepEqual(leerMultiplicador('ED-000123'), { cantidad: 1, codigo: 'ED-000123' });
+  assert.deepEqual(leerMultiplicador('3*123'), { cantidad: 3, codigo: '123' });
+  assert.deepEqual(leerMultiplicador(' 12 * juguetes 49'), { cantidad: 12, codigo: 'juguetes 49' });
+  assert.equal(leerMultiplicador('0*123'), null);
+  assert.equal(leerMultiplicador('100*123'), null);
+  let lineas = agregar([], pieza('G19', 1900), 3);
+  lineas = agregar(lineas, pieza('G19', 1900));
+  assert.equal(lineas.length, 1);
+  assert.equal(lineas[0].cantidad, 4);
+  assert.equal(totales(lineas).total, 7600);
 });

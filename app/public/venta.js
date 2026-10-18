@@ -115,12 +115,23 @@ export function maximoCanje(socio, total, ahora = Date.now()) {
 }
 
 /** Agrega una pieza al ticket, juntando lineas repetidas del mismo codigo. */
-export function agregar(lineas, pieza) {
+export function agregar(lineas, pieza, cantidad = 1) {
   const existente = lineas.find((l) => l.codigo === pieza.codigo && l.precio === pieza.precio);
   if (existente) {
-    return lineas.map((l) => (l === existente ? { ...l, cantidad: l.cantidad + 1 } : l));
+    return lineas.map((l) => (l === existente ? { ...l, cantidad: l.cantidad + cantidad } : l));
   }
-  return [...lineas, { ...pieza, cantidad: 1 }];
+  return [...lineas, { ...pieza, cantidad }];
+}
+
+/**
+ * «3*» antes de escanear agrega 3 piezas (Issue #358): "3*ED-000123", "3*123".
+ * Sin prefijo la cantidad es 1. null = prefijo que no es 1 a 99.
+ */
+export function leerMultiplicador(texto) {
+  const m = /^\s*(\d+)\s*\*\s*(.*)$/.exec(texto);
+  if (!m) return { cantidad: 1, codigo: texto };
+  const cantidad = Number(m[1]);
+  return cantidad >= 1 && cantidad <= 99 ? { cantidad, codigo: m[2] } : null;
 }
 
 /**

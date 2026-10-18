@@ -35,8 +35,10 @@
   #sugerencias button:active { background: #eef1f6; }
   #sugerencias .codigo { font-family: ui-monospace, monospace; color: #78839a; }
   #ticket { flex: 1; overflow-y: auto; margin-top: 4px; }
-  .renglon { display: grid; grid-template-columns: 1fr 52px 90px 32px; gap: 8px; align-items: center;
+  .renglon { display: grid; grid-template-columns: 64px 1fr 52px 90px 32px; gap: 8px; align-items: center;
     padding: 9px 4px; border-bottom: 1px solid var(--linea); }
+  /* El cajero compara la foto con lo que tiene en la mano: etiqueta en la prenda equivocada (Issue #358). */
+  .renglon .foto { width: 64px; height: 64px; object-fit: cover; border-radius: 6px; background: #eef1f6; display: block; }
   .renglon .nombre { font-size: 15px; }
   .renglon .codigo { font-size: 11px; color: #78839a; font-family: ui-monospace, monospace; }
   .renglon .importe { text-align: right; font-weight: 700; font-variant-numeric: tabular-nums; }
@@ -399,7 +401,7 @@ if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw-caja.js'
 </dialog>
 <script type="module">
 import { CATEGORIAS_GASTO } from '/categorias.js';
-import { totales, agregar, efectivoAlcanza, dolaronesGanados, saldoCanjeable, maximoCanje, MINIMO_REGALO, descuentoDe, TOPE_DESCUENTO, DENOMINACIONES, contadoDe, promoInauguracion, desfaseReloj, anticipoDePedido } from '/venta.js';
+import { totales, agregar, leerMultiplicador, efectivoAlcanza, dolaronesGanados, saldoCanjeable, maximoCanje, MINIMO_REGALO, descuentoDe, TOPE_DESCUENTO, DENOMINACIONES, contadoDe, promoInauguracion, desfaseReloj, anticipoDePedido } from '/venta.js';
 import { abrirCamara } from '/camara.js';
 import {
   reconectarImpresora, conectarImpresora, impresoraLista, imprimirTicket, abrirCajon, explicarErrorUsb, errorImpresora,
@@ -669,12 +671,14 @@ function pintar() {
 
   $('ticket').innerHTML = lineas.map((l, i) => `
     <div class="renglon">
+      ${l.producto_id ? `<img class="foto" src="/api/foto/${encodeURIComponent(l.producto_id)}" alt="" loading="lazy" onerror="this.style.visibility='hidden'">` : '<div></div>'}
       <div><div class="nombre">${escapar(l.nombre)}</div><div class="codigo">${escapar(l.codigo)}</div></div>
       <div>x${l.cantidad}</div>
       <div class="importe">${pesos(l.precio * l.cantidad)}</div>
       <button type="button" data-quitar="${i}" aria-label="Quitar" ${cobrando ? 'disabled' : ''}>✕</button>
     </div>`).join('') + (descuento && descuento.estado !== 'rechazada' ? `
     <div class="renglon">
+      <div></div>
       <div><div class="nombre">Descuento</div><div class="codigo">${descuento.estado === 'aprobada' ? 'aprobado' : 'esperando al dueño'}</div></div>
       <div></div>
       <div class="importe">−${pesos(descuento.monto)}</div>
@@ -750,7 +754,14 @@ function buscarPieza(codigo) {
 
 function agregarCodigo(leido, reintento = false) {
   if (cobrando) return;
-  const codigo = codigoDeDigitos(leido) ?? leido;
+  const multiplicado = leerMultiplicador(leido);
+  if (!multiplicado) {
+    $('aviso').textContent = 'La cantidad antes del * va de 1 a 99.';
+    $('aviso').style.color = '#D72B32';
+    return false;
+  }
+  const { cantidad } = multiplicado;
+  const codigo = codigoDeDigitos(multiplicado.codigo) ?? multiplicado.codigo;
   // Folio de un pedido por WhatsApp (P-17): trae sus piezas apartadas y su saldo (Issue #269).
   if (/^P-?\d+$/i.test(codigo.trim())) {
     cargarPedido(Number(codigo.trim().replace(/\D/g, '')));
@@ -776,8 +787,8 @@ function agregarCodigo(leido, reintento = false) {
     const enTicket = lineas
       .filter((l) => l.codigo === pieza.codigo)
       .reduce((suma, l) => suma + l.cantidad, 0);
-    if (pieza.stock - enTicket <= 0) {
-      $('aviso').textContent = enTicket > 0
+    if (pieza.stock - enTicket < cantidad) {
+      $('aviso').textContent = enTicket > 0 || (cantidad > 1 && pieza.stock > 0)
         ? `${pieza.nombre}: solo hay ${pieza.stock} en existencia.`
         : `${pieza.nombre} ya se vendió o está apartada. Revisa la etiqueta.`;
       $('aviso').style.color = '#D72B32';
@@ -787,7 +798,7 @@ function agregarCodigo(leido, reintento = false) {
 
   lineas = agregar(lineas, {
     codigo: pieza.codigo, nombre: pieza.nombre, precio: pieza.precio, producto_id: pieza.id,
-  });
+  }, cantidad);
   idVenta = null;
   $('aviso').textContent = '';
   pintar();
@@ -816,7 +827,7 @@ function buscarPorTexto(texto) {
 }
 
 function pintarSugerencias() {
-  const texto = $('codigo').value;
+  const texto = leerMultiplicador($('codigo').value)?.codigo ?? '';
   const piezas = texto.trim().length >= 2 && !buscarPieza(texto) ? buscarPorTexto(texto) : [];
   $('sugerencias').innerHTML = piezas.map((p) => `
     <button type="button" data-codigo="${escapar(p.codigo)}">
@@ -828,7 +839,8 @@ $('codigo').addEventListener('input', pintarSugerencias);
 $('sugerencias').addEventListener('click', (e) => {
   const codigo = e.target.closest('button')?.dataset.codigo;
   if (!codigo) return;
-  agregarCodigo(codigo);
+  // «3*juguetes» y clic en la sugerencia: tambien entran 3.
+  agregarCodigo(`${leerMultiplicador($('codigo').value)?.cantidad ?? 1}*${codigo}`);
   $('codigo').value = '';
   pintarSugerencias();
   $('codigo').focus();
