@@ -23,12 +23,22 @@ export async function valeDeVenta(env: Env, id: string): Promise<Vale | null> {
     .bind(id).first<Vale>();
 }
 
-export async function valeUsadoEnVenta(env: Env, id: string): Promise<Vale | null> {
-  return env.DB.prepare(`select k.id, k.codigo, k.importe, k.restante, k.disponible_desde, k.vence_en, k.creado_en
+/** Los vales con que se pago la venta, en el orden en que se gastaron (se pueden juntar varios, Isaac 17/10). */
+export async function valesUsadosEnVenta(env: Env, id: string): Promise<Vale[]> {
+  return (await env.DB.prepare(`select k.id, k.codigo, k.importe, k.restante, k.disponible_desde, k.vence_en, k.creado_en
     from vales_dolarones k join vales_movimientos m on m.vale_id = k.id
-    join ventas v on v.id = m.venta_id where m.venta_id = ? and m.tipo = 'canje' and v.cancelada = 0`)
-    .bind(id).first<Vale>();
+    join ventas v on v.id = m.venta_id where m.venta_id = ? and m.tipo = 'canje' and v.cancelada = 0 order by m.id`)
+    .bind(id).all<Vale>()).results;
 }
+
+/** Para respuestas: `vales_usados` y, para cajas viejas, `vale_usado` (el primero). */
+export async function usadosEnVenta(env: Env, id: string) {
+  const vales = await valesUsadosEnVenta(env, id);
+  return { vale_usado:vales[0] ?? null, vales_usados:vales };
+}
+
+// ponytail: tope de vales por ticket, para que una lista enorme no arme un batch enorme.
+export const MAXIMO_VALES = 10;
 
 export async function buscarVale(request: Request, env: Env): Promise<Response> {
   const body = await request.json().then((c) => c ?? {}, () => ({})) as { codigo?: unknown };
@@ -57,29 +67,42 @@ type Resultado = { ok:true; sentencias:D1PreparedStatement[]; emitido:Vale | nul
 
 /** Emisión y canje van en el mismo batch que dinero, stock y venta. */
 export async function sentenciasVale(env: Env, p: {
-  ventaId:string; clienteId:string | null; codigo:string; dolarones:number; total:number; autor:string; ahora:Date;
+  ventaId:string; clienteId:string | null; codigo:unknown; dolarones:number; total:number; autor:string; ahora:Date;
 }): Promise<Resultado> {
   if (!Number.isSafeInteger(p.total) || p.total < 0 || !Number.isSafeInteger(p.dolarones) || p.dolarones < 0 || p.dolarones > p.total)
     return { ok:false, status:400, error:'Importe de Dolarones inválido.' };
-  // ponytail: un vale por ticket; combinar varios sólo cuando se solicite.
-  if (p.codigo && (!codigoValeValido(env, p.codigo) || p.clienteId))
-    return { ok:false, status:400, error:'Usa un vale o una membresía, no ambos en el mismo ticket.' };
+  // Uno (texto, como siempre) o varios vales juntos (lista); nunca con membresía.
+  const codigos = (Array.isArray(p.codigo) ? p.codigo : p.codigo ? [p.codigo] : []).map(String);
+  if (codigos.length && (p.clienteId || codigos.some((c) => !codigoValeValido(env, c))))
+    return { ok:false, status:400, error:'Usa vales o una membresía, no ambos en el mismo ticket.' };
+  if (new Set(codigos).size !== codigos.length || codigos.length > MAXIMO_VALES)
+    return { ok:false, status:400, error:`Cada vale una sola vez, hasta ${MAXIMO_VALES} por ticket.` };
   const ahora = p.ahora.toISOString();
   const sentencias:D1PreparedStatement[] = [];
-  if (p.codigo && p.dolarones > 0) {
-    const vale = await env.DB.prepare(`select k.id from vales_dolarones k left join ventas v on v.id = k.venta_id
-      where k.codigo = ? and coalesce(v.cancelada, 0) = 0 and k.restante >= ?
-      and k.disponible_desde <= ? and k.vence_en > ?`)
-      .bind(p.codigo, p.dolarones, ahora, ahora).first<{ id:string }>();
-    if (!vale) return { ok:false, status:409, error:'Vale no disponible o saldo insuficiente. Vuelve a escanearlo.' };
-    sentencias.push(
-      env.DB.prepare(`update vales_dolarones set restante = case
-        when disponible_desde <= ? and vence_en > ? and vence_en > strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
-        and coalesce((select cancelada from ventas where id = venta_id), 0) = 0
-        then restante - ? else -1 end where id = ?`).bind(ahora, ahora, p.dolarones, vale.id),
-      env.DB.prepare(`insert into vales_movimientos (vale_id, venta_id, tipo, importe, autor, creado_en)
-        values (?, ?, 'canje', ?, ?, ?)`).bind(vale.id, p.ventaId, -p.dolarones, p.autor, ahora),
-    );
+  if (codigos.length && p.dolarones > 0) {
+    const { results:vales } = await env.DB.prepare(`select k.id, k.restante from vales_dolarones k
+      left join ventas v on v.id = k.venta_id
+      where k.codigo in (${codigos.map(() => '?').join(',')}) and coalesce(v.cancelada, 0) = 0 and k.restante > 0
+      and k.disponible_desde <= ? and k.vence_en > ? order by k.vence_en, k.id`)
+      .bind(...codigos, ahora, ahora).all<{ id:string; restante:number }>();
+    const saldo = vales.reduce((suma, k) => suma + k.restante, 0);
+    if (vales.length !== codigos.length || saldo < p.dolarones)
+      return { ok:false, status:409, error:'Vale no disponible o saldo insuficiente. Vuelve a escanearlo.' };
+    // Primero se gasta el que vence antes (bases, punto 9); uno que no hace falta no se toca.
+    let falta = p.dolarones;
+    for (const vale of vales) {
+      const usa = Math.min(vale.restante, falta);
+      if (usa === 0) break;
+      falta -= usa;
+      sentencias.push(
+        env.DB.prepare(`update vales_dolarones set restante = case
+          when disponible_desde <= ? and vence_en > ? and vence_en > strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+          and coalesce((select cancelada from ventas where id = venta_id), 0) = 0
+          then restante - ? else -1 end where id = ?`).bind(ahora, ahora, usa, vale.id),
+        env.DB.prepare(`insert into vales_movimientos (vale_id, venta_id, tipo, importe, autor, creado_en)
+          values (?, ?, 'canje', ?, ?, ?)`).bind(vale.id, p.ventaId, -usa, p.autor, ahora),
+      );
+    }
   }
   let emitido:Vale | null = null;
   const ganados = dolaronesGanados(p.total - p.dolarones, 5);

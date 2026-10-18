@@ -473,6 +473,7 @@ let pedidoCargado = null;
 // Socio de la venta en curso: { id, numero, nombre, disponible, por_liberar, regalo_disponible } o null.
 let socio = null;
 let codigoSocio = '';
+let valesCargados = [];          // vales impresos juntos en este ticket: { codigo, disponible, expira_en } (Isaac, 17/10)
 // Ticket vacío + «Usar todos»: se recuerda la elección y pintar() reaplica el máximo en cada cambio
 // (nunca más que maximoCanje, así no se cobra de más). Se apaga al teclear a mano o quitar socio.
 let usarTodos = false;
@@ -712,7 +713,9 @@ function pintar() {
   $('cobrar').textContent = `Cobrar · ${$('forma').selectedOptions[0].textContent}`;
   $('cobrar').disabled = cobrando || t.total === 0 || usados > t.total || usados > canjeable || !autorizado;
   $('codigo-autorizacion').textContent = socio?.vale
-    ? `Vale impreso: ${dolares(socio.disponible)}. Vence ${new Date(socio.expira_en).toLocaleString('es-MX')}.`
+    ? `${valesCargados.length > 1 ? `${valesCargados.length} vales impresos` : 'Vale impreso'}: ${dolares(socio.disponible)}.`
+      + ` ${valesCargados.length > 1 ? 'El primero vence' : 'Vence'} ${new Date(socio.expira_en).toLocaleString('es-MX')}.`
+      + ' Escanea otro vale para sumarlo.'
     : codigoSocio
     ? `El cliente autorizó hasta ${dolares(socio.maximo)}. Su código vence a las ${new Date(socio.expira_en).toLocaleTimeString('es-MX')}.`
       + (!autorizado ? ' Pide otro código o reduce los D solicitados.' : '')
@@ -977,7 +980,8 @@ function pintarSocio() {
   $('quitar-socio').hidden = !socio;
   $('pagar-dolarones').hidden = !socio || socio.disponible === 0;
   $('socio-info').innerHTML = socio
-    ? (socio.vale ? '<b>Vale impreso</b>' : `<b>#${socio.numero} · ${escapar(socio.nombre)}</b>`) + ` — ${dolares(socio.disponible)} disponibles`
+    ? (socio.vale ? `<b>${valesCargados.length > 1 ? `${valesCargados.length} vales impresos` : 'Vale impreso'}</b>`
+      : `<b>#${socio.numero} · ${escapar(socio.nombre)}</b>`) + ` — ${dolares(socio.disponible)} disponibles`
       + (socio.por_liberar ? ` (+${dolares(socio.por_liberar)} desde mañana)` : '')
     : '';
 }
@@ -985,6 +989,7 @@ function pintarSocio() {
 function quitarSocio() {
   socio = null;
   codigoSocio = '';
+  valesCargados = [];
   usarTodos = false;
   busquedaSocio++;
   $('socio').value = '';
@@ -997,12 +1002,20 @@ async function buscarSocio() {
   // El lector manda vales y codigos de socio solo en digitos (code128.js).
   const q = codigoDeDigitos($('socio').value) ?? $('socio').value.trim();
   if (!q) return;
-  quitarSocio();
+  const esVale = q.startsWith('DP-') || (valesPrueba && /^\d{6}$/.test(q));
+  // Otro vale con un vale ya cargado se suma (Isaac, 17/10); un socio o un vale sobre un socio reemplaza.
+  const sumar = esVale && !!socio?.vale;
+  if (sumar && valesCargados.some((v) => v.codigo === q)) {
+    $('socio').value = '';
+    $('aviso').textContent = 'Ese vale ya está en el ticket.';
+    return;
+  }
+  if (sumar) busquedaSocio++;
+  else quitarSocio();
   const busqueda = busquedaSocio;
   idVenta = null;
   pintar();
   try {
-    const esVale = q.startsWith('DP-') || (valesPrueba && /^\d{6}$/.test(q));
     const esCodigo = q.startsWith('DC-') || esVale;
     const r = esVale
       ? await fetch('/api/vales/buscar', { method:'POST', headers:{ 'content-type':'application/json' }, body:JSON.stringify({ codigo:q }) })
@@ -1011,6 +1024,12 @@ async function buscarSocio() {
       : await fetch(`/api/socios?q=${encodeURIComponent(q)}`);
     const cuerpo = await r.json();
     if (busqueda !== busquedaSocio) return;
+    if (!r.ok && sumar) {
+      $('socio').value = '';
+      $('aviso').textContent = `No se sumó el vale: ${cuerpo.error ?? 'no está disponible'}`;
+      $('aviso').style.color = '#D72B32';
+      return;
+    }
     if (!r.ok) {
       socio = null;
       pintarSocio();
@@ -1018,9 +1037,12 @@ async function buscarSocio() {
       $('socio-info').style.color = '#D72B32';
       return;
     }
-    socio = cuerpo;
-    codigoSocio = esCodigo ? q : '';
-    $('socio').value = esVale ? 'Vale impreso' : '#' + socio.numero;
+    if (esVale) valesCargados.push({ codigo:q, disponible:cuerpo.disponible, expira_en:cuerpo.expira_en });
+    socio = sumar ? { ...socio, disponible:socio.disponible + cuerpo.disponible, maximo:socio.maximo + cuerpo.maximo,
+      expira_en:Date.parse(cuerpo.expira_en) < Date.parse(socio.expira_en) ? cuerpo.expira_en : socio.expira_en } : cuerpo;
+    codigoSocio = sumar ? codigoSocio : esCodigo ? q : '';
+    // Vacío con vale: el siguiente vale se escanea aquí mismo.
+    $('socio').value = esVale ? '' : '#' + socio.numero;
     $('dolarones').value = '';
     idVenta = null;
     $('socio-info').style.color = '';
@@ -1029,6 +1051,7 @@ async function buscarSocio() {
     preguntarDolarones();
   } catch {
     if (busqueda !== busquedaSocio) return;
+    if (sumar) { $('socio').value = ''; avisoRojo('Sin red: no se pudo sumar el vale.'); return; }
     // Sin red no hay saldo que consultar: la venta se cobra sin socio y no gana.
     $('socio-info').textContent = 'Sin red: no se pueden buscar socios. Cobra sin socio.';
     $('socio-info').style.color = '#D72B32';
@@ -1088,7 +1111,8 @@ async function cobrarConDolarones(venta, t) {
   try {
     respuesta = await fetch('/api/ventas', {
       method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ...venta,
-        ...(socio.vale ? { codigo_vale:codigoSocio } : { codigo_socio:codigoSocio }) }),
+        ...(socio.vale ? { codigo_vale:valesCargados.length > 1 ? valesCargados.map((v) => v.codigo) : codigoSocio }
+          : { codigo_socio:codigoSocio }) }),
     });
   } catch {
     $('aviso').textContent = 'Sin red: no se pudo cobrar con Dolarones. Intenta otra vez o cobra sin Dolarones.';
@@ -1106,6 +1130,7 @@ async function cobrarConDolarones(venta, t) {
   if (Object.hasOwn(cuerpo, 'imprimir_en')) venta.imprimir_en = cuerpo.imprimir_en;
   venta.vale_emitido = cuerpo.vale_emitido;
   venta.vale_usado = cuerpo.vale_usado;
+  venta.vales_usados = cuerpo.vales_usados;
   venta.saldo_pedido = cuerpo.saldo_pedido;
   if (socio.vale) return { vale:true };
   const saldo = cuerpo.saldo ?? { disponible: socio.disponible - venta.dolarones };

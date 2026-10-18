@@ -46,7 +46,7 @@ import { lineasNetas } from './netas.ts';
 import { portal, llegada, vincular } from './portal.ts';
 import { mensajesApi, responderApi } from './mensajes.ts';
 import { rutaAsistente } from './asistente.ts';
-import { sentenciasVale, buscarVale, valeDeVenta, valeUsadoEnVenta, reimprimirVale, valesAbiertos, emitirCuponManual, porcentajeCupon } from './vales.ts';
+import { sentenciasVale, buscarVale, valeDeVenta, usadosEnVenta, reimprimirVale, valesAbiertos, emitirCuponManual, porcentajeCupon } from './vales.ts';
 import { catalogoPublico, revisionCatalogo } from './catalogo.ts';
 import { procesarRecortes, revisarRecortes, reiniciarRecorte, rutaRecortesAdmin } from './recortes.ts';
 import { rutaML, recibirNotificacion, conciliarSeguro, sincronizar, publicacionViva } from './mercadolibre.ts';
@@ -920,7 +920,7 @@ async function registrarVenta(request: Request, env: Env, ctx: ExecutionContext,
       where venta_id = ? and tipo = 'compra'`).bind(id).first<{ importe:number }>();
     const respuesta = json({ id, duplicada:true, imprimir_en:previo.imprimir_en, ganados:ganado?.importe ?? 0,
       anticipo:previo.anticipo, saldo_pedido:previo.pedido_id ? await saldoDe(env, previo.pedido_id) : null,
-      vale_emitido:await valeDeVenta(env, id), vale_usado:await valeUsadoEnVenta(env, id) }, 200);
+      vale_emitido:await valeDeVenta(env, id), ...(await usadosEnVenta(env, id)) }, 200);
     respuesta.headers.set('cache-control', 'no-store');
     return respuesta;
   };
@@ -971,7 +971,7 @@ async function registrarVenta(request: Request, env: Env, ctx: ExecutionContext,
   const total = subtotal - descuento;
   const efectivo = Math.max(0, Math.round(Number(venta.efectivo ?? 0)));
   const clienteId = venta.cliente_id ? String(venta.cliente_id) : null;
-  const codigoVale = String(venta.codigo_vale ?? '');
+  const codigoVale = Array.isArray(venta.codigo_vale) ? venta.codigo_vale : String(venta.codigo_vale ?? '');
   const dolarones = Number(venta.dolarones ?? 0);
   // Anticipo = saldo de un pedido que paga parte del ticket (Issue #269). Sin pedido no hay anticipo.
   const pedidoId = venta.pedido_id ? String(venta.pedido_id) : null;
@@ -993,7 +993,7 @@ async function registrarVenta(request: Request, env: Env, ctx: ExecutionContext,
 
   // Valida socio, código y saldo; consumo y venta se confirman en el mismo batch.
   const recompensa = await sentenciasDeVenta(env, {
-    ventaId: id, clienteId, dolarones:codigoVale ? 0 : dolarones, codigo: String(venta.codigo_socio ?? ''), total, autor: correo, ahora: momento,
+    ventaId: id, clienteId, dolarones:codigoVale.length ? 0 : dolarones, codigo: String(venta.codigo_socio ?? ''), total, autor: correo, ahora: momento,
   });
   if (!recompensa.ok) {
     const concurrente = await reintento();
@@ -1085,7 +1085,7 @@ async function registrarVenta(request: Request, env: Env, ctx: ExecutionContext,
     anticipo, saldo_pedido: pedidoId ? await saldoDe(env, pedidoId) : null,
     saldo: clienteId ? await saldo(env, clienteId, ahora) : null,
     vale_emitido:vale.emitido,
-    vale_usado:await valeUsadoEnVenta(env, id),
+    ...(await usadosEnVenta(env, id)),
   }, 201);
   respuesta.headers.set('cache-control', 'no-store');
   return respuesta;
