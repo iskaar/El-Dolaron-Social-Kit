@@ -1,0 +1,177 @@
+/**
+ * Catalogo publico (Issue #204): lo que el sitio eldolaron.com muestra de la tienda.
+ * Solo vive en el host publico (HOST_PORTAL); en los hosts del personal estas
+ * rutas no existen (caen en el control de Access de siempre). Solo lectura y sin
+ * campos internos: ni id, ni costo, ni existencias, ni llave de R2.
+ * Sin Cache API: el max-age de 300 s ya protege a D1 y una pieza vendida no debe
+ * seguir en el escaparate mas de eso. ponytail: caches.default si el trafico lo pide.
+ */
+
+import { CLAVES_CATEGORIA } from '../public/categorias.js';
+import { PUBLICABLE } from './mercadolibre.ts';
+
+const POR_PAGINA = 24;
+const DESTACADOS = 6;
+const DIAS_DESTACADOS = 14;
+const ORIGEN_SITIO = 'https://eldolaron.com';
+const CODIGO = /^ED-\d{1,10}$/;
+// Presentable (Issue #220): precio, foto y nombre que se pueda leer. Nombres
+// internos = los que parecen codigo de banda ("DAMA 150 12") o llevan precio
+// ("Juguetes $49"). Sin campo que lo diga: es un patron de texto.
+// Dos formas: todo en mayusculas con numeros, o una palabra seguida solo de numeros/$
+// en cualquier caja ("dama 50", "Juguetes $49"; Issue #241: "dama 50" se colaba).
+// ponytail: falsos positivos si una pieza real trae mayusculas y numeros ("TV 55 PULGADAS") o es
+// marca + modelo ("Xbox 360"); la revision en /admin la deja corregir. Subir a columna `interna` si pasa seguido.
+const RESTO_NOMBRE = `ltrim(substr(trim(p.nombre), instr(trim(p.nombre), ' ')))`;
+const NOMBRE_INTERNO = `((p.nombre glob '*[0-9]*' and upper(p.nombre) = p.nombre)
+  or (instr(trim(p.nombre), ' ') > 0 and ${RESTO_NOMBRE} glob '[0-9$]*' and not ${RESTO_NOMBRE} glob '*[A-Za-zÁÉÍÓÚÑáéíóúñ]*'))`;
+const PRESENTABLE = `p.precio > 0 and p.foto_key <> '' and trim(p.nombre) <> '' and not ${NOMBRE_INTERNO}`;
+// Lo mismo que se publica en Mercado Libre, mas presentable: el sitio nunca muestra $0, sin foto ni nombre interno.
+export const VENDIBLE = `${PUBLICABLE} and ${PRESENTABLE}`;
+
+const CORS = {
+  'access-control-allow-origin': ORIGEN_SITIO,
+  'access-control-allow-methods': 'GET, HEAD, OPTIONS',
+  'access-control-max-age': '86400',
+};
+
+function json(cuerpo: unknown, status = 200, extra: Record<string, string> = {}): Response {
+  return new Response(JSON.stringify(cuerpo), {
+    status,
+    headers: { 'content-type': 'application/json; charset=utf-8', 'access-control-allow-origin': ORIGEN_SITIO, ...extra },
+  });
+}
+
+function aPieza(p: Record<string, any>, url: URL) {
+  return {
+    codigo: p.codigo, nombre: p.nombre, marca: p.marca, categoria: p.categoria, talla: p.talla ?? null,
+    precio: p.precio, precio_lista: p.precio_lista > p.precio ? p.precio_lista : 0,
+    foto: `${url.origin}/api/catalogo/foto/${p.codigo}`,
+    recorte: p.recorte_estado === 'listo' && p.recorte_revision === 'ok' ? `${url.origin}/api/catalogo/recorte/${p.codigo}` : null,
+  };
+}
+
+/**
+ * Lo que mas se vendio en 14 dias y sigue a la venta; si faltan, lo mas nuevo.
+ * Con ?orden=precio (Issue #339, «Los más buscados» del sitio): lo de mayor precio, con `ultima` si queda una sola
+ * pieza. Solo esa marca, nunca la existencia: el sitio no debe enseñar cuánto inventario hay.
+ */
+async function destacados(env: Env, url: URL): Promise<Response> {
+  if (url.searchParams.get('orden') === 'precio') {
+    const filas = await env.DB.prepare(`select p.codigo, p.nombre, p.marca, p.categoria, p.talla, p.precio, p.precio_lista, p.stock, p.recorte_estado, p.recorte_revision from productos p
+      where ${VENDIBLE} order by p.precio desc, p.creado_en desc, p.codigo limit ?`).bind(DESTACADOS).all<Record<string, any>>();
+    return json({ piezas: filas.results.map((p) => ({ ...aPieza(p, url), ultima: p.stock === 1 })) }, 200, { 'cache-control': 'public, max-age=300' });
+  }
+  const desde = new Date(Date.now() - DIAS_DESTACADOS * 86_400_000).toISOString();
+  const filas = await env.DB.prepare(`select p.codigo, p.nombre, p.marca, p.categoria, p.talla, p.precio, p.precio_lista, p.recorte_estado, p.recorte_revision from productos p
+    left join (select l.codigo, sum(l.cantidad) as n from venta_lineas l join ventas v on v.id = l.venta_id
+      where v.cancelada = 0 and v.creado_en >= ? group by l.codigo) s on s.codigo = p.codigo
+    where ${VENDIBLE} order by coalesce(s.n, 0) desc, p.creado_en desc, p.codigo limit ?`)
+    .bind(desde, DESTACADOS).all<Record<string, any>>();
+  return json({ piezas: filas.results.map((p) => aPieza(p, url)) }, 200, { 'cache-control': 'public, max-age=300' });
+}
+
+/** Staff (Issue #220): en existencia pero no presentable, con el motivo. Mismo universo que PUBLICABLE, sin el filtro de foto. */
+export async function revisionCatalogo(env: Env): Promise<Response> {
+  const filas = await env.DB.prepare(`select p.id, p.codigo, p.nombre, p.marca, p.categoria, p.estado_fisico, p.estado_analisis,
+      p.precio_lista, p.precio, p.stock, p.destino, p.semana_ingreso, p.creado_en,
+      (p.foto_key = '') as sin_foto, (p.precio <= 0) as sin_precio, (trim(p.nombre) = '') as sin_nombre, ${NOMBRE_INTERNO} as nombre_interno
+    from productos p
+    where p.destino = 'etiqueta' and p.sin_inventario = 0 and p.estado_analisis = 'listo' and p.stock > 0
+      and p.estado_fisico <> 'danado' and p.codigo like 'ED-%'
+      and (p.precio <= 0 or p.foto_key = '' or trim(p.nombre) = '' or ${NOMBRE_INTERNO})
+    order by p.creado_en desc, p.codigo`).all<Record<string, any>>();
+  const piezas = filas.results.map(({ sin_foto, sin_precio, sin_nombre, nombre_interno, ...p }) => ({
+    ...p,
+    motivos: [
+      ...(sin_foto ? ['sin_foto'] : []),
+      ...(sin_precio ? ['sin_precio'] : []),
+      ...(sin_nombre ? ['sin_nombre'] : []),
+      ...(nombre_interno ? ['nombre_interno'] : []),
+    ],
+  }));
+  return new Response(JSON.stringify({ piezas }), {
+    headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' },
+  });
+}
+
+// Cursor = fecha de alta + codigo de la ultima pieza entregada (Issue #241): con `pagina`
+// (offset), una venta entre paginas recorria las filas y se saltaba una pieza.
+// La fecha va tal cual la guarda D1 (siempre como parametro, nunca en el SQL).
+const CURSOR = /^([^~]{1,40})~(ED-\d{1,10})$/;
+const ACENTOS: readonly [string, string][] = [
+  ['á', 'a'], ['é', 'e'], ['í', 'i'], ['ó', 'o'], ['ú', 'u'], ['ü', 'u'], ['ñ', 'n'],
+  ['Á', 'a'], ['É', 'e'], ['Í', 'i'], ['Ó', 'o'], ['Ú', 'u'], ['Ü', 'u'], ['Ñ', 'n'],
+];
+const sinAcentosSql = (expr: string) =>
+  ACENTOS.reduce((sql, [de, a]) => `replace(${sql}, '${de}', '${a}')`, `lower(${expr})`);
+const CAMPO_BUSQUEDA = sinAcentosSql(`p.nombre || ' ' || p.marca || ' ' || p.codigo || ' ' || coalesce(p.talla, '')`);
+const normalizarBusqueda = (q: string) =>
+  q.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[\\%_]/g, (c) => `\\${c}`);
+
+async function listar(env: Env, url: URL): Promise<Response> {
+  const categoria = url.searchParams.get('categoria');
+  if (categoria !== null && !CLAVES_CATEGORIA.includes(categoria)) return json({ error: 'Categoría no válida.' }, 400);
+  const qCruda = url.searchParams.get('q');
+  const q = qCruda === null ? '' : qCruda.trim().replace(/\s+/g, ' ');
+  if (q.length > 80) return json({ error: 'Búsqueda no válida.' }, 400);
+  const texto = url.searchParams.get('pagina') ?? '1';
+  const pagina = Number(texto);
+  if (!/^\d+$/.test(texto) || !Number.isSafeInteger(pagina) || pagina < 1) return json({ error: 'Página no válida.' }, 400);
+  const despues = url.searchParams.get('despues');
+  const cursor = despues === null ? null : CURSOR.exec(despues);
+  if (despues !== null && !cursor) return json({ error: 'Cursor no válido.' }, 400);
+
+  const filtro = `${VENDIBLE}${categoria === null ? '' : ' and p.categoria = ?'}${q ? ` and ${CAMPO_BUSQUEDA} like ? escape '\\'` : ''}`;
+  const args: unknown[] = [...(categoria === null ? [] : [categoria]), ...(q ? [`%${normalizarBusqueda(q)}%`] : [])];
+  const desde = cursor ? ' and (p.creado_en < ? or (p.creado_en = ? and p.codigo > ?))' : '';
+  const [filas, cuenta] = await Promise.all([
+    env.DB.prepare(`select p.codigo, p.nombre, p.marca, p.categoria, p.talla, p.precio, p.precio_lista, p.creado_en, p.recorte_estado, p.recorte_revision from productos p
+      where ${filtro}${desde} order by p.creado_en desc, p.codigo limit ? offset ?`)
+      .bind(...args, ...(cursor ? [cursor[1], cursor[1], cursor[2]] : []), POR_PAGINA + 1, cursor ? 0 : (pagina - 1) * POR_PAGINA)
+      .all<Record<string, any>>(),
+    env.DB.prepare(`select count(*) as n from productos p where ${filtro}`).bind(...args).first<{ n: number }>(),
+  ]);
+  const hayMas = filas.results.length > POR_PAGINA;
+  const ultima = filas.results[POR_PAGINA - 1];
+  const piezas = filas.results.slice(0, POR_PAGINA).map((p) => aPieza(p, url));
+  return json({ piezas, pagina, hay_mas: hayMas, siguiente: hayMas ? `${ultima.creado_en}~${ultima.codigo}` : null, total: cuenta?.n ?? 0 }, 200,
+    { 'cache-control': 'public, max-age=300' });
+}
+
+async function foto(env: Env, codigo: string, recorte = false): Promise<Response> {
+  const no = () => json({ error: 'Foto no encontrada.' }, 404);
+  if (!CODIGO.test(codigo)) return no();
+  const p = await env.DB.prepare(`select p.id, p.foto_key, p.recorte_estado, p.recorte_revision from productos p where ${VENDIBLE} and p.codigo = ?`)
+    .bind(codigo).first<{ id: string; foto_key: string; recorte_estado: string | null; recorte_revision: string | null }>();
+  const objeto = p && (!recorte || (p.recorte_estado === 'listo' && p.recorte_revision === 'ok')) && await env.FOTOS.get(recorte ? `recortes/${p.id}.webp` : p.foto_key);
+  if (!objeto) return no();
+  return new Response(objeto.body, {
+    headers: {
+      'content-type': objeto.httpMetadata?.contentType || (recorte ? 'image/webp' : 'image/jpeg'),
+      'cache-control': 'public, max-age=86400',
+      'x-content-type-options': 'nosniff',
+      'access-control-allow-origin': ORIGEN_SITIO,
+    },
+  });
+}
+
+/** null = la ruta no es del catalogo. */
+export async function catalogoPublico(request: Request, env: Env, url: URL): Promise<Response | null> {
+  const { pathname } = url;
+  const esFoto = pathname.startsWith('/api/catalogo/foto/');
+  const esRecorte = pathname.startsWith('/api/catalogo/recorte/');
+  const esDestacados = pathname === '/api/catalogo/destacados';
+  if (pathname !== '/api/catalogo' && !esFoto && !esRecorte && !esDestacados) return null;
+  if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: CORS });
+  if (request.method !== 'GET' && request.method !== 'HEAD') {
+    return json({ error: 'Método no permitido.' }, 405, { allow: 'GET, HEAD, OPTIONS' });
+  }
+  try {
+    if (esFoto) return await foto(env, pathname.slice('/api/catalogo/foto/'.length));
+    if (esRecorte) return await foto(env, pathname.slice('/api/catalogo/recorte/'.length), true);
+    return esDestacados ? await destacados(env, url) : await listar(env, url);
+  } catch {
+    return json({ error: 'Servicio no disponible.' }, 503);
+  }
+}

@@ -1,13 +1,31 @@
 {
   "assets": [
     {
-      "file": "01-Logos/el-dolaron-logo-horizontal-fondo-blanco.png",
-      "title": "Logo horizontal",
-      "description": "Logo completo sobre fondo blanco; conservar proporciones.",
-      "width": 2172,
-      "height": 724,
+      "file": "01-Logos/el-dolaron-logo.png",
+      "title": "Logo oficial",
+      "description": "Logo oficial desde el 7/10/2026: «EL» en etiqueta amarilla, «Dolarón» azul con contorno blanco, subrayado y acento rojos. Fondo transparente; conservar proporciones. Único logo vigente.",
+      "width": 2056,
+      "height": 537,
       "format": "PNG",
-      "background": "opaque white"
+      "background": "transparent"
+    },
+    {
+      "file": "01-Logos/el-dolaron-logo-vertical.png",
+      "title": "Logo vertical",
+      "description": "El mismo logo con «EL» arriba de «Dolarón», para avatares y formatos cuadrados. Fondo transparente.",
+      "width": 1711,
+      "height": 996,
+      "format": "PNG",
+      "background": "transparent"
+    },
+    {
+      "file": "01-Logos/el-dolaron-icono-el.png",
+      "title": "Ícono «EL»",
+      "description": "Etiqueta «EL» del logo, solo para tamaños muy pequeños (favicon, íconos). Fondo transparente.",
+      "width": 414,
+      "height": 396,
+      "format": "PNG",
+      "background": "transparent"
     },
     {
       "file": "02-Perfiles-y-portadas/el-dolaron-perfil-cuadrado.png",
@@ -55,6 +73,15 @@
       "background": "opaque white"
     },
     {
+      "file": "03-Publicaciones/el-dolaron-cierre-redes-cuadrado.png",
+      "title": "Cierre de redes y contacto",
+      "description": "Última diapositiva para carruseles y publicaciones: logo oficial, redes y contacto. Es la misma imagen que el cierre de Marketplace (app/public/marketplace-redes.png); revisar los contactos antes de reutilizar.",
+      "width": 1254,
+      "height": 1254,
+      "format": "PNG",
+      "background": "opaque white"
+    },
+    {
       "file": "04-Historias/el-dolaron-producto-historia-9x16.png",
       "title": "Historia de producto",
       "description": "Agregar foto en el espacio central y precio en la etiqueta; también sirve como base para portada de video.",
@@ -73,32 +100,108 @@
       "background": "opaque white"
     },
     {
-      "file": "01-Logos/el-dolaron-simbolo-transparente.svg",
-      "title": "Símbolo D transparente",
-      "description": "Símbolo independiente; no incluye el nombre completo. SVG vectorial original exportado; PNG con canal alfa real.",
-      "format": "SVG"
+      "file": "site/public/index.html",
+      "title": "Sitio público de El Dolarón",
+      "description": "Página de presentación, contacto, ubicación y acceso a Dolarones.",
+      "format": "HTML"
     },
     {
-      "file": "01-Logos/el-dolaron-simbolo-transparente.png",
-      "title": "Símbolo D transparente",
-      "description": "Símbolo independiente; no incluye el nombre completo. SVG vectorial original exportado; PNG con canal alfa real.",
+      "file": "site/public/styles.css",
+      "title": "Estilos del sitio público",
+      "description": "Diseño adaptable con la paleta original de El Dolarón.",
+      "format": "CSS"
+    },
+    {
+      "file": "site/public/motion.js",
+      "title": "Movimiento puntual del sitio público",
+      "description": "Activa una sola entrada por acento visible; respeta movimiento reducido y conserva el contenido sin JavaScript.",
+      "format": "JS"
+    },
+    {
+      "file": "site/public/assets/hallazgos.webp",
+      "title": "Recortes de la portada del sitio",
+      "description": "Collage de recortes (ropa y productos reales de la tienda) generado en 2k a partir de las fotos reales de los productos; fondo blanco que se muestra con mix-blend-mode multiply sobre el papel.",
+      "width": 1200,
+      "height": 1200,
+      "format": "WEBP",
+      "background": "opaque"
+    },
+    {
+      "file": "site/public/assets/cartel-se-busca.webp",
+      "title": "Hoja de cartel «Se busca» (vacía)",
+      "description": "Papel envejecido con orillas rasgadas, doble filete y agujero de clavo, sin texto; fondo de los carteles de «Los más buscados» del sitio (Issue #339). Generada con Codex.",
+      "width": 760,
+      "height": 1140,
+      "format": "WEBP",
+      "background": "transparent"
+    },
+    {
+      "file": "site/public/assets/etiqueta-vacia.webp",
+      "title": "Etiqueta de cartón vacía",
+      "description": "Etiqueta colgante de cartón con hilo, sin texto; el sitio escribe el precio encima en rojo (carteles y sección de ropa, Issue #339). Generada con Codex.",
+      "width": 640,
+      "height": 320,
+      "format": "WEBP",
+      "background": "transparent"
+    },
+    {
+      "file": "app/public/marketplace.html",
+      "title": "Catálogo privado de Marketplace",
+      "description": "Pantalla del personal autorizada por el Worker; consulta inventario actual sin guardar fotos ni snapshots en el kit.",
+      "format": "HTML"
+    },
+    {
+      "file": "app/public/marketplace-redes.png",
+      "title": "Cierre de redes para Marketplace",
+      "description": "Imagen de redes aprobada para descargar desde el catálogo privado del personal.",
       "format": "PNG",
-      "width": 2048,
-      "height": 2048
+      "width": 1254,
+      "height": 1254
     },
     {
-      "file": "01-Logos/el-dolaron-insignia-social-transparente.svg",
-      "title": "Insignia social transparente",
-      "description": "Insignia circular para superponer en publicaciones, historias y videos; conservar proporciones y margen exterior.",
-      "format": "SVG"
-    },
-    {
-      "file": "01-Logos/el-dolaron-insignia-social-transparente.png",
-      "title": "Insignia social transparente",
-      "description": "PNG de alta resolución con canal alfa real para uso directo en redes sociales.",
+      "file": "site/public/assets/el-dolaron-logo.png",
+      "title": "Logo del sitio público",
+      "description": "Logo oficial reducido para la cabecera y el pie de eldolaron.com.",
+      "width": 900,
+      "height": 235,
       "format": "PNG",
-      "width": 2048,
-      "height": 2048
+      "background": "transparent"
+    },
+    {
+      "file": "site/public/assets/el-dolaron-logo-vertical.png",
+      "title": "Logo vertical del sitio",
+      "description": "Logo vertical reducido para la sección Dolarones.",
+      "width": 500,
+      "height": 291,
+      "format": "PNG",
+      "background": "transparent"
+    },
+    {
+      "file": "site/public/assets/favicon.png",
+      "title": "Favicon del sitio público",
+      "description": "Ícono «EL» a 64 px.",
+      "width": 64,
+      "height": 64,
+      "format": "PNG",
+      "background": "transparent"
+    },
+    {
+      "file": "site/public/assets/apple-touch-icon.png",
+      "title": "Ícono para iPhone",
+      "description": "Ícono «EL» sobre azul, 180 px.",
+      "width": 180,
+      "height": 180,
+      "format": "PNG",
+      "background": "opaque"
+    },
+    {
+      "file": "app/public/el-dolaron-logo.png",
+      "title": "Logo del portal Dolarones",
+      "description": "Logo oficial reducido para la cabecera de dolarones.eldolaron.com.",
+      "width": 600,
+      "height": 156,
+      "format": "PNG",
+      "background": "transparent"
     }
   ],
   "version": "1.0"

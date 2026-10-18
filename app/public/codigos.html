@@ -1,0 +1,175 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>El Dolarón — códigos de barras</title>
+<style>
+  :root { --azul:#16366B; --linea:#dfe3ea; --rojo:#b3141b; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: #f4f6f9; color: #1a1f2b; font-family: system-ui, sans-serif; }
+  header { background: var(--azul); color: #fff; padding: 14px 20px;
+    display: flex; gap: 16px; align-items: center; flex-wrap: wrap; }
+  header h1 { font-size: 18px; margin: 0; flex: 1; }
+  header a { color: #FFD447; font-size: 14px; }
+  main { padding: 20px; max-width: 860px; margin: 0 auto; }
+  .ayuda { font-size: 14px; line-height: 1.5; color: #333; max-width: 68ch; }
+  label { display: block; font-size: 13px; font-weight: 600; margin: 14px 0 6px; }
+  textarea, input { width: 100%; padding: 10px; font: 15px ui-monospace, monospace;
+    border: 1px solid var(--linea); border-radius: 8px; background: #fff; }
+  textarea { min-height: 120px; }
+  .uno { display: grid; grid-template-columns: 1fr 110px auto; gap: 8px; align-items: end; }
+  button { border: 0; border-radius: 8px; padding: 10px 14px; font-size: 14px;
+    font-weight: 600; cursor: pointer; background: var(--azul); color: #fff; }
+  button.claro { background: #fff; color: #1a1f2b; border: 1px solid var(--linea); }
+  button:disabled { opacity: .5; cursor: default; }
+  .botones { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin: 16px 0; }
+  table { width: 100%; border-collapse: collapse; background: #fff; margin-top: 16px; font-size: 14px; }
+  th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--linea); }
+  td.num, th.num { text-align: right; }
+  td code { font-size: 15px; }
+  .malas { color: var(--rojo); font-size: 13px; white-space: pre-wrap; }
+  .estado { font-size: 14px; color: #5b6478; min-height: 1.4em; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Etiquetas con código de barras</h1>
+  <a href="/calibrar-etiqueta">Calibrar →</a>
+  <a href="/">← Inicio</a>
+</header>
+
+<main>
+  <p class="ayuda">
+    Para códigos que ya existen en otro sistema (por ejemplo, Salumax): cada etiqueta lleva
+    solo el código de barras y el código en texto. No se guarda nada ni toca el inventario
+    de la tienda. Usa la misma impresora y calibración que <a href="/etiquetas">/etiquetas</a>.
+  </p>
+
+  <label for="pegar">Pega desde Excel: código y, en la columna de al lado, cuántas etiquetas (sin cantidad = 1)</label>
+  <textarea id="pegar" spellcheck="false" placeholder="7501234567890	3&#10;SAL-0042	1"></textarea>
+  <div class="botones"><button id="agregar-lista" class="claro" type="button">Agregar a la lista</button></div>
+
+  <div class="uno">
+    <div><label for="codigo">O uno por uno: código</label><input id="codigo" autocomplete="off" spellcheck="false"></div>
+    <div><label for="cantidad">Etiquetas</label><input id="cantidad" type="number" min="1" max="999" value="1"></div>
+    <button id="agregar-uno" class="claro" type="button">Agregar</button>
+  </div>
+  <p class="malas" id="malas"></p>
+
+  <table id="tabla" hidden>
+    <thead><tr><th>Código</th><th class="num">Etiquetas</th><th></th></tr></thead>
+    <tbody></tbody>
+  </table>
+
+  <div class="botones">
+    <button id="imprimir" type="button" disabled>Conectar e imprimir</button>
+    <button id="detener" class="claro" type="button">Detener</button>
+    <button id="otra" class="claro" type="button">¿No aparece la impresora?</button>
+    <button id="vaciar" class="claro" type="button">Vaciar lista</button>
+  </div>
+  <div class="estado" id="estado" role="status"></div>
+</main>
+
+<script type="module">
+import {
+  conectarEtiquetera, etiqueteraLista, cargarCalibracion, mandarCopias, detenerEnvio, envioDetenido,
+  errorEnvio, tsplCodigo, leerCodigos,
+} from '/etiquetera.js';
+
+cargarCalibracion();
+
+const lista = [];   // { codigo, cantidad }; vive mientras la pagina este abierta
+const $ = (id) => document.getElementById(id);
+const avisar = (texto) => { $('estado').textContent = texto; };
+
+function agregar(texto) {
+  const { filas, malas } = leerCodigos(texto);
+  for (const fila of filas) {
+    const igual = lista.find((f) => f.codigo === fila.codigo);
+    if (igual) igual.cantidad = Math.min(999, igual.cantidad + fila.cantidad);
+    else lista.push(fila);
+  }
+  $('malas').textContent = malas.length
+    ? `No se agregaron (acentos, espacios, comillas, más de 13 caracteres o cantidad inválida):\n${malas.join('\n')}`
+    : '';
+  pintar();
+  return malas.length === 0;
+}
+
+function pintar() {
+  const cuerpo = $('tabla').querySelector('tbody');
+  cuerpo.replaceChildren(...lista.map((fila, i) => {
+    const tr = document.createElement('tr');
+    tr.innerHTML = '<td><code></code></td><td class="num"></td><td class="num"><button class="claro" type="button">Quitar</button></td>';
+    tr.querySelector('code').textContent = fila.codigo;
+    tr.children[1].textContent = fila.cantidad;
+    tr.querySelector('button').addEventListener('click', () => { lista.splice(i, 1); pintar(); });
+    return tr;
+  }));
+  $('tabla').hidden = lista.length === 0;
+  $('imprimir').disabled = lista.length === 0;
+  const total = lista.reduce((s, f) => s + f.cantidad, 0);
+  avisar(lista.length ? `${lista.length} códigos, ${total} etiquetas.` : '');
+}
+
+$('agregar-lista').addEventListener('click', () => { if (agregar($('pegar').value)) $('pegar').value = ''; });
+$('agregar-uno').addEventListener('click', () => {
+  if (agregar(`${$('codigo').value.trim()}\t${$('cantidad').value}`)) { $('codigo').value = ''; $('cantidad').value = 1; }
+  $('codigo').focus();
+});
+// El lector de barras escribe el codigo y manda Enter: asi se agregan escaneando.
+$('codigo').addEventListener('keydown', (e) => { if (e.key === 'Enter') $('agregar-uno').click(); });
+$('vaciar').addEventListener('click', () => { lista.length = 0; $('malas').textContent = ''; pintar(); });
+$('detener').addEventListener('click', () => detenerEnvio());
+
+async function conectarSiHaceFalta(cualquiera) {
+  if (etiqueteraLista()) return true;
+  try {
+    await conectarEtiquetera({ cualquiera });
+    return true;
+  } catch (error) {
+    avisar(error.name === 'NotFoundError'
+      ? 'No se escogió impresora. Préndela y vuelve a intentar, o usa «¿No aparece la impresora?».'
+      : `No se pudo conectar: ${error.message}`);
+    return false;
+  }
+}
+
+$('imprimir').addEventListener('click', async () => {
+  if (!await conectarSiHaceFalta(false)) return;
+  detenerEnvio(false);
+  $('imprimir').disabled = true;
+  const total = lista.reduce((s, f) => s + f.cantidad, 0);
+  let antes = 0;
+  try {
+    for (const fila of [...lista]) {
+      let hechas = 0;
+      const salio = await mandarCopias(tsplCodigo(fila.codigo), fila.cantidad,
+        (n) => { hechas = n; avisar(`Imprimiendo ${antes + n} de ${total}: ${fila.codigo}`); },
+        `Código ${fila.codigo}`,
+        (segundos) => avisar(`Pausa de ${segundos} s para que la impresora vacíe su memoria…`));
+      if (!salio) {
+        fila.cantidad -= hechas;
+        pintar();
+        avisar(envioDetenido()
+          ? `Detenido en ${fila.codigo}. Lo que falta sigue en la lista.`
+          : `Se cortó en ${fila.codigo}: ${errorEnvio()}. Lo que falta sigue en la lista.`);
+        return;
+      }
+      antes += fila.cantidad;
+      lista.splice(lista.indexOf(fila), 1);
+      pintar();
+    }
+    avisar(`Listo: ${total} etiquetas enviadas.`);
+  } finally {
+    $('imprimir').disabled = lista.length === 0;
+  }
+});
+
+$('otra').addEventListener('click', async () => {
+  if (await conectarSiHaceFalta(true)) avisar('Impresora conectada. Aprieta «Conectar e imprimir».');
+});
+</script>
+</body>
+</html>

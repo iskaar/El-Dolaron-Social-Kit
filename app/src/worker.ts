@@ -6,21 +6,53 @@
  */
 
 import { analizarBorrador, modeloPorDefecto, type Modelo } from './analisis.ts';
+import { PRENDAS_ROPA, PRECIOS_ROPA } from '../public/ropa.js';
+import { procesarColaRopa, rutaRopaAdmin } from './ropa-ia.ts';
 import { calcularPrecio, ajustarManual, esDestinoBanda, prefijoParaFamilia, MONTOS_BANDA, type Destino } from './precio.ts';
-import { efectivoAlcanza } from '../public/venta.js';
+import { efectivoAlcanza, promoInauguracion } from '../public/venta.js';
+
+/** Ventana de la promo de inauguracion; null si no esta configurada. */
+const promoDe = (env: Env) =>
+  env.PROMO_DESDE && env.PROMO_HASTA && Date.parse(env.PROMO_DESDE) < Date.parse(env.PROMO_HASTA)
+    ? { desde: env.PROMO_DESDE, hasta: env.PROMO_HASTA } : null;
+/**
+ * Cuantas promos quedan del cupo (Issue #250, «a las primeras 100 personas»); null sin PROMO_CUPO = sin tope.
+ * Un ticket cancelado devuelve su lugar.
+ */
+async function promoRestantes(env: Env): Promise<number | null> {
+  const cupo = Number(env.PROMO_CUPO);
+  if (!env.PROMO_CUPO || !Number.isInteger(cupo) || cupo < 0) return null;
+  // ponytail: recorre ventas sin indice; un indice parcial en (promo) si la tabla crece a cientos de miles.
+  const fila = await env.DB.prepare('select count(*) as n from ventas where promo > 0 and cancelada = 0').first<{ n:number }>();
+  return Math.max(0, cupo - (fila?.n ?? 0));
+}
 import { semanaIngreso } from '../public/semana.js';
-import { detalleVenta, cancelarPieza } from './devoluciones.ts';
+import { tramoDeDias, TRAMOS_ANTIGUEDAD } from '../public/graficas.js';
+import { detalleVenta, cancelarPieza, devolverEnCupon, reimprimirCupon } from './devoluciones.ts';
+import { cancelarVenta, listarCancelaciones, estadoSolicitud } from './cancelaciones.ts';
 import { BASES, AVISO } from './legal.ts';
 import { CLAVES_CATEGORIA } from '../public/categorias.js';
+import { tallaValida } from '../public/tallas.js';
 import {
-  permiso, puede, quienEs, leerUsuario, yo, pedirAcceso, listarCuentas, guardarCuenta, resolverSolicitud,
+  permiso, puede, quienEs, leerUsuario, yo, pedirAcceso, listarCuentas, guardarCuenta, resolverSolicitud, propietarioDe,
   esDeCaja, soloComputadora, CAJAS,
 } from './cuentas.ts';
 import { cajeroEnTurno, listarCajeros, entrar, salir, ponerPin } from './cajeros.ts';
-import { registrarSocio, buscarSocio, buscarPorCodigo, basesListas, sentenciasDeVenta, sentenciasDeCancelacion, saldo } from './dolarones.ts';
+import { registrarSocio, buscarSocio, buscarPorCodigo, basesListas, sentenciasDeVenta, saldo } from './dolarones.ts';
 import { registrarCorte, registrarRetiro, ultimoCorte, cajaDe } from './corte.ts';
+import { rutaGastos } from './gastos.ts';
+import { rutaNomina } from './nomina.ts';
+import { lineasNetas } from './netas.ts';
 import { portal, llegada, vincular } from './portal.ts';
-import { sentenciasVale, cancelarVales, buscarVale, valeDeVenta, valeUsadoEnVenta, reimprimirVale, valesAbiertos } from './vales.ts';
+import { mensajesApi, responderApi } from './mensajes.ts';
+import { rutaAsistente } from './asistente.ts';
+import { sentenciasVale, buscarVale, valeDeVenta, valeUsadoEnVenta, reimprimirVale, valesAbiertos, emitirCuponManual, porcentajeCupon } from './vales.ts';
+import { catalogoPublico, revisionCatalogo } from './catalogo.ts';
+import { procesarRecortes, revisarRecortes, reiniciarRecorte, rutaRecortesAdmin } from './recortes.ts';
+import { rutaML, recibirNotificacion, conciliarSeguro, sincronizar, publicacionViva } from './mercadolibre.ts';
+import { pedirDescuento, validarDescuento, listarDescuentos, listarDuenos } from './descuentos.ts';
+import { listarAltoValor, revisarConteo, ajustarExistencia, listarAjustes } from './conteo.ts';
+import { rutaPedidos, vencerPedidos, sentenciasDePedido, saldoDe, enPedido } from './pedidos.ts';
 
 interface FilaConfig {
   clave: string;
@@ -33,6 +65,7 @@ interface FilaBorrador {
   nombre: string;
   categoria: string;
   marca: string;
+  talla: string | null;
   precio_lista: number;
   precio: number;
   estado_fisico: string;
@@ -49,17 +82,17 @@ interface FilaBorrador {
  * valiendo si algun dia la politica de Access queda mal configurada. Los precios
  * y el inventario no viven en el telefono que anda en el pasillo.
  */
-const RUTAS_VENDEDOR = new Set(['/captura', '/foto.js', '/api/salud', '/sin-acceso', '/api/yo']);
-const EXISTENCIA = /^\/api\/borradores\/([^/]+)\/existencia$/;
+const RUTAS_VENDEDOR = new Set(['/captura', '/foto.js', '/tallas.js', '/api/salud', '/sin-acceso', '/api/yo']);
+const CORRECCION_CAPTURA = /^\/api\/borradores\/([^/]+)\/(existencia|talla|revision)$/;
 
 export function permitidaParaVendedor(pathname: string, metodo: string): boolean {
   if (RUTAS_VENDEDOR.has(pathname)) {
     return metodo === 'GET';
   }
-  // Corregir cuantas piezas son, desde el carrusel de la camara. El handler
-  // limita a lo que esa persona capturo en las ultimas 24 h.
-  if (EXISTENCIA.test(pathname)) {
-    return metodo === 'PATCH';
+  // Corregir cuantas piezas son o la talla, desde el carrusel de la camara. El
+  // handler limita a lo que esa persona capturo en las ultimas 24 h.
+  if (CORRECCION_CAPTURA.test(pathname)) {
+    return metodo === 'PATCH' || (pathname.endsWith('/revision') && ['GET', 'DELETE'].includes(metodo));
   }
   // Quien entra por la camara sin cuenta tambien tiene que poder pedirla.
   if (pathname === '/api/solicitudes/acceso') {
@@ -79,6 +112,13 @@ const estacionValida = (valor: unknown): valor is string =>
   typeof valor === 'string' && CAJAS.includes(valor);
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const FOTO_MAX_BYTES = 6 * 1024 * 1024;
+const textoCapturaRopa = (valor: unknown) => typeof valor === 'string' && valor.trim().length <= 40 && !/[\r\n]/.test(valor);
+const nombreRopa = (prenda: string, marca: string) => [prenda || 'Ropa', marca].filter(Boolean).join(' ');
+const prendaDeNombre = (nombre: string, marca: string) => {
+  const base = marca && nombre.endsWith(` ${marca}`) ? nombre.slice(0, -(marca.length + 1)) : nombre;
+  return base === 'Ropa' ? '' : base;
+};
+const capturaRopaDisponible = (env: Env) => !env.AMBIENTE || env.AMBIENTE === 'produccion' || env.AMBIENTE === 'sandbox';
 
 function json(cuerpo: unknown, status = 200): Response {
   return new Response(JSON.stringify(cuerpo), {
@@ -117,12 +157,27 @@ async function crearBorrador(request: Request, env: Env, ctx: ExecutionContext, 
   // Muchas piezas vienen repetidas: una foto puede representar varias.
   const cantidad = Math.min(999, Math.max(1, Math.round(Number(formulario.get('cantidad') ?? 1)) || 1));
   const foto = formulario.get('foto');
+  const talla = String(formulario.get('talla') ?? '').trim() || null;
+  const precioRopa = formulario.has('precio_ropa') ? Number(formulario.get('precio_ropa')) : null;
+  const prendaRaw = formulario.get('prenda') ?? '';
+  const marcaRaw = formulario.get('marca') ?? '';
+  const prenda = typeof prendaRaw === 'string' ? prendaRaw.trim() : '\n';
+  const marca = typeof marcaRaw === 'string' ? marcaRaw.trim() : '\n';
 
   if (!UUID.test(id)) {
     return json({ error: 'Identificador invalido.' }, 400);
   }
   if (!ESTADOS_FISICOS.has(estadoFisico)) {
     return json({ error: 'Estado fisico invalido.' }, 400);
+  }
+  if (talla !== null && !tallaValida(talla)) {
+    return json({ error: 'Talla invalida.' }, 400);
+  }
+  if (precioRopa !== null && (!capturaRopaDisponible(env) || !PRECIOS_ROPA.includes(precioRopa))) {
+    return json({ error: 'Precio de ropa invalido.' }, 400);
+  }
+  if (!textoCapturaRopa(prendaRaw) || (prenda && !PRENDAS_ROPA.includes(prenda)) || !textoCapturaRopa(marcaRaw)) {
+    return json({ error: 'Prenda o marca invalida.' }, 400);
   }
   if (!(foto instanceof File) || foto.size === 0) {
     return json({ error: 'Falta la foto.' }, 400);
@@ -131,28 +186,73 @@ async function crearBorrador(request: Request, env: Env, ctx: ExecutionContext, 
     return json({ error: 'La foto pesa demasiado.' }, 413);
   }
 
+  const propietario = propietarioDe(await leerUsuario(env, correo));
+  const existente = await env.DB.prepare('select id, nombre, precio, estado_fisico, estado_analisis, stock, talla, propietario from productos where id = ?')
+    .bind(id).first<{ estado_analisis: string; propietario: string }>();
+  if (existente && existente.propietario !== propietario) return json({ error: 'Pieza no encontrada.' }, 404);
+  if (existente?.estado_analisis === 'descartado' || (precioRopa !== null && existente && formulario.get('solo_foto') !== '1')) {
+    return json(existente, 201);
+  }
+
   const fotoKey = `fotos/${id}.jpg`;
   await env.FOTOS.put(fotoKey, foto.stream(), {
     httpMetadata: { contentType: 'image/jpeg' },
   });
+
+  // "Retomar foto" del admin: solo cambia la imagen. Existencia, talla, estado y
+  // lo que el dueno ya corrigio se quedan; para volver a analizar esta "Reintentar
+  // analisis". La camara no manda esta marca: su reenvio si actualiza todo.
+  if (formulario.get('solo_foto') === '1') {
+    const { meta } = await env.DB.prepare("update productos set foto_key = ?, actualizado_en = ?, recorte_estado=case when recorte_estado='original' then 'original' else null end, recorte_fecha=null, recorte_revision=null where id = ?")
+      .bind(fotoKey, new Date().toISOString(), id)
+      .run();
+    if (meta.changes) await reiniciarRecorte(env, id);
+    if (meta.changes > 0) return json({ id });
+  }
 
   // El correo verificado de quien sube la foto (ver cuentas.ts): de el salen
   // las sesiones de captura y la correccion de existencia desde el carrusel.
   const capturadoPor = correo;
 
   const ahora = new Date();
+  if (precioRopa !== null) {
+    // El reenvío de una foto conserva el precio revisado, el código y el stock ya vendido.
+    await env.DB.prepare(
+      `insert into productos (id, nombre, marca, categoria, precio, estado_analisis, destino, semana_ingreso,
+                              estado_fisico, stock, talla, foto_key, capturado_por, creado_en, actualizado_en, propietario)
+       values (?, ?, ?, 'ropa', ?, 'listo', 'etiqueta', ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       on conflict (id) do nothing`,
+    ).bind(id, nombreRopa(prenda, marca), marca, precioRopa, semanaIngreso(ahora), estadoFisico, cantidad, talla, fotoKey,
+      capturadoPor, ahora.toISOString(), ahora.toISOString(), propietario).run();
+    const guardada = await env.DB.prepare('select id, nombre, marca, precio, estado_fisico, estado_analisis, stock, talla from productos where id = ?')
+      .bind(id).first<{ estado_analisis: string; nombre: string; marca: string }>();
+    if (guardada?.estado_analisis === 'descartado') await env.FOTOS.delete(fotoKey);
+    return json(guardada ? { ...guardada, prenda: prendaDeNombre(guardada.nombre, guardada.marca) } : guardada, 201);
+  }
   await env.DB.prepare(
-    `insert into productos (id, semana_ingreso, estado_fisico, stock, foto_key, capturado_por, creado_en, actualizado_en)
-     values (?, ?, ?, ?, ?, ?, ?, ?)
+    `insert into productos (id, semana_ingreso, estado_fisico, stock, talla, foto_key, capturado_por, creado_en, actualizado_en, propietario)
+     values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+     -- El stock no se toca: el reenvio de una foto no repone lo que la caja ya vendio (#312).
      on conflict (id) do update set
        estado_fisico = excluded.estado_fisico,
-       stock = excluded.stock,
+       talla = excluded.talla,
        foto_key = excluded.foto_key,
+       recorte_estado = case when productos.recorte_estado='original' then 'original' else null end,
+       recorte_revision = null,
+       recorte_fecha = null,
        estado_analisis = 'pendiente',
-       actualizado_en = excluded.actualizado_en`,
+       actualizado_en = excluded.actualizado_en
+       where productos.estado_analisis <> 'descartado'`,
   )
-    .bind(id, semanaIngreso(ahora), estadoFisico, cantidad, fotoKey, capturadoPor, ahora.toISOString(), ahora.toISOString())
+    .bind(id, semanaIngreso(ahora), estadoFisico, cantidad, talla, fotoKey, capturadoPor, ahora.toISOString(), ahora.toISOString(), propietario)
     .run();
+  await reiniciarRecorte(env, id);
+
+  const descartada = await env.DB.prepare("select id, estado_analisis, stock from productos where id = ? and estado_analisis = 'descartado'").bind(id).first();
+  if (descartada) {
+    await env.FOTOS.delete(fotoKey);
+    return json(descartada, 201);
+  }
 
   // El analisis corre despues de responder: la camara nunca espera a la IA.
   ctx.waitUntil(analizarBorrador(id, env, modeloPedido(url, env), busquedaPedida(url)));
@@ -160,21 +260,30 @@ async function crearBorrador(request: Request, env: Env, ctx: ExecutionContext, 
   return json({ id, estado_analisis: 'pendiente' }, 201);
 }
 
-async function listarBorradores(url: URL, env: Env): Promise<Response> {
+async function listarBorradores(url: URL, env: Env, propietario: string): Promise<Response> {
   const estado = url.searchParams.get('estado');
+  const desde = url.searchParams.get('desde');
+  // `cambios`: solo lo modificado despues (indice de la migracion 038), con las descartadas
+  // para que la pantalla las quite. Es lo que pide /etiquetas cada 30 s en automatica.
+  const cambios = url.searchParams.get('cambios');
+  for (const fecha of [desde, cambios]) {
+    if (fecha !== null && (!Number.isFinite(Date.parse(fecha)) || new Date(fecha).toISOString() !== fecha)) {
+      return json({ error: 'Fecha de captura invalida.' }, 400);
+    }
+  }
   // Los botes son productos para la caja, no piezas que revisar.
   // Orden de captura (mas vieja primero), no de llegada: las piezas se quedan
   // fisicamente donde se capturaron hasta que se les pega su etiqueta, asi que
   // el orden de la pantalla tiene que ser el mismo que el de la mesa o se
   // vuelve un rompecabezas saber que etiqueta es de que pieza.
-  const consulta = `select id, codigo, nombre, categoria, marca, precio_lista, precio, estado_fisico,
+  const consulta = `select id, codigo, nombre, categoria, marca, talla, precio_lista, precio, estado_fisico,
                            estado_analisis, destino, stock, semana_ingreso, capturado_por, creado_en
                     from productos
-                    where sin_inventario = 0 ${estado ? 'and estado_analisis = ?' : ''}
+                    where sin_inventario = 0 and propietario = ? ${cambios ? 'and actualizado_en > ?' : "and estado_analisis <> 'descartado'"}
+                      ${estado ? 'and estado_analisis = ?' : ''} ${desde ? 'and creado_en >= ?' : ''}
                     order by creado_en asc limit 2000`;
-  const sentencia = estado
-    ? env.DB.prepare(consulta).bind(estado)
-    : env.DB.prepare(consulta);
+  const filtros = [propietario, ...(cambios ? [cambios] : []), ...(estado ? [estado] : []), ...(desde ? [desde] : [])];
+  const sentencia = env.DB.prepare(consulta).bind(...filtros);
   const { results } = await sentencia.all<FilaBorrador>();
   return json(results);
 }
@@ -192,16 +301,18 @@ async function destinoValido(destino: string, env: Env): Promise<boolean> {
 /**
  * Correcciones del admin. Solo llegan los campos que cambiaron; si no viene un
  * precio explicito, se recalcula con la configuracion vigente.
+ * Con etiqueta (codigo) la pieza ya esta a la venta con ese precio impreso: solo
+ * el dueno lo cambia (Issue #75). Antes de etiquetar, poner precio es parte de la captura.
  */
-async function corregirBorrador(id: string, cambios: Record<string, unknown>, env: Env): Promise<Response> {
+async function corregirBorrador(id: string, cambios: Record<string, unknown>, env: Env, esDueno: boolean): Promise<Response> {
   if (!UUID.test(id)) {
     return json({ error: 'Identificador invalido.' }, 400);
   }
   const fila = await env.DB.prepare(
-    'select nombre, categoria, marca, precio_lista, precio, estado_fisico, destino, stock from productos where id = ?',
+    "select nombre, categoria, marca, talla, precio_lista, precio, estado_fisico, destino, stock, codigo from productos where id = ? and estado_analisis <> 'descartado'",
   )
     .bind(id)
-    .first<FilaBorrador>();
+    .first<FilaBorrador & { codigo: string | null }>();
   if (!fila) {
     return json({ error: 'La pieza no existe.' }, 404);
   }
@@ -209,6 +320,7 @@ async function corregirBorrador(id: string, cambios: Record<string, unknown>, en
   const nombre = cambios.nombre === undefined ? fila.nombre : String(cambios.nombre).slice(0, 120);
   const categoria = cambios.categoria === undefined ? fila.categoria : String(cambios.categoria);
   const marca = cambios.marca === undefined ? fila.marca : String(cambios.marca).trim().slice(0, 60);
+  const talla = cambios.talla === undefined ? fila.talla : String(cambios.talla).trim() || null;
   const estadoFisico = cambios.estado_fisico === undefined ? fila.estado_fisico : String(cambios.estado_fisico);
   const precioLista = cambios.precio_lista === undefined ? fila.precio_lista : Math.round(Number(cambios.precio_lista));
   const stock = cambios.stock === undefined ? fila.stock : Math.round(Number(cambios.stock));
@@ -218,6 +330,9 @@ async function corregirBorrador(id: string, cambios: Record<string, unknown>, en
   }
   if (!ESTADOS_FISICOS.has(estadoFisico)) {
     return json({ error: 'Estado fisico invalido.' }, 400);
+  }
+  if (talla !== null && !tallaValida(talla)) {
+    return json({ error: 'Talla invalida.' }, 400);
   }
   if (!Number.isFinite(precioLista) || precioLista < 0) {
     return json({ error: 'Precio de lista invalido.' }, 400);
@@ -241,7 +356,7 @@ async function corregirBorrador(id: string, cambios: Record<string, unknown>, en
       return json({ error: 'Precio invalido.' }, 400);
     }
     if (esDestinoBanda(destino)) {
-      // Banda: manda el precio de la banda. Etiqueta: quiebra la decena (termina en 9) como el automatico.
+      // Banda: manda el precio de la banda. Etiqueta: el precio tecleado por el dueno se respeta tal cual.
       precio = ajustarManual({ precio, destino: destino as Destino, config });
     }
     // Misma regla que en el calculo automatico: el precio de venta nunca queda
@@ -254,16 +369,28 @@ async function corregirBorrador(id: string, cambios: Record<string, unknown>, en
   if (!await destinoValido(destino, env)) {
     return json({ error: 'Destino invalido.' }, 400);
   }
+  // Guardar deja la pieza `listo`: una etiqueta sin nombre o sin precio bloquearia la cola de impresion (#335).
+  if (destino === 'etiqueta' && (!nombre.trim() || precio <= 0)) {
+    return json({ error: 'Una pieza con etiqueta necesita nombre y un precio mayor a cero para quedar lista.' }, 400);
+  }
+  if (!esDueno && fila.codigo && precio !== fila.precio) {
+    return json({ error: 'Esta pieza ya tiene etiqueta: solo el dueño cambia su precio.' }, 403);
+  }
 
-  await env.DB.prepare(
-    `update productos set nombre = ?, categoria = ?, marca = ?, precio_lista = ?, precio = ?,
-                          estado_fisico = ?, destino = ?, stock = ?, estado_analisis = 'listo', actualizado_en = ?
-     where id = ?`,
+  const guardada = await env.DB.prepare(
+    `update productos set nombre = ?, categoria = ?, marca = ?, talla = ?, precio_lista = ?, precio = ?,
+                          estado_fisico = ?, destino = ?, stock = coalesce(?, stock), estado_analisis = 'listo', actualizado_en = ?
+     where id = ?
+       and estado_analisis <> 'descartado'
+     returning stock`,
   )
-    .bind(nombre, categoria, marca, precioLista, precio, estadoFisico, destino, stock, new Date().toISOString(), id)
-    .run();
+    .bind(nombre, categoria, marca, talla, precioLista, precio, estadoFisico, destino,
+      // Sin `stock` en el cuerpo no se toca: la caja pudo vender piezas desde que se abrio la ficha.
+      cambios.stock === undefined ? null : stock, new Date().toISOString(), id)
+    .first<{ stock: number }>();
 
-  return json({ id, nombre, categoria, marca, precio_lista: precioLista, precio, estado_fisico: estadoFisico, destino, stock });
+  if (!guardada) return json({ error: 'La pieza ya fue eliminada.' }, 409);
+  return json({ id, nombre, categoria, marca, talla, precio_lista: precioLista, precio, estado_fisico: estadoFisico, destino, stock: guardada.stock });
 }
 
 /**
@@ -286,7 +413,7 @@ async function capturarManual(request: Request, env: Env, correo: string): Promi
   )
     .bind(id, semanaIngreso(new Date()), correo, ahora, ahora)
     .run();
-  const respuesta = await corregirBorrador(id, cuerpo, env);
+  const respuesta = await corregirBorrador(id, cuerpo, env, true);
   // Datos invalidos: no queda una pieza vacia (salvo que fuera un reintento de una ya guardada).
   if (!respuesta.ok && meta.changes > 0) await env.DB.prepare('delete from productos where id = ?').bind(id).run();
   if (!respuesta.ok) return respuesta;
@@ -294,49 +421,123 @@ async function capturarManual(request: Request, env: Env, correo: string): Promi
   // el mismo que le pondria Etiquetas, asi que la etiqueta impresa despues coincide.
   // Las de banda se cobran con el codigo de la banda.
   await env.DB.prepare(
-    `update productos set codigo = 'ED-' || printf('%06d', rowid)
+    `update productos set codigo = ${CODIGO_NUEVO}, actualizado_en = ?
      where id = ? and (codigo is null or codigo = '') and destino not like 'banda%'`,
-  ).bind(id).run();
+  ).bind(new Date().toISOString(), id).run();
   return json(await respuesta.json(), 201);
 }
 
-/** Cuanto dura abierta la correccion de existencia desde la camara. */
+/** Cuanto dura abierta la correccion desde la camara. */
 const VENTANA_CAPTURA_MS = 24 * 60 * 60 * 1000;
 
 /**
- * La existencia de una pieza recien capturada, desde el carrusel de /captura.
- * Solo quien la capturo y solo en las primeras 24 h: el telefono del pasillo no
- * es la puerta para ajustar inventario viejo (eso es la cola de revision), y
- * pasado ese rato la pieza ya pudo venderse y un numero absoluto pisaria la venta.
+ * La existencia o la talla de una pieza recien capturada, desde el carrusel de
+ * /captura. Solo quien la capturo y solo en las primeras 24 h: el telefono del
+ * pasillo no es la puerta para ajustar inventario viejo (eso es la cola de
+ * revision), y pasado ese rato la pieza ya pudo venderse y un numero absoluto
+ * pisaria la venta.
  */
-async function corregirExistencia(id: string, request: Request, env: Env, correo: string): Promise<Response> {
+async function corregirCaptura(id: string, campo: string, request: Request, env: Env, correo: string): Promise<Response> {
   if (!UUID.test(id)) {
     return json({ error: 'Identificador invalido.' }, 400);
   }
-  const { stock: crudo } = (await request.json()) as { stock?: unknown };
-  const stock = Number(crudo);
-  if (!Number.isInteger(stock) || stock < 1 || stock > 999) {
-    return json({ error: 'Existencia invalida.' }, 400);
+  const cuerpo = (await request.json()) as { stock?: unknown; talla?: unknown };
+  let valor: number | string;
+  if (campo === 'existencia') {
+    valor = Number(cuerpo.stock);
+    if (!Number.isInteger(valor) || valor < 1 || valor > 999) {
+      return json({ error: 'Existencia invalida.' }, 400);
+    }
+  } else {
+    valor = String(cuerpo.talla ?? '');
+    if (!tallaValida(valor)) {
+      return json({ error: 'Talla invalida.' }, 400);
+    }
   }
-  const quien = correo;
+  const columna = campo === 'existencia' ? 'stock' : 'talla';
   const desde = new Date(Date.now() - VENTANA_CAPTURA_MS).toISOString();
   const resultado = await env.DB.prepare(
-    'update productos set stock = ?, actualizado_en = ? where id = ? and capturado_por = ? and creado_en > ?',
+    `update productos set ${columna} = ?, actualizado_en = ? where id = ? and capturado_por = ? and creado_en > ? and estado_analisis <> 'descartado'`,
   )
-    .bind(stock, new Date().toISOString(), id, quien, desde)
+    .bind(valor, new Date().toISOString(), id, correo, desde)
     .run();
   if (resultado.meta.changes === 0) {
     return json({ error: 'Solo puedes cambiar lo que capturaste en las ultimas 24 horas.' }, 404);
   }
-  return json({ id, stock });
+  return json({ id, [columna]: valor });
 }
+
+/** Corrección desde la miniatura; nunca cambia stock al editar precio/condición. */
+async function revisarCaptura(id: string, request: Request, env: Env, correo: string): Promise<Response> {
+  if (!capturaRopaDisponible(env)) return json({ error: 'Ruta no encontrada.' }, 404);
+  if (!UUID.test(id)) return json({ error: 'Identificador invalido.' }, 400);
+  const ahora = new Date().toISOString();
+  const desde = new Date(Date.now() - VENTANA_CAPTURA_MS).toISOString();
+  const alcance = 'id = ? and capturado_por = ? and creado_en > ? and sin_inventario = 0';
+  // Conserva el UUID incluso si aún no llegó el POST: una subida retrasada no revive la captura.
+  if (request.method === 'DELETE') {
+    await env.DB.prepare(`insert into productos (id, stock, estado_analisis, semana_ingreso, capturado_por, creado_en, actualizado_en)
+      values (?, 0, 'descartado', ?, ?, ?, ?) on conflict(id) do nothing`)
+      .bind(id, semanaIngreso(new Date()), correo, ahora, ahora).run();
+  }
+  const fila = await env.DB.prepare(`select id, precio, estado_fisico, estado_analisis, stock, talla, codigo, nombre, marca, categoria from productos where ${alcance}`)
+    .bind(id, correo, desde).first<{ id: string; nombre: string; marca: string; categoria: string; estado_analisis: string; precio: number; estado_fisico: string; stock: number; talla: string | null; codigo: string | null }>();
+  if (!fila) return json({ error: 'Solo puedes corregir lo que capturaste en las últimas 24 horas.' }, 404);
+  if (request.method === 'GET') return json({ ...fila, prenda: prendaDeNombre(fila.nombre, fila.marca) });
+  if (request.method === 'DELETE') {
+    const resultado = await env.DB.prepare(`update productos set stock = 0, precio = 0, foto_key = '',
+        estado_analisis = 'descartado', actualizado_en = ? where ${alcance}
+        and not exists (select 1 from venta_lineas where producto_id = productos.id)
+        and not exists (select 1 from ml_publicaciones where producto_id = productos.id)`)
+      .bind(ahora, id, correo, desde).run();
+    if (!resultado.meta.changes) return json({ error: 'Tiene una venta o publicación. Revisa la pieza en el admin; no se eliminó.' }, 409);
+    await env.FOTOS.delete(`fotos/${id}.jpg`);
+    return json({ id, descartado: true });
+  }
+  if (request.method !== 'PATCH') return json({ error: 'Metodo no permitido.' }, 405);
+  const cambios = await request.json().catch(() => null) as Record<string, unknown> | null;
+  if (!cambios || Array.isArray(cambios) || typeof cambios !== 'object' || !Object.keys(cambios).length
+      || Object.keys(cambios).some((k) => !['precio', 'estado_fisico', 'prenda', 'marca'].includes(k))) {
+    return json({ error: 'Corrección invalida.' }, 400);
+  }
+  if (cambios.precio !== undefined && (typeof cambios.precio !== 'number' || !PRECIOS_ROPA.includes(cambios.precio))) {
+    return json({ error: 'Escoge $200, $150, $100, $80 o $50 MXN.' }, 400);
+  }
+  if (cambios.estado_fisico !== undefined && (typeof cambios.estado_fisico !== 'string' || !ESTADOS_FISICOS.has(cambios.estado_fisico))) {
+    return json({ error: 'Estado fisico invalido.' }, 400);
+  }
+  if ((cambios.prenda !== undefined && (!textoCapturaRopa(cambios.prenda) || (String(cambios.prenda).trim() !== '' && !PRENDAS_ROPA.includes(String(cambios.prenda).trim()))))
+      || (cambios.marca !== undefined && !textoCapturaRopa(cambios.marca))) return json({ error: 'Prenda o marca invalida.' }, 400);
+  if ((cambios.prenda !== undefined || cambios.marca !== undefined) && fila.categoria !== 'ropa') return json({ error: 'Solo se corrige prenda y marca en ropa.' }, 400);
+  const prenda = cambios.prenda === undefined ? prendaDeNombre(fila.nombre, fila.marca) : cambios.prenda as string;
+  const marca = cambios.marca === undefined ? fila.marca : cambios.marca as string;
+  const nombre = cambios.prenda === undefined && cambios.marca === undefined ? fila.nombre : nombreRopa(prenda.trim(), marca.trim());
+  const resultado = await env.DB.prepare(`update productos set precio = coalesce(?, precio),
+      estado_fisico = coalesce(?, estado_fisico), nombre = ?, marca = ?, actualizado_en = ? where ${alcance} and estado_analisis = 'listo'
+      and (? is null or precio_lista = 0 or precio_lista >= ?)`)
+    .bind(cambios.precio ?? null, cambios.estado_fisico ?? null, nombre, marca.trim(), ahora, id, correo, desde, cambios.precio ?? null, cambios.precio ?? null).run();
+  if (!resultado.meta.changes) return json({ error: 'La captura no está lista, fue eliminada o el precio supera el de lista.' }, 409);
+  const guardada = await env.DB.prepare(`select id, precio, estado_fisico, estado_analisis, stock, talla, codigo, nombre, marca from productos where ${alcance}`)
+    .bind(id, correo, desde).first<{ nombre: string; marca: string }>();
+  return json(guardada ? { ...guardada, prenda: prendaDeNombre(guardada.nombre, guardada.marca) } : guardada);
+}
+
+/**
+ * Codigo ED- nuevo: el rowid, o el siguiente al mayor que ya existe si ese rowid ya
+ * se uso. SQLite reutiliza el rowid mas alto al borrar (fusionar/descartar), y una
+ * fusion deja vivo el codigo de la borrada: sin esto, la siguiente pieza chocaria
+ * con el indice unico o heredaria una etiqueta ya pegada.
+ * ponytail: max() recorre los codigos ED-; un contador en config si el catalogo crece mucho.
+ */
+const CODIGO_NUEVO = `'ED-' || printf('%06d', max(rowid,
+  (select coalesce(max(cast(substr(codigo, 4) as integer)), 0) + 1 from productos where codigo like 'ED-%')))`;
 
 /**
  * Asigna el codigo de barras a las piezas que se van a etiquetar y las devuelve.
  * El codigo se mina una sola vez: una pieza que ya trae etiqueta impresa conserva
  * el suyo, porque reimprimir con otro codigo deja el papel del anaquel huerfano.
  */
-async function prepararEtiquetas(request: Request, env: Env): Promise<Response> {
+async function prepararEtiquetas(request: Request, env: Env, propietario: string): Promise<Response> {
   const { ids } = (await request.json()) as { ids?: unknown };
   if (!Array.isArray(ids) || ids.length === 0 || ids.length > 100) {
     return json({ error: 'Selecciona entre 1 y 100 piezas.' }, 400);
@@ -347,18 +548,25 @@ async function prepararEtiquetas(request: Request, env: Env): Promise<Response> 
   }
 
   const huecos = limpios.map(() => '?').join(',');
-  await env.DB.prepare(
-    `update productos set codigo = 'ED-' || printf('%06d', rowid), actualizado_en = ?
-     where id in (${huecos}) and (codigo is null or codigo = '')`,
+  // Una por una y en orden de captura: cada codigo nuevo ve el anterior (CODIGO_NUEVO).
+  const { results: porCodificar } = await env.DB.prepare(
+    `select id from productos where id in (${huecos}) and propietario = ? and estado_analisis <> 'descartado' and (codigo is null or codigo = '') order by rowid`,
   )
-    .bind(new Date().toISOString(), ...limpios)
-    .run();
+    .bind(...limpios, propietario)
+    .all<{ id: string }>();
+  const ahora = new Date().toISOString();
+  if (porCodificar.length) {
+    await env.DB.batch(porCodificar.map(({ id }) => env.DB.prepare(
+      `update productos set codigo = ${CODIGO_NUEVO}, actualizado_en = ?
+       where id = ? and estado_analisis <> 'descartado' and (codigo is null or codigo = '')`,
+    ).bind(ahora, id)));
+  }
 
   const { results } = await env.DB.prepare(
-    `select id, codigo, nombre, precio, precio_lista, semana_ingreso, destino, stock
-     from productos where id in (${huecos}) order by rowid`,
+    `select id, codigo, nombre, talla, precio, precio_lista, semana_ingreso, destino, stock
+     from productos where id in (${huecos}) and propietario = ? and estado_analisis <> 'descartado' order by rowid`,
   )
-    .bind(...limpios)
+    .bind(...limpios, propietario)
     .all();
 
   return json(results);
@@ -376,29 +584,71 @@ async function fusionarBorrador(id: string, request: Request, env: Env): Promise
     return json({ error: 'Identificador invalido.' }, 400);
   }
 
-  const repetida = await env.DB.prepare('select stock from productos where id = ?')
+  const repetida = await env.DB.prepare('select stock, codigo from productos where id = ?')
     .bind(id)
-    .first<{ stock: number }>();
-  const original = await env.DB.prepare('select stock from productos where id = ?')
+    .first<{ stock: number; codigo: string | null }>();
+  const original = await env.DB.prepare('select stock, codigo from productos where id = ?')
     .bind(destinoId)
-    .first<{ stock: number }>();
+    .first<{ stock: number; codigo: string | null }>();
   if (!repetida || !original) {
     return json({ error: 'La pieza no existe.' }, 404);
   }
+  // Mas de 999 no cabe en una pieza: el admin ya no podria guardarla (corregirBorrador).
+  if (original.stock + repetida.stock > 999) {
+    return json({ error: 'Con esa suma pasa de 999 piezas en existencia.' }, 409);
+  }
 
-  await env.DB.batch([
-    env.DB.prepare('update productos set stock = stock + ?, actualizado_en = ? where id = ?')
-      .bind(repetida.stock, new Date().toISOString(), destinoId),
-    env.DB.prepare('delete from productos where id = ?').bind(id),
+  if (await publicacionViva(env, id)) {
+    return json({ error: 'Tiene publicación en Mercado Libre: ciérrala primero.' }, 409);
+  }
+  if (await enPedido(env, id)) {
+    return json({ error: 'Está en un pedido: no se puede borrar.' }, 409);
+  }
+
+  // La suma sale de la fila de la repetida DENTRO del batch, no de lo leido arriba: dos
+  // fusiones en paralelo leen lo mismo, pero solo la que borra la repetida la consume.
+  // `ahora` marca la suma aplicada; el borrado y el codigo dependen de esa marca.
+  // Si la original no tiene etiqueta, hereda la de la repetida (la que ya esta pegada):
+  // sin eso la etiqueta impresa apunta a una pieza borrada y la caja no la encuentra.
+  // El codigo va despues del borrado: es unico y no puede existir dos veces a la vez.
+  const ahora = new Date().toISOString();
+  const [, borrado] = await env.DB.batch([
+    env.DB.prepare(
+      `update productos set stock = stock + (select stock from productos where id = ?1), actualizado_en = ?3
+       where id = ?2 and exists (select 1 from productos where id = ?1)
+         and stock + (select stock from productos where id = ?1) <= 999`,
+    ).bind(id, destinoId, ahora),
+    env.DB.prepare(
+      'delete from productos where id = ? and exists (select 1 from productos where id = ? and actualizado_en = ?)',
+    ).bind(id, destinoId, ahora),
+    env.DB.prepare(
+      `update productos set codigo = ? where id = ? and actualizado_en = ? and (codigo is null or codigo = '')`,
+    ).bind(repetida.codigo ?? null, destinoId, ahora),
   ]);
+  if (!borrado.meta.changes) {
+    // Otra fusion ya consumio la repetida (404) o la suma ya no cabe (409).
+    const sigue = await env.DB.prepare('select 1 as x from productos where id = ?').bind(id).first();
+    return sigue
+      ? json({ error: 'Con esa suma pasa de 999 piezas en existencia.' }, 409)
+      : json({ error: 'La pieza no existe.' }, 404);
+  }
   await env.FOTOS.delete(`fotos/${id}.jpg`);
 
-  return json({ id, destino_id: destinoId, stock: original.stock + repetida.stock });
+  const final = await env.DB.prepare('select stock from productos where id = ?').bind(destinoId).first<{ stock: number }>();
+  return json({ id, destino_id: destinoId, stock: final?.stock ?? original.stock + repetida.stock });
 }
 
 async function descartarBorrador(id: string, env: Env): Promise<Response> {
   if (!UUID.test(id)) {
     return json({ error: 'Identificador invalido.' }, 400);
+  }
+  const descartada = await env.DB.prepare("select id from productos where id = ? and estado_analisis = 'descartado'").bind(id).first();
+  if (descartada) return json({ id, descartado: true });
+  if (await publicacionViva(env, id)) {
+    return json({ error: 'Tiene publicación en Mercado Libre: ciérrala primero.' }, 409);
+  }
+  if (await enPedido(env, id)) {
+    return json({ error: 'Está en un pedido: no se puede borrar.' }, 409);
   }
   await env.FOTOS.delete(`fotos/${id}.jpg`);
   await env.DB.prepare('delete from productos where id = ?').bind(id).run();
@@ -509,10 +759,25 @@ async function crearFamilia(request: Request, env: Env): Promise<Response> {
   return json({ clave, nombre, prefijo }, 201);
 }
 
-/** Catalogo para la caja: se guarda en el navegador y se cobra sin red. */
-async function catalogo(env: Env): Promise<Response> {
+/**
+ * Catalogo para la caja: se guarda en el navegador y se cobra sin red.
+ * Con `?desde=` solo lo que cambio despues (indice de la migracion 038), incluidas
+ * las piezas que ya no se venden (precio 0) para que la caja las quite. Traer las
+ * ~3000 piezas cada minuto agotaba la cuota diaria de lecturas de D1 (15/10).
+ */
+async function catalogo(env: Env, url: URL): Promise<Response> {
+  const desde = url.searchParams.get('desde');
+  if (desde !== null) {
+    if (!Number.isFinite(Date.parse(desde))) return json({ error: 'Fecha invalida.' }, 400);
+    const ahora = new Date().toISOString();
+    const { results } = await env.DB.prepare(
+      `select id, codigo, nombre, precio, sin_inventario, stock, propietario
+       from productos where actualizado_en > ? and codigo is not null and codigo <> ''`,
+    ).bind(new Date(desde).toISOString()).all();
+    return json({ ahora, piezas: results });
+  }
   const { results } = await env.DB.prepare(
-    `select id, codigo, nombre, precio, sin_inventario, stock
+    `select id, codigo, nombre, precio, sin_inventario, stock, propietario
      from productos where codigo is not null and codigo <> '' and precio > 0
      order by nombre`,
   ).all();
@@ -533,7 +798,13 @@ interface ProductoVenta {
   nombre: string;
   precio: number;
   sin_inventario: number;
+  propietario?: string;
+  precio_anterior?: number | null;
+  precio_cambiado_en?: string | null;
 }
+
+// El precio que mostro la caja gana si es el anterior y el cambio es reciente (decision 7/10).
+const VENTANA_PRECIO_ANTERIOR = 10 * 60_000;
 
 interface LineaPreparada {
   producto_id: string;
@@ -542,17 +813,21 @@ interface LineaPreparada {
   precio: number;
   cantidad: number;
   sinInventario: boolean;
+  propietario: string;
 }
 
 /**
  * Del navegador solo se confia el producto y la cantidad: precio, nombre y
- * codigo salen del catalogo del servidor, nunca de lo que mande la caja. Es
+ * codigo salen del catalogo del servidor. Unica excepcion: el precio de la caja
+ * vale si es exactamente el precio anterior y el cambio fue hace menos de 10
+ * min de la hora de la venta (la caja aun no refrescaba el catalogo). Es
  * pura a proposito, para poder probarla sin D1: worker.ts solo junta el mapa
  * de productos antes de llamarla.
  */
 export function prepararLineas(
   lineasCliente: LineaVenta[],
   productos: Map<string, ProductoVenta>,
+  horaVenta = Date.now(),
 ): { ok: true; lineas: LineaPreparada[] } | { ok: false; error: string } {
   if (lineasCliente.length === 0) {
     return { ok: false, error: 'La venta no tiene piezas.' };
@@ -568,13 +843,17 @@ export function prepararLineas(
     if (!producto) {
       return { ok: false, error: 'Producto inexistente.' };
     }
+    const cambio = Date.parse(producto.precio_cambiado_en ?? '');
+    const precioCaja = Number.isInteger(l.precio) && l.precio === producto.precio_anterior
+      && horaVenta <= cambio + VENTANA_PRECIO_ANTERIOR;
     lineas.push({
       producto_id: producto.id,
       codigo: producto.codigo ?? '',
       nombre: producto.nombre,
-      precio: producto.precio,
+      precio: precioCaja ? (l.precio as number) : producto.precio,
       cantidad,
       sinInventario: producto.sin_inventario === 1,
+      propietario: producto.propietario ?? 'dolaron',
     });
   }
   return { ok: true, lineas };
@@ -585,11 +864,12 @@ export function prepararLineas(
  * asi que reenviar la cola despues de una red caida no duplica el ticket ni
  * vuelve a descontar existencias.
  */
-async function registrarVenta(request: Request, env: Env, correo: string): Promise<Response> {
+async function registrarVenta(request: Request, env: Env, ctx: ExecutionContext, correo: string): Promise<Response> {
   const venta = (await request.json()) as {
     id?: unknown; lineas?: unknown; forma_pago?: unknown;
     efectivo?: unknown; creado_en?: unknown;
     cliente_id?: unknown; dolarones?: unknown; codigo_socio?: unknown; codigo_vale?: unknown; caja?: unknown; imprimir_en?: unknown;
+    descuento_id?: unknown; promo?: unknown; sin_red?: unknown; pedido_id?: unknown; anticipo?: unknown;
   };
   const id = String(venta.id ?? '');
   if (!UUID.test(id)) {
@@ -623,12 +903,16 @@ async function registrarVenta(request: Request, env: Env, correo: string): Promi
     cliente_id:venta.cliente_id ?? null, dolarones:venta.dolarones ?? 0,
     codigo_socio:venta.codigo_socio ?? '', codigo_vale:venta.codigo_vale ?? '',
     caja:venta.caja ?? null,
+    // Solo si lo trae: el hash de las ventas sin descuento no cambia y sus reintentos siguen valiendo.
+    ...(venta.descuento_id ? { descuento_id:venta.descuento_id } : {}),
+    ...(venta.promo ? { promo:venta.promo } : {}),
+    ...(venta.pedido_id ? { pedido_id:venta.pedido_id, anticipo:venta.anticipo ?? 0 } : {}),
   });
   const pedidoHash = [...new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(pedido)))]
     .map((b) => b.toString(16).padStart(2, '0')).join('');
   const reintento = async (): Promise<Response | null> => {
-    const previo = await env.DB.prepare('select pedido_hash, imprimir_en from ventas where id = ?').bind(id)
-      .first<{ pedido_hash:string | null; imprimir_en:string | null }>();
+    const previo = await env.DB.prepare('select pedido_hash, imprimir_en, anticipo, pedido_id from ventas where id = ?').bind(id)
+      .first<{ pedido_hash:string | null; imprimir_en:string | null; anticipo:number; pedido_id:string | null }>();
     if (!previo) return null;
     // null: venta registrada antes de la migracion 021, se acepta como antes.
     if (previo.pedido_hash !== null && previo.pedido_hash !== pedidoHash)
@@ -636,6 +920,7 @@ async function registrarVenta(request: Request, env: Env, correo: string): Promi
     const ganado = await env.DB.prepare(`select coalesce(sum(importe), 0) as importe from dolarones_movimientos
       where venta_id = ? and tipo = 'compra'`).bind(id).first<{ importe:number }>();
     const respuesta = json({ id, duplicada:true, imprimir_en:previo.imprimir_en, ganados:ganado?.importe ?? 0,
+      anticipo:previo.anticipo, saldo_pedido:previo.pedido_id ? await saldoDe(env, previo.pedido_id) : null,
       vale_emitido:await valeDeVenta(env, id), vale_usado:await valeUsadoEnVenta(env, id) }, 200);
     respuesta.headers.set('cache-control', 'no-store');
     return respuesta;
@@ -649,30 +934,63 @@ async function registrarVenta(request: Request, env: Env, correo: string): Promi
   }
   const huecos = idsPedidos.map(() => '?').join(',');
   const { results: filas } = await env.DB.prepare(
-    `select id, codigo, nombre, precio, sin_inventario from productos where id in (${huecos})`,
+    `select id, codigo, nombre, precio, sin_inventario, propietario, precio_anterior, precio_cambiado_en from productos where id in (${huecos})`,
   )
     .bind(...idsPedidos)
     .all<ProductoVenta>();
   const productos = new Map(filas.map((f) => [f.id, f]));
 
-  const preparado = prepararLineas(venta.lineas as LineaVenta[], productos);
+  // Hora fiable de la venta (la de la caja): una hora futura no se acepta.
+  const horaCaja = Date.parse(String(venta.creado_en ?? ''));
+  const horaVenta = Number.isFinite(horaCaja) && horaCaja <= Date.now() + 300_000 ? horaCaja : Date.now();
+  const preparado = prepararLineas(venta.lineas as LineaVenta[], productos, horaVenta);
   if (!preparado.ok) {
     return json({ error: preparado.error }, 400);
   }
 
-  const total = preparado.lineas.reduce((suma, l) => suma + l.precio * l.cantidad, 0);
+  const subtotal = preparado.lineas.reduce((suma, l) => suma + l.precio * l.cantidad, 0);
+  // Un descuento solo entra si el dueno lo aprobo (Issue #119); validarDescuento dice para que ticket.
+  const descuentoId = venta.descuento_id ? String(venta.descuento_id) : null;
+  let descuento = 0;
+  if (descuentoId) {
+    const valido = await validarDescuento(env, descuentoId, subtotal);
+    if (!valido.ok) return json({ error: valido.error }, valido.status);
+    descuento = valido.monto;
+  }
+  // Promo de inauguracion con la hora de la venta en la caja (una venta encolada
+  // sin red conserva la promo que vio el cliente). Se guarda sumada en
+  // `descuento`: devoluciones la prorratea igual.
+  // La caja manda la promo que mostro (una caja vieja no la manda: se asume la que corresponde).
+  const elegible = promoInauguracion(subtotal, horaVenta, promoDe(env));
+  const promo = venta.promo === undefined || Number(venta.promo) > 0 ? elegible : 0;
+  // Con cupo agotado, un cobro en linea se rechaza y la caja vuelve a cobrar sin promo. Una venta
+  // cobrada sin red ya se pago con la promo: se respeta aunque pase del tope (nunca se pierde).
+  // ponytail: contar y luego insertar deja que dos cajas al mismo instante tomen el ultimo lugar; pasa por uno.
+  if (promo && venta.sin_red !== true && await promoRestantes(env) === 0)
+    return json({ error:'Ya se entregaron todos los descuentos de inauguración. Vuelve a cobrar: el ticket queda sin promo.', promo_agotada:true }, 409);
+  descuento += promo;
+  const total = subtotal - descuento;
   const efectivo = Math.max(0, Math.round(Number(venta.efectivo ?? 0)));
   const clienteId = venta.cliente_id ? String(venta.cliente_id) : null;
   const codigoVale = String(venta.codigo_vale ?? '');
   const dolarones = Number(venta.dolarones ?? 0);
-  const aPagar = total - (Number.isInteger(dolarones) ? dolarones : 0);
+  // Anticipo = saldo de un pedido que paga parte del ticket (Issue #269). Sin pedido no hay anticipo.
+  const pedidoId = venta.pedido_id ? String(venta.pedido_id) : null;
+  const anticipo = pedidoId ? Number(venta.anticipo ?? 0) : 0;
+  if (pedidoId ? !UUID.test(pedidoId) || !Number.isInteger(anticipo) || anticipo < 0 : Number(venta.anticipo ?? 0) !== 0)
+    return json({ error: 'Pedido o anticipo invalido.' }, 400);
+  const porPagar = total - (Number.isInteger(dolarones) ? dolarones : 0);
+  if (anticipo > porPagar) return json({ error: 'El anticipo no puede pasar de lo que se cobra.' }, 400);
+  const aPagar = porPagar - anticipo;
   if (!efectivoAlcanza({ formaPago, total: aPagar, efectivo })) {
     return json({ error: 'El efectivo no alcanza para el total.' }, 400);
   }
 
   const momento = new Date();
   const ahora = momento.toISOString();
-  const creadoEn = String(venta.creado_en ?? ahora);
+  // La misma hora fiable: una fecha ilegible o futura (reloj de la caja mal puesto) mandaria la venta a otro
+  // dia y fuera de los reportes y de la ventana de cancelacion. Una venta sin red conserva su hora.
+  const creadoEn = new Date(horaVenta).toISOString();
 
   // Valida socio, código y saldo; consumo y venta se confirman en el mismo batch.
   const recompensa = await sentenciasDeVenta(env, {
@@ -692,21 +1010,31 @@ async function registrarVenta(request: Request, env: Env, correo: string): Promi
     return json({ error:vale.error }, vale.status);
   }
 
+  const conPedido = pedidoId ? await sentenciasDePedido(env, { pedidoId, ventaId: id, anticipo, ahora }) : null;
+  if (conPedido && !conPedido.ok) {
+    const concurrente = await reintento();
+    if (concurrente) return concurrente;
+    return json({ error: conPedido.error }, conPedido.status);
+  }
+
   const sentencias = [
     env.DB.prepare(
       `insert into ventas (id, total, forma_pago, efectivo, cambio, creado_en, registrado_en, cliente_id, dolarones,
-                           caja, cajero, pedido_hash, imprimir_en)
-       values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                           caja, cajero, pedido_hash, imprimir_en, descuento, descuento_id, promo, anticipo, pedido_id)
+       values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).bind(id, total, formaPago, efectivo, Math.max(0, efectivo - aPagar), creadoEn, ahora, clienteId, dolarones,
       // Quien cobro sale de Access; la caja es la suya (Issue #105) o la de la
       // computadora. Una venta encolada antes del corte de caja llega sin caja: ''.
-      await cajaDe(env, correo, venta.caja), correo, pedidoHash, imprimirEn),
+      await cajaDe(env, correo, venta.caja), correo, pedidoHash, imprimirEn, descuento, descuentoId, promo, anticipo, pedidoId),
     ...preparado.lineas.map((l) =>
       env.DB.prepare(
-        `insert into venta_lineas (venta_id, producto_id, codigo, nombre, precio, cantidad)
-         values (?, ?, ?, ?, ?, ?)`,
-      ).bind(id, l.producto_id, l.codigo, l.nombre, l.precio, l.cantidad),
+        `insert into venta_lineas (venta_id, producto_id, codigo, nombre, precio, cantidad, propietario)
+         values (?, ?, ?, ?, ?, ?, ?)`,
+      ).bind(id, l.producto_id, l.codigo, l.nombre, l.precio, l.cantidad, l.propietario),
     ),
+    // Con pedido: sus piezas apartadas vuelven a la venta y se gasta el saldo ANTES de descontar las de
+    // este ticket (si no, el trigger de stock aborta), pero despues del insert de la venta (FK pedidos.venta_id).
+    ...(conPedido?.sentencias ?? []),
     // Los bins no descuentan: nadie cuenta cuantas piezas quedan en un bote.
     // Sin `max(0, ...)`: si dos ventas concurrentes se pelean la ultima pieza,
     // el trigger `stock_no_negativo` (migracion 006) aborta esta sentencia y
@@ -742,10 +1070,20 @@ async function registrarVenta(request: Request, env: Env, correo: string): Promi
     if (String(error).includes('saldo insuficiente')) {
       return json({ error: 'El saldo de Dolarones cambio. Vuelve a buscar al socio.' }, 409);
     }
+    // Trigger pedido_saldo_valido (migracion 033): otra venta gasto el saldo o ya vencio.
+    if (pedidoId && String(error).includes('saldo de pedido invalido')) {
+      return json({ error: 'El saldo del pedido cambió o venció. Vuelve a cargarlo.' }, 409);
+    }
+    if (descuentoId && String(error).includes('descuento_id')) {
+      return json({ error: 'Ese descuento ya se uso en otra venta.' }, 409);
+    }
     throw error;
   }
+  // Si una pieza publicada en Mercado Libre se agoto, se pausa alla (D1 manda). Despues de responder.
+  ctx.waitUntil(conciliarSeguro(env, { productoIds: preparado.lineas.filter((l) => !l.sinInventario).map((l) => l.producto_id) }));
   const respuesta = json({
-    id, total, dolarones, imprimir_en:imprimirEn, cambio: Math.max(0, efectivo - aPagar), ganados: recompensa.ganados,
+    id, total, descuento, dolarones, imprimir_en:imprimirEn, cambio: Math.max(0, efectivo - aPagar), ganados: recompensa.ganados,
+    anticipo, saldo_pedido: pedidoId ? await saldoDe(env, pedidoId) : null,
     saldo: clienteId ? await saldo(env, clienteId, ahora) : null,
     vale_emitido:vale.emitido,
     vale_usado:await valeUsadoEnVenta(env, id),
@@ -787,113 +1125,59 @@ async function tomarImpresion(id: string, request: Request, env: Env, correo: st
   return json({ id, impreso_en:ahora });
 }
 
-/**
- * Cancela una venta ya cobrada: devolucion o error de la cajera.
- * La venta no se borra, se marca: el corte del dia tiene que seguir explicando
- * todo lo que paso, incluido lo que se deshizo. Las piezas vuelven al inventario.
- */
-async function cancelarVenta(id: string, request: Request, env: Env, correo: string): Promise<Response> {
-  if (!UUID.test(id)) {
-    return json({ error: 'Identificador de venta invalido.' }, 400);
-  }
-  // Con dinero real de por medio, una cancelacion sin motivo no se distingue
-  // de una para quedarse el efectivo de una venta que si se cobro. El motivo
-  // y quien la hizo (Cloudflare Access, igual que capturado_por en las fotos)
-  // son lo minimo para poder auditar despues.
-  const cuerpo = (await request.json().catch(() => ({}))) as { motivo?: unknown; caja?: unknown };
-  const motivo = String(cuerpo.motivo ?? '').trim().slice(0, 200);
-  if (!motivo) {
-    return json({ error: 'Escribe el motivo de la cancelacion.' }, 400);
-  }
-  const canceladaPor = correo;
-
-  const venta = await env.DB.prepare(
-    'select id, total, dolarones, cancelada, devuelto, dolarones_devueltos, revision from ventas where id = ?',
-  )
-    .bind(id)
-    .first<{
-      id: string; total: number; dolarones: number; cancelada: number;
-      devuelto: number; dolarones_devueltos: number; revision: number;
-    }>();
-  if (!venta) {
-    return json({ error: 'La venta no existe.' }, 404);
-  }
-  if (venta.cancelada) {
-    return json({ id, cancelada: true, ya_estaba: true });
-  }
-
-  const ahora = new Date().toISOString();
-  // Solo lo que sigue en el ticket: las piezas ya canceladas sueltas (Issue #138) ya regresaron.
-  const { results: lineas } = await env.DB.prepare(
-    `select producto_id, cantidad - cancelada_cantidad as cantidad from venta_lineas
-     where venta_id = ? and producto_id is not null and cantidad > cancelada_cantidad`,
-  )
-    .bind(id)
-    .all<{ producto_id: string; cantidad: number }>();
-
-  // Marca, existencias y Dolarones en un solo batch. Si dos cancelaciones
-  // llegan juntas, el trigger venta_cancelada_una_vez (migracion 011) aborta
-  // la segunda completa: nada se devuelve dos veces.
-  try {
-    await env.DB.batch([
-      // Candado de migracion 020: si una pieza se cancelo entre la lectura y aqui, aborta todo.
-      env.DB.prepare('update ventas set revision = ? where id = ?').bind(venta.revision + 1, id),
-      env.DB.prepare(
-        `update ventas set cancelada = 1, cancelada_en = ?, cancelada_por = ?, motivo_cancelacion = ?, cancelada_caja = ?
-         where id = ?`,
-      ).bind(ahora, canceladaPor, motivo, await cajaDe(env, correo, cuerpo.caja), id),   // el corte de esa caja cuenta la devolucion
-      ...lineas.map((l) =>
-        env.DB.prepare(
-          `update productos set stock = stock + ?, actualizado_en = ?
-           where id = ? and sin_inventario = 0`,
-        ).bind(l.cantidad, ahora, l.producto_id),
-      ),
-      ...(await sentenciasDeCancelacion(env, id, canceladaPor, ahora)),
-      ...(await cancelarVales(env, id, canceladaPor, ahora)),
-    ]);
-  } catch (error) {
-    if (String(error).includes('saldo de vale invalido'))
-      return json({ error:'El vale de esta compra ya se usó. Requiere aclaración presencial antes de cancelar.' }, 409);
-    if (String(error).includes('saldo insuficiente'))
-      return json({ error:'Los Dolarones ganados con esta compra ya se usaron. Requiere aclaración presencial antes de cancelar.' }, 409);
-    if (String(error).includes('venta ya cancelada')) {
-      return json({ id, cancelada: true, ya_estaba: true });
-    }
-    if (String(error).includes('ticket cambio')) {
-      return json({ error: 'Alguien mas cambio este ticket. Vuelve a abrirlo.' }, 409);
-    }
-    throw error;
-  }
-
-  // Lo que se regresa en dinero; lo pagado con Dolarones regresa al saldo.
-  // Sin lo ya devuelto por piezas canceladas sueltas.
-  return json({
-    id, cancelada: true,
-    devuelto: venta.total - venta.dolarones - venta.devuelto,
-    dolarones: venta.dolarones - venta.dolarones_devueltos,
-  });
-}
-
 // La tienda esta en America/Mexico_City: UTC-6 fijo desde 2022, sin horario de
 // verano. Las ventas se guardan en UTC, asi que despues de las 18:00 locales ya
 // son "manana" en UTC; el dia de la tienda se saca restando 6 horas. Sin esto,
 // el corte de las 20:00 solo veia lo vendido de 18:00 a 20:00 (Issue #93).
 const diaTienda = (columna: string) => `substr(datetime(${columna}, '-6 hours'), 1, 10)`;
 export const hoyTienda = (ahora = Date.now()) => new Date(ahora - 6 * 3_600_000).toISOString().slice(0, 10);
+const DIA = /^\d{4}-\d{2}-\d{2}$/;
+/**
+ * [00:00, 24:00) de un dia de la tienda, en UTC. Para filtrar se compara la columna
+ * tal cual: diaTienda() en el WHERE obliga a D1 a leer toda la tabla en cada
+ * consulta, y la caja pide el corte del dia seguido (agoto la cuota diaria, 15/10).
+ */
+const delDia = (dia: string) => {
+  const apertura = (d: string) => `${d}T06:00:00.000Z`;
+  return [apertura(dia), apertura(new Date(Date.parse(`${dia}T12:00:00Z`) + 86_400_000).toISOString().slice(0, 10))];
+};
+
+/**
+ * Los `dias` dias completos de la tienda que terminan hoy (Issue #166): el primero
+ * empieza a las 00:00 de la tienda, no «hace N x 24 h», para que un dia nunca salga
+ * a medias. `anterior_desde` abre el periodo de igual largo justo antes, para comparar.
+ */
+export function rangoDias(dias: number, ahora = Date.now()) {
+  const apertura = (dia: string) => `${dia}T06:00:00.000Z`;   // 00:00 en UTC-6
+  const primero = hoyTienda(ahora - (dias - 1) * 86_400_000);
+  return {
+    dias, dia_desde: primero, dia_hasta: hoyTienda(ahora), desde: apertura(primero),
+    anterior_desde: apertura(hoyTienda(ahora - (2 * dias - 1) * 86_400_000)),
+  };
+}
+// `dias=abc` daba NaN y tumbaba el reporte con 500: un valor que no es numero vale el de omision.
+const rangoDe = (url: URL) => {
+  const dias = Math.round(Number(url.searchParams.get('dias') ?? 30));
+  return rangoDias(Number.isFinite(dias) ? Math.min(365, Math.max(1, dias)) : 30);
+};
+
+// Lo que lleva un renglon de la lista de tickets (ticket.js `renglonTicket`), del dia o del rango.
+const COLUMNAS_TICKET = `v.id, v.total, v.forma_pago, v.cancelada, v.creado_en, v.dolarones, v.devuelto, v.dolarones_devueltos,
+            v.caja, v.cajero, v.cliente_id is not null as con_socio,
+            (select group_concat(nombre, ' · ') from venta_lineas where venta_id = v.id) as piezas,
+            (select coalesce(sum(cantidad), 0) from venta_lineas where venta_id = v.id) as cantidad,
+            (select coalesce(sum(cancelada_cantidad), 0) from venta_lineas where venta_id = v.id) as cancelada_cantidad`;
 
 /** Tickets de un dia (hoy si no se dice): la caja cancela el que se cobro mal; reportes solo los ve. */
 async function ventasDelDia(url: URL, env: Env): Promise<Response> {
   const dia = url.searchParams.get('dia') ?? hoyTienda();
+  if (!DIA.test(dia)) return json({ error: 'Dia invalido.' }, 400);
   const { results } = await env.DB.prepare(
-    `select v.id, v.total, v.forma_pago, v.cancelada, v.creado_en, v.dolarones, v.devuelto, v.dolarones_devueltos,
-            v.caja, v.cajero,
-            (select group_concat(nombre, ' · ') from venta_lineas where venta_id = v.id) as piezas,
-            (select coalesce(sum(cantidad), 0) from venta_lineas where venta_id = v.id) as cantidad,
-            (select coalesce(sum(cancelada_cantidad), 0) from venta_lineas where venta_id = v.id) as cancelada_cantidad
-     from ventas v where ${diaTienda('v.creado_en')} = ?
+    `select ${COLUMNAS_TICKET}
+     from ventas v where v.creado_en >= ? and v.creado_en < ?
      order by v.creado_en desc limit 300`,
   )
-    .bind(dia)
+    .bind(...delDia(dia))
     .all();
   return json(results);
 }
@@ -921,27 +1205,35 @@ async function registrarAperturaCajon(request: Request, env: Env, correo: string
 /** Corte del dia: lo que hay que cuadrar contra el efectivo en la caja. */
 async function corte(url: URL, env: Env): Promise<Response> {
   const dia = url.searchParams.get('dia') ?? hoyTienda();
+  if (!DIA.test(dia)) return json({ error: 'Dia invalido.' }, 400);
+  const rango = delDia(dia);
   // Las canceladas no cuentan: el corte es contra el efectivo que hay en el cajon.
   const { results } = await env.DB.prepare(
-    `select forma_pago, count(*) as tickets, sum(total - dolarones - devuelto) as total,
-            sum(dolarones - dolarones_devueltos) as dolarones
-     from ventas where ${diaTienda('creado_en')} = ? and cancelada = 0 group by forma_pago`,
+    `select forma_pago, sum(tickets) as tickets, sum(total) as total, sum(dolarones) as dolarones from (
+       -- Lo devuelto en cupón (Issue #330) se quedó en el cajón.
+       select forma_pago, count(*) as tickets, sum(total - dolarones - anticipo - devuelto + devuelto_cupon) as total,
+              sum(dolarones - dolarones_devueltos) as dolarones
+       from ventas where creado_en >= ? and creado_en < ? and cancelada = 0 group by forma_pago
+       union all
+       select forma_pago, 0, sum(anticipo), 0 from pedidos where creado_en >= ? and creado_en < ? group by forma_pago
+     ) group by forma_pago`,
   )
-    .bind(dia)
+    .bind(...rango, ...rango)
     .all<{ forma_pago: string; tickets: number; total: number; dolarones: number }>();
 
   const piezas = await env.DB.prepare(
     `select coalesce(sum(l.cantidad - l.cancelada_cantidad), 0) as piezas from venta_lineas l
      join ventas v on v.id = l.venta_id
-     where ${diaTienda('v.creado_en')} = ? and v.cancelada = 0`,
+     where v.creado_en >= ? and v.creado_en < ? and v.cancelada = 0`,
   )
-    .bind(dia)
+    .bind(...rango)
     .first<{ piezas: number }>();
 
   return json({
     dia,
     piezas: piezas?.piezas ?? 0,
-    // Dinero que debe haber entre cajon y terminal; lo pagado con Dolarones va aparte.
+    // Dinero que debe haber entre cajon y terminal; lo pagado con Dolarones va aparte. Los anticipos de
+    // pedidos entran el dia que se recibieron y las ventas restan el saldo que gastaron (Issue #269).
     total: results.reduce((suma, fila) => suma + (fila.total ?? 0), 0),
     dolarones: results.reduce((suma, fila) => suma + (fila.dolarones ?? 0), 0),
     por_forma_pago: results,
@@ -949,69 +1241,163 @@ async function corte(url: URL, env: Env): Promise<Response> {
 }
 
 /**
+ * Foto de lo que hay en piso AHORA (Issue #174), sin importar el periodo del reporte: piezas individuales
+ * ya etiquetadas (con codigo) y con existencia. Quedan fuera las bandas (no tienen fecha de captura propia),
+ * lo agotado y lo que aun esta en la cola de revision sin etiqueta. Las danadas SI cuentan: estan en piso.
+ * Antiguedad = dias de la tienda (UTC-6) desde `creado_en`, y los tramos van por semanas completas.
+ * Una fecha vacia o invalida no se adivina: va aparte, en `sin_fecha`.
+ */
+async function inventarioEnPiso(env: Env, ahora = Date.now()) {
+  // ponytail: se trae toda la lista y se suma en JS; con decenas de miles de piezas en piso conviene agrupar en SQL.
+  const { results } = await env.DB.prepare(
+    `select id, codigo, nombre, coalesce(nullif(categoria, ''), 'sin categoria') as categoria, precio, stock, creado_en,
+       case when julianday(creado_en) is null then null
+            else max(0, cast(julianday(?) - julianday(substr(datetime(creado_en, '-6 hours'), 1, 10)) as integer)) end as dias
+     from productos
+     where sin_inventario = 0 and stock > 0 and destino = 'etiqueta' and codigo is not null and codigo != ''
+       and propietario = 'dolaron'`,
+  )
+    .bind(hoyTienda(ahora))
+    .all<{ id: string; codigo: string; nombre: string; categoria: string; precio: number; stock: number; creado_en: string; dias: number | null }>();
+
+  const valorDe = (f: { precio: number; stock: number }) => f.precio * f.stock;
+  const tramos = new Map(TRAMOS_ANTIGUEDAD.map(([clave]) => [clave, { tramo: clave, piezas: 0, valor: 0 }]));
+  const sinFecha = { piezas: 0, valor: 0 };
+  const categorias = new Map<string, { categoria: string; piezas: number; valor: number; sumaDias: number; fechadas: number }>();
+  for (const f of results) {
+    const grupo = (f.dias === null ? sinFecha : tramos.get(tramoDeDias(f.dias)))!;
+    grupo.piezas += 1;
+    grupo.valor += valorDe(f);
+    const c = categorias.get(f.categoria) ?? { categoria: f.categoria, piezas: 0, valor: 0, sumaDias: 0, fechadas: 0 };
+    c.piezas += 1;
+    c.valor += valorDe(f);
+    if (f.dias !== null) { c.sumaDias += f.dias; c.fechadas += 1; }
+    categorias.set(f.categoria, c);
+  }
+  return {
+    piezas: results.length,
+    unidades: results.reduce((suma, f) => suma + f.stock, 0),
+    valor: results.reduce((suma, f) => suma + valorDe(f), 0),
+    por_antiguedad: [...tramos.values()],
+    sin_fecha: sinFecha,
+    por_categoria: [...categorias.values()]
+      .map(({ sumaDias, fechadas, ...c }) => ({ ...c, dias_promedio: fechadas ? sumaDias / fechadas : null }))
+      .sort((a, b) => b.valor - a.valor || a.categoria.localeCompare(b.categoria)),
+    mas_viejas: results.filter((f) => f.dias !== null)
+      .sort((a, b) => b.dias! - a.dias! || valorDe(b) - valorDe(a) || a.codigo.localeCompare(b.codigo))
+      .slice(0, 15)
+      .map(({ id, codigo, nombre, categoria, precio, stock, creado_en, dias }) => ({ id, codigo, nombre, categoria, precio, stock, creado_en, dias })),
+  };
+}
+
+/**
  * Reportes: todo sale de consultas contra D1 en el momento, nada se precalcula
  * ni vive en otra tabla. `dias` acota lo que tiene sentido por rango (ventas del
  * dia, categoria, top de piezas); precio sugerido y dias en venta son de
  * siempre, porque son pocos datos y la pregunta que responden no es "esta
- * semana" sino "en general".
+ * semana" sino "en general". `inventario` es la foto de ahora: tampoco depende de `dias`.
  */
 async function reportes(url: URL, env: Env): Promise<Response> {
-  const dias = Math.min(365, Math.max(1, Math.round(Number(url.searchParams.get('dias') ?? 30))));
-  const desde = new Date(Date.now() - dias * 86400000).toISOString();
+  const rango = rangoDe(url);
+  const { dias, desde } = rango;
 
+  // Solo lo de la tienda (propietario 'dolaron', Issue #298): el neto de cada ticket va repartido por pieza.
   const resumen = await env.DB.prepare(
-    `select count(*) as ventas, coalesce(sum(total - devuelto - dolarones_devueltos), 0) as total,
-       (select coalesce(sum(l.cantidad - l.cancelada_cantidad), 0) from venta_lineas l join ventas v on v.id = l.venta_id
-        where v.cancelada = 0 and v.creado_en >= ?) as piezas
-     from ventas where cancelada = 0 and creado_en >= ?`,
+    `${lineasNetas('v.creado_en >= ?')}
+     select count(distinct venta) as ventas, coalesce(sum(neta), 0) as total, coalesce(sum(cant), 0) as piezas
+     from netas where propietario = 'dolaron'`,
   )
-    .bind(desde, desde)
+    .bind(desde)
     .first<{ ventas: number; total: number; piezas: number }>();
+
+  // El periodo de igual largo justo antes, para las flechas de «vs periodo anterior».
+  const anterior = await env.DB.prepare(
+    `${lineasNetas('v.creado_en >= ? and v.creado_en < ?')}
+     select count(distinct venta) as ventas, coalesce(sum(neta), 0) as total, coalesce(sum(cant), 0) as piezas
+     from netas where propietario = 'dolaron'`,
+  )
+    .bind(rango.anterior_desde, desde)
+    .first<{ ventas: number; total: number; piezas: number }>();
+
+  // De bruto a vendido, sin que sobre ni falte un centavo: lo cobrado en todos los
+  // tickets, menos lo devuelto por piezas, menos lo que valian los cancelados completos.
+  const cuadre = await env.DB.prepare(
+    `${lineasNetas('v.creado_en >= ?')}
+     select (select coalesce(sum(total), 0) from ventas where creado_en >= ?) as bruto,
+       (select coalesce(sum(devuelto + dolarones_devueltos), 0) from ventas where creado_en >= ?) as devoluciones_pieza,
+       (select coalesce(sum(case when cancelada = 1 then total - devuelto - dolarones_devueltos end), 0) from ventas where creado_en >= ?) as cancelados,
+       (select coalesce(sum(neta), 0) from netas where propietario = 'fep') as fep`,
+  )
+    .bind(desde, desde, desde, desde)
+    .first<{ bruto: number; devoluciones_pieza: number; cancelados: number; fep: number }>();
 
   // Lo cobrado en dinero por forma de pago, y lo pagado con Dolarones como una forma mas.
   const { results: porFormaPago } = await env.DB.prepare(
-    `select forma_pago, count(*) as tickets, sum(total - dolarones - devuelto) as total
-     from ventas where cancelada = 0 and creado_en >= ? group by forma_pago
-     union all
-     select 'dolarones', count(*), sum(dolarones - dolarones_devueltos)
-     from ventas where cancelada = 0 and creado_en >= ? and dolarones > dolarones_devueltos`,
+    // Cobrado en el ticket (netas.ts ya descuenta el anticipo) mas el anticipo de los pedidos recibidos
+    // en el periodo: el dinero entra el dia del apartado, no el de la venta. Los Dolarones usados
+    // (neta - cobrado - anticipo) van en su propia fila.
+    `${lineasNetas('v.creado_en >= ?')}
+     select forma_pago, sum(tickets) as tickets, sum(total) as total from (
+       select forma_pago, count(distinct venta) as tickets, coalesce(sum(cobrado), 0) as total
+       from cobros where propietario = 'dolaron' group by forma_pago
+       union all
+       select forma_pago, 0, coalesce(sum(anticipo), 0) from pedidos where creado_en >= ? group by forma_pago
+       union all
+       select 'dolarones', count(distinct case when neta - cobrado - anticipo_linea <> 0 then venta end),
+         coalesce(sum(neta - cobrado - anticipo_linea), 0)
+       from cobros where propietario = 'dolaron'
+     ) group by forma_pago`,
   )
     .bind(desde, desde)
     .all<{ forma_pago: string; tickets: number; total: number }>();
 
   const { results: ventasPorDia } = await env.DB.prepare(
-    `select ${diaTienda('creado_en')} as dia, count(*) as tickets, sum(total - devuelto - dolarones_devueltos) as total
-     from ventas where cancelada = 0 and creado_en >= ? group by dia order by dia`,
+    `${lineasNetas('v.creado_en >= ?')}
+     select ${diaTienda('creado_en')} as dia, count(distinct venta) as tickets, sum(neta) as total
+     from netas where propietario = 'dolaron' group by dia order by dia`,
   )
     .bind(desde)
     .all<{ dia: string; tickets: number; total: number }>();
   const { results: piezasPorDia } = await env.DB.prepare(
     `select ${diaTienda('v.creado_en')} as dia, coalesce(sum(l.cantidad - l.cancelada_cantidad), 0) as piezas
      from venta_lineas l join ventas v on v.id = l.venta_id
-     where v.cancelada = 0 and v.creado_en >= ? group by dia`,
+     where v.cancelada = 0 and v.creado_en >= ? and l.propietario = 'dolaron' group by dia`,
   )
     .bind(desde)
     .all<{ dia: string; piezas: number }>();
   const piezasPorDiaMapa = new Map(piezasPorDia.map((f) => [f.dia, f.piezas]));
   const porDia = ventasPorDia.map((f) => ({ ...f, piezas: piezasPorDiaMapa.get(f.dia) ?? 0 }));
 
-  const { results: porCategoria } = await env.DB.prepare(
-    `select case when p.sin_inventario = 1 then 'bandas' else coalesce(p.categoria, 'sin categoria') end as categoria,
-       coalesce(sum(l.precio * (l.cantidad - l.cancelada_cantidad)), 0) as total,
-       coalesce(sum(l.cantidad - l.cancelada_cantidad), 0) as piezas
-     from venta_lineas l join ventas v on v.id = l.venta_id left join productos p on p.id = l.producto_id
-     where v.cancelada = 0 and v.creado_en >= ?
-     group by categoria order by total desc`,
+  // Mapa de calor de /reportes: dia de la semana (0 = domingo, como %w) y hora, ambos de la tienda (UTC-6).
+  const { results: porHora } = await env.DB.prepare(
+    `${lineasNetas('v.creado_en >= ?')}
+     select cast(strftime('%w', datetime(creado_en, '-6 hours')) as integer) as dia_semana,
+       cast(strftime('%H', datetime(creado_en, '-6 hours')) as integer) as hora,
+       count(distinct venta) as tickets, sum(neta) as total
+     from netas where propietario = 'dolaron' group by dia_semana, hora order by dia_semana, hora`,
   )
     .bind(desde)
+    .all<{ dia_semana: number; hora: number; tickets: number; total: number }>();
+
+  // Lo vendido por categoria (las bandas juntas), del periodo y del anterior de igual largo: mismas reglas en los dos.
+  const ventasPorCategoria = (anteriorAlPeriodo: boolean) => env.DB.prepare(
+    `${lineasNetas(`v.creado_en >= ? ${anteriorAlPeriodo ? 'and v.creado_en < ?' : ''}`)}
+     select case when p.sin_inventario = 1 then 'bandas' else coalesce(nullif(p.categoria, ''), 'sin categoria') end as categoria,
+       coalesce(sum(n.neta), 0) as total, coalesce(sum(n.cant), 0) as piezas
+     from netas n left join productos p on p.id = n.producto_id
+     where n.propietario = 'dolaron'
+     group by categoria order by total desc`,
+  )
+    .bind(...(anteriorAlPeriodo ? [rango.anterior_desde, desde] : [desde]))
     .all<{ categoria: string; total: number; piezas: number }>();
+  const { results: porCategoria } = await ventasPorCategoria(false);
+  const { results: porCategoriaAnterior } = await ventasPorCategoria(true);
 
   const { results: topProductos } = await env.DB.prepare(
-    `select l.codigo, l.nombre, sum(l.cantidad - l.cancelada_cantidad) as cantidad,
-       sum(l.precio * (l.cantidad - l.cancelada_cantidad)) as total
-     from venta_lineas l join ventas v on v.id = l.venta_id
-     where v.cancelada = 0 and v.creado_en >= ? and l.producto_id is not null and l.cantidad > l.cancelada_cantidad
-     group by l.codigo, l.nombre order by cantidad desc, total desc limit 10`,
+    `${lineasNetas('v.creado_en >= ?')}
+     select codigo, nombre, sum(cant) as cantidad, sum(neta) as total
+     from netas where producto_id is not null and cant > 0 and propietario = 'dolaron'
+     group by codigo, nombre order by cantidad desc, total desc limit 10`,
   )
     .bind(desde)
     .all<{ codigo: string; nombre: string; cantidad: number; total: number }>();
@@ -1021,16 +1407,16 @@ async function reportes(url: URL, env: Env): Promise<Response> {
   // con datos en vez de ajustar los porcentajes a ojo.
   const precioSugerido = await env.DB.prepare(
     `select count(*) as n, avg((precio - precio_sugerido) * 100.0 / precio_sugerido) as promedio_pct
-     from productos where precio_sugerido > 0 and precio > 0`,
+     from productos where precio_sugerido > 0 and precio > 0 and propietario = 'dolaron'`,
   ).first<{ n: number; promedio_pct: number | null }>();
 
   // Diferido a proposito en CONTRATO-ESCANER.md hasta que hubiera ventas reales.
   const { results: diasEnVenta } = await env.DB.prepare(
-    `select coalesce(p.categoria, 'sin categoria') as categoria,
+    `select coalesce(nullif(p.categoria, ''), 'sin categoria') as categoria,
        avg(julianday(substr(v.creado_en, 1, 10)) - julianday(substr(p.creado_en, 1, 10))) as dias_promedio,
        count(*) as n
      from venta_lineas l join ventas v on v.id = l.venta_id join productos p on p.id = l.producto_id
-     where v.cancelada = 0 and p.sin_inventario = 0 and l.cantidad > l.cancelada_cantidad
+     where v.cancelada = 0 and p.sin_inventario = 0 and l.cantidad > l.cancelada_cantidad and l.propietario = 'dolaron'
      group by categoria order by dias_promedio desc`,
   ).all<{ categoria: string; dias_promedio: number; n: number }>();
 
@@ -1038,20 +1424,22 @@ async function reportes(url: URL, env: Env): Promise<Response> {
   // cancelacion que no fue legitima (cobrar de verdad y "cancelar" para
   // quedarse el efectivo). Se listan una por una, no solo el total.
   const { results: cancelaciones } = await env.DB.prepare(
-    `select v.id, v.total - v.dolarones - v.devuelto as total, v.forma_pago, v.cancelada_en, v.cancelada_por,
-       v.motivo_cancelacion,
+    `select v.id, v.total - v.dolarones - v.devuelto as total, v.dolarones - v.dolarones_devueltos as dolarones,
+       v.forma_pago, v.cancelada_en, v.cancelada_por, v.motivo_cancelacion,
        (select group_concat(nombre, ' · ') from venta_lineas
-        where venta_id = v.id and cantidad > cancelada_cantidad) as piezas
+        where venta_id = v.id and cantidad > cancelada_cantidad) as piezas, 'ticket' as tipo
      from ventas v where v.cancelada = 1 and v.creado_en >= ?
      union all
-     select d.venta_id, d.importe, d.forma_pago, d.creado_en, d.autor, d.motivo, d.cantidad || ' × ' || l.nombre
-     from devoluciones d join venta_lineas l on l.id = d.linea_id where d.creado_en >= ?
-     order by 4 desc`,
+     select d.venta_id, d.importe, d.dolarones, d.forma_pago, d.creado_en, d.autor, d.motivo,
+       d.cantidad || ' × ' || l.nombre, 'pieza'
+     from devoluciones d join venta_lineas l on l.id = d.linea_id join ventas v on v.id = d.venta_id
+     where v.creado_en >= ?
+     order by 5 desc`,
   )
     .bind(desde, desde)
     .all<{
-      id: string; total: number; forma_pago: string; cancelada_en: string;
-      cancelada_por: string; motivo_cancelacion: string; piezas: string;
+      id: string; total: number; dolarones: number; forma_pago: string; cancelada_en: string;
+      cancelada_por: string; motivo_cancelacion: string; piezas: string; tipo: string;
     }>();
 
   const { results: aperturas } = await env.DB.prepare(
@@ -1062,7 +1450,7 @@ async function reportes(url: URL, env: Env): Promise<Response> {
 
   const { results: cortes } = await env.DB.prepare(
     `select id, caja, cajero, desde, hasta, tickets, fondo_inicial, efectivo_ventas, efectivo_devoluciones, retiros,
-            gastos, efectivo_esperado, efectivo_contado, diferencia, tarjeta_sistema, tarjeta_terminal, transferencias,
+            gastos, nomina, efectivo_esperado, efectivo_contado, diferencia, tarjeta_sistema, tarjeta_terminal, transferencias,
             dolarones, fondo_siguiente, entregado, notas
      from cortes where hasta >= ? order by hasta desc`,
   )
@@ -1076,22 +1464,39 @@ async function reportes(url: URL, env: Env): Promise<Response> {
     .all();
 
   return json({
-    dias,
+    dias, dia_desde: rango.dia_desde, dia_hasta: rango.dia_hasta,
     resumen: {
       ventas: resumen?.ventas ?? 0,
       total: resumen?.total ?? 0,
       piezas: resumen?.piezas ?? 0,
       ticket_promedio: resumen?.ventas ? Math.round((resumen.total ?? 0) / resumen.ventas) : 0,
     },
+    anterior: {
+      ventas: anterior?.ventas ?? 0,
+      total: anterior?.total ?? 0,
+      piezas: anterior?.piezas ?? 0,
+      ticket_promedio: anterior?.ventas ? Math.round((anterior.total ?? 0) / anterior.ventas) : 0,
+    },
+    cuadre: {
+      bruto: cuadre?.bruto ?? 0,
+      devoluciones_pieza: cuadre?.devoluciones_pieza ?? 0,
+      cancelados: cuadre?.cancelados ?? 0,
+      fep: cuadre?.fep ?? 0,
+      vendido: (cuadre?.bruto ?? 0) - (cuadre?.devoluciones_pieza ?? 0) - (cuadre?.cancelados ?? 0) - (cuadre?.fep ?? 0),
+    },
     por_forma_pago: porFormaPago,
     por_dia: porDia,
+    por_hora: porHora,
     por_categoria: porCategoria,
+    por_categoria_anterior: porCategoriaAnterior,
+    inventario: await inventarioEnPiso(env),
     top_productos: topProductos,
     precio_sugerido: { n: precioSugerido?.n ?? 0, promedio_pct: precioSugerido?.promedio_pct ?? null },
     dias_en_venta_por_categoria: diasEnVenta,
     cancelaciones: {
       n: cancelaciones.length,
       total: cancelaciones.reduce((suma, c) => suma + c.total, 0),
+      dolarones: cancelaciones.reduce((suma, c) => suma + c.dolarones, 0),
       detalle: cancelaciones,
     },
     aperturas_cajon: aperturas,
@@ -1103,7 +1508,12 @@ async function reportes(url: URL, env: Env): Promise<Response> {
 /** Una celda de CSV: entre comillas si trae coma, comilla o salto de linea. */
 function celdaCsv(valor: unknown): string {
   const texto = String(valor ?? '');
-  return /[",\n]/.test(texto) ? `"${texto.replace(/"/g, '""')}"` : texto;
+  // Evitar inyeccion de formulas: si es texto y empieza con un caracter peligroso, prefijo con apostrofe.
+  // Excepto si es un numero decimal (que puede ser negativo), que se deja tal cual.
+  if (typeof valor === 'string' && /^[=+\-@\t\r]/.test(texto) && !/^-?\d+(\.\d+)?$/.test(texto)) {
+    return /[",\r\n]/.test(texto) ? `"'${texto.replace(/"/g, '""')}"` : `'${texto}`;
+  }
+  return /[",\r\n]/.test(texto) ? `"${texto.replace(/"/g, '""')}"` : texto;
 }
 
 function respuestaCsv(nombreArchivo: string, encabezados: string[], filas: unknown[][]): Response {
@@ -1117,7 +1527,118 @@ function respuestaCsv(nombreArchivo: string, encabezados: string[], filas: unkno
   });
 }
 
+const TICKETS_POR_PAGINA = 50;
+
+/**
+ * Los filtros de la lista de tickets de /reportes, en un solo lugar: la lista y su
+ * exportacion a CSV tienen que ver exactamente los mismos tickets.
+ */
+function filtrosTickets(url: URL) {
+  const q = url.searchParams;
+  const { desde } = rangoDe(url);
+
+  const filtros = ['v.creado_en >= ?'];
+  const datos: string[] = [desde];
+  const forma = q.get('forma_pago') ?? '';
+  if (FORMAS_PAGO.has(forma)) { filtros.push('v.forma_pago = ?'); datos.push(forma); }
+  for (const campo of ['caja', 'cajero']) {
+    const valor = q.get(campo);
+    if (valor) { filtros.push(`v.${campo} = ?`); datos.push(valor); }
+  }
+  const estado = q.get('estado');
+  if (estado === 'vigente') filtros.push('v.cancelada = 0');
+  if (estado === 'cancelado') filtros.push('v.cancelada = 1');
+  if (estado === 'devolucion') {
+    filtros.push('v.cancelada = 0 and exists (select 1 from venta_lineas where venta_id = v.id and cancelada_cantidad > 0)');
+  }
+  const dia = q.get('dia') ?? '';
+  if (DIA.test(dia)) { filtros.push('v.creado_en >= ? and v.creado_en < ?'); datos.push(...delDia(dia)); }
+  if (q.get('socio') === '1') filtros.push('v.cliente_id is not null');
+  if (q.get('dolarones') === '1') filtros.push('v.dolarones > 0');
+  const donde = filtros.join(' and ');
+  return { desde, donde, datos };
+}
+
+/**
+ * Tickets del rango de /reportes (Issue #164), con filtros y paginacion. El rango
+ * es el mismo de las tarjetas (`dias`), para que los totales cuadren. El detalle de
+ * cada ticket es GET /api/ventas/:id. «Vendido» es lo que el ticket sigue valiendo:
+ * sin los cancelados ni lo devuelto por piezas.
+ */
+async function ticketsDelRango(url: URL, env: Env): Promise<Response> {
+  const { desde, donde, datos } = filtrosTickets(url);
+  const pagina = Math.min(1000, Math.max(0, Math.floor(Number(url.searchParams.get('pagina'))) || 0));
+
+  const resumen = await env.DB.prepare(
+    `select count(*) as tickets,
+            coalesce(sum(case when v.cancelada = 0 then v.total - v.devuelto - v.dolarones_devueltos end), 0) as vendido,
+            coalesce(sum(case when v.cancelada = 0 then v.dolarones - v.dolarones_devueltos end), 0) as dolarones,
+            coalesce(sum(case when v.cancelada = 1 then 1 end), 0) as cancelados,
+            coalesce((select sum(l.cantidad - l.cancelada_cantidad) from venta_lineas l join ventas v on v.id = l.venta_id
+                      where v.cancelada = 0 and ${donde}), 0) as piezas
+     from ventas v where ${donde}`,
+  )
+    .bind(...datos, ...datos)
+    .first();
+  const { results } = await env.DB.prepare(
+    `select ${COLUMNAS_TICKET} from ventas v where ${donde}
+     order by v.creado_en desc, v.id desc limit ? offset ?`,
+  )
+    .bind(...datos, TICKETS_POR_PAGINA + 1, pagina * TICKETS_POR_PAGINA)
+    .all();
+  // Para los selectores: lo que hubo en el rango, sin importar los filtros.
+  const { results: cajas } = await env.DB.prepare(
+    `select distinct caja as valor from ventas where creado_en >= ? and caja != '' order by caja`,
+  ).bind(desde).all<{ valor: string }>();
+  const { results: cajeros } = await env.DB.prepare(
+    `select distinct cajero as valor from ventas where creado_en >= ? and cajero != '' order by cajero`,
+  ).bind(desde).all<{ valor: string }>();
+
+  return json({
+    resumen,
+    tickets: results.slice(0, TICKETS_POR_PAGINA),
+    hay_mas: results.length > TICKETS_POR_PAGINA,
+    cajas: cajas.map((f) => f.valor),
+    cajeros: cajeros.map((f) => f.valor),
+  });
+}
+
 const pesosDe = (centavos: number) => (centavos / 100).toFixed(2);
+
+// ponytail: tope de filas del CSV de tickets; un rango de 12 meses lo rebasaria solo con mucho volumen. Si
+// pasa, hay que avisarlo en la pantalla o pasar a un export por tramos (hoy el tope ya cubre ~14 tickets al dia).
+const TICKETS_CSV_MAX = 5000;
+
+/** Los tickets de la lista de /reportes con sus mismos filtros, sin paginar, para abrirlos en una hoja de calculo. */
+async function exportarTicketsCsv(url: URL, env: Env): Promise<Response> {
+  const { donde, datos } = filtrosTickets(url);
+  const { results } = await env.DB.prepare(
+    `select ${COLUMNAS_TICKET} from ventas v where ${donde} order by v.creado_en desc, v.id desc limit ?`,
+  )
+    .bind(...datos, TICKETS_CSV_MAX)
+    .all<{
+      id: string; total: number; forma_pago: string; cancelada: number; creado_en: string; dolarones: number;
+      devuelto: number; dolarones_devueltos: number; caja: string; cajero: string; con_socio: number;
+      piezas: string | null; cantidad: number; cancelada_cantidad: number;
+    }>();
+
+  const filas = results.map((f) => [
+    // Hora de la tienda (UTC-6), no la UTC con que se guarda: es la que el dueno reconoce.
+    new Date(Date.parse(f.creado_en) - 6 * 3_600_000).toISOString().slice(0, 16).replace('T', ' '),
+    f.id, f.caja, f.cajero, f.forma_pago,
+    f.cancelada ? 'cancelado' : f.cancelada_cantidad > 0 ? 'con devoluciones' : 'vigente',
+    f.piezas ?? '', f.cantidad, pesosDe(f.total), pesosDe(f.devuelto), pesosDe(f.dolarones), pesosDe(f.dolarones_devueltos),
+    // Igual que «Vendido» en la lista: un cancelado ya no vale nada.
+    pesosDe(f.cancelada ? 0 : f.total - f.devuelto - f.dolarones_devueltos),
+    f.con_socio ? 'sí' : 'no',
+  ]);
+  return respuestaCsv(
+    'tickets.csv',
+    ['fecha', 'ticket', 'caja', 'cajero', 'forma_pago', 'estado', 'piezas', 'cantidad', 'total', 'devuelto',
+      'dolarones', 'dolarones_devueltos', 'vendido', 'socio'],
+    filas,
+  );
+}
 
 /** Un renglon por linea de venta: es el ledger completo, para lo que ningun dashboard cubre. */
 async function exportarVentasCsv(env: Env): Promise<Response> {
@@ -1133,7 +1654,9 @@ async function exportarVentasCsv(env: Env): Promise<Response> {
   }>();
 
   const filas = results.map((f) => [
-    f.creado_en, f.forma_pago, f.cancelada ? 'si' : 'no', f.cancelada_por, f.motivo_cancelacion,
+    // Hora de la tienda (UTC-6), como en tickets.csv: en UTC, una venta de la tarde caia al dia siguiente.
+    new Date(Date.parse(f.creado_en) - 6 * 3_600_000).toISOString().slice(0, 16).replace('T', ' '),
+    f.forma_pago, f.cancelada ? 'si' : 'no', f.cancelada_por, f.motivo_cancelacion,
     f.codigo, f.categoria, f.nombre, pesosDe(f.precio), f.cantidad, pesosDe(f.precio * f.cantidad),
     f.cancelada_cantidad,
   ]);
@@ -1149,7 +1672,7 @@ async function exportarInventarioCsv(env: Env): Promise<Response> {
   const { results } = await env.DB.prepare(
     `select codigo, nombre, categoria, marca, precio_lista, precio, precio_sugerido, estado_fisico,
             estado_analisis, destino, stock, sin_inventario, semana_ingreso, capturado_por, creado_en
-     from productos order by creado_en`,
+     from productos where propietario = 'dolaron' order by creado_en`,
   ).all<{
     codigo: string; nombre: string; categoria: string; marca: string; precio_lista: number; precio: number;
     precio_sugerido: number; estado_fisico: string; estado_analisis: string; destino: string;
@@ -1169,9 +1692,37 @@ async function exportarInventarioCsv(env: Env): Promise<Response> {
   );
 }
 
+// Issue #202: esta pieza azul sigue retenida hasta corregir la identificación gato/perro.
+const RETENIDO_MARKETPLACE = '87ddd327-2058-435d-98ea-651a6e54c09a';
+const ELEGIBLE_MARKETPLACE = `stock >= 1 and sin_inventario = 0 and precio > 0
+  and typeof(precio) = 'integer' and trim(nombre) != '' and destino = 'etiqueta'
+  and foto_key = 'fotos/' || id || '.jpg' and estado_analisis = 'listo' and id != ? and propietario = 'dolaron'`;
+
+async function marketplace(env: Env): Promise<Response> {
+  const { results } = await env.DB.prepare(`select id, codigo, nombre, categoria, marca, precio,
+    estado_fisico, estado_analisis, destino, stock, sin_inventario, foto_key from productos
+    where ${ELEGIBLE_MARKETPLACE} order by nombre`).bind(RETENIDO_MARKETPLACE).all();
+  const respuesta = json({ products: results, updated_at: new Date().toISOString() });
+  respuesta.headers.set('cache-control', 'no-store');
+  return respuesta;
+}
+
+async function fotoMarketplace(id: string, env: Env): Promise<Response> {
+  if (!UUID.test(id)) return json({ error: 'Identificador invalido.' }, 400);
+  const producto = await env.DB.prepare(`select id from productos where ${ELEGIBLE_MARKETPLACE} and id = ?`)
+    .bind(RETENIDO_MARKETPLACE, id).first();
+  if (!producto) return json({ error: 'Pieza no disponible para Marketplace.' }, 404);
+  const respuesta = await servirFoto(id, env);
+  respuesta.headers.set('cache-control', 'no-store');
+  return respuesta;
+}
+
 async function servirFoto(id: string, env: Env): Promise<Response> {
   if (!UUID.test(id)) {
     return json({ error: 'Identificador invalido.' }, 400);
+  }
+  if (await env.DB.prepare("select id from productos where id = ? and estado_analisis = 'descartado'").bind(id).first()) {
+    return json({ error: 'Foto no encontrada.' }, 404);
   }
   const objeto = await env.FOTOS.get(`fotos/${id}.jpg`);
   if (!objeto) {
@@ -1195,11 +1746,16 @@ export default {
     env.PORTAL_AVISO_TEXTO ||= AVISO;
 
     try {
+      // Mercado Libre avisa aquí, sin Access: la ruta secreta es la puerta. También
+      // llega por el host público del portal (único fuera de Access), por eso va antes.
+      const aviso = pathname.match(/^\/api\/ml\/notificaciones\/([^/]+)$/);
+      if (aviso && request.method === 'POST') return await recibirNotificacion(aviso[1], request, env, ctx);
       // Puerta pública cerrada por defecto. Nunca comparte rutas ni assets del personal.
       if (env.HOST_PORTAL && url.hostname === env.HOST_PORTAL) {
         const archivos: Record<string, string> = {
-          '/': '/portal', '/portal': '/portal', '/portal.html': '/portal',
+          '/': '/portal', '/portal': '/portal', '/portal.html': '/portal', '/v': '/portal',
           '/portal.js': '/portal.js', '/portal.css': '/portal.css', '/code128.js': '/code128.js', '/vendor/qrcode-generator.js': '/vendor/qrcode-generator.js',
+          '/el-dolaron-logo.png': '/el-dolaron-logo.png',
         };
         if (archivos[pathname] && (request.method === 'GET' || request.method === 'HEAD')) {
           const asset = new URL(archivos[pathname], url.origin);
@@ -1216,6 +1772,8 @@ export default {
           respuesta.headers.set('x-content-type-options', 'nosniff');
           return respuesta;
         }
+        const publico = await catalogoPublico(request, env, url);
+        if (publico) return publico;
         if (!pathname.startsWith('/api/portal/') || pathname === '/api/portal/llegada')
           return json({ error: 'Ruta no encontrada.' }, 404);
         try { return await portal(request, env, url); }
@@ -1233,8 +1791,12 @@ export default {
       }
 
       if (pathname === '/api/salud') {
-        return json({ estado: 'ok' });
+        return json({ estado: 'ok', ambiente: env.AMBIENTE || 'produccion', ahora: new Date().toISOString() });
       }
+
+      // Issue #296: el Worker de WhatsApp consulta la tienda por service binding, sin Access, con token.
+      // Va antes de quienEs; cualquier otra ruta /api/asistente/* responde 404 dentro de rutaAsistente.
+      if (pathname.startsWith('/api/asistente/')) return await rutaAsistente(request, env, url);
 
       // Quien es (JWT de Access verificado) y si su cuenta le deja entrar aqui.
       const regla = permiso(pathname, request.method);
@@ -1256,7 +1818,8 @@ export default {
         }
         // Issue #112: la computadora de caja no cobra sola. Lo de caja queda a
         // nombre del cajero que entro con su PIN; sin el, la API no responde.
-        if (esDeCaja(regla) && soloComputadora(usuario) && !pathname.startsWith('/api/cajeros')) {
+        if (esDeCaja(regla) && soloComputadora(usuario) && !pathname.startsWith('/api/cajeros')
+            && pathname !== '/api/nomina/entrada' && pathname !== '/api/nomina/checador') {
           const cajero = await cajeroEnTurno(request, env);
           if (cajero) correo = cajero.correo;
           else if (pathname.startsWith('/api/')) return json({ error: 'Escribe tu PIN de cajero.', pin: true }, 401);
@@ -1266,21 +1829,42 @@ export default {
       if (pathname === '/api/yo') {
         return await yo(env, correo, soloComputadora(await leerUsuario(env, correo)) ? await cajeroEnTurno(request, env) : null);
       }
+      const respuestaRopaIA = await rutaRopaAdmin(request, env, pathname);
+      if (respuestaRopaIA) return respuestaRopaIA;
+      const respuestaRecortes = await rutaRecortesAdmin(request, env, pathname);
+      if (respuestaRecortes) return respuestaRecortes;
       if (pathname === '/api/cajeros' && request.method === 'GET') return await listarCajeros(env);
       if (pathname === '/api/cajeros/entrar' && request.method === 'POST') return await entrar(request, env);
       if (pathname === '/api/cajeros/salir' && request.method === 'POST') return await salir(request, env);
       if (pathname === '/api/cuentas/pin' && request.method === 'PUT') return await ponerPin(request, env);
       if (pathname === '/api/solicitudes/acceso' && request.method === 'POST') {
-        return await pedirAcceso(request, env, correo);
+        return await pedirAcceso(request, env, correo, ctx);
       }
       if (pathname === '/api/cuentas') {
         if (request.method === 'GET') return await listarCuentas(env);
         if (request.method === 'PUT') return await guardarCuenta(request, env);
         return json({ error: 'Metodo no permitido.' }, 405);
       }
+      if (pathname === '/api/descuentos' && request.method === 'POST') return await pedirDescuento(request, env, correo, ctx);
+      if (pathname === '/api/descuentos/duenos' && request.method === 'GET') return await listarDuenos(env);
+      if (pathname === '/api/solicitudes/descuentos' && request.method === 'GET') return await listarDescuentos(env);
+      if (pathname === '/api/solicitudes/cancelaciones' && request.method === 'GET') return await listarCancelaciones(env);
+      const solicitud = pathname.match(/^\/api\/solicitudes\/([^/]+)$/);
+      if (solicitud && request.method === 'GET') return await estadoSolicitud(env, solicitud[1], correo);
       const resolver = pathname.match(/^\/api\/solicitudes\/([^/]+)\/resolver$/);
       if (resolver && request.method === 'POST') {
         return await resolverSolicitud(resolver[1], request, env, correo);
+      }
+
+      // Conteo de piezas de alto valor (Issue #219, conteo.ts). Contar: cualquier cuenta de piso; ajustar y el rastro: dueno.
+      if (pathname === '/api/conteo' && request.method === 'GET') return await listarAltoValor(env);
+      if (pathname === '/api/conteo' && request.method === 'POST') return await revisarConteo(request, env);
+      if (pathname === '/api/conteo/ajustes' && request.method === 'GET') return await listarAjustes(env);
+      if (pathname === '/api/conteo/ajustes' && request.method === 'POST') return await ajustarExistencia(request, env, correo, ctx);
+
+      if (pathname.startsWith('/api/ml/') || pathname === '/ml/callback') {
+        const respuestaML = await rutaML(request, env, url);
+        if (respuestaML) return respuestaML;
       }
 
       if (pathname === '/api/config') {
@@ -1295,9 +1879,31 @@ export default {
           return await crearBorrador(request, env, ctx, url, correo);
         }
         if (request.method === 'GET') {
-          return await listarBorradores(url, env);
+          return await listarBorradores(url, env, propietarioDe(await leerUsuario(env, correo)));
         }
         return json({ error: 'Metodo no permitido.' }, 405);
+      }
+
+      // Issue #298: una pieza de FEP no se abre ni se cambia desde la cuenta de la tienda, y al revés.
+      const fusion = pathname.match(/^\/api\/borradores\/([^/]+)\/fusionar$/);
+      const idPieza = pathname.match(/^\/api\/(?:borradores|foto)\/([0-9a-f-]{36})(?:\/|$)/);
+      if (idPieza) {
+        const ids = [idPieza[1]];
+        if (fusion && request.method === 'POST') {
+          const { destino_id } = await request.clone().json() as { destino_id?: unknown };
+          ids.push(String(destino_id ?? ''));
+        }
+        const propietario = propietarioDe(await leerUsuario(env, correo));
+        for (const id of ids) {
+          const fila = await env.DB.prepare('select propietario from productos where id = ?').bind(id).first<{ propietario: string }>();
+          if (fila && fila.propietario !== propietario) return json({ error: 'Pieza no encontrada.' }, 404);
+        }
+      }
+
+      const fotoMarket = pathname.match(/^\/api\/marketplace\/foto\/([^/]+)$/);
+      if (pathname === '/api/marketplace' || fotoMarket) {
+        if (request.method !== 'GET') return json({ error: 'Metodo no permitido.' }, 405);
+        return fotoMarket ? await fotoMarketplace(fotoMarket[1], env) : await marketplace(env);
       }
 
       const foto = pathname.match(/^\/api\/foto\/([^/]+)$/);
@@ -1317,12 +1923,21 @@ export default {
       }
 
       if (pathname === '/api/catalogo') {
-        return await catalogo(env);
+        return await catalogo(env, url);
+      }
+      // Issue #220: piezas que no pueden salir en el sitio, para corregir en /admin. Solo el dueno (cuentas.ts).
+      if (pathname === '/api/catalogo/revision' && request.method === 'GET') {
+        return await revisionCatalogo(env);
+      }
+
+      if (pathname.startsWith('/api/pedidos')) {
+        const respuestaPedidos = await rutaPedidos(request, env, ctx, pathname, correo);
+        if (respuestaPedidos) return respuestaPedidos;
       }
 
       if (pathname === '/api/ventas') {
         if (request.method === 'POST') {
-          return await registrarVenta(request, env, correo);
+          return await registrarVenta(request, env, ctx, correo);
         }
         return url.searchParams.get('lista') ? await ventasDelDia(url, env) : await corte(url, env);
       }
@@ -1331,6 +1946,8 @@ export default {
       const impresion = /^\/api\/impresiones\/([^/]+)\/tomar$/.exec(pathname);
       if (impresion && request.method === 'POST') return await tomarImpresion(impresion[1], request, env, correo);
 
+      if (pathname === '/api/mensajes' && request.method === 'GET') return await mensajesApi(env);
+      if (pathname === '/api/mensajes/responder' && request.method === 'POST') return await responderApi(request, env, correo);
       if (pathname === '/api/socios') {
         if (request.method === 'POST') return await registrarSocio(request, env, correo);
         if (request.method === 'GET') return await buscarSocio(url, env);
@@ -1345,7 +1962,11 @@ export default {
         }
       }
       if (pathname === '/api/vales/config' && request.method === 'GET')
-        return json({ habilitado:valesAbiertos(env) });
+      {
+        const promo = promoDe(env), restantes = promo && await promoRestantes(env);
+        return json({ habilitado:valesAbiertos(env), prueba:env.AMBIENTE === 'sandbox', promo:promo && (restantes === null ? promo : { ...promo, restantes }),
+          cupon_porcentaje:await porcentajeCupon(env) });
+      }
       if (pathname === '/api/vales/buscar' && request.method === 'POST')
         return await buscarVale(request, env);
       const valeVenta = /^\/api\/ventas\/([^/]+)\/vale$/.exec(pathname);
@@ -1367,6 +1988,12 @@ export default {
       if (pathname === '/api/retiros' && request.method === 'POST') {
         return await registrarRetiro(request, env, correo);
       }
+      if (pathname === '/api/gastos' || pathname.startsWith('/api/gastos/')) {
+        return await rutaGastos(request, env, url, correo);
+      }
+      if (pathname === '/api/nomina' || pathname.startsWith('/api/nomina/')) {
+        return await rutaNomina(request, env, url, correo);
+      }
 
       if (pathname === '/api/cajon' && request.method === 'POST') {
         return await registrarAperturaCajon(request, env, correo);
@@ -1374,12 +2001,18 @@ export default {
 
       const cancelacion = pathname.match(/^\/api\/ventas\/([^/]+)\/cancelar$/);
       if (cancelacion && request.method === 'POST') {
-        return await cancelarVenta(cancelacion[1], request, env, correo);
+        return await cancelarVenta(cancelacion[1], request, env, correo, ctx);
       }
       const cancelacionPieza = pathname.match(/^\/api\/ventas\/([^/]+)\/lineas\/(\d+)\/cancelar$/);
       if (cancelacionPieza && request.method === 'POST') {
         return await cancelarPieza(cancelacionPieza[1], Number(cancelacionPieza[2]), request, env, correo);
       }
+      // Cupones en lugar de devolver dinero (Issue #330).
+      const cupon = pathname.match(/^\/api\/ventas\/([^/]+)\/cupon(?:\/([^/]+))?$/);
+      if (cupon && request.method === 'POST') {
+        return cupon[2] ? await reimprimirCupon(cupon[1], cupon[2], env) : await devolverEnCupon(cupon[1], request, env, correo);
+      }
+      if (pathname === '/api/cupones' && request.method === 'POST') return await emitirCuponManual(request, env, correo);
       const ticket = pathname.match(/^\/api\/ventas\/([^/]+)$/);
       if (ticket && request.method === 'GET') {
         return await detalleVenta(ticket[1], env, url.searchParams.get('imprimir') === '1');
@@ -1387,6 +2020,12 @@ export default {
 
       if (pathname === '/api/reportes') {
         return await reportes(url, env);
+      }
+      if (pathname === '/api/reportes/tickets') {
+        return await ticketsDelRango(url, env);
+      }
+      if (pathname === '/api/reportes/tickets.csv') {
+        return await exportarTicketsCsv(url, env);
       }
       if (pathname === '/api/reportes/ventas.csv') {
         return await exportarVentasCsv(env);
@@ -1396,7 +2035,7 @@ export default {
       }
 
       if (pathname === '/api/etiquetas' && request.method === 'POST') {
-        return await prepararEtiquetas(request, env);
+        return await prepararEtiquetas(request, env, propietarioDe(await leerUsuario(env, correo)));
       }
 
       if (pathname === '/api/borradores/manual' && request.method === 'POST') {
@@ -1406,7 +2045,8 @@ export default {
       const pieza = pathname.match(/^\/api\/borradores\/([^/]+)$/);
       if (pieza) {
         if (request.method === 'PATCH') {
-          return await corregirBorrador(pieza[1], await request.json(), env);
+          const esDueno = !!(await leerUsuario(env, correo))?.roles.includes('dueno');
+          return await corregirBorrador(pieza[1], await request.json(), env, esDueno);
         }
         if (request.method === 'DELETE') {
           return await descartarBorrador(pieza[1], env);
@@ -1414,12 +2054,12 @@ export default {
         return json({ error: 'Metodo no permitido.' }, 405);
       }
 
-      const existencia = pathname.match(EXISTENCIA);
-      if (existencia && request.method === 'PATCH') {
-        return await corregirExistencia(existencia[1], request, env, correo);
+      const correccion = pathname.match(CORRECCION_CAPTURA);
+      if (correccion?.[2] === 'revision') return await revisarCaptura(correccion[1], request, env, correo);
+      if (correccion && request.method === 'PATCH') {
+        return await corregirCaptura(correccion[1], correccion[2], request, env, correo);
       }
 
-      const fusion = pathname.match(/^\/api\/borradores\/([^/]+)\/fusionar$/);
       if (fusion && request.method === 'POST') {
         return await fusionarBorrador(fusion[1], request, env);
       }
@@ -1435,23 +2075,52 @@ export default {
         return json({ id: reintento[1], modelo, estado_analisis: 'pendiente' }, 202);
       }
 
+      // Issue #281: errores de JavaScript de la caja, al mismo log que los del servidor.
+      if (pathname === '/api/errores' && request.method === 'POST') {
+        const cuerpo = await request.json().catch(() => ({})) as Record<string, unknown>;
+        const campo = (valor: unknown, max: number) => String(valor ?? '').slice(0, max);
+        console.error(JSON.stringify({ mensaje: 'error en el navegador', origen: campo(cuerpo.origen, 40),
+          pantalla: campo(cuerpo.pantalla, 200), error: campo(cuerpo.error, 500), pila: campo(cuerpo.pila, 2000),
+          caja: campo(cuerpo.caja, 40), correo: acceso }));
+        return new Response(null, { status: 204 });
+      }
+
       if (pathname.startsWith('/api/')) {
         return json({ error: 'Ruta no encontrada.' }, 404);
       }
 
       // Todo lo demas son las pantallas, servidas por el Worker para que el
       // filtro de arriba alcance tambien a los HTML.
-      const pantalla = await env.ASSETS.fetch(request);
-      // En el sandbox cada pantalla lo dice: ahi no se cobra de verdad.
-      if (env.AMBIENTE === 'sandbox' && pantalla.headers.get('content-type')?.includes('text/html')) {
+      let pantalla = await env.ASSETS.fetch(request);
+      if (/^\/marketplace(?:\.html)?\/?$/.test(pathname)) {
+        pantalla = new Response(pantalla.body, pantalla);
+        pantalla.headers.set('cache-control', 'no-store');
+      }
+      // Los precios llegan del servidor; solo sandbox lleva la franja de pruebas.
+      if (pantalla.headers.get('content-type')?.includes('text/html')
+          && (env.AMBIENTE === 'sandbox' || (capturaRopaDisponible(env) && /^\/captura(?:\.html)?\/?$/.test(pathname)))) {
         return new HTMLRewriter()
-          .on('body', { element: (e) => { e.prepend(FRANJA_SANDBOX, { html: true }); } })
+          .on('body', { element: (e) => {
+            e.setAttribute('data-precios-ropa', JSON.stringify(PRECIOS_ROPA));
+            if (env.AMBIENTE === 'sandbox') e.prepend(FRANJA_SANDBOX, { html: true });
+          } })
           .transform(pantalla);
       }
       return pantalla;
     } catch (error) {
-      console.error(JSON.stringify({ mensaje: 'fallo en la peticion', pathname, error: String(error) }));
+      console.error(JSON.stringify({ mensaje: 'fallo en la peticion', pathname, error: String(error),
+        pila: error instanceof Error ? error.stack?.slice(0, 2000) : undefined }));
       return json({ error: 'Error interno. Intenta de nuevo.' }, 500);
     }
+  },
+
+  // Cron de wrangler.jsonc, cada 15 min: ordenes de Mercado Libre perdidas y
+  // conciliacion de existencias. Sin cuenta conectada no hace nada.
+  async scheduled(_evento, env, ctx): Promise<void> {
+    ctx.waitUntil(sincronizar(env));
+    // Apartados cuyo plazo llego: vuelven a la venta (Issue #269). Aparte, para que uno no frene al otro.
+    ctx.waitUntil(vencerPedidos(env));
+    ctx.waitUntil(procesarColaRopa(env));
+    ctx.waitUntil((async () => { await procesarRecortes(env); await revisarRecortes(env); })());
   },
 } satisfies ExportedHandler<Env>;

@@ -235,9 +235,10 @@ test('celular sin red guarda imprimir_en; no imprime localmente ni abre el cajó
     ${cobro}; cobrar`, {
     crypto, Date, $, AbortSignal, Object,
     lineas:[{ producto_id:PRODUCTO, codigo:'ED-000001', nombre:'Ventilador', precio:25000, cantidad:1 }],
-    socio:null, catalogo:new Map(),
+    socio:null, catalogo:new Map(), pedidoCargado:null,
     impresionRemota:() => true, exigirCaja:() => true, cajaActual:() => 'Caja 1', dolaronesPedidos:() => 0,
     totales, efectivoAlcanza, saldoCanjeable, dolaronesGanados,
+    descuento:null, descuentoAplicado:() => 0, promoActual:() => 0, pintarDescuento() {},
     pesos:String, dolares:String, pintar() {}, quitarSocio() {}, sincronizar() {},
     fetch:async () => { throw new Error('sin red'); },
     store:async (almacen: string, _modo: string, fn: any) => fn({ put(v: any) { if (almacen === 'ventas') guardadas.push(v); } }),
@@ -271,7 +272,7 @@ test('sincronizar reenvía el destino remoto y elimina la venta sólo después d
         const r = await t.pedir(ruta, enviada);
         return { status:r.status, json:async () => r.cuerpo };
       },
-      $:() => ({ textContent:'' }), dolares:String,
+      $:() => ({ textContent:'' }), dolares:String, AbortSignal,
       pintarResultadosVales() {}, pendientes() {}, pintarRechazadas() {}, actualizarCorte() {},
     });
     await sincronizar();

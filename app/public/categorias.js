@@ -21,3 +21,19 @@ export const CATEGORIAS = [
 ];
 
 export const CLAVES_CATEGORIA = CATEGORIAS.map(([clave]) => clave);
+
+/** Gastos operativos; claves estables para D1 y nombres para las pantallas. */
+export const CATEGORIAS_GASTO = [
+  ['limpieza', 'Limpieza'],
+  ['papeleria_empaque', 'Papelería y empaque'],
+  ['comida_consumibles', 'Comida y consumibles'],
+  ['mantenimiento', 'Mantenimiento'],
+  ['transporte_envios', 'Transporte y envíos'],
+  ['renta', 'Renta'],
+  ['luz', 'Luz'],
+  ['agua', 'Agua'],
+  ['internet_telefono', 'Internet y teléfono'],
+  ['contador', 'Contador'],
+  ['publicidad', 'Publicidad'],
+  ['otros', 'Otros'],
+];

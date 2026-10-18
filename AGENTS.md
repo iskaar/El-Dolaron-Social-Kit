@@ -36,3 +36,7 @@ Pendiente: ...
 ```
 
 Si otro agente debe continuar, deja el contexto en el Issue o PR; no dependas de memoria privada ni de mensajes fuera de GitHub.
+
+## Aplicación de tienda y evolución
+
+Para cambios en `app/`, scripts que operan la tienda o su infraestructura, lee también [app/AGENTS.md](app/AGENTS.md). El [plan de reestructuración](docs/PLAN-REESTRUCTURACION.md) ordena el trabajo futuro; sus fases no autorizan despliegues ni servicios nuevos. El estado y las decisiones se registran en Issues y PRs.

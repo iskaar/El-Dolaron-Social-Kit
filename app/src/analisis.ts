@@ -9,6 +9,7 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { calcularPrecio, precioDesdeSugerencia } from './precio.ts';
 import { CATEGORIAS as LISTA_CATEGORIAS, CLAVES_CATEGORIA } from '../public/categorias.js';
+import { PRENDAS_ROPA } from '../public/ropa.js';
 
 export type Modelo = 'claude' | 'gemini';
 
@@ -21,8 +22,17 @@ export function modeloPorDefecto(env: Env): Modelo {
   return env.MODELO_ANALISIS === 'gemini' ? 'gemini' : 'claude';
 }
 
-const MODELO_CLAUDE = 'claude-haiku-4-5';
+const MODELO_CLAUDE = 'claude-haiku-5-5';
 const MODELO_GEMINI = 'gemini-flash-latest';
+
+/**
+ * El analisis corre en ctx.waitUntil(), que el runtime corta a los 30 s: si lo
+ * matan, la fila se queda en `pendiente` para siempre. Una sola llamada al
+ * modelo por analisis; el peor caso con Claude es 2 intentos x 11 s + espera
+ * del reintento (~1 s) = 23 s, y Gemini (con busqueda) un intento de 22 s;
+ * debajo de ~27 s queda lo demas (R2, D1). Mutable solo para las pruebas.
+ */
+export const LIMITES_MS = { claude: 11_000, gemini: 22_000 };
 
 const CATEGORIAS = CLAVES_CATEGORIA;
 
@@ -183,28 +193,36 @@ function normalizar(cruda: Partial<Ficha>): Ficha {
   };
 }
 
-async function conClaude(foto: string, env: Env, instruccion: string): Promise<Ficha> {
-  const cliente = new Anthropic({ apiKey: env.ANTHROPIC_API_KEY });
+export async function conClaude(foto: string | string[], env: Env, instruccion: string, esquema: any = ESQUEMA, textoUsuario = 'Identifica este articulo.'): Promise<unknown> {
+  // Un reintento (no los 2 de fabrica) cubre un 429/529 en la captura por lotes.
+  const cliente = new Anthropic({ apiKey: env.ANTHROPIC_API_KEY, timeout: LIMITES_MS.claude, maxRetries: 1 });
   const respuesta = await cliente.messages.create({
     model: MODELO_CLAUDE,
-    max_tokens: 512,
+    // Haiku 5.5 piensa por omision y lo pensado cuenta aqui: con 512 una foto
+    // dificil se quedaba sin JSON. `low` piensa poco o nada en una foto clara.
+    max_tokens: 2048,
     system: instruccion,
-    output_config: { format: { type: 'json_schema', schema: ESQUEMA } },
+    output_config: { effort: 'low', format: { type: 'json_schema', schema: esquema } },
     messages: [
       {
         role: 'user',
         content: [
-          { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: foto } },
-          { type: 'text', text: 'Identifica este articulo.' },
+          ...(Array.isArray(foto) ? foto : [foto]).map((data) => ({ type: 'image' as const, source: { type: 'base64' as const, media_type: 'image/jpeg' as const, data } })),
+          { type: 'text', text: textoUsuario },
         ],
       },
     ],
   });
   const texto = respuesta.content.map((bloque) => (bloque.type === 'text' ? bloque.text : '')).join('');
-  return normalizar(JSON.parse(texto));
+  // Un rechazo (filtros de seguridad) o el tope de tokens llegan sin JSON: que
+  // el error en la fila lo diga en vez de un "Unexpected end of JSON input".
+  if (respuesta.stop_reason === 'refusal' || respuesta.stop_reason === 'max_tokens') {
+    throw new Error(`Claude no respondio la ficha (${respuesta.stop_reason}).`);
+  }
+  return JSON.parse(texto);
 }
 
-async function conGemini(foto: string, env: Env, instruccion: string, buscar = false): Promise<Ficha> {
+async function conGemini(foto: string, env: Env, instruccion: string, buscar = false, esquema: any = ESQUEMA_GEMINI): Promise<unknown> {
   // Las dos instancias tienen secretos independientes, pero no siempre con el
   // mismo nombre: se acepta cualquiera de los dos en lugar de obligar a
   // recapturar la llave.
@@ -215,6 +233,7 @@ async function conGemini(foto: string, env: Env, instruccion: string, buscar = f
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${MODELO_GEMINI}:generateContent?key=${llave}`;
   const respuesta = await fetch(url, {
     method: 'POST',
+    signal: AbortSignal.timeout(LIMITES_MS.gemini),
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({
       systemInstruction: { parts: [{ text: buscar ? instruccion + PIDE_JSON : instruccion }] },
@@ -229,7 +248,7 @@ async function conGemini(foto: string, env: Env, instruccion: string, buscar = f
       // Con busqueda, el esquema estructurado no esta permitido: van excluyentes.
       ...(buscar
         ? { tools: [{ google_search: {} }] }
-        : { generationConfig: { responseMimeType: 'application/json', responseSchema: ESQUEMA_GEMINI } }),
+        : { generationConfig: { responseMimeType: 'application/json', responseSchema: esquema } }),
     }),
   });
   if (!respuesta.ok) {
@@ -241,7 +260,32 @@ async function conGemini(foto: string, env: Env, instruccion: string, buscar = f
   const texto = (cuerpo.candidates?.[0]?.content?.parts ?? [])
     .map((parte) => parte.text ?? '')
     .join('');
-  return normalizar(buscar ? extraerJson(texto) : (JSON.parse(texto || '{}') as Partial<Ficha>));
+  return buscar ? extraerJson(texto) : JSON.parse(texto || '{}');
+}
+
+const ESQUEMA_ROPA = {
+  type: 'object', properties: {
+    prenda: { type: 'string', enum: [...PRENDAS_ROPA, ''] },
+    prenda_confianza: { type: 'string', enum: ['alta', 'media', 'baja'] },
+    marca: { type: 'string' },
+    marca_confianza: { type: 'string', enum: ['alta', 'media', 'baja'] },
+    motivo: { type: 'string' },
+  }, required: ['prenda', 'prenda_confianza', 'marca', 'marca_confianza', 'motivo'], additionalProperties: false,
+} as const;
+const ESQUEMA_ROPA_GEMINI = (({ additionalProperties: _omit, ...esquema }) => esquema)(ESQUEMA_ROPA);
+
+export interface SugerenciaRopa { prenda: string; prenda_confianza: 'alta'|'media'|'baja'; marca: string; marca_confianza: 'alta'|'media'|'baja'; motivo: string }
+export async function analizarFotoRopa(datos: ArrayBuffer, env: Env): Promise<SugerenciaRopa> {
+  const instruccion = `Identifica la prenda visible y la marca solo si una etiqueta legible aparece en la foto. Devuelve JSON. Prenda debe ser exactamente una de: ${PRENDAS_ROPA.join(', ')}; si no se distingue, vacía y confianza baja. Usa confianza alta, media o baja por campo. Motivo breve y objetivo. No infieras marca por estilo ni modelo.`;
+  const foto = base64(datos);
+  const bruto = modeloPorDefecto(env) === 'gemini'
+    ? await conGemini(foto, env, instruccion, false, ESQUEMA_ROPA_GEMINI)
+    : await conClaude(foto, env, instruccion, ESQUEMA_ROPA);
+  const dato = bruto as Partial<SugerenciaRopa>;
+  const confianza = (x: unknown) => ['alta', 'media', 'baja'].includes(String(x)) ? x as SugerenciaRopa['prenda_confianza'] : 'baja';
+  const prenda = String(dato.prenda ?? '');
+  return { prenda: PRENDAS_ROPA.includes(prenda) ? prenda : '', prenda_confianza: confianza(dato.prenda_confianza),
+    marca: String(dato.marca ?? '').trim().slice(0, 60), marca_confianza: confianza(dato.marca_confianza), motivo: String(dato.motivo ?? '').slice(0, 160) };
 }
 
 /**
@@ -276,9 +320,10 @@ export async function analizarBorrador(
     const [ejemplos, nombres] = await Promise.all([ejemplosDeIsaac(env), nombresExistentes(env)]);
     const instruccion = INSTRUCCION + bloqueNombres(nombres) + bloqueEjemplos(ejemplos);
 
-    const ficha = modelo === 'gemini'
+    const fichaCruda = modelo === 'gemini'
       ? await conGemini(foto, env, instruccion, buscar)
       : await conClaude(foto, env, instruccion);
+    const ficha = normalizar(fichaCruda as Partial<Ficha>);
 
     const { results } = await env.DB.prepare('select clave, valor from config').all<{ clave: string; valor: string }>();
     const config = Object.fromEntries(results.map((c) => [c.clave, c.valor]));
@@ -296,22 +341,27 @@ export async function analizarBorrador(
     // `precio_sugerido` queda como testigo de lo que propuso la IA: las
     // correcciones del admin no lo tocan, y de esa diferencia sale el ajuste
     // de los porcentajes cuando haya suficientes piezas.
+    // Sin nombre o con precio 0 la pieza no esta lista: queda en `error`
+    // para revisarla, con lo que se encontro. Si no, la cola automatica de /etiquetas
+    // se queda esperando una pieza que nadie va a completar (#335).
+    const completa = ficha.nombre.trim() !== '' && precio > 0;
     await env.DB.prepare(
       `update productos set nombre = ?, marca = ?, categoria = ?, precio_lista = ?, precio = ?,
-                            precio_sugerido = ?, destino = ?, estado_analisis = 'listo', actualizado_en = ?
-       where id = ?`,
+                            precio_sugerido = ?, destino = ?, estado_analisis = ?, actualizado_en = ?
+       where id = ? and estado_analisis <> 'descartado'`,
     )
-      .bind(ficha.nombre, ficha.marca, ficha.categoria, precioLista, precio, precio, destino, new Date().toISOString(), id)
+      .bind(ficha.nombre, ficha.marca, ficha.categoria, precioLista, precio, precio, destino,
+        completa ? 'listo' : 'error', new Date().toISOString(), id)
       .run();
 
     console.log(JSON.stringify({
-      mensaje: 'analisis listo', id, modelo, buscar, ms: Date.now() - inicio,
+      mensaje: completa ? 'analisis listo' : 'analisis incompleto', id, modelo, buscar, ms: Date.now() - inicio,
       ejemplos: ejemplos.length, nombres: nombres.length, segun_ejemplos: conEjemplos, ficha,
     }));
   } catch (error) {
     console.error(JSON.stringify({ mensaje: 'analisis fallido', id, modelo, error: String(error) }));
     await env.DB.prepare(
-      `update productos set estado_analisis = 'error', actualizado_en = ? where id = ?`,
+      `update productos set estado_analisis = 'error', actualizado_en = ? where id = ? and estado_analisis <> 'descartado'`,
     )
       .bind(new Date().toISOString(), id)
       .run();

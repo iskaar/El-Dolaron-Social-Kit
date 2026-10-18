@@ -32,12 +32,15 @@
     border: 1px solid var(--linea); border-radius: 12px; padding: 14px; margin-bottom: 14px;
     content-visibility: auto; contain-intrinsic-size: auto 260px; }   /* el navegador no pinta las que no se ven */
   .ficha img { width: 100%; aspect-ratio: 1; object-fit: cover; border-radius: 8px; background: #eceff4; }
+  .recorte-par { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
   .retomar { display: block; margin-top: 6px; text-align: center; font-size: 13px; font-weight: 600;
     color: var(--azul); border: 1px solid var(--linea); border-radius: 8px; padding: 7px; cursor: pointer; }
   .retomar:hover { background: #eef1f6; }
   .campos { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 10px; }
   .acciones { display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap; align-items: center; }
   .etiqueta { font-size: 12px; padding: 3px 8px; border-radius: 999px; background: #eef1f6; }
+  /* Issue #189: lo del dueno se oculta a capturistas (/admin tambien es suyo). */
+  body:not(.dueno) .solo-dueno { display: none; }
   .etiqueta.error { background: #fdecec; color: var(--rojo); }
   .etiqueta.pendiente { background: #fff6d9; color: #8a6d00; }
   .aviso { font-size: 13px; color: var(--rojo); min-height: 18px; }
@@ -49,6 +52,7 @@
   <h1>Cola de revisión</h1>
   <a href="/captura">Ir a capturar →</a>
   <a href="/bandas">Imprimir bandas →</a>
+  <a href="/conteo">Conteo de alto valor →</a>
   <span id="resumen"></span>
 </header>
 
@@ -60,6 +64,23 @@
       <button id="guardar-config" type="button">Guardar configuración</button>
       <span class="aviso" id="aviso-config"></span>
     </div>
+  </section>
+
+  <!-- Issue #220: piezas en existencia que no pueden salir en eldolaron.com. Solo el dueno. -->
+  <section class="panel solo-dueno" id="revision">
+    <h2>Revisión del catálogo público</h2>
+    <p class="aviso" style="color:#5b6478">Estas piezas no salen en eldolaron.com. Corrige y recarga la página para ver la lista al día.</p>
+    <div id="revision-lista"></div>
+  </section>
+
+  <section class="panel" id="ropa-ia">
+    <h2>Revisar ropa</h2>
+    <div id="ropa-ia-lista"></div>
+  </section>
+
+  <section class="panel solo-dueno" id="recortes">
+    <h2>Recortes</h2>
+    <div id="recortes-lista"></div>
   </section>
 
   <!-- Issue #115: solo el dueno (la API tambien lo exige). -->
@@ -78,6 +99,7 @@
     </div>
     <div class="acciones">
       <button type="submit">Guardar pieza</button>
+      <button type="button" class="claro" id="m-precios-ml">Ver precios en Mercado Libre</button>
       <span class="aviso" id="m-aviso"></span>
     </div>
   </form>
@@ -93,6 +115,7 @@
   </div>
 
   <div class="panel ajustes" id="filtros-extra">
+    <div style="grid-column: 1 / -1"><label for="f-nombre">Buscar por nombre o código</label><input id="f-nombre" type="search" placeholder="Parte del nombre o del código de barras" autocomplete="off"></div>
     <div><label for="f-dia">Día de captura</label><input id="f-dia" type="date"></div>
     <div><label for="f-categoria">Categoría</label><select id="f-categoria"><option value="">Todas</option></select></div>
     <div><label for="f-min">Precio desde ($)</label><input id="f-min" type="number" min="0"></div>
@@ -107,12 +130,19 @@
 
 <script type="module">
 import { reducirArchivo } from '/foto.js';
+import { copiarParaMarketplace } from '/compartir.js';
 import { agruparSesiones } from '/sesiones.js';
+import { enlacePreciosML } from '/precios-ml.js';
 
 import { CATEGORIAS } from '/categorias.js';
+import { TALLAS } from '/tallas.js';
+
+// Una sola lista para todas las fichas; el servidor es quien valida la talla.
+document.body.insertAdjacentHTML('beforeend',
+  `<datalist id="tallas-lista">${TALLAS.map((t) => `<option value="${t}">`).join('')}</datalist>`);
 const opcionesCategoria = (elegida) =>
   CATEGORIAS.map(([c, nombre]) => `<option value="${c}" ${c === elegida ? 'selected' : ''}>${nombre}</option>`).join('');
-// Los siete montos y las familias de banda salen de la tabla `familias` (GET /api/familias).
+// Los montos y las familias de banda salen de la tabla `familias` (GET /api/familias).
 const { montos: MONTOS_BANDA, familias: FAMILIAS } = await (await fetch('/api/familias')).json();
 const DESTINOS = [
   ['etiqueta', 'Etiqueta individual'],
@@ -189,6 +219,7 @@ function ficha(p) {
         <div><label>Marca</label>
           <input data-campo="marca" maxlength="60" value="${(p.marca ?? '').replace(/"/g, '&quot;')}"></div>
         <div><label>Categoría</label><select data-campo="categoria">${opcionesCategoria(p.categoria)}</select></div>
+        <div><label>Talla</label><input data-campo="talla" list="tallas-lista" maxlength="30" placeholder="ropa" value="${(p.talla ?? '').replace(/"/g, '&quot;')}"></div>
         <div><label>Estado</label><select data-campo="estado_fisico">
           <option value="nuevo" ${p.estado_fisico === 'nuevo' ? 'selected' : ''}>Nuevo</option>
           <option value="danado" ${p.estado_fisico === 'danado' ? 'selected' : ''}>Dañado</option>
@@ -206,7 +237,10 @@ function ficha(p) {
       <div class="acciones">
         <button type="button" data-accion="guardar">Guardar</button>
         <button type="button" class="claro" data-accion="recalcular">Recalcular precio</button>
+        <button type="button" class="claro solo-dueno" data-accion="precios-ml">Ver precios en ML</button>
         <button type="button" class="claro" data-accion="reanalizar">Reintentar análisis</button>
+        <button type="button" class="claro" data-accion="compartir"
+          title="Copia precio, nombre y foto; pégalos con Win+V">Compartir</button>
         ${repetida ? `<button type="button" class="claro" data-accion="fusionar"
           title="Suma esta foto a la pieza que ya existe y borra la repetida">
           Ya existe · sumar a ${repetida.stock ?? 1} pz</button>` : ''}
@@ -219,10 +253,12 @@ function ficha(p) {
   const valor = (campo) => nodo.querySelector(`[data-campo="${campo}"]`).value;
   const aviso = nodo.querySelector('.aviso');
 
+  // La existencia solo viaja si la tocaste: la caja pudo vender desde que se abrio la ficha.
+  let stockMostrado = String(p.stock ?? 1);
   const base = () => ({
-    nombre: valor('nombre'), marca: valor('marca'), categoria: valor('categoria'),
+    nombre: valor('nombre'), marca: valor('marca'), categoria: valor('categoria'), talla: valor('talla'),
     estado_fisico: valor('estado_fisico'), precio_lista: centavos(valor('precio_lista')),
-    stock: Math.round(Number(valor('stock') || 0)),
+    ...(valor('stock') === stockMostrado ? {} : { stock: Math.round(Number(valor('stock') || 0)) }),
   });
 
   async function enviar(cuerpo) {
@@ -233,6 +269,8 @@ function ficha(p) {
     if (!respuesta.ok) { aviso.textContent = datos.error; aviso.style.color = ''; return false; }
     nodo.querySelector('[data-campo="precio"]').value = pesos(datos.precio);
     nodo.querySelector('[data-campo="destino"]').value = datos.destino;
+    stockMostrado = String(datos.stock);
+    nodo.querySelector('[data-campo="stock"]').value = stockMostrado;
     aviso.textContent = 'Guardado';
     aviso.style.color = '#2c7a3f';
     return true;
@@ -242,9 +280,8 @@ function ficha(p) {
   nodo.guardarFicha = () => enviar({ ...base(), precio: centavos(valor('precio')), destino: valor('destino') });
 
   // Retomar foto: mismo id, asi que reemplaza la foto en R2 sin duplicar la pieza.
-  // El analisis vuelve a correr sobre la foto nueva y **pisa** nombre, categoria y
-  // precio: es lo que se quiere cuando la foto estaba mal, pero si ya corregiste a
-  // mano, corrige otra vez despues del retome.
+  // `solo_foto`: no toca existencia, talla ni lo que ya corregiste, y no vuelve a
+  // analizar; si la foto nueva cambia el nombre o el precio, usa "Reintentar análisis".
   nodo.querySelector('.retomar input').addEventListener('change', async (evento) => {
     const archivo = evento.target.files?.[0];
     if (!archivo) return;
@@ -254,6 +291,7 @@ function ficha(p) {
       const cuerpo = new FormData();
       cuerpo.append('id', p.id);
       cuerpo.append('estado_fisico', valor('estado_fisico'));
+      cuerpo.append('solo_foto', '1');
       cuerpo.append('foto', await reducirArchivo(archivo), `${p.id}.jpg`);
       const respuesta = await fetch('/api/borradores', { method: 'POST', body: cuerpo });
       if (!respuesta.ok) {
@@ -261,8 +299,7 @@ function ficha(p) {
         return;
       }
       nodo.querySelector('img').src = `/api/foto/${p.id}?v=${Date.now()}`;  // la foto vieja esta en cache
-      aviso.textContent = 'Foto reemplazada. Analizando de nuevo…';
-      setTimeout(cargarCola, 8000);
+      aviso.textContent = 'Foto reemplazada. Si cambia el nombre o el precio, usa Reintentar análisis.';
     } catch {
       aviso.textContent = 'No se pudo leer la imagen.';
     } finally {
@@ -277,21 +314,38 @@ function ficha(p) {
       await nodo.guardarFicha();
     } else if (accion === 'recalcular') {
       await enviar(base());   // sin precio: lo recalcula la configuración
+    } else if (accion === 'compartir') {
+      try {
+        const { conFoto } = await copiarParaMarketplace({
+          img: nodo.querySelector('img'), nombre: valor('nombre').trim(), precio: valor('precio'),
+        });
+        aviso.textContent = conFoto ? 'Copiado: precio, nombre y foto. Pégalos con Win+V.' : 'Copiado: precio y nombre (esta pieza no tiene foto).';
+        aviso.style.color = '#2c7a3f';
+      } catch {
+        aviso.textContent = 'El navegador no dejó copiar. Vuelve a intentar.';
+        aviso.style.color = '';
+      }
     } else if (accion === 'reanalizar') {
       aviso.textContent = 'Analizando…';
       await fetch(`/api/borradores/${p.id}/analizar`, { method: 'POST' });
       setTimeout(cargarCola, 6000);
     } else if (accion === 'fusionar') {
+      evento.target.disabled = true;   // un segundo clic mientras viaja sumaria dos veces
       const respuesta = await fetch(`/api/borradores/${p.id}/fusionar`, {
         method: 'POST', headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ destino_id: repetida.id }),
       });
       const datos = await respuesta.json();
-      if (!respuesta.ok) { aviso.textContent = datos.error; return; }
+      if (!respuesta.ok) { aviso.textContent = datos.error; evento.target.disabled = false; return; }
       repetida.stock = datos.stock;   // la siguiente repetida ya ve el total nuevo
       nodo.remove();
+    } else if (accion === 'precios-ml') {
+      const enlace = enlacePreciosML(valor('nombre'), valor('marca'));
+      if (enlace) window.open(enlace, '_blank', 'noopener');
+      else { aviso.textContent = 'Escribe el nombre para buscarlo en Mercado Libre.'; aviso.style.color = ''; }
     } else if (accion === 'descartar') {
-      await fetch(`/api/borradores/${p.id}`, { method: 'DELETE' });
+      const respuesta = await fetch(`/api/borradores/${p.id}`, { method: 'DELETE' });
+      if (!respuesta.ok) { aviso.textContent = (await respuesta.json()).error; return; }
       nodo.remove();
     }
   });
@@ -299,10 +353,44 @@ function ficha(p) {
   return nodo;
 }
 
+/* ---------- revisión del catálogo público (Issue #220) ---------- */
+
+const MOTIVOS = { sin_foto: 'Sin foto', sin_precio: 'Sin precio', sin_nombre: 'Sin nombre', nombre_interno: 'Nombre interno' };
+async function cargarRevision() {
+  const { piezas } = await (await fetch('/api/catalogo/revision')).json();
+  const lista = document.getElementById('revision-lista');
+  if (piezas.length === 0) { lista.textContent = 'Nada que corregir.'; return; }
+  lista.replaceChildren(...piezas.map((p) => {
+    const fila = document.createElement('div');
+    fila.className = 'acciones';
+    fila.innerHTML = `<strong></strong> <code></code>`;
+    fila.querySelector('strong').textContent = p.nombre || '(sin nombre)';
+    fila.querySelector('code').textContent = p.codigo;
+    for (const m of p.motivos) {
+      const etiqueta = document.createElement('span');
+      etiqueta.className = 'etiqueta error';
+      etiqueta.textContent = MOTIVOS[m];
+      fila.append(etiqueta);
+    }
+    const editar = document.createElement('button');
+    editar.type = 'button';
+    editar.className = 'claro';
+    editar.textContent = 'Editar';
+    editar.addEventListener('click', () => { editar.replaceWith(ficha(p)); });   // la misma ficha de la cola
+    fila.append(editar);
+    return fila;
+  }));
+}
+
 /* ---------- captura sin foto (Issue #115) ---------- */
 
 const manual = document.getElementById('manual');
-fetch('/api/yo').then((r) => r.json()).then(({ usuario }) => { manual.hidden = !usuario?.roles.includes('dueno'); });
+fetch('/api/yo').then((r) => r.json()).then(({ usuario }) => {
+  const dueno = !!usuario?.roles.includes('dueno');
+  manual.hidden = !dueno;
+  document.body.classList.toggle('dueno', dueno);
+  if (dueno) cargarRevision();
+});
 document.getElementById('m-categoria').innerHTML = opcionesCategoria('');
 document.getElementById('m-destino').innerHTML = '<option value="">Automático</option>'
   + DESTINOS.map(([v, t]) => `<option value="${v}">${t}</option>`).join('');
@@ -331,8 +419,16 @@ manual.addEventListener('submit', async (evento) => {
   cargarCola();
 });
 
+// Issue #182: ML no deja buscar por API a esta app; se abre su listado web.
+document.getElementById('m-precios-ml').addEventListener('click', () => {
+  const enlace = enlacePreciosML(document.getElementById('m-nombre').value, document.getElementById('m-marca').value);
+  if (enlace) window.open(enlace, '_blank', 'noopener');
+  else document.getElementById('m-aviso').textContent = 'Escribe el nombre para buscarlo en Mercado Libre.';
+});
+
 /* ---------- filtros ---------- */
 
+const elNombre = document.getElementById('f-nombre');
 const elDia = document.getElementById('f-dia');
 const elCategoria = document.getElementById('f-categoria');
 const elMin = document.getElementById('f-min');
@@ -356,6 +452,8 @@ function pintarSesiones(sesiones) {
 
 function pasaFiltros(p, sesionDe) {
   if (filtro && p.estado_analisis !== filtro) return false;
+  const busca = normalizar(elNombre.value);
+  if (busca && !normalizar(p.nombre).includes(busca) && !normalizar(p.codigo).includes(busca)) return false;
   if (elDia.value && diaLocal(p.creado_en) !== elDia.value) return false;
   if (elCategoria.value && p.categoria !== elCategoria.value) return false;
   if (elMin.value !== '' && p.precio < centavos(elMin.value)) return false;
@@ -365,8 +463,9 @@ function pasaFiltros(p, sesionDe) {
 }
 
 for (const el of [elDia, elCategoria, elMin, elMax, elSesion]) el.addEventListener('change', cargarCola);
+elNombre.addEventListener('input', pintarCola);
 document.getElementById('f-limpiar').addEventListener('click', () => {
-  for (const el of [elDia, elCategoria, elMin, elMax, elSesion]) el.value = '';
+  for (const el of [elNombre, elDia, elCategoria, elMin, elMax, elSesion]) el.value = '';
   cargarCola();
 });
 
@@ -374,6 +473,7 @@ document.getElementById('f-limpiar').addEventListener('click', () => {
 // Se pintan de 24 en 24 y la siguiente tanda entra al acercarse al final.
 const TANDA = 24;
 let porPintar = [];
+let todas = [];
 const finCola = document.getElementById('cola-fin');
 const observador = new IntersectionObserver(([fin]) => { if (fin.isIntersecting) pintarTanda(); }, { rootMargin: '1500px' });
 function pintarTanda() {
@@ -390,7 +490,11 @@ async function cargarCola() {
   // fotos, no solo de las que pasan el filtro de estado.
   // El servidor las da en orden de captura (Etiquetas lo necesita así); aquí se
   // revisa lo nuevo, así que va de la más nueva a la más vieja.
-  const todas = (await (await fetch('/api/borradores')).json()).reverse();
+  todas = (await (await fetch('/api/borradores')).json()).reverse();
+  pintarCola();
+}
+
+function pintarCola() {
   const { porPieza: sesionDe, sesiones } = agruparSesiones(todas);
   pintarSesiones(sesiones);
   const piezas = todas.filter((p) => pasaFiltros(p, sesionDe));
@@ -478,6 +582,72 @@ document.getElementById('guardar-todo').addEventListener('click', async (evento)
 
 await cargarConfig();
 await cargarCola();
+
+async function cargarRopaIA() {
+  const raiz = document.getElementById('ropa-ia-lista');
+  const respuesta = await fetch('/api/ropa-ia');
+  if (!respuesta.ok) { raiz.textContent = 'No se pudo cargar la revisión de ropa.'; return; }
+  const piezas = await respuesta.json();
+  raiz.replaceChildren();
+  if (!piezas.length) { raiz.textContent = 'No hay prendas pendientes.'; return; }
+  for (const p of piezas) {
+    const s = JSON.parse(p.ropa_ia_sugerencia || '{}');
+    const ficha = document.createElement('article'); ficha.className = 'ficha';
+    const img = document.createElement('img'); img.src = `/api/foto/${p.id}`; img.alt = 'Foto de la prenda';
+    const cuerpo = document.createElement('div');
+    const detalle = document.createElement('p');
+    detalle.textContent = `${s.prenda || 'Sin prenda'} (${s.prenda_confianza || 'baja'}) · ${s.marca || 'Sin marca'} (${s.marca_confianza || 'baja'}) · Banderas: ${(s.banderas || []).join(', ') || 'ninguna'} · ${s.motivo || ''}`;
+    const prenda = document.createElement('input'); prenda.value = s.prenda || ''; prenda.setAttribute('aria-label', 'Prenda corregida');
+    const marca = document.createElement('input'); marca.value = s.marca || ''; marca.maxLength = 60; marca.setAttribute('aria-label', 'Marca corregida');
+    const botones = document.createElement('div'); botones.className = 'acciones';
+    const accion = async (nombre, datos = {}) => {
+      const r = await fetch(`/api/ropa-ia/${p.id}/${nombre}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(datos) });
+      if (!r.ok) { detalle.textContent = (await r.json()).error || 'No se guardó.'; return; }
+      await cargarRopaIA();
+    };
+    for (const [texto, fn] of [['Aceptar', () => accion('aceptar')], ['Corregir', () => accion('corregir', { prenda: prenda.value, marca: marca.value })], ['Descartar', () => accion('descartar')]]) {
+      const b = document.createElement('button'); b.type = 'button'; b.textContent = texto; b.addEventListener('click', fn); botones.append(b);
+    }
+    cuerpo.append(detalle, prenda, marca, botones); ficha.append(img, cuerpo); raiz.append(ficha);
+  }
+}
+await cargarRopaIA();
+
+async function cargarRecortes() {
+  const raiz = document.getElementById('recortes-lista');
+  const respuesta = await fetch('/api/recortes');
+  if (!respuesta.ok) { raiz.textContent = 'No se pudieron cargar los recortes.'; return; }
+  const piezas = await respuesta.json(); raiz.replaceChildren();
+  if (!piezas.length) { raiz.textContent = 'No hay recortes recientes ni errores.'; return; }
+  for (const p of piezas) {
+    const ficha = document.createElement('article'); ficha.className = 'ficha';
+    const imagenes = document.createElement('div'); imagenes.className = 'recorte-par';
+    for (const [src, alt] of [[`/api/catalogo/recorte/${p.codigo}`, 'Recorte'], [`/api/foto/${p.id}`, 'Foto original']]) {
+      const img = document.createElement('img'); img.src = src; img.alt = alt; img.style.objectFit = 'contain'; imagenes.append(img);
+    }
+    const cuerpo = document.createElement('div'); const titulo = document.createElement('p'); titulo.textContent = `${p.codigo} · ${p.nombre} · ${p.recorte_estado}`;
+    if (p.recorte_estado === 'listo' && p.recorte_revision === null) titulo.textContent += ' · Revisando…';
+    if (p.recorte_revision && p.recorte_revision !== 'ok') {
+      let revision = {};
+      try { revision = JSON.parse(p.recorte_revision); } catch { /* valor inválido: se conserva visible en el título */ }
+      titulo.textContent = `Revisar: ${(revision.problemas || [p.recorte_revision]).join(', ')}`;
+      const aprobar = document.createElement('button'); aprobar.type = 'button'; aprobar.textContent = 'El recorte está bien';
+      aprobar.addEventListener('click', async () => {
+        const r = await fetch(`/api/recortes/${p.id}/aprobar`, { method: 'POST' });
+        if (r.ok) cargarRecortes(); else titulo.textContent = 'No se pudo actualizar el recorte.';
+      });
+      cuerpo.append(aprobar);
+    }
+    const boton = document.createElement('button'); boton.type = 'button';
+    boton.textContent = p.recorte_estado === 'error' ? 'Volver a intentar' : 'Usar foto original';
+    boton.addEventListener('click', async () => {
+      const r = await fetch(`/api/recortes/${p.id}/${p.recorte_estado === 'error' ? 'reintentar' : 'original'}`, { method: 'POST' });
+      if (r.ok) cargarRecortes(); else titulo.textContent = 'No se pudo actualizar el recorte.';
+    });
+    cuerpo.append(titulo, boton); ficha.append(imagenes, cuerpo); raiz.append(ficha);
+  }
+}
+await cargarRecortes();
 </script>
 </body>
 </html>

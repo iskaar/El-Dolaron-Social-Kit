@@ -17,7 +17,7 @@ Consulta [el contexto, investigación y plan de 30 días](docs/MARKETING-30-DIAS
 
 | Ruta | Propósito |
 | --- | --- |
-| `01-Logos/` | Logo completo y símbolo D |
+| `01-Logos/` | Logo oficial (horizontal, vertical e ícono «EL»); el logo anterior con símbolo D está retirado |
 | `02-Perfiles-y-portadas/` | Avatar y portada |
 | `03-Publicaciones/` | Plantillas 4:5 |
 | `04-Historias/` | Plantillas 9:16 |
@@ -25,6 +25,7 @@ Consulta [el contexto, investigación y plan de 30 días](docs/MARKETING-30-DIAS
 | `EMPIEZA-AQUI.html` | Preview y guía visual autocontenida |
 | `tools/` | Validaciones sin dependencias externas |
 | `app/` | Caja, inventario y portal Dolarones (Worker + D1) |
+| `site/public/` | Sitio público de la tienda, contacto y ubicación |
 | `.github/` | Flujo de Issues, PRs, ownership y CI |
 
 ## Trabajo entre agentes
@@ -38,6 +39,10 @@ GitHub es la fuente de verdad compartida para Claude, ChatGPT, Agy y cualquier o
 5. El merge requiere revisión y CI verde.
 
 El contrato completo está en [AGENTS.md](AGENTS.md) y la arquitectura en [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+
+## Sitio público
+
+Abre `site/public/index.html` para revisar el sitio de El Dolarón. Es una página estática con assets locales, sin dependencias ni compilación. Para servirla localmente ejecuta `python -m http.server 8080 --directory site/public` y visita `http://localhost:8080`. Antes de publicar cambios ejecuta `python tools/validate_assets.py` y `python tools/validate_site.py`.
 
 ### Claude Code
 
@@ -55,3 +60,12 @@ Claude y Codex se coordinan únicamente mediante Issues, ramas y PRs publicados 
 ## Límites deliberados
 
 Este repositorio no guarda contraseñas, tokens, datos de clientes ni credenciales de redes sociales. Tampoco inventa horarios, dirección, precios, disponibilidad, descuentos o políticas de entrega.
+
+## Evolución de la herramienta de tienda
+
+- [Plan de reestructuración](docs/PLAN-REESTRUCTURACION.md): fases, dependencias, hallazgos y criterios de salida.
+- [Arquitectura objetivo](docs/ARQUITECTURA-OBJETIVO.md): límites de módulos y condiciones para crecer.
+- [Operación y entregas](docs/OPERACION-Y-ENTREGAS.md): entornos, validación, recuperación y continuidad.
+- [Guardrails de la app](app/AGENTS.md): reglas para modelos y desarrolladores que cambian la tienda.
+
+Estos documentos son el plan de evolución; no significan que la reestructuración o sus correcciones ya estén implementadas.

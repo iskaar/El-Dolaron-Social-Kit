@@ -69,7 +69,7 @@ create table if not exists usuarios (
 
 create table if not exists solicitudes (
   id            text primary key,
-  tipo          text not null,                  -- acceso
+  tipo          text not null,                  -- acceso|cancelacion
   correo        text not null,
   nombre        text not null default '',
   justificacion text not null,
@@ -81,3 +81,19 @@ create table if not exists solicitudes (
 );
 
 create index if not exists solicitudes_pendientes on solicitudes (estado, creado_en);
+
+-- Rastro de ajustes por conteo de piezas de alto valor (migracion-028-conteo.sql, Issue #219).
+create table if not exists conteo_ajustes (
+  id           text primary key,
+  producto_id  text not null,
+  codigo       text not null default '',
+  nombre       text not null default '',
+  motivo       text not null,
+  cantidad     integer not null,
+  antes        integer not null,
+  despues      integer not null,
+  ajustado_por text not null,
+  ajustado_en  text not null
+);
+
+create index if not exists conteo_ajustes_fecha on conteo_ajustes (ajustado_en);

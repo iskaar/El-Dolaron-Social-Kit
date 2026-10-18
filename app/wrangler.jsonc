@@ -16,6 +16,8 @@
     "run_worker_first": true
   },
   "vars": {
+    // Numero de WhatsApp para responder desde /mensajes (Issue #290). Publico, no secreto.
+    "WHATSAPP_PHONE_NUMBER_ID": "1433484303171531",
     // Ese hostname solo sirve la camara y la subida de fotos: el vendedor no
     // llega a precios ni a la caja aunque escriba la ruta.
     "HOST_VENDEDOR": "captura.viste.com.mx",
@@ -34,9 +36,20 @@
     // Encendido de Dolarones (Isaac, 01/10). Altas, vales y premios esperan a
     // PROMOCION_INICIO: lunes 5/10/2026, 11:00 hora de la tienda (UTC-6).
     // Apagado de emergencia: quitar PORTAL_REGISTRO_ABIERTO o VALES_ABIERTOS y desplegar.
-    "BASES_APROBADAS_VERSION": "2026-10-v3",
+    "BASES_APROBADAS_VERSION": "2026-10-v4",
     "PROMOCION_INICIO": "2026-10-05T17:00:00Z",
     "VALES_ABIERTOS": "si",
+    // Promo de inauguracion (Isaac, 9/10, Issue #263): 10% directo en todo el ticket, sin tope de tickets.
+    // «El 10 del 10 a las 10»: del sabado 10/10 a las 10:00 al domingo 11/10 a las 23:59, hora de la tienda (UTC-6).
+    // Para apagarla antes: quitar las dos y desplegar. PROMO_CUPO (Issue #250) pondria tope de tickets; sin ella no hay.
+    "PROMO_DESDE": "2026-10-10T16:00:00Z",
+    "PROMO_HASTA": "2026-10-12T06:00:00Z",
+    // Conteo de alto valor (Issue #219): piezas en existencia con precio >= este monto, en centavos.
+    "CONTEO_UMBRAL": "30000",
+    // Mercado Libre (Issue #170): debe ser identica a la URI de redireccion de la
+    // app en el DevCenter. ML_CLIENT_ID, ML_CLIENT_SECRET, ML_LLAVE_TOKENS y
+    // ML_RUTA_NOTIFICACIONES son secretos (wrangler secret put), no van aqui.
+    "ML_REDIRECT_URI": "https://escaner.viste.com.mx/ml/callback",
     "PORTAL_REGISTRO_ABIERTO": "si",
     // Con que se verifica el JWT de Cloudflare Access (src/cuentas.ts). No son
     // secretos: salen en la redireccion al login de cada hostname. El aud es
@@ -47,6 +60,10 @@
       "escaner.viste.com.mx": "8ecef061fac92da30e9b780d70c749c2a4bc91c7a04d3070c35f7d9d23eb451d",
       "captura.viste.com.mx": "d3ee26fb77afa5141ca79be9eeba23d7cf93e31165b1fc1683396c1296629764"
     }
+  },
+  // Concilia existencias con Mercado Libre y recoge ordenes perdidas; sin cuenta conectada no hace nada.
+  "triggers": {
+    "crons": ["*/15 * * * *"]
   },
   // El Worker solo debe responder detras de Access: workers.dev y las URLs de
   // vista previa se saltarian el login.
@@ -71,6 +88,8 @@
       "custom_domain": true
     }
   ],
+  // Avisos al dueno (Issue #75, avisos.ts): remitente avisos@eldolaron.com, destinatarios desde D1.
+  "send_email": [{ "name": "CORREO", "allowed_sender_addresses": ["avisos@eldolaron.com"] }],
   "d1_databases": [
     {
       "binding": "DB",
@@ -78,6 +97,10 @@
       "database_id": "26435b29-79ae-44bf-942d-3bac138c5805"
     }
   ],
+  "kv_namespaces": [
+    { "binding": "WHATSAPP_EVENTOS", "id": "d6cbf480b05d47c7a17d53d8e4b461a8" }
+  ],
+  "images": { "binding": "IMAGES" },
   "r2_buckets": [
     {
       "binding": "FOTOS",

@@ -3,6 +3,7 @@
 declare global {
   interface Env {
     ANTHROPIC_API_KEY: string;
+    IMAGES: ImagesBinding;
     GEMINI_API_KEY: string;
     /** Alterno: alguna instancia guarda la llave con este nombre. */
     GEMINI2_API_KEY?: string;
@@ -14,6 +15,15 @@ declare global {
     HOST_VENDEDOR?: string;
     /** 'sandbox' en wrangler.sandbox.jsonc: pinta la franja en todas las pantallas. */
     AMBIENTE?: string;
+    /** Eventos de WhatsApp guardados por el Worker del WhatsApp (Issue #287). Solo produccion. */
+    WHATSAPP_EVENTOS?: KVNamespace;
+    /** Envio de respuestas desde el sitio de personal (Issue #290). Secreto: wrangler secret put. */
+    WHATSAPP_ACCESS_TOKEN?: string;
+    WHATSAPP_PHONE_NUMBER_ID?: string;
+    /** Token del asistente de WhatsApp (Issue #296). Secreto: el mismo valor va en el Worker de WhatsApp. */
+    ASISTENTE_TOKEN?: string;
+    /** Avisos al dueno por correo (Issue #75, avisos.ts). Binding send_email; ausente en pruebas. */
+    CORREO?: SendEmail;
     /** Solo `wrangler dev` con `--var ACCESS_EQUIPO:local`: el correo con el que se entra. */
     DEV_USUARIO?: string;
     /** Host público exacto. Ausente = portal inaccesible. */
@@ -30,6 +40,24 @@ declare global {
     PROMOCION_INICIO?: string;
     /** Emisión de vales anónimos: ausente = apagada, requiere bases finales. */
     VALES_ABIERTOS?: string;
+    /** Promo de inauguracion (ISO, UTC): ambas o ninguna. Quitarlas y desplegar la apaga. */
+    PROMO_DESDE?: string;
+    PROMO_HASTA?: string;
+    /** Cuantos tickets reciben la promo (Issue #250). Ausente = sin tope. */
+    PROMO_CUPO?: string;
+    /** Conteo de alto valor (Issue #219): precio minimo en centavos. Ausente = 30000. */
+    CONTEO_UMBRAL?: string;
+    /** Mercado Libre (Issue #170). Secretos con `wrangler secret put`; ML_REDIRECT_URI es var. */
+    ML_CLIENT_ID?: string;
+    ML_CLIENT_SECRET?: string;
+    /** base64 de 32 bytes: cifra los tokens de ML en D1 (AES-GCM). */
+    ML_LLAVE_TOKENS?: string;
+    /** Segmento secreto de la URL de notificaciones: /api/ml/notificaciones/<esto>. */
+    ML_RUTA_NOTIFICACIONES?: string;
+    /** Debe ser identica a la registrada en la app de ML. */
+    ML_REDIRECT_URI?: string;
+    /** 'no' = no usar PKCE (solo si la app de ML se creo sin esa casilla). */
+    ML_PKCE?: string;
   }
 }
 

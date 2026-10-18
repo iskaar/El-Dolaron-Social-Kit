@@ -20,7 +20,7 @@ const cancelar = (pedir: Pedir, id: string, caja: string) =>
 const cortar = (pedir: Pedir, caja: string, contado: number, extra: Record<string, unknown> = {}) =>
   pedir('/api/cortes', { id: crypto.randomUUID(), caja, efectivo_contado: contado, tarjeta_terminal: 0, ...extra });
 const salida = (pedir: Pedir, tipo: string, importe: number, caja = 'Caja 1') =>
-  pedir('/api/retiros', { id: crypto.randomUUID(), tipo, caja, importe, motivo: tipo === 'gasto' ? 'garrafon de agua' : 'caja fuerte' });
+  pedir('/api/retiros', { id: crypto.randomUUID(), tipo, caja, importe, motivo: tipo === 'gasto' ? 'garrafon de agua' : 'caja fuerte', ...(tipo === 'gasto' ? { categoria: 'agua' } : {}) });
 
 test('el corte cuadra: fondo + efectivo - devoluciones - retiros, y tarjeta, transferencia y Dolarones aparte', async () => {
   const { db, pedir } = tienda();
@@ -225,4 +225,51 @@ test('#123: una pieza devuelta despues del corte de su venta resta en la caja do
   const caja2 = (await cortar(pedir, 'Caja 2', 25000)).cuerpo;   // fondo 500 - 250 devueltos
   assert.equal(caja2.efectivo_devoluciones, 25000);
   assert.equal(caja2.diferencia, 0);
+});
+
+test('pieza de un ticket con tarjeta devuelta en efectivo: sale del cajon y la tarjeta queda completa (17/10)', async () => {
+  const { db, pedir } = tienda();
+  const devolver = async (id: string, devolver_en?: string) => {
+    const linea = (await pedir(`/api/ventas/${id}`)).cuerpo.lineas[0].id;
+    const r = await pedir(`/api/ventas/${id}/lineas/${linea}/cancelar`,
+      { id: crypto.randomUUID(), cantidad: 1, motivo: 'prueba', caja: 'Caja 1', devolver_en });
+    assert.equal(r.status, 201, JSON.stringify(r.cuerpo));
+  };
+  const dos = { forma_pago: 'tarjeta', efectivo: 0, lineas: [{ producto_id: PRODUCTO, cantidad: 2 }] };
+  const enCaja = await vender(pedir, 'Caja 1', dos);
+  await devolver(enCaja.id, 'efectivo');
+  const aTarjeta = await vender(pedir, 'Caja 1', dos);
+  await devolver(aTarjeta.id);                                     // sin decir: regresa a la tarjeta, como antes
+  assert.deepEqual(db.prepare('select forma_pago from devoluciones order by creado_en').all().map((d: any) => d.forma_pago),
+    ['efectivo', 'tarjeta']);
+
+  // Terminal: 500 + 500 - 250 = 750. Cajon: fondo 500 - 250 = 250.
+  const c = (await cortar(pedir, 'Caja 1', 25000, { tarjeta_terminal: 75000 })).cuerpo;
+  assert.equal(c.tarjeta_sistema, 75000);
+  assert.equal(c.efectivo_devoluciones, 25000);
+  assert.equal(c.diferencia, 0);
+
+  // Ya contada en ese corte, otra pieza devuelta en efectivo resta del cajon del siguiente; la tarjeta no.
+  await devolver(enCaja.id, 'efectivo');
+  const siguiente = (await cortar(pedir, 'Caja 1', 0)).cuerpo;
+  assert.equal(siguiente.efectivo_devoluciones, 25000);
+  assert.equal(siguiente.tarjeta_sistema, 0);
+  assert.equal(siguiente.diferencia, 0);
+});
+
+test('el conteo por billete y moneda suma lo contado y se guarda; uno invalido no hace corte', async () => {
+  const { db, pedir } = tienda();
+  await vender(pedir, 'Caja 1');
+  const conteo = { '50000': 1, '10000': 2, '5000': 1 };   // $500 + 2 x $100 + $50 = $750 = fondo + venta
+  const r = await pedir('/api/cortes', { id: crypto.randomUUID(), caja: 'Caja 1', conteo, tarjeta_terminal: 0 });
+  assert.equal(r.status, 201, JSON.stringify(r.cuerpo));
+  assert.equal(r.cuerpo.efectivo_contado, 75000);
+  assert.equal(r.cuerpo.diferencia, 0);
+  assert.deepEqual(JSON.parse(r.cuerpo.conteo), conteo);
+
+  for (const malo of [{ '777': 1 }, { '10000': 1.5 }, { '10000': -1 }]) {
+    const x = await pedir('/api/cortes', { id: crypto.randomUUID(), caja: 'Caja 1', conteo: malo, tarjeta_terminal: 0 });
+    assert.equal(x.status, 400);
+  }
+  assert.equal((db.prepare('select count(*) as n from cortes').get() as { n: number }).n, 1);
 });

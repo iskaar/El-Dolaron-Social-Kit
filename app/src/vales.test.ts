@@ -349,11 +349,27 @@ test('vale no expone saldo/código al portal público ni a capturistas; al cerra
     t.env.VALES_ABIERTOS = 'no';
     assert.equal((await t.canjear(vale.codigo, 500)).status, 201);
     assert.equal(t.db.prepare('select count(*) as n from vales_dolarones').get()!.n, 1);
+    t.db.exec('drop trigger siempre_un_dueno');   // la prueba le cambia el rol a la unica cuenta
     t.db.prepare("update usuarios set roles='capturista' where correo=?").run(DUENO);
     assert.equal((await t.pedir('/api/vales/buscar', { codigo:vale.codigo })).status, 403);
     assert.equal((await t.pedir(`/api/ventas/${v.id}/vale`, {})).status, 403);
     t.env.HOST_PORTAL = 'caja.prueba';
     assert.equal((await t.pedir('/api/vales/buscar', { codigo:vale.codigo })).status, 404);
     assert.equal((await t.pedir(`/api/ventas/${v.id}/vale`, {})).status, 404);
+  } finally { t.db.close(); }
+});
+
+test('vale de prueba de 6 digitos (Issue #279) solo se acepta en sandbox', async () => {
+  const t = abrir();
+  try {
+    const { v } = await t.emitir();
+    // Vale de prueba sin vencimiento, disponible ya: lo que se inserta en el sandbox.
+    t.db.prepare("update vales_dolarones set codigo='279406', disponible_desde='2020-01-01T00:00:00Z', vence_en='2099-12-31T23:59:59Z' where venta_id=?").run(v.id);
+    t.env.AMBIENTE = 'produccion';
+    assert.equal((await t.pedir('/api/vales/buscar', { codigo:'279406' })).status, 400);
+    t.env.AMBIENTE = 'sandbox';
+    const r = await t.pedir('/api/vales/buscar', { codigo:'279406' });
+    assert.equal(r.status, 200);
+    assert.equal(r.cuerpo.disponible, t.db.prepare('select restante from vales_dolarones where venta_id=?').get(v.id)!.restante);
   } finally { t.db.close(); }
 });

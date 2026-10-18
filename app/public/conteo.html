@@ -1,0 +1,212 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>El Dolarón — conteo de alto valor</title>
+<style>
+  :root { --azul:#16366B; --rojo:#D72B32; --amarillo:#FFD447; --linea:#dfe3ea; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: #f4f6f9; color: #1a1f2b; font-family: system-ui, -apple-system, sans-serif; }
+  header { background: var(--azul); color: #fff; padding: 14px 20px; display: flex; gap: 16px; align-items: center; flex-wrap: wrap; }
+  header h1 { font-size: 18px; margin: 0; flex: 1; }
+  header a { color: var(--amarillo); font-size: 14px; }
+  main { padding: 20px; max-width: 960px; margin: 0 auto; }
+  .panel { background: #fff; border: 1px solid var(--linea); border-radius: 12px; padding: 16px; margin-bottom: 20px; }
+  .panel h2 { font-size: 15px; margin: 0 0 6px; }
+  .ayuda { font-size: 13px; color: #5b6478; margin: 0 0 12px; }
+  .tabla { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  th, td { text-align: left; padding: 8px 6px; border-top: 1px solid var(--linea); vertical-align: middle; }
+  th { font-size: 12px; color: #5b6478; font-weight: 600; border-top: 0; }
+  td.num, th.num { text-align: right; }
+  input[type=number] { width: 90px; padding: 7px 8px; border: 1px solid var(--linea); border-radius: 8px; font-size: 14px; }
+  select { padding: 7px 8px; border: 1px solid var(--linea); border-radius: 8px; font-size: 14px; }
+  img.miniatura { width: 44px; height: 44px; object-fit: cover; border-radius: 6px; background: #eef1f6; display: block; }
+  button { border: 0; border-radius: 8px; padding: 9px 14px; font-size: 14px; font-weight: 600; cursor: pointer;
+    background: var(--azul); color: #fff; }
+  button:disabled { opacity: .5; cursor: default; }
+  .acciones { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-top: 12px; }
+  .faltan { color: var(--rojo); font-weight: 700; }
+  .ok { color: #1e6b3a; font-weight: 600; }
+  .aviso { font-size: 13px; color: var(--rojo); min-height: 1em; margin-top: 8px; }
+  .vacio { color: #5b6478; font-size: 14px; }
+  body:not(.dueno) .solo-dueno { display: none; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Conteo de alto valor</h1>
+  <a href="/">← Inicio</a>
+  <a href="/admin">Admin →</a>
+</header>
+<main>
+  <section class="panel">
+    <h2>Contar</h2>
+    <p class="ayuda">Cuenta cada pieza de alto valor en existencia y escribe la cantidad que hay en el piso. Luego revisa el conteo.</p>
+    <div class="tabla" id="piezas"><p class="vacio">Cargando…</p></div>
+    <div class="acciones">
+      <button id="revisar" type="button">Revisar conteo</button>
+    </div>
+    <div class="aviso" id="aviso"></div>
+  </section>
+
+  <section class="panel">
+    <h2>Faltantes</h2>
+    <div id="faltantes"><p class="vacio">Aún no hay revisión.</p></div>
+  </section>
+
+  <section class="panel solo-dueno">
+    <h2>Ajustes de los últimos 30 días</h2>
+    <p class="ayuda">Cada ajuste queda con quien lo aplicó, cuándo y el motivo.</p>
+    <div class="tabla" id="ajustes"></div>
+  </section>
+</main>
+<script>
+const $ = (selector) => document.querySelector(selector);
+const esc = (texto) => String(texto ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const pesos = (centavos) => (centavos / 100).toLocaleString('es-MX', { style: 'currency', currency: 'MXN' });
+const fecha = (iso) => new Date(iso).toLocaleString('es-MX', { dateStyle: 'short', timeStyle: 'short' });
+const MOTIVOS = ['robo', 'merma', 'error de captura'];
+
+let piezas = [];
+let faltantesActuales = [];
+let esDueno = false;
+
+async function pedir(ruta, metodo = 'GET', cuerpo) {
+  const respuesta = await fetch(ruta, {
+    method: metodo,
+    headers: cuerpo ? { 'content-type': 'application/json' } : {},
+    body: cuerpo ? JSON.stringify(cuerpo) : undefined,
+  });
+  const datos = await respuesta.json().catch(() => ({}));
+  if (!respuesta.ok) throw new Error(datos.error || 'No se pudo. Intenta de nuevo.');
+  return datos;
+}
+
+const aviso = (texto) => { $('#aviso').textContent = texto; };
+
+function pintarPiezas() {
+  if (!piezas.length) {
+    $('#piezas').innerHTML = '<p class="vacio">No hay piezas de alto valor en existencia.</p>';
+    return;
+  }
+  const filas = piezas.map((p) => `
+    <tr>
+      ${esDueno ? `<td><img class="miniatura" src="/api/foto/${esc(p.id)}" alt="" loading="lazy" onerror="this.remove()"></td>` : ''}
+      <td>${esc(p.codigo)}</td>
+      <td>${esc(p.nombre) || '<span class="vacio">sin nombre</span>'}</td>
+      <td class="num">${pesos(p.precio)}</td>
+      <td class="num" data-sistema="${esc(p.id)}">${esc(p.stock)}</td>
+      <td class="num"><input type="number" min="0" max="9999" inputmode="numeric" data-contado="${esc(p.id)}" aria-label="Contado de ${esc(p.codigo)}"></td>
+    </tr>`).join('');
+  $('#piezas').innerHTML = `
+    <table>
+      <thead><tr>${esDueno ? '<th></th>' : ''}<th>Código</th><th>Pieza</th><th class="num">Precio</th><th class="num">Sistema</th><th class="num">Contado</th></tr></thead>
+      <tbody>${filas}</tbody>
+    </table>`;
+}
+
+function pintarFaltantes() {
+  if (!faltantesActuales.length) {
+    $('#faltantes').innerHTML = '<p class="ok">Sin faltantes. Todo cuadra.</p>';
+    return;
+  }
+  const filas = faltantesActuales.map((f) => `
+    <tr>
+      <td>${esc(f.codigo)}</td>
+      <td>${esc(f.nombre) || '<span class="vacio">sin nombre</span>'}</td>
+      <td class="num">${esc(f.sistema)}</td>
+      <td class="num">${esc(f.contado)}</td>
+      <td class="num faltan">${esc(f.faltan)}</td>
+      <td class="solo-dueno">
+        <select data-motivo="${esc(f.producto_id)}" aria-label="Motivo">
+          <option value="">Motivo…</option>
+          ${MOTIVOS.map((m) => `<option value="${esc(m)}">${esc(m)}</option>`).join('')}
+        </select>
+        <button type="button" data-ajustar="${esc(f.producto_id)}">Aplicar ajuste</button>
+      </td>
+    </tr>`).join('');
+  $('#faltantes').innerHTML = `
+    <div class="tabla"><table>
+      <thead><tr><th>Código</th><th>Pieza</th><th class="num">Sistema</th><th class="num">Contado</th><th class="num">Faltan</th><th class="solo-dueno"></th></tr></thead>
+      <tbody>${filas}</tbody>
+    </table></div>
+    ${esDueno ? '' : '<p class="vacio">Avísale al dueño para aplicar el ajuste.</p>'}`;
+}
+
+async function cargarAjustes() {
+  if (!esDueno) return;
+  const filas = await pedir('/api/conteo/ajustes');
+  $('#ajustes').innerHTML = filas.length ? `
+    <table>
+      <thead><tr><th>Cuándo</th><th>Pieza</th><th>Motivo</th><th class="num">Antes</th><th class="num">Después</th><th>Quién</th></tr></thead>
+      <tbody>${filas.map((a) => `
+        <tr>
+          <td>${esc(fecha(a.ajustado_en))}</td>
+          <td>${esc(a.codigo)} ${esc(a.nombre)}</td>
+          <td>${esc(a.motivo)}</td>
+          <td class="num">${esc(a.antes)}</td>
+          <td class="num">${esc(a.despues)}</td>
+          <td>${esc(a.ajustado_por)}</td>
+        </tr>`).join('')}</tbody>
+    </table>` : '<p class="vacio">Sin ajustes en los últimos 30 días.</p>';
+}
+
+$('#revisar').addEventListener('click', async () => {
+  aviso('');
+  const campos = [...document.querySelectorAll('[data-contado]')];
+  const conteos = campos.filter((c) => c.value !== '').map((c) => ({ producto_id: c.dataset.contado, contado: Number(c.value) }));
+  if (conteos.length < piezas.length) {
+    aviso(`Falta contar ${piezas.length - conteos.length} de ${piezas.length} piezas.`);
+    return;
+  }
+  try {
+    const { faltantes } = await pedir('/api/conteo', 'POST', { conteos });
+    faltantesActuales = faltantes;
+    pintarFaltantes();
+  } catch (error) {
+    aviso(error.message);
+  }
+});
+
+$('#faltantes').addEventListener('click', async (evento) => {
+  const boton = evento.target.closest('[data-ajustar]');
+  if (!boton) return;
+  const id = boton.dataset.ajustar;
+  const motivo = document.querySelector(`[data-motivo="${CSS.escape(id)}"]`).value;
+  const faltante = faltantesActuales.find((f) => f.producto_id === id);
+  if (!MOTIVOS.includes(motivo)) {
+    aviso('Escoge un motivo antes de aplicar el ajuste.');
+    return;
+  }
+  boton.disabled = true;
+  try {
+    const { antes, despues } = await pedir('/api/conteo/ajustes', 'POST', { producto_id: id, cantidad: faltante.faltan, motivo });
+    boton.textContent = `Ajustado: ${antes} → ${despues}`;
+    document.querySelector(`[data-sistema="${CSS.escape(id)}"]`).textContent = despues;
+    const pieza = piezas.find((p) => p.id === id);
+    if (pieza) pieza.stock = despues;
+    await cargarAjustes();
+  } catch (error) {
+    boton.disabled = false;
+    aviso(error.message);
+  }
+});
+
+(async () => {
+  try {
+    const yo = await pedir('/api/yo');
+    esDueno = !!yo.usuario?.roles?.includes('dueno');
+    document.body.classList.toggle('dueno', esDueno);
+    piezas = await pedir('/api/conteo');
+    pintarPiezas();
+    await cargarAjustes();
+  } catch (error) {
+    $('#piezas').innerHTML = '';
+    aviso(error.message);
+  }
+})();
+</script>
+</body>
+</html>

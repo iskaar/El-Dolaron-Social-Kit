@@ -9,8 +9,8 @@ export type EstadoFisico = 'nuevo' | 'danado';
 /** Prefijo de una familia de banda: una o dos letras minusculas ('r', 'ju'). Vive en la tabla `familias`. */
 export type Familia = string;
 
-/** Siete precios, compartidos por todas las familias. Ver PLAN-ETIQUETAS-POR-BANDA.md. */
-export const MONTOS_BANDA = [19, 29, 49, 79, 99, 149, 199] as const;
+/** Nueve precios (119 y 129 desde el 4/10, Issue #168), compartidos por todas las familias. Ver PLAN-ETIQUETAS-POR-BANDA.md. */
+export const MONTOS_BANDA = [19, 29, 49, 79, 99, 119, 129, 149, 199] as const;
 
 export type Destino = 'etiqueta' | `banda_${string}`;
 

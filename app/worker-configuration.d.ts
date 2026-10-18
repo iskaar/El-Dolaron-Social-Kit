@@ -3,6 +3,7 @@
 // Runtime types generated with workerd@1.20260911.1 2026-09-11 nodejs_compat
 interface __BaseEnv_Env {
 	FOTOS: R2Bucket;
+	IMAGES: ImagesBinding;
 	DB: D1Database;
 	ASSETS: Fetcher;
 	HOST_VENDEDOR: "captura.viste.com.mx";

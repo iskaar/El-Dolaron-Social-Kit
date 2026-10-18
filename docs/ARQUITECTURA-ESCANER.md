@@ -4,6 +4,8 @@
 > Issue: #2. Rama: `agent/codex/2-operations-scanner-rebaseline`.
 > Alcance funcional: `docs/CONTRATO-ESCANER.md`. Este archivo decide **con qué** se construye.
 
+> Evolución desde 2026-10-08: consultar el [plan de reestructuración](PLAN-REESTRUCTURACION.md) y la [arquitectura objetivo](ARQUITECTURA-OBJETIVO.md). Conservan las decisiones funcionales y calibraciones de este documento; los módulos propuestos no se presumen implementados.
+
 ## Decisiones de Isaac (2026-09-11)
 
 | Decisión | Elegido |
@@ -111,6 +113,7 @@ Costo aproximado por foto (≈1.5 k tokens de entrada, ≈300 de salida) y por p
 | `claude-opus-5` | $0.015 | ~$15 USD |
 | `claude-sonnet-5` | $0.006 | ~$6 USD |
 | `claude-haiku-4-5` | $0.003 | ~$3 USD |
+| `claude-haiku-5-5` | ~$0.0006 | ~$0.60 USD |
 | Gemini Flash | ~$0.001 | ~$1 USD |
 | GPT económico | ~$0.001 | ~$1 USD |
 
@@ -118,7 +121,8 @@ Costo aproximado por foto (≈1.5 k tokens de entrada, ≈300 de salida) y por p
 
 Diferencia técnica real: Gemini puede apoyarse en búsqueda de Google, lo que para "cuánto cuesta esto nuevo en México" es una ventaja sobre un modelo que responde de memoria. Cuesta latencia, y aquí la latencia no importa porque el análisis corre en segundo plano.
 
-Punto de partida: `claude-haiku-4-5`, decidido con la prueba del paso 3.
+Punto de partida: `claude-haiku-4-5`, decidido con la prueba del paso 3. Desde el 8/10/2026 corre
+`claude-haiku-5-5` (Issue #239): mismo prompt y esquema, ~85 % más barato, con `effort: low`.
 
 Un análisis fallido deja la fila en `error` con su foto intacta. Nunca se borra una foto por un fallo de análisis.
 
@@ -186,6 +190,62 @@ unidad (u otra) hay que volver a interrogarla, `/sonda-impresora` sigue desplega
 - **Refrescar datos:** `python tools/refrescar_sandbox.py` borra el sandbox y copia desde producción el esquema completo y los datos de catálogo, configuración, familias, usuarios, solicitudes y ventas. **Nunca copia socios ni Dolarones** (datos personales). Producción solo se lee.
 - **Migraciones:** una migración nueva se corre primero en el sandbox (`--config wrangler.sandbox.jsonc`), se prueba y después en producción.
 - **Qué no tiene:** fotos (R2 no se copia) y llaves de IA, así que el análisis de fotos falla ahí sin gastar. Las altas de socios y los números de socio del sandbox no afectan el regalo de producción.
+
+## Foto → etiqueta de ropa (Issues #273 y #302)
+
+1. En la computadora, abrir `/etiquetas` del **mismo entorno** en Chrome/Edge,
+   conectar la AE240-bt y pulsar «Iniciar / retomar impresión automática».
+2. En el teléfono, abrir `/captura` del **mismo entorno**. Modo Ropa ofrece
+   $300/$200/$150/$120/$100/$80/$50 MXN y las tallas existentes; escoger ambos antes de disparar.
+   El precio se conserva entre fotos, no entre recargas. La foto y el precio se
+   guardan juntos en IndexedDB antes de subir, también sin red.
+3. `POST /api/borradores` acepta `precio_ropa` en centavos en sandbox y producción
+   y únicamente para esos cinco importes. Guarda nombre `Ropa`, talla, precio
+   final exacto y estado `listo`, sin IA ni precio de lista supuesto. Un reenvío
+   por el mismo UUID conserva stock, precio revisado y código.
+4. La computadora consulta cada 2 s las capturas desde el inicio de la sesión,
+   usando la hora del servidor (`/api/salud`) y `GET /api/borradores?desde=<ISO>`.
+   Espera nombre/precio en orden de captura y reutiliza `/api/etiquetas`, TSPL,
+   calibración y pausas de la AE240; una etiqueta por unidad en existencia.
+5. «Detener» pausa la sesión. Una recarga permite retomarla sin imprimir el
+   inventario anterior. «Nueva sesión», estando pausada, deja las anteriores
+   para impresión manual; cada sesión admite hasta 2000 fotos.
+
+Antes del envío automático se guarda su UUID en el navegador. Si BLE falla o la
+página se cierra a medias, la sesión se pausa: revisar el papel y la foto, imprimir
+manualmente esa pieza o marcarla como impresa, y retomar. Un envío completo se
+marca con las funciones existentes y desaparece de la cola. Las pestañas del mismo
+navegador coordinan el consumidor con Web Locks; las marcas son por navegador,
+como antes, así que se usa **una sola computadora/navegador** para esta sesión.
+La AE240 no confirma que salió el papel: «Mostrar impresas» / «No salió desde aquí»
+sigue siendo la recuperación física. No se ha cambiado ni validado de nuevo su
+calibración en hardware real.
+
+El árbol de decisiones por prenda se definirá después. Los cinco precios
+confirmados permiten usar el flujo completo sin gastar IA en ropa.
+
+### Corrección desde miniatura (Issue #275)
+
+En `/captura`, tocar una miniatura muestra los cinco precios y Nuevo/Dañado;
+«Guardar cambios» conserva el precio elegido sin descuento automático por condición.
+Antes de subir, se guarda en IndexedDB junto a la foto. La revisión abierta pausa
+esa subida; al cerrar, la cola aplica también la corrección explícita al servidor
+para cubrir una respuesta de alta perdida. Después de subir, se lee el precio y
+condición actuales desde `GET /api/borradores/:id/revision`; PATCH cambia únicamente
+esos campos, sin reponer stock ni cambiar código. API y controles disponibles en sandbox y producción.
+
+«Eliminar captura» requiere dos toques y conexión. DELETE de esa misma ruta deja
+el UUID con `estado_analisis = descartado`, stock/precio cero y sin foto; retiene el
+UUID para que un POST retrasado no la reviva. No aparece en revisión ni etiquetas.
+El archivo de R2 se borra después de quitar su referencia; análisis y correcciones
+no reabren un descarte. El handler comprueba identidad y ventana de 24 h en las
+mutaciones; rechaza eliminar piezas con venta o publicación. No hay migración nueva.
+
+La computadora detecta cambios de precio contra su marca de impresión y envía una
+etiqueta nueva con el mismo código. Reemplazar la anterior. Una eliminación no puede
+retirar papel ya enviado a la impresora: descartar esa etiqueta físicamente. Precio
+y condición locales sobreviven sin red; una eliminación fallida conserva la foto
+para reintentar con conexión.
 
 ## Orden de entrega
 

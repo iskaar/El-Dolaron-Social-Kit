@@ -99,10 +99,15 @@ test('codigoDeDestino da el codigo impreso de la banda, o nulo para etiqueta', (
   assert.equal(codigoDeDestino('etiqueta'), null);
 });
 
-test('destinos de banda: cualquier familia de 1 o 2 letras con uno de los siete montos', () => {
+test('destinos de banda: cualquier familia de 1 o 2 letras con uno de los nueve montos', () => {
   assert.ok(esDestinoBanda('banda_r49'));
+  assert.ok(esDestinoBanda('banda_r119'));
+  assert.ok(esDestinoBanda('banda_ju129'));
   assert.ok(esDestinoBanda('banda_ju199'));
   assert.ok(!esDestinoBanda('banda_ju50'));      // monto que no es de banda
+  assert.ok(!esDestinoBanda('banda_ju139'));     // ni entre 129 y 149
+  assert.equal(codigoDeDestino('banda_ju119'), 'JU119');
+  assert.equal(ajustarManual({ precio: 123, destino: 'banda_ju129', config: {} }), 12900);
   assert.ok(!esDestinoBanda('banda_abc49'));     // prefijo de 3 letras
   assert.ok(!esDestinoBanda('etiqueta'));
   assert.equal(codigoDeDestino('banda_ju79'), 'JU79');

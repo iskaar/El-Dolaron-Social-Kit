@@ -16,13 +16,17 @@
  * cualquier corte no sale en ninguna; si de verdad se devolvio efectivo de
  * otro cajon, en uno sobra y en otro falta lo mismo (regla de Isaac).
  *
- * Conteo ciego: la caja manda solo el total de efectivo que hay en el cajon.
- * Isaac lo simplifico el 28/09: sin conteo por billete y moneda. Lo esperado se calcula aqui, en
+ * Conteo ciego: la caja manda solo lo contado, por billete y moneda (Isaac lo
+ * simplifico a un total el 28/09 y el 3/10 pidio volver al conteo; `efectivo_contado`
+ * sigue aceptandose para una caja con la pagina vieja). Lo esperado se calcula aqui, en
  * el mismo batch que marca las ventas, y se guarda junto con lo contado: ya no
  * se puede volver a contar para que cuadre.
  */
 
+import { lineasNetas } from './netas.ts';
+import { contadoDe } from '../public/venta.js';
 import { leerUsuario } from './cuentas.ts';
+import { CATEGORIAS_GASTO } from '../public/categorias.js';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const FONDO_POR_OMISION = 50000;
@@ -68,8 +72,10 @@ export async function registrarRetiro(request: Request, env: Env, correo: string
   const caja = await cajaDe(env, correo, cuerpo.caja);
   const importe = Number(cuerpo.importe);
   const motivo = texto(cuerpo.motivo, 200);
+  const categoria = tipo === 'gasto' ? String(cuerpo.categoria ?? '') : '';
   if (!UUID.test(id)) return json({ error: 'Identificador invalido.' }, 400);
   if (!tipo) return json({ error: 'Tipo invalido.' }, 400);
+  if (tipo === 'gasto' && !CATEGORIAS_GASTO.some(([clave]) => clave === categoria)) return json({ error: 'Categoría invalida.' }, 400);
   if (!caja) return json({ error: 'Falta la caja.' }, 400);
   if (!Number.isInteger(importe) || importe <= 0 || importe > 10_000_000) return json({ error: 'Importe invalido.' }, 400);
   if (!motivo) return json({ error: tipo === 'gasto' ? 'Escribe en que se gasto.' : 'Escribe el motivo del retiro.' }, 400);
@@ -80,12 +86,12 @@ export async function registrarRetiro(request: Request, env: Env, correo: string
     }
   }
   await env.DB.prepare(
-    `insert into retiros (id, tipo, caja, cajero, importe, motivo, creado_en) values (?, ?, ?, ?, ?, ?, ?)
+    `insert into retiros (id, tipo, caja, cajero, importe, motivo, creado_en, categoria) values (?, ?, ?, ?, ?, ?, ?, ?)
      on conflict (id) do nothing`,
   )
-    .bind(id, tipo, caja, correo, importe, motivo, new Date().toISOString())
+    .bind(id, tipo, caja, correo, importe, motivo, new Date().toISOString(), categoria)
     .run();
-  const retiro = await env.DB.prepare('select id, tipo, caja, cajero, importe, motivo, creado_en from retiros where id = ?')
+  const retiro = await env.DB.prepare('select id, tipo, caja, cajero, importe, motivo, creado_en, categoria from retiros where id = ?')
     .bind(id)
     .first();
   return json(retiro, 201);
@@ -93,10 +99,11 @@ export async function registrarRetiro(request: Request, env: Env, correo: string
 
 export interface Corte {
   id: string; caja: string; cajero: string; desde: string | null; hasta: string; tickets: number;
-  fondo_inicial: number; efectivo_ventas: number; efectivo_devoluciones: number; retiros: number; gastos: number;
+  fondo_inicial: number; efectivo_ventas: number; efectivo_devoluciones: number; retiros: number; gastos: number; nomina: number;
   efectivo_esperado: number; efectivo_contado: number; diferencia: number;
   tarjeta_sistema: number; tarjeta_terminal: number; transferencias: number; dolarones: number;
   fondo_siguiente: number; entregado: number; conteo: string; notas: string; creado_en: string;
+  fep_por_pagar: number;   // lo cobrado de piezas de FEP en esta caja, a pagarle a FEP (Issue #298)
 }
 
 const leerCorte = (env: Env, id: string) =>
@@ -105,8 +112,13 @@ const leerCorte = (env: Env, id: string) =>
 // Lo cobrado (o devuelto) de una forma de pago, sin la parte pagada con Dolarones.
 const dinero = (forma: string, importe = 'total - dolarones') =>
   `coalesce(sum(case when forma_pago = '${forma}' then ${importe} end), 0)`;
-// Lo que queda de un ticket despues de lo devuelto por piezas sueltas (Issue #138).
-const NETO = 'total - dolarones - devuelto';
+// Lo que queda de un ticket despues de lo devuelto por piezas sueltas (Issue #138) y de lo que
+// pago el saldo de un pedido (Issue #269): ese dinero entro antes, con el anticipo.
+const NETO = 'total - dolarones - anticipo - devuelto';
+// Lo devuelto en cupón (Issue #330) se quedó en el cajón: para lo cobrado vigente se vuelve a sumar.
+const COBRADO = `${NETO} + devuelto_cupon`;
+// Anticipos de pedidos recibidos en esta caja desde su corte anterior, aunque el pedido ya se haya cancelado o vencido.
+const anticipos = (forma: string) => `(select ${dinero(forma, 'anticipo')} from pedidos where corte_id = ?1)`;
 // Lo cobrado: ventas de este corte que siguen vigentes, netas de lo ya devuelto.
 const VIGENTES = 'corte_id = ?1 and cancelada = 0';
 // La venta ya se habia contado en un corte anterior a `cuando` (la hora de la devolucion).
@@ -116,17 +128,23 @@ const CANCELADAS = `corte_cancelacion_id = ?1 and ${contadaAntes('cancelada_en')
 // Piezas sueltas devueltas en esta caja, de una venta ya contada (tabla devoluciones).
 const DEVUELTAS = `d.corte_id = ?1 and d.venta_id in (select id from ventas where ${contadaAntes('d.creado_en')})`;
 const devuelto = (forma: string) => `(select ${dinero(forma, 'importe')} from devoluciones d where ${DEVUELTAS})`;
+// Pieza de un ticket de este corte, cobrado con tarjeta o transferencia, que se devolvio en efectivo de este cajon:
+// el ticket la resto de su forma (ventas.devuelto) pero el dinero salio del cajon. Sin filtrar `forma` es todo lo
+// que salio en efectivo; con `forma`, lo que hay que regresarle a esa forma.
+const enEfectivo = (forma = '') => `(select coalesce(sum(d.importe), 0) from devoluciones d join ventas v on v.id = d.venta_id
+  where v.corte_id = ?1 and d.corte_id = ?1 and d.forma_pago = 'efectivo' and v.forma_pago != 'efectivo'${forma ? ` and v.forma_pago = '${forma}'` : ''})`;
 
 export async function registrarCorte(request: Request, env: Env, correo: string): Promise<Response> {
   const cuerpo = (await request.json().catch(() => ({}))) as Record<string, unknown>;
   const id = String(cuerpo.id ?? '');
   const caja = await cajaDe(env, correo, cuerpo.caja);
-  const contado = Number(cuerpo.efectivo_contado);
+  const conteo = cuerpo.conteo as Record<string, number> | undefined;
+  const contado = conteo ? contadoDe(conteo) : Number(cuerpo.efectivo_contado);
   const terminal = Number(cuerpo.tarjeta_terminal ?? 0);
   const notas = texto(cuerpo.notas, 500);
   if (!UUID.test(id)) return json({ error: 'Identificador invalido.' }, 400);
   if (!caja) return json({ error: 'Falta la caja.' }, 400);
-  if (!Number.isInteger(contado) || contado < 0 || contado > 100_000_000) return json({ error: 'Efectivo contado invalido.' }, 400);
+  if (contado === null || !Number.isInteger(contado) || contado < 0 || contado > 100_000_000) return json({ error: 'Efectivo contado invalido.' }, 400);
   if (!Number.isInteger(terminal) || terminal < 0 || terminal > 100_000_000) return json({ error: 'Total de la terminal invalido.' }, 400);
 
   const previo = await leerCorte(env, id);
@@ -147,32 +165,40 @@ export async function registrarCorte(request: Request, env: Env, correo: string)
         `update ventas set corte_cancelacion_id = ?
          where cancelada = 1 and cancelada_caja = ? and corte_cancelacion_id is null`,
       ).bind(id, caja),
+      env.DB.prepare('update pedidos set corte_id = ? where caja = ? and corte_id is null').bind(id, caja),
       env.DB.prepare('update retiros set corte_id = ? where caja = ? and corte_id is null').bind(id, caja),
       env.DB.prepare('update devoluciones set corte_id = ? where caja = ? and corte_id is null').bind(id, caja),
       env.DB.prepare(
         `insert into cortes (id, caja, cajero, desde, hasta, tickets, fondo_inicial, efectivo_ventas,
-           efectivo_devoluciones, retiros, gastos, efectivo_esperado, efectivo_contado, diferencia, tarjeta_sistema,
-           tarjeta_terminal, transferencias, dolarones, fondo_siguiente, entregado, notas, creado_en)
-         select ?1, ?2, ?3, desde, ?4, tickets, fondo, ev, ed, re, ga,
-                fondo + ev - ed - re - ga, ?5, ?5 - (fondo + ev - ed - re - ga), tv - td,
-                ?6, xv - xd, dv - dd, min(?5, ?7), ?5 - min(?5, ?7), ?8, ?4
+           efectivo_devoluciones, retiros, gastos, nomina, efectivo_esperado, efectivo_contado, diferencia, tarjeta_sistema,
+           tarjeta_terminal, transferencias, dolarones, fondo_siguiente, entregado, conteo, notas, creado_en, fep_por_pagar)
+         select ?1, ?2, ?3, desde, ?4, tickets, fondo, ev, ed, re, ga, no,
+                fondo + ev - ed - re - ga - no, ?5, ?5 - (fondo + ev - ed - re - ga - no), tv - td,
+                ?6, xv - xd, dv - dd, min(?5, ?7), ?5 - min(?5, ?7), ?9, ?8, ?4, fp
          from (select
            (select max(hasta) from cortes where caja = ?2) as desde,
            coalesce((select fondo_siguiente from cortes where caja = ?2 order by hasta desc limit 1), ?7) as fondo,
            (select count(*) from ventas where ${VIGENTES}) as tickets,
-           (select ${dinero('efectivo', NETO)} from ventas where ${VIGENTES}) as ev,
-           (select ${dinero('efectivo', NETO)} from ventas where ${CANCELADAS}) + ${devuelto('efectivo')} as ed,
+           (select ${dinero('efectivo', COBRADO)} from ventas where ${VIGENTES}) + ${anticipos('efectivo')} as ev,
+           (select ${dinero('efectivo', NETO)} from ventas where ${CANCELADAS}) + ${devuelto('efectivo')} + ${enEfectivo()} as ed,
            (select coalesce(sum(importe), 0) from retiros where corte_id = ?1 and tipo = 'retiro') as re,
            (select coalesce(sum(importe), 0) from retiros where corte_id = ?1 and tipo = 'gasto') as ga,
-           (select ${dinero('tarjeta', NETO)} from ventas where ${VIGENTES}) as tv,
+           (select coalesce(sum(importe), 0) from retiros where corte_id = ?1 and tipo = 'nomina') as no,
+           (select ${dinero('tarjeta', COBRADO)} from ventas where ${VIGENTES}) + ${anticipos('tarjeta')} + ${enEfectivo('tarjeta')} as tv,
            (select ${dinero('tarjeta', NETO)} from ventas where ${CANCELADAS}) + ${devuelto('tarjeta')} as td,
-           (select ${dinero('transferencia', NETO)} from ventas where ${VIGENTES}) as xv,
+           (select ${dinero('transferencia', COBRADO)} from ventas where ${VIGENTES}) + ${anticipos('transferencia')}
+             + ${enEfectivo('transferencia')} as xv,
            (select ${dinero('transferencia', NETO)} from ventas where ${CANCELADAS})
              + ${devuelto('transferencia')} as xd,
            (select coalesce(sum(dolarones - dolarones_devueltos), 0) from ventas where ${VIGENTES}) as dv,
            (select coalesce(sum(dolarones - dolarones_devueltos), 0) from ventas where ${CANCELADAS})
-             + (select coalesce(sum(d.dolarones), 0) from devoluciones d where ${DEVUELTAS}) as dd)`,
-      ).bind(id, caja, correo, ahora, contado, terminal, fondoConfig, notas),
+             + (select coalesce(sum(d.dolarones), 0) from devoluciones d where ${DEVUELTAS}) as dd,
+           -- FEP: lo cobrado (efectivo, tarjeta, transferencia) de sus piezas en esta caja; lo pagado con Dolarones
+           -- se descuenta. Un ticket de FEP cancelado despues resta de este corte; el cancelado en el mismo turno no cuenta.
+           -- Mismo reparto por pieza que los reportes (netas.ts).
+           (${lineasNetas('v.corte_id = ?1')} select coalesce(sum(cobrado), 0) from cobros where propietario = 'fep')
+           - (${lineasNetas('v.corte_cancelacion_id = ?1 and v.corte_id != ?1', true)} select coalesce(sum(cobrado), 0) from cobros where propietario = 'fep') as fp)`,
+      ).bind(id, caja, correo, ahora, contado, terminal, fondoConfig, notas, JSON.stringify(conteo ?? {})),
     ]);
   } catch (error) {
     // Dos envios del mismo corte a la vez: el segundo choca con la llave y el primero ya quedo.

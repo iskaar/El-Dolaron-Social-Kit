@@ -5,8 +5,10 @@
 // Nombres de piezas, correos y motivos los escriben otras personas: texto, nunca HTML.
 export const escapar = (texto) =>
   String(texto ?? '').replace(/[<>&"]/g, (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;' }[c]));
-const pesos = (centavos) => `$${(centavos / 100).toLocaleString('es-MX')}`;
-const dolares = (centavos) => `${(centavos / 100).toLocaleString('es-MX')} D`;
+// Siempre con centavos (Issue #166): lo que se ve aqui debe coincidir con el ticket impreso y con los reportes.
+const dos = (centavos) => (centavos / 100).toLocaleString('es-MX', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const pesos = (centavos) => `$${dos(centavos)}`;
+const dolares = (centavos) => `${dos(centavos)} D`;
 const hora = (iso) => new Date(iso).toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' });
 const fecha = (iso) => new Date(iso).toLocaleDateString('es-MX', { weekday: 'short', day: 'numeric', month: 'short' });
 const FORMAS = { efectivo: 'Efectivo', tarjeta: 'Tarjeta', transferencia: 'Transferencia' };
@@ -14,8 +16,11 @@ const FORMAS = { efectivo: 'Efectivo', tarjeta: 'Tarjeta', transferencia: 'Trans
 /** Lo que el ticket sigue valiendo: total menos lo devuelto por piezas, en dinero y en Dolarones. */
 export const vigente = (t) => (t.cancelada ? 0 : t.total - t.devuelto - t.dolarones_devueltos);
 
-/** Un renglon de la lista de tickets del dia. `data-ticket` abre la ventana. */
-export function renglonTicket(t) {
+/**
+ * Un renglon de la lista de tickets. `data-ticket` abre la ventana. Con `completo`
+ * (reportes, donde la lista cruza dias y cajas) lleva fecha, caja, socio y Dolarones.
+ */
+export function renglonTicket(t, { completo = false } = {}) {
   asegurarEstilos();
   const parcial = !t.cancelada && t.cancelada_cantidad > 0;
   const estado = t.cancelada ? 'cancelado' : parcial ? `${t.cancelada_cantidad} de ${t.cantidad} devueltas` : '';
@@ -23,7 +28,8 @@ export function renglonTicket(t) {
     <button type="button" class="ticket-fila ${t.cancelada ? 'cancelada' : ''}" data-ticket="${escapar(t.id)}">
       <span class="ticket-principal">
         <b>${pesos(vigente(t))}</b>${parcial ? ` <s>${pesos(t.total)}</s>` : ''}
-        · ${hora(t.creado_en)} · ${FORMAS[t.forma_pago] ?? escapar(t.forma_pago)}
+        · ${completo ? `${fecha(t.creado_en)} ` : ''}${hora(t.creado_en)} · ${FORMAS[t.forma_pago] ?? escapar(t.forma_pago)}
+        ${completo ? `· ${escapar(t.caja || 'sin caja')}${t.con_socio ? ' · socio' : ''}${t.dolarones ? ` · ${dolares(t.dolarones)}` : ''}` : ''}
         <span class="piezas">${escapar(t.piezas)}</span>
       </span>
       <span class="ticket-estado">${estado}</span>
@@ -54,10 +60,14 @@ export function pintarDetalle(t, { editable = false } = {}) {
   }).join('');
 
   const cifras = [
+    t.descuento ? ['Subtotal', pesos(t.total + t.descuento)] : null,
+    t.descuento ? ['Descuento', `− ${pesos(t.descuento)}`] : null,
     ['Total cobrado', pesos(t.total)],
     t.dolarones ? ['Pagado con Dolarones', dolares(t.dolarones)] : null,
+    t.anticipo ? [`Anticipo${t.pedido_folio ? ` P-${t.pedido_folio}` : ' de pedido'}`, `− ${pesos(t.anticipo)}`] : null,
     t.efectivo ? ['Efectivo recibido / cambio', `${pesos(t.efectivo)} / ${pesos(t.cambio)}`] : null,
-    t.devuelto ? ['Devuelto en dinero', `− ${pesos(t.devuelto)}`] : null,
+    t.devuelto - (t.devuelto_cupon ?? 0) ? ['Devuelto en dinero', `− ${pesos(t.devuelto - (t.devuelto_cupon ?? 0))}`] : null,
+    t.devuelto_cupon ? ['Cambiado por cupón', `− ${pesos(t.devuelto_cupon)}`] : null,
     t.dolarones_devueltos ? ['Regresado al saldo', `− ${dolares(t.dolarones_devueltos)}`] : null,
     t.devuelto || t.dolarones_devueltos || t.cancelada ? ['Queda vendido', pesos(vigente(t)), 'fuerte'] : null,
   ].filter(Boolean);
@@ -65,8 +75,10 @@ export function pintarDetalle(t, { editable = false } = {}) {
   const historial = t.devoluciones.length === 0 ? '' : `
     <h3>Piezas canceladas</h3>
     <ul class="historial">${t.devoluciones.map((d, i) => `
-      <li><b>${d.cantidad} × ${escapar(d.nombre)}</b> — ${pesos(d.importe)}${d.dolarones ? ` + ${dolares(d.dolarones)}` : ''}
+      <li><b>${d.cantidad} × ${escapar(d.nombre)}</b> — ${d.cupon ? `cupón por ${pesos(d.cupon)}` : pesos(d.importe)}${d.dolarones ? ` + ${dolares(d.dolarones)}` : ''}
         ${editable ? `<button type="button" class="secundario" data-imprimir-devolucion="${i}">Imprimir comprobante</button>` : ''}
+        ${editable && d.vale_id && t.devoluciones.findIndex((x) => x.vale_id === d.vale_id) === i
+          ? `<button type="button" class="secundario" data-reimprimir-cupon="${escapar(d.vale_id)}">Reimprimir cupón</button>` : ''}
         <div>${fecha(d.creado_en)} ${hora(d.creado_en)} · ${escapar(d.caja || 'sin caja')} · ${escapar(d.autor)} · «${escapar(d.motivo)}»</div></li>`).join('')}
     </ul>`;
 
@@ -96,9 +108,9 @@ export function comprobanteDevolucion(t, i) {
   const d = t.devoluciones[i];
   return {
     titulo: 'DEVOLUCION DE PIEZAS', caja: d.caja, cajero: d.autor, creado_en: d.creado_en,
-    ticket_creado_en: t.creado_en, forma_pago: t.forma_pago,
-    piezas: [{ nombre: d.nombre, cantidad: d.cantidad, importe: d.importe + d.dolarones }],
-    dinero: d.importe, dolarones: d.dolarones, motivo: d.motivo,
+    ticket_creado_en: t.creado_en, forma_pago: d.forma_pago ?? t.forma_pago,
+    piezas: [{ nombre: d.nombre, cantidad: d.cantidad, importe: d.importe + (d.cupon ?? 0) + d.dolarones }],
+    dinero: d.importe, dolarones: d.dolarones, cupon: d.cupon ?? 0, motivo: d.motivo,
   };
 }
 
@@ -114,25 +126,37 @@ export function comprobanteCancelacion(t) {
   };
 }
 
+// Con `cupon` (el % que el dueño regresa en cupón, Issue #330) va el boton para devolver en cupón en vez de dinero.
+const botonCupon = (cupon, dato) => cupon
+  ? `<button type="button" class="cupon" ${dato}>Dar cupón (${cupon}% en Dolarones)</button>` : '';
+
 /** El formulario de una pieza: cuantas (si hay mas de una) y el motivo. */
-export function formularioPieza(lineaId, quedan) {
+export function formularioPieza(lineaId, quedan, cupon = null, forma = 'efectivo') {
+  // Con tarjeta o transferencia, el cajero dice por donde regresa el dinero: el corte lo cuenta asi.
   return `
     <div class="form-cancelar">
       ${quedan > 1 ? `<label>Cuántas <input type="number" class="cantidad-cancelar" min="1" max="${quedan}" value="1" inputmode="numeric"></label>` : ''}
+      ${forma !== 'efectivo' ? `<select class="devolver-en" aria-label="Cómo se devuelve el dinero">
+        <option value="">¿Cómo se devuelve el dinero?</option>
+        <option value="${forma}">${forma === 'tarjeta' ? 'A la tarjeta, en la terminal' : 'Por transferencia'}</option>
+        <option value="efectivo">En efectivo, del cajón</option>
+      </select>` : ''}
       <input type="text" class="motivo-cancelar" maxlength="200" placeholder="Motivo de la cancelación">
       <div class="botones">
         <button type="button" class="secundario" data-volver>Volver</button>
+        ${botonCupon(cupon, `data-cupon-linea="${lineaId}"`)}
         <button type="button" class="quitar" data-confirmar-linea="${lineaId}">Confirmar y devolver</button>
       </div>
     </div>`;
 }
 
-export function formularioTodo() {
+export function formularioTodo(cupon = null) {
   return `
     <div class="form-cancelar">
       <input type="text" class="motivo-cancelar" maxlength="200" placeholder="Motivo de la cancelación">
       <div class="botones">
         <button type="button" class="secundario" data-volver>Volver</button>
+        ${botonCupon(cupon, 'data-cupon-todo')}
         <button type="button" class="quitar" data-confirmar-todo>Confirmar cancelación</button>
       </div>
     </div>`;
@@ -159,6 +183,9 @@ function asegurarEstilos() {
     .ventana-ticket button.quitar { border: 1px solid #D72B32; background: #fff; color: #D72B32; border-radius: 8px;
       padding: 6px 10px; font-size: 13px; cursor: pointer; white-space: nowrap; }
     .ventana-ticket button.quitar:disabled { opacity: .5; cursor: not-allowed; }
+    .ventana-ticket button.cupon { border: 1px solid #1f7a4d; background: #1f7a4d; color: #fff; border-radius: 8px;
+      padding: 6px 10px; font-size: 13px; cursor: pointer; white-space: nowrap; }
+    .ventana-ticket button.cupon:disabled { opacity: .5; cursor: not-allowed; }
     .ventana-ticket button.secundario { border: 1px solid #dfe3ea; background: #fff; color: #5b6478; border-radius: 8px;
       padding: 6px 10px; font-size: 13px; cursor: pointer; }
     .ventana-ticket .form-cancelar { display: grid; gap: 6px; padding: 6px 0; }
@@ -166,7 +193,7 @@ function asegurarEstilos() {
       border-radius: 8px; }
     .ventana-ticket .form-cancelar label { display: flex; align-items: center; gap: 8px; font-size: 13px; color: #5b6478; margin: 0; }
     .ventana-ticket .form-cancelar label input { width: 90px; }
-    .ventana-ticket .botones { display: flex; gap: 6px; justify-content: flex-end; }
+    .ventana-ticket .botones { display: flex; flex-wrap: wrap; gap: 6px; justify-content: flex-end; }
     .ventana-ticket .cancelar-todo { margin-top: 14px; }
     .ventana-ticket .historial { margin: 0; padding-left: 18px; font-size: 13px; }
     .ventana-ticket .historial div { color: #5b6478; font-size: 12px; }

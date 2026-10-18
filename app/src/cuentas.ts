@@ -1,3 +1,7 @@
+import { resolverCancelacion } from './cancelaciones.ts';
+import { resolverDescuento } from './descuentos.ts';
+import { avisarDueno } from './avisos.ts';
+
 /**
  * Centro de cuentas (Issue #75). Cloudflare Access (con Google) dice QUIEN es
  * la persona; la tabla `usuarios` dice si entra y QUE puede hacer.
@@ -10,8 +14,10 @@
 
 // `computadora`: la cuenta de la tienda con la que entra la computadora de caja;
 // sola no cobra, cada cajero entra con su PIN (Issue #112, cajeros.ts).
-export type Rol = 'dueno' | 'cajero' | 'capturista' | 'computadora';
-export const ROLES: readonly Rol[] = ['dueno', 'cajero', 'capturista', 'computadora'];
+// `finanzas`: FEP. Toma fotos y ve solo sus piezas (propietario 'fep'); ver propietarioDe.
+// `auxiliar`: lleva gastos y nomina (Issue #326); no ve reportes, cuentas ni lo demas del dueno.
+export type Rol = 'dueno' | 'cajero' | 'capturista' | 'computadora' | 'finanzas' | 'auxiliar';
+export const ROLES: readonly Rol[] = ['dueno', 'cajero', 'capturista', 'computadora', 'finanzas', 'auxiliar'];
 /** Lo que recibe alguien al aprobarle el acceso si no se escoge otra cosa. */
 export const ROL_POR_OMISION: Rol = 'cajero';
 
@@ -47,58 +53,89 @@ export const CAJAS = ['Caja 1', 'Caja 2', 'Caja 3'];
 export type Regla = 'libre' | 'cuenta' | Rol[];
 
 const CAPTURA: Rol[] = ['capturista'];
+const CAPTURA_FEP: Rol[] = ['capturista', 'finanzas'];
 const CAJA: Rol[] = ['cajero', 'computadora'];
 const TODOS: Rol[] = ['cajero', 'capturista'];
 const DUENO: Rol[] = [];
+const AUXILIAR: Rol[] = ['auxiliar'];
 
 const PANTALLAS: Record<string, Rol[]> = {
   '/': TODOS,
   '/index': TODOS,
-  '/captura': CAPTURA,
+  '/captura': CAPTURA_FEP,
   '/admin': CAPTURA,
-  '/etiquetas': CAPTURA,
+  '/marketplace': CAPTURA,
+  '/etiquetas': CAPTURA_FEP,
   '/bandas': CAPTURA,
   '/calibrar-etiqueta': CAPTURA,
   '/prueba-codigo': CAPTURA,
   '/sonda-impresora': CAPTURA,
   '/caja': CAJA,
   '/socios': CAJA,
+  '/pedidos': CAJA,
   '/tarjeta-bandas': TODOS,
   '/reportes': DUENO,
+  '/mercadolibre': DUENO,
   '/cuentas': DUENO,
+  '/conteo': TODOS,
+  // Issue #287: mensajes de clientes por WhatsApp; datos personales, solo el dueño.
+  '/mensajes': DUENO,
+  '/gastos': AUXILIAR,
+  '/nomina': AUXILIAR,
 };
 
 export function permiso(pathname: string, metodo: string): Regla {
   const ruta = pathname.replace(/\.html$/, '').replace(/(.)\/$/, '$1');
 
   if (ruta === '/api/salud') return 'libre';
+  // Lo llama Mercado Libre, sin sesion: lo protege la ruta secreta (mercadolibre.ts).
+  if (metodo === 'POST' && /^\/api\/ml\/notificaciones\/[^/]+$/.test(ruta)) return 'libre';
   if (ruta === '/sin-acceso' || ruta === '/api/yo') return 'cuenta';
   if (ruta === '/api/solicitudes/acceso' && metodo === 'POST') return 'cuenta';
+  // Issue #281: cualquier cuenta que entro puede reportar un error de su pantalla, tambien la caja sin PIN.
+  if (ruta === '/api/errores' && metodo === 'POST') return 'cuenta';
+  if (ruta === '/marketplace-redes.png') return CAPTURA;
   // Codigo de las pantallas, sin datos: el permiso se cobra en la pantalla y en la API.
   if (!ruta.startsWith('/api/') && /\.(js|css|png|svg|ico)$/.test(ruta)) return 'cuenta';
 
   if (ruta in PANTALLAS) return PANTALLAS[ruta];
 
-  if (ruta === '/api/config') return metodo === 'GET' ? CAPTURA : DUENO;
+  if (ruta === '/api/mensajes' || ruta === '/api/mensajes/responder') return DUENO;
+  if (ruta === '/api/gastos' || /^\/api\/gastos\/[^/]+$/.test(ruta)) return AUXILIAR;
+  if (ruta === '/api/nomina/entrada' || ruta === '/api/nomina/checador') return CAJA;
+  if (ruta === '/api/nomina' || ruta.startsWith('/api/nomina/')) return AUXILIAR;
+  if (ruta === '/api/config') return metodo === 'GET' ? CAPTURA_FEP : DUENO;
+  // Ropa de El Dolarón: FEP (finanzas) no ve ni renombra piezas ajenas (Issue #318).
+  if (ruta === '/api/ropa-ia' || ruta.startsWith('/api/ropa-ia/')) return CAPTURA;
+  if (ruta === '/api/recortes' || ruta.startsWith('/api/recortes/')) return CAPTURA;
   if (ruta === '/api/familias') return metodo === 'GET' ? TODOS : DUENO;
   if (ruta === '/api/borradores/manual') return DUENO;   // captura sin foto (Issue #115)
-  if (ruta === '/api/borradores' || ruta.startsWith('/api/borradores/')) return CAPTURA;
-  if (ruta.startsWith('/api/foto/')) return CAPTURA;
-  if (ruta === '/api/etiquetas') return CAPTURA;
+  if (ruta === '/api/borradores' || ruta.startsWith('/api/borradores/')) return CAPTURA_FEP;
+  if (ruta.startsWith('/api/foto/')) return CAPTURA_FEP;
+  if (ruta === '/api/etiquetas') return CAPTURA_FEP;
   if (ruta === '/api/calibracion') return CAPTURA;
+  if (ruta === '/api/marketplace' || /^\/api\/marketplace\/foto\/[^/]+$/.test(ruta)) return CAPTURA;
   if (ruta === '/api/catalogo') return CAJA;
   if (ruta === '/api/socios') return CAJA;
   if (ruta === '/api/vales/config' && metodo === 'GET') return CAJA;
   if (ruta === '/api/vales/buscar' && metodo === 'POST') return CAJA;
+  // Cupón de monto libre (Issue #330): la caja lo emite con el PIN de un dueño (vales.ts).
+  if (ruta === '/api/cupones' && metodo === 'POST') return CAJA;
   if (ruta === '/api/socios/codigo' && metodo === 'POST') return CAJA;
   if (ruta === '/api/socios/legal' && metodo === 'GET') return CAJA;
   if (ruta === '/api/portal/llegada' && metodo === 'POST') return CAJA;
   if (ruta === '/api/cajon') return CAJA;
   if (ruta === '/api/cortes' || ruta === '/api/retiros') return CAJA;
   if (ruta === '/api/cajeros' || ruta === '/api/cajeros/entrar' || ruta === '/api/cajeros/salir') return CAJA;
-  // ponytail: cancelar sigue abierto al cajero hasta la fase 2 del Issue #75,
-  // que lo pasa por una solicitud aprobada por el dueno.
+  // Contar piezas de alto valor (Issue #219): cualquier cuenta de piso. Ajustar y ver el rastro es del dueno (default).
+  if (ruta === '/api/conteo') return TODOS;
+  if (ruta === '/api/descuentos' || ruta === '/api/descuentos/duenos') return CAJA;   // pedir un descuento (Issue #119, descuentos.ts)
+  // Cancelar una venta completa: el cajero solo en los primeros minutos; despues
+  // pide aprobacion del dueno (Issue #200, cancelaciones.ts).
+  if (ruta === '/api/solicitudes/cancelaciones' || ruta === '/api/solicitudes/descuentos') return DUENO;
+  if (/^\/api\/solicitudes\/[^/]+$/.test(ruta) && metodo === 'GET') return CAJA;   // la caja ve como va la suya
   if (ruta === '/api/ventas' || ruta.startsWith('/api/ventas/')) return CAJA;
+  if (ruta === '/api/pedidos' || ruta.startsWith('/api/pedidos/')) return CAJA;   // pedidos por WhatsApp (Issue #269, pedidos.ts)
   if (ruta === '/api/impresiones' || ruta.startsWith('/api/impresiones/')) return CAJA;
 
   return DUENO;
@@ -110,6 +147,14 @@ export const esDeCaja = (regla: Regla) => regla === CAJA;
 /** La cuenta de la computadora de caja: para cobrar necesita el PIN de un cajero. */
 export const soloComputadora = (usuario: Usuario | null) =>
   !!usuario?.roles.includes('computadora') && !usuario.roles.includes('cajero') && !usuario.roles.includes('dueno');
+
+/**
+ * De quien son las piezas que esta persona captura y ve (Issue #298). FEP solo
+ * ve y captura lo suyo; el resto de la tienda, lo de El Dolaron. El corte y la
+ * caja no cambian: el cobro es de la tienda, lo de FEP se le debe aparte.
+ */
+export const propietarioDe = (usuario: Usuario | null): 'dolaron' | 'fep' =>
+  usuario?.roles.includes('finanzas') ? 'fep' : 'dolaron';
 
 export function puede(usuario: Usuario | null, regla: Regla): boolean {
   if (regla === 'libre' || regla === 'cuenta') return true;
@@ -243,10 +288,10 @@ export async function yo(env: Env, correo: string, cajero: Usuario | null = null
 }
 
 /** Alguien sin cuenta pide entrar. Una sola pendiente por persona: pedir otra vez la actualiza. */
-export async function pedirAcceso(request: Request, env: Env, correo: string): Promise<Response> {
+export async function pedirAcceso(request: Request, env: Env, correo: string, ctx?: ExecutionContext): Promise<Response> {
   const usuario = await leerUsuario(env, correo);
   if (usuario?.activo) return json({ error: 'Ya tienes cuenta.' }, 409);
-  const cuerpo = (await request.json().catch(() => ({}))) as { nombre?: unknown; justificacion?: unknown };
+  const cuerpo = (await request.json().then((c) => c ?? {}, () => ({}))) as { nombre?: unknown; justificacion?: unknown };
   const nombre = texto(cuerpo.nombre, 80);
   const justificacion = texto(cuerpo.justificacion, 500);
   if (!nombre || !justificacion) {
@@ -270,6 +315,7 @@ export async function pedirAcceso(request: Request, env: Env, correo: string): P
   )
     .bind(id, correo, nombre, justificacion, ahora)
     .run();
+  avisarDueno(env, ctx, request, `Solicitud de acceso: ${nombre}`, `${nombre} (${correo}) pide entrar.\nPara qué: ${justificacion}`);
   return json({ id, estado: 'pendiente' }, 201);
 }
 
@@ -289,14 +335,13 @@ export async function listarCuentas(env: Env): Promise<Response> {
 
 /**
  * Nunca se queda la tienda sin dueno activo: quitarse el rol o desactivarse a
- * uno mismo siendo el ultimo dejaria a todos sin poder aprobar a nadie.
+ * uno mismo siendo el ultimo dejaria a todos sin poder aprobar a nadie. Lo
+ * cuida el trigger `siempre_un_dueno` (migracion 031) dentro de la escritura,
+ * asi dos cambios a la vez no pasan los dos (Issue #253); aqui solo se traduce.
  */
-async function quedariaSinDueno(env: Env, correo: string, roles: Rol[], activo: boolean): Promise<boolean> {
-  if (activo && roles.includes('dueno')) return false;
-  const { results } = await env.DB.prepare(
-    `select correo from usuarios where activo = 1 and (',' || roles || ',') like '%,dueno,%'`,
-  ).all<{ correo: string }>();
-  return results.every((r) => r.correo === correo);
+function sinDueno(error: unknown): Response {
+  if (String(error).includes('sin_dueno')) return json({ error: 'Tiene que quedar al menos un dueno activo.' }, 400);
+  throw error;
 }
 
 function validarRoles(crudo: unknown): Rol[] | null {
@@ -308,7 +353,7 @@ function validarRoles(crudo: unknown): Rol[] | null {
 
 /** Alta o cambio de una cuenta desde /cuentas. */
 export async function guardarCuenta(request: Request, env: Env): Promise<Response> {
-  const cuerpo = (await request.json().catch(() => ({}))) as Record<string, unknown>;
+  const cuerpo = (await request.json().then((c) => c ?? {}, () => ({}))) as Record<string, unknown>;
   const correo = texto(cuerpo.correo, 200).toLowerCase();
   const nombre = texto(cuerpo.nombre, 80);
   const roles = validarRoles(cuerpo.roles);
@@ -318,25 +363,26 @@ export async function guardarCuenta(request: Request, env: Env): Promise<Respons
   if (caja !== null && caja !== '' && !CAJAS.includes(caja)) return json({ error: 'Caja invalida.' }, 400);
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(correo)) return json({ error: 'Correo invalido.' }, 400);
   if (!roles) return json({ error: 'Escoge al menos un rol.' }, 400);
-  if (await quedariaSinDueno(env, correo, roles, activo)) {
-    return json({ error: 'Tiene que quedar al menos un dueno activo.' }, 400);
-  }
   const ahora = new Date().toISOString();
-  await env.DB.prepare(
-    `insert into usuarios (correo, nombre, roles, activo, caja, creado_en, actualizado_en)
-     values (?, ?, ?, ?, coalesce(?, ''), ?, ?)
-     on conflict (correo) do update set nombre = excluded.nombre, roles = excluded.roles,
-       activo = excluded.activo, caja = coalesce(?, usuarios.caja), actualizado_en = excluded.actualizado_en`,
-  )
-    .bind(correo, nombre, roles.join(','), activo ? 1 : 0, caja, ahora, ahora, caja)
-    .run();
+  // Sin cuenta activa o sin rol de caja, su sesion de PIN muere con el cambio: reactivarla despues no la revive.
+  const cobra = activo && (roles.includes('cajero') || roles.includes('dueno'));
+  const fallo = await env.DB.batch([
+    env.DB.prepare(
+      `insert into usuarios (correo, nombre, roles, activo, caja, creado_en, actualizado_en)
+       values (?, ?, ?, ?, coalesce(?, ''), ?, ?)
+       on conflict (correo) do update set nombre = excluded.nombre, roles = excluded.roles,
+         activo = excluded.activo, caja = coalesce(?, usuarios.caja), actualizado_en = excluded.actualizado_en`,
+    ).bind(correo, nombre, roles.join(','), activo ? 1 : 0, caja, ahora, ahora, caja),
+    ...(cobra ? [] : [env.DB.prepare('delete from sesiones_cajero where correo = ?').bind(correo)]),
+  ]).then(() => null, sinDueno);
+  if (fallo) return fallo;
   const guardado = await leerUsuario(env, correo);
   return json({ correo, nombre, roles, activo, caja: guardado?.caja ?? '' });
 }
 
-/** Aprobar o rechazar una solicitud. Hoy solo las de acceso (fase 1 del Issue #75). */
+/** Aprobar o rechazar una solicitud: de acceso (Issue #75), de cancelacion (Issue #200) o de descuento (Issue #119). */
 export async function resolverSolicitud(id: string, request: Request, env: Env, dueno: string): Promise<Response> {
-  const cuerpo = (await request.json().catch(() => ({}))) as { aprobar?: unknown; roles?: unknown };
+  const cuerpo = (await request.json().then((c) => c ?? {}, () => ({}))) as { aprobar?: unknown; roles?: unknown };
   const solicitud = await env.DB.prepare(
     `select id, tipo, correo, nombre, estado from solicitudes where id = ?`,
   )
@@ -344,6 +390,8 @@ export async function resolverSolicitud(id: string, request: Request, env: Env, 
     .first<{ id: string; tipo: string; correo: string; nombre: string; estado: string }>();
   if (!solicitud) return json({ error: 'La solicitud no existe.' }, 404);
   if (solicitud.estado !== 'pendiente') return json({ error: `Ya estaba ${solicitud.estado}.` }, 409);
+  if (solicitud.tipo === 'cancelacion') return resolverCancelacion(env, id, cuerpo.aprobar === true, dueno);
+  if (solicitud.tipo === 'descuento') return resolverDescuento(env, id, cuerpo.aprobar === true, dueno);
   if (solicitud.tipo !== 'acceso') return json({ error: 'Tipo de solicitud desconocido.' }, 400);
 
   const aprobar = cuerpo.aprobar === true;
@@ -358,12 +406,14 @@ export async function resolverSolicitud(id: string, request: Request, env: Env, 
   }
   const roles = cuerpo.roles === undefined ? [ROL_POR_OMISION] : validarRoles(cuerpo.roles);
   if (!roles) return json({ error: 'Escoge al menos un rol.' }, 400);
-  await env.DB.batch([
+  // La cuenta pudo darse de alta por otra via despues de la solicitud: aprobar la reemplazaria.
+  const fallo = await env.DB.batch([
     marcar,
     env.DB.prepare(
       `insert into usuarios (correo, nombre, roles, activo, creado_en, actualizado_en) values (?, ?, ?, 1, ?, ?)
        on conflict (correo) do update set roles = excluded.roles, activo = 1, actualizado_en = excluded.actualizado_en`,
     ).bind(solicitud.correo, solicitud.nombre, roles.join(','), ahora, ahora),
-  ]);
+  ]).then(() => null, sinDueno);
+  if (fallo) return fallo;
   return json({ id, estado: 'aprobada', correo: solicitud.correo, roles });
 }

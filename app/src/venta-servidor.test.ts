@@ -147,15 +147,16 @@ test('caja reintenta un canje tras perder la respuesta con el mismo folio, fecha
     const respuestas: number[] = [];
     let reloj = 0;
     // Ejecutar el cobro real con una primera respuesta perdida. Devolver false mantiene el ticket abierto.
-    const repetir = runInNewContext(`let idVenta = null, creadoEnVenta = null, cobrando = false;
+    const repetir = runInNewContext(`let idVenta = null, creadoEnVenta = null, cobrando = false, formaElegida = true;
       ${cobrar}; cobrar`, {
       crypto, Date: class extends Date { constructor() { super(1760000000000 + reloj++ * 1000); } },
       lineas: [{ producto_id: PRODUCTO, codigo: 'ED-000001', nombre: 'Ventilador', precio: 25000, cantidad: 1 }],
-      socio: { vale: true, disponible: 1000 },
+      socio: { vale: true, disponible: 1000 }, pedidoCargado: null,
       $: (id: string) => ({ value: id === 'efectivo' ? '245' : 'efectivo', style: {} }),
       exigirCaja: () => true, cajaActual: () => 'Caja 1', dolaronesPedidos: () => 500,
       impresionRemota: () => false,
       totales, efectivoAlcanza, saldoCanjeable, pintar() {},
+      descuento: null, descuentoAplicado: () => 0, promoActual: () => 0, pintarDescuento() {},
       cobrarConDolarones: async (venta: Record<string, unknown>) => {
         respuestas.push((await t.pedir('/api/ventas', { ...venta, codigo_vale: vale.codigo })).status);
         return false;
@@ -168,4 +169,41 @@ test('caja reintenta un canje tras perder la respuesta con el mismo folio, fecha
     assert.equal(t.db.prepare('select stock from productos where id = ?').get(PRODUCTO)!.stock, 48);
     assert.equal(t.db.prepare('select restante from vales_dolarones where id = ?').get(vale.id)!.restante, 500);
   } finally { t.db.close(); }
+});
+
+test('el precio que mostro la caja gana si es el anterior y el cambio es de hace menos de 10 min', async () => {
+  const t = tienda();
+  const vender = (extra: object) => t.pedir('/api/ventas', {
+    id: crypto.randomUUID(), lineas: [{ producto_id: PRODUCTO, cantidad: 1, precio: 25000 }], forma_pago: 'efectivo', efectivo: 25000, caja: 'Caja 1', ...extra,
+  });
+  // El trigger guarda el precio de antes y la hora del cambio; tocar otra columna no los mueve.
+  t.db.prepare('update productos set nombre = ? where id = ?').run('Otro', PRODUCTO);
+  assert.equal((t.db.prepare('select precio_anterior as a from productos where id = ?').get(PRODUCTO) as any).a, null);
+  t.db.prepare('update productos set precio = 30000 where id = ?').run(PRODUCTO);
+  const fila = t.db.prepare('select precio_anterior as a, precio_cambiado_en as c from productos where id = ?').get(PRODUCTO) as any;
+  assert.equal(fila.a, 25000);
+  assert.ok(Math.abs(Date.now() - Date.parse(fila.c)) < 5000);
+
+  // La caja vendio hace 2 min con el catalogo viejo: efectivo y tarjeta quedan al precio que cobro.
+  const hace2 = new Date(Date.now() - 120_000).toISOString();
+  const efectivo = await vender({ creado_en: hace2 });
+  assert.equal(efectivo.status, 201, JSON.stringify(efectivo.cuerpo));
+  const tarjeta = await vender({ creado_en: hace2, forma_pago: 'tarjeta', efectivo: 0 });
+  assert.equal(tarjeta.status, 201);
+  assert.deepEqual(t.db.prepare('select total from ventas order by rowid').all().map((v: any) => v.total), [25000, 25000]);
+  assert.deepEqual(t.db.prepare('select precio from venta_lineas').all().map((l: any) => l.precio), [25000, 25000]);
+
+  // Un precio inventado (ni el actual ni el anterior) se ignora: manda el actual.
+  const inventado = await vender({ creado_en: hace2, lineas: [{ producto_id: PRODUCTO, cantidad: 1, precio: 100 }], forma_pago: 'tarjeta', efectivo: 0 });
+  assert.equal(inventado.status, 201);
+  assert.equal((t.db.prepare('select total from ventas order by rowid desc').get() as any).total, 30000);
+
+  // Pasados 10 min del cambio ya no vale el precio viejo: el efectivo de 25000 no alcanza.
+  t.db.prepare('update productos set precio_cambiado_en = ? where id = ?').run(new Date(Date.now() - 20 * 60_000).toISOString(), PRODUCTO);
+  const tarde = await vender({});
+  assert.equal(tarde.status, 400);
+  assert.match(tarde.cuerpo.error, /efectivo no alcanza/);
+  const tardeTarjeta = await vender({ forma_pago: 'tarjeta', efectivo: 0 });
+  assert.equal(tardeTarjeta.status, 201);
+  assert.equal((t.db.prepare('select total from ventas order by rowid desc').get() as any).total, 30000);
 });

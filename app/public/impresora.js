@@ -200,13 +200,17 @@ export function codigoBarrasVale(codigo) {
   ]);
 }
 
-// QR nativo Epson (GS ( k, modelo 2, función 165-181): mismo texto de 30 dígitos que
-// el Code128, para que la cámara del celular lo lea. Nada de imagen raster.
-// ponytail: módulo 6 puntos, corrección M; calibrar con el lector.
+// QR nativo Epson (GS ( k, modelo 2, función 165-181). Nada de imagen raster.
+// Issue #258: el QR es una URL al portal con los mismos 30 dígitos después de '#'
+// (nunca llegan al servidor): la cámara del celular abre el registro y el vale pasa
+// a la cuenta. La caja lo sigue leyendo (code128.js quita la URL).
+// ponytail: módulo 6 puntos, corrección M; calibrar con el lector. Host fijo de prod,
+// también en el sandbox.
 export const MODULO_QR_VALE = 6;
+export const URL_VALE = 'https://dolarones.eldolaron.com/v#';
 export function codigoQrVale(codigo) {
   if (!/^DP-[A-Za-z0-9_-]{16}$/.test(codigo)) throw new Error('Código de vale inválido.');
-  const datos = new TextEncoder().encode(codigoEnDigitos(codigo));
+  const datos = new TextEncoder().encode(URL_VALE + codigoEnDigitos(codigo));
   const k = datos.length + 3;
   return concatenar([
     new Uint8Array([ESC, 0x61, 1,
@@ -219,14 +223,21 @@ export function codigoQrVale(codigo) {
   ]);
 }
 
+// Un cupón (Issue #330) no salió de una compra: no se pasa a una cuenta, así que va sin QR.
+const esCupon = (vale) => vale.origen === 'devolucion' || vale.origen === 'manual';
+
 function partesVale(vale, titulo = 'VALE DOLARONES - SIN REGISTRO', conCodigo = false) {
+  const qr = conCodigo && vale.restante > 0 && !esCupon(vale);
   return [
     separador(), centrado(titulo),
     renglonMonto('Saldo del vale', `${(vale.restante / 100).toFixed(2)} D`),
     linea(Date.parse(vale.disponible_desde) <= Date.parse(vale.creado_en)
       ? 'Usalo en tu siguiente compra' : `Disponible: ${fechaHora(vale.disponible_desde)}`),
     linea(`Vence: ${fechaHora(vale.vence_en)}`),
-    ...(conCodigo && vale.restante > 0 ? [codigoQrVale(vale.codigo), codigoBarrasVale(vale.codigo)] : []), centrado(vale.codigo),
+    ...(qr ? [codigoQrVale(vale.codigo)] : []), ...(conCodigo && vale.restante > 0 ? [codigoBarrasVale(vale.codigo)] : []),
+    centrado(vale.codigo),
+    ...(qr && vale.restante === vale.importe
+      ? [centrado('Escanea el QR con tu celular:'), centrado('registrate y recibe el doble en tu cuenta.')] : []),
     linea('Conserva el papel. Copias comparten el saldo.'),
     linea('Solo en El Dolaron. No canjeable por efectivo.'),
   ];
@@ -235,7 +246,9 @@ function partesVale(vale, titulo = 'VALE DOLARONES - SIN REGISTRO', conCodigo = 
 /** Reimprimir conserva código, saldo actual y vencimiento del servidor. */
 export function imprimirVale(vale) {
   return enviar(concatenar([
-    ...encabezado('VALE DOLARONES'), ...partesVale(vale, undefined, true),
+    ...(esCupon(vale)
+      ? [...encabezado('CUPON DOLARONES'), ...partesVale(vale, 'CUPON - VALE COMO DINERO EN TIENDA', true)]
+      : [...encabezado('VALE DOLARONES'), ...partesVale(vale, undefined, true)]),
     new Uint8Array([0x0a, 0x0a, 0x0a, GS, 0x56, 0x42, 0x00]),
   ]));
 }
@@ -270,10 +283,16 @@ export async function imprimirTicket(venta, lineas) {
     partes.push(renglonMonto(`  ${l.cantidad} x ${pesos(l.precio)}`, pesos(l.precio * l.cantidad)));
   }
   partes.push(separador());
+  if (venta.descuento > 0) {
+    partes.push(renglonMonto('Subtotal', pesos(venta.total + venta.descuento)));
+    partes.push(renglonMonto('Descuento', `-${pesos(venta.descuento)}`));
+  }
   partes.push(renglonMonto('TOTAL', pesos(venta.total)));
-  if (venta.dolarones > 0) {
-    partes.push(renglonMonto('Dolarones', `-${pesos(venta.dolarones)}`));
-    partes.push(renglonMonto('A pagar', pesos(venta.total - venta.dolarones)));
+  // Issue #269: lo pagado con el saldo de un pedido (reimpresion: viene del detalle de la venta).
+  if (venta.dolarones > 0) partes.push(renglonMonto('Dolarones', `-${pesos(venta.dolarones)}`));
+  if (venta.anticipo > 0) partes.push(renglonMonto(venta.pedido_folio ? `Anticipo P-${venta.pedido_folio}` : 'Anticipo', `-${pesos(venta.anticipo)}`));
+  if (venta.dolarones > 0 || venta.anticipo > 0) {
+    partes.push(renglonMonto('A pagar', pesos(venta.total - (venta.dolarones || 0) - (venta.anticipo || 0))));
   }
   if (venta.forma_pago === 'efectivo') {
     partes.push(renglonMonto('Efectivo', pesos(venta.efectivo)));
@@ -349,6 +368,7 @@ const parrafo = (texto) => (sinAcentos(texto).match(new RegExp(`.{1,${COLUMNAS}}
  * @param corte la fila de `cortes` que regresa /api/cortes
  */
 export function imprimirCorte(corte) {
+  const conteo = JSON.parse(corte.conteo || '{}');
   const diferencia = corte.diferencia;
   const etiquetaDiferencia = diferencia === 0 ? 'Diferencia' : diferencia > 0 ? 'SOBRANTE' : 'FALTANTE';
   const partes = [
@@ -365,17 +385,27 @@ export function imprimirCorte(corte) {
     renglonMonto('- Devoluciones', importe(corte.efectivo_devoluciones)),
     renglonMonto('- Retiros', importe(corte.retiros)),
     renglonMonto('- Gastos', importe(corte.gastos ?? 0)),
+    renglonMonto('- Nomina', importe(corte.nomina ?? 0)),
     renglonMonto('= Esperado', importe(corte.efectivo_esperado)),
     renglonMonto('Contado', importe(corte.efectivo_contado)),
     negritas(diferencia !== 0),
     renglonMonto(etiquetaDiferencia, importe(Math.abs(diferencia))),
     negritas(false),
     separador(),
+    ...(Object.keys(conteo).length ? [
+      centrado('CONTEO'),
+      ...Object.entries(conteo)
+        .filter(([, piezas]) => piezas > 0)
+        .sort(([a], [b]) => Number(b) - Number(a))
+        .map(([denominacion, piezas]) => renglonMonto(`  ${piezas} x ${importe(Number(denominacion))}`, importe(piezas * Number(denominacion)))),
+      separador(),
+    ] : []),
     renglonMonto('Tarjeta (sistema)', importe(corte.tarjeta_sistema)),
     renglonMonto('Tarjeta (terminal)', importe(corte.tarjeta_terminal)),
     renglonMonto('Diferencia tarjeta', importe(corte.tarjeta_terminal - corte.tarjeta_sistema)),
     renglonMonto('Transferencias', importe(corte.transferencias)),
     renglonMonto('Dolarones usados', `${corte.dolarones / 100} D`),
+    ...(corte.fep_por_pagar ? [renglonMonto('De lo que se entrega, para FEP', importe(corte.fep_por_pagar))] : []),
     separador(),
     negritas(true),
     renglonMonto('SE ENTREGA', importe(corte.entregado)),
@@ -429,7 +459,8 @@ export function imprimirDevolucion(d) {
     ]),
     separador(),
     negritas(true),
-    renglonMonto(`DEVUELTO EN ${salida}`, importe(d.dinero)),
+    ...(d.dinero || !d.cupon ? [renglonMonto(`DEVUELTO EN ${salida}`, importe(d.dinero))] : []),
+    ...(d.cupon ? [renglonMonto('CAMBIADO POR CUPON', importe(d.cupon))] : []),
     negritas(false),
     ...(d.dolarones ? [renglonMonto('Regresado al saldo (Dolarones)', `${d.dolarones / 100} D`)] : []),
     linea('Motivo:'),

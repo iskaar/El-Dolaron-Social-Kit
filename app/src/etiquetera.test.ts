@@ -4,7 +4,7 @@
 // etiqueta, que es donde se rompio todo lo anterior.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { tsplEtiqueta, tsplBanda, tsplMarco, tsplPruebaCodigo, tsplPruebaLargos, partirNombre, NOMBRE_MAX, TSPL_REGLA, TSPL_CALIBRAR } from '../public/etiquetera.js';
+import { tsplEtiqueta, tsplBanda, tsplMarco, tsplPruebaCodigo, tsplPruebaLargos, partirNombre, NOMBRE_MAX, TSPL_REGLA, TSPL_CALIBRAR, tsplCodigo, leerCodigos } from '../public/etiquetera.js';
 
 const PIEZA = {
   nombre: 'Taza de ceramica azul',
@@ -302,4 +302,20 @@ test('la banda acepta SPEED solo si se pide, y PRINT 1,n para un lote en un solo
   const rapido = tsplBanda(BANDA, 80, 0, 4, 3);
   assert.ok(rapido.includes('\r\nSPEED 3\r\n'));
   assert.ok(rapido.trimEnd().endsWith('PRINT 1,80'));
+});
+
+test('codigos ajenos (#321): solo la barra y el texto, y la barra se angosta para caber', () => {
+  const ean = tsplCodigo('7501234567890', 0, 4);
+  assert.match(ean, /BARCODE \d+,24,"128",112,0,0,2,4,"7501234567890"/);   // 13 caracteres: de 4 baja a 2
+  assert.match(ean, /TEXT \d+,152,"3",0,1,1,"7501234567890"/);
+  assert.ok(!/El Dolaron|\$/.test(ean));
+  assert.match(tsplCodigo('SAL4', 0, 4), /"128",112,0,0,4,8,"SAL4"/);   // corto: se queda el calibrado
+  assert.match(tsplCodigo('SAL-42', 0, 4), /"128",112,0,0,3,6,"SAL-42"/);
+  assert.ok(tsplCodigo('SAL-42', 0, 4).endsWith('PRINT 1,1\r\n'));
+});
+
+test('leerCodigos: lo pegado de Excel, con cantidad o sin ella, y lo que no se puede imprimir', () => {
+  const { filas, malas } = leerCodigos('Código\tCantidad\r\n7501234567890\t3\nSAL-0042\n\nABC;2\nDEF,0\ncon espacio\t1\n12345678901234\t1\nA"B\t1');
+  assert.deepEqual(filas, [{ codigo: '7501234567890', cantidad: 3 }, { codigo: 'SAL-0042', cantidad: 1 }, { codigo: 'ABC', cantidad: 2 }]);
+  assert.deepEqual(malas, ['Código\tCantidad', 'DEF,0', 'con espacio\t1', '12345678901234\t1', 'A"B\t1']);
 });

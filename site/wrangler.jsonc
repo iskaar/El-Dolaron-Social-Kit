@@ -1,0 +1,16 @@
+{
+  "name": "el-dolaron-web",
+  "account_id": "3722419129a69768442e7dd737102387",
+  "compatibility_date": "2026-10-05",
+  "assets": {
+    "directory": "public"
+  },
+  "workers_dev": false,
+  "preview_urls": false,
+  "routes": [
+    {
+      "pattern": "eldolaron.com",
+      "custom_domain": true
+    }
+  ]
+}

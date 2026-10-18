@@ -8,8 +8,8 @@
     "deploy": "wrangler deploy",
     "types": "wrangler types",
     "typecheck": "tsc --noEmit",
-    "db:local": "wrangler d1 execute el-dolaron --local --file=schema.sql",
-    "db:remote": "wrangler d1 execute el-dolaron --remote --file=schema.sql"
+    "db:esquema": "node armar-esquema.mjs",
+    "db:local": "npm run db:esquema && wrangler d1 execute el-dolaron --local --file=.wrangler/esquema-completo.sql"
   },
   "devDependencies": {
     "typescript": "^5.6.3",

@@ -3,8 +3,9 @@
     python tools/refrescar_sandbox.py
 
 Borra todo lo del sandbox y lo reemplaza con el esquema completo de produccion
-y los datos de sus tablas, MENOS socios y Dolarones: son datos personales y no
-salen de produccion. Las ventas copiadas quedan sin socio.
+y los datos de sus tablas, MENOS socios y Dolarones (datos personales) y las sesiones
+y tokens (de cajero y de Mercado Libre): nada de eso sale de produccion. Las ventas
+copiadas quedan sin socio y los premios de apertura, sin dueno.
 
 Las fotos (R2) no se copian: en el sandbox las piezas viejas salen sin foto.
 """
@@ -22,9 +23,13 @@ APP = Path(__file__).resolve().parent.parent / "app"
 ORIGEN = "el-dolaron"
 DESTINO = "el-dolaron-sandbox"
 CONFIG_DESTINO = "wrangler.sandbox.jsonc"
-# Nunca se copian: datos personales de clientes. Las internas de D1/SQLite tampoco.
+# Nunca se copian: datos personales de clientes y credenciales (sesiones de cajero,
+# tokens cifrados y estado OAuth de Mercado Libre). Las internas de D1/SQLite tampoco.
 PRIVADAS = {"clientes", "dolarones_lotes", "dolarones_movimientos", "codigos_cliente",
-            "vinculos_portal", "primera_llegada", "vales_dolarones", "vales_movimientos"}
+            "vinculos_portal", "primera_llegada", "vales_dolarones", "vales_movimientos",
+            "sesiones_cajero", "ml_cuenta", "ml_oauth_estados"}
+# Se copian sin las columnas que apuntan a clientes excluidos (FOREIGN KEY): ver sql_premios.
+PREMIOS = "premios_apertura"
 INTERNAS = ("sqlite_", "_cf_", "d1_")
 
 
@@ -41,13 +46,19 @@ def consultar(base: str, sql: str, *config: str) -> list[dict]:
     return json.loads(salida)[0]["results"]
 
 
+def sql_premios(filas: list[dict]) -> str:
+    """El cupo y su importe, sin cliente_id ni lote_id: esos clientes no existen en el sandbox."""
+    return "".join(f'INSERT INTO "{PREMIOS}" (canal, orden, importe) VALUES '
+                   f"('{f['canal']}', {int(f['orden'])}, {int(f['importe'])});\n" for f in filas)
+
+
 def main() -> None:
     assert DESTINO != ORIGEN, "el destino nunca puede ser produccion"
     config = ("--config", CONFIG_DESTINO)
 
     tablas = [f["name"] for f in consultar(ORIGEN, "select name from sqlite_master where type = 'table'")
               if not f["name"].startswith(INTERNAS)]
-    copiar = [t for t in tablas if t not in PRIVADAS]
+    copiar = [t for t in tablas if t not in PRIVADAS and t != PREMIOS]
 
     with tempfile.TemporaryDirectory() as tmp:
         esquema = Path(tmp) / "esquema.sql"
@@ -58,6 +69,10 @@ def main() -> None:
         wrangler("d1", "export", ORIGEN, "--remote", "--no-data", "--output", str(esquema))
         tablas_args = [a for t in copiar for a in ("--table", t)]
         wrangler("d1", "export", ORIGEN, "--remote", "--no-schema", *tablas_args, "--output", str(datos))
+        if PREMIOS in tablas:
+            premios = consultar(ORIGEN, f"select canal, orden, importe from {PREMIOS} order by canal, orden")
+            with datos.open("a", encoding="utf-8") as f:
+                f.write(sql_premios(premios))
 
         print("Vaciando el sandbox...")
         objetos = consultar(DESTINO, "select type, name from sqlite_master where type in ('table', 'trigger')", *config)
@@ -74,8 +89,7 @@ def main() -> None:
         if datos.stat().st_size > 0:
             wrangler("d1", "execute", DESTINO, "--remote", "--file", str(datos), *config)
         # Sin socios en el sandbox, ninguna venta apunta a uno.
-        wrangler("d1", "execute", DESTINO, "--remote", "--command", "update ventas set cliente_id = null; "
-                 "update premios_apertura set cliente_id = null, lote_id = null", *config)
+        wrangler("d1", "execute", DESTINO, "--remote", "--command", "update ventas set cliente_id = null", *config)
 
     # Un solo renglon: D1 limita cuantos SELECT se pueden unir con UNION.
     conteo = "select " + ", ".join(f'(select count(*) from "{t}") as "{t}"' for t in tablas)
