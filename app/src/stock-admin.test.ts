@@ -79,3 +79,9 @@ test('con etiqueta, solo el dueno cambia el precio; sin etiqueta, el capturista 
   t.env.DEV_USUARIO = DUENO;
   assert.equal((await t.pedir(ruta, { precio: 9000 }, 'PATCH')).cuerpo.precio, 9000);
 });
+
+test('La lista del admin trae el codigo para buscar por codigo de barras (#356)', async () => {
+  const r = await tienda().pedir('/api/borradores', undefined, 'GET');
+  assert.equal(r.status, 200);
+  assert.equal((r.cuerpo as unknown as { id: string; codigo: string }[]).find((p) => p.id === PRODUCTO)?.codigo, 'ED-000001');
+});

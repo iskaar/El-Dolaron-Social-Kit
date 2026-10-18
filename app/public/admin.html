@@ -115,7 +115,7 @@
   </div>
 
   <div class="panel ajustes" id="filtros-extra">
-    <div style="grid-column: 1 / -1"><label for="f-nombre">Buscar por nombre</label><input id="f-nombre" type="search" placeholder="Nombre de la prenda" autocomplete="off"></div>
+    <div style="grid-column: 1 / -1"><label for="f-nombre">Buscar por nombre o código</label><input id="f-nombre" type="search" placeholder="Parte del nombre o del código de barras" autocomplete="off"></div>
     <div><label for="f-dia">Día de captura</label><input id="f-dia" type="date"></div>
     <div><label for="f-categoria">Categoría</label><select id="f-categoria"><option value="">Todas</option></select></div>
     <div><label for="f-min">Precio desde ($)</label><input id="f-min" type="number" min="0"></div>
@@ -452,7 +452,8 @@ function pintarSesiones(sesiones) {
 
 function pasaFiltros(p, sesionDe) {
   if (filtro && p.estado_analisis !== filtro) return false;
-  if (elNombre.value && !normalizar(p.nombre).includes(normalizar(elNombre.value))) return false;
+  const busca = normalizar(elNombre.value);
+  if (busca && !normalizar(p.nombre).includes(busca) && !normalizar(p.codigo).includes(busca)) return false;
   if (elDia.value && diaLocal(p.creado_en) !== elDia.value) return false;
   if (elCategoria.value && p.categoria !== elCategoria.value) return false;
   if (elMin.value !== '' && p.precio < centavos(elMin.value)) return false;
