@@ -675,23 +675,28 @@ function guardarImpresas(mapa) {
   try { globalThis.localStorage?.setItem(CLAVE_IMPRESAS, JSON.stringify(mapa)); } catch { /* sin localStorage no se recuerda, nada mas */ }
 }
 
-/** @param pieza lo que dice la etiqueta: { precio, precio_lista } */
+/** @param pieza lo que dice la etiqueta: { precio, precio_lista, nombre, talla } */
 export function marcarImpresa(id, hora = new Date().toISOString(), pieza = {}) {
-  guardarImpresas({ ...impresas(), [id]: { hora, precio: pieza.precio, precio_lista: pieza.precio_lista } });
+  guardarImpresas({ ...impresas(), [id]: {
+    hora, precio: pieza.precio, precio_lista: pieza.precio_lista, nombre: pieza.nombre ?? '', talla: pieza.talla ?? '',
+  } });
 }
 
 /** Los precios que se ven en la etiqueta: el de lista solo sale si es mayor (tachado). */
-const precioImpreso = (p) => `${p.precio}/${p.precio_lista > p.precio ? p.precio_lista : 0}`;
+export const precioImpreso = (p) => `${p.precio}/${p.precio_lista > p.precio ? p.precio_lista : 0}`;
+/** Nombre y talla como salen en la etiqueta (Issue #361). */
+export const textoImpreso = (p) => `${(p.nombre ?? '').trim()}/${(p.talla ?? '').trim()}`;
 
 /**
- * Si la etiqueta pegada sigue diciendo el precio de hoy. Una marca sin precio
- * (de antes de guardarlo) se da por buena; una pieza sin existencia no tiene
- * etiqueta que cambiar.
+ * Si la etiqueta pegada sigue diciendo el precio, el nombre y la talla de hoy.
+ * Una marca sin precio o sin nombre (de antes de guardarlos) se da por buena en
+ * eso; una pieza sin existencia no tiene etiqueta que cambiar.
  */
 export function etiquetaVigente(marca, pieza) {
   if (!marca) return false;
   if (marca.precio === undefined || (pieza.stock ?? 1) <= 0) return true;
-  return precioImpreso(marca) === precioImpreso(pieza);
+  return precioImpreso(marca) === precioImpreso(pieza)
+    && (marca.nombre === undefined || textoImpreso(marca) === textoImpreso(pieza));
 }
 
 /**

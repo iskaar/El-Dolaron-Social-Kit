@@ -84,7 +84,7 @@
     <b>«No salió desde aquí»</b>: esa y las que siguen regresan a la lista.
     Si ya tienen etiqueta de antes, selecciónalas y aprieta
     <b>«Marcar seleccionadas como impresas»</b>: salen de la lista sin imprimir nada.
-    Si le cambias el precio a una pieza ya etiquetada, regresa arriba en amarillo
+    Si le cambias el precio, el nombre o la talla a una pieza ya etiquetada, regresa arriba en amarillo
     (↻) para reimprimir su etiqueta; el código de barras es el mismo, y la caja
     cobra el precio nuevo aunque la etiqueta vieja siga pegada.
     La columna <b>Etiquetas</b> es cuántas imprimir; empieza en la existencia,
@@ -107,7 +107,7 @@
 <script type="module">
 import {
   conectarEtiquetera, etiqueteraLista, imprimirEtiquetas, historialTexto, detenerEnvio, envioDetenido,
-  errorEnvio, impresas, marcarImpresa, desmarcarDesde, etiquetaVigente,
+  errorEnvio, impresas, marcarImpresa, desmarcarDesde, etiquetaVigente, precioImpreso,
 } from '/etiquetera.js';
 
 const lista = document.getElementById('lista');
@@ -149,17 +149,19 @@ async function cargar() {
 function pintar() {
   const hechas = impresas();
   const idDudoso = localStorage.getItem(CLAVE_DUDOSA);
-  // Las marcas de antes no guardaban el precio: se les pone el de hoy una vez,
-  // para que un cambio de aqui en adelante si se note.
+  // Las marcas de antes no guardaban el precio, ni el nombre y la talla (#361): se les
+  // pone lo de hoy una vez, para que un cambio de aqui en adelante si se note. El
+  // precio ya guardado se respeta: un cambio pendiente sigue arriba.
   for (const p of piezas) {
     const marca = hechas[p.id];
-    if (marca && marca.precio === undefined) {
-      marcarImpresa(p.id, marca.hora, p);
-      hechas[p.id] = { ...marca, precio: p.precio, precio_lista: p.precio_lista };
+    if (marca && (marca.precio === undefined || marca.nombre === undefined)) {
+      const lo = marca.precio === undefined ? p : { ...p, precio: marca.precio, precio_lista: marca.precio_lista };
+      marcarImpresa(p.id, marca.hora, lo);
+      hechas[p.id] = { hora: marca.hora, precio: lo.precio, precio_lista: lo.precio_lista, nombre: p.nombre ?? '', talla: p.talla ?? '' };
     }
   }
   const vigente = (p) => etiquetaVigente(hechas[p.id], p);
-  // Precio cambiado despues de imprimir: la etiqueta pegada miente. Van arriba,
+  // Precio, nombre o talla cambiados despues de imprimir: la etiqueta pegada miente. Van arriba,
   // fuera de la numeracion, porque esas piezas ya no estan en la fila de captura.
   const cambiadas = piezas.filter((p) => hechas[p.id] && !vigente(p));
   const nuevas = piezas.filter((p) => !hechas[p.id]);
@@ -168,7 +170,7 @@ function pintar() {
   verBoton.textContent = verImpresas ? 'Ocultar impresas' : `Mostrar impresas (${piezas.length - pendientes.length})`;
 
   resumen.textContent = `${pendientes.length} piezas por etiquetar`
-    + (cambiadas.length ? ` · ${cambiadas.length} con precio cambiado (arriba)` : '');
+    + (cambiadas.length ? ` · ${cambiadas.length} corregidas para reimprimir (arriba)` : '');
   if (visibles.length === 0) {
     lista.innerHTML = `<div class="vacio">${piezas.length === 0
       ? 'Nada para etiquetar. Las piezas de bin no llevan etiqueta.'
@@ -206,7 +208,8 @@ function pintar() {
         : impresa
         ? `<span class="marca">Impresa ${hora(marca.hora)}<button type="button" class="claro" data-desde="${p.id}">No salió desde aquí</button></span>`
         : cambiada
-          ? `<span class="marca aviso">La etiqueta pegada dice ${pesos(marca.precio)}: reimprime y cámbiala.</span>`
+          ? `<span class="marca aviso">La etiqueta pegada dice ${escapar(precioImpreso(marca) !== precioImpreso(p)
+            ? pesos(marca.precio) : `«${marca.nombre}${marca.talla ? ` · ${marca.talla}` : ''}»`)}: reimprime y cámbiala.</span>`
           : ''}</span>
       <span class="precio">${pesos(p.precio)}${p.precio_lista > p.precio ? ` <s style="font-weight:400;color:#777">${pesos(p.precio_lista)}</s>` : ''}</span>
       <span>${p.stock} ${p.stock === 1 ? 'pieza' : 'piezas'}</span>
