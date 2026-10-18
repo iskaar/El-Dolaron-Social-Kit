@@ -78,7 +78,7 @@ export async function detalleVenta(id: string, env: Env, paraImprimir = false): 
      from venta_lineas where venta_id = ? order by id`,
   ).bind(id).all();
   const { results: devoluciones } = await env.DB.prepare(
-    `select d.id, d.creado_en, d.autor, d.motivo, d.cantidad, d.importe, d.dolarones, d.cupon, d.vale_id, d.caja, l.nombre
+    `select d.id, d.creado_en, d.autor, d.motivo, d.cantidad, d.importe, d.dolarones, d.cupon, d.vale_id, d.caja, d.forma_pago, l.nombre
      from devoluciones d join venta_lineas l on l.id = d.linea_id
      where d.venta_id = ? order by d.creado_en`,
   ).bind(id).all();
@@ -109,7 +109,7 @@ export async function cancelarPieza(
 ): Promise<Response> {
   if (!UUID.test(ventaId)) return json({ error: 'Identificador de venta invalido.' }, 400);
   const cuerpo = (await request.json().catch(() => ({}))) as {
-    id?: unknown; cantidad?: unknown; motivo?: unknown; caja?: unknown;
+    id?: unknown; cantidad?: unknown; motivo?: unknown; caja?: unknown; devolver_en?: unknown;
   };
   const id = String(cuerpo.id ?? '');
   if (!UUID.test(id)) return json({ error: 'Identificador invalido.' }, 400);
@@ -144,6 +144,8 @@ export async function cancelarPieza(
   if (quedan <= 0) return json({ error: 'Esa pieza ya estaba cancelada.' }, 409);
   if (cantidad > quedan) return json({ error: `Solo quedan ${quedan} de esa pieza en el ticket.` }, 400);
 
+  // Un ticket con tarjeta o transferencia puede devolverse en efectivo del cajon (Isaac, 17/10); el corte lo cuenta asi.
+  const devolverEn = cuerpo.devolver_en === 'efectivo' ? 'efectivo' : venta.forma_pago;
   const pagado = venta.total - venta.dolarones;
   const importe = importePiezas({
     precio: linea.precio, cantidad, restan: venta.descuento > 0 ? await piezasQueQuedan(env, ventaId) : 0,
@@ -167,7 +169,7 @@ export async function cancelarPieza(
       env.DB.prepare(
         `insert into devoluciones (id, venta_id, linea_id, cantidad, importe, dolarones, forma_pago, caja, autor, motivo, creado_en)
          values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      ).bind(id, ventaId, linea.id, cantidad, reparto.dinero, reparto.dolarones, venta.forma_pago,
+      ).bind(id, ventaId, linea.id, cantidad, reparto.dinero, reparto.dolarones, devolverEn,
         await cajaDe(env, correo, cuerpo.caja), correo, motivo, ahora),
       // Los bins no regresan existencia: nadie cuenta cuantas piezas hay en un bote.
       ...(linea.producto_id

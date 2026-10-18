@@ -147,8 +147,9 @@ test('envio de un pedido: $99 bajo $1,000 de piezas, gratis desde $1,000', () =>
 
 // Cobro con pedido (Issue #269): el saldo solo existe en el servidor, asi que nunca se encola sin red.
 const cajaFuente = readFileSync('public/caja.html', 'utf8');
-const cobroPedido = (fetchSimulado: () => Promise<unknown>) => {
+const cobroPedido = (fetchSimulado: () => Promise<unknown>, respuestaForma = 'efectivo') => {
   const guardadas: unknown[] = [];
+  const preguntas: number[] = [];
   const enviadas: any[] = [];
   const elementos = new Map<string, any>();
   const $ = (id: string) => {
@@ -159,6 +160,7 @@ const cobroPedido = (fetchSimulado: () => Promise<unknown>) => {
     crypto, Date, $, AbortSignal, Object, totales, efectivoAlcanza, saldoCanjeable, dolaronesGanados, anticipoDePedido,
     lineas: [{ producto_id: 'p1', codigo: 'ED-000001', nombre: 'Ventilador', precio: 30000, cantidad: 1 }],
     socio: null, catalogo: new Map(), pedidoCargado: { id: 'ped-1', folio: 17, saldo: 10000 },
+    preguntarForma: async (aPagar: number) => { preguntas.push(aPagar); return respuestaForma; },
     impresionRemota: () => false, exigirCaja: () => true, cajaActual: () => 'Caja 1', dolaronesPedidos: () => 0,
     descuento: null, descuentoAplicado: () => 0, promoActual: () => 0, totalNeto: () => 30000, pintarDescuento() {},
     pesos: String, dolares: String, pintar() {}, quitarSocio() {}, sincronizar() {}, cargarCatalogo() {},
@@ -171,8 +173,20 @@ const cobroPedido = (fetchSimulado: () => Promise<unknown>) => {
   const cobro = cajaFuente.slice(cajaFuente.indexOf('async function cobrar()'), cajaFuente.indexOf('let sincronizando = false;'));
   const cobrar = runInNewContext(`let idVenta = null, creadoEnVenta = null, cobrando = false, formaElegida = false;
     ${avisoRojo}\n${conPedido}\n${cobro}; cobrar`, contexto);
-  return { cobrar, contexto, guardadas, enviadas, $ };
+  return { cobrar, contexto, guardadas, enviadas, preguntas, $ };
 };
+
+test('17/10: aunque escriba el efectivo, si no eligio la forma se pregunta; con tarjeta no se manda efectivo', async () => {
+  const ok = async () => ({ ok: true, status: 201, json: async () => ({ id: 'x', ganados: 0, vale_emitido: null, saldo_pedido: 0 }) });
+  const conTarjeta = cobroPedido(ok, 'tarjeta');
+  await conTarjeta.cobrar();
+  assert.deepEqual(conTarjeta.preguntas, [20000]);
+  assert.equal(conTarjeta.enviadas[0].forma_pago, 'tarjeta');
+  assert.equal(conTarjeta.enviadas[0].efectivo, 0);
+  const regresa = cobroPedido(ok, '');
+  await regresa.cobrar();
+  assert.equal(regresa.enviadas.length, 0);                        // «Regresar» (o el Enter del lector) no cobra
+});
 
 test('cobro con pedido sin red: avisa y no encola la venta ni cierra el ticket', async () => {
   const c = cobroPedido(async () => { throw new Error('sin red'); });
