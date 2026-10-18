@@ -111,7 +111,8 @@ export function permiso(pathname: string, metodo: string): Regla {
   if (ruta === '/api/familias') return metodo === 'GET' ? TODOS : DUENO;
   if (ruta === '/api/borradores/manual') return DUENO;   // captura sin foto (Issue #115)
   if (ruta === '/api/borradores' || ruta.startsWith('/api/borradores/')) return CAPTURA_FEP;
-  if (ruta.startsWith('/api/foto/')) return CAPTURA_FEP;
+  // La caja muestra la foto de cada pieza escaneada para detectar etiquetas cambiadas (Issue #358).
+  if (ruta.startsWith('/api/foto/')) return [...CAPTURA_FEP, ...CAJA];
   if (ruta === '/api/etiquetas') return CAPTURA_FEP;
   if (ruta === '/api/calibracion') return CAPTURA;
   if (ruta === '/api/marketplace' || /^\/api\/marketplace\/foto\/[^/]+$/.test(ruta)) return CAPTURA;

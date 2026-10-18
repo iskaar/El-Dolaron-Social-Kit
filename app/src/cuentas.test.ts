@@ -18,6 +18,7 @@ test('cada rol entra a lo suyo y el dueno a todo', () => {
   assert.equal(puede(cajero, permiso('/api/ventas', 'POST')), true);
   assert.equal(puede(cajero, permiso('/admin', 'GET')), false);
   assert.equal(puede(cajero, permiso('/api/borradores', 'GET')), false);
+  assert.equal(puede(cajero, permiso('/api/foto/x', 'GET')), true);   // miniatura en la caja (#358)
 
   assert.equal(puede(capturista, permiso('/captura', 'GET')), true);
   assert.equal(puede(capturista, permiso('/admin.html', 'GET')), true);
