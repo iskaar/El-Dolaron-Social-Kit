@@ -128,6 +128,11 @@ const CANCELADAS = `corte_cancelacion_id = ?1 and ${contadaAntes('cancelada_en')
 // Piezas sueltas devueltas en esta caja, de una venta ya contada (tabla devoluciones).
 const DEVUELTAS = `d.corte_id = ?1 and d.venta_id in (select id from ventas where ${contadaAntes('d.creado_en')})`;
 const devuelto = (forma: string) => `(select ${dinero(forma, 'importe')} from devoluciones d where ${DEVUELTAS})`;
+// Pieza de un ticket de este corte, cobrado con tarjeta o transferencia, que se devolvio en efectivo de este cajon:
+// el ticket la resto de su forma (ventas.devuelto) pero el dinero salio del cajon. Sin filtrar `forma` es todo lo
+// que salio en efectivo; con `forma`, lo que hay que regresarle a esa forma.
+const enEfectivo = (forma = '') => `(select coalesce(sum(d.importe), 0) from devoluciones d join ventas v on v.id = d.venta_id
+  where v.corte_id = ?1 and d.corte_id = ?1 and d.forma_pago = 'efectivo' and v.forma_pago != 'efectivo'${forma ? ` and v.forma_pago = '${forma}'` : ''})`;
 
 export async function registrarCorte(request: Request, env: Env, correo: string): Promise<Response> {
   const cuerpo = (await request.json().catch(() => ({}))) as Record<string, unknown>;
@@ -175,13 +180,14 @@ export async function registrarCorte(request: Request, env: Env, correo: string)
            coalesce((select fondo_siguiente from cortes where caja = ?2 order by hasta desc limit 1), ?7) as fondo,
            (select count(*) from ventas where ${VIGENTES}) as tickets,
            (select ${dinero('efectivo', COBRADO)} from ventas where ${VIGENTES}) + ${anticipos('efectivo')} as ev,
-           (select ${dinero('efectivo', NETO)} from ventas where ${CANCELADAS}) + ${devuelto('efectivo')} as ed,
+           (select ${dinero('efectivo', NETO)} from ventas where ${CANCELADAS}) + ${devuelto('efectivo')} + ${enEfectivo()} as ed,
            (select coalesce(sum(importe), 0) from retiros where corte_id = ?1 and tipo = 'retiro') as re,
            (select coalesce(sum(importe), 0) from retiros where corte_id = ?1 and tipo = 'gasto') as ga,
            (select coalesce(sum(importe), 0) from retiros where corte_id = ?1 and tipo = 'nomina') as no,
-           (select ${dinero('tarjeta', COBRADO)} from ventas where ${VIGENTES}) + ${anticipos('tarjeta')} as tv,
+           (select ${dinero('tarjeta', COBRADO)} from ventas where ${VIGENTES}) + ${anticipos('tarjeta')} + ${enEfectivo('tarjeta')} as tv,
            (select ${dinero('tarjeta', NETO)} from ventas where ${CANCELADAS}) + ${devuelto('tarjeta')} as td,
-           (select ${dinero('transferencia', COBRADO)} from ventas where ${VIGENTES}) + ${anticipos('transferencia')} as xv,
+           (select ${dinero('transferencia', COBRADO)} from ventas where ${VIGENTES}) + ${anticipos('transferencia')}
+             + ${enEfectivo('transferencia')} as xv,
            (select ${dinero('transferencia', NETO)} from ventas where ${CANCELADAS})
              + ${devuelto('transferencia')} as xd,
            (select coalesce(sum(dolarones - dolarones_devueltos), 0) from ventas where ${VIGENTES}) as dv,

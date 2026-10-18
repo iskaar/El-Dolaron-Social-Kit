@@ -377,13 +377,14 @@ if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw-caja.js'
 </dialog>
 
 <dialog id="dlg-forma" aria-labelledby="dlg-forma-titulo">
-  <h2 id="dlg-forma-titulo">¿Es en efectivo?</h2>
+  <h2 id="dlg-forma-titulo">¿Efectivo o tarjeta?</h2>
   <p id="dlg-forma-texto"></p>
   <form method="dialog" class="dlg-botones">
-    <button value="efectivo" class="primario" autofocus>Sí, efectivo exacto</button>
-    <button value="tarjeta">No, fue con tarjeta</button>
-    <button value="transferencia">No, fue transferencia</button>
-    <button value="">Regresar</button>
+    <!-- Sin respuesta por omision: el Enter del lector o del teclado solo regresa (17/10, un pago con tarjeta quedo en efectivo). -->
+    <button value="efectivo">Efectivo</button>
+    <button value="tarjeta">Tarjeta</button>
+    <button value="transferencia">Transferencia</button>
+    <button value="" autofocus>Regresar</button>
   </form>
 </dialog>
 
@@ -1192,9 +1193,11 @@ async function cobrarConPedido(venta) {
 /* ---------- cobro: primero al disco, luego a la red ---------- */
 
 // Ventana propia, no confirm() nativo (congela la pestaña). Devuelve la forma elegida o '' si regresa.
-function preguntarForma(aPagar) {
+function preguntarForma(aPagar, efectivo) {
   const d = $('dlg-forma');
-  $('dlg-forma-texto').textContent = `No escribiste el efectivo recibido. Si es efectivo, se registra ${pesos(aPagar)} exacto, sin cambio.`;
+  $('dlg-forma-texto').textContent = efectivo
+    ? `Cobrar ${pesos(aPagar)}. Si es efectivo: recibido ${pesos(efectivo)}, cambio ${pesos(Math.max(0, efectivo - aPagar))}.`
+    : `Cobrar ${pesos(aPagar)}. No escribiste el efectivo recibido: si es efectivo, se registra exacto, sin cambio.`;
   d.returnValue = '';
   d.showModal();
   return new Promise((listo) => d.addEventListener('close', () => listo(d.returnValue), { once: true }));
@@ -1229,14 +1232,16 @@ async function cobrar() {
     $('aviso').style.color = '#D72B32';
     return;
   }
-  // Efectivo sin monto (#260): si la cajera no eligió la forma, se pregunta; si la eligió, es el importe exacto.
-  if (forma === 'efectivo' && efectivo === 0 && t.aPagar > 0) {
-    const elegida = formaElegida ? 'efectivo' : await preguntarForma(t.aPagar);
+  // Si la cajera no eligió la forma en esta venta, se pregunta siempre (#260; 17/10, un pago con tarjeta quedó en
+  // efectivo y descuadró el corte). Efectivo sin monto es el importe exacto.
+  if (forma === 'efectivo' && t.aPagar > 0 && !formaElegida) {
+    const elegida = await preguntarForma(t.aPagar, efectivo);
     if (!elegida) { $('efectivo').focus(); return; }
     forma = $('forma').value = elegida;
-    if (forma === 'efectivo') efectivo = t.aPagar;
-    t = totales(lineas, efectivo, usados, descuentoAplicado() + promoActual(), anticipo);
+    if (forma !== 'efectivo') efectivo = 0;
   }
+  if (forma === 'efectivo' && efectivo === 0 && t.aPagar > 0) efectivo = t.aPagar;
+  t = totales(lineas, efectivo, usados, descuentoAplicado() + promoActual(), anticipo);
   if (!efectivoAlcanza({ formaPago: forma, total: t.aPagar, efectivo })) {
     $('aviso').textContent = efectivo === 0 ? 'Falta el efectivo recibido.' : `Faltan ${pesos(t.falta)}`;
     $('aviso').style.color = '#D72B32';
@@ -1642,7 +1647,7 @@ $('ticket-contenido').addEventListener('click', async (e) => {
     idCancelacion = crypto.randomUUID();
     const destino = d.cancelarLinea ? $(`form-linea-${d.cancelarLinea}`) : $('form-todo');
     const celda = d.cancelarLinea ? destino.firstElementChild : destino;
-    celda.innerHTML = d.cancelarLinea ? formularioPieza(d.cancelarLinea, Number(d.quedan), cuponPorcentaje) : formularioTodo(cuponPorcentaje);
+    celda.innerHTML = d.cancelarLinea ? formularioPieza(d.cancelarLinea, Number(d.quedan), cuponPorcentaje, ticketAbierto.forma_pago) : formularioTodo(cuponPorcentaje);
     destino.hidden = false;
     celda.querySelector('.motivo-cancelar').focus();
     return;
@@ -1772,6 +1777,8 @@ $('ticket-contenido').addEventListener('click', async (e) => {
     if (campoCantidad && (!Number.isInteger(cantidad) || cantidad < 1 || cantidad > Number(campoCantidad.max))) {
       campoCantidad.style.borderColor = 'var(--rojo)'; campoCantidad.focus(); return;
     }
+    const campoDevolver = form.querySelector('.devolver-en');
+    if (campoDevolver && !campoDevolver.value) { campoDevolver.style.borderColor = 'var(--rojo)'; campoDevolver.focus(); return; }
     if (!cajaActual()) {
       $('ticket-aviso').textContent = 'Elige arriba qué caja es esta computadora.';
       $('ticket-aviso').style.color = '#D72B32';
@@ -1786,7 +1793,7 @@ $('ticket-contenido').addEventListener('click', async (e) => {
     try {
       r = await fetch(ruta, {
         method: 'POST', headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ id: idCancelacion, cantidad, motivo, caja: cajaActual() }),
+        body: JSON.stringify({ id: idCancelacion, cantidad, motivo, caja: cajaActual(), devolver_en: campoDevolver?.value }),
       });
       cuerpo = await r.json();
     } catch {

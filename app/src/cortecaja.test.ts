@@ -227,6 +227,36 @@ test('#123: una pieza devuelta despues del corte de su venta resta en la caja do
   assert.equal(caja2.diferencia, 0);
 });
 
+test('pieza de un ticket con tarjeta devuelta en efectivo: sale del cajon y la tarjeta queda completa (17/10)', async () => {
+  const { db, pedir } = tienda();
+  const devolver = async (id: string, devolver_en?: string) => {
+    const linea = (await pedir(`/api/ventas/${id}`)).cuerpo.lineas[0].id;
+    const r = await pedir(`/api/ventas/${id}/lineas/${linea}/cancelar`,
+      { id: crypto.randomUUID(), cantidad: 1, motivo: 'prueba', caja: 'Caja 1', devolver_en });
+    assert.equal(r.status, 201, JSON.stringify(r.cuerpo));
+  };
+  const dos = { forma_pago: 'tarjeta', efectivo: 0, lineas: [{ producto_id: PRODUCTO, cantidad: 2 }] };
+  const enCaja = await vender(pedir, 'Caja 1', dos);
+  await devolver(enCaja.id, 'efectivo');
+  const aTarjeta = await vender(pedir, 'Caja 1', dos);
+  await devolver(aTarjeta.id);                                     // sin decir: regresa a la tarjeta, como antes
+  assert.deepEqual(db.prepare('select forma_pago from devoluciones order by creado_en').all().map((d: any) => d.forma_pago),
+    ['efectivo', 'tarjeta']);
+
+  // Terminal: 500 + 500 - 250 = 750. Cajon: fondo 500 - 250 = 250.
+  const c = (await cortar(pedir, 'Caja 1', 25000, { tarjeta_terminal: 75000 })).cuerpo;
+  assert.equal(c.tarjeta_sistema, 75000);
+  assert.equal(c.efectivo_devoluciones, 25000);
+  assert.equal(c.diferencia, 0);
+
+  // Ya contada en ese corte, otra pieza devuelta en efectivo resta del cajon del siguiente; la tarjeta no.
+  await devolver(enCaja.id, 'efectivo');
+  const siguiente = (await cortar(pedir, 'Caja 1', 0)).cuerpo;
+  assert.equal(siguiente.efectivo_devoluciones, 25000);
+  assert.equal(siguiente.tarjeta_sistema, 0);
+  assert.equal(siguiente.diferencia, 0);
+});
+
 test('el conteo por billete y moneda suma lo contado y se guarda; uno invalido no hace corte', async () => {
   const { db, pedir } = tienda();
   await vender(pedir, 'Caja 1');

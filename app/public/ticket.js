@@ -108,7 +108,7 @@ export function comprobanteDevolucion(t, i) {
   const d = t.devoluciones[i];
   return {
     titulo: 'DEVOLUCION DE PIEZAS', caja: d.caja, cajero: d.autor, creado_en: d.creado_en,
-    ticket_creado_en: t.creado_en, forma_pago: t.forma_pago,
+    ticket_creado_en: t.creado_en, forma_pago: d.forma_pago ?? t.forma_pago,
     piezas: [{ nombre: d.nombre, cantidad: d.cantidad, importe: d.importe + (d.cupon ?? 0) + d.dolarones }],
     dinero: d.importe, dolarones: d.dolarones, cupon: d.cupon ?? 0, motivo: d.motivo,
   };
@@ -131,10 +131,16 @@ const botonCupon = (cupon, dato) => cupon
   ? `<button type="button" class="cupon" ${dato}>Dar cupón (${cupon}% en Dolarones)</button>` : '';
 
 /** El formulario de una pieza: cuantas (si hay mas de una) y el motivo. */
-export function formularioPieza(lineaId, quedan, cupon = null) {
+export function formularioPieza(lineaId, quedan, cupon = null, forma = 'efectivo') {
+  // Con tarjeta o transferencia, el cajero dice por donde regresa el dinero: el corte lo cuenta asi.
   return `
     <div class="form-cancelar">
       ${quedan > 1 ? `<label>Cuántas <input type="number" class="cantidad-cancelar" min="1" max="${quedan}" value="1" inputmode="numeric"></label>` : ''}
+      ${forma !== 'efectivo' ? `<select class="devolver-en" aria-label="Cómo se devuelve el dinero">
+        <option value="">¿Cómo se devuelve el dinero?</option>
+        <option value="${forma}">${forma === 'tarjeta' ? 'A la tarjeta, en la terminal' : 'Por transferencia'}</option>
+        <option value="efectivo">En efectivo, del cajón</option>
+      </select>` : ''}
       <input type="text" class="motivo-cancelar" maxlength="200" placeholder="Motivo de la cancelación">
       <div class="botones">
         <button type="button" class="secundario" data-volver>Volver</button>
