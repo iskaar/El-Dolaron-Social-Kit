@@ -32,6 +32,8 @@
   .renglon .copias { width: 64px; padding: 6px; font-size: 14px; border: 1px solid var(--linea); border-radius: 6px; }
   .renglon .marca { display: block; font-size: 12px; color: #2f7a3a; margin-top: 4px; }
   .renglon .marca button { padding: 3px 8px; font-size: 12px; margin-left: 6px; }
+  .barra input[type=search] { width: 190px; padding: 9px 12px; font-size: 14px;
+    border: 1px solid var(--linea); border-radius: 8px; }
   .vacio { padding: 24px; text-align: center; color: #5b6478; }
   .ayuda { font-size: 13px; color: #5b6478; line-height: 1.45; margin: 0 0 16px; max-width: 70ch; }
 </style>
@@ -45,6 +47,8 @@
 
 <main>
   <div class="barra">
+    <input id="buscar-codigo" type="search" autocomplete="off" placeholder="Código de barras"
+      aria-label="Filtrar por código de barras">
     <span id="impresora-estado" style="font-size:13px"></span>
     <button id="conectar-impresora" type="button">Conectar impresora</button>
     <button id="imprimir" type="button">Imprimir seleccionadas</button>
@@ -116,6 +120,19 @@ const escapar = (texto) => texto.replace(/[<>&"]/g, (c) => ({'<':'&lt;','>':'&gt
 
 let piezas = [];
 let verImpresas = false;
+// Lo que el usuario quito de la seleccion. Sobrevive a los filtros: una pieza
+// oculta por el filtro no se vuelve a marcar al cambiarlo.
+const desmarcadas = new Set();
+let filtroCodigo = '';
+// El lector manda el numero sin "ED-" y sin ceros de relleno ("0006" para
+// ED-000006), asi que los digitos se comparan como numero. Tambien acepta
+// escribir el codigo completo, o su inicio, como "ED-0000".
+function coincideCodigo(codigo, filtro) {
+  const texto = filtro.trim().toUpperCase();
+  if (!texto) return true;
+  if (texto.startsWith('ED')) return codigo.toUpperCase().startsWith(texto);
+  return /^\d+$/.test(texto) && codigo.startsWith('ED-') && Number(codigo.slice(3)) === Number(texto);
+}
 const verBoton = document.getElementById('ver-impresas');
 const copiasDe = (p) => Math.min(99, Math.max(1, p.stock ?? 1));
 const hora = (iso) => new Date(iso).toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' });
@@ -164,17 +181,25 @@ function pintar() {
   // contar "1, 2, 3..." contra la fila de piezas evita tener que adivinar
   // cual etiqueta impresa es de cual pieza. Las impresas no cuentan: ya se
   // etiquetaron y se quitaron de la fila.
+  // El numero de cada pieza se fija antes de filtrar: el filtro oculta filas, no renumera.
+  const numeros = new Map();
   let posicion = 0;
+  for (const p of visibles) if (!hechas[p.id]) numeros.set(p.id, ++posicion);
+  const mostradas = visibles.filter((p) => coincideCodigo(p.codigo ?? '', filtroCodigo));
+  if (mostradas.length === 0) {
+    lista.innerHTML = `<div class="vacio">Ningún código de barras coincide con «${escapar(filtroCodigo.trim())}».</div>`;
+    return;
+  }
   lista.innerHTML = '<div class="renglon" style="font-size:12px;color:#5b6478"><span></span><span></span><span></span><span>Pieza</span><span>Precio</span><span>Existencia</span><span>Etiquetas</span></div>'
-    + visibles.map((p) => {
+    + mostradas.map((p) => {
       const marca = hechas[p.id];
       const impresa = marca && vigente(p);
       const cambiada = marca && !impresa;
       const dudosa = p.id === idDudoso;
       return `
     <label class="renglon${impresa ? ' impresa' : ''}${cambiada || dudosa ? ' cambiada' : ''}">
-      <span class="posicion">${impresa ? '✓' : cambiada ? '↻' : ++posicion}</span>
-      <input type="checkbox" value="${p.id}" ${impresa ? '' : 'checked'}>
+      <span class="posicion">${impresa ? '✓' : cambiada ? '↻' : numeros.get(p.id)}</span>
+      <input type="checkbox" value="${p.id}" ${impresa || desmarcadas.has(p.id) ? '' : 'checked'}>
       <img src="/api/foto/${p.id}" alt="" loading="lazy" onerror="this.style.visibility='hidden'">
       <span>${escapar(p.nombre || 'Sin nombre')}${p.talla ? ` · ${escapar(p.talla)}` : ''}${dudosa
         ? '<span class="marca aviso">Envío incierto: revisa el papel y recupera esta pieza manualmente.</span>'
@@ -192,11 +217,25 @@ function pintar() {
 
 // Las casillas de seleccion, no los campos de cuantas etiquetas.
 const casillas = () => lista.querySelectorAll('input[type=checkbox]');
+// Solo afectan a las filas que se ven: lo que el filtro oculta no se toca.
 document.getElementById('todas').addEventListener('click', () => {
-  casillas().forEach((c) => { c.checked = !c.closest('.impresa'); });
+  casillas().forEach((c) => {
+    if (c.closest('.impresa')) { c.checked = false; return; }
+    c.checked = true;
+    desmarcadas.delete(c.value);
+  });
 });
 document.getElementById('ninguna').addEventListener('click', () => {
-  casillas().forEach((c) => { c.checked = false; });
+  casillas().forEach((c) => { c.checked = false; desmarcadas.add(c.value); });
+});
+lista.addEventListener('change', (e) => {
+  if (e.target.type !== 'checkbox') return;
+  if (e.target.checked) desmarcadas.delete(e.target.value);
+  else desmarcadas.add(e.target.value);
+});
+document.getElementById('buscar-codigo').addEventListener('input', (e) => {
+  filtroCodigo = e.target.value;
+  pintar();
 });
 verBoton.addEventListener('click', () => { verImpresas = !verImpresas; pintar(); });
 
