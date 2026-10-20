@@ -121,6 +121,13 @@ Costo aproximado por foto (≈1.5 k tokens de entrada, ≈300 de salida) y por p
 
 Diferencia técnica real: Gemini puede apoyarse en búsqueda de Google, lo que para "cuánto cuesta esto nuevo en México" es una ventaja sobre un modelo que responde de memoria. Cuesta latencia, y aquí la latencia no importa porque el análisis corre en segundo plano.
 
+Gemini por Vertex (Issue #363): si la instancia tiene el secreto `VERTEX_API_KEY`, `conGemini()`
+llama a Agent Platform (`aiplatform.googleapis.com`, modelo fijo `gemini-3.8-flash`) y se cobra al
+proyecto de Google Cloud `gen-lang-client-0344365575`, no a la cuota de AI Studio. Sin ese secreto,
+la ruta de AI Studio no cambia. Con búsqueda, el log "analisis listo" trae `fuentes`: los dominios
+de donde salió el precio. El grounding se cobra por consulta, aparte del modelo: revisar la tarifa
+antes de activarlo en producción.
+
 Punto de partida: `claude-haiku-4-5`, decidido con la prueba del paso 3. Desde el 8/10/2026 corre
 `claude-haiku-5-5` (Issue #239): mismo prompt y esquema, ~85 % más barato, con `effort: low`.
 

@@ -24,6 +24,8 @@ export function modeloPorDefecto(env: Env): Modelo {
 
 const MODELO_CLAUDE = 'claude-haiku-5-5';
 const MODELO_GEMINI = 'gemini-flash-latest';
+// Vertex no publica alias `-latest`: version fija (GA 2026-09-02, retiro >= 2027-09).
+const MODELO_VERTEX = 'gemini-3.8-flash';
 
 /**
  * El analisis corre en ctx.waitUntil(), que el runtime corta a los 30 s: si lo
@@ -223,14 +225,18 @@ export async function conClaude(foto: string | string[], env: Env, instruccion: 
 }
 
 async function conGemini(foto: string, env: Env, instruccion: string, buscar = false, esquema: any = ESQUEMA_GEMINI): Promise<unknown> {
+  // Con VERTEX_API_KEY se cobra al proyecto de Google Cloud (Issue #363), no a
+  // la cuota de AI Studio que se acabo en #91. Mismo cuerpo para las dos.
   // Las dos instancias tienen secretos independientes, pero no siempre con el
   // mismo nombre: se acepta cualquiera de los dos en lugar de obligar a
   // recapturar la llave.
   const llave = env.GEMINI_API_KEY || env.GEMINI2_API_KEY;
-  if (!llave) {
-    throw new Error('Falta la llave de Gemini (GEMINI_API_KEY o GEMINI2_API_KEY).');
+  if (!env.VERTEX_API_KEY && !llave) {
+    throw new Error('Falta la llave de Gemini (VERTEX_API_KEY, GEMINI_API_KEY o GEMINI2_API_KEY).');
   }
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${MODELO_GEMINI}:generateContent?key=${llave}`;
+  const url = env.VERTEX_API_KEY
+    ? `https://aiplatform.googleapis.com/v1/publishers/google/models/${MODELO_VERTEX}:generateContent?key=${env.VERTEX_API_KEY}`
+    : `https://generativelanguage.googleapis.com/v1beta/models/${MODELO_GEMINI}:generateContent?key=${llave}`;
   const respuesta = await fetch(url, {
     method: 'POST',
     signal: AbortSignal.timeout(LIMITES_MS.gemini),
@@ -239,15 +245,17 @@ async function conGemini(foto: string, env: Env, instruccion: string, buscar = f
       systemInstruction: { parts: [{ text: buscar ? instruccion + PIDE_JSON : instruccion }] },
       contents: [
         {
+          // Vertex exige el rol; AI Studio lo acepta.
+          role: 'user',
           parts: [
-            { inline_data: { mime_type: 'image/jpeg', data: foto } },
+            { inlineData: { mimeType: 'image/jpeg', data: foto } },
             { text: 'Identifica este articulo.' },
           ],
         },
       ],
       // Con busqueda, el esquema estructurado no esta permitido: van excluyentes.
       ...(buscar
-        ? { tools: [{ google_search: {} }] }
+        ? { tools: [{ googleSearch: {} }] }
         : { generationConfig: { responseMimeType: 'application/json', responseSchema: esquema } }),
     }),
   });
@@ -255,12 +263,23 @@ async function conGemini(foto: string, env: Env, instruccion: string, buscar = f
     throw new Error(`Gemini ${respuesta.status}: ${(await respuesta.text()).slice(0, 200)}`);
   }
   const cuerpo = (await respuesta.json()) as {
-    candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
+    candidates?: Array<{
+      content?: { parts?: Array<{ text?: string }> };
+      groundingMetadata?: { groundingChunks?: Array<{ web?: { title?: string } }> };
+    }>;
   };
   const texto = (cuerpo.candidates?.[0]?.content?.parts ?? [])
     .map((parte) => parte.text ?? '')
     .join('');
-  return buscar ? extraerJson(texto) : JSON.parse(texto || '{}');
+  if (!buscar) {
+    return JSON.parse(texto || '{}');
+  }
+  // De donde salio el precio (el dominio de cada pagina), para el log del analisis.
+  const fuentes = (cuerpo.candidates?.[0]?.groundingMetadata?.groundingChunks ?? [])
+    .map((pedazo) => pedazo.web?.title ?? '')
+    .filter(Boolean)
+    .slice(0, 5);
+  return { ...extraerJson(texto), fuentes };
 }
 
 const ESQUEMA_ROPA = {
@@ -357,6 +376,7 @@ export async function analizarBorrador(
     console.log(JSON.stringify({
       mensaje: completa ? 'analisis listo' : 'analisis incompleto', id, modelo, buscar, ms: Date.now() - inicio,
       ejemplos: ejemplos.length, nombres: nombres.length, segun_ejemplos: conEjemplos, ficha,
+      fuentes: (fichaCruda as { fuentes?: string[] }).fuentes,
     }));
   } catch (error) {
     console.error(JSON.stringify({ mensaje: 'analisis fallido', id, modelo, error: String(error) }));

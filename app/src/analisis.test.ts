@@ -78,3 +78,38 @@ test('corregir una etiqueta no la deja lista sin nombre o sin precio (#335)', as
   assert.equal((await pedir(`/api/borradores/${id}`, { precio: 5000 }, 'PATCH')).status, 200);
   assert.equal(estado(), 'listo');
 });
+
+test('con VERTEX_API_KEY Gemini va por Vertex con busqueda y registra las fuentes (#363)', async (t) => {
+  const { db, env } = tienda();
+  const fetchOriginal = globalThis.fetch;
+  const logOriginal = console.log;
+  const logs: string[] = [];
+  t.after(() => { globalThis.fetch = fetchOriginal; console.log = logOriginal; });
+  console.log = (linea: string) => { logs.push(linea); };
+  (env as { VERTEX_API_KEY: string }).VERTEX_API_KEY = 'llave-vertex';
+  let url = '';
+  let cuerpo: any;
+  globalThis.fetch = (async (destino: string, init: RequestInit) => {
+    url = destino;
+    cuerpo = JSON.parse(String(init.body));
+    return new Response(JSON.stringify({ candidates: [{
+      content: { parts: [{ text: '```json\n{"nombre":"Licuadora Oster","marca":"Oster","categoria":"hogar","precio_lista_mxn":899,"precio_venta_mxn":0,"confianza":0.9}\n```' }] },
+      groundingMetadata: { groundingChunks: [{ web: { title: 'mercadolibre.com.mx' } }, { web: { title: 'amazon.com.mx' } }] },
+    }] }));
+  }) as typeof fetch;
+  const id = crypto.randomUUID();
+  await env.FOTOS.put(`fotos/${id}.jpg`, new Uint8Array([1, 2, 3]));
+  db.prepare(
+    `insert into productos (id, nombre, estado_analisis, foto_key, semana_ingreso, creado_en, actualizado_en)
+     values (?, '', 'pendiente', ?, 'S40', '', '')`).run(id, `fotos/${id}.jpg`);
+  await analizarBorrador(id, env, 'gemini', true);
+
+  assert.match(url, /^https:\/\/aiplatform\.googleapis\.com\/v1\/publishers\/google\/models\/[^:]+:generateContent\?key=llave-vertex$/);
+  assert.equal(cuerpo.contents[0].role, 'user');
+  assert.deepEqual(cuerpo.tools, [{ googleSearch: {} }]);
+  assert.equal(cuerpo.generationConfig, undefined);
+  const fila = db.prepare('select nombre, precio_lista, estado_analisis from productos where id = ?').get(id) as
+    { nombre: string; precio_lista: number; estado_analisis: string };
+  assert.deepEqual({ ...fila }, { nombre: 'Licuadora Oster', precio_lista: 89900, estado_analisis: 'listo' });
+  assert.deepEqual(JSON.parse(logs.find((l) => l.includes('analisis listo'))!).fuentes, ['mercadolibre.com.mx', 'amazon.com.mx']);
+});
