@@ -1,13 +1,19 @@
 """Carga el manifiesto del proveedor a la tabla `manifiesto` (Issue #365).
 
-    python tools/importar_manifiesto.py sandbox
-    python tools/importar_manifiesto.py produccion
+    python tools/importar_manifiesto.py sandbox [--maximo N]
+    python tools/importar_manifiesto.py produccion [--maximo N]
     python tools/importar_manifiesto.py local          (la D1 de `wrangler dev`)
     python tools/importar_manifiesto.py --prueba        (solo la comprobacion de abajo)
 
 Baja la hoja como .xlsx (sin sesion: se lee con el enlace), toma cada pestaña
-"Truck <id>", deja un renglon por UPC y sube SOLO lo nuevo o cambiado: la primera vez
-son ~73 mil escrituras, las siguientes la diferencia (cuota diaria de D1).
+"Truck <id>", deja un renglon por UPC y sube SOLO lo nuevo o cambiado.
+
+Cuota de D1: cada UPC cuenta como 2 renglones escritos (la tabla y el indice de su
+llave). La hoja completa son ~71 mil UPC = ~143 mil escrituras, mas que las 100 mil
+diarias del plan gratuito de Workers, que comparten produccion y sandbox: pasarse
+deja a la caja sin poder registrar ventas el resto del dia. Por eso cada corrida sube
+a lo mas MAXIMO UPC (30 mil = ~60 mil escrituras); la siguiente corrida, al otro dia,
+sigue donde se quedo. Con Workers Paid (50 M al mes) pasar --maximo 100000.
 Si cambia la descripcion de un UPC, su nombre traducido se borra y se vuelve a
 traducir la siguiente vez que alguien lo escanee. Requiere la migracion 044.
 """
@@ -42,6 +48,7 @@ TRUCK, PALLET, DESCRIPCION, PRECIO, TCIN, UPC = 0, 1, 2, 5, 7, 9
 DEPARTAMENTOS = (12, 11, 10)   # departamento; si viene vacio, division; luego grupo
 SIN_DATO = {"", "not provided"}
 POR_SENTENCIA = 300
+MAXIMO = 30_000
 
 
 NS = "{http://schemas.openxmlformats.org/spreadsheetml/2006/main}"
@@ -177,7 +184,7 @@ def wrangler(*args: str) -> str:
     return resultado.stdout
 
 
-def main(destino: str) -> None:
+def main(destino: str, maximo: int = MAXIMO) -> None:
     base, banderas = DESTINOS[destino]
     pestañas = pestañas_truck(descargar())
     camiones = sorted(pestañas)
@@ -199,6 +206,9 @@ def main(destino: str) -> None:
           f"en la base {len(actuales)}; nuevos o cambiados: {len(cambios)}")
     if not cambios:
         return
+    if len(cambios) > maximo:
+        print(f"Se suben {maximo} ahora (cuota diaria de D1); faltan {len(cambios) - maximo}: correlo otra vez mañana.")
+        cambios = cambios[:maximo]
     with tempfile.NamedTemporaryFile("w", suffix=".sql", delete=False, encoding="utf-8") as archivo:
         archivo.write(sql(cambios, datetime.now(timezone.utc).isoformat()))
     wrangler("d1", "execute", base, *banderas, "--yes", f"--file={archivo.name}")
@@ -239,5 +249,7 @@ if __name__ == "__main__":
         prueba()
     elif len(sys.argv) == 2 and sys.argv[1] in DESTINOS:
         main(sys.argv[1])
+    elif len(sys.argv) == 4 and sys.argv[1] in DESTINOS and sys.argv[2] == "--maximo" and sys.argv[3].isdigit():
+        main(sys.argv[1], int(sys.argv[3]))
     else:
         sys.exit(__doc__)
