@@ -5,8 +5,8 @@
     python tools/importar_manifiesto.py local          (la D1 de `wrangler dev`)
     python tools/importar_manifiesto.py --prueba        (solo la comprobacion de abajo)
 
-Baja cada pestaña "Truck <id>" de la hoja (sin sesion: la hoja se lee con el
-enlace), deja un renglon por UPC y sube SOLO lo nuevo o cambiado: la primera vez
+Baja la hoja como .xlsx (sin sesion: se lee con el enlace), toma cada pestaña
+"Truck <id>", deja un renglon por UPC y sube SOLO lo nuevo o cambiado: la primera vez
 son ~73 mil escrituras, las siguientes la diferencia (cuota diaria de D1).
 Si cambia la descripcion de un UPC, su nombre traducido se borra y se vuelve a
 traducir la siguiente vez que alguien lo escanee. Requiere la migracion 044.
@@ -14,7 +14,6 @@ traducir la siguiente vez que alguien lo escanee. Requiere la migracion 044.
 
 from __future__ import annotations
 
-import csv
 import io
 import json
 import re
@@ -22,15 +21,16 @@ import shutil
 import subprocess
 import sys
 import tempfile
-import urllib.parse
 import urllib.request
+import zipfile
+import xml.etree.ElementTree as ET
 from collections import Counter, defaultdict
 from datetime import datetime, timezone
+from decimal import Decimal
 from pathlib import Path
 
 APP = Path(__file__).resolve().parent.parent / "app"
 HOJA = "13vihiHG3Dp9Kbh_EPr6Ci6EmUlcsuiwmWG5GAnYjSDo"
-RESUMEN = "Available Truckloads"
 DESTINOS = {
     "produccion": ("el-dolaron", ["--remote"]),
     "sandbox": ("el-dolaron-sandbox", ["--remote", "--config", "wrangler.sandbox.jsonc"]),
@@ -44,11 +44,59 @@ SIN_DATO = {"", "not provided"}
 POR_SENTENCIA = 300
 
 
-def pestaña(nombre: str) -> list[list[str]]:
-    url = (f"https://docs.google.com/spreadsheets/d/{HOJA}/gviz/tq?tqx=out:csv&sheet="
-           + urllib.parse.quote(nombre))
-    with urllib.request.urlopen(url, timeout=120) as respuesta:
-        return list(csv.reader(io.StringIO(respuesta.read().decode("utf-8"))))
+NS = "{http://schemas.openxmlformats.org/spreadsheetml/2006/main}"
+ANCHO = 24   # columnas A..X de una pestaña Truck
+
+
+def numero(valor: str) -> str:
+    """Excel guarda los numeros como texto en <v>; uno grande puede venir como 1.91907910414E+11."""
+    if re.fullmatch(r"-?\d+(\.\d+)?[eE][+-]?\d+", valor):
+        return format(Decimal(valor), "f")
+    return valor
+
+
+def columna(referencia: str) -> int:
+    letras = re.match(r"[A-Z]+", referencia).group()
+    return sum((ord(c) - 64) * 26 ** i for i, c in enumerate(reversed(letras))) - 1
+
+
+def descargar() -> bytes:
+    """La hoja completa en .xlsx, una sola descarga (~40 MB). No se usa el CSV de gviz:
+    adivina un tipo por columna y deja vacios los valores del otro tipo."""
+    url = f"https://docs.google.com/spreadsheets/d/{HOJA}/export?format=xlsx"
+    with urllib.request.urlopen(url, timeout=600) as respuesta:
+        return respuesta.read()
+
+
+def pestañas_truck(datos: bytes) -> dict[str, list[list[str]]]:
+    """Cada pestaña "Truck <id>" como renglones de texto, columnas A..X."""
+    libro = zipfile.ZipFile(io.BytesIO(datos))
+    compartidos = ["".join(t.text or "" for t in si.iter(f"{NS}t"))
+                   for si in ET.parse(libro.open("xl/sharedStrings.xml")).getroot()]
+    rel = "{http://schemas.openxmlformats.org/officeDocument/2006/relationships}id"
+    destinos = {r.get("Id"): r.get("Target") for r in ET.parse(libro.open("xl/_rels/workbook.xml.rels")).getroot()}
+    pestañas = {}
+    for hoja in ET.parse(libro.open("xl/workbook.xml")).getroot().iter(f"{NS}sheet"):
+        camion = re.fullmatch(r"Truck (\d{8})", hoja.get("name", "").strip())
+        if not camion:
+            continue
+        filas = []
+        for fila in ET.parse(libro.open("xl/" + destinos[hoja.get(rel)].lstrip("/").removeprefix("xl/"))).getroot().iter(f"{NS}row"):
+            valores = [""] * ANCHO
+            for celda in fila.iter(f"{NS}c"):
+                i = columna(celda.get("r"))
+                if i >= ANCHO:
+                    continue
+                v = celda.find(f"{NS}v")
+                if celda.get("t") == "s" and v is not None:
+                    valores[i] = compartidos[int(v.text)]
+                elif celda.get("t") == "inlineStr":
+                    valores[i] = "".join(t.text or "" for t in celda.iter(f"{NS}t"))
+                elif v is not None and v.text is not None:
+                    valores[i] = v.text if celda.get("t") == "str" else numero(v.text)
+            filas.append(valores)
+        pestañas[camion.group(1)] = filas
+    return pestañas
 
 
 def centavos(texto: str) -> int | None:
@@ -59,8 +107,8 @@ def centavos(texto: str) -> int | None:
 
 
 def renglones(camion: str, filas: list[list[str]]) -> list[dict]:
-    """Los productos de una pestaña. Con un nombre de pestaña que no existe, la hoja
-    regresa la primera pestaña: por eso se exige que empiece con "Truck <id>"."""
+    """Los productos de una pestaña. Si la pestaña ya no empieza con "Truck <id>",
+    cambio de formato y las columnas por posicion ya no son confiables."""
     if not filas or not filas[0] or not filas[0][0].startswith(f"Truck {camion}"):
         raise ValueError(f"la pestaña Truck {camion} no existe o cambio de formato")
     salida = []
@@ -131,11 +179,12 @@ def wrangler(*args: str) -> str:
 
 def main(destino: str) -> None:
     base, banderas = DESTINOS[destino]
-    camiones = sorted({f[0].strip() for f in pestaña(RESUMEN) if f and re.fullmatch(r"\d{8}", f[0].strip())})
+    pestañas = pestañas_truck(descargar())
+    camiones = sorted(pestañas)
     todos = []
     for camion in camiones:
         try:
-            filas = renglones(camion, pestaña(f"Truck {camion}"))
+            filas = renglones(camion, pestañas[camion])
         except ValueError as error:
             print(f"  se omite: {error}")
             continue
@@ -179,6 +228,8 @@ def prueba() -> None:
     assert diferencia(elegidos, actuales) == []               # segunda corrida: nada que escribir
     actuales["123456789012"]["precio_usd"] = 1
     assert [c["upc"] for c in diferencia(elegidos, actuales)] == ["123456789012"]
+    assert numero("1.91907910414E+11") == "191907910414" and numero("4.99") == "4.99"
+    assert columna("A7") == 0 and columna("J12") == 9 and columna("AA1") == 26
     assert "'O''Neill'" in sql([{"upc": "1", "descripcion": "O'Neill", "departamento": "", "precio_usd": 1, "tcin": ""}], "t")
     print("ok")
 
