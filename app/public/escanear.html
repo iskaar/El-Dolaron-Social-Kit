@@ -1,0 +1,175 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>El Dolarón — escanear código</title>
+<style>
+  :root { --azul:#16366B; --rojo:#D72B32; --amarillo:#FFD447; --linea:#dfe3ea; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: #f4f6f9; color: #1a1f2b; font-family: system-ui, -apple-system, sans-serif; }
+  header { background: var(--azul); color: #fff; padding: 14px 20px; display: flex; gap: 16px; align-items: center; flex-wrap: wrap; }
+  header h1 { font-size: 18px; margin: 0; flex: 1; }
+  header a { color: var(--amarillo); font-size: 14px; }
+  main { padding: 16px; max-width: 640px; margin: 0 auto; }
+  .panel { background: #fff; border: 1px solid var(--linea); border-radius: 12px; padding: 16px; margin-bottom: 16px; }
+  .panel h2 { font-size: 15px; margin: 0 0 6px; }
+  .ayuda { font-size: 13px; color: #5b6478; margin: 0 0 12px; }
+  label { display: block; font-size: 13px; color: #5b6478; margin-bottom: 4px; }
+  input, select { padding: 10px; border: 1px solid var(--linea); border-radius: 8px; font-size: 18px; }
+  #codigo { width: 100%; letter-spacing: 1px; }
+  #cantidad { width: 110px; }
+  button { border: 0; border-radius: 8px; padding: 11px 16px; font-size: 16px; font-weight: 600; cursor: pointer; background: var(--azul); color: #fff; }
+  button.claro { background: #eef1f6; color: var(--azul); }
+  button:disabled { opacity: .5; cursor: default; }
+  .fila { display: flex; gap: 10px; align-items: end; flex-wrap: wrap; margin-top: 12px; }
+  video { width: 100%; border-radius: 8px; margin-top: 12px; background: #000; }
+  #nombre { font-size: 20px; font-weight: 700; margin: 0 0 4px; }
+  .dato { font-size: 14px; color: #5b6478; margin: 2px 0; }
+  .precio { font-size: 28px; font-weight: 800; color: var(--azul); margin: 8px 0 0; }
+  .aviso { font-size: 14px; color: var(--rojo); min-height: 1em; margin-top: 10px; }
+  .ok { color: #1e6b3a; }
+  ul { list-style: none; padding: 0; margin: 0; }
+  li { padding: 8px 0; border-top: 1px solid var(--linea); font-size: 14px; }
+  li:first-child { border-top: 0; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Escanear código</h1>
+  <a href="/">← Inicio</a>
+  <a href="/etiquetas">Etiquetas →</a>
+</header>
+<main>
+  <section class="panel">
+    <label for="codigo">Código de barras de la pieza</label>
+    <input id="codigo" type="text" inputmode="numeric" autocomplete="off" autofocus
+      placeholder="Escanea con el lector o escribe el número y Enter">
+    <div class="fila">
+      <button id="buscar" type="button">Buscar</button>
+      <button id="camara" class="claro" type="button" hidden>Usar la cámara</button>
+    </div>
+    <video id="video" playsinline muted hidden></video>
+    <div class="aviso" id="aviso" role="status"></div>
+  </section>
+
+  <section class="panel" id="ficha" hidden>
+    <p id="nombre"></p>
+    <p class="dato" id="detalle"></p>
+    <p class="dato" id="target"></p>
+    <p class="precio" id="precio"></p>
+    <div class="fila">
+      <div><label for="cantidad">Piezas</label><input id="cantidad" type="number" min="1" max="999" value="1"></div>
+      <div><label for="estado">Estado</label>
+        <select id="estado"><option value="nuevo">Nuevo</option><option value="danado">Dañado</option></select></div>
+      <button id="guardar" type="button">Guardar</button>
+    </div>
+  </section>
+
+  <section class="panel">
+    <h2>Guardadas en esta sesión</h2>
+    <p class="ayuda">Salen en <a href="/etiquetas">Etiquetas</a> para imprimir, una etiqueta por pieza.</p>
+    <ul id="guardadas"><li class="ayuda">Todavía ninguna.</li></ul>
+  </section>
+</main>
+<script type="module">
+import { CATEGORIAS } from '/categorias.js';
+
+const NOMBRES = Object.fromEntries(CATEGORIAS);
+const $ = (id) => document.getElementById(id);
+const pesos = (c) => `$${(c / 100).toLocaleString('es-MX', { maximumFractionDigits: 0 })}`;
+const escapar = (t) => String(t ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
+let actual = null;
+
+function avisar(texto, bien = false) {
+  $('aviso').textContent = texto;
+  $('aviso').classList.toggle('ok', bien);
+}
+
+async function buscar() {
+  const codigo = $('codigo').value.trim();
+  if (!codigo) return;
+  avisar('Buscando…', true);
+  $('ficha').hidden = true;
+  actual = null;
+  const respuesta = await fetch(`/api/manifiesto/${encodeURIComponent(codigo)}`);
+  const cuerpo = await respuesta.json().catch(() => ({ error: 'Sin respuesta del servidor.' }));
+  if (!respuesta.ok) {
+    avisar(cuerpo.error);
+    $('codigo').select();
+    return;
+  }
+  actual = cuerpo;
+  avisar(cuerpo.traducido ? '' : 'Nombre en inglés: no se pudo traducir. Se corrige después en la cola de revisión.');
+  $('nombre').textContent = cuerpo.nombre;
+  $('detalle').textContent = [cuerpo.marca, NOMBRES[cuerpo.categoria] ?? cuerpo.categoria].filter(Boolean).join(' · ');
+  $('target').innerHTML = `Target: US$${(cuerpo.precio_usd / 100).toFixed(2)} · lista ${pesos(cuerpo.precio_lista)}`
+    + (cuerpo.enlace ? ` · <a href="${escapar(cuerpo.enlace)}" target="_blank" rel="noopener">ver en Target</a>` : '');
+  $('precio').textContent = `${pesos(cuerpo.precio)} nuevo`;
+  $('cantidad').value = 1;
+  $('estado').value = 'nuevo';
+  $('ficha').hidden = false;
+  $('cantidad').select();
+}
+
+async function guardar() {
+  if (!actual) return;
+  $('guardar').disabled = true;
+  try {
+    const respuesta = await fetch('/api/borradores/upc', {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ id: crypto.randomUUID(), upc: actual.upc, stock: Number($('cantidad').value), estado_fisico: $('estado').value }),
+    });
+    const pieza = await respuesta.json().catch(() => ({ error: 'Sin respuesta del servidor.' }));
+    if (!respuesta.ok) { avisar(pieza.error); return; }
+    if ($('guardadas').querySelector('.ayuda')) $('guardadas').innerHTML = '';
+    $('guardadas').insertAdjacentHTML('afterbegin',
+      `<li><b>${escapar(pieza.nombre)}</b> · ${pieza.stock} ${pieza.stock === 1 ? 'pieza' : 'piezas'} · ${pesos(pieza.precio)}</li>`);
+    avisar(`Guardada: ${pieza.stock} × ${pieza.nombre}.`, true);
+    $('ficha').hidden = true;
+    actual = null;
+    $('codigo').value = '';
+    $('codigo').focus();
+  } finally {
+    $('guardar').disabled = false;
+  }
+}
+
+$('buscar').addEventListener('click', buscar);
+// El lector teclea el numero y un Enter, como un teclado.
+$('codigo').addEventListener('keydown', (e) => { if (e.key === 'Enter') buscar(); });
+$('cantidad').addEventListener('keydown', (e) => { if (e.key === 'Enter') guardar(); });
+$('guardar').addEventListener('click', guardar);
+
+// Camara del telefono: BarcodeDetector viene en Chrome de Android; en Windows no
+// existe y el boton no aparece (ahi va el lector).
+// ponytail: sin UPC-E (el corto de 8 digitos); agregar su expansion si aparece en piezas reales.
+if ('BarcodeDetector' in window) {
+  $('camara').hidden = false;
+  $('camara').addEventListener('click', async () => {
+    const video = $('video');
+    let flujo;
+    try {
+      flujo = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+    } catch {
+      avisar('No se pudo abrir la cámara: revisa el permiso del navegador.');
+      return;
+    }
+    const detector = new BarcodeDetector({ formats: ['upc_a', 'ean_13', 'ean_8'] });
+    video.srcObject = flujo;
+    video.hidden = false;
+    await video.play();
+    const apagar = () => { flujo.getTracks().forEach((t) => t.stop()); video.hidden = true; };
+    const intento = setInterval(async () => {
+      const [leido] = await detector.detect(video).catch(() => []);
+      if (!leido) return;
+      clearInterval(intento);
+      apagar();
+      $('codigo').value = leido.rawValue;
+      buscar();
+    }, 250);
+  });
+}
+</script>
+</body>
+</html>

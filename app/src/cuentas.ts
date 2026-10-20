@@ -63,6 +63,7 @@ const PANTALLAS: Record<string, Rol[]> = {
   '/': TODOS,
   '/index': TODOS,
   '/captura': CAPTURA_FEP,
+  '/escanear': CAPTURA,
   '/admin': CAPTURA,
   '/marketplace': CAPTURA,
   '/etiquetas': CAPTURA_FEP,
@@ -110,6 +111,9 @@ export function permiso(pathname: string, metodo: string): Regla {
   if (ruta === '/api/recortes' || ruta.startsWith('/api/recortes/')) return CAPTURA;
   if (ruta === '/api/familias') return metodo === 'GET' ? TODOS : DUENO;
   if (ruta === '/api/borradores/manual') return DUENO;   // captura sin foto (Issue #115)
+  // Captura por UPC (Issue #365): el precio sale del manifiesto, no de quien captura.
+  // Solo El Dolarón: FEP (finanzas) no tiene manifiesto.
+  if (ruta === '/api/borradores/upc' || ruta.startsWith('/api/manifiesto/')) return CAPTURA;
   if (ruta === '/api/borradores' || ruta.startsWith('/api/borradores/')) return CAPTURA_FEP;
   // La caja muestra la foto de cada pieza escaneada para detectar etiquetas cambiadas (Issue #358).
   if (ruta.startsWith('/api/foto/')) return [...CAPTURA_FEP, ...CAJA];

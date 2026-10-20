@@ -247,6 +247,16 @@ retirar papel ya enviado a la impresora: descartar esa etiqueta físicamente. Pr
 y condición locales sobreviven sin red; una eliminación fallida conserva la foto
 para reintentar con conexión.
 
+## Captura por UPC desde el manifiesto (Issue #365)
+
+Lo que viene en el manifiesto del proveedor no pasa por foto ni análisis: `/escanear` lee el
+UPC, el servidor saca nombre (traducido una vez por UPC), categoría y precio de Target de la
+tabla `manifiesto`, y `precio_lista = precio_usd × config.tipo_cambio`. Guardar usa el mismo
+alta que la captura sin foto: pieza `listo`, `ED-`, a `/etiquetas`. El precio nunca lo manda
+el cliente. Cada escaneo es una pieza nueva (subirle stock a una pieza ya impresa no imprime
+etiquetas nuevas). La tabla se llena con `tools/importar_manifiesto.py`. Detalle y decisiones:
+[PLAN-MANIFIESTO-UPC.md](PLAN-MANIFIESTO-UPC.md).
+
 ## Orden de entrega
 
 1. Esqueleto: Worker desplegado, D1 creada, R2 creado, `GET /api/config` respondiendo. Probar el despliegue antes de escribir funcionalidad.
