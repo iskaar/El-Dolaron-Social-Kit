@@ -76,6 +76,15 @@ test('el host del vendedor sirve todo lo que importa la pantalla de captura', as
   const modulos = [...html.matchAll(/from '(\/[^']+\.js)'/g)].map((m) => m[1]);
   assert.ok(modulos.includes('/foto.js') && modulos.includes('/tallas.js'));
   for (const ruta of modulos) assert.equal(permitidaParaVendedor(ruta, 'GET'), true, `${ruta} da 404 en captura.viste.com.mx`);
+  // Escanear (Issue #365) tambien vive en el telefono: su pantalla, sus modulos y sus dos llamadas.
+  const escanear = readFileSync('public/escanear.html', 'utf8');
+  const deEscanear = [...escanear.matchAll(/from '(\/[^']+\.js)'/g)].map((m) => m[1]);
+  assert.ok(deEscanear.includes('/categorias.js') && deEscanear.includes('/foto.js'));
+  for (const ruta of ['/escanear', ...deEscanear]) assert.equal(permitidaParaVendedor(ruta, 'GET'), true, ruta);
+  assert.equal(permitidaParaVendedor('/api/manifiesto/191907910414', 'GET'), true);
+  assert.equal(permitidaParaVendedor('/api/borradores/upc', 'POST'), true);
+  assert.equal(permitidaParaVendedor('/api/borradores/manual', 'POST'), false);
+  assert.equal(permitidaParaVendedor('/api/config', 'GET'), false);
 });
 
 test('un cuerpo JSON "null" es un 400, no un 500, en entrar, cuentas y vales', async () => {

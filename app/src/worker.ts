@@ -83,7 +83,9 @@ interface FilaBorrador {
  * valiendo si algun dia la politica de Access queda mal configurada. Los precios
  * y el inventario no viven en el telefono que anda en el pasillo.
  */
-const RUTAS_VENDEDOR = new Set(['/captura', '/foto.js', '/tallas.js', '/api/salud', '/sin-acceso', '/api/yo']);
+const RUTAS_VENDEDOR = new Set(['/captura', '/foto.js', '/tallas.js', '/api/salud', '/sin-acceso', '/api/yo',
+  // Escanear del manifiesto (Issue #365): el telefono ve nombre y precio de lo que escanea, nada mas.
+  '/escanear', '/categorias.js']);
 const CORRECCION_CAPTURA = /^\/api\/borradores\/([^/]+)\/(existencia|talla|revision)$/;
 
 export function permitidaParaVendedor(pathname: string, metodo: string): boolean {
@@ -99,7 +101,10 @@ export function permitidaParaVendedor(pathname: string, metodo: string): boolean
   if (pathname === '/api/solicitudes/acceso') {
     return metodo === 'POST';
   }
-  return pathname === '/api/borradores' && metodo === 'POST';
+  if (/^\/api\/manifiesto\/[^/]+$/.test(pathname)) {
+    return metodo === 'GET';
+  }
+  return (pathname === '/api/borradores' || pathname === '/api/borradores/upc') && metodo === 'POST';
 }
 
 const FRANJA_SANDBOX = `<div style="background:#D72B32;color:#fff;text-align:center;font:700 14px system-ui,sans-serif;padding:6px">

@@ -2,174 +2,397 @@
 <html lang="es">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>El Dolarón — escanear código</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>El Dolarón — escanear</title>
 <style>
-  :root { --azul:#16366B; --rojo:#D72B32; --amarillo:#FFD447; --linea:#dfe3ea; }
+  :root { --azul:#16366B; --rojo:#D72B32; --verde:#1e7a3c; --amarillo:#FFD447; --linea:#dfe3ea; --gris:#5b6478; }
   * { box-sizing: border-box; }
-  body { margin: 0; background: #f4f6f9; color: #1a1f2b; font-family: system-ui, -apple-system, sans-serif; }
-  header { background: var(--azul); color: #fff; padding: 14px 20px; display: flex; gap: 16px; align-items: center; flex-wrap: wrap; }
-  header h1 { font-size: 18px; margin: 0; flex: 1; }
-  header a { color: var(--amarillo); font-size: 14px; }
-  main { padding: 16px; max-width: 640px; margin: 0 auto; }
-  .panel { background: #fff; border: 1px solid var(--linea); border-radius: 12px; padding: 16px; margin-bottom: 16px; }
-  .panel h2 { font-size: 15px; margin: 0 0 6px; }
-  .ayuda { font-size: 13px; color: #5b6478; margin: 0 0 12px; }
-  label { display: block; font-size: 13px; color: #5b6478; margin-bottom: 4px; }
-  input, select { padding: 10px; border: 1px solid var(--linea); border-radius: 8px; font-size: 18px; }
-  #codigo { width: 100%; letter-spacing: 1px; }
-  #cantidad { width: 110px; }
-  button { border: 0; border-radius: 8px; padding: 11px 16px; font-size: 16px; font-weight: 600; cursor: pointer; background: var(--azul); color: #fff; }
-  button.claro { background: #eef1f6; color: var(--azul); }
-  button:disabled { opacity: .5; cursor: default; }
-  .fila { display: flex; gap: 10px; align-items: end; flex-wrap: wrap; margin-top: 12px; }
-  video { width: 100%; border-radius: 8px; margin-top: 12px; background: #000; }
-  #nombre { font-size: 20px; font-weight: 700; margin: 0 0 4px; }
-  .dato { font-size: 14px; color: #5b6478; margin: 2px 0; }
-  .precio { font-size: 28px; font-weight: 800; color: var(--azul); margin: 8px 0 0; }
-  .aviso { font-size: 14px; color: var(--rojo); min-height: 1em; margin-top: 10px; }
-  .ok { color: #1e6b3a; }
+  html, body { height: 100%; }
+  body { margin: 0; background: #f4f6f9; color: #1a1f2b; font-family: system-ui, -apple-system, sans-serif;
+    display: flex; flex-direction: column; border: 6px solid transparent; transition: border-color .15s; }
+  body.ok { border-color: var(--verde); }
+  body.mas { border-color: var(--azul); }
+  body.no { border-color: var(--rojo); }
+  header { background: var(--azul); color: #fff; padding: 8px 14px; display: flex; gap: 14px; align-items: center; }
+  header h1 { font-size: 16px; margin: 0; flex: 1; }
+  header a, header button.liga { color: var(--amarillo); font-size: 14px; background: none; border: 0; padding: 0; cursor: pointer; }
+  #visor { position: relative; background: #000; height: 38vh; flex: none; }
+  #visor[hidden] { display: none; }
+  video { width: 100%; height: 100%; object-fit: cover; display: block; }
+  #mira { position: absolute; left: 12%; right: 12%; top: 50%; height: 2px; background: var(--rojo); opacity: .8; }
+  #teclado { display: flex; gap: 8px; padding: 8px 12px; background: #fff; border-bottom: 1px solid var(--linea); }
+  #teclado[hidden] { display: none; }
+  #teclado input { flex: 1; font-size: 18px; padding: 8px; border: 1px solid var(--linea); border-radius: 8px; }
+  main { flex: 1; overflow-y: auto; padding: 10px 12px 0; }
+  .tarjeta { background: #fff; border: 1px solid var(--linea); border-radius: 12px; padding: 12px; margin-bottom: 10px; }
+  .tarjeta[hidden] { display: none; }
+  #nombre { font-size: 19px; font-weight: 700; margin: 0; }
+  .dato { font-size: 13px; color: var(--gris); margin: 2px 0 0; }
+  .fila { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-top: 10px; }
+  .precio { font-size: 26px; font-weight: 800; color: var(--azul); flex: 1; }
+  .contador { display: flex; align-items: center; gap: 6px; }
+  .contador button { width: 44px; height: 44px; font-size: 22px; border-radius: 10px; border: 0; background: #eef1f6; color: var(--azul); font-weight: 700; }
+  .contador input { width: 64px; height: 44px; text-align: center; font-size: 22px; font-weight: 700; border: 1px solid var(--linea); border-radius: 10px; }
+  button.principal { border: 0; border-radius: 10px; padding: 12px 18px; font-size: 17px; font-weight: 700; background: var(--azul); color: #fff; }
+  button.estado { border: 0; border-radius: 10px; padding: 10px 14px; font-size: 15px; font-weight: 700; background: #eef1f6; color: var(--azul); }
+  button.estado[aria-pressed="true"] { background: var(--rojo); color: #fff; }
+  #desconocido { border-color: var(--rojo); }
+  #desconocido h2 { font-size: 17px; margin: 0; color: var(--rojo); }
+  #aviso { font-size: 14px; color: var(--rojo); min-height: 1.2em; margin: 0 0 8px; }
   ul { list-style: none; padding: 0; margin: 0; }
-  li { padding: 8px 0; border-top: 1px solid var(--linea); font-size: 14px; }
+  li { display: flex; gap: 8px; justify-content: space-between; padding: 8px 2px; border-top: 1px solid var(--linea); font-size: 14px; }
   li:first-child { border-top: 0; }
+  li.fallo { color: var(--rojo); cursor: pointer; }
+  li .cant { font-weight: 700; white-space: nowrap; }
+  footer { flex: none; display: flex; gap: 10px; align-items: center; padding: 10px 12px calc(10px + env(safe-area-inset-bottom));
+    background: #fff; border-top: 1px solid var(--linea); }
+  footer span { flex: 1; font-size: 15px; font-weight: 600; }
+  #inicio { position: fixed; inset: 0; background: rgba(22,54,107,.96); color: #fff; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; gap: 16px; padding: 24px; text-align: center; z-index: 5; }
+  #inicio[hidden] { display: none; }
+  #inicio button { font-size: 20px; padding: 16px 28px; border-radius: 14px; border: 0; background: var(--amarillo); color: var(--azul); font-weight: 800; }
 </style>
 </head>
 <body>
+<div id="inicio">
+  <p>Escanea cada pieza. El mismo código otra vez suma una pieza; un código distinto guarda la anterior.</p>
+  <button id="empezar" type="button">Empezar</button>
+</div>
 <header>
-  <h1>Escanear código</h1>
-  <a href="/">← Inicio</a>
-  <a href="/etiquetas">Etiquetas →</a>
+  <h1>Escanear</h1>
+  <button id="abrir-teclado" class="liga" type="button">Escribir código</button>
+  <a href="/captura">Fotos →</a>
 </header>
+<div id="visor" hidden><video id="video" playsinline muted></video><div id="mira"></div></div>
+<div id="teclado" hidden>
+  <input id="codigo" type="text" inputmode="numeric" autocomplete="off" placeholder="Número del código y Enter" aria-label="Código de barras">
+</div>
 <main>
-  <section class="panel">
-    <label for="codigo">Código de barras de la pieza</label>
-    <input id="codigo" type="text" inputmode="numeric" autocomplete="off" autofocus
-      placeholder="Escanea con el lector o escribe el número y Enter">
-    <div class="fila">
-      <button id="buscar" type="button">Buscar</button>
-      <button id="camara" class="claro" type="button" hidden>Usar la cámara</button>
-    </div>
-    <video id="video" playsinline muted hidden></video>
-    <div class="aviso" id="aviso" role="status"></div>
-  </section>
+  <p id="aviso" role="status"></p>
 
-  <section class="panel" id="ficha" hidden>
+  <section class="tarjeta" id="actual" hidden>
     <p id="nombre"></p>
     <p class="dato" id="detalle"></p>
-    <p class="dato" id="target"></p>
-    <p class="precio" id="precio"></p>
     <div class="fila">
-      <div><label for="cantidad">Piezas</label><input id="cantidad" type="number" min="1" max="999" value="1"></div>
-      <div><label for="estado">Estado</label>
-        <select id="estado"><option value="nuevo">Nuevo</option><option value="danado">Dañado</option></select></div>
-      <button id="guardar" type="button">Guardar</button>
+      <span class="precio" id="precio"></span>
+      <div class="contador">
+        <button type="button" data-paso="-1" aria-label="Una pieza menos">−</button>
+        <input id="cantidad" type="number" inputmode="numeric" min="0" max="999" aria-label="Piezas">
+        <button type="button" data-paso="1" aria-label="Una pieza más">+</button>
+      </div>
     </div>
   </section>
 
-  <section class="panel">
-    <h2>Guardadas en esta sesión</h2>
-    <p class="ayuda">Salen en <a href="/etiquetas">Etiquetas</a> para imprimir, una etiqueta por pieza.</p>
-    <ul id="guardadas"><li class="ayuda">Todavía ninguna.</li></ul>
+  <section class="tarjeta" id="desconocido" hidden>
+    <h2>No está en el manifiesto</h2>
+    <p class="dato" id="desconocido-codigo"></p>
+    <div class="fila">
+      <div class="contador">
+        <button type="button" data-paso="-1" aria-label="Una pieza menos">−</button>
+        <input id="cantidad-foto" type="number" inputmode="numeric" min="0" max="999" aria-label="Piezas">
+        <button type="button" data-paso="1" aria-label="Una pieza más">+</button>
+      </div>
+      <button id="foto" class="principal" type="button">Tomar foto</button>
+    </div>
+    <p class="dato" id="sin-camara" hidden>Aquí no hay cámara: captúrala en <a href="/captura">Fotos</a>.</p>
+  </section>
+
+  <section class="tarjeta">
+    <ul id="guardadas"><li class="dato">Lo guardado sale en Etiquetas, una etiqueta por pieza.</li></ul>
   </section>
 </main>
+<footer>
+  <button id="estado" class="estado" type="button" aria-pressed="false">Nuevo</button>
+  <span id="total">0 piezas</span>
+  <button id="guardar" class="principal" type="button">Guardar</button>
+</footer>
 <script type="module">
 import { CATEGORIAS } from '/categorias.js';
+import { aJpeg } from '/foto.js';
 
 const NOMBRES = Object.fromEntries(CATEGORIAS);
 const $ = (id) => document.getElementById(id);
-const pesos = (c) => `$${(c / 100).toLocaleString('es-MX', { maximumFractionDigits: 0 })}`;
+const pesos = (c) => `$${Math.round(c / 100).toLocaleString('es-MX')}`;
 const escapar = (t) => String(t ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
-let actual = null;
+// Igual que el servidor: el mismo producto llega como UPC-A o como EAN-13 con un 0 delante.
+const normalizar = (crudo) => String(crudo).replace(/\D/g, '').replace(/^0+/, '');
 
-function avisar(texto, bien = false) {
-  $('aviso').textContent = texto;
-  $('aviso').classList.toggle('ok', bien);
+// Se guarda solo despues de este rato sin escanear: da tiempo de juntar las piezas iguales.
+const GUARDAR_SOLA_MS = 10_000;
+// Con la camara, el mismo codigo cuenta otra vez solo si salio de la vista este rato.
+const FUERA_DE_VISTA_MS = 700;
+
+let actual = null;        // { id, upc, ficha, stock } sin guardar todavia
+let desconocido = null;   // { upc, stock } esperando su foto
+let danado = false;
+let piezas = 0;
+let temporizador = null;
+let fila = Promise.resolve();   // un codigo a la vez, en el orden en que llegaron
+let camara = false;
+
+/* ---------- aviso: sonido, vibracion y color ---------- */
+
+let audio = null;
+function avisar(tipo) {
+  const tonos = { ok: [[880, 90]], mas: [[1320, 60]], no: [[220, 250], [180, 250]] }[tipo];
+  try {
+    audio ??= new AudioContext();
+    let t = audio.currentTime;
+    for (const [frecuencia, ms] of tonos) {
+      const osc = audio.createOscillator();
+      osc.frequency.value = frecuencia;
+      osc.connect(audio.destination);
+      osc.start(t);
+      osc.stop(t + ms / 1000);
+      t += ms / 1000 + 0.05;
+    }
+  } catch { /* sin audio, queda la vibracion y el color */ }
+  navigator.vibrate?.(tipo === 'no' ? [200, 100, 200] : 40);
+  document.body.className = tipo;
+  setTimeout(() => { document.body.className = ''; }, 350);
 }
 
-async function buscar() {
-  const codigo = $('codigo').value.trim();
-  if (!codigo) return;
-  avisar('Buscando…', true);
-  $('ficha').hidden = true;
-  actual = null;
-  const respuesta = await fetch(`/api/manifiesto/${encodeURIComponent(codigo)}`);
-  const cuerpo = await respuesta.json().catch(() => ({ error: 'Sin respuesta del servidor.' }));
-  if (!respuesta.ok) {
-    avisar(cuerpo.error);
-    $('codigo').select();
-    return;
+function mensaje(texto) { $('aviso').textContent = texto; }
+
+/* ---------- pintar ---------- */
+
+function pintar() {
+  $('actual').hidden = !actual;
+  if (actual) {
+    const f = actual.ficha;
+    $('nombre').textContent = f.nombre;
+    $('detalle').textContent = [f.marca, NOMBRES[f.categoria] ?? f.categoria, f.traducido ? '' : 'nombre sin traducir']
+      .filter(Boolean).join(' · ');
+    $('precio').textContent = pesos(f.precio);
+    $('cantidad').value = actual.stock;
   }
-  actual = cuerpo;
-  avisar(cuerpo.traducido ? '' : 'Nombre en inglés: no se pudo traducir. Se corrige después en la cola de revisión.');
-  $('nombre').textContent = cuerpo.nombre;
-  $('detalle').textContent = [cuerpo.marca, NOMBRES[cuerpo.categoria] ?? cuerpo.categoria].filter(Boolean).join(' · ');
-  $('target').innerHTML = `Target: US$${(cuerpo.precio_usd / 100).toFixed(2)} · lista ${pesos(cuerpo.precio_lista)}`
-    + (cuerpo.enlace ? ` · <a href="${escapar(cuerpo.enlace)}" target="_blank" rel="noopener">ver en Target</a>` : '');
-  $('precio').textContent = `${pesos(cuerpo.precio)} nuevo`;
-  $('cantidad').value = 1;
-  $('estado').value = 'nuevo';
-  $('ficha').hidden = false;
-  $('cantidad').select();
+  $('desconocido').hidden = !desconocido;
+  if (desconocido) {
+    $('desconocido-codigo').textContent = `Código ${desconocido.upc}. Tómale foto: se analiza como en Fotos.`;
+    $('cantidad-foto').value = desconocido.stock;
+    $('foto').hidden = !camara;
+    $('sin-camara').hidden = camara;
+  }
+  $('total').textContent = `${piezas} ${piezas === 1 ? 'pieza' : 'piezas'}`;
 }
 
-async function guardar() {
-  if (!actual) return;
-  $('guardar').disabled = true;
+function anotar(html, fallo = null) {
+  const lista = $('guardadas');
+  if (lista.querySelector('.dato')) lista.innerHTML = '';
+  lista.insertAdjacentHTML('afterbegin', `<li${fallo ? ' class="fallo"' : ''}>${html}</li>`);
+  if (fallo) lista.firstElementChild.addEventListener('click', fallo, { once: true });
+}
+
+/* ---------- guardar ---------- */
+
+function programarGuardado() {
+  clearTimeout(temporizador);
+  temporizador = setTimeout(() => { fila = fila.then(cerrarActual); }, GUARDAR_SOLA_MS);
+}
+
+/** Guarda la pieza abierta. El id nace con la pieza: reintentar no la duplica. */
+async function cerrarActual() {
+  clearTimeout(temporizador);
+  const pieza = actual;
+  actual = null;
+  pintar();
+  if (!pieza || pieza.stock < 1) return;
+  await enviar(pieza);
+}
+
+async function enviar(pieza) {
   try {
     const respuesta = await fetch('/api/borradores/upc', {
-      method: 'POST', headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ id: crypto.randomUUID(), upc: actual.upc, stock: Number($('cantidad').value), estado_fisico: $('estado').value }),
+      method: 'POST', headers: { 'content-type': 'application/json' }, keepalive: true,
+      body: JSON.stringify({ id: pieza.id, upc: pieza.upc, stock: pieza.stock, estado_fisico: pieza.estado }),
     });
-    const pieza = await respuesta.json().catch(() => ({ error: 'Sin respuesta del servidor.' }));
-    if (!respuesta.ok) { avisar(pieza.error); return; }
-    if ($('guardadas').querySelector('.ayuda')) $('guardadas').innerHTML = '';
-    $('guardadas').insertAdjacentHTML('afterbegin',
-      `<li><b>${escapar(pieza.nombre)}</b> · ${pieza.stock} ${pieza.stock === 1 ? 'pieza' : 'piezas'} · ${pesos(pieza.precio)}</li>`);
-    avisar(`Guardada: ${pieza.stock} × ${pieza.nombre}.`, true);
-    $('ficha').hidden = true;
-    actual = null;
-    $('codigo').value = '';
-    $('codigo').focus();
-  } finally {
-    $('guardar').disabled = false;
+    const guardada = await respuesta.json().catch(() => ({}));
+    if (!respuesta.ok) throw new Error(guardada.error ?? `Error ${respuesta.status}`);
+    piezas += guardada.stock;
+    anotar(`<span>${escapar(guardada.nombre)}${pieza.estado === 'danado' ? ' (dañado)' : ''}</span>
+      <span class="cant">×${guardada.stock} · ${pesos(guardada.precio)}</span>`);
+  } catch (error) {
+    anotar(`<span>No se guardó: ${escapar(pieza.ficha.nombre)} ×${pieza.stock}. Toca para reintentar.</span>`,
+      () => { fila = fila.then(() => enviar(pieza)); });
+    mensaje(String(error.message ?? error));
+    avisar('no');
   }
+  pintar();
 }
 
-$('buscar').addEventListener('click', buscar);
-// El lector teclea el numero y un Enter, como un teclado.
-$('codigo').addEventListener('keydown', (e) => { if (e.key === 'Enter') buscar(); });
-$('cantidad').addEventListener('keydown', (e) => { if (e.key === 'Enter') guardar(); });
-$('guardar').addEventListener('click', guardar);
+/* ---------- un codigo ---------- */
 
-// Camara del telefono: BarcodeDetector viene en Chrome de Android; en Windows no
-// existe y el boton no aparece (ahi va el lector).
-// ponytail: sin UPC-E (el corto de 8 digitos); agregar su expansion si aparece en piezas reales.
-if ('BarcodeDetector' in window) {
-  $('camara').hidden = false;
-  $('camara').addEventListener('click', async () => {
-    const video = $('video');
-    let flujo;
-    try {
-      flujo = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
-    } catch {
-      avisar('No se pudo abrir la cámara: revisa el permiso del navegador.');
-      return;
-    }
-    const detector = new BarcodeDetector({ formats: ['upc_a', 'ean_13', 'ean_8'] });
-    video.srcObject = flujo;
-    video.hidden = false;
-    await video.play();
-    const apagar = () => { flujo.getTracks().forEach((t) => t.stop()); video.hidden = true; };
-    const intento = setInterval(async () => {
-      const [leido] = await detector.detect(video).catch(() => []);
-      if (!leido) return;
-      clearInterval(intento);
-      apagar();
-      $('codigo').value = leido.rawValue;
-      buscar();
-    }, 250);
+async function procesar(crudo) {
+  const upc = normalizar(crudo);
+  if (upc.length < 6) return;
+  mensaje('');
+  if (actual?.upc === upc) {
+    actual.stock += 1;
+    avisar('mas');
+    programarGuardado();
+    return pintar();
+  }
+  if (desconocido?.upc === upc) {
+    desconocido.stock += 1;
+    avisar('mas');
+    return pintar();
+  }
+  await cerrarActual();
+  if (desconocido) anotar(`<span>Sin foto, no se capturó: ${escapar(desconocido.upc)}</span><span class="cant">×${desconocido.stock}</span>`);
+  desconocido = null;
+
+  let respuesta;
+  try {
+    respuesta = await fetch(`/api/manifiesto/${upc}`);
+  } catch {
+    mensaje('Sin conexión: vuelve a escanear cuando regrese la red.');
+    avisar('no');
+    return pintar();
+  }
+  const cuerpo = await respuesta.json().catch(() => ({}));
+  if (respuesta.status === 404) {
+    desconocido = { upc, stock: 1 };
+    avisar('no');
+  } else if (!respuesta.ok) {
+    mensaje(cuerpo.error ?? `Error ${respuesta.status}`);
+    avisar('no');
+  } else {
+    actual = { id: crypto.randomUUID(), upc, ficha: cuerpo, stock: 1, estado: danado ? 'danado' : 'nuevo' };
+    avisar('ok');
+    programarGuardado();
+  }
+  pintar();
+}
+
+const recibir = (codigo) => { fila = fila.then(() => procesar(codigo)); };
+
+/* ---------- foto de lo que no esta en el manifiesto ---------- */
+
+$('foto').addEventListener('click', async () => {
+  if (!desconocido) return;
+  const pieza = desconocido;
+  $('foto').disabled = true;
+  try {
+    const foto = await aJpeg($('video'), $('video').videoWidth, $('video').videoHeight);
+    const cuerpo = new FormData();
+    cuerpo.append('id', crypto.randomUUID());
+    cuerpo.append('estado_fisico', danado ? 'danado' : 'nuevo');
+    cuerpo.append('cantidad', String(pieza.stock));
+    cuerpo.append('foto', foto, 'foto.jpg');
+    const respuesta = await fetch('/api/borradores', { method: 'POST', body: cuerpo });
+    if (!respuesta.ok) throw new Error((await respuesta.json().catch(() => ({}))).error ?? `Error ${respuesta.status}`);
+    piezas += pieza.stock;
+    anotar(`<span>Foto ${escapar(pieza.upc)} (se analiza)</span><span class="cant">×${pieza.stock}</span>`);
+    desconocido = null;
+    avisar('ok');
+  } catch (error) {
+    mensaje(`No se subió la foto: ${error.message ?? error}. Vuelve a intentarlo.`);
+    avisar('no');
+  } finally {
+    $('foto').disabled = false;
+    pintar();
+  }
+});
+
+/* ---------- cantidades, estado y guardar ---------- */
+
+function contador(entrada, obtener) {
+  const caja = entrada.closest('.contador');
+  const fijar = (n) => {
+    const pieza = obtener();
+    if (!pieza) return;
+    pieza.stock = Math.max(0, Math.min(999, Math.round(n) || 0));
+    // En 0 la pieza se cancela: fue un escaneo equivocado.
+    if (pieza.stock === 0) {
+      if (pieza === actual) { clearTimeout(temporizador); actual = null; } else desconocido = null;
+    } else if (pieza === actual) programarGuardado();
+    pintar();
+  };
+  caja.addEventListener('click', (e) => {
+    const paso = Number(e.target.dataset?.paso);
+    if (paso) fijar((obtener()?.stock ?? 0) + paso);
   });
+  entrada.addEventListener('change', () => fijar(Number(entrada.value)));
+  entrada.addEventListener('keydown', (e) => { if (e.key === 'Enter') entrada.blur(); });
 }
+contador($('cantidad'), () => actual);
+contador($('cantidad-foto'), () => desconocido);
+
+$('estado').addEventListener('click', () => {
+  danado = !danado;
+  $('estado').textContent = danado ? 'Dañado' : 'Nuevo';
+  $('estado').setAttribute('aria-pressed', String(danado));
+  if (actual) actual.estado = danado ? 'danado' : 'nuevo';
+});
+
+$('guardar').addEventListener('click', () => { fila = fila.then(cerrarActual); });
+// Si se cierra o se cambia de app, lo abierto no se pierde.
+document.addEventListener('visibilitychange', () => { if (document.hidden) fila = fila.then(cerrarActual); });
+
+/* ---------- entradas: lector Bluetooth/USB, teclado y camara ---------- */
+
+// El lector teclea el numero y Enter, como un teclado, sin que haya un campo
+// enfocado: asi el teclado del telefono no se abre en cada pieza.
+let tecleado = '';
+document.addEventListener('keydown', (e) => {
+  if (e.target instanceof HTMLInputElement) return;
+  if (e.key === 'Enter') {
+    // Sin esto, el Enter del lector "aprieta" el ultimo boton tocado (p.ej. Dañado).
+    e.preventDefault();
+    if (tecleado) recibir(tecleado);
+    tecleado = '';
+  } else if (/^\d$/.test(e.key)) {
+    tecleado += e.key;
+  }
+});
+
+$('abrir-teclado').addEventListener('click', () => {
+  $('teclado').hidden = !$('teclado').hidden;
+  if (!$('teclado').hidden) $('codigo').focus();
+});
+$('codigo').addEventListener('keydown', (e) => {
+  if (e.key !== 'Enter') return;
+  recibir($('codigo').value);
+  $('codigo').value = '';
+});
+
+// Camara: BarcodeDetector viene en Chrome de Android. En Windows no existe:
+// ahi va el lector y la camara no se prende.
+// ponytail: sin UPC-E (el corto de 8 digitos); agregar su expansion si aparece en piezas reales.
+async function encenderCamara() {
+  if (!('BarcodeDetector' in window)) return;
+  try {
+    $('video').srcObject = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: { ideal: 'environment' }, width: { ideal: 1920 } }, audio: false,
+    });
+  } catch {
+    mensaje('No se pudo abrir la cámara: revisa el permiso del navegador. El lector sigue funcionando.');
+    return;
+  }
+  camara = true;
+  $('visor').hidden = false;
+  await $('video').play();
+  const detector = new BarcodeDetector({ formats: ['upc_a', 'ean_13', 'ean_8'] });
+  const vistos = new Map();   // codigo -> ultima vez que estuvo en la vista
+  const leer = async () => {
+    const codigos = await detector.detect($('video')).catch(() => []);
+    const ahora = Date.now();
+    for (const { rawValue } of codigos) {
+      if (ahora - (vistos.get(rawValue) ?? 0) > FUERA_DE_VISTA_MS) recibir(rawValue);
+      vistos.set(rawValue, ahora);
+    }
+    setTimeout(leer, 120);
+  };
+  leer();
+}
+
+// Un toque para empezar: el navegador solo deja sonar y abrir la camara despues de uno.
+$('empezar').addEventListener('click', () => {
+  $('inicio').hidden = true;
+  try { audio ??= new AudioContext(); } catch { /* sin audio */ }
+  encenderCamara();
+});
+pintar();
 </script>
 </body>
 </html>
