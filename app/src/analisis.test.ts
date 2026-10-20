@@ -107,7 +107,7 @@ test('con VERTEX_API_KEY Gemini va por Vertex con busqueda y registra las fuente
   assert.match(url, /^https:\/\/aiplatform\.googleapis\.com\/v1\/publishers\/google\/models\/[^:]+:generateContent\?key=llave-vertex$/);
   assert.equal(cuerpo.contents[0].role, 'user');
   assert.deepEqual(cuerpo.tools, [{ googleSearch: {} }]);
-  assert.equal(cuerpo.generationConfig, undefined);
+  assert.deepEqual(cuerpo.generationConfig, { thinkingConfig: { thinkingLevel: 'LOW' } });
   const fila = db.prepare('select nombre, precio_lista, estado_analisis from productos where id = ?').get(id) as
     { nombre: string; precio_lista: number; estado_analisis: string };
   assert.deepEqual({ ...fila }, { nombre: 'Licuadora Oster', precio_lista: 89900, estado_analisis: 'listo' });

@@ -254,9 +254,13 @@ async function conGemini(foto: string, env: Env, instruccion: string, buscar = f
         },
       ],
       // Con busqueda, el esquema estructurado no esta permitido: van excluyentes.
-      ...(buscar
-        ? { tools: [{ googleSearch: {} }] }
-        : { generationConfig: { responseMimeType: 'application/json', responseSchema: esquema } }),
+      ...(buscar ? { tools: [{ googleSearch: {} }] } : {}),
+      generationConfig: {
+        // gemini-3.8-flash piensa en MEDIUM por omision y, con busqueda, paso
+        // de los 22 s en sandbox (#363). LOW basta para leer una foto.
+        ...(env.VERTEX_API_KEY ? { thinkingConfig: { thinkingLevel: 'LOW' } } : {}),
+        ...(buscar ? {} : { responseMimeType: 'application/json', responseSchema: esquema }),
+      },
     }),
   });
   if (!respuesta.ok) {
