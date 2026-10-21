@@ -3,12 +3,13 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { runInNewContext } from 'node:vm';
-import { tienda } from './prueba-d1.ts';
+import { tienda, DUENO } from './prueba-d1.ts';
 import worker from './worker.ts';
 import { tsplEtiqueta, etiquetaVigente, partirNombre, NOMBRE_MAX } from '../public/etiquetera.js';
+import { CORRECCION_ESCANER_MS } from '../public/upc.js';
 
 const fuente = readFileSync('public/etiquetas.html', 'utf8').match(/<script type="module">([\s\S]*?)<\/script>/)![1]
-  .replace(/import\s*\{[\s\S]*?\}\s*from\s*'[^']+';/, '');
+  .replace(/import\s*\{[\s\S]*?\}\s*from\s*'[^']+';/g, '');
 const DESDE = '2026-10-11T15:00:00.000Z';
 const ANTES = '2026-10-11T14:00:00.000Z';
 const DESPUES = '2026-10-11T16:00:00.000Z';
@@ -105,7 +106,7 @@ async function pagina(t: ReturnType<typeof tienda>, ambiente = 'sandbox', almace
     impresas: marcas, marcarImpresa: (id: string, hora?: string, p?: any) => {
       if (!estado.falloMarca) almacen.set('etiqueta-impresas', JSON.stringify({ ...marcas(), [id]: { hora: hora || DESDE, ...p } }));
     },
-    etiquetaVigente, desmarcarDesde() {}, historialTexto: () => '',
+    etiquetaVigente, CORRECCION_ESCANER_MS, desmarcarDesde() {}, historialTexto: () => '',
     detenerEnvio: (valor = true) => { estado.detenido = valor; }, envioDetenido: () => estado.detenido, errorEnvio: () => 'BLE falló',
     setInterval() {}, AbortSignal, encodeURIComponent, Date, Map, console,
   });
@@ -357,6 +358,31 @@ test('la automática solo imprime ropa: mercancía general sin precio o nombre n
     assert.deepEqual(p.estado.enviadas, [{ id: ropa, copias: 1 }]);
     assert.equal(t.db.prepare('select codigo from productos where id=?').get(conPrecio)!.codigo, null);
     assert.equal(p.activa(), true);
+  } finally { t.db.close(); }
+});
+
+test('lo escaneado sale al cerrar sus 5 minutos de corrección, con la cantidad final y en orden (#369)', async () => {
+  const t = tienda();
+  try {
+    const ahora = new Date().toISOString();
+    const escaneada = agregar(t, ahora, 'listo', 2), ropa = agregar(t, ahora);
+    t.db.prepare("update productos set categoria='hogar', nombre='Estuche Yoobi', upc='0191907910414', capturado_por=?, creado_en=? where id=?")
+      .run(DUENO, new Date(Date.now() - 1000).toISOString(), escaneada);
+    const p = await pagina(t);
+    await p.iniciarAutomatica();
+    // Dentro de la ventana no sale nada, ni la ropa que viene detrás en la mesa.
+    assert.deepEqual(p.estado.enviadas, []);
+    assert.match(p.$('resumen').textContent, /corrección de cantidad de: Estuche Yoobi/);
+    assert.equal((await t.pedir(`/api/borradores/${escaneada}/existencia`, { stock: 3 }, 'PATCH')).status, 200);
+    // Cerrada la ventana el servidor ya no acepta cambios y se imprime la cantidad corregida.
+    const vieja = new Date(Date.now() - CORRECCION_ESCANER_MS - 60_000).toISOString();
+    t.db.prepare("update productos set creado_en=?, actualizado_en=? where id=?").run(vieja, new Date().toISOString(), escaneada);
+    assert.equal((await t.pedir(`/api/borradores/${escaneada}/existencia`, { stock: 9 }, 'PATCH')).status, 404);
+    await p.imprimirNuevas();
+    assert.deepEqual(p.estado.enviadas, [{ id: escaneada, copias: 3 }, { id: ropa, copias: 1 }]);
+    // La foto sin UPC conserva sus 24 horas.
+    t.db.prepare("update productos set capturado_por=?, creado_en=? where id=?").run(DUENO, vieja, ropa);
+    assert.equal((await t.pedir(`/api/borradores/${ropa}/existencia`, { stock: 2 }, 'PATCH')).status, 200);
   } finally { t.db.close(); }
 });
 

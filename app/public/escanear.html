@@ -48,6 +48,8 @@
   li:first-child { border-top: 0; }
   li.fallo { color: var(--rojo); cursor: pointer; }
   li .cant { font-weight: 700; white-space: nowrap; }
+  li .corregir { display: flex; gap: 6px; align-items: center; }
+  li .corregir button { width: 36px; height: 36px; font-size: 20px; border-radius: 8px; border: 0; background: #eef1f6; color: var(--azul); font-weight: 700; }
   footer { flex: none; display: flex; gap: 10px; align-items: center; padding: 10px 12px calc(10px + env(safe-area-inset-bottom));
     background: #fff; border-top: 1px solid var(--linea); }
   footer span { flex: 1; font-size: 15px; font-weight: 600; }
@@ -113,7 +115,7 @@
   </section>
 
   <section class="tarjeta">
-    <ul id="guardadas"><li class="dato">Lo guardado sale en Etiquetas, una etiqueta por pieza.</li></ul>
+    <ul id="guardadas"><li class="dato">Lo guardado sale solo en Etiquetas, una por pieza, 5 minutos después: mientras, corrige la cantidad con − y +.</li></ul>
   </section>
 </main>
 <input id="archivo-foto" type="file" accept="image/*" hidden>
@@ -125,7 +127,7 @@
 <script type="module">
 import { CATEGORIAS } from '/categorias.js';
 import { aJpeg, reducirArchivo } from '/foto.js';
-import { codigoLeido, normalizarUpc as normalizar } from '/upc.js';
+import { codigoLeido, normalizarUpc as normalizar, CORRECCION_ESCANER_MS } from '/upc.js';
 import { guardar as guardarFoto, leer as leerFoto, borrar as borrarFoto, pendientes } from '/cola-fotos.js';
 
 const NOMBRES = Object.fromEntries(CATEGORIAS);
@@ -229,8 +231,7 @@ async function enviar(pieza) {
     const guardada = await respuesta.json().catch(() => ({}));
     if (!respuesta.ok) throw new Error(guardada.error ?? `Error ${respuesta.status}`);
     piezas += guardada.stock;
-    anotar(`<span>${escapar(guardada.nombre)}${pieza.estado === 'danado' ? ' (dañado)' : ''}</span>
-      <span class="cant">×${guardada.stock} · ${pesos(guardada.precio)}</span>`);
+    anotarGuardada(guardada, pieza.estado === 'danado');
   } catch (error) {
     anotar(`<span>No se guardó: ${escapar(pieza.ficha.nombre)} ×${pieza.stock}. Toca para reintentar.</span>`,
       () => { fila = fila.then(() => enviar(pieza)); });
@@ -238,6 +239,50 @@ async function enviar(pieza) {
     avisar('no');
   }
   pintar();
+}
+
+/* ---------- corregir lo guardado: 5 minutos; luego Etiquetas imprime esa cantidad (#369) ---------- */
+
+function anotarGuardada(guardada, danado) {
+  anotar(`<span>${escapar(guardada.nombre)}${danado ? ' (dañado)' : ''}</span>
+    <span class="corregir"><button type="button" data-paso="-1" aria-label="Una pieza menos">−</button>
+    <span class="cant">×<span class="n">${guardada.stock}</span> · ${pesos(guardada.precio)}</span>
+    <button type="button" data-paso="1" aria-label="Una pieza más">+</button></span>`);
+  const li = $('guardadas').firstElementChild;
+  let guardado = guardada.stock, deseado = guardada.stock, espera = null, envio = Promise.resolve();
+  const cerrar = () => { for (const b of li.querySelectorAll('button')) b.remove(); };
+  // Se cierra un poco antes que el servidor: el último toque todavía alcanza a guardarse.
+  setTimeout(cerrar, CORRECCION_ESCANER_MS - 15_000);
+  async function guardar() {
+    const valor = deseado;
+    if (valor === guardado) return;
+    try {
+      const r = await fetch(`/api/borradores/${guardada.id}/existencia`, {
+        method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ stock: valor }),
+      });
+      const cuerpo = await r.json().catch(() => ({}));
+      if (r.status === 404) cerrar();
+      if (!r.ok) throw new Error(cuerpo.error ?? `Error ${r.status}`);
+      piezas += valor - guardado;
+      guardado = valor;
+    } catch (error) {
+      // No se queda en pantalla un número que el servidor no tiene.
+      deseado = guardado;
+      mensaje(`No se cambió la cantidad: ${error instanceof TypeError ? 'sin red' : error.message}`);
+      avisar('no');
+    }
+    li.querySelector('.n').textContent = deseado;
+    pintar();
+  }
+  li.addEventListener('click', (e) => {
+    const paso = Number(e.target.closest?.('button[data-paso]')?.dataset.paso);
+    if (!paso) return;
+    deseado = Math.min(999, Math.max(1, deseado + paso));
+    li.querySelector('.n').textContent = deseado;
+    // Tocar + cinco veces es una sola llamada con el número final.
+    clearTimeout(espera);
+    espera = setTimeout(() => { envio = envio.then(guardar); }, 600);
+  });
 }
 
 /* ---------- un codigo ---------- */
