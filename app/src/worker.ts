@@ -7,7 +7,7 @@
 
 import { analizarBorrador, modeloPorDefecto, type Modelo } from './analisis.ts';
 import { fichaDeManifiesto, normalizarUpc, precioListaMxn, type FichaManifiesto } from './manifiesto.ts';
-import { codigoLeido } from '../public/upc.js';
+import { codigoLeido, CORRECCION_ESCANER_MS } from '../public/upc.js';
 import { imagenGuardada, rutaImagenUpc } from './imagenes-upc.ts';
 import { PRENDAS_ROPA, PRECIOS_ROPA } from '../public/ropa.js';
 import { procesarColaRopa, rutaRopaAdmin } from './ropa-ia.ts';
@@ -77,6 +77,7 @@ interface FilaBorrador {
   stock: number;
   semana_ingreso: string;
   creado_en: string;
+  upc?: string | null;
 }
 
 /**
@@ -302,7 +303,7 @@ async function listarBorradores(url: URL, env: Env, propietario: string): Promis
   // el orden de la pantalla tiene que ser el mismo que el de la mesa o se
   // vuelve un rompecabezas saber que etiqueta es de que pieza.
   const consulta = `select id, codigo, nombre, categoria, marca, talla, precio_lista, precio, estado_fisico,
-                           estado_analisis, destino, stock, semana_ingreso, capturado_por, creado_en
+                           estado_analisis, destino, stock, semana_ingreso, capturado_por, creado_en, upc
                     from productos
                     where sin_inventario = 0 and propietario = ? ${cambios ? 'and actualizado_en > ?' : "and estado_analisis <> 'descartado'"}
                       ${estado ? 'and estado_analisis = ?' : ''} ${desde ? 'and creado_en >= ?' : ''}
@@ -568,13 +569,16 @@ async function corregirCaptura(id: string, campo: string, request: Request, env:
   }
   const columna = campo === 'existencia' ? 'stock' : 'talla';
   const desde = new Date(Date.now() - VENTANA_CAPTURA_MS).toISOString();
+  // Lo escaneado (con UPC) solo sus primeros minutos: después /etiquetas ya imprimió esa cantidad (#369).
+  const desdeEscaner = new Date(Date.now() - CORRECCION_ESCANER_MS).toISOString();
   const resultado = await env.DB.prepare(
-    `update productos set ${columna} = ?, actualizado_en = ? where id = ? and capturado_por = ? and creado_en > ? and estado_analisis <> 'descartado'`,
+    `update productos set ${columna} = ?, actualizado_en = ? where id = ? and capturado_por = ? and creado_en > ?
+       and (upc is null or creado_en > ?) and estado_analisis <> 'descartado'`,
   )
-    .bind(valor, new Date().toISOString(), id, correo, desde)
+    .bind(valor, new Date().toISOString(), id, correo, desde, desdeEscaner)
     .run();
   if (resultado.meta.changes === 0) {
-    return json({ error: 'Solo puedes cambiar lo que capturaste en las ultimas 24 horas.' }, 404);
+    return json({ error: 'Ya no se puede cambiar: lo escaneado se corrige en sus primeros 5 minutos y las fotos en 24 horas.' }, 404);
   }
   return json({ id, [columna]: valor });
 }

@@ -48,6 +48,13 @@ Cada escaneo guardado es una pieza nueva, aunque el UPC ya exista: `/etiquetas` 
 `stock` etiquetas al aparecer la pieza, y subirle el stock a una ya impresa no imprime las
 nuevas. Las repetidas se juntan con la fusión de siempre si hace falta.
 
+**Impresión automática y corrección (Issue #369).** La impresión automática de `/etiquetas`
+también toma lo escaneado (`productos.upc`), pero solo cuando cierran sus 5 minutos de
+corrección (`CORRECCION_ESCANER_MS` en `public/upc.js`, más 20 s de margen con la hora del
+servidor). En ese rato la lista de guardadas de `/escanear` tiene − y +; el servidor rechaza
+cambios después. Así salen tantas etiquetas como piezas quedaron. Lo escaneado respeta el
+orden de la mesa: mientras espera, lo que se capturó después también espera.
+
 ## Decisiones
 
 1. **Nombre (Isaac, 2026-10-20): traducido con IA** al formato de la tienda
