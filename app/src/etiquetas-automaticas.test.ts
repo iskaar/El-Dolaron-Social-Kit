@@ -361,25 +361,28 @@ test('la automática solo imprime ropa: mercancía general sin precio o nombre n
   } finally { t.db.close(); }
 });
 
-test('lo escaneado sale al cerrar sus 5 minutos de corrección, con la cantidad final y en orden (#369)', async () => {
+test('lo escaneado sale al cerrar sus 5 minutos de corrección, con la cantidad final, sin detener lo demás (#369, #375)', async () => {
   const t = tienda();
   try {
     const ahora = new Date().toISOString();
-    const escaneada = agregar(t, ahora, 'listo', 2), ropa = agregar(t, ahora);
+    const sinFoto = agregar(t, ahora, 'error'), escaneada = agregar(t, ahora, 'listo', 2), ropa = agregar(t, ahora);
+    t.db.prepare("update productos set nombre='', precio=0, upc='7501055320639', creado_en=? where id=?")
+      .run(new Date(Date.now() - CORRECCION_ESCANER_MS - 120_000).toISOString(), sinFoto);
     t.db.prepare("update productos set categoria='hogar', nombre='Estuche Yoobi', upc='0191907910414', capturado_por=?, creado_en=? where id=?")
       .run(DUENO, new Date(Date.now() - 1000).toISOString(), escaneada);
     const p = await pagina(t);
     await p.iniciarAutomatica();
-    // Dentro de la ventana no sale nada, ni la ropa que viene detrás en la mesa.
-    assert.deepEqual(p.estado.enviadas, []);
-    assert.match(p.$('resumen').textContent, /corrección de cantidad de: Estuche Yoobi/);
+    // Ni la escaneada que espera foto ni la que está en su ventana detienen la ropa de atrás.
+    assert.deepEqual(p.estado.enviadas, [{ id: ropa, copias: 1 }]);
+    assert.equal(p.activa(), true);
     assert.equal((await t.pedir(`/api/borradores/${escaneada}/existencia`, { stock: 3 }, 'PATCH')).status, 200);
     // Cerrada la ventana el servidor ya no acepta cambios y se imprime la cantidad corregida.
     const vieja = new Date(Date.now() - CORRECCION_ESCANER_MS - 60_000).toISOString();
     t.db.prepare("update productos set creado_en=?, actualizado_en=? where id=?").run(vieja, new Date().toISOString(), escaneada);
     assert.equal((await t.pedir(`/api/borradores/${escaneada}/existencia`, { stock: 9 }, 'PATCH')).status, 404);
     await p.imprimirNuevas();
-    assert.deepEqual(p.estado.enviadas, [{ id: escaneada, copias: 3 }, { id: ropa, copias: 1 }]);
+    assert.deepEqual(p.estado.enviadas, [{ id: ropa, copias: 1 }, { id: escaneada, copias: 3 }]);
+    assert.match(p.$('resumen').textContent, /piezas enviadas/);
     // La foto sin UPC conserva sus 24 horas.
     t.db.prepare("update productos set capturado_por=?, creado_en=? where id=?").run(DUENO, vieja, ropa);
     assert.equal((await t.pedir(`/api/borradores/${ropa}/existencia`, { stock: 2 }, 'PATCH')).status, 200);
