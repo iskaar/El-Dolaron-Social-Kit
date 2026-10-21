@@ -7,7 +7,7 @@
 
 import { analizarBorrador, identificarUpc, modeloPorDefecto, type Modelo } from './analisis.ts';
 import { fichaDeManifiesto, normalizarUpc, precioListaMxn, type FichaManifiesto } from './manifiesto.ts';
-import { codigoLeido, CORRECCION_ESCANER_MS, SIN_CODIGO } from '../public/upc.js';
+import { codigoLeido, SIN_CODIGO } from '../public/upc.js';
 import { ESTADOS } from '../public/estados.js';
 import { imagenGuardada, rutaImagenUpc } from './imagenes-upc.ts';
 import { PRENDAS_ROPA, PRECIOS_ROPA } from '../public/ropa.js';
@@ -638,26 +638,25 @@ async function corregirCaptura(id: string, campo: string, request: Request, env:
   }
   const columna = campo === 'existencia' ? 'stock' : 'talla';
   const desde = new Date(Date.now() - VENTANA_CAPTURA_MS).toISOString();
-  // Lo escaneado (con UPC) solo sus primeros minutos: después /etiquetas ya imprimió esa cantidad (#369).
-  const desdeEscaner = new Date(Date.now() - CORRECCION_ESCANER_MS).toISOString();
-  // En 0 lo escaneado por error se cancela y sale de la cola de etiquetas (#377). Solo lo que tiene
-  // UPC, dentro de su ventana y sin ventas: una foto se elimina desde su miniatura.
+  // Lo escaneado (con UPC) se corrige mientras está abierto en el escáner; ya guardado y `listo`,
+  // /etiquetas lo imprime en seguida, así que solo se corrige lo que aún se identifica o espera foto (#381).
+  // En 0 se cancela y sale de la cola (#377). Una foto se elimina desde su miniatura.
   if (valor === 0) {
     const { meta } = await env.DB.prepare(`update productos set stock = 0, estado_analisis = 'descartado', actualizado_en = ?
-      where id = ? and capturado_por = ? and upc is not null and creado_en > ? and estado_analisis <> 'descartado'
+      where id = ? and capturado_por = ? and upc is not null and creado_en > ? and estado_analisis not in ('listo', 'descartado')
         and not exists (select 1 from venta_lineas where producto_id = productos.id)`)
-      .bind(new Date().toISOString(), id, correo, desdeEscaner).run();
-    if (!meta.changes) return json({ error: 'Solo se cancela lo escaneado en sus primeros 5 minutos.' }, 404);
+      .bind(new Date().toISOString(), id, correo, desde).run();
+    if (!meta.changes) return json({ error: 'Ya tiene etiqueta: corrígela en el admin.' }, 404);
     return json({ id, stock: 0, descartado: true });
   }
   const resultado = await env.DB.prepare(
     `update productos set ${columna} = ?, actualizado_en = ? where id = ? and capturado_por = ? and creado_en > ?
-       and (upc is null or creado_en > ?) and estado_analisis <> 'descartado'`,
+       and (upc is null or estado_analisis <> 'listo') and estado_analisis <> 'descartado'`,
   )
-    .bind(valor, new Date().toISOString(), id, correo, desde, desdeEscaner)
+    .bind(valor, new Date().toISOString(), id, correo, desde)
     .run();
   if (resultado.meta.changes === 0) {
-    return json({ error: 'Ya no se puede cambiar: lo escaneado se corrige en sus primeros 5 minutos y las fotos en 24 horas.' }, 404);
+    return json({ error: 'Ya no se puede cambiar: lo escaneado ya tiene etiqueta y las fotos se corrigen en sus primeras 24 horas.' }, 404);
   }
   return json({ id, [columna]: valor });
 }

@@ -6,7 +6,6 @@ import { runInNewContext } from 'node:vm';
 import { tienda, DUENO } from './prueba-d1.ts';
 import worker from './worker.ts';
 import { tsplEtiqueta, etiquetaVigente, partirNombre, NOMBRE_MAX } from '../public/etiquetera.js';
-import { CORRECCION_ESCANER_MS } from '../public/upc.js';
 
 const fuente = readFileSync('public/etiquetas.html', 'utf8').match(/<script type="module">([\s\S]*?)<\/script>/)![1]
   .replace(/import\s*\{[\s\S]*?\}\s*from\s*'[^']+';/g, '');
@@ -106,7 +105,7 @@ async function pagina(t: ReturnType<typeof tienda>, ambiente = 'sandbox', almace
     impresas: marcas, marcarImpresa: (id: string, hora?: string, p?: any) => {
       if (!estado.falloMarca) almacen.set('etiqueta-impresas', JSON.stringify({ ...marcas(), [id]: { hora: hora || DESDE, ...p } }));
     },
-    etiquetaVigente, CORRECCION_ESCANER_MS, desmarcarDesde() {}, historialTexto: () => '',
+    etiquetaVigente, desmarcarDesde() {}, historialTexto: () => '',
     detenerEnvio: (valor = true) => { estado.detenido = valor; }, envioDetenido: () => estado.detenido, errorEnvio: () => 'BLE falló',
     setInterval() {}, AbortSignal, encodeURIComponent, Date, Map, console,
   });
@@ -361,36 +360,28 @@ test('la automática solo imprime ropa: mercancía general sin precio o nombre n
   } finally { t.db.close(); }
 });
 
-test('lo escaneado sale al cerrar sus 5 minutos de corrección, con la cantidad final, sin detener lo demás (#369, #375)', async () => {
+test('lo escaneado sale en cuanto se guarda, sin detener lo demás; se corrige o cancela solo mientras se identifica (#375, #377, #381)', async () => {
   const t = tienda();
   try {
     const ahora = new Date().toISOString();
     const sinFoto = agregar(t, ahora, 'error'), escaneada = agregar(t, ahora, 'listo', 2), ropa = agregar(t, ahora);
-    t.db.prepare("update productos set nombre='', precio=0, upc='7501055320639', creado_en=? where id=?")
-      .run(new Date(Date.now() - CORRECCION_ESCANER_MS - 120_000).toISOString(), sinFoto);
-    t.db.prepare("update productos set categoria='hogar', nombre='Estuche Yoobi', upc='0191907910414', capturado_por=?, creado_en=? where id=?")
-      .run(DUENO, new Date(Date.now() - 1000).toISOString(), escaneada);
+    t.db.prepare("update productos set nombre='', precio=0, upc='7501055320639', capturado_por=? where id=?").run(DUENO, sinFoto);
+    t.db.prepare("update productos set categoria='hogar', nombre='Estuche Yoobi', upc='0191907910414', capturado_por=? where id=?")
+      .run(DUENO, escaneada);
     const p = await pagina(t);
     await p.iniciarAutomatica();
-    // Ni la escaneada que espera foto ni la que está en su ventana detienen la ropa de atrás.
-    assert.deepEqual(p.estado.enviadas, [{ id: ropa, copias: 1 }]);
+    // La escaneada lista sale de inmediato con su cantidad; la que espera foto no detiene la ropa de atrás.
+    assert.deepEqual(p.estado.enviadas, [{ id: escaneada, copias: 2 }, { id: ropa, copias: 1 }]);
     assert.equal(p.activa(), true);
-    assert.equal((await t.pedir(`/api/borradores/${escaneada}/existencia`, { stock: 3 }, 'PATCH')).status, 200);
-    // Cerrada la ventana el servidor ya no acepta cambios y se imprime la cantidad corregida.
-    const vieja = new Date(Date.now() - CORRECCION_ESCANER_MS - 60_000).toISOString();
-    t.db.prepare("update productos set creado_en=?, actualizado_en=? where id=?").run(vieja, new Date().toISOString(), escaneada);
-    assert.equal((await t.pedir(`/api/borradores/${escaneada}/existencia`, { stock: 9 }, 'PATCH')).status, 404);
-    await p.imprimirNuevas();
-    assert.deepEqual(p.estado.enviadas, [{ id: ropa, copias: 1 }, { id: escaneada, copias: 3 }]);
-    assert.match(p.$('resumen').textContent, /piezas enviadas/);
-    // Lo escaneado en 0 se cancela dentro de su ventana y sale de la cola (#377); fuera de ella, no.
-    const error = agregar(t, new Date().toISOString(), 'listo', 2);
-    t.db.prepare("update productos set categoria='hogar', upc='0191907910414', capturado_por=? where id=?").run(DUENO, error);
-    assert.equal((await t.pedir(`/api/borradores/${error}/existencia`, { stock: 0 }, 'PATCH')).cuerpo.descartado, true);
-    assert.deepEqual({ ...t.db.prepare('select stock, estado_analisis from productos where id=?').get(error)! }, { stock: 0, estado_analisis: 'descartado' });
+    // Ya con etiqueta no se corrige ni se cancela desde el escáner.
+    assert.equal((await t.pedir(`/api/borradores/${escaneada}/existencia`, { stock: 3 }, 'PATCH')).status, 404);
     assert.equal((await t.pedir(`/api/borradores/${escaneada}/existencia`, { stock: 0 }, 'PATCH')).status, 404);
+    // La que aún espera foto sí: cambia su cantidad y en 0 sale de la cola.
+    assert.equal((await t.pedir(`/api/borradores/${sinFoto}/existencia`, { stock: 3 }, 'PATCH')).status, 200);
+    assert.equal((await t.pedir(`/api/borradores/${sinFoto}/existencia`, { stock: 0 }, 'PATCH')).cuerpo.descartado, true);
+    assert.deepEqual({ ...t.db.prepare('select stock, estado_analisis from productos where id=?').get(sinFoto)! }, { stock: 0, estado_analisis: 'descartado' });
     // La foto sin UPC conserva sus 24 horas.
-    t.db.prepare("update productos set capturado_por=?, creado_en=? where id=?").run(DUENO, vieja, ropa);
+    t.db.prepare("update productos set capturado_por=? where id=?").run(DUENO, ropa);
     assert.equal((await t.pedir(`/api/borradores/${ropa}/existencia`, { stock: 2 }, 'PATCH')).status, 200);
   } finally { t.db.close(); }
 });
@@ -410,8 +401,8 @@ test('alta solo con foto desde el escáner: se guarda sin código y se imprime s
     for (const [k, v] of cuerpo) malo.set(k, v);
     malo.set('id', crypto.randomUUID()); malo.set('upc', 'abc');
     assert.equal((await worker.fetch!(new Request('https://caja.prueba/api/borradores', { method: 'POST', body: malo }) as never, t.env, { waitUntil() {} } as never)).status, 400);
-    // Ya analizada y pasada su ventana sale sola; una foto general de /captura (upc nulo) no.
-    const vieja = new Date(Date.now() - CORRECCION_ESCANER_MS - 60_000).toISOString();
+    // Ya analizada sale sola; una foto general de /captura (upc nulo) no.
+    const vieja = new Date(Date.now() - 60_000).toISOString();
     t.db.prepare("update productos set nombre='Lámpara de mesa', categoria='hogar', precio=19900, estado_analisis='listo', creado_en=? where id=?").run(vieja, id);
     const general = agregar(t, vieja);
     t.db.prepare("update productos set categoria='hogar' where id=?").run(general);

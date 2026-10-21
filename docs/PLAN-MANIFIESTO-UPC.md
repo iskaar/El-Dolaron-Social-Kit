@@ -47,7 +47,7 @@ el código completo leído, con sus ceros iniciales, en `productos.upc`.
    10 s) manda `POST /api/borradores/upc/buscar {id, upc, stock, estado_fisico}`. La pieza nace
    `pendiente` con su código y cantidad y el Worker, en `waitUntil`, le pregunta a Gemini por Vertex
    con búsqueda de Google **solo el código** (sin foto). Con nombre seguro (confianza ≥ 0.5) y
-   precio queda `listo` con código `ED-` y la impresión automática la toma al cerrar sus 5 minutos.
+   precio queda `listo` con código `ED-` y la impresión automática la toma en seguida.
    Si no, queda `error`: el escáner (que consulta `GET /api/borradores/upc/:id` cada 4 s) pone la
    fila en rojo y al tocarla abre la foto de esa misma pieza; la foto pasa por el análisis normal
    y nunca duplica ni repone stock. Mientras esa pieza espera, la cola automática se detiene en
@@ -57,12 +57,12 @@ Cada escaneo guardado es una pieza nueva, aunque el UPC ya exista: `/etiquetas` 
 `stock` etiquetas al aparecer la pieza, y subirle el stock a una ya impresa no imprime las
 nuevas. Las repetidas se juntan con la fusión de siempre si hace falta.
 
-**Impresión automática y corrección (Issue #369).** La impresión automática de `/etiquetas`
-también toma lo escaneado (`productos.upc`), pero solo cuando cierran sus 5 minutos de
-corrección (`CORRECCION_ESCANER_MS` en `public/upc.js`, más 20 s de margen con la hora del
-servidor). En ese rato la lista de guardadas de `/escanear` tiene − y +; el servidor rechaza
-cambios después. Así salen tantas etiquetas como piezas quedaron. Lo escaneado respeta el
-orden de la mesa: mientras espera, lo que se capturó después también espera.
+**Impresión automática y corrección (Issues #369, #375, #377, #381).** La impresión automática de
+`/etiquetas` también toma lo escaneado (`productos.upc` con código, o vacío si se dio de alta solo con
+foto, #379). La cantidad se cierra en el escáner: la pieza abierta se guarda a los 25 s sin escanear, al
+escanear otro código o con «Guardar»; mientras está abierta se corrige y en 0 se cancela. Ya guardada y
+`listo`, sale en la siguiente consulta (≤ 30 s) y el servidor ya no acepta cambios desde el escáner. Lo
+que aún se identifica o espera foto conserva − y + (en 0 se cancela) y no detiene la cola.
 
 ## Decisiones
 
