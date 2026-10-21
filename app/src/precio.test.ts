@@ -26,6 +26,13 @@ test('una pieza danada baja al 60 % de ese precio', () => {
   assert.deepEqual(precio(100000, 'ropa', 'danado'), { precio: 29900, destino: 'etiqueta' }); // $1000 * 0.3 = $300 -> $299
 });
 
+test('liquidación (C) es un % del precio de lista, sin el de categoría: hasta 80 % de descuento (#371)', () => {
+  assert.deepEqual(precio(100000, 'ropa', 'liquidacion'), { precio: 19900, destino: 'etiqueta' }); // $1000 * 0.2 = $200 -> $199
+  assert.deepEqual(calcularPrecio({ precioLista: 100000, categoria: 'hogar', estadoFisico: 'liquidacion', config: { ...config, pct_liquidacion: '10' } }),
+    { precio: 9900, destino: 'etiqueta' });
+  assert.ok(precio(100000, 'ropa', 'liquidacion').precio < precio(100000, 'ropa', 'danado').precio);
+});
+
 test('toda pieza fotografiada lleva etiqueta, tambien la barata: ya no cae sola a una banda', () => {
   assert.deepEqual(precio(7000), { precio: 3900, destino: 'etiqueta' });   // $70 -> $35 -> $40 -> $39
   assert.deepEqual(precio(3000), { precio: 1900, destino: 'etiqueta' });   // $30 -> $15 -> $20 -> $19

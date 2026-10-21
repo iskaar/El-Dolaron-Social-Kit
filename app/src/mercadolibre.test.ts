@@ -468,6 +468,7 @@ test('publicar: dañadas, bandas, sin revisar, sin existencias o inexistentes no
   await conML(async (t) => {
     const casos: [string, string, number][] = [
       [pieza(t, { estado_fisico: 'danado' }), 'dañado', 409],
+      [pieza(t, { estado_fisico: 'liquidacion' }), 'liquidación', 409],
       [pieza(t, { destino: 'banda_ju49', sin_inventario: 1, codigo: 'XX49', stock: 0 }), 'bandas', 409],
       [pieza(t, { estado_analisis: 'pendiente' }), 'revisa', 409],
       [pieza(t, { stock: 0 }), 'existencias', 409],

@@ -115,6 +115,11 @@ export function calcularPrecio({ precioLista, categoria, estadoFisico, config }:
     return { precio: 0, destino: 'etiqueta' };
   }
 
+  // Grado C, liquidación total (#371): un % del precio de lista, sin sumar el de categoría.
+  if (estadoFisico === 'liquidacion') {
+    return conEtiqueta((precioLista * entero(config, 'pct_liquidacion', 20)) / 100, precioLista);
+  }
+
   const pctCategoria = entero(config, `pct_${categoria}`, entero(config, 'pct_otros', 50));
   const pctDanado = estadoFisico === 'danado' ? entero(config, 'pct_danado', 60) : 100;
 

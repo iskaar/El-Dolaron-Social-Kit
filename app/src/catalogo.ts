@@ -78,7 +78,7 @@ export async function revisionCatalogo(env: Env): Promise<Response> {
       (p.foto_key = '') as sin_foto, (p.precio <= 0) as sin_precio, (trim(p.nombre) = '') as sin_nombre, ${NOMBRE_INTERNO} as nombre_interno
     from productos p
     where p.destino = 'etiqueta' and p.sin_inventario = 0 and p.estado_analisis = 'listo' and p.stock > 0
-      and p.estado_fisico <> 'danado' and p.codigo like 'ED-%'
+      and p.estado_fisico = 'nuevo' and p.codigo like 'ED-%'
       and (p.precio <= 0 or p.foto_key = '' or trim(p.nombre) = '' or ${NOMBRE_INTERNO})
     order by p.creado_en desc, p.codigo`).all<Record<string, any>>();
   const piezas = filas.results.map(({ sin_foto, sin_precio, sin_nombre, nombre_interno, ...p }) => ({

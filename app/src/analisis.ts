@@ -333,7 +333,8 @@ export async function analizarBorrador(
     // Con suficientes ejemplos manda el criterio de Isaac; sin ellos, el
     // porcentaje de la configuracion. El porcentaje nunca describio como cobra
     // —dos piezas de `hogar` fueron a 57 % y a 29 %— pero es un arranque honesto.
-    const conEjemplos = ejemplos.length >= EJEMPLOS_MINIMOS && ficha.precio_venta_mxn > 0;
+    // La liquidación (C) siempre va por su %: la sugerencia de la IA no conoce el grado (#371).
+    const conEjemplos = ejemplos.length >= EJEMPLOS_MINIMOS && ficha.precio_venta_mxn > 0 && fila.estado_fisico !== 'liquidacion';
     const { precio, destino } = conEjemplos
       ? precioDesdeSugerencia({ precioLista, sugerido: ficha.precio_venta_mxn * 100 })
       : calcularPrecio({ precioLista, categoria: ficha.categoria, estadoFisico: fila.estado_fisico, config });

@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { runInNewContext } from 'node:vm';
+import { nombreEstado, siguienteEstado } from '../public/estados.js';
 import worker, { permitidaParaVendedor } from './worker.ts';
 import { analizarBorrador } from './analisis.ts';
 import { tienda, DUENO } from './prueba-d1.ts';
@@ -161,6 +162,7 @@ function miniatura(subida: boolean) {
     ({ abrirRevision, cerrarRevision, precio: v => { fichaRevision.precio = v; },
        guardar: () => elGuardarRevision.eventos.get('click')(), condicion: () => elRevisarEstado.eventos.get('click')(),
        eliminar: () => elDescartar.eventos.get('click')() })`, {
+    nombreEstado, siguienteEstado,
     document: { getElementById: $ }, sesion, preciosRopa: [20000, 15000, 10000, 8000, 5000], idSubiendo: null,
     prendasRopa: ['Playera'], marcasRopa: ['All in Motion'], elegirOpcion() {},
     chips() {}, selectorTalla: () => ({ poner() {} }), activarControlCantidad() {},
