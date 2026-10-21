@@ -13,6 +13,9 @@
   body.ok { border-color: var(--verde); }
   body.mas { border-color: var(--azul); }
   body.no { border-color: var(--rojo); }
+  /* Sale la etiqueta (#396): toda la pantalla en amarillo, que se vea de reojo. */
+  body.etiqueta { background: var(--amarillo); border-color: var(--amarillo); transition: background .15s; }
+  #aviso.etiqueta { color: var(--azul); font-weight: 800; font-size: 16px; }
   header { background: var(--azul); color: #fff; padding: 8px 14px; display: flex; gap: 14px; align-items: center; }
   header h1 { font-size: 16px; margin: 0; flex: 1; }
   header a, header button.liga { color: var(--amarillo); font-size: 14px; background: none; border: 0; padding: 0; cursor: pointer; }
@@ -154,7 +157,7 @@ let piezaParaFoto = null;
 
 let audio = null;
 function avisar(tipo) {
-  const tonos = { ok: [[880, 90]], mas: [[1320, 60]], no: [[220, 250], [180, 250]] }[tipo];
+  const tonos = { ok: [[880, 90]], mas: [[1320, 60]], no: [[220, 250], [180, 250]], etiqueta: [[1046, 80], [1568, 120]] }[tipo];
   try {
     audio ??= new AudioContext();
     let t = audio.currentTime;
@@ -167,17 +170,19 @@ function avisar(tipo) {
       t += ms / 1000 + 0.05;
     }
   } catch { /* sin audio, queda la vibracion y el color */ }
-  navigator.vibrate?.(tipo === 'no' ? [200, 100, 200] : 40);
-  document.body.className = tipo;
-  setTimeout(() => { document.body.className = ''; }, 350);
+  navigator.vibrate?.({ no: [200, 100, 200], etiqueta: [150, 80, 150, 80, 150] }[tipo] ?? 40);
+  // El amarillo de la etiqueta no lo tapa el verde del siguiente escaneo; un error sí.
+  if (document.body.className !== 'etiqueta' || tipo === 'no') document.body.className = tipo;
+  setTimeout(() => { if (document.body.className === tipo) document.body.className = ''; }, tipo === 'etiqueta' ? 1500 : 350);
 }
 
-function mensaje(texto) { $('aviso').textContent = texto; }
+function mensaje(texto) { $('aviso').textContent = texto; $('aviso').classList.remove('etiqueta'); }
 
 /** Ya tiene nombre y precio: /etiquetas la imprime en segundos. Se le avisa a quien escanea (#394). */
 function avisarEtiqueta(nombre, stock) {
   mensaje(`Sale la etiqueta: ${nombre} ×${stock}`);
-  navigator.vibrate?.([80, 60, 80]);
+  $('aviso').classList.add('etiqueta');
+  avisar('etiqueta');
 }
 
 /* ---------- pintar ---------- */
