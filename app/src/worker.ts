@@ -6,6 +6,7 @@
  */
 
 import { analizarBorrador, modeloPorDefecto, type Modelo } from './analisis.ts';
+import { fichaDeManifiesto, normalizarUpc, precioListaMxn, type FichaManifiesto } from './manifiesto.ts';
 import { PRENDAS_ROPA, PRECIOS_ROPA } from '../public/ropa.js';
 import { procesarColaRopa, rutaRopaAdmin } from './ropa-ia.ts';
 import { calcularPrecio, ajustarManual, esDestinoBanda, prefijoParaFamilia, MONTOS_BANDA, type Destino } from './precio.ts';
@@ -82,7 +83,9 @@ interface FilaBorrador {
  * valiendo si algun dia la politica de Access queda mal configurada. Los precios
  * y el inventario no viven en el telefono que anda en el pasillo.
  */
-const RUTAS_VENDEDOR = new Set(['/captura', '/foto.js', '/tallas.js', '/api/salud', '/sin-acceso', '/api/yo']);
+const RUTAS_VENDEDOR = new Set(['/captura', '/foto.js', '/tallas.js', '/api/salud', '/sin-acceso', '/api/yo',
+  // Escanear del manifiesto (Issue #365): el telefono ve nombre y precio de lo que escanea, nada mas.
+  '/escanear', '/categorias.js']);
 const CORRECCION_CAPTURA = /^\/api\/borradores\/([^/]+)\/(existencia|talla|revision)$/;
 
 export function permitidaParaVendedor(pathname: string, metodo: string): boolean {
@@ -98,7 +101,10 @@ export function permitidaParaVendedor(pathname: string, metodo: string): boolean
   if (pathname === '/api/solicitudes/acceso') {
     return metodo === 'POST';
   }
-  return pathname === '/api/borradores' && metodo === 'POST';
+  if (/^\/api\/manifiesto\/[^/]+$/.test(pathname)) {
+    return metodo === 'GET';
+  }
+  return (pathname === '/api/borradores' || pathname === '/api/borradores/upc') && metodo === 'POST';
 }
 
 const FRANJA_SANDBOX = `<div style="background:#D72B32;color:#fff;text-align:center;font:700 14px system-ui,sans-serif;padding:6px">
@@ -399,7 +405,10 @@ async function corregirBorrador(id: string, cambios: Record<string, unknown>, en
  * validaciones y mismo calculo de precio. Idempotente por id, como la foto.
  */
 async function capturarManual(request: Request, env: Env, correo: string): Promise<Response> {
-  const cuerpo = (await request.json().catch(() => ({}))) as Record<string, unknown>;
+  return await altaManual((await request.json().catch(() => ({}))) as Record<string, unknown>, env, correo);
+}
+
+async function altaManual(cuerpo: Record<string, unknown>, env: Env, correo: string, upc: string | null = null): Promise<Response> {
   const id = String(cuerpo.id ?? '');
   if (!UUID.test(id)) return json({ error: 'Identificador invalido.' }, 400);
   if (!String(cuerpo.nombre ?? '').trim()) return json({ error: 'Falta el nombre.' }, 400);
@@ -408,10 +417,10 @@ async function capturarManual(request: Request, env: Env, correo: string): Promi
   }
   const ahora = new Date().toISOString();
   const { meta } = await env.DB.prepare(
-    `insert into productos (id, semana_ingreso, capturado_por, creado_en, actualizado_en) values (?, ?, ?, ?, ?)
+    `insert into productos (id, semana_ingreso, capturado_por, creado_en, actualizado_en, upc) values (?, ?, ?, ?, ?, ?)
      on conflict (id) do nothing`,
   )
-    .bind(id, semanaIngreso(new Date()), correo, ahora, ahora)
+    .bind(id, semanaIngreso(new Date()), correo, ahora, ahora, upc)
     .run();
   const respuesta = await corregirBorrador(id, cuerpo, env, true);
   // Datos invalidos: no queda una pieza vacia (salvo que fuera un reintento de una ya guardada).
@@ -425,6 +434,49 @@ async function capturarManual(request: Request, env: Env, correo: string): Promi
      where id = ? and (codigo is null or codigo = '') and destino not like 'banda%'`,
   ).bind(new Date().toISOString(), id).run();
   return json(await respuesta.json(), 201);
+}
+
+/**
+ * Lo que el manifiesto dice de un UPC, con el precio de lista en pesos (Issue
+ * #365). El precio de venta de una pieza nueva es solo para la pantalla: al
+ * guardar se recalcula aqui mismo, nunca se toma del cliente.
+ */
+async function precioDeManifiesto(upcCrudo: string, env: Env): Promise<Response | { ficha: FichaManifiesto; precioLista: number; config: Record<string, string> }> {
+  const upc = normalizarUpc(upcCrudo);
+  if (!upc || upc.length > 14) return json({ error: 'Código de barras inválido.' }, 400);
+  const ficha = await fichaDeManifiesto(upc, env);
+  if (!ficha) return json({ error: 'Ese código no está en el manifiesto: captura la pieza con foto.' }, 404);
+  const config = await leerConfig(env);
+  const tipoCambio = Number.parseInt(config.tipo_cambio ?? '', 10);
+  if (!(tipoCambio > 0)) return json({ error: 'Falta el tipo de cambio: ponlo en la configuración del admin.' }, 409);
+  return { ficha, precioLista: precioListaMxn(ficha.precio_usd, tipoCambio), config };
+}
+
+async function buscarEnManifiesto(upcCrudo: string, env: Env): Promise<Response> {
+  const resultado = await precioDeManifiesto(upcCrudo, env);
+  if (resultado instanceof Response) return resultado;
+  const { ficha, precioLista, config } = resultado;
+  const categoria = ficha.categoria || 'otros';
+  return json({
+    upc: ficha.upc, nombre: ficha.nombre || ficha.descripcion, traducido: !!ficha.nombre, descripcion: ficha.descripcion,
+    marca: ficha.marca, categoria, precio_usd: ficha.precio_usd, precio_lista: precioLista,
+    precio: calcularPrecio({ precioLista, categoria, estadoFisico: 'nuevo', config }).precio,
+    enlace: ficha.tcin ? `https://www.target.com/p/-/A-${ficha.tcin}` : '',
+  });
+}
+
+/** Alta de una pieza escaneada: todo sale del manifiesto menos la cantidad y el estado. */
+async function capturarPorUpc(request: Request, env: Env, correo: string): Promise<Response> {
+  const cuerpo = (await request.json().catch(() => ({}))) as Record<string, unknown>;
+  const stock = Number(cuerpo.stock);
+  if (!Number.isInteger(stock) || stock < 1 || stock > 999) return json({ error: 'Cantidad inválida.' }, 400);
+  const resultado = await precioDeManifiesto(String(cuerpo.upc ?? ''), env);
+  if (resultado instanceof Response) return resultado;
+  const { ficha, precioLista } = resultado;
+  return await altaManual({
+    id: cuerpo.id, nombre: ficha.nombre || ficha.descripcion, marca: ficha.marca, categoria: ficha.categoria || 'otros',
+    precio_lista: precioLista, stock, estado_fisico: cuerpo.estado_fisico ?? 'nuevo',
+  }, env, correo, ficha.upc);
 }
 
 /** Cuanto dura abierta la correccion desde la camara. */
@@ -2040,6 +2092,13 @@ export default {
 
       if (pathname === '/api/borradores/manual' && request.method === 'POST') {
         return await capturarManual(request, env, correo);
+      }
+      if (pathname === '/api/borradores/upc' && request.method === 'POST') {
+        return await capturarPorUpc(request, env, correo);
+      }
+      const upcBuscado = pathname.match(/^\/api\/manifiesto\/([^/]+)$/);
+      if (upcBuscado && request.method === 'GET') {
+        return await buscarEnManifiesto(decodeURIComponent(upcBuscado[1]), env);
       }
 
       const pieza = pathname.match(/^\/api\/borradores\/([^/]+)$/);
