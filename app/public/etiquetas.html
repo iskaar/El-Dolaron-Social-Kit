@@ -66,7 +66,7 @@
   <p id="ayuda-automatica" class="ayuda" hidden>
     Inicia aquí y toma las fotos en <a href="/captura" target="_blank" rel="noopener">la cámara</a> desde el teléfono en el mismo entorno.
     Se imprime ropa y lo capturado en <a href="/escanear" target="_blank" rel="noopener">Escanear</a>, una etiqueta por pieza en existencia, cuando su precio está listo;
-    lo escaneado sale al cerrar sus 5 minutos de corrección. El resto de la mercancía general se imprime a mano.
+    lo escaneado sale en cuanto se guarda (25 s, otro código o Guardar). El resto de la mercancía general se imprime a mano.
     Deja esta página abierta en la computadora. Al detener o recargar, puedes retomar la misma sesión.
     «Nueva sesión» deja las pendientes anteriores para impresión manual y empieza con las próximas fotos.
     El precio debe estar asignado antes de imprimir; las piezas sin nombre o precio esperan en la cola.
@@ -110,7 +110,6 @@ import {
   conectarEtiquetera, etiqueteraLista, imprimirEtiquetas, historialTexto, detenerEnvio, envioDetenido,
   errorEnvio, impresas, marcarImpresa, desmarcarDesde, etiquetaVigente, precioImpreso,
 } from '/etiquetera.js';
-import { CORRECCION_ESCANER_MS } from '/upc.js';
 
 const lista = document.getElementById('lista');
 const resumen = document.getElementById('resumen');
@@ -433,8 +432,6 @@ let automaticaDesde = '';
 let piezasSesion = new Map();
 let cambiosDesde = null;   // hora del SERVIDOR de la última consulta, menos un traslape
 const TRASLAPE_MS = 2 * 60_000;
-// Holgura sobre la corrección del escáner: un PATCH en el último segundo ya llegó al servidor.
-const MARGEN_CORRECCION_MS = 20_000;
 let automaticaActiva = false;
 let consultandoAutomatica = false;
 
@@ -534,13 +531,13 @@ async function imprimirNuevas() {
         if ((p.categoria !== 'ropa' && !delEscaner) || etiquetaVigente(hechas[p.id], p) || p.stock <= 0 || p.destino !== 'etiqueta') continue;
         const quien = `${p.nombre?.trim() || 'pieza sin nombre'} (capturada ${hora(p.creado_en)})`;
         const lista = p.estado_analisis === 'listo' && p.nombre?.trim() && p.precio > 0;
-        // Lo escaneado espera a que cierre su corrección: salen tantas etiquetas como piezas quedaron.
-        // No detiene la cola: su etiqueta trae el nombre exacto del producto, así que no depende del
-        // orden de la mesa, y una pieza que espera foto no frena las demás (#375).
-        if (delEscaner && (!lista || ahora < Date.parse(p.creado_en) + CORRECCION_ESCANER_MS + MARGEN_CORRECCION_MS)) {
+        // Lo escaneado sale en cuanto se guarda: su cantidad se cierra en el escáner (25 s, otro código
+        // o Guardar, #381). No detiene la cola: su etiqueta trae el nombre exacto del producto, así que
+        // no depende del orden de la mesa, y una pieza que espera foto no frena las demás (#375).
+        if (delEscaner && !lista) {
           esperando ||= p.estado_analisis === 'error'
             ? `Falta foto de lo escaneado: ${quien}. Tócala en el escáner; las demás siguen.`
-            : `Esperando que cierre la corrección de cantidad de: ${quien}.`;
+            : `Identificando lo escaneado: ${quien}.`;
           continue;
         }
         // Conservar el orden de la mesa aunque un análisis posterior termine primero.

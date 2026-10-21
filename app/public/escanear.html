@@ -116,7 +116,7 @@
   </section>
 
   <section class="tarjeta">
-    <ul id="guardadas"><li class="dato">Lo guardado sale solo en Etiquetas, una por pieza, 5 minutos después: mientras, corrige la cantidad con − y +; en 0 se cancela.</li></ul>
+    <ul id="guardadas"><li class="dato">La pieza se guarda a los 25 s, al escanear otra o con Guardar, y su etiqueta sale sola: corrige la cantidad antes, con − y + (en 0 se cancela).</li></ul>
   </section>
 </main>
 <input id="archivo-foto" type="file" accept="image/*" hidden>
@@ -129,7 +129,7 @@
 import { CATEGORIAS } from '/categorias.js';
 import { nombreEstado, siguienteEstado } from '/estados.js';
 import { aJpeg, reducirArchivo } from '/foto.js';
-import { codigoLeido, normalizarUpc as normalizar, CORRECCION_ESCANER_MS, SIN_CODIGO } from '/upc.js';
+import { codigoLeido, normalizarUpc as normalizar, SIN_CODIGO } from '/upc.js';
 import { guardar as guardarFoto, leer as leerFoto, borrar as borrarFoto, pendientes } from '/cola-fotos.js';
 
 const NOMBRES = Object.fromEntries(CATEGORIAS);
@@ -137,7 +137,7 @@ const $ = (id) => document.getElementById(id);
 const pesos = (c) => `$${Math.round(c / 100).toLocaleString('es-MX')}`;
 const escapar = (t) => String(t ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
 // Se guarda solo despues de este rato sin escanear: da tiempo de juntar las piezas iguales.
-const GUARDAR_SOLA_MS = 10_000;
+const GUARDAR_SOLA_MS = 25_000;
 // Con la camara, el mismo codigo cuenta otra vez solo si salio de la vista este rato.
 const FUERA_DE_VISTA_MS = 700;
 
@@ -253,18 +253,18 @@ async function enviar(pieza) {
   pintar();
 }
 
-/* ---------- corregir lo guardado: 5 minutos; luego Etiquetas imprime esa cantidad (#369) ---------- */
+/* ---------- lo guardado con nombre y precio sale a Etiquetas en seguida; lo que aun se identifica
+   o espera foto se corrige con - y +, y en 0 se cancela (#377, #381) ---------- */
 
 function anotarGuardada(guardada, grado) {
+  const corregible = guardada.estado_analisis !== 'listo';
   anotar(`<span>${escapar(guardada.nombre)}${grado !== 'nuevo' ? ` (${escapar(nombreEstado(grado))})` : ''}</span>
-    <span class="corregir"><button type="button" data-paso="-1" aria-label="Una pieza menos">−</button>
+    <span class="corregir">${corregible ? '<button type="button" data-paso="-1" aria-label="Una pieza menos">−</button>' : ''}
     <span class="cant">×<span class="n">${guardada.stock}</span> · <span class="p">${guardada.precio > 0 ? pesos(guardada.precio) : 'buscando…'}</span></span>
-    <button type="button" data-paso="1" aria-label="Una pieza más">+</button></span>`);
+    ${corregible ? '<button type="button" data-paso="1" aria-label="Una pieza más">+</button>' : ''}</span>`);
   const li = $('guardadas').firstElementChild;
   let guardado = guardada.stock, deseado = guardada.stock, espera = null, envio = Promise.resolve();
   const cerrar = () => { for (const b of li.querySelectorAll('button')) b.remove(); };
-  // Se cierra un poco antes que el servidor: el último toque todavía alcanza a guardarse.
-  setTimeout(cerrar, CORRECCION_ESCANER_MS - 15_000);
   async function guardar() {
     const valor = deseado;
     if (valor === guardado) return;
@@ -301,7 +301,7 @@ function anotarGuardada(guardada, grado) {
     clearTimeout(espera);
     espera = setTimeout(() => { envio = envio.then(guardar); }, 600);
   });
-  return { li, cantidad: () => guardado };
+  return { li, cantidad: () => guardado, cerrar };
 }
 
 /* ---------- UPC que no está en la hoja: se busca solo y el capturista sigue (#373) ---------- */
@@ -328,7 +328,7 @@ async function buscar(pieza) {
 const BUSQUEDA_CADA_MS = 4000;
 const BUSQUEDA_INTENTOS = 15;   // ~1 min; la búsqueda corta a los 22 s en el servidor
 
-function seguirBusqueda(pieza, { li, cantidad }) {
+function seguirBusqueda(pieza, { li, cantidad, cerrar }) {
   let intentos = 0;
   const revisar = async () => {
     intentos += 1;
@@ -338,6 +338,7 @@ function seguirBusqueda(pieza, { li, cantidad }) {
       if (r.ok) datos = await r.json();
     } catch { /* sin red: se vuelve a preguntar */ }
     if (datos?.estado_analisis === 'listo') {
+      cerrar();   // ya va a Etiquetas: su cantidad quedó cerrada
       li.firstElementChild.textContent = datos.nombre;
       li.querySelector('.p').textContent = `${pesos(datos.precio)} · etiqueta en camino`;
       return;
