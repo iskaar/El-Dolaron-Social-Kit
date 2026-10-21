@@ -94,3 +94,24 @@ test('lo que sí está en la hoja, datos inválidos y permisos', async (t) => {
   assert.equal(permitidaParaVendedor(`/api/borradores/upc/${crypto.randomUUID()}`, 'POST'), false);
   assert.equal(p.llamadas.length, 0);
 });
+
+test('un UPC identificado sin foto se reutiliza: el siguiente escaneo no vuelve a buscarlo (#402)', async (t) => {
+  const p = preparar(t);
+  p.responder({ nombre: 'Termo Stanley 1 L', marca: 'Stanley', categoria: 'hogar', precio_lista_mxn: 1000, precio_venta_mxn: 0, confianza: 0.9 });
+  await p.pedir('/api/borradores/upc/buscar', { id: crypto.randomUUID(), upc: UPC, stock: 1 });
+  await p.esperar();
+  // El lector puede mandar el mismo producto con otros ceros a la izquierda.
+  const ficha = await p.pedir('/api/manifiesto/12345678905', undefined, 'GET');
+  assert.equal(ficha.status, 200);
+  assert.equal(ficha.cuerpo.nombre, 'Termo Stanley 1 L');
+  const id = crypto.randomUUID();
+  assert.equal((await p.pedir('/api/borradores/upc', { id, upc: '012345678905', stock: 3 })).status, 201);
+  assert.deepEqual({ ...p.db.prepare('select nombre, precio, stock, estado_analisis from productos where id=?').get(id)! },
+    { nombre: 'Termo Stanley 1 L', precio: 49900, stock: 3, estado_analisis: 'listo' });
+  assert.equal(p.llamadas.length, 1);
+  // FEP o una pieza sin precio no sirven de catálogo.
+  p.db.prepare("update productos set propietario = 'fep' where upc = ?").run(UPC);
+  assert.equal((await p.pedir('/api/manifiesto/12345678905', undefined, 'GET')).status, 200);   // queda la segunda pieza
+  p.db.prepare("update productos set precio = 0 where propietario = 'dolaron' and ltrim(upc, '0') = '12345678905'").run();
+  assert.equal((await p.pedir('/api/manifiesto/12345678905', undefined, 'GET')).status, 404);
+});
