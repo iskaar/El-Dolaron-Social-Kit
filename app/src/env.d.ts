@@ -7,6 +7,8 @@ declare global {
     GEMINI_API_KEY: string;
     /** Alterno: alguna instancia guarda la llave con este nombre. */
     GEMINI2_API_KEY?: string;
+    /** API key de Agent Platform (Vertex, Issue #363). Si existe, Gemini va por Vertex. */
+    VERTEX_API_KEY?: string;
     /** 'claude' (por defecto) o 'gemini'. Por instancia, en wrangler.jsonc. */
     MODELO_ANALISIS?: string;
     /** 'si' = buscar el precio en la web en vez de estimarlo de memoria. */
