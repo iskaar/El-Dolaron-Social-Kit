@@ -100,7 +100,7 @@
   </section>
 
   <section class="tarjeta" id="desconocido" hidden>
-    <h2>No está en el manifiesto</h2>
+    <h2>No está en la hoja</h2>
     <p class="dato" id="desconocido-codigo"></p>
     <div class="fila">
       <div class="contador">
@@ -190,7 +190,9 @@ function pintar() {
   }
   $('desconocido').hidden = !desconocido;
   if (desconocido) {
-    $('desconocido-codigo').textContent = `Código ${desconocido.leido}. Toma o sube una foto: se analiza como en Fotos.`;
+    $('desconocido-codigo').textContent = desconocido.buscada
+      ? `Código ${desconocido.leido}: no se encontró. Toma o sube una foto de esta pieza.`
+      : `Código ${desconocido.leido}. Se busca solo al pasar a la siguiente pieza: sigue escaneando. Si prefieres, tómale foto.`;
     $('cantidad-foto').value = desconocido.stock;
     $('foto').hidden = !camara;
     $('sin-camara').hidden = camara;
@@ -210,6 +212,7 @@ function anotar(html, fallo = null) {
 function programarGuardado() {
   clearTimeout(temporizador);
   if (piezaParaFoto || actual?.cargandoImagen || actual?.confirmandoImagen || actual?.imagen?.confirmada === false) return;
+  if (!actual && !desconocido) return;
   temporizador = setTimeout(() => { fila = fila.then(cerrarActual); }, GUARDAR_SOLA_MS);
 }
 
@@ -217,11 +220,13 @@ function programarGuardado() {
 async function cerrarActual() {
   if (piezaParaFoto) return;
   clearTimeout(temporizador);
-  const pieza = actual;
+  const pieza = actual, otra = desconocido;
   actual = null;
+  desconocido = null;
   pintar();
-  if (!pieza || pieza.stock < 1) return;
-  await enviar(pieza);
+  if (pieza && pieza.stock >= 1) await enviar(pieza);
+  // La desconocida se guarda y se busca sola (#373); una que ya se buscó solo esperaba su foto.
+  if (otra && otra.stock >= 1 && !otra.buscada) await buscar(otra);
 }
 
 async function enviar(pieza) {
@@ -248,7 +253,7 @@ async function enviar(pieza) {
 function anotarGuardada(guardada, grado) {
   anotar(`<span>${escapar(guardada.nombre)}${grado !== 'nuevo' ? ` (${escapar(nombreEstado(grado))})` : ''}</span>
     <span class="corregir"><button type="button" data-paso="-1" aria-label="Una pieza menos">−</button>
-    <span class="cant">×<span class="n">${guardada.stock}</span> · ${pesos(guardada.precio)}</span>
+    <span class="cant">×<span class="n">${guardada.stock}</span> · <span class="p">${guardada.precio > 0 ? pesos(guardada.precio) : 'buscando…'}</span></span>
     <button type="button" data-paso="1" aria-label="Una pieza más">+</button></span>`);
   const li = $('guardadas').firstElementChild;
   let guardado = guardada.stock, deseado = guardada.stock, espera = null, envio = Promise.resolve();
@@ -285,6 +290,68 @@ function anotarGuardada(guardada, grado) {
     clearTimeout(espera);
     espera = setTimeout(() => { envio = envio.then(guardar); }, 600);
   });
+  return { li, cantidad: () => guardado };
+}
+
+/* ---------- UPC que no está en la hoja: se busca solo y el capturista sigue (#373) ---------- */
+
+async function buscar(pieza) {
+  try {
+    const r = await fetch('/api/borradores/upc/buscar', {
+      method: 'POST', headers: { 'content-type': 'application/json' }, keepalive: true,
+      body: JSON.stringify({ id: pieza.id, upc: pieza.leido, stock: pieza.stock, estado_fisico: pieza.estado }),
+    });
+    const guardada = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(guardada.error ?? `Error ${r.status}`);
+    piezas += guardada.stock;
+    seguirBusqueda(pieza, anotarGuardada({ ...guardada, nombre: `Código ${pieza.leido}` }, pieza.estado));
+  } catch (error) {
+    anotar(`<span>No se guardó: código ${escapar(pieza.leido)} ×${pieza.stock}. Toca para reintentar.</span>`,
+      () => { fila = fila.then(() => buscar(pieza)); });
+    mensaje(String(error.message ?? error));
+    avisar('no');
+  }
+  pintar();
+}
+
+const BUSQUEDA_CADA_MS = 4000;
+const BUSQUEDA_INTENTOS = 15;   // ~1 min; la búsqueda corta a los 22 s en el servidor
+
+function seguirBusqueda(pieza, { li, cantidad }) {
+  let intentos = 0;
+  const revisar = async () => {
+    intentos += 1;
+    let datos = null;
+    try {
+      const r = await fetch(`/api/borradores/upc/${pieza.id}`, { cache: 'no-store' });
+      if (r.ok) datos = await r.json();
+    } catch { /* sin red: se vuelve a preguntar */ }
+    if (datos?.estado_analisis === 'listo') {
+      li.firstElementChild.textContent = datos.nombre;
+      li.querySelector('.p').textContent = `${pesos(datos.precio)} · etiqueta en camino`;
+      return;
+    }
+    if (datos?.estado_analisis === 'error' || (!datos && intentos >= BUSQUEDA_INTENTOS)) return pedirFoto();
+    if (intentos < BUSQUEDA_INTENTOS) setTimeout(revisar, BUSQUEDA_CADA_MS);
+    else li.querySelector('.p').textContent = 'sigue buscando: revisa Etiquetas';
+  };
+  // No se encontró: la fila se pone roja y al tocarla se abre la foto de esa misma pieza.
+  const pedirFoto = () => {
+    li.classList.add('fallo');
+    li.firstElementChild.textContent = `No se encontró el código ${pieza.leido}: toca aquí para tomar o subir foto.`;
+    li.querySelector('.p').textContent = 'falta foto';
+    mensaje(`El código ${pieza.leido} no se encontró: tómale foto cuando puedas. La impresión espera esa pieza.`);
+    avisar('no');
+    li.addEventListener('click', (e) => {
+      if (e.target.closest?.('button')) return;
+      fila = fila.then(async () => {
+        await cerrarActual();
+        desconocido = { ...pieza, stock: cantidad(), buscada: true };
+        pintar();
+      });
+    });
+  };
+  setTimeout(revisar, BUSQUEDA_CADA_MS);
 }
 
 /* ---------- un codigo ---------- */
@@ -301,14 +368,13 @@ async function procesar(crudo) {
     programarGuardado();
     return pintar();
   }
-  if (desconocido?.upc === upc) {
+  if (desconocido?.upc === upc && !desconocido.buscada) {
     desconocido.stock = Math.min(999, desconocido.stock + 1);
     avisar('mas');
+    programarGuardado();
     return pintar();
   }
   await cerrarActual();
-  if (desconocido) anotar(`<span>Sin foto, no se capturó: ${escapar(desconocido.upc)}</span><span class="cant">×${desconocido.stock}</span>`);
-  desconocido = null;
 
   let respuesta;
   try {
@@ -322,6 +388,7 @@ async function procesar(crudo) {
   if (respuesta.status === 404) {
     desconocido = { id: crypto.randomUUID(), upc, leido, stock: 1, estado };
     avisar('no');
+    programarGuardado();
   } else if (!respuesta.ok) {
     mensaje(cuerpo.error ?? `Error ${respuesta.status}`);
     avisar('no');
@@ -430,7 +497,7 @@ async function conservarFoto(foto) {
   const registro = { id: pieza.id, upc: pieza.leido, foto, cantidad: pieza.stock, estado_fisico: pieza.estado,
     creado: Date.now(), desde_escaner: true };
   await guardarFoto(registro);
-  piezas += pieza.stock;
+  if (!pieza.buscada) piezas += pieza.stock;   // la buscada ya se contó al guardarse
   if (actual === pieza) actual = null;
   if (desconocido === pieza) desconocido = null;
   piezaParaFoto = null;
@@ -480,7 +547,7 @@ function contador(entrada, obtener) {
     // En 0 la pieza se cancela: fue un escaneo equivocado.
     if (pieza.stock === 0) {
       if (pieza === actual) { clearTimeout(temporizador); actual = null; } else desconocido = null;
-    } else if (pieza === actual) programarGuardado();
+    } else programarGuardado();
     pintar();
   };
   caja.addEventListener('click', (e) => {

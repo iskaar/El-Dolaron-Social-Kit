@@ -43,6 +43,15 @@ el código completo leído, con sus ceros iniciales, en `productos.upc`.
    `/etiquetas` con una etiqueta por pieza. **El precio sale del manifiesto en el servidor**;
    el cliente solo manda cantidad y estado.
 4. **Sin match** — 404 "captura la pieza con foto".
+   Desde el Issue #373 el escáner no detiene al capturista: al pasar a la siguiente pieza (o a los
+   10 s) manda `POST /api/borradores/upc/buscar {id, upc, stock, estado_fisico}`. La pieza nace
+   `pendiente` con su código y cantidad y el Worker, en `waitUntil`, le pregunta a Gemini por Vertex
+   con búsqueda de Google **solo el código** (sin foto). Con nombre seguro (confianza ≥ 0.5) y
+   precio queda `listo` con código `ED-` y la impresión automática la toma al cerrar sus 5 minutos.
+   Si no, queda `error`: el escáner (que consulta `GET /api/borradores/upc/:id` cada 4 s) pone la
+   fila en rojo y al tocarla abre la foto de esa misma pieza; la foto pasa por el análisis normal
+   y nunca duplica ni repone stock. Mientras esa pieza espera, la cola automática se detiene en
+   ella para no cambiar el orden de la mesa.
 
 Cada escaneo guardado es una pieza nueva, aunque el UPC ya exista: `/etiquetas` imprime
 `stock` etiquetas al aparecer la pieza, y subirle el stock a una ya impresa no imprime las

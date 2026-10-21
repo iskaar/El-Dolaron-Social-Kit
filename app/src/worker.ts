@@ -5,7 +5,7 @@
  * (docs/ARQUITECTURA-ESCANER.md).
  */
 
-import { analizarBorrador, modeloPorDefecto, type Modelo } from './analisis.ts';
+import { analizarBorrador, identificarUpc, modeloPorDefecto, type Modelo } from './analisis.ts';
 import { fichaDeManifiesto, normalizarUpc, precioListaMxn, type FichaManifiesto } from './manifiesto.ts';
 import { codigoLeido, CORRECCION_ESCANER_MS } from '../public/upc.js';
 import { ESTADOS } from '../public/estados.js';
@@ -110,6 +110,8 @@ export function permitidaParaVendedor(pathname: string, metodo: string): boolean
   }
   if (/^\/api\/manifiesto\/[^/]+\/imagen$/.test(pathname)) return ['GET', 'POST', 'PUT'].includes(metodo);
   if (/^\/api\/manifiesto\/[^/]+\/imagen\/catalogo$/.test(pathname)) return metodo === 'GET';
+  // UPC desconocido (#373): buscarlo y ver cómo va.
+  if (/^\/api\/borradores\/upc\/[^/]+$/.test(pathname)) return pathname.endsWith('/buscar') ? metodo === 'POST' : metodo === 'GET';
   return (pathname === '/api/borradores' || pathname === '/api/borradores/upc') && metodo === 'POST';
 }
 
@@ -542,6 +544,68 @@ async function capturarPorUpc(request: Request, env: Env, correo: string): Promi
     .bind(cuerpo.id, leido, nombre, ficha.marca.trim().slice(0, 60), categoria, precioLista, precio, estado, stock,
       semanaIngreso(ahora), correo, ahora.toISOString(), ahora.toISOString()).run();
   return (await capturaUpcGuardada(cuerpo.id, leido, env)) ?? json({ error: 'La captura cambió. Vuelve a intentarlo.' }, 409);
+}
+
+/**
+ * UPC que no está en la hoja (Issue #373): la pieza nace `pendiente` con su código y cantidad,
+ * se responde de inmediato y Gemini la busca por el código en segundo plano. El capturista sigue
+ * escaneando; si no aparece, el escáner le pide foto para esta misma pieza (mismo id).
+ */
+async function capturarDesconocido(request: Request, env: Env, ctx: ExecutionContext, correo: string): Promise<Response> {
+  const cuerpo = (await request.json().catch(() => null)) as Record<string, unknown> | null;
+  if (!cuerpo) return json({ error: 'Datos inválidos.' }, 400);
+  const leido = codigoLeido(cuerpo.upc), upc = normalizarUpc(leido);
+  if (!upc) return json({ error: 'Código de barras inválido.' }, 400);
+  if (typeof cuerpo.id !== 'string' || !UUID.test(cuerpo.id)) return json({ error: 'Identificador inválido.' }, 400);
+  const stock = Number(cuerpo.stock);
+  if (!Number.isInteger(stock) || stock < 1 || stock > 999) return json({ error: 'Cantidad inválida.' }, 400);
+  const estado = cuerpo.estado_fisico ?? 'nuevo';
+  if (typeof estado !== 'string' || !ESTADOS_FISICOS.has(estado)) return json({ error: 'Estado físico inválido.' }, 400);
+  if (await fichaDeManifiesto(upc, env)) return json({ error: 'Ese código sí está en la hoja: vuelve a escanearlo.' }, 409);
+  const ahora = new Date();
+  const { meta } = await env.DB.prepare(`insert into productos
+    (id, upc, nombre, estado_fisico, stock, semana_ingreso, capturado_por, creado_en, actualizado_en, estado_analisis, destino, propietario)
+    values (?, ?, '', ?, ?, ?, ?, ?, ?, 'pendiente', 'etiqueta', 'dolaron') on conflict (id) do nothing`)
+    .bind(cuerpo.id, leido, estado, stock, semanaIngreso(ahora), correo, ahora.toISOString(), ahora.toISOString()).run();
+  // Un reintento del mismo id no vuelve a buscar ni repone stock. Se busca el código tal cual se leyó:
+  // sin el 0 inicial, Google no encuentra el UPC-A.
+  if (meta.changes) ctx.waitUntil(identificarPieza(cuerpo.id, leido, env));
+  return await estadoDesconocido(cuerpo.id, env, correo, 202);
+}
+
+async function identificarPieza(id: string, upc: string, env: Env): Promise<void> {
+  const inicio = Date.now();
+  let ficha: Awaited<ReturnType<typeof identificarUpc>> | null = null;
+  try {
+    ficha = await identificarUpc(upc, env);
+  } catch (error) {
+    console.error(JSON.stringify({ mensaje: 'upc sin identificar', id, upc, error: String(error).slice(0, 200) }));
+  }
+  const fila = await env.DB.prepare(`select estado_fisico from productos where id = ? and estado_analisis = 'pendiente' and foto_key = ''`)
+    .bind(id).first<{ estado_fisico: string }>();
+  if (!fila) return;   // ya llegó una foto (manda su análisis) o la descartaron
+  const config = await leerConfig(env);
+  const precioLista = (ficha?.precio_lista_mxn ?? 0) * 100;
+  const precio = ficha ? calcularPrecio({ precioLista, categoria: ficha.categoria, estadoFisico: fila.estado_fisico, config }).precio : 0;
+  // Sin nombre seguro o sin precio no se imprime: queda en `error` y el escáner pide foto.
+  const completa = !!ficha && ficha.nombre.trim() !== '' && ficha.confianza >= 0.5 && precio > 0;
+  await env.DB.prepare(`update productos set nombre = ?, marca = ?, categoria = ?, precio_lista = ?, precio = ?, precio_sugerido = ?,
+      estado_analisis = ?, actualizado_en = ? where id = ? and estado_analisis = 'pendiente' and foto_key = ''`)
+    .bind(completa ? ficha!.nombre : '', completa ? ficha!.marca : '', completa ? ficha!.categoria : 'otros', completa ? precioLista : 0,
+      completa ? precio : 0, completa ? precio : 0, completa ? 'listo' : 'error', new Date().toISOString(), id).run();
+  if (completa) {
+    await env.DB.prepare(`update productos set codigo = ${CODIGO_NUEVO} where id = ? and (codigo is null or codigo = '') and estado_analisis = 'listo'`)
+      .bind(id).run();
+  }
+  console.log(JSON.stringify({ mensaje: completa ? 'upc identificado' : 'upc necesita foto', id, upc, ms: Date.now() - inicio, ficha }));
+}
+
+/** Lo que el escáner consulta mientras se busca una pieza desconocida. Solo quien la capturó. */
+async function estadoDesconocido(id: string, env: Env, correo: string, status = 200): Promise<Response> {
+  if (!UUID.test(id)) return json({ error: 'Identificador inválido.' }, 400);
+  const fila = await env.DB.prepare(`select id, upc, nombre, precio, stock, estado_analisis, foto_key <> '' as con_foto
+    from productos where id = ? and capturado_por = ? and propietario = 'dolaron'`).bind(id, correo).first();
+  return fila ? json(fila, status) : json({ error: 'Pieza no encontrada.' }, 404);
 }
 
 /** Cuanto dura abierta la correccion desde la camara. */
@@ -2166,6 +2230,9 @@ export default {
       if (pathname === '/api/borradores/upc' && request.method === 'POST') {
         return await capturarPorUpc(request, env, correo);
       }
+      if (pathname === '/api/borradores/upc/buscar' && request.method === 'POST') return await capturarDesconocido(request, env, ctx, correo);
+      const desconocida = pathname.match(/^\/api\/borradores\/upc\/([^/]+)$/);
+      if (desconocida && request.method === 'GET') return await estadoDesconocido(desconocida[1], env, correo);
       const upcBuscado = pathname.match(/^\/api\/manifiesto\/([^/]+)$/);
       if (upcBuscado && request.method === 'GET') {
         return await buscarEnManifiesto(decodeURIComponent(upcBuscado[1]), env);

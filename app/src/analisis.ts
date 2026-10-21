@@ -224,7 +224,8 @@ export async function conClaude(foto: string | string[], env: Env, instruccion: 
   return JSON.parse(texto);
 }
 
-async function conGemini(foto: string, env: Env, instruccion: string, buscar = false, esquema: any = ESQUEMA_GEMINI): Promise<unknown> {
+async function conGemini(foto: string | null, env: Env, instruccion: string, buscar = false, esquema: any = ESQUEMA_GEMINI,
+  textoUsuario = 'Identifica este articulo.'): Promise<unknown> {
   // Con VERTEX_API_KEY se cobra al proyecto de Google Cloud (Issue #363), no a
   // la cuota de AI Studio que se acabo en #91. Mismo cuerpo para las dos.
   // Las dos instancias tienen secretos independientes, pero no siempre con el
@@ -247,9 +248,10 @@ async function conGemini(foto: string, env: Env, instruccion: string, buscar = f
         {
           // Vertex exige el rol; AI Studio lo acepta.
           role: 'user',
+          // Sin foto: solo texto, como la búsqueda por código de barras (#373).
           parts: [
-            { inlineData: { mimeType: 'image/jpeg', data: foto } },
-            { text: 'Identifica este articulo.' },
+            ...(foto ? [{ inlineData: { mimeType: 'image/jpeg', data: foto } }] : []),
+            { text: textoUsuario },
           ],
         },
       ],
@@ -284,6 +286,24 @@ async function conGemini(foto: string, env: Env, instruccion: string, buscar = f
     .filter(Boolean)
     .slice(0, 5);
   return { ...extraerJson(texto), fuentes };
+}
+
+const INSTRUCCION_UPC = [
+  'Eres el inspector de una tienda de mercancia americana de liquidacion en San Luis Potosi, Mexico.',
+  'Te dan solo un codigo de barras (UPC o EAN). Buscalo en Google tal cual.',
+  'Responde con un producto SOLO si una pagina muestra ese mismo codigo; si no, deja el nombre vacio',
+  'y la confianza en 0. Un producto equivocado cuesta mas que pedir una foto.',
+  // Mismas reglas de nombre, marca y categoría que la foto: el mismo producto da el mismo nombre.
+  INSTRUCCION.slice(INSTRUCCION.indexOf('COMO SE ESCRIBE')),
+].join(' ');
+
+/**
+ * Identifica un UPC que no está en la hoja del proveedor, sin foto (Issue #373):
+ * Gemini con búsqueda de Google. Corre en segundo plano; el capturista ya siguió.
+ */
+export async function identificarUpc(upc: string, env: Env): Promise<Ficha & { fuentes?: string[] }> {
+  const cruda = await conGemini(null, env, INSTRUCCION_UPC, true, ESQUEMA_GEMINI, `Codigo de barras: ${upc}`) as Partial<Ficha> & { fuentes?: string[] };
+  return { ...normalizar(cruda), fuentes: cruda.fuentes };
 }
 
 const ESQUEMA_ROPA = {
