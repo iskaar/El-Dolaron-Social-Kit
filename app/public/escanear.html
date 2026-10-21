@@ -27,6 +27,10 @@
   .tarjeta { background: #fff; border: 1px solid var(--linea); border-radius: 12px; padding: 12px; margin-bottom: 10px; }
   .tarjeta[hidden] { display: none; }
   #nombre { font-size: 19px; font-weight: 700; margin: 0; }
+  #imagen-producto { width: 100%; max-height: 210px; object-fit: contain; margin-top: 10px; }
+  #imagen-producto[hidden], #confirmar-imagen[hidden], #omitir-imagen[hidden], #fuente-imagen[hidden] { display: none; }
+  .secundario { border: 1px solid var(--linea); border-radius: 8px; padding: 10px 12px; color: var(--azul); background: #fff; font: inherit; }
+  button:disabled { opacity: .55; }
   .dato { font-size: 13px; color: var(--gris); margin: 2px 0 0; }
   .fila { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-top: 10px; }
   .precio { font-size: 26px; font-weight: 800; color: var(--azul); flex: 1; }
@@ -73,6 +77,16 @@
   <section class="tarjeta" id="actual" hidden>
     <p id="nombre"></p>
     <p class="dato" id="detalle"></p>
+    <img id="imagen-producto" alt="" hidden referrerpolicy="no-referrer">
+    <p class="dato" id="nombre-imagen"></p>
+    <p class="dato" id="estado-imagen" role="status"></p>
+    <a id="fuente-imagen" class="dato" target="_blank" rel="noopener noreferrer" hidden>Ver producto original</a>
+    <div class="fila">
+      <button id="confirmar-imagen" class="principal" type="button" hidden>Confirmar imagen</button>
+      <button id="omitir-imagen" class="secundario" type="button" hidden>Continuar sin imagen</button>
+      <button class="secundario otra-foto" type="button">Tomar otra foto</button>
+      <button class="secundario subir-foto" type="button">Subir foto</button>
+    </div>
     <div class="fila">
       <span class="precio" id="precio"></span>
       <div class="contador">
@@ -92,7 +106,8 @@
         <input id="cantidad-foto" type="number" inputmode="numeric" min="0" max="999" aria-label="Piezas">
         <button type="button" data-paso="1" aria-label="Una pieza más">+</button>
       </div>
-      <button id="foto" class="principal" type="button">Tomar foto</button>
+      <button id="foto" class="principal otra-foto" type="button">Tomar foto</button>
+      <button class="secundario subir-foto" type="button">Subir foto</button>
     </div>
     <p class="dato" id="sin-camara" hidden>Aquí no hay cámara: captúrala en <a href="/captura">Fotos</a>.</p>
   </section>
@@ -101,6 +116,7 @@
     <ul id="guardadas"><li class="dato">Lo guardado sale en Etiquetas, una etiqueta por pieza.</li></ul>
   </section>
 </main>
+<input id="archivo-foto" type="file" accept="image/*" hidden>
 <footer>
   <button id="estado" class="estado" type="button" aria-pressed="false">Nuevo</button>
   <span id="total">0 piezas</span>
@@ -108,15 +124,14 @@
 </footer>
 <script type="module">
 import { CATEGORIAS } from '/categorias.js';
-import { aJpeg } from '/foto.js';
+import { aJpeg, reducirArchivo } from '/foto.js';
+import { codigoLeido, normalizarUpc as normalizar } from '/upc.js';
+import { guardar as guardarFoto, leer as leerFoto, borrar as borrarFoto, pendientes } from '/cola-fotos.js';
 
 const NOMBRES = Object.fromEntries(CATEGORIAS);
 const $ = (id) => document.getElementById(id);
 const pesos = (c) => `$${Math.round(c / 100).toLocaleString('es-MX')}`;
 const escapar = (t) => String(t ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
-// Igual que el servidor: el mismo producto llega como UPC-A o como EAN-13 con un 0 delante.
-const normalizar = (crudo) => String(crudo).replace(/\D/g, '').replace(/^0+/, '');
-
 // Se guarda solo despues de este rato sin escanear: da tiempo de juntar las piezas iguales.
 const GUARDAR_SOLA_MS = 10_000;
 // Con la camara, el mismo codigo cuenta otra vez solo si salio de la vista este rato.
@@ -129,6 +144,7 @@ let piezas = 0;
 let temporizador = null;
 let fila = Promise.resolve();   // un codigo a la vez, en el orden en que llegaron
 let camara = false;
+let piezaParaFoto = null;
 
 /* ---------- aviso: sonido, vibracion y color ---------- */
 
@@ -161,14 +177,16 @@ function pintar() {
   if (actual) {
     const f = actual.ficha;
     $('nombre').textContent = f.nombre;
-    $('detalle').textContent = [f.marca, NOMBRES[f.categoria] ?? f.categoria, f.traducido ? '' : 'nombre sin traducir']
+    $('detalle').textContent = [`Código ${actual.leido}`, f.marca, NOMBRES[f.categoria] ?? f.categoria, f.traducido ? '' : 'nombre sin traducir']
       .filter(Boolean).join(' · ');
     $('precio').textContent = pesos(f.precio);
     $('cantidad').value = actual.stock;
+    pintarImagen(actual);
+    document.querySelector('#actual .otra-foto').hidden = !camara;
   }
   $('desconocido').hidden = !desconocido;
   if (desconocido) {
-    $('desconocido-codigo').textContent = `Código ${desconocido.upc}. Tómale foto: se analiza como en Fotos.`;
+    $('desconocido-codigo').textContent = `Código ${desconocido.leido}. Toma o sube una foto: se analiza como en Fotos.`;
     $('cantidad-foto').value = desconocido.stock;
     $('foto').hidden = !camara;
     $('sin-camara').hidden = camara;
@@ -187,11 +205,13 @@ function anotar(html, fallo = null) {
 
 function programarGuardado() {
   clearTimeout(temporizador);
+  if (piezaParaFoto || actual?.cargandoImagen || actual?.confirmandoImagen || actual?.imagen?.confirmada === false) return;
   temporizador = setTimeout(() => { fila = fila.then(cerrarActual); }, GUARDAR_SOLA_MS);
 }
 
 /** Guarda la pieza abierta. El id nace con la pieza: reintentar no la duplica. */
 async function cerrarActual() {
+  if (piezaParaFoto) return;
   clearTimeout(temporizador);
   const pieza = actual;
   actual = null;
@@ -204,7 +224,7 @@ async function enviar(pieza) {
   try {
     const respuesta = await fetch('/api/borradores/upc', {
       method: 'POST', headers: { 'content-type': 'application/json' }, keepalive: true,
-      body: JSON.stringify({ id: pieza.id, upc: pieza.upc, stock: pieza.stock, estado_fisico: pieza.estado }),
+      body: JSON.stringify({ id: pieza.id, upc: pieza.leido, stock: pieza.stock, estado_fisico: pieza.estado }),
     });
     const guardada = await respuesta.json().catch(() => ({}));
     if (!respuesta.ok) throw new Error(guardada.error ?? `Error ${respuesta.status}`);
@@ -223,17 +243,19 @@ async function enviar(pieza) {
 /* ---------- un codigo ---------- */
 
 async function procesar(crudo) {
+  if (piezaParaFoto) return;
+  const leido = codigoLeido(crudo);
   const upc = normalizar(crudo);
-  if (upc.length < 6) return;
+  if (!leido || !upc) return;
   mensaje('');
   if (actual?.upc === upc) {
-    actual.stock += 1;
+    actual.stock = Math.min(999, actual.stock + 1);
     avisar('mas');
     programarGuardado();
     return pintar();
   }
   if (desconocido?.upc === upc) {
-    desconocido.stock += 1;
+    desconocido.stock = Math.min(999, desconocido.stock + 1);
     avisar('mas');
     return pintar();
   }
@@ -243,7 +265,7 @@ async function procesar(crudo) {
 
   let respuesta;
   try {
-    respuesta = await fetch(`/api/manifiesto/${upc}`);
+    respuesta = await fetch(`/api/manifiesto/${leido}`);
   } catch {
     mensaje('Sin conexión: vuelve a escanear cuando regrese la red.');
     avisar('no');
@@ -251,49 +273,153 @@ async function procesar(crudo) {
   }
   const cuerpo = await respuesta.json().catch(() => ({}));
   if (respuesta.status === 404) {
-    desconocido = { upc, stock: 1 };
+    desconocido = { id: crypto.randomUUID(), upc, leido, stock: 1, estado: danado ? 'danado' : 'nuevo' };
     avisar('no');
   } else if (!respuesta.ok) {
     mensaje(cuerpo.error ?? `Error ${respuesta.status}`);
     avisar('no');
   } else {
-    actual = { id: crypto.randomUUID(), upc, ficha: cuerpo, stock: 1, estado: danado ? 'danado' : 'nuevo' };
+    actual = { id: crypto.randomUUID(), upc, leido, ficha: cuerpo, imagen: cuerpo.imagen, stock: 1, estado: danado ? 'danado' : 'nuevo' };
     avisar('ok');
+    if (!actual.imagen) cargarImagen(actual);
     programarGuardado();
   }
   pintar();
 }
 
-const recibir = (codigo) => { fila = fila.then(() => procesar(codigo)); };
+const recibir = (codigo) => { fila = fila.then(() => procesar(codigo)).catch((error) => { mensaje(error.message || 'No se pudo procesar el código.'); avisar('no'); }); };
+
+/* ---------- referencia de imagen, sin tocar existencia ni precio ---------- */
+
+function pintarImagen(pieza) {
+  const imagen = pieza.imagen;
+  const url = imagen?.url || '';
+  const img = $('imagen-producto');
+  if (img.getAttribute('src') !== url) {
+    if (url) img.src = url; else img.removeAttribute('src');
+  }
+  img.alt = imagen?.nombre || pieza.ficha.nombre;
+  $('nombre-imagen').textContent = imagen?.nombre || '';
+  img.hidden = !url || pieza.imagenRota;
+  $('estado-imagen').textContent = pieza.cargandoImagen ? 'Buscando imagen del producto…' : pieza.errorImagen ||
+    (imagen ? imagen.confirmada ? 'Imagen guardada' : imagen.codigo_verificado ? 'Revisa el producto y confirma la imagen.' : 'La página no muestra el código. Confirma que es el mismo producto.' : 'Sin imagen. Puedes tomar o subir una foto.');
+  $('confirmar-imagen').hidden = !imagen || imagen.confirmada;
+  $('confirmar-imagen').disabled = !!pieza.confirmandoImagen || !!pieza.imagenRota;
+  $('omitir-imagen').hidden = !imagen || imagen.confirmada;
+  $('fuente-imagen').hidden = !imagen?.enlace;
+  if (imagen?.enlace) $('fuente-imagen').href = imagen.enlace;
+}
+
+async function cargarImagen(pieza) {
+  pieza.cargandoImagen = true;
+  try {
+    const r = await fetch(`/api/manifiesto/${pieza.upc}/imagen`, { method: 'POST' });
+    const datos = await r.json();
+    if (!r.ok) throw new Error(datos.error || 'No se pudo buscar la imagen.');
+    pieza.imagen = datos.imagen;
+    pieza.errorImagen = '';
+  } catch (error) { pieza.errorImagen = error.message; }
+  finally {
+    pieza.cargandoImagen = false;
+    if (actual === pieza) { pintar(); programarGuardado(); }
+  }
+}
+
+$('imagen-producto').addEventListener('error', () => {
+  if (!actual) return;
+  actual.imagenRota = true;
+  actual.errorImagen = 'No se pudo cargar la imagen. Toma o sube una foto.';
+  pintar();
+});
+$('confirmar-imagen').addEventListener('click', async () => {
+  const pieza = actual;
+  if (!pieza?.imagen || pieza.confirmandoImagen || pieza.imagenRota) return;
+  pieza.confirmandoImagen = true;
+  clearTimeout(temporizador);
+  pintar();
+  try {
+    const r = await fetch(`/api/manifiesto/${pieza.upc}/imagen`, { method: 'PUT', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ url: pieza.imagen.url, tcin: pieza.imagen.tcin }) });
+    const datos = await r.json();
+    if (!r.ok) throw new Error(datos.error || 'No se pudo guardar la imagen.');
+    pieza.imagen = datos.imagen;
+    pieza.errorImagen = '';
+  } catch (error) { pieza.errorImagen = error.message; }
+  finally { pieza.confirmandoImagen = false; if (actual === pieza) { pintar(); programarGuardado(); } }
+});
+$('omitir-imagen').addEventListener('click', () => {
+  if (!actual) return;
+  actual.imagen = null;
+  actual.errorImagen = '';
+  pintar(); programarGuardado();
+});
 
 /* ---------- foto de lo que no esta en el manifiesto ---------- */
 
-$('foto').addEventListener('click', async () => {
-  if (!desconocido) return;
-  const pieza = desconocido;
-  $('foto').disabled = true;
+async function enviarFoto(registro) {
   try {
-    const foto = await aJpeg($('video'), $('video').videoWidth, $('video').videoHeight);
     const cuerpo = new FormData();
-    cuerpo.append('id', crypto.randomUUID());
-    cuerpo.append('estado_fisico', danado ? 'danado' : 'nuevo');
-    cuerpo.append('cantidad', String(pieza.stock));
-    cuerpo.append('foto', foto, 'foto.jpg');
+    cuerpo.append('id', registro.id);
+    cuerpo.append('upc', registro.upc);
+    cuerpo.append('estado_fisico', registro.estado_fisico);
+    cuerpo.append('cantidad', String(registro.cantidad));
+    cuerpo.append('foto', registro.foto, 'foto.jpg');
     const respuesta = await fetch('/api/borradores', { method: 'POST', body: cuerpo });
     if (!respuesta.ok) throw new Error((await respuesta.json().catch(() => ({}))).error ?? `Error ${respuesta.status}`);
-    piezas += pieza.stock;
-    anotar(`<span>Foto ${escapar(pieza.upc)} (se analiza)</span><span class="cant">×${pieza.stock}</span>`);
-    desconocido = null;
-    avisar('ok');
+    const pendiente = await leerFoto(registro.id);
+    if (pendiente && (pendiente.version ?? 0) === (registro.version ?? 0)) await borrarFoto(registro.id);
   } catch (error) {
-    mensaje(`No se subió la foto: ${error.message ?? error}. Vuelve a intentarlo.`);
-    avisar('no');
-  } finally {
-    $('foto').disabled = false;
-    pintar();
+    anotar(`<span>Foto ${escapar(registro.upc)} guardada en este teléfono. Toca para reintentar o abre Fotos.</span>`,
+      () => { fila = fila.then(() => enviarFoto(registro)); });
+    mensaje(`No se subió: ${error.message ?? error}. La foto sigue guardada en Fotos.`);
   }
+}
+
+async function conservarFoto(foto) {
+  const pieza = piezaParaFoto;
+  if (!pieza || !foto) throw new Error('No se pudo tomar la foto.');
+  const registro = { id: pieza.id, upc: pieza.leido, foto, cantidad: pieza.stock, estado_fisico: pieza.estado,
+    creado: Date.now(), desde_escaner: true };
+  await guardarFoto(registro);
+  piezas += pieza.stock;
+  if (actual === pieza) actual = null;
+  if (desconocido === pieza) desconocido = null;
+  piezaParaFoto = null;
+  anotar(`<span>Foto ${escapar(registro.upc)}</span><span class="cant">×${registro.cantidad}</span>`);
+  pintar();
+  await enviarFoto(registro);
+}
+
+function elegirPiezaFoto() {
+  if (piezaParaFoto) return false;
+  piezaParaFoto = actual || desconocido;
+  clearTimeout(temporizador);
+  return !!piezaParaFoto;
+}
+for (const boton of document.querySelectorAll('.otra-foto')) boton.addEventListener('click', () => {
+  if (!camara || !elegirPiezaFoto()) return;
+  fila = fila.then(async () => {
+    try { await conservarFoto(await aJpeg($('video'), $('video').videoWidth, $('video').videoHeight)); }
+    catch (error) { mensaje(error.message); piezaParaFoto = null; programarGuardado(); }
+  });
+});
+for (const boton of document.querySelectorAll('.subir-foto')) boton.addEventListener('click', () => {
+  if (elegirPiezaFoto()) $('archivo-foto').click();
+});
+$('archivo-foto').addEventListener('cancel', () => { piezaParaFoto = null; programarGuardado(); });
+$('archivo-foto').addEventListener('change', () => {
+  const archivo = $('archivo-foto').files[0];
+  fila = fila.then(async () => {
+    try { if (archivo) await conservarFoto(await reducirArchivo(archivo)); }
+    catch (error) { mensaje(error.message || 'No se pudo leer la foto.'); }
+    finally { piezaParaFoto = null; $('archivo-foto').value = ''; programarGuardado(); }
+  });
 });
 
+async function reintentarFotos() {
+  for (const registro of await pendientes()) if (registro.desde_escaner) await enviarFoto(registro);
+}
+addEventListener('online', () => { fila = fila.then(reintentarFotos); });
 /* ---------- cantidades, estado y guardar ---------- */
 
 function contador(entrada, obtener) {
@@ -323,6 +449,7 @@ $('estado').addEventListener('click', () => {
   $('estado').textContent = danado ? 'Dañado' : 'Nuevo';
   $('estado').setAttribute('aria-pressed', String(danado));
   if (actual) actual.estado = danado ? 'danado' : 'nuevo';
+  if (desconocido) desconocido.estado = danado ? 'danado' : 'nuevo';
 });
 
 $('guardar').addEventListener('click', () => { fila = fila.then(cerrarActual); });
@@ -337,6 +464,7 @@ let tecleado = '';
 document.addEventListener('keydown', (e) => {
   if (e.target instanceof HTMLInputElement) return;
   if (e.key === 'Enter') {
+    if (!tecleado) return; // Enter sobre un botón sigue activándolo con teclado.
     // Sin esto, el Enter del lector "aprieta" el ultimo boton tocado (p.ej. Dañado).
     e.preventDefault();
     if (tecleado) recibir(tecleado);
@@ -393,6 +521,7 @@ $('empezar').addEventListener('click', () => {
   encenderCamara();
 });
 pintar();
+fila = fila.then(reintentarFotos).catch(() => mensaje('No se pudo abrir la cola de fotos de este teléfono.'));
 </script>
 </body>
 </html>

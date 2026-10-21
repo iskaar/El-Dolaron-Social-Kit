@@ -5,6 +5,7 @@
  */
 import { conClaude } from './analisis.ts';
 import { CATEGORIAS, CLAVES_CATEGORIA } from '../public/categorias.js';
+export { normalizarUpc } from '../public/upc.js';
 
 export interface FichaManifiesto {
   upc: string;
@@ -16,13 +17,6 @@ export interface FichaManifiesto {
   marca: string;
   categoria: string;
 }
-
-/**
- * Solo digitos y sin ceros a la izquierda: la hoja guarda el UPC como numero
- * (pierde el 0 inicial) y un lector puede mandar el mismo producto como UPC-A
- * de 12 digitos o EAN-13 con un 0 delante. Igual que el importador.
- */
-export const normalizarUpc = (crudo: string): string => crudo.replace(/\D/g, '').replace(/^0+/, '');
 
 /** Centavos USD x centavos MXN por dolar -> centavos MXN. */
 export const precioListaMxn = (precioUsd: number, tipoCambio: number): number => Math.round((precioUsd * tipoCambio) / 100);

@@ -2,6 +2,9 @@
 // declaran aqui y se cargan con `wrangler secret put`.
 declare global {
   interface Env {
+    /** Extractor Python: URL /lookup y token compartido; nunca llegan al navegador. */
+    SCRAPLING_URL?: string;
+    SCRAPLING_TOKEN?: string;
     ANTHROPIC_API_KEY: string;
     IMAGES: ImagesBinding;
     GEMINI_API_KEY: string;
