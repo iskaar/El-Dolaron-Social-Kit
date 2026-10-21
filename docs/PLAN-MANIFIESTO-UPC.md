@@ -61,7 +61,7 @@ nuevas. Las repetidas se juntan con la fusión de siempre si hace falta.
 `/etiquetas` también toma lo escaneado (`productos.upc` con código, o vacío si se dio de alta solo con
 foto, #379). La cantidad se cierra en el escáner: la pieza abierta se guarda a los 25 s sin escanear, al
 escanear otro código o con «Guardar»; mientras está abierta se corrige y en 0 se cancela. Ya guardada y
-`listo`, sale en la siguiente consulta (≤ 30 s) y el servidor ya no acepta cambios desde el escáner. Lo
+`listo`, sale en la siguiente consulta (cada 3 s, #383) y el servidor ya no acepta cambios desde el escáner. Lo
 que aún se identifica o espera foto conserva − y + (en 0 se cancela) y no detiene la cola.
 
 ## Decisiones

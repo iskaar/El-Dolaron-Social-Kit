@@ -214,7 +214,8 @@ function anotar(html, fallo = null) {
 
 function programarGuardado() {
   clearTimeout(temporizador);
-  if (piezaParaFoto || actual?.cargandoImagen || actual?.confirmandoImagen || actual?.imagen?.confirmada === false) return;
+  // La imagen no detiene el guardado (#383): la etiqueta sale en cuanto se cierra la cantidad.
+  if (piezaParaFoto) return;
   if (desconocido?.sinCodigo) return;   // sin código solo se guarda con su foto
   if (!actual && !desconocido) return;
   temporizador = setTimeout(() => { fila = fila.then(cerrarActual); }, GUARDAR_SOLA_MS);

@@ -30,7 +30,7 @@ la hoja de Google: `manifiesto.tcin` ya identifica el enlace
    el análisis habitual de Fotos. Las fotos pendientes también aparecen en `/captura`.
 
 El contador, el lector USB/Bluetooth y los formatos de cámara de #365 se conservan.
-La pausa de guardado automático espera mientras carga un candidato o falta confirmarlo.
+La imagen no detiene el guardado automático (#383): se confirma mientras la pieza sigue abierta.
 Guardar explícitamente o escanear otra pieza puede guardar el inventario sin confirmar
 una imagen. El escáner sigue abierto durante la búsqueda; una respuesta tardía no cambia
 la ficha de otra pieza.
