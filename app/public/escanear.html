@@ -516,7 +516,8 @@ async function conservarFoto(foto) {
   piezaParaFoto = null;
   anotar(`<span>Foto ${escapar(registro.upc || 'sin código')} (se analiza)</span><span class="cant">×${registro.cantidad}</span>`);
   pintar();
-  await enviarFoto(registro);
+  // La subida no detiene el escáner (#385): la foto ya está en el teléfono y enviarFoto avisa si falla.
+  enviarFoto(registro);
 }
 
 function elegirPiezaFoto() {
