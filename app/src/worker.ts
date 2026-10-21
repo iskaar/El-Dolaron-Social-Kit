@@ -626,7 +626,7 @@ async function corregirCaptura(id: string, campo: string, request: Request, env:
   let valor: number | string;
   if (campo === 'existencia') {
     valor = Number(cuerpo.stock);
-    if (!Number.isInteger(valor) || valor < 1 || valor > 999) {
+    if (!Number.isInteger(valor) || valor < 0 || valor > 999) {
       return json({ error: 'Existencia invalida.' }, 400);
     }
   } else {
@@ -639,6 +639,16 @@ async function corregirCaptura(id: string, campo: string, request: Request, env:
   const desde = new Date(Date.now() - VENTANA_CAPTURA_MS).toISOString();
   // Lo escaneado (con UPC) solo sus primeros minutos: después /etiquetas ya imprimió esa cantidad (#369).
   const desdeEscaner = new Date(Date.now() - CORRECCION_ESCANER_MS).toISOString();
+  // En 0 lo escaneado por error se cancela y sale de la cola de etiquetas (#377). Solo lo que tiene
+  // UPC, dentro de su ventana y sin ventas: una foto se elimina desde su miniatura.
+  if (valor === 0) {
+    const { meta } = await env.DB.prepare(`update productos set stock = 0, estado_analisis = 'descartado', actualizado_en = ?
+      where id = ? and capturado_por = ? and upc is not null and creado_en > ? and estado_analisis <> 'descartado'
+        and not exists (select 1 from venta_lineas where producto_id = productos.id)`)
+      .bind(new Date().toISOString(), id, correo, desdeEscaner).run();
+    if (!meta.changes) return json({ error: 'Solo se cancela lo escaneado en sus primeros 5 minutos.' }, 404);
+    return json({ id, stock: 0, descartado: true });
+  }
   const resultado = await env.DB.prepare(
     `update productos set ${columna} = ?, actualizado_en = ? where id = ? and capturado_por = ? and creado_en > ?
        and (upc is null or creado_en > ?) and estado_analisis <> 'descartado'`,
