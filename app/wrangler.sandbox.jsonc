@@ -7,7 +7,8 @@
   //   npx wrangler deploy --config wrangler.sandbox.jsonc
   //   python ../tools/refrescar_sandbox.py      (copia produccion -> sandbox)
   //
-  // Sin llaves de IA a proposito: el analisis de fotos falla aqui sin gastar.
+  // Sin llaves de Claude ni AI Studio a proposito. Solo VERTEX_API_KEY (Issue
+  // #363): aqui se prueba Gemini en Vertex con busqueda antes de produccion.
   "name": "el-dolaron-sandbox",
   "main": "src/worker.ts",
   "compatibility_date": "2026-09-11",
@@ -26,7 +27,8 @@
     // Pinta la franja SANDBOX en todas las pantallas (worker.ts).
     "AMBIENTE": "sandbox",
     "CONTEO_UMBRAL": "30000",
-    "MODELO_ANALISIS": "claude",
+    "MODELO_ANALISIS": "gemini",
+    "BUSQUEDA_WEB": "si",
     // Ensayo de Dolarones: portal propio, mismo proyecto Firebase (usar los
     // numeros de prueba de Firebase, no gastan SMS) y promocion ya iniciada.
     "HOST_PORTAL": "sandbox.eldolaron.com",
