@@ -471,10 +471,13 @@ async function precioDeManifiesto(upcCrudo: string, env: Env): Promise<Response 
   const ficha = await fichaDeManifiesto(upc, env);
   const config = await leerConfig(env);
   if (!ficha) {
+    // Lo ya identificado se reutiliza con o sin foto (#402): búsqueda por código (#373) o captura a mano.
+    // productos.upc guarda el código tal cual se leyó: se prueban sus variantes con ceros para usar el índice productos_upc.
+    const claves = Array.from({ length: 15 - upc.length }, (_, i) => upc.padStart(upc.length + i, '0'));
     const propia = await env.DB.prepare(`select nombre, marca, categoria, precio_lista, precio from productos
-      where ltrim(upc, '0') = ? and propietario = 'dolaron' and foto_key <> '' and estado_analisis <> 'descartado'
-        and estado_analisis = 'listo' and precio > 0 order by actualizado_en desc limit 1`)
-      .bind(upc).first<{ nombre: string; marca: string; categoria: string; precio_lista: number; precio: number }>();
+      where upc in (${claves.map(() => '?').join(', ')}) and propietario = 'dolaron' and estado_analisis = 'listo'
+        and precio > 0 and trim(nombre) <> '' order by actualizado_en desc limit 1`)
+      .bind(...claves).first<{ nombre: string; marca: string; categoria: string; precio_lista: number; precio: number }>();
     if (!propia) return json({ error: 'Ese código no está en el catálogo ni en el manifiesto: captura la pieza con foto.' }, 404);
     return { ficha: { upc, nombre: propia.nombre, descripcion: propia.nombre, marca: propia.marca, categoria: propia.categoria,
       departamento: '', precio_usd: 0, tcin: '' }, precioLista: propia.precio_lista,
