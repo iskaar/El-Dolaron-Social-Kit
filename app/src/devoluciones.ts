@@ -14,7 +14,7 @@
 
 import { cajaDe } from './corte.ts';
 import { dolaronesGanados } from '../public/venta.js';
-import { leerCupon, nuevoCupon, porcentajeCupon, retirarVale, valeDeVenta, valeUsadoEnVenta } from './vales.ts';
+import { leerCupon, nuevoCupon, porcentajeCupon, retirarVale, usadosEnVenta, valeDeVenta } from './vales.ts';
 import { saldo } from './dolarones.ts';
 import { TICKET_CON_ANTICIPO } from './pedidos.ts';
 
@@ -95,7 +95,7 @@ export async function detalleVenta(id: string, env: Env, paraImprimir = false): 
   const saldoActual = venta.cliente_id ? await saldo(env, venta.cliente_id, new Date().toISOString()) : null;
   const respuesta = json({ ...venta, cliente_id: undefined, pedido_id: undefined, pedido_folio: folio,
     socio:socio && { ...socio, ganados:ganados?.importe ?? 0, saldo:saldoActual?.disponible ?? 0 }, lineas, devoluciones,
-    vale_emitido:await valeDeVenta(env, id), vale_usado:await valeUsadoEnVenta(env, id) });
+    vale_emitido:await valeDeVenta(env, id), ...(await usadosEnVenta(env, id)) });
   respuesta.headers.set('cache-control', 'no-store');
   return respuesta;
 }

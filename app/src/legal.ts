@@ -5,11 +5,13 @@
 // elige un maximo en el portal; en caja se le pregunta si usa sus Dolarones.
 // Version 2026-10-v4, 8 de octubre de 2026 (Issue #258): el vale de papel se puede
 // pasar a una cuenta con la tarifa de socio (punto 6 ter). PENDIENTE: visto bueno del abogado.
+// Version 2026-10-v5, 17 de octubre de 2026 (Issue #354): varios vales impresos se juntan en un
+// ticket (punto 9). PENDIENTE: visto bueno del abogado antes de publicarla.
 // Viven aqui y no en variables porque Cloudflare limita cada
 // variable a 5 KB. Cambiar este texto exige subir BASES_APROBADAS_VERSION.
 
 export const BASES = `BASES DEL PROGRAMA DOLARONES
-Versión 2026-10-v4, 8 de octubre de 2026
+Versión 2026-10-v5, 17 de octubre de 2026
 
 1. Organizador
 María Teresa Ferrusca Pérez, RFC FEPT660329TH4, con nombre comercial El Dolarón, en Jardín Hidalgo 129, Zona Centro, Soledad de Graciano Sánchez, San Luis Potosí, C.P. 78430.
@@ -87,7 +89,7 @@ Reglas de la promoción:
 8. Cómo se usan
 Al pagar, el socio inicia sesión en el portal y muestra su código en caja. Ahí se le pregunta si quiere usar sus Dolarones: todos los que apliquen a la compra, una parte o ninguno. El código dura cinco minutos y permite un solo canje; generar otro invalida el anterior. Dar solo el teléfono o número de socio no autoriza gasto. El canje requiere conexión. Los Dolarones se descuentan primero de los que vencen antes. El resto de la compra se paga en efectivo o con tarjeta. El saldo aparece en el ticket.
 
-El cliente sin registro presenta su vale impreso. En caja se consulta su saldo y vigencia; «Usar máximo» cubre el total de la compra o usa el saldo elegible, lo que sea menor. También se puede indicar un importe parcial. En esta versión se usa un vale o una membresía por ticket, no varios a la vez. Para pasar un vale al saldo de una cuenta, ver el punto 6 ter. Un vale perdido no se repone: es al portador, como dinero de la tienda. El personal solo lo reimprime si se presenta el papel dañado, o si el ticket de la compra quedó sin vale por una falla de impresión o de conexión; para eso el ticket trae el folio de la venta.
+El cliente sin registro presenta su vale impreso. En caja se consulta su saldo y vigencia; «Usar máximo» cubre el total de la compra o usa el saldo elegible, lo que sea menor. También se puede indicar un importe parcial. Se pueden juntar varios vales en un mismo ticket, hasta 10; se gasta primero el que vence antes. Los vales no se combinan con una membresía en el mismo ticket. Para pasar un vale al saldo de una cuenta, ver el punto 6 ter. Un vale perdido no se repone: es al portador, como dinero de la tienda. El personal solo lo reimprime si se presenta el papel dañado, o si el ticket de la compra quedó sin vale por una falla de impresión o de conexión; para eso el ticket trae el folio de la venta.
 
 9. Seguridad del acceso
 No compartas códigos SMS, tu sesión ni el código de barras: quien copie un código vigente podría gastar tu saldo disponible. En dispositivos compartidos, no conserves la sesión y ciérrala al terminar. Generar otro código o cerrar sesión invalida el anterior (requiere conexión). El encargado revisa presencialmente la vinculación de una membresía previa; un teléfono coincidente no la vincula automáticamente. No hay recuperación automática de una cuenta ya vinculada.
