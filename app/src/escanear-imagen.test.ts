@@ -39,7 +39,7 @@ function pantalla(fallaFoto = false) {
 }
 
 const asentarse = () => new Promise((resolve) => setImmediate(resolve));
-test('lector conserva ceros, suma alias y no confirma ni programa guardado mientras se revisa la imagen', async () => {
+test('lector conserva ceros, suma alias, no confirma sola la imagen y la imagen no detiene el guardado (#383)', async () => {
   const { api, el, llamadas, temporizadores } = pantalla();
   await api.procesar('0191907910414');
   await asentarse();
@@ -47,8 +47,8 @@ test('lector conserva ceros, suma alias y no confirma ni programa guardado mient
   assert.equal(llamadas[0].ruta, '/api/manifiesto/0191907910414');
   assert.equal(api.actual().imagen.confirmada, false);
   assert.equal(el('confirmar-imagen').hidden, false);
-  // avisar() pone un temporizador de color; programarGuardado() no añade otro.
-  assert.equal(temporizadores.size, 1);
+  // avisar() pone un temporizador de color y programarGuardado() el de 25 s, aunque falte confirmar la imagen.
+  assert.equal(temporizadores.size, 2);
   await api.procesar('191907910414');
   assert.equal(api.actual().stock, 2);
   assert.equal(llamadas.filter((r) => r.ruta.endsWith('/imagen')).length, 1);
