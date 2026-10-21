@@ -20,19 +20,35 @@ const referencia = (r: Referencia) => ({
   codigo_verificado: !!r.upc_fuente, confirmada: !!r.confirmado_en,
 });
 
-async function leerJson(cuerpo: ReadableStream<Uint8Array> | null, maximo: number) {
-  if (!cuerpo) throw new Error('Falta el cuerpo JSON.');
+async function leerTexto(cuerpo: ReadableStream<Uint8Array> | null, maximo: number) {
+  if (!cuerpo) throw new Error('Falta el cuerpo.');
   const lector = cuerpo.getReader(), partes: Uint8Array[] = [];
   let bytes = 0;
   while (true) {
     const { done, value } = await lector.read();
     if (done) break;
     bytes += value.length;
-    if (bytes > maximo) { await lector.cancel(); throw new Error('Cuerpo JSON demasiado grande.'); }
+    if (bytes > maximo) { await lector.cancel(); throw new Error('Cuerpo demasiado grande.'); }
     partes.push(value);
   }
-  return JSON.parse(await new Blob(partes).text());
+  return await new Blob(partes).text();
 }
+const leerJson = async (cuerpo: ReadableStream<Uint8Array> | null, maximo: number) => JSON.parse(await leerTexto(cuerpo, maximo));
+
+const VERIFICACION = 'Target pidió verificación. Abre «Ver producto original», guarda la imagen y usa «Subir foto», o toma una.';
+const PAUSA_MS = 30 * 60_000;
+// ponytail: pausa por isolate; si Target bloquea seguido, guardarla en D1 para todos los isolates.
+let pausaTargetHasta = 0;
+/** Solo para pruebas. */
+export const reiniciarPausaTarget = () => { pausaTargetHasta = 0; };
+const meta = (html: string, propiedad: string) => {
+  for (const [etiqueta] of html.matchAll(/<meta\b[^>]*>/g)) {
+    if (etiqueta.includes(`property="${propiedad}"`)) return /content="([^"]*)"/.exec(etiqueta)?.[1] ?? '';
+  }
+  return '';
+};
+const entidades = (texto: string) => texto.replace(/&(amp|quot|#39|#x27|lt|gt);/g,
+  (_, e: string) => ({ amp: '&', quot: '"', '#39': "'", '#x27': "'", lt: '<', gt: '>' })[e]!);
 
 /** La foto propia tiene prioridad, incluso si se agotó el stock. Nunca busca en piezas de FEP. */
 export async function imagenGuardada(upc: string, env: Env) {
@@ -80,25 +96,31 @@ export async function rutaImagenUpc(request: Request, env: Env, pathname: string
     return meta.changes ? json({ imagen: await imagenGuardada(upc, env) }) : json({ error: 'La imagen cambió. Vuelve a buscarla.' }, 409);
   }
 
-  if (!env.SCRAPLING_URL || !env.SCRAPLING_TOKEN) return json({ error: 'La búsqueda de imágenes no está configurada. Toma o sube una foto.' }, 503);
+  if (Date.now() < pausaTargetHasta) return json({ error: VERIFICACION }, 503);
   try {
-    const servicio = new URL(env.SCRAPLING_URL);
-    if (servicio.username || servicio.password || servicio.search || servicio.hash) return json({ error: 'La búsqueda de imágenes no está configurada.' }, 503);
-    if (servicio.protocol !== 'https:' && !(String(env.ACCESS_EQUIPO) === 'local' && servicio.protocol === 'http:' && ['127.0.0.1', 'localhost'].includes(servicio.hostname))) {
-      return json({ error: 'La búsqueda de imágenes no está configurada.' }, 503);
-    }
-    const respuesta = await fetch(servicio, {
-      method: 'POST', redirect: 'manual', signal: AbortSignal.timeout(35_000),
-      headers: { 'content-type': 'application/json', authorization: `Bearer ${env.SCRAPLING_TOKEN}` },
-      body: JSON.stringify({ url: enlace(fuente.tcin), barcode: upc }),
+    // Una consulta por UPC, solo al escanearlo y luego en caché: volumen de persona, no de crawler.
+    const respuesta = await fetch(enlace(fuente.tcin), {
+      redirect: 'manual', signal: AbortSignal.timeout(10_000),
+      headers: { 'user-agent': 'ElDolaron-escaner/1.0 (+https://viste.com.mx)', accept: 'text/html' },
     });
-    if (!respuesta.ok) {
-      await respuesta.body?.cancel();
-      return json({ error: 'No se pudo obtener una imagen del proveedor. Toma o sube una foto.' }, respuesta.status === 422 ? 422 : 502);
+    const html = respuesta.status === 200 || respuesta.status === 403 || respuesta.status === 429
+      ? await leerTexto(respuesta.body, 3_000_000) : (await respuesta.body?.cancel(), '');
+    // Target usa HUMAN («mantén presionado»). No se resuelve: se pausa y lo hace una persona.
+    if (respuesta.status === 403 || respuesta.status === 429 || /px-captcha|press\s*&(amp;)?\s*hold/i.test(html)) {
+      pausaTargetHasta = Date.now() + PAUSA_MS;
+      console.warn(JSON.stringify({ mensaje: 'target pidió verificación', status: respuesta.status }));
+      return json({ error: VERIFICACION }, 503);
     }
-    const datos = await leerJson(respuesta.body, 16_384) as { image_url?: unknown; title?: unknown; barcode?: unknown };
-    if (!imagenValida(datos.image_url) || typeof datos.title !== 'string' || !datos.title.trim()
-      || (datos.barcode && normalizarUpc(datos.barcode) !== upc)) {
+    if (respuesta.status === 404) return json({ error: 'Target ya no tiene este producto. Toma o sube una foto.' }, 422);
+    if (respuesta.status !== 200) return json({ error: 'No se pudo abrir el producto en Target. Toma o sube una foto.' }, 502);
+    const codigos = new Set([...html.matchAll(/"primary_barcode":"(\d{6,14})"/g)].map((m) => normalizarUpc(m[1])));
+    const datos = {
+      image_url: entidades(meta(html, 'og:image')),
+      title: entidades(meta(html, 'og:title') || /id="pdp-product-title-id"[^>]*>([^<]+)/.exec(html)?.[1] || ''),
+      // Más de un código en la página es ambiguo: queda para revisión manual.
+      barcode: codigos.size === 1 ? [...codigos][0] : '',
+    };
+    if (!imagenValida(datos.image_url) || !datos.title.trim() || (datos.barcode && datos.barcode !== upc)) {
       return json({ error: 'La página no tiene una imagen válida para este código. Toma o sube una foto.' }, 422);
     }
     // Si cambió la hoja o alguien confirmó mientras llegaba HTTP, no se pisa su decisión.
@@ -107,7 +129,7 @@ export async function rutaImagenUpc(request: Request, env: Env, pathname: string
       on conflict (upc) do update set tcin = excluded.tcin, url = excluded.url, nombre = excluded.nombre,
         upc_fuente = excluded.upc_fuente, confirmado_por = '', confirmado_en = ''
       where imagenes_upc.tcin <> excluded.tcin or imagenes_upc.confirmado_en = ''`)
-      .bind(upc, fuente.tcin, datos.image_url, datos.title.trim().slice(0, 200), typeof datos.barcode === 'string' ? datos.barcode : '', upc, fuente.tcin).run();
+      .bind(upc, fuente.tcin, datos.image_url, datos.title.trim().slice(0, 200), datos.barcode, upc, fuente.tcin).run();
     const imagen = await imagenGuardada(upc, env);
     return imagen ? json({ imagen }) : json({ error: 'El enlace cambió. Vuelve a escanear.' }, 409);
   } catch (error) {

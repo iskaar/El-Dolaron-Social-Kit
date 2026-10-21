@@ -2,47 +2,54 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { tienda, DUENO, PRODUCTO } from './prueba-d1.ts';
 import worker, { permitidaParaVendedor } from './worker.ts';
+import { reiniciarPausaTarget } from './imagenes-upc.ts';
 import { codigoLeido, normalizarUpc } from '../public/upc.js';
 
 const UPC = '8438051051054', TCIN = '94882460';
 const IMAGEN = 'https://target.scene7.com/is/image/Target/GUEST_ejemplo?wid=626';
 const RUTA = `/api/manifiesto/${UPC}/imagen`;
+const pagina = (imagen: string, codigo = UPC, status = 200) => new Response(`<html><head>
+  <meta content="Yoobi &amp; pouch" property="og:title" data-next-head=""/>
+  <meta content="${imagen}" property="og:image" data-next-head=""/></head>
+  <body><script>{"primary_barcode":"${codigo}"}</script></body></html>`, { status });
 function preparar() {
   const t = tienda();
   t.db.prepare(`insert into manifiesto (upc, descripcion, precio_usd, tcin, nombre, actualizado_en)
     values (?, 'Yoobi pencil pouch', 999, ?, 'Estuche Yoobi', '')`).run(UPC, TCIN);
   t.db.prepare("insert into config (clave, valor) values ('tipo_cambio', '1850')").run();
-  t.env.SCRAPLING_URL = 'https://extractor.prueba/lookup';
-  t.env.SCRAPLING_TOKEN = 'token-sintetico-de-prueba';
+  reiniciarPausaTarget();
   return t;
 }
 
 test('el candidato se verifica, se confirma explícitamente y se reutiliza sin HTTP ni cambiar stock', async (t) => {
-  const { db, env, pedir } = preparar();
+  const { db, pedir } = preparar();
   let llamadas = 0;
   t.mock.method(globalThis, 'fetch', async (url: string, opciones: RequestInit) => {
     llamadas++;
-    assert.equal(String(url), env.SCRAPLING_URL);
-    assert.equal(opciones.redirect, 'manual'); // Workers no admite redirect: 'error'; no seguir el token a otro host.
-    assert.equal((opciones.headers as Record<string, string>).authorization, `Bearer ${env.SCRAPLING_TOKEN}`);
-    assert.deepEqual(JSON.parse(String(opciones.body)), { url: `https://www.target.com/p/-/A-${TCIN}`, barcode: UPC });
-    return Response.json({ title: 'Yoobi pouch', image_url: IMAGEN, barcode: UPC });
+    assert.equal(String(url), `https://www.target.com/p/-/A-${TCIN}`);
+    assert.equal(opciones.redirect, 'manual');
+    // Ni sesión ni cookies del personal salen hacia Target.
+    assert.deepEqual(Object.keys(opciones.headers as Record<string, string>).sort(), ['accept', 'user-agent']);
+    return pagina(IMAGEN.replace('?', '?a=1&amp;'));
   });
   assert.equal((await pedir(RUTA, { url: IMAGEN, tcin: TCIN }, 'PUT')).status, 409);
   const candidata = await pedir(RUTA, { url: 'http://127.0.0.1/secreto' });
   assert.equal(candidata.status, 200);
   assert.equal(candidata.cuerpo.imagen.confirmada, false);
   assert.equal(candidata.cuerpo.imagen.codigo_verificado, true);
-  assert.equal((await pedir(RUTA, { url: IMAGEN + 'otro', tcin: TCIN }, 'PUT')).status, 409);
-  assert.equal((await pedir(RUTA, { url: IMAGEN, tcin: TCIN }, 'PUT')).cuerpo.imagen.confirmada, true);
+  assert.equal(candidata.cuerpo.imagen.nombre, 'Yoobi & pouch');
+  const IMAGEN_PAGINA = IMAGEN.replace('?', '?a=1&');
+  assert.equal(candidata.cuerpo.imagen.url, IMAGEN_PAGINA);
+  assert.equal((await pedir(RUTA, { url: IMAGEN_PAGINA + 'otro', tcin: TCIN }, 'PUT')).status, 409);
+  assert.equal((await pedir(RUTA, { url: IMAGEN_PAGINA, tcin: TCIN }, 'PUT')).cuerpo.imagen.confirmada, true);
   assert.equal((await pedir(RUTA, {})).cuerpo.imagen.confirmada, true);
-  assert.equal((await pedir(`/api/manifiesto/${UPC}`, undefined, 'GET')).cuerpo.imagen.url, IMAGEN);
+  assert.equal((await pedir(`/api/manifiesto/${UPC}`, undefined, 'GET')).cuerpo.imagen.url, IMAGEN_PAGINA);
   assert.equal(llamadas, 1);
   assert.equal(db.prepare('select confirmado_por from imagenes_upc').get()!.confirmado_por, DUENO);
   assert.equal(db.prepare('select stock from productos where id=?').get(PRODUCTO)!.stock, 50);
   db.prepare("update manifiesto set tcin='123'").run();
   assert.equal((await pedir(RUTA, undefined, 'GET')).cuerpo.imagen, null);
-  assert.equal((await pedir(RUTA, { url: IMAGEN, tcin: TCIN }, 'PUT')).status, 409);
+  assert.equal((await pedir(RUTA, { url: IMAGEN_PAGINA, tcin: TCIN }, 'PUT')).status, 409);
 });
 
 test('foto propia primero, UPC/EAN equivalentes y aislamiento de FEP/portal/vendedor', async (t) => {
@@ -70,20 +77,37 @@ test('foto propia primero, UPC/EAN equivalentes y aislamiento de FEP/portal/vend
   assert.equal(portal.status, 404);
 });
 
-test('respuestas ajenas, códigos distintos, errores y servicio sin configurar no dejan imágenes', async (t) => {
-  const { db, env, pedir } = preparar();
+test('páginas ajenas, códigos distintos y errores no dejan imágenes', async (t) => {
+  const { db, pedir } = preparar();
   const respuestas = [
-    Response.json({ title: 'Otra pieza', image_url: IMAGEN, barcode: '123456789012' }),
-    Response.json({ title: 'Otra pieza', image_url: 'http://127.0.0.1/foto', barcode: UPC }),
-    Response.json({ title: 'Otra pieza', image_url: IMAGEN, barcode: 8438051051054 }),
-    new Response('no', { status: 503 }), new Response('x'.repeat(17_000)),
+    pagina(IMAGEN, '123456789012'), pagina('http://127.0.0.1/foto'), pagina('https://target.scene7.com.evil.mx/is/image/Target/x'),
+    new Response('no', { status: 404 }), new Response('no', { status: 500 }), new Response(null, { status: 301 }),
+    new Response('x'.repeat(3_000_001)),
   ];
   t.mock.method(globalThis, 'fetch', async () => respuestas.shift()!);
-  for (let i = 0; i < 5; i++) assert.ok((await pedir(RUTA, {})).status >= 400);
+  const status = [];
+  for (let i = 0; i < 7; i++) status.push((await pedir(RUTA, {})).status);
+  assert.deepEqual(status, [422, 422, 422, 422, 502, 502, 502]);
   assert.equal(db.prepare('select count(*) n from imagenes_upc').get()!.n, 0);
-  delete env.SCRAPLING_TOKEN;
-  assert.equal((await pedir(RUTA, {})).status, 503);
   assert.equal((await pedir('/api/manifiesto/123456789012/imagen', {})).status, 404);
+});
+
+test('la verificación «mantén presionado» de Target pausa las consultas en vez de insistir', async (t) => {
+  const { db, pedir } = preparar();
+  let llamadas = 0;
+  t.mock.method(globalThis, 'fetch', async () => {
+    llamadas++;
+    return new Response('<div id="px-captcha"></div><p>Press &amp; Hold to confirm you are a human</p>', { status: 403 });
+  });
+  const bloqueo = await pedir(RUTA, {});
+  assert.equal(bloqueo.status, 503);
+  assert.match(bloqueo.cuerpo.error, /verificación/);
+  assert.equal((await pedir(RUTA, {})).status, 503);
+  assert.equal(llamadas, 1);
+  assert.equal(db.prepare('select count(*) n from imagenes_upc').get()!.n, 0);
+  reiniciarPausaTarget();
+  t.mock.method(globalThis, 'fetch', async () => new Response('<div id="px-captcha"></div>'));
+  assert.equal((await pedir(RUTA, {})).status, 503); // También con 200.
 });
 
 test('se conserva el código original; reintentar una captura no repone lo vendido', async () => {

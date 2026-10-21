@@ -306,8 +306,10 @@ function pintarImagen(pieza) {
   $('confirmar-imagen').hidden = !imagen || imagen.confirmada;
   $('confirmar-imagen').disabled = !!pieza.confirmandoImagen || !!pieza.imagenRota;
   $('omitir-imagen').hidden = !imagen || imagen.confirmada;
-  $('fuente-imagen').hidden = !imagen?.enlace;
-  if (imagen?.enlace) $('fuente-imagen').href = imagen.enlace;
+  // Si Target pide verificación, una persona la pasa en su navegador desde este enlace.
+  const enlace = imagen?.enlace || pieza.ficha.enlace;
+  $('fuente-imagen').hidden = !enlace;
+  if (enlace) $('fuente-imagen').href = enlace;
 }
 
 async function cargarImagen(pieza) {

@@ -16,7 +16,8 @@ la hoja de Google: `manifiesto.tcin` ya identifica el enlace
    conserva ese precio manual. El cliente nunca autoriza su propio precio.
 3. Después busca una referencia del mismo UPC y TCIN en `imagenes_upc`. Un cambio de
    TCIN en la hoja invalida la referencia anterior sin tocar la foto propia.
-4. Sin imagen guardada, el Worker pide un candidato al extractor Scrapling. El precio
+4. Sin imagen guardada, el Worker abre el enlace Target del TCIN y lee `og:image`,
+   `og:title` y `primary_barcode` de la página. El precio
    y el nombre de etiqueta siguen saliendo del manifiesto; el nombre original del
    proveedor se muestra junto a la imagen para revisarla.
 5. «Confirmar imagen» registra usuario y fecha. Antes de ese toque no se reutiliza como
@@ -44,33 +45,24 @@ prioridad. Las condiciones y los derechos de imágenes de Target siguen siendo a
 
 Las rutas `/api/manifiesto/:upc/imagen` (GET/POST/PUT) y
 `/api/manifiesto/:upc/imagen/catalogo` (GET) pasan por Access y el rol de captura existente.
-El portal público no las sirve. El navegador no recibe el token del extractor.
+El portal público no las sirve.
 Los enlaces salen del TCIN guardado en servidor; no se aceptan URLs arbitrarias del cliente.
 
-## Preparación del extractor
+## Consulta a Target y verificación humana
 
-Scrapling es Python y se ejecuta fuera de Workers. Esta entrega añade el servicio y su
-Dockerfile, pero no crea hosting, tokens ni despliegues remotos. Requiere Python 3.10+.
+El Worker abre `https://www.target.com/p/-/A-<TCIN>` directamente, sin navegador ni servicio
+aparte (se probó desde Cloudflare: 200 con imagen y título). Se identifica con su propio
+user-agent, no envía cookies ni sesiones del personal y no sigue redirecciones. Solo consulta
+un UPC cuando alguien lo escanea sin imagen guardada; después queda en caché en D1.
 
-```powershell
-python -m venv .venv
-.venv\Scripts\python -m pip install -r tools/scrapling/requirements.txt
-.venv\Scripts\scrapling install
-.venv\Scripts\python tools/scrapling/servidor.py --check https://www.target.com/p/-/A-94882460 --barcode 8438051051054
-```
+Muestreo del 2026-10-21: 17 de 28 TCIN al azar tenían página con imagen; los demás dan 404
+porque Target ya no los lista. Para esos queda tomar o subir foto.
 
-Para servir: definir `SCRAPLING_TOKEN` en el entorno del proceso, mínimo 32 caracteres
-aleatorios, y ejecutar `python tools/scrapling/servidor.py`. Escucha en el puerto 8000
-o `PORT`; `GET /health` permite comprobarlo. En hosting usar HTTPS delante del proceso,
-sin exponer directamente el puerto HTTP. El contenedor se construye con
-`docker build -t viste-scrapling tools/scrapling` y recibe el token mediante el entorno.
-No poner el token en código, argumentos, logs o git. Nunca pasar cookies de Access al proveedor.
-
-El servicio solo admite URLs Target de producto y devuelve JSON pequeño. Hace una consulta
-a la vez; el exceso responde 429. Renderizar JavaScript queda de respaldo cuando HTML no
-alcanza, con una sola tentativa y sin resolver CAPTCHAs. La red del navegador queda
-limitada a Target y su servidor de imágenes. Un bloqueo o falta de imagen deja disponible
-la captura propia.
+Target usa HUMAN («mantén presionado»). **No se resuelve automáticamente**: es una barrera
+deliberada del sitio. Si la respuesta es 403/429 o trae el reto, el Worker deja de consultar
+Target 30 minutos (por isolate) y la pantalla pide hacerlo a mano: «Ver producto original»
+abre la página en el teléfono, la persona pasa la verificación, guarda la imagen y la sube con
+«Subir foto». Si el bloqueo se vuelve frecuente, guardar la pausa en D1 y revisar el volumen.
 
 ## Activación (Isaac)
 
@@ -78,20 +70,14 @@ la captura propia.
 2. Ejecutar la migración **045** antes del Worker, primero en sandbox y luego en producción.
    Los comandos exactos están en `app/migracion-045-imagenes-upc.sql`. Es aditiva y
    compatible con el Worker anterior.
-3. Alojar el extractor y configurar `SCRAPLING_URL` (URL HTTPS completa terminada en
-   `/lookup`) y `SCRAPLING_TOKEN` como secretos del Worker. El token coincide con el del
-   proceso Python. Usar configuración y token separados por entorno. `wrangler secret put`
-   con `--config wrangler.sandbox.jsonc` apunta al sandbox; sin esa opción, a producción.
-4. Desplegar el Worker correspondiente. Sin el servicio, las fotos propias y referencias
-   existentes funcionan y la búsqueda nueva explica que falta configuración.
-5. Probar el ejemplo de Isaac, otro UPC con cero inicial y un enlace sin imagen. Validar
+3. Desplegar el Worker correspondiente. No hay secretos ni servicios que configurar.
+4. Probar el ejemplo de Isaac, otro UPC con cero inicial y un TCIN que ya no exista. Validar
    confirmación, segundo escaneo sin llamada externa, cambio de TCIN, fallback de foto y
    recuperación sin conexión. Lector/cámara/impresora físicos siguen pendientes de prueba.
 
 ## Comprobaciones locales
 
-Desde raíz: `python tools/validate_assets.py` y
-`python -m unittest discover -s tools/scrapling -v` (con Scrapling instalado).
+Desde raíz: `python tools/validate_assets.py`.
 Desde `app/`: `npm test`, `npm run typecheck`, `npm run db:local` sobre una base nueva.
 Los tests HTTP/SQLite verifican confirmación, fuente cambiada, roles/host, datos inválidos,
 foto propia, código original y reintento sin reponer stock; los tests de la pantalla
