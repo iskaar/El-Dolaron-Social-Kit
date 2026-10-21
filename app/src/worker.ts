@@ -612,32 +612,50 @@ async function capturarDesconocido(request: Request, env: Env, ctx: ExecutionCon
     values (?, ?, '', ?, ?, ?, ?, ?, ?, 'pendiente', 'etiqueta', 'dolaron') on conflict (id) do nothing`)
     .bind(cuerpo.id, leido, estado, stock, semanaIngreso(ahora), correo, ahora.toISOString(), ahora.toISOString()).run();
   // Un reintento del mismo id no vuelve a buscar ni repone stock. Se busca el código tal cual se leyó:
-  // sin el 0 inicial, Google no encuentra el UPC-A.
-  if (meta.changes) ctx.waitUntil(identificarPieza(cuerpo.id, leido, env));
+  // sin el 0 inicial, Google no encuentra el UPC-A. Sin cola (local, pruebas), en waitUntil.
+  if (meta.changes) {
+    if (env.BUSQUEDAS) await env.BUSQUEDAS.send({ id: cuerpo.id, upc: leido });
+    else ctx.waitUntil(identificarPieza(cuerpo.id, leido, env));
+  }
   return await estadoDesconocido(cuerpo.id, env, correo, 202);
 }
 
-async function identificarPieza(id: string, upc: string, env: Env): Promise<void> {
+/** En la cola no hay tope de 30 s: Vertex con Google tarda de 20 a 40 s (#406). */
+const LIMITE_COLA_MS = 60_000;
+
+/**
+ * Busca el código de una pieza que no está en la hoja (Issue #373, cola #406). La usan la captura por
+ * código desconocido y el análisis de una foto con código y sin precio. Con hallazgo seguro la pieza
+ * queda lista con el nombre del código, que es más fiable que el de la foto (una cobija salió «gorro»).
+ * Sin hallazgo, `error`: el escáner pide foto o la pieza queda aparte. `ultimo = false` deja que la
+ * cola reintente un error de red o de tiempo.
+ */
+export async function identificarPieza(id: string, upc: string, env: Env, ultimo = true): Promise<void> {
   const inicio = Date.now();
   let ficha: Awaited<ReturnType<typeof identificarUpc>> | null = null;
   try {
-    ficha = await identificarUpc(upc, env);
+    ficha = await identificarUpc(upc, env, env.BUSQUEDAS ? LIMITE_COLA_MS : undefined);
   } catch (error) {
-    console.error(JSON.stringify({ mensaje: 'upc sin identificar', id, upc, error: String(error).slice(0, 200) }));
+    console.error(JSON.stringify({ mensaje: 'upc sin identificar', id, upc, ultimo, error: String(error).slice(0, 200) }));
+    if (!ultimo) throw error;
   }
-  const fila = await env.DB.prepare(`select estado_fisico from productos where id = ? and estado_analisis = 'pendiente' and foto_key = ''`)
+  const fila = await env.DB.prepare(`select estado_fisico from productos where id = ? and estado_analisis in ('pendiente', 'error')`)
     .bind(id).first<{ estado_fisico: string }>();
-  if (!fila) return;   // ya llegó una foto (manda su análisis) o la descartaron
+  if (!fila) return;   // ya está lista (captura manual o análisis) o la descartaron
   const config = await leerConfig(env);
   // Pesos de la página, o sus dólares por el tipo de cambio como la hoja (eBay, tiendas de EE.UU.; #397).
   const precioLista = ficha ? pesosDeLista(ficha, config) * 100 : 0;
   const precio = ficha ? calcularPrecio({ precioLista, categoria: ficha.categoria, estadoFisico: fila.estado_fisico, config }).precio : 0;
-  // Sin nombre seguro o sin precio no se imprime: queda en `error` y el escáner pide foto.
+  // Sin nombre seguro o sin precio no se imprime: queda en `error` (con el nombre que diera la foto).
   const completa = !!ficha && ficha.nombre.trim() !== '' && ficha.confianza >= 0.5 && precio > 0;
-  await env.DB.prepare(`update productos set nombre = ?, marca = ?, categoria = ?, precio_lista = ?, precio = ?, precio_sugerido = ?,
-      estado_analisis = ?, actualizado_en = ? where id = ? and estado_analisis = 'pendiente' and foto_key = ''`)
-    .bind(completa ? ficha!.nombre : '', completa ? ficha!.marca : '', completa ? ficha!.categoria : 'otros', completa ? precioLista : 0,
-      completa ? precio : 0, completa ? precio : 0, completa ? 'listo' : 'error', new Date().toISOString(), id).run();
+  if (completa) {
+    await env.DB.prepare(`update productos set nombre = ?, marca = ?, categoria = ?, precio_lista = ?, precio = ?, precio_sugerido = ?,
+        estado_analisis = 'listo', actualizado_en = ? where id = ? and estado_analisis in ('pendiente', 'error')`)
+      .bind(ficha!.nombre, ficha!.marca, ficha!.categoria, precioLista, precio, precio, new Date().toISOString(), id).run();
+  } else {
+    await env.DB.prepare(`update productos set estado_analisis = 'error', actualizado_en = ? where id = ? and estado_analisis = 'pendiente'`)
+      .bind(new Date().toISOString(), id).run();
+  }
   if (completa) {
     await env.DB.prepare(`update productos set codigo = ${CODIGO_NUEVO} where id = ? and (codigo is null or codigo = '') and estado_analisis = 'listo'`)
       .bind(id).run();
@@ -2375,6 +2393,18 @@ export default {
 
   // Cron de wrangler.jsonc, cada 15 min: ordenes de Mercado Libre perdidas y
   // conciliacion de existencias. Sin cuenta conectada no hace nada.
+  /** Búsquedas por código (#406): en paralelo, cada una con su reintento. */
+  async queue(lote, env): Promise<void> {
+    await Promise.all(lote.messages.map(async (mensaje) => {
+      try {
+        await identificarPieza(mensaje.body.id, mensaje.body.upc, env, mensaje.attempts >= 2);
+        mensaje.ack();
+      } catch {
+        mensaje.retry();
+      }
+    }));
+  },
+
   async scheduled(_evento, env, ctx): Promise<void> {
     ctx.waitUntil(sincronizar(env));
     // Apartados cuyo plazo llego: vuelven a la venta (Issue #269). Aparte, para que uno no frene al otro.
@@ -2382,4 +2412,4 @@ export default {
     ctx.waitUntil(procesarColaRopa(env));
     ctx.waitUntil((async () => { await procesarRecortes(env); await revisarRecortes(env); })());
   },
-} satisfies ExportedHandler<Env>;
+} satisfies ExportedHandler<Env, BusquedaUpc>;

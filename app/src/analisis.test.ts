@@ -4,6 +4,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { tienda } from './prueba-d1.ts';
 import { analizarBorrador, LIMITES_MS } from './analisis.ts';
+import { identificarPieza } from './worker.ts';
 
 test('un modelo que nunca responde deja la fila en error (Claude y Gemini)', async (t) => {
   const { db, env } = tienda();
@@ -171,55 +172,58 @@ test('la sugerencia por ejemplos solo manda con confianza alta; si no, el % de l
   }
 });
 
-test('foto con código y sin precio: busca el código exacto en cualquier tienda y convierte dólares (#397)', async (t) => {
+test('foto con código y sin precio: va a la cola, que busca el código en cualquier tienda y convierte dólares (#397, #406)', async (t) => {
   const { db, env } = tienda();
   const fetchOriginal = globalThis.fetch;
   t.after(() => { globalThis.fetch = fetchOriginal; });
-  (env as { GEMINI_API_KEY: string }).GEMINI_API_KEY = 'prueba';
+  const enviados: BusquedaUpc[] = [];
+  Object.assign(env, { GEMINI_API_KEY: 'prueba', BUSQUEDAS: { send: async (m: BusquedaUpc) => { enviados.push(m); } } });
   db.prepare("insert or replace into config (clave, valor) values ('pct_juguetes', '50'), ('tipo_cambio', '1850')").run();
   const cuerpos: any[] = [];
+  let foto = '';
   globalThis.fetch = (async (_url: unknown, init?: RequestInit) => {
     const cuerpo = JSON.parse(String(init!.body));
     cuerpos.push(cuerpo);
     const ficha = cuerpo.tools
       ? { nombre: 'Bolsa peluche perro FAO Schwarz', marca: 'FAO Schwarz', categoria: 'juguetes', precio_lista_mxn: 0, precio_usd: 7.99, fuente: 'ebay.com', confianza: 0.9 }
-      : { nombre: 'Peluche perro con pelota de tenis', marca: '', categoria: 'juguetes', precio_lista_mxn: 0, precio_venta_mxn: 0, confianza: 0.7 };
+      : { nombre: foto, marca: '', categoria: 'juguetes', precio_lista_mxn: 0, precio_venta_mxn: 0, confianza: 0.4 };
     return new Response(JSON.stringify({ candidates: [{ content: { parts: [{ text: JSON.stringify(ficha) }] } }] }));
   }) as typeof fetch;
-  const id = crypto.randomUUID();
-  await env.FOTOS.put(`fotos/${id}.jpg`, new Uint8Array([1, 2, 3]));
-  db.prepare(`insert into productos (id, nombre, upc, estado_analisis, foto_key, semana_ingreso, creado_en, actualizado_en)
-    values (?, '', '840397509898', 'pendiente', ?, 'S40', '', '')`).run(id, `fotos/${id}.jpg`);
-  await analizarBorrador(id, env, 'gemini', false);
-  // Busca el código (a la par de la foto, #399), no el nombre genérico.
-  const busqueda = cuerpos.filter((c) => c.tools);
-  assert.equal(busqueda.length, 1);
-  assert.equal(busqueda[0].contents[0].parts[0].text, 'upc 840397509898');
-  assert.match(busqueda[0].systemInstruction.parts[0].text, /eBay/);
-  const fila = db.prepare('select nombre, precio_lista, precio, estado_analisis from productos where id = ?').get(id) as any;
-  // US$7.99 x $18.50 = $148 de lista; 50 % = $74 -> $70 -> $69. El nombre sigue siendo el de la foto.
-  assert.deepEqual({ ...fila }, { nombre: 'Peluche perro con pelota de tenis', precio_lista: 14800, precio: 6900, estado_analisis: 'listo' });
+  for (const nombreFoto of ['Gorro tejido', '']) {   // la foto se equivoca o no da nombre; el código manda
+    foto = nombreFoto;
+    cuerpos.length = 0; enviados.length = 0;
+    const id = crypto.randomUUID();
+    await env.FOTOS.put(`fotos/${id}.jpg`, new Uint8Array([1, 2, 3]));
+    db.prepare(`insert into productos (id, nombre, upc, estado_analisis, foto_key, semana_ingreso, creado_en, actualizado_en)
+      values (?, '', '840397509898', 'pendiente', ?, 'S40', '', '')`).run(id, `fotos/${id}.jpg`);
+    await analizarBorrador(id, env, 'gemini', false);
+    // El análisis no busca: deja la pieza pendiente y la manda a la cola.
+    assert.equal(cuerpos.filter((c) => c.tools).length, 0);
+    assert.deepEqual(enviados, [{ id, upc: '840397509898' }]);
+    assert.equal((db.prepare('select estado_analisis from productos where id = ?').get(id) as any).estado_analisis, 'pendiente');
+    await identificarPieza(id, '840397509898', env, true);
+    const busqueda = cuerpos.filter((c) => c.tools);
+    assert.equal(busqueda[0].contents[0].parts[0].text, 'upc 840397509898');
+    assert.match(busqueda[0].systemInstruction.parts[0].text, /eBay/);
+    const fila = db.prepare('select nombre, precio_lista, precio, estado_analisis, codigo from productos where id = ?').get(id) as any;
+    // US$7.99 x $18.50 = $148 de lista; 50 % = $74 -> $70 -> $69, con el nombre del código.
+    assert.deepEqual({ ...fila, codigo: !!fila.codigo },
+      { nombre: 'Bolsa peluche perro FAO Schwarz', precio_lista: 14800, precio: 6900, estado_analisis: 'listo', codigo: true });
+  }
 });
 
-test('la foto no da nombre pero el código sí: la pieza toma nombre y precio de la búsqueda (#402)', async (t) => {
+test('sin hallazgo la cola deja la pieza aparte; un error de red se reintenta y solo el último intento la aparta (#406)', async (t) => {
   const { db, env } = tienda();
   const fetchOriginal = globalThis.fetch;
   t.after(() => { globalThis.fetch = fetchOriginal; });
-  (env as { GEMINI_API_KEY: string }).GEMINI_API_KEY = 'prueba';
-  db.prepare("insert or replace into config (clave, valor) values ('pct_juguetes', '50'), ('tipo_cambio', '1850')").run();
-  globalThis.fetch = (async (_url: unknown, init?: RequestInit) => {
-    const busca = !!JSON.parse(String(init!.body)).tools;
-    const ficha = busca
-      ? { nombre: 'Peluche llavero FAO Schwarz', marca: 'FAO Schwarz', categoria: 'juguetes', precio_lista_mxn: 0, precio_usd: 9.99, fuente: 'ebay.com', confianza: 0.9 }
-      : { nombre: '', marca: '', categoria: 'juguetes', precio_lista_mxn: 0, precio_venta_mxn: 0, confianza: 0.3 };
-    return new Response(JSON.stringify({ candidates: [{ content: { parts: [{ text: JSON.stringify(ficha) }] } }] }));
-  }) as typeof fetch;
+  Object.assign(env, { GEMINI_API_KEY: 'prueba' });
   const id = crypto.randomUUID();
-  await env.FOTOS.put(`fotos/${id}.jpg`, new Uint8Array([1, 2, 3]));
   db.prepare(`insert into productos (id, nombre, upc, estado_analisis, foto_key, semana_ingreso, creado_en, actualizado_en)
-    values (?, '', '840397515004', 'pendiente', ?, 'S40', '', '')`).run(id, `fotos/${id}.jpg`);
-  await analizarBorrador(id, env, 'gemini', false);
-  const fila = db.prepare('select nombre, marca, precio, estado_analisis from productos where id = ?').get(id) as any;
-  // US$9.99 x $18.50 = $185; 50 % = $92.5 -> $90 -> $89.
-  assert.deepEqual({ ...fila }, { nombre: 'Peluche llavero FAO Schwarz', marca: 'FAO Schwarz', precio: 8900, estado_analisis: 'listo' });
+    values (?, 'Peluche gato', '840397509904', 'pendiente', 'x', 'S40', '', '')`).run(id);
+  globalThis.fetch = (async () => { throw new Error('sin red'); }) as typeof fetch;
+  await assert.rejects(identificarPieza(id, '840397509904', env, false));
+  assert.equal((db.prepare('select estado_analisis from productos where id = ?').get(id) as any).estado_analisis, 'pendiente');
+  await identificarPieza(id, '840397509904', env, true);
+  assert.deepEqual({ ...db.prepare('select nombre, estado_analisis from productos where id = ?').get(id) as any },
+    { nombre: 'Peluche gato', estado_analisis: 'error' });
 });
