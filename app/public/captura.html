@@ -858,7 +858,7 @@ async function procesarCola() {
       cuerpo.append('id', registro.id);
       cuerpo.append('estado_fisico', registro.estado_fisico);
       cuerpo.append('cantidad', String(registro.cantidad ?? 1));
-      if (registro.upc) cuerpo.append('upc', registro.upc);
+      if (registro.upc != null) cuerpo.append('upc', registro.upc);   // '' = escáner sin código (#379)
       if (registro.talla) cuerpo.append('talla', registro.talla);
       if (registro.prenda) cuerpo.append('prenda', registro.prenda);
       if (registro.marca) cuerpo.append('marca', registro.marca);
@@ -872,7 +872,7 @@ async function procesarCola() {
         break;                       // sin red: la foto se queda en la cola
       }
       if (respuesta.status >= 500) break;
-      if (registro.upc && !respuesta.ok) break; // Conservar también fotos del escáner ante sesión vencida o precio sin configurar.
+      if (registro.upc != null && !respuesta.ok) break; // Conservar también fotos del escáner ante sesión vencida o precio sin configurar.
       if (registro.precio_ropa != null && !respuesta.ok) {
         document.getElementById('ayuda').textContent = 'No se subió la prenda. Revisa tu sesión; la foto sigue guardada en este teléfono.';
         break;

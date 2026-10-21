@@ -67,6 +67,7 @@
 <header>
   <h1>Escanear</h1>
   <button id="abrir-teclado" class="liga" type="button">Escribir código</button>
+  <button id="sin-codigo" class="liga" type="button">Sin código</button>
   <a href="/captura">Fotos →</a>
 </header>
 <div id="visor" hidden><video id="video" playsinline muted></video><div id="mira"></div></div>
@@ -128,7 +129,7 @@
 import { CATEGORIAS } from '/categorias.js';
 import { nombreEstado, siguienteEstado } from '/estados.js';
 import { aJpeg, reducirArchivo } from '/foto.js';
-import { codigoLeido, normalizarUpc as normalizar, CORRECCION_ESCANER_MS } from '/upc.js';
+import { codigoLeido, normalizarUpc as normalizar, CORRECCION_ESCANER_MS, SIN_CODIGO } from '/upc.js';
 import { guardar as guardarFoto, leer as leerFoto, borrar as borrarFoto, pendientes } from '/cola-fotos.js';
 
 const NOMBRES = Object.fromEntries(CATEGORIAS);
@@ -190,7 +191,9 @@ function pintar() {
   }
   $('desconocido').hidden = !desconocido;
   if (desconocido) {
-    $('desconocido-codigo').textContent = desconocido.buscada
+    $('desconocido-codigo').textContent = desconocido.sinCodigo
+      ? 'Pieza sin código del fabricante: pon la cantidad y tómale o súbele foto. Se analiza como en Fotos y su etiqueta sale sola.'
+      : desconocido.buscada
       ? `Código ${desconocido.leido}: no se encontró. Toma o sube una foto de esta pieza.`
       : `Código ${desconocido.leido}. Se busca solo al pasar a la siguiente pieza: sigue escaneando. Si prefieres, tómale foto.`;
     $('cantidad-foto').value = desconocido.stock;
@@ -212,6 +215,7 @@ function anotar(html, fallo = null) {
 function programarGuardado() {
   clearTimeout(temporizador);
   if (piezaParaFoto || actual?.cargandoImagen || actual?.confirmandoImagen || actual?.imagen?.confirmada === false) return;
+  if (desconocido?.sinCodigo) return;   // sin código solo se guarda con su foto
   if (!actual && !desconocido) return;
   temporizador = setTimeout(() => { fila = fila.then(cerrarActual); }, GUARDAR_SOLA_MS);
 }
@@ -226,7 +230,8 @@ async function cerrarActual() {
   pintar();
   if (pieza && pieza.stock >= 1) await enviar(pieza);
   // La desconocida se guarda y se busca sola (#373); una que ya se buscó solo esperaba su foto.
-  if (otra && otra.stock >= 1 && !otra.buscada) await buscar(otra);
+  if (otra && otra.stock >= 1 && !otra.buscada && !otra.sinCodigo) await buscar(otra);
+  if (otra?.sinCodigo) anotar(`<span>Sin foto, no se capturó la pieza sin código</span><span class="cant">×${otra.stock}</span>`);
 }
 
 async function enviar(pieza) {
@@ -491,7 +496,7 @@ async function enviarFoto(registro) {
     const pendiente = await leerFoto(registro.id);
     if (pendiente && (pendiente.version ?? 0) === (registro.version ?? 0)) await borrarFoto(registro.id);
   } catch (error) {
-    anotar(`<span>Foto ${escapar(registro.upc)} guardada en este teléfono. Toca para reintentar o abre Fotos.</span>`,
+    anotar(`<span>Foto ${escapar(registro.upc || 'sin código')} guardada en este teléfono. Toca para reintentar o abre Fotos.</span>`,
       () => { fila = fila.then(() => enviarFoto(registro)); });
     mensaje(`No se subió: ${error.message ?? error}. La foto sigue guardada en Fotos.`);
   }
@@ -507,7 +512,7 @@ async function conservarFoto(foto) {
   if (actual === pieza) actual = null;
   if (desconocido === pieza) desconocido = null;
   piezaParaFoto = null;
-  anotar(`<span>Foto ${escapar(registro.upc)}</span><span class="cant">×${registro.cantidad}</span>`);
+  anotar(`<span>Foto ${escapar(registro.upc || 'sin código')} (se analiza)</span><span class="cant">×${registro.cantidad}</span>`);
   pintar();
   await enviarFoto(registro);
 }
@@ -576,6 +581,15 @@ $('estado').addEventListener('click', () => {
 });
 
 $('guardar').addEventListener('click', () => { fila = fila.then(cerrarActual); });
+// Alta solo con foto, para lo que no trae código del fabricante (#379).
+$('sin-codigo').addEventListener('click', () => {
+  fila = fila.then(async () => {
+    if (piezaParaFoto) return;
+    await cerrarActual();
+    desconocido = { id: crypto.randomUUID(), upc: SIN_CODIGO, leido: SIN_CODIGO, stock: 1, estado, sinCodigo: true };
+    pintar();
+  });
+});
 // Si se cierra o se cambia de app, lo abierto no se pierde.
 document.addEventListener('visibilitychange', () => { if (document.hidden) fila = fila.then(cerrarActual); });
 

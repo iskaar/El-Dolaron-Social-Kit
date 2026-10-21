@@ -395,6 +395,32 @@ test('lo escaneado sale al cerrar sus 5 minutos de corrección, con la cantidad 
   } finally { t.db.close(); }
 });
 
+test('alta solo con foto desde el escáner: se guarda sin código y se imprime sola como lo escaneado (#379)', async (prueba) => {
+  prueba.mock.method(globalThis, 'fetch', async () => { throw new Error('sin red en pruebas'); });
+  const t = tienda();
+  try {
+    const id = crypto.randomUUID(), cuerpo = new FormData();
+    cuerpo.set('id', id); cuerpo.set('upc', ''); cuerpo.set('cantidad', '2'); cuerpo.set('estado_fisico', 'nuevo');
+    cuerpo.set('foto', new File([new Uint8Array([255, 216, 255])], 'foto.jpg', { type: 'image/jpeg' }));
+    const r = await worker.fetch!(new Request('https://caja.prueba/api/borradores', { method: 'POST', body: cuerpo }) as never, t.env, t.ctx as never);
+    assert.equal(r.status, 201);
+    await t.esperar();   // el análisis falla sin llave; que termine antes de cerrar la base
+    assert.equal(t.db.prepare('select upc from productos where id=?').get(id)!.upc, '');
+    const malo = new FormData();
+    for (const [k, v] of cuerpo) malo.set(k, v);
+    malo.set('id', crypto.randomUUID()); malo.set('upc', 'abc');
+    assert.equal((await worker.fetch!(new Request('https://caja.prueba/api/borradores', { method: 'POST', body: malo }) as never, t.env, { waitUntil() {} } as never)).status, 400);
+    // Ya analizada y pasada su ventana sale sola; una foto general de /captura (upc nulo) no.
+    const vieja = new Date(Date.now() - CORRECCION_ESCANER_MS - 60_000).toISOString();
+    t.db.prepare("update productos set nombre='Lámpara de mesa', categoria='hogar', precio=19900, estado_analisis='listo', creado_en=? where id=?").run(vieja, id);
+    const general = agregar(t, vieja);
+    t.db.prepare("update productos set categoria='hogar' where id=?").run(general);
+    const p = await pagina(t);
+    await p.iniciarAutomatica();
+    assert.deepEqual(p.estado.enviadas, [{ id, copias: 2 }]);
+  } finally { t.db.close(); }
+});
+
 test('si una prenda espera su precio, el aviso dice cuál es y a qué hora se capturó', async () => {
   const t = tienda();
   try {
