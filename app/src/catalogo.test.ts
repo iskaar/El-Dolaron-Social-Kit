@@ -46,6 +46,7 @@ test('catalogo: lista solo piezas vendibles, sin campos internos', async () => {
     pieza(t, { estado_analisis: 'pendiente' });
     pieza(t, { codigo: 'XX0001' });
     pieza(t, { estado_fisico: 'danado' });
+    pieza(t, { estado_fisico: 'liquidacion' });
     pieza(t, { sin_inventario: 1 });
     pieza(t, { destino: 'banda_ju49' });
     const r = await t.llamar('/api/catalogo');
@@ -154,7 +155,7 @@ test('catalogo: foto solo de piezas vendibles', async () => {
     assert.equal(r.headers.get('cache-control'), 'public, max-age=86400');
     assert.equal(r.headers.get('x-content-type-options'), 'nosniff');
     assert.deepEqual([...new Uint8Array(await r.arrayBuffer())], [0xff, 0xd8, 0xff, 0xd9]);
-    for (const extra of [{ stock: 0 }, { precio: 0 }, { estado_analisis: 'pendiente' }, { estado_fisico: 'danado' }, { sin_inventario: 1 }]) {
+    for (const extra of [{ stock: 0 }, { precio: 0 }, { estado_analisis: 'pendiente' }, { estado_fisico: 'danado' }, { estado_fisico: 'liquidacion' }, { sin_inventario: 1 }]) {
       assert.equal((await t.llamar(`/api/catalogo/foto/${pieza(t, extra)}`)).status, 404, JSON.stringify(extra));
     }
     // Pieza vendible cuya foto ya no esta en R2.

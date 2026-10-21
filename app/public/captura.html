@@ -152,7 +152,7 @@
 </div>
 
 <div id="barra" class="encima">
-  <button id="estado" type="button">Nuevo</button>
+  <button id="estado" type="button">A · Nuevo</button>
   <button id="modo" type="button" aria-pressed="false">Ropa</button>
   <div id="cantidad" class="control-cantidad">
     <button type="button" data-paso="-1" aria-label="Menos piezas">−</button>
@@ -197,6 +197,7 @@ import { PRECIO_PRENDA, MARCAS_ROPA } from './ropa.js';
 import { aJpeg } from '/foto.js';
 import { guardar, leer, borrar, pendientes } from '/cola-fotos.js';
 import { TALLAS_ADULTO, EDADES_NINO, TALLAS_NINO } from '/tallas.js';
+import { nombreEstado, siguienteEstado } from '/estados.js';
 
 const video = document.getElementById('camara');
 const contador = document.getElementById('contador');
@@ -472,7 +473,7 @@ function repintarMiniatura(id) {
   // "Niño 18-24 meses / XL" no cabe en 62 px: "18-24m XL".
   boton.querySelector('.t').textContent = (datos.talla ?? '')
     .replace('Niño ', '').replace(' años', 'a').replace(' meses', 'm').replace(' / ', ' ');
-  boton.classList.toggle('danado', datos.estado_fisico === 'danado');
+  boton.classList.toggle('danado', datos.estado_fisico !== 'nuevo');
   boton.classList.toggle('subida', datos.subida);
   boton.querySelector('.n').textContent = datos.cantidad > 1 ? `×${datos.cantidad}` : '';
 }
@@ -512,9 +513,9 @@ function pintarFichaRopa() {
 }
 
 function pintarEstadoRevision() {
-  const danado = (fichaRevision ?? registroActual).estado_fisico === 'danado';
-  elRevisarEstado.textContent = danado ? 'Dañado' : 'Nuevo';
-  elRevisarEstado.classList.toggle('danado', danado);
+  const estado = (fichaRevision ?? registroActual).estado_fisico;
+  elRevisarEstado.textContent = nombreEstado(estado);
+  elRevisarEstado.classList.toggle('danado', estado !== 'nuevo');
   for (const b of document.getElementById('revisar-precios').children) {
     b.setAttribute('aria-checked', String(Number(b.dataset.valor) === fichaRevision?.precio));
   }
@@ -719,12 +720,12 @@ function cerrarRevision() {
 elRevisarEstado.addEventListener('click', async () => {
   if (fichaRevision) {
     if (revisionOcupada) return;
-    fichaRevision.estado_fisico = fichaRevision.estado_fisico === 'danado' ? 'nuevo' : 'danado';
+    fichaRevision.estado_fisico = siguienteEstado(fichaRevision.estado_fisico);
     pintarEstadoRevision();
     elRevisarNota.textContent = 'Pulsa Guardar cambios para aplicar el precio y la condición.';
     return;
   }
-  registroActual.estado_fisico = registroActual.estado_fisico === 'danado' ? 'nuevo' : 'danado';
+  registroActual.estado_fisico = siguienteEstado(registroActual.estado_fisico);
   await guardarLocal(registroActual);
   pintarEstadoRevision();
 });
@@ -961,9 +962,9 @@ activarControlCantidad(document.getElementById('cantidad'), () => cantidad, (val
 /* ---------- arranque ---------- */
 
 botonEstado.addEventListener('click', () => {
-  estadoFisico = estadoFisico === 'nuevo' ? 'danado' : 'nuevo';
-  botonEstado.textContent = estadoFisico === 'nuevo' ? 'Nuevo' : 'Dañado';
-  botonEstado.classList.toggle('danado', estadoFisico === 'danado');
+  estadoFisico = siguienteEstado(estadoFisico);
+  botonEstado.textContent = nombreEstado(estadoFisico);
+  botonEstado.classList.toggle('danado', estadoFisico !== 'nuevo');
 });
 document.getElementById('disparo').addEventListener('click', disparar);
 document.getElementById('reintentar').addEventListener('click', encenderCamara);

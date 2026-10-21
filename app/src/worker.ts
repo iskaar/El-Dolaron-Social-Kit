@@ -8,6 +8,7 @@
 import { analizarBorrador, modeloPorDefecto, type Modelo } from './analisis.ts';
 import { fichaDeManifiesto, normalizarUpc, precioListaMxn, type FichaManifiesto } from './manifiesto.ts';
 import { codigoLeido, CORRECCION_ESCANER_MS } from '../public/upc.js';
+import { ESTADOS } from '../public/estados.js';
 import { imagenGuardada, rutaImagenUpc } from './imagenes-upc.ts';
 import { PRENDAS_ROPA, PRECIOS_ROPA } from '../public/ropa.js';
 import { procesarColaRopa, rutaRopaAdmin } from './ropa-ia.ts';
@@ -88,7 +89,7 @@ interface FilaBorrador {
  */
 const RUTAS_VENDEDOR = new Set(['/captura', '/foto.js', '/tallas.js', '/api/salud', '/sin-acceso', '/api/yo',
   // Escanear del manifiesto (Issue #365): el telefono ve nombre y precio de lo que escanea, nada mas.
-  '/escanear', '/categorias.js', '/upc.js', '/cola-fotos.js']);
+  '/escanear', '/categorias.js', '/upc.js', '/cola-fotos.js', '/estados.js']);
 const CORRECCION_CAPTURA = /^\/api\/borradores\/([^/]+)\/(existencia|talla|revision)$/;
 
 export function permitidaParaVendedor(pathname: string, metodo: string): boolean {
@@ -115,7 +116,7 @@ export function permitidaParaVendedor(pathname: string, metodo: string): boolean
 const FRANJA_SANDBOX = `<div style="background:#D72B32;color:#fff;text-align:center;font:700 14px system-ui,sans-serif;padding:6px">
   SANDBOX · solo pruebas: aquí no se cobra de verdad ni se registran socios reales</div>`;
 
-const ESTADOS_FISICOS = new Set(['nuevo', 'danado']);
+const ESTADOS_FISICOS = new Set(ESTADOS.map(([estado]) => estado));
 // Transferencia: confirmada por Isaac como forma de pago; sin ella se capturaba
 // como efectivo o tarjeta y descuadraba el corte (Issue #93).
 const FORMAS_PAGO = new Set(['efectivo', 'tarjeta', 'transferencia']);
@@ -490,6 +491,9 @@ async function buscarEnManifiesto(upcCrudo: string, env: Env): Promise<Response>
     upc: ficha.upc, nombre: ficha.nombre || ficha.descripcion, traducido: !!ficha.nombre, descripcion: ficha.descripcion,
     marca: ficha.marca, categoria, precio_usd: ficha.precio_usd, precio_lista: precioLista,
     precio: precioManual ?? calcularPrecio({ precioLista, categoria, estadoFisico: 'nuevo', config }).precio,
+    // Por grado A/B/C, para que el escáner muestre el que se va a guardar (#371).
+    precios: Object.fromEntries([...ESTADOS_FISICOS].map((estado) =>
+      [estado, precioManual ?? calcularPrecio({ precioLista, categoria, estadoFisico: estado, config }).precio])),
     enlace: ficha.tcin ? `https://www.target.com/p/-/A-${ficha.tcin}` : '',
     imagen: await imagenGuardada(ficha.upc, env),
   });

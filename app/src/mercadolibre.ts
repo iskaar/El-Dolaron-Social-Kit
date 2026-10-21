@@ -318,9 +318,11 @@ const productoDe = (p: Pieza) => ({
   precio: p.precio, estado_fisico: p.estado_fisico, stock: p.stock, talla: p.talla?.trim() || null,
 });
 
-// Lo que se puede publicar: pieza individual, revisada, con foto y existencias; nunca bandas ni danadas.
+// Lo que se puede publicar: pieza individual, revisada, con foto y existencias; nunca bandas, dañadas (B)
+// ni liquidación (C, solo en tienda, #371). `<> 'danado'` se queda literal: lo exige el índice parcial de recortes.
 export const PUBLICABLE = `p.destino = 'etiqueta' and p.sin_inventario = 0 and p.estado_analisis = 'listo' and p.stock > 0
-  and p.foto_key <> '' and p.codigo like 'ED-%' and p.estado_fisico <> 'danado' and p.propietario = 'dolaron'`;
+  and p.foto_key <> '' and p.codigo like 'ED-%' and p.estado_fisico <> 'danado' and p.estado_fisico <> 'liquidacion'
+  and p.propietario = 'dolaron'`;
 
 async function piezaPublicable(env: Env, id: string): Promise<{ ok: true; pieza: Pieza } | { ok: false; status: number; error: string }> {
   if (!ID_PIEZA.test(id)) return { ok: false, status: 404, error: 'La pieza no existe.' };
@@ -333,7 +335,7 @@ async function piezaPublicable(env: Env, id: string): Promise<{ ok: true; pieza:
   if (p.sin_inventario || p.destino !== 'etiqueta' || !/^ED-/.test(p.codigo ?? '')) {
     return no('Solo se publican piezas individuales con etiqueta ED-; las bandas no.');
   }
-  if (p.estado_fisico === 'danado') return no('Mercado Libre no tiene la condición «dañado»: esta pieza no se puede publicar.');
+  if (p.estado_fisico !== 'nuevo') return no('Mercado Libre no tiene la condición «dañado» ni «liquidación»: esta pieza no se puede publicar.');
   if (p.estado_analisis !== 'listo') return no('Primero revisa la pieza en el admin.');
   if (!p.foto_key) return no('La pieza no tiene foto.');
   if (p.stock <= 0) return no('La pieza no tiene existencias.');

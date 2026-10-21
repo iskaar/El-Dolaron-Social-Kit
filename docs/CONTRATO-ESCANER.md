@@ -76,7 +76,9 @@ Detalle completo en `docs/PLAN-ETIQUETAS-POR-BANDA.md`. Resumen:
 
 - La cámara **se abre y no se cierra**. Toca para disparar, dispara otra vez de inmediato. Sin
   preview que descartar, sin spinner, sin navegación.
-- Interruptor **Nuevo / Dañado** junto al obturador. Conserva su estado entre disparos y también se
+- Interruptor de grado **A · Nuevo / B · Dañado / C · Liquidación** (como LiquiMart, Issue #371) junto al obturador.
+  A se ve nueva; B tiene uso, empaque dañado o piezas faltantes; C no cumple su función. El grado no se imprime;
+  B y C no van a Mercado Libre ni al catálogo público. Conserva su estado entre disparos y también se
   puede corregir tocando la última miniatura.
 - Tira de miniaturas abajo y un contador discreto: `24 fotos · 19 analizadas`. Es la única señal de
   que existe la IA.
@@ -109,7 +111,7 @@ Local, propio de este repositorio. No se copia el modelo de MarKit.
 | --- | --- |
 | `id`, `creado_en` | App |
 | `foto` (1024 px) | Cámara, guardada local primero |
-| `estado_fisico` | `nuevo` \| `danado`, del interruptor |
+| `estado_fisico` | `nuevo` (A) \| `danado` (B) \| `liquidacion` (C), del interruptor |
 | `estado_analisis` | `pendiente` \| `listo` \| `error` |
 | `nombre`, `categoria`, `precio_lista` | IA, editable en el admin |
 | `precio` | Calculado (§5), editable en el admin |
@@ -122,6 +124,7 @@ la pieza es desconocido y **nunca se infiere** (issue #2). No hay precio por cos
 
 ```
 precio = precio_lista × %categoria × (estado_fisico == 'danado' ? %danado : 1)
+         (liquidacion: precio_lista × %liquidacion, 20 % por defecto, sin %categoria ni sugerencia de IA)
 precio = redondear hacia arriba al múltiplo de $5
 precio = al múltiplo de $10 más cercano (de $5 en adelante sube) menos $1, mínimo $9 ($233 → $229, $235 → $239, $250 → $249, $12 → $9)
 destino = etiqueta individual, siempre (las bandas ya no son destino automático)

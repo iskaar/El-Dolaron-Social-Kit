@@ -19,7 +19,7 @@
 globalThis.CatalogLogic = {
  normalize: value => String(value ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLocaleLowerCase('es'),
  eligible: product => Number(product.stock) >= 1 && Number.isInteger(Number(product.precio)) && Number(product.precio) > 0 && product.foto_key === 'fotos/'+product.id+'.jpg' && Boolean(String(product.nombre || '').trim()) && product.destino === 'etiqueta' && product.estado_analisis === 'listo' && Number(product.sin_inventario) === 0 && product.id !== '87ddd327-2058-435d-98ea-651a6e54c09a',
- condition: product => product.estado_fisico === 'nuevo' ? 'Nuevo' : product.estado_fisico === 'danado' ? 'Estado: dañado (según inventario). Consulta los detalles por Messenger' : `Estado: ${product.estado_fisico || 'sin especificar'} (según inventario). Consulta los detalles por Messenger`,
+ condition: product => product.estado_fisico === 'nuevo' ? 'Nuevo' : product.estado_fisico === 'danado' ? 'Estado: dañado (según inventario). Consulta los detalles por Messenger' : product.estado_fisico === 'liquidacion' ? 'Liquidación: no funciona o le faltan piezas; se vende como está, solo en tienda. Consulta los detalles por Messenger' : `Estado: ${product.estado_fisico || 'sin especificar'} (según inventario). Consulta los detalles por Messenger`,
  matches(product, filters) {
   const amount = Number(product.precio) / 100;
   return this.eligible(product) && (!filters.category || product.categoria === filters.category)
