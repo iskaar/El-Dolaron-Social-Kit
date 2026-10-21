@@ -26,6 +26,10 @@ Más adelante: quitar la etiqueta física y cobrar con lectores y teléfonos (fu
 
 ## Cómo funciona
 
+Extensión de imágenes de referencia: [Issue #367 y preparación](IMAGENES-UPC.md).
+La clave histórica del manifiesto sigue normalizada; las nuevas capturas conservan
+el código completo leído, con sus ceros iniciales, en `productos.upc`.
+
 1. **Carga** — `python tools/importar_manifiesto.py sandbox|produccion|local`. Baja cada
    pestaña `Truck <id>` listada en "Available Truckloads", deja un renglón por UPC (gana la
    versión más repetida; empate → precio más alto) y escribe en `manifiesto` **solo lo nuevo

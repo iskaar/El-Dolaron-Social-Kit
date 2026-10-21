@@ -195,6 +195,7 @@
 <script type="module">
 import { PRECIO_PRENDA, MARCAS_ROPA } from './ropa.js';
 import { aJpeg } from '/foto.js';
+import { guardar, leer, borrar, pendientes } from '/cola-fotos.js';
 import { TALLAS_ADULTO, EDADES_NINO, TALLAS_NINO } from '/tallas.js';
 
 const video = document.getElementById('camara');
@@ -395,30 +396,6 @@ botonModo.addEventListener('click', () => { panelIdentidad.hidden = !modoRopa; }
 if (modoRopa) panelIdentidad.hidden = false;
 
 /* ---------- cola local: la foto se guarda antes de intentar subirla ---------- */
-
-function abrirBase() {
-  return new Promise((resolve, reject) => {
-    const solicitud = indexedDB.open('eldolaron', 1);
-    solicitud.onupgradeneeded = () => solicitud.result.createObjectStore('pendientes', { keyPath: 'id' });
-    solicitud.onsuccess = () => resolve(solicitud.result);
-    solicitud.onerror = () => reject(solicitud.error);
-  });
-}
-
-async function conStore(modo, fn) {
-  const base = await abrirBase();
-  return new Promise((resolve, reject) => {
-    const transaccion = base.transaction('pendientes', modo);
-    const solicitud = fn(transaccion.objectStore('pendientes'));
-    solicitud.onsuccess = () => resolve(solicitud.result);
-    solicitud.onerror = () => reject(solicitud.error);
-  });
-}
-
-const guardar = (registro) => conStore('readwrite', (s) => s.put(registro));
-const leer = (id) => conStore('readonly', (s) => s.get(id));
-const borrar = (id) => conStore('readwrite', (s) => s.delete(id));
-const pendientes = () => conStore('readonly', (s) => s.getAll());
 
 /* ---------- camara ---------- */
 
@@ -880,6 +857,7 @@ async function procesarCola() {
       cuerpo.append('id', registro.id);
       cuerpo.append('estado_fisico', registro.estado_fisico);
       cuerpo.append('cantidad', String(registro.cantidad ?? 1));
+      if (registro.upc) cuerpo.append('upc', registro.upc);
       if (registro.talla) cuerpo.append('talla', registro.talla);
       if (registro.prenda) cuerpo.append('prenda', registro.prenda);
       if (registro.marca) cuerpo.append('marca', registro.marca);
@@ -893,6 +871,7 @@ async function procesarCola() {
         break;                       // sin red: la foto se queda en la cola
       }
       if (respuesta.status >= 500) break;
+      if (registro.upc && !respuesta.ok) break; // Conservar también fotos del escáner ante sesión vencida o precio sin configurar.
       if (registro.precio_ropa != null && !respuesta.ok) {
         document.getElementById('ayuda').textContent = 'No se subió la prenda. Revisa tu sesión; la foto sigue guardada en este teléfono.';
         break;
