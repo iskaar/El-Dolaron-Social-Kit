@@ -16,7 +16,7 @@
   /* Sale la etiqueta (#396): toda la pantalla en amarillo, que se vea de reojo. */
   body.etiqueta { background: var(--amarillo); border-color: var(--amarillo); transition: background .15s; }
   #aviso.etiqueta { color: var(--azul); font-weight: 800; font-size: 16px; }
-  header { background: var(--azul); color: #fff; padding: 8px 14px; display: flex; gap: 14px; align-items: center; }
+  header { background: var(--azul); color: #fff; padding: 8px 14px; display: flex; gap: 14px; align-items: center; flex-wrap: wrap; }
   header h1 { font-size: 16px; margin: 0; flex: 1; }
   header a, header button.liga { color: var(--amarillo); font-size: 14px; background: none; border: 0; padding: 0; cursor: pointer; }
   #visor { position: relative; background: #000; height: 38vh; flex: none; }
@@ -72,6 +72,7 @@
 </div>
 <header>
   <h1>Escanear</h1>
+  <button id="alternar-camara" class="liga" type="button" aria-pressed="false">Prender cámara</button>
   <button id="abrir-teclado" class="liga" type="button">Escribir código</button>
   <button id="sin-codigo" class="liga" type="button">Sin código</button>
   <a href="/captura">Fotos →</a>
@@ -118,7 +119,7 @@
       <button id="foto" class="principal otra-foto" type="button">Tomar foto</button>
       <button class="secundario subir-foto" type="button">Subir foto</button>
     </div>
-    <p class="dato" id="sin-camara" hidden>Aquí no hay cámara: captúrala en <a href="/captura">Fotos</a>.</p>
+    <p class="dato" id="sin-camara" hidden>Cámara apagada: préndela o usa Subir foto, Sin foto o <a href="/captura">Fotos</a>.</p>
     <button id="sin-foto" class="secundario" type="button">Sin foto</button>
   </section>
 
@@ -216,6 +217,8 @@ function avisarEtiqueta(nombre, stock) {
 /* ---------- pintar ---------- */
 
 function pintar() {
+  $('alternar-camara').textContent = camara ? 'Apagar cámara' : 'Prender cámara';
+  $('alternar-camara').setAttribute('aria-pressed', String(camara));
   $('actual').hidden = !actual;
   if (actual) {
     const f = actual.ficha;
@@ -226,7 +229,6 @@ function pintar() {
     $('precio').textContent = pesos(f.precios?.[actual.estado] ?? f.precio);
     $('cantidad').value = actual.stock;
     pintarImagen(actual);
-    document.querySelector('#actual .otra-foto').hidden = !camara;
   }
   $('desconocido').hidden = !desconocido || !!piezaParaManual;
   $('manual').hidden = !piezaParaManual;
@@ -237,7 +239,6 @@ function pintar() {
       ? `Código ${desconocido.leido}: no se encontró. Toma o sube foto, o elige Sin foto.`
       : `Código ${desconocido.leido}. Se busca solo al pasar a la siguiente pieza: sigue escaneando. Si prefieres, tómale foto.`;
     $('cantidad-foto').value = desconocido.stock;
-    $('foto').hidden = !camara;
     $('sin-camara').hidden = camara;
   }
   $('total').textContent = `${piezas} ${piezas === 1 ? 'pieza' : 'piezas'}`;
@@ -605,7 +606,9 @@ function elegirPiezaFoto() {
   return !!piezaParaFoto;
 }
 for (const boton of document.querySelectorAll('.otra-foto')) boton.addEventListener('click', () => {
-  if (!camara || !elegirPiezaFoto()) return;
+  // La cámara apagada no bloquea las otras opciones de captura (#411).
+  if (!camara) return mensaje('La cámara está apagada. Toca «Prender cámara» o usa «Subir foto».');
+  if (!elegirPiezaFoto()) return;
   fila = fila.then(async () => {
     try { await conservarFoto(await aJpeg($('video'), $('video').videoWidth, $('video').videoHeight)); }
     catch (error) { mensaje(error.message); piezaParaFoto = null; programarGuardado(); }
@@ -755,38 +758,71 @@ $('codigo').addEventListener('keydown', (e) => {
 // Camara: BarcodeDetector viene en Chrome de Android. En Windows no existe:
 // ahi va el lector y la camara no se prende.
 // ponytail: sin UPC-E (el corto de 8 digitos); agregar su expansion si aparece en piezas reales.
+let abriendoCamara = false;
+let lecturaCamara = null;
+
+// Liberar los tracks apaga también la luz; ocultar el visor no basta (#411).
+function apagarCamara() {
+  camara = false;
+  clearTimeout(lecturaCamara);
+  $('video').srcObject?.getTracks().forEach((track) => track.stop());
+  $('video').srcObject = null;
+  $('visor').hidden = true;
+  pintar();
+}
+
 async function encenderCamara() {
-  if (!('BarcodeDetector' in window)) return;
+  if (camara || abriendoCamara) return;
+  if (!('BarcodeDetector' in window)) return mensaje('Aquí no se puede abrir la cámara. Usa el lector o Subir foto.');
+  abriendoCamara = true;
+  $('alternar-camara').disabled = true;
   try {
-    $('video').srcObject = await navigator.mediaDevices.getUserMedia({
+    const stream = await navigator.mediaDevices.getUserMedia({
       video: { facingMode: { ideal: 'environment' }, width: { ideal: 1920 } }, audio: false,
     });
+    $('video').srcObject = stream;
+    $('visor').hidden = false;
+    await $('video').play();
+    const detector = new BarcodeDetector({ formats: ['upc_a', 'ean_13', 'ean_8'] });
+    camara = true;
+    const vistos = new Map();   // codigo -> ultima vez que estuvo en la vista
+    const leer = async () => {
+      // Una detección pendiente no debe sobrevivir a apagar/prender (#411).
+      if (!camara || $('video').srcObject !== stream) return;
+      const codigos = await detector.detect($('video')).catch(() => []);
+      if (!camara || $('video').srcObject !== stream) return;
+      const ahora = Date.now();
+      for (const { rawValue } of codigos) {
+        if (ahora - (vistos.get(rawValue) ?? 0) > FUERA_DE_VISTA_MS) recibir(rawValue);
+        vistos.set(rawValue, ahora);
+      }
+      lecturaCamara = setTimeout(leer, 120);
+    };
+    leer();
   } catch {
+    apagarCamara();
     mensaje('No se pudo abrir la cámara: revisa el permiso del navegador. El lector sigue funcionando.');
-    return;
+  } finally {
+    abriendoCamara = false;
+    $('alternar-camara').disabled = false;
+    pintar();
   }
-  camara = true;
-  $('visor').hidden = false;
-  await $('video').play();
-  const detector = new BarcodeDetector({ formats: ['upc_a', 'ean_13', 'ean_8'] });
-  const vistos = new Map();   // codigo -> ultima vez que estuvo en la vista
-  const leer = async () => {
-    const codigos = await detector.detect($('video')).catch(() => []);
-    const ahora = Date.now();
-    for (const { rawValue } of codigos) {
-      if (ahora - (vistos.get(rawValue) ?? 0) > FUERA_DE_VISTA_MS) recibir(rawValue);
-      vistos.set(rawValue, ahora);
-    }
-    setTimeout(leer, 120);
-  };
-  leer();
 }
+
+const PREFERENCIA_CAMARA = 'escanear-camara'; // Preferencia local, sin afectar al lector (#411).
+$('alternar-camara').addEventListener('click', async () => {
+  if (abriendoCamara) return;
+  if (camara) apagarCamara(); else await encenderCamara();
+  try { localStorage.setItem(PREFERENCIA_CAMARA, String(camara)); } catch { /* almacenamiento no disponible */ }
+});
 
 // Un toque para empezar: el navegador solo deja sonar y abrir la camara despues de uno.
 $('empezar').addEventListener('click', () => {
   $('inicio').hidden = true;
   try { audio ??= new AudioContext(); } catch { /* sin audio */ }
-  encenderCamara();
+  let prender = true;
+  try { prender = localStorage.getItem(PREFERENCIA_CAMARA) !== 'false'; } catch { /* almacenamiento no disponible */ }
+  if (prender) encenderCamara();
 });
 pintar();
 fila = fila.then(reintentarFotos).catch(() => mensaje('No se pudo abrir la cola de fotos de este teléfono.'));
