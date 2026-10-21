@@ -471,7 +471,8 @@ export async function analizarBorrador(
     await env.DB.prepare(
       `update productos set nombre = ?, marca = ?, categoria = ?, precio_lista = ?, precio = ?,
                             precio_sugerido = ?, destino = ?, estado_analisis = ?, actualizado_en = ?
-       where id = ? and estado_analisis <> 'descartado'`,
+       -- La captura manual del escáner manda sobre un análisis tardío (#399).
+       where id = ? and estado_analisis <> 'descartado' and (upc is null or estado_analisis <> 'listo')`,
     )
       .bind(ficha.nombre, ficha.marca, ficha.categoria, precioLista, precio, precio, destino,
         completa ? 'listo' : 'error', new Date().toISOString(), id)
@@ -485,7 +486,8 @@ export async function analizarBorrador(
   } catch (error) {
     console.error(JSON.stringify({ mensaje: 'analisis fallido', id, modelo, error: String(error) }));
     await env.DB.prepare(
-      `update productos set estado_analisis = 'error', actualizado_en = ? where id = ? and estado_analisis <> 'descartado'`,
+      `update productos set estado_analisis = 'error', actualizado_en = ? where id = ? and estado_analisis <> 'descartado'
+        and (upc is null or estado_analisis <> 'listo')`,
     )
       .bind(new Date().toISOString(), id)
       .run();

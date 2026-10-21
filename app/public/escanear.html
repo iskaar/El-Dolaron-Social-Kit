@@ -45,6 +45,9 @@
   button.estado[aria-pressed="true"] { background: var(--rojo); color: #fff; }
   #desconocido { border-color: var(--rojo); }
   #desconocido h2 { font-size: 17px; margin: 0; color: var(--rojo); }
+  #manual[hidden] { display: none; }
+  #manual label { display: block; margin-top: 10px; }
+  #manual input, #manual select { width: 100%; padding: 10px; font: inherit; border: 1px solid var(--linea); border-radius: 8px; }
   #aviso { font-size: 14px; color: var(--rojo); min-height: 1.2em; margin: 0 0 8px; }
   ul { list-style: none; padding: 0; margin: 0; }
   li { display: flex; gap: 8px; justify-content: space-between; padding: 8px 2px; border-top: 1px solid var(--linea); font-size: 14px; }
@@ -116,7 +119,29 @@
       <button class="secundario subir-foto" type="button">Subir foto</button>
     </div>
     <p class="dato" id="sin-camara" hidden>Aquí no hay cámara: captúrala en <a href="/captura">Fotos</a>.</p>
+    <button id="sin-foto" class="secundario" type="button">Sin foto</button>
   </section>
+
+  <form class="tarjeta" id="manual" hidden>
+    <p class="dato" id="manual-codigo"></p>
+    <label for="manual-nombre">Nombre</label>
+    <input id="manual-nombre" required maxlength="120" autocomplete="off">
+    <label for="manual-categoria">Categoría</label>
+    <select id="manual-categoria" required></select>
+    <label for="manual-estado">Estado</label>
+    <select id="manual-estado" required></select>
+    <label for="manual-tipo-precio">Precio que conoces</label>
+    <select id="manual-tipo-precio"><option value="precio_lista">De lista</option><option value="precio">De venta</option></select>
+    <label for="manual-precio">Precio en pesos MXN</label>
+    <input id="manual-precio" type="number" inputmode="decimal" min="0.01" step="0.01" required>
+    <label for="manual-cantidad">Cantidad</label>
+    <input id="manual-cantidad" type="number" inputmode="numeric" min="1" max="999" step="1" required>
+    <div class="fila">
+      <button id="manual-guardar" class="principal" type="submit">Guardar sin foto</button>
+      <button id="manual-cancelar" class="secundario" type="button">Volver</button>
+    </div>
+    <p class="dato">La etiqueta sale al guardar. Puedes corregir la cantidad durante 5 minutos desde la captura; en 0 se cancela. Si ya salió papel, ajusta las etiquetas en Etiquetas.</p>
+  </form>
 
   <section class="tarjeta">
     <ul id="guardadas"><li class="dato">La pieza se guarda a los 25 s, al escanear otra o con Guardar, y su etiqueta sale sola: corrige la cantidad antes, con − y + (en 0 se cancela).</li></ul>
@@ -130,7 +155,7 @@
 </footer>
 <script type="module">
 import { CATEGORIAS } from '/categorias.js';
-import { nombreEstado, siguienteEstado } from '/estados.js';
+import { ESTADOS, nombreEstado, siguienteEstado } from '/estados.js';
 import { aJpeg, reducirArchivo } from '/foto.js';
 import { codigoLeido, normalizarUpc as normalizar, SIN_CODIGO } from '/upc.js';
 import { guardar as guardarFoto, leer as leerFoto, borrar as borrarFoto, pendientes } from '/cola-fotos.js';
@@ -152,6 +177,9 @@ let temporizador = null;
 let fila = Promise.resolve();   // un codigo a la vez, en el orden en que llegaron
 let camara = false;
 let piezaParaFoto = null;
+let piezaParaManual = null;
+$('manual-categoria').innerHTML = CATEGORIAS.map(([clave, nombre]) => `<option value="${escapar(clave)}">${escapar(nombre)}</option>`).join('');
+$('manual-estado').innerHTML = ESTADOS.map(([clave, nombre]) => `<option value="${escapar(clave)}">${escapar(nombre)}</option>`).join('');
 
 /* ---------- aviso: sonido, vibracion y color ---------- */
 
@@ -200,12 +228,13 @@ function pintar() {
     pintarImagen(actual);
     document.querySelector('#actual .otra-foto').hidden = !camara;
   }
-  $('desconocido').hidden = !desconocido;
+  $('desconocido').hidden = !desconocido || !!piezaParaManual;
+  $('manual').hidden = !piezaParaManual;
   if (desconocido) {
     $('desconocido-codigo').textContent = desconocido.sinCodigo
-      ? 'Pieza sin código del fabricante: pon la cantidad y tómale o súbele foto. Se analiza como en Fotos y su etiqueta sale sola.'
+      ? 'Pieza sin código del fabricante: toma o sube foto, o elige Sin foto para poner nombre y precio.'
       : desconocido.buscada
-      ? `Código ${desconocido.leido}: no se encontró. Toma o sube una foto de esta pieza.`
+      ? `Código ${desconocido.leido}: no se encontró. Toma o sube foto, o elige Sin foto.`
       : `Código ${desconocido.leido}. Se busca solo al pasar a la siguiente pieza: sigue escaneando. Si prefieres, tómale foto.`;
     $('cantidad-foto').value = desconocido.stock;
     $('foto').hidden = !camara;
@@ -226,15 +255,15 @@ function anotar(html, fallo = null) {
 function programarGuardado() {
   clearTimeout(temporizador);
   // La imagen no detiene el guardado (#383): la etiqueta sale en cuanto se cierra la cantidad.
-  if (piezaParaFoto) return;
-  if (desconocido?.sinCodigo) return;   // sin código solo se guarda con su foto
+  if (piezaParaFoto || piezaParaManual) return;
+  if (desconocido?.sinCodigo) return;   // espera foto o captura manual (#399)
   if (!actual && !desconocido) return;
   temporizador = setTimeout(() => { fila = fila.then(cerrarActual); }, GUARDAR_SOLA_MS);
 }
 
 /** Guarda la pieza abierta. El id nace con la pieza: reintentar no la duplica. */
 async function cerrarActual() {
-  if (piezaParaFoto) return;
+  if (piezaParaFoto || piezaParaManual) return;
   clearTimeout(temporizador);
   const pieza = actual, otra = desconocido;
   actual = null;
@@ -272,8 +301,9 @@ async function enviar(pieza) {
 /* ---------- lo guardado con nombre y precio sale a Etiquetas en seguida; lo que aun se identifica
    o espera foto se corrige con - y +, y en 0 se cancela (#377, #381) ---------- */
 
-function anotarGuardada(guardada, grado) {
-  const corregible = guardada.estado_analisis !== 'listo';
+function anotarGuardada(guardada, grado, sinFoto = false) {
+  const hasta = Date.parse(guardada.creado_en) + 5 * 60_000;
+  const corregible = guardada.estado_analisis !== 'listo' || (sinFoto && Date.now() < hasta);
   anotar(`<span>${escapar(guardada.nombre)}${grado !== 'nuevo' ? ` (${escapar(nombreEstado(grado))})` : ''}</span>
     <span class="corregir">${corregible ? '<button type="button" data-paso="-1" aria-label="Una pieza menos">−</button>' : ''}
     <span class="cant">×<span class="n">${guardada.stock}</span> · <span class="p">${guardada.precio > 0 ? pesos(guardada.precio) : 'buscando…'}</span></span>
@@ -285,8 +315,8 @@ function anotarGuardada(guardada, grado) {
     const valor = deseado;
     if (valor === guardado) return;
     try {
-      const r = await fetch(`/api/borradores/${guardada.id}/existencia`, {
-        method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ stock: valor }),
+      const r = await fetch(sinFoto ? '/api/borradores/upc/manual' : `/api/borradores/${guardada.id}/existencia`, {
+        method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id: guardada.id, stock: valor }),
       });
       const cuerpo = await r.json().catch(() => ({}));
       if (r.status === 404) cerrar();
@@ -317,6 +347,7 @@ function anotarGuardada(guardada, grado) {
     clearTimeout(espera);
     espera = setTimeout(() => { envio = envio.then(guardar); }, 600);
   });
+  if (sinFoto && corregible) setTimeout(cerrar, Math.max(0, hasta - Date.now()));
   return { li, cantidad: () => guardado, cerrar };
 }
 
@@ -367,15 +398,16 @@ function seguirBusqueda(pieza, { li, cantidad, cerrar }) {
   // No se encontró: la fila se pone roja y al tocarla se abre la foto de esa misma pieza.
   const pedirFoto = () => {
     li.classList.add('fallo');
-    li.firstElementChild.textContent = `No se encontró el código ${pieza.leido}: toca aquí para tomar o subir foto.`;
+    li.firstElementChild.textContent = `No se encontró el código ${pieza.leido}: toca aquí para foto o Sin foto.`;
     li.querySelector('.p').textContent = 'falta foto';
     mensaje(`El código ${pieza.leido} no se encontró: tómale foto cuando puedas. La impresión espera esa pieza.`);
     avisar('no');
     li.addEventListener('click', (e) => {
       if (e.target.closest?.('button')) return;
       fila = fila.then(async () => {
+        if (piezaParaFoto || piezaParaManual) return;
         await cerrarActual();
-        desconocido = { ...pieza, stock: cantidad(), buscada: true };
+        desconocido = { ...pieza, stock: cantidad(), buscada: true, li };
         pintar();
       });
     });
@@ -386,7 +418,7 @@ function seguirBusqueda(pieza, { li, cantidad, cerrar }) {
 /* ---------- un codigo ---------- */
 
 async function procesar(crudo) {
-  if (piezaParaFoto) return;
+  if (piezaParaFoto || piezaParaManual) return;
   const leido = codigoLeido(crudo);
   const upc = normalizar(crudo);
   if (!leido || !upc) return;
@@ -567,7 +599,7 @@ function seguirFoto(registro, li) {
 }
 
 function elegirPiezaFoto() {
-  if (piezaParaFoto) return false;
+  if (piezaParaFoto || piezaParaManual) return false;
   piezaParaFoto = actual || desconocido;
   clearTimeout(temporizador);
   return !!piezaParaFoto;
@@ -596,6 +628,52 @@ async function reintentarFotos() {
   for (const registro of await pendientes()) if (registro.desde_escaner) await enviarFoto(registro);
 }
 addEventListener('online', () => { fila = fila.then(reintentarFotos); });
+
+/* ---------- nombre y precio a mano, sin foto (#399) ---------- */
+$('sin-foto').addEventListener('click', () => {
+  if (!desconocido || piezaParaFoto || piezaParaManual) return;
+  piezaParaManual = desconocido;
+  clearTimeout(temporizador);
+  $('manual-codigo').textContent = piezaParaManual.leido ? `Código ${piezaParaManual.leido}` : 'Sin código';
+  $('manual-nombre').value = '';
+  $('manual-categoria').value = 'otros';
+  $('manual-estado').value = piezaParaManual.estado;
+  $('manual-tipo-precio').value = 'precio_lista';
+  $('manual-precio').value = '';
+  $('manual-cantidad').value = piezaParaManual.stock;
+  pintar();
+  $('manual-nombre').focus();
+});
+$('manual-cancelar').addEventListener('click', () => {
+  if ($('manual-guardar').disabled) return;
+  piezaParaManual = null;
+  pintar(); programarGuardado();
+  $('sin-foto').focus();
+});
+$('manual').addEventListener('submit', (e) => {
+  e.preventDefault();
+  if (!piezaParaManual || $('manual-guardar').disabled) return;
+  const pieza = piezaParaManual;
+  const grado = $('manual-estado').value;
+  const cuerpo = { id: pieza.id, upc: pieza.leido, nombre: $('manual-nombre').value,
+    categoria: $('manual-categoria').value, estado_fisico: grado, stock: Number($('manual-cantidad').value),
+    [$('manual-tipo-precio').value]: Math.round(Number($('manual-precio').value) * 100) };
+  $('manual-guardar').disabled = true;
+  fila = fila.then(async () => {
+    try {
+      const r = await fetch('/api/borradores/upc/manual', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(cuerpo) });
+      const guardada = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(guardada.error ?? `Error ${r.status}`);
+      piezas += guardada.stock - (pieza.buscada ? pieza.stock : 0);
+      pieza.li?.remove();
+      desconocido = null;
+      piezaParaManual = null;
+      anotarGuardada(guardada, grado, true);
+      avisarEtiqueta(guardada.nombre, guardada.stock);
+    } catch (error) { mensaje(error.message || 'No se guardó. Reintenta con conexión.'); avisar('no'); }
+    finally { $('manual-guardar').disabled = false; pintar(); }
+  });
+});
 /* ---------- cantidades, estado y guardar ---------- */
 
 function contador(entrada, obtener) {
@@ -621,6 +699,7 @@ contador($('cantidad'), () => actual);
 contador($('cantidad-foto'), () => desconocido);
 
 $('estado').addEventListener('click', () => {
+  if (piezaParaManual) return;
   estado = siguienteEstado(estado);
   $('estado').textContent = nombreEstado(estado);
   $('estado').setAttribute('aria-pressed', String(estado !== 'nuevo'));
@@ -629,11 +708,13 @@ $('estado').addEventListener('click', () => {
   pintar();
 });
 
-$('guardar').addEventListener('click', () => { fila = fila.then(cerrarActual); });
-// Alta solo con foto, para lo que no trae código del fabricante (#379).
+$('guardar').addEventListener('click', () => {
+  if (piezaParaManual) $('manual').requestSubmit(); else fila = fila.then(cerrarActual);
+});
+// Sin código del fabricante: foto o nombre y precio a mano (#379, #399).
 $('sin-codigo').addEventListener('click', () => {
   fila = fila.then(async () => {
-    if (piezaParaFoto) return;
+    if (piezaParaFoto || piezaParaManual) return;
     await cerrarActual();
     desconocido = { id: crypto.randomUUID(), upc: SIN_CODIGO, leido: SIN_CODIGO, stock: 1, estado, sinCodigo: true };
     pintar();
@@ -648,6 +729,7 @@ document.addEventListener('visibilitychange', () => { if (document.hidden) fila 
 // enfocado: asi el teclado del telefono no se abre en cada pieza.
 let tecleado = '';
 document.addEventListener('keydown', (e) => {
+  if (piezaParaManual) return;
   if (e.target instanceof HTMLInputElement) return;
   if (e.key === 'Enter') {
     if (!tecleado) return; // Enter sobre un botón sigue activándolo con teclado.

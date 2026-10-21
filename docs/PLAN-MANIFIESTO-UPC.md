@@ -57,6 +57,20 @@ Cada escaneo guardado es una pieza nueva, aunque el UPC ya exista: `/etiquetas` 
 `stock` etiquetas al aparecer la pieza, y subirle el stock a una ya impresa no imprime las
 nuevas. Las repetidas se juntan con la fusión de siempre si hace falta.
 
+**Sin foto (Issue #399, Isaac, 2026-10-21).** En «Sin código» y en un UPC no encontrado,
+«Sin foto» permite a capturista y dueño escribir nombre, categoría, estado, precio de lista
+o de venta y cantidad. `POST /api/borradores/upc/manual` reutiliza el alta/corrección manual:
+calcula el precio cuando solo viene lista, conserva el UPC leído (o `''` sin código), deja
+la pieza `listo`, con `ED-` y destino `etiqueta`. Si ya se estaba buscando, completa ese mismo
+id; las respuestas tardías de búsqueda o análisis no pisan nombre ni precio manuales.
+El precio de una pieza ya etiquetada no cambia por reenviar el alta. La ruta original
+`/api/borradores/manual` sigue siendo solo del dueño.
+
+Desde esa fila se puede corregir solo la cantidad durante cinco minutos desde la creación
+de la pieza, con `PATCH /api/borradores/upc/manual {id, stock}`; en 0 se cancela sin borrar el
+id. El servidor limita a capturas propias de El Dolarón, sin foto, sin venta ni publicación.
+Si una etiqueta ya salió, reemplazarla o descartarla físicamente al corregir o cancelar.
+
 **Impresión automática y corrección (Issues #369, #375, #377, #381).** La impresión automática de
 `/etiquetas` también toma lo escaneado (`productos.upc` con código, o vacío si se dio de alta solo con
 foto, #379). La cantidad se cierra en el escáner: la pieza abierta se guarda a los 25 s sin escanear, al

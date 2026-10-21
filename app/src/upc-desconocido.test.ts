@@ -3,6 +3,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { tienda } from './prueba-d1.ts';
 import worker, { permitidaParaVendedor } from './worker.ts';
+import { analizarBorrador } from './analisis.ts';
 
 const UPC = '0012345678905';
 const gemini = (ficha: Record<string, unknown>) => new Response(JSON.stringify({ candidates: [{
@@ -114,4 +115,47 @@ test('un UPC identificado sin foto se reutiliza: el siguiente escaneo no vuelve 
   assert.equal((await p.pedir('/api/manifiesto/12345678905', undefined, 'GET')).status, 200);   // queda la segunda pieza
   p.db.prepare("update productos set precio = 0 where propietario = 'dolaron' and ltrim(upc, '0') = '12345678905'").run();
   assert.equal((await p.pedir('/api/manifiesto/12345678905', undefined, 'GET')).status, 404);
+});
+
+test('Sin foto completa el mismo id desconocido y la búsqueda tardía no pisa nombre ni precio (#399)', async (t) => {
+  const p = preparar(t);
+  const respuesta = Promise.withResolvers<Response>();
+  t.mock.method(globalThis, 'fetch', () => respuesta.promise);
+  const id = crypto.randomUUID();
+  await p.pedir('/api/borradores/upc/buscar', { id, upc: UPC, stock: 3 });
+  const cuerpo = { id, upc: UPC, nombre: 'Termo a mano', categoria: 'hogar', precio: 12345, stock: 2 };
+  const r = await p.pedir('/api/borradores/upc/manual', cuerpo);
+  assert.equal(r.status, 201); assert.equal(r.cuerpo.id, id); assert.equal(r.cuerpo.upc, UPC);
+  respuesta.resolve(gemini({ nombre: 'Otro de Google', marca: '', categoria: 'hogar', precio_lista_mxn: 1000, confianza: 0.9 }));
+  await p.esperar();
+  const fila = p.db.prepare('select nombre, precio, stock, estado_analisis, codigo from productos where id = ?').get(id)!;
+  assert.equal(fila.nombre, 'Termo a mano'); assert.equal(fila.precio, 12345); assert.equal(fila.stock, 2);
+  assert.equal(fila.estado_analisis, 'listo'); assert.match(String(fila.codigo), /^ED-\d{6}$/);
+  assert.equal(p.db.prepare('select count(*) n from productos where upc = ?').get(UPC)!.n, 1);
+  assert.equal((await p.pedir('/api/borradores/upc/manual', { ...cuerpo, upc: '99999999' })).status, 409);
+  assert.equal(permitidaParaVendedor('/api/borradores/upc/manual', 'POST'), true);
+  assert.equal(permitidaParaVendedor('/api/borradores/upc/manual', 'PATCH'), true);
+  assert.equal(permitidaParaVendedor('/api/borradores/upc/manual', 'GET'), false);
+});
+
+test('el análisis de foto tardío, exitoso o fallido, conserva la captura sin foto (#399)', async (t) => {
+  const p = preparar(t);
+  for (const falla of [false, true]) {
+    const id = crypto.randomUUID();
+    const ahora = new Date().toISOString();
+    p.db.prepare(`insert into productos (id, upc, stock, semana_ingreso, capturado_por, creado_en, actualizado_en)
+      values (?, ?, 2, 'S40', 'dueno@prueba.mx', ?, ?)`).run(id, UPC, ahora, ahora);
+    await p.env.FOTOS.put(`fotos/${id}.jpg`, new Uint8Array([1, 2, 3]));
+    const llamada = Promise.withResolvers<void>(), respuesta = Promise.withResolvers<Response>();
+    t.mock.method(globalThis, 'fetch', () => { llamada.resolve(); return respuesta.promise; });
+    const analisis = analizarBorrador(id, p.env, 'gemini', false);
+    await llamada.promise;
+    assert.equal((await p.pedir('/api/borradores/upc/manual', { id, upc: UPC, nombre: 'Nombre manual', categoria: 'hogar', precio: 9900, stock: 2 })).status, 201);
+    respuesta.resolve(falla ? new Response('fallo', { status: 400 }) : Response.json({ candidates: [{ content: { parts: [{ text: JSON.stringify({
+      nombre: 'De la foto', marca: '', categoria: 'otros', precio_lista_mxn: 500,
+    }) }] } }] }));
+    await analisis;
+    const fila = p.db.prepare('select nombre, precio, estado_analisis from productos where id = ?').get(id)!;
+    assert.deepEqual({ ...fila }, { nombre: 'Nombre manual', precio: 9900, estado_analisis: 'listo' });
+  }
 });
