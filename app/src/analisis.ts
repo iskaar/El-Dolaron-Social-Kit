@@ -390,10 +390,11 @@ export async function analizarBorrador(
       : await conClaude(foto, env, instruccion);
     const ficha = normalizar(fichaCruda as Partial<Ficha>);
     let fuentes = (fichaCruda as { fuentes?: string[] }).fuentes;
+    let busquedaPrecio: { precio_lista_mxn: number; confianza: number } | undefined;
     // Sin precio pero con nombre: se busca el nombre (#387). Si no hay llave o no aparece, queda aparte.
     if (!buscar && ficha.nombre.trim() && ficha.precio_lista_mxn <= 0) {
       try {
-        const hallado = await precioPorNombre(ficha, env, Math.max(MINIMO_PRECIO_MS, PRESUPUESTO_ANALISIS_MS - (Date.now() - inicio)));
+        const hallado = busquedaPrecio = await precioPorNombre(ficha, env, Math.max(MINIMO_PRECIO_MS, PRESUPUESTO_ANALISIS_MS - (Date.now() - inicio)));
         if (hallado.precio_lista_mxn > 0 && hallado.confianza >= 0.5) {
           ficha.precio_lista_mxn = hallado.precio_lista_mxn;
           fuentes = hallado.fuentes;
@@ -436,7 +437,7 @@ export async function analizarBorrador(
     console.log(JSON.stringify({
       mensaje: completa ? 'analisis listo' : 'analisis incompleto', id, modelo, buscar, ms: Date.now() - inicio,
       ejemplos: ejemplos.length, nombres: nombres.length, segun_ejemplos: conEjemplos, ficha,
-      fuentes,
+      fuentes, busqueda_precio: busquedaPrecio && { precio: busquedaPrecio.precio_lista_mxn, confianza: busquedaPrecio.confianza },
     }));
   } catch (error) {
     console.error(JSON.stringify({ mensaje: 'analisis fallido', id, modelo, error: String(error) }));
