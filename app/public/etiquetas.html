@@ -535,9 +535,11 @@ async function imprimirNuevas() {
         // o Guardar, #381). No detiene la cola: su etiqueta trae el nombre exacto del producto, así que
         // no depende del orden de la mesa, y una pieza que espera foto no frena las demás (#375).
         if (delEscaner && !lista) {
+          // Sin coincidencia exacta (nombre y precio) va aparte: se revisa en el admin y sale cuando
+          // quede lista; nunca detiene la cola (#385).
           esperando ||= p.estado_analisis === 'error'
-            ? `Falta foto de lo escaneado: ${quien}. Tócala en el escáner; las demás siguen.`
-            : `Identificando lo escaneado: ${quien}.`;
+            ? `Aparte para revisar en el admin: ${quien}. La cola sigue.`
+            : `Identificando lo escaneado: ${quien}. La cola sigue.`;
           continue;
         }
         // Conservar el orden de la mesa aunque un análisis posterior termine primero.
