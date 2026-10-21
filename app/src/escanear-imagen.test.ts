@@ -5,7 +5,7 @@ import { runInNewContext } from 'node:vm';
 import { codigoLeido, normalizarUpc, SIN_CODIGO } from '../public/upc.js';
 import { ESTADOS } from '../public/estados.js';
 
-function pantalla(fallaFoto = false, desconocida = false) {
+function pantalla(fallaFoto = false, desconocida = false, entorno: Record<string, unknown> = {}) {
   const elementos = new Map<string, any>(), llamadas: { ruta: string; opciones?: RequestInit }[] = [], cola = new Map<string, any>();
   const el = (id: string): any => {
     if (!elementos.has(id)) elementos.set(id, { hidden: false, value: '', textContent: '', atributos: {}, eventos: {}, files: [],
@@ -43,11 +43,57 @@ function pantalla(fallaFoto = false, desconocida = false) {
       if (desconocida && ruta.startsWith('/api/borradores/upc/')) return Response.json({ estado_analisis: 'error' });
       return Response.json({ nombre: 'Estuche', categoria: 'otros', precio: 100, traducido: true, imagen: null });
     },
+    ...entorno,
   });
   return { api, el, llamadas, cola, temporizadores };
 }
 
 const asentarse = () => new Promise((resolve) => setImmediate(resolve));
+
+test('el botón apaga los tracks, recuerda la preferencia y descarta lecturas de la cámara anterior (#411)', async () => {
+  assert.match(readFileSync('public/escanear.html', 'utf8'), /<button[^>]+id="alternar-camara"[^>]+aria-pressed="false">Prender cámara<\/button>/);
+  const preferencias = new Map<string, string>();
+  const tracks: { detenido: boolean; stop(): void }[] = [];
+  let terminarLectura: (codigos: { rawValue: string }[]) => void = () => {};
+  class Detector {
+    detect() { return new Promise((resolve) => { terminarLectura = resolve; }); }
+  }
+  const entorno = {
+    window: { BarcodeDetector: Detector }, BarcodeDetector: Detector,
+    navigator: { mediaDevices: { getUserMedia: async () => {
+      const track = { detenido: false, stop() { this.detenido = true; } };
+      tracks.push(track);
+      return { getTracks: () => [track] };
+    } } },
+    localStorage: { getItem: (clave: string) => preferencias.get(clave), setItem: (clave: string, valor: string) => preferencias.set(clave, valor) },
+  };
+  const { api, el, llamadas, temporizadores } = pantalla(false, false, entorno);
+  el('video').play = async () => {};
+  el('empezar').eventos.click(); await asentarse();
+  assert.equal(el('alternar-camara').textContent, 'Apagar cámara');
+  assert.equal(el('alternar-camara').atributos['aria-pressed'], 'true');
+  const lecturaAnterior = terminarLectura;
+  await el('alternar-camara').eventos.click();
+  assert.equal(tracks[0].detenido, true);
+  assert.equal(el('video').srcObject, null);
+  assert.equal(el('visor').hidden, true);
+  assert.equal(el('alternar-camara').atributos['aria-pressed'], 'false');
+  el('.otra-foto').eventos.click();
+  assert.match(el('aviso').textContent, /cámara está apagada/);
+  await api.procesar('0012345678905'); // La entrada por código sigue disponible.
+  assert.equal(api.actual().leido, '0012345678905');
+  const recarga = pantalla(false, false, entorno);
+  recarga.el('empezar').eventos.click(); await asentarse();
+  assert.equal(tracks.length, 1, 'recargar con la preferencia apagada no pide cámara');
+  await el('alternar-camara').eventos.click();
+  assert.equal(tracks.length, 2);
+  assert.equal(el('visor').hidden, false);
+  assert.equal(preferencias.get('escanear-camara'), 'true');
+  lecturaAnterior([{ rawValue: '99999999' }]); await asentarse();
+  assert.equal(llamadas.some((r) => r.ruta.includes('99999999')), false);
+  assert.equal([...temporizadores.values()].some((t) => t.ms === 120), false);
+});
+
 test('lector conserva ceros, suma alias, no confirma sola la imagen y la imagen no detiene el guardado (#383)', async () => {
   const { api, el, llamadas, temporizadores } = pantalla();
   await api.procesar('0191907910414');
