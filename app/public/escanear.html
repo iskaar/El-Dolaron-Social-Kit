@@ -115,7 +115,7 @@
   </section>
 
   <section class="tarjeta">
-    <ul id="guardadas"><li class="dato">Lo guardado sale solo en Etiquetas, una por pieza, 5 minutos después: mientras, corrige la cantidad con − y +.</li></ul>
+    <ul id="guardadas"><li class="dato">Lo guardado sale solo en Etiquetas, una por pieza, 5 minutos después: mientras, corrige la cantidad con − y +; en 0 se cancela.</li></ul>
   </section>
 </main>
 <input id="archivo-foto" type="file" accept="image/*" hidden>
@@ -272,6 +272,12 @@ function anotarGuardada(guardada, grado) {
       if (!r.ok) throw new Error(cuerpo.error ?? `Error ${r.status}`);
       piezas += valor - guardado;
       guardado = valor;
+      // En 0 se canceló: sale de la cola de Etiquetas y ya no se corrige (#377).
+      if (valor === 0) {
+        cerrar();
+        li.firstElementChild.textContent = `Cancelada: ${li.firstElementChild.textContent}`;
+        li.style.textDecoration = 'line-through';
+      }
     } catch (error) {
       // No se queda en pantalla un número que el servidor no tiene.
       deseado = guardado;
@@ -284,7 +290,7 @@ function anotarGuardada(guardada, grado) {
   li.addEventListener('click', (e) => {
     const paso = Number(e.target.closest?.('button[data-paso]')?.dataset.paso);
     if (!paso) return;
-    deseado = Math.min(999, Math.max(1, deseado + paso));
+    deseado = Math.min(999, Math.max(0, deseado + paso));
     li.querySelector('.n').textContent = deseado;
     // Tocar + cinco veces es una sola llamada con el número final.
     clearTimeout(espera);
