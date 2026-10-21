@@ -228,7 +228,7 @@ export async function conClaude(foto: string | string[], env: Env, instruccion: 
 }
 
 async function conGemini(foto: string | null, env: Env, instruccion: string, buscar = false, esquema: any = ESQUEMA_GEMINI,
-  textoUsuario = 'Identifica este articulo.', limiteMs = LIMITES_MS.gemini): Promise<unknown> {
+  textoUsuario = 'Identifica este articulo.', limiteMs = LIMITES_MS.gemini, pideJson = PIDE_JSON): Promise<unknown> {
   // Con VERTEX_API_KEY se cobra al proyecto de Google Cloud (Issue #363), no a
   // la cuota de AI Studio que se acabo en #91. Mismo cuerpo para las dos.
   // Las dos instancias tienen secretos independientes, pero no siempre con el
@@ -246,7 +246,7 @@ async function conGemini(foto: string | null, env: Env, instruccion: string, bus
     signal: AbortSignal.timeout(limiteMs),
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({
-      systemInstruction: { parts: [{ text: buscar ? instruccion + PIDE_JSON : instruccion }] },
+      systemInstruction: { parts: [{ text: buscar ? instruccion + pideJson : instruccion }] },
       contents: [
         {
           // Vertex exige el rol; AI Studio lo acepta.
@@ -293,9 +293,12 @@ async function conGemini(foto: string | null, env: Env, instruccion: string, bus
 
 const INSTRUCCION_UPC = [
   'Eres el inspector de una tienda de mercancia americana de liquidacion en San Luis Potosi, Mexico.',
-  'Te dan solo un codigo de barras (UPC o EAN). Buscalo en Google tal cual.',
+  'Te dan solo un codigo de barras (UPC o EAN). Buscalo en Google como "upc <codigo>".',
   'Responde con un producto SOLO si una pagina muestra ese mismo codigo; si no, deja el nombre vacio',
   'y la confianza en 0. Un producto equivocado cuesta mas que pedir una foto.',
+  'Sirve cualquier tienda o anuncio que muestre ese codigo: eBay, Amazon, Walmart, Target, tiendas de',
+  'Estados Unidos o de Mexico (Issue #397). Usa el precio de esa misma pagina: en pesos va en',
+  '`precio_lista_mxn`; en dolares va en `precio_usd` y deja `precio_lista_mxn` en 0. No conviertas monedas.',
   // Mismas reglas de nombre, marca y categoría que la foto: el mismo producto da el mismo nombre.
   INSTRUCCION.slice(INSTRUCCION.indexOf('COMO SE ESCRIBE')),
 ].join(' ');
@@ -304,9 +307,26 @@ const INSTRUCCION_UPC = [
  * Identifica un UPC que no está en la hoja del proveedor, sin foto (Issue #373):
  * Gemini con búsqueda de Google. Corre en segundo plano; el capturista ya siguió.
  */
-export async function identificarUpc(upc: string, env: Env): Promise<Ficha & { fuentes?: string[] }> {
-  const cruda = await conGemini(null, env, INSTRUCCION_UPC, true, ESQUEMA_GEMINI, `Codigo de barras: ${upc}`) as Partial<Ficha> & { fuentes?: string[] };
-  return { ...normalizar(cruda), fuentes: cruda.fuentes };
+const PIDE_JSON_UPC = [
+  '\n\nResponde SOLO con este JSON, sin texto alrededor:',
+  `{"nombre":"","marca":"","categoria":"${CATEGORIAS.join('|')}","precio_lista_mxn":0,"precio_usd":0,"fuente":"","confianza":0}`,
+].join(' ');
+
+export type HallazgoUpc = Ficha & { precio_usd: number; fuente: string; fuentes?: string[] };
+
+export async function identificarUpc(upc: string, env: Env, limiteMs = LIMITES_MS.gemini): Promise<HallazgoUpc> {
+  const cruda = await conGemini(null, env, INSTRUCCION_UPC, true, ESQUEMA_GEMINI, `upc ${upc}`, limiteMs, PIDE_JSON_UPC) as
+    Partial<Ficha> & { precio_usd?: unknown; fuente?: unknown; fuentes?: string[] };
+  const usd = Number(cruda.precio_usd);
+  return { ...normalizar(cruda), precio_usd: Number.isFinite(usd) && usd > 0 ? Math.round(usd * 100) / 100 : 0,
+    fuente: String(cruda.fuente ?? '').slice(0, 80), fuentes: cruda.fuentes };
+}
+
+/** Pesos de lista de un hallazgo: los pesos tal cual, o los dólares por el tipo de cambio, como la hoja (#397). */
+export function pesosDeLista(hallazgo: { precio_lista_mxn: number; precio_usd?: number }, config: Record<string, string>): number {
+  if (hallazgo.precio_lista_mxn > 0) return hallazgo.precio_lista_mxn;
+  const tipoCambio = Number.parseInt(config.tipo_cambio ?? '', 10);   // centavos MXN por dólar
+  return hallazgo.precio_usd && tipoCambio > 0 ? Math.round((hallazgo.precio_usd * tipoCambio) / 100) : 0;
 }
 
 const INSTRUCCION_PRECIO = [
@@ -378,9 +398,9 @@ export async function analizarBorrador(
     }
     const foto = base64(await objeto.arrayBuffer());
 
-    const fila = await env.DB.prepare('select estado_fisico from productos where id = ?')
+    const fila = await env.DB.prepare('select estado_fisico, upc from productos where id = ?')
       .bind(id)
-      .first<{ estado_fisico: string }>();
+      .first<{ estado_fisico: string; upc: string | null }>();
     if (!fila) {
       throw new Error('El borrador no existe.');
     }
@@ -393,22 +413,28 @@ export async function analizarBorrador(
       : await conClaude(foto, env, instruccion);
     const ficha = normalizar(fichaCruda as Partial<Ficha>);
     let fuentes = (fichaCruda as { fuentes?: string[] }).fuentes;
-    let busquedaPrecio: { precio_lista_mxn: number; confianza: number } | undefined;
-    // Sin precio pero con nombre: se busca el nombre (#387). Si no hay llave o no aparece, queda aparte.
+    const { results } = await env.DB.prepare('select clave, valor from config').all<{ clave: string; valor: string }>();
+    const config = Object.fromEntries(results.map((c) => [c.clave, c.valor]));
+
+    let busquedaPrecio: { precio_lista_mxn: number; precio_usd?: number; confianza: number; fuente?: string } | undefined;
+    // Sin precio pero con nombre se busca (#387). Con código, el código exacto en cualquier tienda (eBay,
+    // Amazon, EE.UU.; #397): un nombre genérico como "peluche gato" no encuentra el artículo. Sin código,
+    // el nombre. Si no hay llave o no aparece con confianza, queda aparte.
     if (!buscar && ficha.nombre.trim() && ficha.precio_lista_mxn <= 0) {
+      const limite = Math.max(MINIMO_PRECIO_MS, PRESUPUESTO_ANALISIS_MS - (Date.now() - inicio));
       try {
-        const hallado = busquedaPrecio = await precioPorNombre(ficha, env, Math.max(MINIMO_PRECIO_MS, PRESUPUESTO_ANALISIS_MS - (Date.now() - inicio)));
-        if (hallado.precio_lista_mxn > 0 && hallado.confianza >= 0.5) {
-          ficha.precio_lista_mxn = hallado.precio_lista_mxn;
+        const hallado = busquedaPrecio = fila.upc
+          ? await identificarUpc(fila.upc, env, limite)
+          : await precioPorNombre(ficha, env, limite);
+        const pesos = pesosDeLista(hallado, config);
+        if (pesos > 0 && hallado.confianza >= 0.5) {
+          ficha.precio_lista_mxn = pesos;
           fuentes = hallado.fuentes;
         }
       } catch (error) {
-        console.warn(JSON.stringify({ mensaje: 'precio por nombre fallido', id, error: String(error).slice(0, 200) }));
+        console.warn(JSON.stringify({ mensaje: 'busqueda de precio fallida', id, upc: fila.upc, error: String(error).slice(0, 200) }));
       }
     }
-
-    const { results } = await env.DB.prepare('select clave, valor from config').all<{ clave: string; valor: string }>();
-    const config = Object.fromEntries(results.map((c) => [c.clave, c.valor]));
 
     const precioLista = ficha.precio_lista_mxn * 100; // pesos -> centavos
 
@@ -441,7 +467,7 @@ export async function analizarBorrador(
     console.log(JSON.stringify({
       mensaje: completa ? 'analisis listo' : 'analisis incompleto', id, modelo, buscar, ms: Date.now() - inicio,
       ejemplos: ejemplos.length, nombres: nombres.length, segun_ejemplos: conEjemplos, ficha,
-      fuentes, busqueda_precio: busquedaPrecio && { precio: busquedaPrecio.precio_lista_mxn, confianza: busquedaPrecio.confianza },
+      fuentes, busqueda_precio: busquedaPrecio && { mxn: busquedaPrecio.precio_lista_mxn, usd: busquedaPrecio.precio_usd, confianza: busquedaPrecio.confianza, fuente: busquedaPrecio.fuente },
     }));
   } catch (error) {
     console.error(JSON.stringify({ mensaje: 'analisis fallido', id, modelo, error: String(error) }));
