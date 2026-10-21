@@ -111,6 +111,7 @@ export function permitidaParaVendedor(pathname: string, metodo: string): boolean
   if (/^\/api\/manifiesto\/[^/]+\/imagen$/.test(pathname)) return ['GET', 'POST', 'PUT'].includes(metodo);
   if (/^\/api\/manifiesto\/[^/]+\/imagen\/catalogo$/.test(pathname)) return metodo === 'GET';
   // UPC desconocido (#373): buscarlo y ver cómo va.
+  if (pathname === '/api/borradores/upc/manual') return ['POST', 'PATCH'].includes(metodo);
   if (/^\/api\/borradores\/upc\/[^/]+$/.test(pathname)) return pathname.endsWith('/buscar') ? metodo === 'POST' : metodo === 'GET';
   return (pathname === '/api/borradores' || pathname === '/api/borradores/upc') && metodo === 'POST';
 }
@@ -334,7 +335,7 @@ async function destinoValido(destino: string, env: Env): Promise<boolean> {
  * Con etiqueta (codigo) la pieza ya esta a la venta con ese precio impreso: solo
  * el dueno lo cambia (Issue #75). Antes de etiquetar, poner precio es parte de la captura.
  */
-async function corregirBorrador(id: string, cambios: Record<string, unknown>, env: Env, esDueno: boolean): Promise<Response> {
+async function corregirBorrador(id: string, cambios: Record<string, unknown>, env: Env, esDueno: boolean, captura?: { correo: string; upc: string }): Promise<Response> {
   if (!UUID.test(id)) {
     return json({ error: 'Identificador invalido.' }, 400);
   }
@@ -364,10 +365,11 @@ async function corregirBorrador(id: string, cambios: Record<string, unknown>, en
   if (talla !== null && !tallaValida(talla)) {
     return json({ error: 'Talla invalida.' }, 400);
   }
-  if (!Number.isFinite(precioLista) || precioLista < 0) {
+  if (!Number.isSafeInteger(precioLista) || precioLista < 0) {
     return json({ error: 'Precio de lista invalido.' }, 400);
   }
-  if (!Number.isFinite(stock) || stock < 0 || stock > 999) {
+  if (!Number.isFinite(stock) || stock < (captura ? 1 : 0) || stock > 999
+      || (captura && cambios.stock !== undefined && !Number.isInteger(Number(cambios.stock)))) {
     return json({ error: 'Existencia invalida.' }, 400);
   }
 
@@ -382,7 +384,7 @@ async function corregirBorrador(id: string, cambios: Record<string, unknown>, en
   } else {
     precio = Math.round(Number(cambios.precio));
     destino = cambios.destino === undefined ? fila.destino : String(cambios.destino);
-    if (!Number.isFinite(precio) || precio < 0) {
+    if (!Number.isSafeInteger(precio) || precio < 0) {
       return json({ error: 'Precio invalido.' }, 400);
     }
     if (esDestinoBanda(destino)) {
@@ -410,13 +412,17 @@ async function corregirBorrador(id: string, cambios: Record<string, unknown>, en
   const guardada = await env.DB.prepare(
     `update productos set nombre = ?, categoria = ?, marca = ?, talla = ?, precio_lista = ?, precio = ?,
                           estado_fisico = ?, destino = ?, stock = coalesce(?, stock), estado_analisis = 'listo', actualizado_en = ?
+                          ${captura ? `, codigo = ${CODIGO_NUEVO}` : ''}
      where id = ?
        and estado_analisis <> 'descartado'
+       ${captura ? `and capturado_por = ? and upc = ? and propietario = 'dolaron'
+         and estado_analisis in ('pendiente', 'error') and (codigo is null or codigo = '')
+         and not exists (select 1 from venta_lineas where producto_id = productos.id)` : ''}
      returning stock`,
   )
     .bind(nombre, categoria, marca, talla, precioLista, precio, estadoFisico, destino,
       // Sin `stock` en el cuerpo no se toca: la caja pudo vender piezas desde que se abrio la ficha.
-      cambios.stock === undefined ? null : stock, new Date().toISOString(), id)
+      cambios.stock === undefined ? null : stock, new Date().toISOString(), id, ...(captura ? [captura.correo, captura.upc] : []))
     .first<{ stock: number }>();
 
   if (!guardada) return json({ error: 'La pieza ya fue eliminada.' }, 409);
@@ -432,7 +438,7 @@ async function capturarManual(request: Request, env: Env, correo: string): Promi
   return await altaManual((await request.json().catch(() => ({}))) as Record<string, unknown>, env, correo);
 }
 
-async function altaManual(cuerpo: Record<string, unknown>, env: Env, correo: string, upc: string | null = null): Promise<Response> {
+async function altaManual(cuerpo: Record<string, unknown>, env: Env, correo: string, upc: string | null = null, esDueno = true): Promise<Response> {
   const id = String(cuerpo.id ?? '');
   if (!UUID.test(id)) return json({ error: 'Identificador invalido.' }, 400);
   if (!String(cuerpo.nombre ?? '').trim()) return json({ error: 'Falta el nombre.' }, 400);
@@ -446,9 +452,11 @@ async function altaManual(cuerpo: Record<string, unknown>, env: Env, correo: str
   )
     .bind(id, semanaIngreso(new Date()), correo, ahora, ahora, upc)
     .run();
-  const respuesta = await corregirBorrador(id, cuerpo, env, true);
+  const respuesta = await corregirBorrador(id, cuerpo, env, esDueno, upc === null ? undefined : { correo, upc });
   // Datos invalidos: no queda una pieza vacia (salvo que fuera un reintento de una ya guardada).
-  if (!respuesta.ok && meta.changes > 0) await env.DB.prepare('delete from productos where id = ?').bind(id).run();
+  if (!respuesta.ok && meta.changes > 0) await env.DB.prepare(`delete from productos where id = ?
+    ${upc === null ? '' : "and estado_analisis = 'pendiente' and (codigo is null or codigo = '') and actualizado_en = ?"}`)
+    .bind(id, ...(upc === null ? [] : [ahora])).run();
   if (!respuesta.ok) return respuesta;
   // El dueno la da de alta para venderla ya: sin codigo la caja no la recibe. Es
   // el mismo que le pondria Etiquetas, asi que la etiqueta impresa despues coincide.
@@ -458,6 +466,38 @@ async function altaManual(cuerpo: Record<string, unknown>, env: Env, correo: str
      where id = ? and (codigo is null or codigo = '') and destino not like 'banda%'`,
   ).bind(new Date().toISOString(), id).run();
   return json(await respuesta.json(), 201);
+}
+
+/** Sin foto desde el escáner (#399): misma corrección, identidad y precio autorizados en servidor. */
+async function capturarManualEscaner(request: Request, env: Env, correo: string): Promise<Response> {
+  const cuerpo = await request.json().catch(() => null) as Record<string, unknown> | null;
+  if (!cuerpo || typeof cuerpo.id !== 'string' || !UUID.test(cuerpo.id)) return json({ error: 'Identificador inválido.' }, 400);
+  if (request.method === 'PATCH') {
+    return await corregirCaptura(cuerpo.id, 'existencia', new Request(request.url, { method: 'PATCH', body: JSON.stringify(cuerpo) }), env, correo, true);
+  }
+  const upc = cuerpo.upc === SIN_CODIGO ? SIN_CODIGO : codigoLeido(cuerpo.upc);
+  if (cuerpo.upc !== SIN_CODIGO && !normalizarUpc(upc)) return json({ error: 'Código de barras inválido.' }, 400);
+  const existente = await env.DB.prepare('select upc, capturado_por, propietario, estado_analisis, codigo from productos where id = ?')
+    .bind(cuerpo.id).first<{ upc: string | null; capturado_por: string; propietario: string; estado_analisis: string; codigo: string | null }>();
+  if (existente && (existente.propietario !== 'dolaron' || existente.capturado_por !== correo)) return json({ error: 'Pieza no encontrada.' }, 404);
+  if (existente && existente.upc !== upc) return json({ error: 'El código no corresponde a esta pieza.' }, 409);
+  if (existente?.estado_analisis === 'listo') {
+    const guardada = await capturaUpcGuardada(cuerpo.id, upc, env);
+    if (guardada && !guardada.ok) return guardada;
+    return await estadoDesconocido(cuerpo.id, env, correo, 201);
+  }
+  if (existente && (existente.codigo || existente.estado_analisis === 'descartado')) return json({ error: 'La pieza ya tiene etiqueta o se canceló.' }, 409);
+  if (upc && await fichaDeManifiesto(normalizarUpc(upc), env)) return json({ error: 'Ese código sí está en la hoja: vuelve a escanearlo.' }, 409);
+  const esDueno = !!(await leerUsuario(env, correo))?.roles.includes('dueno');
+  const respuesta = await altaManual({ id: cuerpo.id, nombre: cuerpo.nombre, categoria: cuerpo.categoria,
+    estado_fisico: cuerpo.estado_fisico, precio_lista: cuerpo.precio_lista, precio: cuerpo.precio,
+    stock: cuerpo.stock, destino: 'etiqueta' }, env, correo, upc, esDueno);
+  // Otro reintento pudo terminarla mientras se validaban los datos; nunca repone stock.
+  if (!respuesta.ok) {
+    const guardada = await capturaUpcGuardada(cuerpo.id, upc, env);
+    return guardada?.status === 201 ? await estadoDesconocido(cuerpo.id, env, correo, 201) : respuesta;
+  }
+  return await estadoDesconocido(cuerpo.id, env, correo, 201);
 }
 
 /**
@@ -608,7 +648,7 @@ async function identificarPieza(id: string, upc: string, env: Env): Promise<void
 /** Lo que el escáner consulta mientras se busca una pieza desconocida. Solo quien la capturó. */
 async function estadoDesconocido(id: string, env: Env, correo: string, status = 200): Promise<Response> {
   if (!UUID.test(id)) return json({ error: 'Identificador inválido.' }, 400);
-  const fila = await env.DB.prepare(`select id, upc, nombre, precio, stock, estado_analisis, foto_key <> '' as con_foto
+  const fila = await env.DB.prepare(`select id, upc, nombre, precio, stock, estado_analisis, creado_en, foto_key <> '' as con_foto
     from productos where id = ? and capturado_por = ? and propietario = 'dolaron'`).bind(id, correo).first();
   return fila ? json(fila, status) : json({ error: 'Pieza no encontrada.' }, 404);
 }
@@ -623,7 +663,7 @@ const VENTANA_CAPTURA_MS = 24 * 60 * 60 * 1000;
  * revision), y pasado ese rato la pieza ya pudo venderse y un numero absoluto
  * pisaria la venta.
  */
-async function corregirCaptura(id: string, campo: string, request: Request, env: Env, correo: string): Promise<Response> {
+async function corregirCaptura(id: string, campo: string, request: Request, env: Env, correo: string, sinFoto = false): Promise<Response> {
   if (!UUID.test(id)) {
     return json({ error: 'Identificador invalido.' }, 400);
   }
@@ -641,26 +681,31 @@ async function corregirCaptura(id: string, campo: string, request: Request, env:
     }
   }
   const columna = campo === 'existencia' ? 'stock' : 'talla';
-  const desde = new Date(Date.now() - VENTANA_CAPTURA_MS).toISOString();
+  const desde = new Date(Date.now() - (sinFoto ? 5 * 60_000 : VENTANA_CAPTURA_MS)).toISOString();
+  // Captura sin foto (#399): cinco minutos para cantidad; una venta o publicación cierra la corrección.
+  const alcanceSinFoto = `propietario = 'dolaron' and upc is not null and foto_key = ''
+    and not exists (select 1 from venta_lineas where producto_id = productos.id)
+    and not exists (select 1 from ml_publicaciones where producto_id = productos.id)`;
   // Lo escaneado (con UPC) se corrige mientras está abierto en el escáner; ya guardado y `listo`,
   // /etiquetas lo imprime en seguida, así que solo se corrige lo que aún se identifica o espera foto (#381).
   // En 0 se cancela y sale de la cola (#377). Una foto se elimina desde su miniatura.
   if (valor === 0) {
     const { meta } = await env.DB.prepare(`update productos set stock = 0, estado_analisis = 'descartado', actualizado_en = ?
-      where id = ? and capturado_por = ? and upc is not null and creado_en > ? and estado_analisis not in ('listo', 'descartado')
+      where id = ? and capturado_por = ? and upc is not null and creado_en > ? and estado_analisis ${sinFoto ? "<> 'descartado'" : "not in ('listo', 'descartado')"}
+        ${sinFoto ? `and ${alcanceSinFoto}` : ''}
         and not exists (select 1 from venta_lineas where producto_id = productos.id)`)
       .bind(new Date().toISOString(), id, correo, desde).run();
-    if (!meta.changes) return json({ error: 'Ya tiene etiqueta: corrígela en el admin.' }, 404);
+    if (!meta.changes) return json({ error: sinFoto ? 'Ya no se puede cancelar: pasaron 5 minutos o la pieza tiene venta, foto o publicación.' : 'Ya tiene etiqueta: corrígela en el admin.' }, 404);
     return json({ id, stock: 0, descartado: true });
   }
   const resultado = await env.DB.prepare(
     `update productos set ${columna} = ?, actualizado_en = ? where id = ? and capturado_por = ? and creado_en > ?
-       and (upc is null or estado_analisis <> 'listo') and estado_analisis <> 'descartado'`,
+       and (${sinFoto ? alcanceSinFoto : "upc is null or estado_analisis <> 'listo'"}) and estado_analisis <> 'descartado'`,
   )
     .bind(valor, new Date().toISOString(), id, correo, desde)
     .run();
   if (resultado.meta.changes === 0) {
-    return json({ error: 'Ya no se puede cambiar: lo escaneado ya tiene etiqueta y las fotos se corrigen en sus primeras 24 horas.' }, 404);
+    return json({ error: sinFoto ? 'Ya no se puede cambiar: pasaron 5 minutos o la pieza tiene venta, foto o publicación.' : 'Ya no se puede cambiar: lo escaneado ya tiene etiqueta y las fotos se corrigen en sus primeras 24 horas.' }, 404);
   }
   return json({ id, [columna]: valor });
 }
@@ -2245,6 +2290,7 @@ export default {
         return await capturarPorUpc(request, env, correo);
       }
       if (pathname === '/api/borradores/upc/buscar' && request.method === 'POST') return await capturarDesconocido(request, env, ctx, correo);
+      if (pathname === '/api/borradores/upc/manual' && ['POST', 'PATCH'].includes(request.method)) return await capturarManualEscaner(request, env, correo);
       const desconocida = pathname.match(/^\/api\/borradores\/upc\/([^/]+)$/);
       if (desconocida && request.method === 'GET') return await estadoDesconocido(desconocida[1], env, correo);
       const upcBuscado = pathname.match(/^\/api\/manifiesto\/([^/]+)$/);
@@ -2281,6 +2327,9 @@ export default {
           return json({ error: 'Identificador invalido.' }, 400);
         }
         const modelo = modeloPedido(url, env);
+        // Reintento explícito: vuelve a abrir el análisis, a diferencia de una respuesta tardía (#399).
+        await env.DB.prepare("update productos set estado_analisis = 'pendiente' where id = ? and upc is not null and estado_analisis <> 'descartado'")
+          .bind(reintento[1]).run();
         ctx.waitUntil(analizarBorrador(reintento[1], env, modelo, busquedaPedida(url)));
         return json({ id: reintento[1], modelo, estado_analisis: 'pendiente' }, 202);
       }
