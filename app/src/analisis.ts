@@ -225,7 +225,7 @@ export async function conClaude(foto: string | string[], env: Env, instruccion: 
 }
 
 async function conGemini(foto: string | null, env: Env, instruccion: string, buscar = false, esquema: any = ESQUEMA_GEMINI,
-  textoUsuario = 'Identifica este articulo.'): Promise<unknown> {
+  textoUsuario = 'Identifica este articulo.', limiteMs = LIMITES_MS.gemini): Promise<unknown> {
   // Con VERTEX_API_KEY se cobra al proyecto de Google Cloud (Issue #363), no a
   // la cuota de AI Studio que se acabo en #91. Mismo cuerpo para las dos.
   // Las dos instancias tienen secretos independientes, pero no siempre con el
@@ -240,7 +240,7 @@ async function conGemini(foto: string | null, env: Env, instruccion: string, bus
     : `https://generativelanguage.googleapis.com/v1beta/models/${MODELO_GEMINI}:generateContent?key=${llave}`;
   const respuesta = await fetch(url, {
     method: 'POST',
-    signal: AbortSignal.timeout(LIMITES_MS.gemini),
+    signal: AbortSignal.timeout(limiteMs),
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({
       systemInstruction: { parts: [{ text: buscar ? instruccion + PIDE_JSON : instruccion }] },
@@ -306,6 +306,26 @@ export async function identificarUpc(upc: string, env: Env): Promise<Ficha & { f
   return { ...normalizar(cruda), fuentes: cruda.fuentes };
 }
 
+const INSTRUCCION_PRECIO = [
+  'Eres el inspector de una tienda de mercancia americana de liquidacion en San Luis Potosi, Mexico.',
+  'Te dan el nombre de un articulo que ya se identifico en una foto. Solo busca cuanto cuesta nuevo en Mexico;',
+  'copia el nombre, la marca y la categoria tal como te los dan. Confianza baja si no hallas ese mismo articulo.',
+].join(' ');
+// Haiku ya tardó lo suyo dentro de los 30 s de waitUntil: la búsqueda del precio tiene menos.
+const LIMITE_PRECIO_MS = 15_000;
+
+/**
+ * Haiku nombra la pieza pero no inventa precio (#387): con nombre y sin precio, Gemini con búsqueda
+ * de Google busca ese nombre en tiendas mexicanas. Lanza si no hay llave o no responde a tiempo.
+ */
+async function precioPorNombre(ficha: Ficha, env: Env): Promise<{ precio_lista_mxn: number; confianza: number; fuentes?: string[] }> {
+  const cruda = await conGemini(null, env, INSTRUCCION_PRECIO, true, ESQUEMA_GEMINI,
+    `Articulo: ${ficha.nombre}${ficha.marca ? `, marca ${ficha.marca}` : ''}. Categoria: ${ficha.categoria}.`, LIMITE_PRECIO_MS,
+  ) as Partial<Ficha> & { fuentes?: string[] };
+  const { precio_lista_mxn, confianza } = normalizar(cruda);
+  return { precio_lista_mxn, confianza, fuentes: cruda.fuentes };
+}
+
 const ESQUEMA_ROPA = {
   type: 'object', properties: {
     prenda: { type: 'string', enum: [...PRENDAS_ROPA, ''] },
@@ -367,6 +387,19 @@ export async function analizarBorrador(
       ? await conGemini(foto, env, instruccion, buscar)
       : await conClaude(foto, env, instruccion);
     const ficha = normalizar(fichaCruda as Partial<Ficha>);
+    let fuentes = (fichaCruda as { fuentes?: string[] }).fuentes;
+    // Sin precio pero con nombre: se busca el nombre (#387). Si no hay llave o no aparece, queda aparte.
+    if (!buscar && ficha.nombre.trim() && ficha.precio_lista_mxn <= 0) {
+      try {
+        const hallado = await precioPorNombre(ficha, env);
+        if (hallado.precio_lista_mxn > 0 && hallado.confianza >= 0.5) {
+          ficha.precio_lista_mxn = hallado.precio_lista_mxn;
+          fuentes = hallado.fuentes;
+        }
+      } catch (error) {
+        console.warn(JSON.stringify({ mensaje: 'precio por nombre fallido', id, error: String(error).slice(0, 200) }));
+      }
+    }
 
     const { results } = await env.DB.prepare('select clave, valor from config').all<{ clave: string; valor: string }>();
     const config = Object.fromEntries(results.map((c) => [c.clave, c.valor]));
@@ -401,7 +434,7 @@ export async function analizarBorrador(
     console.log(JSON.stringify({
       mensaje: completa ? 'analisis listo' : 'analisis incompleto', id, modelo, buscar, ms: Date.now() - inicio,
       ejemplos: ejemplos.length, nombres: nombres.length, segun_ejemplos: conEjemplos, ficha,
-      fuentes: (fichaCruda as { fuentes?: string[] }).fuentes,
+      fuentes,
     }));
   } catch (error) {
     console.error(JSON.stringify({ mensaje: 'analisis fallido', id, modelo, error: String(error) }));

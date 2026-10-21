@@ -113,3 +113,36 @@ test('con VERTEX_API_KEY Gemini va por Vertex con busqueda y registra las fuente
   assert.deepEqual({ ...fila }, { nombre: 'Licuadora Oster', precio_lista: 89900, estado_analisis: 'listo' });
   assert.deepEqual(JSON.parse(logs.find((l) => l.includes('analisis listo'))!).fuentes, ['mercadolibre.com.mx', 'amazon.com.mx']);
 });
+
+test('con nombre y sin precio busca el nombre en tiendas mexicanas; si no aparece queda aparte (#387)', async (t) => {
+  const { db, env } = tienda();
+  const fetchOriginal = globalThis.fetch;
+  t.after(() => { globalThis.fetch = fetchOriginal; });
+  (env as { GEMINI_API_KEY: string }).GEMINI_API_KEY = 'prueba';
+  db.prepare("insert or replace into config (clave, valor) values ('pct_juguetes', '50')").run();
+  for (const [precioHallado, confianza, esperado] of [[450, 0.8, 'listo'], [450, 0.2, 'error'], [0, 0.9, 'error']] as const) {
+    const cuerpos: any[] = [];
+    globalThis.fetch = (async (_url: unknown, init?: RequestInit) => {
+      const cuerpo = JSON.parse(String(init!.body));
+      cuerpos.push(cuerpo);
+      const busca = !!cuerpo.tools;
+      const ficha = busca
+        ? { nombre: 'Peluche perro', marca: '', categoria: 'juguetes', precio_lista_mxn: precioHallado, precio_venta_mxn: 0, confianza }
+        : { nombre: 'Peluche perro', marca: 'FAO Schwarz', categoria: 'juguetes', precio_lista_mxn: 0, precio_venta_mxn: 0, confianza: 0.9 };
+      return new Response(JSON.stringify({ candidates: [{ content: { parts: [{ text: JSON.stringify(ficha) }] } }] }));
+    }) as typeof fetch;
+    const id = crypto.randomUUID();
+    await env.FOTOS.put(`fotos/${id}.jpg`, new Uint8Array([1, 2, 3]));
+    db.prepare(`insert into productos (id, nombre, estado_analisis, foto_key, semana_ingreso, creado_en, actualizado_en)
+      values (?, '', 'pendiente', ?, 'S40', '', '')`).run(id, `fotos/${id}.jpg`);
+    await analizarBorrador(id, env, 'gemini', false);
+    assert.equal(cuerpos.length, 2);
+    // La segunda llamada es solo texto, con el nombre y la marca que salieron de la foto.
+    assert.deepEqual(cuerpos[1].tools, [{ googleSearch: {} }]);
+    assert.match(cuerpos[1].contents[0].parts[0].text, /Peluche perro, marca FAO Schwarz/);
+    const fila = db.prepare('select nombre, precio_lista, precio, estado_analisis from productos where id = ?').get(id) as any;
+    assert.equal(fila.estado_analisis, esperado);
+    assert.equal(fila.nombre, 'Peluche perro');
+    if (esperado === 'listo') assert.deepEqual([fila.precio_lista, fila.precio], [45000, 22900]);   // $450 x 50 % = $225 -> $230 -> $229
+  }
+});
