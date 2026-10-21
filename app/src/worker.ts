@@ -5,7 +5,7 @@
  * (docs/ARQUITECTURA-ESCANER.md).
  */
 
-import { analizarBorrador, identificarUpc, modeloPorDefecto, type Modelo } from './analisis.ts';
+import { analizarBorrador, identificarUpc, pesosDeLista, modeloPorDefecto, type Modelo } from './analisis.ts';
 import { fichaDeManifiesto, normalizarUpc, precioListaMxn, type FichaManifiesto } from './manifiesto.ts';
 import { codigoLeido, SIN_CODIGO } from '../public/upc.js';
 import { ESTADOS } from '../public/estados.js';
@@ -586,7 +586,8 @@ async function identificarPieza(id: string, upc: string, env: Env): Promise<void
     .bind(id).first<{ estado_fisico: string }>();
   if (!fila) return;   // ya llegó una foto (manda su análisis) o la descartaron
   const config = await leerConfig(env);
-  const precioLista = (ficha?.precio_lista_mxn ?? 0) * 100;
+  // Pesos de la página, o sus dólares por el tipo de cambio como la hoja (eBay, tiendas de EE.UU.; #397).
+  const precioLista = ficha ? pesosDeLista(ficha, config) * 100 : 0;
   const precio = ficha ? calcularPrecio({ precioLista, categoria: ficha.categoria, estadoFisico: fila.estado_fisico, config }).precio : 0;
   // Sin nombre seguro o sin precio no se imprime: queda en `error` y el escáner pide foto.
   const completa = !!ficha && ficha.nombre.trim() !== '' && ficha.confianza >= 0.5 && precio > 0;

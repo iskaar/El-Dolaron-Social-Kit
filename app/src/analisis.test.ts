@@ -170,3 +170,31 @@ test('la sugerencia por ejemplos solo manda con confianza alta; si no, el % de l
     assert.equal((db.prepare('select precio from productos where id = ?').get(id) as { precio: number }).precio, esperado, String(confianza));
   }
 });
+
+test('foto con código y sin precio: busca el código exacto en cualquier tienda y convierte dólares (#397)', async (t) => {
+  const { db, env } = tienda();
+  const fetchOriginal = globalThis.fetch;
+  t.after(() => { globalThis.fetch = fetchOriginal; });
+  (env as { GEMINI_API_KEY: string }).GEMINI_API_KEY = 'prueba';
+  db.prepare("insert or replace into config (clave, valor) values ('pct_juguetes', '50'), ('tipo_cambio', '1850')").run();
+  const cuerpos: any[] = [];
+  globalThis.fetch = (async (_url: unknown, init?: RequestInit) => {
+    const cuerpo = JSON.parse(String(init!.body));
+    cuerpos.push(cuerpo);
+    const ficha = cuerpo.tools
+      ? { nombre: 'Bolsa peluche perro FAO Schwarz', marca: 'FAO Schwarz', categoria: 'juguetes', precio_lista_mxn: 0, precio_usd: 7.99, fuente: 'ebay.com', confianza: 0.9 }
+      : { nombre: 'Peluche perro con pelota de tenis', marca: '', categoria: 'juguetes', precio_lista_mxn: 0, precio_venta_mxn: 0, confianza: 0.7 };
+    return new Response(JSON.stringify({ candidates: [{ content: { parts: [{ text: JSON.stringify(ficha) }] } }] }));
+  }) as typeof fetch;
+  const id = crypto.randomUUID();
+  await env.FOTOS.put(`fotos/${id}.jpg`, new Uint8Array([1, 2, 3]));
+  db.prepare(`insert into productos (id, nombre, upc, estado_analisis, foto_key, semana_ingreso, creado_en, actualizado_en)
+    values (?, '', '840397509898', 'pendiente', ?, 'S40', '', '')`).run(id, `fotos/${id}.jpg`);
+  await analizarBorrador(id, env, 'gemini', false);
+  // Busca el código, no el nombre genérico.
+  assert.equal(cuerpos[1].contents[0].parts[0].text, 'upc 840397509898');
+  assert.match(cuerpos[1].systemInstruction.parts[0].text, /eBay/);
+  const fila = db.prepare('select nombre, precio_lista, precio, estado_analisis from productos where id = ?').get(id) as any;
+  // US$7.99 x $18.50 = $148 de lista; 50 % = $74 -> $70 -> $69. El nombre sigue siendo el de la foto.
+  assert.deepEqual({ ...fila }, { nombre: 'Peluche perro con pelota de tenis', precio_lista: 14800, precio: 6900, estado_analisis: 'listo' });
+});

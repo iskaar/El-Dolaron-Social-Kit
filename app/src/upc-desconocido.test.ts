@@ -35,7 +35,7 @@ test('un UPC desconocido se guarda al instante y se identifica solo por el códi
   const [llamada] = p.llamadas;
   assert.match(llamada.url, /aiplatform\.googleapis\.com/);
   assert.deepEqual(llamada.cuerpo.tools, [{ googleSearch: {} }]);
-  assert.deepEqual(llamada.cuerpo.contents[0].parts, [{ text: `Codigo de barras: ${UPC}` }]);
+  assert.deepEqual(llamada.cuerpo.contents[0].parts, [{ text: `upc ${UPC}` }]);
   const fila = p.db.prepare('select nombre, precio_lista, precio, stock, estado_analisis, codigo, estado_fisico from productos where id=?').get(id)!;
   // $1000 x 50 % x 60 % (dañado) = $300 -> $299, con código para imprimir.
   assert.deepEqual({ ...fila }, { nombre: 'Termo Stanley 1 L', precio_lista: 100000, precio: 29900, stock: 2, estado_analisis: 'listo',
