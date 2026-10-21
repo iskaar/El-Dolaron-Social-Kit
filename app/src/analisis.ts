@@ -311,16 +311,18 @@ const INSTRUCCION_PRECIO = [
   'Te dan el nombre de un articulo que ya se identifico en una foto. Solo busca cuanto cuesta nuevo en Mexico;',
   'copia el nombre, la marca y la categoria tal como te los dan. Confianza baja si no hallas ese mismo articulo.',
 ].join(' ');
-// Haiku ya tardó lo suyo dentro de los 30 s de waitUntil: la búsqueda del precio tiene menos.
-const LIMITE_PRECIO_MS = 15_000;
+// El análisis corre en waitUntil (30 s): la búsqueda del precio usa lo que dejó Haiku, con margen
+// para escribir la fila. 15 s fijos no le alcanzaron a Vertex en producción (#389).
+const PRESUPUESTO_ANALISIS_MS = 27_000;
+const MINIMO_PRECIO_MS = 8_000;
 
 /**
  * Haiku nombra la pieza pero no inventa precio (#387): con nombre y sin precio, Gemini con búsqueda
  * de Google busca ese nombre en tiendas mexicanas. Lanza si no hay llave o no responde a tiempo.
  */
-async function precioPorNombre(ficha: Ficha, env: Env): Promise<{ precio_lista_mxn: number; confianza: number; fuentes?: string[] }> {
+async function precioPorNombre(ficha: Ficha, env: Env, limiteMs: number): Promise<{ precio_lista_mxn: number; confianza: number; fuentes?: string[] }> {
   const cruda = await conGemini(null, env, INSTRUCCION_PRECIO, true, ESQUEMA_GEMINI,
-    `Articulo: ${ficha.nombre}${ficha.marca ? `, marca ${ficha.marca}` : ''}. Categoria: ${ficha.categoria}.`, LIMITE_PRECIO_MS,
+    `Articulo: ${ficha.nombre}${ficha.marca ? `, marca ${ficha.marca}` : ''}. Categoria: ${ficha.categoria}.`, limiteMs,
   ) as Partial<Ficha> & { fuentes?: string[] };
   const { precio_lista_mxn, confianza } = normalizar(cruda);
   return { precio_lista_mxn, confianza, fuentes: cruda.fuentes };
@@ -391,7 +393,7 @@ export async function analizarBorrador(
     // Sin precio pero con nombre: se busca el nombre (#387). Si no hay llave o no aparece, queda aparte.
     if (!buscar && ficha.nombre.trim() && ficha.precio_lista_mxn <= 0) {
       try {
-        const hallado = await precioPorNombre(ficha, env);
+        const hallado = await precioPorNombre(ficha, env, Math.max(MINIMO_PRECIO_MS, PRESUPUESTO_ANALISIS_MS - (Date.now() - inicio)));
         if (hallado.precio_lista_mxn > 0 && hallado.confianza >= 0.5) {
           ficha.precio_lista_mxn = hallado.precio_lista_mxn;
           fuentes = hallado.fuentes;
