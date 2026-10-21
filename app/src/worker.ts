@@ -653,8 +653,15 @@ export async function identificarPieza(id: string, upc: string, env: Env, ultimo
         estado_analisis = 'listo', actualizado_en = ? where id = ? and estado_analisis in ('pendiente', 'error')`)
       .bind(ficha!.nombre, ficha!.marca, ficha!.categoria, precioLista, precio, precio, new Date().toISOString(), id).run();
   } else {
-    await env.DB.prepare(`update productos set estado_analisis = 'error', actualizado_en = ? where id = ? and estado_analisis = 'pendiente'`)
-      .bind(new Date().toISOString(), id).run();
+    // Sin precio, pero si el código dice con seguridad qué es, ese nombre va aparte en lugar del de la
+    // foto: Haiku llamó «Laptop Intel Core» a un peluche de Mickey (#409). El admin solo pone el precio.
+    const nombreSeguro = ficha && ficha.nombre.trim() !== '' && ficha.confianza >= 0.7 ? 1 : 0;
+    await env.DB.prepare(`update productos set estado_analisis = 'error', actualizado_en = ?,
+        nombre = case when ? then ? else nombre end, marca = case when ? then ? else marca end,
+        categoria = case when ? then ? else categoria end
+      where id = ? and estado_analisis = 'pendiente'`)
+      .bind(new Date().toISOString(), nombreSeguro, ficha?.nombre ?? '', nombreSeguro, ficha?.marca ?? '',
+        nombreSeguro, ficha?.categoria ?? '', id).run();
   }
   if (completa) {
     await env.DB.prepare(`update productos set codigo = ${CODIGO_NUEVO} where id = ? and (codigo is null or codigo = '') and estado_analisis = 'listo'`)

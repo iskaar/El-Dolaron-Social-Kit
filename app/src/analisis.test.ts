@@ -227,3 +227,21 @@ test('sin hallazgo la cola deja la pieza aparte; un error de red se reintenta y 
   assert.deepEqual({ ...db.prepare('select nombre, estado_analisis from productos where id = ?').get(id) as any },
     { nombre: 'Peluche gato', estado_analisis: 'error' });
 });
+
+test('sin precio pero con nombre seguro del código, la pieza va aparte con ese nombre (#409)', async (t) => {
+  const { db, env } = tienda();
+  const fetchOriginal = globalThis.fetch;
+  t.after(() => { globalThis.fetch = fetchOriginal; });
+  Object.assign(env, { GEMINI_API_KEY: 'prueba' });
+  const id = crypto.randomUUID();
+  db.prepare(`insert into productos (id, nombre, categoria, upc, estado_analisis, foto_key, semana_ingreso, creado_en, actualizado_en)
+    values (?, 'Laptop Intel Core', 'electronica', '886144175480', 'pendiente', 'x', 'S40', '', '')`).run(id);
+  for (const [confianza, nombre] of [[0.5, 'Laptop Intel Core'], [0.9, 'Peluche Mickey Mouse Just Play']] as const) {
+    db.prepare("update productos set estado_analisis = 'pendiente', nombre = 'Laptop Intel Core' where id = ?").run(id);
+    globalThis.fetch = (async () => new Response(JSON.stringify({ candidates: [{ content: { parts: [{ text: JSON.stringify({
+      nombre: 'Peluche Mickey Mouse Just Play', marca: 'Just Play', categoria: 'juguetes', precio_lista_mxn: 0, precio_usd: 0, fuente: 'toywiz.com', confianza,
+    }) }] } }] }))) as typeof fetch;
+    await identificarPieza(id, '886144175480', env, true);
+    assert.deepEqual({ ...db.prepare('select nombre, estado_analisis from productos where id = ?').get(id) as any }, { nombre, estado_analisis: 'error' });
+  }
+});
