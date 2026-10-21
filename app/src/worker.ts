@@ -7,7 +7,7 @@
 
 import { analizarBorrador, identificarUpc, modeloPorDefecto, type Modelo } from './analisis.ts';
 import { fichaDeManifiesto, normalizarUpc, precioListaMxn, type FichaManifiesto } from './manifiesto.ts';
-import { codigoLeido, CORRECCION_ESCANER_MS } from '../public/upc.js';
+import { codigoLeido, CORRECCION_ESCANER_MS, SIN_CODIGO } from '../public/upc.js';
 import { ESTADOS } from '../public/estados.js';
 import { imagenGuardada, rutaImagenUpc } from './imagenes-upc.ts';
 import { PRENDAS_ROPA, PRECIOS_ROPA } from '../public/ropa.js';
@@ -171,8 +171,9 @@ async function crearBorrador(request: Request, env: Env, ctx: ExecutionContext, 
   // Muchas piezas vienen repetidas: una foto puede representar varias.
   const cantidad = Math.min(999, Math.max(1, Math.round(Number(formulario.get('cantidad') ?? 1)) || 1));
   const foto = formulario.get('foto');
-  const upc = formulario.has('upc') ? codigoLeido(formulario.get('upc')) : null;
-  if (formulario.has('upc') && !normalizarUpc(upc)) return json({ error: 'Código de barras inválido.' }, 400);
+  const upcCrudo = formulario.get('upc');
+  const upc = !formulario.has('upc') ? null : upcCrudo === SIN_CODIGO ? SIN_CODIGO : codigoLeido(upcCrudo);
+  if (formulario.has('upc') && upcCrudo !== SIN_CODIGO && !normalizarUpc(upc)) return json({ error: 'Código de barras inválido.' }, 400);
   const talla = String(formulario.get('talla') ?? '').trim() || null;
   const precioRopa = formulario.has('precio_ropa') ? Number(formulario.get('precio_ropa')) : null;
   const prendaRaw = formulario.get('prenda') ?? '';
