@@ -57,6 +57,9 @@ const INSTRUCCION = [
 
 /** Debajo de esto, los ejemplos son ruido y manda el porcentaje de la configuracion. */
 const EJEMPLOS_MINIMOS = 5;
+// Debajo de esto la sugerencia por ejemplos adivina: el Gigglescape salió en $49 con 0.55 y Isaac
+// lo da en $79, justo lo que da el % de la categoría (#393).
+const CONFIANZA_SUGERENCIA = 0.7;
 const EJEMPLOS_MAXIMOS = 30;
 
 export interface Ficha {
@@ -413,7 +416,8 @@ export async function analizarBorrador(
     // porcentaje de la configuracion. El porcentaje nunca describio como cobra
     // —dos piezas de `hogar` fueron a 57 % y a 29 %— pero es un arranque honesto.
     // La liquidación (C) siempre va por su %: la sugerencia de la IA no conoce el grado (#371).
-    const conEjemplos = ejemplos.length >= EJEMPLOS_MINIMOS && ficha.precio_venta_mxn > 0 && fila.estado_fisico !== 'liquidacion';
+    const conEjemplos = ejemplos.length >= EJEMPLOS_MINIMOS && ficha.precio_venta_mxn > 0 && fila.estado_fisico !== 'liquidacion'
+      && ficha.confianza >= CONFIANZA_SUGERENCIA;
     const { precio, destino } = conEjemplos
       ? precioDesdeSugerencia({ precioLista, sugerido: ficha.precio_venta_mxn * 100 })
       : calcularPrecio({ precioLista, categoria: ficha.categoria, estadoFisico: fila.estado_fisico, config });

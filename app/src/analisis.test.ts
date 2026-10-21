@@ -146,3 +146,27 @@ test('con nombre y sin precio busca el nombre en tiendas mexicanas; si no aparec
     if (esperado === 'listo') assert.deepEqual([fila.precio_lista, fila.precio], [45000, 22900]);   // $450 x 50 % = $225 -> $230 -> $229
   }
 });
+
+test('la sugerencia por ejemplos solo manda con confianza alta; si no, el % de la categoría (#393)', async (t) => {
+  const { db, env } = tienda();
+  const fetchOriginal = globalThis.fetch;
+  t.after(() => { globalThis.fetch = fetchOriginal; });
+  (env as { GEMINI_API_KEY: string }).GEMINI_API_KEY = 'prueba';
+  db.prepare("insert or replace into config (clave, valor) values ('pct_juguetes', '50')").run();
+  for (let i = 0; i < 5; i++) {
+    db.prepare(`insert into productos (id, nombre, categoria, precio_lista, precio, precio_sugerido, semana_ingreso, creado_en, actualizado_en)
+      values (?, ?, 'juguetes', 20000, 7900, 9900, 'S40', '', '')`).run(crypto.randomUUID(), `Ejemplo ${i}`);
+  }
+  for (const [confianza, esperado] of [[0.55, 7900], [0.9, 4900]] as const) {
+    globalThis.fetch = (async () => new Response(JSON.stringify({ candidates: [{ content: { parts: [{ text: JSON.stringify({
+      nombre: 'Muñeco Gigglescape', marca: 'Gigglescape', categoria: 'juguetes', precio_lista_mxn: 150, precio_venta_mxn: 50, confianza,
+    }) }] } }] }))) as typeof fetch;
+    const id = crypto.randomUUID();
+    await env.FOTOS.put(`fotos/${id}.jpg`, new Uint8Array([1, 2, 3]));
+    db.prepare(`insert into productos (id, nombre, estado_analisis, foto_key, semana_ingreso, creado_en, actualizado_en)
+      values (?, '', 'pendiente', ?, 'S40', '', '')`).run(id, `fotos/${id}.jpg`);
+    await analizarBorrador(id, env, 'gemini', false);
+    // $150 x 50 % = $75 -> $79; la sugerencia de $50 -> $49 solo con confianza alta.
+    assert.equal((db.prepare('select precio from productos where id = ?').get(id) as { precio: number }).precio, esperado, String(confianza));
+  }
+});
