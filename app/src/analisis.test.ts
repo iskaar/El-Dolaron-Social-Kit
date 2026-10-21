@@ -191,9 +191,11 @@ test('foto con código y sin precio: busca el código exacto en cualquier tienda
   db.prepare(`insert into productos (id, nombre, upc, estado_analisis, foto_key, semana_ingreso, creado_en, actualizado_en)
     values (?, '', '840397509898', 'pendiente', ?, 'S40', '', '')`).run(id, `fotos/${id}.jpg`);
   await analizarBorrador(id, env, 'gemini', false);
-  // Busca el código, no el nombre genérico.
-  assert.equal(cuerpos[1].contents[0].parts[0].text, 'upc 840397509898');
-  assert.match(cuerpos[1].systemInstruction.parts[0].text, /eBay/);
+  // Busca el código (a la par de la foto, #399), no el nombre genérico.
+  const busqueda = cuerpos.filter((c) => c.tools);
+  assert.equal(busqueda.length, 1);
+  assert.equal(busqueda[0].contents[0].parts[0].text, 'upc 840397509898');
+  assert.match(busqueda[0].systemInstruction.parts[0].text, /eBay/);
   const fila = db.prepare('select nombre, precio_lista, precio, estado_analisis from productos where id = ?').get(id) as any;
   // US$7.99 x $18.50 = $148 de lista; 50 % = $74 -> $70 -> $69. El nombre sigue siendo el de la foto.
   assert.deepEqual({ ...fila }, { nombre: 'Peluche perro con pelota de tenis', precio_lista: 14800, precio: 6900, estado_analisis: 'listo' });

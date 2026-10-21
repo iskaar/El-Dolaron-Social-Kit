@@ -405,6 +405,14 @@ export async function analizarBorrador(
       throw new Error('El borrador no existe.');
     }
 
+    // Con código, su búsqueda arranca junto con la foto (#399): en serie, Haiku + búsqueda pasaban
+    // de los 30 s de waitUntil (arándano Baskin-Robbins, 27 s). Si no se usa, se ignora.
+    const porCodigo = fila.upc && !buscar
+      ? identificarUpc(fila.upc, env, PRESUPUESTO_ANALISIS_MS).catch((error) => {
+        console.warn(JSON.stringify({ mensaje: 'busqueda de precio fallida', id, upc: fila.upc, error: String(error).slice(0, 200) }));
+        return null;
+      })
+      : null;
     const [ejemplos, nombres] = await Promise.all([ejemplosDeIsaac(env), nombresExistentes(env)]);
     const instruccion = INSTRUCCION + bloqueNombres(nombres) + bloqueEjemplos(ejemplos);
 
@@ -423,11 +431,9 @@ export async function analizarBorrador(
     if (!buscar && ficha.nombre.trim() && ficha.precio_lista_mxn <= 0) {
       const limite = Math.max(MINIMO_PRECIO_MS, PRESUPUESTO_ANALISIS_MS - (Date.now() - inicio));
       try {
-        const hallado = busquedaPrecio = fila.upc
-          ? await identificarUpc(fila.upc, env, limite)
-          : await precioPorNombre(ficha, env, limite);
-        const pesos = pesosDeLista(hallado, config);
-        if (pesos > 0 && hallado.confianza >= 0.5) {
+        const hallado = busquedaPrecio = (porCodigo ? await porCodigo : await precioPorNombre(ficha, env, limite)) ?? undefined;
+        const pesos = hallado ? pesosDeLista(hallado, config) : 0;
+        if (hallado && pesos > 0 && hallado.confianza >= 0.5) {
           ficha.precio_lista_mxn = pesos;
           fuentes = hallado.fuentes;
         }
