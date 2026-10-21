@@ -200,3 +200,26 @@ test('foto con código y sin precio: busca el código exacto en cualquier tienda
   // US$7.99 x $18.50 = $148 de lista; 50 % = $74 -> $70 -> $69. El nombre sigue siendo el de la foto.
   assert.deepEqual({ ...fila }, { nombre: 'Peluche perro con pelota de tenis', precio_lista: 14800, precio: 6900, estado_analisis: 'listo' });
 });
+
+test('la foto no da nombre pero el código sí: la pieza toma nombre y precio de la búsqueda (#402)', async (t) => {
+  const { db, env } = tienda();
+  const fetchOriginal = globalThis.fetch;
+  t.after(() => { globalThis.fetch = fetchOriginal; });
+  (env as { GEMINI_API_KEY: string }).GEMINI_API_KEY = 'prueba';
+  db.prepare("insert or replace into config (clave, valor) values ('pct_juguetes', '50'), ('tipo_cambio', '1850')").run();
+  globalThis.fetch = (async (_url: unknown, init?: RequestInit) => {
+    const busca = !!JSON.parse(String(init!.body)).tools;
+    const ficha = busca
+      ? { nombre: 'Peluche llavero FAO Schwarz', marca: 'FAO Schwarz', categoria: 'juguetes', precio_lista_mxn: 0, precio_usd: 9.99, fuente: 'ebay.com', confianza: 0.9 }
+      : { nombre: '', marca: '', categoria: 'juguetes', precio_lista_mxn: 0, precio_venta_mxn: 0, confianza: 0.3 };
+    return new Response(JSON.stringify({ candidates: [{ content: { parts: [{ text: JSON.stringify(ficha) }] } }] }));
+  }) as typeof fetch;
+  const id = crypto.randomUUID();
+  await env.FOTOS.put(`fotos/${id}.jpg`, new Uint8Array([1, 2, 3]));
+  db.prepare(`insert into productos (id, nombre, upc, estado_analisis, foto_key, semana_ingreso, creado_en, actualizado_en)
+    values (?, '', '840397515004', 'pendiente', ?, 'S40', '', '')`).run(id, `fotos/${id}.jpg`);
+  await analizarBorrador(id, env, 'gemini', false);
+  const fila = db.prepare('select nombre, marca, precio, estado_analisis from productos where id = ?').get(id) as any;
+  // US$9.99 x $18.50 = $185; 50 % = $92.5 -> $90 -> $89.
+  assert.deepEqual({ ...fila }, { nombre: 'Peluche llavero FAO Schwarz', marca: 'FAO Schwarz', precio: 8900, estado_analisis: 'listo' });
+});

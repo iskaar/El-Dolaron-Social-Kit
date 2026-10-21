@@ -428,14 +428,21 @@ export async function analizarBorrador(
     // Sin precio pero con nombre se busca (#387). Con código, el código exacto en cualquier tienda (eBay,
     // Amazon, EE.UU.; #397): un nombre genérico como "peluche gato" no encuentra el artículo. Sin código,
     // el nombre. Si no hay llave o no aparece con confianza, queda aparte.
-    if (!buscar && ficha.nombre.trim() && ficha.precio_lista_mxn <= 0) {
+    // Con código se espera su búsqueda aunque la foto no diera nombre: el código sí lo trae (#402).
+    if (!buscar && ficha.precio_lista_mxn <= 0 && (porCodigo || ficha.nombre.trim())) {
       const limite = Math.max(MINIMO_PRECIO_MS, PRESUPUESTO_ANALISIS_MS - (Date.now() - inicio));
       try {
-        const hallado = busquedaPrecio = (porCodigo ? await porCodigo : await precioPorNombre(ficha, env, limite)) ?? undefined;
+        const deCodigo = porCodigo ? await porCodigo : null;
+        const hallado = busquedaPrecio = (porCodigo ? deCodigo : await precioPorNombre(ficha, env, limite)) ?? undefined;
         const pesos = hallado ? pesosDeLista(hallado, config) : 0;
         if (hallado && pesos > 0 && hallado.confianza >= 0.5) {
           ficha.precio_lista_mxn = pesos;
           fuentes = hallado.fuentes;
+          if (!ficha.nombre.trim() && deCodigo?.nombre.trim()) {
+            ficha.nombre = deCodigo.nombre;
+            ficha.marca = deCodigo.marca;
+            ficha.categoria = deCodigo.categoria;
+          }
         }
       } catch (error) {
         console.warn(JSON.stringify({ mensaje: 'busqueda de precio fallida', id, upc: fila.upc, error: String(error).slice(0, 200) }));
