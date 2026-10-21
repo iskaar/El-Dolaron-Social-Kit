@@ -531,13 +531,18 @@ async function imprimirNuevas() {
         // se imprime a mano y nunca detiene la cola (#335).
         if ((p.categoria !== 'ropa' && !p.upc) || etiquetaVigente(hechas[p.id], p) || p.stock <= 0 || p.destino !== 'etiqueta') continue;
         const quien = `${p.nombre?.trim() || 'pieza sin nombre'} (capturada ${hora(p.creado_en)})`;
+        const lista = p.estado_analisis === 'listo' && p.nombre?.trim() && p.precio > 0;
         // Lo escaneado espera a que cierre su corrección: salen tantas etiquetas como piezas quedaron.
-        if (p.upc && ahora < Date.parse(p.creado_en) + CORRECCION_ESCANER_MS + MARGEN_CORRECCION_MS) {
-          esperando = `Esperando que cierre la corrección de cantidad de: ${quien}.`;
-          break;
+        // No detiene la cola: su etiqueta trae el nombre exacto del producto, así que no depende del
+        // orden de la mesa, y una pieza que espera foto no frena las demás (#375).
+        if (p.upc && (!lista || ahora < Date.parse(p.creado_en) + CORRECCION_ESCANER_MS + MARGEN_CORRECCION_MS)) {
+          esperando ||= p.estado_analisis === 'error'
+            ? `Falta foto de lo escaneado: ${quien}. Tócala en el escáner; las demás siguen.`
+            : `Esperando que cierre la corrección de cantidad de: ${quien}.`;
+          continue;
         }
         // Conservar el orden de la mesa aunque un análisis posterior termine primero.
-        if (p.estado_analisis !== 'listo' || !p.nombre?.trim() || p.precio <= 0) {
+        if (!lista) {
           esperando = p.estado_analisis === 'error'
             ? `Una foto necesita revisión: ${quien}. Completa nombre y precio en la cola de revisión.`
             : `Esperando precio de: ${quien}.`;
