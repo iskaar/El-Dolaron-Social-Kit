@@ -106,5 +106,10 @@
       "binding": "FOTOS",
       "bucket_name": "el-dolaron-fotos"
     }
-  ]
+  ],
+  // Búsquedas de códigos fuera de la hoja (#406): sin el tope de 30 s de waitUntil.
+  "queues": {
+    "producers": [{ "binding": "BUSQUEDAS", "queue": "el-dolaron-busquedas" }],
+    "consumers": [{ "queue": "el-dolaron-busquedas", "max_batch_size": 5, "max_batch_timeout": 1, "max_retries": 1 }]
+  }
 }

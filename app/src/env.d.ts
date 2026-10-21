@@ -1,7 +1,11 @@
 // Los secretos no salen de wrangler.jsonc (no van al repositorio), asi que se
 // declaran aqui y se cargan con `wrangler secret put`.
 declare global {
+  /** Búsqueda de un código fuera de la hoja (#406). */
+  interface BusquedaUpc { id: string; upc: string }
   interface Env {
+    /** Cola de búsquedas por código; sin ella (local, pruebas) se busca en waitUntil. */
+    BUSQUEDAS?: Queue<BusquedaUpc>;
     ANTHROPIC_API_KEY: string;
     IMAGES: ImagesBinding;
     GEMINI_API_KEY: string;

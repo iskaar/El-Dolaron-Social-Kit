@@ -297,7 +297,8 @@ const INSTRUCCION_UPC = [
   'Responde con un producto SOLO si una pagina muestra ese mismo codigo; si no, deja el nombre vacio',
   'y la confianza en 0. Un producto equivocado cuesta mas que pedir una foto.',
   'Sirve cualquier tienda o anuncio que muestre ese codigo: eBay, Amazon, Walmart, Target, tiendas de',
-  'Estados Unidos o de Mexico (Issue #397). Usa el precio de esa misma pagina: en pesos va en',
+  'Estados Unidos o de Mexico (Issue #397). Usa el precio de esa misma pagina; si muestra MSRP o precio de',
+  'lista, usa ese en lugar del precio de oferta o de reventa. En pesos va en',
   '`precio_lista_mxn`; en dolares va en `precio_usd` y deja `precio_lista_mxn` en 0. No conviertas monedas.',
   // Mismas reglas de nombre, marca y categoría que la foto: el mismo producto da el mismo nombre.
   INSTRUCCION.slice(INSTRUCCION.indexOf('COMO SE ESCRIBE')),
@@ -405,14 +406,6 @@ export async function analizarBorrador(
       throw new Error('El borrador no existe.');
     }
 
-    // Con código, su búsqueda arranca junto con la foto (#399): en serie, Haiku + búsqueda pasaban
-    // de los 30 s de waitUntil (arándano Baskin-Robbins, 27 s). Si no se usa, se ignora.
-    const porCodigo = fila.upc && !buscar
-      ? identificarUpc(fila.upc, env, PRESUPUESTO_ANALISIS_MS).catch((error) => {
-        console.warn(JSON.stringify({ mensaje: 'busqueda de precio fallida', id, upc: fila.upc, error: String(error).slice(0, 200) }));
-        return null;
-      })
-      : null;
     const [ejemplos, nombres] = await Promise.all([ejemplosDeIsaac(env), nombresExistentes(env)]);
     const instruccion = INSTRUCCION + bloqueNombres(nombres) + bloqueEjemplos(ejemplos);
 
@@ -429,20 +422,16 @@ export async function analizarBorrador(
     // Amazon, EE.UU.; #397): un nombre genérico como "peluche gato" no encuentra el artículo. Sin código,
     // el nombre. Si no hay llave o no aparece con confianza, queda aparte.
     // Con código se espera su búsqueda aunque la foto no diera nombre: el código sí lo trae (#402).
-    if (!buscar && ficha.precio_lista_mxn <= 0 && (porCodigo || ficha.nombre.trim())) {
+    // Con código, la búsqueda del código va a la cola (#406): Vertex con Google tarda más que los 30 s
+    // de waitUntil. Sin código, se busca el nombre aquí mismo.
+    if (!buscar && !fila.upc && ficha.nombre.trim() && ficha.precio_lista_mxn <= 0) {
       const limite = Math.max(MINIMO_PRECIO_MS, PRESUPUESTO_ANALISIS_MS - (Date.now() - inicio));
       try {
-        const deCodigo = porCodigo ? await porCodigo : null;
-        const hallado = busquedaPrecio = (porCodigo ? deCodigo : await precioPorNombre(ficha, env, limite)) ?? undefined;
-        const pesos = hallado ? pesosDeLista(hallado, config) : 0;
-        if (hallado && pesos > 0 && hallado.confianza >= 0.5) {
+        const hallado = busquedaPrecio = await precioPorNombre(ficha, env, limite);
+        const pesos = pesosDeLista(hallado, config);
+        if (pesos > 0 && hallado.confianza >= 0.5) {
           ficha.precio_lista_mxn = pesos;
           fuentes = hallado.fuentes;
-          if (!ficha.nombre.trim() && deCodigo?.nombre.trim()) {
-            ficha.nombre = deCodigo.nombre;
-            ficha.marca = deCodigo.marca;
-            ficha.categoria = deCodigo.categoria;
-          }
         }
       } catch (error) {
         console.warn(JSON.stringify({ mensaje: 'busqueda de precio fallida', id, upc: fila.upc, error: String(error).slice(0, 200) }));
@@ -468,6 +457,8 @@ export async function analizarBorrador(
     // para revisarla, con lo que se encontro. Si no, la cola automatica de /etiquetas
     // se queda esperando una pieza que nadie va a completar (#335).
     const completa = ficha.nombre.trim() !== '' && precio > 0;
+    // Sin precio y con código: sigue `pendiente` mientras la cola busca el código; ella la deja lista o aparte.
+    const aLaCola = !completa && !buscar && !!fila.upc && !!env.BUSQUEDAS;
     await env.DB.prepare(
       `update productos set nombre = ?, marca = ?, categoria = ?, precio_lista = ?, precio = ?,
                             precio_sugerido = ?, destino = ?, estado_analisis = ?, actualizado_en = ?
@@ -475,11 +466,12 @@ export async function analizarBorrador(
        where id = ? and estado_analisis <> 'descartado' and (upc is null or estado_analisis <> 'listo')`,
     )
       .bind(ficha.nombre, ficha.marca, ficha.categoria, precioLista, precio, precio, destino,
-        completa ? 'listo' : 'error', new Date().toISOString(), id)
+        completa ? 'listo' : aLaCola ? 'pendiente' : 'error', new Date().toISOString(), id)
       .run();
+    if (aLaCola) await env.BUSQUEDAS!.send({ id, upc: fila.upc! });
 
     console.log(JSON.stringify({
-      mensaje: completa ? 'analisis listo' : 'analisis incompleto', id, modelo, buscar, ms: Date.now() - inicio,
+      mensaje: completa ? 'analisis listo' : 'analisis incompleto', id, modelo, buscar, ms: Date.now() - inicio, a_la_cola: aLaCola,
       ejemplos: ejemplos.length, nombres: nombres.length, segun_ejemplos: conEjemplos, ficha,
       fuentes, busqueda_precio: busquedaPrecio && { mxn: busquedaPrecio.precio_lista_mxn, usd: busquedaPrecio.precio_usd, confianza: busquedaPrecio.confianza, fuente: busquedaPrecio.fuente },
     }));

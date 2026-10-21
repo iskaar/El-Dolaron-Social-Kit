@@ -2,7 +2,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { tienda } from './prueba-d1.ts';
-import worker, { permitidaParaVendedor } from './worker.ts';
+import worker, { permitidaParaVendedor, identificarPieza } from './worker.ts';
 import { analizarBorrador } from './analisis.ts';
 
 const UPC = '0012345678905';
@@ -69,14 +69,29 @@ test('sin resultado seguro queda en error para foto; la foto de esa pieza no la 
   assert.equal(despues.foto, `fotos/${id}.jpg`);
 });
 
-test('una foto que llega mientras se busca manda: la respuesta tardía de Gemini no la pisa', async (t) => {
+test('el código exacto manda sobre el nombre de la foto, y una pieza ya lista no se toca (#406)', async (t) => {
   const p = preparar(t);
   p.responder({ nombre: 'Termo', marca: '', categoria: 'hogar', precio_lista_mxn: 1000, precio_venta_mxn: 0, confianza: 0.9 });
-  const id = crypto.randomUUID();
+  Object.assign(p.env, { BUSQUEDAS: { send: async () => {} } });   // la búsqueda se corre a mano abajo
+  const id = crypto.randomUUID(), lista = crypto.randomUUID();
   await p.pedir('/api/borradores/upc/buscar', { id, upc: UPC, stock: 1 });
-  p.db.prepare("update productos set foto_key = ?, nombre = 'De la foto' where id = ?").run(`fotos/${id}.jpg`, id);
+  await p.pedir('/api/borradores/upc/buscar', { id: lista, upc: UPC, stock: 1 });
+  p.db.prepare("update productos set foto_key = ?, nombre = 'De la foto', estado_analisis = 'error' where id = ?").run(`fotos/${id}.jpg`, id);
+  p.db.prepare("update productos set nombre = 'Ya capturada', precio = 5000, estado_analisis = 'listo' where id = ?").run(lista);
+  for (const pieza of [id, lista]) await identificarPieza(pieza, UPC, p.env, true);
+  assert.equal(p.db.prepare('select nombre, estado_analisis from productos where id=?').get(id)!.nombre, 'Termo');
+  assert.equal(p.db.prepare('select nombre from productos where id=?').get(lista)!.nombre, 'Ya capturada');
+});
+
+test('con la cola configurada, el código desconocido se encola en lugar de buscarse en waitUntil (#406)', async (t) => {
+  const p = preparar(t);
+  const enviados: BusquedaUpc[] = [];
+  Object.assign(p.env, { BUSQUEDAS: { send: async (m: BusquedaUpc) => { enviados.push(m); } } });
+  const id = crypto.randomUUID();
+  assert.equal((await p.pedir('/api/borradores/upc/buscar', { id, upc: UPC, stock: 1 })).status, 202);
   await p.esperar();
-  assert.equal(p.db.prepare('select nombre from productos where id=?').get(id)!.nombre, 'De la foto');
+  assert.deepEqual(enviados, [{ id, upc: UPC }]);
+  assert.equal(p.llamadas.length, 0);
 });
 
 test('lo que sí está en la hoja, datos inválidos y permisos', async (t) => {

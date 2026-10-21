@@ -373,7 +373,7 @@ async function buscar(pieza) {
 }
 
 const BUSQUEDA_CADA_MS = 4000;
-const BUSQUEDA_INTENTOS = 15;   // ~1 min; la búsqueda corta a los 22 s en el servidor
+const BUSQUEDA_INTENTOS = 35;   // ~2 min: la cola espera hasta 60 s a Vertex y reintenta una vez (#406)
 
 function seguirBusqueda(pieza, { li, cantidad, cerrar }) {
   let intentos = 0;
@@ -571,7 +571,7 @@ async function conservarFoto(foto) {
   enviarFoto(registro, li);
 }
 
-const ANALISIS_INTENTOS = 20;   // ~80 s; el análisis corta a los 30 s en el servidor
+const ANALISIS_INTENTOS = 40;   // ~2.5 min: análisis + búsqueda del código en la cola (#406)
 
 /** Sigue el análisis de una foto: si queda lista, avisa que sale su etiqueta; si no, que va aparte (#394). */
 function seguirFoto(registro, li) {
