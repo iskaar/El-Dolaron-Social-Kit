@@ -174,6 +174,12 @@ function avisar(tipo) {
 
 function mensaje(texto) { $('aviso').textContent = texto; }
 
+/** Ya tiene nombre y precio: /etiquetas la imprime en segundos. Se le avisa a quien escanea (#394). */
+function avisarEtiqueta(nombre, stock) {
+  mensaje(`Sale la etiqueta: ${nombre} ×${stock}`);
+  navigator.vibrate?.([80, 60, 80]);
+}
+
 /* ---------- pintar ---------- */
 
 function pintar() {
@@ -244,7 +250,11 @@ async function enviar(pieza) {
     const guardada = await respuesta.json().catch(() => ({}));
     if (!respuesta.ok) throw new Error(guardada.error ?? `Error ${respuesta.status}`);
     piezas += guardada.stock;
-    anotarGuardada(guardada, pieza.estado);
+    const { li } = anotarGuardada(guardada, pieza.estado);
+    if (guardada.estado_analisis === 'listo') {
+      li.querySelector('.p').textContent = `${pesos(guardada.precio)} · etiqueta en camino`;
+      avisarEtiqueta(guardada.nombre, guardada.stock);
+    }
   } catch (error) {
     anotar(`<span>No se guardó: ${escapar(pieza.ficha.nombre)} ×${pieza.stock}. Toca para reintentar.</span>`,
       () => { fila = fila.then(() => enviar(pieza)); });
@@ -342,6 +352,7 @@ function seguirBusqueda(pieza, { li, cantidad, cerrar }) {
       cerrar();   // ya va a Etiquetas: su cantidad quedó cerrada
       li.firstElementChild.textContent = datos.nombre;
       li.querySelector('.p').textContent = `${pesos(datos.precio)} · etiqueta en camino`;
+      avisarEtiqueta(datos.nombre, datos.stock);
       return;
     }
     if (datos?.estado_analisis === 'error' || (!datos && intentos >= BUSQUEDA_INTENTOS)) return pedirFoto();
@@ -485,7 +496,7 @@ $('omitir-imagen').addEventListener('click', () => {
 
 /* ---------- foto de lo que no esta en el manifiesto ---------- */
 
-async function enviarFoto(registro) {
+async function enviarFoto(registro, li = null) {
   try {
     const cuerpo = new FormData();
     cuerpo.append('id', registro.id);
@@ -497,9 +508,11 @@ async function enviarFoto(registro) {
     if (!respuesta.ok) throw new Error((await respuesta.json().catch(() => ({}))).error ?? `Error ${respuesta.status}`);
     const pendiente = await leerFoto(registro.id);
     if (pendiente && (pendiente.version ?? 0) === (registro.version ?? 0)) await borrarFoto(registro.id);
+    if (li) seguirFoto(registro, li);
   } catch (error) {
     anotar(`<span>Foto ${escapar(registro.upc || 'sin código')} guardada en este teléfono. Toca para reintentar o abre Fotos.</span>`,
-      () => { fila = fila.then(() => enviarFoto(registro)); });
+      () => { fila = fila.then(() => enviarFoto(registro, reintento)); });
+    const reintento = $('guardadas').firstElementChild;
     mensaje(`No se subió: ${error.message ?? error}. La foto sigue guardada en Fotos.`);
   }
 }
@@ -515,9 +528,37 @@ async function conservarFoto(foto) {
   if (desconocido === pieza) desconocido = null;
   piezaParaFoto = null;
   anotar(`<span>Foto ${escapar(registro.upc || 'sin código')} (se analiza)</span><span class="cant">×${registro.cantidad}</span>`);
+  const li = $('guardadas').firstElementChild;
   pintar();
   // La subida no detiene el escáner (#385): la foto ya está en el teléfono y enviarFoto avisa si falla.
-  enviarFoto(registro);
+  enviarFoto(registro, li);
+}
+
+const ANALISIS_INTENTOS = 20;   // ~80 s; el análisis corta a los 30 s en el servidor
+
+/** Sigue el análisis de una foto: si queda lista, avisa que sale su etiqueta; si no, que va aparte (#394). */
+function seguirFoto(registro, li) {
+  let intentos = 0;
+  const revisar = async () => {
+    intentos += 1;
+    let datos = null;
+    try {
+      const r = await fetch(`/api/borradores/upc/${registro.id}`, { cache: 'no-store' });
+      if (r.ok) datos = await r.json();
+    } catch { /* sin red: se vuelve a preguntar */ }
+    if (datos?.estado_analisis === 'listo') {
+      li.innerHTML = `<span>${escapar(datos.nombre)}</span><span class="cant">×${datos.stock} · ${pesos(datos.precio)} · etiqueta en camino</span>`;
+      return avisarEtiqueta(datos.nombre, datos.stock);
+    }
+    if (datos?.estado_analisis === 'error') {
+      li.classList.add('fallo');
+      li.innerHTML = `<span>Aparte, sin precio exacto: ${escapar(datos.nombre || registro.upc || 'pieza sin código')}. Ponle precio en el admin.</span><span class="cant">×${datos.stock}</span>`;
+      return;
+    }
+    if (datos?.estado_analisis === 'descartado') return;
+    if (intentos < ANALISIS_INTENTOS) setTimeout(revisar, BUSQUEDA_CADA_MS);
+  };
+  setTimeout(revisar, BUSQUEDA_CADA_MS);
 }
 
 function elegirPiezaFoto() {
