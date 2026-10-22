@@ -250,9 +250,9 @@ function ficha(p) {
         <button type="button" class="claro" data-accion="reanalizar">Reintentar análisis</button>
         <button type="button" class="claro" data-accion="compartir"
           title="Copia precio, nombre y foto; pégalos con Win+V">Compartir</button>
-        ${repetida ? `<button type="button" class="claro" data-accion="fusionar"
-          title="Suma la existencia; si tiene código, la repetida se conserva descartada con su foto">
-          Ya existe · sumar a ${repetida.stock ?? 1} pz${p.codigo ? ' · la etiqueta de la repetida queda inválida' : ''}</button>` : ''}
+        ${repetida && !(p.codigo && repetida.codigo) ? `<button type="button" class="claro" data-accion="fusionar"
+          title="Suma la existencia y conserva la etiqueta existente en la original; elimina la captura repetida y su foto">
+          Ya existe · sumar a ${repetida.stock ?? 1} pz</button>` : ''}
         <button type="button" class="peligro" data-accion="descartar"
           title="Con código: conserva la pieza y su foto, deja existencia 0 e invalida su etiqueta">Descartar</button>
         <span class="etiqueta ${estado}">${estado} · ${p.semana_ingreso}</span>
@@ -352,8 +352,9 @@ function ficha(p) {
         body: JSON.stringify({ destino_id: repetida.id }),
       });
       const datos = await respuesta.json();
-      if (!respuesta.ok) { aviso.textContent = datos.error; evento.target.disabled = false; return; }
+      if (!respuesta.ok) { aviso.textContent = datos.error; aviso.style.color = ''; evento.target.disabled = false; return; }
       repetida.stock = datos.stock;   // la siguiente repetida ya ve el total nuevo
+      repetida.codigo ||= p.codigo;
       nodo.remove();
     } else if (accion === 'precios-ml') {
       const enlace = enlacePreciosML(valor('nombre'), valor('marca'));

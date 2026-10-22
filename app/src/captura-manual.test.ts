@@ -57,7 +57,7 @@ test('marca y categorias nuevas (#159): se guardan, salen en la cola y en el inv
   assert.equal((db.prepare('select marca from productos where id = ?').get(cuerpo.id) as { marca: string }).marca, 'Elf');
 });
 
-test('fusionar conserva la fila etiquetada; la original sin etiqueta recibe un código nuevo (#439)', async () => {
+test('fusionar transfiere la etiqueta pegada a la original y borra la repetida (#439)', async () => {
   const { db, pedir } = tienda();
   const original = crypto.randomUUID();
   const repetida = crypto.randomUUID();
@@ -70,11 +70,10 @@ test('fusionar conserva la fila etiquetada; la original sin etiqueta recibe un c
   assert.equal(r.status, 200);
   const fila = db.prepare('select codigo, stock from productos where id = ?').get(original) as { codigo: string; stock: number };
   assert.equal(fila.stock, 5);
-  assert.match(fila.codigo, /^ED-\d{6}$/);
-  assert.notEqual(fila.codigo, 'ED-000900');
+  assert.equal(fila.codigo, 'ED-000900');
   assert.equal(db.prepare("select count(*) n from productos where codigo = 'ED-000900'").get()!.n, 1);
-  assert.deepEqual({ ...db.prepare('select codigo, stock, estado_analisis from productos where id = ?').get(repetida)! },
-    { codigo: 'ED-000900', stock: 0, estado_analisis: 'descartado' });
+  assert.equal(db.prepare('select id from productos where id = ?').get(repetida), undefined);
+  assert.notEqual(db.prepare("select estado_analisis from productos where codigo = 'ED-000900'").get()!.estado_analisis, 'descartado');
 });
 
 test('fusionar no deja pasar las 999 piezas: la suma se rechaza y no se pierde ninguna foto', async () => {

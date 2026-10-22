@@ -856,17 +856,20 @@ const BORRADOR_RETIRABLE = `sin_inventario = 0
     and estado not in ('cerrada', 'vendida') and (ml_item_id is not null
       or (estado = 'publicando' and actualizado_en >= strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-2 minutes'))))`;
 
-/** Suma la repetida una sola vez; toda pieza etiquetada conserva fila, código y foto. */
+/** Suma la repetida una sola vez y mantiene su etiqueta vendible en la original. */
 async function fusionarBorrador(id: string, request: Request, env: Env, propietario: string): Promise<Response> {
   const { destino_id } = (await request.json()) as { destino_id?: unknown };
   const destinoId = String(destino_id ?? '');
   if (!UUID.test(id) || !UUID.test(destinoId) || id === destinoId) {
     return json({ error: 'Identificador invalido.' }, 400);
   }
-  const piezas = await env.DB.prepare(`select id, stock, estado_analisis from productos
+  const piezas = await env.DB.prepare(`select id, codigo, stock, estado_analisis from productos
     where id in (?, ?) and propietario = ?`).bind(id, destinoId, propietario)
-    .all<{ id: string; stock: number; estado_analisis: string }>();
+    .all<{ id: string; codigo: string | null; stock: number; estado_analisis: string }>();
   if (piezas.results.length !== 2) return json({ error: 'Pieza no encontrada.' }, 404);
+  const dosEtiquetas = 'Las dos piezas ya tienen etiqueta: son piezas distintas. Corrige la existencia de cada una o descarta la que no exista.';
+  if (piezas.results.every((p) => p.codigo)) return json({ error: dosEtiquetas }, 409);
+  const codigo = piezas.results.find((p) => p.id === id)!.codigo || '';
   if (piezas.results.some((p) => p.estado_analisis === 'descartado')) return json({ error: 'La pieza ya fue descartada.' }, 409);
   if (piezas.results.reduce((n, p) => n + p.stock, 0) > 999) {
     return json({ error: 'Con esa suma pasa de 999 piezas en existencia.' }, 409);
@@ -881,27 +884,27 @@ async function fusionarBorrador(id: string, request: Request, env: Env, propieta
     const resultados = await env.DB.batch([
       env.DB.prepare(`update productos set stock = case when
         exists (select 1 from productos where id = ?1 and propietario = ?3
-          and estado_analisis <> 'descartado' and ${BORRADOR_RETIRABLE})
+          and coalesce(codigo, '') = ?4 and estado_analisis <> 'descartado' and ${BORRADOR_RETIRABLE})
         and exists (select 1 from productos where id = ?2 and propietario = ?3
           and estado_analisis <> 'descartado' and sin_inventario = 0
+          and (?4 = '' or coalesce(codigo, '') = '')
           and stock + (select stock from productos where id = ?1) <= 999)
-        then stock else -1 end where id in (?1, ?2)`).bind(id, destinoId, propietario),
+        then stock else -1 end where id in (?1, ?2)`).bind(id, destinoId, propietario, codigo),
       env.DB.prepare(`update productos set stock = stock + (select stock from productos where id = ?),
         actualizado_en = ? where id = ?`).bind(id, ahora, destinoId),
-      // Si solo la repetida estaba etiquetada, su código sigue siendo suyo: la original recibe uno nuevo.
-      env.DB.prepare(`update productos set codigo = ${CODIGO_NUEVO} where id = ?
-        and (codigo is null or codigo = '') and exists (select 1 from productos where id = ? and codigo <> '')`)
-        .bind(destinoId, id),
-      env.DB.prepare(`update productos set stock = 0, estado_analisis = 'descartado', actualizado_en = ?
-        where id = ? and codigo is not null and codigo <> ''`).bind(ahora, id),
+      // Liberar primero el código único: la etiqueta pegada debe resolver a la original vendible.
+      env.DB.prepare('update productos set codigo = null where id = ? and codigo = ?').bind(id, codigo),
+      env.DB.prepare(`update productos set codigo = ? where id = ?
+        and (codigo is null or codigo = '') and ? <> ''`).bind(codigo, destinoId, codigo),
       env.DB.prepare("delete from productos where id = ? and (codigo is null or codigo = '')").bind(id),
     ]);
     borrado = resultados[4];
   } catch (error) {
     if (!String(error).includes('stock insuficiente')) throw error;
-    const { results } = await env.DB.prepare('select id from productos where id in (?, ?) and propietario = ?')
-      .bind(id, destinoId, propietario).all();
+    const { results } = await env.DB.prepare('select id, codigo from productos where id in (?, ?) and propietario = ?')
+      .bind(id, destinoId, propietario).all<{ id: string; codigo: string | null }>();
     return results.length !== 2 ? json({ error: 'Pieza no encontrada.' }, 404)
+      : results.every((p) => p.codigo) ? json({ error: dosEtiquetas }, 409)
       : json({ error: 'La pieza cambió, fue descartada o tiene venta, pedido o publicación. Revisa y vuelve a intentar.' }, 409);
   }
   if (borrado.meta.changes) await env.FOTOS.delete(`fotos/${id}.jpg`);
