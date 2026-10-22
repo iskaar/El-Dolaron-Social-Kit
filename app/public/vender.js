@@ -14,9 +14,9 @@ export function telefonoInteresado(valor) {
 
 /** Permite pegar «quiero la ED-000123» o leer los números de la etiqueta. */
 export function codigoDeRespuesta(texto) {
-  const codigo = /\bED-\d{1,10}\b/i.exec(texto)?.[0];
-  if (codigo) return codigo.toUpperCase();
-  return /^\s*\d{1,10}\s*$/.test(texto) ? `ED-${texto.trim().padStart(6, '0')}` : null;
+  // Los clientes escriben «ED-2335» sin ceros; la etiqueta dice ED-002335 (mismo relleno que caja y pedidos).
+  const digitos = /\bED-(\d{1,10})\b/i.exec(texto)?.[1] ?? /^\s*(\d{1,10})\s*$/.exec(texto)?.[1];
+  return digitos ? `ED-${digitos.padStart(6, '0')}` : null;
 }
 
 const CIERRE = 'Apártala con $100 por 7 días: responde con el código.\n'
@@ -84,7 +84,7 @@ export async function crearTarjeta(pieza) {
   ctx.font = '700 58px system-ui, sans-serif';
   ctx.fillText(pieza.codigo, 40, 1210, 990);
   ctx.font = '40px system-ui, sans-serif';
-  ctx.fillText(pieza.talla ? `Talla ${pieza.talla}` : 'Talla no indicada', 40, 1300, 530);
+  if (pieza.talla) ctx.fillText(`Talla ${pieza.talla}`, 40, 1300, 530);
   // El logo oficial se conserva completo sobre blanco para que su azul sea legible.
   ctx.fillRect(620, 1230, 420, 92);
   const escalaLogo = Math.min(390 / logo.naturalWidth, 76 / logo.naturalHeight);

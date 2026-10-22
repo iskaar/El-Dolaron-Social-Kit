@@ -50,6 +50,7 @@ test('teléfono opcional: valida, normaliza +52 y rechaza tipos y letras; códig
   for (const valor of ['123', '1 4441234567', 'abc4441234567', '++++++++', 4441234567, {}, null, ' '.repeat(25)]) assert.equal(telefonoInteresado(valor), null);
   assert.equal(codigoDeRespuesta('quiero la ed-000123, por favor'), 'ED-000123');
   assert.equal(codigoDeRespuesta('123\n'), 'ED-000123');
+  assert.equal(codigoDeRespuesta('me apartas la ED-2335?'), 'ED-002335');
   assert.equal(codigoDeRespuesta('quiero dos'), null);
   const params = new URL('https://prueba' + enlaceApartar({ codigo: 'ED-123', cliente: 'Ana & Luis <b>', telefono: '' })).searchParams;
   assert.equal(params.get('cliente'), 'Ana & Luis <b>');

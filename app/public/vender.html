@@ -160,7 +160,7 @@ function pintarPiezas() {
     tarjeta.querySelector('h2').textContent = p.nombre;
     tarjeta.querySelector('.precio').textContent = pesos(p.precio);
     tarjeta.querySelector('.codigo').textContent = p.codigo;
-    tarjeta.querySelector('.talla').textContent = p.talla ? `Talla ${p.talla}` : 'Talla no indicada';
+    tarjeta.querySelector('.talla').textContent = p.talla ? `Talla ${p.talla}` : '';
     tarjeta.querySelector('.marca').textContent = compartidas.has(p.id) ? 'Compartida ✓' : '';
     tarjeta.querySelector('input').checked = seleccion.has(p.id);
     tarjeta.querySelector('input').setAttribute('aria-label', `Seleccionar ${p.nombre} ${p.codigo}`);
@@ -404,7 +404,8 @@ function refrescar() {
   if (document.visibilityState !== 'visible' || document.querySelector('dialog[open]')) return;
   if ($('interesados').hidden) cargarPiezas(); else cargarInteresados();
 }
-setInterval(refrescar, 30000);
+// ponytail: sin refresco por intervalo (cuota D1 de 5M filas/día con teléfonos abiertos todo el día);
+// se actualiza al volver a la pestaña (p. ej. después de compartir en WhatsApp) o con «Actualizar».
 document.addEventListener('visibilitychange', refrescar);
 try {
   const yo = await api('/api/yo');
