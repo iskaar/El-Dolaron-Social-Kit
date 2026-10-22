@@ -14,7 +14,7 @@ export async function procesarRecortes(env: Env): Promise<void> {
       const foto = await env.FOTOS.get(fila.foto_key);
       if (!foto) throw new Error('Foto no encontrada en R2.');
       const original = await foto.arrayBuffer();
-      const recortar = (ajustar: boolean) => {
+      const recortar = async (ajustar: boolean) => {
         const sinFondo = (env.IMAGES as any).input(new Response(original).body).transform({ segment: 'foreground' });
         // #421: cortar el borde transparente para que el producto llene la portada.
         return (ajustar ? sinFondo.transform({ trim: { border: { keep: 24 } } }) : sinFondo).output({ format: 'image/webp', quality: 82 });

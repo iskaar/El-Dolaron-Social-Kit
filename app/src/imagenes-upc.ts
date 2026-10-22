@@ -136,8 +136,9 @@ export async function guardarImagenComoFoto(upc: string, env: Env): Promise<void
         })) continue;
       }
       // «Ropa» con referencia confirmada tampoco debe entrar a la cola que renombra prendas.
+      // #423: la imagen oficial ya viene limpia: 'original' (el check de la migración 042 no admite otro valor) la saca de la cola de recortes.
       await env.DB.prepare(`update productos set foto_key = ?, actualizado_en = ?,
-          recorte_estado = case when recorte_estado = 'original' then 'original' else null end, recorte_fecha = null, recorte_revision = null,
+          recorte_estado = 'original', recorte_fecha = null, recorte_revision = null,
           ropa_ia_estado = case when categoria = 'ropa' and nombre = 'Ropa' and ropa_ia_estado is null then 'descartado' else ropa_ia_estado end
         where id = ? and ltrim(upc, '0') = ? and propietario = 'dolaron' and foto_key = '' and estado_analisis <> 'descartado'
           and exists (select 1 from imagenes_upc i join manifiesto m on m.upc = i.upc and m.tcin = i.tcin
@@ -277,7 +278,7 @@ export async function rutaImagenPieza(request: Request, env: Env, pathname: stri
       if (existente?.customMetadata?.imagen_busqueda !== datos.imagen) return json({ error: 'La pieza ya tiene otra foto. Recarga la ficha.' }, 409);
     }
     const { meta } = await env.DB.prepare(`update productos set foto_key = ?, actualizado_en = ?,
-        recorte_estado = case when recorte_estado = 'original' then 'original' else null end, recorte_fecha = null, recorte_revision = null,
+        recorte_estado = 'original', recorte_fecha = null, recorte_revision = null,
         ropa_ia_estado = case when categoria = 'ropa' and nombre = 'Ropa' and ropa_ia_estado is null then 'descartado' else ropa_ia_estado end
       where id = ? and propietario = 'dolaron' and foto_key = '' and estado_analisis <> 'descartado'`)
       .bind(fotoKey, new Date().toISOString(), id).run();

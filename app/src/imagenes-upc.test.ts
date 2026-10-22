@@ -159,7 +159,7 @@ test('el relleno conserva fotos propias, excluye FEP y descartados e ignora cand
   assert.equal(db.prepare("select valor from config where clave='imagenes_relleno_hasta'").get()!.valor, descartada.confirmadoEn);
 });
 
-test('confirmar guarda una sola descarga en R2 y da foto al catálogo, ML y recortes sin cambiar la pieza', async (t) => {
+test('confirmar guarda una sola descarga en R2 y da foto al catálogo y ML sin quitar fondo ni cambiar la pieza (#423)', async (t) => {
   const { db, env, pedir, esperar } = preparar();
   db.prepare("update productos set upc=?, estado_analisis='listo', destino='etiqueta', categoria='ropa', nombre='Ropa' where id=?").run('0' + UPC, PRODUCTO);
   candidata(db);
@@ -196,7 +196,8 @@ test('confirmar guarda una sola descarga en R2 y da foto al catálogo, ML y reco
   let recortes = 0;
   env.IMAGES = { input() { recortes++; return { transform() { return { output: async () => fotoTarget() }; } }; } } as never;
   await procesarRecortes(env);
-  assert.equal(recortes, 2);
+  assert.equal(recortes, 0);
+  assert.equal(db.prepare('select recorte_estado from productos where id=?').get(PRODUCTO)?.recorte_estado, 'original');
   await procesarColaRopa(env, async () => { assert.fail('La imagen de referencia no debe disparar análisis de ropa'); });
   assert.deepEqual(db.prepare('select nombre, precio, stock, estado_analisis, estado_fisico, codigo from productos where id=?').get(PRODUCTO), antes);
 });
