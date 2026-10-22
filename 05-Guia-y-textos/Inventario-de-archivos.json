@@ -349,6 +349,12 @@
       "title": "Ropa y rodillo de tallas",
       "description": "Captura integrada con los endpoints existentes y cámara remota (#446).",
       "format": "JS"
+    },
+    {
+      "file": "app/public/inventario-revisar.js",
+      "title": "Revisión integrada de inventario",
+      "description": "Filtros, ficha, acciones con casilla y recortes de la pieza (#446).",
+      "format": "JS"
     }
   ],
   "version": "1.0"

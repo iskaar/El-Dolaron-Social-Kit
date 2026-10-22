@@ -94,6 +94,7 @@ interface FilaBorrador {
 const RUTAS_VENDEDOR = new Set(['/captura', '/foto.js', '/tallas.js', '/api/salud', '/sin-acceso', '/api/yo',
   // Escanear del manifiesto (Issue #365): el telefono ve nombre y precio de lo que escanea, nada mas.
   '/escanear', '/categorias.js', '/upc.js', '/cola-fotos.js', '/estados.js',
+  '/inventario-revisar.js', '/sesiones.js', '/precios-ml.js', '/compartir.js',
   '/inventario-capturar.js', '/inventario-ropa.js', '/envio-etiquetas.js', '/semana.js',
   '/inventario', '/inventario.css', '/inventario.js', '/inventario-ui.js', '/lector.js', '/ficha.js',
   '/venta.js', '/etiquetera.js', '/impresora.js', '/camara.js', '/vendor/html5-qrcode.min.js', '/ropa.js']);
@@ -104,6 +105,9 @@ export function permitidaParaVendedor(pathname: string, metodo: string): boolean
   if (pathname === '/api/piezas' || /^\/api\/piezas\/[^/]+$/.test(pathname) || /^\/api\/foto\/[^/]+$/.test(pathname)) return metodo === 'GET';
   if (/^\/api\/piezas\/[^/]+\/existencia$/.test(pathname)) return metodo === 'POST';
   if (pathname === '/api/borradores' && metodo === 'GET') return true;
+  if (pathname === '/api/familias' || pathname === '/api/recortes') return metodo === 'GET';
+  if (/^\/api\/recortes\/[^/]+\/imagen$/.test(pathname)) return metodo === 'GET';
+  if (/^\/api\/recortes\/[^/]+\/(aprobar|original|reintentar)$/.test(pathname)) return metodo === 'POST';
   if (/^\/api\/borradores\/[0-9a-f-]{36}$/.test(pathname)) return ['PATCH', 'DELETE'].includes(metodo);
   if (/^\/api\/borradores\/[^/]+\/(fusionar|analizar|imagen\/buscar)$/.test(pathname)) return metodo === 'POST';
   if (/^\/api\/borradores\/[^/]+\/imagen$/.test(pathname)) return metodo === 'PUT';
@@ -2142,6 +2146,8 @@ export default {
       }
       const respuestaRopaIA = await rutaRopaAdmin(request, env, pathname);
       if (respuestaRopaIA) return respuestaRopaIA;
+      if (request.method === 'POST' && /^\/api\/recortes\/[^/]+\/(aprobar|original|reintentar)$/.test(pathname)
+          && !puedeEditarInventario(await leerUsuario(env, correo))) return json({ error: 'Tu cuenta no tiene permiso para editar el inventario.' }, 403);
       const respuestaRecortes = await rutaRecortesAdmin(request, env, pathname);
       if (respuestaRecortes) return respuestaRecortes;
       const respuestaImagen = await rutaImagenUpc(request, env, pathname, correo, ctx);

@@ -22,6 +22,7 @@ const ficha = crearFicha({ mensaje, confirmar, alAbrir(p) {
       let n = 1; const c = nodo('div'); c.append(stepper(n, v => n = v, { nombre:'Copias' }), boton('Imprimir', async () => { cerrarHoja(); await imprimir(n); }, 'primario')); hoja('Copias', c);
     }));
   }
+  if (dueno || identidad.usuario?.editar_inventario === true) $('acciones-ficha').append(boton(pc() ? 'Foto con celular' : 'Foto nueva', async () => { await (await cargar('capturar')).fotoPieza(p); await ficha.abrir(p.id); }));
   foco();
 } });
 
@@ -94,7 +95,7 @@ async function recibir({ codigo }) {
 escucharLector((lectura) => { void recibir(lectura); }, { caja:$('consulta') });
 $('busqueda').onsubmit = (e) => { e.preventDefault(); void recibir({ codigo:$('consulta').value }); };
 $('mas').onclick = () => buscar(true);
-$('volver').onclick = () => { ficha.cerrar(); piezaActual = null; document.body.classList.remove('con-ficha'); foco(); };
+$('volver').onclick = async () => { if(modo==='revisar') (await cargar('revisar')).cerrar(); ficha.cerrar(); piezaActual = null; document.body.classList.remove('con-ficha'); foco(); };
 $('solo-consulta').onclick = () => hoja('Solo consulta', nodo('p', 'Tu cuenta no puede editar. Pídelo al dueño.'));
 $('camara-etiqueta').onclick = async () => {
   try { await apagarCamaras(); $('visor').hidden = false; const { abrirCamara } = await import('./camara.js'); apagar = await abrirCamara('visor', (codigo) => recibir({ codigo })); }
