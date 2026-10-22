@@ -6,6 +6,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { runInNewContext } from 'node:vm';
 import { tienda, DUENO } from './prueba-d1.ts';
 import { permiso, puede, esDeCaja, type Rol } from './cuentas.ts';
+import * as venta from '../public/venta.js';
 import { textoWhatsApp, telefonoInteresado, codigoDeRespuesta, enlaceApartar, textoSeguimiento, compartirTarjetas, crearTarjeta } from '../public/vender.js';
 
 function pieza(db: DatabaseSync, cambios: Record<string, unknown> = {}) {
@@ -285,7 +286,8 @@ test('pedidos prellena pieza y cliente por URL, escapa texto y nunca manda un an
     document: { getElementById: $, querySelector: () => ({ value: 'tienda', checked: true, addEventListener() {} }), querySelectorAll: () => [] },
     location: { search: `?${params}`, pathname: '/pedidos' }, history: { replaceState: (_a: unknown, _b: unknown, url: string) => { limpia = url; } },
     URLSearchParams, navigator: { onLine: true }, setInterval() {}, localStorage: { getItem: () => null },
-    ANTICIPO_MINIMO: 10000, envioDe: () => 0, codigoDeDigitos: () => null,
+    // Los imports de pedidos.html salen del venta.js real: la regla del anticipo vive ahí (#434).
+    ...venta, codigoDeDigitos: () => null,
     fetch: async (url: string, opciones?: unknown) => {
       llamadas.push(`${opciones ? 'POST' : 'GET'} ${url}`);
       return { ok: true, json: async () => url === '/api/catalogo' ? [{ id: 'p', codigo: 'ED-000123', nombre: 'Blusa <azul>', precio: 20000, stock: 1, propietario: 'dolaron' }]
@@ -296,7 +298,10 @@ test('pedidos prellena pieza y cliente por URL, escapa texto y nunca manda un an
   assert.equal($('telefono').value, '4441234567');
   assert.equal($('codigo').value, '');
   assert.match($('piezas').innerHTML, /Blusa &lt;azul&gt;/);
-  assert.equal($('anticipo').value, '100');
+  // Prellena el mínimo de la regla vigente (sin #434: $100; con #434: 15 % de $200 = $30), nunca lo envía.
+  const reglas = venta as Record<string, any>;
+  const minimo = reglas.anticipoMinimoDe ? reglas.anticipoMinimoDe(20000, 'tienda') : reglas.ANTICIPO_MINIMO;
+  assert.equal($('anticipo').value, String(minimo / 100));
   assert.ok(llamadas.every((r) => r.startsWith('GET')));
   assert.equal(limpia, '/pedidos');
 });
