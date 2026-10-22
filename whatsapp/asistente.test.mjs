@@ -124,7 +124,7 @@ test('si el modelo falla o no hay clave, responde con el FAQ fijo', async () => 
   try {
     const env = entorno({}, { ANTHROPIC_API_KEY: 'clave' });
     await correr(env, [texto('m4', '5214421234567', 'horario')]);
-    assert.match(r.llamadas.meta[0].text.body, /11:00 a 20:00/);
+    assert.match(r.llamadas.meta[0].text.body, /11 a\. m\. a 8 p\. m\./);
   } finally { r.restaurar(); }
   const sinClave = red('no debe usarse');
   try {

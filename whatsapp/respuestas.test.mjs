@@ -5,7 +5,7 @@ import worker from './worker.mjs';
 import { respuestaPara } from './respuestas.mjs';
 
 test('preguntas del FAQ reciben la respuesta aprobada, con o sin acentos', () => {
-  assert.match(respuestaPara('¿A qué hora abren?'), /11:00 a 20:00/);
+  assert.match(respuestaPara('¿A qué hora abren?'), /11 a\. m\. a 8 p\. m\./);
   assert.match(respuestaPara('cual es su telefono'), /444 543 7754/);
   assert.match(respuestaPara('Hacen envíos a domicilio?'), /solo en sucursal/);
   assert.match(respuestaPara('hola buenas tardes'), /gracias por escribir/);
@@ -53,7 +53,7 @@ test('un mensaje de texto recibe una respuesta del FAQ una sola vez', async () =
     assert.match(envio.llamadas[0].url, /\/1433484303171531\/messages$/);
     assert.equal(envio.llamadas[0].opciones.headers.authorization, 'Bearer token');
     assert.equal(envio.llamadas[0].cuerpo.to, '5214421234567');
-    assert.match(envio.llamadas[0].cuerpo.text.body, /11:00 a 20:00/);
+    assert.match(envio.llamadas[0].cuerpo.text.body, /11 a\. m\. a 8 p\. m\./);
   } finally { envio.restaurar(); }
 });
 
