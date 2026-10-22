@@ -242,9 +242,9 @@ condición actuales desde `GET /api/borradores/:id/revision`; PATCH cambia únic
 esos campos, sin reponer stock ni cambiar código. API y controles disponibles en sandbox y producción.
 
 «Eliminar captura» requiere dos toques y conexión. DELETE de esa misma ruta deja
-el UUID con `estado_analisis = descartado`, stock/precio cero y sin foto; retiene el
+el UUID con `estado_analisis = descartado`, stock/precio cero; con código conserva su foto (#439). Retiene el
 UUID para que un POST retrasado no la reviva. No aparece en revisión ni etiquetas.
-El archivo de R2 se borra después de quitar su referencia; análisis y correcciones
+Sin código, el archivo de R2 se borra después de quitar su referencia; análisis y correcciones
 no reabren un descarte. El handler comprueba identidad y ventana de 24 h en las
 mutaciones; rechaza eliminar piezas con venta o publicación. No hay migración nueva.
 
@@ -292,6 +292,23 @@ etiquetas nuevas). La tabla se llena con `tools/importar_manifiesto.py`. Detalle
   Una sola conexión BLE a la vez: con `/etiquetas` conectada en la computadora, el celular no podrá conectar.
 - **Migración.** `migracion-049-etiqueta-impresa.sql`, antes del deploy (sandbox y luego producción). Sin ella,
   `GET /api/borradores` falla.
+
+## Cámara remota: la PC pide la foto y el celular la toma (Issue #444)
+
+Un buzón por persona (`camara_remota`, llave primaria `correo`; PC y celular entran con la misma
+cuenta). La PC crea la solicitud (`PUT /api/camara/solicitud`, UUID propio, reintento idempotente) y el
+celular en `/camara-remota` sondea cada ~2 s solo con la pestaña visible (se apaga tras 60 min sin
+solicitudes; Wake Lock si existe), la toma (`tomar`), sube la foto por el `POST /api/borradores` de
+siempre (`solo_foto` sobre una pieza existente, o alta de pieza nueva) y cierra con `lista`. El
+servidor **no cree** el `lista`: comprueba que la pieza del propietario tiene foto escrita desde que
+se tomó la solicitud. `vencida` se deriva de `vence_en`, sin cron. `PUT` solo existe en el host de
+la PC; `captura.viste.com.mx` solo ve `GET`, `tomar`, `lista` y `cancelar`. `solo_foto` sobre una
+pieza inexistente crearía otra, por eso `PUT` y `tomar` verifican que la pieza exista y no esté
+descartada.
+
+Excepciones aceptadas por Isaac (22/10): la foto remota vive solo en memoria del celular y no pasa
+por `cola-fotos.js` (la cola reprocesaría toda foto como pieza nueva); y repetir sobrescribe la
+foto como «Retomar foto». Requiere red y hardware real (prueba física pendiente).
 
 ## Orden de entrega
 

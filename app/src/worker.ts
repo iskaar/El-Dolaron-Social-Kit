@@ -7,6 +7,7 @@
 
 import { analizarBorrador, identificarUpc, pesosDeLista, modeloPorDefecto, type Modelo } from './analisis.ts';
 import { fichaDeManifiesto, normalizarUpc, precioListaMxn, type FichaManifiesto } from './manifiesto.ts';
+import { decodificarNombre } from './nombre.ts';
 import { codigoLeido, SIN_CODIGO } from '../public/upc.js';
 import { ESTADOS } from '../public/estados.js';
 import { guardarImagenComoFoto, imagenGuardada, procesarRellenoImagenes, rutaImagenUpc, rutaImagenPieza } from './imagenes-upc.ts';
@@ -45,6 +46,8 @@ import { cajeroEnTurno, listarCajeros, entrar, salir, ponerPin } from './cajeros
 import { registrarSocio, buscarSocio, buscarPorCodigo, basesListas, sentenciasDeVenta, saldo } from './dolarones.ts';
 import { registrarCorte, registrarRetiro, ultimoCorte, cajaDe } from './corte.ts';
 import { rutaGastos } from './gastos.ts';
+import { rutaPiezas } from './piezas.ts';
+import { rutaCamaraRemota } from './camara-remota.ts';
 import { rutaNomina } from './nomina.ts';
 import { lineasNetas } from './netas.ts';
 import { portal, llegada, vincular } from './portal.ts';
@@ -97,6 +100,9 @@ const RUTAS_VENDEDOR = new Set(['/captura', '/foto.js', '/tallas.js', '/api/salu
 const CORRECCION_CAPTURA = /^\/api\/borradores\/([^/]+)\/(existencia|talla|revision)$/;
 
 export function permitidaParaVendedor(pathname: string, metodo: string): boolean {
+  if (pathname === '/camara-remota' || pathname === '/camara-remota.js') return metodo === 'GET';
+  if (pathname === '/api/camara/solicitud') return metodo === 'GET';
+  if (/^\/api\/camara\/solicitud\/[^/]+\/(tomar|lista|cancelar)$/.test(pathname)) return metodo === 'POST';
   if (RUTAS_VENDEDOR.has(pathname)) {
     return metodo === 'GET';
   }
@@ -263,9 +269,9 @@ async function crearBorrador(request: Request, env: Env, ctx: ExecutionContext, 
        on conflict (id) do nothing`,
     ).bind(id, nombreRopa(prenda, marca), marca, precioRopa, semanaIngreso(ahora), estadoFisico, cantidad, talla, fotoKey,
       capturadoPor, ahora.toISOString(), ahora.toISOString(), propietario).run();
-    const guardada = await env.DB.prepare('select id, nombre, marca, precio, estado_fisico, estado_analisis, stock, talla from productos where id = ?')
-      .bind(id).first<{ estado_analisis: string; nombre: string; marca: string }>();
-    if (guardada?.estado_analisis === 'descartado') await env.FOTOS.delete(fotoKey);
+    const guardada = await env.DB.prepare('select id, nombre, marca, precio, estado_fisico, estado_analisis, stock, talla, codigo from productos where id = ?')
+      .bind(id).first<{ estado_analisis: string; nombre: string; marca: string; codigo: string | null }>();
+    if (guardada?.estado_analisis === 'descartado' && !guardada.codigo) await env.FOTOS.delete(fotoKey);
     return json(guardada ? { ...guardada, prenda: prendaDeNombre(guardada.nombre, guardada.marca) } : guardada, 201);
   }
   await env.DB.prepare(
@@ -287,9 +293,9 @@ async function crearBorrador(request: Request, env: Env, ctx: ExecutionContext, 
     .run();
   await reiniciarRecorte(env, id);
 
-  const descartada = await env.DB.prepare("select id, estado_analisis, stock from productos where id = ? and estado_analisis = 'descartado'").bind(id).first();
+  const descartada = await env.DB.prepare("select id, estado_analisis, stock, codigo from productos where id = ? and estado_analisis = 'descartado'").bind(id).first<{ codigo: string | null }>();
   if (descartada) {
-    await env.FOTOS.delete(fotoKey);
+    if (!descartada.codigo) await env.FOTOS.delete(fotoKey);
     return json(descartada, 201);
   }
 
@@ -361,7 +367,7 @@ async function corregirBorrador(id: string, cambios: Record<string, unknown>, en
     return json({ error: 'La pieza no existe.' }, 404);
   }
 
-  const nombre = cambios.nombre === undefined ? fila.nombre : String(cambios.nombre).slice(0, 120);
+  const nombre = cambios.nombre === undefined ? fila.nombre : decodificarNombre(String(cambios.nombre)).slice(0, 120);
   const categoria = cambios.categoria === undefined ? fila.categoria : String(cambios.categoria);
   const marca = cambios.marca === undefined ? fila.marca : String(cambios.marca).trim().slice(0, 60);
   const talla = cambios.talla === undefined ? fila.talla : String(cambios.talla).trim() || null;
@@ -588,7 +594,7 @@ async function capturarPorUpc(request: Request, env: Env, correo: string, ctx?: 
   const { ficha, precioLista, precioManual, config } = resultado;
   const estado = cuerpo.estado_fisico ?? 'nuevo';
   if (typeof estado !== 'string' || !ESTADOS_FISICOS.has(estado)) return json({ error: 'Estado físico inválido.' }, 400);
-  const nombre = (ficha.nombre || ficha.descripcion).trim().slice(0, 120), categoria = ficha.categoria || 'otros';
+  const nombre = decodificarNombre(ficha.nombre || ficha.descripcion).trim().slice(0, 120), categoria = ficha.categoria || 'otros';
   const precio = precioManual ?? calcularPrecio({ precioLista, categoria, estadoFisico: estado, config }).precio;
   if (!nombre || !CATEGORIAS.has(categoria) || !Number.isSafeInteger(precio) || precio <= 0 || !Number.isSafeInteger(precioLista) || precioLista < 0) {
     return json({ error: 'El producto necesita nombre, categoría y precio válidos.' }, 400);
@@ -767,13 +773,15 @@ async function revisarCaptura(id: string, request: Request, env: Env, correo: st
   if (!fila) return json({ error: 'Solo puedes corregir lo que capturaste en las últimas 24 horas.' }, 404);
   if (request.method === 'GET') return json({ ...fila, prenda: prendaDeNombre(fila.nombre, fila.marca) });
   if (request.method === 'DELETE') {
-    const resultado = await env.DB.prepare(`update productos set stock = 0, precio = 0, foto_key = '',
+    const resultado = await env.DB.prepare(`update productos set stock = 0, precio = 0,
+        foto_key = case when coalesce(codigo, '') = '' then '' else foto_key end,
         estado_analisis = 'descartado', actualizado_en = ? where ${alcance}
         and not exists (select 1 from venta_lineas where producto_id = productos.id)
         and not exists (select 1 from ml_publicaciones where producto_id = productos.id)`)
       .bind(ahora, id, correo, desde).run();
     if (!resultado.meta.changes) return json({ error: 'Tiene una venta o publicación. Revisa la pieza en el admin; no se eliminó.' }, 409);
-    await env.FOTOS.delete(`fotos/${id}.jpg`);
+    const conservada = await env.DB.prepare('select codigo from productos where id = ?').bind(id).first<{ codigo: string | null }>();
+    if (!conservada?.codigo) await env.FOTOS.delete(`fotos/${id}.jpg`);
     return json({ id, descartado: true });
   }
   if (request.method !== 'PATCH') return json({ error: 'Metodo no permitido.' }, 405);
@@ -930,86 +938,95 @@ async function leerCalibracion(env: Env): Promise<Response> {
   return json(Object.fromEntries(['etiqueta_corrimiento', 'etiqueta_modulo'].filter((clave) => clave in config).map((clave) => [clave, config[clave]])));
 }
 
-/**
- * Dos fotos de la misma pieza. La repetida suma su existencia a la que ya estaba
- * y desaparece; la original se queda con su codigo de barras, porque la etiqueta
- * que ya salio impresa sigue pegada en el anaquel.
- */
-async function fusionarBorrador(id: string, request: Request, env: Env): Promise<Response> {
+/** Mismas restricciones de venta, pedido y publicación, comprobadas dentro del batch. */
+const BORRADOR_RETIRABLE = `sin_inventario = 0
+  and not exists (select 1 from venta_lineas where producto_id = productos.id)
+  and not exists (select 1 from pedido_lineas where producto_id = productos.id)
+  and not exists (select 1 from ml_publicaciones where producto_id = productos.id
+    and estado not in ('cerrada', 'vendida') and (ml_item_id is not null
+      or (estado = 'publicando' and actualizado_en >= strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-2 minutes'))))`;
+
+/** Suma la repetida una sola vez y mantiene su etiqueta vendible en la original. */
+async function fusionarBorrador(id: string, request: Request, env: Env, propietario: string): Promise<Response> {
   const { destino_id } = (await request.json()) as { destino_id?: unknown };
   const destinoId = String(destino_id ?? '');
   if (!UUID.test(id) || !UUID.test(destinoId) || id === destinoId) {
     return json({ error: 'Identificador invalido.' }, 400);
   }
-
-  const repetida = await env.DB.prepare('select stock, codigo from productos where id = ?')
-    .bind(id)
-    .first<{ stock: number; codigo: string | null }>();
-  const original = await env.DB.prepare('select stock, codigo from productos where id = ?')
-    .bind(destinoId)
-    .first<{ stock: number; codigo: string | null }>();
-  if (!repetida || !original) {
-    return json({ error: 'La pieza no existe.' }, 404);
-  }
-  // Mas de 999 no cabe en una pieza: el admin ya no podria guardarla (corregirBorrador).
-  if (original.stock + repetida.stock > 999) {
+  const piezas = await env.DB.prepare(`select id, codigo, stock, estado_analisis from productos
+    where id in (?, ?) and propietario = ?`).bind(id, destinoId, propietario)
+    .all<{ id: string; codigo: string | null; stock: number; estado_analisis: string }>();
+  if (piezas.results.length !== 2) return json({ error: 'Pieza no encontrada.' }, 404);
+  const dosEtiquetas = 'Las dos piezas ya tienen etiqueta: son piezas distintas. Corrige la existencia de cada una o descarta la que no exista.';
+  if (piezas.results.every((p) => p.codigo)) return json({ error: dosEtiquetas }, 409);
+  const codigo = piezas.results.find((p) => p.id === id)!.codigo || '';
+  if (piezas.results.some((p) => p.estado_analisis === 'descartado')) return json({ error: 'La pieza ya fue descartada.' }, 409);
+  if (piezas.results.reduce((n, p) => n + p.stock, 0) > 999) {
     return json({ error: 'Con esa suma pasa de 999 piezas en existencia.' }, 409);
   }
+  if (await publicacionViva(env, id)) return json({ error: 'Tiene publicación en Mercado Libre: ciérrala primero.' }, 409);
+  if (await enPedido(env, id)) return json({ error: 'Está en un pedido: no se puede borrar.' }, 409);
 
-  if (await publicacionViva(env, id)) {
-    return json({ error: 'Tiene publicación en Mercado Libre: ciérrala primero.' }, 409);
-  }
-  if (await enPedido(env, id)) {
-    return json({ error: 'Está en un pedido: no se puede borrar.' }, 409);
-  }
-
-  // La suma sale de la fila de la repetida DENTRO del batch, no de lo leido arriba: dos
-  // fusiones en paralelo leen lo mismo, pero solo la que borra la repetida la consume.
-  // `ahora` marca la suma aplicada; el borrado y el codigo dependen de esa marca.
-  // Si la original no tiene etiqueta, hereda la de la repetida (la que ya esta pegada):
-  // sin eso la etiqueta impresa apunta a una pieza borrada y la caja no la encuentra.
-  // El codigo va despues del borrado: es unico y no puede existir dos veces a la vez.
   const ahora = new Date().toISOString();
-  const [, borrado] = await env.DB.batch([
-    env.DB.prepare(
-      `update productos set stock = stock + (select stock from productos where id = ?1), actualizado_en = ?3
-       where id = ?2 and exists (select 1 from productos where id = ?1)
-         and stock + (select stock from productos where id = ?1) <= 999`,
-    ).bind(id, destinoId, ahora),
-    env.DB.prepare(
-      'delete from productos where id = ? and exists (select 1 from productos where id = ? and actualizado_en = ?)',
-    ).bind(id, destinoId, ahora),
-    env.DB.prepare(
-      `update productos set codigo = ? where id = ? and actualizado_en = ? and (codigo is null or codigo = '')`,
-    ).bind(repetida.codigo ?? null, destinoId, ahora),
-  ]);
-  if (!borrado.meta.changes) {
-    // Otra fusion ya consumio la repetida (404) o la suma ya no cabe (409).
-    const sigue = await env.DB.prepare('select 1 as x from productos where id = ?').bind(id).first();
-    return sigue
-      ? json({ error: 'Con esa suma pasa de 999 piezas en existencia.' }, 409)
-      : json({ error: 'La pieza no existe.' }, 404);
+  let borrado: D1Result;
+  try {
+    // Cero filas no aborta D1: cualquier precondición falsa fuerza el trigger stock_no_negativo.
+    const resultados = await env.DB.batch([
+      env.DB.prepare(`update productos set stock = case when
+        exists (select 1 from productos where id = ?1 and propietario = ?3
+          and coalesce(codigo, '') = ?4 and estado_analisis <> 'descartado' and ${BORRADOR_RETIRABLE})
+        and exists (select 1 from productos where id = ?2 and propietario = ?3
+          and estado_analisis <> 'descartado' and sin_inventario = 0
+          and (?4 = '' or coalesce(codigo, '') = '')
+          and stock + (select stock from productos where id = ?1) <= 999)
+        then stock else -1 end where id in (?1, ?2)`).bind(id, destinoId, propietario, codigo),
+      env.DB.prepare(`update productos set stock = stock + (select stock from productos where id = ?),
+        actualizado_en = ? where id = ?`).bind(id, ahora, destinoId),
+      // Liberar primero el código único: la etiqueta pegada debe resolver a la original vendible.
+      env.DB.prepare('update productos set codigo = null where id = ? and codigo = ?').bind(id, codigo),
+      env.DB.prepare(`update productos set codigo = ? where id = ?
+        and (codigo is null or codigo = '') and ? <> ''`).bind(codigo, destinoId, codigo),
+      env.DB.prepare("delete from productos where id = ? and (codigo is null or codigo = '')").bind(id),
+    ]);
+    borrado = resultados[4];
+  } catch (error) {
+    if (!String(error).includes('stock insuficiente')) throw error;
+    const { results } = await env.DB.prepare('select id, codigo from productos where id in (?, ?) and propietario = ?')
+      .bind(id, destinoId, propietario).all<{ id: string; codigo: string | null }>();
+    return results.length !== 2 ? json({ error: 'Pieza no encontrada.' }, 404)
+      : results.every((p) => p.codigo) ? json({ error: dosEtiquetas }, 409)
+      : json({ error: 'La pieza cambió, fue descartada o tiene venta, pedido o publicación. Revisa y vuelve a intentar.' }, 409);
   }
-  await env.FOTOS.delete(`fotos/${id}.jpg`);
-
+  if (borrado.meta.changes) await env.FOTOS.delete(`fotos/${id}.jpg`);
   const final = await env.DB.prepare('select stock from productos where id = ?').bind(destinoId).first<{ stock: number }>();
-  return json({ id, destino_id: destinoId, stock: final?.stock ?? original.stock + repetida.stock });
+  if (!final) return json({ error: 'Pieza no encontrada.' }, 404);
+  return json({ id, destino_id: destinoId, stock: final.stock });
 }
 
-async function descartarBorrador(id: string, env: Env): Promise<Response> {
-  if (!UUID.test(id)) {
-    return json({ error: 'Identificador invalido.' }, 400);
+async function descartarBorrador(id: string, env: Env, propietario: string): Promise<Response> {
+  if (!UUID.test(id)) return json({ error: 'Identificador invalido.' }, 400);
+  const fila = await env.DB.prepare('select propietario, estado_analisis from productos where id = ?')
+    .bind(id).first<{ propietario: string; estado_analisis: string }>();
+  if (fila && fila.propietario !== propietario) return json({ error: 'Pieza no encontrada.' }, 404);
+  if (!fila || fila.estado_analisis === 'descartado') return json({ id, descartado: true });
+  if (await publicacionViva(env, id)) return json({ error: 'Tiene publicación en Mercado Libre: ciérrala primero.' }, 409);
+  if (await enPedido(env, id)) return json({ error: 'Está en un pedido: no se puede borrar.' }, 409);
+  let borrado: D1Result;
+  try {
+    const resultados = await env.DB.batch([
+      env.DB.prepare(`update productos set stock = case when propietario = ? and ${BORRADOR_RETIRABLE}
+        then stock else -1 end where id = ?`).bind(propietario, id),
+      env.DB.prepare(`update productos set stock = 0, estado_analisis = 'descartado', actualizado_en = ?
+        where id = ? and codigo is not null and codigo <> ''`).bind(new Date().toISOString(), id),
+      env.DB.prepare(`delete from productos where id = ? and (codigo is null or codigo = '')
+        and estado_analisis <> 'descartado'`).bind(id),
+    ]);
+    borrado = resultados[2];
+  } catch (error) {
+    if (!String(error).includes('stock insuficiente')) throw error;
+    return json({ error: 'La pieza cambió o tiene venta, pedido o publicación. Revisa y vuelve a intentar.' }, 409);
   }
-  const descartada = await env.DB.prepare("select id from productos where id = ? and estado_analisis = 'descartado'").bind(id).first();
-  if (descartada) return json({ id, descartado: true });
-  if (await publicacionViva(env, id)) {
-    return json({ error: 'Tiene publicación en Mercado Libre: ciérrala primero.' }, 409);
-  }
-  if (await enPedido(env, id)) {
-    return json({ error: 'Está en un pedido: no se puede borrar.' }, 409);
-  }
-  await env.FOTOS.delete(`fotos/${id}.jpg`);
-  await env.DB.prepare('delete from productos where id = ?').bind(id).run();
+  if (borrado.meta.changes) await env.FOTOS.delete(`fotos/${id}.jpg`);
   return json({ id, descartado: true });
 }
 
@@ -1129,14 +1146,14 @@ async function catalogo(env: Env, url: URL): Promise<Response> {
     if (!Number.isFinite(Date.parse(desde))) return json({ error: 'Fecha invalida.' }, 400);
     const ahora = new Date().toISOString();
     const { results } = await env.DB.prepare(
-      `select id, codigo, nombre, precio, sin_inventario, stock, propietario
+      `select id, codigo, nombre, case when estado_analisis = 'descartado' then 0 else precio end as precio, sin_inventario, stock, propietario
        from productos where actualizado_en > ? and codigo is not null and codigo <> ''`,
     ).bind(new Date(desde).toISOString()).all();
     return json({ ahora, piezas: results });
   }
   const { results } = await env.DB.prepare(
     `select id, codigo, nombre, precio, sin_inventario, stock, propietario
-     from productos where codigo is not null and codigo <> '' and precio > 0
+     from productos where codigo is not null and codigo <> '' and precio > 0 and estado_analisis <> 'descartado'
      order by nombre`,
   ).all();
   return json(results);
@@ -2163,8 +2180,8 @@ export default {
         return json({ error: 'Sin sesion. Vuelve a entrar.' }, 401);
       }
       let correo = acceso;
+      const usuario = regla !== 'cuenta' ? await leerUsuario(env, acceso) : null;
       if (regla !== 'cuenta') {
-        const usuario = await leerUsuario(env, acceso);
         if (!puede(usuario, regla)) {
           // Una pantalla lleva a donde se pide acceso; una llamada de la API
           // recibe el error tal cual.
@@ -2186,6 +2203,13 @@ export default {
 
       if (pathname === '/api/yo') {
         return await yo(env, correo, soloComputadora(await leerUsuario(env, correo)) ? await cajeroEnTurno(request, env) : null);
+      }
+      if (pathname === '/api/camara/solicitud' || pathname.startsWith('/api/camara/solicitud/')) {
+        return await rutaCamaraRemota(request, env, pathname, usuario!);
+      }
+      if (pathname === '/api/piezas' || pathname.startsWith('/api/piezas/')) {
+        const respuesta = await rutaPiezas(request, env, url, await leerUsuario(env, correo), ctx);
+        if (respuesta) return respuesta;
       }
       const respuestaRopaIA = await rutaRopaAdmin(request, env, pathname);
       if (respuestaRopaIA) return respuestaRopaIA;
@@ -2432,7 +2456,7 @@ export default {
           return await corregirBorrador(pieza[1], await request.json(), env, esDueno);
         }
         if (request.method === 'DELETE') {
-          return await descartarBorrador(pieza[1], env);
+          return await descartarBorrador(pieza[1], env, propietarioDe(await leerUsuario(env, correo)));
         }
         return json({ error: 'Metodo no permitido.' }, 405);
       }
@@ -2444,7 +2468,7 @@ export default {
       }
 
       if (fusion && request.method === 'POST') {
-        return await fusionarBorrador(fusion[1], request, env);
+        return await fusionarBorrador(fusion[1], request, env, propietarioDe(await leerUsuario(env, correo)));
       }
 
       // Reintento manual, y la via para la prueba comparativa: ?modelo=gemini

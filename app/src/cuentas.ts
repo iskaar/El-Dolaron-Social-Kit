@@ -27,6 +27,7 @@ export interface Usuario {
   roles: Rol[];
   activo: boolean;
   caja: string;   // la caja del cajero (Issue #105); '' = la de la computadora
+  editar_inventario: boolean;
 }
 
 interface FilaUsuario {
@@ -35,6 +36,7 @@ interface FilaUsuario {
   roles: string;
   activo: number;
   caja: string;
+  editar_inventario: number;
 }
 
 /** Las cajas que se pueden asignar; las mismas que ofrece /caja. */
@@ -63,10 +65,12 @@ const PANTALLAS: Record<string, Rol[]> = {
   '/': TODOS,
   '/index': TODOS,
   '/captura': CAPTURA_FEP,
+  '/camara-remota': CAPTURA,
   '/escanear': CAPTURA,
   '/admin': CAPTURA,
   '/marketplace': CAPTURA,
   '/etiquetas': CAPTURA_FEP,
+  '/pieza': CAPTURA_FEP,
   '/bandas': CAPTURA,
   '/calibrar-etiqueta': CAPTURA,
   '/prueba-codigo': CAPTURA,
@@ -101,6 +105,9 @@ export function permiso(pathname: string, metodo: string): Regla {
 
   if (ruta in PANTALLAS) return PANTALLAS[ruta];
 
+  if ((ruta === '/api/camara/solicitud' && ['GET', 'PUT'].includes(metodo))
+      || (metodo === 'POST' && /^\/api\/camara\/solicitud\/[^/]+\/(tomar|lista|cancelar)$/.test(ruta))) return CAPTURA;
+
   if (ruta === '/api/mensajes' || ruta === '/api/mensajes/responder') return DUENO;
   if (ruta === '/api/gastos' || /^\/api\/gastos\/[^/]+$/.test(ruta)) return AUXILIAR;
   if (ruta === '/api/nomina/entrada' || ruta === '/api/nomina/checador') return CAJA;
@@ -122,6 +129,8 @@ export function permiso(pathname: string, metodo: string): Regla {
   if (ruta === '/api/etiquetas' || ruta === '/api/etiquetas/enviadas') return CAPTURA_FEP;   // el registro de enviadas, #440
   // Leer la calibracion lo hacen tambien FEP (/etiquetas) y el celular; cambiarla, solo quien captura.
   if (ruta === '/api/calibracion') return metodo === 'GET' ? CAPTURA_FEP : CAPTURA;
+  if (metodo === 'GET' && (ruta === '/api/piezas' || /^\/api\/piezas\/[^/]+$/.test(ruta))) return CAPTURA_FEP;
+  if (metodo === 'POST' && /^\/api\/piezas\/[^/]+\/existencia$/.test(ruta)) return CAPTURA_FEP;
   if (ruta === '/api/marketplace' || /^\/api\/marketplace\/foto\/[^/]+$/.test(ruta)) return CAPTURA;
   if (ruta === '/api/catalogo') return CAJA;
   if (ruta === '/api/socios') return CAJA;
@@ -169,6 +178,12 @@ export function puede(usuario: Usuario | null, regla: Regla): boolean {
   if (!usuario?.activo) return false;
   return usuario.roles.includes('dueno') || regla.some((rol) => usuario.roles.includes(rol));
 }
+
+/** #441: el rol habilita la ruta; la casilla autoriza cada escritura de inventario. */
+export const puedeEditarInventario = (usuario: Usuario | null): boolean => !!usuario?.activo && (
+  usuario.roles.includes('dueno') || (usuario.editar_inventario === true
+    && usuario.roles.some((rol) => rol === 'capturista' || rol === 'finanzas'))
+);
 
 /* ---------- quien es ---------- */
 
@@ -266,11 +281,12 @@ export const leerRoles = (texto: string): Rol[] =>
   texto.split(',').map((r) => r.trim()).filter((r): r is Rol => (ROLES as string[]).includes(r));
 
 export async function leerUsuario(env: Env, correo: string): Promise<Usuario | null> {
-  const fila = await env.DB.prepare('select correo, nombre, roles, activo, caja from usuarios where correo = ?')
+  const fila = await env.DB.prepare('select correo, nombre, roles, activo, caja, editar_inventario from usuarios where correo = ?')
     .bind(correo)
     .first<FilaUsuario>();
   return fila
-    ? { correo: fila.correo, nombre: fila.nombre, roles: leerRoles(fila.roles), activo: fila.activo === 1, caja: fila.caja }
+    ? { correo: fila.correo, nombre: fila.nombre, roles: leerRoles(fila.roles), activo: fila.activo === 1, caja: fila.caja,
+      editar_inventario: fila.editar_inventario === 1 }
     : null;
 }
 
@@ -330,14 +346,15 @@ export async function pedirAcceso(request: Request, env: Env, correo: string, ct
 /** Para /cuentas: todos los usuarios y lo que esta esperando respuesta. */
 export async function listarCuentas(env: Env): Promise<Response> {
   const { results: filas } = await env.DB.prepare(
-    `select correo, nombre, roles, activo, caja, pin_hash != '' as tiene_pin, creado_en from usuarios
+    `select correo, nombre, roles, activo, caja, editar_inventario, pin_hash != '' as tiene_pin, creado_en from usuarios
      order by activo desc, nombre`,
   ).all<FilaUsuario & { creado_en: string; tiene_pin: number }>();
   const { results: solicitudes } = await env.DB.prepare(
     `select id, tipo, correo, nombre, justificacion, datos, creado_en from solicitudes
      where estado = 'pendiente' order by creado_en`,
   ).all();
-  const usuarios = filas.map((f) => ({ ...f, roles: leerRoles(f.roles), activo: f.activo === 1, tiene_pin: f.tiene_pin === 1 }));
+  const usuarios = filas.map((f) => ({ ...f, roles: leerRoles(f.roles), activo: f.activo === 1,
+    editar_inventario: f.editar_inventario === 1, tiene_pin: f.tiene_pin === 1 }));
   return json({ usuarios, solicitudes, roles: ROLES, cajas: CAJAS });
 }
 
@@ -368,6 +385,9 @@ export async function guardarCuenta(request: Request, env: Env): Promise<Respons
   const activo = cuerpo.activo !== false;
   // Sin `caja` en el cuerpo (el alta, o una version vieja de /cuentas) no se toca la que tenga.
   const caja = cuerpo.caja === undefined ? null : String(cuerpo.caja);
+  if (cuerpo.editar_inventario !== undefined && typeof cuerpo.editar_inventario !== 'boolean')
+    return json({ error: 'Permiso de inventario inválido.' }, 400);
+  const editar = cuerpo.editar_inventario === undefined ? null : cuerpo.editar_inventario ? 1 : 0;
   if (caja !== null && caja !== '' && !CAJAS.includes(caja)) return json({ error: 'Caja invalida.' }, 400);
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(correo)) return json({ error: 'Correo invalido.' }, 400);
   if (!roles) return json({ error: 'Escoge al menos un rol.' }, 400);
@@ -376,16 +396,17 @@ export async function guardarCuenta(request: Request, env: Env): Promise<Respons
   const cobra = activo && (roles.includes('cajero') || roles.includes('dueno'));
   const fallo = await env.DB.batch([
     env.DB.prepare(
-      `insert into usuarios (correo, nombre, roles, activo, caja, creado_en, actualizado_en)
-       values (?, ?, ?, ?, coalesce(?, ''), ?, ?)
+      `insert into usuarios (correo, nombre, roles, activo, caja, editar_inventario, creado_en, actualizado_en)
+       values (?, ?, ?, ?, coalesce(?, ''), coalesce(?, 0), ?, ?)
        on conflict (correo) do update set nombre = excluded.nombre, roles = excluded.roles,
-         activo = excluded.activo, caja = coalesce(?, usuarios.caja), actualizado_en = excluded.actualizado_en`,
-    ).bind(correo, nombre, roles.join(','), activo ? 1 : 0, caja, ahora, ahora, caja),
+         activo = excluded.activo, caja = coalesce(?, usuarios.caja),
+         editar_inventario = coalesce(?, usuarios.editar_inventario), actualizado_en = excluded.actualizado_en`,
+    ).bind(correo, nombre, roles.join(','), activo ? 1 : 0, caja, editar, ahora, ahora, caja, editar),
     ...(cobra ? [] : [env.DB.prepare('delete from sesiones_cajero where correo = ?').bind(correo)]),
   ]).then(() => null, sinDueno);
   if (fallo) return fallo;
   const guardado = await leerUsuario(env, correo);
-  return json({ correo, nombre, roles, activo, caja: guardado?.caja ?? '' });
+  return json({ correo, nombre, roles, activo, caja: guardado?.caja ?? '', editar_inventario: guardado?.editar_inventario ?? false });
 }
 
 /** Aprobar o rechazar una solicitud: de acceso (Issue #75), de cancelacion (Issue #200) o de descuento (Issue #119). */

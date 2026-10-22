@@ -39,6 +39,8 @@
   .retomar { display: block; margin-top: 6px; text-align: center; font-size: 13px; font-weight: 600;
     color: var(--azul); border: 1px solid var(--linea); border-radius: 8px; padding: 7px; cursor: pointer; }
   .retomar:hover { background: #eef1f6; }
+  button.retomar { display: block; width: 100%; background: #fff; }
+  .celular { font-size: 13px; margin-top: 6px; }
   .campos { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 10px; }
   .acciones { display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap; align-items: center; }
   .etiqueta { font-size: 12px; padding: 3px 8px; border-radius: 999px; background: #eef1f6; }
@@ -53,6 +55,7 @@
 <body>
 <header>
   <h1>Cola de revisión</h1>
+  <a href="/pieza">Buscar pieza →</a>
   <a href="/captura">Ir a capturar →</a>
   <a href="/bandas">Imprimir bandas →</a>
   <a href="/conteo">Conteo de alto valor →</a>
@@ -132,6 +135,7 @@
 
 <script type="module">
 import { reducirArchivo } from '/foto.js';
+import { pedirFoto } from '/camara-pc.js';
 import { copiarParaMarketplace } from '/compartir.js';
 import { agruparSesiones } from '/sesiones.js';
 import { enlacePreciosML } from '/precios-ml.js';
@@ -220,6 +224,8 @@ function ficha(p) {
         Retomar foto
         <input type="file" accept="image/*" capture="environment" hidden>
       </label>
+      <button type="button" class="claro retomar" data-celular>Pedir foto al celular</button>
+      <div class="celular" aria-live="polite"></div>
       ${p.foto_key === '' && p.propietario === 'dolaron' ? '<button type="button" class="claro" data-accion="buscar-imagen">Buscar imagen</button>' : ''}
     </div>
     <div>
@@ -250,10 +256,11 @@ function ficha(p) {
         <button type="button" class="claro" data-accion="reanalizar">Reintentar análisis</button>
         <button type="button" class="claro" data-accion="compartir"
           title="Copia precio, nombre y foto; pégalos con Win+V">Compartir</button>
-        ${repetida ? `<button type="button" class="claro" data-accion="fusionar"
-          title="Suma esta foto a la pieza que ya existe y borra la repetida">
+        ${repetida && !(p.codigo && repetida.codigo) ? `<button type="button" class="claro" data-accion="fusionar"
+          title="Suma la existencia y conserva la etiqueta existente en la original; elimina la captura repetida y su foto">
           Ya existe · sumar a ${repetida.stock ?? 1} pz</button>` : ''}
-        <button type="button" class="peligro" data-accion="descartar">Descartar</button>
+        <button type="button" class="peligro" data-accion="descartar"
+          title="Con código: conserva la pieza y su foto, deja existencia 0 e invalida su etiqueta">Descartar</button>
         <span class="etiqueta ${estado}">${estado} · ${p.semana_ingreso}</span>
         <span class="aviso"></span>
       </div>
@@ -289,6 +296,27 @@ function ficha(p) {
   // Usado por "Guardar todo": misma sentencia que el boton Guardar de esta ficha.
   nodo.guardarFicha = () => enviar({ ...base(), precio: centavos(valor('precio')), destino: valor('destino') });
 
+  // Compartido por Retomar foto y Pedir foto al celular: la foto ya esta en R2 con la misma llave.
+  function fotoReemplazada() {
+    nodo.querySelector('img').src = `/api/foto/${p.id}?v=${Date.now()}`;  // la foto vieja esta en cache
+    p.foto_key = `fotos/${p.id}.jpg`;
+    nodo.querySelector('[data-accion="buscar-imagen"]')?.remove();
+    nodo.querySelector('.candidatas').replaceChildren();
+    aviso.textContent = 'Foto reemplazada. Si cambia el nombre o el precio, usa Reintentar análisis.';
+  }
+
+  // Pedir foto al celular (#444): el celular sube por el mismo POST /api/borradores (solo_foto).
+  // Repetir = volver a pulsar: sobrescribe como Retomar foto.
+  const botonCelular = nodo.querySelector('[data-celular]');
+  botonCelular.addEventListener('click', async () => {
+    botonCelular.disabled = true;
+    aviso.textContent = '';
+    try {
+      const r = await pedirFoto({ tipo: 'foto_pieza', pieza_id: p.id, contenedor: nodo.querySelector('.celular') });
+      if (r.estado === 'lista') fotoReemplazada();
+    } finally { botonCelular.disabled = false; }
+  });
+
   // Retomar foto: mismo id, asi que reemplaza la foto en R2 sin duplicar la pieza.
   // `solo_foto`: no toca existencia, talla ni lo que ya corregiste, y no vuelve a
   // analizar; si la foto nueva cambia el nombre o el precio, usa "Reintentar análisis".
@@ -308,11 +336,7 @@ function ficha(p) {
         aviso.textContent = (await respuesta.json()).error ?? 'No se pudo subir la foto.';
         return;
       }
-      nodo.querySelector('img').src = `/api/foto/${p.id}?v=${Date.now()}`;  // la foto vieja esta en cache
-      p.foto_key = `fotos/${p.id}.jpg`;
-      nodo.querySelector('[data-accion="buscar-imagen"]')?.remove();
-      nodo.querySelector('.candidatas').replaceChildren();
-      aviso.textContent = 'Foto reemplazada. Si cambia el nombre o el precio, usa Reintentar análisis.';
+      fotoReemplazada();
     } catch {
       aviso.textContent = 'No se pudo leer la imagen.';
     } finally {
@@ -351,8 +375,9 @@ function ficha(p) {
         body: JSON.stringify({ destino_id: repetida.id }),
       });
       const datos = await respuesta.json();
-      if (!respuesta.ok) { aviso.textContent = datos.error; evento.target.disabled = false; return; }
+      if (!respuesta.ok) { aviso.textContent = datos.error; aviso.style.color = ''; evento.target.disabled = false; return; }
       repetida.stock = datos.stock;   // la siguiente repetida ya ve el total nuevo
+      repetida.codigo ||= p.codigo;
       nodo.remove();
     } else if (accion === 'precios-ml') {
       const enlace = enlacePreciosML(valor('nombre'), valor('marca'));

@@ -4,6 +4,7 @@
  * busca y, la primera vez que se escanea un UPC, se traduce su nombre.
  */
 import { conClaude } from './analisis.ts';
+import { decodificarNombre } from './nombre.ts';
 import { CATEGORIAS, CLAVES_CATEGORIA } from '../public/categorias.js';
 export { normalizarUpc } from '../public/upc.js';
 
@@ -61,7 +62,7 @@ export async function fichaDeManifiesto(upc: string, env: Env, traducir: Traduct
   try {
     const crudo = (await traducir([], env, INSTRUCCION, ESQUEMA,
       `${ficha.descripcion}\nDepartamento: ${ficha.departamento || 'sin dato'}`)) as Partial<FichaManifiesto>;
-    const nombre = String(crudo.nombre ?? '').trim().slice(0, 120);
+    const nombre = decodificarNombre(String(crudo.nombre ?? '')).trim().slice(0, 120);
     if (!nombre) return ficha;
     const marca = String(crudo.marca ?? '').trim().slice(0, 60);
     const categoria = CLAVES_CATEGORIA.includes(String(crudo.categoria)) ? String(crudo.categoria) : 'otros';
