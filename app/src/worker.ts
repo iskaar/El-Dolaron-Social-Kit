@@ -91,7 +91,9 @@ interface FilaBorrador {
  */
 const RUTAS_VENDEDOR = new Set(['/captura', '/foto.js', '/tallas.js', '/api/salud', '/sin-acceso', '/api/yo',
   // Escanear del manifiesto (Issue #365): el telefono ve nombre y precio de lo que escanea, nada mas.
-  '/escanear', '/categorias.js', '/upc.js', '/cola-fotos.js', '/estados.js']);
+  '/escanear', '/categorias.js', '/upc.js', '/cola-fotos.js', '/estados.js',
+  // Imprimir la etiqueta desde el celular (Issue #440): solo codigo; el permiso se cobra en la API.
+  '/imprimir-celular.js', '/etiquetera.js', '/impresora.js', '/code128.js']);
 const CORRECCION_CAPTURA = /^\/api\/borradores\/([^/]+)\/(existencia|talla|revision)$/;
 
 export function permitidaParaVendedor(pathname: string, metodo: string): boolean {
@@ -114,6 +116,10 @@ export function permitidaParaVendedor(pathname: string, metodo: string): boolean
   if (/^\/api\/manifiesto\/[^/]+\/imagen\/catalogo$/.test(pathname)) return metodo === 'GET';
   // UPC desconocido (#373): buscarlo y ver cómo va.
   if (pathname === '/api/borradores/upc/manual') return ['POST', 'PATCH'].includes(metodo);
+  // Etiqueta desde el celular (#440): la calibracion se lee pero no se cambia aqui, se asigna el
+  // codigo y se registra lo enviado. Soltar una marca (DELETE) y todo lo demas es de la computadora.
+  if (pathname === '/api/calibracion') return metodo === 'GET';
+  if (pathname === '/api/etiquetas' || pathname === '/api/etiquetas/enviadas') return metodo === 'POST';
   if (/^\/api\/borradores\/upc\/[^/]+$/.test(pathname)) return pathname.endsWith('/buscar') ? metodo === 'POST' : metodo === 'GET';
   return (pathname === '/api/borradores' || pathname === '/api/borradores/upc') && metodo === 'POST';
 }
@@ -311,12 +317,15 @@ async function listarBorradores(url: URL, env: Env, propietario: string): Promis
   // vuelve un rompecabezas saber que etiqueta es de que pieza.
   // Las 2000 mas nuevas, en orden de captura (#417): con `asc limit` se quedaban fuera las recien capturadas.
   // Empates de hora: la fila (rowid) desempata igual que antes.
+  // etiqueta_*: lo que dice la etiqueta ya enviada, desde la PC o el celular (#440); null si no ha salido.
   const consulta = `select id, codigo, nombre, categoria, marca, talla, precio_lista, precio, estado_fisico,
-                           estado_analisis, destino, stock, semana_ingreso, capturado_por, creado_en, upc, foto_key, propietario
-                    from productos where rowid in (select rowid from productos
+                           estado_analisis, destino, stock, semana_ingreso, capturado_por, creado_en, upc, foto_key, propietario,
+                           etiqueta_en, etiqueta_precio, etiqueta_precio_lista, etiqueta_nombre, etiqueta_talla
+                    from productos left join etiquetas_enviadas on producto_id = productos.id
+                    where productos.rowid in (select rowid from productos
                     where sin_inventario = 0 and propietario = ? ${cambios ? 'and actualizado_en > ?' : "and estado_analisis <> 'descartado'"}
                       ${estado ? 'and estado_analisis = ?' : ''} ${desde ? 'and creado_en >= ?' : ''}
-                    order by creado_en desc, rowid desc limit 2000) order by creado_en asc, rowid asc`;
+                    order by creado_en desc, rowid desc limit 2000) order by creado_en asc, productos.rowid asc`;
   const filtros = [propietario, ...(cambios ? [cambios] : []), ...(estado ? [estado] : []), ...(desde ? [desde] : [])];
   const sentencia = env.DB.prepare(consulta).bind(...filtros);
   const { results } = await sentencia.all<FilaBorrador>();
@@ -806,11 +815,29 @@ const CODIGO_NUEVO = `'ED-' || printf('%06d', max(rowid,
   (select coalesce(max(cast(substr(codigo, 4) as integer)), 0) + 1 from productos where codigo like 'ED-%')))`;
 
 /**
+ * Desde el celular (host del vendedor) solo se etiqueta lo que esa persona capturo en las
+ * ultimas 24 h, como la correccion de captura: el telefono del pasillo no abre el inventario.
+ * La computadora (`celular` null) no tiene ese limite.
+ */
+const delCelular = (celular: string | null) => ({
+  sql: celular ? ' and capturado_por = ? and creado_en >= ?' : '',
+  args: celular ? [celular, new Date(Date.now() - VENTANA_CAPTURA_MS).toISOString()] : [],
+});
+
+/** Los ids de un cuerpo `{ ids }`: de 1 a 100 UUID validos, o null. */
+function idsDeEtiquetas(cuerpo: { ids?: unknown } | null): string[] | null {
+  const ids = cuerpo?.ids;
+  if (!Array.isArray(ids) || ids.length === 0 || ids.length > 100) return null;
+  const limpios = [...new Set(ids.map(String))].filter((id) => UUID.test(id));
+  return limpios.length > 0 ? limpios : null;
+}
+
+/**
  * Asigna el codigo de barras a las piezas que se van a etiquetar y las devuelve.
  * El codigo se mina una sola vez: una pieza que ya trae etiqueta impresa conserva
  * el suyo, porque reimprimir con otro codigo deja el papel del anaquel huerfano.
  */
-async function prepararEtiquetas(request: Request, env: Env, propietario: string): Promise<Response> {
+async function prepararEtiquetas(request: Request, env: Env, propietario: string, celular: string | null = null): Promise<Response> {
   const { ids } = (await request.json()) as { ids?: unknown };
   if (!Array.isArray(ids) || ids.length === 0 || ids.length > 100) {
     return json({ error: 'Selecciona entre 1 y 100 piezas.' }, 400);
@@ -821,11 +848,12 @@ async function prepararEtiquetas(request: Request, env: Env, propietario: string
   }
 
   const huecos = limpios.map(() => '?').join(',');
+  const alcance = delCelular(celular);
   // Una por una y en orden de captura: cada codigo nuevo ve el anterior (CODIGO_NUEVO).
   const { results: porCodificar } = await env.DB.prepare(
-    `select id from productos where id in (${huecos}) and propietario = ? and estado_analisis <> 'descartado' and (codigo is null or codigo = '') order by rowid`,
+    `select id from productos where id in (${huecos}) and propietario = ? and estado_analisis <> 'descartado' and (codigo is null or codigo = '')${alcance.sql} order by rowid`,
   )
-    .bind(...limpios, propietario)
+    .bind(...limpios, propietario, ...alcance.args)
     .all<{ id: string }>();
   const ahora = new Date().toISOString();
   if (porCodificar.length) {
@@ -837,12 +865,69 @@ async function prepararEtiquetas(request: Request, env: Env, propietario: string
 
   const { results } = await env.DB.prepare(
     `select id, codigo, nombre, talla, precio, precio_lista, semana_ingreso, destino, stock
-     from productos where id in (${huecos}) and propietario = ? and estado_analisis <> 'descartado' order by rowid`,
+     from productos where id in (${huecos}) and propietario = ? and estado_analisis <> 'descartado'${alcance.sql} order by rowid`,
   )
-    .bind(...limpios, propietario)
+    .bind(...limpios, propietario, ...alcance.args)
     .all();
 
   return json(results);
+}
+
+/**
+ * Registro compartido de etiquetas enviadas (Issue #440, migracion 049). Una fila por pieza con lo que
+ * dice la etiqueta que salio y desde donde. La computadora (/etiquetas) y el celular (/escanear) piden
+ * quedarse con la etiqueta ANTES de mandarla: el primero que llega la imprime y el otro la omite.
+ * El upsert es una sola sentencia, asi que dos peticiones a la vez no pueden ganar las dos.
+ *
+ * Se queda con ella si no habia marca, o si la marca ya no dice lo mismo que la pieza (precio, precio
+ * tachado, nombre o talla: misma regla que etiquetaVigente en etiquetera.js), o si se pide `reimprimir`
+ * (el boton explicito del celular). Una pieza sin codigo ni existencia no tiene etiqueta que registrar.
+ * Responde `reclamadas` (las que gano esta peticion) y `marcas` (la que quedo para cada pieza).
+ */
+async function reclamarEtiquetas(request: Request, env: Env, propietario: string, celular: string | null): Promise<Response> {
+  const cuerpo = (await request.json().catch(() => null)) as { ids?: unknown; reimprimir?: unknown } | null;
+  const ids = idsDeEtiquetas(cuerpo);
+  if (!ids) return json({ error: 'Selecciona entre 1 y 100 piezas.' }, 400);
+  const ahora = new Date().toISOString();
+  const alcance = delCelular(celular);
+  const origen = celular ? 'celular' : 'pc';
+  const reimprimir = cuerpo?.reimprimir === true ? 1 : 0;
+  const resultados = await env.DB.batch(ids.map((id) => env.DB.prepare(
+    `insert into etiquetas_enviadas (producto_id, etiqueta_en, etiqueta_precio, etiqueta_precio_lista, etiqueta_nombre, etiqueta_talla, etiqueta_origen)
+     select id, ?, precio, case when precio_lista > precio then precio_lista else 0 end, trim(nombre), trim(coalesce(talla, '')), ?
+     from productos where id = ? and propietario = ? and estado_analisis <> 'descartado' and codigo <> '' and stock > 0${alcance.sql}
+     on conflict (producto_id) do update set etiqueta_en = excluded.etiqueta_en, etiqueta_precio = excluded.etiqueta_precio,
+       etiqueta_precio_lista = excluded.etiqueta_precio_lista, etiqueta_nombre = excluded.etiqueta_nombre,
+       etiqueta_talla = excluded.etiqueta_talla, etiqueta_origen = excluded.etiqueta_origen
+     where ? = 1 or etiqueta_precio <> excluded.etiqueta_precio or etiqueta_precio_lista <> excluded.etiqueta_precio_lista
+       or etiqueta_nombre <> excluded.etiqueta_nombre or etiqueta_talla <> excluded.etiqueta_talla`,
+  ).bind(ahora, origen, id, propietario, ...alcance.args, reimprimir)));
+  const huecos = ids.map(() => '?').join(',');
+  const { results } = await env.DB.prepare(
+    `select producto_id, etiqueta_en, etiqueta_precio, etiqueta_precio_lista, etiqueta_nombre, etiqueta_talla, etiqueta_origen
+     from etiquetas_enviadas where producto_id in (${huecos})`,
+  ).bind(...ids).all<{ producto_id: string }>();
+  return json({
+    reclamadas: ids.filter((_, i) => (resultados[i]?.meta?.changes ?? 0) > 0),
+    marcas: Object.fromEntries(results.map(({ producto_id, ...marca }) => [producto_id, marca])),
+  });
+}
+
+/** "No salio desde aqui" (#440): la marca de esas piezas se borra para que la etiqueta pueda volver a salir. */
+async function soltarEtiquetas(request: Request, env: Env, propietario: string): Promise<Response> {
+  const ids = idsDeEtiquetas((await request.json().catch(() => null)) as { ids?: unknown } | null);
+  if (!ids) return json({ error: 'Selecciona entre 1 y 100 piezas.' }, 400);
+  const { meta } = await env.DB.prepare(
+    `delete from etiquetas_enviadas where producto_id in (${ids.map(() => '?').join(',')})
+       and producto_id in (select id from productos where propietario = ?)`,
+  ).bind(...ids, propietario).run();
+  return json({ soltadas: meta.changes });
+}
+
+/** Solo lo que la etiquetera necesita (Issue #89): el celular lo lee, no ve el resto de `config`. */
+async function leerCalibracion(env: Env): Promise<Response> {
+  const config = await leerConfig(env);
+  return json(Object.fromEntries(['etiqueta_corrimiento', 'etiqueta_modulo'].filter((clave) => clave in config).map((clave) => [clave, config[clave]])));
 }
 
 /**
@@ -2192,6 +2277,7 @@ export default {
       if (pathname === '/api/calibracion' && request.method === 'PUT') {
         return await guardarCalibracion(request, env);
       }
+      if (pathname === '/api/calibracion' && request.method === 'GET') return await leerCalibracion(env);
 
       if (pathname === '/api/familias') {
         if (request.method === 'POST') {
@@ -2312,8 +2398,16 @@ export default {
         return await exportarInventarioCsv(env);
       }
 
+      // Desde el host del vendedor (#440) solo lo que ese celular capturo; la computadora no tiene limite.
+      const celular = env.HOST_VENDEDOR && url.hostname === env.HOST_VENDEDOR ? correo : null;
       if (pathname === '/api/etiquetas' && request.method === 'POST') {
-        return await prepararEtiquetas(request, env, propietarioDe(await leerUsuario(env, correo)));
+        return await prepararEtiquetas(request, env, propietarioDe(await leerUsuario(env, correo)), celular);
+      }
+      if (pathname === '/api/etiquetas/enviadas' && request.method === 'POST') {
+        return await reclamarEtiquetas(request, env, propietarioDe(await leerUsuario(env, correo)), celular);
+      }
+      if (pathname === '/api/etiquetas/enviadas' && request.method === 'DELETE') {
+        return await soltarEtiquetas(request, env, propietarioDe(await leerUsuario(env, correo)));
       }
 
       if (pathname === '/api/borradores/manual' && request.method === 'POST') {

@@ -4,7 +4,7 @@
 // etiqueta, que es donde se rompio todo lo anterior.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { tsplEtiqueta, tsplBanda, tsplMarco, tsplPruebaCodigo, tsplPruebaLargos, partirNombre, NOMBRE_MAX, TSPL_REGLA, TSPL_CALIBRAR, tsplCodigo, leerCodigos } from '../public/etiquetera.js';
+import { tsplEtiqueta, tsplBanda, tsplMarco, tsplPruebaCodigo, tsplPruebaLargos, partirNombre, NOMBRE_MAX, TSPL_REGLA, TSPL_CALIBRAR, tsplCodigo, leerCodigos, reconectarEtiquetera, etiqueteraLista } from '../public/etiquetera.js';
 
 const PIEZA = {
   nombre: 'Taza de ceramica azul',
@@ -335,4 +335,25 @@ test('leerCodigos: lo pegado de Excel, con cantidad o sin ella, y lo que no se p
   const { filas, malas } = leerCodigos('Código\tCantidad\r\n7501234567890\t3\nSAL-0042\n\nABC;2\nDEF,0\ncon espacio\t1\n12345678901234\t1\nA"B\t1');
   assert.deepEqual(filas, [{ codigo: '7501234567890', cantidad: 3 }, { codigo: 'SAL-0042', cantidad: 1 }, { codigo: 'ABC', cantidad: 2 }]);
   assert.deepEqual(malas, ['Código\tCantidad', 'DEF,0', 'con espacio\t1', '12345678901234\t1', 'A"B\t1']);
+});
+
+test('reconectar sin clic (#440): sin getDevices o sin una AE240 recordada no hay nada que hacer; con una, queda lista', async () => {
+  const navegador = globalThis.navigator as unknown as { bluetooth?: unknown };
+  const aparato = (name: string) => ({
+    name, addEventListener() {},
+    gatt: { connected: false, disconnect() {}, connect: async () => ({ getPrimaryService: async () => ({
+      getCharacteristic: async () => ({ properties: { writeWithoutResponse: true }, writeValueWithoutResponse: async () => {} }) }) }) },
+  });
+  try {
+    navegador.bluetooth = {};   // Chrome sin getDevices
+    assert.equal(await reconectarEtiquetera(), false);
+    navegador.bluetooth = { getDevices: async () => [aparato('Otra cosa')] };
+    assert.equal(await reconectarEtiquetera(), false);
+    navegador.bluetooth = { getDevices: async () => { throw new Error('bloqueado'); } };
+    assert.equal(await reconectarEtiquetera(), false);
+    assert.equal(etiqueteraLista(), false);
+    navegador.bluetooth = { getDevices: async () => [aparato('Otra cosa'), aparato('AE240-bt_1DDE-LE')] };
+    assert.equal(await reconectarEtiquetera(), true);
+    assert.equal(etiqueteraLista(), true);
+  } finally { delete navegador.bluetooth; }
 });

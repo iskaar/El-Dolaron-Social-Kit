@@ -108,7 +108,8 @@ export async function cargarCalibracion() {
   if (!globalThis.location || !globalThis.localStorage) return;   // node --test
   let config;
   try {
-    const respuesta = await fetch('/api/config', { signal: AbortSignal.timeout(4000) });
+    // /api/calibracion y no /api/config: el host del celular (#440) solo lee estas dos claves.
+    const respuesta = await fetch('/api/calibracion', { signal: AbortSignal.timeout(4000) });
     if (!respuesta.ok) return;
     config = await respuesta.json();
   } catch {
@@ -476,6 +477,30 @@ export async function conectarEtiquetera({ cualquiera = false } = {}) {
 
 let impresora = null;   // el aparato escogido, para reconectar sin clic
 
+/**
+ * Reconecta sin clic: primero al aparato ya escogido en esta pagina; si no hay, a uno que el
+ * navegador recuerde de otra visita (getDevices, que solo existe en Chrome reciente). Con la
+ * impresora apagada gatt.connect() se queda colgado, asi que se espera `espera` ms y se da por
+ * perdida. Devuelve si quedo lista; nunca lanza. Quien la llama decide cuando intentarlo: abrir
+ * la misma impresora desde dos pestanas a la vez mezcla los trabajos.
+ */
+export async function reconectarEtiquetera(espera = 8000) {
+  if (caracteristica) return true;
+  try {
+    let aparato = impresora;
+    if (!aparato) {
+      aparato = (await navigator.bluetooth?.getDevices?.())?.find((a) => a.name?.startsWith('AE240'));
+      if (!aparato) return false;
+      aparato.addEventListener('gattserverdisconnected', () => { caracteristica = null; });
+      impresora = aparato;
+    }
+    await Promise.race([enlazar(aparato), esperar(espera).then(() => { throw new Error('tiempo agotado'); })]);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 async function enlazar(aparato) {
   // La AE240 a veces suelta el enlace justo despues de conectar ("GATT Server is
   // disconnected", sobre todo si otra sesion la tenia agarrada o acaba de
@@ -706,8 +731,60 @@ export function etiquetaVigente(marca, pieza) {
 export function desmarcarDesde(id) {
   const mapa = impresas();
   const desde = mapa[id]?.hora;
-  if (!desde) return;
+  if (!desde) return [];
   guardarImpresas(Object.fromEntries(Object.entries(mapa).filter(([, marca]) => marca.hora < desde)));
+  return Object.keys(mapa).filter((otra) => mapa[otra].hora >= desde);   // para soltarlas tambien en la base
+}
+
+/* ---------- Registro compartido en la base (Issue #440) ---------- */
+
+// La marca de arriba es de ESTE navegador. Para que la PC y el celular no saquen la misma etiqueta
+// dos veces, cada envio se reclama antes en la base (`etiquetas_enviadas`): gana el primero que
+// llega. Los campos etiqueta_* de una pieza (o de `marcas`) son lo que dice la etiqueta enviada.
+
+/**
+ * Hace local la marca de la base, para que la pieza salga de la lista y no se vuelva a mandar. Si ya
+ * hay una marca local que dice lo mismo se respeta (su hora es la de este navegador).
+ */
+export function adoptarMarca(id, marca) {
+  const dice = {
+    precio: marca.etiqueta_precio, precio_lista: marca.etiqueta_precio_lista,
+    nombre: marca.etiqueta_nombre, talla: marca.etiqueta_talla,
+  };
+  if (impresas()[id] && etiquetaVigente(impresas()[id], { ...dice, stock: 1 })) return;
+  marcarImpresa(id, marca.etiqueta_en, dice);
+}
+
+/**
+ * Pide quedarse con la etiqueta de esas piezas antes de mandarla. Devuelve { reclamadas, marcas }:
+ * las que gano esta llamada y, de las demas, la marca que ya tienen (que aqui se adopta). Con
+ * `reimprimir` se queda con ella aunque ya haya salido. Lanza si no hay red: no se manda a ciegas.
+ */
+export async function reclamarEtiquetas(ids, { reimprimir = false } = {}) {
+  const respuesta = await fetch('/api/etiquetas/enviadas', {
+    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ids, reimprimir }),
+    signal: AbortSignal.timeout(15000),
+  });
+  const cuerpo = await respuesta.json().catch(() => ({}));
+  if (!respuesta.ok) throw new Error(cuerpo.error ?? `Error HTTP ${respuesta.status}. Revisa la red y la sesion.`);
+  for (const id of ids) if (!cuerpo.reclamadas.includes(id) && cuerpo.marcas[id]) adoptarMarca(id, cuerpo.marcas[id]);
+  return cuerpo;
+}
+
+/** Borra la marca de la base ("no salio", o se corto la impresion). true si quedo. */
+export async function soltarEtiquetas(ids) {
+  try {
+    for (let i = 0; i < ids.length; i += 100) {
+      const respuesta = await fetch('/api/etiquetas/enviadas', {
+        method: 'DELETE', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ids: ids.slice(i, i + 100) }),
+        signal: AbortSignal.timeout(15000),
+      });
+      if (!respuesta.ok) return false;
+    }
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /** El historial en lineas de texto, lo mas nuevo primero. */

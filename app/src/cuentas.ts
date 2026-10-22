@@ -119,8 +119,9 @@ export function permiso(pathname: string, metodo: string): Regla {
   if (ruta === '/api/borradores' || ruta.startsWith('/api/borradores/')) return CAPTURA_FEP;
   // La caja muestra la foto de cada pieza escaneada para detectar etiquetas cambiadas (Issue #358).
   if (ruta.startsWith('/api/foto/')) return [...CAPTURA_FEP, ...CAJA];
-  if (ruta === '/api/etiquetas') return CAPTURA_FEP;
-  if (ruta === '/api/calibracion') return CAPTURA;
+  if (ruta === '/api/etiquetas' || ruta === '/api/etiquetas/enviadas') return CAPTURA_FEP;   // el registro de enviadas, #440
+  // Leer la calibracion lo hacen tambien FEP (/etiquetas) y el celular; cambiarla, solo quien captura.
+  if (ruta === '/api/calibracion') return metodo === 'GET' ? CAPTURA_FEP : CAPTURA;
   if (ruta === '/api/marketplace' || /^\/api\/marketplace\/foto\/[^/]+$/.test(ruta)) return CAPTURA;
   if (ruta === '/api/catalogo') return CAJA;
   if (ruta === '/api/socios') return CAJA;

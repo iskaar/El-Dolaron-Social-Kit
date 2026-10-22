@@ -81,12 +81,10 @@ async function pagina(t: ReturnType<typeof tienda>, ambiente = 'sandbox', almace
       eventos: new Map(), addEventListener(evento: string, fn: any) { this.eventos.set(evento, fn); }, querySelectorAll: () => [] });
     return elementos.get(id);
   };
-  const estado = { conectada: true, falloBle: false, falloRed: false, falloMarca: false, permiso: 0,
+  const estado = { conectada: true, falloBle: false, falloRed: false, falloMarca: false, permiso: 0, reclamos: [] as string[][],
     enviadas: [] as { id: string; copias: number }[], detenido: false, antesDePreparar: null as null | (() => Promise<void>) };
   const marcas = () => JSON.parse(almacen.get('etiqueta-impresas') || '{}');
-  const api = await runInNewContext(`(async () => { ${fuente}
-    return { iniciarAutomatica, imprimirNuevas, imprimir, pausarAutomatica, activa: () => automaticaActiva };
-  })()`, {
+  const contexto: Record<string, any> = {
     document: { getElementById: $ }, navigator: { bluetooth: {}, locks: { request: async (_nombre: string, _opciones: any, fn: any) => fn({}) } },
     localStorage: { getItem: (k: string) => almacen.get(k) ?? null, setItem: (k: string, v: string) => almacen.set(k, v), removeItem: (k: string) => almacen.delete(k) },
     fetch: async (ruta: string, opciones?: any) => {
@@ -105,10 +103,24 @@ async function pagina(t: ReturnType<typeof tienda>, ambiente = 'sandbox', almace
     impresas: marcas, marcarImpresa: (id: string, hora?: string, p?: any) => {
       if (!estado.falloMarca) almacen.set('etiqueta-impresas', JSON.stringify({ ...marcas(), [id]: { hora: hora || DESDE, ...p } }));
     },
-    etiquetaVigente, desmarcarDesde() {}, historialTexto: () => '',
+    etiquetaVigente, desmarcarDesde: () => [], historialTexto: () => '',
+    // El registro compartido (#440) contra el Worker real; la marca adoptada se guarda como lo hace etiquetera.js.
+    adoptarMarca: (id: string, m: any) => almacen.set('etiqueta-impresas', JSON.stringify({ ...marcas(), [id]: { hora: m.etiqueta_en, precio: m.etiqueta_precio,
+      precio_lista: m.etiqueta_precio_lista, nombre: m.etiqueta_nombre, talla: m.etiqueta_talla } })),
+    reclamarEtiquetas: async (ids: string[], opciones: { reimprimir?: boolean } = {}) => {
+      estado.reclamos.push(ids);
+      const r = await t.pedir('/api/etiquetas/enviadas', { ids, reimprimir: opciones.reimprimir === true });
+      if (r.status >= 300) throw new Error(r.cuerpo.error);
+      for (const id of ids) if (!r.cuerpo.reclamadas.includes(id) && r.cuerpo.marcas[id]) contexto.adoptarMarca(id, r.cuerpo.marcas[id]);
+      return r.cuerpo;
+    },
+    soltarEtiquetas: async (ids: string[]) => (await t.pedir('/api/etiquetas/enviadas', { ids }, 'DELETE')).status === 200,
     detenerEnvio: (valor = true) => { estado.detenido = valor; }, envioDetenido: () => estado.detenido, errorEnvio: () => 'BLE falló',
     setInterval() {}, AbortSignal, encodeURIComponent, Date, Map, console,
-  });
+  };
+  const api = await runInNewContext(`(async () => { ${fuente}
+    return { iniciarAutomatica, imprimirNuevas, imprimir, pausarAutomatica, activa: () => automaticaActiva };
+  })()`, contexto);
   return { ...api, estado, $, almacen };
 }
 
@@ -519,5 +531,78 @@ test('cambios trae solo lo modificado de la sesión, incluidas las descartadas (
     assert.equal((await t.pedir(`/api/borradores?desde=${DESDE}&cambios=ayer`)).status, 400);
     // Sin `cambios`, la lista de siempre: sin descartadas.
     assert.equal((await t.pedir(`/api/borradores?desde=${DESDE}`)).cuerpo.some((p: any) => p.id === quitada), false);
+  } finally { t.db.close(); }
+});
+
+/* ---------- celular y PC se reparten las etiquetas (#440) ---------- */
+
+/** El celular reclama por su host; la PC entra por el de las demás pruebas. */
+async function reclamarDesdeCelular(t: ReturnType<typeof tienda>, ids: string[], reimprimir = false) {
+  t.env.HOST_VENDEDOR = 'captura.prueba';
+  const preparar = await worker.fetch!(new Request('https://captura.prueba/api/etiquetas', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ids }) }) as never, t.env, t.ctx as never);
+  assert.equal(preparar.status, 200);
+  const r = await worker.fetch!(new Request('https://captura.prueba/api/etiquetas/enviadas', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ids, reimprimir }) }) as never, t.env, t.ctx as never);
+  delete (t.env as any).HOST_VENDEDOR;
+  return await r.json() as any;
+}
+
+test('la automática no repite lo que el celular ya sacó, aunque se haya cortado a medias, y adopta su marca', async () => {
+  const t = tienda();
+  try {
+    t.env.AMBIENTE = 'sandbox';
+    const delCelular = crypto.randomUUID(), nueva = crypto.randomUUID();
+    await capturarRopa(t, delCelular, '15000');
+    await capturarRopa(t, nueva, '20000');
+    assert.deepEqual((await reclamarDesdeCelular(t, [delCelular])).reclamadas, [delCelular]);
+    const p = await pagina(t);
+    await p.iniciarAutomatica();
+    // Solo la que el celular no tocó sale por la PC; la otra queda marcada aqui para que salga de la lista.
+    assert.deepEqual(p.estado.enviadas.map((x: any) => x.id), [nueva]);
+    const marcas = JSON.parse(p.almacen.get('etiqueta-impresas')!);
+    assert.equal(marcas[delCelular].precio, 15000);
+    // Otra vuelta y una recarga de la pagina tampoco la sacan.
+    await p.imprimirNuevas();
+    const recarga = await pagina(t, 'sandbox', new Map());
+    await recarga.iniciarAutomatica();
+    assert.deepEqual(recarga.estado.enviadas, []);
+    assert.equal(JSON.parse(recarga.almacen.get('etiqueta-impresas')!)[delCelular].precio, 15000);
+  } finally { t.db.close(); }
+});
+
+test('lo que sacó la PC el celular lo omite; si la PC falla suelta su marca y reintenta', async () => {
+  const t = tienda();
+  try {
+    t.env.AMBIENTE = 'sandbox';
+    const id = crypto.randomUUID();
+    await capturarRopa(t, id, '15000');
+    const p = await pagina(t);
+    p.estado.falloBle = true;
+    await p.iniciarAutomatica();
+    assert.equal(p.activa(), false);
+    // La PC no pudo: no se queda con la etiqueta, y el celular (o ella misma) puede sacarla.
+    assert.equal(t.db.prepare('select count(*) n from etiquetas_enviadas').get()!.n, 0);
+    p.estado.falloBle = false;
+    await p.imprimir([id]);
+    assert.equal(t.db.prepare('select etiqueta_origen o from etiquetas_enviadas where producto_id=?').get(id)!.o, 'pc');
+    const desdeCelular = await reclamarDesdeCelular(t, [id]);
+    assert.deepEqual(desdeCelular.reclamadas, []);
+    assert.equal(desdeCelular.marcas[id].etiqueta_origen, 'pc');
+  } finally { t.db.close(); }
+});
+
+test('un lote omite lo que el celular ya sacó y lo dice', async () => {
+  const t = tienda();
+  try {
+    const id = agregar(t, new Date().toISOString(), 'listo', 2), otra = agregar(t, DESPUES, 'listo', 1);
+    t.db.prepare('update productos set capturado_por=? where id=?').run(DUENO, id);   // el celular solo etiqueta lo suyo de hoy
+    await reclamarDesdeCelular(t, [id]);
+    const p = await pagina(t);
+    assert.equal(await p.imprimir([id, otra], new Map(), true), true);   // el mismo camino que la manual
+    assert.deepEqual(p.estado.enviadas, [{ id: otra, copias: 1 }]);
+    assert.match(p.$('resumen').textContent, /1 piezas enviadas; 1 ya las había enviado el celular/);
+    // Forzada (como "Marcar seleccionadas" o "No salió desde aquí" y reimprimir) se vuelve a poder.
+    assert.equal((await t.pedir('/api/etiquetas/enviadas', { ids: [id] }, 'DELETE')).cuerpo.soltadas, 1);
+    await p.imprimir([id], new Map(), true);
+    assert.deepEqual(p.estado.enviadas.map((x: any) => x.id), [otra, id]);
   } finally { t.db.close(); }
 });

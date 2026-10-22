@@ -67,6 +67,7 @@
     Inicia aquí y toma las fotos en <a href="/captura" target="_blank" rel="noopener">la cámara</a> desde el teléfono en el mismo entorno.
     Se imprime ropa y lo capturado en <a href="/escanear" target="_blank" rel="noopener">Escanear</a>, una etiqueta por pieza en existencia, cuando su precio está listo;
     lo escaneado sale en cuanto se guarda (25 s, otro código o Guardar). El resto de la mercancía general se imprime a mano.
+    Si el celular también imprime desde Escanear, gana quien reclame primero la etiqueta y la otra no la repite.
     Deja esta página abierta en la computadora. Al detener o recargar, puedes retomar la misma sesión.
     «Nueva sesión» deja las pendientes anteriores para impresión manual y empieza con las próximas fotos.
     El precio debe estar asignado antes de imprimir; las piezas sin nombre o precio esperan en la cola.
@@ -109,6 +110,7 @@
 import {
   conectarEtiquetera, etiqueteraLista, imprimirEtiquetas, historialTexto, detenerEnvio, envioDetenido,
   errorEnvio, impresas, marcarImpresa, desmarcarDesde, etiquetaVigente, precioImpreso,
+  reclamarEtiquetas, soltarEtiquetas, adoptarMarca,
 } from '/etiquetera.js';
 
 const lista = document.getElementById('lista');
@@ -144,6 +146,8 @@ async function cargar() {
   if (!respuesta.ok) throw new Error(`Error HTTP ${respuesta.status}. Revisa la red y la sesión.`);
   piezas = (await respuesta.json())
     .filter((p) => p.destino === 'etiqueta' && p.precio > 0);
+  // Lo que ya salio desde el celular (#440) sale de la lista como si hubiera salido de aqui.
+  for (const p of piezas) if (p.etiqueta_en) adoptarMarca(p.id, p);
   pintar();
 }
 
@@ -260,6 +264,11 @@ document.getElementById('marcar').addEventListener('click', async () => {
       resumen.textContent = (await respuesta?.json().catch(() => ({})))?.error ?? 'No se pudieron marcar: revisa la red e intenta otra vez.';
       return;
     }
+    // Tambien en la base, para que el celular no las saque otra vez (#440).
+    try { await reclamarEtiquetas(ids.slice(i, i + 100), { reimprimir: true }); } catch (error) {
+      resumen.textContent = `No se pudieron marcar: ${error.message}`;
+      return;
+    }
   }
   const base = Date.now();
   const porId = new Map(piezas.map((p) => [p.id, p]));
@@ -269,11 +278,15 @@ document.getElementById('marcar').addEventListener('click', async () => {
   pintar();
   resumen.textContent = `${ids.length} ${ids.length === 1 ? 'pieza marcada' : 'piezas marcadas'} como impresas. Se regresan con «Mostrar impresas».`;
 });
-lista.addEventListener('click', (e) => {
+lista.addEventListener('click', async (e) => {
   const boton = e.target.closest('[data-desde]');
   if (!boton) return;
   e.preventDefault();
-  desmarcarDesde(boton.dataset.desde);
+  // La base tambien las suelta, o la siguiente carga las volveria a marcar como impresas (#440).
+  const soltadas = desmarcarDesde(boton.dataset.desde);
+  if (soltadas.length && !await soltarEtiquetas(soltadas)) {
+    resumen.textContent = 'Regresaron a la lista, pero no se pudo avisar a la base: sin red, el celular o la siguiente carga podrían marcarlas otra vez. Revisa la red y repite «No salió desde aquí».';
+  }
   pintar();
 });
 
@@ -338,7 +351,7 @@ async function imprimir(ids, pedidas = new Map(), automatico = false) {
   imprimiendo = true;
   pintarControles();
   if (!automatico) detenerEnvio(false);
-  let terminadas = 0;
+  let terminadas = 0, omitidas = 0;
   try {
     // Pedir la impresora necesita un clic real, nunca el temporizador automático.
     if (!etiqueteraLista()) {
@@ -376,6 +389,12 @@ async function imprimir(ids, pedidas = new Map(), automatico = false) {
           resumen.textContent = 'La pieza cambió antes de imprimir. Revisa la cola y retoma la sesión.';
           return false;
         }
+        // Antes de mandarla se reclama en la base (#440): si el celular ya la sacó, no se repite.
+        // Para volver a sacarla: «Mostrar impresas» y «No salió desde aquí».
+        if (!(await reclamarEtiquetas([p.id])).reclamadas.includes(p.id)) {
+          omitidas += 1;
+          continue;
+        }
         // Las que se pidieron en la columna Etiquetas; de inicio, una por pieza en existencia.
         const copias = automatico ? p.stock : pedidas.get(p.id) ?? copiasDe(p);
         const detalle = `pieza ${terminadas + 1} de ${ids.length}`;
@@ -389,6 +408,8 @@ async function imprimir(ids, pedidas = new Map(), automatico = false) {
         );
         pintarHistorial();
         if (!salio) {
+          // Esta computadora reintenta la pieza (sigue en la lista), asi que suelta la marca para no negarse a si misma.
+          await soltarEtiquetas([p.id]);
           resumen.textContent = envioDetenido()
             ? `Detenido en la pieza ${terminadas + 1} de ${ids.length}. Las que faltan siguen en la lista.`
             : `Se cortó en la pieza ${terminadas + 1} de ${ids.length} (${p.nombre}): ${errorEnvio()}. Las que faltan siguen en la lista.`;
@@ -402,7 +423,7 @@ async function imprimir(ids, pedidas = new Map(), automatico = false) {
         terminadas += 1;
       }
     }
-    resumen.textContent = `${terminadas} piezas enviadas. Si alguna no salió, usa «Mostrar impresas» y «No salió desde aquí».`;
+    resumen.textContent = `${terminadas} piezas enviadas${omitidas ? `; ${omitidas} ya las había enviado el celular y no se repitieron` : ''}. Si alguna no salió, usa «Mostrar impresas» y «No salió desde aquí».`;
     return true;
   } catch (error) {
     // Nada de fallar en silencio: si algo revienta a media lista, se dice donde.
@@ -514,7 +535,10 @@ async function imprimirNuevas() {
       if (!cambios) piezasSesion = new Map();
       for (const p of llegadas) {
         if (p.estado_analisis === 'descartado') piezasSesion.delete(p.id);
-        else piezasSesion.set(p.id, p);
+        else {
+          piezasSesion.set(p.id, p);
+          if (p.etiqueta_en) adoptarMarca(p.id, p);   // ya la sacó el celular (#440); solo al recibirla, no en cada vuelta
+        }
       }
       const servidor = Date.parse(respuesta.headers?.get?.('date') ?? '');
       const ahora = Number.isFinite(servidor) ? servidor : Date.now();
