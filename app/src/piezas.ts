@@ -1,5 +1,7 @@
-/** Consulta de inventario (#441), sin escrituras ni filtro de existencia. */
-import { propietarioDe, type Usuario } from './cuentas.ts';
+/** Consulta y ajuste de inventario con rastro (#441). */
+import { propietarioDe, puedeEditarInventario, type Usuario } from './cuentas.ts';
+import { MOTIVOS } from './conteo.ts';
+import { conciliarSeguro } from './mercadolibre.ts';
 
 const PAGINA = 25;
 const TRAMO = 200;
@@ -100,21 +102,80 @@ async function buscarPiezas(env: Env, url: URL, propietario: string): Promise<Re
   return json({ piezas, siguiente });
 }
 
-async function fichaPieza(env: Env, id: string, propietario: string): Promise<Response> {
+async function fichaPieza(env: Env, id: string, usuario: Usuario | null): Promise<Response> {
   if (!UUID.test(id)) return json({ error: 'Identificador inválido.' }, 400);
   const pieza = await env.DB.prepare(`select ${COLUMNAS} from productos p
-    where p.id = ? and p.propietario = ? and ${VISIBLE}`).bind(id, propietario).first<Pieza>();
+    where p.id = ? and p.propietario = ? and ${VISIBLE}`).bind(id, propietarioDe(usuario)).first<Pieza>();
   if (!pieza) return json({ error: 'Pieza no encontrada.' }, 404);
   // shortcut: índice por fecha existente; añadir (producto_id, ajustado_en) si el historial supera 10 mil filas.
   const { results: historial } = await env.DB.prepare(`select id, motivo, cantidad, antes, despues, ajustado_por, ajustado_en
     from conteo_ajustes where producto_id = ? order by ajustado_en desc, rowid desc limit 10`).bind(id).all();
-  return json({ pieza, historial });
+  return json({ pieza, historial, puede_editar: puedeEditarInventario(usuario) });
 }
 
-/** Worker valida host y cuenta; cada consulta aplica además propietarioDe. */
-export async function rutaPiezas(request: Request, env: Env, url: URL, usuario: Usuario | null): Promise<Response | null> {
+interface Ajuste {
+  id: string; producto_id: string; motivo: string; cantidad: number; antes: number; despues: number;
+  ajustado_por: string; ajustado_en: string;
+}
+
+async function cambiarExistencia(request: Request, env: Env, id: string, usuario: Usuario | null, ctx: ExecutionContext): Promise<Response> {
+  if (!puedeEditarInventario(usuario)) return json({ error: 'Tu cuenta no tiene permiso para editar inventario.' }, 403);
+  const cuerpo = await request.json().catch(() => null) as Record<string, unknown> | null;
+  if (!UUID.test(id) || !cuerpo || typeof cuerpo !== 'object' || Array.isArray(cuerpo)
+      || typeof cuerpo.id !== 'string' || !UUID.test(cuerpo.id)) return json({ error: 'Identificador inválido.' }, 400);
+  const fijar = cuerpo.fijar_a !== undefined;
+  const entero = (n: unknown): n is number => typeof n === 'number' && Number.isInteger(n) && n >= 0 && n <= 999;
+  if (fijar ? !entero(cuerpo.fijar_a) || !entero(cuerpo.esperado) || cuerpo.delta !== undefined
+    : typeof cuerpo.delta !== 'number' || !Number.isInteger(cuerpo.delta) || Math.abs(cuerpo.delta) > 999 || cuerpo.esperado !== undefined)
+    return json({ error: 'Ajuste inválido. Usa delta o fijar_a con esperado (0 a 999).' }, 400);
+  const delta = fijar ? (cuerpo.fijar_a as number) - (cuerpo.esperado as number) : cuerpo.delta as number;
+  const motivo = cuerpo.motivo;
+  if (!delta || typeof motivo !== 'string' || ![...MOTIVOS, 'entrada', 'correccion'].includes(motivo)
+      || (delta > 0 && (motivo === 'robo' || motivo === 'merma')) || (delta < 0 && motivo === 'entrada'))
+    return json({ error: 'Escoge un motivo válido para subir o bajar existencia.' }, 400);
+  const propietario = propietarioDe(usuario);
+  const actual = () => env.DB.prepare(`select p.stock from productos p
+    where p.id = ? and p.propietario = ? and ${VISIBLE}`).bind(id, propietario).first<{ stock: number }>();
+  if (!await actual()) return json({ error: 'Pieza no encontrada.' }, 404);
+  const guardado = () => env.DB.prepare(`select id, producto_id, motivo, cantidad, antes, despues, ajustado_por, ajustado_en
+    from conteo_ajustes where id = ?`).bind(cuerpo.id).first<Ajuste>();
+  const responder = (a: Ajuste) => a.producto_id === id && a.ajustado_por === usuario!.correo && a.motivo === motivo
+      && a.despues - a.antes === delta && (!fijar || (a.antes === cuerpo.esperado && a.despues === cuerpo.fijar_a))
+    ? json(a) : json({ error: 'El folio ya pertenece a otro ajuste.' }, 409);
+  const previo = await guardado();
+  if (previo) return responder(previo);
+
+  const ahora = new Date().toISOString();
+  await env.DB.batch([
+    env.DB.prepare(`update productos set stock = stock + ?, actualizado_en = ?
+      where id = ? and propietario = ? and sin_inventario = 0 and estado_analisis <> 'descartado'
+        and stock + ? between 0 and 999 ${fijar ? 'and stock = ?' : ''}
+        and not exists (select 1 from conteo_ajustes where id = ?)`)
+      .bind(delta, ahora, id, propietario, delta, ...(fijar ? [cuerpo.esperado] : []), cuerpo.id),
+    // changes() evita rastro falso si otro intento dejó la misma marca en este milisegundo.
+    env.DB.prepare(`insert into conteo_ajustes
+      (id, producto_id, codigo, nombre, motivo, cantidad, antes, despues, ajustado_por, ajustado_en)
+      select ?, id, coalesce(codigo, ''), nombre, ?, ?, stock - ?, stock, ?, ? from productos
+      where id = ? and propietario = ? and actualizado_en = ? and changes() = 1`)
+      .bind(cuerpo.id, motivo, Math.abs(delta), delta, usuario!.correo, ahora, id, propietario, ahora),
+  ]);
+  const ajuste = await guardado();
+  if (ajuste) {
+    ctx.waitUntil(conciliarSeguro(env, { productoIds: [id] }));
+    return responder(ajuste);
+  }
+  const pieza = await actual();
+  return pieza ? json({ error: 'La existencia cambió o queda fuera de 0 a 999. Revisa y vuelve a intentar.', stock: pieza.stock }, 409)
+    : json({ error: 'Pieza no encontrada.' }, 404);
+}
+
+/** Worker valida host y cuenta; cada operación aplica además propietarioDe. */
+export async function rutaPiezas(request: Request, env: Env, url: URL, usuario: Usuario | null, ctx: ExecutionContext): Promise<Response | null> {
+  const existencia = /^\/api\/piezas\/([^/]+)\/existencia$/.exec(url.pathname);
+  if (existencia) return request.method === 'POST' ? cambiarExistencia(request, env, existencia[1], usuario, ctx)
+    : json({ error: 'Método no permitido.' }, 405);
   const detalle = /^\/api\/piezas\/([^/]+)$/.exec(url.pathname);
   if (url.pathname !== '/api/piezas' && !detalle) return null;
   if (request.method !== 'GET') return json({ error: 'Método no permitido.' }, 405);
-  return detalle ? fichaPieza(env, detalle[1], propietarioDe(usuario)) : buscarPiezas(env, url, propietarioDe(usuario));
+  return detalle ? fichaPieza(env, detalle[1], usuario) : buscarPiezas(env, url, propietarioDe(usuario));
 }

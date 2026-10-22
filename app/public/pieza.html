@@ -44,6 +44,7 @@
   #precio { font-size:28px; color:var(--azul); }
   #precio-lista { margin-left:12px; color:#5b6478; }
   #stock { min-width:60px; text-align:center; font-size:32px; font-weight:750; }
+  #menos, #sumar { width:56px; height:56px; font-size:28px; }
   #historial { padding-left:20px; font-size:14px; }
   #historial li { margin:12px 0; overflow-wrap:anywhere; }
   #visor { margin-top:12px; width:100%; overflow:hidden; }
@@ -64,6 +65,7 @@
 <body>
 <header><h1>El Dolarón · Buscar pieza</h1><button id="camara" class="claro" type="button" aria-expanded="false" aria-controls="visor">Cámara</button><a href="/">Inicio</a></header>
 <p id="estado" role="status" aria-live="polite">Escribe un código o el nombre de la pieza.</p>
+<button id="reintentar" type="button" hidden>Reintentar ajuste pendiente</button>
 <main>
   <section id="buscador" aria-label="Buscar y resultados">
     <form id="busqueda">
@@ -81,10 +83,20 @@
       <div><img id="foto" alt="" hidden><div id="sin-foto">Sin foto</div></div>
       <div class="datos"><h2 id="nombre"></h2><p id="detalles" class="ayuda"></p><p id="upc" class="ayuda"></p><p><strong id="precio"></strong><span id="precio-lista"></span></p>
         <h3>Existencia</h3>
-        <output id="stock" aria-label="Existencia actual"></output>
+        <div class="acciones"><button id="menos" type="button" aria-label="Bajar existencia en uno" hidden>−</button><output id="stock" aria-label="Existencia actual"></output><button id="sumar" type="button" aria-label="Subir existencia en uno" hidden>+</button></div>
+        <div id="existencia" hidden>
+          <label for="motivo">Motivo</label>
+          <select id="motivo">
+            <option value="correccion">Corrección</option>
+            <optgroup label="Al bajar"><option value="robo">Robo</option><option value="merma">Merma</option><option value="error de captura">Error de captura</option></optgroup>
+            <optgroup label="Al subir"><option value="entrada">Entrada</option></optgroup>
+          </select>
+          <form id="fijar"><label for="fijar-a">Fijar a…</label><div class="acciones"><input id="fijar-a" type="number" min="0" max="999" step="1" required><button id="ajustar" type="submit">Fijar a…</button></div></form>
+          <button id="deshacer" class="claro" type="button" hidden>Deshacer</button>
+        </div>
       </div>
     </div>
-    <h3>Historial de existencia</h3><p class="ayuda">Últimos 10 ajustes de conteo.</p><ol id="historial"></ol>
+    <h3>Historial de existencia</h3><p class="ayuda">Últimos 10 ajustes.</p><ol id="historial"></ol>
   </section>
 </main>
 <script type="module" src="/pieza.js"></script>

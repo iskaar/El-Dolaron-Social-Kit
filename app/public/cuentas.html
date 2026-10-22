@@ -196,7 +196,9 @@ async function cargar() {
       <div class="fila${u.activo ? '' : ' inactiva'}" data-correo="${escapar(u.correo)}">
         <div><input type="text" data-campo="nombre" value="${escapar(u.nombre)}" placeholder="Nombre">
           <div class="correo">${escapar(u.correo)}</div></div>
-        <div class="roles">${casillas(u.roles)}</div>
+        <div><div class="roles">${casillas(u.roles)}</div>
+          <label><input type="checkbox" data-campo="editar_inventario" ${u.editar_inventario ? 'checked' : ''}> Editar inventario</label>
+          <small>Capturista o FEP; el dueño siempre puede.</small></div>
         ${selectorCaja(u.caja)}
         <input type="password" data-campo="pin" inputmode="numeric" maxlength="6" autocomplete="new-password"
           title="PIN de 6 dígitos para entrar en la computadora de caja (Issue #112)"
@@ -265,6 +267,7 @@ document.body.addEventListener('click', async (evento) => {
       nombre: nodo.querySelector('[data-campo="nombre"]').value,
       roles: rolesDe(nodo),
       activo: nodo.querySelector('[data-campo="activo"]').checked,
+      editar_inventario: nodo.querySelector('[data-campo="editar_inventario"]').checked,
       caja: nodo.querySelector('[data-campo="caja"]').value,
     }, nodo.querySelector('.aviso'));
     if (ok) nodo.classList.toggle('inactiva', !nodo.querySelector('[data-campo="activo"]').checked);
