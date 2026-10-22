@@ -33,6 +33,9 @@
     content-visibility: auto; contain-intrinsic-size: auto 260px; }   /* el navegador no pinta las que no se ven */
   .ficha img { width: 100%; aspect-ratio: 1; object-fit: cover; border-radius: 8px; background: #eceff4; }
   .recorte-par { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .candidatas { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; margin-top: 12px; }
+  .candidatas a { display: block; overflow-wrap: anywhere; font-size: 13px; margin: 6px 0; }
+  .candidatas img { object-fit: contain; }
   .retomar { display: block; margin-top: 6px; text-align: center; font-size: 13px; font-weight: 600;
     color: var(--azul); border: 1px solid var(--linea); border-radius: 8px; padding: 7px; cursor: pointer; }
   .retomar:hover { background: #eef1f6; }
@@ -217,6 +220,7 @@ function ficha(p) {
         Retomar foto
         <input type="file" accept="image/*" capture="environment" hidden>
       </label>
+      ${p.foto_key === '' && p.propietario === 'dolaron' ? '<button type="button" class="claro" data-accion="buscar-imagen">Buscar imagen</button>' : ''}
     </div>
     <div>
       <div class="campos">
@@ -253,6 +257,7 @@ function ficha(p) {
         <span class="etiqueta ${estado}">${estado} · ${p.semana_ingreso}</span>
         <span class="aviso"></span>
       </div>
+      <div class="candidatas" aria-live="polite"></div>
     </div>`;
 
   const valor = (campo) => nodo.querySelector(`[data-campo="${campo}"]`).value;
@@ -304,6 +309,9 @@ function ficha(p) {
         return;
       }
       nodo.querySelector('img').src = `/api/foto/${p.id}?v=${Date.now()}`;  // la foto vieja esta en cache
+      p.foto_key = `fotos/${p.id}.jpg`;
+      nodo.querySelector('[data-accion="buscar-imagen"]')?.remove();
+      nodo.querySelector('.candidatas').replaceChildren();
       aviso.textContent = 'Foto reemplazada. Si cambia el nombre o el precio, usa Reintentar análisis.';
     } catch {
       aviso.textContent = 'No se pudo leer la imagen.';
@@ -319,6 +327,8 @@ function ficha(p) {
       await nodo.guardarFicha();
     } else if (accion === 'recalcular') {
       await enviar(base());   // sin precio: lo recalcula la configuración
+    } else if (accion === 'buscar-imagen') {
+      await buscarImagen(p, nodo, aviso, evento.target);
     } else if (accion === 'compartir') {
       try {
         const { conFoto } = await copiarParaMarketplace({
@@ -356,6 +366,52 @@ function ficha(p) {
   });
 
   return nodo;
+}
+
+// #413: cada clic busca una vez; la elección solo añade la foto a la pieza guardada.
+async function buscarImagen(p, nodo, aviso, boton) {
+  if (boton.disabled) return;
+  boton.disabled = true;
+  aviso.textContent = 'Buscando imagen del nombre y marca guardados…';
+  aviso.style.color = '';
+  const lista = nodo.querySelector('.candidatas');
+  lista.replaceChildren();
+  try {
+    const respuesta = await fetch(`/api/borradores/${p.id}/imagen/buscar`, { method: 'POST' });
+    const datos = await respuesta.json();
+    if (!respuesta.ok) { aviso.textContent = datos.error; return; }
+    if (p.foto_key !== '') return;   // Retomar foto pudo terminar durante la búsqueda.
+    aviso.textContent = datos.candidatas.length ? 'Revisa que sea la misma pieza antes de usar la imagen.' : 'Sin candidatas. Toma o sube una foto.';
+    for (const candidata of datos.candidatas) {
+      const tarjeta = document.createElement('div');
+      const img = document.createElement('img');
+      img.src = candidata.imagen; img.alt = candidata.titulo; img.referrerPolicy = 'no-referrer';
+      const enlace = document.createElement('a');
+      enlace.href = candidata.pagina; enlace.target = '_blank'; enlace.rel = 'noopener noreferrer';
+      enlace.textContent = `${candidata.titulo} · ${candidata.sitio}`;
+      const usar = document.createElement('button');
+      usar.type = 'button'; usar.textContent = 'Usar esta';
+      usar.addEventListener('click', async () => {
+        const botones = [...lista.querySelectorAll('button'), boton];
+        botones.forEach((b) => { b.disabled = true; });
+        aviso.textContent = 'Guardando imagen…';
+        try {
+          const r = await fetch(`/api/borradores/${p.id}/imagen`, {
+            method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ imagen: candidata.imagen }),
+          });
+          const guardada = await r.json();
+          if (!r.ok) { aviso.textContent = guardada.error; return; }
+          p.foto_key = guardada.foto_key;
+          nodo.querySelector('img').src = `/api/foto/${p.id}?v=${Date.now()}`;
+          lista.replaceChildren(); boton.remove();
+          aviso.textContent = 'Foto guardada.';
+        } catch { aviso.textContent = 'No se pudo guardar la imagen. Reintenta.'; }
+        finally { botones.forEach((b) => { b.disabled = false; }); }
+      });
+      tarjeta.append(img, enlace, usar); lista.append(tarjeta);
+    }
+  } catch { aviso.textContent = 'No se pudo buscar la imagen. Reintenta.'; }
+  finally { boton.disabled = false; }
 }
 
 /* ---------- revisión del catálogo público (Issue #220) ---------- */

@@ -9,7 +9,7 @@ import { analizarBorrador, identificarUpc, pesosDeLista, modeloPorDefecto, type 
 import { fichaDeManifiesto, normalizarUpc, precioListaMxn, type FichaManifiesto } from './manifiesto.ts';
 import { codigoLeido, SIN_CODIGO } from '../public/upc.js';
 import { ESTADOS } from '../public/estados.js';
-import { guardarImagenComoFoto, imagenGuardada, procesarRellenoImagenes, rutaImagenUpc } from './imagenes-upc.ts';
+import { guardarImagenComoFoto, imagenGuardada, procesarRellenoImagenes, rutaImagenUpc, rutaImagenPieza } from './imagenes-upc.ts';
 import { PRENDAS_ROPA, PRECIOS_ROPA } from '../public/ropa.js';
 import { procesarColaRopa, rutaRopaAdmin } from './ropa-ia.ts';
 import { calcularPrecio, ajustarManual, esDestinoBanda, prefijoParaFamilia, MONTOS_BANDA, type Destino } from './precio.ts';
@@ -79,6 +79,8 @@ interface FilaBorrador {
   semana_ingreso: string;
   creado_en: string;
   upc?: string | null;
+  foto_key: string;
+  propietario: string;
 }
 
 /**
@@ -308,7 +310,7 @@ async function listarBorradores(url: URL, env: Env, propietario: string): Promis
   // el orden de la pantalla tiene que ser el mismo que el de la mesa o se
   // vuelve un rompecabezas saber que etiqueta es de que pieza.
   const consulta = `select id, codigo, nombre, categoria, marca, talla, precio_lista, precio, estado_fisico,
-                           estado_analisis, destino, stock, semana_ingreso, capturado_por, creado_en, upc
+                           estado_analisis, destino, stock, semana_ingreso, capturado_por, creado_en, upc, foto_key, propietario
                     from productos
                     where sin_inventario = 0 and propietario = ? ${cambios ? 'and actualizado_en > ?' : "and estado_analisis <> 'descartado'"}
                       ${estado ? 'and estado_analisis = ?' : ''} ${desde ? 'and creado_en >= ?' : ''}
@@ -2170,6 +2172,9 @@ export default {
           if (fila && fila.propietario !== propietario) return json({ error: 'Pieza no encontrada.' }, 404);
         }
       }
+
+      const imagenPieza = await rutaImagenPieza(request, env, pathname);
+      if (imagenPieza) return imagenPieza;
 
       const fotoMarket = pathname.match(/^\/api\/marketplace\/foto\/([^/]+)$/);
       if (pathname === '/api/marketplace' || fotoMarket) {

@@ -227,8 +227,15 @@ export async function conClaude(foto: string | string[], env: Env, instruccion: 
   return JSON.parse(texto);
 }
 
-async function conGemini(foto: string | null, env: Env, instruccion: string, buscar = false, esquema: any = ESQUEMA_GEMINI,
-  textoUsuario = 'Identifica este articulo.', limiteMs = LIMITES_MS.gemini, pideJson = PIDE_JSON): Promise<unknown> {
+interface RespuestaGemini {
+  candidates?: Array<{
+    content?: { parts?: Array<{ text?: string }> };
+    groundingMetadata?: { groundingChunks?: Array<{ web?: { title?: string; uri?: string } }> };
+  }>;
+}
+
+// #413: mismo transporte para análisis y búsqueda; las imágenes solo usan grounding.
+async function consultarGemini(env: Env, cuerpo: Record<string, unknown>, limiteMs: number): Promise<RespuestaGemini> {
   // Con VERTEX_API_KEY se cobra al proyecto de Google Cloud (Issue #363), no a
   // la cuota de AI Studio que se acabo en #91. Mismo cuerpo para las dos.
   // Las dos instancias tienen secretos independientes, pero no siempre con el
@@ -245,38 +252,38 @@ async function conGemini(foto: string | null, env: Env, instruccion: string, bus
     method: 'POST',
     signal: AbortSignal.timeout(limiteMs),
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({
-      systemInstruction: { parts: [{ text: buscar ? instruccion + pideJson : instruccion }] },
-      contents: [
-        {
-          // Vertex exige el rol; AI Studio lo acepta.
-          role: 'user',
-          // Sin foto: solo texto, como la búsqueda por código de barras (#373).
-          parts: [
-            ...(foto ? [{ inlineData: { mimeType: 'image/jpeg', data: foto } }] : []),
-            { text: textoUsuario },
-          ],
-        },
-      ],
-      // Con busqueda, el esquema estructurado no esta permitido: van excluyentes.
-      ...(buscar ? { tools: [{ googleSearch: {} }] } : {}),
-      generationConfig: {
-        // gemini-3.8-flash piensa en MEDIUM por omision y, con busqueda, paso
-        // de los 22 s en sandbox (#363). LOW basta para leer una foto.
-        ...(env.VERTEX_API_KEY ? { thinkingConfig: { thinkingLevel: 'LOW' } } : {}),
-        ...(buscar ? {} : { responseMimeType: 'application/json', responseSchema: esquema }),
-      },
-    }),
+    body: JSON.stringify(cuerpo),
   });
   if (!respuesta.ok) {
     throw new Error(`Gemini ${respuesta.status}: ${(await respuesta.text()).slice(0, 200)}`);
   }
-  const cuerpo = (await respuesta.json()) as {
-    candidates?: Array<{
-      content?: { parts?: Array<{ text?: string }> };
-      groundingMetadata?: { groundingChunks?: Array<{ web?: { title?: string } }> };
-    }>;
-  };
+  return await respuesta.json() as RespuestaGemini;
+}
+
+async function conGemini(foto: string | null, env: Env, instruccion: string, buscar = false, esquema: any = ESQUEMA_GEMINI,
+  textoUsuario = 'Identifica este articulo.', limiteMs = LIMITES_MS.gemini, pideJson = PIDE_JSON): Promise<unknown> {
+  const cuerpo = await consultarGemini(env, {
+    systemInstruction: { parts: [{ text: buscar ? instruccion + pideJson : instruccion }] },
+    contents: [
+      {
+        // Vertex exige el rol; AI Studio lo acepta.
+        role: 'user',
+        // Sin foto: solo texto, como la búsqueda por código de barras (#373).
+        parts: [
+          ...(foto ? [{ inlineData: { mimeType: 'image/jpeg', data: foto } }] : []),
+          { text: textoUsuario },
+        ],
+      },
+    ],
+    // Con busqueda, el esquema estructurado no esta permitido: van excluyentes.
+    ...(buscar ? { tools: [{ googleSearch: {} }] } : {}),
+    generationConfig: {
+      // gemini-3.8-flash piensa en MEDIUM por omision y, con busqueda, paso
+      // de los 22 s en sandbox (#363). LOW basta para leer una foto.
+      ...(env.VERTEX_API_KEY ? { thinkingConfig: { thinkingLevel: 'LOW' } } : {}),
+      ...(buscar ? {} : { responseMimeType: 'application/json', responseSchema: esquema }),
+    },
+  }, limiteMs);
   const texto = (cuerpo.candidates?.[0]?.content?.parts ?? [])
     .map((parte) => parte.text ?? '')
     .join('');
@@ -289,6 +296,19 @@ async function conGemini(foto: string | null, env: Env, instruccion: string, bus
     .filter(Boolean)
     .slice(0, 5);
   return { ...extraerJson(texto), fuentes };
+}
+
+/** #413: una llamada por clic; nunca se leen URLs escritas en el texto del modelo. */
+export async function paginasParaImagen(consulta: string, env: Env): Promise<string[]> {
+  if (!env.VERTEX_API_KEY) throw new Error('Falta VERTEX_API_KEY para buscar imágenes.');
+  const cuerpo = await consultarGemini(env, {
+    systemInstruction: { parts: [{ text: 'Busca páginas de producto de tiendas o del fabricante para este artículo. Usa Google con la marca, el nombre y el código si lo hay.' }] },
+    contents: [{ role: 'user', parts: [{ text: consulta }] }],
+    tools: [{ googleSearch: {} }],
+    generationConfig: { thinkingConfig: { thinkingLevel: 'LOW' } },
+  }, LIMITES_MS.gemini);
+  return [...new Set((cuerpo.candidates?.[0]?.groundingMetadata?.groundingChunks ?? [])
+    .map((pedazo) => pedazo.web?.uri).filter((uri): uri is string => typeof uri === 'string'))].slice(0, 6);
 }
 
 const INSTRUCCION_UPC = [

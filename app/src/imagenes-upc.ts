@@ -1,4 +1,5 @@
 import { normalizarUpc } from '../public/upc.js';
+import { paginasParaImagen } from './analisis.ts';
 
 interface Referencia {
   upc: string; tcin: string; url: string; nombre: string; upc_fuente: string;
@@ -39,6 +40,45 @@ const leerJson = async (cuerpo: ReadableStream<Uint8Array> | null, maximo: numbe
 
 const FOTO_MAX_BYTES = 6 * 1024 * 1024;
 
+// #413: valida también la autoridad original: URL borra el puerto explícito :443.
+const httpsValida = (valor: unknown): valor is string => {
+  if (typeof valor !== 'string' || valor.length > 2000 || /[\\\s]/.test(valor) || !/^https:\/\/[^/?#]+/i.test(valor)) return false;
+  try {
+    const u = new URL(valor);
+    const autoridad = /^https:\/\/([^/?#\\]+)/i.exec(valor)![1];
+    return u.protocol === 'https:' && !!u.hostname && !u.username && !u.password && !u.port && !/[:@]/.test(autoridad);
+  } catch { return false; }
+};
+
+async function abrirHttps(url: string, accept: string, redirecciones: number) {
+  const signal = AbortSignal.timeout(10_000);
+  for (let salto = 0; ; salto++) {
+    if (!httpsValida(url)) throw new Error('URL HTTPS inválida.');
+    const respuesta = await fetch(url, {
+      redirect: 'manual', signal,
+      headers: { 'user-agent': 'ElDolaron-escaner/1.0 (+https://viste.com.mx)', accept },
+    });
+    if (![301, 302, 303, 307, 308].includes(respuesta.status)) return { respuesta, url };
+    const destino = respuesta.headers.get('location')?.trim();
+    await respuesta.body?.cancel();
+    if (!destino || destino.includes('\\') || salto >= redirecciones) throw new Error('Redirección de imagen inválida.');
+    url = /^[a-z][a-z0-9+.-]*:/i.test(destino) ? destino
+      : destino.startsWith('//') ? `https:${destino}` : new URL(destino, url).href;
+  }
+}
+
+/** #413: comparte los límites de descarga; Target conserva su política sin redirecciones. */
+async function descargarImagen(url: string, redirecciones = 0) {
+  const { respuesta } = await abrirHttps(url, 'image/*', redirecciones);
+  const tipo = respuesta.headers.get('content-type')?.split(';')[0].trim().toLowerCase() ?? '';
+  if (respuesta.status !== 200 || !/^image\/[a-z0-9.+-]+$/.test(tipo)
+      || Number(respuesta.headers.get('content-length')) > FOTO_MAX_BYTES) {
+    await respuesta.body?.cancel();
+    throw new Error('Respuesta de imagen inválida.');
+  }
+  return { cuerpo: await leerCuerpo(respuesta.body, FOTO_MAX_BYTES), tipo };
+}
+
 /** Caché por referencia; la reserva condicional en R2 evita dos descargas simultáneas. */
 async function fotoDeReferencia(r: Referencia, env: Env) {
   const hash = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(r.url));
@@ -59,17 +99,7 @@ async function fotoDeReferencia(r: Referencia, env: Env) {
     });
     if (!reserva) continue;
     try {
-      const respuesta = await fetch(r.url, {
-        redirect: 'manual', signal: AbortSignal.timeout(10_000),
-        headers: { 'user-agent': 'ElDolaron-escaner/1.0 (+https://viste.com.mx)', accept: 'image/*' },
-      });
-      const tipo = respuesta.headers.get('content-type')?.split(';')[0].trim().toLowerCase() ?? '';
-      if (respuesta.status !== 200 || !/^image\/[a-z0-9.+-]+$/.test(tipo)
-          || Number(respuesta.headers.get('content-length')) > FOTO_MAX_BYTES) {
-        await respuesta.body?.cancel();
-        throw new Error('Respuesta de imagen inválida.');
-      }
-      const cuerpo = await leerCuerpo(respuesta.body, FOTO_MAX_BYTES);
+      const { cuerpo, tipo } = await descargarImagen(r.url);
       await env.FOTOS.put(key, cuerpo, { onlyIf: { etagMatches: reserva.etag }, httpMetadata: { contentType: tipo } });
     } catch (error) {
       await env.FOTOS.put(key, crypto.randomUUID(), { onlyIf: { etagMatches: reserva.etag }, customMetadata: { pendiente: '0' } });
@@ -144,8 +174,118 @@ const meta = (html: string, propiedad: string) => {
   }
   return '';
 };
-const entidades = (texto: string) => texto.replace(/&(amp|quot|#39|#x27|lt|gt);/g,
-  (_, e: string) => ({ amp: '&', quot: '"', '#39': "'", '#x27': "'", lt: '<', gt: '>' })[e]!);
+const entidades = (texto: string) => texto.replace(/&(amp|quot|apos|lt|gt|#\d+|#x[0-9a-f]+);/gi, (original, entidad: string) => {
+  const e = entidad.toLowerCase();
+  if (!e.startsWith('#')) return ({ amp: '&', quot: '"', apos: "'", lt: '<', gt: '>' })[e] ?? original;
+  const codigo = e.startsWith('#x') ? parseInt(e.slice(2), 16) : Number(e.slice(1));
+  return codigo > 0 && codigo <= 0x10ffff ? String.fromCodePoint(codigo) : original;
+});
+
+const atributo = (etiqueta: string, nombre: string) =>
+  new RegExp(`\\s${nombre}\\s*=\\s*(?:"([^"]*)"|'([^']*)'|([^\\s>]+))`, 'i').exec(etiqueta)?.slice(1).find((v) => v !== undefined) ?? '';
+
+function metadato(html: string, propiedad: string) {
+  for (const [etiqueta] of html.matchAll(/<meta\b[^>]*>/gi)) {
+    if ((atributo(etiqueta, 'property') || atributo(etiqueta, 'name')).toLowerCase() === propiedad) return entidades(atributo(etiqueta, 'content'));
+  }
+  return '';
+}
+
+function productoJsonLd(html: string): { imagen: string; nombre: string } | null {
+  for (const [, etiqueta, contenido] of html.matchAll(/<script\b([^>]*)>([\s\S]*?)<\/script\s*>/gi)) {
+    if (atributo(` ${etiqueta}`, 'type').toLowerCase() !== 'application/ld+json') continue;
+    try {
+      const pendientes: unknown[] = [JSON.parse(contenido)];
+      while (pendientes.length) {
+        const dato = pendientes.pop();
+        if (!dato || typeof dato !== 'object') continue;
+        if (Array.isArray(dato)) { pendientes.push(...dato); continue; }
+        const p = dato as Record<string, unknown>;
+        if ([p['@type']].flat().some((tipo) => tipo === 'Product' || tipo === 'https://schema.org/Product')) {
+          const imagen = [p.image].flat()[0];
+          const url = typeof imagen === 'string' ? imagen : (imagen as { url?: unknown; contentUrl?: unknown } | null)?.url
+            ?? (imagen as { contentUrl?: unknown } | null)?.contentUrl;
+          if (typeof url === 'string') return { imagen: url, nombre: typeof p.name === 'string' ? p.name : '' };
+        }
+        pendientes.push(...Object.values(p));
+      }
+    } catch { /* Una página puede tener otro bloque Product válido. */ }
+  }
+  return null;
+}
+
+async function candidataDePagina(pagina: string) {
+  const { respuesta, url } = await abrirHttps(pagina, 'text/html', 3);
+  if (respuesta.status !== 200) { await respuesta.body?.cancel(); return null; }
+  const html = await leerTexto(respuesta.body, 3_000_000);
+  const producto = productoJsonLd(html);
+  for (const imagen of [metadato(html, 'og:image'), producto?.imagen]) {
+    if (!imagen) continue;
+    let absoluta: string;
+    try { absoluta = new URL(imagen, url).href; } catch { continue; }
+    if (!httpsValida(absoluta)) continue;
+    const sitio = new URL(url).hostname;
+    const titulo = metadato(html, 'og:title') || producto?.nombre || entidades(/<title\b[^>]*>([^<]*)<\/title>/i.exec(html)?.[1] ?? '') || sitio;
+    return { imagen: absoluta, pagina: url, titulo: titulo.trim().slice(0, 200), sitio };
+  }
+  return null;
+}
+
+/** #413: solo /admin, después de verificar host, rol y propietario en el Worker. */
+export async function rutaImagenPieza(request: Request, env: Env, pathname: string): Promise<Response | null> {
+  const ruta = /^\/api\/borradores\/([^/]+)\/imagen(\/buscar)?$/.exec(pathname);
+  if (!ruta) return null;
+  if (request.method !== (ruta[2] ? 'POST' : 'PUT')) return json({ error: 'Método no permitido.' }, 405);
+  const id = ruta[1];
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)) return json({ error: 'Identificador inválido.' }, 400);
+  const pieza = await env.DB.prepare(`select nombre, marca, upc, foto_key from productos
+    where id = ? and propietario = 'dolaron' and estado_analisis <> 'descartado'`)
+    .bind(id).first<{ nombre: string; marca: string; upc: string | null; foto_key: string }>();
+  if (!pieza) return json({ error: 'Pieza no encontrada.' }, 404);
+  if (pieza.foto_key !== '') return json({ error: 'La pieza ya tiene foto.' }, 409);
+
+  if (ruta[2]) {
+    if (!env.VERTEX_API_KEY) return json({ error: 'Falta VERTEX_API_KEY para buscar imágenes.' }, 503);
+    if (!pieza.nombre.trim()) return json({ error: 'Guarda el nombre de la pieza antes de buscar.' }, 400);
+    try {
+      const paginas = await paginasParaImagen([pieza.marca, pieza.nombre, pieza.upc].filter(Boolean).join(' '), env);
+      const resultados = await Promise.allSettled(paginas.filter(httpsValida).map(candidataDePagina));
+      const vistas = new Set<string>();
+      const candidatas = resultados.flatMap((r) => {
+        if (r.status !== 'fulfilled' || !r.value || vistas.has(r.value.imagen)) return [];
+        vistas.add(r.value.imagen);
+        return [r.value];
+      }).slice(0, 3);
+      return json({ candidatas });
+    } catch {
+      return json({ error: 'La búsqueda no respondió. Reintenta o sube una foto.' }, 502);
+    }
+  }
+
+  const datos = await leerJson(request.body, 4096).catch(() => null) as { imagen?: unknown } | null;
+  if (!httpsValida(datos?.imagen)) return json({ error: 'Usa una URL HTTPS sin credenciales ni puerto.' }, 400);
+  const fotoKey = `fotos/${id}.jpg`;
+  try {
+    const { cuerpo, tipo } = await descargarImagen(datos.imagen, 3);
+    const creada = await env.FOTOS.put(fotoKey, cuerpo, {
+      onlyIf: { etagDoesNotMatch: '*' }, httpMetadata: { contentType: tipo }, customMetadata: { imagen_busqueda: datos.imagen },
+    });
+    if (!creada) {
+      const existente = await env.FOTOS.get(fotoKey);
+      await existente?.body.cancel();
+      // #413: recupera un UPDATE fallido de esta URL; una foto propia nunca se reemplaza.
+      if (existente?.customMetadata?.imagen_busqueda !== datos.imagen) return json({ error: 'La pieza ya tiene otra foto. Recarga la ficha.' }, 409);
+    }
+    const { meta } = await env.DB.prepare(`update productos set foto_key = ?, actualizado_en = ?,
+        recorte_estado = case when recorte_estado = 'original' then 'original' else null end, recorte_fecha = null, recorte_revision = null,
+        ropa_ia_estado = case when categoria = 'ropa' and nombre = 'Ropa' and ropa_ia_estado is null then 'descartado' else ropa_ia_estado end
+      where id = ? and propietario = 'dolaron' and foto_key = '' and estado_analisis <> 'descartado'`)
+      .bind(fotoKey, new Date().toISOString(), id).run();
+    return meta.changes ? json({ id, foto_key: fotoKey }) : json({ error: 'La pieza cambió o ya tiene foto. Recarga la ficha.' }, 409);
+  } catch {
+    return json({ error: 'No se pudo guardar la imagen. Reintenta o sube una foto.' }, 502);
+  }
+}
 
 /** La foto propia tiene prioridad, incluso si se agotó el stock. Nunca busca en piezas de FEP. */
 export async function imagenGuardada(upc: string, env: Env) {

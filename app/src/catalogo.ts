@@ -74,7 +74,7 @@ async function destacados(env: Env, url: URL): Promise<Response> {
 /** Staff (Issue #220): en existencia pero no presentable, con el motivo. Mismo universo que PUBLICABLE, sin el filtro de foto. */
 export async function revisionCatalogo(env: Env): Promise<Response> {
   const filas = await env.DB.prepare(`select p.id, p.codigo, p.nombre, p.marca, p.categoria, p.estado_fisico, p.estado_analisis,
-      p.precio_lista, p.precio, p.stock, p.destino, p.semana_ingreso, p.creado_en,
+      p.precio_lista, p.precio, p.stock, p.destino, p.semana_ingreso, p.creado_en, p.foto_key, p.propietario, p.upc,
       (p.foto_key = '') as sin_foto, (p.precio <= 0) as sin_precio, (trim(p.nombre) = '') as sin_nombre, ${NOMBRE_INTERNO} as nombre_interno
     from productos p
     where p.destino = 'etiqueta' and p.sin_inventario = 0 and p.estado_analisis = 'listo' and p.stock > 0
