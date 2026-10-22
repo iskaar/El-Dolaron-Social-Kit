@@ -637,6 +637,31 @@ test('venta en ML: descuenta una sola vez por orden, aunque el aviso llegue repe
   });
 });
 
+test('venta en ML: un correo a los dueños por venta; sin existencias en D1, el asunto pide cancelar (#427)', async () => {
+  await conML(async (t) => {
+    const enviados: any[] = [];
+    t.env.CORREO = { async send(m: any) { enviados.push(m); return { messageId: 'x' }; } } as never;
+    const { id, itemId } = await publicarPieza(t);
+    const codigo = (t.db.prepare('select codigo from productos where id = ?').get(id) as { codigo: string }).codigo;
+    t.sim.ordenes.set('9101', { ...orden(9101, 'paid', [[itemId, 1]]), order_items: [{ item: { id: itemId }, quantity: 1, unit_price: 299 }] });
+    await avisar(t, '/orders/9101');
+    await avisar(t, '/orders/9101');
+    await t.esperar();
+    assert.equal(enviados.length, 1);
+    assert.equal(enviados[0].to, DUENO);
+    assert.match(enviados[0].subject, new RegExp(`^Vendido en Mercado Libre: ${codigo}`));
+    assert.match(enviados[0].text, /a \$299\.00[\s\S]*ventas\/9101\/detalle/);
+    // Se vendió todo en tienda y luego llega otra venta de ML.
+    t.db.prepare('update productos set stock = 0 where id = ?').run(id);
+    t.sim.ordenes.set('9102', orden(9102, 'paid', [[itemId, 1]]));
+    await avisar(t, '/orders/9102');
+    await t.esperar();
+    assert.equal(enviados.length, 2);
+    assert.match(enviados[1].subject, /^¡Sin existencias!/);
+    assert.match(enviados[1].text, /Cancela la venta en Mercado Libre/);
+  });
+});
+
 test('publicar: si la pieza se vende en tienda mientras ML la crea, queda pausada en ML (no se vende de mas)', async () => {
   await conML(async (t) => {
     const id = pieza(t, { stock: 1 });

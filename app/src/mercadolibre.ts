@@ -15,6 +15,7 @@
  */
 
 import { quebrarDecena } from './precio.ts';
+import { correoADuenos } from './avisos.ts';
 
 const API = 'https://api.mercadolibre.com';
 const AUTORIZACION = 'https://auth.mercadolibre.com.mx/authorization';
@@ -1015,7 +1016,7 @@ export async function procesarOrden(env: Env, orden: any): Promise<string[]> {
       // Todo en un batch y con la guarda `estado = 'recibida'`: reprocesar la misma
       // orden (notificacion repetida, conciliacion) no descuenta dos veces, y un
       // proceso que murio a medias se termina solo al volver a verla.
-      await env.DB.batch([
+      const hechos = await env.DB.batch([
         env.DB.prepare(
           `update ml_ventas set
              conflicto = (select stock < ml_ventas.cantidad from productos where id = ml_ventas.producto_id),
@@ -1034,6 +1035,8 @@ export async function procesarOrden(env: Env, orden: any): Promise<string[]> {
              and (select stock from productos where id = ml_publicaciones.producto_id) <= 0`,
         ).bind(ahora, pub.producto_id),
       ]);
+      // La orden pasa de 'recibida' a 'descontada' una sola vez: un solo correo por venta.
+      if (hechos[2].meta.changes) await avisarVenta(env, ordenId, itemId, Number(linea?.unit_price));
     } else {
       await env.DB.batch([
         env.DB.prepare(
@@ -1046,6 +1049,32 @@ export async function procesarOrden(env: Env, orden: any): Promise<string[]> {
     }
   }
   return tocados;
+}
+
+/**
+ * Correo a los duenos por cada articulo vendido en ML (Issue #427). Sin existencias
+ * en D1 (se vendio en tienda en la misma ventana) el asunto lo dice: hay que cancelar en ML.
+ * Las existencias ya se descontaron: un correo que falla solo queda en el log.
+ */
+async function avisarVenta(env: Env, ordenId: string, itemId: string, precio: number): Promise<void> {
+  try {
+    const v = await env.DB.prepare(
+      `select p.nombre, p.codigo, v.cantidad, v.conflicto from ml_ventas v join productos p on p.id = v.producto_id
+       where v.order_id = ? and v.ml_item_id = ?`,
+    ).bind(ordenId, itemId).first<{ nombre: string; codigo: string; cantidad: number; conflicto: number }>();
+    if (!v) return;
+    await correoADuenos(env,
+      `${v.conflicto ? '¡Sin existencias! ' : ''}Vendido en Mercado Libre: ${v.codigo} ${v.nombre}`,
+      [
+        `${v.cantidad} × ${v.nombre} (${v.codigo})${precio > 0 ? ` a $${precio.toFixed(2)}` : ''}.`,
+        v.conflicto
+          ? 'D1 ya no tenía existencias: probablemente se vendió en tienda. Cancela la venta en Mercado Libre.'
+          : 'Sácala del piso y empácala para el envío.',
+        `Venta en ML: https://www.mercadolibre.com.mx/ventas/${ordenId}/detalle`,
+      ].join('\n'));
+  } catch (error) {
+    console.error(JSON.stringify({ mensaje: 'aviso de venta ML fallido', orden: ordenId, error: String(error) }));
+  }
 }
 
 /** Respaldo de las notificaciones perdidas: las ordenes del vendedor de las ultimas 24 h. */

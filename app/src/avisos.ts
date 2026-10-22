@@ -12,18 +12,22 @@ import { leerRoles } from './cuentas.ts';
 export const REMITENTE = 'avisos@eldolaron.com';
 
 export async function enviarAviso(env: Env, request: Request, asunto: string, texto: string): Promise<void> {
+  await correoADuenos(env, asunto, `${texto}\n\nApruébala o recházala en ${new URL(request.url).origin}/cuentas`);
+}
+
+/** Un correo a cada dueño activo, tal cual. Lo usa también la venta en Mercado Libre (Issue #427). */
+export async function correoADuenos(env: Env, asunto: string, texto: string): Promise<void> {
   const correo = env.CORREO;
   if (!correo) return;
   const { results } = await env.DB.prepare('select correo, roles from usuarios where activo = 1')
     .all<{ correo: string; roles: string }>();
   const prueba = env.AMBIENTE === 'sandbox' ? '[Sandbox] ' : '';
-  const enlace = `${new URL(request.url).origin}/cuentas`;
   await Promise.all(results.filter((u) => leerRoles(u.roles).includes('dueno')).map((u) =>
     correo.send({
       from: { email: REMITENTE, name: 'El Dolarón' },
       to: u.correo,
       subject: `${prueba}${asunto}`,
-      text: `${texto}\n\nApruébala o recházala en ${enlace}`,
+      text: texto,
     }).catch((error) => console.error(JSON.stringify({
       mensaje: 'aviso por correo fallido', para: u.correo, asunto, codigo: error?.code ?? '', error: String(error),
     })))));
