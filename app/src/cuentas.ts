@@ -65,6 +65,7 @@ const PANTALLAS: Record<string, Rol[]> = {
   '/': TODOS,
   '/index': TODOS,
   '/captura': CAPTURA_FEP,
+  '/camara-remota': CAPTURA,
   '/escanear': CAPTURA,
   '/admin': CAPTURA,
   '/marketplace': CAPTURA,
@@ -103,6 +104,9 @@ export function permiso(pathname: string, metodo: string): Regla {
   if (!ruta.startsWith('/api/') && /\.(js|css|png|svg|ico)$/.test(ruta)) return 'cuenta';
 
   if (ruta in PANTALLAS) return PANTALLAS[ruta];
+
+  if ((ruta === '/api/camara/solicitud' && ['GET', 'PUT'].includes(metodo))
+      || (metodo === 'POST' && /^\/api\/camara\/solicitud\/[^/]+\/(tomar|lista|cancelar)$/.test(ruta))) return CAPTURA;
 
   if (ruta === '/api/mensajes' || ruta === '/api/mensajes/responder') return DUENO;
   if (ruta === '/api/gastos' || /^\/api\/gastos\/[^/]+$/.test(ruta)) return AUXILIAR;
