@@ -64,6 +64,101 @@ function candidata(db: ReturnType<typeof preparar>['db'], confirmada = false, ur
 const bytesFoto = new Uint8Array([255, 216, 255, 1]);
 const fotoTarget = () => new Response(bytesFoto, { headers: { 'content-type': 'image/jpeg' } });
 
+// #413: piezas anteriores a la copia en vivo, sin pasar por el escáner.
+function piezaAnterior(db: ReturnType<typeof preparar>['db'], numero: number) {
+  const id = crypto.randomUUID(), upc = String(8438051051000 + numero), url = `${IMAGEN}&pieza=${numero}`;
+  const confirmadoEn = new Date(Date.UTC(2026, 9, 20, 0, 0, numero)).toISOString();
+  db.prepare(`insert into manifiesto (upc, descripcion, precio_usd, tcin, actualizado_en) values (?, 'Estuche', 999, ?, '')`).run(upc, TCIN);
+  db.prepare(`insert into imagenes_upc (upc, tcin, url, nombre, confirmado_en) values (?, ?, ?, 'Estuche', ?)`)
+    .run(upc, TCIN, url, confirmadoEn);
+  db.prepare(`insert into productos (id, upc, nombre, precio, stock, estado_analisis, semana_ingreso, creado_en, actualizado_en)
+    values (?, ?, 'Estuche', 123, 2, 'listo', 'S40', '2026-10-01', '2026-10-01')`).run(id, upc);
+  return { id, upc, url, confirmadoEn };
+}
+
+test('el cron da foto a una pieza vieja y al ponerse al día solo consulta el lote sin tocar R2', async (t) => {
+  const { db, env, ctx, esperar } = preparar();
+  db.prepare("update productos set upc=?, estado_analisis='listo', creado_en='2026-10-01' where id=?").run('0' + UPC, PRODUCTO);
+  candidata(db, true);
+  const antes = db.prepare('select nombre, precio, stock, estado_analisis, codigo from productos where id=?').get(PRODUCTO);
+  const descargar = t.mock.method(globalThis, 'fetch', async () => fotoTarget());
+  await worker.scheduled!({} as never, env, ctx as never); await esperar();
+  assert.equal(db.prepare('select foto_key from productos where id=?').get(PRODUCTO)!.foto_key, `fotos/${PRODUCTO}.jpg`);
+  assert.deepEqual(new Uint8Array(await (await env.FOTOS.get(`fotos/${PRODUCTO}.jpg`))!.arrayBuffer()), bytesFoto);
+  assert.deepEqual(db.prepare('select nombre, precio, stock, estado_analisis, codigo from productos where id=?').get(PRODUCTO), antes);
+  assert.equal(db.prepare("select valor from config where clave='imagenes_relleno_hasta'").get()!.valor, '2026-10-21');
+  const consultarFoto = t.mock.method(env.FOTOS, 'get');
+  const prepararSql = env.DB.prepare.bind(env.DB), consultas: string[] = [];
+  t.mock.method(env.DB, 'prepare', (sql: string) => { consultas.push(sql); return prepararSql(sql); });
+  await worker.scheduled!({} as never, env, ctx as never); await esperar();
+  assert.equal(descargar.mock.calls.length, 1);
+  assert.equal(consultarFoto.mock.calls.length, 0);
+  const lote = consultas.filter((sql) => sql.includes('imagenes_upc'));
+  assert.equal(lote.length, 1);
+  assert.doesNotMatch(lote[0], /productos/i);
+  assert.ok(!consultas.some((sql) => /insert into config/i.test(sql)));
+});
+
+test('el cron procesa hasta 20 confirmaciones en orden y descarga una imagen a la vez', async (t) => {
+  const { db, env, ctx, esperar } = preparar();
+  const piezas = Array.from({ length: 21 }, (_, i) => piezaAnterior(db, 21 - i)).reverse();
+  const llamadas: string[] = [];
+  let activas = 0, maximo = 0;
+  t.mock.method(globalThis, 'fetch', async (url: string) => {
+    llamadas.push(String(url)); maximo = Math.max(maximo, ++activas);
+    await new Promise((resolve) => setTimeout(resolve, 1));
+    activas--; return fotoTarget();
+  });
+  await worker.scheduled!({} as never, env, ctx as never); await esperar();
+  assert.deepEqual(llamadas, piezas.slice(0, 20).map((p) => p.url));
+  assert.equal(maximo, 1);
+  assert.equal(db.prepare("select count(*) n from productos where foto_key<>''").get()!.n, 20);
+  assert.equal(db.prepare("select valor from config where clave='imagenes_relleno_hasta'").get()!.valor, piezas[19].confirmadoEn);
+  await worker.scheduled!({} as never, env, ctx as never); await esperar();
+  assert.deepEqual(llamadas, piezas.map((p) => p.url));
+  assert.equal(db.prepare('select foto_key from productos where id=?').get(piezas[20].id)!.foto_key, `fotos/${piezas[20].id}.jpg`);
+  assert.equal(db.prepare("select valor from config where clave='imagenes_relleno_hasta'").get()!.valor, piezas[20].confirmadoEn);
+});
+
+test('una descarga fallida se registra y no frena el lote ni el cursor; otro escaneo reintenta', async (t) => {
+  const { db, env, ctx, esperar, pedir } = preparar();
+  const fallida = piezaAnterior(db, 1), siguiente = piezaAnterior(db, 2);
+  const errores = t.mock.method(console, 'error', () => {});
+  const descargar = t.mock.method(globalThis, 'fetch', async (url: string) => {
+    if (String(url) === fallida.url) throw new DOMException('Timeout', 'TimeoutError');
+    return fotoTarget();
+  });
+  await worker.scheduled!({} as never, env, ctx as never); await esperar();
+  assert.equal(db.prepare('select foto_key from productos where id=?').get(fallida.id)!.foto_key, '');
+  assert.equal(db.prepare('select foto_key from productos where id=?').get(siguiente.id)!.foto_key, `fotos/${siguiente.id}.jpg`);
+  assert.equal(db.prepare("select valor from config where clave='imagenes_relleno_hasta'").get()!.valor, siguiente.confirmadoEn);
+  assert.equal(JSON.parse(errores.mock.calls[0].arguments[0]).upc, fallida.upc);
+  await worker.scheduled!({} as never, env, ctx as never); await esperar();
+  assert.equal(descargar.mock.calls.length, 2);
+  t.mock.method(globalThis, 'fetch', async () => fotoTarget());
+  await pedir('/api/borradores/upc', { id: fallida.id, upc: fallida.upc, stock: 2 }); await esperar();
+  assert.equal(db.prepare('select foto_key from productos where id=?').get(fallida.id)!.foto_key, `fotos/${fallida.id}.jpg`);
+});
+
+test('el relleno conserva fotos propias, excluye FEP y descartados e ignora candidatas', async (t) => {
+  const { db, env, ctx, esperar } = preparar();
+  const propia = piezaAnterior(db, 1), fep = piezaAnterior(db, 2), descartada = piezaAnterior(db, 3), sinConfirmar = piezaAnterior(db, 4);
+  const fotoKey = `fotos/${propia.id}.jpg`;
+  db.prepare('update productos set foto_key=? where id=?').run(fotoKey, propia.id);
+  await env.FOTOS.put(fotoKey, new Uint8Array([7, 8]));
+  db.prepare("update productos set propietario='fep' where id=?").run(fep.id);
+  db.prepare("update productos set estado_analisis='descartado' where id=?").run(descartada.id);
+  db.prepare("update imagenes_upc set confirmado_en='' where upc=?").run(sinConfirmar.upc);
+  const antes = db.prepare('select * from productos order by id').all();
+  const descargar = t.mock.method(globalThis, 'fetch', async () => fotoTarget());
+  await worker.scheduled!({} as never, env, ctx as never); await esperar();
+  assert.equal(descargar.mock.calls.length, 3);
+  assert.deepEqual(db.prepare('select * from productos order by id').all(), antes);
+  assert.deepEqual(new Uint8Array(await (await env.FOTOS.get(fotoKey))!.arrayBuffer()), new Uint8Array([7, 8]));
+  for (const p of [fep, descartada, sinConfirmar]) assert.equal(await env.FOTOS.get(`fotos/${p.id}.jpg`), null);
+  assert.equal(db.prepare("select valor from config where clave='imagenes_relleno_hasta'").get()!.valor, descartada.confirmadoEn);
+});
+
 test('confirmar guarda una sola descarga en R2 y da foto al catálogo, ML y recortes sin cambiar la pieza', async (t) => {
   const { db, env, pedir, esperar } = preparar();
   db.prepare("update productos set upc=?, estado_analisis='listo', destino='etiqueta', categoria='ropa', nombre='Ropa' where id=?").run('0' + UPC, PRODUCTO);

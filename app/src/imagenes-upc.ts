@@ -119,6 +119,19 @@ export async function guardarImagenComoFoto(upc: string, env: Env): Promise<void
   }
 }
 
+/** #413: rellena piezas viejas de una en una, sin barrer productos ni atascarse por una imagen fallida. */
+export async function procesarRellenoImagenes(env: Env): Promise<void> {
+  const { results } = await env.DB.prepare(`select upc, confirmado_en from imagenes_upc
+    where confirmado_en > coalesce((select valor from config where clave = 'imagenes_relleno_hasta'), '')
+    order by confirmado_en limit 20`).all<{ upc: string; confirmado_en: string }>();
+  for (const fila of results) {
+    await guardarImagenComoFoto(fila.upc, env);
+    // El helper registra el fallo; el siguiente escaneo o confirmación reintentará esa pieza.
+    await env.DB.prepare(`insert into config (clave, valor) values ('imagenes_relleno_hasta', ?)
+      on conflict (clave) do update set valor = excluded.valor`).bind(fila.confirmado_en).run();
+  }
+}
+
 const VERIFICACION = 'Target pidió verificación. Abre «Ver producto original», guarda la imagen y usa «Subir foto», o toma una.';
 const PAUSA_MS = 30 * 60_000;
 // ponytail: pausa por isolate; si Target bloquea seguido, guardarla en D1 para todos los isolates.

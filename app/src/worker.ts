@@ -9,7 +9,7 @@ import { analizarBorrador, identificarUpc, pesosDeLista, modeloPorDefecto, type 
 import { fichaDeManifiesto, normalizarUpc, precioListaMxn, type FichaManifiesto } from './manifiesto.ts';
 import { codigoLeido, SIN_CODIGO } from '../public/upc.js';
 import { ESTADOS } from '../public/estados.js';
-import { guardarImagenComoFoto, imagenGuardada, rutaImagenUpc } from './imagenes-upc.ts';
+import { guardarImagenComoFoto, imagenGuardada, procesarRellenoImagenes, rutaImagenUpc } from './imagenes-upc.ts';
 import { PRENDAS_ROPA, PRECIOS_ROPA } from '../public/ropa.js';
 import { procesarColaRopa, rutaRopaAdmin } from './ropa-ia.ts';
 import { calcularPrecio, ajustarManual, esDestinoBanda, prefijoParaFamilia, MONTOS_BANDA, type Destino } from './precio.ts';
@@ -2419,5 +2419,6 @@ export default {
     ctx.waitUntil(vencerPedidos(env));
     ctx.waitUntil(procesarColaRopa(env));
     ctx.waitUntil((async () => { await procesarRecortes(env); await revisarRecortes(env); })());
+    ctx.waitUntil(procesarRellenoImagenes(env));
   },
 } satisfies ExportedHandler<Env, BusquedaUpc>;
