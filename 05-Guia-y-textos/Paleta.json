@@ -8,7 +8,29 @@
     "navy": "Nombre, títulos y texto",
     "red": "Subrayados y franjas",
     "yellow": "Etiquetas de precio y El",
-    "white": "Fondo y espacio alrededor del logo"
+    "white": "Fondo y espacio alrededor del logo",
+    "red-text": "Rojo para texto chico y precios sobre papel o cartón",
+    "mist": "Fondo suave de catálogos y paneles"
   },
-  "note": "Valores objetivo para nuevas composiciones; las piezas raster incluyen píxeles suavizados y variaciones de renderizado."
+  "note": "Valores objetivo para nuevas composiciones; las piezas raster incluyen píxeles suavizados y variaciones de renderizado.",
+  "red-text": "#B3141B",
+  "mist": "#F2F5FA",
+  "rgb": {
+    "navy": [22, 54, 107],
+    "red": [215, 43, 50],
+    "yellow": [255, 212, 71],
+    "white": [255, 255, 255],
+    "red-text": [179, 20, 27],
+    "mist": [242, 245, 250]
+  },
+  "cmyk_aproximado": {
+    "navy": [79, 50, 0, 58],
+    "red": [0, 80, 77, 16],
+    "yellow": [0, 17, 72, 0],
+    "white": [0, 0, 0, 0],
+    "red-text": [0, 89, 85, 30],
+    "mist": [3, 2, 0, 2]
+  },
+  "cmyk_nota": "Conversión matemática simple, solo referencia. La imprenta debe hacer prueba de color; no es Pantone ni garantiza coincidencia en papel.",
+  "manual": "05-Guia-y-textos/Manual-de-marca.html"
 }
