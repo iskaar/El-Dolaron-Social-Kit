@@ -1044,7 +1044,11 @@ export async function procesarOrden(env: Env, orden: any): Promise<string[]> {
                   actualizado_en = ?
            where id = ? and exists (select 1 from ml_ventas where order_id = ? and ml_item_id = ? and estado = 'descontada')`,
         ).bind(...llave, ahora, pub.producto_id, ...llave),
-        env.DB.prepare(`update ml_ventas set estado = 'cancelada' where order_id = ? and ml_item_id = ? and estado = 'descontada'`).bind(...llave),
+        // Si ya la habian atendido (empacada), vuelve a /avisos: no enviarla y regresarla al piso (Issue #429).
+        env.DB.prepare(
+          `update ml_ventas set estado = 'cancelada', atendida_en = '', atendida_por = ''
+           where order_id = ? and ml_item_id = ? and estado = 'descontada'`,
+        ).bind(...llave),
       ]);
     }
   }
@@ -1071,10 +1075,37 @@ async function avisarVenta(env: Env, ordenId: string, itemId: string, precio: nu
           ? 'D1 ya no tenía existencias: probablemente se vendió en tienda. Cancela la venta en Mercado Libre.'
           : 'Sácala del piso y empácala para el envío.',
         `Venta en ML: https://www.mercadolibre.com.mx/ventas/${ordenId}/detalle`,
+        ...(env.ML_REDIRECT_URI ? [`Márcala atendida en ${new URL(env.ML_REDIRECT_URI).origin}/avisos`] : []),
       ].join('\n'));
   } catch (error) {
     console.error(JSON.stringify({ mensaje: 'aviso de venta ML fallido', orden: ordenId, error: String(error) }));
   }
+}
+
+/* ---------- centro de avisos (Issue #429) ---------- */
+
+/** Las ventas de ML que nadie ha atendido, la mas vieja primero. Lo ve la caja. */
+export async function avisosPendientes(env: Env): Promise<Response> {
+  const { results } = await env.DB.prepare(
+    `select v.order_id, v.ml_item_id, v.producto_id, v.cantidad, v.estado, v.conflicto, v.recibido_en, p.codigo, p.nombre
+     from ml_ventas v left join productos p on p.id = v.producto_id
+     where v.atendida_en = '' order by v.recibido_en, v.order_id, v.ml_item_id`,
+  ).all<Record<string, any>>();
+  return json({
+    ventas_ml: results.map((f) => ({
+      order_id: f.order_id, ml_item_id: f.ml_item_id, producto_id: f.producto_id,
+      codigo: f.codigo ?? '', nombre: f.nombre ?? '', cantidad: f.cantidad,
+      estado: f.estado, conflicto: !!f.conflicto, recibido_en: f.recibido_en,
+    })),
+  });
+}
+
+/** Marca una venta como atendida, con quien y cuando. Solo una vez: dos cajas a la vez, gana una. */
+export async function atenderVentaML(env: Env, orden: string, item: string, correo: string): Promise<Response> {
+  const r = await env.DB.prepare(
+    `update ml_ventas set atendida_en = ?, atendida_por = ? where order_id = ? and ml_item_id = ? and atendida_en = ''`,
+  ).bind(new Date().toISOString(), correo, orden, item).run();
+  return r.meta.changes ? json({ ok: true }) : json({ error: 'Alguien más ya la atendió. Recarga la lista.' }, 409);
 }
 
 /** Respaldo de las notificaciones perdidas: las ordenes del vendedor de las ultimas 24 h. */

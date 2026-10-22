@@ -53,7 +53,7 @@ import { rutaAsistente } from './asistente.ts';
 import { sentenciasVale, buscarVale, valeDeVenta, valeUsadoEnVenta, reimprimirVale, valesAbiertos, emitirCuponManual, porcentajeCupon } from './vales.ts';
 import { catalogoPublico, revisionCatalogo } from './catalogo.ts';
 import { procesarRecortes, revisarRecortes, ajustarRecortesViejos, reiniciarRecorte, rutaRecortesAdmin } from './recortes.ts';
-import { rutaML, recibirNotificacion, conciliarSeguro, sincronizar, publicacionViva } from './mercadolibre.ts';
+import { rutaML, recibirNotificacion, conciliarSeguro, sincronizar, publicacionViva, avisosPendientes, atenderVentaML } from './mercadolibre.ts';
 import { pedirDescuento, validarDescuento, listarDescuentos, listarDuenos } from './descuentos.ts';
 import { listarAltoValor, revisarConteo, ajustarExistencia, listarAjustes } from './conteo.ts';
 import { rutaPedidos, vencerPedidos, sentenciasDePedido, saldoDe, enPedido } from './pedidos.ts';
@@ -2132,6 +2132,12 @@ export default {
       }
 
       // Conteo de piezas de alto valor (Issue #219, conteo.ts). Contar: cualquier cuenta de piso; ajustar y el rastro: dueno.
+      // Centro de avisos (Issue #429): ventas de ML por atender, a nombre del cajero que la marca.
+      if (pathname === '/api/avisos' && request.method === 'GET') return await avisosPendientes(env);
+      const atender = pathname.match(/^\/api\/avisos\/ml\/([^/]+)\/([^/]+)$/);
+      if (atender && request.method === 'POST') {
+        return await atenderVentaML(env, decodeURIComponent(atender[1]), decodeURIComponent(atender[2]), correo);
+      }
       if (pathname === '/api/conteo' && request.method === 'GET') return await listarAltoValor(env);
       if (pathname === '/api/conteo' && request.method === 'POST') return await revisarConteo(request, env);
       if (pathname === '/api/conteo/ajustes' && request.method === 'GET') return await listarAjustes(env);

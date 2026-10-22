@@ -14,6 +14,7 @@
     display: flex; align-items: center; gap: 14px; }
   header h1 { font-size: 17px; margin: 0; flex: 1; }
   header a { color: #FFD447; font-size: 13px; }
+  #avisos-ml:not([hidden]) { background: #D72B32; color: #fff; padding: 6px 12px; border-radius: 8px; font-size: 15px; font-weight: 700; text-decoration: none; }
   #estado-red { font-size: 13px; padding: 3px 10px; border-radius: 999px; background: #ffffff22; }
   #estado-red.sin-red { background: var(--rojo); }
   main { flex: 1; display: grid; grid-template-columns: 1fr 340px; gap: 16px; padding: 16px; min-height: 0; }
@@ -171,6 +172,7 @@ if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw-caja.js'
   <button id="abrir-corte" type="button">Corte</button>
   <a href="/socios">Alta de socios</a>
   <a href="/admin">Cola de revisión</a>
+  <a href="/avisos" id="avisos-ml" target="_blank" hidden></a>
 </header>
 
 <main>
@@ -520,6 +522,19 @@ function promoAgotada() {
 notaVales();
 cargarConfigVales();
 setInterval(cargarConfigVales, 60000);
+
+/** Issue #429: ventas de Mercado Libre por atender. Sin red o sin PIN se queda como estaba. */
+async function contarAvisos() {
+  try {
+    const r = await fetch('/api/avisos');
+    if (!r.ok) return;
+    const n = (await r.json()).ventas_ml.length;
+    $('avisos-ml').hidden = n === 0;
+    $('avisos-ml').textContent = `📦 ${n} venta${n === 1 ? '' : 's'} de Mercado Libre por atender`;
+  } catch { /* sin red */ }
+}
+contarAvisos();
+setInterval(contarAvisos, 60000);
 const dolares = (centavos) => `${(centavos / 100).toLocaleString('es-MX')} D`;
 
 /* ---------- que caja es esta computadora (Issue #100) ---------- */

@@ -662,6 +662,38 @@ test('venta en ML: un correo a los dueños por venta; sin existencias en D1, el 
   });
 });
 
+test('centro de avisos: la venta espera en /avisos hasta que un cajero la marca; si ML la cancela, vuelve (#429)', async () => {
+  await conML(async (t) => {
+    const { id, itemId } = await publicarPieza(t);
+    t.db.prepare(`insert into usuarios (correo, nombre, roles, activo, creado_en, actualizado_en) values
+      ('cajera@prueba.mx', 'Cajera', 'cajero', 1, '', ''), ('captura@prueba.mx', 'Captura', 'capturista', 1, '', '')`).run();
+    t.sim.ordenes.set('9201', orden(9201, 'paid', [[itemId, 1]]));
+    await avisar(t, '/orders/9201');
+    await t.esperar();
+
+    t.env.DEV_USUARIO = 'captura@prueba.mx';
+    assert.equal((await t.pedir('/api/avisos')).status, 403);
+    t.env.DEV_USUARIO = 'cajera@prueba.mx';
+    const lista = (await t.pedir('/api/avisos')).cuerpo.ventas_ml;
+    assert.equal(lista.length, 1);
+    assert.deepEqual([lista[0].order_id, lista[0].ml_item_id, lista[0].producto_id, lista[0].estado, lista[0].conflicto], ['9201', itemId, id, 'descontada', false]);
+
+    const marcar = () => t.pedir(`/api/avisos/ml/9201/${itemId}`, {});
+    assert.equal((await marcar()).status, 200);
+    assert.equal((await marcar()).status, 409);
+    assert.equal((await t.pedir('/api/avisos')).cuerpo.ventas_ml.length, 0);
+    assert.equal((t.db.prepare('select atendida_por from ml_ventas').get() as any).atendida_por, 'cajera@prueba.mx');
+
+    // ML la cancela despues de empacarla: vuelve a la lista para regresar la pieza al piso.
+    t.sim.ordenes.set('9201', orden(9201, 'cancelled', [[itemId, 1]]));
+    await avisar(t, '/orders/9201');
+    await t.esperar();
+    const otra = (await t.pedir('/api/avisos')).cuerpo.ventas_ml;
+    assert.deepEqual(otra.map((v: any) => v.estado), ['cancelada']);
+    assert.equal(stockDe(t, id), 3);
+  });
+});
+
 test('publicar: si la pieza se vende en tienda mientras ML la crea, queda pausada en ML (no se vende de mas)', async () => {
   await conML(async (t) => {
     const id = pieza(t, { stock: 1 });
