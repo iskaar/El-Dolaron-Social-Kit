@@ -57,13 +57,54 @@ existente cada 15 minutos: procesa hasta 20 referencias confirmadas por `confirm
 una descarga a la vez, y guarda el último valor procesado en `config.imagenes_relleno_hasta`.
 Un fallo se registra y también avanza el cursor; esa pieza reintenta al escanear o confirmar.
 Al ponerse al día solo consulta `imagenes_upc` y el cursor, sin recorrer productos.
-La búsqueda de candidatas fuera del manifiesto (Fase 2) queda pendiente.
+La búsqueda de candidatas fuera del manifiesto (Fase 2) está en /admin («Buscar imagen»).
 Isaac decide usar estas imágenes de otras tiendas o marcas para vender en línea.
 
 Las rutas `/api/manifiesto/:upc/imagen` (GET/POST/PUT) y
 `/api/manifiesto/:upc/imagen/catalogo` (GET) pasan por Access y el rol de captura existente.
 El portal público no las sirve.
 Los enlaces salen del TCIN guardado en servidor; no se aceptan URLs arbitrarias del cliente.
+
+## Buscar imagen en /admin (Fase 2, #413)
+
+Cada tarjeta de El Dolarón sin foto (`foto_key = ''`), incluidas las de «Capturar sin foto»
+y «Revisión del catálogo público», ofrece **Buscar imagen**. Primero guarda las correcciones
+de nombre y marca: la consulta usa los datos guardados, junto al UPC si existe.
+Es manual: una llamada a Gemini en Vertex con `googleSearch` por clic, sin cron ni búsquedas
+automáticas. Reutiliza el cliente de `analisis.ts`. Sin `VERTEX_API_KEY` responde **503**
+con un mensaje claro; no usa la cuota de AI Studio como alternativa.
+
+`POST /api/borradores/:id/imagen/buscar` toma hasta seis páginas únicas de
+`groundingMetadata.groundingChunks[].web.uri`. El Worker sigue la redirección de Vertex
+y lee `og:image` o `image` del JSON-LD `Product`, junto al título de la página.
+**Nunca usa URLs escritas en el texto del modelo.** Devuelve hasta tres candidatas únicas
+`{imagen, pagina, titulo, sitio}`; no las guarda en D1 ni descarga sus imágenes a R2.
+Cada página tiene un plazo de 10 s y un máximo de 3 MB; se omiten páginas bloqueadas,
+inválidas o sin imagen. Si no hay candidatas, sigue disponible tomar o subir foto.
+
+La persona revisa la imagen y el enlace de origen y toca **Usar esta**.
+`PUT /api/borradores/:id/imagen {imagen}` valida la URL elegida por el cliente y reutiliza
+la descarga acotada de la Fase 1: HTTPS, sin usuario, contraseña ni puerto explícito,
+10 s para toda la descarga, 6 MiB como máximo (cabecera y lectura real), respuesta 200 y
+content-type `image/*`. Esta búsqueda permite hasta **tres redirecciones manuales**, siempre
+con las mismas restricciones de URL; la referencia Target de Fase 1 sigue sin redirecciones.
+
+Guarda `fotos/<id>.jpg` con su content-type original mediante put condicional en R2 y
+`UPDATE ... WHERE foto_key = ''` en D1, solo para El Dolarón y sin piezas descartadas.
+Una foto propia, incluso en vuelo, no se reemplaza; una pieza ya con foto responde **409**.
+Si R2 se guardó pero falló el UPDATE, reenviar la misma URL permite completar D1 sin
+reemplazar el objeto. No modifica nombre, marca, precio, stock ni `estado_analisis`.
+Reinicia el recorte como al retomar foto y excluye «Ropa» genérica de la cola de renombrado.
+La pieza entra a catálogo, Mercado Libre y recortes cuando cumple sus filtros habituales;
+el siguiente escaneo del mismo UPC recibe esa foto desde `imagenGuardada`, origen `catalogo`.
+
+Las dos rutas requieren Access y rol dueño o capturista, igual que corregir piezas en
+`/admin`, con alcance de El Dolarón. FEP queda fuera (403 por rol o 404 por pieza ajena),
+y los hosts vendedor y portal las deniegan por omisión (404). Sin dependencias ni migración.
+
+Prueba con Vertex real (pendiente): buscar «BARK Flapper Lantern» y una pieza con UPC,
+abrir sus fuentes, revisar que la imagen coincide y confirmarla. Verificar la foto en
+catálogo/ML/recortes y en el siguiente escaneo, además de un resultado sin imagen o bloqueado.
 
 ## Consulta a Target y verificación humana
 
@@ -96,6 +137,8 @@ abre la página en el teléfono, la persona pasa la verificación, guarda la ima
 
 Desde raíz: `python tools/validate_assets.py`.
 Desde `app/`: `npm test`, `npm run typecheck`, `npm run db:local` sobre una base nueva.
-Los tests HTTP/SQLite verifican confirmación, fuente cambiada, roles/host, datos inválidos,
-foto propia, código original y reintento sin reponer stock; los tests de la pantalla
+Los tests HTTP/SQLite con fetch simulado verifican grounding → página → imagen (incluido
+JSON-LD), exclusión del texto del modelo, 503 sin Vertex, límites y redirecciones,
+confirmación con R2 condicional y carreras con fotos propias, además de fuente cambiada,
+roles/host, datos inválidos, código original y reintento sin reponer stock; los tests de la pantalla
 verifican conservación del código, confirmación explícita y foto retenida ante fallo.
