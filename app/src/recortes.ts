@@ -71,6 +71,13 @@ export async function rutaRecortesAdmin(request: Request, env: Env, pathname: st
     const { results } = await env.DB.prepare(`select id,codigo,nombre,recorte_estado,recorte_fecha,recorte_revision from productos where propietario='dolaron' and recorte_estado in ('listo','error') order by (recorte_revision is not null and recorte_revision<>'ok') desc, recorte_fecha desc limit 60`).all();
     return resp(results);
   }
+  // #419: el recorte sin aprobar no sale en el catálogo público, pero aquí hay que verlo para revisarlo.
+  const img = pathname.match(/^\/api\/recortes\/([0-9a-f-]{36})\/imagen$/);
+  if (img && request.method === 'GET') {
+    const objeto = await env.FOTOS.get(`recortes/${img[1]}.webp`);
+    if (!objeto) return resp({ error: 'Recorte no encontrado.' }, 404);
+    return new Response(objeto.body, { headers: { 'content-type': 'image/webp', 'cache-control': 'private, no-store' } });
+  }
   const m = pathname.match(/^\/api\/recortes\/([0-9a-f-]{36})\/(original|reintentar|aprobar)$/);
   if (!m || request.method !== 'POST') return null;
   const [, id, accion] = m;
