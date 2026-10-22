@@ -522,8 +522,20 @@ $('dlg-cancelar-si').addEventListener('click', async () => {
 
 pintar();
 await cargarCatalogo();
+// Desde /vender: solo prellena; el anticipo y la confirmación siguen siendo manuales.
+const prellenado = new URLSearchParams(location.search);
+if (prellenado.has('codigo')) {
+  $('cliente').value = (prellenado.get('cliente') ?? '').slice(0, 80);
+  $('telefono').value = (prellenado.get('telefono') ?? '').slice(0, 16);
+  $('codigo').value = (prellenado.get('codigo') ?? '').slice(0, 40);
+  agregarPieza($('codigo').value);
+  if (piezas.length) $('codigo').value = '';
+  validar();
+  history.replaceState(null, '', location.pathname);
+}
 await cargarLista();
-$('codigo').focus();
+if (prellenado.has('codigo') && piezas.length) ($('telefono').value ? $('anticipo') : $('telefono')).focus();
+else $('codigo').focus();
 </script>
 </body>
 </html>

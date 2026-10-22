@@ -57,6 +57,7 @@ import { rutaML, recibirNotificacion, conciliarSeguro, sincronizar, publicacionV
 import { pedirDescuento, validarDescuento, listarDescuentos, listarDuenos } from './descuentos.ts';
 import { listarAltoValor, revisarConteo, ajustarExistencia, listarAjustes } from './conteo.ts';
 import { rutaPedidos, vencerPedidos, sentenciasDePedido, saldoDe, enPedido } from './pedidos.ts';
+import { rutaVender } from './vender.ts';
 
 interface FilaConfig {
   clave: string;
@@ -2102,6 +2103,8 @@ export default {
       if (pathname === '/api/yo') {
         return await yo(env, correo, soloComputadora(await leerUsuario(env, correo)) ? await cajeroEnTurno(request, env) : null);
       }
+      const respuestaVender = await rutaVender(request, env, url, correo);
+      if (respuestaVender) return respuestaVender;
       const respuestaRopaIA = await rutaRopaAdmin(request, env, pathname);
       if (respuestaRopaIA) return respuestaRopaIA;
       const respuestaRecortes = await rutaRecortesAdmin(request, env, pathname);

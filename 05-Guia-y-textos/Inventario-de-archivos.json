@@ -151,6 +151,18 @@
       "format": "HTML"
     },
     {
+      "file": "app/public/vender.html",
+      "title": "Vender por WhatsApp",
+      "description": "Página privada de caja para compartir hasta diez piezas con precio y código y anotar interesados sin apartar stock.",
+      "format": "HTML"
+    },
+    {
+      "file": "app/public/vender.js",
+      "title": "Tarjetas para WhatsApp",
+      "description": "Genera tarjetas JPEG 1080 × 1350 en el navegador con el logo oficial, texto y respaldo por descarga y portapapeles.",
+      "format": "JS"
+    },
+    {
       "file": "app/public/marketplace-redes.png",
       "title": "Cierre de redes para Marketplace",
       "description": "Imagen de redes aprobada para descargar desde el catálogo privado del personal.",
