@@ -25,6 +25,7 @@ export function motivoDeCorte(texto) {
 export function crearImpresion({ alCambiar, e = etiquetera, pedir = (...argumentos) => globalThis.fetch(...argumentos) }) {
   const trabajos = new Map();
   let cola = Promise.resolve();   // una pieza a la vez: la impresora es una sola
+  let turno = 0;
   const cambiar = (t, campos) => { Object.assign(t, campos); alCambiar({ ...t }); };
 
   async function correr(t) {
@@ -49,13 +50,13 @@ export function crearImpresion({ alCambiar, e = etiquetera, pedir = (...argument
       if (!pieza?.codigo || !pieza.nombre?.trim() || !(pieza.precio > 0) || !(pieza.stock > 0) || pieza.destino !== 'etiqueta') {
         return cambiar(t, { estado: 'error', hechas: base, mensaje: 'La pieza cambió o se canceló y ya no lleva etiqueta. Revísala en la cola de revisión.' });
       }
-      const reclamo = await e.reclamarEtiquetas([t.id], { reimprimir: forzar });
+      const reclamo = await e.reclamarEtiquetas([t.id], { reimprimir: forzar, version: pieza.etiqueta_version });
       if (!reclamo.reclamadas.includes(t.id)) {
         const marca = reclamo.marcas[t.id];
-        t.forzar = true;
-        return cambiar(t, { estado: 'omitida', hechas: base, mensaje: marca
+        t.forzar = !!marca;
+        return cambiar(t, { estado: marca ? 'omitida' : 'error', hechas: base, mensaje: marca
           ? `Ya salió desde ${marca.etiqueta_origen === 'pc' ? 'la computadora' : 'un celular'} a las ${horaDe(marca.etiqueta_en)}. Si hace falta otra, toca «Reimprimir».`
-          : 'La pieza ya no lleva etiqueta.' });
+          : 'La pieza cambió antes de imprimir. Toca «Imprimir etiqueta» para volver a prepararla.' });
       }
       t.forzar = true;   // desde aqui la marca es de este envio, salga o no
       const copias = Math.max(1, pieza.stock - base);
@@ -94,14 +95,16 @@ export function crearImpresion({ alCambiar, e = etiquetera, pedir = (...argument
     imprimir(id) {
       const t = trabajos.get(id);
       if (!t || t.ocupado) return;   // un doble toque no manda dos veces
+      const pedido = turno;
       cambiar(t, { ocupado: true, mensaje: 'Esperando su turno…' });
-      cola = cola.then(() => correr(t));
+      cola = cola.then(() => pedido === turno ? correr(t)
+        : cambiar(t, { ocupado: false, mensaje: 'Se detuvo a mano. Toca para imprimir.' }));
     },
     /** Al conectar la impresora salen las que esperaban. */
     reanudar() {
       for (const t of trabajos.values()) if (t.estado === 'sin-impresora') this.imprimir(t.id);
     },
     activos: () => [...trabajos.values()].filter((t) => t.ocupado).length,
-    detener: () => e.detenerEnvio(),
+    detener() { turno += 1; e.detenerEnvio(); },
   };
 }

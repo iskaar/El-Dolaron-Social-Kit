@@ -148,7 +148,7 @@ async function cargar() {
   piezas = (await respuesta.json())
     .filter((p) => p.destino === 'etiqueta' && p.precio > 0);
   // Lo que ya salio desde el celular (#440) sale de la lista como si hubiera salido de aqui.
-  for (const p of piezas) if (p.etiqueta_en) adoptarMarca(p.id, p);
+  for (const p of piezas) if (p.etiqueta_en && p.id !== localStorage.getItem(CLAVE_DUDOSA)) adoptarMarca(p.id, p);
   pintar();
 }
 
@@ -392,7 +392,15 @@ async function imprimir(ids, pedidas = new Map(), automatico = false) {
         }
         // Antes de mandarla se reclama en la base (#440): si el celular ya la sacó, no se repite.
         // Para volver a sacarla: «Mostrar impresas» y «No salió desde aquí».
-        if (!(await reclamarEtiquetas([p.id])).reclamadas.includes(p.id)) {
+        const reclamo = await reclamarEtiquetas([p.id], {
+          reimprimir: !automatico && localStorage.getItem(CLAVE_DUDOSA) === p.id,
+          version: p.etiqueta_version,
+        });
+        if (!reclamo.reclamadas.includes(p.id)) {
+          if (!reclamo.marcas[p.id]) {
+            resumen.textContent = 'La pieza cambió antes de imprimir. Revisa la cola y retoma la sesión.';
+            return false;
+          }
           omitidas += 1;
           continue;
         }
@@ -401,7 +409,7 @@ async function imprimir(ids, pedidas = new Map(), automatico = false) {
         const detalle = `pieza ${terminadas + 1} de ${ids.length}`;
         resumen.textContent = `Imprimiendo ${detalle}: ${copias} ${copias === 1 ? 'etiqueta' : 'etiquetas'}…`;
         // Si se cierra la página durante BLE, no se reenvía una etiqueta incierta a ciegas.
-        if (automatico) localStorage.setItem(CLAVE_DUDOSA, p.id);
+        localStorage.setItem(CLAVE_DUDOSA, p.id);
         const salio = await imprimirEtiquetas(
           p, copias,
           (hechas) => { resumen.textContent = `Imprimiendo ${detalle}: etiqueta ${hechas} de ${copias}…`; },
@@ -409,11 +417,10 @@ async function imprimir(ids, pedidas = new Map(), automatico = false) {
         );
         pintarHistorial();
         if (!salio) {
-          // Esta computadora reintenta la pieza (sigue en la lista), asi que suelta la marca para no negarse a si misma.
-          await soltarEtiquetas([p.id]);
+          // BLE no confirma el papel: conservar el reclamo evita que otro dispositivo repita un envío parcial.
           resumen.textContent = envioDetenido()
-            ? `Detenido en la pieza ${terminadas + 1} de ${ids.length}. Las que faltan siguen en la lista.`
-            : `Se cortó en la pieza ${terminadas + 1} de ${ids.length} (${p.nombre}): ${errorEnvio()}. Las que faltan siguen en la lista.`;
+            ? `Detenido en la pieza ${terminadas + 1} de ${ids.length}. Revisa el papel y recupera esa pieza manualmente; las demás siguen en la lista.`
+            : `Se cortó en la pieza ${terminadas + 1} de ${ids.length} (${p.nombre}): ${errorEnvio()}. Revisa el papel y recupera esa pieza manualmente; las demás siguen en la lista.`;
           return false;
         }
         marcarImpresa(p.id, undefined, p);

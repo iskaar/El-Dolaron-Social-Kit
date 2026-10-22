@@ -462,9 +462,7 @@ export function etiqueteraLista() {
  * el enlace, mandarTspl() la reconecta sola (gatt.connect() de un aparato ya
  * escogido no pide clic).
  *
- * ponytail: sin reconexion al recargar la pagina. getDevices() existe a medias
- * entre versiones de Chrome y se cuelga con la impresora apagada; un clic al
- * principio del turno es mas barato que esa complicacion.
+ * /escanear tambien intenta reconectar al recargar con reconectarEtiquetera().
  */
 export async function conectarEtiquetera({ cualquiera = false } = {}) {
   const aparato = await navigator.bluetooth.requestDevice(cualquiera
@@ -684,9 +682,8 @@ function anotarEnvio(envio) {
 // revision cambia el precio, la pieza tiene que volver a la lista para
 // reimprimirla. Por navegador, como el historial.
 //
-// ponytail: "enviada" no es "impresa": la impresora no dice si saco el papel;
-// para eso esta desmarcarDesde(). Si algun dia se etiqueta desde dos
-// computadoras, esto se muda a una columna en D1.
+// "Enviada" no confirma el papel; desmarcarDesde() permite recuperarlo. La copia
+// local alimenta la lista y etiquetas_enviadas coordina los distintos dispositivos.
 const CLAVE_IMPRESAS = 'etiqueta-impresas';
 
 export function impresas() {
@@ -760,9 +757,9 @@ export function adoptarMarca(id, marca) {
  * las que gano esta llamada y, de las demas, la marca que ya tienen (que aqui se adopta). Con
  * `reimprimir` se queda con ella aunque ya haya salido. Lanza si no hay red: no se manda a ciegas.
  */
-export async function reclamarEtiquetas(ids, { reimprimir = false } = {}) {
+export async function reclamarEtiquetas(ids, { reimprimir = false, version } = {}) {
   const respuesta = await fetch('/api/etiquetas/enviadas', {
-    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ids, reimprimir }),
+    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ids, reimprimir, version }),
     signal: AbortSignal.timeout(15000),
   });
   const cuerpo = await respuesta.json().catch(() => ({}));

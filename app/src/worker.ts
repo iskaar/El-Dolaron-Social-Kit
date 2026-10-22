@@ -822,6 +822,10 @@ async function revisarCaptura(id: string, request: Request, env: Env, correo: st
 const CODIGO_NUEVO = `'ED-' || printf('%06d', max(rowid,
   (select coalesce(max(cast(substr(codigo, 4) as integer)), 0) + 1 from productos where codigo like 'ED-%')))`;
 
+// El reclamo debe registrar exactamente el papel preparado, incluso si hay una edición entre peticiones.
+const VERSION_ETIQUETA = `json_array(codigo, precio, case when precio_lista > precio then precio_lista else 0 end,
+  trim(nombre), trim(coalesce(talla, '')), semana_ingreso, stock)`;
+
 /**
  * Desde el celular (host del vendedor) solo se etiqueta lo que esa persona capturo en las
  * ultimas 24 h, como la correccion de captura: el telefono del pasillo no abre el inventario.
@@ -855,13 +859,14 @@ async function prepararEtiquetas(request: Request, env: Env, propietario: string
     return json({ error: 'Identificadores invalidos.' }, 400);
   }
 
-  const huecos = limpios.map(() => '?').join(',');
+  // Un solo parámetro para los UUID: 100 piezas más el alcance excederían el límite de D1.
+  const seleccion = JSON.stringify(limpios);
   const alcance = delCelular(celular);
   // Una por una y en orden de captura: cada codigo nuevo ve el anterior (CODIGO_NUEVO).
   const { results: porCodificar } = await env.DB.prepare(
-    `select id from productos where id in (${huecos}) and propietario = ? and estado_analisis <> 'descartado' and (codigo is null or codigo = '')${alcance.sql} order by rowid`,
+    `select id from productos where id in (select value from json_each(?)) and propietario = ? and estado_analisis <> 'descartado' and (codigo is null or codigo = '')${alcance.sql} order by rowid`,
   )
-    .bind(...limpios, propietario, ...alcance.args)
+    .bind(seleccion, propietario, ...alcance.args)
     .all<{ id: string }>();
   const ahora = new Date().toISOString();
   if (porCodificar.length) {
@@ -872,10 +877,10 @@ async function prepararEtiquetas(request: Request, env: Env, propietario: string
   }
 
   const { results } = await env.DB.prepare(
-    `select id, codigo, nombre, talla, precio, precio_lista, semana_ingreso, destino, stock
-     from productos where id in (${huecos}) and propietario = ? and estado_analisis <> 'descartado'${alcance.sql} order by rowid`,
+    `select id, codigo, nombre, talla, precio, precio_lista, semana_ingreso, destino, stock, ${VERSION_ETIQUETA} as etiqueta_version
+     from productos where id in (select value from json_each(?)) and propietario = ? and estado_analisis <> 'descartado'${alcance.sql} order by rowid`,
   )
-    .bind(...limpios, propietario, ...alcance.args)
+    .bind(seleccion, propietario, ...alcance.args)
     .all();
 
   return json(results);
@@ -893,9 +898,13 @@ async function prepararEtiquetas(request: Request, env: Env, propietario: string
  * Responde `reclamadas` (las que gano esta peticion) y `marcas` (la que quedo para cada pieza).
  */
 async function reclamarEtiquetas(request: Request, env: Env, propietario: string, celular: string | null): Promise<Response> {
-  const cuerpo = (await request.json().catch(() => null)) as { ids?: unknown; reimprimir?: unknown } | null;
+  const cuerpo = (await request.json().catch(() => null)) as { ids?: unknown; reimprimir?: unknown; version?: unknown } | null;
   const ids = idsDeEtiquetas(cuerpo);
   if (!ids) return json({ error: 'Selecciona entre 1 y 100 piezas.' }, 400);
+  const version = cuerpo?.version ?? null;
+  if (version !== null && (typeof version !== 'string' || version.length > 2000 || ids.length !== 1)) {
+    return json({ error: 'Versión de etiqueta inválida.' }, 400);
+  }
   const ahora = new Date().toISOString();
   const alcance = delCelular(celular);
   const origen = celular ? 'celular' : 'pc';
@@ -903,18 +912,20 @@ async function reclamarEtiquetas(request: Request, env: Env, propietario: string
   const resultados = await env.DB.batch(ids.map((id) => env.DB.prepare(
     `insert into etiquetas_enviadas (producto_id, etiqueta_en, etiqueta_precio, etiqueta_precio_lista, etiqueta_nombre, etiqueta_talla, etiqueta_origen)
      select id, ?, precio, case when precio_lista > precio then precio_lista else 0 end, trim(nombre), trim(coalesce(talla, '')), ?
-     from productos where id = ? and propietario = ? and estado_analisis <> 'descartado' and codigo <> '' and stock > 0${alcance.sql}
+     from productos where id = ? and propietario = ? and estado_analisis = 'listo' and destino = 'etiqueta'
+       and trim(nombre) <> '' and precio > 0 and codigo <> '' and stock > 0${alcance.sql}
+       and (? is null or ${VERSION_ETIQUETA} = ?)
      on conflict (producto_id) do update set etiqueta_en = excluded.etiqueta_en, etiqueta_precio = excluded.etiqueta_precio,
        etiqueta_precio_lista = excluded.etiqueta_precio_lista, etiqueta_nombre = excluded.etiqueta_nombre,
        etiqueta_talla = excluded.etiqueta_talla, etiqueta_origen = excluded.etiqueta_origen
      where ? = 1 or etiqueta_precio <> excluded.etiqueta_precio or etiqueta_precio_lista <> excluded.etiqueta_precio_lista
        or etiqueta_nombre <> excluded.etiqueta_nombre or etiqueta_talla <> excluded.etiqueta_talla`,
-  ).bind(ahora, origen, id, propietario, ...alcance.args, reimprimir)));
-  const huecos = ids.map(() => '?').join(',');
+  ).bind(ahora, origen, id, propietario, ...alcance.args, version, version, reimprimir)));
   const { results } = await env.DB.prepare(
     `select producto_id, etiqueta_en, etiqueta_precio, etiqueta_precio_lista, etiqueta_nombre, etiqueta_talla, etiqueta_origen
-     from etiquetas_enviadas where producto_id in (${huecos})`,
-  ).bind(...ids).all<{ producto_id: string }>();
+     from etiquetas_enviadas where producto_id in (select value from json_each(?))
+       and producto_id in (select id from productos where propietario = ?${alcance.sql})`,
+  ).bind(JSON.stringify(ids), propietario, ...alcance.args).all<{ producto_id: string }>();
   return json({
     reclamadas: ids.filter((_, i) => (resultados[i]?.meta?.changes ?? 0) > 0),
     marcas: Object.fromEntries(results.map(({ producto_id, ...marca }) => [producto_id, marca])),
@@ -926,9 +937,9 @@ async function soltarEtiquetas(request: Request, env: Env, propietario: string):
   const ids = idsDeEtiquetas((await request.json().catch(() => null)) as { ids?: unknown } | null);
   if (!ids) return json({ error: 'Selecciona entre 1 y 100 piezas.' }, 400);
   const { meta } = await env.DB.prepare(
-    `delete from etiquetas_enviadas where producto_id in (${ids.map(() => '?').join(',')})
+    `delete from etiquetas_enviadas where producto_id in (select value from json_each(?))
        and producto_id in (select id from productos where propietario = ?)`,
-  ).bind(...ids, propietario).run();
+  ).bind(JSON.stringify(ids), propietario).run();
   return json({ soltadas: meta.changes });
 }
 
@@ -2174,7 +2185,10 @@ export default {
       if (pathname.startsWith('/api/asistente/')) return await rutaAsistente(request, env, url);
 
       // Quien es (JWT de Access verificado) y si su cuenta le deja entrar aqui.
-      const regla = permiso(pathname, request.method);
+      // FEP imprime desde la PC; en captura las API nuevas exigen el mismo rol que /escanear.
+      const rutaPermiso = env.HOST_VENDEDOR === url.hostname
+        && ['/api/calibracion', '/api/etiquetas', '/api/etiquetas/enviadas'].includes(pathname) ? '/escanear' : pathname;
+      const regla = permiso(rutaPermiso, request.method);
       const acceso = await quienEs(request, env, url.hostname);
       if (!acceso) {
         return json({ error: 'Sin sesion. Vuelve a entrar.' }, 401);

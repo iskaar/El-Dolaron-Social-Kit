@@ -106,6 +106,106 @@ test('la calibración se lee con solo sus dos claves, también en el host del ce
   } finally { p.db.close(); }
 });
 
+test('FEP conserva impresión en la PC pero no abre las API de impresión del host de captura', async () => {
+  const p = montar();
+  try {
+    p.db.prepare(`insert into usuarios (correo, nombre, roles, activo, creado_en, actualizado_en)
+      values ('fep@prueba.mx', 'FEP', 'finanzas', 1, '', '')`).run();
+    p.como('fep@prueba.mx');
+    assert.equal((await p.pc('/api/calibracion')).status, 200);
+    assert.equal((await p.pc('/api/etiquetas', { ids: [crypto.randomUUID()] })).status, 200);
+    for (const ruta of ['/api/calibracion', '/api/etiquetas', '/api/etiquetas/enviadas']) {
+      assert.equal((await p.celular(ruta, ruta.endsWith('calibracion') ? undefined : { ids: [crypto.randomUUID()] })).status, 403, ruta);
+    }
+  } finally { p.db.close(); }
+});
+
+test('un reclamo no revela marcas de otro capturista, fuera de 24 h ni de otro propietario', async () => {
+  const p = montar();
+  try {
+    const mia = p.pieza(), otra = p.pieza({ capturado_por: 'otro@prueba.mx' });
+    const vieja = p.pieza({ creado_en: new Date(Date.now() - 25 * 3600_000).toISOString() }), fep = p.pieza();
+    await p.pc('/api/etiquetas/enviadas', { ids: [mia, otra, vieja, fep] });
+    p.db.prepare("update productos set propietario = 'fep' where id = ?").run(fep);
+    p.como(CAPTURISTA);
+    const r = await p.celular('/api/etiquetas/enviadas', { ids: [mia, otra, vieja, fep] });
+    assert.equal(r.status, 200);
+    assert.deepEqual(r.cuerpo.reclamadas, []);
+    assert.deepEqual(Object.keys(r.cuerpo.marcas), [mia]);
+    assert.deepEqual(Object.keys((await p.pc('/api/etiquetas/enviadas', { ids: [fep] })).cuerpo.marcas), []);
+  } finally { p.db.close(); }
+});
+
+test('borradores funciona con etiquetas_enviadas vacía, también con filtros de sesión y cambios', async () => {
+  const p = montar();
+  try {
+    const id = p.pieza();
+    const desde = new Date(Date.now() - 60_000).toISOString();
+    for (const filtro of ['', '?estado=listo', `?desde=${desde}`, `?desde=${desde}&cambios=${desde}`]) {
+      const r = await p.pc(`/api/borradores${filtro}`);
+      assert.equal(r.status, 200, filtro);
+      assert.equal(r.cuerpo.find((x: any) => x.id === id).etiqueta_en, null);
+    }
+  } finally { p.db.close(); }
+});
+
+test('no se reclama una pieza que dejó de estar lista, tener precio/nombre o llevar etiqueta', async () => {
+  const p = montar();
+  try {
+    const id = p.pieza();
+    for (const cambio of ["estado_analisis='pendiente'", "estado_analisis='error'", "precio=0", "nombre='  '", "destino='banda_r99'"]) {
+      p.db.prepare(`update productos set estado_analisis='listo', precio=9900, nombre='Playera', destino='etiqueta' where id=?`).run(id);
+      p.db.prepare(`update productos set ${cambio} where id=?`).run(id);
+      assert.deepEqual((await p.pc('/api/etiquetas/enviadas', { ids: [id] })).cuerpo.reclamadas, [], cambio);
+      assert.equal(p.db.prepare('select count(*) n from etiquetas_enviadas where producto_id=?').get(id)!.n, 0);
+    }
+  } finally { p.db.close(); }
+});
+
+test('los lotes de 100 piezas respetan los 100 parámetros por sentencia de D1', async () => {
+  const p = montar();
+  try {
+    const preparar = p.env.DB.prepare.bind(p.env.DB);
+    p.env.DB.prepare = (sql: string) => {
+      const s = preparar(sql), bind = s.bind.bind(s);
+      s.bind = (...args: unknown[]) => { assert.ok(args.length <= 100, `${args.length} parámetros exceden el límite de D1`); return bind(...args); };
+      return s;
+    };
+    const ids = Array.from({ length: 100 }, () => p.pieza({ codigo: null }));
+    p.como(CAPTURISTA);
+    const preparadas = await p.celular('/api/etiquetas', { ids });
+    assert.equal(preparadas.status, 200);
+    assert.equal(preparadas.cuerpo.length, 100);
+    const reclamo = await p.celular('/api/etiquetas/enviadas', { ids });
+    assert.equal(reclamo.status, 200);
+    assert.equal(reclamo.cuerpo.reclamadas.length, 100);
+    const soltadas = await p.pc('/api/etiquetas/enviadas', { ids }, 'DELETE');
+    assert.equal(soltadas.status, 200);
+    assert.equal(soltadas.cuerpo.soltadas, 100);
+  } finally { p.db.close(); }
+});
+
+test('migración 049: encabezado ejecutable, sin comentarios en línea, aditiva y repetible sobre datos existentes', () => {
+  const p = montar();
+  try {
+    const sql = readFileSync('migracion-049-etiqueta-impresa.sql', 'utf8');
+    assert.match(sql, /-- npx wrangler d1 execute el-dolaron-sandbox .*--file=migracion-049-etiqueta-impresa.sql/);
+    assert.match(sql, /-- npx wrangler d1 execute el-dolaron --remote --file=migracion-049-etiqueta-impresa.sql/);
+    for (const linea of sql.split('\n')) if (!linea.trimStart().startsWith('--')) assert.ok(!linea.includes('--'));
+    p.db.exec('drop table etiquetas_enviadas; pragma foreign_keys=on;');
+    const esquema = p.db.prepare('select * from sqlite_master order by name').all();
+    const datos = p.db.prepare('select * from productos order by id').all();
+    p.db.exec(sql);
+    p.db.prepare("insert into etiquetas_enviadas values (?, 'hoy', 9900, 0, 'Playera', 'M', 'pc')").run(p.pieza());
+    const marca = p.db.prepare('select * from etiquetas_enviadas').all();
+    p.db.exec(sql);
+    assert.deepEqual(p.db.prepare('select * from etiquetas_enviadas').all(), marca);
+    assert.deepEqual(p.db.prepare("select * from sqlite_master where name not like '%etiquetas_enviadas%' order by name").all(), esquema);
+    for (const fila of datos) assert.deepEqual(p.db.prepare('select * from productos where id=?').get(fila.id!), fila);
+    assert.deepEqual(p.db.prepare('pragma foreign_key_check').all(), []);
+  } finally { p.db.close(); }
+});
+
 test('reclamar: gana el primero y el segundo se omite, sea PC o celular; un cambio en la etiqueta la deja pasar otra vez', async () => {
   const p = montar();
   try {
@@ -223,9 +323,9 @@ function telefono(p: ReturnType<typeof montar>) {
     etiqueteraLista: () => e.conectada,
     reconectarEtiquetera: async () => e.conectada,
     envioDetenido: () => false, detenerEnvio: () => { e.detenidos += 1; }, errorEnvio: () => e.error,
-    reclamarEtiquetas: async (ids: string[], op: { reimprimir?: boolean } = {}) => {
+    reclamarEtiquetas: async (ids: string[], op: { reimprimir?: boolean; version?: string } = {}) => {
       e.reclamos.push(op.reimprimir === true);
-      return (await p.celular('/api/etiquetas/enviadas', { ids, reimprimir: op.reimprimir === true })).cuerpo;
+      return (await p.celular('/api/etiquetas/enviadas', { ids, ...op })).cuerpo;
     },
     imprimirEtiquetas: async (pieza: { id: string }, copias: number, avanzar: (n: number, total: number) => void) => {
       const salen = e.corta === null ? copias : Math.min(e.corta, copias);
@@ -365,6 +465,53 @@ test('motivoDeCorte traduce lo que dice la etiquetera', () => {
   assert.match(motivoDeCorte('NetworkError: GATT operation failed'), /Se perdió la conexión/);
   assert.match(motivoDeCorte('detenido a mano'), /detuvo a mano/);
   assert.match(motivoDeCorte(''), /No se pudo enviar/);
+});
+
+test('Detener en el celular cancela también las piezas que esperaban, sin reclamarlas', async () => {
+  const p = montar();
+  try {
+    const primera = p.pieza(), segunda = p.pieza();
+    const c = telefono(p);
+    let terminarEnvio!: () => void;
+    const pendiente = new Promise<void>((r) => { terminarEnvio = r; });
+    const imprimir = c.e.imprimirEtiquetas;
+    c.e.imprimirEtiquetas = async (...args) => { await pendiente; return imprimir(...args); };
+    c.impresion.ofrecer(primera, 'Primera', 3);
+    c.impresion.ofrecer(segunda, 'Segunda', 3);
+    c.impresion.imprimir(primera);
+    c.impresion.imprimir(segunda);
+    await c.terminar();
+    c.impresion.detener();
+    terminarEnvio();
+    await c.terminar();
+    assert.deepEqual(c.e.enviadas, [{ id: primera, copias: 3 }]);
+    assert.equal(c.ultimo(segunda).ocupado, false);
+    assert.equal(p.db.prepare('select count(*) n from etiquetas_enviadas where producto_id=?').get(segunda)!.n, 0);
+    c.impresion.imprimir(segunda);   // un toque posterior sí la vuelve a pedir
+    await c.terminar();
+    assert.equal(c.e.enviadas.length, 2);
+  } finally { p.db.close(); }
+});
+
+test('si cambia el precio entre preparar y reclamar, el celular no imprime ni registra una etiqueta distinta al papel', async () => {
+  const p = montar();
+  try {
+    const id = p.pieza();
+    const c = telefono(p), reclamar = c.e.reclamarEtiquetas;
+    c.e.reclamarEtiquetas = async (...args) => {
+      p.db.prepare('update productos set precio=15000 where id=?').run(id);
+      return reclamar(...args);
+    };
+    c.impresion.ofrecer(id, 'Playera azul', 3);
+    c.impresion.imprimir(id);
+    await c.terminar();
+    assert.deepEqual(c.e.enviadas, []);
+    assert.equal(p.db.prepare('select count(*) n from etiquetas_enviadas where producto_id=?').get(id)!.n, 0);
+    c.impresion.imprimir(id);
+    await c.terminar();
+    assert.equal(c.e.enviadas.length, 1);
+    assert.equal(p.db.prepare('select etiqueta_precio from etiquetas_enviadas where producto_id=?').get(id)!.etiqueta_precio, 15000);
+  } finally { p.db.close(); }
 });
 
 test('escanear.html: botones de 44 px, avisos aria-live, con los controles de la impresora', () => {

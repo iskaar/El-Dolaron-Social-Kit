@@ -82,7 +82,8 @@ async function pagina(t: ReturnType<typeof tienda>, ambiente = 'sandbox', almace
     return elementos.get(id);
   };
   const estado = { conectada: true, falloBle: false, falloRed: false, falloMarca: false, permiso: 0, reclamos: [] as string[][],
-    enviadas: [] as { id: string; copias: number }[], detenido: false, antesDePreparar: null as null | (() => Promise<void>) };
+    enviadas: [] as { id: string; copias: number }[], detenido: false, antesDePreparar: null as null | (() => Promise<void>),
+    antesDeReclamar: null as null | (() => void) };
   const marcas = () => JSON.parse(almacen.get('etiqueta-impresas') || '{}');
   const contexto: Record<string, any> = {
     document: { getElementById: $ }, navigator: { bluetooth: {}, locks: { request: async (_nombre: string, _opciones: any, fn: any) => fn({}) } },
@@ -107,9 +108,10 @@ async function pagina(t: ReturnType<typeof tienda>, ambiente = 'sandbox', almace
     // El registro compartido (#440) contra el Worker real; la marca adoptada se guarda como lo hace etiquetera.js.
     adoptarMarca: (id: string, m: any) => almacen.set('etiqueta-impresas', JSON.stringify({ ...marcas(), [id]: { hora: m.etiqueta_en, precio: m.etiqueta_precio,
       precio_lista: m.etiqueta_precio_lista, nombre: m.etiqueta_nombre, talla: m.etiqueta_talla } })),
-    reclamarEtiquetas: async (ids: string[], opciones: { reimprimir?: boolean } = {}) => {
+    reclamarEtiquetas: async (ids: string[], opciones: { reimprimir?: boolean; version?: string } = {}) => {
       estado.reclamos.push(ids);
-      const r = await t.pedir('/api/etiquetas/enviadas', { ids, reimprimir: opciones.reimprimir === true });
+      estado.antesDeReclamar?.();
+      const r = await t.pedir('/api/etiquetas/enviadas', { ids, ...opciones });
       if (r.status >= 300) throw new Error(r.cuerpo.error);
       for (const id of ids) if (!r.cuerpo.reclamadas.includes(id) && r.cuerpo.marcas[id]) contexto.adoptarMarca(id, r.cuerpo.marcas[id]);
       return r.cuerpo;
@@ -569,7 +571,7 @@ test('la automática no repite lo que el celular ya sacó, aunque se haya cortad
   } finally { t.db.close(); }
 });
 
-test('lo que sacó la PC el celular lo omite; si la PC falla suelta su marca y reintenta', async () => {
+test('lo que sacó la PC el celular lo omite; si la PC falla conserva su marca y permite recuperación manual', async () => {
   const t = tienda();
   try {
     t.env.AMBIENTE = 'sandbox';
@@ -579,8 +581,8 @@ test('lo que sacó la PC el celular lo omite; si la PC falla suelta su marca y r
     p.estado.falloBle = true;
     await p.iniciarAutomatica();
     assert.equal(p.activa(), false);
-    // La PC no pudo: no se queda con la etiqueta, y el celular (o ella misma) puede sacarla.
-    assert.equal(t.db.prepare('select count(*) n from etiquetas_enviadas').get()!.n, 0);
+    // Puede haber salido papel: otro dispositivo no debe repetir; la PC recupera explícitamente.
+    assert.equal(t.db.prepare('select count(*) n from etiquetas_enviadas').get()!.n, 1);
     p.estado.falloBle = false;
     await p.imprimir([id]);
     assert.equal(t.db.prepare('select etiqueta_origen o from etiquetas_enviadas where producto_id=?').get(id)!.o, 'pc');
@@ -604,5 +606,41 @@ test('un lote omite lo que el celular ya sacó y lo dice', async () => {
     assert.equal((await t.pedir('/api/etiquetas/enviadas', { ids: [id] }, 'DELETE')).cuerpo.soltadas, 1);
     await p.imprimir([id], new Map(), true);
     assert.deepEqual(p.estado.enviadas.map((x: any) => x.id), [otra, id]);
+  } finally { t.db.close(); }
+});
+
+test('un envío BLE incierto de la PC conserva el reclamo para que otro navegador o el celular no lo repita', async () => {
+  const t = tienda();
+  try {
+    const id = agregar(t, new Date().toISOString(), 'listo', 3);
+    t.db.prepare('update productos set capturado_por=? where id=?').run(DUENO, id);
+    const pc = await pagina(t);
+    pc.estado.falloBle = true;
+    await pc.iniciarAutomatica();
+    assert.equal(t.db.prepare('select count(*) n from etiquetas_enviadas where producto_id=?').get(id)!.n, 1);
+    const otraPc = await pagina(t);
+    await otraPc.iniciarAutomatica();
+    assert.deepEqual(otraPc.estado.enviadas, []);
+    assert.deepEqual((await reclamarDesdeCelular(t, [id])).reclamadas, []);
+    pc.estado.falloBle = false;
+    await pc.imprimir([id]);   // recuperación explícita tras revisar el papel
+    assert.equal(pc.estado.enviadas.length, 2);
+    assert.equal(pc.almacen.has('etiqueta-automatica-dudosa'), false);
+  } finally { t.db.close(); }
+});
+
+test('la PC no reclama ni imprime datos que cambiaron después de preparar la etiqueta', async () => {
+  const t = tienda();
+  try {
+    const id = agregar(t);
+    const pc = await pagina(t);
+    pc.estado.antesDeReclamar = () => { t.db.prepare('update productos set precio=9900 where id=?').run(id); };
+    await pc.iniciarAutomatica();
+    assert.deepEqual(pc.estado.enviadas, []);
+    assert.equal(t.db.prepare('select count(*) n from etiquetas_enviadas where producto_id=?').get(id)!.n, 0);
+    assert.equal(pc.activa(), false);
+    assert.match(pc.$('resumen').textContent, /cambió antes de imprimir/);
+    await pc.iniciarAutomatica();
+    assert.deepEqual(pc.estado.enviadas, [{ id, copias: 1 }]);
   } finally { t.db.close(); }
 });

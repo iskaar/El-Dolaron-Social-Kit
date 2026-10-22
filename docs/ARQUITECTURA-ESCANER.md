@@ -222,8 +222,8 @@ Antes del envío automático se guarda su UUID en el navegador. Si BLE falla o l
 página se cierra a medias, la sesión se pausa: revisar el papel y la foto, imprimir
 manualmente esa pieza o marcarla como impresa, y retomar. Un envío completo se
 marca con las funciones existentes y desaparece de la cola. Las pestañas del mismo
-navegador coordinan el consumidor con Web Locks; las marcas son por navegador,
-como antes, así que se usa **una sola computadora/navegador** para esta sesión.
+navegador coordinan el consumidor con Web Locks; los distintos dispositivos comparten
+el reclamo de `etiquetas_enviadas` (Issue #440, detalle abajo).
 La AE240 no confirma que salió el papel: «Mostrar impresas» / «No salió desde aquí»
 sigue siendo la recuperación física. No se ha cambiado ni validado de nuevo su
 calibración en hardware real.
@@ -278,14 +278,18 @@ etiquetas nuevas). La tabla se llena con `tools/importar_manifiesto.py`. Detalle
   celular la **reclaman** con `POST /api/etiquetas/enviadas`: un solo `insert … on conflict do update where` decide, así
   que el primero que llega la imprime y el otro la omite. Se vuelve a poder reclamar si lo que dice la etiqueta cambió
   (misma regla que `etiquetaVigente`) o si se pide `reimprimir` (botón explícito del celular, «No salió desde aquí» de la PC).
+  La preparación devuelve `etiqueta_version`; al imprimir, el reclamo exige que código, texto, precios, semana y stock
+  sigan iguales en esa misma sentencia. Si cambiaron entre las dos peticiones, no reclama ni imprime datos anteriores.
   La PC adopta la marca del servidor en su `localStorage` (campos `etiqueta_*` de `GET /api/borradores`, o la respuesta
   de un reclamo denegado), así que sus listas y su automática no cambian.
-- **Si falla.** El celular conserva su marca aunque se corte la tanda (puede haber salido papel): la PC no repite y se
-  recupera desde el celular («Imprimir las que faltan» o «Reimprimir»). La PC, en cambio, suelta su marca si falla, como
-  antes reintentaba la pieza. «No salió desde aquí» en la PC también suelta la marca en la base (`DELETE`).
+- **Si falla.** Ambos conservan su marca aunque se corte la tanda (puede haber salido papel), para que otro dispositivo
+  no repita. Tras revisar el papel, se recupera desde el celular («Imprimir las que faltan» o «Reimprimir») o manualmente
+  desde la PC que guarda el envío incierto. «No salió desde aquí» en la PC suelta la marca en la base (`DELETE`).
+  «Detener» en el celular también cancela las piezas que esperaban, sin reclamarlas; un toque posterior puede retomarlas.
 - **Host del escáner (denegar por omisión).** Se agregan solo: los `.js` (`imprimir-celular.js`, `etiquetera.js`,
   `impresora.js`, `code128.js`), `GET /api/calibracion`, `POST /api/etiquetas` y `POST /api/etiquetas/enviadas`. Desde ese
-  host ambos `POST` se limitan a lo que esa persona capturó en las últimas 24 h. Siguen cerrados ahí: `PUT /api/calibracion`,
+  host las tres API exigen capturista (con el acceso general del dueño); FEP sigue imprimiendo desde la PC. Ambos `POST`
+  y las marcas devueltas se limitan a lo que esa persona capturó en las últimas 24 h. Siguen cerrados ahí: `PUT /api/calibracion`,
   `DELETE /api/etiquetas/enviadas`, `GET /api/config`, las pantallas de etiquetas y calibración.
 - **Mejor esfuerzo.** La reconexión sin toque usa `navigator.bluetooth.getDevices()` (solo Chrome reciente) y solo si ya
   se conectó desde esa página; con la impresora apagada se rinde a los 8 s y queda el botón «Conectar impresora».
