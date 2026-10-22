@@ -7,6 +7,7 @@
  * proveedores (docs/ARQUITECTURA-ESCANER.md).
  */
 import Anthropic from '@anthropic-ai/sdk';
+import { decodificarNombre } from './nombre.ts';
 import { calcularPrecio, precioDesdeSugerencia } from './precio.ts';
 import { CATEGORIAS as LISTA_CATEGORIAS, CLAVES_CATEGORIA } from '../public/categorias.js';
 import { PRENDAS_ROPA } from '../public/ropa.js';
@@ -189,7 +190,7 @@ const PIDE_JSON = [
 function normalizar(cruda: Partial<Ficha>): Ficha {
   const categoria = String(cruda.categoria ?? '');
   return {
-    nombre: String(cruda.nombre ?? '').slice(0, 120),
+    nombre: decodificarNombre(String(cruda.nombre ?? '')).slice(0, 120),
     marca: String(cruda.marca ?? '').trim().slice(0, 60),
     categoria: CATEGORIAS.includes(categoria) ? categoria : 'otros',
     precio_lista_mxn: Math.max(0, Math.round(Number(cruda.precio_lista_mxn ?? 0))),

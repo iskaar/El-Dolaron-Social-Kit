@@ -24,6 +24,8 @@ test('dos fusiones de la misma repetida suman una sola vez', async () => {
   assert.deepEqual([a.status, b.status].sort(), [200, 404]);
   assert.equal((t.db.prepare('select stock from productos where id = ?').get(PRODUCTO) as { stock: number }).stock, 53);
   assert.equal((a.status === 200 ? a : b).cuerpo.stock, 53);
+  assert.equal(t.db.prepare('select id from productos where id = ?').get(REPETIDA), undefined);
+  assert.equal((await t.pedir('/api/catalogo')).cuerpo.find((p: any) => p.codigo === 'ED-000001').stock, 53);
 });
 
 test('una reserva de etiqueta que llega tarde no reemplaza el codigo ya emitido', async () => {
