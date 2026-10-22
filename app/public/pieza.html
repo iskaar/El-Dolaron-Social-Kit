@@ -34,6 +34,8 @@
     background:#fff; color:inherit; border:1px solid var(--linea); margin-bottom:8px; }
   .resultado[aria-current=true] { border:2px solid var(--azul); background:#eef1f6; }
   .resultado img { width:56px; height:56px; object-fit:cover; border-radius:6px; }
+  .resultado > span:nth-child(2) { grid-column:2; }
+  .resultado > span:last-child { grid-column:3; }
   .resultado b, .resultado small { display:block; overflow-wrap:anywhere; }
   .resultado small { margin-top:4px; color:#5b6478; }
   #ficha { background:#fff; border:1px solid var(--linea); border-radius:12px; padding:16px; align-self:start; }
@@ -41,18 +43,13 @@
   #sin-foto { aspect-ratio:1; display:grid; place-content:center; background:#eef1f6; border-radius:8px; }
   #precio { font-size:28px; color:var(--azul); }
   #precio-lista { margin-left:12px; color:#5b6478; }
-  .contador button { width:56px; height:56px; font-size:26px; }
   #stock { min-width:60px; text-align:center; font-size:32px; font-weight:750; }
-  .aviso { padding:12px; background:#fff6d9; border-left:4px solid var(--amarillo); }
   #historial { padding-left:20px; font-size:14px; }
   #historial li { margin:12px 0; overflow-wrap:anywhere; }
-  #editor fieldset { padding:0; border:0; margin:0; }
-  #editor legend { font-size:20px; font-weight:700; }
-  #confirmacion { margin-top:16px; }
   #visor { margin-top:12px; width:100%; overflow:hidden; }
   #visor video { max-width:100%; }
-  @media (max-width:899px) { body.con-ficha #buscador { display:none; } }
-  @media (min-width:900px) {
+  @media (max-width:999px) { body.con-ficha #buscador { display:none; } }
+  @media (min-width:1000px) {
     main { grid-template-columns:minmax(280px,420px) minmax(0,1fr); align-items:start; }
     #buscador { position:sticky; top:16px; }
     #volver { display:none; }
@@ -65,7 +62,7 @@
 </style>
 </head>
 <body>
-<header><h1>Buscar pieza</h1><button id="camara" class="claro" type="button" aria-expanded="false">Cámara</button><a href="/">Inicio</a></header>
+<header><h1>El Dolarón · Buscar pieza</h1><button id="camara" class="claro" type="button" aria-expanded="false" aria-controls="visor">Cámara</button><a href="/">Inicio</a></header>
 <p id="estado" role="status" aria-live="polite">Escribe un código o el nombre de la pieza.</p>
 <main>
   <section id="buscador" aria-label="Buscar y resultados">
@@ -80,44 +77,14 @@
   </section>
   <section id="ficha" aria-label="Ficha de pieza" hidden>
     <div class="acciones"><button id="volver" class="claro" type="button">← Resultados</button><b id="codigo"></b></div>
-    <p id="consulta-sola" class="aviso" hidden>Solo consulta. Puedes reimprimir; para editar pide el permiso «Editar inventario».</p>
     <div class="presentacion">
       <div><img id="foto" alt="" hidden><div id="sin-foto">Sin foto</div></div>
-      <div class="datos"><h2 id="nombre"></h2><p id="detalles" class="ayuda"></p><p><strong id="precio"></strong><span id="precio-lista"></span></p>
+      <div class="datos"><h2 id="nombre"></h2><p id="detalles" class="ayuda"></p><p id="upc" class="ayuda"></p><p><strong id="precio"></strong><span id="precio-lista"></span></p>
         <h3>Existencia</h3>
-        <div class="acciones contador"><button id="menos" class="claro" type="button" aria-label="Quitar una pieza">−</button><output id="stock" aria-label="Existencia actual"></output><button id="sumar" type="button" aria-label="Sumar una pieza">+</button></div>
-        <div id="ajustar" hidden>
-          <label for="motivo">Motivo del ajuste</label><select id="motivo"><option value="correccion">Corrección</option><option value="entrada">Entrada (subir)</option><option value="robo">Robo (bajar)</option><option value="merma">Merma (bajar)</option><option value="error de captura">Error de captura</option></select>
-          <div class="acciones" style="margin-top:8px"><button id="fijar" class="claro" type="button">Fijar a…</button><button id="deshacer" class="claro" type="button" hidden>Deshacer</button></div>
-          <form id="fijar-form" hidden><label for="cantidad-fija">Existencia contada (0–999)</label><input id="cantidad-fija" type="number" min="0" max="999" step="1" required><p id="confirmar-fijar"></p><button type="submit">Confirmar existencia</button><button id="cancelar-fijar" type="button" class="claro">Cancelar</button></form>
-        </div>
+        <output id="stock" aria-label="Existencia actual"></output>
       </div>
     </div>
-    <p id="cola-hoy" class="aviso" hidden>Capturada hoy: puede estar en la cola automática de otra computadora. Revisa el papel antes de reimprimir.</p>
-    <section aria-label="Imprimir etiqueta">
-      <h3>Etiqueta</h3>
-      <label for="copias">Copias (1–99)</label>
-      <div class="acciones"><button id="copia-menos" class="claro" type="button" aria-label="Una copia menos">−</button><input id="copias" type="number" min="1" max="99" step="1" value="1"><button id="copia-mas" class="claro" type="button" aria-label="Una copia más">+</button><button id="igual-existencia" class="claro" type="button">= existencia</button></div>
-      <p id="pausas" class="ayuda" hidden>Más de 20 etiquetas: la impresora descansa 30 segundos entre tandas.</p>
-      <p id="no-imprimir" class="ayuda"></p>
-      <div class="acciones"><button id="imprimir" type="button">Imprimir etiqueta</button><button id="conectar" class="claro" type="button">Conectar impresora</button><button id="detener" class="claro" type="button" hidden>Detener</button></div>
-      <details><summary>¿No aparece la impresora?</summary><p class="ayuda">Usa Chrome o Edge con Bluetooth. En iPhone/Safari no se puede imprimir. La AE240 acepta una conexión: desconéctala de la otra computadora.</p><button id="otra-impresora" class="claro" type="button">Buscar todos los aparatos</button></details>
-    </section>
-    <p id="reimprimir-aviso" class="aviso" hidden>La etiqueta pegada puede mostrar los datos anteriores. <button id="reimprimir" type="button">Reimprimir etiqueta</button></p>
-    <button id="editar" class="claro" type="button" style="margin-top:20px" hidden>Editar nombre / precio</button>
-    <form id="editor" hidden style="margin-top:20px">
-      <fieldset><legend>Corregir pieza</legend>
-        <label for="editar-nombre">Nombre</label><input id="editar-nombre" maxlength="120" required>
-        <label for="editar-marca">Marca</label><input id="editar-marca" maxlength="60">
-        <label for="editar-talla">Talla</label><select id="editar-talla"><option value="">Sin talla</option></select>
-        <label for="editar-precio">Precio de venta (MXN)</label><input id="editar-precio" type="number" min="0.01" step="0.01" required>
-        <label for="editar-lista">Precio de lista (MXN)</label><input id="editar-lista" type="number" min="0" step="0.01" required>
-        <p id="precio-permiso" class="ayuda"></p>
-        <div class="acciones"><button type="submit">Revisar cambios</button><button id="cancelar-editar" type="button" class="claro">Cancelar</button></div>
-      </fieldset>
-      <div id="confirmacion" class="aviso" hidden><p id="confirmar-texto"></p><div class="acciones"><button id="guardar-reimprimir" type="button">Guardar y reimprimir</button><button id="solo-guardar" class="claro" type="button">Solo guardar</button></div></div>
-    </form>
-    <h3>Historial de existencia</h3><ol id="historial"></ol>
+    <h3>Historial de existencia</h3><p class="ayuda">Últimos 10 ajustes de conteo.</p><ol id="historial"></ol>
   </section>
 </main>
 <script type="module" src="/pieza.js"></script>

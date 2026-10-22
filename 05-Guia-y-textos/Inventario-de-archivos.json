@@ -1,18 +1,6 @@
 {
   "assets": [
     {
-      "file": "app/public/pieza.html",
-      "title": "Buscar pieza",
-      "description": "Pantalla de consulta, ajustes de inventario, corrección e impresión de una pieza para celular y PC.",
-      "format": "HTML"
-    },
-    {
-      "file": "app/public/pieza.js",
-      "title": "Acciones de Buscar pieza",
-      "description": "Búsqueda en servidor, cámara, lector, corrección, existencia e impresión BLE con los módulos existentes.",
-      "format": "JS"
-    },
-    {
       "file": "01-Logos/el-dolaron-logo.png",
       "title": "Logo oficial",
       "description": "Logo oficial desde el 7/10/2026: «EL» en etiqueta amarilla, «Dolarón» azul con contorno blanco, subrayado y acento rojos. Fondo transparente; conservar proporciones. Único logo vigente.",

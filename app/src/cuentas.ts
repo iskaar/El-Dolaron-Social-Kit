@@ -67,6 +67,7 @@ const PANTALLAS: Record<string, Rol[]> = {
   '/admin': CAPTURA,
   '/marketplace': CAPTURA,
   '/etiquetas': CAPTURA_FEP,
+  '/pieza': CAPTURA_FEP,
   '/bandas': CAPTURA,
   '/calibrar-etiqueta': CAPTURA,
   '/prueba-codigo': CAPTURA,
@@ -120,6 +121,7 @@ export function permiso(pathname: string, metodo: string): Regla {
   // La caja muestra la foto de cada pieza escaneada para detectar etiquetas cambiadas (Issue #358).
   if (ruta.startsWith('/api/foto/')) return [...CAPTURA_FEP, ...CAJA];
   if (ruta === '/api/etiquetas') return CAPTURA_FEP;
+  if (metodo === 'GET' && (ruta === '/api/piezas' || /^\/api\/piezas\/[^/]+$/.test(ruta))) return CAPTURA_FEP;
   if (ruta === '/api/calibracion') return CAPTURA;
   if (ruta === '/api/marketplace' || /^\/api\/marketplace\/foto\/[^/]+$/.test(ruta)) return CAPTURA;
   if (ruta === '/api/catalogo') return CAJA;

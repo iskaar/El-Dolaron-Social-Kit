@@ -46,6 +46,7 @@ import { cajeroEnTurno, listarCajeros, entrar, salir, ponerPin } from './cajeros
 import { registrarSocio, buscarSocio, buscarPorCodigo, basesListas, sentenciasDeVenta, saldo } from './dolarones.ts';
 import { registrarCorte, registrarRetiro, ultimoCorte, cajaDe } from './corte.ts';
 import { rutaGastos } from './gastos.ts';
+import { rutaPiezas } from './piezas.ts';
 import { rutaNomina } from './nomina.ts';
 import { lineasNetas } from './netas.ts';
 import { portal, llegada, vincular } from './portal.ts';
@@ -58,7 +59,6 @@ import { rutaML, recibirNotificacion, conciliarSeguro, sincronizar, publicacionV
 import { pedirDescuento, validarDescuento, listarDescuentos, listarDuenos } from './descuentos.ts';
 import { listarAltoValor, revisarConteo, ajustarExistencia, listarAjustes } from './conteo.ts';
 import { rutaPedidos, vencerPedidos, sentenciasDePedido, saldoDe, enPedido } from './pedidos.ts';
-import { buscarPiezas, leerPieza } from './piezas.ts';
 
 interface FilaConfig {
   clave: string;
@@ -2115,9 +2115,10 @@ export default {
       if (pathname === '/api/yo') {
         return await yo(env, correo, soloComputadora(await leerUsuario(env, correo)) ? await cajeroEnTurno(request, env) : null);
       }
-      if (pathname === '/api/piezas' && request.method === 'GET') return await buscarPiezas(url, env, (await leerUsuario(env, correo))!);
-      const fichaPieza = pathname.match(/^\/api\/piezas\/([^/]+)$/);
-      if (fichaPieza && request.method === 'GET') return await leerPieza(fichaPieza[1], env, (await leerUsuario(env, correo))!);
+      if (pathname === '/api/piezas' || pathname.startsWith('/api/piezas/')) {
+        const respuesta = await rutaPiezas(request, env, url, await leerUsuario(env, correo));
+        if (respuesta) return respuesta;
+      }
       const respuestaRopaIA = await rutaRopaAdmin(request, env, pathname);
       if (respuestaRopaIA) return respuestaRopaIA;
       const respuestaRecortes = await rutaRecortesAdmin(request, env, pathname);

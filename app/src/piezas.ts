@@ -1,104 +1,120 @@
+/** Consulta de inventario (#441), sin escrituras ni filtro de existencia. */
 import { propietarioDe, type Usuario } from './cuentas.ts';
 
-const CAMPOS = `rowid as fila, id, codigo, nombre, marca, talla, categoria, precio, precio_lista,
-  stock, destino, estado_fisico, estado_analisis, upc, foto_key <> '' as tiene_foto,
-  semana_ingreso, creado_en, actualizado_en, propietario, sin_inventario`;
-const VISIBLE = `sin_inventario = 0 and estado_analisis <> 'descartado'`;
-export const SQL_CODIGO = `select ${CAMPOS} from productos where codigo = ? and propietario = ? and ${VISIBLE}`;
-// Separar el empate evita releer todas las filas con la misma fecha al avanzar el cursor.
-export const SQL_TEXTO = `select ${CAMPOS} from productos indexed by productos_propietario_creado
-  where propietario = ? and creado_en < ? order by creado_en desc, rowid desc limit ?`;
-export const SQL_EMPATE = `select ${CAMPOS} from productos indexed by productos_propietario_creado
-  where propietario = ? and creado_en = ? and rowid < ? order by creado_en desc, rowid desc limit ?`;
-export const SQL_UPC = `select ${CAMPOS} from productos indexed by productos_upc
-  where upc = ? and rowid > ? order by rowid limit ?`;
+const PAGINA = 25;
+const TRAMO = 200;
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const json = (cuerpo: unknown, status = 200) => new Response(JSON.stringify(cuerpo), {
+  status, headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' },
+});
+
+// Copiados de agent/codex/431-vender; main aún no tiene estos helpers.
+interface Cursor { fecha: string; fila: number }
+function leerCursor(valor: string | null): Cursor | null {
+  if (valor === null) return null;
+  const m = /^([^~]{0,40})~([1-9]\d{0,15})$/.exec(valor);
+  if (!m || (m[1] && !Number.isFinite(Date.parse(m[1]))) || !Number.isSafeInteger(Number(m[2]))) return null;
+  return { fecha: m[1], fila: Number(m[2]) };
+}
+const cursorDe = (p: { creado_en: string; fila: number }) => `${p.creado_en}~${p.fila}`;
 
 interface Pieza {
-  fila: number; id: string; codigo: string | null; nombre: string; marca: string; talla: string | null;
+  id: string; codigo: string | null; nombre: string; marca: string; talla: string | null;
   categoria: string; precio: number; precio_lista: number; stock: number; destino: string;
   estado_fisico: string; estado_analisis: string; upc: string | null; tiene_foto: number;
-  semana_ingreso: string; creado_en: string; actualizado_en: string; propietario: string; sin_inventario: number;
+  creado_en: string; actualizado_en: string;
 }
-const json = (cuerpo: unknown, status = 200) => Response.json(cuerpo, { status });
-const publica = ({ fila: _f, propietario: _p, sin_inventario: _s, ...p }: Pieza) => p;
-const visible = (p: Pieza, propietario: string) => p.propietario === propietario && !p.sin_inventario && p.estado_analisis !== 'descartado';
-const cursorDe = (p: Pieza, upc: boolean) => `${upc ? p.upc : p.creado_en}~${p.fila}`;
+type Candidata = Pieza & { fila: number; elegible: number };
+const COLUMNAS = `p.id, p.codigo, p.nombre, p.marca, p.talla, p.categoria, p.precio, p.precio_lista,
+  p.stock, p.destino, p.estado_fisico, p.estado_analisis, p.upc, p.foto_key <> '' as tiene_foto,
+  p.creado_en, p.actualizado_en`;
+const VISIBLE = "p.sin_inventario = 0 and p.estado_analisis <> 'descartado'";
+const publica = ({ fila, elegible, ...p }: Candidata) => p;
 
-export async function buscarPiezas(url: URL, env: Env, usuario: Usuario): Promise<Response> {
+async function buscarPiezas(env: Env, url: URL, propietario: string): Promise<Response> {
   const q = (url.searchParams.get('q') ?? '').trim();
-  if (!q || q.length > 80) return json({ error: 'Escribe un código o un nombre de 3 a 80 caracteres.' }, 400);
-  const propietario = propietarioDe(usuario);
-  const codigo = /^(?:ed-?)?(\d{1,6})$/i.exec(q);
-  if (codigo) {
-    const p = await env.DB.prepare(SQL_CODIGO).bind(`ED-${codigo[1].padStart(6, '0')}`, propietario).first<Pieza>();
-    if (p || !/^\d{6}$/.test(q)) return json({ piezas: p ? [publica(p)] : [], siguiente: null });
-  }
-  const upc = /^\d{6,14}$/.test(q);
-  if (!upc && q.length < 3) return json({ error: 'Escribe al menos 3 caracteres.' }, 400);
+  const ed = /^ed-?(\d{1,10})$/i.exec(q);
+  const digitos = /^\d{1,14}$/.test(q);
+  const codigo = ed ? `ED-${ed[1].padStart(6, '0')}` : digitos && q.length <= 6 ? `ED-${q.padStart(6, '0')}` : null;
+  const upc = digitos && q.length >= 6 ? q.replace(/^0+/, '') || '0' : null;
   const crudo = url.searchParams.get('cursor');
-  const cursor = crudo?.match(/^(.*)~([1-9]\d*)$/);
-  if (crudo && (!cursor || !Number.isSafeInteger(Number(cursor[2])) || cursor[1].length > 40)) {
-    return json({ error: 'Cursor inválido.' }, 400);
+  let cursor = leerCursor(crudo);
+  // UPC recorre (upc, rowid), texto recorre (creado_en, rowid); ambos sin offset.
+  if (upc && crudo !== null) {
+    const m = /^(\d{1,14})~([1-9]\d{0,15})$/.exec(crudo);
+    cursor = m && Number.isSafeInteger(Number(m[2])) ? { fecha: m[1], fila: Number(m[2]) } : null;
   }
-  const piezas: ReturnType<typeof publica>[] = [];
+  if (!q || q.length > 80 || (!codigo && !upc && q.length < 3) || (crudo !== null && !cursor))
+    return json({ error: 'Escribe un código o al menos 3 caracteres (máximo 80); revisa el cursor.' }, 400);
+
+  if (codigo && !cursor) {
+    const p = await env.DB.prepare(`select ${COLUMNAS} from productos p
+      where p.codigo = ? and p.propietario = ? and ${VISIBLE}`).bind(codigo, propietario).first<Pieza>();
+    if (p || !upc) return json({ piezas: p ? [p] : [], siguiente: null });
+  }
+  if (codigo && !upc) return json({ piezas: [], siguiente: null });
+
+  // El índice de expresión productos_upc_foto excluye FEP y piezas sin foto.
+  // Todas las variantes usan productos_upc, sin perder esas piezas ni sus ceros.
+  const variantes = upc ? Array.from({ length: 15 - upc.length }, (_, i) => upc.padStart(upc.length + i, '0')) : [];
+  if (upc && cursor && !variantes.includes(cursor.fecha)) return json({ error: 'Cursor inválido.' }, 400);
+  const palabras = upc ? [] : q.split(/\s+/).filter(Boolean);
+  // shortcut: lower() de SQLite no pliega acentos; normalizar en una migración si hace falta.
+  const coincide = palabras.map(() => "(instr(lower(p.nombre), lower(?)) > 0 or instr(lower(p.marca), lower(?)) > 0)");
+  const piezas: Pieza[] = [];
   let siguiente: string | null = null;
-  let leidas = 0;
-  if (upc) {
-    // El índice 045 es parcial (solo fotos de Dolarón). Las variantes usan el 044
-    // también para FEP y piezas sin foto, sin cambiar ni migrar los UPC guardados.
-    const base = q.replace(/^0+/, '') || '0';
-    const variantes = Array.from({ length: 15 - base.length }, (_, i) => base.padStart(base.length + i, '0')).sort();
-    if (cursor && !variantes.includes(cursor[1])) return json({ error: 'Cursor inválido.' }, 400);
-    for (const variante of variantes) {
-      if (cursor && variante < cursor[1]) continue;
-      let fila = cursor && variante === cursor[1] ? Number(cursor[2]) : 0;
-      while (leidas < 1000) {
-        const { results } = await env.DB.prepare(SQL_UPC).bind(variante, fila, Math.min(200, 1000 - leidas)).all<Pieza>();
-        leidas += results.length;
-        for (const p of results) {
-          siguiente = cursorDe(p, true);
-          if (visible(p, propietario)) piezas.push(publica(p));
-          if (piezas.length === 25) return json({ piezas, siguiente });
-        }
-        if (results.length < 200) break;
-        fila = results.at(-1)!.fila;
+  let restantes = codigo ? 999 : 1000;
+  let empate = !!cursor;
+  // El filtro va en SELECT: LIMIT acota candidatas leídas, incluso si ninguna coincide.
+  while (restantes > 0 && piezas.length < PAGINA) {
+    const limite = Math.min(TRAMO, restantes);
+    const { results } = await env.DB.prepare(`select p.rowid as fila, ${COLUMNAS},
+        (${VISIBLE} ${upc ? 'and p.propietario = ?' : ''} ${coincide.length ? 'and ' + coincide.join(' and ') : ''}) as elegible
+      from productos p indexed by ${upc ? 'productos_upc' : 'productos_propietario_creado'}
+      where ${upc ? `p.upc in (${variantes.map(() => '?').join(',')})` : 'p.propietario = ?'}
+        ${cursor ? empate
+          ? `and p.${upc ? 'upc' : 'creado_en'} = ? and p.rowid < ?`
+          : `and p.${upc ? 'upc' : 'creado_en'} < ?` : ''}
+      order by p.${upc ? 'upc' : 'creado_en'} desc, p.rowid desc limit ?`)
+      .bind(...(upc ? [propietario] : []), ...palabras.flatMap((p) => [p, p]), ...(upc ? variantes : [propietario]),
+        ...(cursor ? [cursor.fecha, ...(empate ? [cursor.fila] : [])] : []), limite).all<Candidata>();
+    restantes -= results.length;
+    siguiente = null;
+    for (let i = 0; i < results.length; i++) {
+      const p = results[i];
+      cursor = { fecha: upc ? p.upc! : p.creado_en, fila: p.fila };
+      if (p.elegible) piezas.push(publica(p));
+      if (piezas.length === PAGINA || i === results.length - 1) {
+        if (piezas.length === PAGINA || results.length === limite || i < results.length - 1)
+          siguiente = cursorDe({ creado_en: cursor.fecha, fila: cursor.fila });
+        if (piezas.length === PAGINA) break;
       }
-      if (leidas >= 1000) return json({ piezas, siguiente });
     }
-    return json({ piezas, siguiente: null });
-  }
-  let fecha = cursor?.[1] ?? '9999';
-  let fila = cursor ? Number(cursor[2]) : 0;
-  // shortcut: SQLite lower() no pliega acentos; normalizar en una columna si hace falta.
-  const minusculas = (s: string) => s.replace(/[A-Z]/g, (c) => c.toLowerCase());
-  const palabras = minusculas(q).split(/\s+/);
-  while (leidas < 1000) {
-    const limite = Math.min(200, 1000 - leidas);
-    const sentencia = fila
-      ? env.DB.prepare(SQL_EMPATE).bind(propietario, fecha, fila, limite)
-      : env.DB.prepare(SQL_TEXTO).bind(propietario, fecha, limite);
-    const { results } = await sentencia.all<Pieza>();
-    leidas += results.length;
-    for (const p of results) {
-      siguiente = cursorDe(p, false);
-      if (visible(p, propietario) && palabras.every((palabra) => minusculas(`${p.nombre} ${p.marca}`).includes(palabra))) piezas.push(publica(p));
-      if (piezas.length === 25) return json({ piezas, siguiente });
+    if (piezas.length === PAGINA) break;
+    if (results.length < limite) {
+      if (empate) { empate = false; continue; }
+      break;
     }
-    if (!results.length || results.length < limite) {
-      if (fila) { fila = 0; continue; }
-      return json({ piezas, siguiente: null });
-    }
-    fecha = results.at(-1)!.creado_en;
-    fila = results.at(-1)!.fila;
+    empate = true;
   }
   return json({ piezas, siguiente });
 }
 
-export async function leerPieza(id: string, env: Env, usuario: Usuario): Promise<Response> {
-  const pieza = await env.DB.prepare(`select ${CAMPOS} from productos where id = ? and propietario = ? and ${VISIBLE}`)
-    .bind(id, propietarioDe(usuario)).first<Pieza>();
+async function fichaPieza(env: Env, id: string, propietario: string): Promise<Response> {
+  if (!UUID.test(id)) return json({ error: 'Identificador inválido.' }, 400);
+  const pieza = await env.DB.prepare(`select ${COLUMNAS} from productos p
+    where p.id = ? and p.propietario = ? and ${VISIBLE}`).bind(id, propietario).first<Pieza>();
   if (!pieza) return json({ error: 'Pieza no encontrada.' }, 404);
-  const { results: ajustes } = await env.DB.prepare(`select id, motivo, cantidad, antes, despues, ajustado_por, ajustado_en
+  // shortcut: índice por fecha existente; añadir (producto_id, ajustado_en) si el historial supera 10 mil filas.
+  const { results: historial } = await env.DB.prepare(`select id, motivo, cantidad, antes, despues, ajustado_por, ajustado_en
     from conteo_ajustes where producto_id = ? order by ajustado_en desc, rowid desc limit 10`).bind(id).all();
-  return json({ pieza: publica(pieza), ajustes });
+  return json({ pieza, historial });
+}
+
+/** Worker valida host y cuenta; cada consulta aplica además propietarioDe. */
+export async function rutaPiezas(request: Request, env: Env, url: URL, usuario: Usuario | null): Promise<Response | null> {
+  const detalle = /^\/api\/piezas\/([^/]+)$/.exec(url.pathname);
+  if (url.pathname !== '/api/piezas' && !detalle) return null;
+  if (request.method !== 'GET') return json({ error: 'Método no permitido.' }, 405);
+  return detalle ? fichaPieza(env, detalle[1], propietarioDe(usuario)) : buscarPiezas(env, url, propietarioDe(usuario));
 }
