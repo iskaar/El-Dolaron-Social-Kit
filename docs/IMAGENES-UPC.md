@@ -52,8 +52,11 @@ FEP y piezas descartadas se excluyen; no cambia nombre, precio, stock ni `estado
 Una pieza llamada «Ropa» queda excluida de la cola que renombra prendas (`ropa_ia_estado = 'descartado'`).
 
 No necesita migración adicional a la 045. Si falla la descarga o la copia, la confirmación
-permanece y otro escaneo, reenvío o confirmación reintenta. No hay barrido automático del
-inventario antiguo: confirmar o escanear ese UPC completa sus piezas sin foto.
+permanece y otro escaneo, reenvío o confirmación reintenta. El relleno de #413 usa el cron
+existente cada 15 minutos: procesa hasta 20 referencias confirmadas por `confirmado_en`,
+una descarga a la vez, y guarda el último valor procesado en `config.imagenes_relleno_hasta`.
+Un fallo se registra y también avanza el cursor; esa pieza reintenta al escanear o confirmar.
+Al ponerse al día solo consulta `imagenes_upc` y el cursor, sin recorrer productos.
 La búsqueda de candidatas fuera del manifiesto (Fase 2) queda pendiente.
 Isaac decide usar estas imágenes de otras tiendas o marcas para vender en línea.
 
