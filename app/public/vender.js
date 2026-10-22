@@ -85,10 +85,10 @@ export async function crearTarjeta(pieza) {
   ctx.fillText(pieza.codigo, 40, 1210, 990);
   ctx.font = '40px system-ui, sans-serif';
   if (pieza.talla) ctx.fillText(`Talla ${pieza.talla}`, 40, 1300, 530);
-  // El logo oficial se conserva completo sobre blanco para que su azul sea legible.
-  ctx.fillRect(620, 1230, 420, 92);
-  const escalaLogo = Math.min(390 / logo.naturalWidth, 76 / logo.naturalHeight);
-  ctx.drawImage(logo, 635, 1238, logo.naturalWidth * escalaLogo, logo.naturalHeight * escalaLogo);
+  // El logo ya trae su contorno blanco: va directo sobre el azul, sin cuadro, alineado a la derecha.
+  const escalaLogo = 460 / logo.naturalWidth;
+  ctx.imageSmoothingQuality = 'high';
+  ctx.drawImage(logo, 580, 1202, logo.naturalWidth * escalaLogo, logo.naturalHeight * escalaLogo);
   const blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/jpeg', 0.85));
   if (!blob) throw new Error('No se pudo preparar la tarjeta. Intenta otra vez.');
   return new File([blob], `${pieza.codigo}.jpg`, { type: 'image/jpeg' });

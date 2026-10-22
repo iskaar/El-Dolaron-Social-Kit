@@ -347,8 +347,9 @@ test('tarjeta JPEG 1080 × 1350, foto contain y precio/código/talla/logo sin de
   } });
   const dibujos: unknown[][] = [], textos: string[] = [];
   let tachados = 0;
-  const ctx = { fillStyle: '', font: '', strokeStyle: '', lineWidth: 0,
-    fillRect() {}, drawImage: (...args: unknown[]) => dibujos.push(args), fillText: (texto: string) => textos.push(texto),
+  const rects: number[][] = [];
+  const ctx = { fillStyle: '', font: '', strokeStyle: '', lineWidth: 0, imageSmoothingQuality: '',
+    fillRect: (...args: number[]) => rects.push(args), drawImage: (...args: unknown[]) => dibujos.push(args), fillText: (texto: string) => textos.push(texto),
     measureText: () => ({ width: 120 }), beginPath() {}, moveTo() {}, lineTo() {}, stroke() { tachados++; } };
   const canvas = { width: 0, height: 0, getContext: () => ctx,
     toBlob: (fn: (b: Blob) => void, tipo: string, calidad: number) => {
@@ -369,6 +370,10 @@ test('tarjeta JPEG 1080 × 1350, foto contain y precio/código/talla/logo sin de
   assert.ok(Math.abs(Number(dibujos[0][4]) - 938) < 1e-9);
   assert.equal(dibujos.length, 2);
   assert.ok(Math.abs(Number(dibujos[1][3]) / Number(dibujos[1][4]) - 600 / 156) < 0.001);
+  // El logo va directo sobre el azul: ningún rectángulo (solo fondo, franja azul) se pinta tras él.
+  assert.equal(rects.length, 2);
+  assert.deepEqual(rects.map((r) => r[1]), [0, 1000]);
+  assert.equal(Number(dibujos[1][1]) + Number(dibujos[1][3]), 1040);
   assert.deepEqual(textos, ['$200', '$300', 'ED-123', 'Talla M']);
   assert.equal(tachados, 1);
 });
