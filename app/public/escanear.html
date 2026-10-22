@@ -59,6 +59,14 @@
   footer { flex: none; display: flex; gap: 10px; align-items: center; padding: 10px 12px calc(10px + env(safe-area-inset-bottom));
     background: #fff; border-top: 1px solid var(--linea); }
   footer span { flex: 1; font-size: 15px; font-weight: 600; }
+  #impresora .fila { margin-top: 6px; }
+  #impresora button, #impresora label { min-height: 44px; }
+  #impresora label { display: flex; align-items: center; gap: 10px; font-size: 15px; color: inherit; }
+  #impresora input[type="checkbox"] { width: 24px; height: 24px; }
+  #impresora [hidden] { display: none; }
+  #etiquetas-celular li { flex-wrap: wrap; align-items: center; }
+  #etiquetas-celular .et-mensaje { flex-basis: 100%; font-size: 13px; color: var(--gris); }
+  #etiquetas-celular li.mal .et-mensaje { color: var(--rojo); }
   #inicio { position: fixed; inset: 0; background: rgba(22,54,107,.96); color: #fff; display: flex; flex-direction: column;
     align-items: center; justify-content: center; gap: 16px; padding: 24px; text-align: center; z-index: 5; }
   #inicio[hidden] { display: none; }
@@ -83,6 +91,18 @@
 </div>
 <main>
   <p id="aviso" role="status"></p>
+
+  <section class="tarjeta" id="impresora" aria-label="Impresora de etiquetas">
+    <div class="fila">
+      <span class="dato" id="impresora-estado" role="status"></span>
+      <button id="conectar-impresora" class="secundario" type="button">Conectar impresora</button>
+      <button id="otra-impresora" class="secundario" type="button">¿No aparece?</button>
+    </div>
+    <label class="fila"><input id="imprimir-solo" type="checkbox"> Imprimir la etiqueta sola al quedar lista la pieza</label>
+    <p class="dato" id="etiqueta-aviso" role="status"></p>
+    <ul id="etiquetas-celular"></ul>
+    <button id="detener-impresion" class="secundario" type="button" hidden>Detener impresión</button>
+  </section>
 
   <section class="tarjeta" id="actual" hidden>
     <p id="nombre"></p>
@@ -208,10 +228,11 @@ function avisar(tipo) {
 function mensaje(texto) { $('aviso').textContent = texto; $('aviso').classList.remove('etiqueta'); }
 
 /** Ya tiene nombre y precio: /etiquetas la imprime en segundos. Se le avisa a quien escanea (#394). */
-function avisarEtiqueta(nombre, stock) {
+function avisarEtiqueta(nombre, stock, id) {
   mensaje(`Sale la etiqueta: ${nombre} ×${stock}`);
   $('aviso').classList.add('etiqueta');
   avisar('etiqueta');
+  ofrecerEtiqueta(id, nombre, stock);
 }
 
 /* ---------- pintar ---------- */
@@ -288,7 +309,7 @@ async function enviar(pieza) {
     const { li } = anotarGuardada(guardada, pieza.estado);
     if (guardada.estado_analisis === 'listo') {
       li.querySelector('.p').textContent = `${pesos(guardada.precio)} · etiqueta en camino`;
-      avisarEtiqueta(guardada.nombre, guardada.stock);
+      avisarEtiqueta(guardada.nombre, guardada.stock, guardada.id);
     }
   } catch (error) {
     anotar(`<span>No se guardó: ${escapar(pieza.ficha.nombre)} ×${pieza.stock}. Toca para reintentar.</span>`,
@@ -389,7 +410,7 @@ function seguirBusqueda(pieza, { li, cantidad, cerrar }) {
       cerrar();   // ya va a Etiquetas: su cantidad quedó cerrada
       li.firstElementChild.textContent = datos.nombre;
       li.querySelector('.p').textContent = `${pesos(datos.precio)} · etiqueta en camino`;
-      avisarEtiqueta(datos.nombre, datos.stock);
+      avisarEtiqueta(datos.nombre, datos.stock, pieza.id);
       return;
     }
     if (datos?.estado_analisis === 'error' || (!datos && intentos >= BUSQUEDA_INTENTOS)) return pedirFoto();
@@ -586,7 +607,7 @@ function seguirFoto(registro, li) {
     } catch { /* sin red: se vuelve a preguntar */ }
     if (datos?.estado_analisis === 'listo') {
       li.innerHTML = `<span>${escapar(datos.nombre)}</span><span class="cant">×${datos.stock} · ${pesos(datos.precio)} · etiqueta en camino</span>`;
-      return avisarEtiqueta(datos.nombre, datos.stock);
+      return avisarEtiqueta(datos.nombre, datos.stock, registro.id);
     }
     if (datos?.estado_analisis === 'error') {
       li.classList.add('fallo');
@@ -672,7 +693,7 @@ $('manual').addEventListener('submit', (e) => {
       desconocido = null;
       piezaParaManual = null;
       anotarGuardada(guardada, grado, true);
-      avisarEtiqueta(guardada.nombre, guardada.stock);
+      avisarEtiqueta(guardada.nombre, guardada.stock, guardada.id);
     } catch (error) { mensaje(error.message || 'No se guardó. Reintenta con conexión.'); avisar('no'); }
     finally { $('manual-guardar').disabled = false; pintar(); }
   });
@@ -725,6 +746,128 @@ $('sin-codigo').addEventListener('click', () => {
 });
 // Si se cierra o se cambia de app, lo abierto no se pierde.
 document.addEventListener('visibilitychange', () => { if (document.hidden) fila = fila.then(cerrarActual); });
+
+/* ---------- imprimir la etiqueta desde el celular (#440) ---------- */
+
+// Se carga aparte: el escaner no espera a la impresora ni se cae si estos modulos fallan.
+// Web Bluetooth (Chrome de Android) pide un toque para escoger la impresora; despues el navegador
+// puede reconectarla solo. La PC (/etiquetas) y este telefono se reparten las etiquetas con el
+// registro de la base: gana quien las reclame primero (ver imprimir-celular.js).
+const CLAVE_IMPRESORA = 'escanear-impresora';   // se conecto aqui alguna vez: se intenta reconectar sola
+const CLAVE_IMPRIMIR_SOLO = 'escanear-imprimir-solo';
+let etiquetera = null, impresion = null, impresionFallo = false, impresoraUsada = false, vigilando = false;
+const leerLocal = (clave) => { try { return localStorage.getItem(clave); } catch { return null; } };
+const guardarLocal = (clave, valor) => { try { localStorage.setItem(clave, valor); } catch { /* sin almacenamiento, solo no se recuerda */ } };
+
+Promise.all([import('/etiquetera.js'), import('/imprimir-celular.js')]).then(([e, c]) => {
+  etiquetera = e;
+  impresion = c.crearImpresion({ alCambiar: pintarTrabajo });
+  if (leerLocal(CLAVE_IMPRESORA) === '1') reconectarImpresora();
+}, () => { impresionFallo = true; }).finally(() => pintarImpresora());
+
+function avisoImpresora(texto) { $('etiqueta-aviso').textContent = texto; }
+
+function pintarImpresora() {
+  const sinBluetooth = !navigator.bluetooth;
+  const lista = !!etiquetera?.etiqueteraLista();
+  const texto = sinBluetooth ? 'Este navegador no tiene Bluetooth web: para imprimir desde aquí abre Escanear en Chrome de Android.'
+    : impresionFallo ? 'No se pudo cargar la impresora: recarga la página.'
+    : !etiquetera ? 'Preparando la impresora…'
+    : lista ? 'Impresora conectada' : 'Impresora sin conectar';
+  if ($('impresora-estado').textContent !== texto) $('impresora-estado').textContent = texto;   // no repetir lo mismo al lector de pantalla
+  $('conectar-impresora').hidden = lista;
+  $('conectar-impresora').disabled = sinBluetooth || !etiquetera;
+  $('otra-impresora').hidden = lista || sinBluetooth || !etiquetera;
+  $('detener-impresion').hidden = !impresion?.activos();
+}
+
+/** El enlace se puede caer solo (impresora apagada, lejos): se revisa cada 2 s una vez que se uso. */
+function vigilarImpresora() {
+  impresoraUsada = true;
+  guardarLocal(CLAVE_IMPRESORA, '1');
+  if (!vigilando) { vigilando = true; setInterval(pintarImpresora, 2000); }
+}
+
+function fallaBluetooth(error) {
+  if (error.name === 'NotFoundError') {
+    return /adapter|turned off/i.test(error.message)
+      ? 'El Bluetooth del teléfono está apagado: préndelo y vuelve a intentar.'
+      : 'No se escogió impresora. Préndela, acércala y vuelve a intentar, o toca «¿No aparece?».';
+  }
+  if (error.name === 'SecurityError' || error.name === 'NotAllowedError') {
+    return 'Chrome no dejó usar el Bluetooth. Revisa el permiso de este sitio en los ajustes de Chrome.';
+  }
+  return /disconnected|GATT/i.test(error.message)
+    ? 'La impresora soltó la conexión. Apágala y préndela, cierra cualquier otra pantalla que la use (como Etiquetas en la computadora) y vuelve a intentar.'
+    : `No se pudo conectar la impresora: ${error.message}`;
+}
+
+// Escoger la impresora necesita un toque real: se pide antes de cualquier otra espera.
+async function conectarImpresora(cualquiera) {
+  if (!etiquetera) return;
+  try {
+    await etiquetera.conectarEtiquetera({ cualquiera });
+    vigilarImpresora();
+    avisoImpresora('Impresora conectada.');
+    impresion.reanudar();
+  } catch (error) {
+    avisoImpresora(fallaBluetooth(error));
+  }
+  pintarImpresora();
+}
+
+/** Sin toque, y solo si ya se conecto aqui antes: con la impresora apagada se rinde a los 8 s. */
+async function reconectarImpresora() {
+  if (!etiquetera || !navigator.bluetooth || etiquetera.etiqueteraLista()) return;
+  if (await etiquetera.reconectarEtiquetera()) {
+    vigilarImpresora();
+    avisoImpresora('Impresora reconectada.');
+    impresion.reanudar();
+  }
+  pintarImpresora();
+}
+
+/** Una pieza lista para etiquetar: se anota para imprimirla o reimprimirla; sola si esa opcion esta prendida. */
+function ofrecerEtiqueta(id, nombre, stock) {
+  // Sin impresora usada ni impresion sola, la etiqueta la saca la PC (/etiquetas) y aqui no hay nada que mostrar.
+  if (!impresion || !id || (!impresoraUsada && !$('imprimir-solo').checked)) return;
+  if (impresion.ofrecer(id, nombre, stock) && $('imprimir-solo').checked) impresion.imprimir(id);
+}
+
+const ACCION = { lista: 'Imprimir etiqueta', error: 'Imprimir etiqueta', 'sin-impresora': 'Imprimir etiqueta',
+  enviada: 'Reimprimir', omitida: 'Reimprimir', cortada: 'Imprimir las que faltan' };
+const ultimoEstado = new Map();
+
+/** Una linea por pieza; se actualiza en su lugar para no mover el boton bajo el dedo. */
+function pintarTrabajo(t) {
+  let li = $('etiquetas-celular').querySelector(`li[data-id="${t.id}"]`);
+  if (!li) {
+    $('etiquetas-celular').insertAdjacentHTML('afterbegin', `<li data-id="${t.id}"><span class="et-nombre"></span>
+      <button class="secundario" type="button"></button><span class="et-mensaje"></span></li>`);
+    li = $('etiquetas-celular').firstElementChild;
+    li.querySelector('button').addEventListener('click', () => impresion.imprimir(t.id));
+  }
+  li.querySelector('.et-nombre').textContent = `${t.nombre} ×${t.copias}`;
+  li.querySelector('.et-mensaje').textContent = t.mensaje;
+  li.classList.toggle('mal', ['cortada', 'error', 'sin-impresora'].includes(t.estado));
+  const boton = li.querySelector('button');
+  boton.textContent = ACCION[t.estado] ?? 'Imprimir etiqueta';
+  boton.disabled = t.ocupado;
+  boton.setAttribute('aria-label', `${boton.textContent}: ${t.nombre}`);
+  // Solo los cambios de estado se anuncian; el avance de cada etiqueta no (aria-live molesta si habla en cada una).
+  if (ultimoEstado.get(t.id) !== t.estado && !t.ocupado && t.estado !== 'lista') avisoImpresora(`${t.nombre}: ${t.mensaje}`);
+  ultimoEstado.set(t.id, t.estado);
+  pintarImpresora();
+}
+
+$('conectar-impresora').addEventListener('click', () => conectarImpresora(false));
+$('otra-impresora').addEventListener('click', () => conectarImpresora(true));
+$('detener-impresion').addEventListener('click', () => impresion?.detener());
+$('imprimir-solo').checked = leerLocal(CLAVE_IMPRIMIR_SOLO) === '1';
+$('imprimir-solo').addEventListener('change', () => guardarLocal(CLAVE_IMPRIMIR_SOLO, $('imprimir-solo').checked ? '1' : '0'));
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden && leerLocal(CLAVE_IMPRESORA) === '1') reconectarImpresora();
+});
 
 /* ---------- entradas: lector Bluetooth/USB, teclado y camara ---------- */
 

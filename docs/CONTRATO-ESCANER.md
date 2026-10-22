@@ -92,6 +92,10 @@ elimina piezas con venta o publicación. El servidor limita estas operaciones
 a capturas propias de las últimas 24 horas. Si ya salió una etiqueta, reemplazarla
 cuando cambie el precio o descartarla cuando se elimine la captura.
 
+En el celular (Chrome de Android) la etiqueta también puede imprimirse desde esta pantalla (Issue #440): «Conectar
+impresora», una etiqueta por pieza en existencia, a mano o sola al quedar lista la pieza. La PC y el celular no repiten la
+misma etiqueta (ver `docs/ARQUITECTURA-ESCANER.md`). Si la impresión falla, la pieza queda guardada y se reimprime.
+
 ### Reglas que no se negocian
 
 1. **La foto se guarda local antes que nada** (IndexedDB), antes de subirla o analizarla. Es lo único

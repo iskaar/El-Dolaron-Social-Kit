@@ -264,6 +264,35 @@ el cliente. Cada escaneo es una pieza nueva (subirle stock a una pieza ya impres
 etiquetas nuevas). La tabla se llena con `tools/importar_manifiesto.py`. Detalle y decisiones:
 [PLAN-MANIFIESTO-UPC.md](PLAN-MANIFIESTO-UPC.md).
 
+## Etiquetas desde el celular (Issue #440)
+
+`/escanear` imprime la etiqueta de la pieza que queda lista, por Web Bluetooth en Chrome de Android, con la misma
+`etiquetera.js` (fff0/fff2 + TSPL, sin cambiar el protocolo). iPhone queda fuera: Safari no tiene Web Bluetooth.
+
+- **Calibración.** Vive en `config` (corrimiento y ancho de barra, Issue #89). Al cargar, `etiquetera.js` la pide a
+  `GET /api/calibracion`, que devuelve solo esas dos claves (el host del celular no lee el resto de `config`); `localStorage`
+  queda como copia para imprimir sin red. El celular nunca calibra: `PUT /api/calibracion` sigue siendo de la computadora.
+- **No imprimir doble.** El estado «impresa» de `/etiquetas` era `localStorage` de cada navegador, así que no se
+  compartía. La migración 049 crea `etiquetas_enviadas` (una fila por pieza: precio, precio de lista efectivo, nombre y
+  talla que dice la etiqueta, hora y origen `pc`/`celular`). Antes de mandar una pieza, la PC (manual o automática) y el
+  celular la **reclaman** con `POST /api/etiquetas/enviadas`: un solo `insert … on conflict do update where` decide, así
+  que el primero que llega la imprime y el otro la omite. Se vuelve a poder reclamar si lo que dice la etiqueta cambió
+  (misma regla que `etiquetaVigente`) o si se pide `reimprimir` (botón explícito del celular, «No salió desde aquí» de la PC).
+  La PC adopta la marca del servidor en su `localStorage` (campos `etiqueta_*` de `GET /api/borradores`, o la respuesta
+  de un reclamo denegado), así que sus listas y su automática no cambian.
+- **Si falla.** El celular conserva su marca aunque se corte la tanda (puede haber salido papel): la PC no repite y se
+  recupera desde el celular («Imprimir las que faltan» o «Reimprimir»). La PC, en cambio, suelta su marca si falla, como
+  antes reintentaba la pieza. «No salió desde aquí» en la PC también suelta la marca en la base (`DELETE`).
+- **Host del escáner (denegar por omisión).** Se agregan solo: los `.js` (`imprimir-celular.js`, `etiquetera.js`,
+  `impresora.js`, `code128.js`), `GET /api/calibracion`, `POST /api/etiquetas` y `POST /api/etiquetas/enviadas`. Desde ese
+  host ambos `POST` se limitan a lo que esa persona capturó en las últimas 24 h. Siguen cerrados ahí: `PUT /api/calibracion`,
+  `DELETE /api/etiquetas/enviadas`, `GET /api/config`, las pantallas de etiquetas y calibración.
+- **Mejor esfuerzo.** La reconexión sin toque usa `navigator.bluetooth.getDevices()` (solo Chrome reciente) y solo si ya
+  se conectó desde esa página; con la impresora apagada se rinde a los 8 s y queda el botón «Conectar impresora».
+  Una sola conexión BLE a la vez: con `/etiquetas` conectada en la computadora, el celular no podrá conectar.
+- **Migración.** `migracion-049-etiqueta-impresa.sql`, antes del deploy (sandbox y luego producción). Sin ella,
+  `GET /api/borradores` falla.
+
 ## Orden de entrega
 
 1. Esqueleto: Worker desplegado, D1 creada, R2 creado, `GET /api/config` respondiendo. Probar el despliegue antes de escribir funcionalidad.
