@@ -7,8 +7,9 @@ import { tienda, DUENO } from './prueba-d1.ts';
 import worker from './worker.ts';
 import { tsplEtiqueta, etiquetaVigente, partirNombre, NOMBRE_MAX } from '../public/etiquetera.js';
 
-const fuente = readFileSync('public/etiquetas.html', 'utf8').match(/<script type="module">([\s\S]*?)<\/script>/)![1]
-  .replace(/import\s*\{[\s\S]*?\}\s*from\s*'[^']+';/g, '');
+const modulo = readFileSync('public/imprimir-lote.js', 'utf8');
+const fuente = readFileSync('public/envio-etiquetas.js', 'utf8').replace(/^import .*;$/gm, '').replace(/^export /gm, '') + '\n'
+  + modulo.slice(modulo.indexOf('const lista ='), modulo.lastIndexOf('return { imprimir, pintar, cargar'));
 const DESDE = '2026-10-11T15:00:00.000Z';
 const ANTES = '2026-10-11T14:00:00.000Z';
 const DESPUES = '2026-10-11T16:00:00.000Z';
@@ -87,7 +88,7 @@ async function pagina(t: ReturnType<typeof tienda>, ambiente = 'sandbox', almace
   const api = await runInNewContext(`(async () => { ${fuente}
     return { iniciarAutomatica, imprimirNuevas, imprimir, pausarAutomatica, activa: () => automaticaActiva };
   })()`, {
-    document: { getElementById: $ }, navigator: { bluetooth: {}, locks: { request: async (_nombre: string, _opciones: any, fn: any) => fn({}) } },
+    vista:null, document: { getElementById: $ }, navigator: { bluetooth: {}, locks: { request: async (_nombre: string, _opciones: any, fn: any) => fn({}) } },
     localStorage: { getItem: (k: string) => almacen.get(k) ?? null, setItem: (k: string, v: string) => almacen.set(k, v), removeItem: (k: string) => almacen.delete(k) },
     fetch: async (ruta: string, opciones?: any) => {
       if (estado.falloRed) throw new Error('sin red');

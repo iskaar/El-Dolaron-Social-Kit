@@ -319,6 +319,24 @@
       "title": "Receptor único del lector",
       "description": "Pantalla única de inventario; Issue #446.",
       "format": "JS"
+    },
+    {
+      "file": "app/public/imprimir-lote.js",
+      "title": "Motor de etiquetas y sesión automática",
+      "description": "Impresión compartida, conserva marcas y calibración de main (#446).",
+      "format": "JS"
+    },
+    {
+      "file": "app/public/envio-etiquetas.js",
+      "title": "Estado de envío de etiquetas",
+      "description": "Impresión compartida, conserva marcas y calibración de main (#446).",
+      "format": "JS"
+    },
+    {
+      "file": "app/public/inventario-imprimir.js",
+      "title": "Etiquetas y bandas en Inventario",
+      "description": "Impresión compartida, conserva marcas y calibración de main (#446).",
+      "format": "JS"
     }
   ],
   "version": "1.0"

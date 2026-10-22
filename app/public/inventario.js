@@ -1,6 +1,6 @@
 import { escucharLector } from './lector.js';
 import { api, crearFicha, pesos } from './ficha.js';
-import { $, nodo, boton, mensaje, hoja, confirmar, prepararHoja } from './inventario-ui.js';
+import { $, nodo, boton, mensaje, hoja, confirmar, prepararHoja, stepper, cerrarHoja } from './inventario-ui.js';
 
 prepararHoja();
 const pc = () => matchMedia('(min-width:1000px)').matches;
@@ -15,6 +15,13 @@ const ficha = crearFicha({ mensaje, confirmar, alAbrir(p) {
   piezaActual = p; document.body.classList.add('con-ficha');
   $('solo-consulta').hidden = dueno || identidad.usuario?.editar_inventario === true;
   for (const b of document.querySelectorAll('.resultado')) b.setAttribute('aria-current', String(b.dataset.id === p.id));
+  $('acciones-ficha').replaceChildren();
+  if (!identidad.vendedor && p.destino === 'etiqueta') {
+    const imprimir = async (n) => (await cargar('imprimir')).imprimir([p.id], new Map([[p.id,n]]));
+    $('acciones-ficha').append(boton('Imprimir 1', () => imprimir(1), 'primario'), boton('Imprimir N…', () => {
+      let n = 1; const c = nodo('div'); c.append(stepper(n, v => n = v, { nombre:'Copias' }), boton('Imprimir', async () => { cerrarHoja(); await imprimir(n); }, 'primario')); hoja('Copias', c);
+    }));
+  }
   foco();
 } });
 
