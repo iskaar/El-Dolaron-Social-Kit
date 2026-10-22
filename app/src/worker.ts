@@ -2116,7 +2116,7 @@ export default {
         return await yo(env, correo, soloComputadora(await leerUsuario(env, correo)) ? await cajeroEnTurno(request, env) : null);
       }
       if (pathname === '/api/piezas' || pathname.startsWith('/api/piezas/')) {
-        const respuesta = await rutaPiezas(request, env, url, await leerUsuario(env, correo));
+        const respuesta = await rutaPiezas(request, env, url, await leerUsuario(env, correo), ctx);
         if (respuesta) return respuesta;
       }
       const respuestaRopaIA = await rutaRopaAdmin(request, env, pathname);

@@ -7,9 +7,11 @@ const pesos = (centavos) => new Intl.NumberFormat('es-MX', { style:'currency', c
 const mensaje = (texto) => { $('estado').textContent = texto; };
 let pieza, siguiente = null, consulta = '', generacion = 0, apertura = 0;
 let apagarCamara = null;
+let puedeEditar = false, pendiente = null, enviando = false, deshacer = null, temporizador;
 
-async function api(ruta) {
-  const r = await fetch(ruta, { cache:'no-store', signal:AbortSignal.timeout(15000) });
+async function api(ruta, cuerpo) {
+  const r = await fetch(ruta, { cache:'no-store', signal:AbortSignal.timeout(15000),
+    ...(cuerpo ? { method:'POST', headers:{ 'content-type':'application/json' }, body:JSON.stringify(cuerpo) } : {}) });
   const datos = await r.json();
   if (!r.ok) throw Object.assign(new Error(datos.error || 'No se pudo completar la acción.'), { status:r.status, datos });
   return datos;
@@ -25,6 +27,11 @@ function pintar() {
   $('precio').textContent = pesos(pieza.precio);
   $('precio-lista').textContent = pieza.precio_lista > 0 ? `Lista ${pesos(pieza.precio_lista)}` : '';
   $('stock').value = String(pieza.stock);
+  $('existencia').hidden = !puedeEditar;
+  $('menos').hidden = $('sumar').hidden = !puedeEditar;
+  $('menos').disabled = enviando || !!pendiente || pieza.stock <= 0 || $('motivo').value === 'entrada';
+  $('sumar').disabled = enviando || !!pendiente || pieza.stock >= 999 || ['robo', 'merma', 'error de captura'].includes($('motivo').value);
+  $('ajustar').disabled = $('deshacer').disabled = enviando || !!pendiente;
   $('foto').hidden = !pieza.tiene_foto;
   $('sin-foto').hidden = !!pieza.tiene_foto;
   if (pieza.tiene_foto) { $('foto').src = `/api/foto/${pieza.id}?v=${encodeURIComponent(pieza.actualizado_en)}`; $('foto').alt = pieza.nombre; }
@@ -32,19 +39,15 @@ function pintar() {
 
 async function abrir(id) {
   const turno = ++apertura;
+  quitarDeshacer();
+  $('motivo').value = 'correccion'; $('fijar-a').value = '';
   pieza = null; pintar();
   try {
     const datos = await api(`/api/piezas/${id}`);
     if (turno !== apertura) return;
     pieza = datos.pieza;
-    $('historial').replaceChildren();
-    for (const a of datos.historial) {
-      const li = document.createElement('li');
-      const delta = a.despues - a.antes;
-      li.textContent = `${new Date(a.ajustado_en).toLocaleString('es-MX', { timeZone:'America/Mexico_City' })} · ${delta > 0 ? '+' : ''}${delta} · ${a.antes} → ${a.despues} · ${a.motivo} · ${a.ajustado_por}`;
-      $('historial').append(li);
-    }
-    if (!datos.historial.length) { const li = document.createElement('li'); li.textContent = 'Sin ajustes registrados.'; $('historial').append(li); }
+    puedeEditar = datos.puede_editar === true;
+    pintarHistorial(datos.historial);
     document.body.classList.add('con-ficha');
     pintar();
     for (const b of document.querySelectorAll('.resultado')) b.setAttribute('aria-current', String(b.dataset.id === id));
@@ -52,6 +55,80 @@ async function abrir(id) {
     if (matchMedia('(min-width:1000px)').matches) foco();
   } catch (error) { if (turno === apertura) mensaje(error.message); }
 }
+
+function pintarHistorial(historial) {
+    $('historial').replaceChildren();
+    for (const a of historial) {
+      const li = document.createElement('li');
+      const delta = a.despues - a.antes;
+      li.textContent = `${new Date(a.ajustado_en).toLocaleString('es-MX', { timeZone:'America/Mexico_City' })} · ${delta > 0 ? '+' : ''}${delta} · ${a.antes} → ${a.despues} · ${a.motivo} · ${a.ajustado_por}`;
+      $('historial').append(li);
+    }
+    if (!historial.length) { const li = document.createElement('li'); li.textContent = 'Sin ajustes registrados.'; $('historial').append(li); }
+}
+
+function quitarDeshacer() {
+  clearTimeout(temporizador); deshacer = null; $('deshacer').hidden = true;
+}
+
+async function ajustar(cuerpo, inverso = false) {
+  if (!pieza || !puedeEditar || pendiente || enviando) return;
+  pendiente = { piezaId:pieza.id, nombre:pieza.nombre, cuerpo:{ id:crypto.randomUUID(), ...cuerpo }, inverso };
+  quitarDeshacer();
+  await enviarAjuste();
+}
+
+async function enviarAjuste() {
+  if (!pendiente || enviando) return;
+  enviando = true; pintar(); $('reintentar').hidden = true;
+  const operacion = pendiente, turno = apertura;
+  let texto;
+  try {
+    const a = await api(`/api/piezas/${operacion.piezaId}/existencia`, operacion.cuerpo);
+    pendiente = null;
+    texto = `${operacion.nombre}: existencia de ${a.antes} a ${a.despues}.`;
+    if (pieza?.id === operacion.piezaId && turno === apertura) {
+      pieza.stock = a.despues;
+      if (!operacion.inverso) {
+        deshacer = { delta:a.antes - a.despues, hasta:Date.now() + 5000 };
+        $('deshacer').hidden = false;
+        temporizador = setTimeout(quitarDeshacer, 5000);
+      }
+    }
+  } catch (error) {
+    if (error.status >= 400 && error.status < 500) {
+      pendiente = null;
+      if (error.status === 403 && pieza?.id === operacion.piezaId) puedeEditar = false;
+      texto = error.message;
+    } else texto = `No se confirmó el ajuste de ${operacion.nombre}. Reintenta para consultar el mismo folio.`;
+  }
+  // Refrescar también después de un conflicto: una venta pudo cambiar existencia e historial.
+  if (!pendiente && pieza?.id === operacion.piezaId && turno === apertura) {
+    try {
+      const datos = await api(`/api/piezas/${operacion.piezaId}`);
+      if (turno === apertura) { pieza = datos.pieza; puedeEditar = datos.puede_editar === true; pintarHistorial(datos.historial); }
+    } catch { texto += ' No se pudo actualizar la ficha; vuelve a abrirla.'; }
+  }
+  enviando = false; pintar(); $('reintentar').hidden = !pendiente;
+  mensaje(texto);
+}
+
+$('motivo').addEventListener('change', pintar);
+$('menos').addEventListener('click', () => ajustar({ delta:-1, motivo:$('motivo').value }));
+$('sumar').addEventListener('click', () => ajustar({ delta:1, motivo:$('motivo').value }));
+$('fijar').addEventListener('submit', (e) => {
+  e.preventDefault();
+  if (!pieza || !puedeEditar || pendiente) return;
+  const n = Number($('fijar-a').value), esperado = pieza.stock;
+  if ($('fijar-a').value === '' || !Number.isInteger(n) || n < 0 || n > 999 || n === esperado) return mensaje('Escribe una existencia distinta entre 0 y 999.');
+  if (!confirm(`¿Cambiar existencia de ${esperado} a ${n}?`)) return;
+  void ajustar({ fijar_a:n, esperado, motivo:$('motivo').value });
+});
+$('deshacer').addEventListener('click', () => {
+  if (deshacer && Date.now() < deshacer.hasta) void ajustar({ delta:deshacer.delta, motivo:'correccion' }, true);
+  else quitarDeshacer();
+});
+$('reintentar').addEventListener('click', enviarAjuste);
 
 function resultado(p) {
   const li = document.createElement('li'), b = document.createElement('button');

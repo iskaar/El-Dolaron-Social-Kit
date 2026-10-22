@@ -222,13 +222,13 @@
     {
       "file": "app/public/pieza.html",
       "title": "Buscar pieza",
-      "description": "Consulta privada por código, UPC o nombre; foto, precio, existencia e historial, con alcance por propietario (Issue #441).",
+      "description": "Consulta privada por código, UPC o nombre; foto, precio, existencia e historial. Ajustes con rastro para dueño y personal autorizado, con alcance por propietario (Issue #441).",
       "format": "HTML"
     },
     {
       "file": "app/public/pieza.js",
       "title": "Consulta de piezas y lector",
-      "description": "Búsqueda paginada, ficha de solo lectura y cámara reutilizada sin cambios de inventario.",
+      "description": "Búsqueda paginada, cámara reutilizada y ajustes de existencia con motivo, confirmación al fijar, deshacer y reintento idempotente según permiso del servidor.",
       "format": "JS"
     },
     {
