@@ -39,7 +39,7 @@ test('texto de una pieza: centavos, antes, talla, acentos y cierre exactos', () 
 test('varias piezas: una línea por pieza y un solo cierre, hasta diez', () => {
   const piezas = Array.from({ length: 10 }, (_, n) => ({ codigo: `ED-${n}`, nombre: 'Blusa', precio: 10001, precio_lista: 20000 }));
   const texto = textoWhatsApp(piezas);
-  assert.equal(texto.split('\n').length, 12);
+  assert.equal(texto.split('\n').length, 13);   // 10 piezas + apartado + envíos + dirección
   assert.equal(texto.match(/Apártala/g)?.length, 1);
   assert.ok(texto.startsWith('ED-0 · Blusa · $100.01\nED-1'));
 });
