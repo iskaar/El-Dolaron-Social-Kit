@@ -71,6 +71,7 @@ const PANTALLAS: Record<string, Rol[]> = {
   '/marketplace': CAPTURA,
   '/etiquetas': CAPTURA_FEP,
   '/pieza': CAPTURA_FEP,
+  '/inventario': CAPTURA_FEP,
   '/bandas': CAPTURA,
   '/calibrar-etiqueta': CAPTURA,
   '/prueba-codigo': CAPTURA,
@@ -299,7 +300,7 @@ function json(cuerpo: unknown, status = 200): Response {
 const texto = (valor: unknown, max: number) => String(valor ?? '').replace(/\s+/g, ' ').trim().slice(0, max);
 
 /** Quien soy y que puedo hacer: para la pantalla de sin acceso y para esconder lo que no toca. */
-export async function yo(env: Env, correo: string, cajero: Usuario | null = null): Promise<Response> {
+export async function yo(env: Env, correo: string, cajero: Usuario | null = null, vendedor = false): Promise<Response> {
   const usuario = await leerUsuario(env, correo);
   const solicitud = await env.DB.prepare(
     `select estado, creado_en from solicitudes where tipo = 'acceso' and correo = ?
@@ -307,7 +308,10 @@ export async function yo(env: Env, correo: string, cajero: Usuario | null = null
   )
     .bind(correo)
     .first<{ estado: string; creado_en: string }>();
-  return json({ correo, usuario, solicitud, cajero: cajero && { correo: cajero.correo, nombre: cajero.nombre, caja: cajero.caja } });
+  const modos = usuario?.activo && (usuario.roles.includes('dueno') || usuario.roles.includes('capturista'))
+    ? ['capturar', 'buscar', 'revisar', ...(!vendedor ? ['imprimir'] : [])]
+    : usuario?.activo && usuario.roles.includes('finanzas') ? ['capturar', 'buscar', ...(!vendedor ? ['imprimir'] : [])] : [];
+  return json({ correo, usuario, solicitud, vendedor, modos_inventario: modos, cajero: cajero && { correo: cajero.correo, nombre: cajero.nombre, caja: cajero.caja } });
 }
 
 /** Alguien sin cuenta pide entrar. Una sola pendiente por persona: pedir otra vez la actualiza. */

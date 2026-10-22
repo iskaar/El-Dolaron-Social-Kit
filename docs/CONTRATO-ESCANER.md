@@ -34,6 +34,8 @@
 > foto con nombre y precio. Esta regla rige en sandbox y producción; para otra
 > mercancía siguen vigentes las reglas de análisis descritas abajo.
 
+> **Inventario (Isaac, 22/10/2026, #446):** `/inventario` reúne Capturar, Buscar, Revisar e Imprimir (Bandas dentro de Imprimir). En `captura.viste.com.mx` se autorizan Capturar, Buscar y Revisar: consulta de precios, existencia y fotos; la edición exige la casilla «Editar inventario», y precio con etiqueta solo lo cambia el dueño. Ajustes (`/admin`) nunca se sirve en ese host. La captura propia de 24 h conserva sus permisos. `/pieza` redirige a Buscar; las cinco rutas anteriores siguen operativas hasta el visto bueno de Isaac. Sin red solo se encolan fotos: nunca cambios de existencia.
+
 ## Decisión de fondo
 
 El escáner **no** es la herramienta de captura del vendedor: la cámara lo es. El análisis con IA

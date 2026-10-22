@@ -87,17 +87,25 @@ interface FilaBorrador {
 }
 
 /**
- * El hostname del vendedor solo sirve la camara y la subida de fotos.
- * Cloudflare Access decide quien entra; esto decide que hay detras, y sigue
- * valiendo si algun dia la politica de Access queda mal configurada. Los precios
- * y el inventario no viven en el telefono que anda en el pasillo.
+ * El host del capturista ofrece Capturar, Buscar y Revisar (#446, Isaac 22/10).
+ * Access autentica; rol, propietario y casilla siguen autorizando cada operación.
+ * Ajustes, configuración y la lista general de impresión no se abren aquí.
  */
 const RUTAS_VENDEDOR = new Set(['/captura', '/foto.js', '/tallas.js', '/api/salud', '/sin-acceso', '/api/yo',
   // Escanear del manifiesto (Issue #365): el telefono ve nombre y precio de lo que escanea, nada mas.
-  '/escanear', '/categorias.js', '/upc.js', '/cola-fotos.js', '/estados.js']);
+  '/escanear', '/categorias.js', '/upc.js', '/cola-fotos.js', '/estados.js',
+  '/inventario', '/inventario.css', '/inventario.js', '/inventario-ui.js', '/lector.js', '/ficha.js',
+  '/venta.js', '/etiquetera.js', '/impresora.js', '/camara.js', '/vendor/html5-qrcode.min.js', '/ropa.js']);
 const CORRECCION_CAPTURA = /^\/api\/borradores\/([^/]+)\/(existencia|talla|revision)$/;
 
 export function permitidaParaVendedor(pathname: string, metodo: string): boolean {
+  if (/^\/(inventario|pieza)(?:\.html)?\/?$/.test(pathname)) return metodo === 'GET';
+  if (pathname === '/api/piezas' || /^\/api\/piezas\/[^/]+$/.test(pathname) || /^\/api\/foto\/[^/]+$/.test(pathname)) return metodo === 'GET';
+  if (/^\/api\/piezas\/[^/]+\/existencia$/.test(pathname)) return metodo === 'POST';
+  if (pathname === '/api/borradores' && metodo === 'GET') return true;
+  if (/^\/api\/borradores\/[0-9a-f-]{36}$/.test(pathname)) return ['PATCH', 'DELETE'].includes(metodo);
+  if (/^\/api\/borradores\/[^/]+\/(fusionar|analizar|imagen\/buscar)$/.test(pathname)) return metodo === 'POST';
+  if (/^\/api\/borradores\/[^/]+\/imagen$/.test(pathname)) return metodo === 'PUT';
   if (pathname === '/camara-remota' || pathname === '/camara-remota.js') return metodo === 'GET';
   if (pathname === '/api/camara/solicitud') return metodo === 'GET';
   if (/^\/api\/camara\/solicitud\/[^/]+\/(tomar|lista|cancelar)$/.test(pathname)) return metodo === 'POST';
@@ -2116,8 +2124,13 @@ export default {
         }
       }
 
+      if (/^\/pieza(?:\.html)?\/?$/.test(pathname) && request.method === 'GET') {
+        const destino = new URL('/inventario', url.origin); destino.search = url.search; destino.hash = 'buscar';
+        return Response.redirect(destino.href, 302);
+      }
+
       if (pathname === '/api/yo') {
-        return await yo(env, correo, soloComputadora(await leerUsuario(env, correo)) ? await cajeroEnTurno(request, env) : null);
+        return await yo(env, correo, soloComputadora(await leerUsuario(env, correo)) ? await cajeroEnTurno(request, env) : null, !!env.HOST_VENDEDOR && url.hostname === env.HOST_VENDEDOR);
       }
       if (pathname === '/api/camara/solicitud' || pathname.startsWith('/api/camara/solicitud/')) {
         return await rutaCamaraRemota(request, env, pathname, usuario!);

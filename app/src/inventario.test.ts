@@ -1,0 +1,40 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import worker, { permitidaParaVendedor } from './worker.ts';
+import { tienda, DUENO } from './prueba-d1.ts';
+import { permiso, puede, type Rol } from './cuentas.ts';
+
+test('/inventario por rol y host; el portal y Ajustes del host de captura permanecen cerrados', async(t0)=>{
+  const t=tienda();t0.after(()=>t.db.close());
+  t.env.ASSETS={fetch:async()=>new Response('inventario')} as Fetcher;
+  for(const rol of ['dueno','capturista','finanzas','cajero','computadora','auxiliar'] as Rol[]){
+    const correo=rol+'@prueba.mx'; if(rol!=='dueno') t.db.prepare("insert into usuarios(correo,nombre,roles,activo,creado_en,actualizado_en) values(?,?,?,1,'','')").run(correo,rol,rol);
+    t.env.DEV_USUARIO=rol==='dueno'?DUENO:correo;
+    assert.equal(puede({correo,nombre:'',roles:[rol],activo:true,caja:'',editar_inventario:false},permiso('/inventario','GET')),['dueno','capturista','finanzas'].includes(rol));
+    const r=await worker.fetch!(new Request('https://caja.prueba/inventario') as never,t.env,t.ctx as never);
+    assert.equal(r.status,['dueno','capturista','finanzas'].includes(rol)?200:302);
+    t.env.HOST_VENDEDOR='captura.prueba';
+    const yo=await worker.fetch!(new Request('https://captura.prueba/api/yo') as never,t.env,t.ctx as never);
+    const d=await yo.json() as any; assert.equal(d.vendedor,true);
+    assert.deepEqual(d.modos_inventario,rol==='dueno'||rol==='capturista'?['capturar','buscar','revisar']:rol==='finanzas'?['capturar','buscar']:[]);
+    for(const ruta of ['/admin','/api/config','/api/cuentas','/api/etiquetas','/etiquetas','/api/catalogo']) assert.equal(permitidaParaVendedor(ruta,'GET'),false,ruta);
+  }
+  for(const ruta of ['/inventario','/inventario.html','/inventario/','/inventario.js','/lector.js','/api/piezas','/api/piezas/x','/api/foto/x','/api/borradores']) assert.equal(permitidaParaVendedor(ruta,'GET'),true,ruta);
+  assert.equal(permitidaParaVendedor('/api/piezas/x/existencia','POST'),true);
+  assert.equal(permitidaParaVendedor('/api/piezas/x/existencia','PATCH'),false);
+  t.env.DEV_USUARIO=DUENO;t.env.HOST_PORTAL='portal.prueba';
+  assert.equal((await worker.fetch!(new Request('https://portal.prueba/inventario') as never,t.env,t.ctx as never)).status,404);
+});
+
+test('/pieza es alias de Buscar y conserva la consulta; las cinco rutas previas sirven assets',async(t0)=>{
+  const t=tienda();t0.after(()=>t.db.close());t.env.ASSETS={fetch:async()=>new Response('pantalla anterior')} as Fetcher;
+  for(const ruta of ['/pieza','/pieza.html','/pieza/']){
+    const r=await worker.fetch!(new Request(`https://caja.prueba${ruta}?pieza=ED-002318`) as never,t.env,t.ctx as never);
+    assert.equal(r.status,302);assert.equal(r.headers.get('location'),'https://caja.prueba/inventario?pieza=ED-002318#buscar');
+  }
+  for(const ruta of ['/captura','/escanear','/admin','/etiquetas','/bandas']){
+    const r=await worker.fetch!(new Request(`https://caja.prueba${ruta}`) as never,t.env,t.ctx as never);
+    // Captura aplica HTMLRewriter solo a respuestas HTML; este doble es texto.
+    assert.equal(r.status,200);assert.equal(await r.text(),'pantalla anterior');
+  }
+});

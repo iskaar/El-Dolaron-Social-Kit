@@ -1,3 +1,4 @@
+import { escucharLector } from './lector.js';
 import { abrirCamara } from './camara.js';
 import { api, crearFicha, pesos } from './ficha.js';
 
@@ -65,13 +66,7 @@ $('consulta').addEventListener('input', () => {
 });
 const foco = () => { $('consulta').focus({ preventScroll:true }); $('consulta').select(); };
 $('volver').addEventListener('click', () => { ficha.invalidar(); document.body.classList.remove('con-ficha'); foco(); });
-// Patrón de /escanear: Enter del lector abre la pieza sin activar el último botón tocado.
-let tecleado = '', ultimaTecla = 0;
-document.addEventListener('keydown', (e) => {
-  if (e.target.matches('input,select,textarea') || e.ctrlKey || e.altKey || e.metaKey) return;
-  if (e.key === 'Enter' && tecleado) { e.preventDefault(); $('consulta').value = tecleado; tecleado = ''; void buscar(); }
-  else if (/^[\da-z-]$/i.test(e.key)) { if (Date.now() - ultimaTecla > 250) tecleado = ''; tecleado += e.key; ultimaTecla = Date.now(); }
-});
+escucharLector(({ codigo }) => { $('consulta').value = codigo; void buscar(); });
 $('camara').addEventListener('click', async () => {
   if ($('camara').disabled) return;
   $('camara').disabled = true;

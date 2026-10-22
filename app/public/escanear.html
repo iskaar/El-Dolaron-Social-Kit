@@ -155,6 +155,7 @@
   <button id="guardar" class="principal" type="button">Guardar</button>
 </footer>
 <script type="module">
+import { escucharLector } from '/lector.js';
 import { CATEGORIAS } from '/categorias.js';
 import { ESTADOS, nombreEstado, siguienteEstado } from '/estados.js';
 import { aJpeg, reducirArchivo } from '/foto.js';
@@ -728,22 +729,7 @@ document.addEventListener('visibilitychange', () => { if (document.hidden) fila 
 
 /* ---------- entradas: lector Bluetooth/USB, teclado y camara ---------- */
 
-// El lector teclea el numero y Enter, como un teclado, sin que haya un campo
-// enfocado: asi el teclado del telefono no se abre en cada pieza.
-let tecleado = '';
-document.addEventListener('keydown', (e) => {
-  if (piezaParaManual) return;
-  if (e.target instanceof HTMLInputElement) return;
-  if (e.key === 'Enter') {
-    if (!tecleado) return; // Enter sobre un botón sigue activándolo con teclado.
-    // Sin esto, el Enter del lector "aprieta" el ultimo boton tocado (p.ej. Dañado).
-    e.preventDefault();
-    if (tecleado) recibir(tecleado);
-    tecleado = '';
-  } else if (/^\d$/.test(e.key)) {
-    tecleado += e.key;
-  }
-});
+escucharLector(({ codigo }) => { if (!piezaParaManual) recibir(codigo); });
 
 $('abrir-teclado').addEventListener('click', () => {
   $('teclado').hidden = !$('teclado').hidden;

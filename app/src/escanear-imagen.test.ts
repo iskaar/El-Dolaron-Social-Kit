@@ -23,7 +23,8 @@ function pantalla(fallaFoto = false, desconocida = false, entorno: Record<string
   const temporizadores = new Map<number, { fn: () => unknown; ms: number }>();
   const html = readFileSync('public/escanear.html', 'utf8');
   const codigo = html.split('<script type="module">')[1].split('</script>')[0].replace(/^import .*;\r?\n/gm, '');
-  const api = runInNewContext(codigo + '\n({procesar, cerrarActual, pintar, actual:()=>actual, desconocido:()=>desconocido, cola:()=>fila, conservarFoto, elegirPiezaFoto})', {
+  const lector = readFileSync('public/lector.js', 'utf8').replace(/^export /gm, '');
+  const api = runInNewContext(lector + '\n' + codigo + '\n({procesar, cerrarActual, pintar, actual:()=>actual, desconocido:()=>desconocido, cola:()=>fila, conservarFoto, elegirPiezaFoto})', {
     document: { getElementById: el, addEventListener() {}, body: { className: '' }, querySelector: el, querySelectorAll: (selector: string) => [el(selector)] },
     CATEGORIAS: [['otros', 'Otros']], ESTADOS, SIN_CODIGO, codigoLeido, normalizar: normalizarUpc, crypto, Blob, File, FormData,
     navigator: {}, addEventListener() {}, setTimeout: (fn: () => unknown, ms: number) => { temporizadores.set(++proximoTemporizador, { fn, ms }); return proximoTemporizador; }, clearTimeout: (id: number) => temporizadores.delete(id),

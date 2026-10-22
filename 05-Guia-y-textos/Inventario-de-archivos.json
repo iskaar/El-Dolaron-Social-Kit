@@ -289,6 +289,36 @@
       "height": 156,
       "format": "PNG",
       "background": "transparent"
+    },
+    {
+      "file": "app/public/inventario.html",
+      "title": "Inventario único",
+      "description": "Pantalla única de inventario; Issue #446.",
+      "format": "HTML"
+    },
+    {
+      "file": "app/public/inventario.css",
+      "title": "Interfaz de inventario",
+      "description": "Pantalla única de inventario; Issue #446.",
+      "format": "CSS"
+    },
+    {
+      "file": "app/public/inventario.js",
+      "title": "Navegación de inventario",
+      "description": "Pantalla única de inventario; Issue #446.",
+      "format": "JS"
+    },
+    {
+      "file": "app/public/inventario-ui.js",
+      "title": "Controles compartidos de inventario",
+      "description": "Pantalla única de inventario; Issue #446.",
+      "format": "JS"
+    },
+    {
+      "file": "app/public/lector.js",
+      "title": "Receptor único del lector",
+      "description": "Pantalla única de inventario; Issue #446.",
+      "format": "JS"
     }
   ],
   "version": "1.0"

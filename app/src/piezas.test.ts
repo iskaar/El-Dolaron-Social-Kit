@@ -139,10 +139,10 @@ test('FEP y dueño aislados en lista, código, UPC, ficha e historial; capturist
   for (const ruta of ['/pieza', '/pieza.html', '/pieza/', '/api/piezas', `/api/piezas/${propia.id}`]) {
     for (const rol of ['dueno', 'capturista', 'finanzas', 'cajero'] as Rol[])
       assert.equal(puede({ correo: '', nombre: '', caja: '', activo: true, roles: [rol] }, permiso(ruta, 'GET')), rol !== 'cajero');
-    assert.equal(permitidaParaVendedor(ruta, 'GET'), false);
+    assert.equal(permitidaParaVendedor(ruta, 'GET'), true);
   }
   env.DEV_USUARIO = DUENO;
-  env.HOST_VENDEDOR = 'caja.prueba'; assert.equal((await pedir('/api/piezas')).status, 404);
+  env.HOST_VENDEDOR = 'caja.prueba'; assert.equal((await pedir('/api/piezas?q=chamarra')).status, 200);
   env.HOST_VENDEDOR = ''; env.HOST_PORTAL = 'caja.prueba'; assert.equal((await pedir('/api/piezas')).status, 404);
 });
 
@@ -216,7 +216,7 @@ function pantalla(responder: (url: string, cuerpo?: any) => unknown | Promise<un
   const temporizadores: { fn: Function; ms: number }[] = [];
   // pieza.js importa la ficha de ficha.js: se evalúan juntas, cada módulo en su propio ámbito.
   const modulo = (archivo: string) => readFileSync(archivo, 'utf8').replace(/^import .+;$/gm, '').replace(/^export /gm, '');
-  const api = runInNewContext(`const { api, crearFicha, pesos } = (() => {${modulo('public/ficha.js')}; return { api, crearFicha, pesos }; })();
+  const api = runInNewContext(`${modulo('public/lector.js')}; const { api, crearFicha, pesos } = (() => {${modulo('public/ficha.js')}; return { api, crearFicha, pesos }; })();
     ${modulo('public/pieza.js')}; ({buscar, abrir})`, {
     impresas: etiquetera.impresas, etiquetaVigente: etiquetera.etiquetaVigente, precioImpreso: etiquetera.precioImpreso, TALLAS: ['M'],
     document: { getElementById: $, createElement: (tag: string) => new Nodo(tag),
@@ -224,6 +224,7 @@ function pantalla(responder: (url: string, cuerpo?: any) => unknown | Promise<un
       addEventListener: (e: string, fn: Function) => { eventos[e] = fn; }, body: new Nodo() },
     CATEGORIAS: [['ropa', 'Ropa']], nombreEstado: () => 'A · Nuevo',
     matchMedia: () => ({ matches: true }), AbortSignal, crypto, confirm:confirmar,
+    performance: { now: () => 0 },
     setTimeout: (fn: Function, ms: number) => { temporizadores.push({ fn, ms }); return temporizadores.length; }, clearTimeout: () => {},
     abrirCamara: async (_id: string, fn: (s: string) => void) => { camaras++; alLeer = fn; return async () => { apagadas++; }; },
     fetch: async (url: string, opciones: RequestInit) => {
@@ -411,8 +412,9 @@ test('cada petición verifica rol y casilla; FEP solo sus piezas; descartadas y 
   }
   env.DEV_USUARIO = DUENO;
   for (const p of [pieza(db, { sin_inventario:1 }), pieza(db, { estado_analisis:'descartado' }), fep]) assert.equal((await cambiar(p.id)).status, 404);
-  assert.equal(permitidaParaVendedor(`/api/piezas/${propia.id}/existencia`, 'POST'), false);
-  for (const host of ['HOST_VENDEDOR', 'HOST_PORTAL'] as const) {
+  assert.equal(permitidaParaVendedor(`/api/piezas/${propia.id}/existencia`, 'POST'), true);
+  env.HOST_VENDEDOR = 'caja.prueba'; assert.equal((await cambiar()).status, 200); env.HOST_VENDEDOR = '';
+  for (const host of ['HOST_PORTAL'] as const) {
     env[host] = 'caja.prueba'; assert.equal((await cambiar()).status, 404); env[host] = '';
   }
   await esperar();

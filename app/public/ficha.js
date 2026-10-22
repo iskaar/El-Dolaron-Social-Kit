@@ -70,7 +70,7 @@ export function avisoReimpresion(marca, antes, ahora) {
     : `La etiqueta pegada dice «${pegada.nombre ?? ''}${pegada.talla ? ` · ${pegada.talla}` : ''}».`;
 }
 
-export function crearFicha({ mensaje, alAbrir = () => {} }) {
+export function crearFicha({ mensaje, alAbrir = () => {}, confirmar = (texto) => Promise.resolve(confirm(texto)) }) {
   let pieza = null, apertura = 0, puedeEditar = false, puedePrecio = false;
   let pendiente = null, enviando = false, guardando = false, deshacer = null, temporizador;
   for (const t of TALLAS) { const o = document.createElement('option'); o.value = t; $('tallas').append(o); }
@@ -138,6 +138,7 @@ export function crearFicha({ mensaje, alAbrir = () => {} }) {
 
   async function ajustar(cuerpo, inverso = false) {
     if (!pieza || !puedeEditar || pendiente || enviando) return;
+    if (globalThis.navigator?.onLine === false) return mensaje('Sin red: se suma al volver la señal');
     pendiente = { piezaId:pieza.id, nombre:pieza.nombre, cuerpo:{ id:crypto.randomUUID(), ...cuerpo }, inverso };
     quitarDeshacer();
     await enviarAjuste();
@@ -198,7 +199,7 @@ export function crearFicha({ mensaje, alAbrir = () => {} }) {
     if (r.error) return mensaje(r.error);
     const lineas = resumenCorreccion(pieza, r.cuerpo, impresas()[pieza.id]);
     if (!lineas.length) return mensaje('No hay cambios que guardar.');
-    if (!confirm(`${lineas.join('\n')}\n\n¿Guardar?`)) return;
+    if (!await confirmar(`${lineas.join('\n')}\n\n¿Guardar?`)) return;
     const antes = { ...pieza }, turno = apertura;
     guardando = true; pintar();
     let texto;
@@ -223,12 +224,12 @@ export function crearFicha({ mensaje, alAbrir = () => {} }) {
   $('motivo').addEventListener('change', pintar);
   $('menos').addEventListener('click', () => ajustar({ delta:-1, motivo:$('motivo').value }));
   $('sumar').addEventListener('click', () => ajustar({ delta:1, motivo:$('motivo').value }));
-  $('fijar').addEventListener('submit', (e) => {
+  $('fijar').addEventListener('submit', async (e) => {
     e.preventDefault();
     if (!pieza || !puedeEditar || pendiente) return;
     const n = Number($('fijar-a').value), esperado = pieza.stock;
     if ($('fijar-a').value === '' || !Number.isInteger(n) || n < 0 || n > 999 || n === esperado) return mensaje('Escribe una existencia distinta entre 0 y 999.');
-    if (!confirm(`¿Cambiar existencia de ${esperado} a ${n}?`)) return;
+    if (!await confirmar(`¿Cambiar existencia de ${esperado} a ${n}?`)) return;
     void ajustar({ fijar_a:n, esperado, motivo:$('motivo').value });
   });
   $('deshacer').addEventListener('click', () => {
