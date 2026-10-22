@@ -58,6 +58,7 @@ import { rutaML, recibirNotificacion, conciliarSeguro, sincronizar, publicacionV
 import { pedirDescuento, validarDescuento, listarDescuentos, listarDuenos } from './descuentos.ts';
 import { listarAltoValor, revisarConteo, ajustarExistencia, listarAjustes } from './conteo.ts';
 import { rutaPedidos, vencerPedidos, sentenciasDePedido, saldoDe, enPedido } from './pedidos.ts';
+import { buscarPiezas, leerPieza } from './piezas.ts';
 
 interface FilaConfig {
   clave: string;
@@ -2114,6 +2115,9 @@ export default {
       if (pathname === '/api/yo') {
         return await yo(env, correo, soloComputadora(await leerUsuario(env, correo)) ? await cajeroEnTurno(request, env) : null);
       }
+      if (pathname === '/api/piezas' && request.method === 'GET') return await buscarPiezas(url, env, (await leerUsuario(env, correo))!);
+      const fichaPieza = pathname.match(/^\/api\/piezas\/([^/]+)$/);
+      if (fichaPieza && request.method === 'GET') return await leerPieza(fichaPieza[1], env, (await leerUsuario(env, correo))!);
       const respuestaRopaIA = await rutaRopaAdmin(request, env, pathname);
       if (respuestaRopaIA) return respuestaRopaIA;
       const respuestaRecortes = await rutaRecortesAdmin(request, env, pathname);
