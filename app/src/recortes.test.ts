@@ -20,9 +20,13 @@ function preparar(n = 1) {
   }
   return t;
 }
-const images = (fn: () => Promise<Response> = async () => new Response(new Uint8Array([9, 8]), { headers: { 'content-type': 'image/webp' } })) => ({
-  // Como el binding real: output() es async y ahí falla (9422 de cuota); response() es síncrono.
-  input() { return { transform() { return { async output() { const r = await fn(); return { response: () => r }; } }; } }; },
+const images = (fn: (pasos: any[]) => Promise<Response> = async () => new Response(new Uint8Array([9, 8]), { headers: { 'content-type': 'image/webp' } }), llamadas: any[][] = []) => ({
+  // Como el binding real: transform() encadena, output() es async y ahí falla (9422 de cuota); response() es síncrono.
+  input() {
+    const pasos: any[] = []; llamadas.push(pasos);
+    const cadena = { transform(o: any) { pasos.push(o); return cadena; }, async output() { const r = await fn(pasos); return { response: () => r }; } };
+    return cadena;
+  },
 });
 
 test('recortes: interruptor apagado, lote limitado a 20 y guarda WebP', async () => {
@@ -36,6 +40,22 @@ test('recortes: interruptor apagado, lote limitado a 20 y guarda WebP', async ()
     assert.equal(t.db.prepare("select count(*) n from productos where recorte_estado='listo'").get()?.n, 20);
     assert.ok((t.env.FOTOS as any).objetos.has(`recortes/${ID0}.webp`));
   } finally { t.db.close(); }
+});
+
+test('recortes: ajusta al producto y, si el ajuste falla, guarda el recorte sin ajustar (#421)', async () => {
+  for (const fallaAjuste of [false, true]) {
+    const t = preparar(); const llamadas: any[][] = [];
+    try {
+      await procesarRecortes(Object.assign(t.env, { IMAGES: images(async (pasos) => {
+        if (fallaAjuste && pasos.some((p) => p.trim)) throw Error('trim no soportado');
+        return new Response(new Uint8Array([9, 8]));
+      }, llamadas) }) as Env);
+      assert.deepEqual(llamadas[0], [{ segment: 'foreground' }, { trim: { border: { keep: 24 } } }]);
+      assert.deepEqual(llamadas.slice(1), fallaAjuste ? [[{ segment: 'foreground' }]] : []);
+      assert.equal(t.db.prepare('select recorte_estado from productos where id=?').get(ID0)?.recorte_estado, 'listo');
+      assert.ok((t.env.FOTOS as any).objetos.has(`recortes/${ID0}.webp`));
+    } finally { t.db.close(); }
+  }
 });
 
 test('recortes: cuota 9422 no marca; otro error marca error', async () => {

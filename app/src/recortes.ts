@@ -13,7 +13,14 @@ export async function procesarRecortes(env: Env): Promise<void> {
     try {
       const foto = await env.FOTOS.get(fila.foto_key);
       if (!foto) throw new Error('Foto no encontrada en R2.');
-      const salida = await (env.IMAGES as any).input(foto.body).transform({ segment: 'foreground' }).output({ format: 'image/webp', quality: 82 });
+      const original = await foto.arrayBuffer();
+      const recortar = (ajustar: boolean) => {
+        const sinFondo = (env.IMAGES as any).input(new Response(original).body).transform({ segment: 'foreground' });
+        // #421: cortar el borde transparente para que el producto llene la portada.
+        return (ajustar ? sinFondo.transform({ trim: { border: { keep: 24 } } }) : sinFondo).output({ format: 'image/webp', quality: 82 });
+      };
+      // ponytail: si el trim no reconoce la transparencia o falla, el recorte queda como antes; la cuota (9422) sí corta.
+      const salida = await recortar(true).catch((e: unknown) => { if (/9422/.test(String(e))) throw e; return recortar(false); });
       const bytes = salida instanceof Response ? salida.body : salida.response().body;
       if (!bytes) throw new Error('Recorte vacío.');
       await env.FOTOS.put(`recortes/${fila.id}.webp`, bytes, { httpMetadata: { contentType: 'image/webp' } });
