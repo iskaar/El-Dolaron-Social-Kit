@@ -242,9 +242,9 @@ condición actuales desde `GET /api/borradores/:id/revision`; PATCH cambia únic
 esos campos, sin reponer stock ni cambiar código. API y controles disponibles en sandbox y producción.
 
 «Eliminar captura» requiere dos toques y conexión. DELETE de esa misma ruta deja
-el UUID con `estado_analisis = descartado`, stock/precio cero y sin foto; retiene el
+el UUID con `estado_analisis = descartado`, stock/precio cero; con código conserva su foto (#439). Retiene el
 UUID para que un POST retrasado no la reviva. No aparece en revisión ni etiquetas.
-El archivo de R2 se borra después de quitar su referencia; análisis y correcciones
+Sin código, el archivo de R2 se borra después de quitar su referencia; análisis y correcciones
 no reabren un descarte. El handler comprueba identidad y ventana de 24 h en las
 mutaciones; rechaza eliminar piezas con venta o publicación. No hay migración nueva.
 

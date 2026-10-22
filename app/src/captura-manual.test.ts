@@ -57,7 +57,7 @@ test('marca y categorias nuevas (#159): se guardan, salen en la cola y en el inv
   assert.equal((db.prepare('select marca from productos where id = ?').get(cuerpo.id) as { marca: string }).marca, 'Elf');
 });
 
-test('fusionar dos fotos de la misma pieza: la que se queda conserva la etiqueta que ya salio impresa', async () => {
+test('fusionar conserva la fila etiquetada; la original sin etiqueta recibe un código nuevo (#439)', async () => {
   const { db, pedir } = tienda();
   const original = crypto.randomUUID();
   const repetida = crypto.randomUUID();
@@ -69,7 +69,12 @@ test('fusionar dos fotos de la misma pieza: la que se queda conserva la etiqueta
   const r = await pedir(`/api/borradores/${repetida}/fusionar`, { destino_id: original });
   assert.equal(r.status, 200);
   const fila = db.prepare('select codigo, stock from productos where id = ?').get(original) as { codigo: string; stock: number };
-  assert.deepEqual({ ...fila }, { codigo: 'ED-000900', stock: 5 });
+  assert.equal(fila.stock, 5);
+  assert.match(fila.codigo, /^ED-\d{6}$/);
+  assert.notEqual(fila.codigo, 'ED-000900');
+  assert.equal(db.prepare("select count(*) n from productos where codigo = 'ED-000900'").get()!.n, 1);
+  assert.deepEqual({ ...db.prepare('select codigo, stock, estado_analisis from productos where id = ?').get(repetida)! },
+    { codigo: 'ED-000900', stock: 0, estado_analisis: 'descartado' });
 });
 
 test('fusionar no deja pasar las 999 piezas: la suma se rechaza y no se pierde ninguna foto', async () => {

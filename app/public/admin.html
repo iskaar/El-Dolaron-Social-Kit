@@ -251,9 +251,10 @@ function ficha(p) {
         <button type="button" class="claro" data-accion="compartir"
           title="Copia precio, nombre y foto; pégalos con Win+V">Compartir</button>
         ${repetida ? `<button type="button" class="claro" data-accion="fusionar"
-          title="Suma esta foto a la pieza que ya existe y borra la repetida">
-          Ya existe · sumar a ${repetida.stock ?? 1} pz</button>` : ''}
-        <button type="button" class="peligro" data-accion="descartar">Descartar</button>
+          title="Suma la existencia; si tiene código, la repetida se conserva descartada con su foto">
+          Ya existe · sumar a ${repetida.stock ?? 1} pz${p.codigo ? ' · la etiqueta de la repetida queda inválida' : ''}</button>` : ''}
+        <button type="button" class="peligro" data-accion="descartar"
+          title="Con código: conserva la pieza y su foto, deja existencia 0 e invalida su etiqueta">Descartar</button>
         <span class="etiqueta ${estado}">${estado} · ${p.semana_ingreso}</span>
         <span class="aviso"></span>
       </div>
