@@ -1,7 +1,9 @@
 -- Apartados y paquetes de envío (Issue #434).
 -- Isaac ejecuta ANTES del deploy, primero en sandbox y luego en producción:
--- npx wrangler d1 execute el-dolaron-sandbox --remote --config wrangler.sandbox.jsonc --file=migracion-048-apartados.sql
--- npx wrangler d1 execute el-dolaron --remote --file=migracion-048-apartados.sql
+-- (--file falla con error 10000 en /import y cmd corta el SQL en el primer salto de línea:
+-- se manda en una línea, sin comentarios. Por eso aquí no hay comentarios al final de una línea.)
+-- npx wrangler d1 execute el-dolaron-sandbox --remote --config wrangler.sandbox.jsonc --command "$(grep -v '^\s*--' migracion-048-apartados.sql | tr '\n' ' ')"
+-- npx wrangler d1 execute el-dolaron --remote --command "$(grep -v '^\s*--' migracion-048-apartados.sql | tr '\n' ' ')"
 -- ANTES de producción: tomar y guardar un bookmark de D1 Time Travel para recuperación.
 -- Ejecutar una sola vez y como archivo completo. Conserva el anticipo y su corte histórico.
 -- Isaac autorizó reconstruir pedidos el 22/10/2026 (#434): el mínimo de tienda
@@ -66,6 +68,8 @@ create table pedido_lineas (
 insert into pedido_lineas (pedido_id, producto_id, cantidad)
   select pedido_id, producto_id, cantidad from pedido_lineas_copia;
 drop table pedido_lineas_copia;
+-- La 047 (#431) crea este índice sobre pedido_lineas; el DROP de arriba lo borra.
+create index if not exists pedido_lineas_producto on pedido_lineas (producto_id, pedido_id);
 update ventas set pedido_id = (select pedido_id from pedidos_ventas_copia where id = ventas.id)
   where id in (select id from pedidos_ventas_copia);
 drop table pedidos_ventas_copia;
@@ -89,10 +93,11 @@ update pedidos set liquidado_en = case when estado = 'vendido'
 where entrega = 'envio' and estado in ('vendido', 'apartado');
 
 create table pedido_movimientos (
-  id text primary key,                         -- UUID del navegador, incluso al perder la respuesta
+  -- id: UUID del navegador, igual aunque se pierda la respuesta; solicitud: mismo id con otro contenido = 409.
+  id text primary key,
   pedido_id text not null references pedidos(id),
   tipo text not null check (tipo in ('pieza', 'abono')),
-  solicitud text not null,                     -- mismo ID con otro contenido responde 409
+  solicitud text not null,
   importe integer not null check (typeof(importe) = 'integer' and
     ((tipo = 'pieza' and importe = 0) or (tipo = 'abono' and importe > 0))),
   forma_pago text not null,
