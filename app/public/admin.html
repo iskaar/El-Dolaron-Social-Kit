@@ -62,7 +62,7 @@
 
 <main>
   <p class="panel aviso" id="aviso-edicion" role="status" hidden>Tu cuenta no tiene «Editar inventario»: aquí solo puedes consultar.
-    No puedes guardar, recalcular, reanalizar, sumar repetidas, descartar ni buscar imagen. Pídele al dueño que la active en Cuentas.</p>
+    No puedes guardar, recalcular, reanalizar, sumar repetidas, descartar, buscar imagen ni revisar ropa o recortes. Pídele al dueño que la active en Cuentas.</p>
   <section class="panel">
     <h2>Configuración de precios</h2>
     <div class="ajustes" id="ajustes"></div>
@@ -687,6 +687,13 @@ async function cargarRopaIA() {
     for (const [texto, fn] of [['Aceptar', () => accion('aceptar')], ['Corregir', () => accion('corregir', { prenda: prenda.value, marca: marca.value })], ['Descartar', () => accion('descartar')]]) {
       const b = document.createElement('button'); b.type = 'button'; b.textContent = texto; b.addEventListener('click', fn); botones.append(b);
     }
+    if (!puedeEditarInventario) {
+      prenda.disabled = marca.disabled = true;
+      for (const b of botones.querySelectorAll('button')) b.disabled = true;
+      const aviso = document.createElement('span'); aviso.className = 'aviso';
+      aviso.textContent = 'Solo consulta: tu cuenta no tiene «Editar inventario».';
+      botones.append(aviso);
+    }
     cuerpo.append(detalle, prenda, marca, botones); ficha.append(img, cuerpo); raiz.append(ficha);
   }
 }
@@ -723,7 +730,14 @@ async function cargarRecortes() {
       const r = await fetch(`/api/recortes/${p.id}/${p.recorte_estado === 'error' ? 'reintentar' : 'original'}`, { method: 'POST' });
       if (r.ok) cargarRecortes(); else titulo.textContent = 'No se pudo actualizar el recorte.';
     });
-    cuerpo.append(titulo, boton); ficha.append(imagenes, cuerpo); raiz.append(ficha);
+    cuerpo.append(titulo, boton);
+    if (!puedeEditarInventario) {
+      for (const b of cuerpo.querySelectorAll('button')) b.disabled = true;
+      const aviso = document.createElement('span'); aviso.className = 'aviso';
+      aviso.textContent = 'Solo consulta: tu cuenta no tiene «Editar inventario».';
+      cuerpo.append(aviso);
+    }
+    ficha.append(imagenes, cuerpo); raiz.append(ficha);
   }
 }
 await cargarRecortes();

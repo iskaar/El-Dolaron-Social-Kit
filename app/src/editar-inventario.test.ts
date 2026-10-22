@@ -68,6 +68,97 @@ test('capturista con casilla: las mismas rutas llegan al handler; el dueño pasa
   }
 });
 
+const REVISIONES = [
+  ['ropa-ia', 'aceptar', {}, { nombre: 'Playera Levis', marca: 'Levis', ropa_ia_estado: 'aceptado' }],
+  ['ropa-ia', 'corregir', { prenda: 'Blusa', marca: 'Cat & Jack' }, { nombre: 'Blusa Cat & Jack', marca: 'Cat & Jack', ropa_ia_estado: 'aceptado' }],
+  ['ropa-ia', 'descartar', {}, { ropa_ia_estado: 'descartado' }],
+  ['recortes', 'aprobar', {}, { recorte_revision: 'ok' }],
+  ['recortes', 'reintentar', {}, { recorte_estado: null, recorte_revision: null }],
+  ['recortes', 'original', {}, { recorte_estado: 'original', recorte_revision: null }],
+] as const;
+
+async function piezaRevision(t: Tienda) {
+  const id = pieza(t, { categoria: 'ropa', nombre: 'Ropa', marca: '', foto_key: 'fotos/revision.jpg',
+    ropa_ia_estado: 'revisar', ropa_ia_sugerencia: JSON.stringify({ prenda: 'Playera', marca: 'Levis', marca_confianza: 'alta' }),
+    recorte_estado: 'listo', recorte_revision: JSON.stringify({ problemas: ['Gancho visible'] }) });
+  await t.env.FOTOS.put('fotos/revision.jpg', new Uint8Array([1, 2, 3]));
+  await t.env.FOTOS.put(`recortes/${id}.webp`, new Uint8Array([4, 5, 6]));
+  return id;
+}
+
+for (const [modulo, accion, cuerpo, cambios] of REVISIONES) {
+  test(`POST ${modulo}/${accion}: sin casilla 403 sin escrituras; con casilla y dueño 200`, async (t0) => {
+    for (const [rol, editar, permitido] of [
+      ['capturista', 0, false], ['capturista', 1, true], ['dueno', 0, true],
+      // FEP sigue sin acceso a estas colas de Dolarón, incluso con la casilla (#318).
+      ['finanzas', 0, false], ['finanzas', 1, false],
+    ] as const) {
+      const t = tienda(); t0.after(() => t.db.close());
+      usuario(t, CAP, rol, editar); comoCaptura(t, CAP);
+      const id = await piezaRevision(t), antes = todas(t);
+      const escriturasAntes = t.db.prepare('select total_changes() n').get()!.n;
+      const r = await t.pedir(`/api/${modulo}/${id}/${accion}`, cuerpo);
+      assert.equal(r.status, permitido ? 200 : 403, `${rol}, casilla ${editar}`);
+      if (!permitido) {
+        if (rol === 'capturista') assert.match(r.cuerpo.error, /editar el inventario/);
+        assert.deepEqual(todas(t), antes);
+        assert.equal(t.db.prepare('select total_changes() n').get()!.n, escriturasAntes);
+      } else {
+        const despues = fila(t, id)!;
+        for (const [campo, valor] of Object.entries(cambios)) assert.equal(despues[campo], valor, campo);
+        assert.equal(despues.precio, 45000); assert.equal(despues.stock, 2);
+      }
+      assert.deepEqual([...new Uint8Array(await (await t.env.FOTOS.get('fotos/revision.jpg'))!.arrayBuffer())], [1, 2, 3]);
+      const recorte = await t.env.FOTOS.get(`recortes/${id}.webp`);
+      if (permitido && accion === 'original') assert.equal(recorte, null);
+      else assert.deepEqual([...new Uint8Array(await recorte!.arrayBuffer())], [4, 5, 6]);
+    }
+  });
+}
+
+test('GET de ropa IA, recortes e imagen conserva el acceso actual sin casilla', async (t0) => {
+  const t = tienda(); t0.after(() => t.db.close());
+  const id = await piezaRevision(t);
+  for (const rol of ['capturista', 'dueno', 'finanzas']) {
+    usuario(t, `consulta-${rol}@prueba.mx`, rol); comoCaptura(t, `consulta-${rol}@prueba.mx`);
+    for (const ruta of ['/api/ropa-ia', '/api/recortes', `/api/recortes/${id}/imagen`]) {
+      const r = await worker.fetch!(new Request(`https://caja.prueba${ruta}`) as never, t.env, t.ctx as never);
+      assert.equal(r.status, rol === 'finanzas' ? 403 : 200, `${rol} ${ruta}`);
+      if (rol !== 'finanzas') {
+        if (ruta.endsWith('/imagen')) assert.deepEqual([...new Uint8Array(await r.arrayBuffer())], [4, 5, 6]);
+        else assert.equal((await r.json() as { id: string }[])[0].id, id);
+      }
+    }
+  }
+});
+
+test('capturista y FEP sin casilla pueden capturar y Retomar foto con solo_foto', async (t0) => {
+  const t = tienda(); t0.after(() => t.db.close());
+  t0.mock.method(globalThis, 'fetch', async () => Response.json({ error: { message: 'IA simulada no disponible' } }, { status: 401 }));
+  for (const rol of ['capturista', 'finanzas']) {
+    usuario(t, `${rol}@prueba.mx`, rol); comoCaptura(t, `${rol}@prueba.mx`);
+    for (const ropa of [false, true]) {
+      const id = crypto.randomUUID();
+      const subir = async (soloFoto = false) => {
+        const body = new FormData(); body.set('id', id);
+        body.set('foto', new File([soloFoto ? 'foto nueva' : 'foto inicial'], 'foto.jpg', { type: 'image/jpeg' }));
+        if (ropa) { body.set('precio_ropa', '15000'); body.set('talla', 'M'); }
+        if (soloFoto) { body.set('solo_foto', '1'); body.set('cantidad', '99'); body.set('talla', 'L'); }
+        return worker.fetch!(new Request('https://caja.prueba/api/borradores', { method: 'POST', body }) as never, t.env, t.ctx as never);
+      };
+      assert.equal((await subir()).status, 201);
+      await t.esperar();
+      const antes = fila(t, id)!;
+      assert.equal(antes.propietario, rol === 'finanzas' ? 'fep' : 'dolaron');
+      assert.equal((await subir(true)).status, 200);
+      const despues = fila(t, id)!;
+      for (const campo of ['nombre', 'marca', 'precio', 'stock', 'talla', 'codigo', 'estado_analisis', 'propietario', 'capturado_por'])
+        assert.equal(despues[campo], antes[campo], campo);
+      assert.equal(await new Response((await t.env.FOTOS.get(`fotos/${id}.jpg`))!.body).text(), 'foto nueva');
+    }
+  }
+});
+
 test('FEP: con casilla edita lo suyo, sin casilla 403, y lo ajeno es 404 con o sin ella', async (t0) => {
   const t = tienda(); t0.after(() => t.db.close());
   usuario(t, FEP, 'finanzas');
@@ -190,5 +281,59 @@ test('/admin sin casilla: fichas de solo consulta, aviso y «Guardar todo» sin 
     assert.deepEqual(controles.map((c) => c.disabled), [!puedeEditarInventario, !puedeEditarInventario]);
     assert.equal(/Solo consulta/.test(aviso.textContent), !puedeEditarInventario);
     if (!puedeEditarInventario) { assert.equal(await n.guardarFicha(), false); assert.deepEqual(intentos, []); }
+  }
+});
+
+test('/admin: ropa IA y recortes deshabilitan las seis acciones y muestran Solo consulta sin casilla', async () => {
+  const html = readFileSync('public/admin.html', 'utf8');
+  const fuentes = [
+    html.slice(html.indexOf('async function cargarRopaIA()'), html.indexOf('\nawait cargarRopaIA();')),
+    html.slice(html.indexOf('async function cargarRecortes()'), html.lastIndexOf('await cargarRecortes();')),
+  ];
+  class Nodo {
+    children: Nodo[] = []; disabled = false; textContent = ''; className = ''; style = {};
+    click?: () => Promise<void>;
+    tag: string;
+    constructor(tag: string) { this.tag = tag; }
+    append(...nodos: Nodo[]) { this.children.push(...nodos); }
+    replaceChildren(...nodos: Nodo[]) { this.children = nodos; }
+    setAttribute() {}
+    querySelectorAll(selector: string): Nodo[] {
+      return this.children.flatMap((n) => [...(selector.split(',').map((s) => s.trim()).includes(n.tag) ? [n] : []), ...n.querySelectorAll(selector)]);
+    }
+    addEventListener(_evento: string, fn: () => Promise<void>) { this.click = fn; }
+  }
+  for (const puedeEditarInventario of [false, true]) {
+    const raiz = new Nodo('div'), llamadas: string[] = [];
+    const piezas = [
+      { id: 'lista', recorte_estado: 'listo', recorte_revision: '{"problemas":["Gancho"]}' },
+      { id: 'error', recorte_estado: 'error', recorte_revision: null },
+    ];
+    const contexto = {
+      puedeEditarInventario,
+      document: { getElementById: () => raiz, createElement: (tag: string) => new Nodo(tag) },
+      fetch: async (ruta: string, opciones?: RequestInit) => {
+        if (opciones?.method === 'POST') { llamadas.push(ruta); return Response.json({ error: 'Conflicto simulado' }, { status: 409 }); }
+        return Response.json(piezas);
+      },
+    };
+    const ropa = runInNewContext(`${fuentes[0]}; cargarRopaIA`, contexto);
+    await ropa();
+    const controlesRopa = raiz.querySelectorAll('input, button');
+    assert.equal(controlesRopa.length, 10);
+    assert.ok(controlesRopa.every((c) => c.disabled === !puedeEditarInventario));
+    assert.equal(raiz.querySelectorAll('span').some((n) => /Solo consulta/.test(n.textContent)), !puedeEditarInventario);
+    if (puedeEditarInventario) for (const b of raiz.querySelectorAll('button').slice(0, 3)) await b.click!();
+    const recortes = runInNewContext(`${fuentes[1]}; cargarRecortes`, contexto);
+    await recortes();
+    const botonesRecortes = raiz.querySelectorAll('button');
+    assert.equal(botonesRecortes.length, 3);
+    assert.ok(botonesRecortes.every((b) => b.disabled === !puedeEditarInventario));
+    assert.equal(raiz.querySelectorAll('span').some((n) => /Solo consulta/.test(n.textContent)), !puedeEditarInventario);
+    if (puedeEditarInventario) for (const b of botonesRecortes) await b.click!();
+    assert.deepEqual(llamadas, puedeEditarInventario ? [
+      '/api/ropa-ia/lista/aceptar', '/api/ropa-ia/lista/corregir', '/api/ropa-ia/lista/descartar',
+      '/api/recortes/lista/aprobar', '/api/recortes/lista/original', '/api/recortes/error/reintentar',
+    ] : []);
   }
 });
