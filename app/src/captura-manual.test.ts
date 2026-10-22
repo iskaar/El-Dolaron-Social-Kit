@@ -190,3 +190,18 @@ test('dos altas sin foto simultáneas conservan un solo resultado y una sola can
   const p = t.db.prepare('select count(*) n, max(stock) stock from productos where id = ?').get(cuerpo.id)!;
   assert.equal(p.n, 1); assert.equal(p.stock, respuestas[0].cuerpo.stock);
 });
+
+test('con más de 2000 piezas, la cola trae las más nuevas en orden de captura (#417)', async () => {
+  const { db, pedir } = tienda();
+  db.exec('delete from productos');
+  const alta = db.prepare(`insert into productos (id, nombre, categoria, precio, stock, semana_ingreso, capturado_por, creado_en, actualizado_en, estado_analisis, destino, propietario)
+    values (?, ?, 'otros', 100, 1, 'S43', 'dueno@prueba.mx', ?, ?, 'listo', 'etiqueta', 'dolaron')`);
+  for (let i = 0; i < 2005; i++) {
+    const fecha = new Date(Date.UTC(2026, 9, 1) + i * 60_000).toISOString();
+    alta.run(crypto.randomUUID(), `Pieza ${i}`, fecha, fecha);
+  }
+  const lista = (await pedir('/api/borradores', undefined, 'GET')).cuerpo as Array<{ nombre: string }>;
+  assert.equal(lista.length, 2000);
+  assert.equal(lista[0].nombre, 'Pieza 5');
+  assert.equal(lista.at(-1)!.nombre, 'Pieza 2004');
+});

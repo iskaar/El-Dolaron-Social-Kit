@@ -309,12 +309,14 @@ async function listarBorradores(url: URL, env: Env, propietario: string): Promis
   // fisicamente donde se capturaron hasta que se les pega su etiqueta, asi que
   // el orden de la pantalla tiene que ser el mismo que el de la mesa o se
   // vuelve un rompecabezas saber que etiqueta es de que pieza.
+  // Las 2000 mas nuevas, en orden de captura (#417): con `asc limit` se quedaban fuera las recien capturadas.
+  // Empates de hora: la fila (rowid) desempata igual que antes.
   const consulta = `select id, codigo, nombre, categoria, marca, talla, precio_lista, precio, estado_fisico,
                            estado_analisis, destino, stock, semana_ingreso, capturado_por, creado_en, upc, foto_key, propietario
-                    from productos
+                    from productos where rowid in (select rowid from productos
                     where sin_inventario = 0 and propietario = ? ${cambios ? 'and actualizado_en > ?' : "and estado_analisis <> 'descartado'"}
                       ${estado ? 'and estado_analisis = ?' : ''} ${desde ? 'and creado_en >= ?' : ''}
-                    order by creado_en asc limit 2000`;
+                    order by creado_en desc, rowid desc limit 2000) order by creado_en asc, rowid asc`;
   const filtros = [propietario, ...(cambios ? [cambios] : []), ...(estado ? [estado] : []), ...(desde ? [desde] : [])];
   const sentencia = env.DB.prepare(consulta).bind(...filtros);
   const { results } = await sentencia.all<FilaBorrador>();
