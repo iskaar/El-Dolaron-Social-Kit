@@ -37,11 +37,25 @@ la ficha de otra pieza.
 
 ## Almacenamiento y permisos
 
-Las fotos propias siguen en R2. La imagen externa se conserva como **referencia URL**
-en D1, con su TCIN, nombre original, UPC declarado y confirmación. Se muestra en el
-escáner interno; no se convierte en `foto_key` ni se envía automáticamente al sitio
-público o a Mercado Libre. El enlace externo puede caducar y las fotos propias tienen
-prioridad. Las condiciones y los derechos de imágenes de Target siguen siendo aplicables.
+La referencia URL queda en D1 con su TCIN, nombre original, UPC declarado y confirmación.
+Desde la Fase 1 del Issue #413 (pedido de Isaac, 2026-10-21), confirmar o guardar un escaneo
+con referencia confirmada copia la imagen a R2 en segundo plano (`waitUntil`). Solo acepta
+el filtro existente de `target.scene7.com/is/image/Target/`, HTTPS, sin redirecciones,
+con timeout de 10 s, máximo 6 MiB y content-type `image/*`.
+
+La caché `imagenes-upc/<upc>/<hash-url>` evita descargar de nuevo, incluso al confirmar
+antes de capturar; una reserva condicional en R2 evita descargas simultáneas y vence en
+15 s si el Worker se interrumpe. Cada pieza de El Dolarón con ese UPC y sin foto recibe
+`fotos/<id>.jpg` y su `foto_key`. Se conserva el content-type original. Catálogo público,
+Mercado Libre y recortes usan esa foto por sus rutas habituales. Las fotos propias,
+FEP y piezas descartadas se excluyen; no cambia nombre, precio, stock ni `estado_analisis`.
+Una pieza llamada «Ropa» queda excluida de la cola que renombra prendas (`ropa_ia_estado = 'descartado'`).
+
+No necesita migración adicional a la 045. Si falla la descarga o la copia, la confirmación
+permanece y otro escaneo, reenvío o confirmación reintenta. No hay barrido automático del
+inventario antiguo: confirmar o escanear ese UPC completa sus piezas sin foto.
+La búsqueda de candidatas fuera del manifiesto (Fase 2) queda pendiente.
+Isaac decide usar estas imágenes de otras tiendas o marcas para vender en línea.
 
 Las rutas `/api/manifiesto/:upc/imagen` (GET/POST/PUT) y
 `/api/manifiesto/:upc/imagen/catalogo` (GET) pasan por Access y el rol de captura existente.

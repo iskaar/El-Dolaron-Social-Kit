@@ -817,7 +817,8 @@ async function publicar(env: Env, id: string, request: Request): Promise<Respons
       const foto = await env.FOTOS.get(p.foto_key);
       if (!foto) throw errorLocal(409, 'sin_foto', 'La foto de la pieza no está en el almacén.');
       const formulario = new FormData();
-      formulario.append('file', new Blob([await foto.arrayBuffer()], { type: 'image/jpeg' }), 'pieza.jpg');
+      const tipo = foto.httpMetadata?.contentType || 'image/jpeg';
+      formulario.append('file', new Blob([await foto.arrayBuffer()], { type: tipo }), tipo === 'image/jpeg' ? 'pieza.jpg' : 'pieza');
       const subida = await mlFetch(env, '/pictures/items/upload', { method: 'POST', body: formulario });
       pictures = [{ id: String(subida?.id) }];
     }

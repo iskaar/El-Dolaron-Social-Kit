@@ -4,6 +4,8 @@ import { tienda, DUENO, PRODUCTO } from './prueba-d1.ts';
 import worker, { permitidaParaVendedor } from './worker.ts';
 import { reiniciarPausaTarget } from './imagenes-upc.ts';
 import { codigoLeido, normalizarUpc } from '../public/upc.js';
+import { procesarRecortes } from './recortes.ts';
+import { procesarColaRopa } from './ropa-ia.ts';
 
 const UPC = '8438051051054', TCIN = '94882460';
 const IMAGEN = 'https://target.scene7.com/is/image/Target/GUEST_ejemplo?wid=626';
@@ -22,10 +24,11 @@ function preparar() {
 }
 
 test('el candidato se verifica, se confirma explícitamente y se reutiliza sin HTTP ni cambiar stock', async (t) => {
-  const { db, pedir } = preparar();
+  const { db, pedir, esperar } = preparar();
   let llamadas = 0;
   t.mock.method(globalThis, 'fetch', async (url: string, opciones: RequestInit) => {
     llamadas++;
+    if (String(url).startsWith('https://target.scene7.com/')) return fotoTarget();
     assert.equal(String(url), `https://www.target.com/p/-/A-${TCIN}`);
     assert.equal(opciones.redirect, 'manual');
     // Ni sesión ni cookies del personal salen hacia Target.
@@ -42,14 +45,192 @@ test('el candidato se verifica, se confirma explícitamente y se reutiliza sin H
   assert.equal(candidata.cuerpo.imagen.url, IMAGEN_PAGINA);
   assert.equal((await pedir(RUTA, { url: IMAGEN_PAGINA + 'otro', tcin: TCIN }, 'PUT')).status, 409);
   assert.equal((await pedir(RUTA, { url: IMAGEN_PAGINA, tcin: TCIN }, 'PUT')).cuerpo.imagen.confirmada, true);
+  await esperar();
   assert.equal((await pedir(RUTA, {})).cuerpo.imagen.confirmada, true);
   assert.equal((await pedir(`/api/manifiesto/${UPC}`, undefined, 'GET')).cuerpo.imagen.url, IMAGEN_PAGINA);
-  assert.equal(llamadas, 1);
+  assert.equal(llamadas, 2);
   assert.equal(db.prepare('select confirmado_por from imagenes_upc').get()!.confirmado_por, DUENO);
   assert.equal(db.prepare('select stock from productos where id=?').get(PRODUCTO)!.stock, 50);
   db.prepare("update manifiesto set tcin='123'").run();
   assert.equal((await pedir(RUTA, undefined, 'GET')).cuerpo.imagen, null);
   assert.equal((await pedir(RUTA, { url: IMAGEN_PAGINA, tcin: TCIN }, 'PUT')).status, 409);
+});
+
+function candidata(db: ReturnType<typeof preparar>['db'], confirmada = false, url = IMAGEN) {
+  db.prepare(`insert into imagenes_upc (upc, tcin, url, nombre, confirmado_en)
+    values (?, ?, ?, 'Referencia Target', ?)`).run(UPC, TCIN, url, confirmada ? '2026-10-21' : '');
+}
+
+const bytesFoto = new Uint8Array([255, 216, 255, 1]);
+const fotoTarget = () => new Response(bytesFoto, { headers: { 'content-type': 'image/jpeg' } });
+
+test('confirmar guarda una sola descarga en R2 y da foto al catálogo, ML y recortes sin cambiar la pieza', async (t) => {
+  const { db, env, pedir, esperar } = preparar();
+  db.prepare("update productos set upc=?, estado_analisis='listo', destino='etiqueta', categoria='ropa', nombre='Ropa' where id=?").run('0' + UPC, PRODUCTO);
+  candidata(db);
+  const antes = db.prepare('select nombre, precio, stock, estado_analisis, estado_fisico, codigo from productos where id=?').get(PRODUCTO);
+  let llamadas = 0;
+  t.mock.method(globalThis, 'fetch', async (url: string, opciones: RequestInit) => {
+    llamadas++;
+    assert.equal(String(url), IMAGEN);
+    assert.equal(opciones.redirect, 'manual');
+    assert.ok(opciones.signal instanceof AbortSignal);
+    assert.deepEqual(Object.keys(opciones.headers as Record<string, string>).sort(), ['accept', 'user-agent']);
+    return fotoTarget();
+  });
+  assert.equal((await pedir(RUTA, { url: IMAGEN, tcin: TCIN }, 'PUT')).status, 200);
+  await esperar();
+  const fotoKey = db.prepare('select foto_key from productos where id=?').get(PRODUCTO)!.foto_key;
+  assert.equal(fotoKey, `fotos/${PRODUCTO}.jpg`);
+  assert.deepEqual(new Uint8Array(await (await env.FOTOS.get(String(fotoKey)))!.arrayBuffer()), bytesFoto);
+  assert.deepEqual(db.prepare('select nombre, precio, stock, estado_analisis, estado_fisico, codigo from productos where id=?').get(PRODUCTO), antes);
+  assert.equal((await pedir(RUTA, { url: IMAGEN, tcin: TCIN }, 'PUT')).status, 200);
+  const id = crypto.randomUUID();
+  assert.equal((await pedir('/api/borradores/upc', { id, upc: UPC, stock: 2 })).status, 201);
+  await esperar();
+  assert.equal(db.prepare('select foto_key from productos where id=?').get(id)!.foto_key, `fotos/${id}.jpg`);
+  assert.equal(llamadas, 1);
+  env.HOST_PORTAL = 'portal.prueba';
+  const publica = await worker.fetch!(new Request('https://portal.prueba/api/catalogo/foto/ED-000001') as never, env, {} as never);
+  assert.equal(publica.status, 200);
+  assert.deepEqual(new Uint8Array(await publica.arrayBuffer()), bytesFoto);
+  const ml = await pedir('/api/ml/piezas', undefined, 'GET');
+  assert.equal(ml.status, 200);
+  assert.ok(JSON.stringify(ml.cuerpo).includes(PRODUCTO));
+  db.prepare("insert into config (clave,valor) values ('recortes_activo','1'), ('ropa_ia_activo','1')").run();
+  let recortes = 0;
+  env.IMAGES = { input() { recortes++; return { transform() { return { output: async () => fotoTarget() }; } }; } } as never;
+  await procesarRecortes(env);
+  assert.equal(recortes, 2);
+  await procesarColaRopa(env, async () => { assert.fail('La imagen de referencia no debe disparar análisis de ropa'); });
+  assert.deepEqual(db.prepare('select nombre, precio, stock, estado_analisis, estado_fisico, codigo from productos where id=?').get(PRODUCTO), antes);
+});
+
+test('confirmar antes de capturar cachea la foto; candidata y TCIN cambiado no se importan', async (t) => {
+  const { db, env, pedir, esperar } = preparar();
+  candidata(db);
+  let llamadas = 0;
+  t.mock.method(globalThis, 'fetch', async () => { llamadas++; return fotoTarget(); });
+  const guardar = () => pedir('/api/borradores/upc', { id: crypto.randomUUID(), upc: UPC, stock: 1 });
+  const sinConfirmar = await guardar(); await esperar();
+  assert.equal(llamadas, 0);
+  db.prepare('delete from productos where id=?').run(sinConfirmar.cuerpo.id);
+  await pedir(RUTA, { url: IMAGEN, tcin: TCIN }, 'PUT'); await esperar();
+  const nueva = await guardar(); await esperar();
+  assert.equal(llamadas, 1);
+  assert.ok(await env.FOTOS.get(`fotos/${nueva.cuerpo.id}.jpg`));
+  db.prepare("update manifiesto set tcin='123'").run();
+  const cambiada = await guardar(); await esperar();
+  assert.equal(db.prepare('select foto_key from productos where id=?').get(cambiada.cuerpo.id)!.foto_key, '');
+  assert.equal(llamadas, 1);
+});
+
+test('el escáner guarda sin esperar HTTP; una foto propia tardía, FEP y descartados se conservan', async (t) => {
+  const { db, env, pedir, esperar } = preparar();
+  candidata(db, true);
+  db.prepare("update productos set upc=?, propietario='fep' where id=?").run(UPC, PRODUCTO);
+  let responder!: (r: Response) => void;
+  let llamadas = 0;
+  const pendiente = new Promise<Response>((resolve) => { responder = resolve; });
+  t.mock.method(globalThis, 'fetch', () => { llamadas++; return pendiente; });
+  const id = crypto.randomUUID(), descartada = crypto.randomUUID();
+  assert.equal((await pedir('/api/borradores/upc', { id, upc: UPC, stock: 2 })).status, 201);
+  assert.equal((await pedir('/api/borradores/upc', { id: descartada, upc: UPC, stock: 1 })).status, 201);
+  db.prepare("update productos set estado_analisis='descartado' where id=?").run(descartada);
+  await env.FOTOS.put(`fotos/${id}.jpg`, new Uint8Array([7, 8]));
+  db.prepare('update productos set foto_key=? where id=?').run(`fotos/${id}.jpg`, id);
+  responder(fotoTarget()); await esperar();
+  assert.equal(llamadas, 1);
+  assert.deepEqual(new Uint8Array(await (await env.FOTOS.get(`fotos/${id}.jpg`))!.arrayBuffer()), new Uint8Array([7, 8]));
+  for (const excluida of [PRODUCTO, descartada]) assert.equal(db.prepare('select foto_key from productos where id=?').get(excluida)!.foto_key, '');
+});
+
+test('foto propia en vuelo y referencia cambiada durante HTTP no se pisan', async (t) => {
+  for (const cambio of ['foto', 'tcin', 'descarte', 'fep']) {
+    const { db, env, pedir, esperar } = preparar();
+    candidata(db, true);
+    let responder!: (r: Response) => void;
+    let iniciada!: () => void;
+    const inicio = new Promise<void>((resolve) => { iniciada = resolve; });
+    t.mock.method(globalThis, 'fetch', () => { iniciada(); return new Promise<Response>((resolve) => { responder = resolve; }); });
+    const id = crypto.randomUUID();
+    await pedir('/api/borradores/upc', { id, upc: UPC, stock: 1 });
+    await inicio;
+    if (cambio === 'tcin') db.prepare("update manifiesto set tcin='123'").run();
+    if (cambio === 'descarte') db.prepare("update productos set estado_analisis='descartado' where id=?").run(id);
+    if (cambio === 'fep') db.prepare("update productos set propietario='fep' where id=?").run(id);
+    // R2 ya tiene la foto propia, pero su UPDATE aún no llegó: también debe conservarse.
+    if (cambio === 'foto') await env.FOTOS.put(`fotos/${id}.jpg`, new Uint8Array([7]));
+    responder(fotoTarget()); await esperar();
+    assert.equal(db.prepare('select foto_key from productos where id=?').get(id)!.foto_key, '');
+    if (cambio === 'foto') assert.deepEqual(new Uint8Array(await (await env.FOTOS.get(`fotos/${id}.jpg`))!.arrayBuffer()), new Uint8Array([7]));
+    if (cambio === 'tcin') {
+      db.prepare('update manifiesto set tcin=?').run(TCIN);
+      db.prepare('update imagenes_upc set url=?').run(IMAGEN + '&nueva=1');
+      t.mock.method(globalThis, 'fetch', async () => fotoTarget());
+      await pedir('/api/borradores/upc', { id, upc: UPC, stock: 1 }); await esperar();
+      assert.equal(db.prepare('select foto_key from productos where id=?').get(id)!.foto_key, `fotos/${id}.jpg`);
+    }
+  }
+});
+
+test('un fallo de R2 se recupera desde la caché y conserva content-type de imagen', async (t) => {
+  const { db, env, pedir, esperar } = preparar();
+  candidata(db, true);
+  let descargas = 0, fallar = true;
+  t.mock.method(globalThis, 'fetch', async () => { descargas++; return new Response(bytesFoto, { headers: { 'content-type': 'image/png' } }); });
+  const put = env.FOTOS.put.bind(env.FOTOS);
+  t.mock.method(env.FOTOS, 'put', async (key: string, valor: BodyInit, opciones: R2PutOptions) => {
+    if (key.startsWith('fotos/') && fallar) { fallar = false; throw new Error('R2 no disponible'); }
+    return put(key, valor as never, opciones);
+  });
+  const id = crypto.randomUUID(), cuerpo = { id, upc: UPC, stock: 1 };
+  await pedir('/api/borradores/upc', cuerpo); await esperar();
+  assert.equal(db.prepare('select foto_key from productos where id=?').get(id)!.foto_key, '');
+  await pedir('/api/borradores/upc', cuerpo); await esperar();
+  assert.equal(descargas, 1);
+  assert.equal((await env.FOTOS.get(`fotos/${id}.jpg`))!.httpMetadata?.contentType, 'image/png');
+  const foto = await worker.fetch!(new Request(`https://caja.prueba/api/foto/${id}`) as never, env, {} as never);
+  assert.equal(foto.status, 200); assert.equal(foto.headers.get('content-type'), 'image/png');
+});
+
+test('descargas inválidas o fallidas no afectan captura ni foto; el reenvío reintenta sin reponer stock', async (t) => {
+  for (const respuesta of [
+    () => new Response(null, { status: 302, headers: { location: 'https://otro.mx/foto' } }),
+    () => new Response('no', { status: 500 }),
+    () => new Response('html', { headers: { 'content-type': 'text/html' } }),
+    () => new Response(bytesFoto, { headers: { 'content-type': 'image/jpeg', 'content-length': String(6 * 1024 * 1024 + 1) } }),
+    () => new Response(new Uint8Array(6 * 1024 * 1024 + 1), { headers: { 'content-type': 'image/png' } }),
+    () => new Response(null, { headers: { 'content-type': 'image/jpeg' } }),
+    () => { throw new DOMException('Timeout', 'TimeoutError'); },
+  ]) {
+    const { db, env, pedir, esperar } = preparar();
+    candidata(db, true);
+    t.mock.method(globalThis, 'fetch', async () => respuesta());
+    const id = crypto.randomUUID(), cuerpo = { id, upc: UPC, stock: 3 };
+    assert.equal((await pedir('/api/borradores/upc', cuerpo)).status, 201);
+    await esperar();
+    assert.equal(db.prepare('select foto_key from productos where id=?').get(id)!.foto_key, '');
+    assert.equal(await env.FOTOS.get(`fotos/${id}.jpg`), null);
+    db.prepare('update productos set stock=1, precio=123 where id=?').run(id);
+    t.mock.method(globalThis, 'fetch', async () => fotoTarget());
+    assert.equal((await pedir('/api/borradores/upc', cuerpo)).status, 201);
+    await esperar();
+    const guardada = db.prepare('select foto_key, stock, precio, estado_analisis from productos where id=?').get(id)!;
+    assert.equal(guardada.foto_key, `fotos/${id}.jpg`);
+    assert.equal(guardada.stock, 1); assert.equal(guardada.precio, 123); assert.equal(guardada.estado_analisis, 'listo');
+  }
+});
+
+test('la descarga vuelve a validar URL guardada: solo HTTPS y el filtro de imagenValida', async (t) => {
+  for (const url of ['http://target.scene7.com/is/image/Target/x', 'https://target.scene7.com.evil.mx/is/image/Target/x',
+    'https://usuario:clave@target.scene7.com/is/image/Target/x', 'https://target.scene7.com:444/is/image/Target/x', 'https://target.scene7.com/otra/x']) {
+    const { db, pedir, esperar } = preparar();
+    candidata(db, true, url);
+    t.mock.method(globalThis, 'fetch', async () => { assert.fail('No debe salir HTTP'); });
+    await pedir('/api/borradores/upc', { id: crypto.randomUUID(), upc: UPC, stock: 1 }); await esperar();
+    assert.equal(db.prepare("select count(*) n from productos where foto_key<>''").get()!.n, 0);
+  }
 });
 
 test('foto propia primero, UPC/EAN equivalentes y aislamiento de FEP/portal/vendedor', async (t) => {
