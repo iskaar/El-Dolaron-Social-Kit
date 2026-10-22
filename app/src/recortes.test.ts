@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { procesarRecortes, revisarRecortes, rutaRecortesAdmin, reiniciarRecorte } from './recortes.ts';
+import { procesarRecortes, revisarRecortes, ajustarRecortesViejos, rutaRecortesAdmin, reiniciarRecorte } from './recortes.ts';
 import { tienda } from './prueba-d1.ts';
 import { catalogoPublico } from './catalogo.ts';
 
@@ -147,4 +147,29 @@ test('un recorte listo sin revisión no se publica', async () => {
     const lista = await (await catalogo(x.env as Env))!.json() as any;
     assert.equal(lista.piezas.find((p: any) => p.codigo === 'ED-1').recorte, null);
   } finally { x.db.close(); }
+});
+
+test('ajuste de recortes viejos: solo trim, conserva la revisión, avanza el cursor y no revive uno reiniciado (#425)', async () => {
+  const t = preparar(4); const llamadas: any[][] = [];
+  try {
+    const fotos = t.env.FOTOS as any;
+    for (let i = 0; i < 3; i++) {
+      await fotos.put(`recortes/${uuid(i)}.webp`, new Uint8Array([1]));
+      t.db.prepare("update productos set recorte_estado='listo', recorte_revision='ok' where id=?").run(uuid(i));
+    }
+    t.db.prepare("update productos set recorte_estado='original' where id=?").run(uuid(3));
+    let reiniciado = false;
+    const env = Object.assign(t.env, { IMAGES: images(async () => {
+      // Se reinicia el tercero mientras se ajusta: su put condicional no debe revivirlo.
+      if (!reiniciado && llamadas.length === 3) { reiniciado = true; await reiniciarRecorte(t.env as Env, uuid(2)); }
+      return new Response(new Uint8Array([7]));
+    }, llamadas) }) as Env;
+    await ajustarRecortesViejos(env);
+    assert.deepEqual(llamadas, [[{ trim: { border: { keep: 24 } } }], [{ trim: { border: { keep: 24 } } }], [{ trim: { border: { keep: 24 } } }]]);
+    for (let i = 0; i < 2; i++) assert.deepEqual([...new Uint8Array(fotos.objetos.get(`recortes/${uuid(i)}.webp`))], [7]);
+    assert.equal(fotos.objetos.has(`recortes/${uuid(2)}.webp`), false);
+    assert.equal(t.db.prepare('select recorte_revision from productos where id=?').get(ID0)?.recorte_revision, 'ok');
+    await ajustarRecortesViejos(env);
+    assert.equal(llamadas.length, 3);
+  } finally { t.db.close(); }
 });
