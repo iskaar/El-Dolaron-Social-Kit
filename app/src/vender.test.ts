@@ -28,7 +28,7 @@ function usuario(db: DatabaseSync, correo: string, rol: Rol, nombre = 'Marta') {
 test('texto de una pieza: centavos, antes, talla, acentos y cierre exactos', () => {
   assert.equal(textoWhatsApp([{ nombre: 'Blusa de algodón', talla: 'M', precio: 20050, precio_lista: 30000, codigo: 'ED-1234' }]),
     '🛍️ Blusa de algodón · Talla M\n💵 $200.50 (antes $300)\n🔖 ED-1234\n'
-    + 'Apártala con $100 por 7 días: responde con el código.\n📍 Jardín Hidalgo 129, Soledad · todos los días de 11 a 8');
+    + 'Apártala con el 15 % por 7 días: responde con el código.\n🚚 Envíos todos los viernes.\n📍 Jardín Hidalgo 129, Soledad · todos los días de 11 a 8');
   const simple = textoWhatsApp([{ nombre: 'Jarrón\n azul', talla: null, precio: 10000, precio_lista: 10000, codigo: 'ED-1' }]);
   assert.match(simple, /^🛍️ Jarrón azul\n💵 \$100\n/);
   assert.ok(!simple.includes('antes') && !simple.includes('Talla'));

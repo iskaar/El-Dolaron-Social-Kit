@@ -19,7 +19,9 @@ export function codigoDeRespuesta(texto) {
   return digitos ? `ED-${digitos.padStart(6, '0')}` : null;
 }
 
-const CIERRE = 'Apártala con $100 por 7 días: responde con el código.\n'
+// Reglas de Isaac (22/10, #434): apartado en tienda = 15 % por 7 días; envíos los viernes.
+const CIERRE = 'Apártala con el 15 % por 7 días: responde con el código.\n'
+  + '🚚 Envíos todos los viernes.\n'
   + '📍 Jardín Hidalgo 129, Soledad · todos los días de 11 a 8';
 const unaLinea = (texto) => String(texto ?? '').replace(/\s+/g, ' ').trim();
 
@@ -39,7 +41,7 @@ export const enlaceApartar = (i) => '/pedidos?' + new URLSearchParams({
 
 /** No promete disponibilidad si la pieza ya quedó apartada o vendida. */
 export const textoSeguimiento = (i) => `Hola ${i.cliente}, la ${i.nombre} ${i.codigo} `
-  + (i.disponibilidad === 'Disponible' ? 'sigue disponible. Apártala con $100 por 7 días en El Dolarón.'
+  + (i.disponibilidad === 'Disponible' ? 'sigue disponible. Apártala con el 15 % por 7 días o te la enviamos el viernes.'
     : i.disponibilidad === 'Apartada' ? 'está apartada. Te avisamos si vuelve a estar disponible.' : 'ya se vendió. Podemos ayudarte a buscar otra pieza.');
 
 function cargarImagen(src) {
