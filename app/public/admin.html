@@ -683,7 +683,7 @@ async function cargarRecortes() {
   for (const p of piezas) {
     const ficha = document.createElement('article'); ficha.className = 'ficha';
     const imagenes = document.createElement('div'); imagenes.className = 'recorte-par';
-    for (const [src, alt] of [[`/api/catalogo/recorte/${p.codigo}`, 'Recorte'], [`/api/foto/${p.id}`, 'Foto original']]) {
+    for (const [src, alt] of [[`/api/recortes/${p.id}/imagen`, 'Recorte'], [`/api/foto/${p.id}`, 'Foto original']]) {
       const img = document.createElement('img'); img.src = src; img.alt = alt; img.style.objectFit = 'contain'; imagenes.append(img);
     }
     const cuerpo = document.createElement('div'); const titulo = document.createElement('p'); titulo.textContent = `${p.codigo} · ${p.nombre} · ${p.recorte_estado}`;

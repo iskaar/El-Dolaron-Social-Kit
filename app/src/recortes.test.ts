@@ -96,6 +96,10 @@ test('revisión: marca problemas, lo oculta, lo ordena y aprobar publica', async
     const listaResp = await rutaRecortesAdmin(new Request('https://x/api/recortes'), x.env as Env, '/api/recortes');
     assert.equal((await listaResp!.json() as any[])[0].id, ID0);
     assert.equal((await catalogo(x.env as Env, '/api/catalogo/recorte/ED-1'))!.status, 404);
+    const admin = await rutaRecortesAdmin(new Request('https://x'), x.env as Env, `/api/recortes/${ID0}/imagen`);
+    assert.equal(admin!.status, 200);
+    assert.deepEqual([...new Uint8Array(await admin!.arrayBuffer())], [1]);
+    assert.equal((await rutaRecortesAdmin(new Request('https://x'), x.env as Env, `/api/recortes/${uuid(9)}/imagen`))!.status, 404);
     assert.equal((await rutaRecortesAdmin(new Request('https://x', { method: 'POST' }), x.env as Env, `/api/recortes/${ID0}/aprobar`))!.status, 200);
     assert.ok(((await (await catalogo(x.env as Env))!.json() as any).piezas.find((p: any) => p.codigo === 'ED-1')).recorte);
   } finally { x.db.close(); }
