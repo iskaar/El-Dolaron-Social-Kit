@@ -16,6 +16,7 @@ Tienda de barrio con calidad americana (`site/DESIGN.md`): cercana, directa y si
 
 ## 2. Mensajes clave (ya en uso)
 
+0. **Calidad americana, precio mexicano.** Lema de marca (22/10/2026).
 1. **Marcas americanas, a precio de saldo.** Titular de portada y descripción del sitio (`site/public/index.html`, `site/DESIGN.md`).
 2. **Ropa americana y mercancía general.** Ropa; hogar, belleza, juguetes y más (`index.html`).
 3. **Calidad americana, pieza por pieza.** Se revisan, fotografían y etiquetan una por una (`que-es-un-saldo.html`).
@@ -70,7 +71,7 @@ Siempre: saludo breve, tuteo, una sola pregunta o acción por mensaje, y precio 
 
 ## 6. Inconsistencias encontradas (sin corregir en archivos; las resueltas llevan marca)
 
-1. **[Parcial: ver decisión 2 de Isaac; lema pendiente]** **Eslogan viejo vs vigente.** `05-Guia-y-textos/Textos-para-redes.txt` dice «Súper precios y grandes hallazgos» y «Mercancía americana a súper precios»; el sitio y `site/DESIGN.md` usan «Marcas americanas, a precio de saldo» (sin «oferta barata», #339).
+1. **[Resuelta: ver decisión 2 de Isaac]** **Eslogan viejo vs vigente.** `05-Guia-y-textos/Textos-para-redes.txt` dice «Súper precios y grandes hallazgos» y «Mercancía americana a súper precios»; el sitio y `site/DESIGN.md` usan «Marcas americanas, a precio de saldo» (sin «oferta barata», #339).
 2. **[Resuelta 22/10/2026: el único WhatsApp oficial es 444 543 7754]** **Dos teléfonos.** `docs/MARKETING-30-DIAS.md` da 444 854 5980 como WhatsApp comercial; el sitio, `app/public/portal.js` y `whatsapp/respuestas.mjs` usan 444 543 7754 y llaman a 854 5980 «teléfono fijo (no es WhatsApp)» (también `app/src/legal.ts`).
 3. **[Resuelta 22/10/2026: «11 a. m. a 8 p. m.» y, en espacio corto, «de 11 a 8»]** **Horario escrito de cuatro formas:** «11:00 a. m. a 8:00 p. m.» (`site/public/index.html`), «de 11 a 8» (marquesina del mismo archivo), «11 am a 8 pm» (`app/public/marketplace.html`), «11:00 a 20:00» (`whatsapp/respuestas.mjs`, `app/src/legal.ts`).
 4. **[Resuelta 22/10/2026: 15 % del valor por 7 días en tienda; ver Decisiones]** **Apartado:** `docs/MARKETING-30-DIAS.md` propone 30% y 15 días (pendiente de validación legal); el código usa 7 días (`app/src/pedidos.ts`, `DIAS_APARTADO`) y la rama `origin/agent/codex/431-vender` (`app/public/vender.js`) dice «Apártala con $100 por 7 días». El sitio no publica ninguna política de apartado.
@@ -89,7 +90,7 @@ Siempre: saludo breve, tuteo, una sola pregunta o acción por mensaje, y precio 
 Reglas vigentes para el manual de marca. No se corrigieron aún los archivos del kit ni de la app que dicen otra cosa; eso va en otro Issue.
 
 1. **Descriptor oficial:** «Mercancía y ropa americana», en ese orden. Sustituye a «Ropa americana y mercancía general» y a las demás variantes (inconsistencia 6).
-2. **Lema: pendiente de definir.** «Marcas americanas, a precio de saldo» **no** es el lema de marca (a Isaac no le gusta del todo); sigue siendo el titular actual del sitio. No inventar un lema nuevo hasta que se decida. Decisión pendiente.
+2. **Lema: «Calidad americana, precio mexicano.»** (Isaac, 22/10/2026). «Marcas americanas, a precio de saldo» **no** es el lema de marca; sigue siendo el titular actual del sitio.
 3. **Tuteo siempre**, también en el ticket impreso: «Gracias por tu compra» (inconsistencia 7).
 4. **WhatsApp: 444 543 7754, único oficial.** El 444 854 5980 no es WhatsApp (inconsistencia 2).
 5. **Dirección:** Jardín Hidalgo 129, Zona Centro, Soledad de Graciano Sánchez, S.L.P., C.P. 78430.
