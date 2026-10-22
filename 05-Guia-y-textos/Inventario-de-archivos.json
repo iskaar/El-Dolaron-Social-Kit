@@ -228,7 +228,13 @@
     {
       "file": "app/public/pieza.js",
       "title": "Consulta de piezas y lector",
-      "description": "Búsqueda paginada, cámara reutilizada y ajustes de existencia con motivo, confirmación al fijar, deshacer y reintento idempotente según permiso del servidor.",
+      "description": "Búsqueda paginada, lector y cámara reutilizada; la ficha de la pieza vive en ficha.js.",
+      "format": "JS"
+    },
+    {
+      "file": "app/public/ficha.js",
+      "title": "Ficha de pieza",
+      "description": "Módulo de la ficha: existencia con rastro (motivo, fijar con confirmación, deshacer, reintento idempotente) y corrección de nombre, marca, talla y precios con confirmación y aviso de reimpresión, según permiso del servidor (Issue #441).",
       "format": "JS"
     },
     {

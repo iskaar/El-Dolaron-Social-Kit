@@ -5,6 +5,7 @@ import { runInNewContext } from 'node:vm';
 import { tienda, DUENO } from './prueba-d1.ts';
 import { permiso, puede, type Rol } from './cuentas.ts';
 import { permitidaParaVendedor } from './worker.ts';
+import * as etiquetera from '../public/etiquetera.js';
 
 function pieza(db: ReturnType<typeof tienda>['db'], cambios: Record<string, unknown> = {}) {
   const p = { id: crypto.randomUUID(), codigo: null, nombre: 'Chamarra', marca: 'Levis', stock: 1,
@@ -213,8 +214,11 @@ function pantalla(responder: (url: string, cuerpo?: any) => unknown | Promise<un
   const llamadas: string[] = [];
   let camaras = 0, apagadas = 0, alLeer: (s: string) => void = () => {};
   const temporizadores: { fn: Function; ms: number }[] = [];
-  const fuente = readFileSync('public/pieza.js', 'utf8').replace(/^import .+;$/gm, '');
-  const api = runInNewContext(`${fuente}; ({buscar, abrir})`, {
+  // pieza.js importa la ficha de ficha.js: se evalúan juntas, cada módulo en su propio ámbito.
+  const modulo = (archivo: string) => readFileSync(archivo, 'utf8').replace(/^import .+;$/gm, '').replace(/^export /gm, '');
+  const api = runInNewContext(`const { api, crearFicha, pesos } = (() => {${modulo('public/ficha.js')}; return { api, crearFicha, pesos }; })();
+    ${modulo('public/pieza.js')}; ({buscar, abrir})`, {
+    impresas: etiquetera.impresas, etiquetaVigente: etiquetera.etiquetaVigente, precioImpreso: etiquetera.precioImpreso, TALLAS: ['M'],
     document: { getElementById: $, createElement: (tag: string) => new Nodo(tag),
       querySelectorAll: () => $('resultados').children.map((li) => li.children[0]),
       addEventListener: (e: string, fn: Function) => { eventos[e] = fn; }, body: new Nodo() },
@@ -480,4 +484,64 @@ test('pantalla: respuesta perdida reintenta el mismo UUID; conflicto refresca st
   await otra.api.abrir('uno'); const ajuste = otra.$('sumar').eventos.click();
   await otra.api.abrir('dos'); terminar({ antes:2, despues:3 }); await ajuste;
   assert.equal(otra.$('stock').value, '2'); assert.equal(otra.$('deshacer').hidden, true);
+});
+
+test('pantalla: corregir desde la ficha confirma, manda precio y destino sin stock y avisa de la etiqueta', async () => {
+  const p = { id:'pieza', codigo:'ED-002318', nombre:'Chamarra', marca:'Levis', talla:'M', precio:45000, precio_lista:60000,
+    stock:3, destino:'etiqueta', estado_analisis:'listo' };
+  const enviados: any[] = [], confirmaciones: string[] = [];
+  let permisos = { puede_editar:true, puede_precio:true };
+  const ui = pantalla((url, cuerpo) => {
+    if (!cuerpo) return { pieza:{ ...p }, ...permisos, historial:[] };
+    enviados.push({ url, cuerpo });
+    return { ...p, ...cuerpo, stock:2 };   // una venta intercalada: la respuesta trae el stock real
+  }, (s: string) => { confirmaciones.push(s); return true; });
+  const llenar = (c: Record<string, string>) => { for (const [k, v] of Object.entries(c)) ui.$(k).value = v; };
+  await ui.api.abrir(p.id);
+  assert.equal(ui.$('edicion').hidden, false); assert.equal(ui.$('editar').hidden, false);
+  ui.$('editar').eventos.click();
+  assert.equal(ui.$('corregir').hidden, false); assert.equal(ui.$('campos-precio').hidden, false);
+  assert.equal(ui.$('e-precio').value, '450.00'); assert.equal(ui.$('e-nombre').value, 'Chamarra');
+  llenar({ 'e-nombre':'Chamarra Levis <b>', 'e-precio':'400' });
+  await ui.$('corregir').eventos.submit({ preventDefault() {} }); await new Promise(setImmediate);
+  assert.match(confirmaciones[0], /Precio \$450\.00 → \$400\.00\. La etiqueta pegada dice \$450\.00: la caja cobrará \$400\.00 desde ahora\./);
+  assert.equal(enviados.length, 1); assert.equal(enviados[0].url, '/api/borradores/pieza');
+  assert.deepEqual(enviados[0].cuerpo, { nombre:'Chamarra Levis <b>', marca:'Levis', talla:'M', precio_lista:60000, precio:40000, destino:'etiqueta' });
+  assert.ok(!('stock' in enviados[0].cuerpo));
+  assert.equal(ui.$('corregir').hidden, true); assert.equal(ui.$('reimprimir').hidden, false);
+  assert.match(ui.$('reimprimir-texto').textContent, /dice \$450\.00 y ahora cuesta \$400\.00/);
+  assert.equal(ui.$('nombre').textContent, 'Chamarra Levis <b>'); assert.equal(ui.$('stock').value, '2');
+  // Sin cambios no hay petición; si no confirma, tampoco.
+  ui.$('editar').eventos.click();
+  await ui.$('corregir').eventos.submit({ preventDefault() {} }); await new Promise(setImmediate);
+  assert.equal(enviados.length, 1); assert.match(ui.$('estado').textContent, /No hay cambios/);
+  // Si no confirma, no se manda nada.
+  const rechazo = pantalla(() => ({ pieza:{ ...p }, ...permisos, historial:[] }), () => false);
+  await rechazo.api.abrir(p.id); rechazo.$('editar').eventos.click(); rechazo.$('e-nombre').value = 'Otro';
+  await rechazo.$('corregir').eventos.submit({ preventDefault() {} }); await new Promise(setImmediate);
+  assert.equal(rechazo.llamadas.filter((u) => u.includes('borradores')).length, 0);
+  // Sin precio de dueño: el campo no sale y se manda el precio actual.
+  permisos = { puede_editar:true, puede_precio:false };
+  const cap = pantalla((url, cuerpo) => cuerpo ? (enviados.push({ url, cuerpo }), { ...p, ...cuerpo }) : { pieza:{ ...p }, ...permisos, historial:[] });
+  await cap.api.abrir(p.id); cap.$('editar').eventos.click();
+  assert.equal(cap.$('campos-precio').hidden, true); assert.match(cap.$('nota-precio').textContent, /solo el dueño/);
+  cap.$('e-talla').value = 'L'; await cap.$('corregir').eventos.submit({ preventDefault() {} }); await new Promise(setImmediate);
+  assert.equal(enviados.at(-1).cuerpo.precio, 45000); assert.equal(enviados.at(-1).cuerpo.talla, 'L');
+  assert.equal(cap.$('reimprimir').hidden, false); assert.match(cap.$('reimprimir-texto').textContent, /dice «Chamarra · M»/);
+});
+
+test('pantalla: sin permiso o con la pieza sin analizar no hay controles; banda deja el precio en solo lectura', async () => {
+  const base = { id:'pieza', codigo:'ED-002318', nombre:'Chamarra', marca:'', talla:null, precio:11900, precio_lista:20000, stock:1, destino:'etiqueta', estado_analisis:'listo' };
+  const abrir = async (pieza: object, permisos: object) => {
+    const ui = pantalla(() => ({ pieza, ...permisos, historial:[] })); await ui.api.abrir('pieza'); return ui;
+  };
+  assert.equal((await abrir(base, { puede_editar:false, puede_precio:false })).$('edicion').hidden, true);
+  const pendiente = await abrir({ ...base, estado_analisis:'pendiente' }, { puede_editar:true, puede_precio:true });
+  assert.equal(pendiente.$('editar').hidden, true); assert.match(pendiente.$('nota-edicion').textContent, /se corrige en \/admin/);
+  const banda = await abrir({ ...base, destino:'banda_g119' }, { puede_editar:true, puede_precio:true });
+  banda.$('editar').eventos.click();
+  assert.equal(banda.$('campos-precio').hidden, true); assert.match(banda.$('nota-precio').textContent, /se cambia en \/admin/);
+  const html = readFileSync('public/pieza.html', 'utf8');
+  assert.match(html, /<div id="edicion" hidden>/); assert.match(html, /<form id="corregir" hidden>/);
+  assert.match(html, /<div id="campos-precio" hidden>/);
 });

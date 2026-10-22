@@ -135,7 +135,7 @@ test('foto ya puesta → 409; FEP, vendedor, portal y cajero quedan fuera; captu
     assert.equal((await p.pedir(RUTA, { imagen: IMAGEN }, 'PUT')).status, 404);
     delete p.env[host];
   }
-  p.db.prepare("insert into usuarios(correo,roles,creado_en,actualizado_en) values ('cap@prueba.mx','capturista','','')").run();
+  p.db.prepare("insert into usuarios(correo,roles,editar_inventario,creado_en,actualizado_en) values ('cap@prueba.mx','capturista',1,'','')").run();
   p.env.DEV_USUARIO = 'cap@prueba.mx';
   t.mock.method(globalThis, 'fetch', async (url: string) => String(url).includes('aiplatform') ? grounding([]) : foto());
   assert.equal((await p.pedir(`${RUTA}/buscar`, {})).status, 200);
