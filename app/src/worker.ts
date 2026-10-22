@@ -47,6 +47,7 @@ import { registrarSocio, buscarSocio, buscarPorCodigo, basesListas, sentenciasDe
 import { registrarCorte, registrarRetiro, ultimoCorte, cajaDe } from './corte.ts';
 import { rutaGastos } from './gastos.ts';
 import { rutaPiezas } from './piezas.ts';
+import { rutaCamaraRemota } from './camara-remota.ts';
 import { rutaNomina } from './nomina.ts';
 import { lineasNetas } from './netas.ts';
 import { portal, llegada, vincular } from './portal.ts';
@@ -97,6 +98,9 @@ const RUTAS_VENDEDOR = new Set(['/captura', '/foto.js', '/tallas.js', '/api/salu
 const CORRECCION_CAPTURA = /^\/api\/borradores\/([^/]+)\/(existencia|talla|revision)$/;
 
 export function permitidaParaVendedor(pathname: string, metodo: string): boolean {
+  if (pathname === '/camara-remota' || pathname === '/camara-remota.js') return metodo === 'GET';
+  if (pathname === '/api/camara/solicitud') return metodo === 'GET';
+  if (/^\/api\/camara\/solicitud\/[^/]+\/(tomar|lista|cancelar)$/.test(pathname)) return metodo === 'POST';
   if (RUTAS_VENDEDOR.has(pathname)) {
     return metodo === 'GET';
   }
@@ -2091,8 +2095,8 @@ export default {
         return json({ error: 'Sin sesion. Vuelve a entrar.' }, 401);
       }
       let correo = acceso;
+      const usuario = regla !== 'cuenta' ? await leerUsuario(env, acceso) : null;
       if (regla !== 'cuenta') {
-        const usuario = await leerUsuario(env, acceso);
         if (!puede(usuario, regla)) {
           // Una pantalla lleva a donde se pide acceso; una llamada de la API
           // recibe el error tal cual.
@@ -2114,6 +2118,9 @@ export default {
 
       if (pathname === '/api/yo') {
         return await yo(env, correo, soloComputadora(await leerUsuario(env, correo)) ? await cajeroEnTurno(request, env) : null);
+      }
+      if (pathname === '/api/camara/solicitud' || pathname.startsWith('/api/camara/solicitud/')) {
+        return await rutaCamaraRemota(request, env, pathname, usuario!);
       }
       if (pathname === '/api/piezas' || pathname.startsWith('/api/piezas/')) {
         const respuesta = await rutaPiezas(request, env, url, await leerUsuario(env, correo));
