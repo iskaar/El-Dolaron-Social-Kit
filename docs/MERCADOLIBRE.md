@@ -151,7 +151,7 @@ En El Dolarón, `/mercadolibre`:
 Cuando alguien compra una pieza en tu tienda, la caja la marca como vendida en D1. El Dolarón **pausa automáticamente** la publicación en ML (la prenda desaparece de búsqueda, pero la publicación queda guardada).
 
 **Venta en Mercado Libre**:  
-Un cliente compra en ML. Mercado Libre te notifica por email. El Dolarón **baja automáticamente** el stock en D1 (la pieza pasa a vendida). **Tú debes**:
+Un cliente compra en ML. Mercado Libre te notifica por email. El Dolarón **baja automáticamente** el stock en D1 (la pieza pasa a vendida). Además, `avisos@eldolaron.com` manda un correo a cada dueño con la pieza, su código ED-, el precio y el enlace a la venta; si D1 ya no tenía existencias, el asunto empieza con **«¡Sin existencias!»** y hay que cancelar la venta en ML. **Tú debes**:
 1. Sacar la prenda de la tienda de inmediato (pasar al almacén o empaque).
 2. Empacarla (con las dimensiones y peso que definiste).
 3. Llevarla a una sucursal de Mercado Envíos (correos, etc.) con la etiqueta que imprime ML.
