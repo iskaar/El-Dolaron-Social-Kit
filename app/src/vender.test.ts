@@ -232,7 +232,7 @@ test('disponibilidad sale de stock y pedidos; apartar sigue exigiendo anticipo y
   const leer = async () => (await pedir('/api/interesados')).cuerpo.interesados[0];
   assert.equal((await leer()).disponibilidad, 'Disponible');
   const pedido = { id: crypto.randomUUID(), lineas: [{ producto_id: p.id, cantidad: 1 }], cliente: 'Ana', telefono: '4441234567',
-    entrega: 'tienda', anticipo: 10000, forma_pago: 'transferencia' };
+    entrega: 'tienda', anticipo: 10000, forma_pago: 'transferencia', caja: 'Caja 1' };
   assert.equal((await pedir('/api/pedidos', { ...pedido, anticipo: 0 })).status, 400);
   const apartado = await pedir('/api/pedidos', pedido);
   assert.equal(apartado.status, 201);
@@ -282,7 +282,7 @@ test('pedidos prellena pieza y cliente por URL, escapa texto y nunca manda un an
   const script = readFileSync('public/pedidos.html', 'utf8').match(/<script type="module">([\s\S]*?)<\/script>/)![1].replace(/^import .+;$/gm, '');
   const params = new URLSearchParams({ codigo: 'ED-000123', cliente: 'Ana <img>', telefono: '4441234567' });
   await runInNewContext(`(async () => { ${script} })()`, {
-    document: { getElementById: $, querySelector: () => ({ value: 'tienda', checked: true }), querySelectorAll: () => [] },
+    document: { getElementById: $, querySelector: () => ({ value: 'tienda', checked: true, addEventListener() {} }), querySelectorAll: () => [] },
     location: { search: `?${params}`, pathname: '/pedidos' }, history: { replaceState: (_a: unknown, _b: unknown, url: string) => { limpia = url; } },
     URLSearchParams, navigator: { onLine: true }, setInterval() {}, localStorage: { getItem: () => null },
     ANTICIPO_MINIMO: 10000, envioDe: () => 0, codigoDeDigitos: () => null,
