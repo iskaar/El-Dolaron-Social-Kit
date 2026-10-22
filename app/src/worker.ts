@@ -40,7 +40,7 @@ import { CLAVES_CATEGORIA } from '../public/categorias.js';
 import { tallaValida } from '../public/tallas.js';
 import {
   permiso, puede, quienEs, leerUsuario, yo, pedirAcceso, listarCuentas, guardarCuenta, resolverSolicitud, propietarioDe,
-  esDeCaja, soloComputadora, CAJAS,
+  esDeCaja, soloComputadora, CAJAS, puedeEditarInventario,
 } from './cuentas.ts';
 import { cajeroEnTurno, listarCajeros, entrar, salir, ponerPin } from './cajeros.ts';
 import { registrarSocio, buscarSocio, buscarPorCodigo, basesListas, sentenciasDeVenta, saldo } from './dolarones.ts';
@@ -2197,6 +2197,15 @@ export default {
           const fila = await env.DB.prepare('select propietario from productos where id = ?').bind(id).first<{ propietario: string }>();
           if (fila && fila.propietario !== propietario) return json({ error: 'Pieza no encontrada.' }, 404);
         }
+      }
+
+      // #441 PR D: editar, fusionar, descartar, reanalizar y poner imagen exigen la casilla «Editar
+      // inventario» (el dueño siempre). La corrección de captura propia de 24 h (existencia, talla y
+      // revision) no pasa por aquí: es el carrusel de la cámara y no pide casilla.
+      const escritura = pathname.match(/^\/api\/borradores\/[^/]+(?:\/(fusionar|analizar|imagen(?:\/buscar)?))?$/);
+      if (escritura && (escritura[1] || ['PATCH', 'DELETE'].includes(request.method))
+          && !puedeEditarInventario(await leerUsuario(env, correo))) {
+        return json({ error: 'Tu cuenta no tiene permiso para editar el inventario.' }, 403);
       }
 
       const imagenPieza = await rutaImagenPieza(request, env, pathname);

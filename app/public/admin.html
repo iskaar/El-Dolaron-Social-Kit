@@ -63,6 +63,8 @@
 </header>
 
 <main>
+  <p class="panel aviso" id="aviso-edicion" role="status" hidden>Tu cuenta no tiene «Editar inventario»: aquí solo puedes consultar.
+    No puedes guardar, recalcular, reanalizar, sumar repetidas, descartar ni buscar imagen. Pídele al dueño que la active en Cuentas.</p>
   <section class="panel">
     <h2>Configuración de precios</h2>
     <div class="ajustes" id="ajustes"></div>
@@ -170,6 +172,7 @@ const CLAVES_CONFIG = [
 const EN_PESOS = new Set([...MONTOS_BANDA.map((p) => `banda_${p}`), 'fondo_caja']);
 
 const cola = document.getElementById('cola');
+let puedeEditarInventario = true;   // se decide con /api/yo antes de pintar la cola
 const resumen = document.getElementById('resumen');
 let filtro = '';
 /** Nombre normalizado → pieza ya revisada, para detectar repetidos. */
@@ -269,6 +272,12 @@ function ficha(p) {
 
   const valor = (campo) => nodo.querySelector(`[data-campo="${campo}"]`).value;
   const aviso = nodo.querySelector('.aviso');
+  // Sin la casilla «Editar inventario» la ficha es de consulta (el servidor igual responde 403).
+  if (!puedeEditarInventario) {
+    for (const campo of nodo.querySelectorAll('input[data-campo], select[data-campo]')) campo.disabled = true;
+    for (const boton of nodo.querySelectorAll('[data-accion="guardar"], [data-accion="recalcular"], [data-accion="reanalizar"], [data-accion="fusionar"], [data-accion="descartar"], [data-accion="buscar-imagen"]')) boton.disabled = true;
+    aviso.textContent = 'Solo consulta: tu cuenta no tiene «Editar inventario».';
+  }
 
   // La existencia solo viaja si la tocaste: la caja pudo vender desde que se abrio la ficha.
   let stockMostrado = String(p.stock ?? 1);
@@ -294,7 +303,7 @@ function ficha(p) {
   }
 
   // Usado por "Guardar todo": misma sentencia que el boton Guardar de esta ficha.
-  nodo.guardarFicha = () => enviar({ ...base(), precio: centavos(valor('precio')), destino: valor('destino') });
+  nodo.guardarFicha = () => !puedeEditarInventario ? Promise.resolve(false) : enviar({ ...base(), precio: centavos(valor('precio')), destino: valor('destino') });
 
   // Compartido por Retomar foto y Pedir foto al celular: la foto ya esta en R2 con la misma llave.
   function fotoReemplazada() {
@@ -471,12 +480,18 @@ async function cargarRevision() {
 /* ---------- captura sin foto (Issue #115) ---------- */
 
 const manual = document.getElementById('manual');
-fetch('/api/yo').then((r) => r.json()).then(({ usuario }) => {
-  const dueno = !!usuario?.roles.includes('dueno');
-  manual.hidden = !dueno;
-  document.body.classList.toggle('dueno', dueno);
-  if (dueno) cargarRevision();
-});
+const { usuario } = await (await fetch('/api/yo')).json();
+const dueno = !!usuario?.roles.includes('dueno');
+manual.hidden = !dueno;
+document.body.classList.toggle('dueno', dueno);
+if (dueno) cargarRevision();
+// #441: la misma regla que el servidor (puedeEditarInventario), que es quien la hace cumplir.
+puedeEditarInventario = dueno || (usuario?.editar_inventario === true
+  && usuario.roles.some((rol) => rol === 'capturista' || rol === 'finanzas'));
+if (!puedeEditarInventario) {
+  document.getElementById('aviso-edicion').hidden = false;
+  for (const id of ['guardar-todo', 'reintentar-todo']) document.getElementById(id).disabled = true;
+}
 document.getElementById('m-categoria').innerHTML = opcionesCategoria('');
 document.getElementById('m-destino').innerHTML = '<option value="">Automático</option>'
   + DESTINOS.map(([v, t]) => `<option value="${v}">${t}</option>`).join('');

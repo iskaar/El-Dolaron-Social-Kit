@@ -234,7 +234,7 @@ test('aislamiento en ambos sentidos y operaciones válidas con piezas propias de
   const t = tienda(), fep = await repetida(t), propia = await repetida(t, 'ED-002319');
   t.db.prepare("update productos set propietario = 'fep' where id in (?, ?)").run(fep, propia);
   t.db.prepare('update productos set codigo = null where id = ?').run(propia);
-  t.db.prepare(`insert into usuarios (correo, roles, activo, creado_en, actualizado_en) values ('fep@prueba.mx', 'finanzas', 1, '', '')`).run();
+  t.db.prepare(`insert into usuarios (correo, roles, activo, editar_inventario, creado_en, actualizado_en) values ('fep@prueba.mx', 'finanzas', 1, 1, '', '')`).run();
   for (const correo of [DUENO, 'fep@prueba.mx']) {
     t.env.DEV_USUARIO = correo;
     const antes = t.db.prepare('select * from productos order by id').all();
@@ -291,7 +291,7 @@ test('/admin oculta la fusión de dos etiquetadas y muestra claro el 409 si camb
     };
     const ficha = runInNewContext(`${fuente}; ficha`, {
       existentes: new Map([['ventilador', { id: PRODUCTO, codigo: original, stock: 50 }]]),
-      normalizar: (s: string) => s.toLowerCase(), document: { createElement: () => nodo },
+      puedeEditarInventario: true, normalizar: (s: string) => s.toLowerCase(), document: { createElement: () => nodo },
       opcionesCategoria: () => '', opcionesEstado: () => '', pesos: () => '', DESTINOS: [],
       fetch: async () => Response.json({ error: DOS_ETIQUETAS }, { status: 409 }),
     });
