@@ -32,6 +32,39 @@ export async function procesarRecortes(env: Env): Promise<void> {
   }
 }
 
+/**
+ * #425: una pasada que ajusta al producto los recortes hechos antes de #421. Solo el trim sobre el
+ * WebP que ya existe: sin quitar fondo otra vez ni revisar con IA, y la revisión aprobada se conserva.
+ * ponytail: cursor por rowid; al terminar la consulta ya no lee filas. Reajustar uno ya ajustado no le hace nada.
+ */
+export async function ajustarRecortesViejos(env: Env): Promise<void> {
+  const activa = await env.DB.prepare("select valor from config where clave='recortes_activo'").first<{ valor: string }>();
+  if (activa?.valor !== '1') return;
+  const cursor = await env.DB.prepare("select valor from config where clave='recortes_ajuste_hasta'").first<{ valor: string }>();
+  const { results } = await env.DB.prepare("select rowid, id from productos where rowid > ? and recorte_estado='listo' order by rowid limit 40")
+    .bind(Number(cursor?.valor ?? 0)).all<{ rowid: number; id: string }>();
+  let hasta = 0;
+  try {
+    for (const fila of results) {
+      const recorte = await env.FOTOS.get(`recortes/${fila.id}.webp`);
+      if (recorte) {
+        try {
+          const salida = await (env.IMAGES as any).input(recorte.body).transform({ trim: { border: { keep: 24 } } }).output({ format: 'image/webp', quality: 82 });
+          const bytes = salida instanceof Response ? salida.body : salida.response().body;
+          // Si se reinició o cambió mientras tanto, no se revive el viejo.
+          if (bytes) await env.FOTOS.put(`recortes/${fila.id}.webp`, bytes, { onlyIf: { etagMatches: recorte.etag }, httpMetadata: { contentType: 'image/webp' } });
+        } catch (error) {
+          if (/9422/.test(String(error))) return;
+        }
+      }
+      hasta = fila.rowid;
+    }
+  } finally {
+    if (hasta) await env.DB.prepare("insert into config (clave, valor) values ('recortes_ajuste_hasta', ?) on conflict (clave) do update set valor = excluded.valor")
+      .bind(String(hasta)).run();
+  }
+}
+
 const ESQUEMA_REVISION = { type: 'object', properties: {
   ok: { type: 'boolean' }, problemas: { type: 'array', items: { type: 'string' } }, instruccion: { type: 'string' },
 }, required: ['ok', 'problemas', 'instruccion'], additionalProperties: false };
