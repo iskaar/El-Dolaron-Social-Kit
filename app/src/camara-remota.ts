@@ -93,6 +93,13 @@ export async function rutaCamaraRemota(request: Request, env: Env, pathname: str
   if (!s || s.id !== id) return json({ error: 'Solicitud no encontrada.' }, 404);
 
   if (accion === 'tomar') {
+    // solo_foto sobre una pieza inexistente crearía otra: no se entrega la solicitud si la pieza ya no está.
+    if (s.tipo === 'foto_pieza' && s.estado === 'pendiente' && !vencida(s, ahora) && !await env.DB.prepare(
+      `select 1 from productos where id = ? and propietario = ? and estado_analisis <> 'descartado'`).bind(s.pieza_id, propietario).first()) {
+      await env.DB.prepare(`update camara_remota set estado = 'cancelada', motivo = 'La pieza ya no está disponible.'
+        where correo = ? and id = ? and estado = 'pendiente'`).bind(correo, id).run();
+      return json({ error: 'La pieza ya no está disponible.' }, 409);
+    }
     // El reintento conserva las horas y el resultado de la primera toma.
     await env.DB.prepare(`update camara_remota set estado = 'tomada', telefono = ?, tomada_en = ?, vence_en = ?
       where correo = ? and id = ? and estado = 'pendiente' and vence_en > ?`)
@@ -115,9 +122,8 @@ export async function rutaCamaraRemota(request: Request, env: Env, pathname: str
     await env.DB.prepare(`update camara_remota set estado = 'lista', lista_en = ?
       where correo = ? and id = ? and estado = 'tomada' and telefono = ?
       and exists (select 1 from productos where id = camara_remota.pieza_id and propietario = ?
-        and estado_analisis <> 'descartado' and foto_key <> ''
-        and ((camara_remota.tipo = 'foto_pieza' and actualizado_en >= camara_remota.tomada_en)
-          or (camara_remota.tipo = 'pieza_nueva' and capturado_por = ?)))`)
+        and estado_analisis <> 'descartado' and foto_key <> '' and actualizado_en >= camara_remota.tomada_en
+        and (camara_remota.tipo = 'foto_pieza' or capturado_por = ?))`)
       .bind(ahora, correo, id, cuerpo.telefono, propietario, correo).run();
     s = await leer();
     if (!s || s.id !== id || s.estado !== 'lista') return json({ error: 'La foto no llegó.' }, 409);

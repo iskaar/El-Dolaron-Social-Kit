@@ -95,6 +95,14 @@ test('foto anterior no basta; pieza desaparecida/descartada cancela con motivo',
   assert.equal(r.cuerpo.solicitud.estado, 'cancelada'); assert.match(r.cuerpo.solicitud.motivo, /pieza/);
 });
 
+test('tomar no entrega la solicitud si la pieza ya no existe (solo_foto crearía otra)', async (t) => {
+  const { db, pedir } = tienda(); t.after(() => db.close());
+  const s = solicitud(); await pedir(RUTA, s, 'PUT');
+  db.prepare("update productos set estado_analisis = 'descartado' where id = ?").run(PRODUCTO);
+  assert.equal((await pedir(post(s.id, 'tomar'), { telefono })).status, 409);
+  const r = await pedir(RUTA); assert.equal(r.cuerpo.solicitud.estado, 'cancelada'); assert.match(r.cuerpo.solicitud.motivo, /pieza/);
+});
+
 test('pieza_nueva exige foto y capturado_por del buzón', async (t) => {
   const { db, pedir } = tienda(); t.after(() => db.close());
   const s = solicitud({ tipo: 'pieza_nueva', pieza_id: crypto.randomUUID(), params: { upc: SIN_CODIGO, cantidad: 3 } });
@@ -102,7 +110,7 @@ test('pieza_nueva exige foto y capturado_por del buzón', async (t) => {
   assert.equal((await pedir(post(s.id, 'lista'), { telefono })).status, 409);
   assert.equal((await pedir(RUTA)).cuerpo.solicitud.estado, 'tomada');
   db.prepare(`insert into productos (id, semana_ingreso, creado_en, actualizado_en, foto_key, capturado_por)
-    values (?, 'S40', '', '', 'foto', 'otro@prueba.mx')`).run(s.pieza_id);
+    values (?, 'S40', '', '2999-01-01T00:00:00.000Z', 'foto', 'otro@prueba.mx')`).run(s.pieza_id);
   assert.equal((await pedir(post(s.id, 'lista'), { telefono })).status, 409);
   db.prepare('update productos set capturado_por = ? where id = ?').run(DUENO, s.pieza_id);
   assert.equal((await pedir(post(s.id, 'lista'), { telefono })).status, 200);
@@ -164,7 +172,6 @@ test('sondeo lee una fila por llave sin SCAN; schema + todas las migraciones sob
   const db = new DatabaseSync(':memory:'); t.after(() => db.close());
   const archivos = ['schema.sql', ...readdirSync('.').filter((f) => /^migracion-\d+/.test(f)).sort()];
   for (const f of archivos) db.exec(readFileSync(f, 'utf8'));
-  db.exec(readFileSync('migracion-051-camara-remota.sql', 'utf8'));
   assert.equal(db.prepare('select count(*) as n from camara_remota').get()!.n, 0);
   const { env, pedir, db: tiendaDb } = tienda(); t.after(() => tiendaDb.close());
   await pedir(RUTA, solicitud(), 'PUT');
