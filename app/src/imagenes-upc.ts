@@ -87,8 +87,10 @@ export async function guardarImagenComoFoto(upc: string, env: Env): Promise<void
     if (!r || !imagenValida(r.url)) return;
     const { key, foto } = await fotoDeReferencia(r, env);
     const bytes = await foto.arrayBuffer();
-    const { results } = await env.DB.prepare(`select id from productos where ltrim(upc, '0') = ?
-      and propietario = 'dolaron' and foto_key = '' and estado_analisis <> 'descartado'`).bind(r.upc).all<{ id: string }>();
+    // Se llama en cada escaneo: variantes con ceros para usar el índice productos_upc, no ltrim (recorre la tabla).
+    const claves = Array.from({ length: 15 - r.upc.length }, (_, i) => r.upc.padStart(r.upc.length + i, '0'));
+    const { results } = await env.DB.prepare(`select id from productos where upc in (${claves.map(() => '?').join(', ')})
+      and propietario = 'dolaron' and foto_key = '' and estado_analisis <> 'descartado'`).bind(...claves).all<{ id: string }>();
     for (const { id } of results) {
       const fotoKey = `fotos/${id}.jpg`;
       const creada = await env.FOTOS.put(fotoKey, bytes, {
