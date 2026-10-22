@@ -68,18 +68,35 @@ Siempre: saludo breve, tuteo, una sola pregunta o acción por mensaje, y precio 
 5. **Colores y logo** según `site/DESIGN.md`: azul #16366B, rojo #D72B32, amarillo #FFD447, blanco; un solo logo vigente.
 6. **No afirmar** que todo el inventario fue probado: solo que se revisan las piezas y los productos grandes (`docs/MARKETING-30-DIAS.md`).
 
-## 6. Inconsistencias encontradas (sin corregir)
+## 6. Inconsistencias encontradas (sin corregir en archivos; las resueltas llevan marca)
 
-1. **Eslogan viejo vs vigente.** `05-Guia-y-textos/Textos-para-redes.txt` dice «Súper precios y grandes hallazgos» y «Mercancía americana a súper precios»; el sitio y `site/DESIGN.md` usan «Marcas americanas, a precio de saldo» (sin «oferta barata», #339).
-2. **Dos teléfonos.** `docs/MARKETING-30-DIAS.md` da 444 854 5980 como WhatsApp comercial; el sitio, `app/public/portal.js` y `whatsapp/respuestas.mjs` usan 444 543 7754 y llaman a 854 5980 «teléfono fijo (no es WhatsApp)» (también `app/src/legal.ts`).
-3. **Horario escrito de cuatro formas:** «11:00 a. m. a 8:00 p. m.» (`site/public/index.html`), «de 11 a 8» (marquesina del mismo archivo), «11 am a 8 pm» (`app/public/marketplace.html`), «11:00 a 20:00» (`whatsapp/respuestas.mjs`, `app/src/legal.ts`).
-4. **Apartado:** `docs/MARKETING-30-DIAS.md` propone 30% y 15 días (pendiente de validación legal); el código usa 7 días (`app/src/pedidos.ts`, `DIAS_APARTADO`) y la rama `origin/agent/codex/431-vender` (`app/public/vender.js`) dice «Apártala con $100 por 7 días». El sitio no publica ninguna política de apartado.
-5. **Contacto y entrega en Marketplace/ML:** `app/public/marketplace.html` termina con «Escríbenos por Messenger» (el resto de la marca dirige a WhatsApp); `app/src/mercadolibre.ts` crea artículos con `shipping.mode: 'me2'` y `local_pick_up: false`, mientras el sitio dice «recogida en sucursal».
-6. **Descriptor del negocio:** «Productos Americanos» (`app/public/impresora.js`), «Mercancía americana» (`Textos-para-redes.txt`), «Ropa americana y mercancía general» (sitio), «Saldos americanos» (sitio y `MARKETING-30-DIAS.md`); y perfiles heredados con «Más que moda» y categoría «tienda de ropa» (`MARKETING-30-DIAS.md` §4).
-7. **Tú vs usted.** Todo se tutea, pero el ticket dice «Gracias por su compra» (`app/public/impresora.js`).
-8. **Nombre del dueño en texto de cliente:** `app/public/portal.html` dice «Muestra este código a Isaac en la tienda»; el resto de la marca no nombra personas.
+1. **[Parcial: ver decisión 2 de Isaac; lema pendiente]** **Eslogan viejo vs vigente.** `05-Guia-y-textos/Textos-para-redes.txt` dice «Súper precios y grandes hallazgos» y «Mercancía americana a súper precios»; el sitio y `site/DESIGN.md` usan «Marcas americanas, a precio de saldo» (sin «oferta barata», #339).
+2. **[Resuelta 22/10/2026: el único WhatsApp oficial es 444 543 7754]** **Dos teléfonos.** `docs/MARKETING-30-DIAS.md` da 444 854 5980 como WhatsApp comercial; el sitio, `app/public/portal.js` y `whatsapp/respuestas.mjs` usan 444 543 7754 y llaman a 854 5980 «teléfono fijo (no es WhatsApp)» (también `app/src/legal.ts`).
+3. **[Resuelta 22/10/2026: «11 a. m. a 8 p. m.» y, en espacio corto, «de 11 a 8»]** **Horario escrito de cuatro formas:** «11:00 a. m. a 8:00 p. m.» (`site/public/index.html`), «de 11 a 8» (marquesina del mismo archivo), «11 am a 8 pm» (`app/public/marketplace.html`), «11:00 a 20:00» (`whatsapp/respuestas.mjs`, `app/src/legal.ts`).
+4. **[Resuelta 22/10/2026: 15 % del valor por 7 días en tienda; ver Decisiones]** **Apartado:** `docs/MARKETING-30-DIAS.md` propone 30% y 15 días (pendiente de validación legal); el código usa 7 días (`app/src/pedidos.ts`, `DIAS_APARTADO`) y la rama `origin/agent/codex/431-vender` (`app/public/vender.js`) dice «Apártala con $100 por 7 días». El sitio no publica ninguna política de apartado.
+5. **[Contacto resuelto 22/10/2026: dirigir a WhatsApp, no a Messenger]** **Contacto y entrega en Marketplace/ML:** `app/public/marketplace.html` termina con «Escríbenos por Messenger» (el resto de la marca dirige a WhatsApp); `app/src/mercadolibre.ts` crea artículos con `shipping.mode: 'me2'` y `local_pick_up: false`, mientras el sitio dice «recogida en sucursal».
+6. **[Resuelta 22/10/2026: «Mercancía y ropa americana»]** **Descriptor del negocio:** «Productos Americanos» (`app/public/impresora.js`), «Mercancía americana» (`Textos-para-redes.txt`), «Ropa americana y mercancía general» (sitio), «Saldos americanos» (sitio y `MARKETING-30-DIAS.md`); y perfiles heredados con «Más que moda» y categoría «tienda de ropa» (`MARKETING-30-DIAS.md` §4).
+7. **[Resuelta 22/10/2026: se tutea siempre, también en el ticket]** **Tú vs usted.** Todo se tutea, pero el ticket dice «Gracias por su compra» (`app/public/impresora.js`).
+8. **[Resuelta 22/10/2026: «muéstralo en caja»]** **Nombre del dueño en texto de cliente:** `app/public/portal.html` dice «Muestra este código a Isaac en la tienda»; el resto de la marca no nombra personas.
 9. **«Las revisamos una por una»** (`site/public/index.html`) vs la cautela de `docs/MARKETING-30-DIAS.md`: no afirmar que todo el inventario fue probado.
 10. **«Vale» y «cupón» se solapan:** vale impreso de Dolarones, cupón de grupo («Vale por tu lugar…») y cupón de devolución en caja son cosas distintas con palabras cercanas.
 11. **Origen de la mercancía:** el sitio dice «pallets de liquidación»; `MARKETING-30-DIAS.md` menciona B-Stock de cadenas concretas con la advertencia de no implicar afiliación. Mantener fuera del copy público.
 12. **Precios de ropa:** el sitio publica «desde $50» y $50/$80/$100/$150/$200, mientras el kit dice que sus precios están vacíos «deliberadamente» (`Textos-para-redes.txt`). Confirmar que siguen vigentes antes de reutilizarlos en redes.
 13. **Datos del local en el kit:** `Textos-para-redes.txt` aún pide «agregar» dirección y horario que ya están confirmados y publicados en el sitio.
+
+## 7. Decisiones de Isaac (22/10/2026)
+
+Reglas vigentes para el manual de marca. No se corrigieron aún los archivos del kit ni de la app que dicen otra cosa; eso va en otro Issue.
+
+1. **Descriptor oficial:** «Mercancía y ropa americana», en ese orden. Sustituye a «Ropa americana y mercancía general» y a las demás variantes (inconsistencia 6).
+2. **Lema: pendiente de definir.** «Marcas americanas, a precio de saldo» **no** es el lema de marca (a Isaac no le gusta del todo); sigue siendo el titular actual del sitio. No inventar un lema nuevo hasta que se decida. Decisión pendiente.
+3. **Tuteo siempre**, también en el ticket impreso: «Gracias por tu compra» (inconsistencia 7).
+4. **WhatsApp: 444 543 7754, único oficial.** El 444 854 5980 no es WhatsApp (inconsistencia 2).
+5. **Dirección:** Jardín Hidalgo 129, Zona Centro, Soledad de Graciano Sánchez, S.L.P., C.P. 78430.
+6. **Horario:** «11 a. m. a 8 p. m.», todos los días; en espacio corto, «de 11 a 8» (inconsistencia 3).
+7. **Apartado en tienda:** 15 % del valor del producto, por 7 días (inconsistencia 4).
+8. **Envío:** $100 de anticipo al apartar el primer producto, que se liquida antes de enviar. Envíos todos los viernes (corte el jueves a las 8 p. m.). Costo del envío: $99 en compras de menos de $1,000 y gratis desde $1,000.
+9. **Portal Dolarones:** no nombra personas; dice «muéstralo en caja» en lugar de «Muestra este código a Isaac en la tienda» (inconsistencia 8).
+10. **Marketplace y Mercado Libre:** el contacto dirige a WhatsApp, no a Messenger (inconsistencia 5).
+
+Pendiente de corregir en archivos (otro Issue): `Textos-para-redes.txt`, `docs/MARKETING-30-DIAS.md`, `app/public/impresora.js`, `app/public/portal.html`, `app/public/marketplace.html` y los textos de la app que usen horario, teléfono, apartado o descriptor distintos.
