@@ -101,7 +101,7 @@
 
     <div class="panel" id="nuevo">
       <h2>Nuevo apartado</h2>
-      <p class="nota" style="margin:0">Sin anticipo no hay apartado: el mínimo es $100 y las piezas se apartan 7 días.</p>
+      <p class="nota" style="margin:0">Recoger: 15% de las piezas, al peso hacia arriba, sin mínimo. Envío: abre tu paquete con $100 y agrega piezas sin otro anticipo. Tienes 7 días; en envío se renuevan con cada pieza o abono. Enviamos los viernes: liquida antes del jueves a las 20:00 para salir esa semana.</p>
       <label for="codigo">Código de la pieza (ED-…, o solo los números)</label>
       <div class="fila">
         <input id="codigo" autocomplete="off" inputmode="text" placeholder="Escanea o escribe el código">
@@ -131,7 +131,7 @@
         </table>
 
         <label for="anticipo">Anticipo recibido ($)</label>
-        <input id="anticipo" type="number" min="100" step="0.01" inputmode="decimal">
+        <input id="anticipo" type="number" min="0" step="0.01" inputmode="decimal">
         <div class="nota" id="anticipo-ayuda"></div>
 
         <label for="forma">Forma de pago del anticipo</label>
@@ -154,6 +154,7 @@
     </div>
     <div class="aviso" id="aviso-lista" role="status"></div>
     <div class="aviso error" id="aviso-red" role="status"></div>
+    <button class="boton" id="recuperar-movimiento" type="button" hidden>Reintentar movimiento pendiente</button>
     <h3>Apartados</h3>
     <div id="lista-apartados"></div>
     <h3>Por enviar</h3>
@@ -172,8 +173,33 @@
   </div>
 </dialog>
 
+<dialog id="dlg-mover" aria-labelledby="dlg-mover-titulo">
+  <h2 id="dlg-mover-titulo"></h2>
+  <p id="dlg-mover-resumen"></p>
+  <form id="form-mover" novalidate>
+    <div id="mover-pieza">
+      <label for="mover-codigo">Código de la pieza</label>
+      <input id="mover-codigo" autocomplete="off">
+      <label for="mover-cantidad">Cantidad</label>
+      <input id="mover-cantidad" type="number" min="1" max="999" step="1" value="1">
+    </div>
+    <div id="mover-abono">
+      <label for="mover-importe">Abono recibido ($)</label>
+      <input id="mover-importe" type="number" min="0.01" step="0.01" inputmode="decimal">
+      <label for="mover-forma">Forma de pago</label>
+      <select id="mover-forma"><option value="transferencia">Transferencia</option><option value="tarjeta">Tarjeta</option><option value="efectivo">Efectivo</option></select>
+      <p class="nota">Se registra en la caja elegida arriba. En efectivo, guarda el abono y abre el cajón desde /caja.</p>
+    </div>
+    <div class="aviso" id="mover-aviso" role="status"></div>
+    <div class="botones">
+      <button class="boton relleno" id="mover-guardar" type="submit">Guardar</button>
+      <button class="boton" id="mover-cerrar" type="button">Cerrar</button>
+    </div>
+  </form>
+</dialog>
+
 <script type="module">
-import { envioDe, ANTICIPO_MINIMO } from '/venta.js';
+import { envioDe, anticipoMinimoDe, ANTICIPO_ENVIO } from '/venta.js';
 import { codigoDeDigitos } from '/code128.js';
 
 const $ = (id) => document.getElementById(id);
@@ -272,15 +298,15 @@ function calcular() {
   const subtotal = piezas.reduce((suma, p) => suma + p.precio * p.cantidad, 0);
   const envio = entrega() === 'envio' ? envioDe(subtotal) : 0;
   const total = subtotal + envio;
-  const anticipo = entrega() === 'envio' ? total : Math.round(Number($('anticipo').value || 0) * 100);
+  const anticipo = entrega() === 'envio' ? ANTICIPO_ENVIO : Math.round(Number($('anticipo').value || 0) * 100);
+  const minimo = anticipoMinimoDe(subtotal, entrega());
   let motivo = '';
   if (!piezas.length) motivo = 'Agrega al menos una pieza.';
-  else if (total < ANTICIPO_MINIMO) motivo = `El apartado debe valer al menos ${pesos(ANTICIPO_MINIMO)}.`;
   else if (!($('cliente').value.trim())) motivo = 'Escribe el nombre del cliente.';
   else if (telefonoLimpio().length !== 10) motivo = 'El WhatsApp debe tener 10 dígitos.';
-  else if (anticipo < ANTICIPO_MINIMO) motivo = `El anticipo mínimo es ${pesos(ANTICIPO_MINIMO)}.`;
+  else if (!Number.isSafeInteger(anticipo) || anticipo < minimo) motivo = `El anticipo mínimo es ${pesos(minimo)}.`;
   else if (anticipo > total) motivo = `El anticipo no puede pasar del total (${pesos(total)}).`;
-  else if ($('forma').value === 'efectivo' && !$('caja-nombre').value) motivo = 'Para cobrar en efectivo elige arriba qué caja es esta computadora.';
+  else if (!$('caja-nombre').value) motivo = 'Para cobrar elige arriba qué caja es esta computadora.';
   return { subtotal, envio, total, anticipo, motivo };
 }
 
@@ -292,16 +318,17 @@ function pintar() {
       <button type="button" data-quitar="${i}" aria-label="Quitar ${escapar(p.nombre)}">✕</button>
     </div>`).join('');
   const envioElegido = entrega() === 'envio';
-  // Envío exige pago completo; en tienda el anticipo se escribe (por omisión el mínimo).
+  // En tienda se puede recibir más del 15%; el paquete abre con $100 y sigue con abonos.
   $('anticipo').readOnly = envioElegido;
-  if (envioElegido) $('anticipo').value = String(calcular().total / 100);
-  else if (!anticipoTocado) $('anticipo').value = String(ANTICIPO_MINIMO / 100);
+  const minimo = anticipoMinimoDe(piezas.reduce((s, p) => s + p.precio * p.cantidad, 0), entrega());
+  if (envioElegido || !anticipoTocado) $('anticipo').value = String(minimo / 100);
+  $('anticipo').min = String(minimo / 100);
   const c = calcular();
   $('c-subtotal').textContent = pesos(c.subtotal);
   $('c-envio-etiqueta').textContent = envioElegido ? 'Envío' : 'Entrega';
   $('c-envio').textContent = !envioElegido ? 'en tienda' : c.envio ? pesos(c.envio) : c.subtotal ? 'gratis' : '—';
   $('c-total').textContent = pesos(c.total);
-  $('anticipo-ayuda').textContent = envioElegido ? 'El envío se paga completo: el anticipo es el total.' : `Mínimo ${pesos(ANTICIPO_MINIMO)}.`;
+  $('anticipo-ayuda').textContent = envioElegido ? '$100 cuentan para el total. Después agrega piezas sin otro anticipo y abona hasta liquidar. Envío $99; gratis desde $1,000 en piezas.' : `15% al peso hacia arriba: mínimo ${pesos(minimo)}, sin mínimo fijo.`;
   validar();
 }
 function validar() {
@@ -325,8 +352,10 @@ const totalDe = (p) => p.subtotal + p.envio;
 const mensajeConfirmar = (p) => `¡Hola ${nombreDe(p)}! Tu apartado P-${p.folio} en El Dolarón quedó registrado: ${piezasDe(p)}. `
   + `Anticipo recibido: ${pesos(p.anticipo)}. Total: ${pesos(totalDe(p))}. `
   + (p.entrega === 'envio'
-    ? 'Pagado completo. Te avisamos cuando salga tu paquete.'
-    : `Recógelo en Jardín Hidalgo #129 a más tardar el ${fecha(p.vence_en)}. Si no lo recoges a tiempo, tu anticipo queda como saldo a favor por 1 mes.`);
+    ? (p.liquidado_en ? `Liquidado. Sale el viernes ${fecha(p.viernes_envio + 'T12:00:00-06:00')}. ` : `Faltan ${pesos(p.faltante)}. Abres con $100 y puedes agregar piezas sin otro anticipo. `)
+      + 'Liquida piezas + envío antes del jueves a las 20:00 para salir ese viernes; desde esa hora sale el viernes siguiente. Envío $99, gratis desde $1,000 en piezas. '
+      + (p.liquidado_en ? '' : `Tu paquete vence el ${fecha(p.vence_en)}; cada pieza o abono renueva 7 días. Al vencer, lo pagado queda como saldo a favor por 1 mes.`)
+    : `Anticipo de al menos 15% al peso hacia arriba, sin mínimo. Recógelo en Jardín Hidalgo #129 a más tardar el ${fecha(p.vence_en)}. Si no lo recoges a tiempo, tu anticipo queda como saldo a favor por 1 mes.`);
 const mensajeRecordar = (p) => `Hola ${nombreDe(p)}, te recordamos que tu apartado P-${p.folio} vence el ${fecha(p.vence_en)}. ¡Te esperamos!`;
 const mensajeSaldo = (p) => `Hola ${nombreDe(p)}, tu apartado P-${p.folio} venció. Tu anticipo quedó como saldo a favor de ${pesos(p.saldo)} hasta el ${fecha(p.saldo_vence_en)}: menciona P-${p.folio} en caja.`;
 const mensajeGuia = (p) => `Hola ${nombreDe(p)}, tu pedido P-${p.folio} ya va en camino. Número de guía: ${p.guia}.`;
@@ -379,7 +408,7 @@ function mostrarListo(p, forma) {
   pintar();
   $('listo-folio').textContent = `P-${p.folio}`;
   $('listo-resumen').textContent = `${p.cliente} · ${piezasDe(p)} · anticipo ${pesos(p.anticipo)} de ${pesos(totalDe(p))}`
-    + (p.entrega === 'tienda' ? ` · vence el ${fecha(p.vence_en)}` : ' · envío pagado completo');
+    + (p.entrega === 'tienda' ? ` · vence el ${fecha(p.vence_en)}` : ` · falta ${pesos(p.faltante)}`);
   $('listo-wa').href = enlaceWhatsApp(p.telefono, mensajeConfirmar(p));
   decir('listo-aviso', '');
   $('listo').hidden = false;
@@ -412,11 +441,11 @@ async function cargarLista() {
 
 const vendedoraDe = (p) => escapar(String(p.vendedora ?? '').split('@')[0]);
 
-function filaPedido(p, { botones, vence }) {
+function filaPedido(p, { botones, vence, saldo = false }) {
   return `<div class="pedido">
     <div class="cabeza"><span class="folio">P-${p.folio}</span><span><b>${escapar(p.cliente)}</b> · ${escapar(p.telefono)}</span></div>
     <div class="piezas">${escapar(piezasDe(p))}</div>
-    <div>${p.estado === 'apartado' ? `Anticipo ${pesos(p.anticipo)} de ${pesos(totalDe(p))}` : `Saldo ${pesos(p.saldo)}`} · ${p.entrega === 'envio' ? 'Envío' : 'Tienda'} · ${vendedoraDe(p)}</div>
+    <div>${saldo ? `Saldo ${pesos(p.saldo)}` : p.estado === 'apartado' ? `Pagado ${pesos(p.saldo)} de ${pesos(totalDe(p))} · Falta ${pesos(p.faltante)}` : p.estado === 'vendido' && p.entrega === 'envio' ? `Liquidado · Falta $0 · Total ${pesos(totalDe(p))}` : `Saldo ${pesos(p.saldo)}`} · ${p.entrega === 'envio' ? 'Envío' : 'Tienda'} · ${vendedoraDe(p)}</div>
     ${vence}
     <div class="botones">${botones}</div>
   </div>`;
@@ -426,8 +455,8 @@ const botonWa = (p, texto, etiqueta) => `<a class="boton chico wa" target="_blan
 function pintarLista() {
   const ahora = Date.now();
   const hoy = dia(ahora);
-  const apartados = pedidos.filter((p) => p.estado === 'apartado');
-  const envios = pedidos.filter((p) => p.estado === 'vendido' && p.entrega === 'envio' && !p.guia).map((p) => guardadas.get(p.folio) ?? p);
+  const apartados = pedidos.filter((p) => p.estado === 'apartado' && p.entrega === 'tienda');
+  const envios = pedidos.filter((p) => ['apartado', 'vendido'].includes(p.estado) && p.entrega === 'envio' && !p.guia).map((p) => guardadas.get(p.folio) ?? p);
   for (const p of guardadas.values()) if (!envios.some((x) => x.folio === p.folio)) envios.push(p);
   const saldos = pedidos.filter((p) => p.estado !== 'apartado' && p.saldo > 0 && Date.parse(p.saldo_vence_en) > ahora);
 
@@ -441,24 +470,33 @@ function pintarLista() {
     });
   }).join('') || '<p class="vacio">No hay apartados.</p>';
 
-  $('lista-envios').innerHTML = envios.map((p) => filaPedido(p, {
-    vence: '',
+  const grupos = [...new Set(envios.map((p) => p.viernes_envio ?? ''))].sort();
+  $('lista-envios').innerHTML = grupos.map((viernes) => `<h3>${viernes ? `Viernes ${fecha(viernes + 'T12:00:00-06:00')}` : 'Por liquidar · viernes pendiente'}</h3>`
+    + envios.filter((p) => (p.viernes_envio ?? '') === viernes).map((p) => filaPedido(p, {
+    vence: p.liquidado_en ? '<div>Liquidado: no vence.</div>' : `<div class="vence">Vence el ${fecha(p.vence_en)}; cada pieza o abono renueva 7 días.</div>`,
     botones: guardadas.has(p.folio)
       ? `<span class="aviso ok">Guía ${escapar(p.guia)} guardada.</span>` + botonWa(p, mensajeGuia(p), 'WhatsApp: avisar guía')
+      : p.estado === 'apartado' ? (p.liquidado_en
+        ? '<span>Cierra el pedido en /caja con su folio P-… para guardar la guía.</span>'
+        : `<button class="boton chico" type="button" data-mover="${p.folio}" data-tipo="pieza">Agregar pieza</button>
+           <button class="boton chico relleno" type="button" data-mover="${p.folio}" data-tipo="abono">Recibir abono</button>
+           <button class="boton chico rojo" type="button" data-cancelar="${p.folio}">Cancelar apartado</button>`)
+        + botonWa(p, mensajeConfirmar(p), 'WhatsApp: confirmar')
       : `<form class="guia" data-guia="${p.folio}">
            <input aria-label="Número de guía de P-${p.folio}" maxlength="60" placeholder="Número de guía" required>
            <button class="boton chico relleno" type="submit">Guardar guía</button>
          </form>`,
-  })).join('') || '<p class="vacio">No hay pedidos por enviar.</p>';
+  })).join('')).join('') || '<p class="vacio">No hay pedidos por enviar.</p>';
 
   $('lista-saldos').innerHTML = saldos.map((p) => filaPedido(p, {
+    saldo: true,
     vence: `<div class="vence">Saldo vigente hasta el ${fecha(p.saldo_vence_en)}</div>`,
     botones: botonWa(p, mensajeSaldo(p), 'WhatsApp: avisar saldo'),
   })).join('') || '<p class="vacio">No hay saldos a favor.</p>';
 }
 
 $('actualizar').addEventListener('click', cargarLista);
-setInterval(() => { if (document.visibilityState === 'visible' && !$('dlg-cancelar').open) cargarLista(); }, 60000);
+setInterval(() => { if (document.visibilityState === 'visible' && !$('dlg-cancelar').open && !$('dlg-mover').open) cargarLista(); }, 60000);
 
 // Guardar guía (solo envíos).
 $('lista-envios').addEventListener('submit', async (e) => {
@@ -488,7 +526,7 @@ $('lista-envios').addEventListener('submit', async (e) => {
 
 let folioACancelar = null;
 let botonOrigen = null;
-$('lista-apartados').addEventListener('click', (e) => {
+document.querySelector('main').addEventListener('click', (e) => {
   const boton = e.target.closest('button[data-cancelar]');
   if (!boton) return;
   const p = pedidos.find((x) => x.folio === Number(boton.dataset.cancelar));
@@ -496,7 +534,7 @@ $('lista-apartados').addEventListener('click', (e) => {
   folioACancelar = p.folio;
   botonOrigen = boton;
   $('dlg-cancelar-titulo').textContent = `¿Cancelar el apartado P-${p.folio}?`;
-  $('dlg-cancelar-texto').textContent = `Las piezas vuelven a la venta y el anticipo de ${pesos(p.anticipo)} queda como saldo a favor de ${p.cliente} por 1 mes.`;
+  $('dlg-cancelar-texto').textContent = `Las piezas vuelven a la venta y lo pagado (${pesos(p.saldo)}) queda como saldo a favor de ${p.cliente} por 1 mes.`;
   $('dlg-cancelar-si').disabled = false;
   $('dlg-cancelar').showModal();
 });
@@ -518,6 +556,100 @@ $('dlg-cancelar-si').addEventListener('click', async () => {
   }
   cargarLista();
   cargarCatalogo();
+});
+
+/* ---------- piezas y abonos: conservar ID y cuerpo hasta conocer el resultado ---------- */
+
+const CLAVE_MOVIMIENTO = 'pedido-movimiento-pendiente';
+let movimiento = null;
+let moviendo = false;
+try {
+  movimiento = JSON.parse(localStorage.getItem(CLAVE_MOVIMIENTO) ?? 'null');
+} catch { decir('aviso-lista', 'No se pudo leer el movimiento pendiente. Revisa la memoria del navegador antes de cobrar.', 'error'); }
+$('recuperar-movimiento').hidden = !movimiento;
+
+function abrirMovimiento(folio, tipo) {
+  if (moviendo) return;
+  const p = pedidos.find((x) => x.folio === folio);
+  if (!movimiento && !p) return;
+  if (!movimiento) movimiento = { folio, tipo, cuerpo: null };
+  const pendiente = !!movimiento.cuerpo;
+  $('dlg-mover-titulo').textContent = `${movimiento.tipo === 'pieza' ? 'Agregar pieza' : 'Recibir abono'} · P-${movimiento.folio}`;
+  $('dlg-mover-resumen').textContent = pendiente ? `Reintento del mismo movimiento: ${movimiento.tipo === 'abono'
+    ? `${pesos(movimiento.cuerpo.importe)} · ${movimiento.cuerpo.forma_pago} · ${movimiento.cuerpo.caja}`
+    : `${movimiento.cuerpo.cantidad} pieza(s) · ${movimiento.cuerpo.producto_id}`}.` : `${p.cliente} · falta ${pesos(p.faltante)}.`;
+  $('mover-pieza').hidden = movimiento.tipo !== 'pieza';
+  $('mover-abono').hidden = movimiento.tipo !== 'abono';
+  for (const id of ['mover-codigo', 'mover-cantidad', 'mover-importe', 'mover-forma']) $(id).disabled = pendiente;
+  if (!pendiente) {
+    $('mover-codigo').value = '';
+    $('mover-cantidad').value = '1';
+    $('mover-importe').value = String(p.faltante / 100);
+  }
+  decir('mover-aviso', pendiente ? 'El ID y el importe se conservan hasta confirmar; no vuelvas a recibir este dinero.' : '');
+  $('mover-guardar').textContent = pendiente ? 'Reintentar el mismo movimiento' : 'Guardar';
+  $('mover-guardar').disabled = false;
+  $('dlg-mover').showModal();
+}
+$('lista-envios').addEventListener('click', (e) => {
+  const boton = e.target.closest('button[data-mover]');
+  if (boton) abrirMovimiento(Number(boton.dataset.mover), boton.dataset.tipo);
+});
+$('recuperar-movimiento').addEventListener('click', () => abrirMovimiento(movimiento.folio, movimiento.tipo));
+$('mover-cerrar').addEventListener('click', () => $('dlg-mover').close());
+$('dlg-mover').addEventListener('close', () => { if (!movimiento?.cuerpo) movimiento = null; });
+$('form-mover').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  if (!movimiento || moviendo) return;
+  if (!movimiento.cuerpo) {
+    let cuerpo;
+    if (movimiento.tipo === 'pieza') {
+      const p = buscarPieza($('mover-codigo').value);
+      const cantidad = Number($('mover-cantidad').value);
+      if (!p || !Number.isInteger(cantidad) || cantidad < 1 || cantidad > 999)
+        return decir('mover-aviso', 'Revisa el código y la cantidad.', 'error');
+      cuerpo = { id: crypto.randomUUID(), producto_id: p.id, cantidad };
+    } else {
+      const importe = Math.round(Number($('mover-importe').value) * 100);
+      const caja = $('caja-nombre').value;
+      if (!Number.isSafeInteger(importe) || importe <= 0 || !caja)
+        return decir('mover-aviso', 'Escribe el abono y elige la caja arriba.', 'error');
+      cuerpo = { id: crypto.randomUUID(), importe, forma_pago: $('mover-forma').value, caja };
+    }
+    const intento = { ...movimiento, cuerpo };
+    try { localStorage.setItem(CLAVE_MOVIMIENTO, JSON.stringify(intento)); }
+    catch { return decir('mover-aviso', 'No se pudo conservar el intento. Habilita la memoria del navegador antes de cobrar.', 'error'); }
+    movimiento = intento;
+  }
+  moviendo = true;
+  $('mover-guardar').disabled = true;
+  for (const id of ['mover-codigo', 'mover-cantidad', 'mover-importe', 'mover-forma']) $(id).disabled = true;
+  const intento = movimiento;
+  let r, datos;
+  try {
+    r = await fetch(`/api/pedidos/${intento.folio}/${intento.tipo === 'pieza' ? 'piezas' : 'abonos'}`, {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(intento.cuerpo),
+    });
+    datos = await r.json();
+  } catch { /* resultado desconocido: conservar el intento */ }
+  moviendo = false;
+  if (!r || !datos || r.status >= 500) {
+    $('recuperar-movimiento').hidden = false;
+    $('mover-guardar').disabled = false;
+    $('mover-guardar').textContent = 'Reintentar el mismo movimiento';
+    return decir('mover-aviso', 'Resultado sin confirmar. Reintenta aquí; el mismo ID evita duplicados. No recibas otra vez el dinero.', 'error');
+  }
+  if (!r.ok && ![400, 404, 409].includes(r.status)) {
+    $('mover-guardar').disabled = false;
+    return decir('mover-aviso', datos.error ?? 'Revisa tu sesión y reintenta el mismo movimiento.', 'error');
+  }
+  try { localStorage.removeItem(CLAVE_MOVIMIENTO); } catch { /* repetir el ID seguirá siendo seguro */ }
+  movimiento = null;
+  $('recuperar-movimiento').hidden = true;
+  $('dlg-mover').close();
+  decir('aviso-lista', r.ok ? `Movimiento de P-${intento.folio} registrado.${datos.viernes_envio ? ` Liquidado: viernes ${fecha(datos.viernes_envio + 'T12:00:00-06:00')}.` : ''}` : datos.error, r.ok ? 'ok' : 'error');
+  await cargarLista();
+  await cargarCatalogo();
 });
 
 pintar();
