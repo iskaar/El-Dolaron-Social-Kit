@@ -74,7 +74,8 @@ async function buscar(mas = false) {
     consulta = $('consulta').value.trim(); siguiente = null; $('resultados').replaceChildren();
     $('mas').hidden = true; document.body.classList.remove('con-ficha');
   }
-  foco();
+  // En celular, enfocar tras leer con la cámara abre el teclado encima del resultado.
+  if (matchMedia('(min-width:1000px)').matches) foco();
   const q = consulta;
   if (!q) return mensaje('Escribe un código o el nombre de la pieza.');
   $('mas').disabled = true;
