@@ -28,6 +28,75 @@
       "background": "transparent"
     },
     {
+      "file": "01-Logos/el-dolaron-logo-horizontal-negro.png",
+      "title": "Logo horizontal, negro",
+      "description": "Una tinta negra sobre fondo claro: sello, serigrafía, fotocopia, uniforme. Derivado del logo oficial (misma geometría): la etiqueta y «Dolarón» son tinta; las letras «EL», el contorno blanco y el exterior son transparentes. Generado con docs/marca/generar_variantes.py.",
+      "width": 2056,
+      "height": 537,
+      "format": "PNG",
+      "background": "transparent"
+    },
+    {
+      "file": "01-Logos/el-dolaron-logo-horizontal-blanco.png",
+      "title": "Logo horizontal, blanco",
+      "description": "Una tinta blanca sobre azul #16366B, negro o foto oscura (tarjeta /vender, bolsa, fondos oscuros). Mismo recorte que la versión negra: las letras «EL» dejan ver el fondo. Generado con docs/marca/generar_variantes.py.",
+      "width": 2056,
+      "height": 537,
+      "format": "PNG",
+      "background": "transparent"
+    },
+    {
+      "file": "01-Logos/el-dolaron-logo-horizontal-azul.png",
+      "title": "Logo horizontal, azul",
+      "description": "Una tinta azul #16366B sobre fondo claro: serigrafía o sello de una sola tinta. Mismo recorte que la versión negra. Generado con docs/marca/generar_variantes.py.",
+      "width": 2056,
+      "height": 537,
+      "format": "PNG",
+      "background": "transparent"
+    },
+    {
+      "file": "01-Logos/el-dolaron-logo-vertical-negro.png",
+      "title": "Logo vertical, negro",
+      "description": "Versión de una tinta negra del logo vertical, para formatos cuadrados o altos sobre fondo claro. Letras «EL» transparentes. Generado con docs/marca/generar_variantes.py.",
+      "width": 1711,
+      "height": 996,
+      "format": "PNG",
+      "background": "transparent"
+    },
+    {
+      "file": "01-Logos/el-dolaron-logo-vertical-blanco.png",
+      "title": "Logo vertical, blanco",
+      "description": "Versión de una tinta blanca del logo vertical, para fondos azules, negros u oscuros. Letras «EL» transparentes. Generado con docs/marca/generar_variantes.py.",
+      "width": 1711,
+      "height": 996,
+      "format": "PNG",
+      "background": "transparent"
+    },
+    {
+      "file": "01-Logos/el-dolaron-icono-el-negro.png",
+      "title": "Ícono «EL», negro",
+      "description": "Etiqueta «EL» en una tinta negra para tamaños muy pequeños sobre fondo claro; las letras son transparentes. Generado con docs/marca/generar_variantes.py.",
+      "width": 414,
+      "height": 396,
+      "format": "PNG",
+      "background": "transparent"
+    },
+    {
+      "file": "01-Logos/el-dolaron-icono-el-blanco.png",
+      "title": "Ícono «EL», blanco",
+      "description": "Etiqueta «EL» en una tinta blanca para tamaños muy pequeños sobre fondo oscuro; las letras son transparentes. Generado con docs/marca/generar_variantes.py.",
+      "width": 414,
+      "height": 396,
+      "format": "PNG",
+      "background": "transparent"
+    },
+    {
+      "file": "05-Guia-y-textos/Manual-de-marca.html",
+      "title": "Manual de marca",
+      "description": "Esencia, logo y cuándo usar cada versión, color, tipografía, voz, datos oficiales y aplicaciones (Issue #433). Referencia imágenes del kit por ruta relativa: abrirlo dentro del repositorio.",
+      "format": "HTML"
+    },
+    {
       "file": "02-Perfiles-y-portadas/el-dolaron-perfil-cuadrado.png",
       "title": "Foto de perfil",
       "description": "Mismo avatar para Instagram, Facebook, TikTok y WhatsApp; centrar al recortar en círculo.",
@@ -79,7 +148,7 @@
       "width": 1254,
       "height": 1254,
       "format": "PNG",
-      "background": "opaque white"
+      "background": "opaque"
     },
     {
       "file": "04-Historias/el-dolaron-producto-historia-9x16.png",
