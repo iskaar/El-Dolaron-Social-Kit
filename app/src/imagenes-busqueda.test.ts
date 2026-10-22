@@ -84,7 +84,7 @@ test('páginas sin imagen, bloqueadas, repetidas o inseguras se omiten; error Ve
   assert.equal(llamadas, 1);
 });
 
-test('Usar esta guarda con content-type, conserva la pieza y habilita catálogo, ML, recortes y reutilización del UPC', async (t) => {
+test('Usar esta guarda con content-type, conserva la pieza y habilita catálogo, ML, reutilización del UPC y sin quitar fondo (#423)', async (t) => {
   const p = preparar();
   const antes = p.db.prepare('select nombre, marca, precio, stock, estado_analisis, estado_fisico, codigo from productos where id=?').get(PRODUCTO);
   t.mock.method(globalThis, 'fetch', async (url: string) => { assert.equal(String(url), IMAGEN); return foto(); });
@@ -107,7 +107,8 @@ test('Usar esta guarda con content-type, conserva la pieza y habilita catálogo,
   p.db.prepare("insert into config (clave,valor) values ('recortes_activo','1')").run();
   let recortes = 0;
   p.env.IMAGES = { input() { recortes++; return { transform() { return { output: async () => foto() }; } }; } } as never;
-  await procesarRecortes(p.env); assert.equal(recortes, 1);
+  await procesarRecortes(p.env); assert.equal(recortes, 0);
+  assert.equal(p.db.prepare("select recorte_estado from productos where codigo='ED-000001'").get()?.recorte_estado, 'original');
 });
 
 test('foto ya puesta → 409; FEP, vendedor, portal y cajero quedan fuera; capturista sí puede', async (t) => {
