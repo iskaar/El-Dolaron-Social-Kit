@@ -26,7 +26,8 @@ Más adelante: quitar la etiqueta física y cobrar con lectores y teléfonos (fu
 
 ## Cómo funciona
 
-Extensión de imágenes de referencia: [Issue #367 y preparación](IMAGENES-UPC.md).
+Extensión de imágenes de referencia y copia de imágenes confirmadas a R2
+(#367 y Fase 1 de #413): [flujo y preparación](IMAGENES-UPC.md).
 La clave histórica del manifiesto sigue normalizada; las nuevas capturas conservan
 el código completo leído, con sus ceros iniciales, en `productos.upc`.
 
@@ -101,5 +102,5 @@ que aún se identifica o espera foto conserva − y + (en 0 se cancela) y no det
 - Cobrar en caja con el UPC de fábrica (hoy la caja lee `ED-`/bandas). Es lo que permite
   medir qué se vende y, después, quitar la etiqueta física.
 - "Calor" del producto (velocidad de venta) y rebajas por antigüedad.
-- Bajar fotos de Target para Mercado Libre (son imágenes de Target).
+- Buscar candidatas por marca y nombre fuera del manifiesto (Fase 2 de #413).
 - Tallas desde la descripción ("Black 46C", "XL").

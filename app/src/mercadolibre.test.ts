@@ -119,7 +119,7 @@ function instalar(sim: SimML) {
     const u = new URL(String(entrada));
     assert.equal(u.origin, 'https://api.mercadolibre.com', 'solo se habla con la API de ML');
     const cuerpo = init.body instanceof URLSearchParams ? Object.fromEntries(init.body)
-      : init.body instanceof FormData ? { archivo: (init.body.get('file') as File).size }
+      : init.body instanceof FormData ? { archivo: (init.body.get('file') as File).size, tipo: (init.body.get('file') as File).type }
       : init.body ? JSON.parse(String(init.body)) : undefined;
     const llamada = { metodo: init.method ?? 'GET', ruta: u.pathname + u.search, cuerpo, auth: new Headers(init.headers).get('authorization') };
     sim.llamadas.push(llamada);
@@ -383,6 +383,15 @@ test('preparar con categoria_id: usa esa categoría y sigue ofreciendo las suger
 });
 
 /* ---------- publicar ---------- */
+
+test('publicar conserva el tipo de la imagen guardada en R2 (#413)', () => conML(async (t) => {
+  const id = pieza(t);
+  await t.env.FOTOS.put(`fotos/${id}.jpg`, new Uint8Array([1, 2, 3]), { httpMetadata: { contentType: 'image/png' } });
+  await publicarPieza(t, id);
+  const [subida] = t.sim.de('POST', /^\/pictures\/items\/upload$/);
+  assert.equal(subida.cuerpo.tipo, 'image/png');
+  assert.equal(subida.cuerpo.archivo, 3);
+}));
 
 test('publicar (modelo clásico): foto de R2, título, precio en pesos, guía y descripción', async () => {
   await conML(async (t) => {

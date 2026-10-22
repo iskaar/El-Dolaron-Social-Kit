@@ -9,7 +9,7 @@ import { analizarBorrador, identificarUpc, pesosDeLista, modeloPorDefecto, type 
 import { fichaDeManifiesto, normalizarUpc, precioListaMxn, type FichaManifiesto } from './manifiesto.ts';
 import { codigoLeido, SIN_CODIGO } from '../public/upc.js';
 import { ESTADOS } from '../public/estados.js';
-import { imagenGuardada, rutaImagenUpc } from './imagenes-upc.ts';
+import { guardarImagenComoFoto, imagenGuardada, rutaImagenUpc } from './imagenes-upc.ts';
 import { PRENDAS_ROPA, PRECIOS_ROPA } from '../public/ropa.js';
 import { procesarColaRopa, rutaRopaAdmin } from './ropa-ia.ts';
 import { calcularPrecio, ajustarManual, esDestinoBanda, prefijoParaFamilia, MONTOS_BANDA, type Destino } from './precio.ts';
@@ -546,7 +546,7 @@ async function buscarEnManifiesto(upcCrudo: string, env: Env): Promise<Response>
 }
 
 /** Alta de una pieza escaneada: todo sale del manifiesto menos la cantidad y el estado. */
-async function capturaUpcGuardada(id: string, leido: string, env: Env): Promise<Response | null> {
+async function capturaUpcGuardada(id: string, leido: string, env: Env, ctx?: ExecutionContext): Promise<Response | null> {
   const existente = await env.DB.prepare('select id, upc, nombre, precio, stock, propietario, estado_analisis from productos where id = ?')
     .bind(id).first<{ id: string; upc: string | null; propietario: string; estado_analisis: string }>();
   if (!existente) return null;
@@ -556,16 +556,17 @@ async function capturaUpcGuardada(id: string, leido: string, env: Env): Promise<
     and estado_analisis = 'listo' and propietario = 'dolaron' and destino not like 'banda%'`)
     .bind(id).run();
   const { propietario: _propietario, ...guardada } = existente;
+  if (ctx) ctx.waitUntil(guardarImagenComoFoto(leido, env));
   return json(guardada, 201);
 }
 
-async function capturarPorUpc(request: Request, env: Env, correo: string): Promise<Response> {
+async function capturarPorUpc(request: Request, env: Env, correo: string, ctx?: ExecutionContext): Promise<Response> {
   const cuerpo = (await request.json().catch(() => null)) as Record<string, unknown> | null;
   if (!cuerpo) return json({ error: 'Datos inválidos.' }, 400);
   const leido = codigoLeido(cuerpo.upc);
   if (!normalizarUpc(leido)) return json({ error: 'Código de barras inválido.' }, 400);
   if (typeof cuerpo.id !== 'string' || !UUID.test(cuerpo.id)) return json({ error: 'Identificador inválido.' }, 400);
-  const existente = await capturaUpcGuardada(cuerpo.id, leido, env);
+  const existente = await capturaUpcGuardada(cuerpo.id, leido, env, ctx);
   if (existente) return existente;
   const stock = Number(cuerpo.stock);
   if (!Number.isInteger(stock) || stock < 1 || stock > 999) return json({ error: 'Cantidad inválida.' }, 400);
@@ -587,7 +588,7 @@ async function capturarPorUpc(request: Request, env: Env, correo: string): Promi
     values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'listo', 'etiqueta', 'dolaron') on conflict (id) do nothing`)
     .bind(cuerpo.id, leido, nombre, ficha.marca.trim().slice(0, 60), categoria, precioLista, precio, estado, stock,
       semanaIngreso(ahora), correo, ahora.toISOString(), ahora.toISOString()).run();
-  return (await capturaUpcGuardada(cuerpo.id, leido, env)) ?? json({ error: 'La captura cambió. Vuelve a intentarlo.' }, 409);
+  return (await capturaUpcGuardada(cuerpo.id, leido, env, ctx)) ?? json({ error: 'La captura cambió. Vuelve a intentarlo.' }, 409);
 }
 
 /**
@@ -1998,7 +1999,7 @@ async function servirFoto(id: string, env: Env): Promise<Response> {
   }
   return new Response(objeto.body, {
     headers: {
-      'content-type': 'image/jpeg',
+      'content-type': objeto.httpMetadata?.contentType || 'image/jpeg',
       'cache-control': 'private, max-age=3600',
     },
   });
@@ -2101,7 +2102,7 @@ export default {
       if (respuestaRopaIA) return respuestaRopaIA;
       const respuestaRecortes = await rutaRecortesAdmin(request, env, pathname);
       if (respuestaRecortes) return respuestaRecortes;
-      const respuestaImagen = await rutaImagenUpc(request, env, pathname, correo);
+      const respuestaImagen = await rutaImagenUpc(request, env, pathname, correo, ctx);
       if (respuestaImagen) return respuestaImagen;
       if (pathname === '/api/cajeros' && request.method === 'GET') return await listarCajeros(env);
       if (pathname === '/api/cajeros/entrar' && request.method === 'POST') return await entrar(request, env);
@@ -2312,7 +2313,7 @@ export default {
         return await capturarManual(request, env, correo);
       }
       if (pathname === '/api/borradores/upc' && request.method === 'POST') {
-        return await capturarPorUpc(request, env, correo);
+        return await capturarPorUpc(request, env, correo, ctx);
       }
       if (pathname === '/api/borradores/upc/buscar' && request.method === 'POST') return await capturarDesconocido(request, env, ctx, correo);
       if (pathname === '/api/borradores/upc/manual' && ['POST', 'PATCH'].includes(request.method)) return await capturarManualEscaner(request, env, correo);

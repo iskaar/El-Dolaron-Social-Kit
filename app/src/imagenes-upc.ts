@@ -20,7 +20,7 @@ const referencia = (r: Referencia) => ({
   codigo_verificado: !!r.upc_fuente, confirmada: !!r.confirmado_en,
 });
 
-async function leerTexto(cuerpo: ReadableStream<Uint8Array> | null, maximo: number) {
+async function leerCuerpo(cuerpo: ReadableStream<Uint8Array> | null, maximo: number) {
   if (!cuerpo) throw new Error('Falta el cuerpo.');
   const lector = cuerpo.getReader(), partes: Uint8Array[] = [];
   let bytes = 0;
@@ -31,9 +31,91 @@ async function leerTexto(cuerpo: ReadableStream<Uint8Array> | null, maximo: numb
     if (bytes > maximo) { await lector.cancel(); throw new Error('Cuerpo demasiado grande.'); }
     partes.push(value);
   }
-  return await new Blob(partes).text();
+  if (!bytes) throw new Error('Cuerpo vacío.');
+  return new Blob(partes);
 }
+const leerTexto = async (cuerpo: ReadableStream<Uint8Array> | null, maximo: number) => (await leerCuerpo(cuerpo, maximo)).text();
 const leerJson = async (cuerpo: ReadableStream<Uint8Array> | null, maximo: number) => JSON.parse(await leerTexto(cuerpo, maximo));
+
+const FOTO_MAX_BYTES = 6 * 1024 * 1024;
+
+/** Caché por referencia; la reserva condicional en R2 evita dos descargas simultáneas. */
+async function fotoDeReferencia(r: Referencia, env: Env) {
+  const hash = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(r.url));
+  const key = `imagenes-upc/${r.upc}/${Array.from(new Uint8Array(hash), (b) => b.toString(16).padStart(2, '0')).join('')}`;
+  const hasta = Date.now() + 15_000;
+  while (Date.now() < hasta) {
+    const foto = await env.FOTOS.get(key);
+    if (foto && !foto.customMetadata?.pendiente) return { key, foto };
+    await foto?.body.cancel();
+    if (foto && Number(foto.customMetadata?.pendiente) > Date.now()) {
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      continue;
+    }
+    // Una reserva abandonada vence; un fallo se libera para el siguiente escaneo o confirmación.
+    const reserva = await env.FOTOS.put(key, crypto.randomUUID(), {
+      onlyIf: foto ? { etagMatches: foto.etag } : { etagDoesNotMatch: '*' },
+      customMetadata: { pendiente: String(Date.now() + 15_000) },
+    });
+    if (!reserva) continue;
+    try {
+      const respuesta = await fetch(r.url, {
+        redirect: 'manual', signal: AbortSignal.timeout(10_000),
+        headers: { 'user-agent': 'ElDolaron-escaner/1.0 (+https://viste.com.mx)', accept: 'image/*' },
+      });
+      const tipo = respuesta.headers.get('content-type')?.split(';')[0].trim().toLowerCase() ?? '';
+      if (respuesta.status !== 200 || !/^image\/[a-z0-9.+-]+$/.test(tipo)
+          || Number(respuesta.headers.get('content-length')) > FOTO_MAX_BYTES) {
+        await respuesta.body?.cancel();
+        throw new Error('Respuesta de imagen inválida.');
+      }
+      const cuerpo = await leerCuerpo(respuesta.body, FOTO_MAX_BYTES);
+      await env.FOTOS.put(key, cuerpo, { onlyIf: { etagMatches: reserva.etag }, httpMetadata: { contentType: tipo } });
+    } catch (error) {
+      await env.FOTOS.put(key, crypto.randomUUID(), { onlyIf: { etagMatches: reserva.etag }, customMetadata: { pendiente: '0' } });
+      throw error;
+    }
+  }
+  throw new Error('La imagen sigue descargándose. Reintenta al escanear.');
+}
+
+/** Solo añade foto: ni análisis, ni precio, ni stock. La confirmación queda en D1 para reintentar. */
+export async function guardarImagenComoFoto(upc: string, env: Env): Promise<void> {
+  try {
+    const r = await env.DB.prepare(`select i.* from imagenes_upc i join manifiesto m on m.upc = i.upc and m.tcin = i.tcin
+      where i.upc = ? and i.confirmado_en <> ''`).bind(normalizarUpc(upc)).first<Referencia>();
+    if (!r || !imagenValida(r.url)) return;
+    const { key, foto } = await fotoDeReferencia(r, env);
+    const bytes = await foto.arrayBuffer();
+    const { results } = await env.DB.prepare(`select id from productos where ltrim(upc, '0') = ?
+      and propietario = 'dolaron' and foto_key = '' and estado_analisis <> 'descartado'`).bind(r.upc).all<{ id: string }>();
+    for (const { id } of results) {
+      const fotoKey = `fotos/${id}.jpg`;
+      const creada = await env.FOTOS.put(fotoKey, bytes, {
+        onlyIf: { etagDoesNotMatch: '*' }, httpMetadata: foto.httpMetadata, customMetadata: { imagen_upc: key },
+      });
+      // Recupera un put cuyo UPDATE falló o cuya referencia cambió; nunca pisa una foto propia en vuelo.
+      if (!creada) {
+        const existente = await env.FOTOS.get(fotoKey);
+        await existente?.body.cancel();
+        if (!existente?.customMetadata?.imagen_upc) continue;
+        if (existente.customMetadata.imagen_upc !== key && !await env.FOTOS.put(fotoKey, bytes, {
+          onlyIf: { etagMatches: existente.etag }, httpMetadata: foto.httpMetadata, customMetadata: { imagen_upc: key },
+        })) continue;
+      }
+      // «Ropa» con referencia confirmada tampoco debe entrar a la cola que renombra prendas.
+      await env.DB.prepare(`update productos set foto_key = ?, actualizado_en = ?,
+          recorte_estado = case when recorte_estado = 'original' then 'original' else null end, recorte_fecha = null, recorte_revision = null,
+          ropa_ia_estado = case when categoria = 'ropa' and nombre = 'Ropa' and ropa_ia_estado is null then 'descartado' else ropa_ia_estado end
+        where id = ? and ltrim(upc, '0') = ? and propietario = 'dolaron' and foto_key = '' and estado_analisis <> 'descartado'
+          and exists (select 1 from imagenes_upc i join manifiesto m on m.upc = i.upc and m.tcin = i.tcin
+            where i.upc = ? and i.url = ? and i.tcin = ? and i.confirmado_en <> '')`)
+        .bind(fotoKey, new Date().toISOString(), id, r.upc, r.upc, r.url, r.tcin).run();
+    }
+  } catch (error) {
+    console.error(JSON.stringify({ mensaje: 'imagen confirmada sin foto', upc, error: error instanceof Error ? error.message.slice(0, 200) : 'error desconocido' }));
+  }
+}
 
 const VERIFICACION = 'Target pidió verificación. Abre «Ver producto original», guarda la imagen y usa «Subir foto», o toma una.';
 const PAUSA_MS = 30 * 60_000;
@@ -62,7 +144,7 @@ export async function imagenGuardada(upc: string, env: Env) {
 }
 
 /** Se llama después de verificar host, sesión y rol en el Worker. */
-export async function rutaImagenUpc(request: Request, env: Env, pathname: string, correo: string): Promise<Response | null> {
+export async function rutaImagenUpc(request: Request, env: Env, pathname: string, correo: string, ctx: ExecutionContext): Promise<Response | null> {
   const ruta = /^\/api\/manifiesto\/([^/]+)\/imagen(\/catalogo)?$/.exec(pathname);
   if (!ruta) return null;
   let upc = '';
@@ -74,7 +156,7 @@ export async function rutaImagenUpc(request: Request, env: Env, pathname: string
       where ltrim(upc, '0') = ? and propietario = 'dolaron' and foto_key <> '' and estado_analisis <> 'descartado'
       order by actualizado_en desc limit 1`).bind(upc).first<{ foto_key: string }>();
     const foto = pieza && await env.FOTOS.get(pieza.foto_key);
-    return foto ? new Response(foto.body, { headers: { 'content-type': 'image/jpeg', 'cache-control': 'private, max-age=300', 'x-content-type-options': 'nosniff' } })
+    return foto ? new Response(foto.body, { headers: { 'content-type': foto.httpMetadata?.contentType || 'image/jpeg', 'cache-control': 'private, max-age=300', 'x-content-type-options': 'nosniff' } })
       : json({ error: 'Foto no encontrada.' }, 404);
   }
   if (!['GET', 'POST', 'PUT'].includes(request.method)) return json({ error: 'Método no permitido.' }, 405);
@@ -93,6 +175,7 @@ export async function rutaImagenUpc(request: Request, env: Env, pathname: string
     const { meta } = await env.DB.prepare(`update imagenes_upc set confirmado_por = ?, confirmado_en = ?
       where upc = ? and url = ? and tcin = ? and exists (select 1 from manifiesto m where m.upc = imagenes_upc.upc and m.tcin = imagenes_upc.tcin)`)
       .bind(correo, new Date().toISOString(), upc, cuerpo.url, cuerpo.tcin).run();
+    if (meta.changes) ctx.waitUntil(guardarImagenComoFoto(upc, env));
     return meta.changes ? json({ imagen: await imagenGuardada(upc, env) }) : json({ error: 'La imagen cambió. Vuelve a buscarla.' }, 409);
   }
 

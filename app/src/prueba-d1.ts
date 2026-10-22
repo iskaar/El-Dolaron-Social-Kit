@@ -53,14 +53,23 @@ function d1(db: DatabaseSync) {
 /** R2 en memoria: lo minimo que usa la app (get/put/delete). */
 function r2() {
   const objetos = new Map<string, ArrayBuffer>();
+  const metadatos = new Map<string, { etag: string; httpMetadata?: R2HTTPMetadata; customMetadata?: Record<string, string> }>();
   return {
     objetos,
     async get(llave: string) {
       const datos = objetos.get(llave);
-      return datos ? { body: new Response(datos).body, arrayBuffer: async () => datos.slice(0) } : null;
+      return datos ? { ...metadatos.get(llave), body: new Response(datos).body!, arrayBuffer: async () => datos.slice(0) } : null;
     },
-    async put(llave: string, valor: BodyInit) { objetos.set(llave, await new Response(valor).arrayBuffer()); },
-    async delete(llave: string) { objetos.delete(llave); },
+    async put(llave: string, valor: BodyInit, opciones?: R2PutOptions) {
+      const datos = await new Response(valor).arrayBuffer();
+      const condicion = opciones?.onlyIf as R2Conditional | undefined;
+      if (condicion?.etagDoesNotMatch === '*' && objetos.has(llave)) return null;
+      if (condicion?.etagMatches && metadatos.get(llave)?.etag !== condicion.etagMatches) return null;
+      const meta = { etag: crypto.randomUUID(), httpMetadata: opciones?.httpMetadata as R2HTTPMetadata | undefined, customMetadata: opciones?.customMetadata };
+      objetos.set(llave, datos); metadatos.set(llave, meta);
+      return meta;
+    },
+    async delete(llave: string) { objetos.delete(llave); metadatos.delete(llave); },
   };
 }
 
