@@ -82,7 +82,7 @@ test('el ticket sale en pedazos de a lo mas PEDAZO bytes, completo y en orden', 
   assert.ok(pedazos.length > 1, 'un ticket largo va en varios pedazos');
   assert.ok(pedazos.every((p) => p.length <= PEDAZO));
   const texto = new TextDecoder().decode(Uint8Array.from(pedazos.flatMap((p) => [...p])));
-  assert.match(texto, /Pieza de prueba 0\n[\s\S]*Pieza de prueba 59\n[\s\S]*Gracias por su compra/);
+  assert.match(texto, /Pieza de prueba 0\n[\s\S]*Pieza de prueba 59\n[\s\S]*Gracias por tu compra/);
 });
 
 test('tras una falla, el cajon vuelve a abrir en el siguiente cobro sin recargar', async () => {
