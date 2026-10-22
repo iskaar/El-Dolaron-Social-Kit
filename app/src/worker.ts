@@ -94,6 +94,7 @@ interface FilaBorrador {
 const RUTAS_VENDEDOR = new Set(['/captura', '/foto.js', '/tallas.js', '/api/salud', '/sin-acceso', '/api/yo',
   // Escanear del manifiesto (Issue #365): el telefono ve nombre y precio de lo que escanea, nada mas.
   '/escanear', '/categorias.js', '/upc.js', '/cola-fotos.js', '/estados.js',
+  '/inventario-capturar.js', '/inventario-ropa.js', '/envio-etiquetas.js', '/semana.js',
   '/inventario', '/inventario.css', '/inventario.js', '/inventario-ui.js', '/lector.js', '/ficha.js',
   '/venta.js', '/etiquetera.js', '/impresora.js', '/camara.js', '/vendor/html5-qrcode.min.js', '/ropa.js']);
 const CORRECCION_CAPTURA = /^\/api\/borradores\/([^/]+)\/(existencia|talla|revision)$/;

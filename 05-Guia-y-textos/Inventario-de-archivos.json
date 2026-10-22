@@ -337,6 +337,18 @@
       "title": "Etiquetas y bandas en Inventario",
       "description": "Impresión compartida, conserva marcas y calibración de main (#446).",
       "format": "JS"
+    },
+    {
+      "file": "app/public/inventario-capturar.js",
+      "title": "Captura de inventario",
+      "description": "Captura integrada con los endpoints existentes y cámara remota (#446).",
+      "format": "JS"
+    },
+    {
+      "file": "app/public/inventario-ropa.js",
+      "title": "Ropa y rodillo de tallas",
+      "description": "Captura integrada con los endpoints existentes y cámara remota (#446).",
+      "format": "JS"
     }
   ],
   "version": "1.0"
