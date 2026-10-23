@@ -1615,7 +1615,10 @@ async function registrarVenta(request: Request, env: Env, ctx: ExecutionContext,
       return json({ error:'El folio ya pertenece a otra venta. Revisa la venta original antes de reintentar.' }, 409);
     const ganado = await env.DB.prepare(`select coalesce(sum(importe), 0) as importe from dolarones_movimientos
       where venta_id = ? and tipo = 'compra'`).bind(id).first<{ importe:number }>();
+    const referido = await env.DB.prepare(`select coalesce(sum(importe), 0) as importe from dolarones_movimientos
+      where venta_id = ? and tipo = 'referido_nuevo'`).bind(id).first<{ importe:number }>();
     const respuesta = json({ id, duplicada:true, imprimir_en:previo.imprimir_en, ganados:ganado?.importe ?? 0,
+      referido_liberado:referido?.importe ?? 0,
       anticipo:previo.anticipo, saldo_pedido:previo.pedido_id ? await saldoDe(env, previo.pedido_id) : null,
       vale_emitido:await valeDeVenta(env, id), vale_usado:await valeUsadoEnVenta(env, id) }, 200);
     respuesta.headers.set('cache-control', 'no-store');
@@ -1778,7 +1781,7 @@ async function registrarVenta(request: Request, env: Env, ctx: ExecutionContext,
   // Si una pieza publicada en Mercado Libre se agoto, se pausa alla (D1 manda). Despues de responder.
   ctx.waitUntil(conciliarSeguro(env, { productoIds: preparado.lineas.filter((l) => !l.sinInventario).map((l) => l.producto_id) }));
   const respuesta = json({
-    id, total, descuento, dolarones, imprimir_en:imprimirEn, cambio: Math.max(0, efectivo - aPagar), ganados: recompensa.ganados,
+    id, total, descuento, dolarones, imprimir_en:imprimirEn, cambio: Math.max(0, efectivo - aPagar), ganados: recompensa.ganados, referido_liberado: recompensa.referido ?? 0,
     anticipo, saldo_pedido: pedidoId ? await saldoDe(env, pedidoId) : null,
     saldo: clienteId ? await saldo(env, clienteId, ahora) : null,
     vale_emitido:vale.emitido,

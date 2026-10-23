@@ -44,6 +44,11 @@
     <p>Completa tu membresía. El registro es gratuito y voluntario.</p>
     <form id="registro-form">
       <label for="nombre">Tu nombre</label><input id="nombre" autocomplete="name" minlength="2" maxlength="80" required>
+      <div id="referido-campo" hidden>
+        <label for="referido">Código de quien te invitó (opcional)</label>
+        <input id="referido" autocomplete="off" autocapitalize="characters" maxlength="20" placeholder="Ej. DOL42K">
+        <p class="nota">Con su código recibes 50 D al unirte.</p>
+      </div>
       <label class="opcion"><input id="acepta" type="checkbox" required>
         Leí y acepto las bases de Dolarones y el aviso de privacidad que aparecen abajo.</label>
       <label class="opcion"><input id="mayor-edad" type="checkbox" required>
@@ -77,6 +82,17 @@
       <p id="codigo-legible"></p><p id="codigo-importe"></p>
       <p id="codigo-tiempo" role="status"></p>
       <p class="nota">Un solo uso para gastar. No compartas este código. Si vence, genera otro.</p>
+    </section>
+    <section id="referidos" class="referidos" hidden aria-labelledby="titulo-referidos">
+      <h2 id="titulo-referidos">Invita a un conocido</h2>
+      <p id="ref-mio" hidden></p>
+      <div id="ref-invita" hidden>
+        <p>Quien se une con tu código recibe 50 D. Cuando haga su primera compra de $150 o más en la tienda, los dos ganan 25 D.</p>
+        <strong id="ref-codigo" class="codigo-referido"></strong>
+        <p id="ref-cuenta" class="nota"></p>
+        <a id="ref-whatsapp" class="boton-enlace" target="_blank" rel="noopener">Enviar por WhatsApp</a>
+        <button id="ref-copiar" class="secundario" type="button">Copiar mi enlace</button>
+      </div>
     </section>
     <section id="novedades" class="novedades" hidden aria-labelledby="titulo-novedades">
       <h2 id="titulo-novedades">Lo nuevo en tienda</h2>
