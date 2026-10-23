@@ -18,7 +18,7 @@ export function crearCaptura({ api, imprimir, cambiar=()=>{}, enLinea=()=>naviga
     const abierta=actual;
     const guardada=await api('/api/borradores/upc',{id:abierta.id,upc:abierta.upc,stock:abierta.cantidad,estado_fisico:abierta.estado});
     actual={...abierta,tipo:'guardada',pieza:guardada};pintar();
-    const salio=guardada.estado_analisis&&guardada.estado_analisis!=='listo'?false:await imprimir(guardada.id,abierta.cantidad);actual.faltaEtiqueta=!salio;pintar();return guardada;
+    const salio=guardada.estado_analisis&&guardada.estado_analisis!=='listo'?false:await imprimir(guardada.id,abierta.cantidad,{reimprimir:!!guardada.existente});actual.faltaEtiqueta=!salio;pintar();return guardada;
   }
   async function leer(codigo,mas=false){
     if(!enLinea())throw new Error('Sin red · toma foto');
@@ -45,7 +45,7 @@ export function crearCaptura({ api, imprimir, cambiar=()=>{}, enLinea=()=>naviga
     ajuste??={pieza:p,cuerpo:{id:uuid(),delta:1,motivo:'entrada'},confirmado:false};
     if(!ajuste.confirmado){const r=await api(`/api/piezas/${p.id}/existencia`,ajuste.cuerpo);ajuste.confirmado=true;ajuste.pieza={...p,stock:r.despues};}
     actual={tipo:'existente',pieza:ajuste.pieza};pintar();
-    const salio=ajuste.pieza.estado_analisis&&ajuste.pieza.estado_analisis!=='listo'?false:await imprimir(p.id,1);actual.faltaEtiqueta=!salio;
+    const salio=ajuste.pieza.estado_analisis&&ajuste.pieza.estado_analisis!=='listo'?false:await imprimir(p.id,1,{reimprimir:true});actual.faltaEtiqueta=!salio;
     ajuste=null;pintar();return actual;
   }
   const serial=(fn)=>{const resultado=fila.then(fn);fila=resultado.catch(()=>{});return resultado;};
@@ -85,11 +85,11 @@ export async function iniciar(ctx) {
     const motivo=falta||(pendienteFoto?'Espera la foto':'');bloquear(disparo,motivo);ayudaDisparo.textContent=motivo;
     if(!pc()){disparo.textContent=falta?falta.replace('Falta ','Elige '):'';disparo.setAttribute('aria-label',falta?disparo.textContent:'Tomar foto');}
   }
-  async function imprimir(id,n){if(!etiqueteraLista()||ctx.identidad.vendedor)return false;return ctx.imprimir([id],new Map([[id,n]]));}
+  async function imprimir(id,n,opciones){if(!etiqueteraLista())return false;return ctx.imprimir([id],new Map([[id,n]]),opciones);}
   const flujo=crearCaptura({api,imprimir,permiteSumar:dueno||ctx.identidad.usuario?.editar_inventario===true,permiteUpc:!ctx.identidad.usuario?.roles.includes('finanzas'),cambiar:pintar});
   async function recibirExistente(p){
     const a={tipo:'guardada',pieza:p,cantidad:p.sumadas,faltaEtiqueta:true};flujo.retomar(a);
-    if(p.estado_analisis==='listo'&&etiqueteraLista()&&!ctx.identidad.vendedor){a.faltaEtiqueta=!await imprimir(p.id,p.sumadas);flujo.retomar(a);}
+    if(p.estado_analisis==='listo'&&etiqueteraLista()){a.faltaEtiqueta=!await imprimir(p.id,p.sumadas,{reimprimir:true});flujo.retomar(a);}
     mensaje(`Ya existía · +${p.sumadas}${p.codigo?` a ${p.codigo}`:''}`,'aviso');
   }
 

@@ -88,7 +88,7 @@ export function resolverRepetida(origen, destino, { nodo, boton, hoja, api, mens
         c.append(nodo('p', `Reemplaza las ${movida.movidas} etiquetas de ${sale.codigo}.`),
           boton(`Imprimir ${movida.movidas} etiquetas de ${queda.codigo}`, async b => {
             b.setAttribute('aria-disabled','true');
-            try { if (await imprimir([queda.id],new Map([[queda.id,movida.movidas]]))) cerrar(); }
+            try { if (await imprimir([queda.id],new Map([[queda.id,movida.movidas]]),{ reimprimir:true })) cerrar(); }
             finally { b.setAttribute('aria-disabled','false'); }
           },'primario'), boton('Cerrar',cerrar));
         hoja('Reetiquetar',c);

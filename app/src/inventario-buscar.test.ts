@@ -47,13 +47,14 @@ test('tarjeta: código primero, nombre seguro, precio/UPC/sin foto, existencia y
   assert.equal(sinCodigo.children[0].tag, 'small'); assert.equal(sinCodigo.children[0].textContent, 'Sin código');
   assert.equal(sinCodigo.children[2].textContent, '$450.00 · sin foto');
   for (const pieza of [{ ...p, codigo: null }, { ...p, destino: 'banda_r19' }]) assert.equal(ui.resultado(pieza, undefined, true).children.length, 1);
-  assert.equal(tarjetas(undefined, true).resultado(p, undefined, true).children.length, 1);
+  // El capturista imprime desde su celular (#440, Isaac 23/10): en su host también aparece Reimprimir.
+  assert.equal(tarjetas(undefined, true).resultado(p, undefined, true).children.length, 2);
 });
 
 test('Reimprimir envía una copia, bloquea doble toque y conserva el botón de ficha como hermano (#446)', async () => {
   const envios: any[] = []; let terminar: (ok: boolean) => void = () => {};
-  const ui = tarjetas(async (ids: string[], copias: Map<string, number>) => {
-    envios.push({ ids: [...ids], copias: Array.from(copias, ([id, n]) => [id, n]) }); return new Promise<boolean>(r => { terminar = r; });
+  const ui = tarjetas(async (ids: string[], copias: Map<string, number>, opciones: unknown) => {
+    envios.push({ ids: [...ids], copias: Array.from(copias, ([id, n]) => [id, n]), opciones: { ...(opciones as object) } }); return new Promise<boolean>(r => { terminar = r; });
   });
   const li = ui.resultado(p, undefined, true), imprimir = li.children[1];
   assert.equal(imprimir.tag, 'button'); assert.equal(imprimir.textContent, 'Reimprimir');
@@ -64,7 +65,7 @@ test('Reimprimir envía una copia, bloquea doble toque y conserva el botón de f
   assert.equal(imprimir.getAttribute('aria-disabled'), 'true'); assert.equal(imprimir.getAttribute('aria-busy'), 'true');
   await imprimir.eventos.click(); assert.equal(envios.length, 1);
   terminar(true); await envio;
-  assert.deepEqual(envios, [{ ids: [p.id], copias: [[p.id, 1]] }]);
+  assert.deepEqual(envios, [{ ids: [p.id], copias: [[p.id, 1]], opciones: { reimprimir: true } }]);   // reimpresión explícita: sale aunque ya figure enviada
   assert.equal(imprimir.getAttribute('aria-disabled'), 'false'); assert.equal(imprimir.getAttribute('aria-busy'), 'false');
   assert.match(ui.$('estado').textContent, /Etiqueta enviada · ED-000123/); assert.deepEqual(ui.abiertas, []);
 });
