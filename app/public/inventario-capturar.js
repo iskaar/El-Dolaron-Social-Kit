@@ -58,7 +58,7 @@ export async function iniciar(ctx) {
   const tipo=nodo('div',undefined,'segmentado');tipo.setAttribute('role','group');tipo.setAttribute('aria-label','Tipo de pieza');
   let esRopa=localStorage.getItem('captura-modo')==='ropa',estado='nuevo',cantidad=1,pendienteFoto=false,consulta='',movil;
   const mercancia=boton('Mercancía',()=>elegirTipo(false)),prenda=boton('Ropa',()=>elegirTipo(true));tipo.append(mercancia,prenda);
-  const tablero=ropa({pc,mensaje,cambiar:()=>actualizarDisparo(true)});
+  const tablero=ropa({pc,mensaje,cambiar:()=>actualizarDisparo()});
   const grado=opciones(ESTADOS,estado,e=>{estado=e;flujo.estado(e);},'Grado');
   const contador=stepper(1,n=>cantidad=n,{nombre:'Piezas'});
   const lista=nodo('ul',undefined,'lista'),pieza=nodo('div'),remota=nodo('div',undefined,'solicitud-celular');
@@ -71,11 +71,14 @@ export async function iniciar(ctx) {
   derecha.append(pieza,disparo,remota,historia);
   const pie=nodo('p','Hoy: 0 piezas', 'ayuda pc');raiz.append(pie);
   let hoy=0;const textoHoy=()=>{pie.textContent=`Hoy: ${hoy} ${hoy===1?'pieza':'piezas'}`;};
-  function elegirTipo(ropa,avisar=true){esRopa=ropa;localStorage.setItem('captura-modo',ropa?'ropa':'mercancia');mercancia.setAttribute('aria-pressed',String(!ropa));prenda.setAttribute('aria-pressed',String(ropa));tablero.raiz.hidden=!ropa;if(ropa)tablero.sincronizar();actualizarDisparo(avisar);}
-  const motivoFalta=()=>esRopa&&!tablero.valores().talla?'Falta talla':esRopa&&!tablero.valores().precio_ropa?'Falta precio':'';
-  let faltaAviso=false;
-  const neutro=()=>{const f=motivoFalta();if(f)mensaje(f,'aviso');else mensaje(pc()?'Escanea o escribe':'Escanea o toma foto');};
-  function actualizarDisparo(avisar=false){const falta=motivoFalta();bloquear(disparo,falta||(pendienteFoto?'Espera la foto':''));if(avisar&&(falta||faltaAviso)){faltaAviso=!!falta;neutro();}}
+  function elegirTipo(ropa){esRopa=ropa;localStorage.setItem('captura-modo',ropa?'ropa':'mercancia');mercancia.setAttribute('aria-pressed',String(!ropa));prenda.setAttribute('aria-pressed',String(ropa));tablero.raiz.hidden=!ropa;if(ropa)tablero.sincronizar();actualizarDisparo();}
+  const ayudaDisparo=nodo('span','','solo-lector');ayudaDisparo.id='ayuda-disparo';ayudaDisparo.setAttribute('role','status');disparo.after(ayudaDisparo);disparo.setAttribute('aria-describedby',ayudaDisparo.id);
+  const neutro=()=>mensaje(pc()?'Escanea o escribe':'Escanea o toma foto');
+  function actualizarDisparo(){
+    const actual=flujo.actual(),falta=esRopa&&!actual?.upc&&actual?.tipo!=='existente'?tablero.faltante():'';
+    const motivo=falta||(pendienteFoto?'Espera la foto':'');bloquear(disparo,motivo);ayudaDisparo.textContent=motivo;
+    if(!pc()){disparo.textContent=falta?falta.replace('Falta ','Elige '):'';disparo.setAttribute('aria-label',falta?disparo.textContent:'Tomar foto');}
+  }
   async function imprimir(id,n){if(!etiqueteraLista()||ctx.identidad.vendedor)return false;return ctx.imprimir([id],new Map([[id,n]]));}
   const flujo=crearCaptura({api,imprimir,permiteSumar:dueno||ctx.identidad.usuario?.editar_inventario===true,permiteUpc:!ctx.identidad.usuario?.roles.includes('finanzas'),cambiar:pintar});
   async function recibirExistente(p){
@@ -92,7 +95,8 @@ export async function iniciar(ctx) {
     if(siguiente){const li=nodo('li');li.append(boton('Buscar más',()=>flujo.leer(consulta,true)));lista.append(li);}
     pieza.replaceChildren();
     if(pc())disparo.classList.toggle('primario',!actual);
-    else disparo.hidden=actual?.tipo==='nueva'||actual?.tipo==='sin-registro';
+    else disparo.hidden=false;
+    actualizarDisparo();
     if(!actual){if(!varias)vacioPieza();return;}
     const p=actual.pieza||actual.ficha;
     const carta=nodo('article',undefined,'tarjeta pieza-actual'),foto=nodo('div',undefined,'foto-pieza'),tarjeta=nodo('div');carta.append(foto,tarjeta);pieza.append(carta);
@@ -145,7 +149,7 @@ export async function iniciar(ctx) {
     for(const [k,t] of [['nombre','Nombre'],['marca','Marca'],['categoria','Categoría'],['estado_fisico','Estado'],['precio_lista','Precio de lista ($)'],['precio','Precio de venta ($)'],['destino','Destino']]){const l=nodo('label',t),input=nodo(['categoria','estado_fisico','destino'].includes(k)?'select':'input');if(k==='categoria'||k==='estado_fisico'||k==='destino'){const lista=k==='categoria'?CATEGORIAS:k==='estado_fisico'?ESTADOS:[['etiqueta','Etiqueta individual']];for(const [v,t]of lista){const o=nodo('option',t);o.value=v;input.append(o);}}else{input.maxLength=k==='nombre'?120:k==='marca'?60:12;}l.append(input);campos[k]=input;form.append(l);}
     let n=1;form.append(nodo('h3','Existencia inicial'),stepper(n,v=>n=v,{max:999,nombre:'Existencia inicial'}),boton('Guardar pieza',async()=>{if(enviando)return;const datos={id,nombre:campos.nombre.value,marca:campos.marca.value,categoria:campos.categoria.value,estado_fisico:campos.estado_fisico.value,stock:n,destino:campos.destino.value};for(const k of ['precio_lista','precio'])if(campos[k].value){const c=aCentavos(campos[k].value);if(c===null)throw new Error('Precio inválido');datos[k]=c;}enviando=true;try{await api('/api/borradores/manual',datos);cerrarHoja();mensaje('Pieza guardada','ok');}finally{enviando=false;}},'primario'));form.onsubmit=e=>e.preventDefault();hoja('Pieza sin foto',form);
   }
-  elegirTipo(esRopa,false);flujo.limpiar();
+  elegirTipo(esRopa);flujo.limpiar();
   addEventListener('offline',()=>{for(const b of pieza.querySelectorAll('button'))if(b.textContent.startsWith('+1'))bloquear(b,'Sin red: se suma al volver la señal');});
   addEventListener('online',()=>{for(const b of pieza.querySelectorAll('button'))if(b.textContent.startsWith('+1'))bloquear(b,'');});
   const interfaz = { abrir(){neutro();foco();void movil?.abrir();},neutro,leer:async(c)=>{consulta=c;await flujo.leer(c);if(flujo.actual()?.tipo==='existente')mensaje(`Ya existe · ×${flujo.actual().pieza.stock}`,'aviso');else if(!flujo.actual()){const n=lista.querySelectorAll('.resultado').length;mensaje(n?`${n} coincidencias`:'Sin coincidencias','aviso');}else if(flujo.actual()?.tipo==='nueva')mensaje(`${flujo.actual().ficha.nombre} ×${flujo.actual().cantidad}`,'ok');},pausar(){movil?.pausar();},flujo,

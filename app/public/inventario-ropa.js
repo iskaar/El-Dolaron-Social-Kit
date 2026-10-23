@@ -14,7 +14,7 @@ let numeroRodillo=0, edadSesion=EDADES_NINO.indexOf('4 años');
 export function rodillo(opciones, indice, cambiar, nombre) {
   const raiz=nodo('div',undefined,'rodillo'),id=`rodillo-${++numeroRodillo}`;
   raiz.setAttribute('role','listbox');raiz.setAttribute('aria-label',nombre);raiz.tabIndex=0;
-  const fila=()=>raiz.firstElementChild?.offsetHeight||48;
+  const fila=()=>raiz.firstElementChild?.offsetHeight||44;
   const pintar=()=>{[...raiz.children].forEach((r,i)=>{r.classList.toggle('elegida',i===indice);r.setAttribute('aria-selected',String(i===indice));});if(indice>=0)raiz.setAttribute('aria-activedescendant',`${id}-${indice}`);else raiz.removeAttribute('aria-activedescendant');};
   const elegir=i=>{if(i!==indice){indice=i;pintar();cambiar(i);}};
   for(const [i,texto] of opciones.entries()){
@@ -73,5 +73,6 @@ export function ropa({ pc, mensaje, cambiar=()=>{}, recordar=true, inicial={} })
     if(otra){const personalizada=!!valores.marca&&!MARCAS_ROPA.slice(0,4).includes(valores.marca);otra.textContent=personalizada?valores.marca:'Otra…';otra.setAttribute('aria-pressed',String(personalizada));}
     tallas.classList.toggle('falta',!valores.talla);precio?.classList.toggle('falta',!valores.precio_ropa);
   }
-  return { raiz, sincronizar, valores:()=>({...valores}), validar(){const motivo=!valores.talla?'Falta talla':!valores.precio_ropa?'Falta precio':'';if(motivo){mensaje(motivo,'aviso');sincronizar();}return !motivo;} };
+  const faltante=()=>!valores.talla?'Falta talla':!valores.precio_ropa?'Falta precio':'';
+  return { raiz, sincronizar, faltante, valores:()=>({...valores}), validar(){const motivo=faltante();if(motivo){mensaje(motivo,'aviso');sincronizar();}return !motivo;} };
 }

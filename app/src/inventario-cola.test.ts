@@ -11,7 +11,7 @@ import { TALLAS_ADULTO, EDADES_NINO, TALLAS_NINO } from '../public/tallas.js';
 function ropaUI(bloquearAlmacenamiento=false) {
   class Nodo {
     textContent='';className='';dataset:Record<string,string>={};children:Nodo[]=[];atributos:Record<string,string>={};eventos:Record<string,Function>={};
-    scrollTop=0;offsetHeight=48;onclick:Function=()=>{};onkeydown:Function=()=>{};
+    scrollTop=0;offsetHeight=44;onclick:Function=()=>{};onkeydown:Function=()=>{};
     classList={toggle:(c:string,activa:boolean)=>{const clases=new Set(this.className.split(' ').filter(Boolean));activa?clases.add(c):clases.delete(c);this.className=[...clases].join(' ');},add:(c:string)=>this.classList.toggle(c,true),remove:(c:string)=>this.classList.toggle(c,false)};
     get firstElementChild(){return this.children[0];}
     append(...n:Nodo[]){this.children.push(...n);}
@@ -31,7 +31,7 @@ function ropaUI(bloquearAlmacenamiento=false) {
     localStorage:{getItem:(k:string)=>{if(bloquearAlmacenamiento)throw new Error('Sin almacenamiento');return almacen.get(k)??null;},setItem:(k:string,v:string)=>{if(bloquearAlmacenamiento)throw new Error('Sin almacenamiento');almacen.set(k,String(v));}}
   });
   const buscar=(raiz:Nodo,nombre:string):Nodo|undefined=>raiz.getAttribute('aria-label')===nombre?raiz:raiz.children.map(n=>buscar(n,nombre)).find(Boolean);
-  const desplazar=(rueda:Nodo,i:number)=>{rueda.scrollTop=i*48;rueda.eventos.scroll();};
+  const desplazar=(rueda:Nodo,i:number)=>{rueda.scrollTop=i*rueda.children[0].offsetHeight;rueda.eventos.scroll();};
   return {...ui,almacen,hojas,buscar,desplazar};
 }
 
@@ -72,9 +72,9 @@ test('edad conserva teclado, selección accesible y edad de sesión sin reinicia
   ui.desplazar(ui.buscar(tablero.raiz,'Prenda')!,1);abrir();edad=ui.buscar(ui.hojas.at(-1)!,'Edad')!;
   assert.equal(edad.children.find(n=>n.getAttribute('aria-selected')==='true')!.textContent,'5 años');
   const nueva=ui.talla(()=>{});nueva.children[0].children.at(-1)!.onclick();
-  assert.equal(ui.buscar(ui.hojas.at(-1)!,'Edad')!.scrollTop,EDADES_NINO.indexOf('5 años')*48);
+  assert.equal(ui.buscar(ui.hojas.at(-1)!,'Edad')!.scrollTop,EDADES_NINO.indexOf('5 años')*44);
   const restaurada=ui.talla(()=>{},'Niño 8 años / M');restaurada.children[0].children.at(-1)!.onclick();
-  assert.equal(ui.buscar(ui.hojas.at(-1)!,'Edad')!.scrollTop,EDADES_NINO.indexOf('8 años')*48);
+  assert.equal(ui.buscar(ui.hojas.at(-1)!,'Edad')!.scrollTop,EDADES_NINO.indexOf('8 años')*44);
   edad.onkeydown({key:'End',preventDefault(){}});assert.equal(edad.getAttribute('role'),'listbox');
   assert.equal(edad.getAttribute('aria-activedescendant'),edad.children.at(-1)!.id);
   edad.onkeydown({key:'Home',preventDefault(){}});assert.equal(edad.scrollTop,0);
@@ -85,6 +85,16 @@ test('capturar ropa funciona con localStorage bloqueado y permite elegir el prim
   const precio=ui.buscar(tablero.raiz,'Precio')!;precio.children[0].onclick();
   assert.equal(tablero.valores().precio_ropa,30000);
   ui.desplazar(ui.buscar(tablero.raiz,'Prenda')!,1);assert.equal(tablero.valores().precio_ropa,10000);
+});
+
+test('el disparo pide talla antes que precio y se habilita al completar ambos (#458)',()=>{
+  const ui=ropaUI(),avisos:string[]=[],tablero=ui.ropa({pc:()=>false,mensaje:(m:string)=>avisos.push(m)});
+  assert.equal(tablero.faltante(),'Falta talla');assert.equal(tablero.validar(),false);
+  ui.buscar(tablero.raiz,'Talla')!.children[0].children.find(n=>n.dataset.valor==='M')!.onclick();
+  assert.equal(tablero.faltante(),'Falta precio');assert.equal(tablero.validar(),false);
+  ui.buscar(tablero.raiz,'Precio')!.children[0].onclick();
+  assert.equal(tablero.faltante(),'');assert.equal(tablero.validar(),true);
+  assert.deepEqual(avisos,['Falta talla','Falta precio']);
 });
 
 test('un registro de Inventario lo sube el código real de /captura, con ropa, talla y centavos intactos',async()=>{

@@ -13,7 +13,7 @@ Base leída (origin/main): `escanear.html`, `captura.html`, `admin.html`, `etiqu
 | Navegación celular | **Barra inferior** de 4 modos (64 px). Los modos no se tapan con el dedo ni con el visor; el pulgar llega. |
 | Navegación PC (≥ 1000 px) | **Pestañas en la cabecera** (segmentado) con pista `Alt+1…4`. |
 | Lenguaje visual | Papel de tienda de barrio: fondo niebla, bordes de 2 px azul, **sombra dura desplazada**, esquinas de 2 px, amarillo para la acción principal. Nada de tarjetas de 12 px de radio con sombra difusa. |
-| Capturar | **Un solo flujo**: la cámara (celular) o la caja (PC) están siempre listas. Código → pieza/+1/etiqueta. Sin código → foto → (Ropa: prenda, marca, talla y precio en el mismo tablero) → subida/análisis. No hay «modo Ropa» aparte: es un interruptor pegajoso `Mercancía | Ropa` junto al disparo. |
+| Capturar | **Un solo flujo**: código → pieza/+1/etiqueta. Sin código → foto → (Ropa: prenda, marca, talla y precio en el mismo tablero) → subida/análisis. En celular, `Mercancía | Ropa` son pestañas compactas en la cabecera; grado, disparo y cantidad viven en una barra fija sobre la navegación. La cámara se puede apagar. |
 | Impresora y celular | **Servicios** con chips fijos en la cabecera, no modos. |
 | Lector | Un solo receptor global (`lector.js`). **El Enter del lector nunca activa un botón.** |
 | Tipografía | `system-ui` (sin descargas con mala red). Precios y cantidades en 800 con `tabular-nums`; códigos en `ui-monospace`. |
@@ -103,7 +103,7 @@ Interlineado 1.3; títulos 1.15. Nombres largos: `overflow-wrap:anywhere`, 2 lí
 - Radios: `2px` en botones, campos, chips, tarjetas, hojas; `50%` solo en disparo y puntos de estado. Nada de 8/10/12.
 - Borde de todo control y tarjeta: `2px solid var(--azul)`. Separadores decorativos de lista: `1px solid var(--linea)`.
 - Capas (z): contenido 0 · barras fijas 10 · hoja 20 · diálogo 30 · «Empezar» 40.
-- `padding-bottom` del área desplazable ≥ altura de la barra inferior + `env(safe-area-inset-bottom)`.
+- `padding-bottom` del área desplazable ≥ altura de la barra inferior + `env(safe-area-inset-bottom)`; en Capturar celular se agregan 110 px para la barra de captura y su sombra.
 - Viewport: `width=device-width, initial-scale=1, viewport-fit=cover`. **Sin** `maximum-scale` ni `user-scalable=no` (lo tiene `captura.html`); usar `touch-action: manipulation` para evitar el doble toque.
 
 ### 2.4 Botón con sombra desplazada
@@ -154,7 +154,7 @@ Glifos de estado en texto: `●` listo, `▲` aviso, `■` error, `✓` hecho.
 
 ### 3.1 Estructura
 
-- **Celular (< 1000 px)**, de arriba abajo: cabecera 56 → línea de estado (mín. 44) → **caja** (52, solo en Buscar/Revisar/Imprimir; en Capturar queda detrás de `⌨ Escribir`) → área del modo (desplazable) → **barra inferior** 64 + `safe-area`.
+- **Celular (< 1000 px)**, de arriba abajo: cabecera 56 → línea de estado (mín. 44) → **caja** (52, solo en Buscar/Revisar/Imprimir; en Capturar queda detrás de `⋯ → ⌨ Escribir`) → área del modo (desplazable) → en Capturar, **barra de captura fija** 96 → **barra inferior** 64 + borde 2 + `safe-area`.
 - **PC (≥ 1000 px)**: cabecera 64 con pestañas → línea de estado → caja 56 de ancho de columna izquierda → cuerpo en **dos columnas** (izq. 440 px lista/entrada, der. fluida pieza/vista; `max-width:1440`, centrado) → pie de 40 px «Hoy: …» solo en Capturar.
 - Punto de corte único: `@media (min-width:1000px)` (el mismo de `pieza.html`). 600–999 usa la disposición de celular con columna de 640 centrada.
 - Fondo `--niebla`; sin cuerpo desplazable detrás de hojas (`overscroll-behavior:contain`).
@@ -177,10 +177,10 @@ Fondo `--azul`, texto blanco, alto 56 (celular) / 64 (PC), `padding: 0 var(--gut
 
 | Zona | Celular | PC |
 | --- | --- | --- |
-| Marca | cuadro 36×36 amarillo con borde 2 px blanco y «EL» 800 azul (CSS, sin imagen) + «Inventario» 18/800 | igual, 20/800 |
+| Marca | cuadro 36×36 amarillo con borde 2 px blanco y «EL» 800 azul (CSS, sin imagen) + «Inventario» 18/800; en Capturar este espacio lo ocupa `Mercancía | Ropa` (44 px de alto) | igual, 20/800 |
 | Modos | (en barra inferior) | pestañas |
 | **Chips** (derecha) | `Impresora` y `Red` | `Impresora`, `Celular`, `Red` |
-| Menú `⋯` (48×48) | Sonido, Vibración, Inicio, Ajustes (solo roles con /admin) | `Ajustes` como texto-botón + `⋯` (Sonido, Vibración, Inicio) |
+| Menú `⋯` (≥44×44) | En Capturar, `⌨ Escribir`; también Sonido, Vibración, Inicio, Ajustes (solo roles con /admin) | `Ajustes` como texto-botón + `⋯` (Sonido, Vibración, Inicio) |
 
 **Chip de conexión** (es un `<button>`, alto 44, `--azul-hondo`, borde 2 px `#6F86B5`, sin sombra, 14/700; glifo + palabra; en celular solo la palabra de estado, el nombre va en `aria-label`):
 
@@ -251,7 +251,7 @@ LISTO ──lee código──► BUSCANDO ──► NUEVA (manifiesto) ──Gua
 
 ```
 +--------------------------------------+ 0
-| [EL] Inventario    (Imp Lista)(Red ●)| header 56
+| [Mercancía*|Ropa] (Imp Lista)(Red ●) ⋯| header 56
 +--------------------------------------+
 | ● Escanea o toma foto                | estado 44
 +--------------------------------------+
@@ -262,19 +262,18 @@ LISTO ──lee código──► BUSCANDO ──► NUEVA (manifiesto) ──Gua
 +--------------------------------------+
 | 12 hoy · 9 subidas  [m][m][m][m] →   | carrusel 24 h (72 px) + contador
 +--------------------------------------+
-| [Mercancía|Ropa]          [⌨ Escribir]|  fila 1 (48)
-| [A Nuevo][B Dañado][C Liq.] [-] 1 [+]|  fila 2 (56)
-|              ( O )                   |  disparo 84 px
+| [A][B][C]       ( O )       [-] 1 [+]|  barra fija 96 px; disparo 76 px
 +--------------------------------------+
 | Capturar | Buscar | Revisar | Imprimir|  barra 64
 +--------------------------------------+
 ```
 
-- Visor siempre 4:3 (como la foto); zoom: deslizador **dentro de una hoja** (`Zoom` en `⋯` del visor) o pellizco; no una barra permanente tapando la imagen. Se recuerda en `captura-zoom`.
-- Disparo: 84×84, círculo blanco con borde 6 px `--amarillo` y sombra dura `4px 4px 0 --azul`; presionado hunde. `aria-label="Tomar foto"`. Es el **único** elemento principal de la vista.
-- Fila de grado: segmentado de 3 (3 × 52) + stepper (56+64+56=176). Caben en 358 px con 12 px de hueco: si no cabe, el stepper pasa a su propia fila.
+- Visor 4:3 en Mercancía y compacto en Ropa; zoom: deslizador **dentro de una hoja** (`Zoom` en `⋯` del visor), recordado en `captura-zoom`.
+- Disparo: 76×76, círculo blanco con borde 6 px `--amarillo` y sombra dura `4px 4px 0 --azul`; presionado hunde. `aria-label="Tomar foto"`. Vive siempre en el centro de la barra fija; no se oculta al leer UPC.
+- Barra de captura: grado a la izquierda (3 × 44×56), disparo al centro, stepper a la derecha (44+44+44, botones de 44×56). Padding lateral 6 px, huecos 4 px: cabe en 360 px sin envolver. Se fija a `66px + env(safe-area-inset-bottom)` del borde inferior. Con un único modo, la navegación se oculta y la barra baja al borde, conservando el área segura. El contenido tiene padding inferior para que su final pueda desplazarse por encima de la barra.
+- Interruptor dentro del visor, esquina superior izquierda: icono blanco + «Cámara»/«Apagada», fondo oscuro translúcido, `aria-pressed`, objetivo ≥44 px. Reutiliza `crearCamara.abrir/pausar`, incluidos parada de tracks y descarte de detecciones tardías. `inventario-camara` en `sessionStorage` recuerda la elección al cambiar de modo o recargar. Apagada: visor oscuro y texto «Cámara apagada»; el disparo abre la selección de foto existente, nunca usa un fotograma detenido. «Pieza sin foto» conserva su permiso de dueño en el menú del visor.
 - Carrusel 24 h: ver «Correcciones».
-- `⌨ Escribir` abre la caja sobre la fila 1 con teclado numérico (`inputmode=numeric`; el botón `ABC` alterna a texto para `ED-`/nombre).
+- `⋯ → ⌨ Escribir` en la cabecera abre la caja con teclado numérico (`inputmode=numeric`). Se eligió el menú existente para conservar espacio en 360 px y mantener a la vista Impresora y Red, sin añadir otra fila o icono.
 
 **Celular — Código leído, pieza nueva del manifiesto** (la tarjeta se acopla encima de la fila 1; el visor sigue vivo detrás)
 
@@ -328,25 +327,25 @@ La búsqueda IA comienza solo al tocar `Buscar en internet`, nunca por tiempo ni
 +--------------------------------------+
 | Prenda                    Precio     |
 |   Suéter                    $200     |
-|  [Chamarra]                [$150]    |  dos rodillos, fila de 48 px
+|  [Chamarra]                [$150]    |  dos rodillos, fila de 44 px
 |   Vestido                   $120     |
 | (Sin marca)(All in Motion)(Cat & Jack)→|  marcas; Otra… al final
 | (XXS)(XS)(S)(M*)(L)(XL)(XXL)(3XL)→   |  talla; Niño… al final
-| [Mercancía|Ropa*]         [⌨ Escribir]|
-| [A][B][C]                   [-] 1 [+]|
-|              ( O )                   |
-+--------------------------------------+
 | Hoy · 12 piezas · 9 subidas [Ver todas]|
-| [miniaturas…]                        |  historial después del disparo
+| [miniaturas…]                        |  contenido desplazable
++--------------------------------------+
+| [A][B][C]       ( O )       [-] 1 [+]|  barra fija, igual que Mercancía
++--------------------------------------+
+| Capturar | Buscar | Revisar | Imprimir|
 ```
 
 - Prenda y precio: **rodillos inline**, lado a lado en 390×844, sin hojas. Comparten función y CSS con edad: `scroll-snap`, `role=listbox`, opciones con `aria-selected`, `aria-activedescendant`, flechas ↑↓, Home/End y movimiento reducido. La primera prenda es `Sin prenda`; conserva el nombre de respaldo `Ropa`. La opción elegida va sobre una banda central amarilla además del peso de la letra.
 - Mover prenda aplica `PRECIO_PRENDA` al precio. Mover precio después lo reemplaza para esa pieza y las siguientes hasta cambiar de prenda o precio. La lista sigue siendo `PRECIOS_ROPA` de `ropa.js`: $300·200·150·120·100·80·50, siempre centavos enteros al guardar. Sin prenda no borra el precio elegido.
 - Marca opcional en **una fila deslizable**: Sin marca, All in Motion, Cat & Jack, Universal Thread, Wild Fable y Otra…. Las cuatro comunes no abren hoja; Otra… permite las demás marcas del catálogo o escribir con sugerencias recientes. La marca elegida aparece en su chip.
 - Prenda, marca y precio se recuerdan en `localStorage` con `try/catch`; al recargar se restaura el precio manual, sin recalcularlo. La talla conserva su regla: permanece entre disparos, no se guarda al recargar. La edad permanece durante la sesión y se respeta la talla infantil al corregir una pieza. Corregir no cambia las preferencias de captura.
-- Obligatorios para disparar: talla y precio. Si faltan, se resalta el grupo y la línea dice «Falta talla» / «Falta precio»; disparo con `aria-disabled`. Prenda y marca opcionales. Sin rótulos duplicados ni párrafos de ayuda.
+- Obligatorios para disparar sin UPC: talla y precio. Si faltan, se resalta el grupo y el disparo dice «Elige talla» / «Elige precio» con `aria-disabled`; no se agrega un banner. `aria-describedby` enlaza el motivo con un nodo `role=status` solo para lectores de pantalla. Prenda y marca opcionales. Los códigos y fotos de piezas existentes conservan su flujo propio.
 - Niño: el chip `Niño…` mantiene la **hoja con rodillo de edades**, sin competir con el scroll; debajo, fila opcional XS–XL y Usar talla. La edad ya no vuelve a «4 años» al cambiar prenda, marca o precio.
-- Visor compacto, rodillos, marca, talla, cantidad y disparo caben en 390×844 con cámara activa y búsqueda cerrada; historial debajo. Controles de al menos 44 px. La página conserva su paleta explícita también con preferencia de sistema oscura.
+- Visor compacto, rodillos, marca y talla caben encima de la barra en los tamaños habituales; el historial o contenido adicional puede desplazarse en pantallas pequeñas. Grado, cantidad y disparo permanecen visibles a cualquier altura. Marcas y tallas siguen en una sola fila horizontal deslizable. Controles de al menos 44 px. La página conserva su paleta explícita también con preferencia de sistema oscura.
 - Si en Ropa se lee un código de barras: se atiende como código de mercancía (la pieza con UPC no es una prenda sin código); el tipo pegajoso no cambia.
 - Datos del servidor y etiqueta conservan campos, nombre «Prenda Marca» y centavos. `/captura`, configuración e IA por lotes no cambian.
 - Toques por pieza (sin contar entrada a Ropa, cámara ni desplazamientos): cambiar prenda + marca común + talla y disparar pasa de **7 a 4**; con precio manual, de **9 a 5**. Si se repiten todos los datos: **1 → 1** (solo disparar). Un gesto de rodillo sustituye la selección por toque; deslizar la fila de marcas/tallas puede requerir otro gesto.
@@ -726,18 +725,18 @@ Chip `Celular · No responde` (rojo). La solicitud caduca a los 2:00 sin crear p
 
 ## 9. Lista de QA (capturas headless)
 
-Herramienta: Chromium headless (Playwright/Puppeteer) con rutas `/api/*` interceptadas con fixtures; `deviceScaleFactor:2`, `hasTouch` + UA Android en 390×844; ratón en 1280×800. Guardar capturas como `qa/inventario/<NN>-<estado>-<390|1280>.png`. Criterio general en **todas**: sin scroll horizontal (`document.documentElement.scrollWidth <= innerWidth`), ningún texto cortado en 320 px, sin superposición con la barra inferior, `console` sin errores.
+Herramienta: `node tools/qa_inventario.mjs`, Chrome headless vía CDP, servidor local con fixtures `/api/*` y cámara simulada; sin dependencias. Captura Mercancía y Ropa en **360×640, 412×740 y 390×844** a DPR 2.625, además de los estados en 390×844 y PC 1280×800. Guarda PNG y `medidas.json` en el directorio temporal `inventario-qa-capturas` (o `QA_SALIDA`). En cada tamaño afirma que el rectángulo completo del disparo está dentro del viewport **sin desplazar**, que su borde inferior queda por encima de la navegación y que no hay otro elemento tapándolo; vuelve a comprobar tras desplazar. Comprueba también padding final, estados de talla/precio, apagado de tracks, captura por archivo y preferencia de sesión. Criterio general en **todas**: sin scroll horizontal (`document.documentElement.scrollWidth <= innerWidth`), ningún texto cortado en 320 px, sin superposición con la barra inferior, `console` sin errores.
 
 **Estados a capturar (390×844 y 1280×800 salvo indicación)**
 
 | # | Estado | Debe verse |
 | --- | --- | --- |
-| 01 | Capturar · listo | visor, línea neutra, disparo 84 px, barra con 4 modos (celular); caja con «● Lector listo» (PC) |
+| 01 | Capturar · listo | visor, línea neutra, disparo 76 px sobre la navegación (celular); caja con «● Lector listo» (PC) |
 | 02 | Capturar · código nuevo | tarjeta con `Guardar`, sin cuenta atrás ni guardado tras 25 s, stepper, línea de éxito |
 | 03 | Capturar · ya existe | `+1 e imprimir 1` principal, `Foto nueva` secundario |
 | 04 | Capturar · sin registro + búsqueda IA | «Sin registro», barra de progreso, `Tomar foto` |
 | 05 | Capturar · Ropa completa | foto visible, rodillos de prenda/precio juntos, marca y talla compactas |
-| 06 | Capturar · Ropa sin talla | disparo `aria-disabled`, grupo con borde rojo + «?», línea «Falta talla» |
+| 06 | Capturar · Ropa sin talla | disparo «Elige talla» con `aria-disabled` y descripción accesible, fila de tallas con borde rojo; sin banner |
 | 07 | Capturar · sin red | línea de aviso, chip Red amarillo con número, miniaturas punteadas |
 | 08 | Capturar · carrusel y hoja «Corregir» | miniaturas 72 px, hoja con `Guardar cambios` y `Descartar` en dos toques |
 | 09 | Capturar · cámara bloqueada | tarjeta de 3 pasos y tres botones |
@@ -756,14 +755,14 @@ Herramienta: Chromium headless (Playwright/Puppeteer) con rutas `/api/*` interce
 
 **Comprobaciones automáticas (script con `getBoundingClientRect` / `getComputedStyle`)**
 
-- [ ] Cada `button, a[href], [role=tab], summary, input, select` visible mide ≥ 44×44 CSS px en 390 px; los `.primario` ≥ 56 de alto; steppers 56×56; disparo 84×84; barra inferior 64 de alto (sin contar `safe-area`).
+- [ ] Cada `button, a[href], [role=tab], summary, input, select` visible mide ≥ 44×44 CSS px; los `.primario` ≥ 56 de alto; en la barra de captura, stepper 44×56 y disparo 76×76; barra inferior 64 de alto + borde (sin contar `safe-area`). Rodillos con filas de 44 px y banda amarilla central.
 - [ ] Todo `input` ≥ 16 px de fuente; ninguno con borde `#9AA4B6`.
 - [ ] Contraste de todos los pares de texto de la tabla 2.1 ≥ 4.5 (3 para ≥ 24 px); ningún texto `#D72B32` sobre niebla.
 - [ ] `getComputedStyle(btn).boxShadow` de cada botón principal/secundario coincide con la tabla 2.4; `:active` los deja sin sombra; deshabilitados sin sombra y con `aria-disabled=true`.
 - [ ] Pestañas: `role=tablist/tab/tabpanel`, un solo `tabindex=0`; Alt+1…4 cambian de modo y dejan el foco en la caja (PC).
 - [ ] Prueba del lector: con foco sobre un botón, inyectar «012345678905» + Enter a 15 ms entre teclas → se emite una `lectura`, el botón **no** recibe `click`, la cantidad no cambia; con foco en la caja igual; con foco en un campo de edición **no** se intercepta.
 - [ ] Al cambiar de modo, `stream.getTracks().every(t => t.readyState === 'ended')` salvo Capturar; sin tracks vivos al ocultar la pestaña.
-- [ ] Línea de estado: un solo nodo `role=status`; un solo `role=alert` visible a la vez.
+- [ ] Línea de estado: un solo nodo `role=status` visible y un solo `role=alert` visible a la vez; el motivo del disparo tiene su propio `role=status` solo para lectores de pantalla.
 - [ ] Con `prefers-reduced-motion: reduce`: `transition-duration` 0 en botones y hojas; sin animaciones infinitas.
 - [ ] Teclado en 1280: recorrer con `Tab` y capturar el foco visible en caja, pestañas, chips de la cabecera, principal de cada modo y una fila de lista; anillo de ≥ 3 px visible en todos.
 - [ ] Teclado virtual simulado (`visualViewport` reducido a 400 px): la barra inferior se oculta y el campo enfocado queda visible.

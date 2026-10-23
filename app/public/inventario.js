@@ -172,6 +172,7 @@ $('camara-etiqueta').onclick = async () => {
 };
 $('menu').onclick = () => {
   const c = nodo('div', undefined, 'formulario');
+  if (!pc() && modo === 'capturar') c.append(boton('⌨ Escribir', () => { cerrarHoja(); $('busqueda').hidden = false; $('consulta').inputMode = 'numeric'; $('consulta').focus(); }));
   for (const [clave, texto] of [['sonido','Sonido'],['vibracion','Vibración']]) {
     const b = boton(texto, () => { const activo = localStorage.getItem(`inventario-${clave}`) !== 'false'; localStorage.setItem(`inventario-${clave}`, String(!activo)); b.setAttribute('aria-checked', String(!activo)); });
     b.setAttribute('role','switch'); b.setAttribute('aria-checked', String(localStorage.getItem(`inventario-${clave}`) !== 'false')); c.append(b);
