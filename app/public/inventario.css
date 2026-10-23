@@ -180,3 +180,6 @@ main:has(#modo-buscar:not([hidden])) .caja{margin-bottom:12px}
 @media(min-width:1000px){.filtros-estado{scrollbar-width:thin}.filtros-estado::-webkit-scrollbar{display:block;height:8px}.filtros-estado::-webkit-scrollbar-thumb{background:var(--azul);border-radius:4px}}
 
 @media(min-width:1000px){.tallas-ropa .chips{flex-wrap:wrap;overflow:visible}}
+
+/* Banda central del rodillo: marca la opción elegida sin depender solo del peso de la letra. */
+.rodillo{background:linear-gradient(transparent calc(var(--fila) - 2px),#FFD44766 calc(var(--fila) - 2px) calc(var(--fila)*2 - 2px),transparent 0),var(--blanco)}
