@@ -81,7 +81,7 @@ async function buscar(mas = false, abrir = false) {
   finally { if (turno === generacion) { cargando = false; bloquear($('mas'), ''); $('resultados').setAttribute('aria-busy', 'false'); } }
 }
 const contexto = { $, nodo, boton, mensaje, hoja, confirmar, api, pesos, identidad, dueno, pc, foco, ficha, resultado,
-  pieza:() => piezaActual, cambiarModo, imprimir:async (...args) => (await cargar('imprimir')).imprimir(...args) };
+  pieza:() => piezaActual, cambiarModo, imprimir:async (...args) => {if(identidad.vendedor){mensaje('Imprime desde la computadora','aviso');return false;}return (await cargar('imprimir')).imprimir(...args);} };
 async function cargar(nombre) {
   if (!modulos.has(nombre)) {
     const archivo = { imprimir:'./inventario-imprimir.js', capturar:'./inventario-capturar.js', revisar:'./inventario-revisar.js' }[nombre];

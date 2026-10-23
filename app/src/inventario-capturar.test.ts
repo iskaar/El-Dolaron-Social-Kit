@@ -5,6 +5,7 @@ import { tienda, PRODUCTO } from './prueba-d1.ts';
 
 test('Capturar +1 usa rastro D1, un UUID por operación y exactamente una etiqueta; sin red no escribe',async(t0)=>{
   const t=tienda();t0.after(()=>t.db.close());
+  t.db.prepare("update productos set estado_analisis='listo' where id=?").run(PRODUCTO);
   const impresiones:any[]=[],llamadas:any[]=[];let sinRed=false,perderRespuesta=true;
   const api=async(ruta:string,cuerpo?:any)=>{llamadas.push({ruta,cuerpo});const r=await t.pedir(ruta,cuerpo);if(r.status>=400)throw Object.assign(new Error(r.cuerpo.error),{status:r.status});
     if(ruta.endsWith('/existencia')&&perderRespuesta){perderRespuesta=false;throw new TypeError('Respuesta perdida');}return r.cuerpo;};

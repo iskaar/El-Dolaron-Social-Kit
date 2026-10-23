@@ -75,7 +75,7 @@ export function resolverRepetida(origen, destino, { nodo, boton, hoja, api, mens
     try {
       movida ??= dosEtiquetas ? await api(`/api/piezas/${sale.id}/juntar`, {id, destino_id:queda.id})
         : await api(`/api/borradores/${sale.id}/fusionar`, {destino_id:queda.id});
-      await api(`/api/borradores/${queda.id}`, {upc:upc || ''}, 'PATCH');
+      if (normalizarUpc(queda.upc) !== normalizarUpc(upc)) await api(`/api/borradores/${queda.id}`, {upc:upc || ''}, 'PATCH');
       cerrar(); await alTerminar(queda.id);
       mensaje('Existencias juntas', 'ok');
       if (dosEtiquetas && movida.movidas > 0) {

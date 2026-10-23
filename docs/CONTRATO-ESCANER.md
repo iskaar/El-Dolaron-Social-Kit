@@ -38,6 +38,8 @@
 
 > **UPC real (#452):** una pieza visible por propietario, UPC sin ceros iniciales y grado. Recapturar suma con folio idempotente y motivo `entrada`; las pendientes también cuentan. `PATCH /api/borradores/:id` acepta `upc` (vacío lo quita) con «Editar inventario»; una coincidencia responde 409 con `existente`. Se reutiliza ese PATCH para conservar los permisos y consumidores actuales. `POST /api/piezas/:id/juntar {id, destino_id}` pasa existencia entre dos piezas etiquetadas del mismo grado, con dos ajustes de `correccion`, sin borrar código ni historial de la origen: queda en cero y sin UPC. La fusión anterior conserva sus restricciones cuando falta una etiqueta. Límite conjunto: 999. Antes de desplegar, Isaac aplica la migración aditiva 053; no hay índice único ni limpieza automática de duplicados históricos.
 
+`GET /api/piezas/repetidas?cursor=…` exige la misma casilla, limita por propietario y devuelve `grupos` y `siguiente`. Cada página inspecciona hasta 80 candidatas (81 con el testigo de continuación); agrupa sin confundir grados y propone la etiqueta ED más antigua. El cursor es opaco para el cliente. Un grupo puede continuar en la siguiente página; la UI une sus miembros por ID. Las bandas y los descartados quedan fuera. El análisis de IA no asigna UPC: sólo usa el enviado por la captura. Fotos con UPC, captura manual del escáner, PATCH y cambios de grado comparten la guarda; la captura manual general que envía UPC se valida en la corrección y rechaza coincidencias sin dejar borrador vacío. Familias de banda e importación Wincaja no fijan UPC y son `sin_inventario`.
+
 ## Decisión de fondo
 
 El escáner **no** es la herramienta de captura del vendedor: la cámara lo es. El análisis con IA

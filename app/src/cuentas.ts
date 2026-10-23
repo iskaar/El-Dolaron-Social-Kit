@@ -310,7 +310,7 @@ export async function yo(env: Env, correo: string, cajero: Usuario | null = null
     .first<{ estado: string; creado_en: string }>();
   const modos = usuario?.activo && (usuario.roles.includes('dueno') || usuario.roles.includes('capturista'))
     ? ['capturar', 'buscar', 'revisar', ...(!vendedor ? ['imprimir'] : [])]
-    : usuario?.activo && usuario.roles.includes('finanzas') ? ['capturar', 'buscar', ...(!vendedor ? ['imprimir'] : [])] : [];
+    : usuario?.activo && usuario.roles.includes('finanzas') ? ['capturar', 'buscar', ...(puedeEditarInventario(usuario) ? ['revisar'] : []), ...(!vendedor ? ['imprimir'] : [])] : [];
   return json({ correo, usuario, solicitud, vendedor, modos_inventario: modos, cajero: cajero && { correo: cajero.correo, nombre: cajero.nombre, caja: cajero.caja } });
 }
 

@@ -6,15 +6,18 @@ export const MISMO_UPC = `${UPC_VISIBLE} and propietario = ? and ltrim(upc, '0')
 export interface PiezaUpc {
   id: string; codigo: string | null; upc: string | null; nombre: string; precio: number; stock: number;
   estado_analisis: string; estado_fisico: string; propietario: string; capturado_por: string;
-  creado_en: string; tiene_foto: number;
+  creado_en: string; actualizado_en: string; tiene_foto: number; marca:string; talla:string | null;
+  categoria:string; precio_lista:number; destino:string;
 }
 export const PIEZA_UPC = `id, codigo, upc, nombre, precio, stock, estado_analisis, estado_fisico, propietario,
-  capturado_por, creado_en, foto_key <> '' as tiene_foto`;
+  capturado_por, creado_en, actualizado_en, marca, talla, categoria, precio_lista, destino, foto_key <> '' as tiene_foto`;
 
 export async function repetidaUpc(env: Env, upc: string, grado: string, propietario: string, excluir = '') {
-  return env.DB.prepare(`select ${PIEZA_UPC} from productos where ${MISMO_UPC} and id <> ?
-    order by (coalesce(codigo, '') <> '') desc, rowid limit 1`)
-    .bind(propietario, normalizarUpc(upc), grado, excluir).first<PiezaUpc>();
+  return env.DB.prepare(`select ${PIEZA_UPC} from productos where id = coalesce(
+    (select id from productos where ${MISMO_UPC} and id <> ? and coalesce(codigo, '') > ''
+      order by coalesce(codigo, ''), rowid limit 1),
+    (select id from productos where ${MISMO_UPC} and id <> ? order by coalesce(codigo, ''), rowid limit 1))`)
+    .bind(propietario, normalizarUpc(upc), grado, excluir, propietario, normalizarUpc(upc), grado, excluir).first<PiezaUpc>();
 }
 
 export const upcValido = (valor: unknown): valor is string => typeof valor === 'string'

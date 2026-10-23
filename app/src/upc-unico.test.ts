@@ -4,6 +4,8 @@ import { tienda, DUENO } from './prueba-d1.ts';
 import worker from './worker.ts';
 import { MISMO_UPC } from './upc-inventario.ts';
 import { resolverRepetida } from '../public/ficha.js';
+import { crearCaptura } from '../public/inventario-capturar.js';
+import { crearSubida, registroFoto } from '../public/foto-pendiente.js';
 
 const UPC = '0012345678905';
 type Tienda = ReturnType<typeof tienda>;
@@ -182,7 +184,7 @@ test('hoja de coincidencia usa fusión si falta etiqueta y reintenta UPC sin rep
     const nodo = (_:string,texto?:string) => ({textContent:texto,append(){},setAttribute(){}});
     const boton = (texto:string,accion:any) => { acciones.set(texto,()=>accion({setAttribute(){}})); return nodo('button',texto); };
     resolverRepetida({id:'origen',nombre:'Origen',stock:2,codigo:etiqueta?'ED-000002':null},{id:'destino',nombre:'Destino',stock:3,codigo:'ED-000001',upc:UPC},{
-      nodo,boton,hoja(){},mensaje(){},cerrar(){},imprimir:async()=>true,
+      nodo,boton,hoja(){},mensaje(){},cerrar(){},imprimir:async()=>true,upc:'999999999999',
       api:async(ruta:string,cuerpo:any)=>{llamadas.push({ruta,cuerpo});if(ruta.includes('borradores/destino')&&fallar){fallar=false;throw new TypeError('Sin red');}return {movidas:2};},
     });
     await acciones.get('Juntar en ED-000001')!(); await acciones.get('Juntar en ED-000001')!();
@@ -190,4 +192,112 @@ test('hoja de coincidencia usa fusión si falta etiqueta y reintenta UPC sin rep
     assert.equal(llamadas.filter(c=>c.ruta.endsWith('/destino')).length,2);
     assert.equal(acciones.has('Imprimir 2 etiquetas de ED-000001'),etiqueta);
   }
+});
+
+test('Repetidas agrupa UPC normalizado+grado, excluye otras piezas y elige la etiqueta más antigua', async () => {
+  const t = preparar();
+  pieza(t,{upc:UPC});
+  const nueva = pieza(t,{upc:'012345678905',codigo:'ED-000125'});
+  const vieja = pieza(t,{upc:'12345678905',codigo:'ED-000123'});
+  pieza(t,{upc:UPC,estado_fisico:'danado'});
+  pieza(t,{upc:UPC,propietario:'fep'});
+  pieza(t,{upc:UPC,estado_analisis:'descartado'});
+  pieza(t,{upc:UPC,sin_inventario:1});
+  const r = await t.pedir('/api/piezas/repetidas');
+  assert.equal(r.status,200); assert.equal(r.cuerpo.siguiente,null);
+  assert.equal(r.cuerpo.grupos.length,1);
+  assert.deepEqual([r.cuerpo.grupos[0].upc,r.cuerpo.grupos[0].estado_fisico,r.cuerpo.grupos[0].destino_id],['12345678905','nuevo',vieja.id]);
+  assert.equal(r.cuerpo.grupos[0].piezas.length,3);
+  assert.ok(r.cuerpo.grupos[0].piezas.some(p=>p.id===nueva.id)); t.db.close();
+});
+
+test('Repetidas pagina aun sin coincidencias y conserva grupos que cruzan la página', async () => {
+  const t = preparar();
+  for(let i=0;i<85;i++)pieza(t,{upc:String(100000000000+i)});
+  for(let i=0;i<85;i++)pieza(t,{upc:UPC});
+  const vistas=new Set<string>(); let cursor:string|null=null, paginas=0;
+  do {
+    const r=await t.pedir('/api/piezas/repetidas'+(cursor?'?'+new URLSearchParams({cursor}):''));
+    assert.equal(r.status,200);
+    for(const g of r.cuerpo.grupos)for(const p of g.piezas)vistas.add(p.id);
+    cursor=r.cuerpo.siguiente; paginas++;
+  }while(cursor&&paginas<10);
+  assert.equal(cursor,null); assert.equal(paginas,3); assert.equal(vistas.size,85);
+  for(const cursor of ['x','[]','["a","nuevo","",0]']) assert.equal((await t.pedir('/api/piezas/repetidas?'+new URLSearchParams({cursor}))).status,400);
+  t.db.close();
+});
+
+test('Repetidas exige casilla; FEP con casilla revisa sólo sus grupos', async () => {
+  const t = preparar(); pieza(t,{upc:UPC});pieza(t,{upc:UPC});
+  const a = pieza(t,{upc:UPC,propietario:'fep'});pieza(t,{upc:UPC,propietario:'fep'});
+  t.db.prepare("insert into usuarios (correo,roles,activo,editar_inventario,creado_en,actualizado_en) values ('fep@prueba.mx','finanzas',1,0,'','')").run();
+  t.env.DEV_USUARIO='fep@prueba.mx';
+  assert.equal((await t.pedir('/api/piezas/repetidas')).status,403);
+  t.db.prepare("update usuarios set editar_inventario=1 where correo='fep@prueba.mx'").run();
+  const r=await t.pedir('/api/piezas/repetidas');
+  assert.equal(r.status,200);assert.equal(r.cuerpo.grupos[0].piezas.length,2);
+  assert.ok(r.cuerpo.grupos[0].piezas.some(p=>p.id===a.id));
+  assert.ok((await t.pedir('/api/yo')).cuerpo.modos_inventario.includes('revisar'));
+  t.db.close();
+});
+
+test('juntar una repetida histórica en cero retira su UPC conservando su código', async () => {
+  const t=preparar(),a=pieza(t,{stock:0,upc:UPC,codigo:'ED-000123'}),b=pieza(t,{upc:UPC,codigo:'ED-000124'});
+  assert.equal((await t.pedir(`/api/piezas/${a.id}/juntar`,{id:crypto.randomUUID(),destino_id:b.id})).status,200);
+  assert.equal(t.db.prepare('select upc from productos where id=?').get(a.id)!.upc,null);
+  assert.equal((await t.pedir('/api/piezas/repetidas')).cuerpo.grupos.length,0);
+  await t.esperar();t.db.close();
+});
+
+test('juntar dentro de un grupo de tres no intenta reasignar el UPC ya correcto del destino', async () => {
+  const acciones=new Map<string,() => Promise<void>>(),llamadas:string[]=[];
+  const nodo=()=>({append(){},setAttribute(){}});
+  resolverRepetida({id:'a',codigo:'ED-000002',stock:1,upc:UPC},{id:'b',codigo:'ED-000001',stock:2,upc:UPC},{
+    nodo,boton:(texto,accion)=>{acciones.set(texto,accion);return nodo();},hoja(){},mensaje(){},cerrar(){},
+    api:async ruta=>{llamadas.push(ruta);return {movidas:1};},imprimir:async()=>true,
+  });
+  await acciones.get('Juntar en ED-000001')!();
+  assert.deepEqual(llamadas,['/api/piezas/a/juntar']);
+});
+
+test('cambiar de grado en Capturar retira el +1 de otro grado y da de alta el grado elegido', async () => {
+  const enviadas:any[]=[];
+  const flujo=crearCaptura({enLinea:()=>true,imprimir:async()=>true,api:async(ruta,cuerpo)=>{
+    if(ruta.startsWith('/api/piezas'))return {piezas:[{id:'a',estado_fisico:'nuevo',upc:UPC,stock:1}],siguiente:null};
+    if(ruta.startsWith('/api/manifiesto'))return {nombre:'Termo',precio:9900};
+    enviadas.push(cuerpo);return {id:cuerpo.id,estado_fisico:cuerpo.estado_fisico};
+  }});
+  await flujo.leer(UPC);assert.equal(flujo.actual().tipo,'existente');
+  flujo.estado('danado');assert.equal(flujo.actual(),null);
+  await flujo.leer(UPC);await flujo.guardar();
+  assert.equal(enviadas[0].estado_fisico,'danado');
+});
+
+test('captura manual general que envía UPC también rechaza la coincidencia y retira el borrador vacío', async () => {
+  const t=preparar(),a=pieza(t,{upc:UPC}),id=crypto.randomUUID();
+  const r=await t.pedir('/api/borradores/manual',{id,upc:UPC,nombre:'Manual',precio:9900,categoria:'otros',stock:2});
+  assert.equal(r.status,409);assert.equal(r.cuerpo.existente.id,a.id);
+  assert.equal(t.db.prepare('select id from productos where id=?').get(id),undefined);
+  assert.equal(filas(t).length,1);t.db.close();
+});
+
+test('+1 sobre una existente pendiente no imprime una etiqueta sin precio', async () => {
+  const impresas:string[]=[];
+  const flujo=crearCaptura({enLinea:()=>true,api:async()=>({despues:3}),imprimir:async id=>{impresas.push(id);return true;}});
+  await flujo.sumar({id:'pendiente',stock:2,estado_analisis:'pendiente'});
+  assert.deepEqual(impresas,[]);assert.equal(flujo.actual().pieza.stock,3);
+});
+
+test('cola de fotos: perder la respuesta de una suma conserva UUID/foto y el reintento borra sólo el registro local', async () => {
+  const t=preparar(),a=cuerpo();await t.pedir('/api/borradores/upc',a);
+  const registro=registroFoto(new Blob(['foto'],{type:'image/jpeg'}),{upc:UPC,cantidad:3});
+  const locales=new Map([[registro.id,registro]]),subidas:any[]=[];let perder=true;
+  const subida=crearSubida({pendientes:async()=>[...locales.values()],leer:async id=>locales.get(id),borrar:async id=>{locales.delete(id);},
+    enviar:async(ruta,opciones)=>{const r=await worker.fetch!(new Request('https://caja.prueba'+ruta,opciones) as never,t.env,t.ctx as never);if(perder){perder=false;throw new TypeError('Respuesta perdida');}return r;},
+    alSubir:(r,d)=>subidas.push({r,d}),
+  });
+  await subida.subir();assert.equal(locales.size,1);assert.equal(filas(t)[0].stock,5);
+  await subida.subir();assert.equal(locales.size,0);assert.equal(filas(t)[0].stock,5);assert.equal(ajustes(t).length,1);
+  assert.deepEqual([subidas[0].r.id,subidas[0].d.id,subidas[0].d.existente,subidas[0].d.sumadas],[registro.id,a.id,true,3]);
+  t.db.close();
 });

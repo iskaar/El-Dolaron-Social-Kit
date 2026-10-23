@@ -319,7 +319,7 @@ function anotarGuardada(guardada, grado, sinFoto = false) {
     li.append(imprimir);
   }
   let guardado = guardada.stock, deseado = guardada.stock, espera = null, envio = Promise.resolve();
-  const cerrar = () => { for (const b of li.querySelectorAll('button')) b.remove(); };
+  const cerrar = () => { for (const b of li.querySelectorAll('button[data-paso]')) b.remove(); };
   async function guardar() {
     const valor = deseado;
     if (valor === guardado) return;
@@ -395,6 +395,7 @@ function seguirBusqueda(pieza, { li, cantidad, cerrar }) {
       if (r.ok) datos = await r.json();
     } catch { /* sin red: se vuelve a preguntar */ }
     if (datos?.estado_analisis === 'listo') {
+      if(datos.existente){li.remove();anotarGuardada(datos,pieza.estado);mensaje(`Ya existía · +${datos.sumadas}${datos.codigo?` a ${datos.codigo}`:''}`);return;}
       cerrar();   // ya va a Etiquetas: su cantidad quedó cerrada
       li.firstElementChild.textContent = datos.nombre;
       li.querySelector('.p').textContent = `${pesos(datos.precio)} · etiqueta en camino`;

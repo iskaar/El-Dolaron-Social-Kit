@@ -24,6 +24,7 @@ const server=createServer(async(req,res)=>{try{
     const inicio=Number(u.searchParams.get('cursor')||0),fin=inicio+25;datos={piezas:piezas.slice(inicio,fin),siguiente:fin<piezas.length?String(fin):null};
   }
   else if(u.pathname.endsWith('/existencia')&&req.method==='POST'){const chunks=[];for await(const ch of req)chunks.push(ch);const c=JSON.parse(Buffer.concat(chunks));const antes=p.stock;p.stock+=c.delta;datos={id:c.id,antes,despues:p.stock};}
+  else if(u.pathname==='/api/piezas/repetidas')datos={grupos:upcQA?[{upc:'12345678901',estado_fisico:'nuevo',piezas:[{...p,upc:'12345678901'},destinoUpc],destino_id:p.id}]:[],siguiente:null};
   else if(u.pathname.endsWith('/juntar'))datos={id:p.id,destino_id:destinoUpc.id,movidas:3,stock:7};
   else if(u.pathname.startsWith('/api/piezas/'))datos={pieza:u.pathname.endsWith(destinoUpc.id)?destinoUpc:p,puede_editar:!consultaSolo,puede_precio:!consultaSolo,historial:[]};
   else if(u.pathname==='/api/borradores'&&req.method==='POST'){const chunks=[];for await(const ch of req)chunks.push(ch);const r=new Request('http://local/foto',{method:'POST',headers:req.headers,body:Buffer.concat(chunks),duplex:'half'});const f=await r.formData();const nuevo={...p,id:f.get('id'),nombre:f.get('prenda')||'Foto de prueba',talla:f.get('talla'),precio:Number(f.get('precio_ropa'))||24900,stock:Number(f.get('cantidad'))||1,capturado_por:'prueba@local.mx'};registros.push(nuevo);datos=nuevo;}
@@ -86,6 +87,7 @@ for(const width of [390,1280]){
   if(width===390){await capturar('00-empezar',width);await js("document.querySelector('.empezar-captura button').click()");await dormir(600);}
   if(upcQA){
     await buscar('0191907910414');
+    await js("document.querySelector('.pieza-actual .stepper button:last-child').click()");
     await js("[...document.querySelectorAll('#modo-capturar button')].find(b=>/^Guardar/.test(b.textContent)).click()");
     await esperar("document.getElementById('estado').textContent.includes('Ya existía · +2 a ED-002318')");
     await capturar('452-01-ya-existia',width);
@@ -104,6 +106,17 @@ for(const width of [390,1280]){
     await js("document.querySelector('#hoja .primario').click()");
     await esperar("document.getElementById('hoja-titulo').textContent==='Reetiquetar'");await capturar('452-04-reetiquetar',width);
     await js("document.getElementById('cerrar-hoja').click()");
+    await modo('revisar');
+    await esperar("!!document.querySelector('[data-estado=repetidas]')");
+    await js("document.querySelector('[data-estado=repetidas]').click()");
+    assert.equal(await js("document.querySelector('.grupo-repetidas select').value"),p.id);
+    await capturar('452-05-repetidas',width);
+    await js(`const s=document.querySelector('.grupo-repetidas select');s.value='${destinoUpc.id}';s.dispatchEvent(new Event('change'))`);
+    assert.ok(await js("[...document.querySelectorAll('.grupo-repetidas button')].some(b=>b.textContent==='Juntar en ED-002319')"));
+    await js("[...document.querySelectorAll('.grupo-repetidas button')].find(b=>b.textContent==='Juntar en ED-002319').click()");
+    await capturar('452-06-repetidas-juntar',width);await js("[...document.querySelectorAll('#hoja button')].find(b=>b.textContent==='Cancelar').click()");
+    consultaSolo=true;await cdp('Page.navigate',{url:`http://127.0.0.1:${port}/inventario?solo=${width}#revisar`});await dormir(600);
+    assert.equal(await js("document.querySelector('[data-estado=repetidas]')"),null,'Sin casilla no se ofrece juntar');
     continue;
   }
   await capturar('01-listo',width);
