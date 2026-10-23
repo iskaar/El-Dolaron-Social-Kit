@@ -2145,6 +2145,11 @@ export default {
         const respuesta = await rutaPiezas(request, env, url, await leerUsuario(env, correo), ctx);
         if (respuesta) return respuesta;
       }
+      // #441: revisar ropa y recortes modifica inventario; sus lecturas conservan el permiso por rol.
+      if (request.method === 'POST' && /^\/api\/(ropa-ia|recortes)\//.test(pathname)
+          && !puedeEditarInventario(await leerUsuario(env, correo))) {
+        return json({ error: 'Tu cuenta no tiene permiso para editar el inventario.' }, 403);
+      }
       const respuestaRopaIA = await rutaRopaAdmin(request, env, pathname);
       if (respuestaRopaIA) return respuestaRopaIA;
       if (request.method === 'POST' && /^\/api\/recortes\/[^/]+\/(aprobar|original|reintentar)$/.test(pathname)
