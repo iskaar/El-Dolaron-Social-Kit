@@ -503,7 +503,7 @@ export async function analizarBorrador(
     const aLaCola = !completa && !buscar && !!fila.upc && !!env.BUSQUEDAS;
     const escrita = await env.DB.prepare(
       `update productos set nombre = ?, marca = ?, categoria = ?, precio_lista = ?, precio = ?,
-                            precio_sugerido = ?, destino = ?, estado_analisis = ?, actualizado_en = ?
+                            precio_sugerido = ?, destino = ?, estado_analisis = ?, actualizado_en = ?, modificado_por = 'ia'
        -- Una pieza revisada (listo) manda sobre un análisis tardío o repetido (#399, #479).
        where id = ? and estado_analisis not in ('descartado', 'listo')`,
     )
@@ -521,7 +521,7 @@ export async function analizarBorrador(
   } catch (error) {
     console.error(JSON.stringify({ mensaje: 'analisis fallido', id, modelo, error: String(error) }));
     await env.DB.prepare(
-      `update productos set estado_analisis = 'error', actualizado_en = ? where id = ? and estado_analisis <> 'descartado'
+      `update productos set estado_analisis = 'error', actualizado_en = ?, modificado_por = 'ia' where id = ? and estado_analisis <> 'descartado'
         and estado_analisis <> 'listo'`,
     )
       .bind(new Date().toISOString(), id)

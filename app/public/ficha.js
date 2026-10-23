@@ -12,6 +12,24 @@ import { esRopa } from './ropa.js';
 const $ = (id) => document.getElementById(id);
 export const pesos = (centavos) => new Intl.NumberFormat('es-MX', { style:'currency', currency:'MXN', maximumFractionDigits:2 }).format(centavos / 100);
 
+// Bitácora de campos (#485, migración 054): «Precio $450.00 → $400.00 · ana@… · 23/10 14:05». Los valores llegan como texto.
+const CAMPOS = { nombre:'Nombre', marca:'Marca', talla:'Talla', categoria:'Categoría', precio:'Precio', precio_lista:'Precio de lista',
+  destino:'Destino', estado_fisico:'Grado', upc:'UPC', codigo:'Código', estado_analisis:'Estado' };
+const ESTADOS_ANALISIS = { pendiente:'en análisis', listo:'lista', error:'por revisar', descartado:'descartada' };
+const AUTORES = { ia:'IA', cola:'búsqueda por código', cron:'proceso automático', sistema:'sistema', manifiesto:'manifiesto' };
+function valorCambio(campo, v) {
+  if (v === null || v === undefined || v === '') return '(vacío)';
+  if (campo === 'precio' || campo === 'precio_lista') return pesos(Number(v));
+  if (campo === 'estado_fisico') return nombreEstado(v);
+  if (campo === 'estado_analisis') return ESTADOS_ANALISIS[v] ?? v;
+  if (campo === 'categoria') return CATEGORIAS.find(([c]) => c === v)?.[1] ?? v;
+  return v;
+}
+export function textoCambio(c) {
+  const fecha = new Date(c.en).toLocaleString('es-MX', { timeZone:'America/Mexico_City', day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit', hourCycle:'h23' }).replace(', ', ' ');
+  return [`${CAMPOS[c.campo] ?? c.campo} ${valorCambio(c.campo, c.antes)} → ${valorCambio(c.campo, c.despues)}`, c.por && (AUTORES[c.por] ?? c.por), fecha].filter(Boolean).join(' · ');
+}
+
 export async function api(ruta, cuerpo, metodo = 'POST') {
   const r = await fetch(ruta, { cache:'no-store', signal:AbortSignal.timeout(15000),
     ...(cuerpo ? { method:metodo, headers:{ 'content-type':'application/json' }, body:JSON.stringify(cuerpo) } : {}) });
@@ -159,11 +177,14 @@ export function crearFicha({ mensaje, alAbrir = () => {}, confirmar = (texto) =>
     $('historial').replaceChildren();
     for (const a of historial) {
       const li = document.createElement('li');
-      const delta = a.despues - a.antes;
-      li.textContent = `${new Date(a.ajustado_en).toLocaleString('es-MX', { timeZone:'America/Mexico_City' })} · ${delta > 0 ? '+' : ''}${delta} · ${a.antes} → ${a.despues} · ${MOTIVOS_TEXTO[a.motivo] ?? a.motivo} · ${a.ajustado_por}`;
+      if (a.campo) li.textContent = textoCambio(a);   // cambio de campo (bitácora #485)
+      else {
+        const delta = a.despues - a.antes;
+        li.textContent = `${new Date(a.ajustado_en).toLocaleString('es-MX', { timeZone:'America/Mexico_City' })} · ${delta > 0 ? '+' : ''}${delta} · ${a.antes} → ${a.despues} · ${MOTIVOS_TEXTO[a.motivo] ?? a.motivo} · ${a.ajustado_por}`;
+      }
       $('historial').append(li);
     }
-    if (!historial.length) { const li = document.createElement('li'); li.textContent = 'Sin ajustes registrados.'; $('historial').append(li); }
+    if (!historial.length) { const li = document.createElement('li'); li.textContent = 'Sin cambios registrados.'; $('historial').append(li); }
   }
 
   function cerrarFormulario() { void cerrarCamaraUpc(); $('corregir').hidden = true; $('reimprimir').hidden = true; }
