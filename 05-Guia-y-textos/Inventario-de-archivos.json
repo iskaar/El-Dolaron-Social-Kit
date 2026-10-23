@@ -373,6 +373,12 @@
       "title": "Visor de inventario para foto y UPC",
       "description": "Captura móvil, conserva IndexedDB eldolaron v1 y los registros compartidos (#446).",
       "format": "JS"
+    },
+    {
+      "file": "app/public/inventario-precio.js",
+      "title": "Solicitud de cambio de precio",
+      "description": "El capturista pide subir o bajar un precio y el dueño lo cambia o lo deja igual desde Revisar y la ficha (#451).",
+      "format": "JS"
     }
   ],
   "version": "1.0"

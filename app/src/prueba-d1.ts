@@ -29,7 +29,11 @@ function d1(db: DatabaseSync) {
       async first() { return db.prepare(sql).get(...(args as never[])) ?? null; },
       async all() { return { results: db.prepare(sql).all(...(args as never[])) }; },
       async run() { return { meta: { changes: Number(db.prepare(sql).run(...(args as never[])).changes) } }; },
-      ejecutar() { return db.prepare(sql).run(...(args as never[])); },
+      // Una sentencia con returning devuelve sus filas, como D1 dentro de un batch.
+      ejecutar() {
+        if (/returning/i.test(sql)) { const results = db.prepare(sql).all(...(args as never[])); return { changes: results.length, results }; }
+        return db.prepare(sql).run(...(args as never[]));
+      },
     };
     return s;
   };
@@ -39,7 +43,7 @@ function d1(db: DatabaseSync) {
     async batch(sentencias: ReturnType<typeof preparar>[]) {
       db.exec('begin');
       try {
-        const salida = sentencias.map((s) => ({ meta: { changes: Number(s.ejecutar().changes) } }));
+        const salida = sentencias.map((s) => { const r = s.ejecutar() as { changes: number | bigint; results?: unknown[] }; return { meta: { changes: Number(r.changes) }, results: r.results }; });
         db.exec('commit');
         return salida;
       } catch (error) {

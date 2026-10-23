@@ -2,6 +2,9 @@
 import { propietarioDe, puedeEditarInventario, type Usuario } from './cuentas.ts';
 import { MOTIVOS } from './conteo.ts';
 import { conciliarSeguro } from './mercadolibre.ts';
+import { pendienteDe } from './solicitudes-precio.ts';
+import { UPC_VISIBLE, repetidaUpc } from './upc-inventario.ts';
+import { normalizarUpc } from '../public/upc.js';
 
 const PAGINA = 25;
 const TRAMO = 200;
@@ -32,6 +35,48 @@ const COLUMNAS = `p.id, p.codigo, p.nombre, p.marca, p.talla, p.categoria, p.pre
   p.creado_en, p.actualizado_en`;
 const VISIBLE = "p.sin_inventario = 0 and p.estado_analisis <> 'descartado'";
 const publica = ({ fila, elegible, ...p }: Candidata) => p;
+
+/** Se inspeccionan 80 candidatas por página, también cuando no hay ninguna repetida. */
+async function piezasRepetidas(env: Env, url: URL, usuario: Usuario | null): Promise<Response> {
+  if (!puedeEditarInventario(usuario)) return json({ error:'Tu cuenta no tiene permiso para editar inventario.' }, 403);
+  let cursor: [string,string,string,number] | null = null;
+  const crudo = url.searchParams.get('cursor');
+  if (crudo !== null) {
+    try { cursor = JSON.parse(crudo); } catch { /* se valida abajo */ }
+    if (!Array.isArray(cursor) || cursor.length !== 4 || typeof cursor[0] !== 'string' || cursor[0].length > 80
+        || !['nuevo','danado','liquidacion'].includes(cursor[1]) || typeof cursor[2] !== 'string' || cursor[2].length > 80
+        || !Number.isSafeInteger(cursor[3]) || cursor[3] < 1)
+      return json({ error:'Cursor inválido.' }, 400);
+  }
+  const propietario = propietarioDe(usuario);
+  const { results } = await env.DB.prepare(`select ${COLUMNAS}, p.rowid as fila, ltrim(p.upc, '0') as clave, coalesce(p.codigo, '') as etiqueta,
+      exists (select 1 from productos r indexed by productos_upc_grado where r.sin_inventario = 0
+        and r.estado_analisis <> 'descartado' and r.upc is not null and r.upc <> ''
+        and r.propietario = p.propietario and ltrim(r.upc, '0') = ltrim(p.upc, '0')
+        and r.estado_fisico = p.estado_fisico and r.id <> p.id) as repetida
+    from productos p indexed by productos_upc_grado where p.propietario = ? and ${UPC_VISIBLE}
+      ${cursor ? "and ltrim(p.upc, '0') >= ? and (ltrim(p.upc, '0'), p.estado_fisico, coalesce(p.codigo, ''), p.rowid) > (?, ?, ?, ?)" : ''}
+    order by ltrim(p.upc, '0'), p.estado_fisico, coalesce(p.codigo, ''), p.rowid limit 81`)
+    .bind(propietario, ...(cursor ? [cursor[0],...cursor] : [])).all<Pieza & { fila:number; clave:string; etiqueta:string; repetida:number }>();
+  const lote = results.slice(0,80), grupos = new Map<string,{upc:string;estado_fisico:string;piezas:Partial<Pieza>[];destino_id:string}>();
+  for (const { fila: _fila, etiqueta: _etiqueta, clave, repetida, ...p } of lote) {
+    if (!repetida || !normalizarUpc(clave)) continue;
+    const key = `${clave}~${p.estado_fisico}`;
+    if (!grupos.has(key)) grupos.set(key,{upc:clave,estado_fisico:p.estado_fisico,piezas:[],destino_id:''});
+    grupos.get(key)!.piezas.push(p);
+  }
+  // Claves contiguas: a lo sumo 41 grupos y una consulta indexada por destino.
+  for (const g of grupos.values()) {
+    const destino = await repetidaUpc(env,g.upc,g.estado_fisico,propietario);
+    if (destino) {
+      g.destino_id = destino.id;
+      if (!g.piezas.some(p => p.id === destino.id)) g.piezas.unshift(destino);
+    }
+  }
+  const ultima = lote.at(-1);
+  return json({ grupos:[...grupos.values()], siguiente:results.length > 80 && ultima
+    ? JSON.stringify([ultima.clave,ultima.estado_fisico,ultima.etiqueta,ultima.fila]) : null });
+}
 
 async function buscarPiezas(env: Env, url: URL, propietario: string): Promise<Response> {
   const q = (url.searchParams.get('q') ?? '').trim();
@@ -111,7 +156,8 @@ async function fichaPieza(env: Env, id: string, usuario: Usuario | null): Promis
   // shortcut: índice por fecha existente; añadir (producto_id, ajustado_en) si el historial supera 10 mil filas.
   const { results: historial } = await env.DB.prepare(`select id, motivo, cantidad, antes, despues, ajustado_por, ajustado_en
     from conteo_ajustes where producto_id = ? order by ajustado_en desc, rowid desc limit 10`).bind(id).all();
-  return json({ pieza, historial, puede_editar: puedeEditarInventario(usuario), puede_precio: !!usuario?.activo && usuario.roles.includes('dueno') });
+  return json({ pieza, historial, puede_editar: puedeEditarInventario(usuario), puede_precio: !!usuario?.activo && usuario.roles.includes('dueno'),
+    solicitud_precio: await pendienteDe(env, id) });
 }
 
 interface Ajuste {
@@ -170,8 +216,67 @@ async function cambiarExistencia(request: Request, env: Env, id: string, usuario
     : json({ error: 'Pieza no encontrada.' }, 404);
 }
 
+/** Conserva ambos códigos: la etiqueta vieja sigue resolviendo en caja, con existencia cero. */
+async function juntarPiezas(request: Request, env: Env, id: string, usuario: Usuario | null, ctx: ExecutionContext): Promise<Response> {
+  if (!puedeEditarInventario(usuario)) return json({ error:'Tu cuenta no tiene permiso para editar inventario.' }, 403);
+  const cuerpo = await request.json().catch(() => null) as { id?: unknown; destino_id?: unknown } | null;
+  if (!UUID.test(id) || typeof cuerpo?.id !== 'string' || !UUID.test(cuerpo.id)
+      || typeof cuerpo.destino_id !== 'string' || !UUID.test(cuerpo.destino_id) || id === cuerpo.destino_id)
+    return json({ error:'Identificador inválido.' }, 400);
+  const propietario = propietarioDe(usuario), destinoId = cuerpo.destino_id;
+  const { results: piezas } = await env.DB.prepare(`select id, codigo, stock, upc, estado_fisico, estado_analisis
+    from productos where id in (?, ?) and propietario = ? and sin_inventario = 0`)
+    .bind(id, destinoId, propietario).all<{ id:string; codigo:string | null; stock:number; upc:string | null; estado_fisico:string; estado_analisis:string }>();
+  if (piezas.length !== 2) return json({ error:'Pieza no encontrada.' }, 404);
+  const previo = () => env.DB.prepare(`select producto_id, cantidad, antes, despues, ajustado_por from conteo_ajustes where id = ?`)
+    .bind(cuerpo.id).first<{ producto_id:string; cantidad:number; antes:number; despues:number; ajustado_por:string }>();
+  const responder = async () => {
+    const a = await previo();
+    if (!a) return null;
+    const b = await env.DB.prepare('select producto_id, despues from conteo_ajustes where id = ?').bind(`${cuerpo.id}:destino`)
+      .first<{ producto_id:string; despues:number }>();
+    return a.producto_id === id && b?.producto_id === destinoId && a.ajustado_por === usuario!.correo
+      ? json({ id, destino_id:destinoId, movidas:a.cantidad, stock:b.despues })
+      : json({ error:'El folio ya pertenece a otro ajuste.' }, 409);
+  };
+  const repetido = await responder();
+  if (repetido) return repetido;
+  const origen = piezas.find(p => p.id === id)!, destino = piezas.find(p => p.id === destinoId)!;
+  if (!origen.codigo || !destino.codigo) return json({ error:'Sin dos etiquetas, usa la fusión de borradores.' }, 409);
+  if (origen.estado_fisico !== destino.estado_fisico) return json({ error:'Sólo puedes juntar piezas del mismo grado.' }, 409);
+  if (origen.stock + destino.stock > 999) return json({ error:'La suma supera 999 piezas.' }, 409);
+  const ahora = new Date().toISOString();
+  const efectos = await env.DB.batch([
+    env.DB.prepare(`update productos set stock = 0, upc = null, actualizado_en = ? where id = ?
+      and propietario = ? and sin_inventario = 0 and estado_analisis <> 'descartado'
+      and stock = ? and upc is ? and codigo = ? and estado_fisico = ?
+      and exists (select 1 from productos where id = ? and propietario = ? and sin_inventario = 0
+        and estado_analisis <> 'descartado' and codigo = ? and estado_fisico = ? and upc is ? and stock + ? <= 999)
+      and not exists (select 1 from conteo_ajustes where id in (?, ?))`)
+      .bind(ahora, id, propietario, origen.stock, origen.upc, origen.codigo, origen.estado_fisico,
+        destinoId, propietario, destino.codigo, origen.estado_fisico, destino.upc, origen.stock, cuerpo.id, `${cuerpo.id}:destino`),
+    env.DB.prepare(`insert into conteo_ajustes
+      (id, producto_id, codigo, nombre, motivo, cantidad, antes, despues, ajustado_por, ajustado_en)
+      select ?, id, codigo, nombre, 'correccion', ?, ?, 0, ?, ? from productos where id = ? and changes() = 1`)
+      .bind(cuerpo.id, origen.stock, origen.stock, usuario!.correo, ahora, id),
+    env.DB.prepare(`update productos set stock = stock + ?, actualizado_en = ? where id = ? and changes() = 1`)
+      .bind(origen.stock, ahora, destinoId),
+    env.DB.prepare(`insert into conteo_ajustes
+      (id, producto_id, codigo, nombre, motivo, cantidad, antes, despues, ajustado_por, ajustado_en)
+      select ?, id, codigo, nombre, 'correccion', ?, stock - ?, stock, ?, ? from productos where id = ? and changes() = 1`)
+      .bind(`${cuerpo.id}:destino`, origen.stock, origen.stock, usuario!.correo, ahora, destinoId),
+  ]);
+  if (efectos.every(e => e.meta.changes === 1)) ctx.waitUntil(conciliarSeguro(env, { productoIds:[id,destinoId] }));
+  return await responder() ?? json({ error:'La pieza origen cambió o la suma supera 999. Revisa y vuelve a intentar.' }, 409);
+}
+
 /** Worker valida host y cuenta; cada operación aplica además propietarioDe. */
 export async function rutaPiezas(request: Request, env: Env, url: URL, usuario: Usuario | null, ctx: ExecutionContext): Promise<Response | null> {
+  if (url.pathname === '/api/piezas/repetidas') return request.method === 'GET' ? piezasRepetidas(env,url,usuario)
+    : json({ error:'Método no permitido.' }, 405);
+  const juntar = /^\/api\/piezas\/([^/]+)\/juntar$/.exec(url.pathname);
+  if (juntar) return request.method === 'POST' ? juntarPiezas(request, env, juntar[1], usuario, ctx)
+    : json({ error:'Método no permitido.' }, 405);
   const existencia = /^\/api\/piezas\/([^/]+)\/existencia$/.exec(url.pathname);
   if (existencia) return request.method === 'POST' ? cambiarExistencia(request, env, existencia[1], usuario, ctx)
     : json({ error: 'Método no permitido.' }, 405);

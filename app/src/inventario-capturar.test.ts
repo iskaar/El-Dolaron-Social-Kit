@@ -5,6 +5,7 @@ import { tienda, PRODUCTO } from './prueba-d1.ts';
 
 test('Capturar +1 usa rastro D1, un UUID por operación y exactamente una etiqueta; sin red no escribe',async(t0)=>{
   const t=tienda();t0.after(()=>t.db.close());
+  t.db.prepare("update productos set estado_analisis='listo' where id=?").run(PRODUCTO);
   const impresiones:any[]=[],llamadas:any[]=[];let sinRed=false,perderRespuesta=true;
   const api=async(ruta:string,cuerpo?:any)=>{llamadas.push({ruta,cuerpo});const r=await t.pedir(ruta,cuerpo);if(r.status>=400)throw Object.assign(new Error(r.cuerpo.error),{status:r.status});
     if(ruta.endsWith('/existencia')&&perderRespuesta){perderRespuesta=false;throw new TypeError('Respuesta perdida');}return r.cuerpo;};
@@ -43,7 +44,7 @@ test('ED- y nombre no crean; UPC nuevo acumula alias, guarda con UUID estable y 
 
 test('una búsqueda paginada no crea una captura ni consulta el manifiesto prematuramente',async()=>{
   const rutas:string[]=[];let pagina=0;
-  const flujo=crearCaptura({api:async ruta=>{rutas.push(ruta);return ++pagina===1?{piezas:[],siguiente:'cursor'}:{piezas:[{id:'vieja',stock:2}],siguiente:null};},imprimir:async()=>true,enLinea:()=>true});
+  const flujo=crearCaptura({api:async ruta=>{rutas.push(ruta);return ++pagina===1?{piezas:[],siguiente:'cursor'}:{piezas:[{id:'vieja',stock:2,estado_fisico:'nuevo'}],siguiente:null};},imprimir:async()=>true,enLinea:()=>true});
   await flujo.leer('012345678905');assert.equal(flujo.actual(),null);
   await flujo.leer('012345678905',true);assert.equal(flujo.actual()!.pieza.id,'vieja');
   assert.ok(rutas.every(r=>r.startsWith('/api/piezas?')));assert.match(rutas[1],/cursor=cursor/);

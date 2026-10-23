@@ -11,6 +11,7 @@
     <div class="presentacion">
       <div><img id="foto" alt="" hidden><div id="sin-foto">Sin foto</div></div>
       <div class="datos"><h2 id="nombre"></h2><p id="detalles" class="ayuda"></p><p id="upc" class="ayuda"></p><p><strong id="precio"></strong><span id="precio-lista"></span></p>
+        <div id="bloque-precio" class="bloque-precio"></div>
         <h3>Existencia</h3><button id="solo-consulta" class="solo-consulta" type="button" hidden>Solo consulta</button>
         <div class="acciones"><button id="menos" type="button" aria-label="Bajar existencia en uno" hidden>−</button><output id="stock" aria-label="Existencia actual"></output><button id="sumar" type="button" aria-label="Subir existencia en uno" hidden>+</button></div>
         <div id="existencia" hidden>
@@ -33,6 +34,8 @@
         <label for="e-nombre">Nombre</label><input id="e-nombre" maxlength="120" required>
         <label for="e-marca">Marca</label><input id="e-marca" maxlength="60">
         <label for="e-talla">Talla</label><input id="e-talla" list="tallas" maxlength="30"><datalist id="tallas"></datalist>
+        <label for="e-upc">Código del producto (UPC)</label><input id="e-upc" inputmode="numeric" maxlength="14" autocomplete="off">
+        <button id="leer-upc" type="button">Leer con cámara</button><div id="e-upc-visor" hidden></div>
         <div id="campos-precio" hidden>
           <label for="e-precio">Precio de venta ($)</label><input id="e-precio" inputmode="decimal" autocomplete="off">
           <label for="e-lista">Precio de lista ($)</label><input id="e-lista" inputmode="decimal" autocomplete="off">
