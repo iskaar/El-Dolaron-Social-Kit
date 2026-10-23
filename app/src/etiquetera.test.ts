@@ -306,6 +306,64 @@ test('corregir nombre o talla despues de imprimir regresa la pieza para reimprim
   delete (globalThis as any).localStorage;
 });
 
+test('el grado A, B o C se imprime en un recuadro, sin tocar el resto de la etiqueta (#453)', () => {
+  const sin = tsplEtiqueta(PIEZA);
+  for (const [estado, letra, palabra] of [['nuevo', 'A', 'Nuevo'], ['danado', 'B', 'Danado'], ['liquidacion', 'C', 'Liquidacion']] as const) {
+    const tspl = tsplEtiqueta({ ...PIEZA, estado_fisico: estado });
+    const caja = tspl.match(/^BOX (\d+),(\d+),(\d+),(\d+),3$/m)!;
+    assert.ok(caja, 'falta el recuadro');
+    assert.ok(tspl.includes(`,"4",0,1,1,"${letra}"`), `falta la letra ${letra}`);
+    // La palabra va al pie solo si no es A (A es lo de siempre) y la A deja el pie como estaba.
+    assert.equal(tspl.includes(` - ${palabra}"`), letra !== 'A');
+    if (letra === 'A') assert.ok(tspl.includes('"ED-000123 - 2026-S38"'));
+    const [x0, y0, x1, y1] = caja.slice(1).map(Number);
+    // Dentro de la etiqueta, a la derecha del precio de venta ($120 = 16..144), a la izquierda del precio de lista ($199) y arriba de las barras (y=108).
+    assert.ok(x0 >= 16 + 4 * 32 && x1 <= 406 - 16 - 4 * 24, `recuadro fuera de su zona: ${caja[0]}`);
+    assert.ok(y0 >= 54 && y1 <= 108);
+    // Las barras, el precio y el nombre se quedan donde estaban.
+    for (const linea of sin.split('\r\n').filter((l) => /^(TEXT|BAR|BARCODE) /.test(l) && !l.includes(`,"4",0`) && !l.endsWith(`"${pie(sin)}"`))) {
+      assert.ok(tspl.includes(linea), `cambio: ${linea}`);
+    }
+  }
+});
+
+const pie = (tspl: string) => tspl.match(/^TEXT \d+,170,"1",0,1,1,"(.*)"$/m)![1];
+
+test('sin precio de lista el recuadro del grado va al borde derecho; con precios largos no se encima (#453)', () => {
+  const borde = tsplEtiqueta({ ...PIEZA, precio_lista: 0, estado_fisico: 'danado' }).match(/^BOX (\d+),/m)!;
+  assert.equal(Number(borde[1]) + 44, 406 - 16);
+  const largo = tsplEtiqueta({ ...PIEZA, precio: 150000, precio_lista: 999900, estado_fisico: 'liquidacion' });
+  const [, x0, , x1] = largo.match(/^BOX (\d+),\d+,(\d+),/m)!.map(Number) as number[];
+  assert.ok(x0 >= 16 + 5 * 32, 'se encima con el precio de venta');
+  assert.ok(Number(largo.match(/^BAR (\d+),/m)![1]) > Number(largo.match(/^BOX \d+,\d+,(\d+),/m)![1]), 'se encima con el precio de lista');
+});
+
+test('la palabra del grado no se pasa del ancho del pie (#453)', () => {
+  const tspl = tsplEtiqueta({ ...PIEZA, talla: 'XXL-TALLA-MUY-LARGA-QUE-NO-CABE', estado_fisico: 'liquidacion' });
+  assert.ok(!tspl.includes('Liquidacion"'), 'la palabra no cabe y debe quedarse solo la letra');
+  assert.ok(/^TEXT \d+,\d+,"4",0,1,1,"C"$/m.test(tspl));
+});
+
+test('cambiar el grado de una pieza etiquetada la regresa para reimprimir; marcas sin grado se leen como A (#453)', async () => {
+  const guardado = new Map<string, string>();
+  (globalThis as any).localStorage = { getItem: (k: string) => guardado.get(k) ?? null, setItem: (k: string, v: string) => guardado.set(k, v) };
+  const { marcarImpresa, impresas, etiquetaVigente } = await import('../public/etiquetera.js');
+  const pieza = { precio: 10000, precio_lista: 0, nombre: 'Playera', talla: 'M', stock: 1, estado_fisico: 'danado' };
+  marcarImpresa('a', '2026-10-22T18:00:00.000Z', pieza);
+  assert.equal(impresas().a.estado_fisico, 'danado');
+  assert.equal(etiquetaVigente(impresas().a, pieza), true);
+  assert.equal(etiquetaVigente(impresas().a, { ...pieza, estado_fisico: 'nuevo' }), false);
+  assert.equal(etiquetaVigente(impresas().a, { ...pieza, estado_fisico: 'liquidacion' }), false);
+  assert.equal(etiquetaVigente(impresas().a, { ...pieza, estado_fisico: 'liquidacion', stock: 0 }), true);   // sin existencia no hay etiqueta que cambiar
+
+  // Marca guardada antes del grado: compatible con A, desactualizada si hoy es B o C.
+  guardado.set('etiqueta-impresas', JSON.stringify({ v: { hora: '2026-10-22T17:00:00.000Z', precio: 10000, precio_lista: 0, nombre: 'Playera', talla: 'M' } }));
+  assert.equal(etiquetaVigente(impresas().v, { ...pieza, estado_fisico: 'nuevo' }), true);
+  assert.equal(etiquetaVigente(impresas().v, { ...pieza, estado_fisico: undefined }), true);
+  assert.equal(etiquetaVigente(impresas().v, pieza), false);
+  delete (globalThis as any).localStorage;
+});
+
 test('la prueba de codigos largos usa la etiqueta real y el mismo ancho de barra', () => {
   const tspl = tsplPruebaLargos();
   const barras = [...tspl.matchAll(/BARCODE (\d+),\d+,"128",56,0,0,(\d+),\d+,"(\d+)"/g)];

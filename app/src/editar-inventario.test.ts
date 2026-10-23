@@ -168,6 +168,8 @@ test('confirmación: precio con etiqueta pegada, nombre y talla; reimpresión co
   assert.equal(avisoReimpresion({ precio: 40000, precio_lista: 60000, nombre: 'Chamarra Levis', talla: 'L' }, antes, ahora), null);
   assert.equal(avisoReimpresion(undefined, { ...antes, codigo: null }, ahora), null);          // aún sin etiqueta
   assert.equal(avisoReimpresion(undefined, { ...antes, destino: 'banda_g119' }, { ...ahora, destino: 'banda_g119' }), null);
+  assert.match(avisoReimpresion({ precio: 40000, precio_lista: 60000, nombre: 'Chamarra Levis', talla: 'L', estado_fisico: 'nuevo' }, antes, { ...ahora, estado_fisico: 'danado' })!, /grado A · Nuevo.*ahora es B · Dañado/);
+  assert.equal(avisoReimpresion({ precio: 40000, precio_lista: 60000, nombre: 'Chamarra Levis', talla: 'L' }, antes, { ...ahora, estado_fisico: 'nuevo' }), null);   // marca sin grado = A
   assert.equal(avisoReimpresion(undefined, antes, { ...ahora, stock: 0 }), null);              // sin existencia no hay etiqueta que cambiar
 });
 

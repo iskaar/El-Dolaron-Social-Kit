@@ -59,15 +59,18 @@ export function resumenCorreccion(pieza, cuerpo, marca) {
 }
 
 /**
- * Misma regla que /etiquetas (etiquetaVigente): si la etiqueta pegada ya no dice el precio, el nombre o la
- * talla de hoy, hay que reimprimirla. Sin marca en este navegador se toma como pegada la pieza antes de guardar.
+ * Misma regla que /etiquetas (etiquetaVigente): si la etiqueta pegada ya no dice el precio, el nombre, la
+ * talla o el grado de hoy, hay que reimprimirla. Sin marca en este navegador se toma como pegada la pieza antes de guardar.
  */
 export function avisoReimpresion(marca, antes, ahora) {
   if (!antes.codigo || ahora.destino !== 'etiqueta') return null;
   const pegada = marca ?? antes;
   if (etiquetaVigente(pegada, ahora)) return null;
+  const grado = (p) => p.estado_fisico ?? 'nuevo';   // las marcas de antes del grado (#453) se leen como A
   return precioImpreso(pegada) !== precioImpreso(ahora)
     ? `La etiqueta pegada dice ${pesos(pegada.precio)} y ahora cuesta ${pesos(ahora.precio)}.`
+    : grado(pegada) !== grado(ahora)
+    ? `La etiqueta pegada dice grado ${nombreEstado(grado(pegada))} y ahora es ${nombreEstado(grado(ahora))}.`
     : `La etiqueta pegada dice «${pegada.nombre ?? ''}${pegada.talla ? ` · ${pegada.talla}` : ''}».`;
 }
 

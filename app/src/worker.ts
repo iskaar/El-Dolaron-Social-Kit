@@ -876,7 +876,7 @@ async function prepararEtiquetas(request: Request, env: Env, propietario: string
   }
 
   const { results } = await env.DB.prepare(
-    `select id, codigo, nombre, talla, precio, precio_lista, semana_ingreso, destino, stock
+    `select id, codigo, nombre, talla, precio, precio_lista, semana_ingreso, destino, stock, estado_fisico
      from productos where id in (${huecos}) and propietario = ? and estado_analisis <> 'descartado' order by rowid`,
   )
     .bind(...limpios, propietario)
