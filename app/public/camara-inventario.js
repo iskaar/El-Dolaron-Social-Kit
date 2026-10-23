@@ -1,3 +1,15 @@
+export const INACTIVIDAD_CAMARA_MS = 60_000;
+
+/** Cuenta solo tiempo visible y sin hojas; la actividad vuelve a dar un minuto completo. */
+export function crearReposoCamara({ apagar, ahora = () => Date.now() }) {
+  let restante=INACTIVIDAD_CAMARA_MS,desde=ahora(),pausada=true;
+  return {
+    actividad(){restante=INACTIVIDAD_CAMARA_MS;desde=ahora();},
+    pausar(valor){if(valor===pausada)return;const t=ahora();if(valor)restante-=t-desde;desde=t;pausada=valor;},
+    comprobar(){if(!pausada&&ahora()-desde>=restante){pausada=true;apagar();}},
+  };
+}
+
 /** Visor único 4:3 de captura; no modifica camara.js, que pertenece también a la caja. */
 export function crearCamara({ video, alLeer, alEstado = () => {}, puedeLeer = () => true }) {
   let generacion=0,timer,pista,detectando=false;
