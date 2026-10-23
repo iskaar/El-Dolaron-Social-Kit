@@ -56,11 +56,19 @@ export function stepper(valor, cambiar, { min = 1, max = 99, nombre = 'Cantidad'
     b.addEventListener('pointerdown', () => { inicio = setTimeout(() => { repetir = setInterval(() => fijar(valor + paso), 120); }, 500); });
     for (const e of ['pointerup', 'pointerleave', 'pointercancel']) b.addEventListener(e, parar);
   }
+  // Escribir el número va en el lugar del número, no en una hoja: dentro de otra hoja (p. ej. «Pieza sin foto») la reemplazaría.
   const editar = () => {
-    const f = nodo('form'), l = nodo('label', nombre), input = nodo('input');
-    input.inputMode = 'numeric'; input.value = String(valor); l.append(input);
-    f.append(l, boton('Usar cantidad', () => { const n = Number(input.value); if (!Number.isInteger(n) || n < min || n > max) return mensaje(`Usa ${min} a ${max}`, 'aviso'); fijar(n); cerrarHoja(); }, 'primario'));
-    f.onsubmit = (e) => e.preventDefault(); hoja(nombre, f); input.focus(); input.select();
+    const input = nodo('input', undefined, 'stepper-entrada'); input.inputMode = 'numeric'; input.value = String(valor); input.setAttribute('aria-label', nombre);
+    let hecho = false;
+    const cerrar = (aplicar, volver) => {
+      if (hecho) return; hecho = true;
+      // Solo dígitos; fuera de rango se acota a min/max (fijar).
+      if (aplicar && /^\d+$/.test(input.value.trim())) fijar(Number(input.value.trim()));
+      input.remove(); salida.hidden = false; if (volver) salida.focus();
+    };
+    input.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); cerrar(true, true); } else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); cerrar(false, true); } });
+    input.addEventListener('blur', () => cerrar(true, false));
+    salida.hidden = true; salida.after(input); input.focus(); input.select();
   };
   salida.onclick = editar; salida.onkeydown = (e) => { if (['Enter', ' '].includes(e.key)) { e.preventDefault(); editar(); } };
   raiz.append(menos, salida, mas); raiz.poner = fijar; return raiz;
