@@ -1,18 +1,35 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { cuerpoRevision, filtrarRevision, diaTienda } from '../public/inventario-revisar.js';
+import { cuerpoRevision, existenciaNueva, filtrarRevision, diaTienda } from '../public/inventario-revisar.js';
 import worker from './worker.ts';
 import { tienda, PRODUCTO } from './prueba-d1.ts';
 
-test('Revisar preserva precio/destino, nunca manda stock y solo dueño recalcula una etiquetada',()=>{
+test('Revisar preserva precio/destino, no manda stock sin tocarlo y solo dueño recalcula una etiquetada',()=>{
   const p={nombre:'Lámpara',marca:'',talla:'',categoria:'hogar',estado_fisico:'nuevo',precio:24900,precio_lista:50000,destino:'etiqueta',stock:9,codigo:'ED-000001'};
-  const campos={...p,precio:'200',precio_lista:'500',stock:99};
+  const campos={...p,precio:'200',precio_lista:'500',stock:'9'};
   assert.equal(cuerpoRevision(p,campos,false).cuerpo.precio,24900);
   assert.equal(cuerpoRevision(p,campos,false).cuerpo.destino,'etiqueta');
   assert.equal('stock' in cuerpoRevision(p,campos,false).cuerpo,false);
   assert.equal(cuerpoRevision(p,campos,true).cuerpo.precio,20000);
   assert.ok(cuerpoRevision(p,campos,false,true).error);
   assert.equal('precio' in cuerpoRevision(p,campos,true,true).cuerpo,false);
+});
+
+test('Revisar manda la existencia solo si se tocó: PATCH si no es listo, ajuste auditado si es listo (#469)',()=>{
+  const p={nombre:'Lámpara',marca:'',talla:'',categoria:'hogar',estado_fisico:'nuevo',precio:24900,precio_lista:50000,destino:'etiqueta',stock:9,codigo:'ED-000001',estado_analisis:'pendiente'};
+  const campos={...p,precio:'249',precio_lista:'500',stock:'9',stock_visto:'9'};
+  assert.equal(existenciaNueva(p,campos),null);
+  assert.equal('stock' in cuerpoRevision(p,campos,true).cuerpo,false);
+  // Se tocó: la pieza aún no está lista conserva el PATCH de siempre.
+  assert.deepEqual(existenciaNueva(p,{...campos,stock:'4'}),{valor:4,esperado:9});
+  assert.equal(cuerpoRevision(p,{...campos,stock:'4'},true).cuerpo.stock,4);
+  // «listo» ya es vendible: el PATCH no lleva stock (lo fija el ajuste auditado con la existencia vista).
+  const listo={...p,estado_analisis:'listo'};
+  assert.equal('stock' in cuerpoRevision(listo,{...campos,stock:'4'},true).cuerpo,false);
+  assert.deepEqual(existenciaNueva(listo,{...campos,stock:'0'}),{valor:0,esperado:9});
+  // Un borrador viejo que no se tocó no pisa lo que vendió la caja después.
+  assert.equal(existenciaNueva({...p,stock:7},campos),null);
+  for(const malo of ['','x','1.5','-1','1000'])assert.ok(cuerpoRevision(p,{...campos,stock:malo},true).error,malo);
 });
 
 test('filtros combinados de revisión usan el día de tienda, estado, precio y sesión',()=>{

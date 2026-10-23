@@ -143,11 +143,11 @@ export function crearFicha({ mensaje, alAbrir = () => {}, confirmar = (texto) =>
       const motivo = sinRed ? 'Sin red: se suma al volver la señal' : b.disabled ? 'Revisa el ajuste pendiente o el límite' : '';
       b.disabled = false; b.setAttribute('aria-disabled', String(!!motivo)); b.dataset.motivo = motivo;
     }
-    // PATCH deja la pieza `listo`: una que aún se analiza se revisa en /admin.
+    // PATCH deja la pieza `listo`: una que aún se analiza se corrige en Inventario › Revisar.
     const corregible = puedeEditar && pieza.estado_analisis === 'listo';
     $('edicion').hidden = !puedeEditar;
     $('editar').hidden = !corregible || !$('corregir').hidden;
-    $('nota-edicion').textContent = puedeEditar && !corregible ? 'Esta pieza aún no está lista: se corrige en /admin.' : '';
+    $('nota-edicion').textContent = puedeEditar && !corregible ? 'Esta pieza aún no está lista: corrígela en Inventario › Revisar.' : '';
     $('guardar-correccion').disabled = $('cancelar-correccion').disabled = guardando;
     $('foto').hidden = !pieza.tiene_foto;
     $('sin-foto').hidden = !!pieza.tiene_foto;

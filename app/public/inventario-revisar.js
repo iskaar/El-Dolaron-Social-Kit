@@ -25,13 +25,22 @@ export function filtrarRevision(piezas, filtro, sesionDe = new Map(), hoy = diaT
   });
 }
 
-/** El PATCH de revisión nunca transporta stock; solo Recalcular omite precio deliberadamente. */
+/** Existencia que el usuario tocó (la caja pudo vender desde que se abrió el formulario); null si no. `stock_visto` es la que se mostró. */
+export function existenciaNueva(p,campos){
+  const visto=campos.stock_visto??String(p.stock),t=String(campos.stock??'').trim();
+  if(campos.stock===undefined||t===visto)return null;
+  const n=Number(t);
+  return t!==''&&Number.isInteger(n)&&n>=0&&n<=999?{valor:n,esperado:Number(visto)}:{error:'La existencia debe ser un entero de 0 a 999.'};
+}
+
+/** El PATCH de revisión lleva stock solo si se tocó y la pieza no es `listo` (esa va por el ajuste auditado, ver guardar); solo Recalcular omite precio deliberadamente. */
 export function cuerpoRevision(p, campos, dueno, recalcular=false) {
   const puedePrecio=dueno||!p.codigo;
   const destino=campos.destino||p.destino;
   const r=cuerpoCorreccion({...p,destino},campos,puedePrecio);
   if(r.error)return r;
-  const cuerpo={...r.cuerpo,categoria:campos.categoria||p.categoria,estado_fisico:campos.estado_fisico||p.estado_fisico};
+  const e=existenciaNueva(p,campos);if(e?.error)return e;
+  const cuerpo={...r.cuerpo,...(e&&p.estado_analisis!=='listo'?{stock:e.valor}:{}),categoria:campos.categoria||p.categoria,estado_fisico:campos.estado_fisico||p.estado_fisico};
   if(recalcular){if(p.codigo&&!dueno)return {error:'El precio lo cambia el dueño'};delete cuerpo.precio;}
   return {cuerpo};
 }
@@ -161,14 +170,15 @@ export async function iniciar(ctx) {
     if(puedeEditar)avanzado(p);
   }
   async function destinos(){if(!familias.length){const d=await api('/api/familias');familias=d.familias;montos=d.montos;}return [['etiqueta','Etiqueta individual'],...familias.flatMap(f=>montos.map(p=>[`banda_${f.prefijo}${p}`,`${f.nombre} $${p}`]))];}
-  function camposDe(p){return borradores.get(p.id)||{nombre:p.nombre,marca:p.marca||'',talla:p.talla||'',categoria:p.categoria,estado_fisico:p.estado_fisico,precio:String(p.precio/100),precio_lista:p.precio_lista?String(p.precio_lista/100):'',destino:p.destino};}
+  function camposDe(p){return borradores.get(p.id)||{nombre:p.nombre,marca:p.marca||'',talla:p.talla||'',categoria:p.categoria,estado_fisico:p.estado_fisico,precio:String(p.precio/100),precio_lista:p.precio_lista?String(p.precio_lista/100):'',destino:p.destino,stock:String(p.stock),stock_visto:String(p.stock)};}
   function avanzado(p){
-    const details=nodo('details'),summary=nodo('summary','Avanzado'),form=nodo('form',undefined,'formulario'),campos=camposDe(p);details.append(summary,form);derecha.append(details);
-    for(const[k,t]of [['nombre','Nombre'],['marca','Marca'],['talla','Talla'],['categoria','Categoría'],['estado_fisico','Estado'],['destino','Destino'],['precio_lista','Precio de lista ($)'],['precio','Precio de venta ($)']]){
+    const seccion=nodo('section'),form=nodo('form',undefined,'formulario'),campos=camposDe(p);seccion.append(nodo('h3','Corregir datos'),form);derecha.append(seccion);
+    for(const[k,t]of [['nombre','Nombre'],['marca','Marca'],['talla','Talla'],['categoria','Categoría'],['estado_fisico','Estado'],['destino','Destino'],['precio_lista','Precio de lista ($)'],['precio','Precio de venta ($)'],['stock','Existencia']]){
       if((k==='precio'||k==='precio_lista')&&p.codigo&&!dueno)continue;
       const l=nodo('label',t),input=nodo(['categoria','estado_fisico','destino'].includes(k)?'select':'input');
       const poner=opciones=>{for(const[v,t]of opciones){const o=nodo('option',t);o.value=v;input.append(o);}input.value=campos[k];};
       if(k==='categoria')poner(CATEGORIAS);else if(k==='estado_fisico')poner(ESTADOS);else if(k==='destino'){poner([[p.destino,p.destino==='etiqueta'?'Etiqueta individual':p.destino]]);void destinos().then(d=>{input.replaceChildren();poner(d);}).catch(e=>mensaje(e.message,'error'));}
+      else if(k==='stock'){input.type='number';input.min=0;input.max=999;input.step=1;input.inputMode='numeric';input.value=campos[k];}
       else{input.value=campos[k];input.maxLength=k==='nombre'?120:k==='marca'?60:k==='talla'?30:12;}
       input.oninput=()=>{campos[k]=input.value;borradores.set(p.id,campos);if(k==='categoria')actualizarGrado();};input.onchange=input.oninput;l.append(input);form.append(l);
       if(k==='estado_fisico')l.dataset.grado='';
@@ -184,7 +194,12 @@ export async function iniciar(ctx) {
   }
   async function guardar(p,campos=camposDe(p),recalcular=false){
     const r=cuerpoRevision(p,campos,dueno,recalcular);if(r.error)throw new Error(r.error);
-    const datos=await api(`/api/borradores/${p.id}`,r.cuerpo,'PATCH');Object.assign(p,datos,{estado_analisis:'listo'});borradores.delete(p.id);mensaje('Cambios guardados','ok');if(abierta?.id===p.id)await abrir(p);return datos;
+    const e=existenciaNueva(p,campos),audita=e&&p.estado_analisis==='listo';
+    const datos=await api(`/api/borradores/${p.id}`,r.cuerpo,'PATCH');Object.assign(p,datos,{estado_analisis:'listo'});borradores.delete(p.id);
+    // Una pieza `listo` ya es vendible: su existencia se fija por el ajuste auditado con la que se vio (`esperado`), igual que en la ficha.
+    let aviso;if(audita)try{p.stock=(await api(`/api/piezas/${p.id}/existencia`,{id:crypto.randomUUID(),fijar_a:e.valor,esperado:e.esperado,motivo:'correccion'})).despues;}catch(x){aviso=x.status===409?'Datos guardados, pero la existencia cambió desde que abriste la pieza (venta, apartado o ajuste). Revísala y corrígela de nuevo.':x.status===403?'Datos guardados, pero tu cuenta no puede ajustar la existencia.':`Datos guardados, pero la existencia no cambió: ${x.message}`;}
+    if(aviso){if(abierta?.id===p.id)await abrir(p);throw new Error(aviso);}
+    mensaje('Cambios guardados','ok');if(abierta?.id===p.id)await abrir(p);return datos;
   }
   async function accion(p,accion,confirmada=false){
     if(!puedeEditar)return;
