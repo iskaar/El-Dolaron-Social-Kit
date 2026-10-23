@@ -210,6 +210,94 @@ if(!upcQA){
   capturista=false;editarInventario=false;
   await js("sessionStorage.removeItem('inventario-camara')");
 }
+if(!upcQA){
+  // #461 PR B: modo enfocado. Se enciende desde ⋯, dura la sesión y deja a la vista solo lo de la captura en serie.
+  const OCULTOS=['#chip-impresora','#chip-celular','#chip-red','#modos','.tira-capturas','.empezar-captura','.captura-movil > ul.lista','.captura-movil > h3','#estado[data-tipo=neutro]'];
+  const visible=sel=>js(`[...document.querySelectorAll(${JSON.stringify(sel)})].some(n=>n.getClientRects().length>0&&getComputedStyle(n).visibility!=='hidden')`);
+  const enPantalla=sel=>js(`(()=>{const n=document.querySelector(${JSON.stringify(sel)});if(!n)return false;const r=n.getBoundingClientRect();return r.width>0&&r.height>0&&r.top>=0&&r.bottom<=innerHeight&&r.left>=0&&r.right<=innerWidth})()`);
+  const tecla=async(key,modifiers=0)=>{const code='Digit'+key;await cdp('Input.dispatchKeyEvent',{type:'keyDown',key,code,modifiers,windowsVirtualKeyCode:key.charCodeAt(0)});await cdp('Input.dispatchKeyEvent',{type:'keyUp',key,code,modifiers,windowsVirtualKeyCode:key.charCodeAt(0)});};
+  const encender=async()=>{await js("document.getElementById('menu').click()");await js("[...document.querySelectorAll('#hoja button')].find(b=>b.textContent==='Modo enfocado').click()");await esperar("document.body.classList.contains('enfocado')");};
+  for(const [width,height] of [[360,640],[412,740],[390,844]]){
+    await cdp('Emulation.setDeviceMetricsOverride',{width,height,deviceScaleFactor:2.625,mobile:true});
+    await cdp('Page.navigate',{url:`http://127.0.0.1:${port}/inventario?enfocado=${width}#capturar`});
+    await esperar("!!document.querySelector('.empezar-captura button')");
+    await js("localStorage.clear();sessionStorage.clear()");await cdp('Page.reload');
+    await esperar("!!document.querySelector('.empezar-captura button')");
+    await js("document.querySelector('.empezar-captura button').click()");
+    await esperar("document.querySelector('.alternar-camara').getAttribute('aria-pressed')==='true'");
+    assert.equal(await js("document.body.classList.contains('enfocado')"),false,'Empieza apagado');
+    assert.equal(await visible('#modos'),true);
+    await encender();
+    assert.equal(await js("sessionStorage.getItem('inventario-enfocado')"),'true','La elección vive en la sesión');
+    assert.equal(await js("document.getElementById('hoja').open"),false,'La hoja del menú se cierra');
+    for(const tipo of ['Mercancía','Ropa']){
+      await js(`[...document.querySelectorAll('.tipo-cabecera button')].find(b=>b.textContent==='${tipo}').click()`);await dormir(250);
+      for(const sel of OCULTOS)assert.equal(await visible(sel),false,`${tipo} ${width}×${height}: «${sel}» sigue a la vista`);
+      assert.equal(await js("document.getElementById('estado').textContent.includes('Escanea')&&document.getElementById('estado').getClientRects().length>0"),false,'La línea «Escanea o toma foto» se oculta');
+      const salir=await js("(()=>{const b=document.getElementById('salir-enfocado'),r=b.getBoundingClientRect();return {w:r.width,h:r.height,dentro:r.top>=0&&r.bottom<=innerHeight&&r.left>=0&&r.right<=innerWidth,texto:b.textContent.trim()}})()");
+      assert.ok(salir.w>=44&&salir.h>=44&&salir.dentro&&salir.texto==='Salir del modo enfocado',`Salida visible y de 44 px: ${JSON.stringify(salir)}`);
+      assert.equal(await enPantalla('.disparo'),true,`${tipo} ${width}×${height}: el disparo cabe sin desplazar`);
+      assert.equal(await js("(()=>{const b=document.querySelector('.disparo'),r=b.getBoundingClientRect();return document.elementFromPoint(r.x+r.width/2,r.y+r.height/2)===b&&scrollY===0})()"),true,'Disparo libre de otras capas y sin desplazamiento');
+      assert.equal(await enPantalla('.alternar-camara'),true,'El interruptor de la cámara sigue a la vista');
+      assert.equal(await enPantalla('.barra-captura .stepper'),true,'La cantidad sigue a la vista');
+      assert.equal(await visible('.barra-captura [aria-label=Grado]'),tipo==='Mercancía','El grado A/B/C solo en Mercancía');
+      assert.equal(await visible('.tablero-ropa'),tipo==='Ropa');
+      if(tipo==='Ropa')for(const sel of ['.rodillo[aria-label=Prenda]','.rodillo[aria-label=Precio]','.marcas-ropa','.tallas-ropa'])assert.equal(await visible(sel),true,`Ropa conserva ${sel}`);
+      await capturar(`461-enfocado-${tipo==='Ropa'?'ropa':'mercancia'}-${height}`,width);
+    }
+    // Mercancía con la tarjeta del manifiesto y la pieza registrada sin foto.
+    await js("[...document.querySelectorAll('.tipo-cabecera button')].find(b=>b.textContent==='Mercancía').click()");
+    await buscar('0191907910414');
+    assert.deepEqual(await js("[...document.querySelectorAll('.pieza-actual input')].map(i=>i.getClientRects().length>0)"),[true,true],'Nombre y precio de la tarjeta siguen a la vista');
+    assert.equal(await enPantalla('.disparo'),true,'Con la tarjeta, el disparo sigue a la vista');
+    await capturar(`461-enfocado-tarjeta-${height}`,width);
+    p.tiene_foto=0;p.foto_key='';
+    await buscar('ED-002318');
+    assert.equal(await js("[...document.querySelectorAll('.pieza-actual button')].some(b=>b.textContent==='Añadir foto'&&b.getClientRects().length>0)"),true,'«Añadir foto» a la vista para una pieza sin foto');
+    await capturar(`461-enfocado-existente-${height}`,width);
+    p.tiene_foto=1;p.foto_key='foto';
+    await buscar('999999999999');
+    assert.equal(await visible('.buscar-internet'),false,'«Buscar en internet» oculto');
+    assert.equal(await js("[...document.querySelectorAll('.pieza-actual button')].some(b=>b.textContent==='Tomar foto'&&b.getClientRects().length>0)"),true);
+    if(width===412){
+      // Línea de alerta: nace con el problema, es role=alert y se va al resolverlo.
+      const alerta=async texto=>{await esperar(`!document.getElementById('alerta-enfocado').hidden&&document.getElementById('alerta-enfocado').textContent.includes(${JSON.stringify(texto)})`);
+        assert.equal(await js("document.getElementById('alerta-enfocado').getAttribute('role')"),'alert');
+        assert.equal(await js("(()=>{const r=document.getElementById('alerta-enfocado').getBoundingClientRect();return r.top>=0&&r.top<120&&r.height>0&&r.height<=64})()"),true,'Línea compacta arriba');};
+      const sinAlerta=()=>esperar("document.getElementById('alerta-enfocado').hidden");
+      // Las lecturas de arriba guardaron una pieza nueva con la impresora sin conectar: la etiqueta pedida queda como alerta hasta conectarla.
+      await alerta('Impresora sin conectar · falta etiqueta');await capturar('461-enfocado-alerta-impresora-412',412);
+      await js("import('/etiquetera.js').then(m=>m.conectarEtiquetera())");
+      await sinAlerta();
+      await js("import('/inventario-ui.js').then(m=>m.mensaje('No se guardó la pieza','error'))");
+      await alerta('No se guardó la pieza');assert.equal(await visible('#error'),false,'No hay dos líneas de alerta');await capturar('461-enfocado-alerta-guardado-412',412);
+      await js("import('/inventario-ui.js').then(m=>m.mensaje('Listo','ok'))");await sinAlerta();
+      // Sin red con fotos por subir.
+      await js("Object.defineProperty(navigator,'onLine',{configurable:true,get:()=>false});dispatchEvent(new Event('offline'))");
+      await js("document.querySelector('.disparo').click()");
+      await alerta('Sin red · 1 sin subir');await capturar('461-enfocado-alerta-sin-red-412',412);
+      await js("delete navigator.onLine;dispatchEvent(new Event('online'))");
+      await sinAlerta();
+    }
+    // Salida: botón, teclado y persistencia por sesión.
+    await js("document.getElementById('salir-enfocado').click()");
+    assert.equal(await js("document.body.classList.contains('enfocado')"),false);
+    assert.equal(await visible('#modos'),true,'Sale con la navegación a la vista');
+    assert.equal(await js("sessionStorage.getItem('inventario-enfocado')"),'false');
+    assert.equal(await js("document.activeElement.id"),'menu');
+    assert.equal(await enPantalla('.disparo'),true,`Modo normal ${width}×${height}: el disparo cabe`);
+    await tecla('0',1);await esperar("document.body.classList.contains('enfocado')");
+    await cdp('Page.reload');await esperar("document.body.classList.contains('enfocado')");
+    await esperar("document.querySelector('.alternar-camara')?.getAttribute('aria-pressed')==='true'");
+    assert.equal(await visible('.empezar-captura'),false,'Recargar en modo enfocado no vuelve a mostrar la intro y arranca la cámara');
+    await tecla('2',1);await esperar("document.getElementById('modo-buscar').hidden===false");
+    assert.equal(await js("document.body.classList.contains('enfocado')"),false,'Fuera de Capturar no se aplica');
+    assert.equal(await visible('#modos'),true);
+    await tecla('1',1);await esperar("document.body.classList.contains('enfocado')");
+    await tecla('0',1);await esperar("!document.body.classList.contains('enfocado')");
+  }
+  await js("sessionStorage.removeItem('inventario-enfocado');sessionStorage.removeItem('inventario-camara')");
+}
 for(const width of [390,1280]){
   consultaSolo=false;listaVacia=false;falloLista=false;
   await cdp('Emulation.setDeviceMetricsOverride',{width,height:width===390?844:800,deviceScaleFactor:2,mobile:width===390});

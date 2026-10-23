@@ -210,3 +210,16 @@ main:has(#modo-buscar:not([hidden])) .caja{margin-bottom:12px}
   body:has(#modo-capturar:not([hidden])) #chip-impresora{flex:0 1 68px}
   body:has(#modo-capturar:not([hidden])) #chip-red{flex:0 1 55px}
 }
+
+/* Modo enfocado (#461): `body.enfocado` solo existe en el celular y en Capturar. Queda cámara, disparo, cantidad, grado, tarjeta y ropa;
+   los problemas críticos (error de guardado, cola de fotos, impresora) suben a #alerta-enfocado. */
+#alerta-enfocado,#salir-enfocado{display:none}
+@media(max-width:999px){
+  body.enfocado #alerta-enfocado{display:flex;min-height:36px;padding:6px var(--gutter);font-size:14px;line-height:1.25}
+  body.enfocado #salir-enfocado{display:inline-flex;align-items:center;justify-content:center;flex:0 1 96px;min-height:44px;padding:4px 6px;font-size:12px;line-height:1.1;background:var(--amarillo);color:var(--tinta);border-color:var(--blanco)}
+  body.enfocado #chip-impresora,body.enfocado #chip-celular,body.enfocado #chip-red,body.enfocado #error,
+  body.enfocado #estado:not([data-tipo=ok]):not([data-tipo=aviso]):not([data-tipo=etiqueta]),
+  body.enfocado .tira-capturas,body.enfocado .captura-movil>ul.lista,body.enfocado .captura-movil>h3,
+  body.enfocado #modo-capturar .columnas>div:last-child,body.enfocado .buscar-internet,body.enfocado .empezar-captura{display:none}
+}
+@media(max-width:999px){body.enfocado .captura-movil:has(>.tablero-ropa:not([hidden]))>.visor:not(.bloqueada){height:clamp(120px,24dvh,200px)}}
