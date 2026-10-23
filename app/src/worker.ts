@@ -40,7 +40,7 @@ import { CLAVES_CATEGORIA } from '../public/categorias.js';
 import { tallaValida } from '../public/tallas.js';
 import {
   permiso, puede, quienEs, leerUsuario, yo, pedirAcceso, listarCuentas, guardarCuenta, resolverSolicitud, propietarioDe,
-  esDeCaja, soloComputadora, CAJAS,
+  esDeCaja, soloComputadora, CAJAS, puedeEditarInventario,
 } from './cuentas.ts';
 import { cajeroEnTurno, listarCajeros, entrar, salir, ponerPin } from './cajeros.ts';
 import { registrarSocio, buscarSocio, buscarPorCodigo, basesListas, sentenciasDeVenta, saldo } from './dolarones.ts';
@@ -87,17 +87,31 @@ interface FilaBorrador {
 }
 
 /**
- * El hostname del vendedor solo sirve la camara y la subida de fotos.
- * Cloudflare Access decide quien entra; esto decide que hay detras, y sigue
- * valiendo si algun dia la politica de Access queda mal configurada. Los precios
- * y el inventario no viven en el telefono que anda en el pasillo.
+ * El host del capturista ofrece Capturar, Buscar y Revisar (#446, Isaac 22/10).
+ * Access autentica; rol, propietario y casilla siguen autorizando cada operación.
+ * Ajustes, configuración y la lista general de impresión no se abren aquí.
  */
 const RUTAS_VENDEDOR = new Set(['/captura', '/foto.js', '/tallas.js', '/api/salud', '/sin-acceso', '/api/yo',
   // Escanear del manifiesto (Issue #365): el telefono ve nombre y precio de lo que escanea, nada mas.
-  '/escanear', '/categorias.js', '/upc.js', '/cola-fotos.js', '/estados.js']);
+  '/escanear', '/categorias.js', '/upc.js', '/cola-fotos.js', '/estados.js',
+  '/inventario-celular.js', '/foto-pendiente.js', '/camara-inventario.js',
+  '/inventario-revisar.js', '/sesiones.js', '/precios-ml.js', '/compartir.js',
+  '/inventario-capturar.js', '/inventario-ropa.js', '/envio-etiquetas.js', '/semana.js',
+  '/inventario', '/inventario.css', '/inventario.js', '/inventario-ui.js', '/lector.js', '/ficha.js',
+  '/venta.js', '/etiquetera.js', '/impresora.js', '/camara.js', '/vendor/html5-qrcode.min.js', '/ropa.js']);
 const CORRECCION_CAPTURA = /^\/api\/borradores\/([^/]+)\/(existencia|talla|revision)$/;
 
 export function permitidaParaVendedor(pathname: string, metodo: string): boolean {
+  if (/^\/(inventario|pieza)(?:\.html)?\/?$/.test(pathname)) return metodo === 'GET';
+  if (pathname === '/api/piezas' || /^\/api\/piezas\/[^/]+$/.test(pathname) || /^\/api\/foto\/[^/]+$/.test(pathname)) return metodo === 'GET';
+  if (/^\/api\/piezas\/[^/]+\/existencia$/.test(pathname)) return metodo === 'POST';
+  if (pathname === '/api/borradores' && metodo === 'GET') return true;
+  if (pathname === '/api/familias' || pathname === '/api/recortes') return metodo === 'GET';
+  if (/^\/api\/recortes\/[^/]+\/imagen$/.test(pathname)) return metodo === 'GET';
+  if (/^\/api\/recortes\/[^/]+\/(aprobar|original|reintentar)$/.test(pathname)) return metodo === 'POST';
+  if (/^\/api\/borradores\/[0-9a-f-]{36}$/.test(pathname)) return ['PATCH', 'DELETE'].includes(metodo);
+  if (/^\/api\/borradores\/[^/]+\/(fusionar|analizar|imagen\/buscar)$/.test(pathname)) return metodo === 'POST';
+  if (/^\/api\/borradores\/[^/]+\/imagen$/.test(pathname)) return metodo === 'PUT';
   if (pathname === '/camara-remota' || pathname === '/camara-remota.js') return metodo === 'GET';
   if (pathname === '/api/camara/solicitud') return metodo === 'GET';
   if (/^\/api\/camara\/solicitud\/[^/]+\/(tomar|lista|cancelar)$/.test(pathname)) return metodo === 'POST';
@@ -844,7 +858,7 @@ async function prepararEtiquetas(request: Request, env: Env, propietario: string
   }
 
   const { results } = await env.DB.prepare(
-    `select id, codigo, nombre, talla, precio, precio_lista, semana_ingreso, destino, stock
+    `select id, codigo, nombre, talla, precio, precio_lista, semana_ingreso, destino, stock, estado_fisico
      from productos where id in (${huecos}) and propietario = ? and estado_analisis <> 'descartado' order by rowid`,
   )
     .bind(...limpios, propietario)
@@ -2116,8 +2130,13 @@ export default {
         }
       }
 
+      if (/^\/pieza(?:\.html)?\/?$/.test(pathname) && request.method === 'GET') {
+        const destino = new URL('/inventario', url.origin); destino.search = url.search; destino.hash = 'buscar';
+        return Response.redirect(destino.href, 302);
+      }
+
       if (pathname === '/api/yo') {
-        return await yo(env, correo, soloComputadora(await leerUsuario(env, correo)) ? await cajeroEnTurno(request, env) : null);
+        return await yo(env, correo, soloComputadora(await leerUsuario(env, correo)) ? await cajeroEnTurno(request, env) : null, !!env.HOST_VENDEDOR && url.hostname === env.HOST_VENDEDOR);
       }
       if (pathname === '/api/camara/solicitud' || pathname.startsWith('/api/camara/solicitud/')) {
         return await rutaCamaraRemota(request, env, pathname, usuario!);
@@ -2128,6 +2147,8 @@ export default {
       }
       const respuestaRopaIA = await rutaRopaAdmin(request, env, pathname);
       if (respuestaRopaIA) return respuestaRopaIA;
+      if (request.method === 'POST' && /^\/api\/recortes\/[^/]+\/(aprobar|original|reintentar)$/.test(pathname)
+          && !puedeEditarInventario(await leerUsuario(env, correo))) return json({ error: 'Tu cuenta no tiene permiso para editar el inventario.' }, 403);
       const respuestaRecortes = await rutaRecortesAdmin(request, env, pathname);
       if (respuestaRecortes) return respuestaRecortes;
       const respuestaImagen = await rutaImagenUpc(request, env, pathname, correo, ctx);
@@ -2197,6 +2218,15 @@ export default {
           const fila = await env.DB.prepare('select propietario from productos where id = ?').bind(id).first<{ propietario: string }>();
           if (fila && fila.propietario !== propietario) return json({ error: 'Pieza no encontrada.' }, 404);
         }
+      }
+
+      // #441 PR D: editar, fusionar, descartar, reanalizar y poner imagen exigen la casilla «Editar
+      // inventario» (el dueño siempre). La corrección de captura propia de 24 h (existencia, talla y
+      // revision) no pasa por aquí: es el carrusel de la cámara y no pide casilla.
+      const escritura = pathname.match(/^\/api\/borradores\/[^/]+(?:\/(fusionar|analizar|imagen(?:\/buscar)?))?$/);
+      if (escritura && (escritura[1] || ['PATCH', 'DELETE'].includes(request.method))
+          && !puedeEditarInventario(await leerUsuario(env, correo))) {
+        return json({ error: 'Tu cuenta no tiene permiso para editar el inventario.' }, 403);
       }
 
       const imagenPieza = await rutaImagenPieza(request, env, pathname);

@@ -46,7 +46,7 @@ async function buscarPiezas(env: Env, url: URL, propietario: string): Promise<Re
     const m = /^(\d{1,14})~([1-9]\d{0,15})$/.exec(crudo);
     cursor = m && Number.isSafeInteger(Number(m[2])) ? { fecha: m[1], fila: Number(m[2]) } : null;
   }
-  if (!q || q.length > 80 || (!codigo && !upc && q.length < 3) || (crudo !== null && !cursor))
+  if (q.length > 80 || (q && !codigo && !upc && q.length < 3) || (crudo !== null && !cursor))
     return json({ error: 'Escribe un código o al menos 3 caracteres (máximo 80); revisa el cursor.' }, 400);
 
   if (codigo && !cursor) {
@@ -69,7 +69,8 @@ async function buscarPiezas(env: Env, url: URL, propietario: string): Promise<Re
   let empate = !!cursor;
   // El filtro va en SELECT: LIMIT acota candidatas leídas, incluso si ninguna coincide.
   while (restantes > 0 && piezas.length < PAGINA) {
-    const limite = Math.min(TRAMO, restantes);
+    // Sin filtro casi toda candidata es elegible: leer una página, no un tramo de 200 (cuota de D1).
+    const limite = Math.min(upc || palabras.length ? TRAMO : PAGINA, restantes);
     const { results } = await env.DB.prepare(`select p.rowid as fila, ${COLUMNAS},
         (${VISIBLE} ${upc ? 'and p.propietario = ?' : ''} ${coincide.length ? 'and ' + coincide.join(' and ') : ''}) as elegible
       from productos p indexed by ${upc ? 'productos_upc' : 'productos_propietario_creado'}
@@ -110,7 +111,7 @@ async function fichaPieza(env: Env, id: string, usuario: Usuario | null): Promis
   // shortcut: índice por fecha existente; añadir (producto_id, ajustado_en) si el historial supera 10 mil filas.
   const { results: historial } = await env.DB.prepare(`select id, motivo, cantidad, antes, despues, ajustado_por, ajustado_en
     from conteo_ajustes where producto_id = ? order by ajustado_en desc, rowid desc limit 10`).bind(id).all();
-  return json({ pieza, historial, puede_editar: puedeEditarInventario(usuario) });
+  return json({ pieza, historial, puede_editar: puedeEditarInventario(usuario), puede_precio: !!usuario?.activo && usuario.roles.includes('dueno') });
 }
 
 interface Ajuste {

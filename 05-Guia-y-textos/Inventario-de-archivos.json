@@ -228,7 +228,13 @@
     {
       "file": "app/public/pieza.js",
       "title": "Consulta de piezas y lector",
-      "description": "Búsqueda paginada, cámara reutilizada y ajustes de existencia con motivo, confirmación al fijar, deshacer y reintento idempotente según permiso del servidor.",
+      "description": "Búsqueda paginada, lector y cámara reutilizada; la ficha de la pieza vive en ficha.js.",
+      "format": "JS"
+    },
+    {
+      "file": "app/public/ficha.js",
+      "title": "Ficha de pieza",
+      "description": "Módulo de la ficha: existencia con rastro (motivo, fijar con confirmación, deshacer, reintento idempotente) y corrección de nombre, marca, talla y precios con confirmación y aviso de reimpresión, según permiso del servidor (Issue #441).",
       "format": "JS"
     },
     {
@@ -283,6 +289,90 @@
       "height": 156,
       "format": "PNG",
       "background": "transparent"
+    },
+    {
+      "file": "app/public/inventario.html",
+      "title": "Inventario único",
+      "description": "Pantalla única de inventario; Issue #446.",
+      "format": "HTML"
+    },
+    {
+      "file": "app/public/inventario.css",
+      "title": "Interfaz de inventario",
+      "description": "Pantalla única de inventario; Issue #446.",
+      "format": "CSS"
+    },
+    {
+      "file": "app/public/inventario.js",
+      "title": "Navegación de inventario",
+      "description": "Pantalla única de inventario; Issue #446.",
+      "format": "JS"
+    },
+    {
+      "file": "app/public/inventario-ui.js",
+      "title": "Controles compartidos de inventario",
+      "description": "Pantalla única de inventario; Issue #446.",
+      "format": "JS"
+    },
+    {
+      "file": "app/public/lector.js",
+      "title": "Receptor único del lector",
+      "description": "Pantalla única de inventario; Issue #446.",
+      "format": "JS"
+    },
+    {
+      "file": "app/public/imprimir-lote.js",
+      "title": "Motor de etiquetas y sesión automática",
+      "description": "Impresión compartida, conserva marcas y calibración de main (#446).",
+      "format": "JS"
+    },
+    {
+      "file": "app/public/envio-etiquetas.js",
+      "title": "Estado de envío de etiquetas",
+      "description": "Impresión compartida, conserva marcas y calibración de main (#446).",
+      "format": "JS"
+    },
+    {
+      "file": "app/public/inventario-imprimir.js",
+      "title": "Etiquetas y bandas en Inventario",
+      "description": "Impresión compartida, conserva marcas y calibración de main (#446).",
+      "format": "JS"
+    },
+    {
+      "file": "app/public/inventario-capturar.js",
+      "title": "Captura de inventario",
+      "description": "Captura integrada con los endpoints existentes y cámara remota (#446).",
+      "format": "JS"
+    },
+    {
+      "file": "app/public/inventario-ropa.js",
+      "title": "Ropa y rodillo de tallas",
+      "description": "Captura integrada con los endpoints existentes y cámara remota (#446).",
+      "format": "JS"
+    },
+    {
+      "file": "app/public/inventario-revisar.js",
+      "title": "Revisión integrada de inventario",
+      "description": "Filtros, ficha, acciones con casilla y recortes de la pieza (#446).",
+      "format": "JS"
+    },
+    {
+      "file": "app/public/inventario-celular.js",
+      "title": "Captura única de Android y correcciones",
+      "description": "Captura móvil, conserva IndexedDB eldolaron v1 y los registros compartidos (#446).",
+      "format": "JS"
+    },
+    {
+      "file": "app/public/foto-pendiente.js",
+      "title": "Contrato de fotos pendientes",
+      "description": "Captura móvil, conserva IndexedDB eldolaron v1 y los registros compartidos (#446).",
+      "format": "JS"
+    },
+    {
+      "file": "app/public/camara-inventario.js",
+      "title": "Visor de inventario para foto y UPC",
+      "description": "Captura móvil, conserva IndexedDB eldolaron v1 y los registros compartidos (#446).",
+      "format": "JS"
     }
   ],
   "version": "1.0"

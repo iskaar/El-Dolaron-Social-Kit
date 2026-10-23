@@ -11,8 +11,8 @@ const FEP = 'b2222222-2222-4222-8222-222222222222';
 
 test('finanzas no modifica piezas de la tienda y puede corregir las suyas', async () => {
   const { db, env, pedir, esperar } = tienda();
-  db.prepare(`insert into usuarios (correo, nombre, roles, activo, creado_en, actualizado_en)
-              values ('fep@prueba.mx', 'FEP', 'finanzas', 1, '', '')`).run();
+  db.prepare(`insert into usuarios (correo, nombre, roles, activo, editar_inventario, creado_en, actualizado_en)
+              values ('fep@prueba.mx', 'FEP', 'finanzas', 1, 1, '', '')`).run();
   db.prepare(`insert into productos (id, nombre, precio, stock, semana_ingreso, creado_en, actualizado_en, propietario)
               values (?, 'Bolsa FEP', 30000, 2, 'S41', '', '', 'fep')`).run(FEP);
   env.DEV_USUARIO = 'fep@prueba.mx';

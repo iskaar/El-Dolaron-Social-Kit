@@ -45,6 +45,8 @@
   #precio-lista { margin-left:12px; color:#5b6478; }
   #stock { min-width:60px; text-align:center; font-size:32px; font-weight:750; }
   #menos, #sumar { width:56px; height:56px; font-size:28px; }
+  #reimprimir { margin-top:12px; padding:8px 12px; background:#fff6d9; border:1px solid var(--amarillo); border-radius:8px; }
+  #reimprimir-enlace { display:inline-flex; align-items:center; font-weight:650; }
   #historial { padding-left:20px; font-size:14px; }
   #historial li { margin:12px 0; overflow-wrap:anywhere; }
   #visor { margin-top:12px; width:100%; overflow:hidden; }
@@ -95,6 +97,23 @@
           <button id="deshacer" class="claro" type="button" hidden>Deshacer</button>
         </div>
       </div>
+    </div>
+    <div id="edicion" hidden>
+      <h3>Corregir datos</h3>
+      <p id="nota-edicion" class="ayuda"></p>
+      <button id="editar" class="claro" type="button" aria-controls="corregir">Corregir nombre y precio</button>
+      <form id="corregir" hidden>
+        <label for="e-nombre">Nombre</label><input id="e-nombre" maxlength="120" required>
+        <label for="e-marca">Marca</label><input id="e-marca" maxlength="60">
+        <label for="e-talla">Talla</label><input id="e-talla" list="tallas" maxlength="30"><datalist id="tallas"></datalist>
+        <div id="campos-precio" hidden>
+          <label for="e-precio">Precio de venta ($)</label><input id="e-precio" inputmode="decimal" autocomplete="off">
+          <label for="e-lista">Precio de lista ($)</label><input id="e-lista" inputmode="decimal" autocomplete="off">
+        </div>
+        <p id="nota-precio" class="ayuda"></p>
+        <div class="acciones"><button id="guardar-correccion" type="submit">Guardar cambios</button><button id="cancelar-correccion" class="claro" type="button">Cancelar</button></div>
+      </form>
+      <div id="reimprimir" role="status" hidden><p id="reimprimir-texto"></p><a id="reimprimir-enlace" href="/etiquetas">Reimprimir etiqueta</a></div>
     </div>
     <h3>Historial de existencia</h3><p class="ayuda">Últimos 10 ajustes.</p><ol id="historial"></ol>
   </section>
