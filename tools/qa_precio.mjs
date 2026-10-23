@@ -99,7 +99,9 @@ try {
     assert.equal(await js("document.querySelector('#hoja .primario').getAttribute('aria-disabled')"), 'true', 'Enviar bloqueado hasta elegir sentido');
     await clic('Enviar al dueño', "document.getElementById('hoja')"); await dormir(150);
     assert.match(await texto('#estado'), /Elige si está barato o caro/);
+    assert.match(await texto('#estado'), /Elige si está barato o caro/);
     await js("document.querySelector('#hoja input[value=subir]').click()");
+    assert.doesNotMatch(await texto('#estado'), /Elige si está barato o caro/, 'el aviso viejo se quita al elegir');
     await escribir('#hoja .campo-precio input', '300'); await escribir('#hoja textarea', 'Se vende a $600 en otra tienda');
     await capturar('03-hoja-llena', width, { hoja:true });
     await escribir('#hoja .campo-precio input', '300'); await clic('Enviar al dueño', "document.getElementById('hoja')"); await dormir(150);
@@ -128,6 +130,13 @@ try {
     assert.equal(await js("document.querySelector('.solicitud-precio .primario').textContent"), 'Cambiar a $350.00');
     assert.equal(await js("document.querySelectorAll('.solicitud-precio')[1].querySelector('input').value"), '249.00', 'sin sugerido, el precio actual');
     assert.equal(await js("document.querySelectorAll('.solicitud-precio')[1].querySelector('.primario').getAttribute('aria-disabled')"), 'true', 'igual al actual: bloqueado');
+    // Foto y nombre abren la ficha de la pieza (botón de al menos 44 px)
+    assert.ok(await js("(()=>{const r=document.querySelector('.solicitud-precio .sp-abrir').getBoundingClientRect();return r.width>=44&&r.height>=44})()"));
+    await js("document.querySelector('.solicitud-precio .sp-abrir').click()"); await dormir(600);
+    assert.equal(await js("document.getElementById('ficha').hidden"), false); assert.equal(await js("document.getElementById('codigo').textContent"), 'ED-002318');
+    await capturar('11b-ficha-desde-solicitud', width);
+    if (width === 390) await js("document.getElementById('volver').click()"); await dormir(300);
+    assert.equal(await js("document.querySelectorAll('.fila-precio .solicitud-precio').length"), 2, 'la lista de precios sigue ahí');
     // Cambio grande: pide confirmar
     await escribir('.solicitud-precio .sp-formulario input', '100'); assert.equal(await js("document.querySelector('.solicitud-precio .primario').textContent"), 'Cambiar a $100.00');
     await clic('Cambiar a $100.00', "document.querySelector('.solicitud-precio')"); await dormir(300);

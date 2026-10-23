@@ -363,7 +363,7 @@ async function destinoValido(destino: string, env: Env): Promise<boolean> {
  * Con etiqueta (codigo) la pieza ya esta a la venta con ese precio impreso: solo
  * el dueno lo cambia (Issue #75). Antes de etiquetar, poner precio es parte de la captura.
  */
-async function corregirBorrador(id: string, cambios: Record<string, unknown>, env: Env, esDueno: boolean, captura?: { correo: string; upc: string }, precioEsperado?: number): Promise<Response> {
+async function corregirBorrador(id: string, cambios: Record<string, unknown>, env: Env, esDueno: boolean, captura?: { correo: string; upc: string }, precioEsperado?: number, cierraSolicitudPor?: string): Promise<Response> {
   if (!UUID.test(id)) {
     return json({ error: 'Identificador invalido.' }, 400);
   }
@@ -437,7 +437,8 @@ async function corregirBorrador(id: string, cambios: Record<string, unknown>, en
     return json({ error: 'Esta pieza ya tiene etiqueta: solo el dueño cambia su precio.' }, 403);
   }
 
-  const guardada = await env.DB.prepare(
+  const ahora = new Date().toISOString();
+  const actualizar = env.DB.prepare(
     `update productos set nombre = ?, categoria = ?, marca = ?, talla = ?, precio_lista = ?, precio = ?,
                           estado_fisico = ?, destino = ?, stock = coalesce(?, stock), estado_analisis = 'listo', actualizado_en = ?
                           ${captura ? `, codigo = ${CODIGO_NUEVO}` : ''}
@@ -451,9 +452,19 @@ async function corregirBorrador(id: string, cambios: Record<string, unknown>, en
   )
     .bind(nombre, categoria, marca, talla, precioLista, precio, estadoFisico, destino,
       // Sin `stock` en el cuerpo no se toca: la caja pudo vender piezas desde que se abrio la ficha.
-      cambios.stock === undefined ? null : stock, new Date().toISOString(), id, ...(captura ? [captura.correo, captura.upc] : []),
-      ...(precioEsperado === undefined ? [] : [precioEsperado]))
-    .first<{ stock: number }>();
+      cambios.stock === undefined ? null : stock, ahora, id, ...(captura ? [captura.correo, captura.upc] : []),
+      ...(precioEsperado === undefined ? [] : [precioEsperado]));
+  // #451: si el dueño cambia el precio por esta vía y había una solicitud pendiente, se cierra en el mismo batch,
+  // solo si la pieza sigue viva y el precio de verdad cambia.
+  const guardada = cierraSolicitudPor && precio !== fila.precio
+    ? (await env.DB.batch([
+      env.DB.prepare(`update solicitudes_precio set estado = 'aplicada', precio_nuevo = ?, resuelto_por = ?, resuelto_en = ?
+        where producto_id = ? and estado = 'pendiente'
+          and exists (select 1 from productos where id = ? and estado_analisis <> 'descartado' and precio <> ?)`)
+        .bind(precio, cierraSolicitudPor, ahora, id, id, precio),
+      actualizar,
+    ]))[1].results?.[0] as { stock: number } | undefined
+    : await actualizar.first<{ stock: number }>();
 
   // `precioEsperado` (#451): el precio solo cambia si sigue valiendo lo que vio quien lo cambia.
   if (!guardada) return json({ error: precioEsperado === undefined ? 'La pieza ya fue eliminada.' : 'El precio de la pieza cambió. Revisa el precio actual.' }, 409);
@@ -2400,7 +2411,7 @@ export default {
       if (pieza) {
         if (request.method === 'PATCH') {
           const esDueno = !!(await leerUsuario(env, correo))?.roles.includes('dueno');
-          return await corregirBorrador(pieza[1], await request.json(), env, esDueno);
+          return await corregirBorrador(pieza[1], await request.json(), env, esDueno, undefined, undefined, esDueno ? correo : undefined);
         }
         if (request.method === 'DELETE') {
           return await descartarBorrador(pieza[1], env, propietarioDe(await leerUsuario(env, correo)));

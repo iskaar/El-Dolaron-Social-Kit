@@ -203,3 +203,24 @@ test('el precio cambia en medio de aplicar: el UPDATE lo detecta y no pisa ni ci
   assert.equal(r.status, 409); assert.equal(r.cuerpo.precio, 30000, 'la respuesta trae el precio de hoy para que el UI lo muestre');
   assert.equal(producto(t).precio, 30000); assert.equal(solicitudes(t)[0].estado, 'pendiente');
 });
+
+test('el dueño cambia el precio por el PATCH (Editar o Revisar): la solicitud pendiente se cierra sola, solo si el precio cambió', async (t0) => {
+  const t = tienda(); t0.after(() => t.db.close()); equipo(t); como(t, CAP);
+  await pedir(t, { precio_sugerido: 20000 }); como(t, DUENO);
+  const patch = (cuerpo: Record<string, unknown>) => t.pedir(`/api/borradores/${PRODUCTO}`, { destino: 'etiqueta', ...cuerpo }, 'PATCH');
+  // Sin cambio de precio (solo el nombre): sigue pendiente.
+  assert.equal((await patch({ nombre: 'Ventilador de mesa', precio: 25000 })).status, 200);
+  assert.equal(solicitudes(t)[0].estado, 'pendiente');
+  // Un PATCH que falla (precio sobre la lista) tampoco la cierra.
+  assert.equal((await patch({ precio: 40001 })).status, 400);
+  assert.equal(solicitudes(t)[0].estado, 'pendiente');
+  const r21 = await patch({ precio: 21000 }); assert.equal(r21.status, 200, JSON.stringify(r21.cuerpo));
+  const s = solicitudes(t)[0];
+  assert.deepEqual([s.estado, s.precio_nuevo, s.resuelto_por], ['aplicada', 21000, DUENO]);
+  assert.notEqual(s.resuelto_en, '');
+  assert.equal(producto(t).precio, 21000);
+  // Otra solicitud nueva sobre la misma pieza ya se puede pedir y un PATCH sin pendiente no falla.
+  como(t, CAP); assert.equal((await pedir(t, { sentido: 'subir' })).status, 201);
+  como(t, DUENO); assert.equal((await patch({ precio: 21000 })).status, 200);
+  assert.equal(solicitudes(t)[1].estado, 'pendiente', 'mismo precio: no se cierra');
+});

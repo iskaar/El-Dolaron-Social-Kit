@@ -96,12 +96,14 @@ export async function iniciar(ctx) {
     lista.replaceChildren();placeholder.hidden=true;barra.hidden=true;nota.hidden=true;
     const n=precios.lista.length;
     const encabezado=nodo('li',undefined,'acciones');cuentaPrecios=nodo('b');encabezado.append(cuentaPrecios,boton('Actualizar',cargar));lista.append(encabezado);textoCuenta();
-    for(const s of precios.lista){const li=nodo('li',undefined,'fila-precio');li.append(filaSolicitud(ctx,s,{alResolver:r=>{const p=piezas.find(o=>o.id===s.producto_id);if(p&&r.precio)p.precio=r.precio;}}));lista.append(li);}
+    for(const s of precios.lista){const li=nodo('li',undefined,'fila-precio');li.append(filaSolicitud(ctx,s,{alAbrir:()=>verPieza(s),alResolver:r=>{const p=piezas.find(o=>o.id===s.producto_id);if(p&&r.precio)p.precio=r.precio;}}));lista.append(li);}
     if(!n)lista.append(vacio('✓ Sin precios por revisar',boton('Ver por revisar',()=>{filtro.estado='revisar';pintar();})));
     mensaje(n?`${n} ${n===1?'precio por revisar':'precios por revisar'}`:'Sin precios por revisar');
   }
   let cuentaPrecios;
   const textoCuenta=()=>{if(cuentaPrecios?.isConnected)cuentaPrecios.textContent=precios.n?`${precios.n} ${precios.n===1?'precio por revisar':'precios por revisar'}`:'Nadie ha pedido cambios';};
+  // La ficha de Revisar; si la pieza no está en la cola cargada, la ficha de Buscar con el mismo flujo del lector.
+  async function verPieza(s){const p=piezas.find(o=>o.id===s.producto_id);if(p)return abrir(p);await ctx.cambiarModo('buscar');$('consulta').value=s.codigo||s.nombre;$('busqueda').requestSubmit();}
   document.addEventListener('precios',()=>{etiquetasFiltro();textoCuenta();});
   function estadoLista(){
     const pendientes=piezas.filter(p=>p.estado_analisis!=='listo'||p.precio<=0).length,n=visibles.length,pl=(k,s,p)=>`${k} ${k===1?s:p}`;

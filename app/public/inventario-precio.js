@@ -3,10 +3,11 @@
 // aquí solo se oculta lo que la cuenta no puede hacer. Dinero siempre en centavos MXN enteros.
 // Todo dato de la pieza entra con textContent, nunca como HTML.
 import { api, aCentavos, pesos } from './ficha.js';
-import { $, nodo, boton, mensaje, hoja, confirmar, cerrarHoja, bloquear } from './inventario-ui.js';
+import { $, nodo, boton, mensaje, hoja, confirmar, cerrarHoja, bloquear, restaurarNeutro } from './inventario-ui.js';
 
 export const MAXIMO = 10_000_000;   // $100,000: el mismo tope que el servidor
 const TIENDA = 'America/Mexico_City';
+const FALTA_SENTIDO = 'Elige si está barato o caro';
 
 /* ---------- reglas sin DOM (probadas en inventario-precio.test.ts) ---------- */
 
@@ -98,7 +99,7 @@ export function pedirCambio(ctx, pieza) {
     for (const [valor, titulo, ayuda] of [['subir', '▲ Está barato', 'Hay que subirlo'], ['bajar', '▼ Está caro', 'Hay que bajarlo']]) {
       const l = nodo('label', undefined, 'sp-opcion'), radio = nodo('input'), cara = nodo('span');
       radio.type = 'radio'; radio.name = 'sentido'; radio.value = valor;
-      radio.onchange = () => { sentido = valor; error.hidden = true; actualizar(); };
+      radio.onchange = () => { sentido = valor; error.hidden = true; actualizar(); avisoViejo(); };
       cara.append(nodo('b', titulo), nodo('small', ayuda)); l.append(radio, cara); opciones.append(l);
       primera ??= radio;
     }
@@ -114,12 +115,14 @@ export function pedirCambio(ctx, pieza) {
     const motivo = nodo('p', undefined, 'ayuda');
     const enviar = boton('Enviar al dueño', () => enviarPedido(), 'primario');
 
+    // Tocar «Enviar» sin elegir deja un aviso en la línea de estado: cuando ya no aplica (se eligió o se cerró) se quita.
+    const avisoViejo = () => { if ($('estado').dataset.tipo === 'aviso' && $('estado').textContent.includes(FALTA_SENTIDO)) restaurarNeutro(); };
     function mostrarError(texto, campoError) {
       error.textContent = `■ ${texto}`; error.hidden = false; campoError?.focus();
     }
     function actualizar() {
       pista.textContent = sentido === 'subir' ? `Más de ${pesos(pieza.precio)}` : sentido === 'bajar' ? `Menos de ${pesos(pieza.precio)}` : 'Elige primero si está barato o caro.';
-      const falta = sentido ? '' : 'Elige si está barato o caro';
+      const falta = sentido ? '' : FALTA_SENTIDO;
       bloquear(enviar, falta); motivo.textContent = falta;
     }
     function cargando(si) {
@@ -144,12 +147,13 @@ export function pedirCambio(ctx, pieza) {
         } else mostrarError(e.status ? e.message : 'Sin conexión: no se envió. Inténtalo otra vez.');
       } finally { enviando = false; cargando(false); }
     }
+    sugerido.addEventListener('input', () => { error.hidden = true; });
     form.onsubmit = (e) => { e.preventDefault(); void enviar.click(); };
 
     form.append(cabeza, opciones, lSugerido, pista, lNota, error, enviar, motivo);
     actualizar();
     hoja('¿El precio está bien?', form);
-    $('hoja').addEventListener('close', () => resolve(resultado), { once:true });
+    $('hoja').addEventListener('close', () => { avisoViejo(); resolve(resultado); }, { once:true });
     primera.focus();
   });
 }
@@ -198,7 +202,7 @@ const datosDe = (p) => ({ producto_id:p.id, codigo:p.codigo, nombre:p.nombre, ma
  * `s`: la solicitud con los datos de hoy de la pieza (lo que devuelve GET /api/solicitudes-precio).
  * `alResolver({ estado, precio })` avisa a quien la contiene; el contador del dueño ya se actualizó.
  */
-export function filaSolicitud(ctx, s, { compacta = false, alResolver = () => {} } = {}) {
+export function filaSolicitud(ctx, s, { compacta = false, alResolver = () => {}, alAbrir = null } = {}) {
   const fila = nodo('article', undefined, 'solicitud-precio'), caro = s.sentido === 'bajar';
   let ocupada = false;
 
@@ -209,10 +213,17 @@ export function filaSolicitud(ctx, s, { compacta = false, alResolver = () => {} 
       const foto = nodo('img', undefined, 'sp-foto'); foto.src = `/api/foto/${s.producto_id}`; foto.alt = ''; foto.loading = 'lazy';
       foto.onerror = () => foto.remove(); encabezado.append(foto);
     }
-    const titulo = nodo('div', undefined, 'sp-titulo');
+    const titulo = nodo('span', undefined, 'sp-titulo');
     titulo.append(nodo('code', s.codigo || 'Sin código'), nodo('b', s.nombre || 'Sin nombre'),
       nodo('small', [s.marca, s.talla].filter(Boolean).join(' · ')));
-    encabezado.append(titulo);
+    // Foto y nombre son un botón: abre la ficha de la pieza.
+    if (alAbrir) {
+      const abrir = boton('', alAbrir, 'sp-abrir');
+      abrir.setAttribute('aria-label', `Ver pieza: ${s.nombre || s.codigo || 'sin nombre'}`);
+      titulo.append(nodo('small', 'Ver pieza ›', 'sp-ver'));
+      abrir.append(...encabezado.childNodes, titulo);
+      encabezado.append(abrir);
+    } else encabezado.append(titulo);
   }
   encabezado.append(nodo('span', caro ? '▼ Caro' : '▲ Barato', `chip-sentido ${caro ? 'bajar' : 'subir'}`));
 
