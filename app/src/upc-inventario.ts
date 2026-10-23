@@ -39,7 +39,7 @@ export async function conflictoUpc(env: Env, upc: string, grado: string, propiet
 }
 
 /** UPC solo: no recalcula precio, no cierra un análisis ni transporta existencia. */
-export async function corregirUpc(env: Env, id: string, valor: unknown, propietario: string): Promise<Response> {
+export async function corregirUpc(env: Env, id: string, valor: unknown, propietario: string, por: string): Promise<Response> {
   const json = (cuerpo: unknown, status = 200) => new Response(JSON.stringify(cuerpo), {
     status, headers:{'content-type':'application/json; charset=utf-8'},
   });
@@ -50,10 +50,10 @@ export async function corregirUpc(env: Env, id: string, valor: unknown, propieta
   const upc = valor.trim();
   const conflicto = await conflictoUpc(env, upc, pieza.estado_fisico, propietario, id);
   if (conflicto) return conflicto;
-  const { meta } = await env.DB.prepare(`update productos set upc = ?, actualizado_en = ? where id = ?
+  const { meta } = await env.DB.prepare(`update productos set upc = ?, actualizado_en = ?, modificado_por = ? where id = ?
     and propietario = ? and sin_inventario = 0 and estado_analisis <> 'descartado' and estado_fisico = ?
     and (? = '' or not exists (select 1 from productos where ${MISMO_UPC} and id <> ?))`)
-    .bind(upc, new Date().toISOString(), id, propietario, pieza.estado_fisico,
+    .bind(upc, new Date().toISOString(), por, id, propietario, pieza.estado_fisico,
       upc, propietario, normalizarUpc(upc), pieza.estado_fisico, id).run();
   return meta.changes ? json({ id, upc }) : await conflictoUpc(env, upc, pieza.estado_fisico, propietario, id)
     ?? json({ error:'La pieza cambió. Revisa y vuelve a intentar.' }, 409);

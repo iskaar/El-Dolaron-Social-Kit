@@ -8,6 +8,7 @@ import { normalizarUpc } from '../public/upc.js';
 
 const PAGINA = 25;
 const TRAMO = 200;
+const HISTORIAL = 50;   // renglones de la ficha: ajustes de existencia (máx. 10) y cambios de campo
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const json = (cuerpo: unknown, status = 200) => new Response(JSON.stringify(cuerpo), {
   status, headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' },
@@ -163,8 +164,14 @@ async function fichaPieza(env: Env, id: string, usuario: Usuario | null): Promis
     where p.id = ? and p.propietario = ? and ${VISIBLE}`).bind(id, propietarioDe(usuario)).first<Pieza>();
   if (!pieza) return json({ error: 'Pieza no encontrada.' }, 404);
   // shortcut: índice por fecha existente; añadir (producto_id, ajustado_en) si el historial supera 10 mil filas.
-  const { results: historial } = await env.DB.prepare(`select id, motivo, cantidad, antes, despues, ajustado_por, ajustado_en
-    from conteo_ajustes where producto_id = ? order by ajustado_en desc, rowid desc limit 10`).bind(id).all();
+  const { results: ajustes } = await env.DB.prepare(`select id, motivo, cantidad, antes, despues, ajustado_por, ajustado_en
+    from conteo_ajustes where producto_id = ? order by ajustado_en desc, rowid desc limit 10`).bind(id).all<Record<string, unknown> & { ajustado_en: string }>();
+  // Bitácora (#485): los cambios de campo (trigger de la migración 054) se mezclan con los ajustes de existencia, lo más nuevo primero.
+  // `campo` los distingue; `antes`/`despues` son texto (centavos en los precios). Los ajustes conservan su forma de siempre.
+  const { results: cambios } = await env.DB.prepare(`select id, campo, antes, despues, por, en
+    from productos_cambios where producto_id = ? order by en desc, id desc limit ${HISTORIAL}`).bind(id).all<Record<string, unknown> & { en: string }>();
+  const historial = [...ajustes.map((a) => ({ a, fecha: a.ajustado_en })), ...cambios.map((a) => ({ a, fecha: a.en }))]
+    .sort((x, y) => (x.fecha < y.fecha ? 1 : x.fecha > y.fecha ? -1 : 0)).slice(0, HISTORIAL).map(({ a }) => a);
   return json({ pieza, historial, puede_editar: puedeEditarInventario(usuario), puede_precio: !!usuario?.activo && usuario.roles.includes('dueno'),
     solicitud_precio: await pendienteDe(env, id) });
 }
@@ -270,13 +277,13 @@ async function juntarPiezas(request: Request, env: Env, id: string, usuario: Usu
   if (origen.stock + destino.stock > 999) return json({ error:'La suma supera 999 piezas.' }, 409);
   const ahora = new Date().toISOString();
   const efectos = await env.DB.batch([
-    env.DB.prepare(`update productos set stock = 0, upc = null, actualizado_en = ? where id = ?
+    env.DB.prepare(`update productos set stock = 0, upc = null, modificado_por = ?, actualizado_en = ? where id = ?
       and propietario = ? and sin_inventario = 0 and estado_analisis <> 'descartado'
       and stock = ? and upc is ? and codigo = ? and estado_fisico = ?
       and exists (select 1 from productos where id = ? and propietario = ? and sin_inventario = 0
         and estado_analisis <> 'descartado' and codigo = ? and estado_fisico = ? and upc is ? and stock + ? <= 999)
       and not exists (select 1 from conteo_ajustes where id in (?, ?))`)
-      .bind(ahora, id, propietario, origen.stock, origen.upc, origen.codigo, origen.estado_fisico,
+      .bind(usuario!.correo, ahora, id, propietario, origen.stock, origen.upc, origen.codigo, origen.estado_fisico,
         destinoId, propietario, destino.codigo, origen.estado_fisico, destino.upc, origen.stock, cuerpo.id, `${cuerpo.id}:destino`),
     env.DB.prepare(`insert into conteo_ajustes
       (id, producto_id, codigo, nombre, motivo, cantidad, antes, despues, ajustado_por, ajustado_en)

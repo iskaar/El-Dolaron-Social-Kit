@@ -14,7 +14,7 @@ const LOTE_PENDIENTES = 5;
  */
 export async function rescatarPendientes(env: Env, ahora = Date.now()): Promise<void> {
   const iso = (ms: number) => new Date(ahora - ms).toISOString();
-  await env.DB.prepare(`update productos set estado_analisis = 'error', actualizado_en = ?
+  await env.DB.prepare(`update productos set estado_analisis = 'error', actualizado_en = ?, modificado_por = 'cron'
     where estado_analisis = 'pendiente' and foto_key <> '' and actualizado_en < ?`).bind(new Date(ahora).toISOString(), iso(ABANDONO_MS)).run();
   const { results } = await env.DB.prepare(`select id from productos
     where estado_analisis = 'pendiente' and foto_key <> '' and actualizado_en < ? order by actualizado_en limit ?`)

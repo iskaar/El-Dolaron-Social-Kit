@@ -337,6 +337,7 @@ async function crearBorrador(request: Request, env: Env, ctx: ExecutionContext, 
        recorte_revision = null,
        recorte_fecha = null,
        estado_analisis = 'pendiente',
+       modificado_por = excluded.capturado_por,
        actualizado_en = excluded.actualizado_en
        where productos.estado_analisis <> 'descartado'
          and not exists (select 1 from productos otra where ${UPC_VISIBLE}
@@ -438,7 +439,9 @@ async function corregirBorrador(id: string, cambios: Record<string, unknown>, en
   if (!fila) {
     return json({ error: 'La pieza no existe.' }, 404);
   }
-  if (Object.keys(cambios).length === 1 && cambios.upc !== undefined) return corregirUpc(env, id, cambios.upc, fila.propietario);
+  // Bitácora (#485): quien cambia la pieza. Sin sesión ni captura (no ocurre hoy) queda 'sistema'.
+  const por = usuario?.correo ?? captura?.correo ?? existencia?.correo ?? cierraSolicitudPor ?? 'sistema';
+  if (Object.keys(cambios).length === 1 && cambios.upc !== undefined) return corregirUpc(env, id, cambios.upc, fila.propietario, por);
   if (cambios.upc !== undefined && !upcValido(cambios.upc)) return json({ error:'Código de barras inválido.' }, 400);
   const upc = cambios.upc === undefined ? fila.upc : String(cambios.upc).trim();
 
@@ -516,7 +519,7 @@ async function corregirBorrador(id: string, cambios: Record<string, unknown>, en
   const actualizar = env.DB.prepare(
     `update productos set nombre = ?, categoria = ?, marca = ?, talla = ?, precio_lista = ?, precio = ?,
                           estado_fisico = ?, destino = ?, stock = case when estado_analisis <> 'listo' then coalesce(?, stock) else stock end, estado_analisis = 'listo', actualizado_en = ?
-                          , upc = ? ${captura ? `, codigo = ${CODIGO_NUEVO}` : ''}
+                          , upc = ?, modificado_por = ? ${captura ? `, codigo = ${CODIGO_NUEVO}` : ''}
      where id = ?
        and estado_analisis <> 'descartado'
        and (? = 0 or ? = '' or not exists (select 1 from productos where ${MISMO_UPC} and id <> ?))
@@ -532,7 +535,7 @@ async function corregirBorrador(id: string, cambios: Record<string, unknown>, en
   )
     .bind(nombre, categoria, marca, talla, precioLista, precio, estadoFisico, destino,
       // Sin `stock` en el cuerpo no se toca: la caja pudo vender piezas desde que se abrio la ficha. Una `listo` tampoco (#473).
-      cambios.stock === undefined || listoAlLeer ? null : stock, ahora, upc ?? null, id,
+      cambios.stock === undefined || listoAlLeer ? null : stock, ahora, upc ?? null, por, id,
       verificarUpc ? 1 : 0, normalizarUpc(upc), fila.propietario, normalizarUpc(upc), estadoFisico, id,
       fila.upc ?? null, fila.estado_fisico, ...(captura ? [captura.correo, captura.upc] : []),
       ...(precioEsperado === undefined ? [] : [precioEsperado]), ...(solicitudId ? [solicitudId] : []));
@@ -616,9 +619,9 @@ async function altaManual(cuerpo: Record<string, unknown>, env: Env, correo: str
   // el mismo que le pondria Etiquetas, asi que la etiqueta impresa despues coincide.
   // Las de banda se cobran con el codigo de la banda.
   await env.DB.prepare(
-    `update productos set codigo = ${CODIGO_NUEVO}, actualizado_en = ?
+    `update productos set codigo = ${CODIGO_NUEVO}, actualizado_en = ?, modificado_por = ?
      where id = ? and (codigo is null or codigo = '') and destino not like 'banda%'`,
-  ).bind(new Date().toISOString(), id).run();
+  ).bind(new Date().toISOString(), correo, id).run();
   return json(await respuesta.json(), 201);
 }
 
@@ -707,9 +710,9 @@ async function capturaUpcGuardada(id: string, leido: string, env: Env, ctx?: Exe
   if (!existente) return null;
   if (existente.propietario !== 'dolaron') return json({ error: 'Pieza no encontrada.' }, 404);
   if (normalizarUpc(existente.upc) !== normalizarUpc(leido) || existente.estado_analisis === 'descartado') return json({ error: 'La captura ya corresponde a otra pieza o está en revisión.' }, 409);
-  await env.DB.prepare(`update productos set codigo = ${CODIGO_NUEVO} where id = ? and (codigo is null or codigo = '')
+  await env.DB.prepare(`update productos set codigo = ${CODIGO_NUEVO}, modificado_por = ? where id = ? and (codigo is null or codigo = '')
     and estado_analisis = 'listo' and propietario = 'dolaron' and destino not like 'banda%'`)
-    .bind(existente.id).run();
+    .bind(correo ?? 'sistema', existente.id).run();
   const codigo = await env.DB.prepare('select codigo from productos where id = ?').bind(existente.id).first<{ codigo: string | null }>();
   if (ctx && existente.estado_analisis === 'listo') ctx.waitUntil(guardarImagenComoFoto(leido, env));
   return json({ id:existente.id, upc:existente.upc, nombre:existente.nombre, precio:existente.precio, stock:existente.stock,
@@ -874,13 +877,13 @@ export async function identificarPieza(id: string, upc: string, env: Env, ultimo
   const completa = !!ficha && ficha.nombre.trim() !== '' && ficha.confianza >= 0.5 && precio > 0;
   if (completa) {
     await env.DB.prepare(`update productos set nombre = ?, marca = ?, categoria = ?, precio_lista = ?, precio = ?, precio_sugerido = ?,
-        estado_analisis = 'listo', actualizado_en = ? where id = ? and estado_analisis in ('pendiente', 'error')`)
+        estado_analisis = 'listo', actualizado_en = ?, modificado_por = 'cola' where id = ? and estado_analisis in ('pendiente', 'error')`)
       .bind(ficha!.nombre, ficha!.marca, ficha!.categoria, precioLista, precio, precio, new Date().toISOString(), id).run();
   } else {
     // Sin precio, pero si el código dice con seguridad qué es, ese nombre va aparte en lugar del de la
     // foto: Haiku llamó «Laptop Intel Core» a un peluche de Mickey (#409). El admin solo pone el precio.
     const nombreSeguro = ficha && ficha.nombre.trim() !== '' && ficha.confianza >= 0.7 ? 1 : 0;
-    await env.DB.prepare(`update productos set estado_analisis = 'error', actualizado_en = ?,
+    await env.DB.prepare(`update productos set estado_analisis = 'error', actualizado_en = ?, modificado_por = 'cola',
         nombre = case when ? then ? else nombre end, marca = case when ? then ? else marca end,
         categoria = case when ? then ? else categoria end
       where id = ? and estado_analisis = 'pendiente'`)
@@ -888,7 +891,7 @@ export async function identificarPieza(id: string, upc: string, env: Env, ultimo
         nombreSeguro, ficha?.categoria ?? '', id).run();
   }
   if (completa) {
-    await env.DB.prepare(`update productos set codigo = ${CODIGO_NUEVO} where id = ? and (codigo is null or codigo = '') and estado_analisis = 'listo'`)
+    await env.DB.prepare(`update productos set codigo = ${CODIGO_NUEVO}, modificado_por = 'cola' where id = ? and (codigo is null or codigo = '') and estado_analisis = 'listo'`)
       .bind(id).run();
   }
   console.log(JSON.stringify({ mensaje: completa ? 'upc identificado' : 'upc necesita foto', id, upc, ms: Date.now() - inicio, ficha }));
@@ -962,8 +965,8 @@ async function corregirCaptura(id: string, campo: string, request: Request, env:
       env.DB.prepare(`insert into conteo_ajustes (id, producto_id, codigo, nombre, motivo, cantidad, antes, despues, ajustado_por, ajustado_en)
         select ?, id, coalesce(codigo, ''), nombre, 'descarte', stock, stock, 0, ?, ? from productos where ${cancelable} and stock > 0`)
         .bind(crypto.randomUUID(), correo, ahora, id, correo, desde),
-      env.DB.prepare(`update productos set stock = 0, estado_analisis = 'descartado', actualizado_en = ? where ${cancelable}`)
-        .bind(ahora, id, correo, desde),
+      env.DB.prepare(`update productos set stock = 0, estado_analisis = 'descartado', actualizado_en = ?, modificado_por = ? where ${cancelable}`)
+        .bind(ahora, correo, id, correo, desde),
     ]);
     if (!meta.changes) return await conflictoCapturaSumada(env, id, correo)
       ?? json({ error: sinFoto ? 'Ya no se puede cancelar: pasaron 5 minutos o la pieza tiene venta, foto o publicación.' : 'Ya tiene etiqueta: corrígela en el admin.' }, 404);
@@ -989,11 +992,11 @@ async function corregirCaptura(id: string, campo: string, request: Request, env:
   }
   // La existencia directa nunca toca una `listo`: si el análisis la terminó después de la lectura de arriba, 0 filas (#468).
   const resultado = await env.DB.prepare(
-    `update productos set ${columna} = ?, actualizado_en = ? where id = ? and capturado_por = ? and creado_en > ?
+    `update productos set ${columna} = ?, actualizado_en = ?, modificado_por = ? where id = ? and capturado_por = ? and creado_en > ?
        and (${sinFoto ? alcanceSinFoto : campo === 'existencia' ? "estado_analisis <> 'listo'" : "upc is null or estado_analisis <> 'listo'"}) and estado_analisis <> 'descartado'
        ${campo === 'existencia' ? `and not ${CAPTURA_SUMADA}` : ''}`,
   )
-    .bind(valor, new Date().toISOString(), id, correo, desde)
+    .bind(valor, new Date().toISOString(), correo, id, correo, desde)
     .run();
   if (resultado.meta.changes === 0) {
     if (campo === 'existencia') {
@@ -1034,8 +1037,8 @@ async function revisarCaptura(id: string, request: Request, env: Env, correo: st
         .bind(crypto.randomUUID(), correo, ahora, id, correo, desde),
       env.DB.prepare(`update productos set stock = 0, precio = 0,
         foto_key = case when coalesce(codigo, '') = '' then '' else foto_key end,
-        estado_analisis = 'descartado', actualizado_en = ? where ${retirable}`)
-        .bind(ahora, id, correo, desde),
+        estado_analisis = 'descartado', actualizado_en = ?, modificado_por = ? where ${retirable}`)
+        .bind(ahora, correo, id, correo, desde),
     ]);
     if (!resultado.meta.changes) return await conflictoCapturaSumada(env, id, correo)
       ?? json({ error: 'Tiene una venta o publicación. Revisa la pieza en el admin; no se eliminó.' }, 409);
@@ -1069,11 +1072,11 @@ async function revisarCaptura(id: string, request: Request, env: Env, correo: st
   const pidePrecio = typeof cambios.precio === 'number' && cambios.precio !== fila.precio && !autorizarPrecio(await leerUsuario(env, correo), fila);
   const precioNuevo = pidePrecio ? null : cambios.precio ?? null;
   const resultado = await env.DB.prepare(`update productos set precio = coalesce(?, precio),
-      estado_fisico = coalesce(?, estado_fisico), nombre = ?, marca = ?, actualizado_en = ? where ${alcance} and estado_analisis = 'listo'
+      estado_fisico = coalesce(?, estado_fisico), nombre = ?, marca = ?, actualizado_en = ?, modificado_por = ? where ${alcance} and estado_analisis = 'listo'
       and upc is ? and estado_fisico = ?
       and (? = 0 or ? = '' or not exists (select 1 from productos where ${MISMO_UPC} and id <> ?))
       and (? is null or precio_lista = 0 or precio_lista >= ?)`)
-    .bind(precioNuevo, cambios.estado_fisico ?? null, nombre, marca.trim(), ahora, id, correo, desde,
+    .bind(precioNuevo, cambios.estado_fisico ?? null, nombre, marca.trim(), ahora, correo, id, correo, desde,
       fila.upc, fila.estado_fisico, cambios.estado_fisico === undefined ? 0 : 1, normalizarUpc(fila.upc), fila.propietario, normalizarUpc(fila.upc), grado, id,
       precioNuevo, precioNuevo).run();
   if (!resultado.meta.changes) return json({ error: 'La captura no está lista, fue eliminada o el precio supera el de lista.' }, 409);
@@ -1117,7 +1120,7 @@ function idsDeEtiquetas(cuerpo: { ids?: unknown } | null): string[] | null {
  * El codigo se mina una sola vez: una pieza que ya trae etiqueta impresa conserva
  * el suyo, porque reimprimir con otro codigo deja el papel del anaquel huerfano.
  */
-async function prepararEtiquetas(request: Request, env: Env, propietario: string): Promise<Response> {
+async function prepararEtiquetas(request: Request, env: Env, propietario: string, correo: string): Promise<Response> {
   const { ids } = (await request.json()) as { ids?: unknown };
   if (!Array.isArray(ids) || ids.length === 0 || ids.length > 100) {
     return json({ error: 'Selecciona entre 1 y 100 piezas.' }, 400);
@@ -1138,9 +1141,9 @@ async function prepararEtiquetas(request: Request, env: Env, propietario: string
   const ahora = new Date().toISOString();
   if (porCodificar.length) {
     await env.DB.batch(porCodificar.map(({ id }) => env.DB.prepare(
-      `update productos set codigo = ${CODIGO_NUEVO}, actualizado_en = ?
+      `update productos set codigo = ${CODIGO_NUEVO}, actualizado_en = ?, modificado_por = ?
        where id = ? and estado_analisis = 'listo' and precio > 0 and (codigo is null or codigo = '')`,
-    ).bind(ahora, id)));
+    ).bind(ahora, correo, id)));
   }
 
   const { results } = await env.DB.prepare(
@@ -1294,9 +1297,9 @@ async function fusionarBorrador(id: string, request: Request, env: Env, propieta
         from productos d, productos o where d.id = ? and o.id = ? and o.stock > 0 and changes() = 1`)
         .bind(crypto.randomUUID(), correo, ahora, destinoId, id),
       // Liberar primero el código único: la etiqueta pegada debe resolver a la original vendible.
-      env.DB.prepare('update productos set codigo = null where id = ? and codigo = ?').bind(id, codigo),
-      env.DB.prepare(`update productos set codigo = ? where id = ?
-        and (codigo is null or codigo = '') and ? <> ''`).bind(codigo, destinoId, codigo),
+      env.DB.prepare('update productos set codigo = null, modificado_por = ? where id = ? and codigo = ?').bind(correo, id, codigo),
+      env.DB.prepare(`update productos set codigo = ?, modificado_por = ? where id = ?
+        and (codigo is null or codigo = '') and ? <> ''`).bind(codigo, correo, destinoId, codigo),
       env.DB.prepare("delete from productos where id = ? and (codigo is null or codigo = '')").bind(id),
     ]);
     borrado = resultados[6];
@@ -1333,8 +1336,8 @@ async function descartarBorrador(id: string, env: Env, propietario: string, corr
         select ?, id, coalesce(codigo, ''), nombre, 'descarte', stock, stock, 0, ?, ? from productos
         where id = ? and stock > 0 and estado_analisis <> 'descartado'`)
         .bind(crypto.randomUUID(), correo, new Date().toISOString(), id),
-      env.DB.prepare(`update productos set stock = 0, estado_analisis = 'descartado', actualizado_en = ?
-        where id = ? and codigo is not null and codigo <> ''`).bind(new Date().toISOString(), id),
+      env.DB.prepare(`update productos set stock = 0, estado_analisis = 'descartado', actualizado_en = ?, modificado_por = ?
+        where id = ? and codigo is not null and codigo <> ''`).bind(new Date().toISOString(), correo, id),
       env.DB.prepare(`delete from productos where id = ? and (codigo is null or codigo = '')
         and estado_analisis <> 'descartado'`).bind(id),
     ]);
@@ -2543,7 +2546,7 @@ export default {
           && !puedeEditarInventario(await leerUsuario(env, correo))) {
         return json({ error: 'Tu cuenta no tiene permiso para editar el inventario.' }, 403);
       }
-      const respuestaRopaIA = await rutaRopaAdmin(request, env, pathname);
+      const respuestaRopaIA = await rutaRopaAdmin(request, env, pathname, correo);
       if (respuestaRopaIA) return respuestaRopaIA;
       if (request.method === 'POST' && /^\/api\/recortes\/[^/]+\/(aprobar|original|reintentar)$/.test(pathname)
           && !puedeEditarInventario(await leerUsuario(env, correo))) return json({ error: 'Tu cuenta no tiene permiso para editar el inventario.' }, 403);
@@ -2766,7 +2769,7 @@ export default {
       }
 
       if (pathname === '/api/etiquetas' && request.method === 'POST') {
-        return await prepararEtiquetas(request, env, propietarioDe(await leerUsuario(env, correo)));
+        return await prepararEtiquetas(request, env, propietarioDe(await leerUsuario(env, correo)), correo);
       }
       if (pathname === '/api/etiquetas/enviadas' && request.method === 'POST') {
         return await reclamarEtiquetas(request, env, propietarioDe(await leerUsuario(env, correo)), !!env.HOST_VENDEDOR && url.hostname === env.HOST_VENDEDOR);
@@ -2821,8 +2824,8 @@ export default {
         const modelo = modeloPedido(url, env);
         // Reintento explícito: vuelve a abrir el análisis, a diferencia de una respuesta tardía (#399).
         // Una pieza `listo` no se reabre (#479): el análisis solo sugiere y, si cambia el precio, pide aprobación al dueño.
-        await env.DB.prepare("update productos set estado_analisis = 'pendiente' where id = ? and upc is not null and estado_analisis not in ('descartado', 'listo')")
-          .bind(reintento[1]).run();
+        await env.DB.prepare("update productos set estado_analisis = 'pendiente', modificado_por = ? where id = ? and upc is not null and estado_analisis not in ('descartado', 'listo')")
+          .bind(correo, reintento[1]).run();
         const lista = (await env.DB.prepare('select estado_analisis from productos where id = ?').bind(reintento[1]).first<{ estado_analisis: string }>())?.estado_analisis === 'listo';
         ctx.waitUntil(analizarBorrador(reintento[1], env, modelo, busquedaPedida(url), correo));
         return json(lista ? { id: reintento[1], modelo, estado_analisis: 'listo', sugerencia: true, mensaje: 'Sugerencia enviada para aprobación' }
