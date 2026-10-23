@@ -66,7 +66,7 @@ export async function iniciar(ctx) {
     if(!navigator.onLine){placeholder.hidden=true;lista.replaceChildren(vacio('Este modo necesita red',boton('Ir a Capturar',()=>ctx.cambiarModo('capturar'))));mensaje('Este modo necesita red','aviso');return;}
     const turno=++generacion;mensaje('Cargando piezas…');
     const avisos=dueno?refrescarPrecios().catch(()=>{}):null;
-    try{const [datos,grupos]=await Promise.all([api('/api/borradores'),puedeEditar?api('/api/piezas/repetidas'):null]);await avisos;if(turno!==generacion)return;piezas=datos.reverse();repetidas=new Map();siguienteRepetidas=grupos?.siguiente||null;if(grupos)agregarRepetidas(grupos.grupos);sesiones=agruparSesiones(piezas);for(const id of seleccion)if(!piezas.some(p=>p.id===id))seleccion.delete(id);pintar();}
+    try{const [datos,grupos]=await Promise.all([api('/api/borradores'),puedeEditar?api('/api/piezas/repetidas').catch(()=>null):null]);await avisos;if(turno!==generacion)return;piezas=datos.reverse();repetidas=new Map();siguienteRepetidas=grupos?.siguiente||null;if(grupos)agregarRepetidas(grupos.grupos);sesiones=agruparSesiones(piezas);for(const id of seleccion)if(!piezas.some(p=>p.id===id))seleccion.delete(id);pintar();}
     catch(e){if(turno!==generacion)return;mensaje(e.message,'error');placeholder.hidden=true;lista.replaceChildren(vacio('Sin conexión',boton('Reintentar',cargar,'primario')));}
   }
   function pintar(){
