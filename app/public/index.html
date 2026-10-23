@@ -12,6 +12,7 @@
     display: flex; align-items: baseline; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
   header h1 { margin: 0; font-size: 20px; }
   #quien { font-size: 13px; opacity: .85; }
+  #salir { border: 1px solid #fff; background: transparent; color: #fff; border-radius: 8px; padding: 6px 12px; font: inherit; font-size: 13px; cursor: pointer; }
   a.tool[hidden] { display: none; }
   main { max-width: 640px; margin: 0 auto; padding: 18px; display: grid; gap: 12px; }
   a.tool { display: block; background: #fff; border: 1px solid var(--linea); border-radius: 12px;
@@ -22,7 +23,7 @@
 </style>
 </head>
 <body>
-<header><h1>El Dolarón</h1><span id="quien"></span></header>
+<header><h1>El Dolarón</h1><span id="quien"></span><button id="salir" type="button">Cerrar sesión</button></header>
 <main>
   <a class="tool" href="/caja" data-roles="cajero"><b>Caja</b><span>Cobrar ventas, cancelar, corte del día</span></a>
   <a class="tool" href="/pedidos" data-roles="cajero"><b>Pedidos por WhatsApp</b><span>Apartar piezas con anticipo, avisar al cliente, guías de envío y saldos a favor</span></a>
@@ -55,6 +56,7 @@ for (const a of document.querySelectorAll('a.tool')) {
   const piden = a.dataset.roles.split(' ').filter(Boolean);
   a.hidden = !dueno && !piden.some((r) => roles.includes(r));
 }
+document.getElementById('salir').onclick = async () => (await import('/cerrar-sesion.js')).cerrarSesion();
 document.getElementById('quien').textContent = `${usuario?.nombre || correo} · ${roles.join(', ')}`;
 </script>
 </body>

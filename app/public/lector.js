@@ -1,4 +1,6 @@
 /** Un receptor de teclado para las pantallas de inventario. Enter de lectura no pulsa botones. */
+/** Hueco máximo (ms) entre teclas de una ráfaga de lector; más lento es una persona. */
+export const HUECO_LECTOR = 50;
 export function crearLector({ emitir, caja = null, ahora = () => performance.now(), esperar = setTimeout, cancelar = clearTimeout }) {
   let texto = '', ultima = -Infinity, rapido = true, timer, consumida = false;
   const limpiar = () => { texto = ''; rapido = true; cancelar(timer); };
@@ -21,7 +23,7 @@ export function crearLector({ emitir, caja = null, ahora = () => performance.now
       if (!/^[\da-z-]$/i.test(e.key)) { limpiar(); return; }
       const t = ahora(), hueco = t - ultima;
       if (hueco > 250) limpiar();
-      if (texto && hueco > 50) rapido = false;
+      if (texto && hueco > HUECO_LECTOR) rapido = false;
       texto += e.key; ultima = t; consumida = false;
       cancelar(timer);
       // Sin sufijo Enter: solo ráfagas de lector fuera de un campo de edición.

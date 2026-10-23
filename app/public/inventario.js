@@ -188,6 +188,7 @@ $('menu').onclick = () => {
   }
   const inicio = nodo('a','Inicio'); inicio.href = '/'; c.append(inicio);
   if (!identidad.vendedor && (dueno || identidad.usuario?.roles.includes('capturista'))) { const a = nodo('a','Ajustes'); a.href = '/admin'; c.append(a); }
+  c.append(boton('Cerrar sesión', async () => (await import('./cerrar-sesion.js')).cerrarSesion({ confirmar })));
   hoja('Menú', c);
 };
 $('chip-red').onclick = () => { const c = nodo('div'); c.append(nodo('p', $('chip-red').textContent), boton('Subir ahora', async () => { await (await cargar('capturar')).subir?.(); } ,'primario')); hoja('Red', c); };

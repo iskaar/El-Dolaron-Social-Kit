@@ -1,12 +1,15 @@
 /** Registros de eldolaron v1/pendientes: los mismos campos que /captura y /escanear. */
-export function registroFoto(foto, { id = crypto.randomUUID(), estado_fisico = 'nuevo', cantidad = 1, upc, talla = null, prenda = '', marca = '', precio_ropa = null }, creado = Date.now()) {
+export function registroFoto(foto, { id = crypto.randomUUID(), estado_fisico = 'nuevo', cantidad = 1, upc, talla = null, prenda = '', marca = '', precio_ropa = null, nombre_edit, precio_edit }, creado = Date.now()) {
   return { id, foto, estado_fisico, cantidad, creado, talla, prenda, marca, precio_ropa,
-    ...(upc != null ? { upc, desde_escaner:true } : {}) };
+    ...(upc != null ? { upc, desde_escaner:true } : {}),
+    // Edición de la tarjeta del manifiesto (#461): ausente = valores del manifiesto; el servidor la autoriza.
+    ...(nombre_edit != null ? { nombre_edit } : {}), ...(precio_edit != null ? { precio_edit } : {}) };
 }
 export function formularioPendiente(registro) {
   const f = new FormData();
   f.set('id',registro.id);f.set('estado_fisico',registro.estado_fisico);f.set('cantidad',String(registro.cantidad??1));
   for(const campo of ['upc','talla','prenda','marca','precio_ropa'])if(registro[campo]!=null&&(campo==='upc'||campo==='precio_ropa'||registro[campo]))f.set(campo,String(registro[campo]));
+  if(registro.nombre_edit!=null)f.set('nombre',String(registro.nombre_edit));if(registro.precio_edit!=null)f.set('precio',String(registro.precio_edit));
   f.set('foto',registro.foto,`${registro.id}.jpg`);return f;
 }
 

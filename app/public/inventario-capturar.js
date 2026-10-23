@@ -7,6 +7,42 @@ import { aCentavos } from './ficha.js';
 import { stepper, bloquear, cerrarHoja } from './inventario-ui.js';
 import { montarPrecio } from './inventario-precio.js';
 import { esRopa as piezaRopa } from './ropa.js';
+import { HUECO_LECTOR } from './lector.js';
+
+/** Nombre y precio (centavos) que el capturista editó en la tarjeta; el servidor los autoriza. Lanza si son inválidos. */
+export function cambiosTarjeta(a){
+  const cambios={};
+  if(a.nombre!==undefined){cambios.nombre=a.nombre.trim();if(!cambios.nombre)throw new Error('El nombre no puede quedar vacío.');}
+  if(a.precio!==undefined){cambios.precio=aCentavos(a.precio);if(cambios.precio===null||cambios.precio<=0)throw new Error('Escribe un precio mayor a cero en pesos.');
+    const lista=a.ficha?.precio_lista;if(lista>0&&cambios.precio>lista)throw new Error(`El precio no puede ser mayor al precio de lista ($${(lista/100).toFixed(2)}).`);}
+  return cambios;
+}
+/** ¿Los campos de la tarjeta difieren de lo que se mostró? Entonces solo «Guardar» la guarda. */
+export function tarjetaEditada(a){
+  return (a.nombre!==undefined&&a.nombre.trim()!==(a.ficha?.nombre??'').trim())
+    ||(a.precio!==undefined&&aCentavos(a.precio)!==(a.ficha?.precios?.[a.estado]??a.ficha?.precio));
+}
+/**
+ * Un lector USB cuyo cursor quedó en un campo de la tarjeta teclea el código ahí. Enter saca el foco del campo;
+ * si lo precedió una ráfaga a velocidad de lector, se devuelve el valor anterior y el código va al lector.
+ */
+export function vigilarLectorEnCampo(campo,{alLeer,salir,ahora=()=>performance.now()}){
+  let texto='',previo='',ultima=-Infinity,rapido=true;
+  const reiniciar=()=>{texto='';rapido=true;};
+  campo.addEventListener('keydown',e=>{
+    if(e.ctrlKey||e.altKey||e.metaKey||e.isComposing)return;
+    if(e.key==='Enter'){
+      e.preventDefault();const codigo=rapido&&texto.length>=4?texto:'';reiniciar();
+      if(codigo){campo.value=previo;campo.dispatchEvent(new Event('input'));}
+      salir();if(codigo)alLeer(codigo);return;
+    }
+    if(!/^[\da-z-]$/i.test(e.key)){if(e.key!=='Shift'&&e.key!=='CapsLock')reiniciar();return;}
+    const t=ahora(),hueco=t-ultima;
+    if(hueco>250)reiniciar();
+    if(!texto)previo=campo.value;else if(hueco>HUECO_LECTOR)rapido=false;
+    texto+=e.key;ultima=t;
+  });
+}
 
 /** Estado de captura: UUID estable al reintentar; precio y existencia confirmados solo por el servidor. */
 export function crearCaptura({ api, imprimir, cambiar=()=>{}, enLinea=()=>navigator.onLine, uuid=()=>crypto.randomUUID(), permiteUpc=true, permiteSumar=true }) {
@@ -16,10 +52,7 @@ export function crearCaptura({ api, imprimir, cambiar=()=>{}, enLinea=()=>naviga
     if(!actual||actual.tipo!=='nueva')return;
     if(!enLinea())throw new Error('Sin red: se suma al volver la señal');
     const abierta=actual;
-    const cambios={};
-    if(abierta.nombre!==undefined){cambios.nombre=abierta.nombre.trim();if(!cambios.nombre)throw new Error('El nombre no puede quedar vacío.');}
-    if(abierta.precio!==undefined){cambios.precio=aCentavos(abierta.precio);if(cambios.precio===null||cambios.precio<=0)throw new Error('Escribe un precio mayor a cero en pesos.');}
-    const guardada=await api('/api/borradores/upc',{id:abierta.id,upc:abierta.upc,stock:abierta.cantidad,estado_fisico:abierta.estado,...cambios});
+    const guardada=await api('/api/borradores/upc',{id:abierta.id,upc:abierta.upc,stock:abierta.cantidad,estado_fisico:abierta.estado,...cambiosTarjeta(abierta)});
     actual={...abierta,tipo:'guardada',pieza:guardada};pintar();
     const salio=guardada.estado_analisis&&guardada.estado_analisis!=='listo'?false:await imprimir(guardada.id,abierta.cantidad);actual.faltaEtiqueta=!salio;pintar();return guardada;
   }
@@ -32,7 +65,7 @@ export function crearCaptura({ api, imprimir, cambiar=()=>{}, enLinea=()=>naviga
     if(etiqueta?.piezas.some(p=>p.codigo===ed))codigo=ed;
     if(!mas&&actual?.tipo==='nueva'&&normalizarUpc(codigo)===normalizarUpc(actual.upc)){actual.cantidad=Math.min(999,actual.cantidad+1);pintar();return;}
     if(!mas&&actual?.tipo==='existente'&&(piezaRopa(actual.pieza)||actual.pieza.estado_fisico===grado)&&permiteSumar&&(actual.pieza.codigo?.toUpperCase()===codigo.toUpperCase()||(actual.pieza.upc&&normalizarUpc(actual.pieza.upc)===normalizarUpc(codigo))))return sumar(actual.pieza);
-    if(!mas&&actual?.tipo==='nueva')await guardar();
+    if(!mas&&actual?.tipo==='nueva'){if(tarjetaEditada(actual))throw new Error('Guarda la tarjeta editada antes de leer otro código');await guardar();}
     const datos=etiqueta??await api(ruta);
     const piezas=codigoLeido(codigo)?datos.piezas.filter(p=>piezaRopa(p)||p.estado_fisico===grado):datos.piezas;
     resultados=mas?[...resultados,...piezas]:piezas;siguiente=datos.siguiente;
@@ -120,6 +153,7 @@ export async function iniciar(ctx) {
       campoNombre.oninput=()=>{actual.nombre=campoNombre.value;};nombre.append(campoNombre);
       campoPrecio.value=actual.precio??String((p.precios?.[actual.estado]??p.precio)/100);campoPrecio.inputMode='decimal';campoPrecio.readOnly=!dueno;
       campoPrecio.oninput=()=>{actual.precio=campoPrecio.value;};precio.append(campoPrecio);tarjeta.append(nombre,precio);
+      for(const campo of [campoNombre,campoPrecio])vigilarLectorEnCampo(campo,{salir:()=>{campo.blur();foco();},alLeer:codigo=>ctx.recibir(codigo,'usb').catch(e=>mensaje(e.message,'error'))});
     }else{
       tarjeta.append(nodo('h2',p?.nombre||'Sin registro'));
       if(p)tarjeta.append(nodo('strong',pesos(p.precios?.[actual.estado]??p.precio),'precio'));
