@@ -762,6 +762,7 @@ Herramienta: `node tools/qa_inventario.mjs`, Chrome headless vía CDP, servidor 
 - [ ] Pestañas: `role=tablist/tab/tabpanel`, un solo `tabindex=0`; Alt+1…4 cambian de modo y dejan el foco en la caja (PC).
 - [ ] Prueba del lector: con foco sobre un botón, inyectar «012345678905» + Enter a 15 ms entre teclas → se emite una `lectura`, el botón **no** recibe `click`, la cantidad no cambia; con foco en la caja igual; con foco en un campo de edición **no** se intercepta.
 - [ ] Al cambiar de modo, `stream.getTracks().every(t => t.readyState === 'ended')` salvo Capturar; sin tracks vivos al ocultar la pestaña.
+- [ ] Área segura simulada de 24 px: el disparo queda por encima de la navegación; con un único modo (sin navegación), el padding final incluye esos 24 px y deja visible todo el contenido al desplazar.
 - [ ] Línea de estado: un solo nodo `role=status` visible y un solo `role=alert` visible a la vez; el motivo del disparo tiene su propio `role=status` solo para lectores de pantalla.
 - [ ] Con `prefers-reduced-motion: reduce`: `transition-duration` 0 en botones y hojas; sin animaciones infinitas.
 - [ ] Teclado en 1280: recorrer con `Tab` y capturar el foco visible en caja, pestañas, chips de la cabecera, principal de cada modo y una fila de lista; anillo de ≥ 3 px visible en todos.

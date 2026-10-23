@@ -192,6 +192,7 @@ main:has(#modo-buscar:not([hidden])) .caja{margin-bottom:12px}
   body{--pie-captura:calc(66px + env(safe-area-inset-bottom))}
   body:has(#modos[hidden]),body.teclado-abierto{--pie-captura:0px}
   body:has(#modo-capturar:not([hidden])) main{padding-bottom:calc(var(--pie-captura) + 110px)}
+  body:has(#modos[hidden]):has(#modo-capturar:not([hidden])) main{padding-bottom:calc(110px + env(safe-area-inset-bottom))}
   .barra-captura{position:fixed;bottom:var(--pie-captura);left:0;right:0;z-index:10;display:grid;grid-template-columns:minmax(0,1fr) 76px minmax(0,1fr);gap:4px;align-items:center;padding:8px 6px 10px;border-top:2px solid var(--azul);background:var(--niebla)}
   body:has(#modos[hidden]) .barra-captura{padding-bottom:calc(10px + env(safe-area-inset-bottom))}
   .barra-captura .chips{justify-self:start;flex-wrap:nowrap;gap:0;padding:0}

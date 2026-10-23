@@ -41,10 +41,10 @@ export async function iniciarCelular(ctx,captura) {
   pintarCamara();
   async function encender(){
     if(!usarCamara||abriendoCamara)return;
-    abriendoCamara=true;bloquear(alternar,'Espera la cámara');
+    abriendoCamara=true;bloquear(alternar,'Espera la cámara');video.hidden=false;
     try{if(await camara.abrir()){reanudar.hidden=true;visor.classList.remove('bloqueada');visor.querySelector('.permiso-camara')?.remove();captura.neutro();}}
     catch(e){camara.pausar();pintarCamara();reanudar.textContent='Reintentar';visor.classList.add('bloqueada');mensaje(e.name==='NotAllowedError'?'Cámara bloqueada · revisa permisos':'Otra app usa la cámara','error');const instrucciones=nodo('ol',undefined,'permiso-camara');instrucciones.append(nodo('li','Toca el candado de la barra de direcciones.'),nodo('li','Permisos › Cámara › Permitir.'));visor.querySelector('.permiso-camara')?.remove();visor.append(instrucciones);}
-    finally{abriendoCamara=false;bloquear(alternar,'');}
+    finally{abriendoCamara=false;bloquear(alternar,'');pintarCamara();}
   }
   const subida=crearSubida({pendientes,leer,borrar,pausada:id=>revisando===id,
     alEstado(estado,r){const datos=sesion.get(r.id);if(datos)datos.estado=estado;pintar();if(estado==='sesion')mensaje('Tu sesión venció · vuelve a entrar','error');},

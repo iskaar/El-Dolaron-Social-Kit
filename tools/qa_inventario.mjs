@@ -76,7 +76,7 @@ async function capturar(nombre,width){
   medidas.push({nombre,width,...d});assert.ok(!/Cannot|undefined|is not a function/.test(d.estado),`Error en pantalla ${nombre}: ${d.estado}`);assert.ok(d.ancho<=width,`Desborde ${nombre}: ${d.ancho}`);
   const png=await cdp('Page.captureScreenshot',{format:'png'});await writeFile(path.join(salida,`${nombre}-${width}.png`),Buffer.from(png.data,'base64'));
 }
-async function esperar(expression,intentos=100){for(let i=0;i<intentos;i++){if(await js(expression))return;await dormir(50);}throw new Error('No llegó el estado: '+expression);}
+async function esperar(expression,intentos=100){for(let i=0;i<intentos;i++){if(await js(expression))return;await dormir(50);}throw new Error('No llegó el estado: '+expression+'; '+await js("document.querySelector('#error:not([hidden]),#estado:not([hidden])')?.textContent"));}
 async function rodar(nombre,texto){
   await js(`(()=>{const r=document.querySelector('.tablero-ropa .rodillo[aria-label="${nombre}"]'),i=[...r.children].findIndex(n=>n.textContent===${JSON.stringify(texto)});if(i<0)throw new Error('Falta opcion');r.children[i].click()})()`);
   await esperar(`document.querySelector('.tablero-ropa .rodillo[aria-label="${nombre}"] .elegida')?.textContent===${JSON.stringify(texto)}`);
@@ -137,6 +137,16 @@ if(!upcQA)for(const [width,height] of [[360,640],[412,740],[390,844]]){
   await modo('buscar');await modo('capturar');
   await js("document.querySelector('.alternar-camara').click()");
   await esperar("document.querySelector('.alternar-camara').getAttribute('aria-pressed')==='true'");
+  if(width===360){
+    await cdp('Emulation.setSafeAreaInsetsOverride',{insets:{bottom:24}});
+    assert.equal(await js("getComputedStyle(document.getElementById('modos')).paddingBottom"),'24px');
+    assert.ok(await js("document.querySelector('.disparo').getBoundingClientRect().bottom<=document.getElementById('modos').getBoundingClientRect().top"),'El área segura no superpone el disparo con la navegación');
+    await js("document.getElementById('modos').hidden=true;window.scrollTo(0,document.documentElement.scrollHeight)");
+    assert.ok(await js("document.querySelector('.captura-movil').getBoundingClientRect().bottom<=document.querySelector('.barra-captura').getBoundingClientRect().top"),'Con un único modo, el padding incluye el área segura');
+    assert.ok(await js('document.querySelector(".disparo").getBoundingClientRect().bottom<=innerHeight-24'));
+    await js("document.getElementById('modos').hidden=false;window.scrollTo(0,0)");
+    await cdp('Emulation.setSafeAreaInsetsOverride',{insets:{}});
+  }
   await js("document.getElementById('menu').click()");
   await js("[...document.querySelectorAll('#hoja button')].find(b=>b.textContent==='⌨ Escribir').click()");
   assert.equal(await js("document.activeElement.id"),'consulta','Escribir sigue accesible desde la cabecera');
