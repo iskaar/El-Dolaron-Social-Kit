@@ -23,6 +23,7 @@ test('Revisar manda la existencia solo si se tocó: PATCH si no es listo, ajuste
   // Se tocó: la pieza aún no está lista conserva el PATCH de siempre.
   assert.deepEqual(existenciaNueva(p,{...campos,stock:'4'}),{valor:4,esperado:9});
   assert.equal(cuerpoRevision(p,{...campos,stock:'4'},true).cuerpo.stock,4);
+  assert.equal(cuerpoRevision(p,{...campos,stock:'4'},true).cuerpo.stock_esperado,9);   // #473: si ya quedó lista, el servidor compara con lo que viste
   // «listo» ya es vendible: el PATCH no lleva stock (lo fija el ajuste auditado con la existencia vista).
   const listo={...p,estado_analisis:'listo'};
   assert.equal('stock' in cuerpoRevision(listo,{...campos,stock:'4'},true).cuerpo,false);

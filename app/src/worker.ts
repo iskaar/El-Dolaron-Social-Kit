@@ -415,16 +415,19 @@ async function destinoValido(destino: string, env: Env): Promise<boolean> {
  * precio explicito, se recalcula con la configuracion vigente.
  * Con etiqueta (codigo) la pieza ya esta a la venta con ese precio impreso: solo
  * el dueno lo cambia (Issue #75). Antes de etiquetar, poner precio es parte de la captura.
+ * Una pieza ya `listo` es vendible: con `existencia` (el PATCH del admin y de Revisar) su `stock` exige `stock_esperado`
+ * (lo que vio quien corrige), es condicional y deja renglón en conteo_ajustes (#473, igual que #468). Sin `existencia`
+ * (alta manual y su reintento, solicitudes de precio) la escritura directa nunca toca una `listo`.
  */
-async function corregirBorrador(id: string, cambios: Record<string, unknown>, env: Env, esDueno: boolean, captura?: { correo: string; upc: string }, precioEsperado?: number, cierraSolicitudPor?: string, solicitudId?: string): Promise<Response> {
+async function corregirBorrador(id: string, cambios: Record<string, unknown>, env: Env, esDueno: boolean, captura?: { correo: string; upc: string }, precioEsperado?: number, cierraSolicitudPor?: string, solicitudId?: string, existencia?: { ctx: ExecutionContext; correo: string }): Promise<Response> {
   if (!UUID.test(id)) {
     return json({ error: 'Identificador invalido.' }, 400);
   }
   const fila = await env.DB.prepare(
-    "select nombre, categoria, marca, talla, precio_lista, precio, estado_fisico, destino, stock, codigo, upc, propietario from productos where id = ? and estado_analisis <> 'descartado'",
+    "select nombre, categoria, marca, talla, precio_lista, precio, estado_fisico, destino, stock, codigo, upc, propietario, estado_analisis from productos where id = ? and estado_analisis <> 'descartado'",
   )
     .bind(id)
-    .first<FilaBorrador & { codigo: string | null }>();
+    .first<FilaBorrador & { codigo: string | null; estado_analisis: string }>();
   if (!fila) {
     return json({ error: 'La pieza no existe.' }, 404);
   }
@@ -459,6 +462,12 @@ async function corregirBorrador(id: string, cambios: Record<string, unknown>, en
       || (captura && cambios.stock !== undefined && !Number.isInteger(Number(cambios.stock)))) {
     return json({ error: 'Existencia invalida.' }, 400);
   }
+  // #473: en una `listo` la existencia se escribe aparte (condicional y auditada), y solo si coincide con la que vio quien corrige.
+  const listoAlLeer = fila.estado_analisis === 'listo';
+  const esperado = cambios.stock_esperado;
+  const aparte = !!existencia && listoAlLeer && cambios.stock !== undefined;
+  const stockVencido = (actual: number, aviso = '') => json({ error: `${aviso}La existencia cambió desde que la abriste (venta, apartado o ajuste): ahora hay ${actual}. Revísala y vuelve a intentar.`, stock: actual }, 409);
+  if (aparte && (typeof esperado !== 'number' || esperado !== fila.stock)) return stockVencido(fila.stock);
 
   const config = await leerConfig(env);
   let precio: number;
@@ -499,7 +508,7 @@ async function corregirBorrador(id: string, cambios: Record<string, unknown>, en
   const ahora = new Date().toISOString();
   const actualizar = env.DB.prepare(
     `update productos set nombre = ?, categoria = ?, marca = ?, talla = ?, precio_lista = ?, precio = ?,
-                          estado_fisico = ?, destino = ?, stock = coalesce(?, stock), estado_analisis = 'listo', actualizado_en = ?
+                          estado_fisico = ?, destino = ?, stock = case when estado_analisis <> 'listo' then coalesce(?, stock) else stock end, estado_analisis = 'listo', actualizado_en = ?
                           , upc = ? ${captura ? `, codigo = ${CODIGO_NUEVO}` : ''}
      where id = ?
        and estado_analisis <> 'descartado'
@@ -515,8 +524,8 @@ async function corregirBorrador(id: string, cambios: Record<string, unknown>, en
      returning stock`,
   )
     .bind(nombre, categoria, marca, talla, precioLista, precio, estadoFisico, destino,
-      // Sin `stock` en el cuerpo no se toca: la caja pudo vender piezas desde que se abrio la ficha.
-      cambios.stock === undefined ? null : stock, ahora, upc ?? null, id,
+      // Sin `stock` en el cuerpo no se toca: la caja pudo vender piezas desde que se abrio la ficha. Una `listo` tampoco (#473).
+      cambios.stock === undefined || listoAlLeer ? null : stock, ahora, upc ?? null, id,
       verificarUpc ? 1 : 0, normalizarUpc(upc), fila.propietario, normalizarUpc(upc), estadoFisico, id,
       fila.upc ?? null, fila.estado_fisico, ...(captura ? [captura.correo, captura.upc] : []),
       ...(precioEsperado === undefined ? [] : [precioEsperado]), ...(solicitudId ? [solicitudId] : []));
@@ -540,6 +549,18 @@ async function corregirBorrador(id: string, cambios: Record<string, unknown>, en
   // `precioEsperado` (#451): el precio solo cambia si sigue valiendo lo que vio quien lo cambia.
   if (!guardada) return precioEsperado !== undefined ? json({ error: 'El precio de la pieza cambió. Revisa el precio actual.' }, 409)
     : await conflictoUpc(env, upc || '', estadoFisico, fila.propietario, id) ?? json({ error: 'La pieza cambió o ya fue eliminada.' }, 409);
+  // Otro proceso la dejó `listo` entre la lectura y el UPDATE: el guardado no escribió su existencia (#473).
+  if (!listoAlLeer && cambios.stock !== undefined && guardada.stock !== stock)
+    return stockVencido(guardada.stock, 'Los demás datos se guardaron, pero la pieza quedó lista mientras corregías. ');
+  if (aparte && stock !== esperado) {
+    const ajuste = await escribirExistencia(env, existencia.ctx, { id, propietario: fila.propietario, folio: crypto.randomUUID(),
+      delta: stock - (esperado as number), motivo: 'correccion', correo: existencia.correo, esperado: esperado as number });
+    if (!ajuste) {
+      const actual = await env.DB.prepare('select stock from productos where id = ?').bind(id).first<{ stock: number }>();
+      return stockVencido(actual?.stock ?? guardada.stock, 'Los demás datos se guardaron, pero no la existencia. ');
+    }
+    guardada.stock = ajuste.despues;
+  }
   return json({ id, nombre, categoria, marca, talla, upc, precio_lista: precioLista, precio, estado_fisico: estadoFisico, destino, stock: guardada.stock });
 }
 
@@ -2725,7 +2746,7 @@ export default {
       if (pieza) {
         if (request.method === 'PATCH') {
           const esDueno = !!(await leerUsuario(env, correo))?.roles.includes('dueno');
-          return await corregirBorrador(pieza[1], await request.json(), env, esDueno, undefined, undefined, esDueno ? correo : undefined);
+          return await corregirBorrador(pieza[1], await request.json(), env, esDueno, undefined, undefined, esDueno ? correo : undefined, undefined, { ctx, correo });
         }
         if (request.method === 'DELETE') {
           return await descartarBorrador(pieza[1], env, propietarioDe(await leerUsuario(env, correo)));
