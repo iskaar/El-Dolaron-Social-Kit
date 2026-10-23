@@ -37,7 +37,7 @@ export async function iniciarCelular(ctx,captura) {
     visor.dataset.destello=tipo;setTimeout(()=>{delete visor.dataset.destello;},tipo==='etiqueta'?1500:350);
   }
   function pintarCamara(){const activa=!!camara.pista();alternar.setAttribute('aria-pressed',String(activa));etiquetaCamara.textContent=activa?'Cámara':'Apagada';apagada.hidden=activa;video.hidden=!activa;reanudar.hidden=!usarCamara||activa;subirArchivo.hidden=activa;}
-  const camara=crearCamara({video,alLeer:codigo=>{if(revisando||$('hoja').open)return;ctx.recibir(codigo,'camara').then(()=>sonar(captura.flujo.actual()?.tipo==='existente'?'existe':captura.flujo.actual()?.tipo==='sin-registro'?'sin':'ok')).catch(e=>{mensaje(e.message,'aviso');sonar('error');});},alEstado:pintarCamara});
+  const camara=crearCamara({video,puedeLeer:()=>!revisando&&!$('hoja').open,alLeer:codigo=>{ctx.recibir(codigo,'camara').then(()=>sonar(captura.flujo.actual()?.tipo==='existente'?'existe':captura.flujo.actual()?.tipo==='sin-registro'?'sin':'ok')).catch(e=>{mensaje(e.message,'aviso');sonar('error');});},alEstado:pintarCamara});
   pintarCamara();
   async function encender(){
     if(!usarCamara||abriendoCamara)return;
@@ -144,7 +144,7 @@ export async function iniciarCelular(ctx,captura) {
     const c=nodo('div',undefined,'formulario');
     c.append(boton('Subir foto',()=>{archivoPara=null;archivo.click();}));
     if(ctx.dueno)c.append(boton('Pieza sin foto',()=>captura.manual()));const pista=camara.pista(),rango=pista?.getCapabilities?.().zoom;
-    if(rango&&rango.max>rango.min){const l=nodo('label','Zoom'),input=nodo('input');input.type='range';Object.assign(input,{min:rango.min,max:rango.max,step:rango.step||.1,value:pista.getSettings().zoom||rango.min});input.oninput=()=>{pista.applyConstraints({advanced:[{zoom:Number(input.value)}]}).catch(()=>{});localStorage.setItem('captura-zoom',input.value);};l.append(input);c.append(l);}
+    if(rango&&rango.max>rango.min){const l=nodo('label','Zoom'),input=nodo('input');input.type='range';Object.assign(input,{min:rango.min,max:rango.max,step:rango.step||.1,value:pista.getSettings().zoom||rango.min});input.oninput=()=>{const zoom=Number(input.value);if(pista.getSettings().zoom!==zoom)pista.applyConstraints({advanced:[{zoom}]}).catch(()=>{});localStorage.setItem('captura-zoom',input.value);};l.append(input);c.append(l);}
     c.append(boton('Producto sin código',()=>{captura.flujo.limpiar();cerrarHoja();}),boton('Reanudar cámara',async()=>{cerrarHoja();usarCamara=true;try{sessionStorage.setItem('inventario-camara','true');}catch{}await encender();}),boton('Escribir código',()=>{cerrarHoja();$('busqueda').hidden=false;$('consulta').inputMode='numeric';$('consulta').focus();}));hoja('Cámara',c);
   }
   async function recuperar(){

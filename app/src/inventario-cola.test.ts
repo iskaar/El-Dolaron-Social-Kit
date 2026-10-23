@@ -144,6 +144,50 @@ test('una cámara que termina de abrir tras cambiar de modo detiene todas sus pi
   resolver({getTracks:()=>[{stop(){paradas++;}}]});assert.equal(await abrir,false);assert.equal(paradas,1);assert.equal(video.srcObject,null);
 });
 
+test('cámara reducida conserva zoom y Code128; pausa el detector y no solapa lecturas al reabrir',async()=>{
+  const tareas=new Map<number,Function>(),respuestas:{resolve:Function;reject:Function}[]=[],lecturas:string[]=[],formatos:string[][]=[],solicitudes:any[]=[],ajustes:any[]=[];
+  const doc={hidden:false};let hoja=false,id=0,paradas=0,zoomGuardado='1',detecciones=0;
+  const video={srcObject:null,play:async()=>{}};
+  const fuente=readFileSync('public/camara-inventario.js','utf8').replace('export ','');
+  const crear=runInNewContext(fuente+';crearCamara',{
+    document:doc,localStorage:{getItem:()=>zoomGuardado},
+    navigator:{mediaDevices:{getUserMedia:async(c:any)=>{
+      solicitudes.push(c);let zoom=1;
+      const pista={stop(){paradas++;},getCapabilities:()=>({zoom:{min:1,max:3}}),getSettings:()=>({zoom}),applyConstraints:async(c:any)=>{ajustes.push(c);zoom=c.advanced[0].zoom;}};
+      return {getTracks:()=>[pista],getVideoTracks:()=>[pista]};
+    }}},
+    BarcodeDetector:class{
+      constructor({formats}:{formats:string[]}){formatos.push(formats);}
+      detect(v:any){assert.equal(v,video);detecciones++;return new Promise((resolve,reject)=>respuestas.push({resolve,reject}));}
+    },
+    setTimeout(fn:Function,ms:number){assert.equal(ms,200);tareas.set(++id,fn);return id;},clearTimeout(i:number){tareas.delete(i);},
+  });
+  const camara=crear({video,puedeLeer:()=>!hoja,alLeer:(codigo:string)=>lecturas.push(codigo)});
+  const avanzar=()=>{assert.equal(tareas.size,1);const [i,fn]=[...tareas][0];tareas.delete(i);return fn();};
+  const terminar=async(codigos:any[])=>{respuestas.shift()!.resolve(codigos);await new Promise(setImmediate);};
+  await camara.abrir();assert.equal(detecciones,1);assert.equal(tareas.size,0,'Espera al detector antes de programar');
+  assert.equal(solicitudes[0].video.width.ideal,1280);assert.equal(solicitudes[0].video.width.min,1024);
+  assert.equal(solicitudes[0].video.height.ideal,960);assert.equal(solicitudes[0].video.aspectRatio.ideal,4/3);
+  assert.equal(solicitudes[0].audio,false);assert.equal(solicitudes[0].video.zoom,true);
+  assert.ok(formatos[0].includes('code_128'));assert.equal(ajustes.length,0,'No reaplica el zoom actual');
+
+  zoomGuardado='9';await camara.abrir();assert.equal(detecciones,1,'No solapa el detector anterior');
+  assert.equal(ajustes.length,1);assert.equal(ajustes[0].advanced[0].zoom,3,'Respeta el rango del zoom');
+  await avanzar();assert.equal(detecciones,1);
+  await terminar([{rawValue:'vieja'}]);assert.deepEqual(lecturas,[],'Descarta el stream anterior');
+  let pendiente=avanzar();assert.equal(detecciones,2);
+  hoja=true;await terminar([{rawValue:'hoja'}]);await pendiente;assert.deepEqual(lecturas,[]);
+  await avanzar();assert.equal(detecciones,2,'No detecta con hoja abierta');
+  hoja=false;doc.hidden=true;await avanzar();assert.equal(detecciones,2,'No detecta con pestaña oculta');
+  doc.hidden=false;pendiente=avanzar();await terminar([{rawValue:'2318'}]);await pendiente;
+  assert.deepEqual(lecturas,['2318']);
+  pendiente=avanzar();doc.hidden=true;await terminar([{rawValue:'oculta'}]);await pendiente;
+  assert.deepEqual(lecturas,['2318'],'Descarta también resultados al ocultarse');
+  doc.hidden=false;pendiente=avanzar();respuestas.shift()!.reject(new Error('Fotograma no disponible'));await pendiente;
+  pendiente=avanzar();camara.pausar();await terminar([{rawValue:'apagada'}]);await pendiente;
+  assert.deepEqual(lecturas,['2318']);assert.equal(tareas.size,0);assert.equal(video.srcObject,null);assert.equal(paradas,2);
+});
+
 test('host del capturista sirve las importaciones de Capturar, Buscar y Revisar sin abrir Ajustes ni impresión',()=>{
   for(const archivo of ['inventario.js','inventario-ui.js','inventario-capturar.js','inventario-ropa.js','inventario-celular.js','inventario-revisar.js','inventario-precio.js','foto-pendiente.js','camara-inventario.js','ficha.js','lector.js','foto.js','cola-fotos.js','tallas.js','ropa.js','upc.js','estados.js','sesiones.js','precios-ml.js','compartir.js','envio-etiquetas.js'])assert.equal(permitidaParaVendedor('/'+archivo,'GET'),true,archivo);
   for(const ruta of ['/admin','/api/config','/imprimir-lote.js','/api/etiquetas'])assert.equal(permitidaParaVendedor(ruta,'GET'),false,ruta);

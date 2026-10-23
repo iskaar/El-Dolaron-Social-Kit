@@ -269,6 +269,8 @@ LISTO ──lee código──► BUSCANDO ──► NUEVA (manifiesto) ──Gua
 ```
 
 - Visor 4:3 en Mercancía y compacto en Ropa; zoom: deslizador **dentro de una hoja** (`Zoom` en `⋯` del visor), recordado en `captura-zoom`.
+- Cámara: ideal 1280×960, ancho mínimo 1024 y proporción ideal 4:3, para conservar fotos de 1024 px de lado mayor con menor costo en teléfonos de gama media; zoom solo si cambia, video `playsinline muted` sin filtros, sombras ni transformaciones.
+- Detector UPC/EAN y Code128 sobre el video reducido, una detección a la vez (también al reabrir), con 200 ms de descanso tras cada intento; no detecta con pestaña oculta, cámara apagada, revisión u hoja abierta y descarta resultados tardíos. Cámara y USB usan `lector.recibir` → Capturar: la búsqueda existente prioriza la etiqueta ED numérica sobre UPC, sin filtrar su grado ni consultar el manifiesto; solo si no es etiqueta sigue el flujo UPC.
 - Disparo: 76×76, círculo blanco con borde 6 px `--amarillo` y sombra dura `4px 4px 0 --azul`; presionado hunde. `aria-label="Tomar foto"`. Vive siempre en el centro de la barra fija; no se oculta al leer UPC.
 - Barra de captura: grado a la izquierda (3 × 44×56), disparo al centro, stepper a la derecha (44+44+44, botones de 44×56). Padding lateral 6 px, huecos 4 px: cabe en 360 px sin envolver. Se fija a `66px + env(safe-area-inset-bottom)` del borde inferior. Con un único modo, la navegación se oculta y la barra baja al borde, conservando el área segura. El contenido tiene padding inferior para que su final pueda desplazarse por encima de la barra.
 - Interruptor dentro del visor, esquina superior izquierda: icono blanco + «Cámara»/«Apagada», fondo oscuro translúcido, `aria-pressed`, objetivo ≥44 px. Reutiliza `crearCamara.abrir/pausar`, incluidos parada de tracks y descarte de detecciones tardías. `inventario-camara` en `sessionStorage` recuerda la elección al cambiar de modo o recargar. Apagada: visor oscuro y texto «Cámara apagada»; el disparo abre la selección de foto existente, nunca usa un fotograma detenido. «Pieza sin foto» conserva su permiso de dueño en el menú del visor.
@@ -771,7 +773,7 @@ Herramienta: `node tools/qa_inventario.mjs`, Chrome headless vía CDP, servidor 
 - [ ] Grises (filtro `grayscale(1)`): éxito, aviso y error siguen distinguibles por glifo y texto.
 - [ ] Todas las cadenas visibles: tuteo, acentos y signos completos; ninguna del tipo «Haz clic aquí»; ninguna frase de más de 6 palabras en línea de estado salvo los errores con acción (≤ 10).
 
-**Pendiente de prueba física (no sustituible por headless)**: lector USB y Bluetooth con ráfagas reales, cámara 4:3 con zoom y `BarcodeDetector` a 120 ms, AE240 por PC y por Android, luz solar con el celular, guantes, red cortada a media tanda, vibración y volumen en el piso.
+**Pendiente de prueba física (no sustituible por headless)**: lector USB y Bluetooth con ráfagas reales, cámara 1280×960 ideal con zoom y `BarcodeDetector` con descanso de 200 ms (UPC/EAN y etiquetas Code128), fluidez en TCL 10 Pro T799B, AE240 por PC y por Android, luz solar con el celular, guantes, red cortada a media tanda, vibración y volumen en el piso.
 
 ---
 
