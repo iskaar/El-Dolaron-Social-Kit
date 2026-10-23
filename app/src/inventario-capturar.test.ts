@@ -3,6 +3,85 @@ import assert from 'node:assert/strict';
 import { crearCaptura } from '../public/inventario-capturar.js';
 import { tienda, PRODUCTO } from './prueba-d1.ts';
 import { crearLector } from '../public/lector.js';
+import { tsplEtiqueta } from '../public/etiquetera.js';
+
+function manifiesto() {
+  const t=tienda();
+  t.db.prepare("insert into manifiesto(upc,descripcion,nombre,precio_usd,tcin,actualizado_en) values('191907910414','Lámpara','Lámpara',1000,'','')").run();
+  t.db.prepare("insert or replace into config(clave,valor) values('tipo_cambio','2000'),('pct_otros','50')").run();
+  t.db.prepare("insert into usuarios(correo,roles,activo,editar_inventario,creado_en,actualizado_en) values('cap@prueba.mx','capturista',1,0,'','')").run();
+  return t;
+}
+const alta=()=>({id:crypto.randomUUID(),upc:'0191907910414',stock:2,estado_fisico:'nuevo'});
+
+test('tarjeta de manifiesto: servidor exige dueño para precio y casilla para nombre, sin escribir al denegar',async t0=>{
+  const t=manifiesto();t0.after(async()=>{await t.esperar();t.db.close();});
+  t.env.DEV_USUARIO='cap@prueba.mx';
+  const ficha=(await t.pedir('/api/manifiesto/0191907910414')).cuerpo;
+  for(const casilla of [0,1]){
+    t.db.prepare("update usuarios set editar_inventario=? where correo='cap@prueba.mx'").run(casilla);
+    assert.equal((await t.pedir('/api/borradores/upc',{...alta(),precio:ficha.precio+100})).status,403);
+  }
+  t.db.prepare("update usuarios set editar_inventario=0 where correo='cap@prueba.mx'").run();
+  assert.equal((await t.pedir('/api/borradores/upc',{...alta(),nombre:'Otro nombre'})).status,403);
+  assert.equal(t.db.prepare('select count(*) n from productos where upc is not null').get()!.n,0);
+  const a=alta(),igual={...a,nombre:'  '+ficha.nombre+'  ',precio:ficha.precio};
+  assert.equal((await t.pedir('/api/borradores/upc',igual)).status,201,'Datos idénticos se aceptan sin casilla');
+  assert.equal((await t.pedir('/api/borradores/upc',{...igual,precio:ficha.precio+100})).status,403,'El reintento también autoriza');
+  assert.equal((await t.pedir('/api/borradores/upc',{...alta(),nombre:'Distinto'})).status,403,'La suma tampoco evita el permiso');
+  assert.equal(t.db.prepare('select stock from productos where id=?').get(a.id)!.stock,2);
+  assert.equal(t.db.prepare('select count(*) n from conteo_ajustes').get()!.n,0);
+});
+
+test('dueño edita nombre/precio; el UUID conserva el resultado y la impresión toma los valores de D1',async t0=>{
+  const t=manifiesto();t0.after(async()=>{await t.esperar();t.db.close();});
+  const api=async(ruta,cuerpo)=>{const r=await t.pedir(ruta,cuerpo);assert.ok(r.status<400,JSON.stringify(r));return r.cuerpo;};
+  const impresas:string[]=[];
+  const flujo=crearCaptura({api,enLinea:()=>true,imprimir:async(id,n)=>{
+    const etiquetas=await api('/api/etiquetas',{ids:[id]});
+    assert.equal(etiquetas[0].nombre,'Termo & tapa');assert.equal(etiquetas[0].precio,8700);
+    impresas.push(tsplEtiqueta(etiquetas[0],n,0,2));return true;
+  }});
+  await flujo.leer('0191907910414');
+  flujo.actual().nombre='  Termo &amp; tapa  ';flujo.actual().precio='87.00';flujo.cantidad(3);
+  const id=flujo.actual().id;await flujo.guardar();
+  assert.equal(impresas.length,1);assert.match(impresas[0],/Termo & tapa/);assert.match(impresas[0],/87/);
+  const reintento=await api('/api/borradores/upc',{...alta(),id,nombre:'No reemplazar',precio:9900});
+  assert.deepEqual([reintento.nombre,reintento.precio,reintento.stock],['Termo & tapa',8700,3]);
+  const suma=await api('/api/borradores/upc',{...alta(),nombre:'Tampoco reemplazar',precio:9900});
+  assert.deepEqual([suma.id,suma.nombre,suma.precio,suma.stock],[id,'Termo & tapa',8700,5]);
+  await flujo.leer('0191907910414');await flujo.leer('0191907910414');
+  assert.equal(impresas.length,2,'Reescanear también imprime los valores editados');
+  assert.equal(t.db.prepare('select stock from productos where id=?').get(id)!.stock,6);
+  assert.equal(t.db.prepare('select count(*) n from productos where upc is not null').get()!.n,1);
+});
+
+test('capturista con casilla edita solo nombre; límites de nombre y centavos se validan antes del alta',async t0=>{
+  const t=manifiesto();t0.after(async()=>{await t.esperar();t.db.close();});
+  for(const campos of [{nombre:''},{nombre:'   '},{nombre:null},{nombre:42},{precio:0},{precio:-1},{precio:1.5},{precio:'100'},{precio:null},{precio:Number.MAX_SAFE_INTEGER+1},{precio:20001}]){
+    assert.equal((await t.pedir('/api/borradores/upc',{...alta(),...campos})).status,400,JSON.stringify(campos));
+  }
+  assert.equal(t.db.prepare('select count(*) n from productos where upc is not null').get()!.n,0);
+  t.env.DEV_USUARIO='cap@prueba.mx';t.db.prepare("update usuarios set editar_inventario=1 where correo='cap@prueba.mx'").run();
+  const nombre='Á'.repeat(125),r=await t.pedir('/api/borradores/upc',{...alta(),nombre:'  '+nombre+'  '});
+  assert.equal(r.status,201);assert.equal(r.cuerpo.nombre,'Á'.repeat(120));
+});
+
+test('campos opcionales no revelan piezas ajenas ni evitan conflictos de UUID/UPC',async t0=>{
+  const t=manifiesto();t0.after(async()=>{await t.esperar();t.db.close();});
+  const a=alta();await t.pedir('/api/borradores/upc',a);
+  t.env.DEV_USUARIO='cap@prueba.mx';
+  assert.equal((await t.pedir('/api/borradores/upc',{...a,upc:'999999999999',nombre:'Otro',precio:1})).status,409);
+  t.db.prepare("update productos set propietario='fep' where id=?").run(a.id);
+  assert.equal((await t.pedir('/api/borradores/upc',{...a,nombre:'Otro',precio:1})).status,404);
+});
+
+test('ediciones inválidas de la tarjeta conservan el trabajo y no guardan ni imprimen',async()=>{
+  const flujo=crearCaptura({api:async()=>assert.fail('No debe llamar la API'),enLinea:()=>true,imprimir:async()=>assert.fail('No debe imprimir')});
+  const a={tipo:'nueva',id:'estable',nombre:'   ',cantidad:1};flujo.retomar(a);
+  await assert.rejects(flujo.guardar(),/nombre/);assert.equal(flujo.actual(),a);
+  a.nombre='Lámpara';a.precio='0';await assert.rejects(flujo.guardar(),/precio/);assert.equal(flujo.actual(),a);
+});
 
 test('UPC de Ropa ignora el grado de MG y conserva el estado interno al sumar; MG sigue filtrada por grado', async () => {
   const ropa = { id: 'ropa', upc: '012345678905', categoria: 'ropa', estado_fisico: 'danado', stock: 1, estado_analisis: 'listo' };
