@@ -114,9 +114,14 @@ test('D1/D4: una pieza lista con UPC se corrige con el ajuste auditado (fijar_a 
   await assert.rejects(() => corregirExistencia(api(403), { estado_analisis: 'listo', upc: '1', stock: 2 }, 'p1', 4), /quien edita el inventario/);
   // Lo que aún se identifica o es una foto sin UPC conserva la corrección de captura.
   await corregirExistencia(api(), { estado_analisis: 'pendiente', upc: '1', stock: 2 }, 'p2', 3);
-  assert.deepEqual(llamadas.at(-1), { ruta: '/api/borradores/p2/existencia', cuerpo: { stock: 3 }, metodo: 'PATCH' });
+  assert.deepEqual(llamadas.at(-1), { ruta: '/api/borradores/p2/existencia', cuerpo: { stock: 3, esperado: 2 }, metodo: 'PATCH' });
+  // Una foto lista sin UPC conserva la ruta de captura pero manda la existencia vista; en 409 recuerda la actual (#468).
   await corregirExistencia(api(), { estado_analisis: 'listo', upc: '', stock: 2 }, 'p3', 3);
-  assert.equal(llamadas.at(-1).ruta, '/api/borradores/p3/existencia');
+  assert.deepEqual(llamadas.at(-1), { ruta: '/api/borradores/p3/existencia', cuerpo: { stock: 3, esperado: 2 }, metodo: 'PATCH' });
+  const vista = { estado_analisis: 'listo', upc: '', stock: 2 };
+  const vencida = async () => { throw Object.assign(new Error('cambió'), { status: 409, datos: { stock: 1 } }); };
+  await assert.rejects(() => corregirExistencia(vencida, vista, 'p3', 3), /cambió/);
+  assert.equal(vista.stock, 1);
 });
 
 test('D4: las unidades que sube una corrección se etiquetan si ya salió la etiqueta anterior (marca local, adoptada o de la base), no solo la de este teléfono', () => {

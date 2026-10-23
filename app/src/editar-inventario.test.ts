@@ -183,7 +183,7 @@ test('las correcciones de 24 h del carrusel (existencia, talla, revisión) no pi
   body.set('foto', new File(['foto de prueba'], 'foto.jpg', { type: 'image/jpeg' }));
   assert.equal((await worker.fetch!(new Request('https://caja.prueba/api/borradores', { method: 'POST', body }) as never, t.env, t.ctx as never)).status, 201);
   const ruta = `/api/borradores/${id}`;
-  assert.equal((await t.pedir(`${ruta}/existencia`, { stock: 3 }, 'PATCH')).status, 200);
+  assert.equal((await t.pedir(`${ruta}/existencia`, { stock: 3, esperado: 1 }, 'PATCH')).status, 200);   // listo: con la existencia vista (#468)
   assert.equal((await t.pedir(`${ruta}/talla`, { talla: 'L' }, 'PATCH')).status, 200);
   assert.equal((await t.pedir(`${ruta}/revision`)).status, 200);
   assert.equal((await t.pedir(`${ruta}/revision`, { precio: 10000 }, 'PATCH')).status, 200);

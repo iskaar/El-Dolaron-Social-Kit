@@ -173,7 +173,7 @@ export async function iniciarCelular(ctx,captura) {
         // Un alta pudo llegar aunque su respuesta se perdiera: corregirla por sus rutas de 24 h.
         if(cantidad!==actual.stock||tallaActual!==actual.talla){
           try{const remota=await api(`/api/borradores/${id}/revision`);
-            if(cantidad!==remota.stock)await api(`/api/borradores/${id}/existencia`,{stock:cantidad},'PATCH');
+            if(cantidad!==remota.stock)await api(`/api/borradores/${id}/existencia`,{stock:cantidad,esperado:remota.stock},'PATCH');
             if(tallaActual&&tallaActual!==remota.talla)await api(`/api/borradores/${id}/talla`,{talla:tallaActual},'PATCH');
           }catch(e){if(e.status!==404)throw e;}
         }

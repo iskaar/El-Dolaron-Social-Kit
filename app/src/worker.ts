@@ -46,7 +46,7 @@ import { cajeroEnTurno, listarCajeros, entrar, salir, ponerPin } from './cajeros
 import { registrarSocio, buscarSocio, buscarPorCodigo, basesListas, sentenciasDeVenta, saldo } from './dolarones.ts';
 import { registrarCorte, registrarRetiro, ultimoCorte, cajaDe } from './corte.ts';
 import { rutaGastos } from './gastos.ts';
-import { rutaPiezas } from './piezas.ts';
+import { rutaPiezas, escribirExistencia } from './piezas.ts';
 import { rutaSolicitudesPrecio } from './solicitudes-precio.ts';
 import { UPC_VISIBLE, MISMO_UPC, PIEZA_UPC, CAPTURA_SUMADA, conflictoCapturaSumada, capturaSumada, sumarCaptura, conflictoUpc, corregirUpc, upcValido, type PiezaUpc } from './upc-inventario.ts';
 import { rutaCamaraRemota } from './camara-remota.ts';
@@ -891,11 +891,11 @@ const VENTANA_CAPTURA_MS = 24 * 60 * 60 * 1000;
  * revision), y pasado ese rato la pieza ya pudo venderse y un numero absoluto
  * pisaria la venta.
  */
-async function corregirCaptura(id: string, campo: string, request: Request, env: Env, correo: string, sinFoto = false): Promise<Response> {
+async function corregirCaptura(id: string, campo: string, request: Request, env: Env, correo: string, sinFoto = false, ctx?: ExecutionContext): Promise<Response> {
   if (!UUID.test(id)) {
     return json({ error: 'Identificador invalido.' }, 400);
   }
-  const cuerpo = (await request.json()) as { stock?: unknown; talla?: unknown };
+  const cuerpo = (await request.json()) as { stock?: unknown; talla?: unknown; esperado?: unknown };
   let valor: number | string;
   if (campo === 'existencia') {
     valor = Number(cuerpo.stock);
@@ -916,9 +916,12 @@ async function corregirCaptura(id: string, campo: string, request: Request, env:
     and not exists (select 1 from ml_publicaciones where producto_id = productos.id)`;
   // Lo escaneado (con UPC) se corrige mientras está abierto en el escáner; ya guardado y `listo`,
   // /etiquetas lo imprime en seguida, así que solo se corrige lo que aún se identifica o espera foto (#381).
-  // Una pieza `listo` con UPC (p. ej. una captura con foto del manifiesto) ya es vendible y puede tener apartados, ajustes o
-  // ventas: aquí NO se le escribe una existencia absoluta. Su corrección va por POST /api/piezas/:id/existencia (fijar_a +
-  // esperado + renglón de auditoría; #464). Este alcance heredado (`upc is null or estado_analisis <> 'listo'`) no cambia.
+  // Una pieza `listo` ya es vendible y puede tener apartados, ajustes o ventas: nunca se le escribe una existencia absoluta a ciegas.
+  // Con UPC (p. ej. una captura con foto del manifiesto) aquí no se corrige: va por POST /api/piezas/:id/existencia (#464).
+  // Sin UPC (foto con análisis de IA o ropa) conserva el alcance y los permisos de la captura propia (24 h, sin casilla), pero la
+  // escritura exige `esperado` (la existencia que vio quien corrige) y es condicional (`stock = esperado`) con renglón de
+  // auditoría, igual que ese POST (#468). Falta `esperado` o está vencido → 409 con la existencia actual; nada se escribe.
+  // Lo que aún no está `listo` (identificándose o esperando foto) conserva la escritura directa.
   // En 0 se cancela y sale de la cola (#377). Una foto se elimina desde su miniatura.
   if (valor === 0) {
     const { meta } = await env.DB.prepare(`update productos set stock = 0, estado_analisis = 'descartado', actualizado_en = ?
@@ -931,9 +934,28 @@ async function corregirCaptura(id: string, campo: string, request: Request, env:
       ?? json({ error: sinFoto ? 'Ya no se puede cancelar: pasaron 5 minutos o la pieza tiene venta, foto o publicación.' : 'Ya tiene etiqueta: corrígela en el admin.' }, 404);
     return json({ id, stock: 0, descartado: true });
   }
+  if (campo === 'existencia' && !sinFoto) {
+    const fila = await env.DB.prepare(`select estado_analisis, stock, propietario from productos
+      where id = ? and capturado_por = ? and creado_en > ? and upc is null and estado_analisis <> 'descartado'`)
+      .bind(id, correo, desde).first<{ estado_analisis: string; stock: number; propietario: string }>();
+    if (fila?.estado_analisis === 'listo') {
+      const vencida = (stock: number) => json({ error: `La existencia cambió desde que la abriste (venta, apartado o ajuste): ahora hay ${stock}. Revísala y vuelve a intentar.`, stock }, 409);
+      const esperado = cuerpo.esperado;
+      if (typeof esperado !== 'number' || esperado !== fila.stock) return vencida(fila.stock);
+      if (valor === esperado) return json({ id, stock: valor });
+      const ajuste = await escribirExistencia(env, ctx!, {
+        id, propietario: fila.propietario, folio: crypto.randomUUID(), delta: valor as number - esperado, motivo: 'correccion', correo, esperado,
+        donde: `and capturado_por = ? and creado_en > ? and not ${CAPTURA_SUMADA}`, args: [correo, desde],
+      });
+      if (ajuste) return json({ id, stock: valor });
+      const actual = await env.DB.prepare('select stock from productos where id = ?').bind(id).first<{ stock: number }>();
+      return await conflictoCapturaSumada(env, id, correo) ?? vencida(actual?.stock ?? fila.stock);
+    }
+  }
+  // La existencia directa nunca toca una `listo`: si el análisis la terminó después de la lectura de arriba, 0 filas (#468).
   const resultado = await env.DB.prepare(
     `update productos set ${columna} = ?, actualizado_en = ? where id = ? and capturado_por = ? and creado_en > ?
-       and (${sinFoto ? alcanceSinFoto : "upc is null or estado_analisis <> 'listo'"}) and estado_analisis <> 'descartado'
+       and (${sinFoto ? alcanceSinFoto : campo === 'existencia' ? "estado_analisis <> 'listo'" : "upc is null or estado_analisis <> 'listo'"}) and estado_analisis <> 'descartado'
        ${campo === 'existencia' ? `and not ${CAPTURA_SUMADA}` : ''}`,
   )
     .bind(valor, new Date().toISOString(), id, correo, desde)
@@ -2714,7 +2736,7 @@ export default {
       const correccion = pathname.match(CORRECCION_CAPTURA);
       if (correccion?.[2] === 'revision') return await revisarCaptura(correccion[1], request, env, correo);
       if (correccion && request.method === 'PATCH') {
-        return await corregirCaptura(correccion[1], correccion[2], request, env, correo);
+        return await corregirCaptura(correccion[1], correccion[2], request, env, correo, false, ctx);
       }
 
       if (fusion && request.method === 'POST') {
