@@ -607,7 +607,7 @@ async function capturarManualEscaner(request: Request, env: Env, correo: string)
 /**
  * Lo que el manifiesto dice de un UPC, con el precio de lista en pesos (Issue
  * #365). El precio de venta de una pieza nueva es solo para la pantalla: al
- * guardar se recalcula aqui mismo, nunca se toma del cliente.
+ * guardar se recalcula aquí mismo; solo el dueño puede sustituirlo (#461).
  */
 async function precioDeManifiesto(upcCrudo: string, env: Env): Promise<Response | { ficha: FichaManifiesto; precioLista: number; precioManual?: number; config: Record<string, string> }> {
   const upc = normalizarUpc(upcCrudo);
@@ -649,7 +649,7 @@ async function buscarEnManifiesto(upcCrudo: string, env: Env): Promise<Response>
   });
 }
 
-/** Alta de una pieza escaneada: todo sale del manifiesto menos la cantidad y el estado. */
+/** Recupera una captura sin repetir el alta ni reponer existencias. */
 async function capturaUpcGuardada(id: string, leido: string, env: Env, ctx?: ExecutionContext, correo?: string): Promise<Response | null> {
   const sumada = correo ? await capturaSumada(env, id, correo) : null;
   const existente = sumada ?? await env.DB.prepare(`select ${PIEZA_UPC} from productos where id = ?`)
@@ -690,19 +690,54 @@ async function capturarPorUpc(request: Request, env: Env, correo: string, ctx?: 
   const leido = codigoLeido(cuerpo.upc);
   if (!normalizarUpc(leido)) return json({ error: 'Código de barras inválido.' }, 400);
   if (typeof cuerpo.id !== 'string' || !UUID.test(cuerpo.id)) return json({ error: 'Identificador inválido.' }, 400);
+  const nombreEditado = cuerpo.nombre === undefined ? undefined
+    : typeof cuerpo.nombre === 'string' ? decodificarNombre(cuerpo.nombre).trim().slice(0, 120) : '';
+  if (nombreEditado === '') return json({ error: 'El nombre no puede quedar vacío.' }, 400);
+  if (cuerpo.precio !== undefined && (typeof cuerpo.precio !== 'number' || !Number.isSafeInteger(cuerpo.precio) || cuerpo.precio <= 0)) {
+    return json({ error: 'Precio inválido.' }, 400);
+  }
+  const editando = nombreEditado !== undefined || cuerpo.precio !== undefined;
+  const usuario = editando ? await leerUsuario(env, correo) : null;
+  const validarEdicion = (nombre: string, precio: number): Response | null => {
+    if (cuerpo.precio !== undefined && cuerpo.precio !== precio && !usuario?.roles.includes('dueno')) {
+      return json({ error: 'Solo el dueño cambia el precio.' }, 403);
+    }
+    if (nombreEditado !== undefined && nombreEditado !== nombre && !puedeEditarInventario(usuario)) {
+      return json({ error: 'Tu cuenta no tiene permiso para editar el inventario.' }, 403);
+    }
+    return null;
+  };
+  // Autorizar también los reintentos antes de asignar código o sumar stock.
+  const previa = editando ? await capturaSumada(env, cuerpo.id, correo)
+    ?? await env.DB.prepare(`select ${PIEZA_UPC} from productos where id = ?`).bind(cuerpo.id).first<PiezaUpc>() : null;
+  if (previa?.propietario === 'dolaron' && normalizarUpc(previa.upc) === normalizarUpc(leido) && previa.estado_analisis !== 'descartado') {
+    const error = validarEdicion(previa.nombre, previa.precio);
+    if (error) return error;
+  }
   const existente = await capturaUpcGuardada(cuerpo.id, leido, env, ctx, correo);
   if (existente) return existente;
   const stock = Number(cuerpo.stock);
   if (!Number.isInteger(stock) || stock < 1 || stock > 999) return json({ error: 'Cantidad inválida.' }, 400);
   const estado = cuerpo.estado_fisico ?? 'nuevo';
   if (typeof estado !== 'string' || !ESTADOS_FISICOS.has(estado)) return json({ error: 'Estado físico inválido.' }, 400);
+  const manifiesto = editando ? await precioDeManifiesto(leido, env) : null;
+  if (manifiesto instanceof Response) return manifiesto;
+  if (manifiesto) {
+    const { ficha, precioLista, precioManual, config } = manifiesto;
+    const error = validarEdicion(decodificarNombre(ficha.nombre || ficha.descripcion).trim().slice(0, 120),
+      precioManual ?? calcularPrecio({ precioLista, categoria: ficha.categoria || 'otros', estadoFisico: estado, config }).precio);
+    if (error) return error;
+    if (typeof cuerpo.precio === 'number' && precioLista > 0 && cuerpo.precio > precioLista) {
+      return json({ error: 'El precio de venta no puede ser mayor al precio de lista.' }, 400);
+    }
+  }
   const sumada = await sumarUpc(cuerpo.id, leido, estado, stock, env, correo, ctx);
   if (sumada) return sumada;
-  const resultado = await precioDeManifiesto(leido, env);
+  const resultado = manifiesto ?? await precioDeManifiesto(leido, env);
   if (resultado instanceof Response) return resultado;
   const { ficha, precioLista, precioManual, config } = resultado;
-  const nombre = decodificarNombre(ficha.nombre || ficha.descripcion).trim().slice(0, 120), categoria = ficha.categoria || 'otros';
-  const precio = precioManual ?? calcularPrecio({ precioLista, categoria, estadoFisico: estado, config }).precio;
+  const nombre = nombreEditado ?? decodificarNombre(ficha.nombre || ficha.descripcion).trim().slice(0, 120), categoria = ficha.categoria || 'otros';
+  const precio = cuerpo.precio === undefined ? precioManual ?? calcularPrecio({ precioLista, categoria, estadoFisico: estado, config }).precio : cuerpo.precio as number;
   if (!nombre || !CATEGORIAS.has(categoria) || !Number.isSafeInteger(precio) || precio <= 0 || !Number.isSafeInteger(precioLista) || precioLista < 0) {
     return json({ error: 'El producto necesita nombre, categoría y precio válidos.' }, 400);
   }
