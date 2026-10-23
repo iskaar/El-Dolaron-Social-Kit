@@ -54,7 +54,7 @@ function d1(db: DatabaseSync) {
   };
 }
 
-/** R2 en memoria: lo minimo que usa la app (get/put/delete). */
+/** R2 en memoria: lo minimo que usa la app (get/put/delete/list). */
 function r2() {
   const objetos = new Map<string, ArrayBuffer>();
   const metadatos = new Map<string, { etag: string; httpMetadata?: R2HTTPMetadata; customMetadata?: Record<string, string> }>();
@@ -74,6 +74,12 @@ function r2() {
       return meta;
     },
     async delete(llave: string) { objetos.delete(llave); metadatos.delete(llave); },
+    async list(opciones?: R2ListOptions) {
+      const llaves = [...objetos.keys()].filter((k) => k.startsWith(opciones?.prefix ?? '')).sort();
+      const desde = opciones?.cursor ? llaves.findIndex((k) => k > opciones.cursor!) : 0;
+      const pagina = desde < 0 ? [] : llaves.slice(desde, desde + (opciones?.limit ?? 1000));
+      return { objects: pagina.map((key) => ({ key })), truncated: desde >= 0 && desde + pagina.length < llaves.length, cursor: pagina.at(-1) };
+    },
   };
 }
 

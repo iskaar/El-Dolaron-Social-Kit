@@ -57,6 +57,7 @@ import { mensajesApi, responderApi } from './mensajes.ts';
 import { rutaAsistente } from './asistente.ts';
 import { sentenciasVale, buscarVale, valeDeVenta, valeUsadoEnVenta, reimprimirVale, valesAbiertos, emitirCuponManual, porcentajeCupon } from './vales.ts';
 import { catalogoPublico, revisionCatalogo } from './catalogo.ts';
+import { rescatarPendientes, esCorridaSemanal, reportarHuerfanosR2 } from './huerfanos.ts';
 import { procesarRecortes, revisarRecortes, ajustarRecortesViejos, reiniciarRecorte, rutaRecortesAdmin } from './recortes.ts';
 import { rutaML, recibirNotificacion, conciliarSeguro, sincronizar, publicacionViva } from './mercadolibre.ts';
 import { pedirDescuento, validarDescuento, listarDescuentos, listarDuenos } from './descuentos.ts';
@@ -257,9 +258,9 @@ async function crearBorrador(request: Request, env: Env, ctx: ExecutionContext, 
   }
 
   const fotoKey = `fotos/${id}.jpg`;
-  await env.FOTOS.put(fotoKey, foto.stream(), {
-    httpMetadata: { contentType: 'image/jpeg' },
-  });
+  // La foto se sube hasta confirmar la fila (#481): un 409 o una captura sumada no dejan objeto huérfano en R2.
+  // Si el put falla, el reintento del mismo id repite el alta (idempotente) y sube la foto.
+  const subirFoto = () => env.FOTOS.put(fotoKey, foto.stream(), { httpMetadata: { contentType: 'image/jpeg' } });
 
   // Foto de respaldo del escáner: conserva identidad y precio conocidos, sin otro análisis.
   // Con edición de la tarjeta (#461) se enruta igual que la tarjeta: precioDeManifiesto no exige foto en la pieza del catálogo (#402).
@@ -282,7 +283,10 @@ async function crearBorrador(request: Request, env: Env, ctx: ExecutionContext, 
     if (respuesta.status === 403 && edicion) respuesta = await alta(false);
     if (respuesta.ok) {
       const guardada = await respuesta.clone().json() as { id: string; existente?: boolean };
-      if (!guardada.existente) await env.DB.prepare('update productos set foto_key = ? where id = ?').bind(fotoKey, guardada.id).run();
+      if (!guardada.existente) {
+        await subirFoto();
+        await env.DB.prepare('update productos set foto_key = ? where id = ?').bind(fotoKey, guardada.id).run();
+      }
     }
     return respuesta;
   }
@@ -294,7 +298,7 @@ async function crearBorrador(request: Request, env: Env, ctx: ExecutionContext, 
     const { meta } = await env.DB.prepare("update productos set foto_key = ?, actualizado_en = ?, recorte_estado=case when recorte_estado='original' then 'original' else null end, recorte_fecha=null, recorte_revision=null where id = ?")
       .bind(fotoKey, new Date().toISOString(), id)
       .run();
-    if (meta.changes) await reiniciarRecorte(env, id);
+    if (meta.changes) { await subirFoto(); await reiniciarRecorte(env, id); }
     if (meta.changes > 0) return json({ id });
   }
 
@@ -312,6 +316,7 @@ async function crearBorrador(request: Request, env: Env, ctx: ExecutionContext, 
        on conflict (id) do nothing`,
     ).bind(id, nombreRopa(prenda, marca), marca, precioRopa, semanaIngreso(ahora), estadoFisico, cantidad, talla, fotoKey,
       capturadoPor, ahora.toISOString(), ahora.toISOString(), propietario).run();
+    await subirFoto();
     const guardada = await env.DB.prepare('select id, nombre, marca, precio, estado_fisico, estado_analisis, stock, talla, codigo from productos where id = ?')
       .bind(id).first<{ estado_analisis: string; nombre: string; marca: string; codigo: string | null }>();
     if (guardada?.estado_analisis === 'descartado' && !guardada.codigo) await env.FOTOS.delete(fotoKey);
@@ -355,6 +360,8 @@ async function crearBorrador(request: Request, env: Env, ctx: ExecutionContext, 
   }
   await reiniciarRecorte(env, id);
 
+  // Si descartaron la pieza mientras tanto, la foto recién subida no se queda sin fila.
+  await subirFoto();
   const descartada = await env.DB.prepare("select id, estado_analisis, stock, codigo from productos where id = ? and estado_analisis = 'descartado'").bind(id).first<{ codigo: string | null }>();
   if (descartada) {
     if (!descartada.codigo) await env.FOTOS.delete(fotoKey);
@@ -1034,6 +1041,7 @@ async function revisarCaptura(id: string, request: Request, env: Env, correo: st
       ?? json({ error: 'Tiene una venta o publicación. Revisa la pieza en el admin; no se eliminó.' }, 409);
     const conservada = await env.DB.prepare('select codigo from productos where id = ?').bind(id).first<{ codigo: string | null }>();
     if (!conservada?.codigo) await env.FOTOS.delete(`fotos/${id}.jpg`);
+    if (!conservada?.codigo) await env.FOTOS.delete(`recortes/${id}.webp`);
     return json({ id, descartado: true });
   }
   if (request.method !== 'PATCH') return json({ error: 'Metodo no permitido.' }, 405);
@@ -1123,7 +1131,7 @@ async function prepararEtiquetas(request: Request, env: Env, propietario: string
   const seleccion = JSON.stringify(limpios);
   // Una por una y en orden de captura: cada codigo nuevo ve el anterior (CODIGO_NUEVO).
   const { results: porCodificar } = await env.DB.prepare(
-    `select id from productos where id in (select value from json_each(?)) and propietario = ? and estado_analisis <> 'descartado' and (codigo is null or codigo = '') order by rowid`,
+    `select id from productos where id in (select value from json_each(?)) and propietario = ? and estado_analisis = 'listo' and precio > 0 and (codigo is null or codigo = '') order by rowid`,
   )
     .bind(seleccion, propietario)
     .all<{ id: string }>();
@@ -1131,7 +1139,7 @@ async function prepararEtiquetas(request: Request, env: Env, propietario: string
   if (porCodificar.length) {
     await env.DB.batch(porCodificar.map(({ id }) => env.DB.prepare(
       `update productos set codigo = ${CODIGO_NUEVO}, actualizado_en = ?
-       where id = ? and estado_analisis <> 'descartado' and (codigo is null or codigo = '')`,
+       where id = ? and estado_analisis = 'listo' and precio > 0 and (codigo is null or codigo = '')`,
     ).bind(ahora, id)));
   }
 
@@ -1301,6 +1309,7 @@ async function fusionarBorrador(id: string, request: Request, env: Env, propieta
       : json({ error: 'La pieza cambió, tiene otro grado, fue descartada o tiene venta, pedido o publicación. Revisa y vuelve a intentar.' }, 409);
   }
   if (borrado.meta.changes) await env.FOTOS.delete(`fotos/${id}.jpg`);
+  if (borrado.meta.changes) await env.FOTOS.delete(`recortes/${id}.webp`);
   const final = await env.DB.prepare('select stock from productos where id = ?').bind(destinoId).first<{ stock: number }>();
   if (!final) return json({ error: 'Pieza no encontrada.' }, 404);
   return json({ id, destino_id: destinoId, stock: final.stock });
@@ -1335,6 +1344,7 @@ async function descartarBorrador(id: string, env: Env, propietario: string, corr
     return json({ error: 'La pieza cambió o tiene venta, pedido o publicación. Revisa y vuelve a intentar.' }, 409);
   }
   if (borrado.meta.changes) await env.FOTOS.delete(`fotos/${id}.jpg`);
+  if (borrado.meta.changes) await env.FOTOS.delete(`recortes/${id}.webp`);
   return json({ id, descartado: true });
 }
 
@@ -2872,12 +2882,17 @@ export default {
     }));
   },
 
-  async scheduled(_evento, env, ctx): Promise<void> {
+  async scheduled(evento, env, ctx): Promise<void> {
     ctx.waitUntil(sincronizar(env));
     // Apartados cuyo plazo llego: vuelven a la venta (Issue #269). Aparte, para que uno no frene al otro.
     ctx.waitUntil(vencerPedidos(env));
     ctx.waitUntil(procesarColaRopa(env));
     ctx.waitUntil((async () => { await procesarRecortes(env); await revisarRecortes(env); await ajustarRecortesViejos(env); })());
     ctx.waitUntil(procesarRellenoImagenes(env));
+    // Piezas que se quedaron en `pendiente` y fotos/recortes de R2 sin pieza (#481).
+    ctx.waitUntil(rescatarPendientes(env).catch((error) => console.error(JSON.stringify({ mensaje: 'rescate de pendientes fallido', error: String(error).slice(0, 200) }))));
+    if (esCorridaSemanal(evento.scheduledTime ?? Date.now())) {
+      ctx.waitUntil(reportarHuerfanosR2(env).catch((error) => console.error(JSON.stringify({ mensaje: 'reporte de huerfanos fallido', error: String(error).slice(0, 200) }))));
+    }
   },
 } satisfies ExportedHandler<Env, BusquedaUpc>;
