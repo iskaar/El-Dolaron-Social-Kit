@@ -36,6 +36,8 @@
 
 > **Inventario (Isaac, 22/10/2026, #446):** `/inventario` reúne Capturar, Buscar, Revisar e Imprimir (Bandas dentro de Imprimir). En `captura.viste.com.mx` se autorizan Capturar, Buscar y Revisar: consulta de precios, existencia y fotos; la edición exige la casilla «Editar inventario», y precio con etiqueta solo lo cambia el dueño. Ajustes (`/admin`) nunca se sirve en ese host. La captura propia de 24 h conserva sus permisos. `/pieza` redirige a Buscar; las cinco rutas anteriores siguen operativas hasta el visto bueno de Isaac. Sin red solo se encolan fotos: nunca cambios de existencia.
 
+> **UPC real (#452):** una pieza visible por propietario, UPC sin ceros iniciales y grado. Recapturar suma con folio idempotente y motivo `entrada`; las pendientes también cuentan. `PATCH /api/borradores/:id` acepta `upc` (vacío lo quita) con «Editar inventario»; una coincidencia responde 409 con `existente`. Se reutiliza ese PATCH para conservar los permisos y consumidores actuales. `POST /api/piezas/:id/juntar {id, destino_id}` pasa existencia entre dos piezas etiquetadas del mismo grado, con dos ajustes de `correccion`, sin borrar código ni historial de la origen: queda en cero y sin UPC. La fusión anterior conserva sus restricciones cuando falta una etiqueta. Límite conjunto: 999. Antes de desplegar, Isaac aplica la migración aditiva 053; no hay índice único ni limpieza automática de duplicados históricos.
+
 ## Decisión de fondo
 
 El escáner **no** es la herramienta de captura del vendedor: la cámara lo es. El análisis con IA

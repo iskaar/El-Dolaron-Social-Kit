@@ -17,6 +17,38 @@ export async function repetidaUpc(env: Env, upc: string, grado: string, propieta
     .bind(propietario, normalizarUpc(upc), grado, excluir).first<PiezaUpc>();
 }
 
+export const upcValido = (valor: unknown): valor is string => typeof valor === 'string'
+  && (valor.trim() === '' || !!normalizarUpc(valor));
+
+export async function conflictoUpc(env: Env, upc: string, grado: string, propietario: string, excluir: string) {
+  const pieza = upc ? await repetidaUpc(env, upc, grado, propietario, excluir) : null;
+  return pieza ? new Response(JSON.stringify({ error:'Ese UPC ya existe con este grado.', existente:{
+    id:pieza.id, codigo:pieza.codigo, nombre:pieza.nombre, stock:pieza.stock, tiene_etiqueta:!!pieza.codigo,
+    estado_fisico:pieza.estado_fisico, upc:pieza.upc,
+  } }), { status:409, headers:{'content-type':'application/json; charset=utf-8'} }) : null;
+}
+
+/** UPC solo: no recalcula precio, no cierra un análisis ni transporta existencia. */
+export async function corregirUpc(env: Env, id: string, valor: unknown, propietario: string): Promise<Response> {
+  const json = (cuerpo: unknown, status = 200) => new Response(JSON.stringify(cuerpo), {
+    status, headers:{'content-type':'application/json; charset=utf-8'},
+  });
+  if (!upcValido(valor)) return json({ error:'Código de barras inválido.' }, 400);
+  const pieza = await env.DB.prepare(`select ${PIEZA_UPC} from productos where id = ? and propietario = ?
+    and sin_inventario = 0 and estado_analisis <> 'descartado'`).bind(id, propietario).first<PiezaUpc>();
+  if (!pieza) return json({ error:'Pieza no encontrada.' }, 404);
+  const upc = valor.trim();
+  const conflicto = await conflictoUpc(env, upc, pieza.estado_fisico, propietario, id);
+  if (conflicto) return conflicto;
+  const { meta } = await env.DB.prepare(`update productos set upc = ?, actualizado_en = ? where id = ?
+    and propietario = ? and sin_inventario = 0 and estado_analisis <> 'descartado' and estado_fisico = ?
+    and (? = '' or not exists (select 1 from productos where ${MISMO_UPC} and id <> ?))`)
+    .bind(upc, new Date().toISOString(), id, propietario, pieza.estado_fisico,
+      upc, propietario, normalizarUpc(upc), pieza.estado_fisico, id).run();
+  return meta.changes ? json({ id, upc }) : await conflictoUpc(env, upc, pieza.estado_fisico, propietario, id)
+    ?? json({ error:'La pieza cambió. Revisa y vuelve a intentar.' }, 409);
+}
+
 export async function capturaSumada(env: Env, id: string, correo: string) {
   return env.DB.prepare(`select ${PIEZA_UPC}, (select cantidad from conteo_ajustes where id = ?) as sumadas
     from productos where id = (select producto_id from conteo_ajustes where id = ? and motivo = 'entrada'

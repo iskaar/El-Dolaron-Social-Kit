@@ -6,6 +6,8 @@ import os from 'node:os';
 import assert from 'node:assert/strict';
 
 const p={id:'11111111-1111-4111-8111-111111111111',codigo:'ED-002318',nombre:'Chamarra Levi’s',marca:'Levi’s',talla:'M',categoria:'ropa',precio:45000,precio_lista:60000,stock:3,destino:'etiqueta',estado_fisico:'nuevo',estado_analisis:'listo',upc:'012345678905',tiene_foto:1,foto_key:'foto',creado_en:new Date().toISOString(),actualizado_en:new Date().toISOString()};
+const upcQA=process.env.QA_UPC==='1';
+const destinoUpc={...p,id:'22222222-2222-4222-8222-222222222222',codigo:'ED-002319',stock:4,upc:'12345678901'};
 let consultaSolo=false, listaVacia=false, falloLista=false;const registros=[];
 const inventario=[p,...Array.from({length:60},(_,i)=>({...p,id:`pieza-${i}`,codigo:`ED-${String(2319+i).padStart(6,'0')}`,nombre:i%2?'Lámpara de escritorio':'Chamarra de mezclilla',tiene_foto:i%3?1:0,foto_key:i%3?'foto':'',stock:i%5}))];
 const consultas=[];
@@ -22,12 +24,18 @@ const server=createServer(async(req,res)=>{try{
     const inicio=Number(u.searchParams.get('cursor')||0),fin=inicio+25;datos={piezas:piezas.slice(inicio,fin),siguiente:fin<piezas.length?String(fin):null};
   }
   else if(u.pathname.endsWith('/existencia')&&req.method==='POST'){const chunks=[];for await(const ch of req)chunks.push(ch);const c=JSON.parse(Buffer.concat(chunks));const antes=p.stock;p.stock+=c.delta;datos={id:c.id,antes,despues:p.stock};}
-  else if(u.pathname.startsWith('/api/piezas/'))datos={pieza:p,puede_editar:!consultaSolo,puede_precio:!consultaSolo,historial:[]};
+  else if(u.pathname.endsWith('/juntar'))datos={id:p.id,destino_id:destinoUpc.id,movidas:3,stock:7};
+  else if(u.pathname.startsWith('/api/piezas/'))datos={pieza:u.pathname.endsWith(destinoUpc.id)?destinoUpc:p,puede_editar:!consultaSolo,puede_precio:!consultaSolo,historial:[]};
   else if(u.pathname==='/api/borradores'&&req.method==='POST'){const chunks=[];for await(const ch of req)chunks.push(ch);const r=new Request('http://local/foto',{method:'POST',headers:req.headers,body:Buffer.concat(chunks),duplex:'half'});const f=await r.formData();const nuevo={...p,id:f.get('id'),nombre:f.get('prenda')||'Foto de prueba',talla:f.get('talla'),precio:Number(f.get('precio_ropa'))||24900,stock:Number(f.get('cantidad'))||1,capturado_por:'prueba@local.mx'};registros.push(nuevo);datos=nuevo;}
   else if(u.pathname==='/api/borradores'&&falloLista){res.statusCode=503;datos={error:'Sin conexión'};}
   else if(u.pathname==='/api/borradores'&&listaVacia)datos=[];
   else if(u.pathname==='/api/borradores')datos=[...registros,p,{...p,id:'22222222-2222-4222-8222-222222222222',codigo:'ED-002319',nombre:'Lámpara de escritorio',categoria:'hogar',precio:24900,stock:6}];
-  else if(u.pathname==='/api/borradores/upc')datos={...p,id:'33333333-3333-4333-8333-333333333333',nombre:'Lámpara',stock:1};
+  else if(upcQA&&u.pathname.startsWith('/api/borradores/')&&req.method==='PATCH'){
+    const chunks=[];for await(const ch of req)chunks.push(ch);const c=JSON.parse(Buffer.concat(chunks));
+    if(u.pathname.endsWith(p.id)&&c.upc==='12345678901'){res.statusCode=409;datos={error:'Ese UPC ya existe con este grado.',existente:{...destinoUpc,tiene_etiqueta:true}};}
+    else{const pieza=u.pathname.endsWith(destinoUpc.id)?destinoUpc:p;pieza.upc=c.upc??pieza.upc;datos={...pieza,...c};}
+  }
+  else if(u.pathname==='/api/borradores/upc')datos=upcQA?{...p,existente:true,sumadas:2,stock:5}:{...p,id:'33333333-3333-4333-8333-333333333333',nombre:'Lámpara',stock:1};
   else if(u.pathname==='/api/etiquetas'){
     const chunks=[];for await(const ch of req)chunks.push(ch);const {ids}=JSON.parse(Buffer.concat(chunks));
     datos=[p,{...p,id:'22222222-2222-4222-8222-222222222222',nombre:'Lámpara de escritorio',stock:6}].filter(p=>ids.includes(p.id));
@@ -76,6 +84,28 @@ for(const width of [390,1280]){
   await cdp('Emulation.setTouchEmulationEnabled',{enabled:width===390});
   await cdp('Page.navigate',{url:`http://127.0.0.1:${port}/inventario?qa=${width}#capturar`});await dormir(600);await js("localStorage.clear()");await cdp('Page.reload');await dormir(1300);
   if(width===390){await capturar('00-empezar',width);await js("document.querySelector('.empezar-captura button').click()");await dormir(600);}
+  if(upcQA){
+    await buscar('0191907910414');
+    await js("[...document.querySelectorAll('#modo-capturar button')].find(b=>/^Guardar/.test(b.textContent)).click()");
+    await esperar("document.getElementById('estado').textContent.includes('Ya existía · +2 a ED-002318')");
+    await capturar('452-01-ya-existia',width);
+    await modo('buscar');await buscar('chamarra');await js("document.getElementById('editar').click()");
+    await js("window.lecturasUPC=0;document.addEventListener('lectura',()=>lecturasUPC++);document.getElementById('e-upc').value='';document.getElementById('e-upc').focus()");
+    for(const key of '12345678901'){await cdp('Input.dispatchKeyEvent',{type:'keyDown',key,text:key});await cdp('Input.dispatchKeyEvent',{type:'keyUp',key});await dormir(15);}
+    await cdp('Input.dispatchKeyEvent',{type:'keyDown',key:'Enter',code:'Enter',windowsVirtualKeyCode:13});
+    assert.equal(await js('lecturasUPC'),0,'El campo UPC no dispara búsqueda');
+    assert.equal(await js("document.getElementById('e-upc').value"),'12345678901');
+    assert.equal(await js("document.getElementById('hoja').open"),false,'Enter del lector no guarda');
+    await js("document.getElementById('e-upc').scrollIntoView({block:'center'})");await capturar('452-02-corregir-upc',width);
+    await js("document.getElementById('corregir').requestSubmit()");await esperar("document.getElementById('hoja').open");
+    await js("document.querySelector('#hoja .primario').click()");
+    await esperar("document.getElementById('hoja-titulo').textContent.startsWith('Ya existe como ED-002319')");
+    await capturar('452-03-upc-repetido',width);
+    await js("document.querySelector('#hoja .primario').click()");
+    await esperar("document.getElementById('hoja-titulo').textContent==='Reetiquetar'");await capturar('452-04-reetiquetar',width);
+    await js("document.getElementById('cerrar-hoja').click()");
+    continue;
+  }
   await capturar('01-listo',width);
   if(width===390){
     await js("[...document.querySelectorAll('#modo-capturar button')].find(b=>b.textContent==='Ropa').click()");
@@ -171,11 +201,13 @@ for(const width of [390,1280]){
   assert.equal(await js("document.getElementById('menos').hidden&&document.getElementById('edicion').hidden"),true);
   await modo('revisar');await js("document.querySelector('#modo-revisar [data-estado=todas]').click()");await capturar('12-solo-consulta',width);assert.equal(await js("document.querySelectorAll('#modo-revisar input[type=checkbox]').length"),0);
 }
+if(!upcQA){
 await cdp('Emulation.setDeviceMetricsOverride',{width:320,height:844,deviceScaleFactor:2,mobile:true});
 await cdp('Page.navigate',{url:`http://127.0.0.1:${port}/inventario?reflujo=320#buscar`});await dormir(500);await capturar('19-reflujo-lista',320);
 await js("document.getElementById('consulta').value='chamarra';document.getElementById('consulta').dispatchEvent(new Event('input'))");
 await esperar("document.getElementById('resumen').textContent.includes('1 resultado')");await capturar('20-reflujo-filtrado',320);
 await buscar('chamarra');await capturar('11-reflujo',320);
+}
 await writeFile(path.join(salida,'medidas.json'),JSON.stringify({errores,medidas},null,2));
 assert.deepEqual(errores,[]);const pequenos=medidas.flatMap(d=>d.pequenos.map(p=>({...p,estado:d.nombre,width:d.width})));assert.deepEqual(pequenos,[],'Objetivos menores de 44 px');console.log(`QA: ${medidas.length} capturas; sin desborde, objetivos >=44 px, sin errores de JavaScript`);
 }catch(e){console.error('Errores de página:',errores);throw e;}finally{await cdp('Browser.close').catch(()=>{});ws.close();server.close();chrome.kill();await dormir(400);await rm(perfil,{recursive:true,force:true,maxRetries:5,retryDelay:200});}

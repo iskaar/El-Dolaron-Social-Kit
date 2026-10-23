@@ -129,7 +129,7 @@ export function permiso(pathname: string, metodo: string): Regla {
   if (ruta.startsWith('/api/foto/')) return [...CAPTURA_FEP, ...CAJA];
   if (ruta === '/api/etiquetas') return CAPTURA_FEP;
   if (metodo === 'GET' && (ruta === '/api/piezas' || /^\/api\/piezas\/[^/]+$/.test(ruta))) return CAPTURA_FEP;
-  if (metodo === 'POST' && /^\/api\/piezas\/[^/]+\/existencia$/.test(ruta)) return CAPTURA_FEP;
+  if (metodo === 'POST' && /^\/api\/piezas\/[^/]+\/(existencia|juntar)$/.test(ruta)) return CAPTURA_FEP;
   if (ruta === '/api/calibracion') return CAPTURA;
   if (ruta === '/api/marketplace' || /^\/api\/marketplace\/foto\/[^/]+$/.test(ruta)) return CAPTURA;
   if (ruta === '/api/catalogo') return CAJA;

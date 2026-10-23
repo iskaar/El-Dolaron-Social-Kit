@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { tienda, DUENO } from './prueba-d1.ts';
 import worker from './worker.ts';
 import { MISMO_UPC } from './upc-inventario.ts';
+import { resolverRepetida } from '../public/ficha.js';
 
 const UPC = '0012345678905';
 type Tienda = ReturnType<typeof tienda>;
@@ -87,4 +88,106 @@ test('la consulta de igualdad usa el índice por propietario, UPC normalizado y 
   const plan = t.db.prepare(`explain query plan select id from productos where ${MISMO_UPC} limit 1`).all('dolaron','12345678905','nuevo');
   assert.match(JSON.stringify(plan), /SEARCH productos USING INDEX productos_upc_grado/);
   t.db.close();
+});
+
+function pieza(t: Tienda, extra = {}) {
+  const p = { id:crypto.randomUUID(), nombre:'Termo', codigo:null, stock:3, precio:9900, estado_analisis:'listo',
+    propietario:'dolaron', estado_fisico:'nuevo', upc:null, semana_ingreso:'S43', creado_en:new Date().toISOString(), actualizado_en:'', ...extra };
+  t.db.prepare(`insert into productos (${Object.keys(p).join(',')}) values (${Object.keys(p).map(() => '?').join(',')})`).run(...Object.values(p) as never[]);
+  return p;
+}
+
+test('PATCH UPC guarda y quita sin alterar precio/stock; 409 describe la otra pieza del mismo grado', async () => {
+  const t = preparar(), a = pieza(t,{upc:UPC,codigo:'ED-000123'}), b = pieza(t);
+  const r = await t.pedir(`/api/borradores/${b.id}`, {upc:'12345678905'}, 'PATCH');
+  assert.equal(r.status, 409);
+  assert.deepEqual(r.cuerpo.existente,{id:a.id,codigo:a.codigo,nombre:a.nombre,stock:3,tiene_etiqueta:true,estado_fisico:'nuevo',upc:UPC});
+  assert.equal((await t.pedir(`/api/borradores/${b.id}`, {upc:'999999999999'}, 'PATCH')).status,200);
+  const despues = t.db.prepare('select precio, stock, upc from productos where id=?').get(b.id)!;
+  assert.deepEqual({...despues},{precio:9900,stock:3,upc:'999999999999'});
+  assert.equal((await t.pedir(`/api/borradores/${b.id}`, {upc:''}, 'PATCH')).status,200);
+  for (const upc of ['00000','x',1234,null]) assert.equal((await t.pedir(`/api/borradores/${b.id}`, {upc}, 'PATCH')).status,400);
+  const c = pieza(t,{estado_fisico:'danado'});
+  assert.equal((await t.pedir(`/api/borradores/${c.id}`, {upc:UPC}, 'PATCH')).status,200);
+  assert.equal((await t.pedir(`/api/borradores/${c.id}`, {estado_fisico:'nuevo'}, 'PATCH')).status,409);
+  t.db.close();
+});
+
+test('dos PATCH UPC simultáneos sólo asignan el mismo código a una pieza', async () => {
+  const t = preparar(), a = pieza(t), b = pieza(t);
+  const r = await Promise.all([a,b].map(p=>t.pedir(`/api/borradores/${p.id}`, {upc:UPC}, 'PATCH')));
+  assert.deepEqual(r.map(r=>r.status).sort(),[200,409]); assert.equal(filas(t).length,1); t.db.close();
+});
+
+test('juntar mueve todo con dos rastros, conserva códigos e historial y reintenta sin repetir', async () => {
+  const t = preparar(), a = pieza(t,{upc:UPC,codigo:'ED-000123'}), b = pieza(t,{upc:UPC,codigo:'ED-000124',stock:4});
+  const c = {id:crypto.randomUUID(),destino_id:b.id};
+  const r = await t.pedir(`/api/piezas/${a.id}/juntar`,c);
+  assert.equal(r.status,200); assert.equal(r.cuerpo.movidas,3); assert.equal(r.cuerpo.stock,7);
+  const guardadas = t.db.prepare('select id,stock,codigo,upc,estado_analisis from productos where id in (?,?) order by codigo').all(a.id,b.id);
+  assert.deepEqual(guardadas.map(p=>[p.stock,p.codigo,p.upc,p.estado_analisis]),[[0,a.codigo,null,'listo'],[7,b.codigo,UPC,'listo']]);
+  assert.deepEqual(ajustes(t).map(a=>[a.producto_id,a.motivo,a.antes,a.despues]),[[a.id,'correccion',3,0],[b.id,'correccion',4,7]]);
+  assert.deepEqual((await t.pedir(`/api/piezas/${a.id}/juntar`,c)).cuerpo,r.cuerpo);
+  assert.equal(ajustes(t).length,2);
+  assert.equal((await t.pedir(`/api/piezas/${a.id}`)).status,200);
+  await t.esperar(); t.db.close();
+});
+
+test('juntar falla sin efectos si la origen cambió entre lectura y batch; límite y grado también se verifican', async (tt) => {
+  const t = preparar(), a = pieza(t,{upc:UPC,codigo:'ED-000123'}), b = pieza(t,{upc:UPC,codigo:'ED-000124'});
+  const batch = t.env.DB.batch.bind(t.env.DB);
+  tt.mock.method(t.env.DB,'batch',async sentencias=>{
+    t.db.prepare('update productos set stock=2 where id=?').run(a.id);
+    return batch(sentencias);
+  });
+  const r = await t.pedir(`/api/piezas/${a.id}/juntar`,{id:crypto.randomUUID(),destino_id:b.id});
+  assert.equal(r.status,409); assert.equal(ajustes(t).length,0);
+  assert.equal(t.db.prepare('select stock from productos where id=?').get(b.id)!.stock,3);
+  assert.equal(t.db.prepare('select upc from productos where id=?').get(a.id)!.upc,UPC);
+  tt.mock.restoreAll();
+  t.db.prepare('update productos set stock=999 where id=?').run(b.id);
+  assert.equal((await t.pedir(`/api/piezas/${a.id}/juntar`,{id:crypto.randomUUID(),destino_id:b.id})).status,409);
+  t.db.prepare("update productos set stock=3,estado_fisico='danado' where id=?").run(b.id);
+  assert.equal((await t.pedir(`/api/piezas/${a.id}/juntar`,{id:crypto.randomUUID(),destino_id:b.id})).status,409);
+  assert.equal(ajustes(t).length,0); t.db.close();
+});
+
+test('juntar simultáneo por folio conserva la cantidad y rechaza reutilizarlo para otro destino', async () => {
+  const t = preparar(), a = pieza(t,{codigo:'ED-000123'}), b = pieza(t,{codigo:'ED-000124'}), c = pieza(t,{codigo:'ED-000125'});
+  const cuerpo = {id:crypto.randomUUID(),destino_id:b.id};
+  const r = await Promise.all([t.pedir(`/api/piezas/${a.id}/juntar`,cuerpo),t.pedir(`/api/piezas/${a.id}/juntar`,cuerpo)]);
+  assert.deepEqual(r.map(r=>r.status),[200,200]); assert.equal(ajustes(t).length,2);
+  assert.equal((await t.pedir(`/api/piezas/${a.id}/juntar`,{...cuerpo,destino_id:c.id})).status,409);
+  await t.esperar();t.db.close();
+});
+
+test('UPC y juntar exigen casilla y respetan propietario incluso en el host vendedor', async () => {
+  const t = preparar(), a = pieza(t,{codigo:'ED-000123'}), b = pieza(t,{codigo:'ED-000124'}), fep = pieza(t,{propietario:'fep',codigo:'ED-000125'});
+  t.db.prepare("insert into usuarios (correo,roles,activo,editar_inventario,creado_en,actualizado_en) values ('cap@prueba.mx','capturista',1,0,'','')").run();
+  t.env.DEV_USUARIO = 'cap@prueba.mx';
+  assert.equal((await t.pedir(`/api/borradores/${a.id}`,{upc:UPC},'PATCH')).status,403);
+  assert.equal((await t.pedir(`/api/piezas/${a.id}/juntar`,{id:crypto.randomUUID(),destino_id:b.id})).status,403);
+  t.db.prepare("update usuarios set editar_inventario=1 where correo='cap@prueba.mx'").run();
+  assert.equal((await t.pedir(`/api/borradores/${fep.id}`,{upc:UPC},'PATCH')).status,404);
+  assert.equal((await t.pedir(`/api/piezas/${a.id}/juntar`,{id:crypto.randomUUID(),destino_id:fep.id})).status,404);
+  t.env.HOST_VENDEDOR = 'caja.prueba';
+  assert.equal((await t.pedir(`/api/borradores/${a.id}`,{upc:UPC},'PATCH')).status,200);
+  assert.equal((await t.pedir(`/api/piezas/${a.id}/juntar`,{id:crypto.randomUUID(),destino_id:b.id})).status,200);
+  await t.esperar(); t.db.close();
+});
+
+test('hoja de coincidencia usa fusión si falta etiqueta y reintenta UPC sin repetir un traspaso confirmado', async () => {
+  for (const etiqueta of [false,true]) {
+    const llamadas:any[] = [], acciones = new Map<string,() => Promise<void>>(); let fallar=true;
+    const nodo = (_:string,texto?:string) => ({textContent:texto,append(){},setAttribute(){}});
+    const boton = (texto:string,accion:any) => { acciones.set(texto,()=>accion({setAttribute(){}})); return nodo('button',texto); };
+    resolverRepetida({id:'origen',nombre:'Origen',stock:2,codigo:etiqueta?'ED-000002':null},{id:'destino',nombre:'Destino',stock:3,codigo:'ED-000001',upc:UPC},{
+      nodo,boton,hoja(){},mensaje(){},cerrar(){},imprimir:async()=>true,
+      api:async(ruta:string,cuerpo:any)=>{llamadas.push({ruta,cuerpo});if(ruta.includes('borradores/destino')&&fallar){fallar=false;throw new TypeError('Sin red');}return {movidas:2};},
+    });
+    await acciones.get('Juntar en ED-000001')!(); await acciones.get('Juntar en ED-000001')!();
+    assert.equal(llamadas.filter(c=>c.ruta.endsWith(etiqueta?'/juntar':'/fusionar')).length,1);
+    assert.equal(llamadas.filter(c=>c.ruta.endsWith('/destino')).length,2);
+    assert.equal(acciones.has('Imprimir 2 etiquetas de ED-000001'),etiqueta);
+  }
 });

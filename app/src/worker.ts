@@ -47,7 +47,7 @@ import { registrarSocio, buscarSocio, buscarPorCodigo, basesListas, sentenciasDe
 import { registrarCorte, registrarRetiro, ultimoCorte, cajaDe } from './corte.ts';
 import { rutaGastos } from './gastos.ts';
 import { rutaPiezas } from './piezas.ts';
-import { MISMO_UPC, PIEZA_UPC, capturaSumada, sumarCaptura, type PiezaUpc } from './upc-inventario.ts';
+import { MISMO_UPC, PIEZA_UPC, capturaSumada, sumarCaptura, conflictoUpc, corregirUpc, upcValido, type PiezaUpc } from './upc-inventario.ts';
 import { rutaCamaraRemota } from './camara-remota.ts';
 import { rutaNomina } from './nomina.ts';
 import { lineasNetas } from './netas.ts';
@@ -105,7 +105,7 @@ const CORRECCION_CAPTURA = /^\/api\/borradores\/([^/]+)\/(existencia|talla|revis
 export function permitidaParaVendedor(pathname: string, metodo: string): boolean {
   if (/^\/(inventario|pieza)(?:\.html)?\/?$/.test(pathname)) return metodo === 'GET';
   if (pathname === '/api/piezas' || /^\/api\/piezas\/[^/]+$/.test(pathname) || /^\/api\/foto\/[^/]+$/.test(pathname)) return metodo === 'GET';
-  if (/^\/api\/piezas\/[^/]+\/existencia$/.test(pathname)) return metodo === 'POST';
+  if (/^\/api\/piezas\/[^/]+\/(existencia|juntar)$/.test(pathname)) return metodo === 'POST';
   if (pathname === '/api/borradores' && metodo === 'GET') return true;
   if (pathname === '/api/familias' || pathname === '/api/recortes') return metodo === 'GET';
   if (/^\/api\/recortes\/[^/]+\/imagen$/.test(pathname)) return metodo === 'GET';
@@ -383,13 +383,16 @@ async function corregirBorrador(id: string, cambios: Record<string, unknown>, en
     return json({ error: 'Identificador invalido.' }, 400);
   }
   const fila = await env.DB.prepare(
-    "select nombre, categoria, marca, talla, precio_lista, precio, estado_fisico, destino, stock, codigo from productos where id = ? and estado_analisis <> 'descartado'",
+    "select nombre, categoria, marca, talla, precio_lista, precio, estado_fisico, destino, stock, codigo, upc, propietario from productos where id = ? and estado_analisis <> 'descartado'",
   )
     .bind(id)
     .first<FilaBorrador & { codigo: string | null }>();
   if (!fila) {
     return json({ error: 'La pieza no existe.' }, 404);
   }
+  if (Object.keys(cambios).length === 1 && cambios.upc !== undefined) return corregirUpc(env, id, cambios.upc, fila.propietario);
+  if (cambios.upc !== undefined && !upcValido(cambios.upc)) return json({ error:'Código de barras inválido.' }, 400);
+  const upc = cambios.upc === undefined ? fila.upc : String(cambios.upc).trim();
 
   const nombre = cambios.nombre === undefined ? fila.nombre : decodificarNombre(String(cambios.nombre)).slice(0, 120);
   const categoria = cambios.categoria === undefined ? fila.categoria : String(cambios.categoria);
@@ -405,6 +408,9 @@ async function corregirBorrador(id: string, cambios: Record<string, unknown>, en
   if (!ESTADOS_FISICOS.has(estadoFisico)) {
     return json({ error: 'Estado fisico invalido.' }, 400);
   }
+  const verificarUpc = cambios.upc !== undefined || estadoFisico !== fila.estado_fisico;
+  const conflicto = verificarUpc ? await conflictoUpc(env, upc || '', estadoFisico, fila.propietario, id) : null;
+  if (conflicto) return conflicto;
   if (talla !== null && !tallaValida(talla)) {
     return json({ error: 'Talla invalida.' }, 400);
   }
@@ -455,9 +461,11 @@ async function corregirBorrador(id: string, cambios: Record<string, unknown>, en
   const guardada = await env.DB.prepare(
     `update productos set nombre = ?, categoria = ?, marca = ?, talla = ?, precio_lista = ?, precio = ?,
                           estado_fisico = ?, destino = ?, stock = coalesce(?, stock), estado_analisis = 'listo', actualizado_en = ?
-                          ${captura ? `, codigo = ${CODIGO_NUEVO}` : ''}
+                          , upc = ? ${captura ? `, codigo = ${CODIGO_NUEVO}` : ''}
      where id = ?
        and estado_analisis <> 'descartado'
+       and (? = 0 or ? = '' or not exists (select 1 from productos where ${MISMO_UPC} and id <> ?))
+       and upc is ? and estado_fisico = ?
        ${captura ? `and capturado_por = ? and upc = ? and propietario = 'dolaron'
          and estado_analisis in ('pendiente', 'error') and (codigo is null or codigo = '')
          and not exists (select 1 from venta_lineas where producto_id = productos.id)` : ''}
@@ -465,11 +473,13 @@ async function corregirBorrador(id: string, cambios: Record<string, unknown>, en
   )
     .bind(nombre, categoria, marca, talla, precioLista, precio, estadoFisico, destino,
       // Sin `stock` en el cuerpo no se toca: la caja pudo vender piezas desde que se abrio la ficha.
-      cambios.stock === undefined ? null : stock, new Date().toISOString(), id, ...(captura ? [captura.correo, captura.upc] : []))
+      cambios.stock === undefined ? null : stock, new Date().toISOString(), upc ?? null, id,
+      verificarUpc ? 1 : 0, normalizarUpc(upc), fila.propietario, normalizarUpc(upc), estadoFisico, id,
+      fila.upc ?? null, fila.estado_fisico, ...(captura ? [captura.correo, captura.upc] : []))
     .first<{ stock: number }>();
 
-  if (!guardada) return json({ error: 'La pieza ya fue eliminada.' }, 409);
-  return json({ id, nombre, categoria, marca, talla, precio_lista: precioLista, precio, estado_fisico: estadoFisico, destino, stock: guardada.stock });
+  if (!guardada) return await conflictoUpc(env, upc || '', estadoFisico, fila.propietario, id) ?? json({ error: 'La pieza cambió o ya fue eliminada.' }, 409);
+  return json({ id, nombre, categoria, marca, talla, upc, precio_lista: precioLista, precio, estado_fisico: estadoFisico, destino, stock: guardada.stock });
 }
 
 /**
@@ -843,8 +853,8 @@ async function revisarCaptura(id: string, request: Request, env: Env, correo: st
       values (?, 0, 'descartado', ?, ?, ?, ?) on conflict(id) do nothing`)
       .bind(id, semanaIngreso(new Date()), correo, ahora, ahora).run();
   }
-  const fila = await env.DB.prepare(`select id, precio, estado_fisico, estado_analisis, stock, talla, codigo, nombre, marca, categoria from productos where ${alcance}`)
-    .bind(id, correo, desde).first<{ id: string; nombre: string; marca: string; categoria: string; estado_analisis: string; precio: number; estado_fisico: string; stock: number; talla: string | null; codigo: string | null }>();
+  const fila = await env.DB.prepare(`select id, precio, estado_fisico, estado_analisis, stock, talla, codigo, nombre, marca, categoria, upc, propietario from productos where ${alcance}`)
+    .bind(id, correo, desde).first<{ id: string; nombre: string; marca: string; categoria: string; estado_analisis: string; precio: number; estado_fisico: string; stock: number; talla: string | null; codigo: string | null; upc:string | null; propietario:string }>();
   if (!fila) return json({ error: 'Solo puedes corregir lo que capturaste en las últimas 24 horas.' }, 404);
   if (request.method === 'GET') return json({ ...fila, prenda: prendaDeNombre(fila.nombre, fila.marca) });
   if (request.method === 'DELETE') {
@@ -877,10 +887,17 @@ async function revisarCaptura(id: string, request: Request, env: Env, correo: st
   const prenda = cambios.prenda === undefined ? prendaDeNombre(fila.nombre, fila.marca) : cambios.prenda as string;
   const marca = cambios.marca === undefined ? fila.marca : cambios.marca as string;
   const nombre = cambios.prenda === undefined && cambios.marca === undefined ? fila.nombre : nombreRopa(prenda.trim(), marca.trim());
+  const grado = String(cambios.estado_fisico ?? fila.estado_fisico);
+  const conflicto = cambios.estado_fisico !== undefined ? await conflictoUpc(env, fila.upc || '', grado, fila.propietario, id) : null;
+  if (conflicto) return conflicto;
   const resultado = await env.DB.prepare(`update productos set precio = coalesce(?, precio),
       estado_fisico = coalesce(?, estado_fisico), nombre = ?, marca = ?, actualizado_en = ? where ${alcance} and estado_analisis = 'listo'
+      and upc is ? and estado_fisico = ?
+      and (? = 0 or ? = '' or not exists (select 1 from productos where ${MISMO_UPC} and id <> ?))
       and (? is null or precio_lista = 0 or precio_lista >= ?)`)
-    .bind(cambios.precio ?? null, cambios.estado_fisico ?? null, nombre, marca.trim(), ahora, id, correo, desde, cambios.precio ?? null, cambios.precio ?? null).run();
+    .bind(cambios.precio ?? null, cambios.estado_fisico ?? null, nombre, marca.trim(), ahora, id, correo, desde,
+      fila.upc, fila.estado_fisico, cambios.estado_fisico === undefined ? 0 : 1, normalizarUpc(fila.upc), fila.propietario, normalizarUpc(fila.upc), grado, id,
+      cambios.precio ?? null, cambios.precio ?? null).run();
   if (!resultado.meta.changes) return json({ error: 'La captura no está lista, fue eliminada o el precio supera el de lista.' }, 409);
   const guardada = await env.DB.prepare(`select id, precio, estado_fisico, estado_analisis, stock, talla, codigo, nombre, marca from productos where ${alcance}`)
     .bind(id, correo, desde).first<{ nombre: string; marca: string }>();

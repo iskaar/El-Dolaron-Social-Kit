@@ -170,8 +170,65 @@ async function cambiarExistencia(request: Request, env: Env, id: string, usuario
     : json({ error: 'Pieza no encontrada.' }, 404);
 }
 
+/** Conserva ambos códigos: la etiqueta vieja sigue resolviendo en caja, con existencia cero. */
+async function juntarPiezas(request: Request, env: Env, id: string, usuario: Usuario | null, ctx: ExecutionContext): Promise<Response> {
+  if (!puedeEditarInventario(usuario)) return json({ error:'Tu cuenta no tiene permiso para editar inventario.' }, 403);
+  const cuerpo = await request.json().catch(() => null) as { id?: unknown; destino_id?: unknown } | null;
+  if (!UUID.test(id) || typeof cuerpo?.id !== 'string' || !UUID.test(cuerpo.id)
+      || typeof cuerpo.destino_id !== 'string' || !UUID.test(cuerpo.destino_id) || id === cuerpo.destino_id)
+    return json({ error:'Identificador inválido.' }, 400);
+  const propietario = propietarioDe(usuario), destinoId = cuerpo.destino_id;
+  const { results: piezas } = await env.DB.prepare(`select id, codigo, stock, upc, estado_fisico, estado_analisis
+    from productos where id in (?, ?) and propietario = ? and sin_inventario = 0`)
+    .bind(id, destinoId, propietario).all<{ id:string; codigo:string | null; stock:number; upc:string | null; estado_fisico:string; estado_analisis:string }>();
+  if (piezas.length !== 2) return json({ error:'Pieza no encontrada.' }, 404);
+  const previo = () => env.DB.prepare(`select producto_id, cantidad, antes, despues, ajustado_por from conteo_ajustes where id = ?`)
+    .bind(cuerpo.id).first<{ producto_id:string; cantidad:number; antes:number; despues:number; ajustado_por:string }>();
+  const responder = async () => {
+    const a = await previo();
+    if (!a) return null;
+    const b = await env.DB.prepare('select producto_id, despues from conteo_ajustes where id = ?').bind(`${cuerpo.id}:destino`)
+      .first<{ producto_id:string; despues:number }>();
+    return a.producto_id === id && b?.producto_id === destinoId && a.ajustado_por === usuario!.correo
+      ? json({ id, destino_id:destinoId, movidas:a.cantidad, stock:b.despues })
+      : json({ error:'El folio ya pertenece a otro ajuste.' }, 409);
+  };
+  const repetido = await responder();
+  if (repetido) return repetido;
+  const origen = piezas.find(p => p.id === id)!, destino = piezas.find(p => p.id === destinoId)!;
+  if (!origen.codigo || !destino.codigo) return json({ error:'Sin dos etiquetas, usa la fusión de borradores.' }, 409);
+  if (origen.estado_fisico !== destino.estado_fisico) return json({ error:'Sólo puedes juntar piezas del mismo grado.' }, 409);
+  if (origen.stock <= 0 || origen.stock + destino.stock > 999) return json({ error:'La origen está en cero o la suma supera 999 piezas.' }, 409);
+  const ahora = new Date().toISOString();
+  const efectos = await env.DB.batch([
+    env.DB.prepare(`update productos set stock = 0, upc = null, actualizado_en = ? where id = ?
+      and propietario = ? and sin_inventario = 0 and estado_analisis <> 'descartado'
+      and stock = ? and upc is ? and codigo = ? and estado_fisico = ?
+      and exists (select 1 from productos where id = ? and propietario = ? and sin_inventario = 0
+        and estado_analisis <> 'descartado' and codigo = ? and estado_fisico = ? and stock + ? <= 999)
+      and not exists (select 1 from conteo_ajustes where id in (?, ?))`)
+      .bind(ahora, id, propietario, origen.stock, origen.upc, origen.codigo, origen.estado_fisico,
+        destinoId, propietario, destino.codigo, origen.estado_fisico, origen.stock, cuerpo.id, `${cuerpo.id}:destino`),
+    env.DB.prepare(`insert into conteo_ajustes
+      (id, producto_id, codigo, nombre, motivo, cantidad, antes, despues, ajustado_por, ajustado_en)
+      select ?, id, codigo, nombre, 'correccion', ?, ?, 0, ?, ? from productos where id = ? and changes() = 1`)
+      .bind(cuerpo.id, origen.stock, origen.stock, usuario!.correo, ahora, id),
+    env.DB.prepare(`update productos set stock = stock + ?, actualizado_en = ? where id = ? and changes() = 1`)
+      .bind(origen.stock, ahora, destinoId),
+    env.DB.prepare(`insert into conteo_ajustes
+      (id, producto_id, codigo, nombre, motivo, cantidad, antes, despues, ajustado_por, ajustado_en)
+      select ?, id, codigo, nombre, 'correccion', ?, stock - ?, stock, ?, ? from productos where id = ? and changes() = 1`)
+      .bind(`${cuerpo.id}:destino`, origen.stock, origen.stock, usuario!.correo, ahora, destinoId),
+  ]);
+  if (efectos.every(e => e.meta.changes === 1)) ctx.waitUntil(conciliarSeguro(env, { productoIds:[id,destinoId] }));
+  return await responder() ?? json({ error:'La pieza origen cambió o la suma supera 999. Revisa y vuelve a intentar.' }, 409);
+}
+
 /** Worker valida host y cuenta; cada operación aplica además propietarioDe. */
 export async function rutaPiezas(request: Request, env: Env, url: URL, usuario: Usuario | null, ctx: ExecutionContext): Promise<Response | null> {
+  const juntar = /^\/api\/piezas\/([^/]+)\/juntar$/.exec(url.pathname);
+  if (juntar) return request.method === 'POST' ? juntarPiezas(request, env, juntar[1], usuario, ctx)
+    : json({ error:'Método no permitido.' }, 405);
   const existencia = /^\/api\/piezas\/([^/]+)\/existencia$/.exec(url.pathname);
   if (existencia) return request.method === 'POST' ? cambiarExistencia(request, env, existencia[1], usuario, ctx)
     : json({ error: 'Método no permitido.' }, 405);

@@ -125,3 +125,4 @@ main:has(#modo-buscar:not([hidden])) .caja{margin-bottom:12px}
 @media(max-width:999px){.caja .acciones button{padding-inline:10px}}
 @media(max-width:999px){.caja .acciones{gap:8px}.caja input{padding-inline:10px}}
 @media(max-width:359px){.caja .acciones{flex-wrap:wrap}.caja input{flex:1 1 100%}}
+#leer-upc{margin:12px 0}#e-upc-visor video{width:100%;max-height:40dvh}

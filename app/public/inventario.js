@@ -1,5 +1,5 @@
 import { escucharLector } from './lector.js';
-import { api, crearFicha, pesos } from './ficha.js';
+import { api, crearFicha, pesos, resolverRepetida } from './ficha.js';
 import { $, nodo, boton, mensaje, hoja, confirmar, prepararHoja, stepper, cerrarHoja, ponerNeutro, bloquear } from './inventario-ui.js';
 
 prepararHoja();
@@ -11,7 +11,8 @@ const dueno = identidad.usuario?.roles.includes('dueno');
 let modo, siguiente = null, consulta = '', generacion = 0, cambioModo = 0, apagar = null, piezaActual = null, filtroTimer, cargando = false;
 const modulos = new Map(), activos = new Map();
 const foco = () => { if (pc()) { $('consulta').focus({ preventScroll:true }); $('consulta').select(); } };
-const ficha = crearFicha({ mensaje, confirmar, integrada:true, elegirMotivo:() => new Promise(resolve => {
+const ficha = crearFicha({ mensaje, confirmar, integrada:true, antesCamara:apagarCamaras,
+  alRepetida:(origen,destino,upc) => resolverRepetida(origen,destino,{...contexto,cerrar:cerrarHoja,upc,alTerminar:id=>ficha.abrir(id)}), elegirMotivo:() => new Promise(resolve => {
   const c=nodo('div',undefined,'chips');
   for(const [valor,texto] of [['correccion','Corrección'],['merma','Merma'],['robo','Robo'],['entrada','Entrada']]) c.append(boton(texto,()=>{ resolve(valor);cerrarHoja(); }));
   hoja('Motivo',c);$('hoja').addEventListener('close',()=>resolve(null),{once:true});
