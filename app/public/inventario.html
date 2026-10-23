@@ -20,7 +20,7 @@
             <optgroup label="Al bajar"><option value="robo">Robo</option><option value="merma">Merma</option><option value="error de captura">Error de captura</option></optgroup>
             <optgroup label="Al subir"><option value="entrada">Entrada</option></optgroup>
           </select>
-          <form id="fijar"><label for="fijar-a">Fijar a…</label><div class="acciones"><input id="fijar-a" type="number" min="0" max="999" step="1" required><button id="ajustar" type="submit">Fijar a…</button></div></form>
+          <form id="fijar" hidden><label for="fijar-a">Fijar a…</label><div class="acciones"><input id="fijar-a" type="number" min="0" max="999" step="1" required><button id="ajustar" type="submit">Fijar a…</button></div></form>
           <button id="deshacer" class="secundario" type="button" hidden>Deshacer</button>
         </div>
       </div>
@@ -42,7 +42,7 @@
       </form>
       <div id="reimprimir" hidden><p id="reimprimir-texto"></p><a id="reimprimir-enlace" href="/etiquetas">Reimprimir etiqueta</a></div>
     </div>
-    <h3>Historial de existencia</h3><p class="ayuda">Últimos 10 ajustes.</p><ol id="historial"></ol>
+    <div id="acciones-ficha" class="acciones"></div><details><summary>Historial de existencia</summary><ol id="historial"></ol></details>
   </section>
 </div></div></section>
 <section id="modo-revisar" data-activo="true" role="tabpanel" aria-labelledby="tab-revisar" hidden><h2>Revisar</h2><a href="/admin">Abrir revisión</a></section>

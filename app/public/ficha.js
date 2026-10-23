@@ -4,7 +4,8 @@
 import { CATEGORIAS } from './categorias.js';
 import { nombreEstado } from './estados.js';
 import { TALLAS } from './tallas.js';
-import { impresas, etiquetaVigente, precioImpreso } from './etiquetera.js';
+import { etiquetaVigente, precioImpreso } from './etiquetera.js';
+import { estadoEnvio } from './envio-etiquetas.js';
 
 const $ = (id) => document.getElementById(id);
 export const pesos = (centavos) => new Intl.NumberFormat('es-MX', { style:'currency', currency:'MXN', maximumFractionDigits:2 }).format(centavos / 100);
@@ -70,7 +71,7 @@ export function avisoReimpresion(marca, antes, ahora) {
     : `La etiqueta pegada dice «${pegada.nombre ?? ''}${pegada.talla ? ` · ${pegada.talla}` : ''}».`;
 }
 
-export function crearFicha({ mensaje, alAbrir = () => {}, confirmar = (texto) => Promise.resolve(confirm(texto)) }) {
+export function crearFicha({ mensaje, alAbrir = () => {}, confirmar = (texto) => Promise.resolve(confirm(texto)), integrada = false, elegirMotivo = async () => $('motivo').value }) {
   let pieza = null, apertura = 0, puedeEditar = false, puedePrecio = false;
   let pendiente = null, enviando = false, guardando = false, deshacer = null, temporizador;
   for (const t of TALLAS) { const o = document.createElement('option'); o.value = t; $('tallas').append(o); }
@@ -90,6 +91,11 @@ export function crearFicha({ mensaje, alAbrir = () => {}, confirmar = (texto) =>
     $('menos').disabled = enviando || !!pendiente || pieza.stock <= 0 || $('motivo').value === 'entrada';
     $('sumar').disabled = enviando || !!pendiente || pieza.stock >= 999 || ['robo', 'merma', 'error de captura'].includes($('motivo').value);
     $('ajustar').disabled = $('deshacer').disabled = enviando || !!pendiente;
+    if (integrada) for (const id of ['menos', 'sumar', 'ajustar', 'deshacer']) {
+      const b = $(id), sinRed = globalThis.navigator?.onLine === false;
+      const motivo = sinRed ? 'Sin red: se suma al volver la señal' : b.disabled ? 'Revisa el ajuste pendiente o el límite' : '';
+      b.disabled = false; b.setAttribute('aria-disabled', String(!!motivo)); b.dataset.motivo = motivo;
+    }
     // PATCH deja la pieza `listo`: una que aún se analiza se revisa en /admin.
     const corregible = puedeEditar && pieza.estado_analisis === 'listo';
     $('edicion').hidden = !puedeEditar;
@@ -133,7 +139,7 @@ export function crearFicha({ mensaje, alAbrir = () => {}, confirmar = (texto) =>
       pintar();
       alAbrir(pieza);
       mensaje(`Pieza abierta: ${pieza.nombre}. Existencia ${pieza.stock}.`);
-    } catch (error) { if (turno === apertura) mensaje(error.message); }
+    } catch (error) { if (turno === apertura) mensaje(error.message, 'error'); }
   }
 
   async function ajustar(cuerpo, inverso = false) {
@@ -197,7 +203,7 @@ export function crearFicha({ mensaje, alAbrir = () => {}, confirmar = (texto) =>
     const r = cuerpoCorreccion(pieza, { nombre:$('e-nombre').value, marca:$('e-marca').value, talla:$('e-talla').value,
       precio:$('e-precio').value, precio_lista:$('e-lista').value }, puedePrecio);
     if (r.error) return mensaje(r.error);
-    const lineas = resumenCorreccion(pieza, r.cuerpo, impresas()[pieza.id]);
+    const lineas = resumenCorreccion(pieza, r.cuerpo, estadoEnvio(pieza).marca);
     if (!lineas.length) return mensaje('No hay cambios que guardar.');
     if (!await confirmar(`${lineas.join('\n')}\n\n¿Guardar?`)) return;
     const antes = { ...pieza }, turno = apertura;
@@ -210,7 +216,7 @@ export function crearFicha({ mensaje, alAbrir = () => {}, confirmar = (texto) =>
         Object.assign(pieza, { nombre:g.nombre, marca:g.marca, talla:g.talla, precio:g.precio, precio_lista:g.precio_lista,
           destino:g.destino, stock:g.stock, estado_analisis:'listo' });
         $('corregir').hidden = true;
-        const aviso = avisoReimpresion(impresas()[antes.id], antes, pieza);
+        const aviso = avisoReimpresion(estadoEnvio(antes).marca, antes, pieza);
         $('reimprimir').hidden = !aviso;
         if (aviso) $('reimprimir-texto').textContent = aviso;
       }
@@ -222,15 +228,20 @@ export function crearFicha({ mensaje, alAbrir = () => {}, confirmar = (texto) =>
   }
 
   $('motivo').addEventListener('change', pintar);
-  $('menos').addEventListener('click', () => ajustar({ delta:-1, motivo:$('motivo').value }));
-  $('sumar').addEventListener('click', () => ajustar({ delta:1, motivo:$('motivo').value }));
+  $('menos').addEventListener('click', async () => {
+    const motivo = integrada ? await elegirMotivo() : $('motivo').value;
+    if (motivo) void ajustar({ delta:-1, motivo });
+  });
+  $('sumar').addEventListener('click', () => ajustar({ delta:1, motivo:integrada ? 'entrada' : $('motivo').value }));
   $('fijar').addEventListener('submit', async (e) => {
     e.preventDefault();
     if (!pieza || !puedeEditar || pendiente) return;
     const n = Number($('fijar-a').value), esperado = pieza.stock;
     if ($('fijar-a').value === '' || !Number.isInteger(n) || n < 0 || n > 999 || n === esperado) return mensaje('Escribe una existencia distinta entre 0 y 999.');
+    const motivo = integrada ? await elegirMotivo() : $('motivo').value;
+    if (!motivo) return;
     if (!await confirmar(`¿Cambiar existencia de ${esperado} a ${n}?`)) return;
-    void ajustar({ fijar_a:n, esperado, motivo:$('motivo').value });
+    void ajustar({ fijar_a:n, esperado, motivo });
   });
   $('deshacer').addEventListener('click', () => {
     if (deshacer && Date.now() < deshacer.hasta) void ajustar({ delta:deshacer.delta, motivo:'correccion' }, true);
@@ -244,6 +255,7 @@ export function crearFicha({ mensaje, alAbrir = () => {}, confirmar = (texto) =>
 
   return {
     abrir,
+    repintar: pintar,
     /** Una búsqueda nueva o un cambio de consulta: la ficha abierta deja de existir. */
     cerrar() { ++apertura; pieza = null; pintar(); },
     /** «Volver»: respuestas atrasadas no reabren la ficha, pero lo abierto se conserva. */

@@ -38,3 +38,11 @@ test('/pieza es alias de Buscar y conserva la consulta; las cinco rutas previas 
     assert.equal(r.status,200);assert.equal(await r.text(),'pantalla anterior');
   }
 });
+
+// Regresión: una acción de ficha sin contenedor quedaba atrapada como mensaje en pantalla.
+test('la pantalla única contiene todos los nodos que consumen ficha.js e inventario.js',async()=>{
+  const {readFileSync}=await import('node:fs');
+  const html=readFileSync('public/inventario.html','utf8');
+  const ids=new Set([...html.matchAll(/id="([^"]+)"/g)].map(m=>m[1]));
+  for(const f of ['ficha.js','inventario.js'])for(const m of readFileSync('public/'+f,'utf8').matchAll(/\$\('([^']+)'\)/g))assert.ok(ids.has(m[1]),f+' necesita '+m[1]);
+});

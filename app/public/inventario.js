@@ -8,14 +8,22 @@ const identidad = await api('/api/yo');
 const modos = identidad.modos_inventario || [];
 if (!modos.length) location.replace('/sin-acceso');
 const dueno = identidad.usuario?.roles.includes('dueno');
-let modo, siguiente = null, consulta = '', generacion = 0, apagar = null, piezaActual = null;
-const modulos = new Map();
+let modo, siguiente = null, consulta = '', generacion = 0, cambioModo = 0, apagar = null, piezaActual = null;
+const modulos = new Map(), activos = new Map();
 const foco = () => { if (pc()) { $('consulta').focus({ preventScroll:true }); $('consulta').select(); } };
-const ficha = crearFicha({ mensaje, confirmar, alAbrir(p) {
+const ficha = crearFicha({ mensaje, confirmar, integrada:true, elegirMotivo:() => new Promise(resolve => {
+  const c=nodo('div',undefined,'chips');
+  for(const [valor,texto] of [['correccion','Corrección'],['merma','Merma'],['robo','Robo'],['entrada','Entrada']]) c.append(boton(texto,()=>{ resolve(valor);cerrarHoja(); }));
+  hoja('Motivo',c);$('hoja').addEventListener('close',()=>resolve(null),{once:true});
+}), alAbrir(p) {
   piezaActual = p; document.body.classList.add('con-ficha');
   $('solo-consulta').hidden = dueno || identidad.usuario?.editar_inventario === true;
   for (const b of document.querySelectorAll('.resultado')) b.setAttribute('aria-current', String(b.dataset.id === p.id));
   $('acciones-ficha').replaceChildren();
+  if (dueno || identidad.usuario?.editar_inventario === true) $('acciones-ficha').append(boton('Fijar a…', () => {
+    const form=$('fijar');form.hidden=false;hoja('Fijar existencia',form);
+    $('hoja').addEventListener('close',()=>{form.hidden=true;$('existencia').prepend(form);},{once:true});
+  }));
   if (!identidad.vendedor && p.destino === 'etiqueta') {
     const imprimir = async (n) => (await cargar('imprimir')).imprimir([p.id], new Map([[p.id,n]]));
     $('acciones-ficha').append(boton('Imprimir 1', () => imprimir(1), 'primario'), boton('Imprimir N…', () => {
@@ -56,29 +64,37 @@ const contexto = { $, nodo, boton, mensaje, hoja, confirmar, api, pesos, identid
 async function cargar(nombre) {
   if (!modulos.has(nombre)) {
     const archivo = { imprimir:'./inventario-imprimir.js', capturar:'./inventario-capturar.js', revisar:'./inventario-revisar.js' }[nombre];
-    modulos.set(nombre, import(archivo).then((m) => m.iniciar(contexto)));
+    modulos.set(nombre, import(archivo).then((m) => m.iniciar(contexto)).then(instancia => {
+      activos.set(nombre,instancia);if(modo!==nombre)instancia.pausar?.();return instancia;
+    }).catch(e=>{modulos.delete(nombre);throw e;}));
   }
   return modulos.get(nombre);
 }
 async function apagarCamaras() {
   await apagar?.(); apagar = null; $('visor').hidden = true;
-  for (const promesa of modulos.values()) (await promesa).pausar?.();
+  for (const instancia of activos.values()) instancia.pausar?.();
 }
 async function cambiarModo(nuevo) {
   if (!modos.includes(nuevo)) return;
-  await apagarCamaras(); ++generacion; ficha.cerrar(); piezaActual = null; document.body.classList.remove('con-ficha');
+  const turno=++cambioModo;
+  await apagarCamaras();if(turno!==cambioModo)return; ++generacion; ficha.cerrar(); piezaActual = null; document.body.classList.remove('con-ficha');
   modo = nuevo; localStorage.setItem('inventario-modo', modo); history.replaceState(null, '', `${location.pathname}${location.search}#${modo}`);
+  $('consulta').value='';
   for (const b of document.querySelectorAll('[data-modo]')) { const activo = b.dataset.modo === modo; b.setAttribute('aria-selected', String(activo)); b.tabIndex = activo ? 0 : -1; $(b.getAttribute('aria-controls')).hidden = !activo; }
   $('busqueda').hidden = modo === 'capturar' && !pc();
   $('consulta').placeholder = { capturar:'UPC, ED- o nombre', buscar:'ED-, UPC o nombre', revisar:'Buscar en la cola', imprimir:'Código para filtrar' }[modo];
   $('camara-etiqueta').hidden = modo !== 'buscar';
+  mensaje(navigator.onLine ? 'Escanea o escribe' : 'Este modo necesita red', navigator.onLine ? 'neutro' : 'aviso');
   if (modo === 'buscar') $('detalle-buscar').append($('ficha'));
   // Las fases siguientes activan estos módulos sin cargar hardware al abrir Buscar.
-  if ($( `modo-${modo}`).dataset.activo) await (await cargar(modo)).abrir?.();
-  mensaje(navigator.onLine ? 'Escanea o escribe' : 'Este modo necesita red', navigator.onLine ? 'neutro' : 'aviso'); foco();
+  if ($( `modo-${modo}`).dataset.activo) {
+    const instancia=await cargar(modo);if(turno!==cambioModo)return;await instancia.abrir?.();
+  }
+  foco();
 }
 for (const b of document.querySelectorAll('[data-modo]')) {
-  b.hidden = !modos.includes(b.dataset.modo); b.onclick = () => cambiarModo(b.dataset.modo);
+  b.hidden = !modos.includes(b.dataset.modo); b.onclick = () => cambiarModo(b.dataset.modo).catch(e=>mensaje(e.message,'error'));
+
 }
 if (modos.length === 1) $('modos').hidden = true;
 $('modos').addEventListener('keydown', (e) => {
@@ -92,8 +108,9 @@ async function recibir({ codigo }) {
   if (modo === 'buscar') await buscar();
   else if ($(`modo-${modo}`).dataset.activo) await (await cargar(modo)).leer?.(codigo);
 }
-escucharLector((lectura) => { void recibir(lectura); }, { caja:$('consulta') });
-$('busqueda').onsubmit = (e) => { e.preventDefault(); void recibir({ codigo:$('consulta').value }); };
+const lector=escucharLector((lectura) => recibir(lectura).catch(e=>mensaje(e.message,'error')), { caja:$('consulta') });
+contexto.recibir=(codigo,origen)=>lector.recibir(codigo,origen);
+$('busqueda').onsubmit = (e) => { e.preventDefault(); void lector.recibir($('consulta').value,'caja'); };
 $('mas').onclick = () => buscar(true);
 $('volver').onclick = async () => { if(modo==='revisar') (await cargar('revisar')).cerrar(); ficha.cerrar(); piezaActual = null; document.body.classList.remove('con-ficha'); foco(); };
 $('solo-consulta').onclick = () => hoja('Solo consulta', nodo('p', 'Tu cuenta no puede editar. Pídelo al dueño.'));
@@ -113,14 +130,21 @@ $('menu').onclick = () => {
 };
 $('chip-red').onclick = () => { const c = nodo('div'); c.append(nodo('p', $('chip-red').textContent), boton('Subir ahora', async () => { await (await cargar('capturar')).subir?.(); } ,'primario')); hoja('Red', c); };
 $('chip-celular').onclick = () => { const a = nodo('a','Abrir en el celular'); a.href = '/camara-remota'; hoja('Cámara para la PC', a); };
-$('chip-impresora').onclick = async () => { if ($('modo-imprimir').dataset.activo) await (await cargar('imprimir')).conexion(); else mensaje('Conecta desde Etiquetas', 'aviso'); };
+$('chip-impresora').onclick = async () => { if (identidad.vendedor) return mensaje('Imprime desde la computadora', 'aviso'); if ($('modo-imprimir').dataset.activo) await (await cargar('imprimir')).conexion(); else mensaje('Conecta desde Etiquetas', 'aviso'); };
+document.addEventListener('click', (e) => {
+  const b=e.target.closest?.('[aria-disabled="true"]');
+  if (b) { e.preventDefault();e.stopImmediatePropagation();mensaje(b.dataset.motivo||'Espera un momento','aviso'); }
+}, true);
 document.addEventListener('keydown', (e) => {
   if (e.altKey && /^[1-4]$/.test(e.key)) { e.preventDefault(); void cambiarModo(['capturar','buscar','revisar','imprimir'][Number(e.key)-1]); }
   if (e.key === 'Escape' && !$('hoja').open) { $('consulta').value = ''; ficha.cerrar(); document.body.classList.remove('con-ficha'); foco(); }
+  if (e.key === 'Enter' && pc() && e.target === $('consulta') && !$('consulta').value && !$('hoja').open) {
+    e.preventDefault();const b=[...$(`modo-${modo}`).querySelectorAll('.primario')].find(b=>b.getClientRects().length);b?.click();
+  }
 });
 document.addEventListener('visibilitychange', () => { if (document.hidden) void apagarCamaras(); });
 addEventListener('blur', () => { void apagarCamaras(); });
-function red() { $('chip-red').textContent = navigator.onLine ? '● Red' : '▲ Sin red'; $('chip-red').classList.toggle('aviso', !navigator.onLine); if (!navigator.onLine) mensaje('Sin red · toma foto', 'aviso'); }
+function red() { $('chip-red').textContent = navigator.onLine ? '● Red' : '▲ Sin red'; $('chip-red').classList.toggle('aviso', !navigator.onLine);ficha.repintar(); if (!navigator.onLine) mensaje('Sin red · toma foto', 'aviso'); }
 addEventListener('online', red); addEventListener('offline', red); red();
 visualViewport?.addEventListener('resize', () => document.body.classList.toggle('teclado-abierto', visualViewport.height < innerHeight * .7));
 await cambiarModo(new URLSearchParams(location.search).has('pieza') ? 'buscar' : modos.includes(location.hash.slice(1)) ? location.hash.slice(1) : modos.includes(localStorage.getItem('inventario-modo')) ? localStorage.getItem('inventario-modo') : modos[0]);

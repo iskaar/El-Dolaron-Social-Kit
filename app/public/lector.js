@@ -2,7 +2,7 @@
 export function crearLector({ emitir, caja = null, ahora = () => performance.now(), esperar = setTimeout, cancelar = clearTimeout }) {
   let texto = '', ultima = -Infinity, rapido = true, timer, consumida = false;
   const limpiar = () => { texto = ''; rapido = true; cancelar(timer); };
-  const enviar = (codigo, origen) => { if (codigo.trim()) emitir({ codigo: codigo.trim(), origen }); };
+  const enviar = (codigo, origen) => { if (codigo.trim()) return emitir({ codigo: codigo.trim(), origen }); };
   return {
     tecla(e) {
       if (e.ctrlKey || e.altKey || e.metaKey || e.isComposing) return;
@@ -35,7 +35,10 @@ export function crearLector({ emitir, caja = null, ahora = () => performance.now
 }
 
 export function escucharLector(alLeer, { caja = null, destino = document } = {}) {
-  const lector = crearLector({ emitir: alLeer, caja });
+  const lector = crearLector({ emitir(detalle) {
+    if (typeof CustomEvent !== 'undefined') destino.dispatchEvent?.(new CustomEvent('lectura', { detail:detalle }));
+    return alLeer(detalle);
+  }, caja });
   const tecla = (e) => lector.tecla(e);
   destino.addEventListener('keydown', tecla, true);
   return { ...lector, cerrar() { lector.limpiar(); destino.removeEventListener('keydown', tecla, true); } };

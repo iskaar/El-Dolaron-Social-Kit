@@ -7,7 +7,7 @@ import { aCentavos } from './ficha.js';
 import { stepper, bloquear, cerrarHoja } from './inventario-ui.js';
 
 /** Estado de captura: UUID estable al reintentar; precio y existencia confirmados solo por el servidor. */
-export function crearCaptura({ api, imprimir, cambiar=()=>{}, enLinea=()=>navigator.onLine, uuid=()=>crypto.randomUUID(), permiteUpc=true }) {
+export function crearCaptura({ api, imprimir, cambiar=()=>{}, enLinea=()=>navigator.onLine, uuid=()=>crypto.randomUUID(), permiteUpc=true, permiteSumar=true, alDesconocido=()=>{} }) {
   let actual=null, resultados=[], siguiente=null, ajuste=null, fila=Promise.resolve();
   function pintar(){cambiar({actual,resultados,siguiente,ajuste});}
   async function guardar(){
@@ -21,6 +21,8 @@ export function crearCaptura({ api, imprimir, cambiar=()=>{}, enLinea=()=>naviga
   async function leer(codigo,mas=false){
     if(!enLinea())throw new Error('Sin red · toma foto');
     if(!mas&&actual?.tipo==='nueva'&&normalizarUpc(codigo)===normalizarUpc(actual.upc)){actual.cantidad=Math.min(999,actual.cantidad+1);pintar();return;}
+    if(!mas&&actual?.tipo==='existente'&&permiteSumar&&(actual.pieza.codigo?.toUpperCase()===codigo.toUpperCase()||(actual.pieza.upc&&normalizarUpc(actual.pieza.upc)===normalizarUpc(codigo))))return sumar(actual.pieza);
+    if(!mas&&actual?.tipo==='sin-registro'&&!actual.buscando)alDesconocido(actual);
     if(!mas&&actual?.tipo==='nueva')await guardar();
     const datos=await api('/api/piezas?'+new URLSearchParams({q:codigo,...(mas&&siguiente?{cursor:siguiente}:{})}));
     resultados=mas?[...resultados,...datos.piezas]:datos.piezas;siguiente=datos.siguiente;
@@ -42,6 +44,7 @@ export function crearCaptura({ api, imprimir, cambiar=()=>{}, enLinea=()=>naviga
   const serial=(fn)=>{const resultado=fila.then(fn);fila=resultado.catch(()=>{});return resultado;};
   return { leer:(...args)=>serial(()=>leer(...args)),guardar:()=>serial(guardar),sumar:(p)=>serial(()=>sumar(p)),
     elegir(p){actual={tipo:'existente',pieza:p};pintar();},
+    retomar(a){actual=a;pintar();},
     cantidad(n){if(actual&&actual.tipo==='nueva'){actual.cantidad=n;if(n===0)actual=null;pintar();}},
     estado(e){if(actual)actual.estado=e;pintar();},
     limpiar(){actual=null;resultados=[];pintar();}, actual:()=>actual };
@@ -52,7 +55,7 @@ export async function iniciar(ctx) {
   const raiz=$('modo-capturar');raiz.replaceChildren();
   const columnas=nodo('div',undefined,'columnas'),entrada=nodo('div'),derecha=nodo('div');columnas.append(entrada,derecha);raiz.append(columnas);
   const tipo=nodo('div',undefined,'segmentado');tipo.setAttribute('role','group');tipo.setAttribute('aria-label','Tipo de pieza');
-  let esRopa=localStorage.getItem('captura-modo')==='ropa',estado='nuevo',cantidad=1,temporizador,pendienteFoto=false,consulta='';
+  let esRopa=localStorage.getItem('captura-modo')==='ropa',estado='nuevo',cantidad=1,temporizador,pendienteFoto=false,consulta='',movil;
   const mercancia=boton('Mercancía',()=>elegirTipo(false)),prenda=boton('Ropa',()=>elegirTipo(true));tipo.append(mercancia,prenda);
   const tablero=ropa({pc,mensaje,cambiar:()=>actualizarDisparo()});
   const grado=opciones(ESTADOS,estado,e=>{estado=e;flujo.estado(e);},'Grado');
@@ -62,18 +65,21 @@ export async function iniciar(ctx) {
   const sinFoto=boton('Pieza sin foto',()=>manual());sinFoto.hidden=!dueno;
   const escribir=boton('⌨ Escribir',()=>{$('busqueda').hidden=false;$('consulta').inputMode='numeric';$('consulta').focus();},'movil');
   entrada.append(tipo,tablero.raiz,grado,nodo('h3','Cantidad'),contador,escribir,nodo('h3','Ya existe en el inventario'),lista,sinFoto);
-  derecha.append(pieza,disparo,remota);
-  const pie=nodo('p','Hoy: 0 piezas', 'ayuda');raiz.append(pie);
+  const historia=nodo('ul',undefined,'lista');
+  derecha.append(pieza,disparo,remota,historia);
+  const pie=nodo('p','Hoy: 0 piezas', 'ayuda pc');raiz.append(pie);
   let hoy=0;
   function elegirTipo(ropa){esRopa=ropa;localStorage.setItem('captura-modo',ropa?'ropa':'mercancia');mercancia.setAttribute('aria-pressed',String(!ropa));prenda.setAttribute('aria-pressed',String(ropa));tablero.raiz.hidden=!ropa;actualizarDisparo();}
   function actualizarDisparo(){bloquear(disparo,esRopa&&!tablero.valores().talla?'Falta talla':esRopa&&!tablero.valores().precio_ropa?'Falta precio':pendienteFoto?'Espera la foto':'');}
   async function imprimir(id,n){if(!etiqueteraLista()||ctx.identidad.vendedor)return false;return ctx.imprimir([id],new Map([[id,n]]));}
-  const flujo=crearCaptura({api,imprimir,permiteUpc:!ctx.identidad.usuario?.roles.includes('finanzas'),cambiar:pintar});
+  const flujo=crearCaptura({api,imprimir,permiteSumar:dueno||ctx.identidad.usuario?.editar_inventario===true,alDesconocido:a=>{void buscarDesconocida(a).catch(e=>mensaje(e.message,'error'));},permiteUpc:!ctx.identidad.usuario?.roles.includes('finanzas'),cambiar:pintar});
   function pintar({actual,resultados,siguiente}){
     clearTimeout(temporizador);lista.replaceChildren();
     for(const p of resultados)lista.append(resultado(p,()=>flujo.elegir(p)));
     if(siguiente){const li=nodo('li');li.append(boton('Buscar más',()=>flujo.leer(consulta,true)));lista.append(li);}
     pieza.replaceChildren();
+    if(pc())disparo.classList.toggle('primario',!actual);
+    else disparo.hidden=actual?.tipo==='nueva'||actual?.tipo==='sin-registro';
     if(!actual)return;
     const p=actual.pieza||actual.ficha;
     const tarjeta=nodo('article',undefined,'tarjeta');pieza.append(tarjeta);
@@ -99,16 +105,20 @@ export async function iniciar(ctx) {
   function pintarImagen(a,c){if(!a.imagen?.url)return;const img=nodo('img');img.src=a.imagen.url;img.alt=a.imagen.nombre||a.ficha.nombre;img.referrerPolicy='no-referrer';img.className='imagen-referencia';c.append(img);if(!a.imagen.confirmada)c.append(boton('Es esta',async()=>{const r=await api(`/api/manifiesto/${a.upc}/imagen`,{url:a.imagen.url,tcin:a.imagen.tcin},'PUT');a.imagen=r.imagen;mensaje('Imagen guardada','ok');}));}
   async function imagen(a,c){try{const r=await api(`/api/manifiesto/${a.upc}/imagen`,{},'POST');a.imagen=r.imagen;if(flujo.actual()===a)pintarImagen(a,c);}catch(e){if(flujo.actual()===a)mensaje(e.message,'aviso');}}
   async function buscarDesconocida(a){
+    if(a.buscando)return;
+    const li=nodo('li'),retomar=boton(`Código ${a.upc} · buscando…`,()=>flujo.retomar(a));li.append(retomar);historia.prepend(li);
     a.buscando=true;clearTimeout(temporizador);mensaje('Buscando en internet…');
     await api('/api/borradores/upc/buscar',{id:a.id,upc:a.upc,stock:a.cantidad,estado_fisico:a.estado});
-    for(let i=0;i<35;i++){await new Promise(r=>setTimeout(r,4000));const datos=await api(`/api/borradores/upc/${a.id}`);if(datos.estado_analisis==='listo'){mensaje('Encontrada · lista para etiqueta','ok');if(flujo.actual()===a)flujo.elegir({...datos,tiene_foto:datos.con_foto});return;}if(datos.estado_analisis==='error'){mensaje('Sin resultado · toma foto','aviso');return;}}
+    for(let i=0;i<35;i++){await new Promise(r=>setTimeout(r,4000));const datos=await api(`/api/borradores/upc/${a.id}`);if(datos.estado_analisis==='listo'){retomar.textContent=`✓ ${datos.nombre}`;mensaje('Encontrada · lista para etiqueta','ok');if(flujo.actual()===a)flujo.elegir({...datos,tiene_foto:datos.con_foto});return;}if(datos.estado_analisis==='error'){retomar.textContent=`▲ ${a.upc} · toma foto`;mensaje('Sin resultado · toma foto','aviso');return;}}
   }
   async function fotoPieza(p){
+    if(!pc())return movil.fotoPieza(p);
     if(pendienteFoto)return;pendienteFoto=true;actualizarDisparo();
     try{const {pedirFoto}=await import('./camara-pc.js');$('chip-celular').textContent='● Esperando foto';const r=await pedirFoto({tipo:'foto_pieza',pieza_id:p.id,contenedor:remota});if(r.estado==='lista'){const d=await api(`/api/piezas/${p.id}`);flujo.elegir(d.pieza);$('chip-celular').textContent='● Celular · Listo';mensaje('Foto recibida','ok');}else mensaje(r.motivo||'No se recibió foto','aviso');}
     finally{pendienteFoto=false;actualizarDisparo();foco();}
   }
   async function fotoNueva(a=null){
+    if(!pc())return movil.tomar(a||flujo.actual());
     if(esRopa&&!a&&!tablero.validar())return;
     if(pendienteFoto)return;
     pendienteFoto=true;actualizarDisparo();clearTimeout(temporizador);
@@ -124,8 +134,11 @@ export async function iniciar(ctx) {
   elegirTipo(esRopa);
   addEventListener('offline',()=>{for(const b of pieza.querySelectorAll('button'))if(b.textContent.startsWith('+1'))bloquear(b,'Sin red: se suma al volver la señal');});
   addEventListener('online',()=>{for(const b of pieza.querySelectorAll('button'))if(b.textContent.startsWith('+1'))bloquear(b,'');});
-  return { abrir(){mensaje('Escanea o escribe');foco();},leer:async(c)=>{consulta=c;await flujo.leer(c);if(flujo.actual()?.tipo==='existente')mensaje('Ya existe','aviso');},pausar(){},flujo,
+  const interfaz = { abrir(){mensaje('Escanea o escribe');foco();void movil?.abrir();},leer:async(c)=>{consulta=c;await flujo.leer(c);if(flujo.actual()?.tipo==='existente')mensaje('Ya existe','aviso');else if(flujo.actual()?.tipo==='nueva')mensaje(`${flujo.actual().ficha.nombre} ×${flujo.actual().cantidad}`,'ok');},pausar(){movil?.pausar();},flujo,
     // La fase móvil conecta estas entradas al mismo flujo y conserva los registros de la cola.
-    entrada,derecha,tablero,disparo,remota,lista,pieza,esRopa:()=>esRopa,estado:()=>estado,cantidad:()=>cantidad,contador,fotoNueva,fotoPieza,
+    entrada,derecha,tipo,grado,escribir,sinFoto,manual,tablero,disparo,remota,lista,pieza,esRopa:()=>esRopa,estado:()=>estado,cantidad:()=>cantidad,contador,fotoNueva,fotoPieza,
   };
+  if(!pc()){const {iniciarCelular}=await import('./inventario-celular.js');movil=await iniciarCelular(ctx,interfaz);}
+  interfaz.subir=()=>movil?.subir();
+  return interfaz;
 }

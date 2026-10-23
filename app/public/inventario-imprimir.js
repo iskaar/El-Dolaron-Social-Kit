@@ -14,7 +14,7 @@ export async function iniciar(ctx) {
   function elegir(b) { etiquetas.hidden=b;bandas.hidden=!b;et.setAttribute('aria-selected',String(!b));ba.setAttribute('aria-selected',String(b));et.tabIndex=b?-1:0;ba.tabIndex=b?0:-1; }
   elegir(false); pestanas.append(et,ba); if(ctx.identidad.usuario?.roles.includes('finanzas')) ba.hidden=true;
   pestanas.onkeydown=(e)=>{if(['ArrowLeft','ArrowRight'].includes(e.key)){e.preventDefault();elegir(bandas.hidden);}};
-  const conectar = boton('Conectar impresora', async()=>{await motor.conexion(false);actualizarConexion();},'primario'); conectar.id='conectar-impresora';
+  const conectar = nodo('button','Conectar impresora','primario'); conectar.type='button'; conectar.id='conectar-impresora';
   const avisoConexion=nodo('div',undefined,'tarjeta conexion-aviso');avisoConexion.append(conectar);
   const lista=nodo('ul',undefined,'lista');lista.id='lista';
   const barra=nodo('div',undefined,'acciones-fijas');const seleccion=nodo('span','');
@@ -39,10 +39,25 @@ export async function iniciar(ctx) {
   etiquetas.append(avisoConexion,controles,lista,barra,operaciones,resumen,historial,estado,ayuda,filtro);raiz.append(pestanas,etiquetas,bandas);
   const motorBoton=(id)=>raiz.querySelector('#'+id);
   // Solo el nodo visual de estado anuncia: el motor conserva sus mensajes y sus controles.
-  Object.defineProperty(resumen,'textContent',{get(){return this._texto||'';},set(t){this._texto=t;mensaje(t,/fall|error|cort|detuvo|incierto|desconect/i.test(t)?'aviso':/enviad/i.test(t)?'etiqueta':'neutro');}});
-  let elegidas=[];
-  function contar(){elegidas=[...lista.querySelectorAll('input[type=checkbox]:checked')];const n=elegidas.reduce((n,c)=>n+Number(lista.querySelector(`.copias[data-id="${c.value}"]`)?.value||1),0);seleccion.textContent=`${elegidas.length} elegidas · ${n} etiquetas`;imprimir.textContent=`Imprimir ${n} etiquetas`;bloquear(imprimir,!etiqueteraLista()?'Conecta la impresora':!n?'Elige piezas':'');}
-  const vista={pintar({ piezas, hechas, pendientes, visibles, filtroCodigo, desmarcadas, idDudoso, copiasDe }){
+  let estadoParcial=null,totalLote=0,enviadasLote=0;
+  Object.defineProperty(resumen,'textContent',{get(){return this._texto||'';},set(t){this._texto=t;
+    let texto=t,tipo=/fall|error|cort|detuvo|incierto|desconect/i.test(t)?'aviso':/enviad/i.test(t)?'etiqueta':'neutro';
+    const avance=/etiqueta (\d+) de (\d+)/.exec(t);
+    if(estadoParcial&&/cort|Detenido|detuvo/i.test(t)){texto=`Salieron ${estadoParcial.hechas} de ${estadoParcial.total}`;tipo='error';}
+    else if(avance)texto=`Enviando ${enviadasLote+Number(avance[1])}/${totalLote||avance[2]}`;
+    else if(/piezas enviadas/.test(t))texto=`Enviadas ${enviadasLote} etiquetas`;
+    else if(t.startsWith('Pausa de'))texto=t.split(' para ')[0];
+    mensaje(texto,tipo);
+  }});
+  let elegidas=[], parcial=false; const restantes=new Map();
+  function contar(){elegidas=[...lista.querySelectorAll('input[type=checkbox]:checked')];const n=elegidas.reduce((n,c)=>n+Number(lista.querySelector(`.copias[data-id="${c.value}"]`)?.value||1),0);seleccion.textContent=`${elegidas.length} elegidas · ${n} etiquetas`;imprimir.textContent=parcial?`Reconectar y seguir (${n})`:`Imprimir ${n} etiquetas`;bloquear(imprimir,!etiqueteraLista()&&!parcial?'Conecta la impresora':!n?'Elige piezas':'');}
+  const vista={
+  inicio(ids,pedidas){estadoParcial=null;enviadasLote=0;totalLote=[...pedidas.values()].reduce((n,v)=>n+v,0);},
+  conexion(){actualizarConexion();contar();},
+  controles({imprimiendo,automaticaActiva}){imprimir.disabled=false;contar();if(imprimiendo||automaticaActiva)bloquear(imprimir,imprimiendo?'Espera el envío':'Pausa la automática');},
+  progreso(p,hechas,total){mensaje(`Enviando ${hechas}/${total}`);},
+  resultado(p,hechas,total,ok){enviadasLote+=hechas;if(ok){restantes.delete(p.id);parcial=false;}else if(hechas>0){restantes.set(p.id,total-hechas);parcial=true;estadoParcial={hechas:enviadasLote,total:totalLote||total};mensaje(`Salieron ${hechas} de ${total}`,'aviso');}},
+  pintar({ piezas, hechas, pendientes, visibles, filtroCodigo, desmarcadas, idDudoso, copiasDe }){
     mostrar.setAttribute('aria-checked',String(visibles.length>pendientes.length));lista.replaceChildren();
     const filtro=filtroCodigo.trim().toUpperCase();
     const filtradas=visibles.filter(p=>!filtro||(p.codigo||'').toUpperCase().startsWith(filtro)||(/^\d+$/.test(filtro)&&Number(p.codigo?.slice(3))===Number(filtro)));
@@ -54,7 +69,7 @@ export async function iniciar(ctx) {
       const texto=nodo('div');texto.append(nodo('b',p.nombre),nodo('div',p.codigo||'Sin código','codigo'),nodo('strong',pesos(p.precio),'precio'));
       const estado=nodo('small',p.id===idDudoso?'▲ Envío incierto':vigente?'✓ Salió':marca?`↻ La pegada dice ${pesos(marca.precio)}`:'Nueva');texto.append(estado);
       if(vigente)texto.append(boton('No salió desde aquí',()=>{desmarcarDesde(p.id);motor.pintar();}));
-      const copia=stepper(copiasDe(p),contar,{nombre:'Copias'});const output=copia.querySelector('output');output.className='copias';output.dataset.id=p.id;output.value=String(copiasDe(p));
+      const cantidad=restantes.get(p.id)??copiasDe(p);const copia=stepper(cantidad,contar,{nombre:'Copias'});const output=copia.querySelector('output');output.className='copias';output.dataset.id=p.id;output.value=String(cantidad);
       li.append(label,imagen,texto,copia);lista.append(li);
     }
     if(!filtradas.length)lista.append(nodo('li','Nada por imprimir','vacio'));
@@ -70,7 +85,7 @@ export async function iniciar(ctx) {
     if(motor){const auto=boton('Automática',async()=>{await motor.iniciarAutomatica();auto.setAttribute('aria-checked',String(motor.activa()));});auto.setAttribute('role','switch');auto.setAttribute('aria-checked',String(motor.activa()));c.append(auto,boton('Nueva sesión',()=>motorBoton('nueva-sesion').click()));}
     c.append(boton('Detener',()=>{motor?.pausarAutomatica();detenerEnvio();},'peligro'));hoja('Impresora',c);
   }
-  function actualizarConexion(){const lista=etiqueteraLista();$('chip-impresora').textContent=lista?'● Impresora · Lista':'▲ Sin conectar';$('chip-impresora').classList.toggle('aviso',!lista);avisoConexion.hidden=lista;}
+  function actualizarConexion(){const lista=etiqueteraLista();$('chip-impresora').textContent=lista?'● Impresora · Lista':'▲ Sin conectar';$('chip-impresora').classList.toggle('aviso',!lista);avisoConexion.hidden=lista||parcial;}
   setInterval(actualizarConexion,2000);
   let familiaElegida, cantidad=20;
   async function cargarBandas(elegir){
@@ -88,5 +103,6 @@ export async function iniciar(ctx) {
     if(!motor)return mensaje('Imprime desde la computadora','aviso');
     const ok=await motor.imprimir(ids,copias);contar();actualizarConexion();foco();return ok;
   }
+  document.addEventListener('keydown',e=>{if(!raiz.hidden&&e.ctrlKey&&e.key.toLowerCase()==='p'){e.preventDefault();imprimir.click();}});
   return { conexion, imprimir:imprimirPiezas, abrir:()=>motor?.cargar(), leer:codigo=>{elegir(false);motor?.filtrar(codigo);}, pausar(){} };
 }

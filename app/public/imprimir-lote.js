@@ -1,6 +1,6 @@
 import {
   conectarEtiquetera, etiqueteraLista, imprimirEtiquetas, historialTexto, detenerEnvio, envioDetenido,
-  errorEnvio, impresas, marcarImpresa, desmarcarDesde, etiquetaVigente, precioImpreso,
+  errorEnvio, desmarcarDesde, etiquetaVigente, precioImpreso,
 } from '/etiquetera.js';
 
 import { estadoEnvio } from './envio-etiquetas.js';
@@ -44,7 +44,7 @@ async function cargar() {
 }
 
 function pintar() {
-  const hechas = impresas();
+  const hechas = estadoEnvio().marcas;
   const idDudoso = localStorage.getItem(CLAVE_DUDOSA);
   // Las marcas de antes no guardaban el precio, ni el nombre y la talla (#361): se les
   // pone lo de hoy una vez, para que un cambio de aqui en adelante si se note. El
@@ -162,7 +162,7 @@ document.getElementById('marcar').addEventListener('click', async () => {
   const porId = new Map(piezas.map((p) => [p.id, p]));
   ids.forEach((id, i) => estadoEnvio(porId.get(id), 'marcar', new Date(base + i).toISOString()));
   const dudosa = localStorage.getItem(CLAVE_DUDOSA);
-  if (ids.includes(dudosa) && impresas()[dudosa]) localStorage.removeItem(CLAVE_DUDOSA);
+  if (ids.includes(dudosa) && estadoEnvio().marcas[dudosa]) localStorage.removeItem(CLAVE_DUDOSA);
   pintar();
   resumen.textContent = `${ids.length} ${ids.length === 1 ? 'pieza marcada' : 'piezas marcadas'} como impresas. Se regresan con «Mostrar impresas».`;
 });
@@ -193,6 +193,7 @@ function pintarImpresora() {
   estado.textContent = lista ? 'Impresora conectada' : 'Impresora no conectada';
   estado.style.color = lista ? '#2f7a3a' : '#D72B32';
   botonConectar.hidden = lista;
+  vista?.conexion?.(lista);
 }
 pintarImpresora();
 setInterval(pintarImpresora, 2000);   // el enlace se puede caer solo
@@ -232,6 +233,7 @@ document.getElementById('imprimir').addEventListener('click', () => {
 
 async function imprimir(ids, pedidas = new Map(), automatico = false) {
   if (imprimiendo || ids.length === 0) return false;
+  vista?.inicio?.(ids, pedidas);
   imprimiendo = true;
   pintarControles();
   if (!automatico) detenerEnvio(false);
@@ -279,11 +281,13 @@ async function imprimir(ids, pedidas = new Map(), automatico = false) {
         resumen.textContent = `Imprimiendo ${detalle}: ${copias} ${copias === 1 ? 'etiqueta' : 'etiquetas'}…`;
         // Si se cierra la página durante BLE, no se reenvía una etiqueta incierta a ciegas.
         if (automatico) localStorage.setItem(CLAVE_DUDOSA, p.id);
+        let hechasDePieza = 0;
         const salio = await imprimirEtiquetas(
           p, copias,
-          (hechas) => { resumen.textContent = `Imprimiendo ${detalle}: etiqueta ${hechas} de ${copias}…`; },
+          (hechas) => { hechasDePieza = hechas; vista?.progreso?.(p, hechas, copias); resumen.textContent = `Imprimiendo ${detalle}: etiqueta ${hechas} de ${copias}…`; },
           (segundos) => { resumen.textContent = `Pausa de ${segundos} s para que la impresora vacíe lo que tiene (${detalle})…`; },
         );
+        vista?.resultado?.(p, hechasDePieza, copias, salio);
         pintarHistorial();
         if (!salio) {
           resumen.textContent = envioDetenido()
@@ -292,7 +296,7 @@ async function imprimir(ids, pedidas = new Map(), automatico = false) {
           return false;
         }
         estadoEnvio(p, 'marcar');
-        if ((automatico || localStorage.getItem(CLAVE_DUDOSA) === p.id) && !impresas()[p.id]) {
+        if ((automatico || localStorage.getItem(CLAVE_DUDOSA) === p.id) && !estadoEnvio().marcas[p.id]) {
           throw new Error('No se pudo recordar el envío. Revisa el almacenamiento del navegador y la etiqueta.');
         }
         if (localStorage.getItem(CLAVE_DUDOSA) === p.id) localStorage.removeItem(CLAVE_DUDOSA);
@@ -338,6 +342,7 @@ function pintarControles() {
   botonAutomatica.disabled = !automaticaActiva && (imprimiendo || consultandoAutomatica);
   document.getElementById('nueva-sesion').disabled = automaticaActiva || imprimiendo || consultandoAutomatica;
   botonAutomatica.textContent = automaticaActiva ? 'Pausar impresión automática' : 'Retomar / iniciar impresión automática';
+  vista?.controles?.({ imprimiendo, automaticaActiva });
 }
 
 function pausarAutomatica() {
@@ -417,7 +422,7 @@ async function imprimirNuevas() {
       const ahora = Number.isFinite(servidor) ? servidor : Date.now();
       cambiosDesde = new Date(ahora - TRASLAPE_MS).toISOString();
       const nuevas = [...piezasSesion.values()].sort((a, b) => a.creado_en.localeCompare(b.creado_en));
-      const hechas = impresas();
+      const hechas = estadoEnvio().marcas;
       const cola = [];
       let esperando = '';
       for (const p of nuevas) {
