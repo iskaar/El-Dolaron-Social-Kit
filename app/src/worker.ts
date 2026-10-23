@@ -382,7 +382,7 @@ async function destinoValido(destino: string, env: Env): Promise<boolean> {
  * Con etiqueta (codigo) la pieza ya esta a la venta con ese precio impreso: solo
  * el dueno lo cambia (Issue #75). Antes de etiquetar, poner precio es parte de la captura.
  */
-async function corregirBorrador(id: string, cambios: Record<string, unknown>, env: Env, esDueno: boolean, captura?: { correo: string; upc: string }, precioEsperado?: number, cierraSolicitudPor?: string): Promise<Response> {
+async function corregirBorrador(id: string, cambios: Record<string, unknown>, env: Env, esDueno: boolean, captura?: { correo: string; upc: string }, precioEsperado?: number, cierraSolicitudPor?: string, solicitudId?: string): Promise<Response> {
   if (!UUID.test(id)) {
     return json({ error: 'Identificador invalido.' }, 400);
   }
@@ -475,6 +475,9 @@ async function corregirBorrador(id: string, cambios: Record<string, unknown>, en
          and estado_analisis in ('pendiente', 'error') and (codigo is null or codigo = '')
          and not exists (select 1 from venta_lineas where producto_id = productos.id)` : ''}
        ${precioEsperado === undefined ? '' : 'and precio = ?'}
+       ${solicitudId ? `and destino = 'etiqueta' and sin_inventario = 0
+         and exists (select 1 from solicitudes_precio where id = ? and producto_id = productos.id
+           and propietario = productos.propietario and estado = 'pendiente')` : ''}
      returning stock`,
   )
     .bind(nombre, categoria, marca, talla, precioLista, precio, estadoFisico, destino,
@@ -482,19 +485,23 @@ async function corregirBorrador(id: string, cambios: Record<string, unknown>, en
       cambios.stock === undefined ? null : stock, ahora, upc ?? null, id,
       verificarUpc ? 1 : 0, normalizarUpc(upc), fila.propietario, normalizarUpc(upc), estadoFisico, id,
       fila.upc ?? null, fila.estado_fisico, ...(captura ? [captura.correo, captura.upc] : []),
-      ...(precioEsperado === undefined ? [] : [precioEsperado]));
+      ...(precioEsperado === undefined ? [] : [precioEsperado]), ...(solicitudId ? [solicitudId] : []));
   // #451: si el dueño cambia el precio por esta vía y había una solicitud pendiente, se cierra en el mismo batch,
   // solo si la pieza sigue viva y el precio de verdad cambia.
-  const guardada = cierraSolicitudPor && precio !== fila.precio
-    ? (await env.DB.batch([
+  let guardada: { stock: number } | undefined | null;
+  if (cierraSolicitudPor && (solicitudId || precio !== fila.precio)) {
+    const [actualizada, cerrada] = await env.DB.batch([
       actualizar,
-      // Después del UPDATE: si una guarda (UPC, descartada) lo frenó, la marca de tiempo no coincide y la solicitud sigue pendiente.
+      // Cero filas no aborta el batch: changes() impide cerrar si el UPDATE no pasó sus guardas.
       env.DB.prepare(`update solicitudes_precio set estado = 'aplicada', precio_nuevo = ?, resuelto_por = ?, resuelto_en = ?
-        where producto_id = ? and estado = 'pendiente'
+        where producto_id = ? and estado = 'pendiente' and changes() = 1
+          ${solicitudId ? 'and id = ?' : ''}
           and exists (select 1 from productos where id = ? and precio = ? and actualizado_en = ?)`)
-        .bind(precio, cierraSolicitudPor, ahora, id, id, precio, ahora),
-    ]))[0].results?.[0] as { stock: number } | undefined
-    : await actualizar.first<{ stock: number }>();
+        .bind(precio, cierraSolicitudPor, ahora, id, ...(solicitudId ? [solicitudId] : []), id, precio, ahora),
+    ]);
+    guardada = actualizada.results?.[0] as { stock: number } | undefined;
+    if (solicitudId && cerrada.meta.changes !== 1) guardada = undefined;
+  } else guardada = await actualizar.first<{ stock: number }>();
 
   // `precioEsperado` (#451): el precio solo cambia si sigue valiendo lo que vio quien lo cambia.
   if (!guardada) return precioEsperado !== undefined ? json({ error: 'El precio de la pieza cambió. Revisa el precio actual.' }, 409)
@@ -2259,7 +2266,7 @@ export default {
       }
       if (pathname === '/api/solicitudes-precio' || pathname.startsWith('/api/solicitudes-precio/') || /^\/api\/piezas\/[^/]+\/solicitud-precio$/.test(pathname)) {
         // Aplicar un precio pasa por corregirBorrador: las mismas reglas que la corrección de la ficha.
-        return await rutaSolicitudesPrecio(request, env, url, usuario!, (id, precio, esperado) => corregirBorrador(id, { precio }, env, true, undefined, esperado));
+        return await rutaSolicitudesPrecio(request, env, url, usuario!, (id, precio, esperado, solicitudId) => corregirBorrador(id, { precio }, env, true, undefined, esperado, correo, solicitudId));
       }
       if (pathname === '/api/piezas' || pathname.startsWith('/api/piezas/')) {
         const respuesta = await rutaPiezas(request, env, url, await leerUsuario(env, correo), ctx);
