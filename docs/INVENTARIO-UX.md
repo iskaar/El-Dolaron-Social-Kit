@@ -412,23 +412,23 @@ Al entrar carga todo el inventario visible, más reciente primero, en páginas d
 | ● 8 resultados                       |   +--------------------------------------+
 | [▮▮ chamarra levi_____________ ] [🎥]|   | [   foto cuadrada, 390×390        ]  |
 +--------------------------------------+   |                                      |
-| [f] Chamarra Levi's M     $450       |   +--------------------------------------+
-|     ED-002318 · ×3                   |   | Chamarra Levi's           $450       |
-| [f] Chamarra Levi's L     $450       |   | M · Levi's · lista $600              |
-|     ED-002319 · ×1                   |   | 012345678905                         |
-| [ ] Chamarra denim S      $300       |   | EXISTENCIA                           |
-|     ED-002101 · sin foto · ×2        |   | [ - ]   3   [ + ]    [ Fijar a… ]    |
-| ...                                  |   | [[ Imprimir 1 ]] [Foto nueva][Editar]|
+| [f] ED-002318                   ×3   |   +--------------------------------------+
+|     Chamarra Levi's M · $450          |   | Chamarra Levi's           $450       |
+|     [ Reimprimir ]                   |   | M · Levi's · lista $600              |
+| [f] ED-002319                   ×1   |   | 012345678905                         |
+|     Chamarra Levi's L · $450          |   | EXISTENCIA                           |
+|     [ Reimprimir ] · sin foto         |   | [ - ]   3   [ + ]    [ Fijar a… ]    |
+| ...                                  |   | [[ Reimprimir etiqueta ]] [Foto nueva][Editar]|
 |           [ Cargar más ]             |   | ▸ Historial (10)                     |
 +--------------------------------------+   +--------------------------------------+
 | Capturar | Buscar | Revisar | Imprimir |
 ```
 
-- Fila de resultado: miniatura 56, nombre (2 líneas), `ED-` mono, precio 800 a la derecha, existencia como insignia cuadrada. Alto mín. 72. Fila completa = botón (`aria-current` en la abierta). «Sin foto» = recuadro con glifo cámara tachada y texto.
+- Fila de resultado: miniatura 56 (reserva el espacio si falta foto); primera línea nuestro código `ED-000123` en monoespaciada 20/800, después nombre (2 líneas), y precio · UPC (si tiene) · «sin foto». Sin código: texto secundario discreto. Existencia como insignia cuadrada. Alto mín. 72, reflujo sin recortes a 320 px. Botón de ficha con `aria-current` en la abierta. En Buscar, `Reimprimir` con icono de impresora y texto es un botón hermano (nunca anidado), ≥44×44; solo fuera del host vendedor, con código y destino etiqueta. Envía 1 copia con el motor existente, bloquea dobles toques con `aria-disabled`/`aria-busy` y anuncia «Etiqueta enviada · ED-000123».
 - Ficha en celular reemplaza la lista (`← Resultados` fijo arriba, 56, con el código); en PC es la columna derecha.
 - Existencia `−`/`+` registra con rastro (`#447`); pide motivo en una hoja corta de 4 chips (`Corrección · Merma · Robo · Entrada`) **solo al bajar o al fijar**; subir 1 usa «Entrada» por omisión. `Fijar a…` abre diálogo numérico. Tras cada ajuste, la línea muestra «Existencia 3 → 2» con `Deshacer` (texto, 8 s).
-- **Sin casilla «Editar inventario» («Solo consulta»)**: la ficha no pinta stepper, `Fijar a…`, `Editar` ni `Foto nueva`; en su lugar el número de existencia grande y un sello `Solo consulta` (cuadro `--niebla`, borde 2 px `--azul`, 14/800) que al tocarse abre una hoja de una línea: «Tu cuenta no puede editar. Pídelo al dueño.» **No hay casillas ni controles deshabilitados.** `Imprimir 1` sí aparece (rol capturista).
-- `Imprimir 1` es el principal de la ficha; `Imprimir N…` abre stepper de copias en hoja.
+- **Sin casilla «Editar inventario» («Solo consulta»)**: la ficha no pinta stepper, `Fijar a…`, `Editar` ni `Foto nueva`; en su lugar el número de existencia grande y un sello `Solo consulta` (cuadro `--niebla`, borde 2 px `--azul`, 14/800) que al tocarse abre una hoja de una línea: «Tu cuenta no puede editar. Pídelo al dueño.» **No hay casillas ni controles deshabilitados.** `Reimprimir etiqueta` sí aparece (rol capturista).
+- `Reimprimir etiqueta` es el principal de la ficha; `Varias copias…` abre stepper de copias en hoja.
 - Precio de pieza con etiqueta: solo el dueño ve el campo; los demás ven el precio como texto.
 
 **PC 1280×800 — Buscar**
@@ -440,11 +440,11 @@ Al entrar carga todo el inventario visible, más reciente primero, en páginas d
 | ● 8 resultados                                                                               |
 +------------------------------------+---------------------------------------------------------+
 | [▮▮ chamarra levi________________ ] | ED-002318                                              |
-| [f] Chamarra Levi's M    $450  ×3  | +------------------+  Chamarra Levi's              $450  |
-| [f] Chamarra Levi's L    $450  ×1  | |   foto 320×320   |  M · Levi's · lista $600            |
-| [ ] Chamarra denim S     $300  ×2  | |                  |  012345678905                       |
+| [f] ED-002318                ×3   | +------------------+  Chamarra Levi's              $450  |
+|     Chamarra Levi's M · $450      | |   foto 320×320   |  M · Levi's · lista $600            |
+|     [ Reimprimir ]                 | |                  |  012345678905                       |
 |     ...                            | +------------------+  EXISTENCIA [-] 3 [+] [Fijar a…]    |
-|           [ Cargar más ]           |  [[ Imprimir 1 ]] [ Imprimir N… ] [ Foto con celular ] [ Editar ] |
+|           [ Cargar más ]           |  [[ Reimprimir etiqueta ]] [ Varias copias… ] [ Foto con celular ] [ Editar ] |
 |                                    |  Historial de existencia                                |
 |                                    |   21/10 11:02  −1 merma  4→3  (Ana)                     |
 +------------------------------------+---------------------------------------------------------+
@@ -741,6 +741,9 @@ Herramienta: Chromium headless (Playwright/Puppeteer) con rutas `/api/*` interce
 | 16 | Imprimir · Bandas | rejilla de bandas 88 px, `✓ 20` en impresas |
 | 17 | Hoja de chip Impresora y de chip Red | una acción principal cada una |
 | 18 | Menú `⋯` | Sonido y Vibración con estado, Inicio, Ajustes (solo rol) |
+| 19 | Buscar · lista completa | «Todo el inventario · más recientes primero», filas con código ED- visible y `Cargar más` mientras haya páginas |
+| 20 | Buscar · filtro escrito | «N resultados para «x»», N+ si hay más, sin abrir la ficha automáticamente |
+| 21 | Buscar · tarjeta con Reimprimir | icono y texto, botón hermano de ficha, envío único y estado con código; variantes sin foto y sin código |
 
 **Comprobaciones automáticas (script con `getBoundingClientRect` / `getComputedStyle`)**
 

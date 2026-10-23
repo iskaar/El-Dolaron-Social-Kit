@@ -26,9 +26,12 @@ const server=createServer(async(req,res)=>{try{
   else if(u.pathname==='/api/borradores'&&req.method==='POST'){const chunks=[];for await(const ch of req)chunks.push(ch);const r=new Request('http://local/foto',{method:'POST',headers:req.headers,body:Buffer.concat(chunks),duplex:'half'});const f=await r.formData();const nuevo={...p,id:f.get('id'),nombre:f.get('prenda')||'Foto de prueba',talla:f.get('talla'),precio:Number(f.get('precio_ropa'))||24900,stock:Number(f.get('cantidad'))||1,capturado_por:'prueba@local.mx'};registros.push(nuevo);datos=nuevo;}
   else if(u.pathname==='/api/borradores'&&falloLista){res.statusCode=503;datos={error:'Sin conexión'};}
   else if(u.pathname==='/api/borradores'&&listaVacia)datos=[];
-  else if(u.pathname==='/api/borradores')datos=[...registros,p,{...p,id:'22222222-2222-4222-8222-222222222222',codigo:'ED-002319',nombre:'Lámpara de escritorio',categoria:'hogar',precio:24900,stock:2}];
+  else if(u.pathname==='/api/borradores')datos=[...registros,p,{...p,id:'22222222-2222-4222-8222-222222222222',codigo:'ED-002319',nombre:'Lámpara de escritorio',categoria:'hogar',precio:24900,stock:6}];
   else if(u.pathname==='/api/borradores/upc')datos={...p,id:'33333333-3333-4333-8333-333333333333',nombre:'Lámpara',stock:1};
-  else if(u.pathname==='/api/etiquetas')datos=[p,{...p,id:'22222222-2222-4222-8222-222222222222',nombre:'Lámpara de escritorio',stock:2}];
+  else if(u.pathname==='/api/etiquetas'){
+    const chunks=[];for await(const ch of req)chunks.push(ch);const {ids}=JSON.parse(Buffer.concat(chunks));
+    datos=[p,{...p,id:'22222222-2222-4222-8222-222222222222',nombre:'Lámpara de escritorio',stock:6}].filter(p=>ids.includes(p.id));
+  }
   else if(u.pathname.startsWith('/api/manifiesto/')){if(u.pathname.includes('999999999999')){res.statusCode=404;datos={error:'Sin registro'};}else datos={nombre:'Lámpara de escritorio',categoria:'hogar',precio:24900,precios:{nuevo:24900,danado:14900,liquidacion:9900},imagen:null};}
   else if(u.pathname.includes('/revision'))datos={...p,categoria:'ropa',prenda:'Chamarra'};
   else if(u.pathname==='/api/camara/solicitud'){const ahora=new Date().toISOString();const chunks=[];for await(const ch of req)chunks.push(ch);if(chunks.length)globalThis.solicitud={...JSON.parse(Buffer.concat(chunks)),estado:'pendiente',vence_en:new Date(Date.now()+120000).toISOString()};datos={ahora,solicitud:globalThis.solicitud};}
@@ -54,7 +57,7 @@ await cdp('Page.addScriptToEvaluateOnNewDocument',{source:`
 window.blePrueba={enviadas:0,fallarDesde:Infinity,buffer:''};
 const caracteristica={properties:{writeWithoutResponse:true},async writeValueWithoutResponse(bytes){if(blePrueba.enviadas>=blePrueba.fallarDesde)throw new Error('GATT desconectada simulada');blePrueba.buffer+=new TextDecoder().decode(bytes);if(blePrueba.buffer.includes('PRINT 1,1\\r\\n')){blePrueba.enviadas++;blePrueba.buffer='';}}};
 const aparato={addEventListener(){},gatt:{connected:true,async connect(){return{getPrimaryService:async()=>({getCharacteristic:async()=>caracteristica})};},disconnect(){}}};
-Object.defineProperty(navigator,'bluetooth',{configurable:true,value:{requestDevice:async()=>aparato}});
+Object.defineProperty(navigator,'bluetooth',{configurable:true,value:{requestDevice:async()=>{if(blePrueba.cancelar)throw new DOMException('Cancelada','NotFoundError');return aparato;}}});
 `.replace(/^\+/gm,'')});
 const medidas=[];
 async function capturar(nombre,width){
@@ -108,6 +111,23 @@ for(const width of [390,1280]){
   await esperar("document.getElementById('resumen').textContent.includes('1 resultado')");
   assert.equal(await js("document.getElementById('ficha').hidden"),true,'El filtro escrito no abre la ficha');
   await capturar('20-buscar-filtrado',width);
+  assert.equal(await js("document.querySelector('#resultados .resultado code').textContent"),'ED-002318');
+  assert.equal(await js("document.querySelectorAll('#resultados .resultado button').length"),0);
+  await js("blePrueba.cancelar=true;document.querySelector('#resultados .reimprimir-pieza').click()");
+  await esperar("document.querySelector('#resultados .reimprimir-pieza').getAttribute('aria-disabled')==='false'");
+  assert.equal(await js('blePrueba.enviadas'),0,'Cancelar la conexión no imprime ni anuncia envío');
+  assert.doesNotMatch(await js("document.getElementById('estado').textContent"),/Etiqueta enviada/);
+  await js("blePrueba.cancelar=false;{const b=document.querySelector('#resultados .reimprimir-pieza');b.click();b.click();window.bloqueadaQA=b.getAttribute('aria-disabled')}");
+  assert.equal(await js('bloqueadaQA'),'true');
+  await esperar("document.getElementById('estado').textContent.includes('Etiqueta enviada · ED-002318')");
+  assert.equal(await js('blePrueba.enviadas'),1,'Un doble toque envía una sola copia');
+  assert.equal(await js("document.getElementById('ficha').hidden"),true,'Reimprimir no abre ficha');
+  await capturar('21-tarjeta-reimprimir',width);
+  await js("document.querySelector('#resultados .resultado').focus()");
+  await cdp('Input.dispatchKeyEvent',{type:'keyDown',key:'Tab',code:'Tab',windowsVirtualKeyCode:9});
+  assert.equal(await js("document.activeElement.classList.contains('reimprimir-pieza')"),true);
+  assert.ok(await js("parseFloat(getComputedStyle(document.activeElement).outlineWidth)>=3"),'Foco visible de al menos 3 px');
+  await capturar('22-reimprimir-foco',width);
   await js("document.getElementById('consulta').value='lámpara';document.getElementById('consulta').dispatchEvent(new Event('input'))");
   await esperar("document.getElementById('resumen').textContent.includes('25+ resultados')");
   await js("document.getElementById('consulta').value='vieja';document.getElementById('consulta').dispatchEvent(new Event('input'))");await dormir(300);
@@ -129,7 +149,7 @@ for(const width of [390,1280]){
   falloLista=true;listaVacia=false;await modo('buscar');await modo('revisar');await capturar('13-revisar-error',width);falloLista=false;
   await modo('imprimir');await capturar('14-impresora-desconectada',width);
   await js("document.getElementById('chip-impresora').click()");await capturar('17-impresora',width);await js("document.getElementById('cerrar-hoja').click()");
-  await js("document.getElementById('conectar-impresora').click()");await dormir(100);await js("blePrueba.fallarDesde=4;document.querySelector('#modo-imprimir #imprimir').click()");await dormir(200);await capturar('15-enviando',width);await dormir(6000);await capturar('15-corte-parcial',width);assert.equal(await js('blePrueba.enviadas'),4,'El corte simulado debe ocurrir tras cuatro etiquetas');
+  await js("document.getElementById('conectar-impresora').click()");await dormir(100);await js("window.inicioTandaQA=blePrueba.enviadas;blePrueba.fallarDesde=inicioTandaQA+4;document.querySelector('#modo-imprimir #imprimir').click()");await dormir(200);await capturar('15-enviando',width);await dormir(6000);await capturar('15-corte-parcial',width);assert.equal(await js('blePrueba.enviadas-inicioTandaQA'),4,'El corte simulado debe ocurrir tras cuatro etiquetas');
   await js("document.getElementById('tab-bandas').click()");await capturar('16-bandas',width);
   if(width===390){await cdp('Browser.setPermission',{permission:{name:'camera'},setting:'denied',origin:`http://127.0.0.1:${port}`});await modo('capturar');await js("navigator.mediaDevices.getUserMedia=async()=>{throw new DOMException('denegada','NotAllowedError')};[...document.querySelectorAll('.visor button')].find(b=>b.textContent==='Reanudar').click()");await dormir(200);await capturar('09-camara-bloqueada',width);assert.match(await js("document.getElementById('error').innerText"),/Cámara bloqueada/);await cdp('Browser.resetPermissions');}
   consultaSolo=true;
@@ -138,7 +158,10 @@ for(const width of [390,1280]){
   await modo('revisar');await js("document.querySelector('#modo-revisar [data-estado=todas]').click()");await capturar('12-solo-consulta',width);assert.equal(await js("document.querySelectorAll('#modo-revisar input[type=checkbox]').length"),0);
 }
 await cdp('Emulation.setDeviceMetricsOverride',{width:320,height:844,deviceScaleFactor:2,mobile:true});
-await cdp('Page.navigate',{url:`http://127.0.0.1:${port}/inventario?reflujo=320#buscar`});await dormir(500);await buscar('chamarra');await capturar('11-reflujo',320);
+await cdp('Page.navigate',{url:`http://127.0.0.1:${port}/inventario?reflujo=320#buscar`});await dormir(500);await capturar('19-reflujo-lista',320);
+await js("document.getElementById('consulta').value='chamarra';document.getElementById('consulta').dispatchEvent(new Event('input'))");
+await esperar("document.getElementById('resumen').textContent.includes('1 resultado')");await capturar('20-reflujo-filtrado',320);
+await buscar('chamarra');await capturar('11-reflujo',320);
 await writeFile(path.join(salida,'medidas.json'),JSON.stringify({errores,medidas},null,2));
 assert.deepEqual(errores,[]);const pequenos=medidas.flatMap(d=>d.pequenos.map(p=>({...p,estado:d.nombre,width:d.width})));assert.deepEqual(pequenos,[],'Objetivos menores de 44 px');console.log(`QA: ${medidas.length} capturas; sin desborde, objetivos >=44 px, sin errores de JavaScript`);
 }catch(e){console.error('Errores de página:',errores);throw e;}finally{await cdp('Browser.close').catch(()=>{});ws.close();server.close();chrome.kill();await dormir(400);await rm(perfil,{recursive:true,force:true,maxRetries:5,retryDelay:200});}

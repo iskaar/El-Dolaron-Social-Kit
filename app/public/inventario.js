@@ -26,7 +26,7 @@ const ficha = crearFicha({ mensaje, confirmar, integrada:true, elegirMotivo:() =
   }));
   if (!identidad.vendedor && p.destino === 'etiqueta') {
     const imprimir = async (n) => (await cargar('imprimir')).imprimir([p.id], new Map([[p.id,n]]));
-    $('acciones-ficha').append(boton('Imprimir 1', () => imprimir(1), 'primario'), boton('Imprimir N…', () => {
+    $('acciones-ficha').append(boton('Reimprimir etiqueta', () => imprimir(1), 'primario'), boton('Varias copias…', () => {
       let n = 1; const c = nodo('div'); c.append(stepper(n, v => n = v, { nombre:'Copias' }), boton('Imprimir', async () => { cerrarHoja(); await imprimir(n); }, 'primario')); hoja('Copias', c);
     }));
   }
@@ -34,13 +34,28 @@ const ficha = crearFicha({ mensaje, confirmar, integrada:true, elegirMotivo:() =
   foco();
 } });
 
-export function resultado(p, alElegir = () => ficha.abrir(p.id)) {
-  const li = nodo('li'), b = boton('', alElegir, 'resultado'), foto = nodo('img');
-  b.dataset.id = p.id; foto.alt = ''; foto.loading = 'lazy';
-  if (p.tiene_foto || p.foto_key) foto.src = `/api/foto/${p.id}`; else foto.hidden = true;
-  foto.onerror = () => { foto.hidden = true; };
-  const texto = nodo('span'); texto.append(nodo('b', p.nombre || 'Sin nombre'), nodo('small', `${p.codigo || 'Sin código'} · ${pesos(p.precio)}${!p.tiene_foto && !p.foto_key ? ' · sin foto' : ''}`));
-  b.append(foto, texto, nodo('span', `×${p.stock}`, 'insignia')); li.append(b); return li;
+export function resultado(p, alElegir = () => ficha.abrir(p.id), reimprimir = false) {
+  const li = nodo('li'), b = boton('', alElegir, 'resultado'), foto = nodo('span', undefined, 'mini-foto'), imagen = nodo('img');
+  const conFoto = p.tiene_foto || p.foto_key;
+  b.dataset.id = p.id; imagen.alt = ''; imagen.loading = 'lazy';
+  foto.textContent = 'Sin foto';
+  if (conFoto) { imagen.src = `/api/foto/${p.id}`; foto.replaceChildren(imagen); }
+  imagen.onerror = () => { foto.textContent = 'Sin foto'; };
+  const texto = nodo('span'), codigo = nodo(p.codigo ? 'code' : 'small', p.codigo || 'Sin código');
+  texto.append(codigo, nodo('b', p.nombre || 'Sin nombre'), nodo('small', `${pesos(p.precio)}${p.upc ? ` · ${p.upc}` : ''}${!conFoto ? ' · sin foto' : ''}`));
+  b.append(foto, texto, nodo('span', `×${p.stock}`, 'insignia')); li.append(b);
+  if (reimprimir) li.className = 'fila-busqueda';
+  if (reimprimir && !identidad.vendedor && p.codigo && p.destino === 'etiqueta') {
+    const imprimir = boton('Reimprimir', async (boton) => {
+      bloquear(boton, 'Espera el envío'); boton.setAttribute('aria-busy', 'true');
+      try { if (await contexto.imprimir([p.id], new Map([[p.id,1]]))) mensaje(`Etiqueta enviada · ${p.codigo}`, 'etiqueta'); }
+      finally { bloquear(boton, ''); boton.setAttribute('aria-busy', 'false'); }
+    }, 'reimprimir-pieza');
+    const icono = document.createElementNS('http://www.w3.org/2000/svg', 'svg'), uso = document.createElementNS('http://www.w3.org/2000/svg', 'use');
+    icono.setAttribute('class', 'icono'); icono.setAttribute('aria-hidden', 'true'); icono.setAttribute('focusable', 'false'); uso.setAttribute('href', '#i-impresora'); icono.append(uso); imprimir.prepend(icono);
+    imprimir.setAttribute('aria-label', `Reimprimir ${p.codigo}`); li.append(imprimir);
+  }
+  return li;
 }
 const filtroCorto = (q) => q.length > 0 && q.length < 3 && !/^\d+$/.test(q);
 async function buscar(mas = false, abrir = false) {
@@ -55,7 +70,7 @@ async function buscar(mas = false, abrir = false) {
     const datos = await api(`/api/piezas?${new URLSearchParams({ q:consulta, ...(mas && siguiente ? { cursor:siguiente } : {}) })}`);
     if (turno !== generacion) return;
     siguiente = datos.siguiente; $('mas').hidden = !siguiente;
-    $('resultados').append(...datos.piezas.map((p) => resultado(p)));
+    $('resultados').append(...datos.piezas.map((p) => resultado(p, undefined, true)));
     const total = $('resultados').children.length; $('resumen').className = 'ayuda';
     $('resumen').textContent = consulta ? `${total}${siguiente ? '+' : ''} ${total === 1 && !siguiente ? 'resultado' : 'resultados'} para «${consulta}»` : 'Todo el inventario · más recientes primero';
     mensaje(filtroCorto($('consulta').value.trim()) ? 'Escribe 3 letras o un código' : total ? 'Resultados listos' : siguiente ? 'Carga más piezas' : 'Sin resultados');
