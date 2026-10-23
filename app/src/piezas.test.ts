@@ -569,7 +569,7 @@ test('pantalla: sin permiso o con la pieza sin analizar no hay controles; banda 
   };
   assert.equal((await abrir(base, { puede_editar:false, puede_precio:false })).$('edicion').hidden, true);
   const pendiente = await abrir({ ...base, estado_analisis:'pendiente' }, { puede_editar:true, puede_precio:true });
-  assert.equal(pendiente.$('editar').hidden, true); assert.match(pendiente.$('nota-edicion').textContent, /se corrige en \/admin/);
+  assert.equal(pendiente.$('editar').hidden, true); assert.match(pendiente.$('nota-edicion').textContent, /corrígela en Inventario › Revisar/);
   const banda = await abrir({ ...base, destino:'banda_g119' }, { puede_editar:true, puede_precio:true });
   banda.$('editar').eventos.click();
   assert.equal(banda.$('campos-precio').hidden, true); assert.match(banda.$('nota-precio').textContent, /se cambia en \/admin/);
