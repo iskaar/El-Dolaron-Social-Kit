@@ -8,12 +8,12 @@ import assert from 'node:assert/strict';
 const p={id:'11111111-1111-4111-8111-111111111111',codigo:'ED-002318',nombre:'Chamarra Levi’s',marca:'Levi’s',talla:'M',categoria:'ropa',precio:45000,precio_lista:60000,stock:3,destino:'etiqueta',estado_fisico:'nuevo',estado_analisis:'listo',upc:'012345678905',tiene_foto:1,foto_key:'foto',creado_en:new Date().toISOString(),actualizado_en:new Date().toISOString()};
 const upcQA=process.env.QA_UPC==='1';
 const destinoUpc={...p,id:'22222222-2222-4222-8222-222222222222',codigo:'ED-002319',stock:4,upc:'12345678901'};
-let consultaSolo=false, listaVacia=false, falloLista=false;const registros=[];
+let consultaSolo=false, capturista=false, editarInventario=false, listaVacia=false, falloLista=false;const registros=[];
 const inventario=[p,...Array.from({length:60},(_,i)=>({...p,id:`pieza-${i}`,codigo:`ED-${String(2319+i).padStart(6,'0')}`,nombre:i%2?'Lámpara de escritorio':'Chamarra de mezclilla',tiene_foto:i%3?1:0,foto_key:i%3?'foto':'',stock:i%5}))];
 const consultas=[];
 const server=createServer(async(req,res)=>{try{
   const u=new URL(req.url,'http://localhost');let datos;
-  if(u.pathname==='/api/yo')datos={correo:'prueba@local.mx',usuario:{correo:'prueba@local.mx',roles:consultaSolo?['capturista']:['dueno'],activo:true,editar_inventario:!consultaSolo},vendedor:false,modos_inventario:['capturar','buscar','revisar','imprimir']};
+  if(u.pathname==='/api/yo')datos={correo:'prueba@local.mx',usuario:{correo:'prueba@local.mx',roles:consultaSolo||capturista?['capturista']:['dueno'],activo:true,editar_inventario:capturista?editarInventario:!consultaSolo},vendedor:false,modos_inventario:['capturar','buscar','revisar','imprimir']};
   else if(u.pathname==='/api/config')datos={};
   else if(u.pathname==='/api/salud')datos={ambiente:'sandbox',ahora:new Date().toISOString()};
   else if(u.pathname==='/api/familias')datos={familias:[{prefijo:'r',nombre:'Ropa'},{prefijo:'g',nombre:'Hogar'}],montos:[19,29,49,79,99,119,129,149,199]};
@@ -36,12 +36,16 @@ const server=createServer(async(req,res)=>{try{
     if(u.pathname.endsWith(p.id)&&c.upc==='12345678901'){res.statusCode=409;datos={error:'Ese UPC ya existe con este grado.',existente:{...destinoUpc,tiene_etiqueta:true}};}
     else{const pieza=u.pathname.endsWith(destinoUpc.id)?destinoUpc:p;pieza.upc=c.upc??pieza.upc;datos={...pieza,...c};}
   }
-  else if(u.pathname==='/api/borradores/upc')datos=upcQA?{...p,existente:true,sumadas:2,stock:5}:{...p,id:'33333333-3333-4333-8333-333333333333',nombre:'Lámpara',stock:1};
+  else if(u.pathname==='/api/borradores/upc'){
+    const chunks=[];for await(const ch of req)chunks.push(ch);const c=JSON.parse(Buffer.concat(chunks));
+    datos=upcQA?{...p,existente:true,sumadas:2,stock:5}:{...p,id:c.id,nombre:c.nombre??'Lámpara',precio:c.precio??24900,categoria:'hogar',stock:c.stock};
+    if(!upcQA)registros.push(datos);
+  }
   else if(u.pathname==='/api/etiquetas'){
     const chunks=[];for await(const ch of req)chunks.push(ch);const {ids}=JSON.parse(Buffer.concat(chunks));
-    datos=[p,{...p,id:'22222222-2222-4222-8222-222222222222',nombre:'Lámpara de escritorio',categoria:'hogar',stock:6}].filter(p=>ids.includes(p.id));
+    datos=[...registros,p,{...p,id:'22222222-2222-4222-8222-222222222222',nombre:'Lámpara de escritorio',categoria:'hogar',stock:6}].filter(p=>ids.includes(p.id));
   }
-  else if(u.pathname.startsWith('/api/manifiesto/')){if(u.pathname.includes('999999999999')){res.statusCode=404;datos={error:'Sin registro'};}else datos={nombre:'Lámpara de escritorio',categoria:'hogar',precio:24900,precios:{nuevo:24900,danado:14900,liquidacion:9900},imagen:null};}
+  else if(u.pathname.startsWith('/api/manifiesto/')){if(u.pathname.includes('999999999999')){res.statusCode=404;datos={error:'Sin registro'};}else datos={nombre:'Lámpara de escritorio',categoria:'hogar',precio:24900,precio_lista:60000,precios:{nuevo:24900,danado:14900,liquidacion:9900},imagen:null};}
   else if(u.pathname.includes('/revision'))datos={...p,categoria:'ropa',prenda:'Chamarra'};
   else if(u.pathname==='/api/camara/solicitud'){const ahora=new Date().toISOString();const chunks=[];for await(const ch of req)chunks.push(ch);if(chunks.length)globalThis.solicitud={...JSON.parse(Buffer.concat(chunks)),estado:'pendiente',vence_en:new Date(Date.now()+120000).toISOString()};datos={ahora,solicitud:globalThis.solicitud};}
   else if(u.pathname.startsWith('/api/foto/')){res.setHeader('content-type','image/svg+xml');res.end('<svg xmlns="http://www.w3.org/2000/svg" width="400" height="400"><rect width="400" height="400" fill="#F2F5FA"/><path d="M140 70l-70 70 45 45 25-25v180h120V160l25 25 45-45-70-70-40 30h-40z" fill="#16366B" stroke="#FFD447" stroke-width="8"/></svg>');return;}
@@ -152,6 +156,52 @@ if(!upcQA)for(const [width,height] of [[360,640],[412,740],[390,844]]){
   await js("document.getElementById('menu').click()");
   await js("[...document.querySelectorAll('#hoja button')].find(b=>b.textContent==='⌨ Escribir').click()");
   assert.equal(await js("document.activeElement.id"),'consulta','Escribir sigue accesible desde la cabecera');
+}
+if(!upcQA){
+  await cdp('Emulation.setDeviceMetricsOverride',{width:412,height:740,deviceScaleFactor:2.625,mobile:true});
+  for(const rol of ['dueno','capturista','capturista-editor']){
+    capturista=rol!=='dueno';editarInventario=rol==='capturista-editor';
+    await cdp('Page.navigate',{url:`http://127.0.0.1:${port}/inventario?tarjeta=${rol}#capturar`});
+    await esperar("!!document.querySelector('.empezar-captura button')");
+    await js("document.querySelector('.empezar-captura button').click();document.querySelector('.tipo-cabecera button').click()");
+    await buscar('0191907910414');
+    const campos="document.querySelectorAll('.pieza-actual input')";
+    assert.deepEqual(await js(`[...${campos}].map(i=>i.value)`),['Lámpara de escritorio','249']);
+    assert.deepEqual(await js(`[...${campos}].map(i=>i.readOnly)`),[rol==='capturista',rol!=='dueno'],'Permisos de nombre/precio: '+rol);
+    await js("document.querySelector('.pieza-actual').scrollIntoView({block:'start'})");
+    await capturar('461-tarjeta-'+rol,412);
+    assert.ok(await js("(()=>{const b=document.querySelector('.disparo'),r=b.getBoundingClientRect();return r.top>=0&&r.bottom<=document.getElementById('modos').getBoundingClientRect().top&&document.elementFromPoint(r.x+r.width/2,r.y+r.height/2)===b})()"),'Disparo visible con tarjeta: '+rol);
+    if(rol==='dueno'){
+      await js(`{const [n,p]=${campos};n.value='Termo corregido';n.dispatchEvent(new Event('input'));p.value='187';p.dispatchEvent(new Event('input'));document.querySelector('.pieza-actual .stepper button:last-child').click()}`);
+      assert.deepEqual(await js(`[...${campos}].map(i=>i.value)`),['Termo corregido','187'],'Repintar conserva ediciones');
+      await js("import('/etiquetera.js').then(m=>m.conectarEtiquetera())");
+      await js("[...document.querySelectorAll('.pieza-actual button')].find(b=>/^Guardar/.test(b.textContent)).click()");
+      await esperar("blePrueba.enviadas===2");
+      const trabajos=await js('blePrueba.trabajos.join("\\n")');assert.match(trabajos,/Termo corregido/);assert.match(trabajos,/"\$187"/);
+      assert.deepEqual([registros.at(-1).nombre,registros.at(-1).precio,registros.at(-1).stock],['Termo corregido',18700,2]);
+      await js("window.relojQA=Date.now;window.avanceQA=0;Date.now=()=>relojQA()+avanceQA;document.querySelector('.alternar-camara').click()");
+      await esperar("!document.querySelector('.visor video').srcObject");
+      await js("document.querySelector('.visor').click()");
+      await esperar("document.querySelector('.alternar-camara').getAttribute('aria-pressed')==='true'");
+      await js("document.getElementById('menu').click()");
+      await js("import('/camara-inventario.js').then(m=>{window.minutoQA=m.INACTIVIDAD_CAMARA_MS;avanceQA+=minutoQA*2})");
+      await dormir(1200);
+      assert.equal(await js("document.querySelector('.alternar-camara').getAttribute('aria-pressed')"),'true','Una hoja suspende el reloj');
+      await js("document.getElementById('cerrar-hoja').click()");await dormir(50);
+      await js("window.pistasReposoQA=document.querySelector('.visor video').srcObject.getTracks();avanceQA+=minutoQA+1");
+      await esperar("document.querySelector('.alternar-camara').getAttribute('aria-pressed')==='false'");
+      assert.equal(await js("pistasReposoQA.every(t=>t.readyState==='ended')"),true,'Reposo usa el mismo apagado de tracks');
+      assert.match(await js("document.querySelector('.camara-apagada').textContent"),/toca para encender/);
+      await capturar('461-camara-en-pausa',412);
+      await js("document.querySelector('.visor').click()");
+      await esperar("document.querySelector('.alternar-camara').getAttribute('aria-pressed')==='true'");
+      await js("document.querySelector('.alternar-camara').click();avanceQA+=minutoQA*2");await dormir(1200);
+      assert.equal(await js("document.querySelector('.visor video').srcObject"),null,'El temporizador respeta el apagado manual');
+      await js('Date.now=relojQA');
+    }
+  }
+  capturista=false;editarInventario=false;
+  await js("sessionStorage.removeItem('inventario-camara')");
 }
 for(const width of [390,1280]){
   consultaSolo=false;listaVacia=false;falloLista=false;

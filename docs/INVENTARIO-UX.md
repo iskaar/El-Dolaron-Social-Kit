@@ -273,7 +273,8 @@ LISTO ──lee código──► BUSCANDO ──► NUEVA (manifiesto) ──Gua
 - Detector UPC/EAN y Code128 sobre el video reducido, una detección a la vez (también al reabrir), con 200 ms de descanso tras cada intento; no detecta con pestaña oculta, cámara apagada, revisión u hoja abierta y descarta resultados tardíos. Cámara y USB usan `lector.recibir` → Capturar: la búsqueda existente prioriza la etiqueta ED numérica sobre UPC, sin filtrar su grado ni consultar el manifiesto; solo si no es etiqueta sigue el flujo UPC.
 - Disparo: 76×76, círculo blanco con borde 6 px `--amarillo` y sombra dura `4px 4px 0 --azul`; presionado hunde. `aria-label="Tomar foto"`. Vive siempre en el centro de la barra fija; no se oculta al leer UPC.
 - Barra de captura: en MG, grado a la izquierda (3 × 44×56), disparo al centro, stepper a la derecha (44+44+44, botones de 44×56). En Ropa solo quedan disparo centrado y cantidad a la derecha; el grado está oculto. Padding lateral 6 px, huecos 4 px: cabe en 360 px sin envolver. Se fija a `66px + env(safe-area-inset-bottom)` del borde inferior. Con un único modo, la navegación se oculta y la barra baja al borde, conservando el área segura. El contenido tiene padding inferior para que su final pueda desplazarse por encima de la barra.
-- Interruptor dentro del visor, esquina superior izquierda: icono blanco + «Cámara»/«Apagada», fondo oscuro translúcido, `aria-pressed`, objetivo ≥44 px. Reutiliza `crearCamara.abrir/pausar`, incluidos parada de tracks y descarte de detecciones tardías. `inventario-camara` en `sessionStorage` recuerda la elección al cambiar de modo o recargar. Apagada: visor oscuro y texto «Cámara apagada»; el disparo abre la selección de foto existente, nunca usa un fotograma detenido. «Pieza sin foto» conserva su permiso de dueño en el menú del visor.
+- Interruptor dentro del visor, esquina superior izquierda: icono blanco + «Cámara»/«Apagada», fondo oscuro translúcido, `aria-pressed`, objetivo ≥44 px. Reutiliza `crearCamara.abrir/pausar`, incluidos parada de tracks y descarte de detecciones tardías. `inventario-camara` en `sessionStorage` recuerda la elección al cambiar de modo o recargar. Apagada: visor oscuro y texto «Cámara en pausa · toca para encender»; tocar el visor o el interruptor la enciende. El disparo abre la selección de foto existente, nunca usa un fotograma detenido. «Pieza sin foto» conserva su permiso de dueño en el menú del visor.
+- Reposo de cámara (#461, PR A): en Mercancía y Ropa, tras **60 s** sin lecturas (cámara/lector), fotos ni interacción de captura, se apaga por la misma función del interruptor y se actualiza su estado. `INACTIVIDAD_CAMARA_MS` es la única constante del plazo. Una hoja abierta o página oculta suspende el contador; el tiempo restante continúa al volver si la cámara sigue activa. Cambiar de modo, ocultar la página o perder foco conserva la liberación de pistas existente y exige reanudar. El temporizador nunca enciende una cámara apagada manualmente.
 - Carrusel 24 h: ver «Correcciones».
 - `⋯ → ⌨ Escribir` en la cabecera abre la caja con teclado numérico (`inputmode=numeric`). Se eligió el menú existente para conservar espacio en 360 px y mantener a la vista Impresora y Red, sin añadir otra fila o icono.
 
@@ -285,13 +286,15 @@ LISTO ──lee código──► BUSCANDO ──► NUEVA (manifiesto) ──Gua
 |▓▓▓▓▓▓▓▓▓▓ (visor, 40 % más bajo) ▓▓▓▓|
 +--------------------------------------+
 | 012345678905                         |
-| Lámpara de escritorio                |
-| $249 · Hogar · A Nuevo               |
+| Nombre / descripción [Lámpara…]      |
+| Precio ($) [249] · A Nuevo           |
 | [ - ] 2 [ + ]       [[ Guardar ]]    |
 +--------------------------------------+
 ```
 
 - Mismo código otra vez = `+1` (el número y el stepper saltan; sonido «más»). Otro código distinto guarda la anterior y abre la nueva. La pieza permanece abierta hasta tocar `Guardar` o leer otro código; no hay guardado por tiempo.
+- En celular y PC, nombre/descripción y precio se precargan del manifiesto y se pueden corregir **antes de Guardar e imprimir** (#461). Dueño: ambos editables. Cuenta con «Editar inventario»: nombre editable y precio de solo lectura. Sin casilla: ambos de solo lectura. El cambio de grado actualiza el precio sugerido mientras el dueño no lo haya sustituido; cantidad y grado conservan las ediciones. Se valida nombre no vacío y precio en pesos; el servidor normaliza nombre y autoriza centavos enteros. Si se rechaza, la tarjeta conserva los campos y UUID.
+- Se imprime al guardar y al reescanear una pieza registrada, con los valores confirmados por D1. El precio de la etiqueta incluye la corrección del dueño. Una coincidencia concurrente de UPC/grado conserva la ficha registrada y suma existencias como #452. La solicitud de cambio de precio #451 sigue disponible después de guardar, en las vistas existentes.
 - `−` hasta 0 cancela; en 0 el botón principal cambia a peligro «Cancelar pieza».
 - Principal `Guardar` (56). Tras guardar, la línea dice «Guardada · etiqueta en camino» y la tarjeta se contrae a una fila «Lámpara ×2 · ED-002331 ✓» al carrusel.
 
@@ -728,6 +731,8 @@ Chip `Celular · No responde` (rojo). La solicitud caduca a los 2:00 sin crear p
 ## 9. Lista de QA (capturas headless)
 
 Herramienta: `node tools/qa_inventario.mjs`, Chrome headless vía CDP, servidor local con fixtures `/api/*` y cámara simulada; sin dependencias. Captura Mercancía y Ropa en **360×640, 412×740 y 390×844** a DPR 2.625, además de los estados en 390×844 y PC 1280×800. Guarda PNG y `medidas.json` en el directorio temporal `inventario-qa-capturas` (o `QA_SALIDA`). En cada tamaño afirma que el rectángulo completo del disparo está dentro del viewport **sin desplazar**, que su borde inferior queda por encima de la navegación y que no hay otro elemento tapándolo; vuelve a comprobar tras desplazar. Comprueba también padding final, estados de talla/precio, apagado de tracks, captura por archivo y preferencia de sesión. Criterio general en **todas**: sin scroll horizontal (`document.documentElement.scrollWidth <= innerWidth`), ningún texto cortado en 320 px, sin superposición con la barra inferior, `console` sin errores.
+
+Para #461 añade tarjetas a **412×740** de dueño, capturista y capturista con casilla: afirma permisos de ambos campos, conserva las ediciones al cambiar cantidad y comprueba nombre/precio en el trabajo de impresión. El disparo permanece visible con la tarjeta. Simula el reloj para comprobar reposo, suspensión con hoja abierta, pistas detenidas, toque del visor para reanudar y respeto del apagado manual; guarda también el visor en pausa. Las pruebas unitarias comprueban el tiempo restante durante las pausas, incluida la página oculta.
 
 **Estados a capturar (390×844 y 1280×800 salvo indicación)**
 
