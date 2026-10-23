@@ -130,6 +130,8 @@ export function permiso(pathname: string, metodo: string): Regla {
   if (ruta === '/api/etiquetas') return CAPTURA_FEP;
   if (metodo === 'GET' && (ruta === '/api/piezas' || /^\/api\/piezas\/[^/]+$/.test(ruta))) return CAPTURA_FEP;
   if (metodo === 'POST' && /^\/api\/piezas\/[^/]+\/existencia$/.test(ruta)) return CAPTURA_FEP;
+  // Pedir un cambio de precio (#451): capturista o dueño. Listar y resolver (/api/solicitudes-precio) son del dueño, por omisión.
+  if (metodo === 'POST' && /^\/api\/piezas\/[^/]+\/solicitud-precio$/.test(ruta)) return CAPTURA;
   if (ruta === '/api/calibracion') return CAPTURA;
   if (ruta === '/api/marketplace' || /^\/api\/marketplace\/foto\/[^/]+$/.test(ruta)) return CAPTURA;
   if (ruta === '/api/catalogo') return CAJA;

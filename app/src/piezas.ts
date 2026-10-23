@@ -2,6 +2,7 @@
 import { propietarioDe, puedeEditarInventario, type Usuario } from './cuentas.ts';
 import { MOTIVOS } from './conteo.ts';
 import { conciliarSeguro } from './mercadolibre.ts';
+import { pendienteDe } from './solicitudes-precio.ts';
 
 const PAGINA = 25;
 const TRAMO = 200;
@@ -111,7 +112,8 @@ async function fichaPieza(env: Env, id: string, usuario: Usuario | null): Promis
   // shortcut: índice por fecha existente; añadir (producto_id, ajustado_en) si el historial supera 10 mil filas.
   const { results: historial } = await env.DB.prepare(`select id, motivo, cantidad, antes, despues, ajustado_por, ajustado_en
     from conteo_ajustes where producto_id = ? order by ajustado_en desc, rowid desc limit 10`).bind(id).all();
-  return json({ pieza, historial, puede_editar: puedeEditarInventario(usuario), puede_precio: !!usuario?.activo && usuario.roles.includes('dueno') });
+  return json({ pieza, historial, puede_editar: puedeEditarInventario(usuario), puede_precio: !!usuario?.activo && usuario.roles.includes('dueno'),
+    solicitud_precio: await pendienteDe(env, id) });
 }
 
 interface Ajuste {

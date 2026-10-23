@@ -47,6 +47,7 @@ import { registrarSocio, buscarSocio, buscarPorCodigo, basesListas, sentenciasDe
 import { registrarCorte, registrarRetiro, ultimoCorte, cajaDe } from './corte.ts';
 import { rutaGastos } from './gastos.ts';
 import { rutaPiezas } from './piezas.ts';
+import { rutaSolicitudesPrecio } from './solicitudes-precio.ts';
 import { rutaCamaraRemota } from './camara-remota.ts';
 import { rutaNomina } from './nomina.ts';
 import { lineasNetas } from './netas.ts';
@@ -95,7 +96,7 @@ const RUTAS_VENDEDOR = new Set(['/captura', '/foto.js', '/tallas.js', '/api/salu
   // Escanear del manifiesto (Issue #365): el telefono ve nombre y precio de lo que escanea, nada mas.
   '/escanear', '/categorias.js', '/upc.js', '/cola-fotos.js', '/estados.js',
   '/inventario-celular.js', '/foto-pendiente.js', '/camara-inventario.js',
-  '/inventario-revisar.js', '/sesiones.js', '/precios-ml.js', '/compartir.js',
+  '/inventario-revisar.js', '/inventario-precio.js', '/sesiones.js', '/precios-ml.js', '/compartir.js',
   '/inventario-capturar.js', '/inventario-ropa.js', '/envio-etiquetas.js', '/semana.js',
   '/inventario', '/inventario.css', '/inventario.js', '/inventario-ui.js', '/lector.js', '/ficha.js',
   '/venta.js', '/etiquetera.js', '/impresora.js', '/camara.js', '/vendor/html5-qrcode.min.js', '/ropa.js']);
@@ -104,7 +105,10 @@ const CORRECCION_CAPTURA = /^\/api\/borradores\/([^/]+)\/(existencia|talla|revis
 export function permitidaParaVendedor(pathname: string, metodo: string): boolean {
   if (/^\/(inventario|pieza)(?:\.html)?\/?$/.test(pathname)) return metodo === 'GET';
   if (pathname === '/api/piezas' || /^\/api\/piezas\/[^/]+$/.test(pathname) || /^\/api\/foto\/[^/]+$/.test(pathname)) return metodo === 'GET';
-  if (/^\/api\/piezas\/[^/]+\/existencia$/.test(pathname)) return metodo === 'POST';
+  if (/^\/api\/piezas\/[^/]+\/(existencia|solicitud-precio)$/.test(pathname)) return metodo === 'POST';
+  // Precios por revisar (#451): el servidor exige el rol de dueño para listar y resolver.
+  if (pathname === '/api/solicitudes-precio') return metodo === 'GET';
+  if (/^\/api\/solicitudes-precio\/[^/]+$/.test(pathname)) return metodo === 'POST';
   if (pathname === '/api/borradores' && metodo === 'GET') return true;
   if (pathname === '/api/familias' || pathname === '/api/recortes') return metodo === 'GET';
   if (/^\/api\/recortes\/[^/]+\/imagen$/.test(pathname)) return metodo === 'GET';
@@ -359,7 +363,7 @@ async function destinoValido(destino: string, env: Env): Promise<boolean> {
  * Con etiqueta (codigo) la pieza ya esta a la venta con ese precio impreso: solo
  * el dueno lo cambia (Issue #75). Antes de etiquetar, poner precio es parte de la captura.
  */
-async function corregirBorrador(id: string, cambios: Record<string, unknown>, env: Env, esDueno: boolean, captura?: { correo: string; upc: string }): Promise<Response> {
+async function corregirBorrador(id: string, cambios: Record<string, unknown>, env: Env, esDueno: boolean, captura?: { correo: string; upc: string }, precioEsperado?: number): Promise<Response> {
   if (!UUID.test(id)) {
     return json({ error: 'Identificador invalido.' }, 400);
   }
@@ -442,14 +446,17 @@ async function corregirBorrador(id: string, cambios: Record<string, unknown>, en
        ${captura ? `and capturado_por = ? and upc = ? and propietario = 'dolaron'
          and estado_analisis in ('pendiente', 'error') and (codigo is null or codigo = '')
          and not exists (select 1 from venta_lineas where producto_id = productos.id)` : ''}
+       ${precioEsperado === undefined ? '' : 'and precio = ?'}
      returning stock`,
   )
     .bind(nombre, categoria, marca, talla, precioLista, precio, estadoFisico, destino,
       // Sin `stock` en el cuerpo no se toca: la caja pudo vender piezas desde que se abrio la ficha.
-      cambios.stock === undefined ? null : stock, new Date().toISOString(), id, ...(captura ? [captura.correo, captura.upc] : []))
+      cambios.stock === undefined ? null : stock, new Date().toISOString(), id, ...(captura ? [captura.correo, captura.upc] : []),
+      ...(precioEsperado === undefined ? [] : [precioEsperado]))
     .first<{ stock: number }>();
 
-  if (!guardada) return json({ error: 'La pieza ya fue eliminada.' }, 409);
+  // `precioEsperado` (#451): el precio solo cambia si sigue valiendo lo que vio quien lo cambia.
+  if (!guardada) return json({ error: precioEsperado === undefined ? 'La pieza ya fue eliminada.' : 'El precio de la pieza cambió. Revisa el precio actual.' }, 409);
   return json({ id, nombre, categoria, marca, talla, precio_lista: precioLista, precio, estado_fisico: estadoFisico, destino, stock: guardada.stock });
 }
 
@@ -2140,6 +2147,10 @@ export default {
       }
       if (pathname === '/api/camara/solicitud' || pathname.startsWith('/api/camara/solicitud/')) {
         return await rutaCamaraRemota(request, env, pathname, usuario!);
+      }
+      if (pathname === '/api/solicitudes-precio' || pathname.startsWith('/api/solicitudes-precio/') || /^\/api\/piezas\/[^/]+\/solicitud-precio$/.test(pathname)) {
+        // Aplicar un precio pasa por corregirBorrador: las mismas reglas que la corrección de la ficha.
+        return await rutaSolicitudesPrecio(request, env, url, usuario!, (id, precio, esperado) => corregirBorrador(id, { precio }, env, true, undefined, esperado));
       }
       if (pathname === '/api/piezas' || pathname.startsWith('/api/piezas/')) {
         const respuesta = await rutaPiezas(request, env, url, await leerUsuario(env, correo), ctx);
