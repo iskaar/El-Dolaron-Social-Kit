@@ -211,8 +211,10 @@ export async function iniciar(ctx) {
   async function accion(p,accion,confirmada=false){
     if(!puedeEditar)return;
     if(accion==='descartar'&&!confirmada&&!await confirmar('¿Descartar esta pieza? No se deshace.'))return;
-    await api(`/api/borradores/${p.id}${accion==='analizar'?'/analizar':''}`,{},accion==='analizar'?'POST':'DELETE');
-    if(accion==='analizar'){p.estado_analisis='pendiente';clearTimeout(temporizador);temporizador=setTimeout(cargar,6000);}else{piezas=piezas.filter(o=>o.id!==p.id);seleccion.delete(p.id);if(abierta?.id===p.id){ficha.cerrar();derecha.replaceChildren($('ficha'),placeholder);abierta=null;document.body.classList.remove('con-ficha');}}
+    const r=await api(`/api/borradores/${p.id}${accion==='analizar'?'/analizar':''}`,{},accion==='analizar'?'POST':'DELETE');
+    // #479: una pieza revisada no se reabre ni se sobrescribe: el análisis solo sugiere y pide aprobación al dueño.
+    if(accion==='analizar'&&r?.sugerencia){mensaje(r.mensaje,'ok');clearTimeout(temporizador);temporizador=setTimeout(cargar,6000);}
+    else if(accion==='analizar'){p.estado_analisis='pendiente';clearTimeout(temporizador);temporizador=setTimeout(cargar,6000);}else{piezas=piezas.filter(o=>o.id!==p.id);seleccion.delete(p.id);if(abierta?.id===p.id){ficha.cerrar();derecha.replaceChildren($('ficha'),placeholder);abierta=null;document.body.classList.remove('con-ficha');}}
     pintar();
   }
   async function fusionar(p,destino){

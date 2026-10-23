@@ -43,12 +43,21 @@ async function pedir(request: Request, env: Env, productoId: string, usuario: Us
   const nota = String(cuerpo.nota ?? '').replace(/\s+/g, ' ').trim();
   if (nota.length > 140) return json({ error: 'La nota admite hasta 140 caracteres.' }, 400);
 
+  return crearSolicitud(env, productoId, propietarioDe(usuario), usuario.correo, { id, sentido, sugerido, nota });
+}
+
+/**
+ * Crea la solicitud pendiente de una pieza. La usan `pedir` (una persona) y el análisis (#479, `pedidoPor` = quien
+ * pidió reanalizar o 'ia'). Devuelve la misma Response que `pedir`: 201 creada, 409 si ya hay una pendiente.
+ */
+export async function crearSolicitud(env: Env, productoId: string, propietario: string, pedidoPor: string,
+  { id, sentido, sugerido, nota }: { id: string; sentido: 'subir' | 'bajar'; sugerido: number | null; nota: string }): Promise<Response> {
   // Reintento con el mismo folio: la misma solicitud, solo si es de esta pieza y de esta persona.
   const previa = await porId(env, id);
-  if (previa) return previa.producto_id === productoId && previa.pedido_por === usuario.correo ? json({ solicitud: previa })
+  if (previa) return previa.producto_id === productoId && previa.pedido_por === pedidoPor ? json({ solicitud: previa })
     : json({ error: 'El folio ya pertenece a otra solicitud.' }, 409);
 
-  const pieza = await env.DB.prepare(PIEZA).bind(productoId, propietarioDe(usuario)).first<PiezaPrecio>();
+  const pieza = await env.DB.prepare(PIEZA).bind(productoId, propietario).first<PiezaPrecio>();
   if (!pieza) return json({ error: 'Pieza no encontrada.' }, 404);
   if (pieza.destino !== 'etiqueta') return json({ error: 'Una pieza de banda tiene el precio de su banda: no se pide cambio aquí.' }, 400);
   if (pieza.estado_analisis !== 'listo' || pieza.precio <= 0) return json({ error: 'La pieza aún no tiene precio para revisar.' }, 400);
@@ -67,7 +76,7 @@ async function pedir(request: Request, env: Env, productoId: string, usuario: Us
       (id, producto_id, propietario, sentido, precio_actual, precio_sugerido, nota, pedido_por, pedido_en)
       select ?, id, propietario, ?, precio, ?, ?, ?, ? from productos where id = ? and propietario = ? and precio = ?
         and destino = 'etiqueta' and sin_inventario = 0 and estado_analisis = 'listo'`)
-      .bind(id, sentido, sugerido, nota, usuario.correo, new Date().toISOString(), productoId, propietarioDe(usuario), pieza.precio).run()).meta.changes;
+      .bind(id, sentido, sugerido, nota, pedidoPor, new Date().toISOString(), productoId, propietario, pieza.precio).run()).meta.changes;
   } catch (error) {
     // Otra persona pidió en el mismo instante: el índice único dejó pasar solo una.
     if (await pendienteDe(env, productoId)) return existente();

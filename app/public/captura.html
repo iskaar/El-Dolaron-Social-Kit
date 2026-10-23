@@ -758,6 +758,9 @@ elGuardarRevision.addEventListener('click', async () => {
       datos.marca = guardada.marca || '';
       datos.estado_fisico = guardada.estado_fisico;
       repintarMiniatura(id);
+      // #479: con etiqueta el precio no lo cambia el capturista; se pidió al dueño y la ficha sigue con el precio actual.
+      if (guardada.solicitud_precio || guardada.aviso) { fichaRevision.precio = guardada.precio; pintarEstadoRevision(); }
+      if (idActual === id && guardada.aviso) { elRevisarNota.textContent = `${guardada.aviso}. Lo demás se guardó; el precio sigue en $${guardada.precio / 100}.`; return; }
     }
     if (idActual === id) elRevisarNota.textContent = 'Cambios guardados. Si ya salió una etiqueta con otro precio, reemplázala por la nueva.';
   } catch (error) {
