@@ -46,3 +46,21 @@ test('la pantalla única contiene todos los nodos que consumen ficha.js e invent
   const ids=new Set([...html.matchAll(/id="([^"]+)"/g)].map(m=>m[1]));
   for(const f of ['ficha.js','inventario.js'])for(const m of readFileSync('public/'+f,'utf8').matchAll(/\$\('([^']+)'\)/g))assert.ok(ids.has(m[1]),f+' necesita '+m[1]);
 });
+
+// #459: el host del capturista devuelve 404 a todo lo que no esté en RUTAS_VENDEDOR; un import nuevo sin ruta rompía la pantalla entera.
+test('el host del capturista sirve todo el grafo de módulos, hojas y scripts de /inventario y /escanear',async()=>{
+  const {readFileSync,existsSync}=await import('node:fs');
+  const vistos=new Set<string>(),pend=['/inventario.html','/escanear.html'];
+  for(let p;(p=pend.pop());){
+    if(vistos.has(p))continue;vistos.add(p);
+    // ponytail: cualquier literal './x.js' o '/x.js' (import estático, import(), src, href, constantes); los de vendor/ también.
+    for(const m of readFileSync('public'+p,'utf8').matchAll(/['"`](\.{0,2}\/?[\w./-]+\.(?:js|css))['"`]/g)){
+      const ruta='/'+m[1].replace(/^\.?\/+/,'');
+      // La lista general de impresión no se abre en este host (el vendedor no tiene modo «imprimir»): no se recorre.
+      if(ruta!=='/inventario-imprimir.js'&&existsSync('public'+ruta))pend.push(ruta);
+    }
+  }
+  assert.ok(vistos.size>20,'el recorrido debe encontrar el grafo ('+vistos.size+')');
+  const bloqueadas=[...vistos].filter(r=>!permitidaParaVendedor(r.replace(/\.html$/,''),'GET'));
+  assert.deepEqual(bloqueadas,[],'rutas sin permitir en el host del capturista');
+});
