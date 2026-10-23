@@ -85,6 +85,62 @@ async function rodar(nombre,texto){
 async function modo(m){await js(`document.getElementById('tab-${m}').click()`);await dormir(350);}
 async function buscar(q){await js(`document.getElementById('consulta').value=${JSON.stringify(q)};document.getElementById('busqueda').requestSubmit()`);await dormir(250);}
 try{
+if(!upcQA)for(const [width,height] of [[360,640],[412,740],[390,844]]){
+  await cdp('Emulation.setDeviceMetricsOverride',{width,height,deviceScaleFactor:2.625,mobile:true});
+  await cdp('Emulation.setTouchEmulationEnabled',{enabled:true});
+  await cdp('Page.navigate',{url:`http://127.0.0.1:${port}/inventario#capturar`});
+  await esperar("!!document.querySelector('.empezar-captura button')");
+  await js("localStorage.clear();sessionStorage.clear()");await cdp('Page.reload');
+  await esperar("!!document.querySelector('.empezar-captura button')");
+  await js("document.querySelector('.empezar-captura button').click()");
+  await esperar("document.querySelector('.alternar-camara').getAttribute('aria-pressed')==='true'");
+  for(const tipo of ['Mercancía','Ropa']){
+    await js(`[...document.querySelectorAll('.tipo-cabecera button')].find(b=>b.textContent==='${tipo}').click()`);
+    assert.equal(await js('scrollY'),0,'La captura se mide sin desplazar la página');
+    const medir=()=>js(`(()=>{const b=document.querySelector('.disparo'),r=b.getBoundingClientRect(),n=document.getElementById('modos').getBoundingClientRect();return {tipo:'${tipo}',width:innerWidth,height:innerHeight,y:r.y,bottom:r.bottom,left:r.left,right:r.right,navY:n.top,visible:!!r.width&&!!r.height,cubierto:document.elementFromPoint(r.x+r.width/2,r.y+r.height/2)!==b}})()`);
+    const comprobar=g=>{assert.ok(g.visible&&g.y>=0&&g.bottom<=height&&g.left>=0&&g.right<=width,`Disparo dentro del viewport: ${JSON.stringify(g)}`);assert.ok(g.bottom<=g.navY&&!g.cubierto,`Disparo libre de navegación: ${JSON.stringify(g)}`);};
+    const geo=await medir();comprobar(geo);medidas.push({nombre:'geometria-captura',pequenos:[],...geo});console.log('Disparo',JSON.stringify(geo));
+    await capturar(`458-${tipo.toLowerCase()}-${height}`,width);
+    if(tipo==='Ropa'){
+      assert.equal(await js("document.querySelector('.disparo').textContent"),'Elige talla');
+      assert.equal(await js("document.querySelector('.disparo').getAttribute('aria-disabled')"),'true');
+      assert.equal(await js("document.getElementById(document.querySelector('.disparo').getAttribute('aria-describedby')).getAttribute('role')"),'status');
+      assert.doesNotMatch(await js("document.getElementById('estado').textContent"),/Falta talla/,'Sin banner de talla');
+      await rodar('Precio','$120');
+      assert.equal(await js("document.querySelector('.disparo').textContent"),'Elige talla','Elegir precio no omite la talla');
+      await js("document.querySelector('.tallas-ropa [data-valor=M]').click()");
+      assert.equal(await js("document.querySelector('.disparo').textContent"),'');
+      assert.equal(await js("document.querySelector('.disparo').getAttribute('aria-disabled')"),'false');
+      await capturar(`458-ropa-lista-${height}`,width);
+    }
+    await js("window.scrollTo(0,document.documentElement.scrollHeight)");comprobar(await medir());
+    assert.ok(await js("document.querySelector('.captura-movil').getBoundingClientRect().bottom<=document.querySelector('.barra-captura').getBoundingClientRect().top"),'El contenido final queda por encima de la barra al desplazar');
+    await js('window.scrollTo(0,0)');
+  }
+  await js("window.pistasQA=document.querySelector('.visor video').srcObject.getTracks();document.querySelector('.alternar-camara').click()");
+  assert.equal(await js("pistasQA.every(t=>t.readyState==='ended')"),true,'Apagar detiene todos los tracks');
+  assert.equal(await js("document.querySelector('.alternar-camara').getAttribute('aria-pressed')"),'false');
+  assert.equal(await js("document.querySelector('.visor video').srcObject"),null);
+  assert.equal(await js("document.querySelector('.disparo').getAttribute('aria-disabled')"),'false','Sin cámara permite subir foto');
+  await cdp('Page.setInterceptFileChooserDialog',{enabled:true});
+  await js("window.archivoQA=0;document.querySelector('input[type=file]').addEventListener('click',()=>archivoQA++);document.querySelector('.disparo').click()");
+  assert.equal(await js('archivoQA'),1,'Sin stream usa el archivo, aunque videoWidth conserve el último fotograma');
+  await cdp('Page.setInterceptFileChooserDialog',{enabled:false});
+  await modo('buscar');await modo('capturar');
+  assert.equal(await js("document.querySelector('.visor video').srcObject"),null,'Cambiar de modo conserva apagada');
+  await cdp('Page.reload');await esperar("!!document.querySelector('.empezar-captura button')");
+  await js("document.querySelector('.empezar-captura button').click()");
+  assert.equal(await js("document.querySelector('.visor video').srcObject"),null,'Recargar respeta la elección de sesión');
+  await capturar(`458-camara-apagada-${height}`,width);
+  await js("document.querySelector('.alternar-camara').click()");
+  await esperar("document.querySelector('.alternar-camara').getAttribute('aria-pressed')==='true'");
+  await modo('buscar');await modo('capturar');
+  await js("document.querySelector('.alternar-camara').click()");
+  await esperar("document.querySelector('.alternar-camara').getAttribute('aria-pressed')==='true'");
+  await js("document.getElementById('menu').click()");
+  await js("[...document.querySelectorAll('#hoja button')].find(b=>b.textContent==='⌨ Escribir').click()");
+  assert.equal(await js("document.activeElement.id"),'consulta','Escribir sigue accesible desde la cabecera');
+}
 for(const width of [390,1280]){
   consultaSolo=false;listaVacia=false;falloLista=false;
   await cdp('Emulation.setDeviceMetricsOverride',{width,height:width===390?844:800,deviceScaleFactor:2,mobile:width===390});
@@ -127,7 +183,7 @@ for(const width of [390,1280]){
   }
   await capturar('01-listo',width);
   if(width===390){
-    await js("[...document.querySelectorAll('#modo-capturar button')].find(b=>b.textContent==='Ropa').click()");
+    await js("[...document.querySelectorAll('[aria-label=\"Tipo de pieza\"] button')].find(b=>b.textContent==='Ropa').click()");
     await capturar('06-ropa-sin-talla',width);
     await js("document.querySelector('.tablero-ropa [data-valor=Niño]').click()");await esperar("!!document.querySelector('#hoja .rodillo .elegida')");
     assert.equal(await js("document.querySelector('#hoja .rodillo .elegida').textContent"),'4 años','Niño abre el rodillo de edades, no una rejilla');
