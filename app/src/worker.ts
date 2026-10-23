@@ -945,12 +945,19 @@ async function corregirCaptura(id: string, campo: string, request: Request, env:
   // Lo que aún no está `listo` (identificándose o esperando foto) conserva la escritura directa.
   // En 0 se cancela y sale de la cola (#377). Una foto se elimina desde su miniatura.
   if (valor === 0) {
-    const { meta } = await env.DB.prepare(`update productos set stock = 0, estado_analisis = 'descartado', actualizado_en = ?
-      where id = ? and capturado_por = ? and upc is not null and creado_en > ? and estado_analisis ${sinFoto ? "<> 'descartado'" : "not in ('listo', 'descartado')"}
+    const ahora = new Date().toISOString();
+    const cancelable = `id = ? and capturado_por = ? and upc is not null and creado_en > ? and estado_analisis ${sinFoto ? "<> 'descartado'" : "not in ('listo', 'descartado')"}
         ${sinFoto ? `and ${alcanceSinFoto}` : ''}
         and not ${CAPTURA_SUMADA}
-        and not exists (select 1 from venta_lineas where producto_id = productos.id)`)
-      .bind(new Date().toISOString(), id, correo, desde).run();
+        and not exists (select 1 from venta_lineas where producto_id = productos.id)`;
+    // Rastro (#480): mismo filtro en ambas sentencias del lote, así que solo hay renglón si la cancelación ocurre.
+    const [, { meta }] = await env.DB.batch([
+      env.DB.prepare(`insert into conteo_ajustes (id, producto_id, codigo, nombre, motivo, cantidad, antes, despues, ajustado_por, ajustado_en)
+        select ?, id, coalesce(codigo, ''), nombre, 'descarte', stock, stock, 0, ?, ? from productos where ${cancelable} and stock > 0`)
+        .bind(crypto.randomUUID(), correo, ahora, id, correo, desde),
+      env.DB.prepare(`update productos set stock = 0, estado_analisis = 'descartado', actualizado_en = ? where ${cancelable}`)
+        .bind(ahora, id, correo, desde),
+    ]);
     if (!meta.changes) return await conflictoCapturaSumada(env, id, correo)
       ?? json({ error: sinFoto ? 'Ya no se puede cancelar: pasaron 5 minutos o la pieza tiene venta, foto o publicación.' : 'Ya tiene etiqueta: corrígela en el admin.' }, 404);
     return json({ id, stock: 0, descartado: true });
@@ -1009,13 +1016,20 @@ async function revisarCaptura(id: string, request: Request, env: Env, correo: st
   if (!fila) return json({ error: 'Solo puedes corregir lo que capturaste en las últimas 24 horas.' }, 404);
   if (request.method === 'GET') return json({ ...fila, prenda: prendaDeNombre(fila.nombre, fila.marca) });
   if (request.method === 'DELETE') {
-    const resultado = await env.DB.prepare(`update productos set stock = 0, precio = 0,
-        foto_key = case when coalesce(codigo, '') = '' then '' else foto_key end,
-        estado_analisis = 'descartado', actualizado_en = ? where ${alcance}
+    const retirable = `${alcance}
         and not ${CAPTURA_SUMADA}
         and not exists (select 1 from venta_lineas where producto_id = productos.id)
-        and not exists (select 1 from ml_publicaciones where producto_id = productos.id)`)
-      .bind(ahora, id, correo, desde).run();
+        and not exists (select 1 from ml_publicaciones where producto_id = productos.id)`;
+    // Rastro (#480): mismo filtro en ambas sentencias del lote, así que solo hay renglón si la baja ocurre.
+    const [, resultado] = await env.DB.batch([
+      env.DB.prepare(`insert into conteo_ajustes (id, producto_id, codigo, nombre, motivo, cantidad, antes, despues, ajustado_por, ajustado_en)
+        select ?, id, coalesce(codigo, ''), nombre, 'descarte', stock, stock, 0, ?, ? from productos where ${retirable} and stock > 0`)
+        .bind(crypto.randomUUID(), correo, ahora, id, correo, desde),
+      env.DB.prepare(`update productos set stock = 0, precio = 0,
+        foto_key = case when coalesce(codigo, '') = '' then '' else foto_key end,
+        estado_analisis = 'descartado', actualizado_en = ? where ${retirable}`)
+        .bind(ahora, id, correo, desde),
+    ]);
     if (!resultado.meta.changes) return await conflictoCapturaSumada(env, id, correo)
       ?? json({ error: 'Tiene una venta o publicación. Revisa la pieza en el admin; no se eliminó.' }, 409);
     const conservada = await env.DB.prepare('select codigo from productos where id = ?').bind(id).first<{ codigo: string | null }>();
@@ -1227,7 +1241,7 @@ const BORRADOR_RETIRABLE = `sin_inventario = 0
       or (estado = 'publicando' and actualizado_en >= strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-2 minutes'))))`;
 
 /** Suma la repetida una sola vez y mantiene su etiqueta vendible en la original. */
-async function fusionarBorrador(id: string, request: Request, env: Env, propietario: string): Promise<Response> {
+async function fusionarBorrador(id: string, request: Request, env: Env, propietario: string, correo: string): Promise<Response> {
   const { destino_id } = (await request.json()) as { destino_id?: unknown };
   const destinoId = String(destino_id ?? '');
   if (!UUID.test(id) || !UUID.test(destinoId) || id === destinoId) {
@@ -1261,15 +1275,23 @@ async function fusionarBorrador(id: string, request: Request, env: Env, propieta
           and (?4 = '' or coalesce(codigo, '') = '')
           and stock + (select stock from productos where id = ?1) <= 999)
         then stock else -1 end where id in (?1, ?2)`).bind(id, destinoId, propietario, codigo),
+      // Rastro (#480): la fila origen se borra; sus dos renglones conservan código y nombre. La guarda de arriba aborta si falla.
+      env.DB.prepare(`insert into conteo_ajustes (id, producto_id, codigo, nombre, motivo, cantidad, antes, despues, ajustado_por, ajustado_en)
+        select ?, id, coalesce(codigo, ''), nombre, 'fusion', stock, stock, 0, ?, ? from productos where id = ? and stock > 0`)
+        .bind(crypto.randomUUID(), correo, ahora, id),
       env.DB.prepare(`update productos set stock = stock + (select stock from productos where id = ?),
         actualizado_en = ? where id = ?`).bind(id, ahora, destinoId),
+      env.DB.prepare(`insert into conteo_ajustes (id, producto_id, codigo, nombre, motivo, cantidad, antes, despues, ajustado_por, ajustado_en)
+        select ?, d.id, coalesce(nullif(d.codigo, ''), o.codigo, ''), d.nombre, 'fusion', o.stock, d.stock - o.stock, d.stock, ?, ?
+        from productos d, productos o where d.id = ? and o.id = ? and o.stock > 0 and changes() = 1`)
+        .bind(crypto.randomUUID(), correo, ahora, destinoId, id),
       // Liberar primero el código único: la etiqueta pegada debe resolver a la original vendible.
       env.DB.prepare('update productos set codigo = null where id = ? and codigo = ?').bind(id, codigo),
       env.DB.prepare(`update productos set codigo = ? where id = ?
         and (codigo is null or codigo = '') and ? <> ''`).bind(codigo, destinoId, codigo),
       env.DB.prepare("delete from productos where id = ? and (codigo is null or codigo = '')").bind(id),
     ]);
-    borrado = resultados[4];
+    borrado = resultados[6];
   } catch (error) {
     if (!String(error).includes('stock insuficiente')) throw error;
     const { results } = await env.DB.prepare('select id, codigo from productos where id in (?, ?) and propietario = ?')
@@ -1284,7 +1306,7 @@ async function fusionarBorrador(id: string, request: Request, env: Env, propieta
   return json({ id, destino_id: destinoId, stock: final.stock });
 }
 
-async function descartarBorrador(id: string, env: Env, propietario: string): Promise<Response> {
+async function descartarBorrador(id: string, env: Env, propietario: string, correo: string): Promise<Response> {
   if (!UUID.test(id)) return json({ error: 'Identificador invalido.' }, 400);
   const fila = await env.DB.prepare('select propietario, estado_analisis from productos where id = ?')
     .bind(id).first<{ propietario: string; estado_analisis: string }>();
@@ -1297,12 +1319,17 @@ async function descartarBorrador(id: string, env: Env, propietario: string): Pro
     const resultados = await env.DB.batch([
       env.DB.prepare(`update productos set stock = case when propietario = ? and ${BORRADOR_RETIRABLE}
         then stock else -1 end where id = ?`).bind(propietario, id),
+      // Rastro (#480): lo que desaparece (cualquiera de las dos ramas de abajo) queda en conteo_ajustes con código y nombre.
+      env.DB.prepare(`insert into conteo_ajustes (id, producto_id, codigo, nombre, motivo, cantidad, antes, despues, ajustado_por, ajustado_en)
+        select ?, id, coalesce(codigo, ''), nombre, 'descarte', stock, stock, 0, ?, ? from productos
+        where id = ? and stock > 0 and estado_analisis <> 'descartado'`)
+        .bind(crypto.randomUUID(), correo, new Date().toISOString(), id),
       env.DB.prepare(`update productos set stock = 0, estado_analisis = 'descartado', actualizado_en = ?
         where id = ? and codigo is not null and codigo <> ''`).bind(new Date().toISOString(), id),
       env.DB.prepare(`delete from productos where id = ? and (codigo is null or codigo = '')
         and estado_analisis <> 'descartado'`).bind(id),
     ]);
-    borrado = resultados[2];
+    borrado = resultados[3];
   } catch (error) {
     if (!String(error).includes('stock insuficiente')) throw error;
     return json({ error: 'La pieza cambió o tiene venta, pedido o publicación. Revisa y vuelve a intentar.' }, 409);
@@ -2538,10 +2565,10 @@ export default {
       }
 
       // Conteo de piezas de alto valor (Issue #219, conteo.ts). Contar: cualquier cuenta de piso; ajustar y el rastro: dueno.
-      if (pathname === '/api/conteo' && request.method === 'GET') return await listarAltoValor(env);
-      if (pathname === '/api/conteo' && request.method === 'POST') return await revisarConteo(request, env);
-      if (pathname === '/api/conteo/ajustes' && request.method === 'GET') return await listarAjustes(env);
-      if (pathname === '/api/conteo/ajustes' && request.method === 'POST') return await ajustarExistencia(request, env, correo, ctx);
+      if (pathname === '/api/conteo' && request.method === 'GET') return await listarAltoValor(env, propietarioDe(usuario));
+      if (pathname === '/api/conteo' && request.method === 'POST') return await revisarConteo(request, env, propietarioDe(usuario));
+      if (pathname === '/api/conteo/ajustes' && request.method === 'GET') return await listarAjustes(env, propietarioDe(usuario));
+      if (pathname === '/api/conteo/ajustes' && request.method === 'POST') return await ajustarExistencia(request, env, correo, ctx, propietarioDe(usuario));
 
       if (pathname.startsWith('/api/ml/') || pathname === '/ml/callback') {
         const respuestaML = await rutaML(request, env, url);
@@ -2760,7 +2787,7 @@ export default {
           return await corregirBorrador(pieza[1], await request.json(), env, editor, undefined, undefined, editor?.roles.includes('dueno') ? correo : undefined, undefined, { ctx, correo });
         }
         if (request.method === 'DELETE') {
-          return await descartarBorrador(pieza[1], env, propietarioDe(await leerUsuario(env, correo)));
+          return await descartarBorrador(pieza[1], env, propietarioDe(await leerUsuario(env, correo)), correo);
         }
         return json({ error: 'Metodo no permitido.' }, 405);
       }
@@ -2772,7 +2799,7 @@ export default {
       }
 
       if (fusion && request.method === 'POST') {
-        return await fusionarBorrador(fusion[1], request, env, propietarioDe(await leerUsuario(env, correo)));
+        return await fusionarBorrador(fusion[1], request, env, propietarioDe(await leerUsuario(env, correo)), correo);
       }
 
       // Reintento manual, y la via para la prueba comparativa: ?modelo=gemini
