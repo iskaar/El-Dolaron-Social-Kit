@@ -97,6 +97,16 @@ for(const width of [390,1280]){
   assert.equal(await js("document.getElementById('consulta').placeholder"),'ED-, nombre o UPC');
   assert.match(await js("document.getElementById('resumen').textContent"),/Todo el inventario/);
   assert.equal(await js("document.getElementById('mas').hidden"),false);
+  assert.match(await js("document.getElementById('estado').textContent"),/Busca por código o nombre/,'El resumen es la única fuente tras cargar');
+  assert.doesNotMatch(await js("document.getElementById('estado').textContent"),/Resultados listos/);
+  const geo=await js(`(()=>{const tope=document.getElementById('modos').getBoundingClientRect().top,f=[...document.querySelectorAll('#resultados>li')].map(l=>l.getBoundingClientRect());const i=document.getElementById('consulta'),c=document.createElement('canvas').getContext('2d'),e=getComputedStyle(i,'::placeholder');c.font=e.fontWeight+' '+e.fontSize+' '+e.fontFamily;const cs=getComputedStyle(i);return {visibles:innerWidth<1000?f.filter(r=>r.top>=0&&r.bottom<=tope).length:f.filter(r=>r.bottom<=innerHeight).length,alto:f[0].height,columnas:new Set(f.filter(r=>r.top===f[0].top).map(r=>Math.round(r.left))).size,anchoLista:Math.round(f[0].width),placeholder:c.measureText(i.placeholder).width,libre:i.clientWidth-parseFloat(cs.paddingLeft)-parseFloat(cs.paddingRight)-20,fuente:parseFloat(cs.fontSize)}})()`);
+  medidas.push({nombre:'geometria-buscar',width,pequenos:[],...geo});
+  assert.ok(geo.alto>=64&&geo.alto<=88,`Fila compacta: ${geo.alto}`);assert.ok(geo.fuente>=16);
+  if(width===390)assert.ok(geo.visibles>=6,`Piezas visibles en 390: ${geo.visibles}`);
+  if(width===1280)assert.ok(geo.columnas>=3,`Rejilla en PC: ${geo.columnas} columnas`);
+  if(width>=390)assert.ok(geo.placeholder<=geo.libre,`El placeholder no cabe: ${geo.placeholder} > ${geo.libre}`);
+  const bajos=await js(`(()=>{const lum=c=>{const [r,g,b]=c.match(/[\\d.]+/g).slice(0,3).map(Number).map(v=>{v/=255;return v<=.03928?v/12.92:((v+.055)/1.055)**2.4});return .2126*r+.7152*g+.0722*b};const fondo=el=>{for(;el;el=el.parentElement){const c=getComputedStyle(el).backgroundColor;if(!/rgba\\(0, 0, 0, 0\\)|transparent/.test(c))return c}return 'rgb(255,255,255)'};const mala=[];for(const el of document.querySelectorAll('#resumen,#resultados code,#resultados b,#resultados small,#resultados .insignia,#consulta,.txt-reimprimir')){const a=lum(getComputedStyle(el).color),b=lum(fondo(el)),r=(Math.max(a,b)+.05)/(Math.min(a,b)+.05);if(r<4.5)mala.push(el.className+el.tagName+r.toFixed(2))}const i=document.getElementById('consulta');const ph=lum(getComputedStyle(i,'::placeholder').color),bf=lum(fondo(i)),rp=(Math.max(ph,bf)+.05)/(Math.min(ph,bf)+.05);if(rp<4.5)mala.push('placeholder'+rp.toFixed(2));return mala})()`);
+  assert.deepEqual(bajos,[],'Contraste menor de 4.5');
   await capturar('19-buscar-lista-completa',width);
   const antesCorto=consultas.length;
   await js("const input=document.getElementById('consulta');input.value='ab';input.dispatchEvent(new Event('input'))");await dormir(350);
@@ -127,7 +137,11 @@ for(const width of [390,1280]){
   await cdp('Input.dispatchKeyEvent',{type:'keyDown',key:'Tab',code:'Tab',windowsVirtualKeyCode:9});
   assert.equal(await js("document.activeElement.classList.contains('reimprimir-pieza')"),true);
   assert.ok(await js("parseFloat(getComputedStyle(document.activeElement).outlineWidth)>=3"),'Foco visible de al menos 3 px');
+  assert.match(await js("document.activeElement.getAttribute('aria-label')"),/^Reimprimir etiqueta ED-002318$/);
   await capturar('22-reimprimir-foco',width);
+  await js("document.querySelector('#resultados .resultado').focus()");
+  assert.ok(await js("parseFloat(getComputedStyle(document.activeElement).outlineWidth)>=3"),'Foco visible en el botón principal');
+  await capturar('23-ficha-foco',width);
   await js("document.getElementById('consulta').value='lámpara';document.getElementById('consulta').dispatchEvent(new Event('input'))");
   await esperar("document.getElementById('resumen').textContent.includes('25+ resultados')");
   await js("document.getElementById('consulta').value='vieja';document.getElementById('consulta').dispatchEvent(new Event('input'))");await dormir(300);

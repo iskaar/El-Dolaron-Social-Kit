@@ -58,6 +58,7 @@ test('Reimprimir envía una copia, bloquea doble toque y conserva el botón de f
   const li = ui.resultado(p, undefined, true), imprimir = li.children[1];
   assert.equal(imprimir.tag, 'button'); assert.equal(imprimir.textContent, 'Reimprimir');
   assert.equal(imprimir.children[0].children[0].getAttribute('href'), '#i-impresora');
+  assert.equal(imprimir.getAttribute('aria-label'), 'Reimprimir etiqueta ED-000123'); assert.equal(imprimir.title, 'Reimprimir etiqueta ED-000123');
   assert.ok(li.children[0].children.every((n: any) => n.tag !== 'button'));
   const envio = imprimir.eventos.click();
   assert.equal(imprimir.getAttribute('aria-disabled'), 'true'); assert.equal(imprimir.getAttribute('aria-busy'), 'true');

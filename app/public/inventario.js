@@ -41,22 +41,23 @@ export function resultado(p, alElegir = () => ficha.abrir(p.id), reimprimir = fa
   foto.textContent = 'Sin foto';
   if (conFoto) { imagen.src = `/api/foto/${p.id}`; foto.replaceChildren(imagen); }
   imagen.onerror = () => { foto.textContent = 'Sin foto'; };
-  const texto = nodo('span'), codigo = nodo(p.codigo ? 'code' : 'small', p.codigo || 'Sin código');
+  const texto = nodo('span', undefined, 'texto-pieza'), codigo = nodo(p.codigo ? 'code' : 'small', p.codigo || 'Sin código');
   texto.append(codigo, nodo('b', p.nombre || 'Sin nombre'), nodo('small', `${pesos(p.precio)}${p.upc ? ` · ${p.upc}` : ''}${!conFoto ? ' · sin foto' : ''}`));
   b.append(foto, texto, nodo('span', `×${p.stock}`, 'insignia')); li.append(b);
   if (reimprimir) li.className = 'fila-busqueda';
   if (reimprimir && !identidad.vendedor && p.codigo && p.destino === 'etiqueta') {
-    const imprimir = boton('Reimprimir', async (boton) => {
+    const imprimir = boton('', async (boton) => {
       bloquear(boton, 'Espera el envío'); boton.setAttribute('aria-busy', 'true');
       try { if (await contexto.imprimir([p.id], new Map([[p.id,1]]))) mensaje(`Etiqueta enviada · ${p.codigo}`, 'etiqueta'); }
       finally { bloquear(boton, ''); boton.setAttribute('aria-busy', 'false'); }
     }, 'reimprimir-pieza');
     const icono = document.createElementNS('http://www.w3.org/2000/svg', 'svg'), uso = document.createElementNS('http://www.w3.org/2000/svg', 'use');
     icono.setAttribute('class', 'icono'); icono.setAttribute('aria-hidden', 'true'); icono.setAttribute('focusable', 'false'); uso.setAttribute('href', '#i-impresora'); icono.append(uso); imprimir.prepend(icono);
-    imprimir.setAttribute('aria-label', `Reimprimir ${p.codigo}`); li.append(imprimir);
+    imprimir.append(nodo('span', 'Reimprimir', 'txt-reimprimir')); imprimir.setAttribute('aria-label', `Reimprimir etiqueta ${p.codigo}`); imprimir.title = `Reimprimir etiqueta ${p.codigo}`; li.append(imprimir);
   }
   return li;
 }
+const NEUTRO_BUSCAR = 'Busca por código o nombre';
 const filtroCorto = (q) => q.length > 0 && q.length < 3 && !/^\d+$/.test(q);
 async function buscar(mas = false, abrir = false) {
   clearTimeout(filtroTimer);
@@ -73,7 +74,7 @@ async function buscar(mas = false, abrir = false) {
     $('resultados').append(...datos.piezas.map((p) => resultado(p, undefined, true)));
     const total = $('resultados').children.length; $('resumen').className = 'ayuda';
     $('resumen').textContent = consulta ? `${total}${siguiente ? '+' : ''} ${total === 1 && !siguiente ? 'resultado' : 'resultados'} para «${consulta}»` : 'Todo el inventario · más recientes primero';
-    mensaje(filtroCorto($('consulta').value.trim()) ? 'Escribe 3 letras o un código' : total ? 'Resultados listos' : siguiente ? 'Carga más piezas' : 'Sin resultados');
+    mensaje(filtroCorto($('consulta').value.trim()) ? 'Escribe 3 letras o un código' : siguiente && !total ? 'Carga más piezas' : NEUTRO_BUSCAR);
     if (abrir && consulta && !mas && datos.piezas.length === 1 && !siguiente) await ficha.abrir(datos.piezas[0].id);
   } catch(e) { if (turno === generacion) mensaje(e.message, 'error'); }
   finally { if (turno === generacion) { cargando = false; bloquear($('mas'), ''); $('resultados').setAttribute('aria-busy', 'false'); } }
@@ -104,7 +105,7 @@ async function cambiarModo(nuevo) {
   $('consulta').placeholder = { capturar:'UPC, ED- o nombre', buscar:'ED-, nombre o UPC', revisar:'Buscar en la cola', imprimir:'Código para filtrar' }[modo];
   $('consulta').inputMode = modo === 'buscar' ? 'search' : 'none';
   $('camara-etiqueta').hidden = modo !== 'buscar';
-  const neutros = { capturar: pc() ? 'Escanea o escribe' : 'Escanea o toma foto', buscar: 'Busca por código o nombre', revisar: 'Revisa tus piezas', imprimir: 'Etiquetas por imprimir' };
+  const neutros = { capturar: pc() ? 'Escanea o escribe' : 'Escanea o toma foto', buscar: NEUTRO_BUSCAR, revisar: 'Revisa tus piezas', imprimir: 'Etiquetas por imprimir' };
   ponerNeutro(neutros[modo]);
   mensaje(navigator.onLine ? neutros[modo] : modo === 'capturar' ? 'Sin red · toma foto' : 'Este modo necesita red', navigator.onLine ? 'neutro' : 'aviso');
   if (modo === 'buscar') { $('detalle-buscar').append($('ficha')); await buscar(); if (turno !== cambioModo) return; }
