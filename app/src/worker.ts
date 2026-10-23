@@ -1029,6 +1029,7 @@ async function fusionarBorrador(id: string, request: Request, env: Env, propieta
           and coalesce(codigo, '') = ?4 and estado_analisis <> 'descartado' and ${BORRADOR_RETIRABLE})
         and exists (select 1 from productos where id = ?2 and propietario = ?3
           and estado_analisis <> 'descartado' and sin_inventario = 0
+          and estado_fisico = (select estado_fisico from productos where id = ?1)
           and (?4 = '' or coalesce(codigo, '') = '')
           and stock + (select stock from productos where id = ?1) <= 999)
         then stock else -1 end where id in (?1, ?2)`).bind(id, destinoId, propietario, codigo),
@@ -1047,7 +1048,7 @@ async function fusionarBorrador(id: string, request: Request, env: Env, propieta
       .bind(id, destinoId, propietario).all<{ id: string; codigo: string | null }>();
     return results.length !== 2 ? json({ error: 'Pieza no encontrada.' }, 404)
       : results.every((p) => p.codigo) ? json({ error: dosEtiquetas }, 409)
-      : json({ error: 'La pieza cambió, fue descartada o tiene venta, pedido o publicación. Revisa y vuelve a intentar.' }, 409);
+      : json({ error: 'La pieza cambió, tiene otro grado, fue descartada o tiene venta, pedido o publicación. Revisa y vuelve a intentar.' }, 409);
   }
   if (borrado.meta.changes) await env.FOTOS.delete(`fotos/${id}.jpg`);
   const final = await env.DB.prepare('select stock from productos where id = ?').bind(destinoId).first<{ stock: number }>();
