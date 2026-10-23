@@ -175,7 +175,7 @@ document.getElementById('marcar').addEventListener('click', async () => {
   }
   const base = Date.now();
   const porId = new Map(piezas.map((p) => [p.id, p]));
-  ids.forEach((id, i) => estadoEnvio(porId.get(id), 'marcar', new Date(base + i).toISOString(), enBase.has(id)));
+  ids.forEach((id, i) => estadoEnvio(porId.get(id), 'marcar', new Date(base + i).toISOString(), enBase.has(id), enBase.get(id)));
   const dudosa = localStorage.getItem(CLAVE_DUDOSA);
   if (ids.includes(dudosa) && estadoEnvio().marcas[dudosa]) localStorage.removeItem(CLAVE_DUDOSA);
   pintar();
@@ -262,7 +262,7 @@ async function imprimir(ids, pedidas = new Map(), automatico = false, opciones =
   imprimiendo = true;
   pintarControles();
   if (!automatico) detenerEnvio(false);
-  let terminadas = 0, omitidas = 0, rechazadas = 0, conBase = false;
+  let terminadas = 0, omitidas = 0, rechazadas = 0;
   try {
     // Pedir la impresora necesita un clic real, nunca el temporizador automático.
     if (!etiqueteraLista()) {
@@ -303,13 +303,12 @@ async function imprimir(ids, pedidas = new Map(), automatico = false, opciones =
         // Antes de mandarla se reclama en la base (#440): si otro dispositivo ya la saco, no se repite.
         const reclamo = await reclamarEnvio(p, { reimprimir: opciones.reimprimir === true || parciales.has(p.id), deLista: opciones.deLista === true });
         if (reclamo.rechazada) { rechazadas += 1; continue; }   // vendida o cambiada: se salta, no aborta el lote
-        // Sin red al reclamar solo se imprime si TODO el lote empezo sin red; si se cae a la mitad, alto: lo
-        // que sigue podria estar ya reclamado por otra pantalla.
-        if (reclamo.sinBase && conBase) {
+        // Sin red al reclamar solo se imprime con la marca local una pieza suelta; en un lote, alto: lo que sigue
+        // podria estar ya reclamado por otra pantalla (la red pudo caerse justo despues de preparar).
+        if (reclamo.sinBase && ids.length > 1) {
           resumen.textContent = `Se detuvo en la pieza ${terminadas + 1} de ${ids.length}: se perdió la red y no se imprime sin avisar a la base. Las que faltan siguen en la lista.`;
           return false;
         }
-        if (!reclamo.sinBase) conBase = true;
         if (!reclamo.reclamada) {
           if (reclamo.cambio) {
             resumen.textContent = automatico ? 'La pieza cambió antes de imprimir. Revisa la cola y retoma la sesión.' : 'La pieza cambió antes de imprimir. Revisa la lista e intenta otra vez.';
@@ -333,14 +332,16 @@ async function imprimir(ids, pedidas = new Map(), automatico = false, opciones =
         vista?.resultado?.(p, hechasDePieza, copias, salio);
         pintarHistorial();
         if (!salio) {
-          // No salió: se libera el reclamo propio para que esta u otra pantalla pueda volver a sacarla. Una reimpresión
-          // forzada no se libera: las etiquetas anteriores siguen pegadas y lo que falta ya se ve como «faltaEtiqueta».
+          // No salió: se libera el reclamo propio para que esta u otra pantalla pueda volver a sacarla. No se libera una
+          // reimpresión forzada (las etiquetas anteriores siguen pegadas) ni un envío parcial (ya hay etiquetas pegadas
+          // y otra pantalla podría reclamar entre liberar y continuar): se conserva el reclamo y lo que falta se
+          // continúa como reimpresión.
           if (hechasDePieza > 0) parciales.add(p.id);
-          const liberada = reclamo.sinBase || reclamo.forzada || await liberarEnvio([p.id], { [p.id]: reclamo.etiqueta_en });
+          const liberada = reclamo.sinBase || reclamo.forzada || hechasDePieza > 0 || await liberarEnvio([p.id], { [p.id]: reclamo.etiqueta_en });
           resumen.textContent = (envioDetenido()
             ? `Detenido en la pieza ${terminadas + 1} de ${ids.length}. Las que faltan siguen en la lista.`
             : `Se cortó en la pieza ${terminadas + 1} de ${ids.length} (${p.nombre}): ${errorEnvio()}. Las que faltan siguen en la lista.`)
-            + (reclamo.forzada ? ' Las etiquetas que ya estaban pegadas siguen registradas.' : '')
+            + (reclamo.forzada || hechasDePieza > 0 ? ' Las etiquetas que ya estaban pegadas siguen registradas.' : '')
             + (liberada ? '' : ' No se pudo avisar a la base: si otro dispositivo no la saca, usa «Mostrar impresas» y «No salió desde aquí».');
           return false;
         }

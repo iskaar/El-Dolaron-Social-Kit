@@ -27,7 +27,7 @@ const mismaEtiqueta = (a, b) => precioImpreso(a) === precioImpreso(b) && textoIm
 /**
  * Se queda con la etiqueta de esta pieza ANTES de mandarla. Devuelve:
  *  - { reclamada: true, forzada, etiqueta_en }: gano este dispositivo, se imprime. `forzada`: ya habia etiquetas pegadas
- *    (reimpresion), asi que si el envio falla NO se suelta; `etiqueta_en` es la hora de SU reclamo, para soltar solo lo propio;
+ *    (reimpresion), asi que si el envio falla NO se suelta; `etiqueta_en` es la hora de SU reclamo (`ahora` de la respuesta), para soltar solo lo propio;
  *  - { reclamada: false, cambio: false }: ya la saco otro (PC o celular), se omite y su marca se adopta aqui;
  *  - { reclamada: false, cambio: true }: la pieza cambio entre preparar y reclamar, no se imprime a ciegas;
  *  - { reclamada: false, rechazada: true }: ya no se puede imprimir (vendida, sin existencia o no lista); se salta sin avisar a la base;
@@ -44,7 +44,7 @@ export async function reclamarEnvio(pieza, { reimprimir = false, deLista = false
   const forzada = reimprimir || (!!marca && mismaEtiqueta(marca, pieza) && (deLista || (!esRopa(pieza) && gradoImpreso(marca) !== gradoImpreso(pieza))));
   try {
     const r = await reclamarEtiquetas([pieza.id], { reimprimir: forzada, version: pieza.etiqueta_version });
-    if (r.reclamadas.includes(pieza.id)) return { reclamada: true, forzada, etiqueta_en: r.marcas[pieza.id]?.etiqueta_en };
+    if (r.reclamadas.includes(pieza.id)) return { reclamada: true, forzada, etiqueta_en: r.ahora };
     const enBase = r.marcas[pieza.id];
     if (!enBase || !mismaEtiqueta(diceLaBase(enBase), pieza)) return { reclamada: false, cambio: true };
     adoptarMarca(pieza.id, enBase, pieza);
@@ -73,7 +73,7 @@ export async function reclamarSinImprimir(ids) {
   const reclamadas = new Map();
   for (let i = 0; i < ids.length; i += 100) {
     const r = await reclamarEtiquetas(ids.slice(i, i + 100), { reimprimir: true });
-    for (const id of r.reclamadas) reclamadas.set(id, r.marcas[id]?.etiqueta_en);
+    for (const id of r.reclamadas) reclamadas.set(id, r.ahora);
   }
   return reclamadas;
 }
@@ -108,7 +108,7 @@ async function subirMarcas(piezas, antes) {
         const ahora = impresas()[p.id];
         // Si mientras tanto se volvio a imprimir o se solto, esa marca ya no es la que se subio.
         if (!ahora || ahora.hora !== antes[p.id].hora) continue;
-        if (r.reclamadas.includes(p.id)) marcarImpresa(p.id, ahora.hora, ahora, true, r.marcas[p.id]?.etiqueta_en);
+        if (r.reclamadas.includes(p.id)) marcarImpresa(p.id, ahora.hora, ahora, true, r.ahora);
         else if (r.marcas[p.id]) adoptarMarca(p.id, r.marcas[p.id], p);
       }
     }

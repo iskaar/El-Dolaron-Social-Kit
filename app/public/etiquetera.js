@@ -840,17 +840,17 @@ export async function reclamarEtiquetas(ids, { reimprimir = false, version, orig
 
 /**
  * Borra la marca de la base ("no salio", o se corto la impresion). true si quedo; nunca lanza. `en` ({ id: hora del
- * reclamo propio }) hace el borrado condicional: solo se suelta lo que reclamo ESTE dispositivo y no cambio despues.
- * Una pieza sin hora conocida no se suelta; sin `en` el borrado es incondicional.
+ * reclamo propio, la `ahora` del reclamo }) es obligatorio: solo se suelta lo que reclamo ESTE dispositivo y no cambio
+ * despues. Una pieza sin hora conocida no se suelta.
  */
-export async function soltarEtiquetas(ids, en = null) {
-  if (en) ids = ids.filter((id) => en[id]);
+export async function soltarEtiquetas(ids, en) {
+  ids = ids.filter((id) => en?.[id]);
   try {
     for (let i = 0; i < ids.length; i += 100) {
       const lote = ids.slice(i, i + 100);
       const respuesta = await fetch('/api/etiquetas/enviadas', {
         method: 'DELETE', headers: { 'content-type': 'application/json' },
-        body: JSON.stringify(en ? { ids: lote, etiquetas_en: Object.fromEntries(lote.map((id) => [id, en[id]])) } : { ids: lote }),
+        body: JSON.stringify({ ids: lote, etiquetas_en: Object.fromEntries(lote.map((id) => [id, en[id]])) }),
         signal: AbortSignal.timeout(15000),
       });
       if (!respuesta.ok) return false;

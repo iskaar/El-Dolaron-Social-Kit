@@ -1115,31 +1115,27 @@ async function reclamarEtiquetas(request: Request, env: Env, propietario: string
      from etiquetas_enviadas where producto_id in (select value from json_each(?))
        and producto_id in (select id from productos where propietario = ?)`,
   ).bind(JSON.stringify(ids), propietario).all<{ producto_id: string }>();
+  // `ahora` es la hora de ESTE reclamo: la que quedo en cada fila de `reclamadas` al ganar. No se relee de `marcas`,
+  // donde otra pantalla pudo reclamar de nuevo entre el batch y la lectura; con la hora ajena soltar borraria su reclamo.
   return json({
     reclamadas: ids.filter((_, i) => (resultados[i]?.meta?.changes ?? 0) > 0),
+    ahora,
     marcas: Object.fromEntries(results.map(({ producto_id, ...marca }) => [producto_id, marca])),
   });
 }
 
 /**
- * "No salio" (#440): la marca de esas piezas se borra para que la etiqueta pueda volver a salir. Con `etiquetas_en`
- * ({ id: etiqueta_en }, la hora del reclamo que el dispositivo hizo) el borrado es condicional, en la misma sentencia: solo
- * se borra la fila si sigue siendo ESE reclamo, asi un dispositivo nunca suelta el reclamo posterior de otro. Una pieza
- * sin hora en el mapa no se toca. Sin `etiquetas_en` se borra sin condicion (compatibilidad). `soltadas` = filas borradas.
+ * "No salio" (#440): la marca de esas piezas se borra para que la etiqueta pueda volver a salir. `etiquetas_en`
+ * ({ id: ahora }, la hora del reclamo que el dispositivo hizo; es obligatorio) vuelve el borrado condicional, en la misma
+ * sentencia: solo se borra la fila si sigue siendo ESE reclamo, asi un dispositivo nunca suelta el reclamo posterior de
+ * otro. Una pieza sin hora en el mapa no se toca. `soltadas` = filas borradas.
  */
 async function soltarEtiquetas(request: Request, env: Env, propietario: string): Promise<Response> {
   const cuerpo = (await request.json().catch(() => null)) as { ids?: unknown; etiquetas_en?: unknown } | null;
   const ids = idsDeEtiquetas(cuerpo);
   if (!ids) return json({ error: 'Selecciona entre 1 y 100 piezas.' }, 400);
   const en = cuerpo?.etiquetas_en;
-  if (en === undefined || en === null) {
-    const { meta } = await env.DB.prepare(
-      `delete from etiquetas_enviadas where producto_id in (select value from json_each(?))
-         and producto_id in (select id from productos where propietario = ?)`,
-    ).bind(JSON.stringify(ids), propietario).run();
-    return json({ soltadas: meta.changes });
-  }
-  if (typeof en !== 'object' || Array.isArray(en)) return json({ error: 'Reclamos inválidos.' }, 400);
+  if (en === null || typeof en !== 'object' || Array.isArray(en)) return json({ error: 'Reclamos inválidos.' }, 400);
   const mapa = en as Record<string, unknown>;
   const pares = [];
   for (const id of ids) {

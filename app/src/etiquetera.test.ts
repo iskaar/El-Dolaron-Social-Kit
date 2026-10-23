@@ -478,11 +478,12 @@ test('reclamarEtiquetas (#440): manda ids, origen y versión; sin red lanza con 
 test('soltarEtiquetas (#440): lotes de 100, true si la base quedó sin ellas, false (sin lanzar) si falla', async () => {
   const lotes: number[] = [];
   await conNavegador((async (_r: string, op: any) => { lotes.push(JSON.parse(op.body).ids.length); assert.equal(op.method, 'DELETE'); return { ok: true }; }) as never, async () => {
-    assert.equal(await soltarEtiquetas(Array.from({ length: 230 }, (_, i) => String(i))), true);
+    const ids = Array.from({ length: 230 }, (_, i) => String(i));
+    assert.equal(await soltarEtiquetas(ids, Object.fromEntries(ids.map((i) => [i, 'H']))), true);
   });
   assert.deepEqual(lotes, [100, 100, 30]);
-  await conNavegador((async () => { throw new Error('sin red'); }) as never, async () => assert.equal(await soltarEtiquetas(['a']), false));
-  await conNavegador((async () => ({ ok: false })) as never, async () => assert.equal(await soltarEtiquetas(['a']), false));
+  await conNavegador((async () => { throw new Error('sin red'); }) as never, async () => assert.equal(await soltarEtiquetas(['a'], { a: 'H' }), false));
+  await conNavegador((async () => ({ ok: false })) as never, async () => assert.equal(await soltarEtiquetas(['a'], { a: 'H' }), false));
 });
 
 test('marcas locales (#440): adoptar la de la base respeta la local igual, reemplaza la distinta y olvidarMarca la quita', async () => {
@@ -542,8 +543,8 @@ test('soltarEtiquetas con `en` (#464): manda la hora de cada reclamo y no suelta
     assert.deepEqual(cuerpos, [{ ids: ['a'], etiquetas_en: { a: 'H1' } }]);
     assert.equal(await soltarEtiquetas(['x'], { y: 'H' }), true);   // nada con hora: ni siquiera se llama
     assert.equal(cuerpos.length, 1);
-    await soltarEtiquetas(['a']);
-    assert.deepEqual(cuerpos[1], { ids: ['a'] });                   // sin `en`, como antes
+    assert.equal(await soltarEtiquetas(['a']), true);               // sin `en` no hay reclamo propio que soltar: no se llama
+    assert.equal(cuerpos.length, 1);
   });
 });
 

@@ -124,7 +124,7 @@ async function pagina(t: ReturnType<typeof tienda>, ambiente = 'sandbox', almace
   const estado = { conectada: true, falloBle: false, falloRed: false, falloMarca: false, permiso: 0, exigirDudosa: true,
     enviadas: [] as { id: string; copias: number }[], detenido: false, antesDePreparar: null as null | (() => Promise<void>),
     reclamos: [] as { ids: string[]; reimprimir?: boolean }[], liberadas: [] as string[][], antesDeReclamar: null as null | (() => void | Promise<void>),
-    sinRedParaReclamar: false, tiempoAgotado: false, falloLiberar: false, liberadasEn: [] as (Record<string, string> | null)[] };
+    sinRedParaReclamar: false, tiempoAgotado: false, liberadasEn: [] as (Record<string, string> | null)[] };
   const pedir = pedirPor(t, host);
   const almacenWeb = { getItem: (k: string) => almacen.get(k) ?? null, setItem: (k: string, v: string) => almacen.set(k, v), removeItem: (k: string) => almacen.delete(k) };
   /** Las funciones de etiquetera.js leen globalThis.localStorage: aqui apunta al almacenamiento de esta pagina mientras corren. */
@@ -147,8 +147,11 @@ async function pagina(t: ReturnType<typeof tienda>, ambiente = 'sandbox', almace
     conectarEtiquetera: async () => { estado.permiso++; estado.conectada = true; }, etiqueteraLista: () => estado.conectada,
     imprimirEtiquetas: async (p: any, copias: number, avanzar: any) => {
       if (estado.exigirDudosa) assert.equal(almacen.get('etiqueta-automatica-dudosa'), p.id);
-      estado.enviadas.push({ id: p.id, copias }); avanzar(1);
-      return !estado.falloBle;
+      estado.enviadas.push({ id: p.id, copias });
+      // Como el real: falla (false) solo si salieron menos de las pedidas, y la primera etiqueta ya pudo haber salido.
+      if (estado.falloBle) { if (copias > 1) avanzar(1); return false; }
+      avanzar(1);
+      return true;
     },
     impresas: marcas, marcarImpresa: (...a: Parameters<typeof marcarReal>) => { if (!estado.falloMarca) conAlmacen(marcarReal)(...a); },
     etiquetaVigente, precioImpreso, textoImpreso, gradoImpreso, esPropia, esRopa, nombreEstado, historialTexto: () => '',
@@ -166,7 +169,7 @@ async function pagina(t: ReturnType<typeof tienda>, ambiente = 'sandbox', almace
     // Igual que el real: con `en` solo se sueltan las piezas con hora de reclamo, y la hora viaja en `etiquetas_en`.
     soltarEtiquetas: async (ids: string[], en: Record<string, string> | null = null) => {
       estado.liberadas.push(ids); estado.liberadasEn.push(en);
-      if (estado.falloRed || estado.falloLiberar) return false;
+      if (estado.falloRed) return false;
       const sueltas = en ? ids.filter((id) => en[id]) : ids;
       if (!sueltas.length) return true;
       return (await pedir('/api/etiquetas/enviadas', en ? { ids: sueltas, etiquetas_en: Object.fromEntries(sueltas.map((id) => [id, en[id]])) } : { ids: sueltas }, 'DELETE')).status === 200;
@@ -833,7 +836,7 @@ test('una reimpresión forzada que falla conserva el registro de las etiquetas y
   } finally { t.db.close(); }
 });
 
-test('un tiempo agotado al reclamar no imprime; una red que se cae a media tanda detiene el resto, salvo que todo empezó sin red (#464)', async () => {
+test('un tiempo agotado al reclamar no imprime; una red que se cae a media tanda o antes del primer reclamo detiene el resto, salvo una pieza suelta (#464)', async () => {
   const t = tienda();
   try {
     const { celular } = await dosDispositivos(t);
@@ -849,26 +852,51 @@ test('un tiempo agotado al reclamar no imprime; una red que se cae a media tanda
     assert.equal(await celular.imprimir([a, b, c]), false);
     assert.deepEqual(celular.estado.enviadas, [{ id: a, copias: 1 }]);
     assert.match(celular.$('resumen').textContent, /Se detuvo en la pieza 2 de 3: se perdió la red/);
-    // Un lote que empieza sin red sí sigue con las marcas locales.
-    celular.estado.antesDeReclamar = null;
-    assert.equal(await celular.imprimir([b, c]), true);
-    assert.deepEqual(celular.estado.enviadas.map((e) => e.id), [a, b, c]);
+    // Un lote que se queda sin red justo después de preparar (antes del primer reclamo) tampoco se manda a ciegas.
+    celular.estado.antesDeReclamar = null; celular.estado.sinRedParaReclamar = false;
+    celular.estado.antesDePreparar = async () => { celular.estado.sinRedParaReclamar = true; };
+    assert.equal(await celular.imprimir([b, c]), false);
+    assert.deepEqual(celular.estado.enviadas.map((e) => e.id), [a], 'ni b ni c salieron');
+    assert.match(celular.$('resumen').textContent, /Se detuvo en la pieza 1 de 2: se perdió la red/);
+    // Una sola pieza sí sigue con la marca local (se sube en la siguiente carga).
+    assert.equal(await celular.imprimir([b]), true);
+    assert.deepEqual(celular.estado.enviadas.map((e) => e.id), [a, b]);
+    assert.equal(celular.marcas()[b].base, undefined);
   } finally { t.db.close(); }
 });
 
-test('un envío parcial cuyo reclamo no se pudo soltar continúa lo que falta, sin llamarlo de otro dispositivo (#464)', async () => {
+test('un envío parcial conserva el reclamo y continúa lo que falta como reimpresión, sin llamarlo de otro dispositivo (#464)', async () => {
   const t = tienda();
   try {
     const { celular } = await dosDispositivos(t);
     const id = agregar(t, DESPUES, 'listo', 3);
-    celular.estado.falloBle = true; celular.estado.falloLiberar = true;
-    assert.equal(await celular.imprimir([id], new Map([[id, 3]])), false);   // salió 1 de 3 y la base no soltó el reclamo
+    celular.estado.falloBle = true;
+    assert.equal(await celular.imprimir([id], new Map([[id, 3]])), false);   // salió 1 de 3
+    assert.deepEqual(celular.estado.liberadas, [], 'con etiquetas ya pegadas no se suelta: otra pantalla podría reclamar antes de continuar');
     assert.equal(t.db.prepare('select count(*) n from etiquetas_enviadas where producto_id=?').get(id)!.n, 1);
-    celular.estado.falloBle = false; celular.estado.falloLiberar = false;
+    celular.estado.falloBle = false;
     assert.equal(await celular.imprimir([id], new Map([[id, 2]])), true);   // «Reconectar y seguir (2)»
     assert.deepEqual(celular.estado.enviadas, [{ id, copias: 3 }, { id, copias: 2 }]);
     assert.equal(celular.estado.reclamos.at(-1)!.reimprimir, true);
     assert.doesNotMatch(celular.$('resumen').textContent, /otro dispositivo/);
     assert.ok(celular.marcas()[id], 'al terminar queda marcada');
+  } finally { t.db.close(); }
+});
+
+test('«No salió desde aquí» sí suelta lo marcado con «Marcar como impresas»: la marca lleva la hora de su reclamo (#464)', async () => {
+  const t = tienda();
+  try {
+    const { pc, celular } = await dosDispositivos(t);
+    const id = agregar(t, DESPUES, 'listo', 1);
+    await celular.cargar();
+    celular.$('lista').querySelectorAll = () => [{ value: id }];
+    await celular.$('marcar').eventos.get('click')();
+    assert.equal(t.db.prepare('select count(*) n from etiquetas_enviadas where producto_id=?').get(id)!.n, 1);
+    assert.equal(celular.marcas()[id].propia, true);
+    assert.match(celular.marcas()[id].en, /^\d{4}-\d\d-\d\dT/, 'guarda la hora del reclamo');
+    assert.equal(await celular.noSalio(id), true);
+    assert.equal(t.db.prepare('select count(*) n from etiquetas_enviadas where producto_id=?').get(id)!.n, 0, 'la base la soltó');
+    assert.equal(celular.marcas()[id], undefined);
+    assert.equal(await pc.imprimir([id]), true);   // otra pantalla ya puede sacarla
   } finally { t.db.close(); }
 });

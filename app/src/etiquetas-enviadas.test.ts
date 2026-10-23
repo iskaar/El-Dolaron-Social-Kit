@@ -33,7 +33,9 @@ function montar() {
     return { status: r.status, cuerpo: (await r.clone().json().catch(() => ({}))) as Record<string, any> };
   };
   const celular = (ruta: string, cuerpo?: unknown, metodo = 'POST') => por(CELULAR, ruta, cuerpo, metodo);
-  return { ...t, t, pieza, como, celular, pc: t.pedir };
+  /** La hora del reclamo vigente de una pieza: lo que un dispositivo manda en `etiquetas_en` para soltarlo. */
+  const sello = (id: string) => (t.db.prepare('select etiqueta_en e from etiquetas_enviadas where producto_id = ?').get(id) as { e: string } | undefined)?.e as string;
+  return { ...t, t, pieza, como, celular, pc: t.pedir, sello };
 }
 
 test('el host del celular sirve la pestaña Imprimir y deja pasar solo las API de etiquetas que necesita (#440)', () => {
@@ -68,7 +70,7 @@ test('por el host del celular: capturista y dueño imprimen, el cajero no; calib
       p.como(quien);
       assert.equal((await p.celular('/api/etiquetas', { ids: [id] })).status, 200, quien);
       assert.equal((await p.celular('/api/etiquetas/enviadas', { ids: [id] })).status, 200, quien);
-      assert.equal((await p.celular('/api/etiquetas/enviadas', { ids: [id] }, 'DELETE')).status, 200, quien);
+      assert.equal((await p.celular('/api/etiquetas/enviadas', { ids: [id], etiquetas_en: { [id]: p.sello(id) } }, 'DELETE')).status, 200, quien);
       assert.equal((await p.celular('/api/calibracion', undefined, 'GET')).status, 200, quien);
     }
     p.como(CAPTURISTA);
@@ -116,10 +118,10 @@ test('FEP imprime solo sus piezas, por la PC o por el celular; no ve, reclama ni
     p.como(DUENO);
     assert.deepEqual((await p.pc('/api/etiquetas/enviadas', { ids: [deLaTienda, mia] })).cuerpo.reclamadas, [deLaTienda]);
     p.como(FEP);
-    assert.equal((await p.celular('/api/etiquetas/enviadas', { ids: [deLaTienda] }, 'DELETE')).cuerpo.soltadas, 0);
+    assert.equal((await p.celular('/api/etiquetas/enviadas', { ids: [deLaTienda], etiquetas_en: { [deLaTienda]: p.sello(deLaTienda) } }, 'DELETE')).cuerpo.soltadas, 0);
     assert.equal(p.db.prepare('select count(*) n from etiquetas_enviadas where producto_id = ?').get(deLaTienda)!.n, 1);
     p.como(DUENO);
-    assert.equal((await p.pc('/api/etiquetas/enviadas', { ids: [mia] }, 'DELETE')).cuerpo.soltadas, 0);   // lo de FEP tampoco
+    assert.equal((await p.pc('/api/etiquetas/enviadas', { ids: [mia], etiquetas_en: { [mia]: p.sello(mia) } }, 'DELETE')).cuerpo.soltadas, 0);   // lo de FEP tampoco
     assert.equal(p.db.prepare('select count(*) n from etiquetas_enviadas where producto_id = ?').get(mia)!.n, 1);
   } finally { p.db.close(); }
 });
@@ -263,11 +265,12 @@ test('soltar borra la marca para que la etiqueta pueda volver a salir, también 
     p.db.prepare("insert into etiquetas_enviadas values (?, 'x', 1, 0, 'n', '', 'pc')").run(fep);
     await p.pc('/api/etiquetas/enviadas', { ids: [id] });
     p.como(CAPTURISTA);
-    assert.equal((await p.celular('/api/etiquetas/enviadas', { ids: [id, fep] }, 'DELETE')).cuerpo.soltadas, 1);
+    assert.equal((await p.celular('/api/etiquetas/enviadas', { ids: [id, fep], etiquetas_en: { [id]: p.sello(id), [fep]: p.sello(fep) } }, 'DELETE')).cuerpo.soltadas, 1);
     assert.equal(p.db.prepare('select count(*) n from etiquetas_enviadas').get()!.n, 1);   // la de FEP no se toca
     assert.deepEqual((await p.celular('/api/etiquetas/enviadas', { ids: [id] })).cuerpo.reclamadas, [id]);
-    assert.equal((await p.celular('/api/etiquetas/enviadas', { ids: [id] }, 'DELETE')).cuerpo.soltadas, 1);
-    assert.equal((await p.celular('/api/etiquetas/enviadas', { ids: [id] }, 'DELETE')).cuerpo.soltadas, 0);   // soltar dos veces es inofensivo
+    const sello = p.sello(id);
+    assert.equal((await p.celular('/api/etiquetas/enviadas', { ids: [id], etiquetas_en: { [id]: sello } }, 'DELETE')).cuerpo.soltadas, 1);
+    assert.equal((await p.celular('/api/etiquetas/enviadas', { ids: [id], etiquetas_en: { [id]: sello } }, 'DELETE')).cuerpo.soltadas, 0);   // soltar dos veces es inofensivo
   } finally { p.db.close(); }
 });
 
@@ -309,7 +312,7 @@ test('los lotes de 100 piezas respetan los 100 parámetros por sentencia de D1',
     const reclamo = await p.celular('/api/etiquetas/enviadas', { ids });
     assert.equal(reclamo.status, 200);
     assert.equal(reclamo.cuerpo.reclamadas.length, 100);
-    const soltadas = await p.celular('/api/etiquetas/enviadas', { ids }, 'DELETE');
+    const soltadas = await p.celular('/api/etiquetas/enviadas', { ids, etiquetas_en: Object.fromEntries(ids.map((i) => [i, reclamo.cuerpo.ahora])) }, 'DELETE');
     assert.equal(soltadas.status, 200);
     assert.equal(soltadas.cuerpo.soltadas, 100);
   } finally { p.db.close(); }
@@ -339,5 +342,41 @@ test('soltar con etiquetas_en es condicional: borra solo si la fila sigue siendo
     for (const etiquetas_en of ['x', [id], { [id]: 5 }, { [id]: '' }, { [id]: 'x'.repeat(41) }]) {
       assert.equal((await p.pc('/api/etiquetas/enviadas', { ids: [id], etiquetas_en }, 'DELETE')).status, 400, JSON.stringify(etiquetas_en));
     }
+  } finally { p.db.close(); }
+});
+
+test('soltar exige etiquetas_en: sin él es 400 y no borra nada, aunque sea la misma pantalla (#464)', async () => {
+  const p = montar();
+  try {
+    const id = p.pieza();
+    await p.pc('/api/etiquetas/enviadas', { ids: [id] });
+    for (const cuerpo of [{ ids: [id] }, { ids: [id], etiquetas_en: null }]) {
+      assert.equal((await p.pc('/api/etiquetas/enviadas', cuerpo, 'DELETE')).status, 400, JSON.stringify(cuerpo));
+      assert.equal((await p.celular('/api/etiquetas/enviadas', cuerpo, 'DELETE')).status, 400);
+    }
+    assert.equal(p.db.prepare('select count(*) n from etiquetas_enviadas').get()!.n, 1);
+  } finally { p.db.close(); }
+});
+
+test('el reclamo devuelve su propia hora (ahora) y no la que otra pantalla escriba entre el batch y la lectura (#464)', async () => {
+  const p = montar();
+  try {
+    const id = p.pieza();
+    let ganadora = '';
+    const preparar = p.env.DB.prepare.bind(p.env.DB);
+    p.env.DB.prepare = (sql: string) => {
+      if (sql.includes('select producto_id, etiqueta_en')) {   // la lectura de marcas, justo después del batch
+        ganadora = p.sello(id);
+        p.db.prepare("update etiquetas_enviadas set etiqueta_en = '2099-01-01T00:00:00.000Z', etiqueta_origen = 'celular'").run();   // otra pantalla reclamó de nuevo
+      }
+      return preparar(sql);
+    };
+    const r = (await p.pc('/api/etiquetas/enviadas', { ids: [id] })).cuerpo;
+    assert.deepEqual(r.reclamadas, [id]);
+    assert.equal(r.ahora, ganadora, 'la hora de ESTE reclamo');
+    assert.equal(r.marcas[id].etiqueta_en, '2099-01-01T00:00:00.000Z');
+    // Soltar con la hora devuelta no borra el reclamo posterior de la otra pantalla.
+    assert.equal((await p.pc('/api/etiquetas/enviadas', { ids: [id], etiquetas_en: { [id]: r.ahora } }, 'DELETE')).cuerpo.soltadas, 0);
+    assert.equal(p.db.prepare('select count(*) n from etiquetas_enviadas').get()!.n, 1);
   } finally { p.db.close(); }
 });
