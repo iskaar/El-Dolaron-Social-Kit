@@ -6,6 +6,7 @@ import { CATEGORIAS } from './categorias.js';
 import { aCentavos } from './ficha.js';
 import { stepper, bloquear, cerrarHoja } from './inventario-ui.js';
 import { montarPrecio } from './inventario-precio.js';
+import { esRopa as piezaRopa } from './ropa.js';
 
 /** Estado de captura: UUID estable al reintentar; precio y existencia confirmados solo por el servidor. */
 export function crearCaptura({ api, imprimir, cambiar=()=>{}, enLinea=()=>navigator.onLine, uuid=()=>crypto.randomUUID(), permiteUpc=true, permiteSumar=true }) {
@@ -27,14 +28,14 @@ export function crearCaptura({ api, imprimir, cambiar=()=>{}, enLinea=()=>naviga
     const ed=`ED-${codigo.padStart(6,'0')}`;
     if(etiqueta?.piezas.some(p=>p.codigo===ed))codigo=ed;
     if(!mas&&actual?.tipo==='nueva'&&normalizarUpc(codigo)===normalizarUpc(actual.upc)){actual.cantidad=Math.min(999,actual.cantidad+1);pintar();return;}
-    if(!mas&&actual?.tipo==='existente'&&actual.pieza.estado_fisico===grado&&permiteSumar&&(actual.pieza.codigo?.toUpperCase()===codigo.toUpperCase()||(actual.pieza.upc&&normalizarUpc(actual.pieza.upc)===normalizarUpc(codigo))))return sumar(actual.pieza);
+    if(!mas&&actual?.tipo==='existente'&&(piezaRopa(actual.pieza)||actual.pieza.estado_fisico===grado)&&permiteSumar&&(actual.pieza.codigo?.toUpperCase()===codigo.toUpperCase()||(actual.pieza.upc&&normalizarUpc(actual.pieza.upc)===normalizarUpc(codigo))))return sumar(actual.pieza);
     if(!mas&&actual?.tipo==='nueva')await guardar();
     const datos=etiqueta??await api(ruta);
-    const piezas=codigoLeido(codigo)?datos.piezas.filter(p=>p.estado_fisico===grado):datos.piezas;
+    const piezas=codigoLeido(codigo)?datos.piezas.filter(p=>piezaRopa(p)||p.estado_fisico===grado):datos.piezas;
     resultados=mas?[...resultados,...piezas]:piezas;siguiente=datos.siguiente;
     if(resultados.length||siguiente){actual=resultados.length===1&&!siguiente?{tipo:'existente',pieza:resultados[0]}:null;pintar();return;}
     if(!permiteUpc||!codigoLeido(codigo)){actual=null;pintar();return;}
-    try{const ficha=await api('/api/manifiesto/'+codigo);actual={tipo:'nueva',id:uuid(),upc:codigo,ficha,cantidad:1,estado:grado};}
+    try{const ficha=await api('/api/manifiesto/'+codigo);actual={tipo:'nueva',id:uuid(),upc:codigo,ficha,cantidad:1,estado:piezaRopa(ficha)?'nuevo':grado};}
     catch(e){if(e.status!==404)throw e;actual={tipo:'sin-registro',id:uuid(),upc:codigo,cantidad:1,estado:grado};}
     pintar();
   }
@@ -52,7 +53,7 @@ export function crearCaptura({ api, imprimir, cambiar=()=>{}, enLinea=()=>naviga
     elegir(p){actual={tipo:'existente',pieza:p};pintar();},
     retomar(a){actual=a;pintar();},
     cantidad(n){if(actual&&actual.tipo==='nueva'){actual.cantidad=n;if(n===0)actual=null;pintar();}},
-    estado(e){grado=e;if(actual?.pieza&&actual.pieza.estado_fisico!==grado){actual=null;resultados=[];}else if(actual)actual.estado=e;pintar();},
+    estado(e){grado=e;if(actual?.pieza&&!piezaRopa(actual.pieza)&&actual.pieza.estado_fisico!==grado){actual=null;resultados=[];}else if(actual)actual.estado=piezaRopa(actual.ficha||{})?'nuevo':e;pintar();},
     limpiar(){actual=null;resultados=[];pintar();}, actual:()=>actual };
 }
 
@@ -76,7 +77,7 @@ export async function iniciar(ctx) {
   derecha.append(pieza,disparo,remota,historia);
   const pie=nodo('p','Hoy: 0 piezas', 'ayuda pc');raiz.append(pie);
   let hoy=0;const textoHoy=()=>{pie.textContent=`Hoy: ${hoy} ${hoy===1?'pieza':'piezas'}`;};
-  function elegirTipo(ropa){esRopa=ropa;localStorage.setItem('captura-modo',ropa?'ropa':'mercancia');mercancia.setAttribute('aria-pressed',String(!ropa));prenda.setAttribute('aria-pressed',String(ropa));tablero.raiz.hidden=!ropa;if(ropa)tablero.sincronizar();actualizarDisparo();}
+  function elegirTipo(ropa){esRopa=ropa;localStorage.setItem('captura-modo',ropa?'ropa':'mercancia');mercancia.setAttribute('aria-pressed',String(!ropa));prenda.setAttribute('aria-pressed',String(ropa));tablero.raiz.hidden=!ropa;grado.hidden=ropa;if(ropa)tablero.sincronizar();actualizarDisparo();}
   const ayudaDisparo=nodo('span','','solo-lector');ayudaDisparo.id='ayuda-disparo';ayudaDisparo.setAttribute('role','status');disparo.after(ayudaDisparo);disparo.setAttribute('aria-describedby',ayudaDisparo.id);
   const neutro=()=>mensaje(pc()?'Escanea o escribe':'Escanea o toma foto');
   function actualizarDisparo(){
@@ -116,7 +117,7 @@ export async function iniciar(ctx) {
       if(conPermiso){bloquear(sumar,!navigator.onLine?'Sin red: se suma al volver la señal':'');const fila=nodo('div',undefined,'acciones');fila.append(sumar,boton(p.tiene_foto?'Foto nueva':'Añadir foto',()=>fotoPieza(p),p.tiene_foto?'':'primario'));carta.append(fila);}else tarjeta.append(nodo('p','Solo consulta','solo-consulta'));
       const precioPedido=nodo('div',undefined,'bloque-precio');carta.append(precioPedido);montarPrecio(ctx,precioPedido,p);
     }else if(actual.tipo==='nueva'){
-      const fila=nodo('div',undefined,'acciones');tarjeta.append(nodo('p',nombreEstado(actual.estado)));carta.append(fila);fila.append(stepper(actual.cantidad,n=>flujo.cantidad(n),{min:0,max:999,nombre:'Piezas de este código'}),boton(etiqueteraLista()?'Guardar e imprimir':'Guardar',async()=>{await flujo.guardar();hoy+=actual.cantidad;textoHoy();const p=flujo.actual()?.pieza;mensaje(p?.existente?`Ya existía · +${p.sumadas}${p.codigo?` a ${p.codigo}`:''}`:flujo.actual()?.faltaEtiqueta?'Guardada · falta etiqueta':'Guardada · etiqueta enviada',p?.existente?'aviso':flujo.actual()?.faltaEtiqueta?'aviso':'etiqueta');foco();},'primario'));
+      const fila=nodo('div',undefined,'acciones');if(!piezaRopa(p))tarjeta.append(nodo('p',nombreEstado(actual.estado)));carta.append(fila);fila.append(stepper(actual.cantidad,n=>flujo.cantidad(n),{min:0,max:999,nombre:'Piezas de este código'}),boton(etiqueteraLista()?'Guardar e imprimir':'Guardar',async()=>{await flujo.guardar();hoy+=actual.cantidad;textoHoy();const p=flujo.actual()?.pieza;mensaje(p?.existente?`Ya existía · +${p.sumadas}${p.codigo?` a ${p.codigo}`:''}`:flujo.actual()?.faltaEtiqueta?'Guardada · falta etiqueta':'Guardada · etiqueta enviada',p?.existente?'aviso':flujo.actual()?.faltaEtiqueta?'aviso':'etiqueta');foco();},'primario'));
       if(!actual.imagenBuscada){actual.imagenBuscada=true;void imagen(actual,foto,tarjeta);}
       else if(actual.imagen)pintarImagen(actual,foto,tarjeta);
     }else if(actual.tipo==='sin-registro'){
@@ -145,14 +146,16 @@ export async function iniciar(ctx) {
     if(esRopa&&!a&&!tablero.validar())return;
     if(pendienteFoto)return;
     pendienteFoto=true;actualizarDisparo();if(!a)pieza.replaceChildren();
-    const id=a?.id||crypto.randomUUID(),params={cantidad:a?.cantidad||cantidad,estado_fisico:a?.estado||estado,...(a?.upc?{upc:a.upc}:esRopa?tablero.valores():{upc:''})};
+    const id=a?.id||crypto.randomUUID(),params={cantidad:a?.cantidad||cantidad,estado_fisico:esRopa&&!a?.upc?'nuevo':a?.estado||estado,...(a?.upc?{upc:a.upc}:esRopa?tablero.valores():{upc:''})};
     try{const {pedirFoto}=await import('./camara-pc.js');$('chip-celular').textContent='● Esperando foto';const r=await pedirFoto({tipo:'pieza_nueva',pieza_id:id,params,contenedor:remota});if(['lista','cancelada'].includes(r.estado))remota.replaceChildren();if(r.estado==='lista'){hoy+=params.cantidad;textoHoy();const d=await api(`/api/piezas/${id}`);flujo.elegir(d.pieza);contador.poner(1);$('chip-celular').textContent='● Celular · Listo';mensaje('Foto recibida','ok');}else{$('chip-celular').textContent='■ No responde';mensaje(r.motivo||'El celular no responde','aviso');}}
     finally{pendienteFoto=false;actualizarDisparo();if(!flujo.actual())vacioPieza();foco();}
   }
   function manual(){
     let id=crypto.randomUUID(),enviando=false;const form=nodo('form',undefined,'formulario'),campos={};
     for(const [k,t] of [['nombre','Nombre'],['marca','Marca'],['categoria','Categoría'],['estado_fisico','Estado'],['precio_lista','Precio de lista ($)'],['precio','Precio de venta ($)'],['destino','Destino']]){const l=nodo('label',t),input=nodo(['categoria','estado_fisico','destino'].includes(k)?'select':'input');if(k==='categoria'||k==='estado_fisico'||k==='destino'){const lista=k==='categoria'?CATEGORIAS:k==='estado_fisico'?ESTADOS:[['etiqueta','Etiqueta individual']];for(const [v,t]of lista){const o=nodo('option',t);o.value=v;input.append(o);}}else{input.maxLength=k==='nombre'?120:k==='marca'?60:12;}l.append(input);campos[k]=input;form.append(l);}
-    let n=1;form.append(nodo('h3','Existencia inicial'),stepper(n,v=>n=v,{max:999,nombre:'Existencia inicial'}),boton('Guardar pieza',async()=>{if(enviando)return;const datos={id,nombre:campos.nombre.value,marca:campos.marca.value,categoria:campos.categoria.value,estado_fisico:campos.estado_fisico.value,stock:n,destino:campos.destino.value};for(const k of ['precio_lista','precio'])if(campos[k].value){const c=aCentavos(campos[k].value);if(c===null)throw new Error('Precio inválido');datos[k]=c;}enviando=true;try{await api('/api/borradores/manual',datos);cerrarHoja();mensaje('Pieza guardada','ok');}finally{enviando=false;}},'primario'));form.onsubmit=e=>e.preventDefault();hoja('Pieza sin foto',form);
+    campos.categoria.value=esRopa?'ropa':campos.categoria.value;
+    const actualizarGrado=()=>{campos.estado_fisico.parentElement.hidden=piezaRopa({categoria:campos.categoria.value});};campos.categoria.onchange=actualizarGrado;actualizarGrado();
+    let n=1;form.append(nodo('h3','Existencia inicial'),stepper(n,v=>n=v,{max:999,nombre:'Existencia inicial'}),boton('Guardar pieza',async()=>{if(enviando)return;const datos={id,nombre:campos.nombre.value,marca:campos.marca.value,categoria:campos.categoria.value,estado_fisico:piezaRopa({categoria:campos.categoria.value})?'nuevo':campos.estado_fisico.value,stock:n,destino:campos.destino.value};for(const k of ['precio_lista','precio'])if(campos[k].value){const c=aCentavos(campos[k].value);if(c===null)throw new Error('Precio inválido');datos[k]=c;}enviando=true;try{await api('/api/borradores/manual',datos);cerrarHoja();mensaje('Pieza guardada','ok');}finally{enviando=false;}},'primario'));form.onsubmit=e=>e.preventDefault();hoja('Pieza sin foto',form);
   }
   elegirTipo(esRopa);flujo.limpiar();
   addEventListener('offline',()=>{for(const b of pieza.querySelectorAll('button'))if(b.textContent.startsWith('+1'))bloquear(b,'Sin red: se suma al volver la señal');});

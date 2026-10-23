@@ -6,6 +6,7 @@ import { ESTADOS } from './estados.js';
 import { ropa, opciones, talla } from './inventario-ropa.js';
 import { stepper, bloquear, cerrarHoja } from './inventario-ui.js';
 import { estadoEnvio } from './envio-etiquetas.js';
+import { esRopa } from './ropa.js';
 
 export async function iniciarCelular(ctx,captura) {
   const {$,nodo,boton,mensaje,hoja,api,confirmar}=ctx;
@@ -71,7 +72,7 @@ export async function iniciarCelular(ctx,captura) {
   async function conservar(foto,a){
     const upc=a?.upc;const ropaSinCodigo=captura.esRopa()&&!upc;
     if(ropaSinCodigo&&!captura.tablero.validar())throw new Error('Completa talla y precio');
-    const r=registroFoto(foto,{id:a?.id||crypto.randomUUID(),estado_fisico:a?.estado||captura.estado(),cantidad:a?.cantidad||captura.cantidad(),...(ropaSinCodigo?captura.tablero.valores():{upc:upc??''})});
+    const r=registroFoto(foto,{id:a?.id||crypto.randomUUID(),estado_fisico:ropaSinCodigo?'nuevo':a?.estado||captura.estado(),cantidad:a?.cantidad||captura.cantidad(),...(ropaSinCodigo?captura.tablero.valores():{upc:upc??''})});
     await guardar(r);sesion.set(r.id,{...r,url:URL.createObjectURL(foto),subida:false});captura.flujo.limpiar();captura.contador.poner(1);pintar();mensaje(navigator.onLine?'Foto guardada en el teléfono':'Sin red · foto en el teléfono',navigator.onLine?'ok':'aviso');
     if(localStorage.getItem('inventario-vibracion')!=='false')navigator.vibrate?.(30);void subir();return r;
   }
@@ -105,9 +106,9 @@ export async function iniciarCelular(ctx,captura) {
     const c=nodo('div',undefined,'corregir-captura'),img=nodo('img');img.src=datos.url||`/api/foto/${id}`;img.alt='Foto de '+(datos.nombre||datos.prenda||'la pieza');c.append(img);
     let cambios={estado_fisico:actual.estado_fisico},cantidad=actual.stock,tallaActual=actual.talla||'',cambiado=false;
     const actualizar=()=>{cambiado=true;bloquear(guardarBoton,'');};
-    c.append(opciones(ESTADOS,actual.estado_fisico,v=>{cambios.estado_fisico=v;actualizar();},'Grado'),stepper(cantidad,n=>{cantidad=n;actualizar();},{max:999,nombre:'Piezas'}));
-    const esRopa=local?local.precio_ropa!=null:actual.categoria==='ropa';
-    const tablero=esRopa?ropa({pc:()=>false,mensaje,recordar:false,inicial:{talla:tallaActual,prenda:actual.prenda||'',marca:actual.marca||'',precio_ropa:actual.precio},cambiar:()=>actualizar()}):null;
+    if(!esRopa(actual))c.append(opciones(ESTADOS,actual.estado_fisico,v=>{cambios.estado_fisico=v;actualizar();},'Grado'));
+    c.append(stepper(cantidad,n=>{cantidad=n;actualizar();},{max:999,nombre:'Piezas'}));
+    const tablero=esRopa(actual)?ropa({pc:()=>false,mensaje,recordar:false,inicial:{talla:tallaActual,prenda:actual.prenda||'',marca:actual.marca||'',precio_ropa:actual.precio},cambiar:()=>actualizar()}):null;
     if(tablero)c.append(tablero.raiz);else if(tallaActual)c.append(talla(v=>{tallaActual=v;actualizar();},tallaActual));
     const marca=estadoEnvio({...actual,id}).marca;if(marca)c.append(nodo('p',`La etiqueta pegada dice $${marca.precio/100}`,'aviso'));
     const guardarBoton=boton('Guardar cambios',async()=>{

@@ -4,6 +4,37 @@ import { crearCaptura } from '../public/inventario-capturar.js';
 import { tienda, PRODUCTO } from './prueba-d1.ts';
 import { crearLector } from '../public/lector.js';
 
+test('UPC de Ropa ignora el grado de MG y conserva el estado interno al sumar; MG sigue filtrada por grado', async () => {
+  const ropa = { id: 'ropa', upc: '012345678905', categoria: 'ropa', estado_fisico: 'danado', stock: 1, estado_analisis: 'listo' };
+  const mg = { ...ropa, id: 'mg', categoria: 'hogar' };
+  const cuerpos: any[] = [];
+  const flujo = crearCaptura({ enLinea: () => true, imprimir: async () => true, api: async (ruta, cuerpo) => {
+    if (ruta.endsWith('/existencia')) { cuerpos.push(cuerpo); return { despues: 2 }; }
+    return { piezas: [ropa, mg], siguiente: null };
+  } });
+  await flujo.leer(ropa.upc);
+  assert.equal(flujo.actual()?.pieza.id, ropa.id);
+  flujo.estado('liquidacion');
+  assert.equal(flujo.actual()?.pieza.id, ropa.id);
+  await flujo.leer(ropa.upc);
+  assert.equal(flujo.actual()?.pieza.stock, 2);
+  assert.equal(flujo.actual()?.pieza.estado_fisico, 'danado');
+  assert.deepEqual(Object.keys(cuerpos[0]).sort(), ['delta', 'id', 'motivo']);
+});
+
+test('un UPC nuevo identificado como Ropa usa nuevo aunque MG tenga B o C seleccionado', async () => {
+  let enviada: any;
+  const flujo = crearCaptura({ enLinea: () => true, imprimir: async () => true, api: async (ruta, cuerpo) => {
+    if (ruta.startsWith('/api/piezas?')) return { piezas: [], siguiente: null };
+    if (ruta.startsWith('/api/manifiesto/')) return { nombre: 'Playera', categoria: 'ropa', precio: 12000 };
+    enviada = cuerpo; return { id: cuerpo.id, estado_analisis: 'listo' };
+  } });
+  flujo.estado('danado'); await flujo.leer('012345678905');
+  assert.equal(flujo.actual()?.estado, 'nuevo');
+  flujo.estado('liquidacion'); await flujo.guardar();
+  assert.equal(enviada.estado_fisico, 'nuevo');
+});
+
 test('Capturar +1 usa rastro D1, un UUID por operación y exactamente una etiqueta; sin red no escribe',async(t0)=>{
   const t=tienda();t0.after(()=>t.db.close());
   t.db.prepare("update productos set estado_analisis='listo' where id=?").run(PRODUCTO);

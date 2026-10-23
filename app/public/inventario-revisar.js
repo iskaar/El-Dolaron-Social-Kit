@@ -7,6 +7,7 @@ import { copiarParaMarketplace } from './compartir.js';
 import { cerrarHoja, bloquear } from './inventario-ui.js';
 import { filaSolicitud, precios, refrescarPrecios } from './inventario-precio.js';
 import { normalizarUpc } from './upc.js';
+import { esRopa } from './ropa.js';
 
 const normalizar = t => String(t||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/\s+/g,' ').trim();
 export const diaTienda = iso => new Date(iso).toLocaleDateString('en-CA',{timeZone:'America/Mexico_City'});
@@ -84,7 +85,7 @@ export async function iniciar(ctx) {
     if(puedeEditar&&visibles.length){const li=nodo('li'),l=nodo('label',undefined,'casilla'),c=nodo('input');c.type='checkbox';c.checked=visibles.every(p=>seleccion.has(p.id));c.indeterminate=!c.checked&&visibles.some(p=>seleccion.has(p.id));c.onchange=()=>{for(const p of visibles)c.checked?seleccion.add(p.id):seleccion.delete(p.id);pintar();};l.append(c,nodo('span',`Todas (${visibles.length})`));li.append(l);lista.append(li);}
     for(const p of visibles){const li=resultado(p,()=>abrir(p));li.className='fila-revision';
       if(puedeEditar){const l=nodo('label',undefined,'casilla'),c=nodo('input');c.type='checkbox';c.setAttribute('aria-label',`Elegir ${p.nombre||'pieza'}`);c.checked=seleccion.has(p.id);c.onchange=()=>{c.checked?seleccion.add(p.id):seleccion.delete(p.id);pintarBarra();};l.append(c);li.prepend(l);}
-      li.append(nodo('small',`${estadoTexto(p)} · ${nombreEstado(p.estado_fisico)}`));
+      li.append(nodo('small',`${estadoTexto(p)}${esRopa(p)?'':` · ${nombreEstado(p.estado_fisico)}`}`));
       if(puedeEditar){if(p.estado_analisis==='error')li.append(boton('Reintentar',()=>accion(p,'analizar')));else if(gemela(p))li.append(boton('Sumar a la existente',()=>fusionar(p,gemela(p))));}
       lista.append(li);
     }
@@ -123,7 +124,7 @@ export async function iniciar(ctx) {
     visibles=[];guardarTodo.hidden=true;activos.replaceChildren();barra.hidden=true;placeholder.hidden=true;nota.hidden=true;lista.replaceChildren();
     for(const g of repetidas.values()){
       if(filtro.busca&&!normalizar([g.upc,...g.piezas.flatMap(p=>[p.codigo,p.nombre])].join(' ')).includes(normalizar(/^\d+$/.test(filtro.busca)?normalizarUpc(filtro.busca):filtro.busca)))continue;
-      const li=nodo('li',undefined,'grupo-repetidas'),titulo=nodo('h3',`UPC ${g.upc} · ${nombreEstado(g.estado_fisico)}`);
+      const li=nodo('li',undefined,'grupo-repetidas'),titulo=nodo('h3',`UPC ${g.upc}${g.piezas.every(esRopa)?'':` · ${nombreEstado(g.estado_fisico)}`}`);
       const label=nodo('label','Conservar'),select=nodo('select');
       for(const p of g.piezas){const o=nodo('option',`${p.codigo||'Sin etiqueta'} · ${p.nombre||'Sin nombre'} · ×${p.stock}`);o.value=p.id;select.append(o);}
       select.id=`conservar-${g.upc}-${g.estado_fisico}`;select.value=g.destino_id;select.onchange=()=>{g.destino_id=select.value;pintar();$(select.id)?.focus();};label.append(select);li.append(titulo,label);
@@ -169,8 +170,11 @@ export async function iniciar(ctx) {
       const poner=opciones=>{for(const[v,t]of opciones){const o=nodo('option',t);o.value=v;input.append(o);}input.value=campos[k];};
       if(k==='categoria')poner(CATEGORIAS);else if(k==='estado_fisico')poner(ESTADOS);else if(k==='destino'){poner([[p.destino,p.destino==='etiqueta'?'Etiqueta individual':p.destino]]);void destinos().then(d=>{input.replaceChildren();poner(d);}).catch(e=>mensaje(e.message,'error'));}
       else{input.value=campos[k];input.maxLength=k==='nombre'?120:k==='marca'?60:k==='talla'?30:12;}
-      input.oninput=()=>{campos[k]=input.value;borradores.set(p.id,campos);};input.onchange=input.oninput;l.append(input);form.append(l);
+      input.oninput=()=>{campos[k]=input.value;borradores.set(p.id,campos);if(k==='categoria')actualizarGrado();};input.onchange=input.oninput;l.append(input);form.append(l);
+      if(k==='estado_fisico')l.dataset.grado='';
     }
+    function actualizarGrado(){form.querySelector('[data-grado]').hidden=esRopa(campos);}
+    actualizarGrado();
     form.onsubmit=e=>e.preventDefault();
     form.append(boton('Guardar cambios',()=>guardar(p,campos),'primario'));
     const acciones=nodo('div',undefined,'acciones');

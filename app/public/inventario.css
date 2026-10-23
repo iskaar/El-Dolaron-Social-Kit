@@ -200,7 +200,7 @@ main:has(#modo-buscar:not([hidden])) .caja{margin-bottom:12px}
   .barra-captura .stepper{justify-self:end;gap:0}
   .barra-captura .stepper button{width:44px;height:56px;padding:0;box-shadow:none}
   .barra-captura .stepper output{width:44px;min-height:44px;display:grid;place-items:center;font-size:28px}
-  .barra-captura .disparo{width:76px;min-width:76px;height:76px;margin:0;padding:3px;font-size:13px;line-height:1.15;overflow-wrap:normal}
+  .barra-captura .disparo{grid-column:2;width:76px;min-width:76px;height:76px;margin:0;padding:3px;font-size:13px;line-height:1.15;overflow-wrap:normal}
   header .tipo-cabecera{display:none}
   body:has(#modo-capturar:not([hidden])) header .marca{display:none}
   body:has(#modo-capturar:not([hidden])) header .tipo-cabecera{display:flex;order:-1;flex:1;flex-wrap:nowrap;margin:0}

@@ -39,7 +39,7 @@ const server=createServer(async(req,res)=>{try{
   else if(u.pathname==='/api/borradores/upc')datos=upcQA?{...p,existente:true,sumadas:2,stock:5}:{...p,id:'33333333-3333-4333-8333-333333333333',nombre:'Lámpara',stock:1};
   else if(u.pathname==='/api/etiquetas'){
     const chunks=[];for await(const ch of req)chunks.push(ch);const {ids}=JSON.parse(Buffer.concat(chunks));
-    datos=[p,{...p,id:'22222222-2222-4222-8222-222222222222',nombre:'Lámpara de escritorio',stock:6}].filter(p=>ids.includes(p.id));
+    datos=[p,{...p,id:'22222222-2222-4222-8222-222222222222',nombre:'Lámpara de escritorio',categoria:'hogar',stock:6}].filter(p=>ids.includes(p.id));
   }
   else if(u.pathname.startsWith('/api/manifiesto/')){if(u.pathname.includes('999999999999')){res.statusCode=404;datos={error:'Sin registro'};}else datos={nombre:'Lámpara de escritorio',categoria:'hogar',precio:24900,precios:{nuevo:24900,danado:14900,liquidacion:9900},imagen:null};}
   else if(u.pathname.includes('/revision'))datos={...p,categoria:'ropa',prenda:'Chamarra'};
@@ -64,8 +64,8 @@ const cdp=(method,params={})=>new Promise((resolve,reject)=>{pendientes.set(++id
 const js=async expression=>{const r=await cdp('Runtime.evaluate',{expression,awaitPromise:true,returnByValue:true});if(r.exceptionDetails)throw new Error(r.exceptionDetails.exception?.description);return r.result.value;};
 await cdp('Runtime.enable');await cdp('Page.enable');const salida=process.env.QA_SALIDA||path.join(os.tmpdir(),'inventario-qa-capturas');await mkdir(salida,{recursive:true});
 await cdp('Page.addScriptToEvaluateOnNewDocument',{source:`
-window.blePrueba={enviadas:0,fallarDesde:Infinity,buffer:''};
-const caracteristica={properties:{writeWithoutResponse:true},async writeValueWithoutResponse(bytes){if(blePrueba.enviadas>=blePrueba.fallarDesde)throw new Error('GATT desconectada simulada');blePrueba.buffer+=new TextDecoder().decode(bytes);if(blePrueba.buffer.includes('PRINT 1,1\\r\\n')){blePrueba.enviadas++;blePrueba.buffer='';}}};
+window.blePrueba={enviadas:0,fallarDesde:Infinity,buffer:'',trabajos:[]};
+const caracteristica={properties:{writeWithoutResponse:true},async writeValueWithoutResponse(bytes){if(blePrueba.enviadas>=blePrueba.fallarDesde)throw new Error('GATT desconectada simulada');blePrueba.buffer+=new TextDecoder().decode(bytes);if(blePrueba.buffer.includes('PRINT 1,1\\r\\n')){blePrueba.enviadas++;blePrueba.trabajos.push(blePrueba.buffer);blePrueba.buffer='';}}};
 const aparato={addEventListener(){},gatt:{connected:true,async connect(){return{getPrimaryService:async()=>({getCharacteristic:async()=>caracteristica})};},disconnect(){}}};
 Object.defineProperty(navigator,'bluetooth',{configurable:true,value:{requestDevice:async()=>{if(blePrueba.cancelar)throw new DOMException('Cancelada','NotFoundError');return aparato;}}});
 `.replace(/^\+/gm,'')});
@@ -96,6 +96,8 @@ if(!upcQA)for(const [width,height] of [[360,640],[412,740],[390,844]]){
   await esperar("document.querySelector('.alternar-camara').getAttribute('aria-pressed')==='true'");
   for(const tipo of ['Mercancía','Ropa']){
     await js(`[...document.querySelectorAll('.tipo-cabecera button')].find(b=>b.textContent==='${tipo}').click()`);
+    assert.equal(await js("!!document.querySelector('.barra-captura [aria-label=Grado]:not([hidden])')"),tipo==='Mercancía','Solo MG muestra el selector de grado');
+    if(tipo==='Mercancía')await js("document.querySelector('.barra-captura [data-valor=danado]').click()");
     assert.equal(await js('scrollY'),0,'La captura se mide sin desplazar la página');
     const medir=()=>js(`(()=>{const b=document.querySelector('.disparo'),r=b.getBoundingClientRect(),n=document.getElementById('modos').getBoundingClientRect();return {tipo:'${tipo}',width:innerWidth,height:innerHeight,y:r.y,bottom:r.bottom,left:r.left,right:r.right,navY:n.top,visible:!!r.width&&!!r.height,cubierto:document.elementFromPoint(r.x+r.width/2,r.y+r.height/2)!==b}})()`);
     const comprobar=g=>{assert.ok(g.visible&&g.y>=0&&g.bottom<=height&&g.left>=0&&g.right<=width,`Disparo dentro del viewport: ${JSON.stringify(g)}`);assert.ok(g.bottom<=g.navY&&!g.cubierto,`Disparo libre de navegación: ${JSON.stringify(g)}`);};
@@ -193,6 +195,7 @@ for(const width of [390,1280]){
   }
   await capturar('01-listo',width);
   if(width===390){
+    await js("document.querySelector('.barra-captura [data-valor=liquidacion]').click()");
     await js("[...document.querySelectorAll('[aria-label=\"Tipo de pieza\"] button')].find(b=>b.textContent==='Ropa').click()");
     await capturar('06-ropa-sin-talla',width);
     await js("document.querySelector('.tablero-ropa [data-valor=Niño]').click()");await esperar("!!document.querySelector('#hoja .rodillo .elegida')");
@@ -217,9 +220,9 @@ for(const width of [390,1280]){
     await cdp('Network.enable');await cdp('Network.emulateNetworkConditions',{offline:true,latency:0,downloadThroughput:0,uploadThroughput:0});
     await js("document.querySelector('.disparo').click()");await esperar("!!document.querySelector('.miniatura.local')");await capturar('07-sin-red',width);
     await js("document.querySelector('.disparo').click()");await esperar("document.querySelectorAll('.miniatura.local').length===2",300);
-    const locales=await js("import('/cola-fotos.js').then(m=>m.pendientes()).then(rs=>rs.map(r=>({prenda:r.prenda,marca:r.marca,talla:r.talla,precio:r.precio_ropa})))");
-    assert.deepEqual(locales,Array.from({length:2},()=>({prenda:'Chamarra',marca:'Cat & Jack',talla:'M',precio:12000})), 'Dos piezas conservan el precio manual y los campos enviados');
-    await js("document.querySelector('.miniatura.local').click()");await capturar('08-corregir',width);await js("document.getElementById('cerrar-hoja').click()");
+    const locales=await js("import('/cola-fotos.js').then(m=>m.pendientes()).then(rs=>rs.map(r=>({prenda:r.prenda,marca:r.marca,talla:r.talla,precio:r.precio_ropa,estado:r.estado_fisico})))");
+    assert.deepEqual(locales,Array.from({length:2},()=>({prenda:'Chamarra',marca:'Cat & Jack',talla:'M',precio:12000,estado:'nuevo'})), 'Dos piezas conservan el precio manual y los campos enviados');
+    await js("document.querySelector('.miniatura.local').click()");assert.equal(await js("document.querySelector('#hoja [aria-label=Grado]')"),null,'Corregir Ropa local no ofrece grado');await capturar('08-corregir',width);await js("document.getElementById('cerrar-hoja').click()");
     await cdp('Network.emulateNetworkConditions',{offline:false,latency:0,downloadThroughput:-1,uploadThroughput:-1});await esperar('navigator.onLine');await dormir(350);
     await cdp('Page.reload');await esperar("!!document.querySelector('.empezar-captura button')");
     await js("document.querySelector('.empezar-captura button').click()");
@@ -228,8 +231,22 @@ for(const width of [390,1280]){
     assert.equal(await js("document.querySelector('.marcas-ropa [aria-pressed=true]').textContent"),'Cat & Jack');
     assert.equal(await js("document.querySelector('.tallas-ropa [aria-pressed=true]')"),null,'La talla no se guarda al recargar');
     await capturar('05c-ropa-recordada',width);
+    await esperar("!!document.querySelector('.miniatura.subida')");
+    await js("document.querySelector('.miniatura.subida').click()");await esperar("document.getElementById('hoja').open");
+    assert.equal(await js("document.querySelector('#hoja [aria-label=Grado]')"),null,'Corregir Ropa subida no ofrece grado');
+    await js("document.getElementById('cerrar-hoja').click()");
   }
-  if(width===1280){await js("[...document.querySelectorAll('#modo-capturar button')].find(b=>b.textContent==='Mercancía').click()");await js("[...document.querySelectorAll('#modo-capturar button')].find(b=>b.textContent==='Producto sin código: foto con celular').click()");await capturar('10-esperando-celular',width);await dormir(8500);await capturar('10-celular-no-responde',width);await js("document.querySelector('.panel-celular button').click()");}
+  if(width===1280){
+    await js("document.querySelector('#modo-capturar [aria-label=Grado] [data-valor=danado]').click();[...document.querySelectorAll('#modo-capturar [aria-label=\"Tipo de pieza\"] button')].find(b=>b.textContent==='Ropa').click()");
+    assert.equal(await js("document.querySelector('#modo-capturar [aria-label=Grado]').hidden"),true,'PC: Ropa oculta grado');
+    await js("document.querySelector('.tablero-ropa [data-valor=M]').click();document.querySelector('.tablero-ropa [aria-label=Precio] [data-valor=\"12000\"]').click()");
+    await js("[...document.querySelectorAll('#modo-capturar button')].find(b=>b.textContent==='Producto sin código: foto con celular').click()");
+    await esperar("document.querySelector('.panel-celular')?.textContent.includes('Esperando al celular')");
+    assert.equal(globalThis.solicitud.params.estado_fisico,'nuevo','PC: la foto remota de Ropa usa nuevo');
+    await js("document.querySelector('.panel-celular button').click()");
+    await esperar("!document.querySelector('.panel-celular')");
+    await js("[...document.querySelectorAll('#modo-capturar button')].find(b=>b.textContent==='Mercancía').click()");await js("[...document.querySelectorAll('#modo-capturar button')].find(b=>b.textContent==='Producto sin código: foto con celular').click()");await capturar('10-esperando-celular',width);await dormir(8500);await capturar('10-celular-no-responde',width);await js("document.querySelector('.panel-celular button').click()");
+  }
   await buscar('0191907910414');await capturar('02-codigo-nuevo',width);
   await buscar('012345678905');await capturar('03-ya-existe',width);
   await buscar('999999999999');await capturar('04-sin-registro',width);
@@ -272,6 +289,7 @@ for(const width of [390,1280]){
   assert.equal(await js('bloqueadaQA'),'true');
   await esperar("document.getElementById('estado').textContent.includes('Etiqueta enviada · ED-002318')");
   assert.equal(await js('blePrueba.enviadas'),1,'Un doble toque envía una sola copia');
+  assert.doesNotMatch(await js('blePrueba.trabajos[0]'),/^BOX |,"4",0,1,1,"[ABC]"/m,'Reimprimir desde Buscar omite grado en Ropa');
   assert.equal(await js("document.getElementById('ficha').hidden"),true,'Reimprimir no abre ficha');
   await capturar('21-tarjeta-reimprimir',width);
   await js("document.querySelector('#resultados .resultado').focus()");
@@ -290,7 +308,7 @@ for(const width of [390,1280]){
   assert.match(await js("document.getElementById('resumen').textContent"),/1 resultado para «chamarra»/);
   await cdp('Input.dispatchKeyEvent',{type:'keyDown',key:'Escape',code:'Escape',windowsVirtualKeyCode:27});
   await esperar("document.getElementById('resumen').textContent.includes('Todo el inventario')");
-  await buscar('chamarra');await capturar('11-ficha',width);
+  await buscar('chamarra');assert.doesNotMatch(await js("document.getElementById('detalles').textContent"),/[ABC] ·|grado/,'Ficha de Ropa sin grado');await capturar('11-ficha',width);
   await js("window.lecturasQA=[];window.clicksQA=0;document.addEventListener('lectura',e=>lecturasQA.push(e.detail));const b=document.getElementById('editar');b.addEventListener('click',()=>clicksQA++);b.focus()");
   for(const key of '012345678905'){await cdp('Input.dispatchKeyEvent',{type:'keyDown',key,text:key});await cdp('Input.dispatchKeyEvent',{type:'keyUp',key});await dormir(15);}
   await cdp('Input.dispatchKeyEvent',{type:'keyDown',key:'Enter',code:'Enter',windowsVirtualKeyCode:13});await cdp('Input.dispatchKeyEvent',{type:'keyUp',key:'Enter',code:'Enter',windowsVirtualKeyCode:13});await dormir(200);
@@ -299,6 +317,14 @@ for(const width of [390,1280]){
   await js("document.getElementById('chip-red').click()");await capturar('17-red',width);await js("document.getElementById('cerrar-hoja').click()");
   await js("document.getElementById('menu').click()");await capturar('18-menu',width);await js("document.getElementById('cerrar-hoja').click()");
   await modo('revisar');await js("document.querySelector('#modo-revisar [data-estado=todas]').click()");
+  assert.doesNotMatch(await js("[...document.querySelectorAll('.fila-revision')].find(l=>l.querySelector('.resultado')?.dataset.id==='11111111-1111-4111-8111-111111111111').textContent"),/[ABC] ·/,'Revisar: Ropa sin grado');
+  assert.match(await js("[...document.querySelectorAll('.fila-revision')].find(l=>l.querySelector('.resultado')?.dataset.id==='22222222-2222-4222-8222-222222222222').textContent"),/A · Nuevo/,'Revisar: MG conserva grado');
+  await js("[...document.querySelectorAll('.fila-revision .resultado')].find(b=>b.dataset.id==='11111111-1111-4111-8111-111111111111').click()");
+  await esperar("!!document.querySelector('#detalle-revisar [data-grado]')");
+  assert.equal(await js("document.querySelector('#detalle-revisar [data-grado]').hidden"),true,'Avanzado oculta grado para Ropa');
+  await js("const s=[...document.querySelectorAll('#detalle-revisar select')].find(s=>[...s.options].some(o=>o.value==='hogar'));s.value='hogar';s.dispatchEvent(new Event('change'))");
+  assert.equal(await js("document.querySelector('#detalle-revisar [data-grado]').hidden"),false,'Cambiar a MG recupera grado');
+  if(width===390)await js("document.getElementById('volver').click()");
   await js("document.querySelector('#modo-revisar .fila-revision input[type=checkbox]').click()");await capturar('12-revisar-seleccion',width);
   listaVacia=true;await modo('buscar');await modo('revisar');await capturar('13-revisar-vacio',width);
   falloLista=true;listaVacia=false;await modo('buscar');await modo('revisar');await capturar('13-revisar-error',width);falloLista=false;
@@ -318,6 +344,14 @@ await cdp('Page.navigate',{url:`http://127.0.0.1:${port}/inventario?reflujo=320#
 await js("document.getElementById('consulta').value='chamarra';document.getElementById('consulta').dispatchEvent(new Event('input'))");
 await esperar("document.getElementById('resumen').textContent.includes('1 resultado')");await capturar('20-reflujo-filtrado',320);
 await buscar('chamarra');await capturar('11-reflujo',320);
+consultaSolo=false;
+await js("import('/etiquetera.js').then(m=>m.marcarImpresa('11111111-1111-4111-8111-111111111111',new Date().toISOString(),{precio:45000,precio_lista:60000,nombre:'Nombre anterior',talla:'M',estado_fisico:'danado'}))");
+for(const ruta of ['/inventario#imprimir','/etiquetas']){
+  await cdp('Page.navigate',{url:`http://127.0.0.1:${port}${ruta}`});
+  await esperar("document.body.textContent.includes('La pegada dice')||document.body.textContent.includes('La etiqueta pegada dice')");
+  const aviso=await js("[...document.querySelectorAll('small,.marca.aviso')].find(n=>/La (etiqueta )?pegada dice/.test(n.textContent)).textContent");
+  assert.match(aviso,/Nombre anterior/);assert.doesNotMatch(aviso,/grado|[ABC] ·/,'Avisos de Imprimir y /etiquetas sin grado en Ropa');
+}
 }
 await writeFile(path.join(salida,'medidas.json'),JSON.stringify({errores,medidas},null,2));
 assert.deepEqual(errores,[]);const pequenos=medidas.flatMap(d=>d.pequenos.map(p=>({...p,estado:d.nombre,width:d.width})));assert.deepEqual(pequenos,[],'Objetivos menores de 44 px');console.log(`QA: ${medidas.length} capturas; sin desborde, objetivos >=44 px, sin errores de JavaScript`);

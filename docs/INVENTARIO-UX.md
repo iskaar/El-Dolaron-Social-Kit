@@ -13,7 +13,7 @@ Base leída (origin/main): `escanear.html`, `captura.html`, `admin.html`, `etiqu
 | Navegación celular | **Barra inferior** de 4 modos (64 px). Los modos no se tapan con el dedo ni con el visor; el pulgar llega. |
 | Navegación PC (≥ 1000 px) | **Pestañas en la cabecera** (segmentado) con pista `Alt+1…4`. |
 | Lenguaje visual | Papel de tienda de barrio: fondo niebla, bordes de 2 px azul, **sombra dura desplazada**, esquinas de 2 px, amarillo para la acción principal. Nada de tarjetas de 12 px de radio con sombra difusa. |
-| Capturar | **Un solo flujo**: código → pieza/+1/etiqueta. Sin código → foto → (Ropa: prenda, marca, talla y precio en el mismo tablero) → subida/análisis. En celular, `Mercancía | Ropa` son pestañas compactas en la cabecera; grado, disparo y cantidad viven en una barra fija sobre la navegación. La cámara se puede apagar. |
+| Capturar | **Un solo flujo**: código → pieza/+1/etiqueta. Sin código → foto → (Ropa: prenda, marca, talla y precio en el mismo tablero) → subida/análisis. En celular, `Mercancía | Ropa` son pestañas compactas en la cabecera; disparo y cantidad (grado solo en MG) viven en una barra fija sobre la navegación. La cámara se puede apagar. |
 | Impresora y celular | **Servicios** con chips fijos en la cabecera, no modos. |
 | Lector | Un solo receptor global (`lector.js`). **El Enter del lector nunca activa un botón.** |
 | Tipografía | `system-ui` (sin descargas con mala red). Precios y cantidades en 800 con `tabular-nums`; códigos en `ui-monospace`. |
@@ -234,7 +234,7 @@ Convención de mockups: `[ ]` botón secundario, `[[ ]]` botón principal, `( )`
 
 ### 4.1 Capturar
 
-Un flujo, tres puertas de entrada: **código** (lector/cámara/teclado), **disparo** (foto sin código) y **ED-/dígitos cortos** (abre la ficha, no crea). Elementos pegajosos entre piezas (se recuerdan): tipo `Mercancía|Ropa`, grado `A|B|C`, cantidad (vuelve a 1 tras guardar), y en Ropa prenda, marca, talla y precio. Grados: `A · Nuevo`, `B · Dañado`, `C · Liquidación` (rótulo corto «Liq.» solo en celular).
+Un flujo, tres puertas de entrada: **código** (lector/cámara/teclado), **disparo** (foto sin código) y **ED-/dígitos cortos** (abre la ficha, no crea). Elementos pegajosos entre piezas (se recuerdan): tipo `Mercancía|Ropa`, grado `A|B|C` solo en MG, cantidad (vuelve a 1 tras guardar), y en Ropa prenda, marca, talla y precio. Grados: `A · Nuevo`, `B · Dañado`, `C · Liquidación` (rótulo corto «Liq.» solo en celular).
 
 **Máquina de estados**
 
@@ -272,7 +272,7 @@ LISTO ──lee código──► BUSCANDO ──► NUEVA (manifiesto) ──Gua
 - Cámara: ideal 1280×960 y proporción ideal 4:3, sin mínimos (un `min` lanza OverconstrainedError y la cámara no abre), para conservar fotos de 1024 px de lado mayor con menor costo en teléfonos de gama media; zoom solo si cambia, video `playsinline muted` sin filtros, sombras ni transformaciones.
 - Detector UPC/EAN y Code128 sobre el video reducido, una detección a la vez (también al reabrir), con 200 ms de descanso tras cada intento; no detecta con pestaña oculta, cámara apagada, revisión u hoja abierta y descarta resultados tardíos. Cámara y USB usan `lector.recibir` → Capturar: la búsqueda existente prioriza la etiqueta ED numérica sobre UPC, sin filtrar su grado ni consultar el manifiesto; solo si no es etiqueta sigue el flujo UPC.
 - Disparo: 76×76, círculo blanco con borde 6 px `--amarillo` y sombra dura `4px 4px 0 --azul`; presionado hunde. `aria-label="Tomar foto"`. Vive siempre en el centro de la barra fija; no se oculta al leer UPC.
-- Barra de captura: grado a la izquierda (3 × 44×56), disparo al centro, stepper a la derecha (44+44+44, botones de 44×56). Padding lateral 6 px, huecos 4 px: cabe en 360 px sin envolver. Se fija a `66px + env(safe-area-inset-bottom)` del borde inferior. Con un único modo, la navegación se oculta y la barra baja al borde, conservando el área segura. El contenido tiene padding inferior para que su final pueda desplazarse por encima de la barra.
+- Barra de captura: en MG, grado a la izquierda (3 × 44×56), disparo al centro, stepper a la derecha (44+44+44, botones de 44×56). En Ropa solo quedan disparo centrado y cantidad a la derecha; el grado está oculto. Padding lateral 6 px, huecos 4 px: cabe en 360 px sin envolver. Se fija a `66px + env(safe-area-inset-bottom)` del borde inferior. Con un único modo, la navegación se oculta y la barra baja al borde, conservando el área segura. El contenido tiene padding inferior para que su final pueda desplazarse por encima de la barra.
 - Interruptor dentro del visor, esquina superior izquierda: icono blanco + «Cámara»/«Apagada», fondo oscuro translúcido, `aria-pressed`, objetivo ≥44 px. Reutiliza `crearCamara.abrir/pausar`, incluidos parada de tracks y descarte de detecciones tardías. `inventario-camara` en `sessionStorage` recuerda la elección al cambiar de modo o recargar. Apagada: visor oscuro y texto «Cámara apagada»; el disparo abre la selección de foto existente, nunca usa un fotograma detenido. «Pieza sin foto» conserva su permiso de dueño en el menú del visor.
 - Carrusel 24 h: ver «Correcciones».
 - `⋯ → ⌨ Escribir` en la cabecera abre la caja con teclado numérico (`inputmode=numeric`). Se eligió el menú existente para conservar espacio en 360 px y mantener a la vista Impresora y Red, sin añadir otra fila o icono.
@@ -336,7 +336,7 @@ La búsqueda IA comienza solo al tocar `Buscar en internet`, nunca por tiempo ni
 | Hoy · 12 piezas · 9 subidas [Ver todas]|
 | [miniaturas…]                        |  contenido desplazable
 +--------------------------------------+
-| [A][B][C]       ( O )       [-] 1 [+]|  barra fija, igual que Mercancía
+|                ( O )       [-] 1 [+]|  barra fija de Ropa, sin grado
 +--------------------------------------+
 | Capturar | Buscar | Revisar | Imprimir|
 ```
@@ -347,9 +347,9 @@ La búsqueda IA comienza solo al tocar `Buscar en internet`, nunca por tiempo ni
 - Prenda, marca y precio se recuerdan en `localStorage` con `try/catch`; al recargar se restaura el precio manual, sin recalcularlo. La talla conserva su regla: permanece entre disparos, no se guarda al recargar. La edad permanece durante la sesión y se respeta la talla infantil al corregir una pieza. Corregir no cambia las preferencias de captura.
 - Obligatorios para disparar sin UPC: talla y precio. Si faltan, se resalta el grupo y el disparo dice «Elige talla» / «Elige precio» con `aria-disabled`; no se agrega un banner. `aria-describedby` enlaza el motivo con un nodo `role=status` solo para lectores de pantalla. Prenda y marca opcionales. Los códigos y fotos de piezas existentes conservan su flujo propio.
 - Niño: el chip `Niño…` mantiene la **hoja con rodillo de edades**, sin competir con el scroll; debajo, fila opcional XS–XL y Usar talla. La edad ya no vuelve a «4 años» al cambiar prenda, marca o precio.
-- Visor compacto, rodillos, marca y talla caben encima de la barra en los tamaños habituales; el historial o contenido adicional puede desplazarse en pantallas pequeñas. Grado, cantidad y disparo permanecen visibles a cualquier altura. Marcas y tallas siguen en una sola fila horizontal deslizable. Controles de al menos 44 px. La página conserva su paleta explícita también con preferencia de sistema oscura.
+- Visor compacto, rodillos, marca y talla caben encima de la barra en los tamaños habituales; el historial o contenido adicional puede desplazarse en pantallas pequeñas. Cantidad y disparo permanecen visibles a cualquier altura. Marcas y tallas siguen en una sola fila horizontal deslizable. Controles de al menos 44 px. La página conserva su paleta explícita también con preferencia de sistema oscura.
 - Si en Ropa se lee un código de barras: se atiende como código de mercancía (la pieza con UPC no es una prenda sin código); el tipo pegajoso no cambia.
-- Datos del servidor y etiqueta conservan campos, nombre «Prenda Marca» y centavos. `/captura`, configuración e IA por lotes no cambian.
+- Ropa envía silenciosamente `estado_fisico='nuevo'`, el valor predeterminado existente; no hay migración. La etiqueta omite recuadro, letra y palabra del grado. Los campos, nombre «Prenda Marca» y centavos se conservan. `/captura`, configuración e IA por lotes no cambian.
 - Toques por pieza (sin contar entrada a Ropa, cámara ni desplazamientos): cambiar prenda + marca común + talla y disparar pasa de **7 a 4**; con precio manual, de **9 a 5**. Si se repiten todos los datos: **1 → 1** (solo disparar). Un gesto de rodillo sustituye la selección por toque; deslizar la fila de marcas/tallas puede requerir otro gesto.
 
 **Celular — Foto tomada, subiendo, analizando (mercancía)**
@@ -365,14 +365,14 @@ La búsqueda IA comienza solo al tocar `Buscar en internet`, nunca por tiempo ni
 ...  (Imp Lista)(▲ Sin red 4)
 | 12 hoy · 8 subidas  [m✓][m✓][m☁][m☁] |  ☁ = nube tachada, borde punteado
 ```
-- Disparo, grado, cantidad y Ropa funcionan igual. Códigos: sin red no se pueden buscar → el estado dice «Sin red · toma foto» y el botón `⌨ Escribir` queda `aria-disabled` con ese motivo.
+- Disparo, grado (solo MG), cantidad y Ropa funcionan igual. Códigos: sin red no se pueden buscar → el estado dice «Sin red · toma foto» y el botón `⌨ Escribir` queda `aria-disabled` con ese motivo.
 - Al volver la red: «Subiendo 4…» → «✓ Todo subido». Mientras haya cola, el chip Red muestra el número y pasa a `Subir ahora` en su hoja.
 
 **Celular — Correcciones de 24 h (carrusel + hoja)**
 
 - Carrusel horizontal, miniaturas de 72×72 (zona táctil 72), hueco 12, `scroll-snap-type:x proximity`, la más reciente primero. Encabezado de una línea: «Hoy · 12 piezas · 9 subidas» a la izquierda y `Ver todas` (texto) a la derecha que abre la lista completa de 24 h en una hoja a pantalla casi completa.
 - Cada miniatura: talla arriba (12/800 sobre `#000b`), badge de cantidad abajo-derecha (insignia amarilla), estado como se describió. `aria-label="Chamarra M, 2 piezas, subida"`.
-- Tocar: **hoja «Corregir»** (no pantalla completa que tape todo): foto 4:3 arriba (40 % del alto), grado (segmentado), cantidad (stepper), en Ropa prenda/precio (mismos rodillos), marca y talla, y abajo `[[ Guardar cambios ]]` (se habilita al haber cambios; si no, `aria-disabled` con «Sin cambios») · `Retomar foto` (secundario) · `Descartar` (peligro, dos toques: «Descartar» → «¿Descartar esta pieza?» rojo durante 4 s; la línea de estado lo anuncia).
+- Tocar: **hoja «Corregir»** (no pantalla completa que tape todo): foto 4:3 arriba (40 % del alto), grado (segmentado solo en MG), cantidad (stepper), en Ropa prenda/precio (mismos rodillos), marca y talla, y abajo `[[ Guardar cambios ]]` (se habilita al haber cambios; si no, `aria-disabled` con «Sin cambios») · `Retomar foto` (secundario) · `Descartar` (peligro, dos toques: «Descartar» → «¿Descartar esta pieza?» rojo durante 4 s; la línea de estado lo anuncia).
 - Si ya salió la etiqueta: nota fija de una línea «La etiqueta pegada dice $300» (aviso) antes de guardar un cambio de precio. No requiere casilla (es captura propia).
 - Si aún se está subiendo: botones de la hoja `aria-disabled` con «Espera a que suba».
 
@@ -403,9 +403,9 @@ La búsqueda IA comienza solo al tocar `Buscar en internet`, nunca por tiempo ni
 +----------------------------------------------------------------------------------------------+
 ```
 
-- Izquierda = entradas (caja, tipo, grado, cantidad, «Ya existe»). Derecha = **pieza actual** y **solicitud al celular**. La acción principal de la derecha es una sola: la de la tarjeta vigente.
+- Izquierda = entradas (caja, tipo, grado solo en MG, cantidad, «Ya existe»). Derecha = **pieza actual** y **solicitud al celular**. La acción principal de la derecha es una sola: la de la tarjeta vigente.
 - `Enter` con la caja vacía activa el principal visible (muestra `kbd Enter` en el botón). Una lectura nunca lo activa (regla 3.5).
-- Ropa en PC: los grupos Prenda / Marca / Talla / Precio se despliegan en la columna izquierda como **cuatro filas de chips que se envuelven** (sin deslizar), con la misma lógica de obligatorios. Principal de la derecha: `[[ Pedir foto al celular ]]` (`aria-disabled` + «Falta talla» hasta completar).
+- Ropa en PC: sin control de grado; los grupos Prenda / Marca / Talla / Precio se despliegan en la columna izquierda como **cuatro filas de chips que se envuelven** (sin deslizar), con la misma lógica de obligatorios. Principal de la derecha: `[[ Pedir foto al celular ]]` (`aria-disabled` + «Falta talla» hasta completar).
 - Solicitud al celular — estados de la tarjeta: **Esperando** (cuenta atrás 2:00, punto fijo; con movimiento permitido, parpadeo lento) con `Cancelar` · **Recibida** (vista previa 4:3, `[[ Usar ]]` `[ Repetir ]`) · **Guardando** · **Lista** («✓ Chamarra M · ED-002331», la tarjeta se vacía y vuelve el foco a la caja) · **No responde** (ver sección 6).
 - Sin impresora: «Guardar ×N» sigue siendo principal, con etiqueta «Guardar ×N» (sin «e imprimir») y la línea avisa al guardar «Guardada · falta etiqueta».
 - El pie «Hoy» es neutro 14/600 con números `tabular-nums`; el segmento «analizando» y «sin foto» son enlaces de texto que saltan a Revisar con ese filtro.
@@ -478,7 +478,7 @@ La cola que hoy vive en `/admin`. Cuenta: «Por revisar N» = pendientes + con e
 | [ Filtros (1) ]       [ ⋯ ]          |
 +--------------------------------------+
 | [☐] [f] Chamarra Levi's  ⏳ Analizando |
-|         ED-002331 · A Nuevo · ×2     |
+|         ED-002331 · ×2               |
 | [☐] [f] Jeans 501 M  ■ Con error     |
 |         [ Reintentar ]               |
 | [☑] [f] Lámpara  ▲ Ya existe ×3      |
@@ -490,7 +490,7 @@ La cola que hoy vive en `/admin`. Cuenta: «Por revisar N» = pendientes + con e
 
 - Fila: casilla (zona táctil 48×48 a la izquierda; la casilla visual 28), miniatura 56, nombre, estado con glifo+texto (`⏳ Analizando`, `✓ Lista`, `■ Con error`, `▲ Ya existe`), una línea de metadatos, y **una** acción contextual en la fila (solo cuando aplica: `Reintentar`, `Sumar a la existente`). Alto mín. 80.
 - Seleccionar ≥ 1 abre la **barra de acciones masivas** pegada sobre la barra inferior: «N elegidas» + principal acorde al contexto + `Descartar` (peligro, dos toques con el conteo: «¿Descartar 3?»). Acciones en `⋯`: `Reanalizar`, `Cambiar categoría`, `Cambiar destino`, `Sumar a existente`. «Elegir todas» = casilla de encabezado tri-estado «Todas (14)». `Guardar todo` queda como acción del encabezado de la lista y pide confirmar con el número («Guardar 14 piezas»).
-- Tocar la fila (no la casilla) abre la **ficha** (la misma de Buscar) con un bloque `Avanzado ▸` (categoría, estado, destino, recalcular precio, reanalizar, fusionar, descartar). Precio de pieza con etiqueta: solo dueño.
+- Tocar la fila (no la casilla) abre la **ficha** (la misma de Buscar) con un bloque `Avanzado ▸` (categoría, estado solo en MG, destino, recalcular precio, reanalizar, fusionar, descartar). Precio de pieza con etiqueta: solo dueño.
 - **Solo consulta** (sin casilla): sin casillas, sin barra masiva, sin `Avanzado` ni acciones de fila; el sello `Solo consulta` va a la derecha de la fila de filtros. Las filas siguen siendo tocables para ver la ficha.
 - Revisar es solo-red: sin red, el modo muestra el vacío «Sin red» (sección 6) y la barra inferior conserva Capturar.
 
@@ -798,3 +798,9 @@ Una captura del mismo UPC (ignorando ceros iniciales), propietario y grado suma 
 En Corregir datos, «Código del producto (UPC)» admite teclado/lector con foco y «Leer con cámara». Vacío quita el UPC; se exige «Editar inventario». Una coincidencia abre una hoja con «Juntar en…» y «Cancelar». Si falta etiqueta se usa la fusión existente, conservando la pieza etiquetada; con dos etiquetas se traspasa toda la existencia, se conservan ambos códigos y se ofrece imprimir las N etiquetas del destino. La origen queda en cero, sin UPC y sin borrar sus relaciones.
 
 Revisar › «Repetidas · N» aparece para el dueño y quien tenga la casilla (también FEP, sólo lo suyo). Agrupa por UPC normalizado y grado, muestra foto, código y existencia, y permite escoger cuál conservar; por omisión el código ED más antiguo. Usa la misma hoja de coincidencia. La búsqueda inspecciona 80 candidatas por página mediante el índice 053: «N+» indica que falta recorrer páginas, con «Cargar más» aun cuando una página no tenga coincidencias. Nunca presenta ese conteo parcial como total.
+
+### Grado solo para MG (Isaac, 23/10/2026; seguimiento #458/#459)
+
+Ropa no muestra ni edita A/B/C en Capturar (móvil y PC), Corregir del carrusel (local o subida), ficha, filas de Revisar, grupos Repetidas formados solo por Ropa, Avanzado ni alta sin foto. Cambiar la categoría a Ropa oculta el campo; volver a MG lo muestra. Buscar ya usa filas sin grado y conserva esa presentación. Los filtros de Revisar siguen siendo estado de análisis, día, categoría, precio y sesión, sin agregar filtro de grado.
+
+Imprimir, Reimprimir de Buscar/ficha y `/etiquetas` comparten TSPL sin grado para Ropa; tampoco muestran avisos de grado al corregir nombre, talla o precio. La vigencia de una etiqueta de Ropa ignora `estado_fisico`; MG conserva la reimpresión por grado. `/api/etiquetas` devuelve también `categoria` para todos esos caminos. Se mantienen valores históricos y reglas de servidor por propietario + UPC + estado físico (#452); al buscar un UPC de Ropa no se descarta por el grado seleccionado en MG.
