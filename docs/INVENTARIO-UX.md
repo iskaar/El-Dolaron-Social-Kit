@@ -239,9 +239,9 @@ Un flujo, tres puertas de entrada: **código** (lector/cámara/teclado), **dispa
 **Máquina de estados**
 
 ```
-LISTO ──lee código──► BUSCANDO ──► NUEVA (manifiesto) ──Guardar / 25 s / otro código──► GUARDADA
+LISTO ──lee código──► BUSCANDO ──► NUEVA (manifiesto) ──Guardar / otro código──► GUARDADA
    │                      ├──► YA EXISTE ──[+1 e imprimir 1]──► GUARDADA
-   │                      ├──► SIN REGISTRO ──► búsqueda IA ──► CONFIRMAR IMAGEN ──► NUEVA
+   │                      ├──► SIN REGISTRO ──Buscar en internet──► búsqueda IA ──► CONFIRMAR IMAGEN ──► NUEVA
    │                      └──► ERROR RED ──► (Reintentar | seguir con foto)
    └──disparo──► (Ropa: exige talla y precio) ──► FOTO GUARDADA EN EL TELÉFONO ──► SUBIENDO ──► ANALIZANDO ──► LISTA
                                                           └── sin red ──► EN COLA (se sube sola)
@@ -283,14 +283,14 @@ LISTO ──lee código──► BUSCANDO ──► NUEVA (manifiesto) ──Gua
 +--------------------------------------+
 |▓▓▓▓▓▓▓▓▓▓ (visor, 40 % más bajo) ▓▓▓▓|
 +--------------------------------------+
-| 012345678905              se guarda 25s
+| 012345678905                         |
 | Lámpara de escritorio                |
 | $249 · Hogar · A Nuevo               |
 | [ - ] 2 [ + ]       [[ Guardar ]]    |
 +--------------------------------------+
 ```
 
-- Mismo código otra vez = `+1` (el número y el stepper saltan; sonido «más»). Otro código distinto guarda la anterior y abre la nueva. A los 25 s se guarda sola: barra amarilla de 4 px que se vacía al pie de la tarjeta (con `prefers-reduced-motion`: solo el texto «25 s» contando).
+- Mismo código otra vez = `+1` (el número y el stepper saltan; sonido «más»). Otro código distinto guarda la anterior y abre la nueva. La pieza permanece abierta hasta tocar `Guardar` o leer otro código; no hay guardado por tiempo.
 - `−` hasta 0 cancela; en 0 el botón principal cambia a peligro «Cancelar pieza».
 - Principal `Guardar` (56). Tras guardar, la línea dice «Guardada · etiqueta en camino» y la tarjeta se contrae a una fila «Lámpara ×2 · ED-002331 ✓» al carrusel.
 
@@ -314,11 +314,11 @@ LISTO ──lee código──► BUSCANDO ──► NUEVA (manifiesto) ──Gua
 ```
 | ▲ Sin registro · 012345678905         | estado: aviso
 +--------------------------------------+
-| Buscando en internet…  ▒▒▒░░ 12 s    |
+| [ Buscar en internet ]             |
 | [[ Tomar foto ]]   [ Sin foto ]*     |  * solo dueño
 +--------------------------------------+
 ```
-Resultado de la búsqueda IA: tarjeta con imagen 120×120, nombre y `[[ Es esta ]]` / `[ No es ]`. «Sin foto» abre formulario manual (solo dueño; ver 4.3 hoja «Pieza sin foto»). Seguir escaneando no cancela: la búsqueda continúa y queda en el carrusel como «⏳ buscando».
+La búsqueda IA comienza solo al tocar `Buscar en internet`, nunca por tiempo ni por leer otro código. Resultado: tarjeta con imagen 120×120, nombre y `[[ Es esta ]]` / `[ No es ]`. «Sin foto» abre formulario manual (solo dueño; ver 4.3 hoja «Pieza sin foto»). Seguir escaneando no cancela: la búsqueda continúa y queda en el carrusel como «⏳ buscando».
 
 **Celular — Sin código: Ropa** (el tablero de Ropa va **encima del visor**, scrim `rgb(11 18 32 / .85)`, y no cambia de lugar entre fotos)
 
@@ -376,7 +376,7 @@ Resultado de la búsqueda IA: tarjeta con imagen 120×120, nombre y `[[ Es esta 
 +---------------------------------------------+------------------------------------------------+
 | [▮▮ 012345678905____________ ● Lector listo]| PIEZA ACTUAL                                   |
 |                                             | +--------------------------------------------+ |
-| Tipo  [Mercancía*|Ropa]                     | | 012345678905            se guarda en 25 s  | |
+| Tipo  [Mercancía*|Ropa]                     | | 012345678905                              | |
 | Grado [A Nuevo*][B Dañado][C Liquidación]   | | Lámpara de escritorio                      | |
 | Cantidad [-] 1 [+]                          | | $249 · Hogar · manifiesto                  | |
 |                                             | | [-] 2 [+]      [[ Guardar ×2 e imprimir ]] | |
@@ -672,7 +672,7 @@ Chip `Celular · No responde` (rojo). La solicitud caduca a los 2:00 sin crear p
 
 - [ ] Todo control con nombre accesible: `label` visible (sin `placeholder` como etiqueta), `aria-label` solo en iconos (`−`, `+`, `✕`, disparo, teclado).
 - [ ] `lang="es"`. Un `h1` («Inventario»), `h2` por modo/sección, `h3` dentro de tarjetas.
-- [ ] Línea de estado `role=status aria-live=polite aria-atomic=true`; errores que exigen acción `role=alert` (assertive) en el mismo sitio; **no** anunciar chips ni contadores que cambian cada segundo (cuenta atrás de 25 s: `aria-hidden`, y un solo anuncio al inicio y otro a los 5 s restantes).
+- [ ] Línea de estado `role=status aria-live=polite aria-atomic=true`; errores que exigen acción `role=alert` (assertive) en el mismo sitio; **no** anunciar chips ni contadores que cambian cada segundo.
 - [ ] Pestañas: patrón `tablist` con roving `tabindex`, ←/→/Inicio/Fin, Alt+1…4; paneles `tabpanel`; el foco se mueve al panel/caja al activar.
 - [ ] Orden de tabulación en PC: caja → controles de la columna izquierda en orden visual → columna derecha → pie; chips de la cabecera **después** de las pestañas y antes de la caja; sin `tabindex` positivos. Saltar al contenido: enlace «Ir a la caja» (visible al enfocar).
 - [ ] Nada solo con hover: todo `:hover` tiene equivalente táctil y de teclado; descripciones en hoja, no en `title`.
@@ -692,7 +692,7 @@ Chip `Celular · No responde` (rojo). La solicitud caduca a los 2:00 sin crear p
 
 ## 8. No hacer (anti-patrones vistos que no se heredan)
 
-1. **Párrafos de ayuda.** `etiquetas.html` (tres `<p class="ayuda">` de 6–9 líneas: conectar, «Mostrar impresas», historial); `bandas.html` (`.ayuda` de 6 líneas); `escanear.html` (`<p class="dato">` bajo el formulario manual y la lista vacía con la regla de 25 s); `camara-remota.html`. Reemplazo: estados con 2–6 palabras y una acción.
+1. **Párrafos de ayuda.** `etiquetas.html` (tres `<p class="ayuda">` de 6–9 líneas: conectar, «Mostrar impresas», historial); `bandas.html` (`.ayuda` de 6 líneas); `escanear.html` (`<p class="dato">` bajo el formulario manual y la lista vacía); `camara-remota.html`. Reemplazo: estados con 2–6 palabras y una acción.
 2. **Fila de 10 botones iguales** sin jerarquía (`etiquetas.html .barra`: Conectar, Imprimir, Auto, Nueva sesión, Todas, Ninguna, Marcar, Mostrar, ¿No aparece?, Detener). Reemplazo: un principal, interruptores y un `⋯`.
 3. **Enlaces con flechas como navegación** en cabeceras (`admin.html`: «Buscar pieza →», «Ir a capturar →», «Imprimir bandas →»; `etiquetas.html`; `bandas.html`). Reemplazo: modos.
 4. **Objetivos de 30–40 px**: `li .corregir button` 36×36 en `escanear.html`; `#cantidad button` 30×40 y `.valor` 28 px en `captura.html` (< 600 px); `.mini` 62×62 como único acceso a corregir. Mínimo de esta guía: 48 (56 principal).
@@ -724,7 +724,7 @@ Herramienta: Chromium headless (Playwright/Puppeteer) con rutas `/api/*` interce
 | # | Estado | Debe verse |
 | --- | --- | --- |
 | 01 | Capturar · listo | visor, línea neutra, disparo 84 px, barra con 4 modos (celular); caja con «● Lector listo» (PC) |
-| 02 | Capturar · código nuevo | tarjeta con `Guardar`, cuenta 25 s, stepper, línea de éxito |
+| 02 | Capturar · código nuevo | tarjeta con `Guardar`, sin cuenta atrás ni guardado tras 25 s, stepper, línea de éxito |
 | 03 | Capturar · ya existe | `+1 e imprimir 1` principal, `Foto nueva` secundario |
 | 04 | Capturar · sin registro + búsqueda IA | «Sin registro», barra de progreso, `Tomar foto` |
 | 05 | Capturar · Ropa completa | tablero con prenda/marca/precio en resumen y fila de talla |

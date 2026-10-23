@@ -103,8 +103,11 @@ test('lector conserva ceros, suma alias, no confirma sola la imagen y la imagen 
   assert.equal(llamadas[0].ruta, '/api/manifiesto/0191907910414');
   assert.equal(api.actual().imagen.confirmada, false);
   assert.equal(el('confirmar-imagen').hidden, false);
-  // avisar() pone un temporizador de color y programarGuardado() el de 25 s, aunque falte confirmar la imagen.
-  assert.equal(temporizadores.size, 2);
+  assert.equal([...temporizadores.values()].some((t) => t.ms === 25_000), false);
+  for (const t of [...temporizadores.values()]) if (t.ms <= 25_000) await t.fn();
+  await api.cola();
+  assert.equal(llamadas.some((r) => r.opciones?.method === 'POST' && r.ruta === '/api/borradores/upc'), false);
+  assert.equal(api.actual().leido, '0191907910414');
   await api.procesar('191907910414');
   assert.equal(api.actual().stock, 2);
   assert.equal(llamadas.filter((r) => r.ruta.endsWith('/imagen')).length, 1);
@@ -197,4 +200,20 @@ test('la fila falta foto abre Sin foto con el mismo id y no cuenta dos veces la 
   assert.equal(cuerpo.id, id); assert.equal(cuerpo.upc, '0012345678905');
   assert.equal(el('total').textContent, '3 piezas'); assert.equal(li.eliminado, true);
   assert.equal(llamadas.filter((r) => r.ruta === '/api/borradores/upc/buscar').length, 1);
+});
+
+test('tras 25 s la desconocida sigue abierta sin crear un borrador; otro código guarda la conocida (#446)', async () => {
+  const { api, llamadas, temporizadores } = pantalla(false, true);
+  await api.procesar('0012345678905');
+  for (const t of [...temporizadores.values()]) if (t.ms <= 25_000) await t.fn();
+  await api.cola();
+  assert.equal(llamadas.some((r) => r.ruta === '/api/borradores/upc/buscar'), false);
+  assert.equal(api.desconocido().leido, '0012345678905');
+  const conocida = pantalla();
+  await conocida.api.procesar('0191907910414');
+  await conocida.api.procesar('191907910414');
+  await conocida.api.procesar('00001234');
+  const guardado = conocida.llamadas.find((r) => r.ruta === '/api/borradores/upc')!;
+  assert.equal(JSON.parse(String(guardado.opciones?.body)).stock, 2);
+  assert.equal(conocida.api.actual().leido, '00001234');
 });

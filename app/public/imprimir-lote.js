@@ -433,8 +433,8 @@ async function imprimirNuevas() {
         if ((p.categoria !== 'ropa' && !delEscaner) || estadoEnvio(p).vigente || p.stock <= 0 || p.destino !== 'etiqueta') continue;
         const quien = `${p.nombre?.trim() || 'pieza sin nombre'} (capturada ${hora(p.creado_en)})`;
         const lista = p.estado_analisis === 'listo' && p.nombre?.trim() && p.precio > 0;
-        // Lo escaneado sale en cuanto se guarda: su cantidad se cierra en el escáner (25 s, otro código
-        // o Guardar, #381). No detiene la cola: su etiqueta trae el nombre exacto del producto, así que
+        // Lo escaneado sale en cuanto se guarda: su cantidad se cierra en el escáner (otro código
+        // o Guardar, #446). No detiene la cola: su etiqueta trae el nombre exacto del producto, así que
         // no depende del orden de la mesa, y una pieza que espera foto no frena las demás (#375).
         if (delEscaner && !lista) {
           // Sin coincidencia exacta (nombre y precio) va aparte: se revisa en el admin y sale cuando

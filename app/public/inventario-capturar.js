@@ -7,7 +7,7 @@ import { aCentavos } from './ficha.js';
 import { stepper, bloquear, cerrarHoja } from './inventario-ui.js';
 
 /** Estado de captura: UUID estable al reintentar; precio y existencia confirmados solo por el servidor. */
-export function crearCaptura({ api, imprimir, cambiar=()=>{}, enLinea=()=>navigator.onLine, uuid=()=>crypto.randomUUID(), permiteUpc=true, permiteSumar=true, alDesconocido=()=>{} }) {
+export function crearCaptura({ api, imprimir, cambiar=()=>{}, enLinea=()=>navigator.onLine, uuid=()=>crypto.randomUUID(), permiteUpc=true, permiteSumar=true }) {
   let actual=null, resultados=[], siguiente=null, ajuste=null, fila=Promise.resolve();
   function pintar(){cambiar({actual,resultados,siguiente,ajuste});}
   async function guardar(){
@@ -22,7 +22,6 @@ export function crearCaptura({ api, imprimir, cambiar=()=>{}, enLinea=()=>naviga
     if(!enLinea())throw new Error('Sin red · toma foto');
     if(!mas&&actual?.tipo==='nueva'&&normalizarUpc(codigo)===normalizarUpc(actual.upc)){actual.cantidad=Math.min(999,actual.cantidad+1);pintar();return;}
     if(!mas&&actual?.tipo==='existente'&&permiteSumar&&(actual.pieza.codigo?.toUpperCase()===codigo.toUpperCase()||(actual.pieza.upc&&normalizarUpc(actual.pieza.upc)===normalizarUpc(codigo))))return sumar(actual.pieza);
-    if(!mas&&actual?.tipo==='sin-registro'&&!actual.buscando)alDesconocido(actual);
     if(!mas&&actual?.tipo==='nueva')await guardar();
     const datos=await api('/api/piezas?'+new URLSearchParams({q:codigo,...(mas&&siguiente?{cursor:siguiente}:{})}));
     resultados=mas?[...resultados,...datos.piezas]:datos.piezas;siguiente=datos.siguiente;
@@ -55,7 +54,7 @@ export async function iniciar(ctx) {
   const raiz=$('modo-capturar');raiz.replaceChildren();
   const columnas=nodo('div',undefined,'columnas'),entrada=nodo('div'),derecha=nodo('div');columnas.append(entrada,derecha);raiz.append(columnas);
   const tipo=nodo('div',undefined,'segmentado');tipo.setAttribute('role','group');tipo.setAttribute('aria-label','Tipo de pieza');
-  let esRopa=localStorage.getItem('captura-modo')==='ropa',estado='nuevo',cantidad=1,temporizador,pendienteFoto=false,consulta='',movil;
+  let esRopa=localStorage.getItem('captura-modo')==='ropa',estado='nuevo',cantidad=1,pendienteFoto=false,consulta='',movil;
   const mercancia=boton('Mercancía',()=>elegirTipo(false)),prenda=boton('Ropa',()=>elegirTipo(true));tipo.append(mercancia,prenda);
   const tablero=ropa({pc,mensaje,cambiar:()=>actualizarDisparo(true)});
   const grado=opciones(ESTADOS,estado,e=>{estado=e;flujo.estado(e);},'Grado');
@@ -76,10 +75,10 @@ export async function iniciar(ctx) {
   const neutro=()=>{const f=motivoFalta();if(f)mensaje(f,'aviso');else mensaje(pc()?'Escanea o escribe':'Escanea o toma foto');};
   function actualizarDisparo(avisar=false){const falta=motivoFalta();bloquear(disparo,falta||(pendienteFoto?'Espera la foto':''));if(avisar&&(falta||faltaAviso)){faltaAviso=!!falta;neutro();}}
   async function imprimir(id,n){if(!etiqueteraLista()||ctx.identidad.vendedor)return false;return ctx.imprimir([id],new Map([[id,n]]));}
-  const flujo=crearCaptura({api,imprimir,permiteSumar:dueno||ctx.identidad.usuario?.editar_inventario===true,alDesconocido:a=>{void buscarDesconocida(a).catch(e=>mensaje(e.message,'error'));},permiteUpc:!ctx.identidad.usuario?.roles.includes('finanzas'),cambiar:pintar});
+  const flujo=crearCaptura({api,imprimir,permiteSumar:dueno||ctx.identidad.usuario?.editar_inventario===true,permiteUpc:!ctx.identidad.usuario?.roles.includes('finanzas'),cambiar:pintar});
   const vacioPieza=()=>{if(pc()&&!pieza.children.length)pieza.append(nodo('p','Escanea un código para empezar','vacio'));};
   function pintar({actual,resultados,siguiente}){
-    clearTimeout(temporizador);lista.replaceChildren();
+    lista.replaceChildren();
     const varias=resultados.length>1;lista.hidden=encabezadoLista.hidden=!varias;if(!pendienteFoto)remota.replaceChildren();
     for(const p of resultados)lista.append(resultado(p,()=>flujo.elegir(p)));
     if(siguiente){const li=nodo('li');li.append(boton('Buscar más',()=>flujo.leer(consulta,true)));lista.append(li);}
@@ -100,13 +99,10 @@ export async function iniciar(ctx) {
       if(conPermiso){bloquear(sumar,!navigator.onLine?'Sin red: se suma al volver la señal':'');const fila=nodo('div',undefined,'acciones');fila.append(sumar,boton(p.tiene_foto?'Foto nueva':'Añadir foto',()=>fotoPieza(p),p.tiene_foto?'':'primario'));carta.append(fila);}else tarjeta.append(nodo('p','Solo consulta','solo-consulta'));
     }else if(actual.tipo==='nueva'){
       const fila=nodo('div',undefined,'acciones');tarjeta.append(nodo('p',nombreEstado(actual.estado)));carta.append(fila);fila.append(stepper(actual.cantidad,n=>flujo.cantidad(n),{min:0,max:999,nombre:'Piezas de este código'}),boton(etiqueteraLista()?'Guardar e imprimir':'Guardar',async()=>{await flujo.guardar();hoy+=actual.cantidad;textoHoy();mensaje(flujo.actual()?.faltaEtiqueta?'Guardada · falta etiqueta':'Guardada · etiqueta enviada',flujo.actual()?.faltaEtiqueta?'aviso':'etiqueta');foco();},'primario'));
-      const cuenta=nodo('p','Se guarda en 25 s','ayuda');cuenta.setAttribute('aria-hidden','true');carta.append(cuenta);
-      temporizador=setTimeout(()=>flujo.guardar().catch(e=>mensaje(e.message,'error')),25000);
       if(!actual.imagenBuscada){actual.imagenBuscada=true;void imagen(actual,foto,tarjeta);}
       else if(actual.imagen)pintarImagen(actual,foto,tarjeta);
     }else if(actual.tipo==='sin-registro'){
       mensaje('Sin registro · toma foto','aviso');const fila=nodo('div',undefined,'acciones');fila.append(boton('Buscar en internet',()=>buscarDesconocida(actual)),boton('Tomar foto',()=>fotoNueva(actual),'primario'));carta.append(fila);
-      if(!actual.buscando)temporizador=setTimeout(()=>buscarDesconocida(actual).catch(e=>mensaje(e.message,'error')),25000);
     }else if(actual.tipo==='guardada')tarjeta.append(nodo('p','✓ Guardada'));
     if(actual.faltaEtiqueta)tarjeta.append(boton('Imprimir etiqueta',async()=>{const ok=await ctx.imprimir([p.id],new Map([[p.id,1]]));if(ok){actual.faltaEtiqueta=false;mensaje('Etiqueta enviada','etiqueta');}}));
   }
@@ -115,7 +111,7 @@ export async function iniciar(ctx) {
   async function buscarDesconocida(a){
     if(a.buscando)return;
     const li=nodo('li'),retomar=boton(`Código ${a.upc} · buscando…`,()=>flujo.retomar(a));li.append(retomar);historia.prepend(li);
-    a.buscando=true;clearTimeout(temporizador);mensaje('Buscando en internet…');
+    a.buscando=true;mensaje('Buscando en internet…');
     await api('/api/borradores/upc/buscar',{id:a.id,upc:a.upc,stock:a.cantidad,estado_fisico:a.estado});
     for(let i=0;i<35;i++){await new Promise(r=>setTimeout(r,4000));const datos=await api(`/api/borradores/upc/${a.id}`);if(datos.estado_analisis==='listo'){retomar.textContent=`✓ ${datos.nombre}`;mensaje('Encontrada · lista para etiqueta','ok');if(flujo.actual()===a)flujo.elegir({...datos,tiene_foto:datos.con_foto});return;}if(datos.estado_analisis==='error'){retomar.textContent=`▲ ${a.upc} · toma foto`;mensaje('Sin resultado · toma foto','aviso');return;}}
   }
@@ -129,7 +125,7 @@ export async function iniciar(ctx) {
     if(!pc())return movil.tomar(a||flujo.actual());
     if(esRopa&&!a&&!tablero.validar())return;
     if(pendienteFoto)return;
-    pendienteFoto=true;actualizarDisparo();clearTimeout(temporizador);if(!a)pieza.replaceChildren();
+    pendienteFoto=true;actualizarDisparo();if(!a)pieza.replaceChildren();
     const id=a?.id||crypto.randomUUID(),params={cantidad:a?.cantidad||cantidad,estado_fisico:a?.estado||estado,...(a?.upc?{upc:a.upc}:esRopa?tablero.valores():{upc:''})};
     try{const {pedirFoto}=await import('./camara-pc.js');$('chip-celular').textContent='● Esperando foto';const r=await pedirFoto({tipo:'pieza_nueva',pieza_id:id,params,contenedor:remota});if(['lista','cancelada'].includes(r.estado))remota.replaceChildren();if(r.estado==='lista'){hoy+=params.cantidad;textoHoy();const d=await api(`/api/piezas/${id}`);flujo.elegir(d.pieza);contador.poner(1);$('chip-celular').textContent='● Celular · Listo';mensaje('Foto recibida','ok');}else{$('chip-celular').textContent='■ No responde';mensaje(r.motivo||'El celular no responde','aviso');}}
     finally{pendienteFoto=false;actualizarDisparo();if(!flujo.actual())vacioPieza();foco();}
