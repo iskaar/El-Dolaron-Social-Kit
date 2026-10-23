@@ -952,9 +952,10 @@ async function corregirCaptura(id: string, campo: string, request: Request, env:
       return await conflictoCapturaSumada(env, id, correo) ?? vencida(actual?.stock ?? fila.stock);
     }
   }
+  // La existencia directa nunca toca una `listo`: si el análisis la terminó después de la lectura de arriba, 0 filas (#468).
   const resultado = await env.DB.prepare(
     `update productos set ${columna} = ?, actualizado_en = ? where id = ? and capturado_por = ? and creado_en > ?
-       and (${sinFoto ? alcanceSinFoto : "upc is null or estado_analisis <> 'listo'"}) and estado_analisis <> 'descartado'
+       and (${sinFoto ? alcanceSinFoto : campo === 'existencia' ? "estado_analisis <> 'listo'" : "upc is null or estado_analisis <> 'listo'"}) and estado_analisis <> 'descartado'
        ${campo === 'existencia' ? `and not ${CAPTURA_SUMADA}` : ''}`,
   )
     .bind(valor, new Date().toISOString(), id, correo, desde)
