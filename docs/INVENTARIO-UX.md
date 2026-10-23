@@ -180,7 +180,7 @@ Fondo `--azul`, texto blanco, alto 56 (celular) / 64 (PC), `padding: 0 var(--gut
 | Marca | cuadro 36×36 amarillo con borde 2 px blanco y «EL» 800 azul (CSS, sin imagen) + «Inventario» 18/800; en Capturar este espacio lo ocupa `Mercancía | Ropa` (44 px de alto) | igual, 20/800 |
 | Modos | (en barra inferior) | pestañas |
 | **Chips** (derecha) | `Impresora` y `Red` | `Impresora`, `Celular`, `Red` |
-| Menú `⋯` (≥44×44) | En Capturar, `⌨ Escribir`; también Sonido, Vibración, Inicio, Ajustes (solo roles con /admin) | `Ajustes` como texto-botón + `⋯` (Sonido, Vibración, Inicio) |
+| Menú `⋯` (≥44×44) | En Capturar, `⌨ Escribir`; también Sonido, Vibración, Inicio, Ajustes (solo roles con /admin), Cerrar sesión (#463) | `Ajustes` como texto-botón + `⋯` (Sonido, Vibración, Inicio) |
 
 **Chip de conexión** (es un `<button>`, alto 44, `--azul-hondo`, borde 2 px `#6F86B5`, sin sombra, 14/700; glifo + palabra; en celular solo la palabra de estado, el nombre va en `aria-label`):
 
