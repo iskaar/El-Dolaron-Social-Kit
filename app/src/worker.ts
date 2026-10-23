@@ -48,7 +48,7 @@ import { registrarCorte, registrarRetiro, ultimoCorte, cajaDe } from './corte.ts
 import { rutaGastos } from './gastos.ts';
 import { rutaPiezas } from './piezas.ts';
 import { rutaSolicitudesPrecio } from './solicitudes-precio.ts';
-import { MISMO_UPC, PIEZA_UPC, CAPTURA_SUMADA, conflictoCapturaSumada, capturaSumada, sumarCaptura, conflictoUpc, corregirUpc, upcValido, type PiezaUpc } from './upc-inventario.ts';
+import { UPC_VISIBLE, MISMO_UPC, PIEZA_UPC, CAPTURA_SUMADA, conflictoCapturaSumada, capturaSumada, sumarCaptura, conflictoUpc, corregirUpc, upcValido, type PiezaUpc } from './upc-inventario.ts';
 import { rutaCamaraRemota } from './camara-remota.ts';
 import { rutaNomina } from './nomina.ts';
 import { lineasNetas } from './netas.ts';
@@ -298,7 +298,8 @@ async function crearBorrador(request: Request, env: Env, ctx: ExecutionContext, 
   const fotoGuardada = await env.DB.prepare(
     `insert into productos (id, semana_ingreso, estado_fisico, stock, talla, foto_key, capturado_por, creado_en, actualizado_en, propietario, upc)
      select ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
-     where (? = '' or not exists (select 1 from productos where ${MISMO_UPC} and id <> ?))
+     where (exists (select 1 from productos where id = ?) or ? = ''
+       or not exists (select 1 from productos where ${MISMO_UPC} and id <> ?))
        and not exists (select 1 from conteo_ajustes where id = ?)
      -- El stock no se toca: el reenvio de una foto no repone lo que la caja ya vendio (#312).
      on conflict (id) do update set
@@ -311,16 +312,24 @@ async function crearBorrador(request: Request, env: Env, ctx: ExecutionContext, 
        estado_analisis = 'pendiente',
        actualizado_en = excluded.actualizado_en
        where productos.estado_analisis <> 'descartado'
-         and (? = '' or not exists (select 1 from productos where ${MISMO_UPC} and id <> ?))`,
+         and not exists (select 1 from productos otra where ${UPC_VISIBLE}
+           and propietario = productos.propietario and ltrim(upc, '0') = ltrim(productos.upc, '0')
+           and estado_fisico = excluded.estado_fisico and id <> productos.id)`,
   )
     .bind(id, semanaIngreso(ahora), estadoFisico, cantidad, talla, fotoKey, capturadoPor, ahora.toISOString(), ahora.toISOString(), propietario, upc,
-      normalizarUpc(upc), propietario, normalizarUpc(upc), estadoFisico, id, id,
-      normalizarUpc(upc), propietario, normalizarUpc(upc), estadoFisico, id)
+      id, normalizarUpc(upc), propietario, normalizarUpc(upc), estadoFisico, id, id)
     .run();
-  if (!fotoGuardada.meta.changes && upc) {
-    const sumada = await sumarUpc(id, upc, estadoFisico, cantidad, env, correo, undefined, propietario);
-    if (sumada) return sumada;
-    return json({ error:'Ese UPC ya existe con este grado. Revisa la pieza existente.' }, 409);
+  if (!fotoGuardada.meta.changes) {
+    const retenida = await env.DB.prepare('select upc, estado_analisis from productos where id = ?')
+      .bind(id).first<{ upc:string | null; estado_analisis:string }>();
+    if (retenida?.estado_analisis !== 'descartado') {
+      if (!retenida && upc) {
+        const sumada = await sumarUpc(id, upc, estadoFisico, cantidad, env, correo, undefined, propietario);
+        if (sumada) return sumada;
+      }
+      return await conflictoUpc(env, retenida?.upc || upc || '', estadoFisico, propietario, id)
+        ?? json({ error:'La pieza cambió o ese UPC ya existe con este grado. Revisa la pieza existente.' }, 409);
+    }
   }
   await reiniciarRecorte(env, id);
 

@@ -136,6 +136,23 @@ test('foto y captura manual con UPC reutilizan identidad y conservan reintentos 
   t.db.close();
 });
 
+test('reenviar foto valida el UPC conservado contra el grado resultante, aunque el formulario no lo mande o mande otro', async tt => {
+  for (const upc of ['', '999999999999']) await tt.test(upc || 'sin UPC', async t0 => {
+    const t = preparar(); t0.after(() => t.db.close());
+    t0.mock.method(globalThis, 'fetch', async () => new Response('{}', {status:401}));
+    const a = pieza(t, {upc:UPC}), b = pieza(t, {upc:'012345678905',estado_fisico:'danado'});
+    const f = new FormData(); f.set('id',b.id); f.set('estado_fisico','nuevo');
+    if (upc) f.set('upc',upc);
+    f.set('foto',new File(['foto'],'foto.jpg',{type:'image/jpeg'}));
+    const r = await worker.fetch!(new Request('https://caja.prueba/api/borradores', {method:'POST',body:f}) as never,t.env,t.ctx as never);
+    await t.esperar();
+    assert.equal(r.status, 409);
+    assert.equal((await r.json() as any).existente.id, a.id);
+    const despues = t.db.prepare('select upc, estado_fisico, stock, precio, estado_analisis from productos where id=?').get(b.id)!;
+    assert.deepEqual({...despues}, {upc:b.upc,estado_fisico:'danado',stock:3,precio:9900,estado_analisis:'listo'});
+  });
+});
+
 test('la consulta de igualdad usa el índice por propietario, UPC normalizado y grado', () => {
   const t = preparar();
   const plan = t.db.prepare(`explain query plan select id from productos where ${MISMO_UPC} limit 1`).all('dolaron','12345678905','nuevo');
