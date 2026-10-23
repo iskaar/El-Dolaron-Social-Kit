@@ -1074,14 +1074,39 @@ async function reclamarEtiquetas(request: Request, env: Env, propietario: string
   });
 }
 
-/** "No salio" (#440): la marca de esas piezas se borra para que la etiqueta pueda volver a salir. */
+/**
+ * "No salio" (#440): la marca de esas piezas se borra para que la etiqueta pueda volver a salir. Con `etiquetas_en`
+ * ({ id: etiqueta_en }, la hora del reclamo que el dispositivo hizo) el borrado es condicional, en la misma sentencia: solo
+ * se borra la fila si sigue siendo ESE reclamo, asi un dispositivo nunca suelta el reclamo posterior de otro. Una pieza
+ * sin hora en el mapa no se toca. Sin `etiquetas_en` se borra sin condicion (compatibilidad). `soltadas` = filas borradas.
+ */
 async function soltarEtiquetas(request: Request, env: Env, propietario: string): Promise<Response> {
-  const ids = idsDeEtiquetas((await request.json().catch(() => null)) as { ids?: unknown } | null);
+  const cuerpo = (await request.json().catch(() => null)) as { ids?: unknown; etiquetas_en?: unknown } | null;
+  const ids = idsDeEtiquetas(cuerpo);
   if (!ids) return json({ error: 'Selecciona entre 1 y 100 piezas.' }, 400);
+  const en = cuerpo?.etiquetas_en;
+  if (en === undefined || en === null) {
+    const { meta } = await env.DB.prepare(
+      `delete from etiquetas_enviadas where producto_id in (select value from json_each(?))
+         and producto_id in (select id from productos where propietario = ?)`,
+    ).bind(JSON.stringify(ids), propietario).run();
+    return json({ soltadas: meta.changes });
+  }
+  if (typeof en !== 'object' || Array.isArray(en)) return json({ error: 'Reclamos inválidos.' }, 400);
+  const mapa = en as Record<string, unknown>;
+  const pares = [];
+  for (const id of ids) {
+    const hora = mapa[id];
+    if (hora === undefined) continue;
+    if (typeof hora !== 'string' || hora.length === 0 || hora.length > 40) return json({ error: 'Reclamos inválidos.' }, 400);
+    pares.push({ id, en: hora });
+  }
+  if (pares.length === 0) return json({ soltadas: 0 });
   const { meta } = await env.DB.prepare(
-    `delete from etiquetas_enviadas where producto_id in (select value from json_each(?))
+    `delete from etiquetas_enviadas
+     where exists (select 1 from json_each(?) j where json_extract(j.value, '$.id') = producto_id and json_extract(j.value, '$.en') = etiqueta_en)
        and producto_id in (select id from productos where propietario = ?)`,
-  ).bind(JSON.stringify(ids), propietario).run();
+  ).bind(JSON.stringify(pares), propietario).run();
   return json({ soltadas: meta.changes });
 }
 

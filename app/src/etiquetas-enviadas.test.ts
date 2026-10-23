@@ -314,3 +314,30 @@ test('los lotes de 100 piezas respetan los 100 parámetros por sentencia de D1',
     assert.equal(soltadas.cuerpo.soltadas, 100);
   } finally { p.db.close(); }
 });
+
+test('soltar con etiquetas_en es condicional: borra solo si la fila sigue siendo ese reclamo, y nunca el de otra pantalla ni el de otro propietario (#464)', async () => {
+  const p = montar();
+  try {
+    const id = p.pieza(), otra = p.pieza(), fep = p.pieza();
+    p.db.prepare("update productos set propietario = 'fep' where id = ?").run(fep);
+    p.db.prepare("insert into etiquetas_enviadas values (?, 'E-FEP', 1, 0, 'n', '', 'pc')").run(fep);
+    const primero = (await p.pc('/api/etiquetas/enviadas', { ids: [id, otra] })).cuerpo.marcas;
+    await new Promise((r) => setTimeout(r, 5));
+    const segundo = (await p.celular('/api/etiquetas/enviadas', { ids: [id], reimprimir: true })).cuerpo.marcas[id].etiqueta_en;   // reclamo posterior de otra pantalla
+    assert.notEqual(segundo, primero[id].etiqueta_en);
+    // La pantalla que reclamó primero ya no es la dueña de la fila de `id`, pero sí la de `otra`.
+    const r = await p.pc('/api/etiquetas/enviadas', { ids: [id, otra, fep], etiquetas_en: { [id]: primero[id].etiqueta_en, [otra]: primero[otra].etiqueta_en, [fep]: 'E-FEP' } }, 'DELETE');
+    assert.equal(r.status, 200);
+    assert.equal(r.cuerpo.soltadas, 1);
+    assert.equal(p.db.prepare('select etiqueta_en e from etiquetas_enviadas where producto_id = ?').get(id)!.e, segundo);
+    assert.equal(p.db.prepare('select count(*) n from etiquetas_enviadas where producto_id = ?').get(otra)!.n, 0);
+    assert.equal(p.db.prepare('select count(*) n from etiquetas_enviadas where producto_id = ?').get(fep)!.n, 1);   // propietario ajeno
+    // Sin hora para la pieza no se toca; con la hora vigente sí.
+    assert.equal((await p.pc('/api/etiquetas/enviadas', { ids: [id], etiquetas_en: {} }, 'DELETE')).cuerpo.soltadas, 0);
+    assert.equal((await p.pc('/api/etiquetas/enviadas', { ids: [id], etiquetas_en: { [id]: segundo } }, 'DELETE')).cuerpo.soltadas, 1);
+    assert.equal((await p.pc('/api/etiquetas/enviadas', { ids: [id], etiquetas_en: { [id]: segundo } }, 'DELETE')).cuerpo.soltadas, 0);
+    for (const etiquetas_en of ['x', [id], { [id]: 5 }, { [id]: '' }, { [id]: 'x'.repeat(41) }]) {
+      assert.equal((await p.pc('/api/etiquetas/enviadas', { ids: [id], etiquetas_en }, 'DELETE')).status, 400, JSON.stringify(etiquetas_en));
+    }
+  } finally { p.db.close(); }
+});
