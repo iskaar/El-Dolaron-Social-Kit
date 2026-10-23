@@ -9,14 +9,15 @@ export function boton(texto, accion, clase = '') {
     try { await accion(b); } catch (e) { mensaje(e.message, 'error'); }
   }); return b;
 }
-let limpiarEstado;
+let limpiarEstado, neutro = 'Escanea o escribe';
+export const ponerNeutro = (texto) => { neutro = texto; };
 export function mensaje(texto, tipo = 'neutro') {
   clearTimeout(limpiarEstado);
   const error = tipo === 'error', el = $(error ? 'error' : 'estado');
   $('estado').hidden = error; $('error').hidden = !error;
   el.dataset.tipo = tipo;
   el.textContent = `${({ ok:'✓', error:'■', aviso:'▲', etiqueta:'✓' })[tipo] || '●'} ${texto}`;
-  if (tipo === 'ok' || tipo === 'etiqueta') limpiarEstado = setTimeout(() => mensaje('Escanea o escribe'), 5000);
+  if (tipo === 'ok' || tipo === 'etiqueta') limpiarEstado = setTimeout(() => mensaje(neutro), 5000);
 }
 let disparador;
 export function hoja(titulo, contenido) {

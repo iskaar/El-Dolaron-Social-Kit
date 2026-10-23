@@ -2,7 +2,7 @@ import { iniciarEtiquetas } from './imprimir-lote.js';
 import { estadoEnvio } from './envio-etiquetas.js';
 import { conectarEtiquetera, etiqueteraLista, imprimirBanda, detenerEnvio, historialTexto, desmarcarDesde } from './etiquetera.js';
 import { semanaIngreso } from './semana.js';
-import { stepper, bloquear, cerrarHoja } from './inventario-ui.js';
+import { stepper, bloquear, cerrarHoja, ponerNeutro } from './inventario-ui.js';
 
 export async function iniciar(ctx) {
   const { $, nodo, boton, mensaje, hoja, api, pesos, dueno, foco } = ctx;
@@ -11,8 +11,8 @@ export async function iniciar(ctx) {
   const etiquetas = nodo('section'), bandas = nodo('section'); etiquetas.id = 'panel-etiquetas'; bandas.id = 'panel-bandas'; bandas.hidden = true;
   const et = boton('Etiquetas', () => elegir(false)), ba = boton('Bandas', () => elegir(true));
   for (const [b,id,panel] of [[et,'tab-etiquetas',etiquetas],[ba,'tab-bandas',bandas]]) { b.id=id;b.setAttribute('role','tab');b.setAttribute('aria-controls',panel.id);panel.setAttribute('role','tabpanel');panel.setAttribute('aria-labelledby',id); }
-  function elegir(b) { etiquetas.hidden=b;bandas.hidden=!b;et.setAttribute('aria-selected',String(!b));ba.setAttribute('aria-selected',String(b));et.tabIndex=b?-1:0;ba.tabIndex=b?0:-1; }
-  elegir(false); pestanas.append(et,ba); if(ctx.identidad.usuario?.roles.includes('finanzas')) ba.hidden=true;
+  function elegir(b,avisar=true) { if(avisar){const t=b?'Elige una banda':'Etiquetas por imprimir';ponerNeutro(t);mensaje(t);}etiquetas.hidden=b;bandas.hidden=!b;et.setAttribute('aria-selected',String(!b));ba.setAttribute('aria-selected',String(b));et.tabIndex=b?-1:0;ba.tabIndex=b?0:-1; }
+  elegir(false,false); pestanas.append(et,ba); if(ctx.identidad.usuario?.roles.includes('finanzas')) ba.hidden=true;
   pestanas.onkeydown=(e)=>{if(['ArrowLeft','ArrowRight'].includes(e.key)){e.preventDefault();elegir(bandas.hidden);}};
   const conectar = nodo('button','Conectar impresora','primario'); conectar.type='button'; conectar.id='conectar-impresora';
   const avisoConexion=nodo('div',undefined,'tarjeta conexion-aviso');avisoConexion.append(conectar);
@@ -35,7 +35,8 @@ export async function iniciar(ctx) {
     hoja('Etiquetas',c);
   });menu.setAttribute('aria-label','Acciones de etiquetas');
   const controles=nodo('div',undefined,'acciones');controles.append(todas,mostrar,menu);
-  barra.append(seleccion,imprimir,boton('Detener',()=>motorBoton('detener').click(),'peligro'));
+  const detener=boton('Detener',()=>motorBoton('detener').click(),'peligro');detener.hidden=true;
+  barra.append(seleccion,imprimir,detener);
   etiquetas.append(avisoConexion,controles,lista,barra,operaciones,resumen,historial,estado,ayuda,filtro);raiz.append(pestanas,etiquetas,bandas);
   const motorBoton=(id)=>raiz.querySelector('#'+id);
   // Solo el nodo visual de estado anuncia: el motor conserva sus mensajes y sus controles.
@@ -54,9 +55,9 @@ export async function iniciar(ctx) {
   const vista={
   inicio(ids,pedidas){estadoParcial=null;enviadasLote=0;totalLote=[...pedidas.values()].reduce((n,v)=>n+v,0);},
   conexion(){actualizarConexion();contar();},
-  controles({imprimiendo,automaticaActiva}){imprimir.disabled=false;contar();if(imprimiendo||automaticaActiva)bloquear(imprimir,imprimiendo?'Espera el envío':'Pausa la automática');},
+  controles({imprimiendo,automaticaActiva}){imprimir.disabled=false;detener.hidden=!(imprimiendo||automaticaActiva||parcial);contar();if(imprimiendo||automaticaActiva)bloquear(imprimir,imprimiendo?'Espera el envío':'Pausa la automática');},
   progreso(p,hechas,total){mensaje(`Enviando ${hechas}/${total}`);},
-  resultado(p,hechas,total,ok){enviadasLote+=hechas;if(ok){restantes.delete(p.id);parcial=false;}else if(hechas>0){restantes.set(p.id,total-hechas);parcial=true;estadoParcial={hechas:enviadasLote,total:totalLote||total};mensaje(`Salieron ${hechas} de ${total}`,'aviso');}},
+  resultado(p,hechas,total,ok){enviadasLote+=hechas;if(ok){restantes.delete(p.id);parcial=false;}else if(hechas>0){restantes.set(p.id,total-hechas);parcial=true;detener.hidden=false;estadoParcial={hechas:enviadasLote,total:totalLote||total};mensaje(`Salieron ${hechas} de ${total}`,'aviso');}},
   pintar({ piezas, hechas, pendientes, visibles, filtroCodigo, desmarcadas, idDudoso, copiasDe }){
     mostrar.setAttribute('aria-checked',String(visibles.length>pendientes.length));lista.replaceChildren();
     const filtro=filtroCodigo.trim().toUpperCase();

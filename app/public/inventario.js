@@ -1,6 +1,6 @@
 import { escucharLector } from './lector.js';
 import { api, crearFicha, pesos } from './ficha.js';
-import { $, nodo, boton, mensaje, hoja, confirmar, prepararHoja, stepper, cerrarHoja } from './inventario-ui.js';
+import { $, nodo, boton, mensaje, hoja, confirmar, prepararHoja, stepper, cerrarHoja, ponerNeutro } from './inventario-ui.js';
 
 prepararHoja();
 const pc = () => matchMedia('(min-width:1000px)').matches;
@@ -46,14 +46,14 @@ async function buscar(mas = false) {
   if (!navigator.onLine) return mensaje('Este modo necesita red', 'aviso');
   const turno = ++generacion;
   if (!mas) { consulta = $('consulta').value.trim(); siguiente = null; $('resultados').replaceChildren(); ficha.cerrar(); document.body.classList.remove('con-ficha'); }
-  if (!consulta) return mensaje('Escribe o escanea una pieza');
+  if (!consulta) { $('resumen').className = 'vacio'; $('resumen').textContent = 'Escribe o escanea una pieza'; return mensaje('Busca por código o nombre'); }
   mensaje('Buscando…');
   try {
     const datos = await api(`/api/piezas?${new URLSearchParams({ q:consulta, ...(mas && siguiente ? { cursor:siguiente } : {}) })}`);
     if (turno !== generacion) return;
     siguiente = datos.siguiente; $('mas').hidden = !siguiente;
     $('resultados').append(...datos.piezas.map((p) => resultado(p)));
-    $('resumen').textContent = `${$('resultados').children.length} resultados`;
+    const total = $('resultados').children.length; $('resumen').className = total ? 'ayuda' : 'vacio'; $('resumen').textContent = total ? `${total} ${total === 1 ? 'resultado' : 'resultados'}` : `Sin resultados para «${consulta}»`;
     mensaje(datos.piezas.length ? 'Resultados listos' : siguiente ? 'Busca más piezas' : 'Sin resultados');
     if (!mas && datos.piezas.length === 1) await ficha.abrir(datos.piezas[0].id);
   } catch(e) { if (turno === generacion) mensaje(e.message, 'error'); }
@@ -84,7 +84,9 @@ async function cambiarModo(nuevo) {
   $('busqueda').hidden = modo === 'capturar' && !pc();
   $('consulta').placeholder = { capturar:'UPC, ED- o nombre', buscar:'ED-, UPC o nombre', revisar:'Buscar en la cola', imprimir:'Código para filtrar' }[modo];
   $('camara-etiqueta').hidden = modo !== 'buscar';
-  mensaje(navigator.onLine ? 'Escanea o escribe' : 'Este modo necesita red', navigator.onLine ? 'neutro' : 'aviso');
+  const neutros = { capturar: pc() ? 'Escanea o escribe' : 'Escanea o toma foto', buscar: 'Busca por código o nombre', revisar: 'Revisa tus piezas', imprimir: 'Etiquetas por imprimir' };
+  ponerNeutro(neutros[modo]);
+  mensaje(navigator.onLine ? neutros[modo] : modo === 'capturar' ? 'Sin red · toma foto' : 'Este modo necesita red', navigator.onLine ? 'neutro' : 'aviso');
   if (modo === 'buscar') $('detalle-buscar').append($('ficha'));
   // Las fases siguientes activan estos módulos sin cargar hardware al abrir Buscar.
   if ($( `modo-${modo}`).dataset.activo) {

@@ -18,10 +18,10 @@ export async function iniciarCelular(ctx,captura) {
   captura.entrada.prepend(visor,tira);captura.entrada.append(archivo);$('modo-capturar').append(inicio);
   captura.disparo.className='disparo';captura.disparo.textContent='';captura.disparo.setAttribute('aria-label','Tomar foto');
   captura.sinFoto.hidden=true;
-  captura.entrada.append(captura.disparo);captura.entrada.classList.add('captura-movil');
+  captura.entrada.append(captura.disparo);captura.entrada.classList.add('captura-movil');captura.entrada.append(captura.pieza);captura.pieza.className='pieza-movil';
   const filaTipo=nodo('div',undefined,'fila-tipo');captura.tipo.before(filaTipo);filaTipo.append(captura.tipo,captura.escribir);
   const filaGrado=nodo('div',undefined,'fila-grado');captura.grado.before(filaGrado);filaGrado.append(captura.grado,captura.contador);
-  for(const b of captura.grado.querySelectorAll('button')){const t=b.textContent;b.setAttribute('aria-label',t);b.textContent=({nuevo:'A Nuevo',danado:'B Dañado',liquidacion:'C Liq.'})[b.dataset.valor];}
+  for(const b of captura.grado.querySelectorAll('button')){const t=b.textContent;b.setAttribute('aria-label',t);b.textContent=({nuevo:'A\nNuevo',danado:'B\nDañado',liquidacion:'C\nLiq.'})[b.dataset.valor];}
   visor.append(captura.tablero.raiz);
   const sesion=new Map();let revisando=null,disparando=false,tomandoPara=null,enviando=false,despierto=null,archivoPara=null,revisionFoto=null;
   let contextoAudio;
@@ -33,8 +33,8 @@ export async function iniciarCelular(ctx,captura) {
   }
   const camara=crearCamara({video,alLeer:codigo=>{if(revisando||$('hoja').open)return;ctx.recibir(codigo,'camara').then(()=>sonar(captura.flujo.actual()?.tipo==='existente'?'existe':captura.flujo.actual()?.tipo==='sin-registro'?'sin':'ok')).catch(e=>{mensaje(e.message,'aviso');sonar('error');});},alEstado:()=>{reanudar.hidden=true;subirArchivo.hidden=true;}});
   async function encender(){
-    try{if(await camara.abrir()){reanudar.hidden=true;visor.classList.remove('bloqueada');mensaje('Escanea o toma foto');}}
-    catch(e){camara.pausar();reanudar.hidden=false;reanudar.textContent='Reintentar';visor.classList.add('bloqueada');mensaje(e.name==='NotAllowedError'?'Cámara bloqueada · revisa permisos':'Otra app usa la cámara','error');const instrucciones=nodo('p','1. Toca el candado. 2. Permisos › Cámara › Permitir.');instrucciones.className='permiso-camara';visor.querySelector('.permiso-camara')?.remove();visor.append(instrucciones);}
+    try{if(await camara.abrir()){reanudar.hidden=true;visor.classList.remove('bloqueada');visor.querySelector('.permiso-camara')?.remove();captura.neutro();}}
+    catch(e){camara.pausar();reanudar.hidden=false;reanudar.textContent='Reintentar';visor.classList.add('bloqueada');mensaje(e.name==='NotAllowedError'?'Cámara bloqueada · revisa permisos':'Otra app usa la cámara','error');const instrucciones=nodo('ol',undefined,'permiso-camara');instrucciones.append(nodo('li','Toca el candado de la barra de direcciones.'),nodo('li','Permisos › Cámara › Permitir.'));visor.querySelector('.permiso-camara')?.remove();visor.append(instrucciones);}
   }
   const subida=crearSubida({pendientes,leer,borrar,pausada:id=>revisando===id,
     alEstado(estado,r){const datos=sesion.get(r.id);if(datos)datos.estado=estado;pintar();if(estado==='sesion')mensaje('Tu sesión venció · vuelve a entrar','error');},
@@ -56,7 +56,7 @@ export async function iniciarCelular(ctx,captura) {
   function pintar(){
     carrusel.replaceChildren();const ahora=Date.now();const registros=[...sesion.values()].filter(r=>!r.subida||ahora-(r.creado??Date.parse(r.creado_en))<86400000).sort((a,b)=>(b.creado??Date.parse(b.creado_en))-(a.creado??Date.parse(a.creado_en)));
     for(const r of registros.slice(0,24))carrusel.append(miniatura(r));
-    contador.textContent=`Hoy · ${registros.reduce((n,r)=>n+(r.cantidad??1),0)} piezas · ${registros.filter(r=>r.subida).length} subidas`;tira.hidden=!registros.length;pintarRed();
+    const piezas=registros.reduce((n,r)=>n+(r.cantidad??1),0),subidas=registros.filter(r=>r.subida).length;contador.textContent=`Hoy · ${piezas} ${piezas===1?'pieza':'piezas'} · ${subidas} ${subidas===1?'subida':'subidas'}`;tira.hidden=!registros.length;pintarRed();
   }
   async function conservar(foto,a){
     const upc=a?.upc;const ropaSinCodigo=captura.esRopa()&&!upc;

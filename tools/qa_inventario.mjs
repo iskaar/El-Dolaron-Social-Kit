@@ -52,7 +52,7 @@ Object.defineProperty(navigator,'bluetooth',{configurable:true,value:{requestDev
 const medidas=[];
 async function capturar(nombre,width){
   await dormir(120);
-  const d=await js(`(()=>{const visibles=[...document.querySelectorAll('button,a[href],summary,input:not([type=checkbox]),select')].filter(b=>{const r=b.getBoundingClientRect();return r.width&&r.height&&r.top>=0&&r.top<innerHeight&&r.left>=0&&!b.closest('[hidden]')});return {ancho:document.documentElement.scrollWidth,ventana:innerWidth,pequenos:visibles.map(b=>({texto:b.getAttribute('aria-label')||b.innerText||b.id,w:b.getBoundingClientRect().width,h:b.getBoundingClientRect().height})).filter(b=>b.w<43.9||b.h<43.9),tabs:[...document.querySelectorAll('#modos button')].map(b=>({texto:b.innerText,hidden:b.hidden,w:b.getBoundingClientRect().width})),estado:document.querySelector('#estado:not([hidden]),#error:not([hidden])')?.innerText}})()`);
+  const d=await js(`(()=>{const visibles=[...document.querySelectorAll('button,a[href],summary,input:not([type=checkbox]),select')].filter(b=>{const r=b.getBoundingClientRect();return r.width&&r.height&&r.top>=0&&r.top<innerHeight&&r.left>=0&&!b.closest('[hidden]')});return {ancho:document.documentElement.scrollWidth,ventana:innerWidth,pequenos:visibles.map(b=>({texto:b.getAttribute('aria-label')||b.innerText||b.id,w:b.getBoundingClientRect().width,h:b.getBoundingClientRect().height})).filter(b=>b.w<43.9||b.h<43.9),tabs:[...document.querySelectorAll('#modos button')].map(b=>({texto:b.innerText,hidden:b.hidden,w:b.getBoundingClientRect().width})),estado:document.querySelector('#estado:not([hidden]),#error:not([hidden])')?.innerText,primariosBajos:visibles.filter(b=>b.classList.contains('primario')&&innerWidth<1000&&b.getBoundingClientRect().height<55.9).map(b=>b.innerText),chicos48:visibles.filter(b=>b.tagName==='BUTTON'&&!b.closest('header,#modos')&&b.getBoundingClientRect().height<47.9).map(b=>b.innerText.trim()||b.getAttribute('aria-label'))}})()`);
   medidas.push({nombre,width,...d});assert.ok(!/Cannot|undefined|is not a function/.test(d.estado),`Error en pantalla ${nombre}: ${d.estado}`);assert.ok(d.ancho<=width,`Desborde ${nombre}: ${d.ancho}`);
   const png=await cdp('Page.captureScreenshot',{format:'png'});await writeFile(path.join(salida,`${nombre}-${width}.png`),Buffer.from(png.data,'base64'));
 }
@@ -64,8 +64,8 @@ for(const width of [390,1280]){
   consultaSolo=false;listaVacia=false;falloLista=false;
   await cdp('Emulation.setDeviceMetricsOverride',{width,height:width===390?844:800,deviceScaleFactor:2,mobile:width===390});
   await cdp('Emulation.setTouchEmulationEnabled',{enabled:width===390});
-  await cdp('Page.navigate',{url:`http://127.0.0.1:${port}/inventario?qa=${width}#capturar`});await dormir(1300);
-  if(width===390){await js("document.querySelector('.empezar-captura button').click()");await dormir(600);}
+  await cdp('Page.navigate',{url:`http://127.0.0.1:${port}/inventario?qa=${width}#capturar`});await dormir(600);await js("localStorage.clear()");await cdp('Page.reload');await dormir(1300);
+  if(width===390){await capturar('00-empezar',width);await js("document.querySelector('.empezar-captura button').click()");await dormir(600);}
   await capturar('01-listo',width);
   if(width===390){
     await js("[...document.querySelectorAll('#modo-capturar button')].find(b=>b.textContent==='Ropa').click()");
@@ -108,4 +108,4 @@ await cdp('Emulation.setDeviceMetricsOverride',{width:320,height:844,deviceScale
 await cdp('Page.navigate',{url:`http://127.0.0.1:${port}/inventario?reflujo=320#buscar`});await dormir(500);await buscar('chamarra');await capturar('11-reflujo',320);
 await writeFile(path.join(salida,'medidas.json'),JSON.stringify({errores,medidas},null,2));
 assert.deepEqual(errores,[]);const pequenos=medidas.flatMap(d=>d.pequenos.map(p=>({...p,estado:d.nombre,width:d.width})));assert.deepEqual(pequenos,[],'Objetivos menores de 44 px');console.log(`QA: ${medidas.length} capturas; sin desborde, objetivos >=44 px, sin errores de JavaScript`);
-}finally{await cdp('Browser.close').catch(()=>{});ws.close();server.close();chrome.kill();await dormir(400);await rm(perfil,{recursive:true,force:true,maxRetries:5,retryDelay:200});}
+}catch(e){console.error('Errores de página:',errores);throw e;}finally{await cdp('Browser.close').catch(()=>{});ws.close();server.close();chrome.kill();await dormir(400);await rm(perfil,{recursive:true,force:true,maxRetries:5,retryDelay:200});}
