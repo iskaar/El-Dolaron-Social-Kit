@@ -4,7 +4,7 @@ export function crearCamara({ video, alLeer, alEstado = () => {}, puedeLeer = ()
   function pausar(){++generacion;clearTimeout(timer);video.srcObject?.getTracks().forEach(t=>t.stop());video.srcObject=null;pista=null;}
   return { pausar, pista:()=>pista, async abrir(){
     pausar();const turno=generacion;
-    const stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'},width:{min:1024,ideal:1280},height:{ideal:960},aspectRatio:{ideal:4/3},zoom:true},audio:false});
+    const stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'},width:{ideal:1280},height:{ideal:960},aspectRatio:{ideal:4/3},zoom:true},audio:false});
     if(turno!==generacion||document.hidden){stream.getTracks().forEach(t=>t.stop());return false;}
     video.srcObject=stream;pista=stream.getVideoTracks()[0];await video.play();
     if(turno!==generacion){stream.getTracks().forEach(t=>t.stop());return false;}

@@ -166,7 +166,7 @@ test('cámara reducida conserva zoom y Code128; pausa el detector y no solapa le
   const avanzar=()=>{assert.equal(tareas.size,1);const [i,fn]=[...tareas][0];tareas.delete(i);return fn();};
   const terminar=async(codigos:any[])=>{respuestas.shift()!.resolve(codigos);await new Promise(setImmediate);};
   await camara.abrir();assert.equal(detecciones,1);assert.equal(tareas.size,0,'Espera al detector antes de programar');
-  assert.equal(solicitudes[0].video.width.ideal,1280);assert.equal(solicitudes[0].video.width.min,1024);
+  assert.equal(solicitudes[0].video.width.ideal,1280);assert.equal(solicitudes[0].video.width.min,undefined,"Sin min: evita OverconstrainedError");
   assert.equal(solicitudes[0].video.height.ideal,960);assert.equal(solicitudes[0].video.aspectRatio.ideal,4/3);
   assert.equal(solicitudes[0].audio,false);assert.equal(solicitudes[0].video.zoom,true);
   assert.ok(formatos[0].includes('code_128'));assert.equal(ajustes.length,0,'No reaplica el zoom actual');
