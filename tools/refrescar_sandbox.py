@@ -26,7 +26,7 @@ CONFIG_DESTINO = "wrangler.sandbox.jsonc"
 # Nunca se copian: datos personales de clientes y credenciales (sesiones de cajero,
 # tokens cifrados y estado OAuth de Mercado Libre). Las internas de D1/SQLite tampoco.
 PRIVADAS = {"clientes", "dolarones_lotes", "dolarones_movimientos", "codigos_cliente",
-            "vinculos_portal", "primera_llegada", "vales_dolarones", "vales_movimientos",
+            "vinculos_portal", "primera_llegada", "vales_dolarones", "vales_movimientos", "referidos",
             "sesiones_cajero", "ml_cuenta", "ml_oauth_estados"}
 # Se copian sin las columnas que apuntan a clientes excluidos (FOREIGN KEY): ver sql_premios.
 PREMIOS = "premios_apertura"
