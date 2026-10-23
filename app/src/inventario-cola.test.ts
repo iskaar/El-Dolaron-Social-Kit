@@ -148,7 +148,7 @@ test('cámara reducida conserva zoom y Code128; pausa el detector y no solapa le
   const tareas=new Map<number,Function>(),respuestas:{resolve:Function;reject:Function}[]=[],lecturas:string[]=[],formatos:string[][]=[],solicitudes:any[]=[],ajustes:any[]=[];
   const doc={hidden:false};let hoja=false,id=0,paradas=0,zoomGuardado='1',detecciones=0;
   const video={srcObject:null,play:async()=>{}};
-  const fuente=readFileSync('public/camara-inventario.js','utf8').replace('export ','');
+  const fuente=readFileSync('public/camara-inventario.js','utf8').replaceAll('export ','');
   const crear=runInNewContext(fuente+';crearCamara',{
     document:doc,localStorage:{getItem:()=>zoomGuardado},
     navigator:{mediaDevices:{getUserMedia:async(c:any)=>{

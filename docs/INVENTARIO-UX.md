@@ -180,7 +180,7 @@ Fondo `--azul`, texto blanco, alto 56 (celular) / 64 (PC), `padding: 0 var(--gut
 | Marca | cuadro 36×36 amarillo con borde 2 px blanco y «EL» 800 azul (CSS, sin imagen) + «Inventario» 18/800; en Capturar este espacio lo ocupa `Mercancía | Ropa` (44 px de alto) | igual, 20/800 |
 | Modos | (en barra inferior) | pestañas |
 | **Chips** (derecha) | `Impresora` y `Red` | `Impresora`, `Celular`, `Red` |
-| Menú `⋯` (≥44×44) | En Capturar, `⌨ Escribir`; también Sonido, Vibración, Inicio, Ajustes (solo roles con /admin) | `Ajustes` como texto-botón + `⋯` (Sonido, Vibración, Inicio) |
+| Menú `⋯` (≥44×44) | En Capturar, `⌨ Escribir`; también Sonido, Vibración, Inicio, Ajustes (solo roles con /admin), Cerrar sesión (#463) | `Ajustes` como texto-botón + `⋯` (Sonido, Vibración, Inicio) |
 
 **Chip de conexión** (es un `<button>`, alto 44, `--azul-hondo`, borde 2 px `#6F86B5`, sin sombra, 14/700; glifo + palabra; en celular solo la palabra de estado, el nombre va en `aria-label`):
 
@@ -273,7 +273,8 @@ LISTO ──lee código──► BUSCANDO ──► NUEVA (manifiesto) ──Gua
 - Detector UPC/EAN y Code128 sobre el video reducido, una detección a la vez (también al reabrir), con 200 ms de descanso tras cada intento; no detecta con pestaña oculta, cámara apagada, revisión u hoja abierta y descarta resultados tardíos. Cámara y USB usan `lector.recibir` → Capturar: la búsqueda existente prioriza la etiqueta ED numérica sobre UPC, sin filtrar su grado ni consultar el manifiesto; solo si no es etiqueta sigue el flujo UPC.
 - Disparo: 76×76, círculo blanco con borde 6 px `--amarillo` y sombra dura `4px 4px 0 --azul`; presionado hunde. `aria-label="Tomar foto"`. Vive siempre en el centro de la barra fija; no se oculta al leer UPC.
 - Barra de captura: en MG, grado a la izquierda (3 × 44×56), disparo al centro, stepper a la derecha (44+44+44, botones de 44×56). En Ropa solo quedan disparo centrado y cantidad a la derecha; el grado está oculto. Padding lateral 6 px, huecos 4 px: cabe en 360 px sin envolver. Se fija a `66px + env(safe-area-inset-bottom)` del borde inferior. Con un único modo, la navegación se oculta y la barra baja al borde, conservando el área segura. El contenido tiene padding inferior para que su final pueda desplazarse por encima de la barra.
-- Interruptor dentro del visor, esquina superior izquierda: icono blanco + «Cámara»/«Apagada», fondo oscuro translúcido, `aria-pressed`, objetivo ≥44 px. Reutiliza `crearCamara.abrir/pausar`, incluidos parada de tracks y descarte de detecciones tardías. `inventario-camara` en `sessionStorage` recuerda la elección al cambiar de modo o recargar. Apagada: visor oscuro y texto «Cámara apagada»; el disparo abre la selección de foto existente, nunca usa un fotograma detenido. «Pieza sin foto» conserva su permiso de dueño en el menú del visor.
+- Interruptor dentro del visor, esquina superior izquierda: icono blanco + «Cámara»/«Apagada», fondo oscuro translúcido, `aria-pressed`, objetivo ≥44 px. Reutiliza `crearCamara.abrir/pausar`, incluidos parada de tracks y descarte de detecciones tardías. `inventario-camara` en `sessionStorage` recuerda la elección al cambiar de modo o recargar. Apagada: visor oscuro y texto «Cámara en pausa · toca para encender»; tocar el visor o el interruptor la enciende. El disparo abre la selección de foto existente, nunca usa un fotograma detenido. «Pieza sin foto» conserva su permiso de dueño en el menú del visor.
+- Reposo de cámara (#461, PR A): en Mercancía y Ropa, tras **60 s** sin lecturas (cámara/lector), fotos ni interacción de captura, se apaga por la misma función del interruptor y se actualiza su estado. `INACTIVIDAD_CAMARA_MS` es la única constante del plazo. Una hoja abierta o página oculta suspende el contador; el tiempo restante continúa al volver si la cámara sigue activa. Cambiar de modo, ocultar la página o perder foco conserva la liberación de pistas existente y exige reanudar. El temporizador nunca enciende una cámara apagada manualmente.
 - Carrusel 24 h: ver «Correcciones».
 - `⋯ → ⌨ Escribir` en la cabecera abre la caja con teclado numérico (`inputmode=numeric`). Se eligió el menú existente para conservar espacio en 360 px y mantener a la vista Impresora y Red, sin añadir otra fila o icono.
 
@@ -285,13 +286,15 @@ LISTO ──lee código──► BUSCANDO ──► NUEVA (manifiesto) ──Gua
 |▓▓▓▓▓▓▓▓▓▓ (visor, 40 % más bajo) ▓▓▓▓|
 +--------------------------------------+
 | 012345678905                         |
-| Lámpara de escritorio                |
-| $249 · Hogar · A Nuevo               |
+| Nombre / descripción [Lámpara…]      |
+| Precio ($) [249] · A Nuevo           |
 | [ - ] 2 [ + ]       [[ Guardar ]]    |
 +--------------------------------------+
 ```
 
 - Mismo código otra vez = `+1` (el número y el stepper saltan; sonido «más»). Otro código distinto guarda la anterior y abre la nueva. La pieza permanece abierta hasta tocar `Guardar` o leer otro código; no hay guardado por tiempo.
+- En celular y PC, nombre/descripción y precio se precargan del manifiesto y se pueden corregir **antes de Guardar e imprimir** (#461). Dueño: ambos editables. Cuenta con «Editar inventario»: nombre editable y precio de solo lectura. Sin casilla: ambos de solo lectura. El cambio de grado actualiza el precio sugerido mientras el dueño no lo haya sustituido; cantidad y grado conservan las ediciones. Se valida nombre no vacío y precio en pesos; el servidor normaliza nombre y autoriza centavos enteros. Si se rechaza, la tarjeta conserva los campos y UUID.
+- Se imprime al guardar y al reescanear una pieza registrada, con los valores confirmados por D1. El precio de la etiqueta incluye la corrección del dueño. Una coincidencia concurrente de UPC/grado conserva la ficha registrada y suma existencias como #452. La solicitud de cambio de precio #451 sigue disponible después de guardar, en las vistas existentes.
 - `−` hasta 0 cancela; en 0 el botón principal cambia a peligro «Cancelar pieza».
 - Principal `Guardar` (56). Tras guardar, la línea dice «Guardada · etiqueta en camino» y la tarjeta se contrae a una fila «Lámpara ×2 · ED-002331 ✓» al carrusel.
 
@@ -729,6 +732,10 @@ Chip `Celular · No responde` (rojo). La solicitud caduca a los 2:00 sin crear p
 
 Herramienta: `node tools/qa_inventario.mjs`, Chrome headless vía CDP, servidor local con fixtures `/api/*` y cámara simulada; sin dependencias. Captura Mercancía y Ropa en **360×640, 412×740 y 390×844** a DPR 2.625, además de los estados en 390×844 y PC 1280×800. Guarda PNG y `medidas.json` en el directorio temporal `inventario-qa-capturas` (o `QA_SALIDA`). En cada tamaño afirma que el rectángulo completo del disparo está dentro del viewport **sin desplazar**, que su borde inferior queda por encima de la navegación y que no hay otro elemento tapándolo; vuelve a comprobar tras desplazar. Comprueba también padding final, estados de talla/precio, apagado de tracks, captura por archivo y preferencia de sesión. Criterio general en **todas**: sin scroll horizontal (`document.documentElement.scrollWidth <= innerWidth`), ningún texto cortado en 320 px, sin superposición con la barra inferior, `console` sin errores.
 
+Para #461 añade tarjetas a **412×740** de dueño, capturista y capturista con casilla: afirma permisos de ambos campos, conserva las ediciones al cambiar cantidad y comprueba nombre/precio en el trabajo de impresión. El disparo permanece visible con la tarjeta. Simula el reloj para comprobar reposo, suspensión con hoja abierta, pistas detenidas, toque del visor para reanudar y respeto del apagado manual; guarda también el visor en pausa. Las pruebas unitarias comprueban el tiempo restante durante las pausas, incluida la página oculta.
+
+PR B de #461 (modo enfocado) añade, a **360×640, 412×740 y 390×844** y en Mercancía y Ropa: lo oculto no se ve (chips, navegación, tira, coincidencias, intro, «Buscar en internet», línea neutra), la salida mide ≥ 44 px y está en pantalla, el disparo, el interruptor de cámara y la cantidad caben sin desplazar, y lo que debe quedar (grado en MG; prendas, precio, marcas y talla en Ropa; tarjeta; «Añadir foto») sigue a la vista. A 412×740 provoca cada alerta (error de guardado, sin red con foto por subir, impresora sin conectar), comprueba `role=alert`, que desaparece al resolverla, la salida con botón y con `Alt+0` y que la elección dura la recarga de la sesión. Las capturas se llaman `461-enfocado-*`.
+
 **Estados a capturar (390×844 y 1280×800 salvo indicación)**
 
 | # | Estado | Debe verse |
@@ -804,3 +811,35 @@ Revisar › «Repetidas · N» aparece para el dueño y quien tenga la casilla (
 Ropa no muestra ni edita A/B/C en Capturar (móvil y PC), Corregir del carrusel (local o subida), ficha, filas de Revisar, grupos Repetidas formados solo por Ropa, Avanzado ni alta sin foto. Cambiar la categoría a Ropa oculta el campo; volver a MG lo muestra. Buscar ya usa filas sin grado y conserva esa presentación. Los filtros de Revisar siguen siendo estado de análisis, día, categoría, precio y sesión, sin agregar filtro de grado.
 
 Imprimir, Reimprimir de Buscar/ficha y `/etiquetas` comparten TSPL sin grado para Ropa; tampoco muestran avisos de grado al corregir nombre, talla o precio. La vigencia de una etiqueta de Ropa ignora `estado_fisico`; MG conserva la reimpresión por grado. `/api/etiquetas` devuelve también `categoria` para todos esos caminos. Se mantienen valores históricos y reglas de servidor por propietario + UPC + estado físico (#452); al buscar un UPC de Ropa no se descarta por el grado seleccionado en MG.
+
+## 11. Modo enfocado de Capturar (#461, PR B)
+
+Para capturar en serie en el celular: solo lo que se toca en cada pieza. Es una preferencia **de la sesión** (`sessionStorage` `inventario-enfocado`, con `try/catch`; sin ella arranca apagado) y **solo se aplica en Capturar del celular**: en PC o en otro modo la preferencia se conserva pero no hace nada. Todo se resuelve con `body.enfocado` (CSS); no cambia flujos, impresión automática ni el reposo de cámara a 60 s.
+
+**Entrar:** `⋯` › interruptor «Modo enfocado» (solo celular y Capturar). Si la intro «Empezar» seguía abierta, encender el modo la cierra y arranca la cámara (el toque del menú es el gesto); al recargar con el modo encendido la intro no vuelve y la cámara arranca sola.
+**Salir:** botón amarillo «Salir del modo enfocado» en la cabecera (≥ 44 px, siempre visible mientras dure el modo), o `Alt+0` (el mismo atajo lo enciende), o el interruptor de `⋯`. Al salir el foco vuelve a `⋯`. Las pestañas Mercancía/Ropa se quedan: hacen falta para cambiar de tipo.
+
+| Se queda a la vista | Se oculta |
+| --- | --- |
+| Visor con su interruptor de cámara y `⋯` de cámara; botón de disparo | Chips de impresora, red y celular de la cabecera |
+| Cantidad; grado A/B/C (solo Mercancía) | Línea de estado neutra «● Escanea o toma foto» |
+| Tarjeta del manifiesto con nombre y precio editables (mismos permisos que PR A) | «Hoy · N piezas», «Ver todas» y la tira de miniaturas |
+| Tarjeta de pieza «existente» con «+1», «Añadir foto» / «Foto nueva» y la solicitud de precio | «Coincidencias» y «Buscar más» |
+| Ropa: rodillos de prenda y precio, marcas, fila de tallas (incluida la edad de niño), cantidad | Historial de códigos desconocidos y «Buscar en internet» |
+| Avisos transitorios de la línea de estado (`✓` guardada, `▲` ya existía / sin registro) | Intro «Empezar» y la barra inferior de modos |
+
+Sin la barra de modos la barra fija de captura baja al borde (mismo `[hidden]` de `#modos` que ya usa el modo único). En Ropa el visor crece (24 dvh, 120–200 px) con el espacio que deja la tira oculta.
+
+**Línea de alerta (`#alerta-enfocado`, `role=alert`).** Una sola línea compacta bajo la cabecera, visible solo mientras haya un problema que el modo dejaría callado; se oculta sola al resolverse (se evalúa al instante en los eventos y cada 2 s). Une, separados por « · »:
+
+| Problema | Texto | Cuándo desaparece |
+| --- | --- | --- |
+| Error de guardado u otro error de la línea de estado | el mismo texto (`■ …`); en modo enfocado `#error` se oculta y la alerta lo refleja, así no hay dos líneas | cuando otro mensaje reemplaza al error |
+| Sin red con fotos por subir | `▲ Sin red · N sin subir` | al volver la red y subir |
+| Cola con error de envío | `■ N sin subir · error de envío`; sesión vencida: `■ Tu sesión venció · vuelve a entrar` | al subirse |
+| Cola atascada (con red, sin intento de subida en 60 s) | `▲ N sin subir · la cola no avanza` | al avanzar |
+| Impresora sin conectar cuando se pidió una etiqueta | `▲ Impresora sin conectar · falta etiqueta` | al conectarla |
+
+Sin red y sin fotos por subir no alerta: el aviso de la línea de estado («Sin red · toma foto») ya es visible. Para actuar (reintentar, conectar) se sale del modo; la línea no tiene botones. La lógica pura está en `alertasCriticas` (`inventario-enfocado.js`, con prueba unitaria); los datos vienen de la cola de fotos (`inventario-celular.js`) y de la petición de impresión (`inventario-capturar.js`) mediante `ctx.problemas`.
+
+**Pendiente de prueba física:** TCL 10 Pro con la impresora Bluetooth, lector, cámara real y una ráfaga de fotos con y sin red; confirmar que el texto de la salida de 3 líneas se lee bien al sol y que el apagado a 60 s sigue sin molestar en serie.

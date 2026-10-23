@@ -363,6 +363,12 @@
       "format": "JS"
     },
     {
+      "file": "app/public/inventario-enfocado.js",
+      "title": "Modo enfocado de captura",
+      "description": "Oculta lo accesorio de Capturar en el celular y reúne los problemas críticos en una línea de alerta (#461).",
+      "format": "JS"
+    },
+    {
       "file": "app/public/foto-pendiente.js",
       "title": "Contrato de fotos pendientes",
       "description": "Captura móvil, conserva IndexedDB eldolaron v1 y los registros compartidos (#446).",
