@@ -70,3 +70,20 @@ test('modo enfocado: el host del capturista sirve el módulo y este no toca el a
   const fuente=readFileSync('public/inventario-enfocado.js','utf8');
   assert.doesNotMatch(fuente,/localStorage|indexedDB/);
 });
+
+test('modo enfocado (#464): el host del capturista también imprime, así que una etiqueta sin impresora conectada también alerta', async()=>{
+  const { readFileSync }=await import('node:fs'),{ runInNewContext }=await import('node:vm');
+  const fuente=readFileSync('public/inventario-capturar.js','utf8');
+  const trozo=fuente.slice(fuente.indexOf('let impresionPedida=false;'),fuente.indexOf('const flujo=crearCaptura'));
+  for(const vendedor of [true,false]){
+    let lista=false;const envios:any[]=[];
+    const ctx:any={identidad:{vendedor},problemas:{},etiqueteraLista:()=>lista,imprimir:async(...a:any[])=>{envios.push(a);return true;}};
+    ctx.ctx=ctx;
+    const imprimir=runInNewContext(`${trozo};imprimir`,{ctx,etiqueteraLista:()=>lista,Map});
+    assert.equal(await imprimir('a',1),false,'sin impresora no sale');
+    assert.equal(ctx.problemas.impresora(),true,`alerta pedida (vendedor=${vendedor})`);
+    lista=true;
+    assert.equal(await imprimir('a',2,{reimprimir:true}),true,'con impresora sale también en el host del capturista');
+    assert.equal(envios.length,1);assert.equal(ctx.problemas.impresora(),false);
+  }
+});

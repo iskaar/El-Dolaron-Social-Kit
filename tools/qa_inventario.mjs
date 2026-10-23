@@ -41,6 +41,10 @@ const server=createServer(async(req,res)=>{try{
     datos=upcQA?{...p,existente:true,sumadas:2,stock:5}:{...p,id:c.id,nombre:c.nombre??'Lámpara',precio:c.precio??24900,categoria:'hogar',stock:c.stock};
     if(!upcQA)registros.push(datos);
   }
+  else if(u.pathname==='/api/etiquetas/enviadas'){
+    const chunks=[];for await(const ch of req)chunks.push(ch);const {ids}=JSON.parse(Buffer.concat(chunks));
+    datos=req.method==='DELETE'?{soltadas:ids.length}:{reclamadas:ids,marcas:{}};   // el reclamo de D1 (#440): aquí siempre gana
+  }
   else if(u.pathname==='/api/etiquetas'){
     const chunks=[];for await(const ch of req)chunks.push(ch);const {ids}=JSON.parse(Buffer.concat(chunks));
     datos=[...registros,p,{...p,id:'22222222-2222-4222-8222-222222222222',nombre:'Lámpara de escritorio',categoria:'hogar',stock:6}].filter(p=>ids.includes(p.id));

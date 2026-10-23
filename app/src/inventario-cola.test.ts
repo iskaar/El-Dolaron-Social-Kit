@@ -188,8 +188,9 @@ test('cámara reducida conserva zoom y Code128; pausa el detector y no solapa le
   assert.deepEqual(lecturas,['2318']);assert.equal(tareas.size,0);assert.equal(video.srcObject,null);assert.equal(paradas,2);
 });
 
-test('host del capturista sirve las importaciones de Capturar, Buscar y Revisar sin abrir Ajustes ni impresión',()=>{
+test('host del capturista sirve las importaciones de Capturar, Buscar, Revisar e Imprimir sin abrir Ajustes',()=>{
   for(const archivo of ['inventario.js','inventario-ui.js','inventario-capturar.js','inventario-ropa.js','inventario-celular.js','inventario-revisar.js','inventario-precio.js','foto-pendiente.js','camara-inventario.js','ficha.js','lector.js','foto.js','cola-fotos.js','tallas.js','ropa.js','upc.js','estados.js','sesiones.js','precios-ml.js','compartir.js','envio-etiquetas.js'])assert.equal(permitidaParaVendedor('/'+archivo,'GET'),true,archivo);
-  for(const ruta of ['/admin','/api/config','/imprimir-lote.js','/api/etiquetas'])assert.equal(permitidaParaVendedor(ruta,'GET'),false,ruta);
+  for(const archivo of ['inventario-imprimir.js','imprimir-lote.js','etiquetera.js','impresora.js','code128.js'])assert.equal(permitidaParaVendedor('/'+archivo,'GET'),true,archivo);   // imprimir desde el celular (#440)
+  for(const ruta of ['/admin','/api/config','/api/etiquetas','/api/etiquetas/enviadas','/etiquetas'])assert.equal(permitidaParaVendedor(ruta,'GET'),false,ruta);
   const fuente=readFileSync('public/cola-fotos.js','utf8');assert.match(fuente,/indexedDB.open\('eldolaron', 1\)/);assert.match(fuente,/createObjectStore\('pendientes', \{ keyPath: 'id' \}\)/);
 });

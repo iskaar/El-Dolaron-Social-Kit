@@ -114,7 +114,7 @@ export async function cargarCalibracion() {
   if (!globalThis.location || !globalThis.localStorage) return;   // node --test
   let config;
   try {
-    const respuesta = await fetch('/api/config', { signal: AbortSignal.timeout(4000) });
+    const respuesta = await fetch('/api/calibracion', { signal: AbortSignal.timeout(4000) });
     if (!respuesta.ok) return;
     config = await respuesta.json();
   } catch {
@@ -485,9 +485,7 @@ export function etiqueteraLista() {
  * el enlace, mandarTspl() la reconecta sola (gatt.connect() de un aparato ya
  * escogido no pide clic).
  *
- * ponytail: sin reconexion al recargar la pagina. getDevices() existe a medias
- * entre versiones de Chrome y se cuelga con la impresora apagada; un clic al
- * principio del turno es mas barato que esa complicacion.
+ * reconectarEtiquetera() recupera el aparato recordado cuando el navegador lo permite.
  */
 export async function conectarEtiquetera({ cualquiera = false } = {}) {
   const aparato = await navigator.bluetooth.requestDevice(cualquiera
@@ -499,6 +497,30 @@ export async function conectarEtiquetera({ cualquiera = false } = {}) {
 }
 
 let impresora = null;   // el aparato escogido, para reconectar sin clic
+
+/**
+ * Reconecta sin clic: primero al aparato ya escogido en esta pagina; si no hay, a uno que el
+ * navegador recuerde de otra visita (getDevices, que solo existe en Chrome reciente). Con la
+ * impresora apagada gatt.connect() se queda colgado, asi que se espera `espera` ms y se da por
+ * perdida. Devuelve si quedo lista; nunca lanza. Quien la llama decide cuando intentarlo: abrir
+ * la misma impresora desde dos pestanas a la vez mezcla los trabajos.
+ */
+export async function reconectarEtiquetera(espera = 8000) {
+  if (caracteristica) return true;
+  try {
+    let aparato = impresora;
+    if (!aparato) {
+      aparato = (await navigator.bluetooth?.getDevices?.())?.find((a) => a.name?.startsWith('AE240'));
+      if (!aparato) return false;
+      aparato.addEventListener('gattserverdisconnected', () => { caracteristica = null; });
+      impresora = aparato;
+    }
+    await Promise.race([enlazar(aparato), esperar(espera).then(() => { throw new Error('tiempo agotado'); })]);
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 async function enlazar(aparato) {
   // La AE240 a veces suelta el enlace justo despues de conectar ("GATT Server is
@@ -683,9 +705,9 @@ function anotarEnvio(envio) {
 // revision cambia el precio, la pieza tiene que volver a la lista para
 // reimprimirla. Por navegador, como el historial.
 //
-// ponytail: "enviada" no es "impresa": la impresora no dice si saco el papel;
-// para eso esta desmarcarDesde(). Si algun dia se etiqueta desde dos
-// computadoras, esto se muda a una columna en D1.
+// D1 (etiquetas_enviadas, Issue #440) coordina PC y celular; esta copia permite consultar las marcas sin
+// red. Una marca con `base: true` ya esta en la base; sin ella es de antes del registro o se hizo sin red.
+// La impresora no confirma el papel: "No salio" libera el reclamo de la base explicitamente.
 const CLAVE_IMPRESAS = 'etiqueta-impresas';
 
 export function impresas() {
@@ -700,11 +722,22 @@ function guardarImpresas(mapa) {
 }
 
 /** @param pieza lo que dice la etiqueta: { precio, precio_lista, nombre, talla } */
-export function marcarImpresa(id, hora = new Date().toISOString(), pieza = {}) {
-  guardarImpresas({ ...impresas(), [id]: {
-    hora, precio: pieza.precio, precio_lista: pieza.precio_lista, nombre: pieza.nombre ?? '', talla: pieza.talla ?? '',
-    estado_fisico: pieza.estado_fisico ?? 'nuevo',
-  } });
+export function marcarImpresa(id, hora = new Date().toISOString(), pieza = {}, base = false, en) {
+  guardarImpresas({ ...impresas(), [id]: entradaMarca(hora, pieza, base, true, en) });
+}
+
+// `propia: true`: la mando ESTE navegador (`en` = la hora del reclamo en la base, para soltar solo su propio reclamo).
+// `propia: false`: se adopto de lo que saco otro dispositivo. Una marca sin la senal es de antes de adoptar: es propia.
+const entradaMarca = (hora, pieza, base, propia = true, en) => ({
+  hora, precio: pieza.precio, precio_lista: pieza.precio_lista, nombre: pieza.nombre ?? '', talla: pieza.talla ?? '',
+  estado_fisico: pieza.estado_fisico ?? 'nuevo', ...(base ? { base: true } : {}), propia, ...(en ? { en } : {}),
+});
+export const esPropia = (marca) => marca?.propia !== false;
+
+/** Quita la marca de esta pieza en este navegador (la soltaron en otro dispositivo). */
+export function olvidarMarca(id) {
+  const { [id]: _, ...resto } = impresas();
+  guardarImpresas(resto);
 }
 
 /** Los precios que se ven en la etiqueta: el de lista solo sale si es mayor (tachado). */
@@ -734,13 +767,98 @@ export function etiquetaVigente(marca, pieza) {
 
 /**
  * "No salio desde aqui": la impresora se paro sin avisar en esta pieza, asi que
- * esta y todas las que se mandaron despues vuelven a la lista.
+ * esta y todas las que se mandaron despues DESDE ESTE NAVEGADOR vuelven a la lista. Lo que saco otro
+ * dispositivo (marca adoptada) no se toca: aqui no se sabe si salio bien. Devuelve los ids soltados.
  */
 export function desmarcarDesde(id) {
   const mapa = impresas();
   const desde = mapa[id]?.hora;
-  if (!desde) return;
-  guardarImpresas(Object.fromEntries(Object.entries(mapa).filter(([, marca]) => marca.hora < desde)));
+  if (!desde || !esPropia(mapa[id])) return [];
+  const sueltas = Object.keys(mapa).filter((otra) => esPropia(mapa[otra]) && mapa[otra].hora >= desde);
+  guardarImpresas(Object.fromEntries(Object.entries(mapa).filter(([otra]) => !sueltas.includes(otra))));
+  return sueltas;
+}
+
+/* ---------- Registro compartido en la base (Issue #440) ---------- */
+
+// La marca de arriba es de ESTE navegador. Para que la PC y el celular no saquen la misma etiqueta
+// dos veces, cada envio se reclama antes en la base (`etiquetas_enviadas`): gana el primero que
+// llega. Los campos etiqueta_* de una pieza (o de `marcas`) son lo que dice la etiqueta enviada.
+
+/**
+ * Hace local la marca de la base (`marca` trae los campos etiqueta_*; `pieza` el grado de hoy, que la base
+ * no guarda), para que la pieza salga de la lista y no se vuelva a mandar. Si ya hay una marca local que
+ * dice lo mismo se respeta (su hora y su grado son los de este navegador) y solo se anota que esta en la base.
+ */
+export const adoptarMarca = (id, marca, pieza) => adoptarMarcas([[id, marca, pieza]]);
+
+/** Lo mismo para muchas a la vez: una sola lectura y una sola escritura del almacenamiento. */
+export function adoptarMarcas(filas) {
+  const mapa = impresas();
+  let cambio = false;
+  for (const [id, marca, pieza = {}] of filas) {
+    const dice = {
+      precio: marca.etiqueta_precio, precio_lista: marca.etiqueta_precio_lista,
+      nombre: marca.etiqueta_nombre, talla: marca.etiqueta_talla, estado_fisico: pieza.estado_fisico,
+    };
+    const local = mapa[id];
+    if (local?.precio !== undefined && precioImpreso(local) === precioImpreso(dice) && textoImpreso(local) === textoImpreso(dice)) {
+      if (!local.base) { mapa[id] = { ...local, base: true }; cambio = true; }
+      continue;
+    }
+    mapa[id] = entradaMarca(marca.etiqueta_en, dice, true, false);
+    cambio = true;
+  }
+  if (cambio) guardarImpresas(mapa);
+}
+
+/**
+ * Pide quedarse con la etiqueta de esas piezas antes de mandarla. Devuelve { reclamadas, marcas }:
+ * las que gano esta llamada y, de las demas, la marca que ya tienen en la base. Con `reimprimir` se queda
+ * con ella aunque ya haya salido (reimpresion explicita). Lanza si falla; si fue por falta de red el error
+ * trae `sinRed` para que quien llama decida: no se manda a ciegas.
+ */
+export async function reclamarEtiquetas(ids, { reimprimir = false, version, origen = globalThis.matchMedia?.('(min-width:1000px)').matches ? 'pc' : 'celular' } = {}) {
+  let respuesta;
+  try {
+    respuesta = await fetch('/api/etiquetas/enviadas', {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ids, reimprimir, version, origen }),
+      signal: AbortSignal.timeout(15000),
+    });
+  } catch (error) {
+    // Solo una red caida permite seguir sin la base. Un tiempo agotado (AbortError/TimeoutError) puede haber
+    // llegado al servidor: no se imprime a ciegas, que la otra pantalla podria sacar la misma etiqueta.
+    if (globalThis.navigator?.onLine === false || error instanceof TypeError) {
+      throw Object.assign(new Error(`Sin red: ${error.message}`), { sinRed: true });
+    }
+    throw new Error('La base no respondió a tiempo. No se imprimió: revisa la red e intenta otra vez.');
+  }
+  const cuerpo = await respuesta.json().catch(() => ({}));
+  if (!respuesta.ok) throw new Error(cuerpo.error ?? `Error HTTP ${respuesta.status}. Revisa la red y la sesion.`);
+  return cuerpo;
+}
+
+/**
+ * Borra la marca de la base ("no salio", o se corto la impresion). true si quedo; nunca lanza. `en` ({ id: hora del
+ * reclamo propio, la `ahora` del reclamo }) es obligatorio: solo se suelta lo que reclamo ESTE dispositivo y no cambio
+ * despues. Una pieza sin hora conocida no se suelta.
+ */
+export async function soltarEtiquetas(ids, en) {
+  ids = ids.filter((id) => en?.[id]);
+  try {
+    for (let i = 0; i < ids.length; i += 100) {
+      const lote = ids.slice(i, i + 100);
+      const respuesta = await fetch('/api/etiquetas/enviadas', {
+        method: 'DELETE', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ ids: lote, etiquetas_en: Object.fromEntries(lote.map((id) => [id, en[id]])) }),
+        signal: AbortSignal.timeout(15000),
+      });
+      if (!respuesta.ok) return false;
+    }
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /** El historial en lineas de texto, lo mas nuevo primero. */

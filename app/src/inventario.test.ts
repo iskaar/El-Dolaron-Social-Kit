@@ -16,8 +16,9 @@ test('/inventario por rol y host; el portal y Ajustes del host de captura perman
     t.env.HOST_VENDEDOR='captura.prueba';
     const yo=await worker.fetch!(new Request('https://captura.prueba/api/yo') as never,t.env,t.ctx as never);
     const d=await yo.json() as any; assert.equal(d.vendedor,true);
-    assert.deepEqual(d.modos_inventario,rol==='dueno'||rol==='capturista'?['capturar','buscar','revisar']:rol==='finanzas'?['capturar','buscar']:[]);
-    for(const ruta of ['/admin','/api/config','/api/cuentas','/api/etiquetas','/etiquetas','/api/catalogo']) assert.equal(permitidaParaVendedor(ruta,'GET'),false,ruta);
+    // Imprimir desde el celular (#440): dueño, capturista y FEP; el cajero y los demás roles no imprimen.
+    assert.deepEqual(d.modos_inventario,rol==='dueno'||rol==='capturista'?['capturar','buscar','revisar','imprimir']:rol==='finanzas'?['capturar','buscar','imprimir']:[]);
+    for(const ruta of ['/admin','/api/config','/api/cuentas','/api/etiquetas','/api/etiquetas/enviadas','/etiquetas','/api/catalogo']) assert.equal(permitidaParaVendedor(ruta,'GET'),false,ruta);
   }
   for(const ruta of ['/inventario','/inventario.html','/inventario/','/inventario.js','/lector.js','/api/piezas','/api/piezas/x','/api/foto/x','/api/borradores']) assert.equal(permitidaParaVendedor(ruta,'GET'),true,ruta);
   assert.equal(permitidaParaVendedor('/api/piezas/x/existencia','POST'),true);
@@ -56,8 +57,8 @@ test('el host del capturista sirve todo el grafo de módulos, hojas y scripts de
     // ponytail: cualquier literal './x.js' o '/x.js' (import estático, import(), src, href, constantes); los de vendor/ también.
     for(const m of readFileSync('public'+p,'utf8').matchAll(/['"`](\.{0,2}\/?[\w./-]+\.(?:js|css))['"`]/g)){
       const ruta='/'+m[1].replace(/^\.?\/+/,'');
-      // La lista general de impresión no se abre en este host (el vendedor no tiene modo «imprimir»): no se recorre.
-      if(ruta!=='/inventario-imprimir.js'&&existsSync('public'+ruta))pend.push(ruta);
+      // También se recorre /inventario-imprimir.js (#440): el capturista imprime desde su celular.
+      if(existsSync('public'+ruta))pend.push(ruta);
     }
   }
   assert.ok(vistos.size>20,'el recorrido debe encontrar el grafo ('+vistos.size+')');

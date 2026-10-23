@@ -28,8 +28,8 @@ const ficha = crearFicha({ mensaje, confirmar, integrada:true, antesCamara:apaga
     const form=$('fijar');form.hidden=false;hoja('Fijar existencia',form);
     $('hoja').addEventListener('close',()=>{form.hidden=true;$('existencia').prepend(form);},{once:true});
   }));
-  if (!identidad.vendedor && p.destino === 'etiqueta') {
-    const imprimir = async (n) => (await cargar('imprimir')).imprimir([p.id], new Map([[p.id,n]]));
+  if (etiquetable(p)) {
+    const imprimir = async (n) => (await cargar('imprimir')).imprimir([p.id], new Map([[p.id,n]]), { reimprimir:true });
     $('acciones-ficha').append(boton('Reimprimir etiqueta', () => imprimir(1), 'primario'), boton('Varias copias…', () => {
       let n = 1; const c = nodo('div'); c.append(stepper(n, v => n = v, { nombre:'Copias' }), boton('Imprimir', async () => { cerrarHoja(); await imprimir(n); }, 'primario')); hoja('Copias', c);
     }));
@@ -49,10 +49,10 @@ export function resultado(p, alElegir = () => ficha.abrir(p.id), reimprimir = fa
   texto.append(codigo, nodo('b', p.nombre || 'Sin nombre'), nodo('small', `${pesos(p.precio)}${p.upc ? ` · ${p.upc}` : ''}${!conFoto ? ' · sin foto' : ''}`));
   b.append(foto, texto, nodo('span', `×${p.stock}`, 'insignia')); li.append(b);
   if (reimprimir) li.className = 'fila-busqueda';
-  if (reimprimir && !identidad.vendedor && p.codigo && p.destino === 'etiqueta') {
+  if (reimprimir && p.codigo && etiquetable(p)) {
     const imprimir = boton('', async (boton) => {
       bloquear(boton, 'Espera el envío'); boton.setAttribute('aria-busy', 'true');
-      try { if (await contexto.imprimir([p.id], new Map([[p.id,1]]))) mensaje(`Etiqueta enviada · ${p.codigo}`, 'etiqueta'); }
+      try { if (await contexto.imprimir([p.id], new Map([[p.id,1]]), { reimprimir:true })) mensaje(`Etiqueta enviada · ${p.codigo}`, 'etiqueta'); }
       finally { bloquear(boton, ''); boton.setAttribute('aria-busy', 'false'); }
     }, 'reimprimir-pieza');
     const icono = document.createElementNS('http://www.w3.org/2000/svg', 'svg'), uso = document.createElementNS('http://www.w3.org/2000/svg', 'use');
@@ -61,6 +61,8 @@ export function resultado(p, alElegir = () => ficha.abrir(p.id), reimprimir = fa
   }
   return li;
 }
+// Reimprimir pide quedarse con la etiqueta en la base, que rechaza lo vendido o no listo: ahi el boton no se ofrece.
+function etiquetable(p) { return p.destino === 'etiqueta' && p.stock > 0 && (p.estado_analisis ?? 'listo') === 'listo'; }
 const NEUTRO_BUSCAR = 'Busca por código o nombre';
 const filtroCorto = (q) => q.length > 0 && q.length < 3 && !/^\d+$/.test(q);
 async function buscar(mas = false, abrir = false) {
@@ -85,7 +87,7 @@ async function buscar(mas = false, abrir = false) {
 }
 const problemas = {};
 const contexto = { $, nodo, boton, mensaje, hoja, confirmar, api, pesos, identidad, dueno, pc, foco, ficha, resultado, problemas,
-  pieza:() => piezaActual, cambiarModo, imprimir:async (...args) => {if(identidad.vendedor){mensaje('Imprime desde la computadora','aviso');return false;}return (await cargar('imprimir')).imprimir(...args);} };
+  pieza:() => piezaActual, cambiarModo, imprimir:async (...args) => (await cargar('imprimir')).imprimir(...args) };
 // Modo enfocado (#461): solo celular y Capturar; la navegación se oculta con el mismo [hidden] que ya usa el modo único.
 const enfocado = contexto.enfocado = crearEnfocado({ $, problemas, aplica:() => !pc() && modo === 'capturar',
   alCambiar:(on) => { $('modos').hidden = on || modos.length === 1; if (on) void activos.get('capturar')?.empezar?.(); } });
@@ -193,7 +195,7 @@ $('menu').onclick = () => {
 };
 $('chip-red').onclick = () => { const c = nodo('div'); c.append(nodo('p', $('chip-red').textContent), boton('Subir ahora', async () => { await (await cargar('capturar')).subir?.(); } ,'primario')); hoja('Red', c); };
 $('chip-celular').onclick = () => { const a = nodo('a','Abrir en el celular'); a.href = '/camara-remota'; hoja('Cámara para la PC', a); };
-$('chip-impresora').onclick = async () => { if (identidad.vendedor) return mensaje('Imprime desde la computadora', 'aviso'); if ($('modo-imprimir').dataset.activo) await (await cargar('imprimir')).conexion(); else mensaje('Conecta desde Etiquetas', 'aviso'); };
+$('chip-impresora').onclick = async () => { if ($('modo-imprimir').dataset.activo) await (await cargar('imprimir')).conexion(); else mensaje('Conecta desde Etiquetas', 'aviso'); };
 document.addEventListener('click', (e) => {
   const b=e.target.closest?.('[aria-disabled="true"]');
   if (b) { e.preventDefault();e.stopImmediatePropagation();mensaje(b.dataset.motivo||'Espera un momento','aviso'); }
@@ -212,4 +214,8 @@ function red() { $('chip-red').textContent = navigator.onLine ? '● Red' : '▲
 addEventListener('online', red); addEventListener('offline', red); red();
 visualViewport?.addEventListener('resize', () => document.body.classList.toggle('teclado-abierto', visualViewport.height < innerHeight * .7));
 await cambiarModo(new URLSearchParams(location.search).has('pieza') ? 'buscar' : modos.includes(location.hash.slice(1)) ? location.hash.slice(1) : modos.includes(localStorage.getItem('inventario-modo')) ? localStorage.getItem('inventario-modo') : modos[0]);
+// Celular (#440): recupera sin clic la impresora que el navegador recuerda; si no se puede, el chip sigue pidiendo conectarla.
+if (!pc() && modos.includes('imprimir') && navigator.bluetooth?.getDevices) void import('./etiquetera.js').then(async (m) => {
+  if (await m.reconectarEtiquetera()) { $('chip-impresora').textContent = '● Impresora · Lista'; $('chip-impresora').classList.remove('aviso'); }
+}).catch(() => {});
 const inicial = new URLSearchParams(location.search).get('pieza'); if (inicial) { $('consulta').value = inicial; await buscar(false, true); }
