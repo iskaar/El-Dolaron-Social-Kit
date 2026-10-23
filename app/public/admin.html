@@ -291,7 +291,7 @@ function ficha(p) {
   const base = () => ({
     nombre: valor('nombre'), marca: valor('marca'), categoria: valor('categoria'), talla: valor('talla'),
     estado_fisico: valor('estado_fisico'), precio_lista: centavos(valor('precio_lista')),
-    ...(valor('stock') === stockMostrado ? {} : { stock: Math.round(Number(valor('stock') || 0)) }),
+    ...(valor('stock') === stockMostrado ? {} : { stock: Math.round(Number(valor('stock') || 0)), stock_esperado: Number(stockMostrado) }),   // #473: una `listo` solo acepta la existencia si sigue siendo la que viste
   });
 
   async function enviar(cuerpo) {
@@ -299,7 +299,14 @@ function ficha(p) {
       method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify(cuerpo),
     });
     const datos = await respuesta.json();
-    if (!respuesta.ok) { aviso.textContent = datos.error; aviso.style.color = ''; return false; }
+    if (!respuesta.ok) {
+      aviso.textContent = datos.error; aviso.style.color = '';
+      if (respuesta.status === 409 && datos.stock !== undefined) {   // la existencia cambió: se muestra la actual
+        stockMostrado = String(datos.stock);
+        nodo.querySelector('[data-campo="stock"]').value = stockMostrado;
+      }
+      return false;
+    }
     nodo.querySelector('[data-campo="precio"]').value = pesos(datos.precio);
     nodo.querySelector('[data-campo="destino"]').value = datos.destino;
     stockMostrado = String(datos.stock);

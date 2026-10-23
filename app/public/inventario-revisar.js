@@ -40,7 +40,7 @@ export function cuerpoRevision(p, campos, dueno, recalcular=false) {
   const r=cuerpoCorreccion({...p,destino},campos,puedePrecio);
   if(r.error)return r;
   const e=existenciaNueva(p,campos);if(e?.error)return e;
-  const cuerpo={...r.cuerpo,...(e&&p.estado_analisis!=='listo'?{stock:e.valor}:{}),categoria:campos.categoria||p.categoria,estado_fisico:campos.estado_fisico||p.estado_fisico};
+  const cuerpo={...r.cuerpo,...(e&&p.estado_analisis!=='listo'?{stock:e.valor,stock_esperado:e.esperado}:{}),categoria:campos.categoria||p.categoria,estado_fisico:campos.estado_fisico||p.estado_fisico};
   if(recalcular){if(p.codigo&&!dueno)return {error:'El precio lo cambia el dueño'};delete cuerpo.precio;}
   return {cuerpo};
 }
