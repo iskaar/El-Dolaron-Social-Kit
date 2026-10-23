@@ -32,6 +32,7 @@ const server = createServer(async (req, res) => {
     else if (u.pathname === '/api/config') datos = {};
     else if (u.pathname === '/api/salud') datos = { ambiente:'sandbox', ahora:ahora() };
     else if (u.pathname === '/api/familias') datos = { familias:[], montos:[] };
+    else if (u.pathname === '/api/piezas/repetidas') datos = { grupos:[], siguiente:null };
     else if (u.pathname === '/api/piezas') datos = { piezas:/chamarra|012345678905/i.test(u.searchParams.get('q')) ? [pieza] : [], siguiente:null };
     else if (/\/solicitud-precio$/.test(u.pathname) && req.method === 'POST') {
       const c = await cuerpoDe(req);

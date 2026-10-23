@@ -45,6 +45,7 @@ const server=createServer(async(req,res)=>{try{
   else if(u.pathname.includes('/revision'))datos={...p,categoria:'ropa',prenda:'Chamarra'};
   else if(u.pathname==='/api/camara/solicitud'){const ahora=new Date().toISOString();const chunks=[];for await(const ch of req)chunks.push(ch);if(chunks.length)globalThis.solicitud={...JSON.parse(Buffer.concat(chunks)),estado:'pendiente',vence_en:new Date(Date.now()+120000).toISOString()};datos={ahora,solicitud:globalThis.solicitud};}
   else if(u.pathname.startsWith('/api/foto/')){res.setHeader('content-type','image/svg+xml');res.end('<svg xmlns="http://www.w3.org/2000/svg" width="400" height="400"><rect width="400" height="400" fill="#F2F5FA"/><path d="M140 70l-70 70 45 45 25-25v180h120V160l25 25 45-45-70-70-40 30h-40z" fill="#16366B" stroke="#FFD447" stroke-width="8"/></svg>');return;}
+  else if(u.pathname==='/api/solicitudes-precio')datos={solicitudes:[],conteo:0};
   else if(u.pathname.startsWith('/api/'))datos=[];
   if(datos!==undefined){res.setHeader('content-type','application/json');res.end(JSON.stringify(datos));return;}
   const file=path.join(process.cwd(),'app/public',u.pathname==='/'?'inventario.html':u.pathname.slice(1)+(path.extname(u.pathname)?'':'.html'));
@@ -123,6 +124,9 @@ for(const width of [390,1280]){
   if(width===390){
     await js("[...document.querySelectorAll('#modo-capturar button')].find(b=>b.textContent==='Ropa').click()");
     await capturar('06-ropa-sin-talla',width);
+    await js("document.querySelector('.tablero-ropa [data-valor=Niño]').click()");await esperar("!!document.querySelector('#hoja .rodillo .elegida')");
+    assert.equal(await js("document.querySelector('#hoja .rodillo .elegida').textContent"),'4 años','Niño abre el rodillo de edades, no una rejilla');
+    await capturar('06b-ropa-nino-rodillo',width);await js("document.getElementById('cerrar-hoja').click()");
     await js("document.querySelector('.tablero-ropa [data-valor=M]').click();[...document.querySelectorAll('.resumen-ropa button')].at(-1).click()");
     await js("[...document.querySelectorAll('#hoja button')].find(b=>b.textContent==='$120').click()");
     await capturar('05-ropa-completa',width);
