@@ -69,7 +69,8 @@ async function buscarPiezas(env: Env, url: URL, propietario: string): Promise<Re
   let empate = !!cursor;
   // El filtro va en SELECT: LIMIT acota candidatas leídas, incluso si ninguna coincide.
   while (restantes > 0 && piezas.length < PAGINA) {
-    const limite = Math.min(TRAMO, restantes);
+    // Sin filtro casi toda candidata es elegible: leer una página, no un tramo de 200 (cuota de D1).
+    const limite = Math.min(upc || palabras.length ? TRAMO : PAGINA, restantes);
     const { results } = await env.DB.prepare(`select p.rowid as fila, ${COLUMNAS},
         (${VISIBLE} ${upc ? 'and p.propietario = ?' : ''} ${coincide.length ? 'and ' + coincide.join(' and ') : ''}) as elegible
       from productos p indexed by ${upc ? 'productos_upc' : 'productos_propietario_creado'}
