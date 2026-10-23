@@ -187,7 +187,7 @@ main:has(#modo-buscar:not([hidden])) .caja{margin-bottom:12px}
 /* Captura móvil (#458): disparo fijo entre grado y cantidad, encima de la navegación. */
 .solo-lector{position:absolute;width:1px;height:1px;padding:0;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
 .visor .alternar-camara{position:absolute;top:8px;left:8px;display:flex;align-items:center;gap:6px;min-height:44px;padding:6px 8px;background:rgb(11 18 32 / .75);border-color:white;color:white;z-index:1}
-.camara-apagada{position:absolute;inset:0;display:grid;place-content:center;margin:0;pointer-events:none;color:white}
+.camara-apagada{position:absolute;left:12px;bottom:12px;margin:0;pointer-events:none;color:white}
 @media(max-width:999px){
   body{--pie-captura:calc(66px + env(safe-area-inset-bottom))}
   body:has(#modos[hidden]),body.teclado-abierto{--pie-captura:0px}
