@@ -127,12 +127,14 @@ export function permiso(pathname: string, metodo: string): Regla {
   if (ruta === '/api/borradores' || ruta.startsWith('/api/borradores/')) return CAPTURA_FEP;
   // La caja muestra la foto de cada pieza escaneada para detectar etiquetas cambiadas (Issue #358).
   if (ruta.startsWith('/api/foto/')) return [...CAPTURA_FEP, ...CAJA];
-  if (ruta === '/api/etiquetas') return CAPTURA_FEP;
+  // Etiquetas y su registro de enviadas (#440): lo usan la PC y el celular; el cajero no imprime.
+  if (ruta === '/api/etiquetas' || ruta === '/api/etiquetas/enviadas') return CAPTURA_FEP;
+  // Leer la calibracion lo hacen tambien FEP y el celular; cambiarla, solo quien captura.
+  if (ruta === '/api/calibracion') return metodo === 'GET' ? CAPTURA_FEP : CAPTURA;
   if (metodo === 'GET' && (ruta === '/api/piezas' || /^\/api\/piezas\/[^/]+$/.test(ruta))) return CAPTURA_FEP;
   if (metodo === 'POST' && /^\/api\/piezas\/[^/]+\/(existencia|juntar)$/.test(ruta)) return CAPTURA_FEP;
   // Pedir un cambio de precio (#451): capturista o dueño. Listar y resolver (/api/solicitudes-precio) son del dueño, por omisión.
   if (metodo === 'POST' && /^\/api\/piezas\/[^/]+\/solicitud-precio$/.test(ruta)) return CAPTURA;
-  if (ruta === '/api/calibracion') return CAPTURA;
   if (ruta === '/api/marketplace' || /^\/api\/marketplace\/foto\/[^/]+$/.test(ruta)) return CAPTURA;
   if (ruta === '/api/catalogo') return CAJA;
   if (ruta === '/api/socios') return CAJA;
@@ -311,8 +313,8 @@ export async function yo(env: Env, correo: string, cajero: Usuario | null = null
     .bind(correo)
     .first<{ estado: string; creado_en: string }>();
   const modos = usuario?.activo && (usuario.roles.includes('dueno') || usuario.roles.includes('capturista'))
-    ? ['capturar', 'buscar', 'revisar', ...(!vendedor ? ['imprimir'] : [])]
-    : usuario?.activo && usuario.roles.includes('finanzas') ? ['capturar', 'buscar', ...(puedeEditarInventario(usuario) ? ['revisar'] : []), ...(!vendedor ? ['imprimir'] : [])] : [];
+    ? ['capturar', 'buscar', 'revisar', 'imprimir']
+    : usuario?.activo && usuario.roles.includes('finanzas') ? ['capturar', 'buscar', ...(puedeEditarInventario(usuario) ? ['revisar'] : []), 'imprimir'] : [];
   return json({ correo, usuario, solicitud, vendedor, modos_inventario: modos, cajero: cajero && { correo: cajero.correo, nombre: cajero.nombre, caja: cajero.caja } });
 }
 
