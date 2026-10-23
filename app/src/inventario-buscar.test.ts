@@ -47,6 +47,9 @@ test('tarjeta: código primero, nombre seguro, precio/UPC/sin foto, existencia y
   assert.equal(sinCodigo.children[0].tag, 'small'); assert.equal(sinCodigo.children[0].textContent, 'Sin código');
   assert.equal(sinCodigo.children[2].textContent, '$450.00 · sin foto');
   for (const pieza of [{ ...p, codigo: null }, { ...p, destino: 'banda_r19' }]) assert.equal(ui.resultado(pieza, undefined, true).children.length, 1);
+  // Lo vendido o no listo no se puede reclamar en la base: ahí no se ofrece Reimprimir (#464).
+  for (const pieza of [{ ...p, stock: 0 }, { ...p, estado_analisis: 'pendiente' }]) assert.equal(ui.resultado(pieza, undefined, true).children.length, 1);
+  assert.equal(ui.resultado({ ...p, estado_analisis: 'listo' }, undefined, true).children.length, 2);
   // El capturista imprime desde su celular (#440, Isaac 23/10): en su host también aparece Reimprimir.
   assert.equal(tarjetas(undefined, true).resultado(p, undefined, true).children.length, 2);
 });

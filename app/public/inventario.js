@@ -27,7 +27,7 @@ const ficha = crearFicha({ mensaje, confirmar, integrada:true, antesCamara:apaga
     const form=$('fijar');form.hidden=false;hoja('Fijar existencia',form);
     $('hoja').addEventListener('close',()=>{form.hidden=true;$('existencia').prepend(form);},{once:true});
   }));
-  if (p.destino === 'etiqueta') {
+  if (etiquetable(p)) {
     const imprimir = async (n) => (await cargar('imprimir')).imprimir([p.id], new Map([[p.id,n]]), { reimprimir:true });
     $('acciones-ficha').append(boton('Reimprimir etiqueta', () => imprimir(1), 'primario'), boton('Varias copias…', () => {
       let n = 1; const c = nodo('div'); c.append(stepper(n, v => n = v, { nombre:'Copias' }), boton('Imprimir', async () => { cerrarHoja(); await imprimir(n); }, 'primario')); hoja('Copias', c);
@@ -48,7 +48,7 @@ export function resultado(p, alElegir = () => ficha.abrir(p.id), reimprimir = fa
   texto.append(codigo, nodo('b', p.nombre || 'Sin nombre'), nodo('small', `${pesos(p.precio)}${p.upc ? ` · ${p.upc}` : ''}${!conFoto ? ' · sin foto' : ''}`));
   b.append(foto, texto, nodo('span', `×${p.stock}`, 'insignia')); li.append(b);
   if (reimprimir) li.className = 'fila-busqueda';
-  if (reimprimir && p.codigo && p.destino === 'etiqueta') {
+  if (reimprimir && p.codigo && etiquetable(p)) {
     const imprimir = boton('', async (boton) => {
       bloquear(boton, 'Espera el envío'); boton.setAttribute('aria-busy', 'true');
       try { if (await contexto.imprimir([p.id], new Map([[p.id,1]]), { reimprimir:true })) mensaje(`Etiqueta enviada · ${p.codigo}`, 'etiqueta'); }
@@ -60,6 +60,8 @@ export function resultado(p, alElegir = () => ficha.abrir(p.id), reimprimir = fa
   }
   return li;
 }
+// Reimprimir pide quedarse con la etiqueta en la base, que rechaza lo vendido o no listo: ahi el boton no se ofrece.
+function etiquetable(p) { return p.destino === 'etiqueta' && p.stock > 0 && (p.estado_analisis ?? 'listo') === 'listo'; }
 const NEUTRO_BUSCAR = 'Busca por código o nombre';
 const filtroCorto = (q) => q.length > 0 && q.length < 3 && !/^\d+$/.test(q);
 async function buscar(mas = false, abrir = false) {
