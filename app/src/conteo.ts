@@ -7,7 +7,7 @@
  * ver el rastro, solo el dueno.
  */
 
-import { conciliarSeguro } from './mercadolibre.ts';
+import { ajusteGuardado, escribirExistencia } from './piezas.ts';
 
 /** $300 en centavos, si la configuracion no trae CONTEO_UMBRAL. */
 const UMBRAL_POR_OMISION = 30000;
@@ -23,19 +23,19 @@ export function umbralConteo(env: Env): number {
   return Number.isInteger(umbral) && umbral > 0 ? umbral : UMBRAL_POR_OMISION;
 }
 
-/** Las piezas que se cuentan cada noche: en existencia y de precio alto. */
-export async function listarAltoValor(env: Env): Promise<Response> {
+/** Las piezas que se cuentan cada noche: en existencia y de precio alto. FEP es otro inquilino: cada cuenta ve solo las suyas (#480). */
+export async function listarAltoValor(env: Env, propietario: string): Promise<Response> {
   const { results } = await env.DB.prepare(
     `select id, codigo, nombre, precio, stock from productos
-     where sin_inventario = 0 and stock >= 1 and precio >= ? order by precio desc, codigo`,
+     where sin_inventario = 0 and stock >= 1 and precio >= ? and propietario = ? order by precio desc, codigo`,
   )
-    .bind(umbralConteo(env))
+    .bind(umbralConteo(env), propietario)
     .all();
   return json(results);
 }
 
 /** Compara lo contado con lo que dice el sistema. No cambia nada: solo devuelve los faltantes. */
-export async function revisarConteo(request: Request, env: Env): Promise<Response> {
+export async function revisarConteo(request: Request, env: Env, propietario: string): Promise<Response> {
   const cuerpo = (await request.json().catch(() => ({}))) as { conteos?: unknown };
   if (!Array.isArray(cuerpo.conteos) || cuerpo.conteos.length > 200) return json({ error: 'Falta el conteo.' }, 400);
 
@@ -48,9 +48,9 @@ export async function revisarConteo(request: Request, env: Env): Promise<Respons
     }
     // Lo que no esta en la lista de alto valor no se cuenta aqui.
     const pieza = await env.DB.prepare(
-      `select codigo, nombre, stock from productos where id = ? and sin_inventario = 0 and precio >= ?`,
+      `select codigo, nombre, stock from productos where id = ? and sin_inventario = 0 and precio >= ? and propietario = ?`,
     )
-      .bind(id, umbralConteo(env))
+      .bind(id, umbralConteo(env), propietario)
       .first<{ codigo: string; nombre: string; stock: number }>();
     if (pieza && pieza.stock > contado) {
       faltantes.push({
@@ -63,54 +63,57 @@ export async function revisarConteo(request: Request, env: Env): Promise<Respons
 }
 
 /**
- * Baja las existencias por un faltante y lo anota. El audit y el UPDATE van en un
- * solo batch: si el stock no alcanza, el trigger stock_no_negativo (migracion-006)
- * aborta todo y no queda rastro de un ajuste que no ocurrio.
+ * Baja las existencias por un faltante y lo anota, por escribirExistencia (#480): el folio lo manda el cliente (`id`), así que
+ * reintentar no descuenta dos veces; `esperado` es la existencia que vio quien cuenta, y solo se escribe si sigue igual.
  */
-export async function ajustarExistencia(request: Request, env: Env, correo: string, ctx: ExecutionContext): Promise<Response> {
+export async function ajustarExistencia(request: Request, env: Env, correo: string, ctx: ExecutionContext, propietario: string): Promise<Response> {
   const cuerpo = (await request.json().catch(() => ({}))) as Record<string, unknown>;
   const id = String(cuerpo.producto_id ?? '');
+  const folio = String(cuerpo.id ?? '');
   const cantidad = Number(cuerpo.cantidad);
+  const esperado = cuerpo.esperado;
   const motivo = String(cuerpo.motivo ?? '');
-  if (!UUID.test(id)) return json({ error: 'Identificador invalido.' }, 400);
-  if (!Number.isInteger(cantidad) || cantidad < 1 || cantidad > 9999) return json({ error: 'Cantidad invalida.' }, 400);
+  if (!UUID.test(id) || !UUID.test(folio)) return json({ error: 'Identificador invalido.' }, 400);
+  if (!Number.isInteger(cantidad) || cantidad < 1 || cantidad > 999) return json({ error: 'Cantidad invalida.' }, 400);
+  if (typeof esperado !== 'number' || !Number.isInteger(esperado) || esperado < 0 || esperado > 999) return json({ error: 'Falta la existencia que viste (esperado).' }, 400);
   if (!(MOTIVOS as readonly string[]).includes(motivo)) {
     return json({ error: 'Escoge un motivo: robo, merma o error de captura.' }, 400);
   }
 
-  const pieza = await env.DB.prepare('select stock, sin_inventario from productos where id = ?')
-    .bind(id)
+  // Un reintento con el mismo folio devuelve lo ya aplicado; el mismo folio con otra cosa es de otro ajuste.
+  const responder = (a: NonNullable<Awaited<ReturnType<typeof ajusteGuardado>>>, status: number) =>
+    a.producto_id === id && a.ajustado_por === correo && a.motivo === motivo && a.cantidad === cantidad && a.antes === esperado
+      ? json({ producto_id: id, antes: a.antes, despues: a.despues }, status)
+      : json({ error: 'El folio ya pertenece a otro ajuste.' }, 409);
+  const previo = await ajusteGuardado(env, folio);
+  if (previo) return responder(previo, 200);
+
+  const pieza = await env.DB.prepare('select stock, sin_inventario from productos where id = ? and propietario = ?')
+    .bind(id, propietario)
     .first<{ stock: number; sin_inventario: number }>();
   if (!pieza) return json({ error: 'La pieza no existe.' }, 404);
   if (pieza.sin_inventario) return json({ error: 'Esa pieza no lleva inventario.' }, 400);
-  if (pieza.stock < cantidad) return json({ error: 'No hay tantas piezas en existencia.' }, 409);
+  if (pieza.stock < cantidad) return json({ error: 'No hay tantas piezas en existencia.', stock: pieza.stock }, 409);
 
-  const ahora = new Date().toISOString();
-  try {
-    await env.DB.batch([
-      env.DB.prepare(
-        `insert into conteo_ajustes (id, producto_id, codigo, nombre, motivo, cantidad, antes, despues, ajustado_por, ajustado_en)
-         select ?, id, codigo, nombre, ?, ?, stock, stock - ?, ?, ? from productos where id = ?`,
-      ).bind(crypto.randomUUID(), motivo, cantidad, cantidad, correo, ahora, id),
-      env.DB.prepare('update productos set stock = stock - ?, actualizado_en = ? where id = ?').bind(cantidad, ahora, id),
-    ]);
-  } catch (error) {
-    if (String(error).includes('stock insuficiente')) return json({ error: 'No hay tantas piezas en existencia.' }, 409);
-    throw error;
-  }
-  // Si el faltante deja la pieza sin existencias, su publicacion en ML se pausa (D1 manda).
-  ctx.waitUntil(conciliarSeguro(env, { productoIds: [id] }));
-  return json({ producto_id: id, antes: pieza.stock, despues: pieza.stock - cantidad }, 201);
+  const ajuste = await escribirExistencia(env, ctx, { id, propietario, folio, delta: -cantidad, motivo, correo, esperado });
+  if (ajuste) return responder(ajuste, 201);
+  // Otro intento con el mismo folio pudo ganar entre la lectura y la escritura.
+  const ganador = await ajusteGuardado(env, folio);
+  if (ganador) return responder(ganador, 200);
+  const actual = await env.DB.prepare('select stock from productos where id = ? and propietario = ?').bind(id, propietario).first<{ stock: number }>();
+  return json({ error: 'La existencia cambió desde que la viste. Revisa el conteo y vuelve a intentar.', stock: actual?.stock }, 409);
 }
 
 /** El rastro de los ultimos 30 dias, para el dueno. */
-export async function listarAjustes(env: Env): Promise<Response> {
+export async function listarAjustes(env: Env, propietario: string): Promise<Response> {
   const desde = new Date(Date.now() - 30 * DIA_MS).toISOString();
   const { results } = await env.DB.prepare(
     `select producto_id, codigo, nombre, motivo, cantidad, antes, despues, ajustado_por, ajustado_en
-     from conteo_ajustes where ajustado_en >= ? order by ajustado_en desc`,
+     from conteo_ajustes where ajustado_en >= ?
+       and not exists (select 1 from productos p where p.id = conteo_ajustes.producto_id and p.propietario <> ?)
+     order by ajustado_en desc`,
   )
-    .bind(desde)
+    .bind(desde, propietario)
     .all();
   return json(results);
 }

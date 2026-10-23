@@ -1041,7 +1041,7 @@ test('preparar: el enlace de una publicación explica qué copiar; sin marca tam
 test('conteo: un faltante (robo) que deja la pieza sin existencias la pausa en ML', async () => {
   await conML(async (t) => {
     const { id, itemId } = await publicarPieza(t, pieza(t, { stock: 1 }));
-    const r = await t.pedir('/api/conteo/ajustes', { producto_id: id, cantidad: 1, motivo: 'robo' });
+    const r = await t.pedir('/api/conteo/ajustes', { id: crypto.randomUUID(), esperado: 1, producto_id: id, cantidad: 1, motivo: 'robo' });
     assert.equal(r.status, 201, JSON.stringify(r.cuerpo));
     await t.esperar();
     assert.equal(stockDe(t, id), 0);

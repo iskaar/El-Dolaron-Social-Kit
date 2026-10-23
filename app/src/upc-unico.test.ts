@@ -72,21 +72,26 @@ test('una suma intercalada antes de corregir o cancelar también impide pisar el
     const t = preparar(); t0.after(() => t.db.close());
     const a = cuerpo(); await t.pedir('/api/borradores/upc', a);
     t.db.prepare("update productos set estado_analisis='pendiente' where id=?").run(a.id);
-    const prepare = t.env.DB.prepare.bind(t.env.DB);
+    const prepare = t.env.DB.prepare.bind(t.env.DB), lote = t.env.DB.batch.bind(t.env.DB), baja = new Set<unknown>();
     let sumada = false;
+    const sumar = async () => {
+      if (!sumada) {
+        sumada = true;
+        assert.equal((await t.pedir('/api/borradores/upc', cuerpo({stock:3}))).status, 201);
+      }
+    };
     t0.mock.method(t.env.DB, 'prepare', (sql: string) => {
       const s = prepare(sql);
-      if (/update productos set (stock = 0|stock = \?)/.test(sql)) {
+      if (/update productos set stock = 0/.test(sql)) baja.add(s);   // la baja viaja en un lote con su renglón (#480)
+      else if (/update productos set stock = \?/.test(sql)) {
         const run = s.run.bind(s);
-        s.run = async () => {
-          if (!sumada) {
-            sumada = true;
-            assert.equal((await t.pedir('/api/borradores/upc', cuerpo({stock:3}))).status, 201);
-          }
-          return run();
-        };
+        s.run = async () => { await sumar(); return run(); };
       }
       return s;
+    });
+    t0.mock.method(t.env.DB, 'batch', async (sentencias: never[]) => {
+      if (sentencias.some((s) => baja.has(s))) await sumar();
+      return lote(sentencias);
     });
     const r = eliminar ? await t.pedir(`/api/borradores/${a.id}/revision`, {}, 'DELETE')
       : await t.pedir(`/api/borradores/${a.id}/existencia`, {stock:3}, 'PATCH');
