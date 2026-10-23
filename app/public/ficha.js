@@ -68,13 +68,17 @@ export function resolverRepetida(origen, destino, { nodo, boton, hoja, api, mens
   const sale = queda.id === destino.id ? origen : destino;
   const dosEtiquetas = !!origen.codigo && !!destino.codigo;
   const contenido = nodo('div', undefined, 'formulario'), id = crypto.randomUUID();
-  let ocupada = false, movida = null;
+  let ocupada = false, movida = null, fusionIntentada = false;
   contenido.append(nodo('p', `Pasa ${sale.stock} piezas a ${queda.codigo || queda.nombre}. ${dosEtiquetas ? 'La etiqueta anterior conserva su código con existencia cero.' : 'Se conserva una sola pieza.'}`));
   const juntar = boton(`Juntar en ${queda.codigo || queda.nombre}`, async () => {
     if (ocupada) return; ocupada = true; juntar.setAttribute('aria-disabled','true');
     try {
+      const reintento = fusionIntentada; fusionIntentada = true;
       movida ??= dosEtiquetas ? await api(`/api/piezas/${sale.id}/juntar`, {id, destino_id:queda.id})
-        : await api(`/api/borradores/${sale.id}/fusionar`, {destino_id:queda.id});
+        : await api(`/api/borradores/${sale.id}/fusionar`, {destino_id:queda.id}).catch(e => {
+          if (!reintento || e.status !== 404) throw e;
+          return {};
+        });
       if (normalizarUpc(queda.upc) !== normalizarUpc(upc)) await api(`/api/borradores/${queda.id}`, {upc:upc || ''}, 'PATCH');
       cerrar(); await alTerminar(queda.id);
       mensaje('Existencias juntas', 'ok');

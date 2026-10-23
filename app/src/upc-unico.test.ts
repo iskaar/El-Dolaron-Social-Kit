@@ -46,6 +46,57 @@ test('distinto grado permite pieza distinta; dos capturas simultáneas sólo ins
   assert.equal(filas(t).length, 3); t.db.close();
 });
 
+test('una captura que recibió una suma rechaza stock absoluto y cancelación sin perder el inventario combinado', async tt => {
+  for (const accion of ['cantidad', 'cero', 'eliminar', 'manual']) await tt.test(accion, async t0 => {
+    const t = preparar(); t0.after(() => t.db.close());
+    const a = cuerpo();
+    await t.pedir('/api/borradores/upc', a);
+    t.db.prepare("update productos set estado_analisis='pendiente' where id=?").run(a.id);
+    await t.pedir('/api/borradores/upc', cuerpo({stock:3}));
+    const r = accion === 'eliminar'
+      ? await t.pedir(`/api/borradores/${a.id}/revision`, {}, 'DELETE')
+      : accion === 'manual'
+      ? await t.pedir('/api/borradores/upc/manual', {id:a.id,stock:3}, 'PATCH')
+      : await t.pedir(`/api/borradores/${a.id}/existencia`, {stock:accion === 'cero' ? 0 : 3}, 'PATCH');
+    assert.equal(r.status, 409);
+    assert.match(r.cuerpo.error, /sum|fusion/i);
+    assert.match(r.cuerpo.error, /ajuste/i);
+    assert.deepEqual(filas(t).map(p => [p.stock,p.estado_analisis]), [[5,'pendiente']]);
+    assert.equal(ajustes(t).length, 1);
+    assert.equal((await t.pedir(`/api/borradores/${a.id}/talla`, {talla:'M'}, 'PATCH')).status, 200);
+  });
+});
+
+test('una suma intercalada antes de corregir o cancelar también impide pisar el stock', async tt => {
+  for (const eliminar of [false,true]) await tt.test(String(eliminar), async t0 => {
+    const t = preparar(); t0.after(() => t.db.close());
+    const a = cuerpo(); await t.pedir('/api/borradores/upc', a);
+    t.db.prepare("update productos set estado_analisis='pendiente' where id=?").run(a.id);
+    const prepare = t.env.DB.prepare.bind(t.env.DB);
+    let sumada = false;
+    t0.mock.method(t.env.DB, 'prepare', (sql: string) => {
+      const s = prepare(sql);
+      if (/update productos set (stock = 0|stock = \?)/.test(sql)) {
+        const run = s.run.bind(s);
+        s.run = async () => {
+          if (!sumada) {
+            sumada = true;
+            assert.equal((await t.pedir('/api/borradores/upc', cuerpo({stock:3}))).status, 201);
+          }
+          return run();
+        };
+      }
+      return s;
+    });
+    const r = eliminar ? await t.pedir(`/api/borradores/${a.id}/revision`, {}, 'DELETE')
+      : await t.pedir(`/api/borradores/${a.id}/existencia`, {stock:3}, 'PATCH');
+    assert.equal(sumada, true);
+    assert.equal(r.status, 409);
+    assert.equal(filas(t)[0].stock, 5);
+    assert.equal(filas(t)[0].estado_analisis, 'pendiente');
+  });
+});
+
 test('desconocido pendiente/error también suma y su UUID original sigue consultable por quien capturó', async () => {
   const t = preparar(); t.db.prepare('delete from manifiesto').run();
   const a = cuerpo(), b = cuerpo();
@@ -83,6 +134,23 @@ test('foto y captura manual con UPC reutilizan identidad y conservan reintentos 
   assert.equal((await t.pedir('/api/borradores/upc/manual', b)).cuerpo.id, a.id);
   assert.equal(filas(t).length, 1); assert.equal(filas(t)[0].stock, 7); assert.equal(ajustes(t).length, 2);
   t.db.close();
+});
+
+test('reenviar foto valida el UPC conservado contra el grado resultante, aunque el formulario no lo mande o mande otro', async tt => {
+  for (const upc of ['', '999999999999']) await tt.test(upc || 'sin UPC', async t0 => {
+    const t = preparar(); t0.after(() => t.db.close());
+    t0.mock.method(globalThis, 'fetch', async () => new Response('{}', {status:401}));
+    const a = pieza(t, {upc:UPC}), b = pieza(t, {upc:'012345678905',estado_fisico:'danado'});
+    const f = new FormData(); f.set('id',b.id); f.set('estado_fisico','nuevo');
+    if (upc) f.set('upc',upc);
+    f.set('foto',new File(['foto'],'foto.jpg',{type:'image/jpeg'}));
+    const r = await worker.fetch!(new Request('https://caja.prueba/api/borradores', {method:'POST',body:f}) as never,t.env,t.ctx as never);
+    await t.esperar();
+    assert.equal(r.status, 409);
+    assert.equal((await r.json() as any).existente.id, a.id);
+    const despues = t.db.prepare('select upc, estado_fisico, stock, precio, estado_analisis from productos where id=?').get(b.id)!;
+    assert.deepEqual({...despues}, {upc:b.upc,estado_fisico:'danado',stock:3,precio:9900,estado_analisis:'listo'});
+  });
 });
 
 test('la consulta de igualdad usa el índice por propietario, UPC normalizado y grado', () => {
@@ -191,6 +259,47 @@ test('hoja de coincidencia usa fusión si falta etiqueta y reintenta UPC sin rep
     assert.equal(llamadas.filter(c=>c.ruta.endsWith(etiqueta?'/juntar':'/fusionar')).length,1);
     assert.equal(llamadas.filter(c=>c.ruta.endsWith('/destino')).length,2);
     assert.equal(acciones.has('Imprimir 2 etiquetas de ED-000001'),etiqueta);
+  }
+});
+
+test('perder la respuesta de fusión permite reintentar y guardar el UPC de la pieza etiquetada', async t0 => {
+  const t = preparar(); t0.after(() => t.db.close());
+  const a = pieza(t,{codigo:'ED-000123',upc:'999999999999',stock:2}), b = pieza(t,{upc:UPC});
+  const acciones = new Map<string,() => Promise<void>>(), llamadas:string[] = [], terminadas:string[] = [];
+  const nodo = () => ({append(){},setAttribute(){}});
+  let perder = true;
+  resolverRepetida(a,b,{
+    nodo,boton:(texto,accion)=>{acciones.set(texto,accion);return nodo();},hoja(){},mensaje(){},cerrar(){},
+    upc:UPC,alTerminar:async id=>{terminadas.push(id);},imprimir:async()=>true,
+    api:async(ruta,cuerpo,metodo)=>{
+      llamadas.push(ruta);
+      const r = await t.pedir(ruta,cuerpo,metodo);
+      if (r.status >= 400) throw Object.assign(new Error(r.cuerpo.error),{status:r.status});
+      if (perder && ruta.endsWith('/fusionar')) { perder=false; throw new TypeError('Respuesta perdida'); }
+      return r.cuerpo;
+    },
+  });
+  await acciones.get('Juntar en ED-000123')!();
+  assert.equal(t.db.prepare('select id from productos where id=?').get(b.id), undefined);
+  assert.deepEqual(terminadas, []);
+  await acciones.get('Juntar en ED-000123')!();
+  assert.deepEqual(terminadas, [a.id]);
+  assert.deepEqual({...t.db.prepare('select upc,stock,codigo from productos where id=?').get(a.id)!},
+    {upc:UPC,stock:5,codigo:a.codigo});
+  assert.deepEqual(llamadas,[`/api/borradores/${b.id}/fusionar`,`/api/borradores/${b.id}/fusionar`,`/api/borradores/${a.id}`]);
+});
+
+test('un 404 inicial de fusión o un error distinto en el reintento no autoriza guardar UPC', async () => {
+  for (const estados of [[404], [500,403], [500,409]]) {
+    const acciones = new Map<string,() => Promise<void>>(), llamadas:string[] = [];
+    const nodo = () => ({append(){},setAttribute(){}});
+    resolverRepetida({id:'a',codigo:'ED-000123',upc:'999999999999',stock:2},{id:'b',upc:UPC,stock:3},{
+      nodo,boton:(texto,accion)=>{acciones.set(texto,accion);return nodo();},hoja(){},mensaje(){},cerrar(){},upc:UPC,
+      api:async ruta=>{llamadas.push(ruta);throw Object.assign(new Error('Fallo'),{status:estados[llamadas.length-1]});},
+      imprimir:async()=>true,
+    });
+    for (const _ of estados) await acciones.get('Juntar en ED-000123')!();
+    assert.ok(llamadas.every(ruta=>ruta.endsWith('/fusionar')));
   }
 });
 

@@ -89,7 +89,7 @@ async function listar(env: Env, url: URL, usuario: Usuario): Promise<Response> {
 }
 
 /** Aplica con la misma lógica de servidor que la corrección de precio de la ficha (`aplicarPrecio`). */
-type AplicarPrecio = (productoId: string, precio: number, esperado: number) => Promise<Response>;
+type AplicarPrecio = (productoId: string, precio: number, esperado: number, solicitudId: string) => Promise<Response>;
 
 async function resolver(request: Request, env: Env, id: string, usuario: Usuario, aplicarPrecio: AplicarPrecio): Promise<Response> {
   const cuerpo = await request.json().catch(() => null) as Record<string, unknown> | null;
@@ -120,15 +120,14 @@ async function resolver(request: Request, env: Env, id: string, usuario: Usuario
   const pieza = await env.DB.prepare(PIEZA).bind(solicitud.producto_id, solicitud.propietario).first<PiezaPrecio>();
   if (!pieza) return json({ error: 'Pieza no encontrada.' }, 404);
   if (pieza.destino !== 'etiqueta') return json({ error: 'La pieza pasó a una banda: su precio es el de la banda. Deja igual la solicitud.' }, 409);
-  // Si ya vale lo pedido (un reintento tras una respuesta perdida) solo falta cerrar la solicitud.
-  if (pieza.precio !== precio) {
-    if (pieza.precio !== esperado) return json({ error: 'El precio de la pieza cambió. Revisa el precio actual.', precio: pieza.precio }, 409);
-    const r = await aplicarPrecio(pieza.id, precio, esperado);
-    if (r.status === 409) return json({ error: 'El precio de la pieza cambió. Revisa el precio actual.',
-      precio: (await env.DB.prepare(PIEZA).bind(solicitud.producto_id, solicitud.propietario).first<PiezaPrecio>())?.precio }, 409);
-    if (r.status !== 200) return r;
-  }
-  if (!await marcar('aplicada', precio)) return json({ error: 'La solicitud ya estaba resuelta.', solicitud: await porId(env, id) }, 409);
+  if (pieza.precio !== precio && pieza.precio !== esperado)
+    return json({ error: 'El precio de la pieza cambió. Revisa el precio actual.', precio: pieza.precio }, 409);
+  // Incluso si ya vale lo pedido, la pieza y el cierre se comprueban en el mismo batch.
+  const r = await aplicarPrecio(pieza.id, precio, pieza.precio === precio ? precio : esperado, id);
+  if (r.status === 409) return json({ error: 'La pieza o la solicitud cambió. Revisa el precio y la solicitud actuales.',
+    solicitud: await porId(env, id),
+    precio: (await env.DB.prepare(PIEZA).bind(solicitud.producto_id, solicitud.propietario).first<PiezaPrecio>())?.precio }, 409);
+  if (r.status !== 200) return r;
   return json({ solicitud: await porId(env, id), precio });
 }
 

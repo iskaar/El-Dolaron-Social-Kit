@@ -6,6 +6,27 @@ import { tienda, PRODUCTO } from './prueba-d1.ts';
 
 const REPETIDA = 'b2222222-2222-4222-8222-222222222222';
 
+test('fusionar rechaza grados distintos, también si cambian justo antes del batch', async tt => {
+  for (const intercalado of [false,true]) await tt.test(String(intercalado), async t0 => {
+    const t = tienda(); t0.after(() => t.db.close());
+    t.db.prepare(`insert into productos (id, nombre, stock, estado_fisico, semana_ingreso, creado_en, actualizado_en)
+      values (?, 'Ventilador', 3, ?, 'S40', '', '')`).run(REPETIDA, intercalado ? 'nuevo' : 'danado');
+    await t.env.FOTOS.put(`fotos/${REPETIDA}.jpg`, 'foto');
+    if (intercalado) {
+      const batch = t.env.DB.batch.bind(t.env.DB);
+      t0.mock.method(t.env.DB, 'batch', async sentencias => {
+        t.db.prepare("update productos set estado_fisico='danado' where id=?").run(REPETIDA);
+        return batch(sentencias);
+      });
+    }
+    const r = await t.pedir(`/api/borradores/${REPETIDA}/fusionar`, {destino_id:PRODUCTO});
+    assert.equal(r.status, 409);
+    assert.equal(t.db.prepare('select stock from productos where id=?').get(PRODUCTO)!.stock, 50);
+    assert.equal(t.db.prepare('select stock from productos where id=?').get(REPETIDA)!.stock, 3);
+    assert.ok(await t.env.FOTOS.get(`fotos/${REPETIDA}.jpg`));
+  });
+});
+
 test('dos fusiones de la misma repetida suman una sola vez', async () => {
   const t = tienda();
   t.db.prepare(`insert into productos (id, nombre, precio, stock, semana_ingreso, creado_en, actualizado_en)

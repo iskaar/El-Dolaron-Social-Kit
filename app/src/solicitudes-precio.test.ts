@@ -204,6 +204,39 @@ test('el precio cambia en medio de aplicar: el UPDATE lo detecta y no pisa ni ci
   assert.equal(producto(t).precio, 30000); assert.equal(solicitudes(t)[0].estado, 'pendiente');
 });
 
+test('un rechazo entre las lecturas y el UPDATE de aplicar conserva precio y auditoría', async t0 => {
+  const t = tienda(); t0.after(() => t.db.close()); equipo(t);
+  const { cuerpo } = await pedir(t); const id = cuerpo.solicitud.id;
+  const antes = { ...producto(t) }, prepare = t.env.DB.prepare.bind(t.env.DB);
+  t0.mock.method(t.env.DB, 'prepare', (sql: string) => {
+    if (/^update productos set nombre/.test(sql.trim())) {
+      t.db.prepare("update solicitudes_precio set estado='rechazada', resuelto_por=?, resuelto_en='rechazo' where id=? and estado='pendiente'")
+        .run(OTRO_DUENO, id);
+    }
+    return prepare(sql);
+  });
+  const r = await t.pedir(`/api/solicitudes-precio/${id}`, {accion:'aplicar',precio:20000,precio_esperado:25000});
+  assert.equal(r.status, 409);
+  assert.deepEqual({ ...producto(t) }, antes);
+  assert.deepEqual(solicitudes(t).map(s => [s.estado,s.resuelto_por,s.resuelto_en,s.precio_nuevo]),
+    [['rechazada',OTRO_DUENO,'rechazo',null]]);
+});
+
+test('cero filas en el UPDATE no cierra la solicitud si la pieza cambia de banda antes del batch', async t0 => {
+  const t = tienda(); t0.after(() => t.db.close()); equipo(t);
+  const { cuerpo } = await pedir(t); const id = cuerpo.solicitud.id;
+  const prepare = t.env.DB.prepare.bind(t.env.DB);
+  t0.mock.method(t.env.DB, 'prepare', (sql: string) => {
+    if (/^update productos set nombre/.test(sql.trim()))
+      t.db.prepare("update productos set destino='banda_g49' where id=?").run(PRODUCTO);
+    return prepare(sql);
+  });
+  const r = await t.pedir(`/api/solicitudes-precio/${id}`, {accion:'aplicar',precio:20000,precio_esperado:25000});
+  assert.equal(r.status, 409);
+  assert.equal(producto(t).precio, 25000);
+  assert.equal(solicitudes(t)[0].estado, 'pendiente');
+});
+
 test('el dueño cambia el precio por el PATCH (Editar o Revisar): la solicitud pendiente se cierra sola, solo si el precio cambió', async (t0) => {
   const t = tienda(); t0.after(() => t.db.close()); equipo(t); como(t, CAP);
   await pedir(t, { precio_sugerido: 20000 }); como(t, DUENO);
