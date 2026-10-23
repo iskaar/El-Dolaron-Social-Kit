@@ -36,6 +36,15 @@ const COLUMNAS = `p.id, p.codigo, p.nombre, p.marca, p.talla, p.categoria, p.pre
 const VISIBLE = "p.sin_inventario = 0 and p.estado_analisis <> 'descartado'";
 const publica = ({ fila, elegible, ...p }: Candidata) => p;
 
+/**
+ * ¿Puede esta persona fijar el precio de esta pieza directamente? (#479, decisión de Isaac en #478.) El dueño siempre.
+ * Las demás solo mientras la pieza no tiene etiqueta (`codigo`): el precio de una captura sin etiquetar es parte de la
+ * captura. `preciadaPorSistema` (alta por UPC: el precio sale del manifiesto) lo deja solo al dueño aunque aún no tenga código.
+ * Quien no pueda, pide el cambio con una solicitud de precio (solicitudes-precio.ts). Un rol «supervisor» se suma en la línea del dueño.
+ */
+export const autorizarPrecio = (usuario: Usuario | null, pieza: { codigo: string | null; preciadaPorSistema?: boolean }): boolean =>
+  (!!usuario?.activo && usuario.roles.includes('dueno')) || (!pieza.codigo && !pieza.preciadaPorSistema);
+
 /** Se inspeccionan 80 candidatas por página, también cuando no hay ninguna repetida. */
 async function piezasRepetidas(env: Env, url: URL, usuario: Usuario | null): Promise<Response> {
   if (!puedeEditarInventario(usuario)) return json({ error:'Tu cuenta no tiene permiso para editar inventario.' }, 403);

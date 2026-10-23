@@ -98,11 +98,18 @@ Detalle completo en `docs/PLAN-ETIQUETAS-POR-BANDA.md`. Resumen:
 
 En sandbox y producción, tocar una miniatura permite cambiar el precio final entre
 $300/$200/$150/$120/$100/$80/$50 MXN y Nuevo/Dañado con «Guardar cambios», también después
-de subir. La condición no recalcula ese precio elegido. «Eliminar captura»
+de subir, mientras la pieza no tenga etiqueta. Con etiqueta (`codigo`) solo el dueño cambia el precio
+(`autorizarPrecio`, #479): la miniatura guarda lo demás, deja el precio como está y crea una solicitud de
+precio (#451) con el mensaje «Se pidió el cambio de precio al dueño»; el dueño la aprueba en «Precios por
+revisar». La condición no recalcula ese precio elegido. «Eliminar captura»
 descarta la captura completa tras un segundo toque; requiere conexión y no
 elimina piezas con venta o publicación. El servidor limita estas operaciones
 a capturas propias de las últimas 24 horas. Si ya salió una etiqueta, reemplazarla
 cuando cambie el precio o descartarla cuando se elimine la captura.
+
+«Reintentar análisis» sobre una pieza ya revisada (`listo`) no la sobrescribe (#479): el análisis guarda
+`precio_sugerido` y, si el precio difiere, crea una solicitud de precio (autor: quien reanalizó, o `ia` si el
+resultado llegó tarde tras una corrección). Revisar responde «Sugerencia enviada para aprobación».
 
 En el celular (Chrome de Android) la etiqueta se imprime desde /inventario (Issue #440): «Conectar impresora» en el chip,
 una etiqueta por pieza en existencia al guardar, +1 imprime 1 (Sumar N imprime N), y la pestaña Imprimir y Reimprimir funcionan como en la PC.

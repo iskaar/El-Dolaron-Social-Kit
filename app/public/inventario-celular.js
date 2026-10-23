@@ -177,6 +177,7 @@ export async function iniciarCelular(ctx,captura) {
     const marca=estadoEnvio({...actual,id}).marca;if(marca)c.append(nodo('p',`La etiqueta pegada dice $${marca.precio/100}`,'aviso'));
     const guardarBoton=boton('Guardar cambios',async()=>{
       if(!cambiado)return mensaje('Sin cambios','aviso');
+      let avisoPrecio='';
       if(!navigator.onLine&&(!local||cantidad!==actual.stock))return mensaje('Sin red: se suma al volver la señal','aviso');
       if(tablero&&!tablero.validar())return;
       const r=tablero?.valores();if(r){cambios={...cambios,prenda:r.prenda,marca:r.marca,precio:r.precio_ropa};tallaActual=r.talla;}
@@ -196,10 +197,12 @@ export async function iniciarCelular(ctx,captura) {
           void etiquetarCorreccion(id,datos,actual,cantidad);
         }
         if(tallaActual&&tallaActual!==actual.talla)await api(`/api/borradores/${id}/talla`,{talla:tallaActual},'PATCH');
-        if(r||cambios.estado_fisico!==actual.estado_fisico)await api(`/api/borradores/${id}/revision`,cambios,'PATCH');
-        Object.assign(datos,{cantidad,talla:tallaActual,estado_fisico:cambios.estado_fisico,...(r?{precio_ropa:r.precio_ropa,prenda:r.prenda,marca:r.marca}:{})});
+        // #479: con etiqueta el precio no lo cambia el capturista: se pide al dueño y se sigue mostrando el precio actual.
+        const guardada=r||cambios.estado_fisico!==actual.estado_fisico?await api(`/api/borradores/${id}/revision`,cambios,'PATCH'):null;
+        if(guardada?.aviso)avisoPrecio=guardada.aviso;
+        Object.assign(datos,{cantidad,talla:tallaActual,estado_fisico:cambios.estado_fisico,...(r?{precio_ropa:guardada?.solicitud_precio||guardada?.aviso?guardada.precio:r.precio_ropa,prenda:r.prenda,marca:r.marca}:{})});
       }
-      cerrarHoja();mensaje('Cambios guardados','ok');pintar();
+      cerrarHoja();mensaje(avisoPrecio||'Cambios guardados',avisoPrecio?'aviso':'ok');pintar();
     },'primario');bloquear(guardarBoton,'Sin cambios');c.append(guardarBoton);
     c.append(boton('Retomar foto',async()=>{if(local){if(camara.pista()&&video.videoWidth)await retomarLocal(local,await aJpeg(video,video.videoWidth,video.videoHeight));else{archivoPara={local};archivo.click();}}else{await fotoPieza({...datos,id});}if(local)cerrarHoja();}));
     const descartar=boton('Descartar',async b=>{

@@ -389,7 +389,10 @@ function ficha(p) {
       }
     } else if (accion === 'reanalizar') {
       aviso.textContent = 'Analizando…';
-      await fetch(`/api/borradores/${p.id}/analizar`, { method: 'POST' });
+      const respuesta = await fetch(`/api/borradores/${p.id}/analizar`, { method: 'POST' });
+      // #479: una pieza revisada solo recibe una sugerencia, que el dueño aprueba en «Precios por revisar».
+      const datos = await respuesta.json().catch(() => ({}));
+      if (datos.sugerencia) aviso.textContent = datos.mensaje;
       setTimeout(cargarCola, 6000);
     } else if (accion === 'fusionar') {
       evento.target.disabled = true;   // un segundo clic mientras viaja sumaria dos veces

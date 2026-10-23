@@ -40,14 +40,14 @@ import { CLAVES_CATEGORIA } from '../public/categorias.js';
 import { tallaValida } from '../public/tallas.js';
 import {
   permiso, puede, quienEs, leerUsuario, yo, pedirAcceso, listarCuentas, guardarCuenta, resolverSolicitud, propietarioDe,
-  esDeCaja, soloComputadora, CAJAS, puedeEditarInventario,
+  esDeCaja, soloComputadora, CAJAS, puedeEditarInventario, type Usuario,
 } from './cuentas.ts';
 import { cajeroEnTurno, listarCajeros, entrar, salir, ponerPin } from './cajeros.ts';
 import { registrarSocio, buscarSocio, buscarPorCodigo, basesListas, sentenciasDeVenta, saldo } from './dolarones.ts';
 import { registrarCorte, registrarRetiro, ultimoCorte, cajaDe } from './corte.ts';
 import { rutaGastos } from './gastos.ts';
-import { rutaPiezas, escribirExistencia } from './piezas.ts';
-import { rutaSolicitudesPrecio } from './solicitudes-precio.ts';
+import { rutaPiezas, escribirExistencia, autorizarPrecio } from './piezas.ts';
+import { rutaSolicitudesPrecio, crearSolicitud } from './solicitudes-precio.ts';
 import { UPC_VISIBLE, MISMO_UPC, PIEZA_UPC, CAPTURA_SUMADA, conflictoCapturaSumada, capturaSumada, sumarCaptura, conflictoUpc, corregirUpc, upcValido, type PiezaUpc } from './upc-inventario.ts';
 import { rutaCamaraRemota } from './camara-remota.ts';
 import { rutaNomina } from './nomina.ts';
@@ -419,7 +419,7 @@ async function destinoValido(destino: string, env: Env): Promise<boolean> {
  * (lo que vio quien corrige), es condicional y deja renglón en conteo_ajustes (#473, igual que #468). Sin `existencia`
  * (alta manual y su reintento, solicitudes de precio) la escritura directa nunca toca una `listo`.
  */
-async function corregirBorrador(id: string, cambios: Record<string, unknown>, env: Env, esDueno: boolean, captura?: { correo: string; upc: string }, precioEsperado?: number, cierraSolicitudPor?: string, solicitudId?: string, existencia?: { ctx: ExecutionContext; correo: string }): Promise<Response> {
+async function corregirBorrador(id: string, cambios: Record<string, unknown>, env: Env, usuario: Usuario | null, captura?: { correo: string; upc: string }, precioEsperado?: number, cierraSolicitudPor?: string, solicitudId?: string, existencia?: { ctx: ExecutionContext; correo: string }): Promise<Response> {
   if (!UUID.test(id)) {
     return json({ error: 'Identificador invalido.' }, 400);
   }
@@ -501,7 +501,7 @@ async function corregirBorrador(id: string, cambios: Record<string, unknown>, en
   if (destino === 'etiqueta' && (!nombre.trim() || precio <= 0)) {
     return json({ error: 'Una pieza con etiqueta necesita nombre y un precio mayor a cero para quedar lista.' }, 400);
   }
-  if (!esDueno && fila.codigo && precio !== fila.precio) {
+  if (precio !== fila.precio && !autorizarPrecio(usuario, fila)) {
     return json({ error: 'Esta pieza ya tiene etiqueta: solo el dueño cambia su precio.' }, 403);
   }
 
@@ -570,10 +570,10 @@ async function corregirBorrador(id: string, cambios: Record<string, unknown>, en
  * validaciones y mismo calculo de precio. Idempotente por id, como la foto.
  */
 async function capturarManual(request: Request, env: Env, correo: string): Promise<Response> {
-  return await altaManual((await request.json().catch(() => ({}))) as Record<string, unknown>, env, correo);
+  return await altaManual((await request.json().catch(() => ({}))) as Record<string, unknown>, env, correo, null, await leerUsuario(env, correo));
 }
 
-async function altaManual(cuerpo: Record<string, unknown>, env: Env, correo: string, upc: string | null = null, esDueno = true): Promise<Response> {
+async function altaManual(cuerpo: Record<string, unknown>, env: Env, correo: string, upc: string | null = null, usuario: Usuario | null = null): Promise<Response> {
   const id = String(cuerpo.id ?? '');
   if (!UUID.test(id)) return json({ error: 'Identificador invalido.' }, 400);
   if (!String(cuerpo.nombre ?? '').trim()) return json({ error: 'Falta el nombre.' }, 400);
@@ -599,7 +599,7 @@ async function altaManual(cuerpo: Record<string, unknown>, env: Env, correo: str
     .run();
   if (!meta.changes && upc && !await env.DB.prepare('select id from productos where id = ?').bind(id).first())
     return await sumarUpc(id, upc, grado, cantidad, env, correo) ?? json({ error:'La captura cambió. Reintenta.' }, 409);
-  const respuesta = await corregirBorrador(id, cuerpo, env, esDueno, upc === null ? undefined : { correo, upc });
+  const respuesta = await corregirBorrador(id, cuerpo, env, usuario, upc === null ? undefined : { correo, upc });
   // Datos invalidos: no queda una pieza vacia (salvo que fuera un reintento de una ya guardada).
   if (!respuesta.ok && meta.changes > 0) await env.DB.prepare(`delete from productos where id = ?
     ${upc === null ? '' : "and estado_analisis = 'pendiente' and (codigo is null or codigo = '') and actualizado_en = ?"}`)
@@ -635,10 +635,9 @@ async function capturarManualEscaner(request: Request, env: Env, correo: string)
   }
   if (existente && (existente.codigo || existente.estado_analisis === 'descartado')) return json({ error: 'La pieza ya tiene etiqueta o se canceló.' }, 409);
   if (upc && await fichaDeManifiesto(normalizarUpc(upc), env)) return json({ error: 'Ese código sí está en la hoja: vuelve a escanearlo.' }, 409);
-  const esDueno = !!(await leerUsuario(env, correo))?.roles.includes('dueno');
   const respuesta = await altaManual({ id: cuerpo.id, nombre: cuerpo.nombre, categoria: cuerpo.categoria,
     estado_fisico: cuerpo.estado_fisico, precio_lista: cuerpo.precio_lista, precio: cuerpo.precio,
-    stock: cuerpo.stock, destino: 'etiqueta' }, env, correo, upc, esDueno);
+    stock: cuerpo.stock, destino: 'etiqueta' }, env, correo, upc, await leerUsuario(env, correo));
   // Otro reintento pudo terminarla mientras se validaban los datos; nunca repone stock.
   if (respuesta.ok && (await respuesta.clone().json() as { existente?: boolean }).existente) return respuesta;
   if (!respuesta.ok) {
@@ -743,7 +742,8 @@ async function capturarPorUpc(request: Request, env: Env, correo: string, ctx?: 
   const editando = nombreEditado !== undefined || cuerpo.precio !== undefined;
   const usuario = editando ? await leerUsuario(env, correo) : null;
   const validarEdicion = (nombre: string, precio: number): Response | null => {
-    if (cuerpo.precio !== undefined && cuerpo.precio !== precio && !usuario?.roles.includes('dueno')) {
+    // El precio de un alta por UPC sale del manifiesto: solo el dueño lo cambia (#479).
+    if (cuerpo.precio !== undefined && cuerpo.precio !== precio && !autorizarPrecio(usuario, { codigo: null, preciadaPorSistema: true })) {
       return json({ error: 'Solo el dueño cambia el precio.' }, 403);
     }
     if (nombreEditado !== undefined && nombreEditado !== nombre && !puedeEditarInventario(usuario)) {
@@ -1057,17 +1057,28 @@ async function revisarCaptura(id: string, request: Request, env: Env, correo: st
   const grado = String(cambios.estado_fisico ?? fila.estado_fisico);
   const conflicto = cambios.estado_fisico !== undefined ? await conflictoUpc(env, fila.upc || '', grado, fila.propietario, id) : null;
   if (conflicto) return conflicto;
+  // #479: quien no autoriza el precio de una pieza con etiqueta lo pide al dueño; lo demás se guarda como siempre.
+  const pidePrecio = typeof cambios.precio === 'number' && cambios.precio !== fila.precio && !autorizarPrecio(await leerUsuario(env, correo), fila);
+  const precioNuevo = pidePrecio ? null : cambios.precio ?? null;
   const resultado = await env.DB.prepare(`update productos set precio = coalesce(?, precio),
       estado_fisico = coalesce(?, estado_fisico), nombre = ?, marca = ?, actualizado_en = ? where ${alcance} and estado_analisis = 'listo'
       and upc is ? and estado_fisico = ?
       and (? = 0 or ? = '' or not exists (select 1 from productos where ${MISMO_UPC} and id <> ?))
       and (? is null or precio_lista = 0 or precio_lista >= ?)`)
-    .bind(cambios.precio ?? null, cambios.estado_fisico ?? null, nombre, marca.trim(), ahora, id, correo, desde,
+    .bind(precioNuevo, cambios.estado_fisico ?? null, nombre, marca.trim(), ahora, id, correo, desde,
       fila.upc, fila.estado_fisico, cambios.estado_fisico === undefined ? 0 : 1, normalizarUpc(fila.upc), fila.propietario, normalizarUpc(fila.upc), grado, id,
-      cambios.precio ?? null, cambios.precio ?? null).run();
+      precioNuevo, precioNuevo).run();
   if (!resultado.meta.changes) return json({ error: 'La captura no está lista, fue eliminada o el precio supera el de lista.' }, 409);
   const guardada = await env.DB.prepare(`select id, precio, estado_fisico, estado_analisis, stock, talla, codigo, nombre, marca from productos where ${alcance}`)
     .bind(id, correo, desde).first<{ nombre: string; marca: string }>();
+  if (guardada && pidePrecio) {
+    const sugerido = cambios.precio as number;
+    const pedida = await crearSolicitud(env, id, fila.propietario, correo, { id: crypto.randomUUID(), sentido: sugerido > fila.precio ? 'subir' : 'bajar', sugerido, nota: 'Desde la miniatura de captura' });
+    // 409 = ya había una pendiente de esta pieza: el dueño ya la tiene. Otro error: lo demás quedó guardado, el precio no.
+    const error = pedida.status === 409 || pedida.ok ? '' : (await pedida.json().catch(() => ({})) as { error?: string }).error ?? 'No se pudo pedir el cambio de precio.';
+    return json({ ...guardada, prenda: prendaDeNombre(guardada.nombre, guardada.marca), solicitud_precio: !error,
+      aviso: error || 'Se pidió el cambio de precio al dueño' });
+  }
   return json(guardada ? { ...guardada, prenda: prendaDeNombre(guardada.nombre, guardada.marca) } : guardada);
 }
 
@@ -2511,7 +2522,7 @@ export default {
       }
       if (pathname === '/api/solicitudes-precio' || pathname.startsWith('/api/solicitudes-precio/') || /^\/api\/piezas\/[^/]+\/solicitud-precio$/.test(pathname)) {
         // Aplicar un precio pasa por corregirBorrador: las mismas reglas que la corrección de la ficha.
-        return await rutaSolicitudesPrecio(request, env, url, usuario!, (id, precio, esperado, solicitudId) => corregirBorrador(id, { precio }, env, true, undefined, esperado, correo, solicitudId));
+        return await rutaSolicitudesPrecio(request, env, url, usuario!, (id, precio, esperado, solicitudId) => corregirBorrador(id, { precio }, env, usuario, undefined, esperado, correo, solicitudId));
       }
       if (pathname === '/api/piezas' || pathname.startsWith('/api/piezas/')) {
         const respuesta = await rutaPiezas(request, env, url, await leerUsuario(env, correo), ctx);
@@ -2772,8 +2783,8 @@ export default {
       const pieza = pathname.match(/^\/api\/borradores\/([^/]+)$/);
       if (pieza) {
         if (request.method === 'PATCH') {
-          const esDueno = !!(await leerUsuario(env, correo))?.roles.includes('dueno');
-          return await corregirBorrador(pieza[1], await request.json(), env, esDueno, undefined, undefined, esDueno ? correo : undefined, undefined, { ctx, correo });
+          const editor = await leerUsuario(env, correo);
+          return await corregirBorrador(pieza[1], await request.json(), env, editor, undefined, undefined, editor?.roles.includes('dueno') ? correo : undefined, undefined, { ctx, correo });
         }
         if (request.method === 'DELETE') {
           return await descartarBorrador(pieza[1], env, propietarioDe(await leerUsuario(env, correo)), correo);
@@ -2799,10 +2810,13 @@ export default {
         }
         const modelo = modeloPedido(url, env);
         // Reintento explícito: vuelve a abrir el análisis, a diferencia de una respuesta tardía (#399).
-        await env.DB.prepare("update productos set estado_analisis = 'pendiente' where id = ? and upc is not null and estado_analisis <> 'descartado'")
+        // Una pieza `listo` no se reabre (#479): el análisis solo sugiere y, si cambia el precio, pide aprobación al dueño.
+        await env.DB.prepare("update productos set estado_analisis = 'pendiente' where id = ? and upc is not null and estado_analisis not in ('descartado', 'listo')")
           .bind(reintento[1]).run();
-        ctx.waitUntil(analizarBorrador(reintento[1], env, modelo, busquedaPedida(url)));
-        return json({ id: reintento[1], modelo, estado_analisis: 'pendiente' }, 202);
+        const lista = (await env.DB.prepare('select estado_analisis from productos where id = ?').bind(reintento[1]).first<{ estado_analisis: string }>())?.estado_analisis === 'listo';
+        ctx.waitUntil(analizarBorrador(reintento[1], env, modelo, busquedaPedida(url), correo));
+        return json(lista ? { id: reintento[1], modelo, estado_analisis: 'listo', sugerencia: true, mensaje: 'Sugerencia enviada para aprobación' }
+          : { id: reintento[1], modelo, estado_analisis: 'pendiente' }, 202);
       }
 
       // Issue #281: errores de JavaScript de la caja, al mismo log que los del servidor.

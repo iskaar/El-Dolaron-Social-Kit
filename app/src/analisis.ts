@@ -11,6 +11,7 @@ import { decodificarNombre } from './nombre.ts';
 import { calcularPrecio, precioDesdeSugerencia } from './precio.ts';
 import { CATEGORIAS as LISTA_CATEGORIAS, CLAVES_CATEGORIA } from '../public/categorias.js';
 import { PRENDAS_ROPA } from '../public/ropa.js';
+import { crearSolicitud } from './solicitudes-precio.ts';
 
 export type Modelo = 'claude' | 'gemini';
 
@@ -399,6 +400,25 @@ export async function analizarFotoRopa(datos: ArrayBuffer, env: Env): Promise<Su
 }
 
 /**
+ * El análisis llegó a una pieza que ya está `listo` (reanálisis explícito, o resultado tardío tras una corrección
+ * humana): no escribe nada de la pieza (#479). Deja `precio_sugerido` y, si el precio sugerido difiere del actual,
+ * una solicitud de precio (#451) que el dueño ve en «Precios por revisar». `pedidoPor`: quien reanalizó, o 'ia'.
+ */
+async function sugerirSobreListo(env: Env, id: string, nuevo: { nombre: string; precio: number; destino: string; completa: boolean }, pedidoPor: string): Promise<void> {
+  if (!nuevo.completa) return;   // un análisis incompleto no sugiere nada
+  const pieza = await env.DB.prepare("select nombre, precio, destino, propietario from productos where id = ? and estado_analisis = 'listo'")
+    .bind(id).first<{ nombre: string; precio: number; destino: string; propietario: string }>();
+  if (!pieza) return;
+  await env.DB.prepare("update productos set precio_sugerido = ? where id = ? and estado_analisis = 'listo'").bind(nuevo.precio, id).run();
+  if (pieza.destino !== 'etiqueta' || nuevo.destino !== 'etiqueta' || nuevo.precio === pieza.precio) return;
+  // ponytail: el nombre sugerido solo viaja en la nota de la solicitud; no hay columna para él (sin migración).
+  const nota = `Reanálisis${nuevo.nombre.trim() !== pieza.nombre.trim() ? `: «${nuevo.nombre.trim()}»` : ''}`.slice(0, 140);
+  const respuesta = await crearSolicitud(env, id, pieza.propietario, pedidoPor,
+    { id: crypto.randomUUID(), sentido: nuevo.precio > pieza.precio ? 'subir' : 'bajar', sugerido: nuevo.precio, nota });
+  if (!respuesta.ok) console.warn(JSON.stringify({ mensaje: 'sugerencia de precio sin solicitud', id, status: respuesta.status }));
+}
+
+/**
  * Analiza la foto de un borrador y escribe el resultado. Nunca lanza: un fallo
  * deja la fila en `error` con su foto intacta, lista para reintentar desde el admin.
  */
@@ -407,6 +427,7 @@ export async function analizarBorrador(
   env: Env,
   modeloPedido?: Modelo,
   buscarPedido?: boolean,
+  pedidoPor = 'ia',   // quien pidió reanalizar: figura como autor de la solicitud de precio si la pieza ya estaba `listo` (#479)
 ): Promise<void> {
   const modelo = modeloPedido ?? modeloPorDefecto(env);
   // Buscar el precio en la web en lugar de estimarlo de memoria. Solo Gemini por
@@ -480,16 +501,17 @@ export async function analizarBorrador(
     const completa = ficha.nombre.trim() !== '' && precio > 0;
     // Sin precio y con código: sigue `pendiente` mientras la cola busca el código; ella la deja lista o aparte.
     const aLaCola = !completa && !buscar && !!fila.upc && !!env.BUSQUEDAS;
-    await env.DB.prepare(
+    const escrita = await env.DB.prepare(
       `update productos set nombre = ?, marca = ?, categoria = ?, precio_lista = ?, precio = ?,
                             precio_sugerido = ?, destino = ?, estado_analisis = ?, actualizado_en = ?
-       -- La captura manual del escáner manda sobre un análisis tardío (#399).
-       where id = ? and estado_analisis <> 'descartado' and (upc is null or estado_analisis <> 'listo')`,
+       -- Una pieza revisada (listo) manda sobre un análisis tardío o repetido (#399, #479).
+       where id = ? and estado_analisis not in ('descartado', 'listo')`,
     )
       .bind(ficha.nombre, ficha.marca, ficha.categoria, precioLista, precio, precio, destino,
         completa ? 'listo' : aLaCola ? 'pendiente' : 'error', new Date().toISOString(), id)
       .run();
-    if (aLaCola) await env.BUSQUEDAS!.send({ id, upc: fila.upc! });
+    if (!escrita.meta.changes) await sugerirSobreListo(env, id, { nombre: ficha.nombre, precio, destino, completa }, pedidoPor);
+    else if (aLaCola) await env.BUSQUEDAS!.send({ id, upc: fila.upc! });
 
     console.log(JSON.stringify({
       mensaje: completa ? 'analisis listo' : 'analisis incompleto', id, modelo, buscar, ms: Date.now() - inicio, a_la_cola: aLaCola,
@@ -500,7 +522,7 @@ export async function analizarBorrador(
     console.error(JSON.stringify({ mensaje: 'analisis fallido', id, modelo, error: String(error) }));
     await env.DB.prepare(
       `update productos set estado_analisis = 'error', actualizado_en = ? where id = ? and estado_analisis <> 'descartado'
-        and (upc is null or estado_analisis <> 'listo')`,
+        and estado_analisis <> 'listo'`,
     )
       .bind(new Date().toISOString(), id)
       .run();
