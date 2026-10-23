@@ -100,7 +100,9 @@ const RUTAS_VENDEDOR = new Set(['/captura', '/foto.js', '/tallas.js', '/api/salu
   '/inventario-revisar.js', '/inventario-precio.js', '/sesiones.js', '/precios-ml.js', '/compartir.js',
   '/inventario-capturar.js', '/inventario-ropa.js', '/envio-etiquetas.js', '/semana.js',
   '/inventario', '/inventario.css', '/inventario.js', '/inventario-ui.js', '/lector.js', '/ficha.js',
-  '/venta.js', '/etiquetera.js', '/impresora.js', '/camara.js', '/vendor/html5-qrcode.min.js', '/ropa.js']);
+  '/venta.js', '/etiquetera.js', '/impresora.js', '/camara.js', '/vendor/html5-qrcode.min.js', '/ropa.js',
+  // #459: imports de /inventario que faltaban (code128.js vía impresora.js; camara-pc.js por import() dinámico).
+  '/code128.js', '/camara-pc.js']);
 const CORRECCION_CAPTURA = /^\/api\/borradores\/([^/]+)\/(existencia|talla|revision)$/;
 
 export function permitidaParaVendedor(pathname: string, metodo: string): boolean {
