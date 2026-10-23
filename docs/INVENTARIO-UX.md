@@ -434,7 +434,7 @@ Al entrar carga todo el inventario visible, más reciente primero, en páginas d
 | Capturar | Buscar | Revisar | Imprimir |
 ```
 
-- Fila de resultado: miniatura 56 (reserva el espacio si falta foto); primera línea nuestro código `ED-000123` en monoespaciada 20/800, después nombre (2 líneas), y precio · UPC (si tiene) · «sin foto». Sin código: texto secundario discreto. Existencia como insignia cuadrada. Alto mín. 72, reflujo sin recortes a 320 px. Botón de ficha con `aria-current` en la abierta. En Buscar, `Reimprimir` con icono de impresora y texto es un botón hermano (nunca anidado), ≥44×44; solo fuera del host vendedor, con código y destino etiqueta. Envía 1 copia con el motor existente, bloquea dobles toques con `aria-disabled`/`aria-busy` y anuncia «Etiqueta enviada · ED-000123».
+- Fila de resultado: miniatura 56 (reserva el espacio si falta foto); primera línea nuestro código `ED-000123` en monoespaciada 20/800, después nombre (2 líneas), y precio · UPC (si tiene) · «sin foto». Sin código: texto secundario discreto. Existencia como insignia cuadrada. Alto mín. 72, reflujo sin recortes a 320 px. Botón de ficha con `aria-current` en la abierta. En Buscar, `Reimprimir` con icono de impresora y texto es un botón hermano (nunca anidado), ≥44×44; también en el host vendedor (#440), con código y destino etiqueta. Envía 1 copia (reimpresión explícita) con el motor existente, bloquea dobles toques con `aria-disabled`/`aria-busy` y anuncia «Etiqueta enviada · ED-000123».
 - Ficha en celular reemplaza la lista (`← Resultados` fijo arriba, 56, con el código); en PC es la columna derecha.
 - Existencia `−`/`+` registra con rastro (`#447`); pide motivo en una hoja corta de 4 chips (`Corrección · Merma · Robo · Entrada`) **solo al bajar o al fijar**; subir 1 usa «Entrada» por omisión. `Fijar a…` abre diálogo numérico. Tras cada ajuste, la línea muestra «Existencia 3 → 2» con `Deshacer` (texto, 8 s).
 - **Sin casilla «Editar inventario» («Solo consulta»)**: la ficha no pinta stepper, `Fijar a…`, `Editar` ni `Foto nueva`; en su lugar el número de existencia grande y un sello `Solo consulta` (cuadro `--niebla`, borde 2 px `--azul`, 14/800) que al tocarse abre una hoja de una línea: «Tu cuenta no puede editar. Pídelo al dueño.» **No hay casillas ni controles deshabilitados.** `Reimprimir etiqueta` sí aparece (rol capturista).
@@ -674,7 +674,7 @@ Chip `Celular · No responde` (rojo). La solicitud caduca a los 2:00 sin crear p
 
 **Sesión vencida**: línea de error «Tu sesión venció» + `[Entrar]`; Capturar sigue guardando localmente.
 
-**Host del vendedor** (`captura.viste.com.mx`): el servidor decide qué APIs responden. La pantalla pinta solo los modos que `/api/yo` indica; precios de pieza con etiqueta nunca son editables para capturistas.
+**Host del vendedor** (`captura.viste.com.mx`): el servidor decide qué APIs responden. La pantalla pinta solo los modos que `/api/yo` indica; precios de pieza con etiqueta nunca son editables para capturistas. Dueño, capturista y FEP imprimen desde su celular (#440): la pestaña Imprimir (sin Bandas ni Automática, que son de la PC) y el chip conectan la AE240; PC y celular se reparten las etiquetas con el reclamo de D1 (`docs/ARQUITECTURA-ESCANER.md`).
 
 ---
 
@@ -769,7 +769,7 @@ Herramienta: `node tools/qa_inventario.mjs`, Chrome headless vía CDP, servidor 
 - [ ] Con `prefers-reduced-motion: reduce`: `transition-duration` 0 en botones y hojas; sin animaciones infinitas.
 - [ ] Teclado en 1280: recorrer con `Tab` y capturar el foco visible en caja, pestañas, chips de la cabecera, principal de cada modo y una fila de lista; anillo de ≥ 3 px visible en todos.
 - [ ] Teclado virtual simulado (`visualViewport` reducido a 400 px): la barra inferior se oculta y el campo enfocado queda visible.
-- [ ] Rol sin casilla: sin casillas, sin stepper, sin `Editar`, con sello «Solo consulta»; rol dueño: ve `Pieza sin foto` y `Crear familia`; rol sin Imprimir-lista (host vendedor): modos omitidos, no atenuados.
+- [ ] Rol sin casilla: sin casillas, sin stepper, sin `Editar`, con sello «Solo consulta»; rol dueño: ve `Pieza sin foto` y `Crear familia`; rol sin impresión (cajero y demás): modos omitidos, no atenuados.
 - [ ] Grises (filtro `grayscale(1)`): éxito, aviso y error siguen distinguibles por glifo y texto.
 - [ ] Todas las cadenas visibles: tuteo, acentos y signos completos; ninguna del tipo «Haz clic aquí»; ninguna frase de más de 6 palabras en línea de estado salvo los errores con acción (≤ 10).
 

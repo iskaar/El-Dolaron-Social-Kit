@@ -37,6 +37,10 @@ const server=createServer(async(req,res)=>{try{
     else{const pieza=u.pathname.endsWith(destinoUpc.id)?destinoUpc:p;pieza.upc=c.upc??pieza.upc;datos={...pieza,...c};}
   }
   else if(u.pathname==='/api/borradores/upc')datos=upcQA?{...p,existente:true,sumadas:2,stock:5}:{...p,id:'33333333-3333-4333-8333-333333333333',nombre:'Lámpara',stock:1};
+  else if(u.pathname==='/api/etiquetas/enviadas'){
+    const chunks=[];for await(const ch of req)chunks.push(ch);const {ids}=JSON.parse(Buffer.concat(chunks));
+    datos=req.method==='DELETE'?{soltadas:ids.length}:{reclamadas:ids,marcas:{}};   // el reclamo de D1 (#440): aquí siempre gana
+  }
   else if(u.pathname==='/api/etiquetas'){
     const chunks=[];for await(const ch of req)chunks.push(ch);const {ids}=JSON.parse(Buffer.concat(chunks));
     datos=[p,{...p,id:'22222222-2222-4222-8222-222222222222',nombre:'Lámpara de escritorio',categoria:'hogar',stock:6}].filter(p=>ids.includes(p.id));
