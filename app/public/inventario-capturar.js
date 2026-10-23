@@ -71,7 +71,7 @@ export async function iniciar(ctx) {
   derecha.append(pieza,disparo,remota,historia);
   const pie=nodo('p','Hoy: 0 piezas', 'ayuda pc');raiz.append(pie);
   let hoy=0;const textoHoy=()=>{pie.textContent=`Hoy: ${hoy} ${hoy===1?'pieza':'piezas'}`;};
-  function elegirTipo(ropa,avisar=true){esRopa=ropa;localStorage.setItem('captura-modo',ropa?'ropa':'mercancia');mercancia.setAttribute('aria-pressed',String(!ropa));prenda.setAttribute('aria-pressed',String(ropa));tablero.raiz.hidden=!ropa;actualizarDisparo(avisar);}
+  function elegirTipo(ropa,avisar=true){esRopa=ropa;localStorage.setItem('captura-modo',ropa?'ropa':'mercancia');mercancia.setAttribute('aria-pressed',String(!ropa));prenda.setAttribute('aria-pressed',String(ropa));tablero.raiz.hidden=!ropa;if(ropa)tablero.sincronizar();actualizarDisparo(avisar);}
   const motivoFalta=()=>esRopa&&!tablero.valores().talla?'Falta talla':esRopa&&!tablero.valores().precio_ropa?'Falta precio':'';
   let faltaAviso=false;
   const neutro=()=>{const f=motivoFalta();if(f)mensaje(f,'aviso');else mensaje(pc()?'Escanea o escribe':'Escanea o toma foto');};

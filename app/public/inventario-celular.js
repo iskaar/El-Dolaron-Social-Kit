@@ -22,7 +22,8 @@ export async function iniciarCelular(ctx,captura) {
   const filaTipo=nodo('div',undefined,'fila-tipo');captura.tipo.before(filaTipo);filaTipo.append(captura.tipo,captura.escribir);
   const filaGrado=nodo('div',undefined,'fila-grado');captura.grado.before(filaGrado);filaGrado.append(captura.grado,captura.contador);
   for(const b of captura.grado.querySelectorAll('button')){const t=b.textContent;b.setAttribute('aria-label',t);b.textContent=({nuevo:'A\nNuevo',danado:'B\nDañado',liquidacion:'C\nLiq.'})[b.dataset.valor];}
-  visor.append(captura.tablero.raiz);
+  visor.after(captura.tablero.raiz);
+  captura.tablero.sincronizar();
   const sesion=new Map();let revisando=null,disparando=false,tomandoPara=null,enviando=false,despierto=null,archivoPara=null,revisionFoto=null;
   let contextoAudio;
   function sonar(tipo){
@@ -128,7 +129,7 @@ export async function iniciarCelular(ctx,captura) {
       if(b.dataset.confirmar!=='true'){b.dataset.confirmar='true';b.textContent='¿Descartar esta pieza?';b.classList.add('confirmando');mensaje('Se descarta la captura completa','aviso');setTimeout(()=>{b.dataset.confirmar='false';b.textContent='Descartar';b.classList.remove('confirmando');},4000);return;}
       if(!navigator.onLine)return mensaje('Sin red · vuelve a intentar','aviso');await api(`/api/borradores/${id}/revision`,{},'DELETE');await borrar(id);if(datos.url)URL.revokeObjectURL(datos.url);sesion.delete(id);cerrarHoja();pintar();mensaje('Captura descartada','ok');
     },'peligro');c.append(descartar);
-    hoja('Corregir',c);$('hoja').addEventListener('close',()=>{revisando=null;void subir();},{once:true});
+    hoja('Corregir',c);tablero?.sincronizar();$('hoja').addEventListener('close',()=>{revisando=null;void subir();},{once:true});
   }
   function opcionesCamara(){
     const c=nodo('div',undefined,'formulario');

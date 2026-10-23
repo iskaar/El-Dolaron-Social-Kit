@@ -320,27 +320,36 @@ LISTO ──lee código──► BUSCANDO ──► NUEVA (manifiesto) ──Gua
 ```
 La búsqueda IA comienza solo al tocar `Buscar en internet`, nunca por tiempo ni por leer otro código. Resultado: tarjeta con imagen 120×120, nombre y `[[ Es esta ]]` / `[ No es ]`. «Sin foto» abre formulario manual (solo dueño; ver 4.3 hoja «Pieza sin foto»). Seguir escaneando no cancela: la búsqueda continúa y queda en el carrusel como «⏳ buscando».
 
-**Celular — Sin código: Ropa** (el tablero de Ropa va **encima del visor**, scrim `rgb(11 18 32 / .85)`, y no cambia de lugar entre fotos)
+**Celular — Sin código: Ropa** (Issue #458: tablero en el flujo, debajo del visor, sin tapar la foto)
 
 ```
 +--------------------------------------+
-| ▲ Falta talla                        |  (si se intentó disparar)
-+--------------------------------------+
-| (Chamarra ▾)(Levi's ▾)($300 ▾)       |  resumen 48: tocar = hoja con todas
-| Talla (S)(M*)(L)(XL)(XXL)(3XL)(Niño…)|  fila deslizable, 48
-|▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓|
 |▓▓▓▓▓▓▓▓▓ visor ▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓|
 +--------------------------------------+
+| Prenda                    Precio     |
+|   Suéter                    $200     |
+|  [Chamarra]                [$150]    |  dos rodillos, fila de 48 px
+|   Vestido                   $120     |
+| (Sin marca)(All in Motion)(Cat & Jack)→|  marcas; Otra… al final
+| (XXS)(XS)(S)(M*)(L)(XL)(XXL)(3XL)→   |  talla; Niño… al final
 | [Mercancía|Ropa*]         [⌨ Escribir]|
 | [A][B][C]                   [-] 1 [+]|
 |              ( O )                   |
++--------------------------------------+
+| Hoy · 12 piezas · 9 subidas [Ver todas]|
+| [miniaturas…]                        |  historial después del disparo
 ```
 
-- Orden de captura: la talla es lo que más cambia (rack de M = N disparos), por eso queda a la vista; prenda, marca y precio se eligen una vez y se muestran como tres fichas-resumen. Tocar una ficha abre una **hoja** con chips (prenda: las 16 de `ropa.js`; marca: 12 + campo `Otra marca` con sugerencias recientes; precio: 300·200·150·120·100·80·50, con el sugerido por prenda ya elegido y marcado «sugerido»).
-- Obligatorios para disparar: talla y precio (como hoy). Si faltan: el disparo queda `aria-disabled`, al tocarlo se enfoca/resalta el grupo faltante con borde `--rojo-texto` y glifo «?», sonido/vibración «error», línea «Falta talla» / «Falta precio». Prenda y marca opcionales.
-- Niño: el chip `Niño…` abre el **rodillo de edades de /captura tal cual** (decisión de Isaac 22/10: se queda el rodillo; misma lógica de `tallas.js`), dentro de una hoja que no compite con el scroll (la hoja no se desplaza mientras el rodillo tiene el gesto). Debajo, fila opcional XS–XL.
+- Prenda y precio: **rodillos inline**, lado a lado en 390×844, sin hojas. Comparten función y CSS con edad: `scroll-snap`, `role=listbox`, opciones con `aria-selected`, `aria-activedescendant`, flechas ↑↓, Home/End y movimiento reducido. La primera prenda es `Sin prenda`; conserva el nombre de respaldo `Ropa`.
+- Mover prenda aplica `PRECIO_PRENDA` al precio. Mover precio después lo reemplaza para esa pieza y las siguientes hasta cambiar de prenda o precio. La lista sigue siendo `PRECIOS_ROPA` de `ropa.js`: $300·200·150·120·100·80·50, siempre centavos enteros al guardar. Sin prenda no borra el precio elegido.
+- Marca opcional en **una fila deslizable**: Sin marca, All in Motion, Cat & Jack, Universal Thread, Wild Fable y Otra…. Las cuatro comunes no abren hoja; Otra… permite las demás marcas del catálogo o escribir con sugerencias recientes. La marca elegida aparece en su chip.
+- Prenda, marca y precio se recuerdan en `localStorage` con `try/catch`; al recargar se restaura el precio manual, sin recalcularlo. La talla conserva su regla: permanece entre disparos, no se guarda al recargar. La edad permanece durante la sesión y se respeta la talla infantil al corregir una pieza. Corregir no cambia las preferencias de captura.
+- Obligatorios para disparar: talla y precio. Si faltan, se resalta el grupo y la línea dice «Falta talla» / «Falta precio»; disparo con `aria-disabled`. Prenda y marca opcionales. Sin rótulos duplicados ni párrafos de ayuda.
+- Niño: el chip `Niño…` mantiene la **hoja con rodillo de edades**, sin competir con el scroll; debajo, fila opcional XS–XL y Usar talla. La edad ya no vuelve a «4 años» al cambiar prenda, marca o precio.
+- Visor compacto, rodillos, marca, talla, cantidad y disparo caben en 390×844 con cámara activa y búsqueda cerrada; historial debajo. Controles de al menos 44 px. La página conserva su paleta explícita también con preferencia de sistema oscura.
 - Si en Ropa se lee un código de barras: se atiende como código de mercancía (la pieza con UPC no es una prenda sin código); el tipo pegajoso no cambia.
-- `Quitar` solo existe dentro de las hojas de prenda y marca (texto, 48).
+- Datos del servidor y etiqueta conservan campos, nombre «Prenda Marca» y centavos. `/captura`, configuración e IA por lotes no cambian.
+- Toques por pieza (sin contar entrada a Ropa, cámara ni desplazamientos): cambiar prenda + marca común + talla y disparar pasa de **7 a 4**; con precio manual, de **9 a 5**. Si se repiten todos los datos: **1 → 1** (solo disparar). Un gesto de rodillo sustituye la selección por toque; deslizar la fila de marcas/tallas puede requerir otro gesto.
 
 **Celular — Foto tomada, subiendo, analizando (mercancía)**
 
@@ -362,7 +371,7 @@ La búsqueda IA comienza solo al tocar `Buscar en internet`, nunca por tiempo ni
 
 - Carrusel horizontal, miniaturas de 72×72 (zona táctil 72), hueco 12, `scroll-snap-type:x proximity`, la más reciente primero. Encabezado de una línea: «Hoy · 12 piezas · 9 subidas» a la izquierda y `Ver todas` (texto) a la derecha que abre la lista completa de 24 h en una hoja a pantalla casi completa.
 - Cada miniatura: talla arriba (12/800 sobre `#000b`), badge de cantidad abajo-derecha (insignia amarilla), estado como se describió. `aria-label="Chamarra M, 2 piezas, subida"`.
-- Tocar: **hoja «Corregir»** (no pantalla completa que tape todo): foto 4:3 arriba (40 % del alto), grado (segmentado), cantidad (stepper), en Ropa prenda/marca/talla/precio (mismas fichas-resumen), y abajo `[[ Guardar cambios ]]` (se habilita al haber cambios; si no, `aria-disabled` con «Sin cambios») · `Retomar foto` (secundario) · `Descartar` (peligro, dos toques: «Descartar» → «¿Descartar esta pieza?» rojo durante 4 s; la línea de estado lo anuncia).
+- Tocar: **hoja «Corregir»** (no pantalla completa que tape todo): foto 4:3 arriba (40 % del alto), grado (segmentado), cantidad (stepper), en Ropa prenda/precio (mismos rodillos), marca y talla, y abajo `[[ Guardar cambios ]]` (se habilita al haber cambios; si no, `aria-disabled` con «Sin cambios») · `Retomar foto` (secundario) · `Descartar` (peligro, dos toques: «Descartar» → «¿Descartar esta pieza?» rojo durante 4 s; la línea de estado lo anuncia).
 - Si ya salió la etiqueta: nota fija de una línea «La etiqueta pegada dice $300» (aviso) antes de guardar un cambio de precio. No requiere casilla (es captura propia).
 - Si aún se está subiendo: botones de la hoja `aria-disabled` con «Espera a que suba».
 
@@ -636,7 +645,7 @@ Patrón de vacío: glifo grande (48 px, trazo azul), **una línea** de 20/800, *
 **Primera vez**
 - Celular, Capturar: pantalla `--azul` a pantalla completa (z 40) con título «Capturar» y un único botón principal `Empezar` (activa audio y pide cámara; es el gesto necesario). Debajo, una línea: «Cámara y sonido». Sin tour ni consejos.
 - PC: la caja ya enfocada con «● Lector listo». Si la impresora nunca se conectó, el chip está amarillo `Sin conectar` y la línea de estado dice «Conecta la impresora» una vez.
-- Primer uso de Ropa: las fichas-resumen aparecen con «?» y borde rojo hasta elegirse.
+- Primer uso de Ropa: Sin prenda y Sin marca son válidos; talla y precio se resaltan hasta elegirse.
 
 **Permiso de cámara denegado (celular y PC)** — en el área del visor, tarjeta `--camara` con texto blanco:
 ```
@@ -727,7 +736,7 @@ Herramienta: Chromium headless (Playwright/Puppeteer) con rutas `/api/*` interce
 | 02 | Capturar · código nuevo | tarjeta con `Guardar`, sin cuenta atrás ni guardado tras 25 s, stepper, línea de éxito |
 | 03 | Capturar · ya existe | `+1 e imprimir 1` principal, `Foto nueva` secundario |
 | 04 | Capturar · sin registro + búsqueda IA | «Sin registro», barra de progreso, `Tomar foto` |
-| 05 | Capturar · Ropa completa | tablero con prenda/marca/precio en resumen y fila de talla |
+| 05 | Capturar · Ropa completa | foto visible, rodillos de prenda/precio juntos, marca y talla compactas |
 | 06 | Capturar · Ropa sin talla | disparo `aria-disabled`, grupo con borde rojo + «?», línea «Falta talla» |
 | 07 | Capturar · sin red | línea de aviso, chip Red amarillo con número, miniaturas punteadas |
 | 08 | Capturar · carrusel y hoja «Corregir» | miniaturas 72 px, hoja con `Guardar cambios` y `Descartar` en dos toques |

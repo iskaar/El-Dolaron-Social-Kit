@@ -5,6 +5,87 @@ import { runInNewContext } from 'node:vm';
 import { registroFoto, crearSubida, formularioPendiente } from '../public/foto-pendiente.js';
 import { crearCamara } from '../public/camara-inventario.js';
 import { permitidaParaVendedor } from './worker.ts';
+import { PRENDAS_ROPA, MARCAS_ROPA, PRECIO_PRENDA, PRECIOS_ROPA } from '../public/ropa.js';
+import { TALLAS_ADULTO, EDADES_NINO, TALLAS_NINO } from '../public/tallas.js';
+
+function ropaUI(bloquearAlmacenamiento=false) {
+  class Nodo {
+    textContent='';className='';dataset:Record<string,string>={};children:Nodo[]=[];atributos:Record<string,string>={};eventos:Record<string,Function>={};
+    scrollTop=0;offsetHeight=48;onclick:Function=()=>{};onkeydown:Function=()=>{};
+    classList={toggle:(c:string,activa:boolean)=>{const clases=new Set(this.className.split(' ').filter(Boolean));activa?clases.add(c):clases.delete(c);this.className=[...clases].join(' ');},add:(c:string)=>this.classList.toggle(c,true),remove:(c:string)=>this.classList.toggle(c,false)};
+    get firstElementChild(){return this.children[0];}
+    append(...n:Nodo[]){this.children.push(...n);}
+    setAttribute(k:string,v:string){this.atributos[k]=v;}
+    getAttribute(k:string){return this.atributos[k];}
+    removeAttribute(k:string){delete this.atributos[k];}
+    addEventListener(e:string,fn:Function){this.eventos[e]=fn;}
+    scrollTo({top}:{top:number}){this.scrollTop=top;}
+  }
+  const almacen=new Map<string,string>(),hojas:Nodo[]=[];
+  const fuente=readFileSync('public/inventario-ropa.js','utf8').replace(/^import .*;\r?\n/gm,'').replaceAll('export ','');
+  const ui=runInNewContext(fuente+';({ropa,talla,rodillo})',{
+    PRENDAS_ROPA,MARCAS_ROPA,PRECIO_PRENDA,PRECIOS_ROPA,TALLAS_ADULTO,EDADES_NINO,TALLAS_NINO,
+    nodo:(_tag:string,texto='',clase='')=>Object.assign(new Nodo(),{textContent:texto,className:clase}),
+    boton:(texto:string,accion:Function)=>Object.assign(new Nodo(),{textContent:texto,onclick:accion}),
+    hoja:(_titulo:string,c:Nodo)=>hojas.push(c),cerrarHoja(){},matchMedia:()=>({matches:true}),
+    localStorage:{getItem:(k:string)=>{if(bloquearAlmacenamiento)throw new Error('Sin almacenamiento');return almacen.get(k)??null;},setItem:(k:string,v:string)=>{if(bloquearAlmacenamiento)throw new Error('Sin almacenamiento');almacen.set(k,String(v));}}
+  });
+  const buscar=(raiz:Nodo,nombre:string):Nodo|undefined=>raiz.getAttribute('aria-label')===nombre?raiz:raiz.children.map(n=>buscar(n,nombre)).find(Boolean);
+  const desplazar=(rueda:Nodo,i:number)=>{rueda.scrollTop=i*48;rueda.eventos.scroll();};
+  return {...ui,almacen,hojas,buscar,desplazar};
+}
+
+test('rodillos de ropa sugieren precio por prenda y conservan el ajuste manual entre piezas y recargas (#458)',()=>{
+  const ui=ropaUI(),tablero=ui.ropa({pc:()=>false,mensaje:()=>{}});tablero.sincronizar();
+  const prenda=ui.buscar(tablero.raiz,'Prenda')!,precio=ui.buscar(tablero.raiz,'Precio')!,tallas=ui.buscar(tablero.raiz,'Talla')!;
+  assert.equal(prenda.children[0].textContent,'Sin prenda');
+  for(const nombre of PRENDAS_ROPA){
+    ui.desplazar(prenda,PRENDAS_ROPA.indexOf(nombre)+1);
+    assert.equal(tablero.valores().precio_ropa,PRECIO_PRENDA[nombre]);
+    assert.equal(precio.children.find(n=>n.getAttribute('aria-selected')==='true')!.textContent,`$${PRECIO_PRENDA[nombre]/100}`);
+  }
+  ui.desplazar(prenda,PRENDAS_ROPA.indexOf('Chamarra')+1);
+  ui.desplazar(precio,PRECIOS_ROPA.indexOf(12000));
+  ui.buscar(tablero.raiz,'Marca')!.children[2].onclick();
+  tallas.children[0].children.find(n=>n.dataset.valor==='M')!.onclick();
+  assert.equal(tablero.valores().precio_ropa,12000);assert.equal(tablero.valores().marca,'Cat & Jack');
+  assert.equal(ui.buscar(tablero.raiz,'Talla'),tallas,'Los cambios conservan el control de talla montado');
+  const enviado=formularioPendiente(registroFoto(new Blob(['foto']),tablero.valores()));
+  assert.equal(enviado.get('precio_ropa'),'12000');assert.equal(enviado.get('prenda'),'Chamarra');assert.equal(enviado.get('marca'),'Cat & Jack');assert.equal(enviado.get('talla'),'M');
+  const siguiente=ui.ropa({pc:()=>false,mensaje:()=>{}});siguiente.sincronizar();
+  assert.equal(siguiente.valores().prenda,'Chamarra');assert.equal(siguiente.valores().marca,'Cat & Jack');assert.equal(siguiente.valores().precio_ropa,12000);
+  assert.equal(siguiente.valores().talla,'','La talla no persiste tras recargar');
+  ui.desplazar(ui.buscar(siguiente.raiz,'Prenda')!,0);assert.equal(siguiente.valores().prenda,'');assert.equal(siguiente.valores().precio_ropa,12000);
+  const almacenAntes=[...ui.almacen];
+  const correccion=ui.ropa({pc:()=>false,mensaje:()=>{},recordar:false,inicial:{prenda:'Playera',marca:'Otra',talla:'S',precio_ropa:8000}});correccion.sincronizar();
+  assert.equal(correccion.valores().precio_ropa,8000);ui.desplazar(ui.buscar(correccion.raiz,'Precio')!,0);
+  assert.deepEqual([...ui.almacen],almacenAntes,'Corregir una pieza no cambia las preferencias de captura');
+});
+
+test('edad conserva teclado, selección accesible y edad de sesión sin reiniciarse al cambiar prenda (#458)',()=>{
+  const ui=ropaUI(),tablero=ui.ropa({pc:()=>false,mensaje:()=>{}});tablero.sincronizar();
+  const abrir=()=>ui.buscar(tablero.raiz,'Talla')!.children[0].children.find(n=>n.dataset.valor==='Niño')!.onclick();
+  abrir();let edad=ui.buscar(ui.hojas.at(-1)!,'Edad')!;
+  assert.equal(edad.children.find(n=>n.getAttribute('aria-selected')==='true')!.textContent,'4 años');
+  let evitado=false;edad.onkeydown({key:'ArrowDown',preventDefault(){evitado=true;}});assert.ok(evitado);
+  assert.equal(tablero.valores().talla,'Niño 5 años');
+  ui.desplazar(ui.buscar(tablero.raiz,'Prenda')!,1);abrir();edad=ui.buscar(ui.hojas.at(-1)!,'Edad')!;
+  assert.equal(edad.children.find(n=>n.getAttribute('aria-selected')==='true')!.textContent,'5 años');
+  const nueva=ui.talla(()=>{});nueva.children[0].children.at(-1)!.onclick();
+  assert.equal(ui.buscar(ui.hojas.at(-1)!,'Edad')!.scrollTop,EDADES_NINO.indexOf('5 años')*48);
+  const restaurada=ui.talla(()=>{},'Niño 8 años / M');restaurada.children[0].children.at(-1)!.onclick();
+  assert.equal(ui.buscar(ui.hojas.at(-1)!,'Edad')!.scrollTop,EDADES_NINO.indexOf('8 años')*48);
+  edad.onkeydown({key:'End',preventDefault(){}});assert.equal(edad.getAttribute('role'),'listbox');
+  assert.equal(edad.getAttribute('aria-activedescendant'),edad.children.at(-1)!.id);
+  edad.onkeydown({key:'Home',preventDefault(){}});assert.equal(edad.scrollTop,0);
+});
+
+test('capturar ropa funciona con localStorage bloqueado y permite elegir el primer precio sin desplazar (#458)',()=>{
+  const ui=ropaUI(true),tablero=ui.ropa({pc:()=>false,mensaje:()=>{}});tablero.sincronizar();
+  const precio=ui.buscar(tablero.raiz,'Precio')!;precio.children[0].onclick();
+  assert.equal(tablero.valores().precio_ropa,30000);
+  ui.desplazar(ui.buscar(tablero.raiz,'Prenda')!,1);assert.equal(tablero.valores().precio_ropa,10000);
+});
 
 test('un registro de Inventario lo sube el código real de /captura, con ropa, talla y centavos intactos',async()=>{
   const registro=registroFoto(new Blob(['foto']),{id:crypto.randomUUID(),precio_ropa:12000,talla:'Niño 6 años / S',prenda:'Chamarra',marca:'Cat & Jack',cantidad:2,estado_fisico:'danado'});

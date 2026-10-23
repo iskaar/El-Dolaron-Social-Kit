@@ -76,7 +76,12 @@ async function capturar(nombre,width){
   medidas.push({nombre,width,...d});assert.ok(!/Cannot|undefined|is not a function/.test(d.estado),`Error en pantalla ${nombre}: ${d.estado}`);assert.ok(d.ancho<=width,`Desborde ${nombre}: ${d.ancho}`);
   const png=await cdp('Page.captureScreenshot',{format:'png'});await writeFile(path.join(salida,`${nombre}-${width}.png`),Buffer.from(png.data,'base64'));
 }
-async function esperar(expression){for(let i=0;i<100;i++){if(await js(expression))return;await dormir(50);}throw new Error('No llegó el estado: '+expression);}
+async function esperar(expression,intentos=100){for(let i=0;i<intentos;i++){if(await js(expression))return;await dormir(50);}throw new Error('No llegó el estado: '+expression);}
+async function rodar(nombre,texto){
+  await js(`(()=>{const r=document.querySelector('.tablero-ropa .rodillo[aria-label="${nombre}"]'),i=[...r.children].findIndex(n=>n.textContent===${JSON.stringify(texto)});if(i<0)throw new Error('Falta opcion');r.children[i].click()})()`);
+  await esperar(`document.querySelector('.tablero-ropa .rodillo[aria-label="${nombre}"] .elegida')?.textContent===${JSON.stringify(texto)}`);
+  await dormir(400);
+}
 async function modo(m){await js(`document.getElementById('tab-${m}').click()`);await dormir(350);}
 async function buscar(q){await js(`document.getElementById('consulta').value=${JSON.stringify(q)};document.getElementById('busqueda').requestSubmit()`);await dormir(250);}
 try{
@@ -126,14 +131,37 @@ for(const width of [390,1280]){
     await capturar('06-ropa-sin-talla',width);
     await js("document.querySelector('.tablero-ropa [data-valor=Niño]').click()");await esperar("!!document.querySelector('#hoja .rodillo .elegida')");
     assert.equal(await js("document.querySelector('#hoja .rodillo .elegida').textContent"),'4 años','Niño abre el rodillo de edades, no una rejilla');
-    await capturar('06b-ropa-nino-rodillo',width);await js("document.getElementById('cerrar-hoja').click()");
-    await js("document.querySelector('.tablero-ropa [data-valor=M]').click();[...document.querySelectorAll('.resumen-ropa button')].at(-1).click()");
-    await js("[...document.querySelectorAll('#hoja button')].find(b=>b.textContent==='$120').click()");
+    await capturar('06b-ropa-nino-rodillo',width);
+    await js("document.querySelector('#hoja .rodillo').dispatchEvent(new KeyboardEvent('keydown',{key:'ArrowDown',bubbles:true}));document.getElementById('cerrar-hoja').click();document.querySelector('.tablero-ropa [data-valor=Niño]').click()");
+    assert.equal(await js("document.querySelector('#hoja .rodillo .elegida').textContent"),'5 años','La edad no vuelve a 4 al reabrir');
+    await js("document.getElementById('cerrar-hoja').click()");
+    await js("document.querySelector('.tablero-ropa [data-valor=M]').click()");
+    await rodar('Prenda','Chamarra');
+    assert.equal(await js("document.querySelector('.rodillo[aria-label=Precio] .elegida').textContent"),'$300');
+    await rodar('Precio','$120');
+    await js("document.querySelector('.marcas-ropa [data-valor=\"Cat & Jack\"]').click()");
+    assert.equal(await js("document.querySelector('.rodillo[aria-label=Precio] .elegida').textContent"),'$120','Cambiar marca no borra el precio manual');
+    const ropaGeo=await js(`(()=>{const ruedas=[...document.querySelectorAll('.rodillos-ropa .rodillo')].map(r=>r.getBoundingClientRect()),foto=document.querySelector('.visor').getBoundingClientRect(),disparo=document.querySelector('.disparo').getBoundingClientRect();return {alineados:ruedas[0].top===ruedas[1].top,fotoVisible:foto.bottom<=ruedas[0].top,disparo:disparo.bottom,limite:document.getElementById('modos').getBoundingClientRect().top}})()`);
+    assert.ok(ropaGeo.alineados&&ropaGeo.fotoVisible,'Rodillos juntos, foto visible');
+    assert.ok(ropaGeo.disparo<=ropaGeo.limite,`El disparo no cabe: ${JSON.stringify(ropaGeo)}`);
     await capturar('05-ropa-completa',width);
+    await cdp('Emulation.setEmulatedMedia',{features:[{name:'prefers-color-scheme',value:'dark'},{name:'prefers-reduced-motion',value:'reduce'}]});
+    await rodar('Precio','$100');await rodar('Precio','$120');await capturar('05b-ropa-oscuro',width);
+    await cdp('Emulation.setEmulatedMedia',{features:[]});
     await cdp('Network.enable');await cdp('Network.emulateNetworkConditions',{offline:true,latency:0,downloadThroughput:0,uploadThroughput:0});
     await js("document.querySelector('.disparo').click()");await esperar("!!document.querySelector('.miniatura.local')");await capturar('07-sin-red',width);
+    await js("document.querySelector('.disparo').click()");await esperar("document.querySelectorAll('.miniatura.local').length===2",300);
+    const locales=await js("import('/cola-fotos.js').then(m=>m.pendientes()).then(rs=>rs.map(r=>({prenda:r.prenda,marca:r.marca,talla:r.talla,precio:r.precio_ropa})))");
+    assert.deepEqual(locales,Array.from({length:2},()=>({prenda:'Chamarra',marca:'Cat & Jack',talla:'M',precio:12000})), 'Dos piezas conservan el precio manual y los campos enviados');
     await js("document.querySelector('.miniatura.local').click()");await capturar('08-corregir',width);await js("document.getElementById('cerrar-hoja').click()");
     await cdp('Network.emulateNetworkConditions',{offline:false,latency:0,downloadThroughput:-1,uploadThroughput:-1});await esperar('navigator.onLine');await dormir(350);
+    await cdp('Page.reload');await esperar("!!document.querySelector('.empezar-captura button')");
+    await js("document.querySelector('.empezar-captura button').click()");
+    await esperar("document.querySelector('.rodillo[aria-label=Precio] .elegida')?.textContent==='$120'");
+    assert.equal(await js("document.querySelector('.rodillo[aria-label=Prenda] .elegida').textContent"),'Chamarra');
+    assert.equal(await js("document.querySelector('.marcas-ropa [aria-pressed=true]').textContent"),'Cat & Jack');
+    assert.equal(await js("document.querySelector('.tallas-ropa [aria-pressed=true]')"),null,'La talla no se guarda al recargar');
+    await capturar('05c-ropa-recordada',width);
   }
   if(width===1280){await js("[...document.querySelectorAll('#modo-capturar button')].find(b=>b.textContent==='Mercancía').click()");await js("[...document.querySelectorAll('#modo-capturar button')].find(b=>b.textContent==='Producto sin código: foto con celular').click()");await capturar('10-esperando-celular',width);await dormir(8500);await capturar('10-celular-no-responde',width);await js("document.querySelector('.panel-celular button').click()");}
   await buscar('0191907910414');await capturar('02-codigo-nuevo',width);
