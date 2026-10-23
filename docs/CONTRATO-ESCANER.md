@@ -79,8 +79,8 @@ Detalle completo en `docs/PLAN-ETIQUETAS-POR-BANDA.md`. Resumen:
 - La cámara **se abre y no se cierra**. Toca para disparar, dispara otra vez de inmediato. Sin
   preview que descartar, sin spinner, sin navegación.
 - Interruptor de grado **A · Nuevo / B · Dañado / C · Liquidación** (como LiquiMart, Issue #371) junto al obturador.
-  A se ve nueva; B tiene uso, empaque dañado o piezas faltantes; C no cumple su función. El grado no se imprime;
-  B y C no van a Mercado Libre ni al catálogo público. Conserva su estado entre disparos y también se
+  A se ve nueva; B tiene uso, empaque dañado o piezas faltantes; C no cumple su función. El grado se imprime en la etiqueta (Issue #453: letra A/B/C en un recuadro junto al precio, y la palabra en el pie
+  si cabe; instrucción de Isaac, revierte la regla de #371); B y C no van a Mercado Libre ni al catálogo público. Conserva su estado entre disparos y también se
   puede corregir tocando la última miniatura.
 - Tira de miniaturas abajo y un contador discreto: `24 fotos · 19 analizadas`. Es la única señal de
   que existe la IA.

@@ -293,7 +293,7 @@ test('automática imprime lo nuevo una sola vez, con código estable y una copia
   } finally { t.db.close(); }
 });
 
-test('corregir un precio reimprime una vez con el mismo código; condición sola y capturas eliminadas no imprimen', async () => {
+test('corregir un precio reimprime una vez con el mismo código; el grado también reimprime (#453); capturas eliminadas no imprimen', async () => {
   const t = tienda();
   try {
     t.env.AMBIENTE = 'sandbox';
@@ -311,14 +311,16 @@ test('corregir un precio reimprime una vez con el mismo código; condición sola
     assert.equal(p.estado.enviadas.length, 2);
     assert.equal(JSON.parse(p.almacen.get('etiqueta-impresas')!)[id].precio, 8000);
     assert.equal(t.db.prepare('select codigo from productos where id=?').get(id)!.codigo, codigo);
+    // #453: el grado va en la etiqueta, así que cambiarlo (B a A) la deja desactualizada y se reimprime una vez.
     await t.pedir(`/api/borradores/${id}/revision`, { estado_fisico: 'nuevo' }, 'PATCH');
-    await p.imprimirNuevas(); assert.equal(p.estado.enviadas.length, 2);
+    await p.imprimirNuevas(); await p.imprimirNuevas(); assert.equal(p.estado.enviadas.length, 3);
+    assert.equal(JSON.parse(p.almacen.get('etiqueta-impresas')!)[id].estado_fisico, 'nuevo');
     await t.pedir(`/api/borradores/${id}/revision`, {}, 'DELETE');
-    await p.imprimirNuevas(); assert.equal(p.estado.enviadas.length, 2);
+    await p.imprimirNuevas(); assert.equal(p.estado.enviadas.length, 3);
     const otra = crypto.randomUUID();
     await capturarRopa(t, otra, '5000');
     p.estado.antesDePreparar = async () => { await t.pedir(`/api/borradores/${otra}/revision`, {}, 'DELETE'); };
-    await p.imprimirNuevas(); assert.equal(p.estado.enviadas.length, 2);
+    await p.imprimirNuevas(); assert.equal(p.estado.enviadas.length, 3);
   } finally { t.db.close(); }
 });
 

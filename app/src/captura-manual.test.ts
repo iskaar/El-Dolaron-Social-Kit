@@ -27,8 +27,9 @@ test('la pieza sin foto sale en la caja de inmediato, con el codigo que llevara 
   assert.match(codigo, /^ED-\d{6}$/);
   const catalogo = (await pedir('/api/catalogo')).cuerpo as { id: string; codigo: string }[];
   assert.equal(catalogo.find((p) => p.id === cuerpo.id)?.codigo, codigo);
-  const etiquetas = (await pedir('/api/etiquetas', { ids: [cuerpo.id] })).cuerpo as { codigo: string }[];
+  const etiquetas = (await pedir('/api/etiquetas', { ids: [cuerpo.id] })).cuerpo as { codigo: string; estado_fisico: string }[];
   assert.equal(etiquetas[0].codigo, codigo);
+  assert.equal(etiquetas[0].estado_fisico, 'nuevo');   // el grado llega a la etiqueta (#453)
 });
 
 test('datos malos no dejan pieza vacia; un capturista no puede', async () => {

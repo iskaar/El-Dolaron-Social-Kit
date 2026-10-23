@@ -1,9 +1,10 @@
 import {
   conectarEtiquetera, etiqueteraLista, imprimirEtiquetas, historialTexto, detenerEnvio, envioDetenido,
-  errorEnvio, desmarcarDesde, etiquetaVigente, precioImpreso,
+  errorEnvio, desmarcarDesde, etiquetaVigente, precioImpreso, gradoImpreso,
 } from '/etiquetera.js';
 
 import { estadoEnvio } from './envio-etiquetas.js';
+import { nombreEstado } from '/estados.js';
 
 export async function iniciarEtiquetas(raiz = globalThis.document, vista = null) {
 const document = { getElementById: (id) => raiz.getElementById ? raiz.getElementById(id) : raiz.querySelector('#' + id) };
@@ -107,7 +108,8 @@ function pintar() {
         ? `<span class="marca">Impresa ${hora(marca.hora)}<button type="button" class="claro" data-desde="${p.id}">No salió desde aquí</button></span>`
         : cambiada
           ? `<span class="marca aviso">La etiqueta pegada dice ${escapar(precioImpreso(marca) !== precioImpreso(p)
-            ? pesos(marca.precio) : `«${marca.nombre}${marca.talla ? ` · ${marca.talla}` : ''}»`)}: reimprime y cámbiala.</span>`
+            ? pesos(marca.precio) : gradoImpreso(marca) !== gradoImpreso(p) ? `grado ${nombreEstado(gradoImpreso(marca))}`
+            : `«${marca.nombre}${marca.talla ? ` · ${marca.talla}` : ''}»`)}: reimprime y cámbiala.</span>`
           : ''}</span>
       <span class="precio">${pesos(p.precio)}${p.precio_lista > p.precio ? ` <s style="font-weight:400;color:#777">${pesos(p.precio_lista)}</s>` : ''}</span>
       <span>${p.stock} ${p.stock === 1 ? 'pieza' : 'piezas'}</span>
