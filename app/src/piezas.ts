@@ -46,7 +46,7 @@ async function buscarPiezas(env: Env, url: URL, propietario: string): Promise<Re
     const m = /^(\d{1,14})~([1-9]\d{0,15})$/.exec(crudo);
     cursor = m && Number.isSafeInteger(Number(m[2])) ? { fecha: m[1], fila: Number(m[2]) } : null;
   }
-  if (!q || q.length > 80 || (!codigo && !upc && q.length < 3) || (crudo !== null && !cursor))
+  if (q.length > 80 || (q && !codigo && !upc && q.length < 3) || (crudo !== null && !cursor))
     return json({ error: 'Escribe un código o al menos 3 caracteres (máximo 80); revisa el cursor.' }, 400);
 
   if (codigo && !cursor) {

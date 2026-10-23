@@ -7,13 +7,20 @@ import assert from 'node:assert/strict';
 
 const p={id:'11111111-1111-4111-8111-111111111111',codigo:'ED-002318',nombre:'Chamarra Levi’s',marca:'Levi’s',talla:'M',categoria:'ropa',precio:45000,precio_lista:60000,stock:3,destino:'etiqueta',estado_fisico:'nuevo',estado_analisis:'listo',upc:'012345678905',tiene_foto:1,foto_key:'foto',creado_en:new Date().toISOString(),actualizado_en:new Date().toISOString()};
 let consultaSolo=false, listaVacia=false, falloLista=false;const registros=[];
+const inventario=[p,...Array.from({length:60},(_,i)=>({...p,id:`pieza-${i}`,codigo:`ED-${String(2319+i).padStart(6,'0')}`,nombre:i%2?'Lámpara de escritorio':'Chamarra de mezclilla',tiene_foto:i%3?1:0,foto_key:i%3?'foto':'',stock:i%5}))];
+const consultas=[];
 const server=createServer(async(req,res)=>{try{
   const u=new URL(req.url,'http://localhost');let datos;
   if(u.pathname==='/api/yo')datos={correo:'prueba@local.mx',usuario:{correo:'prueba@local.mx',roles:consultaSolo?['capturista']:['dueno'],activo:true,editar_inventario:!consultaSolo},vendedor:false,modos_inventario:['capturar','buscar','revisar','imprimir']};
   else if(u.pathname==='/api/config')datos={};
   else if(u.pathname==='/api/salud')datos={ambiente:'sandbox',ahora:new Date().toISOString()};
   else if(u.pathname==='/api/familias')datos={familias:[{prefijo:'r',nombre:'Ropa'},{prefijo:'g',nombre:'Hogar'}],montos:[19,29,49,79,99,119,129,149,199]};
-  else if(u.pathname==='/api/piezas')datos={piezas:/^(0191907910414|999999999999)$/.test(u.searchParams.get('q'))?[]:[p],siguiente:null};
+  else if(u.pathname==='/api/piezas'){
+    const q=u.searchParams.get('q')||'';consultas.push(q);
+    if(q==='vieja')await new Promise(r=>setTimeout(r,700));
+    const piezas=q==='vieja'?inventario.slice(0,2):q==='lámpara'?inventario.filter(p=>p.nombre.startsWith('Lámpara')):q?(/^(0191907910414|999999999999)$/.test(q)?[]:[p]):inventario;
+    const inicio=Number(u.searchParams.get('cursor')||0),fin=inicio+25;datos={piezas:piezas.slice(inicio,fin),siguiente:fin<piezas.length?String(fin):null};
+  }
   else if(u.pathname.endsWith('/existencia')&&req.method==='POST'){const chunks=[];for await(const ch of req)chunks.push(ch);const c=JSON.parse(Buffer.concat(chunks));const antes=p.stock;p.stock+=c.delta;datos={id:c.id,antes,despues:p.stock};}
   else if(u.pathname.startsWith('/api/piezas/'))datos={pieza:p,puede_editar:!consultaSolo,puede_precio:!consultaSolo,historial:[]};
   else if(u.pathname==='/api/borradores'&&req.method==='POST'){const chunks=[];for await(const ch of req)chunks.push(ch);const r=new Request('http://local/foto',{method:'POST',headers:req.headers,body:Buffer.concat(chunks),duplex:'half'});const f=await r.formData();const nuevo={...p,id:f.get('id'),nombre:f.get('prenda')||'Foto de prueba',talla:f.get('talla'),precio:Number(f.get('precio_ropa'))||24900,stock:Number(f.get('cantidad'))||1,capturado_por:'prueba@local.mx'};registros.push(nuevo);datos=nuevo;}
@@ -82,7 +89,33 @@ for(const width of [390,1280]){
   await buscar('0191907910414');await capturar('02-codigo-nuevo',width);
   await buscar('012345678905');await capturar('03-ya-existe',width);
   await buscar('999999999999');await capturar('04-sin-registro',width);
-  await modo('buscar');await buscar('chamarra');await capturar('11-ficha',width);
+  await modo('buscar');await esperar("document.querySelectorAll('#resultados .resultado').length===25");
+  assert.equal(await js("document.getElementById('consulta').inputMode"),'search');
+  assert.equal(await js("document.getElementById('consulta').placeholder"),'ED-, nombre o UPC');
+  assert.match(await js("document.getElementById('resumen').textContent"),/Todo el inventario/);
+  assert.equal(await js("document.getElementById('mas').hidden"),false);
+  await capturar('19-buscar-lista-completa',width);
+  const antesCorto=consultas.length;
+  await js("const input=document.getElementById('consulta');input.value='ab';input.dispatchEvent(new Event('input'))");await dormir(350);
+  assert.equal(consultas.length,antesCorto,'Una o dos letras no consultan');
+  assert.match(await js("document.getElementById('estado').textContent"),/Escribe 3 letras o un código/);
+  await js("document.getElementById('mas').scrollIntoView({block:'center'})");await esperar("document.querySelectorAll('#resultados .resultado').length===50");
+  await js("document.getElementById('mas').click()");await esperar("document.querySelectorAll('#resultados .resultado').length===61");
+  assert.equal(await js("new Set([...document.querySelectorAll('#resultados .resultado')].map(b=>b.dataset.id)).size"),61);
+  assert.equal(await js("document.getElementById('mas').hidden"),true);
+  await js("window.scrollTo(0,0);document.getElementById('consulta').value='chamarra';document.getElementById('consulta').dispatchEvent(new Event('input'))");
+  const antesDebounce=consultas.length;await dormir(100);assert.equal(consultas.length,antesDebounce);
+  await esperar("document.getElementById('resumen').textContent.includes('1 resultado')");
+  assert.equal(await js("document.getElementById('ficha').hidden"),true,'El filtro escrito no abre la ficha');
+  await capturar('20-buscar-filtrado',width);
+  await js("document.getElementById('consulta').value='lámpara';document.getElementById('consulta').dispatchEvent(new Event('input'))");
+  await esperar("document.getElementById('resumen').textContent.includes('25+ resultados')");
+  await js("document.getElementById('consulta').value='vieja';document.getElementById('consulta').dispatchEvent(new Event('input'))");await dormir(300);
+  await js("document.getElementById('consulta').value='chamarra';document.getElementById('consulta').dispatchEvent(new Event('input'))");await dormir(900);
+  assert.match(await js("document.getElementById('resumen').textContent"),/1 resultado para «chamarra»/);
+  await cdp('Input.dispatchKeyEvent',{type:'keyDown',key:'Escape',code:'Escape',windowsVirtualKeyCode:27});
+  await esperar("document.getElementById('resumen').textContent.includes('Todo el inventario')");
+  await buscar('chamarra');await capturar('11-ficha',width);
   await js("window.lecturasQA=[];window.clicksQA=0;document.addEventListener('lectura',e=>lecturasQA.push(e.detail));const b=document.getElementById('editar');b.addEventListener('click',()=>clicksQA++);b.focus()");
   for(const key of '012345678905'){await cdp('Input.dispatchKeyEvent',{type:'keyDown',key,text:key});await cdp('Input.dispatchKeyEvent',{type:'keyUp',key});await dormir(15);}
   await cdp('Input.dispatchKeyEvent',{type:'keyDown',key:'Enter',code:'Enter',windowsVirtualKeyCode:13});await cdp('Input.dispatchKeyEvent',{type:'keyUp',key:'Enter',code:'Enter',windowsVirtualKeyCode:13});await dormir(200);

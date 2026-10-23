@@ -402,7 +402,7 @@ La búsqueda IA comienza solo al tocar `Buscar en internet`, nunca por tiempo ni
 
 ### 4.2 Buscar
 
-Entrada: caja (lector, teclado, nombre parcial). Una lectura **exacta** (ED-, UPC) abre la ficha de inmediato; un nombre parcial lista. Cámara de etiquetas (Code128/QR) vive en `⋯` de la caja: `Leer etiqueta con la cámara` (una cámara a la vez).
+Al entrar carga todo el inventario visible, más reciente primero, en páginas de 25 con cursor. Resumen: «Todo el inventario · más recientes primero». Entrada: caja (lector, teclado de texto en celular, nombre parcial), placeholder «ED-, nombre o UPC». Filtra a los 250 ms sin abrir la ficha; 1–2 letras conservan la lista completa y avisan «Escribe 3 letras o un código». Borrar o Escape restaura la lista completa. El lector y Enter consultan al instante y abren una coincidencia única sin más páginas. Carga al bajar con IntersectionObserver y mantiene `Cargar más` visible mientras haya cursor como respaldo de teclado/lector de pantalla. El resumen filtrado dice «N resultados para «x»», con «N+» mientras haya más páginas. Una lectura **exacta** (ED-, UPC) abre la ficha de inmediato; un nombre parcial lista. Cámara de etiquetas (Code128/QR) vive en `⋯` de la caja: `Leer etiqueta con la cámara` (una cámara a la vez).
 
 **Celular — resultados y ficha**
 
@@ -419,7 +419,7 @@ Entrada: caja (lector, teclado, nombre parcial). Una lectura **exacta** (ED-, UP
 | [ ] Chamarra denim S      $300       |   | EXISTENCIA                           |
 |     ED-002101 · sin foto · ×2        |   | [ - ]   3   [ + ]    [ Fijar a… ]    |
 | ...                                  |   | [[ Imprimir 1 ]] [Foto nueva][Editar]|
-|           [ Buscar más ]             |   | ▸ Historial (10)                     |
+|           [ Cargar más ]             |   | ▸ Historial (10)                     |
 +--------------------------------------+   +--------------------------------------+
 | Capturar | Buscar | Revisar | Imprimir |
 ```
@@ -444,7 +444,7 @@ Entrada: caja (lector, teclado, nombre parcial). Una lectura **exacta** (ED-, UP
 | [f] Chamarra Levi's L    $450  ×1  | |   foto 320×320   |  M · Levi's · lista $600            |
 | [ ] Chamarra denim S     $300  ×2  | |                  |  012345678905                       |
 |     ...                            | +------------------+  EXISTENCIA [-] 3 [+] [Fijar a…]    |
-|           [ Buscar más ]           |  [[ Imprimir 1 ]] [ Imprimir N… ] [ Foto con celular ] [ Editar ] |
+|           [ Cargar más ]           |  [[ Imprimir 1 ]] [ Imprimir N… ] [ Foto con celular ] [ Editar ] |
 |                                    |  Historial de existencia                                |
 |                                    |   21/10 11:02  −1 merma  4→3  (Ana)                     |
 +------------------------------------+---------------------------------------------------------+
@@ -624,7 +624,7 @@ Patrón de vacío: glifo grande (48 px, trazo azul), **una línea** de 20/800, *
 
 | Situación | Título | Acción |
 | --- | --- | --- |
-| Buscar, sin consulta | «Escribe o escanea una pieza» | foco en la caja |
+| Buscar, sin consulta | «Todo el inventario · más recientes primero» | lista completa con carga al bajar |
 | Buscar, sin resultados | «Sin resultados para «chamarr»» | `[[ Capturar pieza nueva ]]` (si el rol puede) |
 | Revisar, todo al día | «Todo revisado» (✓ verde) | `Ver todas` (texto) |
 | Revisar, error de red | «Sin conexión» | `[[ Reintentar ]]` |

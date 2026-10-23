@@ -121,13 +121,14 @@ test('25 por página sin perder coincidencias dentro de un tramo; excluye descar
 
 test('FEP y dueño aislados en lista, código, UPC, ficha e historial; capturista consulta y cajero recibe 403', async (t) => {
   const { db, env, pedir } = tienda(); t.after(() => db.close());
+  db.exec('delete from productos');
   const propia = pieza(db, { codigo: 'ED-008888', upc: '001234567890' });
   const ajena = pieza(db, { propietario: 'fep', codigo: 'ED-009999', upc: '001234567890' });
   for (const [correo, rol] of [['cap@prueba.mx', 'capturista'], ['fep@prueba.mx', 'finanzas'], ['caja@prueba.mx', 'cajero']])
     db.prepare("insert into usuarios (correo,nombre,roles,activo,creado_en,actualizado_en) values (?, 'Prueba', ?, 1, '', '')").run(correo, rol);
   for (const [correo, visible, oculta] of [[DUENO, propia, ajena], ['cap@prueba.mx', propia, ajena], ['fep@prueba.mx', ajena, propia]] as const) {
     env.DEV_USUARIO = correo;
-    for (const q of ['chamarra', '001234567890', String(visible.codigo)]) {
+    for (const q of ['', 'chamarra', '001234567890', String(visible.codigo)]) {
       const r = await pedir('/api/piezas?' + new URLSearchParams({ q }));
       assert.equal(r.status, 200); assert.deepEqual(r.cuerpo.piezas.map((p: any) => p.id), [visible.id]);
     }
@@ -158,7 +159,7 @@ test('ficha trae los últimos diez ajustes en orden estable; validación y méto
   assert.deepEqual(r.cuerpo.historial.map((a: any) => a.id), ['11','10','9','8','7','6','5','4','3','2']);
   assert.equal((await pedir(`/api/piezas/${crypto.randomUUID()}`)).status, 404);
   assert.equal((await pedir('/api/piezas/foo')).status, 400);
-  for (const filtro of ['q=', 'q=ab', `q=${'x'.repeat(81)}`, 'cursor=foo', 'cursor=2026-10-01~0', 'q=123456789&cursor=123~5'])
+  for (const filtro of ['q=ab', `q=${'x'.repeat(81)}`, 'cursor=foo', 'cursor=2026-10-01~0', 'q=123456789&cursor=123~5'])
     assert.equal((await pedir('/api/piezas?' + filtro)).status, 400);
   for (const ruta of ['/api/piezas', `/api/piezas/${p.id}`])
     for (const metodo of ['POST', 'PATCH', 'DELETE']) assert.equal((await pedir(ruta, {}, metodo)).status, 405);
@@ -187,6 +188,33 @@ test('completar la página al terminar un empate conserva el cursor hacia fechas
   assert.equal(primera.piezas.length, 25); assert.ok(primera.siguiente);
   const segunda = (await pedir('/api/piezas?' + new URLSearchParams({ q: 'tesoro', cursor: primera.siguiente }))).cuerpo;
   assert.deepEqual(segunda.piezas.map((p: any) => p.id), [vieja.id]);
+});
+
+test('sin q, vacío o espacios: todo el inventario visible por fecha y rowid, 25 por página sin offset (#446)', async (t) => {
+  const { db, env, pedir } = tienda(); t.after(() => db.close());
+  db.exec('delete from productos');
+  const viejas = Array.from({ length: 31 }, () => pieza(db, { stock: 0 }).id).reverse();
+  const nuevas = Array.from({ length: 30 }, () => pieza(db, { creado_en: '2026-10-22T12:00:00.000Z' }).id).reverse();
+  pieza(db, { propietario: 'fep' });
+  pieza(db, { sin_inventario: 1 });
+  pieza(db, { estado_analisis: 'descartado' });
+  const registro = registrarConsultas(env, db);
+  for (const q of [null, '', '   ']) {
+    let cursor: string | null = null;
+    const ids: string[] = [], paginas: number[] = [];
+    do {
+      const params = new URLSearchParams({ ...(q === null ? {} : { q }), ...(cursor ? { cursor } : {}) });
+      const r = await pedir('/api/piezas?' + params);
+      assert.equal(r.status, 200); paginas.push(r.cuerpo.piezas.length);
+      ids.push(...r.cuerpo.piezas.map((p: any) => p.id)); cursor = r.cuerpo.siguiente;
+      assert.ok(paginas.length <= 3);
+    } while (cursor);
+    assert.deepEqual(ids, [...nuevas, ...viejas]);
+    assert.deepEqual(paginas, [25, 25, 11]);
+    assert.equal(new Set(ids).size, 61);
+  }
+  registro.planes();
+  assert.ok(registro.consultas.every(c => c.sql.includes('productos_propietario_creado') && !/offset\s|count\(/i.test(c.sql)));
 });
 
 function pantalla(responder: (url: string, cuerpo?: any) => unknown | Promise<unknown>, confirmar = () => true) {
