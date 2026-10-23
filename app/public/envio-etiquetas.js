@@ -99,6 +99,18 @@ export function sincronizarMarcas(piezas, desde = null) {
   return porSubir.length ? subirMarcas(porSubir, marcas) : Promise.resolve();
 }
 
+/**
+ * La fila de esta pieza con sus etiqueta_* de AHORA (la lista de la base; /revision no los trae), ya adoptada en este navegador.
+ * Para decidir con lo que la base sabe y no con la última carga: la PC pudo imprimir después (#468). null si no se pudo saber.
+ */
+export async function marcaDeLaBase(api, id, desde = new Date(Date.now() - 86400000).toISOString()) {
+  try {
+    const fila = (await api('/api/borradores?' + new URLSearchParams({ desde }))).find((p) => p.id === id);
+    if (fila) await sincronizarMarcas([fila]);
+    return fila ?? null;
+  } catch { return null; }
+}
+
 /** Registra en la base, sin forzar, las marcas que solo existian aqui. Un fallo se reintenta en la siguiente carga. */
 async function subirMarcas(piezas, antes) {
   try {
