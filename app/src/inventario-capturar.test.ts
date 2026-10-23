@@ -1,8 +1,89 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { crearCaptura } from '../public/inventario-capturar.js';
-import { tienda, PRODUCTO } from './prueba-d1.ts';
+import { crearCaptura, cambiosTarjeta, vigilarLectorEnCampo } from '../public/inventario-capturar.js';
+import { registroFoto, formularioPendiente } from '../public/foto-pendiente.js';
+import worker from './worker.ts';
+import { tienda, PRODUCTO, DUENO } from './prueba-d1.ts';
 import { crearLector } from '../public/lector.js';
+import { tsplEtiqueta } from '../public/etiquetera.js';
+
+function manifiesto() {
+  const t=tienda();
+  t.db.prepare("insert into manifiesto(upc,descripcion,nombre,precio_usd,tcin,actualizado_en) values('191907910414','Lámpara','Lámpara',1000,'','')").run();
+  t.db.prepare("insert or replace into config(clave,valor) values('tipo_cambio','2000'),('pct_otros','50')").run();
+  t.db.prepare("insert into usuarios(correo,roles,activo,editar_inventario,creado_en,actualizado_en) values('cap@prueba.mx','capturista',1,0,'','')").run();
+  return t;
+}
+const alta=()=>({id:crypto.randomUUID(),upc:'0191907910414',stock:2,estado_fisico:'nuevo'});
+
+test('tarjeta de manifiesto: servidor exige dueño para precio y casilla para nombre, sin escribir al denegar',async t0=>{
+  const t=manifiesto();t0.after(async()=>{await t.esperar();t.db.close();});
+  t.env.DEV_USUARIO='cap@prueba.mx';
+  const ficha=(await t.pedir('/api/manifiesto/0191907910414')).cuerpo;
+  for(const casilla of [0,1]){
+    t.db.prepare("update usuarios set editar_inventario=? where correo='cap@prueba.mx'").run(casilla);
+    assert.equal((await t.pedir('/api/borradores/upc',{...alta(),precio:ficha.precio+100})).status,403);
+  }
+  t.db.prepare("update usuarios set editar_inventario=0 where correo='cap@prueba.mx'").run();
+  assert.equal((await t.pedir('/api/borradores/upc',{...alta(),nombre:'Otro nombre'})).status,403);
+  assert.equal(t.db.prepare('select count(*) n from productos where upc is not null').get()!.n,0);
+  const a=alta(),igual={...a,nombre:'  '+ficha.nombre+'  ',precio:ficha.precio};
+  assert.equal((await t.pedir('/api/borradores/upc',igual)).status,201,'Datos idénticos se aceptan sin casilla');
+  assert.equal((await t.pedir('/api/borradores/upc',{...igual,precio:ficha.precio+100})).status,403,'El reintento también autoriza');
+  assert.equal((await t.pedir('/api/borradores/upc',{...alta(),nombre:'Distinto'})).status,403,'La suma tampoco evita el permiso');
+  assert.equal(t.db.prepare('select stock from productos where id=?').get(a.id)!.stock,2);
+  assert.equal(t.db.prepare('select count(*) n from conteo_ajustes').get()!.n,0);
+});
+
+test('dueño edita nombre/precio; el UUID conserva el resultado y la impresión toma los valores de D1',async t0=>{
+  const t=manifiesto();t0.after(async()=>{await t.esperar();t.db.close();});
+  const api=async(ruta,cuerpo)=>{const r=await t.pedir(ruta,cuerpo);assert.ok(r.status<400,JSON.stringify(r));return r.cuerpo;};
+  const impresas:string[]=[];
+  const flujo=crearCaptura({api,enLinea:()=>true,imprimir:async(id,n)=>{
+    const etiquetas=await api('/api/etiquetas',{ids:[id]});
+    assert.equal(etiquetas[0].nombre,'Termo & tapa');assert.equal(etiquetas[0].precio,8700);
+    impresas.push(tsplEtiqueta(etiquetas[0],n,0,2));return true;
+  }});
+  await flujo.leer('0191907910414');
+  flujo.actual().nombre='  Termo &amp; tapa  ';flujo.actual().precio='87.00';flujo.cantidad(3);
+  const id=flujo.actual().id;await flujo.guardar();
+  assert.equal(impresas.length,1);assert.match(impresas[0],/Termo & tapa/);assert.match(impresas[0],/87/);
+  const reintento=await api('/api/borradores/upc',{...alta(),id,nombre:'No reemplazar',precio:9900});
+  assert.deepEqual([reintento.nombre,reintento.precio,reintento.stock],['Termo & tapa',8700,3]);
+  const suma=await api('/api/borradores/upc',{...alta(),nombre:'Tampoco reemplazar',precio:9900});
+  assert.deepEqual([suma.id,suma.nombre,suma.precio,suma.stock],[id,'Termo & tapa',8700,5]);
+  await flujo.leer('0191907910414');await flujo.leer('0191907910414');
+  assert.equal(impresas.length,2,'Reescanear también imprime los valores editados');
+  assert.equal(t.db.prepare('select stock from productos where id=?').get(id)!.stock,6);
+  assert.equal(t.db.prepare('select count(*) n from productos where upc is not null').get()!.n,1);
+});
+
+test('capturista con casilla edita solo nombre; límites de nombre y centavos se validan antes del alta',async t0=>{
+  const t=manifiesto();t0.after(async()=>{await t.esperar();t.db.close();});
+  for(const campos of [{nombre:''},{nombre:'   '},{nombre:null},{nombre:42},{precio:0},{precio:-1},{precio:1.5},{precio:'100'},{precio:null},{precio:Number.MAX_SAFE_INTEGER+1},{precio:20001}]){
+    assert.equal((await t.pedir('/api/borradores/upc',{...alta(),...campos})).status,400,JSON.stringify(campos));
+  }
+  assert.equal(t.db.prepare('select count(*) n from productos where upc is not null').get()!.n,0);
+  t.env.DEV_USUARIO='cap@prueba.mx';t.db.prepare("update usuarios set editar_inventario=1 where correo='cap@prueba.mx'").run();
+  const nombre='Á'.repeat(125),r=await t.pedir('/api/borradores/upc',{...alta(),nombre:'  '+nombre+'  '});
+  assert.equal(r.status,201);assert.equal(r.cuerpo.nombre,'Á'.repeat(120));
+});
+
+test('campos opcionales no revelan piezas ajenas ni evitan conflictos de UUID/UPC',async t0=>{
+  const t=manifiesto();t0.after(async()=>{await t.esperar();t.db.close();});
+  const a=alta();await t.pedir('/api/borradores/upc',a);
+  t.env.DEV_USUARIO='cap@prueba.mx';
+  assert.equal((await t.pedir('/api/borradores/upc',{...a,upc:'999999999999',nombre:'Otro',precio:1})).status,409);
+  t.db.prepare("update productos set propietario='fep' where id=?").run(a.id);
+  assert.equal((await t.pedir('/api/borradores/upc',{...a,nombre:'Otro',precio:1})).status,404);
+});
+
+test('ediciones inválidas de la tarjeta conservan el trabajo y no guardan ni imprimen',async()=>{
+  const flujo=crearCaptura({api:async()=>assert.fail('No debe llamar la API'),enLinea:()=>true,imprimir:async()=>assert.fail('No debe imprimir')});
+  const a={tipo:'nueva',id:'estable',nombre:'   ',cantidad:1};flujo.retomar(a);
+  await assert.rejects(flujo.guardar(),/nombre/);assert.equal(flujo.actual(),a);
+  a.nombre='Lámpara';a.precio='0';await assert.rejects(flujo.guardar(),/precio/);assert.equal(flujo.actual(),a);
+});
 
 test('UPC de Ropa ignora el grado de MG y conserva el estado interno al sumar; MG sigue filtrada por grado', async () => {
   const ropa = { id: 'ropa', upc: '012345678905', categoria: 'ropa', estado_fisico: 'danado', stock: 1, estado_analisis: 'listo' };
@@ -119,4 +200,96 @@ test('cámara y USB priorizan la etiqueta numérica ED- frente a UPC y grado; ot
   await crearLector({emitir:({codigo})=>nuevo.leer(codigo)}).recibir('012345678905','camara');
   assert.equal(nuevo.actual()?.tipo,'nueva');assert.equal(nuevo.actual()?.upc,'012345678905');
   assert.deepEqual(consultas,['/api/piezas?q=012345678905','/api/manifiesto/012345678905']);
+});
+
+test('P2-1: leer otro código nunca guarda una tarjeta editada; sin edición guarda como siempre',async()=>{
+  const llamadas:string[]=[];
+  const api=async(ruta:string,cuerpo?:any)=>{llamadas.push(ruta);
+    if(ruta.startsWith('/api/piezas?'))return {piezas:[],siguiente:null};
+    if(ruta.startsWith('/api/manifiesto/'))return {nombre:'Lámpara',precio:24900};
+    return {id:cuerpo.id,estado_analisis:'listo'};};
+  const flujo=crearCaptura({api,enLinea:()=>true,imprimir:async()=>true});
+  await flujo.leer('012345678905');
+  flujo.actual()!.precio='1';
+  await assert.rejects(flujo.leer('012345678906'),/Guarda la tarjeta/);
+  assert.equal(llamadas.includes('/api/borradores/upc'),false);assert.equal(flujo.actual()!.upc,'012345678905');
+  flujo.actual()!.precio='249';flujo.actual()!.nombre=' Lámpara ';
+  await flujo.leer('012345678906');
+  assert.equal(llamadas.filter(r=>r==='/api/borradores/upc').length,1,'Valores idénticos a lo mostrado se guardan como antes');
+  assert.equal(flujo.actual()!.upc,'012345678906');
+});
+
+test('P2-2: la foto de una tarjeta editada lleva nombre y precio; registros viejos y clientes viejos usan el manifiesto',()=>{
+  const nueva={tipo:'nueva',nombre:'  Termo  ',precio:'87.50'};
+  const edicion=cambiosTarjeta(nueva);assert.deepEqual(edicion,{nombre:'Termo',precio:8750});
+  const r=registroFoto(new Blob(['f']),{upc:'0191907910414',nombre_edit:edicion.nombre,precio_edit:edicion.precio});
+  const f=formularioPendiente(r);assert.equal(f.get('nombre'),'Termo');assert.equal(f.get('precio'),'8750');
+  const vieja=formularioPendiente({id:'x',estado_fisico:'nuevo',cantidad:1,upc:'0191907910414',foto:new Blob(['f'])});
+  assert.equal(vieja.has('nombre'),false);assert.equal(vieja.has('precio'),false);
+  assert.throws(()=>cambiosTarjeta({nombre:'  '}),/nombre/);assert.throws(()=>cambiosTarjeta({precio:'0'}),/precio/);
+});
+
+test('P2-2/P3-a: la foto en cola con edición no autorizada se guarda con el manifiesto; dueño conserva nombre y precio',async t0=>{
+  const t=manifiesto();t0.after(async()=>{await t.esperar();t.db.close();});
+  const ficha=(await t.pedir('/api/manifiesto/0191907910414')).cuerpo;
+  const subir=(extra:Record<string,string>,id=crypto.randomUUID())=>{
+    const f=formularioPendiente(registroFoto(new Blob(['foto'],{type:'image/jpeg'}),{id,upc:'0191907910414',cantidad:2}));
+    for(const [k,v] of Object.entries(extra))f.set(k,v);
+    return worker.fetch!(new Request('https://caja.prueba/api/borradores',{method:'POST',body:f}) as never,t.env,t.ctx as never);
+  };
+  t.env.DEV_USUARIO='cap@prueba.mx';
+  for(const casilla of [0,1]){
+    t.db.prepare("update usuarios set editar_inventario=? where correo='cap@prueba.mx'").run(casilla);
+    const id=crypto.randomUUID();
+    assert.equal((await subir({precio:String(ficha.precio+100)},id)).status,201,'La edición no autorizada se descarta, la cola no se detiene');
+    assert.equal(t.db.prepare('select precio from productos where id=?').get(id)!.precio,ficha.precio);
+    t.db.prepare('delete from productos where id=?').run(id);
+  }
+  t.db.prepare("update usuarios set editar_inventario=0 where correo='cap@prueba.mx'").run();
+  const otro=crypto.randomUUID();
+  assert.equal((await subir({nombre:'Otro nombre'},otro)).status,201);
+  assert.equal(t.db.prepare('select nombre from productos where id=?').get(otro)!.nombre,ficha.nombre,'El nombre no autorizado nunca se escribe');
+  t.db.prepare('delete from productos where id=?').run(otro);
+  assert.equal(t.db.prepare('select count(*) n from productos where upc is not null').get()!.n,0);
+  assert.equal((await t.pedir('/api/borradores/upc',{...alta(),precio:ficha.precio+100})).status,403,'El POST directo conserva su 403');
+  const sin=crypto.randomUUID();assert.equal((await subir({},sin)).status,201,'Sin campos: valores del manifiesto');
+  assert.equal(t.db.prepare('select precio from productos where id=?').get(sin)!.precio,ficha.precio);
+  t.env.DEV_USUARIO=DUENO;t.db.prepare('delete from productos where id=?').run(sin);
+  const id=crypto.randomUUID();
+  assert.equal((await subir({nombre:'Termo &amp; tapa',precio:'8700'},id)).status,201);
+  const fila=t.db.prepare('select nombre,precio,stock,foto_key from productos where id=?').get(id)!;
+  assert.deepEqual([fila.nombre,fila.precio,fila.stock,fila.foto_key],['Termo & tapa',8700,2,`fotos/${id}.jpg`]);
+});
+
+test('P3-1: Enter en un campo de la tarjeta devuelve el foco al lector; una ráfaga de lector no se queda en el campo',()=>{
+  const campo=Object.assign(new EventTarget(),{value:'Lámpara'}) as any;
+  let reloj=0;const leidos:string[]=[];let salidas=0;
+  vigilarLectorEnCampo(campo,{ahora:()=>reloj,salir:()=>{salidas++;},alLeer:c=>leidos.push(c)});
+  const tecla=(key:string,ms:number)=>{reloj+=ms;const e=Object.assign(new Event('keydown',{cancelable:true}),{key});campo.dispatchEvent(e);if(key.length===1)campo.value+=key;return e;};
+  for(const k of '1234567890')tecla(k,k==='1'?400:10);
+  const enter=tecla('Enter',10);
+  assert.equal(enter.defaultPrevented,true);assert.equal(campo.value,'Lámpara');assert.deepEqual(leidos,['1234567890']);assert.equal(salidas,1);
+  for(const k of '1234')tecla(k,k==='1'?400:200);campo.value+='';
+  tecla('Enter',200);
+  assert.deepEqual(leidos,['1234567890'],'Tecleo humano no es un código');assert.equal(campo.value,'Lámpara1234');assert.equal(salidas,2);
+});
+
+test('P3-b: un precio mayor al de lista se rechaza antes de encolar o guardar',()=>{
+  const ficha={precio_lista:50000};
+  assert.throws(()=>cambiosTarjeta({ficha,precio:'500.01'}),/precio de lista/);
+  assert.deepEqual(cambiosTarjeta({ficha,precio:'500'}),{precio:50000});
+  assert.deepEqual(cambiosTarjeta({ficha:{precio_lista:0},precio:'900'}),{precio:90000},'Sin precio de lista no hay tope');
+});
+
+test('P3-c: UPC solo en catálogo y sin foto: la foto con edición del dueño sí llega a capturarPorUpc',async t0=>{
+  const t=manifiesto();t0.after(async()=>{await t.esperar();t.db.close();});
+  t.db.prepare("delete from manifiesto").run();
+  t.db.prepare(`insert into productos(id,upc,nombre,categoria,precio_lista,precio,estado_fisico,stock,estado_analisis,propietario,destino,semana_ingreso,creado_en,actualizado_en)
+    values('catalogo','0191907910414','Lámpara catálogo','otros',10000,8000,'danado',1,'listo','dolaron','etiqueta','S43','','')`).run();
+  const id=crypto.randomUUID();
+  const f=formularioPendiente(registroFoto(new Blob(['foto'],{type:'image/jpeg'}),{id,upc:'0191907910414',cantidad:2,estado_fisico:'nuevo',nombre_edit:'Lámpara editada',precio_edit:9000}));
+  const r=await worker.fetch!(new Request('https://caja.prueba/api/borradores',{method:'POST',body:f}) as never,t.env,t.ctx as never);
+  assert.equal(r.status,201);
+  const fila=t.db.prepare('select nombre,precio,stock,foto_key from productos where id=?').get(id)!;
+  assert.deepEqual([fila.nombre,fila.precio,fila.stock,fila.foto_key],['Lámpara editada',9000,2,`fotos/${id}.jpg`]);
 });

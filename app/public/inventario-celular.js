@@ -1,21 +1,24 @@
 import { guardar, leer, borrar, pendientes } from './cola-fotos.js';
 import { registroFoto, crearSubida } from './foto-pendiente.js';
-import { crearCamara } from './camara-inventario.js';
+import { crearCamara, crearReposoCamara } from './camara-inventario.js';
 import { aJpeg, reducirArchivo } from './foto.js';
 import { ESTADOS } from './estados.js';
 import { ropa, opciones, talla } from './inventario-ropa.js';
 import { stepper, bloquear, cerrarHoja } from './inventario-ui.js';
 import { estadoEnvio } from './envio-etiquetas.js';
 import { esRopa } from './ropa.js';
+import { cambiosTarjeta } from './inventario-capturar.js';
 
 export async function iniciarCelular(ctx,captura) {
   const {$,nodo,boton,mensaje,hoja,api,confirmar}=ctx;
   const visor=nodo('div',undefined,'visor'),video=nodo('video');video.playsInline=true;video.muted=true;video.autoplay=true;video.setAttribute('aria-label','Vista de la cámara');visor.append(video);
   const accionesVisor=nodo('div',undefined,'acciones visor-acciones'),reanudar=boton('Empezar',encender,'primario'),subirArchivo=boton('Subir foto',()=>archivo.click()),menu=boton('⋯',opcionesCamara);menu.setAttribute('aria-label','Opciones de cámara');accionesVisor.append(reanudar,subirArchivo,menu);visor.append(accionesVisor);
   let usarCamara=true,abriendoCamara=false;try{usarCamara=sessionStorage.getItem('inventario-camara')!=='false';}catch{}
-  const alternar=boton('',async()=>{usarCamara=!camara.pista();try{sessionStorage.setItem('inventario-camara',String(usarCamara));}catch{}if(usarCamara)await encender();else{camara.pausar();visor.classList.remove('bloqueada');visor.querySelector('.permiso-camara')?.remove();pintarCamara();}},'alternar-camara');
+  async function cambiarCamara(encendida){usarCamara=encendida;try{sessionStorage.setItem('inventario-camara',String(usarCamara));}catch{}if(usarCamara)await encender();else{camara.pausar();visor.classList.remove('bloqueada');visor.querySelector('.permiso-camara')?.remove();pintarCamara();}}
+  const alternar=boton('',()=>cambiarCamara(!camara.pista()),'alternar-camara');
   const icono=document.createElementNS('http://www.w3.org/2000/svg','svg'),uso=document.createElementNS('http://www.w3.org/2000/svg','use'),etiquetaCamara=nodo('span');icono.setAttribute('class','icono');icono.setAttribute('aria-hidden','true');uso.setAttribute('href','#i-camara');icono.append(uso);alternar.replaceChildren(icono,etiquetaCamara);visor.append(alternar);
-  const apagada=nodo('p','Cámara apagada','camara-apagada');visor.append(apagada);
+  const apagada=nodo('p','Cámara en pausa · toca para encender','camara-apagada');visor.append(apagada);
+  visor.addEventListener('click',e=>{if(!e.target.closest('button')&&!camara.pista())void cambiarCamara(true);});
   const contador=nodo('p',''),carrusel=nodo('div',undefined,'carrusel'),tira=nodo('section',undefined,'tira-capturas');tira.append(contador,carrusel);
   const todas=boton('Ver todas',()=>{const c=nodo('div',undefined,'lista-capturas');for(const r of sesion.values())c.append(miniatura(r));hoja('Capturas de 24 h',c);});const encabezado=nodo('div',undefined,'cabecera-carrusel');encabezado.append(contador,todas);tira.prepend(encabezado);
   const archivo=nodo('input');archivo.type='file';archivo.accept='image/*';archivo.setAttribute('capture','environment');archivo.hidden=true;
@@ -37,11 +40,20 @@ export async function iniciarCelular(ctx,captura) {
     if(localStorage.getItem('inventario-vibracion')!=='false')navigator.vibrate?.(tipo==='error'?[200,100,200]:tipo==='etiqueta'?[150,80,150,80,150]:40);
     visor.dataset.destello=tipo;setTimeout(()=>{delete visor.dataset.destello;},tipo==='etiqueta'?1500:350);
   }
-  function pintarCamara(){const activa=!!camara.pista();alternar.setAttribute('aria-pressed',String(activa));etiquetaCamara.textContent=activa?'Cámara':'Apagada';apagada.hidden=activa;video.hidden=!activa;reanudar.hidden=!usarCamara||activa;subirArchivo.hidden=activa;}
-  const camara=crearCamara({video,puedeLeer:()=>!revisando&&!$('hoja').open,alLeer:codigo=>{ctx.recibir(codigo,'camara').then(()=>sonar(captura.flujo.actual()?.tipo==='existente'?'existe':captura.flujo.actual()?.tipo==='sin-registro'?'sin':'ok')).catch(e=>{mensaje(e.message,'aviso');sonar('error');});},alEstado:pintarCamara});
+  function pintarCamara(){const activa=!!camara.pista();alternar.setAttribute('aria-pressed',String(activa));etiquetaCamara.textContent=activa?'Cámara':'Apagada';apagada.hidden=activa;video.hidden=!activa;reanudar.hidden=!usarCamara||activa;subirArchivo.hidden=activa;sincronizarReposo();}
+  const reposo=crearReposoCamara({apagar:()=>cambiarCamara(false)});
+  function sincronizarReposo(){reposo.pausar(!camara.pista()||$('hoja').open||document.hidden||$('modo-capturar').hidden);}
+  // Mientras el capturista teclea nombre o precio la cámara no lee: un código ajeno no guarda una tarjeta a medias.
+  const escribiendoTarjeta=()=>{const e=document.activeElement;return !!e&&e.matches?.('input:not([readonly])')&&captura.pieza.contains(e);};
+  const camara=crearCamara({video,puedeLeer:()=>!revisando&&!$('hoja').open&&!escribiendoTarjeta(),alLeer:codigo=>{reposo.actividad();ctx.recibir(codigo,'camara').then(()=>sonar(captura.flujo.actual()?.tipo==='existente'?'existe':captura.flujo.actual()?.tipo==='sin-registro'?'sin':'ok')).catch(e=>{mensaje(e.message,'aviso');sonar('error');});},alEstado:pintarCamara});
+  for(const evento of ['pointerdown','input','keydown','scroll'])document.addEventListener(evento,()=>{if(!$('modo-capturar').hidden)reposo.actividad();},{capture:true,passive:true});
+  document.addEventListener('visibilitychange',sincronizarReposo);
+  new MutationObserver(sincronizarReposo).observe($('hoja'),{attributes:true,attributeFilter:['open']});
+  setInterval(()=>{sincronizarReposo();reposo.comprobar();},1000);
   pintarCamara();
   async function encender(){
     if(!usarCamara||abriendoCamara)return;
+    reposo.actividad();
     abriendoCamara=true;bloquear(alternar,'Espera la cámara');video.hidden=false;
     try{if(await camara.abrir()){reanudar.hidden=true;visor.classList.remove('bloqueada');visor.querySelector('.permiso-camara')?.remove();captura.neutro();}}
     catch(e){camara.pausar();pintarCamara();reanudar.textContent='Reintentar';visor.classList.add('bloqueada');mensaje(e.name==='NotAllowedError'?'Cámara bloqueada · revisa permisos':'Otra app usa la cámara','error');const instrucciones=nodo('ol',undefined,'permiso-camara');instrucciones.append(nodo('li','Toca el candado de la barra de direcciones.'),nodo('li','Permisos › Cámara › Permitir.'));visor.querySelector('.permiso-camara')?.remove();visor.append(instrucciones);}
@@ -70,9 +82,11 @@ export async function iniciarCelular(ctx,captura) {
     const piezas=registros.reduce((n,r)=>n+(r.cantidad??1),0),subidas=registros.filter(r=>r.subida).length;contador.textContent=`Hoy · ${piezas} ${piezas===1?'pieza':'piezas'} · ${subidas} ${subidas===1?'subida':'subidas'}`;tira.hidden=!registros.length;pintarRed();
   }
   async function conservar(foto,a){
+    reposo.actividad();
     const upc=a?.upc;const ropaSinCodigo=captura.esRopa()&&!upc;
     if(ropaSinCodigo&&!captura.tablero.validar())throw new Error('Completa talla y precio');
-    const r=registroFoto(foto,{id:a?.id||crypto.randomUUID(),estado_fisico:ropaSinCodigo?'nuevo':a?.estado||captura.estado(),cantidad:a?.cantidad||captura.cantidad(),...(ropaSinCodigo?captura.tablero.valores():{upc:upc??''})});
+    const edicion=a?.tipo==='nueva'?cambiosTarjeta(a):{};
+    const r=registroFoto(foto,{id:a?.id||crypto.randomUUID(),estado_fisico:ropaSinCodigo?'nuevo':a?.estado||captura.estado(),cantidad:a?.cantidad||captura.cantidad(),...(ropaSinCodigo?captura.tablero.valores():{upc:upc??'',nombre_edit:edicion.nombre,precio_edit:edicion.precio})});
     await guardar(r);sesion.set(r.id,{...r,url:URL.createObjectURL(foto),subida:false});captura.flujo.limpiar();captura.contador.poner(1);pintar();mensaje(navigator.onLine?'Foto guardada en el teléfono':'Sin red · foto en el teléfono',navigator.onLine?'ok':'aviso');
     if(localStorage.getItem('inventario-vibracion')!=='false')navigator.vibrate?.(30);void subir();return r;
   }
@@ -86,6 +100,7 @@ export async function iniciarCelular(ctx,captura) {
   archivo.onchange=async()=>{const f=archivo.files?.[0];if(!f)return;try{const foto=await reducirArchivo(f);if(archivoPara?.existente){await reemplazarFoto(archivoPara.existente,foto);cerrarHoja();}else if(archivoPara?.local)await retomarLocal(archivoPara.local,foto);else await conservar(foto,archivoPara||captura.flujo.actual());}catch(e){mensaje(e.message,'error');}finally{archivo.value='';archivoPara=null;}};
   archivo.oncancel=()=>{archivoPara=null;};
   async function reemplazarFoto(p,foto){
+    reposo.actividad();
     if(!navigator.onLine)throw new Error('Sin red · conserva la foto');
     revisionFoto=foto;const f=new FormData();f.set('id',p.id);f.set('solo_foto','1');f.set('estado_fisico',p.estado_fisico||'nuevo');f.set('foto',foto,`${p.id}.jpg`);
     const r=await fetch('/api/borradores',{method:'POST',body:f});if(!r.ok)throw new Error((await r.json()).error||'No se subió la foto');revisionFoto=null;mensaje('Foto reemplazada','ok');
@@ -95,7 +110,7 @@ export async function iniciarCelular(ctx,captura) {
     const c=nodo('div');c.append(nodo('p','Tomar foto de la pieza'),boton('Tomar foto',async()=>{if(!camara.pista()||!video.videoWidth){archivoPara={existente:p};archivo.click();return;}await reemplazarFoto(p,await aJpeg(video,video.videoWidth,video.videoHeight));cerrarHoja();},'primario'),boton('Subir foto',()=>{archivoPara={existente:p};archivo.click();}));hoja('Foto nueva',c);$('hoja').addEventListener('close',resolve,{once:true});
     });
   }
-  async function retomarLocal(r,foto){r={...r,foto,version:(r.version??0)+1};await guardar(r);const anterior=sesion.get(r.id)?.url;if(anterior)URL.revokeObjectURL(anterior);sesion.set(r.id,{...sesion.get(r.id),...r,url:URL.createObjectURL(foto)});pintar();}
+  async function retomarLocal(r,foto){reposo.actividad();r={...r,foto,version:(r.version??0)+1};await guardar(r);const anterior=sesion.get(r.id)?.url;if(anterior)URL.revokeObjectURL(anterior);sesion.set(r.id,{...sesion.get(r.id),...r,url:URL.createObjectURL(foto)});pintar();}
   async function corregir(id){
     if(subida.id()===id)return mensaje('Espera a que suba','aviso');
     const datos=sesion.get(id);if(!datos)return;revisando=id;
@@ -146,7 +161,7 @@ export async function iniciarCelular(ctx,captura) {
     c.append(boton('Subir foto',()=>{archivoPara=null;archivo.click();}));
     if(ctx.dueno)c.append(boton('Pieza sin foto',()=>captura.manual()));const pista=camara.pista(),rango=pista?.getCapabilities?.().zoom;
     if(rango&&rango.max>rango.min){const l=nodo('label','Zoom'),input=nodo('input');input.type='range';Object.assign(input,{min:rango.min,max:rango.max,step:rango.step||.1,value:pista.getSettings().zoom||rango.min});input.oninput=()=>{const zoom=Number(input.value);if(pista.getSettings().zoom!==zoom)pista.applyConstraints({advanced:[{zoom}]}).catch(()=>{});localStorage.setItem('captura-zoom',input.value);};l.append(input);c.append(l);}
-    c.append(boton('Producto sin código',()=>{captura.flujo.limpiar();cerrarHoja();}),boton('Reanudar cámara',async()=>{cerrarHoja();usarCamara=true;try{sessionStorage.setItem('inventario-camara','true');}catch{}await encender();}),boton('Escribir código',()=>{cerrarHoja();$('busqueda').hidden=false;$('consulta').inputMode='numeric';$('consulta').focus();}));hoja('Cámara',c);
+    c.append(boton('Producto sin código',()=>{captura.flujo.limpiar();cerrarHoja();}),boton('Reanudar cámara',async()=>{cerrarHoja();await cambiarCamara(true);}),boton('Escribir código',()=>{cerrarHoja();$('busqueda').hidden=false;$('consulta').inputMode='numeric';$('consulta').focus();}));hoja('Cámara',c);
   }
   async function recuperar(){
     for(const r of await pendientes())if(!sesion.has(r.id))sesion.set(r.id,{...r,url:URL.createObjectURL(r.foto),subida:false});pintar();
@@ -155,5 +170,5 @@ export async function iniciarCelular(ctx,captura) {
   }
   addEventListener('online',()=>{pintar();void subir();});addEventListener('offline',pintar);setInterval(subir,20000);
   await recuperar();
-  return {tomar,fotoPieza,subir,sonar,async abrir(){pintar();pintarCamara();if(!inicio.hidden)return;reanudar.textContent='Reanudar';},pausar(){camara.pausar();pintarCamara();reanudar.textContent='Reanudar';},camara,corregir};
+  return {tomar,fotoPieza,subir,sonar,actividad:()=>reposo.actividad(),async abrir(){pintar();pintarCamara();if(!inicio.hidden)return;reanudar.textContent='Reanudar';},pausar(){camara.pausar();pintarCamara();reanudar.textContent='Reanudar';},camara,corregir};
 }
