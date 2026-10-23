@@ -12,11 +12,11 @@ import { cambiosTarjeta } from './inventario-capturar.js';
 export async function iniciarCelular(ctx,captura) {
   const {$,nodo,boton,mensaje,hoja,api,confirmar}=ctx;
   const visor=nodo('div',undefined,'visor'),video=nodo('video');video.playsInline=true;video.muted=true;video.autoplay=true;video.setAttribute('aria-label','Vista de la cámara');visor.append(video);
-  const accionesVisor=nodo('div',undefined,'acciones visor-acciones'),reanudar=boton('Empezar',encender,'primario'),subirArchivo=boton('Subir foto',()=>archivo.click()),menu=boton('⋯',opcionesCamara);menu.setAttribute('aria-label','Opciones de cámara');accionesVisor.append(reanudar,subirArchivo,menu);visor.append(accionesVisor);
+  const accionesVisor=nodo('div',undefined,'acciones visor-acciones'),reanudar=boton('Empezar',encender,'primario'),subirArchivo=boton('Subir foto',()=>archivo.click(),'visor-subir'),menu=boton('⋯',opcionesCamara,'visor-menu');menu.setAttribute('aria-label','Opciones de cámara');accionesVisor.append(subirArchivo,menu,reanudar);visor.append(accionesVisor);
   let usarCamara=true,abriendoCamara=false;try{usarCamara=sessionStorage.getItem('inventario-camara')!=='false';}catch{}
   async function cambiarCamara(encendida){usarCamara=encendida;try{sessionStorage.setItem('inventario-camara',String(usarCamara));}catch{}if(usarCamara)await encender();else{camara.pausar();visor.classList.remove('bloqueada');visor.querySelector('.permiso-camara')?.remove();pintarCamara();}}
   const alternar=boton('',()=>cambiarCamara(!camara.pista()),'alternar-camara');
-  const icono=document.createElementNS('http://www.w3.org/2000/svg','svg'),uso=document.createElementNS('http://www.w3.org/2000/svg','use'),etiquetaCamara=nodo('span');icono.setAttribute('class','icono');icono.setAttribute('aria-hidden','true');uso.setAttribute('href','#i-camara');icono.append(uso);alternar.replaceChildren(icono,etiquetaCamara);visor.append(alternar);
+  const icono=document.createElementNS('http://www.w3.org/2000/svg','svg'),uso=document.createElementNS('http://www.w3.org/2000/svg','use'),etiquetaCamara=nodo('span');icono.setAttribute('class','icono');icono.setAttribute('aria-hidden','true');uso.setAttribute('href','#i-camara');icono.append(uso);alternar.replaceChildren(icono,etiquetaCamara);reanudar.before(alternar);
   const apagada=nodo('p','Cámara en pausa · toca para encender','camara-apagada');visor.append(apagada);
   visor.addEventListener('click',e=>{if(!e.target.closest('button')&&!camara.pista())void cambiarCamara(true);});
   const contador=nodo('p',''),carrusel=nodo('div',undefined,'carrusel'),tira=nodo('section',undefined,'tira-capturas');tira.append(contador,carrusel);
