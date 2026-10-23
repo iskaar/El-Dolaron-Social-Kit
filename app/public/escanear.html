@@ -272,12 +272,13 @@ async function enviar(pieza) {
     });
     const guardada = await respuesta.json().catch(() => ({}));
     if (!respuesta.ok) throw new Error(guardada.error ?? `Error ${respuesta.status}`);
-    piezas += guardada.stock;
+    piezas += guardada.sumadas ?? pieza.stock;
     const { li } = anotarGuardada(guardada, pieza.estado);
     if (guardada.estado_analisis === 'listo') {
       li.querySelector('.p').textContent = `${pesos(guardada.precio)} · etiqueta en camino`;
-      avisarEtiqueta(guardada.nombre, guardada.stock);
+      avisarEtiqueta(guardada.nombre, pieza.stock);
     }
+    if(guardada.existente)mensaje(`Ya existía · +${guardada.sumadas}${guardada.codigo?` a ${guardada.codigo}`:''}`);
   } catch (error) {
     anotar(`<span>No se guardó: ${escapar(pieza.ficha.nombre)} ×${pieza.stock}. Toca para reintentar.</span>`,
       () => { fila = fila.then(() => enviar(pieza)); });
@@ -292,12 +293,31 @@ async function enviar(pieza) {
 
 function anotarGuardada(guardada, grado, sinFoto = false) {
   const hasta = Date.parse(guardada.creado_en) + 5 * 60_000;
-  const corregible = guardada.estado_analisis !== 'listo' || (sinFoto && Date.now() < hasta);
-  anotar(`<span>${escapar(guardada.nombre)}${grado !== 'nuevo' ? ` (${escapar(nombreEstado(grado))})` : ''}</span>
+  const corregible = !guardada.existente && (guardada.estado_analisis !== 'listo' || (sinFoto && Date.now() < hasta));
+  anotar(`<span>${escapar(guardada.codigo||'')} ${escapar(guardada.nombre)}${grado !== 'nuevo' ? ` (${escapar(nombreEstado(grado))})` : ''}</span>
     <span class="corregir">${corregible ? '<button type="button" data-paso="-1" aria-label="Una pieza menos">−</button>' : ''}
     <span class="cant">×<span class="n">${guardada.stock}</span> · <span class="p">${guardada.precio > 0 ? pesos(guardada.precio) : 'buscando…'}</span></span>
     ${corregible ? '<button type="button" data-paso="1" aria-label="Una pieza más">+</button>' : ''}</span>`);
   const li = $('guardadas').firstElementChild;
+  if (guardada.existente && guardada.codigo) {
+    const imprimir = document.createElement('button');
+    imprimir.type = 'button'; imprimir.className = 'secundario';
+    imprimir.textContent = `Imprimir ${guardada.sumadas} etiquetas de ${guardada.codigo}`;
+    imprimir.addEventListener('click', async () => {
+      if (imprimir.disabled) return;
+      imprimir.disabled = true;
+      try {
+        const e = await import('/etiquetera.js');
+        if (!e.etiqueteraLista()) await e.conectarEtiquetera();
+        const r = await fetch('/api/etiquetas', { method:'POST', headers:{'content-type':'application/json'}, body:JSON.stringify({ids:[guardada.id]}) });
+        const datos = await r.json();
+        if (!r.ok) throw new Error(datos.error || 'No se preparó la etiqueta.');
+        if (await e.imprimirEtiquetas(datos[0], guardada.sumadas)) avisarEtiqueta(guardada.codigo, guardada.sumadas);
+      } catch (error) { mensaje(error.message); }
+      finally { imprimir.disabled = false; }
+    });
+    li.append(imprimir);
+  }
   let guardado = guardada.stock, deseado = guardada.stock, espera = null, envio = Promise.resolve();
   const cerrar = () => { for (const b of li.querySelectorAll('button')) b.remove(); };
   async function guardar() {
@@ -350,8 +370,9 @@ async function buscar(pieza) {
     });
     const guardada = await r.json().catch(() => ({}));
     if (!r.ok) throw new Error(guardada.error ?? `Error ${r.status}`);
-    piezas += guardada.stock;
-    seguirBusqueda(pieza, anotarGuardada({ ...guardada, nombre: `Código ${pieza.leido}` }, pieza.estado));
+    piezas += guardada.sumadas ?? pieza.stock;
+    seguirBusqueda(pieza, anotarGuardada({ ...guardada, nombre: guardada.nombre||`Código ${pieza.leido}` }, pieza.estado));
+    if(guardada.existente)mensaje(`Ya existía · +${guardada.sumadas}${guardada.codigo?` a ${guardada.codigo}`:''}`);
   } catch (error) {
     anotar(`<span>No se guardó: código ${escapar(pieza.leido)} ×${pieza.stock}. Toca para reintentar.</span>`,
       () => { fila = fila.then(() => buscar(pieza)); });
@@ -527,6 +548,8 @@ async function enviarFoto(registro, li = null) {
     cuerpo.append('foto', registro.foto, 'foto.jpg');
     const respuesta = await fetch('/api/borradores', { method: 'POST', body: cuerpo });
     if (!respuesta.ok) throw new Error((await respuesta.json().catch(() => ({}))).error ?? `Error ${respuesta.status}`);
+    const guardada=await respuesta.json();
+    if(guardada.existente){mensaje(`Ya existía · +${guardada.sumadas}${guardada.codigo?` a ${guardada.codigo}`:''}`);anotarGuardada(guardada,registro.estado_fisico);}
     const pendiente = await leerFoto(registro.id);
     if (pendiente && (pendiente.version ?? 0) === (registro.version ?? 0)) await borrarFoto(registro.id);
     if (li) seguirFoto(registro, li);
@@ -653,7 +676,7 @@ $('manual').addEventListener('submit', (e) => {
       desconocido = null;
       piezaParaManual = null;
       anotarGuardada(guardada, grado, true);
-      avisarEtiqueta(guardada.nombre, guardada.stock);
+      if(guardada.existente)mensaje(`Ya existía · +${guardada.sumadas}${guardada.codigo?` a ${guardada.codigo}`:''}`);else avisarEtiqueta(guardada.nombre, guardada.stock);
     } catch (error) { mensaje(error.message || 'No se guardó. Reintenta con conexión.'); avisar('no'); }
     finally { $('manual-guardar').disabled = false; pintar(); }
   });

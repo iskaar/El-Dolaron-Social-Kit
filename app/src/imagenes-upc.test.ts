@@ -183,7 +183,8 @@ test('confirmar guarda una sola descarga en R2 y da foto al catálogo y ML sin q
   const id = crypto.randomUUID();
   assert.equal((await pedir('/api/borradores/upc', { id, upc: UPC, stock: 2 })).status, 201);
   await esperar();
-  assert.equal(db.prepare('select foto_key from productos where id=?').get(id)!.foto_key, `fotos/${id}.jpg`);
+  assert.equal(db.prepare('select foto_key from productos where id=?').get(PRODUCTO)!.foto_key, `fotos/${PRODUCTO}.jpg`);
+  assert.equal(db.prepare('select id from productos where id=?').get(id), undefined);
   assert.equal(llamadas, 1);
   env.HOST_PORTAL = 'portal.prueba';
   const publica = await worker.fetch!(new Request('https://portal.prueba/api/catalogo/foto/ED-000001') as never, env, {} as never);
@@ -199,7 +200,7 @@ test('confirmar guarda una sola descarga en R2 y da foto al catálogo y ML sin q
   assert.equal(recortes, 0);
   assert.equal(db.prepare('select recorte_estado from productos where id=?').get(PRODUCTO)?.recorte_estado, 'original');
   await procesarColaRopa(env, async () => { assert.fail('La imagen de referencia no debe disparar análisis de ropa'); });
-  assert.deepEqual(db.prepare('select nombre, precio, stock, estado_analisis, estado_fisico, codigo from productos where id=?').get(PRODUCTO), antes);
+  assert.deepEqual({ ...db.prepare('select nombre, precio, stock, estado_analisis, estado_fisico, codigo from productos where id=?').get(PRODUCTO) }, { ...antes, stock:52 });
 });
 
 test('confirmar antes de capturar cachea la foto; candidata y TCIN cambiado no se importan', async (t) => {
@@ -207,7 +208,7 @@ test('confirmar antes de capturar cachea la foto; candidata y TCIN cambiado no s
   candidata(db);
   let llamadas = 0;
   t.mock.method(globalThis, 'fetch', async () => { llamadas++; return fotoTarget(); });
-  const guardar = () => pedir('/api/borradores/upc', { id: crypto.randomUUID(), upc: UPC, stock: 1 });
+  const guardar = (estado_fisico = 'nuevo') => pedir('/api/borradores/upc', { id: crypto.randomUUID(), upc: UPC, stock: 1, estado_fisico });
   const sinConfirmar = await guardar(); await esperar();
   assert.equal(llamadas, 0);
   db.prepare('delete from productos where id=?').run(sinConfirmar.cuerpo.id);
@@ -216,7 +217,7 @@ test('confirmar antes de capturar cachea la foto; candidata y TCIN cambiado no s
   assert.equal(llamadas, 1);
   assert.ok(await env.FOTOS.get(`fotos/${nueva.cuerpo.id}.jpg`));
   db.prepare("update manifiesto set tcin='123'").run();
-  const cambiada = await guardar(); await esperar();
+  const cambiada = await guardar('danado'); await esperar();
   assert.equal(db.prepare('select foto_key from productos where id=?').get(cambiada.cuerpo.id)!.foto_key, '');
   assert.equal(llamadas, 1);
 });
@@ -231,7 +232,7 @@ test('el escáner guarda sin esperar HTTP; una foto propia tardía, FEP y descar
   t.mock.method(globalThis, 'fetch', () => { llamadas++; return pendiente; });
   const id = crypto.randomUUID(), descartada = crypto.randomUUID();
   assert.equal((await pedir('/api/borradores/upc', { id, upc: UPC, stock: 2 })).status, 201);
-  assert.equal((await pedir('/api/borradores/upc', { id: descartada, upc: UPC, stock: 1 })).status, 201);
+  assert.equal((await pedir('/api/borradores/upc', { id: descartada, upc: UPC, stock: 1, estado_fisico:'danado' })).status, 201);
   db.prepare("update productos set estado_analisis='descartado' where id=?").run(descartada);
   await env.FOTOS.put(`fotos/${id}.jpg`, new Uint8Array([7, 8]));
   db.prepare('update productos set foto_key=? where id=?').run(`fotos/${id}.jpg`, id);
@@ -440,6 +441,7 @@ test('un producto ya identificado en el catálogo funciona aunque no esté en la
   assert.equal((await pedir('/api/manifiesto/191907910414/imagen', {})).cuerpo.imagen.origen, 'catalogo');
   const id = crypto.randomUUID();
   assert.equal((await pedir('/api/borradores/upc', { id, upc: '0191907910414', stock: 2, precio: 1 })).status, 201);
-  assert.equal(db.prepare('select precio from productos where id=?').get(id)!.precio, 25000);
-  assert.equal(db.prepare('select stock from productos where id=?').get(PRODUCTO)!.stock, 50);
+  assert.equal(db.prepare('select id from productos where id=?').get(id), undefined);
+  assert.equal(db.prepare('select precio from productos where id=?').get(PRODUCTO)!.precio, 25000);
+  assert.equal(db.prepare('select stock from productos where id=?').get(PRODUCTO)!.stock, 52);
 });

@@ -763,3 +763,7 @@ Herramienta: Chromium headless (Playwright/Puppeteer) con rutas `/api/*` interce
 - [ ] Todas las cadenas visibles: tuteo, acentos y signos completos; ninguna del tipo «Haz clic aquí»; ninguna frase de más de 6 palabras en línea de estado salvo los errores con acción (≤ 10).
 
 **Pendiente de prueba física (no sustituible por headless)**: lector USB y Bluetooth con ráfagas reales, cámara 4:3 con zoom y `BarcodeDetector` a 120 ms, AE240 por PC y por Android, luz solar con el celular, guantes, red cortada a media tanda, vibración y volumen en el piso.
+
+## 10. UPC y grados (#452)
+
+Una captura del mismo UPC (ignorando ceros iniciales), propietario y grado suma a la pieza visible existente, incluso si sigue pendiente de análisis. Otro grado conserva su propia pieza. La línea dice «Ya existía · +N a ED-000123»; la tarjeta y las copias usan el código existente. El UUID de la captura se conserva en los reintentos y en la cola de fotos del teléfono. Una suma que supera 999 se rechaza sin efectos.

@@ -8,7 +8,7 @@ import { stepper, bloquear, cerrarHoja } from './inventario-ui.js';
 
 /** Estado de captura: UUID estable al reintentar; precio y existencia confirmados solo por el servidor. */
 export function crearCaptura({ api, imprimir, cambiar=()=>{}, enLinea=()=>navigator.onLine, uuid=()=>crypto.randomUUID(), permiteUpc=true, permiteSumar=true }) {
-  let actual=null, resultados=[], siguiente=null, ajuste=null, fila=Promise.resolve();
+  let actual=null, resultados=[], siguiente=null, ajuste=null, fila=Promise.resolve(), grado='nuevo';
   function pintar(){cambiar({actual,resultados,siguiente,ajuste});}
   async function guardar(){
     if(!actual||actual.tipo!=='nueva')return;
@@ -16,19 +16,20 @@ export function crearCaptura({ api, imprimir, cambiar=()=>{}, enLinea=()=>naviga
     const abierta=actual;
     const guardada=await api('/api/borradores/upc',{id:abierta.id,upc:abierta.upc,stock:abierta.cantidad,estado_fisico:abierta.estado});
     actual={...abierta,tipo:'guardada',pieza:guardada};pintar();
-    const salio=await imprimir(guardada.id,abierta.cantidad);actual.faltaEtiqueta=!salio;pintar();return guardada;
+    const salio=guardada.estado_analisis&&guardada.estado_analisis!=='listo'?false:await imprimir(guardada.id,abierta.cantidad);actual.faltaEtiqueta=!salio;pintar();return guardada;
   }
   async function leer(codigo,mas=false){
     if(!enLinea())throw new Error('Sin red · toma foto');
     if(!mas&&actual?.tipo==='nueva'&&normalizarUpc(codigo)===normalizarUpc(actual.upc)){actual.cantidad=Math.min(999,actual.cantidad+1);pintar();return;}
-    if(!mas&&actual?.tipo==='existente'&&permiteSumar&&(actual.pieza.codigo?.toUpperCase()===codigo.toUpperCase()||(actual.pieza.upc&&normalizarUpc(actual.pieza.upc)===normalizarUpc(codigo))))return sumar(actual.pieza);
+    if(!mas&&actual?.tipo==='existente'&&actual.pieza.estado_fisico===grado&&permiteSumar&&(actual.pieza.codigo?.toUpperCase()===codigo.toUpperCase()||(actual.pieza.upc&&normalizarUpc(actual.pieza.upc)===normalizarUpc(codigo))))return sumar(actual.pieza);
     if(!mas&&actual?.tipo==='nueva')await guardar();
     const datos=await api('/api/piezas?'+new URLSearchParams({q:codigo,...(mas&&siguiente?{cursor:siguiente}:{})}));
-    resultados=mas?[...resultados,...datos.piezas]:datos.piezas;siguiente=datos.siguiente;
+    const piezas=codigoLeido(codigo)?datos.piezas.filter(p=>p.estado_fisico===grado):datos.piezas;
+    resultados=mas?[...resultados,...piezas]:piezas;siguiente=datos.siguiente;
     if(resultados.length||siguiente){actual=resultados.length===1&&!siguiente?{tipo:'existente',pieza:resultados[0]}:null;pintar();return;}
     if(!permiteUpc||!codigoLeido(codigo)){actual=null;pintar();return;}
-    try{const ficha=await api('/api/manifiesto/'+codigo);actual={tipo:'nueva',id:uuid(),upc:codigo,ficha,cantidad:1,estado:'nuevo'};}
-    catch(e){if(e.status!==404)throw e;actual={tipo:'sin-registro',id:uuid(),upc:codigo,cantidad:1,estado:'nuevo'};}
+    try{const ficha=await api('/api/manifiesto/'+codigo);actual={tipo:'nueva',id:uuid(),upc:codigo,ficha,cantidad:1,estado:grado};}
+    catch(e){if(e.status!==404)throw e;actual={tipo:'sin-registro',id:uuid(),upc:codigo,cantidad:1,estado:grado};}
     pintar();
   }
   async function sumar(p){
@@ -45,7 +46,7 @@ export function crearCaptura({ api, imprimir, cambiar=()=>{}, enLinea=()=>naviga
     elegir(p){actual={tipo:'existente',pieza:p};pintar();},
     retomar(a){actual=a;pintar();},
     cantidad(n){if(actual&&actual.tipo==='nueva'){actual.cantidad=n;if(n===0)actual=null;pintar();}},
-    estado(e){if(actual)actual.estado=e;pintar();},
+    estado(e){grado=e;if(actual)actual.estado=e;pintar();},
     limpiar(){actual=null;resultados=[];pintar();}, actual:()=>actual };
 }
 
@@ -98,13 +99,13 @@ export async function iniciar(ctx) {
       const conPermiso=dueno||ctx.identidad.usuario?.editar_inventario===true;
       if(conPermiso){bloquear(sumar,!navigator.onLine?'Sin red: se suma al volver la señal':'');const fila=nodo('div',undefined,'acciones');fila.append(sumar,boton(p.tiene_foto?'Foto nueva':'Añadir foto',()=>fotoPieza(p),p.tiene_foto?'':'primario'));carta.append(fila);}else tarjeta.append(nodo('p','Solo consulta','solo-consulta'));
     }else if(actual.tipo==='nueva'){
-      const fila=nodo('div',undefined,'acciones');tarjeta.append(nodo('p',nombreEstado(actual.estado)));carta.append(fila);fila.append(stepper(actual.cantidad,n=>flujo.cantidad(n),{min:0,max:999,nombre:'Piezas de este código'}),boton(etiqueteraLista()?'Guardar e imprimir':'Guardar',async()=>{await flujo.guardar();hoy+=actual.cantidad;textoHoy();mensaje(flujo.actual()?.faltaEtiqueta?'Guardada · falta etiqueta':'Guardada · etiqueta enviada',flujo.actual()?.faltaEtiqueta?'aviso':'etiqueta');foco();},'primario'));
+      const fila=nodo('div',undefined,'acciones');tarjeta.append(nodo('p',nombreEstado(actual.estado)));carta.append(fila);fila.append(stepper(actual.cantidad,n=>flujo.cantidad(n),{min:0,max:999,nombre:'Piezas de este código'}),boton(etiqueteraLista()?'Guardar e imprimir':'Guardar',async()=>{await flujo.guardar();hoy+=actual.cantidad;textoHoy();const p=flujo.actual()?.pieza;mensaje(p?.existente?`Ya existía · +${p.sumadas}${p.codigo?` a ${p.codigo}`:''}`:flujo.actual()?.faltaEtiqueta?'Guardada · falta etiqueta':'Guardada · etiqueta enviada',p?.existente?'aviso':flujo.actual()?.faltaEtiqueta?'aviso':'etiqueta');foco();},'primario'));
       if(!actual.imagenBuscada){actual.imagenBuscada=true;void imagen(actual,foto,tarjeta);}
       else if(actual.imagen)pintarImagen(actual,foto,tarjeta);
     }else if(actual.tipo==='sin-registro'){
       mensaje('Sin registro · toma foto','aviso');const fila=nodo('div',undefined,'acciones');fila.append(boton('Buscar en internet',()=>buscarDesconocida(actual)),boton('Tomar foto',()=>fotoNueva(actual),'primario'));carta.append(fila);
     }else if(actual.tipo==='guardada')tarjeta.append(nodo('p','✓ Guardada'));
-    if(actual.faltaEtiqueta)tarjeta.append(boton('Imprimir etiqueta',async()=>{const ok=await ctx.imprimir([p.id],new Map([[p.id,1]]));if(ok){actual.faltaEtiqueta=false;mensaje('Etiqueta enviada','etiqueta');}}));
+    if(actual.faltaEtiqueta)tarjeta.append(boton('Imprimir etiqueta',async()=>{const ok=await ctx.imprimir([p.id],new Map([[p.id,actual.cantidad||1]]));if(ok){actual.faltaEtiqueta=false;mensaje('Etiqueta enviada','etiqueta');}}));
   }
   function pintarImagen(a,foto,c){if(!a.imagen?.url){foto.textContent='Sin foto';return;}const img=nodo('img');img.src=a.imagen.url;img.alt=a.imagen.nombre||a.ficha.nombre;img.referrerPolicy='no-referrer';img.onerror=()=>{img.remove();foto.textContent='Sin foto';};foto.replaceChildren(img);if(!a.imagen.confirmada)c.append(boton('Es esta',async()=>{const r=await api(`/api/manifiesto/${a.upc}/imagen`,{url:a.imagen.url,tcin:a.imagen.tcin},'PUT');a.imagen=r.imagen;mensaje('Imagen guardada','ok');}));}
   async function imagen(a,foto,c){try{const r=await api(`/api/manifiesto/${a.upc}/imagen`,{},'POST');a.imagen=r.imagen;if(flujo.actual()===a)pintarImagen(a,foto,c);}catch(e){if(flujo.actual()===a){foto.textContent='Sin foto';mensaje(e.message,'aviso');}}}
@@ -112,7 +113,8 @@ export async function iniciar(ctx) {
     if(a.buscando)return;
     const li=nodo('li'),retomar=boton(`Código ${a.upc} · buscando…`,()=>flujo.retomar(a));li.append(retomar);historia.prepend(li);
     a.buscando=true;mensaje('Buscando en internet…');
-    await api('/api/borradores/upc/buscar',{id:a.id,upc:a.upc,stock:a.cantidad,estado_fisico:a.estado});
+    const guardada=await api('/api/borradores/upc/buscar',{id:a.id,upc:a.upc,stock:a.cantidad,estado_fisico:a.estado});
+    if(guardada.existente){mensaje(`Ya existía · +${guardada.sumadas}${guardada.codigo?` a ${guardada.codigo}`:''}`,'aviso');flujo.elegir(guardada);if(guardada.estado_analisis==='listo'){await imprimir(guardada.id,guardada.sumadas);retomar.textContent=guardada.nombre;return;}}
     for(let i=0;i<35;i++){await new Promise(r=>setTimeout(r,4000));const datos=await api(`/api/borradores/upc/${a.id}`);if(datos.estado_analisis==='listo'){retomar.textContent=`✓ ${datos.nombre}`;mensaje('Encontrada · lista para etiqueta','ok');if(flujo.actual()===a)flujo.elegir({...datos,tiene_foto:datos.con_foto});return;}if(datos.estado_analisis==='error'){retomar.textContent=`▲ ${a.upc} · toma foto`;mensaje('Sin resultado · toma foto','aviso');return;}}
   }
   async function fotoPieza(p){
