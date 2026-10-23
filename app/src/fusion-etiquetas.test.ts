@@ -52,8 +52,8 @@ test('dos fusiones de la misma repetida suman una sola vez', async () => {
 test('una reserva de etiqueta que llega tarde no reemplaza el codigo ya emitido', async () => {
   const t = tienda();
   const id = 'c3333333-3333-4333-8333-333333333333';
-  t.db.prepare(`insert into productos (id, nombre, precio, stock, semana_ingreso, creado_en, actualizado_en)
-                values (?, 'Lampara', 9000, 1, 'S40', '', '')`).run(id);
+  t.db.prepare(`insert into productos (id, nombre, precio, stock, estado_analisis, semana_ingreso, creado_en, actualizado_en)
+                values (?, 'Lampara', 9000, 1, 'listo', 'S40', '', '')`).run(id);
   const preparar = t.env.DB.prepare.bind(t.env.DB);
   let pausar = true;
   let leyo!: () => void;
