@@ -105,7 +105,7 @@ a capturas propias de las últimas 24 horas. Si ya salió una etiqueta, reemplaz
 cuando cambie el precio o descartarla cuando se elimine la captura.
 
 En el celular (Chrome de Android) la etiqueta se imprime desde /inventario (Issue #440): «Conectar impresora» en el chip,
-una etiqueta por pieza en existencia al guardar, +1 imprime 1, y la pestaña Imprimir y Reimprimir funcionan como en la PC.
+una etiqueta por pieza en existencia al guardar, +1 imprime 1 (Sumar N imprime N), y la pestaña Imprimir y Reimprimir funcionan como en la PC.
 Los capturistas también imprimen desde su celular. La PC y el celular no repiten la misma etiqueta (reclamo en D1; ver
 `docs/ARQUITECTURA-ESCANER.md`). Si no sale, la pieza queda pendiente y se reimprime.
 

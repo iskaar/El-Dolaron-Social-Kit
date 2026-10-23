@@ -287,7 +287,7 @@ la pestaña Imprimir y el chip de impresora funcionan igual, y la impresora se c
   reclamarse si lo que dice la etiqueta cambió (misma regla que `etiquetaVigente`: precio, tachado, nombre, talla) o si
   la impresión es explícita: `reimprimir` (Reimprimir de Buscar y de la ficha, +1 de existencia, reetiquetar tras juntar),
   la fila ya impresa que se elige en la lista, o el cambio solo de grado en mercancía general. Reescanear una pieza ya
-  reclamada con la etiqueta igual no imprime otra vez; +1 imprime 1 etiqueta de la unidad nueva.
+  reclamada con la etiqueta igual no imprime otra vez; +1 imprime 1 etiqueta de la unidad nueva (Sumar N, #474: un ajuste de N y N etiquetas).
   La preparación (`POST /api/etiquetas`) devuelve `etiqueta_version`; el reclamo de una pieza puede exigir que siga igual.
 - **Si no sale.** Si la impresora falla o se detiene, el motor **libera** su propio reclamo (`DELETE` con
   `etiquetas_en: { id: ahora }`, obligatorio: la fila se borra solo si sigue siendo ESE reclamo, así un dispositivo nunca

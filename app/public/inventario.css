@@ -230,3 +230,4 @@ main:has(#modo-buscar:not([hidden])) .caja{margin-bottom:12px}
   body.enfocado #modo-capturar .columnas>div:last-child,body.enfocado .buscar-internet,body.enfocado .empezar-captura{display:none}
 }
 @media(max-width:999px){body.enfocado .captura-movil:has(>.tablero-ropa:not([hidden]))>.visor:not(.bloqueada){height:clamp(120px,24dvh,200px)}}
+.stepper input.stepper-entrada{width:64px;min-width:0;height:56px;text-align:center;font-size:var(--t-cantidad);font-weight:800;font-variant-numeric:tabular-nums}

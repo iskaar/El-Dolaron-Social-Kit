@@ -1,5 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { runInNewContext } from 'node:vm';
 import { crearCaptura, cambiosTarjeta, vigilarLectorEnCampo } from '../public/inventario-capturar.js';
 import { registroFoto, formularioPendiente } from '../public/foto-pendiente.js';
 import worker from './worker.ts';
@@ -292,4 +294,78 @@ test('P3-c: UPC solo en catálogo y sin foto: la foto con edición del dueño s�
   assert.equal(r.status,201);
   const fila=t.db.prepare('select nombre,precio,stock,foto_key from productos where id=?').get(id)!;
   assert.deepEqual([fila.nombre,fila.precio,fila.stock,fila.foto_key],['Lámpara editada',9000,2,`fotos/${id}.jpg`]);
+});
+
+// ---- Sumar varias piezas (#474) ----
+test('Sumar N a una pieza existente es un ajuste auditado de N, con N etiquetas, folio estable y tope 999',async(t0)=>{
+  const t=tienda();t0.after(()=>t.db.close());
+  t.db.prepare("update productos set estado_analisis='listo',stock=10 where id=?").run(PRODUCTO);
+  const impresiones:any[]=[],llamadas:any[]=[];let perder=true;
+  const api=async(ruta:string,cuerpo?:any)=>{llamadas.push({ruta,cuerpo});const r=await t.pedir(ruta,cuerpo);if(r.status>=400)throw Object.assign(new Error(r.cuerpo.error),{status:r.status});
+    if(ruta.endsWith('/existencia')&&perder){perder=false;throw new TypeError('Respuesta perdida');}return r.cuerpo;};
+  const flujo=crearCaptura({api,imprimir:async(id,n)=>{impresiones.push({id,n});return true;},enLinea:()=>true});
+  const stock=()=>t.db.prepare('select stock from productos where id=?').get(PRODUCTO)!.stock as number;
+  const p=(await t.pedir(`/api/piezas/${PRODUCTO}`)).cuerpo.pieza;
+  // La respuesta se pierde después de aplicar: el reintento reutiliza el folio y no duplica.
+  await assert.rejects(flujo.sumar(p,12),/Respuesta perdida/);assert.equal(stock(),22);
+  await assert.rejects(flujo.sumar(p,5),/pendiente de 12/);assert.equal(stock(),22);
+  await flujo.sumar(p,12);assert.equal(stock(),22);
+  assert.equal(llamadas[0].cuerpo.id,llamadas[1].cuerpo.id);assert.equal(llamadas[0].cuerpo.delta,12);
+  assert.deepEqual(impresiones,[{id:PRODUCTO,n:12}]);assert.equal(flujo.actual()!.impresas,12);
+  const filas=t.db.prepare("select cantidad,antes,despues,motivo from conteo_ajustes where producto_id=?").all(PRODUCTO);
+  assert.deepEqual(filas.map((f:any)=>({...f})),[{cantidad:12,antes:10,despues:22,motivo:'entrada'}]);
+  // Pasarse de 999 se rechaza completo (409), no deja rastro y libera el ajuste para elegir otra cantidad.
+  const llena=(await t.pedir(`/api/piezas/${PRODUCTO}`)).cuerpo.pieza;
+  await assert.rejects(flujo.sumar(llena,978),(e:any)=>e.status===409);assert.equal(stock(),22);
+  assert.equal(t.db.prepare("select count(*) n from conteo_ajustes where producto_id=?").get(PRODUCTO)!.n,1);
+  await flujo.sumar(llena,977);assert.equal(stock(),999);assert.equal(impresiones.length,2);
+  await t.esperar();
+});
+
+test('«N*código»: N piezas en la lectura (nueva, repetida o existente) con el parser de la caja; sin prefijo sigue siendo 1',async()=>{
+  const llamadas:string[]=[];let existente=false;
+  const pieza={id:'p1',codigo:'ED-000007',upc:'012345678905',stock:4,estado_fisico:'nuevo',estado_analisis:'listo'};
+  const api=async(ruta:string,cuerpo?:any)=>{llamadas.push(ruta);
+    if(ruta.startsWith('/api/piezas?'))return {piezas:existente?[pieza]:[],siguiente:null};
+    if(ruta.startsWith('/api/manifiesto/'))return {nombre:'Lámpara',precio:24900};
+    return {despues:pieza.stock+cuerpo.delta};};
+  const impresas:number[]=[];
+  const flujo=crearCaptura({api,imprimir:async(_id,n)=>{impresas.push(n);return true;},enLinea:()=>true});
+  await flujo.leer('12*012345678905');assert.equal(flujo.actual()!.tipo,'nueva');assert.equal(flujo.actual()!.cantidad,12);
+  await flujo.leer('012345678905');assert.equal(flujo.actual()!.cantidad,13,'sin prefijo, volver a escanear suma 1');
+  await flujo.leer(' 3 * 012345678905');assert.equal(flujo.actual()!.cantidad,16);
+  existente=true;flujo.limpiar();
+  await flujo.leer('12*012345678905');assert.equal(flujo.actual()!.tipo,'existente');assert.equal(flujo.actual()!.cantidad,12,'abre la tarjeta con 12; no suma sola');
+  assert.ok(!llamadas.some(r=>r.endsWith('/existencia')));
+  await flujo.leer('5*012345678905');assert.ok(llamadas.at(-1)!.endsWith('/existencia'),'repetir el código con prefijo suma ese N');assert.deepEqual(impresas,[5]);
+  await flujo.leer('012345678905');assert.deepEqual(impresas,[5,1]);
+  for(const mal of ['0*1','100*1','12*','12*  ']) await assert.rejects(flujo.leer(mal));
+});
+
+test('el stepper deja escribir la cantidad en su lugar y la acota a min/max',()=>{
+  class Nodo{
+    tagName='';textContent='';className='';hidden=false;value='';inputMode='';tabIndex=0;padre:Nodo|null=null;hijos:Nodo[]=[];attrs:Record<string,string>={};eventos:Record<string,Function[]>={};enfocado=false;
+    onclick:Function|null=null;onkeydown:Function|null=null;
+    setAttribute(k:string,v:string){this.attrs[k]=v;}getAttribute(k:string){return this.attrs[k];}
+    append(...n:Nodo[]){for(const x of n){x.padre=this;this.hijos.push(x);}}
+    after(n:Nodo){n.padre=this.padre;this.padre!.hijos.splice(this.padre!.hijos.indexOf(this)+1,0,n);}
+    remove(){this.padre!.hijos.splice(this.padre!.hijos.indexOf(this),1);this.padre=null;}
+    addEventListener(e:string,fn:Function){(this.eventos[e]??=[]).push(fn);}
+    focus(){this.enfocado=true;}select(){}
+    emitir(e:string,datos:any={}){for(const fn of this.eventos[e]??[])fn({preventDefault(){},stopPropagation(){},...datos});}
+  }
+  const fuente=readFileSync('public/inventario-ui.js','utf8').replaceAll('export ','');
+  const { stepper }=runInNewContext(fuente+';({stepper})',{document:{createElement:(tag:string)=>Object.assign(new Nodo(),{tagName:tag}),getElementById:()=>null},clearTimeout,setTimeout,setInterval,clearInterval});
+  const valores:number[]=[];
+  const raiz=stepper(1,(n:number)=>valores.push(n),{min:1,max:50,nombre:'Piezas a sumar'});
+  const salida=raiz.hijos[1];
+  const escribir=(texto:string,tecla='Enter')=>{salida.onclick();const input=raiz.hijos.find((h:Nodo)=>h.tagName==='input')!;assert.ok(salida.hidden);assert.equal(input.inputMode,'numeric');assert.equal(input.attrs['aria-label'],'Piezas a sumar');
+    input.value=texto;input.emitir('keydown',{key:tecla});return input;};
+  escribir('12');assert.equal(salida.value,'12');assert.equal(valores.at(-1),12);assert.ok(!salida.hidden);assert.ok(salida.enfocado);
+  assert.equal(raiz.hijos.length,3,'el campo se retira al terminar');
+  escribir('5000');assert.equal(valores.at(-1),50,'acota al máximo');
+  escribir('0');assert.equal(valores.at(-1),1,'acota al mínimo');
+  const antes=valores.length;escribir('abc');escribir('12',  'Escape');escribir('');assert.equal(valores.length,antes,'texto no numérico, vacío o Escape no cambian nada');
+  salida.onclick();raiz.hijos.find((h:Nodo)=>h.tagName==='input')!.value='7';raiz.hijos.find((h:Nodo)=>h.tagName==='input')!.emitir('blur');assert.equal(valores.at(-1),7,'al salir del campo también aplica');
+  raiz.hijos[2].emitir('click');assert.equal(valores.at(-1),8,'los botones ± siguen funcionando');
 });
