@@ -59,6 +59,7 @@
   <a href="/pieza">Buscar pieza →</a>
   <a href="/captura">Ir a capturar →</a>
   <a href="/bandas">Imprimir bandas →</a>
+  <a href="#" id="salir">Cerrar sesión</a>
   <a href="/conteo">Conteo de alto valor →</a>
   <span id="resumen"></span>
 </header>
@@ -146,6 +147,11 @@ import { enlacePreciosML } from '/precios-ml.js';
 import { CATEGORIAS } from '/categorias.js';
 import { ESTADOS } from '/estados.js';
 import { TALLAS } from '/tallas.js';
+
+document.getElementById('salir').addEventListener('click', async (e) => {
+  e.preventDefault();
+  (await import('/cerrar-sesion.js')).cerrarSesion();
+});
 
 // Una sola lista para todas las fichas; el servidor es quien valida la talla.
 document.body.insertAdjacentHTML('beforeend',
