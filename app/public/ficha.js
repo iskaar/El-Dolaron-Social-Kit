@@ -137,7 +137,7 @@ export function crearFicha({ mensaje, alAbrir = () => {}, confirmar = (texto) =>
       puedePrecio = datos.puede_precio === true;
       pintarHistorial(datos.historial);
       pintar();
-      alAbrir(pieza);
+      alAbrir(pieza, datos);
       mensaje(`Pieza abierta: ${pieza.nombre}. Existencia ${pieza.stock}.`);
     } catch (error) { if (turno === apertura) mensaje(error.message, 'error'); }
   }

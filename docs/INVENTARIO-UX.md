@@ -763,3 +763,19 @@ Herramienta: Chromium headless (Playwright/Puppeteer) con rutas `/api/*` interce
 - [ ] Todas las cadenas visibles: tuteo, acentos y signos completos; ninguna del tipo «Haz clic aquí»; ninguna frase de más de 6 palabras en línea de estado salvo los errores con acción (≤ 10).
 
 **Pendiente de prueba física (no sustituible por headless)**: lector USB y Bluetooth con ráfagas reales, cámara 4:3 con zoom y `BarcodeDetector` a 120 ms, AE240 por PC y por Android, luz solar con el celular, guantes, red cortada a media tanda, vibración y volumen en el piso.
+
+---
+
+## 10. Solicitud de cambio de precio (#451)
+
+El capturista señala una pieza que le parece muy barata o muy cara; el dueño decide. Una sola solicitud pendiente por pieza. Solo piezas de etiqueta individual ya listas (las de banda tienen el precio de su banda). El dueño no ve el botón: cambia el precio desde `Editar`. Cajero y FEP tampoco. El servidor autoriza; la pantalla solo oculta.
+
+**Capturista** (ficha de Buscar y tarjeta de pieza existente en Capturar; el bloque va justo bajo el precio):
+
+| Estado | Lo que ve | Notas |
+| --- | --- | --- |
+| Sin pedir | `[ Pedir cambio de precio ]` secundario | |
+| Hoja `¿El precio está bien?` | Pieza, precio actual grande, `▲ Está barato / Hay que subirlo` y `▼ Está caro / Hay que bajarlo` (radios), `Precio sugerido (opcional)` con prefijo `$`, `Nota (opcional)` ≤ 140, `[[ Enviar al dueño ]]` | Enviar es `aria-disabled` con «Elige si está barato o caro» hasta elegir. El sugerido debe ir en el sentido elegido, > 0 y ≤ precio de lista; el error sale dentro de la hoja con `■`. |
+| Enviada | Línea de estado `✓ Solicitud enviada al dueño`; en la ficha `▲ Pediste subir el precio · pendiente` (o `▼ … bajar`) y `Sugeriste $X` | Reemplaza al botón. Con 409 por pendiente existente se muestra ese mismo estado. Otro capturista ve `▲ Piden subir este precio · pendiente`. |
+
+**Dueño**: en Revisar, primer filtro `Precios por revisar · N` (amarillo mientras N > 0 y no esté elegido) y, en la pestaña Revisar, insignia con el número (`aria-label` «Revisar, N precios por revisar»). Cada solicitud: foto, código `ED-` en monoespaciada, nombre, chip `▲ Barato` / `▼ Caro`, precio actual y sugerido grandes, nota, quién y cuándo (hora de tienda), `Precio nuevo` prellenado con el sugerido (o el actual), `[[ Cambiar a $X ]]` (el texto sigue al campo; `aria-disabled` con el motivo si es el mismo precio, inválido o pasa de la lista) y `[ Dejar igual ]`. Cambios de más de 50 % piden confirmar en hoja. Al cambiar: `✓ Ahora $X`, «La etiqueta pegada dice $Y: ya no es el precio» y `[[ Reimprimir etiqueta ]]` (en el host del capturista solo el aviso). Si el precio ya cambió por otro lado, el servidor responde 409, la fila muestra el precio de hoy y avisa; nada se aplica a ciegas. La misma tarjeta aparece en la ficha cuando el dueño abre una pieza con solicitud pendiente.

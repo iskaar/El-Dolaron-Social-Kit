@@ -124,6 +124,8 @@ async function resolver(request: Request, env: Env, id: string, usuario: Usuario
   if (pieza.precio !== precio) {
     if (pieza.precio !== esperado) return json({ error: 'El precio de la pieza cambió. Revisa el precio actual.', precio: pieza.precio }, 409);
     const r = await aplicarPrecio(pieza.id, precio, esperado);
+    if (r.status === 409) return json({ error: 'El precio de la pieza cambió. Revisa el precio actual.',
+      precio: (await env.DB.prepare(PIEZA).bind(solicitud.producto_id, solicitud.propietario).first<PiezaPrecio>())?.precio }, 409);
     if (r.status !== 200) return r;
   }
   if (!await marcar('aplicada', precio)) return json({ error: 'La solicitud ya estaba resuelta.', solicitud: await porId(env, id) }, 409);

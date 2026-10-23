@@ -200,6 +200,6 @@ test('el precio cambia en medio de aplicar: el UPDATE lo detecta y no pisa ni ci
     return prepare(sql);
   };
   const r = await t.pedir(`/api/solicitudes-precio/${id}`, { accion: 'aplicar', precio: 20000, precio_esperado: 25000 });
-  assert.equal(r.status, 409);
+  assert.equal(r.status, 409); assert.equal(r.cuerpo.precio, 30000, 'la respuesta trae el precio de hoy para que el UI lo muestre');
   assert.equal(producto(t).precio, 30000); assert.equal(solicitudes(t)[0].estado, 'pendiente');
 });

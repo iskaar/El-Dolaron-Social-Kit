@@ -54,7 +54,7 @@ test('una cámara que termina de abrir tras cambiar de modo detiene todas sus pi
 });
 
 test('host del capturista sirve las importaciones de Capturar, Buscar y Revisar sin abrir Ajustes ni impresión',()=>{
-  for(const archivo of ['inventario.js','inventario-ui.js','inventario-capturar.js','inventario-ropa.js','inventario-celular.js','inventario-revisar.js','foto-pendiente.js','camara-inventario.js','ficha.js','lector.js','foto.js','cola-fotos.js','tallas.js','ropa.js','upc.js','estados.js','sesiones.js','precios-ml.js','compartir.js','envio-etiquetas.js'])assert.equal(permitidaParaVendedor('/'+archivo,'GET'),true,archivo);
+  for(const archivo of ['inventario.js','inventario-ui.js','inventario-capturar.js','inventario-ropa.js','inventario-celular.js','inventario-revisar.js','inventario-precio.js','foto-pendiente.js','camara-inventario.js','ficha.js','lector.js','foto.js','cola-fotos.js','tallas.js','ropa.js','upc.js','estados.js','sesiones.js','precios-ml.js','compartir.js','envio-etiquetas.js'])assert.equal(permitidaParaVendedor('/'+archivo,'GET'),true,archivo);
   for(const ruta of ['/admin','/api/config','/imprimir-lote.js','/api/etiquetas'])assert.equal(permitidaParaVendedor(ruta,'GET'),false,ruta);
   const fuente=readFileSync('public/cola-fotos.js','utf8');assert.match(fuente,/indexedDB.open\('eldolaron', 1\)/);assert.match(fuente,/createObjectStore\('pendientes', \{ keyPath: 'id' \}\)/);
 });

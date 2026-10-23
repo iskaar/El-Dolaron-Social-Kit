@@ -125,3 +125,40 @@ main:has(#modo-buscar:not([hidden])) .caja{margin-bottom:12px}
 @media(max-width:999px){.caja .acciones button{padding-inline:10px}}
 @media(max-width:999px){.caja .acciones{gap:8px}.caja input{padding-inline:10px}}
 @media(max-width:359px){.caja .acciones{flex-wrap:wrap}.caja input{flex:1 1 100%}}
+/* Solicitud de cambio de precio (#451): hoja del capturista, estado en la ficha y fila del dueño */
+#modos button{position:relative}
+.insignia-modo{position:absolute;top:3px;left:calc(50% + 6px);border:2px solid var(--azul);font-size:var(--t-chico);line-height:1;padding:3px 4px;min-width:24px;text-align:center}
+.filtros-estado button.con-pendientes{background:var(--amarillo);color:var(--tinta);box-shadow:2px 2px 0 var(--azul)}
+.bloque-precio:empty{display:none}.bloque-precio{margin:12px 0}.pieza-actual>.bloque-precio{grid-column:1/-1;margin:0}
+.sp-estado{display:grid;gap:4px;padding:12px;background:var(--fondo-aviso);color:var(--aviso-texto);border-left:8px solid var(--amarillo)}.sp-estado small{color:inherit}
+.sp-linea{margin:0;font-weight:800}
+.sp-pieza{display:grid;gap:2px}.sp-pieza b{font-size:18px}.sp-pieza code{font-size:14px;color:var(--gris)}.sp-pieza small{margin-top:8px}.sp-pieza .precio{font-size:var(--t-precio)}
+.sp-opciones{border:0;margin:4px 0 0;padding:0;display:grid;grid-template-columns:1fr 1fr}
+.sp-opciones legend{padding:0;margin-bottom:8px;color:var(--gris);font-size:var(--t-sec);font-weight:600}
+.sp-opcion{position:relative;display:block;margin:0}
+.sp-opcion input{position:absolute;inset:0;width:100%;height:100%;min-height:0;margin:0;opacity:0;cursor:pointer}
+.sp-opcion span{display:grid;gap:2px;justify-items:center;align-content:center;min-height:72px;padding:12px 8px;border:2px solid var(--azul);background:var(--blanco);text-align:center}
+.sp-opcion b{font-size:var(--t-boton);font-weight:800}.sp-opcion small{font-weight:600}
+.sp-opcion+.sp-opcion span{margin-left:-2px}
+.sp-opcion input:checked+span{background:var(--azul);color:var(--blanco);box-shadow:2px 2px 0 var(--amarillo);position:relative;z-index:1}
+.sp-opcion input:checked+span small{color:inherit}.sp-opcion input:checked+span b::after{content:' ✓'}
+.sp-opcion input:focus-visible+span{outline:3px solid var(--azul);outline-offset:3px;position:relative;z-index:2}
+.campo-precio{display:flex;align-items:stretch;margin-top:6px}
+.campo-precio span{display:grid;place-items:center;min-width:44px;border:2px solid var(--azul);border-right:0;background:var(--niebla);font-weight:800;font-size:20px}
+.campo-precio input{margin:0;border-left:0;font-size:22px;font-weight:800;font-variant-numeric:tabular-nums}
+.error-hoja{margin:0;padding:12px;background:var(--fondo-error);color:var(--rojo-texto);border-left:8px solid var(--rojo-texto);font-weight:700}
+.hoja-precio textarea{margin-top:6px;resize:vertical}.hoja-precio p{margin:0}
+.solicitud-precio{display:grid;gap:12px;padding:16px;border:2px solid var(--azul);background:var(--blanco)}
+.fila-precio{padding:8px 0 16px}.lista>li.fila-precio{border-bottom:0}
+.sp-encabezado{display:flex;gap:12px;align-items:flex-start}.sp-encabezado h3{flex:1;margin:0}.sp-foto{width:56px;height:56px;object-fit:cover;flex:none}
+.sp-titulo{flex:1;display:grid;gap:2px}.sp-titulo code{font-size:var(--t-base);font-weight:600}.sp-titulo b{font-size:18px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.chip-sentido{flex:none;padding:6px 10px;border:2px solid;font-size:var(--t-sec);font-weight:800;white-space:nowrap}
+.chip-sentido.subir{background:var(--fondo-aviso);color:var(--aviso-texto);border-color:var(--aviso-texto)}
+.chip-sentido.bajar{background:var(--fondo-error);color:var(--rojo-texto);border-color:var(--rojo-texto)}
+.sp-cifras{display:flex;gap:24px;flex-wrap:wrap}.sp-cifras small{display:block}.sp-cifras .precio{font-size:var(--t-precio)}
+.sp-cambio{margin:0;padding:8px 12px;background:var(--fondo-aviso);color:var(--aviso-texto);font-size:var(--t-sec);font-weight:700}
+.sp-nota{margin:0;padding:8px 12px;border-left:4px solid var(--azul);background:var(--niebla)}
+.sp-formulario{display:grid;gap:8px}.sp-formulario label{margin:0}.sp-formulario p{margin:0}
+.sp-formulario .acciones button.primario{flex:1 1 190px}
+.sp-hecho{display:grid;gap:8px}.sp-hecho .sp-linea{font-size:20px;color:var(--verde)}.sp-hecho small{color:var(--gris)}
+@media(min-width:1000px){.insignia-modo{position:static;margin-left:8px;align-self:center}}
