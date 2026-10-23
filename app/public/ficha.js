@@ -154,12 +154,13 @@ export function crearFicha({ mensaje, alAbrir = () => {}, confirmar = (texto) =>
     if (pieza.tiene_foto) { $('foto').src = `/api/foto/${pieza.id}?v=${encodeURIComponent(pieza.actualizado_en)}`; $('foto').alt = pieza.nombre; }
   }
 
+  const MOTIVOS_TEXTO = { fusion:'Fusión', descarte:'Descarte' };   // el resto ya se lee tal cual
   function pintarHistorial(historial) {
     $('historial').replaceChildren();
     for (const a of historial) {
       const li = document.createElement('li');
       const delta = a.despues - a.antes;
-      li.textContent = `${new Date(a.ajustado_en).toLocaleString('es-MX', { timeZone:'America/Mexico_City' })} · ${delta > 0 ? '+' : ''}${delta} · ${a.antes} → ${a.despues} · ${a.motivo} · ${a.ajustado_por}`;
+      li.textContent = `${new Date(a.ajustado_en).toLocaleString('es-MX', { timeZone:'America/Mexico_City' })} · ${delta > 0 ? '+' : ''}${delta} · ${a.antes} → ${a.despues} · ${MOTIVOS_TEXTO[a.motivo] ?? a.motivo} · ${a.ajustado_por}`;
       $('historial').append(li);
     }
     if (!historial.length) { const li = document.createElement('li'); li.textContent = 'Sin ajustes registrados.'; $('historial').append(li); }
