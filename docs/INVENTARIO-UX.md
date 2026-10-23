@@ -734,6 +734,8 @@ Herramienta: `node tools/qa_inventario.mjs`, Chrome headless vía CDP, servidor 
 
 Para #461 añade tarjetas a **412×740** de dueño, capturista y capturista con casilla: afirma permisos de ambos campos, conserva las ediciones al cambiar cantidad y comprueba nombre/precio en el trabajo de impresión. El disparo permanece visible con la tarjeta. Simula el reloj para comprobar reposo, suspensión con hoja abierta, pistas detenidas, toque del visor para reanudar y respeto del apagado manual; guarda también el visor en pausa. Las pruebas unitarias comprueban el tiempo restante durante las pausas, incluida la página oculta.
 
+PR B de #461 (modo enfocado) añade, a **360×640, 412×740 y 390×844** y en Mercancía y Ropa: lo oculto no se ve (chips, navegación, tira, coincidencias, intro, «Buscar en internet», línea neutra), la salida mide ≥ 44 px y está en pantalla, el disparo, el interruptor de cámara y la cantidad caben sin desplazar, y lo que debe quedar (grado en MG; prendas, precio, marcas y talla en Ropa; tarjeta; «Añadir foto») sigue a la vista. A 412×740 provoca cada alerta (error de guardado, sin red con foto por subir, impresora sin conectar), comprueba `role=alert`, que desaparece al resolverla, la salida con botón y con `Alt+0` y que la elección dura la recarga de la sesión. Las capturas se llaman `461-enfocado-*`.
+
 **Estados a capturar (390×844 y 1280×800 salvo indicación)**
 
 | # | Estado | Debe verse |
@@ -809,3 +811,35 @@ Revisar › «Repetidas · N» aparece para el dueño y quien tenga la casilla (
 Ropa no muestra ni edita A/B/C en Capturar (móvil y PC), Corregir del carrusel (local o subida), ficha, filas de Revisar, grupos Repetidas formados solo por Ropa, Avanzado ni alta sin foto. Cambiar la categoría a Ropa oculta el campo; volver a MG lo muestra. Buscar ya usa filas sin grado y conserva esa presentación. Los filtros de Revisar siguen siendo estado de análisis, día, categoría, precio y sesión, sin agregar filtro de grado.
 
 Imprimir, Reimprimir de Buscar/ficha y `/etiquetas` comparten TSPL sin grado para Ropa; tampoco muestran avisos de grado al corregir nombre, talla o precio. La vigencia de una etiqueta de Ropa ignora `estado_fisico`; MG conserva la reimpresión por grado. `/api/etiquetas` devuelve también `categoria` para todos esos caminos. Se mantienen valores históricos y reglas de servidor por propietario + UPC + estado físico (#452); al buscar un UPC de Ropa no se descarta por el grado seleccionado en MG.
+
+## 11. Modo enfocado de Capturar (#461, PR B)
+
+Para capturar en serie en el celular: solo lo que se toca en cada pieza. Es una preferencia **de la sesión** (`sessionStorage` `inventario-enfocado`, con `try/catch`; sin ella arranca apagado) y **solo se aplica en Capturar del celular**: en PC o en otro modo la preferencia se conserva pero no hace nada. Todo se resuelve con `body.enfocado` (CSS); no cambia flujos, impresión automática ni el reposo de cámara a 60 s.
+
+**Entrar:** `⋯` › interruptor «Modo enfocado» (solo celular y Capturar). Si la intro «Empezar» seguía abierta, encender el modo la cierra y arranca la cámara (el toque del menú es el gesto); al recargar con el modo encendido la intro no vuelve y la cámara arranca sola.
+**Salir:** botón amarillo «Salir del modo enfocado» en la cabecera (≥ 44 px, siempre visible mientras dure el modo), o `Alt+0` (el mismo atajo lo enciende), o el interruptor de `⋯`. Al salir el foco vuelve a `⋯`. Las pestañas Mercancía/Ropa se quedan: hacen falta para cambiar de tipo.
+
+| Se queda a la vista | Se oculta |
+| --- | --- |
+| Visor con su interruptor de cámara y `⋯` de cámara; botón de disparo | Chips de impresora, red y celular de la cabecera |
+| Cantidad; grado A/B/C (solo Mercancía) | Línea de estado neutra «● Escanea o toma foto» |
+| Tarjeta del manifiesto con nombre y precio editables (mismos permisos que PR A) | «Hoy · N piezas», «Ver todas» y la tira de miniaturas |
+| Tarjeta de pieza «existente» con «+1», «Añadir foto» / «Foto nueva» y la solicitud de precio | «Coincidencias» y «Buscar más» |
+| Ropa: rodillos de prenda y precio, marcas, fila de tallas (incluida la edad de niño), cantidad | Historial de códigos desconocidos y «Buscar en internet» |
+| Avisos transitorios de la línea de estado (`✓` guardada, `▲` ya existía / sin registro) | Intro «Empezar» y la barra inferior de modos |
+
+Sin la barra de modos la barra fija de captura baja al borde (mismo `[hidden]` de `#modos` que ya usa el modo único). En Ropa el visor crece (24 dvh, 120–200 px) con el espacio que deja la tira oculta.
+
+**Línea de alerta (`#alerta-enfocado`, `role=alert`).** Una sola línea compacta bajo la cabecera, visible solo mientras haya un problema que el modo dejaría callado; se oculta sola al resolverse (se evalúa al instante en los eventos y cada 2 s). Une, separados por « · »:
+
+| Problema | Texto | Cuándo desaparece |
+| --- | --- | --- |
+| Error de guardado u otro error de la línea de estado | el mismo texto (`■ …`); en modo enfocado `#error` se oculta y la alerta lo refleja, así no hay dos líneas | cuando otro mensaje reemplaza al error |
+| Sin red con fotos por subir | `▲ Sin red · N sin subir` | al volver la red y subir |
+| Cola con error de envío | `■ N sin subir · error de envío`; sesión vencida: `■ Tu sesión venció · vuelve a entrar` | al subirse |
+| Cola atascada (con red, sin intento de subida en 60 s) | `▲ N sin subir · la cola no avanza` | al avanzar |
+| Impresora sin conectar cuando se pidió una etiqueta (no en el host del capturista, que no imprime) | `▲ Impresora sin conectar · falta etiqueta` | al conectarla |
+
+Sin red y sin fotos por subir no alerta: el aviso de la línea de estado («Sin red · toma foto») ya es visible. Para actuar (reintentar, conectar) se sale del modo; la línea no tiene botones. La lógica pura está en `alertasCriticas` (`inventario-enfocado.js`, con prueba unitaria); los datos vienen de la cola de fotos (`inventario-celular.js`) y de la petición de impresión (`inventario-capturar.js`) mediante `ctx.problemas`.
+
+**Pendiente de prueba física:** TCL 10 Pro con la impresora Bluetooth, lector, cámara real y una ráfaga de fotos con y sin red; confirmar que el texto de la salida de 3 líneas se lee bien al sol y que el apagado a 60 s sigue sin molestar en serie.
