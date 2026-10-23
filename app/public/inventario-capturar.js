@@ -21,10 +21,15 @@ export function crearCaptura({ api, imprimir, cambiar=()=>{}, enLinea=()=>naviga
   }
   async function leer(codigo,mas=false){
     if(!enLinea())throw new Error('Sin red · toma foto');
+    const ruta='/api/piezas?'+new URLSearchParams({q:codigo,...(mas&&siguiente?{cursor:siguiente}:{})});
+    // La API da prioridad a ED- sobre UPC en números cortos; conservarla antes de acumular o filtrar por grado.
+    const etiqueta=!mas&&/^\d{1,6}$/.test(codigo)?await api(ruta):null;
+    const ed=`ED-${codigo.padStart(6,'0')}`;
+    if(etiqueta?.piezas.some(p=>p.codigo===ed))codigo=ed;
     if(!mas&&actual?.tipo==='nueva'&&normalizarUpc(codigo)===normalizarUpc(actual.upc)){actual.cantidad=Math.min(999,actual.cantidad+1);pintar();return;}
     if(!mas&&actual?.tipo==='existente'&&actual.pieza.estado_fisico===grado&&permiteSumar&&(actual.pieza.codigo?.toUpperCase()===codigo.toUpperCase()||(actual.pieza.upc&&normalizarUpc(actual.pieza.upc)===normalizarUpc(codigo))))return sumar(actual.pieza);
     if(!mas&&actual?.tipo==='nueva')await guardar();
-    const datos=await api('/api/piezas?'+new URLSearchParams({q:codigo,...(mas&&siguiente?{cursor:siguiente}:{})}));
+    const datos=etiqueta??await api(ruta);
     const piezas=codigoLeido(codigo)?datos.piezas.filter(p=>p.estado_fisico===grado):datos.piezas;
     resultados=mas?[...resultados,...piezas]:piezas;siguiente=datos.siguiente;
     if(resultados.length||siguiente){actual=resultados.length===1&&!siguiente?{tipo:'existente',pieza:resultados[0]}:null;pintar();return;}

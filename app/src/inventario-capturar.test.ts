@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { crearCaptura } from '../public/inventario-capturar.js';
 import { tienda, PRODUCTO } from './prueba-d1.ts';
+import { crearLector } from '../public/lector.js';
 
 test('Capturar +1 usa rastro D1, un UUID por operación y exactamente una etiqueta; sin red no escribe',async(t0)=>{
   const t=tienda();t0.after(()=>t.db.close());
@@ -48,4 +49,43 @@ test('una búsqueda paginada no crea una captura ni consulta el manifiesto prema
   await flujo.leer('012345678905');assert.equal(flujo.actual(),null);
   await flujo.leer('012345678905',true);assert.equal(flujo.actual()!.pieza.id,'vieja');
   assert.ok(rutas.every(r=>r.startsWith('/api/piezas?')));assert.match(rutas[1],/cursor=cursor/);
+});
+
+test('cámara y USB priorizan la etiqueta numérica ED- frente a UPC y grado; otros UPC conservan su ruta',async(t0)=>{
+  const t=tienda();t0.after(()=>t.db.close());const rutas:string[]=[];
+  const stock=t.db.prepare('select stock from productos where id=?').get(PRODUCTO)!.stock;
+  const api=async(ruta:string)=>{rutas.push(ruta);const r=await t.pedir(ruta);assert.equal(r.status,200);return r.cuerpo;};
+  t.db.prepare("update productos set estado_fisico='danado',estado_analisis='listo' where id=?").run(PRODUCTO);
+  t.db.prepare(`insert into productos(id,codigo,nombre,upc,stock,estado_analisis,semana_ingreso,creado_en,actualizado_en)
+    values('otra','ED-999999','UPC coincidente','123456',2,'listo','S43','','')`).run();
+  const flujo=crearCaptura({api,imprimir:async()=>assert.fail('Leer no imprime'),enLinea:()=>true,permiteSumar:false});
+  const lector=crearLector({emitir:({codigo})=>flujo.leer(codigo)});
+  for(const codigo of ['000006','002318','012345','123456']){
+    const ed=`ED-${codigo}`;t.db.prepare('update productos set codigo=? where id=?').run(ed,PRODUCTO);
+    for(const origen of ['camara','usb']){
+      flujo.limpiar();await lector.recibir(String(Number(codigo)).padStart(4,'0'),origen);
+      assert.equal(flujo.actual()?.tipo,'existente');assert.equal(flujo.actual()?.pieza.id,PRODUCTO);
+      assert.equal(flujo.actual()?.pieza.estado_fisico,'danado');
+    }
+  }
+  assert.ok(rutas.every(r=>r.startsWith('/api/piezas?')));
+  assert.equal(t.db.prepare('select stock from productos where id=?').get(PRODUCTO)!.stock,stock);
+
+  // Un UPC pendiente igual se guarda con su cantidad original antes de abrir la etiqueta.
+  let guardada:any;
+  const pendiente=crearCaptura({api:async(ruta,cuerpo)=>{
+    if(ruta==='/api/borradores/upc'){guardada=cuerpo;return {id:'upc-pendiente',estado_analisis:'pendiente'};}
+    return api(ruta);
+  },imprimir:async()=>assert.fail('No imprime una pieza pendiente'),enLinea:()=>true});
+  pendiente.retomar({tipo:'nueva',id:'upc-pendiente',upc:'123456',cantidad:1,estado:'nuevo'});
+  await pendiente.leer('123456');assert.equal(pendiente.actual()?.pieza.id,PRODUCTO);assert.equal(guardada.stock,1);
+
+  // Sin esa etiqueta, los seis dígitos vuelven a buscar el UPC existente.
+  t.db.prepare("update productos set codigo='ED-002318' where id=?").run(PRODUCTO);
+  flujo.limpiar();await lector.recibir('123456','camara');assert.equal(flujo.actual()?.pieza.id,'otra');
+  const consultas:string[]=[];
+  const nuevo=crearCaptura({api:async ruta=>{consultas.push(ruta);return ruta.startsWith('/api/piezas?')?{piezas:[],siguiente:null}:{nombre:'Lámpara',precio:24900};},imprimir:async()=>true,enLinea:()=>true});
+  await crearLector({emitir:({codigo})=>nuevo.leer(codigo)}).recibir('012345678905','camara');
+  assert.equal(nuevo.actual()?.tipo,'nueva');assert.equal(nuevo.actual()?.upc,'012345678905');
+  assert.deepEqual(consultas,['/api/piezas?q=012345678905','/api/manifiesto/012345678905']);
 });
