@@ -75,7 +75,7 @@ test('el código exacto manda sobre el nombre de la foto, y una pieza ya lista n
   Object.assign(p.env, { BUSQUEDAS: { send: async () => {} } });   // la búsqueda se corre a mano abajo
   const id = crypto.randomUUID(), lista = crypto.randomUUID();
   await p.pedir('/api/borradores/upc/buscar', { id, upc: UPC, stock: 1 });
-  await p.pedir('/api/borradores/upc/buscar', { id: lista, upc: UPC, stock: 1 });
+  await p.pedir('/api/borradores/upc/buscar', { id: lista, upc: UPC, stock: 1, estado_fisico:'danado' });
   p.db.prepare("update productos set foto_key = ?, nombre = 'De la foto', estado_analisis = 'error' where id = ?").run(`fotos/${id}.jpg`, id);
   p.db.prepare("update productos set nombre = 'Ya capturada', precio = 5000, estado_analisis = 'listo' where id = ?").run(lista);
   for (const pieza of [id, lista]) await identificarPieza(pieza, UPC, p.env, true);
@@ -121,9 +121,9 @@ test('un UPC identificado sin foto se reutiliza: el siguiente escaneo no vuelve 
   assert.equal(ficha.status, 200);
   assert.equal(ficha.cuerpo.nombre, 'Termo Stanley 1 L');
   const id = crypto.randomUUID();
-  assert.equal((await p.pedir('/api/borradores/upc', { id, upc: '012345678905', stock: 3 })).status, 201);
+  assert.equal((await p.pedir('/api/borradores/upc', { id, upc: '012345678905', stock: 3, estado_fisico:'danado' })).status, 201);
   assert.deepEqual({ ...p.db.prepare('select nombre, precio, stock, estado_analisis from productos where id=?').get(id)! },
-    { nombre: 'Termo Stanley 1 L', precio: 49900, stock: 3, estado_analisis: 'listo' });
+    { nombre: 'Termo Stanley 1 L', precio: 29900, stock: 3, estado_analisis: 'listo' });
   assert.equal(p.llamadas.length, 1);
   // FEP o una pieza sin precio no sirven de catálogo.
   p.db.prepare("update productos set propietario = 'fep' where upc = ?").run(UPC);
@@ -159,13 +159,13 @@ test('el análisis de foto tardío, exitoso o fallido, conserva la captura sin f
     const id = crypto.randomUUID();
     const ahora = new Date().toISOString();
     p.db.prepare(`insert into productos (id, upc, stock, semana_ingreso, capturado_por, creado_en, actualizado_en)
-      values (?, ?, 2, 'S40', 'dueno@prueba.mx', ?, ?)`).run(id, UPC, ahora, ahora);
+      values (?, ?, 2, 'S40', 'dueno@prueba.mx', ?, ?)`).run(id, falla ? '999999999999' : UPC, ahora, ahora);
     await p.env.FOTOS.put(`fotos/${id}.jpg`, new Uint8Array([1, 2, 3]));
     const llamada = Promise.withResolvers<void>(), respuesta = Promise.withResolvers<Response>();
     t.mock.method(globalThis, 'fetch', () => { llamada.resolve(); return respuesta.promise; });
     const analisis = analizarBorrador(id, p.env, 'gemini', false);
     await llamada.promise;
-    assert.equal((await p.pedir('/api/borradores/upc/manual', { id, upc: UPC, nombre: 'Nombre manual', categoria: 'hogar', precio: 9900, stock: 2 })).status, 201);
+    assert.equal((await p.pedir('/api/borradores/upc/manual', { id, upc: falla ? '999999999999' : UPC, nombre: 'Nombre manual', categoria: 'hogar', precio: 9900, stock: 2 })).status, 201);
     respuesta.resolve(falla ? new Response('fallo', { status: 400 }) : Response.json({ candidates: [{ content: { parts: [{ text: JSON.stringify({
       nombre: 'De la foto', marca: '', categoria: 'otros', precio_lista_mxn: 500,
     }) }] } }] }));

@@ -1,5 +1,5 @@
 import { escucharLector } from './lector.js';
-import { api, crearFicha, pesos } from './ficha.js';
+import { api, crearFicha, pesos, resolverRepetida } from './ficha.js';
 import { $, nodo, boton, mensaje, hoja, confirmar, prepararHoja, stepper, cerrarHoja, ponerNeutro, bloquear } from './inventario-ui.js';
 import { montarPrecio, refrescarPrecios } from './inventario-precio.js';
 
@@ -12,7 +12,8 @@ const dueno = identidad.usuario?.roles.includes('dueno');
 let modo, siguiente = null, consulta = '', generacion = 0, cambioModo = 0, apagar = null, piezaActual = null, filtroTimer, cargando = false;
 const modulos = new Map(), activos = new Map();
 const foco = () => { if (pc()) { $('consulta').focus({ preventScroll:true }); $('consulta').select(); } };
-const ficha = crearFicha({ mensaje, confirmar, integrada:true, elegirMotivo:() => new Promise(resolve => {
+const ficha = crearFicha({ mensaje, confirmar, integrada:true, antesCamara:apagarCamaras,
+  alRepetida:(origen,destino,upc) => resolverRepetida(origen,destino,{...contexto,cerrar:cerrarHoja,upc,alTerminar:id=>ficha.abrir(id)}), elegirMotivo:() => new Promise(resolve => {
   const c=nodo('div',undefined,'chips');
   for(const [valor,texto] of [['correccion','Corrección'],['merma','Merma'],['robo','Robo'],['entrada','Entrada']]) c.append(boton(texto,()=>{ resolve(valor);cerrarHoja(); }));
   hoja('Motivo',c);$('hoja').addEventListener('close',()=>resolve(null),{once:true});
@@ -82,7 +83,7 @@ async function buscar(mas = false, abrir = false) {
   finally { if (turno === generacion) { cargando = false; bloquear($('mas'), ''); $('resultados').setAttribute('aria-busy', 'false'); } }
 }
 const contexto = { $, nodo, boton, mensaje, hoja, confirmar, api, pesos, identidad, dueno, pc, foco, ficha, resultado,
-  pieza:() => piezaActual, cambiarModo, imprimir:async (...args) => (await cargar('imprimir')).imprimir(...args) };
+  pieza:() => piezaActual, cambiarModo, imprimir:async (...args) => {if(identidad.vendedor){mensaje('Imprime desde la computadora','aviso');return false;}return (await cargar('imprimir')).imprimir(...args);} };
 async function cargar(nombre) {
   if (!modulos.has(nombre)) {
     const archivo = { imprimir:'./inventario-imprimir.js', capturar:'./inventario-capturar.js', revisar:'./inventario-revisar.js' }[nombre];

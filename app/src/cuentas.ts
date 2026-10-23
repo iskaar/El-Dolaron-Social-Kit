@@ -129,7 +129,7 @@ export function permiso(pathname: string, metodo: string): Regla {
   if (ruta.startsWith('/api/foto/')) return [...CAPTURA_FEP, ...CAJA];
   if (ruta === '/api/etiquetas') return CAPTURA_FEP;
   if (metodo === 'GET' && (ruta === '/api/piezas' || /^\/api\/piezas\/[^/]+$/.test(ruta))) return CAPTURA_FEP;
-  if (metodo === 'POST' && /^\/api\/piezas\/[^/]+\/existencia$/.test(ruta)) return CAPTURA_FEP;
+  if (metodo === 'POST' && /^\/api\/piezas\/[^/]+\/(existencia|juntar)$/.test(ruta)) return CAPTURA_FEP;
   // Pedir un cambio de precio (#451): capturista o dueño. Listar y resolver (/api/solicitudes-precio) son del dueño, por omisión.
   if (metodo === 'POST' && /^\/api\/piezas\/[^/]+\/solicitud-precio$/.test(ruta)) return CAPTURA;
   if (ruta === '/api/calibracion') return CAPTURA;
@@ -312,7 +312,7 @@ export async function yo(env: Env, correo: string, cajero: Usuario | null = null
     .first<{ estado: string; creado_en: string }>();
   const modos = usuario?.activo && (usuario.roles.includes('dueno') || usuario.roles.includes('capturista'))
     ? ['capturar', 'buscar', 'revisar', ...(!vendedor ? ['imprimir'] : [])]
-    : usuario?.activo && usuario.roles.includes('finanzas') ? ['capturar', 'buscar', ...(!vendedor ? ['imprimir'] : [])] : [];
+    : usuario?.activo && usuario.roles.includes('finanzas') ? ['capturar', 'buscar', ...(puedeEditarInventario(usuario) ? ['revisar'] : []), ...(!vendedor ? ['imprimir'] : [])] : [];
   return json({ correo, usuario, solicitud, vendedor, modos_inventario: modos, cajero: cajero && { correo: cajero.correo, nombre: cajero.nombre, caja: cajero.caja } });
 }
 

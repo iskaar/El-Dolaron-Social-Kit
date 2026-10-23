@@ -164,3 +164,5 @@ main:has(#modo-buscar:not([hidden])) .caja{margin-bottom:12px}
 .sp-formulario .acciones button.primario{flex:1 1 190px}
 .sp-hecho{display:grid;gap:8px}.sp-hecho .sp-linea{font-size:20px;color:var(--verde)}.sp-hecho small{color:var(--gris)}
 @media(min-width:1000px){.insignia-modo{position:static;margin-left:8px;align-self:center}}
+#leer-upc{margin:12px 0}#e-upc-visor video{width:100%;max-height:40dvh}
+.grupo-repetidas{padding:16px 0}.grupo-repetidas h3{margin-top:0}.grupo-repetidas .lista>li{padding:12px 0}.grupo-repetidas .lista>li>button:not(.resultado){margin-top:12px}

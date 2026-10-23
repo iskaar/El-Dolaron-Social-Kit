@@ -37,11 +37,13 @@ function cargarLibreria() {
  * `alLeer(codigo)` por cada lectura nueva. Devuelve una funcion que la apaga.
  * Falla (promesa rechazada) con un mensaje listo para mostrar.
  */
-export async function abrirCamara(idElemento, alLeer) {
+export async function abrirCamara(idElemento, alLeer, { producto = false } = {}) {
   await cargarLibreria();
   const { Html5Qrcode, Html5QrcodeSupportedFormats } = window;
   const lector = new Html5Qrcode(idElemento, {
-    formatsToSupport: [Html5QrcodeSupportedFormats.CODE_128, Html5QrcodeSupportedFormats.QR_CODE],
+    formatsToSupport: producto
+      ? [Html5QrcodeSupportedFormats.UPC_A, Html5QrcodeSupportedFormats.EAN_13, Html5QrcodeSupportedFormats.EAN_8]
+      : [Html5QrcodeSupportedFormats.CODE_128, Html5QrcodeSupportedFormats.QR_CODE],
     useBarCodeDetectorIfSupported: true,
     verbose: false,
   });

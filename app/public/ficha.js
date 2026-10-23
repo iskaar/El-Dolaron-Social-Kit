@@ -6,6 +6,7 @@ import { nombreEstado } from './estados.js';
 import { TALLAS } from './tallas.js';
 import { etiquetaVigente, precioImpreso } from './etiquetera.js';
 import { estadoEnvio } from './envio-etiquetas.js';
+import { normalizarUpc } from './upc.js';
 
 const $ = (id) => document.getElementById(id);
 export const pesos = (centavos) => new Intl.NumberFormat('es-MX', { style:'currency', currency:'MXN', maximumFractionDigits:2 }).format(centavos / 100);
@@ -39,8 +40,10 @@ export function cuerpoCorreccion(pieza, campos, puedePrecio) {
     if (precio <= 0) return { error:'El precio de venta debe ser mayor a cero.' };
     if (lista > 0 && precio > lista) return { error:'El precio de venta no puede ser mayor al precio de lista.' };
   }
+  const upc = campos.upc === undefined ? undefined : String(campos.upc).trim();
+  if (upc && !normalizarUpc(upc)) return { error:'Código de barras inválido.' };
   return { cuerpo:{ nombre, marca:String(campos.marca ?? '').trim(), talla:String(campos.talla ?? '').trim(),
-    precio_lista:lista, precio, destino:pieza.destino } };
+    precio_lista:lista, precio, destino:pieza.destino, ...(upc !== undefined && upc !== (pieza.upc ?? '') ? {upc} : {}) } };
 }
 
 /** Qué cambia, en líneas para confirmar. `marca` es lo que este navegador imprimió (etiquetera.impresas). */
@@ -55,7 +58,41 @@ export function resumenCorreccion(pieza, cuerpo, marca) {
   if (cuerpo.precio_lista !== pieza.precio_lista) lineas.push(`Precio de lista ${pesos(pieza.precio_lista)} → ${pesos(cuerpo.precio_lista)}.`);
   for (const [campo, rotulo] of [['nombre', 'Nombre'], ['marca', 'Marca'], ['talla', 'Talla']])
     if (cuerpo[campo] !== (pieza[campo] ?? '')) lineas.push(`${rotulo} «${pieza[campo] ?? ''}» → «${cuerpo[campo]}».`);
+  if (cuerpo.upc !== undefined && cuerpo.upc !== (pieza.upc ?? '')) lineas.push(`UPC «${pieza.upc || 'sin UPC'}» → «${cuerpo.upc || 'sin UPC'}».`);
   return lineas;
+}
+
+/** Misma hoja para un conflicto al corregir y para los grupos históricos de Revisar. */
+export function resolverRepetida(origen, destino, { nodo, boton, hoja, api, mensaje, imprimir, cerrar, alTerminar = async () => {}, upc = destino.upc }) {
+  const queda = origen.codigo && !destino.codigo ? origen : destino;
+  const sale = queda.id === destino.id ? origen : destino;
+  const dosEtiquetas = !!origen.codigo && !!destino.codigo;
+  const contenido = nodo('div', undefined, 'formulario'), id = crypto.randomUUID();
+  let ocupada = false, movida = null;
+  contenido.append(nodo('p', `Pasa ${sale.stock} piezas a ${queda.codigo || queda.nombre}. ${dosEtiquetas ? 'La etiqueta anterior conserva su código con existencia cero.' : 'Se conserva una sola pieza.'}`));
+  const juntar = boton(`Juntar en ${queda.codigo || queda.nombre}`, async () => {
+    if (ocupada) return; ocupada = true; juntar.setAttribute('aria-disabled','true');
+    try {
+      movida ??= dosEtiquetas ? await api(`/api/piezas/${sale.id}/juntar`, {id, destino_id:queda.id})
+        : await api(`/api/borradores/${sale.id}/fusionar`, {destino_id:queda.id});
+      if (normalizarUpc(queda.upc) !== normalizarUpc(upc)) await api(`/api/borradores/${queda.id}`, {upc:upc || ''}, 'PATCH');
+      cerrar(); await alTerminar(queda.id);
+      mensaje('Existencias juntas', 'ok');
+      if (dosEtiquetas && movida.movidas > 0) {
+        const c = nodo('div', undefined, 'formulario');
+        c.append(nodo('p', `Reemplaza las ${movida.movidas} etiquetas de ${sale.codigo}.`),
+          boton(`Imprimir ${movida.movidas} etiquetas de ${queda.codigo}`, async b => {
+            b.setAttribute('aria-disabled','true');
+            try { if (await imprimir([queda.id],new Map([[queda.id,movida.movidas]]))) cerrar(); }
+            finally { b.setAttribute('aria-disabled','false'); }
+          },'primario'), boton('Cerrar',cerrar));
+        hoja('Reetiquetar',c);
+      }
+    } catch (e) { mensaje((movida ? 'Existencias juntas · falta guardar UPC. ' : '') + e.message, 'error'); }
+    finally { ocupada = false; juntar.setAttribute('aria-disabled','false'); }
+  },'primario');
+  contenido.append(juntar, boton('Cancelar', cerrar));
+  hoja(`Ya existe como ${destino.codigo || 'pieza sin etiqueta'} · ${destino.nombre} · ×${destino.stock}`, contenido);
 }
 
 /**
@@ -74,9 +111,11 @@ export function avisoReimpresion(marca, antes, ahora) {
     : `La etiqueta pegada dice «${pegada.nombre ?? ''}${pegada.talla ? ` · ${pegada.talla}` : ''}».`;
 }
 
-export function crearFicha({ mensaje, alAbrir = () => {}, confirmar = (texto) => Promise.resolve(confirm(texto)), integrada = false, elegirMotivo = async () => $('motivo').value }) {
+export function crearFicha({ mensaje, alAbrir = () => {}, confirmar = (texto) => Promise.resolve(confirm(texto)), integrada = false, elegirMotivo = async () => $('motivo').value, alRepetida = () => {}, antesCamara = async () => {} }) {
   let pieza = null, apertura = 0, puedeEditar = false, puedePrecio = false;
   let pendiente = null, enviando = false, guardando = false, deshacer = null, temporizador;
+  let apagarUpc = null, camaraTurno = 0;
+  async function cerrarCamaraUpc() { ++camaraTurno; await apagarUpc?.(); apagarUpc = null; if ($('e-upc-visor')) $('e-upc-visor').hidden = true; }
   for (const t of TALLAS) { const o = document.createElement('option'); o.value = t; $('tallas').append(o); }
 
   function pintar() {
@@ -121,7 +160,7 @@ export function crearFicha({ mensaje, alAbrir = () => {}, confirmar = (texto) =>
     if (!historial.length) { const li = document.createElement('li'); li.textContent = 'Sin ajustes registrados.'; $('historial').append(li); }
   }
 
-  function cerrarFormulario() { $('corregir').hidden = true; $('reimprimir').hidden = true; }
+  function cerrarFormulario() { void cerrarCamaraUpc(); $('corregir').hidden = true; $('reimprimir').hidden = true; }
 
   function quitarDeshacer() {
     clearTimeout(temporizador); deshacer = null; $('deshacer').hidden = true;
@@ -191,6 +230,7 @@ export function crearFicha({ mensaje, alAbrir = () => {}, confirmar = (texto) =>
   function abrirFormulario() {
     if (!pieza || !puedeEditar || guardando) return;
     $('e-nombre').value = pieza.nombre ?? ''; $('e-marca').value = pieza.marca ?? ''; $('e-talla').value = pieza.talla ?? '';
+    if ($('e-upc')) $('e-upc').value = pieza.upc ?? '';
     const precios = puedePrecio && pieza.destino === 'etiqueta';
     $('campos-precio').hidden = !precios;
     $('e-precio').value = (pieza.precio / 100).toFixed(2); $('e-lista').value = pieza.precio_lista > 0 ? (pieza.precio_lista / 100).toFixed(2) : '';
@@ -204,7 +244,7 @@ export function crearFicha({ mensaje, alAbrir = () => {}, confirmar = (texto) =>
   async function guardarCorreccion() {
     if (!pieza || !puedeEditar || guardando) return;
     const r = cuerpoCorreccion(pieza, { nombre:$('e-nombre').value, marca:$('e-marca').value, talla:$('e-talla').value,
-      precio:$('e-precio').value, precio_lista:$('e-lista').value }, puedePrecio);
+      precio:$('e-precio').value, precio_lista:$('e-lista').value, upc:$('e-upc')?.value }, puedePrecio);
     if (r.error) return mensaje(r.error);
     const lineas = resumenCorreccion(pieza, r.cuerpo, estadoEnvio(pieza).marca);
     if (!lineas.length) return mensaje('No hay cambios que guardar.');
@@ -217,13 +257,15 @@ export function crearFicha({ mensaje, alAbrir = () => {}, confirmar = (texto) =>
       texto = `${g.nombre}: cambios guardados.`;
       if (pieza?.id === antes.id && turno === apertura) {
         Object.assign(pieza, { nombre:g.nombre, marca:g.marca, talla:g.talla, precio:g.precio, precio_lista:g.precio_lista,
-          destino:g.destino, stock:g.stock, estado_analisis:'listo' });
+          destino:g.destino, stock:g.stock, upc:g.upc ?? pieza.upc, estado_analisis:'listo' });
+        await cerrarCamaraUpc();
         $('corregir').hidden = true;
         const aviso = avisoReimpresion(estadoEnvio(antes).marca, antes, pieza);
         $('reimprimir').hidden = !aviso;
         if (aviso) $('reimprimir-texto').textContent = aviso;
       }
     } catch (error) {
+      if (error.status === 409 && error.datos?.existente && turno === apertura) alRepetida(antes, error.datos.existente, r.cuerpo.upc ?? antes.upc);
       if (error.status === 403 && pieza?.id === antes.id) puedeEditar = false;
       texto = error.message;
     }
@@ -252,7 +294,23 @@ export function crearFicha({ mensaje, alAbrir = () => {}, confirmar = (texto) =>
   });
   $('reintentar').addEventListener('click', enviarAjuste);
   $('editar').addEventListener('click', abrirFormulario);
-  $('cancelar-correccion').addEventListener('click', () => { $('corregir').hidden = true; pintar(); });
+  $('cancelar-correccion').addEventListener('click', () => { void cerrarCamaraUpc(); $('corregir').hidden = true; pintar(); });
+  $('e-upc')?.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); e.stopPropagation(); } });
+  $('leer-upc')?.addEventListener('click', async () => {
+    if (!puedeEditar || guardando) return;
+    try {
+      await cerrarCamaraUpc(); await antesCamara(); const turno = ++camaraTurno;
+      $('e-upc-visor').hidden = false;
+      const { abrirCamara } = await import('./camara.js');
+      const apagar = await abrirCamara('e-upc-visor', codigo => {
+        if (turno !== camaraTurno) return;
+        if (!normalizarUpc(codigo)) return mensaje('Código de barras inválido.', 'error');
+        $('e-upc').value = codigo; void cerrarCamaraUpc(); $('e-upc').focus();
+      }, { producto:true });
+      if (turno !== camaraTurno) await apagar(); else apagarUpc = apagar;
+    } catch (e) { mensaje(e.message,'error'); }
+  });
+  if (globalThis.document?.addEventListener) document.addEventListener('visibilitychange', () => { if (document.hidden) void cerrarCamaraUpc(); });
   $('corregir').addEventListener('submit', (e) => { e.preventDefault(); void guardarCorreccion(); });
   $('foto').addEventListener('error', () => { $('foto').hidden = true; $('sin-foto').hidden = false; });
 
@@ -260,8 +318,8 @@ export function crearFicha({ mensaje, alAbrir = () => {}, confirmar = (texto) =>
     abrir,
     repintar: pintar,
     /** Una búsqueda nueva o un cambio de consulta: la ficha abierta deja de existir. */
-    cerrar() { ++apertura; pieza = null; pintar(); },
+    cerrar() { ++apertura; void cerrarCamaraUpc(); pieza = null; pintar(); },
     /** «Volver»: respuestas atrasadas no reabren la ficha, pero lo abierto se conserva. */
-    invalidar() { ++apertura; },
+    invalidar() { ++apertura; void cerrarCamaraUpc(); },
   };
 }
