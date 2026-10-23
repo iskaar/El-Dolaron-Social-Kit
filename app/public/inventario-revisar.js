@@ -33,6 +33,9 @@ export function existenciaNueva(p,campos){
   return t!==''&&Number.isInteger(n)&&n>=0&&n<=999?{valor:n,esperado:Number(visto)}:{error:'La existencia debe ser un entero de 0 a 999.'};
 }
 
+/** En una pieza `listo` la ficha compartida ya edita nombre, marca, talla y precios; aquí solo quedan categoría, estado, destino y existencia (#469). */
+export const ocultoEnListo=(p,k)=>p.estado_analisis==='listo'&&['nombre','marca','talla','precio_lista','precio'].includes(k);
+
 /** El PATCH de revisión lleva stock solo si se tocó y la pieza no es `listo` (esa va por el ajuste auditado, ver guardar); solo Recalcular omite precio deliberadamente. */
 export function cuerpoRevision(p, campos, dueno, recalcular=false) {
   const puedePrecio=dueno||!p.codigo;
@@ -170,11 +173,13 @@ export async function iniciar(ctx) {
     if(puedeEditar)avanzado(p);
   }
   async function destinos(){if(!familias.length){const d=await api('/api/familias');familias=d.familias;montos=d.montos;}return [['etiqueta','Etiqueta individual'],...familias.flatMap(f=>montos.map(p=>[`banda_${f.prefijo}${p}`,`${f.nombre} $${p}`]))];}
-  function camposDe(p){return borradores.get(p.id)||{nombre:p.nombre,marca:p.marca||'',talla:p.talla||'',categoria:p.categoria,estado_fisico:p.estado_fisico,precio:String(p.precio/100),precio_lista:p.precio_lista?String(p.precio_lista/100):'',destino:p.destino,stock:String(p.stock),stock_visto:String(p.stock)};}
+  const desdePieza=p=>({nombre:p.nombre,marca:p.marca||'',talla:p.talla||'',categoria:p.categoria,estado_fisico:p.estado_fisico,precio:String(p.precio/100),precio_lista:p.precio_lista?String(p.precio_lista/100):'',destino:p.destino,stock:String(p.stock),stock_visto:String(p.stock)});
+  function camposDe(p){return borradores.get(p.id)||desdePieza(p);}
   function avanzado(p){
     const seccion=nodo('section'),form=nodo('form',undefined,'formulario'),campos=camposDe(p);seccion.append(nodo('h3','Corregir datos'),form);derecha.append(seccion);
     for(const[k,t]of [['nombre','Nombre'],['marca','Marca'],['talla','Talla'],['categoria','Categoría'],['estado_fisico','Estado'],['destino','Destino'],['precio_lista','Precio de lista ($)'],['precio','Precio de venta ($)'],['stock','Existencia']]){
       if((k==='precio'||k==='precio_lista')&&p.codigo&&!dueno)continue;
+      if(ocultoEnListo(p,k))continue;
       const l=nodo('label',t),input=nodo(['categoria','estado_fisico','destino'].includes(k)?'select':'input');
       const poner=opciones=>{for(const[v,t]of opciones){const o=nodo('option',t);o.value=v;input.append(o);}input.value=campos[k];};
       if(k==='categoria')poner(CATEGORIAS);else if(k==='estado_fisico')poner(ESTADOS);else if(k==='destino'){poner([[p.destino,p.destino==='etiqueta'?'Etiqueta individual':p.destino]]);void destinos().then(d=>{input.replaceChildren();poner(d);}).catch(e=>mensaje(e.message,'error'));}
@@ -193,6 +198,8 @@ export async function iniciar(ctx) {
     form.append(acciones);void recorte(p,form);
   }
   async function guardar(p,campos=camposDe(p),recalcular=false){
+    // Lo que en `listo` se oculta aquí lo corrige la ficha: se manda lo vigente (la ficha abierta o la pieza), no un borrador viejo que pisaría esa edición.
+    if(p.estado_analisis==='listo'){const f=ficha.pieza?.()?.id===p.id?ficha.pieza():p,d=desdePieza(f);campos={...campos,...Object.fromEntries(Object.keys(d).filter(k=>ocultoEnListo(p,k)).map(k=>[k,d[k]]))};}
     const r=cuerpoRevision(p,campos,dueno,recalcular);if(r.error)throw new Error(r.error);
     const e=existenciaNueva(p,campos),audita=e&&p.estado_analisis==='listo';
     const datos=await api(`/api/borradores/${p.id}`,r.cuerpo,'PATCH');Object.assign(p,datos,{estado_analisis:'listo'});borradores.delete(p.id);

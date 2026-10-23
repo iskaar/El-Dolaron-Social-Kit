@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { cuerpoRevision, existenciaNueva, filtrarRevision, diaTienda } from '../public/inventario-revisar.js';
+import { cuerpoRevision, existenciaNueva, filtrarRevision, diaTienda, ocultoEnListo } from '../public/inventario-revisar.js';
 import worker from './worker.ts';
 import { tienda, PRODUCTO } from './prueba-d1.ts';
 
@@ -31,6 +31,13 @@ test('Revisar manda la existencia solo si se tocó: PATCH si no es listo, ajuste
   // Un borrador viejo que no se tocó no pisa lo que vendió la caja después.
   assert.equal(existenciaNueva({...p,stock:7},campos),null);
   for(const malo of ['','x','1.5','-1','1000'])assert.ok(cuerpoRevision(p,{...campos,stock:malo},true).error,malo);
+});
+
+test('Corregir datos de una pieza listo solo muestra categoría, estado, destino y existencia (#469)',()=>{
+  const campos=['nombre','marca','talla','categoria','estado_fisico','destino','precio_lista','precio','stock'];
+  const listo={estado_analisis:'listo'},pendiente={estado_analisis:'pendiente'};
+  assert.deepEqual(campos.filter(k=>ocultoEnListo(listo,k)),['nombre','marca','talla','precio_lista','precio']);
+  assert.deepEqual(campos.filter(k=>ocultoEnListo(pendiente,k)),[]);
 });
 
 test('filtros combinados de revisión usan el día de tienda, estado, precio y sesión',()=>{

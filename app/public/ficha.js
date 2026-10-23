@@ -322,6 +322,8 @@ export function crearFicha({ mensaje, alAbrir = () => {}, confirmar = (texto) =>
   return {
     abrir,
     repintar: pintar,
+    /** La pieza abierta con lo último que guardó la ficha (Revisar la usa para no pisar esas correcciones). */
+    pieza: () => pieza,
     /** Una búsqueda nueva o un cambio de consulta: la ficha abierta deja de existir. */
     cerrar() { ++apertura; void cerrarCamaraUpc(); pieza = null; pintar(); },
     /** «Volver»: respuestas atrasadas no reabren la ficha, pero lo abierto se conserva. */
