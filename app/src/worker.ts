@@ -48,7 +48,7 @@ import { registrarCorte, registrarRetiro, ultimoCorte, cajaDe } from './corte.ts
 import { rutaGastos } from './gastos.ts';
 import { rutaPiezas } from './piezas.ts';
 import { rutaSolicitudesPrecio } from './solicitudes-precio.ts';
-import { MISMO_UPC, PIEZA_UPC, capturaSumada, sumarCaptura, conflictoUpc, corregirUpc, upcValido, type PiezaUpc } from './upc-inventario.ts';
+import { MISMO_UPC, PIEZA_UPC, CAPTURA_SUMADA, conflictoCapturaSumada, capturaSumada, sumarCaptura, conflictoUpc, corregirUpc, upcValido, type PiezaUpc } from './upc-inventario.ts';
 import { rutaCamaraRemota } from './camara-remota.ts';
 import { rutaNomina } from './nomina.ts';
 import { lineasNetas } from './netas.ts';
@@ -843,18 +843,25 @@ async function corregirCaptura(id: string, campo: string, request: Request, env:
     const { meta } = await env.DB.prepare(`update productos set stock = 0, estado_analisis = 'descartado', actualizado_en = ?
       where id = ? and capturado_por = ? and upc is not null and creado_en > ? and estado_analisis ${sinFoto ? "<> 'descartado'" : "not in ('listo', 'descartado')"}
         ${sinFoto ? `and ${alcanceSinFoto}` : ''}
+        and not ${CAPTURA_SUMADA}
         and not exists (select 1 from venta_lineas where producto_id = productos.id)`)
       .bind(new Date().toISOString(), id, correo, desde).run();
-    if (!meta.changes) return json({ error: sinFoto ? 'Ya no se puede cancelar: pasaron 5 minutos o la pieza tiene venta, foto o publicación.' : 'Ya tiene etiqueta: corrígela en el admin.' }, 404);
+    if (!meta.changes) return await conflictoCapturaSumada(env, id, correo)
+      ?? json({ error: sinFoto ? 'Ya no se puede cancelar: pasaron 5 minutos o la pieza tiene venta, foto o publicación.' : 'Ya tiene etiqueta: corrígela en el admin.' }, 404);
     return json({ id, stock: 0, descartado: true });
   }
   const resultado = await env.DB.prepare(
     `update productos set ${columna} = ?, actualizado_en = ? where id = ? and capturado_por = ? and creado_en > ?
-       and (${sinFoto ? alcanceSinFoto : "upc is null or estado_analisis <> 'listo'"}) and estado_analisis <> 'descartado'`,
+       and (${sinFoto ? alcanceSinFoto : "upc is null or estado_analisis <> 'listo'"}) and estado_analisis <> 'descartado'
+       ${campo === 'existencia' ? `and not ${CAPTURA_SUMADA}` : ''}`,
   )
     .bind(valor, new Date().toISOString(), id, correo, desde)
     .run();
   if (resultado.meta.changes === 0) {
+    if (campo === 'existencia') {
+      const conflicto = await conflictoCapturaSumada(env, id, correo);
+      if (conflicto) return conflicto;
+    }
     return json({ error: sinFoto ? 'Ya no se puede cambiar: pasaron 5 minutos o la pieza tiene venta, foto o publicación.' : 'Ya no se puede cambiar: lo escaneado ya tiene etiqueta y las fotos se corrigen en sus primeras 24 horas.' }, 404);
   }
   return json({ id, [columna]: valor });
@@ -881,10 +888,12 @@ async function revisarCaptura(id: string, request: Request, env: Env, correo: st
     const resultado = await env.DB.prepare(`update productos set stock = 0, precio = 0,
         foto_key = case when coalesce(codigo, '') = '' then '' else foto_key end,
         estado_analisis = 'descartado', actualizado_en = ? where ${alcance}
+        and not ${CAPTURA_SUMADA}
         and not exists (select 1 from venta_lineas where producto_id = productos.id)
         and not exists (select 1 from ml_publicaciones where producto_id = productos.id)`)
       .bind(ahora, id, correo, desde).run();
-    if (!resultado.meta.changes) return json({ error: 'Tiene una venta o publicación. Revisa la pieza en el admin; no se eliminó.' }, 409);
+    if (!resultado.meta.changes) return await conflictoCapturaSumada(env, id, correo)
+      ?? json({ error: 'Tiene una venta o publicación. Revisa la pieza en el admin; no se eliminó.' }, 409);
     const conservada = await env.DB.prepare('select codigo from productos where id = ?').bind(id).first<{ codigo: string | null }>();
     if (!conservada?.codigo) await env.FOTOS.delete(`fotos/${id}.jpg`);
     return json({ id, descartado: true });

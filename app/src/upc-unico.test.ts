@@ -46,6 +46,57 @@ test('distinto grado permite pieza distinta; dos capturas simultáneas sólo ins
   assert.equal(filas(t).length, 3); t.db.close();
 });
 
+test('una captura que recibió una suma rechaza stock absoluto y cancelación sin perder el inventario combinado', async tt => {
+  for (const accion of ['cantidad', 'cero', 'eliminar', 'manual']) await tt.test(accion, async t0 => {
+    const t = preparar(); t0.after(() => t.db.close());
+    const a = cuerpo();
+    await t.pedir('/api/borradores/upc', a);
+    t.db.prepare("update productos set estado_analisis='pendiente' where id=?").run(a.id);
+    await t.pedir('/api/borradores/upc', cuerpo({stock:3}));
+    const r = accion === 'eliminar'
+      ? await t.pedir(`/api/borradores/${a.id}/revision`, {}, 'DELETE')
+      : accion === 'manual'
+      ? await t.pedir('/api/borradores/upc/manual', {id:a.id,stock:3}, 'PATCH')
+      : await t.pedir(`/api/borradores/${a.id}/existencia`, {stock:accion === 'cero' ? 0 : 3}, 'PATCH');
+    assert.equal(r.status, 409);
+    assert.match(r.cuerpo.error, /sum|fusion/i);
+    assert.match(r.cuerpo.error, /ajuste/i);
+    assert.deepEqual(filas(t).map(p => [p.stock,p.estado_analisis]), [[5,'pendiente']]);
+    assert.equal(ajustes(t).length, 1);
+    assert.equal((await t.pedir(`/api/borradores/${a.id}/talla`, {talla:'M'}, 'PATCH')).status, 200);
+  });
+});
+
+test('una suma intercalada antes de corregir o cancelar también impide pisar el stock', async tt => {
+  for (const eliminar of [false,true]) await tt.test(String(eliminar), async t0 => {
+    const t = preparar(); t0.after(() => t.db.close());
+    const a = cuerpo(); await t.pedir('/api/borradores/upc', a);
+    t.db.prepare("update productos set estado_analisis='pendiente' where id=?").run(a.id);
+    const prepare = t.env.DB.prepare.bind(t.env.DB);
+    let sumada = false;
+    t0.mock.method(t.env.DB, 'prepare', (sql: string) => {
+      const s = prepare(sql);
+      if (/update productos set (stock = 0|stock = \?)/.test(sql)) {
+        const run = s.run.bind(s);
+        s.run = async () => {
+          if (!sumada) {
+            sumada = true;
+            assert.equal((await t.pedir('/api/borradores/upc', cuerpo({stock:3}))).status, 201);
+          }
+          return run();
+        };
+      }
+      return s;
+    });
+    const r = eliminar ? await t.pedir(`/api/borradores/${a.id}/revision`, {}, 'DELETE')
+      : await t.pedir(`/api/borradores/${a.id}/existencia`, {stock:3}, 'PATCH');
+    assert.equal(sumada, true);
+    assert.equal(r.status, 409);
+    assert.equal(filas(t)[0].stock, 5);
+    assert.equal(filas(t)[0].estado_analisis, 'pendiente');
+  });
+});
+
 test('desconocido pendiente/error también suma y su UUID original sigue consultable por quien capturó', async () => {
   const t = preparar(); t.db.prepare('delete from manifiesto').run();
   const a = cuerpo(), b = cuerpo();

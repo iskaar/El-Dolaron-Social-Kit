@@ -3,6 +3,13 @@ import { normalizarUpc } from '../public/upc.js';
 // Coincide con el índice parcial 053: también cubre pendientes, FEP y piezas sin foto.
 export const UPC_VISIBLE = "sin_inventario = 0 and estado_analisis <> 'descartado' and upc is not null and upc <> ''";
 export const MISMO_UPC = `${UPC_VISIBLE} and propietario = ? and ltrim(upc, '0') = ? and estado_fisico = ?`;
+export const CAPTURA_SUMADA = "exists (select 1 from conteo_ajustes where producto_id = productos.id and motivo = 'entrada')";
+
+export async function conflictoCapturaSumada(env: Env, id: string, correo: string) {
+  const sumada = await env.DB.prepare(`select id from productos where id = ? and capturado_por = ? and ${CAPTURA_SUMADA}`)
+    .bind(id, correo).first();
+  return sumada ? Response.json({ error:'La pieza recibió existencias sumadas. Cambia el stock mediante un ajuste auditado de + o −; no se puede cancelar la captura.' }, { status:409 }) : null;
+}
 export interface PiezaUpc {
   id: string; codigo: string | null; upc: string | null; nombre: string; precio: number; stock: number;
   estado_analisis: string; estado_fisico: string; propietario: string; capturado_por: string;
