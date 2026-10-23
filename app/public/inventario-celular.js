@@ -7,6 +7,7 @@ import { ropa, opciones, talla } from './inventario-ropa.js';
 import { stepper, bloquear, cerrarHoja } from './inventario-ui.js';
 import { estadoEnvio } from './envio-etiquetas.js';
 import { esRopa } from './ropa.js';
+import { cambiosTarjeta } from './inventario-capturar.js';
 
 export async function iniciarCelular(ctx,captura) {
   const {$,nodo,boton,mensaje,hoja,api,confirmar}=ctx;
@@ -84,7 +85,8 @@ export async function iniciarCelular(ctx,captura) {
     reposo.actividad();
     const upc=a?.upc;const ropaSinCodigo=captura.esRopa()&&!upc;
     if(ropaSinCodigo&&!captura.tablero.validar())throw new Error('Completa talla y precio');
-    const r=registroFoto(foto,{id:a?.id||crypto.randomUUID(),estado_fisico:ropaSinCodigo?'nuevo':a?.estado||captura.estado(),cantidad:a?.cantidad||captura.cantidad(),...(ropaSinCodigo?captura.tablero.valores():{upc:upc??''})});
+    const edicion=a?.tipo==='nueva'?cambiosTarjeta(a):{};
+    const r=registroFoto(foto,{id:a?.id||crypto.randomUUID(),estado_fisico:ropaSinCodigo?'nuevo':a?.estado||captura.estado(),cantidad:a?.cantidad||captura.cantidad(),...(ropaSinCodigo?captura.tablero.valores():{upc:upc??'',nombre_edit:edicion.nombre,precio_edit:edicion.precio})});
     await guardar(r);sesion.set(r.id,{...r,url:URL.createObjectURL(foto),subida:false});captura.flujo.limpiar();captura.contador.poner(1);pintar();mensaje(navigator.onLine?'Foto guardada en el teléfono':'Sin red · foto en el teléfono',navigator.onLine?'ok':'aviso');
     if(localStorage.getItem('inventario-vibracion')!=='false')navigator.vibrate?.(30);void subir();return r;
   }

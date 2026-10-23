@@ -8,6 +8,13 @@ import { stepper, bloquear, cerrarHoja } from './inventario-ui.js';
 import { montarPrecio } from './inventario-precio.js';
 import { esRopa as piezaRopa } from './ropa.js';
 
+/** Nombre y precio (centavos) que el capturista editó en la tarjeta; el servidor los autoriza. Lanza si son inválidos. */
+export function cambiosTarjeta(a){
+  const cambios={};
+  if(a.nombre!==undefined){cambios.nombre=a.nombre.trim();if(!cambios.nombre)throw new Error('El nombre no puede quedar vacío.');}
+  if(a.precio!==undefined){cambios.precio=aCentavos(a.precio);if(cambios.precio===null||cambios.precio<=0)throw new Error('Escribe un precio mayor a cero en pesos.');}
+  return cambios;
+}
 /** ¿Los campos de la tarjeta difieren de lo que se mostró? Entonces solo «Guardar» la guarda. */
 export function tarjetaEditada(a){
   return (a.nombre!==undefined&&a.nombre.trim()!==(a.ficha?.nombre??'').trim())
@@ -21,10 +28,7 @@ export function crearCaptura({ api, imprimir, cambiar=()=>{}, enLinea=()=>naviga
     if(!actual||actual.tipo!=='nueva')return;
     if(!enLinea())throw new Error('Sin red: se suma al volver la señal');
     const abierta=actual;
-    const cambios={};
-    if(abierta.nombre!==undefined){cambios.nombre=abierta.nombre.trim();if(!cambios.nombre)throw new Error('El nombre no puede quedar vacío.');}
-    if(abierta.precio!==undefined){cambios.precio=aCentavos(abierta.precio);if(cambios.precio===null||cambios.precio<=0)throw new Error('Escribe un precio mayor a cero en pesos.');}
-    const guardada=await api('/api/borradores/upc',{id:abierta.id,upc:abierta.upc,stock:abierta.cantidad,estado_fisico:abierta.estado,...cambios});
+    const guardada=await api('/api/borradores/upc',{id:abierta.id,upc:abierta.upc,stock:abierta.cantidad,estado_fisico:abierta.estado,...cambiosTarjeta(abierta)});
     actual={...abierta,tipo:'guardada',pieza:guardada};pintar();
     const salio=guardada.estado_analisis&&guardada.estado_analisis!=='listo'?false:await imprimir(guardada.id,abierta.cantidad);actual.faltaEtiqueta=!salio;pintar();return guardada;
   }

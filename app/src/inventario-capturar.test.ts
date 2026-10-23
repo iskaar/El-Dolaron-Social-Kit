@@ -1,7 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { crearCaptura } from '../public/inventario-capturar.js';
-import { tienda, PRODUCTO } from './prueba-d1.ts';
+import { crearCaptura, cambiosTarjeta } from '../public/inventario-capturar.js';
+import { registroFoto, formularioPendiente } from '../public/foto-pendiente.js';
+import worker from './worker.ts';
+import { tienda, PRODUCTO, DUENO } from './prueba-d1.ts';
 import { crearLector } from '../public/lector.js';
 import { tsplEtiqueta } from '../public/etiquetera.js';
 
@@ -215,4 +217,39 @@ test('P2-1: leer otro código nunca guarda una tarjeta editada; sin edición gua
   await flujo.leer('012345678906');
   assert.equal(llamadas.filter(r=>r==='/api/borradores/upc').length,1,'Valores idénticos a lo mostrado se guardan como antes');
   assert.equal(flujo.actual()!.upc,'012345678906');
+});
+
+test('P2-2: la foto de una tarjeta editada lleva nombre y precio; registros viejos y clientes viejos usan el manifiesto',()=>{
+  const nueva={tipo:'nueva',nombre:'  Termo  ',precio:'87.50'};
+  const edicion=cambiosTarjeta(nueva);assert.deepEqual(edicion,{nombre:'Termo',precio:8750});
+  const r=registroFoto(new Blob(['f']),{upc:'0191907910414',nombre_edit:edicion.nombre,precio_edit:edicion.precio});
+  const f=formularioPendiente(r);assert.equal(f.get('nombre'),'Termo');assert.equal(f.get('precio'),'8750');
+  const vieja=formularioPendiente({id:'x',estado_fisico:'nuevo',cantidad:1,upc:'0191907910414',foto:new Blob(['f'])});
+  assert.equal(vieja.has('nombre'),false);assert.equal(vieja.has('precio'),false);
+  assert.throws(()=>cambiosTarjeta({nombre:'  '}),/nombre/);assert.throws(()=>cambiosTarjeta({precio:'0'}),/precio/);
+});
+
+test('P2-2: la foto en cola con precio editado: capturista 403 sin escribir, dueño conserva nombre y precio',async t0=>{
+  const t=manifiesto();t0.after(async()=>{await t.esperar();t.db.close();});
+  const ficha=(await t.pedir('/api/manifiesto/0191907910414')).cuerpo;
+  const subir=(extra:Record<string,string>,id=crypto.randomUUID())=>{
+    const f=formularioPendiente(registroFoto(new Blob(['foto'],{type:'image/jpeg'}),{id,upc:'0191907910414',cantidad:2}));
+    for(const [k,v] of Object.entries(extra))f.set(k,v);
+    return worker.fetch!(new Request('https://caja.prueba/api/borradores',{method:'POST',body:f}) as never,t.env,t.ctx as never);
+  };
+  t.env.DEV_USUARIO='cap@prueba.mx';
+  for(const casilla of [0,1]){
+    t.db.prepare("update usuarios set editar_inventario=? where correo='cap@prueba.mx'").run(casilla);
+    assert.equal((await subir({precio:String(ficha.precio+100)})).status,403);
+  }
+  t.db.prepare("update usuarios set editar_inventario=0 where correo='cap@prueba.mx'").run();
+  assert.equal((await subir({nombre:'Otro nombre'})).status,403);
+  assert.equal(t.db.prepare('select count(*) n from productos where upc is not null').get()!.n,0);
+  const sin=crypto.randomUUID();assert.equal((await subir({},sin)).status,201,'Sin campos: valores del manifiesto');
+  assert.equal(t.db.prepare('select precio from productos where id=?').get(sin)!.precio,ficha.precio);
+  t.env.DEV_USUARIO=DUENO;t.db.prepare('delete from productos where id=?').run(sin);
+  const id=crypto.randomUUID();
+  assert.equal((await subir({nombre:'Termo &amp; tapa',precio:'8700'},id)).status,201);
+  const fila=t.db.prepare('select nombre,precio,stock,foto_key from productos where id=?').get(id)!;
+  assert.deepEqual([fila.nombre,fila.precio,fila.stock,fila.foto_key],['Termo & tapa',8700,2,`fotos/${id}.jpg`]);
 });

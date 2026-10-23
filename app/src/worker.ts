@@ -258,7 +258,10 @@ async function crearBorrador(request: Request, env: Env, ctx: ExecutionContext, 
       and foto_key <> '' and estado_analisis = 'listo' and precio > 0 limit 1`).bind(normalizarUpc(upc)).first()
   )) {
     const respuesta = await capturarPorUpc(new Request('https://local/api/borradores/upc', {
-      method: 'POST', body: JSON.stringify({ id, upc, stock: cantidad, estado_fisico: estadoFisico }),
+      method: 'POST', body: JSON.stringify({ id, upc, stock: cantidad, estado_fisico: estadoFisico,
+        // Edición de la tarjeta del manifiesto (#461): capturarPorUpc la autoriza igual que POST /api/borradores/upc.
+        ...(typeof formulario.get('nombre') === 'string' ? { nombre: formulario.get('nombre') } : {}),
+        ...(formulario.has('precio') ? { precio: Number(formulario.get('precio')) } : {}) }),
     }), env, correo);
     if (respuesta.ok) {
       const guardada = await respuesta.clone().json() as { id: string; existente?: boolean };
