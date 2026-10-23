@@ -527,6 +527,27 @@ test('fallo de BLE pausa y una recarga no reenvía una pieza incierta', async ()
   } finally { t.db.close(); }
 });
 
+test('la automática no se pausa si la única pieza se descartó entre listar y preparar, pero a mano esa pieza sigue sin salir (#468)', async () => {
+  const t = tienda();
+  try {
+    const id = agregar(t);
+    const p = await pagina(t);
+    p.estado.antesDePreparar = async () => { t.db.prepare("update productos set estado_analisis='descartado' where id=?").run(id); };
+    await p.iniciarAutomatica();
+    assert.deepEqual(p.estado.enviadas, []);
+    assert.equal(p.activa(), true, 'sin falla de impresión no hay motivo para pausar');
+    // A mano no cambia: nada salió, y quien llama no debe anunciar «Etiqueta enviada».
+    assert.equal(await p.imprimir([id]), false);
+    // Una falla real de la impresora sí pausa.
+    p.estado.antesDePreparar = null;
+    const otra = agregar(t);
+    p.estado.falloBle = true;
+    await p.imprimirNuevas();
+    assert.deepEqual(p.estado.enviadas, [{ id: otra, copias: 1 }]);
+    assert.equal(p.activa(), false);
+  } finally { t.db.close(); }
+});
+
 test('sin red pausa sin perder la sesión; al retomar imprime la pendiente', async () => {
   const t = tienda();
   try {

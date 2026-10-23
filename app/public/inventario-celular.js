@@ -5,7 +5,7 @@ import { aJpeg, reducirArchivo } from './foto.js';
 import { ESTADOS } from './estados.js';
 import { ropa, opciones, talla } from './inventario-ropa.js';
 import { stepper, bloquear, cerrarHoja } from './inventario-ui.js';
-import { estadoEnvio, sincronizarMarcas } from './envio-etiquetas.js';
+import { estadoEnvio, sincronizarMarcas, marcaDeLaBase } from './envio-etiquetas.js';
 import { esRopa } from './ropa.js';
 import { cambiosTarjeta, capturaImpresa, corregirExistencia, etiquetasPorCorreccion } from './inventario-capturar.js';
 import { etiqueteraLista } from './etiquetera.js';
@@ -97,6 +97,17 @@ export async function iniciarCelular(ctx,captura) {
     if(ok){mensaje(`Sale la etiqueta: ${p.nombre} ×${n}`,'etiqueta');sonar('etiqueta');}
     else mensaje(`Guardada · falta etiqueta: ${razonSinEtiqueta()}`,'aviso');
   }
+  /**
+   * Si la etiqueta de las unidades anteriores ya salió (en este teléfono, otro dispositivo o la base) y la cantidad sube, salen las que faltan (como +1).
+   * La marca de esta pantalla puede estar vieja (la PC imprimió la original después de la última carga, #468): se pregunta a la base.
+   * Sin poder saberlo no se imprime a ciegas (si la original aún no sale, la cola de la PC la saca completa y esto la repetiría): se avisa.
+   */
+  async function etiquetarCorreccion(id,datos,actual,cantidad){
+    const remota=await marcaDeLaBase(api,id);
+    const faltan=etiquetasPorCorreccion({antes:actual.stock,despues:cantidad,estado_analisis:actual.estado_analisis,marca:estadoEnvio({...actual,id}).marca,etiqueta_en:remota?remota.etiqueta_en:datos.etiqueta_en,impresa:capturaImpresa(id)});
+    if(faltan)void captura.imprimirPieza(id,faltan,{reimprimir:true});
+    else if(!remota&&cantidad>actual.stock&&actual.estado_analisis==='listo')mensaje('No se pudo comprobar la etiqueta: si la original ya salió, reimprime las que faltan desde Buscar','aviso');
+  }
   async function subir(){
     if(enviando||!navigator.onLine)return;pintarRed();enviando=true;
     const drenar=async()=>{const otra=await subida.subir();if(otra)setTimeout(subir,1000);};
@@ -182,9 +193,7 @@ export async function iniciarCelular(ctx,captura) {
         // La corrección propia conserva la ventana y validaciones de /captura; nunca se encola.
         if(cantidad!==actual.stock){
           await corregirExistencia(api,actual,id,cantidad,folioExistencia);
-          // Si la etiqueta de las unidades anteriores ya salió (en este teléfono, otro dispositivo o la base) y la cantidad sube, salen las que faltan (como +1).
-          const faltan=etiquetasPorCorreccion({antes:actual.stock,despues:cantidad,estado_analisis:actual.estado_analisis,marca:estadoEnvio({...actual,id}).marca,etiqueta_en:datos.etiqueta_en,impresa:capturaImpresa(id)});
-          if(faltan)void captura.imprimirPieza(id,faltan,{reimprimir:true});
+          void etiquetarCorreccion(id,datos,actual,cantidad);
         }
         if(tallaActual&&tallaActual!==actual.talla)await api(`/api/borradores/${id}/talla`,{talla:tallaActual},'PATCH');
         if(r||cambios.estado_fisico!==actual.estado_fisico)await api(`/api/borradores/${id}/revision`,cambios,'PATCH');

@@ -356,7 +356,9 @@ async function imprimir(ids, pedidas = new Map(), automatico = false, opciones =
     }
     resumen.textContent = `${terminadas} piezas enviadas${omitidas ? `; ${omitidas} ya las había enviado otro dispositivo y no se repitieron` : ''}${rechazadas ? `; ${rechazadas} ${rechazadas === 1 ? 'pieza ya no se puede imprimir' : 'piezas ya no se pueden imprimir'} (vendidas o cambiaron)` : ''}. Si alguna no salió, usa «Mostrar impresas» y «No salió desde aquí».`;
     // true solo si salió alguna etiqueta o ya la había sacado otro dispositivo; si todo se rechazó (vendidas o cambiaron), nada salió.
-    return terminadas + omitidas > 0;
+    // Excepción (#468): la automática no se pausa si la única pieza se descartó entre listar y preparar (el servidor devuelve []):
+    // no hubo falla de impresión. A mano sigue siendo false: nada salió y quien llama no debe decir «Etiqueta enviada».
+    return terminadas + omitidas > 0 || (automatico && rechazadas === 0);
   } catch (error) {
     // Nada de fallar en silencio: si algo revienta a media lista, se dice donde.
     console.error('Etiquetas: fallo el lote', error);

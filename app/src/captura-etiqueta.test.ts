@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { runInNewContext } from 'node:vm';
 import { corregirExistencia, etiquetasPorCorreccion } from '../public/inventario-capturar.js';
+import { marcaDeLaBase } from '../public/envio-etiquetas.js';
 
 const capturar = readFileSync('public/inventario-capturar.js', 'utf8');
 const celular = readFileSync('public/inventario-celular.js', 'utf8');
@@ -132,4 +133,49 @@ test('D4: las unidades que sube una corrección se etiquetan si ya salió la eti
   assert.equal(etiquetasPorCorreccion({ ...base }), 0, 'sin etiqueta anterior se imprime todo junto, no solo la diferencia');
   assert.equal(etiquetasPorCorreccion({ ...base, marca: {}, despues: 1 }), 0, 'bajar no imprime');
   assert.equal(etiquetasPorCorreccion({ ...base, marca: {}, estado_analisis: 'pendiente' }), 0);
+});
+
+/** `etiquetarCorreccion` del celular con la base simulada: `lista` es lo que devuelve /api/borradores, o un Error si no hay red. */
+function correccion(lista: any[] | Error, { impresa = false } = {}) {
+  const mensajes: [string, string][] = [], impresiones: any[] = [], consultas: string[] = [];
+  const contexto: any = {
+    api: async (ruta: string) => { consultas.push(ruta); if (lista instanceof Error) throw lista; return lista; },
+    mensaje: (t: string, tipo: string) => mensajes.push([t, tipo]),
+    captura: { imprimirPieza: (id: string, n: number, opciones: unknown) => impresiones.push({ id, n, opciones: { ...(opciones as object) } }) },
+    estadoEnvio: () => ({ marca: undefined }), capturaImpresa: () => impresa, etiquetasPorCorreccion, marcaDeLaBase, etiqueteraLista: () => true, $: () => ({}), Promise, setTimeout, console,
+  };
+  runInNewContext(`${etiquetar}
+globalThis.etiquetarCorreccion = etiquetarCorreccion;`, contexto);
+  return { corregir: contexto.etiquetarCorreccion as (id: string, datos: any, actual: any, cantidad: number) => Promise<void>, mensajes, impresiones, consultas };
+}
+const listo = { id: 'p1', estado_analisis: 'listo', stock: 2 };
+
+test('#468: la PC imprimió la original después de la última carga del teléfono: subir la cantidad etiqueta las unidades agregadas', async () => {
+  // El teléfono no tiene marca ni etiqueta_en en su sesión (la etiqueta salió después de cargar), pero la base ya la tiene.
+  const c = correccion([{ ...listo, etiqueta_en: '2026-10-23T10:00:00Z' }, { id: 'otra', etiqueta_en: null }]);
+  await c.corregir('p1', { id: 'p1' }, listo, 5);
+  assert.deepEqual(c.impresiones, [{ id: 'p1', n: 3, opciones: { reimprimir: true } }]);
+  assert.deepEqual(c.mensajes, []);
+  assert.match(c.consultas[0], /^\/api\/borradores\?desde=/);
+});
+
+test('#468: si la base no tiene etiqueta de la pieza no se imprime la diferencia (la original sale completa por la cola) y una marca vieja ya no cuenta', async () => {
+  const c = correccion([{ ...listo, etiqueta_en: null }]);
+  await c.corregir('p1', { id: 'p1', etiqueta_en: '2026-10-23T09:00:00Z' }, listo, 5);   // la sesión recordaba una etiqueta que se soltó después
+  assert.deepEqual(c.impresiones, []);
+  assert.deepEqual(c.mensajes, []);
+});
+
+test('#468: sin poder consultar la base no se imprime a ciegas ni se calla: avisa; lo que ya se sabía localmente sigue imprimiendo', async () => {
+  const sinRed = correccion(new TypeError('sin red'));
+  await sinRed.corregir('p1', { id: 'p1' }, listo, 5);
+  assert.deepEqual(sinRed.impresiones, []);
+  assert.deepEqual(sinRed.mensajes.map(([, tipo]) => tipo), ['aviso']);
+  assert.match(sinRed.mensajes[0][0], /reimprime las que faltan desde Buscar/);
+  const sabida = correccion(new TypeError('sin red'), { impresa: true });   // la imprimió este teléfono
+  await sabida.corregir('p1', { id: 'p1' }, listo, 5);
+  assert.deepEqual(sabida.impresiones, [{ id: 'p1', n: 3, opciones: { reimprimir: true } }]);
+  const baja = correccion(new TypeError('sin red'));
+  await baja.corregir('p1', { id: 'p1' }, listo, 1);   // bajar no etiqueta ni avisa
+  assert.deepEqual([baja.impresiones, baja.mensajes], [[], []]);
 });
