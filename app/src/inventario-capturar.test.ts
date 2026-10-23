@@ -199,3 +199,20 @@ test('cámara y USB priorizan la etiqueta numérica ED- frente a UPC y grado; ot
   assert.equal(nuevo.actual()?.tipo,'nueva');assert.equal(nuevo.actual()?.upc,'012345678905');
   assert.deepEqual(consultas,['/api/piezas?q=012345678905','/api/manifiesto/012345678905']);
 });
+
+test('P2-1: leer otro código nunca guarda una tarjeta editada; sin edición guarda como siempre',async()=>{
+  const llamadas:string[]=[];
+  const api=async(ruta:string,cuerpo?:any)=>{llamadas.push(ruta);
+    if(ruta.startsWith('/api/piezas?'))return {piezas:[],siguiente:null};
+    if(ruta.startsWith('/api/manifiesto/'))return {nombre:'Lámpara',precio:24900};
+    return {id:cuerpo.id,estado_analisis:'listo'};};
+  const flujo=crearCaptura({api,enLinea:()=>true,imprimir:async()=>true});
+  await flujo.leer('012345678905');
+  flujo.actual()!.precio='1';
+  await assert.rejects(flujo.leer('012345678906'),/Guarda la tarjeta/);
+  assert.equal(llamadas.includes('/api/borradores/upc'),false);assert.equal(flujo.actual()!.upc,'012345678905');
+  flujo.actual()!.precio='249';flujo.actual()!.nombre=' Lámpara ';
+  await flujo.leer('012345678906');
+  assert.equal(llamadas.filter(r=>r==='/api/borradores/upc').length,1,'Valores idénticos a lo mostrado se guardan como antes');
+  assert.equal(flujo.actual()!.upc,'012345678906');
+});

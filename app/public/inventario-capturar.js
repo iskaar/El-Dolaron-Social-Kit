@@ -8,6 +8,11 @@ import { stepper, bloquear, cerrarHoja } from './inventario-ui.js';
 import { montarPrecio } from './inventario-precio.js';
 import { esRopa as piezaRopa } from './ropa.js';
 
+/** ¿Los campos de la tarjeta difieren de lo que se mostró? Entonces solo «Guardar» la guarda. */
+export function tarjetaEditada(a){
+  return (a.nombre!==undefined&&a.nombre.trim()!==(a.ficha?.nombre??'').trim())
+    ||(a.precio!==undefined&&aCentavos(a.precio)!==(a.ficha?.precios?.[a.estado]??a.ficha?.precio));
+}
 /** Estado de captura: UUID estable al reintentar; precio y existencia confirmados solo por el servidor. */
 export function crearCaptura({ api, imprimir, cambiar=()=>{}, enLinea=()=>navigator.onLine, uuid=()=>crypto.randomUUID(), permiteUpc=true, permiteSumar=true }) {
   let actual=null, resultados=[], siguiente=null, ajuste=null, fila=Promise.resolve(), grado='nuevo';
@@ -32,7 +37,7 @@ export function crearCaptura({ api, imprimir, cambiar=()=>{}, enLinea=()=>naviga
     if(etiqueta?.piezas.some(p=>p.codigo===ed))codigo=ed;
     if(!mas&&actual?.tipo==='nueva'&&normalizarUpc(codigo)===normalizarUpc(actual.upc)){actual.cantidad=Math.min(999,actual.cantidad+1);pintar();return;}
     if(!mas&&actual?.tipo==='existente'&&(piezaRopa(actual.pieza)||actual.pieza.estado_fisico===grado)&&permiteSumar&&(actual.pieza.codigo?.toUpperCase()===codigo.toUpperCase()||(actual.pieza.upc&&normalizarUpc(actual.pieza.upc)===normalizarUpc(codigo))))return sumar(actual.pieza);
-    if(!mas&&actual?.tipo==='nueva')await guardar();
+    if(!mas&&actual?.tipo==='nueva'){if(tarjetaEditada(actual))throw new Error('Guarda la tarjeta editada antes de leer otro código');await guardar();}
     const datos=etiqueta??await api(ruta);
     const piezas=codigoLeido(codigo)?datos.piezas.filter(p=>piezaRopa(p)||p.estado_fisico===grado):datos.piezas;
     resultados=mas?[...resultados,...piezas]:piezas;siguiente=datos.siguiente;

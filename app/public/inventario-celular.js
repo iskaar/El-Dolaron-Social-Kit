@@ -42,7 +42,9 @@ export async function iniciarCelular(ctx,captura) {
   function pintarCamara(){const activa=!!camara.pista();alternar.setAttribute('aria-pressed',String(activa));etiquetaCamara.textContent=activa?'Cámara':'Apagada';apagada.hidden=activa;video.hidden=!activa;reanudar.hidden=!usarCamara||activa;subirArchivo.hidden=activa;sincronizarReposo();}
   const reposo=crearReposoCamara({apagar:()=>cambiarCamara(false)});
   function sincronizarReposo(){reposo.pausar(!camara.pista()||$('hoja').open||document.hidden||$('modo-capturar').hidden);}
-  const camara=crearCamara({video,puedeLeer:()=>!revisando&&!$('hoja').open,alLeer:codigo=>{reposo.actividad();ctx.recibir(codigo,'camara').then(()=>sonar(captura.flujo.actual()?.tipo==='existente'?'existe':captura.flujo.actual()?.tipo==='sin-registro'?'sin':'ok')).catch(e=>{mensaje(e.message,'aviso');sonar('error');});},alEstado:pintarCamara});
+  // Mientras el capturista teclea nombre o precio la cámara no lee: un código ajeno no guarda una tarjeta a medias.
+  const escribiendoTarjeta=()=>{const e=document.activeElement;return !!e&&e.matches?.('input:not([readonly])')&&captura.pieza.contains(e);};
+  const camara=crearCamara({video,puedeLeer:()=>!revisando&&!$('hoja').open&&!escribiendoTarjeta(),alLeer:codigo=>{reposo.actividad();ctx.recibir(codigo,'camara').then(()=>sonar(captura.flujo.actual()?.tipo==='existente'?'existe':captura.flujo.actual()?.tipo==='sin-registro'?'sin':'ok')).catch(e=>{mensaje(e.message,'aviso');sonar('error');});},alEstado:pintarCamara});
   for(const evento of ['pointerdown','input','keydown','scroll'])document.addEventListener(evento,()=>{if(!$('modo-capturar').hidden)reposo.actividad();},{capture:true,passive:true});
   document.addEventListener('visibilitychange',sincronizarReposo);
   new MutationObserver(sincronizarReposo).observe($('hoja'),{attributes:true,attributeFilter:['open']});
