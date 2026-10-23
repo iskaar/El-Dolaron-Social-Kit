@@ -15,6 +15,7 @@
 
 import { sinAcentos } from './impresora.js';
 import { nombreEstado } from './estados.js';
+import { esRopa } from './ropa.js';
 
 const SERVICIO = '0000fff0-0000-1000-8000-00805f9b34fb';
 const CARACTERISTICA = '0000fff2-0000-1000-8000-00805f9b34fb';
@@ -193,13 +194,14 @@ export function tsplEtiqueta(pieza, copias = 1, y0 = corrimiento(), barra = modu
   // de un digito, que el lector de la caja no engancha (confirmado en hardware
   // el 2026-09-22 -- el ancho de barra no tenia nada que ver, ya estaba bien).
   const numero = String(Number(pieza.codigo.slice(3))).padStart(4, '0');
-  // Grado (#453): letra en un recuadro y, si no es A, su palabra al final del pie
+  // Grado solo en MG (#453): letra en un recuadro y, si no es A, su palabra al final del pie
   // cuando cabe. Sin estado_fisico se toma como A, igual que el servidor.
   const [letra, nombreGrado] = nombreEstado(pieza.estado_fisico).split(' · ');
+  const mostrarGrado = !esRopa(pieza);
   const palabra = limpiar(nombreGrado);
   const base = limpiar(`${pieza.codigo}${pieza.talla ? ` / ${pieza.talla}` : ''} - ${pieza.semana_ingreso}`);
   const conPalabra = `${base} - ${palabra}`;
-  const pie = letra !== 'A' && conPalabra.length * ANCHO_PIE <= ANCHO - MARGEN * 2 ? conPalabra : base;
+  const pie = mostrarGrado && letra !== 'A' && conPalabra.length * ANCHO_PIE <= ANCHO - MARGEN * 2 ? conPalabra : base;
 
   const ordenes = [
     'SIZE 50.8 mm,25.4 mm',
@@ -230,8 +232,10 @@ export function tsplEtiqueta(pieza, copias = 1, y0 = corrimiento(), barra = modu
     ordenes.push(`BAR ${x},${y(81)},${ancho},3`);
   }
 
-  ordenes.push(`BOX ${xGrado},${y(GRADO_Y)},${xGrado + GRADO_ANCHO},${y(GRADO_Y + GRADO_ALTO)},3`);
-  ordenes.push(`TEXT ${xGrado + 10},${y(GRADO_Y + 6)},"4",0,1,1,"${letra}"`);
+  if (mostrarGrado) {
+    ordenes.push(`BOX ${xGrado},${y(GRADO_Y)},${xGrado + GRADO_ANCHO},${y(GRADO_Y + GRADO_ALTO)},3`);
+    ordenes.push(`TEXT ${xGrado + 10},${y(GRADO_Y + 6)},"4",0,1,1,"${letra}"`);
+  }
 
   // El codigo de barras lo dibuja la impresora, no code128.js: asi las barras
   // caen en puntos enteros del cabezal y no las deforma ningun escalado.
@@ -725,7 +729,7 @@ export function etiquetaVigente(marca, pieza) {
   if (marca.precio === undefined || (pieza.stock ?? 1) <= 0) return true;
   return precioImpreso(marca) === precioImpreso(pieza)
     && (marca.nombre === undefined || textoImpreso(marca) === textoImpreso(pieza))
-    && gradoImpreso(marca) === gradoImpreso(pieza);
+    && (esRopa(pieza) || gradoImpreso(marca) === gradoImpreso(pieza));
 }
 
 /**

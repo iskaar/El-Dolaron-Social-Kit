@@ -14,6 +14,26 @@ const DESDE = '2026-10-11T15:00:00.000Z';
 const ANTES = '2026-10-11T14:00:00.000Z';
 const DESPUES = '2026-10-11T16:00:00.000Z';
 
+test('/api/etiquetas conserva categoría al imprimir y reimprimir: Ropa sin grado y MG con grado', async t0 => {
+  const t = tienda(); t0.after(() => t.db.close());
+  const ropa = agregar(t), mg = agregar(t);
+  t.db.prepare("update productos set categoria='hogar',estado_fisico='danado' where id=?").run(mg);
+  assert.equal(t.db.prepare('select estado_fisico from productos where id=?').get(ropa)!.estado_fisico, 'nuevo');
+  let codigos: string[] | undefined;
+  for (let intento = 0; intento < 2; intento++) {
+    const r = await t.pedir('/api/etiquetas', { ids: [ropa, mg] });
+    assert.equal(r.status, 200);
+    const prendas = r.cuerpo.filter((p: any) => p.categoria === 'ropa');
+    const generales = r.cuerpo.filter((p: any) => p.categoria === 'hogar');
+    assert.equal(prendas.length, 1); assert.equal(generales.length, 1);
+    assert.doesNotMatch(tsplEtiqueta(prendas[0]), /^BOX |,"4",0,1,1,"[ABC]"/m);
+    assert.match(tsplEtiqueta(generales[0]), /,"4",0,1,1,"B"/);
+    const actuales = r.cuerpo.map((p: any) => p.codigo);
+    if (codigos) assert.deepEqual(actuales, codigos);
+    codigos = actuales;
+  }
+});
+
 function agregar(t: ReturnType<typeof tienda>, creado = DESPUES, estado = 'listo', stock = 1) {
   const id = crypto.randomUUID();
   t.db.prepare(`insert into productos (id, nombre, categoria, estado_analisis, precio, stock, semana_ingreso, creado_en, actualizado_en)
@@ -293,7 +313,7 @@ test('automática imprime lo nuevo una sola vez, con código estable y una copia
   } finally { t.db.close(); }
 });
 
-test('corregir un precio reimprime una vez con el mismo código; el grado también reimprime (#453); capturas eliminadas no imprimen', async () => {
+test('corregir un precio reimprime una vez con el mismo código; solo el grado de MG reimprime; capturas eliminadas no imprimen', async () => {
   const t = tienda();
   try {
     t.env.AMBIENTE = 'sandbox';
@@ -311,10 +331,15 @@ test('corregir un precio reimprime una vez con el mismo código; el grado tambi�
     assert.equal(p.estado.enviadas.length, 2);
     assert.equal(JSON.parse(p.almacen.get('etiqueta-impresas')!)[id].precio, 8000);
     assert.equal(t.db.prepare('select codigo from productos where id=?').get(id)!.codigo, codigo);
-    // #453: el grado va en la etiqueta, así que cambiarlo (B a A) la deja desactualizada y se reimprime una vez.
+    // Ropa no lleva grado: B a A no vuelve a imprimir ni altera la marca guardada.
     await t.pedir(`/api/borradores/${id}/revision`, { estado_fisico: 'nuevo' }, 'PATCH');
+    await p.imprimirNuevas(); await p.imprimirNuevas(); assert.equal(p.estado.enviadas.length, 2);
+    assert.equal(JSON.parse(p.almacen.get('etiqueta-impresas')!)[id].estado_fisico, 'danado');
+    // MG escaneada sí conserva la reimpresión por grado y el mismo código.
+    t.db.prepare("update productos set categoria='hogar',upc='012345678905' where id=?").run(id);
     await p.imprimirNuevas(); await p.imprimirNuevas(); assert.equal(p.estado.enviadas.length, 3);
     assert.equal(JSON.parse(p.almacen.get('etiqueta-impresas')!)[id].estado_fisico, 'nuevo');
+    assert.equal(t.db.prepare('select codigo from productos where id=?').get(id)!.codigo, codigo);
     await t.pedir(`/api/borradores/${id}/revision`, {}, 'DELETE');
     await p.imprimirNuevas(); assert.equal(p.estado.enviadas.length, 3);
     const otra = crypto.randomUUID();
