@@ -47,6 +47,7 @@ import { registrarSocio, buscarSocio, buscarPorCodigo, basesListas, sentenciasDe
 import { registrarCorte, registrarRetiro, ultimoCorte, cajaDe } from './corte.ts';
 import { rutaGastos } from './gastos.ts';
 import { rutaPiezas } from './piezas.ts';
+import { rutaSolicitudesPrecio } from './solicitudes-precio.ts';
 import { MISMO_UPC, PIEZA_UPC, capturaSumada, sumarCaptura, conflictoUpc, corregirUpc, upcValido, type PiezaUpc } from './upc-inventario.ts';
 import { rutaCamaraRemota } from './camara-remota.ts';
 import { rutaNomina } from './nomina.ts';
@@ -96,7 +97,7 @@ const RUTAS_VENDEDOR = new Set(['/captura', '/foto.js', '/tallas.js', '/api/salu
   // Escanear del manifiesto (Issue #365): el telefono ve nombre y precio de lo que escanea, nada mas.
   '/escanear', '/categorias.js', '/upc.js', '/cola-fotos.js', '/estados.js',
   '/inventario-celular.js', '/foto-pendiente.js', '/camara-inventario.js',
-  '/inventario-revisar.js', '/sesiones.js', '/precios-ml.js', '/compartir.js',
+  '/inventario-revisar.js', '/inventario-precio.js', '/sesiones.js', '/precios-ml.js', '/compartir.js',
   '/inventario-capturar.js', '/inventario-ropa.js', '/envio-etiquetas.js', '/semana.js',
   '/inventario', '/inventario.css', '/inventario.js', '/inventario-ui.js', '/lector.js', '/ficha.js',
   '/venta.js', '/etiquetera.js', '/impresora.js', '/camara.js', '/vendor/html5-qrcode.min.js', '/ropa.js']);
@@ -105,7 +106,10 @@ const CORRECCION_CAPTURA = /^\/api\/borradores\/([^/]+)\/(existencia|talla|revis
 export function permitidaParaVendedor(pathname: string, metodo: string): boolean {
   if (/^\/(inventario|pieza)(?:\.html)?\/?$/.test(pathname)) return metodo === 'GET';
   if (pathname === '/api/piezas' || /^\/api\/piezas\/[^/]+$/.test(pathname) || /^\/api\/foto\/[^/]+$/.test(pathname)) return metodo === 'GET';
-  if (/^\/api\/piezas\/[^/]+\/(existencia|juntar)$/.test(pathname)) return metodo === 'POST';
+  if (/^\/api\/piezas\/[^/]+\/(existencia|juntar|solicitud-precio)$/.test(pathname)) return metodo === 'POST';
+  // Precios por revisar (#451): el servidor exige el rol de dueño para listar y resolver.
+  if (pathname === '/api/solicitudes-precio') return metodo === 'GET';
+  if (/^\/api\/solicitudes-precio\/[^/]+$/.test(pathname)) return metodo === 'POST';
   if (pathname === '/api/borradores' && metodo === 'GET') return true;
   if (pathname === '/api/familias' || pathname === '/api/recortes') return metodo === 'GET';
   if (/^\/api\/recortes\/[^/]+\/imagen$/.test(pathname)) return metodo === 'GET';
@@ -378,7 +382,7 @@ async function destinoValido(destino: string, env: Env): Promise<boolean> {
  * Con etiqueta (codigo) la pieza ya esta a la venta con ese precio impreso: solo
  * el dueno lo cambia (Issue #75). Antes de etiquetar, poner precio es parte de la captura.
  */
-async function corregirBorrador(id: string, cambios: Record<string, unknown>, env: Env, esDueno: boolean, captura?: { correo: string; upc: string }): Promise<Response> {
+async function corregirBorrador(id: string, cambios: Record<string, unknown>, env: Env, esDueno: boolean, captura?: { correo: string; upc: string }, precioEsperado?: number, cierraSolicitudPor?: string): Promise<Response> {
   if (!UUID.test(id)) {
     return json({ error: 'Identificador invalido.' }, 400);
   }
@@ -458,7 +462,8 @@ async function corregirBorrador(id: string, cambios: Record<string, unknown>, en
     return json({ error: 'Esta pieza ya tiene etiqueta: solo el dueño cambia su precio.' }, 403);
   }
 
-  const guardada = await env.DB.prepare(
+  const ahora = new Date().toISOString();
+  const actualizar = env.DB.prepare(
     `update productos set nombre = ?, categoria = ?, marca = ?, talla = ?, precio_lista = ?, precio = ?,
                           estado_fisico = ?, destino = ?, stock = coalesce(?, stock), estado_analisis = 'listo', actualizado_en = ?
                           , upc = ? ${captura ? `, codigo = ${CODIGO_NUEVO}` : ''}
@@ -469,16 +474,31 @@ async function corregirBorrador(id: string, cambios: Record<string, unknown>, en
        ${captura ? `and capturado_por = ? and upc = ? and propietario = 'dolaron'
          and estado_analisis in ('pendiente', 'error') and (codigo is null or codigo = '')
          and not exists (select 1 from venta_lineas where producto_id = productos.id)` : ''}
+       ${precioEsperado === undefined ? '' : 'and precio = ?'}
      returning stock`,
   )
     .bind(nombre, categoria, marca, talla, precioLista, precio, estadoFisico, destino,
       // Sin `stock` en el cuerpo no se toca: la caja pudo vender piezas desde que se abrio la ficha.
-      cambios.stock === undefined ? null : stock, new Date().toISOString(), upc ?? null, id,
+      cambios.stock === undefined ? null : stock, ahora, upc ?? null, id,
       verificarUpc ? 1 : 0, normalizarUpc(upc), fila.propietario, normalizarUpc(upc), estadoFisico, id,
-      fila.upc ?? null, fila.estado_fisico, ...(captura ? [captura.correo, captura.upc] : []))
-    .first<{ stock: number }>();
+      fila.upc ?? null, fila.estado_fisico, ...(captura ? [captura.correo, captura.upc] : []),
+      ...(precioEsperado === undefined ? [] : [precioEsperado]));
+  // #451: si el dueño cambia el precio por esta vía y había una solicitud pendiente, se cierra en el mismo batch,
+  // solo si la pieza sigue viva y el precio de verdad cambia.
+  const guardada = cierraSolicitudPor && precio !== fila.precio
+    ? (await env.DB.batch([
+      actualizar,
+      // Después del UPDATE: si una guarda (UPC, descartada) lo frenó, la marca de tiempo no coincide y la solicitud sigue pendiente.
+      env.DB.prepare(`update solicitudes_precio set estado = 'aplicada', precio_nuevo = ?, resuelto_por = ?, resuelto_en = ?
+        where producto_id = ? and estado = 'pendiente'
+          and exists (select 1 from productos where id = ? and precio = ? and actualizado_en = ?)`)
+        .bind(precio, cierraSolicitudPor, ahora, id, id, precio, ahora),
+    ]))[0].results?.[0] as { stock: number } | undefined
+    : await actualizar.first<{ stock: number }>();
 
-  if (!guardada) return await conflictoUpc(env, upc || '', estadoFisico, fila.propietario, id) ?? json({ error: 'La pieza cambió o ya fue eliminada.' }, 409);
+  // `precioEsperado` (#451): el precio solo cambia si sigue valiendo lo que vio quien lo cambia.
+  if (!guardada) return precioEsperado !== undefined ? json({ error: 'El precio de la pieza cambió. Revisa el precio actual.' }, 409)
+    : await conflictoUpc(env, upc || '', estadoFisico, fila.propietario, id) ?? json({ error: 'La pieza cambió o ya fue eliminada.' }, 409);
   return json({ id, nombre, categoria, marca, talla, upc, precio_lista: precioLista, precio, estado_fisico: estadoFisico, destino, stock: guardada.stock });
 }
 
@@ -2228,6 +2248,10 @@ export default {
       if (pathname === '/api/camara/solicitud' || pathname.startsWith('/api/camara/solicitud/')) {
         return await rutaCamaraRemota(request, env, pathname, usuario!);
       }
+      if (pathname === '/api/solicitudes-precio' || pathname.startsWith('/api/solicitudes-precio/') || /^\/api\/piezas\/[^/]+\/solicitud-precio$/.test(pathname)) {
+        // Aplicar un precio pasa por corregirBorrador: las mismas reglas que la corrección de la ficha.
+        return await rutaSolicitudesPrecio(request, env, url, usuario!, (id, precio, esperado) => corregirBorrador(id, { precio }, env, true, undefined, esperado));
+      }
       if (pathname === '/api/piezas' || pathname.startsWith('/api/piezas/')) {
         const respuesta = await rutaPiezas(request, env, url, await leerUsuario(env, correo), ctx);
         if (respuesta) return respuesta;
@@ -2481,7 +2505,7 @@ export default {
       if (pieza) {
         if (request.method === 'PATCH') {
           const esDueno = !!(await leerUsuario(env, correo))?.roles.includes('dueno');
-          return await corregirBorrador(pieza[1], await request.json(), env, esDueno);
+          return await corregirBorrador(pieza[1], await request.json(), env, esDueno, undefined, undefined, esDueno ? correo : undefined);
         }
         if (request.method === 'DELETE') {
           return await descartarBorrador(pieza[1], env, propietarioDe(await leerUsuario(env, correo)));

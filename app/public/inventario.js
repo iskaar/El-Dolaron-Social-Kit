@@ -1,6 +1,7 @@
 import { escucharLector } from './lector.js';
 import { api, crearFicha, pesos, resolverRepetida } from './ficha.js';
 import { $, nodo, boton, mensaje, hoja, confirmar, prepararHoja, stepper, cerrarHoja, ponerNeutro, bloquear } from './inventario-ui.js';
+import { montarPrecio, refrescarPrecios } from './inventario-precio.js';
 
 prepararHoja();
 const pc = () => matchMedia('(min-width:1000px)').matches;
@@ -16,8 +17,9 @@ const ficha = crearFicha({ mensaje, confirmar, integrada:true, antesCamara:apaga
   const c=nodo('div',undefined,'chips');
   for(const [valor,texto] of [['correccion','Corrección'],['merma','Merma'],['robo','Robo'],['entrada','Entrada']]) c.append(boton(texto,()=>{ resolve(valor);cerrarHoja(); }));
   hoja('Motivo',c);$('hoja').addEventListener('close',()=>resolve(null),{once:true});
-}), alAbrir(p) {
+}), alAbrir(p, datos) {
   piezaActual = p; document.body.classList.add('con-ficha');
+  montarPrecio(contexto, $('bloque-precio'), p, datos?.solicitud_precio ?? null);
   $('solo-consulta').hidden = dueno || identidad.usuario?.editar_inventario === true;
   for (const b of document.querySelectorAll('.resultado')) b.setAttribute('aria-current', String(b.dataset.id === p.id));
   $('acciones-ficha').replaceChildren();
@@ -99,7 +101,8 @@ async function cambiarModo(nuevo) {
   if (!modos.includes(nuevo)) return;
   const turno=++cambioModo;
   await apagarCamaras();if(turno!==cambioModo)return; clearTimeout(filtroTimer); ++generacion; cargando = false; ficha.cerrar(); piezaActual = null; document.body.classList.remove('con-ficha');
-  modo = nuevo; localStorage.setItem('inventario-modo', modo); history.replaceState(null, '', `${location.pathname}${location.search}#${modo}`);
+  modo = nuevo; if (dueno && nuevo !== 'revisar') actualizarPrecios();
+  localStorage.setItem('inventario-modo', modo); history.replaceState(null, '', `${location.pathname}${location.search}#${modo}`);
   $('consulta').value='';
   for (const b of document.querySelectorAll('[data-modo]')) { const activo = b.dataset.modo === modo; b.setAttribute('aria-selected', String(activo)); b.tabIndex = activo ? 0 : -1; $(b.getAttribute('aria-controls')).hidden = !activo; }
   $('busqueda').hidden = modo === 'capturar' && !pc();
@@ -126,6 +129,17 @@ $('modos').addEventListener('keydown', (e) => {
   e.preventDefault(); const i = modos.indexOf(modo), n = e.key === 'Home' ? 0 : e.key === 'End' ? modos.length - 1 : (i + (e.key === 'ArrowRight' ? 1 : -1) + modos.length) % modos.length;
   void cambiarModo(modos[n]);
 });
+// Precios por revisar (#451): el dueño ve cuántas esperan en la pestaña Revisar, con número y no solo con color.
+const insigniaPrecios = nodo('span', '', 'insignia insignia-modo'); insigniaPrecios.hidden = true; insigniaPrecios.setAttribute('aria-hidden', 'true');
+const actualizarPrecios = () => { if (navigator.onLine) refrescarPrecios().catch(() => {}); };
+if (dueno) {
+  $('tab-revisar').append(insigniaPrecios);
+  document.addEventListener('precios', (e) => {
+    const n = e.detail; insigniaPrecios.hidden = !n; insigniaPrecios.textContent = n > 99 ? '99+' : String(n);
+    if (n) $('tab-revisar').setAttribute('aria-label', `Revisar, ${n} ${n === 1 ? 'precio' : 'precios'} por revisar`); else $('tab-revisar').removeAttribute('aria-label');
+  });
+  addEventListener('online', actualizarPrecios);
+}
 async function recibir({ codigo }) {
   if ($('hoja').open) return;
   $('consulta').value = codigo;

@@ -11,6 +11,7 @@ export function boton(texto, accion, clase = '') {
 }
 let limpiarEstado, neutro = 'Escanea o escribe';
 export const ponerNeutro = (texto) => { neutro = texto; };
+export const restaurarNeutro = () => mensaje(neutro);
 export function mensaje(texto, tipo = 'neutro') {
   clearTimeout(limpiarEstado);
   const error = tipo === 'error', el = $(error ? 'error' : 'estado');

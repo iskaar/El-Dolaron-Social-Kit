@@ -5,6 +5,7 @@ import { cuerpoCorreccion, resolverRepetida } from './ficha.js';
 import { enlacePreciosML } from './precios-ml.js';
 import { copiarParaMarketplace } from './compartir.js';
 import { cerrarHoja, bloquear } from './inventario-ui.js';
+import { filaSolicitud, precios, refrescarPrecios } from './inventario-precio.js';
 import { normalizarUpc } from './upc.js';
 
 const normalizar = t => String(t||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/\s+/g,' ').trim();
@@ -47,7 +48,7 @@ export async function iniciar(ctx) {
   const estadoTexto=p=>p.estado_analisis==='error'?'■ Con error':p.estado_analisis==='pendiente'?'⏳ Analizando':p.precio<=0?'▲ Sin precio':'✓ Lista';
   const normalizarNombre=p=>normalizar(p.nombre);
   const gemela=p=>piezas.find(o=>o.id!==p.id&&o.estado_fisico===p.estado_fisico&&o.estado_analisis==='listo'&&normalizarNombre(o)===normalizarNombre(p)&&!(p.codigo&&o.codigo));
-  for(const [v,t]of [['revisar','Por revisar'],['hoy','Hoy'],['error','Error'],['todas','Todas']]){const b=boton(t,()=>{filtro.estado=v;pintar();});b.dataset.estado=v;chips.append(b);}
+  for(const [v,t]of [...(dueno?[['precios','Precios por revisar']]:[]),['revisar','Por revisar'],['hoy','Hoy'],['error','Error'],['todas','Todas']]){const b=boton(t,()=>{filtro.estado=v;pintar();});b.dataset.estado=v;chips.append(b);}
   if(puedeEditar){const b=boton('Repetidas · 0',()=>{filtro.estado='repetidas';abierta=null;ficha.cerrar();document.body.classList.remove('con-ficha');pintar();b.scrollIntoView({block:'nearest',inline:'nearest'});});b.dataset.estado='repetidas';chips.append(b);}
   const botonFiltros=boton('Filtros',filtros),guardarTodo=boton('Guardar todo',()=>masiva('guardar',visibles),'guardar-todo'),mas=boton('⋯',()=>{
     const c=nodo('div',undefined,'formulario'),errores=piezas.filter(p=>p.estado_analisis==='error');
@@ -64,14 +65,17 @@ export async function iniciar(ctx) {
   async function cargar(){
     if(!navigator.onLine){placeholder.hidden=true;lista.replaceChildren(vacio('Este modo necesita red',boton('Ir a Capturar',()=>ctx.cambiarModo('capturar'))));mensaje('Este modo necesita red','aviso');return;}
     const turno=++generacion;mensaje('Cargando piezas…');
-    try{const [datos,grupos]=await Promise.all([api('/api/borradores'),puedeEditar?api('/api/piezas/repetidas'):null]);if(turno!==generacion)return;piezas=datos.reverse();repetidas=new Map();siguienteRepetidas=grupos?.siguiente||null;if(grupos)agregarRepetidas(grupos.grupos);sesiones=agruparSesiones(piezas);for(const id of seleccion)if(!piezas.some(p=>p.id===id))seleccion.delete(id);pintar();}
+    const avisos=dueno?refrescarPrecios().catch(()=>{}):null;
+    try{const [datos,grupos]=await Promise.all([api('/api/borradores'),puedeEditar?api('/api/piezas/repetidas'):null]);await avisos;if(turno!==generacion)return;piezas=datos.reverse();repetidas=new Map();siguienteRepetidas=grupos?.siguiente||null;if(grupos)agregarRepetidas(grupos.grupos);sesiones=agruparSesiones(piezas);for(const id of seleccion)if(!piezas.some(p=>p.id===id))seleccion.delete(id);pintar();}
     catch(e){if(turno!==generacion)return;mensaje(e.message,'error');placeholder.hidden=true;lista.replaceChildren(vacio('Sin conexión',boton('Reintentar',cargar,'primario')));}
   }
   function pintar(){
     visibles=filtrarRevision(piezas,filtro,sesiones?.porPieza);
     const pendientes=piezas.filter(p=>p.estado_analisis!=='listo'||p.precio<=0).length,errores=piezas.filter(p=>p.estado_analisis==='error').length;
-    for(const b of chips.children){b.setAttribute('aria-pressed',String(b.dataset.estado===filtro.estado));b.textContent=({revisar:`Por revisar ${pendientes}`,hoy:'Hoy',error:`Error ${errores}`,todas:'Todas',repetidas:`Repetidas · ${repetidas.size}${siguienteRepetidas?'+':''}`})[b.dataset.estado];}
+    etiquetasFiltro(pendientes,errores);
+    controles.hidden=activos.hidden=filtro.estado==='precios';
     botonFiltros.hidden=filtro.estado==='repetidas';
+    if(filtro.estado==='precios')return pintarPrecios();
     if(filtro.estado==='repetidas'){pintarRepetidas();return;}
     const nFiltros=['dia','categoria','min','max','sesion'].filter(k=>filtro[k]).length;botonFiltros.textContent=nFiltros?`Filtros (${nFiltros})`:'Filtros';guardarTodo.hidden=!visibles.length;
     nota.hidden=piezas.length!==2000;nota.textContent='Mostrando las 2000 más recientes';
@@ -88,6 +92,24 @@ export async function iniciar(ctx) {
     pintarBarra();estadoLista();placeholder.hidden=!visibles.length;
     if(pc()&&!abierta&&visibles[0]){const primera=visibles[0];void abrir(primera).then(()=>{if(abierta===primera)estadoLista();},e=>mensaje(e.message,'error'));}
   }
+  function etiquetasFiltro(pendientes=piezas.filter(p=>p.estado_analisis!=='listo'||p.precio<=0).length,errores=piezas.filter(p=>p.estado_analisis==='error').length){
+    for(const b of chips.children){b.setAttribute('aria-pressed',String(b.dataset.estado===filtro.estado));b.textContent=({precios:`Precios por revisar · ${precios.n}`,revisar:`Por revisar ${pendientes}`,hoy:'Hoy',error:`Error ${errores}`,todas:'Todas',repetidas:`Repetidas · ${repetidas.size}${siguienteRepetidas?'+':''}`})[b.dataset.estado];}
+    chips.querySelector('[data-estado=precios]')?.classList.toggle('con-pendientes',precios.n>0&&filtro.estado!=='precios');
+  }
+  // Solicitudes de precio (#451): el dueño decide aquí mismo; la fila se queda con «✓ Ahora $X» hasta recargar.
+  function pintarPrecios(){
+    lista.replaceChildren();placeholder.hidden=true;barra.hidden=true;nota.hidden=true;
+    const n=precios.lista.length;
+    const encabezado=nodo('li',undefined,'acciones');cuentaPrecios=nodo('b');encabezado.append(cuentaPrecios,boton('Actualizar',cargar));lista.append(encabezado);textoCuenta();
+    for(const s of precios.lista){const li=nodo('li',undefined,'fila-precio');li.append(filaSolicitud(ctx,s,{alAbrir:()=>verPieza(s),alResolver:r=>{const p=piezas.find(o=>o.id===s.producto_id);if(p&&r.precio)p.precio=r.precio;}}));lista.append(li);}
+    if(!n)lista.append(vacio('✓ Sin precios por revisar',boton('Ver por revisar',()=>{filtro.estado='revisar';pintar();})));
+    mensaje(n?`${n} ${n===1?'precio por revisar':'precios por revisar'}`:'Sin precios por revisar');
+  }
+  let cuentaPrecios;
+  const textoCuenta=()=>{if(cuentaPrecios?.isConnected)cuentaPrecios.textContent=precios.n?`${precios.n} ${precios.n===1?'precio por revisar':'precios por revisar'}`:'Nadie ha pedido cambios';};
+  // La ficha de Revisar; si la pieza no está en la cola cargada, la ficha de Buscar con el mismo flujo del lector.
+  async function verPieza(s){const p=piezas.find(o=>o.id===s.producto_id);if(p)return abrir(p);await ctx.cambiarModo('buscar');$('consulta').value=s.codigo||s.nombre;$('busqueda').requestSubmit();}
+  document.addEventListener('precios',()=>{etiquetasFiltro();textoCuenta();});
   function agregarRepetidas(grupos){
     for(const g of grupos){const key=`${g.upc}~${g.estado_fisico}`,previo=repetidas.get(key);if(previo){for(const p of g.piezas)if(!previo.piezas.some(o=>o.id===p.id))previo.piezas.push(p);}else repetidas.set(key,g);}
   }
