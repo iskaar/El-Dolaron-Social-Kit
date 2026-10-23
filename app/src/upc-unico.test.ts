@@ -262,6 +262,47 @@ test('hoja de coincidencia usa fusión si falta etiqueta y reintenta UPC sin rep
   }
 });
 
+test('perder la respuesta de fusión permite reintentar y guardar el UPC de la pieza etiquetada', async t0 => {
+  const t = preparar(); t0.after(() => t.db.close());
+  const a = pieza(t,{codigo:'ED-000123',upc:'999999999999',stock:2}), b = pieza(t,{upc:UPC});
+  const acciones = new Map<string,() => Promise<void>>(), llamadas:string[] = [], terminadas:string[] = [];
+  const nodo = () => ({append(){},setAttribute(){}});
+  let perder = true;
+  resolverRepetida(a,b,{
+    nodo,boton:(texto,accion)=>{acciones.set(texto,accion);return nodo();},hoja(){},mensaje(){},cerrar(){},
+    upc:UPC,alTerminar:async id=>{terminadas.push(id);},imprimir:async()=>true,
+    api:async(ruta,cuerpo,metodo)=>{
+      llamadas.push(ruta);
+      const r = await t.pedir(ruta,cuerpo,metodo);
+      if (r.status >= 400) throw Object.assign(new Error(r.cuerpo.error),{status:r.status});
+      if (perder && ruta.endsWith('/fusionar')) { perder=false; throw new TypeError('Respuesta perdida'); }
+      return r.cuerpo;
+    },
+  });
+  await acciones.get('Juntar en ED-000123')!();
+  assert.equal(t.db.prepare('select id from productos where id=?').get(b.id), undefined);
+  assert.deepEqual(terminadas, []);
+  await acciones.get('Juntar en ED-000123')!();
+  assert.deepEqual(terminadas, [a.id]);
+  assert.deepEqual({...t.db.prepare('select upc,stock,codigo from productos where id=?').get(a.id)!},
+    {upc:UPC,stock:5,codigo:a.codigo});
+  assert.deepEqual(llamadas,[`/api/borradores/${b.id}/fusionar`,`/api/borradores/${b.id}/fusionar`,`/api/borradores/${a.id}`]);
+});
+
+test('un 404 inicial de fusión o un error distinto en el reintento no autoriza guardar UPC', async () => {
+  for (const estados of [[404], [500,403], [500,409]]) {
+    const acciones = new Map<string,() => Promise<void>>(), llamadas:string[] = [];
+    const nodo = () => ({append(){},setAttribute(){}});
+    resolverRepetida({id:'a',codigo:'ED-000123',upc:'999999999999',stock:2},{id:'b',upc:UPC,stock:3},{
+      nodo,boton:(texto,accion)=>{acciones.set(texto,accion);return nodo();},hoja(){},mensaje(){},cerrar(){},upc:UPC,
+      api:async ruta=>{llamadas.push(ruta);throw Object.assign(new Error('Fallo'),{status:estados[llamadas.length-1]});},
+      imprimir:async()=>true,
+    });
+    for (const _ of estados) await acciones.get('Juntar en ED-000123')!();
+    assert.ok(llamadas.every(ruta=>ruta.endsWith('/fusionar')));
+  }
+});
+
 test('Repetidas agrupa UPC normalizado+grado, excluye otras piezas y elige la etiqueta más antigua', async () => {
   const t = preparar();
   pieza(t,{upc:UPC});
