@@ -252,17 +252,24 @@ async function crearBorrador(request: Request, env: Env, ctx: ExecutionContext, 
   });
 
   // Foto de respaldo del escáner: conserva identidad y precio conocidos, sin otro análisis.
+  // Con edición de la tarjeta (#461) se enruta igual que la tarjeta: precioDeManifiesto no exige foto en la pieza del catálogo (#402).
+  const edicion = formulario.has('nombre') || formulario.has('precio');
   if (upc && propietario === 'dolaron' && (
     await env.DB.prepare('select upc from manifiesto where upc = ?').bind(normalizarUpc(upc)).first()
+    || (edicion && !((await precioDeManifiesto(upc, env)) instanceof Response))
     || await env.DB.prepare(`select id from productos where ltrim(upc, '0') = ? and propietario = 'dolaron'
       and foto_key <> '' and estado_analisis = 'listo' and precio > 0 limit 1`).bind(normalizarUpc(upc)).first()
   )) {
-    const respuesta = await capturarPorUpc(new Request('https://local/api/borradores/upc', {
+    const alta = (conEdicion: boolean) => capturarPorUpc(new Request('https://local/api/borradores/upc', {
       method: 'POST', body: JSON.stringify({ id, upc, stock: cantidad, estado_fisico: estadoFisico,
-        // Edición de la tarjeta del manifiesto (#461): capturarPorUpc la autoriza igual que POST /api/borradores/upc.
-        ...(typeof formulario.get('nombre') === 'string' ? { nombre: formulario.get('nombre') } : {}),
-        ...(formulario.has('precio') ? { precio: Number(formulario.get('precio')) } : {}) }),
+        // capturarPorUpc autoriza la edición igual que POST /api/borradores/upc.
+        ...(conEdicion && typeof formulario.get('nombre') === 'string' ? { nombre: formulario.get('nombre') } : {}),
+        ...(conEdicion && formulario.has('precio') ? { precio: Number(formulario.get('precio')) } : {}) }),
     }), env, correo);
+    let respuesta = await alta(true);
+    // Una edición no autorizada se descarta y se guarda con los valores del manifiesto: un 403 aquí
+    // detendría la cola de fotos con «Tu sesión venció». El 403 va antes de cualquier escritura.
+    if (respuesta.status === 403 && edicion) respuesta = await alta(false);
     if (respuesta.ok) {
       const guardada = await respuesta.clone().json() as { id: string; existente?: boolean };
       if (!guardada.existente) await env.DB.prepare('update productos set foto_key = ? where id = ?').bind(fotoKey, guardada.id).run();

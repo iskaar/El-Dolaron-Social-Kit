@@ -13,7 +13,8 @@ import { HUECO_LECTOR } from './lector.js';
 export function cambiosTarjeta(a){
   const cambios={};
   if(a.nombre!==undefined){cambios.nombre=a.nombre.trim();if(!cambios.nombre)throw new Error('El nombre no puede quedar vacío.');}
-  if(a.precio!==undefined){cambios.precio=aCentavos(a.precio);if(cambios.precio===null||cambios.precio<=0)throw new Error('Escribe un precio mayor a cero en pesos.');}
+  if(a.precio!==undefined){cambios.precio=aCentavos(a.precio);if(cambios.precio===null||cambios.precio<=0)throw new Error('Escribe un precio mayor a cero en pesos.');
+    const lista=a.ficha?.precio_lista;if(lista>0&&cambios.precio>lista)throw new Error(`El precio no puede ser mayor al precio de lista ($${(lista/100).toFixed(2)}).`);}
   return cambios;
 }
 /** ¿Los campos de la tarjeta difieren de lo que se mostró? Entonces solo «Guardar» la guarda. */

@@ -229,7 +229,7 @@ test('P2-2: la foto de una tarjeta editada lleva nombre y precio; registros viej
   assert.throws(()=>cambiosTarjeta({nombre:'  '}),/nombre/);assert.throws(()=>cambiosTarjeta({precio:'0'}),/precio/);
 });
 
-test('P2-2: la foto en cola con precio editado: capturista 403 sin escribir, dueño conserva nombre y precio',async t0=>{
+test('P2-2/P3-a: la foto en cola con edición no autorizada se guarda con el manifiesto; dueño conserva nombre y precio',async t0=>{
   const t=manifiesto();t0.after(async()=>{await t.esperar();t.db.close();});
   const ficha=(await t.pedir('/api/manifiesto/0191907910414')).cuerpo;
   const subir=(extra:Record<string,string>,id=crypto.randomUUID())=>{
@@ -240,11 +240,18 @@ test('P2-2: la foto en cola con precio editado: capturista 403 sin escribir, due
   t.env.DEV_USUARIO='cap@prueba.mx';
   for(const casilla of [0,1]){
     t.db.prepare("update usuarios set editar_inventario=? where correo='cap@prueba.mx'").run(casilla);
-    assert.equal((await subir({precio:String(ficha.precio+100)})).status,403);
+    const id=crypto.randomUUID();
+    assert.equal((await subir({precio:String(ficha.precio+100)},id)).status,201,'La edición no autorizada se descarta, la cola no se detiene');
+    assert.equal(t.db.prepare('select precio from productos where id=?').get(id)!.precio,ficha.precio);
+    t.db.prepare('delete from productos where id=?').run(id);
   }
   t.db.prepare("update usuarios set editar_inventario=0 where correo='cap@prueba.mx'").run();
-  assert.equal((await subir({nombre:'Otro nombre'})).status,403);
+  const otro=crypto.randomUUID();
+  assert.equal((await subir({nombre:'Otro nombre'},otro)).status,201);
+  assert.equal(t.db.prepare('select nombre from productos where id=?').get(otro)!.nombre,ficha.nombre,'El nombre no autorizado nunca se escribe');
+  t.db.prepare('delete from productos where id=?').run(otro);
   assert.equal(t.db.prepare('select count(*) n from productos where upc is not null').get()!.n,0);
+  assert.equal((await t.pedir('/api/borradores/upc',{...alta(),precio:ficha.precio+100})).status,403,'El POST directo conserva su 403');
   const sin=crypto.randomUUID();assert.equal((await subir({},sin)).status,201,'Sin campos: valores del manifiesto');
   assert.equal(t.db.prepare('select precio from productos where id=?').get(sin)!.precio,ficha.precio);
   t.env.DEV_USUARIO=DUENO;t.db.prepare('delete from productos where id=?').run(sin);
@@ -265,4 +272,24 @@ test('P3-1: Enter en un campo de la tarjeta devuelve el foco al lector; una ráf
   for(const k of '1234')tecla(k,k==='1'?400:200);campo.value+='';
   tecla('Enter',200);
   assert.deepEqual(leidos,['1234567890'],'Tecleo humano no es un código');assert.equal(campo.value,'Lámpara1234');assert.equal(salidas,2);
+});
+
+test('P3-b: un precio mayor al de lista se rechaza antes de encolar o guardar',()=>{
+  const ficha={precio_lista:50000};
+  assert.throws(()=>cambiosTarjeta({ficha,precio:'500.01'}),/precio de lista/);
+  assert.deepEqual(cambiosTarjeta({ficha,precio:'500'}),{precio:50000});
+  assert.deepEqual(cambiosTarjeta({ficha:{precio_lista:0},precio:'900'}),{precio:90000},'Sin precio de lista no hay tope');
+});
+
+test('P3-c: UPC solo en catálogo y sin foto: la foto con edición del dueño sí llega a capturarPorUpc',async t0=>{
+  const t=manifiesto();t0.after(async()=>{await t.esperar();t.db.close();});
+  t.db.prepare("delete from manifiesto").run();
+  t.db.prepare(`insert into productos(id,upc,nombre,categoria,precio_lista,precio,estado_fisico,stock,estado_analisis,propietario,destino,semana_ingreso,creado_en,actualizado_en)
+    values('catalogo','0191907910414','Lámpara catálogo','otros',10000,8000,'danado',1,'listo','dolaron','etiqueta','S43','','')`).run();
+  const id=crypto.randomUUID();
+  const f=formularioPendiente(registroFoto(new Blob(['foto'],{type:'image/jpeg'}),{id,upc:'0191907910414',cantidad:2,estado_fisico:'nuevo',nombre_edit:'Lámpara editada',precio_edit:9000}));
+  const r=await worker.fetch!(new Request('https://caja.prueba/api/borradores',{method:'POST',body:f}) as never,t.env,t.ctx as never);
+  assert.equal(r.status,201);
+  const fila=t.db.prepare('select nombre,precio,stock,foto_key from productos where id=?').get(id)!;
+  assert.deepEqual([fila.nombre,fila.precio,fila.stock,fila.foto_key],['Lámpara editada',9000,2,`fotos/${id}.jpg`]);
 });
