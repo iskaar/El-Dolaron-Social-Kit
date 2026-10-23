@@ -33,6 +33,9 @@ export function existenciaNueva(p,campos){
   return t!==''&&Number.isInteger(n)&&n>=0&&n<=999?{valor:n,esperado:Number(visto)}:{error:'La existencia debe ser un entero de 0 a 999.'};
 }
 
+/** En una pieza `listo` la ficha compartida ya edita nombre, marca, talla y precios; aquí solo quedan categoría, estado, destino y existencia (#469). */
+export const ocultoEnListo=(p,k)=>p.estado_analisis==='listo'&&['nombre','marca','talla','precio_lista','precio'].includes(k);
+
 /** El PATCH de revisión lleva stock solo si se tocó y la pieza no es `listo` (esa va por el ajuste auditado, ver guardar); solo Recalcular omite precio deliberadamente. */
 export function cuerpoRevision(p, campos, dueno, recalcular=false) {
   const puedePrecio=dueno||!p.codigo;
@@ -175,6 +178,7 @@ export async function iniciar(ctx) {
     const seccion=nodo('section'),form=nodo('form',undefined,'formulario'),campos=camposDe(p);seccion.append(nodo('h3','Corregir datos'),form);derecha.append(seccion);
     for(const[k,t]of [['nombre','Nombre'],['marca','Marca'],['talla','Talla'],['categoria','Categoría'],['estado_fisico','Estado'],['destino','Destino'],['precio_lista','Precio de lista ($)'],['precio','Precio de venta ($)'],['stock','Existencia']]){
       if((k==='precio'||k==='precio_lista')&&p.codigo&&!dueno)continue;
+      if(ocultoEnListo(p,k))continue;
       const l=nodo('label',t),input=nodo(['categoria','estado_fisico','destino'].includes(k)?'select':'input');
       const poner=opciones=>{for(const[v,t]of opciones){const o=nodo('option',t);o.value=v;input.append(o);}input.value=campos[k];};
       if(k==='categoria')poner(CATEGORIAS);else if(k==='estado_fisico')poner(ESTADOS);else if(k==='destino'){poner([[p.destino,p.destino==='etiqueta'?'Etiqueta individual':p.destino]]);void destinos().then(d=>{input.replaceChildren();poner(d);}).catch(e=>mensaje(e.message,'error'));}
