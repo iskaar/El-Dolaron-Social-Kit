@@ -95,12 +95,12 @@ test('descartar y fusionar borran también el recorte de la pieza', async () => 
   }
 });
 
-test('el cron reencola pendientes viejos (máx. 20), manda a error los de más de 1 h y no toca listo', async (prueba) => {
+test('el cron reencola pendientes viejos (máx. 5), manda a error los de más de 1 h y no toca listo', async (prueba) => {
   prueba.mock.method(console, 'error', () => {});
   prueba.mock.method(console, 'log', () => {});
   const t = tienda();
   try {
-    const viejas = Array.from({ length: 23 }, (_, i) => { const id = crypto.randomUUID(); pieza(t, id, { hace: 30 + i / 100 }); return id; });
+    const viejas = Array.from({ length: 8 }, (_, i) => { const id = crypto.randomUUID(); pieza(t, id, { hace: 30 + i / 100 }); return id; });
     const abandonada = crypto.randomUUID(), reciente = crypto.randomUUID(), listo = crypto.randomUUID(), sinFoto = crypto.randomUUID();
     pieza(t, abandonada, { hace: 120 });
     pieza(t, reciente, { hace: 5 });
@@ -110,8 +110,8 @@ test('el cron reencola pendientes viejos (máx. 20), manda a error los de más d
     t.env.FOTOS.get = (async (llave: string) => { vistas.push(llave); return null; }) as never;   // el análisis falla y deja la pieza en error
     await rescatarPendientes(t.env);
     const estado = (id: string) => t.db.prepare('select estado_analisis e from productos where id = ?').get(id)!.e;
-    assert.equal(vistas.length, 20);
-    assert.deepEqual([...vistas].sort(), viejas.slice(3).map((id) => `fotos/${id}.jpg`).sort());   // las 20 más viejas
+    assert.equal(vistas.length, 5);
+    assert.deepEqual([...vistas].sort(), viejas.slice(3).map((id) => `fotos/${id}.jpg`).sort());   // las 5 más viejas
     assert.deepEqual(viejas.slice(0, 3).map(estado), ['pendiente', 'pendiente', 'pendiente']);
     assert.equal(estado(abandonada), 'error');
     assert.ok(!vistas.includes(`fotos/${abandonada}.jpg`));

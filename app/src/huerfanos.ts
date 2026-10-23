@@ -4,7 +4,8 @@ const MINUTO = 60_000;
 const REINTENTO_MS = 15 * MINUTO;
 // Sin contador (no hay migración): 3 corridas del cron de 15 min ≈ 1 h; pasada esa edad la pieza queda en error.
 const ABANDONO_MS = 60 * MINUTO;
-const LOTE_PENDIENTES = 20;
+// ponytail: 5 por corrida (cada análisis tarda 20–40 s y la corrida de 15 min no debe encimarse); subir si se acumulan.
+const LOTE_PENDIENTES = 5;
 
 /**
  * Piezas que se quedaron en `pendiente` porque el Worker murió a media captura (#481). Las muy viejas
