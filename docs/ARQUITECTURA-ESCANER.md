@@ -310,8 +310,12 @@ la pestaña Imprimir y el chip de impresora funcionan igual, y la impresora se c
   y imprime en cuanto queda `listo`; `error`, `pendiente` agotado o sin precio van aparte («Aparte, sin etiqueta»). Va por el
   mismo reclamo y se recuerda por captura en el teléfono (`inventario-autoimpresas`), así una subida repetida no reimprime.
   Una captura sumada a una pieza existente imprime 1 por unidad sumada (como +1). Sin impresora conectada queda «falta
-  etiqueta» y la alerta del modo enfocado, también en el host del capturista. La existencia de una captura con foto (aunque
-  traiga UPC) se corrige 24 h mientras no tenga venta ni publicación; si sube, salen las etiquetas que faltan.
+  etiqueta» y la alerta del modo enfocado, también en el host del capturista. Una captura `listo` con UPC ya es vendible: su
+  existencia se corrige por el ajuste auditado `POST /api/piezas/:id/existencia` (`fijar_a` + `esperado` = lo que se vio +
+  renglón `correccion`); si cambió (venta, apartado, otro ajuste) responde 409 y se pide revisar en Buscar. La corrección de
+  captura heredada (`PATCH /api/borradores/:id/existencia`) no escribe existencia absoluta en una pieza lista con UPC. Si la
+  existencia sube y la etiqueta anterior ya salió (marca local, adoptada o de la base), salen las que faltan. El seguimiento
+  del análisis usa `GET /api/borradores/:id/revision` (sirve también a FEP) y deja de preguntar ante 403/404.
 - **Host del capturista (denegar por omisión).** Se agregan solo: `/inventario-imprimir.js`, `/imprimir-lote.js`,
   `GET /api/calibracion`, `POST /api/etiquetas` y `POST`/`DELETE /api/etiquetas/enviadas`. Siguen cerrados ahí:
   `PUT /api/calibracion`, `GET /api/etiquetas*`, `/etiquetas`, `/bandas`, calibrar y `/api/config`. El servidor exige

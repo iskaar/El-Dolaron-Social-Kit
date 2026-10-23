@@ -27,6 +27,24 @@ const CLAVE_AUTOIMPRESAS='inventario-autoimpresas';
 export function capturaImpresa(id){try{return JSON.parse(localStorage.getItem(CLAVE_AUTOIMPRESAS)||'[]').includes(id);}catch{return false;}}
 function anotarCapturaImpresa(id){try{localStorage.setItem(CLAVE_AUTOIMPRESAS,JSON.stringify([...JSON.parse(localStorage.getItem(CLAVE_AUTOIMPRESAS)||'[]'),id].slice(-300)));}catch{}}
 /**
+ * Corrige la existencia de una captura. Una pieza `listo` con UPC ya es vendible (apartados, ventas, ajustes): no se le escribe un
+ * número absoluto; va por el ajuste auditado con la existencia que se vio (`esperado`) y un 409 pide revisarla en Buscar (#464).
+ * Lo que aún se identifica o espera foto conserva la corrección de captura de siempre.
+ */
+export async function corregirExistencia(api,actual,id,cantidad,folio=crypto.randomUUID()){
+  if(!(actual.estado_analisis==='listo'&&actual.upc))return api(`/api/borradores/${id}/existencia`,{stock:cantidad},'PATCH');
+  try{return await api(`/api/piezas/${id}/existencia`,{id:folio,fijar_a:cantidad,esperado:actual.stock,motivo:'correccion'});}
+  catch(e){
+    if(e.status===409)throw new Error('La existencia cambió desde que la abriste (venta, apartado o ajuste). Revísala en Buscar.');
+    if(e.status===403)throw new Error('Tu cuenta no puede ajustar la existencia de una pieza con etiqueta. Pídelo a quien edita el inventario.');
+    throw e;
+  }
+}
+/** Etiquetas que faltan tras subir la existencia: solo si ya salió la de las unidades anteriores (marca local, adoptada o de la base). */
+export function etiquetasPorCorreccion({antes,despues,estado_analisis,marca,etiqueta_en,impresa}){
+  return despues>antes&&estado_analisis==='listo'&&(marca||etiqueta_en||impresa)?despues-antes:0;
+}
+/**
  * Un lector USB cuyo cursor quedó en un campo de la tarjeta teclea el código ahí. Enter saca el foco del campo;
  * si lo precedió una ráfaga a velocidad de lector, se devuelve el valor anterior y el código va al lector.
  */

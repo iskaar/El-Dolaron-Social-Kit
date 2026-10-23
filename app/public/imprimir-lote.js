@@ -355,7 +355,8 @@ async function imprimir(ids, pedidas = new Map(), automatico = false, opciones =
       }
     }
     resumen.textContent = `${terminadas} piezas enviadas${omitidas ? `; ${omitidas} ya las había enviado otro dispositivo y no se repitieron` : ''}${rechazadas ? `; ${rechazadas} ${rechazadas === 1 ? 'pieza ya no se puede imprimir' : 'piezas ya no se pueden imprimir'} (vendidas o cambiaron)` : ''}. Si alguna no salió, usa «Mostrar impresas» y «No salió desde aquí».`;
-    return true;
+    // true solo si salió alguna etiqueta o ya la había sacado otro dispositivo; si todo se rechazó (vendidas o cambiaron), nada salió.
+    return terminadas + omitidas > 0;
   } catch (error) {
     // Nada de fallar en silencio: si algo revienta a media lista, se dice donde.
     console.error('Etiquetas: fallo el lote', error);

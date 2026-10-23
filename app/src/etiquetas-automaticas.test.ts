@@ -901,29 +901,71 @@ test('«No salió desde aquí» sí suelta lo marcado con «Marcar como impresas
   } finally { t.db.close(); }
 });
 
-test('una captura con foto de un UPC del manifiesto (listo y con UPC) sí se corrige en sus 24 h; sin foto, con venta o ajena, no (#464)', async () => {
+test('D1 (#464): la corrección de captura NO escribe existencia absoluta en una pieza lista con UPC; el ajuste auditado detecta la venta o el apartado intermedio', async () => {
   const t = tienda();
   try {
     const ahora = new Date().toISOString();
-    const preparar = (foto: string, capturador = DUENO) => {
-      const id = agregar(t, ahora, 'listo', 2);
-      t.db.prepare("update productos set categoria='hogar', nombre='Estuche', upc=?, foto_key=?, capturado_por=? where id=?")
-        .run(String(Math.floor(Math.random() * 1e11)), foto, capturador, id);
-      return id;
-    };
-    const conFoto = preparar('fotos/x.jpg'), sinFoto = preparar(''), vendida = preparar('fotos/y.jpg'), ajena = preparar('fotos/z.jpg', 'otro@prueba.mx');
-    t.db.prepare("insert into ventas (id, total, forma_pago, efectivo, cambio, creado_en, registrado_en) values ('v1', 100, 'efectivo', 100, 0, ?, ?)").run(ahora, ahora);
-    t.db.prepare("insert into venta_lineas (venta_id, producto_id, codigo, nombre, precio, cantidad) values ('v1', ?, 'x', 'x', 100, 1)").run(vendida);
-    const corregir = (id: string) => t.pedir(`/api/borradores/${id}/existencia`, { stock: 3 }, 'PATCH');
-    const ok = await corregir(conFoto);
-    assert.equal(ok.status, 200);
-    assert.equal(t.db.prepare('select stock from productos where id=?').get(conFoto)!.stock, 3);
-    for (const id of [sinFoto, vendida, ajena]) {
-      const r = await corregir(id);
-      assert.equal(r.status, 404);
-      assert.match(r.cuerpo.error, /no es tu captura, pasaron 24 horas, tiene venta o publicación/);
-      assert.equal(t.db.prepare('select stock from productos where id=?').get(id)!.stock, 2);
-    }
+    const id = agregar(t, ahora, 'listo', 3);
+    t.db.prepare("update productos set categoria='hogar', nombre='Estuche', upc='0191907910414', foto_key='fotos/x.jpg', capturado_por=?, codigo='ED-000777' where id=?").run(DUENO, id);
+    // 10:00 capturada y etiquetada con 3; 13:00 un apartado de WhatsApp la deja en 2.
+    t.db.prepare('update productos set stock = 2 where id = ?').run(id);
+    // La vía de captura (pre-PR, sin cambios) sigue rechazando una pieza lista con UPC: nunca pisa el 2 con un 4.
+    const captura = await t.pedir(`/api/borradores/${id}/existencia`, { stock: 4 }, 'PATCH');
+    assert.equal(captura.status, 404);
+    assert.match(captura.cuerpo.error, /ajuste auditado en Buscar/);
+    assert.equal(t.db.prepare('select stock from productos where id=?').get(id)!.stock, 2);
+    // 15:00 el capturista corrige "3 → 4" con lo que veía (esperado 3): 409, y la existencia sigue en 2.
+    const folio = crypto.randomUUID();
+    const viejo = await t.pedir(`/api/piezas/${id}/existencia`, { id: folio, fijar_a: 4, esperado: 3, motivo: 'correccion' });
+    assert.equal(viejo.status, 409);
+    assert.equal(t.db.prepare('select stock from productos where id=?').get(id)!.stock, 2);
+    assert.equal(t.db.prepare('select count(*) n from conteo_ajustes where producto_id=?').get(id)!.n, 0);
+    // Con la existencia vigente sí se ajusta, y deja renglón de auditoría.
+    const bueno = await t.pedir(`/api/piezas/${id}/existencia`, { id: crypto.randomUUID(), fijar_a: 4, esperado: 2, motivo: 'correccion' });
+    assert.equal(bueno.status, 200);
+    assert.deepEqual({ ...t.db.prepare('select motivo, antes, despues from conteo_ajustes where producto_id=?').get(id)! }, { motivo: 'correccion', antes: 2, despues: 4 });
+  } finally { t.db.close(); }
+});
+
+test('D1 (#464): dos correcciones simultáneas con la misma existencia vista: solo una gana', async () => {
+  const t = tienda();
+  try {
+    const id = agregar(t, new Date().toISOString(), 'listo', 3);
+    t.db.prepare("update productos set categoria='hogar', upc='0191907910414', foto_key='fotos/x.jpg', capturado_por=?, codigo='ED-000778' where id=?").run(DUENO, id);
+    const intento = (n: number) => t.pedir(`/api/piezas/${id}/existencia`, { id: crypto.randomUUID(), fijar_a: n, esperado: 3, motivo: 'correccion' });
+    const [a, b] = await Promise.all([intento(4), intento(5)]);
+    assert.deepEqual([a.status, b.status].sort(), [200, 409]);
+    assert.equal(t.db.prepare('select count(*) n from conteo_ajustes where producto_id=?').get(id)!.n, 1);
+  } finally { t.db.close(); }
+});
+
+test('D2 (#464): FEP sigue el análisis de su captura por la revisión propia (el estado por UPC es solo de la tienda)', async () => {
+  const t = tienda();
+  try {
+    const id = agregar(t, new Date().toISOString(), 'pendiente', 1);
+    t.db.prepare("update productos set propietario='fep', upc='0191907910414', capturado_por=? where id=?").run(DUENO, id);
+    t.db.prepare("insert into usuarios (correo, nombre, roles, activo, creado_en, actualizado_en) values ('fep@prueba.mx', 'FEP', 'finanzas', 1, '', '')").run();
+    const dueno = await t.pedir(`/api/borradores/upc/${id}`, undefined, 'GET');
+    assert.equal(dueno.status, 404, 'el dueño de la tienda no ve piezas de FEP');
+    t.env.DEV_USUARIO = 'fep@prueba.mx';
+    t.db.prepare('update productos set capturado_por=? where id=?').run('fep@prueba.mx', id);
+    // El estado por UPC es solo de la tienda (FEP no tiene manifiesto): el seguimiento usa la revisión de su propia captura.
+    assert.equal((await t.pedir(`/api/borradores/upc/${id}`, undefined, 'GET')).status, 403);
+    const fep = await t.pedir(`/api/borradores/${id}/revision`, undefined, 'GET');
+    assert.equal(fep.status, 200);
+    assert.equal(fep.cuerpo.estado_analisis, 'pendiente');
+  } finally { t.db.close(); }
+});
+
+test('D3 (#464): si todo se rechazó (vendida o cambió) imprimir no dice que salió; con una buena sí', async () => {
+  const t = tienda();
+  try {
+    const { celular } = await dosDispositivos(t);
+    const vendida = agregar(t, DESPUES, 'listo', 0), buena = agregar(t, DESPUES, 'listo', 1);
+    assert.equal(await celular.imprimir([vendida]), false);
+    assert.deepEqual(celular.estado.enviadas, []);
+    assert.match(celular.$('resumen').textContent, /ya no se puede imprimir \(vendidas o cambiaron\)/);
+    assert.equal(await celular.imprimir([vendida, buena]), true);
   } finally { t.db.close(); }
 });
 

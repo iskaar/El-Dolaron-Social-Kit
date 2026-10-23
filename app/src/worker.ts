@@ -870,9 +870,11 @@ export async function identificarPieza(id: string, upc: string, env: Env, ultimo
 async function estadoDesconocido(id: string, env: Env, correo: string, status = 200): Promise<Response> {
   if (!UUID.test(id)) return json({ error: 'Identificador inválido.' }, 400);
   const sumada = await capturaSumada(env, id, correo);
+  // El propietario de quien pregunta: FEP también sigue el análisis de sus capturas (antes siempre 'dolaron' y daba 404).
+  const propietario = propietarioDe(await leerUsuario(env, correo));
   const fila = await env.DB.prepare(`select ${PIEZA_UPC} from productos
-    where id = ? and propietario = 'dolaron' ${sumada ? '' : 'and capturado_por = ?'}`)
-    .bind(sumada?.id ?? id, ...(sumada ? [] : [correo])).first<PiezaUpc>();
+    where id = ? and propietario = ? ${sumada ? '' : 'and capturado_por = ?'}`)
+    .bind(sumada?.id ?? id, propietario, ...(sumada ? [] : [correo])).first<PiezaUpc>();
   return fila ? json({ id:fila.id, upc:fila.upc, nombre:fila.nombre, precio:fila.precio, stock:fila.stock,
     codigo:fila.codigo, estado_fisico:fila.estado_fisico, estado_analisis:fila.estado_analisis,
     creado_en:fila.creado_en, con_foto:fila.tiene_foto,
@@ -914,10 +916,9 @@ async function corregirCaptura(id: string, campo: string, request: Request, env:
     and not exists (select 1 from ml_publicaciones where producto_id = productos.id)`;
   // Lo escaneado (con UPC) se corrige mientras está abierto en el escáner; ya guardado y `listo`,
   // /etiquetas lo imprime en seguida, así que solo se corrige lo que aún se identifica o espera foto (#381).
-  // Excepción (#464): una captura CON FOTO del manifiesto nace `listo` y con UPC, y el capturista corrige su cantidad desde
-  // la miniatura en sus 24 h; mientras no tenga venta ni publicación, un número absoluto no pisa nada.
-  const alcanceUpcConFoto = `(foto_key <> '' and not exists (select 1 from venta_lineas where producto_id = productos.id)
-    and not exists (select 1 from ml_publicaciones where producto_id = productos.id))`;
+  // Una pieza `listo` con UPC (p. ej. una captura con foto del manifiesto) ya es vendible y puede tener apartados, ajustes o
+  // ventas: aquí NO se le escribe una existencia absoluta. Su corrección va por POST /api/piezas/:id/existencia (fijar_a +
+  // esperado + renglón de auditoría; #464). Este alcance heredado (`upc is null or estado_analisis <> 'listo'`) no cambia.
   // En 0 se cancela y sale de la cola (#377). Una foto se elimina desde su miniatura.
   if (valor === 0) {
     const { meta } = await env.DB.prepare(`update productos set stock = 0, estado_analisis = 'descartado', actualizado_en = ?
@@ -932,7 +933,7 @@ async function corregirCaptura(id: string, campo: string, request: Request, env:
   }
   const resultado = await env.DB.prepare(
     `update productos set ${columna} = ?, actualizado_en = ? where id = ? and capturado_por = ? and creado_en > ?
-       and (${sinFoto ? alcanceSinFoto : `upc is null or estado_analisis <> 'listo' or ${alcanceUpcConFoto}`}) and estado_analisis <> 'descartado'
+       and (${sinFoto ? alcanceSinFoto : "upc is null or estado_analisis <> 'listo'"}) and estado_analisis <> 'descartado'
        ${campo === 'existencia' ? `and not ${CAPTURA_SUMADA}` : ''}`,
   )
     .bind(valor, new Date().toISOString(), id, correo, desde)
@@ -942,7 +943,7 @@ async function corregirCaptura(id: string, campo: string, request: Request, env:
       const conflicto = await conflictoCapturaSumada(env, id, correo);
       if (conflicto) return conflicto;
     }
-    return json({ error: sinFoto ? 'Ya no se puede cambiar: pasaron 5 minutos o la pieza tiene venta, foto o publicación.' : 'Ya no se puede cambiar: no es tu captura, pasaron 24 horas, tiene venta o publicación, o lo escaneado sin foto ya tiene etiqueta.' }, 404);
+    return json({ error: sinFoto ? 'Ya no se puede cambiar: pasaron 5 minutos o la pieza tiene venta, foto o publicación.' : 'Ya no se puede cambiar desde la captura: no es tuya, pasaron 24 horas, o la pieza ya está lista con etiqueta (su existencia se ajusta con un ajuste auditado en Buscar).' }, 404);
   }
   return json({ id, [columna]: valor });
 }
