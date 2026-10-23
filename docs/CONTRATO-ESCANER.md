@@ -82,8 +82,8 @@ Detalle completo en `docs/PLAN-ETIQUETAS-POR-BANDA.md`. Resumen:
 
 - La cámara **se abre y no se cierra**. Toca para disparar, dispara otra vez de inmediato. Sin
   preview que descartar, sin spinner, sin navegación.
-- Interruptor de grado **A · Nuevo / B · Dañado / C · Liquidación** (como LiquiMart, Issue #371) junto al obturador.
-  A se ve nueva; B tiene uso, empaque dañado o piezas faltantes; C no cumple su función. El grado se imprime en la etiqueta (Issue #453: letra A/B/C en un recuadro junto al precio, y la palabra en el pie
+- Solo MG usa el interruptor de grado **A · Nuevo / B · Dañado / C · Liquidación** (como LiquiMart, Issue #371) junto al obturador.
+  A se ve nueva; B tiene uso, empaque dañado o piezas faltantes; C no cumple su función. El grado se imprime solo en la etiqueta de MG (Issue #453: letra A/B/C en un recuadro junto al precio, y la palabra en el pie
   si cabe; instrucción de Isaac, revierte la regla de #371); B y C no van a Mercado Libre ni al catálogo público. Conserva su estado entre disparos y también se
   puede corregir tocando la última miniatura.
 - Tira de miniaturas abajo y un contador discreto: `24 fotos · 19 analizadas`. Es la única señal de
@@ -117,7 +117,7 @@ Local, propio de este repositorio. No se copia el modelo de MarKit.
 | --- | --- |
 | `id`, `creado_en` | App |
 | `foto` (1024 px) | Cámara, guardada local primero |
-| `estado_fisico` | `nuevo` (A) \| `danado` (B) \| `liquidacion` (C), del interruptor |
+| `estado_fisico` | `nuevo` (A) \| `danado` (B) \| `liquidacion` (C), del interruptor de MG; Ropa envía `nuevo` silenciosamente |
 | `estado_analisis` | `pendiente` \| `listo` \| `error` |
 | `nombre`, `categoria`, `precio_lista` | IA, editable en el admin |
 | `precio` | Calculado (§5), editable en el admin |
@@ -185,3 +185,11 @@ desde `/bandas` (`docs/PLAN-ETIQUETAS-POR-BANDA.md`).
 - Varias fotos por pieza, talla y color, publicación en eshop o marketplace.
 
 Cada uno entra con su propio Issue, cuando haya ventas reales que lo justifiquen.
+
+## Ropa sin grados (Isaac, 23/10/2026; #458/#459)
+
+A/B/C pertenece solo a Mercancía General. Ropa se identifica por `categoria='ropa'` en las piezas del servidor y por `precio_ropa` no nulo en la cola local. Las nuevas capturas de Ropa usan el valor predeterminado `estado_fisico='nuevo'` sin mostrar A: la columna es `text not null default 'nuevo'` y la validación de servidor acepta `nuevo|danado|liquidacion`. No se agrega migración ni se normalizan datos históricos.
+
+En `/inventario`, Ropa oculta grado en captura móvil/PC, corrección de miniatura local o subida, ficha, Revisar (filas, grupos solo de Ropa y Avanzado) y alta sin foto. Buscar conserva filas sin grado. La barra móvil queda con disparo centrado y cantidad; debe pasar QA en 360×640, 412×740 y 390×844.
+
+Las etiquetas de Ropa no imprimen recuadro, letra ni palabra de grado, también en reimpresiones de Buscar/ficha, Imprimir y `/etiquetas`; las de MG los conservan. `/api/etiquetas` incluye `categoria`. Un estado físico histórico de Ropa no genera aviso ni reimpresión por grado; nombre, talla y precio siguen invalidando la etiqueta. Las reglas #452 por propietario + UPC normalizado + estado físico se conservan en servidor; la UI no filtra Ropa por el grado elegido para MG.

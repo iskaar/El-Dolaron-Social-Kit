@@ -162,7 +162,7 @@ El módulo del código de barras ya no es un cálculo en milímetros de CSS: la 
 lo dibuja con el comando `BARCODE` de TSPL, controlado por `MODULO` (puntos) en
 `etiquetera.js`. Punto de partida `MODULO = 2`; si el lector no engancha, subir a 3.
 
-**Grado en la etiqueta (Issue #453).** La etiqueta de pieza imprime la letra del grado (A, B o C, de `estado_fisico`) en un recuadro de 44 × 44 puntos a la altura del precio, en el borde derecho o a la izquierda del precio de lista tachado (comandos `BOX` y `TEXT` fuente "4"); si el grado no es A, su palabra («Danado», «Liquidacion») se agrega al pie cuando cabe. No se movió ningún otro elemento ni el corrimiento o el módulo calibrados. Cambiar el grado de una pieza ya etiquetada la marca como desactualizada (`etiquetaVigente`); las marcas guardadas antes del grado se leen como A. Requiere prueba física en la AE240.
+**Grado en la etiqueta (Issue #453).** Solo MG usa grados; Ropa omite recuadro, letra y palabra también al reimprimir (Isaac, 23/10/2026). La etiqueta de MG imprime la letra del grado (A, B o C, de `estado_fisico`) en un recuadro de 44 × 44 puntos a la altura del precio, en el borde derecho o a la izquierda del precio de lista tachado (comandos `BOX` y `TEXT` fuente "4"); si el grado no es A, su palabra («Danado», «Liquidacion») se agrega al pie cuando cabe. No se movió ningún otro elemento ni el corrimiento o el módulo calibrados. Cambiar el grado de una pieza ya etiquetada la marca como desactualizada (`etiquetaVigente`); las marcas guardadas antes del grado se leen como A. Requiere prueba física en la AE240.
 
 Esto se verifica con el lector leyendo papel, no con una captura de pantalla. Si esta
 unidad (u otra) hay que volver a interrogarla, `/sonda-impresora` sigue desplegada.

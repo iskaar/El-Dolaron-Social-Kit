@@ -327,6 +327,34 @@ test('el grado A, B o C se imprime en un recuadro, sin tocar el resto de la etiq
   }
 });
 
+test('Ropa omite recuadro, letra y palabra del grado, incluso con estados anteriores; MG los conserva', () => {
+  for (const estado_fisico of ['nuevo', 'danado', 'liquidacion']) {
+    const mg = tsplEtiqueta({ ...PIEZA, categoria: 'hogar', estado_fisico });
+    for (const ropa of [{ categoria: 'ropa' }, { precio_ropa: 12000 }]) {
+      const tspl = tsplEtiqueta({ ...PIEZA, ...ropa, estado_fisico });
+      assert.doesNotMatch(tspl, /^BOX |,"4",0,1,1,"[ABC]"| - (Nuevo|Danado|Liquidacion)"/m);
+      assert.match(tspl, /"ED-000123 - 2026-S38"/);
+      for (const linea of tspl.split('\r\n').filter(l => l && !l.includes(',170,')))
+        assert.ok(mg.includes(linea), `Se conserva la calibración y el contenido: ${linea}`);
+    }
+    assert.match(mg, /^BOX /m);
+    assert.match(mg, /,"4",0,1,1,"[ABC]"/);
+  }
+});
+
+test('el grado interno de Ropa no pide reimpresión; nombre, talla y precio sí', async () => {
+  const { etiquetaVigente } = await import('../public/etiquetera.js');
+  const { avisoReimpresion } = await import('../public/ficha.js');
+  const pieza = { ...PIEZA, categoria: 'ropa', talla: 'M', destino: 'etiqueta', stock: 2, estado_fisico: 'nuevo' };
+  const marca = { ...pieza, estado_fisico: 'danado' };
+  assert.equal(etiquetaVigente(marca, pieza), true);
+  assert.equal(avisoReimpresion(marca, marca, pieza), null);
+  for (const cambio of [{ nombre: 'Camisa' }, { talla: 'L' }, { precio: 10000 }]) {
+    assert.equal(etiquetaVigente(marca, { ...pieza, ...cambio }), false);
+    assert.doesNotMatch(avisoReimpresion(marca, marca, { ...pieza, ...cambio })!, /grado|A ·|B ·|C ·/);
+  }
+});
+
 const pie = (tspl: string) => tspl.match(/^TEXT \d+,170,"1",0,1,1,"(.*)"$/m)![1];
 
 test('sin precio de lista el recuadro del grado va al borde derecho; con precios largos no se encima (#453)', () => {

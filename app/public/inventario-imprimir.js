@@ -2,6 +2,7 @@ import { iniciarEtiquetas } from './imprimir-lote.js';
 import { estadoEnvio } from './envio-etiquetas.js';
 import { conectarEtiquetera, etiqueteraLista, imprimirBanda, detenerEnvio, historialTexto, desmarcarDesde, precioImpreso, gradoImpreso } from './etiquetera.js';
 import { nombreEstado } from './estados.js';
+import { esRopa } from './ropa.js';
 import { semanaIngreso } from './semana.js';
 import { stepper, bloquear, cerrarHoja, ponerNeutro } from './inventario-ui.js';
 
@@ -69,7 +70,7 @@ export async function iniciar(ctx) {
       const label=nodo('label',undefined,'casilla'),check=nodo('input');check.type='checkbox';check.value=p.id;check.checked=!vigente&&!desmarcadas.has(p.id);check.setAttribute('aria-label',`Elegir ${p.nombre}`);label.append(check);
       const imagen=nodo('img');imagen.src=`/api/foto/${p.id}`;imagen.alt='';imagen.loading='lazy';imagen.onerror=()=>{imagen.hidden=true;};
       const texto=nodo('div');texto.append(nodo('b',p.nombre),nodo('div',p.codigo||'Sin código','codigo'),nodo('strong',pesos(p.precio),'precio'));
-      const estado=nodo('small',p.id===idDudoso?'▲ Envío incierto':vigente?'✓ Salió':marca?`↻ La pegada dice ${precioImpreso(marca)!==precioImpreso(p)?pesos(marca.precio):`grado ${nombreEstado(gradoImpreso(marca))}`}`:'Nueva');texto.append(estado);
+      const estado=nodo('small',p.id===idDudoso?'▲ Envío incierto':vigente?'✓ Salió':marca?`↻ La pegada dice ${precioImpreso(marca)!==precioImpreso(p)?pesos(marca.precio):!esRopa(p)&&gradoImpreso(marca)!==gradoImpreso(p)?`grado ${nombreEstado(gradoImpreso(marca))}`:`«${marca.nombre}${marca.talla?` · ${marca.talla}`:''}»`}`:'Nueva');texto.append(estado);
       if(vigente)texto.append(boton('No salió desde aquí',()=>{desmarcarDesde(p.id);motor.pintar();}));
       const cantidad=restantes.get(p.id)??copiasDe(p);const copia=stepper(cantidad,contar,{nombre:'Copias'});const output=copia.querySelector('output');output.className='copias';output.dataset.id=p.id;output.value=String(cantidad);
       li.append(label,imagen,texto,copia);lista.append(li);

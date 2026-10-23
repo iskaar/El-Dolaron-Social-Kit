@@ -7,6 +7,7 @@ import { tienda, DUENO } from './prueba-d1.ts';
 import { permiso, puede, type Rol } from './cuentas.ts';
 import { permitidaParaVendedor } from './worker.ts';
 import * as etiquetera from '../public/etiquetera.js';
+import { esRopa } from '../public/ropa.js';
 
 function pieza(db: ReturnType<typeof tienda>['db'], cambios: Record<string, unknown> = {}) {
   const p = { id: crypto.randomUUID(), codigo: null, nombre: 'Chamarra', marca: 'Levis', stock: 1,
@@ -247,7 +248,7 @@ function pantalla(responder: (url: string, cuerpo?: any) => unknown | Promise<un
   const modulo = (archivo: string) => readFileSync(archivo, 'utf8').replace(/^import .+;$/gm, '').replace(/^export /gm, '');
   const api = runInNewContext(`${modulo('public/lector.js')}; const { api, crearFicha, pesos } = (() => {${modulo('public/ficha.js')}; return { api, crearFicha, pesos }; })();
     ${modulo('public/pieza.js')}; ({buscar, abrir})`, {
-    estadoEnvio, impresas: etiquetera.impresas, etiquetaVigente: etiquetera.etiquetaVigente, precioImpreso: etiquetera.precioImpreso, TALLAS: ['M'],
+    esRopa, estadoEnvio, impresas: etiquetera.impresas, etiquetaVigente: etiquetera.etiquetaVigente, precioImpreso: etiquetera.precioImpreso, TALLAS: ['M'],
     document: { getElementById: $, createElement: (tag: string) => new Nodo(tag),
       querySelectorAll: () => $('resultados').children.map((li) => li.children[0]),
       addEventListener: (e: string, fn: Function) => { eventos[e] = fn; }, body: new Nodo() },

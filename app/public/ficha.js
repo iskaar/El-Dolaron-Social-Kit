@@ -7,6 +7,7 @@ import { TALLAS } from './tallas.js';
 import { etiquetaVigente, precioImpreso } from './etiquetera.js';
 import { estadoEnvio } from './envio-etiquetas.js';
 import { normalizarUpc } from './upc.js';
+import { esRopa } from './ropa.js';
 
 const $ = (id) => document.getElementById(id);
 export const pesos = (centavos) => new Intl.NumberFormat('es-MX', { style:'currency', currency:'MXN', maximumFractionDigits:2 }).format(centavos / 100);
@@ -110,7 +111,7 @@ export function avisoReimpresion(marca, antes, ahora) {
   const grado = (p) => p.estado_fisico ?? 'nuevo';   // las marcas de antes del grado (#453) se leen como A
   return precioImpreso(pegada) !== precioImpreso(ahora)
     ? `La etiqueta pegada dice ${pesos(pegada.precio)} y ahora cuesta ${pesos(ahora.precio)}.`
-    : grado(pegada) !== grado(ahora)
+    : !esRopa(ahora) && grado(pegada) !== grado(ahora)
     ? `La etiqueta pegada dice grado ${nombreEstado(grado(pegada))} y ahora es ${nombreEstado(grado(ahora))}.`
     : `La etiqueta pegada dice «${pegada.nombre ?? ''}${pegada.talla ? ` · ${pegada.talla}` : ''}».`;
 }
@@ -127,7 +128,7 @@ export function crearFicha({ mensaje, alAbrir = () => {}, confirmar = (texto) =>
     if (!pieza) return;
     $('codigo').textContent = pieza.codigo || 'Sin código asignado';
     $('nombre').textContent = pieza.nombre || 'Sin nombre';
-    $('detalles').textContent = [pieza.marca, pieza.talla, nombreEstado(pieza.estado_fisico), CATEGORIAS.find(([c]) => c === pieza.categoria)?.[1]].filter(Boolean).join(' · ');
+    $('detalles').textContent = [pieza.marca, pieza.talla, !esRopa(pieza) && nombreEstado(pieza.estado_fisico), CATEGORIAS.find(([c]) => c === pieza.categoria)?.[1]].filter(Boolean).join(' · ');
     $('upc').textContent = pieza.upc ? `UPC: ${pieza.upc}` : 'Sin UPC';
     $('precio').textContent = pesos(pieza.precio);
     $('precio-lista').textContent = pieza.precio_lista > 0 ? `Lista ${pesos(pieza.precio_lista)}` : '';
