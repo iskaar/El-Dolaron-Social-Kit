@@ -160,9 +160,40 @@ async function fichaPieza(env: Env, id: string, usuario: Usuario | null): Promis
     solicitud_precio: await pendienteDe(env, id) });
 }
 
-interface Ajuste {
+export interface Ajuste {
   id: string; producto_id: string; motivo: string; cantidad: number; antes: number; despues: number;
   ajustado_por: string; ajustado_en: string;
+}
+
+export const ajusteGuardado = (env: Env, folio: string) => env.DB.prepare(`select id, producto_id, motivo, cantidad, antes, despues, ajustado_por, ajustado_en
+  from conteo_ajustes where id = ?`).bind(folio).first<Ajuste>();
+
+/**
+ * Único lugar que escribe existencia con renglón de auditoría (ajuste de #441 y corrección de captura de #468): quien llama ya
+ * autorizó. `esperado` hace la escritura condicional (`stock = esperado`); `donde`/`args` acotan más la fila. Devuelve el
+ * renglón si se aplicó, o null si la pieza cambió, quedó fuera de 0–999 o el folio ya existía; no asume que un lote protege lecturas previas.
+ */
+export async function escribirExistencia(env: Env, ctx: ExecutionContext, a: {
+  id: string; propietario: string; folio: string; delta: number; motivo: string; correo: string;
+  esperado?: number; donde?: string; args?: unknown[];
+}): Promise<Ajuste | null> {
+  const ahora = new Date().toISOString();
+  await env.DB.batch([
+    env.DB.prepare(`update productos set stock = stock + ?, actualizado_en = ?
+      where id = ? and propietario = ? and sin_inventario = 0 and estado_analisis <> 'descartado'
+        and stock + ? between 0 and 999 ${a.esperado !== undefined ? 'and stock = ?' : ''} ${a.donde ?? ''}
+        and not exists (select 1 from conteo_ajustes where id = ?)`)
+      .bind(a.delta, ahora, a.id, a.propietario, a.delta, ...(a.esperado !== undefined ? [a.esperado] : []), ...(a.args ?? []), a.folio),
+    // changes() evita rastro falso si otro intento dejó la misma marca en este milisegundo.
+    env.DB.prepare(`insert into conteo_ajustes
+      (id, producto_id, codigo, nombre, motivo, cantidad, antes, despues, ajustado_por, ajustado_en)
+      select ?, id, coalesce(codigo, ''), nombre, ?, ?, stock - ?, stock, ?, ? from productos
+      where id = ? and propietario = ? and actualizado_en = ? and changes() = 1`)
+      .bind(a.folio, a.motivo, Math.abs(a.delta), a.delta, a.correo, ahora, a.id, a.propietario, ahora),
+  ]);
+  const ajuste = await ajusteGuardado(env, a.folio);
+  if (ajuste) ctx.waitUntil(conciliarSeguro(env, { productoIds: [a.id] }));
+  return ajuste;
 }
 
 async function cambiarExistencia(request: Request, env: Env, id: string, usuario: Usuario | null, ctx: ExecutionContext): Promise<Response> {
@@ -184,33 +215,16 @@ async function cambiarExistencia(request: Request, env: Env, id: string, usuario
   const actual = () => env.DB.prepare(`select p.stock from productos p
     where p.id = ? and p.propietario = ? and ${VISIBLE}`).bind(id, propietario).first<{ stock: number }>();
   if (!await actual()) return json({ error: 'Pieza no encontrada.' }, 404);
-  const guardado = () => env.DB.prepare(`select id, producto_id, motivo, cantidad, antes, despues, ajustado_por, ajustado_en
-    from conteo_ajustes where id = ?`).bind(cuerpo.id).first<Ajuste>();
+  const guardado = () => ajusteGuardado(env, cuerpo.id as string);
   const responder = (a: Ajuste) => a.producto_id === id && a.ajustado_por === usuario!.correo && a.motivo === motivo
       && a.despues - a.antes === delta && (!fijar || (a.antes === cuerpo.esperado && a.despues === cuerpo.fijar_a))
     ? json(a) : json({ error: 'El folio ya pertenece a otro ajuste.' }, 409);
   const previo = await guardado();
   if (previo) return responder(previo);
 
-  const ahora = new Date().toISOString();
-  await env.DB.batch([
-    env.DB.prepare(`update productos set stock = stock + ?, actualizado_en = ?
-      where id = ? and propietario = ? and sin_inventario = 0 and estado_analisis <> 'descartado'
-        and stock + ? between 0 and 999 ${fijar ? 'and stock = ?' : ''}
-        and not exists (select 1 from conteo_ajustes where id = ?)`)
-      .bind(delta, ahora, id, propietario, delta, ...(fijar ? [cuerpo.esperado] : []), cuerpo.id),
-    // changes() evita rastro falso si otro intento dejó la misma marca en este milisegundo.
-    env.DB.prepare(`insert into conteo_ajustes
-      (id, producto_id, codigo, nombre, motivo, cantidad, antes, despues, ajustado_por, ajustado_en)
-      select ?, id, coalesce(codigo, ''), nombre, ?, ?, stock - ?, stock, ?, ? from productos
-      where id = ? and propietario = ? and actualizado_en = ? and changes() = 1`)
-      .bind(cuerpo.id, motivo, Math.abs(delta), delta, usuario!.correo, ahora, id, propietario, ahora),
-  ]);
-  const ajuste = await guardado();
-  if (ajuste) {
-    ctx.waitUntil(conciliarSeguro(env, { productoIds: [id] }));
-    return responder(ajuste);
-  }
+  const ajuste = await escribirExistencia(env, ctx, { id, propietario, folio: cuerpo.id, delta, motivo, correo: usuario!.correo,
+    esperado: fijar ? cuerpo.esperado as number : undefined });
+  if (ajuste) return responder(ajuste);
   const pieza = await actual();
   return pieza ? json({ error: 'La existencia cambió o queda fuera de 0 a 999. Revisa y vuelve a intentar.', stock: pieza.stock }, 409)
     : json({ error: 'Pieza no encontrada.' }, 404);

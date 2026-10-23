@@ -32,7 +32,11 @@ function anotarCapturaImpresa(id){try{localStorage.setItem(CLAVE_AUTOIMPRESAS,JS
  * Lo que aún se identifica o espera foto conserva la corrección de captura de siempre.
  */
 export async function corregirExistencia(api,actual,id,cantidad,folio=crypto.randomUUID()){
-  if(!(actual.estado_analisis==='listo'&&actual.upc))return api(`/api/borradores/${id}/existencia`,{stock:cantidad},'PATCH');
+  if(!(actual.estado_analisis==='listo'&&actual.upc)){
+    // Una `listo` sin UPC también exige la existencia vista (`esperado`): el servidor responde 409 con la actual si cambió (#468).
+    try{return await api(`/api/borradores/${id}/existencia`,{stock:cantidad,esperado:actual.stock},'PATCH');}
+    catch(e){if(e.status===409&&e.datos?.stock!==undefined)actual.stock=e.datos.stock;throw e;}
+  }
   try{return await api(`/api/piezas/${id}/existencia`,{id:folio,fijar_a:cantidad,esperado:actual.stock,motivo:'correccion'});}
   catch(e){
     if(e.status===409)throw new Error('La existencia cambió desde que la abriste (venta, apartado o ajuste). Revísala en Buscar.');

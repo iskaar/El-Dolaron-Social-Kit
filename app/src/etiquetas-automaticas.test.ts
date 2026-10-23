@@ -460,7 +460,7 @@ test('lo escaneado sale en cuanto se guarda, sin detener lo demás; se corrige o
     assert.deepEqual({ ...t.db.prepare('select stock, estado_analisis from productos where id=?').get(sinFoto)! }, { stock: 0, estado_analisis: 'descartado' });
     // La foto sin UPC conserva sus 24 horas.
     t.db.prepare("update productos set capturado_por=? where id=?").run(DUENO, ropa);
-    assert.equal((await t.pedir(`/api/borradores/${ropa}/existencia`, { stock: 2 }, 'PATCH')).status, 200);
+    assert.equal((await t.pedir(`/api/borradores/${ropa}/existencia`, { stock: 2, esperado: 1 }, 'PATCH')).status, 200);   // listo: con la existencia vista (#468)
   } finally { t.db.close(); }
 });
 
@@ -924,6 +924,35 @@ test('D1 (#464): la corrección de captura NO escribe existencia absoluta en una
     const bueno = await t.pedir(`/api/piezas/${id}/existencia`, { id: crypto.randomUUID(), fijar_a: 4, esperado: 2, motivo: 'correccion' });
     assert.equal(bueno.status, 200);
     assert.deepEqual({ ...t.db.prepare('select motivo, antes, despues from conteo_ajustes where producto_id=?').get(id)! }, { motivo: 'correccion', antes: 2, despues: 4 });
+  } finally { t.db.close(); }
+});
+
+test('D1 (#468): la corrección de captura de una foto lista sin UPC es condicional a la existencia vista y deja auditoría; la vencida no pisa la venta', async () => {
+  const t = tienda();
+  try {
+    const id = agregar(t, new Date().toISOString(), 'listo', 3);
+    t.db.prepare("update productos set capturado_por=?, codigo='ED-000779' where id=?").run(DUENO, id);
+    const stock = () => t.db.prepare('select stock from productos where id=?').get(id)!.stock;
+    const rastros = () => t.db.prepare('select count(*) n from conteo_ajustes where producto_id=?').get(id)!.n;
+    const corregir = (cuerpo: object) => t.pedir(`/api/borradores/${id}/existencia`, cuerpo, 'PATCH');
+    // Sin la existencia vista no hay escritura a ciegas.
+    const sin = await corregir({ stock: 4 });
+    assert.equal(sin.status, 409); assert.equal(sin.cuerpo.stock, 3); assert.equal(stock(), 3); assert.equal(rastros(), 0);
+    // 13:00 un apartado la deja en 2; la corrección "3 → 4" con lo que veía no la pisa.
+    t.db.prepare('update productos set stock = 2 where id = ?').run(id);
+    const vieja = await corregir({ stock: 4, esperado: 3 });
+    assert.equal(vieja.status, 409); assert.equal(vieja.cuerpo.stock, 2); assert.equal(stock(), 2); assert.equal(rastros(), 0);
+    // Con la existencia vigente sí se escribe, con su renglón de auditoría.
+    assert.equal((await corregir({ stock: 4, esperado: 2 })).status, 200);
+    assert.equal(stock(), 4);
+    assert.deepEqual({ ...t.db.prepare('select motivo, antes, despues, ajustado_por from conteo_ajustes where producto_id=?').get(id)! }, { motivo: 'correccion', antes: 2, despues: 4, ajustado_por: DUENO });
+    // Repetir la misma petición ya no coincide con la existencia: 409, sin segundo rastro.
+    assert.equal((await corregir({ stock: 4, esperado: 2 })).status, 409);
+    assert.equal(rastros(), 1);
+    // Sigue siendo solo de quien la capturó.
+    t.db.prepare("update productos set capturado_por='otro@x.com' where id=?").run(id);
+    assert.equal((await corregir({ stock: 1, esperado: 4 })).status, 404);
+    assert.equal(stock(), 4);
   } finally { t.db.close(); }
 });
 

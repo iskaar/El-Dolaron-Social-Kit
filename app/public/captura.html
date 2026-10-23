@@ -687,14 +687,15 @@ async function guardarExistencia(id) {
   let aviso;
   try {
     const respuesta = await fetch(`/api/borradores/${id}/existencia`, {
-      method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ stock: valor }),
+      method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ stock: valor, esperado: datos.guardada }),
     });
     const cuerpo = await respuesta.json().catch(() => ({}));
-    if (!respuesta.ok) throw new Error(cuerpo.error || `error ${respuesta.status}`);
+    if (!respuesta.ok) throw Object.assign(new Error(cuerpo.error || `error ${respuesta.status}`), { stock: respuesta.status === 409 ? cuerpo.stock : undefined });
     datos.guardada = valor;
     aviso = `Guardado: ${valor} ${valor === 1 ? 'pieza' : 'piezas'}.`;
   } catch (error) {
-    // No se queda un numero en pantalla que el servidor no tiene.
+    // No se queda un numero en pantalla que el servidor no tiene (en 409, el que devolvió).
+    if (Number.isInteger(error.stock)) datos.guardada = error.stock;
     aviso = `No se guardó (${error instanceof TypeError ? 'sin red' : error.message}). Sigue en ${datos.guardada}.`;
     piezasTotales += datos.guardada - datos.cantidad;
     datos.cantidad = datos.guardada;

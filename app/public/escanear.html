@@ -325,7 +325,7 @@ function anotarGuardada(guardada, grado, sinFoto = false) {
     if (valor === guardado) return;
     try {
       const r = await fetch(sinFoto ? '/api/borradores/upc/manual' : `/api/borradores/${guardada.id}/existencia`, {
-        method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id: guardada.id, stock: valor }),
+        method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id: guardada.id, stock: valor, esperado: guardado }),
       });
       const cuerpo = await r.json().catch(() => ({}));
       if (r.status === 404) cerrar();
