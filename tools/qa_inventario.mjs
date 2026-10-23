@@ -174,6 +174,13 @@ if(!upcQA){
     if(rol==='dueno'){
       await js(`{const [n,p]=${campos};n.value='Termo corregido';n.dispatchEvent(new Event('input'));p.value='187';p.dispatchEvent(new Event('input'));document.querySelector('.pieza-actual .stepper button:last-child').click()}`);
       assert.deepEqual(await js(`[...${campos}].map(i=>i.value)`),['Termo corregido','187'],'Repintar conserva ediciones');
+      // P3-1: un lector USB con el cursor en el nombre no escribe el código ahí; P2-1: la tarjeta editada no se guarda al leer otro código.
+      await js(`${campos}[0].focus()`);
+      for(const key of '9876543210'){await cdp('Input.dispatchKeyEvent',{type:'keyDown',key,text:key});await cdp('Input.dispatchKeyEvent',{type:'keyUp',key});}
+      await cdp('Input.dispatchKeyEvent',{type:'keyDown',key:'Enter',code:'Enter',windowsVirtualKeyCode:13});
+      assert.equal(await js(`${campos}[0].value`),'Termo corregido','La ráfaga del lector no se queda en el nombre');
+      assert.equal(await js("document.activeElement.tagName==='INPUT'"),false,'Enter saca el foco del campo');
+      await esperar("document.querySelector('#error:not([hidden])')?.textContent.includes('Guarda la tarjeta editada')");
       await js("import('/etiquetera.js').then(m=>m.conectarEtiquetera())");
       await js("[...document.querySelectorAll('.pieza-actual button')].find(b=>/^Guardar/.test(b.textContent)).click()");
       await esperar("blePrueba.enviadas===2");

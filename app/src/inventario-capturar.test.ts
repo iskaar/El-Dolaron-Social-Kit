@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { crearCaptura, cambiosTarjeta } from '../public/inventario-capturar.js';
+import { crearCaptura, cambiosTarjeta, vigilarLectorEnCampo } from '../public/inventario-capturar.js';
 import { registroFoto, formularioPendiente } from '../public/foto-pendiente.js';
 import worker from './worker.ts';
 import { tienda, PRODUCTO, DUENO } from './prueba-d1.ts';
@@ -252,4 +252,17 @@ test('P2-2: la foto en cola con precio editado: capturista 403 sin escribir, due
   assert.equal((await subir({nombre:'Termo &amp; tapa',precio:'8700'},id)).status,201);
   const fila=t.db.prepare('select nombre,precio,stock,foto_key from productos where id=?').get(id)!;
   assert.deepEqual([fila.nombre,fila.precio,fila.stock,fila.foto_key],['Termo & tapa',8700,2,`fotos/${id}.jpg`]);
+});
+
+test('P3-1: Enter en un campo de la tarjeta devuelve el foco al lector; una ráfaga de lector no se queda en el campo',()=>{
+  const campo=Object.assign(new EventTarget(),{value:'Lámpara'}) as any;
+  let reloj=0;const leidos:string[]=[];let salidas=0;
+  vigilarLectorEnCampo(campo,{ahora:()=>reloj,salir:()=>{salidas++;},alLeer:c=>leidos.push(c)});
+  const tecla=(key:string,ms:number)=>{reloj+=ms;const e=Object.assign(new Event('keydown',{cancelable:true}),{key});campo.dispatchEvent(e);if(key.length===1)campo.value+=key;return e;};
+  for(const k of '1234567890')tecla(k,k==='1'?400:10);
+  const enter=tecla('Enter',10);
+  assert.equal(enter.defaultPrevented,true);assert.equal(campo.value,'Lámpara');assert.deepEqual(leidos,['1234567890']);assert.equal(salidas,1);
+  for(const k of '1234')tecla(k,k==='1'?400:200);campo.value+='';
+  tecla('Enter',200);
+  assert.deepEqual(leidos,['1234567890'],'Tecleo humano no es un código');assert.equal(campo.value,'Lámpara1234');assert.equal(salidas,2);
 });

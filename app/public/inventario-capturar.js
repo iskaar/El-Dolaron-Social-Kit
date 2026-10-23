@@ -7,6 +7,7 @@ import { aCentavos } from './ficha.js';
 import { stepper, bloquear, cerrarHoja } from './inventario-ui.js';
 import { montarPrecio } from './inventario-precio.js';
 import { esRopa as piezaRopa } from './ropa.js';
+import { HUECO_LECTOR } from './lector.js';
 
 /** Nombre y precio (centavos) que el capturista editó en la tarjeta; el servidor los autoriza. Lanza si son inválidos. */
 export function cambiosTarjeta(a){
@@ -20,6 +21,28 @@ export function tarjetaEditada(a){
   return (a.nombre!==undefined&&a.nombre.trim()!==(a.ficha?.nombre??'').trim())
     ||(a.precio!==undefined&&aCentavos(a.precio)!==(a.ficha?.precios?.[a.estado]??a.ficha?.precio));
 }
+/**
+ * Un lector USB cuyo cursor quedó en un campo de la tarjeta teclea el código ahí. Enter saca el foco del campo;
+ * si lo precedió una ráfaga a velocidad de lector, se devuelve el valor anterior y el código va al lector.
+ */
+export function vigilarLectorEnCampo(campo,{alLeer,salir,ahora=()=>performance.now()}){
+  let texto='',previo='',ultima=-Infinity,rapido=true;
+  const reiniciar=()=>{texto='';rapido=true;};
+  campo.addEventListener('keydown',e=>{
+    if(e.ctrlKey||e.altKey||e.metaKey||e.isComposing)return;
+    if(e.key==='Enter'){
+      e.preventDefault();const codigo=rapido&&texto.length>=4?texto:'';reiniciar();
+      if(codigo){campo.value=previo;campo.dispatchEvent(new Event('input'));}
+      salir();if(codigo)alLeer(codigo);return;
+    }
+    if(!/^[\da-z-]$/i.test(e.key)){if(e.key!=='Shift'&&e.key!=='CapsLock')reiniciar();return;}
+    const t=ahora(),hueco=t-ultima;
+    if(hueco>250)reiniciar();
+    if(!texto)previo=campo.value;else if(hueco>HUECO_LECTOR)rapido=false;
+    texto+=e.key;ultima=t;
+  });
+}
+
 /** Estado de captura: UUID estable al reintentar; precio y existencia confirmados solo por el servidor. */
 export function crearCaptura({ api, imprimir, cambiar=()=>{}, enLinea=()=>navigator.onLine, uuid=()=>crypto.randomUUID(), permiteUpc=true, permiteSumar=true }) {
   let actual=null, resultados=[], siguiente=null, ajuste=null, fila=Promise.resolve(), grado='nuevo';
@@ -127,6 +150,7 @@ export async function iniciar(ctx) {
       campoNombre.oninput=()=>{actual.nombre=campoNombre.value;};nombre.append(campoNombre);
       campoPrecio.value=actual.precio??String((p.precios?.[actual.estado]??p.precio)/100);campoPrecio.inputMode='decimal';campoPrecio.readOnly=!dueno;
       campoPrecio.oninput=()=>{actual.precio=campoPrecio.value;};precio.append(campoPrecio);tarjeta.append(nombre,precio);
+      for(const campo of [campoNombre,campoPrecio])vigilarLectorEnCampo(campo,{salir:()=>{campo.blur();foco();},alLeer:codigo=>ctx.recibir(codigo,'usb').catch(e=>mensaje(e.message,'error'))});
     }else{
       tarjeta.append(nodo('h2',p?.nombre||'Sin registro'));
       if(p)tarjeta.append(nodo('strong',pesos(p.precios?.[actual.estado]??p.precio),'precio'));
