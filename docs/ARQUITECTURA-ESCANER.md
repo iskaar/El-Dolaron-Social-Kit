@@ -289,13 +289,20 @@ la pestaña Imprimir y el chip de impresora funcionan igual, y la impresora se c
   la fila ya impresa que se elige en la lista, o el cambio solo de grado en mercancía general. Reescanear una pieza ya
   reclamada con la etiqueta igual no imprime otra vez; +1 imprime 1 etiqueta de la unidad nueva.
   La preparación (`POST /api/etiquetas`) devuelve `etiqueta_version`; el reclamo de una pieza puede exigir que siga igual.
-- **Si no sale.** Si la impresora falla o se detiene, el motor **libera** el reclamo (`DELETE`) y la pieza vuelve a
-  quedar pendiente para este u otro dispositivo; «No salió desde aquí» hace lo mismo con la pieza y las siguientes.
-  Si la base no responde al liberar, el aviso lo dice. Si la página se cierra a medias, el reclamo queda (la pieza se
-  ve como enviada) y se recupera con «No salió desde aquí».
-- **Sin red.** `localStorage` es respaldo: si no hay red al reclamar, se imprime con la marca local y la siguiente carga
-  de la lista la sube (también se suben las marcas de antes del registro). Es el único caso en que dos dispositivos podrían
-  coincidir. Tras el primer deploy, abrir Imprimir en la PC una vez siembra la base con sus marcas.
+- **Si no sale.** Si la impresora falla o se detiene, el motor **libera** su propio reclamo (`DELETE` con
+  `etiquetas_en: { id: hora del reclamo }`: la fila se borra solo si sigue siendo ESE reclamo, así un dispositivo nunca
+  suelta el reclamo posterior de otro; sin `etiquetas_en` el borrado es incondicional, por compatibilidad) y la pieza
+  vuelve a quedar pendiente. Una reimpresión forzada que falla **no** se libera: las etiquetas anteriores siguen pegadas.
+  Lo que falta de un envío parcial se continúa como reimpresión, para que el reclamo lo siga cubriendo.
+  «No salió desde aquí» actúa sobre la pieza y las siguientes **que mandó este navegador** (marca `propia`); lo que se
+  adoptó de otro dispositivo (`propia: false`) se suelta desde el dispositivo que lo imprimió. Si la base no responde al
+  liberar, el aviso lo dice. Si la página se cierra a medias, el reclamo queda y se recupera con «No salió desde aquí».
+  Las piezas sin existencia (vendidas) no se listan y, si llegan a un lote, se saltan y se cuentan.
+- **Sin red.** `localStorage` es respaldo: si el navegador reporta que no hay red (o `fetch` falla con `TypeError`) al
+  reclamar, se imprime con la marca local y la siguiente carga de la lista la sube (también se suben las marcas de antes
+  del registro). Solo si TODO el lote empezó sin red: si se cae a media tanda, se detiene en la primera pieza sin reclamo.
+  Un tiempo agotado o un 5xx no cuentan como «sin red»: no se imprime a ciegas. Es el único caso en que dos dispositivos
+  podrían coincidir. Tras el primer deploy, abrir Imprimir en la PC una vez siembra la base con sus marcas.
 - **Host del capturista (denegar por omisión).** Se agregan solo: `/inventario-imprimir.js`, `/imprimir-lote.js`,
   `GET /api/calibracion`, `POST /api/etiquetas` y `POST`/`DELETE /api/etiquetas/enviadas`. Siguen cerrados ahí:
   `PUT /api/calibracion`, `GET /api/etiquetas*`, `/etiquetas`, `/bandas`, calibrar y `/api/config`. El servidor exige

@@ -490,11 +490,11 @@ test('marcas locales (#440): adoptar la de la base respeta la local igual, reemp
     const dice = (precio: number) => ({ etiqueta_en: '2026-10-23T10:00:00.000Z', etiqueta_precio: precio, etiqueta_precio_lista: 0, etiqueta_nombre: 'Playera', etiqueta_talla: 'M' });
     // Sin marca local: se adopta con la hora de la base, el grado de hoy y la señal de que ya está en la base.
     adoptarMarca('a', dice(9900), { estado_fisico: 'danado' });
-    assert.deepEqual(impresas().a, { hora: '2026-10-23T10:00:00.000Z', precio: 9900, precio_lista: 0, nombre: 'Playera', talla: 'M', estado_fisico: 'danado', base: true });
+    assert.deepEqual(impresas().a, { hora: '2026-10-23T10:00:00.000Z', precio: 9900, precio_lista: 0, nombre: 'Playera', talla: 'M', estado_fisico: 'danado', base: true, propia: false });
     // La local igual se respeta (su hora y su grado) y solo gana la señal de la base.
     marcarImpresa('b', '2026-10-23T09:00:00.000Z', { precio: 9900, precio_lista: 0, nombre: 'Playera', talla: 'M', estado_fisico: 'nuevo' });
     adoptarMarcas([['b', dice(9900), { estado_fisico: 'danado' }]]);
-    assert.deepEqual(impresas().b, { hora: '2026-10-23T09:00:00.000Z', precio: 9900, precio_lista: 0, nombre: 'Playera', talla: 'M', estado_fisico: 'nuevo', base: true });
+    assert.deepEqual(impresas().b, { hora: '2026-10-23T09:00:00.000Z', precio: 9900, precio_lista: 0, nombre: 'Playera', talla: 'M', estado_fisico: 'nuevo', base: true, propia: true });
     // La local distinta (otro dispositivo reimprimió con otro precio) se reemplaza.
     adoptarMarca('b', dice(8800), { estado_fisico: 'nuevo' });
     assert.equal(impresas().b.precio, 8800);
@@ -508,4 +508,61 @@ test('marcas locales (#440): adoptar la de la base respeta la local igual, reemp
     assert.deepEqual(Object.keys(impresas()), ['b']);
     assert.deepEqual(desmarcarDesde('zzz'), []);
   });
+});
+
+test('«No salió desde aquí» solo considera marcas propias: una adoptada no se suelta y las viejas sin señal cuentan como propias (#464)', async () => {
+  await conNavegador((async () => { throw new Error('no se usa'); }) as never, async (almacen) => {
+    const dice = { etiqueta_en: '2026-10-23T12:00:00.000Z', etiqueta_precio: 1, etiqueta_precio_lista: 0, etiqueta_nombre: 'X', etiqueta_talla: '' };
+    marcarImpresa('a', '2026-10-23T11:00:00.000Z', { precio: 1 });
+    adoptarMarca('b', dice, {});   // de otro dispositivo, y posterior
+    marcarImpresa('c', '2026-10-23T13:00:00.000Z', { precio: 1 });
+    assert.equal(impresas().a.propia, true); assert.equal(impresas().b.propia, false);
+    assert.deepEqual(desmarcarDesde('b'), []);                      // la adoptada no se puede soltar desde aquí
+    assert.deepEqual(Object.keys(impresas()), ['a', 'b', 'c']);
+    assert.deepEqual(desmarcarDesde('a').sort(), ['a', 'c']);       // las propias desde esa sí; la adoptada en medio se queda
+    assert.deepEqual(Object.keys(impresas()), ['b']);
+    almacen.set('etiqueta-impresas', JSON.stringify({ v: { hora: '2026-10-01T00:00:00.000Z', precio: 1 } }));   // de antes de adoptar: sin señal
+    assert.deepEqual(desmarcarDesde('v'), ['v']);
+  });
+});
+
+test('marcarImpresa guarda la hora del reclamo propio (en) para soltar solo ese reclamo (#464)', async () => {
+  await conNavegador((async () => { throw new Error('no se usa'); }) as never, async () => {
+    marcarImpresa('a', '2026-10-23T11:00:00.000Z', { precio: 1 }, true, '2026-10-23T11:00:00.123Z');
+    assert.equal(impresas().a.en, '2026-10-23T11:00:00.123Z');
+    marcarImpresa('b', '2026-10-23T11:00:00.000Z', { precio: 1 });
+    assert.equal('en' in impresas().b, false);
+  });
+});
+
+test('soltarEtiquetas con `en` (#464): manda la hora de cada reclamo y no suelta lo que no tiene hora', async () => {
+  const cuerpos: any[] = [];
+  await conNavegador((async (_r: string, op: any) => { cuerpos.push(JSON.parse(op.body)); return { ok: true }; }) as never, async () => {
+    assert.equal(await soltarEtiquetas(['a', 'b'], { a: 'H1', b: undefined as never }), true);
+    assert.deepEqual(cuerpos, [{ ids: ['a'], etiquetas_en: { a: 'H1' } }]);
+    assert.equal(await soltarEtiquetas(['x'], { y: 'H' }), true);   // nada con hora: ni siquiera se llama
+    assert.equal(cuerpos.length, 1);
+    await soltarEtiquetas(['a']);
+    assert.deepEqual(cuerpos[1], { ids: ['a'] });                   // sin `en`, como antes
+  });
+});
+
+test('reclamarEtiquetas (#464): solo una red caída permite seguir sin la base; un tiempo agotado no', async () => {
+  const agotado = Object.assign(new Error('The operation timed out.'), { name: 'TimeoutError' });
+  await conNavegador((async () => { throw agotado; }) as never, async () => {
+    await assert.rejects(() => reclamarEtiquetas(['a']), (e: any) => e.sinRed === undefined && /no respondió a tiempo/.test(e.message));
+  });
+  await conNavegador((async () => { throw Object.assign(new Error('aborted'), { name: 'AbortError' }); }) as never, async () => {
+    await assert.rejects(() => reclamarEtiquetas(['a']), (e: any) => e.sinRed === undefined);
+  });
+  await conNavegador((async () => ({ ok: false, status: 503, json: async () => ({}) })) as never, async () => {
+    await assert.rejects(() => reclamarEtiquetas(['a']), (e: any) => e.sinRed === undefined && /503/.test(e.message));
+  });
+  const navegador = globalThis.navigator as unknown as { onLine?: boolean };
+  navegador.onLine = false;
+  try {
+    await conNavegador((async () => { throw agotado; }) as never, async () => {
+      await assert.rejects(() => reclamarEtiquetas(['a']), (e: any) => e.sinRed === true);   // sin conexión declarada por el navegador
+    });
+  } finally { delete navegador.onLine; }
 });

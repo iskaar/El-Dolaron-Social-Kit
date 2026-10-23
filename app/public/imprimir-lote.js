@@ -1,6 +1,6 @@
 import {
   conectarEtiquetera, etiqueteraLista, imprimirEtiquetas, historialTexto, detenerEnvio, envioDetenido,
-  errorEnvio, etiquetaVigente, precioImpreso, gradoImpreso,
+  errorEnvio, etiquetaVigente, precioImpreso, gradoImpreso, esPropia,
 } from '/etiquetera.js';
 
 import { estadoEnvio, reclamarEnvio, liberarEnvio, noSalio, reclamarSinImprimir, sincronizarMarcas } from './envio-etiquetas.js';
@@ -41,11 +41,13 @@ async function cargar() {
   const pedida = Date.now();
   const respuesta = await fetch('/api/borradores?estado=listo', { cache: 'no-store', signal: AbortSignal.timeout(15000) });
   if (!respuesta.ok) throw new Error(`Error HTTP ${respuesta.status}. Revisa la red y la sesión.`);
-  piezas = (await respuesta.json())
+  const delTipo = (await respuesta.json())
     .filter((p) => p.destino === 'etiqueta' && p.precio > 0);
+  // Lo vendido (existencia 0) no tiene etiqueta que sacar: no estorba en la lista ni frena el lote.
+  piezas = delTipo.filter((p) => p.stock > 0);
   // Lo que ya salio desde otro dispositivo (#440) sale de la lista; lo soltado ahi regresa; las marcas
   // de antes del registro se suben en segundo plano.
-  void sincronizarMarcas(piezas, pedida);
+  void sincronizarMarcas(delTipo, pedida);
   pintar();
 }
 
@@ -110,7 +112,7 @@ function pintar() {
       <span>${escapar(p.nombre || 'Sin nombre')}${p.talla ? ` · ${escapar(p.talla)}` : ''}${dudosa
         ? '<span class="marca aviso">Envío incierto: revisa el papel y recupera esta pieza manualmente.</span>'
         : impresa
-        ? `<span class="marca">Impresa ${hora(marca.hora)}<button type="button" class="claro" data-desde="${p.id}">No salió desde aquí</button></span>`
+        ? `<span class="marca">Impresa ${hora(marca.hora)}${esPropia(marca) ? `<button type="button" class="claro" data-desde="${p.id}">No salió desde aquí</button>` : ' desde otro dispositivo'}</span>`
         : cambiada
           ? `<span class="marca aviso">La etiqueta pegada dice ${escapar(precioImpreso(marca) !== precioImpreso(p)
             ? pesos(marca.precio) : !esRopa(p) && gradoImpreso(marca) !== gradoImpreso(p) ? `grado ${nombreEstado(gradoImpreso(marca))}`
@@ -236,6 +238,9 @@ document.getElementById('detener').addEventListener('click', () => {
 });
 
 let imprimiendo = false;
+// Piezas cuyo envio se corto con etiquetas ya impresas: lo que falta se manda como reimpresion, para que el reclamo
+// (que pudo no soltarse) las siga cubriendo y no se confunda con lo que saco otro dispositivo.
+const parciales = new Set();
 document.getElementById('imprimir').addEventListener('click', () => {
   if (automaticaActiva) return;
   const ids = [...lista.querySelectorAll('input[type=checkbox]:checked')].map((c) => c.value);
@@ -257,7 +262,7 @@ async function imprimir(ids, pedidas = new Map(), automatico = false, opciones =
   imprimiendo = true;
   pintarControles();
   if (!automatico) detenerEnvio(false);
-  let terminadas = 0, omitidas = 0;
+  let terminadas = 0, omitidas = 0, rechazadas = 0, conBase = false;
   try {
     // Pedir la impresora necesita un clic real, nunca el temporizador automático.
     if (!etiqueteraLista()) {
@@ -296,7 +301,15 @@ async function imprimir(ids, pedidas = new Map(), automatico = false, opciones =
           return false;
         }
         // Antes de mandarla se reclama en la base (#440): si otro dispositivo ya la saco, no se repite.
-        const reclamo = await reclamarEnvio(p, { reimprimir: opciones.reimprimir === true, deLista: opciones.deLista === true });
+        const reclamo = await reclamarEnvio(p, { reimprimir: opciones.reimprimir === true || parciales.has(p.id), deLista: opciones.deLista === true });
+        if (reclamo.rechazada) { rechazadas += 1; continue; }   // vendida o cambiada: se salta, no aborta el lote
+        // Sin red al reclamar solo se imprime si TODO el lote empezo sin red; si se cae a la mitad, alto: lo
+        // que sigue podria estar ya reclamado por otra pantalla.
+        if (reclamo.sinBase && conBase) {
+          resumen.textContent = `Se detuvo en la pieza ${terminadas + 1} de ${ids.length}: se perdió la red y no se imprime sin avisar a la base. Las que faltan siguen en la lista.`;
+          return false;
+        }
+        if (!reclamo.sinBase) conBase = true;
         if (!reclamo.reclamada) {
           if (reclamo.cambio) {
             resumen.textContent = automatico ? 'La pieza cambió antes de imprimir. Revisa la cola y retoma la sesión.' : 'La pieza cambió antes de imprimir. Revisa la lista e intenta otra vez.';
@@ -320,15 +333,19 @@ async function imprimir(ids, pedidas = new Map(), automatico = false, opciones =
         vista?.resultado?.(p, hechasDePieza, copias, salio);
         pintarHistorial();
         if (!salio) {
-          // No salió: se libera el reclamo para que esta u otra pantalla pueda volver a sacarla.
-          const liberada = reclamo.sinBase || await liberarEnvio([p.id]);
+          // No salió: se libera el reclamo propio para que esta u otra pantalla pueda volver a sacarla. Una reimpresión
+          // forzada no se libera: las etiquetas anteriores siguen pegadas y lo que falta ya se ve como «faltaEtiqueta».
+          if (hechasDePieza > 0) parciales.add(p.id);
+          const liberada = reclamo.sinBase || reclamo.forzada || await liberarEnvio([p.id], { [p.id]: reclamo.etiqueta_en });
           resumen.textContent = (envioDetenido()
             ? `Detenido en la pieza ${terminadas + 1} de ${ids.length}. Las que faltan siguen en la lista.`
             : `Se cortó en la pieza ${terminadas + 1} de ${ids.length} (${p.nombre}): ${errorEnvio()}. Las que faltan siguen en la lista.`)
+            + (reclamo.forzada ? ' Las etiquetas que ya estaban pegadas siguen registradas.' : '')
             + (liberada ? '' : ' No se pudo avisar a la base: si otro dispositivo no la saca, usa «Mostrar impresas» y «No salió desde aquí».');
           return false;
         }
-        estadoEnvio(p, 'marcar', undefined, !reclamo.sinBase);
+        parciales.delete(p.id);
+        estadoEnvio(p, 'marcar', undefined, !reclamo.sinBase, reclamo.etiqueta_en);
         if ((automatico || localStorage.getItem(CLAVE_DUDOSA) === p.id) && !estadoEnvio().marcas[p.id]) {
           throw new Error('No se pudo recordar el envío. Revisa el almacenamiento del navegador y la etiqueta.');
         }
@@ -336,7 +353,7 @@ async function imprimir(ids, pedidas = new Map(), automatico = false, opciones =
         terminadas += 1;
       }
     }
-    resumen.textContent = `${terminadas} piezas enviadas${omitidas ? `; ${omitidas} ya las había enviado otro dispositivo y no se repitieron` : ''}. Si alguna no salió, usa «Mostrar impresas» y «No salió desde aquí».`;
+    resumen.textContent = `${terminadas} piezas enviadas${omitidas ? `; ${omitidas} ya las había enviado otro dispositivo y no se repitieron` : ''}${rechazadas ? `; ${rechazadas} ${rechazadas === 1 ? 'pieza ya no se puede imprimir' : 'piezas ya no se pueden imprimir'} (vendidas o cambiaron)` : ''}. Si alguna no salió, usa «Mostrar impresas» y «No salió desde aquí».`;
     return true;
   } catch (error) {
     // Nada de fallar en silencio: si algo revienta a media lista, se dice donde.

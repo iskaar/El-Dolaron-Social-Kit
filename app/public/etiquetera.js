@@ -722,14 +722,17 @@ function guardarImpresas(mapa) {
 }
 
 /** @param pieza lo que dice la etiqueta: { precio, precio_lista, nombre, talla } */
-export function marcarImpresa(id, hora = new Date().toISOString(), pieza = {}, base = false) {
-  guardarImpresas({ ...impresas(), [id]: entradaMarca(hora, pieza, base) });
+export function marcarImpresa(id, hora = new Date().toISOString(), pieza = {}, base = false, en) {
+  guardarImpresas({ ...impresas(), [id]: entradaMarca(hora, pieza, base, true, en) });
 }
 
-const entradaMarca = (hora, pieza, base) => ({
+// `propia: true`: la mando ESTE navegador (`en` = la hora del reclamo en la base, para soltar solo su propio reclamo).
+// `propia: false`: se adopto de lo que saco otro dispositivo. Una marca sin la senal es de antes de adoptar: es propia.
+const entradaMarca = (hora, pieza, base, propia = true, en) => ({
   hora, precio: pieza.precio, precio_lista: pieza.precio_lista, nombre: pieza.nombre ?? '', talla: pieza.talla ?? '',
-  estado_fisico: pieza.estado_fisico ?? 'nuevo', ...(base ? { base: true } : {}),
+  estado_fisico: pieza.estado_fisico ?? 'nuevo', ...(base ? { base: true } : {}), propia, ...(en ? { en } : {}),
 });
+export const esPropia = (marca) => marca?.propia !== false;
 
 /** Quita la marca de esta pieza en este navegador (la soltaron en otro dispositivo). */
 export function olvidarMarca(id) {
@@ -764,14 +767,16 @@ export function etiquetaVigente(marca, pieza) {
 
 /**
  * "No salio desde aqui": la impresora se paro sin avisar en esta pieza, asi que
- * esta y todas las que se mandaron despues vuelven a la lista.
+ * esta y todas las que se mandaron despues DESDE ESTE NAVEGADOR vuelven a la lista. Lo que saco otro
+ * dispositivo (marca adoptada) no se toca: aqui no se sabe si salio bien. Devuelve los ids soltados.
  */
 export function desmarcarDesde(id) {
   const mapa = impresas();
   const desde = mapa[id]?.hora;
-  if (!desde) return [];
-  guardarImpresas(Object.fromEntries(Object.entries(mapa).filter(([, marca]) => marca.hora < desde)));
-  return Object.keys(mapa).filter((otra) => mapa[otra].hora >= desde);
+  if (!desde || !esPropia(mapa[id])) return [];
+  const sueltas = Object.keys(mapa).filter((otra) => esPropia(mapa[otra]) && mapa[otra].hora >= desde);
+  guardarImpresas(Object.fromEntries(Object.entries(mapa).filter(([otra]) => !sueltas.includes(otra))));
+  return sueltas;
 }
 
 /* ---------- Registro compartido en la base (Issue #440) ---------- */
@@ -801,7 +806,7 @@ export function adoptarMarcas(filas) {
       if (!local.base) { mapa[id] = { ...local, base: true }; cambio = true; }
       continue;
     }
-    mapa[id] = entradaMarca(marca.etiqueta_en, dice, true);
+    mapa[id] = entradaMarca(marca.etiqueta_en, dice, true, false);
     cambio = true;
   }
   if (cambio) guardarImpresas(mapa);
@@ -821,19 +826,31 @@ export async function reclamarEtiquetas(ids, { reimprimir = false, version, orig
       signal: AbortSignal.timeout(15000),
     });
   } catch (error) {
-    throw Object.assign(new Error(`Sin red: ${error.message}`), { sinRed: true });
+    // Solo una red caida permite seguir sin la base. Un tiempo agotado (AbortError/TimeoutError) puede haber
+    // llegado al servidor: no se imprime a ciegas, que la otra pantalla podria sacar la misma etiqueta.
+    if (globalThis.navigator?.onLine === false || error instanceof TypeError) {
+      throw Object.assign(new Error(`Sin red: ${error.message}`), { sinRed: true });
+    }
+    throw new Error('La base no respondió a tiempo. No se imprimió: revisa la red e intenta otra vez.');
   }
   const cuerpo = await respuesta.json().catch(() => ({}));
   if (!respuesta.ok) throw new Error(cuerpo.error ?? `Error HTTP ${respuesta.status}. Revisa la red y la sesion.`);
   return cuerpo;
 }
 
-/** Borra la marca de la base ("no salio", o se corto la impresion). true si quedo; nunca lanza. */
-export async function soltarEtiquetas(ids) {
+/**
+ * Borra la marca de la base ("no salio", o se corto la impresion). true si quedo; nunca lanza. `en` ({ id: hora del
+ * reclamo propio }) hace el borrado condicional: solo se suelta lo que reclamo ESTE dispositivo y no cambio despues.
+ * Una pieza sin hora conocida no se suelta; sin `en` el borrado es incondicional.
+ */
+export async function soltarEtiquetas(ids, en = null) {
+  if (en) ids = ids.filter((id) => en[id]);
   try {
     for (let i = 0; i < ids.length; i += 100) {
+      const lote = ids.slice(i, i + 100);
       const respuesta = await fetch('/api/etiquetas/enviadas', {
-        method: 'DELETE', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ids: ids.slice(i, i + 100) }),
+        method: 'DELETE', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(en ? { ids: lote, etiquetas_en: Object.fromEntries(lote.map((id) => [id, en[id]])) } : { ids: lote }),
         signal: AbortSignal.timeout(15000),
       });
       if (!respuesta.ok) return false;

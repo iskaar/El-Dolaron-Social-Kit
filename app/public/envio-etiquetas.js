@@ -8,13 +8,16 @@ import { impresas, marcarImpresa, etiquetaVigente, gradoImpreso, precioImpreso, 
  */
 
 /** Marca local: consultar (por omision) o 'marcar'. `base` dice que la marca ya esta en D1. */
-export function estadoEnvio(pieza, accion = 'consultar', hora, base = false) {
-  if (accion === 'marcar') marcarImpresa(pieza.id, hora, pieza, base);
+export function estadoEnvio(pieza, accion = 'consultar', hora, base = false, en) {
+  if (accion === 'marcar') marcarImpresa(pieza.id, hora, pieza, base, en);
   const marcas = impresas();
   if (!pieza) return { marcas };
   const marca = marcas[pieza.id];
   return { marca, marcas, vigente: etiquetaVigente(marca, pieza) };
 }
+
+/** Lo que la base aceptaria reclamar: la pieza vendida o sin nombre, precio o etiqueta ya no tiene que imprimirse. */
+const seImprime = (p) => p.stock > 0 && p.precio > 0 && p.destino === 'etiqueta' && !!p.nombre?.trim();
 
 /** Lo que dice la etiqueta enviada segun la base, con la forma de una pieza. */
 const diceLaBase = (marca) => ({ precio: marca.etiqueta_precio, precio_lista: marca.etiqueta_precio_lista, nombre: marca.etiqueta_nombre, talla: marca.etiqueta_talla });
@@ -23,9 +26,11 @@ const mismaEtiqueta = (a, b) => precioImpreso(a) === precioImpreso(b) && textoIm
 
 /**
  * Se queda con la etiqueta de esta pieza ANTES de mandarla. Devuelve:
- *  - { reclamada: true }: gano este dispositivo, se imprime;
+ *  - { reclamada: true, forzada, etiqueta_en }: gano este dispositivo, se imprime. `forzada`: ya habia etiquetas pegadas
+ *    (reimpresion), asi que si el envio falla NO se suelta; `etiqueta_en` es la hora de SU reclamo, para soltar solo lo propio;
  *  - { reclamada: false, cambio: false }: ya la saco otro (PC o celular), se omite y su marca se adopta aqui;
  *  - { reclamada: false, cambio: true }: la pieza cambio entre preparar y reclamar, no se imprime a ciegas;
+ *  - { reclamada: false, rechazada: true }: ya no se puede imprimir (vendida, sin existencia o no lista); se salta sin avisar a la base;
  *  - { reclamada: true, sinBase: true }: no hubo red para preguntar; se imprime con la marca local y se sube
  *    despues (sincronizarMarcas). Cualquier otro fallo lanza.
  * Es reimpresion explicita (siempre sale, y actualiza el reclamo) si se pide `reimprimir` (Reimprimir de Buscar y de
@@ -34,10 +39,12 @@ const mismaEtiqueta = (a, b) => precioImpreso(a) === precioImpreso(b) && textoIm
  * solo difiere en el grado (mercancia general): es la unica forma de reimprimirla. Reescanear nunca fuerza.
  */
 export async function reclamarEnvio(pieza, { reimprimir = false, deLista = false } = {}) {
+  if (!seImprime(pieza)) return { reclamada: false, rechazada: true };
   const marca = impresas()[pieza.id];
+  const forzada = reimprimir || (!!marca && mismaEtiqueta(marca, pieza) && (deLista || (!esRopa(pieza) && gradoImpreso(marca) !== gradoImpreso(pieza))));
   try {
-    const r = await reclamarEtiquetas([pieza.id], { reimprimir: reimprimir || (!!marca && mismaEtiqueta(marca, pieza) && (deLista || (!esRopa(pieza) && gradoImpreso(marca) !== gradoImpreso(pieza)))), version: pieza.etiqueta_version });
-    if (r.reclamadas.includes(pieza.id)) return { reclamada: true };
+    const r = await reclamarEtiquetas([pieza.id], { reimprimir: forzada, version: pieza.etiqueta_version });
+    if (r.reclamadas.includes(pieza.id)) return { reclamada: true, forzada, etiqueta_en: r.marcas[pieza.id]?.etiqueta_en };
     const enBase = r.marcas[pieza.id];
     if (!enBase || !mismaEtiqueta(diceLaBase(enBase), pieza)) return { reclamada: false, cambio: true };
     adoptarMarca(pieza.id, enBase, pieza);
@@ -48,20 +55,25 @@ export async function reclamarEnvio(pieza, { reimprimir = false, deLista = false
   }
 }
 
-/** "No salio": libera el reclamo de estas piezas. true si la base quedo sin ellas; nunca lanza. */
-export const liberarEnvio = (ids) => soltarEtiquetas(ids);
+/** "No salio": libera el reclamo de estas piezas (`en`: la hora del reclamo de cada una, ver soltarEtiquetas). true si la base quedo sin ellas; nunca lanza. */
+export const liberarEnvio = (ids, en) => soltarEtiquetas(ids, en);
 
-/** «No salió desde aquí»: esa pieza y las que se mandaron despues vuelven a la lista, aqui y en la base. */
+/**
+ * «No salió desde aquí»: esa pieza y las que se mandaron despues DESDE ESTE NAVEGADOR vuelven a la lista, aqui y en la
+ * base. En la base solo se suelta el reclamo propio: si otro dispositivo reclamo despues, o saco la pieza, no se toca.
+ */
 export async function noSalio(id) {
+  const antes = impresas();
   const ids = desmarcarDesde(id);
-  return ids.length === 0 || liberarEnvio(ids);
+  return ids.length === 0 || liberarEnvio(ids, Object.fromEntries(ids.map((otra) => [otra, antes[otra].en])));
 }
 
-/** «Marcar como impresas»: sin imprimir, las deja reclamadas en la base. Devuelve las que quedaron; lanza si falla. */
+/** «Marcar como impresas»: sin imprimir, las deja reclamadas en la base. Devuelve las que quedaron (id -> hora del reclamo); lanza si falla. */
 export async function reclamarSinImprimir(ids) {
-  const reclamadas = new Set();
+  const reclamadas = new Map();
   for (let i = 0; i < ids.length; i += 100) {
-    for (const id of (await reclamarEtiquetas(ids.slice(i, i + 100), { reimprimir: true })).reclamadas) reclamadas.add(id);
+    const r = await reclamarEtiquetas(ids.slice(i, i + 100), { reimprimir: true });
+    for (const id of r.reclamadas) reclamadas.set(id, r.marcas[id]?.etiqueta_en);
   }
   return reclamadas;
 }
@@ -96,7 +108,7 @@ async function subirMarcas(piezas, antes) {
         const ahora = impresas()[p.id];
         // Si mientras tanto se volvio a imprimir o se solto, esa marca ya no es la que se subio.
         if (!ahora || ahora.hora !== antes[p.id].hora) continue;
-        if (r.reclamadas.includes(p.id)) marcarImpresa(p.id, ahora.hora, ahora, true);
+        if (r.reclamadas.includes(p.id)) marcarImpresa(p.id, ahora.hora, ahora, true, r.marcas[p.id]?.etiqueta_en);
         else if (r.marcas[p.id]) adoptarMarca(p.id, r.marcas[p.id], p);
       }
     }
