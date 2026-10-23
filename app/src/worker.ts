@@ -96,7 +96,7 @@ interface FilaBorrador {
 const RUTAS_VENDEDOR = new Set(['/captura', '/foto.js', '/tallas.js', '/api/salud', '/sin-acceso', '/api/yo',
   // Escanear del manifiesto (Issue #365): el telefono ve nombre y precio de lo que escanea, nada mas.
   '/escanear', '/categorias.js', '/upc.js', '/cola-fotos.js', '/estados.js',
-  '/inventario-celular.js', '/foto-pendiente.js', '/camara-inventario.js',
+  '/inventario-celular.js', '/inventario-enfocado.js', '/foto-pendiente.js', '/camara-inventario.js',
   '/inventario-revisar.js', '/inventario-precio.js', '/sesiones.js', '/precios-ml.js', '/compartir.js',
   '/inventario-capturar.js', '/inventario-ropa.js', '/envio-etiquetas.js', '/semana.js',
   '/inventario', '/inventario.css', '/inventario.js', '/inventario-ui.js', '/lector.js', '/ficha.js',

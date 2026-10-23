@@ -2,6 +2,7 @@ import { escucharLector } from './lector.js';
 import { api, crearFicha, pesos, resolverRepetida } from './ficha.js';
 import { $, nodo, boton, mensaje, hoja, confirmar, prepararHoja, stepper, cerrarHoja, ponerNeutro, bloquear } from './inventario-ui.js';
 import { montarPrecio, refrescarPrecios } from './inventario-precio.js';
+import { crearEnfocado } from './inventario-enfocado.js';
 
 prepararHoja();
 const pc = () => matchMedia('(min-width:1000px)').matches;
@@ -82,8 +83,12 @@ async function buscar(mas = false, abrir = false) {
   } catch(e) { if (turno === generacion) mensaje(e.message, 'error'); }
   finally { if (turno === generacion) { cargando = false; bloquear($('mas'), ''); $('resultados').setAttribute('aria-busy', 'false'); } }
 }
-const contexto = { $, nodo, boton, mensaje, hoja, confirmar, api, pesos, identidad, dueno, pc, foco, ficha, resultado,
+const problemas = {};
+const contexto = { $, nodo, boton, mensaje, hoja, confirmar, api, pesos, identidad, dueno, pc, foco, ficha, resultado, problemas,
   pieza:() => piezaActual, cambiarModo, imprimir:async (...args) => {if(identidad.vendedor){mensaje('Imprime desde la computadora','aviso');return false;}return (await cargar('imprimir')).imprimir(...args);} };
+// Modo enfocado (#461): solo celular y Capturar; la navegación se oculta con el mismo [hidden] que ya usa el modo único.
+const enfocado = contexto.enfocado = crearEnfocado({ $, problemas, aplica:() => !pc() && modo === 'capturar',
+  alCambiar:(on) => { $('modos').hidden = on || modos.length === 1; if (on) void activos.get('capturar')?.empezar?.(); } });
 async function cargar(nombre) {
   if (!modulos.has(nombre)) {
     const archivo = { imprimir:'./inventario-imprimir.js', capturar:'./inventario-capturar.js', revisar:'./inventario-revisar.js' }[nombre];
@@ -101,7 +106,7 @@ async function cambiarModo(nuevo) {
   if (!modos.includes(nuevo)) return;
   const turno=++cambioModo;
   await apagarCamaras();if(turno!==cambioModo)return; clearTimeout(filtroTimer); ++generacion; cargando = false; ficha.cerrar(); piezaActual = null; document.body.classList.remove('con-ficha');
-  modo = nuevo; if (dueno && nuevo !== 'revisar') actualizarPrecios();
+  modo = nuevo; enfocado.aplicar(); if (dueno && nuevo !== 'revisar') actualizarPrecios();
   localStorage.setItem('inventario-modo', modo); history.replaceState(null, '', `${location.pathname}${location.search}#${modo}`);
   $('consulta').value='';
   for (const b of document.querySelectorAll('[data-modo]')) { const activo = b.dataset.modo === modo; b.setAttribute('aria-selected', String(activo)); b.tabIndex = activo ? 0 : -1; $(b.getAttribute('aria-controls')).hidden = !activo; }
@@ -177,6 +182,10 @@ $('menu').onclick = () => {
     const b = boton(texto, () => { const activo = localStorage.getItem(`inventario-${clave}`) !== 'false'; localStorage.setItem(`inventario-${clave}`, String(!activo)); b.setAttribute('aria-checked', String(!activo)); });
     b.setAttribute('role','switch'); b.setAttribute('aria-checked', String(localStorage.getItem(`inventario-${clave}`) !== 'false')); c.append(b);
   }
+  if (!pc() && modo === 'capturar') {
+    const e = boton('Modo enfocado', () => { cerrarHoja(); enfocado.poner(!enfocado.activo()); });
+    e.setAttribute('role','switch'); e.setAttribute('aria-checked', String(enfocado.activo())); c.append(e);
+  }
   const inicio = nodo('a','Inicio'); inicio.href = '/'; c.append(inicio);
   if (!identidad.vendedor && (dueno || identidad.usuario?.roles.includes('capturista'))) { const a = nodo('a','Ajustes'); a.href = '/admin'; c.append(a); }
   hoja('Menú', c);
@@ -189,6 +198,7 @@ document.addEventListener('click', (e) => {
   if (b) { e.preventDefault();e.stopImmediatePropagation();mensaje(b.dataset.motivo||'Espera un momento','aviso'); }
 }, true);
 document.addEventListener('keydown', (e) => {
+  if (e.altKey && e.key === '0') { e.preventDefault(); enfocado.alternar(); }
   if (e.altKey && /^[1-4]$/.test(e.key)) { e.preventDefault(); void cambiarModo(['capturar','buscar','revisar','imprimir'][Number(e.key)-1]); }
   if (e.key === 'Escape' && !$('hoja').open) { $('consulta').value = ''; ficha.cerrar(); document.body.classList.remove('con-ficha'); if (modo === 'buscar') void buscar(); foco(); }
   if (e.key === 'Enter' && pc() && e.target === $('consulta') && !$('consulta').value && !$('hoja').open) {

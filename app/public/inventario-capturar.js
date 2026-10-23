@@ -88,7 +88,9 @@ export async function iniciar(ctx) {
     const motivo=falta||(pendienteFoto?'Espera la foto':'');bloquear(disparo,motivo);ayudaDisparo.textContent=motivo;
     if(!pc()){disparo.textContent=falta?falta.replace('Falta ','Elige '):'';disparo.setAttribute('aria-label',falta?disparo.textContent:'Tomar foto');}
   }
-  async function imprimir(id,n){if(!etiqueteraLista()||ctx.identidad.vendedor)return false;return ctx.imprimir([id],new Map([[id,n]]));}
+  // Modo enfocado (#461): una etiqueta pedida sin impresora conectada queda como alerta hasta que se conecte.
+  let impresionPedida=false;ctx.problemas.impresora=()=>{if(impresionPedida&&etiqueteraLista())impresionPedida=false;return impresionPedida;};
+  async function imprimir(id,n){if(ctx.identidad.vendedor)return false;if(!etiqueteraLista()){impresionPedida=true;return false;}impresionPedida=false;return ctx.imprimir([id],new Map([[id,n]]));}
   const flujo=crearCaptura({api,imprimir,permiteSumar:dueno||ctx.identidad.usuario?.editar_inventario===true,permiteUpc:!ctx.identidad.usuario?.roles.includes('finanzas'),cambiar:pintar});
   async function recibirExistente(p){
     const a={tipo:'guardada',pieza:p,cantidad:p.sumadas,faltaEtiqueta:true};flujo.retomar(a);
@@ -133,7 +135,7 @@ export async function iniciar(ctx) {
       if(!actual.imagenBuscada){actual.imagenBuscada=true;void imagen(actual,foto,tarjeta);}
       else if(actual.imagen)pintarImagen(actual,foto,tarjeta);
     }else if(actual.tipo==='sin-registro'){
-      mensaje('Sin registro · toma foto','aviso');const fila=nodo('div',undefined,'acciones');fila.append(boton('Buscar en internet',()=>buscarDesconocida(actual)),boton('Tomar foto',()=>fotoNueva(actual),'primario'));carta.append(fila);
+      mensaje('Sin registro · toma foto','aviso');const fila=nodo('div',undefined,'acciones');fila.append(boton('Buscar en internet',()=>buscarDesconocida(actual),'buscar-internet'),boton('Tomar foto',()=>fotoNueva(actual),'primario'));carta.append(fila);
     }else if(actual.tipo==='guardada')tarjeta.append(nodo('p','✓ Guardada'));
     if(actual.faltaEtiqueta&&p.estado_analisis==='listo')tarjeta.append(boton(`Imprimir ${actual.cantidad||1} ${(actual.cantidad||1)===1?'etiqueta':'etiquetas'}`,async()=>{const ok=await ctx.imprimir([p.id],new Map([[p.id,actual.cantidad||1]]));if(ok){actual.faltaEtiqueta=false;mensaje('Etiqueta enviada','etiqueta');}}));
   }
@@ -172,7 +174,7 @@ export async function iniciar(ctx) {
   elegirTipo(esRopa);flujo.limpiar();
   addEventListener('offline',()=>{for(const b of pieza.querySelectorAll('button'))if(b.textContent.startsWith('+1'))bloquear(b,'Sin red: se suma al volver la señal');});
   addEventListener('online',()=>{for(const b of pieza.querySelectorAll('button'))if(b.textContent.startsWith('+1'))bloquear(b,'');});
-  const interfaz = { abrir(){neutro();foco();void movil?.abrir();},neutro,leer:async(c)=>{movil?.actividad();consulta=c;await flujo.leer(c);if(flujo.actual()?.tipo==='existente')mensaje(`Ya existe · ×${flujo.actual().pieza.stock}`,'aviso');else if(!flujo.actual()){const n=lista.querySelectorAll('.resultado').length;mensaje(n?`${n} coincidencias`:'Sin coincidencias','aviso');}else if(flujo.actual()?.tipo==='nueva')mensaje(`${flujo.actual().ficha.nombre} ×${flujo.actual().cantidad}`,'ok');},pausar(){movil?.pausar();},flujo,
+  const interfaz = { empezar:()=>movil?.empezar?.(),abrir(){neutro();foco();void movil?.abrir();},neutro,leer:async(c)=>{movil?.actividad();consulta=c;await flujo.leer(c);if(flujo.actual()?.tipo==='existente')mensaje(`Ya existe · ×${flujo.actual().pieza.stock}`,'aviso');else if(!flujo.actual()){const n=lista.querySelectorAll('.resultado').length;mensaje(n?`${n} coincidencias`:'Sin coincidencias','aviso');}else if(flujo.actual()?.tipo==='nueva')mensaje(`${flujo.actual().ficha.nombre} ×${flujo.actual().cantidad}`,'ok');},pausar(){movil?.pausar();},flujo,
     // La fase móvil conecta estas entradas al mismo flujo y conserva los registros de la cola.
     entrada,derecha,tipo,grado,escribir,sinFoto,manual,tablero,recibirExistente,disparo,remota,lista,pieza,esRopa:()=>esRopa,estado:()=>estado,cantidad:()=>cantidad,contador,fotoNueva,fotoPieza,
   };
