@@ -900,3 +900,44 @@ test('«No salió desde aquí» sí suelta lo marcado con «Marcar como impresas
     assert.equal(await pc.imprimir([id]), true);   // otra pantalla ya puede sacarla
   } finally { t.db.close(); }
 });
+
+test('una captura con foto de un UPC del manifiesto (listo y con UPC) sí se corrige en sus 24 h; sin foto, con venta o ajena, no (#464)', async () => {
+  const t = tienda();
+  try {
+    const ahora = new Date().toISOString();
+    const preparar = (foto: string, capturador = DUENO) => {
+      const id = agregar(t, ahora, 'listo', 2);
+      t.db.prepare("update productos set categoria='hogar', nombre='Estuche', upc=?, foto_key=?, capturado_por=? where id=?")
+        .run(String(Math.floor(Math.random() * 1e11)), foto, capturador, id);
+      return id;
+    };
+    const conFoto = preparar('fotos/x.jpg'), sinFoto = preparar(''), vendida = preparar('fotos/y.jpg'), ajena = preparar('fotos/z.jpg', 'otro@prueba.mx');
+    t.db.prepare("insert into ventas (id, total, forma_pago, efectivo, cambio, creado_en, registrado_en) values ('v1', 100, 'efectivo', 100, 0, ?, ?)").run(ahora, ahora);
+    t.db.prepare("insert into venta_lineas (venta_id, producto_id, codigo, nombre, precio, cantidad) values ('v1', ?, 'x', 'x', 100, 1)").run(vendida);
+    const corregir = (id: string) => t.pedir(`/api/borradores/${id}/existencia`, { stock: 3 }, 'PATCH');
+    const ok = await corregir(conFoto);
+    assert.equal(ok.status, 200);
+    assert.equal(t.db.prepare('select stock from productos where id=?').get(conFoto)!.stock, 3);
+    for (const id of [sinFoto, vendida, ajena]) {
+      const r = await corregir(id);
+      assert.equal(r.status, 404);
+      assert.match(r.cuerpo.error, /no es tu captura, pasaron 24 horas, tiene venta o publicación/);
+      assert.equal(t.db.prepare('select stock from productos where id=?').get(id)!.stock, 2);
+    }
+  } finally { t.db.close(); }
+});
+
+test('Imprimir en el celular no pide /api/foto de las piezas sin foto (#464)', async () => {
+  const t = tienda();
+  try {
+    const { celular } = await dosDispositivos(t);
+    const con = agregar(t, DESPUES, 'listo', 1), sin = agregar(t, DESPUES, 'listo', 1);
+    t.db.prepare("update productos set foto_key='fotos/a.jpg' where id=?").run(con);
+    await celular.cargar();
+    const lista = celular.$('lista').innerHTML;
+    assert.ok(lista.includes(`/api/foto/${con}`));
+    assert.ok(lista.includes(`value="${sin}"`) && !lista.includes(`/api/foto/${sin}`), 'sin foto no hay petición');
+    const vista = readFileSync('public/inventario-imprimir.js', 'utf8');
+    assert.match(vista, /if\(p\.foto_key\)imagen\.src=`\/api\/foto\/\$\{p\.id\}`;else imagen\.hidden=true/);
+  } finally { t.db.close(); }
+});

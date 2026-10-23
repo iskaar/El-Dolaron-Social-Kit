@@ -68,7 +68,7 @@ export async function iniciar(ctx) {
       const li=nodo('li',undefined,'fila-etiqueta'); const marca=hechas[p.id], vigente=estadoEnvio(p).vigente;
       li.classList.toggle('impresa',vigente);
       const label=nodo('label',undefined,'casilla'),check=nodo('input');check.type='checkbox';check.value=p.id;check.checked=!vigente&&!desmarcadas.has(p.id);check.setAttribute('aria-label',`Elegir ${p.nombre}`);label.append(check);
-      const imagen=nodo('img');imagen.src=`/api/foto/${p.id}`;imagen.alt='';imagen.loading='lazy';imagen.onerror=()=>{imagen.hidden=true;};
+      const imagen=nodo('img');imagen.alt='';imagen.loading='lazy';imagen.onerror=()=>{imagen.hidden=true;};if(p.foto_key)imagen.src=`/api/foto/${p.id}`;else imagen.hidden=true;   // sin foto no se pide: era un 404 por pieza
       const texto=nodo('div');texto.append(nodo('b',p.nombre),nodo('div',p.codigo||'Sin código','codigo'),nodo('strong',pesos(p.precio),'precio'));
       const estado=nodo('small',p.id===idDudoso?'▲ Envío incierto':vigente?'✓ Salió':marca?`↻ La pegada dice ${precioImpreso(marca)!==precioImpreso(p)?pesos(marca.precio):!esRopa(p)&&gradoImpreso(marca)!==gradoImpreso(p)?`grado ${nombreEstado(gradoImpreso(marca))}`:`«${marca.nombre}${marca.talla?` · ${marca.talla}`:''}»`}`:'Nueva');texto.append(estado);
       if(vigente&&esPropia(marca))texto.append(boton('No salió desde aquí',async()=>{const ok=await noSalio(p.id);motor.pintar();if(!ok)mensaje('Regresó a la lista, pero no se avisó a la base. Revisa la red y repítelo.','aviso');}));

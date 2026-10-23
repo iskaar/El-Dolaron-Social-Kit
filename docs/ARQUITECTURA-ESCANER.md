@@ -305,6 +305,13 @@ la pestaña Imprimir y el chip de impresora funcionan igual, y la impresora se c
   después de preparar).
   Un tiempo agotado o un 5xx no cuentan como «sin red»: no se imprime a ciegas. Es el único caso en que dos dispositivos
   podrían coincidir. Tras el primer deploy, abrir Imprimir en la PC una vez siembra la base con sus marcas.
+- **Capturas con foto en el celular.** Como en /escanear, la etiqueta sale sola al guardar (#464): una captura que nace
+  `listo` con precio (manifiesto, ropa con precio) imprime al subir; una que se analiza espera con `GET /api/borradores/upc/:id`
+  y imprime en cuanto queda `listo`; `error`, `pendiente` agotado o sin precio van aparte («Aparte, sin etiqueta»). Va por el
+  mismo reclamo y se recuerda por captura en el teléfono (`inventario-autoimpresas`), así una subida repetida no reimprime.
+  Una captura sumada a una pieza existente imprime 1 por unidad sumada (como +1). Sin impresora conectada queda «falta
+  etiqueta» y la alerta del modo enfocado, también en el host del capturista. La existencia de una captura con foto (aunque
+  traiga UPC) se corrige 24 h mientras no tenga venta ni publicación; si sube, salen las etiquetas que faltan.
 - **Host del capturista (denegar por omisión).** Se agregan solo: `/inventario-imprimir.js`, `/imprimir-lote.js`,
   `GET /api/calibracion`, `POST /api/etiquetas` y `POST`/`DELETE /api/etiquetas/enviadas`. Siguen cerrados ahí:
   `PUT /api/calibracion`, `GET /api/etiquetas*`, `/etiquetas`, `/bandas`, calibrar y `/api/config`. El servidor exige

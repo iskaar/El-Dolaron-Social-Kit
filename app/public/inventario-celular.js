@@ -7,7 +7,8 @@ import { ropa, opciones, talla } from './inventario-ropa.js';
 import { stepper, bloquear, cerrarHoja } from './inventario-ui.js';
 import { estadoEnvio } from './envio-etiquetas.js';
 import { esRopa } from './ropa.js';
-import { cambiosTarjeta } from './inventario-capturar.js';
+import { cambiosTarjeta, capturaImpresa } from './inventario-capturar.js';
+import { etiqueteraLista } from './etiquetera.js';
 
 export async function iniciarCelular(ctx,captura) {
   const {$,nodo,boton,mensaje,hoja,api,confirmar}=ctx;
@@ -65,8 +66,31 @@ export async function iniciarCelular(ctx,captura) {
   ctx.problemas.cola=()=>{const sin=[...sesion.values()].filter(r=>!r.subida);if(!sin.length)avance=Date.now();return{sinSubir:sin.length,sinAvanceMs:Date.now()-avance,colaError:sin.some(r=>r.estado==='error'||r.estado==='sesion'),sesion:sin.some(r=>r.estado==='sesion')};};
   const subida=crearSubida({pendientes,leer,borrar,pausada:id=>revisando===id,
     alEstado(estado,r){if(estado==='subiendo')avance=Date.now();const datos=sesion.get(r.id);if(datos)datos.estado=estado;pintar();if(estado==='sesion')mensaje('Tu sesión venció · vuelve a entrar','error');},
-    async alSubir(r,d){if(d.existente){sesion.delete(r.id);sesion.set(d.id,{...d,subida:true,cantidad:r.cantidad,estado:d.estado_analisis==='pendiente'?'analizando':'subida'});pintar();await captura.recibirExistente(d);return;}if(d.estado_analisis==='descartado'){sesion.delete(r.id);pintar();return;}sesion.set(r.id,{...sesion.get(r.id),...r,subida:true,estado:d.estado_analisis==='pendiente'?'analizando':'subida',...d,cantidad:d.stock??r.cantidad});pintar();}
+    async alSubir(r,d){if(d.existente){sesion.delete(r.id);sesion.set(d.id,{...d,subida:true,cantidad:r.cantidad,estado:d.estado_analisis==='pendiente'?'analizando':'subida'});pintar();await captura.recibirExistente(d,r.id);return;}if(d.estado_analisis==='descartado'){sesion.delete(r.id);pintar();return;}sesion.set(r.id,{...sesion.get(r.id),...r,subida:true,estado:d.estado_analisis==='pendiente'?'analizando':'subida',...d,cantidad:d.stock??r.cantidad});pintar();void etiquetar(r.id,d,r.cantidad);}
   });
+  /**
+   * Como /escanear: al guardar, la etiqueta sale sola en cuanto la pieza tiene código y precio (manifiesto: al instante;
+   * análisis de la foto: en cuanto queda `listo`). Va por el mismo reclamo que la PC, así que nunca sale dos veces.
+   * Si no sale, el aviso dice por qué; lo que quede en error o sin precio va aparte, a revisar.
+   */
+  async function etiquetar(llave,d,cantidad){
+    let p=d;
+    for(let i=0;p.estado_analisis==='pendiente'&&i<40;i++){
+      await new Promise(r=>setTimeout(r,4000));
+      try{p=await api(`/api/borradores/upc/${d.id}`);}catch{/* sin red: se vuelve a preguntar */}
+    }
+    const dato=sesion.get(d.id);
+    if(p.estado_analisis==='descartado')return;
+    if(p.estado_analisis!=='listo'||!(p.precio>0)){
+      if(dato){dato.estado='error';pintar();}
+      mensaje(`Aparte, sin etiqueta: ${p.nombre||'pieza sin nombre'}. Ponle precio en la revisión.`,'aviso');sonar('error');return;
+    }
+    const n=Math.min(99,p.stock||cantidad);if(!(n>0))return;
+    const ok=await captura.imprimirCaptura(llave,p.id,n,{});
+    if(dato)dato.faltaEtiqueta=!ok;
+    if(ok){mensaje(`Sale la etiqueta: ${p.nombre} ×${n}`,'etiqueta');sonar('etiqueta');}
+    else mensaje(`Guardada · falta etiqueta: ${etiqueteraLista()?'revisa la impresora':'conecta la impresora'}`,'aviso');
+  }
   async function subir(){
     if(enviando||!navigator.onLine)return;pintarRed();enviando=true;
     const drenar=async()=>{const otra=await subida.subir();if(otra)setTimeout(subir,1000);};
@@ -117,7 +141,10 @@ export async function iniciarCelular(ctx,captura) {
   async function retomarLocal(r,foto){reposo.actividad();r={...r,foto,version:(r.version??0)+1};await guardar(r);const anterior=sesion.get(r.id)?.url;if(anterior)URL.revokeObjectURL(anterior);sesion.set(r.id,{...sesion.get(r.id),...r,url:URL.createObjectURL(foto)});pintar();}
   async function corregir(id){
     if(subida.id()===id)return mensaje('Espera a que suba','aviso');
-    const datos=sesion.get(id);if(!datos)return;revisando=id;
+    const datos=sesion.get(id);if(!datos)return;
+    // Una captura que se sumó a una pieza existente no tiene existencia propia que corregir: su suma quedó auditada.
+    if(datos.existente)return mensaje('Ya existía: la suma quedó auditada. Ajusta la existencia desde Buscar.','aviso');
+    revisando=id;
     let local,actual;
     try{local=await leer(id);actual=local?{...local,precio:local.precio_ropa,stock:local.cantidad}:await api(`/api/borradores/${id}/revision`);}
     catch(e){revisando=null;throw e;}
@@ -146,7 +173,11 @@ export async function iniciarCelular(ctx,captura) {
         local={...local,cantidad,talla:tallaActual||null,estado_fisico:cambios.estado_fisico,...(r?{prenda:r.prenda,marca:r.marca,precio_ropa:r.precio_ropa,correccion_ficha:{...local.correccion_ficha,...cambios}}:{}),version:(local.version??0)+1};await guardar(local);Object.assign(datos,local);sesion.set(id,datos);
       }else{
         // La corrección propia conserva la ventana y validaciones de /captura; nunca se encola.
-        if(cantidad!==actual.stock)await api(`/api/borradores/${id}/existencia`,{stock:cantidad},'PATCH');
+        if(cantidad!==actual.stock){
+          await api(`/api/borradores/${id}/existencia`,{stock:cantidad},'PATCH');
+          // Si la etiqueta de esta captura ya salió y la cantidad sube, salen las que faltan (como +1).
+          if(cantidad>actual.stock&&actual.estado_analisis==='listo'&&capturaImpresa(id))void captura.imprimirPieza(id,cantidad-actual.stock,{reimprimir:true});
+        }
         if(tallaActual&&tallaActual!==actual.talla)await api(`/api/borradores/${id}/talla`,{talla:tallaActual},'PATCH');
         if(r||cambios.estado_fisico!==actual.estado_fisico)await api(`/api/borradores/${id}/revision`,cambios,'PATCH');
         Object.assign(datos,{cantidad,talla:tallaActual,estado_fisico:cambios.estado_fisico,...(r?{precio_ropa:r.precio_ropa,prenda:r.prenda,marca:r.marca}:{})});
@@ -169,7 +200,7 @@ export async function iniciarCelular(ctx,captura) {
   }
   async function recuperar(){
     for(const r of await pendientes())if(!sesion.has(r.id))sesion.set(r.id,{...r,url:URL.createObjectURL(r.foto),subida:false});pintar();
-    if(navigator.onLine)try{const desde=new Date(Date.now()-86400000).toISOString(),d=await api('/api/borradores?'+new URLSearchParams({desde}));for(const p of d){if(p.capturado_por!==(ctx.identidad.correo||ctx.identidad.usuario?.correo)||sesion.has(p.id))continue;sesion.set(p.id,{...p,cantidad:p.stock,creado:Date.parse(p.creado_en),subida:true,estado:p.estado_analisis==='pendiente'?'analizando':'subida'});}pintar();}catch{}
+    if(navigator.onLine)try{const desde=new Date(Date.now()-86400000).toISOString(),d=await api('/api/borradores?'+new URLSearchParams({desde}));for(const p of d){if(p.capturado_por!==(ctx.identidad.correo||ctx.identidad.usuario?.correo)||sesion.has(p.id))continue;sesion.set(p.id,{...p,cantidad:p.stock,creado:Date.parse(p.creado_en),subida:true,estado:p.estado_analisis==='pendiente'?'analizando':'subida'});if(p.estado_analisis==='pendiente')void etiquetar(p.id,p,p.stock);}pintar();}catch{}
     void subir();
   }
   addEventListener('online',()=>{pintar();void subir();});addEventListener('offline',pintar);setInterval(subir,20000);

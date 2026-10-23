@@ -914,6 +914,10 @@ async function corregirCaptura(id: string, campo: string, request: Request, env:
     and not exists (select 1 from ml_publicaciones where producto_id = productos.id)`;
   // Lo escaneado (con UPC) se corrige mientras está abierto en el escáner; ya guardado y `listo`,
   // /etiquetas lo imprime en seguida, así que solo se corrige lo que aún se identifica o espera foto (#381).
+  // Excepción (#464): una captura CON FOTO del manifiesto nace `listo` y con UPC, y el capturista corrige su cantidad desde
+  // la miniatura en sus 24 h; mientras no tenga venta ni publicación, un número absoluto no pisa nada.
+  const alcanceUpcConFoto = `(foto_key <> '' and not exists (select 1 from venta_lineas where producto_id = productos.id)
+    and not exists (select 1 from ml_publicaciones where producto_id = productos.id))`;
   // En 0 se cancela y sale de la cola (#377). Una foto se elimina desde su miniatura.
   if (valor === 0) {
     const { meta } = await env.DB.prepare(`update productos set stock = 0, estado_analisis = 'descartado', actualizado_en = ?
@@ -928,7 +932,7 @@ async function corregirCaptura(id: string, campo: string, request: Request, env:
   }
   const resultado = await env.DB.prepare(
     `update productos set ${columna} = ?, actualizado_en = ? where id = ? and capturado_por = ? and creado_en > ?
-       and (${sinFoto ? alcanceSinFoto : "upc is null or estado_analisis <> 'listo'"}) and estado_analisis <> 'descartado'
+       and (${sinFoto ? alcanceSinFoto : `upc is null or estado_analisis <> 'listo' or ${alcanceUpcConFoto}`}) and estado_analisis <> 'descartado'
        ${campo === 'existencia' ? `and not ${CAPTURA_SUMADA}` : ''}`,
   )
     .bind(valor, new Date().toISOString(), id, correo, desde)
@@ -938,7 +942,7 @@ async function corregirCaptura(id: string, campo: string, request: Request, env:
       const conflicto = await conflictoCapturaSumada(env, id, correo);
       if (conflicto) return conflicto;
     }
-    return json({ error: sinFoto ? 'Ya no se puede cambiar: pasaron 5 minutos o la pieza tiene venta, foto o publicación.' : 'Ya no se puede cambiar: lo escaneado ya tiene etiqueta y las fotos se corrigen en sus primeras 24 horas.' }, 404);
+    return json({ error: sinFoto ? 'Ya no se puede cambiar: pasaron 5 minutos o la pieza tiene venta, foto o publicación.' : 'Ya no se puede cambiar: no es tu captura, pasaron 24 horas, tiene venta o publicación, o lo escaneado sin foto ya tiene etiqueta.' }, 404);
   }
   return json({ id, [columna]: valor });
 }

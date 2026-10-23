@@ -108,7 +108,7 @@ function pintar() {
     <label class="renglon${impresa ? ' impresa' : ''}${cambiada || dudosa ? ' cambiada' : ''}">
       <span class="posicion">${impresa ? '✓' : cambiada ? '↻' : numeros.get(p.id)}</span>
       <input type="checkbox" value="${p.id}" ${impresa || desmarcadas.has(p.id) ? '' : 'checked'}>
-      <img src="/api/foto/${p.id}" alt="" loading="lazy" onerror="this.style.visibility='hidden'">
+      ${p.foto_key ? `<img src="/api/foto/${p.id}" alt="" loading="lazy" onerror="this.style.visibility='hidden'">` : '<span></span>'}
       <span>${escapar(p.nombre || 'Sin nombre')}${p.talla ? ` · ${escapar(p.talla)}` : ''}${dudosa
         ? '<span class="marca aviso">Envío incierto: revisa el papel y recupera esta pieza manualmente.</span>'
         : impresa
