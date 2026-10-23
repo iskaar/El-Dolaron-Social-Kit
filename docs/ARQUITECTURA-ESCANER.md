@@ -162,6 +162,8 @@ El módulo del código de barras ya no es un cálculo en milímetros de CSS: la 
 lo dibuja con el comando `BARCODE` de TSPL, controlado por `MODULO` (puntos) en
 `etiquetera.js`. Punto de partida `MODULO = 2`; si el lector no engancha, subir a 3.
 
+**Grado en la etiqueta (Issue #453).** La etiqueta de pieza imprime la letra del grado (A, B o C, de `estado_fisico`) en un recuadro de 44 × 44 puntos a la altura del precio, en el borde derecho o a la izquierda del precio de lista tachado (comandos `BOX` y `TEXT` fuente "4"); si el grado no es A, su palabra («Danado», «Liquidacion») se agrega al pie cuando cabe. No se movió ningún otro elemento ni el corrimiento o el módulo calibrados. Cambiar el grado de una pieza ya etiquetada la marca como desactualizada (`etiquetaVigente`); las marcas guardadas antes del grado se leen como A. Requiere prueba física en la AE240.
+
 Esto se verifica con el lector leyendo papel, no con una captura de pantalla. Si esta
 unidad (u otra) hay que volver a interrogarla, `/sonda-impresora` sigue desplegada.
 
@@ -263,6 +265,23 @@ alta que la captura sin foto: pieza `listo`, `ED-`, a `/etiquetas`. El precio nu
 el cliente. Cada escaneo es una pieza nueva (subirle stock a una pieza ya impresa no imprime
 etiquetas nuevas). La tabla se llena con `tools/importar_manifiesto.py`. Detalle y decisiones:
 [PLAN-MANIFIESTO-UPC.md](PLAN-MANIFIESTO-UPC.md).
+
+## Cámara remota: la PC pide la foto y el celular la toma (Issue #444)
+
+Un buzón por persona (`camara_remota`, llave primaria `correo`; PC y celular entran con la misma
+cuenta). La PC crea la solicitud (`PUT /api/camara/solicitud`, UUID propio, reintento idempotente) y el
+celular en `/camara-remota` sondea cada ~2 s solo con la pestaña visible (se apaga tras 60 min sin
+solicitudes; Wake Lock si existe), la toma (`tomar`), sube la foto por el `POST /api/borradores` de
+siempre (`solo_foto` sobre una pieza existente, o alta de pieza nueva) y cierra con `lista`. El
+servidor **no cree** el `lista`: comprueba que la pieza del propietario tiene foto escrita desde que
+se tomó la solicitud. `vencida` se deriva de `vence_en`, sin cron. `PUT` solo existe en el host de
+la PC; `captura.viste.com.mx` solo ve `GET`, `tomar`, `lista` y `cancelar`. `solo_foto` sobre una
+pieza inexistente crearía otra, por eso `PUT` y `tomar` verifican que la pieza exista y no esté
+descartada.
+
+Excepciones aceptadas por Isaac (22/10): la foto remota vive solo en memoria del celular y no pasa
+por `cola-fotos.js` (la cola reprocesaría toda foto como pieza nueva); y repetir sobrescribe la
+foto como «Retomar foto». Requiere red y hardware real (prueba física pendiente).
 
 ## Orden de entrega
 

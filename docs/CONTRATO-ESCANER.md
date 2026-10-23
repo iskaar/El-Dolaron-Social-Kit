@@ -34,6 +34,8 @@
 > foto con nombre y precio. Esta regla rige en sandbox y producción; para otra
 > mercancía siguen vigentes las reglas de análisis descritas abajo.
 
+> **Inventario (Isaac, 22/10/2026, #446):** `/inventario` reúne Capturar, Buscar, Revisar e Imprimir (Bandas dentro de Imprimir). En `captura.viste.com.mx` se autorizan Capturar, Buscar y Revisar: consulta de precios, existencia y fotos; la edición exige la casilla «Editar inventario», y precio con etiqueta solo lo cambia el dueño. Ajustes (`/admin`) nunca se sirve en ese host. La captura propia de 24 h conserva sus permisos. `/pieza` redirige a Buscar; las cinco rutas anteriores siguen operativas hasta el visto bueno de Isaac. Sin red solo se encolan fotos: nunca cambios de existencia.
+
 ## Decisión de fondo
 
 El escáner **no** es la herramienta de captura del vendedor: la cámara lo es. El análisis con IA
@@ -77,8 +79,8 @@ Detalle completo en `docs/PLAN-ETIQUETAS-POR-BANDA.md`. Resumen:
 - La cámara **se abre y no se cierra**. Toca para disparar, dispara otra vez de inmediato. Sin
   preview que descartar, sin spinner, sin navegación.
 - Interruptor de grado **A · Nuevo / B · Dañado / C · Liquidación** (como LiquiMart, Issue #371) junto al obturador.
-  A se ve nueva; B tiene uso, empaque dañado o piezas faltantes; C no cumple su función. El grado no se imprime;
-  B y C no van a Mercado Libre ni al catálogo público. Conserva su estado entre disparos y también se
+  A se ve nueva; B tiene uso, empaque dañado o piezas faltantes; C no cumple su función. El grado se imprime en la etiqueta (Issue #453: letra A/B/C en un recuadro junto al precio, y la palabra en el pie
+  si cabe; instrucción de Isaac, revierte la regla de #371); B y C no van a Mercado Libre ni al catálogo público. Conserva su estado entre disparos y también se
   puede corregir tocando la última miniatura.
 - Tira de miniaturas abajo y un contador discreto: `24 fotos · 19 analizadas`. Es la única señal de
   que existe la IA.

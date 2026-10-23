@@ -14,6 +14,7 @@
  */
 
 import { sinAcentos } from './impresora.js';
+import { nombreEstado } from './estados.js';
 
 const SERVICIO = '0000fff0-0000-1000-8000-00805f9b34fb';
 const CARACTERISTICA = '0000fff2-0000-1000-8000-00805f9b34fb';
@@ -27,6 +28,10 @@ const ANCHO_NOMBRE = 12;   // fuente "2" sin ampliar
 const ANCHO_PIE = 8;       // fuente "1" sin ampliar
 const ANCHO_PRECIO = 32;   // fuente "3" ampliada x2
 const ANCHO_PRECIO_LISTA = 24; // fuente "2" ampliada x2
+// Recuadro del grado (A/B/C, Issue #453): a la altura del precio, con la letra en fuente "4" (24 x 32).
+const GRADO_ANCHO = 44;
+const GRADO_ALTO = 44;
+const GRADO_Y = 54;
 const PRIMER_RENGLON = 8;  // lo mas alto del diseno, y el tope del corrimiento
 
 // Ancho de la barra angosta, en puntos (8 = 1 mm a 203 dpi).
@@ -165,7 +170,7 @@ const centrarBarras = (contenido, ancho) =>
 /**
  * El trabajo TSPL de una pieza. Exportada para probarla sin impresora enfrente.
  *
- * @param pieza {{ nombre: string, precio: number, precio_lista: number, codigo: string, semana_ingreso: string }}
+ * @param pieza {{ nombre: string, precio: number, precio_lista: number, codigo: string, semana_ingreso: string, estado_fisico?: string }}
  * @param copias cuantas etiquetas iguales — una por pieza en existencia
  * @param y0 corrimiento vertical en puntos, de la calibracion
  */
@@ -188,7 +193,13 @@ export function tsplEtiqueta(pieza, copias = 1, y0 = corrimiento(), barra = modu
   // de un digito, que el lector de la caja no engancha (confirmado en hardware
   // el 2026-09-22 -- el ancho de barra no tenia nada que ver, ya estaba bien).
   const numero = String(Number(pieza.codigo.slice(3))).padStart(4, '0');
-  const pie = limpiar(`${pieza.codigo}${pieza.talla ? ` / ${pieza.talla}` : ''} - ${pieza.semana_ingreso}`);
+  // Grado (#453): letra en un recuadro y, si no es A, su palabra al final del pie
+  // cuando cabe. Sin estado_fisico se toma como A, igual que el servidor.
+  const [letra, nombreGrado] = nombreEstado(pieza.estado_fisico).split(' · ');
+  const palabra = limpiar(nombreGrado);
+  const base = limpiar(`${pieza.codigo}${pieza.talla ? ` / ${pieza.talla}` : ''} - ${pieza.semana_ingreso}`);
+  const conPalabra = `${base} - ${palabra}`;
+  const pie = letra !== 'A' && conPalabra.length * ANCHO_PIE <= ANCHO - MARGEN * 2 ? conPalabra : base;
 
   const ordenes = [
     'SIZE 50.8 mm,25.4 mm',
@@ -202,16 +213,25 @@ export function tsplEtiqueta(pieza, copias = 1, y0 = corrimiento(), barra = modu
   // El precio es lo que se lee de lejos: se lleva la fuente mas grande que cabe.
   ordenes.push(`TEXT ${MARGEN},${y(54)},"3",0,2,2,"${precio}"`);
 
+  // El recuadro del grado va al borde derecho; si hay precio de lista tachado,
+  // se recorre a su izquierda. Nunca invade el precio de venta ni el codigo de
+  // barras (esta debajo de y=102 y el recuadro termina en 98).
+  let xGrado = ANCHO - MARGEN - GRADO_ANCHO;
+
   if (pieza.precio_lista > pieza.precio) {
     // Precio de lista a la derecha, un paso mas chico que el de venta (fuente
     // "2" x2 contra "3" x2) y con la base a la altura de la del precio.
     const antes = pesos(pieza.precio_lista);
     const ancho = antes.length * ANCHO_PRECIO_LISTA;
     const x = ANCHO - MARGEN - ancho;
+    xGrado = Math.max(x - 12 - GRADO_ANCHO, MARGEN + precio.length * ANCHO_PRECIO + 8);
     ordenes.push(`TEXT ${x},${y(62)},"2",0,2,2,"${antes}"`);
     // TSPL no sabe tachar texto: la linea encima se dibuja a mano, a media altura.
     ordenes.push(`BAR ${x},${y(81)},${ancho},3`);
   }
+
+  ordenes.push(`BOX ${xGrado},${y(GRADO_Y)},${xGrado + GRADO_ANCHO},${y(GRADO_Y + GRADO_ALTO)},3`);
+  ordenes.push(`TEXT ${xGrado + 10},${y(GRADO_Y + 6)},"4",0,1,1,"${letra}"`);
 
   // El codigo de barras lo dibuja la impresora, no code128.js: asi las barras
   // caen en puntos enteros del cabezal y no las deforma ningun escalado.
@@ -679,6 +699,7 @@ function guardarImpresas(mapa) {
 export function marcarImpresa(id, hora = new Date().toISOString(), pieza = {}) {
   guardarImpresas({ ...impresas(), [id]: {
     hora, precio: pieza.precio, precio_lista: pieza.precio_lista, nombre: pieza.nombre ?? '', talla: pieza.talla ?? '',
+    estado_fisico: pieza.estado_fisico ?? 'nuevo',
   } });
 }
 
@@ -688,15 +709,23 @@ export const precioImpreso = (p) => `${p.precio}/${p.precio_lista > p.precio ? p
 export const textoImpreso = (p) => `${(p.nombre ?? '').trim()}/${(p.talla ?? '').trim()}`;
 
 /**
- * Si la etiqueta pegada sigue diciendo el precio, el nombre y la talla de hoy.
- * Una marca sin precio o sin nombre (de antes de guardarlos) se da por buena en
- * eso; una pieza sin existencia no tiene etiqueta que cambiar.
+ * El grado (A/B/C, Issue #453) que dice la etiqueta. Las marcas de antes del
+ * grado no lo traen y esas etiquetas no lo imprimieron: se leen como A, asi que
+ * solo una pieza que hoy no es A las marca como desactualizadas.
+ */
+export const gradoImpreso = (p) => p.estado_fisico ?? 'nuevo';
+
+/**
+ * Si la etiqueta pegada sigue diciendo el precio, el nombre, la talla y el
+ * grado de hoy. Una marca sin precio o sin nombre (de antes de guardarlos) se
+ * da por buena en eso; una pieza sin existencia no tiene etiqueta que cambiar.
  */
 export function etiquetaVigente(marca, pieza) {
   if (!marca) return false;
   if (marca.precio === undefined || (pieza.stock ?? 1) <= 0) return true;
   return precioImpreso(marca) === precioImpreso(pieza)
-    && (marca.nombre === undefined || textoImpreso(marca) === textoImpreso(pieza));
+    && (marca.nombre === undefined || textoImpreso(marca) === textoImpreso(pieza))
+    && gradoImpreso(marca) === gradoImpreso(pieza);
 }
 
 /**
