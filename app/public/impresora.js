@@ -348,13 +348,14 @@ function encabezado(titulo) {
 }
 
 // Espacio para dos firmas y el corte del papel.
-function firmas(quienEntrega) {
+function firmas(quienEntrega, quienRecibe = '') {
   return [
     linea(), linea(), linea(),
     linea('Entrega: ______________________________'),
     linea(`         ${sinAcentos(quienEntrega).slice(0, COLUMNAS - 9)}`),
     linea(), linea(), linea(),
     linea('Recibe:  ______________________________'),
+    ...(quienRecibe ? [linea(`         ${sinAcentos(quienRecibe).slice(0, COLUMNAS - 9)}`)] : []),
     new Uint8Array([0x0a, 0x0a, 0x0a]),
     new Uint8Array([GS, 0x56, 0x42, 0x00]),
   ];
@@ -382,6 +383,7 @@ export function imprimirCorte(corte) {
     centrado('EFECTIVO'),
     renglonMonto('Fondo inicial', importe(corte.fondo_inicial)),
     renglonMonto('+ Ventas en efectivo', importe(corte.efectivo_ventas)),
+    ...(corte.entrada_terminal ? [renglonMonto('+ Pago de terminal', importe(corte.entrada_terminal))] : []),
     renglonMonto('- Devoluciones', importe(corte.efectivo_devoluciones)),
     renglonMonto('- Retiros', importe(corte.retiros)),
     renglonMonto('- Gastos', importe(corte.gastos ?? 0)),
@@ -421,7 +423,7 @@ export function imprimirCorte(corte) {
 export function imprimirRetiro(retiro) {
   const gasto = retiro.tipo === 'gasto';
   const partes = [
-    ...encabezado(gasto ? 'GASTO DE CAJA' : 'RETIRO DE EFECTIVO'),
+    ...encabezado(gasto ? 'GASTO DE CAJA' : retiro.tipo === 'terminal' ? 'PAGO DE LA TERMINAL' : 'RETIRO DE EFECTIVO'),
     linea(`Caja: ${sinAcentos(retiro.caja)}`),
     linea(`Cajero: ${sinAcentos(retiro.cajero)}`.slice(0, COLUMNAS)),
     linea(`Fecha: ${fechaHora(retiro.creado_en)}`),
@@ -431,7 +433,8 @@ export function imprimirRetiro(retiro) {
     negritas(false),
     linea(gasto ? 'Concepto:' : 'Motivo:'),
     ...parrafo(retiro.motivo),
-    ...firmas(retiro.cajero),
+    // Pago de la terminal: entrega su dueño, recibe el cajero.
+    ...(retiro.tipo === 'terminal' ? firmas('', retiro.cajero) : firmas(retiro.cajero)),
   ];
   return enviar(concatenar(partes));
 }

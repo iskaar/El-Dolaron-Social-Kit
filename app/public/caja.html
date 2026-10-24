@@ -313,10 +313,11 @@ if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw-caja.js'
 </dialog>
 
 <dialog id="dialogo-retiro">
-  <h2>Sale efectivo del cajón</h2>
+  <h2 id="retiro-titulo">Sale efectivo del cajón</h2>
   <div class="tipo-salida">
     <label><input type="radio" name="tipo-salida" value="gasto" checked> Gasto (hasta $100)</label>
     <label><input type="radio" name="tipo-salida" value="retiro"> Retiro (caja fuerte, banco)</label>
+    <label><input type="radio" name="tipo-salida" value="terminal"> Entra: pago de la terminal</label>
   </div>
   <p class="nota" id="retiro-nota"></p>
   <label for="retiro-importe">Importe ($)</label>
@@ -2042,15 +2043,20 @@ $('corte-abrir-cajon').addEventListener('click', async () => {
 // Gastos hasta $100 sin aprobacion (Isaac, 28/09); uno mayor lo registra el dueno.
 let idRetiro = null;
 const tipoSalida = () => document.querySelector('input[name="tipo-salida"]:checked').value;
+// Issue #515: el dueño de la terminal paga en efectivo lo cobrado con tarjeta; si entra al cajón, el corte lo suma.
 function pintarTipoSalida() {
-  const gasto = tipoSalida() === 'gasto';
+  const tipo = tipoSalida();
+  const gasto = tipo === 'gasto';
+  $('retiro-titulo').textContent = tipo === 'terminal' ? 'Entra efectivo al cajón' : 'Sale efectivo del cajón';
   $('retiro-etiqueta-categoria').hidden = !gasto;
   $('retiro-categoria').hidden = !gasto;
   $('retiro-nota').textContent = gasto
     ? 'Algo que se pagó con dinero del cajón (agua, limpieza, papelería). Hasta $100 no necesita aprobación; guarda el ticket de la compra.'
-    : 'Dinero que se saca del cajón para guardarlo (caja fuerte, banco). Se imprime un comprobante para firmar.';
-  $('retiro-etiqueta-motivo').textContent = gasto ? 'En qué se gastó' : 'Motivo';
-  $('retiro-motivo').placeholder = gasto ? 'Garrafón de agua, jabón…' : 'Caja fuerte, depósito al banco…';
+    : tipo === 'terminal'
+      ? 'Efectivo que entrega el dueño de la terminal por las ventas con tarjeta. Cuéntalo frente a él; se imprime un comprobante para que lo firme.'
+      : 'Dinero que se saca del cajón para guardarlo (caja fuerte, banco). Se imprime un comprobante para firmar.';
+  $('retiro-etiqueta-motivo').textContent = gasto ? 'En qué se gastó' : tipo === 'terminal' ? 'Nota (opcional)' : 'Motivo';
+  $('retiro-motivo').placeholder = gasto ? 'Garrafón de agua, jabón…' : tipo === 'terminal' ? 'Pago de la terminal' : 'Caja fuerte, depósito al banco…';
 }
 document.querySelector('.tipo-salida').addEventListener('change', pintarTipoSalida);
 $('abrir-retiro').addEventListener('click', () => {
@@ -2070,11 +2076,11 @@ $('retiro-salir').addEventListener('click', () => { $('dialogo-retiro').close();
 $('retiro-registrar').addEventListener('click', async () => {
   const importe = Math.round(Number($('retiro-importe').value || 0) * 100);
   const motivo = $('retiro-motivo').value.trim();
-  if (importe <= 0) { $('retiro-aviso').textContent = 'Escribe cuánto sale del cajón.'; return; }
   const tipo = tipoSalida();
+  if (importe <= 0) { $('retiro-aviso').textContent = tipo === 'terminal' ? 'Escribe cuánto entra al cajón.' : 'Escribe cuánto sale del cajón.'; return; }
   const categoria = $('retiro-categoria').value;
   if (tipo === 'gasto' && !categoria) { $('retiro-aviso').textContent = 'Elige una categoría.'; return; }
-  if (!motivo) { $('retiro-aviso').textContent = tipo === 'gasto' ? 'Escribe en qué se gastó.' : 'Escribe el motivo.'; return; }
+  if (!motivo && tipo !== 'terminal') { $('retiro-aviso').textContent = tipo === 'gasto' ? 'Escribe en qué se gastó.' : 'Escribe el motivo.'; return; }
   $('retiro-registrar').disabled = true;
   try {
     const r = await fetch('/api/retiros', {
@@ -2088,6 +2094,7 @@ $('retiro-registrar').addEventListener('click', async () => {
     imprimirRetiro(retiro).then(pintarImpresora);
     $('aviso').textContent = tipo === 'gasto'
       ? `Gasto de ${pesos(importe)} registrado.`
+      : tipo === 'terminal' ? `Pago de la terminal de ${pesos(importe)} registrado. Que firme el comprobante.`
       : `Retiro de ${pesos(importe)} registrado. Firmen el comprobante.`;
     $('aviso').style.color = '#1f7a4d';
     $('codigo').focus();
@@ -2193,6 +2200,7 @@ function pintarResultado(c) {
     ${renglon('Ventas cobradas', c.tickets)}
     ${renglon('Fondo inicial', pesos(c.fondo_inicial))}
     ${renglon('+ Ventas en efectivo', pesos(c.efectivo_ventas))}
+    ${c.entrada_terminal ? renglon('+ Pago de la terminal', pesos(c.entrada_terminal)) : ''}
     ${renglon('− Devoluciones', pesos(c.efectivo_devoluciones))}
     ${renglon('− Retiros', pesos(c.retiros))}
     ${renglon('− Gastos', pesos(c.gastos))}

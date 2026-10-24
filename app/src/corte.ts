@@ -68,10 +68,11 @@ export const LIMITE_GASTO_CAJERO = 10000;
 export async function registrarRetiro(request: Request, env: Env, correo: string): Promise<Response> {
   const cuerpo = (await request.json().catch(() => ({}))) as Record<string, unknown>;
   const id = String(cuerpo.id ?? '');
-  const tipo = cuerpo.tipo === 'gasto' ? 'gasto' : cuerpo.tipo === undefined || cuerpo.tipo === 'retiro' ? 'retiro' : '';
+  const tipo = cuerpo.tipo === 'gasto' || cuerpo.tipo === 'terminal' ? cuerpo.tipo
+    : cuerpo.tipo === undefined || cuerpo.tipo === 'retiro' ? 'retiro' : '';
   const caja = await cajaDe(env, correo, cuerpo.caja);
   const importe = Number(cuerpo.importe);
-  const motivo = texto(cuerpo.motivo, 200);
+  const motivo = texto(cuerpo.motivo, 200) || (tipo === 'terminal' ? 'Pago de la terminal' : '');
   const categoria = tipo === 'gasto' ? String(cuerpo.categoria ?? '') : '';
   if (!UUID.test(id)) return json({ error: 'Identificador invalido.' }, 400);
   if (!tipo) return json({ error: 'Tipo invalido.' }, 400);
@@ -104,10 +105,14 @@ export interface Corte {
   tarjeta_sistema: number; tarjeta_terminal: number; transferencias: number; dolarones: number;
   fondo_siguiente: number; entregado: number; conteo: string; notas: string; creado_en: string;
   fep_por_pagar: number;   // lo cobrado de piezas de FEP en esta caja, a pagarle a FEP (Issue #298)
+  entrada_terminal: number;   // efectivo que entrego el dueno de la terminal a este cajon (Issue #515)
 }
 
+// Sin columna en `cortes` (sin migracion): sale de los retiros 'terminal' que marco el corte.
+const CON_TERMINAL = `select c.*, (select coalesce(sum(importe), 0) from retiros
+  where corte_id = c.id and tipo = 'terminal') as entrada_terminal from cortes c`;
 const leerCorte = (env: Env, id: string) =>
-  env.DB.prepare('select * from cortes where id = ?').bind(id).first<Corte>();
+  env.DB.prepare(`${CON_TERMINAL} where c.id = ?`).bind(id).first<Corte>();
 
 // Lo cobrado (o devuelto) de una forma de pago, sin la parte pagada con Dolarones.
 const dinero = (forma: string, importe = 'total - dolarones') =>
@@ -177,7 +182,7 @@ export async function registrarCorte(request: Request, env: Env, correo: string)
            efectivo_devoluciones, retiros, gastos, nomina, efectivo_esperado, efectivo_contado, diferencia, tarjeta_sistema,
            tarjeta_terminal, transferencias, dolarones, fondo_siguiente, entregado, conteo, notas, creado_en, fep_por_pagar)
          select ?1, ?2, ?3, desde, ?4, tickets, fondo, ev, ed, re, ga, no,
-                fondo + ev - ed - re - ga - no, ?5, ?5 - (fondo + ev - ed - re - ga - no), tv - td,
+                fondo + ev - ed - re - ga - no + te, ?5, ?5 - (fondo + ev - ed - re - ga - no + te), tv - td,
                 ?6, xv - xd, dv - dd, min(?5, ?7), ?5 - min(?5, ?7), ?9, ?8, ?4, fp
          from (select
            (select max(hasta) from cortes where caja = ?2) as desde,
@@ -188,6 +193,8 @@ export async function registrarCorte(request: Request, env: Env, correo: string)
            (select coalesce(sum(importe), 0) from retiros where corte_id = ?1 and tipo = 'retiro') as re,
            (select coalesce(sum(importe), 0) from retiros where corte_id = ?1 and tipo = 'gasto') as ga,
            (select coalesce(sum(importe), 0) from retiros where corte_id = ?1 and tipo = 'nomina') as no,
+           -- Entra: el dueno de la terminal paga en efectivo lo cobrado con tarjeta (Issue #515).
+           (select coalesce(sum(importe), 0) from retiros where corte_id = ?1 and tipo = 'terminal') as te,
            (select ${dinero('tarjeta', COBRADO)} from ventas where ${VIGENTES}) + ${anticipos('tarjeta')} + ${enEfectivo('tarjeta')} as tv,
            (select ${dinero('tarjeta', NETO)} from ventas where ${CANCELADAS}) + ${devuelto('tarjeta')} as td,
            (select ${dinero('transferencia', COBRADO)} from ventas where ${VIGENTES}) + ${anticipos('transferencia')}
@@ -217,8 +224,43 @@ export async function registrarCorte(request: Request, env: Env, correo: string)
 export async function ultimoCorte(url: URL, env: Env, correo: string): Promise<Response> {
   const caja = await cajaDe(env, correo, url.searchParams.get('caja'));
   if (!caja) return json({ error: 'Falta la caja.' }, 400);
-  const corte = await env.DB.prepare('select * from cortes where caja = ? order by hasta desc limit 1')
+  const corte = await env.DB.prepare(`${CON_TERMINAL} where c.caja = ? order by c.hasta desc limit 1`)
     .bind(caja)
     .first<Corte>();
   return corte ? json(corte) : json({ error: 'Esta caja todavia no tiene cortes.' }, 404);
+}
+
+/**
+ * Cuenta con el dueno de la terminal (Issue #515): cobra con su terminal y paga
+ * el 100 % en efectivo cada pocos dias, a veces al cajon (retiro 'terminal' de
+ * la caja) y a veces al dueno (retiro 'terminal' sin caja: ningun corte lo toma).
+ * Se le cuenta por corte el cierre de la terminal y, si no se capturo (antes del
+ * 24/10), lo de tarjeta en el sistema.
+ * ponytail: un corte con terminal $0 y tarjeta en el sistema cuenta el sistema;
+ * desde #514 el cajero escribe el cierre, asi que solo pasa si de verdad no se cobro con ella.
+ */
+export async function rutaTerminal(request: Request, env: Env, correo: string): Promise<Response> {
+  if (request.method === 'POST') {
+    const cuerpo = (await request.json().catch(() => ({}))) as Record<string, unknown>;
+    const id = String(cuerpo.id ?? '');
+    const importe = Number(cuerpo.importe);
+    if (!UUID.test(id)) return json({ error: 'Identificador invalido.' }, 400);
+    if (!Number.isInteger(importe) || importe <= 0 || importe > 100_000_000) return json({ error: 'Importe invalido.' }, 400);
+    await env.DB.prepare(
+      `insert into retiros (id, tipo, caja, cajero, importe, motivo, creado_en, categoria) values (?, 'terminal', '', ?, ?, ?, ?, '')
+       on conflict (id) do nothing`,
+    ).bind(id, correo, importe, texto(cuerpo.motivo, 200) || 'Pago de la terminal al dueño', new Date().toISOString()).run();
+  } else if (request.method !== 'GET') return json({ error: 'Metodo no permitido.' }, 405);
+
+  const { results: cortes } = await env.DB.prepare(
+    `select hasta, caja, tarjeta_sistema, tarjeta_terminal,
+            case when tarjeta_terminal > 0 then tarjeta_terminal else tarjeta_sistema end as cuenta
+     from cortes order by hasta desc`,
+  ).all<{ hasta: string; caja: string; tarjeta_sistema: number; tarjeta_terminal: number; cuenta: number }>();
+  const { results: pagos } = await env.DB.prepare(
+    `select id, creado_en, caja, cajero, importe, motivo from retiros where tipo = 'terminal' order by creado_en desc`,
+  ).all<{ id: string; creado_en: string; caja: string; cajero: string; importe: number; motivo: string }>();
+  const vendido = cortes.reduce((s, c) => s + c.cuenta, 0);
+  const pagado = pagos.reduce((s, p) => s + p.importe, 0);
+  return json({ vendido, pagado, debe: vendido - pagado, cortes, pagos }, request.method === 'POST' ? 201 : 200);
 }
