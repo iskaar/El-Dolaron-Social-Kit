@@ -30,7 +30,7 @@ function kv(datos = {}) {
 
 /** Simula Claude y Meta. `respuestaModelo` es el texto que devuelve el modelo, o null para fallar. */
 function red(respuestaModelo) {
-  const llamadas = { modelo: [], meta: [] };
+  const llamadas = { modelo: [], meta: [], urls: [] };
   const original = globalThis.fetch;
   globalThis.fetch = async (url, opciones) => {
     const cuerpo = JSON.parse(opciones.body);
@@ -40,6 +40,7 @@ function red(respuestaModelo) {
       return new Response(JSON.stringify({ content: [{ type: 'text', text: respuestaModelo }] }), { status: 200 });
     }
     llamadas.meta.push(cuerpo);
+    llamadas.urls.push(String(url));
     return new Response(JSON.stringify({ messages: [{ id: `wamid.${llamadas.meta.length}` }] }), { status: 200 });
   };
   return { llamadas, restaurar: () => { globalThis.fetch = original; } };
@@ -363,5 +364,20 @@ test('#507: un mensaje del equipo desde la app (eco de coexistencia) calla al bo
     assert.equal(r.llamadas.meta.length, 0);
     await correr(env, [texto('m-eco2', '5214429999999', '¿Qué me recomiendan para un regalo de cumpleaños?')]);
     assert.equal(r.llamadas.meta.length, 1);
+  } finally { r.restaurar(); }
+});
+
+test('#507: contesta desde el número que recibió el mensaje, y nunca desde uno fuera de la lista', async () => {
+  const r = red('Claro, te ayudo.\nSCORE: 2');
+  try {
+    const env = entorno({}, { WHATSAPP_PHONE_NUMBER_ID: 'p442, p444' });
+    const a = (numero, id, de) => JSON.stringify({ object: 'whatsapp_business_account', entry: [{ changes: [{ field: 'messages', value: {
+      metadata: { phone_number_id: numero }, messages: [texto(id, de, 'Hola')],
+    } }] }] });
+    for (const [numero, id] of [['p444', 'n1'], ['p442', 'n2'], ['ajeno', 'n3']]) {
+      await worker.fetch(firmado(a(numero, id, `52144212345${id.at(-1)}`)), env, ctx);
+      await Promise.all(pendientes.splice(0));
+    }
+    assert.deepEqual(r.llamadas.urls, ['https://graph.facebook.com/v26.0/p444/messages', 'https://graph.facebook.com/v26.0/p442/messages']);
   } finally { r.restaurar(); }
 });

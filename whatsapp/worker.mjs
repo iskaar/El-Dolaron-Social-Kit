@@ -1,5 +1,6 @@
 import { esSimple, respuestaFija, respuestaPara } from './respuestas.mjs';
 import { enRafaga, MAX_TARJETAS, recortar, reservarModelo, SIN_CUOTA } from './limites.mjs';
+import { atenderAlta } from './alta.mjs';
 import { esFinDeConversacion, estaPausado, generarRespuesta, guardarTurno, interpretar, leerHistorial, pausar, RETENCION_SEGUNDOS } from './asistente.mjs';
 
 const encoder = new TextEncoder();
@@ -12,6 +13,8 @@ const reply = (text, status = 200) => new Response(text, {
 export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
+    // Issue #507: página de alta de coexistencia; responde 404 mientras ALTA_CONFIG_ID no exista.
+    if (url.hostname === 'whatsapp.eldolaron.com' && url.pathname === '/alta') return atenderAlta(request, env);
     if (url.hostname !== 'whatsapp.eldolaron.com' || url.pathname !== '/webhook') {
       return reply('Not found', 404);
     }
@@ -104,6 +107,9 @@ export default {
  */
 async function responderMensajes(event, env) {
   if (!env.WHATSAPP_ACCESS_TOKEN || !env.WHATSAPP_PHONE_NUMBER_ID) return;
+  // Issue #507: el 442 y el 444 (coexistencia) comparten Worker; se contesta desde el número que
+  // recibió el mensaje, solo si está en la lista. El primero es el de siempre (eventos sin metadata).
+  const numeros = String(env.WHATSAPP_PHONE_NUMBER_ID).split(',').map((n) => n.trim()).filter(Boolean);
   for (const entrada of event.entry) {
     for (const cambio of entrada.changes ?? []) {
       // Issue #507 (coexistencia): el equipo contestó desde la app WhatsApp Business; el bot se calla
@@ -113,6 +119,8 @@ async function responderMensajes(event, env) {
         continue;
       }
       if (cambio.field !== 'messages') continue;
+      const desde = cambio.value?.metadata?.phone_number_id ?? numeros[0];
+      if (!numeros.includes(desde)) continue;
       for (const mensaje of cambio.value?.messages ?? []) {
         if ((mensaje.type !== 'text' && mensaje.type !== 'image') || !mensaje.id || !mensaje.from) continue;
         // Meta reintenta los eventos; la marca evita contestar dos veces el mismo mensaje.
@@ -125,7 +133,7 @@ async function responderMensajes(event, env) {
         if (await enRafaga(env.EVENTS, de)) { console.log(JSON.stringify({ event: 'whatsapp_limite', motivo: 'rafaga' })); continue; }
 
         if (mensaje.type === 'image') {
-          await enviarYGuardar(env, de, IMAGEN);
+          await enviarYGuardar(env, desde, de, IMAGEN);
           continue;
         }
         const texto = String(mensaje.text?.body ?? '');
@@ -163,9 +171,9 @@ async function responderMensajes(event, env) {
           }
         }
         if (!respuesta.texto) continue;
-        if (!await enviarYGuardar(env, de, respuesta.texto)) continue;
+        if (!await enviarYGuardar(env, desde, de, respuesta.texto)) continue;
         await guardarTurno(env.EVENTS, de, texto, respuesta.texto);
-        for (const p of tarjetas) await enviarYGuardar(env, de, `${p.nombre} · ${p.precio} · ${p.codigo}\n${p.url}`, p.foto);
+        for (const p of tarjetas) await enviarYGuardar(env, desde, de, `${p.nombre} · ${p.precio} · ${p.codigo}\n${p.url}`, p.foto);
         if (respuesta.escalar) await pausar(env.EVENTS, de);
       }
     }
@@ -201,8 +209,8 @@ async function consultarTienda(env, nombre, entrada) {
  * Envia el texto por Meta y lo registra para la vista de mensajes. Nunca registra el texto en logs.
  * Con `foto` manda una imagen por enlace y el texto como pie (tarjeta de producto, #499).
  */
-async function enviarYGuardar(env, para, texto, foto = null) {
-  const envio = await fetch(`https://graph.facebook.com/v26.0/${env.WHATSAPP_PHONE_NUMBER_ID}/messages`, {
+async function enviarYGuardar(env, desde, para, texto, foto = null) {
+  const envio = await fetch(`https://graph.facebook.com/v26.0/${desde}/messages`, {
     method: 'POST',
     headers: { authorization: `Bearer ${env.WHATSAPP_ACCESS_TOKEN}`, 'content-type': 'application/json' },
     body: JSON.stringify({ messaging_product: 'whatsapp', to: para,

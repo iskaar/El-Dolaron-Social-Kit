@@ -61,3 +61,33 @@ test('only the intended public host, path and methods are served', async () => {
   assert.equal(response.status, 405);
   assert.equal(response.headers.get('allow'), 'GET, POST');
 });
+
+test('#507: /alta no existe sin ALTA_CONFIG_ID; con ella sirve la página y canjea el código sin exponer el token', async () => {
+  const alta = 'https://whatsapp.eldolaron.com/alta';
+  assert.equal((await worker.fetch(new Request(alta), env)).status, 404);
+  const conAlta = { ...env, ALTA_CONFIG_ID: '123456' };
+  const pagina = await worker.fetch(new Request(alta), conAlta);
+  assert.equal(pagina.status, 200);
+  assert.match(await pagina.text(), /config_id: '123456'.*whatsapp_business_app_onboarding/s);
+  const post = (cuerpo) => new Request(alta, { method: 'POST', body: JSON.stringify(cuerpo) });
+  assert.equal((await worker.fetch(post({ code: 'c' }), conAlta)).status, 400);
+
+  const original = globalThis.fetch;
+  const llamadas = [];
+  globalThis.fetch = async (url, opciones = {}) => {
+    llamadas.push([String(url), opciones.method ?? 'GET', opciones.headers?.authorization]);
+    if (String(url).includes('/oauth/access_token')) return Response.json({ access_token: 'tok-negocio' });
+    if (String(url).includes('/subscribed_apps')) return Response.json({ success: true });
+    return Response.json({ data: [{ id: '999', display_phone_number: '+52 444 543 7754', is_on_biz_app: true, platform_type: 'CLOUD_API' }] });
+  };
+  try {
+    const respuesta = await worker.fetch(post({ code: 'c0d3', waba_id: '777' }), conAlta);
+    const texto = await respuesta.text();
+    assert.equal(respuesta.status, 200);
+    assert.doesNotMatch(texto, /tok-negocio|test-app-secret/);
+    assert.deepEqual(JSON.parse(texto), { waba_id: '777', suscrita: true,
+      numeros: [{ id: '999', display_phone_number: '+52 444 543 7754', is_on_biz_app: true, platform_type: 'CLOUD_API' }] });
+    assert.match(llamadas[0][0], /client_id=1891249878510930&client_secret=test-app-secret&code=c0d3/);
+    assert.deepEqual(llamadas[1], ['https://graph.facebook.com/v26.0/777/subscribed_apps', 'POST', 'Bearer tok-negocio']);
+  } finally { globalThis.fetch = original; }
+});
