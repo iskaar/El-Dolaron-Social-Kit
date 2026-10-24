@@ -29,8 +29,8 @@ test('respuestaFija devuelve null cuando hace falta el modelo y esSimple separa 
 });
 
 test('lo no confirmado (precios, envios) recibe respaldo o escala al equipo', () => {
-  assert.match(respuestaPara('cuanto cuesta el sofa'), /no tengo esa información.*444 543 7754/);
-  assert.match(respuestaPara(undefined), /no tengo esa información/);
+  assert.match(respuestaPara('cuanto cuesta el sofa'), /lo confirma el equipo.*este mismo chat/);
+  assert.match(respuestaPara(undefined), /este mismo chat/);
   assert.doesNotMatch(respuestaPara('hacen envios'), /no hacemos/);
 });
 
