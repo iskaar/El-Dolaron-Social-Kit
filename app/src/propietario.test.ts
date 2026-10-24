@@ -52,7 +52,7 @@ test('una pieza de FEP se cobra en la caja, no sale en los reportes de la tienda
   assert.equal(reporte.total, 25000, 'el reporte de la tienda no cuenta lo de FEP');
   assert.equal(reporte.piezas, 1);
 
-  const corte = (await pedir('/api/cortes', { id: crypto.randomUUID(), caja: 'Caja 1', efectivo_contado: 0, tarjeta_terminal: 0 })).cuerpo;
+  const corte = (await pedir('/api/cortes', { id: crypto.randomUUID(), caja: 'Caja 1', efectivo_contado: 0, tarjeta_terminal: 0, sin_efectivo: true })).cuerpo;
   assert.equal(corte.fep_por_pagar, 60000, 'FEP recibe lo que se cobro de sus piezas');
   assert.equal(corte.efectivo_ventas, 85000, 'el cajon cuenta todo el efectivo, el de FEP tambien');
 });
@@ -89,6 +89,6 @@ test('lo pagado con Dolarones en una pieza de FEP se descuenta de lo que se le d
     id: crypto.randomUUID(), caja: 'Caja 1', cliente_id: socio.id, dolarones: 5000, codigo_socio: await codigoPrueba(db, socio.id),
     forma_pago: 'efectivo', efectivo: 115000, lineas: [{ producto_id: FEP, cantidad: 4 }],
   })).status, 201);
-  const corte = (await pedir('/api/cortes', { id: crypto.randomUUID(), caja: 'Caja 1', efectivo_contado: 0, tarjeta_terminal: 0 })).cuerpo;
+  const corte = (await pedir('/api/cortes', { id: crypto.randomUUID(), caja: 'Caja 1', efectivo_contado: 0, tarjeta_terminal: 0, sin_efectivo: true })).cuerpo;
   assert.equal(corte.fep_por_pagar, 115000);
 });

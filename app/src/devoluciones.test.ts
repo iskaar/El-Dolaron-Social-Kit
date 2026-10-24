@@ -27,7 +27,7 @@ const cancelarPieza = (pedir: Pedir, ventaId: string, lineaId: number, extra: Re
 const stock = (db: ReturnType<typeof tienda>['db']) =>
   (db.prepare('select stock from productos where id = ?').get(PRODUCTO) as { stock: number }).stock;
 const cortar = (pedir: Pedir, contado: number) =>
-  pedir('/api/cortes', { id: crypto.randomUUID(), caja: 'Caja 1', efectivo_contado: contado, tarjeta_terminal: 0 });
+  pedir('/api/cortes', { id: crypto.randomUUID(), caja: 'Caja 1', efectivo_contado: contado, tarjeta_terminal: 0, sin_efectivo: contado === 0 });
 
 test('dinero primero: la pieza sale en dinero hasta lo cobrado en dinero, el resto en Dolarones', () => {
   const base = { pagado: 40000, devuelto: 0, dolarones: 10000, dolaronesDevueltos: 0 };

@@ -147,6 +147,10 @@ export async function registrarCorte(request: Request, env: Env, correo: string)
   if (!caja) return json({ error: 'Falta la caja.' }, 400);
   if (contado === null || !Number.isInteger(contado) || contado < 0 || contado > 100_000_000) return json({ error: 'Efectivo contado invalido.' }, 400);
   if (!Number.isInteger(terminal) || terminal < 0 || terminal > 100_000_000) return json({ error: 'Total de la terminal invalido.' }, 400);
+  // 24/10: un corte cerrado sin contar dejo el fondo del dia siguiente en $0 y descuadro todo. Un cajon
+  // vacio de verdad se confirma en la caja (`sin_efectivo`); una caja vieja que no lo manda no puede.
+  if (contado === 0 && cuerpo.sin_efectivo !== true)
+    return json({ error: 'No se contó el efectivo. Cuenta billetes y monedas; si el cajón de verdad está vacío, confírmalo en la caja.' }, 400);
 
   const previo = await leerCorte(env, id);
   if (previo) return json(previo);   // reenvio tras red caida: el mismo corte, sin volver a contar

@@ -22,6 +22,18 @@ const cortar = (pedir: Pedir, caja: string, contado: number, extra: Record<strin
 const salida = (pedir: Pedir, tipo: string, importe: number, caja = 'Caja 1') =>
   pedir('/api/retiros', { id: crypto.randomUUID(), tipo, caja, importe, motivo: tipo === 'gasto' ? 'garrafon de agua' : 'caja fuerte', ...(tipo === 'gasto' ? { categoria: 'agua' } : {}) });
 
+test('24/10: un corte sin contar el efectivo se rechaza y no se lleva las ventas; con el cajón vacío confirmado sí pasa', async () => {
+  const { db, pedir } = tienda();
+  await vender(pedir, 'Caja 1');
+  const sinContar = await cortar(pedir, 'Caja 1', 0);
+  assert.equal(sinContar.status, 400);
+  assert.match(sinContar.cuerpo.error, /No se contó el efectivo/);
+  assert.equal((db.prepare('select count(*) as n from ventas where corte_id is not null').get() as { n: number }).n, 0, 'las ventas siguen sin corte');
+  assert.equal((db.prepare('select count(*) as n from cortes').get() as { n: number }).n, 0);
+  assert.equal((await cortar(pedir, 'Caja 1', 0, { sin_efectivo: true })).status, 201);
+  assert.equal((await cortar(pedir, 'Caja 1', 25000)).status, 201, 'con efectivo contado no hace falta confirmar');
+});
+
 test('el corte cuadra: fondo + efectivo - devoluciones - retiros, y tarjeta, transferencia y Dolarones aparte', async () => {
   const { db, pedir } = tienda();
   const socio = (await pedir('/api/socios', {
@@ -251,7 +263,7 @@ test('pieza de un ticket con tarjeta devuelta en efectivo: sale del cajon y la t
 
   // Ya contada en ese corte, otra pieza devuelta en efectivo resta del cajon del siguiente; la tarjeta no.
   await devolver(enCaja.id, 'efectivo');
-  const siguiente = (await cortar(pedir, 'Caja 1', 0)).cuerpo;
+  const siguiente = (await cortar(pedir, 'Caja 1', 0, { sin_efectivo: true })).cuerpo;
   assert.equal(siguiente.efectivo_devoluciones, 25000);
   assert.equal(siguiente.tarjeta_sistema, 0);
   assert.equal(siguiente.diferencia, 0);
