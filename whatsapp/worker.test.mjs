@@ -70,7 +70,8 @@ test('#507: /alta no existe sin ALTA_CONFIG_ID; con ella sirve la página y canj
   assert.equal(pagina.status, 200);
   assert.match(await pagina.text(), /config_id: '123456'.*whatsapp_business_app_onboarding/s);
   const post = (cuerpo) => new Request(alta, { method: 'POST', body: JSON.stringify(cuerpo) });
-  assert.equal((await worker.fetch(post({ code: 'c' }), conAlta)).status, 400);
+  assert.equal((await worker.fetch(post({}), conAlta)).status, 400);
+  assert.equal((await worker.fetch(post({ code: 'c', waba_id: 'x' }), conAlta)).status, 400);
 
   const original = globalThis.fetch;
   const llamadas = [];
@@ -78,6 +79,8 @@ test('#507: /alta no existe sin ALTA_CONFIG_ID; con ella sirve la página y canj
     llamadas.push([String(url), opciones.method ?? 'GET', opciones.headers?.authorization]);
     if (String(url).includes('/oauth/access_token')) return Response.json({ access_token: 'tok-negocio' });
     if (String(url).includes('/subscribed_apps')) return Response.json({ success: true });
+    if (String(url).includes('/debug_token')) return Response.json({ data: { granular_scopes: [
+      { scope: 'whatsapp_business_messaging', target_ids: ['777'] }, { scope: 'whatsapp_business_management', target_ids: ['888'] }] } });
     return Response.json({ data: [{ id: '999', display_phone_number: '+52 444 543 7754', is_on_biz_app: true, platform_type: 'CLOUD_API' }] });
   };
   try {
@@ -85,9 +88,15 @@ test('#507: /alta no existe sin ALTA_CONFIG_ID; con ella sirve la página y canj
     const texto = await respuesta.text();
     assert.equal(respuesta.status, 200);
     assert.doesNotMatch(texto, /tok-negocio|test-app-secret/);
-    assert.deepEqual(JSON.parse(texto), { waba_id: '777', suscrita: true,
-      numeros: [{ id: '999', display_phone_number: '+52 444 543 7754', is_on_biz_app: true, platform_type: 'CLOUD_API' }] });
+    const numeros = [{ id: '999', display_phone_number: '+52 444 543 7754', is_on_biz_app: true, platform_type: 'CLOUD_API' }];
+    assert.deepEqual(JSON.parse(texto), { cuentas: [{ waba_id: '777', suscrita: true, numeros }] });
     assert.match(llamadas[0][0], /client_id=1891249878510930&client_secret=test-app-secret&code=c0d3/);
     assert.deepEqual(llamadas[1], ['https://graph.facebook.com/v26.0/777/subscribed_apps', 'POST', 'Bearer tok-negocio']);
+    // Sin waba_id de la ventana: las cuentas salen de los permisos del token.
+    llamadas.length = 0;
+    const sinWaba = await worker.fetch(post({ code: 'c0d3' }), conAlta);
+    assert.deepEqual(await sinWaba.json(), { cuentas: [{ waba_id: '888', suscrita: true, numeros }] });
+    assert.match(llamadas[1][0], /debug_token\?input_token=tok-negocio&access_token=1891249878510930%7Ctest-app-secret/);
+    assert.deepEqual(llamadas[2], ['https://graph.facebook.com/v26.0/888/subscribed_apps', 'POST', 'Bearer tok-negocio']);
   } finally { globalThis.fetch = original; }
 });
