@@ -320,6 +320,22 @@
         <p class="nota">Conteo ciego: el cajero registra lo contado antes de ver lo esperado. Diferencia = contado − esperado.
           «Tarjeta» compara lo cobrado en el sistema con el cierre de la terminal.</p>
       </article>
+      <article class="panel">
+        <header><h3>Terminal de tarjeta</h3></header>
+        <div class="tarjetas" id="terminal-resumen" style="margin-bottom: 14px"></div>
+        <div class="fondo-caja">
+          <label for="terminal-importe">Pago de la terminal que recibiste tú, fuera del cajón ($)</label>
+          <input id="terminal-importe" type="number" min="1" step="0.5" inputmode="decimal">
+          <input id="terminal-nota" type="text" maxlength="200" placeholder="Nota (opcional)" aria-label="Nota del pago">
+          <button id="terminal-registrar" type="button">Registrar pago</button>
+          <span id="aviso-terminal"></span>
+        </div>
+        <div id="terminal-pagos" style="overflow-x:auto"></div>
+        <details><summary>Lo que se le cuenta por corte</summary><div id="terminal-cortes" style="overflow-x:auto"></div></details>
+        <p class="nota">El dueño de la terminal paga en efectivo el 100 % de lo cobrado con tarjeta. Por corte se cuenta el cierre
+          de la terminal; si no se capturó, lo de tarjeta en el sistema. Lo que entra al cajón lo registra la caja en «Gasto / retiro»;
+          lo que te da a ti, aquí. Las ventas con tarjeta cuentan desde su corte.</p>
+      </article>
       <div class="malla iguales">
         <article class="panel"><header><h3>Gastos y retiros de efectivo</h3></header><div id="retiros" style="overflow-x:auto"></div></article>
         <article class="panel"><header><h3>Cajón abierto sin venta</h3></header><div id="aperturas-cajon" style="overflow-x:auto"></div>
@@ -618,7 +634,7 @@ function pintarCaja(r) {
   $('retiros').innerHTML = r.retiros.length === 0 ? '<div class="vacio">Sin gastos ni retiros en este periodo.</div>'
     : `<table class="tabla"><thead><tr><th>Fecha</th><th>Tipo</th><th>Caja</th><th>Quién</th><th>Concepto / motivo</th><th class="num">Importe</th></tr></thead>
        <tbody>${r.retiros.map((x) => `
-         <tr><td>${fechaHora(x.creado_en)}</td><td>${x.tipo === 'gasto' ? 'Gasto' : 'Retiro'}</td><td>${escapar(x.caja)}</td>
+         <tr><td>${fechaHora(x.creado_en)}</td><td>${({ gasto: 'Gasto', terminal: 'Entra: terminal', nomina: 'Nómina' })[x.tipo] ?? 'Retiro'}</td><td>${escapar(x.caja || 'Al dueño')}</td>
            <td>${escapar(x.cajero)}</td><td>${escapar(x.motivo)}</td><td class="num">${pesos(x.importe)}</td></tr>`).join('')}</tbody></table>`;
   $('aperturas-cajon').innerHTML = r.aperturas_cajon.length === 0 ? '<div class="vacio">Nadie abrió el cajón sin venta en este periodo.</div>'
     : `<table class="tabla"><thead><tr><th>Fecha</th><th>Caja</th><th>Quién</th></tr></thead>
@@ -721,6 +737,59 @@ async function cargar() {
     $('principal').classList.remove('cargando');
   }
 }
+
+/* ---------- terminal de tarjeta (Issue #515) ---------- */
+let idPagoTerminal = crypto.randomUUID();   // reintentar no duplica el pago
+function pintarTerminal(t) {
+  $('terminal-resumen').innerHTML = [
+    tarjeta('Cobrado con su terminal', pesos(t.vendido)),
+    tarjeta('Te ha pagado', pesos(t.pagado)),
+    tarjeta(t.debe >= 0 ? 'Te debe' : 'Pagó de más', pesos(Math.abs(t.debe))),
+  ].join('');
+  $('terminal-pagos').innerHTML = t.pagos.length === 0 ? '<div class="vacio">Sin pagos registrados.</div>'
+    : `<table class="tabla"><thead><tr><th>Fecha</th><th>Dónde</th><th>Registró</th><th>Nota</th><th class="num">Importe</th></tr></thead>
+       <tbody>${t.pagos.map((p) => `
+         <tr><td>${fechaHora(p.creado_en)}</td><td>${escapar(p.caja || 'Al dueño')}</td><td>${escapar(p.cajero)}</td>
+           <td>${escapar(p.motivo)}</td><td class="num">${pesos(p.importe)}</td></tr>`).join('')}</tbody></table>`;
+  $('terminal-cortes').innerHTML = `<table class="tabla"><thead><tr><th>Corte</th><th>Caja</th><th class="num">Sistema</th>
+       <th class="num">Terminal</th><th class="num">Se cuenta</th></tr></thead>
+     <tbody>${t.cortes.map((c) => `
+       <tr><td>${fechaHora(c.hasta)}</td><td>${escapar(c.caja)}</td><td class="num">${pesos(c.tarjeta_sistema)}</td>
+         <td class="num">${c.tarjeta_terminal ? pesos(c.tarjeta_terminal) : '—'}</td><td class="num">${pesos(c.cuenta)}</td></tr>`).join('')}</tbody></table>`;
+}
+async function cargarTerminal() {
+  try { pintarTerminal(await (await fetch('/api/terminal')).json()); } catch { /* sin red: se ve al recargar */ }
+}
+$('terminal-registrar').addEventListener('click', async () => {
+  const importe = Math.round(Number($('terminal-importe').value) * 100);
+  const aviso = $('aviso-terminal');
+  if (!Number.isInteger(importe) || importe <= 0) {
+    aviso.textContent = 'Escribe cuánto te pagó.';
+    aviso.style.color = 'var(--mal)';
+    return;
+  }
+  $('terminal-registrar').disabled = true;
+  try {
+    const r = await fetch('/api/terminal', {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ id: idPagoTerminal, importe, motivo: $('terminal-nota').value }),
+    });
+    const cuerpo = await r.json().catch(() => ({}));
+    aviso.textContent = r.ok ? `Pago de ${pesos(importe)} registrado.` : (cuerpo.error ?? 'No se pudo registrar.');
+    aviso.style.color = r.ok ? 'var(--bien)' : 'var(--mal)';
+    if (r.ok) {
+      idPagoTerminal = crypto.randomUUID();
+      $('terminal-importe').value = '';
+      $('terminal-nota').value = '';
+      pintarTerminal(cuerpo);
+    }
+  } catch {
+    aviso.textContent = 'Sin red: no se registró.';
+    aviso.style.color = 'var(--mal)';
+  } finally {
+    $('terminal-registrar').disabled = false;
+  }
+});
 
 /* ---------- fondo de caja (Issue #100) ---------- */
 // El mismo valor que «Fondo por caja» del admin. Aplica desde el siguiente corte; los cortes ya hechos no cambian.
@@ -849,6 +918,7 @@ document.addEventListener('click', (e) => {
 activarGlobos(document.body);
 pintarRango();
 cargarFondo();
+cargarTerminal();
 cargarTickets();
 await cargar();
 </script>

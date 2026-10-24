@@ -28,7 +28,7 @@ import {
 } from './cuentas.ts';
 import { cajeroEnTurno, listarCajeros, entrar, salir, ponerPin } from './cajeros.ts';
 import { registrarSocio, buscarSocio, buscarPorCodigo, basesListas, sentenciasDeVenta, saldo } from './dolarones.ts';
-import { registrarCorte, registrarRetiro, ultimoCorte, cajaDe } from './corte.ts';
+import { registrarCorte, registrarRetiro, rutaTerminal, ultimoCorte, cajaDe } from './corte.ts';
 import { rutaGastos } from './gastos.ts';
 import { rutaPiezas, buscarPiezas, escribirExistencia, autorizarPrecio } from './piezas.ts';
 import { rutaSolicitudesPrecio, crearSolicitud } from './solicitudes-precio.ts';
@@ -2825,6 +2825,7 @@ export default {
       if (pathname === '/api/retiros' && request.method === 'POST') {
         return await registrarRetiro(request, env, correo);
       }
+      if (pathname === '/api/terminal') return await rutaTerminal(request, env, correo);   // solo el dueno (cuentas.ts)
       if (pathname === '/api/gastos' || pathname.startsWith('/api/gastos/')) {
         return await rutaGastos(request, env, url, correo);
       }
