@@ -17,6 +17,8 @@
   #avisos-ml:not([hidden]) { background: #D72B32; color: #fff; padding: 6px 12px; border-radius: 8px; font-size: 15px; font-weight: 700; text-decoration: none; }
   #estado-red { font-size: 13px; padding: 3px 10px; border-radius: 999px; background: #ffffff22; }
   #estado-red.sin-red { background: var(--rojo); }
+  #promo-cupo { font-size: 15px; font-weight: 700; padding: 4px 12px; border-radius: 999px; background: #FFD447; color: #1a1f2b; }
+  #promo-cupo.agotada { background: var(--rojo); color: #fff; }
   main { flex: 1; display: grid; grid-template-columns: 1fr 340px; gap: 16px; padding: 16px; min-height: 0; }
   .panel { background: #fff; border: 1px solid var(--linea); border-radius: 12px; padding: 14px;
     display: flex; flex-direction: column; min-height: 0; }
@@ -167,6 +169,7 @@ if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw-caja.js'
     </select>
   </label>
   <span id="estado-red">en línea</span>
+  <span id="promo-cupo" role="status" hidden></span>
   <button id="marcar-entrada" type="button" hidden>Marcar entrada</button>
   <button id="abrir-retiro" type="button">Gasto / retiro</button>
   <button id="abrir-corte" type="button">Corte</button>
@@ -404,7 +407,7 @@ if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw-caja.js'
 </dialog>
 <script type="module">
 import { CATEGORIAS_GASTO } from '/categorias.js';
-import { totales, agregar, leerMultiplicador, efectivoAlcanza, dolaronesGanados, saldoCanjeable, maximoCanje, MINIMO_REGALO, descuentoDe, TOPE_DESCUENTO, DENOMINACIONES, contadoDe, promoInauguracion, desfaseReloj, anticipoDePedido } from '/venta.js';
+import { totales, agregar, leerMultiplicador, efectivoAlcanza, dolaronesGanados, saldoCanjeable, maximoCanje, MINIMO_REGALO, descuentoDe, TOPE_DESCUENTO, DENOMINACIONES, contadoDe, promoInauguracion, letreroPromo, desfaseReloj, anticipoDePedido } from '/venta.js';
 import { abrirCamara } from '/camara.js';
 import {
   reconectarImpresora, conectarImpresora, impresoraLista, imprimirTicket, abrirCajon, explicarErrorUsb, errorImpresora,
@@ -671,7 +674,15 @@ async function cargarCatalogo() {
 
 /* ---------- ticket ---------- */
 
+/** Letrero del encabezado: el cajero ve cuántas promos quedan (se actualiza con la consulta de cada minuto). */
+function pintarPromoCupo() {
+  const letrero = letreroPromo(promoConfig, Date.now());
+  $('promo-cupo').hidden = !letrero;
+  $('promo-cupo').textContent = letrero;
+  $('promo-cupo').classList.toggle('agotada', promoConfig?.restantes === 0);
+}
 function pintar() {
+  pintarPromoCupo();
   // Uno en % se aprueba para ese ticket exacto: si cambia, hay que pedir otro. Uno en
   // pesos se queda en el ticket hasta vaciarlo o quitarlo (Isaac, 17/10).
   const subtotal = totales(lineas).subtotal;
@@ -1360,6 +1371,7 @@ async function cobrar() {
     if (venta.promo && promoConfig?.restantes) {
       promoConfig.restantes--;
       try { localStorage.setItem('promo-inauguracion', JSON.stringify(promoConfig)); } catch {}
+      pintarPromoCupo();
     }
 
     // Bajar existencias en la copia local: sin esto, la misma etiqueta se podria

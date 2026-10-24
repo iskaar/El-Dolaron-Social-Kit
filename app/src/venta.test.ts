@@ -3,7 +3,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { runInNewContext } from 'node:vm';
-import { totales, agregar, leerMultiplicador, efectivoAlcanza, saldoCanjeable, dolaronesGanados, maximoCanje, desfaseReloj, anticipoDePedido, envioDe, anticipoMinimoDe, viernesDeEnvio, promoInauguracion, PROMO_DESCUENTO, PROMO_MINIMO } from '../public/venta.js';
+import { totales, agregar, leerMultiplicador, efectivoAlcanza, saldoCanjeable, dolaronesGanados, maximoCanje, desfaseReloj, anticipoDePedido, envioDe, anticipoMinimoDe, viernesDeEnvio, promoInauguracion, letreroPromo, PROMO_DESCUENTO, PROMO_MINIMO } from '../public/venta.js';
 
 interface Linea { codigo: string; nombre: string; precio: number; cantidad: number }
 const pieza = (codigo: string, precio: number) => ({ codigo, nombre: codigo, precio });
@@ -266,4 +266,15 @@ test('promo de inauguracion (#487): $100 desde $300.00 exactos, nada por debajo 
   assert.equal(promoInauguracion(30000, Date.parse('2026-10-24T16:59:59Z'), ventana), 0, 'antes de abrir');
   assert.equal(promoInauguracion(30000, Date.parse('2026-10-26T02:00:00Z'), ventana), 0, 'ya cerro');
   assert.equal(promoInauguracion(30000, dentro, null), 0, 'sin configurar');
+});
+
+test('letrero de promos en la caja: cuántas quedan solo dentro de la ventana', () => {
+  const ventana = { desde: '2026-10-24T17:00:00Z', hasta: '2026-10-26T02:00:00Z' };
+  const dentro = Date.parse('2026-10-24T18:00:00Z');
+  assert.equal(letreroPromo({ ...ventana, restantes: 37 }, dentro), 'Promos de $100: quedan 37');
+  assert.equal(letreroPromo({ ...ventana, restantes: 0 }, dentro), 'Promo de $100 agotada');
+  assert.equal(letreroPromo(ventana, dentro), 'Promo $100 activa', 'sin tope');
+  assert.equal(letreroPromo({ ...ventana, restantes: 37 }, Date.parse('2026-10-24T16:59:59Z')), '', 'antes de abrir');
+  assert.equal(letreroPromo({ ...ventana, restantes: 37 }, Date.parse('2026-10-26T02:00:00Z')), '', 'ya cerró');
+  assert.equal(letreroPromo(null, dentro), '', 'sin configurar');
 });
