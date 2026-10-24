@@ -47,6 +47,7 @@ import { rutaML, recibirNotificacion, conciliarSeguro, sincronizar, publicacionV
 import { pedirDescuento, validarDescuento, listarDescuentos, listarDuenos, promoDe, promoRestantes } from './descuentos.ts';
 import { listarAltoValor, revisarConteo, ajustarExistencia, listarAjustes } from './conteo.ts';
 import { rutaPedidos, vencerPedidos, sentenciasDePedido, saldoDe, enPedido } from './pedidos.ts';
+import { rutaVender } from './vender.ts';
 
 interface FilaConfig {
   clave: string;
@@ -2620,6 +2621,8 @@ export default {
           && !puedeEditarInventario(await leerUsuario(env, correo))) {
         return json({ error: 'Tu cuenta no tiene permiso para editar el inventario.' }, 403);
       }
+      const respuestaVender = await rutaVender(request, env, url, correo);
+      if (respuestaVender) return respuestaVender;
       const respuestaRopaIA = await rutaRopaAdmin(request, env, pathname, correo);
       if (respuestaRopaIA) return respuestaRopaIA;
       if (request.method === 'POST' && /^\/api\/recortes\/[^/]+\/(aprobar|original|reintentar)$/.test(pathname)
