@@ -32,7 +32,7 @@ test('la promo del ticket nuevo se mide con la hora de ahora, no con la hora de 
   const inicio = '2026-10-07T16:00:00.000Z';
   const ahora = Date.parse('2026-10-07T20:00:00.000Z');
   const linea = fuente.slice(fuente.indexOf('const promoActual ='), fuente.indexOf('\n', fuente.indexOf('const promoActual =')));
-  const caja = runInNewContext(`let idVenta = null, creadoEnVenta = null;\n${linea}; ({ promoActual, fijar(i, c) { idVenta = i; creadoEnVenta = c; } })`, {
+  const caja = runInNewContext(`let idVenta = null, creadoEnVenta = null, sinPromo = false;\n${linea}; ({ promoActual, fijar(i, c) { idVenta = i; creadoEnVenta = c; }, quitar(q) { sinPromo = q; } })`, {
     totales, promoInauguracion, lineas: [{ precio: 40000, cantidad: 1 }], promoConfig: { desde: inicio, hasta: '2026-10-14T16:00:00.000Z' },
     Date: class extends Date { static now() { return ahora; } },
   });
@@ -42,6 +42,13 @@ test('la promo del ticket nuevo se mide con la hora de ahora, no con la hora de 
   // Un reintento del mismo ticket (mismo folio) si conserva su hora.
   caja.fijar(crypto.randomUUID(), '2026-10-07T10:00:00.000Z');
   assert.equal(caja.promoActual(), 0);
+  // Una por cliente (24/10): el cajero la quita del ticket; el boton sigue sabiendo que aplicaba.
+  caja.fijar(null, null);
+  caja.quitar(true);
+  assert.equal(caja.promoActual(), 0);
+  assert.equal(caja.promoActual(true), 10000);
+  caja.quitar(false);
+  assert.equal(caja.promoActual(), 10000);
 });
 
 test('sincronizar deja encolada la venta si la respuesta no es del servidor o la sesion caduco', async () => {
