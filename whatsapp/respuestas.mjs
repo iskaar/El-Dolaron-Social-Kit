@@ -25,11 +25,24 @@ const RESPALDO = 'Gracias por escribirnos. Por ahora no tengo esa información. 
 
 const contiene = (palabras, texto) => palabras.some((p) => new RegExp(`\\b${p}\\b`).test(texto));
 
-/** Respuesta para un mensaje de texto del cliente. Nunca usa datos de clientes ni de inventario. */
-export function respuestaPara(texto) {
+/** Respuesta fija si el mensaje cae en el FAQ o es un saludo; null si hace falta el modelo (Issue #499). */
+export function respuestaFija(texto) {
   const limpio = normalizar(String(texto ?? ''));
   const hallada = RESPUESTAS.find(({ palabras }) => contiene(palabras, limpio));
   if (hallada) return hallada.texto;
   if (contiene(SALUDO.palabras, limpio)) return SALUDO.texto;
-  return RESPALDO;
+  return null;
+}
+
+/**
+ * Issue #499: un mensaje corto que cae en el FAQ se contesta fijo, sin modelo (gratis, al instante
+ * y siempre igual). Uno largo o que no cae va al modelo, aunque traiga una palabra del FAQ:
+ * «¿dónde consigo talla M?» no es una pregunta de ubicación.
+ */
+export const PALABRAS_SIMPLE = 8;
+export const esSimple = (texto) => String(texto ?? '').trim().split(/\s+/).filter(Boolean).length <= PALABRAS_SIMPLE;
+
+/** Respuesta para un mensaje de texto del cliente. Nunca usa datos de clientes ni de inventario. */
+export function respuestaPara(texto) {
+  return respuestaFija(texto) ?? RESPALDO;
 }

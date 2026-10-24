@@ -1,4 +1,4 @@
-import { respuestaPara } from './respuestas.mjs';
+import { esSimple, respuestaFija, respuestaPara } from './respuestas.mjs';
 import { esFinDeConversacion, estaPausado, generarRespuesta, guardarTurno, interpretar, leerHistorial, pausar, RETENCION_SEGUNDOS } from './asistente.mjs';
 
 const encoder = new TextEncoder();
@@ -96,8 +96,10 @@ export default {
 };
 
 /**
- * Responde a cada mensaje del cliente una sola vez: con el asistente si hay clave y el modelo
- * contesta; si no, con el FAQ fijo. Si el asistente escala, la conversacion queda pausada.
+ * Responde a cada mensaje del cliente una sola vez. Un mensaje corto que cae en el FAQ (saludo,
+ * horario, ubicación, promo) se contesta fijo, sin modelo (Issue #499); el resto va al asistente
+ * si hay clave y el modelo contesta, y si no, al FAQ fijo. Si el asistente escala, la
+ * conversacion queda pausada.
  */
 async function responderMensajes(event, env) {
   if (!env.WHATSAPP_ACCESS_TOKEN || !env.WHATSAPP_PHONE_NUMBER_ID) return;
@@ -122,12 +124,17 @@ async function responderMensajes(event, env) {
         if (esFinDeConversacion(texto, historial.length > 0)) continue;
 
         let respuesta;
-        try {
-          if (!env.ANTHROPIC_API_KEY) throw new Error('sin clave');
-          const consultar = env.TIENDA && env.ASISTENTE_TOKEN ? (q) => consultarTienda(env, q) : null;
-          respuesta = interpretar(await generarRespuesta(historial, texto, env.ANTHROPIC_API_KEY, consultar));
-        } catch {
-          respuesta = { texto: respuestaPara(texto), puntaje: 0, escalar: false };
+        const fija = esSimple(texto) ? respuestaFija(texto) : null;
+        if (fija) {
+          respuesta = { texto: fija, puntaje: 0, escalar: false };
+        } else {
+          try {
+            if (!env.ANTHROPIC_API_KEY) throw new Error('sin clave');
+            const consultar = env.TIENDA && env.ASISTENTE_TOKEN ? (q) => consultarTienda(env, q) : null;
+            respuesta = interpretar(await generarRespuesta(historial, texto, env.ANTHROPIC_API_KEY, consultar));
+          } catch {
+            respuesta = { texto: respuestaPara(texto), puntaje: 0, escalar: false };
+          }
         }
         if (!respuesta.texto) continue;
         if (!await enviarYGuardar(env, de, respuesta.texto)) continue;

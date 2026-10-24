@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createHmac } from 'node:crypto';
 import worker from './worker.mjs';
-import { respuestaPara } from './respuestas.mjs';
+import { esSimple, respuestaFija, respuestaPara } from './respuestas.mjs';
 
 test('preguntas del FAQ reciben la respuesta aprobada, con o sin acentos', () => {
   assert.match(respuestaPara('¿A qué hora abren?'), /11 a\. m\. a 8 p\. m\./);
@@ -17,6 +17,15 @@ test('la gran inauguracion, la ubicacion y el apartado responden con los datos c
   }
   assert.match(respuestaPara('¿Dónde están?'), /Jardín Hidalgo 129/);
   assert.match(respuestaPara('me lo pueden apartar'), /15 %.*7 días/);
+});
+
+test('respuestaFija devuelve null cuando hace falta el modelo y esSimple separa lo corto de lo largo (#499)', () => {
+  assert.equal(respuestaFija('cuanto cuesta el sofa'), null);
+  assert.equal(respuestaFija('¿me recomiendas algo para regalar a mi mamá?'), null);
+  assert.match(respuestaFija('horario'), /11 a\. m\./);
+  assert.equal(esSimple('¿a qué hora abren?'), true);
+  assert.equal(esSimple('hola, ¿dónde consigo una blusa talla M para un regalo de cumpleaños?'), false);
+  assert.equal(esSimple(''), true);
 });
 
 test('lo no confirmado (precios, envios) recibe respaldo o escala al equipo', () => {

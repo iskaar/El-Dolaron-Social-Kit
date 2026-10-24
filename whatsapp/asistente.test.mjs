@@ -74,6 +74,9 @@ test('el prompt solo afirma los datos aprobados', () => {
   assert.match(PROMPT, /11:00 a 20:00/);
   assert.match(PROMPT, /ventas son en sucursal/);
   assert.match(PROMPT, /no inventes nada/);
+  // Issue #499: conversa en general, pero el dato de la tienda sigue cerrado a la lista.
+  assert.match(PROMPT, /Puedes conversar y orientar en general/);
+  assert.match(PROMPT, /ningún otro/);
   // Issue #497: la gran inauguración, la ubicación y el apartado son datos aprobados; los envíos se escalan.
   assert.match(PROMPT, /sábado 24 y domingo 25 de octubre de 2026/);
   assert.match(PROMPT, /primeras 100 compras de \$300 o más.*\$100 en caja/);
@@ -103,7 +106,7 @@ test('el asistente responde, guarda el turno y registra la respuesta para el per
   const r = red('Abrimos de 11:00 a 20:00.\nSCORE: 2');
   try {
     const env = entorno({}, { ANTHROPIC_API_KEY: 'clave' });
-    await correr(env, [texto('m1', '5214421234567', '¿A qué hora abren?')]);
+    await correr(env, [texto('m1', '5214421234567', '¿Qué me recomiendan para un regalo de cumpleaños de mi mamá?')]);
     assert.equal(r.llamadas.meta.length, 1);
     assert.equal(r.llamadas.meta[0].text.body, 'Abrimos de 11:00 a 20:00.');
     const historial = JSON.parse(env.EVENTS.guardados.get('historial:5214421234567'));
@@ -138,6 +141,19 @@ test('si el modelo falla o no hay clave, responde con el FAQ fijo', async () => 
     assert.match(sinClave.llamadas.meta[0].text.body, /444 543 7754/);
     assert.equal(sinClave.llamadas.modelo.length, 0);
   } finally { sinClave.restaurar(); }
+});
+
+test('un mensaje corto del FAQ se contesta fijo sin llamar al modelo; uno largo sí va al modelo (#499)', async () => {
+  const r = red('Claro, te cuento.\nSCORE: 3');
+  try {
+    const env = entorno({}, { ANTHROPIC_API_KEY: 'clave' });
+    await correr(env, [texto('f1', '5214421234567', 'hola buenas')]);
+    assert.match(r.llamadas.meta[0].text.body, /inauguración/);
+    assert.equal(r.llamadas.modelo.length, 0);
+    await correr(env, [texto('f2', '5214421234567', 'hola, ¿dónde consigo una blusa talla M para un regalo de cumpleaños?')]);
+    assert.equal(r.llamadas.modelo.length, 1);
+    assert.match(r.llamadas.meta[1].text.body, /Claro, te cuento/);
+  } finally { r.restaurar(); }
 });
 
 test('una imagen recibe la respuesta corta, sin el modelo', async () => {
