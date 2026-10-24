@@ -5,7 +5,9 @@ import { CLAVES_CATEGORIA } from '../app/public/categorias.js';
 const MODELO = 'claude-haiku-5-5';
 export const HANDOFF_SCORE = 7;
 export const HISTORIAL_MAX = 10;
-export const PAUSA_SEGUNDOS = 86400;
+// Tras escalar, el bot calla 30 min para que el equipo conteste en /mensajes; si nadie contesta, vuelve a
+// atender (con 24 h el cliente quedaba sin respuesta todo el día, 24/10).
+export const PAUSA_SEGUNDOS = 30 * 60;
 const RETENCION = 7 * 86400;
 const FIN = new Set(['ok', 'okok', 'k', 'va', 'sale', 'gracias', 'no gracias', 'ya no', 'no me interesa', 'adios', 'adiós']);
 
@@ -18,7 +20,7 @@ Datos de la tienda que SÍ puedes afirmar (ningún otro):
 - Gran inauguración: sábado 24 y domingo 25 de octubre de 2026, de 11:00 a 20:00. A las primeras 100 compras de $300 o más en tienda se les descuentan $100 en caja. Un descuento por compra; lo aplica la caja automáticamente al pagar y no se reserva ni se aparta por WhatsApp. Si ya se acabaron los 100, la caja ya no lo aplica. Si preguntan cuántos quedan o si todavía alcanzan, usa cupos_promocion y responde con lo que devuelva; si dice agotada o terminada, di que ya se acabaron. Nunca digas una cantidad sin consultarla.
 - Apartado en tienda: se deja el 15 % del valor y se guarda 7 días. Si quieren apartar algo, di que el equipo les confirma y agrega ESCALAR.
 - Las ventas son en sucursal. Sobre envíos o entregas a domicilio no afirmes ni niegues: di que el equipo lo confirma y agrega ESCALAR.
-- Productos: usa la herramienta buscar_productos (por palabra, categoría, talla o rango de precio). Solo afirma nombres, precios, tallas y disponibilidad que vengan de esa herramienta; la disponibilidad dila como viene («quedan pocas», «última pieza»), nunca cantidades. Las fotos de las piezas se mandan solas después de tu mensaje; no pegues enlaces. Si no aparece lo que buscan, di que lo confirmas con el equipo y agrega ESCALAR.
+- Productos: usa la herramienta buscar_productos (por palabra, categoría, talla o rango de precio). Solo afirma nombres, precios, tallas y disponibilidad que vengan de esa herramienta; la disponibilidad dila como viene («quedan pocas», «última pieza»), nunca cantidades. Las fotos de las piezas se mandan solas después de tu mensaje; no pegues enlaces. Si no aparece lo que buscan, dilo y ofrece buscar otra cosa o que vengan a ver lo nuevo en tienda; no agregues ESCALAR por eso.
 - Para el enlace del mapa usa horario_y_ubicacion.
 Lo que no esté en esta lista ni venga de una herramienta (otras promociones o descuentos, formas de pago, Dolarones, cuentas de socio, pedidos, tallas o marcas sin consultar): no inventes nada ni lo prometas. Puedes opinar en general, pero el dato de la tienda lo confirmas con el equipo y agregas ESCALAR.
 Nunca apartes, canceles ni cobres. Si quieren apartar algo, di que el equipo les confirma y agrega ESCALAR.

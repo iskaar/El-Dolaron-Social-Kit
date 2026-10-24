@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createHmac } from 'node:crypto';
 import worker from './worker.mjs';
-import { HERRAMIENTAS, PROMPT, UBICACION, esFinDeConversacion, generarRespuesta, interpretar } from './asistente.mjs';
+import { HERRAMIENTAS, PAUSA_SEGUNDOS, PROMPT, UBICACION, esFinDeConversacion, generarRespuesta, interpretar } from './asistente.mjs';
 import { MAX_TARJETAS } from './limites.mjs';
 
 const endpoint = 'https://whatsapp.eldolaron.com/webhook';
@@ -340,4 +340,9 @@ test('#499 B.4: si el modelo falla después de buscar, no manda tarjetas sueltas
     assert.equal(r.meta.length, 1);
     assert.equal(r.meta[0].type, 'text');
   } finally { r.restaurar(); }
+});
+
+test('escalar no deja al cliente sin respuesta todo el día y no encontrar una pieza no escala', () => {
+  assert.ok(PAUSA_SEGUNDOS <= 3600);
+  assert.match(PROMPT, /no aparece lo que buscan[^\n]*no agregues ESCALAR/);
 });
