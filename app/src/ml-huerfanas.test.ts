@@ -43,11 +43,14 @@ test('descartar sin publicacion (o cerrada, o vendida) sigue funcionando', async
     const t = tienda();
     publicar(t, PRODUCTO, estado);
     assert.equal((await t.pedir(`/api/borradores/${PRODUCTO}`, {}, 'DELETE')).status, 200, estado);
-    assert.ok(!existe(t, PRODUCTO));
+    assert.ok(existe(t, PRODUCTO));
+    assert.equal(t.db.prepare('select stock, estado_analisis from productos where id = ?').get(PRODUCTO)!.stock, 0);
+    assert.equal(t.db.prepare('select estado_analisis from productos where id = ?').get(PRODUCTO)!.estado_analisis, 'descartado');
   }
   const u = tienda();
   assert.equal((await u.pedir(`/api/borradores/${PRODUCTO}`, {}, 'DELETE')).status, 200);
-  assert.ok(!existe(u, PRODUCTO));
+  assert.ok(existe(u, PRODUCTO));
+  assert.equal(u.db.prepare('select estado_analisis from productos where id = ?').get(PRODUCTO)!.estado_analisis, 'descartado');
 });
 
 test('fusionar una repetida con publicacion viva en ML: 409 y nada cambia', async () => {

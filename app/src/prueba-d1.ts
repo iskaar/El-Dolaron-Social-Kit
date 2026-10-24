@@ -29,7 +29,11 @@ function d1(db: DatabaseSync) {
       async first() { return db.prepare(sql).get(...(args as never[])) ?? null; },
       async all() { return { results: db.prepare(sql).all(...(args as never[])) }; },
       async run() { return { meta: { changes: Number(db.prepare(sql).run(...(args as never[])).changes) } }; },
-      ejecutar() { return db.prepare(sql).run(...(args as never[])); },
+      // Una sentencia con returning devuelve sus filas, como D1 dentro de un batch.
+      ejecutar() {
+        if (/returning/i.test(sql)) { const results = db.prepare(sql).all(...(args as never[])); return { changes: results.length, results }; }
+        return db.prepare(sql).run(...(args as never[]));
+      },
     };
     return s;
   };
@@ -39,7 +43,7 @@ function d1(db: DatabaseSync) {
     async batch(sentencias: ReturnType<typeof preparar>[]) {
       db.exec('begin');
       try {
-        const salida = sentencias.map((s) => ({ meta: { changes: Number(s.ejecutar().changes) } }));
+        const salida = sentencias.map((s) => { const r = s.ejecutar() as { changes: number | bigint; results?: unknown[] }; return { meta: { changes: Number(r.changes) }, results: r.results }; });
         db.exec('commit');
         return salida;
       } catch (error) {
@@ -50,7 +54,7 @@ function d1(db: DatabaseSync) {
   };
 }
 
-/** R2 en memoria: lo minimo que usa la app (get/put/delete). */
+/** R2 en memoria: lo minimo que usa la app (get/put/delete/list). */
 function r2() {
   const objetos = new Map<string, ArrayBuffer>();
   const metadatos = new Map<string, { etag: string; httpMetadata?: R2HTTPMetadata; customMetadata?: Record<string, string> }>();
@@ -70,6 +74,12 @@ function r2() {
       return meta;
     },
     async delete(llave: string) { objetos.delete(llave); metadatos.delete(llave); },
+    async list(opciones?: R2ListOptions) {
+      const llaves = [...objetos.keys()].filter((k) => k.startsWith(opciones?.prefix ?? '')).sort();
+      const desde = opciones?.cursor ? llaves.findIndex((k) => k > opciones.cursor!) : 0;
+      const pagina = desde < 0 ? [] : llaves.slice(desde, desde + (opciones?.limit ?? 1000));
+      return { objects: pagina.map((key) => ({ key })), truncated: desde >= 0 && desde + pagina.length < llaves.length, cursor: pagina.at(-1) };
+    },
   };
 }
 

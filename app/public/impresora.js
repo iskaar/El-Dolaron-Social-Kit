@@ -272,7 +272,7 @@ export async function imprimirTicket(venta, lineas) {
     new Uint8Array([ESC, 0x61, 1, ESC, 0x21, 0x30]),
     linea('EL DOLARON'),
     new Uint8Array([ESC, 0x21, 0x00, ESC, 0x61, 0]),
-    centrado('Productos Americanos'),
+    centrado('Mercancia y ropa americana'),
     separador(),
     linea(fecha),
     ...(venta.id ? [linea('Venta: ' + venta.id)] : []),
@@ -314,7 +314,7 @@ export async function imprimirTicket(venta, lineas) {
     linea('Consulta en caja con este ticket tras sincronizar.'));
   if (venta.recompensa_pendiente) partes.push(linea('Dolarones de compra sin confirmar.'),
     linea('Consulta el saldo tras sincronizar.'));
-  partes.push(centrado('Gracias por su compra'));
+  partes.push(centrado('Gracias por tu compra'));
   partes.push(new Uint8Array([0x0a, 0x0a, 0x0a]));
   partes.push(new Uint8Array([GS, 0x56, 0x42, 0x00]));   // corte con avance de papel
 

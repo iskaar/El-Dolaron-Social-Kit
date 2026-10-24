@@ -171,6 +171,7 @@ if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw-caja.js'
   <button id="abrir-corte" type="button">Corte</button>
   <a href="/socios">Alta de socios</a>
   <a href="/admin">Cola de revisión</a>
+  <button id="cerrar-sesion" type="button">Cerrar sesión</button>
 </header>
 
 <main>
@@ -2114,6 +2115,11 @@ $('corte-denominaciones').innerHTML = DENOMINACIONES.map((d) => `
     <td></td></tr>`).join('');
 $('corte-denominaciones').addEventListener('input', pintarContado);
 
+$('cerrar-sesion').addEventListener('click', async () => {
+  const { cerrarSesion } = await import('/cerrar-sesion.js');
+  // Sólo las que siguen por enviar: las rechazadas ya están a la vista y no se pierden al salir.
+  await cerrarSesion({ ventas: async () => (await store('ventas', 'readonly', (s) => s.getAll())).filter((v) => v.estado !== 'rechazada').length });
+});
 $('abrir-corte').addEventListener('click', async () => {
   if (!exigirCaja()) return;
   idCorte = crypto.randomUUID();

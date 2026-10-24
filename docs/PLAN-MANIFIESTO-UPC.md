@@ -44,8 +44,7 @@ el código completo leído, con sus ceros iniciales, en `productos.upc`.
    `/etiquetas` con una etiqueta por pieza. **El precio sale del manifiesto en el servidor**;
    el cliente solo manda cantidad y estado.
 4. **Sin match** — 404 "captura la pieza con foto".
-   Desde el Issue #373 el escáner no detiene al capturista: al pasar a la siguiente pieza (o a los
-   10 s) manda `POST /api/borradores/upc/buscar {id, upc, stock, estado_fisico}`. La pieza nace
+   Desde el Issue #373 el escáner no detiene al capturista: en `/inventario`, solo al tocar «Buscar en internet» manda `POST /api/borradores/upc/buscar {id, upc, stock, estado_fisico}`. La pieza nace
    `pendiente` con su código y cantidad y el Worker, en `waitUntil`, le pregunta a Gemini por Vertex
    con búsqueda de Google **solo el código** (sin foto). Con nombre seguro (confianza ≥ 0.5) y
    precio queda `listo` con código `ED-` y la impresión automática la toma en seguida.
@@ -74,8 +73,8 @@ Si una etiqueta ya salió, reemplazarla o descartarla físicamente al corregir o
 
 **Impresión automática y corrección (Issues #369, #375, #377, #381).** La impresión automática de
 `/etiquetas` también toma lo escaneado (`productos.upc` con código, o vacío si se dio de alta solo con
-foto, #379). La cantidad se cierra en el escáner: la pieza abierta se guarda a los 25 s sin escanear, al
-escanear otro código o con «Guardar»; mientras está abierta se corrige y en 0 se cancela. Ya guardada y
+foto, #379). La cantidad se cierra en el escáner al
+escanear otro código o con «Guardar», sin guardado por tiempo; mientras está abierta se corrige y en 0 se cancela. Ya guardada y
 `listo`, sale en la siguiente consulta (cada 3 s, #383) y el servidor ya no acepta cambios desde el escáner. Lo
 que aún se identifica o espera foto conserva − y + (en 0 se cancela) y no detiene la cola.
 

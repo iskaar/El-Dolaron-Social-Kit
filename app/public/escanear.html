@@ -145,7 +145,7 @@
   </form>
 
   <section class="tarjeta">
-    <ul id="guardadas"><li class="dato">La pieza se guarda a los 25 s, al escanear otra o con Guardar, y su etiqueta sale sola: corrige la cantidad antes, con − y + (en 0 se cancela).</li></ul>
+    <ul id="guardadas"><li class="dato">La pieza se guarda al escanear otra o con Guardar, y su etiqueta sale sola: corrige la cantidad antes, con − y + (en 0 se cancela).</li></ul>
   </section>
 </main>
 <input id="archivo-foto" type="file" accept="image/*" hidden>
@@ -155,6 +155,7 @@
   <button id="guardar" class="principal" type="button">Guardar</button>
 </footer>
 <script type="module">
+import { escucharLector } from '/lector.js';
 import { CATEGORIAS } from '/categorias.js';
 import { ESTADOS, nombreEstado, siguienteEstado } from '/estados.js';
 import { aJpeg, reducirArchivo } from '/foto.js';
@@ -165,8 +166,6 @@ const NOMBRES = Object.fromEntries(CATEGORIAS);
 const $ = (id) => document.getElementById(id);
 const pesos = (c) => `$${Math.round(c / 100).toLocaleString('es-MX')}`;
 const escapar = (t) => String(t ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
-// Se guarda solo despues de este rato sin escanear: da tiempo de juntar las piezas iguales.
-const GUARDAR_SOLA_MS = 25_000;
 // Con la camara, el mismo codigo cuenta otra vez solo si salio de la vista este rato.
 const FUERA_DE_VISTA_MS = 700;
 
@@ -174,7 +173,6 @@ let actual = null;        // { id, upc, ficha, stock } sin guardar todavia
 let desconocido = null;   // { upc, stock } esperando su foto
 let estado = 'nuevo';   // grado A/B/C de lo que se escanee (#371)
 let piezas = 0;
-let temporizador = null;
 let fila = Promise.resolve();   // un codigo a la vez, en el orden en que llegaron
 let camara = false;
 let piezaParaFoto = null;
@@ -253,19 +251,9 @@ function anotar(html, fallo = null) {
 
 /* ---------- guardar ---------- */
 
-function programarGuardado() {
-  clearTimeout(temporizador);
-  // La imagen no detiene el guardado (#383): la etiqueta sale en cuanto se cierra la cantidad.
-  if (piezaParaFoto || piezaParaManual) return;
-  if (desconocido?.sinCodigo) return;   // espera foto o captura manual (#399)
-  if (!actual && !desconocido) return;
-  temporizador = setTimeout(() => { fila = fila.then(cerrarActual); }, GUARDAR_SOLA_MS);
-}
-
 /** Guarda la pieza abierta. El id nace con la pieza: reintentar no la duplica. */
 async function cerrarActual() {
   if (piezaParaFoto || piezaParaManual) return;
-  clearTimeout(temporizador);
   const pieza = actual, otra = desconocido;
   actual = null;
   desconocido = null;
@@ -284,12 +272,13 @@ async function enviar(pieza) {
     });
     const guardada = await respuesta.json().catch(() => ({}));
     if (!respuesta.ok) throw new Error(guardada.error ?? `Error ${respuesta.status}`);
-    piezas += guardada.stock;
+    piezas += guardada.sumadas ?? pieza.stock;
     const { li } = anotarGuardada(guardada, pieza.estado);
     if (guardada.estado_analisis === 'listo') {
       li.querySelector('.p').textContent = `${pesos(guardada.precio)} · etiqueta en camino`;
-      avisarEtiqueta(guardada.nombre, guardada.stock);
+      avisarEtiqueta(guardada.nombre, pieza.stock);
     }
+    if(guardada.existente)mensaje(`Ya existía · +${guardada.sumadas}${guardada.codigo?` a ${guardada.codigo}`:''}`);
   } catch (error) {
     anotar(`<span>No se guardó: ${escapar(pieza.ficha.nombre)} ×${pieza.stock}. Toca para reintentar.</span>`,
       () => { fila = fila.then(() => enviar(pieza)); });
@@ -304,20 +293,39 @@ async function enviar(pieza) {
 
 function anotarGuardada(guardada, grado, sinFoto = false) {
   const hasta = Date.parse(guardada.creado_en) + 5 * 60_000;
-  const corregible = guardada.estado_analisis !== 'listo' || (sinFoto && Date.now() < hasta);
-  anotar(`<span>${escapar(guardada.nombre)}${grado !== 'nuevo' ? ` (${escapar(nombreEstado(grado))})` : ''}</span>
+  const corregible = !guardada.existente && (guardada.estado_analisis !== 'listo' || (sinFoto && Date.now() < hasta));
+  anotar(`<span>${escapar(guardada.codigo||'')} ${escapar(guardada.nombre)}${grado !== 'nuevo' ? ` (${escapar(nombreEstado(grado))})` : ''}</span>
     <span class="corregir">${corregible ? '<button type="button" data-paso="-1" aria-label="Una pieza menos">−</button>' : ''}
     <span class="cant">×<span class="n">${guardada.stock}</span> · <span class="p">${guardada.precio > 0 ? pesos(guardada.precio) : 'buscando…'}</span></span>
     ${corregible ? '<button type="button" data-paso="1" aria-label="Una pieza más">+</button>' : ''}</span>`);
   const li = $('guardadas').firstElementChild;
+  if (guardada.existente && guardada.codigo) {
+    const imprimir = document.createElement('button');
+    imprimir.type = 'button'; imprimir.className = 'secundario';
+    imprimir.textContent = `Imprimir ${guardada.sumadas} etiquetas de ${guardada.codigo}`;
+    imprimir.addEventListener('click', async () => {
+      if (imprimir.disabled) return;
+      imprimir.disabled = true;
+      try {
+        const e = await import('/etiquetera.js');
+        if (!e.etiqueteraLista()) await e.conectarEtiquetera();
+        const r = await fetch('/api/etiquetas', { method:'POST', headers:{'content-type':'application/json'}, body:JSON.stringify({ids:[guardada.id]}) });
+        const datos = await r.json();
+        if (!r.ok) throw new Error(datos.error || 'No se preparó la etiqueta.');
+        if (await e.imprimirEtiquetas(datos[0], guardada.sumadas)) avisarEtiqueta(guardada.codigo, guardada.sumadas);
+      } catch (error) { mensaje(error.message); }
+      finally { imprimir.disabled = false; }
+    });
+    li.append(imprimir);
+  }
   let guardado = guardada.stock, deseado = guardada.stock, espera = null, envio = Promise.resolve();
-  const cerrar = () => { for (const b of li.querySelectorAll('button')) b.remove(); };
+  const cerrar = () => { for (const b of li.querySelectorAll('button[data-paso]')) b.remove(); };
   async function guardar() {
     const valor = deseado;
     if (valor === guardado) return;
     try {
       const r = await fetch(sinFoto ? '/api/borradores/upc/manual' : `/api/borradores/${guardada.id}/existencia`, {
-        method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id: guardada.id, stock: valor }),
+        method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id: guardada.id, stock: valor, esperado: guardado }),
       });
       const cuerpo = await r.json().catch(() => ({}));
       if (r.status === 404) cerrar();
@@ -362,8 +370,9 @@ async function buscar(pieza) {
     });
     const guardada = await r.json().catch(() => ({}));
     if (!r.ok) throw new Error(guardada.error ?? `Error ${r.status}`);
-    piezas += guardada.stock;
-    seguirBusqueda(pieza, anotarGuardada({ ...guardada, nombre: `Código ${pieza.leido}` }, pieza.estado));
+    piezas += guardada.sumadas ?? pieza.stock;
+    seguirBusqueda(pieza, anotarGuardada({ ...guardada, nombre: guardada.nombre||`Código ${pieza.leido}` }, pieza.estado));
+    if(guardada.existente)mensaje(`Ya existía · +${guardada.sumadas}${guardada.codigo?` a ${guardada.codigo}`:''}`);
   } catch (error) {
     anotar(`<span>No se guardó: código ${escapar(pieza.leido)} ×${pieza.stock}. Toca para reintentar.</span>`,
       () => { fila = fila.then(() => buscar(pieza)); });
@@ -386,6 +395,7 @@ function seguirBusqueda(pieza, { li, cantidad, cerrar }) {
       if (r.ok) datos = await r.json();
     } catch { /* sin red: se vuelve a preguntar */ }
     if (datos?.estado_analisis === 'listo') {
+      if(datos.existente){li.remove();anotarGuardada(datos,pieza.estado);mensaje(`Ya existía · +${datos.sumadas}${datos.codigo?` a ${datos.codigo}`:''}`);return;}
       cerrar();   // ya va a Etiquetas: su cantidad quedó cerrada
       li.firstElementChild.textContent = datos.nombre;
       li.querySelector('.p').textContent = `${pesos(datos.precio)} · etiqueta en camino`;
@@ -427,13 +437,11 @@ async function procesar(crudo) {
   if (actual?.upc === upc) {
     actual.stock = Math.min(999, actual.stock + 1);
     avisar('mas');
-    programarGuardado();
     return pintar();
   }
   if (desconocido?.upc === upc && !desconocido.buscada) {
     desconocido.stock = Math.min(999, desconocido.stock + 1);
     avisar('mas');
-    programarGuardado();
     return pintar();
   }
   await cerrarActual();
@@ -450,7 +458,6 @@ async function procesar(crudo) {
   if (respuesta.status === 404) {
     desconocido = { id: crypto.randomUUID(), upc, leido, stock: 1, estado };
     avisar('no');
-    programarGuardado();
   } else if (!respuesta.ok) {
     mensaje(cuerpo.error ?? `Error ${respuesta.status}`);
     avisar('no');
@@ -458,7 +465,6 @@ async function procesar(crudo) {
     actual = { id: crypto.randomUUID(), upc, leido, ficha: cuerpo, imagen: cuerpo.imagen, stock: 1, estado };
     avisar('ok');
     if (!actual.imagen) cargarImagen(actual);
-    programarGuardado();
   }
   pintar();
 }
@@ -499,7 +505,7 @@ async function cargarImagen(pieza) {
   } catch (error) { pieza.errorImagen = error.message; }
   finally {
     pieza.cargandoImagen = false;
-    if (actual === pieza) { pintar(); programarGuardado(); }
+    if (actual === pieza) { pintar(); }
   }
 }
 
@@ -513,7 +519,6 @@ $('confirmar-imagen').addEventListener('click', async () => {
   const pieza = actual;
   if (!pieza?.imagen || pieza.confirmandoImagen || pieza.imagenRota) return;
   pieza.confirmandoImagen = true;
-  clearTimeout(temporizador);
   pintar();
   try {
     const r = await fetch(`/api/manifiesto/${pieza.upc}/imagen`, { method: 'PUT', headers: { 'content-type': 'application/json' },
@@ -523,13 +528,13 @@ $('confirmar-imagen').addEventListener('click', async () => {
     pieza.imagen = datos.imagen;
     pieza.errorImagen = '';
   } catch (error) { pieza.errorImagen = error.message; }
-  finally { pieza.confirmandoImagen = false; if (actual === pieza) { pintar(); programarGuardado(); } }
+  finally { pieza.confirmandoImagen = false; if (actual === pieza) { pintar(); } }
 });
 $('omitir-imagen').addEventListener('click', () => {
   if (!actual) return;
   actual.imagen = null;
   actual.errorImagen = '';
-  pintar(); programarGuardado();
+  pintar();
 });
 
 /* ---------- foto de lo que no esta en el manifiesto ---------- */
@@ -544,6 +549,8 @@ async function enviarFoto(registro, li = null) {
     cuerpo.append('foto', registro.foto, 'foto.jpg');
     const respuesta = await fetch('/api/borradores', { method: 'POST', body: cuerpo });
     if (!respuesta.ok) throw new Error((await respuesta.json().catch(() => ({}))).error ?? `Error ${respuesta.status}`);
+    const guardada=await respuesta.json();
+    if(guardada.existente){mensaje(`Ya existía · +${guardada.sumadas}${guardada.codigo?` a ${guardada.codigo}`:''}`);anotarGuardada(guardada,registro.estado_fisico);}
     const pendiente = await leerFoto(registro.id);
     if (pendiente && (pendiente.version ?? 0) === (registro.version ?? 0)) await borrarFoto(registro.id);
     if (li) seguirFoto(registro, li);
@@ -602,7 +609,6 @@ function seguirFoto(registro, li) {
 function elegirPiezaFoto() {
   if (piezaParaFoto || piezaParaManual) return false;
   piezaParaFoto = actual || desconocido;
-  clearTimeout(temporizador);
   return !!piezaParaFoto;
 }
 for (const boton of document.querySelectorAll('.otra-foto')) boton.addEventListener('click', () => {
@@ -611,19 +617,19 @@ for (const boton of document.querySelectorAll('.otra-foto')) boton.addEventListe
   if (!elegirPiezaFoto()) return;
   fila = fila.then(async () => {
     try { await conservarFoto(await aJpeg($('video'), $('video').videoWidth, $('video').videoHeight)); }
-    catch (error) { mensaje(error.message); piezaParaFoto = null; programarGuardado(); }
+    catch (error) { mensaje(error.message); piezaParaFoto = null; }
   });
 });
 for (const boton of document.querySelectorAll('.subir-foto')) boton.addEventListener('click', () => {
   if (elegirPiezaFoto()) $('archivo-foto').click();
 });
-$('archivo-foto').addEventListener('cancel', () => { piezaParaFoto = null; programarGuardado(); });
+$('archivo-foto').addEventListener('cancel', () => { piezaParaFoto = null; });
 $('archivo-foto').addEventListener('change', () => {
   const archivo = $('archivo-foto').files[0];
   fila = fila.then(async () => {
     try { if (archivo) await conservarFoto(await reducirArchivo(archivo)); }
     catch (error) { mensaje(error.message || 'No se pudo leer la foto.'); }
-    finally { piezaParaFoto = null; $('archivo-foto').value = ''; programarGuardado(); }
+    finally { piezaParaFoto = null; $('archivo-foto').value = ''; }
   });
 });
 
@@ -636,7 +642,6 @@ addEventListener('online', () => { fila = fila.then(reintentarFotos); });
 $('sin-foto').addEventListener('click', () => {
   if (!desconocido || piezaParaFoto || piezaParaManual) return;
   piezaParaManual = desconocido;
-  clearTimeout(temporizador);
   $('manual-codigo').textContent = piezaParaManual.leido ? `Código ${piezaParaManual.leido}` : 'Sin código';
   $('manual-nombre').value = '';
   $('manual-categoria').value = 'otros';
@@ -650,7 +655,7 @@ $('sin-foto').addEventListener('click', () => {
 $('manual-cancelar').addEventListener('click', () => {
   if ($('manual-guardar').disabled) return;
   piezaParaManual = null;
-  pintar(); programarGuardado();
+  pintar();
   $('sin-foto').focus();
 });
 $('manual').addEventListener('submit', (e) => {
@@ -672,7 +677,7 @@ $('manual').addEventListener('submit', (e) => {
       desconocido = null;
       piezaParaManual = null;
       anotarGuardada(guardada, grado, true);
-      avisarEtiqueta(guardada.nombre, guardada.stock);
+      if(guardada.existente)mensaje(`Ya existía · +${guardada.sumadas}${guardada.codigo?` a ${guardada.codigo}`:''}`);else avisarEtiqueta(guardada.nombre, guardada.stock);
     } catch (error) { mensaje(error.message || 'No se guardó. Reintenta con conexión.'); avisar('no'); }
     finally { $('manual-guardar').disabled = false; pintar(); }
   });
@@ -687,8 +692,8 @@ function contador(entrada, obtener) {
     pieza.stock = Math.max(0, Math.min(999, Math.round(n) || 0));
     // En 0 la pieza se cancela: fue un escaneo equivocado.
     if (pieza.stock === 0) {
-      if (pieza === actual) { clearTimeout(temporizador); actual = null; } else desconocido = null;
-    } else programarGuardado();
+      if (pieza === actual) { actual = null; } else desconocido = null;
+    }
     pintar();
   };
   caja.addEventListener('click', (e) => {
@@ -723,27 +728,10 @@ $('sin-codigo').addEventListener('click', () => {
     pintar();
   });
 });
-// Si se cierra o se cambia de app, lo abierto no se pierde.
-document.addEventListener('visibilitychange', () => { if (document.hidden) fila = fila.then(cerrarActual); });
 
 /* ---------- entradas: lector Bluetooth/USB, teclado y camara ---------- */
 
-// El lector teclea el numero y Enter, como un teclado, sin que haya un campo
-// enfocado: asi el teclado del telefono no se abre en cada pieza.
-let tecleado = '';
-document.addEventListener('keydown', (e) => {
-  if (piezaParaManual) return;
-  if (e.target instanceof HTMLInputElement) return;
-  if (e.key === 'Enter') {
-    if (!tecleado) return; // Enter sobre un botón sigue activándolo con teclado.
-    // Sin esto, el Enter del lector "aprieta" el ultimo boton tocado (p.ej. Dañado).
-    e.preventDefault();
-    if (tecleado) recibir(tecleado);
-    tecleado = '';
-  } else if (/^\d$/.test(e.key)) {
-    tecleado += e.key;
-  }
-});
+escucharLector(({ codigo }) => { if (!piezaParaManual) recibir(codigo); });
 
 $('abrir-teclado').addEventListener('click', () => {
   $('teclado').hidden = !$('teclado').hidden;

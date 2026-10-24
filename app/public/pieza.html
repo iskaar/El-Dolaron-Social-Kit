@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>El Dolarón — Buscar pieza</title>
+<style>
+  :root { --azul:#16366B; --rojo:#D72B32; --amarillo:#FFD447; --linea:#dfe3ea; }
+  * { box-sizing:border-box; min-width:0; }
+  [hidden] { display:none !important; }
+  body { margin:0; background:#f4f6f9; color:#1a1f2b; font-family:system-ui,-apple-system,sans-serif; }
+  header { background:var(--azul); color:#fff; padding:12px 16px; display:flex; gap:12px; align-items:center; flex-wrap:wrap; }
+  h1 { font-size:20px; margin:0; flex:1; }
+  header a { color:var(--amarillo); }
+  a, button { min-height:44px; }
+  header a { display:inline-flex; align-items:center; }
+  main { max-width:1440px; margin:auto; padding:16px; display:grid; gap:20px; }
+  h2 { font-size:22px; margin:12px 0 6px; overflow-wrap:anywhere; }
+  h3 { font-size:16px; margin:20px 0 10px; }
+  p { line-height:1.5; overflow-wrap:anywhere; }
+  button, input, select { font:inherit; border-radius:8px; padding:10px 12px; }
+  button { background:var(--azul); color:#fff; border:1px solid var(--azul); font-weight:650; cursor:pointer; }
+  button.claro { background:#fff; border-color:var(--linea); color:var(--azul); }
+  button:disabled { opacity:.55; cursor:default; }
+  :focus-visible { outline:3px solid var(--rojo); outline-offset:3px; }
+  input, select { width:100%; min-height:44px; border:1px solid #9aa4b6; background:#fff; color:inherit; }
+  label { display:block; font-size:14px; margin:12px 0 6px; }
+  .acciones { display:flex; flex-wrap:wrap; align-items:center; gap:8px; }
+  .acciones > input { width:84px; }
+  .ayuda { font-size:14px; color:#5b6478; }
+  #estado { margin:0; padding:8px 16px; min-height:40px; color:var(--azul); background:#fff; }
+  #resultados { padding:0; list-style:none; }
+  .resultado { width:100%; display:grid; grid-template-columns:56px 1fr auto; gap:12px; text-align:left; align-items:center;
+    background:#fff; color:inherit; border:1px solid var(--linea); margin-bottom:8px; }
+  .resultado[aria-current=true] { border:2px solid var(--azul); background:#eef1f6; }
+  .resultado img { width:56px; height:56px; object-fit:cover; border-radius:6px; }
+  .resultado > span:nth-child(2) { grid-column:2; }
+  .resultado > span:last-child { grid-column:3; }
+  .resultado b, .resultado small { display:block; overflow-wrap:anywhere; }
+  .resultado small { margin-top:4px; color:#5b6478; }
+  #ficha { background:#fff; border:1px solid var(--linea); border-radius:12px; padding:16px; align-self:start; }
+  #foto { display:block; width:100%; aspect-ratio:1; object-fit:contain; background:#eef1f6; border-radius:8px; }
+  #sin-foto { aspect-ratio:1; display:grid; place-content:center; background:#eef1f6; border-radius:8px; }
+  #precio { font-size:28px; color:var(--azul); }
+  #precio-lista { margin-left:12px; color:#5b6478; }
+  #stock { min-width:60px; text-align:center; font-size:32px; font-weight:750; }
+  #menos, #sumar { width:56px; height:56px; font-size:28px; }
+  #reimprimir { margin-top:12px; padding:8px 12px; background:#fff6d9; border:1px solid var(--amarillo); border-radius:8px; }
+  #reimprimir-enlace { display:inline-flex; align-items:center; font-weight:650; }
+  #historial { padding-left:20px; font-size:14px; }
+  #historial li { margin:12px 0; overflow-wrap:anywhere; }
+  #visor { margin-top:12px; width:100%; overflow:hidden; }
+  #visor video { max-width:100%; }
+  @media (max-width:999px) { body.con-ficha #buscador { display:none; } }
+  @media (min-width:1000px) {
+    main { grid-template-columns:minmax(280px,420px) minmax(0,1fr); align-items:start; }
+    #buscador { position:sticky; top:16px; }
+    #volver { display:none; }
+  }
+  @media (min-width:1180px) {
+    .presentacion { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:20px; }
+    #foto, #sin-foto { max-width:360px; }
+    .datos h2 { margin-top:0; }
+  }
+</style>
+</head>
+<body>
+<header><h1>El Dolarón · Buscar pieza</h1><button id="camara" class="claro" type="button" aria-expanded="false" aria-controls="visor">Cámara</button><a href="/">Inicio</a></header>
+<p id="estado" role="status" aria-live="polite">Escribe un código o el nombre de la pieza.</p>
+<button id="reintentar" type="button" hidden>Reintentar ajuste pendiente</button>
+<main>
+  <section id="buscador" aria-label="Buscar y resultados">
+    <form id="busqueda">
+      <label for="consulta">Código, UPC o nombre</label>
+      <div class="acciones"><input id="consulta" type="search" maxlength="80" autocomplete="off" autofocus style="flex:1;width:auto"><button type="submit">Buscar</button></div>
+    </form>
+    <div id="visor" hidden></div>
+    <p id="resumen" class="ayuda">El lector puede usarse con cualquier ficha abierta.</p>
+    <ul id="resultados" aria-label="Piezas encontradas"></ul>
+    <button id="mas" class="claro" type="button" hidden>Buscar más</button>
+  </section>
+  <section id="ficha" aria-label="Ficha de pieza" hidden>
+    <div class="acciones"><button id="volver" class="claro" type="button">← Resultados</button><b id="codigo"></b></div>
+    <div class="presentacion">
+      <div><img id="foto" alt="" hidden><div id="sin-foto">Sin foto</div></div>
+      <div class="datos"><h2 id="nombre"></h2><p id="detalles" class="ayuda"></p><p id="upc" class="ayuda"></p><p><strong id="precio"></strong><span id="precio-lista"></span></p>
+        <h3>Existencia</h3>
+        <div class="acciones"><button id="menos" type="button" aria-label="Bajar existencia en uno" hidden>−</button><output id="stock" aria-label="Existencia actual"></output><button id="sumar" type="button" aria-label="Subir existencia en uno" hidden>+</button></div>
+        <div id="existencia" hidden>
+          <label for="motivo">Motivo</label>
+          <select id="motivo">
+            <option value="correccion">Corrección</option>
+            <optgroup label="Al bajar"><option value="robo">Robo</option><option value="merma">Merma</option><option value="error de captura">Error de captura</option></optgroup>
+            <optgroup label="Al subir"><option value="entrada">Entrada</option></optgroup>
+          </select>
+          <form id="fijar"><label for="fijar-a">Fijar a…</label><div class="acciones"><input id="fijar-a" type="number" min="0" max="999" step="1" required><button id="ajustar" type="submit">Fijar a…</button></div></form>
+          <button id="deshacer" class="claro" type="button" hidden>Deshacer</button>
+        </div>
+      </div>
+    </div>
+    <div id="edicion" hidden>
+      <h3>Corregir datos</h3>
+      <p id="nota-edicion" class="ayuda"></p>
+      <button id="editar" class="claro" type="button" aria-controls="corregir">Corregir nombre y precio</button>
+      <form id="corregir" hidden>
+        <label for="e-nombre">Nombre</label><input id="e-nombre" maxlength="120" required>
+        <label for="e-marca">Marca</label><input id="e-marca" maxlength="60">
+        <label for="e-talla">Talla</label><input id="e-talla" list="tallas" maxlength="30"><datalist id="tallas"></datalist>
+        <div id="campos-precio" hidden>
+          <label for="e-precio">Precio de venta ($)</label><input id="e-precio" inputmode="decimal" autocomplete="off">
+          <label for="e-lista">Precio de lista ($)</label><input id="e-lista" inputmode="decimal" autocomplete="off">
+        </div>
+        <p id="nota-precio" class="ayuda"></p>
+        <div class="acciones"><button id="guardar-correccion" type="submit">Guardar cambios</button><button id="cancelar-correccion" class="claro" type="button">Cancelar</button></div>
+      </form>
+      <div id="reimprimir" role="status" hidden><p id="reimprimir-texto"></p><a id="reimprimir-enlace" href="/etiquetas">Reimprimir etiqueta</a></div>
+    </div>
+    <h3>Historial de la pieza</h3><p class="ayuda">Cambios de nombre, precio, grado y código, y los últimos 10 ajustes de existencia.</p><ol id="historial"></ol>
+  </section>
+</main>
+<script type="module" src="/pieza.js"></script>
+</body>
+</html>

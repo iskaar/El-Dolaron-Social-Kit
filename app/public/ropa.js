@@ -1,3 +1,6 @@
+/** Categoría del servidor o precio de la captura local todavía sin subir. */
+export const esRopa = (pieza) => pieza.categoria === 'ropa' || pieza.precio_ropa != null;
+
 /** Catalogo comun de prendas y precios sugeridos, en centavos MXN. */
 export const PRENDAS_ROPA = ['Playera', 'Blusa', 'Camisa', 'Sudadera', 'Suéter', 'Chamarra', 'Vestido', 'Falda', 'Short', 'Jeans', 'Pantalón', 'Leggings', 'Pants', 'Pijama', 'Traje de baño', 'Conjunto'];
 export const MARCAS_ROPA = ['All in Motion', 'Cat & Jack', 'Universal Thread', 'Wild Fable', 'Goodfellow & Co', 'A New Day', 'Art Class', 'Auden', 'Original Use', 'Shade & Shore', 'Xhilaration', 'Stars Above'];

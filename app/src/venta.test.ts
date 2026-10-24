@@ -3,7 +3,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { runInNewContext } from 'node:vm';
-import { totales, agregar, leerMultiplicador, efectivoAlcanza, saldoCanjeable, dolaronesGanados, maximoCanje, desfaseReloj, anticipoDePedido, envioDe, anticipoMinimoDe, viernesDeEnvio } from '../public/venta.js';
+import { totales, agregar, leerMultiplicador, efectivoAlcanza, saldoCanjeable, dolaronesGanados, maximoCanje, desfaseReloj, anticipoDePedido, envioDe, anticipoMinimoDe, viernesDeEnvio, promoInauguracion, PROMO_DESCUENTO, PROMO_MINIMO } from '../public/venta.js';
 
 interface Linea { codigo: string; nombre: string; precio: number; cantidad: number }
 const pieza = (codigo: string, precio: number) => ({ codigo, nombre: codigo, precio });
@@ -253,4 +253,17 @@ test('3* antes del codigo agrega 3 piezas en un renglon (#358)', () => {
   assert.equal(lineas.length, 1);
   assert.equal(lineas[0].cantidad, 4);
   assert.equal(totales(lineas).total, 7600);
+});
+
+test('promo de inauguracion (#487): $100 desde $300.00 exactos, nada por debajo ni fuera de la ventana', () => {
+  const ventana = { desde: '2026-10-24T17:00:00Z', hasta: '2026-10-26T02:00:00Z' };
+  const dentro = Date.parse('2026-10-24T18:00:00Z');
+  assert.equal(PROMO_DESCUENTO, 10000);
+  assert.equal(PROMO_MINIMO, 30000);
+  assert.equal(promoInauguracion(30000, dentro, ventana), 10000, 'borde: $300.00 exactos');
+  assert.equal(promoInauguracion(29999, dentro, ventana), 0, '$299.99');
+  assert.equal(promoInauguracion(500000, dentro, ventana), 10000, 'monto fijo, no porcentaje');
+  assert.equal(promoInauguracion(30000, Date.parse('2026-10-24T16:59:59Z'), ventana), 0, 'antes de abrir');
+  assert.equal(promoInauguracion(30000, Date.parse('2026-10-26T02:00:00Z'), ventana), 0, 'ya cerro');
+  assert.equal(promoInauguracion(30000, dentro, null), 0, 'sin configurar');
 });
