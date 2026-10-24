@@ -745,7 +745,7 @@ test('cero filas no aborta batch; el CHECK sí revierte cuando desaparece la pie
   assert.equal(stockDe(db, PRODUCTO), 49);
 });
 
-test('048: base vacía completa, con todas las migraciones en una transacción y FK activas', () => {
+test('056: base vacía completa, con todas las migraciones en una transacción y FK activas', () => {
   const db = new DatabaseSync(':memory:');
   try {
     db.exec('pragma foreign_keys = on; begin');
@@ -760,11 +760,11 @@ test('048: base vacía completa, con todas las migraciones en una transacción y
   } finally { db.close(); }
 });
 
-test('048: conserva todos los valores históricos, FK, índices y triggers; acepta $8 y rechaza huérfanos', () => {
+test('056: conserva todos los valores históricos, FK, índices y triggers; acepta $8 y rechaza huérfanos', () => {
   const db = new DatabaseSync(':memory:');
   try {
     db.exec('pragma foreign_keys = on');
-    for (const archivo of ['schema.sql', ...readdirSync('.').filter((f) => /^migracion-\d+/.test(f) && Number(f.slice(10, 13)) < 48).sort()])
+    for (const archivo of ['schema.sql', ...readdirSync('.').filter((f) => /^migracion-\d+/.test(f) && Number(f.slice(10, 13)) < 56).sort()])
       db.exec(readFileSync(archivo, 'utf8'));
     db.prepare(`insert into productos (id, codigo, nombre, precio, stock, semana_ingreso, creado_en, actualizado_en)
       values (?, 'ED-000001', 'Prenda', 25000, 48, 'S40', '', '')`).run(PRODUCTO);
@@ -789,7 +789,7 @@ test('048: conserva todos los valores históricos, FK, índices y triggers; acep
     db.prepare('update ventas set pedido_id = ? where id = ?').run(ids[2], ventaId);
     db.prepare(`insert into venta_lineas (venta_id, producto_id, codigo, nombre, precio, cantidad)
       values (?, ?, 'ED-000001', 'Prenda', 25000, 1)`).run(ventaId, PRODUCTO);
-    // pedido_movimientos nace en 048. Los movimientos históricos existentes son los
+    // pedido_movimientos nace en 056. Los movimientos históricos existentes son los
     // de vales, ligados al ticket: también deben sobrevivir sin reconstruir ventas.
     db.prepare(`insert into vales_dolarones (id, venta_id, codigo, importe, restante, disponible_desde, vence_en, creado_en)
       values ('vale-anterior', ?, 'ED-ANTERIOR', 1000, 1000, '2026-10-24', '2026-11-24', '2026-10-23')`).run(ventaId);
@@ -816,9 +816,25 @@ test('048: conserva todos los valores históricos, FK, índices y triggers; acep
     const referenciasAntes = referencias();
     assert.deepEqual(referenciasAntes.map((f) => f.tabla), ['pedido_lineas', 'ventas']);
     const antes = db.prepare('select * from pedidos order by folio').all();
+    // La vista de 054 lee pedidos y pedido_lineas: 056 corre DESPUÉS de ella en producción.
+    const vista = () => String(db.prepare("select sql from sqlite_master where type = 'view' and name = 'movimientos_existencia'").get()?.sql ?? '')
+      .replace(/\s+/g, ' ').trim();
+    const vistaAntes = vista();
+    assert.ok(vistaAntes);
+    const movimientosAntes = db.prepare('select * from movimientos_existencia order by referencia, tipo').all();
     db.exec('begin');
-    db.exec(readFileSync('migracion-048-apartados.sql', 'utf8'));
+    db.exec(readFileSync('migracion-056-apartados.sql', 'utf8'));
     db.exec('commit');
+    assert.deepEqual(vista(), vistaAntes);
+    assert.deepEqual(db.prepare('select * from movimientos_existencia order by referencia, tipo').all(), movimientosAntes);
+    // Un segundo pase (ya corrida, p. ej. como 048 en sandbox) falla en su primera sentencia y no toca nada.
+    const pedidosAplicados = db.prepare('select * from pedidos order by folio').all();
+    const lineasAplicadas = db.prepare('select * from pedido_lineas order by rowid').all();
+    db.exec('begin');
+    assert.throws(() => db.exec(readFileSync('migracion-056-apartados.sql', 'utf8')), /pedido_movimientos already exists/);
+    db.exec('rollback');
+    assert.deepEqual(db.prepare('select * from pedidos order by folio').all(), pedidosAplicados);
+    assert.deepEqual(db.prepare('select * from pedido_lineas order by rowid').all(), lineasAplicadas);
     // Comparar TODAS las columnas originales de TODAS las tablas, no solo conteos.
     for (const { nombre, columnas, filas, fk } of historico) {
       const nombres = columnas.map((c) => `"${c.name}"`).join(', ');
