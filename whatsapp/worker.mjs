@@ -132,7 +132,10 @@ async function responderMensajes(event, env) {
             if (!env.ANTHROPIC_API_KEY) throw new Error('sin clave');
             const consultar = env.TIENDA && env.ASISTENTE_TOKEN ? (q) => consultarTienda(env, q) : null;
             respuesta = interpretar(await generarRespuesta(historial, texto, env.ANTHROPIC_API_KEY, consultar));
-          } catch {
+          } catch (error) {
+            // Issue #499: sin esto el fallo del modelo era invisible y el cliente solo veía el respaldo.
+            // Solo el motivo corto (p. ej. «modelo 401»), nunca la clave ni el texto del cliente.
+            console.error(JSON.stringify({ event: 'whatsapp_modelo_fallo', motivo: String(error?.message ?? error).slice(0, 120) }));
             respuesta = { texto: respuestaPara(texto), puntaje: 0, escalar: false };
           }
         }
