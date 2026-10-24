@@ -88,20 +88,21 @@ export function crearCaptura({ api, imprimir, cambiar=()=>{}, enLinea=()=>naviga
     // «12*código» (como la caja, #358): 12 piezas en esta lectura; sin prefijo, 1. El escaneo repetido sigue sumando 1.
     const multiplicado=leerMultiplicador(texto);if(!multiplicado)throw new Error('La cantidad antes del * va de 1 a 99.');
     const n=multiplicado.cantidad;let codigo=multiplicado.codigo.trim();if(!codigo)throw new Error('Escribe o escanea el código después del *');
-    const ruta='/api/piezas?'+new URLSearchParams({q:codigo,...(mas&&siguiente?{cursor:siguiente}:{})});
+    // Un solo viaje por lectura (#491): piezas del propietario o, si no hay, la ficha del manifiesto; 404 = ninguna de las dos.
+    const resolver=async c=>{try{return await api('/api/piezas/resolver?'+new URLSearchParams({q:c}));}catch(e){if(e.status!==404)throw e;return {};}};
     // La API da prioridad a ED- sobre UPC en números cortos; conservarla antes de acumular o filtrar por grado.
-    const etiqueta=!mas&&/^\d{1,6}$/.test(codigo)?await api(ruta):null;
+    const etiqueta=!mas&&/^\d{1,6}$/.test(codigo)?await resolver(codigo):null;
     const ed=`ED-${codigo.padStart(6,'0')}`;
-    if(etiqueta?.piezas.some(p=>p.codigo===ed))codigo=ed;
+    if(etiqueta?.piezas?.some(p=>p.codigo===ed))codigo=ed;
     if(!mas&&actual?.tipo==='nueva'&&normalizarUpc(codigo)===normalizarUpc(actual.upc)){actual.cantidad=Math.min(999,actual.cantidad+n);pintar();return;}
     if(!mas&&actual?.tipo==='existente'&&(piezaRopa(actual.pieza)||actual.pieza.estado_fisico===grado)&&permiteSumar&&(actual.pieza.codigo?.toUpperCase()===codigo.toUpperCase()||(actual.pieza.upc&&normalizarUpc(actual.pieza.upc)===normalizarUpc(codigo))))return sumar(actual.pieza,n);
     if(!mas&&actual?.tipo==='nueva'){if(tarjetaEditada(actual))throw new Error('Guarda la tarjeta editada antes de leer otro código');await guardar();}
-    const datos=etiqueta??await api(ruta);
-    const piezas=codigoLeido(codigo)?datos.piezas.filter(p=>piezaRopa(p)||p.estado_fisico===grado):datos.piezas;
+    const datos=mas?await api('/api/piezas?'+new URLSearchParams({q:codigo,...(siguiente?{cursor:siguiente}:{})})):etiqueta??await resolver(codigo);
+    const piezas=codigoLeido(codigo)?(datos.piezas??[]).filter(p=>piezaRopa(p)||p.estado_fisico===grado):datos.piezas??[];
     resultados=mas?[...resultados,...piezas]:piezas;siguiente=datos.siguiente;
     if(resultados.length||siguiente){actual=resultados.length===1&&!siguiente?{tipo:'existente',pieza:resultados[0],cantidad:n}:null;pintar();return;}
     if(!permiteUpc||!codigoLeido(codigo)){actual=null;pintar();return;}
-    try{const ficha=await api('/api/manifiesto/'+codigo);actual={tipo:'nueva',id:uuid(),upc:codigo,ficha,cantidad:n,estado:piezaRopa(ficha)?'nuevo':grado};}
+    try{const ficha=datos.ficha??await api('/api/manifiesto/'+codigo);actual={tipo:'nueva',id:uuid(),upc:codigo,ficha,enCamino:!!datos.ficha,cantidad:n,estado:piezaRopa(ficha)?'nuevo':grado};}
     catch(e){if(e.status!==404)throw e;actual={tipo:'sin-registro',id:uuid(),upc:codigo,cantidad:n,estado:grado};}
     pintar();
   }
@@ -218,7 +219,11 @@ export async function iniciar(ctx) {
     if(actual.faltaEtiqueta&&p.estado_analisis==='listo')tarjeta.append(boton(`Imprimir ${k} ${k===1?'etiqueta':'etiquetas'}`,async()=>{const ok=await ctx.imprimir([p.id],new Map([[p.id,k]]));if(ok){actual.faltaEtiqueta=false;mensaje('Etiqueta enviada','etiqueta');}}));
   }
   function pintarImagen(a,foto,c){if(!a.imagen?.url){foto.textContent='Sin foto';return;}const img=nodo('img');img.src=a.imagen.url;img.alt=a.imagen.nombre||a.ficha.nombre;img.referrerPolicy='no-referrer';img.onerror=()=>{img.remove();foto.textContent='Sin foto';};foto.replaceChildren(img);if(!a.imagen.confirmada)c.append(boton('Es esta',async()=>{const r=await api(`/api/manifiesto/${a.upc}/imagen`,{url:a.imagen.url,tcin:a.imagen.tcin},'PUT');a.imagen=r.imagen;mensaje('Imagen guardada','ok');}));}
-  async function imagen(a,foto,c){try{const r=await api(`/api/manifiesto/${a.upc}/imagen`,{},'POST');a.imagen=r.imagen;if(flujo.actual()===a)pintarImagen(a,foto,c);}catch(e){if(flujo.actual()===a){foto.textContent='Sin foto';mensaje(e.message,'aviso');}}}
+  async function imagen(a,foto,c){try{
+    // La ficha trae la imagen guardada; si no, el resolver ya la busca en segundo plano (#491): se consulta sin repetir la búsqueda en Target y solo al final se pide (con su error).
+    let r={imagen:a.ficha.imagen};
+    for(const espera of r.imagen||!a.enCamino?[]:[2000,2000]){await new Promise(f=>setTimeout(f,espera));if(flujo.actual()!==a)return;r=await api(`/api/manifiesto/${a.upc}/imagen`);if(r.imagen)break;}
+    if(!r.imagen)r=await api(`/api/manifiesto/${a.upc}/imagen`,{},'POST');a.imagen=r.imagen;if(flujo.actual()===a)pintarImagen(a,foto,c);}catch(e){if(flujo.actual()===a){foto.textContent='Sin foto';mensaje(e.message,'aviso');}}}
   async function buscarDesconocida(a){
     if(a.buscando)return;
     const li=nodo('li'),retomar=boton(`Código ${a.upc} · buscando…`,()=>flujo.retomar(a));li.append(retomar);historia.prepend(li);

@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs';
 import { runInNewContext } from 'node:vm';
 import { crearCaptura, cambiosTarjeta, vigilarLectorEnCampo } from '../public/inventario-capturar.js';
 import { registroFoto, formularioPendiente } from '../public/foto-pendiente.js';
-import worker from './worker.ts';
+import worker, { permitidaParaVendedor } from './worker.ts';
 import { tienda, PRODUCTO, DUENO } from './prueba-d1.ts';
 import { crearLector } from '../public/lector.js';
 import { tsplEtiqueta } from '../public/etiquetera.js';
@@ -108,8 +108,7 @@ test('UPC de Ropa ignora el grado de MG y conserva el estado interno al sumar; M
 test('un UPC nuevo identificado como Ropa usa nuevo aunque MG tenga B o C seleccionado', async () => {
   let enviada: any;
   const flujo = crearCaptura({ enLinea: () => true, imprimir: async () => true, api: async (ruta, cuerpo) => {
-    if (ruta.startsWith('/api/piezas?')) return { piezas: [], siguiente: null };
-    if (ruta.startsWith('/api/manifiesto/')) return { nombre: 'Playera', categoria: 'ropa', precio: 12000 };
+    if (ruta.startsWith('/api/piezas/resolver?')) return { ficha: { nombre: 'Playera', categoria: 'ropa', precio: 12000 } };
     enviada = cuerpo; return { id: cuerpo.id, estado_analisis: 'listo' };
   } });
   flujo.estado('danado'); await flujo.leer('012345678905');
@@ -141,8 +140,8 @@ test('Capturar +1 usa rastro D1, un UUID por operación y exactamente una etique
 test('ED- y nombre no crean; UPC nuevo acumula alias, guarda con UUID estable y el precio lo da el servidor',async()=>{
   let id=0,falla=true;const llamadas:any[]=[],impresas:any[]=[];
   const api=async(ruta:string,cuerpo?:any)=>{
-    llamadas.push({ruta,cuerpo});if(ruta.startsWith('/api/piezas?'))return {piezas:[],siguiente:null};
-    if(ruta.startsWith('/api/manifiesto/'))return {nombre:'Lámpara',precio:24900};
+    llamadas.push({ruta,cuerpo});
+    if(ruta.startsWith('/api/piezas/resolver?')){if(/q=\d{12}$/.test(ruta))return {ficha:{nombre:'Lámpara',precio:24900}};throw Object.assign(new Error('Sin coincidencias.'),{status:404});}
     if(falla)throw new TypeError('Sin red');return {id:cuerpo.id,nombre:'Lámpara',stock:cuerpo.stock,precio:24900};
   };
   const flujo=crearCaptura({api,imprimir:async(id,n)=>{impresas.push({id,n});return true;},enLinea:()=>true,uuid:()=>`uuid-${++id}`});
@@ -150,6 +149,8 @@ test('ED- y nombre no crean; UPC nuevo acumula alias, guarda con UUID estable y 
   await flujo.leer('chamarra');assert.equal(flujo.actual(),null);
   assert.equal(llamadas.some(l=>l.ruta.startsWith('/api/manifiesto')),false);
   await flujo.leer('012345678905');await flujo.leer('12345678905');assert.equal(flujo.actual()!.cantidad,2);
+  assert.equal(llamadas.filter(l=>l.ruta.startsWith('/api/piezas')).length,3,'un viaje por lectura que llega al servidor; el reescaneo no pregunta');
+  assert.equal(llamadas.some(l=>l.ruta.startsWith('/api/manifiesto')),false,'la ficha viaja en el resolver');
   await assert.rejects(flujo.guardar(),/Sin red/);const uuid=flujo.actual()!.id;
   falla=false;await flujo.guardar();const guardados=llamadas.filter(l=>l.ruta==='/api/borradores/upc');
   assert.equal(guardados.length,2);assert.equal(guardados[0].cuerpo.id,uuid);assert.equal(guardados[1].cuerpo.id,uuid);
@@ -162,7 +163,7 @@ test('una búsqueda paginada no crea una captura ni consulta el manifiesto prema
   const flujo=crearCaptura({api:async ruta=>{rutas.push(ruta);return ++pagina===1?{piezas:[],siguiente:'cursor'}:{piezas:[{id:'vieja',stock:2,estado_fisico:'nuevo'}],siguiente:null};},imprimir:async()=>true,enLinea:()=>true});
   await flujo.leer('012345678905');assert.equal(flujo.actual(),null);
   await flujo.leer('012345678905',true);assert.equal(flujo.actual()!.pieza.id,'vieja');
-  assert.ok(rutas.every(r=>r.startsWith('/api/piezas?')));assert.match(rutas[1],/cursor=cursor/);
+  assert.match(rutas[0],/^\/api\/piezas\/resolver\?/);assert.match(rutas[1],/^\/api\/piezas\?.*cursor=cursor/);assert.equal(rutas.length,2);
 });
 
 test('cámara y USB priorizan la etiqueta numérica ED- frente a UPC y grado; otros UPC conservan su ruta',async(t0)=>{
@@ -182,7 +183,7 @@ test('cámara y USB priorizan la etiqueta numérica ED- frente a UPC y grado; ot
       assert.equal(flujo.actual()?.pieza.estado_fisico,'danado');
     }
   }
-  assert.ok(rutas.every(r=>r.startsWith('/api/piezas?')));
+  assert.ok(rutas.every(r=>r.startsWith('/api/piezas/resolver?')));
   assert.equal(t.db.prepare('select stock from productos where id=?').get(PRODUCTO)!.stock,stock);
 
   // Un UPC pendiente igual se guarda con su cantidad original antes de abrir la etiqueta.
@@ -198,17 +199,70 @@ test('cámara y USB priorizan la etiqueta numérica ED- frente a UPC y grado; ot
   t.db.prepare("update productos set codigo='ED-002318' where id=?").run(PRODUCTO);
   flujo.limpiar();await lector.recibir('123456','camara');assert.equal(flujo.actual()?.pieza.id,'otra');
   const consultas:string[]=[];
-  const nuevo=crearCaptura({api:async ruta=>{consultas.push(ruta);return ruta.startsWith('/api/piezas?')?{piezas:[],siguiente:null}:{nombre:'Lámpara',precio:24900};},imprimir:async()=>true,enLinea:()=>true});
+  const nuevo=crearCaptura({api:async ruta=>{consultas.push(ruta);return {ficha:{nombre:'Lámpara',precio:24900}};},imprimir:async()=>true,enLinea:()=>true});
   await crearLector({emitir:({codigo})=>nuevo.leer(codigo)}).recibir('012345678905','camara');
   assert.equal(nuevo.actual()?.tipo,'nueva');assert.equal(nuevo.actual()?.upc,'012345678905');
-  assert.deepEqual(consultas,['/api/piezas?q=012345678905','/api/manifiesto/012345678905']);
+  assert.deepEqual(consultas,['/api/piezas/resolver?q=012345678905']);
+});
+
+test('GET /api/piezas/resolver (#491): piezas, ficha del manifiesto o 404 en un viaje, con la imagen en segundo plano',async t0=>{
+  const t=manifiesto();t0.after(async()=>{await t.esperar();t.db.close();});
+  t.env.DEV_USUARIO='cap@prueba.mx';
+  const objetivo:string[]=[];let liberar=()=>{};const abierta=new Promise<void>(f=>liberar=f);
+  t0.mock.method(globalThis,'fetch',async(u:any)=>{objetivo.push(String(u));await abierta;return new Response('',{status:404});});
+  t.db.prepare("update manifiesto set tcin='12345678' where upc='191907910414'").run();
+  // Ficha: con ceros de más se normaliza; la búsqueda de la imagen no bloquea la respuesta (termina en waitUntil).
+  const f=await t.pedir('/api/piezas/resolver?q=0191907910414');
+  assert.equal(f.status,200);assert.equal(f.cuerpo.piezas,undefined);assert.equal(f.cuerpo.ficha.upc,'191907910414');
+  assert.deepEqual(f.cuerpo.ficha,(await t.pedir('/api/manifiesto/191907910414')).cuerpo,'es la ficha de /api/manifiesto');
+  assert.equal(objetivo.length,1,'Target sigue pendiente y la respuesta ya salió: no está en el camino crítico');liberar();
+  await t.esperar();assert.match(objetivo[0],/target\.com.*12345678/);
+  // Con la imagen ya guardada no vuelve a Target.
+  t.db.prepare("insert into imagenes_upc(upc,tcin,url,nombre,upc_fuente) values('191907910414','12345678','https://target.scene7.com/is/image/Target/GUEST_1','Lámpara','')").run();
+  objetivo.length=0;
+  const g=await t.pedir('/api/piezas/resolver?q=191907910414');await t.esperar();
+  assert.equal(g.cuerpo.ficha.imagen.url,'https://target.scene7.com/is/image/Target/GUEST_1');assert.equal(objetivo.length,0);
+  // Si hay piezas, solo piezas y nada de manifiesto.
+  t.db.prepare(`insert into productos(id,codigo,nombre,upc,stock,estado_analisis,semana_ingreso,creado_en,actualizado_en)
+    values('con-upc','ED-000777','Lámpara','191907910414',2,'listo','S43','','')`).run();
+  const p=await t.pedir('/api/piezas/resolver?q=191907910414');
+  assert.deepEqual(p.cuerpo.piezas.map((x:any)=>x.id),['con-upc']);assert.equal(p.cuerpo.ficha,undefined);
+  assert.deepEqual(p.cuerpo,(await t.pedir('/api/piezas?q=191907910414')).cuerpo,'mismo resultado que /api/piezas');
+  assert.deepEqual((await t.pedir('/api/piezas/resolver?q=777')).cuerpo.piezas.map((x:any)=>x.id),['con-upc'],'ED- corto');
+  // Ninguno: 404 (UPC desconocido, texto, ED- corto inexistente); q inválido sigue siendo 400 como /api/piezas.
+  for(const q of ['190000000009','chamarra','12']) assert.equal((await t.pedir('/api/piezas/resolver?q='+q)).status,404,q);
+  assert.equal((await t.pedir('/api/piezas/resolver?q=ab')).status,400);
+  assert.equal((await t.pedir('/api/piezas/resolver',{},'POST')).status,403,'solo GET');
+});
+
+test('GET /api/piezas/resolver (#491): FEP solo ve lo suyo y no recibe fichas; sin rol de inventario se niega',async t0=>{
+  const t=manifiesto();t0.after(async()=>{await t.esperar();t.db.close();});
+  const usuario=(correo:string,rol:string,activo=1)=>t.db.prepare("insert into usuarios(correo,roles,activo,editar_inventario,creado_en,actualizado_en) values(?,?,?,0,'','')").run(correo,rol,activo);
+  usuario('fep@prueba.mx','finanzas');usuario('caja@prueba.mx','cajero');usuario('baja@prueba.mx','capturista',0);
+  const pieza=(id:string,codigo:string,upc:string,propietario:string)=>t.db.prepare(`insert into productos(id,codigo,nombre,upc,stock,estado_analisis,semana_ingreso,propietario,creado_en,actualizado_en)
+    values(?,?,?,?,1,'listo','S43',?,'','')`).run(id,codigo,id,upc,propietario);
+  pieza('dolaron-1','ED-000801','900000000001','dolaron');pieza('fep-1','ED-000802','900000000002','fep');
+  const resolver=async(correo:string,q:string)=>{t.env.DEV_USUARIO=correo;return t.pedir('/api/piezas/resolver?q='+q);};
+  const ids=(r:any)=>r.cuerpo.piezas?.map((x:any)=>x.id);
+  assert.deepEqual(ids(await resolver('cap@prueba.mx','900000000001')),['dolaron-1']);
+  assert.equal((await resolver('cap@prueba.mx','900000000002')).status,404,'la tienda no ve la pieza de FEP');
+  assert.deepEqual(ids(await resolver('fep@prueba.mx','900000000002')),['fep-1']);
+  assert.deepEqual(ids(await resolver('fep@prueba.mx','802')),['fep-1']);
+  assert.equal((await resolver('fep@prueba.mx','900000000001')).status,404,'FEP no ve la pieza de la tienda');
+  assert.equal((await resolver('fep@prueba.mx','801')).status,404);
+  const ficha=await resolver('fep@prueba.mx','191907910414');
+  assert.equal(ficha.status,404,'FEP no tiene manifiesto');assert.equal(ficha.cuerpo.ficha,undefined);
+  assert.equal((await resolver('cap@prueba.mx','191907910414')).status,200,'la tienda sí');
+  assert.equal((await resolver('caja@prueba.mx','900000000001')).status,403,'cajero');
+  assert.equal((await resolver('baja@prueba.mx','900000000001')).status,403,'cuenta inactiva');
+  assert.equal((await resolver('nadie@prueba.mx','900000000001')).status,403,'sin cuenta');
+  assert.equal(permitidaParaVendedor('/api/piezas/resolver','GET'),true);assert.equal(permitidaParaVendedor('/api/piezas/resolver','POST'),false);
 });
 
 test('P2-1: leer otro código nunca guarda una tarjeta editada; sin edición guarda como siempre',async()=>{
   const llamadas:string[]=[];
   const api=async(ruta:string,cuerpo?:any)=>{llamadas.push(ruta);
-    if(ruta.startsWith('/api/piezas?'))return {piezas:[],siguiente:null};
-    if(ruta.startsWith('/api/manifiesto/'))return {nombre:'Lámpara',precio:24900};
+    if(ruta.startsWith('/api/piezas/resolver?'))return {ficha:{nombre:'Lámpara',precio:24900}};
     return {id:cuerpo.id,estado_analisis:'listo'};};
   const flujo=crearCaptura({api,enLinea:()=>true,imprimir:async()=>true});
   await flujo.leer('012345678905');
@@ -326,8 +380,7 @@ test('«N*código»: N piezas en la lectura (nueva, repetida o existente) con el
   const llamadas:string[]=[];let existente=false;
   const pieza={id:'p1',codigo:'ED-000007',upc:'012345678905',stock:4,estado_fisico:'nuevo',estado_analisis:'listo'};
   const api=async(ruta:string,cuerpo?:any)=>{llamadas.push(ruta);
-    if(ruta.startsWith('/api/piezas?'))return {piezas:existente?[pieza]:[],siguiente:null};
-    if(ruta.startsWith('/api/manifiesto/'))return {nombre:'Lámpara',precio:24900};
+    if(ruta.startsWith('/api/piezas/resolver?'))return existente?{piezas:[pieza],siguiente:null}:{ficha:{nombre:'Lámpara',precio:24900}};
     return {despues:pieza.stock+cuerpo.delta};};
   const impresas:number[]=[];
   const flujo=crearCaptura({api,imprimir:async(_id,n)=>{impresas.push(n);return true;},enLinea:()=>true});

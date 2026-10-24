@@ -88,7 +88,7 @@ async function piezasRepetidas(env: Env, url: URL, usuario: Usuario | null): Pro
     ? JSON.stringify([ultima.clave,ultima.estado_fisico,ultima.etiqueta,ultima.fila]) : null });
 }
 
-async function buscarPiezas(env: Env, url: URL, propietario: string): Promise<Response> {
+export async function buscarPiezas(env: Env, url: URL, propietario: string): Promise<Response> {
   const q = (url.searchParams.get('q') ?? '').trim();
   const ed = /^ed-?(\d{1,10})$/i.exec(q);
   const digitos = /^\d{1,14}$/.test(q);

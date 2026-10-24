@@ -46,7 +46,7 @@ import { cajeroEnTurno, listarCajeros, entrar, salir, ponerPin } from './cajeros
 import { registrarSocio, buscarSocio, buscarPorCodigo, basesListas, sentenciasDeVenta, saldo } from './dolarones.ts';
 import { registrarCorte, registrarRetiro, ultimoCorte, cajaDe } from './corte.ts';
 import { rutaGastos } from './gastos.ts';
-import { rutaPiezas, escribirExistencia, autorizarPrecio } from './piezas.ts';
+import { rutaPiezas, buscarPiezas, escribirExistencia, autorizarPrecio } from './piezas.ts';
 import { rutaSolicitudesPrecio, crearSolicitud } from './solicitudes-precio.ts';
 import { UPC_VISIBLE, MISMO_UPC, PIEZA_UPC, CAPTURA_SUMADA, conflictoCapturaSumada, capturaSumada, sumarCaptura, conflictoUpc, corregirUpc, upcValido, type PiezaUpc } from './upc-inventario.ts';
 import { rutaCamaraRemota } from './camara-remota.ts';
@@ -700,6 +700,28 @@ async function buscarEnManifiesto(upcCrudo: string, env: Env): Promise<Response>
     enlace: ficha.tcin ? `https://www.target.com/p/-/A-${ficha.tcin}` : '',
     imagen: await imagenGuardada(ficha.upc, env),
   });
+}
+
+/**
+ * Una sola lectura por código en Capturar (#491): piezas del propietario, si no la ficha del manifiesto
+ * (solo quien tiene /api/manifiesto) o 404. Reutiliza buscarPiezas y buscarEnManifiesto tal cual; si la
+ * imagen del UPC aún no está guardada, la busca en segundo plano (la misma ruta del POST de /imagen).
+ */
+async function resolverCodigo(env: Env, url: URL, usuario: Usuario | null, correo: string, ctx: ExecutionContext): Promise<Response> {
+  const encontradas = await buscarPiezas(env, url, propietarioDe(usuario));
+  if (!encontradas.ok) return encontradas;
+  const datos = await encontradas.clone().json() as { piezas: unknown[]; siguiente: string | null };
+  if (datos.piezas.length || datos.siguiente) return encontradas;
+  const q = (url.searchParams.get('q') ?? '').trim();
+  if (!/^\d{6,14}$/.test(q) || !puede(usuario, ['capturista'])) return json({ error: 'Sin coincidencias.' }, 404);
+  const respuesta = await buscarEnManifiesto(q, env);
+  if (!respuesta.ok) return respuesta;
+  const ficha = await respuesta.json() as { upc: string; imagen: unknown };
+  if (!ficha.imagen) {
+    const ruta = `/api/manifiesto/${ficha.upc}/imagen`;
+    ctx.waitUntil(rutaImagenUpc(new Request(new URL(ruta, url.origin), { method: 'POST' }), env, ruta, correo, ctx).catch(() => null));
+  }
+  return json({ ficha });
 }
 
 /** Recupera una captura sin repetir el alta ni reponer existencias. */
@@ -2539,6 +2561,9 @@ export default {
       if (pathname === '/api/solicitudes-precio' || pathname.startsWith('/api/solicitudes-precio/') || /^\/api\/piezas\/[^/]+\/solicitud-precio$/.test(pathname)) {
         // Aplicar un precio pasa por corregirBorrador: las mismas reglas que la corrección de la ficha.
         return await rutaSolicitudesPrecio(request, env, url, usuario!, (id, precio, esperado, solicitudId) => corregirBorrador(id, { precio }, env, usuario, undefined, esperado, correo, solicitudId));
+      }
+      if (pathname === '/api/piezas/resolver' && request.method === 'GET') {
+        return await resolverCodigo(env, url, await leerUsuario(env, correo), correo, ctx);
       }
       if (pathname === '/api/piezas' || pathname.startsWith('/api/piezas/')) {
         const respuesta = await rutaPiezas(request, env, url, await leerUsuario(env, correo), ctx);
