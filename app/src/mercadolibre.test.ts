@@ -651,6 +651,7 @@ test('venta en ML: un correo a los dueños por venta; sin existencias en D1, el 
     assert.equal(enviados[0].to, DUENO);
     assert.match(enviados[0].subject, new RegExp(`^Vendido en Mercado Libre: ${codigo}`));
     assert.match(enviados[0].text, /a \$299\.00[\s\S]*ventas\/9101\/detalle/);
+    assert.match(enviados[0].text, /Márcala atendida en https:\/\/escaner\.prueba\/avisos/);   // #429
     // Se vendió todo en tienda y luego llega otra venta de ML.
     t.db.prepare('update productos set stock = 0 where id = ?').run(id);
     t.sim.ordenes.set('9102', orden(9102, 'paid', [[itemId, 1]]));
@@ -659,6 +660,69 @@ test('venta en ML: un correo a los dueños por venta; sin existencias en D1, el 
     assert.equal(enviados.length, 2);
     assert.match(enviados[1].subject, /^¡Sin existencias!/);
     assert.match(enviados[1].text, /Cancela la venta en Mercado Libre/);
+  });
+});
+
+test('centro de avisos: la venta espera en /avisos hasta que un cajero la marca; si ML la cancela, vuelve (#429)', async () => {
+  await conML(async (t) => {
+    const { id, itemId } = await publicarPieza(t);
+    t.db.prepare(`insert into usuarios (correo, nombre, roles, activo, creado_en, actualizado_en) values
+      ('cajera@prueba.mx', 'Cajera', 'cajero', 1, '', ''), ('captura@prueba.mx', 'Captura', 'capturista', 1, '', '')`).run();
+    t.sim.ordenes.set('9201', orden(9201, 'paid', [[itemId, 1]]));
+    await avisar(t, '/orders/9201');
+    await t.esperar();
+
+    t.env.DEV_USUARIO = 'captura@prueba.mx';
+    assert.equal((await t.pedir('/api/avisos')).status, 403);
+    t.env.DEV_USUARIO = 'cajera@prueba.mx';
+    const lista = (await t.pedir('/api/avisos')).cuerpo.ventas_ml;
+    assert.equal(lista.length, 1);
+    assert.deepEqual([lista[0].order_id, lista[0].ml_item_id, lista[0].producto_id, lista[0].estado, lista[0].conflicto], ['9201', itemId, id, 'descontada', false]);
+
+    const marcar = () => t.pedir(`/api/avisos/ml/9201/${itemId}`, {});
+    assert.equal((await marcar()).status, 200);
+    assert.equal((await marcar()).status, 409);
+    assert.equal((await t.pedir('/api/avisos')).cuerpo.ventas_ml.length, 0);
+    assert.equal((t.db.prepare('select atendida_por from ml_ventas').get() as any).atendida_por, 'cajera@prueba.mx');
+
+    // ML la cancela despues de empacarla: vuelve a la lista para regresar la pieza al piso.
+    t.sim.ordenes.set('9201', orden(9201, 'cancelled', [[itemId, 1]]));
+    await avisar(t, '/orders/9201');
+    await t.esperar();
+    const otra = (await t.pedir('/api/avisos')).cuerpo.ventas_ml;
+    assert.deepEqual(otra.map((v: any) => v.estado), ['cancelada']);
+    assert.equal(stockDe(t, id), 3);
+  });
+});
+
+test('centro de avisos: la cancelación de un conflicto no vuelve; una venta a medias que ML cancela deja de pedir empacarla (#429)', async () => {
+  await conML(async (t) => {
+    const { id, itemId } = await publicarPieza(t);
+    t.db.prepare(`insert into usuarios (correo, nombre, roles, activo, creado_en, actualizado_en) values ('cajera@prueba.mx', 'Cajera', 'cajero', 1, '', '')`).run();
+    t.env.DEV_USUARIO = 'cajera@prueba.mx';
+    const pendientes = async () => (await t.pedir('/api/avisos')).cuerpo.ventas_ml.map((v: any) => [v.order_id, v.estado]);
+
+    // Sin existencias: la cajera cancela en ML como se le pidio; el aviso de ML no la regresa.
+    t.db.prepare('update productos set stock = 0 where id = ?').run(id);
+    t.sim.ordenes.set('9301', orden(9301, 'paid', [[itemId, 1]]));
+    await avisar(t, '/orders/9301');
+    await t.esperar();
+    assert.equal((await t.pedir(`/api/avisos/ml/9301/${itemId}`, {})).status, 200);
+    t.sim.ordenes.set('9301', orden(9301, 'cancelled', [[itemId, 1]]));
+    await avisar(t, '/orders/9301');
+    await t.esperar();
+    assert.deepEqual(await pendientes(), []);
+    assert.equal(stockDe(t, id), 0);
+
+    // El proceso murio entre el insert y el batch de pago (estado 'recibida', sin descontar) y ML la cancela.
+    t.db.prepare('update productos set stock = 3 where id = ?').run(id);
+    t.db.prepare(`insert into ml_ventas (order_id, ml_item_id, producto_id, cantidad, estado, recibido_en) values ('9302', ?, ?, 1, 'recibida', ?)`)
+      .run(itemId, id, new Date().toISOString());
+    t.sim.ordenes.set('9302', orden(9302, 'cancelled', [[itemId, 1]]));
+    await avisar(t, '/orders/9302');
+    await t.esperar();
+    assert.deepEqual(await pendientes(), [['9302', 'cancelada']]);
+    assert.equal(stockDe(t, id), 3);
   });
 });
 
