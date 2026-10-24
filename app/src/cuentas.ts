@@ -80,6 +80,7 @@ const PANTALLAS: Record<string, Rol[]> = {
   '/socios': CAJA,
   '/pedidos': CAJA,
   '/vender': CAJA,
+  '/avisos': CAJA,   // ventas de Mercado Libre por atender (Issue #429)
   '/tarjeta-bandas': TODOS,
   '/reportes': DUENO,
   '/mercadolibre': DUENO,
@@ -161,6 +162,7 @@ export function permiso(pathname: string, metodo: string): Regla {
   if (/^\/api\/solicitudes\/[^/]+$/.test(ruta) && metodo === 'GET') return CAJA;   // la caja ve como va la suya
   if (ruta === '/api/ventas' || ruta.startsWith('/api/ventas/')) return CAJA;
   if (ruta === '/api/pedidos' || ruta.startsWith('/api/pedidos/')) return CAJA;   // pedidos por WhatsApp (Issue #269, pedidos.ts)
+  if (ruta === '/api/avisos' || ruta.startsWith('/api/avisos/')) return CAJA;   // centro de avisos (Issue #429)
   if (ruta === '/api/impresiones' || ruta.startsWith('/api/impresiones/')) return CAJA;
 
   return DUENO;

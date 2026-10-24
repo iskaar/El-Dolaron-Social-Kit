@@ -14,6 +14,7 @@
     display: flex; align-items: center; gap: 14px; }
   header h1 { font-size: 17px; margin: 0; flex: 1; }
   header a { color: #FFD447; font-size: 13px; }
+  #avisos-ml:not([hidden]) { background: #D72B32; color: #fff; padding: 6px 12px; border-radius: 8px; font-size: 15px; font-weight: 700; text-decoration: none; }
   #estado-red { font-size: 13px; padding: 3px 10px; border-radius: 999px; background: #ffffff22; }
   #estado-red.sin-red { background: var(--rojo); }
   main { flex: 1; display: grid; grid-template-columns: 1fr 340px; gap: 16px; padding: 16px; min-height: 0; }
@@ -171,6 +172,7 @@ if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw-caja.js'
   <button id="abrir-corte" type="button">Corte</button>
   <a href="/socios">Alta de socios</a>
   <a href="/admin">Cola de revisión</a>
+  <a href="/avisos" id="avisos-ml" target="_blank" hidden></a>
   <button id="cerrar-sesion" type="button">Cerrar sesión</button>
 </header>
 
@@ -521,6 +523,19 @@ function promoAgotada() {
 notaVales();
 cargarConfigVales();
 setInterval(cargarConfigVales, 60000);
+
+/** Issue #429: ventas de Mercado Libre por atender. Sin red o sin PIN se queda como estaba. */
+async function contarAvisos() {
+  try {
+    const r = await fetch('/api/avisos');
+    if (!r.ok) return;
+    const n = (await r.json()).ventas_ml.length;
+    $('avisos-ml').hidden = n === 0;
+    $('avisos-ml').textContent = `📦 ${n} venta${n === 1 ? '' : 's'} de Mercado Libre por atender`;
+  } catch { /* sin red */ }
+}
+contarAvisos();
+setInterval(contarAvisos, 60000);
 const dolares = (centavos) => `${(centavos / 100).toLocaleString('es-MX')} D`;
 
 /* ---------- que caja es esta computadora (Issue #100) ---------- */
@@ -1147,7 +1162,10 @@ async function cargarPedido(folio) {
   if (!r.ok) return avisoRojo(cuerpo.error ?? `No se encontró el pedido P-${folio}.`);
   const p = cuerpo.pedido;
   if (cobrando || pedidoCargado) return;   // otro escaneo ganó mientras se esperaba
-  if (!(p.saldo > 0 && Date.parse(p.saldo_vence_en) > Date.now())) {
+  if (p.estado === 'apartado' && p.entrega === 'envio' && !p.liquidado_en)
+    return avisoRojo(`El paquete P-${p.folio} recibe piezas y abonos en /pedidos. Liquídalo ahí para programar su viernes de envío.`);
+  const envioPagado = p.estado === 'apartado' && p.entrega === 'envio' && p.liquidado_en;
+  if (!(p.saldo > 0 && (envioPagado || Date.parse(p.saldo_vence_en) > Date.now()))) {
     return avisoRojo(`El pedido P-${p.folio} ${p.saldo > 0 ? 'ya no tiene saldo vigente: el saldo venció' : 'no tiene saldo a favor'}.`);
   }
   const apartado = p.estado === 'apartado';

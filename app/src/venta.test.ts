@@ -3,7 +3,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { runInNewContext } from 'node:vm';
-import { totales, agregar, leerMultiplicador, efectivoAlcanza, saldoCanjeable, dolaronesGanados, maximoCanje, desfaseReloj, anticipoDePedido, envioDe, promoInauguracion, PROMO_DESCUENTO, PROMO_MINIMO } from '../public/venta.js';
+import { totales, agregar, leerMultiplicador, efectivoAlcanza, saldoCanjeable, dolaronesGanados, maximoCanje, desfaseReloj, anticipoDePedido, envioDe, anticipoMinimoDe, viernesDeEnvio, promoInauguracion, PROMO_DESCUENTO, PROMO_MINIMO } from '../public/venta.js';
 
 interface Linea { codigo: string; nombre: string; precio: number; cantidad: number }
 const pieza = (codigo: string, precio: number) => ({ codigo, nombre: codigo, precio });
@@ -143,6 +143,29 @@ test('envio de un pedido: $99 bajo $1,000 de piezas, gratis desde $1,000', () =>
   assert.equal(envioDe(999_99), 99_00);
   assert.equal(envioDe(1000_00), 0);
   assert.equal(envioDe(2500_00), 0);
+});
+
+test('apartado: 15% al peso hacia arriba sin mínimo; paquete abre con $100', () => {
+  for (const [subtotal, anticipo] of [[0, 0], [50_00, 8_00], [100_00, 15_00], [100_01, 16_00], [250_00, 38_00], [1000_00, 150_00]]) {
+    assert.equal(anticipoMinimoDe(subtotal, 'tienda'), anticipo);
+    assert.equal(anticipoMinimoDe(subtotal, 'envio'), 100_00);
+  }
+});
+
+test('viernes de envío: corte estricto del jueves 20:00, con UTC-6 fijo', () => {
+  for (const [instante, viernes] of [
+    ['2026-10-22T19:59:59.999-06:00', '2026-10-23'],
+    ['2026-10-22T20:00:00-06:00', '2026-10-30'],
+    ['2026-10-23T00:00:00-06:00', '2026-10-30'],
+    ['2026-10-23T19:00:00-06:00', '2026-10-30'],
+    ['2026-10-24T09:00:00-06:00', '2026-10-30'],
+    ['2026-10-25T09:00:00-06:00', '2026-10-30'],
+    ['2026-12-31T19:59:00-06:00', '2027-01-01'],
+    ['2026-12-31T20:00:00-06:00', '2027-01-08'],
+    // Incluso en fechas históricas con horario de verano se usa UTC-6 fijo.
+    ['2020-07-03T01:59:00Z', '2020-07-03'],
+    ['2020-07-03T02:00:00Z', '2020-07-10'],
+  ]) assert.equal(viernesDeEnvio(instante), viernes, instante);
 });
 
 // Cobro con pedido (Issue #269): el saldo solo existe en el servidor, asi que nunca se encola sin red.

@@ -43,7 +43,7 @@ import { sentenciasVale, buscarVale, valeDeVenta, valeUsadoEnVenta, reimprimirVa
 import { catalogoPublico, revisionCatalogo } from './catalogo.ts';
 import { rescatarPendientes, esCorridaSemanal, reportarHuerfanosR2 } from './huerfanos.ts';
 import { procesarRecortes, revisarRecortes, ajustarRecortesViejos, reiniciarRecorte, rutaRecortesAdmin } from './recortes.ts';
-import { rutaML, recibirNotificacion, conciliarSeguro, sincronizar, publicacionViva } from './mercadolibre.ts';
+import { rutaML, recibirNotificacion, conciliarSeguro, sincronizar, publicacionViva, avisosPendientes, atenderVentaML } from './mercadolibre.ts';
 import { pedirDescuento, validarDescuento, listarDescuentos, listarDuenos, promoDe, promoRestantes } from './descuentos.ts';
 import { listarAltoValor, revisarConteo, ajustarExistencia, listarAjustes } from './conteo.ts';
 import { rutaPedidos, vencerPedidos, sentenciasDePedido, saldoDe, enPedido } from './pedidos.ts';
@@ -1689,6 +1689,18 @@ async function registrarVenta(request: Request, env: Env, ctx: ExecutionContext,
     .bind(...idsPedidos)
     .all<ProductoVenta>();
   const productos = new Map(filas.map((f) => [f.id, f]));
+  if (venta.pedido_id) {
+    // El precio pactado al apartar pertenece a D1, nunca al precio que envíe el navegador.
+    const { results: pactadas } = await env.DB.prepare(`select l.producto_id, l.precio from pedido_lineas l
+      join pedidos p on p.id = l.pedido_id where p.id = ?1 and p.estado = 'apartado' and p.entrega = 'envio'
+      union all select '00000000-0000-4000-8000-000000000099', envio from pedidos
+      where id = ?1 and estado = 'apartado' and entrega = 'envio' and envio > 0`)
+      .bind(String(venta.pedido_id)).all<{ producto_id: string; precio: number }>();
+    for (const l of pactadas) {
+      const producto = productos.get(l.producto_id);
+      if (producto) productos.set(l.producto_id, { ...producto, precio: l.precio, precio_anterior: null });
+    }
+  }
 
   // Hora fiable de la venta (la de la caja): una hora futura no se acepta.
   const horaCaja = Date.parse(String(venta.creado_en ?? ''));
@@ -1760,7 +1772,7 @@ async function registrarVenta(request: Request, env: Env, ctx: ExecutionContext,
     return json({ error:vale.error }, vale.status);
   }
 
-  const conPedido = pedidoId ? await sentenciasDePedido(env, { pedidoId, ventaId: id, anticipo, ahora }) : null;
+  const conPedido = pedidoId ? await sentenciasDePedido(env, { pedidoId, ventaId: id, anticipo, ahora, total, lineas: preparado.lineas }) : null;
   if (conPedido && !conPedido.ok) {
     const concurrente = await reintento();
     if (concurrente) return concurrente;
@@ -1966,9 +1978,12 @@ async function corte(url: URL, env: Env): Promise<Response> {
        from ventas where creado_en >= ? and creado_en < ? and cancelada = 0 group by forma_pago
        union all
        select forma_pago, 0, sum(anticipo), 0 from pedidos where creado_en >= ? and creado_en < ? group by forma_pago
+       union all
+       select forma_pago, 0, sum(importe), 0 from pedido_movimientos
+       where tipo = 'abono' and creado_en >= ? and creado_en < ? group by forma_pago
      ) group by forma_pago`,
   )
-    .bind(...rango, ...rango)
+    .bind(...rango, ...rango, ...rango)
     .all<{ forma_pago: string; tickets: number; total: number; dolarones: number }>();
 
   const piezas = await env.DB.prepare(
@@ -2093,12 +2108,15 @@ async function reportes(url: URL, env: Env): Promise<Response> {
        union all
        select forma_pago, 0, coalesce(sum(anticipo), 0) from pedidos where creado_en >= ? group by forma_pago
        union all
+       select forma_pago, 0, coalesce(sum(importe), 0) from pedido_movimientos
+       where tipo = 'abono' and creado_en >= ? group by forma_pago
+       union all
        select 'dolarones', count(distinct case when neta - cobrado - anticipo_linea <> 0 then venta end),
          coalesce(sum(neta - cobrado - anticipo_linea), 0)
        from cobros where propietario = 'dolaron'
      ) group by forma_pago`,
   )
-    .bind(desde, desde)
+    .bind(desde, desde, desde)
     .all<{ forma_pago: string; tickets: number; total: number }>();
 
   const { results: ventasPorDia } = await env.DB.prepare(
@@ -2634,6 +2652,13 @@ export default {
       const resolver = pathname.match(/^\/api\/solicitudes\/([^/]+)\/resolver$/);
       if (resolver && request.method === 'POST') {
         return await resolverSolicitud(resolver[1], request, env, correo);
+      }
+
+      // Centro de avisos (Issue #429): ventas de ML por atender, a nombre del cajero que la marca.
+      if (pathname === '/api/avisos' && request.method === 'GET') return await avisosPendientes(env);
+      const atender = pathname.match(/^\/api\/avisos\/ml\/([^/]+)\/([^/]+)$/);
+      if (atender && request.method === 'POST') {
+        return await atenderVentaML(env, decodeURIComponent(atender[1]), decodeURIComponent(atender[2]), correo);
       }
 
       // Conteo de piezas de alto valor (Issue #219, conteo.ts). Contar: cualquier cuenta de piso; ajustar y el rastro: dueno.
