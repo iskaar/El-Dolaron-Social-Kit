@@ -30,8 +30,18 @@ export async function atenderAlta(request, env) {
   const { code, waba_id: waba } = await request.json().catch(() => ({}));
   if (typeof code !== 'string' || !code || (waba != null && !/^\d+$/.test(String(waba)))) return json({ error: 'falta code' }, 400);
 
-  const canje = await fetch(`${GRAPH}/oauth/access_token?${new URLSearchParams({ client_id: APP_ID, client_secret: env.META_APP_SECRET, code })}`);
-  const respuesta = await canje.json().catch(() => ({}));
+  // Issue #507: el 24/10 Meta rechazó el canje sin redirect_uri («redirect_uri is identical»). El
+  // código del JS SDK queda atado a un redirect_uri que la documentación no fija: se prueban en orden.
+  let canje;
+  let respuesta;
+  for (const redirect of [null, '', 'https://whatsapp.eldolaron.com/alta', 'https://whatsapp.eldolaron.com/']) {
+    const params = new URLSearchParams({ client_id: APP_ID, client_secret: env.META_APP_SECRET, code });
+    if (redirect !== null) params.set('redirect_uri', redirect);
+    canje = await fetch(`${GRAPH}/oauth/access_token?${params}`);
+    respuesta = await canje.json().catch(() => ({}));
+    if (canje.ok && respuesta?.access_token) break;
+    if (!/redirect_uri/i.test(respuesta?.error?.message ?? '')) break;
+  }
   const token = respuesta?.access_token;
   if (!canje.ok || !token) return json({ error: `canje del código: ${canje.status} ${respuesta?.error?.message ?? ''}`.trim() }, 502);
   const auth = { authorization: `Bearer ${token}` };
