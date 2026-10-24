@@ -1162,7 +1162,10 @@ async function cargarPedido(folio) {
   if (!r.ok) return avisoRojo(cuerpo.error ?? `No se encontró el pedido P-${folio}.`);
   const p = cuerpo.pedido;
   if (cobrando || pedidoCargado) return;   // otro escaneo ganó mientras se esperaba
-  if (!(p.saldo > 0 && Date.parse(p.saldo_vence_en) > Date.now())) {
+  if (p.estado === 'apartado' && p.entrega === 'envio' && !p.liquidado_en)
+    return avisoRojo(`El paquete P-${p.folio} recibe piezas y abonos en /pedidos. Liquídalo ahí para programar su viernes de envío.`);
+  const envioPagado = p.estado === 'apartado' && p.entrega === 'envio' && p.liquidado_en;
+  if (!(p.saldo > 0 && (envioPagado || Date.parse(p.saldo_vence_en) > Date.now()))) {
     return avisoRojo(`El pedido P-${p.folio} ${p.saldo > 0 ? 'ya no tiene saldo vigente: el saldo venció' : 'no tiene saldo a favor'}.`);
   }
   const apartado = p.estado === 'apartado';

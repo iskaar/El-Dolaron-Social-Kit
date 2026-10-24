@@ -85,11 +85,24 @@ export function anticipoDePedido(saldo, total, dolarones = 0) {
   return Math.max(0, Math.min(saldo, total - dolarones));
 }
 
-/** Pedidos por WhatsApp (Isaac, Issue #269): anticipo minimo y envio fijo, gratis desde $1,000 de piezas. */
-export const ANTICIPO_MINIMO = 100_00;
+/** Apartados (#434): 15% de las piezas al peso hacia arriba; $100 al abrir un paquete. */
+export const ANTICIPO_ENVIO = 100_00;
+export const ANTICIPO_PORCENTAJE = 15;
+export const anticipoMinimoDe = (subtotal, entrega) => entrega === 'envio'
+  ? ANTICIPO_ENVIO : Math.ceil(subtotal * ANTICIPO_PORCENTAJE / 100 / 100) * 100;
 export const ENVIO_COSTO = 99_00;
 export const ENVIO_GRATIS_DESDE = 1000_00;
 export const envioDe = (subtotal) => (subtotal > 0 && subtotal < ENVIO_GRATIS_DESDE ? ENVIO_COSTO : 0);
+
+/** Viernes en fecha de tienda (YYYY-MM-DD); el jueves a las 20:00 ya pasó el corte. UTC-6 fijo. */
+export function viernesDeEnvio(instante) {
+  const local = new Date(new Date(instante).getTime() - 6 * 3_600_000);
+  const dia = local.getUTCDay();
+  let dias = (5 - dia + 7) % 7;
+  if (dia === 5 || (dia === 4 && local.getUTCHours() >= 20)) dias += 7;
+  local.setUTCDate(local.getUTCDate() + dias);
+  return local.toISOString().slice(0, 10);
+}
 
 /**
  * 10 D por cada bloque completo de $100 pagado en dinero (decision de Isaac del
