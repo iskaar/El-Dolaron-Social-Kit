@@ -99,13 +99,19 @@ export default {
 /**
  * Responde a cada mensaje del cliente una sola vez. Un mensaje corto que cae en el FAQ (saludo,
  * horario, ubicación, promo) se contesta fijo, sin modelo (Issue #499); el resto va al asistente
- * si hay clave y el modelo contesta, y si no, al FAQ fijo. Si el asistente escala, la
- * conversacion queda pausada.
+ * si hay clave y el modelo contesta, y si no, al FAQ fijo. Si el asistente escala o el equipo
+ * contesta desde la app (eco de coexistencia, #507), la conversacion queda pausada.
  */
 async function responderMensajes(event, env) {
   if (!env.WHATSAPP_ACCESS_TOKEN || !env.WHATSAPP_PHONE_NUMBER_ID) return;
   for (const entrada of event.entry) {
     for (const cambio of entrada.changes ?? []) {
+      // Issue #507 (coexistencia): el equipo contestó desde la app WhatsApp Business; el bot se calla
+      // en ese chat la misma pausa que al escalar, para no contestar encima de una persona.
+      if (cambio.field === 'smb_message_echoes') {
+        for (const eco of cambio.value?.message_echoes ?? []) if (eco?.to) await pausar(env.EVENTS, eco.to);
+        continue;
+      }
       if (cambio.field !== 'messages') continue;
       for (const mensaje of cambio.value?.messages ?? []) {
         if ((mensaje.type !== 'text' && mensaje.type !== 'image') || !mensaje.id || !mensaje.from) continue;

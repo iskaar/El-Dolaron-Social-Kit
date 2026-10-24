@@ -346,3 +346,22 @@ test('escalar no deja al cliente sin respuesta todo el día y no encontrar una p
   assert.ok(PAUSA_SEGUNDOS <= 3600);
   assert.match(PROMPT, /no aparece lo que buscan[^\n]*no agregues ESCALAR/);
 });
+
+test('#507: un mensaje del equipo desde la app (eco de coexistencia) calla al bot en ese chat y en ningún otro', async () => {
+  const r = red('Claro, te ayudo.\nSCORE: 2');
+  try {
+    const env = entorno({}, { ANTHROPIC_API_KEY: 'clave' });
+    const eco = JSON.stringify({ object: 'whatsapp_business_account', entry: [{ changes: [{ field: 'smb_message_echoes', value: {
+      messaging_product: 'whatsapp', metadata: { phone_number_id: 'p' },
+      message_echoes: [{ from: '524445437754', to: '5214421234567', id: 'eco1', type: 'text', text: { body: 'Hola, sí la tenemos' } }],
+    } }] }] });
+    await worker.fetch(firmado(eco), env, ctx);
+    await Promise.all(pendientes.splice(0));
+    assert.equal(env.EVENTS.guardados.has('pausado:5214421234567'), true);
+    assert.equal(r.llamadas.meta.length + r.llamadas.modelo.length, 0);
+    await correr(env, [texto('m-eco1', '5214421234567', '¿Me la apartan para mañana en la tarde, por favor?')]);
+    assert.equal(r.llamadas.meta.length, 0);
+    await correr(env, [texto('m-eco2', '5214429999999', '¿Qué me recomiendan para un regalo de cumpleaños?')]);
+    assert.equal(r.llamadas.meta.length, 1);
+  } finally { r.restaurar(); }
+});
