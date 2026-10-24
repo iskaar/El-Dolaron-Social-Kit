@@ -15,22 +15,6 @@ import { PRENDAS_ROPA, PRECIOS_ROPA } from '../public/ropa.js';
 import { procesarColaRopa, rutaRopaAdmin } from './ropa-ia.ts';
 import { calcularPrecio, ajustarManual, esDestinoBanda, prefijoParaFamilia, MONTOS_BANDA, type Destino } from './precio.ts';
 import { efectivoAlcanza, promoInauguracion } from '../public/venta.js';
-
-/** Ventana de la promo de inauguracion; null si no esta configurada. */
-const promoDe = (env: Env) =>
-  env.PROMO_DESDE && env.PROMO_HASTA && Date.parse(env.PROMO_DESDE) < Date.parse(env.PROMO_HASTA)
-    ? { desde: env.PROMO_DESDE, hasta: env.PROMO_HASTA } : null;
-/**
- * Cuantas promos quedan del cupo (Issue #250, «a las primeras 100 personas»); null sin PROMO_CUPO = sin tope.
- * Un ticket cancelado devuelve su lugar.
- */
-async function promoRestantes(env: Env): Promise<number | null> {
-  const cupo = Number(env.PROMO_CUPO);
-  if (!env.PROMO_CUPO || !Number.isInteger(cupo) || cupo < 0) return null;
-  // ponytail: recorre ventas sin indice; un indice parcial en (promo) si la tabla crece a cientos de miles.
-  const fila = await env.DB.prepare('select count(*) as n from ventas where promo > 0 and cancelada = 0').first<{ n:number }>();
-  return Math.max(0, cupo - (fila?.n ?? 0));
-}
 import { semanaIngreso } from '../public/semana.js';
 import { tramoDeDias, TRAMOS_ANTIGUEDAD } from '../public/graficas.js';
 import { detalleVenta, cancelarPieza, devolverEnCupon, reimprimirCupon } from './devoluciones.ts';
@@ -60,7 +44,7 @@ import { catalogoPublico, revisionCatalogo } from './catalogo.ts';
 import { rescatarPendientes, esCorridaSemanal, reportarHuerfanosR2 } from './huerfanos.ts';
 import { procesarRecortes, revisarRecortes, ajustarRecortesViejos, reiniciarRecorte, rutaRecortesAdmin } from './recortes.ts';
 import { rutaML, recibirNotificacion, conciliarSeguro, sincronizar, publicacionViva } from './mercadolibre.ts';
-import { pedirDescuento, validarDescuento, listarDescuentos, listarDuenos } from './descuentos.ts';
+import { pedirDescuento, validarDescuento, listarDescuentos, listarDuenos, promoDe, promoRestantes } from './descuentos.ts';
 import { listarAltoValor, revisarConteo, ajustarExistencia, listarAjustes } from './conteo.ts';
 import { rutaPedidos, vencerPedidos, sentenciasDePedido, saldoDe, enPedido } from './pedidos.ts';
 
