@@ -43,6 +43,14 @@ export function promoInauguracion(subtotal, momento, promo) {
   return momento >= desde && momento < hasta && subtotal >= PROMO_MINIMO ? PROMO_DESCUENTO : 0;
 }
 
+/** Letrero de la caja (Isaac, 24/10): cuántas promos quedan mientras la ventana está abierta; '' fuera de ella. */
+export function letreroPromo(promo, momento) {
+  if (!promoInauguracion(PROMO_MINIMO, momento, promo)) return '';
+  const monto = `$${PROMO_DESCUENTO / 100}`;
+  if (promo.restantes == null) return `Promo ${monto} activa`;
+  return promo.restantes > 0 ? `Promos de ${monto}: quedan ${promo.restantes}` : `Promo de ${monto} agotada`;
+}
+
 /**
  * Minutos de desfase del reloj de la caja contra el del servidor (cabecera Date):
  * positivo adelantado, negativo atrasado, 0 si dentro de 10 min o ilegible.
