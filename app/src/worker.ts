@@ -43,7 +43,7 @@ import { sentenciasVale, buscarVale, valeDeVenta, valeUsadoEnVenta, reimprimirVa
 import { catalogoPublico, revisionCatalogo } from './catalogo.ts';
 import { rescatarPendientes, esCorridaSemanal, reportarHuerfanosR2 } from './huerfanos.ts';
 import { procesarRecortes, revisarRecortes, ajustarRecortesViejos, reiniciarRecorte, rutaRecortesAdmin } from './recortes.ts';
-import { rutaML, recibirNotificacion, conciliarSeguro, sincronizar, publicacionViva } from './mercadolibre.ts';
+import { rutaML, recibirNotificacion, conciliarSeguro, sincronizar, publicacionViva, avisosPendientes, atenderVentaML } from './mercadolibre.ts';
 import { pedirDescuento, validarDescuento, listarDescuentos, listarDuenos, promoDe, promoRestantes } from './descuentos.ts';
 import { listarAltoValor, revisarConteo, ajustarExistencia, listarAjustes } from './conteo.ts';
 import { rutaPedidos, vencerPedidos, sentenciasDePedido, saldoDe, enPedido } from './pedidos.ts';
@@ -2649,6 +2649,13 @@ export default {
       const resolver = pathname.match(/^\/api\/solicitudes\/([^/]+)\/resolver$/);
       if (resolver && request.method === 'POST') {
         return await resolverSolicitud(resolver[1], request, env, correo);
+      }
+
+      // Centro de avisos (Issue #429): ventas de ML por atender, a nombre del cajero que la marca.
+      if (pathname === '/api/avisos' && request.method === 'GET') return await avisosPendientes(env);
+      const atender = pathname.match(/^\/api\/avisos\/ml\/([^/]+)\/([^/]+)$/);
+      if (atender && request.method === 'POST') {
+        return await atenderVentaML(env, decodeURIComponent(atender[1]), decodeURIComponent(atender[2]), correo);
       }
 
       // Conteo de piezas de alto valor (Issue #219, conteo.ts). Contar: cualquier cuenta de piso; ajustar y el rastro: dueno.
