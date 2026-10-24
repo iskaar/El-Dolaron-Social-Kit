@@ -8,6 +8,18 @@ Callback público: **https://whatsapp.eldolaron.com/webhook**. Worker `el-dolaro
 2. En Cloudflare → Workers & Pages → `el-dolaron-whatsapp` → Settings → Variables and Secrets, agregar **META_APP_SECRET** como secreto cifrado. Su valor es el App Secret de la misma aplicación Meta (App settings → Basic); no es el access token ni el verify token. No enviarlo por chat ni guardarlo en git.
 3. Suscribir el campo **messages** en Meta (y **smb_message_echoes** cuando el número esté en coexistencia con la app WhatsApp Business, Issue #507: los mensajes que el equipo manda desde la app pausan al asistente en ese chat) y enviar un mensaje de prueba. La suscripción de la aplicación al WhatsApp Business Account también debe estar activa en Meta.
 
+### Alta de coexistencia (Issue #507)
+
+`WHATSAPP_PHONE_NUMBER_ID` acepta varios IDs separados por coma; el Worker contesta desde el número que recibió el mensaje y solo si está en la lista (el primero es el de siempre).
+
+1. App Dashboard → Facebook Login for Business: crear una configuración con la plantilla «WhatsApp Embedded Signup»; en Settings activar «Login with the JavaScript SDK» y poner `https://whatsapp.eldolaron.com` en Allowed domains y Valid OAuth redirect URIs.
+2. Poner el ID de la configuración en `vars.ALTA_CONFIG_ID` de `wrangler.jsonc` y desplegar. Sin esa variable `/alta` responde 404.
+3. Fuera de horario, con el teléfono del 444 y WhatsApp Business ≥ 2.24.17: abrir `https://whatsapp.eldolaron.com/alta`, escoger el portafolio 171469850461227 y «conectar la cuenta existente de la app». La página muestra la cuenta nueva y el ID del número; el Worker ya suscribió la app a esa cuenta.
+4. Business Settings → usuarios del sistema: dar al usuario del token del Worker control sobre la cuenta nueva. Suscribir `smb_message_echoes` y `account_update`.
+5. Añadir el ID del 444 a `WHATSAPP_PHONE_NUMBER_ID`, quitar `ALTA_CONFIG_ID` y desplegar.
+
+No se sincronizan contactos ni historial: el asistente no los usa, y la sincronización solo se puede pedir en las 24 h siguientes al alta. Al conectar se desvinculan los dispositivos enlazados; WhatsApp para Windows deja de funcionar con ese número, WhatsApp Web sí se puede volver a vincular.
+
 La verificación GET funciona con `WHATSAPP_VERIFY_TOKEN`. POST exige la firma `x-hub-signature-256`, comprobada con `META_APP_SECRET`. Sin App Secret responde 503; no acepta ni confirma mensajes sin autenticar.
 
 ## Alcance y retención
