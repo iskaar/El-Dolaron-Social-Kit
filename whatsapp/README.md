@@ -6,7 +6,7 @@ Callback público: **https://whatsapp.eldolaron.com/webhook**. Worker `el-dolaro
 
 1. En WhatsApp → Configuration → Webhook, ingresar la URL anterior y el valor de `WHATSAPP_VERIFY_TOKEN` entregado al propietario fuera de git. Pulsar **Verify and save**.
 2. En Cloudflare → Workers & Pages → `el-dolaron-whatsapp` → Settings → Variables and Secrets, agregar **META_APP_SECRET** como secreto cifrado. Su valor es el App Secret de la misma aplicación Meta (App settings → Basic); no es el access token ni el verify token. No enviarlo por chat ni guardarlo en git.
-3. Suscribir el campo **messages** en Meta y enviar un mensaje de prueba. La suscripción de la aplicación al WhatsApp Business Account también debe estar activa en Meta.
+3. Suscribir el campo **messages** en Meta (y **smb_message_echoes** cuando el número esté en coexistencia con la app WhatsApp Business, Issue #507: los mensajes que el equipo manda desde la app pausan al asistente en ese chat) y enviar un mensaje de prueba. La suscripción de la aplicación al WhatsApp Business Account también debe estar activa en Meta.
 
 La verificación GET funciona con `WHATSAPP_VERIFY_TOKEN`. POST exige la firma `x-hub-signature-256`, comprobada con `META_APP_SECRET`. Sin App Secret responde 503; no acepta ni confirma mensajes sin autenticar.
 
