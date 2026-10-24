@@ -7,15 +7,22 @@ import { respuestaPara } from './respuestas.mjs';
 test('preguntas del FAQ reciben la respuesta aprobada, con o sin acentos', () => {
   assert.match(respuestaPara('¿A qué hora abren?'), /11 a\. m\. a 8 p\. m\./);
   assert.match(respuestaPara('cual es su telefono'), /444 543 7754/);
-  assert.match(respuestaPara('Hacen envíos a domicilio?'), /solo en sucursal/);
-  assert.match(respuestaPara('hola buenas tardes'), /gracias por escribir/);
+  assert.match(respuestaPara('Hacen envíos a domicilio?'), /el equipo te confirma/);
+  assert.match(respuestaPara('hola buenas tardes'), /gracias por escribir.*inauguración/);
 });
 
-test('lo no confirmado (ubicacion, precios) recibe el mensaje de respaldo con telefono y horario', () => {
-  for (const pregunta of ['¿Dónde están?', 'cuanto cuesta el sofa', 'tienen promocion']) {
-    assert.match(respuestaPara(pregunta), /no tengo esa información.*444 543 7754/);
+test('la gran inauguracion, la ubicacion y el apartado responden con los datos confirmados (#497)', () => {
+  for (const pregunta of ['¿A qué hora es la inauguración?', 'tienen promocion', 'cómo funciona el cupón de 100 pesos', 'hay descuento?']) {
+    assert.match(respuestaPara(pregunta), /sábado 24 y domingo 25.*primeras 100 compras de \$300.*\$100 en caja/);
   }
+  assert.match(respuestaPara('¿Dónde están?'), /Jardín Hidalgo 129/);
+  assert.match(respuestaPara('me lo pueden apartar'), /15 %.*7 días/);
+});
+
+test('lo no confirmado (precios, envios) recibe respaldo o escala al equipo', () => {
+  assert.match(respuestaPara('cuanto cuesta el sofa'), /no tengo esa información.*444 543 7754/);
   assert.match(respuestaPara(undefined), /no tengo esa información/);
+  assert.doesNotMatch(respuestaPara('hacen envios'), /no hacemos/);
 });
 
 const endpoint = 'https://whatsapp.eldolaron.com/webhook';

@@ -72,8 +72,14 @@ test('mensajes de cierre no se contestan con historial', () => {
 test('el prompt solo afirma los datos aprobados', () => {
   assert.match(PROMPT, /444 543 7754/);
   assert.match(PROMPT, /11:00 a 20:00/);
-  assert.match(PROMPT, /solo en sucursal/);
+  assert.match(PROMPT, /ventas son en sucursal/);
   assert.match(PROMPT, /no inventes nada/);
+  // Issue #497: la gran inauguración, la ubicación y el apartado son datos aprobados; los envíos se escalan.
+  assert.match(PROMPT, /sábado 24 y domingo 25 de octubre de 2026/);
+  assert.match(PROMPT, /primeras 100 compras de \$300 o más.*\$100 en caja/);
+  assert.match(PROMPT, /Jardín Hidalgo 129/);
+  assert.match(PROMPT, /15 % del valor.*7 días/);
+  assert.match(PROMPT, /envíos.*no afirmes ni niegues/);
 });
 
 test('llama al modelo con el prompt y el historial, y propaga los errores', async () => {
