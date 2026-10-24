@@ -407,6 +407,20 @@ test('promo con cupo (Issue #250): en linea se rechaza al agotarse, sin red se r
   assert.equal(await restantes(), 1);
 });
 
+test('promo con cupo: las ventas con promo de otra ventana (preinauguracion) no gastan el cupo', async () => {
+  const { db, env, venta, pedir, ana } = await montar();
+  Object.assign(env, { PROMO_DESDE: '2026-01-01T06:00:00Z', PROMO_HASTA: '2026-01-08T06:00:00Z', PROMO_CUPO: '2' });
+  const restantes = async () => (await pedir('/api/vales/config', undefined, 'GET', ana)).cuerpo.promo.restantes;
+  const primera = await venta({ creado_en: '2026-01-03T20:00:00Z', promo: 10000 }, 2);
+  assert.equal(await restantes(), 1);
+  // La misma venta, movida a antes de la ventana (como las de la promo anterior), ya no cuenta.
+  db.prepare(`update ventas set creado_en = '2025-12-20T18:00:00.000Z' where id = ?`).run(primera.cuerpo.id);
+  assert.equal(await restantes(), 2);
+  // Borde: el primer milisegundo de la ventana si cuenta.
+  db.prepare(`update ventas set creado_en = '2026-01-01T06:00:00.000Z' where id = ?`).run(primera.cuerpo.id);
+  assert.equal(await restantes(), 1);
+});
+
 test('/reportes: con promo, descuento aprobado, pieza devuelta y ticket cancelado, categorias y top suman lo mismo que el total', async () => {
   const { db, env, pedirDescuento, venta, pedir, ana, como } = await montar();
   const Q = crypto.randomUUID();

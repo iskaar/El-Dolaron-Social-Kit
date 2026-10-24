@@ -109,9 +109,10 @@ test('#499 B.4: código, foto y enlace solo de piezas del catálogo público, y 
   } finally { t.db.close(); }
 });
 
+// Venta dentro de las ventanas de promo de estas pruebas: el cupo solo cuenta las de la ventana vigente.
 const venta = (t: ReturnType<typeof tienda>, promo: number, cancelada = 0) =>
   t.db.prepare(`insert into ventas (id, total, forma_pago, efectivo, cambio, creado_en, registrado_en, promo, cancelada)
-    values (?, 30000, 'efectivo', 30000, 0, '', '', ?, ?)`).run(crypto.randomUUID(), promo, cancelada);
+    values (?, 30000, 'efectivo', 30000, 0, '2026-10-24T18:00:00.000Z', '', ?, ?)`).run(crypto.randomUUID(), promo, cancelada);
 
 test('#499: cupos de la promo con el mismo cupo y ventana que la caja', async () => {
   const t = abrir();
