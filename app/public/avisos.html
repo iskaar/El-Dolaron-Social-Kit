@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>El Dolarón — avisos</title>
+<style>
+  :root { --azul:#16366B; --rojo:#D72B32; --verde:#1f7a4d; --amarillo:#FFD447; --linea:#dfe3ea; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: #f4f6f9; color: #1a1f2b; font-family: system-ui, -apple-system, sans-serif; }
+  header { background: var(--azul); color: #fff; padding: 10px 18px; display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+  header h1 { font-size: 17px; margin: 0; flex: 1; }
+  header a { color: var(--amarillo); font-size: 13px; }
+  main { max-width: 720px; margin: 0 auto; padding: 16px; display: grid; gap: 12px; }
+  h2 { margin: 0; font-size: 18px; color: var(--azul); }
+  .nota { font-size: 13px; color: #5b6478; }
+  .venta { background: #fff; border: 1px solid var(--linea); border-left: 6px solid var(--azul); border-radius: 12px;
+    padding: 12px; display: grid; grid-template-columns: 72px 1fr; gap: 12px; align-items: start; }
+  .venta.mal { border-left-color: var(--rojo); }
+  .venta.cancelada { border-left-color: #78839a; }
+  .venta img { width: 72px; height: 72px; object-fit: cover; border-radius: 8px; background: #eef1f6; }
+  .nombre { font-weight: 700; font-size: 16px; }
+  .codigo { font-family: ui-monospace, monospace; }
+  .accion { margin-top: 6px; font-weight: 700; color: var(--azul); }
+  .venta.mal .accion { color: var(--rojo); }
+  .botones { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
+  button, a.boton { font: inherit; cursor: pointer; border: 1px solid var(--azul); background: #fff; color: var(--azul);
+    border-radius: 10px; padding: 0 14px; min-height: 44px; font-size: 15px; font-weight: 700;
+    display: inline-flex; align-items: center; text-decoration: none; }
+  button.relleno { background: var(--azul); color: #fff; }
+  button:disabled { opacity: .5; cursor: wait; }
+  button:focus-visible, a:focus-visible { outline: 3px solid var(--amarillo); outline-offset: 2px; }
+  .vacio { background: #fff; border: 1px solid var(--linea); border-radius: 12px; padding: 24px; text-align: center; color: #5b6478; }
+  .error { color: var(--rojo); font-size: 14px; min-height: 18px; }
+</style>
+<script src="/cajero.js"></script>
+</head>
+<body>
+<header><h1>Avisos</h1><a href="/caja">Caja</a><a href="/">Inicio</a></header>
+<main>
+  <h2>Ventas de Mercado Libre por atender</h2>
+  <div class="nota">Cada venta se queda aquí hasta que alguien la marca. Se actualiza sola cada 30 segundos.</div>
+  <div class="error" id="error" role="alert"></div>
+  <div id="lista" aria-live="polite"></div>
+</main>
+<script type="module">
+// Centro de avisos (Issue #429). Ninguna venta de ML se pierde: queda a la
+// vista hasta que un cajero la marca, y el servidor guarda quien y cuando.
+const $ = (id) => document.getElementById(id);
+const h = (tag, attrs = {}, ...hijos) => {
+  const el = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs)) if (v != null) el.setAttribute(k, v);
+  el.append(...hijos.flat().filter((x) => x != null));
+  return el;
+};
+const fecha = (iso) => new Date(iso).toLocaleString('es-MX', { dateStyle: 'medium', timeStyle: 'short' });
+
+/** Qué hacer con la venta y cómo se llama el botón para marcarla. */
+function queHacer(v) {
+  if (v.estado === 'cancelada' && v.conflicto) return ['cancelada', 'Mercado Libre ya canceló esta venta. No había pieza que apartar: no hay nada que enviar.', 'Enterado'];
+  if (v.estado === 'cancelada') return ['cancelada', 'Mercado Libre canceló esta venta: no la envíes y regresa la pieza al piso.', 'Ya la regresé'];
+  if (v.conflicto) return ['mal', 'No había existencia en tienda: cancela la venta en Mercado Libre y avisa al comprador.', 'Ya la cancelé en ML'];
+  return ['', 'Sácala del piso de venta y empácala para el envío.', 'Ya la aparté'];
+}
+
+async function atender(v, boton) {
+  boton.disabled = true;
+  $('error').textContent = '';
+  try {
+    const r = await fetch(`/api/avisos/ml/${encodeURIComponent(v.order_id)}/${encodeURIComponent(v.ml_item_id)}`, { method: 'POST' });
+    // 409: otra caja la marcó primero; la lista nueva ya no la trae.
+    if (!r.ok && r.status !== 409) throw new Error((await r.json().catch(() => ({}))).error ?? `Error ${r.status}`);
+  } catch (error) {
+    $('error').textContent = `No se pudo marcar: ${error.message}. Intenta otra vez.`;
+  }
+  await cargar();
+}
+
+function fila(v) {
+  const [clase, texto, etiqueta] = queHacer(v);
+  const boton = h('button', { type: 'button', class: 'relleno' }, etiqueta);
+  boton.addEventListener('click', () => atender(v, boton));
+  return h('div', { class: `venta ${clase}` },
+    h('img', { src: `/api/foto/${encodeURIComponent(v.producto_id)}`, alt: '', loading: 'lazy', onerror: "this.style.visibility='hidden'" }),
+    h('div', {},
+      h('div', { class: 'nombre' }, h('span', { class: 'codigo' }, v.codigo), ' · ', v.nombre),
+      h('div', { class: 'nota' }, `${v.cantidad} ${v.cantidad === 1 ? 'pieza' : 'piezas'} · ${fecha(v.recibido_en)} · Orden ${v.order_id}`),
+      h('div', { class: 'accion' }, texto),
+      h('div', { class: 'botones' }, boton,
+        h('a', { class: 'boton', href: `https://www.mercadolibre.com.mx/ventas/${encodeURIComponent(v.order_id)}/detalle`,
+          target: '_blank', rel: 'noopener noreferrer' }, 'Ver en ML ↗'))));
+}
+
+async function cargar() {
+  try {
+    const r = await fetch('/api/avisos');
+    if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error ?? `Error ${r.status}`);
+    const { ventas_ml } = await r.json();
+    $('lista').replaceChildren(...(ventas_ml.length ? ventas_ml.map(fila)
+      : [h('div', { class: 'vacio' }, 'Nada por atender.')]));
+    document.title = ventas_ml.length ? `(${ventas_ml.length}) El Dolarón — avisos` : 'El Dolarón — avisos';
+  } catch (error) {
+    $('error').textContent = `No se pudo leer la lista (${error.message}). Se reintenta sola.`;
+  }
+}
+cargar();
+setInterval(cargar, 30_000);
+</script>
+</body>
+</html>

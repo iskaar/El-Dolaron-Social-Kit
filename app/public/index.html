@@ -20,13 +20,17 @@
   a.tool:active { background: #eef1f6; }
   a.tool b { display: block; font-size: 17px; color: var(--azul); }
   a.tool span { display: block; font-size: 13px; color: #5b6478; margin-top: 4px; }
+  a.tool.urgente { border: 2px solid var(--rojo); }
+  a.tool.urgente b, a.tool.urgente span { color: var(--rojo); }
 </style>
 </head>
 <body>
 <header><h1>El Dolarón</h1><span id="quien"></span><button id="salir" type="button">Cerrar sesión</button></header>
 <main>
+  <a class="tool" href="/avisos" id="avisos" data-roles="cajero"><b>Avisos</b><span>Ventas de Mercado Libre por atender</span></a>
   <a class="tool" href="/caja" data-roles="cajero"><b>Caja</b><span>Cobrar ventas, cancelar, corte del día</span></a>
   <a class="tool" href="/pedidos" data-roles="cajero"><b>Pedidos por WhatsApp</b><span>Apartar piezas con anticipo, avisar al cliente, guías de envío y saldos a favor</span></a>
+  <a class="tool" href="/vender" data-roles="cajero computadora"><b>Vender por WhatsApp</b><span>Compartir fotos con precio y código, anotar quién la quiere y pasar al apartado</span></a>
   <a class="tool" href="/admin" data-roles="capturista"><b>Ajustes</b><span>Configuración, catálogo público, ropa IA y recortes</span></a>
   <a class="tool" href="/inventario" data-roles="capturista finanzas"><b>Inventario</b><span>Capturar, buscar, revisar e imprimir piezas</span></a>
   <a class="tool" href="/pieza" data-roles="capturista finanzas"><b>Buscar pieza</b><span>Consultar foto, precio, existencia e historial por código o nombre</span></a>
@@ -58,6 +62,16 @@ for (const a of document.querySelectorAll('a.tool')) {
 }
 document.getElementById('salir').onclick = async () => (await import('/cerrar-sesion.js')).cerrarSesion();
 document.getElementById('quien').textContent = `${usuario?.nombre || correo} · ${roles.join(', ')}`;
+// Issue #429: cuántas ventas de ML esperan a alguien.
+const avisos = document.getElementById('avisos');
+if (!avisos.hidden) {
+  const r = await fetch('/api/avisos').catch(() => null);
+  const n = r?.ok ? (await r.json()).ventas_ml.length : 0;
+  if (n > 0) {
+    avisos.classList.add('urgente');
+    avisos.querySelector('span').textContent = `📦 ${n} venta${n === 1 ? '' : 's'} de Mercado Libre por atender`;
+  }
+}
 </script>
 </body>
 </html>

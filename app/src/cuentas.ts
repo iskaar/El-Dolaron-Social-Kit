@@ -79,6 +79,8 @@ const PANTALLAS: Record<string, Rol[]> = {
   '/caja': CAJA,
   '/socios': CAJA,
   '/pedidos': CAJA,
+  '/vender': CAJA,
+  '/avisos': CAJA,   // ventas de Mercado Libre por atender (Issue #429)
   '/tarjeta-bandas': TODOS,
   '/reportes': DUENO,
   '/mercadolibre': DUENO,
@@ -101,6 +103,7 @@ export function permiso(pathname: string, metodo: string): Regla {
   // Issue #281: cualquier cuenta que entro puede reportar un error de su pantalla, tambien la caja sin PIN.
   if (ruta === '/api/errores' && metodo === 'POST') return 'cuenta';
   if (ruta === '/marketplace-redes.png') return CAPTURA;
+  if (ruta === '/vender.js') return CAJA;
   // Codigo de las pantallas, sin datos: el permiso se cobra en la pantalla y en la API.
   if (!ruta.startsWith('/api/') && /\.(js|css|png|svg|ico)$/.test(ruta)) return 'cuenta';
 
@@ -116,6 +119,7 @@ export function permiso(pathname: string, metodo: string): Regla {
   if (ruta === '/api/config') return metodo === 'GET' ? CAPTURA_FEP : DUENO;
   // Ropa de El Dolarón: FEP (finanzas) no ve ni renombra piezas ajenas (Issue #318).
   if (ruta === '/api/ropa-ia' || ruta.startsWith('/api/ropa-ia/')) return CAPTURA;
+  if (metodo === 'GET' && /^\/api\/recortes\/[^/]+\/imagen$/.test(ruta)) return [...CAPTURA, ...CAJA];
   if (ruta === '/api/recortes' || ruta.startsWith('/api/recortes/')) return CAPTURA;
   if (ruta === '/api/familias') return metodo === 'GET' ? TODOS : DUENO;
   if (ruta === '/api/borradores/manual') return DUENO;   // captura sin foto (Issue #115)
@@ -137,6 +141,7 @@ export function permiso(pathname: string, metodo: string): Regla {
   if (metodo === 'POST' && /^\/api\/piezas\/[^/]+\/solicitud-precio$/.test(ruta)) return CAPTURA;
   if (ruta === '/api/marketplace' || /^\/api\/marketplace\/foto\/[^/]+$/.test(ruta)) return CAPTURA;
   if (ruta === '/api/catalogo') return CAJA;
+  if (ruta === '/api/vender' || ruta === '/api/interesados' || ruta.startsWith('/api/interesados/')) return CAJA;
   if (ruta === '/api/socios') return CAJA;
   if (ruta === '/api/vales/config' && metodo === 'GET') return CAJA;
   if (ruta === '/api/vales/buscar' && metodo === 'POST') return CAJA;
@@ -157,6 +162,7 @@ export function permiso(pathname: string, metodo: string): Regla {
   if (/^\/api\/solicitudes\/[^/]+$/.test(ruta) && metodo === 'GET') return CAJA;   // la caja ve como va la suya
   if (ruta === '/api/ventas' || ruta.startsWith('/api/ventas/')) return CAJA;
   if (ruta === '/api/pedidos' || ruta.startsWith('/api/pedidos/')) return CAJA;   // pedidos por WhatsApp (Issue #269, pedidos.ts)
+  if (ruta === '/api/avisos' || ruta.startsWith('/api/avisos/')) return CAJA;   // centro de avisos (Issue #429)
   if (ruta === '/api/impresiones' || ruta.startsWith('/api/impresiones/')) return CAJA;
 
   return DUENO;
