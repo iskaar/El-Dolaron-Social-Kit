@@ -194,6 +194,7 @@ if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw-caja.js'
     <div id="total">$0</div>
     <div id="piezas">0 piezas</div>
     <div id="a-pagar"></div>
+    <button id="quitar-promo" type="button" hidden>Ya usó la promo: cobrar sin ella</button>
 
     <button id="pedir-descuento" type="button" hidden>Pedir descuento</button>
     <div id="descuento-form" hidden>
@@ -468,6 +469,8 @@ const pesos = (centavos) => `$${(centavos / 100).toLocaleString('es-MX')}`;
 
 let catalogo = new Map();
 let lineas = [];
+// La promo es una por cliente (Isaac, 24/10): si el cajero reconoce a alguien que ya la uso, la quita de este ticket.
+let sinPromo = false;
 // Un solo id por ticket: doble clic en Cobrar, o un reintento tras un fallo de
 // red, reusan el mismo id en vez de crear una segunda venta. Cambiar el ticket
 // (agregar, quitar, cancelar) lo invalida: eso ya es una venta distinta.
@@ -525,6 +528,7 @@ function promoAgotada() {
 }
 notaVales();
 cargarConfigVales();
+$('quitar-promo').addEventListener('click', () => { sinPromo = !sinPromo; pintar(); });
 setInterval(cargarConfigVales, 60000);
 
 /** Issue #429: ventas de Mercado Libre por atender. Sin red o sin PIN se queda como estaba. */
@@ -720,6 +724,8 @@ function pintar() {
   const efectivo = Math.round(Number($('efectivo').value || 0) * 100);
   const usados = dolaronesPedidos();
   const promo = promoActual();
+  $('quitar-promo').hidden = !promoActual(true);
+  $('quitar-promo').textContent = sinPromo ? 'Devolver la promo a este ticket' : 'Ya usó la promo: cobrar sin ella';
   const anticipo = pedidoCargado ? anticipoDePedido(pedidoCargado.saldo, totalNeto(), usados) : 0;
   const t = totales(lineas, efectivo, usados, descuentoAplicado() + promo, anticipo);
   $('pedido-cargado').hidden = !pedidoCargado;
@@ -730,6 +736,7 @@ function pintar() {
   $('piezas').textContent = `${t.piezas} ${t.piezas === 1 ? 'pieza' : 'piezas'}`;
   $('a-pagar').textContent = [
     promo ? `Promo inauguración −${pesos(promo)}${promoConfig.restantes != null ? ` (quedan ${promoConfig.restantes})` : ''}` : '',
+    sinPromo && promoActual(true) ? 'Sin promo: este cliente ya la usó' : '',
     t.descuento - promo ? `Descuento −${pesos(t.descuento - promo)}` : '',
     usados ? `Antes ${pesos(t.total)} · Dolarones −${pesos(usados)}` : '',
     anticipo ? `Anticipo P-${pedidoCargado.folio} −${pesos(anticipo)}` : '',
@@ -915,7 +922,7 @@ const descuentoAplicado = () => (descuento?.estado === 'aprobada' ? descuento.mo
 /** Promo de inauguracion del ticket actual; el servidor la vuelve a calcular al cobrar. */
 // La hora guardada solo vale mientras el ticket conserva su folio (reintento); sin folio, cobrar() fijara la de ahora.
 // Con cupo (Issue #250) la caja deja de darla al llegar a 0; sin red sigue con lo último que supo.
-const promoActual = () => promoConfig?.restantes === 0 ? 0 : promoInauguracion(totales(lineas).subtotal, idVenta && creadoEnVenta ? Date.parse(creadoEnVenta) : Date.now(), promoConfig);
+const promoActual = (aunQuitada = false) => (sinPromo && !aunQuitada) || promoConfig?.restantes === 0 ? 0 : promoInauguracion(totales(lineas).subtotal, idVenta && creadoEnVenta ? Date.parse(creadoEnVenta) : Date.now(), promoConfig);
 /** Lo que vale el ticket ya con descuento aprobado y promo: contra esto se canjean Dolarones. */
 const totalNeto = () => totales(lineas, 0, 0, descuentoAplicado() + promoActual()).total;
 
@@ -1403,6 +1410,7 @@ async function cobrar() {
     idVenta = null;
     pedidoCargado = null;
     descuento = null;
+    sinPromo = false;
     pintarDescuento();
     quitarSocio();
     $('efectivo').value = '';
@@ -2283,7 +2291,7 @@ document.addEventListener('keydown', (e) => {
 });
 
 $('cancelar').addEventListener('click', () => {
-  lineas = []; idVenta = null; pedidoCargado = null; descuento = null; pintarDescuento(); quitarSocio(); $('efectivo').value = ''; $('forma').value = 'efectivo'; formaElegida = false; $('aviso').textContent = 'Venta cancelada';
+  lineas = []; idVenta = null; pedidoCargado = null; descuento = null; sinPromo = false; pintarDescuento(); quitarSocio(); $('efectivo').value = ''; $('forma').value = 'efectivo'; formaElegida = false; $('aviso').textContent = 'Venta cancelada';
   $('aviso').style.color = '#5b6478'; pintar(); $('codigo').focus();
 });
 
