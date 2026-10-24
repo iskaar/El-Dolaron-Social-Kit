@@ -39,6 +39,7 @@ usar `--red-text`, o tinta `#2B2116` para texto.
 Único logo vigente (Isaac, 7/10/2026): `assets/el-dolaron-logo.png` (horizontal, transparente con contorno
 blanco), `assets/el-dolaron-logo-vertical.png` y el ícono «EL» (`assets/favicon.png`). Originales en `01-Logos/`.
 El logo anterior (símbolo D con franjas) y la insignia circular están retirados.
+Variantes de una tinta (negro, blanco, azul), tamaños mínimos, protección y usos incorrectos: ver el [manual de marca](../05-Guia-y-textos/Manual-de-marca.html).
 
 ## Piezas
 

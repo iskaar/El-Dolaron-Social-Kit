@@ -1,5 +1,5 @@
 // node --test src/manifiesto.test.ts
-// Captura por UPC (Issue #365): el manifiesto dice que es y cuanto cuesta; quien captura solo pone la cantidad.
+// Captura por UPC (#365/#461): el manifiesto precarga la ficha y el servidor autoriza cada edición.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { tienda } from './prueba-d1.ts';
@@ -30,8 +30,10 @@ test('un capturista escanea, pone la cantidad y la pieza queda lista con su ED- 
   assert.equal(ficha.cuerpo.precio, esperado);
 
   const id = crypto.randomUUID();
-  // Un precio en el cuerpo no cuenta: lo pone el servidor.
-  const r = await pedir('/api/borradores/upc', { id, upc: '191907910414', stock: 3, precio: 100, precio_lista: 100 });
+  // #461: ahora un precio distinto sin ser dueño se rechaza, sin dejar pieza.
+  assert.equal((await pedir('/api/borradores/upc', { id, upc: '191907910414', stock: 3, precio: 100, precio_lista: 100 })).status, 403);
+  assert.equal(db.prepare('select id from productos where id = ?').get(id), undefined);
+  const r = await pedir('/api/borradores/upc', { id, upc: '191907910414', stock: 3, precio_lista: 100 });
   assert.equal(r.status, 201);
   const fila = db.prepare('select upc, nombre, marca, categoria, precio_lista, precio, stock, codigo, estado_analisis, destino, capturado_por from productos where id = ?').get(id) as Record<string, unknown>;
   assert.match(String(fila.codigo), /^ED-\d{6}$/);

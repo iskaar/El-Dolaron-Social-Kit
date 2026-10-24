@@ -27,8 +27,9 @@ test('la pieza sin foto sale en la caja de inmediato, con el codigo que llevara 
   assert.match(codigo, /^ED-\d{6}$/);
   const catalogo = (await pedir('/api/catalogo')).cuerpo as { id: string; codigo: string }[];
   assert.equal(catalogo.find((p) => p.id === cuerpo.id)?.codigo, codigo);
-  const etiquetas = (await pedir('/api/etiquetas', { ids: [cuerpo.id] })).cuerpo as { codigo: string }[];
+  const etiquetas = (await pedir('/api/etiquetas', { ids: [cuerpo.id] })).cuerpo as { codigo: string; estado_fisico: string }[];
   assert.equal(etiquetas[0].codigo, codigo);
+  assert.equal(etiquetas[0].estado_fisico, 'nuevo');   // el grado llega a la etiqueta (#453)
 });
 
 test('datos malos no dejan pieza vacia; un capturista no puede', async () => {
@@ -57,7 +58,7 @@ test('marca y categorias nuevas (#159): se guardan, salen en la cola y en el inv
   assert.equal((db.prepare('select marca from productos where id = ?').get(cuerpo.id) as { marca: string }).marca, 'Elf');
 });
 
-test('fusionar dos fotos de la misma pieza: la que se queda conserva la etiqueta que ya salio impresa', async () => {
+test('fusionar transfiere la etiqueta pegada a la original y borra la repetida (#439)', async () => {
   const { db, pedir } = tienda();
   const original = crypto.randomUUID();
   const repetida = crypto.randomUUID();
@@ -69,7 +70,11 @@ test('fusionar dos fotos de la misma pieza: la que se queda conserva la etiqueta
   const r = await pedir(`/api/borradores/${repetida}/fusionar`, { destino_id: original });
   assert.equal(r.status, 200);
   const fila = db.prepare('select codigo, stock from productos where id = ?').get(original) as { codigo: string; stock: number };
-  assert.deepEqual({ ...fila }, { codigo: 'ED-000900', stock: 5 });
+  assert.equal(fila.stock, 5);
+  assert.equal(fila.codigo, 'ED-000900');
+  assert.equal(db.prepare("select count(*) n from productos where codigo = 'ED-000900'").get()!.n, 1);
+  assert.equal(db.prepare('select id from productos where id = ?').get(repetida), undefined);
+  assert.notEqual(db.prepare("select estado_analisis from productos where codigo = 'ED-000900'").get()!.estado_analisis, 'descartado');
 });
 
 test('fusionar no deja pasar las 999 piezas: la suma se rechaza y no se pierde ninguna foto', async () => {

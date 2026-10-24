@@ -21,6 +21,7 @@ traducir la siguiente vez que alguien lo escanee. Requiere la migracion 044.
 from __future__ import annotations
 
 import io
+import html
 import json
 import re
 import shutil
@@ -127,7 +128,7 @@ def renglones(camion: str, filas: list[list[str]]) -> list[dict]:
         if not 6 <= len(upc) <= 14 or precio is None or not f[DESCRIPCION].strip():
             continue
         departamento = next((f[i].strip() for i in DEPARTAMENTOS if f[i].strip().lower() not in SIN_DATO), "")
-        salida.append({"upc": upc, "descripcion": f[DESCRIPCION].strip()[:200], "precio_usd": precio,
+        salida.append({"upc": upc, "descripcion": html.unescape(f[DESCRIPCION]).strip()[:200], "precio_usd": precio,
                        "departamento": departamento[:80], "tcin": f[TCIN].strip()})
     return salida
 
@@ -226,6 +227,8 @@ def prueba() -> None:
     r = renglones("123", filas)
     assert [x["upc"] for x in r] == ["191907910414"] * 2 + ["123456789012"] * 2, r
     assert r[0]["departamento"] == "SNACKS" and r[1]["departamento"] == "CANDY"
+    filas[1][DESCRIPCION] = 'Chuckle &amp; Roar &quot;niños&quot; &#39;juego&#39; &lt;3&gt;'
+    assert renglones("123", filas)[0]["descripcion"] == 'Chuckle & Roar "niños" \'juego\' <3>'
     try:
         renglones("999", filas)
         raise AssertionError("una pestaña ajena no debe pasar")

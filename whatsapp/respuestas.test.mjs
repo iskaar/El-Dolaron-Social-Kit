@@ -2,20 +2,36 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createHmac } from 'node:crypto';
 import worker from './worker.mjs';
-import { respuestaPara } from './respuestas.mjs';
+import { esSimple, respuestaFija, respuestaPara } from './respuestas.mjs';
 
 test('preguntas del FAQ reciben la respuesta aprobada, con o sin acentos', () => {
-  assert.match(respuestaPara('¿A qué hora abren?'), /11:00 a 20:00/);
+  assert.match(respuestaPara('¿A qué hora abren?'), /11 a\. m\. a 8 p\. m\./);
   assert.match(respuestaPara('cual es su telefono'), /444 543 7754/);
-  assert.match(respuestaPara('Hacen envíos a domicilio?'), /solo en sucursal/);
-  assert.match(respuestaPara('hola buenas tardes'), /gracias por escribir/);
+  assert.match(respuestaPara('Hacen envíos a domicilio?'), /el equipo te confirma/);
+  assert.match(respuestaPara('hola buenas tardes'), /gracias por escribir.*inauguración/);
 });
 
-test('lo no confirmado (ubicacion, precios) recibe el mensaje de respaldo con telefono y horario', () => {
-  for (const pregunta of ['¿Dónde están?', 'cuanto cuesta el sofa', 'tienen promocion']) {
-    assert.match(respuestaPara(pregunta), /no tengo esa información.*444 543 7754/);
+test('la gran inauguracion, la ubicacion y el apartado responden con los datos confirmados (#497)', () => {
+  for (const pregunta of ['¿A qué hora es la inauguración?', 'tienen promocion', 'cómo funciona el cupón de 100 pesos', 'hay descuento?']) {
+    assert.match(respuestaPara(pregunta), /sábado 24 y domingo 25.*primeras 100 compras de \$300.*\$100 en caja/);
   }
-  assert.match(respuestaPara(undefined), /no tengo esa información/);
+  assert.match(respuestaPara('¿Dónde están?'), /Jardín Hidalgo 129/);
+  assert.match(respuestaPara('me lo pueden apartar'), /15 %.*7 días/);
+});
+
+test('respuestaFija devuelve null cuando hace falta el modelo y esSimple separa lo corto de lo largo (#499)', () => {
+  assert.equal(respuestaFija('cuanto cuesta el sofa'), null);
+  assert.equal(respuestaFija('¿me recomiendas algo para regalar a mi mamá?'), null);
+  assert.match(respuestaFija('horario'), /11 a\. m\./);
+  assert.equal(esSimple('¿a qué hora abren?'), true);
+  assert.equal(esSimple('hola, ¿dónde consigo una blusa talla M para un regalo de cumpleaños?'), false);
+  assert.equal(esSimple(''), true);
+});
+
+test('lo no confirmado (precios, envios) recibe respaldo o escala al equipo', () => {
+  assert.match(respuestaPara('cuanto cuesta el sofa'), /lo confirma el equipo.*este mismo chat/);
+  assert.match(respuestaPara(undefined), /este mismo chat/);
+  assert.doesNotMatch(respuestaPara('hacen envios'), /no hacemos/);
 });
 
 const endpoint = 'https://whatsapp.eldolaron.com/webhook';
@@ -53,7 +69,7 @@ test('un mensaje de texto recibe una respuesta del FAQ una sola vez', async () =
     assert.match(envio.llamadas[0].url, /\/1433484303171531\/messages$/);
     assert.equal(envio.llamadas[0].opciones.headers.authorization, 'Bearer token');
     assert.equal(envio.llamadas[0].cuerpo.to, '5214421234567');
-    assert.match(envio.llamadas[0].cuerpo.text.body, /11:00 a 20:00/);
+    assert.match(envio.llamadas[0].cuerpo.text.body, /11 a\. m\. a 8 p\. m\./);
   } finally { envio.restaurar(); }
 });
 

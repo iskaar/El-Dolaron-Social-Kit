@@ -687,14 +687,15 @@ async function guardarExistencia(id) {
   let aviso;
   try {
     const respuesta = await fetch(`/api/borradores/${id}/existencia`, {
-      method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ stock: valor }),
+      method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ stock: valor, esperado: datos.guardada }),
     });
     const cuerpo = await respuesta.json().catch(() => ({}));
-    if (!respuesta.ok) throw new Error(cuerpo.error || `error ${respuesta.status}`);
+    if (!respuesta.ok) throw Object.assign(new Error(cuerpo.error || `error ${respuesta.status}`), { stock: respuesta.status === 409 ? cuerpo.stock : undefined });
     datos.guardada = valor;
     aviso = `Guardado: ${valor} ${valor === 1 ? 'pieza' : 'piezas'}.`;
   } catch (error) {
-    // No se queda un numero en pantalla que el servidor no tiene.
+    // No se queda un numero en pantalla que el servidor no tiene (en 409, el que devolvió).
+    if (Number.isInteger(error.stock)) datos.guardada = error.stock;
     aviso = `No se guardó (${error instanceof TypeError ? 'sin red' : error.message}). Sigue en ${datos.guardada}.`;
     piezasTotales += datos.guardada - datos.cantidad;
     datos.cantidad = datos.guardada;
@@ -757,6 +758,9 @@ elGuardarRevision.addEventListener('click', async () => {
       datos.marca = guardada.marca || '';
       datos.estado_fisico = guardada.estado_fisico;
       repintarMiniatura(id);
+      // #479: con etiqueta el precio no lo cambia el capturista; se pidió al dueño y la ficha sigue con el precio actual.
+      if (guardada.solicitud_precio || guardada.aviso) { fichaRevision.precio = guardada.precio; pintarEstadoRevision(); }
+      if (idActual === id && guardada.aviso) { elRevisarNota.textContent = `${guardada.aviso}. Lo demás se guardó; el precio sigue en $${guardada.precio / 100}.`; return; }
     }
     if (idActual === id) elRevisarNota.textContent = 'Cambios guardados. Si ya salió una etiqueta con otro precio, reemplázala por la nueva.';
   } catch (error) {

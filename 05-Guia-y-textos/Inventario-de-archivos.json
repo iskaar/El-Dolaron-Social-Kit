@@ -28,6 +28,75 @@
       "background": "transparent"
     },
     {
+      "file": "01-Logos/el-dolaron-logo-horizontal-negro.png",
+      "title": "Logo horizontal, negro",
+      "description": "Una tinta negra sobre fondo claro: sello, serigrafía, fotocopia, uniforme. Derivado del logo oficial (misma geometría): la etiqueta y «Dolarón» son tinta; las letras «EL», el contorno blanco y el exterior son transparentes. Generado con docs/marca/generar_variantes.py.",
+      "width": 2056,
+      "height": 537,
+      "format": "PNG",
+      "background": "transparent"
+    },
+    {
+      "file": "01-Logos/el-dolaron-logo-horizontal-blanco.png",
+      "title": "Logo horizontal, blanco",
+      "description": "Una tinta blanca sobre azul #16366B, negro o foto oscura (tarjeta /vender, bolsa, fondos oscuros). Mismo recorte que la versión negra: las letras «EL» dejan ver el fondo. Generado con docs/marca/generar_variantes.py.",
+      "width": 2056,
+      "height": 537,
+      "format": "PNG",
+      "background": "transparent"
+    },
+    {
+      "file": "01-Logos/el-dolaron-logo-horizontal-azul.png",
+      "title": "Logo horizontal, azul",
+      "description": "Una tinta azul #16366B sobre fondo claro: serigrafía o sello de una sola tinta. Mismo recorte que la versión negra. Generado con docs/marca/generar_variantes.py.",
+      "width": 2056,
+      "height": 537,
+      "format": "PNG",
+      "background": "transparent"
+    },
+    {
+      "file": "01-Logos/el-dolaron-logo-vertical-negro.png",
+      "title": "Logo vertical, negro",
+      "description": "Versión de una tinta negra del logo vertical, para formatos cuadrados o altos sobre fondo claro. Letras «EL» transparentes. Generado con docs/marca/generar_variantes.py.",
+      "width": 1711,
+      "height": 996,
+      "format": "PNG",
+      "background": "transparent"
+    },
+    {
+      "file": "01-Logos/el-dolaron-logo-vertical-blanco.png",
+      "title": "Logo vertical, blanco",
+      "description": "Versión de una tinta blanca del logo vertical, para fondos azules, negros u oscuros. Letras «EL» transparentes. Generado con docs/marca/generar_variantes.py.",
+      "width": 1711,
+      "height": 996,
+      "format": "PNG",
+      "background": "transparent"
+    },
+    {
+      "file": "01-Logos/el-dolaron-icono-el-negro.png",
+      "title": "Ícono «EL», negro",
+      "description": "Etiqueta «EL» en una tinta negra para tamaños muy pequeños sobre fondo claro; las letras son transparentes. Generado con docs/marca/generar_variantes.py.",
+      "width": 414,
+      "height": 396,
+      "format": "PNG",
+      "background": "transparent"
+    },
+    {
+      "file": "01-Logos/el-dolaron-icono-el-blanco.png",
+      "title": "Ícono «EL», blanco",
+      "description": "Etiqueta «EL» en una tinta blanca para tamaños muy pequeños sobre fondo oscuro; las letras son transparentes. Generado con docs/marca/generar_variantes.py.",
+      "width": 414,
+      "height": 396,
+      "format": "PNG",
+      "background": "transparent"
+    },
+    {
+      "file": "05-Guia-y-textos/Manual-de-marca.html",
+      "title": "Manual de marca",
+      "description": "Esencia, logo y cuándo usar cada versión, color, tipografía, voz, datos oficiales y aplicaciones (Issue #433). Referencia imágenes del kit por ruta relativa: abrirlo dentro del repositorio.",
+      "format": "HTML"
+    },
+    {
       "file": "02-Perfiles-y-portadas/el-dolaron-perfil-cuadrado.png",
       "title": "Foto de perfil",
       "description": "Mismo avatar para Instagram, Facebook, TikTok y WhatsApp; centrar al recortar en círculo.",
@@ -79,7 +148,7 @@
       "width": 1254,
       "height": 1254,
       "format": "PNG",
-      "background": "opaque white"
+      "background": "opaque"
     },
     {
       "file": "04-Historias/el-dolaron-producto-historia-9x16.png",
@@ -151,6 +220,24 @@
       "format": "HTML"
     },
     {
+      "file": "app/public/pieza.html",
+      "title": "Buscar pieza",
+      "description": "Consulta privada por código, UPC o nombre; foto, precio, existencia e historial. Ajustes con rastro para dueño y personal autorizado, con alcance por propietario (Issue #441).",
+      "format": "HTML"
+    },
+    {
+      "file": "app/public/pieza.js",
+      "title": "Consulta de piezas y lector",
+      "description": "Búsqueda paginada, lector y cámara reutilizada; la ficha de la pieza vive en ficha.js.",
+      "format": "JS"
+    },
+    {
+      "file": "app/public/ficha.js",
+      "title": "Ficha de pieza",
+      "description": "Módulo de la ficha: existencia con rastro (motivo, fijar con confirmación, deshacer, reintento idempotente) y corrección de nombre, marca, talla y precios con confirmación y aviso de reimpresión, según permiso del servidor (Issue #441).",
+      "format": "JS"
+    },
+    {
       "file": "app/public/vender.html",
       "title": "Vender por WhatsApp",
       "description": "Página privada de caja para compartir hasta diez piezas con precio y código y anotar interesados sin apartar stock.",
@@ -214,6 +301,102 @@
       "height": 156,
       "format": "PNG",
       "background": "transparent"
+    },
+    {
+      "file": "app/public/inventario.html",
+      "title": "Inventario único",
+      "description": "Pantalla única de inventario; Issue #446.",
+      "format": "HTML"
+    },
+    {
+      "file": "app/public/inventario.css",
+      "title": "Interfaz de inventario",
+      "description": "Pantalla única de inventario; Issue #446.",
+      "format": "CSS"
+    },
+    {
+      "file": "app/public/inventario.js",
+      "title": "Navegación de inventario",
+      "description": "Pantalla única de inventario; Issue #446.",
+      "format": "JS"
+    },
+    {
+      "file": "app/public/inventario-ui.js",
+      "title": "Controles compartidos de inventario",
+      "description": "Pantalla única de inventario; Issue #446.",
+      "format": "JS"
+    },
+    {
+      "file": "app/public/lector.js",
+      "title": "Receptor único del lector",
+      "description": "Pantalla única de inventario; Issue #446.",
+      "format": "JS"
+    },
+    {
+      "file": "app/public/imprimir-lote.js",
+      "title": "Motor de etiquetas y sesión automática",
+      "description": "Impresión compartida, conserva marcas y calibración de main (#446).",
+      "format": "JS"
+    },
+    {
+      "file": "app/public/envio-etiquetas.js",
+      "title": "Estado de envío de etiquetas",
+      "description": "Impresión compartida, conserva marcas y calibración de main (#446).",
+      "format": "JS"
+    },
+    {
+      "file": "app/public/inventario-imprimir.js",
+      "title": "Etiquetas y bandas en Inventario",
+      "description": "Impresión compartida, conserva marcas y calibración de main (#446).",
+      "format": "JS"
+    },
+    {
+      "file": "app/public/inventario-capturar.js",
+      "title": "Captura de inventario",
+      "description": "Captura integrada con los endpoints existentes y cámara remota (#446).",
+      "format": "JS"
+    },
+    {
+      "file": "app/public/inventario-ropa.js",
+      "title": "Ropa y rodillo de tallas",
+      "description": "Captura integrada con los endpoints existentes y cámara remota (#446).",
+      "format": "JS"
+    },
+    {
+      "file": "app/public/inventario-revisar.js",
+      "title": "Revisión integrada de inventario",
+      "description": "Filtros, ficha, acciones con casilla y recortes de la pieza (#446).",
+      "format": "JS"
+    },
+    {
+      "file": "app/public/inventario-celular.js",
+      "title": "Captura única de Android y correcciones",
+      "description": "Captura móvil, conserva IndexedDB eldolaron v1 y los registros compartidos (#446).",
+      "format": "JS"
+    },
+    {
+      "file": "app/public/inventario-enfocado.js",
+      "title": "Modo enfocado de captura",
+      "description": "Oculta lo accesorio de Capturar en el celular y reúne los problemas críticos en una línea de alerta (#461).",
+      "format": "JS"
+    },
+    {
+      "file": "app/public/foto-pendiente.js",
+      "title": "Contrato de fotos pendientes",
+      "description": "Captura móvil, conserva IndexedDB eldolaron v1 y los registros compartidos (#446).",
+      "format": "JS"
+    },
+    {
+      "file": "app/public/camara-inventario.js",
+      "title": "Visor de inventario para foto y UPC",
+      "description": "Captura móvil, conserva IndexedDB eldolaron v1 y los registros compartidos (#446).",
+      "format": "JS"
+    },
+    {
+      "file": "app/public/inventario-precio.js",
+      "title": "Solicitud de cambio de precio",
+      "description": "El capturista pide subir o bajar un precio y el dueño lo cambia o lo deja igual desde Revisar y la ficha (#451).",
+      "format": "JS"
     }
   ],
   "version": "1.0"

@@ -1,0 +1,482 @@
+{
+  "el-dolaron-icono-el.png": {
+    "sha256": "8f5d6beea441ad26bce3d6ac30068457ff6f3a47dc6862982a7545fd6cb7c9a4",
+    "size": [
+      414,
+      396
+    ],
+    "alpha_bbox": [
+      0,
+      0,
+      414,
+      396
+    ],
+    "alpha_zero": 39839,
+    "alpha_full": 662,
+    "alpha_partial": 123443,
+    "alpha_modes": [
+      [
+        254,
+        63656
+      ],
+      [
+        253,
+        56011
+      ],
+      [
+        0,
+        39839
+      ],
+      [
+        252,
+        700
+      ],
+      [
+        255,
+        662
+      ]
+    ],
+    "rgb_modes_alpha_ge_128": [
+      [
+        [
+          253,
+          202,
+          1
+        ],
+        7840
+      ],
+      [
+        [
+          253,
+          253,
+          253
+        ],
+        5356
+      ],
+      [
+        [
+          253,
+          202,
+          2
+        ],
+        5078
+      ],
+      [
+        [
+          253,
+          203,
+          2
+        ],
+        4783
+      ],
+      [
+        [
+          253,
+          203,
+          1
+        ],
+        4099
+      ]
+    ],
+    "components_alpha_ge_128": {
+      "count": 1,
+      "largest_areas": [
+        123319
+      ],
+      "islands_le_16px": 0,
+      "pixels_in_islands_le_16px": 0
+    },
+    "exact_palette_alpha_ge_128": {
+      "(22, 54, 107)": 0,
+      "(215, 43, 50)": 0,
+      "(255, 212, 71)": 0,
+      "(255, 255, 255)": 1749
+    },
+    "families_alpha_ge_128": {
+      "azul": {
+        "pixels": 35281,
+        "mode": [
+          [
+            0,
+            39,
+            92
+          ],
+          3102
+        ]
+      },
+      "rojo": {
+        "pixels": 1,
+        "mode": [
+          [
+            255,
+            192,
+            7
+          ],
+          1
+        ]
+      },
+      "amarillo": {
+        "pixels": 63895,
+        "mode": [
+          [
+            253,
+            202,
+            1
+          ],
+          7840
+        ]
+      },
+      "blanco": {
+        "pixels": 22585,
+        "mode": [
+          [
+            253,
+            253,
+            253
+          ],
+          5356
+        ]
+      }
+    }
+  },
+  "el-dolaron-logo-vertical.png": {
+    "sha256": "706694ef636c8f80b2d3c1b4423de293f848bebed3d706c6a7fd3eaa82624a6b",
+    "size": [
+      1711,
+      996
+    ],
+    "alpha_bbox": [
+      0,
+      0,
+      1711,
+      996
+    ],
+    "alpha_zero": 788300,
+    "alpha_full": 8062,
+    "alpha_partial": 907794,
+    "alpha_modes": [
+      [
+        0,
+        788300
+      ],
+      [
+        254,
+        613022
+      ],
+      [
+        253,
+        269679
+      ],
+      [
+        255,
+        8062
+      ],
+      [
+        252,
+        4492
+      ]
+    ],
+    "rgb_modes_alpha_ge_128": [
+      [
+        [
+          253,
+          253,
+          253
+        ],
+        46858
+      ],
+      [
+        [
+          1,
+          40,
+          92
+        ],
+        42852
+      ],
+      [
+        [
+          0,
+          39,
+          92
+        ],
+        42719
+      ],
+      [
+        [
+          1,
+          40,
+          93
+        ],
+        36650
+      ],
+      [
+        [
+          0,
+          40,
+          92
+        ],
+        35744
+      ]
+    ],
+    "components_alpha_ge_128": {
+      "count": 13,
+      "largest_areas": [
+        909606,
+        2,
+        2,
+        2,
+        2
+      ],
+      "islands_le_16px": 12,
+      "pixels_in_islands_le_16px": 20
+    },
+    "exact_palette_alpha_ge_128": {
+      "(22, 54, 107)": 0,
+      "(215, 43, 50)": 0,
+      "(255, 212, 71)": 0,
+      "(255, 255, 255)": 20745
+    },
+    "families_alpha_ge_128": {
+      "azul": {
+        "pixels": 482629,
+        "mode": [
+          [
+            1,
+            40,
+            92
+          ],
+          42852
+        ]
+      },
+      "rojo": {
+        "pixels": 49496,
+        "mode": [
+          [
+            231,
+            1,
+            18
+          ],
+          4001
+        ]
+      },
+      "amarillo": {
+        "pixels": 140067,
+        "mode": [
+          [
+            252,
+            201,
+            1
+          ],
+          14795
+        ]
+      },
+      "blanco": {
+        "pixels": 231351,
+        "mode": [
+          [
+            253,
+            253,
+            253
+          ],
+          46858
+        ]
+      }
+    }
+  },
+  "el-dolaron-logo.png": {
+    "sha256": "66423203fb7c69ffbf632855898b46780648183f6615dd703f8947daec569522",
+    "size": [
+      2056,
+      537
+    ],
+    "alpha_bbox": [
+      0,
+      0,
+      2056,
+      537
+    ],
+    "alpha_zero": 344006,
+    "alpha_full": 3046,
+    "alpha_partial": 757020,
+    "alpha_modes": [
+      [
+        254,
+        538224
+      ],
+      [
+        0,
+        344006
+      ],
+      [
+        253,
+        200103
+      ],
+      [
+        252,
+        3994
+      ],
+      [
+        255,
+        3046
+      ]
+    ],
+    "rgb_modes_alpha_ge_128": [
+      [
+        [
+          253,
+          253,
+          253
+        ],
+        50769
+      ],
+      [
+        [
+          1,
+          40,
+          92
+        ],
+        40250
+      ],
+      [
+        [
+          0,
+          39,
+          92
+        ],
+        39351
+      ],
+      [
+        [
+          1,
+          40,
+          93
+        ],
+        34921
+      ],
+      [
+        [
+          0,
+          40,
+          92
+        ],
+        33534
+      ]
+    ],
+    "components_alpha_ge_128": {
+      "count": 1,
+      "largest_areas": [
+        756889
+      ],
+      "islands_le_16px": 0,
+      "pixels_in_islands_le_16px": 0
+    },
+    "exact_palette_alpha_ge_128": {
+      "(22, 54, 107)": 0,
+      "(215, 43, 50)": 0,
+      "(255, 212, 71)": 0,
+      "(255, 255, 255)": 19510
+    },
+    "families_alpha_ge_128": {
+      "azul": {
+        "pixels": 440188,
+        "mode": [
+          [
+            1,
+            40,
+            92
+          ],
+          40250
+        ]
+      },
+      "rojo": {
+        "pixels": 49486,
+        "mode": [
+          [
+            231,
+            1,
+            18
+          ],
+          4001
+        ]
+      },
+      "amarillo": {
+        "pixels": 60336,
+        "mode": [
+          [
+            253,
+            202,
+            1
+          ],
+          6630
+        ]
+      },
+      "blanco": {
+        "pixels": 203362,
+        "mode": [
+          [
+            253,
+            253,
+            253
+          ],
+          50769
+        ]
+      }
+    }
+  },
+  "contrast": [
+    {
+      "pair": [
+        "navy",
+        "red"
+      ],
+      "ratio": 2.413082985251917,
+      "AA_normal": false,
+      "AA_large": false
+    },
+    {
+      "pair": [
+        "navy",
+        "yellow"
+      ],
+      "ratio": 8.319978562654507,
+      "AA_normal": true,
+      "AA_large": true
+    },
+    {
+      "pair": [
+        "navy",
+        "white"
+      ],
+      "ratio": 11.83706324426131,
+      "AA_normal": true,
+      "AA_large": true
+    },
+    {
+      "pair": [
+        "red",
+        "yellow"
+      ],
+      "ratio": 3.4478625946574866,
+      "AA_normal": false,
+      "AA_large": true
+    },
+    {
+      "pair": [
+        "red",
+        "white"
+      ],
+      "ratio": 4.905369320742844,
+      "AA_normal": true,
+      "AA_large": true
+    },
+    {
+      "pair": [
+        "yellow",
+        "white"
+      ],
+      "ratio": 1.4227276134332574,
+      "AA_normal": false,
+      "AA_large": false
+    }
+  ]
+}

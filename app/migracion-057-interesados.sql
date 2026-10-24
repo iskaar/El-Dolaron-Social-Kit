@@ -1,7 +1,8 @@
--- Interesados por WhatsApp (Issue #431). Aditiva; «La quiere» no cambia stock.
+-- Interesados por WhatsApp (Issue #431). Aditiva y repetible (solo create ... if not exists); «La quiere» no cambia stock.
+-- Antes se llamó migracion-047: si ya corrió en sandbox con ese nombre, repetirla no cambia nada.
 -- Isaac ejecuta ANTES del deploy, primero en sandbox y luego en producción:
--- npx wrangler d1 execute el-dolaron-sandbox --remote --config wrangler.sandbox.jsonc --file=migracion-047-interesados.sql
--- npx wrangler d1 execute el-dolaron --remote --file=migracion-047-interesados.sql
+-- npx wrangler d1 execute el-dolaron-sandbox --remote --config wrangler.sandbox.jsonc --file=migracion-057-interesados.sql
+-- npx wrangler d1 execute el-dolaron --remote --file=migracion-057-interesados.sql
 create table if not exists interesados (
   id text primary key,
   -- Cola temporal: borrar/fusionar una pieza no bloquea inventario ni deja anotaciones huérfanas.

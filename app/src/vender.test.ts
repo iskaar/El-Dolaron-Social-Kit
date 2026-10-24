@@ -60,14 +60,14 @@ test('teléfono opcional: valida, normaliza +52 y rechaza tipos y letras; códig
   assert.ok(!textoSeguimiento({ disponibilidad: 'Vendida' }).includes('sigue disponible'));
 });
 
-test('base vacía y actualización: 047 es aditiva, repetible y conserva productos/stock', (t) => {
+test('base vacía y actualización: 057 es aditiva, repetible y conserva productos/stock', (t) => {
   const db = new DatabaseSync(':memory:');
   t.after(() => db.close());
   db.exec(readFileSync('schema.sql', 'utf8'));
-  for (const f of readdirSync('.').filter((f) => /^migracion-\d+/.test(f) && !f.startsWith('migracion-047')).sort()) db.exec(readFileSync(f, 'utf8'));
+  for (const f of readdirSync('.').filter((f) => /^migracion-\d+/.test(f) && !f.startsWith('migracion-057')).sort()) db.exec(readFileSync(f, 'utf8'));
   const p = pieza(db);
   const antes = db.prepare('select * from productos').all();
-  const sql = readFileSync('migracion-047-interesados.sql', 'utf8');
+  const sql = readFileSync('migracion-057-interesados.sql', 'utf8');
   db.exec(sql); db.exec(sql);
   assert.deepEqual(db.prepare('select * from productos').all(), antes);
   assert.equal(db.prepare('pragma foreign_keys').get()!.foreign_keys, 1);

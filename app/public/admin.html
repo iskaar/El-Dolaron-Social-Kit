@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>El Dolarón — cola de revisión</title>
+<title>El Dolarón — Ajustes</title>
 <style>
   :root { --azul:#16366B; --rojo:#D72B32; --amarillo:#FFD447; --linea:#dfe3ea; }
   * { box-sizing: border-box; }
@@ -39,6 +39,8 @@
   .retomar { display: block; margin-top: 6px; text-align: center; font-size: 13px; font-weight: 600;
     color: var(--azul); border: 1px solid var(--linea); border-radius: 8px; padding: 7px; cursor: pointer; }
   .retomar:hover { background: #eef1f6; }
+  button.retomar { display: block; width: 100%; background: #fff; }
+  .celular { font-size: 13px; margin-top: 6px; }
   .campos { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 10px; }
   .acciones { display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap; align-items: center; }
   .etiqueta { font-size: 12px; padding: 3px 8px; border-radius: 999px; background: #eef1f6; }
@@ -52,14 +54,19 @@
 </head>
 <body>
 <header>
-  <h1>Cola de revisión</h1>
+  <h1>Ajustes</h1>
+  <a href="/inventario#revisar">Revisar en Inventario →</a>
+  <a href="/pieza">Buscar pieza →</a>
   <a href="/captura">Ir a capturar →</a>
   <a href="/bandas">Imprimir bandas →</a>
+  <a href="#" id="salir">Cerrar sesión</a>
   <a href="/conteo">Conteo de alto valor →</a>
   <span id="resumen"></span>
 </header>
 
 <main>
+  <p class="panel aviso" id="aviso-edicion" role="status" hidden>Tu cuenta no tiene «Editar inventario»: aquí solo puedes consultar.
+    No puedes guardar, recalcular, reanalizar, sumar repetidas, descartar, buscar imagen ni revisar ropa o recortes. Pídele al dueño que la active en Cuentas.</p>
   <section class="panel">
     <h2>Configuración de precios</h2>
     <div class="ajustes" id="ajustes"></div>
@@ -132,6 +139,7 @@
 
 <script type="module">
 import { reducirArchivo } from '/foto.js';
+import { pedirFoto } from '/camara-pc.js';
 import { copiarParaMarketplace } from '/compartir.js';
 import { agruparSesiones } from '/sesiones.js';
 import { enlacePreciosML } from '/precios-ml.js';
@@ -139,6 +147,11 @@ import { enlacePreciosML } from '/precios-ml.js';
 import { CATEGORIAS } from '/categorias.js';
 import { ESTADOS } from '/estados.js';
 import { TALLAS } from '/tallas.js';
+
+document.getElementById('salir').addEventListener('click', async (e) => {
+  e.preventDefault();
+  (await import('/cerrar-sesion.js')).cerrarSesion();
+});
 
 // Una sola lista para todas las fichas; el servidor es quien valida la talla.
 document.body.insertAdjacentHTML('beforeend',
@@ -166,6 +179,7 @@ const CLAVES_CONFIG = [
 const EN_PESOS = new Set([...MONTOS_BANDA.map((p) => `banda_${p}`), 'fondo_caja']);
 
 const cola = document.getElementById('cola');
+let puedeEditarInventario = true;   // se decide con /api/yo antes de pintar la cola
 const resumen = document.getElementById('resumen');
 let filtro = '';
 /** Nombre normalizado → pieza ya revisada, para detectar repetidos. */
@@ -220,6 +234,8 @@ function ficha(p) {
         Retomar foto
         <input type="file" accept="image/*" capture="environment" hidden>
       </label>
+      <button type="button" class="claro retomar" data-celular>Pedir foto al celular</button>
+      <div class="celular" aria-live="polite"></div>
       ${p.foto_key === '' && p.propietario === 'dolaron' ? '<button type="button" class="claro" data-accion="buscar-imagen">Buscar imagen</button>' : ''}
     </div>
     <div>
@@ -250,10 +266,11 @@ function ficha(p) {
         <button type="button" class="claro" data-accion="reanalizar">Reintentar análisis</button>
         <button type="button" class="claro" data-accion="compartir"
           title="Copia precio, nombre y foto; pégalos con Win+V">Compartir</button>
-        ${repetida ? `<button type="button" class="claro" data-accion="fusionar"
-          title="Suma esta foto a la pieza que ya existe y borra la repetida">
+        ${repetida && !(p.codigo && repetida.codigo) ? `<button type="button" class="claro" data-accion="fusionar"
+          title="Suma la existencia y conserva la etiqueta existente en la original; elimina la captura repetida y su foto">
           Ya existe · sumar a ${repetida.stock ?? 1} pz</button>` : ''}
-        <button type="button" class="peligro" data-accion="descartar">Descartar</button>
+        <button type="button" class="peligro" data-accion="descartar"
+          title="Con código: conserva la pieza y su foto, deja existencia 0 e invalida su etiqueta">Descartar</button>
         <span class="etiqueta ${estado}">${estado} · ${p.semana_ingreso}</span>
         <span class="aviso"></span>
       </div>
@@ -262,13 +279,19 @@ function ficha(p) {
 
   const valor = (campo) => nodo.querySelector(`[data-campo="${campo}"]`).value;
   const aviso = nodo.querySelector('.aviso');
+  // Sin la casilla «Editar inventario» la ficha es de consulta (el servidor igual responde 403).
+  if (!puedeEditarInventario) {
+    for (const campo of nodo.querySelectorAll('input[data-campo], select[data-campo]')) campo.disabled = true;
+    for (const boton of nodo.querySelectorAll('[data-accion="guardar"], [data-accion="recalcular"], [data-accion="reanalizar"], [data-accion="fusionar"], [data-accion="descartar"], [data-accion="buscar-imagen"]')) boton.disabled = true;
+    aviso.textContent = 'Solo consulta: tu cuenta no tiene «Editar inventario».';
+  }
 
   // La existencia solo viaja si la tocaste: la caja pudo vender desde que se abrio la ficha.
   let stockMostrado = String(p.stock ?? 1);
   const base = () => ({
     nombre: valor('nombre'), marca: valor('marca'), categoria: valor('categoria'), talla: valor('talla'),
     estado_fisico: valor('estado_fisico'), precio_lista: centavos(valor('precio_lista')),
-    ...(valor('stock') === stockMostrado ? {} : { stock: Math.round(Number(valor('stock') || 0)) }),
+    ...(valor('stock') === stockMostrado ? {} : { stock: Math.round(Number(valor('stock') || 0)), stock_esperado: Number(stockMostrado) }),   // #473: una `listo` solo acepta la existencia si sigue siendo la que viste
   });
 
   async function enviar(cuerpo) {
@@ -276,7 +299,14 @@ function ficha(p) {
       method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify(cuerpo),
     });
     const datos = await respuesta.json();
-    if (!respuesta.ok) { aviso.textContent = datos.error; aviso.style.color = ''; return false; }
+    if (!respuesta.ok) {
+      aviso.textContent = datos.error; aviso.style.color = '';
+      if (respuesta.status === 409 && datos.stock !== undefined) {   // la existencia cambió: se muestra la actual
+        stockMostrado = String(datos.stock);
+        nodo.querySelector('[data-campo="stock"]').value = stockMostrado;
+      }
+      return false;
+    }
     nodo.querySelector('[data-campo="precio"]').value = pesos(datos.precio);
     nodo.querySelector('[data-campo="destino"]').value = datos.destino;
     stockMostrado = String(datos.stock);
@@ -287,7 +317,28 @@ function ficha(p) {
   }
 
   // Usado por "Guardar todo": misma sentencia que el boton Guardar de esta ficha.
-  nodo.guardarFicha = () => enviar({ ...base(), precio: centavos(valor('precio')), destino: valor('destino') });
+  nodo.guardarFicha = () => !puedeEditarInventario ? Promise.resolve(false) : enviar({ ...base(), precio: centavos(valor('precio')), destino: valor('destino') });
+
+  // Compartido por Retomar foto y Pedir foto al celular: la foto ya esta en R2 con la misma llave.
+  function fotoReemplazada() {
+    nodo.querySelector('img').src = `/api/foto/${p.id}?v=${Date.now()}`;  // la foto vieja esta en cache
+    p.foto_key = `fotos/${p.id}.jpg`;
+    nodo.querySelector('[data-accion="buscar-imagen"]')?.remove();
+    nodo.querySelector('.candidatas').replaceChildren();
+    aviso.textContent = 'Foto reemplazada. Si cambia el nombre o el precio, usa Reintentar análisis.';
+  }
+
+  // Pedir foto al celular (#444): el celular sube por el mismo POST /api/borradores (solo_foto).
+  // Repetir = volver a pulsar: sobrescribe como Retomar foto.
+  const botonCelular = nodo.querySelector('[data-celular]');
+  botonCelular.addEventListener('click', async () => {
+    botonCelular.disabled = true;
+    aviso.textContent = '';
+    try {
+      const r = await pedirFoto({ tipo: 'foto_pieza', pieza_id: p.id, contenedor: nodo.querySelector('.celular') });
+      if (r.estado === 'lista') fotoReemplazada();
+    } finally { botonCelular.disabled = false; }
+  });
 
   // Retomar foto: mismo id, asi que reemplaza la foto en R2 sin duplicar la pieza.
   // `solo_foto`: no toca existencia, talla ni lo que ya corregiste, y no vuelve a
@@ -308,11 +359,7 @@ function ficha(p) {
         aviso.textContent = (await respuesta.json()).error ?? 'No se pudo subir la foto.';
         return;
       }
-      nodo.querySelector('img').src = `/api/foto/${p.id}?v=${Date.now()}`;  // la foto vieja esta en cache
-      p.foto_key = `fotos/${p.id}.jpg`;
-      nodo.querySelector('[data-accion="buscar-imagen"]')?.remove();
-      nodo.querySelector('.candidatas').replaceChildren();
-      aviso.textContent = 'Foto reemplazada. Si cambia el nombre o el precio, usa Reintentar análisis.';
+      fotoReemplazada();
     } catch {
       aviso.textContent = 'No se pudo leer la imagen.';
     } finally {
@@ -342,7 +389,10 @@ function ficha(p) {
       }
     } else if (accion === 'reanalizar') {
       aviso.textContent = 'Analizando…';
-      await fetch(`/api/borradores/${p.id}/analizar`, { method: 'POST' });
+      const respuesta = await fetch(`/api/borradores/${p.id}/analizar`, { method: 'POST' });
+      // #479: una pieza revisada solo recibe una sugerencia, que el dueño aprueba en «Precios por revisar».
+      const datos = await respuesta.json().catch(() => ({}));
+      if (datos.sugerencia) aviso.textContent = datos.mensaje;
       setTimeout(cargarCola, 6000);
     } else if (accion === 'fusionar') {
       evento.target.disabled = true;   // un segundo clic mientras viaja sumaria dos veces
@@ -351,8 +401,9 @@ function ficha(p) {
         body: JSON.stringify({ destino_id: repetida.id }),
       });
       const datos = await respuesta.json();
-      if (!respuesta.ok) { aviso.textContent = datos.error; evento.target.disabled = false; return; }
+      if (!respuesta.ok) { aviso.textContent = datos.error; aviso.style.color = ''; evento.target.disabled = false; return; }
       repetida.stock = datos.stock;   // la siguiente repetida ya ve el total nuevo
+      repetida.codigo ||= p.codigo;
       nodo.remove();
     } else if (accion === 'precios-ml') {
       const enlace = enlacePreciosML(valor('nombre'), valor('marca'));
@@ -446,12 +497,18 @@ async function cargarRevision() {
 /* ---------- captura sin foto (Issue #115) ---------- */
 
 const manual = document.getElementById('manual');
-fetch('/api/yo').then((r) => r.json()).then(({ usuario }) => {
-  const dueno = !!usuario?.roles.includes('dueno');
-  manual.hidden = !dueno;
-  document.body.classList.toggle('dueno', dueno);
-  if (dueno) cargarRevision();
-});
+const { usuario } = await (await fetch('/api/yo')).json();
+const dueno = !!usuario?.roles.includes('dueno');
+manual.hidden = !dueno;
+document.body.classList.toggle('dueno', dueno);
+if (dueno) cargarRevision();
+// #441: la misma regla que el servidor (puedeEditarInventario), que es quien la hace cumplir.
+puedeEditarInventario = dueno || (usuario?.editar_inventario === true
+  && usuario.roles.some((rol) => rol === 'capturista' || rol === 'finanzas'));
+if (!puedeEditarInventario) {
+  document.getElementById('aviso-edicion').hidden = false;
+  for (const id of ['guardar-todo', 'reintentar-todo']) document.getElementById(id).disabled = true;
+}
 document.getElementById('m-categoria').innerHTML = opcionesCategoria('');
 document.getElementById('m-destino').innerHTML = '<option value="">Automático</option>'
   + DESTINOS.map(([v, t]) => `<option value="${v}">${t}</option>`).join('');
@@ -669,6 +726,13 @@ async function cargarRopaIA() {
     for (const [texto, fn] of [['Aceptar', () => accion('aceptar')], ['Corregir', () => accion('corregir', { prenda: prenda.value, marca: marca.value })], ['Descartar', () => accion('descartar')]]) {
       const b = document.createElement('button'); b.type = 'button'; b.textContent = texto; b.addEventListener('click', fn); botones.append(b);
     }
+    if (!puedeEditarInventario) {
+      prenda.disabled = marca.disabled = true;
+      for (const b of botones.querySelectorAll('button')) b.disabled = true;
+      const aviso = document.createElement('span'); aviso.className = 'aviso';
+      aviso.textContent = 'Solo consulta: tu cuenta no tiene «Editar inventario».';
+      botones.append(aviso);
+    }
     cuerpo.append(detalle, prenda, marca, botones); ficha.append(img, cuerpo); raiz.append(ficha);
   }
 }
@@ -705,7 +769,14 @@ async function cargarRecortes() {
       const r = await fetch(`/api/recortes/${p.id}/${p.recorte_estado === 'error' ? 'reintentar' : 'original'}`, { method: 'POST' });
       if (r.ok) cargarRecortes(); else titulo.textContent = 'No se pudo actualizar el recorte.';
     });
-    cuerpo.append(titulo, boton); ficha.append(imagenes, cuerpo); raiz.append(ficha);
+    cuerpo.append(titulo, boton);
+    if (!puedeEditarInventario) {
+      for (const b of cuerpo.querySelectorAll('button')) b.disabled = true;
+      const aviso = document.createElement('span'); aviso.className = 'aviso';
+      aviso.textContent = 'Solo consulta: tu cuenta no tiene «Editar inventario».';
+      cuerpo.append(aviso);
+    }
+    ficha.append(imagenes, cuerpo); raiz.append(ficha);
   }
 }
 await cargarRecortes();
