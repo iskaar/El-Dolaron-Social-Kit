@@ -25,34 +25,49 @@ const diceLaBase = (marca) => ({ precio: marca.etiqueta_precio, precio_lista: ma
 const mismaEtiqueta = (a, b) => precioImpreso(a) === precioImpreso(b) && textoImpreso(a) === textoImpreso(b);
 
 /**
- * Se queda con la etiqueta de esta pieza ANTES de mandarla. Devuelve:
+ * Prepara (codigo) y se queda con la etiqueta de estas piezas ANTES de mandarlas, en UNA llamada (#492; antes eran 1 + N).
+ * Devuelve { piezas, reclamos }: las piezas preparadas y, por id, el resultado de cada una:
  *  - { reclamada: true, forzada, etiqueta_en }: gano este dispositivo, se imprime. `forzada`: ya habia etiquetas pegadas
  *    (reimpresion), asi que si el envio falla NO se suelta; `etiqueta_en` es la hora de SU reclamo (`ahora` de la respuesta), para soltar solo lo propio;
  *  - { reclamada: false, cambio: false }: ya la saco otro (PC o celular), se omite y su marca se adopta aqui;
  *  - { reclamada: false, cambio: true }: la pieza cambio entre preparar y reclamar, no se imprime a ciegas;
- *  - { reclamada: false, rechazada: true }: ya no se puede imprimir (vendida, sin existencia o no lista); se salta sin avisar a la base;
- *  - { reclamada: true, sinBase: true }: no hubo red para preguntar; se imprime con la marca local y se sube
- *    despues (sincronizarMarcas). Cualquier otro fallo lanza.
+ *  - { reclamada: false, rechazada: true }: ya no se puede imprimir (vendida, sin existencia o no lista); se salta sin avisar a la base.
+ * Lanza si la llamada falla (sin red tambien: preparar necesita la base, asi que ya no se imprime con la marca local).
  * Es reimpresion explicita (siempre sale, y actualiza el reclamo) si se pide `reimprimir` (Reimprimir de Buscar y de
- * la ficha, +1) o si el usuario eligio en la lista una fila que ya figura impresa (`deLista`): ahi la base no guarda
- * el grado y no podria distinguir un cambio de grado de un envio repetido. Tambien sale sola la pieza cuya marca de aqui
- * solo difiere en el grado (mercancia general): es la unica forma de reimprimirla. Reescanear nunca fuerza.
+ * la ficha, +1), si la pieza esta en `forzadas` (envio parcial) o si el usuario eligio en la lista una fila que ya figura
+ * impresa (`deLista`): ahi la base no guarda el grado y no podria distinguir un cambio de grado de un envio repetido.
+ * Tambien sale sola la pieza cuya marca de aqui solo difiere en el grado (mercancia general): es la unica forma de
+ * reimprimirla. Reescanear nunca fuerza. Esas ultimas dependen de la marca local y de la pieza ya preparada, asi que se
+ * piden en una segunda llamada, solo para ellas y solo si la primera no las gano.
  */
-export async function reclamarEnvio(pieza, { reimprimir = false, deLista = false } = {}) {
-  if (!seImprime(pieza)) return { reclamada: false, rechazada: true };
-  const marca = impresas()[pieza.id];
-  const forzada = reimprimir || (!!marca && mismaEtiqueta(marca, pieza) && (deLista || (!esRopa(pieza) && gradoImpreso(marca) !== gradoImpreso(pieza))));
-  try {
-    const r = await reclamarEtiquetas([pieza.id], { reimprimir: forzada, version: pieza.etiqueta_version });
-    if (r.reclamadas.includes(pieza.id)) return { reclamada: true, forzada, etiqueta_en: r.ahora };
-    const enBase = r.marcas[pieza.id];
-    if (!enBase || !mismaEtiqueta(diceLaBase(enBase), pieza)) return { reclamada: false, cambio: true };
-    adoptarMarca(pieza.id, enBase, pieza);
-    return { reclamada: false, cambio: false, marca: enBase };
-  } catch (error) {
-    if (!error.sinRed) throw error;
-    return { reclamada: true, sinBase: true };
+export async function prepararYReclamar(ids, { reimprimir = false, deLista = false, forzadas = new Set() } = {}) {
+  const r = await reclamarEtiquetas(ids, { reimprimir, preparar: true });
+  const piezas = r.piezas, reclamos = new Map();
+  const marcas = impresas();
+  const segunda = [];
+  for (const pieza of piezas) {
+    if (!seImprime(pieza)) { reclamos.set(pieza.id, { reclamada: false, rechazada: true }); continue; }
+    const marca = marcas[pieza.id];
+    const forzada = reimprimir || forzadas.has(pieza.id)
+      || (!!marca && mismaEtiqueta(marca, pieza) && (deLista || (!esRopa(pieza) && gradoImpreso(marca) !== gradoImpreso(pieza))));
+    const reclamo = clasificarReclamo(pieza, forzada, r);
+    reclamos.set(pieza.id, reclamo);
+    if (forzada && !reclamo.reclamada && !reclamo.cambio) segunda.push(pieza);
   }
+  if (segunda.length) {
+    const s = await reclamarEtiquetas(segunda.map((p) => p.id), { reimprimir: true });
+    for (const pieza of segunda) reclamos.set(pieza.id, clasificarReclamo(pieza, true, s));
+  }
+  return { piezas, reclamos };
+}
+
+/** Que paso con esta pieza en la respuesta de un reclamo; si otro dispositivo la saco, adopta su marca. */
+function clasificarReclamo(pieza, forzada, r) {
+  if (r.reclamadas.includes(pieza.id)) return { reclamada: true, forzada, etiqueta_en: r.ahora };
+  const enBase = r.marcas[pieza.id];
+  if (!enBase || !mismaEtiqueta(diceLaBase(enBase), pieza)) return { reclamada: false, cambio: true };
+  adoptarMarca(pieza.id, enBase, pieza);
+  return { reclamada: false, cambio: false, marca: enBase };
 }
 
 /** "No salio": libera el reclamo de estas piezas (`en`: la hora del reclamo de cada una, ver soltarEtiquetas). true si la base quedo sin ellas; nunca lanza. */

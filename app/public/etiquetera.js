@@ -815,14 +815,15 @@ export function adoptarMarcas(filas) {
 /**
  * Pide quedarse con la etiqueta de esas piezas antes de mandarla. Devuelve { reclamadas, marcas }:
  * las que gano esta llamada y, de las demas, la marca que ya tienen en la base. Con `reimprimir` se queda
- * con ella aunque ya haya salido (reimpresion explicita). Lanza si falla; si fue por falta de red el error
- * trae `sinRed` para que quien llama decida: no se manda a ciegas.
+ * con ella aunque ya haya salido (reimpresion explicita). Con `preparar` pide tambien el codigo en la misma llamada
+ * (POST /api/etiquetas) y devuelve ademas `piezas`, lo que esa llamada prepara (#492). Lanza si falla; si fue por falta de red
+ * el error trae `sinRed` para que quien llama decida: no se manda a ciegas.
  */
-export async function reclamarEtiquetas(ids, { reimprimir = false, version, origen = globalThis.matchMedia?.('(min-width:1000px)').matches ? 'pc' : 'celular' } = {}) {
+export async function reclamarEtiquetas(ids, { reimprimir = false, version, preparar = false, origen = globalThis.matchMedia?.('(min-width:1000px)').matches ? 'pc' : 'celular' } = {}) {
   let respuesta;
   try {
-    respuesta = await fetch('/api/etiquetas/enviadas', {
-      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ids, reimprimir, version, origen }),
+    respuesta = await fetch(preparar ? '/api/etiquetas' : '/api/etiquetas/enviadas', {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ids, reimprimir, version, origen, ...(preparar && { reclamar: true }) }),
       signal: AbortSignal.timeout(15000),
     });
   } catch (error) {

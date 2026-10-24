@@ -289,6 +289,13 @@ la pestaña Imprimir y el chip de impresora funcionan igual, y la impresora se c
   la fila ya impresa que se elige en la lista, o el cambio solo de grado en mercancía general. Reescanear una pieza ya
   reclamada con la etiqueta igual no imprime otra vez; +1 imprime 1 etiqueta de la unidad nueva (Sumar N, #474: un ajuste de N y N etiquetas).
   La preparación (`POST /api/etiquetas`) devuelve `etiqueta_version`; el reclamo de una pieza puede exigir que siga igual.
+  **Una llamada por lote (#492).** `POST /api/etiquetas` con `reclamar: true` (+ `reimprimir`, `origen`) prepara y reclama
+  en la misma petición, exigiendo la `etiqueta_version` que acaba de leer, y responde `{ piezas, reclamadas, ahora, marcas }`
+  (sin `reclamar` sigue devolviendo la lista). `imprimir()` reclama así el tramo de hasta 100 antes del bucle BLE; solo las
+  de grado distinto o elegidas de la lista, que dependen de la marca local, piden una segunda llamada con `reimprimir`. Lo reclamado que
+  no llega a mandarse (corte, alto, pieza cambiada) se libera al terminar, y queda en `localStorage` bajo un candado web para que la
+  siguiente apertura de la página lo suelte si ésta se cerró a media tanda. Preparar ya exigía red: sin red no se imprime
+  ni una pieza suelta.
 - **Si no sale.** Si la impresora falla o se detiene, el motor **libera** su propio reclamo (`DELETE` con
   `etiquetas_en: { id: ahora }`, obligatorio: la fila se borra solo si sigue siendo ESE reclamo, así un dispositivo nunca
   suelta el reclamo posterior de otro; sin `etiquetas_en` el servidor responde 400). `ahora` es la hora de ese reclamo,

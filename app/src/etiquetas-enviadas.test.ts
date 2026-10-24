@@ -257,6 +257,70 @@ test('la versión del papel preparado: si la pieza cambió entre preparar y recl
   } finally { p.db.close(); }
 });
 
+test('/api/etiquetas con reclamar:true prepara y reclama en una llamada; sin reclamar sigue devolviendo la lista (#492)', async () => {
+  const p = montar();
+  try {
+    const sinCodigo = p.pieza({ stock: 2 }), conCodigo = p.pieza(), vendida = p.pieza({ stock: 0 });
+    p.db.prepare("update productos set codigo = null where id = ?").run(sinCodigo);
+    const sola = await p.pc('/api/etiquetas', { ids: [conCodigo] });
+    assert.ok(Array.isArray(sola.cuerpo), 'sin reclamar: la lista de siempre');
+    assert.equal(p.db.prepare('select count(*) n from etiquetas_enviadas').get()!.n, 0);
+    const r = await p.pc('/api/etiquetas', { ids: [sinCodigo, conCodigo, vendida], reclamar: true, origen: 'celular' });
+    assert.equal(r.status, 200);
+    assert.deepEqual(Object.keys(r.cuerpo).sort(), ['ahora', 'marcas', 'piezas', 'reclamadas']);
+    assert.deepEqual(r.cuerpo.piezas.map((x: any) => x.id), [sinCodigo, conCodigo, vendida]);
+    assert.match(r.cuerpo.piezas[0].codigo, /^ED-\d{6}$/, 'el código se asigna en la misma llamada');
+    assert.ok(r.cuerpo.piezas.every((x: any) => x.etiqueta_version));
+    assert.deepEqual(r.cuerpo.reclamadas, [sinCodigo, conCodigo], 'la vendida no se reclama');
+    assert.deepEqual(Object.keys(r.cuerpo.marcas).sort(), [sinCodigo, conCodigo].sort());
+    assert.equal(p.db.prepare('select etiqueta_origen o from etiquetas_enviadas where producto_id=?').get(sinCodigo)!.o, 'celular');
+    assert.equal(p.sello(sinCodigo), r.cuerpo.ahora);
+    // La hora devuelta permite soltar, y soltar deja volver a reclamar.
+    assert.equal((await p.pc('/api/etiquetas/enviadas', { ids: [sinCodigo], etiquetas_en: { [sinCodigo]: r.cuerpo.ahora } }, 'DELETE')).cuerpo.soltadas, 1);
+    assert.deepEqual((await p.pc('/api/etiquetas', { ids: [sinCodigo, conCodigo], reclamar: true })).cuerpo.reclamadas, [sinCodigo]);
+    // Reimprimir explícito: reclama otra vez lo que ya estaba reclamado.
+    assert.deepEqual((await p.pc('/api/etiquetas', { ids: [sinCodigo], reclamar: true })).cuerpo.reclamadas, []);
+    assert.deepEqual((await p.pc('/api/etiquetas', { ids: [sinCodigo], reclamar: true, reimprimir: true })).cuerpo.reclamadas, [sinCodigo]);
+    // Sin piezas utilizables no falla.
+    p.db.prepare("update productos set estado_analisis = 'descartado' where id = ?").run(conCodigo);
+    const vacia = await p.pc('/api/etiquetas', { ids: [conCodigo], reclamar: true });
+    assert.deepEqual([vacia.status, vacia.cuerpo.piezas, vacia.cuerpo.reclamadas], [200, [], []]);
+  } finally { p.db.close(); }
+});
+
+test('lote de 100 con reclamar:true y dos dispositivos a la vez: cada etiqueta se reclama una sola vez (#492)', async () => {
+  const p = montar();
+  try {
+    const ids = Array.from({ length: 100 }, () => p.pieza());
+    const [pc, celular] = await Promise.all([p.pc('/api/etiquetas', { ids, reclamar: true, origen: 'pc' }), p.celular('/api/etiquetas', { ids, reclamar: true, origen: 'celular' })]);
+    assert.equal(pc.cuerpo.piezas.length, 100);
+    assert.equal(pc.cuerpo.reclamadas.length + celular.cuerpo.reclamadas.length, 100);
+    assert.deepEqual([...pc.cuerpo.reclamadas, ...celular.cuerpo.reclamadas].sort(), [...ids].sort());
+    assert.equal(p.db.prepare('select count(*) n from etiquetas_enviadas').get()!.n, 100);
+    // Una tercera vez ya no reclama nada y devuelve la marca de quien ganó.
+    const otra = await p.pc('/api/etiquetas', { ids, reclamar: true });
+    assert.deepEqual(otra.cuerpo.reclamadas, []);
+    assert.equal(Object.keys(otra.cuerpo.marcas).length, 100);
+    assert.equal((await p.pc('/api/etiquetas', { ids: [...ids, p.pieza()], reclamar: true })).status, 400);
+  } finally { p.db.close(); }
+});
+
+test('reclamar:true exige la versión del papel que acaba de leer: si la pieza cambia entre leer y reclamar, no se reclama (#492)', async () => {
+  const p = montar();
+  try {
+    const id = p.pieza();
+    const batch = p.env.DB.batch.bind(p.env.DB);
+    (p.env.DB as any).batch = async (sentencias: unknown[]) => {
+      p.db.prepare('update productos set precio = 8800 where id = ?').run(id);   // una edición justo antes del reclamo
+      return batch(sentencias as never);
+    };
+    const r = await p.pc('/api/etiquetas', { ids: [id], reclamar: true });
+    assert.equal(r.cuerpo.piezas[0].precio, 9900, 'se devolvió el papel leído');
+    assert.deepEqual(r.cuerpo.reclamadas, []);
+    assert.equal(p.db.prepare('select count(*) n from etiquetas_enviadas').get()!.n, 0);
+  } finally { p.db.close(); }
+});
+
 test('soltar borra la marca para que la etiqueta pueda volver a salir, también desde el celular; solo piezas del mismo propietario', async () => {
   const p = montar();
   try {
