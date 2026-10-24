@@ -152,6 +152,7 @@ export function permitidaParaVendedor(pathname: string, metodo: string): boolean
   if (pathname === '/api/calibracion') return metodo === 'GET';
   if (pathname === '/api/etiquetas') return metodo === 'POST';
   if (pathname === '/api/etiquetas/enviadas') return ['POST', 'DELETE'].includes(metodo);
+  if (pathname === '/api/etiquetas/pendientes') return metodo === 'GET';   // la lista corta de Imprimir (#493)
   if (/^\/api\/borradores\/upc\/[^/]+$/.test(pathname)) return pathname.endsWith('/buscar') ? metodo === 'POST' : metodo === 'GET';
   return (pathname === '/api/borradores' || pathname === '/api/borradores/upc') && metodo === 'POST';
 }
@@ -375,6 +376,33 @@ async function crearBorrador(request: Request, env: Env, ctx: ExecutionContext, 
   return json({ id, estado_analisis: 'pendiente' }, 201);
 }
 
+/** Las columnas de la lista de piezas: la misma forma en `listarBorradores` y en `listarEtiquetasPendientes`. */
+const COLUMNAS_LISTA = `id, codigo, nombre, categoria, marca, talla, precio_lista, precio, estado_fisico,
+                           estado_analisis, destino, stock, semana_ingreso, capturado_por, creado_en, upc, foto_key, propietario,
+                           etiqueta_en, etiqueta_precio, etiqueta_precio_lista, etiqueta_nombre, etiqueta_talla, etiqueta_origen`;
+
+const LIMITE_PENDIENTES = 200;
+
+/**
+ * Imprimir (#493): solo lo que falta por etiquetar, filtrado aqui y no en el telefono (antes bajaba hasta 2000 filas).
+ * Pendiente = la lista de Imprimir (lista, de etiqueta, con precio y existencia) sin marca en `etiquetas_enviadas`, o
+ * cuya marca ya no dice lo mismo que la pieza: la misma comparacion (precio, tachado, nombre y talla) que `reclamarEtiquetas`.
+ * El grado no lo guarda la base: un cambio de grado despues de imprimir solo lo ve quien pide la lista completa.
+ * Las 200 mas nuevas, en orden de captura (#417); al imprimir y recargar salen las siguientes.
+ */
+async function listarEtiquetasPendientes(env: Env, propietario: string): Promise<Response> {
+  const { results } = await env.DB.prepare(
+    `select * from (select productos.rowid as fila, ${COLUMNAS_LISTA}
+       from productos left join etiquetas_enviadas on producto_id = productos.id
+       where sin_inventario = 0 and propietario = ? and estado_analisis = 'listo' and destino = 'etiqueta' and precio > 0 and stock > 0
+         and (producto_id is null or etiqueta_precio <> precio
+           or etiqueta_precio_lista <> case when precio_lista > precio then precio_lista else 0 end
+           or etiqueta_nombre <> trim(nombre) or etiqueta_talla <> trim(coalesce(talla, '')))
+       order by creado_en desc, productos.rowid desc limit ${LIMITE_PENDIENTES}) order by creado_en asc, fila asc`,
+  ).bind(propietario).all<FilaBorrador & { fila: number }>();
+  return json(results.map(({ fila: _, ...pieza }) => pieza));
+}
+
 async function listarBorradores(url: URL, env: Env, propietario: string): Promise<Response> {
   const estado = url.searchParams.get('estado');
   const desde = url.searchParams.get('desde');
@@ -394,9 +422,7 @@ async function listarBorradores(url: URL, env: Env, propietario: string): Promis
   // Las 2000 mas nuevas, en orden de captura (#417): con `asc limit` se quedaban fuera las recien capturadas.
   // Empates de hora: la fila (rowid) desempata igual que antes.
   // etiqueta_*: lo que dice la etiqueta ya enviada, desde la PC o el celular (#440); null si no ha salido.
-  const consulta = `select id, codigo, nombre, categoria, marca, talla, precio_lista, precio, estado_fisico,
-                           estado_analisis, destino, stock, semana_ingreso, capturado_por, creado_en, upc, foto_key, propietario,
-                           etiqueta_en, etiqueta_precio, etiqueta_precio_lista, etiqueta_nombre, etiqueta_talla, etiqueta_origen
+  const consulta = `select ${COLUMNAS_LISTA}
                     from productos left join etiquetas_enviadas on producto_id = productos.id
                     where productos.rowid in (select rowid from productos
                     where sin_inventario = 0 and propietario = ? ${cambios ? 'and actualizado_en > ?' : "and estado_analisis <> 'descartado'"}
@@ -2771,6 +2797,9 @@ export default {
         return await exportarInventarioCsv(env);
       }
 
+      if (pathname === '/api/etiquetas/pendientes' && request.method === 'GET') {
+        return await listarEtiquetasPendientes(env, propietarioDe(await leerUsuario(env, correo)));
+      }
       if (pathname === '/api/etiquetas' && request.method === 'POST') {
         return await prepararEtiquetas(request, env, propietarioDe(await leerUsuario(env, correo)), correo);
       }

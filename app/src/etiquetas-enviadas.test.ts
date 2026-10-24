@@ -4,7 +4,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { tienda, DUENO } from './prueba-d1.ts';
+import { tienda, DUENO, PRODUCTO } from './prueba-d1.ts';
 import worker, { permitidaParaVendedor } from './worker.ts';
 import { permiso, puede } from './cuentas.ts';
 
@@ -378,5 +378,86 @@ test('el reclamo devuelve su propia hora (ahora) y no la que otra pantalla escri
     // Soltar con la hora devuelta no borra el reclamo posterior de la otra pantalla.
     assert.equal((await p.pc('/api/etiquetas/enviadas', { ids: [id], etiquetas_en: { [id]: r.ahora } }, 'DELETE')).cuerpo.soltadas, 0);
     assert.equal(p.db.prepare('select count(*) n from etiquetas_enviadas').get()!.n, 1);
+  } finally { p.db.close(); }
+});
+
+/* ---------- lista corta de Imprimir y sondeo por lote (#493) ---------- */
+
+test('pendientes: solo lo que falta por etiquetar (sin marca, o con marca que ya no dice lo mismo), en orden de captura (#493)', async () => {
+  const p = montar();
+  try {
+    p.db.prepare('delete from productos where id = ?').run(PRODUCTO);   // la pieza de ejemplo de la tienda de prueba
+    const hora = (n: number) => `2026-10-23T10:0${n}:00.000Z`;
+    const nueva = p.pieza({ creado_en: hora(1) }), impresa = p.pieza({ creado_en: hora(2) }), conPrecio = p.pieza({ creado_en: hora(3) });
+    const conNombre = p.pieza({ creado_en: hora(4) }), conTalla = p.pieza({ creado_en: hora(5) }), conTachado = p.pieza({ creado_en: hora(6) });
+    const vendida = p.pieza({ creado_en: hora(7), stock: 0 }), sinPrecio = p.pieza({ creado_en: hora(8), precio: 0 });
+    const pendienteIA = p.pieza({ creado_en: hora(9), estado_analisis: 'pendiente' }), banda = p.pieza({ creado_en: hora(0) });
+    p.db.prepare("update productos set destino = 'banda_ju49' where id = ?").run(banda);
+    p.como(DUENO);
+    assert.deepEqual((await p.pc('/api/etiquetas/enviadas', { ids: [impresa, conPrecio, conNombre, conTalla, conTachado] })).cuerpo.reclamadas.length, 5);
+    p.db.prepare('update productos set precio = 11900 where id = ?').run(conPrecio);
+    p.db.prepare("update productos set nombre = 'Playera roja' where id = ?").run(conNombre);
+    p.db.prepare("update productos set talla = 'L' where id = ?").run(conTalla);
+    p.db.prepare('update productos set precio_lista = 15000 where id = ?').run(conTachado);
+    const lista = (await p.pc('/api/etiquetas/pendientes', undefined, 'GET'));
+    assert.equal(lista.status, 200);
+    assert.deepEqual((lista.cuerpo as unknown as { id: string }[]).map((x) => x.id), [nueva, conPrecio, conNombre, conTalla, conTachado]);
+    // Misma forma que la lista completa: lo que Imprimir y sincronizarMarcas ya leen (etiqueta_* incluidos).
+    const completa = (await p.pc('/api/borradores?estado=listo', undefined, 'GET')).cuerpo as unknown as Record<string, unknown>[];
+    assert.deepEqual((lista.cuerpo as unknown as Record<string, unknown>[])[1], completa.find((x) => x.id === conPrecio));
+    // Un reclamo nuevo de la pieza cambiada la saca de la lista; soltar la marca de la impresa la regresa.
+    await p.pc('/api/etiquetas/enviadas', { ids: [conPrecio] });
+    await p.pc('/api/etiquetas/enviadas', { ids: [impresa], etiquetas_en: { [impresa]: p.sello(impresa) } }, 'DELETE');
+    assert.deepEqual(((await p.pc('/api/etiquetas/pendientes', undefined, 'GET')).cuerpo as unknown as { id: string }[]).map((x) => x.id), [nueva, impresa, conNombre, conTalla, conTachado]);
+  } finally { p.db.close(); }
+});
+
+test('pendientes: FEP solo ve lo suyo y al revés; el celular del capturista la lee y el cajero no (#493)', async () => {
+  const p = montar();
+  try {
+    p.db.prepare('delete from productos where id = ?').run(PRODUCTO);
+    const mia = p.pieza({ capturado_por: FEP }), deLaTienda = p.pieza();
+    p.db.prepare("update productos set propietario = 'fep' where id = ?").run(mia);
+    const ids = async (via: typeof p.celular) => ((await via('/api/etiquetas/pendientes', undefined, 'GET')).cuerpo as unknown as { id: string }[]).map((x) => x.id);
+    p.como(FEP);
+    assert.deepEqual(await ids(p.celular), [mia]);
+    assert.deepEqual(await ids((r, c, m) => p.pc(r, c, m)), [mia]);
+    for (const quien of [DUENO, CAPTURISTA]) { p.como(quien); assert.deepEqual(await ids(p.celular), [deLaTienda], quien); }
+    p.como(CAJERO);
+    for (const via of [p.celular, (r: string, c?: unknown, m?: string) => p.pc(r, c, m)]) assert.ok([403, 404].includes((await via('/api/etiquetas/pendientes', undefined, 'GET')).status));
+    assert.equal(permitidaParaVendedor('/api/etiquetas/pendientes', 'GET'), true);
+    assert.equal(permitidaParaVendedor('/api/etiquetas/pendientes', 'POST'), false);
+  } finally { p.db.close(); }
+});
+
+test('pendientes: tope de 200, las más nuevas y en orden de captura (#493)', async () => {
+  const p = montar();
+  try {
+    p.db.prepare('delete from productos where id = ?').run(PRODUCTO);
+    const todas: string[] = [];
+    for (let i = 0; i < 205; i++) todas.push(p.pieza({ creado_en: `2026-10-23T10:${String(Math.floor(i / 60)).padStart(2, '0')}:${String(i % 60).padStart(2, '0')}.000Z` }));
+    p.como(DUENO);
+    const r = (await p.pc('/api/etiquetas/pendientes', undefined, 'GET')).cuerpo as unknown as { id: string }[];
+    assert.equal(r.length, 200);
+    assert.deepEqual(r.map((x) => x.id), todas.slice(5));
+  } finally { p.db.close(); }
+});
+
+test('sondeo por lote: un solo GET ?cambios= trae lo que quedó listo, aunque se pida por el host del celular (#493)', async () => {
+  const p = montar();
+  try {
+    p.db.prepare('delete from productos where id = ?').run(PRODUCTO);
+    const antes = '2026-10-23T10:00:00.000Z';
+    const pendientes = [1, 2, 3].map(() => p.pieza({ estado_analisis: 'pendiente', creado_en: antes }));
+    p.db.prepare('update productos set actualizado_en = ?').run(antes);
+    // La IA termina dos de las tres: nombre, precio y estado cambian, y actualizado_en avanza.
+    for (const id of pendientes.slice(0, 2)) p.db.prepare("update productos set estado_analisis = 'listo', nombre = 'Chamarra', precio = 14900, actualizado_en = '2026-10-23T10:02:00.000Z' where id = ?").run(id);
+    p.db.prepare("update productos set estado_analisis = 'pendiente' where id = ?").run(pendientes[2]);
+    p.como(CAPTURISTA);
+    const r = await p.celular('/api/borradores?cambios=2026-10-23T10:01:00.000Z', undefined, 'GET');
+    assert.equal(r.status, 200);
+    const filas = r.cuerpo as unknown as { id: string; estado_analisis: string; nombre: string; precio: number; stock: number }[];
+    assert.deepEqual(filas.map((x) => x.id).sort(), pendientes.slice(0, 2).sort());
+    assert.deepEqual(filas.map((x) => [x.estado_analisis, x.nombre, x.precio, x.stock]), [['listo', 'Chamarra', 14900, 3], ['listo', 'Chamarra', 14900, 3]]);
   } finally { p.db.close(); }
 });

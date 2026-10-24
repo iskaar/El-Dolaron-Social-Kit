@@ -114,7 +114,7 @@ const CELULAR = 'captura.prueba';
  * usan las funciones reales de etiquetera.js sobre el almacenamiento de ESTA pagina; solo el reclamo y la liberacion
  * (que son fetch) pasan por el Worker real, por el host de la PC o por el del celular.
  */
-async function pagina(t: ReturnType<typeof tienda>, ambiente = 'sandbox', almacen = new Map<string, string>(), host = 'caja.prueba') {
+async function pagina(t: ReturnType<typeof tienda>, ambiente = 'sandbox', almacen = new Map<string, string>(), host = 'caja.prueba', vista: unknown = null) {
   const elementos = new Map<string, any>();
   const $ = (id: string) => {
     if (!elementos.has(id)) elementos.set(id, { textContent: '', hidden: false, disabled: false, innerHTML: '', style: {},
@@ -124,7 +124,7 @@ async function pagina(t: ReturnType<typeof tienda>, ambiente = 'sandbox', almace
   const estado = { conectada: true, falloBle: false, falloRed: false, falloMarca: false, permiso: 0, exigirDudosa: true,
     enviadas: [] as { id: string; copias: number }[], detenido: false, antesDePreparar: null as null | (() => Promise<void>),
     reclamos: [] as { ids: string[]; reimprimir?: boolean }[], liberadas: [] as string[][], antesDeReclamar: null as null | (() => void | Promise<void>),
-    sinRedParaReclamar: false, tiempoAgotado: false, liberadasEn: [] as (Record<string, string> | null)[] };
+    sinRedParaReclamar: false, tiempoAgotado: false, liberadasEn: [] as (Record<string, string> | null)[], rutas: [] as string[] };
   const pedir = pedirPor(t, host);
   const almacenWeb = { getItem: (k: string) => almacen.get(k) ?? null, setItem: (k: string, v: string) => almacen.set(k, v), removeItem: (k: string) => almacen.delete(k) };
   /** Las funciones de etiquetera.js leen globalThis.localStorage: aqui apunta al almacenamiento de esta pagina mientras corren. */
@@ -135,10 +135,11 @@ async function pagina(t: ReturnType<typeof tienda>, ambiente = 'sandbox', almace
   };
   const marcas = conAlmacen(marcasReales);
   const contexto: Record<string, any> = {
-    vista: null, document: { getElementById: $ }, navigator: { bluetooth: {}, locks: { request: async (_nombre: string, _opciones: any, fn: any) => fn({}) } },
+    vista, document: { getElementById: $ }, navigator: { bluetooth: {}, locks: { request: async (_nombre: string, _opciones: any, fn: any) => fn({}) } },
     localStorage: almacenWeb,
     fetch: async (ruta: string, opciones?: any) => {
       if (estado.falloRed) throw new Error('sin red');
+      estado.rutas.push(ruta);
       if (ruta === '/api/salud') return { ok: true, json: async () => ({ estado: 'ok', ambiente, ahora: DESDE }) };
       if (ruta === '/api/etiquetas') await estado.antesDePreparar?.();
       const r = await pedir(ruta, opciones?.body ? JSON.parse(opciones.body) : undefined, opciones?.method);
@@ -618,6 +619,31 @@ test('cambios trae solo lo modificado de la sesión, incluidas las descartadas (
     assert.equal((await t.pedir(`/api/borradores?desde=${DESDE}&cambios=ayer`)).status, 400);
     // Sin `cambios`, la lista de siempre: sin descartadas.
     assert.equal((await t.pedir(`/api/borradores?desde=${DESDE}`)).cuerpo.some((p: any) => p.id === quitada), false);
+  } finally { t.db.close(); }
+});
+
+test('#493: en /inventario la lista de Imprimir baja solo lo pendiente; «Mostrar impresas» y /etiquetas bajan la completa', async () => {
+  const t = tienda();
+  try {
+    const nueva = agregar(t, DESPUES, 'listo', 2), impresa = agregar(t, DESPUES, 'listo', 1);
+    const pintadas: string[][] = [];
+    const vista = { pintar: ({ piezas }: { piezas: { id: string }[] }) => pintadas.push(piezas.map((p) => p.id)), controles() {} };
+    const p = await pagina(t, 'sandbox', new Map(), 'caja.prueba', vista);
+    p.estado.exigirDudosa = false;
+    assert.equal(await p.imprimir([impresa], new Map([[impresa, 1]])), true);
+    p.estado.rutas.length = 0;
+    await p.cargar();
+    assert.deepEqual(p.estado.rutas, ['/api/etiquetas/pendientes']);
+    assert.equal(pintadas.at(-1)!.includes(impresa), false);
+    assert.equal(pintadas.at(-1)!.includes(nueva), true);
+    await p.$('ver-impresas').eventos.get('click')();
+    assert.deepEqual(p.estado.rutas.at(-1), '/api/borradores?estado=listo');
+    assert.equal(pintadas.at(-1)!.includes(impresa), true);
+    // La pantalla /etiquetas (sin vista) sigue pidiendo la lista completa.
+    const vieja = await pagina(t);
+    vieja.estado.rutas.length = 0;
+    await vieja.cargar();
+    assert.deepEqual(vieja.estado.rutas, ['/api/borradores?estado=listo']);
   } finally { t.db.close(); }
 });
 
