@@ -123,7 +123,7 @@ async function pagina(t: ReturnType<typeof tienda>, ambiente = 'sandbox', almace
   };
   const estado = { conectada: true, falloBle: false, falloRed: false, falloMarca: false, permiso: 0, exigirDudosa: true,
     enviadas: [] as { id: string; copias: number }[], detenido: false, antesDePreparar: null as null | (() => Promise<void>),
-    reclamos: [] as { ids: string[]; reimprimir?: boolean }[], liberadas: [] as string[][], antesDeReclamar: null as null | (() => void | Promise<void>),
+    reclamos: [] as { ids: string[]; reimprimir?: boolean; preparar?: boolean }[], liberadas: [] as string[][], antesDeReclamar: null as null | (() => void | Promise<void>),
     sinRedParaReclamar: false, tiempoAgotado: false, liberadasEn: [] as (Record<string, string> | null)[] };
   const pedir = pedirPor(t, host);
   const almacenWeb = { getItem: (k: string) => almacen.get(k) ?? null, setItem: (k: string, v: string) => almacen.set(k, v), removeItem: (k: string) => almacen.delete(k) };
@@ -140,7 +140,6 @@ async function pagina(t: ReturnType<typeof tienda>, ambiente = 'sandbox', almace
     fetch: async (ruta: string, opciones?: any) => {
       if (estado.falloRed) throw new Error('sin red');
       if (ruta === '/api/salud') return { ok: true, json: async () => ({ estado: 'ok', ambiente, ahora: DESDE }) };
-      if (ruta === '/api/etiquetas') await estado.antesDePreparar?.();
       const r = await pedir(ruta, opciones?.body ? JSON.parse(opciones.body) : undefined, opciones?.method);
       return { ok: r.status < 300, status: r.status, json: async () => r.cuerpo };
     },
@@ -157,12 +156,13 @@ async function pagina(t: ReturnType<typeof tienda>, ambiente = 'sandbox', almace
     etiquetaVigente, precioImpreso, textoImpreso, gradoImpreso, esPropia, esRopa, nombreEstado, historialTexto: () => '',
     desmarcarDesde: conAlmacen(desmarcarReal), olvidarMarca: conAlmacen(olvidarReal), adoptarMarca: conAlmacen(adoptarReal), adoptarMarcas: conAlmacen(adoptarVarias),
     // El reclamo y la liberacion de etiquetera.js, contra el Worker real; sin red lanzan / devuelven false como los reales.
-    reclamarEtiquetas: async (ids: string[], opciones: { reimprimir?: boolean; version?: string } = {}) => {
-      estado.reclamos.push({ ids, reimprimir: opciones.reimprimir });
+    reclamarEtiquetas: async (ids: string[], { preparar, ...opciones }: { reimprimir?: boolean; version?: string; preparar?: boolean } = {}) => {
+      estado.reclamos.push({ ids, reimprimir: opciones.reimprimir, preparar });
+      if (preparar) await estado.antesDePreparar?.();
       await estado.antesDeReclamar?.();
       if (estado.tiempoAgotado) throw new Error('La base no respondió a tiempo. No se imprimió: revisa la red e intenta otra vez.');   // sin `sinRed`, como el real
       if (estado.falloRed || estado.sinRedParaReclamar) throw Object.assign(new Error('Sin red: sin red'), { sinRed: true });
-      const r = await pedir('/api/etiquetas/enviadas', { ids, origen: host === CELULAR ? 'celular' : 'pc', ...opciones });
+      const r = await pedir(preparar ? '/api/etiquetas' : '/api/etiquetas/enviadas', { ids, origen: host === CELULAR ? 'celular' : 'pc', ...opciones, ...(preparar && { reclamar: true }) });
       if (r.status >= 300) throw new Error(r.cuerpo.error);
       return r.cuerpo;
     },
@@ -180,7 +180,13 @@ async function pagina(t: ReturnType<typeof tienda>, ambiente = 'sandbox', almace
   const api = await runInNewContext(`(async () => { ${fuente}
     return { iniciarAutomatica, imprimirNuevas, imprimir, pausarAutomatica, cargar, noSalio, activa: () => automaticaActiva };
   })()`, contexto);
-  return { ...api, estado, $, almacen, marcas };
+  /** Reclama como lo hace imprimir() y deja lo reclamado en el almacenamiento, como si la página se hubiera cerrado antes de mandarlo. */
+  const reclamarComoOtraPagina = async (ids: string[]) => {
+    const r = await pedir('/api/etiquetas', { ids, reclamar: true, origen: host === CELULAR ? 'celular' : 'pc' });
+    almacen.set('etiqueta-reclamadas-sin-enviar', JSON.stringify(Object.fromEntries(r.cuerpo.reclamadas.map((id: string) => [id, r.cuerpo.ahora]))));
+    return r.cuerpo;
+  };
+  return { ...api, estado, $, almacen, marcas, reclamarComoOtraPagina };
 }
 
 function capturarRopa(t: ReturnType<typeof tienda>, id: string, precio: string, datos: { prenda?: string; marca?: string } = {}) {
@@ -732,23 +738,13 @@ test('una pieza que cambió de precio se reimprime una sola vez entre PC y celul
   } finally { t.db.close(); }
 });
 
-test('sin red al reclamar se imprime con la marca local y se sube después; la carga adopta y suelta lo de otros', async () => {
+test('la carga adopta y suelta lo de otros, y sube las marcas de antes del registro', async () => {
   const t = tienda();
   try {
     const { pc, celular } = await dosDispositivos(t);
     const id = agregar(t, DESPUES, 'listo', 1);
-    celular.estado.sinRedParaReclamar = true;
     assert.equal(await celular.imprimir([id]), true);
-    assert.deepEqual(celular.estado.enviadas, [{ id, copias: 1 }]);
-    assert.equal(celular.marcas()[id].base, undefined);   // solo local
-    assert.equal(t.db.prepare('select count(*) n from etiquetas_enviadas').get()!.n, 0);
-    // Con red otra vez, la carga sube esa marca y la PC ya no la repite.
-    celular.estado.sinRedParaReclamar = false;
-    await celular.cargar(); await espera();
-    assert.equal(t.db.prepare('select etiqueta_origen o from etiquetas_enviadas where producto_id=?').get(id)!.o, 'celular');
     assert.equal(celular.marcas()[id].base, true);
-    await pc.imprimir([id]);
-    assert.deepEqual(pc.estado.enviadas, []);
     // La PC la suelta («No salió»): al cargar, el celular olvida su marca de la base.
     await espera(5);
     t.db.prepare('delete from etiquetas_enviadas where producto_id=?').run(id);
@@ -767,18 +763,15 @@ test('sin red al reclamar se imprime con la marca local y se sube después; la c
   } finally { t.db.close(); }
 });
 
-test('si la pieza cambia entre preparar y reclamar no se imprime a ciegas', async () => {
+test('si la pieza cambió justo antes de preparar se imprime lo de ahora, con el precio nuevo registrado', async () => {
   const t = tienda();
   try {
     const { pc } = await dosDispositivos(t);
     const id = agregar(t, DESPUES, 'listo', 1);
     pc.estado.antesDeReclamar = () => { t.db.prepare('update productos set precio = 9900 where id = ?').run(id); };
-    assert.equal(await pc.imprimir([id]), false);
-    assert.deepEqual(pc.estado.enviadas, []);
-    assert.match(pc.$('resumen').textContent, /cambió antes de imprimir/);
-    pc.estado.antesDeReclamar = null;
     assert.equal(await pc.imprimir([id]), true);
     assert.deepEqual(pc.estado.enviadas, [{ id, copias: 1 }]);
+    assert.equal(t.db.prepare('select etiqueta_precio p from etiquetas_enviadas where producto_id=?').get(id)!.p, 9900);
   } finally { t.db.close(); }
 });
 
@@ -830,7 +823,8 @@ test('una pieza vendida no estorba: sale de la lista y el lote sigue sin ella (#
     // Aun si llega al lote (lista vieja), se salta y se cuenta; no aborta.
     assert.equal(await celular.imprimir([vendida, buena], new Map([[buena, 2]])), true);
     assert.deepEqual(celular.estado.enviadas, [{ id: buena, copias: 2 }]);
-    assert.deepEqual(celular.estado.reclamos.map((r) => [...r.ids]), [[buena]], 'ni siquiera se pide a la base');
+    assert.equal(celular.estado.reclamos.length, 1, 'una sola llamada');
+    assert.equal(t.db.prepare('select count(*) n from etiquetas_enviadas').get()!.n, 1, 'la base solo reclama la buena');
     assert.match(celular.$('resumen').textContent, /1 pieza ya no se puede imprimir \(vendidas o cambiaron\)/);
     assert.equal(t.db.prepare('select count(*) n from etiquetas_enviadas where producto_id=?').get(vendida)!.n, 0);
   } finally { t.db.close(); }
@@ -857,32 +851,22 @@ test('una reimpresión forzada que falla conserva el registro de las etiquetas y
   } finally { t.db.close(); }
 });
 
-test('un tiempo agotado al reclamar no imprime; una red que se cae a media tanda o antes del primer reclamo detiene el resto, salvo una pieza suelta (#464)', async () => {
+test('un tiempo agotado o una red caída al preparar y reclamar no imprime nada ni deja reclamos (#464, #492)', async () => {
   const t = tienda();
   try {
     const { celular } = await dosDispositivos(t);
-    const [a, b, c] = [1, 2, 3].map(() => agregar(t, DESPUES, 'listo', 1));
+    const [a, b] = [1, 2].map(() => agregar(t, DESPUES, 'listo', 1));
     celular.estado.tiempoAgotado = true;
-    assert.equal(await celular.imprimir([a]), false);
+    assert.equal(await celular.imprimir([a, b]), false);
     assert.deepEqual(celular.estado.enviadas, []);
     assert.match(celular.$('resumen').textContent, /Se detuvo.*no respondió a tiempo/);
     celular.estado.tiempoAgotado = false;
-    // La red se cae después de la primera pieza: la segunda y la tercera no se mandan a ciegas.
-    let llamadas = 0;
-    celular.estado.antesDeReclamar = () => { if (++llamadas === 2) celular.estado.sinRedParaReclamar = true; };
-    assert.equal(await celular.imprimir([a, b, c]), false);
-    assert.deepEqual(celular.estado.enviadas, [{ id: a, copias: 1 }]);
-    assert.match(celular.$('resumen').textContent, /Se detuvo en la pieza 2 de 3: se perdió la red/);
-    // Un lote que se queda sin red justo después de preparar (antes del primer reclamo) tampoco se manda a ciegas.
-    celular.estado.antesDeReclamar = null; celular.estado.sinRedParaReclamar = false;
-    celular.estado.antesDePreparar = async () => { celular.estado.sinRedParaReclamar = true; };
-    assert.equal(await celular.imprimir([b, c]), false);
-    assert.deepEqual(celular.estado.enviadas.map((e) => e.id), [a], 'ni b ni c salieron');
-    assert.match(celular.$('resumen').textContent, /Se detuvo en la pieza 1 de 2: se perdió la red/);
-    // Una sola pieza sí sigue con la marca local (se sube en la siguiente carga).
-    assert.equal(await celular.imprimir([b]), true);
-    assert.deepEqual(celular.estado.enviadas.map((e) => e.id), [a, b]);
-    assert.equal(celular.marcas()[b].base, undefined);
+    celular.estado.sinRedParaReclamar = true;
+    assert.equal(await celular.imprimir([a]), false);   // preparar necesita la base: ni una pieza suelta sale a ciegas
+    assert.deepEqual(celular.estado.enviadas, []);
+    celular.estado.sinRedParaReclamar = false;
+    assert.equal(t.db.prepare('select count(*) n from etiquetas_enviadas').get()!.n, 0);
+    assert.equal(await celular.imprimir([a, b]), true);
   } finally { t.db.close(); }
 });
 
@@ -919,6 +903,67 @@ test('«No salió desde aquí» sí suelta lo marcado con «Marcar como impresas
     assert.equal(t.db.prepare('select count(*) n from etiquetas_enviadas where producto_id=?').get(id)!.n, 0, 'la base la soltó');
     assert.equal(celular.marcas()[id], undefined);
     assert.equal(await pc.imprimir([id]), true);   // otra pantalla ya puede sacarla
+  } finally { t.db.close(); }
+});
+
+test('un lote de 100 se prepara y reclama en UNA llamada, sin reclamos por pieza (#492)', async () => {
+  const t = tienda();
+  try {
+    const { celular } = await dosDispositivos(t);
+    const ids = Array.from({ length: 100 }, () => agregar(t, DESPUES, 'listo', 1));
+    assert.equal(await celular.imprimir(ids), true);
+    assert.equal(celular.estado.enviadas.length, 100);
+    assert.deepEqual(celular.estado.reclamos.map((r) => [r.ids.length, r.preparar]), [[100, true]]);
+    assert.equal(t.db.prepare('select count(*) n from etiquetas_enviadas').get()!.n, 100);
+  } finally { t.db.close(); }
+});
+
+test('dos dispositivos que lanzan el mismo lote a la vez: cada etiqueta sale una sola vez (#492)', async () => {
+  const t = tienda();
+  try {
+    const { pc, celular } = await dosDispositivos(t);
+    const ids = Array.from({ length: 30 }, () => agregar(t, DESPUES, 'listo', 1));
+    await Promise.all([pc.imprimir(ids), celular.imprimir(ids)]);
+    const salidas = [...pc.estado.enviadas, ...celular.estado.enviadas].map((e) => e.id).sort();
+    assert.deepEqual(salidas, [...ids].sort());
+  } finally { t.db.close(); }
+});
+
+test('si el lote se corta, lo reclamado que no salió se libera y otro dispositivo lo imprime; «No salió» sigue igual (#492)', async () => {
+  const t = tienda();
+  try {
+    const { pc, celular } = await dosDispositivos(t);
+    const [a, b, c] = [1, 2, 3].map(() => agregar(t, DESPUES, 'listo', 1));
+    celular.estado.falloBle = true;
+    assert.equal(await celular.imprimir([a, b, c]), false);
+    assert.deepEqual(celular.estado.enviadas, [{ id: a, copias: 1 }], 'se detiene en la primera');
+    assert.equal(t.db.prepare('select count(*) n from etiquetas_enviadas').get()!.n, 0, 'ni la que falló ni las que esperaban quedan reclamadas');
+    assert.deepEqual(Object.keys(celular.marcas()), []);
+    assert.equal(celular.almacen.has('etiqueta-reclamadas-sin-enviar'), false);
+    assert.equal(await pc.imprimir([a, b, c]), true);
+    assert.deepEqual(pc.estado.enviadas.map((e) => e.id), [a, b, c]);
+    // Detener antes de la primera: todo lo reclamado vuelve.
+    const [d, e] = [1, 2].map(() => agregar(t, DESPUES, 'listo', 1));
+    celular.estado.falloBle = false;
+    celular.estado.antesDePreparar = async () => { celular.$('detener').eventos.get('click')(); };
+    assert.equal(await celular.imprimir([d, e]), false);
+    celular.estado.antesDePreparar = null;
+    assert.equal(t.db.prepare('select count(*) n from etiquetas_enviadas where producto_id in (?, ?)').get(d, e)!.n, 0);
+  } finally { t.db.close(); }
+});
+
+test('si la página se cerró a media tanda, al abrir se sueltan las reclamadas que nunca salieron (#492)', async () => {
+  const t = tienda();
+  try {
+    const { pc, celular } = await dosDispositivos(t);
+    const [a, b] = [1, 2].map(() => agregar(t, DESPUES, 'listo', 1));
+    await celular.reclamarComoOtraPagina([a, b]);   // lo que quedó reclamado cuando se cerró
+    assert.equal(t.db.prepare('select count(*) n from etiquetas_enviadas').get()!.n, 2);
+    const reabierta = await pagina(t, 'produccion', celular.almacen, CELULAR_HOST);
+    reabierta.estado.exigirDudosa = false;
+    assert.equal(t.db.prepare('select count(*) n from etiquetas_enviadas').get()!.n, 0);
+    assert.equal(reabierta.almacen.has('etiqueta-reclamadas-sin-enviar'), false);
+    assert.equal(await pc.imprimir([a, b]), true);
   } finally { t.db.close(); }
 });
 

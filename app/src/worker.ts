@@ -1119,9 +1119,11 @@ function idsDeEtiquetas(cuerpo: { ids?: unknown } | null): string[] | null {
  * Asigna el codigo de barras a las piezas que se van a etiquetar y las devuelve.
  * El codigo se mina una sola vez: una pieza que ya trae etiqueta impresa conserva
  * el suyo, porque reimprimir con otro codigo deja el papel del anaquel huerfano.
+ * Con `reclamar: true` (+ `reimprimir`, `origen`, como en /api/etiquetas/enviadas) reclama ademas lo preparado en la misma
+ * llamada y responde `{ piezas, reclamadas, ahora, marcas }` en vez de la lista sola (#492).
  */
-async function prepararEtiquetas(request: Request, env: Env, propietario: string, correo: string): Promise<Response> {
-  const { ids } = (await request.json()) as { ids?: unknown };
+async function prepararEtiquetas(request: Request, env: Env, propietario: string, correo: string, hostVendedor: boolean): Promise<Response> {
+  const { ids, reclamar, reimprimir, origen } = (await request.json()) as { ids?: unknown; reclamar?: unknown; reimprimir?: unknown; origen?: unknown };
   if (!Array.isArray(ids) || ids.length === 0 || ids.length > 100) {
     return json({ error: 'Selecciona entre 1 y 100 piezas.' }, 400);
   }
@@ -1152,9 +1154,14 @@ async function prepararEtiquetas(request: Request, env: Env, propietario: string
      from productos where id in (select value from json_each(?)) and propietario = ? and estado_analisis <> 'descartado' order by rowid`,
   )
     .bind(seleccion, propietario)
-    .all();
+    .all<{ id: string; etiqueta_version: string }>();
 
-  return json(results);
+  if (reclamar !== true) return json(results);
+  // Prepara y reclama en una sola llamada (#492): ahorra un viaje por pieza. Cada reclamo exige la version que se acaba de leer.
+  const reclamo = await reclamarLote(env, propietario, results.map((p) => p.id), {
+    reimprimir: reimprimir === true, origen: origenDe(origen, hostVendedor), versiones: new Map(results.map((p) => [p.id, p.etiqueta_version])),
+  });
+  return json({ piezas: results, ...reclamo });
 }
 
 /**
@@ -1179,10 +1186,20 @@ async function reclamarEtiquetas(request: Request, env: Env, propietario: string
   if (version !== null && (typeof version !== 'string' || version.length > 2000 || ids.length !== 1)) {
     return json({ error: 'Versión de etiqueta inválida.' }, 400);
   }
+  return json(await reclamarLote(env, propietario, ids, {
+    reimprimir: cuerpo?.reimprimir === true, origen: origenDe(cuerpo?.origen, hostVendedor), versiones: version === null ? undefined : new Map([[ids[0], version]]),
+  }));
+}
+
+const origenDe = (origen: unknown, hostVendedor: boolean) => origen === 'pc' || origen === 'celular' ? origen : hostVendedor ? 'celular' : 'pc';
+
+/** El reclamo en si, compartido por /api/etiquetas/enviadas y por /api/etiquetas con `reclamar` (#492). `versiones`: id -> version que debe seguir vigente. */
+async function reclamarLote(env: Env, propietario: string, ids: string[], { reimprimir, origen, versiones }: { reimprimir: boolean; origen: string; versiones?: Map<string, string> }) {
   const ahora = new Date().toISOString();
-  const origen = cuerpo?.origen === 'pc' || cuerpo?.origen === 'celular' ? cuerpo.origen : hostVendedor ? 'celular' : 'pc';
-  const reimprimir = cuerpo?.reimprimir === true ? 1 : 0;
-  const resultados = await env.DB.batch(ids.map((id) => env.DB.prepare(
+  const forzar = reimprimir ? 1 : 0;
+  const resultados = ids.length === 0 ? [] : await env.DB.batch(ids.map((id) => {
+    const version = versiones?.get(id) ?? null;
+    return env.DB.prepare(
     `insert into etiquetas_enviadas (producto_id, etiqueta_en, etiqueta_precio, etiqueta_precio_lista, etiqueta_nombre, etiqueta_talla, etiqueta_origen)
      select id, ?, precio, case when precio_lista > precio then precio_lista else 0 end, trim(nombre), trim(coalesce(talla, '')), ?
      from productos where id = ? and propietario = ? and estado_analisis = 'listo' and destino = 'etiqueta'
@@ -1193,7 +1210,8 @@ async function reclamarEtiquetas(request: Request, env: Env, propietario: string
        etiqueta_talla = excluded.etiqueta_talla, etiqueta_origen = excluded.etiqueta_origen
      where ? = 1 or etiqueta_precio <> excluded.etiqueta_precio or etiqueta_precio_lista <> excluded.etiqueta_precio_lista
        or etiqueta_nombre <> excluded.etiqueta_nombre or etiqueta_talla <> excluded.etiqueta_talla`,
-  ).bind(ahora, origen, id, propietario, version, version, reimprimir)));
+    ).bind(ahora, origen, id, propietario, version, version, forzar);
+  }));
   const { results } = await env.DB.prepare(
     `select producto_id, etiqueta_en, etiqueta_precio, etiqueta_precio_lista, etiqueta_nombre, etiqueta_talla, etiqueta_origen
      from etiquetas_enviadas where producto_id in (select value from json_each(?))
@@ -1201,11 +1219,11 @@ async function reclamarEtiquetas(request: Request, env: Env, propietario: string
   ).bind(JSON.stringify(ids), propietario).all<{ producto_id: string }>();
   // `ahora` es la hora de ESTE reclamo: la que quedo en cada fila de `reclamadas` al ganar. No se relee de `marcas`,
   // donde otra pantalla pudo reclamar de nuevo entre el batch y la lectura; con la hora ajena soltar borraria su reclamo.
-  return json({
+  return {
     reclamadas: ids.filter((_, i) => (resultados[i]?.meta?.changes ?? 0) > 0),
     ahora,
     marcas: Object.fromEntries(results.map(({ producto_id, ...marca }) => [producto_id, marca])),
-  });
+  };
 }
 
 /**
@@ -2772,7 +2790,7 @@ export default {
       }
 
       if (pathname === '/api/etiquetas' && request.method === 'POST') {
-        return await prepararEtiquetas(request, env, propietarioDe(await leerUsuario(env, correo)), correo);
+        return await prepararEtiquetas(request, env, propietarioDe(await leerUsuario(env, correo)), correo, !!env.HOST_VENDEDOR && url.hostname === env.HOST_VENDEDOR);
       }
       if (pathname === '/api/etiquetas/enviadas' && request.method === 'POST') {
         return await reclamarEtiquetas(request, env, propietarioDe(await leerUsuario(env, correo)), !!env.HOST_VENDEDOR && url.hostname === env.HOST_VENDEDOR);

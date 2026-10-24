@@ -3,7 +3,7 @@ import {
   errorEnvio, etiquetaVigente, precioImpreso, gradoImpreso, esPropia,
 } from '/etiquetera.js';
 
-import { estadoEnvio, reclamarEnvio, liberarEnvio, noSalio, reclamarSinImprimir, sincronizarMarcas } from './envio-etiquetas.js';
+import { estadoEnvio, prepararYReclamar, liberarEnvio, noSalio, reclamarSinImprimir, sincronizarMarcas } from './envio-etiquetas.js';
 import { nombreEstado } from '/estados.js';
 import { esRopa } from './ropa.js';
 
@@ -238,6 +238,32 @@ document.getElementById('detener').addEventListener('click', () => {
 });
 
 let imprimiendo = false;
+// Lo reclamado en la base (#492) y aun sin mandar: si el envio se corta se suelta. Tambien queda en este navegador, con un
+// candado mientras se imprime: si la pagina se cierra a media tanda, la siguiente apertura suelta lo que nunca salio.
+// ponytail: una sola clave por navegador; dos pestanas imprimiendo a la vez se pisarian (una sola impresora, no pasa).
+const CLAVE_RECLAMADAS = 'etiqueta-reclamadas-sin-enviar', CANDADO_LOTE = 'etiqueta-lote';
+const guardarSinEnviar = (sinEnviar) => {
+  try {
+    if (sinEnviar.size) localStorage.setItem(CLAVE_RECLAMADAS, JSON.stringify(Object.fromEntries(sinEnviar)));
+    else localStorage.removeItem(CLAVE_RECLAMADAS);
+  } catch { /* sin almacenamiento solo se pierde esta recuperacion */ }
+};
+function retenerCandado() {
+  let soltar;
+  const espera = new Promise((r) => { soltar = r; });
+  void navigator.locks?.request(CANDADO_LOTE, {}, () => espera);
+  return soltar;
+}
+async function recuperarReclamos() {
+  try {
+    const guardado = JSON.parse(localStorage.getItem(CLAVE_RECLAMADAS) || 'null');
+    if (!guardado || !navigator.locks) return;
+    // Con el candado libre ninguna pestana esta imprimiendo: lo guardado es de una pagina que se cerro.
+    await navigator.locks.request(CANDADO_LOTE, { ifAvailable: true }, async (candado) => {
+      if (candado && await liberarEnvio(Object.keys(guardado), guardado)) localStorage.removeItem(CLAVE_RECLAMADAS);
+    });
+  } catch { /* se reintenta en la siguiente apertura */ }
+}
 // Piezas cuyo envio se corto con etiquetas ya impresas: lo que falta se manda como reimpresion, para que el reclamo
 // (que pudo no soltarse) las siga cubriendo y no se confunda con lo que saco otro dispositivo.
 const parciales = new Set();
@@ -262,7 +288,9 @@ async function imprimir(ids, pedidas = new Map(), automatico = false, opciones =
   imprimiendo = true;
   pintarControles();
   if (!automatico) detenerEnvio(false);
-  let terminadas = 0, omitidas = 0, rechazadas = 0;
+  let terminadas = 0, omitidas = 0, rechazadas = 0, sinSoltar = false;
+  const sinEnviar = new Map();   // id -> hora del reclamo propio, de lo reclamado y aun sin mandar
+  const soltarCandado = retenerCandado();
   try {
     // Pedir la impresora necesita un clic real, nunca el temporizador automático.
     if (!etiqueteraLista()) {
@@ -280,19 +308,16 @@ async function imprimir(ids, pedidas = new Map(), automatico = false, opciones =
       }
     }
 
-    // El servidor prepara hasta 100 piezas por llamada, asi que se manda por tramos.
+    // El servidor prepara y reclama hasta 100 piezas por llamada, asi que se manda por tramos.
     for (let i = 0; i < ids.length; i += 100) {
       if (envioDetenido()) return false;
-      // El codigo se asigna aqui: una pieza sin etiqueta impresa no necesita codigo.
-      const respuesta = await fetch('/api/etiquetas', {
-        method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ids: ids.slice(i, i + 100) }),
-        signal: AbortSignal.timeout(15000),
+      // El codigo se asigna aqui: una pieza sin etiqueta impresa no necesita codigo. Y en la misma llamada se reclama
+      // en la base (#440, #492): si otro dispositivo ya la saco, no se repite.
+      const { piezas: preparadas, reclamos } = await prepararYReclamar(ids.slice(i, i + 100), {
+        reimprimir: opciones.reimprimir === true, deLista: opciones.deLista === true, forzadas: parciales,
       });
-      const preparadas = await respuesta.json();
-      if (!respuesta.ok) {
-        resumen.textContent = preparadas.error;
-        return false;
-      }
+      for (const p of preparadas) if (reclamos.get(p.id).reclamada) sinEnviar.set(p.id, reclamos.get(p.id).etiqueta_en);
+      guardarSinEnviar(sinEnviar);
 
       for (const p of preparadas) {
         if (envioDetenido()) return false;
@@ -300,15 +325,8 @@ async function imprimir(ids, pedidas = new Map(), automatico = false, opciones =
           resumen.textContent = 'La pieza cambió antes de imprimir. Revisa la cola y retoma la sesión.';
           return false;
         }
-        // Antes de mandarla se reclama en la base (#440): si otro dispositivo ya la saco, no se repite.
-        const reclamo = await reclamarEnvio(p, { reimprimir: opciones.reimprimir === true || parciales.has(p.id), deLista: opciones.deLista === true });
+        const reclamo = reclamos.get(p.id);
         if (reclamo.rechazada) { rechazadas += 1; continue; }   // vendida o cambiada: se salta, no aborta el lote
-        // Sin red al reclamar solo se imprime con la marca local una pieza suelta; en un lote, alto: lo que sigue
-        // podria estar ya reclamado por otra pantalla (la red pudo caerse justo despues de preparar).
-        if (reclamo.sinBase && ids.length > 1) {
-          resumen.textContent = `Se detuvo en la pieza ${terminadas + 1} de ${ids.length}: se perdió la red y no se imprime sin avisar a la base. Las que faltan siguen en la lista.`;
-          return false;
-        }
         if (!reclamo.reclamada) {
           if (reclamo.cambio) {
             resumen.textContent = automatico ? 'La pieza cambió antes de imprimir. Revisa la cola y retoma la sesión.' : 'La pieza cambió antes de imprimir. Revisa la lista e intenta otra vez.';
@@ -317,6 +335,9 @@ async function imprimir(ids, pedidas = new Map(), automatico = false, opciones =
           omitidas += 1;
           continue;
         }
+        // Desde aqui lo que pase con esta pieza lo decide su envio, no el cierre del lote.
+        sinEnviar.delete(p.id);
+        guardarSinEnviar(sinEnviar);
         // Las que se pidieron en la columna Etiquetas; de inicio, una por pieza en existencia.
         const copias = automatico ? p.stock : pedidas.get(p.id) ?? copiasDe(p);
         const detalle = `pieza ${terminadas + 1} de ${ids.length}`;
@@ -337,7 +358,7 @@ async function imprimir(ids, pedidas = new Map(), automatico = false, opciones =
           // y otra pantalla podría reclamar entre liberar y continuar): se conserva el reclamo y lo que falta se
           // continúa como reimpresión.
           if (hechasDePieza > 0) parciales.add(p.id);
-          const liberada = reclamo.sinBase || reclamo.forzada || hechasDePieza > 0 || await liberarEnvio([p.id], { [p.id]: reclamo.etiqueta_en });
+          const liberada = reclamo.forzada || hechasDePieza > 0 || await liberarEnvio([p.id], { [p.id]: reclamo.etiqueta_en });
           resumen.textContent = (envioDetenido()
             ? `Detenido en la pieza ${terminadas + 1} de ${ids.length}. Las que faltan siguen en la lista.`
             : `Se cortó en la pieza ${terminadas + 1} de ${ids.length} (${p.nombre}): ${errorEnvio()}. Las que faltan siguen en la lista.`)
@@ -346,7 +367,7 @@ async function imprimir(ids, pedidas = new Map(), automatico = false, opciones =
           return false;
         }
         parciales.delete(p.id);
-        estadoEnvio(p, 'marcar', undefined, !reclamo.sinBase, reclamo.etiqueta_en);
+        estadoEnvio(p, 'marcar', undefined, true, reclamo.etiqueta_en);
         if ((automatico || localStorage.getItem(CLAVE_DUDOSA) === p.id) && !estadoEnvio().marcas[p.id]) {
           throw new Error('No se pudo recordar el envío. Revisa el almacenamiento del navegador y la etiqueta.');
         }
@@ -365,7 +386,13 @@ async function imprimir(ids, pedidas = new Map(), automatico = false, opciones =
     resumen.textContent = `Se detuvo en la pieza ${terminadas + 1} de ${ids.length}: ${error.message}`;
     return false;
   } finally {
+    // Lo reclamado que no llego a mandarse (alto, corte, pieza cambiada) vuelve a la lista, aqui y en las demas pantallas.
+    if (sinEnviar.size) {
+      if (await liberarEnvio([...sinEnviar.keys()], Object.fromEntries(sinEnviar))) { sinEnviar.clear(); guardarSinEnviar(sinEnviar); } else sinSoltar = true;
+    }
+    soltarCandado();
     pintarHistorial();
+    if (sinSoltar) resumen.textContent += ' No se pudo avisar a la base de las que no se mandaron: se sueltan solas al abrir esta página con red.';
     const aviso = resumen.textContent;
     try { await cargar(); } catch { /* el aviso del envío conserva prioridad */ }
     resumen.textContent = aviso;   // cargar() pinta el conteo encima; el aviso importa mas
@@ -547,6 +574,7 @@ try {
   document.getElementById('ayuda-automatica').hidden = botonAutomatica.hidden;
 } catch { /* sin confirmar el entorno, solo queda la impresión manual */ }
 
+await recuperarReclamos();
 try {
   await cargar();
 } catch (error) {
