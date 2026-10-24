@@ -6,6 +6,7 @@ export const MAX_POR_MINUTO = 5;          // mensajes de un mismo número en un 
 export const MAX_MODELO_DIA = 25;         // llamadas al modelo por número y día; después solo respuesta fija
 export const MAX_MODELO_GLOBAL_DIA = 1500; // llamadas al modelo de toda la tienda por día; después solo FAQ fijo
 export const MAX_CARACTERES = 600;        // lo que va al modelo; lo demás se recorta
+export const MAX_TARJETAS = 3;            // fotos de producto después de la respuesta (Issue #499, B.4)
 
 export const SIN_CUOTA = 'Por hoy ya te ayudé con todo lo que puedo por aquí. El equipo te responde por este mismo chat en horario de 11 a. m. a 8 p. m.';
 
