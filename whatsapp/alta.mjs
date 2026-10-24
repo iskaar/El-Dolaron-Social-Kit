@@ -1,7 +1,8 @@
 /**
  * Issue #507: alta de coexistencia del 444 543 7754 (app WhatsApp Business + Cloud API) por el
  * registro integrado de Meta. GET /alta sirve la página; POST /alta canjea el código de un solo uso
- * (vence en 30 s), suscribe la app a la cuenta nueva y devuelve los IDs de los números.
+ * (vence en 30 s), suscribe la app a la cuenta nueva y devuelve los IDs de los números. Si el
+ * aviso de la ventana de Meta (waba_id) no llegó, las cuentas salen de los permisos del token.
  *
  * Solo funciona con ALTA_CONFIG_ID (configuración de Facebook Login for Business, no es secreto);
  * sin ella responde 404, así que se apaga quitando la variable. El código solo lo emite Meta a un
@@ -27,21 +28,29 @@ export async function atenderAlta(request, env) {
   if (!env.META_APP_SECRET) return json({ error: 'sin META_APP_SECRET' }, 503);
 
   const { code, waba_id: waba } = await request.json().catch(() => ({}));
-  if (typeof code !== 'string' || !code || !/^\d+$/.test(String(waba ?? ''))) return json({ error: 'faltan code o waba_id' }, 400);
+  if (typeof code !== 'string' || !code || (waba != null && !/^\d+$/.test(String(waba)))) return json({ error: 'falta code' }, 400);
 
   const canje = await fetch(`${GRAPH}/oauth/access_token?${new URLSearchParams({ client_id: APP_ID, client_secret: env.META_APP_SECRET, code })}`);
-  const token = (await canje.json().catch(() => ({})))?.access_token;
-  if (!canje.ok || !token) return json({ error: `canje del código: ${canje.status}` }, 502);
+  const respuesta = await canje.json().catch(() => ({}));
+  const token = respuesta?.access_token;
+  if (!canje.ok || !token) return json({ error: `canje del código: ${canje.status} ${respuesta?.error?.message ?? ''}`.trim() }, 502);
   const auth = { authorization: `Bearer ${token}` };
 
-  // Sin esta suscripción los mensajes del 444 nunca llegan al webhook.
-  const suscripcion = await fetch(`${GRAPH}/${waba}/subscribed_apps`, { method: 'POST', headers: auth });
-  const numeros = await fetch(`${GRAPH}/${waba}/phone_numbers?fields=id,display_phone_number,is_on_biz_app,platform_type`, { headers: auth });
-  return json({
-    waba_id: waba,
-    suscrita: suscripcion.ok,
-    numeros: numeros.ok ? (await numeros.json()).data ?? [] : [],
-  });
+  let wabas = waba ? [String(waba)] : [];
+  if (!wabas.length) {
+    // Issue #507: el 24/10 la ventana devolvió el código sin el aviso WA_EMBEDDED_SIGNUP.
+    const depuracion = await fetch(`${GRAPH}/debug_token?${new URLSearchParams({ input_token: token, access_token: `${APP_ID}|${env.META_APP_SECRET}` })}`);
+    const alcances = (await depuracion.json().catch(() => ({})))?.data?.granular_scopes ?? [];
+    wabas = alcances.find((a) => a.scope === 'whatsapp_business_management')?.target_ids ?? [];
+  }
+  const cuentas = [];
+  for (const id of wabas) {
+    // Sin esta suscripción los mensajes del 444 nunca llegan al webhook.
+    const suscripcion = await fetch(`${GRAPH}/${id}/subscribed_apps`, { method: 'POST', headers: auth });
+    const numeros = await fetch(`${GRAPH}/${id}/phone_numbers?fields=id,display_phone_number,is_on_biz_app,platform_type`, { headers: auth });
+    cuentas.push({ waba_id: id, suscrita: suscripcion.ok, numeros: numeros.ok ? (await numeros.json()).data ?? [] : [] });
+  }
+  return json({ cuentas });
 }
 
 const pagina = (configId) => `<!doctype html>
@@ -68,7 +77,7 @@ const pagina = (configId) => `<!doctype html>
   let codigo = null;
   let waba = null;
   async function canjear() {
-    if (!codigo || !waba) return;
+    if (!codigo) return;
     di('Conectando con el servidor…');
     const r = await fetch('/alta', { method: 'POST', headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ code: codigo, waba_id: waba }) });
@@ -80,12 +89,8 @@ const pagina = (configId) => `<!doctype html>
     let datos;
     try { datos = JSON.parse(e.data); } catch { return; }
     if (datos?.type !== 'WA_EMBEDDED_SIGNUP') return;
-    if (String(datos.event).startsWith('FINISH') && datos.data?.waba_id) {
-      waba = datos.data.waba_id;
-      canjear();
-    } else {
-      di('Meta: ' + JSON.stringify(datos, null, 2));
-    }
+    if (String(datos.event).startsWith('FINISH') && datos.data?.waba_id) waba = datos.data.waba_id;
+    else di('Meta: ' + JSON.stringify(datos, null, 2));
   });
   window.fbAsyncInit = () => FB.init({ appId: '${APP_ID}', autoLogAppEvents: true, xfbml: false, version: 'v26.0' });
   document.getElementById('alta').addEventListener('click', () => {
@@ -93,7 +98,8 @@ const pagina = (configId) => `<!doctype html>
     FB.login((respuesta) => {
       if (!respuesta.authResponse?.code) return di('Se cerró la ventana sin terminar.');
       codigo = respuesta.authResponse.code;
-      canjear();
+      // El aviso con waba_id suele llegar antes; si no llega, el servidor lo saca del token.
+      setTimeout(canjear, 1500);
     }, { config_id: '${configId}', response_type: 'code', override_default_response_type: true,
       extras: { setup: {}, featureType: 'whatsapp_business_app_onboarding', sessionInfoVersion: '3' } });
   });
