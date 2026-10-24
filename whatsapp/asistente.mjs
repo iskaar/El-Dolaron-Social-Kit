@@ -55,7 +55,11 @@ async function llamarModelo(mensajes, apiKey, herramientas) {
     body: JSON.stringify({ model: MODELO, max_tokens: 400, system: PROMPT, messages: mensajes,
       ...(herramientas ? { tools: HERRAMIENTAS } : {}) }),
   });
-  if (!respuesta.ok) throw new Error(`modelo ${respuesta.status}`);
+  if (!respuesta.ok) {
+    // El tipo de error de la API (p. ej. authentication_error, rate_limit_error) sin el mensaje completo.
+    const tipo = await respuesta.json().then((j) => j?.error?.type ?? '').catch(() => '');
+    throw new Error(`modelo ${respuesta.status} ${tipo}`.trim());
+  }
   return respuesta.json();
 }
 
