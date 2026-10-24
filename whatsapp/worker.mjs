@@ -1,4 +1,5 @@
 import { esSimple, respuestaFija, respuestaPara } from './respuestas.mjs';
+import { enRafaga, recortar, reservarModelo, SIN_CUOTA } from './limites.mjs';
 import { esFinDeConversacion, estaPausado, generarRespuesta, guardarTurno, interpretar, leerHistorial, pausar, RETENCION_SEGUNDOS } from './asistente.mjs';
 
 const encoder = new TextEncoder();
@@ -114,6 +115,8 @@ async function responderMensajes(event, env) {
         await env.EVENTS.put(marca, '1', { expirationTtl: 7 * 86400 });
         const de = mensaje.from;
         if (await estaPausado(env.EVENTS, de)) continue;
+        // Issue #503: un número que manda demasiado por minuto no recibe nada (ni FAQ): corta bucles y floods.
+        if (await enRafaga(env.EVENTS, de)) { console.log(JSON.stringify({ event: 'whatsapp_limite', motivo: 'rafaga' })); continue; }
 
         if (mensaje.type === 'image') {
           await enviarYGuardar(env, de, IMAGEN);
@@ -128,10 +131,17 @@ async function responderMensajes(event, env) {
         if (fija) {
           respuesta = { texto: fija, puntaje: 0, escalar: false };
         } else {
+          // Issue #503: cuota del modelo por número y por día para toda la tienda; el FAQ fijo no la gasta.
+          const limite = env.ANTHROPIC_API_KEY ? await reservarModelo(env.EVENTS, de) : null;
+          if (limite) console.log(JSON.stringify({ event: 'whatsapp_limite', motivo: limite }));
           try {
             if (!env.ANTHROPIC_API_KEY) throw new Error('sin clave');
-            const consultar = env.TIENDA && env.ASISTENTE_TOKEN ? (q) => consultarTienda(env, q) : null;
-            respuesta = interpretar(await generarRespuesta(historial, texto, env.ANTHROPIC_API_KEY, consultar));
+            if (limite === 'global') throw new Error('cuota global');
+            if (limite === 'numero') respuesta = { texto: SIN_CUOTA, puntaje: 0, escalar: false };
+            else {
+              const consultar = env.TIENDA && env.ASISTENTE_TOKEN ? (q) => consultarTienda(env, q) : null;
+              respuesta = interpretar(await generarRespuesta(historial, recortar(texto), env.ANTHROPIC_API_KEY, consultar));
+            }
           } catch (error) {
             // Issue #499: sin esto el fallo del modelo era invisible y el cliente solo veía el respaldo.
             // Solo el motivo corto (p. ej. «modelo 401»), nunca la clave ni el texto del cliente.
