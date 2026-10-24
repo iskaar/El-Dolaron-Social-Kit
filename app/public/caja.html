@@ -2106,6 +2106,7 @@ let ultimoCorte = null;
 const CORTE_RECIENTE_MIN = 30;
 let corteReciente = null;   // minutos desde el ultimo corte de esta caja, si fue hace poco
 let corteConfirmado = false;
+let corteSinEfectivo = false;   // el cajero confirmo que el cajon esta vacio de verdad
 
 function conteoCorte() {
   const conteo = {};
@@ -2151,6 +2152,7 @@ $('abrir-corte').addEventListener('click', async () => {
   $('corte-registrar').textContent = 'Registrar conteo';
   corteReciente = null;
   corteConfirmado = false;
+  corteSinEfectivo = false;
   pintarContado();
   $('dialogo-corte').showModal();
 
@@ -2212,6 +2214,18 @@ $('corte-registrar').addEventListener('click', async () => {
   if (contadoDe(conteo) === null) { $('corte-aviso').textContent = 'Revisa las piezas: solo números enteros.'; return; }
   const terminal = Math.round(Number($('corte-terminal').value || 0) * 100);
   if (!(terminal >= 0)) { $('corte-aviso').textContent = 'Revisa el total de la terminal.'; return; }
+  // 24/10: un corte sin contar y sin terminal descuadro el fondo y las tarjetas del dia siguiente.
+  if ($('corte-terminal').value.trim() === '') {
+    $('corte-aviso').textContent = 'Escribe el total que dice la terminal de tarjetas (pon 0 si no hubo pagos con tarjeta).';
+    $('corte-terminal').focus();
+    return;
+  }
+  if (contadoDe(conteo) === 0 && !corteSinEfectivo) {
+    corteSinEfectivo = true;
+    $('corte-aviso').textContent = 'No contaste efectivo: el corte quedaría en $0 y el fondo de mañana también. Cuenta billetes y monedas; si el cajón de verdad está vacío, vuelve a registrar.';
+    $('corte-registrar').textContent = 'Registrar con el cajón vacío';
+    return;
+  }
   if (corteReciente !== null && !corteConfirmado) {
     corteConfirmado = true;
     $('corte-aviso').textContent = `El último corte de esta caja fue hace ${corteReciente} min. Si ya contaste y entregaste, no hace falta otro; si de veras es otro corte, vuelve a registrar.`;
@@ -2222,7 +2236,8 @@ $('corte-registrar').addEventListener('click', async () => {
   try {
     const r = await fetch('/api/cortes', {
       method: 'POST', headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ id: idCorte, caja: cajaActual(), conteo, tarjeta_terminal: terminal, notas: $('corte-notas').value }),
+      body: JSON.stringify({ id: idCorte, caja: cajaActual(), conteo, tarjeta_terminal: terminal, notas: $('corte-notas').value,
+        sin_efectivo: contadoDe(conteo) === 0 }),
     });
     const corte = await r.json();
     if (!r.ok) { $('corte-aviso').textContent = corte.error ?? 'No se pudo registrar el corte.'; $('corte-registrar').disabled = false; return; }
