@@ -456,6 +456,14 @@ test('/reportes: con promo, descuento aprobado, pieza devuelta y ticket cancelad
   assert.equal(suma(r.por_categoria), r.resumen.total);
   assert.equal(suma(r.top_productos), r.resumen.total);
   assert.deepEqual(verificarCuadre(r).filter((c: { ok: boolean }) => !c.ok), []);
+  // Descuentos regalados (24/10): A y B con promo; B y C con aprobado; D cancelado no cuenta.
+  const aprobadoC = (db.prepare('select descuento from ventas where id = ?').get(folioC) as { descuento: number }).descuento;
+  assert.equal(r.descuentos.promo_tickets, 2);
+  assert.equal(r.descuentos.promo, 20000);
+  assert.equal(r.descuentos.otros_tickets, 2);
+  assert.equal(r.descuentos.otros, b.cuerpo.descuento - 10000 + aprobadoC);
+  assert.equal(r.descuentos.por_dia.reduce((s: number, x: { promo: number; otros: number }) => s + x.promo + x.otros, 0),
+    r.descuentos.promo + r.descuentos.otros);
 });
 
 test('el descuento que queda pendiente avisa al dueno por correo (#75)', async () => {
