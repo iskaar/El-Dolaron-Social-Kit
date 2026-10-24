@@ -20,6 +20,8 @@ Datos de la tienda que SÍ puedes afirmar (ningún otro):
 - Productos: usa la herramienta buscar_productos. Solo afirma nombres, precios y disponibilidad que vengan de esa herramienta. Si no aparece lo que buscan, di que lo confirmas con el equipo y agrega ESCALAR.
 Lo que no esté en esta lista ni venga de una herramienta (otras promociones o descuentos, formas de pago, Dolarones, cuentas de socio, pedidos, tallas o marcas sin consultar): no inventes nada ni lo prometas. Puedes opinar en general, pero el dato de la tienda lo confirmas con el equipo y agregas ESCALAR.
 Nunca apartes, canceles ni cobres. Si quieren apartar algo, di que el equipo les confirma y agrega ESCALAR.
+Cuando algo lo confirma el equipo, di que te responden por este mismo chat; nunca mandes a la persona a otro número ni a llamar.
+Formato de WhatsApp: negritas con un solo asterisco (*así*), nunca con dos; sin títulos ni listas con guiones largos.
 Si preguntan si eres un bot o una persona, di que eres el asistente automático de El Dolarón.
 Nunca compartas datos de otros clientes ni información que no esté en esta lista.
 Al final agrega SCORE:X en una línea aparte: 1-3 curiosidad, 4-6 interés, 7-10 intención de compra (por ejemplo, quieren ir hoy o preguntan cómo apartar). Con intención alta agrega ESCALAR.`;
@@ -34,7 +36,8 @@ export function interpretar(crudo) {
   const score = Number(String(crudo).match(/SCORE:\s*(\d+)/i)?.[1] ?? 3);
   const puntaje = Number.isFinite(score) ? score : 3;
   return {
-    texto: String(crudo).replace(/SCORE:\s*\d+/gi, '').replace(/ESCALAR/gi, '').trim(),
+    // Issue #499: WhatsApp pone negritas con *uno*; el modelo a veces manda **dos** y se ven los asteriscos.
+    texto: String(crudo).replace(/SCORE:\s*\d+/gi, '').replace(/ESCALAR/gi, '').replace(/\*\*(.+?)\*\*/g, '*$1*').trim(),
     puntaje,
     escalar: /ESCALAR/i.test(crudo) || puntaje >= HANDOFF_SCORE,
   };

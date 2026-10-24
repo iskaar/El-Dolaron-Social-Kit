@@ -21,7 +21,7 @@ const RESPUESTAS = [
 ];
 const SALUDO = { palabras: ['hola', 'buenas', 'buenos', 'buen'],
   texto: 'Hola, gracias por escribir a El Dolarón. Este sábado 24 y domingo 25 es la gran inauguración: $100 de descuento en caja a las primeras 100 compras de $300 o más. Puedo darte el horario, la ubicación o cómo apartar.' };
-const RESPALDO = 'Gracias por escribirnos. Por ahora no tengo esa información. Comunícate al 444 543 7754 en horario de 11 a. m. a 8 p. m.';
+const RESPALDO = 'Gracias por escribirnos. Eso lo confirma el equipo y te responde por este mismo chat, en horario de 11 a. m. a 8 p. m.';
 
 const contiene = (palabras, texto) => palabras.some((p) => new RegExp(`\\b${p}\\b`).test(texto));
 

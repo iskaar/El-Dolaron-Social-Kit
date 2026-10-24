@@ -61,6 +61,8 @@ test('interpreta SCORE y ESCALAR sin mostrarlos al cliente', () => {
   assert.equal(r.escalar, false);
   assert.equal(interpretar('Lo confirmo con el equipo. ESCALAR\nSCORE: 3').escalar, true);
   assert.equal(interpretar('Te esperamos.\nSCORE: 8').escalar, true);
+  // Issue #499: negritas de WhatsApp con un asterisco.
+  assert.equal(interpretar('Tenemos una **Sudadera** ($200) y una **Playera**.\nSCORE: 4').texto, 'Tenemos una *Sudadera* ($200) y una *Playera*.');
 });
 
 test('mensajes de cierre no se contestan con historial', () => {
@@ -77,6 +79,8 @@ test('el prompt solo afirma los datos aprobados', () => {
   // Issue #499: conversa en general, pero el dato de la tienda sigue cerrado a la lista.
   assert.match(PROMPT, /Puedes conversar y orientar en general/);
   assert.match(PROMPT, /ningún otro/);
+  assert.match(PROMPT, /este mismo chat/);
+  assert.match(PROMPT, /un solo asterisco/);
   // Issue #497: la gran inauguración, la ubicación y el apartado son datos aprobados; los envíos se escalan.
   assert.match(PROMPT, /sábado 24 y domingo 25 de octubre de 2026/);
   assert.match(PROMPT, /primeras 100 compras de \$300 o más.*\$100 en caja/);
