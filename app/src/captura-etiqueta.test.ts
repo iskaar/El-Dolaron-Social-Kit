@@ -13,15 +13,16 @@ const turno = capturar.slice(capturar.indexOf('let turnoImpresion'), capturar.in
 const etiquetar = celular.slice(celular.indexOf('const razonSinEtiqueta'), celular.indexOf('async function subir('));
 
 /** El motor de etiquetar con sus dependencias simuladas; `imprimir` es el envío al motor de etiquetas. */
-function entorno(respuestas: any[] = [], imprimirResultado: boolean | (() => boolean) = true, resumen = '') {
+function entorno(respuestas: any[] | ((ruta: string) => any) = [], imprimirResultado: boolean | (() => boolean) = true, resumen = '', relojManual = false) {
   const almacen = new Map<string, string>(), mensajes: [string, string][] = [], envios: any[] = [], sonidos: string[] = [], sesion = new Map<string, any>();
   let lista = true, llamadasApi = 0;
+  const peticiones: string[] = [], timers: (() => void)[] = [];
   const contexto: any = {
     localStorage: { getItem: (k: string) => almacen.get(k) ?? null, setItem: (k: string, v: string) => almacen.set(k, v) },
     mensaje: (t: string, tipo: string) => mensajes.push([t, tipo]), sonar: (t: string) => sonidos.push(t), pintar() {}, sesion,
-    setTimeout: (f: () => void) => f(), Promise, Math, JSON, console,
+    setTimeout: (f: () => void) => { if (relojManual) timers.push(f); else f(); }, Promise, Math, JSON, console,
     etiqueteraLista: () => lista, $: () => ({ textContent: resumen }),
-    api: async () => { llamadasApi++; const r = respuestas.shift(); if (r instanceof Error) throw r; return r; },
+    api: async (ruta: string) => { llamadasApi++; peticiones.push(ruta); const r = typeof respuestas === 'function' ? (respuestas as any)(ruta) : respuestas.shift(); if (r instanceof Error) throw r; return r; },
     imprimir: async (id: string, n: number, opciones: unknown) => { envios.push({ id, n, opciones: { ...(opciones as object) } }); return typeof imprimirResultado === 'function' ? imprimirResultado() : imprimirResultado; },
   };
   const motor = runInNewContext(`${auxiliares}\n${turno}\n({ etiquetar: null, imprimirCaptura, capturaImpresa })`, contexto);
@@ -29,7 +30,7 @@ function entorno(respuestas: any[] = [], imprimirResultado: boolean | (() => boo
   contexto.captura = captura;
   runInNewContext(`${etiquetar}\nglobalThis.etiquetar = etiquetar;`, contexto);
   return { etiquetar: contexto.etiquetar as (llave: string, d: any, n: number) => Promise<void>, mensajes, envios, sonidos, sesion, almacen,
-    desconectar: () => { lista = false; }, motor, llamadas: () => llamadasApi };
+    desconectar: () => { lista = false; }, motor, llamadas: () => llamadasApi, peticiones, timers };
 }
 const pieza = (campos: Record<string, unknown> = {}) => ({ id: 'p1', nombre: 'Lámpara', precio: 24900, stock: 2, estado_analisis: 'listo', ...campos });
 
@@ -42,7 +43,7 @@ test('captura con foto lista al guardar (manifiesto): la etiqueta sale en seguid
 });
 
 test('captura analizada por IA: espera a que quede lista y entonces imprime; el error o la falta de precio van aparte y no imprimen', async () => {
-  const e = entorno([pieza({ estado_analisis: 'pendiente' }), pieza({ estado_analisis: 'pendiente' }), pieza({ stock: 3 })]);
+  const e = entorno([[pieza({ estado_analisis: 'pendiente' })], [], [pieza({ stock: 3 })]]);   // el sondeo por lote devuelve una lista
   await e.etiquetar('p1', pieza({ estado_analisis: 'pendiente', precio: 0, nombre: '' }), 1);
   assert.deepEqual(e.envios, [{ id: 'p1', n: 3, opciones: {} }]);   // usa la existencia vigente al quedar lista
   const f = entorno();
@@ -84,14 +85,67 @@ test('la misma captura no imprime dos veces: ni al reintentar la subida ni tras 
   assert.equal(recargada.envios.length, 1);
 });
 
-test('D2: si el seguimiento del análisis da 403/404 se deja de preguntar y no dice «Ponle precio» (FEP o captura ajena)', async () => {
-  const error = Object.assign(new Error('no'), { status: 404 });
+test('D2: si el seguimiento del análisis da 403 se deja de preguntar y no dice «Ponle precio» (FEP o captura ajena)', async () => {
+  const error = Object.assign(new Error('no'), { status: 403 });
   const e = entorno([error]);
   await e.etiquetar('p1', pieza({ estado_analisis: 'pendiente', precio: 0 }), 1);
   assert.equal(e.llamadas(), 1, 'una sola consulta, no 40');
   assert.deepEqual(e.envios, []);
   assert.match(e.mensajes.at(-1)![0], /No se pudo seguir el análisis/);
   assert.doesNotMatch(e.mensajes.at(-1)![0], /Ponle precio/);
+});
+
+/** Un tick del sondeo (4 s): corre el temporizador pendiente y deja que termine su petición. */
+const tick = async (e: ReturnType<typeof entorno>) => { assert.equal(e.timers.length, 1, 'un solo temporizador'); e.timers.shift()!(); await espera(); };
+const espera = () => new Promise((r) => setImmediate(r));
+
+test('#493: 30 capturas pendientes = 1 petición por tick, y las que quedan listas imprimen por el mismo camino', async () => {
+  const listas = new Set<string>();
+  const e = entorno((ruta: string) => Array.from(listas, (id) => pieza({ id, stock: 2 })), true, '', true);
+  const ids = Array.from({ length: 30 }, (_, i) => `p${i}`);
+  const hechas = ids.map((id) => e.etiquetar(id, pieza({ id, estado_analisis: 'pendiente', precio: 0, nombre: '' }), 1));
+  await espera();
+  assert.equal(e.llamadas(), 0, 'nada se pregunta antes del primer tick');
+  await tick(e);
+  assert.equal(e.llamadas(), 1, '30 pendientes, una petición');
+  assert.match(e.peticiones[0], /^\/api\/borradores\?cambios=\d{4}-\d\d-\d\dT/);
+  for (const id of ids.slice(0, 10)) listas.add(id);
+  await tick(e);
+  assert.equal(e.llamadas(), 2);
+  assert.deepEqual(e.envios.map((x) => x.id).sort(), ids.slice(0, 10).sort());
+  for (const id of ids) listas.add(id);
+  await tick(e);
+  assert.equal(e.llamadas(), 3);
+  await Promise.all(hechas);
+  assert.equal(e.envios.length, 30);
+  assert.equal(e.timers.length, 0, 'sin pendientes el sondeo se apaga');
+});
+
+test('#493: cada pieza conserva sus 40 intentos; las que no quedan listas van aparte y el sondeo se detiene', async () => {
+  const e = entorno(() => [], true, '', true);
+  const hecha = e.etiquetar('p1', pieza({ estado_analisis: 'pendiente' }), 1);
+  for (let i = 0; i < 39; i++) await tick(e);
+  assert.equal(e.llamadas(), 39);
+  assert.equal(e.timers.length, 1);
+  await tick(e);
+  await hecha;
+  assert.equal(e.llamadas(), 40);
+  assert.equal(e.timers.length, 0);
+  assert.deepEqual(e.envios, []);
+  assert.match(e.mensajes.at(-1)![0], /Aparte, sin etiqueta/);
+});
+
+test('#493: una pieza nueva entra al mismo sondeo; sin red se vuelve a preguntar y una descartada termina sin imprimir', async () => {
+  const respuestas: any[] = [new Error('sin red'), [pieza({ id: 'a', estado_analisis: 'descartado' }), pieza({ id: 'b' })]];
+  const e = entorno(() => respuestas.shift(), true, '', true);
+  const a = e.etiquetar('a', pieza({ id: 'a', estado_analisis: 'pendiente' }), 1);
+  await tick(e);
+  const b = e.etiquetar('b', pieza({ id: 'b', estado_analisis: 'pendiente' }), 1);
+  assert.equal(e.timers.length, 1, 'no abre otro sondeo');
+  await tick(e);
+  await Promise.all([a, b]);
+  assert.equal(e.llamadas(), 2);
+  assert.deepEqual(e.envios.map((x) => x.id), ['b']);
 });
 
 test('D3: si el motor rechazó la pieza (vendida o cambió), el aviso dice eso y no «revisa la impresora»', async () => {

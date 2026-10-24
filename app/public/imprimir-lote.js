@@ -36,10 +36,15 @@ const verBoton = document.getElementById('ver-impresas');
 const copiasDe = (p) => Math.min(99, Math.max(1, p.stock ?? 1));
 const hora = (iso) => new Date(iso).toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' });
 
-/** Solo lo que lleva etiqueta: los bins se cobran con la tarjeta de la caja. */
+/**
+ * Solo lo que lleva etiqueta: los bins se cobran con la tarjeta de la caja.
+ * En /inventario (`vista`) baja solo lo pendiente, ya filtrado en el servidor (#493); con «Mostrar impresas» (y en la
+ * pantalla /etiquetas, que enseña también el grado) baja la lista completa.
+ */
 async function cargar() {
   const pedida = Date.now();
-  const respuesta = await fetch('/api/borradores?estado=listo', { cache: 'no-store', signal: AbortSignal.timeout(15000) });
+  const completa = !vista || verImpresas;
+  const respuesta = await fetch(completa ? '/api/borradores?estado=listo' : '/api/etiquetas/pendientes', { cache: 'no-store', signal: AbortSignal.timeout(15000) });
   if (!respuesta.ok) throw new Error(`Error HTTP ${respuesta.status}. Revisa la red y la sesión.`);
   const delTipo = (await respuesta.json())
     .filter((p) => p.destino === 'etiqueta' && p.precio > 0);
@@ -147,7 +152,11 @@ document.getElementById('buscar-codigo').addEventListener('input', (e) => {
   filtroCodigo = e.target.value;
   pintar();
 });
-verBoton.addEventListener('click', () => { verImpresas = !verImpresas; pintar(); });
+verBoton.addEventListener('click', async () => {
+  verImpresas = !verImpresas;
+  if (verImpresas && vista) try { await cargar(); } catch { /* sin red: se enseña lo ya cargado */ }
+  pintar();
+});
 
 // Para piezas que ya traen etiqueta (impresa antes de que existiera esta marca,
 // o en otra computadora). Cada una se marca un milisegundo despues de la

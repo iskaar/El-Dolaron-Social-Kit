@@ -75,15 +75,32 @@ export async function iniciarCelular(ctx,captura) {
    */
   // El motivo real: el aviso que dejó el motor (vendida o cambió), o la impresora.
   const razonSinEtiqueta=()=>/ya no se pued/.test($('resumen').textContent||'')?'la pieza ya no se puede imprimir (vendida o cambió)':etiqueteraLista()?'revisa la impresora':'conecta la impresora';
-  async function etiquetar(llave,d,cantidad){
-    let p=d;
-    for(let i=0;p.estado_analisis==='pendiente'&&i<40;i++){
-      await new Promise(r=>setTimeout(r,4000));
-      // La revisión de la propia captura sirve a El Dolarón y a FEP (el estado del UPC es solo de la tienda).
-      try{p={...p,...await api(`/api/borradores/${d.id}/revision`)};}
-      catch(e){if(e.status===403||e.status===404){p={...p,estado_analisis:'sin-seguimiento'};break;}   // no volver a preguntar 40 veces
-        /* sin red: se vuelve a preguntar */}
+  /**
+   * Un solo sondeo para todas las piezas que esperan su análisis (#493): `GET /api/borradores?cambios=` cada 4 s trae lo que
+   * cambió desde la pendiente más vieja (con traslape), sin importar cuántas sean. Cada pieza conserva sus 40 intentos (≈160 s).
+   * Al quedar sin pendientes el sondeo se apaga solo. Devuelve la pieza con lo último que se supo de ella.
+   */
+  const esperando=new Map();
+  function esperarAnalisis(p){
+    let e=esperando.get(p.id);
+    if(!e){e={p,desde:Date.now(),intentos:0};e.promesa=new Promise(r=>{e.listo=r;});esperando.set(p.id,e);if(esperando.size===1)setTimeout(sondear,4000);}
+    return e.promesa;
+  }
+  async function sondear(){
+    const terminar=(e,cambios)=>{esperando.delete(e.p.id);e.listo({...e.p,...cambios});};
+    let filas=null;
+    try{filas=new Map((await api('/api/borradores?cambios='+encodeURIComponent(new Date(Math.min(...[...esperando.values()].map(e=>e.desde))-120000).toISOString()))).map(f=>[f.id,f]));}
+    catch(e){if(e.status===403||e.status===404){for(const x of [...esperando.values()])terminar(x,{estado_analisis:'sin-seguimiento'});return;}   // no volver a preguntar 40 veces
+      /* sin red: se vuelve a preguntar */}
+    for(const e of [...esperando.values()]){
+      const f=filas?.get(e.p.id);
+      if(f&&f.estado_analisis!=='pendiente')terminar(e,f);
+      else if(++e.intentos>=40)terminar(e,{});
     }
+    if(esperando.size)setTimeout(sondear,4000);
+  }
+  async function etiquetar(llave,d,cantidad){
+    const p=d.estado_analisis==='pendiente'?await esperarAnalisis(d):d;
     const dato=sesion.get(d.id);
     if(p.estado_analisis==='descartado')return;
     if(p.estado_analisis==='sin-seguimiento'){mensaje(`No se pudo seguir el análisis de ${p.nombre||'la pieza'}: revísala en su miniatura.`,'aviso');return;}

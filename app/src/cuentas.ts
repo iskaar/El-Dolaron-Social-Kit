@@ -128,7 +128,7 @@ export function permiso(pathname: string, metodo: string): Regla {
   // La caja muestra la foto de cada pieza escaneada para detectar etiquetas cambiadas (Issue #358).
   if (ruta.startsWith('/api/foto/')) return [...CAPTURA_FEP, ...CAJA];
   // Etiquetas y su registro de enviadas (#440): lo usan la PC y el celular; el cajero no imprime.
-  if (ruta === '/api/etiquetas' || ruta === '/api/etiquetas/enviadas') return CAPTURA_FEP;
+  if (ruta === '/api/etiquetas' || ruta === '/api/etiquetas/enviadas' || ruta === '/api/etiquetas/pendientes') return CAPTURA_FEP;
   // Leer la calibracion lo hacen tambien FEP y el celular; cambiarla, solo quien captura.
   if (ruta === '/api/calibracion') return metodo === 'GET' ? CAPTURA_FEP : CAPTURA;
   if (metodo === 'GET' && (ruta === '/api/piezas' || /^\/api\/piezas\/[^/]+$/.test(ruta))) return CAPTURA_FEP;
