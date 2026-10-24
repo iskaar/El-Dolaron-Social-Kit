@@ -1,0 +1,248 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>El Dolarón — cámara para la PC</title>
+<style>
+  :root { --azul:#16366B; --rojo:#D72B32; --amarillo:#FFD447; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; min-height: 100%; background: #0b1220; color: #fff;
+    font-family: system-ui, -apple-system, sans-serif; touch-action: manipulation; }
+  main { max-width: 480px; margin: 0 auto; padding: 12px 16px calc(16px + env(safe-area-inset-bottom)); display: grid; gap: 12px; }
+  header { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
+  h1 { font-size: 18px; margin: 0; }
+  #escucha { font-size: 13px; color: #9fb0cc; }
+  #escucha.activa::before { content: '● '; color: #4caf50; }
+  #tarjeta { border: 2px solid #2a3a58; border-radius: 12px; padding: 12px; min-height: 64px; }
+  #tarjeta.pide { border-color: var(--amarillo); background: #1b2a4a; }
+  #titulo { font-size: 17px; font-weight: 700; overflow-wrap: anywhere; }
+  #detalle { font-size: 14px; color: #c5d0e4; margin-top: 4px; }
+  #visor { position: relative; aspect-ratio: 4 / 3; background: #000; border-radius: 12px; overflow: hidden; }
+  video, #vista { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; }
+  #vista { display: none; }
+  #zoom { width: 100%; accent-color: #fff; }
+  button { border: 0; border-radius: 10px; padding: 12px 16px; font-size: 16px; font-weight: 700;
+    background: #eef1f6; color: #111; cursor: pointer; }
+  button:disabled { opacity: .5; }
+  button.principal { background: var(--amarillo); }
+  #disparo { width: 88px; height: 88px; border-radius: 50%; margin: 0 auto; display: block; background: #fff;
+    border: 6px solid var(--amarillo); }
+  #disparo[hidden], [hidden] { display: none; }
+  #acciones { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; }
+  #error { color: #ff9d9d; font-size: 14px; min-height: 18px; }
+</style>
+</head>
+<body>
+<main>
+  <header><h1>Cámara para la PC</h1><span id="escucha" role="status">Apagada</span></header>
+  <div id="tarjeta"><div id="titulo">Sin solicitudes.</div><div id="detalle">Toca «Empezar» y deja esta pantalla abierta y encendida.</div></div>
+  <div id="visor"><video id="video" playsinline muted></video><img id="vista" alt="Foto enviada"></div>
+  <input id="zoom" type="range" aria-label="Zoom de la cámara" hidden>
+  <button id="disparo" type="button" aria-label="Tomar foto" hidden></button>
+  <div id="error" role="alert"></div>
+  <div id="acciones">
+    <button id="empezar" class="principal" type="button">Empezar</button>
+    <button id="nopuedo" type="button" hidden>No puedo</button>
+    <button id="reintentar" type="button" hidden>Reintentar envío</button>
+    <button id="pausa" type="button" hidden>Pausar cámara</button>
+    <button id="recargar" type="button" hidden>Entrar de nuevo</button>
+  </div>
+</main>
+<script type="module">
+import { aJpeg } from '/foto.js';
+import { SONDEO_CELULAR_MS, ESPERAS_SUBIDA_MS, FALLOS_SIN_SESION, desfase, abierta, estadoDe, segundosRestantes, reloj, inactivo, formularioFoto } from '/camara-remota.js';
+
+const RUTA = '/api/camara/solicitud';
+const $ = (id) => document.getElementById(id);
+const el = Object.fromEntries(['escucha', 'tarjeta', 'titulo', 'detalle', 'video', 'vista', 'zoom', 'disparo', 'error',
+  'empezar', 'nopuedo', 'reintentar', 'pausa', 'recargar'].map((id) => [id, $(id)]));
+
+// Cada celular tiene su UUID: así el servidor distingue «el mismo celular reintentó» de «otro la tomó».
+let telefono = crypto.randomUUID();
+try { telefono = localStorage.getItem('camara-remota-telefono') || telefono; localStorage.setItem('camara-remota-telefono', telefono); } catch { /* sin localStorage: UUID de esta pestaña */ }
+
+let flujo = null, temporizador = null, activo = false, ocupado = false, bloqueado = false;
+let actual = null;        // solicitud que este celular tomó
+let foto = null;          // Blob en memoria: nunca se escribe en cola-fotos.js ni en IndexedDB
+let desfaseMs = 0, ultimaActividad = Date.now(), fallos = 0, ultimoId = '';
+
+const decir = (titulo, detalle = '', pide = false) => {
+  el.titulo.textContent = titulo; el.detalle.textContent = detalle; el.tarjeta.classList.toggle('pide', pide);
+};
+const post = (ruta, cuerpo) => fetch(`${RUTA}/${ruta}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(cuerpo) });
+const pausar = (ms) => new Promise((ok) => setTimeout(ok, ms));
+
+/* ---------- cámara (copiada de captura.html; el zoom usa su propia clave) ---------- */
+
+async function abrirCamara() {
+  if (flujo) return true;
+  try {
+    flujo = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: { ideal: 'environment' }, width: { ideal: 1920 }, aspectRatio: { ideal: 4 / 3 }, zoom: true }, audio: false });
+    el.video.srcObject = flujo;
+    await el.video.play().catch(() => {});
+    prepararZoom(flujo.getVideoTracks()[0]);
+    el.pausa.textContent = 'Pausar cámara';
+    el.error.textContent = '';
+    return true;
+  } catch {
+    el.error.textContent = 'No se pudo abrir la cámara. Revisa los permisos del navegador.';
+    return false;
+  }
+}
+function cerrarCamara() {
+  flujo?.getTracks().forEach((t) => t.stop());
+  flujo = null; el.video.srcObject = null; el.zoom.hidden = true;
+  el.pausa.textContent = 'Reanudar cámara';
+}
+function prepararZoom(pista) {
+  const rango = pista?.getCapabilities?.().zoom;
+  el.zoom.hidden = !rango || rango.max <= rango.min;
+  if (el.zoom.hidden) return;
+  let guardado = NaN;
+  try { guardado = Number(localStorage.getItem('camara-remota-zoom') ?? NaN); } catch { /* lo más abierto */ }
+  Object.assign(el.zoom, { min: rango.min, max: rango.max, step: rango.step || 0.1 });
+  el.zoom.value = Number.isFinite(guardado) ? Math.min(rango.max, Math.max(rango.min, guardado)) : rango.min;
+  const aplicar = () => pista.applyConstraints({ advanced: [{ zoom: Number(el.zoom.value) }] }).catch(() => {});
+  el.zoom.oninput = () => { aplicar(); try { localStorage.setItem('camara-remota-zoom', el.zoom.value); } catch { /* idem */ } };
+  aplicar();
+}
+async function mantenerPantalla() {
+  try { await navigator.wakeLock?.request('screen'); } catch { /* sin Wake Lock: queda el tiempo de pantalla del sistema */ }
+}
+
+/* ---------- sondeo: solo con la pestaña visible; se apaga tras 60 min sin solicitudes ---------- */
+
+function parar(mensaje) {
+  activo = false; clearTimeout(temporizador);
+  el.escucha.classList.remove('activa'); el.escucha.textContent = mensaje;
+}
+function seguir() {
+  if (activo) return;
+  activo = true; fallos = 0; ultimaActividad = Date.now();
+  el.escucha.classList.add('activa'); el.escucha.textContent = 'Escuchando';
+  el.empezar.hidden = true;
+  sondear();
+}
+async function sondear() {
+  clearTimeout(temporizador);
+  if (!activo || document.hidden) return;
+  try {
+    const r = await fetch(RUTA, { cache: 'no-store' });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.error);
+    fallos = 0; el.escucha.classList.add('activa'); el.escucha.textContent = 'Escuchando'; el.recargar.hidden = true;
+    desfaseMs = desfase(d.ahora, Date.now());
+    await atender(d.solicitud);
+  } catch {
+    // Con la sesión de Access vencida el fetch cae en la página de acceso y no hay JSON.
+    if (++fallos >= FALLOS_SIN_SESION) {
+      el.escucha.classList.remove('activa'); el.escucha.textContent = 'Sin conexión o sesión cerrada';
+      el.recargar.hidden = false;
+    }
+  }
+  if (activo && !ocupado && !actual && inactivo(ultimaActividad, Date.now())) {
+    parar('Pausado por inactividad');
+    decir('Toca para seguir escuchando.');
+    el.empezar.textContent = 'Seguir escuchando'; el.empezar.hidden = false;
+    return;
+  }
+  if (activo && !document.hidden) temporizador = setTimeout(sondear, SONDEO_CELULAR_MS);
+}
+
+async function atender(s) {
+  if (ocupado) return;
+  if (abierta(s)) ultimaActividad = Date.now();
+  if (actual) {
+    if (s && s.id === actual.id && abierta(s)) return mostrarTiempo(s);
+    soltar(!s || s.id !== actual.id ? 'La PC pidió otra foto.' : s.estado === 'cancelada' ? (s.motivo || 'La PC la canceló.') : 'Venció.');
+    actual = null;
+  }
+  if (!abierta(s) || s.id === ultimoId) return;
+  const r = await post(`${s.id}/tomar`, { telefono });
+  const d = await r.json();
+  ultimoId = s.id;
+  if (!r.ok) return soltar(d.error ?? 'No se pudo tomar la solicitud.');
+  navigator.vibrate?.(200);
+  actual = d.solicitud;
+  if (!await abrirCamara()) return;
+  el.disparo.hidden = false; el.nopuedo.hidden = false; el.pausa.hidden = false;
+  decir(`Foto para: ${actual.titulo || 'pieza nueva'}`, '', true);
+  mostrarTiempo(actual);
+}
+function mostrarTiempo(s) {
+  el.detalle.textContent = estadoDe(s, desfaseMs, Date.now()) === 'vencida' ? 'Venció, pero puedes enviarla.'
+    : `Vence en ${reloj(segundosRestantes(s, desfaseMs, Date.now()))}`;
+}
+function soltar(motivo) {
+  el.disparo.hidden = true; el.nopuedo.hidden = true; el.reintentar.hidden = true; foto = null;
+  decir('Sin solicitudes.', motivo || 'Deja esta pantalla abierta y encendida.');
+}
+
+/* ---------- disparo y envío ---------- */
+
+async function enviar() {
+  ocupado = true; el.disparo.disabled = true; el.reintentar.hidden = true; el.error.textContent = '';
+  decir('Enviando…', '', true);
+  try {
+    // 3 intentos con espera creciente; reenviar con el mismo id de pieza no duplica nada.
+    for (const espera of ESPERAS_SUBIDA_MS) {
+      await pausar(espera);
+      try {
+        const subida = await fetch('/api/borradores', { method: 'POST', body: formularioFoto(actual, foto) });
+        if (!subida.ok) continue;
+        const lista = await post(`${actual.id}/lista`, { telefono });
+        if (lista.ok) return terminarEnvio();
+        if (lista.status === 404) break;
+      } catch { /* sin red: se reintenta */ }
+    }
+    decir('No se pudo enviar', 'Revisa la red y toca «Reintentar envío», o «No puedo».', true);
+    el.reintentar.hidden = false;
+  } finally { ocupado = false; el.disparo.disabled = false; }
+}
+function terminarEnvio() {
+  const miniatura = URL.createObjectURL(foto);
+  el.vista.src = miniatura; el.vista.style.display = 'block';
+  decir('Enviada ✓'); navigator.vibrate?.(80);
+  el.disparo.hidden = true; el.nopuedo.hidden = true; actual = null; foto = null; ultimaActividad = Date.now();
+  setTimeout(() => { el.vista.style.display = 'none'; URL.revokeObjectURL(miniatura); decir('Sin solicitudes.', 'Deja esta pantalla abierta y encendida.'); }, 2000);
+}
+
+el.disparo.addEventListener('click', async () => {
+  if (!actual || ocupado || !el.video.videoWidth) return;
+  foto = await aJpeg(el.video, el.video.videoWidth, el.video.videoHeight);
+  enviar();
+});
+el.reintentar.addEventListener('click', enviar);
+el.nopuedo.addEventListener('click', async () => {
+  if (!actual || ocupado) return;
+  await post(`${actual.id}/cancelar`, { motivo: 'No puedo' }).catch(() => {});
+  actual = null; soltar('Avisé a la PC.');
+});
+el.pausa.addEventListener('click', () => { if (flujo) cerrarCamara(); else abrirCamara(); });
+el.recargar.addEventListener('click', () => location.reload());
+
+el.empezar.addEventListener('click', async () => {
+  // Chrome exige un gesto para la cámara y el Wake Lock: por eso el botón.
+  if (navigator.locks && !bloqueado) {
+    // Una sola pestaña escucha por celular; el bloqueo se suelta al cerrarla.
+    bloqueado = await new Promise((ok) => navigator.locks.request('camara-remota', { ifAvailable: true },
+      (candado) => { ok(!!candado); return candado ? new Promise(() => {}) : undefined; }));
+    if (!bloqueado) { el.error.textContent = 'Ya hay otra pestaña de este celular escuchando.'; return; }
+  }
+  if (!await abrirCamara()) return;
+  mantenerPantalla();
+  el.pausa.hidden = false;
+  decir('Sin solicitudes.', 'Deja esta pantalla abierta y encendida.');
+  seguir();
+});
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) { clearTimeout(temporizador); return; }
+  if (!activo) return;
+  mantenerPantalla();
+  sondear();
+});
+</script>
+</body>
+</html>

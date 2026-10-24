@@ -57,6 +57,7 @@ const fecha = (iso) => new Date(iso).toLocaleString('es-MX', { dateStyle: 'mediu
 
 /** Qué hacer con la venta y cómo se llama el botón para marcarla. */
 function queHacer(v) {
+  if (v.estado === 'cancelada' && v.conflicto) return ['cancelada', 'Mercado Libre ya canceló esta venta. No había pieza que apartar: no hay nada que enviar.', 'Enterado'];
   if (v.estado === 'cancelada') return ['cancelada', 'Mercado Libre canceló esta venta: no la envíes y regresa la pieza al piso.', 'Ya la regresé'];
   if (v.conflicto) return ['mal', 'No había existencia en tienda: cancela la venta en Mercado Libre y avisa al comprador.', 'Ya la cancelé en ML'];
   return ['', 'Sácala del piso de venta y empácala para el envío.', 'Ya la aparté'];

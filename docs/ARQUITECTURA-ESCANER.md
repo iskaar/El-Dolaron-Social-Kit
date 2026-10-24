@@ -162,6 +162,8 @@ El módulo del código de barras ya no es un cálculo en milímetros de CSS: la 
 lo dibuja con el comando `BARCODE` de TSPL, controlado por `MODULO` (puntos) en
 `etiquetera.js`. Punto de partida `MODULO = 2`; si el lector no engancha, subir a 3.
 
+**Grado en la etiqueta (Issue #453).** Solo MG usa grados; Ropa omite recuadro, letra y palabra también al reimprimir (Isaac, 23/10/2026). La etiqueta de MG imprime la letra del grado (A, B o C, de `estado_fisico`) en un recuadro de 44 × 44 puntos a la altura del precio, en el borde derecho o a la izquierda del precio de lista tachado (comandos `BOX` y `TEXT` fuente "4"); si el grado no es A, su palabra («Danado», «Liquidacion») se agrega al pie cuando cabe. No se movió ningún otro elemento ni el corrimiento o el módulo calibrados. Cambiar el grado de una pieza ya etiquetada la marca como desactualizada (`etiquetaVigente`); las marcas guardadas antes del grado se leen como A. Requiere prueba física en la AE240.
+
 Esto se verifica con el lector leyendo papel, no con una captura de pantalla. Si esta
 unidad (u otra) hay que volver a interrogarla, `/sonda-impresora` sigue desplegada.
 
@@ -222,8 +224,8 @@ Antes del envío automático se guarda su UUID en el navegador. Si BLE falla o l
 página se cierra a medias, la sesión se pausa: revisar el papel y la foto, imprimir
 manualmente esa pieza o marcarla como impresa, y retomar. Un envío completo se
 marca con las funciones existentes y desaparece de la cola. Las pestañas del mismo
-navegador coordinan el consumidor con Web Locks; las marcas son por navegador,
-como antes, así que se usa **una sola computadora/navegador** para esta sesión.
+navegador coordinan el consumidor con Web Locks; entre dispositivos (PC y celular) las
+marcas se comparten con el reclamo de `etiquetas_enviadas` (Issue #440, abajo).
 La AE240 no confirma que salió el papel: «Mostrar impresas» / «No salió desde aquí»
 sigue siendo la recuperación física. No se ha cambiado ni validado de nuevo su
 calibración en hardware real.
@@ -242,9 +244,9 @@ condición actuales desde `GET /api/borradores/:id/revision`; PATCH cambia únic
 esos campos, sin reponer stock ni cambiar código. API y controles disponibles en sandbox y producción.
 
 «Eliminar captura» requiere dos toques y conexión. DELETE de esa misma ruta deja
-el UUID con `estado_analisis = descartado`, stock/precio cero y sin foto; retiene el
+el UUID con `estado_analisis = descartado`, stock/precio cero; con código conserva su foto (#439). Retiene el
 UUID para que un POST retrasado no la reviva. No aparece en revisión ni etiquetas.
-El archivo de R2 se borra después de quitar su referencia; análisis y correcciones
+Sin código, el archivo de R2 se borra después de quitar su referencia; análisis y correcciones
 no reabren un descarte. El handler comprueba identidad y ventana de 24 h en las
 mutaciones; rechaza eliminar piezas con venta o publicación. No hay migración nueva.
 
@@ -263,6 +265,91 @@ alta que la captura sin foto: pieza `listo`, `ED-`, a `/etiquetas`. El precio nu
 el cliente. Cada escaneo es una pieza nueva (subirle stock a una pieza ya impresa no imprime
 etiquetas nuevas). La tabla se llena con `tools/importar_manifiesto.py`. Detalle y decisiones:
 [PLAN-MANIFIESTO-UPC.md](PLAN-MANIFIESTO-UPC.md).
+
+## Etiquetas desde el celular en /inventario (Issue #440)
+
+La AE240 se maneja por Web Bluetooth (Chrome de Android) con la misma `etiquetera.js` (fff0/fff2 + TSPL; no cambia el
+protocolo ni la calibración). iPhone queda fuera: Safari no tiene Web Bluetooth. Isaac decidió el 23/10 que los
+**capturistas también imprimen desde su celular**, también en el host `captura.viste.com.mx`. Se reconstruyó sobre
+/inventario (el PR #443, hecho para /escanear, queda reemplazado): el motor es el mismo de la PC (`imprimir-lote.js`),
+la pestaña Imprimir y el chip de impresora funcionan igual, y la impresora se conecta también desde Capturar.
+
+- **Calibración.** Vive en `config` (corrimiento y ancho de barra, Issue #89). `etiquetera.js` la pide a
+  `GET /api/calibracion`, que devuelve solo esas dos claves (el host del celular no lee el resto de `config`);
+  `localStorage` queda como copia para imprimir sin red. El celular nunca calibra: `PUT /api/calibracion` sigue siendo
+  de la computadora.
+- **No imprimir doble.** El estado «impresa» era `localStorage` de cada navegador. La migración 049 crea
+  `etiquetas_enviadas` (una fila por pieza: precio, precio de lista efectivo, nombre y talla que dice la etiqueta, hora
+  y origen `pc`/`celular`; no guarda el grado). Antes de mandar una pieza, el motor (manual o automático, PC o celular)
+  la **reclama** con `POST /api/etiquetas/enviadas`: una sola sentencia `insert … on conflict do update where` con todas
+  sus condiciones decide, y `changes` dice quién ganó (el batch no protege lecturas anteriores ni aborta con cero filas,
+  por eso no hay lectura previa). El primero imprime; el otro la omite, lo dice y adopta la marca. Vuelve a poder
+  reclamarse si lo que dice la etiqueta cambió (misma regla que `etiquetaVigente`: precio, tachado, nombre, talla) o si
+  la impresión es explícita: `reimprimir` (Reimprimir de Buscar y de la ficha, +1 de existencia, reetiquetar tras juntar),
+  la fila ya impresa que se elige en la lista, o el cambio solo de grado en mercancía general. Reescanear una pieza ya
+  reclamada con la etiqueta igual no imprime otra vez; +1 imprime 1 etiqueta de la unidad nueva (Sumar N, #474: un ajuste de N y N etiquetas).
+  La preparación (`POST /api/etiquetas`) devuelve `etiqueta_version`; el reclamo de una pieza puede exigir que siga igual.
+  **Una llamada por lote (#492).** `POST /api/etiquetas` con `reclamar: true` (+ `reimprimir`, `origen`) prepara y reclama
+  en la misma petición, exigiendo la `etiqueta_version` que acaba de leer, y responde `{ piezas, reclamadas, ahora, marcas }`
+  (sin `reclamar` sigue devolviendo la lista). `imprimir()` reclama así el tramo de hasta 100 antes del bucle BLE; solo las
+  de grado distinto o elegidas de la lista, que dependen de la marca local, piden una segunda llamada con `reimprimir`. Lo reclamado que
+  no llega a mandarse (corte, alto, pieza cambiada) se libera al terminar, y queda en `localStorage` bajo un candado web para que la
+  siguiente apertura de la página lo suelte si ésta se cerró a media tanda. Preparar ya exigía red: sin red no se imprime
+  ni una pieza suelta.
+- **Si no sale.** Si la impresora falla o se detiene, el motor **libera** su propio reclamo (`DELETE` con
+  `etiquetas_en: { id: ahora }`, obligatorio: la fila se borra solo si sigue siendo ESE reclamo, así un dispositivo nunca
+  suelta el reclamo posterior de otro; sin `etiquetas_en` el servidor responde 400). `ahora` es la hora de ese reclamo,
+  que el servidor devuelve junto a `reclamadas` (no se relee de `marcas`). La pieza vuelve a quedar pendiente. Una
+  reimpresión forzada que falla, o un envío parcial (ya salió alguna etiqueta), **no** se liberan: las etiquetas pegadas
+  siguen siéndolo y lo que falta se continúa como reimpresión, para que el reclamo lo siga cubriendo.
+  «No salió desde aquí» actúa sobre la pieza y las siguientes **que mandó este navegador** (marca `propia`); lo que se
+  adoptó de otro dispositivo (`propia: false`) se suelta desde el dispositivo que lo imprimió. Si la base no responde al
+  liberar, el aviso lo dice. Si la página se cierra a medias, el reclamo queda y se recupera con «No salió desde aquí».
+  Las piezas sin existencia (vendidas) no se listan y, si llegan a un lote, se saltan y se cuentan.
+- **Sin red.** `localStorage` es respaldo: si el navegador reporta que no hay red (o `fetch` falla con `TypeError`) al
+  reclamar, se imprime con la marca local y la siguiente carga de la lista la sube (también se suben las marcas de antes
+  del registro). Solo para una pieza suelta: en un lote de varias, sin reclamo se detiene en esa pieza (la red pudo caerse justo
+  después de preparar).
+  Un tiempo agotado o un 5xx no cuentan como «sin red»: no se imprime a ciegas. Es el único caso en que dos dispositivos
+  podrían coincidir. Tras el primer deploy, abrir Imprimir en la PC una vez siembra la base con sus marcas.
+- **Capturas con foto en el celular.** Como en /escanear, la etiqueta sale sola al guardar (#464): una captura que nace
+  `listo` con precio (manifiesto, ropa con precio) imprime al subir; una que se analiza espera con `GET /api/borradores/upc/:id`
+  y imprime en cuanto queda `listo`; `error`, `pendiente` agotado o sin precio van aparte («Aparte, sin etiqueta»). Va por el
+  mismo reclamo y se recuerda por captura en el teléfono (`inventario-autoimpresas`), así una subida repetida no reimprime.
+  Una captura sumada a una pieza existente imprime 1 por unidad sumada (como +1). Sin impresora conectada queda «falta
+  etiqueta» y la alerta del modo enfocado, también en el host del capturista. Una captura `listo` con UPC ya es vendible: su
+  existencia se corrige por el ajuste auditado `POST /api/piezas/:id/existencia` (`fijar_a` + `esperado` = lo que se vio +
+  renglón `correccion`); si cambió (venta, apartado, otro ajuste) responde 409 y se pide revisar en Buscar. La corrección de
+  captura heredada (`PATCH /api/borradores/:id/existencia`) no escribe existencia absoluta en una pieza lista con UPC. Si la
+  existencia sube y la etiqueta anterior ya salió (marca local, adoptada o de la base), salen las que faltan. El seguimiento
+  del análisis usa `GET /api/borradores/:id/revision` (sirve también a FEP) y deja de preguntar ante 403/404.
+- **Host del capturista (denegar por omisión).** Se agregan solo: `/inventario-imprimir.js`, `/imprimir-lote.js`,
+  `GET /api/calibracion`, `POST /api/etiquetas` y `POST`/`DELETE /api/etiquetas/enviadas`. Siguen cerrados ahí:
+  `PUT /api/calibracion`, `GET /api/etiquetas*`, `/etiquetas`, `/bandas`, calibrar y `/api/config`. El servidor exige
+  rol de dueño, capturista o FEP y limita todo al propietario de quien pide (FEP solo sus piezas). El cajero y los demás
+  roles no imprimen. La automática y las bandas siguen siendo de la PC.
+- **Reconexión.** `reconectarEtiquetera()` usa `navigator.bluetooth.getDevices()` (solo Chrome reciente) al abrir
+  /inventario en el celular; con la impresora apagada se rinde a los 8 s y queda el chip para conectar. Una sola
+  conexión BLE a la vez: con la PC conectada a la misma impresora, el celular no podrá conectar.
+- **Migración.** `migracion-049-etiqueta-impresa.sql` ya corrió en sandbox y producción el 23/10 (su número quedó
+  salteado frente a 050–053; no se renumera).
+
+## Cámara remota: la PC pide la foto y el celular la toma (Issue #444)
+
+Un buzón por persona (`camara_remota`, llave primaria `correo`; PC y celular entran con la misma
+cuenta). La PC crea la solicitud (`PUT /api/camara/solicitud`, UUID propio, reintento idempotente) y el
+celular en `/camara-remota` sondea cada ~2 s solo con la pestaña visible (se apaga tras 60 min sin
+solicitudes; Wake Lock si existe), la toma (`tomar`), sube la foto por el `POST /api/borradores` de
+siempre (`solo_foto` sobre una pieza existente, o alta de pieza nueva) y cierra con `lista`. El
+servidor **no cree** el `lista`: comprueba que la pieza del propietario tiene foto escrita desde que
+se tomó la solicitud. `vencida` se deriva de `vence_en`, sin cron. `PUT` solo existe en el host de
+la PC; `captura.viste.com.mx` solo ve `GET`, `tomar`, `lista` y `cancelar`. `solo_foto` sobre una
+pieza inexistente crearía otra, por eso `PUT` y `tomar` verifican que la pieza exista y no esté
+descartada.
+
+Excepciones aceptadas por Isaac (22/10): la foto remota vive solo en memoria del celular y no pasa
+por `cola-fotos.js` (la cola reprocesaría toda foto como pieza nueva); y repetir sobrescribe la
+foto como «Retomar foto». Requiere red y hardware real (prueba física pendiente).
 
 ## Orden de entrega
 

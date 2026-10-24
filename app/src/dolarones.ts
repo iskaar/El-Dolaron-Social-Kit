@@ -8,6 +8,7 @@
  */
 
 import { dolaronesGanados, MINIMO_REGALO } from '../public/venta.js';
+import { MINIMO_COMPRA, D_PREMIO, pendienteDe, sentenciasDeLiberacion, sentenciasDeReversoReferido } from './referidos.ts';
 
 // America/Mexico_City no tiene horario de verano desde 2022: siempre UTC-6.
 const MX = -6 * 3_600_000;
@@ -51,7 +52,7 @@ export interface Lote {
 export function repartir(lotes: Lote[], importe: number, ahora: string, total: number): { id: string; importe: number }[] | null {
   const usables = lotes
     .filter((l) => l.restante > 0 && l.disponible_desde <= ahora && l.vence_en > ahora)
-    .filter((l) => l.origen === 'compra' || (l.origen === 'regalo' && total >= MINIMO_REGALO))
+    .filter((l) => l.origen === 'compra' || l.origen === 'referido' || (l.origen === 'regalo' && total >= MINIMO_REGALO))
     .sort((a, b) => a.vence_en.localeCompare(b.vence_en) || a.id.localeCompare(b.id));
   const reparto: { id: string; importe: number }[] = [];
   let falta = importe;
@@ -176,7 +177,7 @@ export async function buscarSocio(url: URL, env: Env): Promise<Response> {
   return json(await socioConSaldo(env, cliente));
 }
 
-type Resultado = { ok: true; sentencias: D1PreparedStatement[]; ganados: number } | { ok: false; status: number; error: string };
+type Resultado = { ok: true; sentencias: D1PreparedStatement[]; ganados: number; referido?: number } | { ok: false; status: number; error: string };
 
 /**
  * Lo que una venta le hace al saldo, como sentencias para el MISMO batch que
@@ -234,7 +235,7 @@ export async function sentenciasDeVenta(env: Env, p: {
       sentencias.push(
         env.DB.prepare(
           `update dolarones_lotes set restante = case when vence_en > ? and disponible_desde <= ?
-           and (origen = 'compra' or (origen = 'regalo' and ? >= ?)) then restante - ? else -1 end
+           and (origen in ('compra', 'referido') or (origen = 'regalo' and ? >= ?)) then restante - ? else -1 end
            where id = ?`,
         ).bind(ahoraIso, ahoraIso, p.total, MINIMO_REGALO, parte.importe, parte.id),
         env.DB.prepare(
@@ -259,7 +260,11 @@ export async function sentenciasDeVenta(env: Env, p: {
       ).bind(cliente.id, lote, p.ventaId, ganados, p.autor, ahoraIso),
     );
   }
-  return { ok: true, sentencias, ganados };
+  // Referidos (#489): la primera compra con $150 en dinero libera 25 D al nuevo y 25 D a quien lo invitó.
+  const referente = p.total - p.dolarones >= MINIMO_COMPRA ? await pendienteDe(env, cliente.id) : null;
+  if (referente) sentencias.push(...sentenciasDeLiberacion(env, {
+    ventaId: p.ventaId, nuevoId: cliente.id, referenteId: referente, autor: p.autor, ahora: p.ahora }));
+  return { ok: true, sentencias, ganados, referido: referente ? D_PREMIO : 0 };
 }
 
 /**
@@ -299,6 +304,8 @@ export async function sentenciasDeCancelacion(env: Env, ventaId: string, autor: 
       when importe + coalesce((select sum(importe) from dolarones_movimientos
         where lote_id = dolarones_lotes.id and tipo = 'reverso_compra'), 0) = 0
       then 0 else -1 end where venta_id = ?`).bind(ventaId),
+    // Si esta venta liberó un referido (#489), sus 25 + 25 D se retiran y el referido vuelve a pendiente.
+    ...sentenciasDeReversoReferido(env, ventaId, autor, ahora),
   ];
 }
 

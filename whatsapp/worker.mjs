@@ -1,4 +1,5 @@
-import { respuestaPara } from './respuestas.mjs';
+import { esSimple, respuestaFija, respuestaPara } from './respuestas.mjs';
+import { enRafaga, MAX_TARJETAS, recortar, reservarModelo, SIN_CUOTA } from './limites.mjs';
 import { esFinDeConversacion, estaPausado, generarRespuesta, guardarTurno, interpretar, leerHistorial, pausar, RETENCION_SEGUNDOS } from './asistente.mjs';
 
 const encoder = new TextEncoder();
@@ -96,8 +97,10 @@ export default {
 };
 
 /**
- * Responde a cada mensaje del cliente una sola vez: con el asistente si hay clave y el modelo
- * contesta; si no, con el FAQ fijo. Si el asistente escala, la conversacion queda pausada.
+ * Responde a cada mensaje del cliente una sola vez. Un mensaje corto que cae en el FAQ (saludo,
+ * horario, ubicación, promo) se contesta fijo, sin modelo (Issue #499); el resto va al asistente
+ * si hay clave y el modelo contesta, y si no, al FAQ fijo. Si el asistente escala, la
+ * conversacion queda pausada.
  */
 async function responderMensajes(event, env) {
   if (!env.WHATSAPP_ACCESS_TOKEN || !env.WHATSAPP_PHONE_NUMBER_ID) return;
@@ -112,6 +115,8 @@ async function responderMensajes(event, env) {
         await env.EVENTS.put(marca, '1', { expirationTtl: 7 * 86400 });
         const de = mensaje.from;
         if (await estaPausado(env.EVENTS, de)) continue;
+        // Issue #503: un número que manda demasiado por minuto no recibe nada (ni FAQ): corta bucles y floods.
+        if (await enRafaga(env.EVENTS, de)) { console.log(JSON.stringify({ event: 'whatsapp_limite', motivo: 'rafaga' })); continue; }
 
         if (mensaje.type === 'image') {
           await enviarYGuardar(env, de, IMAGEN);
@@ -122,16 +127,39 @@ async function responderMensajes(event, env) {
         if (esFinDeConversacion(texto, historial.length > 0)) continue;
 
         let respuesta;
-        try {
-          if (!env.ANTHROPIC_API_KEY) throw new Error('sin clave');
-          const consultar = env.TIENDA && env.ASISTENTE_TOKEN ? (q) => consultarTienda(env, q) : null;
-          respuesta = interpretar(await generarRespuesta(historial, texto, env.ANTHROPIC_API_KEY, consultar));
-        } catch {
-          respuesta = { texto: respuestaPara(texto), puntaje: 0, escalar: false };
+        let tarjetas = [];
+        const fija = esSimple(texto) ? respuestaFija(texto) : null;
+        if (fija) {
+          respuesta = { texto: fija, puntaje: 0, escalar: false };
+        } else {
+          // Issue #503: cuota del modelo por número y por día para toda la tienda; el FAQ fijo no la gasta.
+          const limite = env.ANTHROPIC_API_KEY ? await reservarModelo(env.EVENTS, de) : null;
+          if (limite) console.log(JSON.stringify({ event: 'whatsapp_limite', motivo: limite }));
+          try {
+            if (!env.ANTHROPIC_API_KEY) throw new Error('sin clave');
+            if (limite === 'global') throw new Error('cuota global');
+            if (limite === 'numero') respuesta = { texto: SIN_CUOTA, puntaje: 0, escalar: false };
+            else {
+              // Issue #499 (B.4): las piezas con foto pública de la última búsqueda van como tarjetas.
+              const consultar = env.TIENDA && env.ASISTENTE_TOKEN ? async (nombre, entrada) => {
+                const resultado = await consultarTienda(env, nombre, entrada);
+                if (nombre === 'buscar_productos') tarjetas = (resultado.productos ?? []).filter((p) => p.foto && p.codigo).slice(0, MAX_TARJETAS);
+                return resultado;
+              } : null;
+              respuesta = interpretar(await generarRespuesta(historial, recortar(texto), env.ANTHROPIC_API_KEY, consultar));
+            }
+          } catch (error) {
+            // Issue #499: sin esto el fallo del modelo era invisible y el cliente solo veía el respaldo.
+            // Solo el motivo corto (p. ej. «modelo 401»), nunca la clave ni el texto del cliente.
+            console.error(JSON.stringify({ event: 'whatsapp_modelo_fallo', motivo: String(error?.message ?? error).slice(0, 120) }));
+            respuesta = { texto: respuestaPara(texto), puntaje: 0, escalar: false };
+            tarjetas = [];
+          }
         }
         if (!respuesta.texto) continue;
         if (!await enviarYGuardar(env, de, respuesta.texto)) continue;
         await guardarTurno(env.EVENTS, de, texto, respuesta.texto);
+        for (const p of tarjetas) await enviarYGuardar(env, de, `${p.nombre} · ${p.precio} · ${p.codigo}\n${p.url}`, p.foto);
         if (respuesta.escalar) await pausar(env.EVENTS, de);
       }
     }
@@ -140,21 +168,39 @@ async function responderMensajes(event, env) {
 
 const IMAGEN = 'Recibimos tu imagen. Escríbenos tu pregunta por texto y te ayudamos.';
 
-/** Consulta de productos en la app principal (Issue #296). Solo nombre y precio; el token nunca sale a logs. */
-async function consultarTienda(env, q) {
-  const respuesta = await env.TIENDA.fetch(new Request(`https://tienda.interno/api/asistente/productos?q=${encodeURIComponent(q)}`, {
+// Herramientas que atiende la tienda (Issue #296, #499): nombre → ruta de solo lectura y sus parámetros.
+const RUTAS = {
+  buscar_productos: ['productos', { q: 'q', categoria: 'categoria', talla: 'talla', precio_min: 'min', precio_max: 'max' }],
+  cupos_promocion: ['promocion', {}],
+};
+
+/** Consulta de solo lectura en la app principal. Otra herramienta, error; el token nunca sale a logs. */
+async function consultarTienda(env, nombre, entrada) {
+  const ruta = Object.hasOwn(RUTAS, nombre) ? RUTAS[nombre] : null;
+  if (!ruta) throw new Error('herramienta desconocida');
+  const params = new URLSearchParams();
+  for (const [de, a] of Object.entries(ruta[1])) {
+    const valor = entrada?.[de];
+    if (valor !== undefined && valor !== null && valor !== '') params.set(a, String(valor));
+  }
+  const consulta = String(params) ? `?${params}` : '';
+  const respuesta = await env.TIENDA.fetch(new Request(`https://tienda.interno/api/asistente/${ruta[0]}${consulta}`, {
     headers: { 'x-asistente-token': env.ASISTENTE_TOKEN },
   }));
   if (!respuesta.ok) throw new Error(`tienda ${respuesta.status}`);
   return respuesta.json();
 }
 
-/** Envia el texto por Meta y lo registra para la vista de mensajes. Nunca registra el texto en logs. */
-async function enviarYGuardar(env, para, texto) {
+/**
+ * Envia el texto por Meta y lo registra para la vista de mensajes. Nunca registra el texto en logs.
+ * Con `foto` manda una imagen por enlace y el texto como pie (tarjeta de producto, #499).
+ */
+async function enviarYGuardar(env, para, texto, foto = null) {
   const envio = await fetch(`https://graph.facebook.com/v26.0/${env.WHATSAPP_PHONE_NUMBER_ID}/messages`, {
     method: 'POST',
     headers: { authorization: `Bearer ${env.WHATSAPP_ACCESS_TOKEN}`, 'content-type': 'application/json' },
-    body: JSON.stringify({ messaging_product: 'whatsapp', to: para, type: 'text', text: { body: texto } }),
+    body: JSON.stringify({ messaging_product: 'whatsapp', to: para,
+      ...(foto ? { type: 'image', image: { link: foto, caption: texto } } : { type: 'text', text: { body: texto } }) }),
   });
   if (!envio.ok) {
     console.error(JSON.stringify({ event: 'whatsapp_reply_failed', status: envio.status }));

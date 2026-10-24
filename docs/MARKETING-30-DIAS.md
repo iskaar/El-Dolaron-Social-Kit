@@ -4,6 +4,8 @@ Fecha del registro: 18 de septiembre de 2026. Moneda: pesos mexicanos (MXN). Zon
 
 Actualización de conservación: 20 de septiembre de 2026. Publicación completa en este repositorio público autorizada expresamente por el propietario, incluyendo meta de ventas, presupuesto y estrategia. Seguimiento: [Issue #28](https://github.com/iskaar/El-Dolaron-Social-Kit/issues/28).
 
+**Actualización de marca (22/10/2026, Issue #436):** el manual de marca ([docs/marca/VOZ.md](marca/VOZ.md), §7) fija el WhatsApp oficial (444 543 7754), el descriptor «Mercancía y ropa americana», el lema «Calidad americana, precio mexicano.», el horario «11 a. m. a 8 p. m.», el apartado de 15 % por 7 días y los envíos de los viernes. Donde este documento conserva propuestas históricas distintas, se marcan como corregidas y se deja el contexto.
+
 Este documento conserva la información sustantiva de la conversación de planificación: datos confirmados por el propietario, condiciones comerciales que desea aplicar, investigación, propuesta estratégica y pendientes. No es una transcripción literal del chat ni indica que las campañas o políticas ya estén implementadas. El plan fue propuesto por el asistente; el usuario pidió conservarlo, pero no aprobó expresamente cada recomendación.
 
 ## 1. Cómo retomar este trabajo
@@ -18,14 +20,14 @@ El 18 de septiembre el usuario pidió guardar todo en GitHub o en otro lugar con
 
 | Tema | Información confirmada |
 | --- | --- |
-| Marca | El Dolarón. |
+| Marca | El Dolarón. Descriptor oficial: «Mercancía y ropa americana». Lema: «Calidad americana, precio mexicano.» (22/10/2026). |
 | Ubicación | Soledad de Graciano Sánchez, San Luis Potosí, México. El propietario confirmó Jardín Hidalgo 129, Zona Centro. |
 | Apertura | Indicó «la siguiente semana» durante la conversación del 18/09/2026. **No confirmó fecha exacta**; no convertirlo en una fecha publicable. |
-| Horario | Todos los días, de 11:00 a. m. a 8:00 p. m. |
+| Horario | Todos los días, de 11 a. m. a 8 p. m. |
 | Objetivo principal | Generar ventas. Meta del primer mes: $300,000 o lo más cercano posible. |
 | Mercado inicial | Venta local y por WhatsApp; expansión nacional una vez asentado el negocio. |
-| Entrega inicial | Exclusivamente en sucursal. No ofrecer entrega a domicilio ni envíos nacionales en esta etapa. |
-| Mercancía | Saldos americanos: desde comida hasta artículos para el hogar; surtido que puede encontrarse en pallets de B-Stock procedentes de Target, Walmart, JCPenney y Dollar General, según el propietario. No supone afiliación oficial con esas cadenas. |
+| Entrega | Recogida en sucursal. **Corregido el 22/10/2026:** ya no es «exclusivamente en sucursal»; hay envíos los viernes (corte el jueves a las 8 p. m.), con $100 de anticipo al apartar el primer producto, que se liquida antes de enviar. Costo del envío: $99 en compras de menos de $1,000 y gratis desde $1,000. No ofrecer entrega a domicilio fuera de ese esquema. |
+| Mercancía | Mercancía y ropa americana (saldos): desde comida hasta artículos para el hogar; surtido que puede encontrarse en pallets de B-Stock procedentes de Target, Walmart, JCPenney y Dollar General, según el propietario. No supone afiliación oficial con esas cadenas. |
 | Inventario inicial | Más de 1,000 piezas en total, incluyendo repeticiones; no son necesariamente 1,000 productos distintos. |
 | Resurtido | Puede resurtir semanalmente. No equivale a una llegada ya confirmada en cada fecha. |
 | Productos estrella | Todavía desconocidos porque la tienda no ha abierto. Desea mover todo tipo de productos. |
@@ -36,7 +38,7 @@ El 18 de septiembre el usuario pidió guardar todo en GitHub o en otro lugar con
 | Facebook | https://www.facebook.com/eldolaronmx/about |
 | Instagram | EL_DOLARON: https://www.instagram.com/el_dolaron/ |
 | TikTok | Pendiente de crear/confirmar. |
-| WhatsApp | El propietario confirmó el número comercial observado en Facebook: 444 854 5980. |
+| WhatsApp | **444 543 7754**, único WhatsApp oficial (22/10/2026). **Corregido:** el 444 854 5980, observado en Facebook y confirmado antes como comercial, es el teléfono fijo y no es WhatsApp. |
 | Pagos | Efectivo, transferencia y tarjeta. No se confirmaron meses sin intereses ni otros mecanismos de financiamiento. |
 | Producción | El propietario puede grabar y dedicar el tiempo necesario; considera prioritaria la difusión. Está reclutando personal. |
 | Atención futura | Habrá personas atendiendo el grupo a futuro. No hay responsable adicional ni fecha de incorporación confirmados. |
@@ -48,7 +50,8 @@ No hay datos confirmados de ventas previas, compra promedio, valor total de inve
 
 Conservar la intención del propietario sin presentarla como una política jurídicamente validada:
 
-- Apartado con **30% del precio del producto** y **15 días para liquidar**.
+- Apartado en tienda: **15 % del valor del producto por 7 días** (decisión de Isaac, 22/10/2026). *Corregido: la propuesta histórica era 30 % del precio y 15 días para liquidar.*
+- Envío: **$100 de anticipo** al apartar el primer producto, que se liquida antes de enviar; salida los viernes (corte el jueves a las 8 p. m.); costo de $99 en compras de menos de $1,000 y gratis desde $1,000 (22/10/2026).
 - Si no se liquida, el propietario indicó que **se pierde el apartado**. Falta revisar y redactar exactamente las consecuencias y su aplicación antes de cobrar bajo esas condiciones.
 - Para fallas, aclaró que quería **7 días desde la compra para reportar que no funciona**, no esperar una semana antes de reclamar.
 - Si procede la devolución por falla, desea devolver el importe **en crédito de tienda**, no necesariamente en efectivo.
@@ -68,7 +71,7 @@ Se accedió directamente a la información pública de [El Dolarón](https://www
 - 525 seguidores y 11 cuentas seguidas visibles.
 - Categoría: tienda de ropa.
 - Dirección visible: Jardín Hidalgo 129, Zona Centro, Soledad Díez Gutiérrez, México, 78430; el propietario confirmó la sucursal en Soledad de Graciano Sánchez.
-- Teléfono comercial: 444 854 5980, posteriormente confirmado por el propietario.
+- Teléfono visible: 444 854 5980. *Corregido el 22/10/2026:* es el teléfono fijo, no WhatsApp; el WhatsApp oficial es 444 543 7754.
 - Correo heredado: viste_boutique@hotmail.com; no se confirmó que deba conservarse como contacto actual.
 - Enlace a Instagram heredado: instagram.com/visteboutique.
 - Área de servicio incluye Soledad, San Luis Potosí, y también San Luis, Argentina.
@@ -119,7 +122,7 @@ No se pudo leer el contenido de los 397 comentarios de Hamsco sin iniciar sesió
 
 Buscar $300,000 en ventas durante los primeros 30 días de operación. Es una meta aspiracional, no un pronóstico ni una promesa. Ajustar expectativas con inventario, precios y resultados de la primera semana.
 
-Propuesta de marca: **saldos americanos, precios claros y hallazgos que puedes revisar en tienda**.
+Propuesta de marca (histórica): **saldos americanos, precios claros y hallazgos que puedes revisar en tienda**. *Corregido el 22/10/2026:* el descriptor oficial es «Mercancía y ropa americana» y el lema, «Calidad americana, precio mexicano.»
 
 Empezar con dos públicos como hipótesis: personas que compran para su hogar y personas que disfrutan encontrar ofertas. Las compras reales determinarán dónde concentrarse. No se definió una edad, género o segmento demográfico como hecho confirmado.
 
@@ -210,9 +213,9 @@ Tres promociones a probar después de revisar costos:
 
 - Producto de atracción: precio atractivo en un artículo con suficientes unidades.
 - Compra combinada: productos complementarios para aumentar el importe de compra conservando margen.
-- Apartado: mostrar precio completo, 30% inicial, saldo y plazo de 15 días; terminar primero la redacción y revisión de las condiciones.
+- Apartado: mostrar precio completo, 15 % de apartado, saldo y plazo de 7 días (corregido el 22/10/2026; la propuesta histórica era 30 % y 15 días); terminar primero la redacción y revisión de las condiciones.
 
-Ejemplo exclusivamente aritmético, no una oferta real: precio $1,000 → anticipo $300 → saldo $700. No usarlo como anuncio de un producto que no exista.
+Ejemplo exclusivamente aritmético, no una oferta real: precio $1,000 → apartado 15 % = $150 → saldo $850. No usarlo como anuncio de un producto que no exista.
 
 El descuento aproximado del 50% no será una promesa general. Comparar el mismo producto y considerar condición, precio de referencia comprobable y costos. No aplicar una segunda rebaja automáticamente sobre precios ya reducidos.
 

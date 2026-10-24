@@ -111,13 +111,13 @@ test('Usar esta guarda con content-type, conserva la pieza y habilita catálogo,
   assert.equal(p.db.prepare("select recorte_estado from productos where codigo='ED-000001'").get()?.recorte_estado, 'original');
 });
 
-test('foto ya puesta → 409; FEP, vendedor, portal y cajero quedan fuera; capturista sí puede', async (t) => {
+test('foto ya puesta → 409; FEP, portal y cajero quedan fuera; capturista autorizado sí puede en ambos hosts', async (t) => {
   const p = preparar();
   t.mock.method(globalThis, 'fetch', async () => { assert.fail('Sin llamadas externas'); });
   p.db.prepare("update productos set foto_key='propia' where id=?").run(PRODUCTO);
   for (const [ruta, metodo] of [[`${RUTA}/buscar`, 'POST'], [RUTA, 'PUT']]) {
     assert.equal((await p.pedir(ruta, { imagen: IMAGEN }, metodo)).status, 409);
-    assert.equal(permitidaParaVendedor(ruta, metodo), false);
+    assert.equal(permitidaParaVendedor(ruta, metodo), true);
   }
   p.db.prepare("update productos set foto_key='', propietario='fep' where id=?").run(PRODUCTO);
   assert.equal((await p.pedir(RUTA, { imagen: IMAGEN }, 'PUT')).status, 404);
@@ -129,15 +129,20 @@ test('foto ya puesta → 409; FEP, vendedor, portal y cajero quedan fuera; captu
     assert.equal((await p.pedir(RUTA, { imagen: IMAGEN }, 'PUT')).status, 403);
   }
   p.env.DEV_USUARIO = DUENO;
-  for (const host of ['HOST_PORTAL', 'HOST_VENDEDOR'] as const) {
+  for (const host of ['HOST_PORTAL'] as const) {
     p.env[host] = 'caja.prueba';
     assert.equal((await p.pedir(`${RUTA}/buscar`, {})).status, 404);
     assert.equal((await p.pedir(RUTA, { imagen: IMAGEN }, 'PUT')).status, 404);
     delete p.env[host];
   }
-  p.db.prepare("insert into usuarios(correo,roles,creado_en,actualizado_en) values ('cap@prueba.mx','capturista','','')").run();
+  p.db.prepare("insert into usuarios(correo,roles,editar_inventario,creado_en,actualizado_en) values ('cap@prueba.mx','capturista',1,'','')").run();
   p.env.DEV_USUARIO = 'cap@prueba.mx';
   t.mock.method(globalThis, 'fetch', async (url: string) => String(url).includes('aiplatform') ? grounding([]) : foto());
+  p.env.HOST_VENDEDOR = 'caja.prueba';
+  p.db.prepare('update usuarios set editar_inventario=0 where correo=?').run('cap@prueba.mx');
+  assert.equal((await p.pedir(`${RUTA}/buscar`, {})).status,403);
+  assert.equal((await p.pedir(RUTA,{imagen:IMAGEN},'PUT')).status,403);
+  p.db.prepare('update usuarios set editar_inventario=1 where correo=?').run('cap@prueba.mx');
   assert.equal((await p.pedir(`${RUTA}/buscar`, {})).status, 200);
   assert.equal((await p.pedir(RUTA, { imagen: IMAGEN }, 'PUT')).status, 200);
 });

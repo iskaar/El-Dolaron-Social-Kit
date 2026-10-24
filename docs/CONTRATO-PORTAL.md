@@ -19,12 +19,13 @@ Todas las respuestas privadas usan `Cache-Control: no-store`. No se manda teléf
 | Método y ruta | Cuerpo o parámetros | Respuesta principal |
 | --- | --- | --- |
 | `GET /api/portal/config` | público | `{firebase, registro_abierto, bases_version, bases, aviso}`. `firebase` es `null` sin proveedor/textos/versiones preparados. La API key web identifica el proyecto, no sustituye autenticación. |
-| `POST /api/portal/registro` | `{nombre, acepta_bases: true, declara_mayor_edad: true, bases_version}` | `{id, numero, nombre, disponible, por_liberar, regalo_disponible, premio}`. Reintento del mismo UID es idempotente; teléfono duplicado con otro UID: 409. `premio` es `null` sin cupos. |
+| `POST /api/portal/registro` | `{nombre, acepta_bases: true, declara_mayor_edad: true, bases_version, referido_codigo?}` | `{id, numero, nombre, disponible, por_liberar, regalo_disponible, premio, referido_otorgado}`. Reintento del mismo UID es idempotente; teléfono duplicado con otro UID: 409. `premio` es `null` sin cupos. |
 | `GET /api/portal/yo` | — | `{id, numero, nombre, telefono: "+52...", bases_version}` del UID titular. |
 | `GET /api/portal/saldo` | — | `{disponible_compras, regalo_sujeto_minimo, por_liberar, disponible_total, lotes}` con origen, restante, liberación y vencimiento. El regalo sólo se gasta en ticket de al menos $1,000 antes de D (#108). |
 | `POST /api/portal/codigo` | `{maximo}` centavos enteros, entre cero y saldo disponible | `{codigo, maximo, expira_en}`; 201. Reemisión antes de cinco segundos: 429. Requiere bases vigentes. |
 | `DELETE /api/portal/codigo` | — | Revoca el código del titular; `{ok:true}`. |
 | `POST /api/portal/vale` | `{codigo}` del vale `DP-…`, por cuerpo | Pasa un vale completo y vigente a la cuenta con tarifa de socio (#258): 201 `{importe, disponible_desde, vence_en}`; repetido por el mismo socio: 200 `{ya_estaba:true}`; de otra cuenta, usado, vencido, cancelado o de compra pagada con D: 409; más de 2 en 7 días: 429. |
+| `GET /api/portal/referidos` | — | `{habilitado, puede_referir, codigo, maximo, referidos, liberados, pendientes, premio, alta, minimo_compra, mi_referido}`. Piloto #489, ver «Referidos». `codigo` es `null` si el teléfono no está en la lista. |
 | `POST /api/portal/vinculo` | — | `{codigo, expira_en}`; desafío para socio previo sin UID. |
 | `POST /api/socios/codigo` **personal** | `{codigo}` | Socio, saldo, `maximo`, `expira_en`; lookup no consume ni cobra. |
 | `POST /api/socios/vincular` **dueño** | `{numero, codigo, confirma:true}` | `{numero, nombre, vinculado:true}`; no vincula cuenta ya asociada. |
@@ -66,6 +67,7 @@ npx wrangler d1 execute el-dolaron --remote --file=migracion-021-pedido-hash.sql
 | `FIREBASE_PROJECT_ID`, `FIREBASE_WEB_API_KEY` | Configuración y validación de identidad del portal; proveedor Phone, dominio autorizado, cuotas y presupuesto de SMS requieren configuración externa aprobada. | `app/src/portal.ts:21` y `:203`; sin configuración, el frontend se detiene en `app/public/portal.js:206` |
 | `FIREBASE_AUTH_DOMAIN` | Dominio de autenticación opcional; por defecto `<projectId>.firebaseapp.com`. | `app/src/portal.ts:206` y `app/src/worker.ts:1147` |
 | `HOST_PORTAL` | Host público aislado; también necesita DNS/ruta autorizados. | `app/src/worker.ts:1135`; rutas en `app/wrangler.jsonc:43` |
+| `REFERIDOS_TELEFONOS` | Piloto de referidos (#489): teléfonos de 10 dígitos separados por coma con código propio. Ausente o vacía = programa apagado; sin ella `/config` devuelve `referidos:false` y un código se rechaza con 400. | `app/src/referidos.ts` |
 | `VALES_ABIERTOS=si` | Emisión nueva de papel, además de bases e inicio. | `app/src/vales.ts:6` y `:80` |
 
 **Matiz de canje:** sin vales emitidos, el canje falla cerrado (403 al buscar / 409 al cobrar). `VALES_ABIERTOS` controla emisión, **no bloquea vales previos válidos**, tampoco al apagar la promoción o las bases; #134 conserva su canje/reimpresión/cancelación hasta vencimiento. No interpretar estas variables como un interruptor de emergencia del saldo ya prometido. A06 debe revisar ese comportamiento; si Isaac requiere suspender también vales vigentes, debe decidirlo expresamente antes de cambiarlo.
@@ -81,6 +83,16 @@ Hecho: merge de `origin/main` (`d864810`) sobre `99e4597`, sin rebase. Conflicto
 Validación: `npm test` pasa 178/178 pruebas (8 nuevas frente a las 170 iniciales) y `npm run typecheck` pasa. Incluye Worker/SQLite de dinero, stock, saldo, reintento y carrera entre cajas; actualización desde main con 020 aplicada; configuración cerrada; detalle/impresión y respuesta perdida en caja. Sintaxis del script de caja, ausencia de marcadores y `git diff --check` correctos. Los 12 assets pasan una comprobación equivalente con Node; `python tools/validate_assets.py` no se pudo ejecutar porque no hay intérprete Python disponible en este entorno. Sin migraciones remotas ni activación de servicios.
 
 Pendiente: por instrucción de Isaac, A07 no ejecuta git de escritura. El índice aún marca `app/public/caja.html` como conflicto aunque el archivo no tiene marcadores; Claude debe marcarlo resuelto, revisar el diff y completar el commit, por ejemplo `Integra main y corrige cancelaciones y reintentos de Dolarones`. Claude/CI debe ejecutar `python tools/validate_assets.py` con un intérprete disponible y publicar el contexto en el Issue/PR correspondiente. No hacer push/PR/despliegue en esta entrega. A06 debe revisar las restricciones SQL dentro del batch y el retiro acumulado del vale (cada pieza queda en `devoluciones`); falta ensayo autorizado en D1/sandbox y con dos cajas, lector e impresora físicos. Isaac mantiene pendiente la autorización comercial/legal y cualquier suspensión de vales vigentes.
+
+## Referidos — prototipo con conocidos, Issue #489
+
+**Estado: reglas propuestas, pendientes de confirmación de Isaac. Las bases 2026-10-v4 no contemplan referidos: piloto interno, no abrir al público ni anunciar montos sin nuevas bases y aviso revisados por el abogado.** Migración `app/migracion-055-referidos.sql` (tabla `referidos`, trigger de tope, índice único de movimientos); se corre antes del Worker. Las constantes están en `app/src/referidos.ts`.
+
+- **Código del referente**: `DOL` + número de socio + letra de verificación (`DOL42K`), calculado, sin azar ni columna. Solo los teléfonos de `REFERIDOS_TELEFONOS` tienen código válido. Enlace `/?r=<código>`.
+- **Alta con código** (solo cuentas nuevas, mismo batch que crea al socio): 50 D, `origen='referido'`, vigencia 30 días, movimiento `alta_referido`. Sin código no hay 50 D. Código inválido, propio, ajeno a la lista o de un referente con 10 personas: 400/409 y no se crea nada. Tope de 10 por referente (teléfono) en SQL.
+- **Liberación** (dentro del batch de `POST /api/ventas`): si el socio de la venta tiene un referido `pendiente` y `total - dolarones >= $150` (dinero cobrado, después de promo y descuentos; los D no cuentan), el nuevo y el referente reciben 25 D cada uno (`referido_nuevo`, `referido`; lotes `origen='referido'`, disponibles desde la medianoche siguiente, 12 meses). Una vez por referido: el reintento del folio responde `duplicada` y una venta encolada libera al sincronizar. No exige código del socio (acumular no lo exige). La respuesta agrega `referido_liberado` (centavos).
+- **Cancelación** del ticket que liberó: retira ambos lotes (`reverso_referido`) y el referido vuelve a `pendiente`; si ya se gastó parte, la cancelación se aborta (409), como lo ganado por compras (#135). La devolución por pieza no revierte la liberación.
+- Los lotes `origen='referido'` se gastan como lo ganado por compras (sin el mínimo de $1,000 del regalo de apertura).
 
 ## Configuración pendiente
 

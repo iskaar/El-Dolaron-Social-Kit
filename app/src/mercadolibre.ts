@@ -1044,10 +1044,15 @@ export async function procesarOrden(env: Env, orden: any): Promise<string[]> {
                   actualizado_en = ?
            where id = ? and exists (select 1 from ml_ventas where order_id = ? and ml_item_id = ? and estado = 'descontada')`,
         ).bind(...llave, ahora, pub.producto_id, ...llave),
-        // Si ya la habian atendido (empacada), vuelve a /avisos: no enviarla y regresarla al piso (Issue #429).
+        // Issue #429: si ya la habian sacado del piso, vuelve a /avisos para regresarla. En conflicto
+        // se pidio cancelar en ML, no sacarla: esa cancelacion es la esperada y no vuelve.
+        // 'recibida' (murio antes del batch de pago) nunca desconto: solo se cierra, para que
+        // /avisos no la siga pidiendo empacar.
         env.DB.prepare(
-          `update ml_ventas set estado = 'cancelada', atendida_en = '', atendida_por = ''
-           where order_id = ? and ml_item_id = ? and estado = 'descontada'`,
+          `update ml_ventas set estado = 'cancelada',
+             atendida_en = case when conflicto then atendida_en else '' end,
+             atendida_por = case when conflicto then atendida_por else '' end
+           where order_id = ? and ml_item_id = ? and estado in ('recibida', 'descontada')`,
         ).bind(...llave),
       ]);
     }
