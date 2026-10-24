@@ -2231,6 +2231,20 @@ async function reportes(url: URL, env: Env): Promise<Response> {
     .bind(desde)
     .all();
 
+  // Lo regalado en descuentos por dia (Isaac, 24/10): la promo de inauguracion aparte de los aprobados
+  // (descuento ya trae la promo sumada). Un ticket cancelado no regalo nada.
+  const { results: descuentosPorDia } = await env.DB.prepare(
+    `select ${diaTienda('creado_en')} as dia,
+       sum(case when coalesce(promo, 0) > 0 then 1 else 0 end) as promo_tickets, coalesce(sum(promo), 0) as promo,
+       sum(case when coalesce(descuento, 0) - coalesce(promo, 0) > 0 then 1 else 0 end) as otros_tickets,
+       coalesce(sum(coalesce(descuento, 0) - coalesce(promo, 0)), 0) as otros
+     from ventas where cancelada = 0 and coalesce(descuento, 0) > 0 and creado_en >= ? group by dia order by dia`,
+  )
+    .bind(desde)
+    .all<{ dia: string; promo_tickets: number; promo: number; otros_tickets: number; otros: number }>();
+  const sumaDescuentos = (campo: 'promo_tickets' | 'promo' | 'otros_tickets' | 'otros') =>
+    descuentosPorDia.reduce((suma, d) => suma + d[campo], 0);
+
   return json({
     dias, dia_desde: rango.dia_desde, dia_hasta: rango.dia_hasta,
     resumen: {
@@ -2270,6 +2284,11 @@ async function reportes(url: URL, env: Env): Promise<Response> {
     aperturas_cajon: aperturas,
     cortes,
     retiros,
+    descuentos: {
+      promo_tickets: sumaDescuentos('promo_tickets'), promo: sumaDescuentos('promo'),
+      otros_tickets: sumaDescuentos('otros_tickets'), otros: sumaDescuentos('otros'),
+      por_dia: descuentosPorDia,
+    },
   });
 }
 

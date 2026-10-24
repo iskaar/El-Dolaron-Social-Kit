@@ -338,6 +338,16 @@
     </article>
   </section>
 
+  <section aria-labelledby="t-descuentos">
+    <h2 class="titulo-bloque" id="t-descuentos">Descuentos y promociones</h2>
+    <article class="panel">
+      <div class="tarjetas" id="descuentos-resumen" style="margin-bottom: 14px"></div>
+      <div id="descuentos-detalle" style="overflow-x:auto"></div>
+      <p class="nota">Lo que se dejó de cobrar: la promo de inauguración ($100 en compras de $300 o más) y los descuentos aprobados por el dueño.
+        Los tickets cancelados no cuentan.</p>
+    </article>
+  </section>
+
   <section aria-labelledby="t-inventario">
     <h2 class="titulo-bloque" id="t-inventario">Precios e inventario</h2>
     <div class="malla">
@@ -631,6 +641,21 @@ function pintarCancelaciones(r) {
            <td class="num">${pesos(d.total)}</td><td class="num">${d.dolarones ? dolarones(d.dolarones) : '—'}</td></tr>`).join('')}</tbody></table>`;
 }
 
+function pintarDescuentos(r) {
+  const d = r.descuentos;
+  $('descuentos-resumen').innerHTML = [
+    tarjeta('Tickets con promo', d.promo_tickets.toLocaleString('es-MX')),
+    tarjeta('Regalado en promo', pesos(d.promo)),
+    tarjeta('Otros descuentos', pesos(d.otros), `<div class="delta">${escapar(cuenta(d.otros_tickets, 'ticket', 'tickets'))}</div>`),
+    tarjeta('Total regalado', pesos(d.promo + d.otros)),
+  ].join('');
+  $('descuentos-detalle').innerHTML = d.por_dia.length === 0 ? '<div class="vacio">Sin descuentos en este periodo.</div>'
+    : `<table class="tabla"><thead><tr><th>Día</th><th class="num">Tickets con promo</th><th class="num">Promo</th><th class="num">Otros descuentos</th><th class="num">Total</th></tr></thead>
+       <tbody>${d.por_dia.map((x) => `
+         <tr><td>${escapar(mayuscula(diaLargo(x.dia)))}</td><td class="num">${x.promo_tickets.toLocaleString('es-MX')}</td>
+           <td class="num">${pesos(x.promo)}</td><td class="num">${pesos(x.otros)}</td><td class="num">${pesos(x.promo + x.otros)}</td></tr>`).join('')}</tbody></table>`;
+}
+
 // El inventario en piso es una foto de ahora (Issue #174): no cambia con el periodo.
 function pintarPiso(inv) {
   const vacio = '<div class="vacio">No hay piezas con etiqueta y existencia en piso.</div>';
@@ -691,7 +716,7 @@ async function cargar() {
   try {
     const r = await (await fetch(`/api/reportes?dias=${diasActual}`)).json();
     ultimoReporte = r;
-    pintarResumen(r); pintarVentas(r); pintarCuadre(r); pintarCaja(r); pintarCancelaciones(r); pintarInventario(r);
+    pintarResumen(r); pintarVentas(r); pintarCuadre(r); pintarCaja(r); pintarCancelaciones(r); pintarDescuentos(r); pintarInventario(r);
   } finally {
     $('principal').classList.remove('cargando');
   }
