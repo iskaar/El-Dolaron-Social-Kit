@@ -1,0 +1,136 @@
+{
+  "semana": "2026-W43",
+  "generado": "2026-10-25T20:22:42+00:00",
+  "piezas": [
+    {
+      "codigo": "ED-002361",
+      "nombre": "Varita de burbujas Fubbles",
+      "precio": 4900,
+      "x": 0.0333,
+      "y": -0.0342,
+      "w": 0.2417,
+      "h": 0.3683,
+      "giro": -8
+    },
+    {
+      "codigo": "ED-002567",
+      "nombre": "Plastilina Crayola Silly Scents 142 g",
+      "precio": 4900,
+      "x": 0.3483,
+      "y": -0.0317,
+      "w": 0.3167,
+      "h": 0.3675,
+      "giro": -14
+    },
+    {
+      "codigo": "ED-002519",
+      "nombre": "Tenis All in Motion Dillon niño talla 1",
+      "precio": 17900,
+      "x": 0.6183,
+      "y": 0.035,
+      "w": 0.415,
+      "h": 0.2967,
+      "giro": 12
+    },
+    {
+      "codigo": "ED-002333",
+      "nombre": "Juego de pesca Sunsquad Pool 4 piezas",
+      "precio": 8900,
+      "x": -0.025,
+      "y": 0.355,
+      "w": 0.3417,
+      "h": 0.3283,
+      "giro": 6
+    },
+    {
+      "codigo": "ED-002450",
+      "nombre": "Toalla de playa Sun Squad 152 x 152 cm",
+      "precio": 18900,
+      "x": 0.3258,
+      "y": 0.2767,
+      "w": 0.355,
+      "h": 0.4317,
+      "giro": -14
+    },
+    {
+      "codigo": "ED-002456",
+      "nombre": "Garrafa de vidrio con asa 1 galón",
+      "precio": 5900,
+      "x": 0.7367,
+      "y": 0.2875,
+      "w": 0.2442,
+      "h": 0.4,
+      "giro": -8
+    },
+    {
+      "codigo": "ED-002378",
+      "nombre": "Figura sorpresa Mash'ems Marvel Avengers",
+      "precio": 7900,
+      "x": 0.03,
+      "y": 0.695,
+      "w": 0.285,
+      "h": 0.2825,
+      "giro": 12
+    },
+    {
+      "codigo": "ED-002459",
+      "nombre": "Bolsa Sun Squad Concha de Mar",
+      "precio": 5900,
+      "x": 0.3008,
+      "y": 0.645,
+      "w": 0.4242,
+      "h": 0.4183,
+      "giro": -14
+    },
+    {
+      "codigo": "ED-002555",
+      "nombre": "Arcoíris de madera Mondo Llama",
+      "precio": 7900,
+      "x": 0.6292,
+      "y": 0.5958,
+      "w": 0.4267,
+      "h": 0.4258,
+      "giro": -8
+    },
+    {
+      "codigo": "ED-002363",
+      "nombre": "Kit diamond painting Creativity for Kids Big Gem",
+      "precio": 14900,
+      "x": 0.1392,
+      "y": 0.125,
+      "w": 0.3508,
+      "h": 0.39,
+      "giro": -10
+    },
+    {
+      "codigo": "ED-002602",
+      "nombre": "Botana de arroz Drizzilicious Cinnamon Swirl",
+      "precio": 900,
+      "x": 0.5108,
+      "y": 0.1517,
+      "w": 0.355,
+      "h": 0.39,
+      "giro": 10
+    },
+    {
+      "codigo": "ED-002339",
+      "nombre": "Kit de actividades manualidades Mondo Llama",
+      "precio": 8900,
+      "x": 0.1533,
+      "y": 0.4908,
+      "w": 0.3533,
+      "h": 0.3308,
+      "giro": 10
+    },
+    {
+      "codigo": "ED-002527",
+      "nombre": "Sandalias Cat & Jack Negro",
+      "precio": 13900,
+      "x": 0.4658,
+      "y": 0.4783,
+      "w": 0.3983,
+      "h": 0.3967,
+      "giro": -10
+    }
+  ]
+}
