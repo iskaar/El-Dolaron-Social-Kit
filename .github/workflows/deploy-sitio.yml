@@ -1,0 +1,71 @@
+name: Deploy del sitio
+
+# Issue #531. Publica eldolaron.com (Worker el-dolaron-web) en cada push a main que
+# toque site/, cada lunes 06:00 UTC (la rotación semanal de la pila de stickers) y a
+# mano. Autorizado por Isaac el 25/10/2026 con el secreto CLOUDFLARE_API_TOKEN; el repo
+# nunca guarda el token. No ampliar sin nueva autorización.
+#
+# La pila de site/public/assets/pila* que está en el repo es solo la base y el respaldo:
+# el sitio en vivo siempre lleva la pila de la semana ISO actual. El script es
+# determinista por semana, así que un deploy manual a mitad de semana reproduce la pila
+# del lunes. Los archivos generados solo existen en el runner; no se commitea nada, así
+# que la protección de main nunca interviene.
+on:
+  push:
+    branches: [main]
+    paths: ["site/**"]
+  schedule:
+    - cron: "0 6 * * 1" # lunes 06:00 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-sitio
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install Pillow
+        run: pip install pillow
+      - name: Generar la pila de la semana
+        id: pila
+        continue-on-error: true
+        run: python tools/pila_stickers.py
+      - name: Aviso si la pila no se generó
+        if: steps.pila.outcome == 'failure'
+        run: echo "::warning::No se pudo generar la pila de la semana (¿catálogo inaccesible?). Se publica la pila del repo como respaldo."
+      - name: Validate inventory and assets
+        run: python tools/validate_assets.py
+      - name: Validate public storefront
+        run: python tools/validate_site.py
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          # El Wrangler fijado en app/package-lock.json exige Node >= 22.
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+      - name: Verificar el secreto
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          if [ -z "$CLOUDFLARE_API_TOKEN" ]; then
+            echo "::error::Falta el secreto CLOUDFLARE_API_TOKEN (Settings > Secrets and variables > Actions). Ver site/README.md."
+            exit 1
+          fi
+      - name: Install Wrangler (versión del lockfile de app/)
+        run: npm ci --prefix app
+      - name: Deploy
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: app/node_modules/.bin/wrangler deploy --config site/wrangler.jsonc
