@@ -1,12 +1,21 @@
 name: Deploy del sitio
 
 # Issue #531. Publica eldolaron.com (Worker el-dolaron-web) en cada push a main que
-# toque site/. Autorizado por Isaac el 25/10/2026 con el secreto CLOUDFLARE_API_TOKEN;
-# el repo nunca guarda el token. No ampliar a la app de caja sin nueva autorización.
+# toque site/, cada lunes 06:00 UTC (la rotación semanal de la pila de stickers) y a
+# mano. Autorizado por Isaac el 25/10/2026 con el secreto CLOUDFLARE_API_TOKEN; el repo
+# nunca guarda el token. No ampliar sin nueva autorización.
+#
+# La pila de site/public/assets/pila* que está en el repo es solo la base y el respaldo:
+# el sitio en vivo siempre lleva la pila de la semana ISO actual. El script es
+# determinista por semana, así que un deploy manual a mitad de semana reproduce la pila
+# del lunes. Los archivos generados solo existen en el runner; no se commitea nada, así
+# que la protección de main nunca interviene.
 on:
   push:
     branches: [main]
     paths: ["site/**"]
+  schedule:
+    - cron: "0 6 * * 1" # lunes 06:00 UTC
   workflow_dispatch:
 
 permissions:
@@ -22,6 +31,23 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install Pillow
+        run: pip install pillow
+      - name: Generar la pila de la semana
+        id: pila
+        continue-on-error: true
+        run: python tools/pila_stickers.py
+      - name: Aviso si la pila no se generó
+        if: steps.pila.outcome == 'failure'
+        run: echo "::warning::No se pudo generar la pila de la semana (¿catálogo inaccesible?). Se publica la pila del repo como respaldo."
+      - name: Validate inventory and assets
+        run: python tools/validate_assets.py
+      - name: Validate public storefront
+        run: python tools/validate_site.py
       - name: Set up Node
         uses: actions/setup-node@v4
         with:

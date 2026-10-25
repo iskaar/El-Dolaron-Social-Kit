@@ -37,20 +37,22 @@ Verifica HTTPS, portada, assets y enlaces al WhatsApp y al monedero en el domini
 
 ### Deploy automático
 
-Desde el Issue #531, cada push a `main` que toque `site/**` publica el sitio solo con `.github/workflows/deploy-sitio.yml` (`wrangler deploy --config site/wrangler.jsonc`, con el Wrangler del lockfile de `app/`). También se lanza a mano con `gh workflow run deploy-sitio.yml`. El comando manual de arriba queda como respaldo. Si falta el secreto, el workflow falla con un mensaje claro.
+Desde el Issue #531, cada push a `main` que toque `site/**` (y cada lunes, para rotar la pila) publica el sitio solo con `.github/workflows/deploy-sitio.yml` (`wrangler deploy --config site/wrangler.jsonc`, con el Wrangler del lockfile de `app/`). También se lanza a mano con `gh workflow run deploy-sitio.yml`. El comando manual de arriba queda como respaldo. Si falta el secreto, el workflow falla con un mensaje claro.
 
 ## Pila semanal
 
-`tools/pila_stickers.py` genera la pila de stickers de la portada (`public/assets/pila.webp`, `pila-640.webp` y `pila.json`) a partir de los recortes del catálogo público; la misma semana ISO produce la misma pila. `.github/workflows/pila-semanal.yml` la regenera **cada lunes a las 06:00 UTC**. Si cambió algo, valida (`validate_assets.py` y `validate_site.py`), abre un PR `bot/pila-<año>-W<semana>`, lo mezcla en el mismo job y lanza `deploy-sitio.yml`; si no cambió nada, termina sin hacer nada. Ejecución manual:
+`tools/pila_stickers.py` genera la pila de stickers de la portada (`public/assets/pila.webp`, `pila-640.webp` y `pila.json`) a partir de los recortes del catálogo público; la misma semana ISO produce la misma pila. `deploy-sitio.yml` la regenera en el runner en cada deploy: **cada lunes a las 06:00 UTC**, en cada push a `main` bajo `site/**` y en cada ejecución manual. Luego valida (`validate_assets.py` y `validate_site.py`) y despliega. Los archivos generados no se commitean ni abren PRs: la pila que está en el repo es solo la base y el respaldo (si el script falla, el workflow avisa con un `::warning::` y publica esa), y el sitio en vivo siempre lleva la pila de la semana ISO actual. Como el script es determinista por semana, un deploy a mitad de semana reproduce la pila del lunes.
+
+Para refrescar la pila a mano:
 
 ```powershell
-gh workflow run pila-semanal.yml
+gh workflow run deploy-sitio.yml
 ```
+
+Para actualizar la base commiteada, corre `python tools/pila_stickers.py` en local y abre un PR normal.
 
 ### Token de Cloudflare (lo hace Isaac, una sola vez)
 
 1. Cloudflare dashboard → My Profile → API Tokens → Create Token → plantilla **Edit Cloudflare Workers**, limitada a la cuenta de El Dolarón (Cloudflare no permite limitarlo a un solo Worker).
 2. GitHub → repo → Settings → Secrets and variables → Actions → New repository secret: nombre `CLOUDFLARE_API_TOKEN`, valor el token.
-3. Settings → Actions → General → Workflow permissions: «Read and write» y «Allow GitHub Actions to create and approve pull requests» (la pila abre y mezcla su propio PR). Si `main` exige revisión, `pila-semanal.yml` no podrá mezclar sin una excepción para el bot.
-
-El repo nunca guarda el token: vive solo como secreto de GitHub. Estos dos workflows son la única automatización de publicación autorizada; ampliarlos requiere permiso nuevo de Isaac.
+El repo nunca guarda el token: vive solo como secreto de GitHub. `deploy-sitio.yml` es la única automatización de publicación autorizada; ampliarla requiere permiso nuevo de Isaac.
