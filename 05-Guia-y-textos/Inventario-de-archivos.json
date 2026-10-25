@@ -187,6 +187,12 @@
       "format": "JS"
     },
     {
+      "file": "site/public/stickers.js",
+      "title": "Stickers despegables de la portada",
+      "description": "Reemplaza el collage por un tablero de recortes reales del catálogo que se despegan; si la API falla se queda el collage.",
+      "format": "JS"
+    },
+    {
       "file": "site/public/assets/hallazgos.webp",
       "title": "Recortes de la portada del sitio",
       "description": "Collage de recortes (ropa y productos reales de la tienda) generado en 2k a partir de las fotos reales de los productos; fondo blanco que se muestra con mix-blend-mode multiply sobre el papel.",

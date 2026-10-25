@@ -99,6 +99,68 @@ h2 { font-family: var(--display); font-variation-settings: var(--display-axes); 
 .hero-directions { display: inline-block; margin-top: 18px; font-size: 15px; }
 .hero-art > img { width: 100%; }
 
+/* Portada: stickers de recortes reales (#526)
+   stickers.js cambia el collage por 6 stickers hechos con recortes del catálogo; el collage (HTML) queda de respaldo y de LCP.
+   Técnica del prototipo aprobado: borde troquelado blanco (#troquel) y aro holográfico (#anillo) en SVG, esquina que se despega
+   con clip-path y un dorso espejado. Todo lo que se mueve va en no-preference; con «reducir movimiento» quedan planos. */
+@property --peel { syntax: "<number>"; inherits: true; initial-value: 0; }
+@property --alto { syntax: "<number>"; inherits: true; initial-value: 0; }
+.hero-art.con-stickers { display: grid; align-items: center; }
+.hero-art.con-stickers > * { grid-area: 1 / 1; }
+.hero-art.con-stickers > img { opacity: 0; transition: opacity 300ms ease; }
+.sticker-board { --px: .5; --py: .5; display: grid; grid-template-columns: repeat(3, minmax(0, 170px)); justify-content: center; align-content: center; gap: 10px 12px; width: 100%; aspect-ratio: 1; opacity: 0; transition: opacity 300ms ease; }
+.sticker-board.listo { opacity: 1; }
+.vacio { aspect-ratio: 1; border: 2px dashed rgb(22 54 107 / .25); border-radius: 8px; }
+.sticker {
+  --m: 16px;       /* margen para que el borde troquelado no se recorte */
+  --sx: 1; --sy: 1; /* esquina activa: 1 = izquierda/arriba, -1 = derecha/abajo (la geometría se espeja con scale) */
+  --k: .55;        /* compresión de la pestaña: 1 = doblez plano, menor = rizo */
+  /* Distancia del pliegue desde la esquina; el min() salta rápido los primeros 24% porque la esquina casi siempre está vacía. */
+  --d: calc(var(--peel) * 115% + min(var(--peel) * 800%, 24%));
+  --alza: max(var(--peel), var(--alto));
+  position: relative; display: block; width: 100%; aspect-ratio: 1; padding: 0; border: 0; background: none; color: inherit; font: inherit;
+  touch-action: none; user-select: none; -webkit-user-select: none; -webkit-tap-highlight-color: transparent; cursor: pointer;
+  transform: scale(var(--sx), var(--sy)) scale(calc(1 + var(--alto) * .06));
+}
+.sticker > *, .frente > * { position: absolute; inset: 0; display: block; }
+.sticker img { width: 100%; height: 100%; padding: var(--m); object-fit: contain; pointer-events: none; transform: scale(var(--sx), var(--sy)); }
+/* Sombra: silueta desenfocada; al levantar solo se oscurece y crece, sin desplazarse. */
+.sombra { filter: url(#troquel) brightness(0) blur(10px); opacity: calc(.10 + var(--alza) * .22); transform: scale(var(--sx), var(--sy)) scale(calc(1 + var(--alza) * .05)); }
+.frente { clip-path: polygon(var(--d) 0, 100% 0, 100% 100%, 0 100%, 0 var(--d)); }
+.arte { filter: url(#troquel); }
+.holo { filter: url(#anillo); mix-blend-mode: multiply; opacity: .9; }
+/* El relleno necesita mask-image con CORS: funciona en eldolaron.com (la API autoriza ese origen); en localhost no hay aro. */
+.holo-fill {
+  position: absolute; inset: var(--m); transform: scale(var(--sx), var(--sy));
+  -webkit-mask: var(--src) center / contain no-repeat; mask: var(--src) center / contain no-repeat;
+  background:
+    repeating-linear-gradient(calc(var(--py) * 180deg + 20deg), #fff9 0 1px, transparent 1px 5px),
+    conic-gradient(from calc(var(--px) * 360deg) at calc(var(--px) * 100%) calc(var(--py) * 100%), #ff7a9c, #ffd36b, #8bff9e, #6bd6ff, #c58bff, #ff7a9c);
+}
+/* Dorso: la pestaña levantada, la misma imagen vuelta papel, reflejada sobre el pliegue x+y=d. */
+.dorso { clip-path: polygon(var(--d) 0, var(--d) var(--d), 0 var(--d)); }
+.dorso img {
+  transform-origin: 0 0; filter: url(#troquel) brightness(0) invert(.93);
+  transform:
+    translate(calc(var(--d) / 2), calc(var(--d) / 2)) rotate(45deg) scaleX(var(--k)) rotate(-45deg) translate(calc(var(--d) / -2), calc(var(--d) / -2))
+    translate(var(--d), var(--d)) scaleY(-1) rotate(90deg)
+    translate(50%, 50%) scale(var(--sx), var(--sy)) translate(-50%, -50%);
+}
+@media (prefers-reduced-motion: no-preference) {
+  .sticker { cursor: grab; transition: --peel 500ms cubic-bezier(.2, .9, .3, 1.25), --alto 300ms ease; }
+  .frente { will-change: clip-path; }
+  .sticker.agarrado { cursor: grabbing; z-index: 2; transition: none; }
+  @media (hover: hover) { .sticker:hover { --alto: .35; } }
+  /* Despegado del todo: sale en la dirección del jalón (--vx/--vy; el contenedor está espejado, de ahí los signos). */
+  .sticker.volando { pointer-events: none; z-index: 3; animation: volar 550ms cubic-bezier(.3, .6, .4, 1) forwards; }
+  @keyframes volar { to { transform: scale(var(--sx), var(--sy)) translate(calc(var(--vx, 0px) * var(--sx)), calc(var(--vy, -160px) * var(--sy))) rotate(calc(var(--giro, -20deg) * var(--sx) * var(--sy))) scale(.7); opacity: 0; } }
+  /* La nueva cae y se pega. */
+  .sticker.nuevo { animation: pegar 450ms cubic-bezier(.2, .9, .3, 1.3) backwards; }
+  @keyframes pegar { from { transform: translateY(-30px) scale(1.12) rotate(-6deg); opacity: 0; } }
+  .sticker.nuevo .sombra { animation: sombra-pegar 450ms ease-out backwards; }
+  @keyframes sombra-pegar { from { opacity: .35; } }
+}
+
 /* Se busca (Issue #339): carteles del viejo oeste clavados en la pared, con lo de mayor precio.
    Papel envejecido = grano + manchas + orillas tostadas; orilla rasgada con clip-path, sombra en el <li>. */
 .wanted { padding-block: var(--section); scroll-margin-top: 16px; }
@@ -349,6 +411,7 @@ dd { margin: 0; line-height: 1.5; }
   .hero .button { padding-inline: 14px; }
   .hero-stamp { font-size: 19px; }
   .hero-art { width: min(100%, 360px); margin: 12px auto 0; }
+  .sticker-board { grid-template-columns: repeat(2, minmax(0, 150px)); gap: 8px; aspect-ratio: auto; }
   .ticker { height: 80px; margin-top: -18px; }
   .ticker-pause { top: 18px; right: 8px; width: 30px; height: 30px; }
   .ticker-track { font-size: 17px; }
