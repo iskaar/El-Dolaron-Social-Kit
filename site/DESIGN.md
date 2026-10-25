@@ -60,8 +60,20 @@ Variantes de una tinta (negro, blanco, azul), tamaños mínimos, protección y u
 
 ## Movimiento
 
-Mínimo: el subtítulo de la portada cae al cargar, la marquesina corre y dos recuadros se asientan al entrar en
-pantalla (`motion.js`, objetivos `data-motion`). Todo se apaga con `prefers-reduced-motion`.
+Sin librerías: CSS y un poco de JS. Una sola animación por gesto, la interfaz nunca pasa de 300 ms y no hay bucles nuevos
+(solo la marquesina, con botón de pausa).
+
+- **Entre páginas**: transiciones de documento (`@view-transition`). La cabecera (`masthead`) y el logo de la cabecera
+  persisten y el resto hace crossfade de 200 ms; el logo del pie no lleva nombre. Firefox navega normal.
+- **Tarjeta → visor**: la foto de la miniatura o del cartel se transforma en la del visor (300 ms, `pieza-foto`), y vuelve al
+  cerrar, también con Esc o tocando el fondo. Sin View Transitions el visor abre de golpe.
+- **Chips**: el chip activo se desliza al nuevo (`chip-activo`, 200 ms).
+- **Tarjetas**: las nuevas se asientan en 320 ms, escalonadas 35 ms donde existe `sibling-index()`.
+- **Revelado**: los recuadros `data-motion` se asientan con una línea de tiempo de scroll (`animation-timeline: view()`) y
+  vuelven si se sube; sin ella, `motion.js` los asienta una sola vez al entrar. No se aplica dentro de `.wanted-grid`
+  (scroller horizontal en celular).
+- El subtítulo de la portada cae al cargar y la marquesina corre.
+- Todo se apaga con `prefers-reduced-motion`, incluidos los pseudoelementos `::view-transition-*`.
 
 ## Reglas
 
