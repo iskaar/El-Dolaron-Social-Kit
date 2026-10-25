@@ -23,7 +23,7 @@ function preparar() {
   return t;
 }
 
-test('el candidato se verifica, se confirma explícitamente y se reutiliza sin HTTP ni cambiar stock', async (t) => {
+test('la imagen cuyo código verificó la página de Target se confirma sola; una persona puede volver a confirmarla (#524)', async (t) => {
   const { db, pedir, esperar } = preparar();
   let llamadas = 0;
   t.mock.method(globalThis, 'fetch', async (url: string, opciones: RequestInit) => {
@@ -38,11 +38,15 @@ test('el candidato se verifica, se confirma explícitamente y se reutiliza sin H
   assert.equal((await pedir(RUTA, { url: IMAGEN, tcin: TCIN }, 'PUT')).status, 409);
   const candidata = await pedir(RUTA, { url: 'http://127.0.0.1/secreto' });
   assert.equal(candidata.status, 200);
-  assert.equal(candidata.cuerpo.imagen.confirmada, false);
   assert.equal(candidata.cuerpo.imagen.codigo_verificado, true);
+  assert.equal(candidata.cuerpo.imagen.confirmada, true);
   assert.equal(candidata.cuerpo.imagen.nombre, 'Yoobi & pouch');
   const IMAGEN_PAGINA = IMAGEN.replace('?', '?a=1&');
   assert.equal(candidata.cuerpo.imagen.url, IMAGEN_PAGINA);
+  await esperar();
+  // Se confirmó sola y ya bajó la imagen una vez (página + foto).
+  assert.equal(db.prepare('select confirmado_por from imagenes_upc').get()!.confirmado_por, 'sistema');
+  assert.equal(llamadas, 2);
   assert.equal((await pedir(RUTA, { url: IMAGEN_PAGINA + 'otro', tcin: TCIN }, 'PUT')).status, 409);
   assert.equal((await pedir(RUTA, { url: IMAGEN_PAGINA, tcin: TCIN }, 'PUT')).cuerpo.imagen.confirmada, true);
   await esperar();
@@ -54,6 +58,31 @@ test('el candidato se verifica, se confirma explícitamente y se reutiliza sin H
   db.prepare("update manifiesto set tcin='123'").run();
   assert.equal((await pedir(RUTA, undefined, 'GET')).cuerpo.imagen, null);
   assert.equal((await pedir(RUTA, { url: IMAGEN_PAGINA, tcin: TCIN }, 'PUT')).status, 409);
+});
+
+test('sin código verificable en la página, la imagen queda como candidata y se confirma a mano (#524)', async (t) => {
+  const { db, env, pedir, esperar } = preparar();
+  db.prepare("update productos set upc=?, estado_analisis='listo' where id=?").run('0' + UPC, PRODUCTO);
+  let llamadas = 0;
+  t.mock.method(globalThis, 'fetch', async (url: string) => {
+    llamadas++;
+    return String(url).startsWith('https://target.scene7.com/') ? fotoTarget() : pagina(IMAGEN, '');
+  });
+  const candidata = await pedir(RUTA, {});
+  assert.equal(candidata.status, 200);
+  assert.equal(candidata.cuerpo.imagen.codigo_verificado, false);
+  assert.equal(candidata.cuerpo.imagen.confirmada, false);
+  await esperar();
+  assert.equal(llamadas, 1);
+  assert.equal(db.prepare('select confirmado_en from imagenes_upc').get()!.confirmado_en, '');
+  assert.equal(db.prepare('select foto_key from productos where id=?').get(PRODUCTO)!.foto_key, '');
+  // El cron tampoco la confirma: no hay código que la respalde.
+  await worker.scheduled!({} as never, env, { waitUntil() {}, passThroughOnException() {} } as never); await esperar();
+  assert.equal(db.prepare('select confirmado_en from imagenes_upc').get()!.confirmado_en, '');
+  assert.equal((await pedir(RUTA, { url: IMAGEN, tcin: TCIN }, 'PUT')).cuerpo.imagen.confirmada, true);
+  await esperar();
+  assert.equal(db.prepare('select foto_key from productos where id=?').get(PRODUCTO)!.foto_key, `fotos/${PRODUCTO}.jpg`);
+  assert.equal(llamadas, 2);
 });
 
 function candidata(db: ReturnType<typeof preparar>['db'], confirmada = false, url = IMAGEN) {
@@ -93,9 +122,10 @@ test('el cron da foto a una pieza vieja y al ponerse al día solo consulta el lo
   await worker.scheduled!({} as never, env, ctx as never); await esperar();
   assert.equal(descargar.mock.calls.length, 1);
   assert.equal(consultarFoto.mock.calls.length, 0);
+  // #524: el barrido de candidatas verificadas más el lote; ninguno toca productos.
   const lote = consultas.filter((sql) => sql.includes('imagenes_upc'));
-  assert.equal(lote.length, 1);
-  assert.doesNotMatch(lote[0], /productos/i);
+  assert.equal(lote.length, 2);
+  for (const sql of lote) assert.doesNotMatch(sql, /productos/i);
   assert.ok(!consultas.some((sql) => /insert into config/i.test(sql)));
 });
 
@@ -157,6 +187,21 @@ test('el relleno conserva fotos propias, excluye FEP y descartados e ignora cand
   assert.deepEqual(new Uint8Array(await (await env.FOTOS.get(fotoKey))!.arrayBuffer()), new Uint8Array([7, 8]));
   for (const p of [fep, descartada, sinConfirmar]) assert.equal(await env.FOTOS.get(`fotos/${p.id}.jpg`), null);
   assert.equal(db.prepare("select valor from config where clave='imagenes_relleno_hasta'").get()!.valor, descartada.confirmadoEn);
+});
+
+test('el cron confirma como «sistema» las candidatas verificadas que nadie tocó y les da foto (#524)', async (t) => {
+  const { db, env, ctx, esperar } = preparar();
+  const rezagada = piezaAnterior(db, 1), sinCodigo = piezaAnterior(db, 2);
+  db.prepare("update imagenes_upc set confirmado_en='', upc_fuente=upc where upc=?").run(rezagada.upc);
+  db.prepare("update imagenes_upc set confirmado_en='' where upc=?").run(sinCodigo.upc);
+  t.mock.method(globalThis, 'fetch', async () => fotoTarget());
+  await worker.scheduled!({} as never, env, ctx as never); await esperar();
+  const confirmada = db.prepare('select confirmado_por, confirmado_en from imagenes_upc where upc=?').get(rezagada.upc)!;
+  assert.equal(confirmada.confirmado_por, 'sistema');
+  assert.ok(confirmada.confirmado_en > '2026');
+  assert.equal(db.prepare('select foto_key from productos where id=?').get(rezagada.id)!.foto_key, `fotos/${rezagada.id}.jpg`);
+  assert.equal(db.prepare('select confirmado_en from imagenes_upc where upc=?').get(sinCodigo.upc)!.confirmado_en, '');
+  assert.equal(db.prepare('select foto_key from productos where id=?').get(sinCodigo.id)!.foto_key, '');
 });
 
 test('confirmar guarda una sola descarga en R2 y da foto al catálogo y ML sin quitar fondo ni cambiar la pieza (#423)', async (t) => {

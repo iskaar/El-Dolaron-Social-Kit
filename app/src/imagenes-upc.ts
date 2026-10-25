@@ -152,6 +152,10 @@ export async function guardarImagenComoFoto(upc: string, env: Env): Promise<void
 
 /** #413: rellena piezas viejas de una en una, sin barrer productos ni atascarse por una imagen fallida. */
 export async function procesarRellenoImagenes(env: Env): Promise<void> {
+  // #524: las candidatas que Target ya verificó por código y nadie confirmó a mano entran al mismo lote.
+  await env.DB.prepare(`update imagenes_upc set confirmado_por = 'sistema', confirmado_en = ?
+    where confirmado_en = '' and upc_fuente <> '' and exists (select 1 from manifiesto m where m.upc = imagenes_upc.upc and m.tcin = imagenes_upc.tcin)`)
+    .bind(new Date().toISOString()).run();
   const { results } = await env.DB.prepare(`select upc, confirmado_en from imagenes_upc
     where confirmado_en > coalesce((select valor from config where clave = 'imagenes_relleno_hasta'), '')
     order by confirmado_en limit 20`).all<{ upc: string; confirmado_en: string }>();
@@ -363,12 +367,16 @@ export async function rutaImagenUpc(request: Request, env: Env, pathname: string
       return json({ error: 'La página no tiene una imagen válida para este código. Toma o sube una foto.' }, 422);
     }
     // Si cambió la hoja o alguien confirmó mientras llegaba HTTP, no se pisa su decisión.
-    await env.DB.prepare(`insert into imagenes_upc (upc, tcin, url, nombre, upc_fuente)
-      select ?, ?, ?, ?, ? where exists (select 1 from manifiesto where upc = ? and tcin = ?)
+    // #524: si la propia página de Target trae el código escaneado, la imagen se confirma sola
+    // (confirmado_por = 'sistema') y pasa a ser la foto de las piezas sin foto; sin código verificable sigue pidiendo «Es esta».
+    const guardada = await env.DB.prepare(`insert into imagenes_upc (upc, tcin, url, nombre, upc_fuente, confirmado_por, confirmado_en)
+      select ?, ?, ?, ?, ?, ?, ? where exists (select 1 from manifiesto where upc = ? and tcin = ?)
       on conflict (upc) do update set tcin = excluded.tcin, url = excluded.url, nombre = excluded.nombre,
-        upc_fuente = excluded.upc_fuente, confirmado_por = '', confirmado_en = ''
+        upc_fuente = excluded.upc_fuente, confirmado_por = excluded.confirmado_por, confirmado_en = excluded.confirmado_en
       where imagenes_upc.tcin <> excluded.tcin or imagenes_upc.confirmado_en = ''`)
-      .bind(upc, fuente.tcin, datos.image_url, datos.title.trim().slice(0, 200), datos.barcode, upc, fuente.tcin).run();
+      .bind(upc, fuente.tcin, datos.image_url, datos.title.trim().slice(0, 200), datos.barcode,
+        datos.barcode ? 'sistema' : '', datos.barcode ? new Date().toISOString() : '', upc, fuente.tcin).run();
+    if (guardada.meta.changes && datos.barcode) ctx.waitUntil(guardarImagenComoFoto(upc, env));
     const imagen = await imagenGuardada(upc, env);
     return imagen ? json({ imagen }) : json({ error: 'El enlace cambió. Vuelve a escanear.' }, 409);
   } catch (error) {
