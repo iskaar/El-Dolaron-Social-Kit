@@ -189,26 +189,32 @@
     {
       "file": "site/public/stickers.js",
       "title": "Stickers despegables de la portada",
-      "description": "Reemplaza el collage por un tablero de recortes reales del catálogo que se despegan; si la API falla se queda el collage.",
+      "description": "Pone cinco stickers de recortes reales del catálogo, que se despegan, sobre la pila de la portada; si la API falla se queda solo la pila.",
       "format": "JS"
     },
     {
-      "file": "site/public/assets/hallazgos.webp",
-      "title": "Recortes de la portada del sitio",
-      "description": "Collage de recortes (ropa y productos reales de la tienda) generado en 2k a partir de las fotos reales de los productos; fondo blanco que se muestra con mix-blend-mode multiply sobre el papel.",
+      "file": "site/public/assets/pila.webp",
+      "title": "Pila semanal de stickers de la portada",
+      "description": "Trece recortes reales del catálogo con borde blanco troquelado y sombra, generada cada semana con tools/pila_stickers.py (Issue #531). Es la imagen LCP y el respaldo de la portada; los stickers vivos van encima.",
       "width": 1200,
       "height": 1200,
       "format": "WEBP",
       "background": "opaque"
     },
     {
-      "file": "site/public/assets/hallazgos-640.webp",
-      "title": "Recortes de la portada, versión chica",
-      "description": "El mismo collage a 640 px para celulares (srcset, Issue #526).",
+      "file": "site/public/assets/pila-640.webp",
+      "title": "Pila semanal de la portada, versión chica",
+      "description": "La misma pila a 640 px para celulares (srcset).",
       "width": 640,
       "height": 640,
       "format": "WEBP",
       "background": "opaque"
+    },
+    {
+      "file": "site/public/assets/pila.json",
+      "title": "Piezas de la pila semanal",
+      "description": "Semana, fecha de generación y, por pieza, código, nombre, precio, caja (fracciones del cuadrado) y giro. stickers.js lo lee para no repetir esas piezas en los stickers vivos.",
+      "format": "JSON"
     },
     {
       "file": "site/public/assets/cartel-se-busca.webp",
