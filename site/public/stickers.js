@@ -2,7 +2,7 @@
   // Portada (Issue #526): el collage se cambia por un tablero de stickers despegables hechos con los
   // recortes reales del catálogo. Si algo falla, el collage del HTML se queda tal cual.
   const API = "https://dolarones.eldolaron.com";
-  const VISIBLES = 6, META = 12, PAGINAS = 6;
+  const VISIBLES = 4, META = 12, PAGINAS = 6;
 
   // Copias de catalogo.js (ese archivo es un IIFE aparte y no se importa).
   function precio(centavos) {
@@ -28,7 +28,7 @@
     const rollo = [];
     let despues = null;
     for (let n = 0; n < PAGINAS; n++) {
-      const params = new URLSearchParams();
+      const params = new URLSearchParams({ recorte: "1" });   // API nueva: solo piezas con recorte; la vieja lo ignora y se filtra abajo
       if (despues) params.set("despues", despues);
       const r = await fetch(`${base}/api/catalogo?${params}`, { signal, headers: { accept: "application/json" } });
       if (!r.ok) throw new Error(`HTTP ${r.status}`);

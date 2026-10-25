@@ -47,7 +47,7 @@ Variantes de una tinta (negro, blanco, azul), tamaños mínimos, protección y u
   Variantes: azul (acción principal), amarillo con filete punteado (`button-ticket`, WhatsApp), blanco.
 - **Cintas** (`.tape`): tira amarilla o azul con giro leve y borde dentado, solo para el kicker y el subtítulo de la portada.
 - **Portada**: titular «Marcas americanas, *a precio de saldo.*» y, al lado, stickers de recortes reales del catálogo (`stickers.js`):
-  6 a la vez, con borde troquelado blanco y aro holográfico que sigue al puntero. Un toque abre el visor de la pieza; jalar una
+  4 a la vez (2×2, cuadrado como el collage para no mover la portada), con borde troquelado blanco y aro holográfico que sigue al puntero. Un toque abre el visor de la pieza; jalar una
   esquina la despega con un dorso doblado, soltar antes la regresa con rebote y despegarla del todo la manda volando y trae la
   siguiente del rollo (12 piezas con recorte o 6 páginas del catálogo). El collage `hallazgos.webp` queda en el HTML como
   respaldo sin JavaScript o sin API y como imagen LCP. Con `prefers-reduced-motion` los stickers son planos (el toque sigue abriendo

@@ -100,7 +100,7 @@ h2 { font-family: var(--display); font-variation-settings: var(--display-axes); 
 .hero-art > img { width: 100%; }
 
 /* Portada: stickers de recortes reales (#526)
-   stickers.js cambia el collage por 6 stickers hechos con recortes del catálogo; el collage (HTML) queda de respaldo y de LCP.
+   stickers.js cambia el collage por 4 stickers hechos con recortes del catálogo; el collage (HTML) queda de respaldo y de LCP.
    Técnica del prototipo aprobado: borde troquelado blanco (#troquel) y aro holográfico (#anillo) en SVG, esquina que se despega
    con clip-path y un dorso espejado. Todo lo que se mueve va en no-preference; con «reducir movimiento» quedan planos. */
 @property --peel { syntax: "<number>"; inherits: true; initial-value: 0; }
@@ -108,7 +108,7 @@ h2 { font-family: var(--display); font-variation-settings: var(--display-axes); 
 .hero-art.con-stickers { display: grid; align-items: center; }
 .hero-art.con-stickers > * { grid-area: 1 / 1; }
 .hero-art.con-stickers > img { opacity: 0; transition: opacity 300ms ease; }
-.sticker-board { --px: .5; --py: .5; display: grid; grid-template-columns: repeat(3, minmax(0, 170px)); justify-content: center; align-content: center; gap: 10px 12px; width: 100%; aspect-ratio: 1; opacity: 0; transition: opacity 300ms ease; }
+.sticker-board { --px: .5; --py: .5; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-content: center; gap: 12px; width: 100%; aspect-ratio: 1; opacity: 0; transition: opacity 300ms ease; }
 .sticker-board.listo { opacity: 1; }
 .vacio { aspect-ratio: 1; border: 2px dashed rgb(22 54 107 / .25); border-radius: 8px; }
 .sticker {
@@ -119,7 +119,9 @@ h2 { font-family: var(--display); font-variation-settings: var(--display-axes); 
   --d: calc(var(--peel) * 115% + min(var(--peel) * 800%, 24%));
   --alza: max(var(--peel), var(--alto));
   position: relative; display: block; width: 100%; aspect-ratio: 1; padding: 0; border: 0; background: none; color: inherit; font: inherit;
-  touch-action: none; user-select: none; -webkit-user-select: none; -webkit-tap-highlight-color: transparent; cursor: pointer;
+  /* pan-y: un deslizamiento vertical sobre el tablero sigue haciendo scroll; a cambio, despegar pide un jalón con componente
+     horizontal (de la esquina hacia el centro), que es el gesto natural. Si el navegador toma el gesto para scroll, pointercancel regresa el sticker. */
+  touch-action: pan-y; user-select: none; -webkit-user-select: none; -webkit-tap-highlight-color: transparent; cursor: pointer;
   transform: scale(var(--sx), var(--sy)) scale(calc(1 + var(--alto) * .06));
 }
 .sticker > *, .frente > * { position: absolute; inset: 0; display: block; }
@@ -411,7 +413,6 @@ dd { margin: 0; line-height: 1.5; }
   .hero .button { padding-inline: 14px; }
   .hero-stamp { font-size: 19px; }
   .hero-art { width: min(100%, 360px); margin: 12px auto 0; }
-  .sticker-board { grid-template-columns: repeat(2, minmax(0, 150px)); gap: 8px; aspect-ratio: auto; }
   .ticker { height: 80px; margin-top: -18px; }
   .ticker-pause { top: 18px; right: 8px; width: 30px; height: 30px; }
   .ticker-track { font-size: 17px; }
