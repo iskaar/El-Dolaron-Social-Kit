@@ -355,3 +355,38 @@ test('catalogo (Issue #241): busqueda ?q= por nombre, marca, codigo o talla sin 
   } finally { t.db.close(); }
 });
 
+test('catalogo (Issue #526): ?recorte=1 lista solo piezas con recorte listo y revisado, con total, q y cursor', async () => {
+  const t = publica();
+  try {
+    const con = (codigo: string, estado: string | null, revision: string | null) =>
+      t.db.prepare('update productos set recorte_estado = ?, recorte_revision = ? where codigo = ?').run(estado, revision, codigo);
+    const buena = pieza(t, { nombre: 'Chamarra' });
+    const sinRevisar = pieza(t, { nombre: 'Gorra' });
+    const sinRecorte = pieza(t, { nombre: 'Bota' });
+    con(buena, 'listo', 'ok');
+    con(sinRevisar, 'listo', 'pendiente');
+    const filtrado = await leer(await t.llamar('/api/catalogo?recorte=1'));
+    assert.deepEqual(filtrado.piezas.map((p: any) => p.codigo), [buena]);
+    assert.equal(filtrado.total, 1);
+    assert.match(filtrado.piezas[0].recorte, /\/api\/catalogo\/recorte\//);
+    for (const q of ['', '?recorte=0', '?recorte=', '?recorte=si']) {
+      const todo = await leer(await t.llamar(`/api/catalogo${q}`));
+      assert.deepEqual(todo.piezas.map((p: any) => p.codigo).sort(), [buena, sinRevisar, sinRecorte].sort(), q);
+      assert.equal(todo.total, 3, q);
+    }
+    assert.deepEqual((await leer(await t.llamar('/api/catalogo?recorte=1&q=chamarra'))).piezas.map((p: any) => p.codigo), [buena]);
+    assert.deepEqual((await leer(await t.llamar('/api/catalogo?recorte=1&q=gorra'))).piezas, []);
+    assert.deepEqual((await leer(await t.llamar('/api/catalogo?recorte=1&categoria=hogar'))).piezas, []);
+    // Cursor: POR_PAGINA es 24, asi que 25 con recorte pagina; las sin recorte no cuentan.
+    const mas = Array.from({ length: 24 }, () => pieza(t));
+    for (const c of mas) con(c, 'listo', 'ok');
+    const p1 = await leer(await t.llamar('/api/catalogo?recorte=1'));
+    assert.equal(p1.piezas.length, 24);
+    assert.equal(p1.total, 25);
+    assert.equal(p1.hay_mas, true);
+    const p2 = await leer(await t.llamar(`/api/catalogo?recorte=1&despues=${encodeURIComponent(p1.siguiente)}`));
+    assert.deepEqual(p2.piezas.map((p: any) => p.codigo), [buena]);
+    assert.equal(p2.hay_mas, false);
+    assert.equal(p2.siguiente, null);
+  } finally { t.db.close(); }
+});
