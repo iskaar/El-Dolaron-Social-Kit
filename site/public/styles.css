@@ -99,18 +99,16 @@ h2 { font-family: var(--display); font-variation-settings: var(--display-axes); 
 .hero-directions { display: inline-block; margin-top: 18px; font-size: 15px; }
 .hero-art > img { width: 100%; }
 
-/* Portada: stickers de recortes reales (#526)
-   stickers.js cambia el collage por 4 stickers hechos con recortes del catálogo; el collage (HTML) queda de respaldo y de LCP.
+/* Portada: stickers de recortes reales (#526, #531)
+   La imagen del HTML es la pila semanal (tools/pila_stickers.py): LCP y respaldo. stickers.js pone encima 5 stickers vivos en
+   lugares fijos (--l, --t, --w, --r); el tablero es una capa absoluta, así que la portada no cambia de alto al activarse.
    Técnica del prototipo aprobado: borde troquelado blanco (#troquel) y aro holográfico (#anillo) en SVG, esquina que se despega
    con clip-path y un dorso espejado. Todo lo que se mueve va en no-preference; con «reducir movimiento» quedan planos. */
 @property --peel { syntax: "<number>"; inherits: true; initial-value: 0; }
 @property --alto { syntax: "<number>"; inherits: true; initial-value: 0; }
-.hero-art.con-stickers { display: grid; align-items: center; }
-.hero-art.con-stickers > * { grid-area: 1 / 1; }
-.hero-art.con-stickers > img { opacity: 0; transition: opacity 300ms ease; }
-.sticker-board { --px: .5; --py: .5; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-content: center; gap: 12px; width: 100%; aspect-ratio: 1; opacity: 0; transition: opacity 300ms ease; }
+.sticker-board { --px: .5; --py: .5; position: absolute; inset: 0; opacity: 0; transition: opacity 300ms ease; }
 .sticker-board.listo { opacity: 1; }
-.vacio { aspect-ratio: 1; border: 2px dashed rgb(22 54 107 / .25); border-radius: 8px; }
+.vacio { position: absolute; left: var(--l); top: var(--t); width: var(--w); rotate: var(--r); aspect-ratio: 1; border: 2px dashed rgb(22 54 107 / .25); border-radius: 8px; }
 .sticker {
   --m: 16px;       /* margen para que el borde troquelado no se recorte */
   --sx: 1; --sy: 1; /* esquina activa: 1 = izquierda/arriba, -1 = derecha/abajo (la geometría se espeja con scale) */
@@ -118,7 +116,7 @@ h2 { font-family: var(--display); font-variation-settings: var(--display-axes); 
   /* Distancia del pliegue desde la esquina; el min() salta rápido los primeros 24% porque la esquina casi siempre está vacía. */
   --d: calc(var(--peel) * 115% + min(var(--peel) * 800%, 24%));
   --alza: max(var(--peel), var(--alto));
-  position: relative; display: block; width: 100%; aspect-ratio: 1; padding: 0; border: 0; background: none; color: inherit; font: inherit;
+  position: absolute; left: var(--l); top: var(--t); width: var(--w); rotate: var(--r); display: block; aspect-ratio: 1; padding: 0; border: 0; background: none; color: inherit; font: inherit;
   /* pan-y: un deslizamiento vertical sobre el tablero sigue haciendo scroll; a cambio, despegar pide un jalón con componente
      horizontal (de la esquina hacia el centro), que es el gesto natural. Si el navegador toma el gesto para scroll, pointercancel regresa el sticker. */
   touch-action: pan-y; user-select: none; -webkit-user-select: none; -webkit-tap-highlight-color: transparent; cursor: pointer;

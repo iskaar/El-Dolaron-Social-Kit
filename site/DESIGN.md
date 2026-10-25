@@ -46,12 +46,15 @@ Variantes de una tinta (negro, blanco, azul), tamaños mínimos, protección y u
 - **Botones** (`.button`): borde azul de 2 px, sombra dura azul de 4 px que se levanta al pasar el cursor y se hunde al pulsar (`:active`, para táctil).
   Variantes: azul (acción principal), amarillo con filete punteado (`button-ticket`, WhatsApp), blanco.
 - **Cintas** (`.tape`): tira amarilla o azul con giro leve y borde dentado, solo para el kicker y el subtítulo de la portada.
-- **Portada**: titular «Marcas americanas, *a precio de saldo.*» y, al lado, stickers de recortes reales del catálogo (`stickers.js`):
-  4 a la vez (2×2, cuadrado como el collage para no mover la portada), con borde troquelado blanco y aro holográfico que sigue al puntero. Un toque abre el visor de la pieza; jalar una
-  esquina la despega con un dorso doblado, soltar antes la regresa con rebote y despegarla del todo la manda volando y trae la
-  siguiente del rollo (12 piezas con recorte o 6 páginas del catálogo). El collage `hallazgos.webp` queda en el HTML como
-  respaldo sin JavaScript o sin API y como imagen LCP. Con `prefers-reduced-motion` los stickers son planos (el toque sigue abriendo
-  el visor). Puerta de rendimiento: probar en iPhone Safari (filtros SVG y `clip-path` animado) antes de sumar más stickers.
+- **Portada**: titular «Marcas americanas, *a precio de saldo.*» y, al lado, una pila semanal de stickers: `assets/pila.webp`
+  se genera con `tools/pila_stickers.py` (13 recortes reales del catálogo con borde troquelado blanco y sombra azul, cuadrada,
+  sin huecos grandes; se regenera cada semana) y `pila.json` lista sus piezas. La pila es la imagen LCP y el respaldo sin
+  JavaScript o sin API. Encima, `stickers.js` pone 5 stickers vivos en lugares fijos y girados (cajas en %, empalmadas entre sí y
+  con la pila; la capa es absoluta, así que la portada no cambia de alto) con aro holográfico que sigue al puntero. Un toque abre
+  el visor de la pieza; jalar una esquina la despega con un dorso doblado, soltar antes la regresa con rebote y despegarla del
+  todo la manda volando y trae la siguiente del rollo (12 piezas con recorte o 6 páginas del catálogo, sin las de la pila) al
+  mismo lugar. Con `prefers-reduced-motion` los stickers son planos (el toque sigue abriendo el visor). Puerta de rendimiento:
+  probar en iPhone Safari (filtros SVG y `clip-path` animado) antes de sumar más stickers.
 - **Carteles «Se busca»** (`.poster`, sección «Los más buscados»): papel generado (`cartel-se-busca.webp`), nombre arriba,
   foto cuadrada que abre el visor, precio en Anton rojo, «Ahorras $X», sello «¡Última pieza!» cuando el servidor lo manda
   y «Apartar por WhatsApp». Aparece solo con 3 o más; con 3 a 5 las filas quedan centradas. En celular es una fila

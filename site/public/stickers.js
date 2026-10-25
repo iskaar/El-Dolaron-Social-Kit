@@ -1,8 +1,14 @@
 (() => {
-  // Portada (Issue #526): el collage se cambia por un tablero de stickers despegables hechos con los
-  // recortes reales del catálogo. Si algo falla, el collage del HTML se queda tal cual.
+  // Portada (Issues #526 y #531): cinco stickers despegables hechos con los recortes reales del catálogo flotan sobre la
+  // pila semanal (assets/pila.webp). La pila siempre queda debajo: si algo falla, se ve sola.
   const API = "https://dolarones.eldolaron.com";
-  const VISIBLES = 4, META = 12, PAGINAS = 6;
+  const META = 12, PAGINAS = 6;
+  // Lugares fijos como cajas en % de la portada (izquierda, arriba, ancho) y giro; se empalman entre sí y con la pila.
+  const LUGARES = [
+    { l: 2, t: 4, w: 44, r: -9 }, { l: 52, t: 0, w: 46, r: 7 }, { l: 28, t: 30, w: 44, r: -5 },
+    { l: 0, t: 54, w: 46, r: 8 }, { l: 54, t: 52, w: 44, r: -11 },
+  ];
+  const VISIBLES = LUGARES.length;
 
   // Copias de catalogo.js (ese archivo es un IIFE aparte y no se importa).
   function precio(centavos) {
@@ -24,7 +30,13 @@
   const el = (tag, clase) => { const n = document.createElement(tag); if (clase) n.className = clase; return n; };
 
   // El rollo: piezas con recorte transparente, siguiendo el cursor de /api/catalogo (como catalogo.js).
-  async function traerRollo(base, signal) {
+  // Los códigos que ya salen en la pila no se repiten en el rollo; si pila.json no carga, no se excluye nada.
+  const traerExcluidos = () => fetch("assets/pila.json", { headers: { accept: "application/json" } })
+    .then((r) => (r.ok ? r.json() : null))
+    .then((d) => new Set(d.piezas.map((p) => p.codigo)))
+    .catch(() => new Set());
+
+  async function traerRollo(base, signal, excluidos) {
     const rollo = [];
     let despues = null;
     for (let n = 0; n < PAGINAS; n++) {
@@ -34,11 +46,23 @@
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
       const d = await r.json();
       if (!d || !Array.isArray(d.piezas)) throw new Error("Respuesta inesperada");
-      rollo.push(...d.piezas.filter((p) => https(p.recorte) && https(p.foto)));
+      const fuera = await excluidos;
+      rollo.push(...d.piezas.filter((p) => https(p.recorte) && https(p.foto) && !fuera.has(p.codigo)));
       if (!d.hay_mas || !d.siguiente || rollo.length >= META) break;
       despues = d.siguiente;
     }
     return rollo;
+  }
+
+  // Cada sticker (o hueco) ocupa su lugar con variables que usa styles.css.
+  function colocar(n, i) {
+    const { l, t, w, r } = LUGARES[i];
+    n.lugar = i;
+    n.style.setProperty("--l", `${l}%`);
+    n.style.setProperty("--t", `${t}%`);
+    n.style.setProperty("--w", `${w}%`);
+    n.style.setProperty("--r", `${r}deg`);
+    return n;
   }
 
   // Sombra, frente (imagen con borde troquelado + aro holográfico) y dorso (la pestaña doblada).
@@ -59,10 +83,9 @@
   async function arrancar() {
     const arte = document.querySelector(".hero-art");
     if (!arte || typeof fetch !== "function") return;
-    const collage = arte.querySelector("img");
     const control = new AbortController();
     const reloj = setTimeout(() => control.abort(), 15000);
-    const rollo = await traerRollo(apiBase(location.search), control.signal).finally(() => clearTimeout(reloj));
+    const rollo = await traerRollo(apiBase(location.search), control.signal, traerExcluidos()).finally(() => clearTimeout(reloj));
     let idx = 0;
     // La siguiente pieza del rollo cuyo recorte sí se decodifica; null cuando se acaba.
     async function sacar() {
@@ -80,11 +103,10 @@
     const tablero = el("div", "sticker-board");
     tablero.setAttribute("role", "group");
     tablero.setAttribute("aria-label", "Piezas de la tienda");
-    tablero.append(...primeras.map((p) => (p ? pegatina(p) : el("span", "vacio"))));
+    tablero.append(...primeras.map((p, i) => colocar(p ? pegatina(p) : el("span", "vacio"), i)));
     arte.append(tablero);
     arte.classList.add("con-stickers");
     requestAnimationFrame(() => tablero.classList.add("listo"));
-    setTimeout(() => { collage.hidden = true; }, 400);
 
     // Toque corto o Enter/Espacio: abre el visor del catálogo (catalogo.js escucha este evento).
     let suprimir = null;   // el clic que sigue a un jalón no abre nada
@@ -111,8 +133,8 @@
     // Rellena un slot con la siguiente pieza del rollo; si se acabó, queda el hueco punteado.
     async function rellenar(slot) {
       const p = await sacar();
-      if (!p) { slot.replaceWith(el("span", "vacio")); return; }
-      const s = pegatina(p);
+      if (!p) { slot.replaceWith(colocar(el("span", "vacio"), slot.lugar)); return; }
+      const s = colocar(pegatina(p), slot.lugar);
       s.classList.add("nuevo");
       slot.replaceWith(s);
     }
