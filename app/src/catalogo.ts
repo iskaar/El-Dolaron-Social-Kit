@@ -122,7 +122,9 @@ async function listar(env: Env, url: URL): Promise<Response> {
   const cursor = despues === null ? null : CURSOR.exec(despues);
   if (despues !== null && !cursor) return json({ error: 'Cursor no válido.' }, 400);
 
-  const filtro = `${VENDIBLE}${categoria === null ? '' : ' and p.categoria = ?'}${q ? ` and ${CAMPO_BUSQUEDA} like ? escape '\\'` : ''}`;
+  // Issue #526: ?recorte=1 = solo piezas con recorte listo y revisado (la misma condicion que arma la URL `recorte`).
+  const conRecorte = url.searchParams.get('recorte') === '1' ? ` and p.recorte_estado = 'listo' and p.recorte_revision = 'ok'` : '';
+  const filtro = `${VENDIBLE}${conRecorte}${categoria === null ? '' : ' and p.categoria = ?'}${q ? ` and ${CAMPO_BUSQUEDA} like ? escape '\\'` : ''}`;
   const args: unknown[] = [...(categoria === null ? [] : [categoria]), ...(q ? [`%${normalizarBusqueda(q)}%`] : [])];
   const desde = cursor ? ' and (p.creado_en < ? or (p.creado_en = ? and p.codigo > ?))' : '';
   const [filas, cuenta] = await Promise.all([
