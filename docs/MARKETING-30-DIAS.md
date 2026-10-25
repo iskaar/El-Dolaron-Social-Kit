@@ -253,9 +253,8 @@ Primera producción: apertura y días 1–7, usando inventario confirmado. Las s
 
 ## 8. Kit existente y continuidad en el repositorio
 
+Carpeta de trabajo: el repositorio `C:\Users\isaac\Claude\Projects\El-Dolaron`. Los videos están en `El-Dolaron\videos\` y el material de marketing, operación y documentos en `El-Dolaron\recursos\` (ambas carpetas fuera de git). La antigua carpeta `Viste Boutique\El-Dolaron-Social-Kit` ya no existe.
 Repositorio: https://github.com/iskaar/El-Dolaron-Social-Kit
-
-Carpeta de trabajo identificada: `C:\Users\isaac\Claude\Projects\Viste Boutique\El-Dolaron-Social-Kit`.
 
 Archivos de referencia ya revisados: `README.md`, `AGENTS.md`, `docs/ARCHITECTURE.md`, `LEEME.txt`, `05-Guia-y-textos/Textos-para-redes.txt`, `05-Guia-y-textos/Paleta.json` e inventario de assets.
 

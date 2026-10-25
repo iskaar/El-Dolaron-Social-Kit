@@ -169,6 +169,15 @@
       "background": "opaque white"
     },
     {
+      "file": "04-Historias/el-dolaron-reclutamiento-historia-9x16.png",
+      "title": "Historia de reclutamiento",
+      "description": "Historia 9:16 de reclutamiento de personal: «¡Estamos contratando!», mujeres de 18 a 30 años, pago base semanal, turnos y bonos; invita a mandar mensaje. Confirmar pago, requisitos y contacto antes de publicar.",
+      "width": 940,
+      "height": 1672,
+      "format": "PNG",
+      "background": "opaque white"
+    },
+    {
       "file": "site/public/index.html",
       "title": "Sitio público de El Dolarón",
       "description": "Página de presentación, contacto, ubicación y acceso a Dolarones.",
