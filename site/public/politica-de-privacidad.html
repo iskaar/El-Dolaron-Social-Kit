@@ -52,6 +52,14 @@
     .marca img { width: 170px; }
     .cabecera > a:last-child { max-width: 100px; font-size: 14px; }
   }
+  /* Transiciones entre páginas (mismas que styles.css): cabecera y logo persisten; sin soporte, navega normal. */
+  @view-transition { navigation: auto; }
+  header { view-transition-name: masthead; }
+  .marca img { view-transition-name: logo; }
+  ::view-transition-group(*) { animation-duration: 200ms; }
+  @media (prefers-reduced-motion: reduce) {
+    ::view-transition-group(*), ::view-transition-old(*), ::view-transition-new(*) { animation: none !important; }
+  }
   @media print {
     body { background: #fff; font-size: 11pt; }
     .wrap { width: 100%; }

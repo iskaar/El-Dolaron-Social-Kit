@@ -25,7 +25,7 @@ const { join } = require("node:path");
 const vm = require("node:vm");
 const fuente = readFileSync(join(__dirname, "../site/public/catalogo.js"), "utf8");
 class Nodo {
-  constructor() { this.children = []; this.listeners = {}; this.attrs = {}; this.hidden = false; this.textContent = ""; this.value = ""; this.open = false; this.focused = false; this.classes = new Set(); this.classList = { add: (v) => this.classes.add(v), remove: (v) => this.classes.delete(v) }; }
+  constructor() { this.children = []; this.listeners = {}; this.attrs = {}; this.hidden = false; this.textContent = ""; this.value = ""; this.open = false; this.focused = false; this.style = {}; this.classes = new Set(); this.classList = { add: (v) => this.classes.add(v), remove: (v) => this.classes.delete(v) }; }
   append(...xs) { this.children.push(...xs); }
   prepend(...xs) { this.children.unshift(...xs); }
   replaceChildren(...xs) { this.children = xs; }
@@ -36,7 +36,7 @@ class Nodo {
   showModal() { this.open = true; }
   close() { this.open = false; if (this.listeners.close) this.listeners.close(); }
 }
-function pagina(fetcher) {
+function pagina(fetcher, extra = {}) {
   const selectores = [
     ".chips", ".catalog-grid", ".catalog-status", ".catalog-more", ".catalog-fallback", ".catalog-retry",
     ".catalog-search", ".search-input", ".catalog-clear", ".piece-dialog", ".piece-dialog-close",
@@ -48,8 +48,8 @@ function pagina(fetcher) {
   root.querySelector = (k) => partes[k];
   const relojes = [];
   vm.runInNewContext(fuente, {
-    document: { querySelector: () => null, getElementById: (id) => (id === "catalogo" ? root : null), createElement: () => new Nodo() },
-    location: { search: "" }, Image: class extends Nodo {}, fetch: fetcher, AbortController, URL, URLSearchParams, Intl, Number, String, encodeURIComponent,
+    document: { querySelector: () => null, getElementById: (id) => (id === "catalogo" ? root : null), createElement: () => new Nodo(), ...extra.document },
+    location: { search: "" }, Image: extra.Image || class extends Nodo {}, matchMedia: extra.matchMedia, fetch: fetcher, AbortController, URL, URLSearchParams, Intl, Number, String, encodeURIComponent,
     setTimeout: (fn) => relojes.push(fn), clearTimeout: () => {},
   });
   const textos = () => partes[".catalog-grid"].children.map((li) => li.children[1].children.map((n) => n.textContent));
@@ -100,6 +100,30 @@ const tick = () => new Promise((r) => setImmediate(r));
   p.partes[".piece-dialog-close"].listeners.click();
   assert.equal(p.partes[".piece-dialog"].open, false);
   assert.equal(fotoBtn.focused, true);
+
+  // Morph del visor (View Transitions): la miniatura suelta su nombre, el visor abre y Esc cierra devolviendo el foco.
+  const sinMovimiento = { matches: false };
+  const morph = pagina(async () => ({
+    ok: true,
+    json: async () => ({ piezas: [{ nombre: "Pieza 1", codigo: "ED-1", precio: 10000, foto: "https://dolarones.eldolaron.com/api/catalogo/foto/ED-1" }], total: 1, hay_mas: false, siguiente: null }),
+  }), {
+    matchMedia: () => sinMovimiento,
+    document: { startViewTransition: (fn) => { const p = Promise.resolve().then(fn); return { finished: p, ready: p, updateCallbackDone: p }; } },
+    Image: class extends Nodo { decode() { return Promise.resolve(); } },
+  });
+  await tick();
+  const morphBtn = morph.partes[".catalog-grid"].children[0].children[0];
+  const morphImg = morphBtn.children[0];
+  morphBtn.listeners.click();
+  assert.equal(morphImg.style.viewTransitionName, "pieza-foto");   // única en la captura «antes»
+  await tick();
+  assert.equal(morph.partes[".piece-dialog"].open, true);
+  assert.equal(morphImg.style.viewTransitionName, "");
+  morph.partes[".piece-dialog"].listeners.cancel({ preventDefault() {} });
+  await tick();
+  assert.equal(morph.partes[".piece-dialog"].open, false);
+  assert.equal(morphImg.style.viewTransitionName, "");
+  assert.equal(morphBtn.focused, true);
 
   // Búsqueda por ?q= y botón Limpiar.
   p.partes[".search-input"].value = "  nada  ";
