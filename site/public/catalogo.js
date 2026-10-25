@@ -229,6 +229,9 @@
     });
   }
 
+  // La portada (stickers.js) abre el mismo visor con este evento.
+  if (typeof document.addEventListener === "function") document.addEventListener("dolaron:ver-pieza", (ev) => { const d = ev.detail || {}; if (d.pieza) abrirVisor(d.pieza, d.disparador, d.img); });
+
   function cerrarVisor() {
     if (!conMorph || !fotoOrigen || !fotoOrigen.style) { dialog.close(); return; }
     const origen = fotoOrigen;

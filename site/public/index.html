@@ -63,8 +63,27 @@
   </script>
   <script src="motion.js" defer></script>
   <script src="catalogo.js" defer></script>
+  <script src="stickers.js" defer></script>
 </head>
 <body>
+  <svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
+    <!-- Stickers de la portada (#526): borde troquelado blanco y aro holográfico; ver stickers.js y styles.css. -->
+    <filter id="troquel" x="-15%" y="-15%" width="130%" height="130%" color-interpolation-filters="sRGB">
+      <feMorphology in="SourceAlpha" operator="dilate" radius="8" result="gordo"/>
+      <feGaussianBlur in="gordo" stdDeviation=".4" result="suave"/>
+      <feFlood flood-color="#fff"/>
+      <feComposite in2="suave" operator="in" result="borde"/>
+      <feMerge><feMergeNode in="borde"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <filter id="anillo" x="-15%" y="-15%" width="130%" height="130%" color-interpolation-filters="sRGB">
+      <feMorphology in="SourceGraphic" operator="dilate" radius="8" result="gordo"/>
+      <feComposite in="gordo" in2="SourceAlpha" operator="out" result="anillo"/>
+      <feTurbulence type="fractalNoise" baseFrequency="1.1" numOctaves="1" seed="7" result="ruido"/>
+      <feColorMatrix in="ruido" values="0 0 0 0 1  0 0 0 0 1  0 0 0 0 1  7 7 7 0 -10.5" result="chispas"/>
+      <feComposite in="chispas" in2="anillo" operator="in" result="chispasAnillo"/>
+      <feMerge><feMergeNode in="anillo"/><feMergeNode in="chispasAnillo"/></feMerge>
+    </filter>
+  </svg>
   <a class="skip-link" href="#contenido">Saltar al contenido</a>
   <div class="masthead"><header class="header wrap">
     <a class="brand" href="#" aria-label="El Dolarón, inicio"><img src="assets/el-dolaron-logo.webp" width="600" height="157" alt="El Dolarón"></a>
