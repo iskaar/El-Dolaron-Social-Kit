@@ -5,3 +5,7 @@ __pycache__/
 *.py[cod]
 .pytest_cache/
 .claude/settings.local.json
+
+# Material privado y multimedia (no versionar)
+recursos/
+videos/
