@@ -196,6 +196,15 @@
       "background": "opaque"
     },
     {
+      "file": "site/public/assets/hallazgos-640.webp",
+      "title": "Recortes de la portada, versión chica",
+      "description": "El mismo collage a 640 px para celulares (srcset, Issue #526).",
+      "width": 640,
+      "height": 640,
+      "format": "WEBP",
+      "background": "opaque"
+    },
+    {
       "file": "site/public/assets/cartel-se-busca.webp",
       "title": "Hoja de cartel «Se busca» (vacía)",
       "description": "Papel envejecido con orillas rasgadas, doble filete y agujero de clavo, sin texto; fondo de los carteles de «Los más buscados» del sitio (Issue #339). Generada con Codex.",
@@ -273,6 +282,24 @@
       "width": 500,
       "height": 291,
       "format": "PNG",
+      "background": "transparent"
+    },
+    {
+      "file": "site/public/assets/el-dolaron-logo.webp",
+      "title": "Logo del sitio público (WebP)",
+      "description": "El mismo logo horizontal a 600 px en WebP para cabecera y pie de eldolaron.com (Issue #526); el PNG se conserva para JSON-LD y vistas previas.",
+      "width": 600,
+      "height": 157,
+      "format": "WEBP",
+      "background": "transparent"
+    },
+    {
+      "file": "site/public/assets/el-dolaron-logo-vertical.webp",
+      "title": "Logo vertical del sitio (WebP)",
+      "description": "Logo vertical a 400 px en WebP para la sección Dolarones (Issue #526).",
+      "width": 400,
+      "height": 233,
+      "format": "WEBP",
       "background": "transparent"
     },
     {
