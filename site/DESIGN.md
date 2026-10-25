@@ -43,7 +43,7 @@ Variantes de una tinta (negro, blanco, azul), tamaños mínimos, protección y u
 
 ## Piezas
 
-- **Botones** (`.button`): borde azul de 2 px, sombra dura azul de 4 px que se levanta al pasar el cursor.
+- **Botones** (`.button`): borde azul de 2 px, sombra dura azul de 4 px que se levanta al pasar el cursor y se hunde al pulsar (`:active`, para táctil).
   Variantes: azul (acción principal), amarillo con filete punteado (`button-ticket`, WhatsApp), blanco.
 - **Cintas** (`.tape`): tira amarilla o azul con giro leve y borde dentado, solo para el kicker y el subtítulo de la portada.
 - **Portada**: titular «Marcas americanas, *a precio de saldo.*» y el collage `hallazgos.webp` (recortes reales sobre transparente).
@@ -64,6 +64,15 @@ Mínimo: el subtítulo de la portada cae al cargar, la marquesina corre y dos re
 pantalla (`motion.js`, objetivos `data-motion`). Todo se apaga con `prefers-reduced-motion`.
 
 ## Reglas
+
+- Inclinaciones solo en objetos pegados: sellos, cintas, etiquetas y cupones (`--tilt-s/m/l`: 1°, 2°, 3°). Los párrafos y las
+  tarjetas con texto corrido van rectos. Las sombras son duras y azules (`4px 4px 0 var(--navy)`); las suaves con desenfoque
+  solo en carteles y etiquetas.
+- Ritmo vertical: cada sección usa `--section` (o `--section-s` arriba del catálogo); no se inventan paddings por sección.
+- Jerarquía: el `h1` manda; los `h2` quedan un paso abajo (`clamp(36px, 4.6vw, 68px)`).
+- Celular: barra fija abajo con WhatsApp y Catálogo (`.sticky-bar`, solo ≤ 760 px; se oculta con el visor abierto); el collage
+  va después del titular, chico; «Cómo llegar» es enlace de texto bajo el sello.
+- Logo en cabecera y pie: `assets/el-dolaron-logo.webp` (600 px); el PNG se conserva para JSON-LD y vistas previas.
 
 - Celular primero: sin desplazamiento horizontal de la página de 320 a 1440 px.
 - Contraste AA en todo texto; el rojo grande sobre papel o cartón debe dar 3:1 (usar `--red-text`).
