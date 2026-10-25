@@ -46,6 +46,8 @@ En `/inventario` móvil, Mercancía y Ropa apagan la cámara tras **60 s** sin l
 
 `GET /api/piezas/repetidas?cursor=…` exige la misma casilla, limita por propietario y devuelve `grupos` y `siguiente`. Cada página inspecciona hasta 80 candidatas (81 con el testigo de continuación); agrupa sin confundir grados y propone la etiqueta ED más antigua. El cursor es opaco para el cliente. Un grupo puede continuar en la siguiente página; la UI une sus miembros por ID. Las bandas y los descartados quedan fuera. El análisis de IA no asigna UPC: sólo usa el enviado por la captura. Fotos con UPC, captura manual del escáner, PATCH y cambios de grado comparten la guarda; la captura manual general que envía UPC se valida en la corrección y rechaza coincidencias sin dejar borrador vacío. Familias de banda e importación Wincaja no fijan UPC y son `sin_inventario`.
 
+**Imagen de Target por UPC (#413, #524):** al escanear un UPC del manifiesto se busca una vez la imagen de su página de Target. Si esa página trae un solo `primary_barcode` y coincide con el UPC leído, la imagen queda **confirmada sola** (`confirmado_por = 'sistema'`) y se guarda como foto de las piezas de ese UPC que no tienen foto; el escáner no muestra «Es esta». Si la página no trae código verificable, la imagen queda como candidata y una persona la confirma con «Es esta». El cron de relleno confirma del mismo modo las candidatas verificadas que quedaron sin tocar. Una confirmación humana previa no se pisa, y la foto propia sigue teniendo prioridad: solo se llena `foto_key = ''`.
+
 ## Decisión de fondo
 
 El escáner **no** es la herramienta de captura del vendedor: la cámara lo es. El análisis con IA
