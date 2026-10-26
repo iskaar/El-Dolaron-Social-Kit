@@ -65,18 +65,48 @@
     return n;
   }
 
+  // Borde troquelado, sombra, dorso y aro holográfico se hornean UNA vez en canvas al construir el sticker (#539): en celular los
+  // filtros SVG (feMorphology) se recalculaban en cada cuadro del despegue. Devuelve null si no hay canvas 2D (se usan <img> planas).
+  function troquelar(img) {
+    const ctx2d = (c) => c.getContext && c.getContext("2d");
+    const S = 512, r = 18, M = r + 12, caja = S - 2 * M;   // r: grosor del borde en px del canvas (≈ 8 px CSS en un sticker de ~230 px)
+    const lienzo = () => { const c = el("canvas"); c.width = c.height = S; return c; };
+    const sil = lienzo(), sx = ctx2d(sil);
+    if (!sx) return null;
+    // Geometría "contain" de la imagen dentro de la caja con margen M.
+    const k = Math.min(caja / img.naturalWidth, caja / img.naturalHeight), w = img.naturalWidth * k, h = img.naturalHeight * k;
+    const x = M + (caja - w) / 2, y = M + (caja - h) / 2;
+    const poner = (c, dx = 0, dy = 0) => c.drawImage(img, x + dx, y + dy, w, h);
+    // Silueta blanca = imagen estampada en tres anillos de radio r (dilatar a mano) y rellenada de blanco.
+    poner(sx);
+    for (const f of [1, .66, .33]) for (let a = 0; a < 24; a++) poner(sx, Math.cos(a * Math.PI / 12) * r * f, Math.sin(a * Math.PI / 12) * r * f);
+    const pintar = (c, color) => { c.globalCompositeOperation = "source-in"; c.fillStyle = color; c.fillRect(0, 0, S, S); c.globalCompositeOperation = "source-over"; };
+    pintar(sx, "#fff");
+    const arte = lienzo(), ax = ctx2d(arte); ax.drawImage(sil, 0, 0); poner(ax);
+    // La silueta se dibuja fuera del lienzo y solo cae su sombra desenfocada.
+    const sombra = lienzo(), bx = ctx2d(sombra);
+    bx.shadowColor = "#000"; bx.shadowBlur = 24; bx.shadowOffsetX = S * 2; bx.drawImage(sil, -S * 2, 0);
+    const dorso = lienzo(), dx = ctx2d(dorso); dx.drawImage(sil, 0, 0); pintar(dx, "#ededed");
+    // Aro = silueta menos la imagen; sirve de máscara del degradado holográfico. Con canvas "tainted" (sin CORS) no hay aro.
+    const aro = lienzo(), ox = ctx2d(aro); ox.drawImage(sil, 0, 0); ox.globalCompositeOperation = "destination-out"; poner(ox);
+    let anillo = null;
+    try { anillo = aro.toDataURL(); } catch {}
+    sombra.className = "sombra"; arte.className = "arte";
+    return { arte, sombra, dorso, anillo };
+  }
+
   // Sombra, frente (imagen con borde troquelado + aro holográfico) y dorso (la pestaña doblada).
-  function pegatina(p) {
+  function pegatina(p, imagen) {
     const b = el("button", "sticker");
     b.type = "button";
     b.pieza = p;
     b.setAttribute("aria-label", `Ver ${p.nombre}, ${precio(p.precio)}`);
-    b.style.setProperty("--src", `url(${JSON.stringify(p.recorte)})`);
     const img = (clase) => { const i = el("img", clase); i.src = p.recorte; i.alt = ""; i.draggable = false; return i; };
-    const holo = el("span", "holo"); holo.append(el("span", "holo-fill"));
-    const frente = el("span", "frente"); frente.append(img("arte"), holo);
-    const dorso = el("span", "dorso"); dorso.append(img(""));
-    b.append(img("sombra"), frente, dorso);
+    const t = troquelar(imagen) || { sombra: img("sombra"), arte: img("arte"), dorso: img(""), anillo: null };
+    const frente = el("span", "frente"); frente.append(t.arte);
+    if (t.anillo) { const holo = el("span", "holo"); holo.style.setProperty("--anillo", `url(${JSON.stringify(t.anillo)})`); frente.append(holo); }
+    const dorso = el("span", "dorso"); dorso.append(t.dorso);
+    b.append(t.sombra, frente, dorso);
     return b;
   }
 
@@ -87,13 +117,17 @@
     const reloj = setTimeout(() => control.abort(), 15000);
     const rollo = await traerRollo(apiBase(location.search), control.signal, traerExcluidos()).finally(() => clearTimeout(reloj));
     let idx = 0;
-    // La siguiente pieza del rollo cuyo recorte sí se decodifica; null cuando se acaba.
+    // La siguiente pieza del rollo cuyo recorte sí se decodifica, con su imagen ({ p, img }); null cuando se acaba.
+    // Primero con CORS para que el canvas no quede "tainted"; si falla, otra vez sin CORS (se ve, pero sin aro).
     async function sacar() {
       while (idx < rollo.length) {
         const p = rollo[idx++];
-        const i = new Image();
-        i.src = p.recorte;
-        try { await i.decode(); return p; } catch {}
+        for (const cors of [true, false]) {
+          const i = new Image();
+          if (cors) i.crossOrigin = "anonymous";
+          i.src = p.recorte;
+          try { await i.decode(); return { p, img: i }; } catch {}
+        }
       }
       return null;
     }
@@ -103,7 +137,7 @@
     const tablero = el("div", "sticker-board");
     tablero.setAttribute("role", "group");
     tablero.setAttribute("aria-label", "Piezas de la tienda");
-    tablero.append(...primeras.map((p, i) => colocar(p ? pegatina(p) : el("span", "vacio"), i)));
+    tablero.append(...primeras.map((x, i) => colocar(x ? pegatina(x.p, x.img) : el("span", "vacio"), i)));
     arte.append(tablero);
     arte.classList.add("con-stickers");
     requestAnimationFrame(() => tablero.classList.add("listo"));
@@ -119,10 +153,10 @@
 
     if (matchMedia("(prefers-reduced-motion: reduce)").matches) return { rollo, tablero };
 
-    // El aro holográfico sigue al puntero: una escritura por cuadro, en el tablero y no en :root.
+    // El aro holográfico sigue al puntero (no al dedo: en touch queda fijo): una escritura por cuadro, en el tablero y no en :root.
     let raf = 0;
     tablero.addEventListener("pointermove", (e) => {
-      if (raf) return;
+      if (e.pointerType === "touch" || raf) return;
       raf = requestAnimationFrame(() => {
         raf = 0;
         tablero.style.setProperty("--px", (e.clientX / innerWidth).toFixed(3));
@@ -132,9 +166,9 @@
 
     // Rellena un slot con la siguiente pieza del rollo; si se acabó, queda el hueco punteado.
     async function rellenar(slot) {
-      const p = await sacar();
-      if (!p) { slot.replaceWith(colocar(el("span", "vacio"), slot.lugar)); return; }
-      const s = colocar(pegatina(p), slot.lugar);
+      const x = await sacar();
+      if (!x) { slot.replaceWith(colocar(el("span", "vacio"), slot.lugar)); return; }
+      const s = colocar(pegatina(x.p, x.img), slot.lugar);
       s.classList.add("nuevo");
       slot.replaceWith(s);
     }

@@ -102,7 +102,8 @@ h2 { font-family: var(--display); font-variation-settings: var(--display-axes); 
 /* Portada: stickers de recortes reales (#526, #531)
    La imagen del HTML es la pila semanal (tools/pila_stickers.py): LCP y respaldo. stickers.js pone encima 5 stickers vivos en
    lugares fijos (--l, --t, --w, --r); el tablero es una capa absoluta, así que la portada no cambia de alto al activarse.
-   Técnica del prototipo aprobado: borde troquelado blanco (#troquel) y aro holográfico (#anillo) en SVG, esquina que se despega
+   Técnica del prototipo aprobado: borde troquelado blanco, sombra, dorso y aro holográfico se hornean una vez en canvas
+   (troquelar() en stickers.js; los filtros SVG por cuadro iban a tirones en celular, #539), esquina que se despega
    con clip-path y un dorso espejado. Todo lo que se mueve va en no-preference; con «reducir movimiento» quedan planos. */
 @property --peel { syntax: "<number>"; inherits: true; initial-value: 0; }
 @property --alto { syntax: "<number>"; inherits: true; initial-value: 0; }
@@ -110,7 +111,6 @@ h2 { font-family: var(--display); font-variation-settings: var(--display-axes); 
 .sticker-board.listo { opacity: 1; }
 .vacio { position: absolute; left: var(--l); top: var(--t); width: var(--w); rotate: var(--r); aspect-ratio: 1; border: 2px dashed rgb(22 54 107 / .25); border-radius: 8px; }
 .sticker {
-  --m: 16px;       /* margen para que el borde troquelado no se recorte */
   --sx: 1; --sy: 1; /* esquina activa: 1 = izquierda/arriba, -1 = derecha/abajo (la geometría se espeja con scale) */
   --k: .55;        /* compresión de la pestaña: 1 = doblez plano, menor = rizo */
   /* Distancia del pliegue desde la esquina; el min() salta rápido los primeros 24% porque la esquina casi siempre está vacía. */
@@ -122,24 +122,22 @@ h2 { font-family: var(--display); font-variation-settings: var(--display-axes); 
   transform: scale(var(--sx), var(--sy)) scale(calc(1 + var(--alto) * .06));
 }
 .sticker > *, .frente > * { position: absolute; inset: 0; display: block; }
-.sticker img { width: 100%; height: 100%; padding: var(--m); object-fit: contain; pointer-events: none; transform: scale(var(--sx), var(--sy)); }
+.sticker img, .sticker canvas { width: 100%; height: 100%; pointer-events: none; transform: scale(var(--sx), var(--sy)); }
 /* Sombra: silueta desenfocada; al levantar solo se oscurece y crece, sin desplazarse. */
-.sombra { filter: url(#troquel) brightness(0) blur(10px); opacity: calc(.10 + var(--alza) * .22); transform: scale(var(--sx), var(--sy)) scale(calc(1 + var(--alza) * .05)); }
+.sombra { opacity: calc(.10 + var(--alza) * .22); transform: scale(var(--sx), var(--sy)) scale(calc(1 + var(--alza) * .05)); }
 .frente { clip-path: polygon(var(--d) 0, 100% 0, 100% 100%, 0 100%, 0 var(--d)); }
-.arte { filter: url(#troquel); }
-.holo { filter: url(#anillo); mix-blend-mode: multiply; opacity: .9; }
-/* El relleno necesita mask-image con CORS: funciona en eldolaron.com (la API autoriza ese origen); en localhost no hay aro. */
-.holo-fill {
-  position: absolute; inset: var(--m); transform: scale(var(--sx), var(--sy));
-  -webkit-mask: var(--src) center / contain no-repeat; mask: var(--src) center / contain no-repeat;
+/* Aro holográfico: el degradado se ve solo a través del aro horneado en canvas (--anillo, data URL de stickers.js). */
+.holo {
+  opacity: .9; transform: scale(var(--sx), var(--sy));
+  -webkit-mask: var(--anillo) center / 100% 100% no-repeat; mask: var(--anillo) center / 100% 100% no-repeat;
   background:
     repeating-linear-gradient(calc(var(--py) * 180deg + 20deg), #fff9 0 1px, transparent 1px 5px),
     conic-gradient(from calc(var(--px) * 360deg) at calc(var(--px) * 100%) calc(var(--py) * 100%), #ff7a9c, #ffd36b, #8bff9e, #6bd6ff, #c58bff, #ff7a9c);
 }
 /* Dorso: la pestaña levantada, la misma imagen vuelta papel, reflejada sobre el pliegue x+y=d. */
 .dorso { clip-path: polygon(var(--d) 0, var(--d) var(--d), 0 var(--d)); }
-.dorso img {
-  transform-origin: 0 0; filter: url(#troquel) brightness(0) invert(.93);
+.dorso img, .dorso canvas {
+  transform-origin: 0 0;
   transform:
     translate(calc(var(--d) / 2), calc(var(--d) / 2)) rotate(45deg) scaleX(var(--k)) rotate(-45deg) translate(calc(var(--d) / -2), calc(var(--d) / -2))
     translate(var(--d), var(--d)) scaleY(-1) rotate(90deg)
