@@ -117,9 +117,8 @@ h2 { font-family: var(--display); font-variation-settings: var(--display-axes); 
   --d: calc(var(--peel) * 115% + min(var(--peel) * 800%, 24%));
   --alza: max(var(--peel), var(--alto));
   position: absolute; left: var(--l); top: var(--t); width: var(--w); rotate: var(--r); display: block; aspect-ratio: 1; padding: 0; border: 0; background: none; color: inherit; font: inherit;
-  /* pan-y: un deslizamiento vertical sobre el tablero sigue haciendo scroll; a cambio, despegar pide un jalón con componente
-     horizontal (de la esquina hacia el centro), que es el gesto natural. Si el navegador toma el gesto para scroll, pointercancel regresa el sticker. */
-  touch-action: pan-y; user-select: none; -webkit-user-select: none; -webkit-tap-highlight-color: transparent; cursor: pointer;
+  /* none para que el dedo pueda despegar el sticker en celular (con pan-y el navegador se quedaba el gesto para scroll y mandaba pointercancel); el scroll sigue funcionando en los huecos del tablero y fuera de él. */
+  touch-action: none; -webkit-touch-callout: none; user-select: none; -webkit-user-select: none; -webkit-tap-highlight-color: transparent; cursor: pointer;
   transform: scale(var(--sx), var(--sy)) scale(calc(1 + var(--alto) * .06));
 }
 .sticker > *, .frente > * { position: absolute; inset: 0; display: block; }
