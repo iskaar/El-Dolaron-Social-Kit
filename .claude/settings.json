@@ -13,7 +13,8 @@
       "mcp__meta_ads__ads_create_campaign",
       "mcp__meta_ads__ads_create_ad_set",
       "mcp__meta_ads__ads_create_creative",
-      "mcp__meta_ads__ads_create_ad"
+      "mcp__meta_ads__ads_create_ad",
+      "Bash(npx wrangler d1 execute el-dolaron --remote --json --command \"select:*)"
     ],
     "deny": [
       "Read(app/.dev.vars)",

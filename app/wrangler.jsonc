@@ -43,8 +43,8 @@
     // a las primeras 100 compras. Sabado 24/10 11:00 a domingo 25/10 20:00, hora de la tienda (UTC-6).
     // Para apagarla antes: quitar PROMO_DESDE y PROMO_HASTA y desplegar.
     "PROMO_DESDE": "2026-10-24T17:00:00Z",
-    "PROMO_HASTA": "2026-10-26T02:00:00Z",
-    "PROMO_CUPO": "100",
+    "PROMO_HASTA": "2026-10-26T06:00:00Z",
+    "PROMO_CUPO": "110",
     // Conteo de alto valor (Issue #219): piezas en existencia con precio >= este monto, en centavos.
     "CONTEO_UMBRAL": "30000",
     // Mercado Libre (Issue #170): debe ser identica a la URI de redireccion de la
