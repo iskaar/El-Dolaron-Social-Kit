@@ -48,6 +48,7 @@ function corre(pila) {
   assert.equal(new URL(urls[1]).searchParams.get("despues"), "c1");   // pidió la 2 con el cursor y paró: hay_mas era false
   assert.equal(rollo.map((p) => p.codigo).join(), ["ED-1", "ED-3", "ED-4", "ED-6", "ED-7"].join());   // sin la de recorte null ni las de la pila
   assert.equal(tablero.children.length, 5);
+  assert.equal(tablero.children[0].children.length, 3);   // sin canvas (DOM falso): sombra, frente y dorso con <img> planas
   assert.equal(tablero.children[0].attrs["aria-label"], "Ver Pieza 1, $1,499");
   const lugares = tablero.children.map((n) => [n.lugar, n.style.props["--l"], n.style.props["--t"], n.style.props["--w"], n.style.props["--r"]].join("|"));
   assert.equal(new Set(lugares).size, 5);   // cinco lugares distintos, cada uno con caja y giro
