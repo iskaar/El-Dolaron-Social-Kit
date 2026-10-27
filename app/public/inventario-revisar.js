@@ -184,7 +184,7 @@ export async function iniciar(ctx) {
       const poner=opciones=>{for(const[v,t]of opciones){const o=nodo('option',t);o.value=v;input.append(o);}input.value=campos[k];};
       if(k==='categoria')poner(CATEGORIAS);else if(k==='estado_fisico')poner(ESTADOS);else if(k==='destino'){poner([[p.destino,p.destino==='etiqueta'?'Etiqueta individual':p.destino]]);void destinos().then(d=>{input.replaceChildren();poner(d);}).catch(e=>mensaje(e.message,'error'));}
       else if(k==='stock'){input.type='number';input.min=0;input.max=999;input.step=1;input.inputMode='numeric';input.value=campos[k];}
-      else{input.value=campos[k];input.maxLength=k==='nombre'?120:k==='marca'?60:k==='talla'?30:12;}
+      else{input.value=campos[k];input.maxLength=k==='nombre'?120:k==='marca'?60:k==='talla'?30:12;if(k==='talla')input.setAttribute('list','tallas');}   // el desplegable de tallas (#tallas, lo llena ficha.js con TALLAS): a mano daba «Talla invalida»
       input.oninput=()=>{campos[k]=input.value;borradores.set(p.id,campos);if(k==='categoria')actualizarGrado();};input.onchange=input.oninput;l.append(input);form.append(l);
       if(k==='estado_fisico')l.dataset.grado='';
     }
