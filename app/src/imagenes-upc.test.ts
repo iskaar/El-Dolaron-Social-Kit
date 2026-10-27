@@ -486,6 +486,31 @@ test('una foto de respaldo guarda el UPC, usa el manifiesto y queda disponible p
   assert.equal(producto.foto_key, `fotos/${id}.jpg`);
 });
 
+test('#549: la foto con el id y UPC de una pieza que ya tiene imagen no la pisa; un reintento sin foto sí la sube', async () => {
+  const { db, env, pedir } = preparar();
+  const id = crypto.randomUUID(), key = `fotos/${id}.jpg`;
+  assert.equal((await pedir('/api/borradores/upc', { id, upc: UPC, stock: 1 })).status, 201);
+  // La imagen del catálogo ya quedó como foto de la pieza.
+  await env.FOTOS.put(key, 'catalogo', { customMetadata: { imagen_upc: 'imagenes-upc/x' } });
+  db.prepare('update productos set foto_key=? where id=?').run(key, id);
+  const subir = async () => {
+    const cuerpo = new FormData();
+    cuerpo.set('id', id); cuerpo.set('upc', UPC); cuerpo.set('cantidad', '1'); cuerpo.set('estado_fisico', 'nuevo');
+    cuerpo.set('foto', new File(['playera'], 'foto.jpg', { type: 'image/jpeg' }));
+    return worker.fetch!(new Request('https://caja.prueba/api/borradores', { method: 'POST', body: cuerpo }) as never, env, { waitUntil() {} } as never);
+  };
+  assert.equal((await subir()).status, 201);
+  assert.equal(new TextDecoder().decode((env.FOTOS as any).objetos.get(key)), 'catalogo');
+  assert.equal(db.prepare('select foto_key, stock from productos where id=?').get(id)!.foto_key, key);
+  assert.equal(db.prepare('select stock from productos where id=?').get(id)!.stock, 1);
+  // Reintento legítimo: el alta quedó sin foto (falló el put) y la misma subida la repone.
+  await env.FOTOS.delete(key);
+  db.prepare("update productos set foto_key='' where id=?").run(id);
+  assert.equal((await subir()).status, 201);
+  assert.equal(new TextDecoder().decode((env.FOTOS as any).objetos.get(key)), 'playera');
+  assert.equal(db.prepare('select foto_key from productos where id=?').get(id)!.foto_key, key);
+});
+
 test('un producto ya identificado en el catálogo funciona aunque no esté en la hoja del proveedor', async () => {
   const { db, pedir } = preparar();
   db.prepare('delete from manifiesto').run();

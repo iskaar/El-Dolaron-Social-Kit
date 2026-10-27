@@ -7,7 +7,7 @@ import { ropa, opciones, talla } from './inventario-ropa.js';
 import { stepper, bloquear, cerrarHoja } from './inventario-ui.js';
 import { estadoEnvio, sincronizarMarcas, marcaDeLaBase } from './envio-etiquetas.js';
 import { esRopa } from './ropa.js';
-import { cambiosTarjeta, capturaImpresa, corregirExistencia, etiquetasPorCorreccion } from './inventario-capturar.js';
+import { cambiosTarjeta, capturaImpresa, corregirExistencia, etiquetasPorCorreccion, piezaSinRegistrar } from './inventario-capturar.js';
 import { etiqueteraLista } from './etiquetera.js';
 
 export async function iniciarCelular(ctx,captura) {
@@ -152,14 +152,15 @@ export async function iniciarCelular(ctx,captura) {
     await guardar(r);sesion.set(r.id,{...r,url:URL.createObjectURL(foto),subida:false});captura.flujo.limpiar();captura.contador.poner(1);pintar();mensaje(navigator.onLine?'Foto guardada en el teléfono':'Sin red · foto en el teléfono',navigator.onLine?'ok':'aviso');
     if(localStorage.getItem('inventario-vibracion')!=='false')navigator.vibrate?.(30);void subir();return r;
   }
-  async function tomar(a=captura.flujo.actual()){
+  // El obturador nunca toca una pieza ya registrada (#549): con el topper guardado en pantalla, la foto de la playera era
+  // del topper (mismo id y UPC: el Worker la tomaba por reintento y pisaba su imagen). Reemplazar es «Foto nueva» en la tarjeta.
+  async function tomar(a=piezaSinRegistrar(captura.flujo.actual())){
     if(disparando)return;
-    if(a?.tipo==='existente')return fotoPieza(a.pieza);
     if(captura.esRopa()&&!a?.upc&&!captura.tablero.validar()){sonar('error');return;}
     if(!camara.pista()||!video.videoWidth){archivoPara=a;archivo.click();return;}
-    disparando=true;try{const foto=await aJpeg(video,video.videoWidth,video.videoHeight);if(!foto)throw new Error('No se pudo tomar foto');await conservar(foto,a?.tipo==='existente'?null:a);}finally{disparando=false;}
+    disparando=true;try{const foto=await aJpeg(video,video.videoWidth,video.videoHeight);if(!foto)throw new Error('No se pudo tomar foto');await conservar(foto,a);}finally{disparando=false;}
   }
-  archivo.onchange=async()=>{const f=archivo.files?.[0];if(!f)return;try{const foto=await reducirArchivo(f);if(archivoPara?.existente){await reemplazarFoto(archivoPara.existente,foto);cerrarHoja();}else if(archivoPara?.local)await retomarLocal(archivoPara.local,foto);else await conservar(foto,archivoPara||captura.flujo.actual());}catch(e){mensaje(e.message,'error');}finally{archivo.value='';archivoPara=null;}};
+  archivo.onchange=async()=>{const f=archivo.files?.[0];if(!f)return;try{const foto=await reducirArchivo(f);if(archivoPara?.existente){await reemplazarFoto(archivoPara.existente,foto);cerrarHoja();}else if(archivoPara?.local)await retomarLocal(archivoPara.local,foto);else await conservar(foto,piezaSinRegistrar(archivoPara||captura.flujo.actual()));}catch(e){mensaje(e.message,'error');}finally{archivo.value='';archivoPara=null;}};
   archivo.oncancel=()=>{archivoPara=null;};
   async function reemplazarFoto(p,foto){
     reposo.actividad();
