@@ -39,12 +39,8 @@
     "BASES_APROBADAS_VERSION": "2026-10-v4",
     "PROMOCION_INICIO": "2026-10-05T17:00:00Z",
     "VALES_ABIERTOS": "si",
-    // Promo de gran inauguracion (Isaac, 23/10, Issue #487): $100 de descuento en compras de $300 o mas,
-    // a las primeras 100 compras. Sabado 24/10 11:00 a domingo 25/10 20:00, hora de la tienda (UTC-6).
-    // Para apagarla antes: quitar PROMO_DESDE y PROMO_HASTA y desplegar.
-    "PROMO_DESDE": "2026-10-24T17:00:00Z",
-    "PROMO_HASTA": "2026-10-26T06:00:00Z",
-    "PROMO_CUPO": "110",
+    // Promo de inauguracion (Issue #487): se enciende con PROMO_DESDE, PROMO_HASTA y PROMO_CUPO (ver descuentos.ts).
+    // La del 24-25/10 ya vencio; se quitaron las variables el 27/10 a pedido de Isaac.
     // Conteo de alto valor (Issue #219): piezas en existencia con precio >= este monto, en centavos.
     "CONTEO_UMBRAL": "30000",
     // Mercado Libre (Issue #170): debe ser identica a la URI de redireccion de la
