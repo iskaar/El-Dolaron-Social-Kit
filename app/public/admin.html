@@ -563,7 +563,8 @@ function pintarSesiones(sesiones) {
   elSesion.innerHTML = '<option value="">Todas</option>' + sesiones.map((s) => {
     const fecha = new Date(s.inicio).toLocaleDateString('es-MX', { weekday: 'short', day: 'numeric', month: 'short' });
     const quien = s.quien ? s.quien.split('@')[0] : 'sin correo';
-    return `<option value="${s.clave}">${fecha} ${horaLocal(s.inicio)}–${horaLocal(s.fin)} · ${quien} · ${s.piezas} ${s.piezas === 1 ? 'foto' : 'fotos'}</option>`;
+    const esc = (t) => String(t).replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
+    return `<option value="${esc(s.clave)}">${fecha} ${horaLocal(s.inicio)}–${horaLocal(s.fin)} · ${esc(quien)} · ${s.piezas} ${s.piezas === 1 ? 'foto' : 'fotos'}</option>`;
   }).join('');
   elSesion.value = elegida;   // si la sesion ya no existe, cae a "Todas"
 }

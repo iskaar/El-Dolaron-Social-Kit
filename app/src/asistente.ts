@@ -80,8 +80,8 @@ export async function cuposPromocion(env: Env, ahora = Date.now()) {
 /** Número en pesos de la consulta a centavos enteros; null si no es válido, undefined si no vino. */
 function centavos(texto: string | null) {
   if (texto === null || texto.trim() === '') return undefined;
-  const n = Number(texto);
-  return Number.isFinite(n) && n >= 0 ? Math.round(n * 100) : null;
+  const c = Math.round(Number(texto) * 100);
+  return Number.isSafeInteger(c) && c >= 0 ? c : null;
 }
 
 export async function rutaAsistente(request: Request, env: Env, url: URL): Promise<Response> {

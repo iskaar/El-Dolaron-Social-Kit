@@ -384,3 +384,22 @@ test('vale de papel a la cuenta (Issue #258): doble, una vez, tope semanal y reg
     assert.equal((p.db.prepare('select restante from vales_dolarones where id = ?').get(dos.vale.id) as any).restante, 0);
   } finally { p.cerrar(); }
 });
+
+test('host público: tope por IP en la API, fotos del catálogo fuera, y HSTS en toda respuesta', async () => {
+  const p = portalDePrueba();
+  try {
+    const llaves: string[] = [];
+    p.env.LIMITE_PORTAL = { limit: async ({ key }: { key: string }) => { llaves.push(key); return { success: false }; } } as never;
+    const pedir = (ruta: string) => worker.fetch!(new Request(`https://portal.prueba${ruta}`, { headers: { 'cf-connecting-ip': '203.0.113.9' } }) as never, p.env, { waitUntil() {} } as never);
+    const limitada = await pedir('/api/portal/config');
+    assert.equal(limitada.status, 429);
+    assert.equal(limitada.headers.get('retry-after'), '60');
+    assert.deepEqual(llaves, ['203.0.113.9']);
+    assert.notEqual((await pedir('/api/catalogo/foto/ED-000001')).status, 429);
+    assert.equal(limitada.headers.get('strict-transport-security'), 'max-age=31536000; includeSubDomains');
+    delete (p.env as Record<string, unknown>).LIMITE_PORTAL;
+    const libre = await pedir('/api/portal/config');
+    assert.equal(libre.status, 200);
+    assert.equal(libre.headers.get('strict-transport-security'), 'max-age=31536000; includeSubDomains');
+  } finally { p.cerrar(); }
+});

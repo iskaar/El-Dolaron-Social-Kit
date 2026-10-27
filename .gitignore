@@ -9,3 +9,10 @@ __pycache__/
 # Material privado y multimedia (no versionar)
 recursos/
 videos/
+
+# Secretos y estado local de Wrangler, en cualquier carpeta
+.env*
+.dev.vars*
+.wrangler/
+node_modules/
+respaldos/
