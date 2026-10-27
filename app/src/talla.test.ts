@@ -5,7 +5,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import worker from './worker.ts';
 import { tienda } from './prueba-d1.ts';
-import { tallaValida, TABLAS_CALZADO, CALZADO_US_HOMBRE, CALZADO_US_MUJER, CALZADO_US_NINO } from '../public/tallas.js';
+import { tallaValida, tallaUs, TABLAS_CALZADO, CALZADO_US_HOMBRE, CALZADO_US_MUJER, CALZADO_US_NINO } from '../public/tallas.js';
 import { tsplEtiqueta } from '../public/etiquetera.js';
 
 const HOST = 'dolarones.prueba';
@@ -142,4 +142,13 @@ test('toda talla de las tablas US->MX (#546) guarda un cm valido y sin repetir l
     for (const [us, cm] of tabla) assert.ok(tallaValida(tipo === 'Calzado niño' ? `Niño ${cm}` : cm), `${tipo} US ${us} -> ${cm}`);
     assert.equal(new Set(tabla.map(([us]) => us)).size, tabla.length, tipo);
   }
+});
+
+test('los desplegables de ficha, Revisar y admin rotulan cada cm de calzado con la talla US de la caja (#546)', () => {
+  assert.equal(tallaUs('26'), 'US 8 H · US 9 M');
+  assert.equal(tallaUs('22'), 'US 5 M');
+  assert.equal(tallaUs('32'), 'US 14 H');
+  assert.equal(tallaUs('Niño 19'), 'US 13C');
+  assert.equal(tallaUs('Niño 24.5'), 'US 5.5Y · US 6Y');
+  for (const ropa of ['M', 'Niño 6 años', 'Niño 6 años / S']) assert.equal(tallaUs(ropa), '', ropa);
 });

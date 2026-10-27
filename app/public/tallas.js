@@ -59,6 +59,19 @@ export function calzadoGuardado(talla, activo) {
   return null;
 }
 
+/**
+ * Lo que dice la caja para un cm guardado: "US 8 H · US 9 M", "US 13C", o '' si no es calzado.
+ * Es el rotulo de los desplegables de la ficha, Revisar y /admin, donde se elige el cm viendo la US.
+ */
+export const tallaUs = (talla) => {
+  const nino = talla.startsWith('Niño ');
+  const cm = nino ? talla.slice(5) : talla;
+  const us = Object.entries(TABLAS_CALZADO)
+    .filter(([tipo]) => (tipo === 'Calzado niño') === nino)
+    .flatMap(([tipo, tabla]) => tabla.filter((par) => par[1] === cm).map(([u]) => nino ? `US ${u}` : `US ${u} ${tipo.slice(-1)}`));
+  return [...new Set(us)].join(' · ');
+};
+
 /** Todo lo que se puede guardar en `productos.talla`. */
 export const TALLAS = [
   ...TALLAS_ADULTO,
