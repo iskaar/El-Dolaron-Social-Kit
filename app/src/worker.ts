@@ -2523,6 +2523,49 @@ async function servirFoto(id: string, env: Env): Promise<Response> {
   });
 }
 
+/** Todo lo que responde el host del portal (dolarones.eldolaron.com): assets fijos, catálogo público y /api/portal/*. */
+async function rutaPortalPublico(request: Request, env: Env, url: URL): Promise<Response> {
+  const { pathname } = url;
+  const archivos: Record<string, string> = {
+    '/': '/portal', '/portal': '/portal', '/portal.html': '/portal', '/v': '/portal',
+    '/portal.js': '/portal.js', '/portal.css': '/portal.css', '/code128.js': '/code128.js', '/vendor/qrcode-generator.js': '/vendor/qrcode-generator.js',
+    '/el-dolaron-logo.png': '/el-dolaron-logo.png',
+  };
+  if (archivos[pathname] && (request.method === 'GET' || request.method === 'HEAD')) {
+    const asset = new URL(archivos[pathname], url.origin);
+    const pantalla = await env.ASSETS.fetch(new Request(asset, { method: request.method }));
+    // Assets no hace redirección de HTML hacia el index del personal.
+    if (pantalla.status >= 300 && pantalla.status < 400)
+      return json({ error: 'Página no disponible.' }, 503);
+    const respuesta = new Response(pantalla.body, pantalla);
+    const authDomain = env.FIREBASE_AUTH_DOMAIN || `${env.FIREBASE_PROJECT_ID}.firebaseapp.com`;
+    const frameAuth = /^[a-z0-9.-]+$/.test(authDomain) ? `https://${authDomain}` : '';
+    respuesta.headers.set('content-security-policy', "default-src 'self'; script-src 'self' https://www.gstatic.com https://www.google.com https://www.recaptcha.net https://apis.google.com; style-src 'self' 'unsafe-inline'; connect-src 'self' https://identitytoolkit.googleapis.com https://securetoken.googleapis.com https://www.google.com https://www.recaptcha.net; frame-src https://www.google.com https://www.recaptcha.net " + frameAuth + "; img-src 'self' data: https://www.gstatic.com; object-src 'none'; base-uri 'none'; frame-ancestors 'none'");
+    respuesta.headers.set('cache-control', 'no-store');
+    respuesta.headers.set('referrer-policy', 'no-referrer');
+    respuesta.headers.set('x-content-type-options', 'nosniff');
+    return respuesta;
+  }
+  // Sin sesión nadie paga el abuso: tope por IP a la API pública (cada petición con token
+  // cuesta un lookup a Firebase; cada búsqueda, un barrido de productos en D1). Las fotos
+  // del catálogo quedan fuera: una página del sitio pide dos docenas de golpe.
+  // ponytail: tope único por IP; si un NAT grande lo tropieza, subir el limit en wrangler.jsonc.
+  if (env.LIMITE_PORTAL && pathname.startsWith('/api/') && !/^\/api\/catalogo\/(foto|recorte)\//.test(pathname)) {
+    const { success } = await env.LIMITE_PORTAL.limit({ key: request.headers.get('cf-connecting-ip') ?? 'sin-ip' });
+    if (!success) {
+      const r = json({ error: 'Demasiadas peticiones. Espera un minuto.' }, 429);
+      r.headers.set('retry-after', '60');
+      return r;
+    }
+  }
+  const publico = await catalogoPublico(request, env, url);
+  if (publico) return publico;
+  if (!pathname.startsWith('/api/portal/') || pathname === '/api/portal/llegada')
+    return json({ error: 'Ruta no encontrada.' }, 404);
+  try { return await portal(request, env, url); }
+  catch { return json({ error: 'Servicio no disponible.' }, 503); }
+}
+
 export default {
   async fetch(request, env, ctx): Promise<Response> {
     const url = new URL(request.url);
@@ -2539,32 +2582,11 @@ export default {
       if (aviso && request.method === 'POST') return await recibirNotificacion(aviso[1], request, env, ctx);
       // Puerta pública cerrada por defecto. Nunca comparte rutas ni assets del personal.
       if (env.HOST_PORTAL && url.hostname === env.HOST_PORTAL) {
-        const archivos: Record<string, string> = {
-          '/': '/portal', '/portal': '/portal', '/portal.html': '/portal', '/v': '/portal',
-          '/portal.js': '/portal.js', '/portal.css': '/portal.css', '/code128.js': '/code128.js', '/vendor/qrcode-generator.js': '/vendor/qrcode-generator.js',
-          '/el-dolaron-logo.png': '/el-dolaron-logo.png',
-        };
-        if (archivos[pathname] && (request.method === 'GET' || request.method === 'HEAD')) {
-          const asset = new URL(archivos[pathname], url.origin);
-          const pantalla = await env.ASSETS.fetch(new Request(asset, { method: request.method }));
-          // Assets no hace redirección de HTML hacia el index del personal.
-          if (pantalla.status >= 300 && pantalla.status < 400)
-            return json({ error: 'Página no disponible.' }, 503);
-          const respuesta = new Response(pantalla.body, pantalla);
-          const authDomain = env.FIREBASE_AUTH_DOMAIN || `${env.FIREBASE_PROJECT_ID}.firebaseapp.com`;
-          const frameAuth = /^[a-z0-9.-]+$/.test(authDomain) ? `https://${authDomain}` : '';
-          respuesta.headers.set('content-security-policy', "default-src 'self'; script-src 'self' https://www.gstatic.com https://www.google.com https://www.recaptcha.net https://apis.google.com; style-src 'self' 'unsafe-inline'; connect-src 'self' https://identitytoolkit.googleapis.com https://securetoken.googleapis.com https://www.google.com https://www.recaptcha.net; frame-src https://www.google.com https://www.recaptcha.net " + frameAuth + "; img-src 'self' data: https://www.gstatic.com; object-src 'none'; base-uri 'none'; frame-ancestors 'none'");
-          respuesta.headers.set('cache-control', 'no-store');
-          respuesta.headers.set('referrer-policy', 'no-referrer');
-          respuesta.headers.set('x-content-type-options', 'nosniff');
-          return respuesta;
-        }
-        const publico = await catalogoPublico(request, env, url);
-        if (publico) return publico;
-        if (!pathname.startsWith('/api/portal/') || pathname === '/api/portal/llegada')
-          return json({ error: 'Ruta no encontrada.' }, 404);
-        try { return await portal(request, env, url); }
-        catch { return json({ error: 'Servicio no disponible.' }, 503); }
+        const publica = await rutaPortalPublico(request, env, url);
+        // Único host sin Access: el navegador no vuelve a entrar por http.
+        const respuesta = new Response(publica.body, publica);
+        respuesta.headers.set('strict-transport-security', 'max-age=31536000; includeSubDomains');
+        return respuesta;
       }
       if (pathname.startsWith('/api/portal/') && pathname !== '/api/portal/llegada')
         return json({ error: 'Ruta no encontrada.' }, 404);
@@ -2972,7 +2994,8 @@ export default {
       }
       return pantalla;
     } catch (error) {
-      console.error(JSON.stringify({ mensaje: 'fallo en la peticion', pathname, error: String(error),
+      // El segmento secreto de /api/ml/notificaciones/<secreto> no va al log.
+      console.error(JSON.stringify({ mensaje: 'fallo en la peticion', pathname: pathname.replace(/^(\/api\/ml\/notificaciones\/).+/, '$1<secreto>'), error: String(error),
         pila: error instanceof Error ? error.stack?.slice(0, 2000) : undefined }));
       return json({ error: 'Error interno. Intenta de nuevo.' }, 500);
     }

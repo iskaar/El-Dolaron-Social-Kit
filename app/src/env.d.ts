@@ -32,6 +32,8 @@ declare global {
     CORREO?: SendEmail;
     /** Solo `wrangler dev` con `--var ACCESS_EQUIPO:local`: el correo con el que se entra. */
     DEV_USUARIO?: string;
+    /** Tope por IP a la API del host público (binding ratelimits de wrangler.jsonc). Ausente = sin tope (local, pruebas). */
+    LIMITE_PORTAL?: RateLimit;
     /** Host público exacto. Ausente = portal inaccesible. */
     HOST_PORTAL?: string;
     FIREBASE_PROJECT_ID?: string;
