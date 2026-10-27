@@ -1,5 +1,5 @@
 import { PRENDAS_ROPA, MARCAS_ROPA, PRECIO_PRENDA, PRECIOS_ROPA } from './ropa.js';
-import { TALLAS_ADULTO, EDADES_NINO, TALLAS_NINO, TALLAS_CALZADO_ADULTO, TALLAS_CALZADO_NINO } from './tallas.js';
+import { TALLAS_ADULTO, EDADES_NINO, TALLAS_NINO, TABLAS_CALZADO, CALZADO_INICIAL, calzadoRenglon, calzadoValor, calzadoGuardado } from './tallas.js';
 import { nodo, boton, hoja, cerrarHoja } from './inventario-ui.js';
 
 export function opciones(opciones, valor, cambiar, nombre) {
@@ -28,13 +28,12 @@ export function rodillo(opciones, indice, cambiar, nombre) {
 }
 
 export function talla(ponerValor, inicial = '') {
-  // "Niño 15" (calzado, solo numero) no es "Niño 6 años" (ropa, con edad): se distingue por la lista (#543).
-  const resto=inicial.startsWith('Niño ')?inicial.slice(5).split(' / ')[0]:'',
-    tipo=TALLAS_CALZADO_ADULTO.includes(inicial)?'Calzado':TALLAS_CALZADO_NINO.includes(resto)?'Calzado niño':resto?'Niño':'';
-  const raiz=nodo('div',undefined,'tallas-ropa'),adultos=opciones([...TALLAS_ADULTO.map(t=>[t,t]),['Niño','Niño…'],['Calzado','Calzado…'],['Calzado niño','Calzado niño…']],tipo||inicial,elegir,'Talla');
-  let elegida=tipo||inicial, edad=tipo==='Niño'?EDADES_NINO.indexOf(resto):edadSesion, infantil=tipo==='Niño'?(inicial.split(' / ')[1]||''):'';
-  const calzado={'Calzado':TALLAS_CALZADO_ADULTO.indexOf(tipo==='Calzado'?inicial:'25'),'Calzado niño':TALLAS_CALZADO_NINO.indexOf(tipo==='Calzado niño'?resto:'15')};
-  const avisar=()=>ponerValor(elegida==='Niño'?`Niño ${EDADES_NINO[edad]}${infantil?' / '+infantil:''}`:elegida==='Calzado'?TALLAS_CALZADO_ADULTO[calzado[elegida]]:elegida==='Calzado niño'?`Niño ${TALLAS_CALZADO_NINO[calzado[elegida]]}`:elegida);
+  // "Niño 19" (calzado en cm) no es "Niño 6 años" (ropa, con edad): se distingue por las tablas (#543, #546).
+  const guardado=calzadoGuardado(inicial.split(' / ')[0]),tipo=guardado?guardado.tipo:inicial.startsWith('Niño ')?'Niño':'';
+  const raiz=nodo('div',undefined,'tallas-ropa'),adultos=opciones([...TALLAS_ADULTO.map(t=>[t,t]),['Niño','Niño…'],...Object.keys(TABLAS_CALZADO).map(t=>[t,t+'…'])],tipo||inicial,elegir,'Talla');
+  let elegida=tipo||inicial, edad=tipo==='Niño'?EDADES_NINO.indexOf(inicial.slice(5).split(' / ')[0]):edadSesion, infantil=tipo==='Niño'?(inicial.split(' / ')[1]||''):'';
+  const calzado=Object.fromEntries(Object.entries(TABLAS_CALZADO).map(([t,tabla])=>[t,t===tipo?guardado.indice:tabla.findIndex(([us])=>us===CALZADO_INICIAL[t])]));
+  const avisar=()=>ponerValor(elegida==='Niño'?`Niño ${EDADES_NINO[edad]}${infantil?' / '+infantil:''}`:elegida in calzado?calzadoValor(elegida,calzado[elegida]):elegida);
   function elegir(t){elegida=t;if(t==='Niño')abrirNino();else if(t in calzado)abrirCalzado(t);else avisar();}
   function abrirNino(){
     const c=nodo('div',undefined,'nino'),edades=rodillo(EDADES_NINO,edad,i=>{edad=edadSesion=i;avisar();},'Edad');
@@ -42,9 +41,9 @@ export function talla(ponerValor, inicial = '') {
     hoja('Talla de niño',c);edades.poner(edad);avisar();
   }
   function abrirCalzado(t){
-    const lista=t==='Calzado'?TALLAS_CALZADO_ADULTO:TALLAS_CALZADO_NINO,c=nodo('div',undefined,'nino'),numeros=rodillo(lista,calzado[t],i=>{calzado[t]=i;avisar();},'Talla de calzado');
+    const c=nodo('div',undefined,'nino'),numeros=rodillo(TABLAS_CALZADO[t].map(calzadoRenglon),calzado[t],i=>{calzado[t]=i;avisar();},'Talla de calzado (US)');
     c.append(numeros,boton('Usar talla',()=>{avisar();cerrarHoja();},'primario'));
-    hoja(t==='Calzado'?'Talla de calzado (cm MX)':'Talla de calzado de niño (cm MX)',c);numeros.poner(calzado[t]);avisar();
+    hoja(t==='Calzado niño'?'Calzado de niño (US · cm MX)':t==='Calzado M'?'Calzado de mujer (US · cm MX)':'Calzado de hombre (US · cm MX)',c);numeros.poner(calzado[t]);avisar();
   }
   raiz.append(adultos);return raiz;
 }

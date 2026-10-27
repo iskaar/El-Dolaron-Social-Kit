@@ -5,7 +5,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import worker from './worker.ts';
 import { tienda } from './prueba-d1.ts';
-import { tallaValida } from '../public/tallas.js';
+import { tallaValida, TABLAS_CALZADO, CALZADO_US_HOMBRE, CALZADO_US_MUJER, CALZADO_US_NINO } from '../public/tallas.js';
 import { tsplEtiqueta } from '../public/etiquetera.js';
 
 const HOST = 'dolarones.prueba';
@@ -107,8 +107,8 @@ test('la camara corrige la talla de lo que acaba de capturar; una talla que no e
 });
 
 test('calzado (#543): talla MX en cm de adulto y de nino; fuera de rango no pasa', async () => {
-  for (const valida of ['22', '25.5', '31', 'Niño 10', 'Niño 15', 'Niño 21.5']) assert.ok(tallaValida(valida), valida);
-  for (const invalida of ['21.5', '31.5', '32', '25.0', '25,5', 'Niño 9', 'Niño 22', 'Niño 15 / S']) assert.ok(!tallaValida(invalida), invalida);
+  for (const valida of ['22', '25.5', '32', 'Niño 10', 'Niño 15', 'Niño 25']) assert.ok(tallaValida(valida), valida);
+  for (const invalida of ['21.5', '32.5', '25.0', '25,5', 'Niño 9.5', 'Niño 25.5', 'Niño 15 / S']) assert.ok(!tallaValida(invalida), invalida);
 
   const t = tienda();
   for (const buena of ['25.5', 'Niño 15']) {
@@ -117,7 +117,7 @@ test('calzado (#543): talla MX en cm de adulto y de nino; fuera de rango no pasa
     assert.equal(talla(t, id), buena);
   }
   const antes = (t.db.prepare('select count(*) n from productos').get() as { n: number }).n;
-  for (const mala of ['32', 'Niño 9']) assert.equal((await capturar(t, crypto.randomUUID(), mala)).status, 400, mala);
+  for (const mala of ['32.5', 'Niño 9']) assert.equal((await capturar(t, crypto.randomUUID(), mala)).status, 400, mala);
   assert.equal((t.db.prepare('select count(*) n from productos').get() as { n: number }).n, antes);
 
   // Corregir a calzado desde la camara, y la etiqueta lo imprime tal cual.
@@ -134,4 +134,12 @@ test('calzado (#543): talla MX en cm de adulto y de nino; fuera de rango no pasa
   assert.equal(talla(t, id), 'Niño 14.5');
   assert.match(tsplEtiqueta({ nombre: 'Tenis', precio: 30000, precio_lista: 0, codigo: 'ED-000778', semana_ingreso: 'S44', talla: 'Niño 14.5' }),
     /ED-000778 \/ Nino 14\.5 - S44/);
+});
+
+test('toda talla de las tablas US->MX (#546) guarda un cm valido y sin repetir la talla US', () => {
+  assert.deepEqual(Object.values(TABLAS_CALZADO), [CALZADO_US_HOMBRE, CALZADO_US_MUJER, CALZADO_US_NINO]);
+  for (const [tipo, tabla] of Object.entries(TABLAS_CALZADO)) {
+    for (const [us, cm] of tabla) assert.ok(tallaValida(tipo === 'Calzado niño' ? `Niño ${cm}` : cm), `${tipo} US ${us} -> ${cm}`);
+    assert.equal(new Set(tabla.map(([us]) => us)).size, tabla.length, tipo);
+  }
 });
