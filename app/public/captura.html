@@ -72,7 +72,7 @@
   #modo[aria-pressed="true"] { background: var(--amarillo); border-color: var(--amarillo); color: #111; }
   /* Un toque por talla y se queda puesta entre fotos: un rack de M son N disparos seguidos. */
   #talla-panel { top: calc(56px + env(safe-area-inset-top)); display: flex; flex-direction: column; gap: 8px; padding: 0 14px; }
-  #talla-panel[hidden], .nino[hidden], #revisar-talla[hidden] { display: none; }
+  #talla-panel[hidden], .nino[hidden], .talla-nino[hidden], #revisar-talla[hidden] { display: none; }
   #precio-panel { top: calc(56px + env(safe-area-inset-top)); padding: 0 14px; }
   #precio-panel[hidden] { display: none; }
   #identidad-panel { top: calc(56px + env(safe-area-inset-top)); display: flex; flex-direction: column; gap: 5px; padding: 0 14px; max-height: 145px; }
@@ -196,7 +196,7 @@
 import { PRECIO_PRENDA, MARCAS_ROPA } from './ropa.js';
 import { aJpeg } from '/foto.js';
 import { guardar, leer, borrar, pendientes } from '/cola-fotos.js';
-import { TALLAS_ADULTO, EDADES_NINO, TALLAS_NINO } from '/tallas.js';
+import { TALLAS_ADULTO, EDADES_NINO, TALLAS_NINO, TALLAS_CALZADO_ADULTO, TALLAS_CALZADO_NINO } from '/tallas.js';
 import { nombreEstado, siguienteEstado } from '/estados.js';
 
 const video = document.getElementById('camara');
@@ -239,9 +239,10 @@ function chips(contenedor, opciones, elegido, alElegir) {
 }
 
 /**
- * Botones de adulto + Niño, que abre el rodillo de edad y la talla de nino
- * opcional. Uno arriba, para disparar; otro en "revisar", para corregir.
- * `alCambiar` recibe la talla completa ("M", "Niño 6 años / S") a cada cambio.
+ * Botones de adulto + Niño + Calzado + Calzado niño. Niño abre el rodillo de edad y la
+ * talla de nino opcional; los de calzado, el mismo rodillo con la talla MX en cm (#543).
+ * Uno arriba, para disparar; otro en "revisar", para corregir.
+ * `alCambiar` recibe la talla completa ("M", "Niño 6 años / S", "25.5", "Niño 15") a cada cambio.
  */
 function selectorTalla(raiz, alCambiar) {
   raiz.innerHTML = `<div class="chips fila tallas" role="radiogroup" aria-label="Talla"></div>
@@ -251,36 +252,46 @@ function selectorTalla(raiz, alCambiar) {
     </div>`;
   const [panelTallas, panelNino, rodillo, panelTallaNino] =
     ['.tallas', '.nino', '.rodillo', '.talla-nino'].map((selector) => raiz.querySelector(selector));
-  let talla = null;                          // 'M', o 'Niño' para usar la edad del rodillo
-  let edad = EDADES_NINO.indexOf('4 años');  // arranca a media lista: menos giro hacia bebé o hacia 16
-  let tallaNino = '';                        // opcional
+  // Cada tipo de talla con rodillo tiene su lista y su posicion; arrancan a media lista: menos giro.
+  const listas = { 'Niño': EDADES_NINO, 'Calzado': TALLAS_CALZADO_ADULTO, 'Calzado niño': TALLAS_CALZADO_NINO };
+  const nombres = { 'Niño': 'Edad', 'Calzado': 'Talla de calzado', 'Calzado niño': 'Talla de calzado de niño' };
+  const posicion = { 'Niño': EDADES_NINO.indexOf('4 años'), 'Calzado': TALLAS_CALZADO_ADULTO.indexOf('25'), 'Calzado niño': TALLAS_CALZADO_NINO.indexOf('15') };
+  let talla = null;                          // 'M', o 'Niño' / 'Calzado' / 'Calzado niño' para usar el rodillo
+  let tallaNino = '';                        // opcional, solo con 'Niño'
 
-  /** Adulto "M", nino "Niño 6 años / S" o "Niño 6 años". */
+  /** Adulto "M", nino "Niño 6 años / S" o "Niño 6 años", calzado "25.5" o "Niño 15". */
   const valor = () => {
-    if (talla !== 'Niño') return talla;
-    const base = `Niño ${EDADES_NINO[edad]}`;
-    return tallaNino ? `${base} / ${tallaNino}` : base;
+    if (!listas[talla]) return talla;
+    const elegido = listas[talla][posicion[talla]];
+    if (talla === 'Calzado') return elegido;
+    const base = `Niño ${elegido}`;
+    return talla === 'Niño' && tallaNino ? `${base} / ${tallaNino}` : base;
   };
   const fila = () => rodillo.firstElementChild.offsetHeight;
   const marcar = (contenedor, elegido) => {
     for (const b of contenedor.children) b.setAttribute('aria-checked', String(b.dataset.valor === elegido));
   };
-  function pintarEdad() {
+  function pintarRodillo() {
     [...rodillo.children].forEach((renglon, i) => {
-      renglon.classList.toggle('elegida', i === edad);
-      renglon.setAttribute('aria-selected', String(i === edad));
+      renglon.classList.toggle('elegida', i === posicion[talla]);
+      renglon.setAttribute('aria-selected', String(i === posicion[talla]));
     });
   }
-  function mostrarNino() {
-    panelNino.hidden = talla !== 'Niño';
-    // Un rodillo oculto no se puede girar: se acomoda en la edad al mostrarse.
-    if (!panelNino.hidden) rodillo.scrollTop = edad * fila();
+  function mostrarRodillo() {
+    panelNino.hidden = !listas[talla];
+    panelTallaNino.hidden = talla !== 'Niño';
+    if (panelNino.hidden) return;
+    rodillo.setAttribute('aria-label', nombres[talla]);
+    rodillo.innerHTML = listas[talla].map((e) => `<div role="option">${e}</div>`).join('');
+    // Un rodillo oculto no se puede girar: se acomoda en la posicion al mostrarse.
+    rodillo.scrollTop = posicion[talla] * fila();
+    pintarRodillo();
   }
 
-  chips(panelTallas, [...TALLAS_ADULTO.map((t) => [t, t]), ['Niño', 'Niño']], null, (elegido) => {
+  chips(panelTallas, [...TALLAS_ADULTO.map((t) => [t, t]), ['Niño', 'Niño'], ['Calzado', 'Calzado'], ['Calzado niño', 'Calzado niño']], null, (elegido) => {
     talla = elegido;
     panelTallas.classList.remove('falta');
-    mostrarNino();
+    mostrarRodillo();
     alCambiar(valor());
   });
   chips(panelTallaNino, [['', 'Sin'], ...TALLAS_NINO.map((t) => [t, t])], '', (elegido) => {
@@ -288,13 +299,13 @@ function selectorTalla(raiz, alCambiar) {
     alCambiar(valor());
   });
 
-  rodillo.innerHTML = EDADES_NINO.map((e) => `<div role="option">${e}</div>`).join('');
   // La fila del centro es la elegida mientras gira, sin esperar a que se detenga.
   rodillo.addEventListener('scroll', () => {
-    const i = Math.min(EDADES_NINO.length - 1, Math.max(0, Math.round(rodillo.scrollTop / fila())));
-    if (i === edad) return;
-    edad = i;
-    pintarEdad();
+    if (!listas[talla]) return;
+    const i = Math.min(listas[talla].length - 1, Math.max(0, Math.round(rodillo.scrollTop / fila())));
+    if (i === posicion[talla]) return;
+    posicion[talla] = i;
+    pintarRodillo();
     alCambiar(valor());
   }, { passive: true });
   // Tocar una fila la lleva al centro: sirve tambien para quien no gira.
@@ -302,7 +313,6 @@ function selectorTalla(raiz, alCambiar) {
     const i = [...rodillo.children].indexOf(evento.target);
     if (i >= 0) rodillo.scrollTo({ top: i * fila(), behavior: 'smooth' });
   });
-  pintarEdad();
 
   return {
     valor,
@@ -310,13 +320,15 @@ function selectorTalla(raiz, alCambiar) {
     /** Pinta una talla ya guardada, sin avisar a `alCambiar`. La raiz tiene que estar a la vista. */
     poner(texto) {
       const [base, nino = ''] = texto.split(' / ');
-      talla = base.startsWith('Niño ') ? 'Niño' : base;
-      if (talla === 'Niño') edad = EDADES_NINO.indexOf(base.slice('Niño '.length));
+      const resto = base.startsWith('Niño ') ? base.slice('Niño '.length) : null;
+      // "Niño 15" es calzado; "Niño 6 años" es ropa: la edad trae texto, el calzado solo el numero.
+      talla = resto === null ? (TALLAS_CALZADO_ADULTO.includes(base) ? 'Calzado' : base)
+        : TALLAS_CALZADO_NINO.includes(resto) ? 'Calzado niño' : 'Niño';
+      if (listas[talla]) posicion[talla] = listas[talla].indexOf(resto ?? base);
       tallaNino = nino;
       marcar(panelTallas, talla);
       marcar(panelTallaNino, tallaNino);
-      pintarEdad();
-      mostrarNino();
+      mostrarRodillo();
     },
   };
 }

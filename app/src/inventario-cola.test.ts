@@ -6,7 +6,7 @@ import { registroFoto, crearSubida, formularioPendiente } from '../public/foto-p
 import { crearCamara } from '../public/camara-inventario.js';
 import { permitidaParaVendedor } from './worker.ts';
 import { PRENDAS_ROPA, MARCAS_ROPA, PRECIO_PRENDA, PRECIOS_ROPA } from '../public/ropa.js';
-import { TALLAS_ADULTO, EDADES_NINO, TALLAS_NINO } from '../public/tallas.js';
+import { TALLAS_ADULTO, EDADES_NINO, TALLAS_NINO, TALLAS_CALZADO_ADULTO, TALLAS_CALZADO_NINO } from '../public/tallas.js';
 
 function ropaUI(bloquearAlmacenamiento=false) {
   class Nodo {
@@ -24,7 +24,7 @@ function ropaUI(bloquearAlmacenamiento=false) {
   const almacen=new Map<string,string>(),hojas:Nodo[]=[];
   const fuente=readFileSync('public/inventario-ropa.js','utf8').replace(/^import .*;\r?\n/gm,'').replaceAll('export ','');
   const ui=runInNewContext(fuente+';({ropa,talla,rodillo})',{
-    PRENDAS_ROPA,MARCAS_ROPA,PRECIO_PRENDA,PRECIOS_ROPA,TALLAS_ADULTO,EDADES_NINO,TALLAS_NINO,
+    PRENDAS_ROPA,MARCAS_ROPA,PRECIO_PRENDA,PRECIOS_ROPA,TALLAS_ADULTO,EDADES_NINO,TALLAS_NINO,TALLAS_CALZADO_ADULTO,TALLAS_CALZADO_NINO,
     nodo:(_tag:string,texto='',clase='')=>Object.assign(new Nodo(),{textContent:texto,className:clase}),
     boton:(texto:string,accion:Function)=>Object.assign(new Nodo(),{textContent:texto,onclick:accion}),
     hoja:(_titulo:string,c:Nodo)=>hojas.push(c),cerrarHoja(){},matchMedia:()=>({matches:true}),
@@ -71,13 +71,32 @@ test('edad conserva teclado, selección accesible y edad de sesión sin reinicia
   assert.equal(tablero.valores().talla,'Niño 5 años');
   ui.desplazar(ui.buscar(tablero.raiz,'Prenda')!,1);abrir();edad=ui.buscar(ui.hojas.at(-1)!,'Edad')!;
   assert.equal(edad.children.find(n=>n.getAttribute('aria-selected')==='true')!.textContent,'5 años');
-  const nueva=ui.talla(()=>{});nueva.children[0].children.at(-1)!.onclick();
+  const nueva=ui.talla(()=>{});nueva.children[0].children.find(n=>n.dataset.valor==='Niño')!.onclick();
   assert.equal(ui.buscar(ui.hojas.at(-1)!,'Edad')!.scrollTop,EDADES_NINO.indexOf('5 años')*44);
-  const restaurada=ui.talla(()=>{},'Niño 8 años / M');restaurada.children[0].children.at(-1)!.onclick();
+  const restaurada=ui.talla(()=>{},'Niño 8 años / M');restaurada.children[0].children.find(n=>n.dataset.valor==='Niño')!.onclick();
   assert.equal(ui.buscar(ui.hojas.at(-1)!,'Edad')!.scrollTop,EDADES_NINO.indexOf('8 años')*44);
   edad.onkeydown({key:'End',preventDefault(){}});assert.equal(edad.getAttribute('role'),'listbox');
   assert.equal(edad.getAttribute('aria-activedescendant'),edad.children.at(-1)!.id);
   edad.onkeydown({key:'Home',preventDefault(){}});assert.equal(edad.scrollTop,0);
+});
+
+test('corregir talla de calzado usa el rodillo numerico y "Niño 15" no cae en la edad de ropa (#543)',()=>{
+  const ui=ropaUI(),valores:string[]=[];
+  const chip=(raiz:any,v:string)=>raiz.children[0].children.find((n:any)=>n.dataset.valor===v);
+  const adulto=ui.talla(v=>valores.push(v));chip(adulto,'Calzado').onclick();
+  assert.equal(valores.at(-1),'25');
+  const rueda=ui.buscar(ui.hojas.at(-1)!,'Talla de calzado')!;
+  ui.desplazar(rueda,TALLAS_CALZADO_ADULTO.indexOf('27.5'));assert.equal(valores.at(-1),'27.5');
+  const nino=ui.talla(v=>valores.push(v));chip(nino,'Calzado niño').onclick();
+  assert.equal(valores.at(-1),'Niño 15');
+  ui.desplazar(ui.buscar(ui.hojas.at(-1)!,'Talla de calzado')!,TALLAS_CALZADO_NINO.indexOf('12.5'));assert.equal(valores.at(-1),'Niño 12.5');
+  // Una talla ya guardada abre en su propio tipo, no en el de edad.
+  const guardada=ui.talla(()=>{},'Niño 15');
+  assert.equal(chip(guardada,'Calzado niño').atributos['aria-pressed'],'true');assert.equal(chip(guardada,'Niño').atributos['aria-pressed'],'false');
+  chip(guardada,'Calzado niño').onclick();
+  assert.equal(ui.buscar(ui.hojas.at(-1)!,'Talla de calzado')!.scrollTop,TALLAS_CALZADO_NINO.indexOf('15')*44);
+  assert.equal(chip(ui.talla(()=>{},'25.5'),'Calzado').atributos['aria-pressed'],'true');
+  assert.equal(chip(ui.talla(()=>{},'Niño 6 años / S'),'Niño').atributos['aria-pressed'],'true');
 });
 
 test('capturar ropa funciona con localStorage bloqueado y permite elegir el primer precio sin desplazar (#458)',()=>{

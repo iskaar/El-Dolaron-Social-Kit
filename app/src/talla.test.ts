@@ -105,3 +105,33 @@ test('la camara corrige la talla de lo que acaba de capturar; una talla que no e
   t.db.prepare("update productos set creado_en = '2020-01-01T00:00:00Z' where id = ?").run(id);
   assert.equal((await patch({ talla: 'S' })).status, 404);
 });
+
+test('calzado (#543): talla MX en cm de adulto y de nino; fuera de rango no pasa', async () => {
+  for (const valida of ['22', '25.5', '31', 'Niño 10', 'Niño 15', 'Niño 21.5']) assert.ok(tallaValida(valida), valida);
+  for (const invalida of ['21.5', '31.5', '32', '25.0', '25,5', 'Niño 9', 'Niño 22', 'Niño 15 / S']) assert.ok(!tallaValida(invalida), invalida);
+
+  const t = tienda();
+  for (const buena of ['25.5', 'Niño 15']) {
+    const id = crypto.randomUUID();
+    assert.equal((await capturar(t, id, buena)).status, 201, buena);
+    assert.equal(talla(t, id), buena);
+  }
+  const antes = (t.db.prepare('select count(*) n from productos').get() as { n: number }).n;
+  for (const mala of ['32', 'Niño 9']) assert.equal((await capturar(t, crypto.randomUUID(), mala)).status, 400, mala);
+  assert.equal((t.db.prepare('select count(*) n from productos').get() as { n: number }).n, antes);
+
+  // Corregir a calzado desde la camara, y la etiqueta lo imprime tal cual.
+  const id = crypto.randomUUID();
+  assert.equal((await capturar(t, id, 'M')).status, 201);
+  const patch = (cuerpo: unknown) => worker.fetch!(new Request(`https://caja.prueba/api/borradores/${id}/talla`, {
+    method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify(cuerpo),
+  }) as never, t.env, t.ctx as never);
+  assert.equal((await patch({ talla: '26.5' })).status, 200);
+  assert.equal(talla(t, id), '26.5');
+  assert.equal((await patch({ talla: 'Niño 14.5' })).status, 200);
+  assert.equal(talla(t, id), 'Niño 14.5');
+  assert.equal((await patch({ talla: 'Niño 9' })).status, 400);
+  assert.equal(talla(t, id), 'Niño 14.5');
+  assert.match(tsplEtiqueta({ nombre: 'Tenis', precio: 30000, precio_lista: 0, codigo: 'ED-000778', semana_ingreso: 'S44', talla: 'Niño 14.5' }),
+    /ED-000778 \/ Nino 14\.5 - S44/);
+});
