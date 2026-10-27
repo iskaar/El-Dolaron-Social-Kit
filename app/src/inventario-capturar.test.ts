@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { runInNewContext } from 'node:vm';
-import { crearCaptura, cambiosTarjeta, vigilarLectorEnCampo } from '../public/inventario-capturar.js';
+import { crearCaptura, cambiosTarjeta, vigilarLectorEnCampo, piezaSinRegistrar } from '../public/inventario-capturar.js';
 import { registroFoto, formularioPendiente } from '../public/foto-pendiente.js';
 import worker, { permitidaParaVendedor } from './worker.ts';
 import { tienda, PRODUCTO, DUENO } from './prueba-d1.ts';
@@ -421,4 +421,13 @@ test('el stepper deja escribir la cantidad en su lugar y la acota a min/max',()=
   const antes=valores.length;escribir('abc');escribir('12',  'Escape');escribir('');assert.equal(valores.length,antes,'texto no numérico, vacío o Escape no cambian nada');
   salida.onclick();raiz.hijos.find((h:Nodo)=>h.tagName==='input')!.value='7';raiz.hijos.find((h:Nodo)=>h.tagName==='input')!.emitir('blur');assert.equal(valores.at(-1),7,'al salir del campo también aplica');
   raiz.hijos[2].emitir('click');assert.equal(valores.at(-1),8,'los botones ± siguen funcionando');
+});
+
+test('#549: el obturador del celular solo entrega la foto a una tarjeta sin registrar; guardada o existente = pieza nueva',()=>{
+  const nueva={tipo:'nueva',id:'n',upc:'1'},sinRegistro={tipo:'sin-registro',id:'s',upc:'2'};
+  assert.equal(piezaSinRegistrar(nueva),nueva);
+  assert.equal(piezaSinRegistrar(sinRegistro),sinRegistro);
+  assert.equal(piezaSinRegistrar({...nueva,tipo:'guardada',pieza:{id:'n'}}),null);   // el topper recién guardado no recibe la playera
+  assert.equal(piezaSinRegistrar({tipo:'existente',pieza:{id:'e'}}),null);
+  assert.equal(piezaSinRegistrar(null),null);
 });

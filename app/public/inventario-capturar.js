@@ -23,6 +23,11 @@ export function tarjetaEditada(a){
   return (a.nombre!==undefined&&a.nombre.trim()!==(a.ficha?.nombre??'').trim())
     ||(a.precio!==undefined&&aCentavos(a.precio)!==(a.ficha?.precios?.[a.estado]??a.ficha?.precio));
 }
+/**
+ * La pieza actual que todavía recibe la foto del obturador: una tarjeta del manifiesto o un código sin registro (su foto la crea).
+ * Una pieza ya registrada (`guardada`/`existente`) no: la foto es de una pieza nueva; reemplazar la suya es «Foto nueva» (#549).
+ */
+export function piezaSinRegistrar(a){return a&&(a.tipo==='nueva'||a.tipo==='sin-registro')?a:null;}
 /** Capturas cuya etiqueta ya salió desde este teléfono: una subida repetida (se perdió la respuesta, recarga) no la reimprime. */
 const CLAVE_AUTOIMPRESAS='inventario-autoimpresas';
 export function capturaImpresa(id){try{return JSON.parse(localStorage.getItem(CLAVE_AUTOIMPRESAS)||'[]').includes(id);}catch{return false;}}
@@ -153,7 +158,7 @@ export async function iniciar(ctx) {
   const ayudaDisparo=nodo('span','','solo-lector');ayudaDisparo.id='ayuda-disparo';ayudaDisparo.setAttribute('role','status');disparo.after(ayudaDisparo);disparo.setAttribute('aria-describedby',ayudaDisparo.id);
   const neutro=()=>mensaje(pc()?'Escanea o escribe':'Escanea o toma foto');
   function actualizarDisparo(){
-    const actual=flujo.actual(),falta=esRopa&&!actual?.upc&&actual?.tipo!=='existente'?tablero.faltante():'';
+    const actual=flujo.actual(),falta=esRopa&&!piezaSinRegistrar(actual)?tablero.faltante():'';
     const motivo=falta||(pendienteFoto?'Espera la foto':'');bloquear(disparo,motivo);ayudaDisparo.textContent=motivo;
     if(!pc()){disparo.textContent=falta?falta.replace('Falta ','Elige '):'';disparo.setAttribute('aria-label',falta?disparo.textContent:'Tomar foto');}
   }
@@ -239,7 +244,7 @@ export async function iniciar(ctx) {
     finally{pendienteFoto=false;actualizarDisparo();foco();}
   }
   async function fotoNueva(a=null){
-    if(!pc())return movil.tomar(a||flujo.actual());
+    if(!pc())return movil.tomar(piezaSinRegistrar(a||flujo.actual()));
     if(esRopa&&!a&&!tablero.validar())return;
     if(pendienteFoto)return;
     pendienteFoto=true;actualizarDisparo();if(!a)pieza.replaceChildren();

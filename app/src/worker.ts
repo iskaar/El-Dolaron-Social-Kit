@@ -231,8 +231,8 @@ async function crearBorrador(request: Request, env: Env, ctx: ExecutionContext, 
   }
 
   const propietario = propietarioDe(await leerUsuario(env, correo));
-  const existente = await env.DB.prepare('select id, nombre, precio, estado_fisico, estado_analisis, stock, talla, propietario from productos where id = ?')
-    .bind(id).first<{ estado_analisis: string; propietario: string }>();
+  const existente = await env.DB.prepare('select id, nombre, precio, estado_fisico, estado_analisis, stock, talla, propietario, foto_key from productos where id = ?')
+    .bind(id).first<{ estado_analisis: string; propietario: string; foto_key: string }>();
   if (existente && existente.propietario !== propietario) return json({ error: 'Pieza no encontrada.' }, 404);
   if (existente?.estado_analisis === 'descartado' || (precioRopa !== null && existente && formulario.get('solo_foto') !== '1')) {
     return json(existente, 201);
@@ -269,9 +269,11 @@ async function crearBorrador(request: Request, env: Env, ctx: ExecutionContext, 
     if (respuesta.status === 403 && edicion) respuesta = await alta(false);
     if (respuesta.ok) {
       const guardada = await respuesta.clone().json() as { id: string; existente?: boolean };
-      if (!guardada.existente) {
+      // #549: capturaUpcGuardada responde la pieza del mismo id sin `existente` (reintento del alta). Si esa pieza ya tiene
+      // foto (la del catálogo o una propia), esta subida no es un reintento: no se pisa. Reemplazar es `solo_foto`.
+      if (!guardada.existente && !existente?.foto_key) {
         await subirFoto();
-        await env.DB.prepare('update productos set foto_key = ? where id = ?').bind(fotoKey, guardada.id).run();
+        await env.DB.prepare("update productos set foto_key = ? where id = ? and foto_key = ''").bind(fotoKey, guardada.id).run();
       }
     }
     return respuesta;
