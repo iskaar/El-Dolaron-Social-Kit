@@ -103,7 +103,7 @@
   .nino { display: flex; gap: 8px; align-items: center; }
   .talla-nino { flex: 1; grid-template-columns: repeat(3, 1fr); }
   /* La edad, como el candado de una maleta: se gira con el dedo y vale la fila del centro. */
-  .rodillo { --fila: 40px; flex: 0 0 180px; height: calc(var(--fila) * 3); padding: var(--fila) 0;
+  .rodillo { --fila: 40px; flex: 0 0 130px; height: calc(var(--fila) * 3); padding: var(--fila) 0;
     overflow-y: auto; scroll-snap-type: y mandatory; scrollbar-width: none; border-radius: 12px;
     border: 2px solid var(--amarillo); background: #000b;
     mask-image: linear-gradient(#0003, #000 35%, #000 65%, #0003); }
@@ -285,6 +285,8 @@ function selectorTalla(raiz, alCambiar) {
     panelTallaNino.hidden = talla !== 'Niño';
     if (panelNino.hidden) return;
     rodillo.setAttribute('aria-label', nombres[talla]);
+    // «US 13.5C · 19.5» no cabe en 130 px; la edad si, y a su lado van los chips de talla de nino.
+    rodillo.style.flexBasis = talla === 'Niño' ? '' : '180px';
     rodillo.innerHTML = listas[talla].map((e) => `<div role="option">${e}</div>`).join('');
     // Un rodillo oculto no se puede girar: se acomoda en la posicion al mostrarse.
     rodillo.scrollTop = posicion[talla] * fila();
