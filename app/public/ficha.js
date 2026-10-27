@@ -3,7 +3,7 @@
 // Todo dato de la pieza entra con textContent/value, nunca como HTML.
 import { CATEGORIAS } from './categorias.js';
 import { nombreEstado } from './estados.js';
-import { TALLAS } from './tallas.js';
+import { TALLAS, tallaUs } from './tallas.js';
 import { etiquetaVigente, precioImpreso } from './etiquetera.js';
 import { estadoEnvio } from './envio-etiquetas.js';
 import { normalizarUpc } from './upc.js';
@@ -139,7 +139,8 @@ export function crearFicha({ mensaje, alAbrir = () => {}, confirmar = (texto) =>
   let pendiente = null, enviando = false, guardando = false, deshacer = null, temporizador;
   let apagarUpc = null, camaraTurno = 0;
   async function cerrarCamaraUpc() { ++camaraTurno; await apagarUpc?.(); apagarUpc = null; if ($('e-upc-visor')) $('e-upc-visor').hidden = true; }
-  for (const t of TALLAS) { const o = document.createElement('option'); o.value = t; $('tallas').append(o); }
+  // Calzado: el valor es el cm que se guarda y el rotulo, la talla US de la caja (#546).
+  for (const t of TALLAS) { const o = document.createElement('option'); o.value = t; if (tallaUs(t)) o.label = tallaUs(t); $('tallas').append(o); }
 
   function pintar() {
     $('ficha').hidden = !pieza;

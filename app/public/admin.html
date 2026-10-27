@@ -146,7 +146,7 @@ import { enlacePreciosML } from '/precios-ml.js';
 
 import { CATEGORIAS } from '/categorias.js';
 import { ESTADOS } from '/estados.js';
-import { TALLAS } from '/tallas.js';
+import { TALLAS, tallaUs } from '/tallas.js';
 
 document.getElementById('salir').addEventListener('click', async (e) => {
   e.preventDefault();
@@ -155,7 +155,7 @@ document.getElementById('salir').addEventListener('click', async (e) => {
 
 // Una sola lista para todas las fichas; el servidor es quien valida la talla.
 document.body.insertAdjacentHTML('beforeend',
-  `<datalist id="tallas-lista">${TALLAS.map((t) => `<option value="${t}">`).join('')}</datalist>`);
+  `<datalist id="tallas-lista">${TALLAS.map((t) => `<option value="${t}"${tallaUs(t) ? ` label="${tallaUs(t)}"` : ''}>`).join('')}</datalist>`);
 const opcionesCategoria = (elegida) =>
   CATEGORIAS.map(([c, nombre]) => `<option value="${c}" ${c === elegida ? 'selected' : ''}>${nombre}</option>`).join('');
 // Los montos y las familias de banda salen de la tabla `familias` (GET /api/familias).

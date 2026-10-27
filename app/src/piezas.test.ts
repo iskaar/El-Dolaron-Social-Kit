@@ -248,7 +248,7 @@ function pantalla(responder: (url: string, cuerpo?: any) => unknown | Promise<un
   const modulo = (archivo: string) => readFileSync(archivo, 'utf8').replace(/^import .+;$/gm, '').replace(/^export /gm, '');
   const api = runInNewContext(`${modulo('public/lector.js')}; const { api, crearFicha, pesos } = (() => {${modulo('public/ficha.js')}; return { api, crearFicha, pesos }; })();
     ${modulo('public/pieza.js')}; ({buscar, abrir})`, {
-    esRopa, estadoEnvio, impresas: etiquetera.impresas, etiquetaVigente: etiquetera.etiquetaVigente, precioImpreso: etiquetera.precioImpreso, TALLAS: ['M'],
+    esRopa, estadoEnvio, impresas: etiquetera.impresas, etiquetaVigente: etiquetera.etiquetaVigente, precioImpreso: etiquetera.precioImpreso, TALLAS: ['M', '26'], tallaUs: (t: string) => t === '26' ? 'US 8 H · US 9 M' : '',
     document: { getElementById: $, createElement: (tag: string) => new Nodo(tag),
       querySelectorAll: () => $('resultados').children.map((li) => li.children[0]),
       addEventListener: (e: string, fn: Function) => { eventos[e] = fn; }, body: new Nodo() },
