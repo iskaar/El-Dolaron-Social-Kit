@@ -6,7 +6,7 @@ import { registroFoto, crearSubida, formularioPendiente } from '../public/foto-p
 import { crearCamara } from '../public/camara-inventario.js';
 import { permitidaParaVendedor } from './worker.ts';
 import { PRENDAS_ROPA, MARCAS_ROPA, PRECIO_PRENDA, PRECIOS_ROPA } from '../public/ropa.js';
-import { TALLAS_ADULTO, EDADES_NINO, TALLAS_NINO, TALLAS_CALZADO_ADULTO, TALLAS_CALZADO_NINO } from '../public/tallas.js';
+import { TALLAS_ADULTO, EDADES_NINO, TALLAS_NINO, TABLAS_CALZADO, CALZADO_INICIAL, calzadoRenglon, calzadoValor, calzadoGuardado } from '../public/tallas.js';
 
 function ropaUI(bloquearAlmacenamiento=false) {
   class Nodo {
@@ -24,7 +24,7 @@ function ropaUI(bloquearAlmacenamiento=false) {
   const almacen=new Map<string,string>(),hojas:Nodo[]=[];
   const fuente=readFileSync('public/inventario-ropa.js','utf8').replace(/^import .*;\r?\n/gm,'').replaceAll('export ','');
   const ui=runInNewContext(fuente+';({ropa,talla,rodillo})',{
-    PRENDAS_ROPA,MARCAS_ROPA,PRECIO_PRENDA,PRECIOS_ROPA,TALLAS_ADULTO,EDADES_NINO,TALLAS_NINO,TALLAS_CALZADO_ADULTO,TALLAS_CALZADO_NINO,
+    PRENDAS_ROPA,MARCAS_ROPA,PRECIO_PRENDA,PRECIOS_ROPA,TALLAS_ADULTO,EDADES_NINO,TALLAS_NINO,TABLAS_CALZADO,CALZADO_INICIAL,calzadoRenglon,calzadoValor,calzadoGuardado,
     nodo:(_tag:string,texto='',clase='')=>Object.assign(new Nodo(),{textContent:texto,className:clase}),
     boton:(texto:string,accion:Function)=>Object.assign(new Nodo(),{textContent:texto,onclick:accion}),
     hoja:(_titulo:string,c:Nodo)=>hojas.push(c),cerrarHoja(){},matchMedia:()=>({matches:true}),
@@ -80,23 +80,40 @@ test('edad conserva teclado, selección accesible y edad de sesión sin reinicia
   edad.onkeydown({key:'Home',preventDefault(){}});assert.equal(edad.scrollTop,0);
 });
 
-test('corregir talla de calzado usa el rodillo numerico y "Niño 15" no cae en la edad de ropa (#543)',()=>{
+test('corregir calzado: se elige talla US, se guarda el cm MX y "Niño 19" no cae en la edad de ropa (#543, #546)',()=>{
   const ui=ropaUI(),valores:string[]=[];
   const chip=(raiz:any,v:string)=>raiz.children[0].children.find((n:any)=>n.dataset.valor===v);
-  const adulto=ui.talla(v=>valores.push(v));chip(adulto,'Calzado').onclick();
-  assert.equal(valores.at(-1),'25');
-  const rueda=ui.buscar(ui.hojas.at(-1)!,'Talla de calzado')!;
-  ui.desplazar(rueda,TALLAS_CALZADO_ADULTO.indexOf('27.5'));assert.equal(valores.at(-1),'27.5');
+  const rueda=()=>ui.buscar(ui.hojas.at(-1)!,'Talla de calzado (US)')!;
+  const fila=(rueda:any,texto:string)=>rueda.children.findIndex((n:any)=>n.textContent===texto);
+  // Hombre arranca en US 9 (27); US 8 es 26. Mujer arranca en US 7 (24); US 8 es 25.
+  const hombre=ui.talla(v=>valores.push(v));chip(hombre,'Calzado H').onclick();
+  assert.equal(valores.at(-1),'27');assert.ok(fila(rueda(),'US 9 · 27')>=0);
+  ui.desplazar(rueda(),fila(rueda(),'US 8 · 26'));assert.equal(valores.at(-1),'26');
+  const mujer=ui.talla(v=>valores.push(v));chip(mujer,'Calzado M').onclick();assert.equal(valores.at(-1),'24');
+  ui.desplazar(rueda(),fila(rueda(),'US 8 · 25'));assert.equal(valores.at(-1),'25');
   const nino=ui.talla(v=>valores.push(v));chip(nino,'Calzado niño').onclick();
-  assert.equal(valores.at(-1),'Niño 15');
-  ui.desplazar(ui.buscar(ui.hojas.at(-1)!,'Talla de calzado')!,TALLAS_CALZADO_NINO.indexOf('12.5'));assert.equal(valores.at(-1),'Niño 12.5');
-  // Una talla ya guardada abre en su propio tipo, no en el de edad.
-  const guardada=ui.talla(()=>{},'Niño 15');
+  assert.equal(valores.at(-1),'Niño 19');
+  ui.desplazar(rueda(),fila(rueda(),'US 7Y · 25'));assert.equal(valores.at(-1),'Niño 25');
+  // Una talla ya guardada en cm abre en su chip y en su fila.
+  const guardada=ui.talla(()=>{},'Niño 19');
   assert.equal(chip(guardada,'Calzado niño').atributos['aria-pressed'],'true');assert.equal(chip(guardada,'Niño').atributos['aria-pressed'],'false');
   chip(guardada,'Calzado niño').onclick();
-  assert.equal(ui.buscar(ui.hojas.at(-1)!,'Talla de calzado')!.scrollTop,TALLAS_CALZADO_NINO.indexOf('15')*44);
-  assert.equal(chip(ui.talla(()=>{},'25.5'),'Calzado').atributos['aria-pressed'],'true');
+  assert.equal(rueda().scrollTop,fila(rueda(),'US 13C · 19')*44);
+  const adulto=ui.talla(()=>{},'26');assert.equal(chip(adulto,'Calzado H').atributos['aria-pressed'],'true');
+  chip(adulto,'Calzado H').onclick();assert.equal(rueda().scrollTop,fila(rueda(),'US 8 · 26')*44);
+  assert.equal(chip(ui.talla(()=>{},'22'),'Calzado M').atributos['aria-pressed'],'true');
+  assert.equal(chip(ui.talla(()=>{},'32'),'Calzado H').atributos['aria-pressed'],'true');
   assert.equal(chip(ui.talla(()=>{},'Niño 6 años / S'),'Niño').atributos['aria-pressed'],'true');
+});
+
+test('calzadoGuardado: el chip activo gana si tiene el cm; si no, hombre; lo que no es calzado no se toca (#546)',()=>{
+  assert.deepEqual(calzadoGuardado('26','Calzado M'),{tipo:'Calzado M',indice:TABLAS_CALZADO['Calzado M'].findIndex(p=>p[1]==='26')});
+  assert.equal(calzadoGuardado('26')!.tipo,'Calzado H');assert.equal(calzadoGuardado('26','Calzado niño')!.tipo,'Calzado H');
+  assert.equal(calzadoGuardado('22')!.tipo,'Calzado M');assert.equal(calzadoGuardado('32','Calzado M')!.tipo,'Calzado H');
+  assert.equal(calzadoGuardado('Niño 19')!.tipo,'Calzado niño');
+  assert.equal(calzadoGuardado('M'),null);assert.equal(calzadoGuardado('Niño 6 años'),null);assert.equal(calzadoGuardado('Niño 26'),null);
+  for(const [tipo,us] of Object.entries(CALZADO_INICIAL))assert.ok(TABLAS_CALZADO[tipo as keyof typeof TABLAS_CALZADO].some(p=>p[0]===us),tipo);
+  assert.equal(calzadoRenglon(['7Y','25']),'US 7Y · 25');assert.equal(calzadoValor('Calzado niño',0),'Niño 10');
 });
 
 test('capturar ropa funciona con localStorage bloqueado y permite elegir el primer precio sin desplazar (#458)',()=>{
