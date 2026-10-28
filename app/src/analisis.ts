@@ -157,7 +157,7 @@ const ESQUEMA = {
 // de menos.
 const { additionalProperties: _noEnGemini, ...ESQUEMA_GEMINI } = ESQUEMA;
 
-function base64(datos: ArrayBuffer): string {
+export function base64(datos: ArrayBuffer): string {
   const bytes = new Uint8Array(datos);
   let binario = '';
   for (let i = 0; i < bytes.length; i += 8192) {

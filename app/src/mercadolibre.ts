@@ -16,7 +16,7 @@
 
 import { quebrarDecena } from './precio.ts';
 import { correoADuenos } from './avisos.ts';
-import { sugerirAtributos } from './analisis.ts';
+import { sugerirAtributos, base64 } from './analisis.ts';
 import { tallaUs } from '../public/tallas.js';
 
 const API = 'https://api.mercadolibre.com';
@@ -732,6 +732,54 @@ async function yaPublicada(env: Env, id: string): Promise<boolean> {
   return !!previa && !(previa.estado === 'cerrada' || (previa.estado === 'error' && !previa.ml_item_id));
 }
 
+const FALLAS_FOTO: Record<string, string> = {
+  white_background: 'fondo no blanco', minimum_size: 'tamaño menor al mínimo',
+  text_logo: 'texto o logo visible', watermark: 'marca de agua',
+};
+
+/**
+ * Lo que falla la foto segun el diagnostico de ML (#564): [] si pasa (`action: 'empty'`), null si la
+ * respuesta no se entiende. ponytail: la forma exacta de la respuesta no esta confirmada contra la
+ * cuenta real (la doc agrupa por tipo de foto), por eso se busca cada `action` donde este anidado.
+ */
+export function fallasDeFoto(respuesta: unknown): string[] | null {
+  const fallas = new Set<string>();
+  let vistas = 0;
+  const recorrer = (nodo: any): void => {
+    if (!nodo || typeof nodo !== 'object') return;
+    if (Array.isArray(nodo)) return nodo.forEach(recorrer);
+    if (typeof nodo.action === 'string') {
+      vistas++;
+      if (nodo.action !== 'empty') {
+        const detecciones: any[] = Array.isArray(nodo.detections) ? nodo.detections : [];
+        for (const d of detecciones) fallas.add(FALLAS_FOTO[String(d?.name)] ?? String(d?.name ?? 'no cumple los requisitos'));
+        if (!detecciones.length) fallas.add('no cumple los requisitos');
+      }
+      return;
+    }
+    Object.values(nodo).forEach(recorrer);
+  };
+  recorrer(respuesta);
+  return vistas ? [...fallas] : null;
+}
+
+/** Aviso (o nada) sobre la foto que se va a subir. Nunca lanza ni bloquea: ML pide no detener el flujo si el diagnostico falla. */
+async function avisoDiagnosticoFoto(env: Env, categoriaId: string, foto: ArrayBuffer): Promise<string | null> {
+  try {
+    const r = await mlFetch(env, '/moderations/pictures/diagnostic', {
+      method: 'POST',
+      json: { pictures: [{ id: 'pieza', base64: base64(foto) }], context: { category_id: categoriaId, picture_type: 'thumbnail' } },
+    });
+    const fallas = fallasDeFoto(r);
+    if (fallas === null) return 'Mercado Libre contestó el diagnóstico de la foto en un formato que no se entendió; revísala a mano. Puedes publicar igual.';
+    return fallas.length
+      ? `La foto principal no pasa el diagnóstico de Mercado Libre (${fallas.join(', ')}) y la publicación puede perder exposición. Puedes publicar igual.`
+      : null;
+  } catch (error) {
+    return `No se pudo revisar la foto con el diagnóstico de Mercado Libre (${error instanceof ErrorML ? error.detalle : String(error)}). Puedes publicar igual.`;
+  }
+}
+
 async function preparar(env: Env, id: string, request: Request): Promise<Response> {
   const cuerpo = (await request.json().catch(() => ({}))) as { categoria_id?: unknown; consulta?: unknown; consulta_catalogo?: unknown; sin_ia?: unknown } | null;
   const elegida = cuerpo?.categoria_id === undefined || cuerpo.categoria_id === '' ? '' : String(cuerpo.categoria_id);
@@ -815,6 +863,11 @@ async function preparar(env: Env, id: string, request: Request): Promise<Respons
     const medidas = bytesFoto ? dimensionesJpeg(new Uint8Array(bytesFoto)) : null;
     if (medidas && (medidas.ancho < 500 || medidas.alto < 500)) {
       avisos.push(`La foto mide ${medidas.ancho} x ${medidas.alto} px; Mercado Libre pide mínimo 500 x 500.`);
+    }
+    // El diagnostico pide la categoria y la foto que publicar() sube; solo avisa.
+    if (categoria && bytesFoto) {
+      const aviso = await avisoDiagnosticoFoto(env, categoria.categoria_id, bytesFoto);
+      if (aviso) avisos.push(aviso);
     }
 
     return json({
