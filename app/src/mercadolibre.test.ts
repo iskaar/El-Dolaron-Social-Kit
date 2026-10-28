@@ -53,6 +53,8 @@ class SimML {
     pictures: [{ url: 'http://http2.mlstatic.com/a.jpg', secure_url: 'https://http2.mlstatic.com/a.jpg' }],
     attributes: [{ id: 'BRAND', value_name: 'Splat R Ball' }],
   }] } };
+  /** Lo que contesta el diagnostico de fotos (#564): por omision, foto valida. */
+  diagnostico: { status?: number; cuerpo: unknown } = { cuerpo: { pictures: [{ id: 'pieza', results: { thumbnail: { action: 'empty', detections: [] } } }] } };
   /** Categorias que con el token de la app responden 403 y sin token si (#186). 'todo' = tambien sin token. */
   publicasSoloSinToken: false | true | 'todo' = false;
 
@@ -95,6 +97,7 @@ class SimML {
       return { cuerpo: { charts: [{ id: '26008', names: { MLM: 'Jeans hombre' }, rows: [{ id: '26008:1', attributes: [{ id: 'SIZE', values: [{ name: '32' }] }] }] }] } };
     }
     if (metodo === 'POST' && ruta === '/pictures/items/upload') return { cuerpo: { id: 'PIC-1' } };
+    if (metodo === 'POST' && ruta === '/moderations/pictures/diagnostic') return this.diagnostico;
     if (metodo === 'POST' && ruta === '/items') {
       if (this.rechazarItem) return { status: 400, cuerpo: this.rechazarItem };
       const id = `MLM${100 + this.items.size}`;
@@ -510,6 +513,42 @@ test('preparar: avisos de marca restringida, sin marca, precio mínimo y foto ch
     assert.ok((await t.pedir(`/api/ml/preparar/${sinMarca}`, {})).cuerpo.propuesta.avisos.some((a: string) => /no tiene marca/.test(a)));
   });
 });
+
+const detectado = (...nombres: string[]) => ({ cuerpo: { pictures: [{ id: 'pieza', results: { thumbnail: {
+  action: 'diagnostic', detections: nombres.map((name) => ({ name, wordings: [{ kind: 'REMEDY_SHORT', value: 'x' }] })),
+} } }] } });
+const avisoFoto = (r: any) => r.cuerpo.propuesta.avisos.find((a: string) => /diagnóstico/.test(a));
+
+test('preparar: el diagnóstico de la foto (#564) avisa lo que falla, y con foto válida no avisa', () => conML(async (t) => {
+  const valida = await t.pedir(`/api/ml/preparar/${pieza(t)}`, {});
+  assert.equal(avisoFoto(valida), undefined, valida.cuerpo.propuesta.avisos.join('|'));
+  const [llamada] = t.sim.de('POST', /^\/moderations\/pictures\/diagnostic$/);
+  assert.deepEqual(llamada.cuerpo.context, { category_id: 'MLM194175', picture_type: 'thumbnail' });
+  assert.ok(llamada.cuerpo.pictures[0].base64.length > 10);
+
+  t.sim.diagnostico = detectado('white_background', 'text_logo');
+  const mala = await t.pedir(`/api/ml/preparar/${pieza(t)}`, {});
+  assert.equal(mala.status, 200);
+  assert.match(avisoFoto(mala), /fondo no blanco, texto o logo visible.*publicar igual/);
+}));
+
+test('preparar: si el diagnóstico de la foto falla (red o cuota), Preparar sigue y lo dice', () => conML(async (t) => {
+  t.sim.diagnostico = { status: 429, cuerpo: { message: 'quota exceeded', error: 'too_many_requests', status: 429 } };
+  const cuota = await t.pedir(`/api/ml/preparar/${pieza(t)}`, {});
+  assert.equal(cuota.status, 200);
+  assert.match(avisoFoto(cuota), /No se pudo revisar la foto.*publicar igual/);
+  assert.equal(cuota.cuerpo.propuesta.categoria_id, 'MLM194175');
+
+  t.sim.antesDe = async (l) => { if (l.ruta.includes('/moderations/')) throw new Error('sin red'); };
+  const red = await t.pedir(`/api/ml/preparar/${pieza(t)}`, {});
+  assert.equal(red.status, 200);
+  assert.match(avisoFoto(red), /No se pudo revisar la foto.*sin red/);
+  assert.equal(red.cuerpo.propuesta.categoria_id, 'MLM194175');
+
+  t.sim.antesDe = null;
+  t.sim.diagnostico = { cuerpo: { algo: 'raro' } };
+  assert.match(avisoFoto(await t.pedir(`/api/ml/preparar/${pieza(t)}`, {})), /formato que no se entendió/);
+}));
 
 test('preparar con categoria_id: usa esa categoría y sigue ofreciendo las sugerencias', async () => {
   await conML(async (t) => {
