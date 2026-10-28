@@ -247,6 +247,15 @@ test('tope de 10 piezas apartadas abiertas por revendedora; cancelar una libera 
   comoUsuario(t.env, ANA);
   assert.equal((await t.pedir(`/api/vender/apartados/${primeras.cuerpo.pedido.folio}/cancelar`, {})).status, 200);
   assert.equal((await apartar(t, [piezas[11]])).status, 201);
+  // Con el pago registrado, el pedido ya no cuenta para el tope
+  assert.equal((await apartar(t, Array.from({ length: 5 }, () => pieza(t.db).id as string))).status, 201);   // 10 sin pago
+  const extra = pieza(t.db).id as string;
+  assert.equal((await apartar(t, [extra])).status, 409);
+  const ultimo = fila(t.db, "select folio from pedidos where vendedora = ? and estado = 'apartado' order by folio desc limit 1", ANA);
+  comoUsuario(t.env, DUENO);
+  assert.equal((await t.pedir(`/api/pedidos/${ultimo.folio}/abonos`, { id: crypto.randomUUID(), importe: 1000, forma_pago: 'efectivo', caja: 'Caja 1' })).status, 200);
+  comoUsuario(t.env, ANA);
+  assert.equal((await apartar(t, [extra])).status, 201);
   t.db.close();
 });
 

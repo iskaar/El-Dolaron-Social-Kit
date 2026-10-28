@@ -242,11 +242,12 @@ async function crearPedido(request: Request, env: Env, ctx: ExecutionContext, co
   if (!revendedora && entrega === 'envio' && anticipo !== ANTICIPO_ENVIO)
     return json({ error: 'El paquete de envío se abre con $100; el resto se recibe como abonos.' }, 400);
   if (revendedora) {
+    // Solo cuentan las que siguen sin pago: una ya pagada y por recoger no bloquea seguir vendiendo.
     const abiertas = (await env.DB.prepare(`select coalesce(sum(l.cantidad), 0) as n from pedidos d
-      join pedido_lineas l on l.pedido_id = d.id where d.estado = 'apartado' and d.vendedora = ?`)
+      join pedido_lineas l on l.pedido_id = d.id where d.estado = 'apartado' and d.saldo = 0 and d.vendedora = ?`)
       .bind(correo).first<{ n: number }>())?.n ?? 0;
     if (abiertas + [...cantidades.values()].reduce((suma, n) => suma + n, 0) > PIEZAS_REVENDEDORA)
-      return json({ error: `Máximo ${PIEZAS_REVENDEDORA} piezas apartadas a la vez (ahora tienes ${abiertas}). Espera a que la tienda registre el pago o cancela alguna.` }, 409);
+      return json({ error: `Máximo ${PIEZAS_REVENDEDORA} piezas apartadas sin pago a la vez (ahora tienes ${abiertas}). Espera a que la tienda registre el pago o cancela alguna.` }, 409);
   }
 
   const momento = new Date();
