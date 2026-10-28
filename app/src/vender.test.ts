@@ -37,6 +37,19 @@ test('texto de una pieza: centavos, antes, talla, acentos y cierre exactos', () 
   assert.throws(() => textoWhatsApp(Array(11).fill({})));
 });
 
+test('texto para revendedora: sin el apartado con 15 % por 7 días y sin prometer anticipo (#575)', () => {
+  const pieza = { nombre: 'Blusa', talla: 'M', precio: 20000, precio_lista: 30000, codigo: 'ED-1234' };
+  const texto = textoWhatsApp([pieza], true);
+  assert.ok(texto.includes('Apártala: responde con el código.'));
+  assert.ok(!/15 %|7 días|\$100/.test(texto));
+  assert.ok(texto.includes('Envíos todos los viernes') && texto.includes('Jardín Hidalgo 129'));
+  assert.ok(!/15 %|7 días/.test(textoWhatsApp([pieza, pieza], true)));
+  assert.match(textoWhatsApp([pieza]), /15 % por 7 días/);   // la caja no cambia
+  const i = { cliente: 'Ana', nombre: 'Blusa', codigo: 'ED-1', disponibilidad: 'Disponible' };
+  assert.ok(!/15 %|7 días/.test(textoSeguimiento(i, true)));
+  assert.match(textoSeguimiento(i), /15 % por 7 días/);
+});
+
 test('varias piezas: una línea por pieza y un solo cierre, hasta diez', () => {
   const piezas = Array.from({ length: 10 }, (_, n) => ({ codigo: `ED-${n}`, nombre: 'Blusa', precio: 10001, precio_lista: 20000 }));
   const texto = textoWhatsApp(piezas);
@@ -255,7 +268,7 @@ test('permisos de caja, métodos, PIN de computadora y aislamiento de hosts', as
     }
   }
   const foto = `/api/recortes/${crypto.randomUUID()}/imagen`;
-  assert.deepEqual(permiso(foto, 'GET'), ['capturista', 'cajero', 'computadora']);
+  assert.deepEqual(permiso(foto, 'GET'), ['capturista', 'cajero', 'computadora', 'revendedora']);   // #575: la revendedora ve las fotos de /vender
   assert.deepEqual(permiso(foto, 'POST'), ['capturista']);
   usuario(db, 'foto@prueba.mx', 'capturista');
   env.DEV_USUARIO = 'foto@prueba.mx';

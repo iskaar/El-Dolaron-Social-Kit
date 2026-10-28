@@ -16,6 +16,11 @@ import { envioDe, anticipoMinimoDe, ANTICIPO_ENVIO, viernesDeEnvio } from '../pu
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const FORMAS_PAGO = new Set(['efectivo', 'tarjeta', 'transferencia']);
 const DIAS_APARTADO = 7;
+// Revendedora externa (#575): aparta sin anticipo. El plazo corto lo cierra el cron de siempre (vence_en).
+const HORAS_REVENDEDORA = 48;
+// ponytail: el tope se lee justo antes del batch; dos apartados a la vez pueden pasarse por una pieza.
+// Mejora: contar dentro del insert del pedido si algun dia importa.
+const PIEZAS_REVENDEDORA = 10;
 const LIMITE_LISTA = 200;
 const ENVIO_ID = '00000000-0000-4000-8000-000000000099';
 
@@ -35,14 +40,16 @@ function json(cuerpo: unknown, status = 200): Response {
 /* ---------- lectura ---------- */
 
 const COLUMNAS = `id, folio, cliente, telefono, entrega, envio, vendedora, estado, vence_en, anticipo, forma_pago,
-  saldo, saldo_vence_en, guia, venta_id, creado_en, actualizado_en, revision, liquidado_en, caja`;
+  saldo, saldo_vence_en, guia, venta_id, creado_en, actualizado_en, revision, liquidado_en, caja,
+  (select u.nombre from usuarios u where u.correo = pedidos.vendedora) as vendedora_nombre`;
 
 interface FilaPedido {
   id: string; folio: number; estado: string; entrega: string; envio: number; saldo: number;
+  vendedora: string; cliente: string; telefono: string; creado_en: string;
   anticipo: number; vence_en: string; saldo_vence_en: string; revision: number; liquidado_en: string | null; caja: string; forma_pago: string;
   [campo: string]: unknown;
 }
-interface LineaPedido { pedido_id: string; producto_id: string; precio: number; cantidad: number }
+interface LineaPedido { pedido_id: string; producto_id: string; codigo: string; nombre: string; precio: number; cantidad: number }
 
 /** El paquete conserva el precio pactado; recoger mantiene el precio de catálogo de #269. */
 async function leerPedidos(env: Env, donde: string, args: unknown[], orden = 'folio desc', limite = LIMITE_LISTA) {
@@ -75,12 +82,12 @@ const pedidoPor = async (env: Env, donde: string, valor: unknown) => (await leer
  * evalua en SQL, asi que dos cancelaciones (o el cron y una venta) juntas
  * regresan la existencia una sola vez.
  */
-export const devolverApartado = (env: Env, pedidoId: string, ahora: string, condicion = '') => env.DB.prepare(
+export const devolverApartado = (env: Env, pedidoId: string, ahora: string, condicion = '', ...extra: unknown[]) => env.DB.prepare(
   `update productos set stock = stock + (select cantidad from pedido_lineas where pedido_id = ?1 and producto_id = productos.id),
                         actualizado_en = ?2
    where id in (select producto_id from pedido_lineas where pedido_id = ?1)
      and exists (select 1 from pedidos where id = ?1 and estado = 'apartado' ${condicion})`,
-).bind(pedidoId, ahora);
+).bind(pedidoId, ahora, ...extra);
 
 async function productosDe(env: Env, pedidoId: string): Promise<string[]> {
   const { results } = await env.DB.prepare('select producto_id from pedido_lineas where pedido_id = ?')
@@ -178,13 +185,20 @@ export function telefonoDe(valor: unknown): string | null {
   return digitos.length === 10 ? digitos : null;
 }
 
-async function crearPedido(request: Request, env: Env, ctx: ExecutionContext, correo: string): Promise<Response> {
+/**
+ * `revendedora` (#575): el mismo pedido sin dinero de por medio. Sin anticipo, saldo ni caja, 48 h de plazo,
+ * envio sin cobrar el paquete. Lo decide vender.ts segun la cuenta, nunca el cuerpo de la peticion.
+ */
+async function crearPedido(request: Request, env: Env, ctx: ExecutionContext, correo: string, revendedora = false): Promise<Response> {
   const cuerpo = (await request.json().catch(() => ({}))) as Record<string, unknown>;
   const id = String(cuerpo.id ?? '');
   if (!UUID.test(id)) return json({ error: 'Identificador invalido.' }, 400);
   // Reintento tras red caida: el mismo pedido, sin bajar otra vez la existencia.
   const previo = await pedidoPor(env, 'id = ?', id);
-  if (previo) return json({ pedido: previo });
+  if (previo) {
+    return revendedora && previo.vendedora !== correo
+      ? json({ error: 'El identificador ya corresponde a otro pedido.' }, 409) : json({ pedido: previo });
+  }
 
   if (!Array.isArray(cuerpo.lineas) || cuerpo.lineas.length < 1 || cuerpo.lineas.length > 20)
     return json({ error: 'Un pedido lleva de 1 a 20 piezas.' }, 400);
@@ -202,10 +216,11 @@ async function crearPedido(request: Request, env: Env, ctx: ExecutionContext, co
   if (!telefono) return json({ error: 'El WhatsApp debe tener 10 digitos.' }, 400);
   const entrega = String(cuerpo.entrega ?? '');
   if (entrega !== 'tienda' && entrega !== 'envio') return json({ error: 'Entrega invalida.' }, 400);
-  const formaPago = String(cuerpo.forma_pago ?? '');
+  // forma_pago es NOT NULL con CHECK: sin dinero recibido da igual, 'transferencia' es lo que se cobrara despues.
+  const formaPago = revendedora ? 'transferencia' : String(cuerpo.forma_pago ?? '');
   if (!FORMAS_PAGO.has(formaPago)) return json({ error: 'Forma de pago invalida.' }, 400);
-  const caja = await cajaDe(env, correo, cuerpo.caja);
-  if (!caja) return json({ error: 'Falta la caja.' }, 400);
+  const caja = revendedora ? '' : await cajaDe(env, correo, cuerpo.caja);
+  if (!revendedora && !caja) return json({ error: 'Falta la caja.' }, 400);
 
   const ids = [...cantidades.keys()];
   const { results: filas } = await env.DB.prepare(
@@ -220,16 +235,24 @@ async function crearPedido(request: Request, env: Env, ctx: ExecutionContext, co
   const subtotal = filas.reduce((suma, p) => suma + p.precio * cantidades.get(p.id)!, 0);
   const envio = entrega === 'envio' ? envioDe(subtotal) : 0;
   const total = subtotal + envio;
-  const anticipo = Number(cuerpo.anticipo);
-  const minimo = anticipoMinimoDe(subtotal, entrega);
+  const anticipo = revendedora ? 0 : Number(cuerpo.anticipo);
+  const minimo = revendedora ? 0 : anticipoMinimoDe(subtotal, entrega);
   if (!Number.isSafeInteger(total) || !Number.isSafeInteger(anticipo) || anticipo < minimo || anticipo > total)
     return json({ error: `El anticipo mínimo es $${minimo / 100} y no pasa del total.` }, 400);
-  if (entrega === 'envio' && anticipo !== ANTICIPO_ENVIO)
+  if (!revendedora && entrega === 'envio' && anticipo !== ANTICIPO_ENVIO)
     return json({ error: 'El paquete de envío se abre con $100; el resto se recibe como abonos.' }, 400);
+  if (revendedora) {
+    // Solo cuentan las que siguen sin pago: una ya pagada y por recoger no bloquea seguir vendiendo.
+    const abiertas = (await env.DB.prepare(`select coalesce(sum(l.cantidad), 0) as n from pedidos d
+      join pedido_lineas l on l.pedido_id = d.id where d.estado = 'apartado' and d.saldo = 0 and d.vendedora = ?`)
+      .bind(correo).first<{ n: number }>())?.n ?? 0;
+    if (abiertas + [...cantidades.values()].reduce((suma, n) => suma + n, 0) > PIEZAS_REVENDEDORA)
+      return json({ error: `Máximo ${PIEZAS_REVENDEDORA} piezas apartadas sin pago a la vez (ahora tienes ${abiertas}). Espera a que la tienda registre el pago o cancela alguna.` }, 409);
+  }
 
   const momento = new Date();
   const ahora = momento.toISOString();
-  const vence = new Date(momento.getTime() + DIAS_APARTADO * 86_400_000);
+  const vence = new Date(momento.getTime() + (revendedora ? HORAS_REVENDEDORA * 3_600_000 : DIAS_APARTADO * 86_400_000));
   try {
     await env.DB.batch([
       env.DB.prepare(
@@ -273,6 +296,51 @@ async function listarPedidos(env: Env): Promise<Response> {
   return json({ pedidos });
 }
 
+/** Apartar como revendedora (#575): `POST /api/vender/apartar`. */
+export const apartarRevendedora = (request: Request, env: Env, ctx: ExecutionContext, correo: string) =>
+  crearPedido(request, env, ctx, correo, true);
+
+/**
+ * Los apartados de una revendedora: los abiertos (indice por estado) y lo de los ultimos 60 dias.
+ * ponytail: pedidos no tiene indice por vendedora; el historial se acota a los ultimos 400 folios.
+ * Mejora: indice (vendedora, creado_en) en una migracion cuando el volumen lo pida.
+ */
+export async function pedidosDeRevendedora(env: Env, correo: string): Promise<Response> {
+  const desde = new Date(Date.now() - 60 * 86_400_000).toISOString();
+  const [abiertos, recientes] = await Promise.all([
+    leerPedidos(env, "estado = 'apartado' and vendedora = ?", [correo], 'folio desc', 50),
+    leerPedidos(env, 'folio > (select coalesce(max(folio), 0) - 400 from pedidos) and vendedora = ? and creado_en >= ?', [correo, desde], 'folio desc', 100),
+  ]);
+  const porFolio = new Map([...recientes, ...abiertos].map((p) => [p.folio, p]));
+  const pedidos = [...porFolio.values()].sort((a, b) => b.folio - a.folio).map((p) => ({
+    folio: p.folio, estado: p.estado, vence_en: p.vence_en, cliente: p.cliente, telefono: p.telefono, entrega: p.entrega,
+    envio: p.envio, saldo: p.saldo, creado_en: p.creado_en, subtotal: p.subtotal,
+    lineas: p.lineas.map(({ codigo, nombre, precio, cantidad }) => ({ codigo, nombre, precio, cantidad })),
+    // Con dinero registrado ya solo lo cancela la tienda.
+    cancelable: p.estado === 'apartado' && Number(p.saldo) === 0,
+  }));
+  return json({ pedidos });
+}
+
+/** Cancelar uno suyo y sin pago. Las condiciones van en SQL: dos cancelaciones (o el cron) devuelven la existencia una vez. */
+export async function cancelarDeRevendedora(folio: number, env: Env, ctx: ExecutionContext, correo: string): Promise<Response> {
+  const pedido = await pedidoPor(env, 'folio = ?', folio);
+  if (!pedido || pedido.vendedora !== correo) return json({ error: 'El pedido no existe.' }, 404);
+  if (pedido.estado !== 'apartado' || Number(pedido.saldo) !== 0)
+    return json({ error: 'Ya no se puede cancelar aquí: pídelo a la tienda.' }, 409);
+  const momento = new Date();
+  const ahora = momento.toISOString();
+  const [, marca] = await env.DB.batch([
+    devolverApartado(env, pedido.id, ahora, 'and vendedora = ?3 and saldo = 0 and liquidado_en is null', correo),
+    env.DB.prepare(`update pedidos set estado = 'cancelado', saldo_vence_en = ?, actualizado_en = ?, revision = revision + 1
+      where id = ? and estado = 'apartado' and saldo = 0 and liquidado_en is null and vendedora = ?`)
+      .bind(sumarMeses(momento, 1), ahora, pedido.id, correo),
+  ]);
+  if (!marca.meta.changes) return json({ error: 'Ya no se puede cancelar aquí: pídelo a la tienda.' }, 409);
+  ctx.waitUntil(conciliarSeguro(env, { productoIds: await productosDe(env, pedido.id) }));
+  return json({ ok: true, folio });
+}
+
 /** Un movimiento tiene ID del navegador y contenido fijo: una respuesta perdida no cobra ni aparta dos veces. */
 async function moverPaquete(folio: number, tipo: 'pieza' | 'abono', request: Request,
   env: Env, ctx: ExecutionContext, correo: string): Promise<Response> {
@@ -302,7 +370,10 @@ async function moverPaquete(folio: number, tipo: 'pieza' | 'abono', request: Req
   if (!pedido) return json({ error: 'El pedido no existe.' }, 404);
   const momento = new Date();
   const ahora = momento.toISOString();
-  if (pedido.entrega !== 'envio' || pedido.estado !== 'apartado' || pedido.liquidado_en || String(pedido.vence_en) <= ahora)
+  // #575: el apartado de revendedora (tienda, anticipo 0) recibe abonos como un paquete, pero no se liquida:
+  // lo que falte se cobra en caja al recoger. Un apartado normal (anticipo > 0) sigue sin aceptarlos.
+  const sinAnticipo = tipo === 'abono' && pedido.entrega === 'tienda' && Number(pedido.anticipo) === 0;
+  if ((pedido.entrega !== 'envio' && !sinAnticipo) || pedido.estado !== 'apartado' || pedido.liquidado_en || String(pedido.vence_en) <= ahora)
     return json({ error: 'El paquete ya no está abierto o venció. Actualiza la lista.' }, 409);
   const vence = new Date(momento.getTime() + DIAS_APARTADO * 86_400_000);
   let precio = 0;
@@ -322,11 +393,12 @@ async function moverPaquete(folio: number, tipo: 'pieza' | 'abono', request: Req
   const nuevoSaldo = Number(pedido.saldo) + (tipo === 'abono' ? importe : 0);
   if (!Number.isSafeInteger(total) || (tipo === 'abono' && nuevoSaldo > total))
     return json({ error: 'El abono no puede pasar de lo que falta por pagar.' }, 400);
-  const liquidado = nuevoSaldo >= total;
+  const liquidado = pedido.entrega === 'envio' && nuevoSaldo >= total;
   try {
     await env.DB.batch([
       // La revisión y el estado se comprueban DENTRO del batch. Un WHERE que no modifica filas no lo aborta.
-      env.DB.prepare(`update pedidos set saldo = case when revision = ?1 and estado = 'apartado' and entrega = 'envio'
+      env.DB.prepare(`update pedidos set saldo = case when revision = ?1 and estado = 'apartado'
+        and (entrega = 'envio'${sinAnticipo ? " or (entrega = 'tienda' and anticipo = 0)" : ''})
         and liquidado_en is null and vence_en > ?2 ${tipo === 'pieza' ? `and exists (select 1 from productos
           where id = ?4 and propietario = 'dolaron' and sin_inventario = 0 and codigo is not null and codigo != ''
           and stock >= ?5 and precio = ?6)` : ''} then saldo else -1 end where id = ?3`)
