@@ -161,7 +161,7 @@ export function numeroCalzado({nodo,boton},actual,ficha,cambiar){
   campo.value=actual.textoNumero??'';
   campo.oninput=()=>{actual.textoNumero=campo.value;if(actual.talla){delete actual.talla;delete actual.tallaClave;delete actual.tallaRotulo;cambiar();}buscar();};
   buscar();raiz.append(etiqueta,chips,elegida);
-  return {raiz,campo,elegirPrimero:()=>{if(filas[0])fijar(filas[0]);}};
+  return {raiz,campo,elegirPrimero:()=>{if(filas[0]&&!actual.talla)fijar(filas[0]);}};
 }
 
 export async function iniciar(ctx) {

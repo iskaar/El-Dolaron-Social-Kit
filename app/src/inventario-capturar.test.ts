@@ -446,7 +446,7 @@ test('#552: la ficha del manifiesto dice si es calzado; la lámpara no', async t
   assert.equal(zapato.calzado, true); assert.equal(zapato.departamento, 'SHOES');
   assert.equal((await t.pedir('/api/manifiesto/0191907910414')).cuerpo.calzado, false);
   // Una pieza ya identificada sin manifiesto (la ficha «propia») también se reconoce por su nombre.
-  t.db.prepare("insert into productos (id, upc, nombre, categoria, precio_lista, precio, estado_fisico, stock, estado_analisis, destino, propietario, semana_ingreso, creado_en, actualizado_en) values (?, '555555555552', 'Tenis Nike Court', 'otros', 50000, 40000, 'nuevo', 1, 'listo', 'etiqueta', 'dolaron', 'S44', '', '')").run(crypto.randomUUID());
+  t.db.prepare("insert into productos (id, upc, nombre, categoria, precio_lista, precio, estado_fisico, stock, estado_analisis, destino, propietario, semana_ingreso, creado_en, actualizado_en) values (?, '555555555552', 'Tenis Nike Court', 'ropa', 50000, 40000, 'nuevo', 1, 'listo', 'etiqueta', 'dolaron', 'S44', '', '')").run(crypto.randomUUID());
   assert.equal((await t.pedir('/api/manifiesto/555555555552')).cuerpo.calzado, true);
 });
 

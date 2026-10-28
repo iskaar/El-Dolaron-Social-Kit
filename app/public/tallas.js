@@ -123,6 +123,9 @@ export const tipoCalzadoDeNombre = (nombre) => {
 };
 
 const ES_CALZADO = palabras('shoes?|sneakers?|boots?|booties|bootie|sandals?|slippers?|slides?|loafers?|flip[ -]flops?|cleats?|zapatos?|zapatillas?|tenis|botas?|botín|botines|sandalias?|pantuflas?|chanclas?');
-/** ¿La ficha del manifiesto es calzado? Departamento SHOE/FOOTWEAR o una palabra de calzado en el nombre o la descripcion. */
-export const esCalzado = ({ nombre, descripcion, departamento } = {}) =>
-  /shoe|footwear/i.test(departamento ?? '') || ES_CALZADO.test(`${nombre ?? ''} ${descripcion ?? ''}`);
+/**
+ * ¿La ficha del manifiesto es calzado? Departamento SHOE/FOOTWEAR, o una palabra de calzado en el nombre o la descripcion
+ * cuando la categoria es ropa (o no se conoce): un «water slide» de juguetes o un «boot tray» de hogar no piden numero.
+ */
+export const esCalzado = ({ nombre, descripcion, departamento, categoria } = {}) =>
+  /shoe|footwear/i.test(departamento ?? '') || ((!categoria || categoria === 'ropa') && ES_CALZADO.test(`${nombre ?? ''} ${descripcion ?? ''}`));

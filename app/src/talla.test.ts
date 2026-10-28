@@ -218,4 +218,6 @@ test('esCalzado: departamento SHOES/FOOTWEAR o una palabra de calzado completa e
   assert.ok(!esCalzado({ nombre: 'Lámpara', descripcion: 'Desk lamp', departamento: 'HOME' }));
   assert.ok(!esCalzado({ nombre: 'Bootcamp planner', descripcion: 'Notebook' }), 'palabra completa');
   assert.ok(!esCalzado({}));
+  assert.ok(!esCalzado({ nombre: 'Water slide', categoria: 'juguetes' }), 'palabra de calzado fuera de ropa');
+  assert.ok(esCalzado({ nombre: 'Water slide', categoria: 'juguetes', departamento: 'SHOES' }), 'el departamento manda');
 });
