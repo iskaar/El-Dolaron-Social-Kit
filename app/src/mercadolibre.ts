@@ -780,6 +780,29 @@ async function avisoDiagnosticoFoto(env: Env, categoriaId: string, foto: ArrayBu
   }
 }
 
+/**
+ * Avisos de duplicado (#568): ML da de baja la misma publicacion dos veces. Busca otras piezas con el mismo
+ * nombre y marca que ya tengan articulo vivo en ML. Solo avisa; el dueno decide.
+ * ponytail: coincidencia exacta (sin mayusculas ni espacios de mas); nombres parecidos no se detectan.
+ */
+async function avisosDuplicado(env: Env, p: Pieza): Promise<string[]> {
+  const { results } = await env.DB.prepare(
+    `select m.ml_item_id, m.permalink, p.talla
+     from ml_publicaciones m join productos p on p.id = m.producto_id
+     where p.id <> ? and m.ml_item_id is not null and m.estado in ('activa', 'pausada', 'pausada_por_venta')
+       and lower(trim(p.nombre)) = lower(trim(?)) and lower(trim(p.marca)) = lower(trim(?))
+     order by m.publicado_en desc limit 3`,
+  ).bind(p.id, p.nombre, p.marca).all<{ ml_item_id: string; permalink: string; talla: string | null }>();
+  const talla = (p.talla ?? '').trim();
+  return results.map((f) => {
+    const otra = (f.talla ?? '').trim();
+    const aviso = `Ya publicaste "${p.nombre}" (${f.ml_item_id}): súmale existencias ahí en vez de duplicar.${f.permalink ? ` ${f.permalink}` : ''}`;
+    return p.categoria === 'ropa' && talla && otra && talla.toLowerCase() !== otra.toLowerCase()
+      ? `${aviso} Si prefieres publicarla aparte (esta es talla ${talla}, la otra ${otra}), incluye la talla en el título para que no cuente como duplicado.`
+      : aviso;
+  });
+}
+
 async function preparar(env: Env, id: string, request: Request): Promise<Response> {
   const cuerpo = (await request.json().catch(() => ({}))) as { categoria_id?: unknown; consulta?: unknown; consulta_catalogo?: unknown; sin_ia?: unknown } | null;
   const elegida = cuerpo?.categoria_id === undefined || cuerpo.categoria_id === '' ? '' : String(cuerpo.categoria_id);
@@ -797,9 +820,9 @@ async function preparar(env: Env, id: string, request: Request): Promise<Respons
   try {
     const perfil = await perfilML(env);
     const { ml_pct, ml_tipo_publicacion } = await config(env);
-    const avisos: string[] = [];
+    const avisos: string[] = await avisosDuplicado(env, p);
 
-    const consulta = buscada || tituloML(p.nombre, p.marca) || p.nombre;
+    const consulta =buscada || tituloML(p.nombre, p.marca) || p.nombre;
     let encontradas: any[] = [];
     try {
       encontradas = await mlPublico(env, `/sites/MLM/domain_discovery/search?q=${encodeURIComponent(consulta)}&limit=4`);

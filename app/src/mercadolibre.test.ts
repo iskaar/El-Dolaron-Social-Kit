@@ -550,6 +550,30 @@ test('preparar: si el diagnóstico de la foto falla (red o cuota), Preparar sigu
   assert.match(avisoFoto(await t.pedir(`/api/ml/preparar/${pieza(t)}`, {})), /formato que no se entendió/);
 }));
 
+const avisoDuplicado = (r: any) => r.cuerpo.propuesta.avisos.find((a: string) => /Ya publicaste/.test(a));
+
+test('preparar: avisa si ya hay una publicación activa del mismo nombre y marca (#568), sin bloquear', () => conML(async (t) => {
+  const nueva = pieza(t, { talla: '32' });
+  assert.equal(avisoDuplicado(await t.pedir(`/api/ml/preparar/${nueva}`, {})), undefined);   // aún no hay nada publicado
+
+  const { itemId } = await publicarPieza(t, pieza(t, { talla: '32' }));
+  const r = await t.pedir(`/api/ml/preparar/${nueva}`, {});
+  assert.equal(r.status, 200);
+  const aviso = avisoDuplicado(r);
+  assert.ok(aviso.includes(`Ya publicaste "Jeans Levi's 501 Hombre" (${itemId}): súmale existencias ahí en vez de duplicar.`), aviso);
+  assert.ok(aviso.includes(`https://articulo.mercadolibre.com.mx/${itemId}`));
+  assert.ok(!/talla/.test(aviso), 'misma talla: no sugiere incluirla en el título');
+
+  // Ropa en otra talla: además sugiere la talla en el título.
+  assert.match(avisoDuplicado(await t.pedir(`/api/ml/preparar/${pieza(t, { talla: 'M' })}`, {})), /esta es talla M, la otra 32.*incluye la talla en el título/);
+
+  // Otro nombre o marca, o la publicación ya cerrada: sin aviso.
+  assert.equal(avisoDuplicado(await t.pedir(`/api/ml/preparar/${pieza(t, { nombre: 'Jeans Levi\'s 505 Hombre' })}`, {})), undefined);
+  assert.equal(avisoDuplicado(await t.pedir(`/api/ml/preparar/${pieza(t, { marca: 'Wrangler' })}`, {})), undefined);
+  t.db.prepare(`update ml_publicaciones set estado = 'cerrada'`).run();
+  assert.equal(avisoDuplicado(await t.pedir(`/api/ml/preparar/${nueva}`, {})), undefined);
+}));
+
 test('preparar con categoria_id: usa esa categoría y sigue ofreciendo las sugerencias', async () => {
   await conML(async (t) => {
     const r = await t.pedir(`/api/ml/preparar/${pieza(t)}`, { categoria_id: 'MLM1234' });
