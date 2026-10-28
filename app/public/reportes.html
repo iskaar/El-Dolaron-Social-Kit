@@ -364,6 +364,15 @@
     </article>
   </section>
 
+  <section aria-labelledby="t-revendedoras">
+    <h2 class="titulo-bloque" id="t-revendedoras">Revendedoras</h2>
+    <article class="panel">
+      <div id="revendedoras-detalle" style="overflow-x:auto"></div>
+      <p class="nota">Lo que cada revendedora cerró en el periodo: pedidos que apartó y la tienda cobró en caja. El importe es el del ticket
+        que los cerró (sin cancelados, menos devoluciones). El pago a la tienda lo registra el personal en Pedidos; la comisión se calcula con este importe.</p>
+    </article>
+  </section>
+
   <section aria-labelledby="t-inventario">
     <h2 class="titulo-bloque" id="t-inventario">Precios e inventario</h2>
     <div class="malla">
@@ -672,6 +681,14 @@ function pintarDescuentos(r) {
            <td class="num">${pesos(x.promo)}</td><td class="num">${pesos(x.otros)}</td><td class="num">${pesos(x.promo + x.otros)}</td></tr>`).join('')}</tbody></table>`;
 }
 
+function pintarRevendedoras(r) {
+  $('revendedoras-detalle').innerHTML = !r.revendedoras?.length ? '<div class="vacio">Sin ventas de revendedoras en este periodo.</div>'
+    : `<table class="tabla"><thead><tr><th>Revendedora</th><th class="num">Pedidos vendidos</th><th class="num">Piezas</th><th class="num">Importe</th></tr></thead>
+       <tbody>${r.revendedoras.map((x) => `
+         <tr><td>${escapar(x.nombre)}</td><td class="num">${x.pedidos.toLocaleString('es-MX')}</td>
+           <td class="num">${x.piezas.toLocaleString('es-MX')}</td><td class="num">${pesos(x.importe)}</td></tr>`).join('')}</tbody></table>`;
+}
+
 // El inventario en piso es una foto de ahora (Issue #174): no cambia con el periodo.
 function pintarPiso(inv) {
   const vacio = '<div class="vacio">No hay piezas con etiqueta y existencia en piso.</div>';
@@ -732,7 +749,7 @@ async function cargar() {
   try {
     const r = await (await fetch(`/api/reportes?dias=${diasActual}`)).json();
     ultimoReporte = r;
-    pintarResumen(r); pintarVentas(r); pintarCuadre(r); pintarCaja(r); pintarCancelaciones(r); pintarDescuentos(r); pintarInventario(r);
+    pintarResumen(r); pintarVentas(r); pintarCuadre(r); pintarCaja(r); pintarCancelaciones(r); pintarDescuentos(r); pintarRevendedoras(r); pintarInventario(r);
   } finally {
     $('principal').classList.remove('cargando');
   }

@@ -16,8 +16,9 @@ import { avisarDueno } from './avisos.ts';
 // sola no cobra, cada cajero entra con su PIN (Issue #112, cajeros.ts).
 // `finanzas`: FEP. Toma fotos y ve solo sus piezas (propietario 'fep'); ver propietarioDe.
 // `auxiliar`: lleva gastos y nomina (Issue #326); no ve reportes, cuentas ni lo demas del dueno.
-export type Rol = 'dueno' | 'cajero' | 'capturista' | 'computadora' | 'finanzas' | 'auxiliar';
-export const ROLES: readonly Rol[] = ['dueno', 'cajero', 'capturista', 'computadora', 'finanzas', 'auxiliar'];
+// `revendedora`: externa (Issue #575). Solo /vender: aparta 48 h sin anticipo y ve lo suyo; nunca la caja.
+export type Rol = 'dueno' | 'cajero' | 'capturista' | 'computadora' | 'finanzas' | 'auxiliar' | 'revendedora';
+export const ROLES: readonly Rol[] = ['dueno', 'cajero', 'capturista', 'computadora', 'finanzas', 'auxiliar', 'revendedora'];
 /** Lo que recibe alguien al aprobarle el acceso si no se escoge otra cosa. */
 export const ROL_POR_OMISION: Rol = 'cajero';
 
@@ -57,6 +58,9 @@ export type Regla = 'libre' | 'cuenta' | Rol[];
 const CAPTURA: Rol[] = ['capturista'];
 const CAPTURA_FEP: Rol[] = ['capturista', 'finanzas'];
 const CAJA: Rol[] = ['cajero', 'computadora'];
+// /vender y sus API: la caja y la revendedora. Va aparte de CAJA a proposito: esDeCaja compara por identidad
+// y la computadora sigue necesitando el PIN aqui (si fuera [...CAJA, 'revendedora'] el PIN desapareceria).
+const VENDER: Rol[] = [...CAJA, 'revendedora'];
 const TODOS: Rol[] = ['cajero', 'capturista'];
 const DUENO: Rol[] = [];
 const AUXILIAR: Rol[] = ['auxiliar'];
@@ -79,7 +83,7 @@ const PANTALLAS: Record<string, Rol[]> = {
   '/caja': CAJA,
   '/socios': CAJA,
   '/pedidos': CAJA,
-  '/vender': CAJA,
+  '/vender': VENDER,
   '/avisos': CAJA,   // ventas de Mercado Libre por atender (Issue #429)
   '/tarjeta-bandas': TODOS,
   '/reportes': DUENO,
@@ -103,7 +107,7 @@ export function permiso(pathname: string, metodo: string): Regla {
   // Issue #281: cualquier cuenta que entro puede reportar un error de su pantalla, tambien la caja sin PIN.
   if (ruta === '/api/errores' && metodo === 'POST') return 'cuenta';
   if (ruta === '/marketplace-redes.png') return CAPTURA;
-  if (ruta === '/vender.js') return CAJA;
+  if (ruta === '/vender.js') return VENDER;
   // Codigo de las pantallas, sin datos: el permiso se cobra en la pantalla y en la API.
   if (!ruta.startsWith('/api/') && /\.(js|css|png|svg|ico)$/.test(ruta)) return 'cuenta';
 
@@ -119,7 +123,7 @@ export function permiso(pathname: string, metodo: string): Regla {
   if (ruta === '/api/config') return metodo === 'GET' ? CAPTURA_FEP : DUENO;
   // Ropa de El Dolarón: FEP (finanzas) no ve ni renombra piezas ajenas (Issue #318).
   if (ruta === '/api/ropa-ia' || ruta.startsWith('/api/ropa-ia/')) return CAPTURA;
-  if (metodo === 'GET' && /^\/api\/recortes\/[^/]+\/imagen$/.test(ruta)) return [...CAPTURA, ...CAJA];
+  if (metodo === 'GET' && /^\/api\/recortes\/[^/]+\/imagen$/.test(ruta)) return [...CAPTURA, ...VENDER];
   if (ruta === '/api/recortes' || ruta.startsWith('/api/recortes/')) return CAPTURA;
   if (ruta === '/api/familias') return metodo === 'GET' ? TODOS : DUENO;
   if (ruta === '/api/borradores/manual') return DUENO;   // captura sin foto (Issue #115)
@@ -130,7 +134,7 @@ export function permiso(pathname: string, metodo: string): Regla {
   if (/^\/api\/borradores\/[^/]+\/imagen(?:\/buscar)?$/.test(ruta)) return CAPTURA;
   if (ruta === '/api/borradores' || ruta.startsWith('/api/borradores/')) return CAPTURA_FEP;
   // La caja muestra la foto de cada pieza escaneada para detectar etiquetas cambiadas (Issue #358).
-  if (ruta.startsWith('/api/foto/')) return [...CAPTURA_FEP, ...CAJA];
+  if (ruta.startsWith('/api/foto/')) return metodo === 'GET' ? [...CAPTURA_FEP, ...VENDER] : [...CAPTURA_FEP, ...CAJA];
   // Etiquetas y su registro de enviadas (#440): lo usan la PC y el celular; el cajero no imprime.
   if (ruta === '/api/etiquetas' || ruta === '/api/etiquetas/enviadas' || ruta === '/api/etiquetas/pendientes') return CAPTURA_FEP;
   // Leer la calibracion lo hacen tambien FEP y el celular; cambiarla, solo quien captura.
@@ -141,7 +145,9 @@ export function permiso(pathname: string, metodo: string): Regla {
   if (metodo === 'POST' && /^\/api\/piezas\/[^/]+\/solicitud-precio$/.test(ruta)) return CAPTURA;
   if (ruta === '/api/marketplace' || /^\/api\/marketplace\/foto\/[^/]+$/.test(ruta)) return CAPTURA;
   if (ruta === '/api/catalogo') return CAJA;
-  if (ruta === '/api/vender' || ruta === '/api/interesados' || ruta.startsWith('/api/interesados/')) return CAJA;
+  if (ruta === '/api/vender' || ruta === '/api/interesados' || ruta.startsWith('/api/interesados/')) return VENDER;
+  // Revendedora (#575): apartar 48 h sin anticipo, ver y cancelar lo suyo. vender.ts exige ademas que no sea personal de caja.
+  if (ruta === '/api/vender/apartar' || ruta === '/api/vender/mios' || /^\/api\/vender\/apartados\/\d+\/cancelar$/.test(ruta)) return VENDER;
   if (ruta === '/api/socios') return CAJA;
   if (ruta === '/api/vales/config' && metodo === 'GET') return CAJA;
   if (ruta === '/api/vales/buscar' && metodo === 'POST') return CAJA;
@@ -169,11 +175,19 @@ export function permiso(pathname: string, metodo: string): Regla {
 }
 
 /** Lo de caja: lo unico que abre el PIN del cajero. */
-export const esDeCaja = (regla: Regla) => regla === CAJA;
+export const esDeCaja = (regla: Regla) => regla === CAJA || regla === VENDER;
 
 /** La cuenta de la computadora de caja: para cobrar necesita el PIN de un cajero. */
 export const soloComputadora = (usuario: Usuario | null) =>
   !!usuario?.roles.includes('computadora') && !usuario.roles.includes('cajero') && !usuario.roles.includes('dueno');
+
+/**
+ * Revendedora externa (#575): tiene el rol y ninguno de caja o dueno. Solo ella usa el apartado sin anticipo,
+ * y a ella se le acota lo que ve de las demas. Quien ademas es cajero o dueno conserva el flujo de la tienda.
+ */
+export const esRevendedora = (usuario: Usuario | null) =>
+  !!usuario?.activo && usuario.roles.includes('revendedora')
+  && !usuario.roles.some((rol) => rol === 'dueno' || rol === 'cajero' || rol === 'computadora');
 
 /**
  * De quien son las piezas que esta persona captura y ve (Issue #298). FEP solo
@@ -321,7 +335,7 @@ export async function yo(env: Env, correo: string, cajero: Usuario | null = null
   const modos = usuario?.activo && (usuario.roles.includes('dueno') || usuario.roles.includes('capturista'))
     ? ['capturar', 'buscar', 'revisar', 'imprimir']
     : usuario?.activo && usuario.roles.includes('finanzas') ? ['capturar', 'buscar', ...(puedeEditarInventario(usuario) ? ['revisar'] : []), 'imprimir'] : [];
-  return json({ correo, usuario, solicitud, vendedor, modos_inventario: modos, cajero: cajero && { correo: cajero.correo, nombre: cajero.nombre, caja: cajero.caja } });
+  return json({ correo, usuario, solicitud, vendedor, revendedora: esRevendedora(usuario), modos_inventario: modos, cajero: cajero && { correo: cajero.correo, nombre: cajero.nombre, caja: cajero.caja } });
 }
 
 /** Alguien sin cuenta pide entrar. Una sola pendiente por persona: pedir otra vez la actualiza. */

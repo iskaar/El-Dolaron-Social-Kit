@@ -20,13 +20,17 @@ export function codigoDeRespuesta(texto) {
 }
 
 // Reglas de Isaac (22/10, #434): apartado en tienda = 15 % por 7 días; envíos los viernes.
-const CIERRE = 'Apártala con el 15 % por 7 días: responde con el código.\n'
+const APARTAR = 'Apártala con el 15 % por 7 días: responde con el código.';
+// Revendedora (#575): aparta ella misma y sin anticipo; la tienda cobra después.
+const APARTAR_REVENDEDORA = 'Apártala: responde con el código.';
+const cierre = (revendedora) => `${revendedora ? APARTAR_REVENDEDORA : APARTAR}\n`
   + '🚚 Envíos todos los viernes.\n'
   + '📍 Jardín Hidalgo 129, Soledad · todos los días de 11 a 8';
 const unaLinea = (texto) => String(texto ?? '').replace(/\s+/g, ' ').trim();
 
 /** Función pura: el cierre va una sola vez, también al compartir varias piezas. */
-export function textoWhatsApp(piezas) {
+export function textoWhatsApp(piezas, revendedora = false) {
+  const CIERRE = cierre(revendedora);
   if (!piezas.length || piezas.length > 10) throw new Error('Selecciona de 1 a 10 piezas.');
   if (piezas.length > 1) return piezas.map((p) => `${p.codigo} · ${unaLinea(p.nombre)} · ${pesos(p.precio)}`).join('\n') + `\n${CIERRE}`;
   const p = piezas[0];
@@ -40,8 +44,8 @@ export const enlaceApartar = (i) => '/pedidos?' + new URLSearchParams({
 });
 
 /** No promete disponibilidad si la pieza ya quedó apartada o vendida. */
-export const textoSeguimiento = (i) => `Hola ${i.cliente}, la ${i.nombre} ${i.codigo} `
-  + (i.disponibilidad === 'Disponible' ? 'sigue disponible. Apártala con el 15 % por 7 días o te la enviamos el viernes.'
+export const textoSeguimiento = (i, revendedora = false) => `Hola ${i.cliente}, la ${i.nombre} ${i.codigo} `
+  + (i.disponibilidad === 'Disponible' ? `sigue disponible. ${revendedora ? 'Dime y te la aparto, o' : 'Apártala con el 15 % por 7 días o'} te la enviamos el viernes.`
     : i.disponibilidad === 'Apartada' ? 'está apartada. Te avisamos si vuelve a estar disponible.' : 'ya se vendió. Podemos ayudarte a buscar otra pieza.');
 
 function cargarImagen(src) {

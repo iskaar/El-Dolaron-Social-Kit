@@ -440,6 +440,9 @@ async function cargarLista() {
 }
 
 const vendedoraDe = (p) => escapar(String(p.vendedora ?? '').split('@')[0]);
+// Apartado de revendedora (#575): sin anticipo, dura 48 h y el pago lo registra la tienda con un abono.
+const sinAnticipo = (p) => p.estado === 'apartado' && p.anticipo === 0 && !p.liquidado_en;
+const revendedoraNombre = (p) => escapar(p.vendedora_nombre || String(p.vendedora ?? '').split('@')[0]);
 
 function filaPedido(p, { botones, vence, saldo = false }) {
   return `<div class="pedido">
@@ -463,9 +466,11 @@ function pintarLista() {
   $('lista-apartados').innerHTML = apartados.map((p) => {
     const vencido = Date.parse(p.vence_en) <= ahora;
     const urgente = vencido || dia(Date.parse(p.vence_en)) === hoy;
+    const reventa = sinAnticipo(p);
     return filaPedido(p, {
-      vence: `<div class="vence ${urgente ? 'urgente' : ''}">${vencido ? 'Venció el' : dia(Date.parse(p.vence_en)) === hoy ? 'Vence hoy,' : 'Vence el'} ${fecha(p.vence_en)}</div>`,
+      vence: `<div class="vence ${urgente ? 'urgente' : ''}">${reventa ? 'Sin anticipo · ' : ''}${vencido ? 'Venció el' : dia(Date.parse(p.vence_en)) === hoy ? 'Vence hoy,' : 'Vence el'} ${fecha(p.vence_en)}${reventa ? ` · ${revendedoraNombre(p)}` : ''}</div>`,
       botones: botonWa(p, mensajeRecordar(p), 'WhatsApp: recordar')
+        + (reventa ? `<button class="boton chico relleno" type="button" data-mover="${p.folio}" data-tipo="abono">Recibir abono</button>` : '')
         + `<button class="boton chico rojo" type="button" data-cancelar="${p.folio}">Cancelar apartado</button>`,
     });
   }).join('') || '<p class="vacio">No hay apartados.</p>';
@@ -473,7 +478,8 @@ function pintarLista() {
   const grupos = [...new Set(envios.map((p) => p.viernes_envio ?? ''))].sort();
   $('lista-envios').innerHTML = grupos.map((viernes) => `<h3>${viernes ? `Viernes ${fecha(viernes + 'T12:00:00-06:00')}` : 'Por liquidar · viernes pendiente'}</h3>`
     + envios.filter((p) => (p.viernes_envio ?? '') === viernes).map((p) => filaPedido(p, {
-    vence: p.liquidado_en ? '<div>Liquidado: no vence.</div>' : `<div class="vence">Vence el ${fecha(p.vence_en)}; cada pieza o abono renueva 7 días.</div>`,
+    vence: p.liquidado_en ? '<div>Liquidado: no vence.</div>'
+      : `<div class="vence">${sinAnticipo(p) ? 'Sin anticipo · ' : ''}Vence el ${fecha(p.vence_en)}${sinAnticipo(p) ? ` · ${revendedoraNombre(p)}` : ''}; cada pieza o abono renueva 7 días.</div>`,
     botones: guardadas.has(p.folio)
       ? `<span class="aviso ok">Guía ${escapar(p.guia)} guardada.</span>` + botonWa(p, mensajeGuia(p), 'WhatsApp: avisar guía')
       : p.estado === 'apartado' ? (p.liquidado_en
@@ -591,7 +597,7 @@ function abrirMovimiento(folio, tipo) {
   $('mover-guardar').disabled = false;
   $('dlg-mover').showModal();
 }
-$('lista-envios').addEventListener('click', (e) => {
+for (const lista of ['lista-envios', 'lista-apartados']) $(lista).addEventListener('click', (e) => {
   const boton = e.target.closest('button[data-mover]');
   if (boton) abrirMovimiento(Number(boton.dataset.mover), boton.dataset.tipo);
 });

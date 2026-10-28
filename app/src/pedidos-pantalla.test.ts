@@ -115,3 +115,32 @@ test('Por enviar separa los viernes confirmados de los paquetes pendientes y mue
   assert.match(envios, /data-guia="2"/);
   assert.match(envios, /Liquidado: no vence/);
 });
+
+test('un apartado de revendedora (anticipo 0) dice «Sin anticipo · vence … · nombre» y trae su botón de abono; el normal no (#575)', () => {
+  const html = new Map<string, any>();
+  const $ = (id: string) => { if (!html.has(id)) html.set(id, {}); return html.get(id); };
+  const base = { cliente: 'Ana', telefono: '4441234567', entrega: 'tienda', estado: 'apartado', guia: '', liquidado_en: null, envio: 0,
+    subtotal: 20000, vence_en: '2030-01-01T12:00:00.000Z', lineas: [] };
+  const pedidos = [
+    { ...base, folio: 1, vendedora: 'ana@revende.mx', vendedora_nombre: 'Ana <R>', anticipo: 0, saldo: 0, faltante: 20000 },
+    { ...base, folio: 2, vendedora: 'caja@prueba.mx', vendedora_nombre: 'Marta', anticipo: 3000, saldo: 3000, faltante: 17000 },
+    { ...base, folio: 3, entrega: 'envio', vendedora: 'bety@revende.mx', vendedora_nombre: 'Bety', anticipo: 0, saldo: 0, faltante: 29900, viernes_envio: null },
+  ];
+  const bloque = fuente.slice(fuente.indexOf('const vendedoraDe ='), fuente.indexOf("$('actualizar').addEventListener"));
+  const pintar = runInNewContext(`${bloque}
+pintarLista`, {
+    $, pedidos, Date, guardadas: new Map(), escapar: (t: string) => String(t).replace(/</g, '&lt;'), pesos: (n: number) => `$${n / 100}`, dia: () => '2026-10-22',
+    fecha: (s: string) => s.slice(0, 10), piezasDe: () => 'Prenda', totalDe: () => 20000,
+    enlaceWhatsApp: () => '#', mensajeConfirmar: () => '', mensajeRecordar: () => '', mensajeGuia: () => '', mensajeSaldo: () => '',
+  });
+  pintar();
+  const apartados = $('lista-apartados').innerHTML as string;
+  const [reventa, normal] = apartados.split('<div class="pedido">').slice(1);
+  assert.match(reventa, /Sin anticipo · Vence (?:hoy,|el) 2030-01-01 · Ana &lt;R>/);
+  assert.match(reventa, /data-mover="1" data-tipo="abono"/);
+  assert.match(reventa, /Pagado \$0 de \$200 · Falta \$200/);
+  assert.match(reventa, /data-cancelar="1"/);
+  assert.doesNotMatch(normal, /Sin anticipo|data-mover/);
+  assert.match(normal, /data-cancelar="2"/);
+  assert.match($('lista-envios').innerHTML, /Sin anticipo · Vence el 2030-01-01 · Bety; cada pieza/);
+});

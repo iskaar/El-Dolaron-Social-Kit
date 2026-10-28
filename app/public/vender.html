@@ -54,6 +54,11 @@
   dialog { width: min(520px, 94vw); max-height: 92dvh; border: 2px solid var(--azul); border-radius: 12px; padding: 16px; }
   dialog::backdrop { background: rgba(22, 54, 107, .6); }
   dialog .acciones { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
+  .mia { border-top: 1px solid var(--linea); padding: 14px 0; overflow-wrap: anywhere; }
+  .mia:first-child { border-top: 0; }
+  .mia h2 { font-size: 17px; margin-bottom: 4px; }
+  .mia p { margin: 4px 0; }
+  .peligro { border-color: var(--rojo); color: var(--rojo); }
   #vista-previa { display: flex; overflow-x: auto; gap: 8px; }
   #vista-previa img { width: 135px; height: 169px; }
   @media (min-width: 700px) { #piezas { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
@@ -61,7 +66,7 @@
 <script src="/cajero.js"></script>
 </head>
 <body>
-<header><h1>Vender por WhatsApp</h1><a href="/">Menú</a><a href="/pedidos">Pedidos</a></header>
+<header><h1>Vender por WhatsApp</h1><a id="enlace-menu" href="/">Menú</a><a id="enlace-pedidos" href="/pedidos">Pedidos</a></header>
 <main>
   <section class="panel">
     <h2>¿Ya te dijeron «la quiero»?</h2>
@@ -71,7 +76,7 @@
     </form>
     <p class="nota">Anotar a alguien no aparta la pieza. Sin anticipo, sigue disponible.</p>
   </section>
-  <nav aria-label="Vista de ventas"><button id="ver-piezas" type="button" aria-pressed="true">Piezas</button><button id="ver-interesados" type="button" aria-pressed="false">Interesados</button></nav>
+  <nav aria-label="Vista de ventas"><button id="ver-piezas" type="button" aria-pressed="true">Piezas</button><button id="ver-interesados" type="button" aria-pressed="false">Interesados</button><button id="ver-mias" type="button" aria-pressed="false" hidden>Mis ventas</button></nav>
   <p id="aviso" class="aviso" role="status" aria-live="polite"></p>
   <section id="catalogo">
     <form id="filtros" class="panel">
@@ -84,6 +89,11 @@
     </form>
     <div id="piezas"></div>
     <div class="fila"><button id="anterior" type="button" disabled>Anterior</button><button id="siguiente" type="button" disabled>Ver más piezas</button></div>
+  </section>
+  <section id="mias" class="panel" hidden>
+    <div class="fila"><button id="actualizar-mias" type="button">Actualizar</button></div>
+    <p class="nota">Tus ventas de los últimos 60 días. El cliente paga a la tienda: transferencia o en caja al recoger.</p>
+    <div id="lista-mias"></div>
   </section>
   <section id="interesados" class="panel" hidden>
     <div class="fila"><label class="check"><input id="mios" type="checkbox">Solo los míos</label><button id="actualizar-interesados" type="button">Actualizar</button></div>
@@ -104,6 +114,22 @@
     <div class="acciones"><button id="guardar" class="principal" type="submit">Anotar interesado</button><button id="cerrar-interesado" type="button">Cerrar</button></div>
   </form>
 </dialog>
+<dialog id="dlg-vendida" aria-labelledby="titulo-vendida">
+  <h2 id="titulo-vendida">Vendida</h2><p id="pieza-vendida"></p>
+  <form id="form-vendida">
+    <label for="vendida-cliente">Nombre del cliente</label><input id="vendida-cliente" maxlength="80" required autocomplete="name">
+    <label for="vendida-telefono">WhatsApp del cliente (10 dígitos)</label><input id="vendida-telefono" type="tel" inputmode="tel" maxlength="24" required autocomplete="tel">
+    <label for="vendida-entrega">Entrega</label>
+    <select id="vendida-entrega"><option value="tienda">Recoger en tienda (cliente o tú)</option><option value="envio">Envío</option></select>
+    <p class="nota">La pieza queda apartada 48 horas. El cliente paga a la tienda: transferencia o en caja al recoger. Si la tienda no registra el pago en ese plazo, la pieza vuelve a la venta. Envío $99; gratis desde $1,000 en piezas.</p>
+    <p id="aviso-vendida" class="aviso" role="status" aria-live="polite"></p>
+    <div class="acciones"><button id="guardar-vendida" class="principal" type="submit">Apartar 48 horas</button><button id="cerrar-vendida" type="button">Cerrar</button></div>
+  </form>
+</dialog>
+<dialog id="dlg-cancelar-mia" aria-labelledby="titulo-cancelar-mia">
+  <h2 id="titulo-cancelar-mia">¿Cancelar la venta?</h2><p id="texto-cancelar-mia"></p>
+  <div class="acciones"><button id="cancelar-mia-si" class="peligro" type="button">Sí, cancelar</button><button id="cancelar-mia-no" type="button" autofocus>No, regresar</button></div>
+</dialog>
 <dialog id="dlg-compartir" aria-labelledby="titulo-compartir">
   <h2 id="titulo-compartir">Compartir piezas</h2><div id="vista-previa"></div>
   <label for="texto-compartir">Texto para WhatsApp</label><textarea id="texto-compartir" rows="6" readonly></textarea>
@@ -115,7 +141,7 @@
 <template id="tarjeta"><article class="pieza">
   <img width="320" height="320" loading="lazy" decoding="async"><div class="detalle">
     <h2></h2><div class="precio"></div><div class="codigo"></div><div class="nota talla"></div><div class="marca"></div>
-    <label class="check"><input type="checkbox">Seleccionar</label><div class="cola"></div><button type="button">La quiere</button>
+    <label class="check"><input type="checkbox">Seleccionar</label><div class="cola"></div><button type="button" class="quiere">La quiere</button><button type="button" class="vendida" hidden>Vendida</button>
   </div>
 </article></template>
 <script type="module">
@@ -132,7 +158,7 @@ async function api(ruta, opciones) {
   return datos;
 }
 for (const [clave, nombre] of CATEGORIAS) $('categoria').add(new Option(nombre, clave));
-let correo = '', compartidas = new Set();
+let correo = '', compartidas = new Set(), revendedora = false;
 let piezas = [], cola = [], seleccion = new Map();
 let cursores = [null], cursoresInteresados = [null], siguiente = null, siguienteInteresados = null;
 let consulta = new URLSearchParams(), cargando = false, cargandoInteresados = false;
@@ -165,7 +191,8 @@ function pintarPiezas() {
     tarjeta.querySelector('input').checked = seleccion.has(p.id);
     tarjeta.querySelector('input').setAttribute('aria-label', `Seleccionar ${p.nombre} ${p.codigo}`);
     tarjeta.querySelector('.cola').textContent = p.cola.length
-      ? p.cola.map((i, n) => `${n + 1}.º ${i.cliente} (${i.vendedora_nombre}, ${hora(i.creado_en)})`).join(' · ') : 'Sin interesados';
+      ? p.cola.map((i, n) => `${n + 1}.º ${i.cliente || 'Alguien'} (${i.vendedora_nombre}, ${hora(i.creado_en)})`).join(' · ') : 'Sin interesados';
+    tarjeta.querySelector('.vendida').hidden = !revendedora;
     $('piezas').append(fragmento);
   }
   pintarSeleccion();
@@ -226,9 +253,10 @@ function abrirInteresado(p) {
   $('dlg-interesado').showModal();
 }
 $('piezas').addEventListener('click', (e) => {
-  if (!e.target.closest('button')) return;
+  const boton = e.target.closest('button');
+  if (!boton) return;
   const p = piezas.find((p) => p.id === e.target.closest('article').dataset.id);
-  abrirInteresado(p);
+  if (boton.classList.contains('vendida')) abrirVendida(p); else abrirInteresado(p);
 });
 $('form-codigo').addEventListener('submit', async (e) => {
   e.preventDefault();
@@ -256,7 +284,7 @@ $('form-interesado').addEventListener('submit', async (e) => {
     intento = null;
     $('dlg-interesado').close();
     decir('aviso', 'Interesado anotado. La pieza sigue sin apartar.');
-    if ($('interesados').hidden) await cargarPiezas(); else await cargarInteresados();
+    if (vista === 'interesados') await cargarInteresados(); else await cargarPiezas();
   } catch (e) {
     if (e.status && e.status < 500) intento = null;
     decir('aviso-interesado', intento ? 'No se pudo confirmar. Reintenta: no se duplica y se conservan los datos.' : e.message, true);
@@ -287,10 +315,16 @@ function pintarInteresados() {
     const botones = textoEn(fila, 'div', '', 'fila');
     if (i.telefono) {
       const wa = textoEn(botones, 'a', 'WhatsApp', 'boton');
-      wa.href = `https://wa.me/52${i.telefono}?text=${encodeURIComponent(textoSeguimiento(i))}`;
+      wa.href = `https://wa.me/52${i.telefono}?text=${encodeURIComponent(textoSeguimiento(i, revendedora))}`;
       wa.target = '_blank'; wa.rel = 'noopener';
     }
-    if (i.disponibilidad === 'Disponible') textoEn(botones, 'a', 'Apartar', 'boton principal').href = enlaceApartar(i);
+    if (i.disponibilidad === 'Disponible') {
+      if (revendedora) {
+        const vendida = textoEn(botones, 'button', 'Vendida', 'principal');
+        vendida.type = 'button';
+        vendida.addEventListener('click', () => abrirVendida({ id: i.producto_id, codigo: i.codigo, nombre: i.nombre, precio: i.precio }, i));
+      } else textoEn(botones, 'a', 'Apartar', 'boton principal').href = enlaceApartar(i);
+    }
     const descartar = textoEn(botones, 'button', 'Descartar');
     descartar.type = 'button';
     descartar.addEventListener('click', async () => {
@@ -326,15 +360,117 @@ async function cargarInteresados() {
     $('mas-interesados').disabled = !siguienteInteresados;
   }
 }
-function mostrar(interesados) {
-  $('interesados').hidden = !interesados;
-  $('catalogo').hidden = $('seleccion').hidden = interesados;
-  $('ver-interesados').setAttribute('aria-pressed', String(interesados));
-  $('ver-piezas').setAttribute('aria-pressed', String(!interesados));
-  if (interesados) cargarInteresados(); else cargarPiezas();
+let vista = 'piezas';
+function mostrar(nueva) {
+  vista = nueva;
+  $('interesados').hidden = nueva !== 'interesados';
+  $('mias').hidden = nueva !== 'mias';
+  $('catalogo').hidden = $('seleccion').hidden = nueva !== 'piezas';
+  for (const [clave, id] of [['piezas', 'ver-piezas'], ['interesados', 'ver-interesados'], ['mias', 'ver-mias']])
+    $(id).setAttribute('aria-pressed', String(clave === nueva));
+  if (nueva === 'interesados') cargarInteresados(); else if (nueva === 'mias') cargarMias(); else cargarPiezas();
 }
-$('ver-piezas').addEventListener('click', () => mostrar(false));
-$('ver-interesados').addEventListener('click', () => mostrar(true));
+$('ver-piezas').addEventListener('click', () => mostrar('piezas'));
+$('ver-interesados').addEventListener('click', () => mostrar('interesados'));
+$('ver-mias').addEventListener('click', () => mostrar('mias'));
+
+/* ---------- Vendida (solo revendedoras, #575): aparta 48 h sin anticipo ---------- */
+
+let piezaVendida = null, intentoVendida = null, apartando = false;
+function abrirVendida(p, interesado = null) {
+  if (intentoVendida) {
+    decir('aviso-vendida', 'Primero reintenta el apartado pendiente. Se conserva el mismo identificador.', true);
+  } else {
+    piezaVendida = p;
+    $('form-vendida').reset();
+    if (interesado) { $('vendida-cliente').value = interesado.cliente ?? ''; $('vendida-telefono').value = interesado.telefono ?? ''; }
+    decir('aviso-vendida', '');
+  }
+  $('pieza-vendida').textContent = `${piezaVendida.codigo} · ${piezaVendida.nombre} · ${pesos(piezaVendida.precio)}`;
+  $('dlg-vendida').showModal();
+}
+$('cerrar-vendida').addEventListener('click', () => $('dlg-vendida').close());
+$('dlg-vendida').addEventListener('cancel', (e) => { if (apartando) e.preventDefault(); });
+$('form-vendida').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  if (apartando) return;
+  const telefono = telefonoInteresado($('vendida-telefono').value);
+  if (!telefono) return decir('aviso-vendida', 'Escribe el WhatsApp del cliente con 10 dígitos.', true);
+  // Un solo id por intento: si se pierde la respuesta, reintentar no aparta dos veces.
+  intentoVendida ??= { id: crypto.randomUUID(), lineas: [{ producto_id: piezaVendida.id, cantidad: 1 }],
+    cliente: $('vendida-cliente').value.trim(), telefono, entrega: $('vendida-entrega').value };
+  apartando = true;
+  for (const id of ['guardar-vendida', 'cerrar-vendida', 'vendida-cliente', 'vendida-telefono', 'vendida-entrega']) $(id).disabled = true;
+  try {
+    const { pedido } = await api('/api/vender/apartar', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(intentoVendida) });
+    intentoVendida = null;
+    $('dlg-vendida').close();
+    decir('aviso', `Apartada: P-${pedido.folio}, vence ${hora(pedido.vence_en)} (48 horas). El cliente paga a la tienda: transferencia o en caja al recoger.`);
+    if (vista === 'piezas') await cargarPiezas(); else if (vista === 'mias') await cargarMias();
+  } catch (e) {
+    if (e.status && e.status < 500) intentoVendida = null;
+    decir('aviso-vendida', intentoVendida ? 'No se pudo confirmar. Reintenta: no se duplica y se conservan los datos.' : e.message, true);
+  } finally {
+    apartando = false;
+    for (const id of ['guardar-vendida', 'cerrar-vendida']) $(id).disabled = false;
+    for (const id of ['vendida-cliente', 'vendida-telefono', 'vendida-entrega']) $(id).disabled = !!intentoVendida;
+  }
+});
+
+/* ---------- Mis ventas ---------- */
+
+const ESTADOS_MIA = { vendido: 'Cerrada: ya se cobró', vencido: 'Venció: la pieza volvió a la venta', cancelado: 'Cancelada' };
+let cargandoMias = false, folioCancelar = null;
+function pintarMias(pedidos) {
+  $('lista-mias').replaceChildren();
+  if (!pedidos.length) textoEn($('lista-mias'), 'p', 'Todavía no tienes ventas en los últimos 60 días.');
+  for (const p of pedidos) {
+    const fila = document.createElement('article');
+    fila.className = 'mia';
+    textoEn(fila, 'h2', `P-${p.folio} · ${p.cliente}`);
+    textoEn(fila, 'p', p.lineas.map((l) => `${l.codigo} ${l.nombre}`).join(', ') + ` · ${pesos(p.subtotal + p.envio)}`);
+    textoEn(fila, 'p', p.estado === 'apartado'
+      ? (p.saldo > 0 ? `Apartada · la tienda ya registró un pago · vence ${hora(p.vence_en)}` : `Apartada sin pago · vence ${hora(p.vence_en)}`)
+      : ESTADOS_MIA[p.estado] ?? p.estado, 'nota');
+    textoEn(fila, 'p', p.entrega === 'envio' ? 'Envío' : 'Recoger en tienda', 'nota');
+    if (p.cancelable) {
+      const cancelar = textoEn(fila, 'button', 'Cancelar', 'peligro');
+      cancelar.type = 'button';
+      cancelar.addEventListener('click', () => {
+        folioCancelar = p.folio;
+        $('texto-cancelar-mia').textContent = `P-${p.folio}: la pieza vuelve a la venta. Solo se puede mientras la tienda no registre un pago.`;
+        $('cancelar-mia-si').disabled = false;
+        $('dlg-cancelar-mia').showModal();
+      });
+    }
+    $('lista-mias').append(fila);
+  }
+}
+async function cargarMias() {
+  if (cargandoMias) return;
+  cargandoMias = true;
+  try {
+    pintarMias((await api('/api/vender/mios')).pedidos);
+    decir('aviso', 'Tus ventas, actualizadas.');
+  } catch (e) { decir('aviso', e.message || 'Sin conexión. Intenta actualizar.', true); }
+  finally { cargandoMias = false; }
+}
+$('actualizar-mias').addEventListener('click', cargarMias);
+$('cancelar-mia-no').addEventListener('click', () => $('dlg-cancelar-mia').close());
+$('cancelar-mia-si').addEventListener('click', async () => {
+  if (folioCancelar === null) return;
+  $('cancelar-mia-si').disabled = true;
+  try {
+    await api(`/api/vender/apartados/${folioCancelar}/cancelar`, { method: 'POST' });
+    $('dlg-cancelar-mia').close();
+    decir('aviso', `P-${folioCancelar} cancelada: la pieza volvió a la venta.`);
+  } catch (e) {
+    $('dlg-cancelar-mia').close();
+    decir('aviso', e.message || 'Sin conexión. Intenta otra vez.', true);
+  }
+  folioCancelar = null;
+  cargarMias();
+});
 $('mios').addEventListener('change', () => { if (cargandoInteresados) return; cursoresInteresados = [null]; cargarInteresados(); });
 $('actualizar-interesados').addEventListener('click', cargarInteresados);
 $('anteriores-interesados').addEventListener('click', () => { cursoresInteresados.pop(); cargarInteresados(); });
@@ -345,7 +481,7 @@ $('preparar').addEventListener('click', async () => {
   envio = [...seleccion.values()];
   archivos = [];
   $('vista-previa').replaceChildren();
-  $('texto-compartir').value = textoWhatsApp(envio);
+  $('texto-compartir').value = textoWhatsApp(envio, revendedora);
   $('abrir-wa').href = `https://wa.me/?text=${encodeURIComponent($('texto-compartir').value)}`;
   $('abrir-wa').hidden = true;
   $('compartir').disabled = $('descargar').disabled = true;
@@ -369,7 +505,7 @@ $('preparar').addEventListener('click', async () => {
       img.src = url; img.alt = `Tarjeta ${p.codigo} · ${pesos(p.precio)}`;
       $('vista-previa').append(img);
     }
-    $('texto-compartir').value = textoWhatsApp(envio);
+    $('texto-compartir').value = textoWhatsApp(envio, revendedora);
     $('abrir-wa').href = `https://wa.me/?text=${encodeURIComponent($('texto-compartir').value)}`;
     $('abrir-wa').hidden = false;
     decir('aviso-compartir', 'Tarjetas listas. Revisa precio y código antes de compartir.');
@@ -402,7 +538,7 @@ $('cerrar-compartir').addEventListener('click', () => $('dlg-compartir').close()
 $('dlg-compartir').addEventListener('close', () => { preparacion++; for (const url of urls) URL.revokeObjectURL(url); urls = []; archivos = []; });
 function refrescar() {
   if (document.visibilityState !== 'visible' || document.querySelector('dialog[open]')) return;
-  if ($('interesados').hidden) cargarPiezas(); else cargarInteresados();
+  if (vista === 'interesados') cargarInteresados(); else if (vista === 'mias') cargarMias(); else cargarPiezas();
 }
 // ponytail: sin refresco por intervalo (cuota D1 de 5M filas/día con teléfonos abiertos todo el día);
 // se actualiza al volver a la pestaña (p. ej. después de compartir en WhatsApp) o con «Actualizar».
@@ -410,6 +546,12 @@ document.addEventListener('visibilitychange', refrescar);
 try {
   const yo = await api('/api/yo');
   correo = yo.cajero?.correo ?? yo.correo;
+  revendedora = yo.revendedora === true;
+  if (revendedora) {
+    // Su unica pantalla es esta: sin menu ni /pedidos (la API tampoco se lo permite).
+    $('enlace-menu').hidden = $('enlace-pedidos').hidden = true;
+    $('ver-mias').hidden = false;
+  }
   try { compartidas = new Set(JSON.parse(localStorage.getItem(`vender-compartidas:${correo}`) || '[]')); } catch { /* sin memoria */ }
   await cargarPiezas();
 } catch (e) { decir('aviso', e.message || 'No se pudo iniciar. Vuelve a entrar.', true); }

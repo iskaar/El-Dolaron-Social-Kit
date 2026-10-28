@@ -24,7 +24,7 @@ import { CLAVES_CATEGORIA } from '../public/categorias.js';
 import { tallaValida, esCalzado } from '../public/tallas.js';
 import {
   permiso, puede, quienEs, leerUsuario, yo, pedirAcceso, listarCuentas, guardarCuenta, resolverSolicitud, propietarioDe,
-  esDeCaja, soloComputadora, CAJAS, puedeEditarInventario, type Usuario,
+  esDeCaja, soloComputadora, esRevendedora, CAJAS, puedeEditarInventario, type Usuario,
 } from './cuentas.ts';
 import { cajeroEnTurno, listarCajeros, entrar, salir, ponerPin } from './cajeros.ts';
 import { registrarSocio, buscarSocio, buscarPorCodigo, basesListas, sentenciasDeVenta, saldo } from './dolarones.ts';
@@ -2275,6 +2275,22 @@ async function reportes(url: URL, env: Env): Promise<Response> {
   const sumaDescuentos = (campo: 'promo_tickets' | 'promo' | 'otros_tickets' | 'otros') =>
     descuentosPorDia.reduce((suma, d) => suma + d[campo], 0);
 
+  // Revendedoras (#575): lo que cerro en caja cada una, por el pedido que apartó. Un ticket cancelado no cuenta
+  // y lo devuelto se resta (mismo neto que el resumen). Entra por ventas_creado (el rango) y une por llave primaria.
+  // ponytail: importe = el ticket completo; si el cliente agrego otras piezas al cobrar, tambien suman.
+  const { results: revendedoras } = await env.DB.prepare(
+    `select p.vendedora, coalesce(nullif(u.nombre, ''), p.vendedora) as nombre, count(*) as pedidos,
+       coalesce(sum((select coalesce(sum(l.cantidad - l.cancelada_cantidad), 0) from venta_lineas l
+         where l.venta_id = v.id and l.codigo != 'ENVIO')), 0) as piezas,
+       coalesce(sum(v.total - v.devuelto - v.dolarones_devueltos), 0) as importe
+     from ventas v join pedidos p on p.id = v.pedido_id join usuarios u on u.correo = p.vendedora
+     where v.cancelada = 0 and v.creado_en >= ? and v.pedido_id is not null
+       and (',' || u.roles || ',') like '%,revendedora,%'
+     group by p.vendedora order by importe desc`,
+  )
+    .bind(desde)
+    .all<{ vendedora: string; nombre: string; pedidos: number; piezas: number; importe: number }>();
+
   return json({
     dias, dia_desde: rango.dia_desde, dia_hasta: rango.dia_hasta,
     resumen: {
@@ -2314,6 +2330,7 @@ async function reportes(url: URL, env: Env): Promise<Response> {
     aperturas_cajon: aperturas,
     cortes,
     retiros,
+    revendedoras,
     descuentos: {
       promo_tickets: sumaDescuentos('promo_tickets'), promo: sumaDescuentos('promo'),
       otros_tickets: sumaDescuentos('otros_tickets'), otros: sumaDescuentos('otros'),
@@ -2651,6 +2668,8 @@ export default {
           // recibe el error tal cual.
           if (!pathname.startsWith('/api/') && request.method === 'GET') {
             if (soloComputadora(usuario)) return Response.redirect(`${url.origin}/caja`, 302);
+            // Revendedora (#575): su unica pantalla es /vender; el menu de la tienda no es para ella.
+            if (esRevendedora(usuario) && /^\/(?:index(?:\.html)?)?$/.test(pathname)) return Response.redirect(`${url.origin}/vender`, 302);
             return Response.redirect(`${url.origin}/sin-acceso?desde=${encodeURIComponent(pathname)}`, 302);
           }
           return json({ error: usuario?.activo ? 'Tu cuenta no tiene permiso para esto.' : 'No tienes cuenta activa.' }, 403);
@@ -2692,7 +2711,7 @@ export default {
           && !puedeEditarInventario(await leerUsuario(env, correo))) {
         return json({ error: 'Tu cuenta no tiene permiso para editar el inventario.' }, 403);
       }
-      const respuestaVender = await rutaVender(request, env, url, correo);
+      const respuestaVender = await rutaVender(request, env, url, correo, ctx, esRevendedora(usuario));
       if (respuestaVender) return respuestaVender;
       const respuestaRopaIA = await rutaRopaAdmin(request, env, pathname, correo);
       if (respuestaRopaIA) return respuestaRopaIA;

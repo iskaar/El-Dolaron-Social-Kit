@@ -2,6 +2,7 @@
 import { VENDIBLE } from './catalogo.ts';
 import { CLAVES_CATEGORIA } from '../public/categorias.js';
 import { telefonoInteresado } from '../public/vender.js';
+import { apartarRevendedora, pedidosDeRevendedora, cancelarDeRevendedora } from './pedidos.ts';
 
 const PAGINA = 24;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -29,7 +30,7 @@ interface Interesado {
   vendedora: string; estado: string; creado_en: string; actualizado_en: string;
 }
 
-async function listarPiezas(env: Env, url: URL): Promise<Response> {
+async function listarPiezas(env: Env, url: URL, correo: string, revendedora: boolean): Promise<Response> {
   const q = (url.searchParams.get('q') ?? '').trim();
   const categoria = url.searchParams.get('categoria');
   const hoy = url.searchParams.get('hoy');
@@ -77,16 +78,19 @@ async function listarPiezas(env: Env, url: URL): Promise<Response> {
     order by i.creado_en, i.rowid`).bind(...piezas.map((p) => p.id), desdeInteresados())
     .all<{ producto_id: string; cliente: string; vendedora: string; vendedora_nombre: string; creado_en: string }>()).results : [];
   return json({ piezas: piezas.map(({ fila, elegible, recorte_estado, recorte_revision, ...p }) => {
-    const cola = interesados.filter((i) => i.producto_id === p.id).map(({ producto_id, ...i }) => i);
+    // #575: una revendedora ve la posicion en la cola, no los clientes ni las vendedoras ajenas.
+    const cola = interesados.filter((i) => i.producto_id === p.id).map(({ producto_id, ...i }) =>
+      revendedora && i.vendedora !== correo ? { ...i, cliente: '', vendedora: '', vendedora_nombre: 'Otra vendedora' } : i);
     return { ...p, foto: recorte_estado === 'listo' && recorte_revision === 'ok'
       ? `/api/recortes/${p.id}/imagen` : `/api/foto/${p.id}`, interesados: cola.length, cola };
   }), siguiente: hayMas && cursor ? `${cursor.fecha}~${cursor.fila}` : null });
 }
 
-async function listarInteresados(env: Env, url: URL, correo: string): Promise<Response> {
-  const mios = url.searchParams.get('mios');
+async function listarInteresados(env: Env, url: URL, correo: string, revendedora: boolean): Promise<Response> {
+  // Las revendedoras compiten entre si: para ellas la lista siempre es la suya.
+  const mios = revendedora ? '1' : url.searchParams.get('mios');
   const cursor = leerCursor(url.searchParams.get('cursor'));
-  if ((mios !== null && mios !== '1') || (url.searchParams.has('cursor') && !cursor))
+  if ((url.searchParams.get('mios') !== null && url.searchParams.get('mios') !== '1') || (url.searchParams.has('cursor') && !cursor))
     return json({ error: 'Filtros o cursor inválidos.' }, 400);
   const { results } = await env.DB.prepare(`select i.rowid as fila, i.*,
       coalesce(nullif(u.nombre, ''), i.vendedora) as vendedora_nombre,
@@ -138,31 +142,42 @@ async function crearInteresado(request: Request, env: Env, correo: string): Prom
     : json({ error: 'La pieza ya no está disponible para ofrecer. Actualiza la lista.' }, 409);
 }
 
-async function descartarInteresado(request: Request, env: Env, id: string): Promise<Response> {
+async function descartarInteresado(request: Request, env: Env, id: string, propio: string | null): Promise<Response> {
   if (!UUID.test(id)) return json({ error: 'Identificador inválido.' }, 400);
   const cuerpo = await request.json().catch(() => null) as { estado?: unknown } | null;
   if (!cuerpo || cuerpo.estado !== 'descartado' || Object.keys(cuerpo).some((k) => k !== 'estado'))
     return json({ error: 'Solo se puede descartar el interesado.' }, 400);
-  // Toda la caja ve y puede cerrar la cola compartida. Nunca reabre ni altera el cliente.
+  // Toda la caja ve y puede cerrar la cola compartida; una revendedora (`propio`) solo lo suyo. Nunca reabre ni altera el cliente.
   await env.DB.prepare(`update interesados set estado = 'descartado', actualizado_en = ?
-    where id = ? and estado = 'abierto'
+    where id = ? and estado = 'abierto' ${propio ? 'and vendedora = ?' : ''}
       and exists (select 1 from productos p where p.id = interesados.producto_id and p.propietario = 'dolaron')`)
-    .bind(new Date().toISOString(), id).run();
+    .bind(new Date().toISOString(), id, ...(propio ? [propio] : [])).run();
   const i = await env.DB.prepare(`select i.* from interesados i join productos p on p.id = i.producto_id
-    where i.id = ? and p.propietario = 'dolaron'`).bind(id).first<Interesado>();
+    where i.id = ? and p.propietario = 'dolaron' ${propio ? 'and i.vendedora = ?' : ''}`).bind(id, ...(propio ? [propio] : [])).first<Interesado>();
   return i ? json({ interesado: i }) : json({ error: 'Interesado no encontrado.' }, 404);
 }
 
-/** La identidad y el permiso de caja se resuelven antes, en worker.ts/cuentas.ts. */
-export async function rutaVender(request: Request, env: Env, url: URL, correo: string): Promise<Response | null> {
+/**
+ * La identidad y el permiso de caja se resuelven antes, en worker.ts/cuentas.ts. `revendedora` (esRevendedora)
+ * acota lo que ve y habilita el apartado sin anticipo (#575): ninguna cuenta de la tienda lo usa.
+ */
+export async function rutaVender(request: Request, env: Env, url: URL, correo: string, ctx: ExecutionContext, revendedora = false): Promise<Response | null> {
   const { pathname } = url;
   const detalle = /^\/api\/interesados\/([^/]+)$/.exec(pathname);
-  if (pathname === '/api/vender' && request.method === 'GET') return listarPiezas(env, url);
+  const cancelar = /^\/api\/vender\/apartados\/(\d{1,9})\/cancelar$/.exec(pathname);
+  if (pathname === '/api/vender' && request.method === 'GET') return listarPiezas(env, url, correo, revendedora);
   if (pathname === '/api/interesados') {
-    if (request.method === 'GET') return listarInteresados(env, url, correo);
+    if (request.method === 'GET') return listarInteresados(env, url, correo, revendedora);
     if (request.method === 'POST') return crearInteresado(request, env, correo);
   }
-  if (detalle && request.method === 'PATCH') return descartarInteresado(request, env, detalle[1]);
+  if (detalle && request.method === 'PATCH') return descartarInteresado(request, env, detalle[1], revendedora ? correo : null);
+  if (pathname === '/api/vender/apartar' || pathname === '/api/vender/mios' || cancelar) {
+    const metodo = pathname === '/api/vender/mios' ? 'GET' : 'POST';
+    if (request.method !== metodo) return json({ error: 'Método no permitido.' }, 405);
+    if (!revendedora) return json({ error: 'Solo las revendedoras apartan sin anticipo. En la tienda, aparta desde Pedidos.' }, 403);
+    if (cancelar) return cancelarDeRevendedora(Number(cancelar[1]), env, ctx, correo);
+    return metodo === 'GET' ? pedidosDeRevendedora(env, correo) : apartarRevendedora(request, env, ctx, correo);
+  }
   return pathname === '/api/vender' || pathname === '/api/interesados' || detalle
     ? json({ error: 'Método no permitido.' }, 405) : null;
 }
