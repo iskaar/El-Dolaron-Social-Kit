@@ -17,6 +17,7 @@
 import { quebrarDecena } from './precio.ts';
 import { correoADuenos } from './avisos.ts';
 import { sugerirAtributos } from './analisis.ts';
+import { tallaUs } from '../public/tallas.js';
 
 const API = 'https://api.mercadolibre.com';
 const AUTORIZACION = 'https://auth.mercadolibre.com.mx/authorization';
@@ -843,6 +844,32 @@ async function preparar(env: Env, id: string, request: Request): Promise<Respons
 
 const sinEmojis = (texto: string) => texto.replace(/[<>]/g, '').replace(/[\p{Extended_Pictographic}️]/gu, '');
 
+// Letra de ropa de adulto -> como se dice en Mexico (la letra US es la misma).
+const TALLA_MX: Record<string, string> = {
+  XXS: 'extra extra chica', XS: 'extra chica', S: 'chica', M: 'mediana', L: 'grande', XL: 'extra grande', XXL: 'doble extra grande', '3XL': 'triple extra grande',
+};
+
+/**
+ * Descripcion por defecto (#565): solo lo que la ficha tecnica no dice y evita reclamos (talla US y MX,
+ * estado, origen, que incluye). Texto plano con \n, sin contacto, enlaces ni precios. Solo usa lo que la pieza
+ * trae: sin talla no hay lineas de talla. ponytail: no hay medidas ni descripcion de la ficha IA guardadas en
+ * D1; cuando existan, se agregan aqui.
+ */
+export function descripcionPorDefecto(p: { nombre: string; marca: string; categoria: string; talla: string | null }): string {
+  const talla = p.talla?.trim() ?? '';
+  const us = talla && p.categoria === 'ropa' ? tallaUs(talla) : '';   // '' si no es calzado
+  const lineasTalla = !talla || p.categoria !== 'ropa' ? []
+    : us ? [`Talla MX: ${talla.replace(/^Niño /, '')} cm`, `Talla US: ${us.replace(/US /g, '').replace(/ H\b/g, ' hombre').replace(/ M\b/g, ' mujer').replace(/ · /g, ' / ')}`]
+    : TALLA_MX[talla] ? [`Talla US: ${talla}`, `Talla MX: ${talla} (${TALLA_MX[talla]})`]
+    : [`Talla: ${talla.replace(' / ', ' (talla ')}${talla.includes(' / ') ? ')' : ''}`];   // niño: «Niño 6 años (talla S)»
+  return sinEmojis([
+    p.nombre, p.marca && `Marca: ${p.marca}`, ...lineasTalla,
+    'Condición: nuevo.', 'Mercancía americana, pieza única.', 'Incluye solo lo que se ve en las fotos.',
+  ].filter(Boolean).join('\n'))
+    .replace(/\S*(?:https?:\/\/|www\.|@)\S*/gi, '')   // un enlace o correo en el nombre no llega a ML
+    .replace(/[ \t]+\n/g, '\n').trim();
+}
+
 async function publicar(env: Env, id: string, request: Request): Promise<Response> {
   const cuerpo = (await request.json().catch(() => null)) as Record<string, any> | null;
   const titulo = String(cuerpo?.titulo ?? '').replace(/\s+/g, ' ').trim().slice(0, 60);
@@ -945,7 +972,7 @@ async function publicar(env: Env, id: string, request: Request): Promise<Respons
     let ultimoError = '';
     if (!catalogoId) {
       const descripcion = sinEmojis(String(cuerpo?.descripcion ?? '')).trim()
-        || [p.nombre, p.marca ? `Marca: ${p.marca}` : '', 'Condición: nuevo.'].filter(Boolean).join('\n');
+        || descripcionPorDefecto(p);
       try {
         await mlFetch(env, `/items/${itemId}/description`, { method: 'POST', json: { plain_text: descripcion.slice(0, 50_000) } });
       } catch (error) {
