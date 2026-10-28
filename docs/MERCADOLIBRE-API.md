@@ -169,6 +169,12 @@ Los valores de `GENDER`: Mujer `339665`, Hombre `339666`, Niñas `339668`, Niño
 Categorías no moda (hogar, juguetes, accesorios): requieren `BRAND`, `MODEL` y un atributo específico (p. ej. `PRODUCT_TYPE` en sartenes); `COLOR` opcional.
 `MODEL` es obligatorio: si una prenda de marca no tiene modelo, la doc permite N/A (`value_id:"-1"`, `value_name:null`) en atributos que no sean `allow_variations`. **[NO CONFIRMADO]** que `MODEL` acepte N/A en ropa.
 
+**Cómo propone la app los atributos (#555, 28/10/2026).** `preparar` llena todo lo que puede antes de abrir el formulario, y cada valor lleva su origen (`pieza`, `defecto` o `ia`):
+- De la pieza: `BRAND` (`marca`), `SIZE` (`talla`), `GTIN` (`upc`, solo con dígito verificador válido; se incluye aunque la categoría no lo marque obligatorio), `MODEL` (nombre sin la marca).
+- Por regla: `EMPTY_GTIN_REASON` `17055160` si no hay GTIN válido (y se omite si lo hay), `UNITS_PER_PACK` = 1, `ITEM_CONDITION` desde el estado físico (solo `nuevo` es publicable).
+- Lo demás obligatorio (COLOR, GENDER, material, tipos…) lo propone el análisis de `analisis.ts` con la foto y el nombre; en listas cerradas solo puede elegir uno de los valores de ML. Lo que no distingue queda vacío y el formulario lo lista arriba con su motivo.
+- Etiquetas reales de la API que importan (consultadas el 28/10/2026): `EMPTY_GTIN_REASON` e `ITEM_CONDITION` vienen `hidden: true` (el primero se manda igual); `GRADING` trae `new_hidden` (no aplica a piezas nuevas).
+
 Ajustes de categoría (`GET /categories/{id}`, también público): `max_title_length` 60, `max_pictures_per_item` 12, `max_pictures_per_item_var` 10, `minimum_price` 35 MXN, `item_conditions` `new/used/not_specified`, `buying_modes` `buy_it_now/auction`, `immediate_payment` `required`, `max_variations_allowed` 100 (legacy).
 
 ### Guías de tallas (size charts) [OFICIAL]

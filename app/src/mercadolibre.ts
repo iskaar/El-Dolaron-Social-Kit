@@ -16,6 +16,7 @@
 
 import { quebrarDecena } from './precio.ts';
 import { correoADuenos } from './avisos.ts';
+import { sugerirAtributos } from './analisis.ts';
 
 const API = 'https://api.mercadolibre.com';
 const AUTORIZACION = 'https://auth.mercadolibre.com.mx/authorization';
@@ -311,7 +312,7 @@ async function perfilML(env: Env): Promise<{ id: string; nickname: string; usaFa
 interface Pieza {
   id: string; codigo: string | null; nombre: string; categoria: string; marca: string; precio: number;
   estado_fisico: string; stock: number; destino: string; sin_inventario: number; estado_analisis: string; foto_key: string;
-  talla: string | null;
+  talla: string | null; upc: string | null;
 }
 
 const productoDe = (p: Pieza) => ({
@@ -328,7 +329,7 @@ export const PUBLICABLE = `p.destino = 'etiqueta' and p.sin_inventario = 0 and p
 async function piezaPublicable(env: Env, id: string): Promise<{ ok: true; pieza: Pieza } | { ok: false; status: number; error: string }> {
   if (!ID_PIEZA.test(id)) return { ok: false, status: 404, error: 'La pieza no existe.' };
   const p = await env.DB.prepare(
-    `select id, codigo, nombre, categoria, marca, precio, estado_fisico, stock, destino, sin_inventario, estado_analisis, foto_key, talla
+    `select id, codigo, nombre, categoria, marca, precio, estado_fisico, stock, destino, sin_inventario, estado_analisis, foto_key, talla, upc
      from productos where id = ?`,
   ).bind(id).first<Pieza>();
   if (!p) return { ok: false, status: 404, error: 'La pieza no existe.' };
@@ -540,36 +541,99 @@ interface Sugerencia { categoria_id: string; categoria_nombre: string; dominio: 
 
 // Los pone el sistema (o la guia de tallas), no el dueno.
 const ATRIBUTOS_PROPIOS = new Set(['ITEM_CONDITION', 'SIZE_GRID_ID', 'SIZE_GRID_ROW_ID']);
+// ITEM_CONDITION de ML por estado fisico; solo `nuevo` es publicable (piezaPublicable).
+const CONDICION_ML: Record<string, string> = { nuevo: '2230284' };
+// Datos que la pieza ya trae o que una regla fija resuelve: no se le piden a la IA.
+const SIN_IA = new Set(['BRAND', 'SIZE', 'GTIN', 'EMPTY_GTIN_REASON', 'UNITS_PER_PACK']);
+const RAZON_SIN_CODIGO = '17055160';   // EMPTY_GTIN_REASON: «El producto no tiene código registrado»
 
-function atributosPedidos(attrs: any[], marca: string, talla: string) {
+/** GTIN valido (8, 12, 13 o 14 digitos, con digito verificador) a partir del UPC de la pieza; '' si no lo hay. */
+export function gtinDe(upc: string | null): string {
+  const d = (upc ?? '').trim();
+  if (!/^\d{6,14}$/.test(d)) return '';
+  for (const largo of [8, 12, 13, 14]) {
+    if (largo < d.length) continue;
+    const c = d.padStart(largo, '0');
+    const suma = [...c.slice(0, -1)].reverse().reduce((total, x, i) => total + Number(x) * (i % 2 ? 1 : 3), 0);
+    if ((10 - (suma % 10)) % 10 === Number(c.at(-1))) return c;
+  }
+  return '';
+}
+
+/** MODEL para ML: el nombre de la pieza sin la marca ('' si no queda nada). */
+export function modeloDe(nombre: string, marca: string): string {
+  const i = marca ? nombre.toLowerCase().indexOf(marca.toLowerCase()) : -1;
+  const sin = i < 0 ? nombre : `${nombre.slice(0, i)} ${nombre.slice(i + marca.length)}`;
+  return sin.replace(/\s+/g, ' ').trim().slice(0, 255);
+}
+
+export interface DatosPieza { nombre: string; marca: string; talla: string; upc: string | null }
+type Origen = 'pieza' | 'ia' | 'defecto';
+
+/**
+ * Los atributos de la categoria que el dueno ve, cada uno con su valor propuesto y de donde sale
+ * (`pieza`: dato de la pieza; `defecto`: regla fija; `ia`: lo propuso el analisis, #555). Sin valor,
+ * `motivo` dice por que. `ia` es lo que el modelo contesto por id; `iaFallo`, por que no hubo respuesta.
+ */
+export function atributosPedidos(attrs: any[], d: DatosPieza, ia: Record<string, string> = {}, iaFallo = '') {
   const ids = new Set(attrs.map((a) => a.id));
+  const gtin = gtinDe(d.upc);
+  const modelo = modeloDe(d.nombre, d.marca);
   const clave = (a: any) => a.tags?.required || a.tags?.catalog_required || a.tags?.conditional_required;
+  // EMPTY_GTIN_REASON viene `hidden` en la API real y aun asi hay que mandarlo; GRADING (`new_hidden`) no aplica a lo nuevo.
+  const oculto = (a: any) => (a.tags?.hidden && a.id !== 'EMPTY_GTIN_REASON') || a.tags?.new_hidden;
   return attrs
-    .filter((a) => !ATRIBUTOS_PROPIOS.has(a.id) && !a.tags?.read_only && !a.tags?.hidden && !a.tags?.fixed && clave(a))
+    .filter((a) => !ATRIBUTOS_PROPIOS.has(a.id) && !a.tags?.read_only && !oculto(a) && !a.tags?.fixed
+      && (clave(a) || (a.id === 'GTIN' && gtin)))
+    // Con GTIN no hace falta la razon de GTIN vacio.
+    .filter((a) => !(a.id === 'EMPTY_GTIN_REASON' && gtin && ids.has('GTIN')))
     .map((a) => {
       const valores = (Array.isArray(a.values) ? a.values : []).map((v: any) => ({ id: String(v.id), nombre: String(v.name) }));
+      const delTexto = (texto: string) => {
+        const igual = valores.find((v: { nombre: string }) => v.nombre.toLowerCase() === texto.toLowerCase());
+        return { id: igual?.id ?? null, nombre: igual?.nombre ?? texto };
+      };
+      // Con razon de GTIN vacio, el GTIN deja de ser obligatorio.
+      const requerido = !(a.id === 'GTIN' && ids.has('EMPTY_GTIN_REASON'));
       let sugerido: { id: string | null; nombre: string } | null = null;
-      if (a.id === 'BRAND' && marca) {
-        const igual = valores.find((v: { nombre: string }) => v.nombre.toLowerCase() === marca.toLowerCase());
-        sugerido = { id: igual?.id ?? null, nombre: igual?.nombre ?? marca };
+      let origen: Origen | null = null;
+      if (a.id === 'BRAND' && d.marca) {
+        [sugerido, origen] = [delTexto(d.marca), 'pieza'];
+      } else if (a.id === 'GTIN' && gtin) {
+        [sugerido, origen] = [{ id: null, nombre: gtin }, 'pieza'];
       } else if (a.id === 'EMPTY_GTIN_REASON') {
-        const sinCodigo = valores.find((v: { id: string }) => v.id === '17055160');
-        if (sinCodigo) sugerido = sinCodigo;   // «El producto no tiene código registrado»
-      } else if (a.id === 'SIZE' && talla) {
+        const sinCodigo = valores.find((v: { id: string }) => v.id === RAZON_SIN_CODIGO);
+        if (sinCodigo) [sugerido, origen] = [sinCodigo, 'defecto'];
+      } else if (a.id === 'SIZE' && d.talla) {
         // Talla de niño «Niño 6 años / S» -> «6 años»; la de adulto va tal cual.
-        const valor = talla.replace(/^Niño /, '').split(' / ')[0];
-        const igual = valores.find((v: { nombre: string }) => v.nombre.toLowerCase() === valor.toLowerCase());
-        sugerido = { id: igual?.id ?? null, nombre: igual?.nombre ?? valor };
+        [sugerido, origen] = [delTexto(d.talla.replace(/^Niño /, '').split(' / ')[0]), 'pieza'];
+      } else if (a.id === 'MODEL' && modelo) {
+        [sugerido, origen] = [{ id: null, nombre: modelo }, 'pieza'];
+      } else if (a.id === 'UNITS_PER_PACK') {
+        [sugerido, origen] = [{ id: null, nombre: '1' }, 'defecto'];   // pieza individual
+      } else if (ia[a.id]) {
+        const dicho = delTexto(ia[a.id]);
+        // Una lista cerrada no acepta lo que no esta en ella.
+        if (dicho.id || a.value_type !== 'list') [sugerido, origen] = [dicho, 'ia'];
       }
+      const motivo = sugerido || !requerido ? undefined
+        : a.id === 'BRAND' ? 'La pieza no tiene marca capturada.'
+        : a.id === 'SIZE' ? 'La pieza no tiene talla capturada.'
+        : a.id === 'GTIN' ? 'La pieza no tiene un código de barras válido.'
+        : iaFallo && puedeIA(a.id, String(a.value_type ?? 'string')) ? `No se pudo proponer con IA (${iaFallo}); escríbelo o elígelo.`
+        : puedeIA(a.id, String(a.value_type ?? 'string')) ? 'La IA no lo distinguió en la foto ni en el nombre; escríbelo o elígelo.'
+        : 'Mercado Libre lo pide y la pieza no lo guarda; escríbelo.';
       return {
         id: String(a.id), nombre: String(a.name ?? a.id), tipo: String(a.value_type ?? 'string'),
-        // Con razon de GTIN vacio, el GTIN deja de ser obligatorio.
-        requerido: !(a.id === 'GTIN' && ids.has('EMPTY_GTIN_REASON')),
-        valores, valor_sugerido: sugerido,
+        requerido, valores, valor_sugerido: sugerido, origen, motivo,
       };
     })
     .sort((a, b) => Number(b.requerido) - Number(a.requerido));
 }
+
+const puedeIA = (id: string, tipo: string) => !SIN_IA.has(id) && ['string', 'list', 'boolean'].includes(tipo);
+/** Obligatorios sin valor que el analisis de la foto puede intentar (color, genero, material...). */
+const paraIA = (a: ReturnType<typeof atributosPedidos>[number]) => a.requerido && !a.valor_sugerido && puedeIA(a.id, a.tipo);
 
 // ponytail: el endpoint de busqueda de guias del vendedor NO esta confirmado en la doc
 // (docs/MERCADOLIBRE-API.md, seccion 3); si falla, se avisa y el dueno la elige en ML.
@@ -668,7 +732,7 @@ async function yaPublicada(env: Env, id: string): Promise<boolean> {
 }
 
 async function preparar(env: Env, id: string, request: Request): Promise<Response> {
-  const cuerpo = (await request.json().catch(() => ({}))) as { categoria_id?: unknown; consulta?: unknown; consulta_catalogo?: unknown } | null;
+  const cuerpo = (await request.json().catch(() => ({}))) as { categoria_id?: unknown; consulta?: unknown; consulta_catalogo?: unknown; sin_ia?: unknown } | null;
   const elegida = cuerpo?.categoria_id === undefined || cuerpo.categoria_id === '' ? '' : String(cuerpo.categoria_id);
   // Texto para pedir categorias; sin el, el nombre de la pieza.
   const buscada = typeof cuerpo?.consulta === 'string' ? cuerpo.consulta.trim().replace(/\s+/g, ' ').slice(0, 80) : '';
@@ -711,6 +775,31 @@ async function preparar(env: Env, id: string, request: Request): Promise<Respons
       else if (guias.length === 0) avisos.push('Esta categoría exige guía de tallas y no tienes ninguna: créala en Mercado Libre antes de publicar.');
     }
 
+    // La foto se lee una vez: sirve para las medidas y para que la IA proponga atributos.
+    const fotoR2 = await env.FOTOS.get(p.foto_key);
+    const bytesFoto = fotoR2 ? await fotoR2.arrayBuffer() : null;
+
+    // Atributos: lo que la pieza trae, y lo que falta lo propone el analisis de la foto (#555).
+    // `sin_ia`: buscar en el catalogo no cambia la categoria; el formulario conserva lo propuesto.
+    const datos: DatosPieza = { nombre: p.nombre, marca: p.marca.trim(), talla: p.talla?.trim() ?? '', upc: p.upc };
+    let atributos = atributosPedidos(attrs, datos);
+    const porProponer = cuerpo?.sin_ia === true ? [] : atributos.filter(paraIA);
+    if (porProponer.length) {
+      let propuestos: Record<string, string> = {};
+      let fallo = '';
+      if (!bytesFoto) fallo = 'la foto no está en el almacén';
+      else {
+        try {
+          propuestos = await sugerirAtributos(bytesFoto, env, { nombre: p.nombre, marca: datos.marca },
+            porProponer.map((a) => ({ id: a.id, nombre: a.nombre, valores: a.valores.map((v: { nombre: string }) => v.nombre) })));
+        } catch (error) {
+          fallo = 'la IA no respondió';
+          console.warn(JSON.stringify({ mensaje: 'atributos con IA fallidos', id, error: String(error).slice(0, 200) }));
+        }
+      }
+      atributos = atributosPedidos(attrs, datos, propuestos, fallo);
+    }
+
     // Lo que no es ropa puede ir al catalogo con fotos oficiales; la ropa, con fotos propias.
     const catalogo = p.categoria !== 'ropa' ? await candidatosCatalogo(env, enCatalogo || consulta) : null;
 
@@ -722,8 +811,7 @@ async function preparar(env: Env, id: string, request: Request): Promise<Respons
     else if (MARCAS_RESTRINGIDAS.includes(p.marca.trim().toLowerCase())) {
       avisos.push(`${p.marca} es una marca restringida en México: solo la venden tiendas oficiales o vendedores acreditados; Mercado Libre puede rechazar o dar de baja la publicación.`);
     }
-    const foto = await env.FOTOS.get(p.foto_key);
-    const medidas = foto ? dimensionesJpeg(new Uint8Array(await foto.arrayBuffer())) : null;
+    const medidas = bytesFoto ? dimensionesJpeg(new Uint8Array(bytesFoto)) : null;
     if (medidas && (medidas.ancho < 500 || medidas.alto < 500)) {
       avisos.push(`La foto mide ${medidas.ancho} x ${medidas.alto} px; Mercado Libre pide mínimo 500 x 500.`);
     }
@@ -741,7 +829,7 @@ async function preparar(env: Env, id: string, request: Request): Promise<Respons
         catalogo,
         precio_ml: precio,
         tipo_publicacion: ml_tipo_publicacion,
-        atributos: atributosPedidos(attrs, p.marca.trim(), p.talla?.trim() ?? ''),
+        atributos,
         guia_tallas: guia,
         avisos,
       },
@@ -827,7 +915,8 @@ async function publicar(env: Env, id: string, request: Request): Promise<Respons
     const attrsCategoria: any[] = await mlPublico(env, `/categories/${categoria}/attributes`).catch(() => []);
     const propios = [
       // `condition` esta por desaparecer a favor de este atributo; se mandan los dos.
-      ...(attrsCategoria.some((a) => a.id === 'ITEM_CONDITION') ? [{ id: 'ITEM_CONDITION', value_id: '2230284' }] : []),
+      ...(attrsCategoria.some((a) => a.id === 'ITEM_CONDITION') && CONDICION_ML[p.estado_fisico]
+        ? [{ id: 'ITEM_CONDITION', value_id: CONDICION_ML[p.estado_fisico] }] : []),
       ...(fila ? [{ id: 'SIZE_GRID_ID', value_name: fila.split(':')[0] }, { id: 'SIZE_GRID_ROW_ID', value_name: fila }] : []),
     ];
     const creado = await mlFetch(env, '/items', {

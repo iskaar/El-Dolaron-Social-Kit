@@ -399,6 +399,42 @@ export async function analizarFotoRopa(datos: ArrayBuffer, env: Env): Promise<Su
     marca: String(dato.marca ?? '').trim().slice(0, 60), marca_confianza: confianza(dato.marca_confianza), motivo: String(dato.motivo ?? '').slice(0, 160) };
 }
 
+const INSTRUCCION_ATRIBUTOS = [
+  'Eres el inspector de una tienda de mercancia americana en San Luis Potosi, Mexico.',
+  'Llena la ficha de Mercado Libre de la pieza de la foto. Responde solo con el JSON pedido.',
+  'Cada atributo con valores permitidos se contesta con exactamente uno de ellos.',
+  'Si no se distingue en la foto o en el nombre, responde "": un dato equivocado genera reclamos y uno vacio lo completa el dueno.',
+  'Color: el que predomina. Genero: para quien es la prenda segun su corte o su etiqueta, no por la marca.',
+  'No des materiales que no se vean ni esten en la etiqueta.',
+].join(' ');
+
+export interface PedidoAtributo { id: string; nombre: string; valores: string[] }
+
+/**
+ * Atributos de una categoria de Mercado Libre que la pieza no trae (color, genero, material...), segun la foto
+ * y el nombre (#555). Con valores permitidos elige uno de ellos (el esquema lo obliga); sin ellos escribe texto.
+ * Devuelve solo los que contesto. Lanza si el modelo no responde: quien llama muestra el motivo.
+ */
+export async function sugerirAtributos(
+  datos: ArrayBuffer, env: Env, pieza: { nombre: string; marca: string }, pedidos: PedidoAtributo[],
+): Promise<Record<string, string>> {
+  const esquema = {
+    type: 'object',
+    properties: Object.fromEntries(pedidos.map((a) => [a.id, {
+      type: 'string', description: a.nombre, ...(a.valores.length ? { enum: [...a.valores, ''] } : {}),
+    }])),
+    required: pedidos.map((a) => a.id),
+    additionalProperties: false,
+  };
+  const texto = `Pieza: ${pieza.nombre}${pieza.marca ? `, marca ${pieza.marca}` : ''}. Atributos: ${pedidos.map((a) => `${a.id} (${a.nombre})`).join(', ')}.`;
+  const foto = base64(datos);
+  const bruto = modeloPorDefecto(env) === 'gemini'
+    ? await conGemini(foto, env, INSTRUCCION_ATRIBUTOS, false, (({ additionalProperties: _omit, ...e }) => e)(esquema), texto)
+    : await conClaude(foto, env, INSTRUCCION_ATRIBUTOS, esquema, texto);
+  const dicho = (bruto ?? {}) as Record<string, unknown>;
+  return Object.fromEntries(pedidos.map((a) => [a.id, String(dicho[a.id] ?? '').trim().slice(0, 255)]).filter(([, valor]) => valor));
+}
+
 /**
  * El análisis llegó a una pieza que ya está `listo` (reanálisis explícito, o resultado tardío tras una corrección
  * humana): no escribe nada de la pieza (#479). Deja `precio_sugerido` y, si el precio sugerido difiere del actual,

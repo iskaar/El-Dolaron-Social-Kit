@@ -5,7 +5,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import worker from './worker.ts';
 import { tienda, DUENO } from './prueba-d1.ts';
-import { guardarTokens, mlFetch, precioML, tituloML, dimensionesJpeg, idProductoML } from './mercadolibre.ts';
+import { guardarTokens, mlFetch, precioML, tituloML, dimensionesJpeg, idProductoML, gtinDe, modeloDe } from './mercadolibre.ts';
 
 const LLAVE = Buffer.from(crypto.getRandomValues(new Uint8Array(32))).toString('base64');
 const RUTA = 'ruta-secreta-de-prueba';
@@ -15,14 +15,18 @@ interface Llamada { metodo: string; ruta: string; cuerpo: any; auth: string | nu
 
 const ATRIBUTOS = [
   { id: 'BRAND', name: 'Marca', value_type: 'string', tags: { required: true } },
+  { id: 'MODEL', name: 'Modelo', value_type: 'string', tags: { required: true, catalog_required: true } },
   { id: 'GENDER', name: 'Género', value_type: 'list', tags: { required: true, grid_template_required: true },
     values: [{ id: '339666', name: 'Hombre' }, { id: '339665', name: 'Mujer' }] },
   { id: 'SIZE', name: 'Talla', value_type: 'string', tags: { required: true, allow_variations: true } },
   { id: 'COLOR', name: 'Color', value_type: 'string', tags: { required: true } },
   { id: 'GTIN', name: 'Código de barras', value_type: 'string', tags: { conditional_required: true } },
-  { id: 'EMPTY_GTIN_REASON', name: 'Razón de GTIN vacío', value_type: 'list', tags: { conditional_required: true },
+  { id: 'EMPTY_GTIN_REASON', name: 'Razón de GTIN vacío', value_type: 'list', tags: { conditional_required: true, hidden: true },
     values: [{ id: '17055160', name: 'El producto no tiene código registrado' }, { id: '17055161', name: 'Otra razón' }] },
   { id: 'PANT_TYPE', name: 'Tipo', value_type: 'string', tags: { required: true, read_only: true } },
+  { id: 'UNITS_PER_PACK', name: 'Unidades por paquete', value_type: 'number', tags: { conditional_required: true } },
+  { id: 'GRADING', name: 'Estado', value_type: 'list', tags: { conditional_required: true, new_hidden: true },
+    values: [{ id: '1', name: 'Excelente' }] },
   { id: 'ITEM_CONDITION', name: 'Condición', value_type: 'list', tags: {} },
   { id: 'SIZE_GRID_ID', name: 'Guía', value_type: 'string', tags: { required: true } },
   { id: 'NOTAS', name: 'Notas', value_type: 'string', tags: {} },
@@ -41,6 +45,9 @@ class SimML {
   items = new Map<string, { id: string; status: string; available_quantity: number }>();
   ordenes = new Map<string, unknown>();
   productoActivo = true;
+  /** Lo que contesta la IA (Gemini) a la propuesta de atributos (por omisión, nada); null = no responde. Cada cuerpo pedido se anota en `pedidosIA`. */
+  ia: ((cuerpo: any) => Record<string, string>) | null = () => ({});
+  pedidosIA: any[] = [];
   catalogo: { status?: number; cuerpo: unknown } = { cuerpo: { results: [{
     id: 'MLM2001', name: 'Lanzador SplatRball 800 Pyro', settings: { listing_strategy: 'catalog_required' },
     pictures: [{ url: 'http://http2.mlstatic.com/a.jpg', secure_url: 'https://http2.mlstatic.com/a.jpg' }],
@@ -117,6 +124,13 @@ class SimML {
 function instalar(sim: SimML) {
   globalThis.fetch = (async (entrada: unknown, init: RequestInit = {}) => {
     const u = new URL(String(entrada));
+    if (u.origin === 'https://generativelanguage.googleapis.com') {
+      const pedido = JSON.parse(String(init.body));
+      sim.pedidosIA.push(pedido);
+      if (!sim.ia) throw new Error('la IA simulada no responde');
+      const texto = JSON.stringify(sim.ia(pedido));
+      return new Response(JSON.stringify({ candidates: [{ content: { parts: [{ text: texto }] } }] }), { status: 200 });
+    }
     assert.equal(u.origin, 'https://api.mercadolibre.com', 'solo se habla con la API de ML');
     const cuerpo = init.body instanceof URLSearchParams ? Object.fromEntries(init.body)
       : init.body instanceof FormData ? { archivo: (init.body.get('file') as File).size, tipo: (init.body.get('file') as File).type }
@@ -137,6 +151,7 @@ async function conML(prueba: (t: Tienda) => Promise<void>, conectada = true) {
   Object.assign(t.env, {
     ML_CLIENT_ID: '123', ML_CLIENT_SECRET: 'secreto-de-la-app', ML_LLAVE_TOKENS: LLAVE,
     ML_RUTA_NOTIFICACIONES: RUTA, ML_REDIRECT_URI: 'https://escaner.prueba/ml/callback',
+    MODELO_ANALISIS: 'gemini', GEMINI_API_KEY: 'prueba',
   });
   instalar(t.sim);
   try {
@@ -166,10 +181,10 @@ function pieza(t: Tienda, extra: Record<string, unknown> = {}): string {
   fila.foto_key = extra.foto_key ?? `fotos/${fila.id}.jpg`;
   t.db.prepare(
     `insert into productos (id, codigo, nombre, marca, categoria, precio, estado_fisico, estado_analisis, destino, sin_inventario,
-                            stock, foto_key, talla, semana_ingreso, creado_en, actualizado_en)
-     values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'S40', ?, '')`,
+                            stock, foto_key, talla, upc, semana_ingreso, creado_en, actualizado_en)
+     values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'S40', ?, '')`,
   ).run(fila.id, fila.codigo, fila.nombre, fila.marca, fila.categoria, fila.precio, fila.estado_fisico, fila.estado_analisis,
-    fila.destino, fila.sin_inventario, fila.stock, fila.foto_key, fila.talla ?? null, new Date(2026, 9, 1, 0, 0, n).toISOString());
+    fila.destino, fila.sin_inventario, fila.stock, fila.foto_key, fila.talla ?? null, fila.upc ?? null, new Date(2026, 9, 1, 0, 0, n).toISOString());
   if (fila.foto_key) (t.env.FOTOS as any).objetos.set(fila.foto_key, jpeg(1200, 1200).buffer);
   return fila.id;
 }
@@ -324,7 +339,7 @@ test('preparar: categoría, atributos pedidos, precio con ml_pct, guía de talla
     assert.equal(p.tipo_publicacion, 'gold_special');
     const ids = p.atributos.map((a: any) => a.id);
     // Lo obligatorio, sin lo que ML llena o el sistema pone; el GTIN deja de ser obligatorio con razon de vacio.
-    assert.deepEqual([...ids].sort(), ['BRAND', 'COLOR', 'EMPTY_GTIN_REASON', 'GENDER', 'GTIN', 'SIZE']);
+    assert.deepEqual([...ids].sort(), ['BRAND', 'COLOR', 'EMPTY_GTIN_REASON', 'GENDER', 'GTIN', 'MODEL', 'SIZE', 'UNITS_PER_PACK']);
     assert.equal(p.atributos.find((a: any) => a.id === 'GTIN').requerido, false);
     assert.deepEqual(p.atributos.find((a: any) => a.id === 'BRAND').valor_sugerido, { id: null, nombre: "Levi's" });
     assert.equal(p.atributos.find((a: any) => a.id === 'EMPTY_GTIN_REASON').valor_sugerido.id, '17055160');
@@ -351,6 +366,136 @@ test('preparar: la talla de la pieza va en producto y llena SIZE (adulto y de ni
   assert.equal(nino.producto.talla, 'Niño 6 años / S');
   assert.deepEqual(nino.propuesta.atributos.find((a: any) => a.id === 'SIZE').valor_sugerido, { id: null, nombre: '6 años' });
   assert.equal((await t.pedir(`/api/ml/preparar/${pieza(t)}`, {})).cuerpo.producto.talla, null);
+}));
+
+/* ---------- atributos propuestos (#555) ---------- */
+
+const atributo = (r: any, id: string) => r.cuerpo.propuesta.atributos.find((a: any) => a.id === id);
+
+test('GTIN desde el UPC: solo con dígito verificador; se completa el cero perdido', () => {
+  assert.equal(gtinDe('012345678905'), '012345678905');   // UPC-A
+  assert.equal(gtinDe('12345678905'), '012345678905');    // sin el cero inicial
+  assert.equal(gtinDe('4006381333931'), '4006381333931');  // EAN-13
+  assert.equal(gtinDe('012345678900'), '');                // dígito verificador malo
+  assert.equal(gtinDe(''), '');
+  assert.equal(gtinDe(null), '');
+  assert.equal(gtinDe('ABC123456789'), '');
+});
+
+test('MODEL desde el nombre sin la marca', () => {
+  assert.equal(modeloDe("Jeans Levi's 501 Hombre", "Levi's"), 'Jeans 501 Hombre');
+  assert.equal(modeloDe('Sartén Tramontina 24 cm', 'tramontina'), 'Sartén 24 cm');
+  assert.equal(modeloDe('Licuadora 10 velocidades', ''), 'Licuadora 10 velocidades');
+  assert.equal(modeloDe("Levi's", "Levi's"), '');
+});
+
+test('preparar: lo que trae la pieza llega propuesto y marcado de dónde sale (marca, talla, modelo, GTIN)', () => conML(async (t) => {
+  const r = await t.pedir(`/api/ml/preparar/${pieza(t, { talla: 'M', upc: '012345678905' })}`, {});
+  assert.equal(r.status, 200, JSON.stringify(r.cuerpo));
+  const ids = r.cuerpo.propuesta.atributos.map((a: any) => a.id);
+  // Con GTIN no hace falta la razón de GTIN vacío; GRADING (new_hidden) no aplica a lo nuevo.
+  assert.ok(!ids.includes('EMPTY_GTIN_REASON'));
+  assert.ok(!ids.includes('GRADING'));
+  assert.deepEqual(atributo(r, 'GTIN').valor_sugerido, { id: null, nombre: '012345678905' });
+  assert.equal(atributo(r, 'GTIN').origen, 'pieza');
+  assert.deepEqual(atributo(r, 'MODEL').valor_sugerido, { id: null, nombre: 'Jeans 501 Hombre' });
+  assert.equal(atributo(r, 'MODEL').origen, 'pieza');
+  assert.equal(atributo(r, 'BRAND').origen, 'pieza');
+  assert.equal(atributo(r, 'SIZE').origen, 'pieza');
+  assert.deepEqual(atributo(r, 'UNITS_PER_PACK').valor_sugerido, { id: null, nombre: '1' });
+  assert.equal(atributo(r, 'UNITS_PER_PACK').origen, 'defecto');
+  // El GTIN con UPC no es obligatorio (la categoría lo acepta vacío con razón) pero sí viaja.
+  assert.equal(atributo(r, 'GTIN').requerido, false);
+}));
+
+test('preparar: sin UPC válido se propone la razón de GTIN vacío aunque ML la marque hidden', () => conML(async (t) => {
+  for (const upc of [null, '', '012345678900']) {
+    const r = await t.pedir(`/api/ml/preparar/${pieza(t, { upc })}`, {});
+    assert.equal(atributo(r, 'EMPTY_GTIN_REASON').valor_sugerido.id, '17055160', String(upc));
+    assert.equal(atributo(r, 'EMPTY_GTIN_REASON').origen, 'defecto');
+    assert.equal(atributo(r, 'GTIN').valor_sugerido, null);
+  }
+}));
+
+test('preparar: GTIN va aunque la categoría no lo marque obligatorio, si la pieza tiene UPC', () => conML(async (t) => {
+  const sinGtin = t.sim.responder.bind(t.sim);
+  t.sim.responder = (l) => l.ruta === '/categories/MLM194175/attributes'
+    ? { cuerpo: [{ id: 'BRAND', name: 'Marca', value_type: 'string', tags: { required: true } },
+      { id: 'GTIN', name: 'Código de barras', value_type: 'string', tags: {} }] }
+    : sinGtin(l);
+  const con = await t.pedir(`/api/ml/preparar/${pieza(t, { upc: '012345678905' })}`, {});
+  assert.deepEqual(atributo(con, 'GTIN').valor_sugerido, { id: null, nombre: '012345678905' });
+  const sin = await t.pedir(`/api/ml/preparar/${pieza(t)}`, {});
+  assert.equal(atributo(sin, 'GTIN'), undefined);
+}));
+
+test('preparar: lo que la pieza no trae (color, género) lo propone la IA eligiendo de la lista de ML', () => conML(async (t) => {
+  t.sim.ia = () => ({ COLOR: 'Azul', GENDER: 'Hombre' });
+  const r = await t.pedir(`/api/ml/preparar/${pieza(t, { talla: 'M', upc: '012345678905' })}`, {});
+  assert.equal(r.status, 200, JSON.stringify(r.cuerpo));
+  assert.equal(t.sim.pedidosIA.length, 1);
+  const pedido = t.sim.pedidosIA[0];
+  const esquema = pedido.generationConfig.responseSchema;
+  // Solo lo que falta: la marca, la talla, el GTIN y el modelo ya los trae la pieza.
+  assert.deepEqual(Object.keys(esquema.properties).sort(), ['COLOR', 'GENDER']);
+  assert.deepEqual(esquema.properties.GENDER.enum, ['Hombre', 'Mujer', '']);
+  assert.equal(esquema.properties.GENDER.type, 'string');
+  assert.ok(pedido.contents[0].parts.some((p: any) => p.inlineData), 'la foto va al modelo');
+  assert.deepEqual(atributo(r, 'GENDER').valor_sugerido, { id: '339666', nombre: 'Hombre' });
+  assert.equal(atributo(r, 'GENDER').origen, 'ia');
+  assert.deepEqual(atributo(r, 'COLOR').valor_sugerido, { id: null, nombre: 'Azul' });
+  assert.equal(atributo(r, 'COLOR').origen, 'ia');
+  assert.equal(atributo(r, 'COLOR').motivo, undefined);
+}));
+
+test('preparar: una lista cerrada no acepta lo que la IA invente, y queda con su motivo', () => conML(async (t) => {
+  t.sim.ia = () => ({ GENDER: 'Alienígena', COLOR: '' });
+  const r = await t.pedir(`/api/ml/preparar/${pieza(t, { talla: 'M' })}`, {});
+  assert.equal(atributo(r, 'GENDER').valor_sugerido, null);
+  assert.match(atributo(r, 'GENDER').motivo, /IA no lo distinguió/);
+  assert.match(atributo(r, 'COLOR').motivo, /IA no lo distinguió/);
+}));
+
+test('preparar: la categoría exige MODEL y la pieza no lo tiene -> la IA lo intenta; sin respuesta queda con motivo, sin bloquear en silencio', () => conML(async (t) => {
+  // El nombre es solo la marca: no queda modelo.
+  const id = pieza(t, { nombre: "Levi's", talla: 'M' });
+  t.sim.ia = () => ({ MODEL: '501', COLOR: 'Azul', GENDER: 'Hombre' });
+  const conIA = await t.pedir(`/api/ml/preparar/${id}`, {});
+  assert.deepEqual(atributo(conIA, 'MODEL').valor_sugerido, { id: null, nombre: '501' });
+  assert.equal(atributo(conIA, 'MODEL').origen, 'ia');
+
+  t.sim.ia = null;   // la IA no responde
+  const sinIA = await t.pedir(`/api/ml/preparar/${id}`, {});
+  assert.equal(sinIA.status, 200, 'la IA caída no rompe preparar');
+  const modelo = atributo(sinIA, 'MODEL');
+  assert.equal(modelo.valor_sugerido, null);
+  assert.equal(modelo.requerido, true);
+  assert.match(modelo.motivo, /No se pudo proponer con IA \(la IA no respondió\)/);
+  assert.match(atributo(sinIA, 'COLOR').motivo, /No se pudo proponer con IA/);
+  // Lo que la pieza sí trae sigue propuesto.
+  assert.equal(atributo(sinIA, 'BRAND').origen, 'pieza');
+  // Cada obligatorio vacío trae su motivo.
+  for (const a of sinIA.cuerpo.propuesta.atributos.filter((x: any) => x.requerido && !x.valor_sugerido)) assert.ok(a.motivo, a.id);
+}));
+
+test('preparar: sin marca ni talla el motivo lo dice; sin_ia no llama al modelo', () => conML(async (t) => {
+  t.sim.ia = () => ({});
+  const r = await t.pedir(`/api/ml/preparar/${pieza(t, { marca: '' })}`, { sin_ia: true });
+  assert.equal(t.sim.pedidosIA.length, 0);
+  assert.match(atributo(r, 'BRAND').motivo, /no tiene marca/);
+  assert.match(atributo(r, 'SIZE').motivo, /no tiene talla/);
+}));
+
+test('publicar manda tal cual lo propuesto (GTIN, razón de GTIN vacío, unidades) junto con ITEM_CONDITION', () => conML(async (t) => {
+  const id = pieza(t, { upc: '012345678905' });
+  const r = await t.pedir(`/api/ml/publicar/${id}`, cuerpoPublicar({ atributos: [
+    { id: 'GTIN', value_name: '012345678905' }, { id: 'MODEL', value_name: 'Jeans 501 Hombre' },
+    { id: 'UNITS_PER_PACK', value_name: '1' }, { id: 'GENDER', value_id: '339666' },
+  ] }));
+  assert.equal(r.status, 201, JSON.stringify(r.cuerpo));
+  const enviado = t.sim.de('POST', /^\/items$/)[0].cuerpo.attributes;
+  assert.deepEqual(enviado.map((a: any) => a.id), ['GTIN', 'MODEL', 'UNITS_PER_PACK', 'GENDER', 'ITEM_CONDITION', 'SIZE_GRID_ID', 'SIZE_GRID_ROW_ID']);
+  assert.equal(enviado.find((a: any) => a.id === 'ITEM_CONDITION').value_id, '2230284');
 }));
 
 test('preparar: avisos de marca restringida, sin marca, precio mínimo y foto chica', async () => {
