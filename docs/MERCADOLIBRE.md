@@ -1,5 +1,7 @@
 # Guía de Configuración: Vender en Mercado Libre con El Dolarón
 
+> Qué funciona en 2026, costos reales, umbral de precio y cambios priorizados: [MERCADOLIBRE-ESTRATEGIA.md](MERCADOLIBRE-ESTRATEGIA.md) (Issue #554, 28/10/2026). La sección 11 de esta guía quedó corta: el cargo fijo se sustituyó en abril de 2026 por el «costo de los Envíos» por peso y precio.
+
 ## 1. Qué necesitas antes de empezar
 
 - Cuenta de Mercado Libre México a tu nombre (persona moral o física) con datos fiscales completos validados.
