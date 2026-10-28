@@ -21,7 +21,8 @@ export async function iniciarCelular(ctx,captura) {
   const apagada=nodo('p','Cámara en pausa · toca para encender','camara-apagada');visor.append(apagada);
   visor.addEventListener('click',e=>{if(!e.target.closest('button')&&!camara.pista())void cambiarCamara(true);});
   const contador=nodo('p',''),carrusel=nodo('div',undefined,'carrusel'),tira=nodo('section',undefined,'tira-capturas');tira.append(contador,carrusel);
-  const todas=boton('Ver todas',()=>{const c=nodo('div',undefined,'lista-capturas');for(const r of sesion.values())c.append(miniatura(r));hoja('Capturas de 24 h',c);});const encabezado=nodo('div',undefined,'cabecera-carrusel');encabezado.append(contador,todas);tira.prepend(encabezado);
+  const todas=boton('Ver todas',()=>{const c=nodo('div',undefined,'lista-capturas');for(const r of sesion.values())c.append(miniatura(r));hoja('Capturas de 24 h',c);});const revisarBoton=boton('',()=>{const r=porRevisar()[0];if(r)return corregir(r.id);},'revisar-pendientes');revisarBoton.hidden=true;
+  const encabezado=nodo('div',undefined,'cabecera-carrusel');encabezado.append(contador,revisarBoton,todas);tira.prepend(encabezado);
   const archivo=nodo('input');archivo.type='file';archivo.accept='image/*';archivo.setAttribute('capture','environment');archivo.hidden=true;
   async function empezar(){if(inicio.hidden)return;inicio.hidden=true;sonar('ok');if(usarCamara)await encender();}
   const inicio=nodo('div',undefined,'empezar-captura');inicio.append(nodo('h2','Capturar'),boton('Empezar',empezar,'primario'),nodo('p','Cámara y sonido'));
@@ -37,7 +38,7 @@ export async function iniciarCelular(ctx,captura) {
   const sesion=new Map();let revisando=null,disparando=false,tomandoPara=null,enviando=false,despierto=null,archivoPara=null,revisionFoto=null;
   let contextoAudio;
   function sonar(tipo){
-    const tonos={ok:[[880,90]],mas:[[1320,60]],existe:[[1320,60],[1320,60]],sin:[[440,120],[330,120]],error:[[220,250],[180,250]],etiqueta:[[1046,80],[1568,120]]}[tipo]||[];
+    const tonos={ok:[[880,90]],mas:[[1320,60]],existe:[[1320,60],[1320,60]],sin:[[440,120],[330,120]],error:[[220,250],[180,250]],etiqueta:[[1046,80],[1568,120]],revisar:[[660,80],[880,80],[1100,100]]}[tipo]||[];
     if(localStorage.getItem('inventario-sonido')!=='false')try{contextoAudio??=new AudioContext();let t=contextoAudio.currentTime;for(const[f,ms]of tonos){const o=contextoAudio.createOscillator();o.frequency.value=f;o.connect(contextoAudio.destination);o.start(t);o.stop(t+ms/1000);t+=ms/1000+.05;}}catch{}
     if(localStorage.getItem('inventario-vibracion')!=='false')navigator.vibrate?.(tipo==='error'?[200,100,200]:tipo==='etiqueta'?[150,80,150,80,150]:40);
     visor.dataset.destello=tipo;setTimeout(()=>{delete visor.dataset.destello;},tipo==='etiqueta'?1500:350);
@@ -66,12 +67,12 @@ export async function iniciarCelular(ctx,captura) {
   ctx.problemas.cola=()=>{const sin=[...sesion.values()].filter(r=>!r.subida);if(!sin.length)avance=Date.now();return{sinSubir:sin.length,sinAvanceMs:Date.now()-avance,colaError:sin.some(r=>r.estado==='error'||r.estado==='sesion'),sesion:sin.some(r=>r.estado==='sesion')};};
   const subida=crearSubida({pendientes,leer,borrar,pausada:id=>revisando===id,
     alEstado(estado,r){if(estado==='subiendo')avance=Date.now();const datos=sesion.get(r.id);if(datos)datos.estado=estado;pintar();if(estado==='sesion')mensaje('Tu sesión venció · vuelve a entrar','error');},
-    async alSubir(r,d){if(d.existente){sesion.delete(r.id);sesion.set(d.id,{...d,subida:true,cantidad:r.cantidad,estado:d.estado_analisis==='pendiente'?'analizando':'subida'});pintar();await captura.recibirExistente(d,r.id);return;}if(d.estado_analisis==='descartado'){sesion.delete(r.id);pintar();return;}sesion.set(r.id,{...sesion.get(r.id),...r,subida:true,estado:d.estado_analisis==='pendiente'?'analizando':'subida',...d,cantidad:d.stock??r.cantidad});pintar();void etiquetar(r.id,d,r.cantidad);}
+    async alSubir(r,d){if(d.existente){sesion.delete(r.id);sesion.set(d.id,{...d,subida:true,cantidad:r.cantidad,estado:d.estado_analisis==='pendiente'?'analizando':'subida'});pintar();await captura.recibirExistente(d,r.id);return;}if(d.estado_analisis==='descartado'){sesion.delete(r.id);pintar();return;}sesion.set(r.id,{...sesion.get(r.id),...r,subida:true,estado:d.estado_analisis==='pendiente'?'analizando':'subida',...d,cantidad:d.stock??r.cantidad});pintar();void prepararRevision(d);}
   });
   /**
-   * Como /escanear: al guardar, la etiqueta sale sola en cuanto la pieza tiene código y precio (manifiesto: al instante;
-   * análisis de la foto: en cuanto queda `listo`). Va por el mismo reclamo que la PC, así que nunca sale dos veces.
-   * Si no sale, el aviso dice por qué; lo que quede en error o sin precio va aparte, a revisar.
+   * Una pieza nueva con foto NO imprime sola (#573): al quedar `listo` con precio pasa a «por revisar» (✎ en su miniatura) y
+   * la etiqueta sale cuando alguien pulsa «Guardar e imprimir» en su hoja de revisión (nombre, precio, cantidad y grado).
+   * Lo que quede en error o sin precio va aparte. La impresión de la revisión va por el mismo reclamo que la PC: nunca sale dos veces.
    */
   // El motivo real: el aviso que dejó el motor (vendida o cambió), o la impresora.
   const razonSinEtiqueta=()=>/ya no se pued/.test($('resumen').textContent||'')?'la pieza ya no se puede imprimir (vendida o cambió)':etiqueteraLista()?'revisa la impresora':'conecta la impresora';
@@ -99,7 +100,8 @@ export async function iniciarCelular(ctx,captura) {
     }
     if(esperando.size)setTimeout(sondear,4000);
   }
-  async function etiquetar(llave,d,cantidad){
+  const porRevisar=()=>[...sesion.values()].filter(r=>r.estado==='revisar');
+  async function prepararRevision(d){
     const p=d.estado_analisis==='pendiente'?await esperarAnalisis(d):d;
     const dato=sesion.get(d.id);
     if(p.estado_analisis==='descartado')return;
@@ -108,11 +110,16 @@ export async function iniciarCelular(ctx,captura) {
       if(dato){dato.estado='error';pintar();}
       mensaje(`Aparte, sin etiqueta: ${p.nombre||'pieza sin nombre'}. Ponle precio en la revisión.`,'aviso');sonar('error');return;
     }
-    const n=Math.min(99,p.stock||cantidad);if(!(n>0))return;
-    const ok=await captura.imprimirCaptura(llave,p.id,n,{});
-    if(dato)dato.faltaEtiqueta=!ok;
-    if(ok){mensaje(`Sale la etiqueta: ${p.nombre} ×${n}`,'etiqueta');sonar('etiqueta');}
+    if(dato){dato.estado='revisar';dato.por_revisar=1;pintar();}
+    mensaje(`Por revisar: ${p.nombre}. Toca ✎ para ver precio, cantidad y grado, y guarda para imprimir.`,'aviso');sonar('revisar');
+  }
+  /** «Guardar e imprimir» de la revisión: la etiqueta de la cantidad confirmada, una sola vez por captura (`capturaImpresa`). */
+  async function imprimirRevisada(id,n,nombre){
+    const ok=await captura.imprimirCaptura(id,id,Math.min(99,n),{}),dato=sesion.get(id);
+    if(dato){dato.estado='subida';dato.por_revisar=0;dato.faltaEtiqueta=!ok;}
+    if(ok){mensaje(`Sale la etiqueta: ${nombre} ×${Math.min(99,n)}`,'etiqueta');sonar('etiqueta');}
     else mensaje(`Guardada · falta etiqueta: ${razonSinEtiqueta()}`,'aviso');
+    pintar();return ok;
   }
   /**
    * Si la etiqueta de las unidades anteriores ya salió (en este teléfono, otro dispositivo o la base) y la cantidad sube, salen las que faltan (como +1).
@@ -133,15 +140,15 @@ export async function iniciarCelular(ctx,captura) {
   }
   function pintarRed(){const n=[...sesion.values()].filter(r=>!r.subida).length;$('chip-red').textContent=navigator.onLine?(n?`▲ ${n} sin subir`:'● Red'):`▲ Sin red · ${n}`;$('chip-red').classList.toggle('aviso',!navigator.onLine||n>0);ctx.enfocado?.pintar();}
   function miniatura(r){
-    const b=boton('',()=>corregir(r.id),'miniatura '+(!r.subida?'local':'subida'));const img=nodo('img');img.alt='';img.src=r.url||`/api/foto/${r.id}`;img.onerror=()=>{img.hidden=true;};
-    const estado=r.estado==='subiendo'?'↑':r.estado==='analizando'?'⏳':r.estado==='error'||r.estado==='sesion'?'■':r.subida?'✓':'☁';
+    const b=boton('',()=>corregir(r.id),'miniatura '+(!r.subida?'local':'subida')+(r.estado==='revisar'?' por-revisar':''));const img=nodo('img');img.alt='';img.src=r.url||`/api/foto/${r.id}`;img.onerror=()=>{img.hidden=true;};
+    const estado=r.estado==='subiendo'?'↑':r.estado==='analizando'?'⏳':r.estado==='error'||r.estado==='sesion'?'■':r.estado==='revisar'?'✎':r.subida?'✓':'☁';
     b.append(img,nodo('span',r.talla||'','mini-talla'),nodo('span',`${estado} ×${r.cantidad??r.stock??1}`,'mini-estado'));
-    b.setAttribute('aria-label',`${r.nombre||r.prenda||'Pieza'} ${r.talla||''}, ${r.cantidad??1} piezas, ${r.subida?'subida':'en el teléfono'}`);return b;
+    b.setAttribute('aria-label',`${r.nombre||r.prenda||'Pieza'} ${r.talla||''}, ${r.cantidad??1} piezas, ${r.estado==='revisar'?'por revisar':r.subida?'subida':'en el teléfono'}`);return b;
   }
   function pintar(){
     carrusel.replaceChildren();const ahora=Date.now();const registros=[...sesion.values()].filter(r=>!r.subida||ahora-(r.creado??Date.parse(r.creado_en))<86400000).sort((a,b)=>(b.creado??Date.parse(b.creado_en))-(a.creado??Date.parse(a.creado_en)));
     for(const r of registros.slice(0,24))carrusel.append(miniatura(r));
-    const piezas=registros.reduce((n,r)=>n+(r.cantidad??1),0),subidas=registros.filter(r=>r.subida).length;contador.textContent=`Hoy · ${piezas} ${piezas===1?'pieza':'piezas'} · ${subidas} ${subidas===1?'subida':'subidas'}`;tira.hidden=!registros.length;pintarRed();
+    const piezas=registros.reduce((n,r)=>n+(r.cantidad??1),0),subidas=registros.filter(r=>r.subida).length;contador.textContent=`Hoy · ${piezas} ${piezas===1?'pieza':'piezas'} · ${subidas} ${subidas===1?'subida':'subidas'}`;tira.hidden=!registros.length;const porRev=porRevisar().length;revisarBoton.hidden=!porRev;revisarBoton.textContent=`✎ Revisar ${porRev}`;pintarRed();
   }
   async function conservar(foto,a){
     reposo.actividad();ctx.problemas.cola();
@@ -186,21 +193,42 @@ export async function iniciarCelular(ctx,captura) {
     try{local=await leer(id);actual=local?{...local,precio:local.precio_ropa,stock:local.cantidad}:await api(`/api/borradores/${id}/revision`);}
     catch(e){revisando=null;throw e;}
     if(actual.estado_analisis==='descartado'){sesion.delete(id);revisando=null;pintar();return;}
+    // #573: una pieza nueva `por_revisar` abre su hoja como tarjeta de revisión (nombre, precio, cantidad, grado) y «Guardar e imprimir» la libera.
+    const revisar=!local&&!!actual.por_revisar&&actual.estado_analisis==='listo';
+    if(!revisar&&datos.estado==='revisar'){datos.estado='subida';pintar();}   // otro dispositivo ya la confirmó
     const c=nodo('div',undefined,'corregir-captura'),img=nodo('img');img.src=datos.url||`/api/foto/${id}`;img.alt='Foto de '+(datos.nombre||datos.prenda||'la pieza');c.append(img);
     const folioExistencia=crypto.randomUUID();
     let cambios={estado_fisico:actual.estado_fisico},cantidad=actual.stock,tallaActual=actual.talla||'',cambiado=false;
     const actualizar=()=>{cambiado=true;bloquear(guardarBoton,'');};
-    if(!esRopa(actual))c.append(opciones(ESTADOS,actual.estado_fisico,v=>{cambios.estado_fisico=v;actualizar();},'Grado'));
+    let nombre=actual.nombre,tocoPrecio=false,campoPrecio=null;
+    if(revisar&&!esRopa(actual)){
+      const ln=nodo('label','Nombre / descripción'),cn=nodo('input'),lp=nodo('label','Precio ($)');campoPrecio=nodo('input');
+      cn.value=nombre??'';cn.maxLength=120;cn.readOnly=!(ctx.dueno||ctx.identidad.usuario?.editar_inventario===true);cn.oninput=()=>{nombre=cn.value;actualizar();};
+      campoPrecio.value=String(actual.precio/100);campoPrecio.inputMode='decimal';campoPrecio.readOnly=!ctx.dueno;campoPrecio.oninput=()=>{tocoPrecio=true;actualizar();};
+      ln.append(cn);lp.append(campoPrecio);c.append(ln,lp);
+    }else if(revisar)c.append(nodo('p',actual.nombre??''));
+    if(!esRopa(actual))c.append(opciones(ESTADOS,actual.estado_fisico,v=>{cambios.estado_fisico=v;if(campoPrecio&&!tocoPrecio&&actual.precios?.[v])campoPrecio.value=String(actual.precios[v]/100);actualizar();},'Grado'));
     c.append(stepper(cantidad,n=>{cantidad=n;actualizar();},{max:999,nombre:'Piezas'}));
     const tablero=esRopa(actual)?ropa({pc:()=>false,mensaje,recordar:false,inicial:{talla:tallaActual,prenda:actual.prenda||'',marca:actual.marca||'',precio_ropa:actual.precio},cambiar:()=>actualizar()}):null;
     if(tablero)c.append(tablero.raiz);else if(tallaActual)c.append(talla(v=>{tallaActual=v;actualizar();},tallaActual));
     const marca=estadoEnvio({...actual,id}).marca;if(marca)c.append(nodo('p',`La etiqueta pegada dice $${marca.precio/100}`,'aviso'));
-    const guardarBoton=boton('Guardar cambios',async()=>{
-      if(!cambiado)return mensaje('Sin cambios','aviso');
+    const guardarBoton=boton(revisar?(etiqueteraLista()?'Guardar e imprimir':'Guardar'):'Guardar cambios',async()=>{
+      if(!cambiado&&!revisar)return mensaje('Sin cambios','aviso');
       let avisoPrecio='';
-      if(!navigator.onLine&&(!local||cantidad!==actual.stock))return mensaje('Sin red: se suma al volver la señal','aviso');
+      if(!navigator.onLine&&(revisar||!local||cantidad!==actual.stock))return mensaje(revisar?'Sin red: se guarda al volver la señal':'Sin red: se suma al volver la señal','aviso');
       if(tablero&&!tablero.validar())return;
       const r=tablero?.valores();if(r){cambios={...cambios,prenda:r.prenda,marca:r.marca,precio:r.precio_ropa};tallaActual=r.talla;}
+      if(revisar){
+        // La existencia y la talla primero: si fallan no se confirma nada. Una pieza sin etiqueta previa imprime todo junto (sin etiquetarCorreccion).
+        const ed=campoPrecio||(nombre!==actual.nombre)?cambiosTarjeta({nombre:nombre!==actual.nombre?nombre:undefined,precio:tocoPrecio?campoPrecio.value:undefined,ficha:{precio_lista:actual.precio_lista}}):{};
+        if(cantidad!==actual.stock){await corregirExistencia(api,actual,id,cantidad,folioExistencia);actual.stock=cantidad;}
+        if(tallaActual&&tallaActual!==actual.talla){await api(`/api/borradores/${id}/talla`,{talla:tallaActual},'PATCH');actual.talla=tallaActual;}
+        const guardada=await api(`/api/borradores/${id}/revision`,{confirmar:true,...(cambios.estado_fisico!==actual.estado_fisico?{estado_fisico:cambios.estado_fisico}:{}),...(r?{prenda:r.prenda,marca:r.marca,precio:r.precio_ropa}:{}),...ed},'PATCH');
+        Object.assign(datos,{cantidad,talla:tallaActual,estado_fisico:guardada.estado_fisico,nombre:guardada.nombre,precio:guardada.precio,por_revisar:0});
+        cerrarHoja();await imprimirRevisada(id,cantidad,guardada.nombre);
+        if(guardada.aviso)mensaje(guardada.aviso,'aviso');
+        return;
+      }
       if(local){
         // Un alta pudo llegar aunque su respuesta se perdiera: corregirla por sus rutas de 24 h.
         if(cantidad!==actual.stock||tallaActual!==actual.talla){
@@ -223,13 +251,13 @@ export async function iniciarCelular(ctx,captura) {
         Object.assign(datos,{cantidad,talla:tallaActual,estado_fisico:cambios.estado_fisico,...(r?{precio_ropa:guardada?.solicitud_precio||guardada?.aviso?guardada.precio:r.precio_ropa,prenda:r.prenda,marca:r.marca}:{})});
       }
       cerrarHoja();mensaje(avisoPrecio||'Cambios guardados',avisoPrecio?'aviso':'ok');pintar();
-    },'primario');bloquear(guardarBoton,'Sin cambios');c.append(guardarBoton);
+    },'primario');if(!revisar)bloquear(guardarBoton,'Sin cambios');c.append(guardarBoton);
     c.append(boton('Retomar foto',async()=>{if(local){if(camara.pista()&&video.videoWidth)await retomarLocal(local,await aJpeg(video,video.videoWidth,video.videoHeight));else{archivoPara={local};archivo.click();}}else{await fotoPieza({...datos,id});}if(local)cerrarHoja();}));
     const descartar=boton('Descartar',async b=>{
       if(b.dataset.confirmar!=='true'){b.dataset.confirmar='true';b.textContent='¿Descartar esta pieza?';b.classList.add('confirmando');mensaje('Se descarta la captura completa','aviso');setTimeout(()=>{b.dataset.confirmar='false';b.textContent='Descartar';b.classList.remove('confirmando');},4000);return;}
       if(!navigator.onLine)return mensaje('Sin red · vuelve a intentar','aviso');await api(`/api/borradores/${id}/revision`,{},'DELETE');await borrar(id);if(datos.url)URL.revokeObjectURL(datos.url);sesion.delete(id);cerrarHoja();pintar();mensaje('Captura descartada','ok');
     },'peligro');c.append(descartar);
-    hoja('Corregir',c);tablero?.sincronizar();$('hoja').addEventListener('close',()=>{revisando=null;void subir();},{once:true});
+    hoja(revisar?'Revisar antes de imprimir':'Corregir',c);tablero?.sincronizar();$('hoja').addEventListener('close',()=>{revisando=null;void subir();},{once:true});
   }
   function opcionesCamara(){
     const c=nodo('div',undefined,'formulario');
@@ -240,7 +268,7 @@ export async function iniciarCelular(ctx,captura) {
   }
   async function recuperar(){
     for(const r of await pendientes())if(!sesion.has(r.id))sesion.set(r.id,{...r,url:URL.createObjectURL(r.foto),subida:false});pintar();
-    if(navigator.onLine)try{const desde=new Date(Date.now()-86400000).toISOString(),d=await api('/api/borradores?'+new URLSearchParams({desde}));for(const p of d){if(p.capturado_por!==(ctx.identidad.correo||ctx.identidad.usuario?.correo)||sesion.has(p.id))continue;sesion.set(p.id,{...p,cantidad:p.stock,creado:Date.parse(p.creado_en),subida:true,estado:p.estado_analisis==='pendiente'?'analizando':'subida'});if(p.estado_analisis==='pendiente')void etiquetar(p.id,p,p.stock);}sincronizarMarcas(d.filter(p=>p.capturado_por===(ctx.identidad.correo||ctx.identidad.usuario?.correo)));pintar();}catch{}
+    if(navigator.onLine)try{const desde=new Date(Date.now()-86400000).toISOString(),d=await api('/api/borradores?'+new URLSearchParams({desde}));for(const p of d){if(p.capturado_por!==(ctx.identidad.correo||ctx.identidad.usuario?.correo)||sesion.has(p.id))continue;sesion.set(p.id,{...p,cantidad:p.stock,creado:Date.parse(p.creado_en),subida:true,estado:p.estado_analisis==='pendiente'?'analizando':p.por_revisar&&p.estado_analisis==='listo'&&p.precio>0?'revisar':'subida'});if(p.estado_analisis==='pendiente')void prepararRevision(p);}sincronizarMarcas(d.filter(p=>p.capturado_por===(ctx.identidad.correo||ctx.identidad.usuario?.correo)));pintar();}catch{}
     void subir();
   }
   addEventListener('online',()=>{pintar();void subir();});addEventListener('offline',pintar);setInterval(subir,20000);

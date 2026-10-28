@@ -224,6 +224,9 @@ test('las siete categorías se guardan con foto, talla y precio exacto, sin IA, 
     }
     const p = await pagina(t);
     await p.iniciarAutomatica();
+    assert.equal(p.estado.enviadas.length, 0, '#573: una prenda con foto espera su tarjeta de revisión; la automática no la imprime sola');
+    t.db.prepare('update productos set por_revisar=0').run();   // lo que hace «Guardar e imprimir» en la tarjeta (PATCH revision {confirmar})
+    await p.imprimirNuevas();
     assert.equal(p.estado.enviadas.length, 7);
     assert.ok(p.estado.enviadas.every((p: any) => p.copias === 2));
   } finally { t.db.close(); }
@@ -376,6 +379,7 @@ test('corregir un precio reimprime una vez con el mismo código; solo el grado d
     t.env.AMBIENTE = 'sandbox';
     const id = crypto.randomUUID();
     await capturarRopa(t, id, '15000');
+    t.db.prepare('update productos set por_revisar=0 where id=?').run(id);   // ya confirmada en su tarjeta (#573)
     const p = await pagina(t);
     await p.iniciarAutomatica();
     const codigo = t.db.prepare('select codigo from productos where id=?').get(id)!.codigo;
@@ -401,6 +405,7 @@ test('corregir un precio reimprime una vez con el mismo código; solo el grado d
     await p.imprimirNuevas(); assert.equal(p.estado.enviadas.length, 3);
     const otra = crypto.randomUUID();
     await capturarRopa(t, otra, '5000');
+    t.db.prepare('update productos set por_revisar=0 where id=?').run(otra);
     p.estado.antesDePreparar = async () => { await t.pedir(`/api/borradores/${otra}/revision`, {}, 'DELETE'); };
     await p.imprimirNuevas(); assert.equal(p.estado.enviadas.length, 3);
   } finally { t.db.close(); }
@@ -493,6 +498,10 @@ test('alta solo con foto desde el escáner: se guarda sin código y se imprime s
     t.db.prepare("update productos set categoria='hogar' where id=?").run(general);
     const p = await pagina(t);
     await p.iniciarAutomatica();
+    assert.deepEqual(p.estado.enviadas, [], '#573: lista pero sin confirmar en la tarjeta de revisión, no sale');
+    assert.match(p.$('resumen').textContent, /Por revisar en la tarjeta/);
+    t.db.prepare('update productos set por_revisar=0 where id=?').run(id);
+    await p.imprimirNuevas();
     assert.deepEqual(p.estado.enviadas, [{ id, copias: 2 }]);
   } finally { t.db.close(); }
 });

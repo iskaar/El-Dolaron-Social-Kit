@@ -14,10 +14,10 @@ export interface PiezaUpc {
   id: string; codigo: string | null; upc: string | null; nombre: string; precio: number; stock: number;
   estado_analisis: string; estado_fisico: string; propietario: string; capturado_por: string;
   creado_en: string; actualizado_en: string; tiene_foto: number; marca:string; talla:string | null;
-  categoria:string; precio_lista:number; destino:string;
+  categoria:string; precio_lista:number; destino:string; por_revisar:number;
 }
 export const PIEZA_UPC = `id, codigo, upc, nombre, precio, stock, estado_analisis, estado_fisico, propietario,
-  capturado_por, creado_en, actualizado_en, marca, talla, categoria, precio_lista, destino, foto_key <> '' as tiene_foto`;
+  capturado_por, creado_en, actualizado_en, marca, talla, categoria, precio_lista, destino, por_revisar, foto_key <> '' as tiene_foto`;
 
 export async function repetidaUpc(env: Env, upc: string, grado: string, propietario: string, excluir = '') {
   return env.DB.prepare(`select ${PIEZA_UPC} from productos where id = coalesce(
