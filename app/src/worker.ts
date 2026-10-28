@@ -21,7 +21,7 @@ import { detalleVenta, cancelarPieza, devolverEnCupon, reimprimirCupon } from '.
 import { cancelarVenta, listarCancelaciones, estadoSolicitud } from './cancelaciones.ts';
 import { BASES, AVISO } from './legal.ts';
 import { CLAVES_CATEGORIA } from '../public/categorias.js';
-import { tallaValida } from '../public/tallas.js';
+import { tallaValida, esCalzado } from '../public/tallas.js';
 import {
   permiso, puede, quienEs, leerUsuario, yo, pedirAcceso, listarCuentas, guardarCuenta, resolverSolicitud, propietarioDe,
   esDeCaja, soloComputadora, CAJAS, puedeEditarInventario, type Usuario,
@@ -260,6 +260,7 @@ async function crearBorrador(request: Request, env: Env, ctx: ExecutionContext, 
     const alta = (conEdicion: boolean) => capturarPorUpc(new Request('https://local/api/borradores/upc', {
       method: 'POST', body: JSON.stringify({ id, upc, stock: cantidad, estado_fisico: estadoFisico,
         // capturarPorUpc autoriza la edición igual que POST /api/borradores/upc.
+        ...(talla ? { talla } : {}),
         ...(conEdicion && typeof formulario.get('nombre') === 'string' ? { nombre: formulario.get('nombre') } : {}),
         ...(conEdicion && formulario.has('precio') ? { precio: Number(formulario.get('precio')) } : {}) }),
     }), env, correo);
@@ -705,7 +706,8 @@ async function buscarEnManifiesto(upcCrudo: string, env: Env): Promise<Response>
   const categoria = ficha.categoria || 'otros';
   return json({
     upc: ficha.upc, nombre: ficha.nombre || ficha.descripcion, traducido: !!ficha.nombre, descripcion: ficha.descripcion,
-    marca: ficha.marca, categoria, precio_usd: ficha.precio_usd, precio_lista: precioLista,
+    marca: ficha.marca, categoria, departamento: ficha.departamento, calzado: esCalzado(ficha),
+    precio_usd: ficha.precio_usd, precio_lista: precioLista,
     precio: precioManual ?? calcularPrecio({ precioLista, categoria, estadoFisico: 'nuevo', config }).precio,
     // Por grado A/B/C, para que el escáner muestre el que se va a guardar (#371).
     precios: Object.fromEntries([...ESTADOS_FISICOS].map((estado) =>
@@ -784,6 +786,9 @@ async function capturarPorUpc(request: Request, env: Env, correo: string, ctx?: 
   if (cuerpo.precio !== undefined && (typeof cuerpo.precio !== 'number' || !Number.isSafeInteger(cuerpo.precio) || cuerpo.precio <= 0)) {
     return json({ error: 'Precio inválido.' }, 400);
   }
+  // Calzado con UPC (#552): el número de la caja, en cm. La obligatoriedad vive en la tarjeta, no aquí.
+  const talla = cuerpo.talla === undefined || cuerpo.talla === '' || cuerpo.talla === null ? null : cuerpo.talla;
+  if (talla !== null && (typeof talla !== 'string' || !tallaValida(talla))) return json({ error: 'Talla invalida.' }, 400);
   const editando = nombreEditado !== undefined || cuerpo.precio !== undefined;
   const usuario = editando ? await leerUsuario(env, correo) : null;
   const validarEdicion = (nombre: string, precio: number): Response | null => {
@@ -833,12 +838,12 @@ async function capturarPorUpc(request: Request, env: Env, correo: string, ctx?: 
   const ahora = new Date();
   // Una sola inserción completa: dos reintentos nunca restauran stock ni ven una pieza a medio llenar.
   await env.DB.prepare(`insert into productos
-    (id, upc, nombre, marca, categoria, precio_lista, precio, estado_fisico, stock, semana_ingreso,
+    (id, upc, nombre, marca, categoria, precio_lista, precio, estado_fisico, stock, talla, semana_ingreso,
      capturado_por, creado_en, actualizado_en, estado_analisis, destino, propietario)
-    select ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'listo', 'etiqueta', 'dolaron'
+    select ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'listo', 'etiqueta', 'dolaron'
     where not exists (select 1 from productos where ${MISMO_UPC})
       and not exists (select 1 from conteo_ajustes where id = ?) on conflict (id) do nothing`)
-    .bind(cuerpo.id, leido, nombre, ficha.marca.trim().slice(0, 60), categoria, precioLista, precio, estado, stock,
+    .bind(cuerpo.id, leido, nombre, ficha.marca.trim().slice(0, 60), categoria, precioLista, precio, estado, stock, talla,
       semanaIngreso(ahora), correo, ahora.toISOString(), ahora.toISOString(), 'dolaron', normalizarUpc(leido), estado, cuerpo.id).run();
   return (await capturaUpcGuardada(cuerpo.id, leido, env, ctx, correo))
     ?? await sumarUpc(cuerpo.id, leido, estado, stock, env, correo, ctx) ?? json({ error: 'La captura cambió. Vuelve a intentarlo.' }, 409);

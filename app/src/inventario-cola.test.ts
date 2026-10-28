@@ -93,12 +93,12 @@ test('corregir calzado: se elige talla US, se guarda el cm MX y "Niño 19" no ca
   ui.desplazar(rueda(),fila(rueda(),'US 8 · 25'));assert.equal(valores.at(-1),'25');
   const nino=ui.talla(v=>valores.push(v));chip(nino,'Calzado niño').onclick();
   assert.equal(valores.at(-1),'Niño 19');
-  ui.desplazar(rueda(),fila(rueda(),'US 7Y · 25'));assert.equal(valores.at(-1),'Niño 25');
+  ui.desplazar(rueda(),fila(rueda(),'US 7Y · EU 40 · 25'));assert.equal(valores.at(-1),'Niño 25');
   // Una talla ya guardada en cm abre en su chip y en su fila.
   const guardada=ui.talla(()=>{},'Niño 19');
   assert.equal(chip(guardada,'Calzado niño').atributos['aria-pressed'],'true');assert.equal(chip(guardada,'Niño').atributos['aria-pressed'],'false');
   chip(guardada,'Calzado niño').onclick();
-  assert.equal(rueda().scrollTop,fila(rueda(),'US 13C · 19')*44);
+  assert.equal(rueda().scrollTop,fila(rueda(),'US 13C · EU 31 · 19')*44);
   const adulto=ui.talla(()=>{},'26');assert.equal(chip(adulto,'Calzado H').atributos['aria-pressed'],'true');
   chip(adulto,'Calzado H').onclick();assert.equal(rueda().scrollTop,fila(rueda(),'US 8 · 26')*44);
   assert.equal(chip(ui.talla(()=>{},'22'),'Calzado M').atributos['aria-pressed'],'true');
