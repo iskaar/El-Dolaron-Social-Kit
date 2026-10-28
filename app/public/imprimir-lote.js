@@ -523,6 +523,8 @@ async function imprimirNuevas() {
         const delEscaner = p.upc != null;
         if ((p.categoria !== 'ropa' && !delEscaner) || estadoEnvio(p).vigente || p.stock <= 0 || p.destino !== 'etiqueta') continue;
         const quien = `${p.nombre?.trim() || 'pieza sin nombre'} (capturada ${hora(p.creado_en)})`;
+        // Una pieza nueva solo sale de aquí después de «Guardar» en su tarjeta de revisión (#573); mientras, no detiene la cola.
+        if (p.por_revisar) { esperando ||= `Por revisar en la tarjeta (precio, cantidad y grado): ${quien}. La cola sigue.`; continue; }
         const lista = p.estado_analisis === 'listo' && p.nombre?.trim() && p.precio > 0;
         // Lo escaneado sale en cuanto se guarda: su cantidad se cierra en el escáner (otro código
         // o Guardar, #446). No detiene la cola: su etiqueta trae el nombre exacto del producto, así que

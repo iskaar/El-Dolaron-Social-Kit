@@ -1,4 +1,4 @@
-// La etiqueta sale sola al guardar una captura con foto en el celular, como en /escanear (#464).
+// Una captura con foto en el celular pasa a «por revisar» y su etiqueta sale al pulsar «Guardar e imprimir» en la revisión (#573; antes salía sola, #464).
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
@@ -28,24 +28,36 @@ function entorno(respuestas: any[] | ((ruta: string) => any) = [], imprimirResul
   const motor = runInNewContext(`${auxiliares}\n${turno}\n({ etiquetar: null, imprimirCaptura, capturaImpresa })`, contexto);
   const captura = { imprimirCaptura: motor.imprimirCaptura };
   contexto.captura = captura;
-  runInNewContext(`${etiquetar}\nglobalThis.etiquetar = etiquetar;`, contexto);
-  return { etiquetar: contexto.etiquetar as (llave: string, d: any, n: number) => Promise<void>, mensajes, envios, sonidos, sesion, almacen,
+  runInNewContext(`${etiquetar}\nglobalThis.prepararRevision = prepararRevision; globalThis.imprimirRevisada = imprimirRevisada;`, contexto);
+  return { etiquetar: ((_llave: string, d: any) => contexto.prepararRevision(d)) as (llave: string, d: any, n: number) => Promise<void>,
+    imprimirRevisada: contexto.imprimirRevisada as (id: string, n: number, nombre: string) => Promise<boolean>, mensajes, envios, sonidos, sesion, almacen,
     desconectar: () => { lista = false; }, motor, llamadas: () => llamadasApi, peticiones, timers };
 }
 const pieza = (campos: Record<string, unknown> = {}) => ({ id: 'p1', nombre: 'Lámpara', precio: 24900, stock: 2, estado_analisis: 'listo', ...campos });
 
-test('captura con foto lista al guardar (manifiesto): la etiqueta sale en seguida, una por unidad, con aviso y sonido de /escanear', async () => {
+test('#573: captura con foto lista (manifiesto): NO imprime; pasa a «por revisar» y avisa. La etiqueta sale al guardar la revisión, una por unidad confirmada', async () => {
   const e = entorno();
+  e.sesion.set('p1', { estado: 'subida' });
   await e.etiquetar('p1', pieza(), 2);
-  assert.deepEqual(e.envios, [{ id: 'p1', n: 2, opciones: {} }]);   // sin forzar: el reclamo evita que la PC la repita
-  assert.deepEqual(e.mensajes.at(-1), ['Sale la etiqueta: Lámpara ×2', 'etiqueta']);
-  assert.deepEqual(e.sonidos, ['etiqueta']);
+  assert.deepEqual(e.envios, [], 'una captura con foto no imprime antes de confirmarse');
+  assert.equal(e.sesion.get('p1').estado, 'revisar');
+  assert.equal(e.sesion.get('p1').por_revisar, 1);
+  assert.match(e.mensajes.at(-1)![0], /Por revisar: Lámpara/);
+  assert.deepEqual(e.sonidos, ['revisar']);
+  assert.equal(await e.imprimirRevisada('p1', 3, 'Lámpara'), true);   // la cantidad que se confirmó en la revisión, no la de la foto
+  assert.deepEqual(e.envios, [{ id: 'p1', n: 3, opciones: {} }]);   // sin forzar: el reclamo evita que la PC la repita
+  assert.deepEqual(e.mensajes.at(-1), ['Sale la etiqueta: Lámpara ×3', 'etiqueta']);
+  assert.deepEqual(e.sonidos, ['revisar', 'etiqueta']);
+  assert.equal(e.sesion.get('p1').estado, 'subida');
+  assert.equal(e.sesion.get('p1').por_revisar, 0);
 });
 
-test('captura analizada por IA: espera a que quede lista y entonces imprime; el error o la falta de precio van aparte y no imprimen', async () => {
+test('captura analizada por IA: espera a que quede lista y pasa a revisar sin imprimir; el error o la falta de precio van aparte', async () => {
   const e = entorno([[pieza({ estado_analisis: 'pendiente' })], [], [pieza({ stock: 3 })]]);   // el sondeo por lote devuelve una lista
+  e.sesion.set('p1', { estado: 'analizando' });
   await e.etiquetar('p1', pieza({ estado_analisis: 'pendiente', precio: 0, nombre: '' }), 1);
-  assert.deepEqual(e.envios, [{ id: 'p1', n: 3, opciones: {} }]);   // usa la existencia vigente al quedar lista
+  assert.deepEqual(e.envios, [], 'ni al quedar lista imprime antes de la revisión');
+  assert.equal(e.sesion.get('p1').estado, 'revisar');
   const f = entorno();
   f.sesion.set('p2', { estado: 'analizando' });
   await f.etiquetar('p2', pieza({ id: 'p2', estado_analisis: 'error', precio: 0, nombre: 'Algo' }), 1);
@@ -61,27 +73,27 @@ test('captura analizada por IA: espera a que quede lista y entonces imprime; el 
 test('sin impresora conectada o con el envío fallido: dice por qué, no la da por impresa y un reintento sí imprime', async () => {
   let sale = false;
   const e = entorno([], () => sale);
-  await e.etiquetar('p1', pieza(), 1);
+  await e.imprimirRevisada('p1', 1, 'Lámpara');
   assert.match(e.mensajes.at(-1)![0], /Guardada · falta etiqueta: revisa la impresora/);
   e.desconectar();
-  await e.etiquetar('p1', pieza(), 1);
+  await e.imprimirRevisada('p1', 1, 'Lámpara');
   assert.match(e.mensajes.at(-1)![0], /conecta la impresora/);
   assert.equal(e.envios.length, 2);
   sale = true;
-  await e.etiquetar('p1', pieza(), 1);
+  await e.imprimirRevisada('p1', 1, 'Lámpara');
   assert.equal(e.envios.length, 3);
   assert.equal(e.motor.capturaImpresa('p1'), true);
 });
 
 test('la misma captura no imprime dos veces: ni al reintentar la subida ni tras recargar (se recuerda en el teléfono)', async () => {
   const e = entorno();
-  await Promise.all([e.etiquetar('p1', pieza(), 1), e.etiquetar('p1', pieza(), 1)]);   // dos subidas casi a la vez
+  await Promise.all([e.imprimirRevisada('p1', 1, 'Lámpara'), e.imprimirRevisada('p1', 1, 'Lámpara')]);   // dos toques casi a la vez
   assert.equal(e.envios.length, 1);
   const recargada = entorno();
   for (const [k, v] of e.almacen) recargada.almacen.set(k, v);   // mismo localStorage tras recargar
-  await recargada.etiquetar('p1', pieza(), 1);
+  await recargada.imprimirRevisada('p1', 1, 'Lámpara');
   assert.equal(recargada.envios.length, 0);
-  await recargada.etiquetar('p2', pieza({ id: 'p2' }), 1);       // otra captura sí
+  await recargada.imprimirRevisada('p2', 1, 'Lámpara');       // otra captura sí
   assert.equal(recargada.envios.length, 1);
 });
 
@@ -99,10 +111,11 @@ test('D2: si el seguimiento del análisis da 403 se deja de preguntar y no dice 
 const tick = async (e: ReturnType<typeof entorno>) => { assert.equal(e.timers.length, 1, 'un solo temporizador'); e.timers.shift()!(); await espera(); };
 const espera = () => new Promise((r) => setImmediate(r));
 
-test('#493: 30 capturas pendientes = 1 petición por tick, y las que quedan listas imprimen por el mismo camino', async () => {
+test('#493: 30 capturas pendientes = 1 petición por tick, y las que quedan listas pasan a revisar por el mismo camino (sin imprimir)', async () => {
   const listas = new Set<string>();
   const e = entorno((ruta: string) => Array.from(listas, (id) => pieza({ id, stock: 2 })), true, '', true);
   const ids = Array.from({ length: 30 }, (_, i) => `p${i}`);
+  for (const id of ids) e.sesion.set(id, { estado: 'analizando' });
   const hechas = ids.map((id) => e.etiquetar(id, pieza({ id, estado_analisis: 'pendiente', precio: 0, nombre: '' }), 1));
   await espera();
   assert.equal(e.llamadas(), 0, 'nada se pregunta antes del primer tick');
@@ -112,12 +125,13 @@ test('#493: 30 capturas pendientes = 1 petición por tick, y las que quedan list
   for (const id of ids.slice(0, 10)) listas.add(id);
   await tick(e);
   assert.equal(e.llamadas(), 2);
-  assert.deepEqual(e.envios.map((x) => x.id).sort(), ids.slice(0, 10).sort());
+  assert.deepEqual(ids.filter((id) => e.sesion.get(id).estado === 'revisar').sort(), ids.slice(0, 10).sort());
   for (const id of ids) listas.add(id);
   await tick(e);
   assert.equal(e.llamadas(), 3);
   await Promise.all(hechas);
-  assert.equal(e.envios.length, 30);
+  assert.equal(ids.filter((id) => e.sesion.get(id).estado === 'revisar').length, 30);
+  assert.deepEqual(e.envios, [], 'ninguna imprimió antes de su revisión');
   assert.equal(e.timers.length, 0, 'sin pendientes el sondeo se apaga');
 });
 
@@ -135,9 +149,10 @@ test('#493: cada pieza conserva sus 40 intentos; las que no quedan listas van ap
   assert.match(e.mensajes.at(-1)![0], /Aparte, sin etiqueta/);
 });
 
-test('#493: una pieza nueva entra al mismo sondeo; sin red se vuelve a preguntar y una descartada termina sin imprimir', async () => {
+test('#493: una pieza nueva entra al mismo sondeo; sin red se vuelve a preguntar y una descartada termina sin pasar a revisar', async () => {
   const respuestas: any[] = [new Error('sin red'), [pieza({ id: 'a', estado_analisis: 'descartado' }), pieza({ id: 'b' })]];
   const e = entorno(() => respuestas.shift(), true, '', true);
+  e.sesion.set('a', { estado: 'analizando' }); e.sesion.set('b', { estado: 'analizando' });
   const a = e.etiquetar('a', pieza({ id: 'a', estado_analisis: 'pendiente' }), 1);
   await tick(e);
   const b = e.etiquetar('b', pieza({ id: 'b', estado_analisis: 'pendiente' }), 1);
@@ -145,12 +160,13 @@ test('#493: una pieza nueva entra al mismo sondeo; sin red se vuelve a preguntar
   await tick(e);
   await Promise.all([a, b]);
   assert.equal(e.llamadas(), 2);
-  assert.deepEqual(e.envios.map((x) => x.id), ['b']);
+  assert.deepEqual([e.sesion.get('a').estado, e.sesion.get('b').estado], ['analizando', 'revisar']);
+  assert.deepEqual(e.envios, []);
 });
 
 test('D3: si el motor rechazó la pieza (vendida o cambió), el aviso dice eso y no «revisa la impresora»', async () => {
   const e = entorno([], false, '0 piezas enviadas; 1 pieza ya no se puede imprimir (vendidas o cambiaron). Si alguna no salió…');
-  await e.etiquetar('p1', pieza(), 1);
+  await e.imprimirRevisada('p1', 1, 'Lámpara');
   assert.match(e.mensajes.at(-1)![0], /falta etiqueta: la pieza ya no se puede imprimir \(vendida o cambió\)/);
   assert.equal(e.mensajes.some(([t]) => /Sale la etiqueta/.test(t)), false);
   assert.deepEqual(e.sonidos, []);

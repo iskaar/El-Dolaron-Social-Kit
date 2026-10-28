@@ -72,6 +72,7 @@ interface FilaBorrador {
   upc?: string | null;
   foto_key: string;
   propietario: string;
+  por_revisar?: number;
 }
 
 /**
@@ -263,7 +264,7 @@ async function crearBorrador(request: Request, env: Env, ctx: ExecutionContext, 
         ...(talla ? { talla } : {}),
         ...(conEdicion && typeof formulario.get('nombre') === 'string' ? { nombre: formulario.get('nombre') } : {}),
         ...(conEdicion && formulario.has('precio') ? { precio: Number(formulario.get('precio')) } : {}) }),
-    }), env, correo);
+    }), env, correo, undefined, true);   // #573: una foto no libera la etiqueta; la libera «Guardar» en la tarjeta de revisión
     let respuesta = await alta(true);
     // Una edición no autorizada se descarta y se guarda con los valores del manifiesto: un 403 aquí
     // detendría la cola de fotos con «Tu sesión venció». El 403 va antes de cualquier escritura.
@@ -300,20 +301,20 @@ async function crearBorrador(request: Request, env: Env, ctx: ExecutionContext, 
     // El reenvío de una foto conserva el precio revisado, el código y el stock ya vendido.
     await env.DB.prepare(
       `insert into productos (id, nombre, marca, categoria, precio, estado_analisis, destino, semana_ingreso,
-                              estado_fisico, stock, talla, foto_key, capturado_por, creado_en, actualizado_en, propietario)
-       values (?, ?, ?, 'ropa', ?, 'listo', 'etiqueta', ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                              estado_fisico, stock, talla, foto_key, capturado_por, creado_en, actualizado_en, propietario, por_revisar)
+       values (?, ?, ?, 'ropa', ?, 'listo', 'etiqueta', ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
        on conflict (id) do nothing`,
     ).bind(id, nombreRopa(prenda, marca), marca, precioRopa, semanaIngreso(ahora), estadoFisico, cantidad, talla, fotoKey,
       capturadoPor, ahora.toISOString(), ahora.toISOString(), propietario).run();
     await subirFoto();
-    const guardada = await env.DB.prepare('select id, nombre, marca, precio, estado_fisico, estado_analisis, stock, talla, codigo from productos where id = ?')
+    const guardada = await env.DB.prepare('select id, nombre, marca, precio, estado_fisico, estado_analisis, stock, talla, codigo, por_revisar from productos where id = ?')
       .bind(id).first<{ estado_analisis: string; nombre: string; marca: string; codigo: string | null }>();
     if (guardada?.estado_analisis === 'descartado' && !guardada.codigo) await env.FOTOS.delete(fotoKey);
     return json(guardada ? { ...guardada, prenda: prendaDeNombre(guardada.nombre, guardada.marca) } : guardada, 201);
   }
   const fotoGuardada = await env.DB.prepare(
-    `insert into productos (id, semana_ingreso, estado_fisico, stock, talla, foto_key, capturado_por, creado_en, actualizado_en, propietario, upc)
-     select ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+    `insert into productos (id, semana_ingreso, estado_fisico, stock, talla, foto_key, capturado_por, creado_en, actualizado_en, propietario, upc, por_revisar)
+     select ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1
      where (exists (select 1 from productos where id = ?) or ? = ''
        or not exists (select 1 from productos where ${MISMO_UPC} and id <> ?))
        and not exists (select 1 from conteo_ajustes where id = ?)
@@ -367,7 +368,7 @@ async function crearBorrador(request: Request, env: Env, ctx: ExecutionContext, 
 /** Las columnas de la lista de piezas: la misma forma en `listarBorradores` y en `listarEtiquetasPendientes`. */
 const COLUMNAS_LISTA = `id, codigo, nombre, categoria, marca, talla, precio_lista, precio, estado_fisico,
                            estado_analisis, destino, stock, semana_ingreso, capturado_por, creado_en, upc, foto_key, propietario,
-                           etiqueta_en, etiqueta_precio, etiqueta_precio_lista, etiqueta_nombre, etiqueta_talla, etiqueta_origen`;
+                           etiqueta_en, etiqueta_precio, etiqueta_precio_lista, etiqueta_nombre, etiqueta_talla, etiqueta_origen, por_revisar`;
 
 const LIMITE_PENDIENTES = 200;
 
@@ -754,7 +755,7 @@ async function capturaUpcGuardada(id: string, leido: string, env: Env, ctx?: Exe
   if (ctx && existente.estado_analisis === 'listo') ctx.waitUntil(guardarImagenComoFoto(leido, env));
   return json({ id:existente.id, upc:existente.upc, nombre:existente.nombre, precio:existente.precio, stock:existente.stock,
     estado_fisico:existente.estado_fisico, estado_analisis:existente.estado_analisis, codigo:codigo?.codigo,
-    tiene_foto:existente.tiene_foto, creado_en:existente.creado_en,
+    tiene_foto:existente.tiene_foto, creado_en:existente.creado_en, por_revisar:existente.por_revisar,
     ...(sumada ? { existente:true, sumadas:sumada.sumadas } : {}) }, 201);
 }
 
@@ -774,7 +775,7 @@ async function sumarUpc(id: string, upc: string, grado: string, cantidad: number
   }
 }
 
-async function capturarPorUpc(request: Request, env: Env, correo: string, ctx?: ExecutionContext): Promise<Response> {
+async function capturarPorUpc(request: Request, env: Env, correo: string, ctx?: ExecutionContext, porRevisar = false): Promise<Response> {
   const cuerpo = (await request.json().catch(() => null)) as Record<string, unknown> | null;
   if (!cuerpo) return json({ error: 'Datos inválidos.' }, 400);
   const leido = codigoLeido(cuerpo.upc);
@@ -839,8 +840,8 @@ async function capturarPorUpc(request: Request, env: Env, correo: string, ctx?: 
   // Una sola inserción completa: dos reintentos nunca restauran stock ni ven una pieza a medio llenar.
   await env.DB.prepare(`insert into productos
     (id, upc, nombre, marca, categoria, precio_lista, precio, estado_fisico, stock, talla, semana_ingreso,
-     capturado_por, creado_en, actualizado_en, estado_analisis, destino, propietario)
-    select ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'listo', 'etiqueta', 'dolaron'
+     capturado_por, creado_en, actualizado_en, estado_analisis, destino, propietario, por_revisar)
+    select ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'listo', 'etiqueta', 'dolaron', ${porRevisar ? 1 : 0}
     where not exists (select 1 from productos where ${MISMO_UPC})
       and not exists (select 1 from conteo_ajustes where id = ?) on conflict (id) do nothing`)
     .bind(cuerpo.id, leido, nombre, ficha.marca.trim().slice(0, 60), categoria, precioLista, precio, estado, stock, talla,
@@ -871,8 +872,8 @@ async function capturarDesconocido(request: Request, env: Env, ctx: ExecutionCon
   if (await fichaDeManifiesto(upc, env)) return json({ error: 'Ese código sí está en la hoja: vuelve a escanearlo.' }, 409);
   const ahora = new Date();
   const { meta } = await env.DB.prepare(`insert into productos
-    (id, upc, nombre, estado_fisico, stock, semana_ingreso, capturado_por, creado_en, actualizado_en, estado_analisis, destino, propietario)
-    select ?, ?, '', ?, ?, ?, ?, ?, ?, 'pendiente', 'etiqueta', 'dolaron'
+    (id, upc, nombre, estado_fisico, stock, semana_ingreso, capturado_por, creado_en, actualizado_en, estado_analisis, destino, propietario, por_revisar)
+    select ?, ?, '', ?, ?, ?, ?, ?, ?, 'pendiente', 'etiqueta', 'dolaron', 1
     where not exists (select 1 from productos where ${MISMO_UPC})
       and not exists (select 1 from conteo_ajustes where id = ?) on conflict (id) do nothing`)
     .bind(cuerpo.id, leido, estado, stock, semanaIngreso(ahora), correo, ahora.toISOString(), ahora.toISOString(), 'dolaron', upc, estado, cuerpo.id).run();
@@ -948,7 +949,7 @@ async function estadoDesconocido(id: string, env: Env, correo: string, status = 
     .bind(sumada?.id ?? id, propietario, ...(sumada ? [] : [correo])).first<PiezaUpc>();
   return fila ? json({ id:fila.id, upc:fila.upc, nombre:fila.nombre, precio:fila.precio, stock:fila.stock,
     codigo:fila.codigo, estado_fisico:fila.estado_fisico, estado_analisis:fila.estado_analisis,
-    creado_en:fila.creado_en, con_foto:fila.tiene_foto,
+    creado_en:fila.creado_en, con_foto:fila.tiene_foto, por_revisar:fila.por_revisar,
     ...(sumada ? { existente:true, sumadas:sumada.sumadas } : {}) }, status) : json({ error: 'Pieza no encontrada.' }, 404);
 }
 
@@ -1061,10 +1062,16 @@ async function revisarCaptura(id: string, request: Request, env: Env, correo: st
       values (?, 0, 'descartado', ?, ?, ?, ?) on conflict(id) do nothing`)
       .bind(id, semanaIngreso(new Date()), correo, ahora, ahora).run();
   }
-  const fila = await env.DB.prepare(`select id, precio, estado_fisico, estado_analisis, stock, talla, codigo, nombre, marca, categoria, upc, propietario from productos where ${alcance}`)
-    .bind(id, correo, desde).first<{ id: string; nombre: string; marca: string; categoria: string; estado_analisis: string; precio: number; estado_fisico: string; stock: number; talla: string | null; codigo: string | null; upc:string | null; propietario:string }>();
+  const fila = await env.DB.prepare(`select id, precio, precio_lista, estado_fisico, estado_analisis, stock, talla, codigo, nombre, marca, categoria, upc, propietario, por_revisar from productos where ${alcance}`)
+    .bind(id, correo, desde).first<{ id: string; nombre: string; marca: string; categoria: string; estado_analisis: string; precio: number; precio_lista: number; estado_fisico: string; stock: number; talla: string | null; codigo: string | null; upc:string | null; propietario:string; por_revisar: number }>();
   if (!fila) return json({ error: 'Solo puedes corregir lo que capturaste en las últimas 24 horas.' }, 404);
-  if (request.method === 'GET') return json({ ...fila, prenda: prendaDeNombre(fila.nombre, fila.marca) });
+  if (request.method === 'GET') {
+    // Revisión de una pieza nueva (#573): el precio de cada grado, para que la tarjeta lo muestre al cambiar A/B/C.
+    const config = fila.por_revisar && fila.categoria !== 'ropa' && fila.precio_lista > 0 ? await leerConfig(env) : null;
+    const precios = config && Object.fromEntries([...ESTADOS_FISICOS].map((e) =>
+      [e, calcularPrecio({ precioLista: fila.precio_lista, categoria: fila.categoria || 'otros', estadoFisico: e, config }).precio]));
+    return json({ ...fila, prenda: prendaDeNombre(fila.nombre, fila.marca), ...(precios ? { precios } : {}) });
+  }
   if (request.method === 'DELETE') {
     const retirable = `${alcance}
         and not ${CAPTURA_SUMADA}
@@ -1090,11 +1097,22 @@ async function revisarCaptura(id: string, request: Request, env: Env, correo: st
   if (request.method !== 'PATCH') return json({ error: 'Metodo no permitido.' }, 405);
   const cambios = await request.json().catch(() => null) as Record<string, unknown> | null;
   if (!cambios || Array.isArray(cambios) || typeof cambios !== 'object' || !Object.keys(cambios).length
-      || Object.keys(cambios).some((k) => !['precio', 'estado_fisico', 'prenda', 'marca'].includes(k))) {
+      || Object.keys(cambios).some((k) => !['precio', 'estado_fisico', 'prenda', 'marca', 'nombre', 'confirmar'].includes(k))
+      || (cambios.confirmar !== undefined && cambios.confirmar !== true)) {
     return json({ error: 'Corrección invalida.' }, 400);
   }
-  if (cambios.precio !== undefined && (typeof cambios.precio !== 'number' || !PRECIOS_ROPA.includes(cambios.precio))) {
-    return json({ error: 'Escoge $200, $150, $100, $80 o $50 MXN.' }, 400);
+  // #573: en la revisión de una pieza nueva el precio y el nombre se editan como en la tarjeta UPC. Ropa conserva sus precios fijos.
+  const libre = fila.categoria !== 'ropa' && !!fila.por_revisar;
+  if (cambios.precio !== undefined && (typeof cambios.precio !== 'number'
+      || (libre ? !Number.isSafeInteger(cambios.precio) || cambios.precio <= 0 : !PRECIOS_ROPA.includes(cambios.precio)))) {
+    return json({ error: libre ? 'Escribe un precio mayor a cero en pesos.' : 'Escoge $200, $150, $100, $80 o $50 MXN.' }, 400);
+  }
+  const usuario = await leerUsuario(env, correo);
+  const nombreEditado = cambios.nombre === undefined ? undefined : typeof cambios.nombre === 'string' ? decodificarNombre(cambios.nombre).trim().slice(0, 120) : '';
+  if (nombreEditado !== undefined && !libre) return json({ error: 'El nombre solo se corrige al revisar una pieza nueva (en ropa sale de prenda y marca).' }, 400);
+  if (nombreEditado === '') return json({ error: 'El nombre no puede quedar vacío.' }, 400);
+  if (nombreEditado !== undefined && nombreEditado !== fila.nombre.trim() && !puedeEditarInventario(usuario)) {
+    return json({ error: 'Tu cuenta no tiene permiso para editar el inventario.' }, 403);
   }
   if (cambios.estado_fisico !== undefined && (typeof cambios.estado_fisico !== 'string' || !ESTADOS_FISICOS.has(cambios.estado_fisico))) {
     return json({ error: 'Estado fisico invalido.' }, 400);
@@ -1104,23 +1122,28 @@ async function revisarCaptura(id: string, request: Request, env: Env, correo: st
   if ((cambios.prenda !== undefined || cambios.marca !== undefined) && fila.categoria !== 'ropa') return json({ error: 'Solo se corrige prenda y marca en ropa.' }, 400);
   const prenda = cambios.prenda === undefined ? prendaDeNombre(fila.nombre, fila.marca) : cambios.prenda as string;
   const marca = cambios.marca === undefined ? fila.marca : cambios.marca as string;
-  const nombre = cambios.prenda === undefined && cambios.marca === undefined ? fila.nombre : nombreRopa(prenda.trim(), marca.trim());
+  const nombre = nombreEditado ?? (cambios.prenda === undefined && cambios.marca === undefined ? fila.nombre : nombreRopa(prenda.trim(), marca.trim()));
   const grado = String(cambios.estado_fisico ?? fila.estado_fisico);
   const conflicto = cambios.estado_fisico !== undefined ? await conflictoUpc(env, fila.upc || '', grado, fila.propietario, id) : null;
   if (conflicto) return conflicto;
   // #479: quien no autoriza el precio de una pieza con etiqueta lo pide al dueño; lo demás se guarda como siempre.
-  const pidePrecio = typeof cambios.precio === 'number' && cambios.precio !== fila.precio && !autorizarPrecio(await leerUsuario(env, correo), fila);
-  const precioNuevo = pidePrecio ? null : cambios.precio ?? null;
+  const pidePrecio = typeof cambios.precio === 'number' && cambios.precio !== fila.precio && !autorizarPrecio(usuario, fila);
+  // Cambiar el grado de una pieza por revisar sin tocar el precio lo recalcula con la banda del grado, como al guardar la tarjeta UPC.
+  const porGrado = cambios.precio === undefined && cambios.estado_fisico !== undefined && cambios.estado_fisico !== fila.estado_fisico
+    && fila.por_revisar && fila.categoria !== 'ropa' && fila.precio_lista > 0
+    ? calcularPrecio({ precioLista: fila.precio_lista, categoria: fila.categoria || 'otros', estadoFisico: grado, config: await leerConfig(env) }).precio : null;
+  const precioNuevo = pidePrecio ? null : cambios.precio ?? porGrado;
   const resultado = await env.DB.prepare(`update productos set precio = coalesce(?, precio),
-      estado_fisico = coalesce(?, estado_fisico), nombre = ?, marca = ?, actualizado_en = ?, modificado_por = ? where ${alcance} and estado_analisis = 'listo'
+      estado_fisico = coalesce(?, estado_fisico), nombre = ?, marca = ?, actualizado_en = ?, modificado_por = ?,
+      por_revisar = case when ? = 1 then 0 else por_revisar end where ${alcance} and estado_analisis = 'listo'
       and upc is ? and estado_fisico = ?
       and (? = 0 or ? = '' or not exists (select 1 from productos where ${MISMO_UPC} and id <> ?))
       and (? is null or precio_lista = 0 or precio_lista >= ?)`)
-    .bind(precioNuevo, cambios.estado_fisico ?? null, nombre, marca.trim(), ahora, correo, id, correo, desde,
+    .bind(precioNuevo, cambios.estado_fisico ?? null, nombre, marca.trim(), ahora, correo, cambios.confirmar ? 1 : 0, id, correo, desde,
       fila.upc, fila.estado_fisico, cambios.estado_fisico === undefined ? 0 : 1, normalizarUpc(fila.upc), fila.propietario, normalizarUpc(fila.upc), grado, id,
       precioNuevo, precioNuevo).run();
   if (!resultado.meta.changes) return json({ error: 'La captura no está lista, fue eliminada o el precio supera el de lista.' }, 409);
-  const guardada = await env.DB.prepare(`select id, precio, estado_fisico, estado_analisis, stock, talla, codigo, nombre, marca from productos where ${alcance}`)
+  const guardada = await env.DB.prepare(`select id, precio, estado_fisico, estado_analisis, stock, talla, codigo, nombre, marca, por_revisar from productos where ${alcance}`)
     .bind(id, correo, desde).first<{ nombre: string; marca: string }>();
   if (guardada && pidePrecio) {
     const sugerido = cambios.precio as number;
