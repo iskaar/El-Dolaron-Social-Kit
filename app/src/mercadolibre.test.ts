@@ -5,7 +5,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import worker from './worker.ts';
 import { tienda, DUENO } from './prueba-d1.ts';
-import { guardarTokens, mlFetch, precioML, tituloML, dimensionesJpeg, idProductoML, gtinDe, modeloDe } from './mercadolibre.ts';
+import { guardarTokens, mlFetch, precioML, tituloML, dimensionesJpeg, idProductoML, gtinDe, modeloDe, descripcionPorDefecto } from './mercadolibre.ts';
 
 const LLAVE = Buffer.from(crypto.getRandomValues(new Uint8Array(32))).toString('base64');
 const RUTA = 'ruta-secreta-de-prueba';
@@ -568,6 +568,33 @@ test('publicar (modelo clásico): foto de R2, título, precio en pesos, guía y 
     assert.equal((await t.pedir(`/api/ml/publicar/${id}`, cuerpoPublicar())).status, 409);
   });
 });
+
+test('descripción por defecto (#565): ropa con talla -> US y MX, estado y origen; sin talla no inventa nada', () => {
+  const base = { nombre: "Jeans Levi's 501 Hombre", marca: "Levi's", categoria: 'ropa' };
+  const cierre = ['Condición: nuevo.', 'Mercancía americana, pieza única.', 'Incluye solo lo que se ve en las fotos.'];
+  assert.equal(descripcionPorDefecto({ ...base, talla: 'M' }),
+    ["Jeans Levi's 501 Hombre", "Marca: Levi's", 'Talla US: M', 'Talla MX: M (mediana)', ...cierre].join('\n'));
+  // Sin talla: solo nombre, marca y lo fijo; nada de tallas ni medidas inventadas.
+  assert.equal(descripcionPorDefecto({ ...base, talla: null }), ["Jeans Levi's 501 Hombre", "Marca: Levi's", ...cierre].join('\n'));
+  // Calzado: la talla guardada son los cm de MX; la US sale de la tabla.
+  assert.match(descripcionPorDefecto({ ...base, talla: '26' }), /Talla MX: 26 cm\nTalla US: 8 hombre \/ 9 mujer\n/);
+  assert.match(descripcionPorDefecto({ ...base, talla: 'Niño 19.5' }), /Talla MX: 19.5 cm\nTalla US: 13.5C\n/);
+  assert.match(descripcionPorDefecto({ ...base, talla: 'Niño 6 años / S' }), /\nTalla: Niño 6 años \(talla S\)\n/);
+  // Fuera de ropa no hay talla; sin emojis ni signos; sin enlaces ni correos.
+  assert.equal(descripcionPorDefecto({ nombre: 'Lego 🚀 Set <b>', marca: '', categoria: 'juguetes', talla: 'M' }),
+    ['Lego  Set b', ...cierre].join('\n'));
+  assert.ok(!/https?:|www\.|@/.test(descripcionPorDefecto({ ...base, nombre: 'Playera www.tienda.com ventas@x.mx', talla: 'M' })));
+});
+
+test('publicar: sin descripción del dueño va la plantilla; con ella, la del dueño', () => conML(async (t) => {
+  const id = pieza(t, { talla: 'L' });
+  assert.equal((await t.pedir(`/api/ml/publicar/${id}`, cuerpoPublicar({ descripcion: '' }))).status, 201);
+  const texto = t.sim.de('POST', /\/description$/)[0].cuerpo.plain_text as string;
+  assert.match(texto, /Talla US: L\nTalla MX: L \(grande\)\n/);
+  assert.match(texto, /Mercancía americana, pieza única\./);
+  await publicarPieza(t);   // cuerpoPublicar trae «Jeans nuevos»
+  assert.deepEqual(t.sim.de('POST', /\/description$/)[1].cuerpo, { plain_text: 'Jeans nuevos' });
+}));
 
 test('publicar: dos clics a la vez crean un solo artículo', async () => {
   await conML(async (t) => {
