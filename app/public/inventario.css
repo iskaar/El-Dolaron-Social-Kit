@@ -231,3 +231,5 @@ main:has(#modo-buscar:not([hidden])) .caja{margin-bottom:12px}
 }
 @media(max-width:999px){body.enfocado .captura-movil:has(>.tablero-ropa:not([hidden]))>.visor:not(.bloqueada){height:clamp(120px,24dvh,200px)}}
 .stepper input.stepper-entrada{width:64px;min-width:0;height:56px;text-align:center;font-size:var(--t-cantidad);font-weight:800;font-variant-numeric:tabular-nums}
+/* Calzado con UPC (#552): número de la caja y los renglones que coinciden */
+.numero-calzado{margin:12px 0}.numero-calzado .chips{padding:8px 0 4px;gap:8px}.numero-calzado .chips button{min-width:0;min-height:44px;padding:6px 10px;font-size:14px;box-shadow:none}.numero-calzado small{display:block;margin-top:4px}

@@ -7,6 +7,7 @@ import { aCentavos } from './ficha.js';
 import { stepper, bloquear, cerrarHoja } from './inventario-ui.js';
 import { montarPrecio } from './inventario-precio.js';
 import { esRopa as piezaRopa } from './ropa.js';
+import { buscarCalzado, tipoCalzadoDeNombre, tallaUs } from './tallas.js';
 import { HUECO_LECTOR } from './lector.js';
 import { leerMultiplicador } from './venta.js';
 
@@ -23,6 +24,8 @@ export function tarjetaEditada(a){
   return (a.nombre!==undefined&&a.nombre.trim()!==(a.ficha?.nombre??'').trim())
     ||(a.precio!==undefined&&aCentavos(a.precio)!==(a.ficha?.precios?.[a.estado]??a.ficha?.precio));
 }
+/** Calzado del manifiesto sin su número de la caja (#552): no se guarda, imprime ni fotografía hasta elegirlo. */
+export const faltaCalzado=a=>a?.tipo==='nueva'&&a.ficha?.calzado&&!a.talla?'Falta número de calzado':'';
 /**
  * La pieza actual que todavía recibe la foto del obturador: una tarjeta del manifiesto o un código sin registro (su foto la crea).
  * Una pieza ya registrada (`guardada`/`existente`) no: la foto es de una pieza nueva; reemplazar la suya es «Foto nueva» (#549).
@@ -66,7 +69,7 @@ export function vigilarLectorEnCampo(campo,{alLeer,salir,ahora=()=>performance.n
     if(e.key==='Enter'){
       e.preventDefault();const codigo=rapido&&texto.length>=4?texto:'';reiniciar();
       if(codigo){campo.value=previo;campo.dispatchEvent(new Event('input'));}
-      salir();if(codigo)alLeer(codigo);return;
+      salir(!!codigo);if(codigo)alLeer(codigo);return;
     }
     if(!/^[\da-z-]$/i.test(e.key)){if(e.key!=='Shift'&&e.key!=='CapsLock')reiniciar();return;}
     const t=ahora(),hueco=t-ultima;
@@ -84,7 +87,8 @@ export function crearCaptura({ api, imprimir, cambiar=()=>{}, enLinea=()=>naviga
     if(!actual||actual.tipo!=='nueva')return;
     if(!enLinea())throw new Error('Sin red: se suma al volver la señal');
     const abierta=actual;
-    const guardada=await api('/api/borradores/upc',{id:abierta.id,upc:abierta.upc,stock:abierta.cantidad,estado_fisico:abierta.estado,...cambiosTarjeta(abierta)});
+    if(faltaCalzado(abierta))throw new Error('Falta el número del calzado');
+    const guardada=await api('/api/borradores/upc',{id:abierta.id,upc:abierta.upc,stock:abierta.cantidad,estado_fisico:abierta.estado,...(abierta.talla?{talla:abierta.talla}:{}),...cambiosTarjeta(abierta)});
     actual={...abierta,tipo:'guardada',pieza:guardada};pintar();
     const salio=guardada.estado_analisis&&guardada.estado_analisis!=='listo'?false:await imprimir(guardada.id,abierta.cantidad,{reimprimir:!!guardada.existente});actual.faltaEtiqueta=!salio;pintar();return guardada;
   }
@@ -134,6 +138,32 @@ export function crearCaptura({ api, imprimir, cambiar=()=>{}, enLinea=()=>naviga
     limpiar(){actual=null;resultados=[];pintar();}, actual:()=>actual };
 }
 
+/**
+ * «Número de la caja» del calzado con UPC (#552): se escribe lo que dice la caja (US, C/Y, EU o cm) y los renglones que
+ * coinciden salen como chips; el nombre del manifiesto solo los ordena. Elegir fija `actual.talla` (el cm que se guarda);
+ * escribir otra cosa la quita para no guardar un número viejo. Enter elige el primero.
+ */
+export function numeroCalzado({nodo,boton},actual,ficha,cambiar){
+  const raiz=nodo('div',undefined,'numero-calzado'),etiqueta=nodo('label','Número de la caja'),campo=nodo('input'),
+    chips=nodo('div',undefined,'chips'),elegida=nodo('small',undefined,'ayuda');
+  campo.inputMode='decimal';campo.autocomplete='off';campo.enterKeyHint='done';campo.maxLength=8;etiqueta.append(campo);
+  chips.setAttribute('role','group');chips.setAttribute('aria-label','Números que coinciden');elegida.setAttribute('role','status');
+  const preferido=tipoCalzadoDeNombre(`${ficha.nombre??''} ${ficha.descripcion??''}`);let filas=[];
+  const clave=f=>`${f.tipo}:${f.indice}`;
+  const rotular=()=>{elegida.textContent=actual.talla?`Elegido: ${actual.tallaRotulo||tallaUs(actual.talla)} · se imprime ${actual.talla}`:'Escribe el número de la caja y elige';};
+  const marcar=()=>{for(const b of chips.children)b.setAttribute('aria-pressed',String(b.dataset.clave===actual.tallaClave));rotular();};
+  const fijar=f=>{actual.talla=f.valor;actual.tallaClave=clave(f);actual.tallaRotulo=f.rotulo;marcar();cambiar();};
+  const buscar=()=>{
+    filas=buscarCalzado(campo.value,preferido).slice(0,8);chips.replaceChildren();
+    for(const f of filas){const b=boton(f.rotulo,()=>fijar(f));b.dataset.clave=clave(f);chips.append(b);}
+    marcar();
+  };
+  campo.value=actual.textoNumero??'';
+  campo.oninput=()=>{actual.textoNumero=campo.value;if(actual.talla){delete actual.talla;delete actual.tallaClave;delete actual.tallaRotulo;cambiar();}buscar();};
+  buscar();raiz.append(etiqueta,chips,elegida);
+  return {raiz,campo,elegirPrimero:()=>{if(filas[0]&&!actual.talla)fijar(filas[0]);}};
+}
+
 export async function iniciar(ctx) {
   const {$,nodo,boton,mensaje,hoja,api,pesos,dueno,pc,foco,resultado}=ctx;
   const raiz=$('modo-capturar');raiz.replaceChildren();
@@ -159,7 +189,7 @@ export async function iniciar(ctx) {
   const neutro=()=>mensaje(pc()?'Escanea o escribe':'Escanea o toma foto');
   function actualizarDisparo(){
     const actual=flujo.actual(),falta=esRopa&&!piezaSinRegistrar(actual)?tablero.faltante():'';
-    const motivo=falta||(pendienteFoto?'Espera la foto':'');bloquear(disparo,motivo);ayudaDisparo.textContent=motivo;
+    const motivo=falta||faltaCalzado(actual)||(pendienteFoto?'Espera la foto':'');bloquear(disparo,motivo);ayudaDisparo.textContent=motivo;
     if(!pc()){disparo.textContent=falta?falta.replace('Falta ','Elige '):'';disparo.setAttribute('aria-label',falta?disparo.textContent:'Tomar foto');}
   }
   // Modo enfocado (#461): una etiqueta pedida sin impresora conectada queda como alerta hasta que se conecte.
@@ -181,6 +211,7 @@ export async function iniciar(ctx) {
 
   const vacioPieza=()=>{if(pc()&&!pieza.children.length)pieza.append(nodo('p','Escanea un código para empezar','vacio'));};
   function pintar({actual,resultados,siguiente}){
+    let botonGuardar;
     lista.replaceChildren();
     const varias=resultados.length>1;lista.hidden=encabezadoLista.hidden=!varias;if(!pendienteFoto)remota.replaceChildren();
     for(const p of resultados)lista.append(resultado(p,()=>flujo.elegir(p)));
@@ -202,6 +233,10 @@ export async function iniciar(ctx) {
       campoPrecio.value=actual.precio??String((p.precios?.[actual.estado]??p.precio)/100);campoPrecio.inputMode='decimal';campoPrecio.readOnly=!dueno;
       campoPrecio.oninput=()=>{actual.precio=campoPrecio.value;};precio.append(campoPrecio);tarjeta.append(nombre,precio);
       for(const campo of [campoNombre,campoPrecio])vigilarLectorEnCampo(campo,{salir:()=>{campo.blur();foco();},alLeer:codigo=>ctx.recibir(codigo,'usb').catch(e=>mensaje(e.message,'error'))});
+      if(p.calzado){
+        const numero=numeroCalzado({nodo,boton},actual,p,()=>{actualizarDisparo();bloquear(botonGuardar,faltaCalzado(actual));});tarjeta.append(numero.raiz);
+        vigilarLectorEnCampo(numero.campo,{salir:lector=>{if(!lector)numero.elegirPrimero();numero.campo.blur();foco();},alLeer:codigo=>ctx.recibir(codigo,'usb').catch(e=>mensaje(e.message,'error'))});
+      }
     }else{
       tarjeta.append(nodo('h2',p?.nombre||'Sin registro'));
       if(p)tarjeta.append(nodo('strong',pesos(p.precios?.[actual.estado]??p.precio),'precio'));
@@ -214,7 +249,9 @@ export async function iniciar(ctx) {
       if(conPermiso){bloquear(sumar,!navigator.onLine?'Sin red: se suma al volver la señal':'');const fila=nodo('div',undefined,'acciones');fila.append(stepper(n,v=>{n=v;sumar.textContent=rotulo(n);},{min:1,max:maximo,nombre:'Piezas a sumar'}),sumar,boton(p.tiene_foto?'Foto nueva':'Añadir foto',()=>fotoPieza(p),p.tiene_foto?'':'primario'));carta.append(fila);}else tarjeta.append(nodo('p','Solo consulta','solo-consulta'));
       const precioPedido=nodo('div',undefined,'bloque-precio');carta.append(precioPedido);montarPrecio(ctx,precioPedido,p);
     }else if(actual.tipo==='nueva'){
-      const fila=nodo('div',undefined,'acciones');if(!piezaRopa(p))tarjeta.append(nodo('p',nombreEstado(actual.estado)));carta.append(fila);fila.append(stepper(actual.cantidad,n=>flujo.cantidad(n),{min:0,max:999,nombre:'Piezas de este código'}),boton(etiqueteraLista()?'Guardar e imprimir':'Guardar',async()=>{await flujo.guardar();hoy+=actual.cantidad;textoHoy();const p=flujo.actual()?.pieza;mensaje(p?.existente?`Ya existía · +${p.sumadas}${p.codigo?` a ${p.codigo}`:''}`:flujo.actual()?.faltaEtiqueta?'Guardada · falta etiqueta':'Guardada · etiqueta enviada',p?.existente?'aviso':flujo.actual()?.faltaEtiqueta?'aviso':'etiqueta');foco();},'primario'));
+      const fila=nodo('div',undefined,'acciones');if(!piezaRopa(p))tarjeta.append(nodo('p',nombreEstado(actual.estado)));carta.append(fila);
+      botonGuardar=boton(etiqueteraLista()?'Guardar e imprimir':'Guardar',async()=>{await flujo.guardar();hoy+=actual.cantidad;textoHoy();const p=flujo.actual()?.pieza;mensaje(p?.existente?`Ya existía · +${p.sumadas}${p.codigo?` a ${p.codigo}`:''}`:flujo.actual()?.faltaEtiqueta?'Guardada · falta etiqueta':'Guardada · etiqueta enviada',p?.existente?'aviso':flujo.actual()?.faltaEtiqueta?'aviso':'etiqueta');foco();},'primario');
+      bloquear(botonGuardar,faltaCalzado(actual));fila.append(stepper(actual.cantidad,n=>flujo.cantidad(n),{min:0,max:999,nombre:'Piezas de este código'}),botonGuardar);
       if(!actual.imagenBuscada){actual.imagenBuscada=true;void imagen(actual,foto);}
       else if(actual.imagen)pintarImagen(actual,foto);
     }else if(actual.tipo==='sin-registro'){
@@ -246,9 +283,10 @@ export async function iniciar(ctx) {
   async function fotoNueva(a=null){
     if(!pc())return movil.tomar(piezaSinRegistrar(a||flujo.actual()));
     if(esRopa&&!a&&!tablero.validar())return;
+    if(faltaCalzado(a))throw new Error(faltaCalzado(a));
     if(pendienteFoto)return;
     pendienteFoto=true;actualizarDisparo();if(!a)pieza.replaceChildren();
-    const id=a?.id||crypto.randomUUID(),params={cantidad:a?.cantidad||cantidad,estado_fisico:esRopa&&!a?.upc?'nuevo':a?.estado||estado,...(a?.upc?{upc:a.upc}:esRopa?tablero.valores():{upc:''})};
+    const id=a?.id||crypto.randomUUID(),params={cantidad:a?.cantidad||cantidad,estado_fisico:esRopa&&!a?.upc?'nuevo':a?.estado||estado,...(a?.upc?{upc:a.upc,...(a.talla?{talla:a.talla}:{})}:esRopa?tablero.valores():{upc:''})};
     try{const {pedirFoto}=await import('./camara-pc.js');$('chip-celular').textContent='● Esperando foto';const r=await pedirFoto({tipo:'pieza_nueva',pieza_id:id,params,contenedor:remota});if(['lista','cancelada'].includes(r.estado))remota.replaceChildren();if(r.estado==='lista'){hoy+=params.cantidad;textoHoy();const d=await api(`/api/piezas/${id}`);flujo.elegir(d.pieza);contador.poner(1);$('chip-celular').textContent='● Celular · Listo';mensaje('Foto recibida','ok');}else{$('chip-celular').textContent='■ No responde';mensaje(r.motivo||'El celular no responde','aviso');}}
     finally{pendienteFoto=false;actualizarDisparo();if(!flujo.actual())vacioPieza();foco();}
   }

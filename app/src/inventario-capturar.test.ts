@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { runInNewContext } from 'node:vm';
-import { crearCaptura, cambiosTarjeta, vigilarLectorEnCampo, piezaSinRegistrar } from '../public/inventario-capturar.js';
+import { crearCaptura, cambiosTarjeta, vigilarLectorEnCampo, piezaSinRegistrar, faltaCalzado, numeroCalzado } from '../public/inventario-capturar.js';
 import { registroFoto, formularioPendiente } from '../public/foto-pendiente.js';
 import worker, { permitidaParaVendedor } from './worker.ts';
 import { tienda, PRODUCTO, DUENO } from './prueba-d1.ts';
@@ -430,4 +430,131 @@ test('#549: el obturador del celular solo entrega la foto a una tarjeta sin regi
   assert.equal(piezaSinRegistrar({...nueva,tipo:'guardada',pieza:{id:'n'}}),null);   // el topper recién guardado no recibe la playera
   assert.equal(piezaSinRegistrar({tipo:'existente',pieza:{id:'e'}}),null);
   assert.equal(piezaSinRegistrar(null),null);
+});
+
+// Calzado con UPC (#552): el número de la caja viaja desde la tarjeta hasta la fila y la etiqueta.
+function calzado() {
+  const t = manifiesto();
+  t.db.prepare(`insert into manifiesto(upc,descripcion,nombre,departamento,precio_usd,tcin,actualizado_en) values('191907910421',?,'Tenis de mujer','SHOES',2000,'','')`).run("Women's Running Shoes");
+  return t;
+}
+const altaCalzado = (extra: Record<string, unknown> = {}) => ({ id: crypto.randomUUID(), upc: '0191907910421', stock: 1, estado_fisico: 'nuevo', ...extra });
+
+test('#552: la ficha del manifiesto dice si es calzado; la lámpara no', async t0 => {
+  const t = calzado(); t0.after(async () => { await t.esperar(); t.db.close(); });
+  const zapato = (await t.pedir('/api/manifiesto/0191907910421')).cuerpo;
+  assert.equal(zapato.calzado, true); assert.equal(zapato.departamento, 'SHOES');
+  assert.equal((await t.pedir('/api/manifiesto/0191907910414')).cuerpo.calzado, false);
+  // Una pieza ya identificada sin manifiesto (la ficha «propia») también se reconoce por su nombre.
+  t.db.prepare("insert into productos (id, upc, nombre, categoria, precio_lista, precio, estado_fisico, stock, estado_analisis, destino, propietario, semana_ingreso, creado_en, actualizado_en) values (?, '555555555552', 'Tenis Nike Court', 'ropa', 50000, 40000, 'nuevo', 1, 'listo', 'etiqueta', 'dolaron', 'S44', '', '')").run(crypto.randomUUID());
+  assert.equal((await t.pedir('/api/manifiesto/555555555552')).cuerpo.calzado, true);
+});
+
+test('#552: POST /api/borradores/upc guarda la talla, la etiqueta la imprime y un reintento no duplica', async t0 => {
+  const t = calzado(); t0.after(async () => { await t.esperar(); t.db.close(); });
+  const a = altaCalzado({ talla: '27' });
+  const r = await t.pedir('/api/borradores/upc', a);
+  assert.equal(r.status, 201);
+  assert.equal(t.db.prepare('select talla from productos where id=?').get(a.id)!.talla, '27');
+  const etiqueta = (await t.pedir('/api/etiquetas', { ids: [a.id] })).cuerpo[0];
+  assert.match(tsplEtiqueta(etiqueta, 1, 0, 2), /\/ 27/);
+  assert.equal((await t.pedir('/api/borradores/upc', a)).status, 201, 'El reintento con el mismo id responde la misma pieza');
+  assert.equal(t.db.prepare('select count(*) n from productos where upc is not null').get()!.n, 1);
+  assert.equal(t.db.prepare('select stock from productos where id=?').get(a.id)!.stock, 1);
+  // Talla de niño en cm; sin talla la pieza sigue naciendo como antes (la obligatoriedad vive en la tarjeta).
+  const nino = altaCalzado({ talla: 'Niño 17', upc: '0191907910414' });
+  assert.equal((await t.pedir('/api/borradores/upc', nino)).status, 201);
+  assert.equal(t.db.prepare('select talla from productos where id=?').get(nino.id)!.talla, 'Niño 17');
+  const sin = altaCalzado({ estado_fisico: 'liquidacion' });
+  assert.equal((await t.pedir('/api/borradores/upc', sin)).status, 201);
+  assert.equal(t.db.prepare('select talla from productos where id=?').get(sin.id)!.talla, null);
+});
+
+test('#552: una talla que no existe es 400 y no deja fila; una talla nueva no cambia una pieza ya registrada', async t0 => {
+  const t = calzado(); t0.after(async () => { await t.esperar(); t.db.close(); });
+  for (const mala of ['99', 'Niño 9', 'm', 27, ['27']]) {
+    assert.equal((await t.pedir('/api/borradores/upc', altaCalzado({ talla: mala }))).status, 400, JSON.stringify(mala));
+  }
+  assert.equal(t.db.prepare('select count(*) n from productos where upc is not null').get()!.n, 0);
+  const primera = altaCalzado({ talla: '27' });
+  await t.pedir('/api/borradores/upc', primera);
+  const suma = await t.pedir('/api/borradores/upc', altaCalzado({ talla: '28' }));
+  assert.equal(suma.status, 201);
+  assert.equal(t.db.prepare('select talla from productos where id=?').get(primera.id)!.talla, '27', 'sumar no cambia la talla');
+  assert.equal(t.db.prepare('select stock from productos where id=?').get(primera.id)!.stock, 2);
+});
+
+test('#552: la foto con UPC y talla (cola del celular) llega al alta con la talla', async t0 => {
+  const t = calzado(); t0.after(async () => { await t.esperar(); t.db.close(); });
+  const id = crypto.randomUUID();
+  const f = formularioPendiente(registroFoto(new Blob(['foto'], { type: 'image/jpeg' }), { id, upc: '0191907910421', talla: '27' }));
+  assert.equal(f.get('talla'), '27');
+  const r = await worker.fetch!(new Request('https://caja.prueba/api/borradores', { method: 'POST', body: f }) as never, t.env, t.ctx as never);
+  assert.equal(r.status, 201);
+  const fila = t.db.prepare('select talla, upc, foto_key from productos where id=?').get(id)!;
+  assert.deepEqual([fila.talla, fila.upc, fila.foto_key], ['27', '0191907910421', `fotos/${id}.jpg`]);
+  const mala = formularioPendiente(registroFoto(new Blob(['foto'], { type: 'image/jpeg' }), { id: crypto.randomUUID(), upc: '0191907910421', talla: '99' }));
+  assert.equal((await worker.fetch!(new Request('https://caja.prueba/api/borradores', { method: 'POST', body: mala }) as never, t.env, t.ctx as never)).status, 400);
+});
+
+test('#552: sin el número del calzado la tarjeta no guarda; con él lo manda', async () => {
+  const llamadas: any[] = [];
+  const flujo = crearCaptura({ enLinea: () => true, imprimir: async () => true, api: async (ruta, cuerpo) => { llamadas.push([ruta, cuerpo]); return { id: 'x', estado_analisis: 'listo' }; } });
+  const a: any = { tipo: 'nueva', id: 'estable', upc: '0191907910421', ficha: { calzado: true, nombre: 'Tenis' }, cantidad: 1, estado: 'nuevo' };
+  flujo.retomar(a);
+  assert.equal(faltaCalzado(a), 'Falta número de calzado');
+  await assert.rejects(flujo.guardar(), /Falta el número del calzado/);
+  assert.equal(llamadas.length, 0); assert.equal(flujo.actual(), a);
+  a.talla = '27';
+  assert.equal(faltaCalzado(a), '');
+  await flujo.guardar();
+  assert.equal(llamadas[0][0], '/api/borradores/upc'); assert.equal(llamadas[0][1].talla, '27');
+  // Lo que no es calzado no manda talla y la guardia no lo toca.
+  llamadas.length = 0;
+  flujo.retomar({ tipo: 'nueva', id: 'otro', upc: '0191907910414', ficha: { calzado: false }, cantidad: 1, estado: 'nuevo' });
+  await flujo.guardar();
+  assert.equal('talla' in llamadas[0][1], false);
+  assert.equal(faltaCalzado({ tipo: 'sin-registro', ficha: { calzado: true } }), '');
+});
+
+test('#552: el campo «Número de la caja» ofrece los renglones, ordena por el nombre y elige con un toque o con Enter', () => {
+  class Nodo {
+    textContent = ''; className = ''; children: Nodo[] = []; dataset: Record<string, string> = {}; atributos: Record<string, string> = {}; value = ''; onclick: Function = () => {}; oninput: Function = () => {};
+    append(...n: Nodo[]) { this.children.push(...n); } replaceChildren(...n: Nodo[]) { this.children = n; }
+    setAttribute(k: string, v: string) { this.atributos[k] = v; }
+  }
+  const nodo = (_tag: string, texto = '', clase = '') => Object.assign(new Nodo(), { textContent: texto, className: clase });
+  const boton = (texto: string, accion: Function) => Object.assign(new Nodo(), { textContent: texto, onclick: accion });
+  const a: any = { tipo: 'nueva', upc: '1', ficha: { calzado: true } }; let cambios = 0;
+  const n = numeroCalzado({ nodo, boton } as any, a, { nombre: 'Tenis de mujer', descripcion: "Women's Running Shoes" }, () => cambios++);
+  const chips = () => (n.raiz.children[1] as Nodo).children;
+  const escribir = (texto: string) => { (n.campo as any).value = texto; (n.campo as any).oninput(); };
+  assert.equal(chips().length, 0);
+  escribir('9');
+  assert.deepEqual(chips().slice(0, 2).map(c => c.textContent), ['US 9 M · 26', 'US 9 H · 27'], "Women's: mujer primero");
+  assert.ok(chips().length <= 8);
+  chips()[1].onclick();
+  assert.equal(a.talla, '27'); assert.equal(chips()[1].atributos['aria-pressed'], 'true'); assert.equal(chips()[0].atributos['aria-pressed'], 'false'); assert.equal(cambios, 1);
+  escribir('28');
+  assert.equal(a.talla, undefined, 'Escribir otro número quita el anterior: no se guarda uno viejo'); assert.equal(faltaCalzado(a), 'Falta número de calzado');
+  n.elegirPrimero();
+  assert.ok(a.talla); assert.equal(a.tallaRotulo, chips()[0].textContent);
+  escribir('99'); assert.equal(chips().length, 0); n.elegirPrimero(); assert.equal(a.talla, undefined);
+  // Repintado de la tarjeta: el texto y la elección se conservan.
+  escribir('11c'); n.elegirPrimero();
+  const otra = numeroCalzado({ nodo, boton } as any, a, { nombre: 'Tenis', descripcion: '' }, () => {});
+  assert.equal((otra.campo as any).value, '11c'); assert.equal((otra.raiz.children[1] as Nodo).children[0].atributos['aria-pressed'], 'true');
+});
+
+test('#552: vigilarLectorEnCampo avisa a salir si lo que terminó en Enter fue un lector (no elegir el primer chip)', () => {
+  const campo = Object.assign(new EventTarget(), { value: '' }) as any;
+  let reloj = 0; const salidas: boolean[] = [];
+  vigilarLectorEnCampo(campo, { ahora: () => reloj, salir: (lector?: boolean) => { salidas.push(!!lector); }, alLeer: () => {} });
+  const tecla = (key: string, ms: number) => { reloj += ms; campo.dispatchEvent(Object.assign(new Event('keydown', { cancelable: true }), { key })); if (key.length === 1) campo.value += key; };
+  for (const k of '1234567890') tecla(k, k === '1' ? 400 : 10);
+  tecla('Enter', 10);
+  campo.value = '';
+  for (const k of '28') tecla(k, k === '2' ? 400 : 200);
+  tecla('Enter', 200);
+  assert.deepEqual(salidas, [true, false]);
 });
