@@ -185,7 +185,6 @@ const IMAGEN = 'Recibimos tu imagen. Escríbenos tu pregunta por texto y te ayud
 // Herramientas que atiende la tienda (Issue #296, #499): nombre → ruta de solo lectura y sus parámetros.
 const RUTAS = {
   buscar_productos: ['productos', { q: 'q', categoria: 'categoria', talla: 'talla', precio_min: 'min', precio_max: 'max' }],
-  cupos_promocion: ['promocion', {}],
 };
 
 /** Consulta de solo lectura en la app principal. Otra herramienta, error; el token nunca sale a logs. */
