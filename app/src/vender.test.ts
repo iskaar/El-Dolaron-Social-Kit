@@ -7,7 +7,7 @@ import { runInNewContext } from 'node:vm';
 import { tienda, DUENO } from './prueba-d1.ts';
 import { permiso, puede, esDeCaja, type Rol } from './cuentas.ts';
 import * as venta from '../public/venta.js';
-import { textoWhatsApp, telefonoInteresado, codigoDeRespuesta, enlaceApartar, textoSeguimiento, compartirTarjetas, crearTarjeta,
+import { textoWhatsApp, telefonoInteresado, codigoDeRespuesta, enlaceApartar, textoSeguimiento, compartirTarjetas, crearTarjeta, partirNombre,
   fechaLegible, horaLegible, textoAvisoCliente, enlaceCliente, estadoMia, agruparMias, cobradoMias } from '../public/vender.js';
 
 function pieza(db: DatabaseSync, cambios: Record<string, unknown> = {}) {
@@ -382,7 +382,7 @@ test('tarjeta JPEG 1080 × 1350, foto contain y precio/código/talla/logo sin de
       queueMicrotask(() => this.onload());
     }
   } });
-  const r = await crearTarjeta({ foto: '/api/foto/x', codigo: 'ED-123', precio: 20000, precio_lista: 30000, talla: 'M' });
+  const r = await crearTarjeta({ foto: '/api/foto/x', nombre: 'Blusa de algodón', codigo: 'ED-123', precio: 20000, precio_lista: 30000, talla: 'M' });
   assert.equal(canvas.width, 1080); assert.equal(canvas.height, 1350);
   assert.equal(r.type, 'image/jpeg'); assert.equal(r.name, 'ED-123.jpg');
   assert.ok(Math.abs(Number(dibujos[0][3]) - 469) < 1e-9);
@@ -393,8 +393,21 @@ test('tarjeta JPEG 1080 × 1350, foto contain y precio/código/talla/logo sin de
   assert.equal(rects.length, 2);
   assert.deepEqual(rects.map((r) => r[1]), [0, 1000]);
   assert.equal(Number(dibujos[1][1]) + Number(dibujos[1][3]), 1040);
-  assert.deepEqual(textos, ['$200', '$300', 'ED-123', 'Talla M']);
+  assert.ok(Number(dibujos[1][2]) + Number(dibujos[1][4]) <= 1350);
+  assert.deepEqual(textos, ['Blusa de algodón', '$200', '$300', 'ED-123', 'Talla M']);
   assert.equal(tachados, 1);
+});
+
+test('partirNombre: cabe en una línea, parte por palabras, recorta con «…» y limpia espacios', () => {
+  const medidor = { measureText: (t: string) => ({ width: t.length * 10 }) }; // 10 px por carácter
+  assert.deepEqual(partirNombre(medidor, '  Blusa \n de   algodón ', 200, 2), ['Blusa de algodón']);
+  assert.deepEqual(partirNombre(medidor, 'Tenis Nike Air Max originales nuevos', 150, 2), ['Tenis Nike Air', 'Max originales…']);
+  assert.deepEqual(partirNombre(medidor, 'Tenis Nike Air Max 270', 150, 2), ['Tenis Nike Air', 'Max 270']);
+  assert.deepEqual(partirNombre(medidor, 'Pantalón corte recto', 100, 1), ['Pantalón…']);
+  assert.deepEqual(partirNombre(medidor, 'Supercalifragilisticoespialidoso piña', 100, 2), ['Supercalif', 'ragilisti…']);
+  assert.deepEqual(partirNombre(medidor, '', 100, 2), []);
+  assert.deepEqual(partirNombre(medidor, undefined as unknown as string, 100, 2), []);
+  for (const t of ['a'.repeat(200), 'Camisa ñandú '.repeat(8)]) for (const l of partirNombre(medidor, t, 300, 2)) assert.ok(l.length * 10 <= 300);
 });
 
 test('una computadora registra al interesado con el cajero del PIN, nunca la cuenta compartida', async (t) => {
