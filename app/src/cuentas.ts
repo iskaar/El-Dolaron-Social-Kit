@@ -84,6 +84,7 @@ const PANTALLAS: Record<string, Rol[]> = {
   '/socios': CAJA,
   '/pedidos': CAJA,
   '/vender': VENDER,
+  '/manual': VENDER,   // manual interactivo de la revendedora (#594): practica con datos de ejemplo, sin API
   '/avisos': CAJA,   // ventas de Mercado Libre por atender (Issue #429)
   '/tarjeta-bandas': TODOS,
   '/reportes': DUENO,
