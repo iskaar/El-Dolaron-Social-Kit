@@ -98,7 +98,7 @@ test('#499 B.4: código, foto y enlace solo de piezas del catálogo público, y 
     const [pieza] = r.cuerpo.productos;
     assert.equal(pieza.codigo, 'ED-000777');
     assert.equal(pieza.foto, 'https://dolarones.eldolaron.com/api/catalogo/foto/ED-000777');
-    assert.equal(pieza.url, 'https://eldolaron.com/#catalogo');
+    assert.equal(pieza.url, 'https://eldolaron.com/?pieza=ED-000777#catalogo');
     const foto = await catalogoPublico(new Request(pieza.foto), t.env, new URL(pieza.foto));
     assert.equal(foto?.status, 200);
     assert.equal(foto?.headers.get('content-type'), 'image/jpeg');

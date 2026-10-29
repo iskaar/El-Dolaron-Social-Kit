@@ -26,17 +26,19 @@ const APARTAR_REVENDEDORA = 'Apártala: responde con el código.';
 const cierre = (revendedora) => `${revendedora ? APARTAR_REVENDEDORA : APARTAR}\n`
   + '🚚 Envíos todos los viernes.\n'
   + '📍 Jardín Hidalgo 129, Soledad · todos los días de 11 a 8';
+// Issue #590: enlace del sitio que abre el visor del catálogo sobre esta pieza (todas las de /vender son VENDIBLE).
+export const enlacePieza = (codigo) => `https://eldolaron.com/?pieza=${encodeURIComponent(codigo)}#catalogo`;
 const unaLinea = (texto) => String(texto ?? '').replace(/\s+/g, ' ').trim();
 
 /** Función pura: el cierre va una sola vez, también al compartir varias piezas. */
 export function textoWhatsApp(piezas, revendedora = false) {
   const CIERRE = cierre(revendedora);
   if (!piezas.length || piezas.length > 10) throw new Error('Selecciona de 1 a 10 piezas.');
-  if (piezas.length > 1) return piezas.map((p) => `${p.codigo} · ${unaLinea(p.nombre)} · ${pesos(p.precio)}`).join('\n') + `\n${CIERRE}`;
+  if (piezas.length > 1) return piezas.map((p) => `${p.codigo} · ${unaLinea(p.nombre)} · ${pesos(p.precio)} · ${enlacePieza(p.codigo)}`).join('\n') + `\n${CIERRE}`;
   const p = piezas[0];
   return `🛍️ ${unaLinea(p.nombre)}${p.talla ? ` · Talla ${unaLinea(p.talla)}` : ''}\n`
     + `💵 ${pesos(p.precio)}${p.precio_lista > p.precio ? ` (antes ${pesos(p.precio_lista)})` : ''}\n`
-    + `🔖 ${p.codigo}\n${CIERRE}`;
+    + `🔖 ${p.codigo}\n🔗 ${enlacePieza(p.codigo)}\n${CIERRE}`;
 }
 
 export const enlaceApartar = (i) => '/pedidos?' + new URLSearchParams({

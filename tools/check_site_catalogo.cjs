@@ -1,6 +1,6 @@
 // Run: node tools/check_site_catalogo.cjs
 const assert = require("node:assert/strict");
-const { precio, consulta, apiBase } = require("../site/public/catalogo.js");
+const { precio, consulta, apiBase, codigoDePieza } = require("../site/public/catalogo.js");
 
 assert.equal(precio(15000), "$150");
 assert.equal(precio(24950), "$249.50");
@@ -18,6 +18,11 @@ assert.equal(apiBase("?api=http://127.0.0.1:8787"), "http://127.0.0.1:8787");
 for (const bad of ["javascript:alert(1)", "https://evil.example", "ftp://127.0.0.1", "no-es-url"]) {
   assert.equal(apiBase("?api=" + encodeURIComponent(bad)), "https://dolarones.eldolaron.com");
 }
+
+// ?pieza= (Issue #590): solo códigos válidos; lo demás se ignora.
+assert.equal(codigoDePieza("?pieza=ED-000123"), "ED-000123");
+assert.equal(codigoDePieza("?x=1&pieza=ed-7"), "ED-7");
+for (const bad of ["", "?pieza=", "?pieza=ED-", "?pieza=ED-1%20OR%201", "?pieza=<script>", "?pieza=ED-12345678901", "?q=ED-1"]) assert.equal(codigoDePieza(bad), "");
 
 // Catálogo en una página falsa (Issue #241): reintento, talla, tiempo agotado y botón Reintentar.
 const { readFileSync } = require("node:fs");
@@ -49,7 +54,7 @@ function pagina(fetcher, extra = {}) {
   const relojes = [];
   vm.runInNewContext(fuente, {
     document: { querySelector: () => null, getElementById: (id) => (id === "catalogo" ? root : null), createElement: () => new Nodo(), ...extra.document },
-    location: { search: "" }, Image: extra.Image || class extends Nodo {}, matchMedia: extra.matchMedia, fetch: fetcher, AbortController, URL, URLSearchParams, Intl, Number, String, encodeURIComponent,
+    location: { search: extra.search || "" }, Image: extra.Image || class extends Nodo {}, matchMedia: extra.matchMedia, fetch: fetcher, AbortController, URL, URLSearchParams, Intl, Number, String, encodeURIComponent,
     setTimeout: (fn) => relojes.push(fn), clearTimeout: () => {},
   });
   const textos = () => partes[".catalog-grid"].children.map((li) => li.children[1].children.map((n) => n.textContent));
@@ -124,6 +129,27 @@ const tick = () => new Promise((r) => setImmediate(r));
   assert.equal(morph.partes[".piece-dialog"].open, false);
   assert.equal(morphImg.style.viewTransitionName, "");
   assert.equal(morphBtn.focused, true);
+
+  // Enlace a una pieza (Issue #590): busca el código y abre el visor solo con coincidencia exacta.
+  const consultas = [];
+  const enlace = pagina(async (url) => {
+    const q = new URL(url).searchParams.get("q");
+    consultas.push(q);
+    const piezas = q === "ED-9" ? [{ nombre: "Otra", codigo: "ED-90", precio: 1000, foto: "https://x/y.jpg" }, { nombre: "Chamarra", codigo: "ED-9", precio: 30000, foto: "https://x/z.jpg" }] : [];
+    return { ok: true, json: async () => ({ piezas, total: piezas.length, hay_mas: false, siguiente: null }) };
+  }, { search: "?pieza=ED-9" });
+  await tick();
+  assert.deepEqual(consultas, ["ED-9"]);
+  assert.equal(enlace.partes[".search-input"].value, "ED-9");
+  assert.equal(enlace.partes[".piece-dialog"].open, true);
+  assert.equal(enlace.partes[".piece-dialog-title"].textContent, "Chamarra");
+  const vendida = pagina(async (url) => { consultas.push(new URL(url).searchParams.get("q")); return { ok: true, json: async () => ({ piezas: [], total: 0, hay_mas: false, siguiente: null }) }; }, { search: "?pieza=ED-5" });
+  await tick();
+  assert.equal(vendida.partes[".piece-dialog"].open, false);
+  assert.match(vendida.partes[".catalog-status"].textContent, /No encontramos piezas para «ED-5»/);
+  const mala = pagina(async (url) => { consultas.push(new URL(url).searchParams.get("q")); return { ok: true, json: async () => ({ piezas: [], total: 0, hay_mas: false, siguiente: null }) }; }, { search: "?pieza=hola" });
+  await tick();
+  assert.equal(consultas.at(-1), null);   // malformado: carga normal, sin búsqueda
 
   // Búsqueda por ?q= y botón Limpiar.
   p.partes[".search-input"].value = "  nada  ";

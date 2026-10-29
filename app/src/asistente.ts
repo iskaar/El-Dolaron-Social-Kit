@@ -56,8 +56,8 @@ export async function buscarProductos(db: D1Database, filtros: Filtros, hostFoto
       nombre: p.nombre, precio: pesos(p.precio), talla: p.talla ?? null, disponibilidad: disponibilidad(p.stock, p.sin_inventario),
       codigo: publica ? p.codigo : null,
       foto: publica ? `https://${hostFoto}/api/catalogo/foto/${p.codigo}` : null,
-      // ponytail: el sitio no tiene página por pieza; el enlace lleva al catálogo, donde se busca por código.
-      url: publica ? 'https://eldolaron.com/#catalogo' : null,
+      // Issue #590: el sitio abre el visor del catálogo sobre esta pieza (catalogo.js lee ?pieza=).
+      url: publica ? `https://eldolaron.com/?pieza=${encodeURIComponent(p.codigo)}#catalogo` : null,
     };
   });
 }
