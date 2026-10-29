@@ -130,7 +130,7 @@ test('si el asistente escala, la conversación queda pausada y no vuelve a conte
   const r = red('Eso lo confirmo con el equipo. ESCALAR');
   try {
     const env = entorno({}, { ANTHROPIC_API_KEY: 'clave' });
-    await correr(env, [texto('m2', '5214421234567', '¿Tienen promociones?')]);
+    await correr(env, [texto('m2', '5214421234567', '¿Aceptan tarjeta?')]);
     assert.equal(env.EVENTS.guardados.has('pausado:5214421234567'), true);
     await correr(env, [texto('m3', '5214421234567', '¿Y los precios?')]);
     assert.equal(r.llamadas.modelo.length, 1);

@@ -7,7 +7,7 @@ const normalizar = (texto) => texto.normalize('NFD').replace(/[\u0300-\u036f]/g,
 
 const RESPUESTAS = [
   // Issue #583: sin promo vigente. Sigue primero para que «¿a qué hora es la inauguración?» no caiga en horario.
-  { palabras: ['inauguracion', 'inaguracion', 'promocion', 'promo', 'descuento', 'cupon', 'cien pesos', '100 pesos', 'oferta', 'primeras'],
+  { palabras: ['inauguracion', 'inaguracion', 'promocion', 'promociones', 'promo', 'promos', 'descuento', 'descuentos', 'ofertas', 'cupon', 'cien pesos', '100 pesos', 'oferta', 'primeras'],
     texto: 'Por ahora no tenemos ninguna promoción vigente.\nEn nuestros grupos de WhatsApp te enteras primero de lo que llega: Ropa https://eldolaron.com/ropa y Mercancía General https://eldolaron.com/general\nY te esperamos en Jardín Hidalgo 129, Centro de Soledad: https://maps.app.goo.gl/RgWXq1AUvyXsV9ts6' },
   { palabras: ['grupo', 'grupos', 'unirme', 'unirse', 'unirnos'],
     texto: 'Tenemos dos grupos de WhatsApp. Ropa (novedades de ropa americana): https://eldolaron.com/ropa\nMercancía General (hogar, belleza, juguetes y más): https://eldolaron.com/general' },
