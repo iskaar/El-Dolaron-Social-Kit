@@ -312,7 +312,8 @@ function pieza(p, { botones = true, marca = '', check = '' } = {}) {
     <button type="button" class="texto" data-etiqueta="Anotar a un cliente">Anotar a un cliente</button>` : ''}</div></article>`;
 }
 const elegir = (p, marcado) => `<label class="check resaltable"><input type="checkbox" data-acc="elegir" data-id="${p.id}" aria-label="Elegir ${esc(p.nombre)} ${p.codigo}"${marcado ? ' checked' : ''}><span data-etiqueta="Elegir">Elegir</span></label>`;
-const sinMas = () => '<p data-etiqueta="No hay más piezas por ahora.">No hay más piezas por ahora.</p>';
+// Después de apartar la pieza A, la lista sigue con las otras de ejemplo (nunca queda vacía).
+const otras = () => pieza(PIEZAS.b) + pieza(PIEZAS.c);
 const resultado = (html, error = false, boton = '') => `<div class="resultado${error ? ' error' : ''}" role="status"><p>${error ? '⚠ ' : ''}${html}</p>${boton}</div>`;
 const etiqueta = (t) => `<span data-etiqueta="${t}">${t}</span>`;
 const cuerpo = (base, dialogo = '') => `<div class="base${dialogo ? ' atenuada' : ''}">${base}</div>${dialogo}`;
@@ -438,7 +439,7 @@ const DEFS = {
     final: () => ({ dlg: true, cliente: CLIENTE, tel: '444 123 4567', entrega: 'tienda', err: '', guardada: false }),
     vista(est) {
       const p = PIEZAS.a;
-      if (est.guardada) return cuerpo(nav() + sinMas());
+      if (est.guardada) return cuerpo(nav() + otras());
       const base = nav() + pieza(p);
       if (!est.dlg) return cuerpo(base);
       return cuerpo(base, `<dialog open aria-labelledby="t-vendi"><h2 id="t-vendi" tabindex="-1" data-etiqueta="Ya la vendí">Ya la vendí</h2><p class="grande">${p.codigo} · ${esc(p.nombre)} · ${V.pesos(p.precio)}</p>
@@ -468,17 +469,16 @@ const DEFS = {
 
   avisar: {
     pasos: [
-      { acc: 'avisar', texto: 'Toca el botón verde de WhatsApp para avisarle a tu cliente.' },
-      { acc: 'seguir', texto: 'Toca «Seguir con otras piezas».' },
+      { acc: 'avisar', texto: 'Toca el botón azul «Avisarle a… por WhatsApp» para avisarle a tu cliente.' },
     ],
-    fin: 'Listo. Si tu cliente no paga en 48 horas, la pieza vuelve a la venta sola.',
+    fin: 'Listo: así le llega tu aviso. Si no paga en 48 horas, la pieza vuelve a la venta sola. Luego toca «Seguir con otras piezas».',
     inicio: () => ({ dlg: true, aviso: false }),
     final: () => ({ dlg: true, aviso: true }),
     vista(est) {
       const p = PIEZAS.a, vence = new Date(AHORA + 48 * H).toISOString();
-      const base = nav() + sinMas();
+      const base = nav() + otras();
       if (!est.dlg) return cuerpo(base);
-      return cuerpo(base, `<dialog open aria-labelledby="titulo-listo"><div class="listo-icono" aria-hidden="true">✓</div>
+      return cuerpo('', `<dialog open aria-labelledby="titulo-listo"><div class="listo-icono" aria-hidden="true">✓</div>
         <h2 id="titulo-listo" tabindex="-1" data-etiqueta="¡Venta guardada!">¡Venta guardada!</h2>
         <p class="grande">${p.codigo} · ${esc(p.nombre)} para ${CLIENTE}.</p>
         <p class="grande"><strong><span data-etiqueta="Tienes hasta el">Tienes hasta el</span> ${V.fechaLegible(vence)} para que pague.</strong></p>
