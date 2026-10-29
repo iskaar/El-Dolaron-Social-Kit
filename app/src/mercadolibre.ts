@@ -504,6 +504,15 @@ async function retorno(env: Env, url: URL): Promise<Response> {
 
 /* ---------- lista de piezas ---------- */
 
+// Orden de la lista; la clave viene del navegador, el SQL solo de aqui.
+const ORDENES: Record<string, string> = {
+  recientes: 'coalesce(m.actualizado_en, p.creado_en) desc',
+  mas_existencias: 'p.stock desc',
+  menos_existencias: 'p.stock asc',
+  codigo: 'p.codigo asc',
+  nombre: 'lower(p.nombre) asc',
+};
+
 async function listarPiezas(env: Env, url: URL): Promise<Response> {
   const filtro = url.searchParams.get('filtro') ?? 'pendientes';
   const pagina = Math.max(1, Math.floor(Number(url.searchParams.get('pagina') ?? 1)) || 1);
@@ -517,14 +526,16 @@ async function listarPiezas(env: Env, url: URL): Promise<Response> {
   const palabras = (url.searchParams.get('q') ?? '').trim().slice(0, 80).split(/\s+/).filter(Boolean).slice(0, 8);
   const busca = palabras.map(() =>
     ` and instr(lower(coalesce(p.nombre, '') || ' ' || coalesce(p.codigo, '') || ' ' || coalesce(p.marca, '') || ' ' || coalesce(p.categoria, '')), lower(?)) > 0`).join('');
+  const min = Math.max(0, Math.floor(Number(url.searchParams.get('min') ?? 0)) || 0);
+  const orden = ORDENES[url.searchParams.get('orden') ?? ''] ?? ORDENES.recientes;
   const { results } = await env.DB.prepare(
     `select p.id, p.codigo, p.nombre, p.categoria, p.marca, p.precio, p.estado_fisico, p.stock,
             m.producto_id as m_id, m.ml_item_id, m.estado, m.precio_ml, m.permalink, m.ultimo_error, m.actualizado_en
      from productos p left join ml_publicaciones m on m.producto_id = p.id
-     where (${donde})${busca}
-     order by coalesce(m.actualizado_en, p.creado_en) desc, p.id
+     where (${donde})${busca}${min ? ' and p.stock >= ?' : ''}
+     order by ${orden}, p.id
      limit 51 offset ?`,
-  ).bind(...palabras, (pagina - 1) * 50).all<Record<string, any>>();
+  ).bind(...palabras, ...(min ? [min] : []), (pagina - 1) * 50).all<Record<string, any>>();
   return json({
     piezas: results.slice(0, 50).map((f) => ({
       producto: {
