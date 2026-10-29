@@ -194,7 +194,8 @@
 <template id="tarjeta"><article class="pieza">
   <img width="320" height="320" loading="lazy" decoding="async"><div class="detalle">
     <h2></h2><div class="precio"></div><div class="codigo"></div><div class="nota talla"></div><div class="marca"></div>
-    <label class="check"><input type="checkbox">Seleccionar</label><div class="cola"></div><button type="button" class="quiere">La quiere</button><button type="button" class="vendida" hidden>Ya la vendí</button>
+    <label class="check"><input type="checkbox"><span class="txt-elegir">Seleccionar</span></label><div class="cola"></div>
+    <button type="button" class="principal compartir-uno" hidden>Compartir</button><button type="button" class="vendida" hidden>Ya la vendí</button><button type="button" class="quiere">La quiere</button>
   </div>
 </article></template>
 <script type="module">
@@ -240,6 +241,10 @@ function pintarSeleccion() {
   $('preparar').textContent = `Compartir ${seleccion.size} en WhatsApp`;
   $('seleccion').hidden = vista !== 'piezas' || !seleccion.size;
 }
+// La revendedora ve el estado de la pieza como chip (color + ícono + palabra); la caja conserva su texto de siempre.
+function marcar(marca, clase, texto) {
+  if (revendedora) textoEn(marca, 'span', texto, `chip ${clase}`); else marca.textContent = texto;
+}
 function pintarPiezas() {
   $('piezas').replaceChildren();
   if (!piezas.length) textoEn($('piezas'), 'p', siguiente ? 'No encontré piezas aquí. Toca «Ver más piezas».' : 'No hay más piezas por ahora.', 'vacio');
@@ -250,17 +255,29 @@ function pintarPiezas() {
     const img = tarjeta.querySelector('img');
     img.src = p.foto;
     img.alt = p.nombre;
-    img.addEventListener('error', () => { tarjeta.querySelector('.marca').textContent = 'No cargó la foto. Toca “Actualizar”.'; });
+    const marca = tarjeta.querySelector('.marca');
+    img.addEventListener('error', () => { marca.replaceChildren(); marcar(marca, 'alerta', 'No cargó la foto. Toca “Actualizar”.'); });
     tarjeta.querySelector('h2').textContent = p.nombre;
     tarjeta.querySelector('.precio').textContent = pesos(p.precio);
     tarjeta.querySelector('.codigo').textContent = p.codigo;
     tarjeta.querySelector('.talla').textContent = p.talla ? `Talla ${p.talla}` : '';
-    tarjeta.querySelector('.marca').textContent = compartidas.has(p.id) ? 'Compartida ✓' : '';
     tarjeta.querySelector('input').checked = seleccion.has(p.id);
-    tarjeta.querySelector('input').setAttribute('aria-label', `Seleccionar ${p.nombre} ${p.codigo}`);
     tarjeta.querySelector('.cola').textContent = p.cola.length
       ? p.cola.map((i, n) => `${n + 1}.º ${i.cliente || 'Alguien'} (${i.vendedora_nombre}, ${hora(i.creado_en)})`).join(' · ') : 'Sin interesados';
-    tarjeta.querySelector('.vendida').hidden = !revendedora;
+    if (revendedora) {
+      // Compartir y «Ya la vendí» son las dos acciones; anotar a un cliente queda como enlace. Sin la cola de nombres (U15).
+      tarjeta.querySelector('input').setAttribute('aria-label', `Elegir ${p.nombre} ${p.codigo}`);
+      tarjeta.querySelector('.txt-elegir').textContent = 'Elegir';
+      tarjeta.querySelector('.cola').hidden = true;
+      tarjeta.querySelector('.compartir-uno').hidden = tarjeta.querySelector('.vendida').hidden = false;
+      tarjeta.querySelector('.quiere').textContent = 'Anotar a un cliente';
+      tarjeta.querySelector('.quiere').classList.add('texto');
+      if (compartidas.has(p.id)) marcar(marca, 'ok', '✓ Ya la compartiste');
+      if (p.cola.length) marcar(marca, 'aviso', '⚠ Otra persona también la quiere');
+    } else {
+      tarjeta.querySelector('input').setAttribute('aria-label', `Seleccionar ${p.nombre} ${p.codigo}`);
+      marca.textContent = compartidas.has(p.id) ? 'Compartida ✓' : '';
+    }
     $('piezas').append(fragmento);
   }
   pintarSeleccion();
@@ -327,7 +344,9 @@ $('piezas').addEventListener('click', (e) => {
   const boton = e.target.closest('button');
   if (!boton) return;
   const p = piezas.find((p) => p.id === e.target.closest('article').dataset.id);
-  if (boton.classList.contains('vendida')) abrirVendida(p); else abrirInteresado(p);
+  if (boton.classList.contains('vendida')) abrirVendida(p);
+  else if (boton.classList.contains('compartir-uno')) prepararEnvio([p]);   // una sola pieza, sin tocar la selección
+  else abrirInteresado(p);
 });
 $('form-codigo').addEventListener('submit', async (e) => {
   e.preventDefault();
