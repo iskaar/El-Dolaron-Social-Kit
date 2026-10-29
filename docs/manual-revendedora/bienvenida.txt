@@ -1,0 +1,28 @@
+Mensaje de bienvenida por WhatsApp (Issue #594). Isaac lo manda junto con la imagen entrar.png.
+Cambia {nombre} por el nombre de la revendedora. Sin sesión en persona: la imagen y este texto guían la primera entrada.
+No agregues aquí datos bancarios ni teléfonos personales: el repositorio es público.
+
+--- copiar desde aquí ---
+
+Hola {nombre}, bienvenida a El Dolarón. 🛍️
+
+Con tu celular vendes piezas de la tienda por WhatsApp. Tu cliente paga a la tienda, nunca a ti.
+
+1. Entra aquí: viste.com.mx/vender
+   La primera vez te llega un código a tu correo. En la imagen ves los 6 pasos. Si el correo no llega, mira en Spam.
+
+2. Ya adentro, practica sin miedo: viste.com.mx/manual
+   Ahí hay una práctica de cada tarea. No se manda nada de verdad.
+
+Así vendes:
+1. Toca «Compartir» en una pieza y mándala por WhatsApp.
+2. Si te dicen «la quiero», toca «Ya la vendí» y escribe quién la compró.
+3. La tienda cobra. Tú no cobras. Mira «Mis ventas» para saber cuándo pagan.
+
+La pieza queda apartada 48 horas. Si tu cliente no paga a tiempo, vuelve a la venta sola.
+
+Tu ganancia: 10 % del precio de cada pieza que la tienda cobra (sin contar el envío). Te pagamos cada lunes por transferencia.
+
+¿Dudas? Escríbenos por WhatsApp al 444 543 7754, de 11 a. m. a 8 p. m. 💙
+
+--- hasta aquí ---
