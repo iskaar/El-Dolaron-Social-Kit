@@ -102,6 +102,37 @@ export const ENVIO_COSTO = 99_00;
 export const ENVIO_GRATIS_DESDE = 1000_00;
 export const envioDe = (subtotal) => (subtotal > 0 && subtotal < ENVIO_GRATIS_DESDE ? ENVIO_COSTO : 0);
 
+/**
+ * Clave de rastreo SPEI (#593, paso 1). El cajero la copia del comprobante del cliente. En caja se pide
+ * desde $300 de transferencia; en apartados, envios y pagos de revendedora, siempre.
+ * Banxico acepta hasta 30 caracteres alfanumericos; el minimo de 6 solo frena capturas como «ok» o «123».
+ */
+export const CLAVE_DESDE = 300_00;
+export const CLAVE_RASTREO = /^[A-Z0-9]{6,30}$/;
+/** Mayusculas y sin espacios (los comprobantes la parten en renglones). */
+export const claveRastreoDe = (texto) => String(texto ?? '').replace(/\s+/g, '').toUpperCase();
+const dinero = (centavos) => `$${(centavos / 100).toLocaleString('es-MX', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
+/**
+ * Valida lo que el cajero capturo de una transferencia (centavos enteros) contra lo que se cobra por
+ * ese medio. Menos que lo debido se rechaza; mas se acepta y el excedente se resuelve a mano.
+ * La usan la pantalla y el servidor: ninguno acepta lo que el otro rechazaria.
+ * @param {{ clave: unknown, transferido: number, debido: number }} datos
+ * @returns {{ ok: false, campo: 'clave' | 'monto', error: string }
+ *   | { ok: true, clave: string, transferido: number, aplicado: number, excedente: number }}
+ */
+export function transferenciaDe({ clave, transferido, debido }) {
+  const normalizada = claveRastreoDe(clave);
+  if (!normalizada) return { ok: false, campo: 'clave', error: 'Escribe la clave de rastreo que viene en el comprobante del cliente.' };
+  if (!CLAVE_RASTREO.test(normalizada))
+    return { ok: false, campo: 'clave', error: 'La clave de rastreo lleva de 6 a 30 letras y números, sin acentos, guiones ni símbolos.' };
+  if (!Number.isSafeInteger(transferido) || transferido <= 0)
+    return { ok: false, campo: 'monto', error: 'Escribe el monto que dice el comprobante del cliente.' };
+  if (transferido < debido)
+    return { ok: false, campo: 'monto', error: `El comprobante dice ${dinero(transferido)} y se cobran ${dinero(debido)}. Pídele al cliente que transfiera lo que falta (${dinero(debido - transferido)}).` };
+  return { ok: true, clave: normalizada, transferido, aplicado: debido, excedente: transferido - debido };
+}
+
 /** Viernes en fecha de tienda (YYYY-MM-DD); el jueves a las 20:00 ya pasó el corte. UTC-6 fijo. */
 export function viernesDeEnvio(instante) {
   const local = new Date(new Date(instante).getTime() - 6 * 3_600_000);

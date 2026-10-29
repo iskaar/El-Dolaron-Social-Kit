@@ -3,7 +3,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { runInNewContext } from 'node:vm';
-import { totales, agregar, leerMultiplicador, efectivoAlcanza, saldoCanjeable, dolaronesGanados, maximoCanje, desfaseReloj, anticipoDePedido, envioDe, anticipoMinimoDe, viernesDeEnvio, promoInauguracion, letreroPromo, PROMO_DESCUENTO, PROMO_MINIMO } from '../public/venta.js';
+import { totales, agregar, leerMultiplicador, efectivoAlcanza, saldoCanjeable, dolaronesGanados, maximoCanje, desfaseReloj, anticipoDePedido, envioDe, anticipoMinimoDe, viernesDeEnvio, promoInauguracion, letreroPromo, PROMO_DESCUENTO, PROMO_MINIMO, transferenciaDe, CLAVE_DESDE } from '../public/venta.js';
 
 interface Linea { codigo: string; nombre: string; precio: number; cantidad: number }
 const pieza = (codigo: string, precio: number) => ({ codigo, nombre: codigo, precio });
@@ -170,19 +170,19 @@ test('viernes de envío: corte estricto del jueves 20:00, con UTC-6 fijo', () =>
 
 // Cobro con pedido (Issue #269): el saldo solo existe en el servidor, asi que nunca se encola sin red.
 const cajaFuente = readFileSync('public/caja.html', 'utf8');
-const cobroPedido = (fetchSimulado: () => Promise<unknown>, respuestaForma = 'efectivo') => {
+const cobroPedido = (fetchSimulado: () => Promise<unknown>, respuestaForma = 'efectivo', opciones: { sinPedido?: boolean; valores?: Record<string, string> } = {}) => {
   const guardadas: unknown[] = [];
   const preguntas: number[] = [];
   const enviadas: any[] = [];
   const elementos = new Map<string, any>();
   const $ = (id: string) => {
-    if (!elementos.has(id)) elementos.set(id, { value: id === 'forma' ? 'efectivo' : id === 'efectivo' ? '200' : '', textContent: '', style: {}, focus() {} });
+    if (!elementos.has(id)) elementos.set(id, { value: opciones.valores?.[id] ?? (id === 'forma' ? 'efectivo' : id === 'efectivo' ? '200' : ''), textContent: '', style: {}, focus() { this.enfocado = true; } });
     return elementos.get(id);
   };
   const contexto: Record<string, unknown> = {
-    crypto, Date, $, AbortSignal, Object, totales, efectivoAlcanza, saldoCanjeable, dolaronesGanados, anticipoDePedido,
+    crypto, Date, $, AbortSignal, Object, Math, totales, efectivoAlcanza, saldoCanjeable, dolaronesGanados, anticipoDePedido, transferenciaDe, CLAVE_DESDE,
     lineas: [{ producto_id: 'p1', codigo: 'ED-000001', nombre: 'Ventilador', precio: 30000, cantidad: 1 }],
-    socio: null, catalogo: new Map(), pedidoCargado: { id: 'ped-1', folio: 17, saldo: 10000 },
+    socio: null, catalogo: new Map(), pedidoCargado: opciones.sinPedido ? null : { id: 'ped-1', folio: 17, saldo: 10000 },
     preguntarForma: async (aPagar: number) => { preguntas.push(aPagar); return respuestaForma; },
     impresionRemota: () => false, exigirCaja: () => true, cajaActual: () => 'Caja 1', dolaronesPedidos: () => 0,
     descuento: null, descuentoAplicado: () => 0, promoActual: () => 0, totalNeto: () => 30000, pintarDescuento() {},
@@ -194,8 +194,9 @@ const cobroPedido = (fetchSimulado: () => Promise<unknown>, respuestaForma = 'ef
   const avisoRojo = cajaFuente.slice(cajaFuente.indexOf('const avisoRojo ='), cajaFuente.indexOf('\n', cajaFuente.indexOf('const avisoRojo =')));
   const conPedido = cajaFuente.slice(cajaFuente.indexOf('async function cobrarConPedido('), cajaFuente.indexOf('/* ---------- cobro: primero'));
   const cobro = cajaFuente.slice(cajaFuente.indexOf('async function cobrar()'), cajaFuente.indexOf('let sincronizando = false;'));
+  const errorClave = cajaFuente.slice(cajaFuente.indexOf('function errorClave('), cajaFuente.indexOf("for (const id of ['clave-rastreo'"));
   const cobrar = runInNewContext(`let idVenta = null, creadoEnVenta = null, cobrando = false, formaElegida = false;
-    ${avisoRojo}\n${conPedido}\n${cobro}; cobrar`, contexto);
+    ${avisoRojo}\n${conPedido}\n${errorClave}\n${cobro}; cobrar`, contexto);
   return { cobrar, contexto, guardadas, enviadas, preguntas, $ };
 };
 
@@ -232,6 +233,49 @@ test('cobro con pedido: espera al servidor, manda anticipo y cobra solo el resto
   assert.match(c.$('aviso').textContent, /Cobrado\. Cambio 0.*Anticipo P-17 −10000\./);
   assert.equal(c.contexto.pedidoCargado, null);
   assert.equal((c.contexto.lineas as unknown[]).length, 0);
+});
+
+// Transferencia desde $300 (#593): la caja pide la clave de rastreo y el monto, y el cobro espera al servidor.
+const idToTransferencia = { 'clave-rastreo': ' ejemplo 123456 ', 'monto-transferido': '300' };
+test('caja: transferencia de $300 o mas sin clave no se cobra; el error queda junto al campo', async () => {
+  const c = cobroPedido(async () => { throw new Error('no debe pedir nada'); }, 'transferencia', { sinPedido: true });
+  await c.cobrar();
+  assert.equal(c.enviadas.length, 0);
+  assert.equal(c.guardadas.length, 0);
+  assert.match(c.$('clave-error').textContent, /Escribe la clave de rastreo/);
+  assert.equal(c.$('clave-rastreo').enfocado, true);
+  const poco = cobroPedido(async () => { throw new Error('no debe pedir nada'); }, 'transferencia',
+    { sinPedido: true, valores: { ...idToTransferencia, 'monto-transferido': '299.99' } });
+  await poco.cobrar();
+  assert.equal(poco.enviadas.length, 0);
+  assert.match(poco.$('clave-error').textContent, /Pídele al cliente que transfiera lo que falta/);
+  assert.equal(poco.$('monto-transferido').enfocado, true);
+});
+
+test('caja: transferencia con clave se manda normalizada, espera al servidor y avisa el excedente; sin red no se encola', async () => {
+  const ok = async () => ({ ok: true, status: 201, json: async () => ({ id: 'x', ganados: 0, vale_emitido: null, saldo_pedido: null, excedente_transferencia: 1500 }) });
+  const c = cobroPedido(ok, 'transferencia', { sinPedido: true, valores: { ...idToTransferencia, 'monto-transferido': '315' } });
+  await c.cobrar();
+  assert.equal(c.enviadas[0].forma_pago, 'transferencia');
+  assert.equal(c.enviadas[0].clave_rastreo, 'EJEMPLO123456');
+  assert.equal(c.enviadas[0].monto_transferido, 31500);
+  assert.equal(c.guardadas.length, 0);
+  assert.match(c.$('aviso').textContent, /Cobrado.*Sobraron 1500 en la transferencia/);
+  assert.equal(c.$('clave-rastreo').value, '');   // el siguiente ticket empieza limpio
+
+  const sinRed = cobroPedido(async () => { throw new Error('sin red'); }, 'transferencia', { sinPedido: true, valores: idToTransferencia });
+  await sinRed.cobrar();
+  assert.equal(sinRed.guardadas.length, 0);
+  assert.match(sinRed.$('aviso').textContent, /Sin red.*clave de rastreo/);
+  assert.equal((sinRed.contexto.lineas as unknown[]).length, 1);
+});
+
+test('caja: transferencia bajo $300 sigue como siempre, sin clave y con la cola local', async () => {
+  const c = cobroPedido(async () => { throw new Error('sin red'); }, 'transferencia', { sinPedido: true });
+  (c.contexto.lineas as any[])[0].precio = 29999;
+  await c.cobrar();
+  assert.equal(c.guardadas.length, 1);                       // se encola como hoy
+  assert.equal(c.enviadas[0].clave_rastreo, undefined);
 });
 
 test('cobro con pedido rechazado por el servidor deja el ticket y el pedido para corregir', async () => {

@@ -8,6 +8,11 @@ import worker from './worker.ts';
 export const DUENO = 'dueno@prueba.mx';
 export const PRODUCTO = 'a1111111-1111-4111-8111-111111111111';
 
+/** Clave de rastreo y monto del comprobante, sinteticos y unicos, para una transferencia de `debido` centavos (#593). */
+let consecutivoClave = 0;
+export const datosTransferencia = (debido: number) =>
+  ({ clave_rastreo: `PRUEBA${String(++consecutivoClave).padStart(10, '0')}`, monto_transferido: debido });
+
 /** Autorización sintética; las pruebas de portal ejercitan la emisión real. */
 export async function codigoPrueba(db: DatabaseSync, clienteId: string, maximo = 1_000_000): Promise<string> {
   const codigo = 'DC-' + Buffer.from(crypto.getRandomValues(new Uint8Array(12))).toString('base64url');

@@ -3,7 +3,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { runInNewContext } from 'node:vm';
-import { tienda, PRODUCTO, DUENO } from './prueba-d1.ts';
+import { tienda, PRODUCTO, DUENO, datosTransferencia } from './prueba-d1.ts';
 import { VENDIBLE } from './catalogo.ts';
 import { PUBLICABLE } from './mercadolibre.ts';
 
@@ -215,7 +215,7 @@ test('venta, pedido o publicación después de preleer impiden fusión/descarte 
       })).status, 201);
       if (cambio === 'pedido') assert.equal((await t.pedir('/api/pedidos', {
         id: crypto.randomUUID(), caja: 'Caja 1', cliente: 'Prueba', telefono: '4441234567',
-        entrega: 'tienda', anticipo: 10000, forma_pago: 'transferencia', lineas: [{ producto_id: id, cantidad: 1 }],
+        entrega: 'tienda', anticipo: 10000, forma_pago: 'transferencia', ...datosTransferencia(10000), lineas: [{ producto_id: id, cantidad: 1 }],
       })).status, 201);
       if (cambio === 'publicacion') t.db.prepare(`insert into ml_publicaciones (producto_id, estado, actualizado_en)
         values (?, 'publicando', ?)`).run(id, new Date().toISOString());

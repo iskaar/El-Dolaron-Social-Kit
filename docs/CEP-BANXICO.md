@@ -1,6 +1,6 @@
 # Validar transferencias con el CEP de Banxico (Issue #593)
 
-Investigación de la fase 1. No cambia código de la app, no despliega nada y no agrega dependencias. Hecha el 29/10/2026 sobre `main` 2e58a37.
+Investigación de la fase 1. No cambia código de la app, no despliega nada y no agrega dependencias. Hecha el 29/10/2026 sobre `main` 2e58a37. El paso 1 (clave de rastreo única, sin servicio externo) ya está implementado: ver «Paso 1 implementado (#593)» antes de las fuentes.
 
 Marcas de las fuentes: **verificado** = lo comprobé con una petición real; **leído (código)** = lo leí en JavaScript/Python publicado y no lo probé en vivo; **leído (página)** = texto de una página oficial o del proveedor; **solo resumen** = lo dijo un resumen de búsqueda y no abrí la fuente.
 
@@ -280,6 +280,42 @@ Isaac pidió comparar. No me registré, no pedí llaves ni llamé a ningún endp
 | 7 | **Preguntar a Banxico** si el uso automático de bajo volumen es aceptable | Sí, un correo corto. No bloquea el desarrollo de la opción D. |
 | 8 | **Aviso de privacidad** si se usa proveedor (datos de transferencias salen a un tercero) | Actualizarlo antes de activar B; `docs/BASES-Y-AVISO-DOLARONES.md` ya trata el aviso de Dolarones. |
 | 9 | **Cuándo exigir verificación**: todas las transferencias, o solo desde un monto | Todas las de apartado/envío/revendedora. En caja, desde $300, para no frenar compras chicas. |
+
+---
+
+## Paso 1 implementado (#593)
+
+Decidido por Isaac el 29/10/2026 (todas según la recomendación de la sección 10). Sin servicio externo, sin consulta a Banxico: el cajero copia la **clave de rastreo** y el **monto** del comprobante del cliente, y la app impide reusar la misma clave. Migración `app/migracion-060-transferencias-spei.sql` (Isaac la corre en sandbox y en producción **antes** del deploy).
+
+**Dónde se exige.** Todo pago por transferencia que la tienda registra, salvo en caja bajo $300:
+
+| Pantalla | Pago | Cuándo pide clave |
+| --- | --- | --- |
+| `/pedidos` (`POST /api/pedidos`) | anticipo de un apartado o de un paquete de envío | siempre que la forma sea transferencia |
+| `/pedidos` (`POST /api/pedidos/:folio/abonos`) | abono de un paquete de envío y pago de un apartado de revendedora (lo registra la tienda; la revendedora nunca captura dinero) | siempre que la forma sea transferencia |
+| `/caja` (`POST /api/ventas`) | cobro de un ticket, también el celular con impresión remota (`imprimir_en`), con Dolarones o con saldo de pedido | cuando lo que se cobra **por transferencia** (después de Dolarones y anticipo) es **$300 o más** (`CLAVE_DESDE` en `public/venta.js`) |
+
+No hay pagos divididos: una venta tiene una sola forma de pago. Tarjeta y efectivo no piden clave. La liquidación de un paquete que emite el ticket (`ventaDePaquete`) no mueve dinero nuevo y no pide clave. `vender.html` no cambia.
+
+**Qué se guarda.** Tabla `transferencias_spei`: `clave_rastreo` (normalizada), `monto` (centavos que dice el comprobante), `aplicado` (centavos registrados como pago), `origen` (`venta`, `anticipo` o `abono`) con su `venta_id` / `pedido_id` / `movimiento_id`, `verificacion` (`cajero`; el paso 2 podrá poner `banxico`), `registrado_por` y `registrado_en`. Sin banco emisor (no se necesita todavía) y sin datos de la cuenta del cliente.
+
+**Reglas.**
+
+- **Clave.** Se quita el espacio, se pone en mayúsculas y debe ser de 6 a 30 letras y números (`[A-Z0-9]`), sin acentos, guiones ni símbolos. Banxico acepta hasta 30 caracteres alfanuméricos (sección 2); el mínimo de 6 es nuestro y solo frena capturas como «ok» o «123».
+- **Una sola vez en toda la tienda**, garantizado por el **índice único** `transferencias_spei_clave`, no por una revisión previa: si dos cobros con la misma clave llegan a la vez, uno gana y el otro recibe 409 «Esa clave de rastreo ya se usó en el ticket XXXXXXXX / el pedido P-n», y no queda venta, abono ni existencia movida del perdedor (el insert de la clave va en el mismo batch que el pago).
+- **Reintentos.** Un reintento con el mismo UUID de venta, pedido o movimiento devuelve el resultado original (también el excedente) y nunca «ya se usó». Con otra clave bajo el mismo UUID sigue siendo 409 de «otro movimiento».
+- **Monto.** Menor que lo que se cobra por transferencia: se rechaza (400) y se dice cuánto falta pedir. Mayor: se registra solo lo debido, se guarda lo transferido y la pantalla avisa que el excedente se resuelve a mano; no se genera saldo. Todo en centavos enteros.
+- **Verificación.** Siempre «confirmado por cajero» con el usuario que la registró; cualquier rol que ya pueda registrar pagos, sin tope diario.
+- **Si el ticket o el pedido se cancelan, o se devuelve algo, la clave sigue usada.** Nada la libera: el dinero ya entró una vez a esa cuenta y reusar el comprobante para otro pago es justo el fraude que se quiere cerrar. Si una captura fue un error de dedo, se corrige a mano en D1 con autorización de Isaac.
+- **Caja sin red.** Una transferencia desde $300 espera al servidor (como una venta con pedido o con Dolarones): la unicidad solo existe en D1, así que no se encola. Bajo $300, la cola local funciona como siempre.
+- **Corte y reportes.** Sin cambio: suman `ventas`, anticipos y abonos por forma de pago, y el excedente nunca entra.
+
+**Pendiente.**
+
+1. Una transferencia real de prueba con `tools/cep_probe.py` (decisión 4).
+2. Prueba gratis de `overrideCaptcha` desde un Worker desplegado en sandbox, temporal y a cargo de Isaac (decisión 5).
+3. Solo si falla la anterior: proveedor tipo Tlaloc, y antes actualizar el aviso de privacidad. Con cualquiera de las dos vías, `verificacion = 'banxico'` y el hash del CEP se agregan en una migración nueva.
+4. Prueba física: caja con transferencia real y `/pedidos` (apartado, abono, revendedora).
 
 ---
 

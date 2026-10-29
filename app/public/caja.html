@@ -77,6 +77,9 @@
   #descuento-pin h3 { margin: 0; font-size: 13px; color: #5b6478; }
   #descuento-pin[hidden] { display: none; }
   #aviso { min-height: 20px; font-size: 14px; margin-top: 8px; }
+  #datos-transferencia[hidden] { display: none; }
+  #clave-ayuda { font-size: 12px; color: #5b6478; margin: 4px 0; }
+  #clave-error { min-height: 18px; font-size: 14px; color: var(--rojo); margin: 4px 0; }
   #rechazadas:not(:empty) { margin-top: 8px; }
   #rechazadas .ticket { border: 1px solid var(--rojo); border-radius: 8px; padding: 8px;
     margin-bottom: 6px; font-size: 13px; color: var(--rojo); }
@@ -256,6 +259,16 @@ if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw-caja.js'
       <option value="transferencia">Transferencia</option>
     </select>
 
+    <!-- Transferencia desde $300 (#593): la clave de rastreo y el monto salen del comprobante del cliente. -->
+    <div id="datos-transferencia" hidden>
+      <label for="clave-rastreo">Clave de rastreo</label>
+      <input id="clave-rastreo" autocomplete="off" autocapitalize="characters" spellcheck="false" maxlength="40" aria-describedby="clave-ayuda clave-error">
+      <label for="monto-transferido">Monto transferido ($)</label>
+      <input id="monto-transferido" type="number" min="0.01" step="0.01" inputmode="decimal" aria-describedby="clave-ayuda clave-error">
+      <p id="clave-ayuda">Viene en el comprobante de tu cliente, igual que el monto. Ejemplo: EJEMPLO1234567890. Cada clave sirve para un solo pago.</p>
+      <p id="clave-error" role="alert"></p>
+    </div>
+
     <label for="efectivo">Efectivo recibido</label>
     <input id="efectivo" type="number" min="0" step="5" inputmode="numeric" placeholder="0">
 
@@ -409,7 +422,7 @@ if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw-caja.js'
 </dialog>
 <script type="module">
 import { CATEGORIAS_GASTO } from '/categorias.js';
-import { totales, agregar, leerMultiplicador, efectivoAlcanza, dolaronesGanados, saldoCanjeable, maximoCanje, MINIMO_REGALO, descuentoDe, TOPE_DESCUENTO, DENOMINACIONES, contadoDe, promoInauguracion, letreroPromo, desfaseReloj, anticipoDePedido } from '/venta.js';
+import { totales, agregar, leerMultiplicador, efectivoAlcanza, dolaronesGanados, saldoCanjeable, maximoCanje, MINIMO_REGALO, descuentoDe, TOPE_DESCUENTO, DENOMINACIONES, contadoDe, promoInauguracion, letreroPromo, desfaseReloj, anticipoDePedido, transferenciaDe, CLAVE_DESDE } from '/venta.js';
 import { abrirCamara } from '/camara.js';
 import {
   reconectarImpresora, conectarImpresora, impresoraLista, imprimirTicket, abrirCajon, explicarErrorUsb, errorImpresora,
@@ -746,7 +759,9 @@ function pintar() {
   const canjeable = saldoCanjeable(socio, t.total);
   const autorizado = !usados || (codigoSocio && usados <= socio.maximo && Date.parse(socio.expira_en) > Date.now());
   $('usar-maximo').disabled = cobrando || !codigoSocio || maximoCanje(socio, t.total) === 0;
-  for (const id of ['codigo', 'socio', 'buscar-socio', 'quitar-socio', 'dolarones', 'efectivo', 'forma', 'cancelar', 'pedir-descuento', 'quitar-descuento', 'quitar-pedido']) $(id).disabled = cobrando;
+  for (const id of ['codigo', 'socio', 'buscar-socio', 'quitar-socio', 'dolarones', 'efectivo', 'forma', 'cancelar', 'pedir-descuento', 'quitar-descuento', 'quitar-pedido', 'clave-rastreo', 'monto-transferido']) $(id).disabled = cobrando;
+  // Transferencia desde $300 (#593): aparecen la clave de rastreo y el monto del comprobante.
+  $('datos-transferencia').hidden = !($('forma').value === 'transferencia' && t.aPagar >= CLAVE_DESDE);
   pintarImpresionRemota();
   $('cobrar').textContent = `Cobrar · ${$('forma').selectedOptions[0].textContent}`;
   $('cobrar').disabled = cobrando || t.total === 0 || usados > t.total || usados > canjeable || !autorizado;
@@ -1154,6 +1169,7 @@ async function cobrarConDolarones(venta, t) {
   venta.vale_emitido = cuerpo.vale_emitido;
   venta.vale_usado = cuerpo.vale_usado;
   venta.saldo_pedido = cuerpo.saldo_pedido;
+  venta.excedente_transferencia = cuerpo.excedente_transferencia;
   if (socio.vale) return { vale:true };
   const saldo = cuerpo.saldo ?? { disponible: socio.disponible - venta.dolarones };
   return { numero: socio.numero, ganados: cuerpo.ganados ?? dolaronesGanados(t.aPagar), saldo: saldo.disponible };
@@ -1233,7 +1249,8 @@ async function cobrarConPedido(venta) {
       signal: AbortSignal.timeout(15000),
     });
   } catch {
-    return avisoRojo('Sin red: una venta con pedido no se cobra sin conexión. Intenta otra vez, o quita el pedido y cobra normal.');
+    return avisoRojo('Sin red: una venta con pedido o con clave de rastreo no se cobra sin conexión. Intenta otra vez'
+      + (pedidoCargado ? ', o quita el pedido y cobra normal.' : '.'));
   }
   const cuerpo = await respuesta.json().catch(() => ({}));
   if (!respuesta.ok) {
@@ -1255,6 +1272,14 @@ function preguntarForma(aPagar, efectivo) {
   d.showModal();
   return new Promise((listo) => d.addEventListener('close', () => listo(d.returnValue), { once: true }));
 }
+
+/** El error de la clave o del monto va junto a sus campos y el foco regresa al que falló. */
+function errorClave(r) {
+  $('clave-error').textContent = r.error;
+  $(r.campo === 'monto' ? 'monto-transferido' : 'clave-rastreo').focus();
+  return false;
+}
+for (const id of ['clave-rastreo', 'monto-transferido']) $(id).addEventListener('input', () => { $('clave-error').textContent = ''; });
 
 async function cobrar() {
   if (cobrando) return;                 // doble clic: el primero ya va en camino
@@ -1300,6 +1325,14 @@ async function cobrar() {
     $('aviso').style.color = '#D72B32';
     return;
   }
+  // Transferencia desde $300 (#593): clave de rastreo y monto del comprobante, validados igual que en el servidor.
+  // Con clave el cobro espera al servidor (como con pedido): la clave solo es unica si la ve la base de datos.
+  let transf = null;
+  if (forma === 'transferencia' && t.aPagar >= CLAVE_DESDE) {
+    transf = transferenciaDe({ clave: $('clave-rastreo').value, transferido: Math.round(Number($('monto-transferido').value || 0) * 100), debido: t.aPagar });
+    if (!transf.ok) { pintar(); return errorClave(transf); }
+  }
+  $('clave-error').textContent = '';
 
   cobrando = true;
   pintar();
@@ -1322,15 +1355,19 @@ async function cobrar() {
       promo: promoActual(),
       ...(pedidoCargado ? { pedido_id: pedidoCargado.id, anticipo } : {}),
       ...(imprimirEn ? { imprimir_en: imprimirEn } : {}),
+      ...(transf ? { clave_rastreo: transf.clave, monto_transferido: transf.transferido } : {}),
     };
     let socioTicket = socio && !socio.vale && { numero: socio.numero, ganados: 0, saldo: socio.disponible };
+    let excedente = 0;
     if (usados > 0) {
       socioTicket = await cobrarConDolarones(venta, t);
       if (!socioTicket) return;
+      excedente = venta.excedente_transferencia ?? 0;
       if (socioTicket.vale) socioTicket = null;
-    } else if (pedidoCargado) {
+    } else if (pedidoCargado || transf) {
       const cuerpo = await cobrarConPedido(venta);
       if (!cuerpo) return;
+      excedente = cuerpo.excedente_transferencia ?? 0;
       if (Object.hasOwn(cuerpo, 'imprimir_en')) venta.imprimir_en = cuerpo.imprimir_en;
       venta.vale_emitido = cuerpo.vale_emitido;
       venta.saldo_pedido = cuerpo.saldo_pedido;
@@ -1403,6 +1440,7 @@ async function cobrar() {
         + (venta.saldo_pedido > 0 ? `; le quedan ${pesos(venta.saldo_pedido)} a favor.` : '.');
       cargarCatalogo();   // las piezas apartadas que no se llevó vuelven a la venta
     }
+    if (excedente > 0) $('aviso').textContent += ` · Sobraron ${pesos(excedente)} en la transferencia: se registró solo lo cobrado. El excedente se resuelve a mano con el dueño.`;
     if (venta.imprimir_en) $('aviso').textContent += ` Ticket enviado a ${venta.imprimir_en}.`;
     if (venta.imprimir_en && (venta.vale_pendiente || venta.recompensa_pendiente)) $('aviso').textContent += ' Sin red: se enviará al sincronizar.';
     if (venta.vale_pendiente) $('aviso').textContent += venta.imprimir_en
@@ -1418,6 +1456,7 @@ async function cobrar() {
     pintarDescuento();
     quitarSocio();
     $('efectivo').value = '';
+    $('clave-rastreo').value = ''; $('monto-transferido').value = '';
     $('forma').value = 'efectivo'; formaElegida = false;      // cada venta empieza en efectivo: la forma anterior descuadraba el corte (#260)
     $('codigo').focus();
     sincronizar();
@@ -2317,7 +2356,7 @@ document.addEventListener('keydown', (e) => {
 });
 
 $('cancelar').addEventListener('click', () => {
-  lineas = []; idVenta = null; pedidoCargado = null; descuento = null; sinPromo = false; pintarDescuento(); quitarSocio(); $('efectivo').value = ''; $('forma').value = 'efectivo'; formaElegida = false; $('aviso').textContent = 'Venta cancelada';
+  lineas = []; idVenta = null; pedidoCargado = null; descuento = null; sinPromo = false; pintarDescuento(); quitarSocio(); $('efectivo').value = ''; $('clave-rastreo').value = ''; $('monto-transferido').value = ''; $('clave-error').textContent = ''; $('forma').value = 'efectivo'; formaElegida = false; $('aviso').textContent = 'Venta cancelada';
   $('aviso').style.color = '#5b6478'; pintar(); $('codigo').focus();
 });
 
