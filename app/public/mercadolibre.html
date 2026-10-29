@@ -101,6 +101,8 @@
   @media (max-width: 480px) { .fila-dos { grid-template-columns: 1fr; } }
   .pie-dialogo { display: flex; gap: 10px; justify-content: flex-end; flex-wrap: wrap; margin-top: 14px; align-items: center; }
   .pie-dialogo .falta { flex: 1; min-width: 180px; font-size: 12px; color: var(--suave); }
+  .filtros { display: grid; grid-template-columns: 2fr 1fr 1fr; gap: 0 10px; }
+  @media (max-width: 560px) { .filtros { grid-template-columns: 1fr 1fr; } .filtros .campo:first-child { grid-column: 1 / -1; } }
   fieldset { border: 1px solid var(--linea); border-radius: 10px; padding: 10px 12px 2px; margin: 0 0 12px; }
   legend { font-size: 13px; font-weight: 700; padding: 0 6px; }
 </style>
@@ -124,8 +126,20 @@
   <section class="panel" id="panel-piezas" aria-labelledby="h-piezas" hidden>
     <h2 id="h-piezas">Piezas</h2>
     <div class="pestanas" role="tablist" aria-label="Filtro de piezas" id="pestanas"></div>
-    <div class="campo"><label for="buscar">Buscar</label>
-      <input id="buscar" type="search" maxlength="80" autocomplete="off" placeholder="nombre, código, marca o categoría"></div>
+    <div class="filtros">
+      <div class="campo"><label for="buscar">Buscar</label>
+        <input id="buscar" type="search" maxlength="80" autocomplete="off" placeholder="nombre, código, marca o categoría"></div>
+      <div class="campo"><label for="orden">Ordenar por</label>
+        <select id="orden">
+          <option value="recientes">Más recientes</option>
+          <option value="mas_existencias">Más existencias</option>
+          <option value="menos_existencias">Menos existencias</option>
+          <option value="codigo">Código</option>
+          <option value="nombre">Nombre (A–Z)</option>
+        </select></div>
+      <div class="campo"><label for="min">Existencias mínimas</label>
+        <input id="min" type="number" min="0" step="1" inputmode="numeric" placeholder="0"></div>
+    </div>
     <div id="lista" role="tabpanel" aria-live="polite"></div>
     <div style="margin-top:12px"><button type="button" id="ver-mas" hidden>Ver más</button></div>
     <p class="nota">Solo piezas individuales con foto ya revisadas. Las bandas no se publican. El recargo y el
@@ -428,7 +442,7 @@ function aviso(texto, error = false) {
 function pintarLista() {
   $('lista').replaceChildren(...(piezas.length
     ? piezas.map(filaPieza)
-    : [h('div', { class: 'vacio' }, $('buscar').value.trim() ? 'Ninguna pieza coincide con la búsqueda.'
+    : [h('div', { class: 'vacio' }, $('buscar').value.trim() || $('min').value ? 'Ninguna pieza coincide con la búsqueda.'
       : filtro === 'pendientes' ? 'No hay piezas por publicar.' : 'No hay piezas en esta lista.')]));
   $('ver-mas').hidden = !hayMas;
 }
@@ -445,9 +459,10 @@ function actualizarFila(id, publicacion) {
 async function cargarPiezas(desdeCero) {
   if (desdeCero) { pagina = 1; piezas = []; $('lista').replaceChildren(h('p', { class: 'vacio' }, 'Cargando…')); }
   else pagina += 1;
-  const q = $('buscar').value.trim();
-  const r = await api(`/api/ml/piezas?filtro=${filtro}&pagina=${pagina}&q=${encodeURIComponent(q)}`);
-  if (q !== $('buscar').value.trim()) return;   // llego tarde: ya se escribio otra busqueda
+  const consulta = new URLSearchParams({ filtro, pagina, q: $('buscar').value.trim(), orden: $('orden').value, min: $('min').value });
+  const r = await api(`/api/ml/piezas?${consulta}`);
+  // Llego tarde: ya se escribio otra busqueda o se cambio el orden.
+  if (consulta.get('q') !== $('buscar').value.trim() || consulta.get('orden') !== $('orden').value || consulta.get('min') !== $('min').value) return;
   if (!r.ok || !r.datos) {
     if (!desdeCero) pagina -= 1;
     $('lista').replaceChildren(h('div', { class: 'aviso error' }, textoError(r, 'No se pudieron cargar las piezas.')));
@@ -460,7 +475,8 @@ async function cargarPiezas(desdeCero) {
 }
 $('ver-mas').addEventListener('click', () => cargarPiezas(false));
 let esperaBusqueda;
-$('buscar').addEventListener('input', () => { clearTimeout(esperaBusqueda); esperaBusqueda = setTimeout(() => cargarPiezas(true), 300); });
+for (const id of ['buscar', 'min']) $(id).addEventListener('input', () => { clearTimeout(esperaBusqueda); esperaBusqueda = setTimeout(() => cargarPiezas(true), 300); });
+$('orden').addEventListener('change', () => cargarPiezas(true));
 
 /* ---------- dialogo de publicacion ---------- */
 

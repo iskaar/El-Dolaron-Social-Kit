@@ -782,7 +782,19 @@ test('piezas: pendientes, publicadas y todas; 50 por página', async () => {
     assert.deepEqual(await ids(`levi's 501`), [a]);
     assert.deepEqual(await ids('100%'), []);
 
-    for (let i = 0; i < 50; i++) pieza(t);   // + la de Nike = 51 pendientes
+    // Orden y existencias minimas (#587).
+    const zapato = pieza(t, { nombre: 'Zapato bota', stock: 9 });
+    const abrigo = pieza(t, { nombre: 'abrigo lana', stock: 1 });
+    const lista = async (qs: string) => (await t.pedir(`/api/ml/piezas?filtro=pendientes&${qs}`)).cuerpo.piezas.map((x: any) => x.producto.id);
+    assert.deepEqual(await lista('orden=mas_existencias'), [zapato, nike, abrigo]);
+    assert.deepEqual(await lista('orden=menos_existencias'), [abrigo, nike, zapato]);
+    assert.deepEqual(await lista('orden=nombre'), [abrigo, nike, zapato]);
+    assert.deepEqual(await lista('orden=codigo'), [nike, zapato, abrigo]);
+    assert.deepEqual(await lista('min=3'), [zapato, nike]);
+    assert.deepEqual(await lista('min=10'), []);
+    assert.deepEqual(await lista('orden=p.id;drop'), [abrigo, zapato, nike]);   // desconocido: recientes
+
+    for (let i = 0; i < 48; i++) pieza(t);   // + Nike, zapato y abrigo = 51 pendientes
     const p1 = (await t.pedir('/api/ml/piezas')).cuerpo;
     assert.equal(p1.piezas.length, 50);
     assert.equal(p1.hay_mas, true);
