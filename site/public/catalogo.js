@@ -37,7 +37,13 @@
     return API;
   }
 
-  if (typeof module !== "undefined") module.exports = { precio, consulta, apiBase };
+  // Issue #590: ?pieza=ED-000123 (mismo formato que CODIGO en app/src/catalogo.ts); lo malformado se ignora.
+  function codigoDePieza(search) {
+    const valor = (new URLSearchParams(search).get("pieza") || "").trim();
+    return /^ED-\d{1,10}$/i.test(valor) ? valor.toUpperCase() : "";
+  }
+
+  if (typeof module !== "undefined") module.exports = { precio, consulta, apiBase, codigoDePieza };
 
   // Los precios con su precio de lista tachado, igual en carteles, tarjetas y visor.
   function pintarPrecio(nodo, pieza) {
@@ -176,6 +182,7 @@
   const dialogAsk = root.querySelector(".piece-dialog-ask");
   let categoria = "";
   let busqueda = "";
+  let deseada = codigoDePieza(location.search);   // pieza a abrir tras la primera carga (#590)
   let focoAnterior = null;
   // Cursor de la última página que SÍ llegó: un fallo reintenta la misma (Issue #241).
   // `pagina` solo por si el sitio se publica antes que la API con cursor: la API nueva lo ignora con `despues`.
@@ -319,6 +326,11 @@
       if (searchForm) searchForm.hidden = false;
       siguiente = data.siguiente || null;
       grid.append(...data.piezas.map(tarjeta));
+      if (deseada) {   // Issue #590: solo coincidencia exacta; si no está, queda el mensaje de búsqueda vacía
+        const pieza = data.piezas.find((x) => x.codigo === deseada);
+        deseada = "";
+        if (pieza) abrirVisor(pieza, null, null);
+      }
       more.hidden = !data.hay_mas;
       status.textContent = grid.children.length
         ? `${grid.children.length} de ${Number(data.total) || grid.children.length} piezas`
@@ -374,5 +386,10 @@
   }
   more.addEventListener("click", () => cargar(false));
   retry.addEventListener("click", () => cargar(true));
+  if (deseada && searchInput) {   // la búsqueda del servidor ya incluye `codigo`
+    busqueda = deseada;
+    searchInput.value = deseada;
+    if (clearBtn) clearBtn.hidden = false;
+  } else deseada = "";
   cargar(true);
 })();

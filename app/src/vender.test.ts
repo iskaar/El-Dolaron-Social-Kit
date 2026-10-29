@@ -29,7 +29,7 @@ function usuario(db: DatabaseSync, correo: string, rol: Rol, nombre = 'Marta') {
 
 test('texto de una pieza: centavos, antes, talla, acentos y cierre exactos', () => {
   assert.equal(textoWhatsApp([{ nombre: 'Blusa de algodón', talla: 'M', precio: 20050, precio_lista: 30000, codigo: 'ED-1234' }]),
-    '🛍️ Blusa de algodón · Talla M\n💵 $200.50 (antes $300)\n🔖 ED-1234\n'
+    '🛍️ Blusa de algodón · Talla M\n💵 $200.50 (antes $300)\n🔖 ED-1234\n🔗 https://eldolaron.com/?pieza=ED-1234#catalogo\n'
     + 'Apártala con el 15 % por 7 días: responde con el código.\n🚚 Envíos todos los viernes.\n📍 Jardín Hidalgo 129, Soledad · todos los días de 11 a 8');
   const simple = textoWhatsApp([{ nombre: 'Jarrón\n azul', talla: null, precio: 10000, precio_lista: 10000, codigo: 'ED-1' }]);
   assert.match(simple, /^🛍️ Jarrón azul\n💵 \$100\n/);
@@ -54,9 +54,9 @@ test('texto para revendedora: sin el apartado con 15 % por 7 días y sin promete
 test('varias piezas: una línea por pieza y un solo cierre, hasta diez', () => {
   const piezas = Array.from({ length: 10 }, (_, n) => ({ codigo: `ED-${n}`, nombre: 'Blusa', precio: 10001, precio_lista: 20000 }));
   const texto = textoWhatsApp(piezas);
-  assert.equal(texto.split('\n').length, 13);   // 10 piezas + apartado + envíos + dirección
+  assert.equal(texto.split('\n').length, 13);   // 10 piezas (con su enlace, #590) + apartado + envíos + dirección
   assert.equal(texto.match(/Apártala/g)?.length, 1);
-  assert.ok(texto.startsWith('ED-0 · Blusa · $100.01\nED-1'));
+  assert.ok(texto.startsWith('ED-0 · Blusa · $100.01 · https://eldolaron.com/?pieza=ED-0#catalogo\nED-1'));
 });
 
 test('teléfono opcional: valida, normaliza +52 y rechaza tipos y letras; código pegado o escaneado', () => {

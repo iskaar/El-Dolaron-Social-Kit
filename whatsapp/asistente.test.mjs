@@ -252,7 +252,7 @@ const usar = (name, input = {}, id = 't1') => ({ stop_reason: 'tool_use', conten
 const pieza = (n, conFoto = true) => ({
   nombre: `Blusa ${n}`, precio: '$150.00', talla: 'M', disponibilidad: 'disponible',
   codigo: conFoto ? `ED-00000${n}` : null, foto: conFoto ? `https://dolarones.eldolaron.com/api/catalogo/foto/ED-00000${n}` : null,
-  url: conFoto ? 'https://eldolaron.com/#catalogo' : null,
+  url: conFoto ? `https://eldolaron.com/?pieza=ED-00000${n}#catalogo` : null,
 });
 /** Tienda simulada por el service binding: registra rutas y responde según la ruta. */
 function tiendaSimulada(respuestas) {
@@ -316,7 +316,7 @@ test('#499 B.4: tras buscar_productos manda el texto y luego a lo más 3 tarjeta
     assert.ok(tarjetas.every((m) => m.type === 'image' && m.to === '5214421234567'));
     // La pieza sin foto pública se salta; el orden es el de la tienda.
     assert.deepEqual(tarjetas.map((m) => m.image.link), [1, 3, 4].map((n) => `https://dolarones.eldolaron.com/api/catalogo/foto/ED-00000${n}`));
-    assert.equal(tarjetas[0].image.caption, 'Blusa 1 · $150.00 · ED-000001\nhttps://eldolaron.com/#catalogo');
+    assert.equal(tarjetas[0].image.caption, 'Blusa 1 · $150.00 · ED-000001\nhttps://eldolaron.com/?pieza=ED-000001#catalogo');
     // Las tarjetas quedan en la vista de mensajes del personal, pero el historial del modelo solo guarda el texto.
     assert.equal([...env.EVENTS.guardados.keys()].filter((k) => k.startsWith('saliente:')).length, 4);
     assert.equal(JSON.parse(env.EVENTS.guardados.get('historial:5214421234567')).length, 2);
