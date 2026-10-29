@@ -334,7 +334,7 @@ test('compartir copia antes de comprobar files y enviar; AbortError es silencios
   navegador.share = async () => { throw Object.assign(new Error(), { name: 'AbortError' }); };
   assert.equal((await compartirTarjetas(files, 'Texto')).compartida, false);
   navegador.share = async () => { throw new Error('No permitido'); };
-  await assert.rejects(() => compartirTarjetas(files, 'Texto'), /Descargar/);
+  await assert.rejects(() => compartirTarjetas(files, 'Texto'), /¿No se abrió WhatsApp\?/);
 });
 
 test('sin Web Share descarga cada imagen y abre WhatsApp con el texto; copiar puede fallar', async (t) => {

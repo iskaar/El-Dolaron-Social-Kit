@@ -6,7 +6,8 @@
 <meta name="referrer" content="no-referrer">
 <title>El Dolarón — vender por WhatsApp</title>
 <style>
-  :root { --azul:#16366B; --rojo:#D72B32; --amarillo:#FFD447; --linea:#dfe3ea; --verde:#1f7a4d; }
+  :root { --azul:#16366B; --rojo:#D72B32; --amarillo:#FFD447; --linea:#dfe3ea; --verde:#1f7a4d;
+    --rojo-texto:#B3141B; --gris:#5B6478; --fondo-ok:#E4F3EA; --fondo-error:#FDECEC; --fondo-aviso:#FFF6D9; --aviso-texto:#6B5400; --deshab-fondo:#E9EDF4; }
   * { box-sizing: border-box; }
   [hidden] { display: none !important; }
   body { margin: 0; background: #f4f6f9; color: #1a1f2b; font-family: system-ui, -apple-system, sans-serif; }
@@ -22,7 +23,9 @@
   button, .boton { display: inline-flex; align-items: center; justify-content: center; min-height: 44px; padding: 10px 12px; border: 1px solid var(--azul); border-radius: 8px; font: inherit; font-weight: 700; color: var(--azul); background: #fff; cursor: pointer; text-decoration: none; }
   button:disabled { opacity: .55; cursor: default; }
   .principal, button[aria-pressed="true"] { background: var(--azul); color: #fff; }
-  :is(button, a, input, select, textarea):focus-visible { outline: 3px solid #d08b00; outline-offset: 3px; }
+  .texto { border-color: transparent; background: transparent; text-decoration: underline; }
+  :is(button, a, input, select, textarea, summary):focus-visible { outline: 3px solid #d08b00; outline-offset: 3px; }
+  .sr-only { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
   .panel { background: #fff; border: 1px solid var(--linea); border-radius: 12px; padding: 14px; margin-bottom: 14px; }
   .fila { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
   .fila input { flex: 1; }
@@ -35,7 +38,17 @@
   .error { color: #ae1a21; }
   .ok { color: var(--verde); }
   .nota { font-size: 13px; color: #505d73; }
+  /* Resultado de una acción de la usuaria: fijo arriba, se queda hasta «Entendido» (#579, U6). */
+  #resultado { position: sticky; top: 0; z-index: 20; display: flex; gap: 12px; align-items: center; justify-content: space-between; padding: 12px 16px; font-size: 18px; font-weight: 700; color: var(--azul); background: var(--fondo-ok); border-bottom: 3px solid var(--verde); }
+  #resultado.error { color: var(--rojo-texto); background: var(--fondo-error); border-bottom-color: var(--rojo-texto); }
+  #resultado p { flex: 1; margin: 0; overflow-wrap: anywhere; }
+  .barra { justify-content: space-between; flex-wrap: nowrap; }
+  .barra .aviso { flex: 1; margin: 0; }
+  .estado { color: var(--gris); font-size: 16px; }
+  details.plegable > summary { display: flex; align-items: center; min-height: 44px; font-weight: 700; color: var(--azul); cursor: pointer; }
+  body:not(.rev) details.plegable > summary, body.rev .solo-caja { display: none; }
   #piezas { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+  .vacio { grid-column: 1 / -1; }
   .pieza { background: #fff; border: 1px solid var(--linea); border-radius: 10px; overflow: hidden; min-width: 0; }
   .pieza img { display: block; width: 100%; aspect-ratio: 1; object-fit: contain; background: #fff; }
   .detalle { padding: 10px; }
@@ -50,10 +63,20 @@
   .interesado h2 { font-size: 17px; }
   .interesado p { margin: 6px 0; }
   .pie { position: fixed; bottom: 0; left: 0; width: 100%; padding: 10px 12px; background: #fff; border-top: 2px solid var(--azul); display: flex; gap: 12px; align-items: center; justify-content: center; }
-  .pie button { background: var(--azul); color: #fff; }
+  .pie .principal { flex: 2; }
+  .pie .texto { flex: 1; color: var(--azul); }
   dialog { width: min(520px, 94vw); max-height: 92dvh; border: 2px solid var(--azul); border-radius: 12px; padding: 16px; }
   dialog::backdrop { background: rgba(22, 54, 107, .6); }
+  dialog h2:focus { outline: none; }
   dialog .acciones { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
+  dialog .acciones.columna { flex-direction: column; }
+  dialog .acciones.columna > * { width: 100%; }
+  .grande { font-size: 18px; }
+  .listo-icono { width: 56px; height: 56px; margin-bottom: 8px; border-radius: 50%; background: var(--verde); color: #fff; font-size: 34px; font-weight: 800; line-height: 56px; text-align: center; }
+  #titulo-listo { font-size: 24px; font-weight: 800; }
+  .reglas { margin: 12px 0 0; padding: 0; list-style: none; font-size: 16px; }
+  .reglas li { margin: 4px 0; }
+  .reglas li::before { content: "✓ "; color: var(--verde); font-weight: 800; }
   .mia { border-top: 1px solid var(--linea); padding: 14px 0; overflow-wrap: anywhere; }
   .mia:first-child { border-top: 0; }
   .mia h2 { font-size: 17px; margin-bottom: 4px; }
@@ -61,51 +84,57 @@
   .peligro { border-color: var(--rojo); color: var(--rojo); }
   #vista-previa { display: flex; overflow-x: auto; gap: 8px; }
   #vista-previa img { width: 135px; height: 169px; }
+  #mas-compartir { margin-top: 12px; }
   @media (min-width: 700px) { #piezas { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
 </style>
 <script src="/cajero.js"></script>
 </head>
 <body>
 <header><h1>Vender por WhatsApp</h1><a id="enlace-menu" href="/">Menú</a><a id="enlace-pedidos" href="/pedidos">Pedidos</a></header>
-<main>
-  <section class="panel">
-    <h2>¿Ya te dijeron «la quiero»?</h2>
+<div id="resultado" role="status" aria-live="polite" hidden><p id="resultado-texto"></p><button id="resultado-ok" type="button">Entendido</button></div>
+<p id="aviso-sr" class="sr-only" aria-live="polite"></p>
+<main id="principal" hidden>
+  <details id="det-codigo" class="panel plegable" open>
+    <summary>Me escribieron con un código</summary>
+    <h2 class="solo-caja">¿Ya te dijeron «la quiero»?</h2>
     <form id="form-codigo">
-      <label for="codigo">Código de la pieza</label>
-      <div class="fila"><input id="codigo" maxlength="160" placeholder="Pega la respuesta o escanea ED-…" autocomplete="off"><button type="submit">La quiere</button></div>
+      <label id="etiqueta-codigo" for="codigo">Código de la pieza</label>
+      <div class="fila"><input id="codigo" maxlength="160" placeholder="Pega la respuesta o escanea ED-…" autocomplete="off"><button id="buscar-codigo" type="submit">La quiere</button></div>
     </form>
-    <p class="nota">Anotar a alguien no aparta la pieza. Sin anticipo, sigue disponible.</p>
-  </section>
-  <nav aria-label="Vista de ventas"><button id="ver-piezas" type="button" aria-pressed="true">Piezas</button><button id="ver-interesados" type="button" aria-pressed="false">Interesados</button><button id="ver-mias" type="button" aria-pressed="false" hidden>Mis ventas</button></nav>
-  <p id="aviso" class="aviso" role="status" aria-live="polite"></p>
+    <p class="nota solo-caja">Anotar a alguien no aparta la pieza. Sin anticipo, sigue disponible.</p>
+  </details>
+  <nav aria-label="Vista de ventas"><button id="ver-piezas" type="button" aria-pressed="true">Piezas</button><button id="ver-interesados" type="button" aria-pressed="false"><span id="txt-interesados">Interesados</span></button><button id="ver-mias" type="button" aria-pressed="false" hidden>Mis ventas</button></nav>
+  <div class="fila barra"><p id="aviso" class="aviso" role="status" aria-live="polite"></p><button id="actualizar" type="button">Actualizar</button></div>
   <section id="catalogo">
-    <form id="filtros" class="panel">
-      <label for="q">Nombre o código</label><input id="q" type="search" maxlength="80" placeholder="Buscar piezas">
-      <div class="dos">
-        <div><label for="categoria">Categoría</label><select id="categoria"><option value="">Todas</option></select></div>
-        <label class="check"><input id="hoy" type="checkbox">Ingresadas hoy</label>
-      </div>
-      <div class="fila"><button class="principal" type="submit">Buscar</button><button id="actualizar" type="button">Actualizar</button></div>
-    </form>
+    <details id="det-filtros" class="panel plegable" open>
+      <summary>Buscar una pieza</summary>
+      <form id="filtros">
+        <label for="q">Nombre o código</label><input id="q" type="search" maxlength="80" placeholder="Buscar piezas">
+        <div class="dos">
+          <div><label for="categoria">Categoría</label><select id="categoria"><option value="">Todas</option></select></div>
+          <label class="check"><input id="hoy" type="checkbox"><span id="txt-hoy">Ingresadas hoy</span></label>
+        </div>
+        <div class="fila"><button class="principal" type="submit">Buscar</button></div>
+      </form>
+    </details>
     <div id="piezas"></div>
     <div class="fila"><button id="anterior" type="button" disabled>Anterior</button><button id="siguiente" type="button" disabled>Ver más piezas</button></div>
   </section>
   <section id="mias" class="panel" hidden>
-    <div class="fila"><button id="actualizar-mias" type="button">Actualizar</button></div>
     <p class="nota">Tus ventas de los últimos 60 días. El cliente paga a la tienda: transferencia o en caja al recoger.</p>
     <div id="lista-mias"></div>
   </section>
   <section id="interesados" class="panel" hidden>
-    <div class="fila"><label class="check"><input id="mios" type="checkbox">Solo los míos</label><button id="actualizar-interesados" type="button">Actualizar</button></div>
-    <p class="nota">Por orden de llegada. Se muestran las anotaciones de los últimos 7 días.</p>
+    <div class="fila"><label class="check"><input id="mios" type="checkbox">Solo los míos</label></div>
+    <p id="nota-interesados" class="nota">Por orden de llegada. Se muestran las anotaciones de los últimos 7 días.</p>
     <div id="lista-interesados"></div>
     <div class="fila"><button id="anteriores-interesados" type="button" disabled>Anterior</button><button id="mas-interesados" type="button" disabled>Ver más interesados</button></div>
   </section>
 </main>
-<div id="seleccion" class="pie"><span id="seleccionadas" aria-live="polite">0 de 10 piezas</span><button id="preparar" type="button" disabled>Preparar envío</button><button id="limpiar" type="button" disabled>Limpiar</button></div>
+<div id="seleccion" class="pie" hidden><button id="preparar" class="principal" type="button">Compartir 1 en WhatsApp</button><button id="limpiar" class="texto" type="button">Quitar elegidas</button></div>
 
 <dialog id="dlg-interesado" aria-labelledby="titulo-interesado">
-  <h2 id="titulo-interesado">La quiere</h2><p id="pieza-interesado"></p>
+  <h2 id="titulo-interesado" tabindex="-1">La quiere</h2><p id="pieza-interesado"></p>
   <form id="form-interesado">
     <label for="cliente">Nombre del cliente</label><input id="cliente" maxlength="80" required autocomplete="name">
     <label for="telefono">WhatsApp (opcional, 10 dígitos)</label><input id="telefono" type="tel" inputmode="tel" maxlength="24" autocomplete="tel">
@@ -115,50 +144,78 @@
   </form>
 </dialog>
 <dialog id="dlg-vendida" aria-labelledby="titulo-vendida">
-  <h2 id="titulo-vendida">Vendida</h2><p id="pieza-vendida"></p>
+  <h2 id="titulo-vendida" tabindex="-1">Ya la vendí</h2><p id="pieza-vendida" class="grande"></p>
   <form id="form-vendida">
-    <label for="vendida-cliente">Nombre del cliente</label><input id="vendida-cliente" maxlength="80" required autocomplete="name">
-    <label for="vendida-telefono">WhatsApp del cliente (10 dígitos)</label><input id="vendida-telefono" type="tel" inputmode="tel" maxlength="24" required autocomplete="tel">
-    <label for="vendida-entrega">Entrega</label>
-    <select id="vendida-entrega"><option value="tienda">Recoger en tienda (cliente o tú)</option><option value="envio">Envío</option></select>
-    <p class="nota">La pieza queda apartada 48 horas. El cliente paga a la tienda: transferencia o en caja al recoger. Si la tienda no registra el pago en ese plazo, la pieza vuelve a la venta. Envío $99; gratis desde $1,000 en piezas.</p>
+    <label for="vendida-cliente">¿Quién la compró?</label><input id="vendida-cliente" maxlength="80" required autocomplete="name">
+    <label for="vendida-telefono">WhatsApp de quien la compró</label><input id="vendida-telefono" type="tel" inputmode="tel" maxlength="24" required autocomplete="tel" aria-describedby="ayuda-telefono">
+    <p id="ayuda-telefono" class="nota">10 números. Ejemplo: 444 123 4567</p>
+    <label for="vendida-entrega">¿Cómo la recibe?</label>
+    <select id="vendida-entrega"><option value="tienda">La recoge en la tienda</option><option value="envio">Se la mandan a su casa (envío)</option></select>
+    <p id="linea-envio" class="nota" hidden><strong>Envío $99. Gratis si compra $1,000 o más en piezas.</strong></p>
+    <ul class="reglas"><li>La pieza queda apartada 48 horas.</li><li>Quien la compró paga en la tienda.</li><li>Si no paga a tiempo, la pieza vuelve a la venta.</li></ul>
     <p id="aviso-vendida" class="aviso" role="status" aria-live="polite"></p>
-    <div class="acciones"><button id="guardar-vendida" class="principal" type="submit">Apartar 48 horas</button><button id="cerrar-vendida" type="button">Cerrar</button></div>
+    <div class="acciones"><button id="guardar-vendida" class="principal" type="submit">Guardar venta</button><button id="cerrar-vendida" type="button">Volver</button></div>
   </form>
 </dialog>
+<dialog id="dlg-listo" aria-labelledby="titulo-listo">
+  <div class="listo-icono" aria-hidden="true">✓</div>
+  <h2 id="titulo-listo" tabindex="-1" autofocus>¡Venta guardada!</h2>
+  <p id="listo-pieza" class="grande"></p>
+  <p id="listo-plazo" class="grande"><strong></strong></p>
+  <p class="nota">El pago se hace en la tienda. Si no paga a tiempo, la pieza vuelve a la venta.</p>
+  <div class="acciones columna"><a id="listo-wa" class="boton principal" target="_blank" rel="noopener">Avisarle por WhatsApp</a><button id="listo-seguir" type="button">Seguir con otras piezas</button></div>
+</dialog>
 <dialog id="dlg-cancelar-mia" aria-labelledby="titulo-cancelar-mia">
-  <h2 id="titulo-cancelar-mia">¿Cancelar la venta?</h2><p id="texto-cancelar-mia"></p>
-  <div class="acciones"><button id="cancelar-mia-si" class="peligro" type="button">Sí, cancelar</button><button id="cancelar-mia-no" type="button" autofocus>No, regresar</button></div>
+  <h2 id="titulo-cancelar-mia">¿Cancelar la venta?</h2><p id="texto-cancelar-mia">La pieza vuelve a estar en venta.</p>
+  <div class="acciones"><button id="cancelar-mia-si" class="peligro" type="button">Sí, cancelar</button><button id="cancelar-mia-no" type="button" autofocus>No, dejarla</button></div>
 </dialog>
 <dialog id="dlg-compartir" aria-labelledby="titulo-compartir">
-  <h2 id="titulo-compartir">Compartir piezas</h2><div id="vista-previa"></div>
-  <label for="texto-compartir">Texto para WhatsApp</label><textarea id="texto-compartir" rows="6" readonly></textarea>
-  <p class="nota">El texto se copia antes de compartir. Si WhatsApp no lo incluye, pégalo. Tú eliges el grupo y envías.</p>
+  <h2 id="titulo-compartir" tabindex="-1" autofocus>Compartir en WhatsApp</h2><div id="vista-previa"></div>
   <p id="aviso-compartir" class="aviso" role="status" aria-live="polite"></p>
-  <div class="acciones"><button id="compartir" class="principal" type="button" disabled>Compartir</button><button id="descargar" type="button" disabled>Descargar y abrir WhatsApp</button><button id="cerrar-compartir" type="button">Cerrar</button></div>
-  <a id="abrir-wa" class="boton" target="_blank" rel="noopener">Abrir WhatsApp</a>
+  <div class="acciones columna"><button id="compartir" class="principal" type="button" disabled>Enviar por WhatsApp</button><button id="cerrar-compartir" class="texto" type="button">Volver</button></div>
+  <details id="mas-compartir">
+    <summary>¿No se abrió WhatsApp?</summary>
+    <label for="texto-compartir">Texto para WhatsApp</label><textarea id="texto-compartir" rows="6" readonly></textarea>
+    <p class="nota">El texto se copia antes de compartir. Si WhatsApp no lo incluye, pégalo. Tú eliges el grupo y envías.</p>
+    <div class="acciones columna"><button id="descargar" type="button" disabled>Guardar las fotos y abrir WhatsApp</button><a id="abrir-wa" class="boton" target="_blank" rel="noopener">Abrir WhatsApp</a></div>
+  </details>
 </dialog>
 <template id="tarjeta"><article class="pieza">
   <img width="320" height="320" loading="lazy" decoding="async"><div class="detalle">
     <h2></h2><div class="precio"></div><div class="codigo"></div><div class="nota talla"></div><div class="marca"></div>
-    <label class="check"><input type="checkbox">Seleccionar</label><div class="cola"></div><button type="button" class="quiere">La quiere</button><button type="button" class="vendida" hidden>Vendida</button>
+    <label class="check"><input type="checkbox">Seleccionar</label><div class="cola"></div><button type="button" class="quiere">La quiere</button><button type="button" class="vendida" hidden>Ya la vendí</button>
   </div>
 </article></template>
 <script type="module">
 import { CATEGORIAS } from '/categorias.js';
-import { pesos, telefonoInteresado, codigoDeRespuesta, textoWhatsApp, crearTarjeta, compartirTarjetas, descargarTarjetas, enlaceApartar, textoSeguimiento } from '/vender.js';
+import { pesos, telefonoInteresado, codigoDeRespuesta, textoWhatsApp, crearTarjeta, compartirTarjetas, descargarTarjetas, enlaceApartar, textoSeguimiento,
+  textoAvisoCliente, enlaceCliente, estadoMia, agruparMias, cobradoMias, fechaLegible, horaLegible } from '/vender.js';
 
 const $ = (id) => document.getElementById(id);
 const decir = (id, texto, error = false) => { $(id).textContent = texto; $(id).className = `aviso${error ? ' error' : ''}`; };
 const hora = (iso) => new Date(iso).toLocaleString('es-MX', { timeZone: 'America/Mexico_City', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+const SIN_INTERNET = 'Parece que no hay internet. Revisa tu señal y vuelve a intentar.';
+// Un fallo de red (TypeError) o una respuesta que no es JSON (SyntaxError) dicen «no hay internet»; el texto de la API se muestra tal cual.
+const mensaje = (e) => (e instanceof TypeError || e instanceof SyntaxError ? SIN_INTERNET : e.message || SIN_INTERNET);
 async function api(ruta, opciones) {
   const r = await fetch(ruta, { cache: 'no-store', ...opciones });
   const datos = await r.json();
-  if (!r.ok) throw Object.assign(new Error(datos.error || 'No se pudo consultar. Intenta actualizar.'), { status: r.status });
+  if (!r.ok) throw Object.assign(new Error(datos.error || 'No cargó. Revisa tu señal y toca «Actualizar».'), { status: r.status });
   return datos;
 }
+// ponytail: #resultado solo lo escribe una acción de la usuaria (guardar, anotar, cancelar, error de una acción)
+// y solo se quita con «Entendido». Las recargas (cargar*) hablan por #aviso y #aviso-sr, nunca por aquí:
+// antes la confirmación de apartar se pisaba con «N piezas disponibles» y ella nunca sabía si funcionó (U6).
+function resultado(texto, error = false) {
+  $('resultado').className = error ? 'error' : '';
+  $('resultado-texto').textContent = (error ? '⚠ ' : '') + texto;
+  $('resultado').hidden = false;
+}
+$('resultado-ok').addEventListener('click', () => { $('resultado').hidden = true; });
+const sr = (texto) => { $('aviso-sr').textContent = texto; };
+const listaAlDia = () => { decir('aviso', `Actualizado a las ${horaLegible(Date.now())}`); $('aviso').classList.add('estado'); };
 for (const [clave, nombre] of CATEGORIAS) $('categoria').add(new Option(nombre, clave));
-let correo = '', compartidas = new Set(), revendedora = false;
+let correo = '', compartidas = new Set(), revendedora = false, vista = 'piezas';
 let piezas = [], cola = [], seleccion = new Map();
 let cursores = [null], cursoresInteresados = [null], siguiente = null, siguienteInteresados = null;
 let consulta = new URLSearchParams(), cargando = false, cargandoInteresados = false;
@@ -169,12 +226,12 @@ function recordarCompartidas() {
   try { localStorage.setItem(`vender-compartidas:${correo}`, JSON.stringify([...compartidas])); } catch { /* conveniencia: funciona sin memoria */ }
 }
 function pintarSeleccion() {
-  $('seleccionadas').textContent = `${seleccion.size} de 10 piezas`;
-  $('preparar').disabled = !seleccion.size;
-  $('limpiar').disabled = !seleccion.size;
+  $('preparar').textContent = `Compartir ${seleccion.size} en WhatsApp`;
+  $('seleccion').hidden = vista !== 'piezas' || !seleccion.size;
 }
 function pintarPiezas() {
   $('piezas').replaceChildren();
+  if (!piezas.length) textoEn($('piezas'), 'p', siguiente ? 'No encontré piezas aquí. Toca «Ver más piezas».' : 'No hay más piezas por ahora.', 'vacio');
   for (const p of piezas) {
     const fragmento = $('tarjeta').content.cloneNode(true);
     const tarjeta = fragmento.querySelector('article');
@@ -182,7 +239,7 @@ function pintarPiezas() {
     const img = tarjeta.querySelector('img');
     img.src = p.foto;
     img.alt = p.nombre;
-    img.addEventListener('error', () => { tarjeta.querySelector('.marca').textContent = 'Foto no disponible: actualiza antes de compartir.'; });
+    img.addEventListener('error', () => { tarjeta.querySelector('.marca').textContent = 'No cargó la foto. Toca “Actualizar”.'; });
     tarjeta.querySelector('h2').textContent = p.nombre;
     tarjeta.querySelector('.precio').textContent = pesos(p.precio);
     tarjeta.querySelector('.codigo').textContent = p.codigo;
@@ -209,9 +266,9 @@ async function cargarPiezas() {
     piezas = datos.piezas;
     siguiente = datos.siguiente;
     pintarPiezas();
-    decir('aviso', piezas.length ? `${piezas.length} piezas disponibles en esta página.`
-      : siguiente ? 'Sin coincidencias en este tramo. Toca «Ver más piezas» para continuar.' : 'No hay más piezas con estos filtros.');
-  } catch (e) { decir('aviso', e.message || 'Sin conexión. Intenta actualizar.', true); }
+    listaAlDia();
+    sr(`${piezas.length} piezas disponibles en esta página.`);
+  } catch (e) { decir('aviso', mensaje(e), true); }
   finally {
     cargando = false;
     $('anterior').disabled = cursores.length === 1;
@@ -228,7 +285,10 @@ $('filtros').addEventListener('submit', (e) => {
   cursores = [null];
   cargarPiezas();
 });
-$('actualizar').addEventListener('click', cargarPiezas);
+function recargar() {
+  if (vista === 'interesados') cargarInteresados(); else if (vista === 'mias') cargarMias(); else cargarPiezas();
+}
+$('actualizar').addEventListener('click', recargar);
 $('anterior').addEventListener('click', () => { cursores.pop(); cargarPiezas(); });
 $('siguiente').addEventListener('click', () => { cursores.push(siguiente); cargarPiezas(); });
 $('piezas').addEventListener('change', (e) => {
@@ -236,18 +296,18 @@ $('piezas').addEventListener('change', (e) => {
   if (!p) return;
   if (!e.target.checked) seleccion.delete(p.id);
   else if (seleccion.size < 10) seleccion.set(p.id, p);
-  else { e.target.checked = false; decir('aviso', 'El máximo por envío es 10 piezas.', true); }
+  else { e.target.checked = false; resultado('Máximo 10 piezas a la vez.', true); }
   pintarSeleccion();
 });
 $('limpiar').addEventListener('click', () => { seleccion.clear(); pintarPiezas(); });
 
 function abrirInteresado(p) {
   if (intento) {
-    decir('aviso-interesado', 'Primero reintenta la anotación pendiente. Se conserva el mismo identificador.', true);
+    decir('aviso-interesado', `Tu anotación anterior aún no se confirma. Toca «${$('guardar').textContent}» otra vez: no se repite.`, true);
   } else {
     piezaInteresado = p;
     $('form-interesado').reset();
-    decir('aviso-interesado', 'Anotarlo no aparta ni cobra anticipo.');
+    decir('aviso-interesado', 'Solo lo anotas. La pieza sigue en venta.');
   }
   $('pieza-interesado').textContent = `${piezaInteresado.codigo} · ${piezaInteresado.nombre}`;
   $('dlg-interesado').showModal();
@@ -261,13 +321,13 @@ $('piezas').addEventListener('click', (e) => {
 $('form-codigo').addEventListener('submit', async (e) => {
   e.preventDefault();
   const codigo = codigoDeRespuesta($('codigo').value);
-  if (!codigo) return decir('aviso', 'Pega una respuesta con ED-… o escanea los números de la etiqueta.', true);
+  if (!codigo) return resultado('Pega el mensaje de tu cliente. Debe traer el código, por ejemplo ED-002335.', true);
   try {
     const datos = await api('/api/vender?' + new URLSearchParams({ q: codigo }));
     const p = datos.piezas.find((p) => p.codigo === codigo);
-    if (!p) return decir('aviso', 'Esa pieza no está disponible para ofrecer. Revisa Interesados o Pedidos.', true);
+    if (!p) return resultado('Esa pieza ya no está disponible. Puede que otra persona la apartó.', true);
     abrirInteresado(p);
-  } catch (e) { decir('aviso', e.message || 'Sin conexión. Reintenta el código.', true); }
+  } catch (e) { resultado(mensaje(e), true); }
 });
 $('cerrar-interesado').addEventListener('click', () => $('dlg-interesado').close());
 $('dlg-interesado').addEventListener('cancel', (e) => { if (enviando) e.preventDefault(); });
@@ -275,7 +335,7 @@ $('form-interesado').addEventListener('submit', async (e) => {
   e.preventDefault();
   if (enviando) return;
   const telefono = telefonoInteresado($('telefono').value);
-  if (telefono === null) return decir('aviso-interesado', 'Escribe 10 dígitos o deja el teléfono vacío.', true);
+  if (telefono === null) return decir('aviso-interesado', 'Escribe los 10 números del WhatsApp. Ejemplo: 444 123 4567.', true);
   intento ??= { id: crypto.randomUUID(), producto_id: piezaInteresado.id, cliente: $('cliente').value.trim(), telefono, nota: $('nota').value.trim() };
   enviando = true;
   for (const id of ['guardar', 'cerrar-interesado', 'cliente', 'telefono', 'nota']) $(id).disabled = true;
@@ -283,11 +343,11 @@ $('form-interesado').addEventListener('submit', async (e) => {
     await api('/api/interesados', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(intento) });
     intento = null;
     $('dlg-interesado').close();
-    decir('aviso', 'Interesado anotado. La pieza sigue sin apartar.');
+    resultado('✓ Anotado. La pieza sigue en venta.');
     if (vista === 'interesados') await cargarInteresados(); else await cargarPiezas();
   } catch (e) {
     if (e.status && e.status < 500) intento = null;
-    decir('aviso-interesado', intento ? 'No se pudo confirmar. Reintenta: no se duplica y se conservan los datos.' : e.message, true);
+    decir('aviso-interesado', intento ? `No sabemos si se guardó. Toca «${$('guardar').textContent}» otra vez: no se repite.` : mensaje(e), true);
   } finally {
     enviando = false;
     for (const id of ['guardar', 'cerrar-interesado']) $(id).disabled = false;
@@ -315,12 +375,12 @@ function pintarInteresados() {
     const botones = textoEn(fila, 'div', '', 'fila');
     if (i.telefono) {
       const wa = textoEn(botones, 'a', 'WhatsApp', 'boton');
-      wa.href = `https://wa.me/52${i.telefono}?text=${encodeURIComponent(textoSeguimiento(i, revendedora))}`;
+      wa.href = enlaceCliente(i.telefono, textoSeguimiento(i, revendedora));
       wa.target = '_blank'; wa.rel = 'noopener';
     }
     if (i.disponibilidad === 'Disponible') {
       if (revendedora) {
-        const vendida = textoEn(botones, 'button', 'Vendida', 'principal');
+        const vendida = textoEn(botones, 'button', 'Ya la vendí', 'principal');
         vendida.type = 'button';
         vendida.addEventListener('click', () => abrirVendida({ id: i.producto_id, codigo: i.codigo, nombre: i.nombre, precio: i.precio }, i));
       } else textoEn(botones, 'a', 'Apartar', 'boton principal').href = enlaceApartar(i);
@@ -332,7 +392,7 @@ function pintarInteresados() {
       try {
         await api(`/api/interesados/${i.id}`, { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ estado: 'descartado' }) });
         await cargarInteresados();
-      } catch (e) { decir('aviso', e.message || 'Sin conexión. Reintenta el descarte.', true); descartar.disabled = false; }
+      } catch (e) { resultado(mensaje(e), true); descartar.disabled = false; }
     });
     $('lista-interesados').append(fila);
   }
@@ -351,8 +411,8 @@ async function cargarInteresados() {
     cola = datos.interesados;
     siguienteInteresados = datos.siguiente;
     pintarInteresados();
-    decir('aviso', 'Cola actualizada por orden de llegada.');
-  } catch (e) { decir('aviso', e.message || 'Sin conexión. Intenta actualizar.', true); }
+    listaAlDia();
+  } catch (e) { decir('aviso', mensaje(e), true); }
   finally {
     cargandoInteresados = false;
     $('mios').disabled = false;
@@ -360,42 +420,54 @@ async function cargarInteresados() {
     $('mas-interesados').disabled = !siguienteInteresados;
   }
 }
-let vista = 'piezas';
 function mostrar(nueva) {
   vista = nueva;
   $('interesados').hidden = nueva !== 'interesados';
   $('mias').hidden = nueva !== 'mias';
-  $('catalogo').hidden = $('seleccion').hidden = nueva !== 'piezas';
+  $('catalogo').hidden = nueva !== 'piezas';
+  pintarSeleccion();
   for (const [clave, id] of [['piezas', 'ver-piezas'], ['interesados', 'ver-interesados'], ['mias', 'ver-mias']])
     $(id).setAttribute('aria-pressed', String(clave === nueva));
-  if (nueva === 'interesados') cargarInteresados(); else if (nueva === 'mias') cargarMias(); else cargarPiezas();
+  recargar();
 }
 $('ver-piezas').addEventListener('click', () => mostrar('piezas'));
 $('ver-interesados').addEventListener('click', () => mostrar('interesados'));
 $('ver-mias').addEventListener('click', () => mostrar('mias'));
 
-/* ---------- Vendida (solo revendedoras, #575): aparta 48 h sin anticipo ---------- */
+/* ---------- Ya la vendí (solo revendedoras, #575): aparta 48 h sin anticipo ---------- */
 
 let piezaVendida = null, intentoVendida = null, apartando = false;
+const mostrarEnvio = () => { $('linea-envio').hidden = $('vendida-entrega').value !== 'envio'; };
+$('vendida-entrega').addEventListener('change', mostrarEnvio);
 function abrirVendida(p, interesado = null) {
   if (intentoVendida) {
-    decir('aviso-vendida', 'Primero reintenta el apartado pendiente. Se conserva el mismo identificador.', true);
+    decir('aviso-vendida', 'Tu venta anterior aún no se confirma. Toca “Guardar venta” otra vez: no se repite.', true);
   } else {
     piezaVendida = p;
     $('form-vendida').reset();
     if (interesado) { $('vendida-cliente').value = interesado.cliente ?? ''; $('vendida-telefono').value = interesado.telefono ?? ''; }
     decir('aviso-vendida', '');
   }
+  mostrarEnvio();
   $('pieza-vendida').textContent = `${piezaVendida.codigo} · ${piezaVendida.nombre} · ${pesos(piezaVendida.precio)}`;
   $('dlg-vendida').showModal();
 }
 $('cerrar-vendida').addEventListener('click', () => $('dlg-vendida').close());
 $('dlg-vendida').addEventListener('cancel', (e) => { if (apartando) e.preventDefault(); });
+// La pantalla que se queda: plazo, aviso al cliente y siguiente paso (U6, U20).
+function abrirListo(pieza, cliente, telefono, pedido) {
+  $('listo-pieza').textContent = `${pieza.codigo} · ${pieza.nombre} para ${cliente}.`;
+  $('listo-plazo').firstChild.textContent = `Tienes hasta el ${fechaLegible(pedido.vence_en)} para que pague.`;
+  $('listo-wa').textContent = `Avisarle a ${cliente} por WhatsApp`;
+  $('listo-wa').href = enlaceCliente(telefono, textoAvisoCliente(pieza, cliente, pedido.vence_en));
+  $('dlg-listo').showModal();
+}
+$('listo-seguir').addEventListener('click', () => $('dlg-listo').close());
 $('form-vendida').addEventListener('submit', async (e) => {
   e.preventDefault();
   if (apartando) return;
   const telefono = telefonoInteresado($('vendida-telefono').value);
-  if (!telefono) return decir('aviso-vendida', 'Escribe el WhatsApp del cliente con 10 dígitos.', true);
+  if (!telefono) return decir('aviso-vendida', 'Escribe los 10 números del WhatsApp de quien la compró.', true);
   // Un solo id por intento: si se pierde la respuesta, reintentar no aparta dos veces.
   intentoVendida ??= { id: crypto.randomUUID(), lineas: [{ producto_id: piezaVendida.id, cantidad: 1 }],
     cliente: $('vendida-cliente').value.trim(), telefono, entrega: $('vendida-entrega').value };
@@ -403,13 +475,14 @@ $('form-vendida').addEventListener('submit', async (e) => {
   for (const id of ['guardar-vendida', 'cerrar-vendida', 'vendida-cliente', 'vendida-telefono', 'vendida-entrega']) $(id).disabled = true;
   try {
     const { pedido } = await api('/api/vender/apartar', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(intentoVendida) });
+    const { cliente, telefono: tel } = intentoVendida;
     intentoVendida = null;
     $('dlg-vendida').close();
-    decir('aviso', `Apartada: P-${pedido.folio}, vence ${hora(pedido.vence_en)} (48 horas). El cliente paga a la tienda: transferencia o en caja al recoger.`);
+    abrirListo(piezaVendida, cliente, tel, pedido);
     if (vista === 'piezas') await cargarPiezas(); else if (vista === 'mias') await cargarMias();
   } catch (e) {
     if (e.status && e.status < 500) intentoVendida = null;
-    decir('aviso-vendida', intentoVendida ? 'No se pudo confirmar. Reintenta: no se duplica y se conservan los datos.' : e.message, true);
+    decir('aviso-vendida', intentoVendida ? 'No sabemos si se guardó. Toca «Guardar venta» otra vez: no se repite.' : mensaje(e), true);
   } finally {
     apartando = false;
     for (const id of ['guardar-vendida', 'cerrar-vendida']) $(id).disabled = false;
@@ -420,10 +493,10 @@ $('form-vendida').addEventListener('submit', async (e) => {
 /* ---------- Mis ventas ---------- */
 
 const ESTADOS_MIA = { vendido: 'Cerrada: ya se cobró', vencido: 'Venció: la pieza volvió a la venta', cancelado: 'Cancelada' };
-let cargandoMias = false, folioCancelar = null;
+let cargandoMias = false, folioCancelar = null, clienteCancelar = '';
 function pintarMias(pedidos) {
   $('lista-mias').replaceChildren();
-  if (!pedidos.length) textoEn($('lista-mias'), 'p', 'Todavía no tienes ventas en los últimos 60 días.');
+  if (!pedidos.length) textoEn($('lista-mias'), 'p', 'Aquí verás tus ventas. Cuando marques una pieza como vendida, aparece aquí.');
   for (const p of pedidos) {
     const fila = document.createElement('article');
     fila.className = 'mia';
@@ -438,7 +511,8 @@ function pintarMias(pedidos) {
       cancelar.type = 'button';
       cancelar.addEventListener('click', () => {
         folioCancelar = p.folio;
-        $('texto-cancelar-mia').textContent = `P-${p.folio}: la pieza vuelve a la venta. Solo se puede mientras la tienda no registre un pago.`;
+        clienteCancelar = p.cliente;
+        $('titulo-cancelar-mia').textContent = `¿Cancelar la venta a ${p.cliente}?`;
         $('cancelar-mia-si').disabled = false;
         $('dlg-cancelar-mia').showModal();
       });
@@ -451,11 +525,10 @@ async function cargarMias() {
   cargandoMias = true;
   try {
     pintarMias((await api('/api/vender/mios')).pedidos);
-    decir('aviso', 'Tus ventas, actualizadas.');
-  } catch (e) { decir('aviso', e.message || 'Sin conexión. Intenta actualizar.', true); }
+    listaAlDia();
+  } catch (e) { decir('aviso', mensaje(e), true); }
   finally { cargandoMias = false; }
 }
-$('actualizar-mias').addEventListener('click', cargarMias);
 $('cancelar-mia-no').addEventListener('click', () => $('dlg-cancelar-mia').close());
 $('cancelar-mia-si').addEventListener('click', async () => {
   if (folioCancelar === null) return;
@@ -463,39 +536,41 @@ $('cancelar-mia-si').addEventListener('click', async () => {
   try {
     await api(`/api/vender/apartados/${folioCancelar}/cancelar`, { method: 'POST' });
     $('dlg-cancelar-mia').close();
-    decir('aviso', `P-${folioCancelar} cancelada: la pieza volvió a la venta.`);
+    resultado(`✓ Venta a ${clienteCancelar} cancelada. La pieza volvió a la venta.`);
   } catch (e) {
     $('dlg-cancelar-mia').close();
-    decir('aviso', e.message || 'Sin conexión. Intenta otra vez.', true);
+    resultado(mensaje(e), true);
   }
   folioCancelar = null;
   cargarMias();
 });
 $('mios').addEventListener('change', () => { if (cargandoInteresados) return; cursoresInteresados = [null]; cargarInteresados(); });
-$('actualizar-interesados').addEventListener('click', cargarInteresados);
 $('anteriores-interesados').addEventListener('click', () => { cursoresInteresados.pop(); cargarInteresados(); });
 $('mas-interesados').addEventListener('click', () => { cursoresInteresados.push(siguienteInteresados); cargarInteresados(); });
 
-$('preparar').addEventListener('click', async () => {
+$('preparar').addEventListener('click', () => prepararEnvio([...seleccion.values()]));
+async function prepararEnvio(lista) {
   const version = ++preparacion;
-  envio = [...seleccion.values()];
+  envio = [...lista];
   archivos = [];
   $('vista-previa').replaceChildren();
   $('texto-compartir').value = textoWhatsApp(envio, revendedora);
   $('abrir-wa').href = `https://wa.me/?text=${encodeURIComponent($('texto-compartir').value)}`;
   $('abrir-wa').hidden = true;
+  $('mas-compartir').open = false;
   $('compartir').disabled = $('descargar').disabled = true;
-  decir('aviso-compartir', 'Preparando fotos con precio y código…');
+  decir('aviso-compartir', `Preparando foto 1 de ${envio.length}…`);
   $('dlg-compartir').showModal();
   try {
     for (const [n, seleccionada] of envio.entries()) {
+      decir('aviso-compartir', `Preparando foto ${n + 1} de ${envio.length}…`);
       // Solo códigos concretos, con índice único: ni un catálogo completo ni precios viejos de la selección.
       const datos = await api('/api/vender?' + new URLSearchParams({ q: seleccionada.codigo }));
       if (version !== preparacion || !$('dlg-compartir').open) return;
       const p = datos.piezas.find((p) => p.id === seleccionada.id);
-      if (!p) throw new Error(`${seleccionada.codigo} ya no está disponible. Cierra y limpia la selección.`);
+      if (!p) throw new Error(`La pieza ${seleccionada.codigo} ya no está disponible. Quítala y vuelve a intentar.`);
       envio[n] = p;
-      seleccion.set(p.id, p);
+      if (seleccion.has(p.id)) seleccion.set(p.id, p);
       const archivo = await crearTarjeta(p);
       if (version !== preparacion || !$('dlg-compartir').open) return;
       archivos.push(archivo);
@@ -508,28 +583,31 @@ $('preparar').addEventListener('click', async () => {
     $('texto-compartir').value = textoWhatsApp(envio, revendedora);
     $('abrir-wa').href = `https://wa.me/?text=${encodeURIComponent($('texto-compartir').value)}`;
     $('abrir-wa').hidden = false;
-    decir('aviso-compartir', 'Tarjetas listas. Revisa precio y código antes de compartir.');
+    decir('aviso-compartir', 'Fotos listas. Revisa precio y código antes de enviar.');
     $('compartir').disabled = $('descargar').disabled = false;
-  } catch (e) { if (version === preparacion) decir('aviso-compartir', e.message, true); }
-});
+  } catch (e) { if (version === preparacion) decir('aviso-compartir', mensaje(e), true); }
+}
 async function compartir(descarga = false) {
   $('compartir').disabled = $('descargar').disabled = true;
   try {
     const texto = $('texto-compartir').value;
-    let resultado;
+    let resultadoEnvio;
     if (descarga) {
       let copiado = false;
       try { await navigator.clipboard.writeText(texto); copiado = true; } catch { /* copia manual en el campo visible */ }
       descargarTarjetas(archivos, texto);
-      resultado = { compartida: true, copiado, descarga: true };
-    } else resultado = await compartirTarjetas(archivos, texto);
-    if (!resultado.compartida) return;
+      resultadoEnvio = { compartida: true, copiado, descarga: true };
+    } else resultadoEnvio = await compartirTarjetas(archivos, texto);
+    if (!resultadoEnvio.compartida) return;
     for (const p of envio) compartidas.add(p.id);
     recordarCompartidas();
     pintarPiezas();
-    decir('aviso-compartir', (resultado.descarga ? 'Adjunta las imágenes descargadas en WhatsApp. Si no se abrió, usa el enlace de abajo. ' : 'Compartida ✓. ')
-      + (resultado.copiado ? 'Texto copiado: pégalo si falta.' : 'No se pudo copiar: selecciona el texto de arriba y cópialo a mano.'));
-  } catch (e) { decir('aviso-compartir', e.message, true); }
+    // Si no se pudo copiar, el texto de abajo (dentro de «¿No se abrió WhatsApp?») se abre solo.
+    if (!resultadoEnvio.copiado) $('mas-compartir').open = true;
+    decir('aviso-compartir', (resultadoEnvio.descarga ? 'Se guardaron las fotos. Abre WhatsApp, toca el clip y elígelas.'
+      : `✓ Listo. Compartiste ${envio.length} ${envio.length === 1 ? 'pieza' : 'piezas'}.`)
+      + (resultadoEnvio.copiado ? '' : ' Copia el texto de abajo y pégalo con las fotos.'));
+  } catch (e) { decir('aviso-compartir', mensaje(e), true); }
   finally { $('compartir').disabled = $('descargar').disabled = false; }
 }
 $('compartir').addEventListener('click', () => compartir());
@@ -538,7 +616,7 @@ $('cerrar-compartir').addEventListener('click', () => $('dlg-compartir').close()
 $('dlg-compartir').addEventListener('close', () => { preparacion++; for (const url of urls) URL.revokeObjectURL(url); urls = []; archivos = []; });
 function refrescar() {
   if (document.visibilityState !== 'visible' || document.querySelector('dialog[open]')) return;
-  if (vista === 'interesados') cargarInteresados(); else if (vista === 'mias') cargarMias(); else cargarPiezas();
+  recargar();
 }
 // ponytail: sin refresco por intervalo (cuota D1 de 5M filas/día con teléfonos abiertos todo el día);
 // se actualiza al volver a la pestaña (p. ej. después de compartir en WhatsApp) o con «Actualizar».
@@ -553,8 +631,12 @@ try {
     $('ver-mias').hidden = false;
   }
   try { compartidas = new Set(JSON.parse(localStorage.getItem(`vender-compartidas:${correo}`) || '[]')); } catch { /* sin memoria */ }
+  $('principal').hidden = false;
   await cargarPiezas();
-} catch (e) { decir('aviso', e.message || 'No se pudo iniciar. Vuelve a entrar.', true); }
+} catch (e) {
+  $('principal').hidden = false;
+  decir('aviso', e.status ? e.message : 'No se pudo abrir. Cierra la página y vuelve a entrar.', true);
+}
 </script>
 </body>
 </html>
