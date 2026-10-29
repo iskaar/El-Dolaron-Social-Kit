@@ -665,7 +665,7 @@ test('las pantallas que cambian (vender, caja, reportes, pedidos) siguen con sin
   // Sin esta condicion la caja contesta «no tiene saldo a favor» y el apartado sin abono no se puede cobrar al recoger.
   assert.match(caja, /p\.entrega === 'tienda' && p\.anticipo === 0 && Date\.parse\(p\.vence_en\) > Date\.now\(\)/);
   const vender = readFileSync('public/vender.html', 'utf8');
-  assert.match(vender, /Apartar 48 horas/);
-  assert.match(vender, /El cliente paga a la tienda: transferencia o en caja al recoger/);
+  assert.match(vender, /Guardar venta/);
+  assert.match(vender, /Quien la compró paga en la tienda/);
   assert.match(vender, /\/api\/vender\/apartar/);
 });

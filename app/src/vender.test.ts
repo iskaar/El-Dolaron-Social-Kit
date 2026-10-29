@@ -7,7 +7,8 @@ import { runInNewContext } from 'node:vm';
 import { tienda, DUENO } from './prueba-d1.ts';
 import { permiso, puede, esDeCaja, type Rol } from './cuentas.ts';
 import * as venta from '../public/venta.js';
-import { textoWhatsApp, telefonoInteresado, codigoDeRespuesta, enlaceApartar, textoSeguimiento, compartirTarjetas, crearTarjeta } from '../public/vender.js';
+import { textoWhatsApp, telefonoInteresado, codigoDeRespuesta, enlaceApartar, textoSeguimiento, compartirTarjetas, crearTarjeta,
+  fechaLegible, horaLegible, textoAvisoCliente, enlaceCliente, estadoMia, agruparMias, cobradoMias } from '../public/vender.js';
 
 function pieza(db: DatabaseSync, cambios: Record<string, unknown> = {}) {
   const id = crypto.randomUUID();
@@ -333,7 +334,7 @@ test('compartir copia antes de comprobar files y enviar; AbortError es silencios
   navegador.share = async () => { throw Object.assign(new Error(), { name: 'AbortError' }); };
   assert.equal((await compartirTarjetas(files, 'Texto')).compartida, false);
   navegador.share = async () => { throw new Error('No permitido'); };
-  await assert.rejects(() => compartirTarjetas(files, 'Texto'), /Descargar/);
+  await assert.rejects(() => compartirTarjetas(files, 'Texto'), /¿No se abrió WhatsApp\?/);
 });
 
 test('sin Web Share descarga cada imagen y abre WhatsApp con el texto; copiar puede fallar', async (t) => {
@@ -406,4 +407,77 @@ test('una computadora registra al interesado con el cajero del PIN, nunca la cue
   const r = await pedir('/api/interesados', registro(p.id), 'POST', { 'x-cajero': sesion.token });
   assert.equal(r.status, 201);
   assert.equal(r.cuerpo.interesado.vendedora, 'marta@prueba.mx');
+});
+
+/* ---------- Revendedoras (#579): funciones puras de /vender ---------- */
+
+test('fecha y hora legibles: zona de la tienda, 12 horas con «a. m.» y «p. m.», medianoche y mediodía', () => {
+  assert.equal(fechaLegible('2026-10-30T20:00:00.000Z'), 'viernes 30 oct, 2:00 p. m.');
+  assert.equal(fechaLegible('2026-10-31T03:30:00.000Z'), 'viernes 30 oct, 9:30 p. m.');   // UTC ya es 31, en la tienda sigue siendo 30
+  assert.equal(horaLegible('2026-10-30T06:05:00.000Z'), '12:05 a. m.');
+  assert.equal(horaLegible('2026-10-30T18:00:00.000Z'), '12:00 p. m.');
+  assert.equal(horaLegible(Date.parse('2026-10-30T20:35:00.000Z')), '2:35 p. m.');
+});
+
+test('aviso al cliente: nombre, talla solo si existe, código, precio en pesos, fecha de vencimiento y enlace wa.me/52', () => {
+  const vence = '2026-10-30T20:00:00.000Z';
+  const sin = textoAvisoCliente({ nombre: 'Blusa de algodón', codigo: 'ED-002335', precio: 20050 }, 'Ana', vence);
+  assert.equal(sin, 'Hola Ana, ya te aparté Blusa de algodón (ED-002335) por $200.50. La tengo apartada hasta el viernes 30 oct, 2:00 p. m. '
+    + 'Para pagar, escríbeme y te paso los datos de la tienda.');
+  const con = textoAvisoCliente({ nombre: 'Blusa\n azul', codigo: 'ED-1', precio: 30000, talla: 'M' }, ' Ana  María ', vence);
+  assert.match(con, /^Hola Ana María, ya te aparté Blusa azul talla M \(ED-1\) por \$300\. /);
+  const url = new URL(enlaceCliente('4441234567', 'Hola & más'));
+  assert.equal(url.origin + url.pathname, 'https://wa.me/524441234567');
+  assert.equal(url.searchParams.get('text'), 'Hola & más');
+});
+
+test('chip de Mis ventas: umbrales de 6 h y 1 h, vencido por reloj, pago registrado y estados cerrados', () => {
+  const ahora = Date.parse('2026-10-29T12:00:00.000Z');
+  const vence = (ms: number) => new Date(ahora + ms).toISOString();
+  const H = 3_600_000, M = 60_000;
+  const apartado = (ms: number, extra: Record<string, unknown> = {}) => ({ estado: 'apartado', saldo: 0, vence_en: vence(ms), ...extra });
+  assert.deepEqual(estadoMia(apartado(30 * H), ahora), { clase: 'aviso', texto: '⏳ Esperando pago · te quedan 30 h' });
+  assert.deepEqual(estadoMia(apartado(6 * H + M), ahora), { clase: 'aviso', texto: '⏳ Esperando pago · te quedan 6 h' });
+  assert.deepEqual(estadoMia(apartado(6 * H), ahora), { clase: 'alerta', texto: '⚠ Se vence pronto · te quedan 6 h' });
+  assert.deepEqual(estadoMia(apartado(5 * H + 59 * M), ahora), { clase: 'alerta', texto: '⚠ Se vence pronto · te quedan 5 h' });
+  assert.deepEqual(estadoMia(apartado(H), ahora), { clase: 'alerta', texto: '⚠ Se vence pronto · te quedan 1 h' });
+  assert.deepEqual(estadoMia(apartado(59 * M), ahora), { clase: 'alerta', texto: '⚠ Se vence pronto · te queda menos de 1 h' });
+  for (const ms of [0, -M, -5 * H]) assert.deepEqual(estadoMia(apartado(ms), ahora), { clase: 'alerta', texto: '⚠ Ya venció. En unos minutos la pieza vuelve a la venta.' });
+  const pagado = estadoMia(apartado(-H, { saldo: 10000 }), ahora);   // con pago, la tienda ya extendió el plazo: no es «venció»
+  assert.equal(pagado.clase, 'ok');
+  assert.match(pagado.texto, /^✓ La tienda ya registró su pago · Recoger antes del /);
+  assert.deepEqual(estadoMia({ estado: 'vendido' }, ahora), { clase: 'ok', texto: '✓ Cobrada: la tienda ya cobró' });
+  assert.deepEqual(estadoMia({ estado: 'vencido' }, ahora), { clase: 'cerrada', texto: '✕ Se venció · la pieza volvió a la venta' });
+  assert.deepEqual(estadoMia({ estado: 'cancelado' }, ahora), { clase: 'cerrada', texto: '✕ Cancelada' });
+});
+
+test('Mis ventas: grupos por urgencia, cerradas por folio descendente y total cobrado solo de lo vendido', () => {
+  const ahora = Date.parse('2026-10-29T12:00:00.000Z');
+  const en = (h: number) => new Date(ahora + h * 3_600_000).toISOString();
+  const pedidos = [
+    { folio: 5, estado: 'apartado', saldo: 0, vence_en: en(30), subtotal: 10000 },
+    { folio: 9, estado: 'apartado', saldo: 0, vence_en: en(4), subtotal: 20000 },
+    { folio: 7, estado: 'apartado', saldo: 5000, vence_en: en(20), subtotal: 30000 },
+    { folio: 3, estado: 'vendido', saldo: 0, vence_en: en(-50), subtotal: 40000 },
+    { folio: 6, estado: 'vendido', saldo: 0, vence_en: en(-10), subtotal: 15050 },
+    { folio: 8, estado: 'cancelado', saldo: 0, vence_en: en(-5), subtotal: 99900 },
+    { folio: 4, estado: 'vencido', saldo: 0, vence_en: en(-9), subtotal: 99900 },
+  ];
+  const g = agruparMias(pedidos);
+  assert.deepEqual(g.esperando.map((p) => p.folio), [9, 5]);
+  assert.deepEqual(g.pagadas.map((p) => p.folio), [7, 6, 3]);
+  assert.deepEqual(g.anteriores.map((p) => p.folio), [8, 4]);
+  assert.equal(pedidos[0].folio, 5);   // no reordena la lista original
+  assert.equal(cobradoMias(pedidos), 55050);
+  assert.equal(cobradoMias([]), 0);
+});
+
+test('regresión U6: ninguna recarga escribe en la franja #resultado, que solo cambia por una acción de la usuaria', () => {
+  const html = readFileSync('public/vender.html', 'utf8').replace(/\r\n/g, '\n');
+  for (const nombre of ['cargarPiezas', 'cargarInteresados', 'cargarMias', 'recargar', 'refrescar']) {
+    const cuerpo = html.match(new RegExp(String.raw`(?:async )?function ${nombre}\(\) \{[\s\S]*?\n\}\n`))?.[0];
+    assert.ok(cuerpo, nombre);
+    assert.ok(!/\bresultado\(/.test(cuerpo), `${nombre} no debe escribir en #resultado`);
+  }
+  assert.match(html, /id="resultado-ok"[^>]*>Entendido</);   // se quita solo con «Entendido»
 });
