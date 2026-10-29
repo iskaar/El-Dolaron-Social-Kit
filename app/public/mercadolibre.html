@@ -727,6 +727,8 @@ function pintarFormulario() {
       h('div', {}, h('div', { style: 'font-weight:700;overflow-wrap:anywhere' }, p.nombre),
         h('div', { class: 'nota' }, [p.codigo, p.marca].filter(Boolean).join(' · ')))),
     ...(prop.avisos ?? []).map((t) => h('div', { class: 'aviso', role: 'alert', style: 'margin-bottom:12px' }, t)),
+    prop.fotos_extra && !f.catalogo_id ? h('div', { class: 'nota', style: 'margin-bottom:12px' },
+      `📷 Se suben ${prop.fotos_extra + 1} fotos: ${prop.fotos_extra} adicional${prop.fotos_extra === 1 ? '' : 'es'} (la primera es la miniatura) y la foto de la pieza al final.`) : null,
     ref.pendientes,
     pintarCatalogo(),
     campo(prop.usa_family_name ? 'Nombre del producto' : 'Título de la publicación', titulo, {
