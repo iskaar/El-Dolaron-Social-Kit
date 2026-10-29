@@ -105,6 +105,29 @@ export function agruparMias(pedidos) {
 /** Lo vendido que la tienda ya cobró (centavos). No es comisión. */
 export const cobradoMias = (pedidos) => pedidos.filter((p) => p.estado === 'vendido').reduce((suma, p) => suma + p.subtotal, 0);
 
+/** Parte el nombre en hasta `lineasMax` líneas que caben en `anchoMax`; recorta con «…». `ctx`: cualquier objeto con measureText. */
+export function partirNombre(ctx, texto, anchoMax, lineasMax) {
+  const cabe = (t) => ctx.measureText(t).width <= anchoMax;
+  const recortar = (t) => {
+    if (cabe(t)) return t;
+    let corto = t;
+    while (corto && !cabe(`${corto}…`)) corto = corto.slice(0, -1);
+    return `${corto.trimEnd()}…`;
+  };
+  let resto = unaLinea(texto);
+  const lineas = [];
+  while (resto && lineas.length < lineasMax) {
+    if (lineas.length === lineasMax - 1 || cabe(resto)) { lineas.push(recortar(resto)); break; }
+    let corte = resto.length;
+    while (corte > 1 && !cabe(resto.slice(0, corte))) corte--;
+    const espacio = resto.lastIndexOf(' ', corte);
+    const fin = espacio > 0 ? espacio : corte;
+    lineas.push(resto.slice(0, fin).trimEnd());
+    resto = resto.slice(fin).trimStart();
+  }
+  return lineas;
+}
+
 function cargarImagen(src) {
   return new Promise((resolve, reject) => {
     const img = new Image();
@@ -128,30 +151,38 @@ export async function crearTarjeta(pieza) {
   ctx.drawImage(foto, (1080 - ancho) / 2, 28 + (938 - alto) / 2, ancho, alto);
   ctx.fillStyle = '#16366B';
   ctx.fillRect(0, 1000, 1080, 350);
+  // Franja azul (y 1000–1350): nombre arriba (1–2 líneas), precio, código + talla abajo y logo a la derecha.
+  ctx.fillStyle = '#fff';
+  ctx.font = '800 52px system-ui, sans-serif';
+  const lineas = partirNombre(ctx, pieza.nombre, 1000, 2);
+  lineas.forEach((linea, i) => ctx.fillText(linea, 40, 1060 + i * 56, 1000));
   ctx.fillStyle = '#FFD447';
-  ctx.font = '800 112px system-ui, sans-serif';
-  ctx.fillText(pesos(pieza.precio), 40, 1120, 630);
+  ctx.font = '800 100px system-ui, sans-serif';
+  ctx.fillText(pesos(pieza.precio), 40, 1222, 560);
   if (pieza.precio_lista > pieza.precio) {
     ctx.fillStyle = '#fff';
     ctx.font = '36px system-ui, sans-serif';
     const antes = pesos(pieza.precio_lista);
-    ctx.fillText(antes, 720, 1100, 320);
+    ctx.fillText(antes, 640, 1197, 400);
     ctx.strokeStyle = '#fff';
     ctx.lineWidth = 3;
     ctx.beginPath();
-    ctx.moveTo(720, 1088);
-    ctx.lineTo(720 + Math.min(ctx.measureText(antes).width, 320), 1088);
+    ctx.moveTo(640, 1185);
+    ctx.lineTo(640 + Math.min(ctx.measureText(antes).width, 400), 1185);
     ctx.stroke();
   }
   ctx.fillStyle = '#fff';
   ctx.font = '700 44px system-ui, sans-serif';
-  ctx.fillText(pieza.codigo, 40, 1210, 990);
-  ctx.font = '40px system-ui, sans-serif';
-  if (pieza.talla) ctx.fillText(`Talla ${pieza.talla}`, 40, 1300, 530);
+  ctx.fillText(pieza.codigo, 40, 1300, 330);
+  if (pieza.talla) {
+    const xTalla = 40 + Math.min(ctx.measureText(pieza.codigo).width, 330) + 28;
+    ctx.font = '40px system-ui, sans-serif';
+    ctx.fillText(`Talla ${pieza.talla}`, xTalla, 1300, 640 - xTalla - 16);
+  }
   // El logo ya trae su contorno blanco: va directo sobre el azul, sin cuadro, alineado a la derecha.
-  const escalaLogo = 460 / logo.naturalWidth;
+  const escalaLogo = 380 / logo.naturalWidth;
   ctx.imageSmoothingQuality = 'high';
-  ctx.drawImage(logo, 580, 1202, logo.naturalWidth * escalaLogo, logo.naturalHeight * escalaLogo);
+  ctx.drawImage(logo, 660, 1228, logo.naturalWidth * escalaLogo, logo.naturalHeight * escalaLogo);
   const blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/jpeg', 0.85));
   if (!blob) throw new Error('No se pudo preparar la tarjeta. Intenta otra vez.');
   return new File([blob], `${pieza.codigo}.jpg`, { type: 'image/jpeg' });
