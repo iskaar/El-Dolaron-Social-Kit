@@ -79,9 +79,20 @@
   .reglas li::before { content: "✓ "; color: var(--verde); font-weight: 800; }
   .mia { border-top: 1px solid var(--linea); padding: 14px 0; overflow-wrap: anywhere; }
   .mia:first-child { border-top: 0; }
-  .mia h2 { font-size: 17px; margin-bottom: 4px; }
+  .mia h3 { margin: 0 0 4px; font-size: 17px; color: var(--azul); }
   .mia p { margin: 4px 0; }
-  .peligro { border-color: var(--rojo); color: var(--rojo); }
+  .acciones-mia { display: flex; flex-direction: column; gap: 10px; margin-top: 10px; }
+  .acciones-mia > * { width: 100%; }
+  .resumen { margin-bottom: 8px; font-size: 18px; }
+  .resumen p { margin: 4px 0; }
+  .fuerte { font-weight: 800; color: var(--azul); }
+  .grupo { margin: 22px 0 6px; font-size: 20px; font-weight: 800; }
+  .chip { display: inline-block; margin: 6px 0; padding: 6px 10px; border: 2px solid; border-radius: 10px; font-size: 16px; font-weight: 700; line-height: 1.3; }
+  .chip.ok { color: var(--azul); background: var(--fondo-ok); border-color: var(--verde); }
+  .chip.aviso { color: var(--aviso-texto); background: var(--fondo-aviso); border-color: var(--aviso-texto); }
+  .chip.alerta { color: var(--rojo-texto); background: var(--fondo-error); border-color: var(--rojo-texto); }
+  .chip.cerrada { color: var(--gris); background: var(--deshab-fondo); border-color: var(--gris); }
+  .peligro { border-color: var(--rojo-texto); color: var(--rojo-texto); }
   #vista-previa { display: flex; overflow-x: auto; gap: 8px; }
   #vista-previa img { width: 135px; height: 169px; }
   #mas-compartir { margin-top: 12px; }
@@ -492,32 +503,49 @@ $('form-vendida').addEventListener('submit', async (e) => {
 
 /* ---------- Mis ventas ---------- */
 
-const ESTADOS_MIA = { vendido: 'Cerrada: ya se cobró', vencido: 'Venció: la pieza volvió a la venta', cancelado: 'Cancelada' };
 let cargandoMias = false, folioCancelar = null, clienteCancelar = '';
+function tarjetaMia(p, ahora) {
+  const fila = document.createElement('article');
+  fila.className = 'mia';
+  textoEn(fila, 'h3', p.cliente);
+  textoEn(fila, 'p', `${p.lineas.map((l) => l.nombre).join(', ')} · ${pesos(p.subtotal + p.envio)}`);
+  const estado = estadoMia(p, ahora);
+  textoEn(fila, 'p', estado.texto, `chip ${estado.clase}`);
+  textoEn(fila, 'p', p.entrega === 'envio' ? 'Envío a su casa' : 'Recoge en la tienda', 'nota');
+  textoEn(fila, 'p', `Folio P-${p.folio} · ${p.lineas.map((l) => l.codigo).join(', ')}`, 'nota');
+  const acciones = textoEn(fila, 'div', '', 'acciones-mia');
+  // Con el plazo ya vencido el mensaje «te la tengo apartada hasta…» sería falso.
+  if (p.estado === 'apartado' && p.telefono && Date.parse(p.vence_en) > ahora) {
+    const aviso = textoEn(acciones, 'a', `Avisarle a ${p.cliente}`, 'boton principal');
+    aviso.href = enlaceCliente(p.telefono, textoAvisoCliente({ nombre: p.lineas.map((l) => l.nombre).join(', '),
+      codigo: p.lineas.map((l) => l.codigo).join(', '), precio: p.subtotal }, p.cliente, p.vence_en));
+    aviso.target = '_blank'; aviso.rel = 'noopener';
+  }
+  if (p.cancelable) {
+    const cancelar = textoEn(acciones, 'button', 'Cancelar venta', 'peligro');
+    cancelar.type = 'button';
+    cancelar.addEventListener('click', () => {
+      folioCancelar = p.folio;
+      clienteCancelar = p.cliente;
+      $('titulo-cancelar-mia').textContent = `¿Cancelar la venta a ${p.cliente}?`;
+      $('cancelar-mia-si').disabled = false;
+      $('dlg-cancelar-mia').showModal();
+    });
+  }
+  return fila;
+}
 function pintarMias(pedidos) {
-  $('lista-mias').replaceChildren();
-  if (!pedidos.length) textoEn($('lista-mias'), 'p', 'Aquí verás tus ventas. Cuando marques una pieza como vendida, aparece aquí.');
-  for (const p of pedidos) {
-    const fila = document.createElement('article');
-    fila.className = 'mia';
-    textoEn(fila, 'h2', `P-${p.folio} · ${p.cliente}`);
-    textoEn(fila, 'p', p.lineas.map((l) => `${l.codigo} ${l.nombre}`).join(', ') + ` · ${pesos(p.subtotal + p.envio)}`);
-    textoEn(fila, 'p', p.estado === 'apartado'
-      ? (p.saldo > 0 ? `Apartada · la tienda ya registró un pago · vence ${hora(p.vence_en)}` : `Apartada sin pago · vence ${hora(p.vence_en)}`)
-      : ESTADOS_MIA[p.estado] ?? p.estado, 'nota');
-    textoEn(fila, 'p', p.entrega === 'envio' ? 'Envío' : 'Recoger en tienda', 'nota');
-    if (p.cancelable) {
-      const cancelar = textoEn(fila, 'button', 'Cancelar', 'peligro');
-      cancelar.type = 'button';
-      cancelar.addEventListener('click', () => {
-        folioCancelar = p.folio;
-        clienteCancelar = p.cliente;
-        $('titulo-cancelar-mia').textContent = `¿Cancelar la venta a ${p.cliente}?`;
-        $('cancelar-mia-si').disabled = false;
-        $('dlg-cancelar-mia').showModal();
-      });
-    }
-    $('lista-mias').append(fila);
+  const lista = $('lista-mias');
+  lista.replaceChildren();
+  if (!pedidos.length) return void textoEn(lista, 'p', 'Aquí verás tus ventas. Cuando marques una pieza como vendida, aparece aquí.');
+  const grupos = agruparMias(pedidos), ahora = Date.now();
+  const resumen = textoEn(lista, 'div', '', 'resumen');
+  textoEn(resumen, 'p', `Ventas que la tienda ya cobró: ${pesos(cobradoMias(pedidos))}`, 'fuerte');
+  textoEn(resumen, 'p', `${grupos.esperando.length} esperando pago`);
+  for (const [titulo, lote] of [['Esperando pago', grupos.esperando], ['Ya pagadas', grupos.pagadas], ['Anteriores', grupos.anteriores]]) {
+    if (!lote.length) continue;
+    textoEn(lista, 'h2', titulo, 'grupo');
+    for (const p of lote) lista.append(tarjetaMia(p, ahora));
   }
 }
 async function cargarMias() {
