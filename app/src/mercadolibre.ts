@@ -818,6 +818,16 @@ async function avisosDuplicado(env: Env, p: Pieza): Promise<string[]> {
   });
 }
 
+/**
+ * Fotos adicionales de la pieza (#589): R2 `extras/{id}/NN.jpg`, en orden de llave. Si hay, van primero en la
+ * publicacion (la primera es la miniatura) y la foto propia al final. ML admite 12 por articulo.
+ * ponytail: sin pantalla para administrarlas; se suben con wrangler. Interfaz cuando se usen seguido (#562).
+ */
+async function fotosExtra(env: Env, id: string): Promise<string[]> {
+  const { objects } = await env.FOTOS.list({ prefix: `extras/${id}/`, limit: 11 });
+  return objects.map((o) => o.key).sort();
+}
+
 async function preparar(env: Env, id: string, request: Request): Promise<Response> {
   const cuerpo = (await request.json().catch(() => ({}))) as { categoria_id?: unknown; consulta?: unknown; consulta_catalogo?: unknown; sin_ia?: unknown } | null;
   const elegida = cuerpo?.categoria_id === undefined || cuerpo.categoria_id === '' ? '' : String(cuerpo.categoria_id);
@@ -865,6 +875,10 @@ async function preparar(env: Env, id: string, request: Request): Promise<Respons
     // La foto se lee una vez: sirve para las medidas y para que la IA proponga atributos.
     const fotoR2 = await env.FOTOS.get(p.foto_key);
     const bytesFoto = fotoR2 ? await fotoR2.arrayBuffer() : null;
+    // Medidas y diagnostico van sobre la miniatura: la primera adicional si la hay.
+    const extras = await fotosExtra(env, p.id);
+    const miniaturaR2 = extras.length ? await env.FOTOS.get(extras[0]) : null;
+    const bytesMiniatura = miniaturaR2 ? await miniaturaR2.arrayBuffer() : bytesFoto;
 
     // Atributos: lo que la pieza trae, y lo que falta lo propone el analisis de la foto (#555).
     // `sin_ia`: buscar en el catalogo no cambia la categoria; el formulario conserva lo propuesto.
@@ -898,13 +912,13 @@ async function preparar(env: Env, id: string, request: Request): Promise<Respons
     else if (MARCAS_RESTRINGIDAS.includes(p.marca.trim().toLowerCase())) {
       avisos.push(`${p.marca} es una marca restringida en México: solo la venden tiendas oficiales o vendedores acreditados; Mercado Libre puede rechazar o dar de baja la publicación.`);
     }
-    const medidas = bytesFoto ? dimensionesJpeg(new Uint8Array(bytesFoto)) : null;
+    const medidas = bytesMiniatura ? dimensionesJpeg(new Uint8Array(bytesMiniatura)) : null;
     if (medidas && (medidas.ancho < 500 || medidas.alto < 500)) {
       avisos.push(`La foto mide ${medidas.ancho} x ${medidas.alto} px; Mercado Libre pide mínimo 500 x 500.`);
     }
     // El diagnostico pide la categoria y la foto que publicar() sube; solo avisa.
-    if (categoria && bytesFoto) {
-      const aviso = await avisoDiagnosticoFoto(env, categoria.categoria_id, bytesFoto);
+    if (categoria && bytesMiniatura) {
+      const aviso = await avisoDiagnosticoFoto(env, categoria.categoria_id, bytesMiniatura);
       if (aviso) avisos.push(aviso);
     }
 
@@ -924,6 +938,7 @@ async function preparar(env: Env, id: string, request: Request): Promise<Respons
         atributos,
         guia_tallas: guia,
         avisos,
+        fotos_extra: extras.length,
       },
     });
   } catch (error) {
@@ -1021,13 +1036,15 @@ async function publicar(env: Env, id: string, request: Request): Promise<Respons
         if (delDominio) categoria = String(delDominio.category_id);
       }
     } else {
-      const foto = await env.FOTOS.get(p.foto_key);
-      if (!foto) throw errorLocal(409, 'sin_foto', 'La foto de la pieza no está en el almacén.');
-      const formulario = new FormData();
-      const tipo = foto.httpMetadata?.contentType || 'image/jpeg';
-      formulario.append('file', new Blob([await foto.arrayBuffer()], { type: tipo }), tipo === 'image/jpeg' ? 'pieza.jpg' : 'pieza');
-      const subida = await mlFetch(env, '/pictures/items/upload', { method: 'POST', body: formulario });
-      pictures = [{ id: String(subida?.id) }];
+      for (const llave of [...await fotosExtra(env, p.id), p.foto_key]) {
+        const foto = await env.FOTOS.get(llave);
+        if (!foto) throw errorLocal(409, 'sin_foto', 'La foto de la pieza no está en el almacén.');
+        const formulario = new FormData();
+        const tipo = foto.httpMetadata?.contentType || 'image/jpeg';
+        formulario.append('file', new Blob([await foto.arrayBuffer()], { type: tipo }), tipo === 'image/jpeg' ? 'pieza.jpg' : 'pieza');
+        const subida = await mlFetch(env, '/pictures/items/upload', { method: 'POST', body: formulario });
+        pictures.push({ id: String(subida?.id) });
+      }
     }
 
     const attrsCategoria: any[] = await mlPublico(env, `/categories/${categoria}/attributes`).catch(() => []);

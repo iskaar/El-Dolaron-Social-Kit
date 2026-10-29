@@ -601,6 +601,18 @@ test('publicar conserva el tipo de la imagen guardada en R2 (#413)', () => conML
   assert.equal(subida.cuerpo.archivo, 3);
 }));
 
+test('fotos adicionales (#589): van primero en orden y la foto propia al final; preparar las cuenta', () => conML(async (t) => {
+  const id = pieza(t);
+  const otra = pieza(t);
+  await t.env.FOTOS.put(`extras/${id}/02.jpg`, new Uint8Array(5), { httpMetadata: { contentType: 'image/jpeg' } });
+  await t.env.FOTOS.put(`extras/${id}/01.jpg`, new Uint8Array(3), { httpMetadata: { contentType: 'image/jpeg' } });
+  await t.env.FOTOS.put(`extras/${otra}/01.jpg`, new Uint8Array(7), { httpMetadata: { contentType: 'image/jpeg' } });
+  assert.equal((await t.pedir(`/api/ml/preparar/${id}`, {})).cuerpo.propuesta.fotos_extra, 2);
+  await publicarPieza(t, id);
+  assert.deepEqual(t.sim.de('POST', /^\/pictures\/items\/upload$/).map((l) => l.cuerpo.archivo), [3, 5, jpeg(1200, 1200).length]);
+  assert.equal(t.sim.de('POST', /^\/items$/)[0].cuerpo.pictures.length, 3);
+}));
+
 test('publicar (modelo clásico): foto de R2, título, precio en pesos, guía y descripción', async () => {
   await conML(async (t) => {
     const id = pieza(t);
