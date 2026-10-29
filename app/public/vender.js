@@ -87,7 +87,7 @@ export async function crearTarjeta(pieza) {
     ctx.stroke();
   }
   ctx.fillStyle = '#fff';
-  ctx.font = '700 58px system-ui, sans-serif';
+  ctx.font = '700 44px system-ui, sans-serif';
   ctx.fillText(pieza.codigo, 40, 1210, 990);
   ctx.font = '40px system-ui, sans-serif';
   if (pieza.talla) ctx.fillText(`Talla ${pieza.talla}`, 40, 1300, 530);
