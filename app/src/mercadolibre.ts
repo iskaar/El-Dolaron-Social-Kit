@@ -513,14 +513,18 @@ async function listarPiezas(env: Env, url: URL): Promise<Response> {
       ? `(${PUBLICABLE} or m.producto_id is not null)`
       // Pendientes: publicables sin publicacion (o con una que fallo/cerro, para reintentar).
       : `${PUBLICABLE} and (m.producto_id is null or (m.estado = 'error' and m.ml_item_id is null) or m.estado = 'cerrada')`;
+  // Cada palabra debe aparecer en nombre, codigo, marca o categoria (instr: sin comodines que escapar).
+  const palabras = (url.searchParams.get('q') ?? '').trim().slice(0, 80).split(/\s+/).filter(Boolean).slice(0, 8);
+  const busca = palabras.map(() =>
+    ` and instr(lower(coalesce(p.nombre, '') || ' ' || coalesce(p.codigo, '') || ' ' || coalesce(p.marca, '') || ' ' || coalesce(p.categoria, '')), lower(?)) > 0`).join('');
   const { results } = await env.DB.prepare(
     `select p.id, p.codigo, p.nombre, p.categoria, p.marca, p.precio, p.estado_fisico, p.stock,
             m.producto_id as m_id, m.ml_item_id, m.estado, m.precio_ml, m.permalink, m.ultimo_error, m.actualizado_en
      from productos p left join ml_publicaciones m on m.producto_id = p.id
-     where ${donde}
+     where (${donde})${busca}
      order by coalesce(m.actualizado_en, p.creado_en) desc, p.id
      limit 51 offset ?`,
-  ).bind((pagina - 1) * 50).all<Record<string, any>>();
+  ).bind(...palabras, (pagina - 1) * 50).all<Record<string, any>>();
   return json({
     piezas: results.slice(0, 50).map((f) => ({
       producto: {

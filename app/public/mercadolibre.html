@@ -124,6 +124,8 @@
   <section class="panel" id="panel-piezas" aria-labelledby="h-piezas" hidden>
     <h2 id="h-piezas">Piezas</h2>
     <div class="pestanas" role="tablist" aria-label="Filtro de piezas" id="pestanas"></div>
+    <div class="campo"><label for="buscar">Buscar</label>
+      <input id="buscar" type="search" maxlength="80" autocomplete="off" placeholder="nombre, código, marca o categoría"></div>
     <div id="lista" role="tabpanel" aria-live="polite"></div>
     <div style="margin-top:12px"><button type="button" id="ver-mas" hidden>Ver más</button></div>
     <p class="nota">Solo piezas individuales con foto ya revisadas. Las bandas no se publican. El recargo y el
@@ -382,6 +384,7 @@ function filaPieza(item) {
     h('div', { class: 'meta' }, [p.codigo, p.marca, p.categoria].filter(Boolean).join(' · ')),
     h('div', { class: 'precios' },
       h('span', {}, `Tienda ${pesos(p.precio)}`),
+      h('span', {}, `Existencias: ${p.stock}`),
       pub?.precio_ml != null ? h('span', {}, `Mercado Libre ${pesos(pub.precio_ml)}`) : null));
   const acciones = h('div', { class: 'acciones' });
   const publicable = !pub || (pub.estado === 'error' && !pub.ml_item_id);
@@ -425,7 +428,8 @@ function aviso(texto, error = false) {
 function pintarLista() {
   $('lista').replaceChildren(...(piezas.length
     ? piezas.map(filaPieza)
-    : [h('div', { class: 'vacio' }, filtro === 'pendientes' ? 'No hay piezas por publicar.' : 'No hay piezas en esta lista.')]));
+    : [h('div', { class: 'vacio' }, $('buscar').value.trim() ? 'Ninguna pieza coincide con la búsqueda.'
+      : filtro === 'pendientes' ? 'No hay piezas por publicar.' : 'No hay piezas en esta lista.')]));
   $('ver-mas').hidden = !hayMas;
 }
 
@@ -441,7 +445,9 @@ function actualizarFila(id, publicacion) {
 async function cargarPiezas(desdeCero) {
   if (desdeCero) { pagina = 1; piezas = []; $('lista').replaceChildren(h('p', { class: 'vacio' }, 'Cargando…')); }
   else pagina += 1;
-  const r = await api(`/api/ml/piezas?filtro=${filtro}&pagina=${pagina}`);
+  const q = $('buscar').value.trim();
+  const r = await api(`/api/ml/piezas?filtro=${filtro}&pagina=${pagina}&q=${encodeURIComponent(q)}`);
+  if (q !== $('buscar').value.trim()) return;   // llego tarde: ya se escribio otra busqueda
   if (!r.ok || !r.datos) {
     if (!desdeCero) pagina -= 1;
     $('lista').replaceChildren(h('div', { class: 'aviso error' }, textoError(r, 'No se pudieron cargar las piezas.')));
@@ -453,6 +459,8 @@ async function cargarPiezas(desdeCero) {
   pintarLista();
 }
 $('ver-mas').addEventListener('click', () => cargarPiezas(false));
+let esperaBusqueda;
+$('buscar').addEventListener('input', () => { clearTimeout(esperaBusqueda); esperaBusqueda = setTimeout(() => cargarPiezas(true), 300); });
 
 /* ---------- dialogo de publicacion ---------- */
 
