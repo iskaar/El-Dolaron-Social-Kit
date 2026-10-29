@@ -14,7 +14,7 @@ import { guardarImagenComoFoto, imagenGuardada, procesarRellenoImagenes, rutaIma
 import { PRENDAS_ROPA, PRECIOS_ROPA } from '../public/ropa.js';
 import { procesarColaRopa, rutaRopaAdmin } from './ropa-ia.ts';
 import { calcularPrecio, ajustarManual, esDestinoBanda, prefijoParaFamilia, MONTOS_BANDA, type Destino } from './precio.ts';
-import { efectivoAlcanza, promoInauguracion } from '../public/venta.js';
+import { efectivoAlcanza, promoInauguracion, CLAVE_DESDE, claveRastreoDe } from '../public/venta.js';
 import { semanaIngreso } from '../public/semana.js';
 import { tramoDeDias, TRAMOS_ANTIGUEDAD } from '../public/graficas.js';
 import { detalleVenta, cancelarPieza, devolverEnCupon, reimprimirCupon } from './devoluciones.ts';
@@ -47,6 +47,7 @@ import { rutaML, recibirNotificacion, conciliarSeguro, sincronizar, publicacionV
 import { pedirDescuento, validarDescuento, listarDescuentos, listarDuenos, promoDe, promoRestantes } from './descuentos.ts';
 import { listarAltoValor, revisarConteo, ajustarExistencia, listarAjustes } from './conteo.ts';
 import { rutaPedidos, vencerPedidos, sentenciasDePedido, saldoDe, enPedido } from './pedidos.ts';
+import { leerTransferencia, sentenciaTransferencia, respuestaClaveUsada, esChoqueDeClave, excedenteDe } from './transferencias.ts';
 import { rutaVender } from './vender.ts';
 
 interface FilaConfig {
@@ -1647,6 +1648,7 @@ async function registrarVenta(request: Request, env: Env, ctx: ExecutionContext,
     efectivo?: unknown; creado_en?: unknown;
     cliente_id?: unknown; dolarones?: unknown; codigo_socio?: unknown; codigo_vale?: unknown; caja?: unknown; imprimir_en?: unknown;
     descuento_id?: unknown; promo?: unknown; sin_red?: unknown; pedido_id?: unknown; anticipo?: unknown;
+    clave_rastreo?: unknown; monto_transferido?: unknown;
   };
   const id = String(venta.id ?? '');
   if (!UUID.test(id)) {
@@ -1684,6 +1686,8 @@ async function registrarVenta(request: Request, env: Env, ctx: ExecutionContext,
     ...(venta.descuento_id ? { descuento_id:venta.descuento_id } : {}),
     ...(venta.promo ? { promo:venta.promo } : {}),
     ...(venta.pedido_id ? { pedido_id:venta.pedido_id, anticipo:venta.anticipo ?? 0 } : {}),
+    // Igual: solo si la trae (#593), para que los reintentos de ventas sin clave sigan valiendo.
+    ...(venta.clave_rastreo ? { clave_rastreo:claveRastreoDe(venta.clave_rastreo), monto_transferido:venta.monto_transferido ?? 0 } : {}),
   });
   const pedidoHash = [...new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(pedido)))]
     .map((b) => b.toString(16).padStart(2, '0')).join('');
@@ -1701,6 +1705,7 @@ async function registrarVenta(request: Request, env: Env, ctx: ExecutionContext,
     const respuesta = json({ id, duplicada:true, imprimir_en:previo.imprimir_en, ganados:ganado?.importe ?? 0,
       referido_liberado:referido?.importe ?? 0,
       anticipo:previo.anticipo, saldo_pedido:previo.pedido_id ? await saldoDe(env, previo.pedido_id) : null,
+      excedente_transferencia:await excedenteDe(env, 'venta', id),
       vale_emitido:await valeDeVenta(env, id), vale_usado:await valeUsadoEnVenta(env, id) }, 200);
     respuesta.headers.set('cache-control', 'no-store');
     return respuesta;
@@ -1777,6 +1782,13 @@ async function registrarVenta(request: Request, env: Env, ctx: ExecutionContext,
   if (!efectivoAlcanza({ formaPago, total: aPagar, efectivo })) {
     return json({ error: 'El efectivo no alcanza para el total.' }, 400);
   }
+  // Transferencia (#593): desde $300 la clave de rastreo y el monto del comprobante son obligatorios; abajo, solo si la trae.
+  // Se valida contra lo que se cobra por transferencia (despues de Dolarones y anticipo) y la clave queda «confirmada por cajero».
+  const transf = formaPago === 'transferencia' && aPagar > 0 && (aPagar >= CLAVE_DESDE || venta.clave_rastreo)
+    ? leerTransferencia(venta, aPagar) : null;
+  if (transf && !transf.ok) return json({ error: transf.error, campo: transf.campo }, 400);
+  const usada = transf && await respuestaClaveUsada(env, transf.clave);
+  if (usada) return usada;
 
   const momento = new Date();
   const ahora = momento.toISOString();
@@ -1818,6 +1830,7 @@ async function registrarVenta(request: Request, env: Env, ctx: ExecutionContext,
       // Quien cobro sale de Access; la caja es la suya (Issue #105) o la de la
       // computadora. Una venta encolada antes del corte de caja llega sin caja: ''.
       await cajaDe(env, correo, venta.caja), correo, pedidoHash, imprimirEn, descuento, descuentoId, promo, anticipo, pedidoId),
+    ...(transf ? [sentenciaTransferencia(env, transf, correo, ahora, 'venta', { venta: id })] : []),
     ...preparado.lineas.map((l) =>
       env.DB.prepare(
         `insert into venta_lineas (venta_id, producto_id, codigo, nombre, precio, cantidad, propietario)
@@ -1851,6 +1864,8 @@ async function registrarVenta(request: Request, env: Env, ctx: ExecutionContext,
     // Solo el mismo pedido obtiene respuesta idempotente; otros errores siguen visibles.
     const concurrente = await reintento();
     if (concurrente) return concurrente;
+    // Otra solicitud con la misma clave de rastreo gano el indice unico: nada de esta venta quedo (#593).
+    if (transf && esChoqueDeClave(error)) return (await respuestaClaveUsada(env, transf.clave)) ?? json({ error:'Esa clave de rastreo ya se usó.', campo:'clave' }, 409);
     if (String(error).includes('saldo de vale invalido'))
       return json({ error:'El vale cambió, venció o se agotó. Vuelve a escanearlo.' }, 409);
     if (String(error).includes('codigo de socio invalido')) {
@@ -1876,6 +1891,7 @@ async function registrarVenta(request: Request, env: Env, ctx: ExecutionContext,
   const respuesta = json({
     id, total, descuento, dolarones, imprimir_en:imprimirEn, cambio: Math.max(0, efectivo - aPagar), ganados: recompensa.ganados, referido_liberado: recompensa.referido ?? 0,
     anticipo, saldo_pedido: pedidoId ? await saldoDe(env, pedidoId) : null,
+    excedente_transferencia: transf?.ok ? transf.excedente : 0,
     saldo: clienteId ? await saldo(env, clienteId, ahora) : null,
     vale_emitido:vale.emitido,
     vale_usado:await valeUsadoEnVenta(env, id),

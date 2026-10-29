@@ -4,7 +4,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { DatabaseSync } from 'node:sqlite';
-import { tienda, DUENO, PRODUCTO } from './prueba-d1.ts';
+import { tienda, DUENO, PRODUCTO, datosTransferencia } from './prueba-d1.ts';
 import { permiso, puede, esDeCaja, ROL_POR_OMISION, type Rol } from './cuentas.ts';
 import { vencerPedidos } from './pedidos.ts';
 
@@ -43,7 +43,8 @@ const apartar = (t: Tienda, productos: string[], extra: Record<string, unknown> 
   return t.pedir('/api/vender/apartar', cuerpo).then((r) => ({ ...r, id: cuerpo.id as string }));
 };
 const abonar = (t: Tienda, folio: number, importe: number, extra: Record<string, unknown> = {}) =>
-  t.pedir(`/api/pedidos/${folio}/abonos`, { id: crypto.randomUUID(), importe, forma_pago: 'efectivo', caja: 'Caja 1', ...extra });
+  t.pedir(`/api/pedidos/${folio}/abonos`, { id: crypto.randomUUID(), importe, forma_pago: 'efectivo', caja: 'Caja 1',
+    ...(extra.forma_pago === 'transferencia' && !('clave_rastreo' in extra) ? datosTransferencia(importe) : {}), ...extra });
 const cobrar = (t: Tienda, pedido: { id: string }, productoId: string, anticipo: number, efectivo: number, extra: Record<string, unknown> = {}) =>
   t.pedir('/api/ventas', { id: crypto.randomUUID(), lineas: [{ producto_id: productoId, cantidad: 1 }], forma_pago: 'efectivo', efectivo,
     caja: 'Caja 1', pedido_id: pedido.id, anticipo, ...extra });
@@ -669,3 +670,28 @@ test('las pantallas que cambian (vender, caja, reportes, pedidos) siguen con sin
   assert.match(vender, /Quien la compró paga en la tienda/);
   assert.match(vender, /\/api\/vender\/apartar/);
 });
+
+test('todo pago que la tienda registra de una revendedora por transferencia lleva clave de rastreo unica (#593)', async () => {
+  const t = mundo();
+  comoUsuario(t.env, ANA);
+  const r = await apartar(t, [PRODUCTO]);
+  assert.equal(r.status, 201, JSON.stringify(r.cuerpo));   // la revendedora nunca captura dinero ni clave
+  assert.equal((t.db.prepare('select count(*) as n from transferencias_spei').get() as any).n, 0);
+  const folio = r.cuerpo.pedido.folio;
+
+  comoUsuario(t.env, CAJERO);
+  const sin = await abonar(t, folio, 5000, { forma_pago: 'transferencia', clave_rastreo: '' });
+  assert.equal(sin.status, 400);
+  assert.equal(sin.cuerpo.campo, 'clave');
+  const dato = datosTransferencia(5000);
+  const bien = await abonar(t, folio, 5000, { forma_pago: 'transferencia', ...dato });
+  assert.equal(bien.status, 200, JSON.stringify(bien.cuerpo));
+  const fila = t.db.prepare('select origen, registrado_por, verificacion, monto, aplicado from transferencias_spei').get() as Record<string, any>;
+  assert.deepEqual({ ...fila }, { origen: 'abono', registrado_por: CAJERO, verificacion: 'cajero', monto: 5000, aplicado: 5000 });
+  const otra = await abonar(t, folio, 5000, { forma_pago: 'transferencia', ...dato });
+  assert.equal(otra.status, 409);
+  assert.equal(otra.cuerpo.campo, 'clave');
+  assert.equal(saldoDelFolio(t.db, folio), 5000);
+  t.db.close();
+});
+const saldoDelFolio = (db: DatabaseSync, folio: number) => (db.prepare('select saldo from pedidos where folio = ?').get(folio) as { saldo: number }).saldo;

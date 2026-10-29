@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { readFileSync, readdirSync } from 'node:fs';
 import { DatabaseSync } from 'node:sqlite';
 import { runInNewContext } from 'node:vm';
-import { tienda, DUENO } from './prueba-d1.ts';
+import { tienda, DUENO, datosTransferencia } from './prueba-d1.ts';
 import { permiso, puede, esDeCaja, type Rol } from './cuentas.ts';
 import * as venta from '../public/venta.js';
 import { textoWhatsApp, telefonoInteresado, codigoDeRespuesta, enlaceApartar, textoSeguimiento, compartirTarjetas, crearTarjeta, partirNombre,
@@ -247,7 +247,7 @@ test('disponibilidad sale de stock y pedidos; apartar sigue exigiendo anticipo y
   const leer = async () => (await pedir('/api/interesados')).cuerpo.interesados[0];
   assert.equal((await leer()).disponibilidad, 'Disponible');
   const pedido = { id: crypto.randomUUID(), lineas: [{ producto_id: p.id, cantidad: 1 }], cliente: 'Ana', telefono: '4441234567',
-    entrega: 'tienda', anticipo: 10000, forma_pago: 'transferencia', caja: 'Caja 1' };
+    entrega: 'tienda', anticipo: 10000, forma_pago: 'transferencia', caja: 'Caja 1', ...datosTransferencia(10000) };
   assert.equal((await pedir('/api/pedidos', { ...pedido, anticipo: 0 })).status, 400);
   const apartado = await pedir('/api/pedidos', pedido);
   assert.equal(apartado.status, 201);

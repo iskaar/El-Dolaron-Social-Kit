@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { runInNewContext } from 'node:vm';
+import { transferenciaDe } from '../public/venta.js';
 
 const fuente = readFileSync('public/pedidos.html', 'utf8').replace(/\r\n/g, '\n');
 
@@ -18,13 +19,14 @@ function pantalla(memoria: Map<string, string>, enviar: (ruta: string, cuerpo: a
       value: '', hidden: false, disabled: false, textContent: '', className: '',
       addEventListener(tipo: string, fn: any) { this[tipo] = fn; },
       showModal() { this.open = true; },
+      focus() { this.enfocado = true; },
       close() { this.open = false; },
     });
     return elementos.get(id);
   };
   $('caja-nombre').value = 'Caja 1';
   const contexto = {
-    $, crypto, JSON, Number,
+    $, crypto, JSON, Number, Math, transferenciaDe,
     localStorage: {
       getItem: (k: string) => memoria.get(k) ?? null,
       setItem: (k: string, v: string) => { if (!permiteGuardar) throw new Error('sin memoria'); memoria.set(k, v); },
@@ -37,7 +39,9 @@ function pantalla(memoria: Map<string, string>, enviar: (ruta: string, cuerpo: a
     fetch: (ruta: string, opciones: any) => enviar(ruta, JSON.parse(opciones.body)),
   };
   const bloque = fuente.slice(fuente.indexOf('const CLAVE_MOVIMIENTO ='), fuente.indexOf('\npintar();\nawait cargarCatalogo();'));
-  const abrir = runInNewContext(`${bloque}\nabrirMovimiento`, contexto);
+  // Las ayudas de clave de rastreo (#593) viven antes del bloque: centavos, leerTransferencia, errorTransferencia, avisoExcedente.
+  const ayudas = fuente.slice(fuente.indexOf('const centavos ='), fuente.indexOf("dueño.` : '';") + "dueño.` : '';".length);
+  const abrir = runInNewContext(`${ayudas}\n${bloque}\nabrirMovimiento`, contexto);
   return { $, abrir, guardar: () => $('form-mover').submit({ preventDefault() {} }) };
 }
 
@@ -143,4 +147,54 @@ pintarLista`, {
   assert.doesNotMatch(normal, /Sin anticipo|data-mover/);
   assert.match(normal, /data-cancelar="2"/);
   assert.match($('lista-envios').innerHTML, /Sin anticipo · Vence el 2030-01-01 · Bety; cada pieza/);
+});
+
+test('abono por transferencia: sin clave o con monto menor el error queda junto al campo y no se envía ni se guarda nada', async () => {
+  const memoria = new Map<string, string>();
+  const enviados: any[] = [];
+  const p = pantalla(memoria, async (_ruta, cuerpo) => { enviados.push(cuerpo); return { ok: true, status: 200, json: async () => ({ faltante: 0, excedente_transferencia: 1000 }) }; });
+  p.abrir(17, 'abono');
+  p.$('mover-importe').value = '50';
+  p.$('mover-forma').value = 'transferencia';
+  await p.guardar();
+  assert.match(p.$('mover-clave-error').textContent, /Escribe la clave de rastreo/);
+  p.$('mover-clave').value = ' ejemplo 123456 ';
+  p.$('mover-monto').value = '49.99';
+  await p.guardar();
+  assert.match(p.$('mover-clave-error').textContent, /Pídele al cliente que transfiera lo que falta/);
+  assert.equal(enviados.length, 0);
+  assert.equal(memoria.size, 0);
+  p.$('mover-monto').value = '60';
+  await p.guardar();
+  assert.equal(enviados.length, 1);
+  assert.equal(enviados[0].clave_rastreo, 'EJEMPLO123456');
+  assert.equal(enviados[0].monto_transferido, 6000);
+  assert.equal(enviados[0].importe, 5000);
+  assert.match(p.$('aviso-lista').textContent, /Movimiento de P-17 registrado.*Sobraron \$10/);
+});
+
+test('abono: si el servidor rechaza la clave, el cuadro sigue abierto con el error junto al campo y el intento siguiente usa ID nuevo', async () => {
+  const memoria = new Map<string, string>();
+  const enviados: any[] = [];
+  const p = pantalla(memoria, async (_ruta, cuerpo) => {
+    enviados.push(cuerpo);
+    return enviados.length === 1
+      ? { ok: false, status: 409, json: async () => ({ error: 'Esa clave de rastreo ya se usó en el pedido P-3.', campo: 'clave' }) }
+      : { ok: true, status: 200, json: async () => ({ faltante: 0 }) };
+  });
+  p.abrir(17, 'abono');
+  p.$('mover-importe').value = '50';
+  p.$('mover-forma').value = 'transferencia';
+  p.$('mover-clave').value = 'EJEMPLO123456';
+  p.$('mover-monto').value = '50';
+  await p.guardar();
+  assert.match(p.$('mover-clave-error').textContent, /ya se usó en el pedido P-3/);
+  assert.equal(memoria.size, 0);                      // nada se registró: no queda intento pendiente
+  assert.equal(p.$('mover-guardar').disabled, false);
+  assert.equal(p.$('mover-clave').disabled, false);
+  p.$('mover-clave').value = 'EJEMPLO654321';
+  await p.guardar();
+  assert.equal(enviados.length, 2);
+  assert.notEqual(enviados[1].id, enviados[0].id);
+  assert.equal(enviados[1].clave_rastreo, 'EJEMPLO654321');
 });

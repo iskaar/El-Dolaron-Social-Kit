@@ -4,7 +4,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { DatabaseSync } from 'node:sqlite';
 import { readFileSync, readdirSync } from 'node:fs';
-import { tienda, PRODUCTO, codigoPrueba } from './prueba-d1.ts';
+import { tienda, PRODUCTO, codigoPrueba, datosTransferencia } from './prueba-d1.ts';
 import { permiso } from './cuentas.ts';
 import { PUBLICABLE } from './mercadolibre.ts';
 import { vencerPedidos, telefonoDe } from './pedidos.ts';
@@ -29,6 +29,8 @@ const apartar = (pedir: ReturnType<typeof tienda>['pedir'], extra: Record<string
     id: crypto.randomUUID(), lineas: [{ producto_id: PRODUCTO, cantidad: 1 }], cliente: 'Ana', telefono: '4441234567',
     entrega: 'tienda', anticipo: 10000, forma_pago: 'transferencia', caja: 'Caja 1', ...extra,
   };
+  // Toda transferencia lleva su clave de rastreo (#593): sintetica y unica salvo que la prueba ponga la suya.
+  if (cuerpo.forma_pago === 'transferencia' && !('clave_rastreo' in extra)) Object.assign(cuerpo, datosTransferencia(Number(cuerpo.anticipo)));
   return pedir('/api/pedidos', cuerpo).then((r) => ({ ...r, id: cuerpo.id as string }));
 };
 const vender = (pedir: ReturnType<typeof tienda>['pedir'], extra: Record<string, unknown> = {}) => {
@@ -41,7 +43,8 @@ const vender = (pedir: ReturnType<typeof tienda>['pedir'], extra: Record<string,
 
 const paquete = (pedir: ReturnType<typeof tienda>['pedir'], extra: Record<string, unknown> = {}) => apartar(pedir, { entrega: 'envio', ...extra });
 const abonar = (pedir: ReturnType<typeof tienda>['pedir'], folio: number, importe: number, extra: Record<string, unknown> = {}) =>
-  pedir(`/api/pedidos/${folio}/abonos`, { id: crypto.randomUUID(), importe, forma_pago: 'efectivo', caja: 'Caja 1', ...extra });
+  pedir(`/api/pedidos/${folio}/abonos`, { id: crypto.randomUUID(), importe, forma_pago: 'efectivo', caja: 'Caja 1',
+    ...(extra.forma_pago === 'transferencia' && !('clave_rastreo' in extra) ? datosTransferencia(importe) : {}), ...extra });
 const agregarAPaquete = (pedir: ReturnType<typeof tienda>['pedir'], folio: number, producto_id: string, extra: Record<string, unknown> = {}) =>
   pedir(`/api/pedidos/${folio}/piezas`, { id: crypto.randomUUID(), producto_id, cantidad: 1, ...extra });
 
@@ -600,8 +603,9 @@ test('cada abono entra en su fecha, forma y caja, una vez; liquidar no duplica i
   const a = await abonar(pedir, folio, 10000, { forma_pago: 'tarjeta', caja: 'Caja 2' });
   assert.equal(a.status, 200);
   const ultimoId = crypto.randomUUID();
-  assert.equal((await abonar(pedir, folio, 14900, { id: ultimoId, forma_pago: 'transferencia' })).status, 200);
-  assert.equal((await abonar(pedir, folio, 14900, { id: ultimoId, forma_pago: 'transferencia' })).status, 200);
+  const transferencia = { id: ultimoId, forma_pago: 'transferencia', ...datosTransferencia(14900) };
+  assert.equal((await abonar(pedir, folio, 14900, transferencia)).status, 200);
+  assert.equal((await abonar(pedir, folio, 14900, transferencia)).status, 200);
   const vista = (await pedir('/api/ventas', undefined, 'GET')).cuerpo;
   const formas = Object.fromEntries(vista.por_forma_pago.map((f: any) => [f.forma_pago, f.total]));
   assert.equal(formas.efectivo ?? 0, 0); // anticipo de otro día

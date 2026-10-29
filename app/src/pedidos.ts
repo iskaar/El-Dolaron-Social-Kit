@@ -11,7 +11,8 @@ import { cajaDe } from './corte.ts';
 import { sumarMeses } from './dolarones.ts';
 import { conciliarSeguro } from './mercadolibre.ts';
 import { sentenciasVale } from './vales.ts';
-import { envioDe, anticipoMinimoDe, ANTICIPO_ENVIO, viernesDeEnvio } from '../public/venta.js';
+import { envioDe, anticipoMinimoDe, ANTICIPO_ENVIO, viernesDeEnvio, claveRastreoDe } from '../public/venta.js';
+import { leerTransferencia, sentenciaTransferencia, respuestaClaveUsada, esChoqueDeClave, excedenteDe } from './transferencias.ts';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const FORMAS_PAGO = new Set(['efectivo', 'tarjeta', 'transferencia']);
@@ -197,7 +198,8 @@ async function crearPedido(request: Request, env: Env, ctx: ExecutionContext, co
   const previo = await pedidoPor(env, 'id = ?', id);
   if (previo) {
     return revendedora && previo.vendedora !== correo
-      ? json({ error: 'El identificador ya corresponde a otro pedido.' }, 409) : json({ pedido: previo });
+      ? json({ error: 'El identificador ya corresponde a otro pedido.' }, 409)
+      : json({ pedido: previo, excedente_transferencia: await excedenteDe(env, 'anticipo', id) });
   }
 
   if (!Array.isArray(cuerpo.lineas) || cuerpo.lineas.length < 1 || cuerpo.lineas.length > 20)
@@ -241,6 +243,11 @@ async function crearPedido(request: Request, env: Env, ctx: ExecutionContext, co
     return json({ error: `El anticipo mínimo es $${minimo / 100} y no pasa del total.` }, 400);
   if (!revendedora && entrega === 'envio' && anticipo !== ANTICIPO_ENVIO)
     return json({ error: 'El paquete de envío se abre con $100; el resto se recibe como abonos.' }, 400);
+  // Transferencia (#593): todo anticipo de apartado o envio por transferencia lleva la clave de rastreo del comprobante.
+  const transf = !revendedora && formaPago === 'transferencia' && anticipo > 0 ? leerTransferencia(cuerpo, anticipo) : null;
+  if (transf && !transf.ok) return json({ error: transf.error, campo: transf.campo }, 400);
+  const usada = transf && await respuestaClaveUsada(env, transf.clave);
+  if (usada) return usada;
   if (revendedora) {
     // Solo cuentan las que siguen sin pago: una ya pagada y por recoger no bloquea seguir vendiendo.
     const abiertas = (await env.DB.prepare(`select coalesce(sum(l.cantidad), 0) as n from pedidos d
@@ -261,6 +268,7 @@ async function crearPedido(request: Request, env: Env, ctx: ExecutionContext, co
          values (?, (select coalesce(max(folio), 0) + 1 from pedidos), ?, ?, ?, ?, ?, 'apartado', ?, ?, ?, ?, ?, ?, ?, ?)`,
       ).bind(id, cliente, telefono, entrega, envio, correo, vence.toISOString(), anticipo, formaPago, caja,
         anticipo, sumarMeses(vence, 1), ahora, ahora),
+      ...(transf ? [sentenciaTransferencia(env, transf, correo, ahora, 'anticipo', { pedido: id })] : []),
       ...ids.map((productoId) => env.DB.prepare(
         'insert into pedido_lineas (pedido_id, producto_id, cantidad, precio) values (?, ?, ?, ?)',
       ).bind(id, productoId, cantidades.get(productoId), filas.find((p) => p.id === productoId)!.precio)),
@@ -274,13 +282,14 @@ async function crearPedido(request: Request, env: Env, ctx: ExecutionContext, co
   } catch (error) {
     // Dos envios del mismo pedido a la vez: el segundo choca con la llave y el primero ya quedo.
     const ya = await pedidoPor(env, 'id = ?', id);
-    if (ya) return json({ pedido: ya });
+    if (ya) return json({ pedido: ya, excedente_transferencia: await excedenteDe(env, 'anticipo', id) });
+    if (transf && esChoqueDeClave(error)) return (await respuestaClaveUsada(env, transf.clave)) ?? json({ error: 'Esa clave de rastreo ya se usó.', campo: 'clave' }, 409);
     if (String(error).includes('stock insuficiente')) return json({ error: 'Alguna pieza ya no está disponible.' }, 409);
     throw error;
   }
   // Las piezas apartadas dejan de estar a la venta tambien en Mercado Libre (D1 manda).
   ctx.waitUntil(conciliarSeguro(env, { productoIds: ids }));
-  return json({ pedido: await pedidoPor(env, 'id = ?', id) }, 201);
+  return json({ pedido: await pedidoPor(env, 'id = ?', id), excedente_transferencia: transf?.ok ? transf.excedente : 0 }, 201);
 }
 
 /** Apartados, envios por mandar y saldos a favor vigentes. */
@@ -356,7 +365,11 @@ async function moverPaquete(folio: number, tipo: 'pieza' | 'abono', request: Req
     return json({ error: 'Pieza o cantidad inválida.' }, 400);
   if (tipo === 'abono' && (!Number.isSafeInteger(importe) || importe <= 0 || !FORMAS_PAGO.has(formaPago) || !caja))
     return json({ error: 'Escribe un abono en centavos enteros, su forma de pago y su caja.' }, 400);
-  const solicitud = JSON.stringify(tipo === 'pieza' ? { folio, tipo, productoId, cantidad } : { folio, tipo, importe, formaPago, caja });
+  // #593: una transferencia lleva clave y monto del comprobante. Entran a la solicitud solo si vienen, para que el
+  // reintento de un abono anterior a este cambio (sin clave) siga devolviendo su resultado original.
+  const conClave = tipo === 'abono' && formaPago === 'transferencia';
+  const solicitud = JSON.stringify(tipo === 'pieza' ? { folio, tipo, productoId, cantidad }
+    : { folio, tipo, importe, formaPago, caja, ...(conClave && cuerpo.clave_rastreo ? { clave: claveRastreoDe(cuerpo.clave_rastreo), transferido: Number(cuerpo.monto_transferido) } : {}) });
   const reintento = async () => {
     const previo = await env.DB.prepare('select solicitud, respuesta from pedido_movimientos where id = ?')
       .bind(id).first<{ solicitud: string; respuesta: string }>();
@@ -366,6 +379,10 @@ async function moverPaquete(folio: number, tipo: 'pieza' | 'abono', request: Req
   };
   const previo = await reintento();
   if (previo) return previo;
+  const transf = conClave ? leerTransferencia(cuerpo, importe) : null;
+  if (transf && !transf.ok) return json({ error: transf.error, campo: transf.campo }, 400);
+  const usada = transf && await respuestaClaveUsada(env, transf.clave);
+  if (usada) return usada;
   const pedido = await pedidoPor(env, 'folio = ?', folio);
   if (!pedido) return json({ error: 'El pedido no existe.' }, 404);
   const momento = new Date();
@@ -407,6 +424,7 @@ async function moverPaquete(folio: number, tipo: 'pieza' | 'abono', request: Req
         (id, pedido_id, tipo, solicitud, importe, forma_pago, caja, autor, creado_en, respuesta)
         values (?, ?, ?, ?, ?, ?, ?, ?, ?, '')`)
         .bind(id, pedido.id, tipo, solicitud, tipo === 'abono' ? importe : 0, tipo === 'abono' ? formaPago : '', caja, correo, ahora),
+      ...(transf ? [sentenciaTransferencia(env, transf, correo, ahora, 'abono', { pedido: pedido.id, movimiento: id })] : []),
       ...(tipo === 'pieza' ? [
         env.DB.prepare(`insert into pedido_lineas (pedido_id, producto_id, cantidad, precio) values (?, ?, ?, ?)
           on conflict (pedido_id, producto_id) do update set cantidad = cantidad + excluded.cantidad`)
@@ -423,13 +441,14 @@ async function moverPaquete(folio: number, tipo: 'pieza' | 'abono', request: Req
         tipo === 'abono' ? caja : pedido.caja, tipo === 'abono' ? formaPago : String(pedido.forma_pago)) : []),
       // La respuesta se guarda en el mismo batch: conserva el resultado original incluso después de otros movimientos.
       env.DB.prepare(`update pedido_movimientos set respuesta = json_object('movimiento_id', id, 'pedido_id', pedido_id,
-        'folio', ?1, 'saldo', ?2, 'faltante', ?3, 'liquidado_en', ?4, 'viernes_envio', ?5) where id = ?6`)
+        'folio', ?1, 'saldo', ?2, 'faltante', ?3, 'liquidado_en', ?4, 'viernes_envio', ?5, 'excedente_transferencia', ?7) where id = ?6`)
         .bind(folio, liquidado ? nuevoSaldo - total : nuevoSaldo, Math.max(0, total - nuevoSaldo), liquidado ? ahora : null,
-          liquidado ? viernesDeEnvio(ahora) : null, id),
+          liquidado ? viernesDeEnvio(ahora) : null, id, transf?.ok ? transf.excedente : 0),
     ]);
   } catch (error) {
     const repetido = await reintento();
     if (repetido) return repetido;
+    if (transf && esChoqueDeClave(error)) return (await respuestaClaveUsada(env, transf.clave)) ?? json({ error: 'Esa clave de rastreo ya se usó.', campo: 'clave' }, 409);
     if (String(error).includes('stock insuficiente')) return json({ error: 'Alguna pieza ya no está disponible.' }, 409);
     if (String(error).includes('saldo de pedido invalido')) return json({ error: 'El paquete cambió o venció. Actualiza la lista.' }, 409);
     throw error;
