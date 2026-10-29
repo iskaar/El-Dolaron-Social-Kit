@@ -271,6 +271,19 @@ Los mensajes que vienen del servidor (`datos.error`, p. ej. «Pieza o cantidad i
 
 ---
 
+## 4.5 Implementado en la Fase 2 (PR de #579)
+
+Solo `app/public/vender.html`, `vender.js` y sus pruebas; sin API ni reglas de #575. Lo que se aplicó a **todas** las cuentas (cajeras incluidas): A3 (pie «Compartir {n} en WhatsApp», oculto con 0), A4 (diálogo de compartir), A8 (tabla 4.2 completa), A10 («Actualizado a las…» y un solo «Actualizar»), la franja `#resultado` de A1 y el cambio de «Preparar envío». Lo que cuelga de `body.rev` (cuenta `revendedora`): A11 tamaños, A2 tarjeta horizontal y chips, A7 pestañas con ícono, «Preguntaron», paneles plegables y sin «Solo los míos», Descartar con dos toques, y A9 primera vez. A1 (diálogo «¡Venta guardada!»), A5 y A6 ya eran solo de revendedora.
+
+Decisiones al implementar:
+- «Me escribieron con un código» (revendedora) **busca la pieza** y la deja en la lista con sus botones («Ya la vendí»), en vez de abrir el formulario de interesados; la caja conserva «La quiere».
+- Los avisos de conteo («N piezas disponibles…», «Cola actualizada…», «Tus ventas, actualizadas.») van a una región `aria-live` oculta; las recargas nunca escriben en `#resultado` (regresión U6 cubierta en `vender.test.ts`).
+- En «Mis ventas» el folio sigue como dato menor junto con los códigos de las piezas (`Folio P-123 · ED-…`); «Avisarle» no aparece si el plazo ya venció por reloj.
+- La casilla de selección sigue siendo `<input type="checkbox">` nativo (28 px con `rev`), con la etiqueta «Elegir».
+- Pendiente de la Fase 2 sin hacer: ninguno de la lista «Ahora». Siguen en «Después» D1–D12.
+
+---
+
 ## 5. Orden de implementación sugerido (Fase 2)
 
 A1 (confirmación) → A5 (diálogo «Ya la vendí») → A2/A3/A4 (tarjeta, pie, compartir) → A6 (Mis ventas) → A8/A11 (textos y tamaños) → A7, A9, A10. Cada bloque cuelga de `body.rev`; cajeras sin cambios. Validación: `npm test`, `npm run typecheck`, `python tools/validate_assets.py`. La cuenta regresiva y la franja `#resultado` necesitan prueba de regresión del fallo U6 (que la recarga no borre el resultado). Prueba física: sección 7.
