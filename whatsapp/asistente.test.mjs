@@ -83,9 +83,13 @@ test('el prompt solo afirma los datos aprobados', () => {
   assert.match(PROMPT, /ningún otro/);
   assert.match(PROMPT, /este mismo chat/);
   assert.match(PROMPT, /un solo asterisco/);
-  // Issue #497: la gran inauguración, la ubicación y el apartado son datos aprobados; los envíos se escalan.
-  assert.match(PROMPT, /sábado 24 y domingo 25 de octubre de 2026/);
-  assert.match(PROMPT, /primeras 100 compras de \$300 o más.*\$100 en caja/);
+  // Issue #583: la inauguración terminó; sin promoción vigente, se invita a los grupos y al mapa.
+  assert.doesNotMatch(PROMPT, /inauguraci|primeras 100/i);
+  assert.match(PROMPT, /NO hay ninguna promoción vigente/);
+  assert.match(PROMPT, /eldolaron\.com\/ropa/);
+  assert.match(PROMPT, /eldolaron\.com\/general/);
+  assert.match(PROMPT, /otras promociones o descuentos/);
+  // Issue #497: la ubicación y el apartado son datos aprobados; los envíos se escalan.
   assert.match(PROMPT, /Jardín Hidalgo 129/);
   assert.match(PROMPT, /15 % del valor.*7 días/);
   assert.match(PROMPT, /envíos.*no afirmes ni niegues/);
@@ -126,7 +130,7 @@ test('si el asistente escala, la conversación queda pausada y no vuelve a conte
   const r = red('Eso lo confirmo con el equipo. ESCALAR');
   try {
     const env = entorno({}, { ANTHROPIC_API_KEY: 'clave' });
-    await correr(env, [texto('m2', '5214421234567', '¿Tienen promociones?')]);
+    await correr(env, [texto('m2', '5214421234567', '¿Aceptan tarjeta?')]);
     assert.equal(env.EVENTS.guardados.has('pausado:5214421234567'), true);
     await correr(env, [texto('m3', '5214421234567', '¿Y los precios?')]);
     assert.equal(r.llamadas.modelo.length, 1);
@@ -154,7 +158,8 @@ test('un mensaje corto del FAQ se contesta fijo sin llamar al modelo; uno largo 
   try {
     const env = entorno({}, { ANTHROPIC_API_KEY: 'clave' });
     await correr(env, [texto('f1', '5214421234567', 'hola buenas')]);
-    assert.match(r.llamadas.meta[0].text.body, /inauguración/);
+    assert.match(r.llamadas.meta[0].text.body, /eldolaron\.com\/ropa/);
+    assert.doesNotMatch(r.llamadas.meta[0].text.body, /inauguraci/i);
     assert.equal(r.llamadas.modelo.length, 0);
     await correr(env, [texto('f2', '5214421234567', 'hola, ¿dónde consigo una blusa talla M para un regalo de cumpleaños?')]);
     assert.equal(r.llamadas.modelo.length, 1);
@@ -259,11 +264,9 @@ function tiendaSimulada(respuestas) {
   } };
 }
 
-test('#499: el prompt obliga a consultar cupos, disponibilidad y mapa en vez de inventarlos', () => {
-  assert.deepEqual(HERRAMIENTAS.map((h) => h.name), ['buscar_productos', 'cupos_promocion', 'horario_y_ubicacion']);
-  assert.match(PROMPT, /usa cupos_promocion/);
-  assert.match(PROMPT, /Nunca digas una cantidad sin consultarla/);
-  assert.match(PROMPT, /ya se acabaron/);
+test('#499 y #583: el prompt obliga a consultar disponibilidad y mapa en vez de inventarlos; ya no hay herramienta de cupos', () => {
+  assert.deepEqual(HERRAMIENTAS.map((h) => h.name), ['buscar_productos', 'horario_y_ubicacion']);
+  assert.doesNotMatch(PROMPT, /cupos_promocion/);
   assert.match(PROMPT, /nunca cantidades/);
   assert.match(PROMPT, /horario_y_ubicacion/);
   // La categoría solo acepta las claves de la tienda.
@@ -280,20 +283,8 @@ test('#499: horario_y_ubicacion responde con datos confirmados sin tocar la tien
     assert.deepEqual(resultado, UBICACION);
     assert.match(UBICACION.direccion, /Jardín Hidalgo 129/);
     assert.match(UBICACION.horario, /11:00 a 20:00/);
-    assert.match(UBICACION.mapa, /^https:\/\/www\.google\.com\/maps\/dir\/\?api=1&destination=Jard%C3%ADn%20Hidalgo%20129/);
-  } finally { r.restaurar(); }
-});
-
-test('#499: cupos_promocion va a la ruta de solo lectura y el modelo recibe el «ya se acabaron» de la tienda', async () => {
-  const agotada = { estado: 'agotada', restantes: 0, mensaje: 'Ya se acabaron los descuentos de la promoción.' };
-  const r = redSecuencia([usar('cupos_promocion'), textoFinal('Ya se acabaron los descuentos.\nSCORE: 3')]);
-  const tienda = tiendaSimulada({ '/api/asistente/promocion': agotada });
-  try {
-    const env = entorno({}, { ANTHROPIC_API_KEY: 'clave', ASISTENTE_TOKEN: 'token-enlace', TIENDA: tienda });
-    await correr(env, [texto('p1', '5214421234567', '¿todavía alcanzo el descuento de la inauguración si voy en la tarde?')]);
-    assert.deepEqual(tienda.llamadas, [{ ruta: '/api/asistente/promocion', params: {}, token: 'token-enlace' }]);
-    assert.deepEqual(JSON.parse(r.modelo[1].messages.at(-1).content[0].content), agotada);
-    assert.equal(r.meta.length, 1, 'sin búsqueda de productos no hay tarjetas');
+    assert.equal(UBICACION.mapa, 'https://maps.app.goo.gl/RgWXq1AUvyXsV9ts6');
+    assert.deepEqual(UBICACION.grupos, { ropa: 'https://eldolaron.com/ropa', mercancia_general: 'https://eldolaron.com/general' });
   } finally { r.restaurar(); }
 });
 

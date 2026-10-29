@@ -4,18 +4,31 @@ import { createHmac } from 'node:crypto';
 import worker from './worker.mjs';
 import { esSimple, respuestaFija, respuestaPara } from './respuestas.mjs';
 
+const GRUPOS = [/eldolaron\.com\/ropa/, /eldolaron\.com\/general/, /maps\.app\.goo\.gl\/RgWXq1AUvyXsV9ts6/];
+
 test('preguntas del FAQ reciben la respuesta aprobada, con o sin acentos', () => {
   assert.match(respuestaPara('¿A qué hora abren?'), /11 a\. m\. a 8 p\. m\./);
   assert.match(respuestaPara('cual es su telefono'), /444 543 7754/);
   assert.match(respuestaPara('Hacen envíos a domicilio?'), /el equipo te confirma/);
-  assert.match(respuestaPara('hola buenas tardes'), /gracias por escribir.*inauguración/);
+  const saludo = respuestaPara('hola buenas tardes');
+  assert.match(saludo, /gracias por escribir/);
+  for (const enlace of GRUPOS) assert.match(saludo, enlace);
+  assert.doesNotMatch(saludo, /inauguraci/i);
 });
 
-test('la gran inauguracion, la ubicacion y el apartado responden con los datos confirmados (#497)', () => {
+test('sin promocion vigente: las preguntas de promo invitan a los grupos y a la tienda; ubicacion y apartado siguen (#583)', () => {
   for (const pregunta of ['¿A qué hora es la inauguración?', 'tienen promocion', 'cómo funciona el cupón de 100 pesos', 'hay descuento?']) {
-    assert.match(respuestaPara(pregunta), /sábado 24 y domingo 25.*primeras 100 compras de \$300.*\$100 en caja/);
+    const r = respuestaPara(pregunta);
+    assert.match(r, /no tenemos ninguna promoción vigente/);
+    for (const enlace of GRUPOS) assert.match(r, enlace);
+    assert.doesNotMatch(r, /inauguraci|\$100|primeras 100/i);
   }
-  assert.match(respuestaPara('¿Dónde están?'), /Jardín Hidalgo 129/);
+  for (const pregunta of ['quiero unirme al grupo', 'tienen grupos de whatsapp']) {
+    for (const enlace of GRUPOS.slice(0, 2)) assert.match(respuestaPara(pregunta), enlace);
+  }
+  const ubicacion = respuestaPara('¿Dónde están?');
+  assert.match(ubicacion, /Jardín Hidalgo 129/);
+  assert.match(ubicacion, GRUPOS[2]);
   assert.match(respuestaPara('me lo pueden apartar'), /15 %.*7 días/);
 });
 
