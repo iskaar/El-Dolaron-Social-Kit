@@ -773,7 +773,16 @@ test('piezas: pendientes, publicadas y todas; 50 por página', async () => {
     assert.deepEqual((await t.pedir('/api/ml/piezas?filtro=todas')).cuerpo.piezas.map((x: any) => x.producto.id), [a]);
     assert.ok(!(await t.pedir('/api/ml/piezas?filtro=todas')).cuerpo.piezas.some((x: any) => x.producto.id === dañada));
 
-    for (let i = 0; i < 51; i++) pieza(t);
+    // Busqueda: cada palabra en nombre, codigo, marca o categoria, sin importar mayusculas.
+    const nike = pieza(t, { nombre: 'Tenis Air Max', marca: 'Nike', categoria: 'calzado' });
+    const ids = async (q: string) => (await t.pedir(`/api/ml/piezas?filtro=todas&q=${encodeURIComponent(q)}`)).cuerpo.piezas.map((x: any) => x.producto.id);
+    assert.deepEqual(await ids('nike'), [nike]);
+    assert.deepEqual(await ids('CALZADO air'), [nike]);
+    assert.deepEqual(await ids('nike levi'), []);
+    assert.deepEqual(await ids(`levi's 501`), [a]);
+    assert.deepEqual(await ids('100%'), []);
+
+    for (let i = 0; i < 50; i++) pieza(t);   // + la de Nike = 51 pendientes
     const p1 = (await t.pedir('/api/ml/piezas')).cuerpo;
     assert.equal(p1.piezas.length, 50);
     assert.equal(p1.hay_mas, true);
