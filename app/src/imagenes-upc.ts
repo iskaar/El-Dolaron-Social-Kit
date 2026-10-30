@@ -56,7 +56,7 @@ async function abrirHttps(url: string, accept: string, redirecciones: number) {
     if (!httpsValida(url)) throw new Error('URL HTTPS inválida.');
     const respuesta = await fetch(url, {
       redirect: 'manual', signal,
-      headers: { 'user-agent': 'ElDolaron-escaner/1.0 (+https://viste.com.mx)', accept },
+      headers: { 'user-agent': 'ElDolaron-escaner/1.0 (+https://eldolaron.com)', accept },
     });
     if (![301, 302, 303, 307, 308].includes(respuesta.status)) return { respuesta, url };
     const destino = respuesta.headers.get('location')?.trim();
@@ -353,7 +353,7 @@ export async function rutaImagenUpc(request: Request, env: Env, pathname: string
     // Una consulta por UPC, solo al escanearlo y luego en caché: volumen de persona, no de crawler.
     const respuesta = await fetch(enlace(fuente.tcin), {
       redirect: 'manual', signal: AbortSignal.timeout(10_000),
-      headers: { 'user-agent': 'ElDolaron-escaner/1.0 (+https://viste.com.mx)', accept: 'text/html' },
+      headers: { 'user-agent': 'ElDolaron-escaner/1.0 (+https://eldolaron.com)', accept: 'text/html' },
     });
     const html = respuesta.status === 200 || respuesta.status === 403 || respuesta.status === 429
       ? await leerTexto(respuesta.body, 3_000_000) : (await respuesta.body?.cancel(), '');
