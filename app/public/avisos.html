@@ -4,6 +4,10 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>El Dolarón — avisos</title>
+<!-- Issue #600: se instala como app para recibir notificaciones push (en iPhone, solo así). -->
+<link rel="manifest" href="/avisos.webmanifest" crossorigin="use-credentials">
+<link rel="apple-touch-icon" href="/icono-app.png">
+<meta name="theme-color" content="#16366B">
 <style>
   :root { --azul:#16366B; --rojo:#D72B32; --verde:#1f7a4d; --amarillo:#FFD447; --linea:#dfe3ea; }
   * { box-sizing: border-box; }
@@ -38,6 +42,10 @@
 <body>
 <header><h1>Avisos</h1><a href="/caja">Caja</a><a href="/">Inicio</a></header>
 <main>
+  <div id="push" class="nota" hidden>
+    <button id="activar-push" type="button" class="relleno">Activar notificaciones</button>
+    <div id="push-estado" role="status"></div>
+  </div>
   <h2>Ventas de Mercado Libre por atender</h2>
   <div class="nota">Cada venta se queda aquí hasta que alguien la marca. Se actualiza sola cada 30 segundos.</div>
   <div class="error" id="error" role="alert"></div>
@@ -105,6 +113,45 @@ async function cargar() {
 }
 cargar();
 setInterval(cargar, 30_000);
+
+// Notificaciones push al dueño (Issue #600): el botón «Ayuda» de la caja llega aquí.
+// En iPhone solo existen dentro de la app agregada a la pantalla de inicio (iOS 16.4+).
+async function prepararPush() {
+  const r = await fetch('/api/push/clave').catch(() => null);
+  if (!r?.ok) return;   // solo el dueño, y solo con el secreto VAPID_JWK cargado
+  const { clave } = await r.json();
+  $('push').hidden = false;
+  const estado = (texto) => { $('push-estado').textContent = texto; };
+  if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
+    $('activar-push').hidden = true;
+    return estado('En iPhone: en Safari toca Compartir → «Agregar a inicio» y abre Avisos desde ese ícono para activarlas.');
+  }
+  const registro = await navigator.serviceWorker.register('/sw-avisos.js', { scope: '/avisos' });
+  if (Notification.permission === 'granted' && await registro.pushManager.getSubscription()) {
+    estado('Activas en este dispositivo. Tócalo otra vez para mandarte una prueba.');
+  }
+  $('activar-push').addEventListener('click', async () => {
+    $('activar-push').disabled = true;
+    try {
+      // iOS solo pregunta si requestPermission va directo en el toque.
+      if (await Notification.requestPermission() !== 'granted') throw new Error('sin permiso; actívalas en Ajustes → Notificaciones → Avisos');
+      await navigator.serviceWorker.ready;
+      const llave = Uint8Array.from(atob(clave.replace(/-/g, '+').replace(/_/g, '/')), (c) => c.charCodeAt(0));
+      const suscripcion = await registro.pushManager.getSubscription()
+        ?? await registro.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: llave });
+      const g = await fetch('/api/push/suscripcion', {
+        method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(suscripcion),
+      });
+      const cuerpo = await g.json().catch(() => ({}));
+      if (!g.ok) throw new Error(cuerpo.error ?? `Error ${g.status}`);
+      estado(cuerpo.prueba ? 'Listo: te mandamos una notificación de prueba.' : 'Guardado, pero la prueba no salió. Revisa los logs del Worker.');
+    } catch (error) {
+      estado(`No se pudo: ${error.message}`);
+    }
+    $('activar-push').disabled = false;
+  });
+}
+prepararPush();
 </script>
 </body>
 </html>

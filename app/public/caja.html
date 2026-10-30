@@ -15,6 +15,8 @@
   header h1 { font-size: 17px; margin: 0; flex: 1; }
   header a { color: #FFD447; font-size: 13px; }
   #avisos-ml:not([hidden]) { background: #D72B32; color: #fff; padding: 6px 12px; border-radius: 8px; font-size: 15px; font-weight: 700; text-decoration: none; }
+  #pedir-ayuda { background: #D72B32; color: #fff; border: 0; border-radius: 8px; padding: 6px 14px; font-size: 15px; font-weight: 700; cursor: pointer; }
+  #pedir-ayuda:disabled { opacity: .8; cursor: default; }
   #estado-red { font-size: 13px; padding: 3px 10px; border-radius: 999px; background: #ffffff22; }
   #estado-red.sin-red { background: var(--rojo); }
   #promo-cupo { font-size: 15px; font-weight: 700; padding: 4px 12px; border-radius: 999px; background: #FFD447; color: #1a1f2b; }
@@ -179,6 +181,7 @@ if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw-caja.js'
   <a href="/socios">Alta de socios</a>
   <a href="/admin">Cola de revisión</a>
   <a href="/avisos" id="avisos-ml" target="_blank" hidden></a>
+  <button id="pedir-ayuda" type="button" aria-live="polite">Ayuda</button>
   <button id="cerrar-sesion" type="button">Cerrar sesión</button>
 </header>
 
@@ -2125,6 +2128,22 @@ function pintarTipoSalida() {
   $('retiro-motivo').placeholder = gasto ? 'Garrafón de agua, jabón…' : tipo === 'terminal' ? 'Pago de la terminal' : 'Caja fuerte, depósito al banco…';
 }
 document.querySelector('.tipo-salida').addEventListener('change', pintarTipoSalida);
+// Issue #600: avisa al dueño con una notificación push al celular (o por correo si no las tiene activas).
+$('pedir-ayuda').addEventListener('click', async () => {
+  const boton = $('pedir-ayuda');
+  boton.disabled = true;
+  try {
+    const r = await fetch('/api/ayuda', {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ caja: $('caja-nombre').value }),
+    });
+    boton.textContent = r.ok ? 'Ayuda avisada ✓' : ((await r.json().catch(() => ({}))).error ?? 'No se pudo avisar');
+  } catch {
+    boton.textContent = 'Sin red: no se pudo avisar';
+  }
+  // ponytail: 30 s sin repetir para no llenar el celular de avisos.
+  setTimeout(() => { boton.textContent = 'Ayuda'; boton.disabled = false; }, 30_000);
+});
+
 $('abrir-retiro').addEventListener('click', () => {
   if (!exigirCaja()) return;
   idRetiro = crypto.randomUUID();

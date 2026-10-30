@@ -5,7 +5,7 @@
  * falla no tumba la solicitud: queda en el log y la solicitud sigue en /cuentas.
  * Un envio por dueno: sin el plan Workers Paid solo se puede mandar a direcciones
  * verificadas en Email Routing, y un destinatario sin verificar tumbaria el de todos.
- * ponytail: solo correo; el push del navegador (VAPID) si el correo llega tarde.
+ * El push del navegador (VAPID) vive en push.ts (Issue #600).
  */
 import { leerRoles } from './cuentas.ts';
 

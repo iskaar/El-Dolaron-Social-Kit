@@ -110,7 +110,7 @@ export function permiso(pathname: string, metodo: string): Regla {
   if (ruta === '/marketplace-redes.png') return CAPTURA;
   if (ruta === '/vender.js') return VENDER;
   // Codigo de las pantallas, sin datos: el permiso se cobra en la pantalla y en la API.
-  if (!ruta.startsWith('/api/') && /\.(js|css|png|svg|ico)$/.test(ruta)) return 'cuenta';
+  if (!ruta.startsWith('/api/') && /\.(js|css|png|svg|ico|webmanifest)$/.test(ruta)) return 'cuenta';
 
   if (ruta in PANTALLAS) return PANTALLAS[ruta];
 
@@ -170,6 +170,7 @@ export function permiso(pathname: string, metodo: string): Regla {
   if (ruta === '/api/ventas' || ruta.startsWith('/api/ventas/')) return CAJA;
   if (ruta === '/api/pedidos' || ruta.startsWith('/api/pedidos/')) return CAJA;   // pedidos por WhatsApp (Issue #269, pedidos.ts)
   if (ruta === '/api/avisos' || ruta.startsWith('/api/avisos/')) return CAJA;   // centro de avisos (Issue #429)
+  if (ruta === '/api/ayuda') return CAJA;   // botón «Ayuda» (Issue #600); /api/push/* es del dueño, por omisión
   if (ruta === '/api/impresiones' || ruta.startsWith('/api/impresiones/')) return CAJA;
 
   return DUENO;
