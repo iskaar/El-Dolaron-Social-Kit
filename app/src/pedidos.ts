@@ -17,9 +17,9 @@ import { hayReportePendiente, reportesDeRevendedora, reportesPendientes, rechaza
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const FORMAS_PAGO = new Set(['efectivo', 'tarjeta', 'transferencia']);
-const DIAS_APARTADO = 7;
+export const DIAS_APARTADO = 7;
 // Revendedora externa (#575): aparta sin anticipo. El plazo corto lo cierra el cron de siempre (vence_en).
-const HORAS_REVENDEDORA = 48;
+export const HORAS_REVENDEDORA = 48;
 // ponytail: el tope se lee justo antes del batch; dos apartados a la vez pueden pasarse por una pieza.
 // Mejora: contar dentro del insert del pedido si algun dia importa.
 const PIEZAS_REVENDEDORA = 10;

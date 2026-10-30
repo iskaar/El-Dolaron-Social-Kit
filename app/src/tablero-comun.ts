@@ -4,6 +4,7 @@ import { lineasNetas } from './netas.ts';
 import { GASTOS_DEL_MES } from './gastos.ts';
 import { hoyTienda } from './reportes.ts';
 import { sumarDias } from '../public/graficas.js';
+import { gananciaDe } from '../public/vender.js';
 
 export const MIN_PERSONAS = 5;
 export const MIN_VENTAS_COMPARACION = 10;   // con menos tickets en la semana anterior no se muestra porcentaje
@@ -134,4 +135,16 @@ export async function gastosDelMes(env: Env, cal: Calendario) {
   const porCategoria = new Map(filas.results.map((f) => [f.categoria, f.importe]));
   if (nomina?.importe) porCategoria.set('nomina', (porCategoria.get('nomina') ?? 0) + nomina.importe);
   return { porCategoria, total: [...porCategoria.values()].reduce((s, v) => s + v, 0), grupos: agruparGastos(porCategoria) };
+}
+
+/** Comision de las revendedoras en el mes: se redondea por ticket sobre el subtotal sin envio, como en vender.js. Un solo numero, sin nombres. */
+export async function comisionDelMes(env: Env, cal: Calendario) {
+  const { results } = await env.DB.prepare(
+    `select coalesce(sum(l.precio * (l.cantidad - l.cancelada_cantidad)), 0) as subtotal
+     from ventas v join pedidos p on p.id = v.pedido_id
+       join usuarios u on u.correo = p.vendedora and (',' || u.roles || ',') like '%,revendedora,%'
+       left join venta_lineas l on l.venta_id = v.id and l.codigo != 'ENVIO'
+     where v.cancelada = 0 and v.creado_en >= ? and v.creado_en < ? group by v.id`,
+  ).bind(apertura(cal.primero), apertura(cal.siguiente)).all<{ subtotal: number }>();
+  return results.reduce((s, f) => s + gananciaDe({ estado: 'vendido', subtotal: f.subtotal }), 0);
 }

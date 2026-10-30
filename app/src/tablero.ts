@@ -2,10 +2,9 @@
 // SOLO agregados del mes de la tienda. Nunca nombres, telefonos, correos, tickets, codigos de pieza, motivos de
 // cancelacion, sueldos ni una fila por persona. Un grupo de menos de 5 personas no se cuenta (MIN_PERSONAS).
 import { diasEnVentaPorCategoria, inventarioEnPiso } from './reportes.ts';
-import { gananciaDe } from '../public/vender.js';
 import { DETALLES } from './tablero-detalle.ts';
 import {
-  apertura, calendario, canalesDelMes, desdeComparacion, gastosDelMes, json, mercadoLibre, personasVisibles, resumenDeVentas,
+  calendario, canalesDelMes, comisionDelMes, desdeComparacion, gastosDelMes, json, mercadoLibre, personasVisibles, resumenDeVentas,
   ventasPorDia, MIN_PERSONAS,
 } from './tablero-comun.ts';
 
@@ -15,17 +14,10 @@ export async function calcularTablero(env: Env, ahora = Date.now()) {
   const cal = calendario(ahora);
   const { hoy, mes, primero, siguiente, diasMes, transcurridos } = cal;
 
-  const [porDia, canales, filasRevendedora, ml, gastos, config, inventario, diasEnVenta, clientes] = await Promise.all([
+  const [porDia, canales, comision, ml, gastos, config, inventario, diasEnVenta, clientes] = await Promise.all([
     ventasPorDia(env, desdeComparacion(cal), cal),
     canalesDelMes(env, cal),
-    // Un renglon por ticket de revendedora (solo el subtotal sin envio, sin id): la comision se redondea por ticket como en vender.js.
-    env.DB.prepare(
-      `select coalesce(sum(l.precio * (l.cantidad - l.cancelada_cantidad)), 0) as subtotal
-       from ventas v join pedidos p on p.id = v.pedido_id
-         join usuarios u on u.correo = p.vendedora and (',' || u.roles || ',') like '%,revendedora,%'
-         left join venta_lineas l on l.venta_id = v.id and l.codigo != 'ENVIO'
-       where v.cancelada = 0 and v.creado_en >= ? and v.creado_en < ? group by v.id`,
-    ).bind(apertura(primero), apertura(siguiente)).all<{ subtotal: number }>(),
+    comisionDelMes(env, cal),
     mercadoLibre(env, primero, cal),
     gastosDelMes(env, cal),
     env.DB.prepare("select valor from config where clave = 'meta_ventas_mes'").first<{ valor: string }>(),
@@ -51,7 +43,6 @@ export async function calcularTablero(env: Env, ahora = Date.now()) {
 
   // --- canales
   const canal = (clave: string) => canales.results.find((f) => f.canal === clave);
-  const comision = filasRevendedora.results.reduce((s, f) => s + gananciaDe({ estado: 'vendido', subtotal: f.subtotal }), 0);
   const revendedoras = canal('revendedoras');
   const revendedorasVisibles = personasVisibles(revendedoras?.personas ?? 0) !== null;
 

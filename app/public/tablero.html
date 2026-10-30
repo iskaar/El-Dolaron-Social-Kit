@@ -124,7 +124,7 @@ import { escapar, pesosEje, cambio } from '/graficas.js';
 import { CATEGORIAS, CATEGORIAS_GASTO } from '/categorias.js';
 
 const $ = (id) => document.getElementById(id);
-const NOMBRE_CATEGORIA = new Map([...CATEGORIAS, ['sin categoria', 'Sin categoría']]);
+const NOMBRE_CATEGORIA = new Map([...CATEGORIAS, ['sin categoria', 'Sin categoría'], ['bandas', 'Bandas']]);
 const categoria = (clave) => NOMBRE_CATEGORIA.get(clave) ?? clave;
 
 // Pesos enteros, es-MX; los negativos con signo menos tipografico.
@@ -136,7 +136,7 @@ const compacto = (centavos) => { const p = Math.round(centavos / 100); return p 
 
 const barra = (porcentaje, color) => `<div class="pista" aria-hidden="true"><div style="width:${Math.min(100, Math.max(0, porcentaje))}%${color ? `;background:${color}` : ''}"></div></div>`;
 // Las vistas de detalle que existen (?vista=): solo a esas se enlaza desde el resumen.
-const VISTAS = new Set(['ventas', 'tienda', 'mercancia', 'gastos', 'clientes']);
+const VISTAS = new Set(['ventas', 'tienda', 'mercancia', 'gastos', 'clientes', 'whatsapp', 'revendedoras', 'mercadolibre']);
 const href = (vista) => `/tablero?vista=${vista}`;
 const VER = '<span class="ver" aria-hidden="true">Ver detalle ›</span>';
 const verMas = (vista) => (VISTAS.has(vista) ? `<a class="ver" href="${href(vista)}">Ver detalle ›</a>` : '');
@@ -515,6 +515,98 @@ const DETALLE = {
         ]),
       ];
     },
+  },
+};
+
+DETALLE.whatsapp = {
+  titulo: 'Pedidos por WhatsApp',
+  pintar(d) {
+    const c = d.canal; const p = d.pedidos_mes; const a = d.apartados; const e = d.entrega; const r = d.reglas;
+    const cuantos = (n) => `${entero(n)} ${n === 1 ? 'pedido' : 'pedidos'}`;
+    const filaPedidos = (nombre, n) => filaBarra(nombre, cuantos(n), n, p.total, 'var(--acento)');
+    const entregas = e.tienda + e.envio;
+    return [
+      titularDe(`Los pedidos por WhatsApp${c.incluye_revendedoras ? ' (con los de revendedoras)' : ''} dejaron <strong>${pesos(c.total)}</strong> y hoy hay <strong>${entero(a.abiertos)}</strong> ${a.abiertos === 1 ? 'apartado abierto esperando' : 'apartados abiertos esperando'} que los paguen o los recojan.`),
+      tarjeta('Pedidos cerrados', entero(c.tickets), '<p class="frase chica">Ya pagados completos y cobrados este mes.</p>'),
+      tarjeta('Ticket promedio', pesos(c.ticket_promedio), '<p class="frase chica">Lo que deja cada pedido.</p>'),
+      `<article class="tarjeta" style="gap:14px"><p class="etiqueta">Qué pasó con los pedidos del mes</p>
+        ${p.total > 0 ? [filaPedidos('Cerrados', p.cerrados), filaPedidos('Apartados abiertos', p.abiertos), filaPedidos('Vencidos', p.vencidos), filaPedidos('Cancelados', p.cancelados)].join('') : '<p class="frase chica">Todavía no hay pedidos apartados este mes.</p>'}
+        <p class="frase chica">De los ${cuantos(p.total)} que se apartaron en ${nombreMes(d)}. Un apartado dura ${r.dias_apartado} días; si no se paga, las piezas regresan al piso.${c.incluye_revendedoras ? ` Los de revendedoras duran ${r.horas_revendedora} horas.` : ''}</p></article>`,
+      `<article class="tarjeta" style="gap:10px"><p class="etiqueta">Apartados abiertos hoy</p>
+        <div class="fila"><span>Valor de lo apartado (con envío)</span><span>${pesos(a.valor)}</span></div>
+        <div class="fila"><span>Ya pagado (anticipos y abonos)</span><span>${pesos(a.pagado)}</span></div>
+        <div class="fila"><span>Falta por cobrar</span><span>${pesos(a.falta)}</span></div>
+        ${barra(pct(a.pagado, a.valor), 'var(--acento)')}
+        <p class="frase chica">El anticipo mínimo es ${r.anticipo_pct} % del valor de las piezas; en envío a domicilio, ${pesos(r.anticipo_envio)}.${c.incluye_revendedoras ? ' Las revendedoras apartan sin anticipo.' : ''}</p></article>`,
+      `<article class="tarjeta" style="gap:10px"><p class="etiqueta">Cómo se entregan</p>
+        ${entregas > 0 ? `<div class="fila"><span>Recoger en tienda</span><span>${cuantos(e.tienda)} · ${pct(e.tienda, entregas)} %</span></div>
+        <div class="fila"><span>Envío a domicilio</span><span>${cuantos(e.envio)} · ${pct(e.envio, entregas)} %</span></div>
+        ${e.envios_pendientes > 0 ? `<p class="frase"><strong>${entero(e.envios_pendientes)} ${e.envios_pendientes === 1 ? 'envío ya pagado espera' : 'envíos ya pagados esperan'}</strong> que se anote la guía.</p>` : ''}` : '<p class="frase chica">Sin pedidos todavía.</p>'}</article>`,
+      detalleDe([
+        '<strong>Pedidos cerrados:</strong> las ventas del mes que vinieron de un pedido por WhatsApp (los mismos del resumen). Los demás números son de los pedidos que se apartaron en el mes, sea cual sea su estado hoy.',
+        '<strong>Falta por cobrar:</strong> valor de las piezas apartadas (con el envío) menos lo que ya se pagó, pedido por pedido.',
+        '<strong>Apartados abiertos hoy:</strong> todos los que siguen apartados, sin importar el mes en que se hicieron.',
+        c.incluye_revendedoras ? 'Con menos de 5 revendedoras con ventas, sus pedidos van sumados a los de WhatsApp.' : 'Las revendedoras (5 o más con ventas) tienen su propia vista y no están en estos números.',
+        NOTA_PRIVACIDAD,
+      ]),
+    ];
+  },
+};
+
+DETALLE.revendedoras = {
+  titulo: 'Revendedoras',
+  pintar(d) {
+    if (!d.disponible) return [titularDe('Las revendedoras se muestran aparte cuando sean 5 o más.'), detalleDe([NOTA_PRIVACIDAD])];
+    const maxCat = d.categorias.reduce((s, c) => s + c.total, 0);
+    return [
+      titularDe(`${entero(d.personas)} revendedoras cerraron ${entero(d.pedidos)} pedidos por <strong>${pesos(d.total)}</strong> este mes y ganaron <strong>${pesos(d.comision)}</strong> de comisión.`),
+      tarjeta('Revendedoras activas', entero(d.personas), '<p class="frase chica">Con al menos un pedido cobrado.</p>'),
+      tarjeta('Pedidos cobrados', entero(d.pedidos)),
+      tarjeta('Ticket promedio', pesos(d.ticket_promedio)),
+      tarjeta('Comisión ganada', pesos(d.comision), `<p class="frase chica">${d.comision_pct} % del precio, sin envío.</p>`),
+      d.categorias.length ? `<article class="tarjeta" style="gap:14px"><p class="etiqueta">Qué venden</p>
+        ${d.categorias.map((c) => filaBarra(escapar(categoria(c.categoria)), `${pct(c.total, maxCat)} %`, c.total, maxCat, 'var(--acento)')).join('')}</article>` : '',
+      `<article class="tarjeta" style="gap:10px"><p class="etiqueta">Pedidos por cobrar</p>
+        <div class="fila"><span>Apartados de revendedoras abiertos</span><span>${entero(d.apartados_abiertos.n)} · ${pesos(d.apartados_abiertos.valor)}</span></div>
+        <p class="frase chica">Todavía no cuentan como venta: se suman cuando la clienta paga.</p></article>`,
+      detalleDe([
+        `<strong>Revendedoras activas:</strong> las que tuvieron al menos un pedido cobrado en el mes. Esta vista solo existe cuando son 5 o más.`,
+        `<strong>Comisión:</strong> ${d.comision_pct} % del precio de las piezas de cada pedido cobrado, sin el envío, redondeada por pedido.`,
+        '<strong>Qué venden:</strong> porcentaje del importe de las piezas de sus pedidos cobrados, por categoría.',
+        'Aquí nunca aparece el nombre de una revendedora ni de sus clientas.',
+      ]),
+    ];
+  },
+};
+
+DETALLE.mercadolibre = {
+  titulo: 'Mercado Libre',
+  pintar(d) {
+    const v = d.vendido; const pu = d.publicaciones;
+    const maxCat = Math.max(1, ...d.por_categoria.map((c) => c.total));
+    return [
+      titularDe(`En Mercado Libre vendimos unos <strong>${pesos(v.total)}</strong> (estimado) en ${nombreMes(d)}: ${entero(v.piezas)} ${v.piezas === 1 ? 'pieza' : 'piezas'}.${d.por_atender > 0 ? ` Hay ${entero(d.por_atender)} ${d.por_atender === 1 ? 'orden' : 'órdenes'} por atender.` : ''}`),
+      `<article class="tarjeta"><p class="etiqueta">Vendido (estimado)</p><p class="cifra">≈ ${pesos(v.total)}</p>${marca('Estimado')}</article>`,
+      tarjeta('Piezas vendidas', entero(v.piezas), `<p class="frase chica">Este mes.</p>`),
+      tarjeta('Publicaciones activas', entero(pu.activas), '<p class="frase chica">Piezas a la venta hoy.</p>'),
+      tarjeta('Días en venderse', d.dias_en_venderse === null ? '—' : entero(d.dias_en_venderse),
+        d.dias_en_venderse === null ? '<span class="nota">Se muestra con 3 ventas o más con fecha de publicación</span>' : '<p class="frase chica">Promedio desde que se publica.</p>'),
+      `<article class="tarjeta" style="gap:10px"><p class="etiqueta">De lo publicado, qué se vendió</p>
+        <div class="fila"><span>Publicadas alguna vez</span><span>${entero(pu.publicadas)}</span></div>
+        <div class="fila"><span>Con al menos una venta</span><span>${entero(pu.con_venta)} · ${pct(pu.con_venta, pu.publicadas)} %</span></div>
+        <div class="fila"><span>Activas hoy</span><span>${entero(pu.activas)}</span></div></article>`,
+      d.por_categoria.length ? `<article class="tarjeta" style="gap:14px"><p class="etiqueta">Qué categorías venden más</p>
+        ${d.por_categoria.map((c) => filaBarra(escapar(categoria(c.categoria)), `${entero(c.piezas)} ${c.piezas === 1 ? 'pieza' : 'piezas'} · ≈ ${pesos(c.total)}`, c.total, maxCat, 'var(--acento)')).join('')}</article>` : '',
+      `<article class="tarjeta" style="gap:10px"><p class="etiqueta">Por atender</p>
+        <div class="fila"><span>Órdenes por atender en Avisos</span><span>${entero(d.por_atender)}</span></div>
+        <div class="fila"><span>Canceladas este mes</span><span>${entero(d.canceladas)}</span></div>
+        ${falta('Falta guardar el precio real, la comisión y el envío de cada orden: por eso el total es estimado y no mostramos cuánto nos queda')}</article>`,
+      detalleDe([
+        '<strong>Vendido (estimado):</strong> piezas vendidas × precio publicado en Mercado Libre. Todavía no guardamos lo que Mercado Libre cobró de comisión y envío. No está sumado en las ventas de la tienda.',
+        '<strong>Días en venderse:</strong> del día que se publicó la pieza al día de la orden, de las que guardan la fecha de publicación.',
+        '<strong>Por atender:</strong> órdenes que nadie ha marcado como atendidas en Avisos.',
+      ]),
+    ];
   },
 };
 

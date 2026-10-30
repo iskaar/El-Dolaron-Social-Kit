@@ -112,7 +112,7 @@ export function agruparMias(pedidos) {
 export const cobradoMias = (pedidos) => pedidos.filter((p) => p.estado === 'vendido').reduce((suma, p) => suma + p.subtotal, 0);
 
 /** Ganancia de la revendedora: 10 % del precio de la pieza, sin envío (Isaac, 29/10/2026, #599). */
-const COMISION = 0.10;
+export const COMISION = 0.10;
 /** Centavos; `subtotal` ya excluye el envío. Solo lo que la tienda cobró. */
 export const gananciaDe = (pedido) => pedido.estado === 'vendido' ? Math.round(pedido.subtotal * COMISION) : 0;
 
