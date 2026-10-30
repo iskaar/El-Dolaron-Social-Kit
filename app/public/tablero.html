@@ -141,6 +141,13 @@ const barra = (porcentaje, color) => `<div class="pista" aria-hidden="true"><div
 // Las vistas de detalle que existen (?vista=): solo a esas se enlaza desde el resumen.
 const VISTAS = new Set(['ventas', 'tienda', 'mercancia', 'gastos', 'clientes', 'whatsapp', 'revendedoras', 'mercadolibre']);
 const href = (vista) => `/tablero?vista=${vista}`;
+// Mercado Libre (#621): el monto es real donde ya se leyo la orden y estimado (precio publicado) solo donde falta.
+const montoML = (c) => `${c.estimado ? '≈ ' : ''}${pesos(c.total)}`;
+const marcaML = (c) => (c.estimado ? `<span class="aviso-estimado">Estimado</span>` : '');
+const notaML = (c) => (c.estimado
+  ? `${c.piezas_reales > 0 ? `${entero(c.piezas_reales)} de ${entero(c.piezas)} piezas con el precio real; el resto, con el precio publicado.` : 'Con el precio publicado: aún no leemos el precio real.'} No está sumado en las ventas de arriba.`
+  : 'Con el precio real que cobró Mercado Libre. No está sumado en las ventas de arriba.');
+const TEXTO_ML = '<strong>Mercado Libre:</strong> el precio real que cobró Mercado Libre por cada pieza y, solo donde todavía no lo tenemos, el precio publicado (se marca como estimado). No está sumado en las ventas.';
 const VER = '<span class="ver" aria-hidden="true">Ver detalle ›</span>';
 const verMas = (vista) => (VISTAS.has(vista) ? `<a class="ver" href="${href(vista)}">Ver detalle ›</a>` : '');
 const enTarjeta = (vista, html) => (VISTAS.has(vista) ? `<a class="enlace" href="${href(vista)}">${html}</a>` : html);
@@ -224,9 +231,9 @@ function seccionCanales(d) {
         ? `${fila('Pedidos por WhatsApp', c.whatsapp, '', 'whatsapp')}
       ${fila('Revendedoras', rev, nota(`Comisión que ganaron: ${pesos(rev.comision)} (10 %, sin envío) · ${rev.personas} revendedoras`), 'revendedoras')}`
         : fila('Pedidos por WhatsApp y revendedoras', c.whatsapp, nota('Las revendedoras se muestran aparte cuando sean 5 o más.'), 'whatsapp')}
-      ${abre('mercadolibre', `<div class="fila"><span>Mercado Libre${VISTAS.has('mercadolibre') ? ' ›' : ''}</span><span>≈ ${pesos(c.mercado_libre.total)}</span></div>
-        <span class="aviso-estimado">Estimado</span>
-        ${nota('Con el precio publicado: aún no guardamos comisión ni envío. No está sumado en las ventas de arriba.')}`)}
+      ${abre('mercadolibre', `<div class="fila"><span>Mercado Libre${VISTAS.has('mercadolibre') ? ' ›' : ''}</span><span>${montoML(c.mercado_libre)}</span></div>
+        ${marcaML(c.mercado_libre)}
+        ${nota(notaML(c.mercado_libre))}`)}
     </div></section>`;
 }
 
@@ -292,7 +299,7 @@ const COMO = `<section aria-labelledby="t-como" style="gap:8px"><h2 id="t-como" 
     <p style="margin:0"><strong>Ventas − gastos:</strong> las ventas del mes menos todos los gastos. No incluye lo que costó la mercancía.</p>
     <p style="margin:0"><strong>Meta y ritmo:</strong> la meta del mes repartida entre sus días. «Abajo del ritmo» significa que hoy vamos detrás de esa línea.</p>
     <p style="margin:0"><strong>Esta semana:</strong> de lunes a hoy, contra la semana anterior hasta el mismo día.</p>
-    <p style="margin:0"><strong>Mercado Libre:</strong> estimado con el precio publicado de las piezas vendidas; no está sumado en las ventas.</p>
+    <p style="margin:0">${TEXTO_ML}</p>
     <p style="margin:0"><strong>Mercancía en el piso:</strong> piezas etiquetadas con existencia, a precio de venta.</p>
     <p style="margin:0"><strong>Poca historia:</strong> si la semana anterior tuvo menos de 10 ventas, no mostramos porcentaje.</p>
     <p style="margin:0">Aquí nunca aparecen nombres, teléfonos ni compras de una persona; los grupos de menos de 5 personas no se cuentan.</p>
@@ -354,8 +361,8 @@ const DETALLE = {
         `<article class="tarjeta" style="gap:14px"><p class="etiqueta">Esta semana, por canal</p>
           ${canal('Tienda (caja)', cs.tienda)}
           ${cs.revendedoras ? `${canal('Pedidos por WhatsApp', cs.whatsapp)}${canal('Revendedoras', cs.revendedoras)}` : canal('Pedidos por WhatsApp y revendedoras', cs.whatsapp)}
-          <div class="canal"><div class="fila"><span>Mercado Libre</span><span>≈ ${pesos(cs.mercado_libre.total)}</span></div>${marca('Estimado')}
-            <span class="nota">No está sumado en las ventas de arriba.</span></div></article>`,
+          <div class="canal"><div class="fila"><span>Mercado Libre</span><span>${montoML(cs.mercado_libre)}</span></div>${marcaML(cs.mercado_libre)}
+            <span class="nota">${notaML(cs.mercado_libre)}</span></div></article>`,
         `<article class="tarjeta" style="gap:10px"><p class="etiqueta">Del cobrado a lo vendido</p>
           ${fila('Total de los tickets del mes', q.cobrado)}${fila('Devoluciones de piezas', q.devoluciones, '− ')}${fila('Tickets cancelados', q.cancelaciones, '− ')}
           ${q.otros_duenos > 0 ? fila('Mercancía de otro dueño', q.otros_duenos, '− ') : ''}
@@ -369,7 +376,7 @@ const DETALLE = {
           '<strong>Esta semana:</strong> de lunes a hoy, contra la semana anterior hasta el mismo día.',
           '<strong>Por canal:</strong> tienda es lo cobrado en la caja; WhatsApp, los pedidos apartados por WhatsApp. Con menos de 5 revendedoras con ventas, lo suyo va sumado a WhatsApp.',
           '<strong>Del cobrado a lo vendido:</strong> el total de los tickets del mes menos lo devuelto por piezas y lo cancelado (y lo de otros dueños, si hay) da las ventas del mes.',
-          '<strong>Mercado Libre:</strong> estimado con el precio publicado de las piezas vendidas; no está sumado en las ventas.',
+          TEXTO_ML,
         ]),
       ];
     },
@@ -585,11 +592,20 @@ DETALLE.revendedoras = {
 DETALLE.mercadolibre = {
   titulo: 'Mercado Libre',
   pintar(d) {
-    const v = d.vendido; const pu = d.publicaciones;
+    const v = d.vendido; const pu = d.publicaciones; const q = d.queda;
     const maxCat = Math.max(1, ...d.por_categoria.map((c) => c.total));
+    const estimadas = v.piezas - v.piezas_reales;
+    const piezasTxt = (n) => `${entero(n)} ${n === 1 ? 'pieza' : 'piezas'}`;
+    const filaQ = (n, x, signo = '') => `<div class="fila"><span>${n}</span><span>${signo}${pesos(x)}</span></div>`;
     return [
-      titularDe(`En Mercado Libre vendimos unos <strong>${pesos(v.total)}</strong> (estimado) en ${nombreMes(d)}: ${entero(v.piezas)} ${v.piezas === 1 ? 'pieza' : 'piezas'}.${d.por_atender > 0 ? ` Hay ${entero(d.por_atender)} ${d.por_atender === 1 ? 'orden' : 'órdenes'} por atender.` : ''}`),
-      `<article class="tarjeta"><p class="etiqueta">Vendido (estimado)</p><p class="cifra">≈ ${pesos(v.total)}</p>${marca('Estimado')}</article>`,
+      titularDe(`En Mercado Libre vendimos ${d.estimado ? 'unos ' : ''}<strong>${pesos(v.total)}</strong>${d.estimado ? ' (estimado)' : ''} en ${nombreMes(d)}: ${piezasTxt(v.piezas)}.${q ? ` Después de comisión y envío nos quedan <strong>${pesos(q.queda)}</strong>.` : ''}${d.por_atender > 0 ? ` Hay ${entero(d.por_atender)} ${d.por_atender === 1 ? 'orden' : 'órdenes'} por atender.` : ''}`),
+      `<article class="tarjeta"><p class="etiqueta">${d.estimado ? 'Vendido (estimado)' : 'Vendido'}</p><p class="cifra">${montoML({ estimado: d.estimado, total: v.total })}</p>${marcaML(d)}
+        ${v.piezas > 0 ? `<p class="frase chica">${entero(v.piezas_reales)} de ${piezasTxt(v.piezas)} con el precio real${estimadas > 0 ? `; ${piezasTxt(estimadas)} con el precio publicado.` : '.'}</p>` : ''}</article>`,
+      q ? `<article class="tarjeta" style="gap:10px"><p class="etiqueta">Lo que nos queda</p><p class="cifra">${pesos(q.queda)}</p>
+        ${filaQ('Precio de venta', q.vendido)}${filaQ('Comisión de Mercado Libre', q.comision, '− ')}${filaQ('Envío que paga la tienda', q.envio, '− ')}
+        <p class="frase chica">De ${piezasTxt(q.piezas)}${q.piezas < v.piezas ? ` de ${entero(v.piezas)} (las demás aún no traen comisión o envío)` : ''}. Antes de retenciones de impuestos.</p></article>`
+        : `<article class="tarjeta"><p class="etiqueta">Lo que nos queda</p><p class="cifra">—</p>
+        ${falta('Todavía no tenemos precio, comisión y envío de ninguna venta de este mes: no mostramos cuánto nos queda')}</article>`,
       tarjeta('Piezas vendidas', entero(v.piezas), `<p class="frase chica">Este mes.</p>`),
       tarjeta('Publicaciones activas', entero(pu.activas), '<p class="frase chica">Piezas a la venta hoy.</p>'),
       tarjeta('Días en venderse', d.dias_en_venderse === null ? '—' : entero(d.dias_en_venderse),
@@ -599,13 +615,14 @@ DETALLE.mercadolibre = {
         <div class="fila"><span>Con al menos una venta</span><span>${entero(pu.con_venta)} · ${pct(pu.con_venta, pu.publicadas)} %</span></div>
         <div class="fila"><span>Activas hoy</span><span>${entero(pu.activas)}</span></div></article>`,
       d.por_categoria.length ? `<article class="tarjeta" style="gap:14px"><p class="etiqueta">Qué categorías venden más</p>
-        ${d.por_categoria.map((c) => filaBarra(escapar(categoria(c.categoria)), `${entero(c.piezas)} ${c.piezas === 1 ? 'pieza' : 'piezas'} · ≈ ${pesos(c.total)}`, c.total, maxCat, 'var(--acento)')).join('')}</article>` : '',
+        ${d.por_categoria.map((c) => filaBarra(escapar(categoria(c.categoria)), `${entero(c.piezas)} ${c.piezas === 1 ? 'pieza' : 'piezas'} · ${c.piezas_reales < c.piezas ? '≈ ' : ''}${pesos(c.total)}`, c.total, maxCat, 'var(--acento)')).join('')}</article>` : '',
       `<article class="tarjeta" style="gap:10px"><p class="etiqueta">Por atender</p>
         <div class="fila"><span>Órdenes por atender en Avisos</span><span>${entero(d.por_atender)}</span></div>
         <div class="fila"><span>Canceladas este mes</span><span>${entero(d.canceladas)}</span></div>
-        ${falta('Falta guardar el precio real, la comisión y el envío de cada orden: por eso el total es estimado y no mostramos cuánto nos queda')}</article>`,
+        ${estimadas > 0 ? falta(`Falta guardar el precio real de ${piezasTxt(estimadas)}: por eso parte del total es estimado. Se va llenando solo`) : ''}</article>`,
       detalleDe([
-        '<strong>Vendido (estimado):</strong> piezas vendidas × precio publicado en Mercado Libre. Todavía no guardamos lo que Mercado Libre cobró de comisión y envío. No está sumado en las ventas de la tienda.',
+        '<strong>Vendido:</strong> piezas vendidas × el precio real que cobró Mercado Libre. Solo donde todavía no lo tenemos se usa el precio publicado, y entonces se marca como estimado. No está sumado en las ventas de la tienda.',
+        '<strong>Lo que nos queda:</strong> precio de venta − comisión de Mercado Libre − envío que paga la tienda, solo de las piezas que ya tienen los tres datos. No descuenta las retenciones de impuestos (ISR/IVA): Mercado Libre no las entrega en la orden.',
         '<strong>Días en venderse:</strong> del día que se publicó la pieza al día de la orden, de las que guardan la fecha de publicación.',
         '<strong>Por atender:</strong> órdenes que nadie ha marcado como atendidas en Avisos.',
       ]),
