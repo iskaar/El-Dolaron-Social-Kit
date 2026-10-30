@@ -1281,7 +1281,105 @@ export async function procesarOrden(env: Env, orden: any): Promise<string[]> {
       ]);
     }
   }
+  // Precio real, comision y envio (#621): despues del batch y sin transaccion abierta. Si falla, la venta ya quedo igual.
+  if (pagada && tocados.length) await guardarPrecios(env, orden);
   return tocados;
+}
+
+/* ---------- precio real, comision y envio de cada venta (Issue #621) ---------- */
+
+/** Pesos de ML a centavos enteros; null si no es un monto valido (negativo, texto, NaN). */
+export function centavos(pesos: unknown): number | null {
+  const n = typeof pesos === 'number' ? pesos : typeof pesos === 'string' && pesos.trim() !== '' ? Number(pesos) : NaN;
+  return Number.isFinite(n) && n >= 0 && n < 1e7 ? Math.round(n * 100) : null;
+}
+
+/**
+ * Lo que la tienda paga de envio por un shipment: la suma de senders[].cost de GET /shipments/{id}/costs.
+ * Lanza si ML no contesta o no trae `senders` (no se supone 0: 0 solo es 0 si ML lo dice).
+ */
+async function envioDelVendedor(env: Env, envioId: string): Promise<number> {
+  const costos = await mlFetch(env, `/shipments/${encodeURIComponent(envioId)}/costs`);
+  const senders = costos?.senders;
+  if (!Array.isArray(senders) || senders.length === 0) throw errorLocal(502, 'sin_costo_envio', 'ML no trajo el costo de envio.');
+  let total = 0;
+  for (const s of senders) {
+    const c = centavos(s?.cost);
+    if (c === null) throw errorLocal(502, 'sin_costo_envio', 'ML trajo un costo de envio invalido.');
+    total += c;
+  }
+  return total;
+}
+
+/**
+ * Llena precio_unitario, comision_unitaria y envio_vendedor de las filas de ml_ventas de una orden pagada, con lo
+ * que dice la propia orden (unit_price, sale_fee) y el shipment. Solo llena lo que esta en NULL, asi que repetirla no
+ * cambia nada. Nunca lanza ni toca existencias: si ML falla, queda NULL y el relleno del cron lo reintenta.
+ * Devuelve true si la orden quedo completa.
+ */
+export async function guardarPrecios(env: Env, orden: any): Promise<boolean> {
+  try {
+    const ordenId = String(orden?.id ?? '');
+    const { results: filas } = await env.DB.prepare(
+      'select ml_item_id, precio_unitario, envio_vendedor from ml_ventas where order_id = ?',
+    ).bind(ordenId).all<{ ml_item_id: string; precio_unitario: number | null; envio_vendedor: number | null }>();
+    if (!ordenId || orden?.status !== 'paid' || filas.length === 0) return false;
+    const ahora = new Date().toISOString();
+
+    // Precio y comision por pieza, tal cual vienen en la orden.
+    const lineas = new Map<string, { precio: number; comision: number | null }>();
+    for (const l of Array.isArray(orden.order_items) ? orden.order_items : []) {
+      const precio = centavos(l?.unit_price);
+      if (precio === null || precio === 0 || (l?.currency_id && l.currency_id !== 'MXN')) continue;
+      lineas.set(String(l?.item?.id ?? ''), { precio, comision: centavos(l?.sale_fee) });
+    }
+    const propias = filas.filter((f) => lineas.has(f.ml_item_id));
+    if (propias.length === 0) return false;
+    if (propias.every((f) => f.precio_unitario !== null && f.envio_vendedor !== null)) return true;   // ya completa: no escribe ni llama a ML
+    await env.DB.batch(propias.map((f) => env.DB.prepare(
+      `update ml_ventas set precio_unitario = coalesce(precio_unitario, ?), comision_unitaria = coalesce(comision_unitaria, ?),
+         precio_leido_en = coalesce(precio_leido_en, ?)
+       where order_id = ? and ml_item_id = ?`,
+    ).bind(lineas.get(f.ml_item_id)!.precio, lineas.get(f.ml_item_id)!.comision, ahora, ordenId, f.ml_item_id)));
+
+    // Envio: del shipment, completo en la primera fila de la orden y 0 en las demas. Sin shipment no hay envio que pagar.
+    const pendientes = propias.filter((f) => f.envio_vendedor === null);
+    if (pendientes.length === 0) return true;
+    const envioId = String(orden?.shipping?.id ?? '');
+    const envio = envioId ? await envioDelVendedor(env, envioId) : 0;
+    const primera = String(orden.order_items.find((l: any) => pendientes.some((f) => f.ml_item_id === String(l?.item?.id ?? '')))?.item?.id ?? '');
+    await env.DB.batch(pendientes.map((f) => env.DB.prepare(
+      'update ml_ventas set envio_vendedor = ? where order_id = ? and ml_item_id = ? and envio_vendedor is null',
+    ).bind(f.ml_item_id === primera ? envio : 0, ordenId, f.ml_item_id)));
+    return true;
+  } catch (error) {
+    console.error(JSON.stringify({ mensaje: 'precio real de la orden ML', orden: String(orden?.id ?? ''), error: String(error) }));
+    return false;
+  }
+}
+
+const LOTE_PRECIOS = 10;       // ordenes por corrida del cron
+const MAX_INTENTOS_PRECIO = 8; // lecturas fallidas antes de dejar de insistir
+
+/**
+ * Relleno acotado (Issue #621): ordenes pagadas sin precio o sin envio, las mas recientes primero y las menos
+ * intentadas antes. Cada una se vuelve a pedir a ML (/orders/{id}); si sigue incompleta, suma un intento.
+ */
+export async function rellenarPrecios(env: Env): Promise<number> {
+  const { results } = await env.DB.prepare(
+    `select order_id from ml_ventas where estado != 'cancelada' and precio_intentos < ?
+       and (precio_unitario is null or envio_vendedor is null)
+     group by order_id order by min(precio_intentos), max(recibido_en) desc limit ?`,
+  ).bind(MAX_INTENTOS_PRECIO, LOTE_PRECIOS).all<{ order_id: string }>();
+  let completas = 0;
+  for (const { order_id } of results) {
+    let completa = false;
+    try { completa = await guardarPrecios(env, await mlFetch(env, `/orders/${encodeURIComponent(order_id)}`)); }
+    catch (error) { console.error(JSON.stringify({ mensaje: 'relleno de precio ML', orden: order_id, error: String(error) })); }
+    if (completa) completas++;
+    else await env.DB.prepare('update ml_ventas set precio_intentos = precio_intentos + 1 where order_id = ? and (precio_unitario is null or envio_vendedor is null)').bind(order_id).run();
+  }
+  return completas;
 }
 
 /**
@@ -1367,6 +1465,7 @@ export async function sincronizar(env: Env): Promise<void> {
   await reintentarAvisos(env);
   try { await traerOrdenesRecientes(env, cuenta.ml_user_id); }
   catch (error) { console.error(JSON.stringify({ mensaje: 'ordenes recientes de ML', error: String(error) })); }
+  await rellenarPrecios(env).catch((error) => console.error(JSON.stringify({ mensaje: 'relleno de precios ML', error: String(error) })));
   await conciliarSeguro(env);
 }
 

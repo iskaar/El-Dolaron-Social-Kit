@@ -100,7 +100,7 @@ test('/api/tablero suma al centavo ventas, canales, gastos y publicidad, y no su
   assert.equal(canales.whatsapp.incluye_revendedoras, true);
   assert.equal(canales.revendedoras, null);
   assert.ok(!JSON.stringify(d).includes('comision'));
-  assert.deepEqual(canales.mercado_libre, { estimado: true, total: 36000, piezas: 2 });
+  assert.deepEqual(canales.mercado_libre, { estimado: true, total: 36000, piezas: 2, piezas_reales: 0 });
 
   // 100 + 500 + 30 + 20 + 15 + 1,000 (adelanto 200 + pago 800)
   assert.equal(d.gastos.total, 166500);

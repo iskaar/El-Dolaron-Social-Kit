@@ -5,7 +5,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import worker from './worker.ts';
 import { tienda, DUENO } from './prueba-d1.ts';
-import { guardarTokens, mlFetch, precioML, tituloML, dimensionesJpeg, idProductoML, gtinDe, modeloDe, descripcionPorDefecto } from './mercadolibre.ts';
+import { guardarTokens, mlFetch, rellenarPrecios, centavos, precioML, tituloML, dimensionesJpeg, idProductoML, gtinDe, modeloDe, descripcionPorDefecto } from './mercadolibre.ts';
 
 const LLAVE = Buffer.from(crypto.getRandomValues(new Uint8Array(32))).toString('base64');
 const RUTA = 'ruta-secreta-de-prueba';
@@ -44,6 +44,12 @@ class SimML {
   rechazarItem: unknown = null;
   items = new Map<string, { id: string; status: string; available_quantity: number }>();
   ordenes = new Map<string, unknown>();
+  /** Lo que contesta GET /orders/{id} si difiere de lo que trae la busqueda (#621). */
+  detalle = new Map<string, unknown>();
+  /** Costos de envio por shipment (GET /shipments/{id}/costs); `fallarEnvios` los hace responder 500; `fallarOrdenes` hace lo mismo con GET /orders/{id}. */
+  envios = new Map<string, unknown>();
+  fallarEnvios = false;
+  fallarOrdenes = false;
   productoActivo = true;
   /** Lo que contesta la IA (Gemini) a la propuesta de atributos (por omisión, nada); null = no responde. Cada cuerpo pedido se anota en `pedidosIA`. */
   ia: ((cuerpo: any) => Record<string, string>) | null = () => ({});
@@ -116,7 +122,14 @@ class SimML {
       return { cuerpo: ids.map((id) => this.items.has(id) ? { code: 200, body: this.items.get(id) } : { code: 404, body: {} }) };
     }
     if (metodo === 'GET' && ruta.startsWith('/orders/search')) return { cuerpo: { results: [...this.ordenes.values()] } };
+    const envio = /^\/shipments\/([^/]+)\/costs$/.exec(ruta);
+    if (metodo === 'GET' && envio) {
+      if (this.fallarEnvios) return { status: 500, cuerpo: { message: 'internal', error: 'internal_error', status: 500 } };
+      return this.envios.has(envio[1]) ? { cuerpo: this.envios.get(envio[1]) } : { status: 404, cuerpo: { message: 'no shipment', error: 'not_found', status: 404 } };
+    }
     const orden = /^\/orders\/(\d+)$/.exec(ruta);
+    if (metodo === 'GET' && orden && this.fallarOrdenes) return { status: 500, cuerpo: { message: 'internal', error: 'internal_error', status: 500 } };
+    if (metodo === 'GET' && orden && this.detalle.has(orden[1])) return { cuerpo: this.detalle.get(orden[1]) };
     if (metodo === 'GET' && orden) {
       return this.ordenes.has(orden[1]) ? { cuerpo: this.ordenes.get(orden[1]) } : { status: 404, cuerpo: { message: 'Order not found', error: 'not_found', status: 404 } };
     }
@@ -902,6 +915,144 @@ test('venta en ML: descuenta una sola vez por orden, aunque el aviso llegue repe
     await avisar(t, '/orders/9004');
     await t.esperar();
     assert.equal(stockDe(t, id), 2);
+  });
+});
+
+/** Una orden pagada con precio, comision (por pieza, en pesos) y shipment, como la entrega ML. */
+const ordenConPrecio = (id: number, items: [string, number, number, number][], envio: string | null = null, estado = 'paid') => ({
+  id, status: estado, seller: { id: 555 }, shipping: { id: envio },
+  order_items: items.map(([item, quantity, unit_price, sale_fee]) => ({ item: { id: item }, quantity, unit_price, sale_fee, currency_id: 'MXN' })),
+});
+const ventasML = (t: Tienda) => t.db.prepare('select * from ml_ventas order by order_id, ml_item_id').all() as any[];
+const costoEnvio = (cost: number, ...mas: number[]) => ({ gross_amount: cost, receiver: { cost: 0 }, senders: [cost, ...mas].map((c) => ({ cost: c })) });
+
+test('precio real (#621): pesos de ML a centavos enteros, sin montos inválidos', () => {
+  assert.deepEqual([centavos(129.95), centavos(299.9), centavos('84.5'), centavos(0), centavos(1.005 + 0.0001)], [12995, 29990, 8450, 0, 101]);
+  assert.deepEqual([centavos(-1), centavos(null), centavos('x'), centavos(NaN), centavos('')], [null, null, null, null, null]);
+});
+
+test('precio real (#621): la orden pagada guarda precio, comisión y envío en centavos, sin tocar el stock, y repetirla no cambia nada', async () => {
+  await conML(async (t) => {
+    const { id, itemId } = await publicarPieza(t);
+    t.sim.ordenes.set('9301', ordenConPrecio(9301, [[itemId, 1, 299.9, 44.99]], 'SHP-1'));
+    t.sim.envios.set('SHP-1', costoEnvio(84.5));
+    await avisar(t, '/orders/9301');
+    await t.esperar();
+    assert.equal(stockDe(t, id), 2);
+    let v = ventasML(t)[0];
+    assert.deepEqual([v.precio_unitario, v.comision_unitaria, v.envio_vendedor, v.estado, v.descontado], [29990, 4499, 8450, 'descontada', 1]);
+    assert.ok(Date.parse(v.precio_leido_en) > 0);
+    assert.equal(t.sim.de('GET', /^\/shipments\/SHP-1\/costs$/).length, 1);
+    // Aviso repetido: ni baja el stock otra vez ni vuelve a pedir el envío.
+    await avisar(t, '/orders/9301');
+    await t.esperar();
+    assert.equal(stockDe(t, id), 2);
+    assert.equal(t.sim.de('GET', /^\/shipments\//).length, 1);
+    v = ventasML(t)[0];
+    assert.deepEqual([v.precio_unitario, v.comision_unitaria, v.envio_vendedor], [29990, 4499, 8450]);
+  });
+});
+
+test('precio real (#621): dos artículos en una orden llevan el envío completo en la primera fila y 0 en la otra; sin shipment el envío es 0; varios remitentes se suman', async () => {
+  await conML(async (t) => {
+    const a = await publicarPieza(t);
+    const b = await publicarPieza(t);
+    t.sim.ordenes.set('9302', ordenConPrecio(9302, [[a.itemId, 1, 200, 30], [b.itemId, 2, 150, 22.5]], 'SHP-2'));
+    t.sim.envios.set('SHP-2', costoEnvio(60, 15.25));
+    t.sim.ordenes.set('9303', ordenConPrecio(9303, [[a.itemId, 1, 200, 30]], null));
+    await avisar(t, '/orders/9302');
+    await avisar(t, '/orders/9303');
+    await t.esperar();
+    const v = ventasML(t);
+    const de = (orden: string, item: string) => v.find((f) => f.order_id === orden && f.ml_item_id === item);
+    assert.deepEqual([de('9302', a.itemId).envio_vendedor, de('9302', b.itemId).envio_vendedor], [7525, 0]);
+    assert.deepEqual([de('9302', b.itemId).precio_unitario, de('9302', b.itemId).comision_unitaria, de('9302', b.itemId).cantidad], [15000, 2250, 2]);
+    assert.equal(de('9303', a.itemId).envio_vendedor, 0);
+    assert.equal(t.sim.de('GET', /^\/shipments\//).length, 1);
+  });
+});
+
+test('precio real (#621): si ML no da el envío, la venta y el stock quedan igual; el precio se guarda y el envío se completa después', async () => {
+  await conML(async (t) => {
+    const { id, itemId } = await publicarPieza(t);
+    t.sim.fallarEnvios = true;
+    t.sim.ordenes.set('9304', ordenConPrecio(9304, [[itemId, 1, 299, 40]], 'SHP-3'));
+    t.sim.envios.set('SHP-3', costoEnvio(70));
+    await avisar(t, '/orders/9304');
+    await t.esperar();
+    assert.equal(stockDe(t, id), 2);                                         // igual que sin esta función
+    let v = ventasML(t)[0];
+    assert.deepEqual([v.estado, v.descontado, v.precio_unitario, v.envio_vendedor], ['descontada', 1, 29900, null]);
+    assert.equal((t.db.prepare('select procesado_en, error from ml_notificaciones').get() as any).error, '');
+    // ML se recupera: el cron lo completa sin volver a descontar.
+    t.sim.fallarEnvios = false;
+    await worker.scheduled!({} as never, t.env, t.ctx as never);
+    await t.esperar();
+    v = ventasML(t)[0];
+    assert.deepEqual([v.precio_unitario, v.comision_unitaria, v.envio_vendedor], [29900, 4000, 7000]);
+    assert.equal(stockDe(t, id), 2);
+  });
+});
+
+test('precio real (#621): si ML falla al traer la orden, el precio queda nulo, el stock descuenta igual y el relleno lo reintenta', async () => {
+  await conML(async (t) => {
+    const { id, itemId } = await publicarPieza(t);
+    // La búsqueda de órdenes recientes no trae precios; el detalle sí, pero ML falla.
+    t.sim.ordenes.set('9305', orden(9305, 'paid', [[itemId, 1]]));
+    t.sim.detalle.set('9305', ordenConPrecio(9305, [[itemId, 1, 199.5, 27]], 'SHP-4'));
+    t.sim.envios.set('SHP-4', costoEnvio(55));
+    t.sim.fallarOrdenes = true;
+    await worker.scheduled!({} as never, t.env, t.ctx as never);
+    await t.esperar();
+    assert.equal(stockDe(t, id), 2);
+    let v = ventasML(t)[0];
+    assert.deepEqual([v.estado, v.precio_unitario, v.comision_unitaria, v.envio_vendedor, v.precio_intentos], ['descontada', null, null, null, 1]);
+    t.sim.fallarOrdenes = false;
+    await worker.scheduled!({} as never, t.env, t.ctx as never);
+    await t.esperar();
+    v = ventasML(t)[0];
+    assert.deepEqual([v.precio_unitario, v.comision_unitaria, v.envio_vendedor, v.precio_intentos], [19950, 2700, 5500, 1]);
+    assert.equal(stockDe(t, id), 2);
+    // Ya completa: otra corrida no la vuelve a pedir.
+    const antes = t.sim.llamadas.length;
+    assert.equal(await rellenarPrecios(t.env), 0);
+    assert.equal(t.sim.llamadas.length, antes);
+  });
+});
+
+test('relleno de precios (#621): acotado a 10 órdenes por corrida, las más recientes primero, y deja de insistir con la que nunca trae precio', async () => {
+  await conML(async (t) => {
+    const { id } = await publicarPieza(t);
+    const inserta = t.db.prepare(`insert into ml_ventas (order_id, ml_item_id, producto_id, cantidad, estado, descontado, recibido_en) values (?, 'MLM-X', ?, 1, 'descontada', 1, ?)`);
+    for (let n = 1; n <= 25; n++) {
+      const orden = String(9400 + n);
+      inserta.run(orden, id, new Date(Date.UTC(2026, 9, 1, 0, n)).toISOString());
+      t.sim.detalle.set(orden, ordenConPrecio(9400 + n, [['MLM-X', 1, 100 + n, 10]], null));
+    }
+    // La 26 nunca trae precio: el detalle no tiene unit_price.
+    inserta.run('9426', id, new Date(Date.UTC(2026, 9, 1, 1, 0)).toISOString());
+    t.sim.detalle.set('9426', orden(9426, 'paid', [['MLM-X', 1]]));
+
+    const pedidas = () => t.sim.de('GET', /^\/orders\/\d+$/).map((l) => l.ruta);
+    assert.equal(await rellenarPrecios(t.env), 9);                       // 10 pedidas: la 26 (la más reciente) no completa
+    assert.equal(pedidas().length, 10);
+    assert.equal(pedidas()[0], '/orders/9426');
+    assert.equal((t.db.prepare('select count(*) n from ml_ventas where precio_unitario is not null').get() as any).n, 9);
+    assert.equal((t.db.prepare("select precio_intentos n from ml_ventas where order_id = '9426'").get() as any).n, 1);
+    await rellenarPrecios(t.env);
+    assert.equal(pedidas().length, 20);
+    await rellenarPrecios(t.env);
+    assert.equal((t.db.prepare('select count(*) n from ml_ventas where precio_unitario is not null').get() as any).n, 25);
+    // La 26 se intenta 8 veces y luego no se vuelve a pedir.
+    for (let i = 0; i < 12; i++) await rellenarPrecios(t.env);
+    assert.equal((t.db.prepare("select precio_intentos n from ml_ventas where order_id = '9426'").get() as any).n, 8);
+    assert.equal(pedidas().filter((r) => r === '/orders/9426').length, 8);
+    // Una orden cancelada nunca se pide.
+    t.db.prepare("update ml_ventas set precio_unitario = null, envio_vendedor = null, precio_intentos = 0, estado = 'cancelada' where order_id = '9401'").run();
+    const antes = pedidas().length;
+    await rellenarPrecios(t.env);
+    assert.equal(pedidas().length, antes);
+    assert.equal(stockDe(t, id), 3);                                     // ni una vez se tocó el stock
   });
 });
 

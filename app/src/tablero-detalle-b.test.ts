@@ -141,15 +141,51 @@ test('mercadolibre: estimado con el precio publicado, sin ordenes ni enlaces', a
   const resumen = (await t.pedir('/api/tablero', undefined, 'GET')).cuerpo;
   d = (await vista(t, 'mercadolibre')).cuerpo;
   assert.equal(d.estimado, true);
-  assert.deepEqual(d.vendido, { total: 4 * 18000, piezas: 4 });                       // la cancelada no cuenta
+  assert.deepEqual(d.vendido, { total: 4 * 18000, piezas: 4, piezas_reales: 0 });
+  assert.equal(d.queda, null);                       // la cancelada no cuenta
   assert.equal(d.vendido.total, resumen.canales.mercado_libre.total);
   assert.deepEqual(d.publicaciones, { publicadas: 1, activas: 1, con_venta: 1 });
-  assert.deepEqual(d.por_categoria, [{ categoria: 'hogar', piezas: 4, total: 72000 }]);
+  assert.deepEqual(d.por_categoria, [{ categoria: 'hogar', piezas: 4, total: 72000, piezas_reales: 0 }]);
   assert.equal(d.por_categoria.reduce((s: number, c: { total: number }) => s + c.total, 0), d.vendido.total);
   assert.equal(d.por_atender, 2);                                                      // la atendida y la cancelada no
   assert.equal(d.canceladas, 1);
   assert.ok(d.dias_en_venderse >= 5 && d.dias_en_venderse <= 7, String(d.dias_en_venderse));
   sinDatosPrivados(d, ['MLM-PRIVADO-1', 'ord-privada', 'articulo.mercadolibre']);
+  t.db.close();
+});
+
+test('mercadolibre (#621): el precio real manda, el estimado solo donde falta, y «lo que nos queda» solo cuenta filas con los tres datos', async () => {
+  const t = tienda();
+  t.db.prepare("insert into ml_publicaciones (producto_id, ml_item_id, estado, precio_ml, permalink, publicado_en, actualizado_en) values (?, 'MLM-PRIVADO-1', 'activa', 18000, 'https://articulo.mercadolibre.com.mx/MLM-PRIVADO-1', '', '')")
+    .run(PRODUCTO);
+  const ahora = new Date().toISOString();
+  const fila = t.db.prepare(`insert into ml_ventas (order_id, ml_item_id, producto_id, cantidad, estado, descontado, recibido_en, precio_unitario, comision_unitaria, envio_vendedor)
+    values (?, 'MLM-PRIVADO-1', ?, ?, ?, 0, ?, ?, ?, ?)`);
+  fila.run('ord-privada-1', PRODUCTO, 2, 'descontada', ahora, 15000, 2250, 8450);       // los tres datos
+  fila.run('ord-privada-2', PRODUCTO, 1, 'descontada', ahora, 9900, null, null);        // solo precio
+  fila.run('ord-privada-3', PRODUCTO, 1, 'descontada', ahora, null, null, null);        // nada: estimado con 18000
+  fila.run('ord-privada-4', PRODUCTO, 5, 'cancelada', ahora, 15000, 2250, 8450);        // cancelada: no cuenta
+  let resumen = (await t.pedir('/api/tablero', undefined, 'GET')).cuerpo;
+  let d = (await vista(t, 'mercadolibre')).cuerpo;
+  assert.equal(d.estimado, true);
+  assert.deepEqual(d.vendido, { total: 2 * 15000 + 9900 + 18000, piezas: 4, piezas_reales: 3 });
+  assert.deepEqual(resumen.canales.mercado_libre, { estimado: true, total: 57900, piezas: 4, piezas_reales: 3 });
+  assert.deepEqual(d.queda, { piezas: 2, vendido: 30000, comision: 4500, envio: 8450, queda: 30000 - 4500 - 8450 });
+  assert.deepEqual(d.por_categoria.map((c: { total: number; piezas_reales: number }) => [c.total, c.piezas_reales]), [[57900, 3]]);
+  // Tampoco entra en las ventas de la tienda.
+  assert.equal(resumen.ventas.total, 0);
+  sinDatosPrivados(d, ['MLM-PRIVADO-1', 'ord-privada', 'articulo.mercadolibre']);
+  sinDatosPrivados(resumen, ['MLM-PRIVADO-1', 'ord-privada']);
+
+  // Con todo leido ya no es estimado y se ve el neto de las cuatro piezas.
+  t.db.prepare("update ml_ventas set precio_unitario = 9900, comision_unitaria = 1485, envio_vendedor = 0 where order_id in ('ord-privada-2', 'ord-privada-3')").run();
+  t.db.prepare('delete from ml_ventas where order_id = ?').run('ord-privada-4');
+  resumen = (await t.pedir('/api/tablero', undefined, 'GET')).cuerpo;
+  d = (await vista(t, 'mercadolibre')).cuerpo;
+  assert.equal(d.estimado, false);
+  assert.equal(resumen.canales.mercado_libre.estimado, false);
+  assert.equal(d.vendido.total, 2 * 15000 + 2 * 9900);
+  assert.deepEqual(d.queda, { piezas: 4, vendido: 49800, comision: 4500 + 2 * 1485, envio: 8450, queda: 49800 - 7470 - 8450 });
   t.db.close();
 });
 

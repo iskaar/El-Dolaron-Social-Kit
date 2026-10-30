@@ -9,7 +9,7 @@ import { DIAS_APARTADO, HORAS_REVENDEDORA } from './pedidos.ts';
 import { ANTICIPO_ENVIO, ANTICIPO_PORCENTAJE } from '../public/venta.js';
 import { COMISION } from '../public/vender.js';
 import {
-  apertura, canalesDelMes, comisionDelMes, desdeComparacion, gastosDelMes, mercadoLibre, personasVisibles, resumenDeVentas,
+  apertura, canalML, canalesDelMes, comisionDelMes, desdeComparacion, gastosDelMes, mercadoLibre, personasVisibles, quedaML, SQL_ML, resumenDeVentas,
   ventasPorDia, type Calendario, type FilaCanal,
 } from './tablero-comun.ts';
 
@@ -83,8 +83,8 @@ async function ventas(env: Env, cal: Calendario) {
   return {
     ...cabecera('ventas', cal),
     ventas: resumen,
-    // Esta semana (lunes a hoy) por canal. Mercado Libre va aparte: es estimado y no esta sumado en las ventas.
-    canales_semana: { ...semana, mercado_libre: { estimado: true, total: ml?.total ?? 0, piezas: ml?.piezas ?? 0 } },
+    // Esta semana (lunes a hoy) por canal. Mercado Libre va aparte: no esta sumado en las ventas.
+    canales_semana: { ...semana, mercado_libre: canalML(ml) },
     cuadre: {
       cobrado: cuadre?.bruto ?? 0, devoluciones: cuadre?.devoluciones ?? 0, cancelaciones: cuadre?.cancelaciones ?? 0,
       otros_duenos: cuadre?.otros_duenos ?? 0,
@@ -322,7 +322,7 @@ async function revendedoras(env: Env, cal: Calendario) {
   };
 }
 
-// --- Mercado Libre (estimado: no se guarda el precio real, la comision ni el envio de cada orden)
+// --- Mercado Libre (precio real, comision y envio de la orden donde ya se leyeron; estimado con el precio publicado donde no, #621)
 
 async function mercadolibre(env: Env, cal: Calendario) {
   const desde = apertura(cal.primero);
@@ -336,12 +336,11 @@ async function mercadolibre(env: Env, cal: Calendario) {
        from ml_publicaciones m join productos p on p.id = m.producto_id where p.propietario = 'dolaron'`,
     ).first<{ publicadas: number; activas: number; con_venta: number }>(),
     env.DB.prepare(
-      `select coalesce(nullif(p.categoria, ''), 'sin categoria') as categoria, coalesce(sum(m.cantidad), 0) as piezas,
-         coalesce(sum(m.cantidad * coalesce(pub.precio_ml, 0)), 0) as total
+      `select coalesce(nullif(p.categoria, ''), 'sin categoria') as categoria, ${SQL_ML}
        from ml_ventas m join productos p on p.id = m.producto_id left join ml_publicaciones pub on pub.producto_id = m.producto_id
        where m.estado != 'cancelada' and p.propietario = 'dolaron' and m.recibido_en >= ? and m.recibido_en < ?
        group by categoria order by total desc, categoria`,
-    ).bind(desde, hasta).all<{ categoria: string; piezas: number; total: number }>(),
+    ).bind(desde, hasta).all<{ categoria: string; piezas: number; total: number; piezas_reales: number }>(),
     env.DB.prepare(
       `select coalesce(sum(case when atendida_en = '' and estado != 'cancelada' then 1 else 0 end), 0) as por_atender,
          coalesce(sum(case when estado = 'cancelada' and recibido_en >= ? and recibido_en < ? then 1 else 0 end), 0) as canceladas
@@ -356,10 +355,11 @@ async function mercadolibre(env: Env, cal: Calendario) {
   ]);
   return {
     ...cabecera('mercadolibre', cal),
-    estimado: true,
-    vendido: { total: ml?.total ?? 0, piezas: ml?.piezas ?? 0 },
+    estimado: canalML(ml).estimado,
+    vendido: { total: ml?.total ?? 0, piezas: ml?.piezas ?? 0, piezas_reales: ml?.piezas_reales ?? 0 },
+    queda: quedaML(ml),
     publicaciones: { publicadas: publicadas?.publicadas ?? 0, activas: publicadas?.activas ?? 0, con_venta: publicadas?.con_venta ?? 0 },
-    por_categoria: categorias.results,
+    por_categoria: categorias.results.map(({ categoria, piezas, total, piezas_reales }) => ({ categoria, piezas, total, piezas_reales })),
     por_atender: atender?.por_atender ?? 0,
     canceladas: atender?.canceladas ?? 0,
     dias_en_venderse: (dias?.n ?? 0) >= 3 && dias?.promedio != null ? Math.max(0, dias.promedio) : null,

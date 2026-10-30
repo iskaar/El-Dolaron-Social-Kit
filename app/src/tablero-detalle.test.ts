@@ -57,7 +57,7 @@ test('ventas: semanas, canales de la semana y del cobrado a lo vendido suman al 
   assert.equal(cs.whatsapp.incluye_revendedoras, true);
   assert.equal(cs.revendedoras, null);
   assert.equal(cs.tienda.total + cs.whatsapp.total, d.ventas.semana.actual.total);
-  assert.deepEqual(cs.mercado_libre, { estimado: true, total: 36000, piezas: 2 });
+  assert.deepEqual(cs.mercado_libre, { estimado: true, total: 36000, piezas: 2, piezas_reales: 0 });
   assert.ok(!JSON.stringify(d).includes('comision'));
 
   // Cobrado 2,000 = 250 + 500 + 250 (cancelado) + 500 + 250 + 250; menos 250 devueltos y 250 cancelados = 1,500.

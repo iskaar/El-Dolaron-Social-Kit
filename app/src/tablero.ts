@@ -4,7 +4,7 @@
 import { diasEnVentaPorCategoria, inventarioEnPiso } from './reportes.ts';
 import { DETALLES } from './tablero-detalle.ts';
 import {
-  calendario, canalesDelMes, comisionDelMes, desdeComparacion, gastosDelMes, json, mercadoLibre, personasVisibles, resumenDeVentas,
+  calendario, canalML, canalesDelMes, comisionDelMes, desdeComparacion, gastosDelMes, json, mercadoLibre, personasVisibles, resumenDeVentas,
   ventasPorDia, MIN_PERSONAS,
 } from './tablero-comun.ts';
 
@@ -90,7 +90,7 @@ export async function calcularTablero(env: Env, ahora = Date.now()) {
       revendedoras: revendedorasVisibles
         ? { total: revendedoras?.total ?? 0, tickets: revendedoras?.tickets ?? 0, comision, personas: revendedoras!.personas }
         : null,
-      mercado_libre: { estimado: true, total: ml?.total ?? 0, piezas: ml?.piezas ?? 0 },
+      mercado_libre: canalML(ml),
     },
     clientes: {
       socios: personasVisibles(socios),

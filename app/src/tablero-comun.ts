@@ -103,13 +103,42 @@ export const canalesDelMes = (env: Env, cal: Calendario) => env.DB.prepare(
   apertura(cal.lunes), apertura(cal.lunes), apertura(cal.lunes),
 ).all<FilaCanal>();
 
-/** Mercado Libre no guarda precio de la orden: estimado con el precio publicado. No entra en `ventas`. */
+// Una fila de ml_ventas tiene precio real si ya se leyo de la orden (#621). `total` usa el real donde lo hay y el
+// precio publicado solo donde falta. «Lo que nos queda» (precio - comision - envio) solo suma filas con los tres datos.
+const TRES = 'm.precio_unitario is not null and m.comision_unitaria is not null and m.envio_vendedor is not null';
+export const SQL_ML = `coalesce(sum(m.cantidad), 0) as piezas,
+  coalesce(sum(m.cantidad * coalesce(m.precio_unitario, pub.precio_ml, 0)), 0) as total,
+  coalesce(sum(case when m.precio_unitario is not null then m.cantidad end), 0) as piezas_reales,
+  coalesce(sum(case when ${TRES} then m.cantidad end), 0) as piezas_neto,
+  coalesce(sum(case when ${TRES} then m.cantidad * m.precio_unitario end), 0) as neto_vendido,
+  coalesce(sum(case when ${TRES} then m.cantidad * m.comision_unitaria end), 0) as neto_comision,
+  coalesce(sum(case when ${TRES} then m.envio_vendedor end), 0) as neto_envio`;
+
+export type FilaML = {
+  piezas: number; total: number; piezas_reales: number;
+  piezas_neto: number; neto_vendido: number; neto_comision: number; neto_envio: number;
+};
+
+/** Mercado Libre del periodo: precio real donde ya se leyo de la orden y estimado con el precio publicado donde no. No entra en `ventas`. */
 export const mercadoLibre = (env: Env, desdeDia: string, cal: Calendario) => env.DB.prepare(
-  `select coalesce(sum(m.cantidad), 0) as piezas, coalesce(sum(m.cantidad * coalesce(pub.precio_ml, 0)), 0) as total
+  `select ${SQL_ML}
    from ml_ventas m join productos p on p.id = m.producto_id
      left join ml_publicaciones pub on pub.producto_id = m.producto_id
    where m.estado != 'cancelada' and p.propietario = 'dolaron' and m.recibido_en >= ? and m.recibido_en < ?`,
-).bind(apertura(desdeDia), apertura(cal.siguiente)).first<{ piezas: number; total: number }>();
+).bind(apertura(desdeDia), apertura(cal.siguiente)).first<FilaML>();
+
+/** El canal tal como sale en el JSON: `estimado` es true solo si alguna pieza sigue con el precio publicado. */
+export const canalML = (ml: FilaML | null) => ({
+  estimado: (ml?.piezas ?? 0) > (ml?.piezas_reales ?? 0),
+  total: ml?.total ?? 0,
+  piezas: ml?.piezas ?? 0,
+  piezas_reales: ml?.piezas_reales ?? 0,
+});
+
+/** Lo que nos queda de Mercado Libre (precio - comision - envio) en las piezas con los tres datos; null si no hay ninguna. Antes de retenciones. */
+export const quedaML = (ml: FilaML | null) => (ml && ml.piezas_neto > 0
+  ? { piezas: ml.piezas_neto, vendido: ml.neto_vendido, comision: ml.neto_comision, envio: ml.neto_envio, queda: ml.neto_vendido - ml.neto_comision - ml.neto_envio }
+  : null);
 
 /** Nomina, renta, publicidad y el resto: la nomina es lo pagado en el mes (pagos y adelantos), sin desglose por persona. */
 export function agruparGastos(porCategoria: Map<string, number>) {
