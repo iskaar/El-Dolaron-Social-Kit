@@ -30,6 +30,7 @@ import { cajeroEnTurno, listarCajeros, entrar, salir, ponerPin } from './cajeros
 import { rutaPush } from './push.ts';
 import { rutaCep, transferenciasPorValidar, validarTransferencia } from './cep.ts';
 import { subirComprobante, verComprobante } from './comprobante.ts';
+import { verFotoReportada } from './pagos-reportados.ts';
 import { registrarSocio, buscarSocio, buscarPorCodigo, basesListas, sentenciasDeVenta, saldo } from './dolarones.ts';
 import { registrarCorte, registrarRetiro, rutaTerminal, ultimoCorte, cajaDe } from './corte.ts';
 import { rutaGastos } from './gastos.ts';
@@ -2782,6 +2783,8 @@ export default {
       if (pathname === '/api/transferencias/comprobante' && request.method === 'POST') return await subirComprobante(request, env);
       const verComp = pathname.match(/^\/api\/transferencias\/(\d+)\/comprobante$/);
       if (verComp && request.method === 'GET') return await verComprobante(env, Number(verComp[1]));
+      const verFotoRep = pathname.match(/^\/api\/pagos-reportados\/(\d+)\/comprobante$/);
+      if (verFotoRep && request.method === 'GET') return await verFotoReportada(env, Number(verFotoRep[1]));
       const validarTransf = pathname.match(/^\/api\/avisos\/transferencias\/(\d+)\/validar$/);
       if (validarTransf && request.method === 'POST') return await validarTransferencia(env, Number(validarTransf[1]), correo);
       const atender = pathname.match(/^\/api\/avisos\/ml\/([^/]+)\/([^/]+)$/);

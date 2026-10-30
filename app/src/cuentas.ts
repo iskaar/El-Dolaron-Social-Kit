@@ -148,7 +148,8 @@ export function permiso(pathname: string, metodo: string): Regla {
   if (ruta === '/api/catalogo') return CAJA;
   if (ruta === '/api/vender' || ruta === '/api/interesados' || ruta.startsWith('/api/interesados/')) return VENDER;
   // Revendedora (#575): apartar 48 h sin anticipo, ver y cancelar lo suyo. vender.ts exige ademas que no sea personal de caja.
-  if (ruta === '/api/vender/apartar' || ruta === '/api/vender/mios' || /^\/api\/vender\/apartados\/\d+\/cancelar$/.test(ruta)) return VENDER;
+  // #609: ademas, mandar el pago (foto del comprobante y clave) de uno suyo; ver la foto despues es solo del dueño (/api/pagos-reportados/:id/comprobante, por omisión).
+  if (ruta === '/api/vender/apartar' || ruta === '/api/vender/mios' || /^\/api\/vender\/apartados\/\d+\/(cancelar|pago|comprobante)$/.test(ruta)) return VENDER;
   if (ruta === '/api/socios') return CAJA;
   if (ruta === '/api/vales/config' && metodo === 'GET') return CAJA;
   if (ruta === '/api/vales/buscar' && metodo === 'POST') return CAJA;

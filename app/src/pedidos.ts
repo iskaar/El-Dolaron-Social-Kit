@@ -13,6 +13,7 @@ import { conciliarSeguro } from './mercadolibre.ts';
 import { sentenciasVale } from './vales.ts';
 import { envioDe, anticipoMinimoDe, ANTICIPO_ENVIO, viernesDeEnvio, claveRastreoDe } from '../public/venta.js';
 import { leerTransferencia, sentenciaTransferencia, respuestaClaveUsada, esChoqueDeClave, excedenteDe } from './transferencias.ts';
+import { hayReportePendiente, reportesDeRevendedora, reportesPendientes, rechazarPago } from './pagos-reportados.ts';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const FORMAS_PAGO = new Set(['efectivo', 'tarjeta', 'transferencia']);
@@ -302,7 +303,9 @@ async function listarPedidos(env: Env): Promise<Response> {
     [ahora],
     `estado != 'apartado', case when estado = 'apartado' then vence_en else '' end, actualizado_en desc`,
   );
-  return json({ pedidos });
+  // #609: el pago que reporto la revendedora y la tienda aun no revisa, junto a su apartado.
+  const reportes = await reportesPendientes(env);
+  return json({ pedidos: pedidos.map((p) => ({ ...p, reporte: reportes.get(p.id) ?? null })) });
 }
 
 /** Apartar como revendedora (#575): `POST /api/vender/apartar`. */
@@ -316,17 +319,20 @@ export const apartarRevendedora = (request: Request, env: Env, ctx: ExecutionCon
  */
 export async function pedidosDeRevendedora(env: Env, correo: string): Promise<Response> {
   const desde = new Date(Date.now() - 60 * 86_400_000).toISOString();
-  const [abiertos, recientes] = await Promise.all([
+  const [abiertos, recientes, reportes] = await Promise.all([
     leerPedidos(env, "estado = 'apartado' and vendedora = ?", [correo], 'folio desc', 50),
     leerPedidos(env, 'folio > (select coalesce(max(folio), 0) - 400 from pedidos) and vendedora = ? and creado_en >= ?', [correo, desde], 'folio desc', 100),
+    reportesDeRevendedora(env, correo, desde),
   ]);
   const porFolio = new Map([...recientes, ...abiertos].map((p) => [p.folio, p]));
   const pedidos = [...porFolio.values()].sort((a, b) => b.folio - a.folio).map((p) => ({
     folio: p.folio, estado: p.estado, vence_en: p.vence_en, cliente: p.cliente, telefono: p.telefono, entrega: p.entrega,
     envio: p.envio, saldo: p.saldo, creado_en: p.creado_en, subtotal: p.subtotal, liquidado_en: p.liquidado_en,
     lineas: p.lineas.map(({ codigo, nombre, precio, cantidad }) => ({ codigo, nombre, precio, cantidad })),
-    // Con dinero registrado ya solo lo cancela la tienda.
-    cancelable: p.estado === 'apartado' && Number(p.saldo) === 0,
+    // Con dinero registrado, o con un pago por revisar (#609), ya solo lo cancela la tienda.
+    cancelable: p.estado === 'apartado' && Number(p.saldo) === 0 && reportes.get(p.folio)?.estado !== 'pendiente',
+    // Lo ultimo que paso con el pago que ella reporto: { estado: pendiente | aceptado | rechazado, motivo, reportado_en } o null.
+    pago_reportado: reportes.get(p.folio) ?? null,
   }));
   return json({ pedidos });
 }
@@ -339,11 +345,13 @@ export async function cancelarDeRevendedora(folio: number, env: Env, ctx: Execut
     return json({ error: 'Ya no se puede cancelar aquí: pídelo a la tienda.' }, 409);
   const momento = new Date();
   const ahora = momento.toISOString();
+  // #609: con un pago reportado sin revisar la pieza no se cancela (el cliente ya pago); lo decide la tienda.
+  const sinReporte = `and not ${hayReportePendiente('?1')}`;
   const [, marca] = await env.DB.batch([
-    devolverApartado(env, pedido.id, ahora, 'and vendedora = ?3 and saldo = 0 and liquidado_en is null', correo),
-    env.DB.prepare(`update pedidos set estado = 'cancelado', saldo_vence_en = ?, actualizado_en = ?, revision = revision + 1
-      where id = ? and estado = 'apartado' and saldo = 0 and liquidado_en is null and vendedora = ?`)
-      .bind(sumarMeses(momento, 1), ahora, pedido.id, correo),
+    devolverApartado(env, pedido.id, ahora, `and vendedora = ?3 and saldo = 0 and liquidado_en is null ${sinReporte}`, correo),
+    env.DB.prepare(`update pedidos set estado = 'cancelado', saldo_vence_en = ?2, actualizado_en = ?3, revision = revision + 1
+      where id = ?1 and estado = 'apartado' and saldo = 0 and liquidado_en is null and vendedora = ?4 ${sinReporte}`)
+      .bind(pedido.id, sumarMeses(momento, 1), ahora, correo),
   ]);
   if (!marca.meta.changes) return json({ error: 'Ya no se puede cancelar aquí: pídelo a la tienda.' }, 409);
   ctx.waitUntil(conciliarSeguro(env, { productoIds: await productosDe(env, pedido.id) }));
@@ -390,7 +398,10 @@ async function moverPaquete(folio: number, tipo: 'pieza' | 'abono', request: Req
   // #575: el apartado de revendedora (tienda, anticipo 0) recibe abonos como un paquete, pero no se liquida:
   // lo que falte se cobra en caja al recoger. Un apartado normal (anticipo > 0) sigue sin aceptarlos.
   const sinAnticipo = tipo === 'abono' && pedido.entrega === 'tienda' && Number(pedido.anticipo) === 0;
-  if ((pedido.entrega !== 'envio' && !sinAnticipo) || pedido.estado !== 'apartado' || pedido.liquidado_en || String(pedido.vence_en) <= ahora)
+  // #609: un apartado con pago reportado sin revisar no vence (el cron lo salta); su abono se registra aunque el plazo ya pasara.
+  const vencido = String(pedido.vence_en) <= ahora;
+  const reportado = tipo === 'abono' && vencido && !!await env.DB.prepare("select 1 as x from pagos_reportados where pedido_id = ? and estado = 'pendiente'").bind(pedido.id).first();
+  if ((pedido.entrega !== 'envio' && !sinAnticipo) || pedido.estado !== 'apartado' || pedido.liquidado_en || (vencido && !reportado))
     return json({ error: 'El paquete ya no está abierto o venció. Actualiza la lista.' }, 409);
   const vence = new Date(momento.getTime() + DIAS_APARTADO * 86_400_000);
   let precio = 0;
@@ -416,7 +427,7 @@ async function moverPaquete(folio: number, tipo: 'pieza' | 'abono', request: Req
       // La revisión y el estado se comprueban DENTRO del batch. Un WHERE que no modifica filas no lo aborta.
       env.DB.prepare(`update pedidos set saldo = case when revision = ?1 and estado = 'apartado'
         and (entrega = 'envio'${sinAnticipo ? " or (entrega = 'tienda' and anticipo = 0)" : ''})
-        and liquidado_en is null and vence_en > ?2 ${tipo === 'pieza' ? `and exists (select 1 from productos
+        and liquidado_en is null and (vence_en > ?2 or ${tipo === 'abono' ? hayReportePendiente('pedidos.id') : '0'}) ${tipo === 'pieza' ? `and exists (select 1 from productos
           where id = ?4 and propietario = 'dolaron' and sin_inventario = 0 and codigo is not null and codigo != ''
           and stock >= ?5 and precio = ?6)` : ''} then saldo else -1 end where id = ?3`)
         .bind(pedido.revision, ahora, pedido.id, ...(tipo === 'pieza' ? [productoId, cantidad, precioCatalogo] : [])),
@@ -425,6 +436,9 @@ async function moverPaquete(folio: number, tipo: 'pieza' | 'abono', request: Req
         values (?, ?, ?, ?, ?, ?, ?, ?, ?, '')`)
         .bind(id, pedido.id, tipo, solicitud, tipo === 'abono' ? importe : 0, tipo === 'abono' ? formaPago : '', caja, correo, ahora),
       ...(transf ? [sentenciaTransferencia(env, transf, correo, ahora, 'abono', { pedido: pedido.id, movimiento: id })] : []),
+      // #609: el abono es el pago que la revendedora reporto: el reporte se acepta en el mismo batch (si el abono falla, sigue pendiente).
+      ...(tipo === 'abono' ? [env.DB.prepare(`update pagos_reportados set estado = 'aceptado', revisado_por = ?, revisado_en = ?, movimiento_id = ?
+        where pedido_id = ? and estado = 'pendiente'`).bind(correo, ahora, id, pedido.id)] : []),
       ...(tipo === 'pieza' ? [
         env.DB.prepare(`insert into pedido_lineas (pedido_id, producto_id, cantidad, precio) values (?, ?, ?, ?)
           on conflict (pedido_id, producto_id) do update set cantidad = cantidad + excluded.cantidad`)
@@ -492,7 +506,7 @@ async function guardarGuia(folio: number, request: Request, env: Env): Promise<R
 
 /** null = la ruta no es de pedidos. El permiso (CAJA) ya lo cobro cuentas.ts. */
 export async function rutaPedidos(request: Request, env: Env, ctx: ExecutionContext, pathname: string, correo: string): Promise<Response | null> {
-  const m = /^\/api\/pedidos(?:\/(\d{1,9})(?:\/(cancelar|guia|piezas|abonos))?)?$/.exec(pathname);
+  const m = /^\/api\/pedidos(?:\/(\d{1,9})(?:\/(cancelar|guia|piezas|abonos|rechazar-pago))?)?$/.exec(pathname);
   if (!m) return null;
   const metodo = request.method;
   const folio = m[1] === undefined ? null : Number(m[1]);
@@ -506,6 +520,8 @@ export async function rutaPedidos(request: Request, env: Env, ctx: ExecutionCont
     }
   } else if (m[2] === 'cancelar') {
     if (metodo === 'POST') return cancelarPedido(folio, env, ctx);
+  } else if (m[2] === 'rechazar-pago') {
+    if (metodo === 'POST') return rechazarPago(folio, request, env, correo);
   } else if (m[2] === 'piezas' || m[2] === 'abonos') {
     if (metodo === 'POST') return moverPaquete(folio, m[2] === 'piezas' ? 'pieza' : 'abono', request, env, ctx, correo);
   } else if (metodo === 'PUT') {
@@ -516,7 +532,7 @@ export async function rutaPedidos(request: Request, env: Env, ctx: ExecutionCont
 
 /**
  * El cron (cada 15 min): cada apartado cuyo plazo llego pasa a `vencido`, sus piezas
- * vuelven a la venta y el anticipo queda de saldo un mes desde hoy. Cada pedido en su
+ * vuelven a la venta y el anticipo queda de saldo un mes desde hoy. Con un pago reportado por revisar (#609) no vence. Cada pedido en su
  * batch: uno que falle no frena a los demas. Devuelve cuantos vencieron.
  */
 export async function vencerPedidos(env: Env, momento = new Date()): Promise<number> {
@@ -525,15 +541,15 @@ export async function vencerPedidos(env: Env, momento = new Date()): Promise<num
   const tocados: string[] = [];
   try {
     const { results } = await env.DB.prepare(
-      `select id from pedidos where estado = 'apartado' and liquidado_en is null and vence_en <= ? order by vence_en limit 100`,
+      `select id from pedidos where estado = 'apartado' and liquidado_en is null and vence_en <= ? and not ${hayReportePendiente('pedidos.id')} order by vence_en limit 100`,
     ).bind(ahora).all<{ id: string }>();
     for (const { id } of results) {
       try {
         const [, marca] = await env.DB.batch([
-          devolverApartado(env, id, ahora, 'and liquidado_en is null and vence_en <= ?2'),
+          devolverApartado(env, id, ahora, `and liquidado_en is null and vence_en <= ?2 and not ${hayReportePendiente('?1')}`),
           env.DB.prepare(
             `update pedidos set estado = 'vencido', saldo_vence_en = ?1, actualizado_en = ?2, revision = revision + 1
-             where id = ?3 and estado = 'apartado' and liquidado_en is null and vence_en <= ?2`,
+             where id = ?3 and estado = 'apartado' and liquidado_en is null and vence_en <= ?2 and not ${hayReportePendiente('?3')}`,
           ).bind(sumarMeses(momento, 1), ahora, id),
         ]);
         if (marca.meta.changes) { vencidos++; tocados.push(...await productosDe(env, id)); }

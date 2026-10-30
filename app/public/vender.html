@@ -240,6 +240,21 @@
   <h2 id="titulo-cancelar-mia">¿Cancelar la venta?</h2><p id="texto-cancelar-mia">La pieza vuelve a estar en venta.</p>
   <div class="acciones"><button id="cancelar-mia-si" class="peligro" type="button">Sí, cancelar</button><button id="cancelar-mia-no" type="button" autofocus>No, dejarla</button></div>
 </dialog>
+<dialog id="dlg-pago" aria-labelledby="titulo-pago">
+  <h2 id="titulo-pago" tabindex="-1">Mandar el comprobante</h2><p id="resumen-pago" class="grande"></p>
+  <form id="form-pago" novalidate>
+    <label for="pago-foto">Foto del comprobante</label>
+    <input id="pago-foto" type="file" accept="image/*" aria-describedby="pago-foto-aviso">
+    <p id="pago-foto-aviso" class="aviso" role="status" aria-live="polite"></p>
+    <label for="pago-clave">Clave de rastreo</label>
+    <input id="pago-clave" autocomplete="off" autocapitalize="characters" spellcheck="false" maxlength="40" aria-describedby="ayuda-clave">
+    <p id="ayuda-clave" class="nota">Viene en el comprobante de tu cliente. No es el «número de referencia».</p>
+    <input id="pago-monto" type="hidden"><input id="pago-banco" type="hidden">
+    <p class="nota">Manda la foto, la clave o las dos. La tienda revisa el pago y lo registra. Mientras tanto la pieza no se vence.</p>
+    <p id="aviso-pago" class="aviso" role="status" aria-live="polite"></p>
+    <div class="acciones"><button id="enviar-pago" class="principal" type="submit">Mandar a la tienda</button><button id="cerrar-pago" type="button">Volver</button></div>
+  </form>
+</dialog>
 <dialog id="dlg-compartir" aria-labelledby="titulo-compartir">
   <h2 id="titulo-compartir" tabindex="-1" autofocus>Compartir en WhatsApp</h2><div id="vista-previa"></div>
   <p id="aviso-compartir" class="aviso" role="status" aria-live="polite"></p>
@@ -613,6 +628,8 @@ function tarjetaMia(p, ahora) {
   textoEn(fila, 'p', `${p.lineas.map((l) => l.nombre).join(', ')} · ${pesos(p.subtotal + p.envio)}`);
   const estado = estadoMia(p, ahora);
   textoEn(fila, 'p', estado.texto, `chip ${estado.clase}`);
+  if (p.estado === 'apartado' && p.pago_reportado?.estado === 'rechazado')
+    textoEn(fila, 'p', `Si no llega el pago, la pieza vuelve a la venta el ${fechaLegible(p.vence_en)}.`, 'nota');
   if (p.estado === 'vendido') textoEn(fila, 'p', `Tu ganancia: ${pesos(gananciaDe(p))}`, 'nota');
   textoEn(fila, 'p', p.entrega === 'envio' ? 'Envío a su casa' : 'Recoge en la tienda', 'nota');
   textoEn(fila, 'p', `Folio P-${p.folio} · ${p.lineas.map((l) => l.codigo).join(', ')}`, 'nota');
@@ -623,6 +640,11 @@ function tarjetaMia(p, ahora) {
     aviso.href = enlaceCliente(p.telefono, textoAvisoCliente({ nombre: p.lineas.map((l) => l.nombre).join(', '),
       codigo: p.lineas.map((l) => l.codigo).join(', '), precio: p.subtotal }, p.cliente, p.vence_en));
     aviso.target = '_blank'; aviso.rel = 'noopener';
+  }
+  if (p.estado === 'apartado' && Number(p.saldo) === 0 && p.pago_reportado?.estado !== 'pendiente') {
+    const pago = textoEn(acciones, 'button', p.pago_reportado?.estado === 'rechazado' ? 'Mandar otra vez el comprobante' : 'Ya me pagó: mandar comprobante', 'principal');
+    pago.type = 'button';
+    pago.addEventListener('click', () => abrirPago(p));
   }
   if (p.cancelable) {
     const cancelar = textoEn(acciones, 'button', 'Cancelar venta', 'peligro');
@@ -661,6 +683,66 @@ async function cargarMias() {
   } catch (e) { decir('aviso', mensaje(e), true); }
   finally { cargandoMias = false; }
 }
+/* ---------- Mandar el pago de un cliente (#609) ---------- */
+
+let pagoFolio = null, pagoCliente = '', intentoPago = null, enviandoPago = false;
+function abrirPago(p) {
+  pagoFolio = p.folio;
+  pagoCliente = p.cliente;
+  intentoPago = null;
+  $('form-pago').reset();
+  for (const id of ['pago-monto', 'pago-banco']) $(id).value = '';   // los ocultos no los limpia reset()
+  $('pago-foto').dataset.key = '';
+  $('pago-foto').dataset.fecha = '';
+  decir('pago-foto-aviso', '');
+  decir('aviso-pago', '');
+  for (const id of ['pago-foto', 'pago-clave', 'enviar-pago', 'cerrar-pago']) $(id).disabled = false;
+  $('resumen-pago').textContent = `${p.cliente} · ${p.lineas.map((l) => l.nombre).join(', ')} · ${pesos(p.subtotal + p.envio)}`;
+  $('dlg-pago').showModal();
+}
+$('dlg-pago').addEventListener('cancel', (e) => { if (enviandoPago) e.preventDefault(); });
+$('cerrar-pago').addEventListener('click', () => $('dlg-pago').close());
+$('pago-foto').addEventListener('change', async () => {
+  $('enviar-pago').disabled = true;
+  try {
+    await (await import('/comprobante.js')).adjuntar($('pago-foto'), {
+      clave: 'pago-clave', monto: 'pago-monto', banco: 'pago-banco', aviso: 'pago-foto-aviso',
+      ruta: `/api/vender/apartados/${pagoFolio}/comprobante`,
+      texto: {
+        leido: (lista) => lista.includes('clave de rastreo') ? 'Leí la clave de rastreo del comprobante. Compárala y corrígela si hace falta.'
+          : 'La foto se guardó. Si ves la clave de rastreo en el comprobante, escríbela.',
+        noLeyo: 'La foto se guardó, pero no pude leerla. Si ves la clave de rastreo en el comprobante, escríbela.',
+        sinRed: 'No se pudo subir la foto (¿sin red?). Escribe la clave de rastreo o vuelve a elegir la foto.',
+      },
+    }, $);
+  } catch { decir('pago-foto-aviso', 'No se pudo subir la foto (¿sin red?). Escribe la clave de rastreo o vuelve a elegir la foto.', true); }
+  finally { $('enviar-pago').disabled = false; }
+});
+$('form-pago').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  if (enviandoPago) return;
+  const clave = $('pago-clave').value.trim(), foto = $('pago-foto').dataset.key || '';
+  if (!clave && !foto) return decir('aviso-pago', 'Sube la foto del comprobante o escribe la clave de rastreo.', true);
+  // Un solo id por intento: si se pierde la respuesta, reintentar no manda el pago dos veces.
+  intentoPago ??= { id: crypto.randomUUID(), clave_rastreo: clave, comprobante_key: foto || undefined, fecha_comprobante: $('pago-foto').dataset.fecha || undefined,
+    monto: $('pago-monto').value ? Math.round(Number($('pago-monto').value) * 100) : undefined, banco_emisor: $('pago-banco').value || undefined };
+  enviandoPago = true;
+  for (const id of ['pago-foto', 'pago-clave', 'enviar-pago', 'cerrar-pago']) $(id).disabled = true;
+  try {
+    await api(`/api/vender/apartados/${pagoFolio}/pago`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(intentoPago) });
+    intentoPago = null;
+    $('dlg-pago').close();
+    resultado(`✓ Listo. La tienda revisa el pago de ${pagoCliente}.`);
+    cargarMias();
+  } catch (e) {
+    if (e.status && e.status < 500) intentoPago = null;
+    decir('aviso-pago', intentoPago ? 'No sabemos si se mandó. Toca «Mandar a la tienda» otra vez: no se repite.' : mensaje(e), true);
+  } finally {
+    enviandoPago = false;
+    for (const id of ['enviar-pago', 'cerrar-pago']) $(id).disabled = false;
+    for (const id of ['pago-foto', 'pago-clave']) $(id).disabled = !!intentoPago;
+  }
+});
 $('cancelar-mia-no').addEventListener('click', () => $('dlg-cancelar-mia').close());
 $('cancelar-mia-si').addEventListener('click', async () => {
   if (folioCancelar === null) return;
