@@ -94,10 +94,12 @@ test('/api/tablero suma al centavo ventas, canales, gastos y publicidad, y no su
   assert.equal(d.ventas.semana.poca_historia, true);
 
   const canales = d.canales;
-  assert.deepEqual([canales.tienda.total, canales.whatsapp.total, canales.revendedoras.total], [100000, 25000, 25000]);
-  assert.equal(canales.tienda.total + canales.whatsapp.total + canales.revendedoras.total, d.ventas.total);
-  assert.equal(canales.revendedoras.comision, 2500);
-  assert.equal(canales.revendedoras.personas, null);           // 1 persona: no se cuenta
+  // 1 revendedora: su venta y comision serian su pago; van sumadas a WhatsApp y no sale comision.
+  assert.deepEqual([canales.tienda.total, canales.whatsapp.total], [100000, 50000]);
+  assert.equal(canales.tienda.total + canales.whatsapp.total, d.ventas.total);
+  assert.equal(canales.whatsapp.incluye_revendedoras, true);
+  assert.equal(canales.revendedoras, null);
+  assert.ok(!JSON.stringify(d).includes('comision'));
   assert.deepEqual(canales.mercado_libre, { estimado: true, total: 36000, piezas: 2 });
 
   // 100 + 500 + 30 + 20 + 15 + 1,000 (adelanto 200 + pago 800)
@@ -147,8 +149,10 @@ test('grupos de menos de 5 personas no se cuentan y sin meta no hay barra', asyn
     pedido(t, correo, await venta(t), 10 + n);
   }
   const e = (await t.pedir('/api/tablero', undefined, 'GET')).cuerpo;
-  assert.equal(e.canales.revendedoras.personas, 5);
-  assert.equal(e.canales.revendedoras.comision, 5 * 2500);
+  assert.ok(e.canales.revendedoras.personas >= 5);
+  assert.equal(e.canales.revendedoras.comision, e.canales.revendedoras.personas * 2500);
+  assert.equal(e.canales.whatsapp.incluye_revendedoras, false);
+  assert.equal(e.canales.tienda.total + e.canales.whatsapp.total + e.canales.revendedoras.total, e.ventas.total);
   t.db.close();
 });
 

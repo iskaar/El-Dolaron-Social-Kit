@@ -187,15 +187,16 @@ function seccionCanales(d) {
   const t = d.ventas.total;
   const fila = (nombre, canal, extra = '') => `<div class="canal"><div class="fila"><span>${nombre}</span><span>${pesos(canal.total)} · ${pct(canal.total, t)} %</span></div>${barra(pct(canal.total, t))}${extra}</div>`;
   const nota = (texto) => `<span class="nota">${texto}</span>`;
-  const rev = c.revendedoras;
-  const resto = pct(c.whatsapp.total + rev.total, t);
-  const comision = `Comisión que ganaron: ${pesos(rev.comision)} (10 %, sin envío)${rev.personas ? ` · ${rev.personas} revendedoras` : ''}`;
+  const rev = c.revendedoras;   // null con menos de 5 revendedoras: su venta viene sumada en WhatsApp
+  const resto = pct(c.whatsapp.total + (rev?.total ?? 0), t);
   return `<section aria-labelledby="t-canales"><h2 id="t-canales" class="seccion">De dónde vienen las ventas</h2>
     <p class="historia">${t > 0 ? `Por la caja entra el ${pct(c.tienda.total, t)} %; WhatsApp y las revendedoras suman ${resto} %.` : 'Todavía no hay ventas este mes.'}</p>
     <div class="tarjeta" style="gap:14px">
       ${fila('Tienda (caja)', c.tienda)}
-      ${fila('Pedidos por WhatsApp', c.whatsapp)}
-      ${fila('Revendedoras', rev, nota(comision))}
+      ${rev
+        ? `${fila('Pedidos por WhatsApp', c.whatsapp)}
+      ${fila('Revendedoras', rev, nota(`Comisión que ganaron: ${pesos(rev.comision)} (10 %, sin envío) · ${rev.personas} revendedoras`))}`
+        : fila('Pedidos por WhatsApp y revendedoras', c.whatsapp, nota('Las revendedoras se muestran aparte cuando sean 5 o más.'))}
       <div class="canal"><div class="fila"><span>Mercado Libre</span><span>≈ ${pesos(c.mercado_libre.total)}</span></div>
         <span class="aviso-estimado">Estimado</span>
         ${nota('Con el precio publicado: aún no guardamos comisión ni envío. No está sumado en las ventas de arriba.')}</div>
