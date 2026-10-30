@@ -389,6 +389,7 @@ test('/api/vender/mios: solo los suyos de los ultimos 60 dias, con estado, plazo
   assert.equal(m.entrega, 'tienda');
   assert.equal(m.subtotal, 20000);
   assert.equal(m.cancelable, true);
+  assert.equal(m.liquidado_en, null);
   assert.equal(m.lineas[0].codigo, a.codigo);
   assert.equal(m.vence_en, suyo.cuerpo.pedido.vence_en);
   assert.ok(!JSON.stringify(r.cuerpo).includes('Secreta'));

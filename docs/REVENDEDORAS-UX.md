@@ -226,7 +226,7 @@ Los mensajes que vienen del servidor (`datos.error`, p. ej. «Pieza o cantidad i
 | D1 | **«Las que compartí»**: una pestaña o franja con las piezas compartidas (foto, código, botón «Ya la vendí»), para resolver U19 sin buscar. Versión local posible: guardar en `localStorage` `{id, código, nombre, precio, foto}` al compartir; la API valida al apartar. | Datos desfasados (precio, disponibilidad) y límites de almacenamiento; mejor pedir piezas por `ids` a la API. Decidir con la prueba (sección 7). |
 | D2 | Foto de la pieza en «Mis ventas». | `lineas` no trae `producto_id` (`pedidos.ts` L318); API. |
 | D3 | **Datos de pago** (CLABE/cuenta, titular, concepto «P-{folio}») dentro del diálogo «Listo» y del mensaje al cliente. | Decisión de Isaac (#575 paso 4); no se inventan. |
-| D4 | **Comisión visible**: «Tu comisión: ${x}» en «Mis ventas». | Porcentaje sin definir (#575). El reporte para Isaac ya existe en `/reportes`. |
+| D4 | ~~**Comisión visible**~~ **Hecho (#599)**: «Tu ganancia esta semana» y «Tu ganancia: $X» por venta en «Mis ventas». | Regla de Isaac (29/10): 10 % del precio de la pieza, sin envío, pago cada lunes. `/reportes` sigue mostrando el importe del ticket completo (incluye envío): 10 % de ese importe no es la ganancia. |
 | D5 | Aviso a la revendedora cuando la tienda registra pago o cuando faltan 6 h (WhatsApp o notificación). | Fuera de alcance de #579 (avisos automáticos). Hoy depende de abrir «Mis ventas». |
 | D6 | `manifest.webmanifest` + `apple-touch-icon` para que Android instale la web app (WebAPK) en vez de dejar un acceso directo. | Archivo estático nuevo + ruta permitida para el rol `revendedora` en el Worker (`worker.ts`); además, Cloudflare Access puede bloquear el manifiesto si el navegador lo pide sin credenciales: probar con `crossorigin="use-credentials"`. |
 | D7 | **Duración de la sesión de Access** para este grupo: por defecto 24 h (máximo 1 mes). A diario el código por correo es la peor parte de la experiencia. | Es Access: lo cambia Isaac; el agente no lo toca. [Cloudflare, session management](https://developers.cloudflare.com/cloudflare-one/access-controls/access-settings/session-management/) (leído). |
@@ -269,7 +269,7 @@ Los mensajes que vienen del servidor (`datos.error`, p. ej. «Pieza o cantidad i
 
 **P-4. Seguimiento.** Primera semana: mensaje al día siguiente («¿pudiste entrar?»); revisar en `/reportes` que haya ventas; si lleva 3 días sin abrir, llamarla. No mandar videos largos: una captura de pantalla por duda.
 
-**P-5. Qué sabe ella de su dinero.** Hoy solo ve «Cobrada: la tienda ya cobró». Mientras no haya D4, Isaac le dice la comisión por escrito (P-3) y se la paga con la regla que decida; la app no la calcula.
+**P-5. Qué sabe ella de su dinero.** Ve «Cobrada: la tienda ya cobró», «Tu ganancia: $X» en cada venta cobrada y «Tu ganancia esta semana» (10 % del precio, sin envío; D4, #599). Se la pagas cada lunes por transferencia con esa misma cuenta.
 
 ---
 

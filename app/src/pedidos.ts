@@ -323,7 +323,7 @@ export async function pedidosDeRevendedora(env: Env, correo: string): Promise<Re
   const porFolio = new Map([...recientes, ...abiertos].map((p) => [p.folio, p]));
   const pedidos = [...porFolio.values()].sort((a, b) => b.folio - a.folio).map((p) => ({
     folio: p.folio, estado: p.estado, vence_en: p.vence_en, cliente: p.cliente, telefono: p.telefono, entrega: p.entrega,
-    envio: p.envio, saldo: p.saldo, creado_en: p.creado_en, subtotal: p.subtotal,
+    envio: p.envio, saldo: p.saldo, creado_en: p.creado_en, subtotal: p.subtotal, liquidado_en: p.liquidado_en,
     lineas: p.lineas.map(({ codigo, nombre, precio, cantidad }) => ({ codigo, nombre, precio, cantidad })),
     // Con dinero registrado ya solo lo cancela la tienda.
     cancelable: p.estado === 'apartado' && Number(p.saldo) === 0,
