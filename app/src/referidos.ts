@@ -6,8 +6,8 @@
  * - Al cobrarle una compra con al menos $150 en dinero, el nuevo y el referente
  *   reciben 25 D cada uno (12 meses, desde la medianoche siguiente).
  * - Cada referente admite hasta 10 personas (tambien en SQL: trigger referidos_tope).
- * - Piloto cerrado: sin REFERIDOS_TELEFONOS el programa esta apagado, y solo los
- *   telefonos de esa lista tienen codigo.
+ * - Abierto a todo socio del portal (Issue #597): sin REFERIDOS_ABIERTO='si' el programa
+ *   esta apagado; con ella, todo socio tiene codigo. Sin requisito de compra previa.
  *
  * Centavos enteros como todo el dinero (1 D = 100). Nada aqui usa azar: el codigo
  * sale del numero de socio y los premios los fija la venta, en su mismo batch.
@@ -40,12 +40,8 @@ export function numeroDeCodigo(texto: unknown): number | null {
   return m && m[1][0] !== '0' && verificador(m[1]) === m[2] ? Number(m[1]) : null;
 }
 
-/* ---------- piloto ---------- */
-
-/** Telefonos (10 digitos) con codigo. Vacio = programa apagado. Se pone en Cloudflare, no en el repo. */
-const piloto = (env: Env) => new Set((env.REFERIDOS_TELEFONOS ?? '').split(',').map((t) => t.replace(/\D/g, '')).filter((t) => t.length === 10));
-export const programaActivo = (env: Env) => piloto(env).size > 0;
-export const puedeReferir = (env: Env, telefono: string) => piloto(env).has(telefono);
+/** Apagado de emergencia: quitar REFERIDOS_ABIERTO de wrangler.jsonc y desplegar. */
+export const programaActivo = (env: Env) => env.REFERIDOS_ABIERTO === 'si';
 
 /* ---------- D1 ---------- */
 
@@ -123,7 +119,7 @@ export function sentenciasDeReversoReferido(env: Env, ventaId: string, autor: st
 
 type Revision = { ok: true; referenteId: string } | { ok: false; status: number; error: string };
 
-/** El codigo que escribio quien se registra: existe, es de la lista, no es suyo y no esta lleno. */
+/** El codigo que escribio quien se registra: existe, no es suyo y no esta lleno. */
 export async function revisarCodigo(env: Env, codigo: unknown, quien: { uid: string; telefono: string }): Promise<Revision> {
   if (!programaActivo(env)) return { ok: false, status: 400, error: 'Los referidos todavía no están disponibles. Quita el código para registrarte.' };
   const invalido: Revision = { ok: false, status: 400, error: 'Ese código no es válido. Revísalo o quítalo para registrarte sin él.' };
@@ -131,7 +127,7 @@ export async function revisarCodigo(env: Env, codigo: unknown, quien: { uid: str
   if (!numero) return invalido;
   const referente = await env.DB.prepare('select id, telefono, auth_uid from clientes where numero = ?')
     .bind(numero).first<{ id: string; telefono: string; auth_uid: string | null }>();
-  if (!referente || !puedeReferir(env, referente.telefono)) return invalido;
+  if (!referente) return invalido;
   if (referente.telefono === quien.telefono || referente.auth_uid === quien.uid)
     return { ok: false, status: 400, error: 'No puedes usar tu propio código.' };
   const { total } = (await env.DB.prepare('select count(*) as total from referidos where referente_id = ?')
@@ -142,8 +138,8 @@ export async function revisarCodigo(env: Env, codigo: unknown, quien: { uid: str
 }
 
 /** Lo que muestra el portal: tu codigo, cuantos llevas y como va tu propia invitacion. */
-export async function resumenReferidos(env: Env, socio: { id: string; numero: number; telefono: string }) {
-  const puede = programaActivo(env) && puedeReferir(env, socio.telefono);
+export async function resumenReferidos(env: Env, socio: { id: string; numero: number }) {
+  const puede = programaActivo(env);
   const llevas = puede ? await env.DB.prepare(
     `select count(*) as total, coalesce(sum(estado = 'liberado'), 0) as liberados from referidos where referente_id = ?`)
     .bind(socio.id).first<{ total: number; liberados: number }>() : null;
