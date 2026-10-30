@@ -158,10 +158,15 @@ setInterval(cargar, 30_000);
 // En iPhone solo existen dentro de la app agregada a la pantalla de inicio (iOS 16.4+).
 async function prepararPush() {
   const r = await fetch('/api/push/clave').catch(() => null);
-  if (!r?.ok) return;   // solo el dueño, y solo con el secreto VAPID_JWK cargado
-  const { clave } = await r.json();
+  if (!r || r.status === 403) return;   // solo el dueño
+  const { clave, error } = await r.json().catch(() => ({}));
   $('push').hidden = false;
   const estado = (texto) => { $('push-estado').textContent = texto; };
+  // Sin el secreto VAPID_JWK (503) el dueño ve por qué no hay botón, en vez de nada.
+  if (!r.ok) {
+    $('activar-push').hidden = true;
+    return estado(`Notificaciones no disponibles: ${error ?? `error ${r.status}`}`);
+  }
   if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
     $('activar-push').hidden = true;
     return estado('En iPhone: en Safari toca Compartir → «Agregar a inicio» y abre Avisos desde ese ícono para activarlas.');
