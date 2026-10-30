@@ -92,6 +92,20 @@ export async function inventarioEnPiso(env: Env, ahora = Date.now()) {
   };
 }
 
+/** Dias promedio entre capturar una pieza y venderla, por categoria (de siempre, solo El Dolaron). Lo reusa /api/tablero (#610). */
+export async function diasEnVentaPorCategoria(env: Env) {
+  // Diferido a proposito en CONTRATO-ESCANER.md hasta que hubiera ventas reales.
+  const { results } = await env.DB.prepare(
+    `select coalesce(nullif(p.categoria, ''), 'sin categoria') as categoria,
+       avg(julianday(substr(v.creado_en, 1, 10)) - julianday(substr(p.creado_en, 1, 10))) as dias_promedio,
+       count(*) as n
+     from venta_lineas l join ventas v on v.id = l.venta_id join productos p on p.id = l.producto_id
+     where v.cancelada = 0 and p.sin_inventario = 0 and l.cantidad > l.cancelada_cantidad and l.propietario = 'dolaron'
+     group by categoria order by dias_promedio desc`,
+  ).all<{ categoria: string; dias_promedio: number; n: number }>();
+  return results;
+}
+
 /**
  * Reportes: todo sale de consultas contra D1 en el momento, nada se precalcula
  * ni vive en otra tabla. `dias` acota lo que tiene sentido por rango (ventas del
@@ -215,15 +229,7 @@ export async function reportes(url: URL, env: Env): Promise<Response> {
      from productos where precio_sugerido > 0 and precio > 0 and propietario = 'dolaron'`,
   ).first<{ n: number; promedio_pct: number | null }>();
 
-  // Diferido a proposito en CONTRATO-ESCANER.md hasta que hubiera ventas reales.
-  const { results: diasEnVenta } = await env.DB.prepare(
-    `select coalesce(nullif(p.categoria, ''), 'sin categoria') as categoria,
-       avg(julianday(substr(v.creado_en, 1, 10)) - julianday(substr(p.creado_en, 1, 10))) as dias_promedio,
-       count(*) as n
-     from venta_lineas l join ventas v on v.id = l.venta_id join productos p on p.id = l.producto_id
-     where v.cancelada = 0 and p.sin_inventario = 0 and l.cantidad > l.cancelada_cantidad and l.propietario = 'dolaron'
-     group by categoria order by dias_promedio desc`,
-  ).all<{ categoria: string; dias_promedio: number; n: number }>();
+  const diasEnVenta = await diasEnVentaPorCategoria(env);
 
   // Devoluciones, de ticket completo o de piezas sueltas (Issue #138): el motivo y quien cancelo son la unica huella de una
   // cancelacion que no fue legitima (cobrar de verdad y "cancelar" para

@@ -23,7 +23,7 @@ import { CLAVES_CATEGORIA } from '../public/categorias.js';
 import { tallaValida, esCalzado } from '../public/tallas.js';
 import {
   permiso, puede, quienEs, leerUsuario, yo, pedirAcceso, listarCuentas, guardarCuenta, resolverSolicitud, propietarioDe,
-  esDeCaja, soloComputadora, esRevendedora, CAJAS, puedeEditarInventario, type Usuario,
+  esDeCaja, soloComputadora, esRevendedora, esInversionista, CAJAS, puedeEditarInventario, type Usuario,
 } from './cuentas.ts';
 import { cajeroEnTurno, listarCajeros, entrar, salir, ponerPin } from './cajeros.ts';
 import { rutaPush } from './push.ts';
@@ -38,6 +38,7 @@ import { rutaSolicitudesPrecio, crearSolicitud } from './solicitudes-precio.ts';
 import { UPC_VISIBLE, MISMO_UPC, PIEZA_UPC, CAPTURA_SUMADA, conflictoCapturaSumada, capturaSumada, sumarCaptura, conflictoUpc, corregirUpc, upcValido, type PiezaUpc } from './upc-inventario.ts';
 import { rutaCamaraRemota } from './camara-remota.ts';
 import { rutaNomina } from './nomina.ts';
+import { rutaTablero } from './tablero.ts';
 import { diaTienda, hoyTienda, rangoDias, rangoDe, delDia, DIA, reportes } from './reportes.ts';
 
 // Las pruebas importan estos dos desde aqui.
@@ -2356,6 +2357,8 @@ export default {
             if (soloComputadora(usuario)) return Response.redirect(`${url.origin}/caja`, 302);
             // Revendedora (#575): su unica pantalla es /vender; el menu de la tienda no es para ella.
             if (esRevendedora(usuario) && /^\/(?:index(?:\.html)?)?$/.test(pathname)) return Response.redirect(`${url.origin}/vender`, 302);
+            // Inversionista (#610): su unica pantalla es /tablero.
+            if (esInversionista(usuario) && /^\/(?:index(?:\.html)?)?$/.test(pathname)) return Response.redirect(`${url.origin}/tablero`, 302);
             return Response.redirect(`${url.origin}/sin-acceso?desde=${encodeURIComponent(pathname)}`, 302);
           }
           return json({ error: usuario?.activo ? 'Tu cuenta no tiene permiso para esto.' : 'No tienes cuenta activa.' }, 403);
@@ -2629,6 +2632,8 @@ export default {
       if (ticket && request.method === 'GET') {
         return await detalleVenta(ticket[1], env, url.searchParams.get('imprimir') === '1');
       }
+
+      if (pathname === '/api/tablero') return await rutaTablero(request, env, ctx);
 
       if (pathname === '/api/reportes') {
         return await reportes(url, env);

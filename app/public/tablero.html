@@ -1,0 +1,299 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>El Dolarón — tablero</title>
+<style>
+  /* Tablero de inversionistas (Issue #610): solo lectura, solo agregados. Sin menu de la tienda.
+     Fuentes: ninguna pagina de la app carga fuentes externas, asi que Anton/Archivo solo se usan si el equipo las tiene
+     y si no cae a Impact y a la fuente del sistema. */
+  :root {
+    color-scheme: light;
+    --marca: #16366B; --marca-claro: #FFD447;
+    --pagina: #f9f9f7; --superficie: #ffffff; --tinta: #0b0b0b; --tinta-2: #52514e; --tinta-3: #2b2a28;
+    --borde: rgba(11,11,11,.10); --pista: #ecebe6; --acento: #16366B; --acento-2: #b9c7de;
+    --serie-2: #7f97c0; --serie-3: #eb6834; --serie-4: #2a78d6; --serie-5: #9ec5f4;
+    --bien: #006300; --mal: #d03b3b; --aviso-fondo: #fff4e0; --aviso: #8a5200;
+    --cabecera-texto: #dfe6f2; --foco: #16366B;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:where(:not([data-theme="light"])) {
+      color-scheme: dark;
+      --pagina: #0d0d0d; --superficie: #1a1a19; --tinta: #ffffff; --tinta-2: #c3c2b7; --tinta-3: #e6e5df;
+      --borde: rgba(255,255,255,.10); --pista: #2c2c2a; --acento: #3987e5; --acento-2: #38557f;
+      --serie-2: #5f7fb4; --serie-3: #d95926; --serie-4: #3987e5; --serie-5: #9ec5f4;
+      --bien: #0ca30c; --mal: #e66767; --aviso-fondo: #3a2a08; --aviso: #fab219; --foco: #9ec5f4;
+    }
+  }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --pagina: #0d0d0d; --superficie: #1a1a19; --tinta: #ffffff; --tinta-2: #c3c2b7; --tinta-3: #e6e5df;
+    --borde: rgba(255,255,255,.10); --pista: #2c2c2a; --acento: #3987e5; --acento-2: #38557f;
+    --serie-2: #5f7fb4; --serie-3: #d95926; --serie-4: #3987e5; --serie-5: #9ec5f4;
+    --bien: #0ca30c; --mal: #e66767; --aviso-fondo: #3a2a08; --aviso: #fab219; --foco: #9ec5f4;
+  }
+
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--pagina); color: var(--tinta); -webkit-text-size-adjust: 100%;
+    font-family: Archivo, system-ui, -apple-system, "Segoe UI", sans-serif; }
+  .contenedor { max-width: 560px; margin: 0 auto; }
+  header { background: #16366B; color: #fff; padding: 20px 20px 22px; display: flex; flex-direction: column; gap: 6px; }
+  header .fila-marca { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+  .marca { margin: 0; font-family: Anton, Impact, "Arial Narrow Bold", sans-serif; font-size: 22px; letter-spacing: .02em; color: var(--marca-claro); font-weight: 400; }
+  header p { margin: 0; font-size: 12px; color: var(--cabecera-texto); }
+  header h1 { margin: 0; font-size: 26px; font-weight: 700; line-height: 1.2; }
+  header .mes { font-size: 14px; }
+  main { padding: 20px 16px 32px; display: flex; flex-direction: column; gap: 28px; }
+  section { display: flex; flex-direction: column; gap: 12px; }
+  .resumen { gap: 10px; }
+  .titular { margin: 0; font-size: 21px; line-height: 1.35; font-weight: 600; }
+  .titular strong { color: var(--acento); }
+  .historia { margin: 0; font-size: 15px; line-height: 1.45; color: var(--tinta-2); }
+  h2.seccion { margin: 0; font-family: Anton, Impact, "Arial Narrow Bold", sans-serif; font-weight: 400; font-size: 24px; letter-spacing: .01em; color: var(--acento); }
+  .tarjeta { background: var(--superficie); border: 1px solid var(--borde); border-radius: 16px; padding: 18px 18px 16px; display: flex; flex-direction: column; gap: 8px; }
+  .etiqueta { margin: 0; font-size: 13px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--tinta-2); }
+  .cifra { margin: 0; font-family: Anton, Impact, "Arial Narrow Bold", sans-serif; font-weight: 400; font-size: 44px; line-height: 1; font-variant-numeric: tabular-nums; }
+  .cifra.media { font-size: 32px; }
+  .cifra small { font-family: Archivo, system-ui, sans-serif; font-size: 18px; font-weight: 600; color: var(--tinta-2); }
+  .frase { margin: 0; font-size: 15px; line-height: 1.45; color: var(--tinta-3); }
+  .frase.chica { font-size: 14px; }
+  .nota { font-size: 12px; color: var(--tinta-2); }
+  .doble { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+  .fila { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; font-size: 15px; }
+  .fila span:last-child { font-variant-numeric: tabular-nums; font-weight: 600; white-space: nowrap; }
+  .pista { height: 10px; border-radius: 999px; background: var(--pista); overflow: hidden; }
+  .pista > div { height: 100%; background: var(--acento); border-radius: 999px; }
+  .meta { position: relative; height: 12px; border-radius: 999px; background: var(--pista); overflow: visible; }
+  .meta .lleno { height: 100%; background: var(--acento); border-radius: 999px; }
+  .meta .ritmo { position: absolute; top: -4px; width: 3px; height: 20px; background: var(--tinta); border-radius: 2px; transform: translateX(-1px); }
+  .leyenda-meta { display: flex; justify-content: space-between; font-size: 12px; color: var(--tinta-2); gap: 12px; }
+  .arriba { color: var(--bien); font-weight: 600; }
+  .abajo { color: var(--mal); font-weight: 600; }
+  .semanas { display: grid; gap: 8px; align-items: end; height: 120px; padding-top: 8px; }
+  .semanas .col { display: flex; flex-direction: column; align-items: center; justify-content: flex-end; gap: 4px; height: 100%; }
+  .semanas .barra { width: 100%; background: var(--acento-2); border-radius: 6px 6px 2px 2px; min-height: 2px; }
+  .semanas .col.actual .barra { background: var(--acento); }
+  .semanas .valor { font-size: 11px; color: var(--tinta-2); font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .semanas .nombre { font-size: 11px; color: var(--tinta-2); }
+  .semanas .col.actual .nombre { font-weight: 700; color: var(--tinta); }
+  .apilada { display: flex; height: 14px; border-radius: 999px; overflow: hidden; gap: 2px; background: var(--pista); }
+  .leyenda { display: flex; flex-direction: column; gap: 6px; font-size: 14px; }
+  .leyenda .fila > span:first-child { display: flex; align-items: center; gap: 8px; }
+  .muestra { width: 10px; height: 10px; border-radius: 3px; flex: none; }
+  .canal { display: flex; flex-direction: column; gap: 6px; }
+  .aviso-estimado { align-self: flex-start; font-size: 12px; font-weight: 600; color: var(--aviso); background: var(--aviso-fondo); border-radius: 999px; padding: 4px 10px; }
+  .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+  #estado { padding: 24px 16px; font-size: 15px; color: var(--tinta-2); }
+  #estado.error { color: var(--mal); font-weight: 600; }
+  @media (max-width: 360px) { .doble { grid-template-columns: 1fr; } .cifra { font-size: 38px; } }
+  @media (prefers-reduced-motion: no-preference) { .meta .lleno, .pista > div { transition: width .4s ease; } }
+</style>
+</head>
+<body>
+<div class="contenedor">
+  <header>
+    <div class="fila-marca">
+      <p class="marca">EL DOLARÓN</p>
+      <p>Pesos mexicanos</p>
+    </div>
+    <h1>Cómo va la tienda</h1>
+    <p class="mes" id="mes">&nbsp;</p>
+  </header>
+  <div id="estado" role="status" aria-live="polite">Cargando…</div>
+  <main id="contenido" hidden></main>
+</div>
+
+<script type="module">
+import { escapar, pesosEje, cambio } from '/graficas.js';
+import { CATEGORIAS } from '/categorias.js';
+
+const $ = (id) => document.getElementById(id);
+const NOMBRE_CATEGORIA = new Map([...CATEGORIAS, ['sin categoria', 'Sin categoría']]);
+const categoria = (clave) => NOMBRE_CATEGORIA.get(clave) ?? clave;
+
+// Pesos enteros, es-MX; los negativos con signo menos tipografico.
+const pesos = (centavos) => `${centavos < 0 ? '−' : ''}${pesosEje(Math.abs(centavos))}`;
+const entero = (n) => Math.round(n).toLocaleString('es-MX');
+const pct = (parte, todo) => (todo > 0 ? Math.round(parte * 100 / todo) : 0);
+const MESES = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
+const compacto = (centavos) => { const p = Math.round(centavos / 100); return p >= 1000 ? `${entero(p / 1000)} mil` : `$${entero(p)}`; };
+
+const barra = (porcentaje, color) => `<div class="pista" aria-hidden="true"><div style="width:${Math.min(100, Math.max(0, porcentaje))}%${color ? `;background:${color}` : ''}"></div></div>`;
+const tarjeta = (etiqueta, cifra, resto = '', clase = '') =>
+  `<article class="tarjeta"><p class="etiqueta">${etiqueta}</p><p class="cifra ${clase}">${cifra}</p>${resto}</article>`;
+
+function leyenda(items) {
+  const total = items.reduce((s, i) => s + i.valor, 0);
+  const apilada = `<div class="apilada" aria-hidden="true">${items.filter((i) => i.valor > 0)
+    .map((i) => `<div style="width:${pct(i.valor, total)}%;background:${i.color}"></div>`).join('')}</div>`;
+  const filas = items.map((i) => `<div class="fila"><span><span class="muestra" style="background:${i.color}"></span>${i.nombre}</span><span>${i.texto}</span></div>`).join('');
+  return `${apilada}<div class="leyenda">${filas}</div>`;
+}
+
+function resumen(d) {
+  const [anio, mes] = d.mes.clave.split('-').map(Number);
+  const nombreMes = MESES[mes - 1];
+  const caja = pct(d.canales.tienda.total, d.ventas.total);
+  const frase = d.meta
+    ? `En ${nombreMes} vendimos <strong>${pesos(d.ventas.total)}</strong>: <strong>${d.meta.avance_pct} %</strong> de la meta de ${pesos(d.meta.monto)}.`
+    : `En ${nombreMes} llevamos <strong>${pesos(d.ventas.total)}</strong> en ventas.`;
+  const historia = d.ventas.total > 0 ? `${caja} % de las ventas entró por la caja de la tienda.` : 'Todavía no hay ventas este mes.';
+  $('mes').textContent = `${nombreMes[0].toUpperCase()}${nombreMes.slice(1)} ${anio} · actualizado ${new Date(d.generado_en).toLocaleString('es-MX', { dateStyle: 'medium', timeStyle: 'short' })}`;
+  return `<section class="resumen" aria-label="Resumen"><p class="titular">${frase}</p><p class="historia">${historia}</p></section>`;
+}
+
+function tarjetaVentas(d) {
+  const v = d.ventas;
+  let metaHtml = '';
+  if (d.meta) {
+    const m = d.meta;
+    const arriba = m.estado === 'arriba';
+    metaHtml = `<div style="display:flex;flex-direction:column;gap:6px">
+      <div class="meta" role="img" aria-label="${m.avance_pct} por ciento de la meta del mes; a esta fecha el ritmo pedía ${m.ritmo_pct} por ciento">
+        <div class="lleno" style="width:${Math.min(100, m.avance_pct)}%"></div><div class="ritmo" style="left:${Math.min(100, m.ritmo_pct)}%"></div></div>
+      <div class="leyenda-meta"><span>Meta del mes: ${pesos(m.monto)}</span><span>▏ritmo a hoy</span></div>
+      <p class="frase chica"><span class="${arriba ? 'arriba' : 'abajo'}">${arriba ? '▲ Arriba del ritmo:' : '▼ Abajo del ritmo:'}</span> a esta fecha deberíamos llevar ${pesos(m.ritmo_monto)}.</p></div>`;
+  }
+  const s = v.semana;
+  let comparacion;
+  if (s.poca_historia) {
+    comparacion = '<span class="nota">Poca historia: la semana anterior tuvo muy pocas ventas para comparar.</span>';
+  } else {
+    const c = cambio(s.actual.total, s.anterior.total);
+    comparacion = !c ? '' : c.direccion === 'igual' ? '= igual que la semana anterior'
+      : `<span class="${c.direccion === 'sube' ? 'arriba' : 'abajo'}">${c.direccion === 'sube' ? '▲' : '▼'} ${Math.abs(c.pct).toLocaleString('es-MX', { maximumFractionDigits: 1 })} % ${c.direccion === 'sube' ? 'más' : 'menos'}</span> que la semana anterior al mismo día`;
+  }
+  const maximo = Math.max(1, ...v.semanas.map((w) => w.total));
+  const columnas = v.semanas.map((w, i) => `<div class="col${w.actual ? ' actual' : ''}">
+      <span class="valor">${compacto(w.total)}</span><div class="barra" style="height:${Math.max(2, Math.round(w.total * 68 / maximo))}px"></div>
+      <span class="nombre">${w.actual ? 'Esta' : `Sem ${i + 1}`}</span></div>`).join('');
+  const descripcion = v.semanas.map((w, i) => `${w.actual ? 'esta semana' : `semana ${i + 1}`}: ${pesos(w.total)}`).join('; ');
+  return `<article class="tarjeta"><p class="etiqueta">Ventas del mes</p><p class="cifra">${pesos(v.total)}</p>${metaHtml}
+    <p class="frase">Esta semana: ${pesos(s.actual.total)}. ${comparacion}</p>
+    <div class="semanas" role="img" aria-label="Ventas por semana. ${escapar(descripcion)}" style="grid-template-columns:repeat(${v.semanas.length},minmax(0,1fr))">${columnas}</div></article>`;
+}
+
+function bloqueInventario(d) {
+  const i = d.inventario;
+  const semanas = i.semanas_de_inventario ? ` Alcanza para unas ${entero(i.semanas_de_inventario)} semanas al ritmo actual.` : '';
+  return tarjeta('Mercancía en el piso', `${entero(i.piezas)} <small>piezas</small>`,
+    `<p class="frase">Valen <strong>${pesos(i.valor)}</strong> a precio de venta.${semanas}</p>`);
+}
+
+function seccionCanales(d) {
+  const c = d.canales;
+  const t = d.ventas.total;
+  const fila = (nombre, canal, extra = '') => `<div class="canal"><div class="fila"><span>${nombre}</span><span>${pesos(canal.total)} · ${pct(canal.total, t)} %</span></div>${barra(pct(canal.total, t))}${extra}</div>`;
+  const nota = (texto) => `<span class="nota">${texto}</span>`;
+  const rev = c.revendedoras;
+  const resto = pct(c.whatsapp.total + rev.total, t);
+  const comision = `Comisión que ganaron: ${pesos(rev.comision)} (10 %, sin envío)${rev.personas ? ` · ${rev.personas} revendedoras` : ''}`;
+  return `<section aria-labelledby="t-canales"><h2 id="t-canales" class="seccion">De dónde vienen las ventas</h2>
+    <p class="historia">${t > 0 ? `Por la caja entra el ${pct(c.tienda.total, t)} %; WhatsApp y las revendedoras suman ${resto} %.` : 'Todavía no hay ventas este mes.'}</p>
+    <div class="tarjeta" style="gap:14px">
+      ${fila('Tienda (caja)', c.tienda)}
+      ${fila('Pedidos por WhatsApp', c.whatsapp)}
+      ${fila('Revendedoras', rev, nota(comision))}
+      <div class="canal"><div class="fila"><span>Mercado Libre</span><span>≈ ${pesos(c.mercado_libre.total)}</span></div>
+        <span class="aviso-estimado">Estimado</span>
+        ${nota('Con el precio publicado: aún no guardamos comisión ni envío. No está sumado en las ventas de arriba.')}</div>
+    </div></section>`;
+}
+
+function seccionMovimiento(d) {
+  const ventas = d.dias_en_venta.filter((c) => c.n >= 3 && c.dias_promedio !== null).sort((a, b) => a.dias_promedio - b.dias_promedio);
+  const dias = (x) => `${entero(Math.max(0, x))} ${Math.round(x) === 1 ? 'día' : 'días'}`;
+  const historia = ventas.length >= 2
+    ? `${categoria(ventas[0].categoria)} se vende en ${dias(ventas[0].dias_promedio)}; ${categoria(ventas.at(-1).categoria)} tarda ${dias(ventas.at(-1).dias_promedio)}.`
+    : 'Aquí aparece cuánto tarda cada categoría en venderse cuando haya suficientes ventas.';
+  const tramos = new Map(d.inventario.por_antiguedad.map((x) => [x.tramo, x.valor]));
+  const partes = [
+    { nombre: '0 a 2 semanas', valor: tramos.get('0-2') ?? 0, color: 'var(--acento)' },
+    { nombre: '3 a 4 semanas', valor: tramos.get('3-4') ?? 0, color: 'var(--serie-2)' },
+    { nombre: '5 o más semanas', valor: (tramos.get('5-8') ?? 0) + (tramos.get('9+') ?? 0), color: 'var(--serie-3)' },
+  ];
+  const total = partes.reduce((s, p) => s + p.valor, 0);
+  partes.forEach((p) => { p.texto = `${pct(p.valor, total)} %`; });
+  const filasDias = ventas.map((c) => `<div class="fila"><span>${escapar(categoria(c.categoria))}</span><span>${dias(c.dias_promedio)}</span></div>`).join('');
+  return `<section aria-labelledby="t-mueve"><h2 id="t-mueve" class="seccion">Qué se está moviendo</h2><p class="historia">${historia}</p>
+    ${filasDias ? `<div class="tarjeta" style="gap:12px"><p class="etiqueta">Días que tarda en venderse</p>${filasDias}</div>` : ''}
+    ${total > 0 ? `<div class="tarjeta" style="gap:10px"><p class="etiqueta">Cuánto lleva en el piso (del valor)</p>${leyenda(partes)}</div>` : ''}</section>`;
+}
+
+function seccionClientes(d) {
+  const c = d.clientes;
+  const sinDato = '<span class="nota">Se muestra con 5 o más</span>';
+  const historia = c.regresaron_pct === null
+    ? `Cada compra deja en promedio ${pesos(d.ventas.ticket_promedio)}.`
+    : `Cada compra deja en promedio ${pesos(d.ventas.ticket_promedio)}, y ${c.regresaron_pct} de cada 100 socios Dolarones ya regresó.`;
+  return `<section aria-labelledby="t-clientes"><h2 id="t-clientes" class="seccion">Clientes</h2><p class="historia">${historia}</p>
+    <div class="doble">
+      ${tarjeta('Compras', entero(d.ventas.tickets), '', 'media')}
+      ${tarjeta('Ticket promedio', pesos(d.ventas.ticket_promedio), '', 'media')}
+      ${tarjeta('Socios Dolarones', c.socios === null ? '—' : entero(c.socios), c.socios === null ? sinDato : '', 'media')}
+      ${tarjeta('Regresaron', c.regresaron_pct === null ? '—' : `${c.regresaron_pct} %`, c.regresaron_pct === null ? sinDato : '<span class="nota">Compraron 2 veces o más</span>', 'media')}
+    </div></section>`;
+}
+
+function seccionPublicidad(d) {
+  const p = d.publicidad;
+  const historia = p.gasto > 0
+    ? `Pusimos ${pesos(p.gasto)} en anuncios este mes.${p.ventas_por_peso !== null ? ` Por cada $1 de anuncio vendimos ${pesos(p.ventas_por_peso * 100)} en total.` : ''}`
+    : 'Todavía no hay gasto en anuncios registrado este mes.';
+  return `<section aria-labelledby="t-anuncios"><h2 id="t-anuncios" class="seccion">Publicidad</h2><p class="historia">${historia}</p>
+    <div class="tarjeta"><div class="fila"><span>Gasto en anuncios</span><span>${pesos(p.gasto)}</span></div>
+    <div class="fila"><span>Ventas por cada $1 de anuncio</span><span>${p.ventas_por_peso === null ? '—' : pesos(p.ventas_por_peso * 100)}</span></div></div></section>`;
+}
+
+function seccionGastos(d) {
+  const nombres = { nomina: 'Nómina', renta: 'Renta', otros: 'Otros', publicidad: 'Anuncios' };
+  const colores = { nomina: 'var(--acento)', renta: 'var(--serie-4)', otros: 'var(--serie-5)', publicidad: 'var(--serie-3)' };
+  const items = d.gastos.por_categoria.map((g) => ({ nombre: nombres[g.categoria] ?? g.categoria, valor: g.importe, color: colores[g.categoria] ?? 'var(--serie-2)', texto: pesos(g.importe) }));
+  const mayor = [...items].sort((a, b) => b.valor - a.valor)[0];
+  const historia = d.gastos.total > 0 ? `${mayor.nombre} es el ${pct(mayor.valor, d.gastos.total)} % de los gastos.` : 'Todavía no hay gastos registrados este mes.';
+  return `<section aria-labelledby="t-gastos"><h2 id="t-gastos" class="seccion">A dónde se va el dinero</h2><p class="historia">${historia}</p>
+    ${d.gastos.total > 0 ? `<div class="tarjeta" style="gap:10px">${leyenda(items)}</div>` : ''}</section>`;
+}
+
+const COMO = `<section aria-labelledby="t-como" style="gap:8px"><h2 id="t-como" class="seccion" style="font-size:20px">Cómo se calcula</h2>
+  <div class="tarjeta frase chica" style="gap:10px">
+    <p style="margin:0"><strong>Ventas:</strong> lo cobrado ya sin descuentos, devoluciones ni cancelaciones, solo de la tienda. Cada día va de las 12 a. m. a las 12 a. m., hora de la tienda (centro de México).</p>
+    <p style="margin:0"><strong>Gastos:</strong> los capturados, los pagados desde la caja y la nómina pagada en el mes (pagos y adelantos). Sin desglose por persona.</p>
+    <p style="margin:0"><strong>Ventas − gastos:</strong> las ventas del mes menos todos los gastos. No incluye lo que costó la mercancía.</p>
+    <p style="margin:0"><strong>Meta y ritmo:</strong> la meta del mes repartida entre sus días. «Abajo del ritmo» significa que hoy vamos detrás de esa línea.</p>
+    <p style="margin:0"><strong>Esta semana:</strong> de lunes a hoy, contra la semana anterior hasta el mismo día.</p>
+    <p style="margin:0"><strong>Mercado Libre:</strong> estimado con el precio publicado de las piezas vendidas; no está sumado en las ventas.</p>
+    <p style="margin:0"><strong>Mercancía en el piso:</strong> piezas etiquetadas con existencia, a precio de venta.</p>
+    <p style="margin:0"><strong>Poca historia:</strong> si la semana anterior tuvo menos de 10 ventas, no mostramos porcentaje.</p>
+    <p style="margin:0">Aquí nunca aparecen nombres, teléfonos ni compras de una persona; los grupos de menos de 5 personas no se cuentan.</p>
+  </div></section>`;
+
+function pintar(d) {
+  const sv = d.ventas_menos_gastos;
+  $('contenido').innerHTML = [
+    resumen(d),
+    `<section style="gap:12px" aria-label="Lo más importante">${tarjetaVentas(d)}
+      <div class="doble">
+        ${tarjeta('Gastos del mes', pesos(d.gastos.total), '<p class="frase chica">Nómina, renta, anuncios y otros.</p>', 'media')}
+        ${tarjeta('Ventas − gastos', pesos(sv), '<p class="frase chica">Antes del costo de la mercancía.</p>', 'media')}
+      </div>
+      ${bloqueInventario(d)}</section>`,
+    seccionCanales(d), seccionMovimiento(d), seccionClientes(d), seccionPublicidad(d), seccionGastos(d), COMO,
+  ].join('');
+  $('estado').hidden = true;
+  $('contenido').hidden = false;
+}
+
+try {
+  const r = await fetch('/api/tablero', { cache: 'no-store' });
+  if (!r.ok) throw new Error(r.status === 401 || r.status === 403 ? 'Tu cuenta no tiene acceso a este tablero.' : 'No se pudo cargar el tablero. Intenta de nuevo en unos minutos.');
+  pintar(await r.json());
+} catch (e) {
+  $('estado').textContent = e instanceof Error ? e.message : 'No se pudo cargar el tablero.';
+  $('estado').className = 'error';
+}
+</script>
+</body>
+</html>
