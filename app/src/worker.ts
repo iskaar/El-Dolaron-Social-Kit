@@ -2260,6 +2260,8 @@ async function rutaPortalPublico(request: Request, env: Env, url: URL): Promise<
     '/': '/portal', '/portal': '/portal', '/portal.html': '/portal', '/v': '/portal',
     '/portal.js': '/portal.js', '/portal.css': '/portal.css', '/code128.js': '/code128.js', '/vendor/qrcode-generator.js': '/vendor/qrcode-generator.js',
     '/el-dolaron-logo.png': '/el-dolaron-logo.png',
+    // Manual de la revendedora (#623): práctica con datos de ejemplo, sin API. Importa vender.js (solo funciones puras de texto y fechas).
+    '/manual': '/manual', '/manual.js': '/manual.js', '/vender.js': '/vender.js',
   };
   if (archivos[pathname] && (request.method === 'GET' || request.method === 'HEAD')) {
     const asset = new URL(archivos[pathname], url.origin);

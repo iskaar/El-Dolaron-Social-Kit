@@ -202,10 +202,11 @@ test('allowlist pública sirve sólo portal y assets necesarios; no abre caja, a
     p.env.ASSETS = { async fetch(request: Request) {
       const ruta = new URL(request.url).pathname;
       leidos.push(ruta);
-      return new Response(readFileSync('public/' + (ruta === '/portal' ? 'portal.html' : ruta.slice(1))),
-        { headers:{ 'content-type':ruta === '/portal' ? 'text/html' : 'text/javascript' } });
+      return new Response(readFileSync('public/' + (ruta === '/portal' ? 'portal.html' : ruta === '/manual' ? 'manual.html' : ruta.slice(1))),
+        { headers:{ 'content-type':ruta === '/portal' || ruta === '/manual' ? 'text/html' : 'text/javascript' } });
     } } as unknown as Fetcher;
-    for (const ruta of ['/', '/portal', '/portal.html', '/portal.js', '/portal.css', '/code128.js', '/vendor/qrcode-generator.js', '/el-dolaron-logo.png']) {
+    for (const ruta of ['/', '/portal', '/portal.html', '/portal.js', '/portal.css', '/code128.js', '/vendor/qrcode-generator.js', '/el-dolaron-logo.png',
+      '/manual', '/manual.js', '/vender.js']) {
       const r = await worker.fetch!(new Request('https://portal.prueba' + ruta) as never, p.env, {} as never);
       assert.equal(r.status, 200, ruta);
       assert.equal(r.headers.get('cache-control'), 'no-store');
@@ -214,10 +215,12 @@ test('allowlist pública sirve sólo portal y assets necesarios; no abre caja, a
       assert.ok(cuerpo.length);
     }
     for (const ruta of ['/caja', '/caja.html', '/admin', '/cuentas', '/socios', '/captura',
-      '/cajero.js', '/venta.js', '/api/ventas', '/api/socios/codigo', '/api/socios/vincular',
+      '/cajero.js', '/venta.js', '/vender', '/vender.html', '/manual.html', '/manual/', '/api/vender', '/api/ventas', '/api/socios/codigo', '/api/socios/vincular',
       '/api/foto/123', '/api/portal/llegada', '/foo/portal.html'])
       assert.equal((await p.llamar(ruta, '')).status, 404, ruta);
-    assert.equal(leidos.length, 8);
+    assert.equal(leidos.length, 11);
+    // El manual (#623) sale solo por GET/HEAD.
+    assert.equal((await p.llamar('/manual', '', {}, 'POST')).status, 404);
     assert.equal((await p.llamar('/portal.js', '', {}, 'POST')).status, 404);
     assert.equal((await p.pedir('/api/portal/config')).status, 404);
     const config = await p.llamar('/api/portal/config', '');
