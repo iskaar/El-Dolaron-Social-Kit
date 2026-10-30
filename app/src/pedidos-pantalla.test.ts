@@ -166,7 +166,14 @@ test('abono por transferencia: sin clave o con monto menor el error queda junto 
   assert.equal(memoria.size, 0);
   p.$('mover-monto').value = '60';
   await p.guardar();
+  // El CEP de Banxico pide el banco emisor (#603): sin elegirlo no se envía y el error queda junto a su campo.
+  assert.match(p.$('mover-clave-error').textContent, /Elige el banco/);
+  assert.equal(p.$('mover-banco').enfocado, true);
+  assert.equal(enviados.length, 0);
+  p.$('mover-banco').value = '40012';
+  await p.guardar();
   assert.equal(enviados.length, 1);
+  assert.equal(enviados[0].banco_emisor, '40012');
   assert.equal(enviados[0].clave_rastreo, 'EJEMPLO123456');
   assert.equal(enviados[0].monto_transferido, 6000);
   assert.equal(enviados[0].importe, 5000);
@@ -187,6 +194,7 @@ test('abono: si el servidor rechaza la clave, el cuadro sigue abierto con el err
   p.$('mover-forma').value = 'transferencia';
   p.$('mover-clave').value = 'EJEMPLO123456';
   p.$('mover-monto').value = '50';
+  p.$('mover-banco').value = 'otro';
   await p.guardar();
   assert.match(p.$('mover-clave-error').textContent, /ya se usó en el pedido P-3/);
   assert.equal(memoria.size, 0);                      // nada se registró: no queda intento pendiente

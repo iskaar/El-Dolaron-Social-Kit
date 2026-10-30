@@ -133,6 +133,24 @@ export function transferenciaDe({ clave, transferido, debido }) {
   return { ok: true, clave: normalizada, transferido, aplicado: debido, excedente: transferido - debido };
 }
 
+/**
+ * Banco de donde sale la transferencia (#603): el CEP de Banxico lo pide. Codigo SPEI de 5 digitos = 40 (banco) o 90
+ * (fintech) + el codigo de 3 digitos de la CLABE. La PC de la caja revisa cada codigo contra el catalogo de Banxico
+ * (tools/cep_verificar.py --catalogo); uno que Banxico no conozca nunca se consulta. «otro» = no se verifica sola.
+ */
+export const BANCOS = [
+  ['40012', 'BBVA México'], ['40014', 'Santander'], ['40072', 'Banorte'], ['40002', 'Citibanamex'], ['40021', 'HSBC'],
+  ['40044', 'Scotiabank'], ['40036', 'Inbursa'], ['40058', 'Banregio'], ['40062', 'Afirme'], ['40030', 'BanBajío'],
+  ['40127', 'Azteca'], ['40137', 'BanCoppel'], ['40167', 'Hey Banco'], ['40042', 'Mifel'],
+  ['90638', 'Nu México'], ['90722', 'Mercado Pago'], ['90646', 'STP'], ['90661', 'Klar'], ['90728', 'Spin by OXXO'],
+];
+/** Codigo del banco de lo capturado: '' u «otro» = null (no se verifica sola); un codigo que no esta en la lista = undefined. */
+export const bancoDe = (valor) => {
+  const texto = String(valor ?? '').trim();
+  if (texto === '' || texto === 'otro') return null;
+  return BANCOS.some(([codigo]) => codigo === texto) ? texto : undefined;
+};
+
 /** Viernes en fecha de tienda (YYYY-MM-DD); el jueves a las 20:00 ya pasó el corte. UTC-6 fijo. */
 export function viernesDeEnvio(instante) {
   const local = new Date(new Date(instante).getTime() - 6 * 3_600_000);

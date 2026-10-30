@@ -169,6 +169,8 @@ export function permiso(pathname: string, metodo: string): Regla {
   if (/^\/api\/solicitudes\/[^/]+$/.test(ruta) && metodo === 'GET') return CAJA;   // la caja ve como va la suya
   if (ruta === '/api/ventas' || ruta.startsWith('/api/ventas/')) return CAJA;
   if (ruta === '/api/pedidos' || ruta.startsWith('/api/pedidos/')) return CAJA;   // pedidos por WhatsApp (Issue #269, pedidos.ts)
+  // Dar por buena a mano una transferencia que Banxico no confirmo (#603): solo el dueño, aunque el resto de avisos sea de caja.
+  if (/^\/api\/avisos\/transferencias\/\d+\/validar$/.test(ruta)) return DUENO;
   if (ruta === '/api/avisos' || ruta.startsWith('/api/avisos/')) return CAJA;   // centro de avisos (Issue #429)
   if (ruta === '/api/ayuda') return CAJA;   // botón «Ayuda» (Issue #600); /api/push/* es del dueño, por omisión
   if (ruta === '/api/impresiones' || ruta.startsWith('/api/impresiones/')) return CAJA;
@@ -221,17 +223,16 @@ const comoJson = (b64url: string): Record<string, unknown> =>
   JSON.parse(new TextDecoder().decode(decodificar(b64url)));
 
 /**
- * El correo dentro de un JWT de Access, o null si no es valido: firma RS256 de
- * una llave del equipo, para ESTA aplicacion (aud), del equipo correcto (iss) y
- * vigente. Exportada para probarla con llaves generadas en la prueba.
+ * La carga de un JWT de Access, o null si no es valido: firma RS256 de una llave
+ * del equipo, para ESTA aplicacion (aud), del equipo correcto (iss) y vigente.
  */
-export async function verificarJwt(
+async function verificarCarga(
   token: string,
   aud: string,
   emisor: string,
   llave: (kid: string) => Promise<CryptoKey | undefined>,
-  ahora = Date.now() / 1000,
-): Promise<string | null> {
+  ahora: number,
+): Promise<Record<string, unknown> | null> {
   const partes = token.split('.');
   if (partes.length !== 3) return null;
   let cabecera: Record<string, unknown>;
@@ -258,8 +259,36 @@ export async function verificarJwt(
   if (!auds.includes(aud) || carga.iss !== emisor) return null;
   if (typeof carga.exp !== 'number' || carga.exp < ahora) return null;
   if (typeof carga.nbf === 'number' && carga.nbf > ahora + 60) return null;
-  if (typeof carga.email !== 'string' || !carga.email) return null;
+  return carga;
+}
+
+/** El correo dentro de un JWT de Access de una persona, o null. Exportada para probarla con llaves generadas en la prueba. */
+export async function verificarJwt(
+  token: string,
+  aud: string,
+  emisor: string,
+  llave: (kid: string) => Promise<CryptoKey | undefined>,
+  ahora = Date.now() / 1000,
+): Promise<string | null> {
+  const carga = await verificarCarga(token, aud, emisor, llave, ahora);
+  if (!carga || typeof carga.email !== 'string' || !carga.email) return null;
   return carga.email.toLowerCase();
+}
+
+/**
+ * El Client ID (common_name) de un JWT de Access de un service token, o null. Un token de persona (con correo)
+ * no es un servicio, y un service token nunca pasa por verificarJwt: no lleva correo, asi que no entra a ninguna pantalla.
+ */
+export async function verificarJwtServicio(
+  token: string,
+  aud: string,
+  emisor: string,
+  llave: (kid: string) => Promise<CryptoKey | undefined>,
+  ahora = Date.now() / 1000,
+): Promise<string | null> {
+  const carga = await verificarCarga(token, aud, emisor, llave, ahora);
+  if (!carga || (typeof carga.email === 'string' && carga.email)) return null;
+  return typeof carga.common_name === 'string' && carga.common_name ? carga.common_name : null;
 }
 
 // Las llaves publicas de Access rotan de vez en cuando: se guardan una hora, y
@@ -299,6 +328,19 @@ export async function quienEs(request: Request, env: Env, hostname: string): Pro
   const token = request.headers.get('cf-access-jwt-assertion');
   if (!equipo || !aud || !token) return null;
   return verificarJwt(token, aud, `https://${equipo}`, (kid) => llaveDeAccess(equipo, kid));
+}
+
+/**
+ * El Client ID verificado del service token que hace la peticion, o null (misma verificacion que quienEs).
+ * Solo lo usa /api/cep/* (cep.ts). Con ACCESS_EQUIPO = "local" entra DEV_SERVICIO, sin Access.
+ */
+export async function quienEsServicio(request: Request, env: Env, hostname: string): Promise<string | null> {
+  const equipo: string | undefined = env.ACCESS_EQUIPO;
+  if (equipo === 'local') return env.DEV_SERVICIO || null;
+  const aud = (env.ACCESS_AUD as Record<string, string> | undefined)?.[hostname];
+  const token = request.headers.get('cf-access-jwt-assertion');
+  if (!equipo || !aud || !token) return null;
+  return verificarJwtServicio(token, aud, `https://${equipo}`, (kid) => llaveDeAccess(equipo, kid));
 }
 
 /* ---------- usuarios ---------- */

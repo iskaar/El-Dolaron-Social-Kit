@@ -290,7 +290,7 @@ test('permisos de caja, métodos, PIN de computadora y aislamiento de hosts', as
 test('pedidos prellena pieza y cliente por URL, escapa texto y nunca manda un anticipo automáticamente', async () => {
   const nodos = new Map<string, any>();
   const nodo = () => ({ value: '', textContent: '', innerHTML: '', hidden: true, className: '', firstChild: { textContent: '' },
-    classList: { contains: () => false }, addEventListener() {}, focus() {}, scrollIntoView() {} });
+    classList: { contains: () => false }, addEventListener() {}, focus() {}, scrollIntoView() {}, append() {} });
   const $ = (id: string) => { if (!nodos.has(id)) nodos.set(id, nodo()); return nodos.get(id); };
   const llamadas: string[] = [];
   let limpia = '';
@@ -299,7 +299,7 @@ test('pedidos prellena pieza y cliente por URL, escapa texto y nunca manda un an
   await runInNewContext(`(async () => { ${script} })()`, {
     document: { getElementById: $, querySelector: () => ({ value: 'tienda', checked: true, addEventListener() {} }), querySelectorAll: () => [] },
     location: { search: `?${params}`, pathname: '/pedidos' }, history: { replaceState: (_a: unknown, _b: unknown, url: string) => { limpia = url; } },
-    URLSearchParams, navigator: { onLine: true }, setInterval() {}, localStorage: { getItem: () => null },
+    URLSearchParams, navigator: { onLine: true }, setInterval() {}, localStorage: { getItem: () => null }, Option: class {},
     // Los imports de pedidos.html salen del venta.js real: la regla del anticipo vive ahí (#434).
     ...venta, codigoDeDigitos: () => null,
     fetch: async (url: string, opciones?: unknown) => {

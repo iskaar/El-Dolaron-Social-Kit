@@ -46,6 +46,11 @@
     <button id="activar-push" type="button" class="relleno">Activar notificaciones</button>
     <div id="push-estado" role="status"></div>
   </div>
+  <section id="transferencias" hidden>
+    <h2>Transferencias por validar</h2>
+    <div class="nota">Banxico no confirmó estas transferencias (no la encontró o no coincide con lo capturado). El cobro ya se hizo: revisa el dinero en la cuenta de la tienda y, si llegó, márcala como validada. Solo el dueño puede validarlas.</div>
+    <div id="lista-transferencias" aria-live="polite"></div>
+  </section>
   <h2>Ventas de Mercado Libre por atender</h2>
   <div class="nota">Cada venta se queda aquí hasta que alguien la marca. Se actualiza sola cada 30 segundos.</div>
   <div class="error" id="error" role="alert"></div>
@@ -61,6 +66,7 @@ const h = (tag, attrs = {}, ...hijos) => {
   el.append(...hijos.flat().filter((x) => x != null));
   return el;
 };
+const pesos = (centavos) => `$${(centavos / 100).toLocaleString('es-MX', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 const fecha = (iso) => new Date(iso).toLocaleString('es-MX', { dateStyle: 'medium', timeStyle: 'short' });
 
 /** Qué hacer con la venta y cómo se llama el botón para marcarla. */
@@ -99,14 +105,46 @@ function fila(v) {
           target: '_blank', rel: 'noopener noreferrer' }, 'Ver en ML ↗'))));
 }
 
+// Transferencias que Banxico no confirmó (#603). Validarlas es del dueño; la caja solo las ve.
+let esDueno = false;
+const yoListo = fetch('/api/yo').then((r) => r.json()).then((y) => { esDueno = !!y.usuario?.roles?.includes('dueno'); }).catch(() => {});
+
+async function validar(t, boton) {
+  boton.disabled = true;
+  $('error').textContent = '';
+  try {
+    const r = await fetch(`/api/avisos/transferencias/${t.id}/validar`, { method: 'POST' });
+    if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error ?? `Error ${r.status}`);
+  } catch (error) {
+    $('error').textContent = `No se pudo validar: ${error.message}. Intenta otra vez.`;
+  }
+  await cargar();
+}
+
+function filaTransferencia(t) {
+  const motivo = t.estado === 'no_coincide' ? 'El CEP de Banxico existe pero no coincide con el monto o la cuenta capturados.' : 'Banxico no encontró esta transferencia.';
+  const boton = h('button', { type: 'button', class: 'relleno' }, 'Ya llegó: validar a mano');
+  boton.addEventListener('click', () => validar(t, boton));
+  return h('div', { class: 'venta mal', style: 'grid-template-columns: 1fr' },
+    h('div', {},
+      h('div', { class: 'nombre' }, pesos(t.monto), ' · ', t.donde),
+      h('div', { class: 'nota' }, `Clave ${t.clave} · ${fecha(t.registrado_en)}`),
+      h('div', { class: 'accion' }, motivo),
+      esDueno ? h('div', { class: 'botones' }, boton) : h('div', { class: 'nota' }, 'Lo valida el dueño.')));
+}
+
 async function cargar() {
   try {
+    await yoListo;
     const r = await fetch('/api/avisos');
     if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error ?? `Error ${r.status}`);
-    const { ventas_ml } = await r.json();
+    const { ventas_ml, transferencias = [] } = await r.json();
+    $('transferencias').hidden = transferencias.length === 0;
+    $('lista-transferencias').replaceChildren(...transferencias.map(filaTransferencia));
     $('lista').replaceChildren(...(ventas_ml.length ? ventas_ml.map(fila)
       : [h('div', { class: 'vacio' }, 'Nada por atender.')]));
-    document.title = ventas_ml.length ? `(${ventas_ml.length}) El Dolarón — avisos` : 'El Dolarón — avisos';
+    const por = ventas_ml.length + transferencias.length;
+    document.title = por ? `(${por}) El Dolarón — avisos` : 'El Dolarón — avisos';
   } catch (error) {
     $('error').textContent = `No se pudo leer la lista (${error.message}). Se reintenta sola.`;
   }
