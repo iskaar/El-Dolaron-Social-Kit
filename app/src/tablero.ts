@@ -10,7 +10,6 @@ import { sumarDias } from '../public/graficas.js';
 const MIN_PERSONAS = 5;
 const MIN_VENTAS_COMPARACION = 10;   // con menos tickets en la semana anterior no se muestra porcentaje
 const CACHE_SEGUNDOS = 300;
-const CLAVE_CACHE = 'https://tablero.interno/api/tablero/v1';
 
 const json = (cuerpo: unknown, status = 200) => new Response(JSON.stringify(cuerpo), {
   status, headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' },
@@ -194,7 +193,8 @@ export async function rutaTablero(request: Request, env: Env, ctx: ExecutionCont
   if (request.method !== 'GET') return json({ error: 'Metodo no permitido.' }, 405);
   // Sin `caches` (pruebas locales) se calcula siempre.
   const cache = typeof caches === 'undefined' ? null : (caches as unknown as { default: Cache }).default;
-  const llave = new Request(CLAVE_CACHE);
+  // La cache es de la zona: sandbox y prod comparten viste.com.mx, asi que la llave lleva el host.
+  const llave = new Request(`${new URL(request.url).origin}/api/tablero/cache-v1`);
   const guardado = await cache?.match(llave).catch(() => undefined);
   if (guardado) return json(await guardado.json());
   const cuerpo = await calcularTablero(env);
