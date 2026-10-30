@@ -268,6 +268,11 @@ if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw-caja.js'
       <input id="clave-rastreo" autocomplete="off" autocapitalize="characters" spellcheck="false" maxlength="40" aria-describedby="clave-ayuda clave-error">
       <label for="monto-transferido">Monto transferido ($)</label>
       <input id="monto-transferido" type="number" min="0.01" step="0.01" inputmode="decimal" aria-describedby="clave-ayuda clave-error">
+      <label for="banco-emisor">Banco de donde sale</label>
+      <select id="banco-emisor" aria-describedby="clave-error"><option value="">Elige el banco…</option></select>
+      <label for="comprobante">O sube la foto del comprobante (se llenan solos; tú confirmas)</label>
+      <input id="comprobante" type="file" accept="image/*" aria-describedby="comprobante-aviso">
+      <p id="comprobante-aviso" role="status"></p>
       <p id="clave-ayuda">Viene en el comprobante de tu cliente, igual que el monto. Ejemplo: EJEMPLO1234567890. Cada clave sirve para un solo pago.</p>
       <p id="clave-error" role="alert"></p>
     </div>
@@ -425,7 +430,7 @@ if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw-caja.js'
 </dialog>
 <script type="module">
 import { CATEGORIAS_GASTO } from '/categorias.js';
-import { totales, agregar, leerMultiplicador, efectivoAlcanza, dolaronesGanados, saldoCanjeable, maximoCanje, MINIMO_REGALO, descuentoDe, TOPE_DESCUENTO, DENOMINACIONES, contadoDe, promoInauguracion, letreroPromo, desfaseReloj, anticipoDePedido, transferenciaDe, CLAVE_DESDE } from '/venta.js';
+import { totales, agregar, leerMultiplicador, efectivoAlcanza, dolaronesGanados, saldoCanjeable, maximoCanje, MINIMO_REGALO, descuentoDe, TOPE_DESCUENTO, DENOMINACIONES, contadoDe, promoInauguracion, letreroPromo, desfaseReloj, anticipoDePedido, transferenciaDe, CLAVE_DESDE, BANCOS } from '/venta.js';
 import { abrirCamara } from '/camara.js';
 import {
   reconectarImpresora, conectarImpresora, impresoraLista, imprimirTicket, abrirCajon, explicarErrorUsb, errorImpresora,
@@ -548,14 +553,20 @@ cargarConfigVales();
 $('quitar-promo').addEventListener('click', () => { sinPromo = !sinPromo; pintar(); });
 setInterval(cargarConfigVales, 60000);
 
-/** Issue #429: ventas de Mercado Libre por atender. Sin red o sin PIN se queda como estaba. */
+/**
+ * Issue #429: ventas de Mercado Libre por atender. #603: transferencias que Banxico no confirmó (solo un aviso:
+ * nunca frena un cobro; el dueño las valida en /avisos). Sin red o sin PIN se queda como estaba.
+ */
 async function contarAvisos() {
   try {
     const r = await fetch('/api/avisos');
     if (!r.ok) return;
-    const n = (await r.json()).ventas_ml.length;
-    $('avisos-ml').hidden = n === 0;
-    $('avisos-ml').textContent = `📦 ${n} venta${n === 1 ? '' : 's'} de Mercado Libre por atender`;
+    const { ventas_ml: ml, transferencias = [] } = await r.json();
+    const partes = [];
+    if (ml.length) partes.push(`📦 ${ml.length} venta${ml.length === 1 ? '' : 's'} de Mercado Libre por atender`);
+    if (transferencias.length) partes.push(`⚠ ${transferencias.length} transferencia${transferencias.length === 1 ? '' : 's'} por validar con el dueño`);
+    $('avisos-ml').hidden = partes.length === 0;
+    $('avisos-ml').textContent = partes.join(' · ');
   } catch { /* sin red */ }
 }
 contarAvisos();
@@ -763,7 +774,7 @@ function pintar() {
   const canjeable = saldoCanjeable(socio, t.total);
   const autorizado = !usados || (codigoSocio && usados <= socio.maximo && Date.parse(socio.expira_en) > Date.now());
   $('usar-maximo').disabled = cobrando || !codigoSocio || maximoCanje(socio, t.total) === 0;
-  for (const id of ['codigo', 'socio', 'buscar-socio', 'quitar-socio', 'dolarones', 'efectivo', 'forma', 'cancelar', 'pedir-descuento', 'quitar-descuento', 'quitar-pedido', 'clave-rastreo', 'monto-transferido']) $(id).disabled = cobrando;
+  for (const id of ['codigo', 'socio', 'buscar-socio', 'quitar-socio', 'dolarones', 'efectivo', 'forma', 'cancelar', 'pedir-descuento', 'quitar-descuento', 'quitar-pedido', 'clave-rastreo', 'monto-transferido', 'banco-emisor', 'comprobante']) $(id).disabled = cobrando;
   // Transferencia desde $300 (#593): aparecen la clave de rastreo y el monto del comprobante.
   $('datos-transferencia').hidden = !($('forma').value === 'transferencia' && t.aPagar >= CLAVE_DESDE);
   pintarImpresionRemota();
@@ -1281,10 +1292,18 @@ function preguntarForma(aPagar, efectivo) {
 /** El error de la clave o del monto va junto a sus campos y el foco regresa al que falló. */
 function errorClave(r) {
   $('clave-error').textContent = r.error;
-  $(r.campo === 'monto' ? 'monto-transferido' : 'clave-rastreo').focus();
+  $({ monto: 'monto-transferido', banco: 'banco-emisor' }[r.campo] ?? 'clave-rastreo').focus();
   return false;
 }
-for (const id of ['clave-rastreo', 'monto-transferido']) $(id).addEventListener('input', () => { $('clave-error').textContent = ''; });
+for (const id of ['clave-rastreo', 'monto-transferido', 'banco-emisor']) $(id).addEventListener('input', () => { $('clave-error').textContent = ''; });
+// Foto del comprobante (#603): se llena sola la clave, el monto y el banco; el cajero confirma. Sin red o si falla, a mano como siempre.
+$('comprobante').addEventListener('change', async () => {
+  try { await (await import('/comprobante.js')).adjuntar($('comprobante'), { clave: 'clave-rastreo', monto: 'monto-transferido', banco: 'banco-emisor', aviso: 'comprobante-aviso' }, $); }
+  catch { $('comprobante-aviso').textContent = 'Sin red: escribe la clave, el monto y el banco a mano.'; }
+  $('clave-error').textContent = '';
+});
+// Banxico pide el banco emisor para verificar la transferencia despues (#603); «Otro banco» no se verifica sola.
+$('banco-emisor').append(...[...BANCOS, ['otro', 'Otro banco (no se verifica sola)']].map(([codigo, nombre]) => new Option(nombre, codigo)));
 
 async function cobrar() {
   if (cobrando) return;                 // doble clic: el primero ya va en camino
@@ -1336,6 +1355,7 @@ async function cobrar() {
   if (forma === 'transferencia' && t.aPagar >= CLAVE_DESDE) {
     transf = transferenciaDe({ clave: $('clave-rastreo').value, transferido: Math.round(Number($('monto-transferido').value || 0) * 100), debido: t.aPagar });
     if (!transf.ok) { pintar(); return errorClave(transf); }
+    if (!$('banco-emisor').value) { pintar(); return errorClave({ campo: 'banco', error: 'Elige el banco de donde salió la transferencia (viene en el comprobante).' }); }
   }
   $('clave-error').textContent = '';
 
@@ -1360,7 +1380,8 @@ async function cobrar() {
       promo: promoActual(),
       ...(pedidoCargado ? { pedido_id: pedidoCargado.id, anticipo } : {}),
       ...(imprimirEn ? { imprimir_en: imprimirEn } : {}),
-      ...(transf ? { clave_rastreo: transf.clave, monto_transferido: transf.transferido } : {}),
+      ...(transf ? { clave_rastreo: transf.clave, monto_transferido: transf.transferido, banco_emisor: $('banco-emisor').value } : {}),
+      ...(transf && $('comprobante').dataset?.key ? { comprobante_key: $('comprobante').dataset.key, fecha_comprobante: $('comprobante').dataset.fecha || undefined } : {}),
     };
     let socioTicket = socio && !socio.vale && { numero: socio.numero, ganados: 0, saldo: socio.disponible };
     let excedente = 0;
@@ -1464,7 +1485,8 @@ async function cobrar() {
     pintarDescuento();
     quitarSocio();
     $('efectivo').value = '';
-    $('clave-rastreo').value = ''; $('monto-transferido').value = '';
+    $('clave-rastreo').value = ''; $('monto-transferido').value = ''; $('banco-emisor').value = '';
+    $('comprobante').value = ''; if ($('comprobante').dataset) { $('comprobante').dataset.key = ''; $('comprobante-aviso').textContent = ''; }
     $('forma').value = 'efectivo'; formaElegida = false;      // cada venta empieza en efectivo: la forma anterior descuadraba el corte (#260)
     $('codigo').focus();
     sincronizar();
@@ -2381,7 +2403,7 @@ document.addEventListener('keydown', (e) => {
 });
 
 $('cancelar').addEventListener('click', () => {
-  lineas = []; idVenta = null; pedidoCargado = null; descuento = null; sinPromo = false; pintarDescuento(); quitarSocio(); $('efectivo').value = ''; $('clave-rastreo').value = ''; $('monto-transferido').value = ''; $('clave-error').textContent = ''; $('forma').value = 'efectivo'; formaElegida = false; $('aviso').textContent = 'Venta cancelada';
+  lineas = []; idVenta = null; pedidoCargado = null; descuento = null; sinPromo = false; pintarDescuento(); quitarSocio(); $('efectivo').value = ''; $('clave-rastreo').value = ''; $('monto-transferido').value = ''; $('banco-emisor').value = ''; $('comprobante').value = ''; $('comprobante').dataset.key = ''; $('comprobante-aviso').textContent = ''; $('clave-error').textContent = ''; $('forma').value = 'efectivo'; formaElegida = false; $('aviso').textContent = 'Venta cancelada';
   $('aviso').style.color = '#5b6478'; pintar(); $('codigo').focus();
 });
 

@@ -34,6 +34,10 @@ declare global {
     VAPID_JWK?: string;
     /** Solo `wrangler dev` con `--var ACCESS_EQUIPO:local`: el correo con el que se entra. */
     DEV_USUARIO?: string;
+    /** Client ID del service token de Access de la PC de la caja (#603, cep.ts): lo unico que entra a /api/cep/*. Ausente = cerrado. Secreto: wrangler secret put. */
+    CEP_CLIENT_ID?: string;
+    /** Solo con ACCESS_EQUIPO:local: el Client ID con el que entra la PC de la caja. */
+    DEV_SERVICIO?: string;
     /** Tope por IP a la API del host público (binding ratelimits de wrangler.jsonc). Ausente = sin tope (local, pruebas). */
     LIMITE_PORTAL?: RateLimit;
     /** Host público exacto. Ausente = portal inaccesible. */

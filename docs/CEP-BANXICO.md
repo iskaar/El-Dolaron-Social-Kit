@@ -297,7 +297,7 @@ Decidido por Isaac el 29/10/2026 (todas según la recomendación de la sección 
 
 No hay pagos divididos: una venta tiene una sola forma de pago. Tarjeta y efectivo no piden clave. La liquidación de un paquete que emite el ticket (`ventaDePaquete`) no mueve dinero nuevo y no pide clave. `vender.html` no cambia.
 
-**Qué se guarda.** Tabla `transferencias_spei`: `clave_rastreo` (normalizada), `monto` (centavos que dice el comprobante), `aplicado` (centavos registrados como pago), `origen` (`venta`, `anticipo` o `abono`) con su `venta_id` / `pedido_id` / `movimiento_id`, `verificacion` (`cajero`; el paso 2 podrá poner `banxico`), `registrado_por` y `registrado_en`. Sin banco emisor (no se necesita todavía) y sin datos de la cuenta del cliente.
+**Qué se guarda.** Tabla `transferencias_spei`: `clave_rastreo` (normalizada), `monto` (centavos que dice el comprobante), `aplicado` (centavos registrados como pago), `origen` (`venta`, `anticipo` o `abono`) con su `venta_id` / `pedido_id` / `movimiento_id`, `verificacion` (`cajero`; el paso 2 podrá poner `banxico`), `registrado_por` y `registrado_en`. Sin datos de la cuenta del cliente. El banco emisor se agregó en el paso 2 (migración 062).
 
 **Reglas.**
 
@@ -316,6 +316,66 @@ No hay pagos divididos: una venta tiene una sola forma de pago. Tarjeta y efecti
 2. Prueba gratis de `overrideCaptcha` desde un Worker desplegado en sandbox, temporal y a cargo de Isaac (decisión 5).
 3. Solo si falla la anterior: proveedor tipo Tlaloc, y antes actualizar el aviso de privacidad. Con cualquiera de las dos vías, `verificacion = 'banxico'` y el hash del CEP se agregan en una migración nueva.
 4. Prueba física: caja con transferencia real y `/pedidos` (apartado, abono, revendedora).
+
+---
+
+## Paso 2: la PC de la caja verifica con el CEP (#603)
+
+Decidido por Isaac el 29/10/2026: Banxico exige captcha desde Cloudflare (probado desde un Worker desplegado), pero desde una IP residencial responde sin captcha si no se encadenan consultas (sonda con una transferencia real, mismo día). Por eso la consulta la hace `tools/cep_verificar.py` en la PC de la caja y solo **reporta** a la app. La caja nunca espera esto: la transferencia ya quedó «confirmada por cajero» y la venta no se bloquea.
+
+**Cuándo se consulta a Banxico: al registrar la transferencia, no por reloj** (decisión de Isaac). El Worker no puede llamar a Banxico (captcha desde Cloudflare) ni alcanzar la PC (sin túneles ni servicios nuevos), así que la PC le pregunta a *nuestra* app cada minuto: una lectura autenticada y barata (`GET /api/cep/pendientes`) que casi siempre vuelve vacía. **Sin transferencias pendientes no hay ninguna llamada a Banxico** y el registro del script no escribe nada. Cuando alguien registra una transferencia (caja, anticipo o abono de `/pedidos`, que cubre los pagos de revendedora que registra la tienda: son todos los lugares que escriben `transferencias_spei`), la app la ofrece a partir del minuto de su registro, así que la verificación llega en aproximadamente un minuto. Una transferencia que no aparece se vuelve a ofrecer **una sola vez**, 30 minutos después y con un día menos; nunca en ráfaga.
+
+**Cómo captura quien cobra** (en caja y en `/pedidos`, en cada lugar donde hay transferencia): (a) teclear clave de rastreo, monto y banco de donde sale, o (b) **subir la foto o captura del comprobante**. Con (b), Claude (el mismo binding y secreto del análisis de piezas; ningún proveedor ni dependencia nuevos) lee clave, banco, monto y fecha; la pantalla los pone en sus campos y quien cobra **confirma o corrige** antes de cobrar. Si la lectura falla o no hay red, se teclea como siempre y el cobro nunca se frena. La regla de monto del #596 no cambia (menos se rechaza; más registra solo lo debido). La imagen se guarda en el R2 de siempre bajo `comprobantes/` (sin ruta pública; trae nombres y RFC de terceros): solo el dueño la ve (botón «Ver comprobante» en `/avisos`), nunca va al registro, y no se borra sola. Una foto subida y luego abandonada sin cobrar queda huérfana en R2 (sin datos en la base).
+
+**Fecha de abono.** Es el día de tienda (UTC-6) del registro, o la fecha leída del comprobante **solo si es anterior** (llegó un día antes de registrarse). Una fecha posterior se ignora a propósito: en las transferencias de la tarde el comprobante del banco muestra el siguiente día hábil (la «fecha de operación SPEI»), no el día del abono, y Banxico se busca por el segundo.
+
+**Flujo.**
+
+1. Cada minuto el script pide `GET /api/cep/pendientes`: transferencias con banco emisor en estado `pendiente`, de más de 60 segundos (o, la segunda vez, 30 minutos después de la primera consulta). Cada una trae clave, monto en centavos, banco emisor y la fecha de abono.
+2. Por cada una, **una** consulta a Banxico (`GET /cep/`, catálogo, `valida.do` y, si existe, `descarga.do`), con pausa de 60 s entre transferencias y máximo 5 por corrida. La CLABE y el banco que reciben (Mercado Pago W, 90722) salen de la configuración local, no de la app.
+3. Si Banxico responde captcha, límite o `overrideCaptcha: false`, el script se detiene **sin reportar** esa transferencia y sin reintentar; la siguiente corrida lo vuelve a intentar. Nada de resolver ni evadir captcha.
+4. Reporta `POST /api/cep/resultado` con `encontrada` (monto del CEP en centavos y si la cuenta beneficiaria es la de la tienda) o `no_existe`. **La app decide el estado**: monto y cuenta correctos = `banxico_ok` (y `verificacion = 'banxico'`); algo distinto = `no_coincide`; `no_existe` dos veces (la primera y la segunda, esta con un día menos) = `no_encontrada`. Repetir un reporte no cambia nada; gana el primero.
+5. En `no_coincide` y `no_encontrada` el dueño recibe una notificación push (la del botón «Ayuda», #600) o, sin dispositivo, un correo, con monto y motivo pero **sin clave**. La caja muestra en su barra el aviso «⚠ N transferencias por validar con el dueño» (el mismo lugar de las ventas de ML, solo informativo) y `/avisos` lista cada una; el dueño revisa el dinero en la cuenta y toca «Ya llegó: validar a mano» (`validada_manual`, con quién y cuándo). El cajero no puede validar.
+
+**Estados** (`transferencias_spei.cep_estado`, migración 062): `pendiente`, `banxico_ok`, `no_encontrada`, `no_coincide`, `validada_manual`. Más `cep_intentos`, `cep_ultimo_intento`, `validada_por`, `validada_en`, `comprobante_key` y `fecha_comprobante`.
+
+**Banco emisor.** Banxico lo exige en la consulta y la caja no lo capturaba. La clave de rastreo no lo identifica de forma confiable (el prefijo a veces sí, a veces no), así que ahora la caja y `/pedidos` (anticipo y abono) piden **«Banco de donde sale»** junto a la clave (o lo llena la lectura del comprobante), de una lista corta (`BANCOS` en `public/venta.js`, códigos SPEI de 5 dígitos). «Otro banco» no se verifica sola. Una transferencia sin banco (anterior a la migración o «otro») queda `pendiente` y el script nunca la consulta. El script omite sin consultar un banco que el catálogo de Banxico del día no reconozca; `python -I tools/cep_verificar.py --catalogo` compara la lista de la app con el catálogo (hacerlo una vez al instalar).
+
+**Seguridad.** `POST /api/transferencias/comprobante` es de quien cobra (PIN del cajero incluido); `GET /api/transferencias/:id/comprobante` es solo del dueño. `/api/cep/*` solo acepta el JWT de Access de un **service token** (verificado igual que el de las personas: firma RS256, `aud`, `iss`, vigencia) cuyo `common_name` sea exactamente `CEP_CLIENT_ID`. Sin esa variable, o con otro token, 401. Ese token no trae correo: no entra a ninguna otra pantalla ni API. Una persona, aunque sea el dueño, tampoco entra a `/api/cep/*`.
+
+### Instalación (la hace Isaac, en este orden)
+
+1. **Migración 062**, antes del deploy, primero en sandbox y luego en producción (el comando está en el encabezado de `app/migracion-062-verificacion-cep.sql`).
+2. **Service token de Access** (Cloudflare Zero Trust, Access → Service credentials → Create service token, p. ej. «caja-cep», duración larga). Copia el **Client ID** y el **Client Secret** (el secreto se muestra una sola vez). En la aplicación de Access del host de la tienda agrega una política **Service Auth** que incluya solo ese token (en esa misma aplicación, para que el `aud` coincida). Con eso el token no puede abrir ninguna ruta de la app: el Worker solo le responde en `/api/cep/*`.
+3. **Secreto del Worker**: `cd app && npx wrangler secret put CEP_CLIENT_ID` (pega el Client ID completo, tal como lo muestra Cloudflare; el Worker lo compara con el `common_name` del JWT). Si después de desplegar `/api/cep/pendientes` responde 401 con el token bueno, el `common_name` no es igual al Client ID: se ve en el JWT que llega, no en el repo.
+4. **Deploy** (lo corre Isaac).
+5. **Instalar el script** en la PC de la caja. Solo necesita Python 3 y este repositorio. Crea `%APPDATA%\ElDolaron\cep.json` (fuera del repo; el script se niega a leer uno dentro) con estos campos:
+
+   ```json
+   {
+     "url": "https://<host-de-la-tienda>",
+     "client_id": "<Client ID del service token>",
+     "client_secret": "<Client Secret del service token>",
+     "clabe": "<CLABE de 18 dígitos de la cuenta que recibe>",
+     "banco_receptor": "90722",
+     "pausa_s": 60,
+     "max_por_corrida": 5
+   }
+   ```
+
+   `banco_receptor`, `pausa_s` y `max_por_corrida` son opcionales (valores de arriba; la pausa no baja de 30 s ni son más de 10 por corrida). Revisa: `python -I tools\cep_verificar.py --autoprueba` (sin red) y `python -I tools\cep_verificar.py --catalogo` (una petición a Banxico).
+6. **Tarea programada** (Programador de tareas de Windows), **cada minuto** (solo pregunta a la app; a Banxico solo llama si hay una transferencia nueva). Dos corridas no se pisan (candado `cep.lock` junto a la configuración):
+
+   ```
+   schtasks /Create /TN "ElDolaron CEP" /SC MINUTE /MO 1 /TR "cmd /c python -I C:
+utal
+epo	ools\cep_verificar.py >> %APPDATA%\ElDolaron\cep.log 2>&1"
+   ```
+
+   El registro no lleva CLABE, nombres ni claves completas (solo `...` y los 4 últimos caracteres). Códigos de salida: 0 corrida completa, 2 error, 3 Banxico pidió captcha o puso límite.
+7. **Prueba con una transferencia real**: cobra una transferencia en caja subiendo la foto de su comprobante (y otra tecleando clave y banco), confirma lo que se llenó, y a más tardar a los 2 minutos revisa el registro: la fila debe quedar `banxico_ok`. Para ver el aviso, captura una con una clave inventada y espera ~31 minutos (la segunda consulta usa un día menos): debe llegar la notificación y aparecer en `/avisos` (con «Ver comprobante» si subiste foto) y en la caja.
+
+**Pendiente de prueba física.** La consulta con la fecha de abono y el XML se probaron a mano con una transferencia BBVA → Mercado Pago W (29/10). Falta correr el script programado cada minuto, la lectura de comprobantes con capturas reales de varios bancos (la precisión del modelo no está medida), la notificación en el celular y el aviso en la caja con hardware real.
 
 ---
 

@@ -236,7 +236,7 @@ test('cobro con pedido: espera al servidor, manda anticipo y cobra solo el resto
 });
 
 // Transferencia desde $300 (#593): la caja pide la clave de rastreo y el monto, y el cobro espera al servidor.
-const idToTransferencia = { 'clave-rastreo': ' ejemplo 123456 ', 'monto-transferido': '300' };
+const idToTransferencia = { 'clave-rastreo': ' ejemplo 123456 ', 'monto-transferido': '300', 'banco-emisor': '40012' };
 test('caja: transferencia de $300 o mas sin clave no se cobra; el error queda junto al campo', async () => {
   const c = cobroPedido(async () => { throw new Error('no debe pedir nada'); }, 'transferencia', { sinPedido: true });
   await c.cobrar();
@@ -252,6 +252,16 @@ test('caja: transferencia de $300 o mas sin clave no se cobra; el error queda ju
   assert.equal(poco.$('monto-transferido').enfocado, true);
 });
 
+test('caja: transferencia con clave pero sin banco no se cobra; el error queda junto al campo del banco (#603)', async () => {
+  const c = cobroPedido(async () => { throw new Error('no debe pedir nada'); }, 'transferencia',
+    { sinPedido: true, valores: { ...idToTransferencia, 'banco-emisor': '' } });
+  await c.cobrar();
+  assert.equal(c.enviadas.length, 0);
+  assert.equal(c.guardadas.length, 0);
+  assert.match(c.$('clave-error').textContent, /Elige el banco/);
+  assert.equal(c.$('banco-emisor').enfocado, true);
+});
+
 test('caja: transferencia con clave se manda normalizada, espera al servidor y avisa el excedente; sin red no se encola', async () => {
   const ok = async () => ({ ok: true, status: 201, json: async () => ({ id: 'x', ganados: 0, vale_emitido: null, saldo_pedido: null, excedente_transferencia: 1500 }) });
   const c = cobroPedido(ok, 'transferencia', { sinPedido: true, valores: { ...idToTransferencia, 'monto-transferido': '315' } });
@@ -259,6 +269,7 @@ test('caja: transferencia con clave se manda normalizada, espera al servidor y a
   assert.equal(c.enviadas[0].forma_pago, 'transferencia');
   assert.equal(c.enviadas[0].clave_rastreo, 'EJEMPLO123456');
   assert.equal(c.enviadas[0].monto_transferido, 31500);
+  assert.equal(c.enviadas[0].banco_emisor, '40012');   // el CEP de Banxico lo pide (#603)
   assert.equal(c.guardadas.length, 0);
   assert.match(c.$('aviso').textContent, /Cobrado.*Sobraron 1500 en la transferencia/);
   assert.equal(c.$('clave-rastreo').value, '');   // el siguiente ticket empieza limpio

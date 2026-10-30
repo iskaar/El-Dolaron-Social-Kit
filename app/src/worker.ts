@@ -28,6 +28,8 @@ import {
 } from './cuentas.ts';
 import { cajeroEnTurno, listarCajeros, entrar, salir, ponerPin } from './cajeros.ts';
 import { rutaPush } from './push.ts';
+import { rutaCep, transferenciasPorValidar, validarTransferencia } from './cep.ts';
+import { subirComprobante, verComprobante } from './comprobante.ts';
 import { registrarSocio, buscarSocio, buscarPorCodigo, basesListas, sentenciasDeVenta, saldo } from './dolarones.ts';
 import { registrarCorte, registrarRetiro, rutaTerminal, ultimoCorte, cajaDe } from './corte.ts';
 import { rutaGastos } from './gastos.ts';
@@ -2671,6 +2673,10 @@ export default {
       // Va antes de quienEs; cualquier otra ruta /api/asistente/* responde 404 dentro de rutaAsistente.
       if (pathname.startsWith('/api/asistente/')) return await rutaAsistente(request, env, url);
 
+      // #603: la PC de la caja verifica transferencias con Banxico. Entra solo con su service token de Access
+      // (cep.ts lo verifica); va antes de quienEs porque ese token no trae correo de persona.
+      if (pathname.startsWith('/api/cep/')) return await rutaCep(request, env, url);
+
       // Quien es (JWT de Access verificado) y si su cuenta le deja entrar aqui.
       const regla = permiso(pathname, request.method);
       const acceso = await quienEs(request, env, url.hostname);
@@ -2768,7 +2774,16 @@ export default {
       }
 
       // Centro de avisos (Issue #429): ventas de ML por atender, a nombre del cajero que la marca.
-      if (pathname === '/api/avisos' && request.method === 'GET') return await avisosPendientes(env);
+      if (pathname === '/api/avisos' && request.method === 'GET') {
+        // Ventas de ML + transferencias que Banxico no confirmo (#603): la caja las ve como aviso, el dueño las valida.
+        return json({ ...await (await avisosPendientes(env)).json() as object, transferencias: await transferenciasPorValidar(env) });
+      }
+      // Comprobante de transferencia (#603): leerlo al cobrar (caja) y verlo después (solo el dueño, ya filtrado por permiso()).
+      if (pathname === '/api/transferencias/comprobante' && request.method === 'POST') return await subirComprobante(request, env);
+      const verComp = pathname.match(/^\/api\/transferencias\/(\d+)\/comprobante$/);
+      if (verComp && request.method === 'GET') return await verComprobante(env, Number(verComp[1]));
+      const validarTransf = pathname.match(/^\/api\/avisos\/transferencias\/(\d+)\/validar$/);
+      if (validarTransf && request.method === 'POST') return await validarTransferencia(env, Number(validarTransf[1]), correo);
       const atender = pathname.match(/^\/api\/avisos\/ml\/([^/]+)\/([^/]+)$/);
       if (atender && request.method === 'POST') {
         return await atenderVentaML(env, decodeURIComponent(atender[1]), decodeURIComponent(atender[2]), correo);

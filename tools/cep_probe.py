@@ -67,7 +67,7 @@ def resume_xml(xml: str, monto_centavos: int | None) -> dict:
         "fecha_operacion": raiz.attrib.get("FechaOperacion"),
         "hora": raiz.attrib.get("Hora"),
         "abono_ddmmyyyy_hhmmss": f"{cadena[4]} {cadena[5]}" if len(cadena) > 5 else None,
-        "clave_spei_emisor": raiz.attrib.get("ClaveSPEI"),
+        "institucion_firmante": raiz.attrib.get("ClaveSPEI"),  # quien firma el CDA: la institucion receptora, no la emisora
         "banco_emisor": ord_.attrib.get("BancoEmisor"),
         "banco_receptor": ben.attrib.get("BancoReceptor"),
         "cuenta_ordenante": mask(ord_.attrib.get("Cuenta", "")),
