@@ -364,12 +364,10 @@ Decidido por Isaac el 29/10/2026: Banxico exige captcha desde Cloudflare (probad
    ```
 
    `banco_receptor`, `pausa_s` y `max_por_corrida` son opcionales (valores de arriba; la pausa no baja de 30 s ni son más de 10 por corrida). Revisa: `python -I tools\cep_verificar.py --autoprueba` (sin red) y `python -I tools\cep_verificar.py --catalogo` (una petición a Banxico).
-6. **Tarea programada** (Programador de tareas de Windows), **cada minuto** (solo pregunta a la app; a Banxico solo llama si hay una transferencia nueva). Dos corridas no se pisan (candado `cep.lock` junto a la configuración):
+6. **Tarea programada** (Programador de tareas de Windows), **cada minuto** (solo pregunta a la app; a Banxico solo llama si hay una transferencia nueva). Dos corridas no se pisan (candado `cep.lock` junto a la configuración). El comando supone que `tools\cep_verificar.py` y `tools\cep_probe.py` están en `C:\ElDolaron\tools\`; si el repositorio está en otra carpeta, cambia la ruta:
 
    ```
-   schtasks /Create /TN "ElDolaron CEP" /SC MINUTE /MO 1 /TR "cmd /c python -I C:
-utal
-epo	ools\cep_verificar.py >> %APPDATA%\ElDolaron\cep.log 2>&1"
+   schtasks /Create /TN "ElDolaron CEP" /SC MINUTE /MO 1 /TR "cmd /c python -I C:\ElDolaron\tools\cep_verificar.py >> %APPDATA%\ElDolaron\cep.log 2>&1"
    ```
 
    El registro no lleva CLABE, nombres ni claves completas (solo `...` y los 4 últimos caracteres). Códigos de salida: 0 corrida completa, 2 error, 3 Banxico pidió captcha o puso límite.
