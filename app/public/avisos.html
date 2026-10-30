@@ -130,7 +130,9 @@ function filaTransferencia(t) {
       h('div', { class: 'nombre' }, pesos(t.monto), ' · ', t.donde),
       h('div', { class: 'nota' }, `Clave ${t.clave} · ${fecha(t.registrado_en)}`),
       h('div', { class: 'accion' }, motivo),
-      esDueno ? h('div', { class: 'botones' }, boton) : h('div', { class: 'nota' }, 'Lo valida el dueño.')));
+      esDueno ? h('div', { class: 'botones' }, boton,
+        t.comprobante ? h('a', { class: 'boton', href: `/api/transferencias/${t.id}/comprobante`, target: '_blank', rel: 'noopener noreferrer' }, 'Ver comprobante ↗') : null)
+        : h('div', { class: 'nota' }, 'Lo valida el dueño.')));
 }
 
 async function cargar() {

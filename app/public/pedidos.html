@@ -148,6 +148,9 @@
           <input id="monto-transf" type="number" min="0.01" step="0.01" inputmode="decimal" aria-describedby="clave-ayuda clave-error">
           <label for="banco">Banco de donde sale</label>
           <select id="banco" aria-describedby="clave-error"><option value="">Elige el banco…</option></select>
+          <label for="comprobante">O sube la foto del comprobante (se llenan solos; tú confirmas)</label>
+          <input id="comprobante" type="file" accept="image/*" aria-describedby="comprobante-aviso">
+          <div class="nota" id="comprobante-aviso" role="status"></div>
           <div class="nota" id="clave-ayuda">Viene en el comprobante de tu cliente, igual que el monto. Ejemplo: EJEMPLO1234567890. Cada clave sirve para un solo pago.</div>
           <div class="aviso error" id="clave-error" role="alert"></div>
         </div>
@@ -206,6 +209,9 @@
         <input id="mover-monto" type="number" min="0.01" step="0.01" inputmode="decimal" aria-describedby="mover-ayuda mover-clave-error">
         <label for="mover-banco">Banco de donde sale</label>
         <select id="mover-banco" aria-describedby="mover-clave-error"><option value="">Elige el banco…</option></select>
+        <label for="mover-comprobante">O sube la foto del comprobante (se llenan solos; tú confirmas)</label>
+        <input id="mover-comprobante" type="file" accept="image/*" aria-describedby="mover-comprobante-aviso">
+        <div class="nota" id="mover-comprobante-aviso" role="status"></div>
         <p class="nota" id="mover-ayuda">Viene en el comprobante de tu cliente, igual que el monto. Ejemplo: EJEMPLO1234567890. Cada clave sirve para un solo pago.</p>
         <div class="aviso error" id="mover-clave-error" role="alert"></div>
       </div>
@@ -244,10 +250,21 @@ function errorTransferencia(avisoId, claveId, montoId, r, bancoId) {
   decir(avisoId, r.error, 'error');
   $({ monto: montoId, banco: bancoId }[r.campo] ?? claveId).focus();
 }
+/** La foto del comprobante que leyó el servidor (#603): su llave y la fecha, para mandarlas al guardar. */
+const adjunto = (id) => ($(id).dataset?.key ? { comprobante_key: $(id).dataset.key, fecha_comprobante: $(id).dataset.fecha || undefined } : {});
+const limpiarAdjunto = (id) => { $(id).value = ''; if ($(id).dataset) { $(id).dataset.key = ''; $(id).dataset.fecha = ''; } };
 const avisoExcedente = (excedente) => excedente > 0
   ? `Sobraron ${pesos(excedente)} en la transferencia: solo se registró lo debido. El excedente se resuelve a mano con el dueño.` : '';
 // Banxico pide el banco emisor para verificar la transferencia despues (#603); «Otro banco» no se verifica sola.
 for (const id of ['banco', 'mover-banco']) $(id).append(...[...BANCOS, ['otro', 'Otro banco (no se verifica sola)']].map(([codigo, nombre]) => new Option(nombre, codigo)));
+// Foto del comprobante (#603): se llena sola la clave, el monto y el banco; quien cobra confirma. Sin red o si falla, a mano como siempre.
+for (const [id, ids] of [['comprobante', { clave: 'clave', monto: 'monto-transf', banco: 'banco', aviso: 'comprobante-aviso' }],
+  ['mover-comprobante', { clave: 'mover-clave', monto: 'mover-monto', banco: 'mover-banco', aviso: 'mover-comprobante-aviso' }]]) {
+  $(id).addEventListener('change', async () => {
+    try { await (await import('/comprobante.js')).adjuntar($(id), ids, $); }
+    catch { $(ids.aviso).textContent = 'Sin red: escribe la clave, el monto y el banco a mano.'; }
+  });
+}
 
 /* ---------- que caja es esta computadora: la misma que recuerda /caja ---------- */
 
@@ -421,7 +438,7 @@ $('form-apartado').addEventListener('submit', async (e) => {
   if (cuerpo.forma_pago === 'transferencia') {
     const transf = leerTransferencia('clave', 'monto-transf', c.anticipo, 'banco');
     if (!transf.ok) { enviando = false; validar(); return errorTransferencia('clave-error', 'clave', 'monto-transf', transf, 'banco'); }
-    Object.assign(cuerpo, { clave_rastreo: transf.clave, monto_transferido: transf.transferido, banco_emisor: $('banco').value });
+    Object.assign(cuerpo, { clave_rastreo: transf.clave, monto_transferido: transf.transferido, banco_emisor: $('banco').value, ...adjunto('comprobante') });
   }
   let r, datos;
   try {
@@ -450,6 +467,7 @@ function mostrarListo(p, forma, excedente = 0) {
   piezas = [];
   anticipoTocado = false;
   for (const id of ['cliente', 'telefono', 'clave', 'monto-transf', 'banco']) $(id).value = '';
+  limpiarAdjunto('comprobante'); $('comprobante-aviso').textContent = '';
   document.querySelector('input[name="entrega"][value="tienda"]').checked = true;
   $('forma').value = 'transferencia';
   mostrarTransferencia();
@@ -636,13 +654,14 @@ function abrirMovimiento(folio, tipo) {
     : `${movimiento.cuerpo.cantidad} pieza(s) · ${movimiento.cuerpo.producto_id}`}.` : `${p.cliente} · falta ${pesos(p.faltante)}.`;
   $('mover-pieza').hidden = movimiento.tipo !== 'pieza';
   $('mover-abono').hidden = movimiento.tipo !== 'abono';
-  for (const id of ['mover-codigo', 'mover-cantidad', 'mover-importe', 'mover-forma', 'mover-clave', 'mover-monto', 'mover-banco']) $(id).disabled = pendiente;
+  for (const id of ['mover-codigo', 'mover-cantidad', 'mover-importe', 'mover-forma', 'mover-clave', 'mover-monto', 'mover-banco', 'mover-comprobante']) $(id).disabled = pendiente;
   decir('mover-clave-error', '');
   if (!pendiente) {
     $('mover-codigo').value = '';
     $('mover-cantidad').value = '1';
     $('mover-importe').value = String(p.faltante / 100);
     for (const id of ['mover-clave', 'mover-monto', 'mover-banco']) $(id).value = '';
+    limpiarAdjunto('mover-comprobante'); $('mover-comprobante-aviso').textContent = '';
   } else if (movimiento.tipo === 'abono') {
     // El intento pendiente conserva su ID y su cuerpo: se muestran tal cual para ver qué se reintenta.
     $('mover-forma').value = movimiento.cuerpo.forma_pago;
@@ -686,7 +705,7 @@ $('form-mover').addEventListener('submit', async (e) => {
       if (cuerpo.forma_pago === 'transferencia') {
         const transf = leerTransferencia('mover-clave', 'mover-monto', importe, 'mover-banco');
         if (!transf.ok) return errorTransferencia('mover-clave-error', 'mover-clave', 'mover-monto', transf, 'mover-banco');
-        Object.assign(cuerpo, { clave_rastreo: transf.clave, monto_transferido: transf.transferido, banco_emisor: $('mover-banco').value });
+        Object.assign(cuerpo, { clave_rastreo: transf.clave, monto_transferido: transf.transferido, banco_emisor: $('mover-banco').value, ...adjunto('mover-comprobante') });
       }
     }
     const intento = { ...movimiento, cuerpo };
@@ -696,7 +715,7 @@ $('form-mover').addEventListener('submit', async (e) => {
   }
   moviendo = true;
   $('mover-guardar').disabled = true;
-  for (const id of ['mover-codigo', 'mover-cantidad', 'mover-importe', 'mover-forma', 'mover-clave', 'mover-monto', 'mover-banco']) $(id).disabled = true;
+  for (const id of ['mover-codigo', 'mover-cantidad', 'mover-importe', 'mover-forma', 'mover-clave', 'mover-monto', 'mover-banco', 'mover-comprobante']) $(id).disabled = true;
   const intento = movimiento;
   let r, datos;
   try {
@@ -717,7 +736,7 @@ $('form-mover').addEventListener('submit', async (e) => {
     try { localStorage.removeItem(CLAVE_MOVIMIENTO); } catch { /* el ID viejo ya no se reutiliza */ }
     movimiento = { folio: intento.folio, tipo: intento.tipo, cuerpo: null };
     $('recuperar-movimiento').hidden = true;
-    for (const id of ['mover-codigo', 'mover-cantidad', 'mover-importe', 'mover-forma', 'mover-clave', 'mover-monto', 'mover-banco']) $(id).disabled = false;
+    for (const id of ['mover-codigo', 'mover-cantidad', 'mover-importe', 'mover-forma', 'mover-clave', 'mover-monto', 'mover-banco', 'mover-comprobante']) $(id).disabled = false;
     $('mover-guardar').disabled = false;
     $('mover-guardar').textContent = 'Guardar';
     return errorTransferencia('mover-clave-error', 'mover-clave', 'mover-monto', datos, 'mover-banco');

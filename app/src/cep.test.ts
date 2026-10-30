@@ -7,6 +7,8 @@ import { DatabaseSync } from 'node:sqlite';
 import { tienda, PRODUCTO, DUENO, datosTransferencia } from './prueba-d1.ts';
 import { verificarJwt, verificarJwtServicio, permiso, puede } from './cuentas.ts';
 import { bancoDe } from '../public/venta.js';
+import worker from './worker.ts';
+import { depurarLectura } from './comprobante.ts';
 
 const SERVICIO = 'servicio-pc-prueba.access';
 const BBVA = '40012';
@@ -30,7 +32,7 @@ async function transferencia(t: Tienda, extra: Record<string, unknown> = { banco
     caja: 'Caja 1', promo: 0, ...datosTransferencia(50000), ...extra });
   assert.equal(r.status, 201, JSON.stringify(r.cuerpo));
   const fila = t.db.prepare('select id from transferencias_spei order by id desc limit 1').get() as { id: number };
-  // Banxico tarda en tener el CEP: por omision la transferencia ya tiene mas de 10 minutos.
+  // La primera consulta espera un minuto a que el CEP exista: por omision la transferencia ya tiene mas de eso.
   t.db.prepare('update transferencias_spei set registrado_en = ? where id = ?').run(registradoEn ?? new Date(Date.now() - 20 * 60_000).toISOString(), fila.id);
   return fila.id;
 }
@@ -137,13 +139,13 @@ test('la ruta de validar a mano es solo del dueno en el mapa de permisos', () =>
 
 /* ---------- pendientes ---------- */
 
-test('pendientes: con banco, de mas de 10 minutos, con la fecha de ABONO en hora de tienda y el intento que toca', async () => {
+test('pendientes: con banco, de mas de un minuto, con la fecha de ABONO en hora de tienda y el intento que toca', async () => {
   const t = conServicio();
   // 02:00 UTC del 30/10 = 20:00 del 29/10 en la tienda (UTC-6): se busca el 29.
   const noche = await transferencia(t, { banco_emisor: BBVA }, '2026-10-30T02:00:00.000Z');
-  await transferencia(t, { banco_emisor: BBVA }, hace(3));
+  await transferencia(t, { banco_emisor: BBVA }, new Date(Date.now() - 20_000).toISOString());
   const { cuerpo } = await t.pedir('/api/cep/pendientes');
-  assert.deepEqual(cuerpo.transferencias.map((x: any) => x.id), [noche]);   // la de 3 minutos todavia no
+  assert.deepEqual(cuerpo.transferencias.map((x: any) => x.id), [noche]);   // la de 20 segundos todavia no
   const x = cuerpo.transferencias[0];
   assert.equal(x.fecha, '2026-10-29');
   assert.equal(x.monto, 50000);
@@ -152,10 +154,12 @@ test('pendientes: con banco, de mas de 10 minutos, con la fecha de ABONO en hora
   assert.match(x.clave, /^PRUEBA\d{10}$/);
   assert.equal(Object.keys(x).sort().join(), 'banco_emisor,clave,fecha,id,intento,monto');   // sin CLABE, nombres ni quien la capturo
 
-  // Segunda y ultima consulta: el dia anterior, y no antes de 10 minutos de la primera.
+  // Segunda y ultima consulta: el dia anterior, y no antes de 30 minutos de la primera.
   assert.equal((await reportar(t, { id: noche, intento: 1, estado: 'no_existe' })).cuerpo.estado, 'pendiente');
   assert.deepEqual((await t.pedir('/api/cep/pendientes')).cuerpo.transferencias, []);
-  t.db.prepare('update transferencias_spei set cep_ultimo_intento = ? where id = ?').run(hace(11), noche);
+  t.db.prepare('update transferencias_spei set cep_ultimo_intento = ? where id = ?').run(hace(29), noche);
+  assert.deepEqual((await t.pedir('/api/cep/pendientes')).cuerpo.transferencias, []);   // 29 minutos: todavia no
+  t.db.prepare('update transferencias_spei set cep_ultimo_intento = ? where id = ?').run(hace(31), noche);
   const otra = (await t.pedir('/api/cep/pendientes')).cuerpo.transferencias[0];
   assert.deepEqual([otra.id, otra.fecha, otra.intento], [noche, '2026-10-28', 2]);
 });
@@ -292,7 +296,7 @@ test('Avisos trae las transferencias por validar para la caja; validar a mano es
   const vista = (await t.pedir('/api/avisos')).cuerpo;
   assert.deepEqual(vista.ventas_ml, []);
   assert.equal(vista.transferencias.length, 1);
-  assert.deepEqual(Object.keys(vista.transferencias[0]).sort(), ['clave', 'donde', 'estado', 'id', 'monto', 'registrado_en']);
+  assert.deepEqual(Object.keys(vista.transferencias[0]).sort(), ['clave', 'comprobante', 'donde', 'estado', 'id', 'monto', 'registrado_en']);
   assert.equal(vista.transferencias[0].estado, 'no_coincide');
   assert.match(vista.transferencias[0].donde, /^Ticket [0-9A-F]{8}$/);
   const intento = await t.pedir(`/api/avisos/transferencias/${id}/validar`, {});
@@ -336,4 +340,108 @@ test('el banco emisor tambien se guarda en el anticipo y en el abono de /pedidos
   assert.equal(abono.status, 200, JSON.stringify(abono.cuerpo));
   const filas = t.db.prepare('select origen, banco_emisor, cep_estado from transferencias_spei order by id').all();
   assert.deepEqual(filas.map((f: any) => [f.origen, f.banco_emisor, f.cep_estado]), [['anticipo', '90722', 'pendiente'], ['abono', BBVA, 'pendiente']]);
+});
+
+/* ---------- fecha de abono con comprobante ---------- */
+
+test('la fecha de la consulta: la del comprobante solo si es ANTERIOR al dia de registro; una posterior (siguiente dia habil) se ignora', async () => {
+  const t = conServicio();
+  // Registro: 29/10 a las 18:38 en la tienda (00:38Z del 30).
+  const registro = '2026-10-30T00:38:00.000Z';
+  const noche = await transferencia(t, { banco_emisor: BBVA, fecha_comprobante: '2026-10-30' }, registro);   // el comprobante dice 30/10: operacion SPEI del dia siguiente
+  const ayer = await transferencia(t, { banco_emisor: BBVA, fecha_comprobante: '2026-10-28' }, registro);    // llego antes de registrarse
+  const sin = await transferencia(t, { banco_emisor: BBVA }, registro);
+  const rara = await transferencia(t, { banco_emisor: BBVA, fecha_comprobante: 'ayer' }, registro);          // basura: ni se guarda
+  const fechas = Object.fromEntries((await t.pedir('/api/cep/pendientes')).cuerpo.transferencias.map((x: any) => [x.id, x.fecha]));
+  assert.deepEqual(fechas, { [noche]: '2026-10-29', [ayer]: '2026-10-28', [sin]: '2026-10-29', [rara]: '2026-10-29' });
+  assert.equal(fila(t.db, rara).fecha_comprobante, null);
+  assert.equal(fila(t.db, ayer).fecha_comprobante, '2026-10-28');
+});
+
+/* ---------- comprobante: foto, lectura y privacidad ---------- */
+
+const JPEG = new Uint8Array([0xff, 0xd8, 0xff, 0xd9]);
+const subir = async (t: Tienda, cuerpo: BodyInit = JPEG, tipo = 'image/jpeg') => {
+  const r = await worker.fetch!(new Request('https://caja.prueba/api/transferencias/comprobante', { method: 'POST', headers: { 'content-type': tipo }, body: cuerpo }) as never, t.env, t.ctx as never);
+  return { status: r.status, cuerpo: (await r.json().catch(() => ({}))) as Record<string, any> };
+};
+const verFoto = async (t: Tienda, id: number) => worker.fetch!(new Request(`https://caja.prueba/api/transferencias/${id}/comprobante`) as never, t.env, t.ctx as never);
+
+/** El modelo simulado: responde como la API de mensajes de Anthropic con el JSON dado. */
+function conModelo(t: Tienda, lectura: Record<string, unknown> | 'falla', capturado: { cuerpos: any[] } = { cuerpos: [] }) {
+  (t.env as any).ANTHROPIC_API_KEY = 'prueba';
+  const original = globalThis.fetch;
+  globalThis.fetch = (async (_url: string, init: RequestInit) => {
+    capturado.cuerpos.push(JSON.parse(String(init.body)));
+    if (lectura === 'falla') return new Response('{"error":{"type":"api_error","message":"x"}}', { status: 500 });
+    return new Response(JSON.stringify({ id: 'msg_1', type: 'message', role: 'assistant', model: 'x', stop_reason: 'end_turn',
+      content: [{ type: 'text', text: JSON.stringify(lectura) }], usage: { input_tokens: 1, output_tokens: 1 } }), { headers: { 'content-type': 'application/json' } });
+  }) as typeof fetch;
+  test.after(() => { globalThis.fetch = original; });
+  return capturado;
+}
+
+test('subir el comprobante: se guarda en R2 sin ruta publica y el modelo devuelve clave, banco, monto y fecha ya depurados', async () => {
+  const t = conServicio();
+  const visto = conModelo(t, { clave_rastreo: ' ejemplo 123456 ', banco_emisor: BBVA, monto_mxn: 500, fecha: '2026-10-29' });
+  const r = await subir(t);
+  assert.equal(r.status, 200);
+  assert.match(r.cuerpo.key, /^comprobantes\/[0-9a-f-]{36}\.jpg$/);
+  assert.deepEqual(r.cuerpo.lectura, { clave: 'EJEMPLO123456', banco_emisor: BBVA, monto: 50000, fecha: '2026-10-29' });
+  assert.ok(t.env.FOTOS.get(r.cuerpo.key));
+  // La imagen sale al modelo como imagen y el prompt le ofrece los codigos de banco; nada se pide a otro proveedor.
+  assert.equal(visto.cuerpos.length, 1);
+  assert.equal(visto.cuerpos[0].messages[0].content[0].type, 'image');
+  assert.match(visto.cuerpos[0].system, /40012 = BBVA/);
+  // No hay ruta publica ni de foto de piezas que la sirva.
+  assert.notEqual((await t.pedir(`/api/foto/${r.cuerpo.key.slice(13, 49)}`)).status, 200);
+});
+
+test('lectura depurada: lo que no pasa las reglas de la captura a mano se deja vacio', () => {
+  assert.deepEqual(depurarLectura({ clave_rastreo: 'AB', banco_emisor: '99999', monto_mxn: -3, fecha: 'hoy' }), { clave: '', banco_emisor: '', monto: 0, fecha: '' });
+  assert.deepEqual(depurarLectura({ clave_rastreo: 'ñandú 12345', banco_emisor: '', monto_mxn: 10.555, fecha: '2026-10-29' }).clave, '');
+  assert.equal(depurarLectura({ clave_rastreo: 'CLAVE123456', banco_emisor: '', monto_mxn: 19.99, fecha: '' }).monto, 1999);
+});
+
+test('si el modelo falla o no hay llave, la foto se guarda igual y la captura sigue a mano; una imagen invalida se rechaza', async () => {
+  const t = conServicio();
+  delete (t.env as any).ANTHROPIC_API_KEY;
+  const sinLlave = await subir(t);
+  assert.deepEqual([sinLlave.status, sinLlave.cuerpo.lectura], [200, null]);
+  assert.match(sinLlave.cuerpo.key, /^comprobantes\//);
+  conModelo(t, 'falla');
+  const falla = await subir(t);
+  assert.deepEqual([falla.status, falla.cuerpo.lectura], [200, null]);
+  assert.equal((await subir(t, 'no soy una imagen', 'text/plain')).status, 415);
+  assert.equal((await subir(t, new Uint8Array(0))).status, 413);
+  assert.equal((await subir(t, new Uint8Array(4 * 1024 * 1024 + 1))).status, 413);
+});
+
+test('el comprobante se guarda con la transferencia; solo el dueno lo ve y el cajero ve apenas que existe', async () => {
+  const t = conServicio();
+  conModelo(t, { clave_rastreo: '', banco_emisor: '', monto_mxn: 0, fecha: '' });
+  const { key } = (await subir(t)).cuerpo;
+  const id = await transferencia(t, { banco_emisor: BBVA, comprobante_key: key });
+  assert.equal(fila(t.db, id).comprobante_key, key);
+  // Una llave inventada o de otra carpeta no se guarda.
+  const otra = await transferencia(t, { banco_emisor: BBVA, comprobante_key: 'fotos/ajena.jpg' });
+  assert.equal(fila(t.db, otra).comprobante_key, null);
+
+  await reportar(t, { id, intento: 1, estado: 'encontrada', monto_cep: 1, cuenta_ok: true });
+  assert.equal((await t.pedir('/api/avisos')).cuerpo.transferencias[0].comprobante, true);
+  const foto = await verFoto(t, id);
+  assert.equal(foto.status, 200);
+  assert.equal(foto.headers.get('content-type'), 'image/jpeg');
+  assert.match(foto.headers.get('cache-control') ?? '', /no-store/);
+  assert.equal((await verFoto(t, otra)).status, 404);
+
+  t.db.prepare("insert into usuarios(correo, nombre, roles, activo, creado_en, actualizado_en) values ('cajero@prueba.mx', 'Cajero', 'cajero', 1, '', '')").run();
+  t.env.DEV_USUARIO = 'cajero@prueba.mx';
+  assert.equal((await verFoto(t, id)).status, 403);
+  // Pero el cajero si puede subir el suyo al cobrar.
+  assert.equal((await subir(t)).status, 200);
+  // Y una cuenta sin rol de caja (capturista) no.
+  t.db.prepare("insert into usuarios(correo, nombre, roles, activo, creado_en, actualizado_en) values ('cap@prueba.mx', 'Cap', 'capturista', 1, '', '')").run();
+  t.env.DEV_USUARIO = 'cap@prueba.mx';
+  assert.equal((await subir(t)).status, 403);
 });

@@ -4,9 +4,15 @@ Corre en la PC de la caja (Windows, Programador de tareas). Solo biblioteca esta
 Cloudflare, pero no desde una IP residencial si no se encadenan consultas: por eso la consulta se hace aqui y el
 resultado se reporta a la app. La app decide el estado, avisa al dueno y le deja validar a mano.
 
+Se programa cada MINUTO (Programador de tareas), pero eso es solo preguntarle a la app si hay algo nuevo: una lectura barata
+que casi siempre vuelve vacia. A Banxico solo se llama cuando alguien registro una transferencia (la app la ofrece a partir del
+minuto de su registro); sin pendientes, cero llamadas a Banxico y el registro no escribe nada.
+
 Cada corrida: pide a la app las transferencias pendientes, hace UNA consulta a Banxico por transferencia (con la fecha
-de ABONO que la app indica, no la fecha de operacion SPEI), con pausa entre una y otra, y reporta. Si Banxico pide imagen
-de seguridad o dice limite, se detiene SIN reportar y SIN reintentar ni evadir nada: la siguiente corrida lo vuelve a intentar.
+de ABONO que la app indica, no la fecha de operacion SPEI), con pausa entre una y otra, y reporta. Una transferencia que no
+aparece se vuelve a ofrecer UNA sola vez, 30 minutos despues y con un dia menos; despues la app la marca para el dueno. Si Banxico
+pide imagen de seguridad o dice limite, se detiene SIN reportar y SIN reintentar ni evadir nada: la siguiente corrida lo vuelve a intentar.
+Dos corridas no se pisan: un candado (cep.lock junto a la configuracion) hace que la segunda salga sin hacer nada.
 
 La configuracion (URL de la app, service token de Access, CLABE y banco que reciben) vive FUERA del repositorio:
 %APPDATA%\\ElDolaron\\cep.json (o la ruta de la variable ELD_CEP_CONFIG). Formato y pasos: docs/CEP-BANXICO.md.
@@ -166,8 +172,7 @@ def corre(cfg: dict, api, nueva_sesion, dormir=time.sleep, log=print) -> int:
         log(f"no se pudo pedir las pendientes a la app: {e}")
         return 2
     if not pendientes:
-        log("sin transferencias por verificar")
-        return 0
+        return 0  # callado: corre cada minuto
     codigo = 0
     for n, item in enumerate(pendientes[: cfg["max_por_corrida"]]):
         if n:
@@ -193,6 +198,23 @@ def corre(cfg: dict, api, nueva_sesion, dormir=time.sleep, log=print) -> int:
             log(f"{etiqueta}: error {type(e).__name__}: {e}. Me detengo.")
             return 2
     return codigo
+
+
+CANDADO_VENCE = 30 * 60  # una corrida muerta no deja la verificacion atorada
+
+
+def toma_candado(ruta: Path) -> bool:
+    """True si esta corrida puede seguir; False si hay otra en curso (candado de menos de 30 minutos)."""
+    try:
+        if time.time() - ruta.stat().st_mtime > CANDADO_VENCE:
+            ruta.unlink()
+    except FileNotFoundError:
+        pass
+    try:
+        os.close(os.open(ruta, os.O_CREAT | os.O_EXCL | os.O_WRONLY))
+        return True
+    except FileExistsError:
+        return False
 
 
 def bancos_de_la_app() -> list[tuple[str, str]]:
@@ -242,6 +264,14 @@ def autoprueba() -> int:
         assert "FUERA" in str(e)
     else:
         raise AssertionError("debio rechazar una configuracion dentro del repositorio")
+
+    # Candado: la segunda corrida sale; uno viejo se reemplaza.
+    with tempfile.TemporaryDirectory() as d:
+        candado = Path(d) / "cep.lock"
+        assert toma_candado(candado) and not toma_candado(candado)
+        viejo = time.time() - CANDADO_VENCE - 5
+        os.utime(candado, (viejo, viejo))
+        assert toma_candado(candado)
 
     assert ddmmyyyy("2026-10-29") == "29-10-2026"
     xml = ('<SPEI_Tercero><Beneficiario BancoReceptor="B" Cuenta="%s" MontoPago="5000.00"/><Ordenante BancoEmisor="A" Cuenta="999999999999999999"/></SPEI_Tercero>' % clabe)
@@ -332,13 +362,19 @@ def main() -> int:
     except ConfigError as e:
         print(f"configuracion: {e}")
         return 2
-    try:
-        if a.catalogo:
+    if a.catalogo:
+        try:
             return catalogo(cfg["banco_receptor"])
+        except (urllib.error.URLError, TimeoutError, json.JSONDecodeError, KeyError) as e:
+            print(f"error: {type(e).__name__}: {e}")
+            return 2
+    candado = ruta_config().with_name("cep.lock")
+    if not toma_candado(candado):
+        return 0  # otra corrida sigue en curso
+    try:
         return corre(cfg, Api(cfg), sonda.Sesion)
-    except (urllib.error.URLError, TimeoutError, json.JSONDecodeError, KeyError) as e:
-        print(f"error: {type(e).__name__}: {e}")
-        return 2
+    finally:
+        candado.unlink(missing_ok=True)
 
 
 if __name__ == "__main__":

@@ -29,6 +29,7 @@ import {
 import { cajeroEnTurno, listarCajeros, entrar, salir, ponerPin } from './cajeros.ts';
 import { rutaPush } from './push.ts';
 import { rutaCep, transferenciasPorValidar, validarTransferencia } from './cep.ts';
+import { subirComprobante, verComprobante } from './comprobante.ts';
 import { registrarSocio, buscarSocio, buscarPorCodigo, basesListas, sentenciasDeVenta, saldo } from './dolarones.ts';
 import { registrarCorte, registrarRetiro, rutaTerminal, ultimoCorte, cajaDe } from './corte.ts';
 import { rutaGastos } from './gastos.ts';
@@ -2777,6 +2778,10 @@ export default {
         // Ventas de ML + transferencias que Banxico no confirmo (#603): la caja las ve como aviso, el dueño las valida.
         return json({ ...await (await avisosPendientes(env)).json() as object, transferencias: await transferenciasPorValidar(env) });
       }
+      // Comprobante de transferencia (#603): leerlo al cobrar (caja) y verlo después (solo el dueño, ya filtrado por permiso()).
+      if (pathname === '/api/transferencias/comprobante' && request.method === 'POST') return await subirComprobante(request, env);
+      const verComp = pathname.match(/^\/api\/transferencias\/(\d+)\/comprobante$/);
+      if (verComp && request.method === 'GET') return await verComprobante(env, Number(verComp[1]));
       const validarTransf = pathname.match(/^\/api\/avisos\/transferencias\/(\d+)\/validar$/);
       if (validarTransf && request.method === 'POST') return await validarTransferencia(env, Number(validarTransf[1]), correo);
       const atender = pathname.match(/^\/api\/avisos\/ml\/([^/]+)\/([^/]+)$/);

@@ -169,6 +169,8 @@ export function permiso(pathname: string, metodo: string): Regla {
   if (/^\/api\/solicitudes\/[^/]+$/.test(ruta) && metodo === 'GET') return CAJA;   // la caja ve como va la suya
   if (ruta === '/api/ventas' || ruta.startsWith('/api/ventas/')) return CAJA;
   if (ruta === '/api/pedidos' || ruta.startsWith('/api/pedidos/')) return CAJA;   // pedidos por WhatsApp (Issue #269, pedidos.ts)
+  // Subir el comprobante de una transferencia para leerlo (#603): lo hace quien cobra. Verlo (/api/transferencias/:id/comprobante) es solo del dueño, por omisión.
+  if (ruta === '/api/transferencias/comprobante' && metodo === 'POST') return CAJA;
   // Dar por buena a mano una transferencia que Banxico no confirmo (#603): solo el dueño, aunque el resto de avisos sea de caja.
   if (/^\/api\/avisos\/transferencias\/\d+\/validar$/.test(ruta)) return DUENO;
   if (ruta === '/api/avisos' || ruta.startsWith('/api/avisos/')) return CAJA;   // centro de avisos (Issue #429)
