@@ -403,3 +403,35 @@ test('host público: tope por IP en la API, fotos del catálogo fuera, y HSTS en
     assert.equal(libre.headers.get('strict-transport-security'), 'max-age=31536000; includeSubDomains');
   } finally { p.cerrar(); }
 });
+
+test('sin PREMIOS_APERTURA no se otorgan premios nuevos ni primera llegada (Issue #611)', async () => {
+  const p = portalDePrueba();
+  delete p.env.PREMIOS_APERTURA;
+  try {
+    const a = await p.registrar('uid-sin-promo', '+524440000611');
+    assert.equal(a.status, 200);
+    assert.equal(a.body.premio, null);
+    assert.equal(p.db.prepare("select count(*) as n from dolarones_lotes where origen = 'regalo'").get()!.n, 0);
+    assert.equal(p.db.prepare("select count(*) as n from dolarones_movimientos where tipo = 'regalo'").get()!.n, 0);
+    assert.equal(p.db.prepare('select count(cliente_id) as n from premios_apertura').get()!.n, 0);
+    const r = await p.pedir('/api/portal/llegada', { cliente_id: a.body.id });
+    assert.equal(r.status, 200);
+    assert.equal(r.cuerpo.premio, null);
+    assert.equal(p.db.prepare('select count(*) as n from primera_llegada').get()!.n, 0);
+    assert.equal(p.db.prepare("select count(*) as n from dolarones_lotes where origen = 'regalo'").get()!.n, 0);
+  } finally { p.cerrar(); }
+});
+
+test('apagar la promoción respeta el premio ya otorgado (Issue #611)', async () => {
+  const p = portalDePrueba();
+  try {
+    const a = await p.registrar('uid-previo', '+524440000612');
+    assert.equal(a.body.premio.importe, 300_00);
+    delete p.env.PREMIOS_APERTURA;
+    const r = await p.pedir('/api/portal/llegada', { cliente_id: a.body.id });
+    assert.equal(r.cuerpo.premio.importe, 300_00);
+    assert.equal(r.cuerpo.premio.lote_id, a.body.premio.lote_id);
+    assert.equal(p.db.prepare('select count(*) as n from primera_llegada').get()!.n, 0);
+    assert.equal((await p.registrar('uid-previo', '+524440000612')).body.premio.importe, 300_00);
+  } finally { p.cerrar(); }
+});
