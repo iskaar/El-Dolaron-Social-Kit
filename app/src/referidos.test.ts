@@ -76,6 +76,20 @@ test('sin REFERIDOS_ABIERTO el programa está apagado: el código se rechaza y n
   } finally { p.cerrar(); }
 });
 
+test('sin PREMIOS_APERTURA el alta con código sigue dando los 50 D de referido (Issue #611)', async () => {
+  const p = montar();
+  delete p.env.PREMIOS_APERTURA;
+  try {
+    const a = (await p.registrar(1)).body;
+    assert.equal(a.premio, null);
+    const b = await p.registrar(2, codigoReferido(a.numero));
+    assert.equal(b.status, 200, JSON.stringify(b.body));
+    assert.equal(b.body.premio, null);
+    assert.equal(b.body.referido_otorgado, 50_00);
+    assert.deepEqual(p.lotes(b.body.id).map((l) => l.origen), ['referido']);
+  } finally { p.cerrar(); }
+});
+
 test('alta con código: 50 D a 30 días; sin código, inválido, o propio no dan nada', async () => {
   const p = montar();
   try {

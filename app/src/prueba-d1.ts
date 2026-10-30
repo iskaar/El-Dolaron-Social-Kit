@@ -96,7 +96,7 @@ export function tienda() {
   db.prepare(`insert into productos (id, codigo, nombre, precio, stock, semana_ingreso, creado_en, actualizado_en)
               values (?, 'ED-000001', 'Ventilador', 25000, 50, 'S40', '', '')`).run(PRODUCTO);
   const env = { DB: d1(db), FOTOS: r2(), ACCESS_EQUIPO: 'local', DEV_USUARIO: DUENO,
-    BASES_APROBADAS_VERSION: 'prueba-1', PORTAL_REGISTRO_ABIERTO: 'si', PROMOCION_INICIO: '2020-01-01T00:00:00Z',
+    BASES_APROBADAS_VERSION: 'prueba-1', PORTAL_REGISTRO_ABIERTO: 'si', PREMIOS_APERTURA: 'si', PROMOCION_INICIO: '2020-01-01T00:00:00Z',
     PORTAL_BASES_TEXTO: 'Bases sintéticas de prueba.', PORTAL_AVISO_TEXTO: 'Aviso sintético de prueba.',
   } as unknown as Env;
   // Lo que la app deja para despues de responder (ctx.waitUntil): `esperar()` lo termina.

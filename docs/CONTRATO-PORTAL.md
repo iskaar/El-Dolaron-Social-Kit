@@ -38,6 +38,8 @@ Errores: 400 entrada inválida, 401 token faltante/inválido/vencido/revocado, 4
 
 ## Premios y migración
 
+**Apagados (#611):** salvo `PREMIOS_APERTURA=si`, el registro y `llegada` no otorgan premios de apertura nuevos (`premio` queda `null`, `llegada` no registra primera llegada). Los premios ya otorgados conservan saldo y vencimiento; el alta con código de referido sigue dando 50 D. Lo que sigue describe el comportamiento con el interruptor encendido.
+
 Ejecutar `app/migracion-016-portal.sql` antes del Worker. Las filas de `premios_apertura` fijan 50 cupos online = 7,300 D y 50 en tienda = 7,700 D. Se adjudica el menor orden libre en una transacción D1; los vencidos quedan ocupados. El primer arribo queda reservado aun si su reemplazo falla. Si su premio online está intacto y vigente, una sola transacción lo revoca, libera su cupo y concede 500 D. Si tuvo canje, aun revertido, o venció, responde 409 y **no cambia el saldo**: Isaac y abogado deben fijar la resolución antes de operación real. No se asignan los 500 D a la segunda llegada.
 
 El registro online y la acreditación de llegada responden 409 **antes de crear socio o premio** si D1 contiene regalos anteriores a esta migración sin reconciliar. Hay que revisar esos lotes y ventas antes de encenderla; no ejecutamos reasignación automática. La alta presencial ya no concede premio por número global: personal registra y confirma la llegada explícitamente en `/socios`.
@@ -63,6 +65,7 @@ npx wrangler d1 execute el-dolaron --remote --file=migracion-021-pedido-hash.sql
 | --- | --- | --- |
 | `BASES_APROBADAS_VERSION`, `PORTAL_BASES_TEXTO`, `PORTAL_AVISO_TEXTO` | Alta presencial y textos legales: versión no vacía que no empiece con `borrador`, bases y aviso no vacíos. | `app/src/dolarones.ts:87` y `:135` |
 | `PROMOCION_INICIO` | Instante UTC válido alcanzado según el servidor: acumulación por compras, emisión de vales y apertura del registro/promoción. | `app/src/dolarones.ts:92` y `:246` |
+| `PREMIOS_APERTURA=si` | Reactiva los premios de apertura (registro y llegada). Ausente = no se otorgan nuevos (#611). | `app/src/portal.ts` |
 | `PORTAL_REGISTRO_ABIERTO=si` | Registro/promoción pública, además de bases e inicio; no habilita SMS por sí sola. | `app/src/portal.ts:13` |
 | `FIREBASE_PROJECT_ID`, `FIREBASE_WEB_API_KEY` | Configuración y validación de identidad del portal; proveedor Phone, dominio autorizado, cuotas y presupuesto de SMS requieren configuración externa aprobada. | `app/src/portal.ts:21` y `:203`; sin configuración, el frontend se detiene en `app/public/portal.js:206` |
 | `FIREBASE_AUTH_DOMAIN` | Dominio de autenticación opcional; por defecto `<projectId>.firebaseapp.com`. | `app/src/portal.ts:206` y `app/src/worker.ts:1147` |

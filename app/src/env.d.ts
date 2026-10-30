@@ -51,6 +51,8 @@ declare global {
     /** Requiere texto legal aprobado y despliegue coordinado. */
     BASES_APROBADAS_VERSION?: string;
     PORTAL_REGISTRO_ABIERTO?: string;
+    // Issue #611: 'si' reactiva los premios de apertura (registro y llegada). Ausente = no se otorgan nuevos.
+    PREMIOS_APERTURA?: string;
     PROMOCION_INICIO?: string;
     /** Referidos (#489, #597): 'si' da código a todo socio del portal. Ausente = apagado. */
     REFERIDOS_ABIERTO?: string;

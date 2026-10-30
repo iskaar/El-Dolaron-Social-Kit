@@ -149,7 +149,8 @@ export async function registro(request: Request, env: Env, auth: Identidad): Pro
     }
   }
   socio = (await cliente(env, auth.uid))!;
-  if (!await premioActual(env, socio.id)) await premio(env, 'online', socio.id, ahora);
+  // #611: sin PREMIOS_APERTURA=si no se otorgan premios nuevos (los ya otorgados se respetan).
+  if (env.PREMIOS_APERTURA === 'si' && !await premioActual(env, socio.id)) await premio(env, 'online', socio.id, ahora);
   return json({ id: socio.id, numero: socio.numero, nombre: socio.nombre,
     ...(await saldo(env, socio.id, new Date().toISOString())), premio: await premioActual(env, socio.id),
     referido_otorgado: referenteId ? D_ALTA : 0 }, 200);
@@ -161,6 +162,8 @@ export async function llegada(request: Request, env: Env, autor: string): Promis
   const id = String(body.cliente_id ?? '');
   if (!UUID.test(id)) return json({ error: 'Socio inválido.' }, 400);
   if (!await env.DB.prepare('select 1 from clientes where id = ?').bind(id).first()) return json({ error: 'Socio no encontrado.' }, 404);
+  // #611: promoción de apertura apagada; no otorga ni registra primera llegada.
+  if (env.PREMIOS_APERTURA !== 'si') return json({ premio: await premioActual(env, id) ?? null });
   if (await hayRegalosLegados(env)) return json({ error: 'Resolver premios anteriores antes de abrir la promoción.' }, 409);
   const ahora = new Date();
   await env.DB.prepare(`insert or ignore into primera_llegada (singleton, cliente_id, acreditado_por, acreditado_en)
