@@ -89,7 +89,7 @@ Pendiente: por instrucción de Isaac, A07 no ejecuta git de escritura. El índic
 
 ## Referidos — prototipo con conocidos, Issue #489
 
-**Estado: en producción (#597), con `REFERIDOS_ABIERTO=si`. Las bases 2026-10-v4 no los contemplan; las bases 2026-10-v5 (punto 7) y el aviso 2026-10-v3 sí, y esperan el visto bueno del abogado (PR #355): no anunciar montos hasta que se publiquen.** Migración `app/migracion-055-referidos.sql` (tabla `referidos`, trigger de tope, índice único de movimientos); se corre antes del Worker. Las constantes están en `app/src/referidos.ts`.
+**Estado: en producción (#597), con `REFERIDOS_ABIERTO=si`. Los describen las bases 2026-10-v5 (punto 7) y el aviso 2026-10-v3, aprobados por el abogado el 30/10/2026 (PR #355).** Migración `app/migracion-055-referidos.sql` (tabla `referidos`, trigger de tope, índice único de movimientos); se corre antes del Worker. Las constantes están en `app/src/referidos.ts`.
 
 - **Código del referente**: `DOL` + número de socio + letra de verificación (`DOL42K`), calculado, sin azar ni columna. Con `REFERIDOS_ABIERTO` encendida, todo socio tiene código válido. Enlace `/?r=<código>`.
 - **Alta con código** (solo cuentas nuevas, mismo batch que crea al socio): 50 D, `origen='referido'`, vigencia 30 días, movimiento `alta_referido`. Sin código no hay 50 D. Código inválido, propio, ajeno a la lista o de un referente con 10 personas: 400/409 y no se crea nada. Tope de 10 invitaciones por socio (pendientes y liberadas cuentan) en SQL.

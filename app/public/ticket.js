@@ -127,8 +127,10 @@ export function comprobanteCancelacion(t) {
 }
 
 // Con `cupon` (el % que el dueño regresa en cupón, Issue #330) va el boton para devolver en cupón en vez de dinero.
+// El cupón es opcional para el cliente (bases v5, punto 6 quater): el cajero le dice el importe y que puede pedir su dinero.
 const botonCupon = (cupon, dato) => cupon
-  ? `<button type="button" class="cupon" ${dato}>Dar cupón (${cupon}% en Dolarones)</button>` : '';
+  ? `<button type="button" class="cupon" ${dato}>Dar cupón (${cupon}% en Dolarones)</button>
+     <small>Solo si el cliente lo acepta: dile el importe y que puede pedir su dinero.</small>` : '';
 
 /** El formulario de una pieza: cuantas (si hay mas de una) y el motivo. */
 export function formularioPieza(lineaId, quedan, cupon = null, forma = 'efectivo') {

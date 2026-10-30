@@ -5,8 +5,8 @@
 // elige un maximo en el portal; en caja se le pregunta si usa sus Dolarones.
 // Version 2026-10-v4, 8 de octubre de 2026 (Issue #258): el vale de papel se puede
 // pasar a una cuenta con la tarifa de socio (punto 6 ter). PENDIENTE: visto bueno del abogado.
-// Version 2026-10-v5, 30 de octubre de 2026 (Issues #354, #489, #597, #611). PENDIENTE: visto bueno
-// del abogado antes de publicarla. Cambios respecto a v4: vales y cupones se juntan en un ticket, hasta
+// Version 2026-10-v5, 30 de octubre de 2026 (Issues #354, #489, #597, #611). Aprobada por el
+// abogado el 30 de octubre de 2026 (tambien cubre v4). Cambios respecto a v4: vales y cupones se juntan en un ticket, hasta
 // 10 (punto 8); cupones (punto 6 quater); el punto 7 pasa de la promocion de apertura, ya terminada,
 // al programa de referidos; la cancelacion cubre vales juntos y premios de referidos (punto 10).
 // El aviso sube a 2026-10-v3 (referidos y cupones).

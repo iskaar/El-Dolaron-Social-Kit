@@ -1,6 +1,6 @@
 # Dolarones — bases del programa y aviso de privacidad
 
-**Estado: en producción están las bases 2026-10-v4 y el aviso 2026-10-v2. La versión 2026-10-v5 de las bases (vales y cupones acumulables, cupones, referidos en lugar de la promoción de apertura, cancelaciones) y la 2026-10-v3 del aviso están pendientes del visto bueno del abogado (PR #355); no se publican hasta tenerlo.** No es asesoría legal.
+**Estado: bases 2026-10-v5 (vales y cupones acumulables, cupones, referidos en lugar de la promoción de apertura, cancelaciones) y aviso 2026-10-v3, aprobados por el abogado el 30/10/2026 (PR #355).** No es asesoría legal.
 
 El texto que ve el cliente vive solo en estos dos archivos de texto plano, que son la única versión vigente:
 
