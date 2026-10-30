@@ -30,6 +30,8 @@ declare global {
     ASISTENTE_TOKEN?: string;
     /** Avisos al dueno por correo (Issue #75, avisos.ts). Binding send_email; ausente en pruebas. */
     CORREO?: SendEmail;
+    /** Llave privada VAPID (JWK P-256) de las notificaciones push (Issue #600, push.ts). Secreto: wrangler secret put. */
+    VAPID_JWK?: string;
     /** Solo `wrangler dev` con `--var ACCESS_EQUIPO:local`: el correo con el que se entra. */
     DEV_USUARIO?: string;
     /** Tope por IP a la API del host público (binding ratelimits de wrangler.jsonc). Ausente = sin tope (local, pruebas). */

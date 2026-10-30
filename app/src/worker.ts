@@ -27,6 +27,7 @@ import {
   esDeCaja, soloComputadora, esRevendedora, CAJAS, puedeEditarInventario, type Usuario,
 } from './cuentas.ts';
 import { cajeroEnTurno, listarCajeros, entrar, salir, ponerPin } from './cajeros.ts';
+import { rutaPush } from './push.ts';
 import { registrarSocio, buscarSocio, buscarPorCodigo, basesListas, sentenciasDeVenta, saldo } from './dolarones.ts';
 import { registrarCorte, registrarRetiro, rutaTerminal, ultimoCorte, cajaDe } from './corte.ts';
 import { rutaGastos } from './gastos.ts';
@@ -2758,6 +2759,12 @@ export default {
       const resolver = pathname.match(/^\/api\/solicitudes\/([^/]+)\/resolver$/);
       if (resolver && request.method === 'POST') {
         return await resolverSolicitud(resolver[1], request, env, correo);
+      }
+
+      // Botón «Ayuda» de la caja y notificaciones push al dueño (Issue #600, push.ts).
+      if (pathname === '/api/ayuda' || pathname.startsWith('/api/push/')) {
+        const respuestaPush = await rutaPush(request, env, pathname, correo);
+        if (respuestaPush) return respuestaPush;
       }
 
       // Centro de avisos (Issue #429): ventas de ML por atender, a nombre del cajero que la marca.
