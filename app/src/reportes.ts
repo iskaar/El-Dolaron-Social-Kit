@@ -63,15 +63,18 @@ export async function inventarioEnPiso(env: Env, ahora = Date.now()) {
     .all<{ id: string; codigo: string; nombre: string; categoria: string; precio: number; stock: number; creado_en: string; dias: number | null }>();
 
   const valorDe = (f: { precio: number; stock: number }) => f.precio * f.stock;
-  const tramos = new Map(TRAMOS_ANTIGUEDAD.map(([clave]) => [clave, { tramo: clave, piezas: 0, valor: 0 }]));
+  const tramos = new Map(TRAMOS_ANTIGUEDAD.map(([clave]) => [clave, { tramo: clave, piezas: 0, unidades: 0, valor: 0 }]));
   const sinFecha = { piezas: 0, valor: 0 };
-  const categorias = new Map<string, { categoria: string; piezas: number; valor: number; sumaDias: number; fechadas: number }>();
+  const categorias = new Map<string, { categoria: string; piezas: number; unidades: number; valor: number; sumaDias: number; fechadas: number }>();
   for (const f of results) {
-    const grupo = (f.dias === null ? sinFecha : tramos.get(tramoDeDias(f.dias)))!;
+    const tramo = f.dias === null ? null : tramos.get(tramoDeDias(f.dias))!;
+    const grupo = tramo ?? sinFecha;
     grupo.piezas += 1;
+    if (tramo) tramo.unidades += f.stock;   // `piezas` cuenta etiquetas; `unidades`, la existencia (tablero #610)
     grupo.valor += valorDe(f);
-    const c = categorias.get(f.categoria) ?? { categoria: f.categoria, piezas: 0, valor: 0, sumaDias: 0, fechadas: 0 };
+    const c = categorias.get(f.categoria) ?? { categoria: f.categoria, piezas: 0, unidades: 0, valor: 0, sumaDias: 0, fechadas: 0 };
     c.piezas += 1;
+    c.unidades += f.stock;
     c.valor += valorDe(f);
     if (f.dias !== null) { c.sumaDias += f.dias; c.fechadas += 1; }
     categorias.set(f.categoria, c);
