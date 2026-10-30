@@ -8,7 +8,7 @@ Hola {nombre}, bienvenida a El Dolarón. 🛍️
 
 Con tu celular vendes piezas de la tienda por WhatsApp. Tu cliente paga a la tienda, nunca a ti.
 
-1. Entra aquí: viste.com.mx/vender
+1. Entra aquí: escaner.viste.com.mx/vender
    La primera vez te llega un código a tu correo. En la imagen ves los 6 pasos. Si el correo no llega, mira en Spam.
 
 2. Practica sin miedo, antes o después de entrar: dolarones.eldolaron.com/manual

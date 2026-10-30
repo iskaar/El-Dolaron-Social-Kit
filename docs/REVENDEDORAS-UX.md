@@ -265,7 +265,7 @@ Los mensajes que vienen del servidor (`datos.error`, p. ej. «Pieza o cantidad i
 > Tu ganancia: {comisión}.
 > Si algo no sale, escríbeme aquí. 💙
 
-**P-3b. Kit de bienvenida sin sesión en persona (#594).** Mensaje y tarjeta listos en `docs/manual-revendedora/`: `bienvenida.txt` (texto para pegar) y `entrar.png` (tarjeta «Cómo entrar», fuente `entrar.html`). Después de entrar, ella practica cada tarea en el manual interactivo: [¿Cómo funciona? Ver el manual](https://viste.com.mx/manual) (`/manual`, detrás de Access; este enlace es solo para Isaac, `/vender` no lo lleva todavía). Los datos de pago no van en el repositorio, que es público: se mandan por WhatsApp.
+**P-3b. Kit de bienvenida sin sesión en persona (#594).** Mensaje y tarjeta listos en `docs/manual-revendedora/`: `bienvenida.txt` (texto para pegar) y `entrar.png` (tarjeta «Cómo entrar», fuente `entrar.html`). Después de entrar, ella practica cada tarea en el manual interactivo: [¿Cómo funciona? Ver el manual](https://escaner.viste.com.mx/manual) (`/manual`, detrás de Access; este enlace es solo para Isaac, `/vender` no lo lleva todavía). Los datos de pago no van en el repositorio, que es público: se mandan por WhatsApp.
 
 **P-4. Seguimiento.** Primera semana: mensaje al día siguiente («¿pudiste entrar?»); revisar en `/reportes` que haya ventas; si lleva 3 días sin abrir, llamarla. No mandar videos largos: una captura de pantalla por duda.
 
