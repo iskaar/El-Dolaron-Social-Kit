@@ -113,7 +113,7 @@ export function permiso(pathname: string, metodo: string): Regla {
   if (ruta === '/marketplace-redes.png') return CAPTURA;
   if (ruta === '/vender.js') return VENDER;
   // Codigo de las pantallas, sin datos: el permiso se cobra en la pantalla y en la API.
-  if (!ruta.startsWith('/api/') && /\.(js|css|png|svg|ico|webmanifest)$/.test(ruta)) return 'cuenta';
+  if (!ruta.startsWith('/api/') && /\.(js|css|png|svg|ico|webmanifest|woff2)$/.test(ruta)) return 'cuenta';
 
   if (ruta in PANTALLAS) return PANTALLAS[ruta];
 
