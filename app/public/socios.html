@@ -156,7 +156,7 @@ $('otro').addEventListener('click', () => {
 });
 
 async function acreditar(socio, aviso) {
-  if (!confirm(`¿Confirmas la llegada física de #${socio.numero}, ${socio.nombre}? La primera llegada define el premio de 500 D y no se puede cambiar desde esta pantalla.`)) return;
+  if (!confirm(`¿Confirmas la llegada física de #${socio.numero}, ${socio.nombre}? Si la promoción de apertura está activa, el premio que se otorgue no se puede cambiar desde esta pantalla.`)) return;
   const r = await fetch('/api/portal/llegada', { method:'POST', headers:{ 'content-type':'application/json' },
     body:JSON.stringify({ cliente_id:socio.id }) });
   const cuerpo = await r.json();
