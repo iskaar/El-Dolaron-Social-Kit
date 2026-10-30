@@ -92,3 +92,21 @@ test('suscripción vencida (410) se borra y la ayuda cae al correo; datos invál
   assert.equal(t.correos[0].to, DUENO);
   assert.equal(t.correos[0].text, 'Isaac pide ayuda.');
 });
+
+test('solicitud de acceso (#607): llega por push sin correo; si el dispositivo ya no sirve, correo con el enlace a /avisos', async () => {
+  const t = await conPush();
+  assert.equal((await t.pedir('/api/push/suscripcion', { endpoint: 'https://web.push.apple.com/abc', keys: t.keys })).status, 200);
+  const antes = t.llegadas.length;   // la prueba de la alta
+  t.env.DEV_USUARIO = 'nueva@prueba.mx';
+  assert.equal((await t.pedir('/api/solicitudes/acceso', { nombre: 'Rosa', justificacion: 'capturar ropa' })).status, 201);
+  await t.esperar();
+  assert.equal(t.llegadas.length, antes + 1);
+  assert.equal(t.correos.length, 0);
+
+  t.responder(410);
+  t.env.DEV_USUARIO = 'otra@prueba.mx';
+  assert.equal((await t.pedir('/api/solicitudes/acceso', { nombre: 'Luis', justificacion: 'caja' })).status, 201);
+  await t.esperar();
+  assert.equal(t.correos.length, 1);
+  assert.match(t.correos[0].text, /caja[\s\S]*https:\/\/caja\.prueba\/avisos/);
+});
