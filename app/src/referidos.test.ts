@@ -17,10 +17,10 @@ const token = (uid: string, phone: string) => {
 };
 const tel = (n: number) => `+52444000${String(n).padStart(4, '0')}`;
 
-function montar(piloto = '4440000001') {
+function montar(abierto = 'si') {
   const { db, env, pedir } = tienda();
   Object.assign(env, { HOST_PORTAL: 'portal.prueba', FIREBASE_PROJECT_ID: 'prueba-firebase',
-    FIREBASE_WEB_API_KEY: 'clave', REFERIDOS_TELEFONOS: piloto });
+    FIREBASE_WEB_API_KEY: 'clave', REFERIDOS_ABIERTO: abierto });
   const fetchOriginal = globalThis.fetch;
   globalThis.fetch = async (_url, options) => {
     const t = JSON.parse(String(options?.body ?? '{}')).idToken as string;
@@ -34,7 +34,7 @@ function montar(piloto = '4440000001') {
     }) as never, env, { waitUntil() {} } as never);
     return { status: r.status, body: await r.json() as Record<string, any> };
   };
-  // n = teléfono 4440000nnn; uid = u<n>. El 1 es el referente del piloto.
+  // n = teléfono 4440000nnn; uid = u<n>. El 1 es el referente.
   const registrar = (n: number, codigo?: string) => llamar('/api/portal/registro', `u${n}`, tel(n), {
     nombre: 'Cliente', acepta_bases: true, declara_mayor_edad: true, bases_version: 'prueba-1',
     ...(codigo === undefined ? {} : { referido_codigo: codigo }),
@@ -63,7 +63,7 @@ test('el código sale del número de socio, detecta errores de dedo y no usa aza
   for (const malo of ['', 'DOL', 'DOL0A', '42', 'xyz', null, undefined]) assert.equal(numeroDeCodigo(malo), null);
 });
 
-test('sin lista del piloto el programa está apagado: el código se rechaza y no hay pantalla', async () => {
+test('sin REFERIDOS_ABIERTO el programa está apagado: el código se rechaza y no hay pantalla', async () => {
   const p = montar('');
   try {
     assert.equal((await p.llamar('/api/portal/config', '', '')).body.referidos, false);
@@ -76,7 +76,7 @@ test('sin lista del piloto el programa está apagado: el código se rechaza y no
   } finally { p.cerrar(); }
 });
 
-test('alta con código: 50 D a 30 días; sin código, inválido, ajeno a la lista o propio no dan nada', async () => {
+test('alta con código: 50 D a 30 días; sin código, inválido, o propio no dan nada', async () => {
   const p = montar();
   try {
     const a = (await p.registrar(1)).body;
@@ -102,9 +102,7 @@ test('alta con código: 50 D a 30 días; sin código, inválido, ajeno a la list
     for (const malo of ['DOL999Z', 'basura', codigo.slice(0, -1) + (codigo.endsWith('A') ? 'B' : 'A')]) {
       assert.equal((await p.registrar(4, malo)).status, 400, malo);
     }
-    // Un socio que no está en la lista no tiene código válido.
-    assert.equal((await p.registrar(5, codigoReferido(b.body.numero))).status, 400);
-    assert.equal(p.db.prepare("select count(*) as n from clientes where telefono in ('4440000004', '4440000005')").get()!.n, 0);
+    assert.equal(p.db.prepare("select count(*) as n from clientes where telefono = '4440000004'").get()!.n, 0);
 
     // Auto-referido: otro UID con el MISMO teléfono del referente, o su propio código ya registrado.
     const propio = await p.llamar('/api/portal/registro', 'otro-uid', tel(1), {
@@ -119,8 +117,14 @@ test('alta con código: 50 D a 30 días; sin código, inválido, ajeno a la list
     const r = (await p.llamar('/api/portal/referidos', 'u1', tel(1))).body;
     assert.deepEqual([r.codigo, r.referidos, r.liberados, r.pendientes, r.maximo], [codigo, 1, 0, 1, 10]);
     const mio = (await p.llamar('/api/portal/referidos', 'u2', tel(2))).body;
-    assert.equal(mio.codigo, null);
+    assert.equal(mio.codigo, codigoReferido(b.body.numero));
     assert.deepEqual(mio.mi_referido, { estado: 'pendiente' });
+
+    // Sin lista ni compra previa: quien se acaba de registrar ya puede referir.
+    const c = await p.registrar(5, mio.codigo);
+    assert.equal(c.status, 200, JSON.stringify(c.body));
+    assert.equal(c.body.referido_otorgado, 50_00);
+    assert.equal((await p.llamar('/api/portal/referidos', 'u2', tel(2))).body.referidos, 1);
   } finally { p.cerrar(); }
 });
 

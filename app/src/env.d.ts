@@ -46,8 +46,8 @@ declare global {
     BASES_APROBADAS_VERSION?: string;
     PORTAL_REGISTRO_ABIERTO?: string;
     PROMOCION_INICIO?: string;
-    /** Piloto de referidos (#489): teléfonos de 10 dígitos separados por coma que tienen código. Ausente = apagado. */
-    REFERIDOS_TELEFONOS?: string;
+    /** Referidos (#489, #597): 'si' da código a todo socio del portal. Ausente = apagado. */
+    REFERIDOS_ABIERTO?: string;
     /** Emisión de vales anónimos: ausente = apagada, requiere bases finales. */
     VALES_ABIERTOS?: string;
     /** Promo de inauguracion (ISO, UTC): ambas o ninguna. Quitarlas y desplegar la apaga. */
