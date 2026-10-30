@@ -60,6 +60,7 @@
   .pedido .folio { font-size: 20px; font-weight: 800; color: var(--azul); }
   .pedido .piezas { color: #5b6478; font-size: 13px; }
   .pedido .vence.urgente { color: var(--rojo); font-weight: 700; }
+  .pedido .reporte { background: #FFF6D9; border: 2px solid #6B5400; border-radius: 8px; padding: 8px 10px; color: #3d3000; font-size: 15px; overflow-wrap: anywhere; }
   .pedido .botones { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-top: 4px; }
   .pedido .guia { display: flex; gap: 8px; flex: 1 1 260px; }
   .pedido .guia input { padding: 8px 10px; font-size: 15px; }
@@ -187,6 +188,18 @@
   </div>
 </dialog>
 
+<dialog id="dlg-rechazar" aria-labelledby="dlg-rechazar-titulo">
+  <h2 id="dlg-rechazar-titulo">Rechazar el pago reportado</h2>
+  <p id="dlg-rechazar-texto"></p>
+  <label for="rechazar-motivo">¿Por qué? La revendedora lo verá.</label>
+  <input id="rechazar-motivo" maxlength="140" autocomplete="off" placeholder="Ejemplo: no nos llegó ese dinero">
+  <div class="aviso error" id="rechazar-aviso" role="alert"></div>
+  <div class="botones">
+    <button class="boton rojo" id="rechazar-si" type="button">Rechazar pago</button>
+    <button class="boton" id="rechazar-no" type="button">No, regresar</button>
+  </div>
+</dialog>
+
 <dialog id="dlg-mover" aria-labelledby="dlg-mover-titulo">
   <h2 id="dlg-mover-titulo"></h2>
   <p id="dlg-mover-resumen"></p>
@@ -275,7 +288,10 @@ $('caja-nombre').addEventListener('change', () => {
   validar();
 });
 // La caja asignada por el dueño (o la del cajero que entró con PIN) manda sobre la elegida aquí.
+let esDueno = false;   // solo el dueño ve la foto del comprobante que manda una revendedora (#609)
 fetch('/api/yo').then((r) => r.json()).then(({ usuario, cajero }) => {
+  esDueno = !!usuario?.roles?.includes('dueno');
+  pintarLista();
   const caja = (cajero ?? usuario)?.caja;
   if (!caja) return;
   $('caja-nombre').value = caja;
@@ -512,13 +528,26 @@ const vendedoraDe = (p) => escapar(String(p.vendedora ?? '').split('@')[0]);
 const sinAnticipo = (p) => p.estado === 'apartado' && p.anticipo === 0 && !p.liquidado_en;
 const revendedoraNombre = (p) => escapar(p.vendedora_nombre || String(p.vendedora ?? '').split('@')[0]);
 
+// Pago que reporto la revendedora (#609): se acepta registrando el abono (llena la ventana de abono) o se rechaza con motivo.
+const bancoNombre = (codigo) => BANCOS.find(([c]) => c === codigo)?.[1] ?? '';
+function reporteHtml(p) {
+  const r = p.reporte;
+  if (!r) return '';
+  const datos = [r.clave && `clave ${escapar(r.clave)}`, r.monto && pesos(r.monto), bancoNombre(r.banco_emisor)].filter(Boolean).join(' · ');
+  const foto = !r.comprobante_key ? '' : esDueno ? ` · <a href="/api/pagos-reportados/${r.id}/comprobante" target="_blank" rel="noopener noreferrer">Ver foto ↗</a>` : ' · con foto (solo la ve el dueño)';
+  return `<div class="reporte"><b>${escapar(r.revendedora)} dice que su cliente ya pagó.</b> ${datos || 'Sin clave'}${foto}. Revisa que el dinero haya llegado, luego regístralo o recházalo.</div>`;
+}
+const botonesReporte = (p) => p.reporte
+  ? `<button class="boton chico relleno" type="button" data-registrar="${p.folio}">Registrar pago</button><button class="boton chico rojo" type="button" data-rechazar="${p.folio}">Rechazar</button>` : '';
+
 function filaPedido(p, { botones, vence, saldo = false }) {
   return `<div class="pedido">
     <div class="cabeza"><span class="folio">P-${p.folio}</span><span><b>${escapar(p.cliente)}</b> · ${escapar(p.telefono)}</span></div>
     <div class="piezas">${escapar(piezasDe(p))}</div>
     <div>${saldo ? `Saldo ${pesos(p.saldo)}` : p.estado === 'apartado' ? `Pagado ${pesos(p.saldo)} de ${pesos(totalDe(p))} · Falta ${pesos(p.faltante)}` : p.estado === 'vendido' && p.entrega === 'envio' ? `Liquidado · Falta $0 · Total ${pesos(totalDe(p))}` : `Saldo ${pesos(p.saldo)}`} · ${p.entrega === 'envio' ? 'Envío' : 'Tienda'} · ${vendedoraDe(p)}</div>
     ${vence}
-    <div class="botones">${botones}</div>
+    ${reporteHtml(p)}
+    <div class="botones">${botonesReporte(p)}${botones}</div>
   </div>`;
 }
 const botonWa = (p, texto, etiqueta) => `<a class="boton chico wa" target="_blank" rel="noopener" href="${enlaceWhatsApp(p.telefono, texto)}">${etiqueta}</a>`;
@@ -570,7 +599,7 @@ function pintarLista() {
 }
 
 $('actualizar').addEventListener('click', cargarLista);
-setInterval(() => { if (document.visibilityState === 'visible' && !$('dlg-cancelar').open && !$('dlg-mover').open) cargarLista(); }, 60000);
+setInterval(() => { if (document.visibilityState === 'visible' && !$('dlg-cancelar').open && !$('dlg-mover').open && !$('dlg-rechazar').open) cargarLista(); }, 60000);
 
 // Guardar guía (solo envíos).
 $('lista-envios').addEventListener('submit', async (e) => {
@@ -594,6 +623,38 @@ $('lista-envios').addEventListener('submit', async (e) => {
     decir('aviso-lista', 'Sin red: la guía no se guardó. Intenta otra vez.', 'error');
     boton.disabled = false;
   }
+});
+
+/* ---------- rechazar un pago reportado (#609): la revendedora ve el motivo ---------- */
+
+let folioARechazar = null;
+function abrirRechazo(folio) {
+  const p = pedidos.find((x) => x.folio === folio);
+  if (!p?.reporte) return;
+  folioARechazar = folio;
+  $('dlg-rechazar-texto').textContent = `P-${folio} · ${p.cliente}. El apartado sigue con su plazo de siempre.`;
+  $('rechazar-motivo').value = '';
+  decir('rechazar-aviso', '', 'error');
+  $('rechazar-si').disabled = false;
+  $('dlg-rechazar').showModal();
+}
+$('rechazar-no').addEventListener('click', () => $('dlg-rechazar').close());
+$('rechazar-si').addEventListener('click', async () => {
+  const motivo = $('rechazar-motivo').value.trim();
+  if (!motivo) { decir('rechazar-aviso', 'Escribe en pocas palabras por qué.', 'error'); return $('rechazar-motivo').focus(); }
+  $('rechazar-si').disabled = true;
+  try {
+    const r = await fetch(`/api/pedidos/${folioARechazar}/rechazar-pago`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ motivo }) });
+    const cuerpo = await r.json().catch(() => ({}));
+    if (!r.ok) { decir('rechazar-aviso', cuerpo.error ?? 'No se pudo rechazar.', 'error'); $('rechazar-si').disabled = false; return; }
+    $('dlg-rechazar').close();
+    decir('aviso-lista', `Pago de P-${folioARechazar} rechazado. La revendedora ve el motivo.`, 'ok');
+  } catch {
+    decir('rechazar-aviso', 'Sin red: no se rechazó. Intenta otra vez.', 'error');
+    $('rechazar-si').disabled = false;
+    return;
+  }
+  cargarLista();
 });
 
 /* ---------- cancelar un apartado: ventana propia, nada de confirm() ---------- */
@@ -642,7 +703,7 @@ try {
 } catch { decir('aviso-lista', 'No se pudo leer el movimiento pendiente. Revisa la memoria del navegador antes de cobrar.', 'error'); }
 $('recuperar-movimiento').hidden = !movimiento;
 
-function abrirMovimiento(folio, tipo) {
+function abrirMovimiento(folio, tipo, reporte = null) {
   if (moviendo) return;
   const p = pedidos.find((x) => x.folio === folio);
   if (!movimiento && !p) return;
@@ -662,6 +723,18 @@ function abrirMovimiento(folio, tipo) {
     $('mover-importe').value = String(p.faltante / 100);
     for (const id of ['mover-clave', 'mover-monto', 'mover-banco']) $(id).value = '';
     limpiarAdjunto('mover-comprobante'); $('mover-comprobante-aviso').textContent = '';
+    if (reporte && tipo === 'abono') {
+      // #609: lo que mandó la revendedora; quien cobra lo compara con el dinero recibido y lo corrige antes de guardar.
+      $('mover-forma').value = 'transferencia';
+      $('mover-clave').value = reporte.clave ?? '';
+      $('mover-banco').value = reporte.banco_emisor ?? '';
+      if (reporte.monto) { $('mover-monto').value = String(reporte.monto / 100); $('mover-importe').value = String(Math.min(p.faltante, reporte.monto) / 100); }
+      if (reporte.comprobante_key) {
+        $('mover-comprobante').dataset.key = reporte.comprobante_key;
+        $('mover-comprobante').dataset.fecha = reporte.fecha_comprobante ?? '';
+        $('mover-comprobante-aviso').textContent = 'La foto del comprobante ya va adjunta (la mandó la revendedora). Compara los datos con el dinero que llegó.';
+      }
+    }
   } else if (movimiento.tipo === 'abono') {
     // El intento pendiente conserva su ID y su cuerpo: se muestran tal cual para ver qué se reintenta.
     $('mover-forma').value = movimiento.cuerpo.forma_pago;
@@ -681,6 +754,10 @@ for (const id of ['mover-clave', 'mover-monto', 'mover-banco']) $(id).addEventLi
 for (const lista of ['lista-envios', 'lista-apartados']) $(lista).addEventListener('click', (e) => {
   const boton = e.target.closest('button[data-mover]');
   if (boton) abrirMovimiento(Number(boton.dataset.mover), boton.dataset.tipo);
+  const registrar = e.target.closest('button[data-registrar]');
+  if (registrar) abrirMovimiento(Number(registrar.dataset.registrar), 'abono', pedidos.find((x) => x.folio === Number(registrar.dataset.registrar))?.reporte);
+  const rechazar = e.target.closest('button[data-rechazar]');
+  if (rechazar) abrirRechazo(Number(rechazar.dataset.rechazar));
 });
 $('recuperar-movimiento').addEventListener('click', () => abrirMovimiento(movimiento.folio, movimiento.tipo));
 $('mover-cerrar').addEventListener('click', () => $('dlg-mover').close());

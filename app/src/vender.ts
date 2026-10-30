@@ -3,6 +3,7 @@ import { VENDIBLE } from './catalogo.ts';
 import { CLAVES_CATEGORIA } from '../public/categorias.js';
 import { telefonoInteresado } from '../public/vender.js';
 import { apartarRevendedora, pedidosDeRevendedora, cancelarDeRevendedora } from './pedidos.ts';
+import { reportarPago, subirFotoDeRevendedora } from './pagos-reportados.ts';
 
 const PAGINA = 24;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -165,17 +166,20 @@ export async function rutaVender(request: Request, env: Env, url: URL, correo: s
   const { pathname } = url;
   const detalle = /^\/api\/interesados\/([^/]+)$/.exec(pathname);
   const cancelar = /^\/api\/vender\/apartados\/(\d{1,9})\/cancelar$/.exec(pathname);
+  // #609: el pago de su cliente: la foto del comprobante (se lee) y el reporte con la clave.
+  const pago = /^\/api\/vender\/apartados\/(\d{1,9})\/(pago|comprobante)$/.exec(pathname);
   if (pathname === '/api/vender' && request.method === 'GET') return listarPiezas(env, url, correo, revendedora);
   if (pathname === '/api/interesados') {
     if (request.method === 'GET') return listarInteresados(env, url, correo, revendedora);
     if (request.method === 'POST') return crearInteresado(request, env, correo);
   }
   if (detalle && request.method === 'PATCH') return descartarInteresado(request, env, detalle[1], revendedora ? correo : null);
-  if (pathname === '/api/vender/apartar' || pathname === '/api/vender/mios' || cancelar) {
+  if (pathname === '/api/vender/apartar' || pathname === '/api/vender/mios' || cancelar || pago) {
     const metodo = pathname === '/api/vender/mios' ? 'GET' : 'POST';
     if (request.method !== metodo) return json({ error: 'Método no permitido.' }, 405);
     if (!revendedora) return json({ error: 'Solo las revendedoras apartan sin anticipo. En la tienda, aparta desde Pedidos.' }, 403);
     if (cancelar) return cancelarDeRevendedora(Number(cancelar[1]), env, ctx, correo);
+    if (pago) return pago[2] === 'pago' ? reportarPago(Number(pago[1]), request, env, ctx, correo) : subirFotoDeRevendedora(Number(pago[1]), request, env, correo);
     return metodo === 'GET' ? pedidosDeRevendedora(env, correo) : apartarRevendedora(request, env, ctx, correo);
   }
   return pathname === '/api/vender' || pathname === '/api/interesados' || detalle

@@ -286,6 +286,20 @@ Decisiones al implementar:
 
 ---
 
+## 4.6 Mandar el comprobante del pago (Issue #609)
+
+La revendedora avisa que su cliente ya pagó un apartado por transferencia. **No da el pedido por pagado**: lo registra la tienda.
+
+- **Dónde:** «Mis ventas», en el apartado sin pago: botón **«Ya me pagó: mandar comprobante»**. Abre un diálogo con **«Foto del comprobante»** (cámara o galería; la lee el mismo servicio de #603 y prellena la clave) y **«Clave de rastreo»**. Con foto, clave o las dos; al menos una. La ayuda dice que la clave viene en el comprobante y que **no** es el «número de referencia» (ese lo escoge quien paga y se repite).
+- **Estados (chip):** «Pago enviado · la tienda lo revisa» · «⚠ La tienda no encontró el pago: {motivo}» (con el botón «Mandar otra vez el comprobante») · si la tienda ya registró el abono, el chip de siempre «✓ La tienda ya registró su pago».
+- **Tienda (`/pedidos`):** el apartado muestra el aviso amarillo con la revendedora, clave, monto, banco y, solo al dueño, el enlace «Ver foto». **«Registrar pago»** abre el abono de siempre ya lleno (transferencia, clave, monto, banco, foto); al guardar, el reporte pasa a *aceptado* en el mismo batch y la transferencia entra a la verificación CEP de #603. **«Rechazar»** pide un motivo corto que ella ve en su chip.
+- **Plazo:** con un reporte pendiente el cron no vence el apartado y ella no puede cancelarlo. Si la tienda rechaza y el plazo ya había pasado, el apartado conserva 2 horas para que mande el bueno; si no había pasado, rige el plazo original.
+- **Privacidad:** la foto trae nombres y RFC de terceros. Se guarda en R2 sin ruta pública y solo la ve el dueño (`/api/pagos-reportados/:id/comprobante`); la revendedora no la vuelve a ver. El aviso al dueño dice «{nombre} mandó el pago de P-{folio}» sin clave ni datos del cliente.
+- **Límites:** una clave ya registrada, o esperando en el reporte de otra venta, se rechaza («Esa clave ya se usó en otro pago»). Hasta 6 fotos leídas por venta (cada una cuesta una lectura); después solo la clave. Migración 063 (`pagos_reportados`, `comprobantes_subidos`).
+- **Pendiente:** si manda solo la foto y no se pudo leer, únicamente el dueño ve la foto para registrar la clave. Prueba física con el celular y un comprobante real.
+
+---
+
 ## 5. Orden de implementación sugerido (Fase 2)
 
 A1 (confirmación) → A5 (diálogo «Ya la vendí») → A2/A3/A4 (tarjeta, pie, compartir) → A6 (Mis ventas) → A8/A11 (textos y tamaños) → A7, A9, A10. Cada bloque cuelga de `body.rev`; cajeras sin cambios. Validación: `npm test`, `npm run typecheck`, `python tools/validate_assets.py`. La cuenta regresiva y la franja `#resultado` necesitan prueba de regresión del fallo U6 (que la recarga no borre el resultado). Prueba física: sección 7.

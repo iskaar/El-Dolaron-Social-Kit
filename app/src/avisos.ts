@@ -16,12 +16,13 @@ export const REMITENTE = 'avisos@eldolaron.com';
  * Push al dueño (como CEP y Ayuda); sin dispositivo que lo reciba, correo con el enlace a /avisos,
  * donde ya se aprueba de un toque (Issue #607). Un fallo se registra y no tumba la solicitud.
  */
-export async function enviarAviso(env: Env, request: Request, asunto: string, texto: string): Promise<void> {
+export async function enviarAviso(env: Env, request: Request, asunto: string, texto: string,
+  pie = { frase: 'Apruébala o recházala en', ruta: '/avisos' }): Promise<void> {
   try {
     if (!await pushADuenos(env, asunto, texto)) {
       await correoADuenos(env, asunto, `${texto}
 
-Apruébala o recházala en ${new URL(request.url).origin}/avisos`);
+${pie.frase} ${new URL(request.url).origin}${pie.ruta}`);
     }
   } catch (error) {
     console.error(JSON.stringify({ mensaje: 'aviso al dueño fallido', asunto, error: String(error) }));
@@ -47,6 +48,6 @@ export async function correoADuenos(env: Env, asunto: string, texto: string): Pr
 }
 
 /** Sin ctx (pruebas que llaman al handler directo) el aviso no se manda. */
-export function avisarDueno(env: Env, ctx: ExecutionContext | undefined, request: Request, asunto: string, texto: string) {
-  ctx?.waitUntil(enviarAviso(env, request, asunto, texto));
+export function avisarDueno(env: Env, ctx: ExecutionContext | undefined, request: Request, asunto: string, texto: string, pie?: { frase: string; ruta: string }) {
+  ctx?.waitUntil(enviarAviso(env, request, asunto, texto, pie));
 }

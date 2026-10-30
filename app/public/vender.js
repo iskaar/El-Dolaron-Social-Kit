@@ -84,6 +84,10 @@ export function estadoMia(pedido, ahoraMs) {
   if (pedido.estado === 'cancelado') return { clase: 'cerrada', texto: '✕ Cancelada' };
   if (pedido.estado !== 'apartado') return { clase: 'cerrada', texto: String(pedido.estado) };
   if (pedido.saldo > 0) return { clase: 'ok', texto: `✓ La tienda ya registró su pago · Recoger antes del ${fechaLegible(pedido.vence_en)}` };
+  // #609: el comprobante que ella mandó. Pendiente no se vence; rechazado trae el motivo de la tienda y puede mandar otro.
+  const reporte = pedido.pago_reportado;
+  if (reporte?.estado === 'pendiente') return { clase: 'aviso', texto: 'Pago enviado · la tienda lo revisa' };
+  if (reporte?.estado === 'rechazado') return { clase: 'alerta', texto: `⚠ La tienda no encontró el pago${reporte.motivo ? `: ${reporte.motivo}` : ''}` };
   const resta = Date.parse(pedido.vence_en) - ahoraMs;
   if (!(resta > 0)) return { clase: 'alerta', texto: '⚠ Ya venció. En unos minutos la pieza vuelve a la venta.' };
   const horas = Math.floor(resta / HORA);

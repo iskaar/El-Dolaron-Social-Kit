@@ -22,18 +22,20 @@ async function aJpeg(archivo) {
 /**
  * Sube el archivo del input, rellena los campos que el modelo leyo y deja en input.dataset la foto (key) y la fecha leida:
  * la pagina las manda al guardar. `ids` = { clave, monto, banco, aviso } de la pantalla; `$` = su getElementById.
+ * La revendedora (#609) lo usa con su propia ruta (`ids.ruta`) y sus propios textos (`ids.texto`: { leido(lista), noLeyo, sinRed }).
  */
 export async function adjuntar(input, ids, $) {
   const archivo = input.files?.[0];
   input.dataset.key = '';
   input.dataset.fecha = '';
   const aviso = $(ids.aviso);
+  const t = ids.texto ?? {};
   if (!archivo) { aviso.textContent = ''; return; }
   aviso.textContent = 'Leyendo el comprobante…';
   try {
     const blob = await aJpeg(archivo);
-    const r = await fetch('/api/transferencias/comprobante', { method: 'POST', headers: { 'content-type': 'image/jpeg' }, body: blob });
-    if (!r.ok) throw new Error(String(r.status));
+    const r = await fetch(ids.ruta ?? '/api/transferencias/comprobante', { method: 'POST', headers: { 'content-type': 'image/jpeg' }, body: blob });
+    if (!r.ok) throw Object.assign(new Error(String(r.status)), { servidor: [409, 413, 415, 429].includes(r.status) ? (await r.json().catch(() => ({}))).error : '' });
     const { key, lectura } = await r.json();
     input.dataset.key = key || '';
     input.dataset.fecha = lectura?.fecha || '';
@@ -42,10 +44,11 @@ export async function adjuntar(input, ids, $) {
     if (lectura?.monto) { $(ids.monto).value = String(lectura.monto / 100); leido.push('monto'); }
     if (lectura?.banco_emisor) { $(ids.banco).value = lectura.banco_emisor; leido.push('banco'); }
     aviso.textContent = leido.length
-      ? `Leí del comprobante: ${leido.join(', ')}. Compáralos con el comprobante y corrige lo que haga falta antes de cobrar.`
-      : 'No pude leer el comprobante: escribe la clave, el monto y el banco a mano. La foto sí se guardó.';
-  } catch {
+      ? (t.leido ? t.leido(leido) : `Leí del comprobante: ${leido.join(', ')}. Compáralos con el comprobante y corrige lo que haga falta antes de cobrar.`)
+      : (t.noLeyo ?? 'No pude leer el comprobante: escribe la clave, el monto y el banco a mano. La foto sí se guardó.');
+  } catch (error) {
     input.dataset.key = '';
-    aviso.textContent = 'No se pudo subir el comprobante (¿sin red?). Escribe la clave, el monto y el banco a mano.';
+    // Un rechazo del servidor (foto muy grande, tope de fotos) se dice tal cual; lo demas es falta de red.
+    aviso.textContent = error?.servidor || (t.sinRed ?? 'No se pudo subir el comprobante (¿sin red?). Escribe la clave, el monto y el banco a mano.');
   }
 }

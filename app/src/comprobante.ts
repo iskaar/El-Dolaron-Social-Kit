@@ -49,8 +49,8 @@ export function depurarLectura(cruda: Record<string, unknown>): Lectura {
   };
 }
 
-/** POST /api/transferencias/comprobante (caja, a nombre del cajero del PIN): guarda la imagen y devuelve su lectura. */
-export async function subirComprobante(request: Request, env: Env): Promise<Response> {
+/** Guarda la imagen y la lee. Lo comparten la caja (a nombre del cajero) y la revendedora (acotada a su apartado, en pagos-reportados.ts). */
+export async function guardarYLeer(request: Request, env: Env): Promise<Response | { key: string; lectura: Lectura | null }> {
   if (!/^image\/jpeg\b/i.test(request.headers.get('content-type') ?? '')) return json({ error: 'El comprobante debe ser una imagen JPEG.' }, 415);
   const datos = await request.arrayBuffer();
   if (datos.byteLength === 0 || datos.byteLength > MAX_BYTES) return json({ error: 'La imagen del comprobante es muy grande o está vacía.' }, 413);
@@ -62,7 +62,13 @@ export async function subirComprobante(request: Request, env: Env): Promise<Resp
   } catch (error) {
     console.error(JSON.stringify({ mensaje: 'lectura de comprobante fallida', error: String(error).slice(0, 200) }));
   }
-  return json({ key, lectura });
+  return { key, lectura };
+}
+
+/** POST /api/transferencias/comprobante (caja, a nombre del cajero del PIN): guarda la imagen y devuelve su lectura. */
+export async function subirComprobante(request: Request, env: Env): Promise<Response> {
+  const r = await guardarYLeer(request, env);
+  return r instanceof Response ? r : json(r);
 }
 
 /** GET /api/transferencias/:id/comprobante: la foto, solo para el dueno (la ruta es suya en cuentas.ts); nunca en cache. */
