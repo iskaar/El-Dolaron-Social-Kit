@@ -264,3 +264,11 @@ test('portal.js solo usa ids que existen en portal.html (campo de código y secc
   assert.ok(usados.includes('referido') && usados.includes('ref-copiar'));
   assert.deepEqual(usados.filter((id) => !html.includes(`id="${id}"`)), []);
 });
+
+test('la caja muestra el premio de referido en el cobro, con y sin red (los tres caminos y la sincronización)', () => {
+  const caja = readFileSync('public/caja.html', 'utf8');
+  assert.equal(caja.match(/venta\.referido_liberado = cuerpo\.referido_liberado \?\? 0;/g)?.length, 3);
+  assert.match(caja, /venta\.referido_liberado > 0 \? ` · \$\{avisoReferido\(venta\.referido_liberado\)\}`/);
+  assert.match(caja, /cuerpo\.referido_liberado > 0 \? ` \$\{avisoReferido\(cuerpo\.referido_liberado\)\}\.`/);
+  assert.match(caja, /Referido: \+\$\{dolares\(centavos\)\} para el cliente y para quien lo invitó/);
+});
