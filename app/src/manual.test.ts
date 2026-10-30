@@ -6,7 +6,10 @@ import { permiso, puede, esDeCaja, type Rol } from './cuentas.ts';
 import { estadoMia, agruparMias, cobradoMias, gananciaDe, gananciaSemana } from '../public/vender.js';
 
 const leer = (ruta: string) => readFileSync(ruta, 'utf8').replace(/\r\n/g, '\n');
-const manual = leer('public/manual.html');
+const html = leer('public/manual.html');
+const script = leer('public/manual.js');
+// El texto y la práctica viven en dos archivos (#623): las revisiones de abajo miran los dos juntos.
+const manual = html + script;
 const app = leer('public/vender.html') + leer('public/vender.js');
 const cuenta = (...roles: Rol[]) => ({ correo: 'x@prueba.mx', nombre: '', caja: '', activo: true, editar_inventario: false, roles });
 
@@ -38,6 +41,13 @@ test('cada data-etiqueta del manual existe literalmente en vender.html o vender.
   const mensajes = [...manual.matchAll(/(?:est\.(?:err|aviso) = |etiqueta\()'([^']+)'/g), ...manual.matchAll(/\['([^']+)', g\.\w+\]/g)].map((m) => m[1]);
   assert.ok(mensajes.length >= 6, String(mensajes.length));
   for (const mensaje of mensajes) assert.ok(app.includes(mensaje), `«${mensaje}» no está en vender.html ni vender.js`);
+});
+
+test('el script del manual es un archivo aparte: la CSP del portal público no permite scripts en línea (#623)', () => {
+  assert.match(html, /<script type="module" src="\/manual\.js"><\/script>/);
+  assert.deepEqual([...html.matchAll(/<script[^>]*>/g)].map((m) => m[0]), ['<script type="module" src="/manual.js">']);
+  assert.ok(!/\son[a-z]+\s*=/i.test(html), 'hay un manejador en línea (onclick, etc.)');
+  assert.match(script, /await import\('\/vender\.js'\)/);
 });
 
 test('el manual no hace red: sin fetch, sin API, sin wa.me, sin compartir del teléfono', () => {
