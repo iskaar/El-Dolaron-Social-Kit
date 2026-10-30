@@ -208,6 +208,14 @@ test('inversionista (#610): solo GET /tablero y GET /api/tablero; todo lo demas 
   assert.equal(puede(inversionista, permiso('/api/tablero', 'PUT')), false);
   assert.equal(puede(inversionista, permiso('/api/tablero', 'DELETE')), false);
   assert.equal(puede(inversionista, permiso('/tablero.js', 'GET')), true);   // codigo sin datos, como para cualquier cuenta
+  // Las vistas de detalle (?vista=) viajan por la misma ruta: el query no entra al permiso, asi que la regla es la misma (solo GET).
+  // Una ruta con la vista en el camino NO existe: cae en el dueno, y la vista que no existe la corta tablero.ts con 404.
+  for (const metodo of ['GET', 'POST', 'PUT', 'DELETE']) {
+    assert.equal(puede(inversionista, permiso('/api/tablero/ventas', metodo)), false, `${metodo} /api/tablero/ventas`);
+    assert.equal(puede(inversionista, permiso('/api/tablero/ventas/x', metodo)), false);
+  }
+  assert.equal(puede(inversionista, permiso('/api/tablero/cache-v1', 'GET')), false);
+  assert.equal(puede(usuario(['cajero']), permiso('/api/tablero', 'GET')), false);
   for (const [ruta, metodo] of [
     ['/reportes', 'GET'], ['/api/reportes', 'GET'], ['/api/reportes/tickets', 'GET'], ['/api/reportes/tickets.csv', 'GET'],
     ['/api/ventas/abc', 'GET'], ['/api/pedidos', 'GET'], ['/api/gastos', 'GET'], ['/api/cuentas', 'GET'], ['/api/avisos', 'GET'],
