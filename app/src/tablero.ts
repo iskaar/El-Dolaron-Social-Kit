@@ -125,6 +125,7 @@ export async function calcularTablero(env: Env, ahora = Date.now()) {
   const canal = (clave: string) => canales.results.find((f) => f.canal === clave);
   const comision = filasRevendedora.results.reduce((s, f) => s + gananciaDe({ estado: 'vendido', subtotal: f.subtotal }), 0);
   const revendedoras = canal('revendedoras');
+  const revendedorasVisibles = personasVisibles(revendedoras?.personas ?? 0) !== null;
 
   // --- inventario: solo agregados (sin la lista de piezas mas viejas)
   const semanasDeInventario = transcurridos >= 7 && delMes.total > 0
@@ -170,11 +171,15 @@ export async function calcularTablero(env: Env, ahora = Date.now()) {
     dias_en_venta: diasEnVenta.map(({ categoria, dias_promedio, n }) => ({ categoria, dias_promedio, n })),
     canales: {
       tienda: { total: canal('tienda')?.total ?? 0, tickets: canal('tienda')?.tickets ?? 0 },
-      whatsapp: { total: canal('whatsapp')?.total ?? 0, tickets: canal('whatsapp')?.tickets ?? 0 },
-      revendedoras: {
-        total: revendedoras?.total ?? 0, tickets: revendedoras?.tickets ?? 0, comision,
-        personas: personasVisibles(revendedoras?.personas ?? 0),
+      // Con menos de 5 revendedoras su venta y comision son casi el pago de una persona: van sumadas a WhatsApp.
+      whatsapp: {
+        total: (canal('whatsapp')?.total ?? 0) + (revendedorasVisibles ? 0 : revendedoras?.total ?? 0),
+        tickets: (canal('whatsapp')?.tickets ?? 0) + (revendedorasVisibles ? 0 : revendedoras?.tickets ?? 0),
+        incluye_revendedoras: !revendedorasVisibles,
       },
+      revendedoras: revendedorasVisibles
+        ? { total: revendedoras?.total ?? 0, tickets: revendedoras?.tickets ?? 0, comision, personas: revendedoras!.personas }
+        : null,
       mercado_libre: { estimado: true, total: ml?.total ?? 0, piezas: ml?.piezas ?? 0 },
     },
     clientes: {
