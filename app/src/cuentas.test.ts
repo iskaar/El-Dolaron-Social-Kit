@@ -208,6 +208,7 @@ test('inversionista (#610): solo GET /tablero y GET /api/tablero; todo lo demas 
   assert.equal(puede(inversionista, permiso('/api/tablero', 'PUT')), false);
   assert.equal(puede(inversionista, permiso('/api/tablero', 'DELETE')), false);
   assert.equal(puede(inversionista, permiso('/tablero.js', 'GET')), true);   // codigo sin datos, como para cualquier cuenta
+  assert.equal(puede(inversionista, permiso('/fuentes/anton-400.woff2', 'GET')), true);   // fuentes del tablero, sin datos
   // Las vistas de detalle (?vista=) viajan por la misma ruta: el query no entra al permiso, asi que la regla es la misma (solo GET).
   // Una ruta con la vista en el camino NO existe: cae en el dueno, y la vista que no existe la corta tablero.ts con 404.
   for (const metodo of ['GET', 'POST', 'PUT', 'DELETE']) {
