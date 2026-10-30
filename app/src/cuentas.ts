@@ -17,8 +17,9 @@ import { avisarDueno } from './avisos.ts';
 // `finanzas`: FEP. Toma fotos y ve solo sus piezas (propietario 'fep'); ver propietarioDe.
 // `auxiliar`: lleva gastos y nomina (Issue #326); no ve reportes, cuentas ni lo demas del dueno.
 // `revendedora`: externa (Issue #575). Solo /vender: aparta 48 h sin anticipo y ve lo suyo; nunca la caja.
-export type Rol = 'dueno' | 'cajero' | 'capturista' | 'computadora' | 'finanzas' | 'auxiliar' | 'revendedora';
-export const ROLES: readonly Rol[] = ['dueno', 'cajero', 'capturista', 'computadora', 'finanzas', 'auxiliar', 'revendedora'];
+// `inversionista`: socio capitalista (Issue #610). Solo ve /tablero y GET /api/tablero (agregados, sin personas). No es `socio`: esa palabra es el cliente Dolarones.
+export type Rol = 'dueno' | 'cajero' | 'capturista' | 'computadora' | 'finanzas' | 'auxiliar' | 'revendedora' | 'inversionista';
+export const ROLES: readonly Rol[] = ['dueno', 'cajero', 'capturista', 'computadora', 'finanzas', 'auxiliar', 'revendedora', 'inversionista'];
 /** Lo que recibe alguien al aprobarle el acceso si no se escoge otra cosa. */
 export const ROL_POR_OMISION: Rol = 'cajero';
 
@@ -64,6 +65,7 @@ const VENDER: Rol[] = [...CAJA, 'revendedora'];
 const TODOS: Rol[] = ['cajero', 'capturista'];
 const DUENO: Rol[] = [];
 const AUXILIAR: Rol[] = ['auxiliar'];
+const INVERSIONISTA: Rol[] = ['inversionista'];
 
 const PANTALLAS: Record<string, Rol[]> = {
   '/': TODOS,
@@ -88,6 +90,7 @@ const PANTALLAS: Record<string, Rol[]> = {
   '/avisos': CAJA,   // ventas de Mercado Libre por atender (Issue #429)
   '/tarjeta-bandas': TODOS,
   '/reportes': DUENO,
+  '/tablero': INVERSIONISTA,   // #610: solo lectura, agregados
   '/mercadolibre': DUENO,
   '/cuentas': DUENO,
   '/conteo': TODOS,
@@ -117,6 +120,7 @@ export function permiso(pathname: string, metodo: string): Regla {
   if ((ruta === '/api/camara/solicitud' && ['GET', 'PUT'].includes(metodo))
       || (metodo === 'POST' && /^\/api\/camara\/solicitud\/[^/]+\/(tomar|lista|cancelar)$/.test(ruta))) return CAPTURA;
 
+  if (ruta === '/api/tablero') return metodo === 'GET' ? INVERSIONISTA : DUENO;
   if (ruta === '/api/mensajes' || ruta === '/api/mensajes/responder') return DUENO;
   if (ruta === '/api/gastos' || /^\/api\/gastos\/[^/]+$/.test(ruta)) return AUXILIAR;
   if (ruta === '/api/nomina/entrada' || ruta === '/api/nomina/checador') return CAJA;
@@ -195,6 +199,9 @@ export const soloComputadora = (usuario: Usuario | null) =>
 export const esRevendedora = (usuario: Usuario | null) =>
   !!usuario?.activo && usuario.roles.includes('revendedora')
   && !usuario.roles.some((rol) => rol === 'dueno' || rol === 'cajero' || rol === 'computadora');
+
+/** Inversionista (#610): su unica pantalla es /tablero; el menu de la tienda no es para el. */
+export const esInversionista = (usuario: Usuario | null) => !!usuario?.activo && usuario.roles.includes('inversionista');
 
 /**
  * De quien son las piezas que esta persona captura y ve (Issue #298). FEP solo

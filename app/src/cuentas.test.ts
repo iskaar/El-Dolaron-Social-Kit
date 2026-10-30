@@ -198,3 +198,27 @@ test('050 sobre la base anterior conserva usuarios, stock e historial y no recon
     (id,producto_id,motivo,cantidad,antes,despues,ajustado_por,ajustado_en) values (?,'pieza',?,1,8,9,'prueba','')`).run(motivo, motivo);
   assert.deepEqual(db.prepare('pragma foreign_key_check').all(), []);
 });
+
+test('inversionista (#610): solo GET /tablero y GET /api/tablero; todo lo demas es del dueno', () => {
+  const inversionista = usuario(['inversionista']);
+  assert.equal(puede(inversionista, permiso('/tablero', 'GET')), true);
+  assert.equal(puede(inversionista, permiso('/tablero.html', 'GET')), true);
+  assert.equal(puede(inversionista, permiso('/api/tablero', 'GET')), true);
+  assert.equal(puede(inversionista, permiso('/api/tablero', 'POST')), false);
+  assert.equal(puede(inversionista, permiso('/api/tablero', 'PUT')), false);
+  assert.equal(puede(inversionista, permiso('/api/tablero', 'DELETE')), false);
+  assert.equal(puede(inversionista, permiso('/tablero.js', 'GET')), true);   // codigo sin datos, como para cualquier cuenta
+  for (const [ruta, metodo] of [
+    ['/reportes', 'GET'], ['/api/reportes', 'GET'], ['/api/reportes/tickets', 'GET'], ['/api/reportes/tickets.csv', 'GET'],
+    ['/api/ventas/abc', 'GET'], ['/api/pedidos', 'GET'], ['/api/gastos', 'GET'], ['/api/cuentas', 'GET'], ['/api/avisos', 'GET'],
+    ['/api/mensajes', 'GET'], ['/api/config', 'GET'], ['/api/config', 'PUT'], ['/caja', 'GET'], ['/inventario', 'GET'],
+    ['/', 'GET'], ['/index', 'GET'], ['/gastos', 'GET'], ['/nomina', 'GET'], ['/api/nomina', 'GET'],
+  ] as const) {
+    assert.equal(puede(inversionista, permiso(ruta, metodo)), false, `${metodo} ${ruta}`);
+  }
+  assert.equal(puede(usuario(['dueno']), permiso('/tablero', 'GET')), true);
+  assert.equal(puede(usuario(['cajero']), permiso('/tablero', 'GET')), false);
+  assert.equal(puede(usuario(['revendedora']), permiso('/api/tablero', 'GET')), false);
+  assert.equal(puede(usuario(['inversionista'], false), permiso('/tablero', 'GET')), false);
+  assert.deepEqual(leerRoles('inversionista, socio'), ['inversionista']);   // «socio» no es un rol
+});

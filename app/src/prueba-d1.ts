@@ -122,5 +122,5 @@ export function tienda() {
     // ignoreBOM: text() se come el BOM y las pruebas quieren verlo.
     return { status: r.status, texto: new TextDecoder('utf-8', { ignoreBOM: true }).decode(await r.arrayBuffer()), tipo: r.headers.get('content-type') ?? '' };
   };
-  return { db, env, pedir, pedirTexto, esperar, ctx };
+  return { db, env, pedir, pedirTexto, esperar, ctx, enviar };
 }

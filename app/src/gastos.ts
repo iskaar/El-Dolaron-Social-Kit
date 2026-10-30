@@ -14,6 +14,20 @@ const fechaValida = (valor: unknown): valor is string => {
   return !Number.isNaN(fecha.valueOf()) && fecha.toISOString().slice(0, 10) === valor;
 };
 
+/**
+ * Los gastos de un mes: los capturados mas los retiros de caja tipo gasto que no tienen su fila en `gastos`
+ * (un gasto de caja existe en las dos tablas y cuenta una sola vez). Binds: desde, hasta (YYYY-MM-DD, hasta
+ * excluido), `${desde}T00:00:00`, `${hasta}T00:00:00`. Lo reusa /api/tablero (#610).
+ */
+export const GASTOS_DEL_MES = `select id, fecha, categoria, importe, nota, origen, retiro_id, null as caja, creado_por, creado_en
+           from gastos where fecha >= ? and fecha < ?
+         union all
+         select r.id, date(r.creado_en, '-6 hours'), coalesce(nullif(r.categoria, ''), 'sin_categoria'), r.importe,
+                r.motivo, 'caja', null, r.caja, r.cajero, r.creado_en from retiros r
+          where r.tipo = 'gasto' and datetime(r.creado_en) >= datetime(?, '+6 hours')
+            and datetime(r.creado_en) < datetime(?, '+6 hours')
+            and not exists (select 1 from gastos g where g.retiro_id = r.id)`;
+
 export async function rutaGastos(request: Request, env: Env, url: URL, correo: string): Promise<Response> {
   if (request.method === 'GET') {
     const mes = url.searchParams.get('mes') ?? '';
@@ -21,16 +35,8 @@ export async function rutaGastos(request: Request, env: Env, url: URL, correo: s
     const desde = `${mes}-01`;
     const hasta = new Date(Date.UTC(Number(mes.slice(0, 4)), Number(mes.slice(5)), 1)).toISOString().slice(0, 10);
     const { results } = await env.DB.prepare(
-      `select id, fecha, categoria, importe, nota, origen, retiro_id, caja, creado_por, creado_en from (
-         select id, fecha, categoria, importe, nota, origen, retiro_id, null as caja, creado_por, creado_en
-           from gastos where fecha >= ? and fecha < ?
-         union all
-         select r.id, date(r.creado_en, '-6 hours'), coalesce(nullif(r.categoria, ''), 'sin_categoria'), r.importe,
-                r.motivo, 'caja', null, r.caja, r.cajero, r.creado_en from retiros r
-          where r.tipo = 'gasto' and datetime(r.creado_en) >= datetime(?, '+6 hours')
-            and datetime(r.creado_en) < datetime(?, '+6 hours')
-            and not exists (select 1 from gastos g where g.retiro_id = r.id)
-       ) order by fecha desc, creado_en desc`,
+      `select id, fecha, categoria, importe, nota, origen, retiro_id, caja, creado_por, creado_en from (${GASTOS_DEL_MES})
+       order by fecha desc, creado_en desc`,
     ).bind(desde, hasta, `${desde}T00:00:00`, `${hasta}T00:00:00`).all<{
       id: string; fecha: string; categoria: string; importe: number; nota: string; origen: string;
       retiro_id: string | null; caja: string | null; creado_por: string; creado_en: string;

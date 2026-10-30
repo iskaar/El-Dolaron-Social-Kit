@@ -173,10 +173,12 @@ const CLAVES_CONFIG = [
   ['pct_liquidacion', 'Liquidación (C) % del precio de lista'],
   ...MONTOS_BANDA.map((p) => [`banda_${p}`, `Banda $${p}`]),
   ['fondo_caja', 'Fondo por caja $'],
+  // Tablero de inversionistas (#610): meta de ventas del mes, en pesos; 0 = sin meta (se oculta la barra).
+  ['meta_ventas_mes', 'Meta de ventas del mes $ (tablero)'],
   // Captura por UPC (Issue #365): precio de Target en dólares x esto = precio de lista.
   ['tipo_cambio', 'Tipo de cambio (centavos por dólar, 1850 = $18.50)'],
 ];
-const EN_PESOS = new Set([...MONTOS_BANDA.map((p) => `banda_${p}`), 'fondo_caja']);
+const EN_PESOS = new Set([...MONTOS_BANDA.map((p) => `banda_${p}`), 'fondo_caja', 'meta_ventas_mes']);
 
 const cola = document.getElementById('cola');
 let puedeEditarInventario = true;   // se decide con /api/yo antes de pintar la cola
