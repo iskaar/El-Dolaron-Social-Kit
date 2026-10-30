@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { procesarRecortes, revisarRecortes, rutaRecortesAdmin, reiniciarRecorte } from './recortes.ts';
+import { procesarRecortes, revisarRecortes, ajustarRecortesViejos, rutaRecortesAdmin, reiniciarRecorte } from './recortes.ts';
 import { tienda } from './prueba-d1.ts';
 import { catalogoPublico } from './catalogo.ts';
 
@@ -20,9 +20,13 @@ function preparar(n = 1) {
   }
   return t;
 }
-const images = (fn: () => Promise<Response> = async () => new Response(new Uint8Array([9, 8]), { headers: { 'content-type': 'image/webp' } })) => ({
-  // Como el binding real: output() es async y ahí falla (9422 de cuota); response() es síncrono.
-  input() { return { transform() { return { async output() { const r = await fn(); return { response: () => r }; } }; } }; },
+const images = (fn: (pasos: any[]) => Promise<Response> = async () => new Response(new Uint8Array([9, 8]), { headers: { 'content-type': 'image/webp' } }), llamadas: any[][] = []) => ({
+  // Como el binding real: transform() encadena, output() es async y ahí falla (9422 de cuota); response() es síncrono.
+  input() {
+    const pasos: any[] = []; llamadas.push(pasos);
+    const cadena = { transform(o: any) { pasos.push(o); return cadena; }, async output() { const r = await fn(pasos); return { response: () => r }; } };
+    return cadena;
+  },
 });
 
 test('recortes: interruptor apagado, lote limitado a 20 y guarda WebP', async () => {
@@ -36,6 +40,22 @@ test('recortes: interruptor apagado, lote limitado a 20 y guarda WebP', async ()
     assert.equal(t.db.prepare("select count(*) n from productos where recorte_estado='listo'").get()?.n, 20);
     assert.ok((t.env.FOTOS as any).objetos.has(`recortes/${ID0}.webp`));
   } finally { t.db.close(); }
+});
+
+test('recortes: ajusta al producto y, si el ajuste falla, guarda el recorte sin ajustar (#421)', async () => {
+  for (const fallaAjuste of [false, true]) {
+    const t = preparar(); const llamadas: any[][] = [];
+    try {
+      await procesarRecortes(Object.assign(t.env, { IMAGES: images(async (pasos) => {
+        if (fallaAjuste && pasos.some((p) => p.trim)) throw Error('trim no soportado');
+        return new Response(new Uint8Array([9, 8]));
+      }, llamadas) }) as Env);
+      assert.deepEqual(llamadas[0], [{ segment: 'foreground' }, { trim: { border: { keep: 24 } } }]);
+      assert.deepEqual(llamadas.slice(1), fallaAjuste ? [[{ segment: 'foreground' }]] : []);
+      assert.equal(t.db.prepare('select recorte_estado from productos where id=?').get(ID0)?.recorte_estado, 'listo');
+      assert.ok((t.env.FOTOS as any).objetos.has(`recortes/${ID0}.webp`));
+    } finally { t.db.close(); }
+  }
 });
 
 test('recortes: cuota 9422 no marca; otro error marca error', async () => {
@@ -96,6 +116,10 @@ test('revisión: marca problemas, lo oculta, lo ordena y aprobar publica', async
     const listaResp = await rutaRecortesAdmin(new Request('https://x/api/recortes'), x.env as Env, '/api/recortes');
     assert.equal((await listaResp!.json() as any[])[0].id, ID0);
     assert.equal((await catalogo(x.env as Env, '/api/catalogo/recorte/ED-1'))!.status, 404);
+    const admin = await rutaRecortesAdmin(new Request('https://x'), x.env as Env, `/api/recortes/${ID0}/imagen`);
+    assert.equal(admin!.status, 200);
+    assert.deepEqual([...new Uint8Array(await admin!.arrayBuffer())], [1]);
+    assert.equal((await rutaRecortesAdmin(new Request('https://x'), x.env as Env, `/api/recortes/${uuid(9)}/imagen`))!.status, 404);
     assert.equal((await rutaRecortesAdmin(new Request('https://x', { method: 'POST' }), x.env as Env, `/api/recortes/${ID0}/aprobar`))!.status, 200);
     assert.ok(((await (await catalogo(x.env as Env))!.json() as any).piezas.find((p: any) => p.codigo === 'ED-1')).recorte);
   } finally { x.db.close(); }
@@ -123,4 +147,29 @@ test('un recorte listo sin revisión no se publica', async () => {
     const lista = await (await catalogo(x.env as Env))!.json() as any;
     assert.equal(lista.piezas.find((p: any) => p.codigo === 'ED-1').recorte, null);
   } finally { x.db.close(); }
+});
+
+test('ajuste de recortes viejos: solo trim, conserva la revisión, avanza el cursor y no revive uno reiniciado (#425)', async () => {
+  const t = preparar(4); const llamadas: any[][] = [];
+  try {
+    const fotos = t.env.FOTOS as any;
+    for (let i = 0; i < 3; i++) {
+      await fotos.put(`recortes/${uuid(i)}.webp`, new Uint8Array([1]));
+      t.db.prepare("update productos set recorte_estado='listo', recorte_revision='ok' where id=?").run(uuid(i));
+    }
+    t.db.prepare("update productos set recorte_estado='original' where id=?").run(uuid(3));
+    let reiniciado = false;
+    const env = Object.assign(t.env, { IMAGES: images(async () => {
+      // Se reinicia el tercero mientras se ajusta: su put condicional no debe revivirlo.
+      if (!reiniciado && llamadas.length === 3) { reiniciado = true; await reiniciarRecorte(t.env as Env, uuid(2)); }
+      return new Response(new Uint8Array([7]));
+    }, llamadas) }) as Env;
+    await ajustarRecortesViejos(env);
+    assert.deepEqual(llamadas, [[{ trim: { border: { keep: 24 } } }], [{ trim: { border: { keep: 24 } } }], [{ trim: { border: { keep: 24 } } }]]);
+    for (let i = 0; i < 2; i++) assert.deepEqual([...new Uint8Array(fotos.objetos.get(`recortes/${uuid(i)}.webp`))], [7]);
+    assert.equal(fotos.objetos.has(`recortes/${uuid(2)}.webp`), false);
+    assert.equal(t.db.prepare('select recorte_revision from productos where id=?').get(ID0)?.recorte_revision, 'ok');
+    await ajustarRecortesViejos(env);
+    assert.equal(llamadas.length, 3);
+  } finally { t.db.close(); }
 });

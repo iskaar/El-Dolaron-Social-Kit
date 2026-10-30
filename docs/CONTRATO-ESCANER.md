@@ -34,6 +34,22 @@
 > foto con nombre y precio. Esta regla rige en sandbox y producción; para otra
 > mercancía siguen vigentes las reglas de análisis descritas abajo.
 
+> **Inventario (Isaac, 22/10/2026, #446):** `/inventario` reúne Capturar, Buscar, Revisar e Imprimir (Bandas dentro de Imprimir). En `captura.viste.com.mx` se autorizan Capturar, Buscar y Revisar: consulta de precios, existencia y fotos; la edición exige la casilla «Editar inventario», y precio con etiqueta solo lo cambia el dueño. Ajustes (`/admin`) nunca se sirve en ese host. La captura propia de 24 h conserva sus permisos. `/pieza` redirige a Buscar; las cinco rutas anteriores siguen operativas hasta el visto bueno de Isaac. Sin red solo se encolan fotos: nunca cambios de existencia.
+
+> **Tarjeta del manifiesto y reposo (Isaac, 23/10/2026, #461, PR A):** en captura PC y celular, nombre/descripción y precio aparecen precargados antes de «Guardar e imprimir». El dueño puede cambiar ambos; una cuenta con «Editar inventario» puede cambiar solo el nombre; sin casilla ambos son de solo lectura. La impresión automática al guardar y reescanear se conserva y toma los datos confirmados por D1. La solicitud de precio #451 sigue en las vistas existentes después de guardar.
+
+> **Revisar antes de imprimir (Isaac, 28/10/2026, #573):** ninguna pieza **nueva** imprime etiqueta hasta que alguien pulsa «Guardar» en una tarjeta que muestra nombre/descripción, precio, cantidad y grado A/B/C (ropa: sin grado, con talla). Esto sustituye lo anterior de «imprime sola al quedar lista» para la foto en celular (mercancía y ropa) y para el UPC buscado en internet: al quedar `listo` la captura pasa a «por revisar» (✎ en la miniatura, conteo en la cabecera) y «Guardar e imprimir» confirma los cambios (`PATCH /api/borradores/:id/revision` con `confirmar: true`, que también acepta `nombre` y, fuera de ropa, `precio` libre) y entonces imprime la cantidad confirmada. Cambiar el grado sin tocar el precio recalcula el de su banda. Permisos como en la tarjeta UPC: nombre con «Editar inventario» o dueño, precio solo el dueño (#479: quien no puede lo pide al dueño y la pieza se confirma igual). La tarjeta UPC del manifiesto ahora muestra el grado editable. Re-escanear una pieza existente («Sumar k e imprimir k») no cambia. `productos.por_revisar` (migración 059; 1 al nacer de foto o de búsqueda en internet, 0 al confirmar) llega en `GET /api/borradores`, y la impresión automática de la PC (`/etiquetas`) omite lo `por_revisar` sin detener la cola; lo guardado desde la tarjeta UPC, la alta manual y lo anterior a la migración nacen en 0 y salen como siempre. Impresión manual (Imprimir/Reimprimir) no cambia.
+
+`POST /api/borradores/upc` conserva `{id, upc, stock, estado_fisico}` y acepta `nombre?: string` y `precio?: number`. El nombre se decodifica con las reglas existentes de entidades, se recorta por los extremos y a 120 caracteres; vacío o tipo inválido responde 400. Precio: centavos MXN, número entero seguro mayor a cero; si existe precio de lista positivo, no puede superarlo (400). Omitir campos conserva el cálculo del servidor. Un precio diferente al calculado por el servidor sin rol dueño responde **403**; nombre diferente sin `puedeEditarInventario` responde **403**, antes de sumar o insertar. En reintentos se compara contra la ficha guardada. El UUID conserva el resultado original y no repone stock; una captura distinta que coincide en UPC/grado suma sin sobrescribir nombre/precio ya registrados (#452). D1 sigue como único maestro.
+
+En `/inventario` móvil, Mercancía y Ropa apagan la cámara tras **60 s** sin lecturas, fotos ni interacción de captura (`INACTIVIDAD_CAMARA_MS`). Se usa el mismo apagado del interruptor «Cámara/Apagada», se detienen pistas y se muestra «Cámara en pausa · toca para encender». Tocar visor o interruptor la reanuda; el reloj no revierte la elección manual. Una hoja abierta o página oculta suspende el contador. Se conserva la liberación de cámara al salir de captura, ocultar la página o perder foco: se reanuda por gesto explícito.
+
+> **UPC real (#452):** una pieza visible por propietario, UPC sin ceros iniciales y grado. Recapturar suma con folio idempotente y motivo `entrada`; las pendientes también cuentan. `PATCH /api/borradores/:id` acepta `upc` (vacío lo quita) con «Editar inventario»; una coincidencia responde 409 con `existente`. Se reutiliza ese PATCH para conservar los permisos y consumidores actuales. `POST /api/piezas/:id/juntar {id, destino_id}` pasa existencia entre dos piezas etiquetadas del mismo grado, con dos ajustes de `correccion`, sin borrar código ni historial de la origen: queda en cero y sin UPC. La fusión anterior conserva sus restricciones cuando falta una etiqueta. Límite conjunto: 999. Antes de desplegar, Isaac aplica la migración aditiva 053; no hay índice único ni limpieza automática de duplicados históricos.
+
+`GET /api/piezas/repetidas?cursor=…` exige la misma casilla, limita por propietario y devuelve `grupos` y `siguiente`. Cada página inspecciona hasta 80 candidatas (81 con el testigo de continuación); agrupa sin confundir grados y propone la etiqueta ED más antigua. El cursor es opaco para el cliente. Un grupo puede continuar en la siguiente página; la UI une sus miembros por ID. Las bandas y los descartados quedan fuera. El análisis de IA no asigna UPC: sólo usa el enviado por la captura. Fotos con UPC, captura manual del escáner, PATCH y cambios de grado comparten la guarda; la captura manual general que envía UPC se valida en la corrección y rechaza coincidencias sin dejar borrador vacío. Familias de banda e importación Wincaja no fijan UPC y son `sin_inventario`.
+
+**Imagen de Target por UPC (#413, #524, #532):** al escanear un UPC del manifiesto se busca una vez la imagen de su página de Target. Toda imagen encontrada queda **confirmada sola** (`confirmado_por = 'sistema'`) y se guarda como foto de las piezas de ese UPC que no tienen foto; /inventario no muestra «Es esta». Se rechaza (422) únicamente si la página trae un solo `primary_barcode` distinto del UPC leído; con varios códigos o sin código se acepta igual (`codigo_verificado` lo distingue). Una candidata vieja sin confirmar se confirma al leerla por UPC y el cron de relleno confirma las que queden sin tocar. La confirmación humana por `PUT` es opcional: sigue disponible, queda registrada con el correo de quien la hace y no se pisa. La foto propia sigue teniendo prioridad: solo se llena `foto_key = ''`.
+
 ## Decisión de fondo
 
 El escáner **no** es la herramienta de captura del vendedor: la cámara lo es. El análisis con IA
@@ -76,7 +92,9 @@ Detalle completo en `docs/PLAN-ETIQUETAS-POR-BANDA.md`. Resumen:
 
 - La cámara **se abre y no se cierra**. Toca para disparar, dispara otra vez de inmediato. Sin
   preview que descartar, sin spinner, sin navegación.
-- Interruptor **Nuevo / Dañado** junto al obturador. Conserva su estado entre disparos y también se
+- Solo MG usa el interruptor de grado **A · Nuevo / B · Dañado / C · Liquidación** (como LiquiMart, Issue #371) junto al obturador.
+  A se ve nueva; B tiene uso, empaque dañado o piezas faltantes; C no cumple su función. El grado se imprime solo en la etiqueta de MG (Issue #453: letra A/B/C en un recuadro junto al precio, y la palabra en el pie
+  si cabe; instrucción de Isaac, revierte la regla de #371); B y C no van a Mercado Libre ni al catálogo público. Conserva su estado entre disparos y también se
   puede corregir tocando la última miniatura.
 - Tira de miniaturas abajo y un contador discreto: `24 fotos · 19 analizadas`. Es la única señal de
   que existe la IA.
@@ -84,11 +102,23 @@ Detalle completo en `docs/PLAN-ETIQUETAS-POR-BANDA.md`. Resumen:
 
 En sandbox y producción, tocar una miniatura permite cambiar el precio final entre
 $300/$200/$150/$120/$100/$80/$50 MXN y Nuevo/Dañado con «Guardar cambios», también después
-de subir. La condición no recalcula ese precio elegido. «Eliminar captura»
+de subir, mientras la pieza no tenga etiqueta. Con etiqueta (`codigo`) solo el dueño cambia el precio
+(`autorizarPrecio`, #479): la miniatura guarda lo demás, deja el precio como está y crea una solicitud de
+precio (#451) con el mensaje «Se pidió el cambio de precio al dueño»; el dueño la aprueba en «Precios por
+revisar». La condición no recalcula ese precio elegido. «Eliminar captura»
 descarta la captura completa tras un segundo toque; requiere conexión y no
 elimina piezas con venta o publicación. El servidor limita estas operaciones
 a capturas propias de las últimas 24 horas. Si ya salió una etiqueta, reemplazarla
 cuando cambie el precio o descartarla cuando se elimine la captura.
+
+«Reintentar análisis» sobre una pieza ya revisada (`listo`) no la sobrescribe (#479): el análisis guarda
+`precio_sugerido` y, si el precio difiere, crea una solicitud de precio (autor: quien reanalizó, o `ia` si el
+resultado llegó tarde tras una corrección). Revisar responde «Sugerencia enviada para aprobación».
+
+En el celular (Chrome de Android) la etiqueta se imprime desde /inventario (Issue #440): «Conectar impresora» en el chip,
+una etiqueta por pieza en existencia al guardar, +1 imprime 1 (Sumar N imprime N), y la pestaña Imprimir y Reimprimir funcionan como en la PC.
+Los capturistas también imprimen desde su celular. La PC y el celular no repiten la misma etiqueta (reclamo en D1; ver
+`docs/ARQUITECTURA-ESCANER.md`). Si no sale, la pieza queda pendiente y se reimprime.
 
 ### Reglas que no se negocian
 
@@ -109,7 +139,7 @@ Local, propio de este repositorio. No se copia el modelo de MarKit.
 | --- | --- |
 | `id`, `creado_en` | App |
 | `foto` (1024 px) | Cámara, guardada local primero |
-| `estado_fisico` | `nuevo` \| `danado`, del interruptor |
+| `estado_fisico` | `nuevo` (A) \| `danado` (B) \| `liquidacion` (C), del interruptor de MG; Ropa envía `nuevo` silenciosamente |
 | `estado_analisis` | `pendiente` \| `listo` \| `error` |
 | `nombre`, `categoria`, `precio_lista` | IA, editable en el admin |
 | `precio` | Calculado (§5), editable en el admin |
@@ -122,6 +152,7 @@ la pieza es desconocido y **nunca se infiere** (issue #2). No hay precio por cos
 
 ```
 precio = precio_lista × %categoria × (estado_fisico == 'danado' ? %danado : 1)
+         (liquidacion: precio_lista × %liquidacion, 20 % por defecto, sin %categoria ni sugerencia de IA)
 precio = redondear hacia arriba al múltiplo de $5
 precio = al múltiplo de $10 más cercano (de $5 en adelante sube) menos $1, mínimo $9 ($233 → $229, $235 → $239, $250 → $249, $12 → $9)
 destino = etiqueta individual, siempre (las bandas ya no son destino automático)
@@ -176,3 +207,11 @@ desde `/bandas` (`docs/PLAN-ETIQUETAS-POR-BANDA.md`).
 - Varias fotos por pieza, talla y color, publicación en eshop o marketplace.
 
 Cada uno entra con su propio Issue, cuando haya ventas reales que lo justifiquen.
+
+## Ropa sin grados (Isaac, 23/10/2026; #458/#459)
+
+A/B/C pertenece solo a Mercancía General. Ropa se identifica por `categoria='ropa'` en las piezas del servidor y por `precio_ropa` no nulo en la cola local. Las nuevas capturas de Ropa usan el valor predeterminado `estado_fisico='nuevo'` sin mostrar A: la columna es `text not null default 'nuevo'` y la validación de servidor acepta `nuevo|danado|liquidacion`. No se agrega migración ni se normalizan datos históricos.
+
+En `/inventario`, Ropa oculta grado en captura móvil/PC, corrección de miniatura local o subida, ficha, Revisar (filas, grupos solo de Ropa y Avanzado) y alta sin foto. Buscar conserva filas sin grado. La barra móvil queda con disparo centrado y cantidad; debe pasar QA en 360×640, 412×740 y 390×844.
+
+Las etiquetas de Ropa no imprimen recuadro, letra ni palabra de grado, también en reimpresiones de Buscar/ficha, Imprimir y `/etiquetas`; las de MG los conservan. `/api/etiquetas` incluye `categoria`. Un estado físico histórico de Ropa no genera aviso ni reimpresión por grado; nombre, talla y precio siguen invalidando la etiqueta. Las reglas #452 por propietario + UPC normalizado + estado físico se conservan en servidor; la UI no filtra Ropa por el grado elegido para MG.

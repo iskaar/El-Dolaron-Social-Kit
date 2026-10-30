@@ -61,3 +61,40 @@ test('only the intended public host, path and methods are served', async () => {
   assert.equal(response.status, 405);
   assert.equal(response.headers.get('allow'), 'GET, POST');
 });
+
+test('#507: /alta no existe sin ALTA_CONFIG_ID; con ella redirige a Meta, exige state y canjea sin exponer el token', async () => {
+  const alta = 'https://whatsapp.eldolaron.com/alta';
+  assert.equal((await worker.fetch(new Request(alta), env)).status, 404);
+  const conAlta = { ...env, ALTA_CONFIG_ID: '123456' };
+  const inicio = await worker.fetch(new Request(alta), conAlta);
+  assert.equal(inicio.status, 200);
+  const state = /alta_state=([\w-]+)/.exec(inicio.headers.get('set-cookie'))[1];
+  const enlace = new URL(/href="([^"]+)"/.exec(await inicio.text())[1].replaceAll('&#38;', '&'));
+  assert.equal(enlace.origin + enlace.pathname, 'https://www.facebook.com/v26.0/dialog/oauth');
+  assert.equal(enlace.searchParams.get('config_id'), '123456');
+  assert.equal(enlace.searchParams.get('redirect_uri'), alta);
+  assert.equal(enlace.searchParams.get('state'), state);
+  assert.equal(JSON.parse(enlace.searchParams.get('extras')).featureType, 'whatsapp_business_app_onboarding');
+
+  const original = globalThis.fetch;
+  const llamadas = [];
+  globalThis.fetch = async (url, opciones = {}) => {
+    llamadas.push([String(url), opciones.method ?? 'GET', opciones.headers?.authorization]);
+    if (String(url).includes('/oauth/access_token')) return Response.json({ access_token: 'tok-negocio' });
+    if (String(url).includes('/subscribed_apps')) return Response.json({ success: true });
+    if (String(url).includes('/debug_token')) return Response.json({ data: { granular_scopes: [
+      { scope: 'whatsapp_business_messaging', target_ids: ['777'] }, { scope: 'whatsapp_business_management', target_ids: ['888'] }] } });
+    return Response.json({ data: [{ id: '999', display_phone_number: '+52 444 543 7754', is_on_biz_app: true, platform_type: 'CLOUD_API' }] });
+  };
+  try {
+    const regreso = (st, cookie) => new Request(`${alta}?code=c0d3&state=${st}`, { headers: { cookie: `alta_state=${cookie}` } });
+    assert.match(await (await worker.fetch(regreso('otro', state), conAlta)).text(), /no coincide/);
+    assert.equal(llamadas.length, 0);
+    const texto = await (await worker.fetch(regreso(state, state), conAlta)).text();
+    assert.doesNotMatch(texto, /tok-negocio|test-app-secret/);
+    assert.match(texto, /&#34;waba_id&#34;: &#34;888&#34;/);
+    assert.match(texto, /&#34;is_on_biz_app&#34;: true/);
+    assert.match(llamadas[0][0], /client_secret=test-app-secret&redirect_uri=https%3A%2F%2Fwhatsapp.eldolaron.com%2Falta&code=c0d3$/);
+    assert.deepEqual(llamadas[2], ['https://graph.facebook.com/v26.0/888/subscribed_apps', 'POST', 'Bearer tok-negocio']);
+  } finally { globalThis.fetch = original; }
+});

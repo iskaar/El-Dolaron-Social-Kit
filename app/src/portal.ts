@@ -1,5 +1,6 @@
 import { saldo, codigoAleatorio, hashCodigo, basesListas, promocionIniciada } from './dolarones.ts';
 import { reclamarVale } from './vales.ts';
+import { programaActivo, revisarCodigo, resumenReferidos, sentenciasDeAlta, D_ALTA } from './referidos.ts';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const DIA = 86_400_000;
@@ -108,6 +109,13 @@ export async function registro(request: Request, env: Env, auth: Identidad): Pro
     body.bases_version !== env.BASES_APROBADAS_VERSION || body.acepta_bases !== true || body.declara_mayor_edad !== true)
     return json({ error: 'Nombre, declaración de mayoría de edad y aceptación vigente requeridos.' }, 400);
   let socio = await cliente(env, auth.uid);
+  // Referido (#489): solo cuenta una membresía nueva. Quien ya existe ignora el código (reintento idempotente).
+  let referenteId: string | null = null;
+  if (!socio && body.referido_codigo) {
+    const revision = await revisarCodigo(env, body.referido_codigo, auth);
+    if (!revision.ok) return json({ error: revision.error }, revision.status);
+    referenteId = revision.referenteId;
+  }
   if (socio) {
     try {
       await env.DB.prepare(`update clientes set telefono = ?, bases_version = ?,
@@ -122,23 +130,30 @@ export async function registro(request: Request, env: Env, auth: Identidad): Pro
   } else {
     const id = crypto.randomUUID();
     try {
-      await env.DB.prepare(`insert into clientes
+      // Con código, socio + referido + 50 D van juntos: si el tope se llenó entre tanto, no queda nada a medias.
+      await env.DB.batch([env.DB.prepare(`insert into clientes
         (id, numero, nombre, telefono, bases_version, bases_aceptadas_en, registrado_por, creado_en, auth_uid)
         select ?, coalesce(max(numero), 0) + 1, ?, ?, ?, ?, 'portal', ?, ? from clientes`)
         .bind(id, nombre, auth.telefono,
-          env.BASES_APROBADAS_VERSION, ahora.toISOString(), ahora.toISOString(), auth.uid).run();
+          env.BASES_APROBADAS_VERSION, ahora.toISOString(), ahora.toISOString(), auth.uid),
+        ...(referenteId ? sentenciasDeAlta(env, { nuevoId: id, referenteId, ahora }) : [])]);
     } catch (error) {
       socio = await cliente(env, auth.uid);
       if (!socio) {
         if (String(error).includes('clientes.telefono')) return json({ error: 'El teléfono requiere revisión presencial.' }, 409);
+        if (String(error).includes('tope de referidos'))
+          return json({ error: 'Ese código ya llegó a su límite de referidos. Quítalo para registrarte sin él.' }, 409);
         throw error;
       }
+      referenteId = null;
     }
   }
   socio = (await cliente(env, auth.uid))!;
-  if (!await premioActual(env, socio.id)) await premio(env, 'online', socio.id, ahora);
+  // #611: sin PREMIOS_APERTURA=si no se otorgan premios nuevos (los ya otorgados se respetan).
+  if (env.PREMIOS_APERTURA === 'si' && !await premioActual(env, socio.id)) await premio(env, 'online', socio.id, ahora);
   return json({ id: socio.id, numero: socio.numero, nombre: socio.nombre,
-    ...(await saldo(env, socio.id, new Date().toISOString())), premio: await premioActual(env, socio.id) }, 200);
+    ...(await saldo(env, socio.id, new Date().toISOString())), premio: await premioActual(env, socio.id),
+    referido_otorgado: referenteId ? D_ALTA : 0 }, 200);
 }
 
 export async function llegada(request: Request, env: Env, autor: string): Promise<Response> {
@@ -147,6 +162,8 @@ export async function llegada(request: Request, env: Env, autor: string): Promis
   const id = String(body.cliente_id ?? '');
   if (!UUID.test(id)) return json({ error: 'Socio inválido.' }, 400);
   if (!await env.DB.prepare('select 1 from clientes where id = ?').bind(id).first()) return json({ error: 'Socio no encontrado.' }, 404);
+  // #611: promoción de apertura apagada; no otorga ni registra primera llegada.
+  if (env.PREMIOS_APERTURA !== 'si') return json({ premio: await premioActual(env, id) ?? null });
   if (await hayRegalosLegados(env)) return json({ error: 'Resolver premios anteriores antes de abrir la promoción.' }, 409);
   const ahora = new Date();
   await env.DB.prepare(`insert or ignore into primera_llegada (singleton, cliente_id, acreditado_por, acreditado_en)
@@ -213,7 +230,7 @@ export async function portal(request: Request, env: Env, url: URL): Promise<Resp
     return json({ firebase: configurado ? {
       projectId: env.FIREBASE_PROJECT_ID, apiKey: env.FIREBASE_WEB_API_KEY,
       authDomain: env.FIREBASE_AUTH_DOMAIN || `${env.FIREBASE_PROJECT_ID}.firebaseapp.com`,
-    } : null, registro_abierto: promocionAbierta(env),
+    } : null, registro_abierto: promocionAbierta(env), referidos: programaActivo(env),
       bases_version: env.BASES_APROBADAS_VERSION || '', bases: env.PORTAL_BASES_TEXTO || '',
       aviso: env.PORTAL_AVISO_TEXTO || '' });
   }
@@ -273,6 +290,7 @@ export async function portal(request: Request, env: Env, url: URL): Promise<Resp
     const body = await request.json().then((c) => c ?? {}, () => ({})) as { codigo?: unknown };
     return reclamarVale(env, socio.id, String(body.codigo ?? ''));
   }
+  if (url.pathname === '/api/portal/referidos' && request.method === 'GET') return json(await resumenReferidos(env, socio));
   if (url.pathname === '/api/portal/yo' && request.method === 'GET')
     return json({ id: socio.id, numero: socio.numero, nombre: socio.nombre, telefono: `+52${socio.telefono}`, bases_version: socio.bases_version });
   if (url.pathname === '/api/portal/saldo' && request.method === 'GET') {

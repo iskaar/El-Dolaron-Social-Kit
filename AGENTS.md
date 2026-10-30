@@ -23,6 +23,7 @@ Este archivo es la instrucción común para cualquier agente que trabaje en el r
 - No conviertas plantillas con corchetes en afirmaciones publicables sin datos confirmados.
 - Si agregas, quitas o renombras un asset, actualiza `05-Guia-y-textos/Inventario-de-archivos.json` y revisa `EMPIEZA-AQUI.html`.
 - No agregues dependencias, servicios, automatizaciones de publicación ni credenciales para resolver un cambio de este kit.
+  Excepción autorizada por Isaac el 25/10/2026 (Issue #531): el sitio se publica solo desde `deploy-sitio.yml` con el secreto `CLOUDFLARE_API_TOKEN`, (que también regenera la pila de la portada cada semana). No ampliarlo sin nueva autorización.
 
 ## Entrega del agente
 

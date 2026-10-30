@@ -1,0 +1,375 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>El Dolarón — avisos</title>
+<!-- Issue #600: se instala como app para recibir notificaciones push (en iPhone, solo así). -->
+<link rel="manifest" href="/avisos.webmanifest" crossorigin="use-credentials">
+<link rel="apple-touch-icon" href="/icono-app.png">
+<meta name="theme-color" content="#16366B">
+<style>
+  :root { --azul:#16366B; --rojo:#D72B32; --verde:#1f7a4d; --amarillo:#FFD447; --linea:#dfe3ea; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: #f4f6f9; color: #1a1f2b; font-family: system-ui, -apple-system, sans-serif; }
+  header { background: var(--azul); color: #fff; padding: 10px 18px; display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+  header h1 { font-size: 17px; margin: 0; flex: 1; }
+  header a { color: var(--amarillo); font-size: 13px; }
+  main { max-width: 720px; margin: 0 auto; padding: 16px; display: grid; gap: 12px; }
+  h2 { margin: 0; font-size: 18px; color: var(--azul); }
+  .nota { font-size: 13px; color: #5b6478; }
+  .venta { background: #fff; border: 1px solid var(--linea); border-left: 6px solid var(--azul); border-radius: 12px;
+    padding: 12px; display: grid; grid-template-columns: 72px 1fr; gap: 12px; align-items: start; }
+  .venta.mal { border-left-color: var(--rojo); }
+  .venta.cancelada { border-left-color: #78839a; }
+  .venta img { width: 72px; height: 72px; object-fit: cover; border-radius: 8px; background: #eef1f6; }
+  .nombre { font-weight: 700; font-size: 16px; }
+  .codigo { font-family: ui-monospace, monospace; }
+  .accion { margin-top: 6px; font-weight: 700; color: var(--azul); }
+  .venta.mal .accion { color: var(--rojo); }
+  .botones { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
+  button, a.boton { font: inherit; cursor: pointer; border: 1px solid var(--azul); background: #fff; color: var(--azul);
+    border-radius: 10px; padding: 0 14px; min-height: 44px; font-size: 15px; font-weight: 700;
+    display: inline-flex; align-items: center; text-decoration: none; }
+  button.relleno { background: var(--azul); color: #fff; }
+  button:disabled { opacity: .5; cursor: wait; }
+  button:focus-visible, a:focus-visible { outline: 3px solid var(--amarillo); outline-offset: 2px; }
+  .vacio { background: #fff; border: 1px solid var(--linea); border-radius: 12px; padding: 24px; text-align: center; color: #5b6478; }
+  .error { color: var(--rojo); font-size: 14px; min-height: 18px; }
+  .ok { color: var(--verde); font-size: 14px; font-weight: 700; }
+  .ok:empty { display: none; }
+  .venta { grid-template-columns: 72px minmax(0, 1fr); }
+  .venta.sola { grid-template-columns: minmax(0, 1fr); }
+  .venta > div { min-width: 0; overflow-wrap: anywhere; }
+  .venta + .venta { margin-top: 10px; }
+  .aviso-fila { color: var(--rojo); font-size: 14px; margin-top: 6px; }
+  .aviso-fila:empty { display: none; }
+  button.peligro { border-color: var(--rojo); color: var(--rojo); }
+  .motivo { margin-top: 6px; white-space: pre-wrap; }
+  .grupo { display: grid; gap: 8px; }
+</style>
+<script src="/cajero.js"></script>
+</head>
+<body>
+<header><h1>Avisos</h1><a href="/caja">Caja</a><a href="/">Inicio</a></header>
+<main>
+  <div id="push" class="nota" hidden>
+    <button id="activar-push" type="button" class="relleno">Activar notificaciones</button>
+    <div id="push-estado" role="status"></div>
+  </div>
+  <section id="descuentos" class="grupo" hidden>
+    <h2 id="t-descuentos"></h2>
+    <div id="l-descuentos" aria-live="polite"></div>
+  </section>
+  <section id="cancelaciones" class="grupo" hidden>
+    <h2 id="t-cancelaciones"></h2>
+    <div id="l-cancelaciones" aria-live="polite"></div>
+  </section>
+  <section id="acceso" class="grupo" hidden>
+    <h2 id="t-acceso"></h2>
+    <div id="l-acceso" aria-live="polite"></div>
+  </section>
+  <section id="precios" class="grupo" hidden>
+    <h2 id="t-precios"></h2>
+    <div id="l-precios" aria-live="polite"></div>
+  </section>
+  <section id="transferencias" hidden>
+    <h2>Transferencias por validar</h2>
+    <div class="nota">Banxico no confirmó estas transferencias (no la encontró o no coincide con lo capturado). El cobro ya se hizo: revisa el dinero en la cuenta de la tienda y, si llegó, márcala como validada. Solo el dueño puede validarlas.</div>
+    <div id="lista-transferencias" aria-live="polite"></div>
+  </section>
+  <h2>Ventas de Mercado Libre por atender</h2>
+  <div class="nota">Cada venta se queda aquí hasta que alguien la marca. Se actualiza sola cada 30 segundos.</div>
+  <div class="ok" id="ok" role="status"></div>
+  <div class="error" id="error" role="alert"></div>
+  <div id="lista" aria-live="polite"></div>
+</main>
+<script type="module">
+// Centro de avisos (Issue #429). Ninguna venta de ML se pierde: queda a la
+// vista hasta que un cajero la marca, y el servidor guarda quien y cuando.
+const $ = (id) => document.getElementById(id);
+const h = (tag, attrs = {}, ...hijos) => {
+  const el = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs)) if (v != null) el.setAttribute(k, v);
+  el.append(...hijos.flat().filter((x) => x != null));
+  return el;
+};
+const pesos = (centavos) => `$${(centavos / 100).toLocaleString('es-MX', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+const fecha = (iso) => new Date(iso).toLocaleString('es-MX', { dateStyle: 'medium', timeStyle: 'short' });
+
+/** Qué hacer con la venta y cómo se llama el botón para marcarla. */
+function queHacer(v) {
+  if (v.estado === 'cancelada' && v.conflicto) return ['cancelada', 'Mercado Libre ya canceló esta venta. No había pieza que apartar: no hay nada que enviar.', 'Enterado'];
+  if (v.estado === 'cancelada') return ['cancelada', 'Mercado Libre canceló esta venta: no la envíes y regresa la pieza al piso.', 'Ya la regresé'];
+  if (v.conflicto) return ['mal', 'No había existencia en tienda: cancela la venta en Mercado Libre y avisa al comprador.', 'Ya la cancelé en ML'];
+  return ['', 'Sácala del piso de venta y empácala para el envío.', 'Ya la aparté'];
+}
+
+async function atender(v, boton) {
+  boton.disabled = true;
+  $('error').textContent = '';
+  try {
+    const r = await fetch(`/api/avisos/ml/${encodeURIComponent(v.order_id)}/${encodeURIComponent(v.ml_item_id)}`, { method: 'POST' });
+    // 409: otra caja la marcó primero; la lista nueva ya no la trae.
+    if (!r.ok && r.status !== 409) throw new Error((await r.json().catch(() => ({}))).error ?? `Error ${r.status}`);
+  } catch (error) {
+    $('error').textContent = `No se pudo marcar: ${error.message}. Intenta otra vez.`;
+  }
+  await cargar();
+}
+
+function fila(v) {
+  const [clase, texto, etiqueta] = queHacer(v);
+  const boton = h('button', { type: 'button', class: 'relleno' }, etiqueta);
+  boton.addEventListener('click', () => atender(v, boton));
+  return h('div', { class: `venta ${clase}` },
+    h('img', { src: `/api/foto/${encodeURIComponent(v.producto_id)}`, alt: '', loading: 'lazy', onerror: "this.style.visibility='hidden'" }),
+    h('div', {},
+      h('div', { class: 'nombre' }, h('span', { class: 'codigo' }, v.codigo), ' · ', v.nombre),
+      h('div', { class: 'nota' }, `${v.cantidad} ${v.cantidad === 1 ? 'pieza' : 'piezas'} · ${fecha(v.recibido_en)} · Orden ${v.order_id}`),
+      h('div', { class: 'accion' }, texto),
+      h('div', { class: 'botones' }, boton,
+        h('a', { class: 'boton', href: `https://www.mercadolibre.com.mx/ventas/${encodeURIComponent(v.order_id)}/detalle`,
+          target: '_blank', rel: 'noopener noreferrer' }, 'Ver en ML ↗'))));
+}
+
+// Transferencias que Banxico no confirmó (#603). Validarlas es del dueño; la caja solo las ve.
+let esDueno = false;
+const yoListo = fetch('/api/yo').then((r) => r.json()).then((y) => { esDueno = !!y.usuario?.roles?.includes('dueno'); }).catch(() => {});
+
+async function validar(t, boton) {
+  boton.disabled = true;
+  $('error').textContent = '';
+  try {
+    const r = await fetch(`/api/avisos/transferencias/${t.id}/validar`, { method: 'POST' });
+    if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error ?? `Error ${r.status}`);
+  } catch (error) {
+    $('error').textContent = `No se pudo validar: ${error.message}. Intenta otra vez.`;
+  }
+  await cargar();
+}
+
+function filaTransferencia(t) {
+  const motivo = t.estado === 'no_coincide' ? 'El CEP de Banxico existe pero no coincide con el monto o la cuenta capturados.' : 'Banxico no encontró esta transferencia.';
+  const boton = h('button', { type: 'button', class: 'relleno' }, 'Ya llegó: validar a mano');
+  boton.addEventListener('click', () => validar(t, boton));
+  return h('div', { class: 'venta mal', style: 'grid-template-columns: 1fr' },
+    h('div', {},
+      h('div', { class: 'nombre' }, pesos(t.monto), ' · ', t.donde),
+      h('div', { class: 'nota' }, `Clave ${t.clave} · ${fecha(t.registrado_en)}`),
+      h('div', { class: 'accion' }, motivo),
+      esDueno ? h('div', { class: 'botones' }, boton,
+        t.comprobante ? h('a', { class: 'boton', href: `/api/transferencias/${t.id}/comprobante`, target: '_blank', rel: 'noopener noreferrer' }, 'Ver comprobante ↗') : null)
+        : h('div', { class: 'nota' }, 'Lo valida el dueño.')));
+}
+
+// Aprobaciones del dueño desde el celular (Issue #607): mismas APIs que /cuentas e /inventario.
+// Cada sección se lee por separado: si una falla, las demás se siguen pintando.
+const erroresFila = {};   // por id de solicitud: sobrevive a un repintado
+const firmas = {};        // JSON de lo último pintado: si nada cambió no se repinta (y no se borra un error a la vista)
+const conteos = { ml: 0, descuentos: 0, cancelaciones: 0, acceso: 0, precios: 0 };
+const fallas = {};
+let ultimaFalla = '';
+function mostrarFallas() {
+  const texto = Object.values(fallas).filter(Boolean).join(' ');
+  if (texto !== ultimaFalla) { ultimaFalla = texto; $('error').textContent = texto; }
+}
+function limpiarError() { ultimaFalla = ''; $('error').textContent = ''; $('ok').textContent = ''; }
+function pintarTitulo() {
+  const por = Object.values(conteos).reduce((a, b) => a + b, 0);
+  document.title = por ? `(${por}) El Dolarón — avisos` : 'El Dolarón — avisos';
+}
+
+const boton = (texto, clase, alClic) => {
+  const b = h('button', { type: 'button', class: clase }, texto);
+  b.addEventListener('click', () => alClic(b.closest('.venta')));
+  return b;
+};
+const tarjeta = (id, img, hijos, botones) => h('div', { class: `venta${img ? '' : ' sola'}` },
+  img,
+  h('div', {}, ...hijos, h('div', { class: 'botones' }, ...botones), h('div', { class: 'aviso-fila', role: 'alert' }, erroresFila[id] ?? '')));
+
+/** POST de una resolución. Error: se reactivan los botones y se ve el del servidor. 409: otra persona ya la resolvió, se recarga. */
+async function enviar(id, fila, url, cuerpo, exito) {
+  const botones = [...fila.querySelectorAll('button')];
+  botones.forEach((b) => { b.disabled = true; });
+  fila.querySelector('.aviso-fila').textContent = '';
+  limpiarError();
+  try {
+    const r = await fetch(url, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(cuerpo) });
+    const d = await r.json().catch(() => ({}));
+    if (r.status === 409) $('error').textContent = d.error ?? 'Otra persona ya la resolvió.';
+    else if (!r.ok) throw new Error(d.error ?? `Error ${r.status}`);
+    else if (exito) $('ok').textContent = exito;
+  } catch (error) {
+    erroresFila[id] = `No se pudo: ${error.message}. Intenta otra vez.`;
+    fila.querySelector('.aviso-fila').textContent = erroresFila[id];
+    botones.forEach((b) => { b.disabled = false; });
+    return;
+  }
+  delete erroresFila[id];
+  for (const k of Object.keys(firmas)) delete firmas[k];
+  await cargar();
+}
+
+const resolverUrl = (s) => `/api/solicitudes/${encodeURIComponent(s.id)}/resolver`;
+const aprobarRechazar = (s, aprobar = 'Aprobar') => [
+  boton(aprobar, 'relleno', (f) => enviar(s.id, f, resolverUrl(s), { aprobar: true })),
+  boton('Rechazar', 'peligro', (f) => enviar(s.id, f, resolverUrl(s), { aprobar: false })),
+];
+
+function filaDescuento(s) {
+  const cuanto = s.tipo === 'porcentaje' ? `${s.valor}% (${pesos(s.monto)})` : pesos(s.monto);
+  return tarjeta(s.id, null, [
+    h('div', { class: 'nombre' }, `${s.nombre || s.correo} pide ${cuanto} de descuento`),
+    h('div', { class: 'nota' }, `${s.correo} · pidió ${fecha(s.creado_en)}`),
+    h('div', {}, `Ticket ${pesos(s.subtotal)} → `, h('b', {}, pesos(s.subtotal - s.monto))),
+    h('div', { class: 'motivo' }, s.motivo),
+  ], aprobarRechazar(s));
+}
+
+function filaCancelacion(s) {
+  return tarjeta(s.id, null, [
+    h('div', { class: 'nombre' }, `${s.nombre || s.correo} pide cancelar una venta`),
+    h('div', { class: 'nota' }, `${s.correo} · pidió ${fecha(s.creado_en)}`),
+    h('div', {}, `Ticket ${String(s.venta_id ?? '').slice(0, 8)} · `, h('b', {}, s.total == null ? '—' : pesos(s.total)),
+      ` · vendido ${s.venta_creado_en ? fecha(s.venta_creado_en) : '—'}`),
+    h('div', { class: 'motivo' }, s.motivo),
+  ], aprobarRechazar(s));
+}
+
+function filaAcceso(s) {
+  return tarjeta(s.id, null, [
+    h('div', { class: 'nombre' }, `${s.nombre} pide entrar`),
+    h('div', { class: 'nota' }, `${s.correo} · ${fecha(s.creado_en)}`),
+    h('div', { class: 'motivo' }, s.justificacion),
+  ], [...aprobarRechazar(s, 'Aprobar como cajero'), h('a', { class: 'boton', href: '/cuentas' }, 'Otro rol en Cuentas ↗')]);
+}
+
+// Igual que inventario-precio.js: un cambio de más de la mitad del precio pide confirmar.
+const cambioGrande = (actual, nuevo) => actual > 0 && Math.abs(nuevo - actual) * 2 > actual;
+
+function filaPrecio(s) {
+  const url = `/api/solicitudes-precio/${encodeURIComponent(s.id)}`;
+  const botones = [];
+  if (s.precio_sugerido != null) {
+    botones.push(boton(`Aplicar ${pesos(s.precio_sugerido)}`, 'relleno', async (f) => {
+      if (cambioGrande(s.precio, s.precio_sugerido)
+        && !confirm(`El precio cambia de ${pesos(s.precio)} a ${pesos(s.precio_sugerido)} (${Math.round((s.precio_sugerido - s.precio) / s.precio * 100)} %). ¿Seguro?`)) return;
+      await enviar(s.id, f, url, { accion: 'aplicar', precio: s.precio_sugerido, precio_esperado: s.precio },
+        'Precio cambiado: reimprime la etiqueta desde Inventario.');
+    }));
+  }
+  botones.push(boton('Dejar igual', '', (f) => enviar(s.id, f, url, { accion: 'rechazar' })));
+  botones.push(h('a', { class: 'boton', href: `/inventario?pieza=${encodeURIComponent(s.codigo)}` }, 'Abrir en Inventario ↗'));
+  return tarjeta(s.id,
+    h('img', { src: `/api/foto/${encodeURIComponent(s.producto_id)}`, alt: '', loading: 'lazy', onerror: "this.style.visibility='hidden'" }), [
+      h('div', { class: 'nombre' }, h('span', { class: 'codigo' }, s.codigo), ' · ', s.nombre),
+      h('div', {}, `Ahora ${pesos(s.precio)} · `, h('b', {}, s.sentido === 'subir' ? '▲ Está barato' : '▼ Está caro'),
+        s.precio_sugerido != null ? ` · sugerido ${pesos(s.precio_sugerido)}` : ' · sin precio sugerido'),
+      s.nota ? h('div', { class: 'motivo' }, s.nota) : null,
+      h('div', { class: 'nota' }, `${s.pedido_por} · ${fecha(s.pedido_en)}`),
+    ], botones);
+}
+
+const SECCIONES = {
+  descuentos: { url: '/api/solicitudes/descuentos', titulo: 'Descuentos por aprobar', fila: filaDescuento },
+  cancelaciones: { url: '/api/solicitudes/cancelaciones', titulo: 'Cancelaciones por aprobar', fila: filaCancelacion },
+  // acceso viene dentro de /api/cuentas (ahí también están los usuarios; aquí solo importan las solicitudes)
+  acceso: { url: '/api/cuentas', titulo: 'Solicitudes de acceso', fila: filaAcceso, lista: (d) => d.solicitudes.filter((x) => x.tipo === 'acceso') },
+  precios: { url: '/api/solicitudes-precio?estado=pendiente', titulo: 'Precios por revisar', fila: filaPrecio, lista: (d) => d.solicitudes },
+};
+
+async function cargarSeccion(clave) {
+  const { url, titulo, fila, lista = (d) => d } = SECCIONES[clave];
+  try {
+    const r = await fetch(url);
+    if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error ?? `Error ${r.status}`);
+    const filas = lista(await r.json());
+    fallas[clave] = '';
+    conteos[clave] = filas.length;
+    const firma = JSON.stringify(filas);
+    if (firma === firmas[clave]) return;
+    firmas[clave] = firma;
+    $(clave).hidden = filas.length === 0;
+    $(`t-${clave}`).textContent = `${titulo} (${filas.length})`;
+    $(`l-${clave}`).replaceChildren(...filas.map(fila));
+  } catch (error) {
+    fallas[clave] = `No se pudo leer «${titulo}» (${error.message}). Se reintenta sola.`;
+  }
+}
+
+async function cargarMl() {
+  try {
+    const r = await fetch('/api/avisos');
+    if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error ?? `Error ${r.status}`);
+    const { ventas_ml, transferencias = [] } = await r.json();
+    fallas.ml = '';
+    $('transferencias').hidden = transferencias.length === 0;
+    $('lista-transferencias').replaceChildren(...transferencias.map(filaTransferencia));
+    $('lista').replaceChildren(...(ventas_ml.length ? ventas_ml.map(fila)
+      : [h('div', { class: 'vacio' }, 'Nada por atender.')]));
+    conteos.ml = ventas_ml.length + transferencias.length;
+  } catch (error) {
+    fallas.ml = `No se pudo leer la lista (${error.message}). Se reintenta sola.`;
+  }
+}
+
+async function cargar() {
+  await yoListo;
+  // La caja no llama a las rutas del dueño (darían 403): ve lo mismo de siempre.
+  await Promise.all([cargarMl(), ...(esDueno ? Object.keys(SECCIONES).map(cargarSeccion) : [])]);
+  mostrarFallas();
+  pintarTitulo();
+}
+await yoListo;
+cargar();
+// El dueño revisa cada 10 s: en la caja hay alguien esperando su descuento o cancelación.
+setInterval(cargar, esDueno ? 10_000 : 30_000);
+
+// Notificaciones push al dueño (Issue #600): el botón «Ayuda» de la caja llega aquí.
+// En iPhone solo existen dentro de la app agregada a la pantalla de inicio (iOS 16.4+).
+async function prepararPush() {
+  const r = await fetch('/api/push/clave').catch(() => null);
+  if (!r || r.status === 403) return;   // solo el dueño
+  const { clave, error } = await r.json().catch(() => ({}));
+  $('push').hidden = false;
+  const estado = (texto) => { $('push-estado').textContent = texto; };
+  // Sin el secreto VAPID_JWK (503) el dueño ve por qué no hay botón, en vez de nada.
+  if (!r.ok) {
+    $('activar-push').hidden = true;
+    return estado(`Notificaciones no disponibles: ${error ?? `error ${r.status}`}`);
+  }
+  if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
+    $('activar-push').hidden = true;
+    return estado('En iPhone: en Safari toca Compartir → «Agregar a inicio» y abre Avisos desde ese ícono para activarlas.');
+  }
+  const registro = await navigator.serviceWorker.register('/sw-avisos.js', { scope: '/avisos' });
+  if (Notification.permission === 'granted' && await registro.pushManager.getSubscription()) {
+    estado('Activas en este dispositivo. Tócalo otra vez para mandarte una prueba.');
+  }
+  $('activar-push').addEventListener('click', async () => {
+    $('activar-push').disabled = true;
+    try {
+      // iOS solo pregunta si requestPermission va directo en el toque.
+      if (await Notification.requestPermission() !== 'granted') throw new Error('sin permiso; actívalas en Ajustes → Notificaciones → Avisos');
+      await navigator.serviceWorker.ready;
+      const llave = Uint8Array.from(atob(clave.replace(/-/g, '+').replace(/_/g, '/')), (c) => c.charCodeAt(0));
+      const suscripcion = await registro.pushManager.getSubscription()
+        ?? await registro.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: llave });
+      const g = await fetch('/api/push/suscripcion', {
+        method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(suscripcion),
+      });
+      const cuerpo = await g.json().catch(() => ({}));
+      if (!g.ok) throw new Error(cuerpo.error ?? `Error ${g.status}`);
+      estado(cuerpo.prueba ? 'Listo: te mandamos una notificación de prueba.' : 'Guardado, pero la prueba no salió. Revisa los logs del Worker.');
+    } catch (error) {
+      estado(`No se pudo: ${error.message}`);
+    }
+    $('activar-push').disabled = false;
+  });
+}
+prepararPush();
+</script>
+</body>
+</html>

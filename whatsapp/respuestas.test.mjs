@@ -2,20 +2,49 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createHmac } from 'node:crypto';
 import worker from './worker.mjs';
-import { respuestaPara } from './respuestas.mjs';
+import { esSimple, respuestaFija, respuestaPara } from './respuestas.mjs';
+
+const GRUPOS = [/eldolaron\.com\/ropa/, /eldolaron\.com\/general/, /maps\.app\.goo\.gl\/RgWXq1AUvyXsV9ts6/];
 
 test('preguntas del FAQ reciben la respuesta aprobada, con o sin acentos', () => {
-  assert.match(respuestaPara('¿A qué hora abren?'), /11:00 a 20:00/);
+  assert.match(respuestaPara('¿A qué hora abren?'), /11 a\. m\. a 8 p\. m\./);
   assert.match(respuestaPara('cual es su telefono'), /444 543 7754/);
-  assert.match(respuestaPara('Hacen envíos a domicilio?'), /solo en sucursal/);
-  assert.match(respuestaPara('hola buenas tardes'), /gracias por escribir/);
+  assert.match(respuestaPara('Hacen envíos a domicilio?'), /el equipo te confirma/);
+  const saludo = respuestaPara('hola buenas tardes');
+  assert.match(saludo, /gracias por escribir/);
+  for (const enlace of GRUPOS) assert.match(saludo, enlace);
+  assert.doesNotMatch(saludo, /inauguraci/i);
 });
 
-test('lo no confirmado (ubicacion, precios) recibe el mensaje de respaldo con telefono y horario', () => {
-  for (const pregunta of ['¿Dónde están?', 'cuanto cuesta el sofa', 'tienen promocion']) {
-    assert.match(respuestaPara(pregunta), /no tengo esa información.*444 543 7754/);
+test('sin promocion vigente: las preguntas de promo invitan a los grupos y a la tienda; ubicacion y apartado siguen (#583)', () => {
+  for (const pregunta of ['¿A qué hora es la inauguración?', 'tienen promocion', 'cómo funciona el cupón de 100 pesos', 'hay descuento?']) {
+    const r = respuestaPara(pregunta);
+    assert.match(r, /no tenemos ninguna promoción vigente/);
+    for (const enlace of GRUPOS) assert.match(r, enlace);
+    assert.doesNotMatch(r, /inauguraci|\$100|primeras 100/i);
   }
-  assert.match(respuestaPara(undefined), /no tengo esa información/);
+  for (const pregunta of ['quiero unirme al grupo', 'tienen grupos de whatsapp']) {
+    for (const enlace of GRUPOS.slice(0, 2)) assert.match(respuestaPara(pregunta), enlace);
+  }
+  const ubicacion = respuestaPara('¿Dónde están?');
+  assert.match(ubicacion, /Jardín Hidalgo 129/);
+  assert.match(ubicacion, GRUPOS[2]);
+  assert.match(respuestaPara('me lo pueden apartar'), /15 %.*7 días/);
+});
+
+test('respuestaFija devuelve null cuando hace falta el modelo y esSimple separa lo corto de lo largo (#499)', () => {
+  assert.equal(respuestaFija('cuanto cuesta el sofa'), null);
+  assert.equal(respuestaFija('¿me recomiendas algo para regalar a mi mamá?'), null);
+  assert.match(respuestaFija('horario'), /11 a\. m\./);
+  assert.equal(esSimple('¿a qué hora abren?'), true);
+  assert.equal(esSimple('hola, ¿dónde consigo una blusa talla M para un regalo de cumpleaños?'), false);
+  assert.equal(esSimple(''), true);
+});
+
+test('lo no confirmado (precios, envios) recibe respaldo o escala al equipo', () => {
+  assert.match(respuestaPara('cuanto cuesta el sofa'), /lo confirma el equipo.*este mismo chat/);
+  assert.match(respuestaPara(undefined), /este mismo chat/);
+  assert.doesNotMatch(respuestaPara('hacen envios'), /no hacemos/);
 });
 
 const endpoint = 'https://whatsapp.eldolaron.com/webhook';
@@ -53,7 +82,7 @@ test('un mensaje de texto recibe una respuesta del FAQ una sola vez', async () =
     assert.match(envio.llamadas[0].url, /\/1433484303171531\/messages$/);
     assert.equal(envio.llamadas[0].opciones.headers.authorization, 'Bearer token');
     assert.equal(envio.llamadas[0].cuerpo.to, '5214421234567');
-    assert.match(envio.llamadas[0].cuerpo.text.body, /11:00 a 20:00/);
+    assert.match(envio.llamadas[0].cuerpo.text.body, /11 a\. m\. a 8 p\. m\./);
   } finally { envio.restaurar(); }
 });
 

@@ -1,5 +1,7 @@
 # Guía de Configuración: Vender en Mercado Libre con El Dolarón
 
+> Qué funciona en 2026, costos reales, umbral de precio y cambios priorizados: [MERCADOLIBRE-ESTRATEGIA.md](MERCADOLIBRE-ESTRATEGIA.md) (Issue #554, 28/10/2026). La sección 11 de esta guía quedó corta: el cargo fijo se sustituyó en abril de 2026 por el «costo de los Envíos» por peso y precio.
+
 ## 1. Qué necesitas antes de empezar
 
 - Cuenta de Mercado Libre México a tu nombre (persona moral o física) con datos fiscales completos validados.
@@ -151,7 +153,7 @@ En El Dolarón, `/mercadolibre`:
 Cuando alguien compra una pieza en tu tienda, la caja la marca como vendida en D1. El Dolarón **pausa automáticamente** la publicación en ML (la prenda desaparece de búsqueda, pero la publicación queda guardada).
 
 **Venta en Mercado Libre**:  
-Un cliente compra en ML. Mercado Libre te notifica por email. El Dolarón **baja automáticamente** el stock en D1 (la pieza pasa a vendida). **Tú debes**:
+Un cliente compra en ML. Mercado Libre te notifica por email. El Dolarón **baja automáticamente** el stock en D1 (la pieza pasa a vendida). Además, `avisos@eldolaron.com` manda un correo a cada dueño con la pieza, su código ED-, el precio y el enlace a la venta; si D1 ya no tenía existencias, el asunto empieza con **«¡Sin existencias!»** y hay que cancelar la venta en ML. **Tú debes**:
 1. Sacar la prenda de la tienda de inmediato (pasar al almacén o empaque).
 2. Empacarla (con las dimensiones y peso que definiste).
 3. Llevarla a una sucursal de Mercado Envíos (correos, etc.) con la etiqueta que imprime ML.

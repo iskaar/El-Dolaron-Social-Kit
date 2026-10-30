@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>El Dolarón — cola de revisión</title>
+<title>El Dolarón — Ajustes</title>
 <style>
   :root { --azul:#16366B; --rojo:#D72B32; --amarillo:#FFD447; --linea:#dfe3ea; }
   * { box-sizing: border-box; }
@@ -33,9 +33,14 @@
     content-visibility: auto; contain-intrinsic-size: auto 260px; }   /* el navegador no pinta las que no se ven */
   .ficha img { width: 100%; aspect-ratio: 1; object-fit: cover; border-radius: 8px; background: #eceff4; }
   .recorte-par { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .candidatas { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; margin-top: 12px; }
+  .candidatas a { display: block; overflow-wrap: anywhere; font-size: 13px; margin: 6px 0; }
+  .candidatas img { object-fit: contain; }
   .retomar { display: block; margin-top: 6px; text-align: center; font-size: 13px; font-weight: 600;
     color: var(--azul); border: 1px solid var(--linea); border-radius: 8px; padding: 7px; cursor: pointer; }
   .retomar:hover { background: #eef1f6; }
+  button.retomar { display: block; width: 100%; background: #fff; }
+  .celular { font-size: 13px; margin-top: 6px; }
   .campos { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 10px; }
   .acciones { display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap; align-items: center; }
   .etiqueta { font-size: 12px; padding: 3px 8px; border-radius: 999px; background: #eef1f6; }
@@ -49,14 +54,19 @@
 </head>
 <body>
 <header>
-  <h1>Cola de revisión</h1>
+  <h1>Ajustes</h1>
+  <a href="/inventario#revisar">Revisar en Inventario →</a>
+  <a href="/pieza">Buscar pieza →</a>
   <a href="/captura">Ir a capturar →</a>
   <a href="/bandas">Imprimir bandas →</a>
+  <a href="#" id="salir">Cerrar sesión</a>
   <a href="/conteo">Conteo de alto valor →</a>
   <span id="resumen"></span>
 </header>
 
 <main>
+  <p class="panel aviso" id="aviso-edicion" role="status" hidden>Tu cuenta no tiene «Editar inventario»: aquí solo puedes consultar.
+    No puedes guardar, recalcular, reanalizar, sumar repetidas, descartar, buscar imagen ni revisar ropa o recortes. Pídele al dueño que la active en Cuentas.</p>
   <section class="panel">
     <h2>Configuración de precios</h2>
     <div class="ajustes" id="ajustes"></div>
@@ -90,8 +100,7 @@
       <div style="grid-column: 1 / -1"><label for="m-nombre">Nombre</label><input id="m-nombre" maxlength="120" required></div>
       <div><label for="m-marca">Marca</label><input id="m-marca" maxlength="60"></div>
       <div><label for="m-categoria">Categoría</label><select id="m-categoria"></select></div>
-      <div><label for="m-estado">Estado</label><select id="m-estado">
-        <option value="nuevo">Nuevo</option><option value="danado">Dañado</option></select></div>
+      <div><label for="m-estado">Estado</label><select id="m-estado"></select></div>
       <div><label for="m-lista">Precio de lista ($)</label><input id="m-lista" type="number" min="0"></div>
       <div><label for="m-precio">Precio de venta ($)</label><input id="m-precio" type="number" min="0" placeholder="automático"></div>
       <div><label for="m-stock">Existencia</label><input id="m-stock" type="number" min="1" max="999" value="1"></div>
@@ -115,7 +124,7 @@
   </div>
 
   <div class="panel ajustes" id="filtros-extra">
-    <div style="grid-column: 1 / -1"><label for="f-nombre">Buscar por nombre</label><input id="f-nombre" type="search" placeholder="Nombre de la prenda" autocomplete="off"></div>
+    <div style="grid-column: 1 / -1"><label for="f-nombre">Buscar por nombre o código</label><input id="f-nombre" type="search" placeholder="Parte del nombre o del código de barras" autocomplete="off"></div>
     <div><label for="f-dia">Día de captura</label><input id="f-dia" type="date"></div>
     <div><label for="f-categoria">Categoría</label><select id="f-categoria"><option value="">Todas</option></select></div>
     <div><label for="f-min">Precio desde ($)</label><input id="f-min" type="number" min="0"></div>
@@ -130,16 +139,23 @@
 
 <script type="module">
 import { reducirArchivo } from '/foto.js';
+import { pedirFoto } from '/camara-pc.js';
 import { copiarParaMarketplace } from '/compartir.js';
 import { agruparSesiones } from '/sesiones.js';
 import { enlacePreciosML } from '/precios-ml.js';
 
 import { CATEGORIAS } from '/categorias.js';
-import { TALLAS } from '/tallas.js';
+import { ESTADOS } from '/estados.js';
+import { TALLAS, tallaUs } from '/tallas.js';
+
+document.getElementById('salir').addEventListener('click', async (e) => {
+  e.preventDefault();
+  (await import('/cerrar-sesion.js')).cerrarSesion();
+});
 
 // Una sola lista para todas las fichas; el servidor es quien valida la talla.
 document.body.insertAdjacentHTML('beforeend',
-  `<datalist id="tallas-lista">${TALLAS.map((t) => `<option value="${t}">`).join('')}</datalist>`);
+  `<datalist id="tallas-lista">${TALLAS.map((t) => `<option value="${t}"${tallaUs(t) ? ` label="${tallaUs(t)}"` : ''}>`).join('')}</datalist>`);
 const opcionesCategoria = (elegida) =>
   CATEGORIAS.map(([c, nombre]) => `<option value="${c}" ${c === elegida ? 'selected' : ''}>${nombre}</option>`).join('');
 // Los montos y las familias de banda salen de la tabla `familias` (GET /api/familias).
@@ -149,14 +165,23 @@ const DESTINOS = [
   ...FAMILIAS.flatMap((f) => MONTOS_BANDA.map((p) =>
     [`banda_${f.prefijo}${p}`, `Banda ${f.nombre} $${p} → ${f.prefijo.toUpperCase()}${p}`])),
 ];
+const opcionesEstado = (actual) => ESTADOS.map(([e, nombre]) => `<option value="${e}" ${e === actual ? 'selected' : ''}>${nombre}</option>`).join('');
+document.getElementById('m-estado').innerHTML = opcionesEstado('nuevo');
 const CLAVES_CONFIG = [
-  ...CATEGORIAS.map(([c, nombre]) => [`pct_${c}`, `${nombre} %`]), ['pct_danado','Dañado %'],
+  ...CATEGORIAS.map(([c, nombre]) => [`pct_${c}`, `${nombre} %`]), ['pct_danado','Dañado (B) %'],
+  // Grado C (#371): % del precio de lista, sin sumar el de categoría. 20 = hasta 80 % de descuento.
+  ['pct_liquidacion', 'Liquidación (C) % del precio de lista'],
   ...MONTOS_BANDA.map((p) => [`banda_${p}`, `Banda $${p}`]),
   ['fondo_caja', 'Fondo por caja $'],
+  // Tablero de inversionistas (#610): meta de ventas del mes, en pesos; 0 = sin meta (se oculta la barra).
+  ['meta_ventas_mes', 'Meta de ventas del mes $ (tablero)'],
+  // Captura por UPC (Issue #365): precio de Target en dólares x esto = precio de lista.
+  ['tipo_cambio', 'Tipo de cambio (centavos por dólar, 1850 = $18.50)'],
 ];
-const EN_PESOS = new Set([...MONTOS_BANDA.map((p) => `banda_${p}`), 'fondo_caja']);
+const EN_PESOS = new Set([...MONTOS_BANDA.map((p) => `banda_${p}`), 'fondo_caja', 'meta_ventas_mes']);
 
 const cola = document.getElementById('cola');
+let puedeEditarInventario = true;   // se decide con /api/yo antes de pintar la cola
 const resumen = document.getElementById('resumen');
 let filtro = '';
 /** Nombre normalizado → pieza ya revisada, para detectar repetidos. */
@@ -211,6 +236,9 @@ function ficha(p) {
         Retomar foto
         <input type="file" accept="image/*" capture="environment" hidden>
       </label>
+      <button type="button" class="claro retomar" data-celular>Pedir foto al celular</button>
+      <div class="celular" aria-live="polite"></div>
+      ${p.foto_key === '' && p.propietario === 'dolaron' ? '<button type="button" class="claro" data-accion="buscar-imagen">Buscar imagen</button>' : ''}
     </div>
     <div>
       <div class="campos">
@@ -221,8 +249,7 @@ function ficha(p) {
         <div><label>Categoría</label><select data-campo="categoria">${opcionesCategoria(p.categoria)}</select></div>
         <div><label>Talla</label><input data-campo="talla" list="tallas-lista" maxlength="30" placeholder="ropa" value="${(p.talla ?? '').replace(/"/g, '&quot;')}"></div>
         <div><label>Estado</label><select data-campo="estado_fisico">
-          <option value="nuevo" ${p.estado_fisico === 'nuevo' ? 'selected' : ''}>Nuevo</option>
-          <option value="danado" ${p.estado_fisico === 'danado' ? 'selected' : ''}>Dañado</option>
+          ${opcionesEstado(p.estado_fisico)}
         </select></div>
         <div><label>Precio de lista ($)</label>
           <input data-campo="precio_lista" type="number" min="0" value="${pesos(p.precio_lista)}"></div>
@@ -241,24 +268,32 @@ function ficha(p) {
         <button type="button" class="claro" data-accion="reanalizar">Reintentar análisis</button>
         <button type="button" class="claro" data-accion="compartir"
           title="Copia precio, nombre y foto; pégalos con Win+V">Compartir</button>
-        ${repetida ? `<button type="button" class="claro" data-accion="fusionar"
-          title="Suma esta foto a la pieza que ya existe y borra la repetida">
+        ${repetida && !(p.codigo && repetida.codigo) ? `<button type="button" class="claro" data-accion="fusionar"
+          title="Suma la existencia y conserva la etiqueta existente en la original; elimina la captura repetida y su foto">
           Ya existe · sumar a ${repetida.stock ?? 1} pz</button>` : ''}
-        <button type="button" class="peligro" data-accion="descartar">Descartar</button>
+        <button type="button" class="peligro" data-accion="descartar"
+          title="Con código: conserva la pieza y su foto, deja existencia 0 e invalida su etiqueta">Descartar</button>
         <span class="etiqueta ${estado}">${estado} · ${p.semana_ingreso}</span>
         <span class="aviso"></span>
       </div>
+      <div class="candidatas" aria-live="polite"></div>
     </div>`;
 
   const valor = (campo) => nodo.querySelector(`[data-campo="${campo}"]`).value;
   const aviso = nodo.querySelector('.aviso');
+  // Sin la casilla «Editar inventario» la ficha es de consulta (el servidor igual responde 403).
+  if (!puedeEditarInventario) {
+    for (const campo of nodo.querySelectorAll('input[data-campo], select[data-campo]')) campo.disabled = true;
+    for (const boton of nodo.querySelectorAll('[data-accion="guardar"], [data-accion="recalcular"], [data-accion="reanalizar"], [data-accion="fusionar"], [data-accion="descartar"], [data-accion="buscar-imagen"]')) boton.disabled = true;
+    aviso.textContent = 'Solo consulta: tu cuenta no tiene «Editar inventario».';
+  }
 
   // La existencia solo viaja si la tocaste: la caja pudo vender desde que se abrio la ficha.
   let stockMostrado = String(p.stock ?? 1);
   const base = () => ({
     nombre: valor('nombre'), marca: valor('marca'), categoria: valor('categoria'), talla: valor('talla'),
     estado_fisico: valor('estado_fisico'), precio_lista: centavos(valor('precio_lista')),
-    ...(valor('stock') === stockMostrado ? {} : { stock: Math.round(Number(valor('stock') || 0)) }),
+    ...(valor('stock') === stockMostrado ? {} : { stock: Math.round(Number(valor('stock') || 0)), stock_esperado: Number(stockMostrado) }),   // #473: una `listo` solo acepta la existencia si sigue siendo la que viste
   });
 
   async function enviar(cuerpo) {
@@ -266,7 +301,14 @@ function ficha(p) {
       method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify(cuerpo),
     });
     const datos = await respuesta.json();
-    if (!respuesta.ok) { aviso.textContent = datos.error; aviso.style.color = ''; return false; }
+    if (!respuesta.ok) {
+      aviso.textContent = datos.error; aviso.style.color = '';
+      if (respuesta.status === 409 && datos.stock !== undefined) {   // la existencia cambió: se muestra la actual
+        stockMostrado = String(datos.stock);
+        nodo.querySelector('[data-campo="stock"]').value = stockMostrado;
+      }
+      return false;
+    }
     nodo.querySelector('[data-campo="precio"]').value = pesos(datos.precio);
     nodo.querySelector('[data-campo="destino"]').value = datos.destino;
     stockMostrado = String(datos.stock);
@@ -277,7 +319,28 @@ function ficha(p) {
   }
 
   // Usado por "Guardar todo": misma sentencia que el boton Guardar de esta ficha.
-  nodo.guardarFicha = () => enviar({ ...base(), precio: centavos(valor('precio')), destino: valor('destino') });
+  nodo.guardarFicha = () => !puedeEditarInventario ? Promise.resolve(false) : enviar({ ...base(), precio: centavos(valor('precio')), destino: valor('destino') });
+
+  // Compartido por Retomar foto y Pedir foto al celular: la foto ya esta en R2 con la misma llave.
+  function fotoReemplazada() {
+    nodo.querySelector('img').src = `/api/foto/${p.id}?v=${Date.now()}`;  // la foto vieja esta en cache
+    p.foto_key = `fotos/${p.id}.jpg`;
+    nodo.querySelector('[data-accion="buscar-imagen"]')?.remove();
+    nodo.querySelector('.candidatas').replaceChildren();
+    aviso.textContent = 'Foto reemplazada. Si cambia el nombre o el precio, usa Reintentar análisis.';
+  }
+
+  // Pedir foto al celular (#444): el celular sube por el mismo POST /api/borradores (solo_foto).
+  // Repetir = volver a pulsar: sobrescribe como Retomar foto.
+  const botonCelular = nodo.querySelector('[data-celular]');
+  botonCelular.addEventListener('click', async () => {
+    botonCelular.disabled = true;
+    aviso.textContent = '';
+    try {
+      const r = await pedirFoto({ tipo: 'foto_pieza', pieza_id: p.id, contenedor: nodo.querySelector('.celular') });
+      if (r.estado === 'lista') fotoReemplazada();
+    } finally { botonCelular.disabled = false; }
+  });
 
   // Retomar foto: mismo id, asi que reemplaza la foto en R2 sin duplicar la pieza.
   // `solo_foto`: no toca existencia, talla ni lo que ya corregiste, y no vuelve a
@@ -298,8 +361,7 @@ function ficha(p) {
         aviso.textContent = (await respuesta.json()).error ?? 'No se pudo subir la foto.';
         return;
       }
-      nodo.querySelector('img').src = `/api/foto/${p.id}?v=${Date.now()}`;  // la foto vieja esta en cache
-      aviso.textContent = 'Foto reemplazada. Si cambia el nombre o el precio, usa Reintentar análisis.';
+      fotoReemplazada();
     } catch {
       aviso.textContent = 'No se pudo leer la imagen.';
     } finally {
@@ -314,6 +376,8 @@ function ficha(p) {
       await nodo.guardarFicha();
     } else if (accion === 'recalcular') {
       await enviar(base());   // sin precio: lo recalcula la configuración
+    } else if (accion === 'buscar-imagen') {
+      await buscarImagen(p, nodo, aviso, evento.target);
     } else if (accion === 'compartir') {
       try {
         const { conFoto } = await copiarParaMarketplace({
@@ -327,7 +391,10 @@ function ficha(p) {
       }
     } else if (accion === 'reanalizar') {
       aviso.textContent = 'Analizando…';
-      await fetch(`/api/borradores/${p.id}/analizar`, { method: 'POST' });
+      const respuesta = await fetch(`/api/borradores/${p.id}/analizar`, { method: 'POST' });
+      // #479: una pieza revisada solo recibe una sugerencia, que el dueño aprueba en «Precios por revisar».
+      const datos = await respuesta.json().catch(() => ({}));
+      if (datos.sugerencia) aviso.textContent = datos.mensaje;
       setTimeout(cargarCola, 6000);
     } else if (accion === 'fusionar') {
       evento.target.disabled = true;   // un segundo clic mientras viaja sumaria dos veces
@@ -336,8 +403,9 @@ function ficha(p) {
         body: JSON.stringify({ destino_id: repetida.id }),
       });
       const datos = await respuesta.json();
-      if (!respuesta.ok) { aviso.textContent = datos.error; evento.target.disabled = false; return; }
+      if (!respuesta.ok) { aviso.textContent = datos.error; aviso.style.color = ''; evento.target.disabled = false; return; }
       repetida.stock = datos.stock;   // la siguiente repetida ya ve el total nuevo
+      repetida.codigo ||= p.codigo;
       nodo.remove();
     } else if (accion === 'precios-ml') {
       const enlace = enlacePreciosML(valor('nombre'), valor('marca'));
@@ -351,6 +419,52 @@ function ficha(p) {
   });
 
   return nodo;
+}
+
+// #413: cada clic busca una vez; la elección solo añade la foto a la pieza guardada.
+async function buscarImagen(p, nodo, aviso, boton) {
+  if (boton.disabled) return;
+  boton.disabled = true;
+  aviso.textContent = 'Buscando imagen del nombre y marca guardados…';
+  aviso.style.color = '';
+  const lista = nodo.querySelector('.candidatas');
+  lista.replaceChildren();
+  try {
+    const respuesta = await fetch(`/api/borradores/${p.id}/imagen/buscar`, { method: 'POST' });
+    const datos = await respuesta.json();
+    if (!respuesta.ok) { aviso.textContent = datos.error; return; }
+    if (p.foto_key !== '') return;   // Retomar foto pudo terminar durante la búsqueda.
+    aviso.textContent = datos.candidatas.length ? 'Revisa que sea la misma pieza antes de usar la imagen.' : 'Sin candidatas. Toma o sube una foto.';
+    for (const candidata of datos.candidatas) {
+      const tarjeta = document.createElement('div');
+      const img = document.createElement('img');
+      img.src = candidata.imagen; img.alt = candidata.titulo; img.referrerPolicy = 'no-referrer';
+      const enlace = document.createElement('a');
+      enlace.href = candidata.pagina; enlace.target = '_blank'; enlace.rel = 'noopener noreferrer';
+      enlace.textContent = `${candidata.titulo} · ${candidata.sitio}`;
+      const usar = document.createElement('button');
+      usar.type = 'button'; usar.textContent = 'Usar esta';
+      usar.addEventListener('click', async () => {
+        const botones = [...lista.querySelectorAll('button'), boton];
+        botones.forEach((b) => { b.disabled = true; });
+        aviso.textContent = 'Guardando imagen…';
+        try {
+          const r = await fetch(`/api/borradores/${p.id}/imagen`, {
+            method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ imagen: candidata.imagen }),
+          });
+          const guardada = await r.json();
+          if (!r.ok) { aviso.textContent = guardada.error; return; }
+          p.foto_key = guardada.foto_key;
+          nodo.querySelector('img').src = `/api/foto/${p.id}?v=${Date.now()}`;
+          lista.replaceChildren(); boton.remove();
+          aviso.textContent = 'Foto guardada.';
+        } catch { aviso.textContent = 'No se pudo guardar la imagen. Reintenta.'; }
+        finally { botones.forEach((b) => { b.disabled = false; }); }
+      });
+      tarjeta.append(img, enlace, usar); lista.append(tarjeta);
+    }
+  } catch { aviso.textContent = 'No se pudo buscar la imagen. Reintenta.'; }
+  finally { boton.disabled = false; }
 }
 
 /* ---------- revisión del catálogo público (Issue #220) ---------- */
@@ -385,12 +499,18 @@ async function cargarRevision() {
 /* ---------- captura sin foto (Issue #115) ---------- */
 
 const manual = document.getElementById('manual');
-fetch('/api/yo').then((r) => r.json()).then(({ usuario }) => {
-  const dueno = !!usuario?.roles.includes('dueno');
-  manual.hidden = !dueno;
-  document.body.classList.toggle('dueno', dueno);
-  if (dueno) cargarRevision();
-});
+const { usuario } = await (await fetch('/api/yo')).json();
+const dueno = !!usuario?.roles.includes('dueno');
+manual.hidden = !dueno;
+document.body.classList.toggle('dueno', dueno);
+if (dueno) cargarRevision();
+// #441: la misma regla que el servidor (puedeEditarInventario), que es quien la hace cumplir.
+puedeEditarInventario = dueno || (usuario?.editar_inventario === true
+  && usuario.roles.some((rol) => rol === 'capturista' || rol === 'finanzas'));
+if (!puedeEditarInventario) {
+  document.getElementById('aviso-edicion').hidden = false;
+  for (const id of ['guardar-todo', 'reintentar-todo']) document.getElementById(id).disabled = true;
+}
 document.getElementById('m-categoria').innerHTML = opcionesCategoria('');
 document.getElementById('m-destino').innerHTML = '<option value="">Automático</option>'
   + DESTINOS.map(([v, t]) => `<option value="${v}">${t}</option>`).join('');
@@ -445,14 +565,16 @@ function pintarSesiones(sesiones) {
   elSesion.innerHTML = '<option value="">Todas</option>' + sesiones.map((s) => {
     const fecha = new Date(s.inicio).toLocaleDateString('es-MX', { weekday: 'short', day: 'numeric', month: 'short' });
     const quien = s.quien ? s.quien.split('@')[0] : 'sin correo';
-    return `<option value="${s.clave}">${fecha} ${horaLocal(s.inicio)}–${horaLocal(s.fin)} · ${quien} · ${s.piezas} ${s.piezas === 1 ? 'foto' : 'fotos'}</option>`;
+    const esc = (t) => String(t).replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
+    return `<option value="${esc(s.clave)}">${fecha} ${horaLocal(s.inicio)}–${horaLocal(s.fin)} · ${esc(quien)} · ${s.piezas} ${s.piezas === 1 ? 'foto' : 'fotos'}</option>`;
   }).join('');
   elSesion.value = elegida;   // si la sesion ya no existe, cae a "Todas"
 }
 
 function pasaFiltros(p, sesionDe) {
   if (filtro && p.estado_analisis !== filtro) return false;
-  if (elNombre.value && !normalizar(p.nombre).includes(normalizar(elNombre.value))) return false;
+  const busca = normalizar(elNombre.value);
+  if (busca && !normalizar(p.nombre).includes(busca) && !normalizar(p.codigo).includes(busca)) return false;
   if (elDia.value && diaLocal(p.creado_en) !== elDia.value) return false;
   if (elCategoria.value && p.categoria !== elCategoria.value) return false;
   if (elMin.value !== '' && p.precio < centavos(elMin.value)) return false;
@@ -607,6 +729,13 @@ async function cargarRopaIA() {
     for (const [texto, fn] of [['Aceptar', () => accion('aceptar')], ['Corregir', () => accion('corregir', { prenda: prenda.value, marca: marca.value })], ['Descartar', () => accion('descartar')]]) {
       const b = document.createElement('button'); b.type = 'button'; b.textContent = texto; b.addEventListener('click', fn); botones.append(b);
     }
+    if (!puedeEditarInventario) {
+      prenda.disabled = marca.disabled = true;
+      for (const b of botones.querySelectorAll('button')) b.disabled = true;
+      const aviso = document.createElement('span'); aviso.className = 'aviso';
+      aviso.textContent = 'Solo consulta: tu cuenta no tiene «Editar inventario».';
+      botones.append(aviso);
+    }
     cuerpo.append(detalle, prenda, marca, botones); ficha.append(img, cuerpo); raiz.append(ficha);
   }
 }
@@ -621,7 +750,7 @@ async function cargarRecortes() {
   for (const p of piezas) {
     const ficha = document.createElement('article'); ficha.className = 'ficha';
     const imagenes = document.createElement('div'); imagenes.className = 'recorte-par';
-    for (const [src, alt] of [[`/api/catalogo/recorte/${p.codigo}`, 'Recorte'], [`/api/foto/${p.id}`, 'Foto original']]) {
+    for (const [src, alt] of [[`/api/recortes/${p.id}/imagen`, 'Recorte'], [`/api/foto/${p.id}`, 'Foto original']]) {
       const img = document.createElement('img'); img.src = src; img.alt = alt; img.style.objectFit = 'contain'; imagenes.append(img);
     }
     const cuerpo = document.createElement('div'); const titulo = document.createElement('p'); titulo.textContent = `${p.codigo} · ${p.nombre} · ${p.recorte_estado}`;
@@ -643,7 +772,14 @@ async function cargarRecortes() {
       const r = await fetch(`/api/recortes/${p.id}/${p.recorte_estado === 'error' ? 'reintentar' : 'original'}`, { method: 'POST' });
       if (r.ok) cargarRecortes(); else titulo.textContent = 'No se pudo actualizar el recorte.';
     });
-    cuerpo.append(titulo, boton); ficha.append(imagenes, cuerpo); raiz.append(ficha);
+    cuerpo.append(titulo, boton);
+    if (!puedeEditarInventario) {
+      for (const b of cuerpo.querySelectorAll('button')) b.disabled = true;
+      const aviso = document.createElement('span'); aviso.className = 'aviso';
+      aviso.textContent = 'Solo consulta: tu cuenta no tiene «Editar inventario».';
+      cuerpo.append(aviso);
+    }
+    ficha.append(imagenes, cuerpo); raiz.append(ficha);
   }
 }
 await cargarRecortes();

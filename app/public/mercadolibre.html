@@ -93,10 +93,16 @@
     border: 1px solid var(--linea); border-radius: 8px; background: var(--fondo); color: var(--texto); }
   .campo textarea { min-height: 80px; resize: vertical; }
   .campo .otro { margin-top: 6px; }
+  .origen { display: inline-block; margin-left: 8px; font-size: 11px; font-weight: 600; padding: 1px 7px;
+    border-radius: 999px; border: 1px solid var(--linea); color: var(--suave); }
+  .origen[data-origen="ia"] { color: var(--ambar); border-color: var(--aviso-borde); background: var(--aviso-fondo); }
+  .origen[data-origen="pieza"] { color: var(--verde); }
   .fila-dos { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
   @media (max-width: 480px) { .fila-dos { grid-template-columns: 1fr; } }
   .pie-dialogo { display: flex; gap: 10px; justify-content: flex-end; flex-wrap: wrap; margin-top: 14px; align-items: center; }
   .pie-dialogo .falta { flex: 1; min-width: 180px; font-size: 12px; color: var(--suave); }
+  .filtros { display: grid; grid-template-columns: 2fr 1fr 1fr; gap: 0 10px; }
+  @media (max-width: 560px) { .filtros { grid-template-columns: 1fr 1fr; } .filtros .campo:first-child { grid-column: 1 / -1; } }
   fieldset { border: 1px solid var(--linea); border-radius: 10px; padding: 10px 12px 2px; margin: 0 0 12px; }
   legend { font-size: 13px; font-weight: 700; padding: 0 6px; }
 </style>
@@ -120,6 +126,20 @@
   <section class="panel" id="panel-piezas" aria-labelledby="h-piezas" hidden>
     <h2 id="h-piezas">Piezas</h2>
     <div class="pestanas" role="tablist" aria-label="Filtro de piezas" id="pestanas"></div>
+    <div class="filtros">
+      <div class="campo"><label for="buscar">Buscar</label>
+        <input id="buscar" type="search" maxlength="80" autocomplete="off" placeholder="nombre, código, marca o categoría"></div>
+      <div class="campo"><label for="orden">Ordenar por</label>
+        <select id="orden">
+          <option value="recientes">Más recientes</option>
+          <option value="mas_existencias">Más existencias</option>
+          <option value="menos_existencias">Menos existencias</option>
+          <option value="codigo">Código</option>
+          <option value="nombre">Nombre (A–Z)</option>
+        </select></div>
+      <div class="campo"><label for="min">Existencias mínimas</label>
+        <input id="min" type="number" min="0" step="1" inputmode="numeric" placeholder="0"></div>
+    </div>
     <div id="lista" role="tabpanel" aria-live="polite"></div>
     <div style="margin-top:12px"><button type="button" id="ver-mas" hidden>Ver más</button></div>
     <p class="nota">Solo piezas individuales con foto ya revisadas. Las bandas no se publican. El recargo y el
@@ -378,6 +398,7 @@ function filaPieza(item) {
     h('div', { class: 'meta' }, [p.codigo, p.marca, p.categoria].filter(Boolean).join(' · ')),
     h('div', { class: 'precios' },
       h('span', {}, `Tienda ${pesos(p.precio)}`),
+      h('span', {}, `Existencias: ${p.stock}`),
       pub?.precio_ml != null ? h('span', {}, `Mercado Libre ${pesos(pub.precio_ml)}`) : null));
   const acciones = h('div', { class: 'acciones' });
   const publicable = !pub || (pub.estado === 'error' && !pub.ml_item_id);
@@ -421,7 +442,8 @@ function aviso(texto, error = false) {
 function pintarLista() {
   $('lista').replaceChildren(...(piezas.length
     ? piezas.map(filaPieza)
-    : [h('div', { class: 'vacio' }, filtro === 'pendientes' ? 'No hay piezas por publicar.' : 'No hay piezas en esta lista.')]));
+    : [h('div', { class: 'vacio' }, $('buscar').value.trim() || $('min').value ? 'Ninguna pieza coincide con la búsqueda.'
+      : filtro === 'pendientes' ? 'No hay piezas por publicar.' : 'No hay piezas en esta lista.')]));
   $('ver-mas').hidden = !hayMas;
 }
 
@@ -437,7 +459,10 @@ function actualizarFila(id, publicacion) {
 async function cargarPiezas(desdeCero) {
   if (desdeCero) { pagina = 1; piezas = []; $('lista').replaceChildren(h('p', { class: 'vacio' }, 'Cargando…')); }
   else pagina += 1;
-  const r = await api(`/api/ml/piezas?filtro=${filtro}&pagina=${pagina}`);
+  const consulta = new URLSearchParams({ filtro, pagina, q: $('buscar').value.trim(), orden: $('orden').value, min: $('min').value });
+  const r = await api(`/api/ml/piezas?${consulta}`);
+  // Llego tarde: ya se escribio otra busqueda o se cambio el orden.
+  if (consulta.get('q') !== $('buscar').value.trim() || consulta.get('orden') !== $('orden').value || consulta.get('min') !== $('min').value) return;
   if (!r.ok || !r.datos) {
     if (!desdeCero) pagina -= 1;
     $('lista').replaceChildren(h('div', { class: 'aviso error' }, textoError(r, 'No se pudieron cargar las piezas.')));
@@ -449,6 +474,9 @@ async function cargarPiezas(desdeCero) {
   pintarLista();
 }
 $('ver-mas').addEventListener('click', () => cargarPiezas(false));
+let esperaBusqueda;
+for (const id of ['buscar', 'min']) $(id).addEventListener('input', () => { clearTimeout(esperaBusqueda); esperaBusqueda = setTimeout(() => cargarPiezas(true), 300); });
+$('orden').addEventListener('change', () => cargarPiezas(true));
 
 /* ---------- dialogo de publicacion ---------- */
 
@@ -465,14 +493,18 @@ function normalizar(v) {
   return v == null || v === '' ? null : { id: null, nombre: String(v) };
 }
 
+// De donde sale lo propuesto: lo que viene de la pieza, de una regla fija o de la IA (#555).
+const ORIGENES = { pieza: 'De la pieza', defecto: 'Valor por omisión', ia: '✨ Propuesto por IA: revísalo', editado: 'Editado por ti' };
+
 function prellenar(a) {
   const v = normalizar(a.valor_sugerido);
-  if (!v) return { sel: '', txt: '' };
-  if (!a.valores?.length) return { sel: '', txt: v.nombre };
+  const origen = a.origen ?? null;
+  if (!v) return { sel: '', txt: '', origen: null };
+  if (!a.valores?.length) return { sel: '', txt: v.nombre, origen };
   const m = a.valores.find((x) => (v.id && String(x.id) === v.id) || String(x.nombre).toLowerCase() === v.nombre.toLowerCase());
-  if (m) return { sel: String(m.id), txt: '' };
+  if (m) return { sel: String(m.id), txt: '', origen };
   // Una lista cerrada no acepta texto libre: sin coincidencia, el dueno elige.
-  return a.tipo === 'list' ? { sel: '', txt: '' } : { sel: OTRO, txt: v.nombre };
+  return a.tipo === 'list' ? { sel: '', txt: '', origen: null } : { sel: OTRO, txt: v.nombre, origen };
 }
 
 function cargarPropuesta(respuesta, conservar) {
@@ -510,7 +542,7 @@ function errorEnDialogo(texto) {
 async function buscarCatalogo(texto) {
   if (texto.trim().length < 2) return;
   const r = await api(`/api/ml/preparar/${encodeURIComponent(p.id)}`,
-    { metodo: 'POST', cuerpo: { categoria_id: f.categoria_id ?? '', consulta: prop.consulta, consulta_catalogo: texto.trim() } });
+    { metodo: 'POST', cuerpo: { categoria_id: f.categoria_id ?? '', consulta: prop.consulta, consulta_catalogo: texto.trim(), sin_ia: true } });
   if (!dialogo.open || !f) return;
   if (!r.ok || !r.datos?.propuesta) {
     ref.error.replaceChildren(h('div', { class: 'aviso error', role: 'alert' }, textoError(r, 'No se pudo buscar en el catálogo.')));
@@ -539,32 +571,41 @@ async function cambiarCategoria(id, consulta = prop.consulta) {
 }
 
 let contador = 0;
-function campo(etiqueta, control, { requerido = false, ayuda = null } = {}) {
+function campo(etiqueta, control, { requerido = false, ayuda = null, insignia = null } = {}) {
   const id = `c${++contador}`;
   control.id = id;
   return h('div', { class: 'campo' },
-    h('label', { htmlFor: id }, etiqueta, requerido ? h('span', { class: 'req', 'aria-hidden': 'true' }, ' *') : null),
+    h('label', { htmlFor: id }, etiqueta, requerido ? h('span', { class: 'req', 'aria-hidden': 'true' }, ' *') : null, insignia?.nodo),
     control, ayuda ? h('div', { class: 'nota' }, ayuda) : null);
+}
+
+// La marca «propuesto por IA / de la pieza» pasa a «editado» cuando el dueño cambia el valor.
+function insigniaDe(st) {
+  const nodo = h('span', { class: 'origen' });
+  const pintar = () => { nodo.hidden = !st.origen; nodo.dataset.origen = st.origen ?? ''; nodo.textContent = ORIGENES[st.origen] ?? ''; };
+  pintar();
+  return { nodo, editado() { if (st.origen) { st.origen = 'editado'; pintar(); } } };
 }
 
 function campoAtributo(a) {
   const st = f.attr[a.id];
   const etiqueta = a.nombre || a.id;
+  const insignia = insigniaDe(st);
   if (!a.valores?.length) {
     const entrada = h('input', { type: 'text', value: st.txt, required: a.requerido, autocomplete: 'off',
-      oninput: (e) => { st.txt = e.target.value; revisar(); } });
-    return campo(etiqueta, entrada, { requerido: a.requerido });
+      oninput: (e) => { st.txt = e.target.value; insignia.editado(); revisar(); } });
+    return campo(etiqueta, entrada, { requerido: a.requerido, insignia });
   }
   const otro = h('input', { type: 'text', class: 'otro', value: st.txt, hidden: st.sel !== OTRO, autocomplete: 'off',
     'aria-label': `${etiqueta}: otro valor`, placeholder: 'Escribe el valor',
-    oninput: (e) => { st.txt = e.target.value; revisar(); } });
+    oninput: (e) => { st.txt = e.target.value; insignia.editado(); revisar(); } });
   const sel = h('select', { required: a.requerido,
-    onchange: (e) => { st.sel = e.target.value; otro.hidden = st.sel !== OTRO; if (!otro.hidden) otro.focus(); revisar(); } },
+    onchange: (e) => { st.sel = e.target.value; otro.hidden = st.sel !== OTRO; insignia.editado(); if (!otro.hidden) otro.focus(); revisar(); } },
     h('option', { value: '' }, 'Elige…'),
     a.valores.map((v) => h('option', { value: String(v.id), selected: st.sel === String(v.id) }, v.nombre)),
     // «Otro…» solo si el atributo no es una lista cerrada: ML rechaza texto libre en las listas.
     a.tipo === 'list' ? null : h('option', { value: OTRO, selected: st.sel === OTRO }, 'Otro…'));
-  const fila = campo(etiqueta, sel, { requerido: a.requerido });
+  const fila = campo(etiqueta, sel, { requerido: a.requerido, insignia });
   fila.append(otro);
   return fila;
 }
@@ -591,8 +632,23 @@ function faltante() {
   return falta;
 }
 
+// Arriba del formulario: cada obligatorio que sigue vacío, con el motivo, y cuánto propuso la IA (#555).
+function pintarPendientes() {
+  if (f.catalogo_id) { ref.pendientes.replaceChildren(); return; }
+  const lista = prop.atributos ?? [];
+  const vacios = lista.filter((a) => a.requerido && !valorAtributo(a));
+  const deIA = lista.filter((a) => f.attr[a.id]?.origen === 'ia').map((a) => a.nombre || a.id);
+  ref.pendientes.replaceChildren(
+    ...(vacios.length ? [h('div', { class: 'aviso', style: 'margin-bottom:12px' },
+      h('b', {}, `Para publicar falta${vacios.length === 1 ? '' : 'n'}:`),
+      h('ul', {}, vacios.map((a) => h('li', {}, h('b', {}, a.nombre || a.id), ': ', a.motivo || 'Escríbelo o elígelo.'))))] : []),
+    ...(deIA.length ? [h('div', { class: 'nota', style: 'margin-bottom:12px' },
+      `✨ La IA propuso ${deIA.join(', ')}. Revísalo abajo; si no lo cambias, se envía tal cual.`)] : []));
+}
+
 // Todo lo que cambia mientras se escribe, sin reconstruir el formulario.
 function revisar() {
+  pintarPendientes();
   ref.contador.textContent = `${f.titulo.length}/60`;
   const c = aCentavos(f.precio);
   ref.precioNota.textContent = c
@@ -659,6 +715,7 @@ function pintarFormulario() {
     oninput: (e) => { f.descripcion = e.target.value; } });
   ref.falta = h('span', { class: 'falta', 'aria-live': 'polite' });
   ref.error = h('div', { 'aria-live': 'assertive' });
+  ref.pendientes = h('div', { 'aria-live': 'polite' });
   ref.enviar = h('button', { type: 'submit', class: 'primario' }, 'Publicar');
 
   const requeridos = (prop.atributos ?? []).filter((a) => a.requerido);
@@ -670,6 +727,9 @@ function pintarFormulario() {
       h('div', {}, h('div', { style: 'font-weight:700;overflow-wrap:anywhere' }, p.nombre),
         h('div', { class: 'nota' }, [p.codigo, p.marca].filter(Boolean).join(' · ')))),
     ...(prop.avisos ?? []).map((t) => h('div', { class: 'aviso', role: 'alert', style: 'margin-bottom:12px' }, t)),
+    prop.fotos_extra && !f.catalogo_id ? h('div', { class: 'nota', style: 'margin-bottom:12px' },
+      `📷 Se suben ${prop.fotos_extra + 1} fotos: ${prop.fotos_extra} adicional${prop.fotos_extra === 1 ? '' : 'es'} (la primera es la miniatura) y la foto de la pieza al final.`) : null,
+    ref.pendientes,
     pintarCatalogo(),
     campo(prop.usa_family_name ? 'Nombre del producto' : 'Título de la publicación', titulo, {
       requerido: true,

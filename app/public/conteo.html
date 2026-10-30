@@ -68,10 +68,13 @@ const esc = (texto) => String(texto ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&
 const pesos = (centavos) => (centavos / 100).toLocaleString('es-MX', { style: 'currency', currency: 'MXN' });
 const fecha = (iso) => new Date(iso).toLocaleString('es-MX', { dateStyle: 'short', timeStyle: 'short' });
 const MOTIVOS = ['robo', 'merma', 'error de captura'];
+const MOTIVOS_TEXTO = { fusion: 'Fusión', descarte: 'Descarte' };
 
 let piezas = [];
 let faltantesActuales = [];
 let esDueno = false;
+// Un folio por intento de ajuste: reintentar con el mismo no descuenta dos veces (#480).
+const folios = new Map();
 
 async function pedir(ruta, metodo = 'GET', cuerpo) {
   const respuesta = await fetch(ruta, {
@@ -145,7 +148,7 @@ async function cargarAjustes() {
         <tr>
           <td>${esc(fecha(a.ajustado_en))}</td>
           <td>${esc(a.codigo)} ${esc(a.nombre)}</td>
-          <td>${esc(a.motivo)}</td>
+          <td>${esc(MOTIVOS_TEXTO[a.motivo] ?? a.motivo)}</td>
           <td class="num">${esc(a.antes)}</td>
           <td class="num">${esc(a.despues)}</td>
           <td>${esc(a.ajustado_por)}</td>
@@ -164,6 +167,7 @@ $('#revisar').addEventListener('click', async () => {
   try {
     const { faltantes } = await pedir('/api/conteo', 'POST', { conteos });
     faltantesActuales = faltantes;
+    folios.clear();
     pintarFaltantes();
   } catch (error) {
     aviso(error.message);
@@ -182,7 +186,9 @@ $('#faltantes').addEventListener('click', async (evento) => {
   }
   boton.disabled = true;
   try {
-    const { antes, despues } = await pedir('/api/conteo/ajustes', 'POST', { producto_id: id, cantidad: faltante.faltan, motivo });
+    if (!folios.has(id)) folios.set(id, crypto.randomUUID());
+    const { antes, despues } = await pedir('/api/conteo/ajustes', 'POST', { id: folios.get(id), producto_id: id, cantidad: faltante.faltan, motivo, esperado: faltante.sistema });
+    folios.delete(id);
     boton.textContent = `Ajustado: ${antes} → ${despues}`;
     document.querySelector(`[data-sistema="${CSS.escape(id)}"]`).textContent = despues;
     const pieza = piezas.find((p) => p.id === id);

@@ -130,7 +130,8 @@ def main():
         errors.append("Missing or unpublished og:image")
     css = (PUBLIC / "styles.css").read_text(encoding="utf-8")
     for reference in re.findall(r"url\(['\"]?([^)'\"]+)", css):
-        if not urlsplit(reference).scheme and not (PUBLIC / reference).is_file():
+        # url(#id) apunta a un filtro SVG del propio HTML, no a un archivo.
+        if not urlsplit(reference).scheme and not reference.startswith("#") and not (PUBLIC / reference).is_file():
             errors.append(f"Missing CSS reference: {reference}")
     if errors:
         print("\n".join(f"- {error}" for error in errors))

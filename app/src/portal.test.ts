@@ -202,10 +202,11 @@ test('allowlist pública sirve sólo portal y assets necesarios; no abre caja, a
     p.env.ASSETS = { async fetch(request: Request) {
       const ruta = new URL(request.url).pathname;
       leidos.push(ruta);
-      return new Response(readFileSync('public/' + (ruta === '/portal' ? 'portal.html' : ruta.slice(1))),
-        { headers:{ 'content-type':ruta === '/portal' ? 'text/html' : 'text/javascript' } });
+      return new Response(readFileSync('public/' + (ruta === '/portal' ? 'portal.html' : ruta === '/manual' ? 'manual.html' : ruta.slice(1))),
+        { headers:{ 'content-type':ruta === '/portal' || ruta === '/manual' ? 'text/html' : 'text/javascript' } });
     } } as unknown as Fetcher;
-    for (const ruta of ['/', '/portal', '/portal.html', '/portal.js', '/portal.css', '/code128.js', '/vendor/qrcode-generator.js', '/el-dolaron-logo.png']) {
+    for (const ruta of ['/', '/portal', '/portal.html', '/portal.js', '/portal.css', '/code128.js', '/vendor/qrcode-generator.js', '/el-dolaron-logo.png',
+      '/manual', '/manual.js', '/vender.js']) {
       const r = await worker.fetch!(new Request('https://portal.prueba' + ruta) as never, p.env, {} as never);
       assert.equal(r.status, 200, ruta);
       assert.equal(r.headers.get('cache-control'), 'no-store');
@@ -214,10 +215,12 @@ test('allowlist pública sirve sólo portal y assets necesarios; no abre caja, a
       assert.ok(cuerpo.length);
     }
     for (const ruta of ['/caja', '/caja.html', '/admin', '/cuentas', '/socios', '/captura',
-      '/cajero.js', '/venta.js', '/api/ventas', '/api/socios/codigo', '/api/socios/vincular',
+      '/cajero.js', '/venta.js', '/vender', '/vender.html', '/manual.html', '/manual/', '/api/vender', '/api/ventas', '/api/socios/codigo', '/api/socios/vincular',
       '/api/foto/123', '/api/portal/llegada', '/foo/portal.html'])
       assert.equal((await p.llamar(ruta, '')).status, 404, ruta);
-    assert.equal(leidos.length, 8);
+    assert.equal(leidos.length, 11);
+    // El manual (#623) sale solo por GET/HEAD.
+    assert.equal((await p.llamar('/manual', '', {}, 'POST')).status, 404);
     assert.equal((await p.llamar('/portal.js', '', {}, 'POST')).status, 404);
     assert.equal((await p.pedir('/api/portal/config')).status, 404);
     const config = await p.llamar('/api/portal/config', '');
@@ -382,5 +385,56 @@ test('vale de papel a la cuenta (Issue #258): doble, una vez, tope semanal y reg
     assert.equal((p.db.prepare('select restante from dolarones_lotes where venta_id = ?').get(dos.id) as any).restante, 0);
     // Y su vale no revive.
     assert.equal((p.db.prepare('select restante from vales_dolarones where id = ?').get(dos.vale.id) as any).restante, 0);
+  } finally { p.cerrar(); }
+});
+
+test('host público: tope por IP en la API, fotos del catálogo fuera, y HSTS en toda respuesta', async () => {
+  const p = portalDePrueba();
+  try {
+    const llaves: string[] = [];
+    p.env.LIMITE_PORTAL = { limit: async ({ key }: { key: string }) => { llaves.push(key); return { success: false }; } } as never;
+    const pedir = (ruta: string) => worker.fetch!(new Request(`https://portal.prueba${ruta}`, { headers: { 'cf-connecting-ip': '203.0.113.9' } }) as never, p.env, { waitUntil() {} } as never);
+    const limitada = await pedir('/api/portal/config');
+    assert.equal(limitada.status, 429);
+    assert.equal(limitada.headers.get('retry-after'), '60');
+    assert.deepEqual(llaves, ['203.0.113.9']);
+    assert.notEqual((await pedir('/api/catalogo/foto/ED-000001')).status, 429);
+    assert.equal(limitada.headers.get('strict-transport-security'), 'max-age=31536000; includeSubDomains');
+    delete (p.env as Record<string, unknown>).LIMITE_PORTAL;
+    const libre = await pedir('/api/portal/config');
+    assert.equal(libre.status, 200);
+    assert.equal(libre.headers.get('strict-transport-security'), 'max-age=31536000; includeSubDomains');
+  } finally { p.cerrar(); }
+});
+
+test('sin PREMIOS_APERTURA no se otorgan premios nuevos ni primera llegada (Issue #611)', async () => {
+  const p = portalDePrueba();
+  delete p.env.PREMIOS_APERTURA;
+  try {
+    const a = await p.registrar('uid-sin-promo', '+524440000611');
+    assert.equal(a.status, 200);
+    assert.equal(a.body.premio, null);
+    assert.equal(p.db.prepare("select count(*) as n from dolarones_lotes where origen = 'regalo'").get()!.n, 0);
+    assert.equal(p.db.prepare("select count(*) as n from dolarones_movimientos where tipo = 'regalo'").get()!.n, 0);
+    assert.equal(p.db.prepare('select count(cliente_id) as n from premios_apertura').get()!.n, 0);
+    const r = await p.pedir('/api/portal/llegada', { cliente_id: a.body.id });
+    assert.equal(r.status, 200);
+    assert.equal(r.cuerpo.premio, null);
+    assert.equal(p.db.prepare('select count(*) as n from primera_llegada').get()!.n, 0);
+    assert.equal(p.db.prepare("select count(*) as n from dolarones_lotes where origen = 'regalo'").get()!.n, 0);
+  } finally { p.cerrar(); }
+});
+
+test('apagar la promoción respeta el premio ya otorgado (Issue #611)', async () => {
+  const p = portalDePrueba();
+  try {
+    const a = await p.registrar('uid-previo', '+524440000612');
+    assert.equal(a.body.premio.importe, 300_00);
+    delete p.env.PREMIOS_APERTURA;
+    const r = await p.pedir('/api/portal/llegada', { cliente_id: a.body.id });
+    assert.equal(r.cuerpo.premio.importe, 300_00);
+    assert.equal(r.cuerpo.premio.lote_id, a.body.premio.lote_id);
+    assert.equal(p.db.prepare('select count(*) as n from primera_llegada').get()!.n, 0);
+    assert.equal((await p.registrar('uid-previo', '+524440000612')).body.premio.importe, 300_00);
   } finally { p.cerrar(); }
 });

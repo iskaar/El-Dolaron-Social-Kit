@@ -5,31 +5,49 @@
  * falla no tumba la solicitud: queda en el log y la solicitud sigue en /cuentas.
  * Un envio por dueno: sin el plan Workers Paid solo se puede mandar a direcciones
  * verificadas en Email Routing, y un destinatario sin verificar tumbaria el de todos.
- * ponytail: solo correo; el push del navegador (VAPID) si el correo llega tarde.
+ * El push del navegador (VAPID) vive en push.ts (Issue #600).
  */
 import { leerRoles } from './cuentas.ts';
+import { pushADuenos } from './push.ts';   // import circular con push.ts: ambos solo se usan dentro de funciones
 
 export const REMITENTE = 'avisos@eldolaron.com';
 
-export async function enviarAviso(env: Env, request: Request, asunto: string, texto: string): Promise<void> {
+/**
+ * Push al dueño (como CEP y Ayuda); sin dispositivo que lo reciba, correo con el enlace a /avisos,
+ * donde ya se aprueba de un toque (Issue #607). Un fallo se registra y no tumba la solicitud.
+ */
+export async function enviarAviso(env: Env, request: Request, asunto: string, texto: string,
+  pie = { frase: 'Apruébala o recházala en', ruta: '/avisos' }): Promise<void> {
+  try {
+    if (!await pushADuenos(env, asunto, texto)) {
+      await correoADuenos(env, asunto, `${texto}
+
+${pie.frase} ${new URL(request.url).origin}${pie.ruta}`);
+    }
+  } catch (error) {
+    console.error(JSON.stringify({ mensaje: 'aviso al dueño fallido', asunto, error: String(error) }));
+  }
+}
+
+/** Un correo a cada dueño activo, tal cual. Lo usa también la venta en Mercado Libre (Issue #427). */
+export async function correoADuenos(env: Env, asunto: string, texto: string): Promise<void> {
   const correo = env.CORREO;
   if (!correo) return;
   const { results } = await env.DB.prepare('select correo, roles from usuarios where activo = 1')
     .all<{ correo: string; roles: string }>();
   const prueba = env.AMBIENTE === 'sandbox' ? '[Sandbox] ' : '';
-  const enlace = `${new URL(request.url).origin}/cuentas`;
   await Promise.all(results.filter((u) => leerRoles(u.roles).includes('dueno')).map((u) =>
     correo.send({
       from: { email: REMITENTE, name: 'El Dolarón' },
       to: u.correo,
       subject: `${prueba}${asunto}`,
-      text: `${texto}\n\nApruébala o recházala en ${enlace}`,
+      text: texto,
     }).catch((error) => console.error(JSON.stringify({
       mensaje: 'aviso por correo fallido', para: u.correo, asunto, codigo: error?.code ?? '', error: String(error),
     })))));
 }
 
 /** Sin ctx (pruebas que llaman al handler directo) el aviso no se manda. */
-export function avisarDueno(env: Env, ctx: ExecutionContext | undefined, request: Request, asunto: string, texto: string) {
-  ctx?.waitUntil(enviarAviso(env, request, asunto, texto));
+export function avisarDueno(env: Env, ctx: ExecutionContext | undefined, request: Request, asunto: string, texto: string, pie?: { frase: string; ruta: string }) {
+  ctx?.waitUntil(enviarAviso(env, request, asunto, texto, pie));
 }

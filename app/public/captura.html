@@ -72,7 +72,7 @@
   #modo[aria-pressed="true"] { background: var(--amarillo); border-color: var(--amarillo); color: #111; }
   /* Un toque por talla y se queda puesta entre fotos: un rack de M son N disparos seguidos. */
   #talla-panel { top: calc(56px + env(safe-area-inset-top)); display: flex; flex-direction: column; gap: 8px; padding: 0 14px; }
-  #talla-panel[hidden], .nino[hidden], #revisar-talla[hidden] { display: none; }
+  #talla-panel[hidden], .nino[hidden], .talla-nino[hidden], #revisar-talla[hidden] { display: none; }
   #precio-panel { top: calc(56px + env(safe-area-inset-top)); padding: 0 14px; }
   #precio-panel[hidden] { display: none; }
   #identidad-panel { top: calc(56px + env(safe-area-inset-top)); display: flex; flex-direction: column; gap: 5px; padding: 0 14px; max-height: 145px; }
@@ -152,7 +152,7 @@
 </div>
 
 <div id="barra" class="encima">
-  <button id="estado" type="button">Nuevo</button>
+  <button id="estado" type="button">A · Nuevo</button>
   <button id="modo" type="button" aria-pressed="false">Ropa</button>
   <div id="cantidad" class="control-cantidad">
     <button type="button" data-paso="-1" aria-label="Menos piezas">−</button>
@@ -195,7 +195,9 @@
 <script type="module">
 import { PRECIO_PRENDA, MARCAS_ROPA } from './ropa.js';
 import { aJpeg } from '/foto.js';
-import { TALLAS_ADULTO, EDADES_NINO, TALLAS_NINO } from '/tallas.js';
+import { guardar, leer, borrar, pendientes } from '/cola-fotos.js';
+import { TALLAS_ADULTO, EDADES_NINO, TALLAS_NINO, TABLAS_CALZADO, CALZADO_INICIAL, calzadoRenglon, calzadoValor, calzadoGuardado } from '/tallas.js';
+import { nombreEstado, siguienteEstado } from '/estados.js';
 
 const video = document.getElementById('camara');
 const contador = document.getElementById('contador');
@@ -237,9 +239,10 @@ function chips(contenedor, opciones, elegido, alElegir) {
 }
 
 /**
- * Botones de adulto + Niño, que abre el rodillo de edad y la talla de nino
- * opcional. Uno arriba, para disparar; otro en "revisar", para corregir.
- * `alCambiar` recibe la talla completa ("M", "Niño 6 años / S") a cada cambio.
+ * Botones de adulto + Niño + Calzado H / M / niño. Niño abre el rodillo de edad y la talla de nino
+ * opcional; los de calzado, el mismo rodillo con la talla US de la caja y su cm MX, que es lo que se guarda (#546).
+ * Uno arriba, para disparar; otro en "revisar", para corregir.
+ * `alCambiar` recibe la talla completa ("M", "Niño 6 años / S", "26", "Niño 19") a cada cambio.
  */
 function selectorTalla(raiz, alCambiar) {
   raiz.innerHTML = `<div class="chips fila tallas" role="radiogroup" aria-label="Talla"></div>
@@ -249,36 +252,51 @@ function selectorTalla(raiz, alCambiar) {
     </div>`;
   const [panelTallas, panelNino, rodillo, panelTallaNino] =
     ['.tallas', '.nino', '.rodillo', '.talla-nino'].map((selector) => raiz.querySelector(selector));
-  let talla = null;                          // 'M', o 'Niño' para usar la edad del rodillo
-  let edad = EDADES_NINO.indexOf('4 años');  // arranca a media lista: menos giro hacia bebé o hacia 16
-  let tallaNino = '';                        // opcional
+  // Cada tipo de talla con rodillo tiene su lista y su posicion; arrancan a media lista: menos giro.
+  const calzado = Object.keys(TABLAS_CALZADO);
+  const listas = { 'Niño': EDADES_NINO,
+    ...Object.fromEntries(calzado.map((t) => [t, TABLAS_CALZADO[t].map(calzadoRenglon)])) };
+  const nombres = { 'Niño': 'Edad', 'Calzado H': 'Talla de calzado de hombre (US)', 'Calzado M': 'Talla de calzado de mujer (US)',
+    'Calzado niño': 'Talla de calzado de niño (US)' };
+  const posicion = { 'Niño': EDADES_NINO.indexOf('4 años'),
+    ...Object.fromEntries(calzado.map((t) => [t, TABLAS_CALZADO[t].findIndex(([us]) => us === CALZADO_INICIAL[t])])) };
+  let talla = null;                          // 'M', o 'Niño' / 'Calzado H' / 'Calzado M' / 'Calzado niño' para usar el rodillo
+  let tallaNino = '';                        // opcional, solo con 'Niño'
 
-  /** Adulto "M", nino "Niño 6 años / S" o "Niño 6 años". */
+  /** Adulto "M", nino "Niño 6 años / S" o "Niño 6 años", calzado en cm: "26" o "Niño 19". */
   const valor = () => {
-    if (talla !== 'Niño') return talla;
-    const base = `Niño ${EDADES_NINO[edad]}`;
+    if (!listas[talla]) return talla;
+    if (talla !== 'Niño') return calzadoValor(talla, posicion[talla]);
+    const base = `Niño ${EDADES_NINO[posicion[talla]]}`;
     return tallaNino ? `${base} / ${tallaNino}` : base;
   };
   const fila = () => rodillo.firstElementChild.offsetHeight;
   const marcar = (contenedor, elegido) => {
     for (const b of contenedor.children) b.setAttribute('aria-checked', String(b.dataset.valor === elegido));
   };
-  function pintarEdad() {
+  function pintarRodillo() {
     [...rodillo.children].forEach((renglon, i) => {
-      renglon.classList.toggle('elegida', i === edad);
-      renglon.setAttribute('aria-selected', String(i === edad));
+      renglon.classList.toggle('elegida', i === posicion[talla]);
+      renglon.setAttribute('aria-selected', String(i === posicion[talla]));
     });
   }
-  function mostrarNino() {
-    panelNino.hidden = talla !== 'Niño';
-    // Un rodillo oculto no se puede girar: se acomoda en la edad al mostrarse.
-    if (!panelNino.hidden) rodillo.scrollTop = edad * fila();
+  function mostrarRodillo() {
+    panelNino.hidden = !listas[talla];
+    panelTallaNino.hidden = talla !== 'Niño';
+    if (panelNino.hidden) return;
+    rodillo.setAttribute('aria-label', nombres[talla]);
+    // «US 13.5C · 19.5» no cabe en 130 px; la edad si, y a su lado van los chips de talla de nino.
+    rodillo.style.flexBasis = talla === 'Niño' ? '' : '180px';
+    rodillo.innerHTML = listas[talla].map((e) => `<div role="option">${e}</div>`).join('');
+    // Un rodillo oculto no se puede girar: se acomoda en la posicion al mostrarse.
+    rodillo.scrollTop = posicion[talla] * fila();
+    pintarRodillo();
   }
 
-  chips(panelTallas, [...TALLAS_ADULTO.map((t) => [t, t]), ['Niño', 'Niño']], null, (elegido) => {
+  chips(panelTallas, [...TALLAS_ADULTO.map((t) => [t, t]), ['Niño', 'Niño'], ...calzado.map((t) => [t, t])], null, (elegido) => {
     talla = elegido;
     panelTallas.classList.remove('falta');
-    mostrarNino();
+    mostrarRodillo();
     alCambiar(valor());
   });
   chips(panelTallaNino, [['', 'Sin'], ...TALLAS_NINO.map((t) => [t, t])], '', (elegido) => {
@@ -286,13 +304,13 @@ function selectorTalla(raiz, alCambiar) {
     alCambiar(valor());
   });
 
-  rodillo.innerHTML = EDADES_NINO.map((e) => `<div role="option">${e}</div>`).join('');
   // La fila del centro es la elegida mientras gira, sin esperar a que se detenga.
   rodillo.addEventListener('scroll', () => {
-    const i = Math.min(EDADES_NINO.length - 1, Math.max(0, Math.round(rodillo.scrollTop / fila())));
-    if (i === edad) return;
-    edad = i;
-    pintarEdad();
+    if (!listas[talla]) return;
+    const i = Math.min(listas[talla].length - 1, Math.max(0, Math.round(rodillo.scrollTop / fila())));
+    if (i === posicion[talla]) return;
+    posicion[talla] = i;
+    pintarRodillo();
     alCambiar(valor());
   }, { passive: true });
   // Tocar una fila la lleva al centro: sirve tambien para quien no gira.
@@ -300,7 +318,6 @@ function selectorTalla(raiz, alCambiar) {
     const i = [...rodillo.children].indexOf(evento.target);
     if (i >= 0) rodillo.scrollTo({ top: i * fila(), behavior: 'smooth' });
   });
-  pintarEdad();
 
   return {
     valor,
@@ -308,13 +325,15 @@ function selectorTalla(raiz, alCambiar) {
     /** Pinta una talla ya guardada, sin avisar a `alCambiar`. La raiz tiene que estar a la vista. */
     poner(texto) {
       const [base, nino = ''] = texto.split(' / ');
-      talla = base.startsWith('Niño ') ? 'Niño' : base;
-      if (talla === 'Niño') edad = EDADES_NINO.indexOf(base.slice('Niño '.length));
+      // "Niño 19" es calzado (cm); "Niño 6 años" es ropa: la edad trae texto, el calzado solo el numero.
+      const guardado = calzadoGuardado(base, talla);
+      talla = guardado ? guardado.tipo : base.startsWith('Niño ') ? 'Niño' : base;
+      if (guardado) posicion[talla] = guardado.indice;
+      else if (talla === 'Niño') posicion[talla] = EDADES_NINO.indexOf(base.slice('Niño '.length));
       tallaNino = nino;
       marcar(panelTallas, talla);
       marcar(panelTallaNino, tallaNino);
-      pintarEdad();
-      mostrarNino();
+      mostrarRodillo();
     },
   };
 }
@@ -396,30 +415,6 @@ if (modoRopa) panelIdentidad.hidden = false;
 
 /* ---------- cola local: la foto se guarda antes de intentar subirla ---------- */
 
-function abrirBase() {
-  return new Promise((resolve, reject) => {
-    const solicitud = indexedDB.open('eldolaron', 1);
-    solicitud.onupgradeneeded = () => solicitud.result.createObjectStore('pendientes', { keyPath: 'id' });
-    solicitud.onsuccess = () => resolve(solicitud.result);
-    solicitud.onerror = () => reject(solicitud.error);
-  });
-}
-
-async function conStore(modo, fn) {
-  const base = await abrirBase();
-  return new Promise((resolve, reject) => {
-    const transaccion = base.transaction('pendientes', modo);
-    const solicitud = fn(transaccion.objectStore('pendientes'));
-    solicitud.onsuccess = () => resolve(solicitud.result);
-    solicitud.onerror = () => reject(solicitud.error);
-  });
-}
-
-const guardar = (registro) => conStore('readwrite', (s) => s.put(registro));
-const leer = (id) => conStore('readonly', (s) => s.get(id));
-const borrar = (id) => conStore('readwrite', (s) => s.delete(id));
-const pendientes = () => conStore('readonly', (s) => s.getAll());
-
 /* ---------- camara ---------- */
 
 async function encenderCamara() {
@@ -495,7 +490,7 @@ function repintarMiniatura(id) {
   // "Niño 18-24 meses / XL" no cabe en 62 px: "18-24m XL".
   boton.querySelector('.t').textContent = (datos.talla ?? '')
     .replace('Niño ', '').replace(' años', 'a').replace(' meses', 'm').replace(' / ', ' ');
-  boton.classList.toggle('danado', datos.estado_fisico === 'danado');
+  boton.classList.toggle('danado', datos.estado_fisico !== 'nuevo');
   boton.classList.toggle('subida', datos.subida);
   boton.querySelector('.n').textContent = datos.cantidad > 1 ? `×${datos.cantidad}` : '';
 }
@@ -535,9 +530,9 @@ function pintarFichaRopa() {
 }
 
 function pintarEstadoRevision() {
-  const danado = (fichaRevision ?? registroActual).estado_fisico === 'danado';
-  elRevisarEstado.textContent = danado ? 'Dañado' : 'Nuevo';
-  elRevisarEstado.classList.toggle('danado', danado);
+  const estado = (fichaRevision ?? registroActual).estado_fisico;
+  elRevisarEstado.textContent = nombreEstado(estado);
+  elRevisarEstado.classList.toggle('danado', estado !== 'nuevo');
   for (const b of document.getElementById('revisar-precios').children) {
     b.setAttribute('aria-checked', String(Number(b.dataset.valor) === fichaRevision?.precio));
   }
@@ -709,14 +704,15 @@ async function guardarExistencia(id) {
   let aviso;
   try {
     const respuesta = await fetch(`/api/borradores/${id}/existencia`, {
-      method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ stock: valor }),
+      method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ stock: valor, esperado: datos.guardada }),
     });
     const cuerpo = await respuesta.json().catch(() => ({}));
-    if (!respuesta.ok) throw new Error(cuerpo.error || `error ${respuesta.status}`);
+    if (!respuesta.ok) throw Object.assign(new Error(cuerpo.error || `error ${respuesta.status}`), { stock: respuesta.status === 409 ? cuerpo.stock : undefined });
     datos.guardada = valor;
     aviso = `Guardado: ${valor} ${valor === 1 ? 'pieza' : 'piezas'}.`;
   } catch (error) {
-    // No se queda un numero en pantalla que el servidor no tiene.
+    // No se queda un numero en pantalla que el servidor no tiene (en 409, el que devolvió).
+    if (Number.isInteger(error.stock)) datos.guardada = error.stock;
     aviso = `No se guardó (${error instanceof TypeError ? 'sin red' : error.message}). Sigue en ${datos.guardada}.`;
     piezasTotales += datos.guardada - datos.cantidad;
     datos.cantidad = datos.guardada;
@@ -742,12 +738,12 @@ function cerrarRevision() {
 elRevisarEstado.addEventListener('click', async () => {
   if (fichaRevision) {
     if (revisionOcupada) return;
-    fichaRevision.estado_fisico = fichaRevision.estado_fisico === 'danado' ? 'nuevo' : 'danado';
+    fichaRevision.estado_fisico = siguienteEstado(fichaRevision.estado_fisico);
     pintarEstadoRevision();
     elRevisarNota.textContent = 'Pulsa Guardar cambios para aplicar el precio y la condición.';
     return;
   }
-  registroActual.estado_fisico = registroActual.estado_fisico === 'danado' ? 'nuevo' : 'danado';
+  registroActual.estado_fisico = siguienteEstado(registroActual.estado_fisico);
   await guardarLocal(registroActual);
   pintarEstadoRevision();
 });
@@ -779,6 +775,9 @@ elGuardarRevision.addEventListener('click', async () => {
       datos.marca = guardada.marca || '';
       datos.estado_fisico = guardada.estado_fisico;
       repintarMiniatura(id);
+      // #479: con etiqueta el precio no lo cambia el capturista; se pidió al dueño y la ficha sigue con el precio actual.
+      if (guardada.solicitud_precio || guardada.aviso) { fichaRevision.precio = guardada.precio; pintarEstadoRevision(); }
+      if (idActual === id && guardada.aviso) { elRevisarNota.textContent = `${guardada.aviso}. Lo demás se guardó; el precio sigue en $${guardada.precio / 100}.`; return; }
     }
     if (idActual === id) elRevisarNota.textContent = 'Cambios guardados. Si ya salió una etiqueta con otro precio, reemplázala por la nueva.';
   } catch (error) {
@@ -880,6 +879,7 @@ async function procesarCola() {
       cuerpo.append('id', registro.id);
       cuerpo.append('estado_fisico', registro.estado_fisico);
       cuerpo.append('cantidad', String(registro.cantidad ?? 1));
+      if (registro.upc != null) cuerpo.append('upc', registro.upc);   // '' = escáner sin código (#379)
       if (registro.talla) cuerpo.append('talla', registro.talla);
       if (registro.prenda) cuerpo.append('prenda', registro.prenda);
       if (registro.marca) cuerpo.append('marca', registro.marca);
@@ -893,6 +893,7 @@ async function procesarCola() {
         break;                       // sin red: la foto se queda en la cola
       }
       if (respuesta.status >= 500) break;
+      if (registro.upc != null && !respuesta.ok) break; // Conservar también fotos del escáner ante sesión vencida o precio sin configurar.
       if (registro.precio_ropa != null && !respuesta.ok) {
         document.getElementById('ayuda').textContent = 'No se subió la prenda. Revisa tu sesión; la foto sigue guardada en este teléfono.';
         break;
@@ -982,9 +983,9 @@ activarControlCantidad(document.getElementById('cantidad'), () => cantidad, (val
 /* ---------- arranque ---------- */
 
 botonEstado.addEventListener('click', () => {
-  estadoFisico = estadoFisico === 'nuevo' ? 'danado' : 'nuevo';
-  botonEstado.textContent = estadoFisico === 'nuevo' ? 'Nuevo' : 'Dañado';
-  botonEstado.classList.toggle('danado', estadoFisico === 'danado');
+  estadoFisico = siguienteEstado(estadoFisico);
+  botonEstado.textContent = nombreEstado(estadoFisico);
+  botonEstado.classList.toggle('danado', estadoFisico !== 'nuevo');
 });
 document.getElementById('disparo').addEventListener('click', disparar);
 document.getElementById('reintentar').addEventListener('click', encenderCamara);

@@ -88,7 +88,7 @@ export async function sentenciasVale(env: Env, p: {
     const saldo = vales.reduce((suma, k) => suma + k.restante, 0);
     if (vales.length !== codigos.length || saldo < p.dolarones)
       return { ok:false, status:409, error:'Vale no disponible o saldo insuficiente. Vuelve a escanearlo.' };
-    // Primero se gasta el que vence antes (bases, punto 9); uno que no hace falta no se toca.
+    // Primero se gasta el que vence antes (bases, punto 8); uno que no hace falta no se toca.
     let falta = p.dolarones;
     for (const vale of vales) {
       const usa = Math.min(vale.restante, falta);

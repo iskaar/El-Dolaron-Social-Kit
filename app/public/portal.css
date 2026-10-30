@@ -51,6 +51,8 @@ li { margin:10px 0; }
 dialog { width:min(500px, 94vw); max-height:90vh; border:2px solid var(--azul); border-radius:10px; padding:24px; color:var(--azul); }
 dialog::backdrop { background:#16366b99; }
 #detalle-recibo p { border-bottom:1px solid var(--linea); padding-bottom:8px; }
+.referidos { margin-top:28px; }
+.codigo-referido { display:block; padding:14px; border:2px dashed var(--azul); text-align:center; font-size:28px; letter-spacing:2px; }
 .novedades { margin-top:28px; }
 #novedades-lista { list-style:none; padding:0; display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:12px; }
 #novedades-lista li { margin:0; }

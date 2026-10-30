@@ -14,8 +14,13 @@
     display: flex; align-items: center; gap: 14px; }
   header h1 { font-size: 17px; margin: 0; flex: 1; }
   header a { color: #FFD447; font-size: 13px; }
+  #avisos-ml:not([hidden]) { background: #D72B32; color: #fff; padding: 6px 12px; border-radius: 8px; font-size: 15px; font-weight: 700; text-decoration: none; }
+  #pedir-ayuda { background: #D72B32; color: #fff; border: 0; border-radius: 8px; padding: 6px 14px; font-size: 15px; font-weight: 700; cursor: pointer; }
+  #pedir-ayuda:disabled { opacity: .8; cursor: default; }
   #estado-red { font-size: 13px; padding: 3px 10px; border-radius: 999px; background: #ffffff22; }
   #estado-red.sin-red { background: var(--rojo); }
+  #promo-cupo { font-size: 15px; font-weight: 700; padding: 4px 12px; border-radius: 999px; background: #FFD447; color: #1a1f2b; }
+  #promo-cupo.agotada { background: var(--rojo); color: #fff; }
   main { flex: 1; display: grid; grid-template-columns: 1fr 340px; gap: 16px; padding: 16px; min-height: 0; }
   .panel { background: #fff; border: 1px solid var(--linea); border-radius: 12px; padding: 14px;
     display: flex; flex-direction: column; min-height: 0; }
@@ -35,8 +40,10 @@
   #sugerencias button:active { background: #eef1f6; }
   #sugerencias .codigo { font-family: ui-monospace, monospace; color: #78839a; }
   #ticket { flex: 1; overflow-y: auto; margin-top: 4px; }
-  .renglon { display: grid; grid-template-columns: 1fr 52px 90px 32px; gap: 8px; align-items: center;
+  .renglon { display: grid; grid-template-columns: 64px 1fr 52px 90px 32px; gap: 8px; align-items: center;
     padding: 9px 4px; border-bottom: 1px solid var(--linea); }
+  /* El cajero compara la foto con lo que tiene en la mano: etiqueta en la prenda equivocada (Issue #358). */
+  .renglon .foto { width: 64px; height: 64px; object-fit: cover; border-radius: 6px; background: #eef1f6; display: block; }
   .renglon .nombre { font-size: 15px; }
   .renglon .codigo { font-size: 11px; color: #78839a; font-family: ui-monospace, monospace; }
   .renglon .importe { text-align: right; font-weight: 700; font-variant-numeric: tabular-nums; }
@@ -72,6 +79,9 @@
   #descuento-pin h3 { margin: 0; font-size: 13px; color: #5b6478; }
   #descuento-pin[hidden] { display: none; }
   #aviso { min-height: 20px; font-size: 14px; margin-top: 8px; }
+  #datos-transferencia[hidden] { display: none; }
+  #clave-ayuda { font-size: 12px; color: #5b6478; margin: 4px 0; }
+  #clave-error { min-height: 18px; font-size: 14px; color: var(--rojo); margin: 4px 0; }
   #rechazadas:not(:empty) { margin-top: 8px; }
   #rechazadas .ticket { border: 1px solid var(--rojo); border-radius: 8px; padding: 8px;
     margin-bottom: 6px; font-size: 13px; color: var(--rojo); }
@@ -164,11 +174,15 @@ if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw-caja.js'
     </select>
   </label>
   <span id="estado-red">en línea</span>
+  <span id="promo-cupo" role="status" hidden></span>
   <button id="marcar-entrada" type="button" hidden>Marcar entrada</button>
   <button id="abrir-retiro" type="button">Gasto / retiro</button>
   <button id="abrir-corte" type="button">Corte</button>
   <a href="/socios">Alta de socios</a>
   <a href="/admin">Cola de revisión</a>
+  <a href="/avisos" id="avisos-ml" target="_blank" hidden></a>
+  <button id="pedir-ayuda" type="button" aria-live="polite">Ayuda</button>
+  <button id="cerrar-sesion" type="button">Cerrar sesión</button>
 </header>
 
 <main>
@@ -186,6 +200,7 @@ if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw-caja.js'
     <div id="total">$0</div>
     <div id="piezas">0 piezas</div>
     <div id="a-pagar"></div>
+    <button id="quitar-promo" type="button" hidden>Ya usó la promo: cobrar sin ella</button>
 
     <button id="pedir-descuento" type="button" hidden>Pedir descuento</button>
     <div id="descuento-form" hidden>
@@ -247,6 +262,21 @@ if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw-caja.js'
       <option value="transferencia">Transferencia</option>
     </select>
 
+    <!-- Transferencia desde $300 (#593): la clave de rastreo y el monto salen del comprobante del cliente. -->
+    <div id="datos-transferencia" hidden>
+      <label for="clave-rastreo">Clave de rastreo</label>
+      <input id="clave-rastreo" autocomplete="off" autocapitalize="characters" spellcheck="false" maxlength="40" aria-describedby="clave-ayuda clave-error">
+      <label for="monto-transferido">Monto transferido ($)</label>
+      <input id="monto-transferido" type="number" min="0.01" step="0.01" inputmode="decimal" aria-describedby="clave-ayuda clave-error">
+      <label for="banco-emisor">Banco de donde sale</label>
+      <select id="banco-emisor" aria-describedby="clave-error"><option value="">Elige el banco…</option></select>
+      <label for="comprobante">O sube la foto del comprobante (se llenan solos; tú confirmas)</label>
+      <input id="comprobante" type="file" accept="image/*" aria-describedby="comprobante-aviso">
+      <p id="comprobante-aviso" role="status"></p>
+      <p id="clave-ayuda">Viene en el comprobante de tu cliente, igual que el monto. Ejemplo: EJEMPLO1234567890. Cada clave sirve para un solo pago.</p>
+      <p id="clave-error" role="alert"></p>
+    </div>
+
     <label for="efectivo">Efectivo recibido</label>
     <input id="efectivo" type="number" min="0" step="5" inputmode="numeric" placeholder="0">
 
@@ -306,10 +336,11 @@ if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw-caja.js'
 </dialog>
 
 <dialog id="dialogo-retiro">
-  <h2>Sale efectivo del cajón</h2>
+  <h2 id="retiro-titulo">Sale efectivo del cajón</h2>
   <div class="tipo-salida">
     <label><input type="radio" name="tipo-salida" value="gasto" checked> Gasto (hasta $100)</label>
     <label><input type="radio" name="tipo-salida" value="retiro"> Retiro (caja fuerte, banco)</label>
+    <label><input type="radio" name="tipo-salida" value="terminal"> Entra: pago de la terminal</label>
   </div>
   <p class="nota" id="retiro-nota"></p>
   <label for="retiro-importe">Importe ($)</label>
@@ -399,7 +430,7 @@ if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw-caja.js'
 </dialog>
 <script type="module">
 import { CATEGORIAS_GASTO } from '/categorias.js';
-import { totales, agregar, efectivoAlcanza, dolaronesGanados, saldoCanjeable, maximoCanje, MINIMO_REGALO, descuentoDe, TOPE_DESCUENTO, DENOMINACIONES, contadoDe, promoInauguracion, desfaseReloj, anticipoDePedido } from '/venta.js';
+import { totales, agregar, leerMultiplicador, efectivoAlcanza, dolaronesGanados, saldoCanjeable, maximoCanje, MINIMO_REGALO, descuentoDe, TOPE_DESCUENTO, DENOMINACIONES, contadoDe, promoInauguracion, letreroPromo, desfaseReloj, anticipoDePedido, transferenciaDe, CLAVE_DESDE, BANCOS } from '/venta.js';
 import { abrirCamara } from '/camara.js';
 import {
   reconectarImpresora, conectarImpresora, impresoraLista, imprimirTicket, abrirCajon, explicarErrorUsb, errorImpresora,
@@ -460,6 +491,8 @@ const pesos = (centavos) => `$${(centavos / 100).toLocaleString('es-MX')}`;
 
 let catalogo = new Map();
 let lineas = [];
+// La promo es una por cliente (Isaac, 24/10): si el cajero reconoce a alguien que ya la uso, la quita de este ticket.
+let sinPromo = false;
 // Un solo id por ticket: doble clic en Cobrar, o un reintento tras un fallo de
 // red, reusan el mismo id en vez de crear una segunda venta. Cambiar el ticket
 // (agregar, quitar, cancelar) lo invalida: eso ya es una venta distinta.
@@ -518,8 +551,29 @@ function promoAgotada() {
 }
 notaVales();
 cargarConfigVales();
+$('quitar-promo').addEventListener('click', () => { sinPromo = !sinPromo; pintar(); });
 setInterval(cargarConfigVales, 60000);
+
+/**
+ * Issue #429: ventas de Mercado Libre por atender. #603: transferencias que Banxico no confirmó (solo un aviso:
+ * nunca frena un cobro; el dueño las valida en /avisos). Sin red o sin PIN se queda como estaba.
+ */
+async function contarAvisos() {
+  try {
+    const r = await fetch('/api/avisos');
+    if (!r.ok) return;
+    const { ventas_ml: ml, transferencias = [] } = await r.json();
+    const partes = [];
+    if (ml.length) partes.push(`📦 ${ml.length} venta${ml.length === 1 ? '' : 's'} de Mercado Libre por atender`);
+    if (transferencias.length) partes.push(`⚠ ${transferencias.length} transferencia${transferencias.length === 1 ? '' : 's'} por validar con el dueño`);
+    $('avisos-ml').hidden = partes.length === 0;
+    $('avisos-ml').textContent = partes.join(' · ');
+  } catch { /* sin red */ }
+}
+contarAvisos();
+setInterval(contarAvisos, 60000);
 const dolares = (centavos) => `${(centavos / 100).toLocaleString('es-MX')} D`;
+const avisoReferido = (centavos) => `Referido: +${dolares(centavos)} para el cliente y para quien lo invitó`;
 
 /* ---------- que caja es esta computadora (Issue #100) ---------- */
 
@@ -654,7 +708,15 @@ async function cargarCatalogo() {
 
 /* ---------- ticket ---------- */
 
+/** Letrero del encabezado: el cajero ve cuántas promos quedan (se actualiza con la consulta de cada minuto). */
+function pintarPromoCupo() {
+  const letrero = letreroPromo(promoConfig, Date.now());
+  $('promo-cupo').hidden = !letrero;
+  $('promo-cupo').textContent = letrero;
+  $('promo-cupo').classList.toggle('agotada', promoConfig?.restantes === 0);
+}
 function pintar() {
+  pintarPromoCupo();
   // Uno en % se aprueba para ese ticket exacto: si cambia, hay que pedir otro. Uno en
   // pesos se queda en el ticket hasta vaciarlo o quitarlo (Isaac, 17/10).
   const subtotal = totales(lineas).subtotal;
@@ -670,12 +732,14 @@ function pintar() {
 
   $('ticket').innerHTML = lineas.map((l, i) => `
     <div class="renglon">
+      ${l.producto_id ? `<img class="foto" src="/api/foto/${encodeURIComponent(l.producto_id)}" alt="" loading="lazy" onerror="this.style.visibility='hidden'">` : '<div></div>'}
       <div><div class="nombre">${escapar(l.nombre)}</div><div class="codigo">${escapar(l.codigo)}</div></div>
       <div>x${l.cantidad}</div>
       <div class="importe">${pesos(l.precio * l.cantidad)}</div>
       <button type="button" data-quitar="${i}" aria-label="Quitar" ${cobrando ? 'disabled' : ''}>✕</button>
     </div>`).join('') + (descuento && descuento.estado !== 'rechazada' ? `
     <div class="renglon">
+      <div></div>
       <div><div class="nombre">Descuento</div><div class="codigo">${descuento.estado === 'aprobada' ? 'aprobado' : 'esperando al dueño'}</div></div>
       <div></div>
       <div class="importe">−${pesos(descuento.monto)}</div>
@@ -690,6 +754,8 @@ function pintar() {
   const efectivo = Math.round(Number($('efectivo').value || 0) * 100);
   const usados = dolaronesPedidos();
   const promo = promoActual();
+  $('quitar-promo').hidden = !promoActual(true);
+  $('quitar-promo').textContent = sinPromo ? 'Devolver la promo a este ticket' : 'Ya usó la promo: cobrar sin ella';
   const anticipo = pedidoCargado ? anticipoDePedido(pedidoCargado.saldo, totalNeto(), usados) : 0;
   const t = totales(lineas, efectivo, usados, descuentoAplicado() + promo, anticipo);
   $('pedido-cargado').hidden = !pedidoCargado;
@@ -700,6 +766,7 @@ function pintar() {
   $('piezas').textContent = `${t.piezas} ${t.piezas === 1 ? 'pieza' : 'piezas'}`;
   $('a-pagar').textContent = [
     promo ? `Promo inauguración −${pesos(promo)}${promoConfig.restantes != null ? ` (quedan ${promoConfig.restantes})` : ''}` : '',
+    sinPromo && promoActual(true) ? 'Sin promo: este cliente ya la usó' : '',
     t.descuento - promo ? `Descuento −${pesos(t.descuento - promo)}` : '',
     usados ? `Antes ${pesos(t.total)} · Dolarones −${pesos(usados)}` : '',
     anticipo ? `Anticipo P-${pedidoCargado.folio} −${pesos(anticipo)}` : '',
@@ -708,13 +775,15 @@ function pintar() {
   const canjeable = saldoCanjeable(socio, t.total);
   const autorizado = !usados || (codigoSocio && usados <= socio.maximo && Date.parse(socio.expira_en) > Date.now());
   $('usar-maximo').disabled = cobrando || !codigoSocio || maximoCanje(socio, t.total) === 0;
-  for (const id of ['codigo', 'socio', 'buscar-socio', 'quitar-socio', 'dolarones', 'efectivo', 'forma', 'cancelar', 'pedir-descuento', 'quitar-descuento', 'quitar-pedido']) $(id).disabled = cobrando;
+  for (const id of ['codigo', 'socio', 'buscar-socio', 'quitar-socio', 'dolarones', 'efectivo', 'forma', 'cancelar', 'pedir-descuento', 'quitar-descuento', 'quitar-pedido', 'clave-rastreo', 'monto-transferido', 'banco-emisor', 'comprobante']) $(id).disabled = cobrando;
+  // Transferencia desde $300 (#593): aparecen la clave de rastreo y el monto del comprobante.
+  $('datos-transferencia').hidden = !($('forma').value === 'transferencia' && t.aPagar >= CLAVE_DESDE);
   pintarImpresionRemota();
   $('cobrar').textContent = `Cobrar · ${$('forma').selectedOptions[0].textContent}`;
   $('cobrar').disabled = cobrando || t.total === 0 || usados > t.total || usados > canjeable || !autorizado;
   $('codigo-autorizacion').textContent = socio?.vale
     ? `${valesCargados.length > 1 ? `${valesCargados.length} vales impresos` : 'Vale impreso'}: ${dolares(socio.disponible)}.`
-      + ` ${valesCargados.length > 1 ? 'El primero vence' : 'Vence'} ${new Date(socio.expira_en).toLocaleString('es-MX')}.`
+      + ` ${valesCargados.length > 1 ? 'El más próximo vence' : 'Vence'} ${new Date(socio.expira_en).toLocaleString('es-MX')}.`
       + ' Escanea otro vale para sumarlo.'
     : codigoSocio
     ? `El cliente autorizó hasta ${dolares(socio.maximo)}. Su código vence a las ${new Date(socio.expira_en).toLocaleTimeString('es-MX')}.`
@@ -753,7 +822,14 @@ function buscarPieza(codigo) {
 
 function agregarCodigo(leido, reintento = false) {
   if (cobrando) return;
-  const codigo = codigoDeDigitos(leido) ?? leido;
+  const multiplicado = leerMultiplicador(leido);
+  if (!multiplicado) {
+    $('aviso').textContent = 'La cantidad antes del * va de 1 a 99.';
+    $('aviso').style.color = '#D72B32';
+    return false;
+  }
+  const { cantidad } = multiplicado;
+  const codigo = codigoDeDigitos(multiplicado.codigo) ?? multiplicado.codigo;
   // Folio de un pedido por WhatsApp (P-17): trae sus piezas apartadas y su saldo (Issue #269).
   if (/^P-?\d+$/i.test(codigo.trim())) {
     cargarPedido(Number(codigo.trim().replace(/\D/g, '')));
@@ -779,8 +855,8 @@ function agregarCodigo(leido, reintento = false) {
     const enTicket = lineas
       .filter((l) => l.codigo === pieza.codigo)
       .reduce((suma, l) => suma + l.cantidad, 0);
-    if (pieza.stock - enTicket <= 0) {
-      $('aviso').textContent = enTicket > 0
+    if (pieza.stock - enTicket < cantidad) {
+      $('aviso').textContent = enTicket > 0 || (cantidad > 1 && pieza.stock > 0)
         ? `${pieza.nombre}: solo hay ${pieza.stock} en existencia.`
         : `${pieza.nombre} ya se vendió o está apartada. Revisa la etiqueta.`;
       $('aviso').style.color = '#D72B32';
@@ -790,7 +866,7 @@ function agregarCodigo(leido, reintento = false) {
 
   lineas = agregar(lineas, {
     codigo: pieza.codigo, nombre: pieza.nombre, precio: pieza.precio, producto_id: pieza.id,
-  });
+  }, cantidad);
   idVenta = null;
   $('aviso').textContent = '';
   pintar();
@@ -819,7 +895,7 @@ function buscarPorTexto(texto) {
 }
 
 function pintarSugerencias() {
-  const texto = $('codigo').value;
+  const texto = leerMultiplicador($('codigo').value)?.codigo ?? '';
   const piezas = texto.trim().length >= 2 && !buscarPieza(texto) ? buscarPorTexto(texto) : [];
   $('sugerencias').innerHTML = piezas.map((p) => `
     <button type="button" data-codigo="${escapar(p.codigo)}">
@@ -831,7 +907,8 @@ $('codigo').addEventListener('input', pintarSugerencias);
 $('sugerencias').addEventListener('click', (e) => {
   const codigo = e.target.closest('button')?.dataset.codigo;
   if (!codigo) return;
-  agregarCodigo(codigo);
+  // «3*juguetes» y clic en la sugerencia: tambien entran 3.
+  agregarCodigo(`${leerMultiplicador($('codigo').value)?.cantidad ?? 1}*${codigo}`);
   $('codigo').value = '';
   pintarSugerencias();
   $('codigo').focus();
@@ -879,7 +956,7 @@ const descuentoAplicado = () => (descuento?.estado === 'aprobada' ? descuento.mo
 /** Promo de inauguracion del ticket actual; el servidor la vuelve a calcular al cobrar. */
 // La hora guardada solo vale mientras el ticket conserva su folio (reintento); sin folio, cobrar() fijara la de ahora.
 // Con cupo (Issue #250) la caja deja de darla al llegar a 0; sin red sigue con lo último que supo.
-const promoActual = () => promoConfig?.restantes === 0 ? 0 : promoInauguracion(totales(lineas).subtotal, idVenta && creadoEnVenta ? Date.parse(creadoEnVenta) : Date.now(), promoConfig);
+const promoActual = (aunQuitada = false) => (sinPromo && !aunQuitada) || promoConfig?.restantes === 0 ? 0 : promoInauguracion(totales(lineas).subtotal, idVenta && creadoEnVenta ? Date.parse(creadoEnVenta) : Date.now(), promoConfig);
 /** Lo que vale el ticket ya con descuento aprobado y promo: contra esto se canjean Dolarones. */
 const totalNeto = () => totales(lineas, 0, 0, descuentoAplicado() + promoActual()).total;
 
@@ -1132,6 +1209,8 @@ async function cobrarConDolarones(venta, t) {
   venta.vale_usado = cuerpo.vale_usado;
   venta.vales_usados = cuerpo.vales_usados;
   venta.saldo_pedido = cuerpo.saldo_pedido;
+  venta.excedente_transferencia = cuerpo.excedente_transferencia;
+  venta.referido_liberado = cuerpo.referido_liberado ?? 0;
   if (socio.vale) return { vale:true };
   const saldo = cuerpo.saldo ?? { disponible: socio.disponible - venta.dolarones };
   return { numero: socio.numero, ganados: cuerpo.ganados ?? dolaronesGanados(t.aPagar), saldo: saldo.disponible };
@@ -1159,7 +1238,12 @@ async function cargarPedido(folio) {
   if (!r.ok) return avisoRojo(cuerpo.error ?? `No se encontró el pedido P-${folio}.`);
   const p = cuerpo.pedido;
   if (cobrando || pedidoCargado) return;   // otro escaneo ganó mientras se esperaba
-  if (!(p.saldo > 0 && Date.parse(p.saldo_vence_en) > Date.now())) {
+  if (p.estado === 'apartado' && p.entrega === 'envio' && !p.liquidado_en)
+    return avisoRojo(`El paquete P-${p.folio} recibe piezas y abonos en /pedidos. Liquídalo ahí para programar su viernes de envío.`);
+  const envioPagado = p.estado === 'apartado' && p.entrega === 'envio' && p.liquidado_en;
+  // Apartado de revendedora (#575): sin anticipo, el cliente paga todo al recoger (o ya abonó una parte por transferencia).
+  const sinAnticipo = p.estado === 'apartado' && p.entrega === 'tienda' && p.anticipo === 0 && Date.parse(p.vence_en) > Date.now();
+  if (!sinAnticipo && !(p.saldo > 0 && (envioPagado || Date.parse(p.saldo_vence_en) > Date.now()))) {
     return avisoRojo(`El pedido P-${p.folio} ${p.saldo > 0 ? 'ya no tiene saldo vigente: el saldo venció' : 'no tiene saldo a favor'}.`);
   }
   const apartado = p.estado === 'apartado';
@@ -1177,7 +1261,8 @@ async function cargarPedido(folio) {
   }
   pedidoCargado = { id: p.id, folio: p.folio, saldo: p.saldo };
   idVenta = null;
-  $('aviso').textContent = `Pedido P-${p.folio} de ${p.cliente}: ${apartado ? 'piezas y ' : ''}saldo ${pesos(p.saldo)} cargados.`;
+  $('aviso').textContent = p.saldo > 0 ? `Pedido P-${p.folio} de ${p.cliente}: ${apartado ? 'piezas y ' : ''}saldo ${pesos(p.saldo)} cargados.`
+    : `Pedido P-${p.folio} de ${p.cliente}: piezas cargadas, sin pago registrado: se cobra completo.`;
   $('aviso').style.color = '#1f7a4d';
   pintar();
 }
@@ -1205,7 +1290,8 @@ async function cobrarConPedido(venta) {
       signal: AbortSignal.timeout(15000),
     });
   } catch {
-    return avisoRojo('Sin red: una venta con pedido no se cobra sin conexión. Intenta otra vez, o quita el pedido y cobra normal.');
+    return avisoRojo('Sin red: una venta con pedido o con clave de rastreo no se cobra sin conexión. Intenta otra vez'
+      + (pedidoCargado ? ', o quita el pedido y cobra normal.' : '.'));
   }
   const cuerpo = await respuesta.json().catch(() => ({}));
   if (!respuesta.ok) {
@@ -1227,6 +1313,22 @@ function preguntarForma(aPagar, efectivo) {
   d.showModal();
   return new Promise((listo) => d.addEventListener('close', () => listo(d.returnValue), { once: true }));
 }
+
+/** El error de la clave o del monto va junto a sus campos y el foco regresa al que falló. */
+function errorClave(r) {
+  $('clave-error').textContent = r.error;
+  $({ monto: 'monto-transferido', banco: 'banco-emisor' }[r.campo] ?? 'clave-rastreo').focus();
+  return false;
+}
+for (const id of ['clave-rastreo', 'monto-transferido', 'banco-emisor']) $(id).addEventListener('input', () => { $('clave-error').textContent = ''; });
+// Foto del comprobante (#603): se llena sola la clave, el monto y el banco; el cajero confirma. Sin red o si falla, a mano como siempre.
+$('comprobante').addEventListener('change', async () => {
+  try { await (await import('/comprobante.js')).adjuntar($('comprobante'), { clave: 'clave-rastreo', monto: 'monto-transferido', banco: 'banco-emisor', aviso: 'comprobante-aviso' }, $); }
+  catch { $('comprobante-aviso').textContent = 'Sin red: escribe la clave, el monto y el banco a mano.'; }
+  $('clave-error').textContent = '';
+});
+// Banxico pide el banco emisor para verificar la transferencia despues (#603); «Otro banco» no se verifica sola.
+$('banco-emisor').append(...[...BANCOS, ['otro', 'Otro banco (no se verifica sola)']].map(([codigo, nombre]) => new Option(nombre, codigo)));
 
 async function cobrar() {
   if (cobrando) return;                 // doble clic: el primero ya va en camino
@@ -1272,6 +1374,15 @@ async function cobrar() {
     $('aviso').style.color = '#D72B32';
     return;
   }
+  // Transferencia desde $300 (#593): clave de rastreo y monto del comprobante, validados igual que en el servidor.
+  // Con clave el cobro espera al servidor (como con pedido): la clave solo es unica si la ve la base de datos.
+  let transf = null;
+  if (forma === 'transferencia' && t.aPagar >= CLAVE_DESDE) {
+    transf = transferenciaDe({ clave: $('clave-rastreo').value, transferido: Math.round(Number($('monto-transferido').value || 0) * 100), debido: t.aPagar });
+    if (!transf.ok) { pintar(); return errorClave(transf); }
+    if (!$('banco-emisor').value) { pintar(); return errorClave({ campo: 'banco', error: 'Elige el banco de donde salió la transferencia (viene en el comprobante).' }); }
+  }
+  $('clave-error').textContent = '';
 
   cobrando = true;
   pintar();
@@ -1294,18 +1405,24 @@ async function cobrar() {
       promo: promoActual(),
       ...(pedidoCargado ? { pedido_id: pedidoCargado.id, anticipo } : {}),
       ...(imprimirEn ? { imprimir_en: imprimirEn } : {}),
+      ...(transf ? { clave_rastreo: transf.clave, monto_transferido: transf.transferido, banco_emisor: $('banco-emisor').value } : {}),
+      ...(transf && $('comprobante').dataset?.key ? { comprobante_key: $('comprobante').dataset.key, fecha_comprobante: $('comprobante').dataset.fecha || undefined } : {}),
     };
     let socioTicket = socio && !socio.vale && { numero: socio.numero, ganados: 0, saldo: socio.disponible };
+    let excedente = 0;
     if (usados > 0) {
       socioTicket = await cobrarConDolarones(venta, t);
       if (!socioTicket) return;
+      excedente = venta.excedente_transferencia ?? 0;
       if (socioTicket.vale) socioTicket = null;
-    } else if (pedidoCargado) {
+    } else if (pedidoCargado || transf) {
       const cuerpo = await cobrarConPedido(venta);
       if (!cuerpo) return;
+      excedente = cuerpo.excedente_transferencia ?? 0;
       if (Object.hasOwn(cuerpo, 'imprimir_en')) venta.imprimir_en = cuerpo.imprimir_en;
       venta.vale_emitido = cuerpo.vale_emitido;
       venta.saldo_pedido = cuerpo.saldo_pedido;
+      venta.referido_liberado = cuerpo.referido_liberado ?? 0;
       if (socioTicket) {
         socioTicket.ganados = cuerpo.ganados ?? 0;
         socioTicket.saldo = cuerpo.saldo?.disponible ?? socioTicket.saldo;
@@ -1328,6 +1445,7 @@ async function cobrar() {
       if (r?.ok && cuerpo && Object.hasOwn(cuerpo, 'ganados') && Object.hasOwn(cuerpo, 'vale_emitido')) {
         if (Object.hasOwn(cuerpo, 'imprimir_en')) venta.imprimir_en = cuerpo.imprimir_en;
         venta.vale_emitido = cuerpo.vale_emitido;
+        venta.referido_liberado = cuerpo.referido_liberado ?? 0;
         if (socioTicket) {
           socioTicket.ganados = cuerpo.ganados ?? 0;
           socioTicket.saldo = cuerpo.saldo?.disponible ?? socioTicket.saldo;
@@ -1354,6 +1472,7 @@ async function cobrar() {
     if (venta.promo && promoConfig?.restantes) {
       promoConfig.restantes--;
       try { localStorage.setItem('promo-inauguracion', JSON.stringify(promoConfig)); } catch {}
+      pintarPromoCupo();
     }
 
     // Bajar existencias en la copia local: sin esto, la misma etiqueta se podria
@@ -1368,12 +1487,14 @@ async function cobrar() {
 
     const ganados = socioTicket?.ganados || venta.vale_emitido?.importe || 0;
     $('aviso').textContent = (forma === 'efectivo' && efectivo > 0 ? `Cobrado. Cambio ${pesos(t.cambio)}` : 'Cobrado.')
-      + (ganados ? ` · Ganó ${dolares(ganados)}` : '');
+      + (ganados ? ` · Ganó ${dolares(ganados)}` : '')
+      + (venta.referido_liberado > 0 ? ` · ${avisoReferido(venta.referido_liberado)}` : '');
     if (pedidoCargado) {
       $('aviso').textContent += ` · Anticipo P-${pedidoCargado.folio} −${pesos(anticipo)}`
         + (venta.saldo_pedido > 0 ? `; le quedan ${pesos(venta.saldo_pedido)} a favor.` : '.');
       cargarCatalogo();   // las piezas apartadas que no se llevó vuelven a la venta
     }
+    if (excedente > 0) $('aviso').textContent += ` · Sobraron ${pesos(excedente)} en la transferencia: se registró solo lo cobrado. El excedente se resuelve a mano con el dueño.`;
     if (venta.imprimir_en) $('aviso').textContent += ` Ticket enviado a ${venta.imprimir_en}.`;
     if (venta.imprimir_en && (venta.vale_pendiente || venta.recompensa_pendiente)) $('aviso').textContent += ' Sin red: se enviará al sincronizar.';
     if (venta.vale_pendiente) $('aviso').textContent += venta.imprimir_en
@@ -1385,9 +1506,12 @@ async function cobrar() {
     idVenta = null;
     pedidoCargado = null;
     descuento = null;
+    sinPromo = false;
     pintarDescuento();
     quitarSocio();
     $('efectivo').value = '';
+    $('clave-rastreo').value = ''; $('monto-transferido').value = ''; $('banco-emisor').value = '';
+    $('comprobante').value = ''; if ($('comprobante').dataset) { $('comprobante').dataset.key = ''; $('comprobante-aviso').textContent = ''; }
     $('forma').value = 'efectivo'; formaElegida = false;      // cada venta empieza en efectivo: la forma anterior descuadraba el corte (#260)
     $('codigo').focus();
     sincronizar();
@@ -1439,6 +1563,7 @@ async function sincronizar() {
         }));
         $('aviso').textContent = venta.recompensa_pendiente
           ? `Venta ${venta.id} sincronizada. Dolarones ganados: ${dolares(cuerpo.ganados)}.`
+            + (cuerpo.referido_liberado > 0 ? ` ${avisoReferido(cuerpo.referido_liberado)}.` : '')
           : emitido ? `Venta ${venta.id} sincronizada. El vale fue emitido; imprímelo con el folio del ticket.`
           : `Venta ${venta.id} sincronizada. El servidor confirmó que no se emitió vale.`;
         if (venta.imprimir_en) $('aviso').textContent = `Venta ${venta.id} sincronizada. Ticket enviado a ${cuerpo.imprimir_en || venta.imprimir_en}.`;
@@ -2034,17 +2159,38 @@ $('corte-abrir-cajon').addEventListener('click', async () => {
 // Gastos hasta $100 sin aprobacion (Isaac, 28/09); uno mayor lo registra el dueno.
 let idRetiro = null;
 const tipoSalida = () => document.querySelector('input[name="tipo-salida"]:checked').value;
+// Issue #515: el dueño de la terminal paga en efectivo lo cobrado con tarjeta; si entra al cajón, el corte lo suma.
 function pintarTipoSalida() {
-  const gasto = tipoSalida() === 'gasto';
+  const tipo = tipoSalida();
+  const gasto = tipo === 'gasto';
+  $('retiro-titulo').textContent = tipo === 'terminal' ? 'Entra efectivo al cajón' : 'Sale efectivo del cajón';
   $('retiro-etiqueta-categoria').hidden = !gasto;
   $('retiro-categoria').hidden = !gasto;
   $('retiro-nota').textContent = gasto
     ? 'Algo que se pagó con dinero del cajón (agua, limpieza, papelería). Hasta $100 no necesita aprobación; guarda el ticket de la compra.'
-    : 'Dinero que se saca del cajón para guardarlo (caja fuerte, banco). Se imprime un comprobante para firmar.';
-  $('retiro-etiqueta-motivo').textContent = gasto ? 'En qué se gastó' : 'Motivo';
-  $('retiro-motivo').placeholder = gasto ? 'Garrafón de agua, jabón…' : 'Caja fuerte, depósito al banco…';
+    : tipo === 'terminal'
+      ? 'Efectivo que entrega el dueño de la terminal por las ventas con tarjeta. Cuéntalo frente a él; se imprime un comprobante para que lo firme.'
+      : 'Dinero que se saca del cajón para guardarlo (caja fuerte, banco). Se imprime un comprobante para firmar.';
+  $('retiro-etiqueta-motivo').textContent = gasto ? 'En qué se gastó' : tipo === 'terminal' ? 'Nota (opcional)' : 'Motivo';
+  $('retiro-motivo').placeholder = gasto ? 'Garrafón de agua, jabón…' : tipo === 'terminal' ? 'Pago de la terminal' : 'Caja fuerte, depósito al banco…';
 }
 document.querySelector('.tipo-salida').addEventListener('change', pintarTipoSalida);
+// Issue #600: avisa al dueño con una notificación push al celular (o por correo si no las tiene activas).
+$('pedir-ayuda').addEventListener('click', async () => {
+  const boton = $('pedir-ayuda');
+  boton.disabled = true;
+  try {
+    const r = await fetch('/api/ayuda', {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ caja: $('caja-nombre').value }),
+    });
+    boton.textContent = r.ok ? 'Ayuda avisada ✓' : ((await r.json().catch(() => ({}))).error ?? 'No se pudo avisar');
+  } catch {
+    boton.textContent = 'Sin red: no se pudo avisar';
+  }
+  // ponytail: 30 s sin repetir para no llenar el celular de avisos.
+  setTimeout(() => { boton.textContent = 'Ayuda'; boton.disabled = false; }, 30_000);
+});
+
 $('abrir-retiro').addEventListener('click', () => {
   if (!exigirCaja()) return;
   idRetiro = crypto.randomUUID();
@@ -2062,11 +2208,11 @@ $('retiro-salir').addEventListener('click', () => { $('dialogo-retiro').close();
 $('retiro-registrar').addEventListener('click', async () => {
   const importe = Math.round(Number($('retiro-importe').value || 0) * 100);
   const motivo = $('retiro-motivo').value.trim();
-  if (importe <= 0) { $('retiro-aviso').textContent = 'Escribe cuánto sale del cajón.'; return; }
   const tipo = tipoSalida();
+  if (importe <= 0) { $('retiro-aviso').textContent = tipo === 'terminal' ? 'Escribe cuánto entra al cajón.' : 'Escribe cuánto sale del cajón.'; return; }
   const categoria = $('retiro-categoria').value;
   if (tipo === 'gasto' && !categoria) { $('retiro-aviso').textContent = 'Elige una categoría.'; return; }
-  if (!motivo) { $('retiro-aviso').textContent = tipo === 'gasto' ? 'Escribe en qué se gastó.' : 'Escribe el motivo.'; return; }
+  if (!motivo && tipo !== 'terminal') { $('retiro-aviso').textContent = tipo === 'gasto' ? 'Escribe en qué se gastó.' : 'Escribe el motivo.'; return; }
   $('retiro-registrar').disabled = true;
   try {
     const r = await fetch('/api/retiros', {
@@ -2080,6 +2226,7 @@ $('retiro-registrar').addEventListener('click', async () => {
     imprimirRetiro(retiro).then(pintarImpresora);
     $('aviso').textContent = tipo === 'gasto'
       ? `Gasto de ${pesos(importe)} registrado.`
+      : tipo === 'terminal' ? `Pago de la terminal de ${pesos(importe)} registrado. Que firme el comprobante.`
       : `Retiro de ${pesos(importe)} registrado. Firmen el comprobante.`;
     $('aviso').style.color = '#1f7a4d';
     $('codigo').focus();
@@ -2098,6 +2245,7 @@ let ultimoCorte = null;
 const CORTE_RECIENTE_MIN = 30;
 let corteReciente = null;   // minutos desde el ultimo corte de esta caja, si fue hace poco
 let corteConfirmado = false;
+let corteSinEfectivo = false;   // el cajero confirmo que el cajon esta vacio de verdad
 
 function conteoCorte() {
   const conteo = {};
@@ -2124,6 +2272,11 @@ $('corte-denominaciones').innerHTML = DENOMINACIONES.map((d) => `
     <td></td></tr>`).join('');
 $('corte-denominaciones').addEventListener('input', pintarContado);
 
+$('cerrar-sesion').addEventListener('click', async () => {
+  const { cerrarSesion } = await import('/cerrar-sesion.js');
+  // Sólo las que siguen por enviar: las rechazadas ya están a la vista y no se pierden al salir.
+  await cerrarSesion({ ventas: async () => (await store('ventas', 'readonly', (s) => s.getAll())).filter((v) => v.estado !== 'rechazada').length });
+});
 $('abrir-corte').addEventListener('click', async () => {
   if (!exigirCaja()) return;
   idCorte = crypto.randomUUID();
@@ -2138,6 +2291,7 @@ $('abrir-corte').addEventListener('click', async () => {
   $('corte-registrar').textContent = 'Registrar conteo';
   corteReciente = null;
   corteConfirmado = false;
+  corteSinEfectivo = false;
   pintarContado();
   $('dialogo-corte').showModal();
 
@@ -2178,6 +2332,7 @@ function pintarResultado(c) {
     ${renglon('Ventas cobradas', c.tickets)}
     ${renglon('Fondo inicial', pesos(c.fondo_inicial))}
     ${renglon('+ Ventas en efectivo', pesos(c.efectivo_ventas))}
+    ${c.entrada_terminal ? renglon('+ Pago de la terminal', pesos(c.entrada_terminal)) : ''}
     ${renglon('− Devoluciones', pesos(c.efectivo_devoluciones))}
     ${renglon('− Retiros', pesos(c.retiros))}
     ${renglon('− Gastos', pesos(c.gastos))}
@@ -2199,6 +2354,18 @@ $('corte-registrar').addEventListener('click', async () => {
   if (contadoDe(conteo) === null) { $('corte-aviso').textContent = 'Revisa las piezas: solo números enteros.'; return; }
   const terminal = Math.round(Number($('corte-terminal').value || 0) * 100);
   if (!(terminal >= 0)) { $('corte-aviso').textContent = 'Revisa el total de la terminal.'; return; }
+  // 24/10: un corte sin contar y sin terminal descuadro el fondo y las tarjetas del dia siguiente.
+  if ($('corte-terminal').value.trim() === '') {
+    $('corte-aviso').textContent = 'Escribe el total que dice la terminal de tarjetas (pon 0 si no hubo pagos con tarjeta).';
+    $('corte-terminal').focus();
+    return;
+  }
+  if (contadoDe(conteo) === 0 && !corteSinEfectivo) {
+    corteSinEfectivo = true;
+    $('corte-aviso').textContent = 'No contaste efectivo: el corte quedaría en $0 y el fondo de mañana también. Cuenta billetes y monedas; si el cajón de verdad está vacío, vuelve a registrar.';
+    $('corte-registrar').textContent = 'Registrar con el cajón vacío';
+    return;
+  }
   if (corteReciente !== null && !corteConfirmado) {
     corteConfirmado = true;
     $('corte-aviso').textContent = `El último corte de esta caja fue hace ${corteReciente} min. Si ya contaste y entregaste, no hace falta otro; si de veras es otro corte, vuelve a registrar.`;
@@ -2209,7 +2376,8 @@ $('corte-registrar').addEventListener('click', async () => {
   try {
     const r = await fetch('/api/cortes', {
       method: 'POST', headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ id: idCorte, caja: cajaActual(), conteo, tarjeta_terminal: terminal, notas: $('corte-notas').value }),
+      body: JSON.stringify({ id: idCorte, caja: cajaActual(), conteo, tarjeta_terminal: terminal, notas: $('corte-notas').value,
+        sin_efectivo: contadoDe(conteo) === 0 }),
     });
     const corte = await r.json();
     if (!r.ok) { $('corte-aviso').textContent = corte.error ?? 'No se pudo registrar el corte.'; $('corte-registrar').disabled = false; return; }
@@ -2260,7 +2428,7 @@ document.addEventListener('keydown', (e) => {
 });
 
 $('cancelar').addEventListener('click', () => {
-  lineas = []; idVenta = null; pedidoCargado = null; descuento = null; pintarDescuento(); quitarSocio(); $('efectivo').value = ''; $('forma').value = 'efectivo'; formaElegida = false; $('aviso').textContent = 'Venta cancelada';
+  lineas = []; idVenta = null; pedidoCargado = null; descuento = null; sinPromo = false; pintarDescuento(); quitarSocio(); $('efectivo').value = ''; $('clave-rastreo').value = ''; $('monto-transferido').value = ''; $('banco-emisor').value = ''; $('comprobante').value = ''; $('comprobante').dataset.key = ''; $('comprobante-aviso').textContent = ''; $('clave-error').textContent = ''; $('forma').value = 'efectivo'; formaElegida = false; $('aviso').textContent = 'Venta cancelada';
   $('aviso').style.color = '#5b6478'; pintar(); $('codigo').focus();
 });
 

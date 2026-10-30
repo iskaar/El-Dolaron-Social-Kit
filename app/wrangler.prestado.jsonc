@@ -27,8 +27,14 @@
     "head_sampling_rate": 1
   },
   "assets": {
-    "directory": "public"
+    "directory": "public",
+    "binding": "ASSETS",
+    // Como produccion: sin esto los HTML del personal se sirven antes del filtro del Worker.
+    "run_worker_first": true
   },
+  // Nunca sin Access, aunque esta instancia este dormida.
+  "workers_dev": false,
+  "preview_urls": false,
   "vars": {
     // Gemini tiene capa gratuita: esta instancia corre con la llave de su dueño
     // y no gasta de la cuenta de El Dolaron.

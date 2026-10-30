@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { runInNewContext } from 'node:vm';
+import { nombreEstado, siguienteEstado } from '../public/estados.js';
 import worker, { permitidaParaVendedor } from './worker.ts';
 import { analizarBorrador } from './analisis.ts';
 import { tienda, DUENO } from './prueba-d1.ts';
@@ -122,23 +123,23 @@ test('venta intercalada antes de editar no se repone; venta antes de descartar i
   try {
     const { id } = await captura(t), ruta = `/api/borradores/${id}/revision`;
     await t.pedir('/api/etiquetas', { ids: [id] });
-    const original = t.env.DB.prepare.bind(t.env.DB);
+    const original = t.env.DB.prepare.bind(t.env.DB), lote = t.env.DB.batch.bind(t.env.DB), baja = new Set<unknown>();
     let vendida = false;
     t.env.DB.prepare = (sql) => {
       const s = original(sql);
-      if (sql.startsWith('update productos set stock = 0,')) {
-        const run = s.run.bind(s);
-        s.run = async () => {
-          if (!vendida) {
-            vendida = true;
-            assert.equal((await t.pedir('/api/ventas', { id: crypto.randomUUID(), lineas: [{ producto_id: id, cantidad: 1 }], forma_pago: 'efectivo', efectivo: 15000 })).status, 201);
-          }
-          return run();
-        };
-      }
+      if (sql.startsWith('update productos set stock = 0,')) baja.add(s);
       return s;
     };
+    // La baja viaja en un lote con su renglón de auditoría (#480): la venta se intercala justo antes del lote.
+    t.env.DB.batch = async (sentencias) => {
+      if (!vendida && sentencias.some((s) => baja.has(s))) {
+        vendida = true;
+        assert.equal((await t.pedir('/api/ventas', { id: crypto.randomUUID(), lineas: [{ producto_id: id, cantidad: 1 }], forma_pago: 'efectivo', efectivo: 15000 })).status, 201);
+      }
+      return lote(sentencias);
+    };
     assert.equal((await t.pedir(ruta, {}, 'DELETE')).status, 409);
+    assert.equal(t.db.prepare("select count(*) n from conteo_ajustes where motivo = 'descarte'").get()!.n, 0);
     assert.equal((await t.pedir(ruta, { precio: 8000, estado_fisico: 'danado' }, 'PATCH')).cuerpo.stock, 0);
     assert.ok(await t.env.FOTOS.get(`fotos/${id}.jpg`));
   } finally { t.db.close(); }
@@ -161,6 +162,7 @@ function miniatura(subida: boolean) {
     ({ abrirRevision, cerrarRevision, precio: v => { fichaRevision.precio = v; },
        guardar: () => elGuardarRevision.eventos.get('click')(), condicion: () => elRevisarEstado.eventos.get('click')(),
        eliminar: () => elDescartar.eventos.get('click')() })`, {
+    nombreEstado, siguienteEstado,
     document: { getElementById: $ }, sesion, preciosRopa: [20000, 15000, 10000, 8000, 5000], idSubiendo: null,
     prendasRopa: ['Playera'], marcasRopa: ['All in Motion'], elegirOpcion() {},
     chips() {}, selectorTalla: () => ({ poner() {} }), activarControlCantidad() {},

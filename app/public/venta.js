@@ -27,19 +27,28 @@ export function descuentoDe({ tipo, valor }, subtotal) {
 }
 
 /**
- * Promo de inauguracion (Isaac, 9/10, Issue #263): 10% directo del subtotal, sin
- * minimo, una vez por ticket, al centavo. Las fechas vienen del servidor
+ * Promo de gran inauguracion (Isaac, 23/10, Issue #487; mecanica de #250): $100 de
+ * descuento si el subtotal es de $300 o mas, una vez por ticket. Las fechas vienen del servidor
  * (PROMO_DESDE/PROMO_HASTA): sin ellas no hay promo. Se suma a un descuento
  * aprobado y se siguen ganando y usando Dolarones y vales. La usan la caja (para
  * mostrar) y el servidor (para cobrar), con la hora de la venta.
  * @param {{ desde: string, hasta: string } | null} promo
  */
-export const PROMO_PORCENTAJE = 10;
+export const PROMO_DESCUENTO = 10000;
+export const PROMO_MINIMO = 30000;
 
 export function promoInauguracion(subtotal, momento, promo) {
   if (!promo) return 0;
   const desde = Date.parse(promo.desde), hasta = Date.parse(promo.hasta);
-  return momento >= desde && momento < hasta ? Math.round(subtotal * PROMO_PORCENTAJE / 100) : 0;
+  return momento >= desde && momento < hasta && subtotal >= PROMO_MINIMO ? PROMO_DESCUENTO : 0;
+}
+
+/** Letrero de la caja (Isaac, 24/10): cuántas promos quedan mientras la ventana está abierta; '' fuera de ella. */
+export function letreroPromo(promo, momento) {
+  if (!promoInauguracion(PROMO_MINIMO, momento, promo)) return '';
+  const monto = `$${PROMO_DESCUENTO / 100}`;
+  if (promo.restantes == null) return `Promo ${monto} activa`;
+  return promo.restantes > 0 ? `Promos de ${monto}: quedan ${promo.restantes}` : `Promo de ${monto} agotada`;
 }
 
 /**
@@ -84,11 +93,73 @@ export function anticipoDePedido(saldo, total, dolarones = 0) {
   return Math.max(0, Math.min(saldo, total - dolarones));
 }
 
-/** Pedidos por WhatsApp (Isaac, Issue #269): anticipo minimo y envio fijo, gratis desde $1,000 de piezas. */
-export const ANTICIPO_MINIMO = 100_00;
+/** Apartados (#434): 15% de las piezas al peso hacia arriba; $100 al abrir un paquete. */
+export const ANTICIPO_ENVIO = 100_00;
+export const ANTICIPO_PORCENTAJE = 15;
+export const anticipoMinimoDe = (subtotal, entrega) => entrega === 'envio'
+  ? ANTICIPO_ENVIO : Math.ceil(subtotal * ANTICIPO_PORCENTAJE / 100 / 100) * 100;
 export const ENVIO_COSTO = 99_00;
 export const ENVIO_GRATIS_DESDE = 1000_00;
 export const envioDe = (subtotal) => (subtotal > 0 && subtotal < ENVIO_GRATIS_DESDE ? ENVIO_COSTO : 0);
+
+/**
+ * Clave de rastreo SPEI (#593, paso 1). El cajero la copia del comprobante del cliente. En caja se pide
+ * desde $300 de transferencia; en apartados, envios y pagos de revendedora, siempre.
+ * Banxico acepta hasta 30 caracteres alfanumericos; el minimo de 6 solo frena capturas como «ok» o «123».
+ */
+export const CLAVE_DESDE = 300_00;
+export const CLAVE_RASTREO = /^[A-Z0-9]{6,30}$/;
+/** Mayusculas y sin espacios (los comprobantes la parten en renglones). */
+export const claveRastreoDe = (texto) => String(texto ?? '').replace(/\s+/g, '').toUpperCase();
+const dinero = (centavos) => `$${(centavos / 100).toLocaleString('es-MX', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
+/**
+ * Valida lo que el cajero capturo de una transferencia (centavos enteros) contra lo que se cobra por
+ * ese medio. Menos que lo debido se rechaza; mas se acepta y el excedente se resuelve a mano.
+ * La usan la pantalla y el servidor: ninguno acepta lo que el otro rechazaria.
+ * @param {{ clave: unknown, transferido: number, debido: number }} datos
+ * @returns {{ ok: false, campo: 'clave' | 'monto', error: string }
+ *   | { ok: true, clave: string, transferido: number, aplicado: number, excedente: number }}
+ */
+export function transferenciaDe({ clave, transferido, debido }) {
+  const normalizada = claveRastreoDe(clave);
+  if (!normalizada) return { ok: false, campo: 'clave', error: 'Escribe la clave de rastreo que viene en el comprobante del cliente.' };
+  if (!CLAVE_RASTREO.test(normalizada))
+    return { ok: false, campo: 'clave', error: 'La clave de rastreo lleva de 6 a 30 letras y números, sin acentos, guiones ni símbolos.' };
+  if (!Number.isSafeInteger(transferido) || transferido <= 0)
+    return { ok: false, campo: 'monto', error: 'Escribe el monto que dice el comprobante del cliente.' };
+  if (transferido < debido)
+    return { ok: false, campo: 'monto', error: `El comprobante dice ${dinero(transferido)} y se cobran ${dinero(debido)}. Pídele al cliente que transfiera lo que falta (${dinero(debido - transferido)}).` };
+  return { ok: true, clave: normalizada, transferido, aplicado: debido, excedente: transferido - debido };
+}
+
+/**
+ * Banco de donde sale la transferencia (#603): el CEP de Banxico lo pide. Codigo SPEI de 5 digitos = 40 (banco) o 90
+ * (fintech) + el codigo de 3 digitos de la CLABE. La PC de la caja revisa cada codigo contra el catalogo de Banxico
+ * (tools/cep_verificar.py --catalogo); uno que Banxico no conozca nunca se consulta. «otro» = no se verifica sola.
+ */
+export const BANCOS = [
+  ['40012', 'BBVA México'], ['40014', 'Santander'], ['40072', 'Banorte'], ['40002', 'Citibanamex'], ['40021', 'HSBC'],
+  ['40044', 'Scotiabank'], ['40036', 'Inbursa'], ['40058', 'Banregio'], ['40062', 'Afirme'], ['40030', 'BanBajío'],
+  ['40127', 'Azteca'], ['40137', 'BanCoppel'], ['40167', 'Hey Banco'], ['40042', 'Mifel'],
+  ['90638', 'Nu México'], ['90722', 'Mercado Pago'], ['90646', 'STP'], ['90661', 'Klar'], ['90728', 'Spin by OXXO'],
+];
+/** Codigo del banco de lo capturado: '' u «otro» = null (no se verifica sola); un codigo que no esta en la lista = undefined. */
+export const bancoDe = (valor) => {
+  const texto = String(valor ?? '').trim();
+  if (texto === '' || texto === 'otro') return null;
+  return BANCOS.some(([codigo]) => codigo === texto) ? texto : undefined;
+};
+
+/** Viernes en fecha de tienda (YYYY-MM-DD); el jueves a las 20:00 ya pasó el corte. UTC-6 fijo. */
+export function viernesDeEnvio(instante) {
+  const local = new Date(new Date(instante).getTime() - 6 * 3_600_000);
+  const dia = local.getUTCDay();
+  let dias = (5 - dia + 7) % 7;
+  if (dia === 5 || (dia === 4 && local.getUTCHours() >= 20)) dias += 7;
+  local.setUTCDate(local.getUTCDate() + dias);
+  return local.toISOString().slice(0, 10);
+}
 
 /**
  * 10 D por cada bloque completo de $100 pagado en dinero (decision de Isaac del
@@ -115,12 +186,23 @@ export function maximoCanje(socio, total, ahora = Date.now()) {
 }
 
 /** Agrega una pieza al ticket, juntando lineas repetidas del mismo codigo. */
-export function agregar(lineas, pieza) {
+export function agregar(lineas, pieza, cantidad = 1) {
   const existente = lineas.find((l) => l.codigo === pieza.codigo && l.precio === pieza.precio);
   if (existente) {
-    return lineas.map((l) => (l === existente ? { ...l, cantidad: l.cantidad + 1 } : l));
+    return lineas.map((l) => (l === existente ? { ...l, cantidad: l.cantidad + cantidad } : l));
   }
-  return [...lineas, { ...pieza, cantidad: 1 }];
+  return [...lineas, { ...pieza, cantidad }];
+}
+
+/**
+ * «3*» antes de escanear agrega 3 piezas (Issue #358): "3*ED-000123", "3*123".
+ * Sin prefijo la cantidad es 1. null = prefijo que no es 1 a 99.
+ */
+export function leerMultiplicador(texto) {
+  const m = /^\s*(\d+)\s*\*\s*(.*)$/.exec(texto);
+  if (!m) return { cantidad: 1, codigo: texto };
+  const cantidad = Number(m[1]);
+  return cantidad >= 1 && cantidad <= 99 ? { cantidad, codigo: m[2] } : null;
 }
 
 /**

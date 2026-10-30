@@ -169,6 +169,12 @@ Los valores de `GENDER`: Mujer `339665`, Hombre `339666`, Niñas `339668`, Niño
 Categorías no moda (hogar, juguetes, accesorios): requieren `BRAND`, `MODEL` y un atributo específico (p. ej. `PRODUCT_TYPE` en sartenes); `COLOR` opcional.
 `MODEL` es obligatorio: si una prenda de marca no tiene modelo, la doc permite N/A (`value_id:"-1"`, `value_name:null`) en atributos que no sean `allow_variations`. **[NO CONFIRMADO]** que `MODEL` acepte N/A en ropa.
 
+**Cómo propone la app los atributos (#555, 28/10/2026).** `preparar` llena todo lo que puede antes de abrir el formulario, y cada valor lleva su origen (`pieza`, `defecto` o `ia`):
+- De la pieza: `BRAND` (`marca`), `SIZE` (`talla`), `GTIN` (`upc`, solo con dígito verificador válido; se incluye aunque la categoría no lo marque obligatorio), `MODEL` (nombre sin la marca).
+- Por regla: `EMPTY_GTIN_REASON` `17055160` si no hay GTIN válido (y se omite si lo hay), `UNITS_PER_PACK` = 1, `ITEM_CONDITION` desde el estado físico (solo `nuevo` es publicable).
+- Lo demás obligatorio (COLOR, GENDER, material, tipos…) lo propone el análisis de `analisis.ts` con la foto y el nombre; en listas cerradas solo puede elegir uno de los valores de ML. Lo que no distingue queda vacío y el formulario lo lista arriba con su motivo.
+- Etiquetas reales de la API que importan (consultadas el 28/10/2026): `EMPTY_GTIN_REASON` e `ITEM_CONDITION` vienen `hidden: true` (el primero se manda igual); `GRADING` trae `new_hidden` (no aplica a piezas nuevas).
+
 Ajustes de categoría (`GET /categories/{id}`, también público): `max_title_length` 60, `max_pictures_per_item` 12, `max_pictures_per_item_var` 10, `minimum_price` 35 MXN, `item_conditions` `new/used/not_specified`, `buying_modes` `buy_it_now/auction`, `immediate_payment` `required`, `max_variations_allowed` 100 (legacy).
 
 ### Guías de tallas (size charts) [OFICIAL]
@@ -191,6 +197,7 @@ Fuentes: https://developers.mercadolibre.com.mx/es_ar/trabajar-con-imagenes (act
 - Formatos JPG/JPEG/PNG; hasta 10 MB; recomendado 1200x1200 px; **mínimo 500x500 px** (error `cause_id 509`: "below the minimum allowed size"); máx. 1920x1920 (se reduce). Más de 800 px de ancho activa zoom (recomendado para moda). RGB mejor que CMYK; el producto debe ocupar ~95% del encuadre.
 - Máx. por publicación: `max_pictures_per_item` = 12 (10 por variante en legacy) en las categorías revisadas. La doc de publicar dice "hasta seis"; prevalece el valor por categoría.
 - Fondo blanco: la API de diagnóstico de imágenes valida `white_background`, `minimum_size`, `text_logo` y `watermark` "según corresponda por categoría", con el mensaje "El fondo de tu foto debe ser blanco digitalizado". **[NO CONFIRMADO]** si la foto de portada de moda en MLM exige fondo blanco (blogs lo afirman: [3ROS]). Usar `POST /moderations/pictures/diagnostic` (acepta URL, base64 o picture_id, con `category_id` en `context`) antes de asociar. Sin logos, textos ni marcas de agua.
+  - App (#564): `preparar` lo llama con `picture_type: thumbnail` y avisa lo que falla (`action: 'empty'` = válida); nunca bloquea. **[NO CONFIRMADO con cuenta real]** la forma exacta del cuerpo (`pictures[].base64`) y de la respuesta; `fallasDeFoto` busca cada `action` donde esté anidado.
 - Una sola foto por pieza es técnicamente válida (mínimo de la doc: al menos una imagen para `gold_special/gold_pro`: `requires_picture: true`; desde 12/03/2026 las actualizaciones sin imágenes se rechazan con 400).
 
 ### Cómo subirlas desde un Worker [OFICIAL]
@@ -240,6 +247,7 @@ No se encontró firma, HMAC ni secret compartido en la doc de notificaciones. Me
 ### Cómo leer la orden [OFICIAL]
 Fuente: https://developers.mercadolibre.com.mx/es_ar/gestiona-ventas (act. 21/09/2026)
 `GET https://api.mercadolibre.com/orders/$ORDER_ID` con el token del vendedor. Campos útiles: `status` (`paid` cuando hay pago acreditado; también `confirmed`, `cancelled`, `partially_refunded`...), `date_closed` (primera vez que pasa a confirmed/paid; "se descuenta el stock del ítem"), `order_items[].item.id`, `order_items[].quantity`, `unit_price`, `sale_fee`, `total_amount`, `buyer.id`, `shipping.id`, `pack_id`, `payments[]`, `tags`.
+- **Precio real, comisión y envío (#621)**: de la orden se guardan `order_items[].unit_price` y `order_items[].sale_fee` (por pieza, en pesos; `sale_fee` por pieza es la lectura de la doc, a confirmar con una orden real). El envío que paga la tienda es la suma de `senders[].cost` de `GET /shipments/{shipping.id}/costs` (`receiver.cost` es lo que paga el comprador). La retención de ISR/IVA no viene en la orden: no se guarda. Columnas en `ml_ventas` (migración 064); el cron rellena en lotes de 10.
 - `orders_v2` solo se emite para ventas confirmadas; con `buy_it_now` la orden aparece cuando el pago está aprobado.
 - **Compras de carrito**: varias órdenes comparten `pack_id`; el detalle del carrito está en `/packs`. Una orden puede contener varias unidades del mismo ítem.
 - Una orden `cancelled` (por falta de pago, ítem pausado durante aprobación, etc.) debe **reponer** el stock en D1 si ya se descontó. `confirmed` por API puede significar "no concretada" por front (ver doc).

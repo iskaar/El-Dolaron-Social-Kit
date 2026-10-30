@@ -26,6 +26,40 @@ test('PATCH con stock explicito sigue fijando la existencia', async () => {
   assert.equal(stock(t), 12);
 });
 
+test('D1 (#473): en una pieza lista, la existencia del PATCH exige la vista y deja auditoría; la vencida no pisa la venta', async () => {
+  const t = tienda();
+  try {
+    const ruta = `/api/borradores/${PRODUCTO}`;
+    const fila = () => t.db.prepare('select nombre, stock from productos where id = ?').get(PRODUCTO) as { nombre: string; stock: number };
+    const rastros = () => (t.db.prepare('select count(*) n from conteo_ajustes where producto_id = ?').get(PRODUCTO) as { n: number }).n;
+    const corregir = (cuerpo: object) => t.pedir(ruta, { nombre: 'Ventilador nuevo', precio: 25000, ...cuerpo }, 'PATCH');
+    t.db.prepare("update productos set estado_analisis = 'listo' where id = ?").run(PRODUCTO);
+    // Sin la existencia vista no hay escritura a ciegas; nada cambia, ni el nombre.
+    const sin = await corregir({ stock: 40 });
+    assert.equal(sin.status, 409); assert.equal(sin.cuerpo.stock, 50);
+    assert.deepEqual({ ...fila() }, { nombre: 'Ventilador', stock: 50 }); assert.equal(rastros(), 0);
+    // La caja vendió 3 después de abrir la ficha: la existencia vista (50) ya venció.
+    t.db.prepare('update productos set stock = 47 where id = ?').run(PRODUCTO);
+    const vieja = await corregir({ stock: 40, stock_esperado: 50 });
+    assert.equal(vieja.status, 409); assert.equal(vieja.cuerpo.stock, 47);
+    assert.deepEqual({ ...fila() }, { nombre: 'Ventilador', stock: 47 }); assert.equal(rastros(), 0);
+    // Con la vigente se escribe, con su renglón; los demás campos se guardan.
+    const buena = await corregir({ stock: 40, stock_esperado: 47 });
+    assert.equal(buena.status, 200); assert.equal(buena.cuerpo.stock, 40);
+    assert.deepEqual({ ...fila() }, { nombre: 'Ventilador nuevo', stock: 40 });
+    assert.deepEqual({ ...t.db.prepare('select motivo, antes, despues, ajustado_por from conteo_ajustes where producto_id = ?').get(PRODUCTO)! },
+      { motivo: 'correccion', antes: 47, despues: 40, ajustado_por: DUENO });
+    // Sin tocar la existencia (stock = lo visto) no hay escritura ni renglón; sin `stock` tampoco se exige nada.
+    assert.equal((await corregir({ stock: 40, stock_esperado: 40 })).status, 200);
+    assert.equal((await corregir({})).status, 200);
+    assert.equal(rastros(), 1);
+    // Una pieza que aún no está lista conserva la escritura absoluta.
+    t.db.prepare("update productos set estado_analisis = 'pendiente' where id = ?").run(PRODUCTO);
+    assert.equal((await corregir({ stock: 7 })).cuerpo.stock, 7);
+    assert.equal(rastros(), 1);
+  } finally { t.db.close(); }
+});
+
 function foto(id: string, extra: Record<string, string>) {
   const cuerpo = new FormData();
   cuerpo.append('id', id);
@@ -63,7 +97,7 @@ test('la camara reenvia el mismo id: actualiza la talla pero conserva el stock (
 
 test('con etiqueta, solo el dueno cambia el precio; sin etiqueta, el capturista lo pone (#75)', async () => {
   const t = tienda();
-  t.db.prepare("insert into usuarios(correo, roles, activo, creado_en, actualizado_en) values ('cap@prueba.mx', 'capturista', 1, '', '')").run();
+  t.db.prepare("insert into usuarios(correo, roles, activo, editar_inventario, creado_en, actualizado_en) values ('cap@prueba.mx', 'capturista', 1, 1, '', '')").run();
   t.env.DEV_USUARIO = 'cap@prueba.mx';
   const precio = () => (t.db.prepare('select precio from productos where id = ?').get(PRODUCTO) as { precio: number }).precio;
   const ruta = `/api/borradores/${PRODUCTO}`;
@@ -78,4 +112,10 @@ test('con etiqueta, solo el dueno cambia el precio; sin etiqueta, el capturista 
   t.db.prepare("update productos set codigo = 'ED-000001' where id = ?").run(PRODUCTO);
   t.env.DEV_USUARIO = DUENO;
   assert.equal((await t.pedir(ruta, { precio: 9000 }, 'PATCH')).cuerpo.precio, 9000);
+});
+
+test('La lista del admin trae el codigo para buscar por codigo de barras (#356)', async () => {
+  const r = await tienda().pedir('/api/borradores', undefined, 'GET');
+  assert.equal(r.status, 200);
+  assert.equal((r.cuerpo as unknown as { id: string; codigo: string }[]).find((p) => p.id === PRODUCTO)?.codigo, 'ED-000001');
 });

@@ -7,9 +7,11 @@
  * proveedores (docs/ARQUITECTURA-ESCANER.md).
  */
 import Anthropic from '@anthropic-ai/sdk';
+import { decodificarNombre } from './nombre.ts';
 import { calcularPrecio, precioDesdeSugerencia } from './precio.ts';
 import { CATEGORIAS as LISTA_CATEGORIAS, CLAVES_CATEGORIA } from '../public/categorias.js';
 import { PRENDAS_ROPA } from '../public/ropa.js';
+import { crearSolicitud } from './solicitudes-precio.ts';
 
 export type Modelo = 'claude' | 'gemini';
 
@@ -24,6 +26,8 @@ export function modeloPorDefecto(env: Env): Modelo {
 
 const MODELO_CLAUDE = 'claude-haiku-5-5';
 const MODELO_GEMINI = 'gemini-flash-latest';
+// Vertex no publica alias `-latest`: version fija (GA 2026-09-02, retiro >= 2027-09).
+const MODELO_VERTEX = 'gemini-3.8-flash';
 
 /**
  * El analisis corre en ctx.waitUntil(), que el runtime corta a los 30 s: si lo
@@ -55,6 +59,9 @@ const INSTRUCCION = [
 
 /** Debajo de esto, los ejemplos son ruido y manda el porcentaje de la configuracion. */
 const EJEMPLOS_MINIMOS = 5;
+// Debajo de esto la sugerencia por ejemplos adivina: el Gigglescape salió en $49 con 0.55 y Isaac
+// lo da en $79, justo lo que da el % de la categoría (#393).
+const CONFIANZA_SUGERENCIA = 0.7;
 const EJEMPLOS_MAXIMOS = 30;
 
 export interface Ficha {
@@ -150,7 +157,7 @@ const ESQUEMA = {
 // de menos.
 const { additionalProperties: _noEnGemini, ...ESQUEMA_GEMINI } = ESQUEMA;
 
-function base64(datos: ArrayBuffer): string {
+export function base64(datos: ArrayBuffer): string {
   const bytes = new Uint8Array(datos);
   let binario = '';
   for (let i = 0; i < bytes.length; i += 8192) {
@@ -184,7 +191,7 @@ const PIDE_JSON = [
 function normalizar(cruda: Partial<Ficha>): Ficha {
   const categoria = String(cruda.categoria ?? '');
   return {
-    nombre: String(cruda.nombre ?? '').slice(0, 120),
+    nombre: decodificarNombre(String(cruda.nombre ?? '')).slice(0, 120),
     marca: String(cruda.marca ?? '').trim().slice(0, 60),
     categoria: CATEGORIAS.includes(categoria) ? categoria : 'otros',
     precio_lista_mxn: Math.max(0, Math.round(Number(cruda.precio_lista_mxn ?? 0))),
@@ -222,45 +229,149 @@ export async function conClaude(foto: string | string[], env: Env, instruccion: 
   return JSON.parse(texto);
 }
 
-async function conGemini(foto: string, env: Env, instruccion: string, buscar = false, esquema: any = ESQUEMA_GEMINI): Promise<unknown> {
+interface RespuestaGemini {
+  candidates?: Array<{
+    content?: { parts?: Array<{ text?: string }> };
+    groundingMetadata?: { groundingChunks?: Array<{ web?: { title?: string; uri?: string } }> };
+  }>;
+}
+
+// #413: mismo transporte para análisis y búsqueda; las imágenes solo usan grounding.
+async function consultarGemini(env: Env, cuerpo: Record<string, unknown>, limiteMs: number): Promise<RespuestaGemini> {
+  // Con VERTEX_API_KEY se cobra al proyecto de Google Cloud (Issue #363), no a
+  // la cuota de AI Studio que se acabo en #91. Mismo cuerpo para las dos.
   // Las dos instancias tienen secretos independientes, pero no siempre con el
   // mismo nombre: se acepta cualquiera de los dos en lugar de obligar a
   // recapturar la llave.
   const llave = env.GEMINI_API_KEY || env.GEMINI2_API_KEY;
-  if (!llave) {
-    throw new Error('Falta la llave de Gemini (GEMINI_API_KEY o GEMINI2_API_KEY).');
+  if (!env.VERTEX_API_KEY && !llave) {
+    throw new Error('Falta la llave de Gemini (VERTEX_API_KEY, GEMINI_API_KEY o GEMINI2_API_KEY).');
   }
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${MODELO_GEMINI}:generateContent?key=${llave}`;
+  const url = env.VERTEX_API_KEY
+    ? `https://aiplatform.googleapis.com/v1/publishers/google/models/${MODELO_VERTEX}:generateContent?key=${env.VERTEX_API_KEY}`
+    : `https://generativelanguage.googleapis.com/v1beta/models/${MODELO_GEMINI}:generateContent?key=${llave}`;
   const respuesta = await fetch(url, {
     method: 'POST',
-    signal: AbortSignal.timeout(LIMITES_MS.gemini),
+    signal: AbortSignal.timeout(limiteMs),
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({
-      systemInstruction: { parts: [{ text: buscar ? instruccion + PIDE_JSON : instruccion }] },
-      contents: [
-        {
-          parts: [
-            { inline_data: { mime_type: 'image/jpeg', data: foto } },
-            { text: 'Identifica este articulo.' },
-          ],
-        },
-      ],
-      // Con busqueda, el esquema estructurado no esta permitido: van excluyentes.
-      ...(buscar
-        ? { tools: [{ google_search: {} }] }
-        : { generationConfig: { responseMimeType: 'application/json', responseSchema: esquema } }),
-    }),
+    body: JSON.stringify(cuerpo),
   });
   if (!respuesta.ok) {
     throw new Error(`Gemini ${respuesta.status}: ${(await respuesta.text()).slice(0, 200)}`);
   }
-  const cuerpo = (await respuesta.json()) as {
-    candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
-  };
+  return await respuesta.json() as RespuestaGemini;
+}
+
+async function conGemini(foto: string | null, env: Env, instruccion: string, buscar = false, esquema: any = ESQUEMA_GEMINI,
+  textoUsuario = 'Identifica este articulo.', limiteMs = LIMITES_MS.gemini, pideJson = PIDE_JSON): Promise<unknown> {
+  const cuerpo = await consultarGemini(env, {
+    systemInstruction: { parts: [{ text: buscar ? instruccion + pideJson : instruccion }] },
+    contents: [
+      {
+        // Vertex exige el rol; AI Studio lo acepta.
+        role: 'user',
+        // Sin foto: solo texto, como la búsqueda por código de barras (#373).
+        parts: [
+          ...(foto ? [{ inlineData: { mimeType: 'image/jpeg', data: foto } }] : []),
+          { text: textoUsuario },
+        ],
+      },
+    ],
+    // Con busqueda, el esquema estructurado no esta permitido: van excluyentes.
+    ...(buscar ? { tools: [{ googleSearch: {} }] } : {}),
+    generationConfig: {
+      // gemini-3.8-flash piensa en MEDIUM por omision y, con busqueda, paso
+      // de los 22 s en sandbox (#363). LOW basta para leer una foto.
+      ...(env.VERTEX_API_KEY ? { thinkingConfig: { thinkingLevel: 'LOW' } } : {}),
+      ...(buscar ? {} : { responseMimeType: 'application/json', responseSchema: esquema }),
+    },
+  }, limiteMs);
   const texto = (cuerpo.candidates?.[0]?.content?.parts ?? [])
     .map((parte) => parte.text ?? '')
     .join('');
-  return buscar ? extraerJson(texto) : JSON.parse(texto || '{}');
+  if (!buscar) {
+    return JSON.parse(texto || '{}');
+  }
+  // De donde salio el precio (el dominio de cada pagina), para el log del analisis.
+  const fuentes = (cuerpo.candidates?.[0]?.groundingMetadata?.groundingChunks ?? [])
+    .map((pedazo) => pedazo.web?.title ?? '')
+    .filter(Boolean)
+    .slice(0, 5);
+  return { ...extraerJson(texto), fuentes };
+}
+
+/** #413: una llamada por clic; nunca se leen URLs escritas en el texto del modelo. */
+export async function paginasParaImagen(consulta: string, env: Env): Promise<string[]> {
+  if (!env.VERTEX_API_KEY) throw new Error('Falta VERTEX_API_KEY para buscar imágenes.');
+  const cuerpo = await consultarGemini(env, {
+    systemInstruction: { parts: [{ text: 'Busca páginas de producto de tiendas o del fabricante para este artículo. Usa Google con la marca, el nombre y el código si lo hay.' }] },
+    contents: [{ role: 'user', parts: [{ text: consulta }] }],
+    tools: [{ googleSearch: {} }],
+    generationConfig: { thinkingConfig: { thinkingLevel: 'LOW' } },
+  }, LIMITES_MS.gemini);
+  return [...new Set((cuerpo.candidates?.[0]?.groundingMetadata?.groundingChunks ?? [])
+    .map((pedazo) => pedazo.web?.uri).filter((uri): uri is string => typeof uri === 'string'))].slice(0, 6);
+}
+
+const INSTRUCCION_UPC = [
+  'Eres el inspector de una tienda de mercancia americana de liquidacion en San Luis Potosi, Mexico.',
+  'Te dan solo un codigo de barras (UPC o EAN). Buscalo en Google como "upc <codigo>".',
+  'Responde con un producto SOLO si una pagina muestra ese mismo codigo; si no, deja el nombre vacio',
+  'y la confianza en 0. Un producto equivocado cuesta mas que pedir una foto.',
+  'Sirve cualquier tienda o anuncio que muestre ese codigo: eBay, Amazon, Walmart, Target, tiendas de',
+  'Estados Unidos o de Mexico (Issue #397). Usa el precio de esa misma pagina; si muestra MSRP o precio de',
+  'lista, usa ese en lugar del precio de oferta o de reventa. En pesos va en',
+  '`precio_lista_mxn`; en dolares va en `precio_usd` y deja `precio_lista_mxn` en 0. No conviertas monedas.',
+  // Mismas reglas de nombre, marca y categoría que la foto: el mismo producto da el mismo nombre.
+  INSTRUCCION.slice(INSTRUCCION.indexOf('COMO SE ESCRIBE')),
+].join(' ');
+
+/**
+ * Identifica un UPC que no está en la hoja del proveedor, sin foto (Issue #373):
+ * Gemini con búsqueda de Google. Corre en segundo plano; el capturista ya siguió.
+ */
+const PIDE_JSON_UPC = [
+  '\n\nResponde SOLO con este JSON, sin texto alrededor:',
+  `{"nombre":"","marca":"","categoria":"${CATEGORIAS.join('|')}","precio_lista_mxn":0,"precio_usd":0,"fuente":"","confianza":0}`,
+].join(' ');
+
+export type HallazgoUpc = Ficha & { precio_usd: number; fuente: string; fuentes?: string[] };
+
+export async function identificarUpc(upc: string, env: Env, limiteMs = LIMITES_MS.gemini): Promise<HallazgoUpc> {
+  const cruda = await conGemini(null, env, INSTRUCCION_UPC, true, ESQUEMA_GEMINI, `upc ${upc}`, limiteMs, PIDE_JSON_UPC) as
+    Partial<Ficha> & { precio_usd?: unknown; fuente?: unknown; fuentes?: string[] };
+  const usd = Number(cruda.precio_usd);
+  return { ...normalizar(cruda), precio_usd: Number.isFinite(usd) && usd > 0 ? Math.round(usd * 100) / 100 : 0,
+    fuente: String(cruda.fuente ?? '').slice(0, 80), fuentes: cruda.fuentes };
+}
+
+/** Pesos de lista de un hallazgo: los pesos tal cual, o los dólares por el tipo de cambio, como la hoja (#397). */
+export function pesosDeLista(hallazgo: { precio_lista_mxn: number; precio_usd?: number }, config: Record<string, string>): number {
+  if (hallazgo.precio_lista_mxn > 0) return hallazgo.precio_lista_mxn;
+  const tipoCambio = Number.parseInt(config.tipo_cambio ?? '', 10);   // centavos MXN por dólar
+  return hallazgo.precio_usd && tipoCambio > 0 ? Math.round((hallazgo.precio_usd * tipoCambio) / 100) : 0;
+}
+
+const INSTRUCCION_PRECIO = [
+  'Eres el inspector de una tienda de mercancia americana de liquidacion en San Luis Potosi, Mexico.',
+  'Te dan el nombre de un articulo que ya se identifico en una foto. Solo busca cuanto cuesta nuevo en Mexico;',
+  'copia el nombre, la marca y la categoria tal como te los dan. Confianza baja si no hallas ese mismo articulo.',
+].join(' ');
+// El análisis corre en waitUntil (30 s): la búsqueda del precio usa lo que dejó Haiku, con margen
+// para escribir la fila. 15 s fijos no le alcanzaron a Vertex en producción (#389).
+const PRESUPUESTO_ANALISIS_MS = 27_000;
+const MINIMO_PRECIO_MS = 8_000;
+
+/**
+ * Haiku nombra la pieza pero no inventa precio (#387): con nombre y sin precio, Gemini con búsqueda
+ * de Google busca ese nombre en tiendas mexicanas. Lanza si no hay llave o no responde a tiempo.
+ */
+async function precioPorNombre(ficha: Ficha, env: Env, limiteMs: number): Promise<{ precio_lista_mxn: number; confianza: number; fuentes?: string[] }> {
+  const cruda = await conGemini(null, env, INSTRUCCION_PRECIO, true, ESQUEMA_GEMINI,
+    `Articulo: ${ficha.nombre}${ficha.marca ? `, marca ${ficha.marca}` : ''}. Categoria: ${ficha.categoria}.`, limiteMs,
+  ) as Partial<Ficha> & { fuentes?: string[] };
+  const { precio_lista_mxn, confianza } = normalizar(cruda);
+  return { precio_lista_mxn, confianza, fuentes: cruda.fuentes };
 }
 
 const ESQUEMA_ROPA = {
@@ -288,6 +399,61 @@ export async function analizarFotoRopa(datos: ArrayBuffer, env: Env): Promise<Su
     marca: String(dato.marca ?? '').trim().slice(0, 60), marca_confianza: confianza(dato.marca_confianza), motivo: String(dato.motivo ?? '').slice(0, 160) };
 }
 
+const INSTRUCCION_ATRIBUTOS = [
+  'Eres el inspector de una tienda de mercancia americana en San Luis Potosi, Mexico.',
+  'Llena la ficha de Mercado Libre de la pieza de la foto. Responde solo con el JSON pedido.',
+  'Cada atributo con valores permitidos se contesta con exactamente uno de ellos.',
+  'Si no se distingue en la foto o en el nombre, responde "": un dato equivocado genera reclamos y uno vacio lo completa el dueno.',
+  'Color: el que predomina. Genero: para quien es la prenda segun su corte o su etiqueta, no por la marca.',
+  'No des materiales que no se vean ni esten en la etiqueta.',
+].join(' ');
+
+export interface PedidoAtributo { id: string; nombre: string; valores: string[] }
+
+/**
+ * Atributos de una categoria de Mercado Libre que la pieza no trae (color, genero, material...), segun la foto
+ * y el nombre (#555). Con valores permitidos elige uno de ellos (el esquema lo obliga); sin ellos escribe texto.
+ * Devuelve solo los que contesto. Lanza si el modelo no responde: quien llama muestra el motivo.
+ */
+export async function sugerirAtributos(
+  datos: ArrayBuffer, env: Env, pieza: { nombre: string; marca: string }, pedidos: PedidoAtributo[],
+): Promise<Record<string, string>> {
+  const esquema = {
+    type: 'object',
+    properties: Object.fromEntries(pedidos.map((a) => [a.id, {
+      type: 'string', description: a.nombre, ...(a.valores.length ? { enum: [...a.valores, ''] } : {}),
+    }])),
+    required: pedidos.map((a) => a.id),
+    additionalProperties: false,
+  };
+  const texto = `Pieza: ${pieza.nombre}${pieza.marca ? `, marca ${pieza.marca}` : ''}. Atributos: ${pedidos.map((a) => `${a.id} (${a.nombre})`).join(', ')}.`;
+  const foto = base64(datos);
+  const bruto = modeloPorDefecto(env) === 'gemini'
+    ? await conGemini(foto, env, INSTRUCCION_ATRIBUTOS, false, (({ additionalProperties: _omit, ...e }) => e)(esquema), texto)
+    : await conClaude(foto, env, INSTRUCCION_ATRIBUTOS, esquema, texto);
+  const dicho = (bruto ?? {}) as Record<string, unknown>;
+  return Object.fromEntries(pedidos.map((a) => [a.id, String(dicho[a.id] ?? '').trim().slice(0, 255)]).filter(([, valor]) => valor));
+}
+
+/**
+ * El análisis llegó a una pieza que ya está `listo` (reanálisis explícito, o resultado tardío tras una corrección
+ * humana): no escribe nada de la pieza (#479). Deja `precio_sugerido` y, si el precio sugerido difiere del actual,
+ * una solicitud de precio (#451) que el dueño ve en «Precios por revisar». `pedidoPor`: quien reanalizó, o 'ia'.
+ */
+async function sugerirSobreListo(env: Env, id: string, nuevo: { nombre: string; precio: number; destino: string; completa: boolean }, pedidoPor: string): Promise<void> {
+  if (!nuevo.completa) return;   // un análisis incompleto no sugiere nada
+  const pieza = await env.DB.prepare("select nombre, precio, destino, propietario from productos where id = ? and estado_analisis = 'listo'")
+    .bind(id).first<{ nombre: string; precio: number; destino: string; propietario: string }>();
+  if (!pieza) return;
+  await env.DB.prepare("update productos set precio_sugerido = ? where id = ? and estado_analisis = 'listo'").bind(nuevo.precio, id).run();
+  if (pieza.destino !== 'etiqueta' || nuevo.destino !== 'etiqueta' || nuevo.precio === pieza.precio) return;
+  // ponytail: el nombre sugerido solo viaja en la nota de la solicitud; no hay columna para él (sin migración).
+  const nota = `Reanálisis${nuevo.nombre.trim() !== pieza.nombre.trim() ? `: «${nuevo.nombre.trim()}»` : ''}`.slice(0, 140);
+  const respuesta = await crearSolicitud(env, id, pieza.propietario, pedidoPor,
+    { id: crypto.randomUUID(), sentido: nuevo.precio > pieza.precio ? 'subir' : 'bajar', sugerido: nuevo.precio, nota });
+  if (!respuesta.ok) console.warn(JSON.stringify({ mensaje: 'sugerencia de precio sin solicitud', id, status: respuesta.status }));
+}
+
 /**
  * Analiza la foto de un borrador y escribe el resultado. Nunca lanza: un fallo
  * deja la fila en `error` con su foto intacta, lista para reintentar desde el admin.
@@ -297,6 +463,7 @@ export async function analizarBorrador(
   env: Env,
   modeloPedido?: Modelo,
   buscarPedido?: boolean,
+  pedidoPor = 'ia',   // quien pidió reanalizar: figura como autor de la solicitud de precio si la pieza ya estaba `listo` (#479)
 ): Promise<void> {
   const modelo = modeloPedido ?? modeloPorDefecto(env);
   // Buscar el precio en la web en lugar de estimarlo de memoria. Solo Gemini por
@@ -310,9 +477,9 @@ export async function analizarBorrador(
     }
     const foto = base64(await objeto.arrayBuffer());
 
-    const fila = await env.DB.prepare('select estado_fisico from productos where id = ?')
+    const fila = await env.DB.prepare('select estado_fisico, upc from productos where id = ?')
       .bind(id)
-      .first<{ estado_fisico: string }>();
+      .first<{ estado_fisico: string; upc: string | null }>();
     if (!fila) {
       throw new Error('El borrador no existe.');
     }
@@ -324,16 +491,39 @@ export async function analizarBorrador(
       ? await conGemini(foto, env, instruccion, buscar)
       : await conClaude(foto, env, instruccion);
     const ficha = normalizar(fichaCruda as Partial<Ficha>);
-
+    let fuentes = (fichaCruda as { fuentes?: string[] }).fuentes;
     const { results } = await env.DB.prepare('select clave, valor from config').all<{ clave: string; valor: string }>();
     const config = Object.fromEntries(results.map((c) => [c.clave, c.valor]));
+
+    let busquedaPrecio: { precio_lista_mxn: number; precio_usd?: number; confianza: number; fuente?: string } | undefined;
+    // Sin precio pero con nombre se busca (#387). Con código, el código exacto en cualquier tienda (eBay,
+    // Amazon, EE.UU.; #397): un nombre genérico como "peluche gato" no encuentra el artículo. Sin código,
+    // el nombre. Si no hay llave o no aparece con confianza, queda aparte.
+    // Con código se espera su búsqueda aunque la foto no diera nombre: el código sí lo trae (#402).
+    // Con código, la búsqueda del código va a la cola (#406): Vertex con Google tarda más que los 30 s
+    // de waitUntil. Sin código, se busca el nombre aquí mismo.
+    if (!buscar && !fila.upc && ficha.nombre.trim() && ficha.precio_lista_mxn <= 0) {
+      const limite = Math.max(MINIMO_PRECIO_MS, PRESUPUESTO_ANALISIS_MS - (Date.now() - inicio));
+      try {
+        const hallado = busquedaPrecio = await precioPorNombre(ficha, env, limite);
+        const pesos = pesosDeLista(hallado, config);
+        if (pesos > 0 && hallado.confianza >= 0.5) {
+          ficha.precio_lista_mxn = pesos;
+          fuentes = hallado.fuentes;
+        }
+      } catch (error) {
+        console.warn(JSON.stringify({ mensaje: 'busqueda de precio fallida', id, upc: fila.upc, error: String(error).slice(0, 200) }));
+      }
+    }
 
     const precioLista = ficha.precio_lista_mxn * 100; // pesos -> centavos
 
     // Con suficientes ejemplos manda el criterio de Isaac; sin ellos, el
     // porcentaje de la configuracion. El porcentaje nunca describio como cobra
     // —dos piezas de `hogar` fueron a 57 % y a 29 %— pero es un arranque honesto.
-    const conEjemplos = ejemplos.length >= EJEMPLOS_MINIMOS && ficha.precio_venta_mxn > 0;
+    // La liquidación (C) siempre va por su %: la sugerencia de la IA no conoce el grado (#371).
+    const conEjemplos = ejemplos.length >= EJEMPLOS_MINIMOS && ficha.precio_venta_mxn > 0 && fila.estado_fisico !== 'liquidacion'
+      && ficha.confianza >= CONFIANZA_SUGERENCIA;
     const { precio, destino } = conEjemplos
       ? precioDesdeSugerencia({ precioLista, sugerido: ficha.precio_venta_mxn * 100 })
       : calcularPrecio({ precioLista, categoria: ficha.categoria, estadoFisico: fila.estado_fisico, config });
@@ -345,23 +535,30 @@ export async function analizarBorrador(
     // para revisarla, con lo que se encontro. Si no, la cola automatica de /etiquetas
     // se queda esperando una pieza que nadie va a completar (#335).
     const completa = ficha.nombre.trim() !== '' && precio > 0;
-    await env.DB.prepare(
+    // Sin precio y con código: sigue `pendiente` mientras la cola busca el código; ella la deja lista o aparte.
+    const aLaCola = !completa && !buscar && !!fila.upc && !!env.BUSQUEDAS;
+    const escrita = await env.DB.prepare(
       `update productos set nombre = ?, marca = ?, categoria = ?, precio_lista = ?, precio = ?,
-                            precio_sugerido = ?, destino = ?, estado_analisis = ?, actualizado_en = ?
-       where id = ? and estado_analisis <> 'descartado'`,
+                            precio_sugerido = ?, destino = ?, estado_analisis = ?, actualizado_en = ?, modificado_por = 'ia'
+       -- Una pieza revisada (listo) manda sobre un análisis tardío o repetido (#399, #479).
+       where id = ? and estado_analisis not in ('descartado', 'listo')`,
     )
       .bind(ficha.nombre, ficha.marca, ficha.categoria, precioLista, precio, precio, destino,
-        completa ? 'listo' : 'error', new Date().toISOString(), id)
+        completa ? 'listo' : aLaCola ? 'pendiente' : 'error', new Date().toISOString(), id)
       .run();
+    if (!escrita.meta.changes) await sugerirSobreListo(env, id, { nombre: ficha.nombre, precio, destino, completa }, pedidoPor);
+    else if (aLaCola) await env.BUSQUEDAS!.send({ id, upc: fila.upc! });
 
     console.log(JSON.stringify({
-      mensaje: completa ? 'analisis listo' : 'analisis incompleto', id, modelo, buscar, ms: Date.now() - inicio,
+      mensaje: completa ? 'analisis listo' : 'analisis incompleto', id, modelo, buscar, ms: Date.now() - inicio, a_la_cola: aLaCola,
       ejemplos: ejemplos.length, nombres: nombres.length, segun_ejemplos: conEjemplos, ficha,
+      fuentes, busqueda_precio: busquedaPrecio && { mxn: busquedaPrecio.precio_lista_mxn, usd: busquedaPrecio.precio_usd, confianza: busquedaPrecio.confianza, fuente: busquedaPrecio.fuente },
     }));
   } catch (error) {
     console.error(JSON.stringify({ mensaje: 'analisis fallido', id, modelo, error: String(error) }));
     await env.DB.prepare(
-      `update productos set estado_analisis = 'error', actualizado_en = ? where id = ? and estado_analisis <> 'descartado'`,
+      `update productos set estado_analisis = 'error', actualizado_en = ?, modificado_por = 'ia' where id = ? and estado_analisis <> 'descartado'
+        and estado_analisis <> 'listo'`,
     )
       .bind(new Date().toISOString(), id)
       .run();

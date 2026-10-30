@@ -39,11 +39,8 @@
     "BASES_APROBADAS_VERSION": "2026-10-v5",
     "PROMOCION_INICIO": "2026-10-05T17:00:00Z",
     "VALES_ABIERTOS": "si",
-    // Promo de inauguracion (Isaac, 9/10, Issue #263): 10% directo en todo el ticket, sin tope de tickets.
-    // «El 10 del 10 a las 10»: del sabado 10/10 a las 10:00 al domingo 11/10 a las 23:59, hora de la tienda (UTC-6).
-    // Para apagarla antes: quitar las dos y desplegar. PROMO_CUPO (Issue #250) pondria tope de tickets; sin ella no hay.
-    "PROMO_DESDE": "2026-10-10T16:00:00Z",
-    "PROMO_HASTA": "2026-10-12T06:00:00Z",
+    // Promo de inauguracion (Issue #487): se enciende con PROMO_DESDE, PROMO_HASTA y PROMO_CUPO (ver descuentos.ts).
+    // La del 24-25/10 ya vencio; se quitaron las variables el 27/10 a pedido de Isaac.
     // Conteo de alto valor (Issue #219): piezas en existencia con precio >= este monto, en centavos.
     "CONTEO_UMBRAL": "30000",
     // Mercado Libre (Issue #170): debe ser identica a la URI de redireccion de la
@@ -51,6 +48,8 @@
     // ML_RUTA_NOTIFICACIONES son secretos (wrangler secret put), no van aqui.
     "ML_REDIRECT_URI": "https://escaner.viste.com.mx/ml/callback",
     "PORTAL_REGISTRO_ABIERTO": "si",
+    // Referidos abiertos a todo socio (Issue #597). Apagado de emergencia: quitarla y desplegar.
+    "REFERIDOS_ABIERTO": "si",
     // Con que se verifica el JWT de Cloudflare Access (src/cuentas.ts). No son
     // secretos: salen en la redireccion al login de cada hostname. El aud es
     // por aplicacion de Access; una aplicacion nueva necesita su renglon aqui
@@ -101,10 +100,18 @@
     { "binding": "WHATSAPP_EVENTOS", "id": "d6cbf480b05d47c7a17d53d8e4b461a8" }
   ],
   "images": { "binding": "IMAGES" },
+  // Tope por IP a la API pública del portal (worker.ts, rutaPortalPublico): 100 peticiones por minuto.
+  // Las fotos del catálogo no cuentan. Para subirlo basta cambiar limit y desplegar.
+  "ratelimits": [{ "name": "LIMITE_PORTAL", "namespace_id": "1001", "simple": { "limit": 100, "period": 60 } }],
   "r2_buckets": [
     {
       "binding": "FOTOS",
       "bucket_name": "el-dolaron-fotos"
     }
-  ]
+  ],
+  // Búsquedas de códigos fuera de la hoja (#406): sin el tope de 30 s de waitUntil.
+  "queues": {
+    "producers": [{ "binding": "BUSQUEDAS", "queue": "el-dolaron-busquedas" }],
+    "consumers": [{ "queue": "el-dolaron-busquedas", "max_batch_size": 5, "max_batch_timeout": 1, "max_retries": 1 }]
+  }
 }

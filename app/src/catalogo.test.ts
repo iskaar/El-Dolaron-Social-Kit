@@ -46,6 +46,7 @@ test('catalogo: lista solo piezas vendibles, sin campos internos', async () => {
     pieza(t, { estado_analisis: 'pendiente' });
     pieza(t, { codigo: 'XX0001' });
     pieza(t, { estado_fisico: 'danado' });
+    pieza(t, { estado_fisico: 'liquidacion' });
     pieza(t, { sin_inventario: 1 });
     pieza(t, { destino: 'banda_ju49' });
     const r = await t.llamar('/api/catalogo');
@@ -154,7 +155,7 @@ test('catalogo: foto solo de piezas vendibles', async () => {
     assert.equal(r.headers.get('cache-control'), 'public, max-age=86400');
     assert.equal(r.headers.get('x-content-type-options'), 'nosniff');
     assert.deepEqual([...new Uint8Array(await r.arrayBuffer())], [0xff, 0xd8, 0xff, 0xd9]);
-    for (const extra of [{ stock: 0 }, { precio: 0 }, { estado_analisis: 'pendiente' }, { estado_fisico: 'danado' }, { sin_inventario: 1 }]) {
+    for (const extra of [{ stock: 0 }, { precio: 0 }, { estado_analisis: 'pendiente' }, { estado_fisico: 'danado' }, { estado_fisico: 'liquidacion' }, { sin_inventario: 1 }]) {
       assert.equal((await t.llamar(`/api/catalogo/foto/${pieza(t, extra)}`)).status, 404, JSON.stringify(extra));
     }
     // Pieza vendible cuya foto ya no esta en R2.
@@ -354,3 +355,38 @@ test('catalogo (Issue #241): busqueda ?q= por nombre, marca, codigo o talla sin 
   } finally { t.db.close(); }
 });
 
+test('catalogo (Issue #526): ?recorte=1 lista solo piezas con recorte listo y revisado, con total, q y cursor', async () => {
+  const t = publica();
+  try {
+    const con = (codigo: string, estado: string | null, revision: string | null) =>
+      t.db.prepare('update productos set recorte_estado = ?, recorte_revision = ? where codigo = ?').run(estado, revision, codigo);
+    const buena = pieza(t, { nombre: 'Chamarra' });
+    const sinRevisar = pieza(t, { nombre: 'Gorra' });
+    const sinRecorte = pieza(t, { nombre: 'Bota' });
+    con(buena, 'listo', 'ok');
+    con(sinRevisar, 'listo', 'pendiente');
+    const filtrado = await leer(await t.llamar('/api/catalogo?recorte=1'));
+    assert.deepEqual(filtrado.piezas.map((p: any) => p.codigo), [buena]);
+    assert.equal(filtrado.total, 1);
+    assert.match(filtrado.piezas[0].recorte, /\/api\/catalogo\/recorte\//);
+    for (const q of ['', '?recorte=0', '?recorte=', '?recorte=si']) {
+      const todo = await leer(await t.llamar(`/api/catalogo${q}`));
+      assert.deepEqual(todo.piezas.map((p: any) => p.codigo).sort(), [buena, sinRevisar, sinRecorte].sort(), q);
+      assert.equal(todo.total, 3, q);
+    }
+    assert.deepEqual((await leer(await t.llamar('/api/catalogo?recorte=1&q=chamarra'))).piezas.map((p: any) => p.codigo), [buena]);
+    assert.deepEqual((await leer(await t.llamar('/api/catalogo?recorte=1&q=gorra'))).piezas, []);
+    assert.deepEqual((await leer(await t.llamar('/api/catalogo?recorte=1&categoria=hogar'))).piezas, []);
+    // Cursor: POR_PAGINA es 24, asi que 25 con recorte pagina; las sin recorte no cuentan.
+    const mas = Array.from({ length: 24 }, () => pieza(t));
+    for (const c of mas) con(c, 'listo', 'ok');
+    const p1 = await leer(await t.llamar('/api/catalogo?recorte=1'));
+    assert.equal(p1.piezas.length, 24);
+    assert.equal(p1.total, 25);
+    assert.equal(p1.hay_mas, true);
+    const p2 = await leer(await t.llamar(`/api/catalogo?recorte=1&despues=${encodeURIComponent(p1.siguiente)}`));
+    assert.deepEqual(p2.piezas.map((p: any) => p.codigo), [buena]);
+    assert.equal(p2.hay_mas, false);
+    assert.equal(p2.siguiente, null);
+  } finally { t.db.close(); }
+});

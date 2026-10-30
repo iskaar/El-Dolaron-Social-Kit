@@ -5,7 +5,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import worker from './worker.ts';
 import { tienda, DUENO } from './prueba-d1.ts';
-import { guardarTokens, mlFetch, precioML, tituloML, dimensionesJpeg, idProductoML } from './mercadolibre.ts';
+import { guardarTokens, mlFetch, rellenarPrecios, centavos, precioML, tituloML, dimensionesJpeg, idProductoML, gtinDe, modeloDe, descripcionPorDefecto } from './mercadolibre.ts';
 
 const LLAVE = Buffer.from(crypto.getRandomValues(new Uint8Array(32))).toString('base64');
 const RUTA = 'ruta-secreta-de-prueba';
@@ -15,14 +15,18 @@ interface Llamada { metodo: string; ruta: string; cuerpo: any; auth: string | nu
 
 const ATRIBUTOS = [
   { id: 'BRAND', name: 'Marca', value_type: 'string', tags: { required: true } },
+  { id: 'MODEL', name: 'Modelo', value_type: 'string', tags: { required: true, catalog_required: true } },
   { id: 'GENDER', name: 'Género', value_type: 'list', tags: { required: true, grid_template_required: true },
     values: [{ id: '339666', name: 'Hombre' }, { id: '339665', name: 'Mujer' }] },
   { id: 'SIZE', name: 'Talla', value_type: 'string', tags: { required: true, allow_variations: true } },
   { id: 'COLOR', name: 'Color', value_type: 'string', tags: { required: true } },
   { id: 'GTIN', name: 'Código de barras', value_type: 'string', tags: { conditional_required: true } },
-  { id: 'EMPTY_GTIN_REASON', name: 'Razón de GTIN vacío', value_type: 'list', tags: { conditional_required: true },
+  { id: 'EMPTY_GTIN_REASON', name: 'Razón de GTIN vacío', value_type: 'list', tags: { conditional_required: true, hidden: true },
     values: [{ id: '17055160', name: 'El producto no tiene código registrado' }, { id: '17055161', name: 'Otra razón' }] },
   { id: 'PANT_TYPE', name: 'Tipo', value_type: 'string', tags: { required: true, read_only: true } },
+  { id: 'UNITS_PER_PACK', name: 'Unidades por paquete', value_type: 'number', tags: { conditional_required: true } },
+  { id: 'GRADING', name: 'Estado', value_type: 'list', tags: { conditional_required: true, new_hidden: true },
+    values: [{ id: '1', name: 'Excelente' }] },
   { id: 'ITEM_CONDITION', name: 'Condición', value_type: 'list', tags: {} },
   { id: 'SIZE_GRID_ID', name: 'Guía', value_type: 'string', tags: { required: true } },
   { id: 'NOTAS', name: 'Notas', value_type: 'string', tags: {} },
@@ -40,12 +44,23 @@ class SimML {
   rechazarItem: unknown = null;
   items = new Map<string, { id: string; status: string; available_quantity: number }>();
   ordenes = new Map<string, unknown>();
+  /** Lo que contesta GET /orders/{id} si difiere de lo que trae la busqueda (#621). */
+  detalle = new Map<string, unknown>();
+  /** Costos de envio por shipment (GET /shipments/{id}/costs); `fallarEnvios` los hace responder 500; `fallarOrdenes` hace lo mismo con GET /orders/{id}. */
+  envios = new Map<string, unknown>();
+  fallarEnvios = false;
+  fallarOrdenes = false;
   productoActivo = true;
+  /** Lo que contesta la IA (Gemini) a la propuesta de atributos (por omisión, nada); null = no responde. Cada cuerpo pedido se anota en `pedidosIA`. */
+  ia: ((cuerpo: any) => Record<string, string>) | null = () => ({});
+  pedidosIA: any[] = [];
   catalogo: { status?: number; cuerpo: unknown } = { cuerpo: { results: [{
     id: 'MLM2001', name: 'Lanzador SplatRball 800 Pyro', settings: { listing_strategy: 'catalog_required' },
     pictures: [{ url: 'http://http2.mlstatic.com/a.jpg', secure_url: 'https://http2.mlstatic.com/a.jpg' }],
     attributes: [{ id: 'BRAND', value_name: 'Splat R Ball' }],
   }] } };
+  /** Lo que contesta el diagnostico de fotos (#564): por omision, foto valida. */
+  diagnostico: { status?: number; cuerpo: unknown } = { cuerpo: { pictures: [{ id: 'pieza', results: { thumbnail: { action: 'empty', detections: [] } } }] } };
   /** Categorias que con el token de la app responden 403 y sin token si (#186). 'todo' = tambien sin token. */
   publicasSoloSinToken: false | true | 'todo' = false;
 
@@ -88,6 +103,7 @@ class SimML {
       return { cuerpo: { charts: [{ id: '26008', names: { MLM: 'Jeans hombre' }, rows: [{ id: '26008:1', attributes: [{ id: 'SIZE', values: [{ name: '32' }] }] }] }] } };
     }
     if (metodo === 'POST' && ruta === '/pictures/items/upload') return { cuerpo: { id: 'PIC-1' } };
+    if (metodo === 'POST' && ruta === '/moderations/pictures/diagnostic') return this.diagnostico;
     if (metodo === 'POST' && ruta === '/items') {
       if (this.rechazarItem) return { status: 400, cuerpo: this.rechazarItem };
       const id = `MLM${100 + this.items.size}`;
@@ -106,7 +122,14 @@ class SimML {
       return { cuerpo: ids.map((id) => this.items.has(id) ? { code: 200, body: this.items.get(id) } : { code: 404, body: {} }) };
     }
     if (metodo === 'GET' && ruta.startsWith('/orders/search')) return { cuerpo: { results: [...this.ordenes.values()] } };
+    const envio = /^\/shipments\/([^/]+)\/costs$/.exec(ruta);
+    if (metodo === 'GET' && envio) {
+      if (this.fallarEnvios) return { status: 500, cuerpo: { message: 'internal', error: 'internal_error', status: 500 } };
+      return this.envios.has(envio[1]) ? { cuerpo: this.envios.get(envio[1]) } : { status: 404, cuerpo: { message: 'no shipment', error: 'not_found', status: 404 } };
+    }
     const orden = /^\/orders\/(\d+)$/.exec(ruta);
+    if (metodo === 'GET' && orden && this.fallarOrdenes) return { status: 500, cuerpo: { message: 'internal', error: 'internal_error', status: 500 } };
+    if (metodo === 'GET' && orden && this.detalle.has(orden[1])) return { cuerpo: this.detalle.get(orden[1]) };
     if (metodo === 'GET' && orden) {
       return this.ordenes.has(orden[1]) ? { cuerpo: this.ordenes.get(orden[1]) } : { status: 404, cuerpo: { message: 'Order not found', error: 'not_found', status: 404 } };
     }
@@ -117,9 +140,16 @@ class SimML {
 function instalar(sim: SimML) {
   globalThis.fetch = (async (entrada: unknown, init: RequestInit = {}) => {
     const u = new URL(String(entrada));
+    if (u.origin === 'https://generativelanguage.googleapis.com') {
+      const pedido = JSON.parse(String(init.body));
+      sim.pedidosIA.push(pedido);
+      if (!sim.ia) throw new Error('la IA simulada no responde');
+      const texto = JSON.stringify(sim.ia(pedido));
+      return new Response(JSON.stringify({ candidates: [{ content: { parts: [{ text: texto }] } }] }), { status: 200 });
+    }
     assert.equal(u.origin, 'https://api.mercadolibre.com', 'solo se habla con la API de ML');
     const cuerpo = init.body instanceof URLSearchParams ? Object.fromEntries(init.body)
-      : init.body instanceof FormData ? { archivo: (init.body.get('file') as File).size }
+      : init.body instanceof FormData ? { archivo: (init.body.get('file') as File).size, tipo: (init.body.get('file') as File).type }
       : init.body ? JSON.parse(String(init.body)) : undefined;
     const llamada = { metodo: init.method ?? 'GET', ruta: u.pathname + u.search, cuerpo, auth: new Headers(init.headers).get('authorization') };
     sim.llamadas.push(llamada);
@@ -137,6 +167,7 @@ async function conML(prueba: (t: Tienda) => Promise<void>, conectada = true) {
   Object.assign(t.env, {
     ML_CLIENT_ID: '123', ML_CLIENT_SECRET: 'secreto-de-la-app', ML_LLAVE_TOKENS: LLAVE,
     ML_RUTA_NOTIFICACIONES: RUTA, ML_REDIRECT_URI: 'https://escaner.prueba/ml/callback',
+    MODELO_ANALISIS: 'gemini', GEMINI_API_KEY: 'prueba',
   });
   instalar(t.sim);
   try {
@@ -166,10 +197,10 @@ function pieza(t: Tienda, extra: Record<string, unknown> = {}): string {
   fila.foto_key = extra.foto_key ?? `fotos/${fila.id}.jpg`;
   t.db.prepare(
     `insert into productos (id, codigo, nombre, marca, categoria, precio, estado_fisico, estado_analisis, destino, sin_inventario,
-                            stock, foto_key, talla, semana_ingreso, creado_en, actualizado_en)
-     values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'S40', ?, '')`,
+                            stock, foto_key, talla, upc, semana_ingreso, creado_en, actualizado_en)
+     values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'S40', ?, '')`,
   ).run(fila.id, fila.codigo, fila.nombre, fila.marca, fila.categoria, fila.precio, fila.estado_fisico, fila.estado_analisis,
-    fila.destino, fila.sin_inventario, fila.stock, fila.foto_key, fila.talla ?? null, new Date(2026, 9, 1, 0, 0, n).toISOString());
+    fila.destino, fila.sin_inventario, fila.stock, fila.foto_key, fila.talla ?? null, fila.upc ?? null, new Date(2026, 9, 1, 0, 0, n).toISOString());
   if (fila.foto_key) (t.env.FOTOS as any).objetos.set(fila.foto_key, jpeg(1200, 1200).buffer);
   return fila.id;
 }
@@ -324,7 +355,7 @@ test('preparar: categoría, atributos pedidos, precio con ml_pct, guía de talla
     assert.equal(p.tipo_publicacion, 'gold_special');
     const ids = p.atributos.map((a: any) => a.id);
     // Lo obligatorio, sin lo que ML llena o el sistema pone; el GTIN deja de ser obligatorio con razon de vacio.
-    assert.deepEqual([...ids].sort(), ['BRAND', 'COLOR', 'EMPTY_GTIN_REASON', 'GENDER', 'GTIN', 'SIZE']);
+    assert.deepEqual([...ids].sort(), ['BRAND', 'COLOR', 'EMPTY_GTIN_REASON', 'GENDER', 'GTIN', 'MODEL', 'SIZE', 'UNITS_PER_PACK']);
     assert.equal(p.atributos.find((a: any) => a.id === 'GTIN').requerido, false);
     assert.deepEqual(p.atributos.find((a: any) => a.id === 'BRAND').valor_sugerido, { id: null, nombre: "Levi's" });
     assert.equal(p.atributos.find((a: any) => a.id === 'EMPTY_GTIN_REASON').valor_sugerido.id, '17055160');
@@ -353,6 +384,136 @@ test('preparar: la talla de la pieza va en producto y llena SIZE (adulto y de ni
   assert.equal((await t.pedir(`/api/ml/preparar/${pieza(t)}`, {})).cuerpo.producto.talla, null);
 }));
 
+/* ---------- atributos propuestos (#555) ---------- */
+
+const atributo = (r: any, id: string) => r.cuerpo.propuesta.atributos.find((a: any) => a.id === id);
+
+test('GTIN desde el UPC: solo con dígito verificador; se completa el cero perdido', () => {
+  assert.equal(gtinDe('012345678905'), '012345678905');   // UPC-A
+  assert.equal(gtinDe('12345678905'), '012345678905');    // sin el cero inicial
+  assert.equal(gtinDe('4006381333931'), '4006381333931');  // EAN-13
+  assert.equal(gtinDe('012345678900'), '');                // dígito verificador malo
+  assert.equal(gtinDe(''), '');
+  assert.equal(gtinDe(null), '');
+  assert.equal(gtinDe('ABC123456789'), '');
+});
+
+test('MODEL desde el nombre sin la marca', () => {
+  assert.equal(modeloDe("Jeans Levi's 501 Hombre", "Levi's"), 'Jeans 501 Hombre');
+  assert.equal(modeloDe('Sartén Tramontina 24 cm', 'tramontina'), 'Sartén 24 cm');
+  assert.equal(modeloDe('Licuadora 10 velocidades', ''), 'Licuadora 10 velocidades');
+  assert.equal(modeloDe("Levi's", "Levi's"), '');
+});
+
+test('preparar: lo que trae la pieza llega propuesto y marcado de dónde sale (marca, talla, modelo, GTIN)', () => conML(async (t) => {
+  const r = await t.pedir(`/api/ml/preparar/${pieza(t, { talla: 'M', upc: '012345678905' })}`, {});
+  assert.equal(r.status, 200, JSON.stringify(r.cuerpo));
+  const ids = r.cuerpo.propuesta.atributos.map((a: any) => a.id);
+  // Con GTIN no hace falta la razón de GTIN vacío; GRADING (new_hidden) no aplica a lo nuevo.
+  assert.ok(!ids.includes('EMPTY_GTIN_REASON'));
+  assert.ok(!ids.includes('GRADING'));
+  assert.deepEqual(atributo(r, 'GTIN').valor_sugerido, { id: null, nombre: '012345678905' });
+  assert.equal(atributo(r, 'GTIN').origen, 'pieza');
+  assert.deepEqual(atributo(r, 'MODEL').valor_sugerido, { id: null, nombre: 'Jeans 501 Hombre' });
+  assert.equal(atributo(r, 'MODEL').origen, 'pieza');
+  assert.equal(atributo(r, 'BRAND').origen, 'pieza');
+  assert.equal(atributo(r, 'SIZE').origen, 'pieza');
+  assert.deepEqual(atributo(r, 'UNITS_PER_PACK').valor_sugerido, { id: null, nombre: '1' });
+  assert.equal(atributo(r, 'UNITS_PER_PACK').origen, 'defecto');
+  // El GTIN con UPC no es obligatorio (la categoría lo acepta vacío con razón) pero sí viaja.
+  assert.equal(atributo(r, 'GTIN').requerido, false);
+}));
+
+test('preparar: sin UPC válido se propone la razón de GTIN vacío aunque ML la marque hidden', () => conML(async (t) => {
+  for (const upc of [null, '', '012345678900']) {
+    const r = await t.pedir(`/api/ml/preparar/${pieza(t, { upc })}`, {});
+    assert.equal(atributo(r, 'EMPTY_GTIN_REASON').valor_sugerido.id, '17055160', String(upc));
+    assert.equal(atributo(r, 'EMPTY_GTIN_REASON').origen, 'defecto');
+    assert.equal(atributo(r, 'GTIN').valor_sugerido, null);
+  }
+}));
+
+test('preparar: GTIN va aunque la categoría no lo marque obligatorio, si la pieza tiene UPC', () => conML(async (t) => {
+  const sinGtin = t.sim.responder.bind(t.sim);
+  t.sim.responder = (l) => l.ruta === '/categories/MLM194175/attributes'
+    ? { cuerpo: [{ id: 'BRAND', name: 'Marca', value_type: 'string', tags: { required: true } },
+      { id: 'GTIN', name: 'Código de barras', value_type: 'string', tags: {} }] }
+    : sinGtin(l);
+  const con = await t.pedir(`/api/ml/preparar/${pieza(t, { upc: '012345678905' })}`, {});
+  assert.deepEqual(atributo(con, 'GTIN').valor_sugerido, { id: null, nombre: '012345678905' });
+  const sin = await t.pedir(`/api/ml/preparar/${pieza(t)}`, {});
+  assert.equal(atributo(sin, 'GTIN'), undefined);
+}));
+
+test('preparar: lo que la pieza no trae (color, género) lo propone la IA eligiendo de la lista de ML', () => conML(async (t) => {
+  t.sim.ia = () => ({ COLOR: 'Azul', GENDER: 'Hombre' });
+  const r = await t.pedir(`/api/ml/preparar/${pieza(t, { talla: 'M', upc: '012345678905' })}`, {});
+  assert.equal(r.status, 200, JSON.stringify(r.cuerpo));
+  assert.equal(t.sim.pedidosIA.length, 1);
+  const pedido = t.sim.pedidosIA[0];
+  const esquema = pedido.generationConfig.responseSchema;
+  // Solo lo que falta: la marca, la talla, el GTIN y el modelo ya los trae la pieza.
+  assert.deepEqual(Object.keys(esquema.properties).sort(), ['COLOR', 'GENDER']);
+  assert.deepEqual(esquema.properties.GENDER.enum, ['Hombre', 'Mujer', '']);
+  assert.equal(esquema.properties.GENDER.type, 'string');
+  assert.ok(pedido.contents[0].parts.some((p: any) => p.inlineData), 'la foto va al modelo');
+  assert.deepEqual(atributo(r, 'GENDER').valor_sugerido, { id: '339666', nombre: 'Hombre' });
+  assert.equal(atributo(r, 'GENDER').origen, 'ia');
+  assert.deepEqual(atributo(r, 'COLOR').valor_sugerido, { id: null, nombre: 'Azul' });
+  assert.equal(atributo(r, 'COLOR').origen, 'ia');
+  assert.equal(atributo(r, 'COLOR').motivo, undefined);
+}));
+
+test('preparar: una lista cerrada no acepta lo que la IA invente, y queda con su motivo', () => conML(async (t) => {
+  t.sim.ia = () => ({ GENDER: 'Alienígena', COLOR: '' });
+  const r = await t.pedir(`/api/ml/preparar/${pieza(t, { talla: 'M' })}`, {});
+  assert.equal(atributo(r, 'GENDER').valor_sugerido, null);
+  assert.match(atributo(r, 'GENDER').motivo, /IA no lo distinguió/);
+  assert.match(atributo(r, 'COLOR').motivo, /IA no lo distinguió/);
+}));
+
+test('preparar: la categoría exige MODEL y la pieza no lo tiene -> la IA lo intenta; sin respuesta queda con motivo, sin bloquear en silencio', () => conML(async (t) => {
+  // El nombre es solo la marca: no queda modelo.
+  const id = pieza(t, { nombre: "Levi's", talla: 'M' });
+  t.sim.ia = () => ({ MODEL: '501', COLOR: 'Azul', GENDER: 'Hombre' });
+  const conIA = await t.pedir(`/api/ml/preparar/${id}`, {});
+  assert.deepEqual(atributo(conIA, 'MODEL').valor_sugerido, { id: null, nombre: '501' });
+  assert.equal(atributo(conIA, 'MODEL').origen, 'ia');
+
+  t.sim.ia = null;   // la IA no responde
+  const sinIA = await t.pedir(`/api/ml/preparar/${id}`, {});
+  assert.equal(sinIA.status, 200, 'la IA caída no rompe preparar');
+  const modelo = atributo(sinIA, 'MODEL');
+  assert.equal(modelo.valor_sugerido, null);
+  assert.equal(modelo.requerido, true);
+  assert.match(modelo.motivo, /No se pudo proponer con IA \(la IA no respondió\)/);
+  assert.match(atributo(sinIA, 'COLOR').motivo, /No se pudo proponer con IA/);
+  // Lo que la pieza sí trae sigue propuesto.
+  assert.equal(atributo(sinIA, 'BRAND').origen, 'pieza');
+  // Cada obligatorio vacío trae su motivo.
+  for (const a of sinIA.cuerpo.propuesta.atributos.filter((x: any) => x.requerido && !x.valor_sugerido)) assert.ok(a.motivo, a.id);
+}));
+
+test('preparar: sin marca ni talla el motivo lo dice; sin_ia no llama al modelo', () => conML(async (t) => {
+  t.sim.ia = () => ({});
+  const r = await t.pedir(`/api/ml/preparar/${pieza(t, { marca: '' })}`, { sin_ia: true });
+  assert.equal(t.sim.pedidosIA.length, 0);
+  assert.match(atributo(r, 'BRAND').motivo, /no tiene marca/);
+  assert.match(atributo(r, 'SIZE').motivo, /no tiene talla/);
+}));
+
+test('publicar manda tal cual lo propuesto (GTIN, razón de GTIN vacío, unidades) junto con ITEM_CONDITION', () => conML(async (t) => {
+  const id = pieza(t, { upc: '012345678905' });
+  const r = await t.pedir(`/api/ml/publicar/${id}`, cuerpoPublicar({ atributos: [
+    { id: 'GTIN', value_name: '012345678905' }, { id: 'MODEL', value_name: 'Jeans 501 Hombre' },
+    { id: 'UNITS_PER_PACK', value_name: '1' }, { id: 'GENDER', value_id: '339666' },
+  ] }));
+  assert.equal(r.status, 201, JSON.stringify(r.cuerpo));
+  const enviado = t.sim.de('POST', /^\/items$/)[0].cuerpo.attributes;
+  assert.deepEqual(enviado.map((a: any) => a.id), ['GTIN', 'MODEL', 'UNITS_PER_PACK', 'GENDER', 'ITEM_CONDITION', 'SIZE_GRID_ID', 'SIZE_GRID_ROW_ID']);
+  assert.equal(enviado.find((a: any) => a.id === 'ITEM_CONDITION').value_id, '2230284');
+}));
+
 test('preparar: avisos de marca restringida, sin marca, precio mínimo y foto chica', async () => {
   await conML(async (t) => {
     const nike = pieza(t, { marca: 'Nike', nombre: 'Playera Nike', precio: 900, foto_key: 'fotos/chica.jpg' });
@@ -365,6 +526,66 @@ test('preparar: avisos de marca restringida, sin marca, precio mínimo y foto ch
     assert.ok((await t.pedir(`/api/ml/preparar/${sinMarca}`, {})).cuerpo.propuesta.avisos.some((a: string) => /no tiene marca/.test(a)));
   });
 });
+
+const detectado = (...nombres: string[]) => ({ cuerpo: { pictures: [{ id: 'pieza', results: { thumbnail: {
+  action: 'diagnostic', detections: nombres.map((name) => ({ name, wordings: [{ kind: 'REMEDY_SHORT', value: 'x' }] })),
+} } }] } });
+const avisoFoto = (r: any) => r.cuerpo.propuesta.avisos.find((a: string) => /diagnóstico/.test(a));
+
+test('preparar: el diagnóstico de la foto (#564) avisa lo que falla, y con foto válida no avisa', () => conML(async (t) => {
+  const valida = await t.pedir(`/api/ml/preparar/${pieza(t)}`, {});
+  assert.equal(avisoFoto(valida), undefined, valida.cuerpo.propuesta.avisos.join('|'));
+  const [llamada] = t.sim.de('POST', /^\/moderations\/pictures\/diagnostic$/);
+  assert.deepEqual(llamada.cuerpo.context, { category_id: 'MLM194175', picture_type: 'thumbnail' });
+  assert.ok(llamada.cuerpo.pictures[0].base64.length > 10);
+
+  t.sim.diagnostico = detectado('white_background', 'text_logo');
+  const mala = await t.pedir(`/api/ml/preparar/${pieza(t)}`, {});
+  assert.equal(mala.status, 200);
+  assert.match(avisoFoto(mala), /fondo no blanco, texto o logo visible.*publicar igual/);
+}));
+
+test('preparar: si el diagnóstico de la foto falla (red o cuota), Preparar sigue y lo dice', () => conML(async (t) => {
+  t.sim.diagnostico = { status: 429, cuerpo: { message: 'quota exceeded', error: 'too_many_requests', status: 429 } };
+  const cuota = await t.pedir(`/api/ml/preparar/${pieza(t)}`, {});
+  assert.equal(cuota.status, 200);
+  assert.match(avisoFoto(cuota), /No se pudo revisar la foto.*publicar igual/);
+  assert.equal(cuota.cuerpo.propuesta.categoria_id, 'MLM194175');
+
+  t.sim.antesDe = async (l) => { if (l.ruta.includes('/moderations/')) throw new Error('sin red'); };
+  const red = await t.pedir(`/api/ml/preparar/${pieza(t)}`, {});
+  assert.equal(red.status, 200);
+  assert.match(avisoFoto(red), /No se pudo revisar la foto.*sin red/);
+  assert.equal(red.cuerpo.propuesta.categoria_id, 'MLM194175');
+
+  t.sim.antesDe = null;
+  t.sim.diagnostico = { cuerpo: { algo: 'raro' } };
+  assert.match(avisoFoto(await t.pedir(`/api/ml/preparar/${pieza(t)}`, {})), /formato que no se entendió/);
+}));
+
+const avisoDuplicado = (r: any) => r.cuerpo.propuesta.avisos.find((a: string) => /Ya publicaste/.test(a));
+
+test('preparar: avisa si ya hay una publicación activa del mismo nombre y marca (#568), sin bloquear', () => conML(async (t) => {
+  const nueva = pieza(t, { talla: '32' });
+  assert.equal(avisoDuplicado(await t.pedir(`/api/ml/preparar/${nueva}`, {})), undefined);   // aún no hay nada publicado
+
+  const { itemId } = await publicarPieza(t, pieza(t, { talla: '32' }));
+  const r = await t.pedir(`/api/ml/preparar/${nueva}`, {});
+  assert.equal(r.status, 200);
+  const aviso = avisoDuplicado(r);
+  assert.ok(aviso.includes(`Ya publicaste "Jeans Levi's 501 Hombre" (${itemId}): súmale existencias ahí en vez de duplicar.`), aviso);
+  assert.ok(aviso.includes(`https://articulo.mercadolibre.com.mx/${itemId}`));
+  assert.ok(!/talla/.test(aviso), 'misma talla: no sugiere incluirla en el título');
+
+  // Ropa en otra talla: además sugiere la talla en el título.
+  assert.match(avisoDuplicado(await t.pedir(`/api/ml/preparar/${pieza(t, { talla: 'M' })}`, {})), /esta es talla M, la otra 32.*incluye la talla en el título/);
+
+  // Otro nombre o marca, o la publicación ya cerrada: sin aviso.
+  assert.equal(avisoDuplicado(await t.pedir(`/api/ml/preparar/${pieza(t, { nombre: 'Jeans Levi\'s 505 Hombre' })}`, {})), undefined);
+  assert.equal(avisoDuplicado(await t.pedir(`/api/ml/preparar/${pieza(t, { marca: 'Wrangler' })}`, {})), undefined);
+  t.db.prepare(`update ml_publicaciones set estado = 'cerrada'`).run();
+  assert.equal(avisoDuplicado(await t.pedir(`/api/ml/preparar/${nueva}`, {})), undefined);
+}));
 
 test('preparar con categoria_id: usa esa categoría y sigue ofreciendo las sugerencias', async () => {
   await conML(async (t) => {
@@ -383,6 +604,27 @@ test('preparar con categoria_id: usa esa categoría y sigue ofreciendo las suger
 });
 
 /* ---------- publicar ---------- */
+
+test('publicar conserva el tipo de la imagen guardada en R2 (#413)', () => conML(async (t) => {
+  const id = pieza(t);
+  await t.env.FOTOS.put(`fotos/${id}.jpg`, new Uint8Array([1, 2, 3]), { httpMetadata: { contentType: 'image/png' } });
+  await publicarPieza(t, id);
+  const [subida] = t.sim.de('POST', /^\/pictures\/items\/upload$/);
+  assert.equal(subida.cuerpo.tipo, 'image/png');
+  assert.equal(subida.cuerpo.archivo, 3);
+}));
+
+test('fotos adicionales (#589): van primero en orden y la foto propia al final; preparar las cuenta', () => conML(async (t) => {
+  const id = pieza(t);
+  const otra = pieza(t);
+  await t.env.FOTOS.put(`extras/${id}/02.jpg`, new Uint8Array(5), { httpMetadata: { contentType: 'image/jpeg' } });
+  await t.env.FOTOS.put(`extras/${id}/01.jpg`, new Uint8Array(3), { httpMetadata: { contentType: 'image/jpeg' } });
+  await t.env.FOTOS.put(`extras/${otra}/01.jpg`, new Uint8Array(7), { httpMetadata: { contentType: 'image/jpeg' } });
+  assert.equal((await t.pedir(`/api/ml/preparar/${id}`, {})).cuerpo.propuesta.fotos_extra, 2);
+  await publicarPieza(t, id);
+  assert.deepEqual(t.sim.de('POST', /^\/pictures\/items\/upload$/).map((l) => l.cuerpo.archivo), [3, 5, jpeg(1200, 1200).length]);
+  assert.equal(t.sim.de('POST', /^\/items$/)[0].cuerpo.pictures.length, 3);
+}));
 
 test('publicar (modelo clásico): foto de R2, título, precio en pesos, guía y descripción', async () => {
   await conML(async (t) => {
@@ -414,6 +656,33 @@ test('publicar (modelo clásico): foto de R2, título, precio en pesos, guía y 
     assert.equal((await t.pedir(`/api/ml/publicar/${id}`, cuerpoPublicar())).status, 409);
   });
 });
+
+test('descripción por defecto (#565): ropa con talla -> US y MX, estado y origen; sin talla no inventa nada', () => {
+  const base = { nombre: "Jeans Levi's 501 Hombre", marca: "Levi's", categoria: 'ropa' };
+  const cierre = ['Condición: nuevo.', 'Mercancía americana, pieza única.', 'Incluye solo lo que se ve en las fotos.'];
+  assert.equal(descripcionPorDefecto({ ...base, talla: 'M' }),
+    ["Jeans Levi's 501 Hombre", "Marca: Levi's", 'Talla US: M', 'Talla MX: M (mediana)', ...cierre].join('\n'));
+  // Sin talla: solo nombre, marca y lo fijo; nada de tallas ni medidas inventadas.
+  assert.equal(descripcionPorDefecto({ ...base, talla: null }), ["Jeans Levi's 501 Hombre", "Marca: Levi's", ...cierre].join('\n'));
+  // Calzado: la talla guardada son los cm de MX; la US sale de la tabla.
+  assert.match(descripcionPorDefecto({ ...base, talla: '26' }), /Talla MX: 26 cm\nTalla US: 8 hombre \/ 9 mujer\n/);
+  assert.match(descripcionPorDefecto({ ...base, talla: 'Niño 19.5' }), /Talla MX: 19.5 cm\nTalla US: 13.5C\n/);
+  assert.match(descripcionPorDefecto({ ...base, talla: 'Niño 6 años / S' }), /\nTalla: Niño 6 años \(talla S\)\n/);
+  // Fuera de ropa no hay talla; sin emojis ni signos; sin enlaces ni correos.
+  assert.equal(descripcionPorDefecto({ nombre: 'Lego 🚀 Set <b>', marca: '', categoria: 'juguetes', talla: 'M' }),
+    ['Lego  Set b', ...cierre].join('\n'));
+  assert.ok(!/https?:|www\.|@/.test(descripcionPorDefecto({ ...base, nombre: 'Playera www.tienda.com ventas@x.mx', talla: 'M' })));
+});
+
+test('publicar: sin descripción del dueño va la plantilla; con ella, la del dueño', () => conML(async (t) => {
+  const id = pieza(t, { talla: 'L' });
+  assert.equal((await t.pedir(`/api/ml/publicar/${id}`, cuerpoPublicar({ descripcion: '' }))).status, 201);
+  const texto = t.sim.de('POST', /\/description$/)[0].cuerpo.plain_text as string;
+  assert.match(texto, /Talla US: L\nTalla MX: L \(grande\)\n/);
+  assert.match(texto, /Mercancía americana, pieza única\./);
+  await publicarPieza(t);   // cuerpoPublicar trae «Jeans nuevos»
+  assert.deepEqual(t.sim.de('POST', /\/description$/)[1].cuerpo, { plain_text: 'Jeans nuevos' });
+}));
 
 test('publicar: dos clics a la vez crean un solo artículo', async () => {
   await conML(async (t) => {
@@ -468,6 +737,7 @@ test('publicar: dañadas, bandas, sin revisar, sin existencias o inexistentes no
   await conML(async (t) => {
     const casos: [string, string, number][] = [
       [pieza(t, { estado_fisico: 'danado' }), 'dañado', 409],
+      [pieza(t, { estado_fisico: 'liquidacion' }), 'liquidación', 409],
       [pieza(t, { destino: 'banda_ju49', sin_inventario: 1, codigo: 'XX49', stock: 0 }), 'bandas', 409],
       [pieza(t, { estado_analisis: 'pendiente' }), 'revisa', 409],
       [pieza(t, { stock: 0 }), 'existencias', 409],
@@ -528,7 +798,28 @@ test('piezas: pendientes, publicadas y todas; 50 por página', async () => {
     assert.deepEqual((await t.pedir('/api/ml/piezas?filtro=todas')).cuerpo.piezas.map((x: any) => x.producto.id), [a]);
     assert.ok(!(await t.pedir('/api/ml/piezas?filtro=todas')).cuerpo.piezas.some((x: any) => x.producto.id === dañada));
 
-    for (let i = 0; i < 51; i++) pieza(t);
+    // Busqueda: cada palabra en nombre, codigo, marca o categoria, sin importar mayusculas.
+    const nike = pieza(t, { nombre: 'Tenis Air Max', marca: 'Nike', categoria: 'calzado' });
+    const ids = async (q: string) => (await t.pedir(`/api/ml/piezas?filtro=todas&q=${encodeURIComponent(q)}`)).cuerpo.piezas.map((x: any) => x.producto.id);
+    assert.deepEqual(await ids('nike'), [nike]);
+    assert.deepEqual(await ids('CALZADO air'), [nike]);
+    assert.deepEqual(await ids('nike levi'), []);
+    assert.deepEqual(await ids(`levi's 501`), [a]);
+    assert.deepEqual(await ids('100%'), []);
+
+    // Orden y existencias minimas (#587).
+    const zapato = pieza(t, { nombre: 'Zapato bota', stock: 9 });
+    const abrigo = pieza(t, { nombre: 'abrigo lana', stock: 1 });
+    const lista = async (qs: string) => (await t.pedir(`/api/ml/piezas?filtro=pendientes&${qs}`)).cuerpo.piezas.map((x: any) => x.producto.id);
+    assert.deepEqual(await lista('orden=mas_existencias'), [zapato, nike, abrigo]);
+    assert.deepEqual(await lista('orden=menos_existencias'), [abrigo, nike, zapato]);
+    assert.deepEqual(await lista('orden=nombre'), [abrigo, nike, zapato]);
+    assert.deepEqual(await lista('orden=codigo'), [nike, zapato, abrigo]);
+    assert.deepEqual(await lista('min=3'), [zapato, nike]);
+    assert.deepEqual(await lista('min=10'), []);
+    assert.deepEqual(await lista('orden=p.id;drop'), [abrigo, zapato, nike]);   // desconocido: recientes
+
+    for (let i = 0; i < 48; i++) pieza(t);   // + Nike, zapato y abrigo = 51 pendientes
     const p1 = (await t.pedir('/api/ml/piezas')).cuerpo;
     assert.equal(p1.piezas.length, 50);
     assert.equal(p1.hay_mas, true);
@@ -624,6 +915,233 @@ test('venta en ML: descuenta una sola vez por orden, aunque el aviso llegue repe
     await avisar(t, '/orders/9004');
     await t.esperar();
     assert.equal(stockDe(t, id), 2);
+  });
+});
+
+/** Una orden pagada con precio, comision (por pieza, en pesos) y shipment, como la entrega ML. */
+const ordenConPrecio = (id: number, items: [string, number, number, number][], envio: string | null = null, estado = 'paid') => ({
+  id, status: estado, seller: { id: 555 }, shipping: { id: envio },
+  order_items: items.map(([item, quantity, unit_price, sale_fee]) => ({ item: { id: item }, quantity, unit_price, sale_fee, currency_id: 'MXN' })),
+});
+const ventasML = (t: Tienda) => t.db.prepare('select * from ml_ventas order by order_id, ml_item_id').all() as any[];
+const costoEnvio = (cost: number, ...mas: number[]) => ({ gross_amount: cost, receiver: { cost: 0 }, senders: [cost, ...mas].map((c) => ({ cost: c })) });
+
+test('precio real (#621): pesos de ML a centavos enteros, sin montos inválidos', () => {
+  assert.deepEqual([centavos(129.95), centavos(299.9), centavos('84.5'), centavos(0), centavos(1.005 + 0.0001)], [12995, 29990, 8450, 0, 101]);
+  assert.deepEqual([centavos(-1), centavos(null), centavos('x'), centavos(NaN), centavos('')], [null, null, null, null, null]);
+});
+
+test('precio real (#621): la orden pagada guarda precio, comisión y envío en centavos, sin tocar el stock, y repetirla no cambia nada', async () => {
+  await conML(async (t) => {
+    const { id, itemId } = await publicarPieza(t);
+    t.sim.ordenes.set('9301', ordenConPrecio(9301, [[itemId, 1, 299.9, 44.99]], 'SHP-1'));
+    t.sim.envios.set('SHP-1', costoEnvio(84.5));
+    await avisar(t, '/orders/9301');
+    await t.esperar();
+    assert.equal(stockDe(t, id), 2);
+    let v = ventasML(t)[0];
+    assert.deepEqual([v.precio_unitario, v.comision_unitaria, v.envio_vendedor, v.estado, v.descontado], [29990, 4499, 8450, 'descontada', 1]);
+    assert.ok(Date.parse(v.precio_leido_en) > 0);
+    assert.equal(t.sim.de('GET', /^\/shipments\/SHP-1\/costs$/).length, 1);
+    // Aviso repetido: ni baja el stock otra vez ni vuelve a pedir el envío.
+    await avisar(t, '/orders/9301');
+    await t.esperar();
+    assert.equal(stockDe(t, id), 2);
+    assert.equal(t.sim.de('GET', /^\/shipments\//).length, 1);
+    v = ventasML(t)[0];
+    assert.deepEqual([v.precio_unitario, v.comision_unitaria, v.envio_vendedor], [29990, 4499, 8450]);
+  });
+});
+
+test('precio real (#621): dos artículos en una orden llevan el envío completo en la primera fila y 0 en la otra; sin shipment el envío es 0; varios remitentes se suman', async () => {
+  await conML(async (t) => {
+    const a = await publicarPieza(t);
+    const b = await publicarPieza(t);
+    t.sim.ordenes.set('9302', ordenConPrecio(9302, [[a.itemId, 1, 200, 30], [b.itemId, 2, 150, 22.5]], 'SHP-2'));
+    t.sim.envios.set('SHP-2', costoEnvio(60, 15.25));
+    t.sim.ordenes.set('9303', ordenConPrecio(9303, [[a.itemId, 1, 200, 30]], null));
+    await avisar(t, '/orders/9302');
+    await avisar(t, '/orders/9303');
+    await t.esperar();
+    const v = ventasML(t);
+    const de = (orden: string, item: string) => v.find((f) => f.order_id === orden && f.ml_item_id === item);
+    assert.deepEqual([de('9302', a.itemId).envio_vendedor, de('9302', b.itemId).envio_vendedor], [7525, 0]);
+    assert.deepEqual([de('9302', b.itemId).precio_unitario, de('9302', b.itemId).comision_unitaria, de('9302', b.itemId).cantidad], [15000, 2250, 2]);
+    assert.equal(de('9303', a.itemId).envio_vendedor, 0);
+    assert.equal(t.sim.de('GET', /^\/shipments\//).length, 1);
+  });
+});
+
+test('precio real (#621): si ML no da el envío, la venta y el stock quedan igual; el precio se guarda y el envío se completa después', async () => {
+  await conML(async (t) => {
+    const { id, itemId } = await publicarPieza(t);
+    t.sim.fallarEnvios = true;
+    t.sim.ordenes.set('9304', ordenConPrecio(9304, [[itemId, 1, 299, 40]], 'SHP-3'));
+    t.sim.envios.set('SHP-3', costoEnvio(70));
+    await avisar(t, '/orders/9304');
+    await t.esperar();
+    assert.equal(stockDe(t, id), 2);                                         // igual que sin esta función
+    let v = ventasML(t)[0];
+    assert.deepEqual([v.estado, v.descontado, v.precio_unitario, v.envio_vendedor], ['descontada', 1, 29900, null]);
+    assert.equal((t.db.prepare('select procesado_en, error from ml_notificaciones').get() as any).error, '');
+    // ML se recupera: el cron lo completa sin volver a descontar.
+    t.sim.fallarEnvios = false;
+    await worker.scheduled!({} as never, t.env, t.ctx as never);
+    await t.esperar();
+    v = ventasML(t)[0];
+    assert.deepEqual([v.precio_unitario, v.comision_unitaria, v.envio_vendedor], [29900, 4000, 7000]);
+    assert.equal(stockDe(t, id), 2);
+  });
+});
+
+test('precio real (#621): si ML falla al traer la orden, el precio queda nulo, el stock descuenta igual y el relleno lo reintenta', async () => {
+  await conML(async (t) => {
+    const { id, itemId } = await publicarPieza(t);
+    // La búsqueda de órdenes recientes no trae precios; el detalle sí, pero ML falla.
+    t.sim.ordenes.set('9305', orden(9305, 'paid', [[itemId, 1]]));
+    t.sim.detalle.set('9305', ordenConPrecio(9305, [[itemId, 1, 199.5, 27]], 'SHP-4'));
+    t.sim.envios.set('SHP-4', costoEnvio(55));
+    t.sim.fallarOrdenes = true;
+    await worker.scheduled!({} as never, t.env, t.ctx as never);
+    await t.esperar();
+    assert.equal(stockDe(t, id), 2);
+    let v = ventasML(t)[0];
+    assert.deepEqual([v.estado, v.precio_unitario, v.comision_unitaria, v.envio_vendedor, v.precio_intentos], ['descontada', null, null, null, 1]);
+    t.sim.fallarOrdenes = false;
+    await worker.scheduled!({} as never, t.env, t.ctx as never);
+    await t.esperar();
+    v = ventasML(t)[0];
+    assert.deepEqual([v.precio_unitario, v.comision_unitaria, v.envio_vendedor, v.precio_intentos], [19950, 2700, 5500, 1]);
+    assert.equal(stockDe(t, id), 2);
+    // Ya completa: otra corrida no la vuelve a pedir.
+    const antes = t.sim.llamadas.length;
+    assert.equal(await rellenarPrecios(t.env), 0);
+    assert.equal(t.sim.llamadas.length, antes);
+  });
+});
+
+test('relleno de precios (#621): acotado a 10 órdenes por corrida, las más recientes primero, y deja de insistir con la que nunca trae precio', async () => {
+  await conML(async (t) => {
+    const { id } = await publicarPieza(t);
+    const inserta = t.db.prepare(`insert into ml_ventas (order_id, ml_item_id, producto_id, cantidad, estado, descontado, recibido_en) values (?, 'MLM-X', ?, 1, 'descontada', 1, ?)`);
+    for (let n = 1; n <= 25; n++) {
+      const orden = String(9400 + n);
+      inserta.run(orden, id, new Date(Date.UTC(2026, 9, 1, 0, n)).toISOString());
+      t.sim.detalle.set(orden, ordenConPrecio(9400 + n, [['MLM-X', 1, 100 + n, 10]], null));
+    }
+    // La 26 nunca trae precio: el detalle no tiene unit_price.
+    inserta.run('9426', id, new Date(Date.UTC(2026, 9, 1, 1, 0)).toISOString());
+    t.sim.detalle.set('9426', orden(9426, 'paid', [['MLM-X', 1]]));
+
+    const pedidas = () => t.sim.de('GET', /^\/orders\/\d+$/).map((l) => l.ruta);
+    assert.equal(await rellenarPrecios(t.env), 9);                       // 10 pedidas: la 26 (la más reciente) no completa
+    assert.equal(pedidas().length, 10);
+    assert.equal(pedidas()[0], '/orders/9426');
+    assert.equal((t.db.prepare('select count(*) n from ml_ventas where precio_unitario is not null').get() as any).n, 9);
+    assert.equal((t.db.prepare("select precio_intentos n from ml_ventas where order_id = '9426'").get() as any).n, 1);
+    await rellenarPrecios(t.env);
+    assert.equal(pedidas().length, 20);
+    await rellenarPrecios(t.env);
+    assert.equal((t.db.prepare('select count(*) n from ml_ventas where precio_unitario is not null').get() as any).n, 25);
+    // La 26 se intenta 8 veces y luego no se vuelve a pedir.
+    for (let i = 0; i < 12; i++) await rellenarPrecios(t.env);
+    assert.equal((t.db.prepare("select precio_intentos n from ml_ventas where order_id = '9426'").get() as any).n, 8);
+    assert.equal(pedidas().filter((r) => r === '/orders/9426').length, 8);
+    // Una orden cancelada nunca se pide.
+    t.db.prepare("update ml_ventas set precio_unitario = null, envio_vendedor = null, precio_intentos = 0, estado = 'cancelada' where order_id = '9401'").run();
+    const antes = pedidas().length;
+    await rellenarPrecios(t.env);
+    assert.equal(pedidas().length, antes);
+    assert.equal(stockDe(t, id), 3);                                     // ni una vez se tocó el stock
+  });
+});
+
+test('venta en ML: un correo a los dueños por venta; sin existencias en D1, el asunto pide cancelar (#427)', async () => {
+  await conML(async (t) => {
+    const enviados: any[] = [];
+    t.env.CORREO = { async send(m: any) { enviados.push(m); return { messageId: 'x' }; } } as never;
+    const { id, itemId } = await publicarPieza(t);
+    const codigo = (t.db.prepare('select codigo from productos where id = ?').get(id) as { codigo: string }).codigo;
+    t.sim.ordenes.set('9101', { ...orden(9101, 'paid', [[itemId, 1]]), order_items: [{ item: { id: itemId }, quantity: 1, unit_price: 299 }] });
+    await avisar(t, '/orders/9101');
+    await avisar(t, '/orders/9101');
+    await t.esperar();
+    assert.equal(enviados.length, 1);
+    assert.equal(enviados[0].to, DUENO);
+    assert.match(enviados[0].subject, new RegExp(`^Vendido en Mercado Libre: ${codigo}`));
+    assert.match(enviados[0].text, /a \$299\.00[\s\S]*ventas\/9101\/detalle/);
+    assert.match(enviados[0].text, /Márcala atendida en https:\/\/escaner\.prueba\/avisos/);   // #429
+    // Se vendió todo en tienda y luego llega otra venta de ML.
+    t.db.prepare('update productos set stock = 0 where id = ?').run(id);
+    t.sim.ordenes.set('9102', orden(9102, 'paid', [[itemId, 1]]));
+    await avisar(t, '/orders/9102');
+    await t.esperar();
+    assert.equal(enviados.length, 2);
+    assert.match(enviados[1].subject, /^¡Sin existencias!/);
+    assert.match(enviados[1].text, /Cancela la venta en Mercado Libre/);
+  });
+});
+
+test('centro de avisos: la venta espera en /avisos hasta que un cajero la marca; si ML la cancela, vuelve (#429)', async () => {
+  await conML(async (t) => {
+    const { id, itemId } = await publicarPieza(t);
+    t.db.prepare(`insert into usuarios (correo, nombre, roles, activo, creado_en, actualizado_en) values
+      ('cajera@prueba.mx', 'Cajera', 'cajero', 1, '', ''), ('captura@prueba.mx', 'Captura', 'capturista', 1, '', '')`).run();
+    t.sim.ordenes.set('9201', orden(9201, 'paid', [[itemId, 1]]));
+    await avisar(t, '/orders/9201');
+    await t.esperar();
+
+    t.env.DEV_USUARIO = 'captura@prueba.mx';
+    assert.equal((await t.pedir('/api/avisos')).status, 403);
+    t.env.DEV_USUARIO = 'cajera@prueba.mx';
+    const lista = (await t.pedir('/api/avisos')).cuerpo.ventas_ml;
+    assert.equal(lista.length, 1);
+    assert.deepEqual([lista[0].order_id, lista[0].ml_item_id, lista[0].producto_id, lista[0].estado, lista[0].conflicto], ['9201', itemId, id, 'descontada', false]);
+
+    const marcar = () => t.pedir(`/api/avisos/ml/9201/${itemId}`, {});
+    assert.equal((await marcar()).status, 200);
+    assert.equal((await marcar()).status, 409);
+    assert.equal((await t.pedir('/api/avisos')).cuerpo.ventas_ml.length, 0);
+    assert.equal((t.db.prepare('select atendida_por from ml_ventas').get() as any).atendida_por, 'cajera@prueba.mx');
+
+    // ML la cancela despues de empacarla: vuelve a la lista para regresar la pieza al piso.
+    t.sim.ordenes.set('9201', orden(9201, 'cancelled', [[itemId, 1]]));
+    await avisar(t, '/orders/9201');
+    await t.esperar();
+    const otra = (await t.pedir('/api/avisos')).cuerpo.ventas_ml;
+    assert.deepEqual(otra.map((v: any) => v.estado), ['cancelada']);
+    assert.equal(stockDe(t, id), 3);
+  });
+});
+
+test('centro de avisos: la cancelación de un conflicto no vuelve; una venta a medias que ML cancela deja de pedir empacarla (#429)', async () => {
+  await conML(async (t) => {
+    const { id, itemId } = await publicarPieza(t);
+    t.db.prepare(`insert into usuarios (correo, nombre, roles, activo, creado_en, actualizado_en) values ('cajera@prueba.mx', 'Cajera', 'cajero', 1, '', '')`).run();
+    t.env.DEV_USUARIO = 'cajera@prueba.mx';
+    const pendientes = async () => (await t.pedir('/api/avisos')).cuerpo.ventas_ml.map((v: any) => [v.order_id, v.estado]);
+
+    // Sin existencias: la cajera cancela en ML como se le pidio; el aviso de ML no la regresa.
+    t.db.prepare('update productos set stock = 0 where id = ?').run(id);
+    t.sim.ordenes.set('9301', orden(9301, 'paid', [[itemId, 1]]));
+    await avisar(t, '/orders/9301');
+    await t.esperar();
+    assert.equal((await t.pedir(`/api/avisos/ml/9301/${itemId}`, {})).status, 200);
+    t.sim.ordenes.set('9301', orden(9301, 'cancelled', [[itemId, 1]]));
+    await avisar(t, '/orders/9301');
+    await t.esperar();
+    assert.deepEqual(await pendientes(), []);
+    assert.equal(stockDe(t, id), 0);
+
+    // El proceso murio entre el insert y el batch de pago (estado 'recibida', sin descontar) y ML la cancela.
+    t.db.prepare('update productos set stock = 3 where id = ?').run(id);
+    t.db.prepare(`insert into ml_ventas (order_id, ml_item_id, producto_id, cantidad, estado, recibido_en) values ('9302', ?, ?, 1, 'recibida', ?)`)
+      .run(itemId, id, new Date().toISOString());
+    t.sim.ordenes.set('9302', orden(9302, 'cancelled', [[itemId, 1]]));
+    await avisar(t, '/orders/9302');
+    await t.esperar();
+    assert.deepEqual(await pendientes(), [['9302', 'cancelada']]);
+    assert.equal(stockDe(t, id), 3);
   });
 });
 
@@ -1006,7 +1524,7 @@ test('preparar: el enlace de una publicación explica qué copiar; sin marca tam
 test('conteo: un faltante (robo) que deja la pieza sin existencias la pausa en ML', async () => {
   await conML(async (t) => {
     const { id, itemId } = await publicarPieza(t, pieza(t, { stock: 1 }));
-    const r = await t.pedir('/api/conteo/ajustes', { producto_id: id, cantidad: 1, motivo: 'robo' });
+    const r = await t.pedir('/api/conteo/ajustes', { id: crypto.randomUUID(), esperado: 1, producto_id: id, cantidad: 1, motivo: 'robo' });
     assert.equal(r.status, 201, JSON.stringify(r.cuerpo));
     await t.esperar();
     assert.equal(stockDe(t, id), 0);

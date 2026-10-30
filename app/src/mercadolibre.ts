@@ -15,6 +15,9 @@
  */
 
 import { quebrarDecena } from './precio.ts';
+import { correoADuenos } from './avisos.ts';
+import { sugerirAtributos, base64 } from './analisis.ts';
+import { tallaUs } from '../public/tallas.js';
 
 const API = 'https://api.mercadolibre.com';
 const AUTORIZACION = 'https://auth.mercadolibre.com.mx/authorization';
@@ -310,7 +313,7 @@ async function perfilML(env: Env): Promise<{ id: string; nickname: string; usaFa
 interface Pieza {
   id: string; codigo: string | null; nombre: string; categoria: string; marca: string; precio: number;
   estado_fisico: string; stock: number; destino: string; sin_inventario: number; estado_analisis: string; foto_key: string;
-  talla: string | null;
+  talla: string | null; upc: string | null;
 }
 
 const productoDe = (p: Pieza) => ({
@@ -318,14 +321,16 @@ const productoDe = (p: Pieza) => ({
   precio: p.precio, estado_fisico: p.estado_fisico, stock: p.stock, talla: p.talla?.trim() || null,
 });
 
-// Lo que se puede publicar: pieza individual, revisada, con foto y existencias; nunca bandas ni danadas.
+// Lo que se puede publicar: pieza individual, revisada, con foto y existencias; nunca bandas, dañadas (B)
+// ni liquidación (C, solo en tienda, #371). `<> 'danado'` se queda literal: lo exige el índice parcial de recortes.
 export const PUBLICABLE = `p.destino = 'etiqueta' and p.sin_inventario = 0 and p.estado_analisis = 'listo' and p.stock > 0
-  and p.foto_key <> '' and p.codigo like 'ED-%' and p.estado_fisico <> 'danado' and p.propietario = 'dolaron'`;
+  and p.foto_key <> '' and p.codigo like 'ED-%' and p.estado_fisico <> 'danado' and p.estado_fisico <> 'liquidacion'
+  and p.propietario = 'dolaron'`;
 
 async function piezaPublicable(env: Env, id: string): Promise<{ ok: true; pieza: Pieza } | { ok: false; status: number; error: string }> {
   if (!ID_PIEZA.test(id)) return { ok: false, status: 404, error: 'La pieza no existe.' };
   const p = await env.DB.prepare(
-    `select id, codigo, nombre, categoria, marca, precio, estado_fisico, stock, destino, sin_inventario, estado_analisis, foto_key, talla
+    `select id, codigo, nombre, categoria, marca, precio, estado_fisico, stock, destino, sin_inventario, estado_analisis, foto_key, talla, upc
      from productos where id = ?`,
   ).bind(id).first<Pieza>();
   if (!p) return { ok: false, status: 404, error: 'La pieza no existe.' };
@@ -333,7 +338,7 @@ async function piezaPublicable(env: Env, id: string): Promise<{ ok: true; pieza:
   if (p.sin_inventario || p.destino !== 'etiqueta' || !/^ED-/.test(p.codigo ?? '')) {
     return no('Solo se publican piezas individuales con etiqueta ED-; las bandas no.');
   }
-  if (p.estado_fisico === 'danado') return no('Mercado Libre no tiene la condición «dañado»: esta pieza no se puede publicar.');
+  if (p.estado_fisico !== 'nuevo') return no('Mercado Libre no tiene la condición «dañado» ni «liquidación»: esta pieza no se puede publicar.');
   if (p.estado_analisis !== 'listo') return no('Primero revisa la pieza en el admin.');
   if (!p.foto_key) return no('La pieza no tiene foto.');
   if (p.stock <= 0) return no('La pieza no tiene existencias.');
@@ -499,6 +504,15 @@ async function retorno(env: Env, url: URL): Promise<Response> {
 
 /* ---------- lista de piezas ---------- */
 
+// Orden de la lista; la clave viene del navegador, el SQL solo de aqui.
+const ORDENES: Record<string, string> = {
+  recientes: 'coalesce(m.actualizado_en, p.creado_en) desc',
+  mas_existencias: 'p.stock desc',
+  menos_existencias: 'p.stock asc',
+  codigo: 'p.codigo asc',
+  nombre: 'lower(p.nombre) asc',
+};
+
 async function listarPiezas(env: Env, url: URL): Promise<Response> {
   const filtro = url.searchParams.get('filtro') ?? 'pendientes';
   const pagina = Math.max(1, Math.floor(Number(url.searchParams.get('pagina') ?? 1)) || 1);
@@ -508,14 +522,20 @@ async function listarPiezas(env: Env, url: URL): Promise<Response> {
       ? `(${PUBLICABLE} or m.producto_id is not null)`
       // Pendientes: publicables sin publicacion (o con una que fallo/cerro, para reintentar).
       : `${PUBLICABLE} and (m.producto_id is null or (m.estado = 'error' and m.ml_item_id is null) or m.estado = 'cerrada')`;
+  // Cada palabra debe aparecer en nombre, codigo, marca o categoria (instr: sin comodines que escapar).
+  const palabras = (url.searchParams.get('q') ?? '').trim().slice(0, 80).split(/\s+/).filter(Boolean).slice(0, 8);
+  const busca = palabras.map(() =>
+    ` and instr(lower(coalesce(p.nombre, '') || ' ' || coalesce(p.codigo, '') || ' ' || coalesce(p.marca, '') || ' ' || coalesce(p.categoria, '')), lower(?)) > 0`).join('');
+  const min = Math.max(0, Math.floor(Number(url.searchParams.get('min') ?? 0)) || 0);
+  const orden = ORDENES[url.searchParams.get('orden') ?? ''] ?? ORDENES.recientes;
   const { results } = await env.DB.prepare(
     `select p.id, p.codigo, p.nombre, p.categoria, p.marca, p.precio, p.estado_fisico, p.stock,
             m.producto_id as m_id, m.ml_item_id, m.estado, m.precio_ml, m.permalink, m.ultimo_error, m.actualizado_en
      from productos p left join ml_publicaciones m on m.producto_id = p.id
-     where ${donde}
-     order by coalesce(m.actualizado_en, p.creado_en) desc, p.id
+     where (${donde})${busca}${min ? ' and p.stock >= ?' : ''}
+     order by ${orden}, p.id
      limit 51 offset ?`,
-  ).bind((pagina - 1) * 50).all<Record<string, any>>();
+  ).bind(...palabras, ...(min ? [min] : []), (pagina - 1) * 50).all<Record<string, any>>();
   return json({
     piezas: results.slice(0, 50).map((f) => ({
       producto: {
@@ -537,36 +557,99 @@ interface Sugerencia { categoria_id: string; categoria_nombre: string; dominio: 
 
 // Los pone el sistema (o la guia de tallas), no el dueno.
 const ATRIBUTOS_PROPIOS = new Set(['ITEM_CONDITION', 'SIZE_GRID_ID', 'SIZE_GRID_ROW_ID']);
+// ITEM_CONDITION de ML por estado fisico; solo `nuevo` es publicable (piezaPublicable).
+const CONDICION_ML: Record<string, string> = { nuevo: '2230284' };
+// Datos que la pieza ya trae o que una regla fija resuelve: no se le piden a la IA.
+const SIN_IA = new Set(['BRAND', 'SIZE', 'GTIN', 'EMPTY_GTIN_REASON', 'UNITS_PER_PACK']);
+const RAZON_SIN_CODIGO = '17055160';   // EMPTY_GTIN_REASON: «El producto no tiene código registrado»
 
-function atributosPedidos(attrs: any[], marca: string, talla: string) {
+/** GTIN valido (8, 12, 13 o 14 digitos, con digito verificador) a partir del UPC de la pieza; '' si no lo hay. */
+export function gtinDe(upc: string | null): string {
+  const d = (upc ?? '').trim();
+  if (!/^\d{6,14}$/.test(d)) return '';
+  for (const largo of [8, 12, 13, 14]) {
+    if (largo < d.length) continue;
+    const c = d.padStart(largo, '0');
+    const suma = [...c.slice(0, -1)].reverse().reduce((total, x, i) => total + Number(x) * (i % 2 ? 1 : 3), 0);
+    if ((10 - (suma % 10)) % 10 === Number(c.at(-1))) return c;
+  }
+  return '';
+}
+
+/** MODEL para ML: el nombre de la pieza sin la marca ('' si no queda nada). */
+export function modeloDe(nombre: string, marca: string): string {
+  const i = marca ? nombre.toLowerCase().indexOf(marca.toLowerCase()) : -1;
+  const sin = i < 0 ? nombre : `${nombre.slice(0, i)} ${nombre.slice(i + marca.length)}`;
+  return sin.replace(/\s+/g, ' ').trim().slice(0, 255);
+}
+
+export interface DatosPieza { nombre: string; marca: string; talla: string; upc: string | null }
+type Origen = 'pieza' | 'ia' | 'defecto';
+
+/**
+ * Los atributos de la categoria que el dueno ve, cada uno con su valor propuesto y de donde sale
+ * (`pieza`: dato de la pieza; `defecto`: regla fija; `ia`: lo propuso el analisis, #555). Sin valor,
+ * `motivo` dice por que. `ia` es lo que el modelo contesto por id; `iaFallo`, por que no hubo respuesta.
+ */
+export function atributosPedidos(attrs: any[], d: DatosPieza, ia: Record<string, string> = {}, iaFallo = '') {
   const ids = new Set(attrs.map((a) => a.id));
+  const gtin = gtinDe(d.upc);
+  const modelo = modeloDe(d.nombre, d.marca);
   const clave = (a: any) => a.tags?.required || a.tags?.catalog_required || a.tags?.conditional_required;
+  // EMPTY_GTIN_REASON viene `hidden` en la API real y aun asi hay que mandarlo; GRADING (`new_hidden`) no aplica a lo nuevo.
+  const oculto = (a: any) => (a.tags?.hidden && a.id !== 'EMPTY_GTIN_REASON') || a.tags?.new_hidden;
   return attrs
-    .filter((a) => !ATRIBUTOS_PROPIOS.has(a.id) && !a.tags?.read_only && !a.tags?.hidden && !a.tags?.fixed && clave(a))
+    .filter((a) => !ATRIBUTOS_PROPIOS.has(a.id) && !a.tags?.read_only && !oculto(a) && !a.tags?.fixed
+      && (clave(a) || (a.id === 'GTIN' && gtin)))
+    // Con GTIN no hace falta la razon de GTIN vacio.
+    .filter((a) => !(a.id === 'EMPTY_GTIN_REASON' && gtin && ids.has('GTIN')))
     .map((a) => {
       const valores = (Array.isArray(a.values) ? a.values : []).map((v: any) => ({ id: String(v.id), nombre: String(v.name) }));
+      const delTexto = (texto: string) => {
+        const igual = valores.find((v: { nombre: string }) => v.nombre.toLowerCase() === texto.toLowerCase());
+        return { id: igual?.id ?? null, nombre: igual?.nombre ?? texto };
+      };
+      // Con razon de GTIN vacio, el GTIN deja de ser obligatorio.
+      const requerido = !(a.id === 'GTIN' && ids.has('EMPTY_GTIN_REASON'));
       let sugerido: { id: string | null; nombre: string } | null = null;
-      if (a.id === 'BRAND' && marca) {
-        const igual = valores.find((v: { nombre: string }) => v.nombre.toLowerCase() === marca.toLowerCase());
-        sugerido = { id: igual?.id ?? null, nombre: igual?.nombre ?? marca };
+      let origen: Origen | null = null;
+      if (a.id === 'BRAND' && d.marca) {
+        [sugerido, origen] = [delTexto(d.marca), 'pieza'];
+      } else if (a.id === 'GTIN' && gtin) {
+        [sugerido, origen] = [{ id: null, nombre: gtin }, 'pieza'];
       } else if (a.id === 'EMPTY_GTIN_REASON') {
-        const sinCodigo = valores.find((v: { id: string }) => v.id === '17055160');
-        if (sinCodigo) sugerido = sinCodigo;   // «El producto no tiene código registrado»
-      } else if (a.id === 'SIZE' && talla) {
+        const sinCodigo = valores.find((v: { id: string }) => v.id === RAZON_SIN_CODIGO);
+        if (sinCodigo) [sugerido, origen] = [sinCodigo, 'defecto'];
+      } else if (a.id === 'SIZE' && d.talla) {
         // Talla de niño «Niño 6 años / S» -> «6 años»; la de adulto va tal cual.
-        const valor = talla.replace(/^Niño /, '').split(' / ')[0];
-        const igual = valores.find((v: { nombre: string }) => v.nombre.toLowerCase() === valor.toLowerCase());
-        sugerido = { id: igual?.id ?? null, nombre: igual?.nombre ?? valor };
+        [sugerido, origen] = [delTexto(d.talla.replace(/^Niño /, '').split(' / ')[0]), 'pieza'];
+      } else if (a.id === 'MODEL' && modelo) {
+        [sugerido, origen] = [{ id: null, nombre: modelo }, 'pieza'];
+      } else if (a.id === 'UNITS_PER_PACK') {
+        [sugerido, origen] = [{ id: null, nombre: '1' }, 'defecto'];   // pieza individual
+      } else if (ia[a.id]) {
+        const dicho = delTexto(ia[a.id]);
+        // Una lista cerrada no acepta lo que no esta en ella.
+        if (dicho.id || a.value_type !== 'list') [sugerido, origen] = [dicho, 'ia'];
       }
+      const motivo = sugerido || !requerido ? undefined
+        : a.id === 'BRAND' ? 'La pieza no tiene marca capturada.'
+        : a.id === 'SIZE' ? 'La pieza no tiene talla capturada.'
+        : a.id === 'GTIN' ? 'La pieza no tiene un código de barras válido.'
+        : iaFallo && puedeIA(a.id, String(a.value_type ?? 'string')) ? `No se pudo proponer con IA (${iaFallo}); escríbelo o elígelo.`
+        : puedeIA(a.id, String(a.value_type ?? 'string')) ? 'La IA no lo distinguió en la foto ni en el nombre; escríbelo o elígelo.'
+        : 'Mercado Libre lo pide y la pieza no lo guarda; escríbelo.';
       return {
         id: String(a.id), nombre: String(a.name ?? a.id), tipo: String(a.value_type ?? 'string'),
-        // Con razon de GTIN vacio, el GTIN deja de ser obligatorio.
-        requerido: !(a.id === 'GTIN' && ids.has('EMPTY_GTIN_REASON')),
-        valores, valor_sugerido: sugerido,
+        requerido, valores, valor_sugerido: sugerido, origen, motivo,
       };
     })
     .sort((a, b) => Number(b.requerido) - Number(a.requerido));
 }
+
+const puedeIA = (id: string, tipo: string) => !SIN_IA.has(id) && ['string', 'list', 'boolean'].includes(tipo);
+/** Obligatorios sin valor que el analisis de la foto puede intentar (color, genero, material...). */
+const paraIA = (a: ReturnType<typeof atributosPedidos>[number]) => a.requerido && !a.valor_sugerido && puedeIA(a.id, a.tipo);
 
 // ponytail: el endpoint de busqueda de guias del vendedor NO esta confirmado en la doc
 // (docs/MERCADOLIBRE-API.md, seccion 3); si falla, se avisa y el dueno la elige en ML.
@@ -664,8 +747,89 @@ async function yaPublicada(env: Env, id: string): Promise<boolean> {
   return !!previa && !(previa.estado === 'cerrada' || (previa.estado === 'error' && !previa.ml_item_id));
 }
 
+const FALLAS_FOTO: Record<string, string> = {
+  white_background: 'fondo no blanco', minimum_size: 'tamaño menor al mínimo',
+  text_logo: 'texto o logo visible', watermark: 'marca de agua',
+};
+
+/**
+ * Lo que falla la foto segun el diagnostico de ML (#564): [] si pasa (`action: 'empty'`), null si la
+ * respuesta no se entiende. ponytail: la forma exacta de la respuesta no esta confirmada contra la
+ * cuenta real (la doc agrupa por tipo de foto), por eso se busca cada `action` donde este anidado.
+ */
+export function fallasDeFoto(respuesta: unknown): string[] | null {
+  const fallas = new Set<string>();
+  let vistas = 0;
+  const recorrer = (nodo: any): void => {
+    if (!nodo || typeof nodo !== 'object') return;
+    if (Array.isArray(nodo)) return nodo.forEach(recorrer);
+    if (typeof nodo.action === 'string') {
+      vistas++;
+      if (nodo.action !== 'empty') {
+        const detecciones: any[] = Array.isArray(nodo.detections) ? nodo.detections : [];
+        for (const d of detecciones) fallas.add(FALLAS_FOTO[String(d?.name)] ?? String(d?.name ?? 'no cumple los requisitos'));
+        if (!detecciones.length) fallas.add('no cumple los requisitos');
+      }
+      return;
+    }
+    Object.values(nodo).forEach(recorrer);
+  };
+  recorrer(respuesta);
+  return vistas ? [...fallas] : null;
+}
+
+/** Aviso (o nada) sobre la foto que se va a subir. Nunca lanza ni bloquea: ML pide no detener el flujo si el diagnostico falla. */
+async function avisoDiagnosticoFoto(env: Env, categoriaId: string, foto: ArrayBuffer): Promise<string | null> {
+  try {
+    const r = await mlFetch(env, '/moderations/pictures/diagnostic', {
+      method: 'POST',
+      json: { pictures: [{ id: 'pieza', base64: base64(foto) }], context: { category_id: categoriaId, picture_type: 'thumbnail' } },
+    });
+    const fallas = fallasDeFoto(r);
+    if (fallas === null) return 'Mercado Libre contestó el diagnóstico de la foto en un formato que no se entendió; revísala a mano. Puedes publicar igual.';
+    return fallas.length
+      ? `La foto principal no pasa el diagnóstico de Mercado Libre (${fallas.join(', ')}) y la publicación puede perder exposición. Puedes publicar igual.`
+      : null;
+  } catch (error) {
+    return `No se pudo revisar la foto con el diagnóstico de Mercado Libre (${error instanceof ErrorML ? error.detalle : String(error)}). Puedes publicar igual.`;
+  }
+}
+
+/**
+ * Avisos de duplicado (#568): ML da de baja la misma publicacion dos veces. Busca otras piezas con el mismo
+ * nombre y marca que ya tengan articulo vivo en ML. Solo avisa; el dueno decide.
+ * ponytail: coincidencia exacta (sin mayusculas ni espacios de mas); nombres parecidos no se detectan.
+ */
+async function avisosDuplicado(env: Env, p: Pieza): Promise<string[]> {
+  const { results } = await env.DB.prepare(
+    `select m.ml_item_id, m.permalink, p.talla
+     from ml_publicaciones m join productos p on p.id = m.producto_id
+     where p.id <> ? and m.ml_item_id is not null and m.estado in ('activa', 'pausada', 'pausada_por_venta')
+       and lower(trim(p.nombre)) = lower(trim(?)) and lower(trim(p.marca)) = lower(trim(?))
+     order by m.publicado_en desc limit 3`,
+  ).bind(p.id, p.nombre, p.marca).all<{ ml_item_id: string; permalink: string; talla: string | null }>();
+  const talla = (p.talla ?? '').trim();
+  return results.map((f) => {
+    const otra = (f.talla ?? '').trim();
+    const aviso = `Ya publicaste "${p.nombre}" (${f.ml_item_id}): súmale existencias ahí en vez de duplicar.${f.permalink ? ` ${f.permalink}` : ''}`;
+    return p.categoria === 'ropa' && talla && otra && talla.toLowerCase() !== otra.toLowerCase()
+      ? `${aviso} Si prefieres publicarla aparte (esta es talla ${talla}, la otra ${otra}), incluye la talla en el título para que no cuente como duplicado.`
+      : aviso;
+  });
+}
+
+/**
+ * Fotos adicionales de la pieza (#589): R2 `extras/{id}/NN.jpg`, en orden de llave. Si hay, van primero en la
+ * publicacion (la primera es la miniatura) y la foto propia al final. ML admite 12 por articulo.
+ * ponytail: sin pantalla para administrarlas; se suben con wrangler. Interfaz cuando se usen seguido (#562).
+ */
+async function fotosExtra(env: Env, id: string): Promise<string[]> {
+  const { objects } = await env.FOTOS.list({ prefix: `extras/${id}/`, limit: 11 });
+  return objects.map((o) => o.key).sort();
+}
+
 async function preparar(env: Env, id: string, request: Request): Promise<Response> {
-  const cuerpo = (await request.json().catch(() => ({}))) as { categoria_id?: unknown; consulta?: unknown; consulta_catalogo?: unknown } | null;
+  const cuerpo = (await request.json().catch(() => ({}))) as { categoria_id?: unknown; consulta?: unknown; consulta_catalogo?: unknown; sin_ia?: unknown } | null;
   const elegida = cuerpo?.categoria_id === undefined || cuerpo.categoria_id === '' ? '' : String(cuerpo.categoria_id);
   // Texto para pedir categorias; sin el, el nombre de la pieza.
   const buscada = typeof cuerpo?.consulta === 'string' ? cuerpo.consulta.trim().replace(/\s+/g, ' ').slice(0, 80) : '';
@@ -681,9 +845,9 @@ async function preparar(env: Env, id: string, request: Request): Promise<Respons
   try {
     const perfil = await perfilML(env);
     const { ml_pct, ml_tipo_publicacion } = await config(env);
-    const avisos: string[] = [];
+    const avisos: string[] = await avisosDuplicado(env, p);
 
-    const consulta = buscada || tituloML(p.nombre, p.marca) || p.nombre;
+    const consulta =buscada || tituloML(p.nombre, p.marca) || p.nombre;
     let encontradas: any[] = [];
     try {
       encontradas = await mlPublico(env, `/sites/MLM/domain_discovery/search?q=${encodeURIComponent(consulta)}&limit=4`);
@@ -708,6 +872,35 @@ async function preparar(env: Env, id: string, request: Request): Promise<Respons
       else if (guias.length === 0) avisos.push('Esta categoría exige guía de tallas y no tienes ninguna: créala en Mercado Libre antes de publicar.');
     }
 
+    // La foto se lee una vez: sirve para las medidas y para que la IA proponga atributos.
+    const fotoR2 = await env.FOTOS.get(p.foto_key);
+    const bytesFoto = fotoR2 ? await fotoR2.arrayBuffer() : null;
+    // Medidas y diagnostico van sobre la miniatura: la primera adicional si la hay.
+    const extras = await fotosExtra(env, p.id);
+    const miniaturaR2 = extras.length ? await env.FOTOS.get(extras[0]) : null;
+    const bytesMiniatura = miniaturaR2 ? await miniaturaR2.arrayBuffer() : bytesFoto;
+
+    // Atributos: lo que la pieza trae, y lo que falta lo propone el analisis de la foto (#555).
+    // `sin_ia`: buscar en el catalogo no cambia la categoria; el formulario conserva lo propuesto.
+    const datos: DatosPieza = { nombre: p.nombre, marca: p.marca.trim(), talla: p.talla?.trim() ?? '', upc: p.upc };
+    let atributos = atributosPedidos(attrs, datos);
+    const porProponer = cuerpo?.sin_ia === true ? [] : atributos.filter(paraIA);
+    if (porProponer.length) {
+      let propuestos: Record<string, string> = {};
+      let fallo = '';
+      if (!bytesFoto) fallo = 'la foto no está en el almacén';
+      else {
+        try {
+          propuestos = await sugerirAtributos(bytesFoto, env, { nombre: p.nombre, marca: datos.marca },
+            porProponer.map((a) => ({ id: a.id, nombre: a.nombre, valores: a.valores.map((v: { nombre: string }) => v.nombre) })));
+        } catch (error) {
+          fallo = 'la IA no respondió';
+          console.warn(JSON.stringify({ mensaje: 'atributos con IA fallidos', id, error: String(error).slice(0, 200) }));
+        }
+      }
+      atributos = atributosPedidos(attrs, datos, propuestos, fallo);
+    }
+
     // Lo que no es ropa puede ir al catalogo con fotos oficiales; la ropa, con fotos propias.
     const catalogo = p.categoria !== 'ropa' ? await candidatosCatalogo(env, enCatalogo || consulta) : null;
 
@@ -719,10 +912,14 @@ async function preparar(env: Env, id: string, request: Request): Promise<Respons
     else if (MARCAS_RESTRINGIDAS.includes(p.marca.trim().toLowerCase())) {
       avisos.push(`${p.marca} es una marca restringida en México: solo la venden tiendas oficiales o vendedores acreditados; Mercado Libre puede rechazar o dar de baja la publicación.`);
     }
-    const foto = await env.FOTOS.get(p.foto_key);
-    const medidas = foto ? dimensionesJpeg(new Uint8Array(await foto.arrayBuffer())) : null;
+    const medidas = bytesMiniatura ? dimensionesJpeg(new Uint8Array(bytesMiniatura)) : null;
     if (medidas && (medidas.ancho < 500 || medidas.alto < 500)) {
       avisos.push(`La foto mide ${medidas.ancho} x ${medidas.alto} px; Mercado Libre pide mínimo 500 x 500.`);
+    }
+    // El diagnostico pide la categoria y la foto que publicar() sube; solo avisa.
+    if (categoria && bytesMiniatura) {
+      const aviso = await avisoDiagnosticoFoto(env, categoria.categoria_id, bytesMiniatura);
+      if (aviso) avisos.push(aviso);
     }
 
     return json({
@@ -738,9 +935,10 @@ async function preparar(env: Env, id: string, request: Request): Promise<Respons
         catalogo,
         precio_ml: precio,
         tipo_publicacion: ml_tipo_publicacion,
-        atributos: atributosPedidos(attrs, p.marca.trim(), p.talla?.trim() ?? ''),
+        atributos,
         guia_tallas: guia,
         avisos,
+        fotos_extra: extras.length,
       },
     });
   } catch (error) {
@@ -751,6 +949,32 @@ async function preparar(env: Env, id: string, request: Request): Promise<Respons
 /* ---------- publicar, pausar, reactivar ---------- */
 
 const sinEmojis = (texto: string) => texto.replace(/[<>]/g, '').replace(/[\p{Extended_Pictographic}️]/gu, '');
+
+// Letra de ropa de adulto -> como se dice en Mexico (la letra US es la misma).
+const TALLA_MX: Record<string, string> = {
+  XXS: 'extra extra chica', XS: 'extra chica', S: 'chica', M: 'mediana', L: 'grande', XL: 'extra grande', XXL: 'doble extra grande', '3XL': 'triple extra grande',
+};
+
+/**
+ * Descripcion por defecto (#565): solo lo que la ficha tecnica no dice y evita reclamos (talla US y MX,
+ * estado, origen, que incluye). Texto plano con \n, sin contacto, enlaces ni precios. Solo usa lo que la pieza
+ * trae: sin talla no hay lineas de talla. ponytail: no hay medidas ni descripcion de la ficha IA guardadas en
+ * D1; cuando existan, se agregan aqui.
+ */
+export function descripcionPorDefecto(p: { nombre: string; marca: string; categoria: string; talla: string | null }): string {
+  const talla = p.talla?.trim() ?? '';
+  const us = talla && p.categoria === 'ropa' ? tallaUs(talla) : '';   // '' si no es calzado
+  const lineasTalla = !talla || p.categoria !== 'ropa' ? []
+    : us ? [`Talla MX: ${talla.replace(/^Niño /, '')} cm`, `Talla US: ${us.replace(/US /g, '').replace(/ H\b/g, ' hombre').replace(/ M\b/g, ' mujer').replace(/ · /g, ' / ')}`]
+    : TALLA_MX[talla] ? [`Talla US: ${talla}`, `Talla MX: ${talla} (${TALLA_MX[talla]})`]
+    : [`Talla: ${talla.replace(' / ', ' (talla ')}${talla.includes(' / ') ? ')' : ''}`];   // niño: «Niño 6 años (talla S)»
+  return sinEmojis([
+    p.nombre, p.marca && `Marca: ${p.marca}`, ...lineasTalla,
+    'Condición: nuevo.', 'Mercancía americana, pieza única.', 'Incluye solo lo que se ve en las fotos.',
+  ].filter(Boolean).join('\n'))
+    .replace(/\S*(?:https?:\/\/|www\.|@)\S*/gi, '')   // un enlace o correo en el nombre no llega a ML
+    .replace(/[ \t]+\n/g, '\n').trim();
+}
 
 async function publicar(env: Env, id: string, request: Request): Promise<Response> {
   const cuerpo = (await request.json().catch(() => null)) as Record<string, any> | null;
@@ -812,18 +1036,22 @@ async function publicar(env: Env, id: string, request: Request): Promise<Respons
         if (delDominio) categoria = String(delDominio.category_id);
       }
     } else {
-      const foto = await env.FOTOS.get(p.foto_key);
-      if (!foto) throw errorLocal(409, 'sin_foto', 'La foto de la pieza no está en el almacén.');
-      const formulario = new FormData();
-      formulario.append('file', new Blob([await foto.arrayBuffer()], { type: 'image/jpeg' }), 'pieza.jpg');
-      const subida = await mlFetch(env, '/pictures/items/upload', { method: 'POST', body: formulario });
-      pictures = [{ id: String(subida?.id) }];
+      for (const llave of [...await fotosExtra(env, p.id), p.foto_key]) {
+        const foto = await env.FOTOS.get(llave);
+        if (!foto) throw errorLocal(409, 'sin_foto', 'La foto de la pieza no está en el almacén.');
+        const formulario = new FormData();
+        const tipo = foto.httpMetadata?.contentType || 'image/jpeg';
+        formulario.append('file', new Blob([await foto.arrayBuffer()], { type: tipo }), tipo === 'image/jpeg' ? 'pieza.jpg' : 'pieza');
+        const subida = await mlFetch(env, '/pictures/items/upload', { method: 'POST', body: formulario });
+        pictures.push({ id: String(subida?.id) });
+      }
     }
 
     const attrsCategoria: any[] = await mlPublico(env, `/categories/${categoria}/attributes`).catch(() => []);
     const propios = [
       // `condition` esta por desaparecer a favor de este atributo; se mandan los dos.
-      ...(attrsCategoria.some((a) => a.id === 'ITEM_CONDITION') ? [{ id: 'ITEM_CONDITION', value_id: '2230284' }] : []),
+      ...(attrsCategoria.some((a) => a.id === 'ITEM_CONDITION') && CONDICION_ML[p.estado_fisico]
+        ? [{ id: 'ITEM_CONDITION', value_id: CONDICION_ML[p.estado_fisico] }] : []),
       ...(fila ? [{ id: 'SIZE_GRID_ID', value_name: fila.split(':')[0] }, { id: 'SIZE_GRID_ROW_ID', value_name: fila }] : []),
     ];
     const creado = await mlFetch(env, '/items', {
@@ -852,7 +1080,7 @@ async function publicar(env: Env, id: string, request: Request): Promise<Respons
     let ultimoError = '';
     if (!catalogoId) {
       const descripcion = sinEmojis(String(cuerpo?.descripcion ?? '')).trim()
-        || [p.nombre, p.marca ? `Marca: ${p.marca}` : '', 'Condición: nuevo.'].filter(Boolean).join('\n');
+        || descripcionPorDefecto(p);
       try {
         await mlFetch(env, `/items/${itemId}/description`, { method: 'POST', json: { plain_text: descripcion.slice(0, 50_000) } });
       } catch (error) {
@@ -1012,7 +1240,7 @@ export async function procesarOrden(env: Env, orden: any): Promise<string[]> {
       // Todo en un batch y con la guarda `estado = 'recibida'`: reprocesar la misma
       // orden (notificacion repetida, conciliacion) no descuenta dos veces, y un
       // proceso que murio a medias se termina solo al volver a verla.
-      await env.DB.batch([
+      const hechos = await env.DB.batch([
         env.DB.prepare(
           `update ml_ventas set
              conflicto = (select stock < ml_ventas.cantidad from productos where id = ml_ventas.producto_id),
@@ -1031,6 +1259,8 @@ export async function procesarOrden(env: Env, orden: any): Promise<string[]> {
              and (select stock from productos where id = ml_publicaciones.producto_id) <= 0`,
         ).bind(ahora, pub.producto_id),
       ]);
+      // La orden pasa de 'recibida' a 'descontada' una sola vez: un solo correo por venta.
+      if (hechos[2].meta.changes) await avisarVenta(env, ordenId, itemId, Number(linea?.unit_price));
     } else {
       await env.DB.batch([
         env.DB.prepare(
@@ -1038,11 +1268,171 @@ export async function procesarOrden(env: Env, orden: any): Promise<string[]> {
                   actualizado_en = ?
            where id = ? and exists (select 1 from ml_ventas where order_id = ? and ml_item_id = ? and estado = 'descontada')`,
         ).bind(...llave, ahora, pub.producto_id, ...llave),
-        env.DB.prepare(`update ml_ventas set estado = 'cancelada' where order_id = ? and ml_item_id = ? and estado = 'descontada'`).bind(...llave),
+        // Issue #429: si ya la habian sacado del piso, vuelve a /avisos para regresarla. En conflicto
+        // se pidio cancelar en ML, no sacarla: esa cancelacion es la esperada y no vuelve.
+        // 'recibida' (murio antes del batch de pago) nunca desconto: solo se cierra, para que
+        // /avisos no la siga pidiendo empacar.
+        env.DB.prepare(
+          `update ml_ventas set estado = 'cancelada',
+             atendida_en = case when conflicto then atendida_en else '' end,
+             atendida_por = case when conflicto then atendida_por else '' end
+           where order_id = ? and ml_item_id = ? and estado in ('recibida', 'descontada')`,
+        ).bind(...llave),
       ]);
     }
   }
+  // Precio real, comision y envio (#621): despues del batch y sin transaccion abierta. Si falla, la venta ya quedo igual.
+  if (pagada && tocados.length) await guardarPrecios(env, orden);
   return tocados;
+}
+
+/* ---------- precio real, comision y envio de cada venta (Issue #621) ---------- */
+
+/** Pesos de ML a centavos enteros; null si no es un monto valido (negativo, texto, NaN). */
+export function centavos(pesos: unknown): number | null {
+  const n = typeof pesos === 'number' ? pesos : typeof pesos === 'string' && pesos.trim() !== '' ? Number(pesos) : NaN;
+  return Number.isFinite(n) && n >= 0 && n < 1e7 ? Math.round(n * 100) : null;
+}
+
+/**
+ * Lo que la tienda paga de envio por un shipment: la suma de senders[].cost de GET /shipments/{id}/costs.
+ * Lanza si ML no contesta o no trae `senders` (no se supone 0: 0 solo es 0 si ML lo dice).
+ */
+async function envioDelVendedor(env: Env, envioId: string): Promise<number> {
+  const costos = await mlFetch(env, `/shipments/${encodeURIComponent(envioId)}/costs`);
+  const senders = costos?.senders;
+  if (!Array.isArray(senders) || senders.length === 0) throw errorLocal(502, 'sin_costo_envio', 'ML no trajo el costo de envio.');
+  let total = 0;
+  for (const s of senders) {
+    const c = centavos(s?.cost);
+    if (c === null) throw errorLocal(502, 'sin_costo_envio', 'ML trajo un costo de envio invalido.');
+    total += c;
+  }
+  return total;
+}
+
+/**
+ * Llena precio_unitario, comision_unitaria y envio_vendedor de las filas de ml_ventas de una orden pagada, con lo
+ * que dice la propia orden (unit_price, sale_fee) y el shipment. Solo llena lo que esta en NULL, asi que repetirla no
+ * cambia nada. Nunca lanza ni toca existencias: si ML falla, queda NULL y el relleno del cron lo reintenta.
+ * Devuelve true si la orden quedo completa.
+ */
+export async function guardarPrecios(env: Env, orden: any): Promise<boolean> {
+  try {
+    const ordenId = String(orden?.id ?? '');
+    const { results: filas } = await env.DB.prepare(
+      'select ml_item_id, precio_unitario, envio_vendedor from ml_ventas where order_id = ?',
+    ).bind(ordenId).all<{ ml_item_id: string; precio_unitario: number | null; envio_vendedor: number | null }>();
+    if (!ordenId || orden?.status !== 'paid' || filas.length === 0) return false;
+    const ahora = new Date().toISOString();
+
+    // Precio y comision por pieza, tal cual vienen en la orden.
+    const lineas = new Map<string, { precio: number; comision: number | null }>();
+    for (const l of Array.isArray(orden.order_items) ? orden.order_items : []) {
+      const precio = centavos(l?.unit_price);
+      if (precio === null || precio === 0 || (l?.currency_id && l.currency_id !== 'MXN')) continue;
+      lineas.set(String(l?.item?.id ?? ''), { precio, comision: centavos(l?.sale_fee) });
+    }
+    const propias = filas.filter((f) => lineas.has(f.ml_item_id));
+    if (propias.length === 0) return false;
+    if (propias.every((f) => f.precio_unitario !== null && f.envio_vendedor !== null)) return true;   // ya completa: no escribe ni llama a ML
+    await env.DB.batch(propias.map((f) => env.DB.prepare(
+      `update ml_ventas set precio_unitario = coalesce(precio_unitario, ?), comision_unitaria = coalesce(comision_unitaria, ?),
+         precio_leido_en = coalesce(precio_leido_en, ?)
+       where order_id = ? and ml_item_id = ?`,
+    ).bind(lineas.get(f.ml_item_id)!.precio, lineas.get(f.ml_item_id)!.comision, ahora, ordenId, f.ml_item_id)));
+
+    // Envio: del shipment, completo en la primera fila de la orden y 0 en las demas. Sin shipment no hay envio que pagar.
+    const pendientes = propias.filter((f) => f.envio_vendedor === null);
+    if (pendientes.length === 0) return true;
+    const envioId = String(orden?.shipping?.id ?? '');
+    const envio = envioId ? await envioDelVendedor(env, envioId) : 0;
+    const primera = String(orden.order_items.find((l: any) => pendientes.some((f) => f.ml_item_id === String(l?.item?.id ?? '')))?.item?.id ?? '');
+    await env.DB.batch(pendientes.map((f) => env.DB.prepare(
+      'update ml_ventas set envio_vendedor = ? where order_id = ? and ml_item_id = ? and envio_vendedor is null',
+    ).bind(f.ml_item_id === primera ? envio : 0, ordenId, f.ml_item_id)));
+    return true;
+  } catch (error) {
+    console.error(JSON.stringify({ mensaje: 'precio real de la orden ML', orden: String(orden?.id ?? ''), error: String(error) }));
+    return false;
+  }
+}
+
+const LOTE_PRECIOS = 10;       // ordenes por corrida del cron
+const MAX_INTENTOS_PRECIO = 8; // lecturas fallidas antes de dejar de insistir
+
+/**
+ * Relleno acotado (Issue #621): ordenes pagadas sin precio o sin envio, las mas recientes primero y las menos
+ * intentadas antes. Cada una se vuelve a pedir a ML (/orders/{id}); si sigue incompleta, suma un intento.
+ */
+export async function rellenarPrecios(env: Env): Promise<number> {
+  const { results } = await env.DB.prepare(
+    `select order_id from ml_ventas where estado != 'cancelada' and precio_intentos < ?
+       and (precio_unitario is null or envio_vendedor is null)
+     group by order_id order by min(precio_intentos), max(recibido_en) desc limit ?`,
+  ).bind(MAX_INTENTOS_PRECIO, LOTE_PRECIOS).all<{ order_id: string }>();
+  let completas = 0;
+  for (const { order_id } of results) {
+    let completa = false;
+    try { completa = await guardarPrecios(env, await mlFetch(env, `/orders/${encodeURIComponent(order_id)}`)); }
+    catch (error) { console.error(JSON.stringify({ mensaje: 'relleno de precio ML', orden: order_id, error: String(error) })); }
+    if (completa) completas++;
+    else await env.DB.prepare('update ml_ventas set precio_intentos = precio_intentos + 1 where order_id = ? and (precio_unitario is null or envio_vendedor is null)').bind(order_id).run();
+  }
+  return completas;
+}
+
+/**
+ * Correo a los duenos por cada articulo vendido en ML (Issue #427). Sin existencias
+ * en D1 (se vendio en tienda en la misma ventana) el asunto lo dice: hay que cancelar en ML.
+ * Las existencias ya se descontaron: un correo que falla solo queda en el log.
+ */
+async function avisarVenta(env: Env, ordenId: string, itemId: string, precio: number): Promise<void> {
+  try {
+    const v = await env.DB.prepare(
+      `select p.nombre, p.codigo, v.cantidad, v.conflicto from ml_ventas v join productos p on p.id = v.producto_id
+       where v.order_id = ? and v.ml_item_id = ?`,
+    ).bind(ordenId, itemId).first<{ nombre: string; codigo: string; cantidad: number; conflicto: number }>();
+    if (!v) return;
+    await correoADuenos(env,
+      `${v.conflicto ? '¡Sin existencias! ' : ''}Vendido en Mercado Libre: ${v.codigo} ${v.nombre}`,
+      [
+        `${v.cantidad} × ${v.nombre} (${v.codigo})${precio > 0 ? ` a $${precio.toFixed(2)}` : ''}.`,
+        v.conflicto
+          ? 'D1 ya no tenía existencias: probablemente se vendió en tienda. Cancela la venta en Mercado Libre.'
+          : 'Sácala del piso y empácala para el envío.',
+        `Venta en ML: https://www.mercadolibre.com.mx/ventas/${ordenId}/detalle`,
+        ...(env.ML_REDIRECT_URI ? [`Márcala atendida en ${new URL(env.ML_REDIRECT_URI).origin}/avisos`] : []),
+      ].join('\n'));
+  } catch (error) {
+    console.error(JSON.stringify({ mensaje: 'aviso de venta ML fallido', orden: ordenId, error: String(error) }));
+  }
+}
+
+/* ---------- centro de avisos (Issue #429) ---------- */
+
+/** Las ventas de ML que nadie ha atendido, la mas vieja primero. Lo ve la caja. */
+export async function avisosPendientes(env: Env): Promise<Response> {
+  const { results } = await env.DB.prepare(
+    `select v.order_id, v.ml_item_id, v.producto_id, v.cantidad, v.estado, v.conflicto, v.recibido_en, p.codigo, p.nombre
+     from ml_ventas v left join productos p on p.id = v.producto_id
+     where v.atendida_en = '' order by v.recibido_en, v.order_id, v.ml_item_id`,
+  ).all<Record<string, any>>();
+  return json({
+    ventas_ml: results.map((f) => ({
+      order_id: f.order_id, ml_item_id: f.ml_item_id, producto_id: f.producto_id,
+      codigo: f.codigo ?? '', nombre: f.nombre ?? '', cantidad: f.cantidad,
+      estado: f.estado, conflicto: !!f.conflicto, recibido_en: f.recibido_en,
+    })),
+  });
+}
+
+/** Marca una venta como atendida, con quien y cuando. Solo una vez: dos cajas a la vez, gana una. */
+export async function atenderVentaML(env: Env, orden: string, item: string, correo: string): Promise<Response> {
+  const r = await env.DB.prepare(
+    `update ml_ventas set atendida_en = ?, atendida_por = ? where order_id = ? and ml_item_id = ? and atendida_en = ''`,
+  ).bind(new Date().toISOString(), correo, orden, item).run();
+  return r.meta.changes ? json({ ok: true }) : json({ error: 'Alguien más ya la atendió. Recarga la lista.' }, 409);
 }
 
 /** Respaldo de las notificaciones perdidas: las ordenes del vendedor de las ultimas 24 h. */
@@ -1075,6 +1465,7 @@ export async function sincronizar(env: Env): Promise<void> {
   await reintentarAvisos(env);
   try { await traerOrdenesRecientes(env, cuenta.ml_user_id); }
   catch (error) { console.error(JSON.stringify({ mensaje: 'ordenes recientes de ML', error: String(error) })); }
+  await rellenarPrecios(env).catch((error) => console.error(JSON.stringify({ mensaje: 'relleno de precios ML', error: String(error) })));
   await conciliarSeguro(env);
 }
 

@@ -32,7 +32,7 @@ export async function procesarColaRopa(env: EnvRopa, analizar = analizarFotoRopa
       const nombre = [s.prenda, marca].filter(Boolean).join(' ');
       const estado = aplicar && !banderas.length && s.prenda_confianza === 'alta' && (!s.marca || s.marca_confianza === 'alta') ? 'aplicado' : 'revisar';
       await env.DB.prepare(`update productos set ropa_ia_estado=?, ropa_ia_sugerencia=?, ropa_ia_fecha=?
-        ${aplicar ? ', nombre=?, marca=?' : ''} where id=? and ropa_ia_estado is null and nombre='Ropa' and categoria='ropa' and stock>0`)
+        ${aplicar ? ", nombre=?, marca=?, modificado_por='ia'" : ''} where id=? and ropa_ia_estado is null and nombre='Ropa' and categoria='ropa' and stock>0`)
         .bind(estado, JSON.stringify(suggestion), ahora(), ...(aplicar ? [nombre, marca] : []), fila.id).run();
     } catch (error) {
       const nuevoIntento = intentos + 1;
@@ -43,7 +43,7 @@ export async function procesarColaRopa(env: EnvRopa, analizar = analizarFotoRopa
   }
 }
 
-export async function rutaRopaAdmin(request: Request, env: EnvRopa, pathname: string): Promise<Response | null> {
+export async function rutaRopaAdmin(request: Request, env: EnvRopa, pathname: string, correo = 'sistema'): Promise<Response | null> {
   if (pathname === '/api/ropa-ia' && request.method === 'GET') {
     const { results } = await env.DB.prepare(`select id,nombre,marca,precio,ropa_ia_estado,ropa_ia_sugerencia,ropa_ia_fecha
       from productos where ropa_ia_estado='revisar' and categoria='ropa' and propietario='dolaron' order by ropa_ia_fecha limit 200`).all();
@@ -61,8 +61,8 @@ export async function rutaRopaAdmin(request: Request, env: EnvRopa, pathname: st
     const prenda = accion === 'corregir' ? String(cuerpo.prenda ?? '').trim() : s.prenda;
     const marca = accion === 'corregir' ? String(cuerpo.marca ?? '').trim() : s.marca_confianza === 'alta' ? s.marca : '';
     if (!Object.keys(PRECIO_PRENDA).includes(prenda) || marca.length > 40 || /[\r\n]/.test(marca)) return resp({ error: 'Prenda o marca inválida.' }, 400);
-    await env.DB.prepare("update productos set nombre=?, marca=?, ropa_ia_estado='aceptado', ropa_ia_fecha=? where id=? and ropa_ia_estado='revisar'")
-      .bind([prenda, marca].filter(Boolean).join(' '), marca, ahora(), id).run();
+    await env.DB.prepare("update productos set nombre=?, marca=?, modificado_por=?, ropa_ia_estado='aceptado', ropa_ia_fecha=? where id=? and ropa_ia_estado='revisar'")
+      .bind([prenda, marca].filter(Boolean).join(' '), marca, correo, ahora(), id).run();
   }
   return resp({ ok: true });
 }

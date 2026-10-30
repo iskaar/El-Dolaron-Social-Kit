@@ -14,6 +14,8 @@
  */
 
 import { sinAcentos } from './impresora.js';
+import { nombreEstado } from './estados.js';
+import { esRopa } from './ropa.js';
 
 const SERVICIO = '0000fff0-0000-1000-8000-00805f9b34fb';
 const CARACTERISTICA = '0000fff2-0000-1000-8000-00805f9b34fb';
@@ -27,6 +29,10 @@ const ANCHO_NOMBRE = 12;   // fuente "2" sin ampliar
 const ANCHO_PIE = 8;       // fuente "1" sin ampliar
 const ANCHO_PRECIO = 32;   // fuente "3" ampliada x2
 const ANCHO_PRECIO_LISTA = 24; // fuente "2" ampliada x2
+// Recuadro del grado (A/B/C, Issue #453): a la altura del precio, con la letra en fuente "4" (24 x 32).
+const GRADO_ANCHO = 44;
+const GRADO_ALTO = 44;
+const GRADO_Y = 54;
 const PRIMER_RENGLON = 8;  // lo mas alto del diseno, y el tope del corrimiento
 
 // Ancho de la barra angosta, en puntos (8 = 1 mm a 203 dpi).
@@ -108,7 +114,7 @@ export async function cargarCalibracion() {
   if (!globalThis.location || !globalThis.localStorage) return;   // node --test
   let config;
   try {
-    const respuesta = await fetch('/api/config', { signal: AbortSignal.timeout(4000) });
+    const respuesta = await fetch('/api/calibracion', { signal: AbortSignal.timeout(4000) });
     if (!respuesta.ok) return;
     config = await respuesta.json();
   } catch {
@@ -165,7 +171,7 @@ const centrarBarras = (contenido, ancho) =>
 /**
  * El trabajo TSPL de una pieza. Exportada para probarla sin impresora enfrente.
  *
- * @param pieza {{ nombre: string, precio: number, precio_lista: number, codigo: string, semana_ingreso: string }}
+ * @param pieza {{ nombre: string, precio: number, precio_lista: number, codigo: string, semana_ingreso: string, estado_fisico?: string }}
  * @param copias cuantas etiquetas iguales — una por pieza en existencia
  * @param y0 corrimiento vertical en puntos, de la calibracion
  */
@@ -188,7 +194,14 @@ export function tsplEtiqueta(pieza, copias = 1, y0 = corrimiento(), barra = modu
   // de un digito, que el lector de la caja no engancha (confirmado en hardware
   // el 2026-09-22 -- el ancho de barra no tenia nada que ver, ya estaba bien).
   const numero = String(Number(pieza.codigo.slice(3))).padStart(4, '0');
-  const pie = limpiar(`${pieza.codigo}${pieza.talla ? ` / ${pieza.talla}` : ''} - ${pieza.semana_ingreso}`);
+  // Grado solo en MG (#453): letra en un recuadro y, si no es A, su palabra al final del pie
+  // cuando cabe. Sin estado_fisico se toma como A, igual que el servidor.
+  const [letra, nombreGrado] = nombreEstado(pieza.estado_fisico).split(' · ');
+  const mostrarGrado = !esRopa(pieza);
+  const palabra = limpiar(nombreGrado);
+  const base = limpiar(`${pieza.codigo}${pieza.talla ? ` / ${pieza.talla}` : ''} - ${pieza.semana_ingreso}`);
+  const conPalabra = `${base} - ${palabra}`;
+  const pie = mostrarGrado && letra !== 'A' && conPalabra.length * ANCHO_PIE <= ANCHO - MARGEN * 2 ? conPalabra : base;
 
   const ordenes = [
     'SIZE 50.8 mm,25.4 mm',
@@ -202,15 +215,26 @@ export function tsplEtiqueta(pieza, copias = 1, y0 = corrimiento(), barra = modu
   // El precio es lo que se lee de lejos: se lleva la fuente mas grande que cabe.
   ordenes.push(`TEXT ${MARGEN},${y(54)},"3",0,2,2,"${precio}"`);
 
+  // El recuadro del grado va al borde derecho; si hay precio de lista tachado,
+  // se recorre a su izquierda. Nunca invade el precio de venta ni el codigo de
+  // barras (esta debajo de y=102 y el recuadro termina en 98).
+  let xGrado = ANCHO - MARGEN - GRADO_ANCHO;
+
   if (pieza.precio_lista > pieza.precio) {
     // Precio de lista a la derecha, un paso mas chico que el de venta (fuente
     // "2" x2 contra "3" x2) y con la base a la altura de la del precio.
     const antes = pesos(pieza.precio_lista);
     const ancho = antes.length * ANCHO_PRECIO_LISTA;
     const x = ANCHO - MARGEN - ancho;
+    xGrado = Math.max(x - 12 - GRADO_ANCHO, MARGEN + precio.length * ANCHO_PRECIO + 8);
     ordenes.push(`TEXT ${x},${y(62)},"2",0,2,2,"${antes}"`);
     // TSPL no sabe tachar texto: la linea encima se dibuja a mano, a media altura.
     ordenes.push(`BAR ${x},${y(81)},${ancho},3`);
+  }
+
+  if (mostrarGrado) {
+    ordenes.push(`BOX ${xGrado},${y(GRADO_Y)},${xGrado + GRADO_ANCHO},${y(GRADO_Y + GRADO_ALTO)},3`);
+    ordenes.push(`TEXT ${xGrado + 10},${y(GRADO_Y + 6)},"4",0,1,1,"${letra}"`);
   }
 
   // El codigo de barras lo dibuja la impresora, no code128.js: asi las barras
@@ -461,9 +485,7 @@ export function etiqueteraLista() {
  * el enlace, mandarTspl() la reconecta sola (gatt.connect() de un aparato ya
  * escogido no pide clic).
  *
- * ponytail: sin reconexion al recargar la pagina. getDevices() existe a medias
- * entre versiones de Chrome y se cuelga con la impresora apagada; un clic al
- * principio del turno es mas barato que esa complicacion.
+ * reconectarEtiquetera() recupera el aparato recordado cuando el navegador lo permite.
  */
 export async function conectarEtiquetera({ cualquiera = false } = {}) {
   const aparato = await navigator.bluetooth.requestDevice(cualquiera
@@ -475,6 +497,30 @@ export async function conectarEtiquetera({ cualquiera = false } = {}) {
 }
 
 let impresora = null;   // el aparato escogido, para reconectar sin clic
+
+/**
+ * Reconecta sin clic: primero al aparato ya escogido en esta pagina; si no hay, a uno que el
+ * navegador recuerde de otra visita (getDevices, que solo existe en Chrome reciente). Con la
+ * impresora apagada gatt.connect() se queda colgado, asi que se espera `espera` ms y se da por
+ * perdida. Devuelve si quedo lista; nunca lanza. Quien la llama decide cuando intentarlo: abrir
+ * la misma impresora desde dos pestanas a la vez mezcla los trabajos.
+ */
+export async function reconectarEtiquetera(espera = 8000) {
+  if (caracteristica) return true;
+  try {
+    let aparato = impresora;
+    if (!aparato) {
+      aparato = (await navigator.bluetooth?.getDevices?.())?.find((a) => a.name?.startsWith('AE240'));
+      if (!aparato) return false;
+      aparato.addEventListener('gattserverdisconnected', () => { caracteristica = null; });
+      impresora = aparato;
+    }
+    await Promise.race([enlazar(aparato), esperar(espera).then(() => { throw new Error('tiempo agotado'); })]);
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 async function enlazar(aparato) {
   // La AE240 a veces suelta el enlace justo despues de conectar ("GATT Server is
@@ -659,9 +705,9 @@ function anotarEnvio(envio) {
 // revision cambia el precio, la pieza tiene que volver a la lista para
 // reimprimirla. Por navegador, como el historial.
 //
-// ponytail: "enviada" no es "impresa": la impresora no dice si saco el papel;
-// para eso esta desmarcarDesde(). Si algun dia se etiqueta desde dos
-// computadoras, esto se muda a una columna en D1.
+// D1 (etiquetas_enviadas, Issue #440) coordina PC y celular; esta copia permite consultar las marcas sin
+// red. Una marca con `base: true` ya esta en la base; sin ella es de antes del registro o se hizo sin red.
+// La impresora no confirma el papel: "No salio" libera el reclamo de la base explicitamente.
 const CLAVE_IMPRESAS = 'etiqueta-impresas';
 
 export function impresas() {
@@ -675,34 +721,145 @@ function guardarImpresas(mapa) {
   try { globalThis.localStorage?.setItem(CLAVE_IMPRESAS, JSON.stringify(mapa)); } catch { /* sin localStorage no se recuerda, nada mas */ }
 }
 
-/** @param pieza lo que dice la etiqueta: { precio, precio_lista } */
-export function marcarImpresa(id, hora = new Date().toISOString(), pieza = {}) {
-  guardarImpresas({ ...impresas(), [id]: { hora, precio: pieza.precio, precio_lista: pieza.precio_lista } });
+/** @param pieza lo que dice la etiqueta: { precio, precio_lista, nombre, talla } */
+export function marcarImpresa(id, hora = new Date().toISOString(), pieza = {}, base = false, en) {
+  guardarImpresas({ ...impresas(), [id]: entradaMarca(hora, pieza, base, true, en) });
+}
+
+// `propia: true`: la mando ESTE navegador (`en` = la hora del reclamo en la base, para soltar solo su propio reclamo).
+// `propia: false`: se adopto de lo que saco otro dispositivo. Una marca sin la senal es de antes de adoptar: es propia.
+const entradaMarca = (hora, pieza, base, propia = true, en) => ({
+  hora, precio: pieza.precio, precio_lista: pieza.precio_lista, nombre: pieza.nombre ?? '', talla: pieza.talla ?? '',
+  estado_fisico: pieza.estado_fisico ?? 'nuevo', ...(base ? { base: true } : {}), propia, ...(en ? { en } : {}),
+});
+export const esPropia = (marca) => marca?.propia !== false;
+
+/** Quita la marca de esta pieza en este navegador (la soltaron en otro dispositivo). */
+export function olvidarMarca(id) {
+  const { [id]: _, ...resto } = impresas();
+  guardarImpresas(resto);
 }
 
 /** Los precios que se ven en la etiqueta: el de lista solo sale si es mayor (tachado). */
-const precioImpreso = (p) => `${p.precio}/${p.precio_lista > p.precio ? p.precio_lista : 0}`;
+export const precioImpreso = (p) => `${p.precio}/${p.precio_lista > p.precio ? p.precio_lista : 0}`;
+/** Nombre y talla como salen en la etiqueta (Issue #361). */
+export const textoImpreso = (p) => `${(p.nombre ?? '').trim()}/${(p.talla ?? '').trim()}`;
 
 /**
- * Si la etiqueta pegada sigue diciendo el precio de hoy. Una marca sin precio
- * (de antes de guardarlo) se da por buena; una pieza sin existencia no tiene
- * etiqueta que cambiar.
+ * El grado (A/B/C, Issue #453) que dice la etiqueta. Las marcas de antes del
+ * grado no lo traen y esas etiquetas no lo imprimieron: se leen como A, asi que
+ * solo una pieza que hoy no es A las marca como desactualizadas.
+ */
+export const gradoImpreso = (p) => p.estado_fisico ?? 'nuevo';
+
+/**
+ * Si la etiqueta pegada sigue diciendo el precio, el nombre, la talla y el
+ * grado de hoy. Una marca sin precio o sin nombre (de antes de guardarlos) se
+ * da por buena en eso; una pieza sin existencia no tiene etiqueta que cambiar.
  */
 export function etiquetaVigente(marca, pieza) {
   if (!marca) return false;
   if (marca.precio === undefined || (pieza.stock ?? 1) <= 0) return true;
-  return precioImpreso(marca) === precioImpreso(pieza);
+  return precioImpreso(marca) === precioImpreso(pieza)
+    && (marca.nombre === undefined || textoImpreso(marca) === textoImpreso(pieza))
+    && (esRopa(pieza) || gradoImpreso(marca) === gradoImpreso(pieza));
 }
 
 /**
  * "No salio desde aqui": la impresora se paro sin avisar en esta pieza, asi que
- * esta y todas las que se mandaron despues vuelven a la lista.
+ * esta y todas las que se mandaron despues DESDE ESTE NAVEGADOR vuelven a la lista. Lo que saco otro
+ * dispositivo (marca adoptada) no se toca: aqui no se sabe si salio bien. Devuelve los ids soltados.
  */
 export function desmarcarDesde(id) {
   const mapa = impresas();
   const desde = mapa[id]?.hora;
-  if (!desde) return;
-  guardarImpresas(Object.fromEntries(Object.entries(mapa).filter(([, marca]) => marca.hora < desde)));
+  if (!desde || !esPropia(mapa[id])) return [];
+  const sueltas = Object.keys(mapa).filter((otra) => esPropia(mapa[otra]) && mapa[otra].hora >= desde);
+  guardarImpresas(Object.fromEntries(Object.entries(mapa).filter(([otra]) => !sueltas.includes(otra))));
+  return sueltas;
+}
+
+/* ---------- Registro compartido en la base (Issue #440) ---------- */
+
+// La marca de arriba es de ESTE navegador. Para que la PC y el celular no saquen la misma etiqueta
+// dos veces, cada envio se reclama antes en la base (`etiquetas_enviadas`): gana el primero que
+// llega. Los campos etiqueta_* de una pieza (o de `marcas`) son lo que dice la etiqueta enviada.
+
+/**
+ * Hace local la marca de la base (`marca` trae los campos etiqueta_*; `pieza` el grado de hoy, que la base
+ * no guarda), para que la pieza salga de la lista y no se vuelva a mandar. Si ya hay una marca local que
+ * dice lo mismo se respeta (su hora y su grado son los de este navegador) y solo se anota que esta en la base.
+ */
+export const adoptarMarca = (id, marca, pieza) => adoptarMarcas([[id, marca, pieza]]);
+
+/** Lo mismo para muchas a la vez: una sola lectura y una sola escritura del almacenamiento. */
+export function adoptarMarcas(filas) {
+  const mapa = impresas();
+  let cambio = false;
+  for (const [id, marca, pieza = {}] of filas) {
+    const dice = {
+      precio: marca.etiqueta_precio, precio_lista: marca.etiqueta_precio_lista,
+      nombre: marca.etiqueta_nombre, talla: marca.etiqueta_talla, estado_fisico: pieza.estado_fisico,
+    };
+    const local = mapa[id];
+    if (local?.precio !== undefined && precioImpreso(local) === precioImpreso(dice) && textoImpreso(local) === textoImpreso(dice)) {
+      if (!local.base) { mapa[id] = { ...local, base: true }; cambio = true; }
+      continue;
+    }
+    mapa[id] = entradaMarca(marca.etiqueta_en, dice, true, false);
+    cambio = true;
+  }
+  if (cambio) guardarImpresas(mapa);
+}
+
+/**
+ * Pide quedarse con la etiqueta de esas piezas antes de mandarla. Devuelve { reclamadas, marcas }:
+ * las que gano esta llamada y, de las demas, la marca que ya tienen en la base. Con `reimprimir` se queda
+ * con ella aunque ya haya salido (reimpresion explicita). Con `preparar` pide tambien el codigo en la misma llamada
+ * (POST /api/etiquetas) y devuelve ademas `piezas`, lo que esa llamada prepara (#492). Lanza si falla; si fue por falta de red
+ * el error trae `sinRed` para que quien llama decida: no se manda a ciegas.
+ */
+export async function reclamarEtiquetas(ids, { reimprimir = false, version, preparar = false, origen = globalThis.matchMedia?.('(min-width:1000px)').matches ? 'pc' : 'celular' } = {}) {
+  let respuesta;
+  try {
+    respuesta = await fetch(preparar ? '/api/etiquetas' : '/api/etiquetas/enviadas', {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ids, reimprimir, version, origen, ...(preparar && { reclamar: true }) }),
+      signal: AbortSignal.timeout(15000),
+    });
+  } catch (error) {
+    // Solo una red caida permite seguir sin la base. Un tiempo agotado (AbortError/TimeoutError) puede haber
+    // llegado al servidor: no se imprime a ciegas, que la otra pantalla podria sacar la misma etiqueta.
+    if (globalThis.navigator?.onLine === false || error instanceof TypeError) {
+      throw Object.assign(new Error(`Sin red: ${error.message}`), { sinRed: true });
+    }
+    throw new Error('La base no respondió a tiempo. No se imprimió: revisa la red e intenta otra vez.');
+  }
+  const cuerpo = await respuesta.json().catch(() => ({}));
+  if (!respuesta.ok) throw new Error(cuerpo.error ?? `Error HTTP ${respuesta.status}. Revisa la red y la sesion.`);
+  return cuerpo;
+}
+
+/**
+ * Borra la marca de la base ("no salio", o se corto la impresion). true si quedo; nunca lanza. `en` ({ id: hora del
+ * reclamo propio, la `ahora` del reclamo }) es obligatorio: solo se suelta lo que reclamo ESTE dispositivo y no cambio
+ * despues. Una pieza sin hora conocida no se suelta.
+ */
+export async function soltarEtiquetas(ids, en) {
+  ids = ids.filter((id) => en?.[id]);
+  try {
+    for (let i = 0; i < ids.length; i += 100) {
+      const lote = ids.slice(i, i + 100);
+      const respuesta = await fetch('/api/etiquetas/enviadas', {
+        method: 'DELETE', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ ids: lote, etiquetas_en: Object.fromEntries(lote.map((id) => [id, en[id]])) }),
+        signal: AbortSignal.timeout(15000),
+      });
+      if (!respuesta.ok) return false;
+    }
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /** El historial en lineas de texto, lo mas nuevo primero. */

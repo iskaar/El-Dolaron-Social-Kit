@@ -39,13 +39,22 @@ usar `--red-text`, o tinta `#2B2116` para texto.
 Único logo vigente (Isaac, 7/10/2026): `assets/el-dolaron-logo.png` (horizontal, transparente con contorno
 blanco), `assets/el-dolaron-logo-vertical.png` y el ícono «EL» (`assets/favicon.png`). Originales en `01-Logos/`.
 El logo anterior (símbolo D con franjas) y la insignia circular están retirados.
+Variantes de una tinta (negro, blanco, azul), tamaños mínimos, protección y usos incorrectos: ver el [manual de marca](../05-Guia-y-textos/Manual-de-marca.html).
 
 ## Piezas
 
-- **Botones** (`.button`): borde azul de 2 px, sombra dura azul de 4 px que se levanta al pasar el cursor.
+- **Botones** (`.button`): borde azul de 2 px, sombra dura azul de 4 px que se levanta al pasar el cursor y se hunde al pulsar (`:active`, para táctil).
   Variantes: azul (acción principal), amarillo con filete punteado (`button-ticket`, WhatsApp), blanco.
 - **Cintas** (`.tape`): tira amarilla o azul con giro leve y borde dentado, solo para el kicker y el subtítulo de la portada.
-- **Portada**: titular «Marcas americanas, *a precio de saldo.*» y el collage `hallazgos.webp` (recortes reales sobre transparente).
+- **Portada**: titular «Marcas americanas, *a precio de saldo.*» y, al lado, una pila semanal de stickers: `assets/pila.webp`
+  se genera con `tools/pila_stickers.py` (13 recortes reales del catálogo con borde troquelado blanco y sombra azul, cuadrada,
+  sin huecos grandes; se regenera cada semana) y `pila.json` lista sus piezas. La pila es la imagen LCP y el respaldo sin
+  JavaScript o sin API. Encima, `stickers.js` pone 5 stickers vivos en lugares fijos y girados (cajas en %, empalmadas entre sí y
+  con la pila; la capa es absoluta, así que la portada no cambia de alto) con borde troquelado, sombra, dorso y aro holográfico horneados una vez en canvas (`troquelar()` en `stickers.js`, sin filtros SVG por cuadro; el aro sigue al puntero, no al dedo). Un toque abre
+  el visor de la pieza; jalar una esquina la despega con un dorso doblado, soltar antes la regresa con rebote y despegarla del
+  todo la manda volando y trae la siguiente del rollo (12 piezas con recorte o 6 páginas del catálogo, sin las de la pila) al
+  mismo lugar. Con `prefers-reduced-motion` los stickers son planos (el toque sigue abriendo el visor). Puerta de rendimiento:
+  probar en iPhone Safari (`clip-path` animado y canvas) antes de sumar más stickers.
 - **Carteles «Se busca»** (`.poster`, sección «Los más buscados»): papel generado (`cartel-se-busca.webp`), nombre arriba,
   foto cuadrada que abre el visor, precio en Anton rojo, «Ahorras $X», sello «¡Última pieza!» cuando el servidor lo manda
   y «Apartar por WhatsApp». Aparece solo con 3 o más; con 3 a 5 las filas quedan centradas. En celular es una fila
@@ -59,10 +68,31 @@ El logo anterior (símbolo D con franjas) y la insignia circular están retirado
 
 ## Movimiento
 
-Mínimo: el subtítulo de la portada cae al cargar, la marquesina corre y dos recuadros se asientan al entrar en
-pantalla (`motion.js`, objetivos `data-motion`). Todo se apaga con `prefers-reduced-motion`.
+Sin librerías: CSS y un poco de JS. Una sola animación por gesto, la interfaz nunca pasa de 300 ms y no hay bucles nuevos
+(solo la marquesina, con botón de pausa).
+
+- **Entre páginas**: transiciones de documento (`@view-transition`). La cabecera (`masthead`) y el logo de la cabecera
+  persisten y el resto hace crossfade de 200 ms; el logo del pie no lleva nombre. Firefox navega normal.
+- **Tarjeta → visor**: la foto de la miniatura o del cartel se transforma en la del visor (300 ms, `pieza-foto`), y vuelve al
+  cerrar, también con Esc o tocando el fondo. Sin View Transitions el visor abre de golpe.
+- **Chips**: el chip activo se desliza al nuevo (`chip-activo`, 200 ms).
+- **Tarjetas**: las nuevas se asientan en 320 ms, escalonadas 35 ms donde existe `sibling-index()`.
+- **Revelado**: los recuadros `data-motion` se asientan con una línea de tiempo de scroll (`animation-timeline: view()`) y
+  vuelven si se sube; sin ella, `motion.js` los asienta una sola vez al entrar. No se aplica dentro de `.wanted-grid`
+  (scroller horizontal en celular).
+- El subtítulo de la portada cae al cargar y la marquesina corre.
+- Todo se apaga con `prefers-reduced-motion`, incluidos los pseudoelementos `::view-transition-*`.
 
 ## Reglas
+
+- Inclinaciones solo en objetos pegados: sellos, cintas, etiquetas y cupones (`--tilt-s/m/l`: 1°, 2°, 3°). Los párrafos y las
+  tarjetas con texto corrido van rectos. Las sombras son duras y azules (`4px 4px 0 var(--navy)`); las suaves con desenfoque
+  solo en carteles y etiquetas.
+- Ritmo vertical: cada sección usa `--section` (o `--section-s` arriba del catálogo); no se inventan paddings por sección.
+- Jerarquía: el `h1` manda; los `h2` quedan un paso abajo (`clamp(36px, 4.6vw, 68px)`).
+- Celular: barra fija abajo con WhatsApp y Catálogo (`.sticky-bar`, solo ≤ 760 px; se oculta con el visor abierto); el collage
+  va después del titular, chico; «Cómo llegar» es enlace de texto bajo el sello.
+- Logo en cabecera y pie: `assets/el-dolaron-logo.webp` (600 px); el PNG se conserva para JSON-LD y vistas previas.
 
 - Celular primero: sin desplazamiento horizontal de la página de 320 a 1440 px.
 - Contraste AA en todo texto; el rojo grande sobre papel o cartón debe dar 3:1 (usar `--red-text`).

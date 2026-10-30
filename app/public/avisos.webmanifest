@@ -1,0 +1,10 @@
+{
+  "name": "El Dolarón — avisos",
+  "short_name": "Avisos",
+  "start_url": "/avisos",
+  "scope": "/avisos",
+  "display": "standalone",
+  "background_color": "#16366B",
+  "theme_color": "#16366B",
+  "icons": [{ "src": "/icono-app.png", "sizes": "1254x1254", "type": "image/png" }]
+}

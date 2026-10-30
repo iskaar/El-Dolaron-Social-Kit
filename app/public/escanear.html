@@ -1,0 +1,819 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>El Dolarón — escanear</title>
+<style>
+  :root { --azul:#16366B; --rojo:#D72B32; --verde:#1e7a3c; --amarillo:#FFD447; --linea:#dfe3ea; --gris:#5b6478; }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body { margin: 0; background: #f4f6f9; color: #1a1f2b; font-family: system-ui, -apple-system, sans-serif;
+    display: flex; flex-direction: column; border: 6px solid transparent; transition: border-color .15s; }
+  body.ok { border-color: var(--verde); }
+  body.mas { border-color: var(--azul); }
+  body.no { border-color: var(--rojo); }
+  /* Sale la etiqueta (#396): toda la pantalla en amarillo, que se vea de reojo. */
+  body.etiqueta { background: var(--amarillo); border-color: var(--amarillo); transition: background .15s; }
+  #aviso.etiqueta { color: var(--azul); font-weight: 800; font-size: 16px; }
+  header { background: var(--azul); color: #fff; padding: 8px 14px; display: flex; gap: 14px; align-items: center; flex-wrap: wrap; }
+  header h1 { font-size: 16px; margin: 0; flex: 1; }
+  header a, header button.liga { color: var(--amarillo); font-size: 14px; background: none; border: 0; padding: 0; cursor: pointer; }
+  #visor { position: relative; background: #000; height: 38vh; flex: none; }
+  #visor[hidden] { display: none; }
+  video { width: 100%; height: 100%; object-fit: cover; display: block; }
+  #mira { position: absolute; left: 12%; right: 12%; top: 50%; height: 2px; background: var(--rojo); opacity: .8; }
+  #teclado { display: flex; gap: 8px; padding: 8px 12px; background: #fff; border-bottom: 1px solid var(--linea); }
+  #teclado[hidden] { display: none; }
+  #teclado input { flex: 1; font-size: 18px; padding: 8px; border: 1px solid var(--linea); border-radius: 8px; }
+  main { flex: 1; overflow-y: auto; padding: 10px 12px 0; }
+  .tarjeta { background: #fff; border: 1px solid var(--linea); border-radius: 12px; padding: 12px; margin-bottom: 10px; }
+  .tarjeta[hidden] { display: none; }
+  #nombre { font-size: 19px; font-weight: 700; margin: 0; }
+  #imagen-producto { width: 100%; max-height: 210px; object-fit: contain; margin-top: 10px; }
+  #imagen-producto[hidden], #confirmar-imagen[hidden], #omitir-imagen[hidden], #fuente-imagen[hidden] { display: none; }
+  .secundario { border: 1px solid var(--linea); border-radius: 8px; padding: 10px 12px; color: var(--azul); background: #fff; font: inherit; }
+  button:disabled { opacity: .55; }
+  .dato { font-size: 13px; color: var(--gris); margin: 2px 0 0; }
+  .fila { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-top: 10px; }
+  .precio { font-size: 26px; font-weight: 800; color: var(--azul); flex: 1; }
+  .contador { display: flex; align-items: center; gap: 6px; }
+  .contador button { width: 44px; height: 44px; font-size: 22px; border-radius: 10px; border: 0; background: #eef1f6; color: var(--azul); font-weight: 700; }
+  .contador input { width: 64px; height: 44px; text-align: center; font-size: 22px; font-weight: 700; border: 1px solid var(--linea); border-radius: 10px; }
+  button.principal { border: 0; border-radius: 10px; padding: 12px 18px; font-size: 17px; font-weight: 700; background: var(--azul); color: #fff; }
+  button.estado { border: 0; border-radius: 10px; padding: 10px 14px; font-size: 15px; font-weight: 700; background: #eef1f6; color: var(--azul); }
+  button.estado[aria-pressed="true"] { background: var(--rojo); color: #fff; }
+  #desconocido { border-color: var(--rojo); }
+  #desconocido h2 { font-size: 17px; margin: 0; color: var(--rojo); }
+  #manual[hidden] { display: none; }
+  #manual label { display: block; margin-top: 10px; }
+  #manual input, #manual select { width: 100%; padding: 10px; font: inherit; border: 1px solid var(--linea); border-radius: 8px; }
+  #aviso { font-size: 14px; color: var(--rojo); min-height: 1.2em; margin: 0 0 8px; }
+  ul { list-style: none; padding: 0; margin: 0; }
+  li { display: flex; gap: 8px; justify-content: space-between; padding: 8px 2px; border-top: 1px solid var(--linea); font-size: 14px; }
+  li:first-child { border-top: 0; }
+  li.fallo { color: var(--rojo); cursor: pointer; }
+  li .cant { font-weight: 700; white-space: nowrap; }
+  li .corregir { display: flex; gap: 6px; align-items: center; }
+  li .corregir button { width: 36px; height: 36px; font-size: 20px; border-radius: 8px; border: 0; background: #eef1f6; color: var(--azul); font-weight: 700; }
+  footer { flex: none; display: flex; gap: 10px; align-items: center; padding: 10px 12px calc(10px + env(safe-area-inset-bottom));
+    background: #fff; border-top: 1px solid var(--linea); }
+  footer span { flex: 1; font-size: 15px; font-weight: 600; }
+  #inicio { position: fixed; inset: 0; background: rgba(22,54,107,.96); color: #fff; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; gap: 16px; padding: 24px; text-align: center; z-index: 5; }
+  #inicio[hidden] { display: none; }
+  #inicio button { font-size: 20px; padding: 16px 28px; border-radius: 14px; border: 0; background: var(--amarillo); color: var(--azul); font-weight: 800; }
+</style>
+</head>
+<body>
+<div id="inicio">
+  <p>Escanea cada pieza. El mismo código otra vez suma una pieza; un código distinto guarda la anterior.</p>
+  <button id="empezar" type="button">Empezar</button>
+</div>
+<header>
+  <h1>Escanear</h1>
+  <button id="alternar-camara" class="liga" type="button" aria-pressed="false">Prender cámara</button>
+  <button id="abrir-teclado" class="liga" type="button">Escribir código</button>
+  <button id="sin-codigo" class="liga" type="button">Sin código</button>
+  <a href="/captura">Fotos →</a>
+</header>
+<div id="visor" hidden><video id="video" playsinline muted></video><div id="mira"></div></div>
+<div id="teclado" hidden>
+  <input id="codigo" type="text" inputmode="numeric" autocomplete="off" placeholder="Número del código y Enter" aria-label="Código de barras">
+</div>
+<main>
+  <p id="aviso" role="status"></p>
+
+  <section class="tarjeta" id="actual" hidden>
+    <p id="nombre"></p>
+    <p class="dato" id="detalle"></p>
+    <img id="imagen-producto" alt="" hidden referrerpolicy="no-referrer">
+    <p class="dato" id="nombre-imagen"></p>
+    <p class="dato" id="estado-imagen" role="status"></p>
+    <a id="fuente-imagen" class="dato" target="_blank" rel="noopener noreferrer" hidden>Ver producto original</a>
+    <div class="fila">
+      <button id="confirmar-imagen" class="principal" type="button" hidden>Confirmar imagen</button>
+      <button id="omitir-imagen" class="secundario" type="button" hidden>Continuar sin imagen</button>
+      <button class="secundario otra-foto" type="button">Tomar otra foto</button>
+      <button class="secundario subir-foto" type="button">Subir foto</button>
+    </div>
+    <div class="fila">
+      <span class="precio" id="precio"></span>
+      <div class="contador">
+        <button type="button" data-paso="-1" aria-label="Una pieza menos">−</button>
+        <input id="cantidad" type="number" inputmode="numeric" min="0" max="999" aria-label="Piezas">
+        <button type="button" data-paso="1" aria-label="Una pieza más">+</button>
+      </div>
+    </div>
+  </section>
+
+  <section class="tarjeta" id="desconocido" hidden>
+    <h2>No está en la hoja</h2>
+    <p class="dato" id="desconocido-codigo"></p>
+    <div class="fila">
+      <div class="contador">
+        <button type="button" data-paso="-1" aria-label="Una pieza menos">−</button>
+        <input id="cantidad-foto" type="number" inputmode="numeric" min="0" max="999" aria-label="Piezas">
+        <button type="button" data-paso="1" aria-label="Una pieza más">+</button>
+      </div>
+      <button id="foto" class="principal otra-foto" type="button">Tomar foto</button>
+      <button class="secundario subir-foto" type="button">Subir foto</button>
+    </div>
+    <p class="dato" id="sin-camara" hidden>Cámara apagada: préndela o usa Subir foto, Sin foto o <a href="/captura">Fotos</a>.</p>
+    <button id="sin-foto" class="secundario" type="button">Sin foto</button>
+  </section>
+
+  <form class="tarjeta" id="manual" hidden>
+    <p class="dato" id="manual-codigo"></p>
+    <label for="manual-nombre">Nombre</label>
+    <input id="manual-nombre" required maxlength="120" autocomplete="off">
+    <label for="manual-categoria">Categoría</label>
+    <select id="manual-categoria" required></select>
+    <label for="manual-estado">Estado</label>
+    <select id="manual-estado" required></select>
+    <label for="manual-tipo-precio">Precio que conoces</label>
+    <select id="manual-tipo-precio"><option value="precio_lista">De lista</option><option value="precio">De venta</option></select>
+    <label for="manual-precio">Precio en pesos MXN</label>
+    <input id="manual-precio" type="number" inputmode="decimal" min="0.01" step="0.01" required>
+    <label for="manual-cantidad">Cantidad</label>
+    <input id="manual-cantidad" type="number" inputmode="numeric" min="1" max="999" step="1" required>
+    <div class="fila">
+      <button id="manual-guardar" class="principal" type="submit">Guardar sin foto</button>
+      <button id="manual-cancelar" class="secundario" type="button">Volver</button>
+    </div>
+    <p class="dato">La etiqueta sale al guardar. Puedes corregir la cantidad durante 5 minutos desde la captura; en 0 se cancela. Si ya salió papel, ajusta las etiquetas en Etiquetas.</p>
+  </form>
+
+  <section class="tarjeta">
+    <ul id="guardadas"><li class="dato">La pieza se guarda al escanear otra o con Guardar, y su etiqueta sale sola: corrige la cantidad antes, con − y + (en 0 se cancela).</li></ul>
+  </section>
+</main>
+<input id="archivo-foto" type="file" accept="image/*" hidden>
+<footer>
+  <button id="estado" class="estado" type="button" aria-pressed="false">A · Nuevo</button>
+  <span id="total">0 piezas</span>
+  <button id="guardar" class="principal" type="button">Guardar</button>
+</footer>
+<script type="module">
+import { escucharLector } from '/lector.js';
+import { CATEGORIAS } from '/categorias.js';
+import { ESTADOS, nombreEstado, siguienteEstado } from '/estados.js';
+import { aJpeg, reducirArchivo } from '/foto.js';
+import { codigoLeido, normalizarUpc as normalizar, SIN_CODIGO } from '/upc.js';
+import { guardar as guardarFoto, leer as leerFoto, borrar as borrarFoto, pendientes } from '/cola-fotos.js';
+
+const NOMBRES = Object.fromEntries(CATEGORIAS);
+const $ = (id) => document.getElementById(id);
+const pesos = (c) => `$${Math.round(c / 100).toLocaleString('es-MX')}`;
+const escapar = (t) => String(t ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
+// Con la camara, el mismo codigo cuenta otra vez solo si salio de la vista este rato.
+const FUERA_DE_VISTA_MS = 700;
+
+let actual = null;        // { id, upc, ficha, stock } sin guardar todavia
+let desconocido = null;   // { upc, stock } esperando su foto
+let estado = 'nuevo';   // grado A/B/C de lo que se escanee (#371)
+let piezas = 0;
+let fila = Promise.resolve();   // un codigo a la vez, en el orden en que llegaron
+let camara = false;
+let piezaParaFoto = null;
+let piezaParaManual = null;
+$('manual-categoria').innerHTML = CATEGORIAS.map(([clave, nombre]) => `<option value="${escapar(clave)}">${escapar(nombre)}</option>`).join('');
+$('manual-estado').innerHTML = ESTADOS.map(([clave, nombre]) => `<option value="${escapar(clave)}">${escapar(nombre)}</option>`).join('');
+
+/* ---------- aviso: sonido, vibracion y color ---------- */
+
+let audio = null;
+function avisar(tipo) {
+  const tonos = { ok: [[880, 90]], mas: [[1320, 60]], no: [[220, 250], [180, 250]], etiqueta: [[1046, 80], [1568, 120]] }[tipo];
+  try {
+    audio ??= new AudioContext();
+    let t = audio.currentTime;
+    for (const [frecuencia, ms] of tonos) {
+      const osc = audio.createOscillator();
+      osc.frequency.value = frecuencia;
+      osc.connect(audio.destination);
+      osc.start(t);
+      osc.stop(t + ms / 1000);
+      t += ms / 1000 + 0.05;
+    }
+  } catch { /* sin audio, queda la vibracion y el color */ }
+  navigator.vibrate?.({ no: [200, 100, 200], etiqueta: [150, 80, 150, 80, 150] }[tipo] ?? 40);
+  // El amarillo de la etiqueta no lo tapa el verde del siguiente escaneo; un error sí.
+  if (document.body.className !== 'etiqueta' || tipo === 'no') document.body.className = tipo;
+  setTimeout(() => { if (document.body.className === tipo) document.body.className = ''; }, tipo === 'etiqueta' ? 1500 : 350);
+}
+
+function mensaje(texto) { $('aviso').textContent = texto; $('aviso').classList.remove('etiqueta'); }
+
+/** Ya tiene nombre y precio: /etiquetas la imprime en segundos. Se le avisa a quien escanea (#394). */
+function avisarEtiqueta(nombre, stock) {
+  mensaje(`Sale la etiqueta: ${nombre} ×${stock}`);
+  $('aviso').classList.add('etiqueta');
+  avisar('etiqueta');
+}
+
+/* ---------- pintar ---------- */
+
+function pintar() {
+  $('alternar-camara').textContent = camara ? 'Apagar cámara' : 'Prender cámara';
+  $('alternar-camara').setAttribute('aria-pressed', String(camara));
+  $('actual').hidden = !actual;
+  if (actual) {
+    const f = actual.ficha;
+    $('nombre').textContent = f.nombre;
+    $('detalle').textContent = [`Código ${actual.leido}`, f.marca, NOMBRES[f.categoria] ?? f.categoria, f.traducido ? '' : 'nombre sin traducir']
+      .filter(Boolean).join(' · ');
+    // El precio cambia con el grado; el servidor lo vuelve a calcular al guardar.
+    $('precio').textContent = pesos(f.precios?.[actual.estado] ?? f.precio);
+    $('cantidad').value = actual.stock;
+    pintarImagen(actual);
+  }
+  $('desconocido').hidden = !desconocido || !!piezaParaManual;
+  $('manual').hidden = !piezaParaManual;
+  if (desconocido) {
+    $('desconocido-codigo').textContent = desconocido.sinCodigo
+      ? 'Pieza sin código del fabricante: toma o sube foto, o elige Sin foto para poner nombre y precio.'
+      : desconocido.buscada
+      ? `Código ${desconocido.leido}: no se encontró. Toma o sube foto, o elige Sin foto.`
+      : `Código ${desconocido.leido}. Se busca solo al pasar a la siguiente pieza: sigue escaneando. Si prefieres, tómale foto.`;
+    $('cantidad-foto').value = desconocido.stock;
+    $('sin-camara').hidden = camara;
+  }
+  $('total').textContent = `${piezas} ${piezas === 1 ? 'pieza' : 'piezas'}`;
+}
+
+function anotar(html, fallo = null) {
+  const lista = $('guardadas');
+  if (lista.querySelector('.dato')) lista.innerHTML = '';
+  lista.insertAdjacentHTML('afterbegin', `<li${fallo ? ' class="fallo"' : ''}>${html}</li>`);
+  if (fallo) lista.firstElementChild.addEventListener('click', fallo, { once: true });
+}
+
+/* ---------- guardar ---------- */
+
+/** Guarda la pieza abierta. El id nace con la pieza: reintentar no la duplica. */
+async function cerrarActual() {
+  if (piezaParaFoto || piezaParaManual) return;
+  const pieza = actual, otra = desconocido;
+  actual = null;
+  desconocido = null;
+  pintar();
+  if (pieza && pieza.stock >= 1) await enviar(pieza);
+  // La desconocida se guarda y se busca sola (#373); una que ya se buscó solo esperaba su foto.
+  if (otra && otra.stock >= 1 && !otra.buscada && !otra.sinCodigo) await buscar(otra);
+  if (otra?.sinCodigo) anotar(`<span>Sin foto, no se capturó la pieza sin código</span><span class="cant">×${otra.stock}</span>`);
+}
+
+async function enviar(pieza) {
+  try {
+    const respuesta = await fetch('/api/borradores/upc', {
+      method: 'POST', headers: { 'content-type': 'application/json' }, keepalive: true,
+      body: JSON.stringify({ id: pieza.id, upc: pieza.leido, stock: pieza.stock, estado_fisico: pieza.estado }),
+    });
+    const guardada = await respuesta.json().catch(() => ({}));
+    if (!respuesta.ok) throw new Error(guardada.error ?? `Error ${respuesta.status}`);
+    piezas += guardada.sumadas ?? pieza.stock;
+    const { li } = anotarGuardada(guardada, pieza.estado);
+    if (guardada.estado_analisis === 'listo') {
+      li.querySelector('.p').textContent = `${pesos(guardada.precio)} · etiqueta en camino`;
+      avisarEtiqueta(guardada.nombre, pieza.stock);
+    }
+    if(guardada.existente)mensaje(`Ya existía · +${guardada.sumadas}${guardada.codigo?` a ${guardada.codigo}`:''}`);
+  } catch (error) {
+    anotar(`<span>No se guardó: ${escapar(pieza.ficha.nombre)} ×${pieza.stock}. Toca para reintentar.</span>`,
+      () => { fila = fila.then(() => enviar(pieza)); });
+    mensaje(String(error.message ?? error));
+    avisar('no');
+  }
+  pintar();
+}
+
+/* ---------- lo guardado con nombre y precio sale a Etiquetas en seguida; lo que aun se identifica
+   o espera foto se corrige con - y +, y en 0 se cancela (#377, #381) ---------- */
+
+function anotarGuardada(guardada, grado, sinFoto = false) {
+  const hasta = Date.parse(guardada.creado_en) + 5 * 60_000;
+  const corregible = !guardada.existente && (guardada.estado_analisis !== 'listo' || (sinFoto && Date.now() < hasta));
+  anotar(`<span>${escapar(guardada.codigo||'')} ${escapar(guardada.nombre)}${grado !== 'nuevo' ? ` (${escapar(nombreEstado(grado))})` : ''}</span>
+    <span class="corregir">${corregible ? '<button type="button" data-paso="-1" aria-label="Una pieza menos">−</button>' : ''}
+    <span class="cant">×<span class="n">${guardada.stock}</span> · <span class="p">${guardada.precio > 0 ? pesos(guardada.precio) : 'buscando…'}</span></span>
+    ${corregible ? '<button type="button" data-paso="1" aria-label="Una pieza más">+</button>' : ''}</span>`);
+  const li = $('guardadas').firstElementChild;
+  if (guardada.existente && guardada.codigo) {
+    const imprimir = document.createElement('button');
+    imprimir.type = 'button'; imprimir.className = 'secundario';
+    imprimir.textContent = `Imprimir ${guardada.sumadas} etiquetas de ${guardada.codigo}`;
+    imprimir.addEventListener('click', async () => {
+      if (imprimir.disabled) return;
+      imprimir.disabled = true;
+      try {
+        const e = await import('/etiquetera.js');
+        if (!e.etiqueteraLista()) await e.conectarEtiquetera();
+        const r = await fetch('/api/etiquetas', { method:'POST', headers:{'content-type':'application/json'}, body:JSON.stringify({ids:[guardada.id]}) });
+        const datos = await r.json();
+        if (!r.ok) throw new Error(datos.error || 'No se preparó la etiqueta.');
+        if (await e.imprimirEtiquetas(datos[0], guardada.sumadas)) avisarEtiqueta(guardada.codigo, guardada.sumadas);
+      } catch (error) { mensaje(error.message); }
+      finally { imprimir.disabled = false; }
+    });
+    li.append(imprimir);
+  }
+  let guardado = guardada.stock, deseado = guardada.stock, espera = null, envio = Promise.resolve();
+  const cerrar = () => { for (const b of li.querySelectorAll('button[data-paso]')) b.remove(); };
+  async function guardar() {
+    const valor = deseado;
+    if (valor === guardado) return;
+    try {
+      const r = await fetch(sinFoto ? '/api/borradores/upc/manual' : `/api/borradores/${guardada.id}/existencia`, {
+        method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id: guardada.id, stock: valor, esperado: guardado }),
+      });
+      const cuerpo = await r.json().catch(() => ({}));
+      if (r.status === 404) cerrar();
+      if (!r.ok) throw new Error(cuerpo.error ?? `Error ${r.status}`);
+      piezas += valor - guardado;
+      guardado = valor;
+      // En 0 se canceló: sale de la cola de Etiquetas y ya no se corrige (#377).
+      if (valor === 0) {
+        cerrar();
+        li.firstElementChild.textContent = `Cancelada: ${li.firstElementChild.textContent}`;
+        li.style.textDecoration = 'line-through';
+      }
+    } catch (error) {
+      // No se queda en pantalla un número que el servidor no tiene.
+      deseado = guardado;
+      mensaje(`No se cambió la cantidad: ${error instanceof TypeError ? 'sin red' : error.message}`);
+      avisar('no');
+    }
+    li.querySelector('.n').textContent = deseado;
+    pintar();
+  }
+  li.addEventListener('click', (e) => {
+    const paso = Number(e.target.closest?.('button[data-paso]')?.dataset.paso);
+    if (!paso) return;
+    deseado = Math.min(999, Math.max(0, deseado + paso));
+    li.querySelector('.n').textContent = deseado;
+    // Tocar + cinco veces es una sola llamada con el número final.
+    clearTimeout(espera);
+    espera = setTimeout(() => { envio = envio.then(guardar); }, 600);
+  });
+  if (sinFoto && corregible) setTimeout(cerrar, Math.max(0, hasta - Date.now()));
+  return { li, cantidad: () => guardado, cerrar };
+}
+
+/* ---------- UPC que no está en la hoja: se busca solo y el capturista sigue (#373) ---------- */
+
+async function buscar(pieza) {
+  try {
+    const r = await fetch('/api/borradores/upc/buscar', {
+      method: 'POST', headers: { 'content-type': 'application/json' }, keepalive: true,
+      body: JSON.stringify({ id: pieza.id, upc: pieza.leido, stock: pieza.stock, estado_fisico: pieza.estado }),
+    });
+    const guardada = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(guardada.error ?? `Error ${r.status}`);
+    piezas += guardada.sumadas ?? pieza.stock;
+    seguirBusqueda(pieza, anotarGuardada({ ...guardada, nombre: guardada.nombre||`Código ${pieza.leido}` }, pieza.estado));
+    if(guardada.existente)mensaje(`Ya existía · +${guardada.sumadas}${guardada.codigo?` a ${guardada.codigo}`:''}`);
+  } catch (error) {
+    anotar(`<span>No se guardó: código ${escapar(pieza.leido)} ×${pieza.stock}. Toca para reintentar.</span>`,
+      () => { fila = fila.then(() => buscar(pieza)); });
+    mensaje(String(error.message ?? error));
+    avisar('no');
+  }
+  pintar();
+}
+
+const BUSQUEDA_CADA_MS = 4000;
+const BUSQUEDA_INTENTOS = 35;   // ~2 min: la cola espera hasta 60 s a Vertex y reintenta una vez (#406)
+
+function seguirBusqueda(pieza, { li, cantidad, cerrar }) {
+  let intentos = 0;
+  const revisar = async () => {
+    intentos += 1;
+    let datos = null;
+    try {
+      const r = await fetch(`/api/borradores/upc/${pieza.id}`, { cache: 'no-store' });
+      if (r.ok) datos = await r.json();
+    } catch { /* sin red: se vuelve a preguntar */ }
+    if (datos?.estado_analisis === 'listo') {
+      if(datos.existente){li.remove();anotarGuardada(datos,pieza.estado);mensaje(`Ya existía · +${datos.sumadas}${datos.codigo?` a ${datos.codigo}`:''}`);return;}
+      cerrar();   // ya va a Etiquetas: su cantidad quedó cerrada
+      li.firstElementChild.textContent = datos.nombre;
+      li.querySelector('.p').textContent = `${pesos(datos.precio)} · etiqueta en camino`;
+      avisarEtiqueta(datos.nombre, datos.stock);
+      return;
+    }
+    if (datos?.estado_analisis === 'error' || (!datos && intentos >= BUSQUEDA_INTENTOS)) return pedirFoto();
+    if (intentos < BUSQUEDA_INTENTOS) setTimeout(revisar, BUSQUEDA_CADA_MS);
+    else li.querySelector('.p').textContent = 'sigue buscando: revisa Etiquetas';
+  };
+  // No se encontró: la fila se pone roja y al tocarla se abre la foto de esa misma pieza.
+  const pedirFoto = () => {
+    li.classList.add('fallo');
+    li.firstElementChild.textContent = `No se encontró el código ${pieza.leido}: toca aquí para foto o Sin foto.`;
+    li.querySelector('.p').textContent = 'falta foto';
+    mensaje(`El código ${pieza.leido} no se encontró: tómale foto cuando puedas. La impresión espera esa pieza.`);
+    avisar('no');
+    li.addEventListener('click', (e) => {
+      if (e.target.closest?.('button')) return;
+      fila = fila.then(async () => {
+        if (piezaParaFoto || piezaParaManual) return;
+        await cerrarActual();
+        desconocido = { ...pieza, stock: cantidad(), buscada: true, li };
+        pintar();
+      });
+    });
+  };
+  setTimeout(revisar, BUSQUEDA_CADA_MS);
+}
+
+/* ---------- un codigo ---------- */
+
+async function procesar(crudo) {
+  if (piezaParaFoto || piezaParaManual) return;
+  const leido = codigoLeido(crudo);
+  const upc = normalizar(crudo);
+  if (!leido || !upc) return;
+  mensaje('');
+  if (actual?.upc === upc) {
+    actual.stock = Math.min(999, actual.stock + 1);
+    avisar('mas');
+    return pintar();
+  }
+  if (desconocido?.upc === upc && !desconocido.buscada) {
+    desconocido.stock = Math.min(999, desconocido.stock + 1);
+    avisar('mas');
+    return pintar();
+  }
+  await cerrarActual();
+
+  let respuesta;
+  try {
+    respuesta = await fetch(`/api/manifiesto/${leido}`);
+  } catch {
+    mensaje('Sin conexión: vuelve a escanear cuando regrese la red.');
+    avisar('no');
+    return pintar();
+  }
+  const cuerpo = await respuesta.json().catch(() => ({}));
+  if (respuesta.status === 404) {
+    desconocido = { id: crypto.randomUUID(), upc, leido, stock: 1, estado };
+    avisar('no');
+  } else if (!respuesta.ok) {
+    mensaje(cuerpo.error ?? `Error ${respuesta.status}`);
+    avisar('no');
+  } else {
+    actual = { id: crypto.randomUUID(), upc, leido, ficha: cuerpo, imagen: cuerpo.imagen, stock: 1, estado };
+    avisar('ok');
+    if (!actual.imagen) cargarImagen(actual);
+  }
+  pintar();
+}
+
+const recibir = (codigo) => { fila = fila.then(() => procesar(codigo)).catch((error) => { mensaje(error.message || 'No se pudo procesar el código.'); avisar('no'); }); };
+
+/* ---------- referencia de imagen, sin tocar existencia ni precio ---------- */
+
+function pintarImagen(pieza) {
+  const imagen = pieza.imagen;
+  const url = imagen?.url || '';
+  const img = $('imagen-producto');
+  if (img.getAttribute('src') !== url) {
+    if (url) img.src = url; else img.removeAttribute('src');
+  }
+  img.alt = imagen?.nombre || pieza.ficha.nombre;
+  $('nombre-imagen').textContent = imagen?.nombre || '';
+  img.hidden = !url || pieza.imagenRota;
+  $('estado-imagen').textContent = pieza.cargandoImagen ? 'Buscando imagen del producto…' : pieza.errorImagen ||
+    (imagen ? imagen.confirmada ? 'Imagen guardada' : imagen.codigo_verificado ? 'Revisa el producto y confirma la imagen.' : 'La página no muestra el código. Confirma que es el mismo producto.' : 'Sin imagen. Puedes tomar o subir una foto.');
+  $('confirmar-imagen').hidden = !imagen || imagen.confirmada;
+  $('confirmar-imagen').disabled = !!pieza.confirmandoImagen || !!pieza.imagenRota;
+  $('omitir-imagen').hidden = !imagen || imagen.confirmada;
+  // Si Target pide verificación, una persona la pasa en su navegador desde este enlace.
+  const enlace = imagen?.enlace || pieza.ficha.enlace;
+  $('fuente-imagen').hidden = !enlace;
+  if (enlace) $('fuente-imagen').href = enlace;
+}
+
+async function cargarImagen(pieza) {
+  pieza.cargandoImagen = true;
+  try {
+    const r = await fetch(`/api/manifiesto/${pieza.upc}/imagen`, { method: 'POST' });
+    const datos = await r.json();
+    if (!r.ok) throw new Error(datos.error || 'No se pudo buscar la imagen.');
+    pieza.imagen = datos.imagen;
+    pieza.errorImagen = '';
+  } catch (error) { pieza.errorImagen = error.message; }
+  finally {
+    pieza.cargandoImagen = false;
+    if (actual === pieza) { pintar(); }
+  }
+}
+
+$('imagen-producto').addEventListener('error', () => {
+  if (!actual) return;
+  actual.imagenRota = true;
+  actual.errorImagen = 'No se pudo cargar la imagen. Toma o sube una foto.';
+  pintar();
+});
+$('confirmar-imagen').addEventListener('click', async () => {
+  const pieza = actual;
+  if (!pieza?.imagen || pieza.confirmandoImagen || pieza.imagenRota) return;
+  pieza.confirmandoImagen = true;
+  pintar();
+  try {
+    const r = await fetch(`/api/manifiesto/${pieza.upc}/imagen`, { method: 'PUT', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ url: pieza.imagen.url, tcin: pieza.imagen.tcin }) });
+    const datos = await r.json();
+    if (!r.ok) throw new Error(datos.error || 'No se pudo guardar la imagen.');
+    pieza.imagen = datos.imagen;
+    pieza.errorImagen = '';
+  } catch (error) { pieza.errorImagen = error.message; }
+  finally { pieza.confirmandoImagen = false; if (actual === pieza) { pintar(); } }
+});
+$('omitir-imagen').addEventListener('click', () => {
+  if (!actual) return;
+  actual.imagen = null;
+  actual.errorImagen = '';
+  pintar();
+});
+
+/* ---------- foto de lo que no esta en el manifiesto ---------- */
+
+async function enviarFoto(registro, li = null) {
+  try {
+    const cuerpo = new FormData();
+    cuerpo.append('id', registro.id);
+    cuerpo.append('upc', registro.upc);
+    cuerpo.append('estado_fisico', registro.estado_fisico);
+    cuerpo.append('cantidad', String(registro.cantidad));
+    cuerpo.append('foto', registro.foto, 'foto.jpg');
+    const respuesta = await fetch('/api/borradores', { method: 'POST', body: cuerpo });
+    if (!respuesta.ok) throw new Error((await respuesta.json().catch(() => ({}))).error ?? `Error ${respuesta.status}`);
+    const guardada=await respuesta.json();
+    if(guardada.existente){mensaje(`Ya existía · +${guardada.sumadas}${guardada.codigo?` a ${guardada.codigo}`:''}`);anotarGuardada(guardada,registro.estado_fisico);}
+    const pendiente = await leerFoto(registro.id);
+    if (pendiente && (pendiente.version ?? 0) === (registro.version ?? 0)) await borrarFoto(registro.id);
+    if (li) seguirFoto(registro, li);
+  } catch (error) {
+    anotar(`<span>Foto ${escapar(registro.upc || 'sin código')} guardada en este teléfono. Toca para reintentar o abre Fotos.</span>`,
+      () => { fila = fila.then(() => enviarFoto(registro, reintento)); });
+    const reintento = $('guardadas').firstElementChild;
+    mensaje(`No se subió: ${error.message ?? error}. La foto sigue guardada en Fotos.`);
+  }
+}
+
+async function conservarFoto(foto) {
+  const pieza = piezaParaFoto;
+  if (!pieza || !foto) throw new Error('No se pudo tomar la foto.');
+  const registro = { id: pieza.id, upc: pieza.leido, foto, cantidad: pieza.stock, estado_fisico: pieza.estado,
+    creado: Date.now(), desde_escaner: true };
+  await guardarFoto(registro);
+  if (!pieza.buscada) piezas += pieza.stock;   // la buscada ya se contó al guardarse
+  if (actual === pieza) actual = null;
+  if (desconocido === pieza) desconocido = null;
+  piezaParaFoto = null;
+  anotar(`<span>Foto ${escapar(registro.upc || 'sin código')} (se analiza)</span><span class="cant">×${registro.cantidad}</span>`);
+  const li = $('guardadas').firstElementChild;
+  pintar();
+  // La subida no detiene el escáner (#385): la foto ya está en el teléfono y enviarFoto avisa si falla.
+  enviarFoto(registro, li);
+}
+
+const ANALISIS_INTENTOS = 40;   // ~2.5 min: análisis + búsqueda del código en la cola (#406)
+
+/** Sigue el análisis de una foto: si queda lista, avisa que sale su etiqueta; si no, que va aparte (#394). */
+function seguirFoto(registro, li) {
+  let intentos = 0;
+  const revisar = async () => {
+    intentos += 1;
+    let datos = null;
+    try {
+      const r = await fetch(`/api/borradores/upc/${registro.id}`, { cache: 'no-store' });
+      if (r.ok) datos = await r.json();
+    } catch { /* sin red: se vuelve a preguntar */ }
+    if (datos?.estado_analisis === 'listo') {
+      li.innerHTML = `<span>${escapar(datos.nombre)}</span><span class="cant">×${datos.stock} · ${pesos(datos.precio)} · etiqueta en camino</span>`;
+      return avisarEtiqueta(datos.nombre, datos.stock);
+    }
+    if (datos?.estado_analisis === 'error') {
+      li.classList.add('fallo');
+      li.innerHTML = `<span>Aparte, sin precio exacto: ${escapar(datos.nombre || registro.upc || 'pieza sin código')}. Ponle precio en el admin.</span><span class="cant">×${datos.stock}</span>`;
+      return;
+    }
+    if (datos?.estado_analisis === 'descartado') return;
+    if (intentos < ANALISIS_INTENTOS) setTimeout(revisar, BUSQUEDA_CADA_MS);
+  };
+  setTimeout(revisar, BUSQUEDA_CADA_MS);
+}
+
+function elegirPiezaFoto() {
+  if (piezaParaFoto || piezaParaManual) return false;
+  piezaParaFoto = actual || desconocido;
+  return !!piezaParaFoto;
+}
+for (const boton of document.querySelectorAll('.otra-foto')) boton.addEventListener('click', () => {
+  // La cámara apagada no bloquea las otras opciones de captura (#411).
+  if (!camara) return mensaje('La cámara está apagada. Toca «Prender cámara» o usa «Subir foto».');
+  if (!elegirPiezaFoto()) return;
+  fila = fila.then(async () => {
+    try { await conservarFoto(await aJpeg($('video'), $('video').videoWidth, $('video').videoHeight)); }
+    catch (error) { mensaje(error.message); piezaParaFoto = null; }
+  });
+});
+for (const boton of document.querySelectorAll('.subir-foto')) boton.addEventListener('click', () => {
+  if (elegirPiezaFoto()) $('archivo-foto').click();
+});
+$('archivo-foto').addEventListener('cancel', () => { piezaParaFoto = null; });
+$('archivo-foto').addEventListener('change', () => {
+  const archivo = $('archivo-foto').files[0];
+  fila = fila.then(async () => {
+    try { if (archivo) await conservarFoto(await reducirArchivo(archivo)); }
+    catch (error) { mensaje(error.message || 'No se pudo leer la foto.'); }
+    finally { piezaParaFoto = null; $('archivo-foto').value = ''; }
+  });
+});
+
+async function reintentarFotos() {
+  for (const registro of await pendientes()) if (registro.desde_escaner) await enviarFoto(registro);
+}
+addEventListener('online', () => { fila = fila.then(reintentarFotos); });
+
+/* ---------- nombre y precio a mano, sin foto (#399) ---------- */
+$('sin-foto').addEventListener('click', () => {
+  if (!desconocido || piezaParaFoto || piezaParaManual) return;
+  piezaParaManual = desconocido;
+  $('manual-codigo').textContent = piezaParaManual.leido ? `Código ${piezaParaManual.leido}` : 'Sin código';
+  $('manual-nombre').value = '';
+  $('manual-categoria').value = 'otros';
+  $('manual-estado').value = piezaParaManual.estado;
+  $('manual-tipo-precio').value = 'precio_lista';
+  $('manual-precio').value = '';
+  $('manual-cantidad').value = piezaParaManual.stock;
+  pintar();
+  $('manual-nombre').focus();
+});
+$('manual-cancelar').addEventListener('click', () => {
+  if ($('manual-guardar').disabled) return;
+  piezaParaManual = null;
+  pintar();
+  $('sin-foto').focus();
+});
+$('manual').addEventListener('submit', (e) => {
+  e.preventDefault();
+  if (!piezaParaManual || $('manual-guardar').disabled) return;
+  const pieza = piezaParaManual;
+  const grado = $('manual-estado').value;
+  const cuerpo = { id: pieza.id, upc: pieza.leido, nombre: $('manual-nombre').value,
+    categoria: $('manual-categoria').value, estado_fisico: grado, stock: Number($('manual-cantidad').value),
+    [$('manual-tipo-precio').value]: Math.round(Number($('manual-precio').value) * 100) };
+  $('manual-guardar').disabled = true;
+  fila = fila.then(async () => {
+    try {
+      const r = await fetch('/api/borradores/upc/manual', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(cuerpo) });
+      const guardada = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(guardada.error ?? `Error ${r.status}`);
+      piezas += guardada.stock - (pieza.buscada ? pieza.stock : 0);
+      pieza.li?.remove();
+      desconocido = null;
+      piezaParaManual = null;
+      anotarGuardada(guardada, grado, true);
+      if(guardada.existente)mensaje(`Ya existía · +${guardada.sumadas}${guardada.codigo?` a ${guardada.codigo}`:''}`);else avisarEtiqueta(guardada.nombre, guardada.stock);
+    } catch (error) { mensaje(error.message || 'No se guardó. Reintenta con conexión.'); avisar('no'); }
+    finally { $('manual-guardar').disabled = false; pintar(); }
+  });
+});
+/* ---------- cantidades, estado y guardar ---------- */
+
+function contador(entrada, obtener) {
+  const caja = entrada.closest('.contador');
+  const fijar = (n) => {
+    const pieza = obtener();
+    if (!pieza) return;
+    pieza.stock = Math.max(0, Math.min(999, Math.round(n) || 0));
+    // En 0 la pieza se cancela: fue un escaneo equivocado.
+    if (pieza.stock === 0) {
+      if (pieza === actual) { actual = null; } else desconocido = null;
+    }
+    pintar();
+  };
+  caja.addEventListener('click', (e) => {
+    const paso = Number(e.target.dataset?.paso);
+    if (paso) fijar((obtener()?.stock ?? 0) + paso);
+  });
+  entrada.addEventListener('change', () => fijar(Number(entrada.value)));
+  entrada.addEventListener('keydown', (e) => { if (e.key === 'Enter') entrada.blur(); });
+}
+contador($('cantidad'), () => actual);
+contador($('cantidad-foto'), () => desconocido);
+
+$('estado').addEventListener('click', () => {
+  if (piezaParaManual) return;
+  estado = siguienteEstado(estado);
+  $('estado').textContent = nombreEstado(estado);
+  $('estado').setAttribute('aria-pressed', String(estado !== 'nuevo'));
+  if (actual) actual.estado = estado;
+  if (desconocido) desconocido.estado = estado;
+  pintar();
+});
+
+$('guardar').addEventListener('click', () => {
+  if (piezaParaManual) $('manual').requestSubmit(); else fila = fila.then(cerrarActual);
+});
+// Sin código del fabricante: foto o nombre y precio a mano (#379, #399).
+$('sin-codigo').addEventListener('click', () => {
+  fila = fila.then(async () => {
+    if (piezaParaFoto || piezaParaManual) return;
+    await cerrarActual();
+    desconocido = { id: crypto.randomUUID(), upc: SIN_CODIGO, leido: SIN_CODIGO, stock: 1, estado, sinCodigo: true };
+    pintar();
+  });
+});
+
+/* ---------- entradas: lector Bluetooth/USB, teclado y camara ---------- */
+
+escucharLector(({ codigo }) => { if (!piezaParaManual) recibir(codigo); });
+
+$('abrir-teclado').addEventListener('click', () => {
+  $('teclado').hidden = !$('teclado').hidden;
+  if (!$('teclado').hidden) $('codigo').focus();
+});
+$('codigo').addEventListener('keydown', (e) => {
+  if (e.key !== 'Enter') return;
+  recibir($('codigo').value);
+  $('codigo').value = '';
+});
+
+// Camara: BarcodeDetector viene en Chrome de Android. En Windows no existe:
+// ahi va el lector y la camara no se prende.
+// ponytail: sin UPC-E (el corto de 8 digitos); agregar su expansion si aparece en piezas reales.
+let abriendoCamara = false;
+let lecturaCamara = null;
+
+// Liberar los tracks apaga también la luz; ocultar el visor no basta (#411).
+function apagarCamara() {
+  camara = false;
+  clearTimeout(lecturaCamara);
+  $('video').srcObject?.getTracks().forEach((track) => track.stop());
+  $('video').srcObject = null;
+  $('visor').hidden = true;
+  pintar();
+}
+
+async function encenderCamara() {
+  if (camara || abriendoCamara) return;
+  if (!('BarcodeDetector' in window)) return mensaje('Aquí no se puede abrir la cámara. Usa el lector o Subir foto.');
+  abriendoCamara = true;
+  $('alternar-camara').disabled = true;
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: { ideal: 'environment' }, width: { ideal: 1920 } }, audio: false,
+    });
+    $('video').srcObject = stream;
+    $('visor').hidden = false;
+    await $('video').play();
+    const detector = new BarcodeDetector({ formats: ['upc_a', 'ean_13', 'ean_8'] });
+    camara = true;
+    const vistos = new Map();   // codigo -> ultima vez que estuvo en la vista
+    const leer = async () => {
+      // Una detección pendiente no debe sobrevivir a apagar/prender (#411).
+      if (!camara || $('video').srcObject !== stream) return;
+      const codigos = await detector.detect($('video')).catch(() => []);
+      if (!camara || $('video').srcObject !== stream) return;
+      const ahora = Date.now();
+      for (const { rawValue } of codigos) {
+        if (ahora - (vistos.get(rawValue) ?? 0) > FUERA_DE_VISTA_MS) recibir(rawValue);
+        vistos.set(rawValue, ahora);
+      }
+      lecturaCamara = setTimeout(leer, 120);
+    };
+    leer();
+  } catch {
+    apagarCamara();
+    mensaje('No se pudo abrir la cámara: revisa el permiso del navegador. El lector sigue funcionando.');
+  } finally {
+    abriendoCamara = false;
+    $('alternar-camara').disabled = false;
+    pintar();
+  }
+}
+
+const PREFERENCIA_CAMARA = 'escanear-camara'; // Preferencia local, sin afectar al lector (#411).
+$('alternar-camara').addEventListener('click', async () => {
+  if (abriendoCamara) return;
+  if (camara) apagarCamara(); else await encenderCamara();
+  try { localStorage.setItem(PREFERENCIA_CAMARA, String(camara)); } catch { /* almacenamiento no disponible */ }
+});
+
+// Un toque para empezar: el navegador solo deja sonar y abrir la camara despues de uno.
+$('empezar').addEventListener('click', () => {
+  $('inicio').hidden = true;
+  try { audio ??= new AudioContext(); } catch { /* sin audio */ }
+  let prender = true;
+  try { prender = localStorage.getItem(PREFERENCIA_CAMARA) !== 'false'; } catch { /* almacenamiento no disponible */ }
+  if (prender) encenderCamara();
+});
+pintar();
+fila = fila.then(reintentarFotos).catch(() => mensaje('No se pudo abrir la cola de fotos de este teléfono.'));
+</script>
+</body>
+</html>

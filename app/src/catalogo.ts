@@ -74,11 +74,11 @@ async function destacados(env: Env, url: URL): Promise<Response> {
 /** Staff (Issue #220): en existencia pero no presentable, con el motivo. Mismo universo que PUBLICABLE, sin el filtro de foto. */
 export async function revisionCatalogo(env: Env): Promise<Response> {
   const filas = await env.DB.prepare(`select p.id, p.codigo, p.nombre, p.marca, p.categoria, p.estado_fisico, p.estado_analisis,
-      p.precio_lista, p.precio, p.stock, p.destino, p.semana_ingreso, p.creado_en,
+      p.precio_lista, p.precio, p.stock, p.destino, p.semana_ingreso, p.creado_en, p.foto_key, p.propietario, p.upc,
       (p.foto_key = '') as sin_foto, (p.precio <= 0) as sin_precio, (trim(p.nombre) = '') as sin_nombre, ${NOMBRE_INTERNO} as nombre_interno
     from productos p
     where p.destino = 'etiqueta' and p.sin_inventario = 0 and p.estado_analisis = 'listo' and p.stock > 0
-      and p.estado_fisico <> 'danado' and p.codigo like 'ED-%'
+      and p.estado_fisico = 'nuevo' and p.codigo like 'ED-%'
       and (p.precio <= 0 or p.foto_key = '' or trim(p.nombre) = '' or ${NOMBRE_INTERNO})
     order by p.creado_en desc, p.codigo`).all<Record<string, any>>();
   const piezas = filas.results.map(({ sin_foto, sin_precio, sin_nombre, nombre_interno, ...p }) => ({
@@ -122,7 +122,9 @@ async function listar(env: Env, url: URL): Promise<Response> {
   const cursor = despues === null ? null : CURSOR.exec(despues);
   if (despues !== null && !cursor) return json({ error: 'Cursor no válido.' }, 400);
 
-  const filtro = `${VENDIBLE}${categoria === null ? '' : ' and p.categoria = ?'}${q ? ` and ${CAMPO_BUSQUEDA} like ? escape '\\'` : ''}`;
+  // Issue #526: ?recorte=1 = solo piezas con recorte listo y revisado (la misma condicion que arma la URL `recorte`).
+  const conRecorte = url.searchParams.get('recorte') === '1' ? ` and p.recorte_estado = 'listo' and p.recorte_revision = 'ok'` : '';
+  const filtro = `${VENDIBLE}${conRecorte}${categoria === null ? '' : ' and p.categoria = ?'}${q ? ` and ${CAMPO_BUSQUEDA} like ? escape '\\'` : ''}`;
   const args: unknown[] = [...(categoria === null ? [] : [categoria]), ...(q ? [`%${normalizarBusqueda(q)}%`] : [])];
   const desde = cursor ? ' and (p.creado_en < ? or (p.creado_en = ? and p.codigo > ?))' : '';
   const [filas, cuenta] = await Promise.all([

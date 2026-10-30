@@ -1,0 +1,524 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Manual de marca — El Dolarón</title>
+<meta name="description" content="Logo y sus versiones, color, tipografía, voz, datos oficiales y aplicaciones de El Dolarón.">
+<style>
+/* Fuentes del sitio por ruta relativa; si no cargan, entran las del sistema. */
+@font-face { font-family: "Anton"; src: url("../site/public/assets/fonts/anton-400.woff2") format("woff2"); font-display: swap; }
+@font-face { font-family: "Rye"; src: url("../site/public/assets/fonts/rye-400.woff2") format("woff2"); font-display: swap; }
+@font-face { font-family: "Fraunces"; src: url("../site/public/assets/fonts/fraunces-normal.woff2") format("woff2"); font-weight: 100 900; font-display: swap; }
+@font-face { font-family: "Fraunces"; src: url("../site/public/assets/fonts/fraunces-italic.woff2") format("woff2"); font-weight: 100 900; font-style: italic; font-display: swap; }
+@font-face { font-family: "Archivo"; src: url("../site/public/assets/fonts/archivo-variable.woff2") format("woff2"); font-weight: 100 900; font-display: swap; }
+
+:root {
+  --navy: #16366B;
+  --red: #D72B32;
+  --red-text: #B3141B;
+  --yellow: #FFD447;
+  --white: #FFFFFF;
+  --mist: #F2F5FA;
+  --display: "Fraunces", Georgia, serif;
+  --body: "Archivo", "Segoe UI", system-ui, sans-serif;
+  --price: "Anton", Impact, "Arial Narrow", sans-serif;
+  --shadow: 4px 4px 0 var(--navy);
+}
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+body { margin: 0; background: var(--white); color: var(--navy); font: 17px/1.6 var(--body); overflow-wrap: break-word; }
+img { max-width: 100%; height: auto; display: block; }
+a { color: var(--navy); text-underline-offset: 3px; }
+a:focus-visible { outline: 3px solid var(--red); outline-offset: 2px; }
+.wrap { max-width: 1100px; margin: 0 auto; padding: 0 16px; }
+
+h1, h2, h3 { font-family: var(--display); font-variation-settings: "SOFT" 100, "WONK" 1; line-height: 1.05; margin: 0; letter-spacing: -.02em; }
+h1 { font-weight: 900; font-size: clamp(38px, 9vw, 72px); }
+h2 { font-weight: 900; font-size: clamp(30px, 6.5vw, 48px); margin-bottom: 8px; }
+h3 { font-weight: 800; font-size: 22px; margin: 22px 0 8px; letter-spacing: -.01em; }
+p { margin: 8px 0 14px; }
+code { background: var(--mist); border: 1px solid #D5DDEB; padding: 1px 5px; font-size: .88em; overflow-wrap: anywhere; }
+.muted { color: #3D5382; font-size: 15px; }
+
+.top { background: var(--navy); color: var(--white); border-bottom: 7px solid var(--red); }
+.top .wrap { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 6px 20px; padding-top: 14px; padding-bottom: 14px; font-weight: 700; }
+.top span { color: var(--yellow); }
+
+.hero { padding: 32px 0 24px; }
+.hero img { width: min(100%, 520px); }
+.hero h1 { margin: 20px 0 10px; }
+.hero .lede { font-size: 20px; max-width: 46ch; }
+.chips { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+.chip { border: 2px solid var(--navy); background: var(--yellow); padding: 3px 12px; font-weight: 800; font-size: 14px; }
+
+nav.index { background: var(--mist); border-block: 2px solid var(--navy); }
+nav.index ol { list-style: none; margin: 0; padding: 12px 0; display: flex; flex-wrap: wrap; gap: 8px; counter-reset: n; }
+nav.index a { display: block; padding: 6px 12px; border: 2px solid var(--navy); background: var(--white); text-decoration: none; font-weight: 700; font-size: 15px; box-shadow: 3px 3px 0 var(--navy); }
+nav.index a:hover { background: var(--yellow); }
+
+section.sec { padding: 40px 0 8px; scroll-margin-top: 8px; }
+.num { display: inline-block; background: var(--red); color: var(--white); font-family: var(--price); font-size: 20px; padding: 2px 12px; margin-bottom: 10px; letter-spacing: .04em; }
+.lead { font-size: 18px; max-width: 60ch; }
+
+.card { border: 2px solid var(--navy); box-shadow: var(--shadow); background: var(--white); padding: 16px; }
+.cards { display: grid; gap: 22px; grid-template-columns: 1fr; margin: 18px 0; }
+.card h3 { margin-top: 0; font-size: 19px; }
+.card p { font-size: 15.5px; margin: 6px 0; }
+.stage { display: flex; align-items: center; justify-content: center; padding: 18px; min-height: 150px; border: 2px solid var(--navy); margin-bottom: 12px; }
+.stage img { max-height: 120px; width: auto; max-width: 100%; }
+.on-white { background: var(--white); } .on-navy { background: var(--navy); } .on-mist { background: var(--mist); } .on-yellow { background: var(--yellow); }
+.meta { font-size: 13.5px; color: #3D5382; }
+.tag-ok { display: inline-block; background: #E4F3E8; border: 1.5px solid #1B7F3B; color: #0E5A26; font-weight: 700; font-size: 13px; padding: 0 8px; }
+.tag-no { display: inline-block; background: #FBE5E6; border: 1.5px solid var(--red-text); color: var(--red-text); font-weight: 700; font-size: 13px; padding: 0 8px; }
+
+.note { border: 2px solid var(--navy); border-left: 10px solid var(--yellow); background: var(--mist); padding: 12px 16px; margin: 18px 0; }
+.note.red { border-left-color: var(--red); }
+.note p:first-child { margin-top: 0; } .note p:last-child { margin-bottom: 0; }
+
+/* Tablas: en celular cada fila se vuelve una tarjeta */
+table { border-collapse: collapse; width: 100%; font-size: 15.5px; }
+thead { display: none; }
+tr { display: block; border: 2px solid var(--navy); box-shadow: 3px 3px 0 var(--navy); background: var(--white); margin: 0 0 14px; }
+td, th[scope=row] { display: block; padding: 6px 12px; text-align: left; }
+td + td, th[scope=row] + td { border-top: 1px dashed #B5C2DA; }
+td::before, th[scope=row]::before { content: attr(data-l); display: block; font-size: 12px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; color: #3D5382; }
+th[scope=row] { background: var(--mist); font-weight: 800; }
+@media (min-width: 760px) {
+  thead { display: table-header-group; }
+  th { background: var(--navy); color: var(--white); text-align: left; padding: 8px 12px; font-size: 14px; }
+  table { border: 2px solid var(--navy); }
+  tr { display: table-row; border: 0; box-shadow: none; margin: 0; }
+  td, th[scope=row] { display: table-cell; padding: 8px 12px; border-bottom: 1px solid #C9D3E6; vertical-align: top; }
+  td + td, th[scope=row] + td { border-top: 0; }
+  td::before, th[scope=row]::before { display: none; }
+  th[scope=row] { background: var(--mist); color: var(--navy); font-size: 15.5px; }
+  .cards.c2 { grid-template-columns: repeat(2, 1fr); }
+  .cards.c3 { grid-template-columns: repeat(3, 1fr); }
+}
+.cards.c4 { grid-template-columns: repeat(2, 1fr); gap: 12px; }
+.cards.c4 .card { padding: 8px; box-shadow: 3px 3px 0 var(--navy); }
+.cards.c4 .card p { font-size: 13.5px; line-height: 1.4; }
+@media (min-width: 1000px) { .cards.c4 { grid-template-columns: repeat(4, 1fr); gap: 22px; } .cards.c4 .card { padding: 12px; box-shadow: var(--shadow); } .cards.c4 .card p { font-size: 15px; } }
+
+/* Zona de protección: 1/4 de la altura del logo (altura = 26.1 % del ancho) */
+.zona { max-width: 560px; margin: 16px 0; background: var(--mist); border: 2px dashed var(--red); padding: 5.78%; position: relative; }
+.zona img { width: 100%; background: transparent; }
+.zona span { position: absolute; font-size: 12px; font-weight: 800; color: var(--red-text); background: var(--white); padding: 0 4px; }
+.zona .a { top: 2px; left: 6px; } .zona .b { bottom: 2px; right: 6px; }
+
+.swatches { display: grid; gap: 16px; grid-template-columns: repeat(2, 1fr); margin: 18px 0; }
+@media (min-width: 760px) { .swatches { grid-template-columns: repeat(3, 1fr); } }
+.sw { border: 2px solid var(--navy); box-shadow: var(--shadow); background: var(--white); }
+.sw .c { height: 84px; border-bottom: 2px solid var(--navy); }
+.sw div:last-child { padding: 8px 12px 10px; font-size: 14.5px; line-height: 1.45; }
+.sw b { font-size: 16px; }
+.sw code { white-space: nowrap; word-break: normal; }
+
+.type { display: grid; gap: 18px; grid-template-columns: 1fr; }
+.type .card .specimen { margin: 4px 0 8px; line-height: 1.05; }
+@media (min-width: 760px) { .type { grid-template-columns: repeat(2, 1fr); } }
+
+.pair { display: grid; gap: 18px; grid-template-columns: 1fr; margin: 14px 0; }
+@media (min-width: 760px) { .pair { grid-template-columns: 1fr 1fr; } }
+ul.tight { margin: 6px 0 14px; padding-left: 22px; } ul.tight li { margin: 4px 0; }
+.say { display: grid; gap: 10px; }
+
+.apps { align-items: start; display: grid; gap: 20px; grid-template-columns: repeat(2, 1fr); margin: 18px 0; }
+@media (min-width: 760px) { .apps { grid-template-columns: repeat(4, 1fr); } }
+.app { border: 2px solid var(--navy); box-shadow: var(--shadow); background: var(--white); }
+.app img { width: 100%; border-bottom: 2px solid var(--navy); background: var(--mist); }
+.app p { padding: 6px 10px 8px; margin: 0; font-size: 13.5px; line-height: 1.4; }
+.app.wide { grid-column: span 2; }
+@media (min-width: 760px) { .app.wide { grid-column: span 4; } }
+
+/* Maqueta de la tarjeta WhatsApp /vender */
+.vender { width: 100%; max-width: 270px; aspect-ratio: 1080 / 1350; border: 2px solid var(--navy); box-shadow: var(--shadow); background: var(--white); position: relative; overflow: hidden; display: flex; flex-direction: column; }
+.vender .foto { flex: 1 1 74%; display: flex; align-items: center; justify-content: center; background: repeating-linear-gradient(45deg, #E9EEF6 0 10px, #F4F7FB 10px 20px); font-size: 13px; color: #3D5382; font-weight: 700; text-align: center; padding: 8px; }
+.vender .franja { flex: 0 0 26%; background: var(--navy); color: var(--white); padding: 6% 8%; display: flex; flex-direction: column; justify-content: space-between; }
+.vender .precio { font-family: var(--price); color: var(--yellow); font-size: 30px; line-height: 1; letter-spacing: .02em; }
+.vender .franja img { width: 62%; align-self: flex-end; }
+.vender .franja small { font-size: 11px; opacity: .92; }
+
+footer.fin { margin-top: 48px; background: var(--navy); color: var(--white); border-top: 7px solid var(--red); }
+footer.fin .wrap { padding-top: 20px; padding-bottom: 28px; font-size: 14.5px; }
+footer.fin a { color: var(--yellow); }
+
+@media print {
+  @page { margin: 14mm; }
+  html { scroll-behavior: auto; }
+  body { font-size: 11.5pt; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  nav.index { display: none; }
+  section.sec { padding-top: 20px; break-before: auto; }
+  .card, .sw, .app, tr, .note, figure { break-inside: avoid; }
+  h2, h3 { break-after: avoid; }
+  .card, .sw, .app, nav.index a, tr { box-shadow: none; }
+  a { text-decoration: none; }
+  a[href^="http"]::after { content: " (" attr(href) ")"; font-size: 9pt; }
+  .stage { min-height: 0; }
+  .cards.c2, .cards.c3, .cards.c4 { grid-template-columns: repeat(2, 1fr); }
+  .apps { grid-template-columns: repeat(4, 1fr); }
+  .swatches { grid-template-columns: repeat(3, 1fr); }
+  table { font-size: 10pt; }
+  thead { display: table-header-group; }
+  tr { display: table-row; border: 0; }
+  td, th[scope=row] { display: table-cell; }
+  td::before, th[scope=row]::before { display: none; }
+}
+</style>
+</head>
+<body>
+
+<div class="top"><div class="wrap"><strong>EL DOLARÓN · Manual de marca</strong><span>Revisión 1 · 22/10/2026 · Issue #433</span></div></div>
+
+<header class="hero"><div class="wrap">
+  <img src="../01-Logos/el-dolaron-logo.png" alt="Logo de El Dolarón: «EL» en etiqueta amarilla y «Dolarón» en azul con subrayado y destellos rojos" width="2056" height="537">
+  <h1>Cómo se ve y cómo habla El Dolarón</h1>
+  <p class="lede">Una página para elegir el logo correcto, usar los colores y escribir como la tienda. Está pensada para abrirse en el celular o imprimirse.</p>
+  <div class="chips"><span class="chip">Mercancía y ropa americana</span><span class="chip">Soledad de Graciano Sánchez, S.L.P.</span></div>
+</div></header>
+
+<nav class="index" aria-label="Índice"><div class="wrap"><ol>
+  <li><a href="#esencia">1 Esencia</a></li>
+  <li><a href="#logo">2 Logo</a></li>
+  <li><a href="#color">3 Color</a></li>
+  <li><a href="#tipografia">4 Tipografía</a></li>
+  <li><a href="#voz">5 Voz y tono</a></li>
+  <li><a href="#datos">6 Datos oficiales</a></li>
+  <li><a href="#aplicaciones">7 Aplicaciones</a></li>
+</ol></div></nav>
+
+<main class="wrap">
+
+<!-- 1 ESENCIA -->
+<section class="sec" id="esencia">
+  <span class="num">01</span>
+  <h2>Esencia</h2>
+  <p class="lead"><strong>El Dolarón</strong> es una tienda de barrio en el centro de Soledad de Graciano Sánchez, S.L.P. Vende ropa y mercancía que llega de Estados Unidos, pieza por pieza, a precio de saldo: lo que ves es lo que hay.</p>
+  <div class="cards c2">
+    <div class="card">
+      <h3>Descriptor oficial</h3>
+      <p style="font-size:22px;font-weight:800;margin:4px 0 8px">Mercancía y ropa americana</p>
+      <p>Se escribe siempre en ese orden. Reemplaza a «Ropa americana y mercancía general» y a las demás versiones que circulan.</p>
+    </div>
+    <div class="card">
+      <h3>Lema</h3>
+      <p style="font-size:22px;font-weight:800;margin:4px 0 8px">Calidad americana, precio mexicano.</p>
+      <p>Aprobado por Isaac el 22/10/2026. Va debajo del logo o al cierre de una pieza, nunca en lugar del nombre. «Marcas americanas, a precio de saldo» queda solo como titular actual del sitio.</p>
+    </div>
+  </div>
+  <div class="note">
+    <p><strong>Tono en una línea:</strong> cercana, directa y sin ruido; orgullosa de lo americano sin presumir. Se tutea siempre al cliente. Detalle en la <a href="#voz">sección 5</a>.</p>
+  </div>
+</section>
+
+<!-- 2 LOGO -->
+<section class="sec" id="logo">
+  <span class="num">02</span>
+  <h2>Logo</h2>
+  <p class="lead">El logo oficial es el de «EL» en etiqueta amarilla con «Dolarón» en azul (vigente desde el 7/10/2026). Hay tres versiones a color y siete de una tinta.</p>
+
+  <h3>El original no se redibuja</h3>
+  <p>Los tres logos a color son imágenes PNG transparentes y son la única fuente. No hay un archivo vectorial del autor en el repositorio. Por eso:</p>
+  <ul class="tight">
+    <li>Las versiones de una tinta se <strong>derivan de los píxeles del original</strong>, con la misma forma y proporción. No son un calco ni una versión redibujada.</li>
+    <li>Nadie rehace las letras, la etiqueta o el subrayado a mano ni con otra tipografía.</li>
+    <li>Si una imprenta pide vectores, se calca desde el PNG y se compara contra el original antes de aceptarlo. Ampliar el PNG no agrega detalle: el horizontal mide 2056 px, unos 174 mm a 300 ppp.</li>
+  </ul>
+
+  <h3>Versiones a color (originales)</h3>
+  <div class="cards c3">
+    <div class="card">
+      <div class="stage on-white"><img src="../01-Logos/el-dolaron-logo.png" alt="Logo horizontal a color" width="2056" height="537"></div>
+      <h3>Horizontal</h3>
+      <p>Uso principal sobre fondo claro: sitio, posts, historias, portada.</p>
+      <p class="meta"><a href="../01-Logos/el-dolaron-logo.png">01-Logos/el-dolaron-logo.png</a> · 2056×537</p>
+    </div>
+    <div class="card">
+      <div class="stage on-white"><img src="../01-Logos/el-dolaron-logo-vertical.png" alt="Logo vertical a color" width="1711" height="996"></div>
+      <h3>Vertical</h3>
+      <p>Avatares y formatos cuadrados. No se arma recomponiendo el horizontal.</p>
+      <p class="meta"><a href="../01-Logos/el-dolaron-logo-vertical.png">01-Logos/el-dolaron-logo-vertical.png</a> · 1711×996</p>
+    </div>
+    <div class="card">
+      <div class="stage on-white"><img src="../01-Logos/el-dolaron-icono-el.png" alt="Ícono EL a color" width="414" height="396"></div>
+      <h3>Ícono «EL»</h3>
+      <p>Solo para tamaños muy pequeños: favicon e ícono de iPhone. No reemplaza al nombre en piezas de venta.</p>
+      <p class="meta"><a href="../01-Logos/el-dolaron-icono-el.png">01-Logos/el-dolaron-icono-el.png</a> · 414×396</p>
+    </div>
+  </div>
+  <p>Los originales traen un contorno blanco propio, por eso también se ven bien sobre azul, como una calcomanía. Ya no existen el logo con el símbolo D y franjas ni la insignia circular: están retirados.</p>
+
+  <h3>Versiones de una tinta</h3>
+  <p>Las letras «EL» son un <strong>hueco</strong>: dejan ver el fondo. El contorno blanco y el exterior también son transparentes. Sobre fondo oscuro la tinta es blanca; sobre claro, negra o azul.</p>
+  <div class="cards c3">
+    <div class="card">
+      <div class="stage on-white"><img src="../01-Logos/el-dolaron-logo-horizontal-negro.png" alt="Logo horizontal negro" width="2056" height="537"></div>
+      <h3>Horizontal negro</h3>
+      <p>Sobre claro, una tinta: sello, fotocopia, uniforme.</p>
+      <p class="meta"><a href="../01-Logos/el-dolaron-logo-horizontal-negro.png" download>el-dolaron-logo-horizontal-negro.png</a> · 2056×537</p>
+    </div>
+    <div class="card">
+      <div class="stage on-navy"><img src="../01-Logos/el-dolaron-logo-horizontal-blanco.png" alt="Logo horizontal blanco sobre azul" width="2056" height="537"></div>
+      <h3>Horizontal blanco</h3>
+      <p>Una tinta blanca: serigrafía o grabado sobre fondo oscuro, foto oscura o negro. Sobre el azul de la marca se prefiere el original a color.</p>
+      <p class="meta"><a href="../01-Logos/el-dolaron-logo-horizontal-blanco.png" download>el-dolaron-logo-horizontal-blanco.png</a> · 2056×537</p>
+    </div>
+    <div class="card">
+      <div class="stage on-white"><img src="../01-Logos/el-dolaron-logo-horizontal-azul.png" alt="Logo horizontal azul" width="2056" height="537"></div>
+      <h3>Horizontal azul</h3>
+      <p>Azul #16366B sobre claro: serigrafía o sello de una sola tinta azul.</p>
+      <p class="meta"><a href="../01-Logos/el-dolaron-logo-horizontal-azul.png" download>el-dolaron-logo-horizontal-azul.png</a> · 2056×537</p>
+    </div>
+    <div class="card">
+      <div class="stage on-white"><img src="../01-Logos/el-dolaron-logo-vertical-negro.png" alt="Logo vertical negro" width="1711" height="996"></div>
+      <h3>Vertical negro</h3>
+      <p>Formatos cuadrados o altos sobre claro, una tinta.</p>
+      <p class="meta"><a href="../01-Logos/el-dolaron-logo-vertical-negro.png" download>el-dolaron-logo-vertical-negro.png</a> · 1711×996</p>
+    </div>
+    <div class="card">
+      <div class="stage on-navy"><img src="../01-Logos/el-dolaron-logo-vertical-blanco.png" alt="Logo vertical blanco sobre azul" width="1711" height="996"></div>
+      <h3>Vertical blanco</h3>
+      <p>Formatos cuadrados o altos sobre azul, negro u oscuro.</p>
+      <p class="meta"><a href="../01-Logos/el-dolaron-logo-vertical-blanco.png" download>el-dolaron-logo-vertical-blanco.png</a> · 1711×996</p>
+    </div>
+    <div class="card">
+      <div class="stage on-white" style="gap:16px"><img src="../01-Logos/el-dolaron-icono-el-negro.png" alt="Ícono EL negro" width="414" height="396" style="max-height:100px"><span class="on-navy" style="display:inline-flex;padding:10px;border:2px solid var(--navy)"><img src="../01-Logos/el-dolaron-icono-el-blanco.png" alt="Ícono EL blanco sobre azul" width="414" height="396" style="max-height:80px"></span></div>
+      <h3>Ícono «EL» negro y blanco</h3>
+      <p>Tamaños muy pequeños en una tinta, sobre claro (negro) u oscuro (blanco).</p>
+      <p class="meta"><a href="../01-Logos/el-dolaron-icono-el-negro.png" download>…-icono-el-negro.png</a> · <a href="../01-Logos/el-dolaron-icono-el-blanco.png" download>…-icono-el-blanco.png</a> · 414×396</p>
+    </div>
+  </div>
+
+  <h3>Cada versión sobre cada fondo</h3>
+  <p>Verde: la tinta tiene al menos 4.5:1 de contraste con el fondo. Rojo: no usar esa combinación. Las «fotos» de la lámina son simuladas; con una foto real hay que revisar el contraste en la zona donde cae el logo.</p>
+  <figure style="margin:0;overflow-x:auto;border:2px solid var(--navy)" tabindex="0" aria-label="Lámina; se desliza de lado en pantallas chicas"><img src="../docs/marca/laminas/variantes-sobre-fondos.jpg" alt="Lámina que compara las siete versiones de una tinta sobre fondo claro, azul, negro y dos fotos" width="2000" height="1330" loading="lazy" style="min-width:860px"></figure>
+  <p class="muted">En pantallas chicas, desliza la lámina hacia los lados.</p>
+
+  <h3>Cuándo usar cada archivo</h3>
+  <table>
+    <thead><tr><th>Situación</th><th>Archivo</th><th>Nota</th></tr></thead>
+    <tbody>
+      <tr><th scope="row" data-l="Situación">Sitio web</th><td data-l="Archivo"><code>el-dolaron-logo.png</code> (a color)</td><td data-l="Nota">El sitio usa copias reducidas en <code>site/public/assets/</code>.</td></tr>
+      <tr><th scope="row" data-l="Situación">Redes: perfil</th><td data-l="Archivo"><code>el-dolaron-logo-vertical.png</code> en <code>02-Perfiles-y-portadas/</code></td><td data-l="Nota">Se recorta en círculo: centrar.</td></tr>
+      <tr><th scope="row" data-l="Situación">Redes: posts e historias</th><td data-l="Archivo">Horizontal a color, sobre fondo claro</td><td data-l="Nota">Ya viene dentro de las plantillas del kit.</td></tr>
+      <tr><th scope="row" data-l="Situación">Sobre una foto</th><td data-l="Archivo">Horizontal <strong>blanco</strong> (foto oscura) o <strong>negro</strong> (foto clara)</td><td data-l="Nota">En una zona tranquila y con contraste. No en fotos de producto de Mercado Libre: la plataforma pide fotos sin logos ni textos.</td></tr>
+      <tr><th scope="row" data-l="Situación">Fondo azul #16366B</th><td data-l="Archivo">Original <strong>a color</strong> (horizontal o vertical)</td><td data-l="Nota">Decisión de Isaac (22/10/2026): su contorno blanco lo separa del azul y conserva el amarillo y el rojo, que es lo que se reconoce. Sin cuadro blanco detrás. El blanco queda para cuando solo hay una tinta.</td></tr>
+      <tr><th scope="row" data-l="Situación">Tarjeta de WhatsApp (/vender)</th><td data-l="Archivo"><code>el-dolaron-logo.png</code> (a color)</td><td data-l="Nota">Directo sobre la franja azul, sin soporte blanco. Ver la maqueta en la <a href="#aplicaciones">sección 7</a>.</td></tr>
+      <tr><th scope="row" data-l="Situación">Ticket térmico (Epson TM-T20 II)</th><td data-l="Archivo">Ninguno: el nombre sale como texto, «EL DOLARON»</td><td data-l="Nota">Sin logo en imagen. Esta guía no autoriza reactivarlo (problema del Issue #97).</td></tr>
+      <tr><th scope="row" data-l="Situación">Etiqueta AE240, 203 dpi</th><td data-l="Archivo">Ninguno: nombre, precio y barras en texto</td><td data-l="Nota">En 25.4 mm de alto no cabe un logo junto al precio y el código.</td></tr>
+      <tr><th scope="row" data-l="Situación">Sello</th><td data-l="Archivo">Horizontal <strong>negro</strong> (o <strong>azul</strong> si la tinta es azul)</td><td data-l="Nota">El proveedor debe probar el tamaño; ver mínimos abajo.</td></tr>
+      <tr><th scope="row" data-l="Situación">Bolsa o serigrafía</th><td data-l="Archivo">Horizontal <strong>negro</strong>, <strong>blanco</strong> o <strong>azul</strong> (una tinta)</td><td data-l="Nota">Blanco sobre bolsa oscura; negro o azul sobre clara. Pedir prueba de color.</td></tr>
+      <tr><th scope="row" data-l="Situación">Uniforme</th><td data-l="Archivo">Horizontal blanco sobre prenda oscura; negro sobre clara. Ícono «EL» para el pecho</td><td data-l="Nota">Bordado fino: usar el ícono, que aguanta mejor.</td></tr>
+      <tr><th scope="row" data-l="Situación">Favicon e ícono de iPhone</th><td data-l="Archivo"><code>el-dolaron-icono-el.png</code> (a color)</td><td data-l="Nota">Ya existen en <code>site/public/assets/</code>. Negro y blanco quedan para pantallas o grabados de una tinta.</td></tr>
+    </tbody>
+  </table>
+
+  <h3>Zona de protección</h3>
+  <p>Deja libre alrededor del logo un margen de <strong>¼ de su altura total</strong>. Nada de texto, bordes u otros elementos dentro de ese margen. Los originales no la traen incorporada: se la das tú al colocarlo.</p>
+  <div class="zona"><span class="a">¼ de la altura</span><img src="../01-Logos/el-dolaron-logo.png" alt="Logo horizontal dentro de su zona de protección" width="2056" height="537"><span class="b">¼ de la altura</span></div>
+
+  <h3>Tamaños mínimos</h3>
+  <div class="note red"><p><strong>Provisionales.</strong> Salen de pruebas en pantalla y de simulaciones a 203 dpi; no se han probado en papel ni en el celular de un cliente. Antes de fijar un tamaño para imprenta, imprimir una muestra.</p></div>
+  <table>
+    <thead><tr><th>Medio</th><th>Mínimo</th><th>Por qué</th></tr></thead>
+    <tbody>
+      <tr><th scope="row" data-l="Medio">Pantalla: logo horizontal</th><td data-l="Mínimo">150 px de ancho (el sitio hoy baja hasta 124)</td><td data-l="Por qué">Más chico, el subrayado y el acento se pierden.</td></tr>
+      <tr><th scope="row" data-l="Medio">Pantalla: ícono «EL»</th><td data-l="Mínimo">24 px; probar 16 px antes de usarlo como favicon</td><td data-l="Por qué">Las letras necesitan margen de reproducción.</td></tr>
+      <tr><th scope="row" data-l="Medio">Impresión térmica, horizontal de una tinta</th><td data-l="Mínimo">320 puntos (≈40 mm) de ancho, con huecos de al menos 2 puntos</td><td data-l="Por qué">A 240 puntos el subrayado es muy fino y «EL» pierde margen. Un punto mide 0.125 mm.</td></tr>
+    </tbody>
+  </table>
+
+  <h3>Usos incorrectos</h3>
+  <p>Todos estos ejemplos están hechos a propósito para mostrar el error. No los copies.</p>
+  <div class="cards c4">
+    <figure class="card" style="margin:0"><img src="../docs/marca/laminas/incorrecto-1-estirar.png" alt="Logo estirado a lo alto" width="800" height="450" loading="lazy"><p><span class="tag-no">No</span> <strong>Estirar o aplastar.</strong> Mantén las proporciones.</p></figure>
+    <figure class="card" style="margin:0"><img src="../docs/marca/laminas/incorrecto-2-recolorear.png" alt="Logo con colores cambiados a mano" width="800" height="450" loading="lazy"><p><span class="tag-no">No</span> <strong>Recolorear a mano.</strong> Usa el original o las versiones de una tinta.</p></figure>
+    <figure class="card" style="margin:0"><img src="../docs/marca/laminas/incorrecto-3-sin-etiqueta.png" alt="Logo sin la etiqueta EL" width="800" height="450" loading="lazy"><p><span class="tag-no">No</span> <strong>Quitar la etiqueta «EL».</strong> El nombre es «El Dolarón», completo.</p></figure>
+    <figure class="card" style="margin:0"><img src="../docs/marca/laminas/incorrecto-4-sombras.png" alt="Logo con sombra y resplandor" width="800" height="450" loading="lazy"><p><span class="tag-no">No</span> <strong>Sombras, brillos ni efectos.</strong> El logo ya trae su contorno.</p></figure>
+    <figure class="card" style="margin:0"><img src="../docs/marca/laminas/incorrecto-5-sin-contraste.png" alt="Logo azul sobre azul, invisible, y logo blanco sobre amarillo, difícil de leer" width="800" height="450" loading="lazy"><p><span class="tag-no">No</span> <strong>Fondos sin contraste.</strong> Azul sobre azul no se ve; blanco sobre amarillo, tampoco.</p></figure>
+    <figure class="card" style="margin:0"><img src="../docs/marca/laminas/incorrecto-6-tipografia.png" alt="El nombre escrito con una tipografía común" width="800" height="450" loading="lazy"><p><span class="tag-no">No</span> <strong>Escribir el nombre con una fuente.</strong> El lettering del logo no es una tipografía.</p></figure>
+    <figure class="card" style="margin:0"><img src="../docs/marca/laminas/incorrecto-7-girar.png" alt="Logo girado" width="800" height="450" loading="lazy"><p><span class="tag-no">No</span> <strong>Girar o inclinar.</strong> Ya tiene su propia inclinación.</p></figure>
+    <figure class="card" style="margin:0"><img src="../docs/marca/laminas/incorrecto-8-logo-retirado.png" alt="Logo anterior con una D y franjas, tachado" width="800" height="450" loading="lazy"><p><span class="tag-no">No</span> <strong>Logo viejo de la «D».</strong> Está retirado, igual que la insignia circular.</p></figure>
+  </div>
+</section>
+
+<!-- 3 COLOR -->
+<section class="sec" id="color">
+  <span class="num">03</span>
+  <h2>Color</h2>
+  <p class="lead">Fondo blanco, azul como tinta y dos acentos: amarillo y rojo. Los valores son los de <a href="Paleta.json"><code>Paleta.json</code></a>, que es la fuente de la que se copian.</p>
+  <div class="swatches">
+    <div class="sw"><div class="c" style="background:#16366B"></div><div><b>Azul</b> <code>#16366B</code><br>RGB 22, 54, 107<br>CMYK ≈ 79, 50, 0, 58<br>Nombre, títulos, texto, bordes y sombras.</div></div>
+    <div class="sw"><div class="c" style="background:#FFD447"></div><div><b>Amarillo</b> <code>#FFD447</code><br>RGB 255, 212, 71<br>CMYK ≈ 0, 17, 72, 0<br>Etiquetas de precio, cintas, botón de acción.</div></div>
+    <div class="sw"><div class="c" style="background:#D72B32"></div><div><b>Rojo</b> <code>#D72B32</code><br>RGB 215, 43, 50<br>CMYK ≈ 0, 80, 77, 16<br>Subrayados, franjas y acentos.</div></div>
+    <div class="sw"><div class="c" style="background:#FFFFFF"></div><div><b>Blanco</b> <code>#FFFFFF</code><br>RGB 255, 255, 255<br>CMYK 0, 0, 0, 0<br>Fondo y espacio alrededor del logo.</div></div>
+    <div class="sw"><div class="c" style="background:#B3141B"></div><div><b>Rojo de texto</b> <code>#B3141B</code> (<code>--red-text</code>)<br>RGB 179, 20, 27<br>CMYK ≈ 0, 89, 85, 30<br>Rojo para letra chica y precios sobre papel o cartón.</div></div>
+    <div class="sw"><div class="c" style="background:#F2F5FA"></div><div><b>Neblina</b> <code>#F2F5FA</code> (<code>--mist</code>)<br>RGB 242, 245, 250<br>CMYK ≈ 3, 2, 0, 2<br>Fondo suave de catálogos y paneles.</div></div>
+  </div>
+  <div class="note red">
+    <p><strong>El CMYK es aproximado.</strong> Es una conversión matemática simple, solo de referencia. No es Pantone ni garantiza que el papel se vea igual que la pantalla. La imprenta debe hacer una prueba de color y aprobarla antes de tirar la serie. Las imágenes del kit tienen colores ligeramente distintos a estos valores objetivo (píxeles suavizados): no se «corrigen» masivamente.</p>
+  </div>
+
+  <h3>Contraste (WCAG)</h3>
+  <p>Relación entre texto y fondo. AA pide 4.5:1 en texto normal y 3:1 en texto grande (24 px, o unos 19 px en negrita).</p>
+  <table>
+    <thead><tr><th>Texto sobre fondo</th><th>Relación</th><th>AA normal</th><th>AA grande</th></tr></thead>
+    <tbody>
+      <tr><th scope="row" data-l="Texto sobre fondo">Azul / blanco</th><td data-l="Relación">11.84:1</td><td data-l="AA normal">Sí</td><td data-l="AA grande">Sí</td></tr>
+      <tr><th scope="row" data-l="Texto sobre fondo">Azul / neblina <code>#F2F5FA</code></th><td data-l="Relación">10.83:1</td><td data-l="AA normal">Sí</td><td data-l="AA grande">Sí</td></tr>
+      <tr><th scope="row" data-l="Texto sobre fondo">Azul / amarillo</th><td data-l="Relación">8.32:1</td><td data-l="AA normal">Sí</td><td data-l="AA grande">Sí</td></tr>
+      <tr><th scope="row" data-l="Texto sobre fondo">Rojo de texto <code>#B3141B</code> / blanco</th><td data-l="Relación">6.92:1</td><td data-l="AA normal">Sí</td><td data-l="AA grande">Sí</td></tr>
+      <tr><th scope="row" data-l="Texto sobre fondo">Rojo de texto / neblina</th><td data-l="Relación">6.34:1</td><td data-l="AA normal">Sí</td><td data-l="AA grande">Sí</td></tr>
+      <tr><th scope="row" data-l="Texto sobre fondo">Rojo de texto / amarillo</th><td data-l="Relación">4.87:1</td><td data-l="AA normal">Sí</td><td data-l="AA grande">Sí</td></tr>
+      <tr><th scope="row" data-l="Texto sobre fondo">Rojo <code>#D72B32</code> / blanco</th><td data-l="Relación">4.91:1</td><td data-l="AA normal">Sí</td><td data-l="AA grande">Sí</td></tr>
+      <tr><th scope="row" data-l="Texto sobre fondo">Rojo / neblina</th><td data-l="Relación">4.49:1</td><td data-l="AA normal">No (por muy poco)</td><td data-l="AA grande">Sí</td></tr>
+      <tr><th scope="row" data-l="Texto sobre fondo">Rojo / amarillo</th><td data-l="Relación">3.45:1</td><td data-l="AA normal">No</td><td data-l="AA grande">Sí</td></tr>
+      <tr><th scope="row" data-l="Texto sobre fondo">Azul / rojo</th><td data-l="Relación">2.41:1</td><td data-l="AA normal">No</td><td data-l="AA grande">No</td></tr>
+      <tr><th scope="row" data-l="Texto sobre fondo">Amarillo / blanco</th><td data-l="Relación">1.42:1</td><td data-l="AA normal">No</td><td data-l="AA grande">No</td></tr>
+    </tbody>
+  </table>
+  <p class="muted">Calculado desde los HEX en sRGB. No cubre fotos, degradados ni texturas. Sobre papel o cartón de los carteles, el rojo se verifica contra el fondo real: usar <code>--red-text</code>. No certifica toda la app ni el sitio. El amarillo nunca es texto sobre blanco.</p>
+</section>
+
+<!-- 4 TIPOGRAFIA -->
+<section class="sec" id="tipografia">
+  <span class="num">04</span>
+  <h2>Tipografía</h2>
+  <p class="lead">Tres fuentes hacen el trabajo y una cuarta tiene un solo uso. Todas están en <code>site/public/assets/fonts/</code>. El detalle técnico y de componentes vive en <a href="../site/DESIGN.md"><code>site/DESIGN.md</code></a>; aquí solo el resumen.</p>
+  <div class="type">
+    <div class="card">
+      <h3>Fraunces</h3>
+      <div class="specimen" style="font-family:var(--display);font-weight:900;font-size:40px;font-variation-settings:'SOFT' 100,'WONK' 1">Hallazgos <em>del día</em></div>
+      <p>Titulares, nombres de pieza, cupones y pasos. Peso 800 a 900; cursiva para la parte roja de un titular.</p>
+    </div>
+    <div class="card">
+      <h3>Anton</h3>
+      <div class="specimen" style="font-family:var(--price);font-size:46px;color:var(--red-text);letter-spacing:.02em">$150</div>
+      <p>Precios, sellos, marquesina, chips y categorías.</p>
+    </div>
+    <div class="card">
+      <h3>Archivo</h3>
+      <div class="specimen" style="font-family:var(--body);font-size:22px;font-weight:500;line-height:1.3">Texto corrido, etiquetas de sección y botones.</div>
+      <p>Todo lo que se lee de corrido.</p>
+    </div>
+    <div class="card">
+      <h3>Rye <span class="tag-no">solo carteles</span></h3>
+      <div class="specimen" style="font-family:Rye,serif;font-size:40px">Se busca</div>
+      <p>Únicamente en el «Se busca» de los carteles. En ningún otro lado.</p>
+    </div>
+  </div>
+  <div class="note red">
+    <p><strong>Prohibido como tipografía de diseño:</strong> Inter, Roboto, Arial y Space Grotesk. El lettering del logo no se sustituye con una fuente.</p>
+    <p>La aplicación operativa (caja, inventario) usa fuentes del sistema: es una herramienta de trabajo, no una pieza de marca.</p>
+  </div>
+</section>
+
+<!-- 5 VOZ -->
+<section class="sec" id="voz">
+  <span class="num">05</span>
+  <h2>Voz y tono</h2>
+  <p class="lead">Tienda de barrio con calidad americana. Habla claro, dice lo que hay y no exagera. <strong>Se tutea siempre</strong>, también en el ticket: «Gracias por tu compra».</p>
+  <div class="pair">
+    <div class="card">
+      <h3 style="margin-top:0">Sí decimos</h3>
+      <ul class="tight">
+        <li>Precio, talla, condición, dirección y horario.</li>
+        <li>«Lo que ves es lo que hay.» «Confirma disponibilidad.»</li>
+        <li>«Pasa a la tienda.» «Entérate primero.»</li>
+        <li>«Las revisamos una por una.» (pieza por pieza, sin afirmar que todo fue probado)</li>
+        <li>Juego en los objetos: cupones y carteles «Se busca».</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h3 style="margin-top:0">No decimos</h3>
+      <ul class="tight">
+        <li>Superlativos vacíos: «los más baratos», «increíble», «únicos en México».</li>
+        <li>«Oferta barata», «ganga», «remate», «todo a un dólar».</li>
+        <li>Escasez o llegadas que no se pueden comprobar.</li>
+        <li>Garantías, devoluciones o promociones que no estén definidas.</li>
+        <li>Nombres de cadenas como si fueran proveedores.</li>
+      </ul>
+    </div>
+  </div>
+  <div class="note">
+    <p><strong>Reglas que no se rompen:</strong> no inventar precios, horarios, descuentos ni disponibilidad. El nombre es «El Dolarón», con tilde y «El» en mayúscula; nunca «Dolaron» ni «ElDolaron». Acentos y signos ¿ ¡ completos en lo que ve el cliente. «Dolarón» es la unidad de lealtad (1 Dolarón = $1.00 MXN en tienda), no significa que todo cueste un dólar.</p>
+  </div>
+  <p>Vocabulario, reglas por canal (WhatsApp, redes, sitio, ticket, Mercado Libre) y las decisiones de Isaac del 22/10/2026: <a href="../docs/marca/VOZ.md"><code>docs/marca/VOZ.md</code></a>.</p>
+</section>
+
+<!-- 6 DATOS -->
+<section class="sec" id="datos">
+  <span class="num">06</span>
+  <h2>Datos oficiales</h2>
+  <p class="lead">Confirmados por Isaac el 22/10/2026. Si un archivo dice otra cosa, este cuadro manda. No se agrega ningún dato fuera de esta lista.</p>
+  <table>
+    <thead><tr><th>Dato</th><th>Valor oficial</th></tr></thead>
+    <tbody>
+      <tr><th scope="row" data-l="Dato">Descriptor</th><td data-l="Valor oficial">Mercancía y ropa americana</td></tr>
+      <tr><th scope="row" data-l="Dato">Lema</th><td data-l="Valor oficial">Calidad americana, precio mexicano.</td></tr>
+      <tr><th scope="row" data-l="Dato">WhatsApp</th><td data-l="Valor oficial"><strong>444 543 7754</strong>, el único WhatsApp oficial. El 444 854 5980 <strong>no</strong> es WhatsApp.</td></tr>
+      <tr><th scope="row" data-l="Dato">Dirección</th><td data-l="Valor oficial">Jardín Hidalgo 129, Zona Centro, Soledad de Graciano Sánchez, S.L.P., C.P. 78430</td></tr>
+      <tr><th scope="row" data-l="Dato">Horario</th><td data-l="Valor oficial">11 a. m. a 8 p. m., todos los días. En espacio corto: «de 11 a 8».</td></tr>
+      <tr><th scope="row" data-l="Dato">Trato al cliente</th><td data-l="Valor oficial">Se tutea siempre, en todos los canales.</td></tr>
+      <tr><th scope="row" data-l="Dato">Apartado en tienda</th><td data-l="Valor oficial">15 % del valor del producto, por 7 días.</td></tr>
+      <tr><th scope="row" data-l="Dato">Envío: anticipo</th><td data-l="Valor oficial">$100 de anticipo al apartar el primer producto; se liquida antes de enviar.</td></tr>
+      <tr><th scope="row" data-l="Dato">Envío: calendario</th><td data-l="Valor oficial">Envíos todos los viernes. Corte el jueves a las 8 p. m.</td></tr>
+      <tr><th scope="row" data-l="Dato">Envío: costo</th><td data-l="Valor oficial">$99 en compras de menos de $1,000. Gratis desde $1,000.</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<!-- 7 APLICACIONES -->
+<section class="sec" id="aplicaciones">
+  <span class="num">07</span>
+  <h2>Aplicaciones</h2>
+  <p class="lead">Piezas reales del kit. Se ven reducidas; los archivos completos están en sus carpetas.</p>
+  <div class="apps">
+    <figure class="app wide" style="margin:0"><img src="../02-Perfiles-y-portadas/el-dolaron-portada-horizontal.png" alt="Portada horizontal con el logo y franjas" width="2172" height="724" loading="lazy"><p><strong>Portada</strong> · 2172×724. Revisar el recorte de cada plataforma.</p></figure>
+    <figure class="app" style="margin:0"><img src="../02-Perfiles-y-portadas/el-dolaron-perfil-cuadrado.png" alt="Foto de perfil cuadrada con el logo vertical" width="1254" height="1254" loading="lazy"><p><strong>Perfil</strong> · 1254×1254. Mismo avatar en todas las redes.</p></figure>
+    <figure class="app" style="margin:0"><img src="../03-Publicaciones/el-dolaron-bienvenida-4x5.png" alt="Publicación de bienvenida 4 a 5" width="1122" height="1402" loading="lazy"><p><strong>Bienvenida</strong> · 4:5</p></figure>
+    <figure class="app" style="margin:0"><img src="../03-Publicaciones/el-dolaron-producto-4x5.png" alt="Fondo para publicar un producto, 4 a 5" width="1122" height="1402" loading="lazy"><p><strong>Producto</strong> · 4:5. Foto al centro; precio en la etiqueta amarilla.</p></figure>
+    <figure class="app" style="margin:0"><img src="../03-Publicaciones/el-dolaron-novedades-4x5.png" alt="Fondo para cuatro novedades, 4 a 5" width="1122" height="1402" loading="lazy"><p><strong>Novedades</strong> · 4:5. Cuatro fotos.</p></figure>
+    <figure class="app" style="margin:0"><img src="../03-Publicaciones/el-dolaron-cierre-redes-cuadrado.png" alt="Cierre de redes y contacto sobre azul" width="1254" height="1254" loading="lazy"><p><strong>Cierre de redes</strong> · 1254×1254. Revisar contactos antes de reutilizar.</p></figure>
+    <figure class="app" style="margin:0"><img src="../04-Historias/el-dolaron-producto-historia-9x16.png" alt="Historia de producto 9 a 16" width="941" height="1672" loading="lazy"><p><strong>Historia de producto</strong> · 9:16</p></figure>
+    <figure class="app" style="margin:0"><img src="../04-Historias/el-dolaron-aviso-historia-9x16.png" alt="Historia de aviso 9 a 16" width="940" height="1672" loading="lazy"><p><strong>Historia de aviso</strong> · 9:16</p></figure>
+  </div>
+
+  <div class="note red"><p><strong>Pendiente de actualizar:</strong> algunas plantillas todavía dicen «Mercancía americana» o «A súper precios». Son textos anteriores a las decisiones del 22/10/2026 (descriptor «Mercancía y ropa americana»; «súper precios» ya no se usa). Se corrigen en otro Issue; hasta entonces, no los publiques sin revisar el texto.</p></div>
+
+  <h3>Tarjeta de WhatsApp (/vender)</h3>
+  <div class="pair" style="align-items:start">
+    <div class="vender" role="img" aria-label="Maqueta de la tarjeta: foto arriba y franja azul abajo con el precio en amarillo y el logo blanco">
+      <div class="foto">Foto de la pieza</div>
+      <div class="franja"><span class="precio">$150</span><img src="../01-Logos/el-dolaron-logo.png" alt="" width="2056" height="537"><small>Nombre de la pieza</small></div>
+    </div>
+    <div>
+      <p>Imagen JPEG de <strong>1080×1350</strong> que se manda por WhatsApp para vender una pieza:</p>
+      <ul class="tight">
+        <li>La foto de la pieza va arriba, sobre blanco.</li>
+        <li>Una franja azul <code>#16366B</code> ocupa el fondo (de y=1000 a y=1350).</li>
+        <li>En la franja: el precio en amarillo, los textos en blanco y el <strong>logo horizontal blanco</strong>, directo sobre el azul, sin cuadro blanco detrás.</li>
+        <li>El logo se escala sin deformarlo: dentro de un espacio de 390×76 mide unos 292×76.</li>
+      </ul>
+      <p class="muted">La maqueta de la izquierda es solo ilustrativa. La tarjeta se genera en el Issue #431, y falta revisarla a ≈360 px de ancho en WhatsApp real antes de fijar posición y mínimo.</p>
+    </div>
+  </div>
+
+  <h3>Qué falta probar con hardware real</h3>
+  <ul class="tight">
+    <li>Imprimir una muestra de cada tamaño mínimo en papel, sin reescalar.</li>
+    <li>Ver la tarjeta de WhatsApp en un celular y en la app de WhatsApp.</li>
+    <li>Prueba de color con la imprenta antes de cualquier tiraje.</li>
+  </ul>
+</section>
+
+</main>
+
+<footer class="fin"><div class="wrap">
+  <p><strong>El Dolarón · Manual de marca</strong> · Revisión 1, 22/10/2026 · <a href="https://github.com/iskaar/El-Dolaron-Social-Kit/issues/433">Issue #433</a></p>
+  <p>Fuentes: <a href="Paleta.json">Paleta.json</a> · <a href="../site/DESIGN.md">site/DESIGN.md</a> · <a href="../docs/marca/VOZ.md">docs/marca/VOZ.md</a> · <a href="../docs/marca/INVESTIGACION.md">docs/marca/INVESTIGACION.md</a>. Este manual solo muestra las imágenes si se abre dentro del repositorio del kit, junto a sus carpetas.</p>
+</div></footer>
+
+</body>
+</html>

@@ -5,54 +5,57 @@
  * (docs/ARQUITECTURA-ESCANER.md).
  */
 
-import { analizarBorrador, modeloPorDefecto, type Modelo } from './analisis.ts';
+import { analizarBorrador, identificarUpc, pesosDeLista, modeloPorDefecto, type Modelo } from './analisis.ts';
+import { fichaDeManifiesto, normalizarUpc, precioListaMxn, type FichaManifiesto } from './manifiesto.ts';
+import { decodificarNombre } from './nombre.ts';
+import { codigoLeido, SIN_CODIGO } from '../public/upc.js';
+import { ESTADOS } from '../public/estados.js';
+import { guardarImagenComoFoto, imagenGuardada, procesarRellenoImagenes, rutaImagenUpc, rutaImagenPieza } from './imagenes-upc.ts';
 import { PRENDAS_ROPA, PRECIOS_ROPA } from '../public/ropa.js';
 import { procesarColaRopa, rutaRopaAdmin } from './ropa-ia.ts';
 import { calcularPrecio, ajustarManual, esDestinoBanda, prefijoParaFamilia, MONTOS_BANDA, type Destino } from './precio.ts';
-import { efectivoAlcanza, promoInauguracion } from '../public/venta.js';
-
-/** Ventana de la promo de inauguracion; null si no esta configurada. */
-const promoDe = (env: Env) =>
-  env.PROMO_DESDE && env.PROMO_HASTA && Date.parse(env.PROMO_DESDE) < Date.parse(env.PROMO_HASTA)
-    ? { desde: env.PROMO_DESDE, hasta: env.PROMO_HASTA } : null;
-/**
- * Cuantas promos quedan del cupo (Issue #250, «a las primeras 100 personas»); null sin PROMO_CUPO = sin tope.
- * Un ticket cancelado devuelve su lugar.
- */
-async function promoRestantes(env: Env): Promise<number | null> {
-  const cupo = Number(env.PROMO_CUPO);
-  if (!env.PROMO_CUPO || !Number.isInteger(cupo) || cupo < 0) return null;
-  // ponytail: recorre ventas sin indice; un indice parcial en (promo) si la tabla crece a cientos de miles.
-  const fila = await env.DB.prepare('select count(*) as n from ventas where promo > 0 and cancelada = 0').first<{ n:number }>();
-  return Math.max(0, cupo - (fila?.n ?? 0));
-}
+import { efectivoAlcanza, promoInauguracion, CLAVE_DESDE, claveRastreoDe } from '../public/venta.js';
 import { semanaIngreso } from '../public/semana.js';
-import { tramoDeDias, TRAMOS_ANTIGUEDAD } from '../public/graficas.js';
 import { detalleVenta, cancelarPieza, devolverEnCupon, reimprimirCupon } from './devoluciones.ts';
 import { cancelarVenta, listarCancelaciones, estadoSolicitud } from './cancelaciones.ts';
 import { BASES, AVISO } from './legal.ts';
 import { CLAVES_CATEGORIA } from '../public/categorias.js';
-import { tallaValida } from '../public/tallas.js';
+import { tallaValida, esCalzado } from '../public/tallas.js';
 import {
   permiso, puede, quienEs, leerUsuario, yo, pedirAcceso, listarCuentas, guardarCuenta, resolverSolicitud, propietarioDe,
-  esDeCaja, soloComputadora, CAJAS,
+  esDeCaja, soloComputadora, esRevendedora, esInversionista, CAJAS, puedeEditarInventario, type Usuario,
 } from './cuentas.ts';
 import { cajeroEnTurno, listarCajeros, entrar, salir, ponerPin } from './cajeros.ts';
+import { rutaPush } from './push.ts';
+import { rutaCep, transferenciasPorValidar, validarTransferencia } from './cep.ts';
+import { subirComprobante, verComprobante } from './comprobante.ts';
+import { verFotoReportada } from './pagos-reportados.ts';
 import { registrarSocio, buscarSocio, buscarPorCodigo, basesListas, sentenciasDeVenta, saldo } from './dolarones.ts';
-import { registrarCorte, registrarRetiro, ultimoCorte, cajaDe } from './corte.ts';
+import { registrarCorte, registrarRetiro, rutaTerminal, ultimoCorte, cajaDe } from './corte.ts';
 import { rutaGastos } from './gastos.ts';
+import { rutaPiezas, buscarPiezas, escribirExistencia, autorizarPrecio } from './piezas.ts';
+import { rutaSolicitudesPrecio, crearSolicitud } from './solicitudes-precio.ts';
+import { UPC_VISIBLE, MISMO_UPC, PIEZA_UPC, CAPTURA_SUMADA, conflictoCapturaSumada, capturaSumada, sumarCaptura, conflictoUpc, corregirUpc, upcValido, type PiezaUpc } from './upc-inventario.ts';
+import { rutaCamaraRemota } from './camara-remota.ts';
 import { rutaNomina } from './nomina.ts';
-import { lineasNetas } from './netas.ts';
+import { rutaTablero } from './tablero.ts';
+import { diaTienda, hoyTienda, rangoDias, rangoDe, delDia, DIA, reportes } from './reportes.ts';
+
+// Las pruebas importan estos dos desde aqui.
+export { hoyTienda, rangoDias };
 import { portal, llegada, vincular } from './portal.ts';
 import { mensajesApi, responderApi } from './mensajes.ts';
 import { rutaAsistente } from './asistente.ts';
 import { sentenciasVale, buscarVale, valeDeVenta, usadosEnVenta, reimprimirVale, valesAbiertos, emitirCuponManual, porcentajeCupon } from './vales.ts';
 import { catalogoPublico, revisionCatalogo } from './catalogo.ts';
-import { procesarRecortes, revisarRecortes, reiniciarRecorte, rutaRecortesAdmin } from './recortes.ts';
-import { rutaML, recibirNotificacion, conciliarSeguro, sincronizar, publicacionViva } from './mercadolibre.ts';
-import { pedirDescuento, validarDescuento, listarDescuentos, listarDuenos } from './descuentos.ts';
+import { rescatarPendientes, esCorridaSemanal, reportarHuerfanosR2 } from './huerfanos.ts';
+import { procesarRecortes, revisarRecortes, ajustarRecortesViejos, reiniciarRecorte, rutaRecortesAdmin } from './recortes.ts';
+import { rutaML, recibirNotificacion, conciliarSeguro, sincronizar, publicacionViva, avisosPendientes, atenderVentaML } from './mercadolibre.ts';
+import { pedirDescuento, validarDescuento, listarDescuentos, listarDuenos, promoDe, promoRestantes } from './descuentos.ts';
 import { listarAltoValor, revisarConteo, ajustarExistencia, listarAjustes } from './conteo.ts';
 import { rutaPedidos, vencerPedidos, sentenciasDePedido, saldoDe, enPedido } from './pedidos.ts';
+import { leerTransferencia, sentenciaTransferencia, respuestaClaveUsada, esChoqueDeClave, excedenteDe } from './transferencias.ts';
+import { rutaVender } from './vender.ts';
 
 interface FilaConfig {
   clave: string;
@@ -61,6 +64,7 @@ interface FilaConfig {
 
 interface FilaBorrador {
   id: string;
+  codigo: string | null;
   nombre: string;
   categoria: string;
   marca: string;
@@ -73,18 +77,51 @@ interface FilaBorrador {
   stock: number;
   semana_ingreso: string;
   creado_en: string;
+  upc?: string | null;
+  foto_key: string;
+  propietario: string;
+  por_revisar?: number;
 }
 
 /**
- * El hostname del vendedor solo sirve la camara y la subida de fotos.
- * Cloudflare Access decide quien entra; esto decide que hay detras, y sigue
- * valiendo si algun dia la politica de Access queda mal configurada. Los precios
- * y el inventario no viven en el telefono que anda en el pasillo.
+ * El host del capturista ofrece Capturar, Buscar y Revisar (#446, Isaac 22/10).
+ * Access autentica; rol, propietario y casilla siguen autorizando cada operación.
+ * Ajustes y configuración no se abren aquí. Imprimir etiquetas sí (#440): la AE240 por Web Bluetooth,
+ * con el mismo registro de enviadas que la PC para no repetir ninguna.
  */
-const RUTAS_VENDEDOR = new Set(['/captura', '/foto.js', '/tallas.js', '/api/salud', '/sin-acceso', '/api/yo']);
+const RUTAS_VENDEDOR = new Set(['/captura', '/foto.js', '/tallas.js', '/api/salud', '/sin-acceso', '/api/yo',
+  // Escanear del manifiesto (Issue #365): el telefono ve nombre y precio de lo que escanea, nada mas.
+  '/escanear', '/categorias.js', '/upc.js', '/cola-fotos.js', '/estados.js',
+  '/inventario-celular.js', '/inventario-enfocado.js', '/foto-pendiente.js', '/camara-inventario.js',
+  '/inventario-revisar.js', '/inventario-precio.js', '/sesiones.js', '/precios-ml.js', '/compartir.js',
+  '/inventario-capturar.js', '/inventario-ropa.js', '/envio-etiquetas.js', '/semana.js',
+  // Imprimir desde el celular (#440, Isaac 23/10): el motor y su pestaña; el permiso se cobra en la API.
+  '/inventario-imprimir.js', '/imprimir-lote.js',
+  '/inventario', '/inventario.css', '/inventario.js', '/inventario-ui.js', '/lector.js', '/ficha.js',
+  '/venta.js', '/etiquetera.js', '/impresora.js', '/camara.js', '/vendor/html5-qrcode.min.js', '/ropa.js',
+  // #459: imports de /inventario que faltaban (code128.js vía impresora.js; camara-pc.js por import() dinámico).
+  '/code128.js', '/camara-pc.js',
+  // #463: «Cerrar sesión» del menú de /inventario (import dinámico).
+  '/cerrar-sesion.js']);
 const CORRECCION_CAPTURA = /^\/api\/borradores\/([^/]+)\/(existencia|talla|revision)$/;
 
 export function permitidaParaVendedor(pathname: string, metodo: string): boolean {
+  if (/^\/(inventario|pieza)(?:\.html)?\/?$/.test(pathname)) return metodo === 'GET';
+  if (pathname === '/api/piezas' || /^\/api\/piezas\/[^/]+$/.test(pathname) || /^\/api\/foto\/[^/]+$/.test(pathname)) return metodo === 'GET';
+  if (/^\/api\/piezas\/[^/]+\/(existencia|juntar|solicitud-precio)$/.test(pathname)) return metodo === 'POST';
+  // Precios por revisar (#451): el servidor exige el rol de dueño para listar y resolver.
+  if (pathname === '/api/solicitudes-precio') return metodo === 'GET';
+  if (/^\/api\/solicitudes-precio\/[^/]+$/.test(pathname)) return metodo === 'POST';
+  if (pathname === '/api/borradores' && metodo === 'GET') return true;
+  if (pathname === '/api/familias' || pathname === '/api/recortes') return metodo === 'GET';
+  if (/^\/api\/recortes\/[^/]+\/imagen$/.test(pathname)) return metodo === 'GET';
+  if (/^\/api\/recortes\/[^/]+\/(aprobar|original|reintentar)$/.test(pathname)) return metodo === 'POST';
+  if (/^\/api\/borradores\/[0-9a-f-]{36}$/.test(pathname)) return ['PATCH', 'DELETE'].includes(metodo);
+  if (/^\/api\/borradores\/[^/]+\/(fusionar|analizar|imagen\/buscar)$/.test(pathname)) return metodo === 'POST';
+  if (/^\/api\/borradores\/[^/]+\/imagen$/.test(pathname)) return metodo === 'PUT';
+  if (pathname === '/camara-remota' || pathname === '/camara-remota.js') return metodo === 'GET';
+  if (pathname === '/api/camara/solicitud') return metodo === 'GET';
+  if (/^\/api\/camara\/solicitud\/[^/]+\/(tomar|lista|cancelar)$/.test(pathname)) return metodo === 'POST';
   if (RUTAS_VENDEDOR.has(pathname)) {
     return metodo === 'GET';
   }
@@ -97,13 +134,27 @@ export function permitidaParaVendedor(pathname: string, metodo: string): boolean
   if (pathname === '/api/solicitudes/acceso') {
     return metodo === 'POST';
   }
-  return pathname === '/api/borradores' && metodo === 'POST';
+  if (/^\/api\/manifiesto\/[^/]+$/.test(pathname)) {
+    return metodo === 'GET';
+  }
+  if (/^\/api\/manifiesto\/[^/]+\/imagen$/.test(pathname)) return ['GET', 'POST', 'PUT'].includes(metodo);
+  if (/^\/api\/manifiesto\/[^/]+\/imagen\/catalogo$/.test(pathname)) return metodo === 'GET';
+  // UPC desconocido (#373): buscarlo y ver cómo va.
+  if (pathname === '/api/borradores/upc/manual') return ['POST', 'PATCH'].includes(metodo);
+  // Etiquetas desde el celular (#440): la calibración se lee pero no se cambia aquí; se asigna el código,
+  // se reclama la etiqueta antes de mandarla y se suelta si no salió. Lo demás de /api/etiquetas es de la PC.
+  if (pathname === '/api/calibracion') return metodo === 'GET';
+  if (pathname === '/api/etiquetas') return metodo === 'POST';
+  if (pathname === '/api/etiquetas/enviadas') return ['POST', 'DELETE'].includes(metodo);
+  if (pathname === '/api/etiquetas/pendientes') return metodo === 'GET';   // la lista corta de Imprimir (#493)
+  if (/^\/api\/borradores\/upc\/[^/]+$/.test(pathname)) return pathname.endsWith('/buscar') ? metodo === 'POST' : metodo === 'GET';
+  return (pathname === '/api/borradores' || pathname === '/api/borradores/upc') && metodo === 'POST';
 }
 
 const FRANJA_SANDBOX = `<div style="background:#D72B32;color:#fff;text-align:center;font:700 14px system-ui,sans-serif;padding:6px">
   SANDBOX · solo pruebas: aquí no se cobra de verdad ni se registran socios reales</div>`;
 
-const ESTADOS_FISICOS = new Set(['nuevo', 'danado']);
+const ESTADOS_FISICOS = new Set(ESTADOS.map(([estado]) => estado));
 // Transferencia: confirmada por Isaac como forma de pago; sin ella se capturaba
 // como efectivo o tarjeta y descuadraba el corte (Issue #93).
 const FORMAS_PAGO = new Set(['efectivo', 'tarjeta', 'transferencia']);
@@ -156,6 +207,9 @@ async function crearBorrador(request: Request, env: Env, ctx: ExecutionContext, 
   // Muchas piezas vienen repetidas: una foto puede representar varias.
   const cantidad = Math.min(999, Math.max(1, Math.round(Number(formulario.get('cantidad') ?? 1)) || 1));
   const foto = formulario.get('foto');
+  const upcCrudo = formulario.get('upc');
+  const upc = !formulario.has('upc') ? null : upcCrudo === SIN_CODIGO ? SIN_CODIGO : codigoLeido(upcCrudo);
+  if (formulario.has('upc') && upcCrudo !== SIN_CODIGO && !normalizarUpc(upc)) return json({ error: 'Código de barras inválido.' }, 400);
   const talla = String(formulario.get('talla') ?? '').trim() || null;
   const precioRopa = formulario.has('precio_ropa') ? Number(formulario.get('precio_ropa')) : null;
   const prendaRaw = formulario.get('prenda') ?? '';
@@ -186,17 +240,54 @@ async function crearBorrador(request: Request, env: Env, ctx: ExecutionContext, 
   }
 
   const propietario = propietarioDe(await leerUsuario(env, correo));
-  const existente = await env.DB.prepare('select id, nombre, precio, estado_fisico, estado_analisis, stock, talla, propietario from productos where id = ?')
-    .bind(id).first<{ estado_analisis: string; propietario: string }>();
+  const existente = await env.DB.prepare('select id, nombre, precio, estado_fisico, estado_analisis, stock, talla, propietario, foto_key from productos where id = ?')
+    .bind(id).first<{ estado_analisis: string; propietario: string; foto_key: string }>();
   if (existente && existente.propietario !== propietario) return json({ error: 'Pieza no encontrada.' }, 404);
   if (existente?.estado_analisis === 'descartado' || (precioRopa !== null && existente && formulario.get('solo_foto') !== '1')) {
     return json(existente, 201);
   }
 
+  if (upc && !existente) {
+    const sumada = await sumarUpc(id, upc, estadoFisico, cantidad, env, correo, undefined, propietario);
+    if (sumada) return sumada;
+  }
+
   const fotoKey = `fotos/${id}.jpg`;
-  await env.FOTOS.put(fotoKey, foto.stream(), {
-    httpMetadata: { contentType: 'image/jpeg' },
-  });
+  // La foto se sube hasta confirmar la fila (#481): un 409 o una captura sumada no dejan objeto huérfano en R2.
+  // Si el put falla, el reintento del mismo id repite el alta (idempotente) y sube la foto.
+  const subirFoto = () => env.FOTOS.put(fotoKey, foto.stream(), { httpMetadata: { contentType: 'image/jpeg' } });
+
+  // Foto de respaldo del escáner: conserva identidad y precio conocidos, sin otro análisis.
+  // Con edición de la tarjeta (#461) se enruta igual que la tarjeta: precioDeManifiesto no exige foto en la pieza del catálogo (#402).
+  const edicion = formulario.has('nombre') || formulario.has('precio');
+  if (upc && propietario === 'dolaron' && (
+    await env.DB.prepare('select upc from manifiesto where upc = ?').bind(normalizarUpc(upc)).first()
+    || (edicion && !((await precioDeManifiesto(upc, env)) instanceof Response))
+    || await env.DB.prepare(`select id from productos where ltrim(upc, '0') = ? and propietario = 'dolaron'
+      and foto_key <> '' and estado_analisis = 'listo' and precio > 0 limit 1`).bind(normalizarUpc(upc)).first()
+  )) {
+    const alta = (conEdicion: boolean) => capturarPorUpc(new Request('https://local/api/borradores/upc', {
+      method: 'POST', body: JSON.stringify({ id, upc, stock: cantidad, estado_fisico: estadoFisico,
+        // capturarPorUpc autoriza la edición igual que POST /api/borradores/upc.
+        ...(talla ? { talla } : {}),
+        ...(conEdicion && typeof formulario.get('nombre') === 'string' ? { nombre: formulario.get('nombre') } : {}),
+        ...(conEdicion && formulario.has('precio') ? { precio: Number(formulario.get('precio')) } : {}) }),
+    }), env, correo, undefined, true);   // #573: una foto no libera la etiqueta; la libera «Guardar» en la tarjeta de revisión
+    let respuesta = await alta(true);
+    // Una edición no autorizada se descarta y se guarda con los valores del manifiesto: un 403 aquí
+    // detendría la cola de fotos con «Tu sesión venció». El 403 va antes de cualquier escritura.
+    if (respuesta.status === 403 && edicion) respuesta = await alta(false);
+    if (respuesta.ok) {
+      const guardada = await respuesta.clone().json() as { id: string; existente?: boolean };
+      // #549: capturaUpcGuardada responde la pieza del mismo id sin `existente` (reintento del alta). Si esa pieza ya tiene
+      // foto (la del catálogo o una propia), esta subida no es un reintento: no se pisa. Reemplazar es `solo_foto`.
+      if (!guardada.existente && !existente?.foto_key) {
+        await subirFoto();
+        await env.DB.prepare("update productos set foto_key = ? where id = ? and foto_key = ''").bind(fotoKey, guardada.id).run();
+      }
+    }
+    return respuesta;
+  }
 
   // "Retomar foto" del admin: solo cambia la imagen. Existencia, talla, estado y
   // lo que el dueno ya corrigio se quedan; para volver a analizar esta "Reintentar
@@ -205,7 +296,7 @@ async function crearBorrador(request: Request, env: Env, ctx: ExecutionContext, 
     const { meta } = await env.DB.prepare("update productos set foto_key = ?, actualizado_en = ?, recorte_estado=case when recorte_estado='original' then 'original' else null end, recorte_fecha=null, recorte_revision=null where id = ?")
       .bind(fotoKey, new Date().toISOString(), id)
       .run();
-    if (meta.changes) await reiniciarRecorte(env, id);
+    if (meta.changes) { await subirFoto(); await reiniciarRecorte(env, id); }
     if (meta.changes > 0) return json({ id });
   }
 
@@ -218,19 +309,23 @@ async function crearBorrador(request: Request, env: Env, ctx: ExecutionContext, 
     // El reenvío de una foto conserva el precio revisado, el código y el stock ya vendido.
     await env.DB.prepare(
       `insert into productos (id, nombre, marca, categoria, precio, estado_analisis, destino, semana_ingreso,
-                              estado_fisico, stock, talla, foto_key, capturado_por, creado_en, actualizado_en, propietario)
-       values (?, ?, ?, 'ropa', ?, 'listo', 'etiqueta', ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                              estado_fisico, stock, talla, foto_key, capturado_por, creado_en, actualizado_en, propietario, por_revisar)
+       values (?, ?, ?, 'ropa', ?, 'listo', 'etiqueta', ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
        on conflict (id) do nothing`,
     ).bind(id, nombreRopa(prenda, marca), marca, precioRopa, semanaIngreso(ahora), estadoFisico, cantidad, talla, fotoKey,
       capturadoPor, ahora.toISOString(), ahora.toISOString(), propietario).run();
-    const guardada = await env.DB.prepare('select id, nombre, marca, precio, estado_fisico, estado_analisis, stock, talla from productos where id = ?')
-      .bind(id).first<{ estado_analisis: string; nombre: string; marca: string }>();
-    if (guardada?.estado_analisis === 'descartado') await env.FOTOS.delete(fotoKey);
+    await subirFoto();
+    const guardada = await env.DB.prepare('select id, nombre, marca, precio, estado_fisico, estado_analisis, stock, talla, codigo, por_revisar from productos where id = ?')
+      .bind(id).first<{ estado_analisis: string; nombre: string; marca: string; codigo: string | null }>();
+    if (guardada?.estado_analisis === 'descartado' && !guardada.codigo) await env.FOTOS.delete(fotoKey);
     return json(guardada ? { ...guardada, prenda: prendaDeNombre(guardada.nombre, guardada.marca) } : guardada, 201);
   }
-  await env.DB.prepare(
-    `insert into productos (id, semana_ingreso, estado_fisico, stock, talla, foto_key, capturado_por, creado_en, actualizado_en, propietario)
-     values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  const fotoGuardada = await env.DB.prepare(
+    `insert into productos (id, semana_ingreso, estado_fisico, stock, talla, foto_key, capturado_por, creado_en, actualizado_en, propietario, upc, por_revisar)
+     select ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1
+     where (exists (select 1 from productos where id = ?) or ? = ''
+       or not exists (select 1 from productos where ${MISMO_UPC} and id <> ?))
+       and not exists (select 1 from conteo_ajustes where id = ?)
      -- El stock no se toca: el reenvio de una foto no repone lo que la caja ya vendio (#312).
      on conflict (id) do update set
        estado_fisico = excluded.estado_fisico,
@@ -240,16 +335,35 @@ async function crearBorrador(request: Request, env: Env, ctx: ExecutionContext, 
        recorte_revision = null,
        recorte_fecha = null,
        estado_analisis = 'pendiente',
+       modificado_por = excluded.capturado_por,
        actualizado_en = excluded.actualizado_en
-       where productos.estado_analisis <> 'descartado'`,
+       where productos.estado_analisis <> 'descartado'
+         and not exists (select 1 from productos otra where ${UPC_VISIBLE}
+           and propietario = productos.propietario and ltrim(upc, '0') = ltrim(productos.upc, '0')
+           and estado_fisico = excluded.estado_fisico and id <> productos.id)`,
   )
-    .bind(id, semanaIngreso(ahora), estadoFisico, cantidad, talla, fotoKey, capturadoPor, ahora.toISOString(), ahora.toISOString(), propietario)
+    .bind(id, semanaIngreso(ahora), estadoFisico, cantidad, talla, fotoKey, capturadoPor, ahora.toISOString(), ahora.toISOString(), propietario, upc,
+      id, normalizarUpc(upc), propietario, normalizarUpc(upc), estadoFisico, id, id)
     .run();
+  if (!fotoGuardada.meta.changes) {
+    const retenida = await env.DB.prepare('select upc, estado_analisis from productos where id = ?')
+      .bind(id).first<{ upc:string | null; estado_analisis:string }>();
+    if (retenida?.estado_analisis !== 'descartado') {
+      if (!retenida && upc) {
+        const sumada = await sumarUpc(id, upc, estadoFisico, cantidad, env, correo, undefined, propietario);
+        if (sumada) return sumada;
+      }
+      return await conflictoUpc(env, retenida?.upc || upc || '', estadoFisico, propietario, id)
+        ?? json({ error:'La pieza cambió o ese UPC ya existe con este grado. Revisa la pieza existente.' }, 409);
+    }
+  }
   await reiniciarRecorte(env, id);
 
-  const descartada = await env.DB.prepare("select id, estado_analisis, stock from productos where id = ? and estado_analisis = 'descartado'").bind(id).first();
+  // Si descartaron la pieza mientras tanto, la foto recién subida no se queda sin fila.
+  await subirFoto();
+  const descartada = await env.DB.prepare("select id, estado_analisis, stock, codigo from productos where id = ? and estado_analisis = 'descartado'").bind(id).first<{ codigo: string | null }>();
   if (descartada) {
-    await env.FOTOS.delete(fotoKey);
+    if (!descartada.codigo) await env.FOTOS.delete(fotoKey);
     return json(descartada, 201);
   }
 
@@ -257,6 +371,33 @@ async function crearBorrador(request: Request, env: Env, ctx: ExecutionContext, 
   ctx.waitUntil(analizarBorrador(id, env, modeloPedido(url, env), busquedaPedida(url)));
 
   return json({ id, estado_analisis: 'pendiente' }, 201);
+}
+
+/** Las columnas de la lista de piezas: la misma forma en `listarBorradores` y en `listarEtiquetasPendientes`. */
+const COLUMNAS_LISTA = `id, codigo, nombre, categoria, marca, talla, precio_lista, precio, estado_fisico,
+                           estado_analisis, destino, stock, semana_ingreso, capturado_por, creado_en, upc, foto_key, propietario,
+                           etiqueta_en, etiqueta_precio, etiqueta_precio_lista, etiqueta_nombre, etiqueta_talla, etiqueta_origen, por_revisar`;
+
+const LIMITE_PENDIENTES = 200;
+
+/**
+ * Imprimir (#493): solo lo que falta por etiquetar, filtrado aqui y no en el telefono (antes bajaba hasta 2000 filas).
+ * Pendiente = la lista de Imprimir (lista, de etiqueta, con precio y existencia) sin marca en `etiquetas_enviadas`, o
+ * cuya marca ya no dice lo mismo que la pieza: la misma comparacion (precio, tachado, nombre y talla) que `reclamarEtiquetas`.
+ * El grado no lo guarda la base: un cambio de grado despues de imprimir solo lo ve quien pide la lista completa.
+ * Las 200 mas nuevas, en orden de captura (#417); al imprimir y recargar salen las siguientes.
+ */
+async function listarEtiquetasPendientes(env: Env, propietario: string): Promise<Response> {
+  const { results } = await env.DB.prepare(
+    `select * from (select productos.rowid as fila, ${COLUMNAS_LISTA}
+       from productos left join etiquetas_enviadas on producto_id = productos.id
+       where sin_inventario = 0 and propietario = ? and estado_analisis = 'listo' and destino = 'etiqueta' and precio > 0 and stock > 0
+         and (producto_id is null or etiqueta_precio <> precio
+           or etiqueta_precio_lista <> case when precio_lista > precio then precio_lista else 0 end
+           or etiqueta_nombre <> trim(nombre) or etiqueta_talla <> trim(coalesce(talla, '')))
+       order by creado_en desc, productos.rowid desc limit ${LIMITE_PENDIENTES}) order by creado_en asc, fila asc`,
+  ).bind(propietario).all<FilaBorrador & { fila: number }>();
+  return json(results.map(({ fila: _, ...pieza }) => pieza));
 }
 
 async function listarBorradores(url: URL, env: Env, propietario: string): Promise<Response> {
@@ -275,12 +416,15 @@ async function listarBorradores(url: URL, env: Env, propietario: string): Promis
   // fisicamente donde se capturaron hasta que se les pega su etiqueta, asi que
   // el orden de la pantalla tiene que ser el mismo que el de la mesa o se
   // vuelve un rompecabezas saber que etiqueta es de que pieza.
-  const consulta = `select id, nombre, categoria, marca, talla, precio_lista, precio, estado_fisico,
-                           estado_analisis, destino, stock, semana_ingreso, capturado_por, creado_en
-                    from productos
+  // Las 2000 mas nuevas, en orden de captura (#417): con `asc limit` se quedaban fuera las recien capturadas.
+  // Empates de hora: la fila (rowid) desempata igual que antes.
+  // etiqueta_*: lo que dice la etiqueta ya enviada, desde la PC o el celular (#440); null si no ha salido.
+  const consulta = `select ${COLUMNAS_LISTA}
+                    from productos left join etiquetas_enviadas on producto_id = productos.id
+                    where productos.rowid in (select rowid from productos
                     where sin_inventario = 0 and propietario = ? ${cambios ? 'and actualizado_en > ?' : "and estado_analisis <> 'descartado'"}
                       ${estado ? 'and estado_analisis = ?' : ''} ${desde ? 'and creado_en >= ?' : ''}
-                    order by creado_en asc limit 2000`;
+                    order by creado_en desc, rowid desc limit 2000) order by creado_en asc, productos.rowid asc`;
   const filtros = [propietario, ...(cambios ? [cambios] : []), ...(estado ? [estado] : []), ...(desde ? [desde] : [])];
   const sentencia = env.DB.prepare(consulta).bind(...filtros);
   const { results } = await sentencia.all<FilaBorrador>();
@@ -302,21 +446,29 @@ async function destinoValido(destino: string, env: Env): Promise<boolean> {
  * precio explicito, se recalcula con la configuracion vigente.
  * Con etiqueta (codigo) la pieza ya esta a la venta con ese precio impreso: solo
  * el dueno lo cambia (Issue #75). Antes de etiquetar, poner precio es parte de la captura.
+ * Una pieza ya `listo` es vendible: con `existencia` (el PATCH del admin y de Revisar) su `stock` exige `stock_esperado`
+ * (lo que vio quien corrige), es condicional y deja renglón en conteo_ajustes (#473, igual que #468). Sin `existencia`
+ * (alta manual y su reintento, solicitudes de precio) la escritura directa nunca toca una `listo`.
  */
-async function corregirBorrador(id: string, cambios: Record<string, unknown>, env: Env, esDueno: boolean): Promise<Response> {
+async function corregirBorrador(id: string, cambios: Record<string, unknown>, env: Env, usuario: Usuario | null, captura?: { correo: string; upc: string }, precioEsperado?: number, cierraSolicitudPor?: string, solicitudId?: string, existencia?: { ctx: ExecutionContext; correo: string }): Promise<Response> {
   if (!UUID.test(id)) {
     return json({ error: 'Identificador invalido.' }, 400);
   }
   const fila = await env.DB.prepare(
-    "select nombre, categoria, marca, talla, precio_lista, precio, estado_fisico, destino, stock, codigo from productos where id = ? and estado_analisis <> 'descartado'",
+    "select nombre, categoria, marca, talla, precio_lista, precio, estado_fisico, destino, stock, codigo, upc, propietario, estado_analisis from productos where id = ? and estado_analisis <> 'descartado'",
   )
     .bind(id)
-    .first<FilaBorrador & { codigo: string | null }>();
+    .first<FilaBorrador & { codigo: string | null; estado_analisis: string }>();
   if (!fila) {
     return json({ error: 'La pieza no existe.' }, 404);
   }
+  // Bitácora (#485): quien cambia la pieza. Sin sesión ni captura (no ocurre hoy) queda 'sistema'.
+  const por = usuario?.correo ?? captura?.correo ?? existencia?.correo ?? cierraSolicitudPor ?? 'sistema';
+  if (Object.keys(cambios).length === 1 && cambios.upc !== undefined) return corregirUpc(env, id, cambios.upc, fila.propietario, por);
+  if (cambios.upc !== undefined && !upcValido(cambios.upc)) return json({ error:'Código de barras inválido.' }, 400);
+  const upc = cambios.upc === undefined ? fila.upc : String(cambios.upc).trim();
 
-  const nombre = cambios.nombre === undefined ? fila.nombre : String(cambios.nombre).slice(0, 120);
+  const nombre = cambios.nombre === undefined ? fila.nombre : decodificarNombre(String(cambios.nombre)).slice(0, 120);
   const categoria = cambios.categoria === undefined ? fila.categoria : String(cambios.categoria);
   const marca = cambios.marca === undefined ? fila.marca : String(cambios.marca).trim().slice(0, 60);
   const talla = cambios.talla === undefined ? fila.talla : String(cambios.talla).trim() || null;
@@ -330,15 +482,25 @@ async function corregirBorrador(id: string, cambios: Record<string, unknown>, en
   if (!ESTADOS_FISICOS.has(estadoFisico)) {
     return json({ error: 'Estado fisico invalido.' }, 400);
   }
+  const verificarUpc = cambios.upc !== undefined || estadoFisico !== fila.estado_fisico;
+  const conflicto = verificarUpc ? await conflictoUpc(env, upc || '', estadoFisico, fila.propietario, id) : null;
+  if (conflicto) return conflicto;
   if (talla !== null && !tallaValida(talla)) {
     return json({ error: 'Talla invalida.' }, 400);
   }
-  if (!Number.isFinite(precioLista) || precioLista < 0) {
+  if (!Number.isSafeInteger(precioLista) || precioLista < 0) {
     return json({ error: 'Precio de lista invalido.' }, 400);
   }
-  if (!Number.isFinite(stock) || stock < 0 || stock > 999) {
+  if (!Number.isFinite(stock) || stock < (captura ? 1 : 0) || stock > 999
+      || (captura && cambios.stock !== undefined && !Number.isInteger(Number(cambios.stock)))) {
     return json({ error: 'Existencia invalida.' }, 400);
   }
+  // #473: en una `listo` la existencia se escribe aparte (condicional y auditada), y solo si coincide con la que vio quien corrige.
+  const listoAlLeer = fila.estado_analisis === 'listo';
+  const esperado = cambios.stock_esperado;
+  const aparte = !!existencia && listoAlLeer && cambios.stock !== undefined;
+  const stockVencido = (actual: number, aviso = '') => json({ error: `${aviso}La existencia cambió desde que la abriste (venta, apartado o ajuste): ahora hay ${actual}. Revísala y vuelve a intentar.`, stock: actual }, 409);
+  if (aparte && (typeof esperado !== 'number' || esperado !== fila.stock)) return stockVencido(fila.stock);
 
   const config = await leerConfig(env);
   let precio: number;
@@ -351,7 +513,7 @@ async function corregirBorrador(id: string, cambios: Record<string, unknown>, en
   } else {
     precio = Math.round(Number(cambios.precio));
     destino = cambios.destino === undefined ? fila.destino : String(cambios.destino);
-    if (!Number.isFinite(precio) || precio < 0) {
+    if (!Number.isSafeInteger(precio) || precio < 0) {
       return json({ error: 'Precio invalido.' }, 400);
     }
     if (esDestinoBanda(destino)) {
@@ -372,24 +534,67 @@ async function corregirBorrador(id: string, cambios: Record<string, unknown>, en
   if (destino === 'etiqueta' && (!nombre.trim() || precio <= 0)) {
     return json({ error: 'Una pieza con etiqueta necesita nombre y un precio mayor a cero para quedar lista.' }, 400);
   }
-  if (!esDueno && fila.codigo && precio !== fila.precio) {
+  if (precio !== fila.precio && !autorizarPrecio(usuario, fila)) {
     return json({ error: 'Esta pieza ya tiene etiqueta: solo el dueño cambia su precio.' }, 403);
   }
 
-  const guardada = await env.DB.prepare(
+  const ahora = new Date().toISOString();
+  const actualizar = env.DB.prepare(
     `update productos set nombre = ?, categoria = ?, marca = ?, talla = ?, precio_lista = ?, precio = ?,
-                          estado_fisico = ?, destino = ?, stock = coalesce(?, stock), estado_analisis = 'listo', actualizado_en = ?
+                          estado_fisico = ?, destino = ?, stock = case when estado_analisis <> 'listo' then coalesce(?, stock) else stock end, estado_analisis = 'listo', actualizado_en = ?
+                          , upc = ?, modificado_por = ? ${captura ? `, codigo = ${CODIGO_NUEVO}` : ''}
      where id = ?
        and estado_analisis <> 'descartado'
+       and (? = 0 or ? = '' or not exists (select 1 from productos where ${MISMO_UPC} and id <> ?))
+       and upc is ? and estado_fisico = ?
+       ${captura ? `and capturado_por = ? and upc = ? and propietario = 'dolaron'
+         and estado_analisis in ('pendiente', 'error') and (codigo is null or codigo = '')
+         and not exists (select 1 from venta_lineas where producto_id = productos.id)` : ''}
+       ${precioEsperado === undefined ? '' : 'and precio = ?'}
+       ${solicitudId ? `and destino = 'etiqueta' and sin_inventario = 0
+         and exists (select 1 from solicitudes_precio where id = ? and producto_id = productos.id
+           and propietario = productos.propietario and estado = 'pendiente')` : ''}
      returning stock`,
   )
     .bind(nombre, categoria, marca, talla, precioLista, precio, estadoFisico, destino,
-      // Sin `stock` en el cuerpo no se toca: la caja pudo vender piezas desde que se abrio la ficha.
-      cambios.stock === undefined ? null : stock, new Date().toISOString(), id)
-    .first<{ stock: number }>();
+      // Sin `stock` en el cuerpo no se toca: la caja pudo vender piezas desde que se abrio la ficha. Una `listo` tampoco (#473).
+      cambios.stock === undefined || listoAlLeer ? null : stock, ahora, upc ?? null, por, id,
+      verificarUpc ? 1 : 0, normalizarUpc(upc), fila.propietario, normalizarUpc(upc), estadoFisico, id,
+      fila.upc ?? null, fila.estado_fisico, ...(captura ? [captura.correo, captura.upc] : []),
+      ...(precioEsperado === undefined ? [] : [precioEsperado]), ...(solicitudId ? [solicitudId] : []));
+  // #451: si el dueño cambia el precio por esta vía y había una solicitud pendiente, se cierra en el mismo batch,
+  // solo si la pieza sigue viva y el precio de verdad cambia.
+  let guardada: { stock: number } | undefined | null;
+  if (cierraSolicitudPor && (solicitudId || precio !== fila.precio)) {
+    const [actualizada, cerrada] = await env.DB.batch([
+      actualizar,
+      // Cero filas no aborta el batch: changes() impide cerrar si el UPDATE no pasó sus guardas.
+      env.DB.prepare(`update solicitudes_precio set estado = 'aplicada', precio_nuevo = ?, resuelto_por = ?, resuelto_en = ?
+        where producto_id = ? and estado = 'pendiente' and changes() = 1
+          ${solicitudId ? 'and id = ?' : ''}
+          and exists (select 1 from productos where id = ? and precio = ? and actualizado_en = ?)`)
+        .bind(precio, cierraSolicitudPor, ahora, id, ...(solicitudId ? [solicitudId] : []), id, precio, ahora),
+    ]);
+    guardada = actualizada.results?.[0] as { stock: number } | undefined;
+    if (solicitudId && cerrada.meta.changes !== 1) guardada = undefined;
+  } else guardada = await actualizar.first<{ stock: number }>();
 
-  if (!guardada) return json({ error: 'La pieza ya fue eliminada.' }, 409);
-  return json({ id, nombre, categoria, marca, talla, precio_lista: precioLista, precio, estado_fisico: estadoFisico, destino, stock: guardada.stock });
+  // `precioEsperado` (#451): el precio solo cambia si sigue valiendo lo que vio quien lo cambia.
+  if (!guardada) return precioEsperado !== undefined ? json({ error: 'El precio de la pieza cambió. Revisa el precio actual.' }, 409)
+    : await conflictoUpc(env, upc || '', estadoFisico, fila.propietario, id) ?? json({ error: 'La pieza cambió o ya fue eliminada.' }, 409);
+  // Otro proceso la dejó `listo` entre la lectura y el UPDATE: el guardado no escribió su existencia (#473).
+  if (!listoAlLeer && cambios.stock !== undefined && guardada.stock !== stock)
+    return stockVencido(guardada.stock, 'Los demás datos se guardaron, pero la pieza quedó lista mientras corregías. ');
+  if (aparte && stock !== esperado) {
+    const ajuste = await escribirExistencia(env, existencia.ctx, { id, propietario: fila.propietario, folio: crypto.randomUUID(),
+      delta: stock - (esperado as number), motivo: 'correccion', correo: existencia.correo, esperado: esperado as number });
+    if (!ajuste) {
+      const actual = await env.DB.prepare('select stock from productos where id = ?').bind(id).first<{ stock: number }>();
+      return stockVencido(actual?.stock ?? guardada.stock, 'Los demás datos se guardaron, pero no la existencia. ');
+    }
+    guardada.stock = ajuste.despues;
+  }
+  return json({ id, nombre, categoria, marca, talla, upc, precio_lista: precioLista, precio, estado_fisico: estadoFisico, destino, stock: guardada.stock });
 }
 
 /**
@@ -398,32 +603,362 @@ async function corregirBorrador(id: string, cambios: Record<string, unknown>, en
  * validaciones y mismo calculo de precio. Idempotente por id, como la foto.
  */
 async function capturarManual(request: Request, env: Env, correo: string): Promise<Response> {
-  const cuerpo = (await request.json().catch(() => ({}))) as Record<string, unknown>;
+  return await altaManual((await request.json().catch(() => ({}))) as Record<string, unknown>, env, correo, null, await leerUsuario(env, correo));
+}
+
+async function altaManual(cuerpo: Record<string, unknown>, env: Env, correo: string, upc: string | null = null, usuario: Usuario | null = null): Promise<Response> {
   const id = String(cuerpo.id ?? '');
   if (!UUID.test(id)) return json({ error: 'Identificador invalido.' }, 400);
   if (!String(cuerpo.nombre ?? '').trim()) return json({ error: 'Falta el nombre.' }, 400);
   if (!(Number(cuerpo.precio_lista) > 0) && !(Number(cuerpo.precio) > 0)) {
     return json({ error: 'Escribe el precio de lista o el de venta.' }, 400);
   }
+  const grado = String(cuerpo.estado_fisico ?? 'nuevo');
+  const cantidad = Number(cuerpo.stock ?? 1);
+  if (!ESTADOS_FISICOS.has(grado) || !Number.isInteger(cantidad) || cantidad < 1 || cantidad > 999)
+    return json({ error:'Grado o cantidad inválidos.' }, 400);
+  if (upc) {
+    const sumada = await sumarUpc(id, upc, grado, cantidad, env, correo);
+    if (sumada) return sumada;
+  }
   const ahora = new Date().toISOString();
   const { meta } = await env.DB.prepare(
-    `insert into productos (id, semana_ingreso, capturado_por, creado_en, actualizado_en) values (?, ?, ?, ?, ?)
-     on conflict (id) do nothing`,
+    `insert into productos (id, semana_ingreso, capturado_por, creado_en, actualizado_en, upc, estado_fisico)
+     select ?, ?, ?, ?, ?, ?, ? where (? = '' or not exists (select 1 from productos where ${MISMO_UPC} and id <> ?))
+       and not exists (select 1 from conteo_ajustes where id = ?) on conflict (id) do nothing`,
   )
-    .bind(id, semanaIngreso(new Date()), correo, ahora, ahora)
+    .bind(id, semanaIngreso(new Date()), correo, ahora, ahora, upc, grado,
+      normalizarUpc(upc), 'dolaron', normalizarUpc(upc), grado, id, id)
     .run();
-  const respuesta = await corregirBorrador(id, cuerpo, env, true);
+  if (!meta.changes && upc && !await env.DB.prepare('select id from productos where id = ?').bind(id).first())
+    return await sumarUpc(id, upc, grado, cantidad, env, correo) ?? json({ error:'La captura cambió. Reintenta.' }, 409);
+  const respuesta = await corregirBorrador(id, cuerpo, env, usuario, upc === null ? undefined : { correo, upc });
   // Datos invalidos: no queda una pieza vacia (salvo que fuera un reintento de una ya guardada).
-  if (!respuesta.ok && meta.changes > 0) await env.DB.prepare('delete from productos where id = ?').bind(id).run();
+  if (!respuesta.ok && meta.changes > 0) await env.DB.prepare(`delete from productos where id = ?
+    ${upc === null ? '' : "and estado_analisis = 'pendiente' and (codigo is null or codigo = '') and actualizado_en = ?"}`)
+    .bind(id, ...(upc === null ? [] : [ahora])).run();
   if (!respuesta.ok) return respuesta;
   // El dueno la da de alta para venderla ya: sin codigo la caja no la recibe. Es
   // el mismo que le pondria Etiquetas, asi que la etiqueta impresa despues coincide.
   // Las de banda se cobran con el codigo de la banda.
   await env.DB.prepare(
-    `update productos set codigo = ${CODIGO_NUEVO}, actualizado_en = ?
+    `update productos set codigo = ${CODIGO_NUEVO}, actualizado_en = ?, modificado_por = ?
      where id = ? and (codigo is null or codigo = '') and destino not like 'banda%'`,
-  ).bind(new Date().toISOString(), id).run();
+  ).bind(new Date().toISOString(), correo, id).run();
   return json(await respuesta.json(), 201);
+}
+
+/** Sin foto desde el escáner (#399): misma corrección, identidad y precio autorizados en servidor. */
+async function capturarManualEscaner(request: Request, env: Env, correo: string): Promise<Response> {
+  const cuerpo = await request.json().catch(() => null) as Record<string, unknown> | null;
+  if (!cuerpo || typeof cuerpo.id !== 'string' || !UUID.test(cuerpo.id)) return json({ error: 'Identificador inválido.' }, 400);
+  if (request.method === 'PATCH') {
+    return await corregirCaptura(cuerpo.id, 'existencia', new Request(request.url, { method: 'PATCH', body: JSON.stringify(cuerpo) }), env, correo, true);
+  }
+  const upc = cuerpo.upc === SIN_CODIGO ? SIN_CODIGO : codigoLeido(cuerpo.upc);
+  if (cuerpo.upc !== SIN_CODIGO && !normalizarUpc(upc)) return json({ error: 'Código de barras inválido.' }, 400);
+  const existente = await env.DB.prepare('select upc, capturado_por, propietario, estado_analisis, codigo from productos where id = ?')
+    .bind(cuerpo.id).first<{ upc: string | null; capturado_por: string; propietario: string; estado_analisis: string; codigo: string | null }>();
+  if (existente && (existente.propietario !== 'dolaron' || existente.capturado_por !== correo)) return json({ error: 'Pieza no encontrada.' }, 404);
+  if (existente && existente.upc !== upc) return json({ error: 'El código no corresponde a esta pieza.' }, 409);
+  if (existente?.estado_analisis === 'listo') {
+    const guardada = await capturaUpcGuardada(cuerpo.id, upc, env, undefined, correo);
+    if (guardada && !guardada.ok) return guardada;
+    return await estadoDesconocido(cuerpo.id, env, correo, 201);
+  }
+  if (existente && (existente.codigo || existente.estado_analisis === 'descartado')) return json({ error: 'La pieza ya tiene etiqueta o se canceló.' }, 409);
+  if (upc && await fichaDeManifiesto(normalizarUpc(upc), env)) return json({ error: 'Ese código sí está en la hoja: vuelve a escanearlo.' }, 409);
+  const respuesta = await altaManual({ id: cuerpo.id, nombre: cuerpo.nombre, categoria: cuerpo.categoria,
+    estado_fisico: cuerpo.estado_fisico, precio_lista: cuerpo.precio_lista, precio: cuerpo.precio,
+    stock: cuerpo.stock, destino: 'etiqueta' }, env, correo, upc, await leerUsuario(env, correo));
+  // Otro reintento pudo terminarla mientras se validaban los datos; nunca repone stock.
+  if (respuesta.ok && (await respuesta.clone().json() as { existente?: boolean }).existente) return respuesta;
+  if (!respuesta.ok) {
+    const guardada = await capturaUpcGuardada(cuerpo.id, upc, env, undefined, correo);
+    return guardada?.status === 201 ? await estadoDesconocido(cuerpo.id, env, correo, 201) : respuesta;
+  }
+  return await estadoDesconocido(cuerpo.id, env, correo, 201);
+}
+
+/**
+ * Lo que el manifiesto dice de un UPC, con el precio de lista en pesos (Issue
+ * #365). El precio de venta de una pieza nueva es solo para la pantalla: al
+ * guardar se recalcula aquí mismo; solo el dueño puede sustituirlo (#461).
+ */
+async function precioDeManifiesto(upcCrudo: string, env: Env): Promise<Response | { ficha: FichaManifiesto; precioLista: number; precioManual?: number; config: Record<string, string> }> {
+  const upc = normalizarUpc(upcCrudo);
+  if (!upc || upc.length > 14) return json({ error: 'Código de barras inválido.' }, 400);
+  const ficha = await fichaDeManifiesto(upc, env);
+  const config = await leerConfig(env);
+  if (!ficha) {
+    // Lo ya identificado se reutiliza con o sin foto (#402): búsqueda por código (#373) o captura a mano.
+    // productos.upc guarda el código tal cual se leyó: se prueban sus variantes con ceros para usar el índice productos_upc.
+    const claves = Array.from({ length: 15 - upc.length }, (_, i) => upc.padStart(upc.length + i, '0'));
+    const propia = await env.DB.prepare(`select nombre, marca, categoria, precio_lista, precio from productos
+      where upc in (${claves.map(() => '?').join(', ')}) and propietario = 'dolaron' and estado_analisis = 'listo'
+        and precio > 0 and trim(nombre) <> '' order by actualizado_en desc limit 1`)
+      .bind(...claves).first<{ nombre: string; marca: string; categoria: string; precio_lista: number; precio: number }>();
+    if (!propia) return json({ error: 'Ese código no está en el catálogo ni en el manifiesto: captura la pieza con foto.' }, 404);
+    return { ficha: { upc, nombre: propia.nombre, descripcion: propia.nombre, marca: propia.marca, categoria: propia.categoria,
+      departamento: '', precio_usd: 0, tcin: '' }, precioLista: propia.precio_lista,
+      ...(propia.precio_lista > 0 ? {} : { precioManual: propia.precio }), config };
+  }
+  const tipoCambio = Number.parseInt(config.tipo_cambio ?? '', 10);
+  if (!(tipoCambio > 0)) return json({ error: 'Falta el tipo de cambio: ponlo en la configuración del admin.' }, 409);
+  return { ficha, precioLista: precioListaMxn(ficha.precio_usd, tipoCambio), config };
+}
+
+async function buscarEnManifiesto(upcCrudo: string, env: Env): Promise<Response> {
+  const resultado = await precioDeManifiesto(upcCrudo, env);
+  if (resultado instanceof Response) return resultado;
+  const { ficha, precioLista, precioManual, config } = resultado;
+  const categoria = ficha.categoria || 'otros';
+  return json({
+    upc: ficha.upc, nombre: ficha.nombre || ficha.descripcion, traducido: !!ficha.nombre, descripcion: ficha.descripcion,
+    marca: ficha.marca, categoria, departamento: ficha.departamento, calzado: esCalzado(ficha),
+    precio_usd: ficha.precio_usd, precio_lista: precioLista,
+    precio: precioManual ?? calcularPrecio({ precioLista, categoria, estadoFisico: 'nuevo', config }).precio,
+    // Por grado A/B/C, para que el escáner muestre el que se va a guardar (#371).
+    precios: Object.fromEntries([...ESTADOS_FISICOS].map((estado) =>
+      [estado, precioManual ?? calcularPrecio({ precioLista, categoria, estadoFisico: estado, config }).precio])),
+    enlace: ficha.tcin ? `https://www.target.com/p/-/A-${ficha.tcin}` : '',
+    imagen: await imagenGuardada(ficha.upc, env),
+  });
+}
+
+/**
+ * Una sola lectura por código en Capturar (#491): piezas del propietario, si no la ficha del manifiesto
+ * (solo quien tiene /api/manifiesto) o 404. Reutiliza buscarPiezas y buscarEnManifiesto tal cual; si la
+ * imagen del UPC aún no está guardada, la busca en segundo plano (la misma ruta del POST de /imagen).
+ */
+async function resolverCodigo(env: Env, url: URL, usuario: Usuario | null, correo: string, ctx: ExecutionContext): Promise<Response> {
+  const encontradas = await buscarPiezas(env, url, propietarioDe(usuario));
+  if (!encontradas.ok) return encontradas;
+  const datos = await encontradas.clone().json() as { piezas: unknown[]; siguiente: string | null };
+  if (datos.piezas.length || datos.siguiente) return encontradas;
+  const q = (url.searchParams.get('q') ?? '').trim();
+  if (!/^\d{6,14}$/.test(q) || !puede(usuario, ['capturista'])) return json({ error: 'Sin coincidencias.' }, 404);
+  const respuesta = await buscarEnManifiesto(q, env);
+  if (!respuesta.ok) return respuesta;
+  const ficha = await respuesta.json() as { upc: string; imagen: unknown };
+  if (!ficha.imagen) {
+    const ruta = `/api/manifiesto/${ficha.upc}/imagen`;
+    ctx.waitUntil(rutaImagenUpc(new Request(new URL(ruta, url.origin), { method: 'POST' }), env, ruta, correo, ctx).catch(() => null));
+  }
+  return json({ ficha });
+}
+
+/** Recupera una captura sin repetir el alta ni reponer existencias. */
+async function capturaUpcGuardada(id: string, leido: string, env: Env, ctx?: ExecutionContext, correo?: string): Promise<Response | null> {
+  const sumada = correo ? await capturaSumada(env, id, correo) : null;
+  const existente = sumada ?? await env.DB.prepare(`select ${PIEZA_UPC} from productos where id = ?`)
+    .bind(id).first<PiezaUpc>();
+  if (!existente) return null;
+  if (existente.propietario !== 'dolaron') return json({ error: 'Pieza no encontrada.' }, 404);
+  if (normalizarUpc(existente.upc) !== normalizarUpc(leido) || existente.estado_analisis === 'descartado') return json({ error: 'La captura ya corresponde a otra pieza o está en revisión.' }, 409);
+  await env.DB.prepare(`update productos set codigo = ${CODIGO_NUEVO}, modificado_por = ? where id = ? and (codigo is null or codigo = '')
+    and estado_analisis = 'listo' and propietario = 'dolaron' and destino not like 'banda%'`)
+    .bind(correo ?? 'sistema', existente.id).run();
+  const codigo = await env.DB.prepare('select codigo from productos where id = ?').bind(existente.id).first<{ codigo: string | null }>();
+  if (ctx && existente.estado_analisis === 'listo') ctx.waitUntil(guardarImagenComoFoto(leido, env));
+  return json({ id:existente.id, upc:existente.upc, nombre:existente.nombre, precio:existente.precio, stock:existente.stock,
+    estado_fisico:existente.estado_fisico, estado_analisis:existente.estado_analisis, codigo:codigo?.codigo,
+    tiene_foto:existente.tiene_foto, creado_en:existente.creado_en, por_revisar:existente.por_revisar,
+    ...(sumada ? { existente:true, sumadas:sumada.sumadas } : {}) }, 201);
+}
+
+async function sumarUpc(id: string, upc: string, grado: string, cantidad: number, env: Env, correo: string, ctx?: ExecutionContext, propietario = 'dolaron'): Promise<Response | null> {
+  try {
+    const sumada = await sumarCaptura(env, id, upc, grado, cantidad, correo, propietario);
+    if (!sumada) return null;
+    if (sumada.propietario !== propietario) return json({ error:'Pieza no encontrada.' }, 404);
+    if (propietario !== 'dolaron') {
+      const { propietario: _propietario, capturado_por: _capturado, ...pieza } = sumada;
+      return json({ ...pieza, existente:true }, 201);
+    }
+    return await capturaUpcGuardada(id, upc, env, ctx, correo);
+  } catch (error) {
+    if (!String(error).includes('La captura cambió')) throw error;
+    return json({ error: String((error as Error).message) }, 409);
+  }
+}
+
+async function capturarPorUpc(request: Request, env: Env, correo: string, ctx?: ExecutionContext, porRevisar = false): Promise<Response> {
+  const cuerpo = (await request.json().catch(() => null)) as Record<string, unknown> | null;
+  if (!cuerpo) return json({ error: 'Datos inválidos.' }, 400);
+  const leido = codigoLeido(cuerpo.upc);
+  if (!normalizarUpc(leido)) return json({ error: 'Código de barras inválido.' }, 400);
+  if (typeof cuerpo.id !== 'string' || !UUID.test(cuerpo.id)) return json({ error: 'Identificador inválido.' }, 400);
+  const nombreEditado = cuerpo.nombre === undefined ? undefined
+    : typeof cuerpo.nombre === 'string' ? decodificarNombre(cuerpo.nombre).trim().slice(0, 120) : '';
+  if (nombreEditado === '') return json({ error: 'El nombre no puede quedar vacío.' }, 400);
+  if (cuerpo.precio !== undefined && (typeof cuerpo.precio !== 'number' || !Number.isSafeInteger(cuerpo.precio) || cuerpo.precio <= 0)) {
+    return json({ error: 'Precio inválido.' }, 400);
+  }
+  // Calzado con UPC (#552): el número de la caja, en cm. La obligatoriedad vive en la tarjeta, no aquí.
+  const talla = cuerpo.talla === undefined || cuerpo.talla === '' || cuerpo.talla === null ? null : cuerpo.talla;
+  if (talla !== null && (typeof talla !== 'string' || !tallaValida(talla))) return json({ error: 'Talla invalida.' }, 400);
+  const editando = nombreEditado !== undefined || cuerpo.precio !== undefined;
+  const usuario = editando ? await leerUsuario(env, correo) : null;
+  const validarEdicion = (nombre: string, precio: number): Response | null => {
+    // El precio de un alta por UPC sale del manifiesto: solo el dueño lo cambia (#479).
+    if (cuerpo.precio !== undefined && cuerpo.precio !== precio && !autorizarPrecio(usuario, { codigo: null, preciadaPorSistema: true })) {
+      return json({ error: 'Solo el dueño cambia el precio.' }, 403);
+    }
+    if (nombreEditado !== undefined && nombreEditado !== nombre && !puedeEditarInventario(usuario)) {
+      return json({ error: 'Tu cuenta no tiene permiso para editar el inventario.' }, 403);
+    }
+    return null;
+  };
+  // Autorizar también los reintentos antes de asignar código o sumar stock.
+  const previa = editando ? await capturaSumada(env, cuerpo.id, correo)
+    ?? await env.DB.prepare(`select ${PIEZA_UPC} from productos where id = ?`).bind(cuerpo.id).first<PiezaUpc>() : null;
+  if (previa?.propietario === 'dolaron' && normalizarUpc(previa.upc) === normalizarUpc(leido) && previa.estado_analisis !== 'descartado') {
+    const error = validarEdicion(previa.nombre, previa.precio);
+    if (error) return error;
+  }
+  const existente = await capturaUpcGuardada(cuerpo.id, leido, env, ctx, correo);
+  if (existente) return existente;
+  const stock = Number(cuerpo.stock);
+  if (!Number.isInteger(stock) || stock < 1 || stock > 999) return json({ error: 'Cantidad inválida.' }, 400);
+  const estado = cuerpo.estado_fisico ?? 'nuevo';
+  if (typeof estado !== 'string' || !ESTADOS_FISICOS.has(estado)) return json({ error: 'Estado físico inválido.' }, 400);
+  const manifiesto = editando ? await precioDeManifiesto(leido, env) : null;
+  if (manifiesto instanceof Response) return manifiesto;
+  if (manifiesto) {
+    const { ficha, precioLista, precioManual, config } = manifiesto;
+    const error = validarEdicion(decodificarNombre(ficha.nombre || ficha.descripcion).trim().slice(0, 120),
+      precioManual ?? calcularPrecio({ precioLista, categoria: ficha.categoria || 'otros', estadoFisico: estado, config }).precio);
+    if (error) return error;
+    if (typeof cuerpo.precio === 'number' && precioLista > 0 && cuerpo.precio > precioLista) {
+      return json({ error: 'El precio de venta no puede ser mayor al precio de lista.' }, 400);
+    }
+  }
+  const sumada = await sumarUpc(cuerpo.id, leido, estado, stock, env, correo, ctx);
+  if (sumada) return sumada;
+  const resultado = manifiesto ?? await precioDeManifiesto(leido, env);
+  if (resultado instanceof Response) return resultado;
+  const { ficha, precioLista, precioManual, config } = resultado;
+  const nombre = nombreEditado ?? decodificarNombre(ficha.nombre || ficha.descripcion).trim().slice(0, 120), categoria = ficha.categoria || 'otros';
+  const precio = cuerpo.precio === undefined ? precioManual ?? calcularPrecio({ precioLista, categoria, estadoFisico: estado, config }).precio : cuerpo.precio as number;
+  if (!nombre || !CATEGORIAS.has(categoria) || !Number.isSafeInteger(precio) || precio <= 0 || !Number.isSafeInteger(precioLista) || precioLista < 0) {
+    return json({ error: 'El producto necesita nombre, categoría y precio válidos.' }, 400);
+  }
+  const ahora = new Date();
+  // Una sola inserción completa: dos reintentos nunca restauran stock ni ven una pieza a medio llenar.
+  await env.DB.prepare(`insert into productos
+    (id, upc, nombre, marca, categoria, precio_lista, precio, estado_fisico, stock, talla, semana_ingreso,
+     capturado_por, creado_en, actualizado_en, estado_analisis, destino, propietario, por_revisar)
+    select ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'listo', 'etiqueta', 'dolaron', ${porRevisar ? 1 : 0}
+    where not exists (select 1 from productos where ${MISMO_UPC})
+      and not exists (select 1 from conteo_ajustes where id = ?) on conflict (id) do nothing`)
+    .bind(cuerpo.id, leido, nombre, ficha.marca.trim().slice(0, 60), categoria, precioLista, precio, estado, stock, talla,
+      semanaIngreso(ahora), correo, ahora.toISOString(), ahora.toISOString(), 'dolaron', normalizarUpc(leido), estado, cuerpo.id).run();
+  return (await capturaUpcGuardada(cuerpo.id, leido, env, ctx, correo))
+    ?? await sumarUpc(cuerpo.id, leido, estado, stock, env, correo, ctx) ?? json({ error: 'La captura cambió. Vuelve a intentarlo.' }, 409);
+}
+
+/**
+ * UPC que no está en la hoja (Issue #373): la pieza nace `pendiente` con su código y cantidad,
+ * se responde de inmediato y Gemini la busca por el código en segundo plano. El capturista sigue
+ * escaneando; si no aparece, el escáner le pide foto para esta misma pieza (mismo id).
+ */
+async function capturarDesconocido(request: Request, env: Env, ctx: ExecutionContext, correo: string): Promise<Response> {
+  const cuerpo = (await request.json().catch(() => null)) as Record<string, unknown> | null;
+  if (!cuerpo) return json({ error: 'Datos inválidos.' }, 400);
+  const leido = codigoLeido(cuerpo.upc), upc = normalizarUpc(leido);
+  if (!upc) return json({ error: 'Código de barras inválido.' }, 400);
+  if (typeof cuerpo.id !== 'string' || !UUID.test(cuerpo.id)) return json({ error: 'Identificador inválido.' }, 400);
+  const stock = Number(cuerpo.stock);
+  if (!Number.isInteger(stock) || stock < 1 || stock > 999) return json({ error: 'Cantidad inválida.' }, 400);
+  const estado = cuerpo.estado_fisico ?? 'nuevo';
+  if (typeof estado !== 'string' || !ESTADOS_FISICOS.has(estado)) return json({ error: 'Estado físico inválido.' }, 400);
+  const guardada = await capturaUpcGuardada(cuerpo.id, leido, env, undefined, correo);
+  if (guardada) return guardada;
+  const sumada = await sumarUpc(cuerpo.id, leido, estado, stock, env, correo);
+  if (sumada) return sumada;
+  if (await fichaDeManifiesto(upc, env)) return json({ error: 'Ese código sí está en la hoja: vuelve a escanearlo.' }, 409);
+  const ahora = new Date();
+  const { meta } = await env.DB.prepare(`insert into productos
+    (id, upc, nombre, estado_fisico, stock, semana_ingreso, capturado_por, creado_en, actualizado_en, estado_analisis, destino, propietario, por_revisar)
+    select ?, ?, '', ?, ?, ?, ?, ?, ?, 'pendiente', 'etiqueta', 'dolaron', 1
+    where not exists (select 1 from productos where ${MISMO_UPC})
+      and not exists (select 1 from conteo_ajustes where id = ?) on conflict (id) do nothing`)
+    .bind(cuerpo.id, leido, estado, stock, semanaIngreso(ahora), correo, ahora.toISOString(), ahora.toISOString(), 'dolaron', upc, estado, cuerpo.id).run();
+  if (!meta.changes) return (await capturaUpcGuardada(cuerpo.id, leido, env, undefined, correo))
+    ?? await sumarUpc(cuerpo.id, leido, estado, stock, env, correo) ?? json({ error:'La captura cambió. Reintenta.' }, 409);
+  // Un reintento del mismo id no vuelve a buscar ni repone stock. Se busca el código tal cual se leyó:
+  // sin el 0 inicial, Google no encuentra el UPC-A. Sin cola (local, pruebas), en waitUntil.
+  if (meta.changes) {
+    if (env.BUSQUEDAS) await env.BUSQUEDAS.send({ id: cuerpo.id, upc: leido });
+    else ctx.waitUntil(identificarPieza(cuerpo.id, leido, env));
+  }
+  return await estadoDesconocido(cuerpo.id, env, correo, 202);
+}
+
+/** En la cola no hay tope de 30 s: Vertex con Google tarda de 20 a 40 s (#406). */
+const LIMITE_COLA_MS = 60_000;
+
+/**
+ * Busca el código de una pieza que no está en la hoja (Issue #373, cola #406). La usan la captura por
+ * código desconocido y el análisis de una foto con código y sin precio. Con hallazgo seguro la pieza
+ * queda lista con el nombre del código, que es más fiable que el de la foto (una cobija salió «gorro»).
+ * Sin hallazgo, `error`: el escáner pide foto o la pieza queda aparte. `ultimo = false` deja que la
+ * cola reintente un error de red o de tiempo.
+ */
+export async function identificarPieza(id: string, upc: string, env: Env, ultimo = true): Promise<void> {
+  const inicio = Date.now();
+  let ficha: Awaited<ReturnType<typeof identificarUpc>> | null = null;
+  try {
+    ficha = await identificarUpc(upc, env, env.BUSQUEDAS ? LIMITE_COLA_MS : undefined);
+  } catch (error) {
+    console.error(JSON.stringify({ mensaje: 'upc sin identificar', id, upc, ultimo, error: String(error).slice(0, 200) }));
+    if (!ultimo) throw error;
+  }
+  const fila = await env.DB.prepare(`select estado_fisico from productos where id = ? and estado_analisis in ('pendiente', 'error')`)
+    .bind(id).first<{ estado_fisico: string }>();
+  if (!fila) return;   // ya está lista (captura manual o análisis) o la descartaron
+  const config = await leerConfig(env);
+  // Pesos de la página, o sus dólares por el tipo de cambio como la hoja (eBay, tiendas de EE.UU.; #397).
+  const precioLista = ficha ? pesosDeLista(ficha, config) * 100 : 0;
+  const precio = ficha ? calcularPrecio({ precioLista, categoria: ficha.categoria, estadoFisico: fila.estado_fisico, config }).precio : 0;
+  // Sin nombre seguro o sin precio no se imprime: queda en `error` (con el nombre que diera la foto).
+  const completa = !!ficha && ficha.nombre.trim() !== '' && ficha.confianza >= 0.5 && precio > 0;
+  if (completa) {
+    await env.DB.prepare(`update productos set nombre = ?, marca = ?, categoria = ?, precio_lista = ?, precio = ?, precio_sugerido = ?,
+        estado_analisis = 'listo', actualizado_en = ?, modificado_por = 'cola' where id = ? and estado_analisis in ('pendiente', 'error')`)
+      .bind(ficha!.nombre, ficha!.marca, ficha!.categoria, precioLista, precio, precio, new Date().toISOString(), id).run();
+  } else {
+    // Sin precio, pero si el código dice con seguridad qué es, ese nombre va aparte en lugar del de la
+    // foto: Haiku llamó «Laptop Intel Core» a un peluche de Mickey (#409). El admin solo pone el precio.
+    const nombreSeguro = ficha && ficha.nombre.trim() !== '' && ficha.confianza >= 0.7 ? 1 : 0;
+    await env.DB.prepare(`update productos set estado_analisis = 'error', actualizado_en = ?, modificado_por = 'cola',
+        nombre = case when ? then ? else nombre end, marca = case when ? then ? else marca end,
+        categoria = case when ? then ? else categoria end
+      where id = ? and estado_analisis = 'pendiente'`)
+      .bind(new Date().toISOString(), nombreSeguro, ficha?.nombre ?? '', nombreSeguro, ficha?.marca ?? '',
+        nombreSeguro, ficha?.categoria ?? '', id).run();
+  }
+  if (completa) {
+    await env.DB.prepare(`update productos set codigo = ${CODIGO_NUEVO}, modificado_por = 'cola' where id = ? and (codigo is null or codigo = '') and estado_analisis = 'listo'`)
+      .bind(id).run();
+  }
+  console.log(JSON.stringify({ mensaje: completa ? 'upc identificado' : 'upc necesita foto', id, upc, ms: Date.now() - inicio, ficha }));
+}
+
+/** Lo que el escáner consulta mientras se busca una pieza desconocida. Solo quien la capturó. */
+async function estadoDesconocido(id: string, env: Env, correo: string, status = 200): Promise<Response> {
+  if (!UUID.test(id)) return json({ error: 'Identificador inválido.' }, 400);
+  const sumada = await capturaSumada(env, id, correo);
+  // El propietario de quien pregunta: FEP también sigue el análisis de sus capturas (antes siempre 'dolaron' y daba 404).
+  const propietario = propietarioDe(await leerUsuario(env, correo));
+  const fila = await env.DB.prepare(`select ${PIEZA_UPC} from productos
+    where id = ? and propietario = ? ${sumada ? '' : 'and capturado_por = ?'}`)
+    .bind(sumada?.id ?? id, propietario, ...(sumada ? [] : [correo])).first<PiezaUpc>();
+  return fila ? json({ id:fila.id, upc:fila.upc, nombre:fila.nombre, precio:fila.precio, stock:fila.stock,
+    codigo:fila.codigo, estado_fisico:fila.estado_fisico, estado_analisis:fila.estado_analisis,
+    creado_en:fila.creado_en, con_foto:fila.tiene_foto, por_revisar:fila.por_revisar,
+    ...(sumada ? { existente:true, sumadas:sumada.sumadas } : {}) }, status) : json({ error: 'Pieza no encontrada.' }, 404);
 }
 
 /** Cuanto dura abierta la correccion desde la camara. */
@@ -436,15 +971,15 @@ const VENTANA_CAPTURA_MS = 24 * 60 * 60 * 1000;
  * revision), y pasado ese rato la pieza ya pudo venderse y un numero absoluto
  * pisaria la venta.
  */
-async function corregirCaptura(id: string, campo: string, request: Request, env: Env, correo: string): Promise<Response> {
+async function corregirCaptura(id: string, campo: string, request: Request, env: Env, correo: string, sinFoto = false, ctx?: ExecutionContext): Promise<Response> {
   if (!UUID.test(id)) {
     return json({ error: 'Identificador invalido.' }, 400);
   }
-  const cuerpo = (await request.json()) as { stock?: unknown; talla?: unknown };
+  const cuerpo = (await request.json()) as { stock?: unknown; talla?: unknown; esperado?: unknown };
   let valor: number | string;
   if (campo === 'existencia') {
     valor = Number(cuerpo.stock);
-    if (!Number.isInteger(valor) || valor < 1 || valor > 999) {
+    if (!Number.isInteger(valor) || valor < 0 || valor > 999) {
       return json({ error: 'Existencia invalida.' }, 400);
     }
   } else {
@@ -454,14 +989,70 @@ async function corregirCaptura(id: string, campo: string, request: Request, env:
     }
   }
   const columna = campo === 'existencia' ? 'stock' : 'talla';
-  const desde = new Date(Date.now() - VENTANA_CAPTURA_MS).toISOString();
+  const desde = new Date(Date.now() - (sinFoto ? 5 * 60_000 : VENTANA_CAPTURA_MS)).toISOString();
+  // Captura sin foto (#399): cinco minutos para cantidad; una venta o publicación cierra la corrección.
+  const alcanceSinFoto = `propietario = 'dolaron' and upc is not null and foto_key = ''
+    and not exists (select 1 from venta_lineas where producto_id = productos.id)
+    and not exists (select 1 from ml_publicaciones where producto_id = productos.id)`;
+  // Lo escaneado (con UPC) se corrige mientras está abierto en el escáner; ya guardado y `listo`,
+  // /etiquetas lo imprime en seguida, así que solo se corrige lo que aún se identifica o espera foto (#381).
+  // Una pieza `listo` ya es vendible y puede tener apartados, ajustes o ventas: nunca se le escribe una existencia absoluta a ciegas.
+  // Con UPC (p. ej. una captura con foto del manifiesto) aquí no se corrige: va por POST /api/piezas/:id/existencia (#464).
+  // Sin UPC (foto con análisis de IA o ropa) conserva el alcance y los permisos de la captura propia (24 h, sin casilla), pero la
+  // escritura exige `esperado` (la existencia que vio quien corrige) y es condicional (`stock = esperado`) con renglón de
+  // auditoría, igual que ese POST (#468). Falta `esperado` o está vencido → 409 con la existencia actual; nada se escribe.
+  // Lo que aún no está `listo` (identificándose o esperando foto) conserva la escritura directa.
+  // En 0 se cancela y sale de la cola (#377). Una foto se elimina desde su miniatura.
+  if (valor === 0) {
+    const ahora = new Date().toISOString();
+    const cancelable = `id = ? and capturado_por = ? and upc is not null and creado_en > ? and estado_analisis ${sinFoto ? "<> 'descartado'" : "not in ('listo', 'descartado')"}
+        ${sinFoto ? `and ${alcanceSinFoto}` : ''}
+        and not ${CAPTURA_SUMADA}
+        and not exists (select 1 from venta_lineas where producto_id = productos.id)`;
+    // Rastro (#480): mismo filtro en ambas sentencias del lote, así que solo hay renglón si la cancelación ocurre.
+    const [, { meta }] = await env.DB.batch([
+      env.DB.prepare(`insert into conteo_ajustes (id, producto_id, codigo, nombre, motivo, cantidad, antes, despues, ajustado_por, ajustado_en)
+        select ?, id, coalesce(codigo, ''), nombre, 'descarte', stock, stock, 0, ?, ? from productos where ${cancelable} and stock > 0`)
+        .bind(crypto.randomUUID(), correo, ahora, id, correo, desde),
+      env.DB.prepare(`update productos set stock = 0, estado_analisis = 'descartado', actualizado_en = ?, modificado_por = ? where ${cancelable}`)
+        .bind(ahora, correo, id, correo, desde),
+    ]);
+    if (!meta.changes) return await conflictoCapturaSumada(env, id, correo)
+      ?? json({ error: sinFoto ? 'Ya no se puede cancelar: pasaron 5 minutos o la pieza tiene venta, foto o publicación.' : 'Ya tiene etiqueta: corrígela en el admin.' }, 404);
+    return json({ id, stock: 0, descartado: true });
+  }
+  if (campo === 'existencia' && !sinFoto) {
+    const fila = await env.DB.prepare(`select estado_analisis, stock, propietario from productos
+      where id = ? and capturado_por = ? and creado_en > ? and upc is null and estado_analisis <> 'descartado'`)
+      .bind(id, correo, desde).first<{ estado_analisis: string; stock: number; propietario: string }>();
+    if (fila?.estado_analisis === 'listo') {
+      const vencida = (stock: number) => json({ error: `La existencia cambió desde que la abriste (venta, apartado o ajuste): ahora hay ${stock}. Revísala y vuelve a intentar.`, stock }, 409);
+      const esperado = cuerpo.esperado;
+      if (typeof esperado !== 'number' || esperado !== fila.stock) return vencida(fila.stock);
+      if (valor === esperado) return json({ id, stock: valor });
+      const ajuste = await escribirExistencia(env, ctx!, {
+        id, propietario: fila.propietario, folio: crypto.randomUUID(), delta: valor as number - esperado, motivo: 'correccion', correo, esperado,
+        donde: `and capturado_por = ? and creado_en > ? and not ${CAPTURA_SUMADA}`, args: [correo, desde],
+      });
+      if (ajuste) return json({ id, stock: valor });
+      const actual = await env.DB.prepare('select stock from productos where id = ?').bind(id).first<{ stock: number }>();
+      return await conflictoCapturaSumada(env, id, correo) ?? vencida(actual?.stock ?? fila.stock);
+    }
+  }
+  // La existencia directa nunca toca una `listo`: si el análisis la terminó después de la lectura de arriba, 0 filas (#468).
   const resultado = await env.DB.prepare(
-    `update productos set ${columna} = ?, actualizado_en = ? where id = ? and capturado_por = ? and creado_en > ? and estado_analisis <> 'descartado'`,
+    `update productos set ${columna} = ?, actualizado_en = ?, modificado_por = ? where id = ? and capturado_por = ? and creado_en > ?
+       and (${sinFoto ? alcanceSinFoto : campo === 'existencia' ? "estado_analisis <> 'listo'" : "upc is null or estado_analisis <> 'listo'"}) and estado_analisis <> 'descartado'
+       ${campo === 'existencia' ? `and not ${CAPTURA_SUMADA}` : ''}`,
   )
-    .bind(valor, new Date().toISOString(), id, correo, desde)
+    .bind(valor, new Date().toISOString(), correo, id, correo, desde)
     .run();
   if (resultado.meta.changes === 0) {
-    return json({ error: 'Solo puedes cambiar lo que capturaste en las ultimas 24 horas.' }, 404);
+    if (campo === 'existencia') {
+      const conflicto = await conflictoCapturaSumada(env, id, correo);
+      if (conflicto) return conflicto;
+    }
+    return json({ error: sinFoto ? 'Ya no se puede cambiar: pasaron 5 minutos o la pieza tiene venta, foto o publicación.' : 'Ya no se puede cambiar desde la captura: no es tuya, pasaron 24 horas, o la pieza ya está lista con etiqueta (su existencia se ajusta con un ajuste auditado en Buscar).' }, 404);
   }
   return json({ id, [columna]: valor });
 }
@@ -479,28 +1070,57 @@ async function revisarCaptura(id: string, request: Request, env: Env, correo: st
       values (?, 0, 'descartado', ?, ?, ?, ?) on conflict(id) do nothing`)
       .bind(id, semanaIngreso(new Date()), correo, ahora, ahora).run();
   }
-  const fila = await env.DB.prepare(`select id, precio, estado_fisico, estado_analisis, stock, talla, codigo, nombre, marca, categoria from productos where ${alcance}`)
-    .bind(id, correo, desde).first<{ id: string; nombre: string; marca: string; categoria: string; estado_analisis: string; precio: number; estado_fisico: string; stock: number; talla: string | null; codigo: string | null }>();
+  const fila = await env.DB.prepare(`select id, precio, precio_lista, estado_fisico, estado_analisis, stock, talla, codigo, nombre, marca, categoria, upc, propietario, por_revisar from productos where ${alcance}`)
+    .bind(id, correo, desde).first<{ id: string; nombre: string; marca: string; categoria: string; estado_analisis: string; precio: number; precio_lista: number; estado_fisico: string; stock: number; talla: string | null; codigo: string | null; upc:string | null; propietario:string; por_revisar: number }>();
   if (!fila) return json({ error: 'Solo puedes corregir lo que capturaste en las últimas 24 horas.' }, 404);
-  if (request.method === 'GET') return json({ ...fila, prenda: prendaDeNombre(fila.nombre, fila.marca) });
+  if (request.method === 'GET') {
+    // Revisión de una pieza nueva (#573): el precio de cada grado, para que la tarjeta lo muestre al cambiar A/B/C.
+    const config = fila.por_revisar && fila.categoria !== 'ropa' && fila.precio_lista > 0 ? await leerConfig(env) : null;
+    const precios = config && Object.fromEntries([...ESTADOS_FISICOS].map((e) =>
+      [e, calcularPrecio({ precioLista: fila.precio_lista, categoria: fila.categoria || 'otros', estadoFisico: e, config }).precio]));
+    return json({ ...fila, prenda: prendaDeNombre(fila.nombre, fila.marca), ...(precios ? { precios } : {}) });
+  }
   if (request.method === 'DELETE') {
-    const resultado = await env.DB.prepare(`update productos set stock = 0, precio = 0, foto_key = '',
-        estado_analisis = 'descartado', actualizado_en = ? where ${alcance}
+    const retirable = `${alcance}
+        and not ${CAPTURA_SUMADA}
         and not exists (select 1 from venta_lineas where producto_id = productos.id)
-        and not exists (select 1 from ml_publicaciones where producto_id = productos.id)`)
-      .bind(ahora, id, correo, desde).run();
-    if (!resultado.meta.changes) return json({ error: 'Tiene una venta o publicación. Revisa la pieza en el admin; no se eliminó.' }, 409);
-    await env.FOTOS.delete(`fotos/${id}.jpg`);
+        and not exists (select 1 from ml_publicaciones where producto_id = productos.id)`;
+    // Rastro (#480): mismo filtro en ambas sentencias del lote, así que solo hay renglón si la baja ocurre.
+    const [, resultado] = await env.DB.batch([
+      env.DB.prepare(`insert into conteo_ajustes (id, producto_id, codigo, nombre, motivo, cantidad, antes, despues, ajustado_por, ajustado_en)
+        select ?, id, coalesce(codigo, ''), nombre, 'descarte', stock, stock, 0, ?, ? from productos where ${retirable} and stock > 0`)
+        .bind(crypto.randomUUID(), correo, ahora, id, correo, desde),
+      env.DB.prepare(`update productos set stock = 0, precio = 0,
+        foto_key = case when coalesce(codigo, '') = '' then '' else foto_key end,
+        estado_analisis = 'descartado', actualizado_en = ?, modificado_por = ? where ${retirable}`)
+        .bind(ahora, correo, id, correo, desde),
+    ]);
+    if (!resultado.meta.changes) return await conflictoCapturaSumada(env, id, correo)
+      ?? json({ error: 'Tiene una venta o publicación. Revisa la pieza en el admin; no se eliminó.' }, 409);
+    const conservada = await env.DB.prepare('select codigo from productos where id = ?').bind(id).first<{ codigo: string | null }>();
+    if (!conservada?.codigo) await env.FOTOS.delete(`fotos/${id}.jpg`);
+    if (!conservada?.codigo) await env.FOTOS.delete(`recortes/${id}.webp`);
     return json({ id, descartado: true });
   }
   if (request.method !== 'PATCH') return json({ error: 'Metodo no permitido.' }, 405);
   const cambios = await request.json().catch(() => null) as Record<string, unknown> | null;
   if (!cambios || Array.isArray(cambios) || typeof cambios !== 'object' || !Object.keys(cambios).length
-      || Object.keys(cambios).some((k) => !['precio', 'estado_fisico', 'prenda', 'marca'].includes(k))) {
+      || Object.keys(cambios).some((k) => !['precio', 'estado_fisico', 'prenda', 'marca', 'nombre', 'confirmar'].includes(k))
+      || (cambios.confirmar !== undefined && cambios.confirmar !== true)) {
     return json({ error: 'Corrección invalida.' }, 400);
   }
-  if (cambios.precio !== undefined && (typeof cambios.precio !== 'number' || !PRECIOS_ROPA.includes(cambios.precio))) {
-    return json({ error: 'Escoge $200, $150, $100, $80 o $50 MXN.' }, 400);
+  // #573: en la revisión de una pieza nueva el precio y el nombre se editan como en la tarjeta UPC. Ropa conserva sus precios fijos.
+  const libre = fila.categoria !== 'ropa' && !!fila.por_revisar;
+  if (cambios.precio !== undefined && (typeof cambios.precio !== 'number'
+      || (libre ? !Number.isSafeInteger(cambios.precio) || cambios.precio <= 0 : !PRECIOS_ROPA.includes(cambios.precio)))) {
+    return json({ error: libre ? 'Escribe un precio mayor a cero en pesos.' : 'Escoge $200, $150, $100, $80 o $50 MXN.' }, 400);
+  }
+  const usuario = await leerUsuario(env, correo);
+  const nombreEditado = cambios.nombre === undefined ? undefined : typeof cambios.nombre === 'string' ? decodificarNombre(cambios.nombre).trim().slice(0, 120) : '';
+  if (nombreEditado !== undefined && !libre) return json({ error: 'El nombre solo se corrige al revisar una pieza nueva (en ropa sale de prenda y marca).' }, 400);
+  if (nombreEditado === '') return json({ error: 'El nombre no puede quedar vacío.' }, 400);
+  if (nombreEditado !== undefined && nombreEditado !== fila.nombre.trim() && !puedeEditarInventario(usuario)) {
+    return json({ error: 'Tu cuenta no tiene permiso para editar el inventario.' }, 403);
   }
   if (cambios.estado_fisico !== undefined && (typeof cambios.estado_fisico !== 'string' || !ESTADOS_FISICOS.has(cambios.estado_fisico))) {
     return json({ error: 'Estado fisico invalido.' }, 400);
@@ -510,14 +1130,37 @@ async function revisarCaptura(id: string, request: Request, env: Env, correo: st
   if ((cambios.prenda !== undefined || cambios.marca !== undefined) && fila.categoria !== 'ropa') return json({ error: 'Solo se corrige prenda y marca en ropa.' }, 400);
   const prenda = cambios.prenda === undefined ? prendaDeNombre(fila.nombre, fila.marca) : cambios.prenda as string;
   const marca = cambios.marca === undefined ? fila.marca : cambios.marca as string;
-  const nombre = cambios.prenda === undefined && cambios.marca === undefined ? fila.nombre : nombreRopa(prenda.trim(), marca.trim());
+  const nombre = nombreEditado ?? (cambios.prenda === undefined && cambios.marca === undefined ? fila.nombre : nombreRopa(prenda.trim(), marca.trim()));
+  const grado = String(cambios.estado_fisico ?? fila.estado_fisico);
+  const conflicto = cambios.estado_fisico !== undefined ? await conflictoUpc(env, fila.upc || '', grado, fila.propietario, id) : null;
+  if (conflicto) return conflicto;
+  // #479: quien no autoriza el precio de una pieza con etiqueta lo pide al dueño; lo demás se guarda como siempre.
+  const pidePrecio = typeof cambios.precio === 'number' && cambios.precio !== fila.precio && !autorizarPrecio(usuario, fila);
+  // Cambiar el grado de una pieza por revisar sin tocar el precio lo recalcula con la banda del grado, como al guardar la tarjeta UPC.
+  const porGrado = cambios.precio === undefined && cambios.estado_fisico !== undefined && cambios.estado_fisico !== fila.estado_fisico
+    && fila.por_revisar && fila.categoria !== 'ropa' && fila.precio_lista > 0
+    ? calcularPrecio({ precioLista: fila.precio_lista, categoria: fila.categoria || 'otros', estadoFisico: grado, config: await leerConfig(env) }).precio : null;
+  const precioNuevo = pidePrecio ? null : cambios.precio ?? porGrado;
   const resultado = await env.DB.prepare(`update productos set precio = coalesce(?, precio),
-      estado_fisico = coalesce(?, estado_fisico), nombre = ?, marca = ?, actualizado_en = ? where ${alcance} and estado_analisis = 'listo'
+      estado_fisico = coalesce(?, estado_fisico), nombre = ?, marca = ?, actualizado_en = ?, modificado_por = ?,
+      por_revisar = case when ? = 1 then 0 else por_revisar end where ${alcance} and estado_analisis = 'listo'
+      and upc is ? and estado_fisico = ?
+      and (? = 0 or ? = '' or not exists (select 1 from productos where ${MISMO_UPC} and id <> ?))
       and (? is null or precio_lista = 0 or precio_lista >= ?)`)
-    .bind(cambios.precio ?? null, cambios.estado_fisico ?? null, nombre, marca.trim(), ahora, id, correo, desde, cambios.precio ?? null, cambios.precio ?? null).run();
+    .bind(precioNuevo, cambios.estado_fisico ?? null, nombre, marca.trim(), ahora, correo, cambios.confirmar ? 1 : 0, id, correo, desde,
+      fila.upc, fila.estado_fisico, cambios.estado_fisico === undefined ? 0 : 1, normalizarUpc(fila.upc), fila.propietario, normalizarUpc(fila.upc), grado, id,
+      precioNuevo, precioNuevo).run();
   if (!resultado.meta.changes) return json({ error: 'La captura no está lista, fue eliminada o el precio supera el de lista.' }, 409);
-  const guardada = await env.DB.prepare(`select id, precio, estado_fisico, estado_analisis, stock, talla, codigo, nombre, marca from productos where ${alcance}`)
+  const guardada = await env.DB.prepare(`select id, precio, estado_fisico, estado_analisis, stock, talla, codigo, nombre, marca, por_revisar from productos where ${alcance}`)
     .bind(id, correo, desde).first<{ nombre: string; marca: string }>();
+  if (guardada && pidePrecio) {
+    const sugerido = cambios.precio as number;
+    const pedida = await crearSolicitud(env, id, fila.propietario, correo, { id: crypto.randomUUID(), sentido: sugerido > fila.precio ? 'subir' : 'bajar', sugerido, nota: 'Desde la miniatura de captura' });
+    // 409 = ya había una pendiente de esta pieza: el dueño ya la tiene. Otro error: lo demás quedó guardado, el precio no.
+    const error = pedida.status === 409 || pedida.ok ? '' : (await pedida.json().catch(() => ({})) as { error?: string }).error ?? 'No se pudo pedir el cambio de precio.';
+    return json({ ...guardada, prenda: prendaDeNombre(guardada.nombre, guardada.marca), solicitud_precio: !error,
+      aviso: error || 'Se pidió el cambio de precio al dueño' });
+  }
   return json(guardada ? { ...guardada, prenda: prendaDeNombre(guardada.nombre, guardada.marca) } : guardada);
 }
 
@@ -531,13 +1174,27 @@ async function revisarCaptura(id: string, request: Request, env: Env, correo: st
 const CODIGO_NUEVO = `'ED-' || printf('%06d', max(rowid,
   (select coalesce(max(cast(substr(codigo, 4) as integer)), 0) + 1 from productos where codigo like 'ED-%')))`;
 
+// El reclamo registra exactamente el papel preparado, incluso si hay una edicion entre las dos peticiones.
+const VERSION_ETIQUETA = `json_array(codigo, precio, case when precio_lista > precio then precio_lista else 0 end,
+  trim(nombre), trim(coalesce(talla, '')), semana_ingreso, stock)`;
+
+/** Los ids de un cuerpo `{ ids }`: de 1 a 100 UUID validos, sin repetir, o null. */
+function idsDeEtiquetas(cuerpo: { ids?: unknown } | null): string[] | null {
+  const ids = cuerpo?.ids;
+  if (!Array.isArray(ids) || ids.length === 0 || ids.length > 100) return null;
+  const limpios = [...new Set(ids.map(String))].filter((id) => UUID.test(id));
+  return limpios.length > 0 ? limpios : null;
+}
+
 /**
  * Asigna el codigo de barras a las piezas que se van a etiquetar y las devuelve.
  * El codigo se mina una sola vez: una pieza que ya trae etiqueta impresa conserva
  * el suyo, porque reimprimir con otro codigo deja el papel del anaquel huerfano.
+ * Con `reclamar: true` (+ `reimprimir`, `origen`, como en /api/etiquetas/enviadas) reclama ademas lo preparado en la misma
+ * llamada y responde `{ piezas, reclamadas, ahora, marcas }` en vez de la lista sola (#492).
  */
-async function prepararEtiquetas(request: Request, env: Env, propietario: string): Promise<Response> {
-  const { ids } = (await request.json()) as { ids?: unknown };
+async function prepararEtiquetas(request: Request, env: Env, propietario: string, correo: string, hostVendedor: boolean): Promise<Response> {
+  const { ids, reclamar, reimprimir, origen } = (await request.json()) as { ids?: unknown; reclamar?: unknown; reimprimir?: unknown; origen?: unknown };
   if (!Array.isArray(ids) || ids.length === 0 || ids.length > 100) {
     return json({ error: 'Selecciona entre 1 y 100 piezas.' }, 400);
   }
@@ -546,111 +1203,240 @@ async function prepararEtiquetas(request: Request, env: Env, propietario: string
     return json({ error: 'Identificadores invalidos.' }, 400);
   }
 
-  const huecos = limpios.map(() => '?').join(',');
+  // Un solo parametro para los UUID: 100 piezas mas el propietario excederian el limite de 100 de D1.
+  const seleccion = JSON.stringify(limpios);
   // Una por una y en orden de captura: cada codigo nuevo ve el anterior (CODIGO_NUEVO).
   const { results: porCodificar } = await env.DB.prepare(
-    `select id from productos where id in (${huecos}) and propietario = ? and estado_analisis <> 'descartado' and (codigo is null or codigo = '') order by rowid`,
+    `select id from productos where id in (select value from json_each(?)) and propietario = ? and estado_analisis = 'listo' and precio > 0 and (codigo is null or codigo = '') order by rowid`,
   )
-    .bind(...limpios, propietario)
+    .bind(seleccion, propietario)
     .all<{ id: string }>();
   const ahora = new Date().toISOString();
   if (porCodificar.length) {
     await env.DB.batch(porCodificar.map(({ id }) => env.DB.prepare(
-      `update productos set codigo = ${CODIGO_NUEVO}, actualizado_en = ?
-       where id = ? and estado_analisis <> 'descartado' and (codigo is null or codigo = '')`,
-    ).bind(ahora, id)));
+      `update productos set codigo = ${CODIGO_NUEVO}, actualizado_en = ?, modificado_por = ?
+       where id = ? and estado_analisis = 'listo' and precio > 0 and (codigo is null or codigo = '')`,
+    ).bind(ahora, correo, id)));
   }
 
   const { results } = await env.DB.prepare(
-    `select id, codigo, nombre, talla, precio, precio_lista, semana_ingreso, destino, stock
-     from productos where id in (${huecos}) and propietario = ? and estado_analisis <> 'descartado' order by rowid`,
+    `select id, codigo, nombre, categoria, talla, precio, precio_lista, semana_ingreso, destino, stock, estado_fisico,
+       ${VERSION_ETIQUETA} as etiqueta_version
+     from productos where id in (select value from json_each(?)) and propietario = ? and estado_analisis <> 'descartado' order by rowid`,
   )
-    .bind(...limpios, propietario)
-    .all();
+    .bind(seleccion, propietario)
+    .all<{ id: string; etiqueta_version: string }>();
 
-  return json(results);
+  if (reclamar !== true) return json(results);
+  // Prepara y reclama en una sola llamada (#492): ahorra un viaje por pieza. Cada reclamo exige la version que se acaba de leer.
+  const reclamo = await reclamarLote(env, propietario, results.map((p) => p.id), {
+    reimprimir: reimprimir === true, origen: origenDe(origen, hostVendedor), versiones: new Map(results.map((p) => [p.id, p.etiqueta_version])),
+  });
+  return json({ piezas: results, ...reclamo });
 }
 
 /**
- * Dos fotos de la misma pieza. La repetida suma su existencia a la que ya estaba
- * y desaparece; la original se queda con su codigo de barras, porque la etiqueta
- * que ya salio impresa sigue pegada en el anaquel.
+ * Registro compartido de etiquetas enviadas (Issue #440, migracion 049). Una fila por pieza con lo que
+ * dice la etiqueta que salio y desde donde. La PC y el celular piden quedarse con la etiqueta ANTES de
+ * mandarla: el primero que llega la imprime y el otro la omite. Cada pieza es UNA sentencia (insert o
+ * upsert condicionado), asi que dos peticiones a la vez no pueden ganar las dos, y `changes` dice quien
+ * gano: el batch no protege lecturas anteriores ni aborta con cero filas, por eso todas las condiciones
+ * van dentro de la sentencia.
+ *
+ * Se queda con ella si no habia marca, si la marca ya no dice lo mismo que la pieza (precio, precio
+ * tachado, nombre o talla: la misma regla que etiquetaVigente en etiquetera.js) o si se pide
+ * `reimprimir` (la reimpresion explicita). Una pieza sin codigo, sin existencia o que no esta lista no
+ * tiene etiqueta que registrar. Responde `reclamadas` (las que gano esta peticion) y `marcas` (la que
+ * quedo para cada pieza; ninguna de piezas ajenas).
  */
-async function fusionarBorrador(id: string, request: Request, env: Env): Promise<Response> {
+async function reclamarEtiquetas(request: Request, env: Env, propietario: string, hostVendedor: boolean): Promise<Response> {
+  const cuerpo = (await request.json().catch(() => null)) as { ids?: unknown; reimprimir?: unknown; version?: unknown; origen?: unknown } | null;
+  const ids = idsDeEtiquetas(cuerpo);
+  if (!ids) return json({ error: 'Selecciona entre 1 y 100 piezas.' }, 400);
+  const version = cuerpo?.version ?? null;
+  if (version !== null && (typeof version !== 'string' || version.length > 2000 || ids.length !== 1)) {
+    return json({ error: 'Versión de etiqueta inválida.' }, 400);
+  }
+  return json(await reclamarLote(env, propietario, ids, {
+    reimprimir: cuerpo?.reimprimir === true, origen: origenDe(cuerpo?.origen, hostVendedor), versiones: version === null ? undefined : new Map([[ids[0], version]]),
+  }));
+}
+
+const origenDe = (origen: unknown, hostVendedor: boolean) => origen === 'pc' || origen === 'celular' ? origen : hostVendedor ? 'celular' : 'pc';
+
+/** El reclamo en si, compartido por /api/etiquetas/enviadas y por /api/etiquetas con `reclamar` (#492). `versiones`: id -> version que debe seguir vigente. */
+async function reclamarLote(env: Env, propietario: string, ids: string[], { reimprimir, origen, versiones }: { reimprimir: boolean; origen: string; versiones?: Map<string, string> }) {
+  const ahora = new Date().toISOString();
+  const forzar = reimprimir ? 1 : 0;
+  const resultados = ids.length === 0 ? [] : await env.DB.batch(ids.map((id) => {
+    const version = versiones?.get(id) ?? null;
+    return env.DB.prepare(
+    `insert into etiquetas_enviadas (producto_id, etiqueta_en, etiqueta_precio, etiqueta_precio_lista, etiqueta_nombre, etiqueta_talla, etiqueta_origen)
+     select id, ?, precio, case when precio_lista > precio then precio_lista else 0 end, trim(nombre), trim(coalesce(talla, '')), ?
+     from productos where id = ? and propietario = ? and estado_analisis = 'listo' and destino = 'etiqueta'
+       and trim(nombre) <> '' and precio > 0 and codigo <> '' and stock > 0
+       and (? is null or ${VERSION_ETIQUETA} = ?)
+     on conflict (producto_id) do update set etiqueta_en = excluded.etiqueta_en, etiqueta_precio = excluded.etiqueta_precio,
+       etiqueta_precio_lista = excluded.etiqueta_precio_lista, etiqueta_nombre = excluded.etiqueta_nombre,
+       etiqueta_talla = excluded.etiqueta_talla, etiqueta_origen = excluded.etiqueta_origen
+     where ? = 1 or etiqueta_precio <> excluded.etiqueta_precio or etiqueta_precio_lista <> excluded.etiqueta_precio_lista
+       or etiqueta_nombre <> excluded.etiqueta_nombre or etiqueta_talla <> excluded.etiqueta_talla`,
+    ).bind(ahora, origen, id, propietario, version, version, forzar);
+  }));
+  const { results } = await env.DB.prepare(
+    `select producto_id, etiqueta_en, etiqueta_precio, etiqueta_precio_lista, etiqueta_nombre, etiqueta_talla, etiqueta_origen
+     from etiquetas_enviadas where producto_id in (select value from json_each(?))
+       and producto_id in (select id from productos where propietario = ?)`,
+  ).bind(JSON.stringify(ids), propietario).all<{ producto_id: string }>();
+  // `ahora` es la hora de ESTE reclamo: la que quedo en cada fila de `reclamadas` al ganar. No se relee de `marcas`,
+  // donde otra pantalla pudo reclamar de nuevo entre el batch y la lectura; con la hora ajena soltar borraria su reclamo.
+  return {
+    reclamadas: ids.filter((_, i) => (resultados[i]?.meta?.changes ?? 0) > 0),
+    ahora,
+    marcas: Object.fromEntries(results.map(({ producto_id, ...marca }) => [producto_id, marca])),
+  };
+}
+
+/**
+ * "No salio" (#440): la marca de esas piezas se borra para que la etiqueta pueda volver a salir. `etiquetas_en`
+ * ({ id: ahora }, la hora del reclamo que el dispositivo hizo; es obligatorio) vuelve el borrado condicional, en la misma
+ * sentencia: solo se borra la fila si sigue siendo ESE reclamo, asi un dispositivo nunca suelta el reclamo posterior de
+ * otro. Una pieza sin hora en el mapa no se toca. `soltadas` = filas borradas.
+ */
+async function soltarEtiquetas(request: Request, env: Env, propietario: string): Promise<Response> {
+  const cuerpo = (await request.json().catch(() => null)) as { ids?: unknown; etiquetas_en?: unknown } | null;
+  const ids = idsDeEtiquetas(cuerpo);
+  if (!ids) return json({ error: 'Selecciona entre 1 y 100 piezas.' }, 400);
+  const en = cuerpo?.etiquetas_en;
+  if (en === null || typeof en !== 'object' || Array.isArray(en)) return json({ error: 'Reclamos inválidos.' }, 400);
+  const mapa = en as Record<string, unknown>;
+  const pares = [];
+  for (const id of ids) {
+    const hora = mapa[id];
+    if (hora === undefined) continue;
+    if (typeof hora !== 'string' || hora.length === 0 || hora.length > 40) return json({ error: 'Reclamos inválidos.' }, 400);
+    pares.push({ id, en: hora });
+  }
+  if (pares.length === 0) return json({ soltadas: 0 });
+  const { meta } = await env.DB.prepare(
+    `delete from etiquetas_enviadas
+     where exists (select 1 from json_each(?) j where json_extract(j.value, '$.id') = producto_id and json_extract(j.value, '$.en') = etiqueta_en)
+       and producto_id in (select id from productos where propietario = ?)`,
+  ).bind(JSON.stringify(pares), propietario).run();
+  return json({ soltadas: meta.changes });
+}
+
+/** Solo lo que la etiquetera necesita (Issue #89): el celular lo lee, no ve el resto de `config`. */
+async function leerCalibracion(env: Env): Promise<Response> {
+  const config = await leerConfig(env);
+  return json(Object.fromEntries(['etiqueta_corrimiento', 'etiqueta_modulo'].filter((clave) => clave in config).map((clave) => [clave, config[clave]])));
+}
+
+/** Mismas restricciones de venta, pedido y publicación, comprobadas dentro del batch. */
+const BORRADOR_RETIRABLE = `sin_inventario = 0
+  and not exists (select 1 from venta_lineas where producto_id = productos.id)
+  and not exists (select 1 from pedido_lineas where producto_id = productos.id)
+  and not exists (select 1 from ml_publicaciones where producto_id = productos.id
+    and estado not in ('cerrada', 'vendida') and (ml_item_id is not null
+      or (estado = 'publicando' and actualizado_en >= strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-2 minutes'))))`;
+
+/** Suma la repetida una sola vez y mantiene su etiqueta vendible en la original. */
+async function fusionarBorrador(id: string, request: Request, env: Env, propietario: string, correo: string): Promise<Response> {
   const { destino_id } = (await request.json()) as { destino_id?: unknown };
   const destinoId = String(destino_id ?? '');
   if (!UUID.test(id) || !UUID.test(destinoId) || id === destinoId) {
     return json({ error: 'Identificador invalido.' }, 400);
   }
-
-  const repetida = await env.DB.prepare('select stock, codigo from productos where id = ?')
-    .bind(id)
-    .first<{ stock: number; codigo: string | null }>();
-  const original = await env.DB.prepare('select stock, codigo from productos where id = ?')
-    .bind(destinoId)
-    .first<{ stock: number; codigo: string | null }>();
-  if (!repetida || !original) {
-    return json({ error: 'La pieza no existe.' }, 404);
-  }
-  // Mas de 999 no cabe en una pieza: el admin ya no podria guardarla (corregirBorrador).
-  if (original.stock + repetida.stock > 999) {
+  const piezas = await env.DB.prepare(`select id, codigo, stock, estado_analisis from productos
+    where id in (?, ?) and propietario = ?`).bind(id, destinoId, propietario)
+    .all<{ id: string; codigo: string | null; stock: number; estado_analisis: string }>();
+  if (piezas.results.length !== 2) return json({ error: 'Pieza no encontrada.' }, 404);
+  const dosEtiquetas = 'Las dos piezas ya tienen etiqueta: son piezas distintas. Corrige la existencia de cada una o descarta la que no exista.';
+  if (piezas.results.every((p) => p.codigo)) return json({ error: dosEtiquetas }, 409);
+  const codigo = piezas.results.find((p) => p.id === id)!.codigo || '';
+  if (piezas.results.some((p) => p.estado_analisis === 'descartado')) return json({ error: 'La pieza ya fue descartada.' }, 409);
+  if (piezas.results.reduce((n, p) => n + p.stock, 0) > 999) {
     return json({ error: 'Con esa suma pasa de 999 piezas en existencia.' }, 409);
   }
+  if (await publicacionViva(env, id)) return json({ error: 'Tiene publicación en Mercado Libre: ciérrala primero.' }, 409);
+  if (await enPedido(env, id)) return json({ error: 'Está en un pedido: no se puede borrar.' }, 409);
 
-  if (await publicacionViva(env, id)) {
-    return json({ error: 'Tiene publicación en Mercado Libre: ciérrala primero.' }, 409);
-  }
-  if (await enPedido(env, id)) {
-    return json({ error: 'Está en un pedido: no se puede borrar.' }, 409);
-  }
-
-  // La suma sale de la fila de la repetida DENTRO del batch, no de lo leido arriba: dos
-  // fusiones en paralelo leen lo mismo, pero solo la que borra la repetida la consume.
-  // `ahora` marca la suma aplicada; el borrado y el codigo dependen de esa marca.
-  // Si la original no tiene etiqueta, hereda la de la repetida (la que ya esta pegada):
-  // sin eso la etiqueta impresa apunta a una pieza borrada y la caja no la encuentra.
-  // El codigo va despues del borrado: es unico y no puede existir dos veces a la vez.
   const ahora = new Date().toISOString();
-  const [, borrado] = await env.DB.batch([
-    env.DB.prepare(
-      `update productos set stock = stock + (select stock from productos where id = ?1), actualizado_en = ?3
-       where id = ?2 and exists (select 1 from productos where id = ?1)
-         and stock + (select stock from productos where id = ?1) <= 999`,
-    ).bind(id, destinoId, ahora),
-    env.DB.prepare(
-      'delete from productos where id = ? and exists (select 1 from productos where id = ? and actualizado_en = ?)',
-    ).bind(id, destinoId, ahora),
-    env.DB.prepare(
-      `update productos set codigo = ? where id = ? and actualizado_en = ? and (codigo is null or codigo = '')`,
-    ).bind(repetida.codigo ?? null, destinoId, ahora),
-  ]);
-  if (!borrado.meta.changes) {
-    // Otra fusion ya consumio la repetida (404) o la suma ya no cabe (409).
-    const sigue = await env.DB.prepare('select 1 as x from productos where id = ?').bind(id).first();
-    return sigue
-      ? json({ error: 'Con esa suma pasa de 999 piezas en existencia.' }, 409)
-      : json({ error: 'La pieza no existe.' }, 404);
+  let borrado: D1Result;
+  try {
+    // Cero filas no aborta D1: cualquier precondición falsa fuerza el trigger stock_no_negativo.
+    const resultados = await env.DB.batch([
+      env.DB.prepare(`update productos set stock = case when
+        exists (select 1 from productos where id = ?1 and propietario = ?3
+          and coalesce(codigo, '') = ?4 and estado_analisis <> 'descartado' and ${BORRADOR_RETIRABLE})
+        and exists (select 1 from productos where id = ?2 and propietario = ?3
+          and estado_analisis <> 'descartado' and sin_inventario = 0
+          and estado_fisico = (select estado_fisico from productos where id = ?1)
+          and (?4 = '' or coalesce(codigo, '') = '')
+          and stock + (select stock from productos where id = ?1) <= 999)
+        then stock else -1 end where id in (?1, ?2)`).bind(id, destinoId, propietario, codigo),
+      // Rastro (#480): la fila origen se borra; sus dos renglones conservan código y nombre. La guarda de arriba aborta si falla.
+      env.DB.prepare(`insert into conteo_ajustes (id, producto_id, codigo, nombre, motivo, cantidad, antes, despues, ajustado_por, ajustado_en)
+        select ?, id, coalesce(codigo, ''), nombre, 'fusion', stock, stock, 0, ?, ? from productos where id = ? and stock > 0`)
+        .bind(crypto.randomUUID(), correo, ahora, id),
+      env.DB.prepare(`update productos set stock = stock + (select stock from productos where id = ?),
+        actualizado_en = ? where id = ?`).bind(id, ahora, destinoId),
+      env.DB.prepare(`insert into conteo_ajustes (id, producto_id, codigo, nombre, motivo, cantidad, antes, despues, ajustado_por, ajustado_en)
+        select ?, d.id, coalesce(nullif(d.codigo, ''), o.codigo, ''), d.nombre, 'fusion', o.stock, d.stock - o.stock, d.stock, ?, ?
+        from productos d, productos o where d.id = ? and o.id = ? and o.stock > 0 and changes() = 1`)
+        .bind(crypto.randomUUID(), correo, ahora, destinoId, id),
+      // Liberar primero el código único: la etiqueta pegada debe resolver a la original vendible.
+      env.DB.prepare('update productos set codigo = null, modificado_por = ? where id = ? and codigo = ?').bind(correo, id, codigo),
+      env.DB.prepare(`update productos set codigo = ?, modificado_por = ? where id = ?
+        and (codigo is null or codigo = '') and ? <> ''`).bind(codigo, correo, destinoId, codigo),
+      env.DB.prepare("delete from productos where id = ? and (codigo is null or codigo = '')").bind(id),
+    ]);
+    borrado = resultados[6];
+  } catch (error) {
+    if (!String(error).includes('stock insuficiente')) throw error;
+    const { results } = await env.DB.prepare('select id, codigo from productos where id in (?, ?) and propietario = ?')
+      .bind(id, destinoId, propietario).all<{ id: string; codigo: string | null }>();
+    return results.length !== 2 ? json({ error: 'Pieza no encontrada.' }, 404)
+      : results.every((p) => p.codigo) ? json({ error: dosEtiquetas }, 409)
+      : json({ error: 'La pieza cambió, tiene otro grado, fue descartada o tiene venta, pedido o publicación. Revisa y vuelve a intentar.' }, 409);
   }
-  await env.FOTOS.delete(`fotos/${id}.jpg`);
-
+  if (borrado.meta.changes) await env.FOTOS.delete(`fotos/${id}.jpg`);
+  if (borrado.meta.changes) await env.FOTOS.delete(`recortes/${id}.webp`);
   const final = await env.DB.prepare('select stock from productos where id = ?').bind(destinoId).first<{ stock: number }>();
-  return json({ id, destino_id: destinoId, stock: final?.stock ?? original.stock + repetida.stock });
+  if (!final) return json({ error: 'Pieza no encontrada.' }, 404);
+  return json({ id, destino_id: destinoId, stock: final.stock });
 }
 
-async function descartarBorrador(id: string, env: Env): Promise<Response> {
-  if (!UUID.test(id)) {
-    return json({ error: 'Identificador invalido.' }, 400);
+async function descartarBorrador(id: string, env: Env, propietario: string, correo: string): Promise<Response> {
+  if (!UUID.test(id)) return json({ error: 'Identificador invalido.' }, 400);
+  const fila = await env.DB.prepare('select propietario, estado_analisis from productos where id = ?')
+    .bind(id).first<{ propietario: string; estado_analisis: string }>();
+  if (fila && fila.propietario !== propietario) return json({ error: 'Pieza no encontrada.' }, 404);
+  if (!fila || fila.estado_analisis === 'descartado') return json({ id, descartado: true });
+  if (await publicacionViva(env, id)) return json({ error: 'Tiene publicación en Mercado Libre: ciérrala primero.' }, 409);
+  if (await enPedido(env, id)) return json({ error: 'Está en un pedido: no se puede borrar.' }, 409);
+  let borrado: D1Result;
+  try {
+    const resultados = await env.DB.batch([
+      env.DB.prepare(`update productos set stock = case when propietario = ? and ${BORRADOR_RETIRABLE}
+        then stock else -1 end where id = ?`).bind(propietario, id),
+      // Rastro (#480): lo que desaparece (cualquiera de las dos ramas de abajo) queda en conteo_ajustes con código y nombre.
+      env.DB.prepare(`insert into conteo_ajustes (id, producto_id, codigo, nombre, motivo, cantidad, antes, despues, ajustado_por, ajustado_en)
+        select ?, id, coalesce(codigo, ''), nombre, 'descarte', stock, stock, 0, ?, ? from productos
+        where id = ? and stock > 0 and estado_analisis <> 'descartado'`)
+        .bind(crypto.randomUUID(), correo, new Date().toISOString(), id),
+      env.DB.prepare(`update productos set stock = 0, estado_analisis = 'descartado', actualizado_en = ?, modificado_por = ?
+        where id = ? and codigo is not null and codigo <> ''`).bind(new Date().toISOString(), correo, id),
+      env.DB.prepare(`delete from productos where id = ? and (codigo is null or codigo = '')
+        and estado_analisis <> 'descartado'`).bind(id),
+    ]);
+    borrado = resultados[3];
+  } catch (error) {
+    if (!String(error).includes('stock insuficiente')) throw error;
+    return json({ error: 'La pieza cambió o tiene venta, pedido o publicación. Revisa y vuelve a intentar.' }, 409);
   }
-  const descartada = await env.DB.prepare("select id from productos where id = ? and estado_analisis = 'descartado'").bind(id).first();
-  if (descartada) return json({ id, descartado: true });
-  if (await publicacionViva(env, id)) {
-    return json({ error: 'Tiene publicación en Mercado Libre: ciérrala primero.' }, 409);
-  }
-  if (await enPedido(env, id)) {
-    return json({ error: 'Está en un pedido: no se puede borrar.' }, 409);
-  }
-  await env.FOTOS.delete(`fotos/${id}.jpg`);
-  await env.DB.prepare('delete from productos where id = ?').bind(id).run();
+  if (borrado.meta.changes) await env.FOTOS.delete(`fotos/${id}.jpg`);
+  if (borrado.meta.changes) await env.FOTOS.delete(`recortes/${id}.webp`);
   return json({ id, descartado: true });
 }
 
@@ -770,14 +1556,14 @@ async function catalogo(env: Env, url: URL): Promise<Response> {
     if (!Number.isFinite(Date.parse(desde))) return json({ error: 'Fecha invalida.' }, 400);
     const ahora = new Date().toISOString();
     const { results } = await env.DB.prepare(
-      `select id, codigo, nombre, precio, sin_inventario, stock, propietario
+      `select id, codigo, nombre, case when estado_analisis = 'descartado' then 0 else precio end as precio, sin_inventario, stock, propietario
        from productos where actualizado_en > ? and codigo is not null and codigo <> ''`,
     ).bind(new Date(desde).toISOString()).all();
     return json({ ahora, piezas: results });
   }
   const { results } = await env.DB.prepare(
     `select id, codigo, nombre, precio, sin_inventario, stock, propietario
-     from productos where codigo is not null and codigo <> '' and precio > 0
+     from productos where codigo is not null and codigo <> '' and precio > 0 and estado_analisis <> 'descartado'
      order by nombre`,
   ).all();
   return json(results);
@@ -869,6 +1655,7 @@ async function registrarVenta(request: Request, env: Env, ctx: ExecutionContext,
     efectivo?: unknown; creado_en?: unknown;
     cliente_id?: unknown; dolarones?: unknown; codigo_socio?: unknown; codigo_vale?: unknown; caja?: unknown; imprimir_en?: unknown;
     descuento_id?: unknown; promo?: unknown; sin_red?: unknown; pedido_id?: unknown; anticipo?: unknown;
+    clave_rastreo?: unknown; monto_transferido?: unknown;
   };
   const id = String(venta.id ?? '');
   if (!UUID.test(id)) {
@@ -906,6 +1693,8 @@ async function registrarVenta(request: Request, env: Env, ctx: ExecutionContext,
     ...(venta.descuento_id ? { descuento_id:venta.descuento_id } : {}),
     ...(venta.promo ? { promo:venta.promo } : {}),
     ...(venta.pedido_id ? { pedido_id:venta.pedido_id, anticipo:venta.anticipo ?? 0 } : {}),
+    // Igual: solo si la trae (#593), para que los reintentos de ventas sin clave sigan valiendo.
+    ...(venta.clave_rastreo ? { clave_rastreo:claveRastreoDe(venta.clave_rastreo), monto_transferido:venta.monto_transferido ?? 0 } : {}),
   });
   const pedidoHash = [...new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(pedido)))]
     .map((b) => b.toString(16).padStart(2, '0')).join('');
@@ -918,8 +1707,12 @@ async function registrarVenta(request: Request, env: Env, ctx: ExecutionContext,
       return json({ error:'El folio ya pertenece a otra venta. Revisa la venta original antes de reintentar.' }, 409);
     const ganado = await env.DB.prepare(`select coalesce(sum(importe), 0) as importe from dolarones_movimientos
       where venta_id = ? and tipo = 'compra'`).bind(id).first<{ importe:number }>();
+    const referido = await env.DB.prepare(`select coalesce(sum(importe), 0) as importe from dolarones_movimientos
+      where venta_id = ? and tipo = 'referido_nuevo'`).bind(id).first<{ importe:number }>();
     const respuesta = json({ id, duplicada:true, imprimir_en:previo.imprimir_en, ganados:ganado?.importe ?? 0,
+      referido_liberado:referido?.importe ?? 0,
       anticipo:previo.anticipo, saldo_pedido:previo.pedido_id ? await saldoDe(env, previo.pedido_id) : null,
+      excedente_transferencia:await excedenteDe(env, 'venta', id),
       vale_emitido:await valeDeVenta(env, id), ...(await usadosEnVenta(env, id)) }, 200);
     respuesta.headers.set('cache-control', 'no-store');
     return respuesta;
@@ -938,6 +1731,18 @@ async function registrarVenta(request: Request, env: Env, ctx: ExecutionContext,
     .bind(...idsPedidos)
     .all<ProductoVenta>();
   const productos = new Map(filas.map((f) => [f.id, f]));
+  if (venta.pedido_id) {
+    // El precio pactado al apartar pertenece a D1, nunca al precio que envíe el navegador.
+    const { results: pactadas } = await env.DB.prepare(`select l.producto_id, l.precio from pedido_lineas l
+      join pedidos p on p.id = l.pedido_id where p.id = ?1 and p.estado = 'apartado' and p.entrega = 'envio'
+      union all select '00000000-0000-4000-8000-000000000099', envio from pedidos
+      where id = ?1 and estado = 'apartado' and entrega = 'envio' and envio > 0`)
+      .bind(String(venta.pedido_id)).all<{ producto_id: string; precio: number }>();
+    for (const l of pactadas) {
+      const producto = productos.get(l.producto_id);
+      if (producto) productos.set(l.producto_id, { ...producto, precio: l.precio, precio_anterior: null });
+    }
+  }
 
   // Hora fiable de la venta (la de la caja): una hora futura no se acepta.
   const horaCaja = Date.parse(String(venta.creado_en ?? ''));
@@ -984,6 +1789,13 @@ async function registrarVenta(request: Request, env: Env, ctx: ExecutionContext,
   if (!efectivoAlcanza({ formaPago, total: aPagar, efectivo })) {
     return json({ error: 'El efectivo no alcanza para el total.' }, 400);
   }
+  // Transferencia (#593): desde $300 la clave de rastreo y el monto del comprobante son obligatorios; abajo, solo si la trae.
+  // Se valida contra lo que se cobra por transferencia (despues de Dolarones y anticipo) y la clave queda «confirmada por cajero».
+  const transf = formaPago === 'transferencia' && aPagar > 0 && (aPagar >= CLAVE_DESDE || venta.clave_rastreo)
+    ? leerTransferencia(venta, aPagar) : null;
+  if (transf && !transf.ok) return json({ error: transf.error, campo: transf.campo }, 400);
+  const usada = transf && await respuestaClaveUsada(env, transf.clave);
+  if (usada) return usada;
 
   const momento = new Date();
   const ahora = momento.toISOString();
@@ -1009,7 +1821,7 @@ async function registrarVenta(request: Request, env: Env, ctx: ExecutionContext,
     return json({ error:vale.error }, vale.status);
   }
 
-  const conPedido = pedidoId ? await sentenciasDePedido(env, { pedidoId, ventaId: id, anticipo, ahora }) : null;
+  const conPedido = pedidoId ? await sentenciasDePedido(env, { pedidoId, ventaId: id, anticipo, ahora, total, lineas: preparado.lineas }) : null;
   if (conPedido && !conPedido.ok) {
     const concurrente = await reintento();
     if (concurrente) return concurrente;
@@ -1025,6 +1837,7 @@ async function registrarVenta(request: Request, env: Env, ctx: ExecutionContext,
       // Quien cobro sale de Access; la caja es la suya (Issue #105) o la de la
       // computadora. Una venta encolada antes del corte de caja llega sin caja: ''.
       await cajaDe(env, correo, venta.caja), correo, pedidoHash, imprimirEn, descuento, descuentoId, promo, anticipo, pedidoId),
+    ...(transf ? [sentenciaTransferencia(env, transf, correo, ahora, 'venta', { venta: id })] : []),
     ...preparado.lineas.map((l) =>
       env.DB.prepare(
         `insert into venta_lineas (venta_id, producto_id, codigo, nombre, precio, cantidad, propietario)
@@ -1058,6 +1871,8 @@ async function registrarVenta(request: Request, env: Env, ctx: ExecutionContext,
     // Solo el mismo pedido obtiene respuesta idempotente; otros errores siguen visibles.
     const concurrente = await reintento();
     if (concurrente) return concurrente;
+    // Otra solicitud con la misma clave de rastreo gano el indice unico: nada de esta venta quedo (#593).
+    if (transf && esChoqueDeClave(error)) return (await respuestaClaveUsada(env, transf.clave)) ?? json({ error:'Esa clave de rastreo ya se usó.', campo:'clave' }, 409);
     if (String(error).includes('saldo de vale invalido'))
       return json({ error:'El vale cambió, venció o se agotó. Vuelve a escanearlo.' }, 409);
     if (String(error).includes('codigo de socio invalido')) {
@@ -1081,8 +1896,9 @@ async function registrarVenta(request: Request, env: Env, ctx: ExecutionContext,
   // Si una pieza publicada en Mercado Libre se agoto, se pausa alla (D1 manda). Despues de responder.
   ctx.waitUntil(conciliarSeguro(env, { productoIds: preparado.lineas.filter((l) => !l.sinInventario).map((l) => l.producto_id) }));
   const respuesta = json({
-    id, total, descuento, dolarones, imprimir_en:imprimirEn, cambio: Math.max(0, efectivo - aPagar), ganados: recompensa.ganados,
+    id, total, descuento, dolarones, imprimir_en:imprimirEn, cambio: Math.max(0, efectivo - aPagar), ganados: recompensa.ganados, referido_liberado: recompensa.referido ?? 0,
     anticipo, saldo_pedido: pedidoId ? await saldoDe(env, pedidoId) : null,
+    excedente_transferencia: transf?.ok ? transf.excedente : 0,
     saldo: clienteId ? await saldo(env, clienteId, ahora) : null,
     vale_emitido:vale.emitido,
     ...(await usadosEnVenta(env, id)),
@@ -1123,42 +1939,6 @@ async function tomarImpresion(id: string, request: Request, env: Env, correo: st
   if (!meta.changes) return json({ error: 'Ticket ya tomado, cancelado o no pendiente en esta estación.' }, 409);
   return json({ id, impreso_en:ahora });
 }
-
-// La tienda esta en America/Mexico_City: UTC-6 fijo desde 2022, sin horario de
-// verano. Las ventas se guardan en UTC, asi que despues de las 18:00 locales ya
-// son "manana" en UTC; el dia de la tienda se saca restando 6 horas. Sin esto,
-// el corte de las 20:00 solo veia lo vendido de 18:00 a 20:00 (Issue #93).
-const diaTienda = (columna: string) => `substr(datetime(${columna}, '-6 hours'), 1, 10)`;
-export const hoyTienda = (ahora = Date.now()) => new Date(ahora - 6 * 3_600_000).toISOString().slice(0, 10);
-const DIA = /^\d{4}-\d{2}-\d{2}$/;
-/**
- * [00:00, 24:00) de un dia de la tienda, en UTC. Para filtrar se compara la columna
- * tal cual: diaTienda() en el WHERE obliga a D1 a leer toda la tabla en cada
- * consulta, y la caja pide el corte del dia seguido (agoto la cuota diaria, 15/10).
- */
-const delDia = (dia: string) => {
-  const apertura = (d: string) => `${d}T06:00:00.000Z`;
-  return [apertura(dia), apertura(new Date(Date.parse(`${dia}T12:00:00Z`) + 86_400_000).toISOString().slice(0, 10))];
-};
-
-/**
- * Los `dias` dias completos de la tienda que terminan hoy (Issue #166): el primero
- * empieza a las 00:00 de la tienda, no «hace N x 24 h», para que un dia nunca salga
- * a medias. `anterior_desde` abre el periodo de igual largo justo antes, para comparar.
- */
-export function rangoDias(dias: number, ahora = Date.now()) {
-  const apertura = (dia: string) => `${dia}T06:00:00.000Z`;   // 00:00 en UTC-6
-  const primero = hoyTienda(ahora - (dias - 1) * 86_400_000);
-  return {
-    dias, dia_desde: primero, dia_hasta: hoyTienda(ahora), desde: apertura(primero),
-    anterior_desde: apertura(hoyTienda(ahora - (2 * dias - 1) * 86_400_000)),
-  };
-}
-// `dias=abc` daba NaN y tumbaba el reporte con 500: un valor que no es numero vale el de omision.
-const rangoDe = (url: URL) => {
-  const dias = Math.round(Number(url.searchParams.get('dias') ?? 30));
-  return rangoDias(Number.isFinite(dias) ? Math.min(365, Math.max(1, dias)) : 30);
-};
 
 // Lo que lleva un renglon de la lista de tickets (ticket.js `renglonTicket`), del dia o del rango.
 const COLUMNAS_TICKET = `v.id, v.total, v.forma_pago, v.cancelada, v.creado_en, v.dolarones, v.devuelto, v.dolarones_devueltos,
@@ -1215,9 +1995,12 @@ async function corte(url: URL, env: Env): Promise<Response> {
        from ventas where creado_en >= ? and creado_en < ? and cancelada = 0 group by forma_pago
        union all
        select forma_pago, 0, sum(anticipo), 0 from pedidos where creado_en >= ? and creado_en < ? group by forma_pago
+       union all
+       select forma_pago, 0, sum(importe), 0 from pedido_movimientos
+       where tipo = 'abono' and creado_en >= ? and creado_en < ? group by forma_pago
      ) group by forma_pago`,
   )
-    .bind(...rango, ...rango)
+    .bind(...rango, ...rango, ...rango)
     .all<{ forma_pago: string; tickets: number; total: number; dolarones: number }>();
 
   const piezas = await env.DB.prepare(
@@ -1236,271 +2019,6 @@ async function corte(url: URL, env: Env): Promise<Response> {
     total: results.reduce((suma, fila) => suma + (fila.total ?? 0), 0),
     dolarones: results.reduce((suma, fila) => suma + (fila.dolarones ?? 0), 0),
     por_forma_pago: results,
-  });
-}
-
-/**
- * Foto de lo que hay en piso AHORA (Issue #174), sin importar el periodo del reporte: piezas individuales
- * ya etiquetadas (con codigo) y con existencia. Quedan fuera las bandas (no tienen fecha de captura propia),
- * lo agotado y lo que aun esta en la cola de revision sin etiqueta. Las danadas SI cuentan: estan en piso.
- * Antiguedad = dias de la tienda (UTC-6) desde `creado_en`, y los tramos van por semanas completas.
- * Una fecha vacia o invalida no se adivina: va aparte, en `sin_fecha`.
- */
-async function inventarioEnPiso(env: Env, ahora = Date.now()) {
-  // ponytail: se trae toda la lista y se suma en JS; con decenas de miles de piezas en piso conviene agrupar en SQL.
-  const { results } = await env.DB.prepare(
-    `select id, codigo, nombre, coalesce(nullif(categoria, ''), 'sin categoria') as categoria, precio, stock, creado_en,
-       case when julianday(creado_en) is null then null
-            else max(0, cast(julianday(?) - julianday(substr(datetime(creado_en, '-6 hours'), 1, 10)) as integer)) end as dias
-     from productos
-     where sin_inventario = 0 and stock > 0 and destino = 'etiqueta' and codigo is not null and codigo != ''
-       and propietario = 'dolaron'`,
-  )
-    .bind(hoyTienda(ahora))
-    .all<{ id: string; codigo: string; nombre: string; categoria: string; precio: number; stock: number; creado_en: string; dias: number | null }>();
-
-  const valorDe = (f: { precio: number; stock: number }) => f.precio * f.stock;
-  const tramos = new Map(TRAMOS_ANTIGUEDAD.map(([clave]) => [clave, { tramo: clave, piezas: 0, valor: 0 }]));
-  const sinFecha = { piezas: 0, valor: 0 };
-  const categorias = new Map<string, { categoria: string; piezas: number; valor: number; sumaDias: number; fechadas: number }>();
-  for (const f of results) {
-    const grupo = (f.dias === null ? sinFecha : tramos.get(tramoDeDias(f.dias)))!;
-    grupo.piezas += 1;
-    grupo.valor += valorDe(f);
-    const c = categorias.get(f.categoria) ?? { categoria: f.categoria, piezas: 0, valor: 0, sumaDias: 0, fechadas: 0 };
-    c.piezas += 1;
-    c.valor += valorDe(f);
-    if (f.dias !== null) { c.sumaDias += f.dias; c.fechadas += 1; }
-    categorias.set(f.categoria, c);
-  }
-  return {
-    piezas: results.length,
-    unidades: results.reduce((suma, f) => suma + f.stock, 0),
-    valor: results.reduce((suma, f) => suma + valorDe(f), 0),
-    por_antiguedad: [...tramos.values()],
-    sin_fecha: sinFecha,
-    por_categoria: [...categorias.values()]
-      .map(({ sumaDias, fechadas, ...c }) => ({ ...c, dias_promedio: fechadas ? sumaDias / fechadas : null }))
-      .sort((a, b) => b.valor - a.valor || a.categoria.localeCompare(b.categoria)),
-    mas_viejas: results.filter((f) => f.dias !== null)
-      .sort((a, b) => b.dias! - a.dias! || valorDe(b) - valorDe(a) || a.codigo.localeCompare(b.codigo))
-      .slice(0, 15)
-      .map(({ id, codigo, nombre, categoria, precio, stock, creado_en, dias }) => ({ id, codigo, nombre, categoria, precio, stock, creado_en, dias })),
-  };
-}
-
-/**
- * Reportes: todo sale de consultas contra D1 en el momento, nada se precalcula
- * ni vive en otra tabla. `dias` acota lo que tiene sentido por rango (ventas del
- * dia, categoria, top de piezas); precio sugerido y dias en venta son de
- * siempre, porque son pocos datos y la pregunta que responden no es "esta
- * semana" sino "en general". `inventario` es la foto de ahora: tampoco depende de `dias`.
- */
-async function reportes(url: URL, env: Env): Promise<Response> {
-  const rango = rangoDe(url);
-  const { dias, desde } = rango;
-
-  // Solo lo de la tienda (propietario 'dolaron', Issue #298): el neto de cada ticket va repartido por pieza.
-  const resumen = await env.DB.prepare(
-    `${lineasNetas('v.creado_en >= ?')}
-     select count(distinct venta) as ventas, coalesce(sum(neta), 0) as total, coalesce(sum(cant), 0) as piezas
-     from netas where propietario = 'dolaron'`,
-  )
-    .bind(desde)
-    .first<{ ventas: number; total: number; piezas: number }>();
-
-  // El periodo de igual largo justo antes, para las flechas de «vs periodo anterior».
-  const anterior = await env.DB.prepare(
-    `${lineasNetas('v.creado_en >= ? and v.creado_en < ?')}
-     select count(distinct venta) as ventas, coalesce(sum(neta), 0) as total, coalesce(sum(cant), 0) as piezas
-     from netas where propietario = 'dolaron'`,
-  )
-    .bind(rango.anterior_desde, desde)
-    .first<{ ventas: number; total: number; piezas: number }>();
-
-  // De bruto a vendido, sin que sobre ni falte un centavo: lo cobrado en todos los
-  // tickets, menos lo devuelto por piezas, menos lo que valian los cancelados completos.
-  const cuadre = await env.DB.prepare(
-    `${lineasNetas('v.creado_en >= ?')}
-     select (select coalesce(sum(total), 0) from ventas where creado_en >= ?) as bruto,
-       (select coalesce(sum(devuelto + dolarones_devueltos), 0) from ventas where creado_en >= ?) as devoluciones_pieza,
-       (select coalesce(sum(case when cancelada = 1 then total - devuelto - dolarones_devueltos end), 0) from ventas where creado_en >= ?) as cancelados,
-       (select coalesce(sum(neta), 0) from netas where propietario = 'fep') as fep`,
-  )
-    .bind(desde, desde, desde, desde)
-    .first<{ bruto: number; devoluciones_pieza: number; cancelados: number; fep: number }>();
-
-  // Lo cobrado en dinero por forma de pago, y lo pagado con Dolarones como una forma mas.
-  const { results: porFormaPago } = await env.DB.prepare(
-    // Cobrado en el ticket (netas.ts ya descuenta el anticipo) mas el anticipo de los pedidos recibidos
-    // en el periodo: el dinero entra el dia del apartado, no el de la venta. Los Dolarones usados
-    // (neta - cobrado - anticipo) van en su propia fila.
-    `${lineasNetas('v.creado_en >= ?')}
-     select forma_pago, sum(tickets) as tickets, sum(total) as total from (
-       select forma_pago, count(distinct venta) as tickets, coalesce(sum(cobrado), 0) as total
-       from cobros where propietario = 'dolaron' group by forma_pago
-       union all
-       select forma_pago, 0, coalesce(sum(anticipo), 0) from pedidos where creado_en >= ? group by forma_pago
-       union all
-       select 'dolarones', count(distinct case when neta - cobrado - anticipo_linea <> 0 then venta end),
-         coalesce(sum(neta - cobrado - anticipo_linea), 0)
-       from cobros where propietario = 'dolaron'
-     ) group by forma_pago`,
-  )
-    .bind(desde, desde)
-    .all<{ forma_pago: string; tickets: number; total: number }>();
-
-  const { results: ventasPorDia } = await env.DB.prepare(
-    `${lineasNetas('v.creado_en >= ?')}
-     select ${diaTienda('creado_en')} as dia, count(distinct venta) as tickets, sum(neta) as total
-     from netas where propietario = 'dolaron' group by dia order by dia`,
-  )
-    .bind(desde)
-    .all<{ dia: string; tickets: number; total: number }>();
-  const { results: piezasPorDia } = await env.DB.prepare(
-    `select ${diaTienda('v.creado_en')} as dia, coalesce(sum(l.cantidad - l.cancelada_cantidad), 0) as piezas
-     from venta_lineas l join ventas v on v.id = l.venta_id
-     where v.cancelada = 0 and v.creado_en >= ? and l.propietario = 'dolaron' group by dia`,
-  )
-    .bind(desde)
-    .all<{ dia: string; piezas: number }>();
-  const piezasPorDiaMapa = new Map(piezasPorDia.map((f) => [f.dia, f.piezas]));
-  const porDia = ventasPorDia.map((f) => ({ ...f, piezas: piezasPorDiaMapa.get(f.dia) ?? 0 }));
-
-  // Mapa de calor de /reportes: dia de la semana (0 = domingo, como %w) y hora, ambos de la tienda (UTC-6).
-  const { results: porHora } = await env.DB.prepare(
-    `${lineasNetas('v.creado_en >= ?')}
-     select cast(strftime('%w', datetime(creado_en, '-6 hours')) as integer) as dia_semana,
-       cast(strftime('%H', datetime(creado_en, '-6 hours')) as integer) as hora,
-       count(distinct venta) as tickets, sum(neta) as total
-     from netas where propietario = 'dolaron' group by dia_semana, hora order by dia_semana, hora`,
-  )
-    .bind(desde)
-    .all<{ dia_semana: number; hora: number; tickets: number; total: number }>();
-
-  // Lo vendido por categoria (las bandas juntas), del periodo y del anterior de igual largo: mismas reglas en los dos.
-  const ventasPorCategoria = (anteriorAlPeriodo: boolean) => env.DB.prepare(
-    `${lineasNetas(`v.creado_en >= ? ${anteriorAlPeriodo ? 'and v.creado_en < ?' : ''}`)}
-     select case when p.sin_inventario = 1 then 'bandas' else coalesce(nullif(p.categoria, ''), 'sin categoria') end as categoria,
-       coalesce(sum(n.neta), 0) as total, coalesce(sum(n.cant), 0) as piezas
-     from netas n left join productos p on p.id = n.producto_id
-     where n.propietario = 'dolaron'
-     group by categoria order by total desc`,
-  )
-    .bind(...(anteriorAlPeriodo ? [rango.anterior_desde, desde] : [desde]))
-    .all<{ categoria: string; total: number; piezas: number }>();
-  const { results: porCategoria } = await ventasPorCategoria(false);
-  const { results: porCategoriaAnterior } = await ventasPorCategoria(true);
-
-  const { results: topProductos } = await env.DB.prepare(
-    `${lineasNetas('v.creado_en >= ?')}
-     select codigo, nombre, sum(cant) as cantidad, sum(neta) as total
-     from netas where producto_id is not null and cant > 0 and propietario = 'dolaron'
-     group by codigo, nombre order by cantidad desc, total desc limit 10`,
-  )
-    .bind(desde)
-    .all<{ codigo: string; nombre: string; cantidad: number; total: number }>();
-
-  // Cuanto se aleja lo que de verdad se cobra de lo que propuso la IA: la razon
-  // por la que existe precio_sugerido (migracion 002) es poder responder esto
-  // con datos en vez de ajustar los porcentajes a ojo.
-  const precioSugerido = await env.DB.prepare(
-    `select count(*) as n, avg((precio - precio_sugerido) * 100.0 / precio_sugerido) as promedio_pct
-     from productos where precio_sugerido > 0 and precio > 0 and propietario = 'dolaron'`,
-  ).first<{ n: number; promedio_pct: number | null }>();
-
-  // Diferido a proposito en CONTRATO-ESCANER.md hasta que hubiera ventas reales.
-  const { results: diasEnVenta } = await env.DB.prepare(
-    `select coalesce(nullif(p.categoria, ''), 'sin categoria') as categoria,
-       avg(julianday(substr(v.creado_en, 1, 10)) - julianday(substr(p.creado_en, 1, 10))) as dias_promedio,
-       count(*) as n
-     from venta_lineas l join ventas v on v.id = l.venta_id join productos p on p.id = l.producto_id
-     where v.cancelada = 0 and p.sin_inventario = 0 and l.cantidad > l.cancelada_cantidad and l.propietario = 'dolaron'
-     group by categoria order by dias_promedio desc`,
-  ).all<{ categoria: string; dias_promedio: number; n: number }>();
-
-  // Devoluciones, de ticket completo o de piezas sueltas (Issue #138): el motivo y quien cancelo son la unica huella de una
-  // cancelacion que no fue legitima (cobrar de verdad y "cancelar" para
-  // quedarse el efectivo). Se listan una por una, no solo el total.
-  const { results: cancelaciones } = await env.DB.prepare(
-    `select v.id, v.total - v.dolarones - v.devuelto as total, v.dolarones - v.dolarones_devueltos as dolarones,
-       v.forma_pago, v.cancelada_en, v.cancelada_por, v.motivo_cancelacion,
-       (select group_concat(nombre, ' · ') from venta_lineas
-        where venta_id = v.id and cantidad > cancelada_cantidad) as piezas, 'ticket' as tipo
-     from ventas v where v.cancelada = 1 and v.creado_en >= ?
-     union all
-     select d.venta_id, d.importe, d.dolarones, d.forma_pago, d.creado_en, d.autor, d.motivo,
-       d.cantidad || ' × ' || l.nombre, 'pieza'
-     from devoluciones d join venta_lineas l on l.id = d.linea_id join ventas v on v.id = d.venta_id
-     where v.creado_en >= ?
-     order by 5 desc`,
-  )
-    .bind(desde, desde)
-    .all<{
-      id: string; total: number; dolarones: number; forma_pago: string; cancelada_en: string;
-      cancelada_por: string; motivo_cancelacion: string; piezas: string; tipo: string;
-    }>();
-
-  const { results: aperturas } = await env.DB.prepare(
-    `select abierto_en, abierto_por, caja from cajon_aperturas where abierto_en >= ? order by abierto_en desc`,
-  )
-    .bind(desde)
-    .all<{ abierto_en: string; abierto_por: string; caja: string }>();
-
-  const { results: cortes } = await env.DB.prepare(
-    `select id, caja, cajero, desde, hasta, tickets, fondo_inicial, efectivo_ventas, efectivo_devoluciones, retiros,
-            gastos, nomina, efectivo_esperado, efectivo_contado, diferencia, tarjeta_sistema, tarjeta_terminal, transferencias,
-            dolarones, fondo_siguiente, entregado, notas
-     from cortes where hasta >= ? order by hasta desc`,
-  )
-    .bind(desde)
-    .all();
-
-  const { results: retiros } = await env.DB.prepare(
-    `select creado_en, tipo, caja, cajero, importe, motivo from retiros where creado_en >= ? order by creado_en desc`,
-  )
-    .bind(desde)
-    .all();
-
-  return json({
-    dias, dia_desde: rango.dia_desde, dia_hasta: rango.dia_hasta,
-    resumen: {
-      ventas: resumen?.ventas ?? 0,
-      total: resumen?.total ?? 0,
-      piezas: resumen?.piezas ?? 0,
-      ticket_promedio: resumen?.ventas ? Math.round((resumen.total ?? 0) / resumen.ventas) : 0,
-    },
-    anterior: {
-      ventas: anterior?.ventas ?? 0,
-      total: anterior?.total ?? 0,
-      piezas: anterior?.piezas ?? 0,
-      ticket_promedio: anterior?.ventas ? Math.round((anterior.total ?? 0) / anterior.ventas) : 0,
-    },
-    cuadre: {
-      bruto: cuadre?.bruto ?? 0,
-      devoluciones_pieza: cuadre?.devoluciones_pieza ?? 0,
-      cancelados: cuadre?.cancelados ?? 0,
-      fep: cuadre?.fep ?? 0,
-      vendido: (cuadre?.bruto ?? 0) - (cuadre?.devoluciones_pieza ?? 0) - (cuadre?.cancelados ?? 0) - (cuadre?.fep ?? 0),
-    },
-    por_forma_pago: porFormaPago,
-    por_dia: porDia,
-    por_hora: porHora,
-    por_categoria: porCategoria,
-    por_categoria_anterior: porCategoriaAnterior,
-    inventario: await inventarioEnPiso(env),
-    top_productos: topProductos,
-    precio_sugerido: { n: precioSugerido?.n ?? 0, promedio_pct: precioSugerido?.promedio_pct ?? null },
-    dias_en_venta_por_categoria: diasEnVenta,
-    cancelaciones: {
-      n: cancelaciones.length,
-      total: cancelaciones.reduce((suma, c) => suma + c.total, 0),
-      dolarones: cancelaciones.reduce((suma, c) => suma + c.dolarones, 0),
-      detalle: cancelaciones,
-    },
-    aperturas_cajon: aperturas,
-    cortes,
-    retiros,
   });
 }
 
@@ -1729,10 +2247,55 @@ async function servirFoto(id: string, env: Env): Promise<Response> {
   }
   return new Response(objeto.body, {
     headers: {
-      'content-type': 'image/jpeg',
+      'content-type': objeto.httpMetadata?.contentType || 'image/jpeg',
       'cache-control': 'private, max-age=3600',
     },
   });
+}
+
+/** Todo lo que responde el host del portal (dolarones.eldolaron.com): assets fijos, catálogo público y /api/portal/*. */
+async function rutaPortalPublico(request: Request, env: Env, url: URL): Promise<Response> {
+  const { pathname } = url;
+  const archivos: Record<string, string> = {
+    '/': '/portal', '/portal': '/portal', '/portal.html': '/portal', '/v': '/portal',
+    '/portal.js': '/portal.js', '/portal.css': '/portal.css', '/code128.js': '/code128.js', '/vendor/qrcode-generator.js': '/vendor/qrcode-generator.js',
+    '/el-dolaron-logo.png': '/el-dolaron-logo.png',
+    // Manual de la revendedora (#623): práctica con datos de ejemplo, sin API. Importa vender.js (solo funciones puras de texto y fechas).
+    '/manual': '/manual', '/manual.js': '/manual.js', '/vender.js': '/vender.js',
+  };
+  if (archivos[pathname] && (request.method === 'GET' || request.method === 'HEAD')) {
+    const asset = new URL(archivos[pathname], url.origin);
+    const pantalla = await env.ASSETS.fetch(new Request(asset, { method: request.method }));
+    // Assets no hace redirección de HTML hacia el index del personal.
+    if (pantalla.status >= 300 && pantalla.status < 400)
+      return json({ error: 'Página no disponible.' }, 503);
+    const respuesta = new Response(pantalla.body, pantalla);
+    const authDomain = env.FIREBASE_AUTH_DOMAIN || `${env.FIREBASE_PROJECT_ID}.firebaseapp.com`;
+    const frameAuth = /^[a-z0-9.-]+$/.test(authDomain) ? `https://${authDomain}` : '';
+    respuesta.headers.set('content-security-policy', "default-src 'self'; script-src 'self' https://www.gstatic.com https://www.google.com https://www.recaptcha.net https://apis.google.com; style-src 'self' 'unsafe-inline'; connect-src 'self' https://identitytoolkit.googleapis.com https://securetoken.googleapis.com https://www.google.com https://www.recaptcha.net; frame-src https://www.google.com https://www.recaptcha.net " + frameAuth + "; img-src 'self' data: https://www.gstatic.com; object-src 'none'; base-uri 'none'; frame-ancestors 'none'");
+    respuesta.headers.set('cache-control', 'no-store');
+    respuesta.headers.set('referrer-policy', 'no-referrer');
+    respuesta.headers.set('x-content-type-options', 'nosniff');
+    return respuesta;
+  }
+  // Sin sesión nadie paga el abuso: tope por IP a la API pública (cada petición con token
+  // cuesta un lookup a Firebase; cada búsqueda, un barrido de productos en D1). Las fotos
+  // del catálogo quedan fuera: una página del sitio pide dos docenas de golpe.
+  // ponytail: tope único por IP; si un NAT grande lo tropieza, subir el limit en wrangler.jsonc.
+  if (env.LIMITE_PORTAL && pathname.startsWith('/api/') && !/^\/api\/catalogo\/(foto|recorte)\//.test(pathname)) {
+    const { success } = await env.LIMITE_PORTAL.limit({ key: request.headers.get('cf-connecting-ip') ?? 'sin-ip' });
+    if (!success) {
+      const r = json({ error: 'Demasiadas peticiones. Espera un minuto.' }, 429);
+      r.headers.set('retry-after', '60');
+      return r;
+    }
+  }
+  const publico = await catalogoPublico(request, env, url);
+  if (publico) return publico;
+  if (!pathname.startsWith('/api/portal/') || pathname === '/api/portal/llegada')
+    return json({ error: 'Ruta no encontrada.' }, 404);
+  try { return await portal(request, env, url); }
+  catch { return json({ error: 'Servicio no disponible.' }, 503); }
 }
 
 export default {
@@ -1751,32 +2314,11 @@ export default {
       if (aviso && request.method === 'POST') return await recibirNotificacion(aviso[1], request, env, ctx);
       // Puerta pública cerrada por defecto. Nunca comparte rutas ni assets del personal.
       if (env.HOST_PORTAL && url.hostname === env.HOST_PORTAL) {
-        const archivos: Record<string, string> = {
-          '/': '/portal', '/portal': '/portal', '/portal.html': '/portal', '/v': '/portal',
-          '/portal.js': '/portal.js', '/portal.css': '/portal.css', '/code128.js': '/code128.js', '/vendor/qrcode-generator.js': '/vendor/qrcode-generator.js',
-          '/el-dolaron-logo.png': '/el-dolaron-logo.png',
-        };
-        if (archivos[pathname] && (request.method === 'GET' || request.method === 'HEAD')) {
-          const asset = new URL(archivos[pathname], url.origin);
-          const pantalla = await env.ASSETS.fetch(new Request(asset, { method: request.method }));
-          // Assets no hace redirección de HTML hacia el index del personal.
-          if (pantalla.status >= 300 && pantalla.status < 400)
-            return json({ error: 'Página no disponible.' }, 503);
-          const respuesta = new Response(pantalla.body, pantalla);
-          const authDomain = env.FIREBASE_AUTH_DOMAIN || `${env.FIREBASE_PROJECT_ID}.firebaseapp.com`;
-          const frameAuth = /^[a-z0-9.-]+$/.test(authDomain) ? `https://${authDomain}` : '';
-          respuesta.headers.set('content-security-policy', "default-src 'self'; script-src 'self' https://www.gstatic.com https://www.google.com https://www.recaptcha.net https://apis.google.com; style-src 'self' 'unsafe-inline'; connect-src 'self' https://identitytoolkit.googleapis.com https://securetoken.googleapis.com https://www.google.com https://www.recaptcha.net; frame-src https://www.google.com https://www.recaptcha.net " + frameAuth + "; img-src 'self' data: https://www.gstatic.com; object-src 'none'; base-uri 'none'; frame-ancestors 'none'");
-          respuesta.headers.set('cache-control', 'no-store');
-          respuesta.headers.set('referrer-policy', 'no-referrer');
-          respuesta.headers.set('x-content-type-options', 'nosniff');
-          return respuesta;
-        }
-        const publico = await catalogoPublico(request, env, url);
-        if (publico) return publico;
-        if (!pathname.startsWith('/api/portal/') || pathname === '/api/portal/llegada')
-          return json({ error: 'Ruta no encontrada.' }, 404);
-        try { return await portal(request, env, url); }
-        catch { return json({ error: 'Servicio no disponible.' }, 503); }
+        const publica = await rutaPortalPublico(request, env, url);
+        // Único host sin Access: el navegador no vuelve a entrar por http.
+        const respuesta = new Response(publica.body, publica);
+        respuesta.headers.set('strict-transport-security', 'max-age=31536000; includeSubDomains');
+        return respuesta;
       }
       if (pathname.startsWith('/api/portal/') && pathname !== '/api/portal/llegada')
         return json({ error: 'Ruta no encontrada.' }, 404);
@@ -1797,6 +2339,10 @@ export default {
       // Va antes de quienEs; cualquier otra ruta /api/asistente/* responde 404 dentro de rutaAsistente.
       if (pathname.startsWith('/api/asistente/')) return await rutaAsistente(request, env, url);
 
+      // #603: la PC de la caja verifica transferencias con Banxico. Entra solo con su service token de Access
+      // (cep.ts lo verifica); va antes de quienEs porque ese token no trae correo de persona.
+      if (pathname.startsWith('/api/cep/')) return await rutaCep(request, env, url);
+
       // Quien es (JWT de Access verificado) y si su cuenta le deja entrar aqui.
       const regla = permiso(pathname, request.method);
       const acceso = await quienEs(request, env, url.hostname);
@@ -1804,13 +2350,17 @@ export default {
         return json({ error: 'Sin sesion. Vuelve a entrar.' }, 401);
       }
       let correo = acceso;
+      const usuario = regla !== 'cuenta' ? await leerUsuario(env, acceso) : null;
       if (regla !== 'cuenta') {
-        const usuario = await leerUsuario(env, acceso);
         if (!puede(usuario, regla)) {
           // Una pantalla lleva a donde se pide acceso; una llamada de la API
           // recibe el error tal cual.
           if (!pathname.startsWith('/api/') && request.method === 'GET') {
             if (soloComputadora(usuario)) return Response.redirect(`${url.origin}/caja`, 302);
+            // Revendedora (#575): su unica pantalla es /vender; el menu de la tienda no es para ella.
+            if (esRevendedora(usuario) && /^\/(?:index(?:\.html)?)?$/.test(pathname)) return Response.redirect(`${url.origin}/vender`, 302);
+            // Inversionista (#610): su unica pantalla es /tablero.
+            if (esInversionista(usuario) && /^\/(?:index(?:\.html)?)?$/.test(pathname)) return Response.redirect(`${url.origin}/tablero`, 302);
             return Response.redirect(`${url.origin}/sin-acceso?desde=${encodeURIComponent(pathname)}`, 302);
           }
           return json({ error: usuario?.activo ? 'Tu cuenta no tiene permiso para esto.' : 'No tienes cuenta activa.' }, 403);
@@ -1825,13 +2375,43 @@ export default {
         }
       }
 
-      if (pathname === '/api/yo') {
-        return await yo(env, correo, soloComputadora(await leerUsuario(env, correo)) ? await cajeroEnTurno(request, env) : null);
+      if (/^\/pieza(?:\.html)?\/?$/.test(pathname) && request.method === 'GET') {
+        const destino = new URL('/inventario', url.origin); destino.search = url.search; destino.hash = 'buscar';
+        return Response.redirect(destino.href, 302);
       }
-      const respuestaRopaIA = await rutaRopaAdmin(request, env, pathname);
+
+      if (pathname === '/api/yo') {
+        return await yo(env, correo, soloComputadora(await leerUsuario(env, correo)) ? await cajeroEnTurno(request, env) : null, !!env.HOST_VENDEDOR && url.hostname === env.HOST_VENDEDOR);
+      }
+      if (pathname === '/api/camara/solicitud' || pathname.startsWith('/api/camara/solicitud/')) {
+        return await rutaCamaraRemota(request, env, pathname, usuario!);
+      }
+      if (pathname === '/api/solicitudes-precio' || pathname.startsWith('/api/solicitudes-precio/') || /^\/api\/piezas\/[^/]+\/solicitud-precio$/.test(pathname)) {
+        // Aplicar un precio pasa por corregirBorrador: las mismas reglas que la corrección de la ficha.
+        return await rutaSolicitudesPrecio(request, env, url, usuario!, (id, precio, esperado, solicitudId) => corregirBorrador(id, { precio }, env, usuario, undefined, esperado, correo, solicitudId));
+      }
+      if (pathname === '/api/piezas/resolver' && request.method === 'GET') {
+        return await resolverCodigo(env, url, await leerUsuario(env, correo), correo, ctx);
+      }
+      if (pathname === '/api/piezas' || pathname.startsWith('/api/piezas/')) {
+        const respuesta = await rutaPiezas(request, env, url, await leerUsuario(env, correo), ctx);
+        if (respuesta) return respuesta;
+      }
+      // #441: revisar ropa y recortes modifica inventario; sus lecturas conservan el permiso por rol.
+      if (request.method === 'POST' && /^\/api\/(ropa-ia|recortes)\//.test(pathname)
+          && !puedeEditarInventario(await leerUsuario(env, correo))) {
+        return json({ error: 'Tu cuenta no tiene permiso para editar el inventario.' }, 403);
+      }
+      const respuestaVender = await rutaVender(request, env, url, correo, ctx, esRevendedora(usuario));
+      if (respuestaVender) return respuestaVender;
+      const respuestaRopaIA = await rutaRopaAdmin(request, env, pathname, correo);
       if (respuestaRopaIA) return respuestaRopaIA;
+      if (request.method === 'POST' && /^\/api\/recortes\/[^/]+\/(aprobar|original|reintentar)$/.test(pathname)
+          && !puedeEditarInventario(await leerUsuario(env, correo))) return json({ error: 'Tu cuenta no tiene permiso para editar el inventario.' }, 403);
       const respuestaRecortes = await rutaRecortesAdmin(request, env, pathname);
       if (respuestaRecortes) return respuestaRecortes;
+      const respuestaImagen = await rutaImagenUpc(request, env, pathname, correo, ctx);
+      if (respuestaImagen) return respuestaImagen;
       if (pathname === '/api/cajeros' && request.method === 'GET') return await listarCajeros(env);
       if (pathname === '/api/cajeros/entrar' && request.method === 'POST') return await entrar(request, env);
       if (pathname === '/api/cajeros/salir' && request.method === 'POST') return await salir(request, env);
@@ -1855,11 +2435,35 @@ export default {
         return await resolverSolicitud(resolver[1], request, env, correo);
       }
 
+      // Botón «Ayuda» de la caja y notificaciones push al dueño (Issue #600, push.ts).
+      if (pathname === '/api/ayuda' || pathname.startsWith('/api/push/')) {
+        const respuestaPush = await rutaPush(request, env, pathname, correo);
+        if (respuestaPush) return respuestaPush;
+      }
+
+      // Centro de avisos (Issue #429): ventas de ML por atender, a nombre del cajero que la marca.
+      if (pathname === '/api/avisos' && request.method === 'GET') {
+        // Ventas de ML + transferencias que Banxico no confirmo (#603): la caja las ve como aviso, el dueño las valida.
+        return json({ ...await (await avisosPendientes(env)).json() as object, transferencias: await transferenciasPorValidar(env) });
+      }
+      // Comprobante de transferencia (#603): leerlo al cobrar (caja) y verlo después (solo el dueño, ya filtrado por permiso()).
+      if (pathname === '/api/transferencias/comprobante' && request.method === 'POST') return await subirComprobante(request, env);
+      const verComp = pathname.match(/^\/api\/transferencias\/(\d+)\/comprobante$/);
+      if (verComp && request.method === 'GET') return await verComprobante(env, Number(verComp[1]));
+      const verFotoRep = pathname.match(/^\/api\/pagos-reportados\/(\d+)\/comprobante$/);
+      if (verFotoRep && request.method === 'GET') return await verFotoReportada(env, Number(verFotoRep[1]));
+      const validarTransf = pathname.match(/^\/api\/avisos\/transferencias\/(\d+)\/validar$/);
+      if (validarTransf && request.method === 'POST') return await validarTransferencia(env, Number(validarTransf[1]), correo);
+      const atender = pathname.match(/^\/api\/avisos\/ml\/([^/]+)\/([^/]+)$/);
+      if (atender && request.method === 'POST') {
+        return await atenderVentaML(env, decodeURIComponent(atender[1]), decodeURIComponent(atender[2]), correo);
+      }
+
       // Conteo de piezas de alto valor (Issue #219, conteo.ts). Contar: cualquier cuenta de piso; ajustar y el rastro: dueno.
-      if (pathname === '/api/conteo' && request.method === 'GET') return await listarAltoValor(env);
-      if (pathname === '/api/conteo' && request.method === 'POST') return await revisarConteo(request, env);
-      if (pathname === '/api/conteo/ajustes' && request.method === 'GET') return await listarAjustes(env);
-      if (pathname === '/api/conteo/ajustes' && request.method === 'POST') return await ajustarExistencia(request, env, correo, ctx);
+      if (pathname === '/api/conteo' && request.method === 'GET') return await listarAltoValor(env, propietarioDe(usuario));
+      if (pathname === '/api/conteo' && request.method === 'POST') return await revisarConteo(request, env, propietarioDe(usuario));
+      if (pathname === '/api/conteo/ajustes' && request.method === 'GET') return await listarAjustes(env, propietarioDe(usuario));
+      if (pathname === '/api/conteo/ajustes' && request.method === 'POST') return await ajustarExistencia(request, env, correo, ctx, propietarioDe(usuario));
 
       if (pathname.startsWith('/api/ml/') || pathname === '/ml/callback') {
         const respuestaML = await rutaML(request, env, url);
@@ -1899,6 +2503,18 @@ export default {
         }
       }
 
+      // #441 PR D: editar, fusionar, descartar, reanalizar y poner imagen exigen la casilla «Editar
+      // inventario» (el dueño siempre). La corrección de captura propia de 24 h (existencia, talla y
+      // revision) no pasa por aquí: es el carrusel de la cámara y no pide casilla.
+      const escritura = pathname.match(/^\/api\/borradores\/[^/]+(?:\/(fusionar|analizar|imagen(?:\/buscar)?))?$/);
+      if (escritura && (escritura[1] || ['PATCH', 'DELETE'].includes(request.method))
+          && !puedeEditarInventario(await leerUsuario(env, correo))) {
+        return json({ error: 'Tu cuenta no tiene permiso para editar el inventario.' }, 403);
+      }
+
+      const imagenPieza = await rutaImagenPieza(request, env, pathname);
+      if (imagenPieza) return imagenPieza;
+
       const fotoMarket = pathname.match(/^\/api\/marketplace\/foto\/([^/]+)$/);
       if (pathname === '/api/marketplace' || fotoMarket) {
         if (request.method !== 'GET') return json({ error: 'Metodo no permitido.' }, 405);
@@ -1913,6 +2529,7 @@ export default {
       if (pathname === '/api/calibracion' && request.method === 'PUT') {
         return await guardarCalibracion(request, env);
       }
+      if (pathname === '/api/calibracion' && request.method === 'GET') return await leerCalibracion(env);
 
       if (pathname === '/api/familias') {
         if (request.method === 'POST') {
@@ -1987,6 +2604,7 @@ export default {
       if (pathname === '/api/retiros' && request.method === 'POST') {
         return await registrarRetiro(request, env, correo);
       }
+      if (pathname === '/api/terminal') return await rutaTerminal(request, env, correo);   // solo el dueno (cuentas.ts)
       if (pathname === '/api/gastos' || pathname.startsWith('/api/gastos/')) {
         return await rutaGastos(request, env, url, correo);
       }
@@ -2017,6 +2635,8 @@ export default {
         return await detalleVenta(ticket[1], env, url.searchParams.get('imprimir') === '1');
       }
 
+      if (pathname === '/api/tablero') return await rutaTablero(request, env, ctx);
+
       if (pathname === '/api/reportes') {
         return await reportes(url, env);
       }
@@ -2033,22 +2653,42 @@ export default {
         return await exportarInventarioCsv(env);
       }
 
+      if (pathname === '/api/etiquetas/pendientes' && request.method === 'GET') {
+        return await listarEtiquetasPendientes(env, propietarioDe(await leerUsuario(env, correo)));
+      }
       if (pathname === '/api/etiquetas' && request.method === 'POST') {
-        return await prepararEtiquetas(request, env, propietarioDe(await leerUsuario(env, correo)));
+        return await prepararEtiquetas(request, env, propietarioDe(await leerUsuario(env, correo)), correo, !!env.HOST_VENDEDOR && url.hostname === env.HOST_VENDEDOR);
+      }
+      if (pathname === '/api/etiquetas/enviadas' && request.method === 'POST') {
+        return await reclamarEtiquetas(request, env, propietarioDe(await leerUsuario(env, correo)), !!env.HOST_VENDEDOR && url.hostname === env.HOST_VENDEDOR);
+      }
+      if (pathname === '/api/etiquetas/enviadas' && request.method === 'DELETE') {
+        return await soltarEtiquetas(request, env, propietarioDe(await leerUsuario(env, correo)));
       }
 
       if (pathname === '/api/borradores/manual' && request.method === 'POST') {
         return await capturarManual(request, env, correo);
       }
+      if (pathname === '/api/borradores/upc' && request.method === 'POST') {
+        return await capturarPorUpc(request, env, correo, ctx);
+      }
+      if (pathname === '/api/borradores/upc/buscar' && request.method === 'POST') return await capturarDesconocido(request, env, ctx, correo);
+      if (pathname === '/api/borradores/upc/manual' && ['POST', 'PATCH'].includes(request.method)) return await capturarManualEscaner(request, env, correo);
+      const desconocida = pathname.match(/^\/api\/borradores\/upc\/([^/]+)$/);
+      if (desconocida && request.method === 'GET') return await estadoDesconocido(desconocida[1], env, correo);
+      const upcBuscado = pathname.match(/^\/api\/manifiesto\/([^/]+)$/);
+      if (upcBuscado && request.method === 'GET') {
+        return await buscarEnManifiesto(decodeURIComponent(upcBuscado[1]), env);
+      }
 
       const pieza = pathname.match(/^\/api\/borradores\/([^/]+)$/);
       if (pieza) {
         if (request.method === 'PATCH') {
-          const esDueno = !!(await leerUsuario(env, correo))?.roles.includes('dueno');
-          return await corregirBorrador(pieza[1], await request.json(), env, esDueno);
+          const editor = await leerUsuario(env, correo);
+          return await corregirBorrador(pieza[1], await request.json(), env, editor, undefined, undefined, editor?.roles.includes('dueno') ? correo : undefined, undefined, { ctx, correo });
         }
         if (request.method === 'DELETE') {
-          return await descartarBorrador(pieza[1], env);
+          return await descartarBorrador(pieza[1], env, propietarioDe(await leerUsuario(env, correo)), correo);
         }
         return json({ error: 'Metodo no permitido.' }, 405);
       }
@@ -2056,11 +2696,11 @@ export default {
       const correccion = pathname.match(CORRECCION_CAPTURA);
       if (correccion?.[2] === 'revision') return await revisarCaptura(correccion[1], request, env, correo);
       if (correccion && request.method === 'PATCH') {
-        return await corregirCaptura(correccion[1], correccion[2], request, env, correo);
+        return await corregirCaptura(correccion[1], correccion[2], request, env, correo, false, ctx);
       }
 
       if (fusion && request.method === 'POST') {
-        return await fusionarBorrador(fusion[1], request, env);
+        return await fusionarBorrador(fusion[1], request, env, propietarioDe(await leerUsuario(env, correo)), correo);
       }
 
       // Reintento manual, y la via para la prueba comparativa: ?modelo=gemini
@@ -2070,8 +2710,14 @@ export default {
           return json({ error: 'Identificador invalido.' }, 400);
         }
         const modelo = modeloPedido(url, env);
-        ctx.waitUntil(analizarBorrador(reintento[1], env, modelo, busquedaPedida(url)));
-        return json({ id: reintento[1], modelo, estado_analisis: 'pendiente' }, 202);
+        // Reintento explícito: vuelve a abrir el análisis, a diferencia de una respuesta tardía (#399).
+        // Una pieza `listo` no se reabre (#479): el análisis solo sugiere y, si cambia el precio, pide aprobación al dueño.
+        await env.DB.prepare("update productos set estado_analisis = 'pendiente', modificado_por = ? where id = ? and upc is not null and estado_analisis not in ('descartado', 'listo')")
+          .bind(correo, reintento[1]).run();
+        const lista = (await env.DB.prepare('select estado_analisis from productos where id = ?').bind(reintento[1]).first<{ estado_analisis: string }>())?.estado_analisis === 'listo';
+        ctx.waitUntil(analizarBorrador(reintento[1], env, modelo, busquedaPedida(url), correo));
+        return json(lista ? { id: reintento[1], modelo, estado_analisis: 'listo', sugerencia: true, mensaje: 'Sugerencia enviada para aprobación' }
+          : { id: reintento[1], modelo, estado_analisis: 'pendiente' }, 202);
       }
 
       // Issue #281: errores de JavaScript de la caja, al mismo log que los del servidor.
@@ -2107,7 +2753,8 @@ export default {
       }
       return pantalla;
     } catch (error) {
-      console.error(JSON.stringify({ mensaje: 'fallo en la peticion', pathname, error: String(error),
+      // El segmento secreto de /api/ml/notificaciones/<secreto> no va al log.
+      console.error(JSON.stringify({ mensaje: 'fallo en la peticion', pathname: pathname.replace(/^(\/api\/ml\/notificaciones\/).+/, '$1<secreto>'), error: String(error),
         pila: error instanceof Error ? error.stack?.slice(0, 2000) : undefined }));
       return json({ error: 'Error interno. Intenta de nuevo.' }, 500);
     }
@@ -2115,11 +2762,29 @@ export default {
 
   // Cron de wrangler.jsonc, cada 15 min: ordenes de Mercado Libre perdidas y
   // conciliacion de existencias. Sin cuenta conectada no hace nada.
-  async scheduled(_evento, env, ctx): Promise<void> {
+  /** Búsquedas por código (#406): en paralelo, cada una con su reintento. */
+  async queue(lote, env): Promise<void> {
+    await Promise.all(lote.messages.map(async (mensaje) => {
+      try {
+        await identificarPieza(mensaje.body.id, mensaje.body.upc, env, mensaje.attempts >= 2);
+        mensaje.ack();
+      } catch {
+        mensaje.retry();
+      }
+    }));
+  },
+
+  async scheduled(evento, env, ctx): Promise<void> {
     ctx.waitUntil(sincronizar(env));
     // Apartados cuyo plazo llego: vuelven a la venta (Issue #269). Aparte, para que uno no frene al otro.
     ctx.waitUntil(vencerPedidos(env));
     ctx.waitUntil(procesarColaRopa(env));
-    ctx.waitUntil((async () => { await procesarRecortes(env); await revisarRecortes(env); })());
+    ctx.waitUntil((async () => { await procesarRecortes(env); await revisarRecortes(env); await ajustarRecortesViejos(env); })());
+    ctx.waitUntil(procesarRellenoImagenes(env));
+    // Piezas que se quedaron en `pendiente` y fotos/recortes de R2 sin pieza (#481).
+    ctx.waitUntil(rescatarPendientes(env).catch((error) => console.error(JSON.stringify({ mensaje: 'rescate de pendientes fallido', error: String(error).slice(0, 200) }))));
+    if (esCorridaSemanal(evento.scheduledTime ?? Date.now())) {
+      ctx.waitUntil(reportarHuerfanosR2(env).catch((error) => console.error(JSON.stringify({ mensaje: 'reporte de huerfanos fallido', error: String(error).slice(0, 200) }))));
+    }
   },
-} satisfies ExportedHandler<Env>;
+} satisfies ExportedHandler<Env, BusquedaUpc>;

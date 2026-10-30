@@ -13,7 +13,14 @@ export async function procesarRecortes(env: Env): Promise<void> {
     try {
       const foto = await env.FOTOS.get(fila.foto_key);
       if (!foto) throw new Error('Foto no encontrada en R2.');
-      const salida = await (env.IMAGES as any).input(foto.body).transform({ segment: 'foreground' }).output({ format: 'image/webp', quality: 82 });
+      const original = await foto.arrayBuffer();
+      const recortar = async (ajustar: boolean) => {
+        const sinFondo = (env.IMAGES as any).input(new Response(original).body).transform({ segment: 'foreground' });
+        // #421: cortar el borde transparente para que el producto llene la portada.
+        return (ajustar ? sinFondo.transform({ trim: { border: { keep: 24 } } }) : sinFondo).output({ format: 'image/webp', quality: 82 });
+      };
+      // ponytail: si el trim no reconoce la transparencia o falla, el recorte queda como antes; la cuota (9422) sí corta.
+      const salida = await recortar(true).catch((e: unknown) => { if (/9422/.test(String(e))) throw e; return recortar(false); });
       const bytes = salida instanceof Response ? salida.body : salida.response().body;
       if (!bytes) throw new Error('Recorte vacío.');
       await env.FOTOS.put(`recortes/${fila.id}.webp`, bytes, { httpMetadata: { contentType: 'image/webp' } });
@@ -22,6 +29,39 @@ export async function procesarRecortes(env: Env): Promise<void> {
       if (/9422/.test(String(error))) return;
       await env.DB.prepare("update productos set recorte_estado='error', recorte_fecha=? where id=? and recorte_estado is null").bind(ahora(), fila.id).run();
     }
+  }
+}
+
+/**
+ * #425: una pasada que ajusta al producto los recortes hechos antes de #421. Solo el trim sobre el
+ * WebP que ya existe: sin quitar fondo otra vez ni revisar con IA, y la revisión aprobada se conserva.
+ * ponytail: cursor por rowid; al terminar la consulta ya no lee filas. Reajustar uno ya ajustado no le hace nada.
+ */
+export async function ajustarRecortesViejos(env: Env): Promise<void> {
+  const activa = await env.DB.prepare("select valor from config where clave='recortes_activo'").first<{ valor: string }>();
+  if (activa?.valor !== '1') return;
+  const cursor = await env.DB.prepare("select valor from config where clave='recortes_ajuste_hasta'").first<{ valor: string }>();
+  const { results } = await env.DB.prepare("select rowid, id from productos where rowid > ? and recorte_estado='listo' order by rowid limit 40")
+    .bind(Number(cursor?.valor ?? 0)).all<{ rowid: number; id: string }>();
+  let hasta = 0;
+  try {
+    for (const fila of results) {
+      const recorte = await env.FOTOS.get(`recortes/${fila.id}.webp`);
+      if (recorte) {
+        try {
+          const salida = await (env.IMAGES as any).input(recorte.body).transform({ trim: { border: { keep: 24 } } }).output({ format: 'image/webp', quality: 82 });
+          const bytes = salida instanceof Response ? salida.body : salida.response().body;
+          // Si se reinició o cambió mientras tanto, no se revive el viejo.
+          if (bytes) await env.FOTOS.put(`recortes/${fila.id}.webp`, bytes, { onlyIf: { etagMatches: recorte.etag }, httpMetadata: { contentType: 'image/webp' } });
+        } catch (error) {
+          if (/9422/.test(String(error))) return;
+        }
+      }
+      hasta = fila.rowid;
+    }
+  } finally {
+    if (hasta) await env.DB.prepare("insert into config (clave, valor) values ('recortes_ajuste_hasta', ?) on conflict (clave) do update set valor = excluded.valor")
+      .bind(String(hasta)).run();
   }
 }
 
@@ -70,6 +110,13 @@ export async function rutaRecortesAdmin(request: Request, env: Env, pathname: st
   if (pathname === '/api/recortes' && request.method === 'GET') {
     const { results } = await env.DB.prepare(`select id,codigo,nombre,recorte_estado,recorte_fecha,recorte_revision from productos where propietario='dolaron' and recorte_estado in ('listo','error') order by (recorte_revision is not null and recorte_revision<>'ok') desc, recorte_fecha desc limit 60`).all();
     return resp(results);
+  }
+  // #419: el recorte sin aprobar no sale en el catálogo público, pero aquí hay que verlo para revisarlo.
+  const img = pathname.match(/^\/api\/recortes\/([0-9a-f-]{36})\/imagen$/);
+  if (img && request.method === 'GET') {
+    const objeto = await env.FOTOS.get(`recortes/${img[1]}.webp`);
+    if (!objeto) return resp({ error: 'Recorte no encontrado.' }, 404);
+    return new Response(objeto.body, { headers: { 'content-type': 'image/webp', 'cache-control': 'private, no-store' } });
   }
   const m = pathname.match(/^\/api\/recortes\/([0-9a-f-]{36})\/(original|reintentar|aprobar)$/);
   if (!m || request.method !== 'POST') return null;

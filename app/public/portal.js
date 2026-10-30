@@ -23,6 +23,36 @@ let valeEnMemoria = null;
   if (leido?.startsWith('DP-')) { guardarVale(leido); history.replaceState(null, '', '/'); }
   else if (valePendiente()) guardarVale(valePendiente());
 }
+// Referidos (#489): el enlace /?r=DOL42K se guarda en este teléfono hasta registrarse. El código
+// no es un secreto: solo dice quién invitó. Se precarga en el formulario y se puede borrar.
+const REF = 'referido-pendiente';
+const referidoPendiente = () => { try { return localStorage.getItem(REF) || ''; } catch { return ''; } };
+function guardarReferido(codigo) {
+  try { codigo ? localStorage.setItem(REF, codigo) : localStorage.removeItem(REF); } catch { /* sin almacenamiento: sigue en el campo */ }
+}
+{
+  const leido = new URLSearchParams(location.search).get('r');
+  if (leido && /^[A-Za-z0-9 -]{3,20}$/.test(leido)) { guardarReferido(leido.toUpperCase()); history.replaceState(null, '', '/' + location.hash); }
+  $('referido').value = referidoPendiente();
+}
+let enlaceReferido = '';
+async function referidos() {
+  try {
+    const r = await api('referidos');
+    $('referidos').hidden = !(r.habilitado && (r.puede_referir || r.mi_referido));
+    $('ref-mio').hidden = !r.mi_referido;
+    if (r.mi_referido) $('ref-mio').textContent = r.mi_referido.estado === 'liberado'
+      ? 'Ya recibiste ' + d(r.premio) + ' por tu primera compra de ' + pesos(r.minimo_compra) + ' o más.'
+      : 'Haz tu primera compra de ' + pesos(r.minimo_compra) + ' o más en la tienda y recibes ' + d(r.premio) + ' más.';
+    $('ref-invita').hidden = !r.puede_referir;
+    if (!r.puede_referir) return;
+    enlaceReferido = location.origin + '/?r=' + r.codigo;
+    $('ref-codigo').textContent = r.codigo;
+    $('ref-cuenta').textContent = r.referidos + ' de ' + r.maximo + ' invitados · ' + r.liberados + ' con su primera compra' +
+      (r.pendientes ? ' · ' + r.pendientes + ' por comprar' : '');
+    $('ref-whatsapp').href = 'https://wa.me/?text=' + encodeURIComponent('Únete a Dolarones de El Dolarón con mi código ' + r.codigo + ' y recibe 50 D: ' + enlaceReferido);
+  } catch { $('referidos').hidden = true; /* Sin referidos, el monedero sigue igual. */ }
+}
 async function pasarVale() {
   const codigo = valeEnMemoria;
   if (!codigo) return;
@@ -90,6 +120,7 @@ async function cargarCuenta() {
       estado('Lee y acepta las bases vigentes para continuar.');
       return;
     }
+    guardarReferido(null);
     $('titular').textContent = yo.nombre;
     $('numero').textContent = '#' + yo.numero;
     await actualizarSaldo();
@@ -97,6 +128,7 @@ async function cargarCuenta() {
     if (uid !== auth.currentUser?.uid) return;
     $('monedero').hidden = false;
     estado();
+    referidos();
     novedades();
     await pasarVale();
   } catch (e) {
@@ -137,7 +169,7 @@ async function actualizarSaldo() {
   $('minimo').hidden = !s.regalo_sujeto_minimo;
   $('vencimientos').replaceChildren(...s.lotes.map((l) => {
     const li = document.createElement('li');
-    li.textContent = d(l.restante) + (l.origen === 'regalo' ? ' de apertura' : ' por compras') +
+    li.textContent = d(l.restante) + (l.origen === 'regalo' ? ' de apertura' : l.origen === 'referido' ? ' por referidos' : ' por compras') +
       ' · vence ' + fecha(l.vence_en) + (Date.parse(l.disponible_desde) > Date.now() ? ' · disponible desde ' + fecha(l.disponible_desde) : '');
     return li;
   }));
@@ -210,9 +242,13 @@ $('cambiar-telefono').addEventListener('click', () => {
 $('registro-form').addEventListener('submit', (e) => {
   e.preventDefault();
   accion($('registrar'), async () => {
-    await api('registro', { nombre:$('nombre').value, acepta_bases:$('acepta').checked,
-      declara_mayor_edad:$('mayor-edad').checked, bases_version:config.bases_version });
+    const codigo = config.referidos ? $('referido').value.trim() : '';
+    const r = await api('registro', { nombre:$('nombre').value, acepta_bases:$('acepta').checked,
+      declara_mayor_edad:$('mayor-edad').checked, bases_version:config.bases_version,
+      ...(codigo ? { referido_codigo:codigo } : {}) });
+    guardarReferido(null);
     await cargarCuenta();
+    if (r.referido_otorgado) estado('¡Listo! Recibiste ' + d(r.referido_otorgado) + ' por unirte con un código.');
   });
 });
 $('codigo-form').addEventListener('submit', (e) => {
@@ -241,6 +277,10 @@ function cuentaRegresiva() {
   $('codigo-tiempo').textContent = 'Vence en ' + Math.floor(segundos / 60) + ':' + String(segundos % 60).padStart(2, '0');
 }
 setInterval(cuentaRegresiva, 1000);
+$('ref-copiar').addEventListener('click', () => accion($('ref-copiar'), async () => {
+  await navigator.clipboard.writeText(enlaceReferido);
+  estado('Enlace copiado.');
+}));
 $('actualizar').addEventListener('click', () => accion($('actualizar'), cargarCuenta));
 $('mas-recibos').addEventListener('click', () => accion($('mas-recibos'), async () => { await recibos(); estado(); }));
 $('pedir-vinculo').addEventListener('click', () => accion($('pedir-vinculo'), async () => {
@@ -262,6 +302,7 @@ try {
   $('texto-bases').textContent = config.bases;
   $('texto-aviso').textContent = config.aviso;
   $('legal').hidden = !config.bases || !config.aviso;
+  $('referido-campo').hidden = !config.referidos;
   if (!config.firebase) throw new Error('Estamos preparando tu monedero. El acceso aún no está disponible.');
   const app = await import('https://www.gstatic.com/firebasejs/12.19.0/firebase-app.js');
   sdk = await import('https://www.gstatic.com/firebasejs/12.19.0/firebase-auth.js');

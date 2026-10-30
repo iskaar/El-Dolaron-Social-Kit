@@ -16,8 +16,10 @@ import { avisarDueno } from './avisos.ts';
 // sola no cobra, cada cajero entra con su PIN (Issue #112, cajeros.ts).
 // `finanzas`: FEP. Toma fotos y ve solo sus piezas (propietario 'fep'); ver propietarioDe.
 // `auxiliar`: lleva gastos y nomina (Issue #326); no ve reportes, cuentas ni lo demas del dueno.
-export type Rol = 'dueno' | 'cajero' | 'capturista' | 'computadora' | 'finanzas' | 'auxiliar';
-export const ROLES: readonly Rol[] = ['dueno', 'cajero', 'capturista', 'computadora', 'finanzas', 'auxiliar'];
+// `revendedora`: externa (Issue #575). Solo /vender: aparta 48 h sin anticipo y ve lo suyo; nunca la caja.
+// `inversionista`: socio capitalista (Issue #610). Solo ve /tablero y GET /api/tablero (agregados, sin personas). No es `socio`: esa palabra es el cliente Dolarones.
+export type Rol = 'dueno' | 'cajero' | 'capturista' | 'computadora' | 'finanzas' | 'auxiliar' | 'revendedora' | 'inversionista';
+export const ROLES: readonly Rol[] = ['dueno', 'cajero', 'capturista', 'computadora', 'finanzas', 'auxiliar', 'revendedora', 'inversionista'];
 /** Lo que recibe alguien al aprobarle el acceso si no se escoge otra cosa. */
 export const ROL_POR_OMISION: Rol = 'cajero';
 
@@ -27,6 +29,7 @@ export interface Usuario {
   roles: Rol[];
   activo: boolean;
   caja: string;   // la caja del cajero (Issue #105); '' = la de la computadora
+  editar_inventario: boolean;
 }
 
 interface FilaUsuario {
@@ -35,6 +38,7 @@ interface FilaUsuario {
   roles: string;
   activo: number;
   caja: string;
+  editar_inventario: number;
 }
 
 /** Las cajas que se pueden asignar; las mismas que ofrece /caja. */
@@ -55,17 +59,25 @@ export type Regla = 'libre' | 'cuenta' | Rol[];
 const CAPTURA: Rol[] = ['capturista'];
 const CAPTURA_FEP: Rol[] = ['capturista', 'finanzas'];
 const CAJA: Rol[] = ['cajero', 'computadora'];
+// /vender y sus API: la caja y la revendedora. Va aparte de CAJA a proposito: esDeCaja compara por identidad
+// y la computadora sigue necesitando el PIN aqui (si fuera [...CAJA, 'revendedora'] el PIN desapareceria).
+const VENDER: Rol[] = [...CAJA, 'revendedora'];
 const TODOS: Rol[] = ['cajero', 'capturista'];
 const DUENO: Rol[] = [];
 const AUXILIAR: Rol[] = ['auxiliar'];
+const INVERSIONISTA: Rol[] = ['inversionista'];
 
 const PANTALLAS: Record<string, Rol[]> = {
   '/': TODOS,
   '/index': TODOS,
   '/captura': CAPTURA_FEP,
+  '/camara-remota': CAPTURA,
+  '/escanear': CAPTURA,
   '/admin': CAPTURA,
   '/marketplace': CAPTURA,
   '/etiquetas': CAPTURA_FEP,
+  '/pieza': CAPTURA_FEP,
+  '/inventario': CAPTURA_FEP,
   '/bandas': CAPTURA,
   '/calibrar-etiqueta': CAPTURA,
   '/prueba-codigo': CAPTURA,
@@ -73,8 +85,12 @@ const PANTALLAS: Record<string, Rol[]> = {
   '/caja': CAJA,
   '/socios': CAJA,
   '/pedidos': CAJA,
+  '/vender': VENDER,
+  '/manual': VENDER,   // manual interactivo de la revendedora (#594): practica con datos de ejemplo, sin API
+  '/avisos': CAJA,   // ventas de Mercado Libre por atender (Issue #429)
   '/tarjeta-bandas': TODOS,
   '/reportes': DUENO,
+  '/tablero': INVERSIONISTA,   // #610: solo lectura, agregados
   '/mercadolibre': DUENO,
   '/cuentas': DUENO,
   '/conteo': TODOS,
@@ -95,11 +111,16 @@ export function permiso(pathname: string, metodo: string): Regla {
   // Issue #281: cualquier cuenta que entro puede reportar un error de su pantalla, tambien la caja sin PIN.
   if (ruta === '/api/errores' && metodo === 'POST') return 'cuenta';
   if (ruta === '/marketplace-redes.png') return CAPTURA;
+  if (ruta === '/vender.js') return VENDER;
   // Codigo de las pantallas, sin datos: el permiso se cobra en la pantalla y en la API.
-  if (!ruta.startsWith('/api/') && /\.(js|css|png|svg|ico)$/.test(ruta)) return 'cuenta';
+  if (!ruta.startsWith('/api/') && /\.(js|css|png|svg|ico|webmanifest|woff2)$/.test(ruta)) return 'cuenta';
 
   if (ruta in PANTALLAS) return PANTALLAS[ruta];
 
+  if ((ruta === '/api/camara/solicitud' && ['GET', 'PUT'].includes(metodo))
+      || (metodo === 'POST' && /^\/api\/camara\/solicitud\/[^/]+\/(tomar|lista|cancelar)$/.test(ruta))) return CAPTURA;
+
+  if (ruta === '/api/tablero') return metodo === 'GET' ? INVERSIONISTA : DUENO;
   if (ruta === '/api/mensajes' || ruta === '/api/mensajes/responder') return DUENO;
   if (ruta === '/api/gastos' || /^\/api\/gastos\/[^/]+$/.test(ruta)) return AUXILIAR;
   if (ruta === '/api/nomina/entrada' || ruta === '/api/nomina/checador') return CAJA;
@@ -107,15 +128,32 @@ export function permiso(pathname: string, metodo: string): Regla {
   if (ruta === '/api/config') return metodo === 'GET' ? CAPTURA_FEP : DUENO;
   // Ropa de El Dolarón: FEP (finanzas) no ve ni renombra piezas ajenas (Issue #318).
   if (ruta === '/api/ropa-ia' || ruta.startsWith('/api/ropa-ia/')) return CAPTURA;
+  if (metodo === 'GET' && /^\/api\/recortes\/[^/]+\/imagen$/.test(ruta)) return [...CAPTURA, ...VENDER];
   if (ruta === '/api/recortes' || ruta.startsWith('/api/recortes/')) return CAPTURA;
   if (ruta === '/api/familias') return metodo === 'GET' ? TODOS : DUENO;
   if (ruta === '/api/borradores/manual') return DUENO;   // captura sin foto (Issue #115)
+  // Captura por UPC (Issue #365): el precio sale del manifiesto, no de quien captura.
+  // Solo El Dolarón: FEP (finanzas) no tiene manifiesto.
+  if (ruta === '/api/borradores/upc' || ruta.startsWith('/api/borradores/upc/') || ruta.startsWith('/api/manifiesto/')) return CAPTURA;
+  // #413: buscar/confirmar imagen en /admin, sin acceso de FEP.
+  if (/^\/api\/borradores\/[^/]+\/imagen(?:\/buscar)?$/.test(ruta)) return CAPTURA;
   if (ruta === '/api/borradores' || ruta.startsWith('/api/borradores/')) return CAPTURA_FEP;
-  if (ruta.startsWith('/api/foto/')) return CAPTURA_FEP;
-  if (ruta === '/api/etiquetas') return CAPTURA_FEP;
-  if (ruta === '/api/calibracion') return CAPTURA;
+  // La caja muestra la foto de cada pieza escaneada para detectar etiquetas cambiadas (Issue #358).
+  if (ruta.startsWith('/api/foto/')) return metodo === 'GET' ? [...CAPTURA_FEP, ...VENDER] : [...CAPTURA_FEP, ...CAJA];
+  // Etiquetas y su registro de enviadas (#440): lo usan la PC y el celular; el cajero no imprime.
+  if (ruta === '/api/etiquetas' || ruta === '/api/etiquetas/enviadas' || ruta === '/api/etiquetas/pendientes') return CAPTURA_FEP;
+  // Leer la calibracion lo hacen tambien FEP y el celular; cambiarla, solo quien captura.
+  if (ruta === '/api/calibracion') return metodo === 'GET' ? CAPTURA_FEP : CAPTURA;
+  if (metodo === 'GET' && (ruta === '/api/piezas' || /^\/api\/piezas\/[^/]+$/.test(ruta))) return CAPTURA_FEP;
+  if (metodo === 'POST' && /^\/api\/piezas\/[^/]+\/(existencia|juntar)$/.test(ruta)) return CAPTURA_FEP;
+  // Pedir un cambio de precio (#451): capturista o dueño. Listar y resolver (/api/solicitudes-precio) son del dueño, por omisión.
+  if (metodo === 'POST' && /^\/api\/piezas\/[^/]+\/solicitud-precio$/.test(ruta)) return CAPTURA;
   if (ruta === '/api/marketplace' || /^\/api\/marketplace\/foto\/[^/]+$/.test(ruta)) return CAPTURA;
   if (ruta === '/api/catalogo') return CAJA;
+  if (ruta === '/api/vender' || ruta === '/api/interesados' || ruta.startsWith('/api/interesados/')) return VENDER;
+  // Revendedora (#575): apartar 48 h sin anticipo, ver y cancelar lo suyo. vender.ts exige ademas que no sea personal de caja.
+  // #609: ademas, mandar el pago (foto del comprobante y clave) de uno suyo; ver la foto despues es solo del dueño (/api/pagos-reportados/:id/comprobante, por omisión).
+  if (ruta === '/api/vender/apartar' || ruta === '/api/vender/mios' || /^\/api\/vender\/apartados\/\d+\/(cancelar|pago|comprobante)$/.test(ruta)) return VENDER;
   if (ruta === '/api/socios') return CAJA;
   if (ruta === '/api/vales/config' && metodo === 'GET') return CAJA;
   if (ruta === '/api/vales/buscar' && metodo === 'POST') return CAJA;
@@ -136,17 +174,34 @@ export function permiso(pathname: string, metodo: string): Regla {
   if (/^\/api\/solicitudes\/[^/]+$/.test(ruta) && metodo === 'GET') return CAJA;   // la caja ve como va la suya
   if (ruta === '/api/ventas' || ruta.startsWith('/api/ventas/')) return CAJA;
   if (ruta === '/api/pedidos' || ruta.startsWith('/api/pedidos/')) return CAJA;   // pedidos por WhatsApp (Issue #269, pedidos.ts)
+  // Subir el comprobante de una transferencia para leerlo (#603): lo hace quien cobra. Verlo (/api/transferencias/:id/comprobante) es solo del dueño, por omisión.
+  if (ruta === '/api/transferencias/comprobante' && metodo === 'POST') return CAJA;
+  // Dar por buena a mano una transferencia que Banxico no confirmo (#603): solo el dueño, aunque el resto de avisos sea de caja.
+  if (/^\/api\/avisos\/transferencias\/\d+\/validar$/.test(ruta)) return DUENO;
+  if (ruta === '/api/avisos' || ruta.startsWith('/api/avisos/')) return CAJA;   // centro de avisos (Issue #429)
+  if (ruta === '/api/ayuda') return CAJA;   // botón «Ayuda» (Issue #600); /api/push/* es del dueño, por omisión
   if (ruta === '/api/impresiones' || ruta.startsWith('/api/impresiones/')) return CAJA;
 
   return DUENO;
 }
 
 /** Lo de caja: lo unico que abre el PIN del cajero. */
-export const esDeCaja = (regla: Regla) => regla === CAJA;
+export const esDeCaja = (regla: Regla) => regla === CAJA || regla === VENDER;
 
 /** La cuenta de la computadora de caja: para cobrar necesita el PIN de un cajero. */
 export const soloComputadora = (usuario: Usuario | null) =>
   !!usuario?.roles.includes('computadora') && !usuario.roles.includes('cajero') && !usuario.roles.includes('dueno');
+
+/**
+ * Revendedora externa (#575): tiene el rol y ninguno de caja o dueno. Solo ella usa el apartado sin anticipo,
+ * y a ella se le acota lo que ve de las demas. Quien ademas es cajero o dueno conserva el flujo de la tienda.
+ */
+export const esRevendedora = (usuario: Usuario | null) =>
+  !!usuario?.activo && usuario.roles.includes('revendedora')
+  && !usuario.roles.some((rol) => rol === 'dueno' || rol === 'cajero' || rol === 'computadora');
+
+/** Inversionista (#610): su unica pantalla es /tablero; el menu de la tienda no es para el. */
+export const esInversionista = (usuario: Usuario | null) => !!usuario?.activo && usuario.roles.includes('inversionista');
 
 /**
  * De quien son las piezas que esta persona captura y ve (Issue #298). FEP solo
@@ -162,6 +217,12 @@ export function puede(usuario: Usuario | null, regla: Regla): boolean {
   return usuario.roles.includes('dueno') || regla.some((rol) => usuario.roles.includes(rol));
 }
 
+/** #441: el rol habilita la ruta; la casilla autoriza cada escritura de inventario. */
+export const puedeEditarInventario = (usuario: Usuario | null): boolean => !!usuario?.activo && (
+  usuario.roles.includes('dueno') || (usuario.editar_inventario === true
+    && usuario.roles.some((rol) => rol === 'capturista' || rol === 'finanzas'))
+);
+
 /* ---------- quien es ---------- */
 
 const decodificar = (b64url: string): Uint8Array => {
@@ -172,17 +233,16 @@ const comoJson = (b64url: string): Record<string, unknown> =>
   JSON.parse(new TextDecoder().decode(decodificar(b64url)));
 
 /**
- * El correo dentro de un JWT de Access, o null si no es valido: firma RS256 de
- * una llave del equipo, para ESTA aplicacion (aud), del equipo correcto (iss) y
- * vigente. Exportada para probarla con llaves generadas en la prueba.
+ * La carga de un JWT de Access, o null si no es valido: firma RS256 de una llave
+ * del equipo, para ESTA aplicacion (aud), del equipo correcto (iss) y vigente.
  */
-export async function verificarJwt(
+async function verificarCarga(
   token: string,
   aud: string,
   emisor: string,
   llave: (kid: string) => Promise<CryptoKey | undefined>,
-  ahora = Date.now() / 1000,
-): Promise<string | null> {
+  ahora: number,
+): Promise<Record<string, unknown> | null> {
   const partes = token.split('.');
   if (partes.length !== 3) return null;
   let cabecera: Record<string, unknown>;
@@ -209,8 +269,36 @@ export async function verificarJwt(
   if (!auds.includes(aud) || carga.iss !== emisor) return null;
   if (typeof carga.exp !== 'number' || carga.exp < ahora) return null;
   if (typeof carga.nbf === 'number' && carga.nbf > ahora + 60) return null;
-  if (typeof carga.email !== 'string' || !carga.email) return null;
+  return carga;
+}
+
+/** El correo dentro de un JWT de Access de una persona, o null. Exportada para probarla con llaves generadas en la prueba. */
+export async function verificarJwt(
+  token: string,
+  aud: string,
+  emisor: string,
+  llave: (kid: string) => Promise<CryptoKey | undefined>,
+  ahora = Date.now() / 1000,
+): Promise<string | null> {
+  const carga = await verificarCarga(token, aud, emisor, llave, ahora);
+  if (!carga || typeof carga.email !== 'string' || !carga.email) return null;
   return carga.email.toLowerCase();
+}
+
+/**
+ * El Client ID (common_name) de un JWT de Access de un service token, o null. Un token de persona (con correo)
+ * no es un servicio, y un service token nunca pasa por verificarJwt: no lleva correo, asi que no entra a ninguna pantalla.
+ */
+export async function verificarJwtServicio(
+  token: string,
+  aud: string,
+  emisor: string,
+  llave: (kid: string) => Promise<CryptoKey | undefined>,
+  ahora = Date.now() / 1000,
+): Promise<string | null> {
+  const carga = await verificarCarga(token, aud, emisor, llave, ahora);
+  if (!carga || (typeof carga.email === 'string' && carga.email)) return null;
+  return typeof carga.common_name === 'string' && carga.common_name ? carga.common_name : null;
 }
 
 // Las llaves publicas de Access rotan de vez en cuando: se guardan una hora, y
@@ -252,17 +340,31 @@ export async function quienEs(request: Request, env: Env, hostname: string): Pro
   return verificarJwt(token, aud, `https://${equipo}`, (kid) => llaveDeAccess(equipo, kid));
 }
 
+/**
+ * El Client ID verificado del service token que hace la peticion, o null (misma verificacion que quienEs).
+ * Solo lo usa /api/cep/* (cep.ts). Con ACCESS_EQUIPO = "local" entra DEV_SERVICIO, sin Access.
+ */
+export async function quienEsServicio(request: Request, env: Env, hostname: string): Promise<string | null> {
+  const equipo: string | undefined = env.ACCESS_EQUIPO;
+  if (equipo === 'local') return env.DEV_SERVICIO || null;
+  const aud = (env.ACCESS_AUD as Record<string, string> | undefined)?.[hostname];
+  const token = request.headers.get('cf-access-jwt-assertion');
+  if (!equipo || !aud || !token) return null;
+  return verificarJwtServicio(token, aud, `https://${equipo}`, (kid) => llaveDeAccess(equipo, kid));
+}
+
 /* ---------- usuarios ---------- */
 
 export const leerRoles = (texto: string): Rol[] =>
   texto.split(',').map((r) => r.trim()).filter((r): r is Rol => (ROLES as string[]).includes(r));
 
 export async function leerUsuario(env: Env, correo: string): Promise<Usuario | null> {
-  const fila = await env.DB.prepare('select correo, nombre, roles, activo, caja from usuarios where correo = ?')
+  const fila = await env.DB.prepare('select correo, nombre, roles, activo, caja, editar_inventario from usuarios where correo = ?')
     .bind(correo)
     .first<FilaUsuario>();
   return fila
-    ? { correo: fila.correo, nombre: fila.nombre, roles: leerRoles(fila.roles), activo: fila.activo === 1, caja: fila.caja }
+    ? { correo: fila.correo, nombre: fila.nombre, roles: leerRoles(fila.roles), activo: fila.activo === 1, caja: fila.caja,
+      editar_inventario: fila.editar_inventario === 1 }
     : null;
 }
 
@@ -276,7 +378,7 @@ function json(cuerpo: unknown, status = 200): Response {
 const texto = (valor: unknown, max: number) => String(valor ?? '').replace(/\s+/g, ' ').trim().slice(0, max);
 
 /** Quien soy y que puedo hacer: para la pantalla de sin acceso y para esconder lo que no toca. */
-export async function yo(env: Env, correo: string, cajero: Usuario | null = null): Promise<Response> {
+export async function yo(env: Env, correo: string, cajero: Usuario | null = null, vendedor = false): Promise<Response> {
   const usuario = await leerUsuario(env, correo);
   const solicitud = await env.DB.prepare(
     `select estado, creado_en from solicitudes where tipo = 'acceso' and correo = ?
@@ -284,7 +386,10 @@ export async function yo(env: Env, correo: string, cajero: Usuario | null = null
   )
     .bind(correo)
     .first<{ estado: string; creado_en: string }>();
-  return json({ correo, usuario, solicitud, cajero: cajero && { correo: cajero.correo, nombre: cajero.nombre, caja: cajero.caja } });
+  const modos = usuario?.activo && (usuario.roles.includes('dueno') || usuario.roles.includes('capturista'))
+    ? ['capturar', 'buscar', 'revisar', 'imprimir']
+    : usuario?.activo && usuario.roles.includes('finanzas') ? ['capturar', 'buscar', ...(puedeEditarInventario(usuario) ? ['revisar'] : []), 'imprimir'] : [];
+  return json({ correo, usuario, solicitud, vendedor, revendedora: esRevendedora(usuario), modos_inventario: modos, cajero: cajero && { correo: cajero.correo, nombre: cajero.nombre, caja: cajero.caja } });
 }
 
 /** Alguien sin cuenta pide entrar. Una sola pendiente por persona: pedir otra vez la actualiza. */
@@ -322,14 +427,15 @@ export async function pedirAcceso(request: Request, env: Env, correo: string, ct
 /** Para /cuentas: todos los usuarios y lo que esta esperando respuesta. */
 export async function listarCuentas(env: Env): Promise<Response> {
   const { results: filas } = await env.DB.prepare(
-    `select correo, nombre, roles, activo, caja, pin_hash != '' as tiene_pin, creado_en from usuarios
+    `select correo, nombre, roles, activo, caja, editar_inventario, pin_hash != '' as tiene_pin, creado_en from usuarios
      order by activo desc, nombre`,
   ).all<FilaUsuario & { creado_en: string; tiene_pin: number }>();
   const { results: solicitudes } = await env.DB.prepare(
     `select id, tipo, correo, nombre, justificacion, datos, creado_en from solicitudes
      where estado = 'pendiente' order by creado_en`,
   ).all();
-  const usuarios = filas.map((f) => ({ ...f, roles: leerRoles(f.roles), activo: f.activo === 1, tiene_pin: f.tiene_pin === 1 }));
+  const usuarios = filas.map((f) => ({ ...f, roles: leerRoles(f.roles), activo: f.activo === 1,
+    editar_inventario: f.editar_inventario === 1, tiene_pin: f.tiene_pin === 1 }));
   return json({ usuarios, solicitudes, roles: ROLES, cajas: CAJAS });
 }
 
@@ -360,6 +466,9 @@ export async function guardarCuenta(request: Request, env: Env): Promise<Respons
   const activo = cuerpo.activo !== false;
   // Sin `caja` en el cuerpo (el alta, o una version vieja de /cuentas) no se toca la que tenga.
   const caja = cuerpo.caja === undefined ? null : String(cuerpo.caja);
+  if (cuerpo.editar_inventario !== undefined && typeof cuerpo.editar_inventario !== 'boolean')
+    return json({ error: 'Permiso de inventario inválido.' }, 400);
+  const editar = cuerpo.editar_inventario === undefined ? null : cuerpo.editar_inventario ? 1 : 0;
   if (caja !== null && caja !== '' && !CAJAS.includes(caja)) return json({ error: 'Caja invalida.' }, 400);
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(correo)) return json({ error: 'Correo invalido.' }, 400);
   if (!roles) return json({ error: 'Escoge al menos un rol.' }, 400);
@@ -368,16 +477,17 @@ export async function guardarCuenta(request: Request, env: Env): Promise<Respons
   const cobra = activo && (roles.includes('cajero') || roles.includes('dueno'));
   const fallo = await env.DB.batch([
     env.DB.prepare(
-      `insert into usuarios (correo, nombre, roles, activo, caja, creado_en, actualizado_en)
-       values (?, ?, ?, ?, coalesce(?, ''), ?, ?)
+      `insert into usuarios (correo, nombre, roles, activo, caja, editar_inventario, creado_en, actualizado_en)
+       values (?, ?, ?, ?, coalesce(?, ''), coalesce(?, 0), ?, ?)
        on conflict (correo) do update set nombre = excluded.nombre, roles = excluded.roles,
-         activo = excluded.activo, caja = coalesce(?, usuarios.caja), actualizado_en = excluded.actualizado_en`,
-    ).bind(correo, nombre, roles.join(','), activo ? 1 : 0, caja, ahora, ahora, caja),
+         activo = excluded.activo, caja = coalesce(?, usuarios.caja),
+         editar_inventario = coalesce(?, usuarios.editar_inventario), actualizado_en = excluded.actualizado_en`,
+    ).bind(correo, nombre, roles.join(','), activo ? 1 : 0, caja, editar, ahora, ahora, caja, editar),
     ...(cobra ? [] : [env.DB.prepare('delete from sesiones_cajero where correo = ?').bind(correo)]),
   ]).then(() => null, sinDueno);
   if (fallo) return fallo;
   const guardado = await leerUsuario(env, correo);
-  return json({ correo, nombre, roles, activo, caja: guardado?.caja ?? '' });
+  return json({ correo, nombre, roles, activo, caja: guardado?.caja ?? '', editar_inventario: guardado?.editar_inventario ?? false });
 }
 
 /** Aprobar o rechazar una solicitud: de acceso (Issue #75), de cancelacion (Issue #200) o de descuento (Issue #119). */

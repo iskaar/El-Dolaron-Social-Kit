@@ -8,6 +8,11 @@ import worker from './worker.ts';
 export const DUENO = 'dueno@prueba.mx';
 export const PRODUCTO = 'a1111111-1111-4111-8111-111111111111';
 
+/** Clave de rastreo y monto del comprobante, sinteticos y unicos, para una transferencia de `debido` centavos (#593). */
+let consecutivoClave = 0;
+export const datosTransferencia = (debido: number) =>
+  ({ clave_rastreo: `PRUEBA${String(++consecutivoClave).padStart(10, '0')}`, monto_transferido: debido });
+
 /** Autorización sintética; las pruebas de portal ejercitan la emisión real. */
 export async function codigoPrueba(db: DatabaseSync, clienteId: string, maximo = 1_000_000): Promise<string> {
   const codigo = 'DC-' + Buffer.from(crypto.getRandomValues(new Uint8Array(12))).toString('base64url');
@@ -29,7 +34,11 @@ function d1(db: DatabaseSync) {
       async first() { return db.prepare(sql).get(...(args as never[])) ?? null; },
       async all() { return { results: db.prepare(sql).all(...(args as never[])) }; },
       async run() { return { meta: { changes: Number(db.prepare(sql).run(...(args as never[])).changes) } }; },
-      ejecutar() { return db.prepare(sql).run(...(args as never[])); },
+      // Una sentencia con returning devuelve sus filas, como D1 dentro de un batch.
+      ejecutar() {
+        if (/returning/i.test(sql)) { const results = db.prepare(sql).all(...(args as never[])); return { changes: results.length, results }; }
+        return db.prepare(sql).run(...(args as never[]));
+      },
     };
     return s;
   };
@@ -39,7 +48,7 @@ function d1(db: DatabaseSync) {
     async batch(sentencias: ReturnType<typeof preparar>[]) {
       db.exec('begin');
       try {
-        const salida = sentencias.map((s) => ({ meta: { changes: Number(s.ejecutar().changes) } }));
+        const salida = sentencias.map((s) => { const r = s.ejecutar() as { changes: number | bigint; results?: unknown[] }; return { meta: { changes: Number(r.changes) }, results: r.results }; });
         db.exec('commit');
         return salida;
       } catch (error) {
@@ -50,17 +59,32 @@ function d1(db: DatabaseSync) {
   };
 }
 
-/** R2 en memoria: lo minimo que usa la app (get/put/delete). */
+/** R2 en memoria: lo minimo que usa la app (get/put/delete/list). */
 function r2() {
   const objetos = new Map<string, ArrayBuffer>();
+  const metadatos = new Map<string, { etag: string; httpMetadata?: R2HTTPMetadata; customMetadata?: Record<string, string> }>();
   return {
     objetos,
     async get(llave: string) {
       const datos = objetos.get(llave);
-      return datos ? { body: new Response(datos).body, arrayBuffer: async () => datos.slice(0) } : null;
+      return datos ? { ...metadatos.get(llave), body: new Response(datos).body!, arrayBuffer: async () => datos.slice(0) } : null;
     },
-    async put(llave: string, valor: BodyInit) { objetos.set(llave, await new Response(valor).arrayBuffer()); },
-    async delete(llave: string) { objetos.delete(llave); },
+    async put(llave: string, valor: BodyInit, opciones?: R2PutOptions) {
+      const datos = await new Response(valor).arrayBuffer();
+      const condicion = opciones?.onlyIf as R2Conditional | undefined;
+      if (condicion?.etagDoesNotMatch === '*' && objetos.has(llave)) return null;
+      if (condicion?.etagMatches && metadatos.get(llave)?.etag !== condicion.etagMatches) return null;
+      const meta = { etag: crypto.randomUUID(), httpMetadata: opciones?.httpMetadata as R2HTTPMetadata | undefined, customMetadata: opciones?.customMetadata };
+      objetos.set(llave, datos); metadatos.set(llave, meta);
+      return meta;
+    },
+    async delete(llave: string) { objetos.delete(llave); metadatos.delete(llave); },
+    async list(opciones?: R2ListOptions) {
+      const llaves = [...objetos.keys()].filter((k) => k.startsWith(opciones?.prefix ?? '')).sort();
+      const desde = opciones?.cursor ? llaves.findIndex((k) => k > opciones.cursor!) : 0;
+      const pagina = desde < 0 ? [] : llaves.slice(desde, desde + (opciones?.limit ?? 1000));
+      return { objects: pagina.map((key) => ({ key })), truncated: desde >= 0 && desde + pagina.length < llaves.length, cursor: pagina.at(-1) };
+    },
   };
 }
 
@@ -72,7 +96,7 @@ export function tienda() {
   db.prepare(`insert into productos (id, codigo, nombre, precio, stock, semana_ingreso, creado_en, actualizado_en)
               values (?, 'ED-000001', 'Ventilador', 25000, 50, 'S40', '', '')`).run(PRODUCTO);
   const env = { DB: d1(db), FOTOS: r2(), ACCESS_EQUIPO: 'local', DEV_USUARIO: DUENO,
-    BASES_APROBADAS_VERSION: 'prueba-1', PORTAL_REGISTRO_ABIERTO: 'si', PROMOCION_INICIO: '2020-01-01T00:00:00Z',
+    BASES_APROBADAS_VERSION: 'prueba-1', PORTAL_REGISTRO_ABIERTO: 'si', PREMIOS_APERTURA: 'si', PROMOCION_INICIO: '2020-01-01T00:00:00Z',
     PORTAL_BASES_TEXTO: 'Bases sintéticas de prueba.', PORTAL_AVISO_TEXTO: 'Aviso sintético de prueba.',
   } as unknown as Env;
   // Lo que la app deja para despues de responder (ctx.waitUntil): `esperar()` lo termina.
@@ -98,5 +122,5 @@ export function tienda() {
     // ignoreBOM: text() se come el BOM y las pruebas quieren verlo.
     return { status: r.status, texto: new TextDecoder('utf-8', { ignoreBOM: true }).decode(await r.arrayBuffer()), tipo: r.headers.get('content-type') ?? '' };
   };
-  return { db, env, pedir, pedirTexto, esperar, ctx };
+  return { db, env, pedir, pedirTexto, esperar, ctx, enviar };
 }

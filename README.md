@@ -44,6 +44,8 @@ El contrato completo está en [AGENTS.md](AGENTS.md) y la arquitectura en [docs/
 
 Abre `site/public/index.html` para revisar el sitio de El Dolarón. Es una página estática con assets locales, sin dependencias ni compilación. Para servirla localmente ejecuta `python -m http.server 8080 --directory site/public` y visita `http://localhost:8080`. Antes de publicar cambios ejecuta `python tools/validate_assets.py` y `python tools/validate_site.py`.
 
+Los cambios en `site/` que lleguen a `main` se publican solos con `.github/workflows/deploy-sitio.yml` (detalles en [site/README.md](site/README.md)).
+
 ### Claude Code
 
 Claude Code ya puede trabajar desde la raíz del repositorio y carga `CLAUDE.md` automáticamente:

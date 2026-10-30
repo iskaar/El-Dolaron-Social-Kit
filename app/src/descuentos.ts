@@ -119,3 +119,24 @@ export async function validarDescuento(
   if (usado) return { ok: false, error: 'Ese descuento ya se uso en otra venta.', status: 409 };
   return { ok: true, monto: calculo.monto };
 }
+
+/** Ventana de la promo de inauguracion; null si no esta configurada. La usan la caja y el asistente (#499). */
+export const promoDe = (env: Env) =>
+  env.PROMO_DESDE && env.PROMO_HASTA && Date.parse(env.PROMO_DESDE) < Date.parse(env.PROMO_HASTA)
+    ? { desde: env.PROMO_DESDE, hasta: env.PROMO_HASTA } : null;
+/**
+ * Cuantas promos quedan del cupo (Issue #250, «a las primeras 100 personas»); null sin PROMO_CUPO = sin tope.
+ * Un ticket cancelado devuelve su lugar. Solo cuentan las ventas de la ventana vigente: las de una
+ * promo anterior (preinauguracion 10-12/10) se comian el cupo de la inauguracion (24/10).
+ */
+export async function promoRestantes(env: Env): Promise<number | null> {
+  const cupo = Number(env.PROMO_CUPO);
+  if (!env.PROMO_CUPO || !Number.isInteger(cupo) || cupo < 0) return null;
+  const ventana = promoDe(env);
+  // creado_en es ISO en UTC con milisegundos: se compara como texto contra el mismo formato.
+  const limites = ventana ? [new Date(ventana.desde).toISOString(), new Date(ventana.hasta).toISOString()] : [];
+  // ponytail: recorre ventas sin indice; un indice parcial en (promo) si la tabla crece a cientos de miles.
+  const fila = await env.DB.prepare(`select count(*) as n from ventas where promo > 0 and cancelada = 0${
+    ventana ? ' and creado_en >= ? and creado_en < ?' : ''}`).bind(...limites).first<{ n:number }>();
+  return Math.max(0, cupo - (fila?.n ?? 0));
+}

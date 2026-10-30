@@ -3,10 +3,12 @@
 // lo que se prueba es que solo pase uno firmado, vigente, para esta aplicacion.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { permiso, puede, verificarJwt, leerRoles, type Usuario } from './cuentas.ts';
+import { readFileSync, readdirSync } from 'node:fs';
+import { DatabaseSync } from 'node:sqlite';
+import { permiso, puede, verificarJwt, leerRoles, leerUsuario, puedeEditarInventario, type Usuario } from './cuentas.ts';
 import { tienda, DUENO } from './prueba-d1.ts';
 
-const usuario = (roles: Usuario['roles'], activo = true): Usuario => ({ correo: 'a@b.mx', nombre: 'A', roles, activo });
+const usuario = (roles: Usuario['roles'], activo = true): Usuario => ({ correo: 'a@b.mx', nombre: 'A', roles, activo, caja:'', editar_inventario:false });
 
 test('cada rol entra a lo suyo y el dueno a todo', () => {
   const cajero = usuario(['cajero']);
@@ -18,6 +20,7 @@ test('cada rol entra a lo suyo y el dueno a todo', () => {
   assert.equal(puede(cajero, permiso('/api/ventas', 'POST')), true);
   assert.equal(puede(cajero, permiso('/admin', 'GET')), false);
   assert.equal(puede(cajero, permiso('/api/borradores', 'GET')), false);
+  assert.equal(puede(cajero, permiso('/api/foto/x', 'GET')), true);   // miniatura en la caja (#358)
 
   assert.equal(puede(capturista, permiso('/captura', 'GET')), true);
   assert.equal(puede(capturista, permiso('/admin.html', 'GET')), true);
@@ -129,4 +132,102 @@ test('dos dueños quitandose el rol a la vez: uno pasa y el otro no; nunca queda
   assert.equal((await pedir('/api/solicitudes/s1/resolver', { aprobar: true, roles: ['cajero'] })).status, 400);
   assert.equal((db.prepare(`select estado from solicitudes where id = 's1'`).get() as { estado: string }).estado, 'pendiente');
   assert.equal(duenos(), 1);
+});
+
+test('Editar inventario: solo dueño lo guarda; se lee en cuentas y yo; cliente anterior conserva la casilla', async (t) => {
+  const { db, env, pedir } = tienda(); t.after(() => db.close());
+  const cuenta = { correo:'cap@prueba.mx', nombre:'Captura', roles:['capturista'] };
+  const guardar = (extra = {}) => pedir('/api/cuentas', { ...cuenta, ...extra }, 'PUT');
+  assert.equal((await guardar()).cuerpo.editar_inventario, false);
+  assert.equal((await guardar({ editar_inventario:true })).cuerpo.editar_inventario, true);
+  assert.equal((await guardar({ nombre:'Nuevo nombre' })).cuerpo.editar_inventario, true);
+  assert.equal((await leerUsuario(env, cuenta.correo))!.editar_inventario, true);
+  const lista = await pedir('/api/cuentas');
+  assert.equal(lista.cuerpo.usuarios.find((u: any) => u.correo === cuenta.correo).editar_inventario, true);
+  for (const crudo of [1, 'true', null]) assert.equal((await guardar({ editar_inventario:crudo })).status, 400);
+  env.DEV_USUARIO = cuenta.correo;
+  assert.equal((await pedir('/api/yo')).cuerpo.usuario.editar_inventario, true);
+  assert.equal((await guardar({ editar_inventario:false })).status, 403);
+  env.DEV_USUARIO = DUENO;
+  assert.equal((await guardar({ editar_inventario:false })).cuerpo.editar_inventario, false);
+  assert.equal((await leerUsuario(env, cuenta.correo))!.editar_inventario, false);
+  for (const rol of ['dueno','capturista','finanzas','cajero','computadora','auxiliar'] as const) {
+    const u = usuario([rol]);
+    assert.equal(puedeEditarInventario(u), rol === 'dueno');
+    u.editar_inventario = true;
+    assert.equal(puedeEditarInventario(u), ['dueno','capturista','finanzas'].includes(rol));
+    assert.equal(puede(u, permiso('/api/piezas/uuid/existencia', 'POST')), ['dueno','capturista','finanzas'].includes(rol));
+    u.activo = false; assert.equal(puedeEditarInventario(u), false);
+  }
+  const html = readFileSync('public/cuentas.html', 'utf8');
+  assert.match(html, /data-campo="editar_inventario".*Editar inventario/);
+  assert.match(html, /editar_inventario: nodo.querySelector\('\[data-campo="editar_inventario"\]'\).checked/);
+});
+
+test('schema + todas las migraciones en prueba-d1 deja el permiso completo y cerrado por omisión', (t) => {
+  const { db } = tienda(); t.after(() => db.close());
+  const columna = db.prepare('pragma table_info(usuarios)').all().find((c) => c.name === 'editar_inventario')!;
+  assert.equal(columna.notnull, 1); assert.equal(columna.dflt_value, '0');
+  assert.equal(db.prepare('select editar_inventario from usuarios where correo = ?').get(DUENO)!.editar_inventario, 0);
+  assert.throws(() => db.exec('update usuarios set editar_inventario = 2'), /CHECK/);
+  assert.deepEqual(db.prepare('pragma foreign_key_check').all(), []);
+});
+
+test('050 sobre la base anterior conserva usuarios, stock e historial y no reconstruye tablas', (t) => {
+  const db = new DatabaseSync(':memory:'); t.after(() => db.close());
+  db.exec('pragma foreign_keys = on');
+  for (const f of ['schema.sql', ...readdirSync('.').filter((f) => /^migracion-\d+/.test(f) && !f.startsWith('migracion-050-')).sort()])
+    db.exec(readFileSync(f, 'utf8'));
+  db.exec(`insert into usuarios (correo,nombre,roles,activo,caja,pin_hash,creado_en,actualizado_en)
+    values ('cap@prueba.mx','Captura','capturista',1,'Caja 2','hash sintético','','');
+    insert into productos (id,nombre,stock,semana_ingreso,creado_en,actualizado_en) values ('pieza','Pieza',8,'S40','','');
+    insert into conteo_ajustes (id,producto_id,motivo,cantidad,antes,despues,ajustado_por,ajustado_en)
+    values ('rastro','pieza','robo',1,9,8,'cap@prueba.mx','');`);
+  const usuarios = db.prepare('select * from usuarios').all(), productos = db.prepare('select * from productos').all(), rastros = db.prepare('select * from conteo_ajustes').all();
+  const sql = readFileSync('migracion-050-editar-inventario.sql', 'utf8');
+  assert.doesNotMatch(sql, /\b(drop|rename|delete|writable_schema)\b/i);
+  assert.ok(sql.split('\n').every((linea) => /^\s*--/.test(linea) || !linea.includes('--')));
+  db.exec(sql);
+  for (const u of db.prepare('select * from usuarios').all()) {
+    const { editar_inventario, ...anterior } = u;
+    assert.equal(editar_inventario, 0); assert.deepEqual(anterior, { ...usuarios[0] });
+  }
+  assert.deepEqual(db.prepare('select * from productos').all(), productos);
+  assert.deepEqual(db.prepare('select * from conteo_ajustes').all(), rastros);
+  for (const motivo of ['entrada', 'correccion']) db.prepare(`insert into conteo_ajustes
+    (id,producto_id,motivo,cantidad,antes,despues,ajustado_por,ajustado_en) values (?,'pieza',?,1,8,9,'prueba','')`).run(motivo, motivo);
+  assert.deepEqual(db.prepare('pragma foreign_key_check').all(), []);
+});
+
+test('inversionista (#610): solo GET /tablero y GET /api/tablero; todo lo demas es del dueno', () => {
+  const inversionista = usuario(['inversionista']);
+  assert.equal(puede(inversionista, permiso('/tablero', 'GET')), true);
+  assert.equal(puede(inversionista, permiso('/tablero.html', 'GET')), true);
+  assert.equal(puede(inversionista, permiso('/api/tablero', 'GET')), true);
+  assert.equal(puede(inversionista, permiso('/api/tablero', 'POST')), false);
+  assert.equal(puede(inversionista, permiso('/api/tablero', 'PUT')), false);
+  assert.equal(puede(inversionista, permiso('/api/tablero', 'DELETE')), false);
+  assert.equal(puede(inversionista, permiso('/tablero.js', 'GET')), true);   // codigo sin datos, como para cualquier cuenta
+  assert.equal(puede(inversionista, permiso('/fuentes/anton-400.woff2', 'GET')), true);   // fuentes del tablero, sin datos
+  // Las vistas de detalle (?vista=) viajan por la misma ruta: el query no entra al permiso, asi que la regla es la misma (solo GET).
+  // Una ruta con la vista en el camino NO existe: cae en el dueno, y la vista que no existe la corta tablero.ts con 404.
+  for (const metodo of ['GET', 'POST', 'PUT', 'DELETE']) {
+    assert.equal(puede(inversionista, permiso('/api/tablero/ventas', metodo)), false, `${metodo} /api/tablero/ventas`);
+    assert.equal(puede(inversionista, permiso('/api/tablero/ventas/x', metodo)), false);
+  }
+  assert.equal(puede(inversionista, permiso('/api/tablero/cache-v1', 'GET')), false);
+  assert.equal(puede(usuario(['cajero']), permiso('/api/tablero', 'GET')), false);
+  for (const [ruta, metodo] of [
+    ['/reportes', 'GET'], ['/api/reportes', 'GET'], ['/api/reportes/tickets', 'GET'], ['/api/reportes/tickets.csv', 'GET'],
+    ['/api/ventas/abc', 'GET'], ['/api/pedidos', 'GET'], ['/api/gastos', 'GET'], ['/api/cuentas', 'GET'], ['/api/avisos', 'GET'],
+    ['/api/mensajes', 'GET'], ['/api/config', 'GET'], ['/api/config', 'PUT'], ['/caja', 'GET'], ['/inventario', 'GET'],
+    ['/', 'GET'], ['/index', 'GET'], ['/gastos', 'GET'], ['/nomina', 'GET'], ['/api/nomina', 'GET'],
+  ] as const) {
+    assert.equal(puede(inversionista, permiso(ruta, metodo)), false, `${metodo} ${ruta}`);
+  }
+  assert.equal(puede(usuario(['dueno']), permiso('/tablero', 'GET')), true);
+  assert.equal(puede(usuario(['cajero']), permiso('/tablero', 'GET')), false);
+  assert.equal(puede(usuario(['revendedora']), permiso('/api/tablero', 'GET')), false);
+  assert.equal(puede(usuario(['inversionista'], false), permiso('/tablero', 'GET')), false);
+  assert.deepEqual(leerRoles('inversionista, socio'), ['inversionista']);   // «socio» no es un rol
 });

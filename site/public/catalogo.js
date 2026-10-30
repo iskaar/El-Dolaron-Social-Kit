@@ -37,7 +37,13 @@
     return API;
   }
 
-  if (typeof module !== "undefined") module.exports = { precio, consulta, apiBase };
+  // Issue #590: ?pieza=ED-000123 (mismo formato que CODIGO en app/src/catalogo.ts); lo malformado se ignora.
+  function codigoDePieza(search) {
+    const valor = (new URLSearchParams(search).get("pieza") || "").trim();
+    return /^ED-\d{1,10}$/i.test(valor) ? valor.toUpperCase() : "";
+  }
+
+  if (typeof module !== "undefined") module.exports = { precio, consulta, apiBase, codigoDePieza };
 
   // Los precios con su precio de lista tachado, igual en carteles, tarjetas y visor.
   function pintarPrecio(nodo, pieza) {
@@ -109,7 +115,7 @@
           sello.textContent = "¡Última pieza!";
           foto.append(sello);
         }
-        foto.addEventListener("click", () => abrirVisor(pieza, foto));
+        foto.addEventListener("click", () => abrirVisor(pieza, foto, img));
         const visto = document.createElement("p");
         visto.className = "poster-seen";
         visto.textContent = "Visto por última vez en Jardín Hidalgo 129";
@@ -176,6 +182,7 @@
   const dialogAsk = root.querySelector(".piece-dialog-ask");
   let categoria = "";
   let busqueda = "";
+  let deseada = codigoDePieza(location.search);   // pieza a abrir tras la primera carga (#590)
   let focoAnterior = null;
   // Cursor de la última página que SÍ llegó: un fallo reintenta la misma (Issue #241).
   // `pagina` solo por si el sitio se publica antes que la API con cursor: la API nueva lo ignora con `despues`.
@@ -192,9 +199,16 @@
     return node;
   };
 
-  function abrirVisor(pieza, disparador) {
+  // Morph miniatura → visor con View Transitions (Chrome 111+, Safari 18+, Firefox 144+).
+  // Sin soporte o con movimiento reducido, el visor abre y cierra de golpe como hasta ahora.
+  const conMorph = typeof document.startViewTransition === "function"
+    && typeof matchMedia === "function" && !matchMedia("(prefers-reduced-motion: reduce)").matches;
+  let fotoOrigen = null;   // la <img> de la tarjeta o cartel que abrió el visor
+
+  function abrirVisor(pieza, disparador, img) {
     if (!dialog) return;
     focoAnterior = disparador;
+    fotoOrigen = img || null;
     if (dialogTitle) dialogTitle.textContent = pieza.nombre;
     if (dialogImg) { dialogImg.src = pieza.foto; dialogImg.alt = pieza.nombre; }
     if (dialogMeta) {
@@ -205,16 +219,41 @@
       dialogAsk.href = consulta(pieza);
       dialogAsk.setAttribute("aria-label", `Preguntar por WhatsApp: ${pieza.nombre}`);
     }
-    if (typeof dialog.showModal === "function") dialog.showModal();
-    else dialog.open = true;
-    if (dialogClose && typeof dialogClose.focus === "function") dialogClose.focus();
+    const abrir = () => {
+      if (typeof dialog.showModal === "function") dialog.showModal();
+      else dialog.open = true;
+      if (dialogClose && typeof dialogClose.focus === "function") dialogClose.focus();
+    };
+    if (!conMorph || !fotoOrigen || !fotoOrigen.style) { abrir(); return; }
+    // El nombre debe ser único en pantalla: la miniatura lo lleva solo en la captura «antes»;
+    // la foto del visor lo tiene en CSS y solo está en pantalla con el diálogo abierto.
+    fotoOrigen.style.viewTransitionName = "pieza-foto";
+    document.startViewTransition(async () => {
+      fotoOrigen.style.viewTransitionName = "";
+      abrir();
+      // La foto grande necesita tamaño antes de la captura «después»; tope de 250 ms para no congelar la página.
+      await Promise.race([dialogImg && typeof dialogImg.decode === "function" ? dialogImg.decode().catch(() => {}) : null, new Promise((r) => setTimeout(r, 250))]);
+    });
+  }
+
+  // La portada (stickers.js) abre el mismo visor con este evento.
+  if (typeof document.addEventListener === "function") document.addEventListener("dolaron:ver-pieza", (ev) => { const d = ev.detail || {}; if (d.pieza) abrirVisor(d.pieza, d.disparador, d.img); });
+
+  function cerrarVisor() {
+    if (!conMorph || !fotoOrigen || !fotoOrigen.style) { dialog.close(); return; }
+    const origen = fotoOrigen;
+    const t = document.startViewTransition(() => { dialog.close(); origen.style.viewTransitionName = "pieza-foto"; });
+    t.finished.then(() => { origen.style.viewTransitionName = ""; });
   }
 
   if (dialogClose && dialog) {
     dialogClose.addEventListener("click", () => {
-      if (typeof dialog.close === "function") dialog.close();
+      if (typeof dialog.close === "function") cerrarVisor();
       else { dialog.open = false; if (focoAnterior && typeof focoAnterior.focus === "function") focoAnterior.focus(); }
     });
+    // Esc y el fondo cierran con el mismo morph.
+    dialog.addEventListener("cancel", (ev) => { ev.preventDefault(); cerrarVisor(); });
+    dialog.addEventListener("click", (ev) => { if (ev.target === dialog && typeof dialog.close === "function") cerrarVisor(); });
     dialog.addEventListener("close", () => {
       if (focoAnterior && typeof focoAnterior.focus === "function") focoAnterior.focus();
     });
@@ -240,7 +279,7 @@
       const zoom = el("span", "piece-zoom", "Ver foto");
       zoom.setAttribute("aria-hidden", "true");
       photo.append(img, zoom);
-      photo.addEventListener("click", () => abrirVisor(pieza, photo));
+      photo.addEventListener("click", () => abrirVisor(pieza, photo, img));
     }
     const body = el("div", "piece-body");
     // ponytail: la ropa se captura sin nombre propio; hasta tener marca/equipo dice «Ropa americana».
@@ -287,6 +326,11 @@
       if (searchForm) searchForm.hidden = false;
       siguiente = data.siguiente || null;
       grid.append(...data.piezas.map(tarjeta));
+      if (deseada) {   // Issue #590: solo coincidencia exacta; si no está, queda el mensaje de búsqueda vacía
+        const pieza = data.piezas.find((x) => x.codigo === deseada);
+        deseada = "";
+        if (pieza) abrirVisor(pieza, null, null);
+      }
       more.hidden = !data.hay_mas;
       status.textContent = grid.children.length
         ? `${grid.children.length} de ${Number(data.total) || grid.children.length} piezas`
@@ -332,12 +376,20 @@
     chip.addEventListener("click", () => {
       if (clave === categoria) return;
       categoria = clave;
-      for (const other of chips.children) other.setAttribute("aria-pressed", String(other === chip));
-      cargar(true);
+      const cambiar = () => {
+        for (const other of chips.children) other.setAttribute("aria-pressed", String(other === chip));
+        cargar(true);
+      };
+      if (conMorph) document.startViewTransition(cambiar); else cambiar();
     });
     chips.append(chip);
   }
   more.addEventListener("click", () => cargar(false));
   retry.addEventListener("click", () => cargar(true));
+  if (deseada && searchInput) {   // la búsqueda del servidor ya incluye `codigo`
+    busqueda = deseada;
+    searchInput.value = deseada;
+    if (clearBtn) clearBtn.hidden = false;
+  } else deseada = "";
   cargar(true);
 })();

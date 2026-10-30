@@ -22,6 +22,18 @@ const cortar = (pedir: Pedir, caja: string, contado: number, extra: Record<strin
 const salida = (pedir: Pedir, tipo: string, importe: number, caja = 'Caja 1') =>
   pedir('/api/retiros', { id: crypto.randomUUID(), tipo, caja, importe, motivo: tipo === 'gasto' ? 'garrafon de agua' : 'caja fuerte', ...(tipo === 'gasto' ? { categoria: 'agua' } : {}) });
 
+test('24/10: un corte sin contar el efectivo se rechaza y no se lleva las ventas; con el cajón vacío confirmado sí pasa', async () => {
+  const { db, pedir } = tienda();
+  await vender(pedir, 'Caja 1');
+  const sinContar = await cortar(pedir, 'Caja 1', 0);
+  assert.equal(sinContar.status, 400);
+  assert.match(sinContar.cuerpo.error, /No se contó el efectivo/);
+  assert.equal((db.prepare('select count(*) as n from ventas where corte_id is not null').get() as { n: number }).n, 0, 'las ventas siguen sin corte');
+  assert.equal((db.prepare('select count(*) as n from cortes').get() as { n: number }).n, 0);
+  assert.equal((await cortar(pedir, 'Caja 1', 0, { sin_efectivo: true })).status, 201);
+  assert.equal((await cortar(pedir, 'Caja 1', 25000)).status, 201, 'con efectivo contado no hace falta confirmar');
+});
+
 test('el corte cuadra: fondo + efectivo - devoluciones - retiros, y tarjeta, transferencia y Dolarones aparte', async () => {
   const { db, pedir } = tienda();
   const socio = (await pedir('/api/socios', {
@@ -251,7 +263,7 @@ test('pieza de un ticket con tarjeta devuelta en efectivo: sale del cajon y la t
 
   // Ya contada en ese corte, otra pieza devuelta en efectivo resta del cajon del siguiente; la tarjeta no.
   await devolver(enCaja.id, 'efectivo');
-  const siguiente = (await cortar(pedir, 'Caja 1', 0)).cuerpo;
+  const siguiente = (await cortar(pedir, 'Caja 1', 0, { sin_efectivo: true })).cuerpo;
   assert.equal(siguiente.efectivo_devoluciones, 25000);
   assert.equal(siguiente.tarjeta_sistema, 0);
   assert.equal(siguiente.diferencia, 0);
@@ -272,4 +284,39 @@ test('el conteo por billete y moneda suma lo contado y se guarda; uno invalido n
     assert.equal(x.status, 400);
   }
   assert.equal((db.prepare('select count(*) as n from cortes').get() as { n: number }).n, 1);
+});
+
+test('#515: el pago de la terminal que entra al cajón se suma al esperado; el que recibe el dueño no toca el corte', async () => {
+  const { db, env, pedir } = tienda();
+  db.prepare(`insert into usuarios (correo, nombre, roles, activo, creado_en, actualizado_en) values ('caja@prueba.mx', 'K', 'cajero', 1, '', '')`).run();
+  const como = (correo: string) => { (env as unknown as { DEV_USUARIO: string }).DEV_USUARIO = correo; };
+  await vender(pedir, 'Caja 1', { forma_pago: 'tarjeta', efectivo: 0 });   // $250 con su terminal
+  const entra = await pedir('/api/retiros', { id: crypto.randomUUID(), tipo: 'terminal', caja: 'Caja 1', importe: 21800 });
+  assert.equal(entra.status, 201, JSON.stringify(entra.cuerpo));
+  assert.equal(entra.cuerpo.motivo, 'Pago de la terminal');
+
+  // Fondo 500 + 218 que entró: con 718 en el cajón cuadra, ya no es sobrante.
+  const c = (await cortar(pedir, 'Caja 1', 71800, { tarjeta_terminal: 25000 })).cuerpo;
+  assert.equal(c.efectivo_esperado, 71800);
+  assert.equal(c.diferencia, 0);
+  assert.equal(c.entrada_terminal, 21800);
+  assert.equal((await pedir('/api/cortes?caja=Caja%201', undefined, 'GET')).cuerpo.entrada_terminal, 21800, 'reimprimir trae la línea');
+
+  // Al dueño, fuera del cajón: el siguiente corte no lo espera.
+  const id = crypto.randomUUID();
+  const t = await pedir('/api/terminal', { id, importe: 1000 });
+  assert.equal(t.status, 201);
+  assert.equal((await pedir('/api/terminal', { id, importe: 1000 })).cuerpo.pagado, 22800, 'reenviar no duplica');
+  assert.deepEqual([t.cuerpo.vendido, t.cuerpo.pagado, t.cuerpo.debe], [25000, 22800, 2200]);
+  assert.deepEqual(t.cuerpo.pagos.map((p: { caja: string }) => p.caja).sort(), ['', 'Caja 1']);
+  await vender(pedir, 'Caja 1');
+  assert.equal((await cortar(pedir, 'Caja 1', 75000)).cuerpo.efectivo_esperado, 75000);
+
+  // Sin cierre de la terminal (cortes de antes del 24/10) se cuenta lo de tarjeta del sistema.
+  db.prepare(`update cortes set tarjeta_terminal = 0`).run();
+  assert.equal((await pedir('/api/terminal', undefined, 'GET')).cuerpo.vendido, 25000);
+
+  como('caja@prueba.mx');
+  assert.equal((await pedir('/api/terminal', undefined, 'GET')).status, 403);
+  assert.equal((await pedir('/api/terminal', { id: crypto.randomUUID(), importe: 100 })).status, 403);
 });

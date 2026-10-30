@@ -1,12 +1,18 @@
 // Los secretos no salen de wrangler.jsonc (no van al repositorio), asi que se
 // declaran aqui y se cargan con `wrangler secret put`.
 declare global {
+  /** Búsqueda de un código fuera de la hoja (#406). */
+  interface BusquedaUpc { id: string; upc: string }
   interface Env {
+    /** Cola de búsquedas por código; sin ella (local, pruebas) se busca en waitUntil. */
+    BUSQUEDAS?: Queue<BusquedaUpc>;
     ANTHROPIC_API_KEY: string;
     IMAGES: ImagesBinding;
     GEMINI_API_KEY: string;
     /** Alterno: alguna instancia guarda la llave con este nombre. */
     GEMINI2_API_KEY?: string;
+    /** API key de Agent Platform (Vertex, Issue #363). Si existe, Gemini va por Vertex. */
+    VERTEX_API_KEY?: string;
     /** 'claude' (por defecto) o 'gemini'. Por instancia, en wrangler.jsonc. */
     MODELO_ANALISIS?: string;
     /** 'si' = buscar el precio en la web en vez de estimarlo de memoria. */
@@ -24,8 +30,16 @@ declare global {
     ASISTENTE_TOKEN?: string;
     /** Avisos al dueno por correo (Issue #75, avisos.ts). Binding send_email; ausente en pruebas. */
     CORREO?: SendEmail;
+    /** Llave privada VAPID (JWK P-256) de las notificaciones push (Issue #600, push.ts). Secreto: wrangler secret put. */
+    VAPID_JWK?: string;
     /** Solo `wrangler dev` con `--var ACCESS_EQUIPO:local`: el correo con el que se entra. */
     DEV_USUARIO?: string;
+    /** Client ID del service token de Access de la PC de la caja (#603, cep.ts): lo unico que entra a /api/cep/*. Ausente = cerrado. Secreto: wrangler secret put. */
+    CEP_CLIENT_ID?: string;
+    /** Solo con ACCESS_EQUIPO:local: el Client ID con el que entra la PC de la caja. */
+    DEV_SERVICIO?: string;
+    /** Tope por IP a la API del host público (binding ratelimits de wrangler.jsonc). Ausente = sin tope (local, pruebas). */
+    LIMITE_PORTAL?: RateLimit;
     /** Host público exacto. Ausente = portal inaccesible. */
     HOST_PORTAL?: string;
     FIREBASE_PROJECT_ID?: string;
@@ -37,7 +51,11 @@ declare global {
     /** Requiere texto legal aprobado y despliegue coordinado. */
     BASES_APROBADAS_VERSION?: string;
     PORTAL_REGISTRO_ABIERTO?: string;
+    // Issue #611: 'si' reactiva los premios de apertura (registro y llegada). Ausente = no se otorgan nuevos.
+    PREMIOS_APERTURA?: string;
     PROMOCION_INICIO?: string;
+    /** Referidos (#489, #597): 'si' da código a todo socio del portal. Ausente = apagado. */
+    REFERIDOS_ABIERTO?: string;
     /** Emisión de vales anónimos: ausente = apagada, requiere bases finales. */
     VALES_ABIERTOS?: string;
     /** Promo de inauguracion (ISO, UTC): ambas o ninguna. Quitarlas y desplegar la apaga. */

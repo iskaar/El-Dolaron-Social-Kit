@@ -7,7 +7,8 @@
   //   npx wrangler deploy --config wrangler.sandbox.jsonc
   //   python ../tools/refrescar_sandbox.py      (copia produccion -> sandbox)
   //
-  // Sin llaves de IA a proposito: el analisis de fotos falla aqui sin gastar.
+  // Sin llaves de Claude ni AI Studio a proposito. Solo VERTEX_API_KEY (Issue
+  // #363): aqui se prueba Gemini en Vertex con busqueda antes de produccion.
   "name": "el-dolaron-sandbox",
   "main": "src/worker.ts",
   "compatibility_date": "2026-09-11",
@@ -26,7 +27,8 @@
     // Pinta la franja SANDBOX en todas las pantallas (worker.ts).
     "AMBIENTE": "sandbox",
     "CONTEO_UMBRAL": "30000",
-    "MODELO_ANALISIS": "claude",
+    "MODELO_ANALISIS": "gemini",
+    "BUSQUEDA_WEB": "si",
     // Ensayo de Dolarones: portal propio, mismo proyecto Firebase (usar los
     // numeros de prueba de Firebase, no gastan SMS) y promocion ya iniciada.
     "HOST_PORTAL": "sandbox.eldolaron.com",
@@ -41,6 +43,8 @@
     "PROMO_HASTA": "2026-10-13T06:00:00Z",
     "PROMO_CUPO": "3",
     "PORTAL_REGISTRO_ABIERTO": "si",
+    // Referidos abiertos a todo socio (Issue #597). Apagado de emergencia: quitarla y desplegar.
+    "REFERIDOS_ABIERTO": "si",
     "ACCESS_EQUIPO": "yellow-term-7d99.cloudflareaccess.com",
     // El aud es por aplicacion de Access: sandbox.viste.com.mx se agrega como
     // dominio a la MISMA aplicacion que escaner.viste.com.mx, asi que comparte
@@ -72,10 +76,18 @@
     }
   ],
   "images": { "binding": "IMAGES" },
+  // Tope por IP a la API pública del portal (worker.ts, rutaPortalPublico): 100 peticiones por minuto.
+  // Las fotos del catálogo no cuentan. Para subirlo basta cambiar limit y desplegar.
+  "ratelimits": [{ "name": "LIMITE_PORTAL", "namespace_id": "1002", "simple": { "limit": 100, "period": 60 } }],
   "r2_buckets": [
     {
       "binding": "FOTOS",
       "bucket_name": "el-dolaron-sandbox-fotos"
     }
-  ]
+  ],
+  // Búsquedas de códigos fuera de la hoja (#406): sin el tope de 30 s de waitUntil.
+  "queues": {
+    "producers": [{ "binding": "BUSQUEDAS", "queue": "el-dolaron-sandbox-busquedas" }],
+    "consumers": [{ "queue": "el-dolaron-sandbox-busquedas", "max_batch_size": 5, "max_batch_timeout": 1, "max_retries": 1 }]
+  }
 }

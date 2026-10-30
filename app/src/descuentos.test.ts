@@ -352,7 +352,7 @@ test('el desglose del ticket trae el descuento para la caja y los reportes', asy
   assert.equal(detalle.cuerpo.descuento, 2500);
 });
 
-test('promo de inauguracion: 10% del ticket sin minimo dentro de la ventana, una vez, y se suma al descuento aprobado', async () => {
+test('promo de inauguracion: $100 con ticket de $300 o mas dentro de la ventana, una vez, y se suma al descuento aprobado', async () => {
   const { env, venta, pedidoResuelto, pedir, ana } = await montar();
   // Sin fechas configuradas no hay promo, ni en la caja ni al cobrar.
   assert.equal((await venta({}, 2)).cuerpo.total, 50000);
@@ -364,10 +364,10 @@ test('promo de inauguracion: 10% del ticket sin minimo dentro de la ventana, una
   const dentro = '2026-01-03T20:00:00Z';
   const con = await venta({ creado_en: dentro }, 2);
   assert.equal(con.status, 201, JSON.stringify(con.cuerpo));
-  assert.equal(con.cuerpo.descuento, 5000);
-  assert.equal(con.cuerpo.total, 45000);
-  assert.equal((await venta({ creado_en: dentro, efectivo: 80000 }, 3)).cuerpo.total, 67500);
-  assert.equal((await venta({ creado_en: dentro }, 1)).cuerpo.total, 22500, 'sin minimo');
+  assert.equal(con.cuerpo.descuento, 10000);
+  assert.equal(con.cuerpo.total, 40000);
+  assert.equal((await venta({ creado_en: dentro, efectivo: 80000 }, 3)).cuerpo.total, 65000, 'monto fijo, no porcentaje');
+  assert.equal((await venta({ creado_en: dentro }, 1)).cuerpo.total, 25000, 'bajo el minimo de $300: sin promo');
   assert.equal((await venta({ creado_en: '2026-01-01T05:59:59Z' }, 2)).cuerpo.total, 50000, 'antes de empezar');
   assert.equal((await venta({ creado_en: '2026-01-08T06:00:00Z' }, 2)).cuerpo.total, 50000, 'ya termino');
   // Una hora futura de la caja no cuenta: se usa la del servidor, fuera de la ventana.
@@ -375,8 +375,8 @@ test('promo de inauguracion: 10% del ticket sin minimo dentro de la ventana, una
   // Con un descuento aprobado, se suman los dos.
   const id = await pedidoResuelto({ tipo: 'monto', valor: 5000, subtotal: 50000 }, true);
   const ambos = await venta({ creado_en: dentro, descuento_id: id }, 2);
-  assert.equal(ambos.cuerpo.descuento, 10000);
-  assert.equal(ambos.cuerpo.total, 40000);
+  assert.equal(ambos.cuerpo.descuento, 15000);
+  assert.equal(ambos.cuerpo.total, 35000);
 });
 
 test('promo con cupo (Issue #250): en linea se rechaza al agotarse, sin red se respeta y cancelar devuelve el lugar', async () => {
@@ -385,25 +385,39 @@ test('promo con cupo (Issue #250): en linea se rechaza al agotarse, sin red se r
   const dentro = '2026-01-03T20:00:00Z';
   const restantes = async () => (await pedir('/api/vales/config', undefined, 'GET', ana)).cuerpo.promo.restantes;
   assert.equal(await restantes(), 2);
-  const primera = await venta({ creado_en: dentro, promo: 5000 }, 2);
-  assert.equal(primera.cuerpo.total, 45000);
+  const primera = await venta({ creado_en: dentro, promo: 10000 }, 2);
+  assert.equal(primera.cuerpo.total, 40000);
   // Una caja vieja no manda `promo`: cuenta igual.
-  assert.equal((await venta({ creado_en: dentro }, 2)).cuerpo.total, 45000);
+  assert.equal((await venta({ creado_en: dentro }, 2)).cuerpo.total, 40000);
   assert.equal(await restantes(), 0);
 
-  const agotada = await venta({ creado_en: dentro, promo: 5000 }, 2);
+  const agotada = await venta({ creado_en: dentro, promo: 10000 }, 2);
   assert.equal(agotada.status, 409);
   assert.equal(agotada.cuerpo.promo_agotada, true);
   // La caja ya sabe que se acabo: cobra completo.
   assert.equal((await venta({ creado_en: dentro, promo: 0 }, 2)).cuerpo.total, 50000);
   // Cobrada sin red con la promo: el cliente ya pago asi, se respeta aunque pase del tope.
-  assert.equal((await venta({ creado_en: dentro, promo: 5000, sin_red: true }, 2)).cuerpo.total, 45000);
+  assert.equal((await venta({ creado_en: dentro, promo: 10000, sin_red: true }, 2)).cuerpo.total, 40000);
   assert.equal(await restantes(), 0);
 
   // Un ticket con promo cancelado devuelve su lugar (la ventana de cancelar ya paso para enero: directo en D1).
   db.prepare('update ventas set cancelada = 1 where id = ?').run(primera.cuerpo.id);
   assert.equal(await restantes(), 0, '3 con promo (una sin red) y una cancelada: siguen 2 de 2');
   db.prepare(`update ventas set cancelada = 1 where id = (select id from ventas where promo > 0 and cancelada = 0 limit 1)`).run();
+  assert.equal(await restantes(), 1);
+});
+
+test('promo con cupo: las ventas con promo de otra ventana (preinauguracion) no gastan el cupo', async () => {
+  const { db, env, venta, pedir, ana } = await montar();
+  Object.assign(env, { PROMO_DESDE: '2026-01-01T06:00:00Z', PROMO_HASTA: '2026-01-08T06:00:00Z', PROMO_CUPO: '2' });
+  const restantes = async () => (await pedir('/api/vales/config', undefined, 'GET', ana)).cuerpo.promo.restantes;
+  const primera = await venta({ creado_en: '2026-01-03T20:00:00Z', promo: 10000 }, 2);
+  assert.equal(await restantes(), 1);
+  // La misma venta, movida a antes de la ventana (como las de la promo anterior), ya no cuenta.
+  db.prepare(`update ventas set creado_en = '2025-12-20T18:00:00.000Z' where id = ?`).run(primera.cuerpo.id);
+  assert.equal(await restantes(), 2);
+  // Borde: el primer milisegundo de la ventana si cuenta.
+  db.prepare(`update ventas set creado_en = '2026-01-01T06:00:00.000Z' where id = ?`).run(primera.cuerpo.id);
   assert.equal(await restantes(), 1);
 });
 
@@ -417,10 +431,10 @@ test('/reportes: con promo, descuento aprobado, pieza devuelta y ticket cancelad
   const aprobar = async (subtotal: number) =>
     (await pedirDescuento({ subtotal, valor: 7, aprobador: DUENO, pin: PIN_DUENO })).cuerpo.id as string;
 
-  // A: solo promo (10%, desde una hora antes hasta manana)
+  // A: solo promo ($100, desde una hora antes hasta manana)
   Object.assign(env, { PROMO_DESDE: new Date(Date.now() - 3_600_000).toISOString(), PROMO_HASTA: new Date(Date.now() + 86_400_000).toISOString() });
   const a = await venta({ lineas: lineas(1, 1), efectivo: 100000 });
-  assert.equal(a.cuerpo.descuento, 5833);
+  assert.equal(a.cuerpo.descuento, 10000);
   // B: promo + descuento aprobado
   const b = await venta({ lineas: lineas(2, 1), efectivo: 100000, descuento_id: await aprobar(83333) });
   assert.equal(b.status, 201, JSON.stringify(b.cuerpo));
@@ -442,6 +456,14 @@ test('/reportes: con promo, descuento aprobado, pieza devuelta y ticket cancelad
   assert.equal(suma(r.por_categoria), r.resumen.total);
   assert.equal(suma(r.top_productos), r.resumen.total);
   assert.deepEqual(verificarCuadre(r).filter((c: { ok: boolean }) => !c.ok), []);
+  // Descuentos regalados (24/10): A y B con promo; B y C con aprobado; D cancelado no cuenta.
+  const aprobadoC = (db.prepare('select descuento from ventas where id = ?').get(folioC) as { descuento: number }).descuento;
+  assert.equal(r.descuentos.promo_tickets, 2);
+  assert.equal(r.descuentos.promo, 20000);
+  assert.equal(r.descuentos.otros_tickets, 2);
+  assert.equal(r.descuentos.otros, b.cuerpo.descuento - 10000 + aprobadoC);
+  assert.equal(r.descuentos.por_dia.reduce((s: number, x: { promo: number; otros: number }) => s + x.promo + x.otros, 0),
+    r.descuentos.promo + r.descuentos.otros);
 });
 
 test('el descuento que queda pendiente avisa al dueno por correo (#75)', async () => {

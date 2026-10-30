@@ -1,0 +1,669 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>El Dolarón — tablero</title>
+<link rel="preload" href="/fuentes/anton-400.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="/fuentes/archivo-variable.woff2" as="font" type="font/woff2" crossorigin>
+<style>
+  /* Tablero de inversionistas (Issue #610): solo lectura, solo agregados. Sin menu de la tienda.
+     Fuentes: Anton y Archivo servidas por la app (las mismas del sitio, licencia OFL), sin Google Fonts. */
+  @font-face { font-family: Anton; src: url("/fuentes/anton-400.woff2") format("woff2"); font-weight: 400; font-display: swap; }
+  @font-face { font-family: Archivo; src: url("/fuentes/archivo-variable.woff2") format("woff2"); font-weight: 100 900; font-display: swap; }
+  :root {
+    color-scheme: light;
+    --marca: #16366B; --marca-claro: #FFD447;
+    --pagina: #f9f9f7; --superficie: #ffffff; --tinta: #0b0b0b; --tinta-2: #52514e; --tinta-3: #2b2a28;
+    --borde: rgba(11,11,11,.10); --pista: #ecebe6; --acento: #16366B; --acento-2: #b9c7de;
+    --serie-2: #7f97c0; --serie-3: #eb6834; --serie-4: #2a78d6; --serie-5: #9ec5f4;
+    --bien: #006300; --mal: #d03b3b; --aviso-fondo: #fff4e0; --aviso: #8a5200;
+    --cabecera-texto: #dfe6f2; --foco: #16366B;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:where(:not([data-theme="light"])) {
+      color-scheme: dark;
+      --pagina: #0d0d0d; --superficie: #1a1a19; --tinta: #ffffff; --tinta-2: #c3c2b7; --tinta-3: #e6e5df;
+      --borde: rgba(255,255,255,.10); --pista: #2c2c2a; --acento: #3987e5; --acento-2: #38557f;
+      --serie-2: #5f7fb4; --serie-3: #d95926; --serie-4: #3987e5; --serie-5: #9ec5f4;
+      --bien: #0ca30c; --mal: #e66767; --aviso-fondo: #3a2a08; --aviso: #fab219; --foco: #9ec5f4;
+    }
+  }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --pagina: #0d0d0d; --superficie: #1a1a19; --tinta: #ffffff; --tinta-2: #c3c2b7; --tinta-3: #e6e5df;
+    --borde: rgba(255,255,255,.10); --pista: #2c2c2a; --acento: #3987e5; --acento-2: #38557f;
+    --serie-2: #5f7fb4; --serie-3: #d95926; --serie-4: #3987e5; --serie-5: #9ec5f4;
+    --bien: #0ca30c; --mal: #e66767; --aviso-fondo: #3a2a08; --aviso: #fab219; --foco: #9ec5f4;
+  }
+
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--pagina); color: var(--tinta); -webkit-text-size-adjust: 100%;
+    font-family: Archivo, system-ui, -apple-system, "Segoe UI", sans-serif; }
+  .contenedor { max-width: 560px; margin: 0 auto; }
+  header { background: #16366B; color: #fff; padding: 20px 20px 22px; display: flex; flex-direction: column; gap: 6px; }
+  header .fila-marca { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+  .marca { margin: 0; font-family: Anton, Impact, "Arial Narrow Bold", sans-serif; font-size: 22px; letter-spacing: .02em; color: var(--marca-claro); font-weight: 400; }
+  header p { margin: 0; font-size: 12px; color: var(--cabecera-texto); }
+  header h1 { margin: 0; font-size: 26px; font-weight: 700; line-height: 1.2; }
+  header .mes { font-size: 14px; }
+  main { padding: 20px 16px 32px; display: flex; flex-direction: column; gap: 28px; }
+  section { display: flex; flex-direction: column; gap: 12px; }
+  .resumen { gap: 10px; }
+  .titular { margin: 0; font-size: 21px; line-height: 1.35; font-weight: 600; }
+  .titular strong { color: var(--acento); }
+  .historia { margin: 0; font-size: 15px; line-height: 1.45; color: var(--tinta-2); }
+  h2.seccion { margin: 0; font-family: Anton, Impact, "Arial Narrow Bold", sans-serif; font-weight: 400; font-size: 24px; letter-spacing: .01em; color: var(--acento); }
+  .tarjeta { background: var(--superficie); border: 1px solid var(--borde); border-radius: 16px; padding: 18px 18px 16px; display: flex; flex-direction: column; gap: 8px; }
+  .etiqueta { margin: 0; font-size: 13px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--tinta-2); }
+  .cifra { margin: 0; font-family: Anton, Impact, "Arial Narrow Bold", sans-serif; font-weight: 400; font-size: 44px; line-height: 1; font-variant-numeric: tabular-nums; }
+  .cifra.media { font-size: 32px; }
+  .cifra small { font-family: Archivo, system-ui, sans-serif; font-size: 18px; font-weight: 600; color: var(--tinta-2); }
+  .frase { margin: 0; font-size: 15px; line-height: 1.45; color: var(--tinta-3); }
+  .frase.chica { font-size: 14px; }
+  .nota { font-size: 12px; color: var(--tinta-2); }
+  .doble { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+  .fila { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; font-size: 15px; }
+  .fila span:last-child { font-variant-numeric: tabular-nums; font-weight: 600; white-space: nowrap; }
+  .pista { height: 10px; border-radius: 999px; background: var(--pista); overflow: hidden; }
+  .pista > div { height: 100%; background: var(--acento); border-radius: 999px; }
+  .meta { position: relative; height: 12px; border-radius: 999px; background: var(--pista); overflow: visible; }
+  .meta .lleno { height: 100%; background: var(--acento); border-radius: 999px; }
+  .meta .ritmo { position: absolute; top: -4px; width: 3px; height: 20px; background: var(--tinta); border-radius: 2px; transform: translateX(-1px); }
+  .leyenda-meta { display: flex; justify-content: space-between; font-size: 12px; color: var(--tinta-2); gap: 12px; }
+  .arriba { color: var(--bien); font-weight: 600; }
+  .abajo { color: var(--mal); font-weight: 600; }
+  .semanas { display: grid; gap: 8px; align-items: end; height: 120px; padding-top: 8px; }
+  .semanas .col { display: flex; flex-direction: column; align-items: center; justify-content: flex-end; gap: 4px; height: 100%; }
+  .semanas .barra { width: 100%; background: var(--acento-2); border-radius: 6px 6px 2px 2px; min-height: 2px; }
+  .semanas .col.actual .barra { background: var(--acento); }
+  .semanas .valor { font-size: 11px; color: var(--tinta-2); font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .semanas .nombre { font-size: 11px; color: var(--tinta-2); }
+  .semanas .col.actual .nombre { font-weight: 700; color: var(--tinta); }
+  .apilada { display: flex; height: 14px; border-radius: 999px; overflow: hidden; gap: 2px; background: var(--pista); }
+  .leyenda { display: flex; flex-direction: column; gap: 6px; font-size: 14px; }
+  .leyenda .fila > span:first-child { display: flex; align-items: center; gap: 8px; }
+  .muestra { width: 10px; height: 10px; border-radius: 3px; flex: none; }
+  .canal { display: flex; flex-direction: column; gap: 6px; }
+  .aviso-estimado { align-self: flex-start; font-size: 12px; font-weight: 600; color: var(--aviso); background: var(--aviso-fondo); border-radius: 999px; padding: 4px 10px; }
+  a.enlace { display: flex; color: inherit; text-decoration: none; border-radius: 16px; }
+  a.enlace > .tarjeta { flex: 1; min-width: 0; }
+  a.enlace-fila { color: inherit; text-decoration: none; border-radius: 8px; }
+  a.enlace:focus-visible, a.enlace-fila:focus-visible, .volver:focus-visible, .volver2:focus-visible { outline: 3px solid var(--foco); outline-offset: 2px; }
+  .ver { align-self: flex-start; font-size: 13px; font-weight: 600; color: var(--acento); }
+  .volver { display: inline-flex; align-items: center; gap: 8px; align-self: flex-start; min-height: 44px; margin-left: -8px; padding: 0 8px; font-size: 15px; font-weight: 600; color: #fff; text-decoration: none; border-radius: 10px; }
+  .volver[hidden] { display: none; }
+  .volver:hover { color: var(--marca-claro); text-decoration: underline; }
+  .volver:focus-visible { outline-color: var(--marca-claro); }
+  .volver2 { display: flex; align-items: center; justify-content: center; gap: 8px; min-height: 48px; border-radius: 14px; background: #16366B; color: #fff; font-size: 15px; font-weight: 600; text-decoration: none; }
+  .volver2:hover { background: #0d2347; }
+  .falta { align-self: flex-start; font-size: 12px; font-weight: 600; line-height: 1.35; color: var(--aviso); background: var(--aviso-fondo); border-radius: 12px; padding: 6px 10px; }
+  .tabla-cuadre { border-top: 1px solid var(--borde); padding-top: 10px; font-weight: 700; }
+  .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+  #estado { padding: 24px 16px; font-size: 15px; color: var(--tinta-2); }
+  #estado.error { color: var(--mal); font-weight: 600; }
+  @media (max-width: 360px) { .doble { grid-template-columns: 1fr; } .cifra { font-size: 38px; } }
+  @media (prefers-reduced-motion: no-preference) { .meta .lleno, .pista > div { transition: width .4s ease; } }
+</style>
+</head>
+<body>
+<div class="contenedor">
+  <header>
+    <a class="volver" id="atras" href="/tablero" hidden><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 12H5M11 6l-6 6 6 6"></path></svg> Volver al resumen</a>
+    <div class="fila-marca">
+      <p class="marca">EL DOLARÓN</p>
+      <p>Pesos mexicanos</p>
+    </div>
+    <h1 id="titulo">Cómo va la tienda</h1>
+    <p class="mes" id="mes">&nbsp;</p>
+  </header>
+  <div id="estado" role="status" aria-live="polite">Cargando…</div>
+  <main id="contenido" hidden></main>
+</div>
+
+<script type="module">
+import { escapar, pesosEje, cambio } from '/graficas.js';
+import { CATEGORIAS, CATEGORIAS_GASTO } from '/categorias.js';
+
+const $ = (id) => document.getElementById(id);
+const NOMBRE_CATEGORIA = new Map([...CATEGORIAS, ['sin categoria', 'Sin categoría'], ['bandas', 'Bandas']]);
+const categoria = (clave) => NOMBRE_CATEGORIA.get(clave) ?? clave;
+
+// Pesos enteros, es-MX; los negativos con signo menos tipografico.
+const pesos = (centavos) => `${centavos < 0 ? '−' : ''}${pesosEje(Math.abs(centavos))}`;
+const entero = (n) => Math.round(n).toLocaleString('es-MX');
+const pct = (parte, todo) => (todo > 0 ? Math.round(parte * 100 / todo) : 0);
+const MESES = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
+const compacto = (centavos) => { const p = Math.round(centavos / 100); return p >= 1000 ? `${entero(p / 1000)} mil` : `$${entero(p)}`; };
+
+const barra = (porcentaje, color) => `<div class="pista" aria-hidden="true"><div style="width:${Math.min(100, Math.max(0, porcentaje))}%${color ? `;background:${color}` : ''}"></div></div>`;
+// Las vistas de detalle que existen (?vista=): solo a esas se enlaza desde el resumen.
+const VISTAS = new Set(['ventas', 'tienda', 'mercancia', 'gastos', 'clientes', 'whatsapp', 'revendedoras', 'mercadolibre']);
+const href = (vista) => `/tablero?vista=${vista}`;
+// Mercado Libre (#621): el monto es real donde ya se leyo la orden y estimado (precio publicado) solo donde falta.
+const montoML = (c) => `${c.estimado ? '≈ ' : ''}${pesos(c.total)}`;
+const marcaML = (c) => (c.estimado ? `<span class="aviso-estimado">Estimado</span>` : '');
+const notaML = (c) => (c.estimado
+  ? `${c.piezas_reales > 0 ? `${entero(c.piezas_reales)} de ${entero(c.piezas)} piezas con el precio real; el resto, con el precio publicado.` : 'Con el precio publicado: aún no leemos el precio real.'} No está sumado en las ventas de arriba.`
+  : 'Con el precio real que cobró Mercado Libre. No está sumado en las ventas de arriba.');
+const TEXTO_ML = '<strong>Mercado Libre:</strong> el precio real que cobró Mercado Libre por cada pieza y, solo donde todavía no lo tenemos, el precio publicado (se marca como estimado). No está sumado en las ventas.';
+const VER = '<span class="ver" aria-hidden="true">Ver detalle ›</span>';
+const verMas = (vista) => (VISTAS.has(vista) ? `<a class="ver" href="${href(vista)}">Ver detalle ›</a>` : '');
+const enTarjeta = (vista, html) => (VISTAS.has(vista) ? `<a class="enlace" href="${href(vista)}">${html}</a>` : html);
+const tarjeta = (etiqueta, cifra, resto = '', clase = '', vista = '') =>
+  enTarjeta(vista, `<article class="tarjeta"><p class="etiqueta">${etiqueta}</p><p class="cifra ${clase}">${cifra}</p>${resto}${VISTAS.has(vista) ? VER : ''}</article>`);
+
+function leyenda(items) {
+  const total = items.reduce((s, i) => s + i.valor, 0);
+  const apilada = `<div class="apilada" aria-hidden="true">${items.filter((i) => i.valor > 0)
+    .map((i) => `<div style="width:${pct(i.valor, total)}%;background:${i.color}"></div>`).join('')}</div>`;
+  const filas = items.map((i) => `<div class="fila"><span><span class="muestra" style="background:${i.color}"></span>${i.nombre}</span><span>${i.texto}</span></div>`).join('');
+  return `${apilada}<div class="leyenda">${filas}</div>`;
+}
+
+function resumen(d) {
+  const [anio, mes] = d.mes.clave.split('-').map(Number);
+  const nombreMes = MESES[mes - 1];
+  const caja = pct(d.canales.tienda.total, d.ventas.total);
+  const frase = d.meta
+    ? `En ${nombreMes} vendimos <strong>${pesos(d.ventas.total)}</strong>: <strong>${d.meta.avance_pct} %</strong> de la meta de ${pesos(d.meta.monto)}.`
+    : `En ${nombreMes} llevamos <strong>${pesos(d.ventas.total)}</strong> en ventas.`;
+  const historia = d.ventas.total > 0 ? `${caja} % de las ventas entró por la caja de la tienda.` : 'Todavía no hay ventas este mes.';
+  $('mes').textContent = `${nombreMes[0].toUpperCase()}${nombreMes.slice(1)} ${anio} · actualizado ${new Date(d.generado_en).toLocaleString('es-MX', { dateStyle: 'medium', timeStyle: 'short' })}`;
+  return `<section class="resumen" aria-label="Resumen"><p class="titular">${frase}</p><p class="historia">${historia}</p></section>`;
+}
+
+// «▲ 6 % más que la semana anterior al mismo día», o «poca historia» si la anterior tuvo muy pocas ventas.
+function comparacionSemana(s, contra = 'la semana anterior') {
+  if (s.poca_historia) return '<span class="nota">Poca historia: la semana anterior tuvo muy pocas ventas para comparar.</span>';
+  const c = cambio(s.actual.total, s.anterior.total);
+  return !c ? '' : c.direccion === 'igual' ? `= igual que ${contra}`
+    : `<span class="${c.direccion === 'sube' ? 'arriba' : 'abajo'}">${c.direccion === 'sube' ? '▲' : '▼'} ${Math.abs(c.pct).toLocaleString('es-MX', { maximumFractionDigits: 1 })} % ${c.direccion === 'sube' ? 'más' : 'menos'}</span> que ${contra} al mismo día`;
+}
+
+function barrasSemanas(v) {
+  const maximo = Math.max(1, ...v.semanas.map((w) => w.total));
+  const columnas = v.semanas.map((w, i) => `<div class="col${w.actual ? ' actual' : ''}">
+      <span class="valor">${compacto(w.total)}</span><div class="barra" style="height:${Math.max(2, Math.round(w.total * 68 / maximo))}px"></div>
+      <span class="nombre">${w.actual ? 'Esta' : `Sem ${i + 1}`}</span></div>`).join('');
+  const descripcion = v.semanas.map((w, i) => `${w.actual ? 'esta semana' : `semana ${i + 1}`}: ${pesos(w.total)}`).join('; ');
+  return `<div class="semanas" role="img" aria-label="Ventas por semana. ${escapar(descripcion)}" style="grid-template-columns:repeat(${v.semanas.length},minmax(0,1fr))">${columnas}</div>`;
+}
+
+function tarjetaVentas(d) {
+  const v = d.ventas;
+  let metaHtml = '';
+  if (d.meta) {
+    const m = d.meta;
+    const arriba = m.estado === 'arriba';
+    metaHtml = `<div style="display:flex;flex-direction:column;gap:6px">
+      <div class="meta" role="img" aria-label="${m.avance_pct} por ciento de la meta del mes; a esta fecha el ritmo pedía ${m.ritmo_pct} por ciento">
+        <div class="lleno" style="width:${Math.min(100, m.avance_pct)}%"></div><div class="ritmo" style="left:${Math.min(100, m.ritmo_pct)}%"></div></div>
+      <div class="leyenda-meta"><span>Meta del mes: ${pesos(m.monto)}</span><span>▏ritmo a hoy</span></div>
+      <p class="frase chica"><span class="${arriba ? 'arriba' : 'abajo'}">${arriba ? '▲ Arriba del ritmo:' : '▼ Abajo del ritmo:'}</span> a esta fecha deberíamos llevar ${pesos(m.ritmo_monto)}.</p></div>`;
+  }
+  return enTarjeta('ventas', `<article class="tarjeta"><p class="etiqueta">Ventas del mes</p><p class="cifra">${pesos(v.total)}</p>${metaHtml}
+    <p class="frase">Esta semana: ${pesos(v.semana.actual.total)}. ${comparacionSemana(v.semana)}</p>
+    ${barrasSemanas(v)}${VER}</article>`);
+}
+
+function bloqueInventario(d) {
+  const i = d.inventario;
+  const semanas = i.semanas_de_inventario ? ` Alcanza para unas ${entero(i.semanas_de_inventario)} semanas al ritmo actual.` : '';
+  return tarjeta('Mercancía en el piso', `${entero(i.piezas)} <small>piezas</small>`,
+    `<p class="frase">Valen <strong>${pesos(i.valor)}</strong> a precio de venta.${semanas}</p>`, '', 'mercancia');
+}
+
+function seccionCanales(d) {
+  const c = d.canales;
+  const t = d.ventas.total;
+  const abre = (vista, html) => (VISTAS.has(vista) ? `<a class="canal enlace-fila" href="${href(vista)}">${html}</a>` : `<div class="canal">${html}</div>`);
+  const fila = (nombre, canal, extra = '', vista = '') => abre(vista, `<div class="fila"><span>${nombre}${VISTAS.has(vista) ? ' ›' : ''}</span><span>${pesos(canal.total)} · ${pct(canal.total, t)} %</span></div>${barra(pct(canal.total, t))}${extra}`);
+  const nota = (texto) => `<span class="nota">${texto}</span>`;
+  const rev = c.revendedoras;   // null con menos de 5 revendedoras: su venta viene sumada en WhatsApp
+  const resto = pct(c.whatsapp.total + (rev?.total ?? 0), t);
+  return `<section aria-labelledby="t-canales"><h2 id="t-canales" class="seccion">De dónde vienen las ventas</h2>
+    <p class="historia">${t > 0 ? `Por la caja entra el ${pct(c.tienda.total, t)} %; WhatsApp y las revendedoras suman ${resto} %.` : 'Todavía no hay ventas este mes.'}</p>
+    <div class="tarjeta" style="gap:14px">
+      ${fila('Tienda (caja)', c.tienda, '', 'tienda')}
+      ${rev
+        ? `${fila('Pedidos por WhatsApp', c.whatsapp, '', 'whatsapp')}
+      ${fila('Revendedoras', rev, nota(`Comisión que ganaron: ${pesos(rev.comision)} (10 %, sin envío) · ${rev.personas} revendedoras`), 'revendedoras')}`
+        : fila('Pedidos por WhatsApp y revendedoras', c.whatsapp, nota('Las revendedoras se muestran aparte cuando sean 5 o más.'), 'whatsapp')}
+      ${abre('mercadolibre', `<div class="fila"><span>Mercado Libre${VISTAS.has('mercadolibre') ? ' ›' : ''}</span><span>${montoML(c.mercado_libre)}</span></div>
+        ${marcaML(c.mercado_libre)}
+        ${nota(notaML(c.mercado_libre))}`)}
+    </div></section>`;
+}
+
+function seccionMovimiento(d) {
+  const ventas = d.dias_en_venta.filter((c) => c.n >= 3 && c.dias_promedio !== null).sort((a, b) => a.dias_promedio - b.dias_promedio);
+  const dias = (x) => `${entero(Math.max(0, x))} ${Math.round(x) === 1 ? 'día' : 'días'}`;
+  const historia = ventas.length >= 2
+    ? `${categoria(ventas[0].categoria)} se vende en ${dias(ventas[0].dias_promedio)}; ${categoria(ventas.at(-1).categoria)} tarda ${dias(ventas.at(-1).dias_promedio)}.`
+    : 'Aquí aparece cuánto tarda cada categoría en venderse cuando haya suficientes ventas.';
+  const tramos = new Map(d.inventario.por_antiguedad.map((x) => [x.tramo, x.valor]));
+  const partes = [
+    { nombre: '0 a 2 semanas', valor: tramos.get('0-2') ?? 0, color: 'var(--acento)' },
+    { nombre: '3 a 4 semanas', valor: tramos.get('3-4') ?? 0, color: 'var(--serie-2)' },
+    { nombre: '5 o más semanas', valor: (tramos.get('5-8') ?? 0) + (tramos.get('9+') ?? 0), color: 'var(--serie-3)' },
+  ];
+  const total = partes.reduce((s, p) => s + p.valor, 0);
+  partes.forEach((p) => { p.texto = `${pct(p.valor, total)} %`; });
+  const filasDias = ventas.map((c) => `<div class="fila"><span>${escapar(categoria(c.categoria))}</span><span>${dias(c.dias_promedio)}</span></div>`).join('');
+  return `<section aria-labelledby="t-mueve"><h2 id="t-mueve" class="seccion">Qué se está moviendo</h2><p class="historia">${historia}</p>
+    ${filasDias ? `<div class="tarjeta" style="gap:12px"><p class="etiqueta">Días que tarda en venderse</p>${filasDias}</div>` : ''}
+    ${total > 0 ? `<div class="tarjeta" style="gap:10px"><p class="etiqueta">Cuánto lleva en el piso (del valor)</p>${leyenda(partes)}</div>` : ''}${verMas('mercancia')}</section>`;
+}
+
+function seccionClientes(d) {
+  const c = d.clientes;
+  const sinDato = '<span class="nota">Se muestra con 5 o más</span>';
+  const historia = c.regresaron_pct === null
+    ? `Cada compra deja en promedio ${pesos(d.ventas.ticket_promedio)}.`
+    : `Cada compra deja en promedio ${pesos(d.ventas.ticket_promedio)}, y ${c.regresaron_pct} de cada 100 socios Dolarones ya regresó.`;
+  return `<section aria-labelledby="t-clientes"><h2 id="t-clientes" class="seccion">Clientes</h2><p class="historia">${historia}</p>
+    <div class="doble">
+      ${tarjeta('Compras', entero(d.ventas.tickets), '', 'media')}
+      ${tarjeta('Ticket promedio', pesos(d.ventas.ticket_promedio), '', 'media')}
+      ${tarjeta('Socios Dolarones', c.socios === null ? '—' : entero(c.socios), c.socios === null ? sinDato : '', 'media')}
+      ${tarjeta('Regresaron', c.regresaron_pct === null ? '—' : `${c.regresaron_pct} %`, c.regresaron_pct === null ? sinDato : '<span class="nota">Compraron 2 veces o más</span>', 'media')}
+    </div>${verMas('clientes')}</section>`;
+}
+
+function seccionPublicidad(d) {
+  const p = d.publicidad;
+  const historia = p.gasto > 0
+    ? `Pusimos ${pesos(p.gasto)} en anuncios este mes.${p.ventas_por_peso !== null ? ` Por cada $1 de anuncio vendimos ${pesos(p.ventas_por_peso * 100)} en total.` : ''}`
+    : 'Todavía no hay gasto en anuncios registrado este mes.';
+  return `<section aria-labelledby="t-anuncios"><h2 id="t-anuncios" class="seccion">Publicidad</h2><p class="historia">${historia}</p>
+    <div class="tarjeta"><div class="fila"><span>Gasto en anuncios</span><span>${pesos(p.gasto)}</span></div>
+    <div class="fila"><span>Ventas por cada $1 de anuncio</span><span>${p.ventas_por_peso === null ? '—' : pesos(p.ventas_por_peso * 100)}</span></div></div>${verMas('gastos')}</section>`;
+}
+
+function seccionGastos(d) {
+  const nombres = { nomina: 'Nómina', renta: 'Renta', otros: 'Otros', publicidad: 'Anuncios' };
+  const colores = { nomina: 'var(--acento)', renta: 'var(--serie-4)', otros: 'var(--serie-5)', publicidad: 'var(--serie-3)' };
+  const items = d.gastos.por_categoria.map((g) => ({ nombre: nombres[g.categoria] ?? g.categoria, valor: g.importe, color: colores[g.categoria] ?? 'var(--serie-2)', texto: pesos(g.importe) }));
+  const mayor = [...items].sort((a, b) => b.valor - a.valor)[0];
+  const historia = d.gastos.total > 0 ? `${mayor.nombre} es el ${pct(mayor.valor, d.gastos.total)} % de los gastos.` : 'Todavía no hay gastos registrados este mes.';
+  return `<section aria-labelledby="t-gastos"><h2 id="t-gastos" class="seccion">A dónde se va el dinero</h2><p class="historia">${historia}</p>
+    ${d.gastos.total > 0 ? `<div class="tarjeta" style="gap:10px">${leyenda(items)}</div>` : ''}${verMas('gastos')}</section>`;
+}
+
+const COMO = `<section aria-labelledby="t-como" style="gap:8px"><h2 id="t-como" class="seccion" style="font-size:20px">Cómo se calcula</h2>
+  <div class="tarjeta frase chica" style="gap:10px">
+    <p style="margin:0"><strong>Ventas:</strong> lo cobrado ya sin descuentos, devoluciones ni cancelaciones, solo de la tienda. Cada día va de las 12 a. m. a las 12 a. m., hora de la tienda (centro de México).</p>
+    <p style="margin:0"><strong>Gastos:</strong> los capturados, los pagados desde la caja y la nómina pagada en el mes (pagos y adelantos). Sin desglose por persona.</p>
+    <p style="margin:0"><strong>Ventas − gastos:</strong> las ventas del mes menos todos los gastos. No incluye lo que costó la mercancía.</p>
+    <p style="margin:0"><strong>Meta y ritmo:</strong> la meta del mes repartida entre sus días. «Abajo del ritmo» significa que hoy vamos detrás de esa línea.</p>
+    <p style="margin:0"><strong>Esta semana:</strong> de lunes a hoy, contra la semana anterior hasta el mismo día.</p>
+    <p style="margin:0">${TEXTO_ML}</p>
+    <p style="margin:0"><strong>Mercancía en el piso:</strong> piezas etiquetadas con existencia, a precio de venta.</p>
+    <p style="margin:0"><strong>Poca historia:</strong> si la semana anterior tuvo menos de 10 ventas, no mostramos porcentaje.</p>
+    <p style="margin:0">Aquí nunca aparecen nombres, teléfonos ni compras de una persona; los grupos de menos de 5 personas no se cuentan.</p>
+  </div></section>`;
+
+function pintar(d) {
+  const sv = d.ventas_menos_gastos;
+  $('contenido').innerHTML = [
+    resumen(d),
+    `<section style="gap:12px" aria-label="Lo más importante">${tarjetaVentas(d)}
+      <div class="doble">
+        ${tarjeta('Gastos del mes', pesos(d.gastos.total), '<p class="frase chica">Nómina, renta, anuncios y otros.</p>', 'media', 'gastos')}
+        ${tarjeta('Ventas − gastos', pesos(sv), '<p class="frase chica">Antes del costo de la mercancía.</p>', 'media', 'gastos')}
+      </div>
+      ${bloqueInventario(d)}</section>`,
+    seccionCanales(d), seccionMovimiento(d), seccionClientes(d), seccionPublicidad(d), seccionGastos(d), COMO,
+  ].join('');
+  $('estado').hidden = true;
+  $('contenido').hidden = false;
+}
+
+// ---------- Vistas de detalle (?vista=...): mismos datos agregados, una pantalla por cifra ----------
+
+const DIAS_SEMANA = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
+const ORDEN_SEMANA = [1, 2, 3, 4, 5, 6, 0];   // la semana de la tienda empieza el lunes
+const FRANJAS = [['manana', 'Antes del mediodía'], ['tarde', 'Del mediodía a las 4 p. m.'], ['noche', 'Después de las 4 p. m.']];
+const FLECHA = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 12H5M11 6l-6 6 6 6"></path></svg>';
+const nombreMes = (d) => MESES[Number(d.mes.clave.slice(5)) - 1];
+const volverAbajo = `<a class="volver2" href="/tablero">${FLECHA} Volver al resumen</a>`;
+const titularDe = (html) => `<p class="titular">${html}</p>`;
+const marca = (texto) => `<span class="aviso-estimado">${texto}</span>`;
+const falta = (texto) => `<p class="falta">${texto}</p>`;
+const detalleDe = (parrafos) => `<section aria-labelledby="t-como" style="gap:8px"><h2 id="t-como" class="seccion" style="font-size:20px">Cómo se calcula</h2>
+  <div class="tarjeta frase chica" style="gap:10px">${parrafos.map((p) => `<p style="margin:0">${p}</p>`).join('')}</div></section>`;
+const dias = (x) => `${entero(Math.max(0, x))} ${Math.round(x) === 1 ? 'día' : 'días'}`;
+// Una fila con su barra; el ancho es relativo al maximo del grupo.
+const filaBarra = (nombre, texto, valor, maximo, color = '') =>
+  `<div class="canal"><div class="fila"><span>${nombre}</span><span>${texto}</span></div>${barra(maximo > 0 ? valor * 100 / maximo : 0, color)}</div>`;
+const NOTA_PRIVACIDAD = 'Aquí nunca aparecen nombres, teléfonos ni compras de una persona; los grupos de menos de 5 personas no se cuentan.';
+
+const DETALLE = {
+  ventas: {
+    titulo: 'Ventas del mes',
+    pintar(d) {
+      const v = d.ventas; const s = v.semana;
+      const c = cambio(s.actual.total, s.anterior.total);
+      const ritmo = s.poca_historia || !c || c.direccion === 'igual' ? ''
+        : ` Esta semana vamos ${Math.abs(c.pct).toLocaleString('es-MX', { maximumFractionDigits: 1 })} % ${c.direccion === 'sube' ? 'arriba' : 'abajo'} de la anterior al mismo día.`;
+      const cs = d.canales_semana;
+      const totalSemana = cs.tienda.total + cs.whatsapp.total + (cs.revendedoras?.total ?? 0);
+      const canal = (nombre, x) => filaBarra(nombre, `${pesos(x.total)} · ${pct(x.total, totalSemana)} %`, x.total, totalSemana, 'var(--acento)');
+      const q = d.cuadre;
+      const fila = (n, x, signo = '') => `<div class="fila"><span>${n}</span><span>${signo}${pesos(x)}</span></div>`;
+      const ds = d.descuentos;
+      return [
+        titularDe(`Vendimos <strong>${pesos(v.total)}</strong> en ${nombreMes(d)}.${ritmo}`),
+        `<article class="tarjeta"><p class="etiqueta">Ventas por semana</p><p class="cifra">${pesos(v.total)}</p>
+          <p class="frase">Esta semana: ${pesos(s.actual.total)}. ${comparacionSemana(s)}</p>${barrasSemanas(v)}</article>`,
+        `<article class="tarjeta" style="gap:14px"><p class="etiqueta">Esta semana, por canal</p>
+          ${canal('Tienda (caja)', cs.tienda)}
+          ${cs.revendedoras ? `${canal('Pedidos por WhatsApp', cs.whatsapp)}${canal('Revendedoras', cs.revendedoras)}` : canal('Pedidos por WhatsApp y revendedoras', cs.whatsapp)}
+          <div class="canal"><div class="fila"><span>Mercado Libre</span><span>${montoML(cs.mercado_libre)}</span></div>${marcaML(cs.mercado_libre)}
+            <span class="nota">${notaML(cs.mercado_libre)}</span></div></article>`,
+        `<article class="tarjeta" style="gap:10px"><p class="etiqueta">Del cobrado a lo vendido</p>
+          ${fila('Total de los tickets del mes', q.cobrado)}${fila('Devoluciones de piezas', q.devoluciones, '− ')}${fila('Tickets cancelados', q.cancelaciones, '− ')}
+          ${q.otros_duenos > 0 ? fila('Mercancía de otro dueño', q.otros_duenos, '− ') : ''}
+          <div class="tabla-cuadre"><div class="fila"><span>Ventas del mes</span><span>${pesos(q.vendido)}</span></div></div></article>`,
+        `<article class="tarjeta" style="gap:10px"><p class="etiqueta">Descuentos que dimos</p>
+          <div class="fila"><span>Promoción</span><span>${pesos(ds.promo)} · ${entero(ds.promo_tickets)} compras</span></div>
+          <div class="fila"><span>Otros descuentos autorizados</span><span>${pesos(ds.otros)} · ${entero(ds.otros_tickets)} compras</span></div>
+          <p class="frase chica">Ya están restados de las ventas.</p></article>`,
+        detalleDe([
+          '<strong>Ventas:</strong> lo cobrado ya sin descuentos, devoluciones ni cancelaciones, solo de la tienda. No incluye Mercado Libre. Cada día va de las 12 a. m. a las 12 a. m., hora de la tienda (centro de México).',
+          '<strong>Esta semana:</strong> de lunes a hoy, contra la semana anterior hasta el mismo día.',
+          '<strong>Por canal:</strong> tienda es lo cobrado en la caja; WhatsApp, los pedidos apartados por WhatsApp. Con menos de 5 revendedoras con ventas, lo suyo va sumado a WhatsApp.',
+          '<strong>Del cobrado a lo vendido:</strong> el total de los tickets del mes menos lo devuelto por piezas y lo cancelado (y lo de otros dueños, si hay) da las ventas del mes.',
+          TEXTO_ML,
+        ]),
+      ];
+    },
+  },
+
+  tienda: {
+    titulo: 'Tienda (caja)',
+    pintar(d) {
+      const t = d.tienda; const p = d.pagos;
+      const sinVentas = t.total === 0;
+      const mejorDia = [...d.por_dia_semana].sort((a, b) => b.total - a.total)[0];
+      const mejorFranja = FRANJAS.map(([k, n]) => [n, d.por_franja[k]]).sort((a, b) => b[1] - a[1])[0];
+      const frase = sinVentas ? 'Todavía no hay ventas en la caja este mes.'
+        : `La caja vendió <strong>${pesos(t.total)}</strong>: ${pct(t.total, d.ventas_total)} de cada 100 pesos del mes. El mejor día es ${DIAS_SEMANA[mejorDia.dia].toLowerCase()}. Franja con más ventas: ${mejorFranja[0][0].toLowerCase()}${mejorFranja[0].slice(1)}.`;
+      const pagos = [
+        { nombre: 'Efectivo', valor: p.efectivo, color: 'var(--acento)' }, { nombre: 'Tarjeta', valor: p.tarjeta, color: 'var(--serie-4)' },
+        { nombre: 'Transferencia', valor: p.transferencia, color: 'var(--serie-5)' },
+        ...(p.dolarones === null ? [] : [{ nombre: 'Pagado con Dolarones', valor: p.dolarones, color: 'var(--serie-3)' }]),
+        ...(p.otras > 0 ? [{ nombre: 'Otras formas de pago', valor: p.otras, color: 'var(--serie-2)' }] : []),
+      ].map((i) => ({ ...i, texto: `${pesos(i.valor)} · ${pct(i.valor, t.total)} %` }));
+      const maxDia = Math.max(...d.por_dia_semana.map((x) => x.total));
+      return [
+        titularDe(frase),
+        `<div class="doble">${tarjeta('Compras', entero(t.tickets), '<p class="frase chica">Tickets cobrados en caja.</p>', 'media')}
+          ${tarjeta('Ticket promedio', pesos(t.ticket_promedio), '<p class="frase chica">Lo que deja cada compra.</p>', 'media')}</div>`,
+        `<article class="tarjeta" style="gap:10px"><p class="etiqueta">Cómo pagan</p>${sinVentas ? '<p class="frase chica">Sin ventas todavía.</p>' : leyenda(pagos)}</article>`,
+        `<article class="tarjeta" style="gap:14px"><p class="etiqueta">Cuándo compran</p>
+          ${ORDEN_SEMANA.map((n) => filaBarra(DIAS_SEMANA[n], pesos(d.por_dia_semana[n].total), d.por_dia_semana[n].total, maxDia, 'var(--acento)')).join('')}
+          <div style="border-top:1px solid var(--borde);padding-top:12px;display:flex;flex-direction:column;gap:10px"><p class="etiqueta">Por hora del día</p>
+          ${FRANJAS.map(([k, n]) => filaBarra(n, `${pct(d.por_franja[k], t.total)} %`, d.por_franja[k], t.total, 'var(--serie-2)')).join('')}</div></article>`,
+        detalleDe([
+          '<strong>Tienda (caja):</strong> compras cobradas en la caja (sin pedidos por WhatsApp ni revendedoras, y sin Mercado Libre). Efectivo, tarjeta y transferencia suman lo cobrado; los Dolarones son otra forma de pago.',
+          '<strong>Ticket promedio:</strong> ventas de la caja ÷ número de compras.',
+          '<strong>Cuándo compran:</strong> ventas del mes de la caja por día de la semana y por franja, con la hora de la tienda (centro de México).',
+          '<strong>Dolarones:</strong> si menos de 5 socios pagaron con ellos este mes, no se muestran y su monto va dentro de «otras formas de pago».',
+        ]),
+      ];
+    },
+  },
+
+  mercancia: {
+    titulo: 'Mercancía en el piso',
+    pintar(d) {
+      const i = d.inventario;
+      const tramo = new Map(i.por_antiguedad.map((x) => [x.tramo, x]));
+      const reciente = (tramo.get('0-2')?.piezas ?? 0) + (tramo.get('3-4')?.piezas ?? 0);
+      const maxCat = Math.max(1, ...i.por_categoria.map((c) => c.valor));
+      const visibles = i.por_categoria.slice(0, 5);
+      const resto = i.por_categoria.slice(5);
+      if (resto.length) visibles.push({ categoria: null, piezas: resto.reduce((s, c) => s + c.piezas, 0), valor: resto.reduce((s, c) => s + c.valor, 0) });
+      const tramos = [['0-2', '0 a 2 semanas', 'var(--acento)'], ['3-4', '3 a 4 semanas', 'var(--serie-4)'], ['5-8', '5 a 8 semanas', 'var(--serie-2)'], ['9+', '9 o más semanas', 'var(--serie-3)']]
+        .map(([k, nombre, color]) => ({ nombre, color, valor: tramo.get(k)?.piezas ?? 0, texto: `${entero(tramo.get(k)?.piezas ?? 0)} piezas` }));
+      if (i.sin_fecha > 0) tramos.push({ nombre: 'Sin fecha de captura', color: 'var(--pista)', valor: i.sin_fecha, texto: `${entero(i.sin_fecha)} piezas` });
+      const viejas = tramo.get('9+');
+      const vendidas = d.dias_en_venta.filter((c) => c.n >= 3 && c.dias_promedio !== null).sort((a, b) => a.dias_promedio - b.dias_promedio);
+      return [
+        titularDe(i.piezas > 0
+          ? `Hay <strong>${entero(i.piezas)}</strong> piezas en el piso que valen <strong>${pesos(i.valor)}</strong> a precio de venta. ${Math.round(reciente * 10 / i.piezas)} de cada 10 llevan menos de 5 semanas.`
+          : 'Todavía no hay mercancía con etiqueta y existencia en el piso.'),
+        tarjeta('Piezas en el piso', entero(i.piezas)), tarjeta('Valor a precio de venta', pesos(i.valor)),
+        `<article class="tarjeta" style="gap:14px"><p class="etiqueta">Por categoría</p>
+          ${visibles.map((c) => filaBarra(c.categoria === null ? 'Otras categorías' : escapar(categoria(c.categoria)), `${entero(c.piezas)} piezas · ${pesos(c.valor)}`, c.valor, maxCat, 'var(--acento)')).join('')}</article>`,
+        `<article class="tarjeta" style="gap:10px"><p class="etiqueta">Cuánto lleva en el piso</p>${i.piezas > 0 ? leyenda(tramos) : ''}
+          ${viejas && viejas.piezas > 0 ? `<p class="frase">Las ${entero(viejas.piezas)} piezas con 9 o más semanas valen ${pesos(viejas.valor)}.</p>` : ''}</article>`,
+        vendidas.length ? `<article class="tarjeta" style="gap:12px"><p class="etiqueta">Días que tardó en venderse lo ya vendido</p>
+          ${vendidas.map((c) => `<div class="fila"><span>${escapar(categoria(c.categoria))}</span><span>${dias(c.dias_promedio)}</span></div>`).join('')}</article>` : '',
+        detalleDe([
+          '<strong>Mercancía en el piso:</strong> piezas con existencia y etiqueta, valoradas a su precio de venta. Sin las bandas ni el inventario de otros dueños.',
+          '<strong>Cuánto lleva:</strong> semanas completas desde que la pieza se capturó.',
+          '<strong>Días que tardó en venderse:</strong> promedio histórico entre capturar una pieza y venderla, por categoría; solo categorías con 3 o más ventas.',
+        ]),
+      ];
+    },
+  },
+
+  gastos: {
+    titulo: 'Gastos del mes',
+    pintar(d) {
+      const g = d.gastos; const vt = d.ventas_total;
+      const nombres = { nomina: 'Nómina', renta: 'Renta', otros: 'Otros', publicidad: 'Anuncios' };
+      const colores = { nomina: 'var(--acento)', renta: 'var(--serie-4)', otros: 'var(--serie-5)', publicidad: 'var(--serie-3)' };
+      const grupos = ['nomina', 'renta', 'otros', 'publicidad'].map((k) => ({ nombre: nombres[k], valor: g[k], color: colores[k], texto: pesos(g[k]) }));
+      const mayor = [...grupos].sort((a, b) => b.valor - a.valor)[0];
+      const maxOtros = Math.max(1, ...g.otros_detalle.map((x) => x.importe));
+      const nombreGasto = new Map([...CATEGORIAS_GASTO, ['sin_categoria', 'Sin categoría']]);
+      const porCien = (x) => `$${entero(Math.round(x * 100 / vt))}`;
+      const p = d.publicidad;
+      return [
+        titularDe(g.total > 0
+          ? `Gastamos <strong>${pesos(g.total)}</strong> en ${nombreMes(d)}${vt > 0 ? `, ${porCien(g.total)} por cada $100 que vendimos` : ''}. ${mayor.nombre} es el ${pct(mayor.valor, g.total)} % de los gastos.`
+          : 'Todavía no hay gastos registrados este mes.'),
+        `<article class="tarjeta" style="gap:10px"><p class="etiqueta">A dónde se fue</p>${g.total > 0 ? leyenda(grupos) : '<p class="frase chica">Sin gastos todavía.</p>'}
+          <span class="nota">La nómina es un solo total, sin desglose por persona.</span></article>`,
+        g.otros_detalle.length ? `<article class="tarjeta" style="gap:14px"><p class="etiqueta">Dentro de «Otros»</p>
+          ${g.otros_detalle.map((x) => filaBarra(escapar(nombreGasto.get(x.categoria) ?? x.categoria), pesos(x.importe), x.importe, maxOtros, 'var(--serie-5)')).join('')}</article>` : '',
+        vt > 0 && g.total > 0 ? `<article class="tarjeta" style="gap:10px"><p class="etiqueta">Por cada $100 que vendimos</p>
+          ${['nomina', 'renta', 'otros', 'publicidad'].map((k) => `<div class="fila"><span>${nombres[k]}</span><span>${porCien(g[k])}</span></div>`).join('')}
+          <div class="tabla-cuadre"><div class="fila"><span>Total de gastos</span><span>${porCien(g.total)}</span></div></div></article>` : '',
+        `<article class="tarjeta" style="gap:10px"><p class="etiqueta">Anuncios</p>
+          <div class="fila"><span>Gasto en anuncios</span><span>${pesos(p.gasto)}</span></div>
+          <div class="fila"><span>Ventas por cada $1 de anuncio</span><span>${p.ventas_por_peso === null ? '—' : pesos(p.ventas_por_peso * 100)}</span></div>
+          ${p.gasto === 0 ? falta('Solo aparece si el gasto de anuncios se anota como gasto de publicidad') : ''}</article>`,
+        detalleDe([
+          '<strong>Gastos:</strong> los gastos capturados, los pagados desde la caja (cada uno cuenta una sola vez) y la nómina pagada en el mes (pagos y adelantos), sea de la caja o pagado fuera.',
+          '<strong>No incluye</strong> lo que costó la mercancía.',
+          '<strong>Por cada $100:</strong> el gasto ÷ las ventas del mes × 100, redondeado a pesos; por eso las partes pueden no sumar exacto el total.',
+          '<strong>Ventas por cada $1 de anuncio:</strong> ventas totales del mes ÷ gasto en anuncios (no es el ROAS de Meta).',
+        ]),
+      ];
+    },
+  },
+
+  clientes: {
+    titulo: 'Clientes',
+    pintar(d) {
+      const c = d.compras; const s = d.socios;
+      const sinDato = '<span class="nota">Se muestra con 5 o más</span>';
+      const nuevos = s.nuevos_por_semana;
+      const maxNuevos = Math.max(1, ...(nuevos ?? []).map((w) => w.nuevos ?? 0));
+      const columnas = (nuevos ?? []).map((w, i) => `<div class="col${w.actual ? ' actual' : ''}">
+        <span class="valor">${w.nuevos === null ? '< 5' : entero(w.nuevos)}</span><div class="barra" style="height:${Math.max(2, Math.round((w.nuevos ?? 0) * 68 / maxNuevos))}px"></div>
+        <span class="nombre">${w.actual ? 'Esta' : `Sem ${i + 1}`}</span></div>`).join('');
+      const r = d.referidos;
+      const Dn = (x) => `${entero(x / 100)} D`;
+      return [
+        titularDe(`Hubo <strong>${entero(c.tickets)}</strong> compras de <strong>${pesos(c.ticket_promedio)}</strong> en promedio.${s.total === null ? '' : ` Ya son ${entero(s.total)} socios Dolarones${s.regresaron_pct === null ? '.' : ` y ${s.regresaron_pct} de cada 100 volvió a comprar.`}`}`),
+        tarjeta('Compras', entero(c.tickets), '<p class="frase chica">Tickets de la tienda, WhatsApp y revendedoras. Mercado Libre no entra.</p>'),
+        tarjeta('Ticket promedio', pesos(c.ticket_promedio)),
+        `<article class="tarjeta"><p class="etiqueta">Socios Dolarones</p><p class="cifra">${s.total === null ? '—' : entero(s.total)}</p>
+          ${s.total === null ? sinDato : `<div class="semanas" role="img" aria-label="Socios nuevos por semana" style="grid-template-columns:repeat(${nuevos.length},minmax(0,1fr))">${columnas}</div>
+          <p class="frase">Socios nuevos por semana de ${nombreMes(d)} (con menos de 5 no se muestra el número).${d.dolarones_pagados === null ? '' : ` Este mes se pagaron ${pesos(d.dolarones_pagados)} con Dolarones.`}</p>`}</article>`,
+        `<article class="tarjeta"><p class="etiqueta">Regresaron</p><p class="cifra">${s.regresaron_pct === null ? '—' : `${s.regresaron_pct} %`}</p>
+          ${s.regresaron_pct === null ? sinDato : `${barra(s.regresaron_pct)}<p class="frase">${s.regresaron === null ? 'Socios que compraron dos veces o más.' : `${entero(s.regresaron)} de ${entero(s.total)} socios compraron dos veces o más.`}</p>
+          ${falta('Solo contamos a quienes tienen cuenta Dolarones; no sabemos cuántos clientes sin cuenta regresan')}`}</article>`,
+        r ? `<article class="tarjeta" style="gap:10px"><p class="etiqueta">Programa de referidos (piloto)</p>
+          <p class="frase">Un socio invita a un conocido con su código. El invitado recibe ${Dn(r.reglas.alta)} al registrarse y, con su primera compra de ${pesos(r.reglas.minimo_compra)} o más en dinero, cada uno recibe ${Dn(r.reglas.premio)} más.</p>
+          <div class="fila"><span>Socios que llegaron con un código</span><span>${entero(r.total)}</span></div>
+          ${r.liberados === null ? '<span class="nota">El desglose se muestra cuando cada grupo tiene 5 o más.</span>'
+            : `<div class="fila"><span>Ya hicieron su compra</span><span>${entero(r.liberados)}</span></div><div class="fila"><span>Esperando su primera compra</span><span>${entero(r.pendientes)}</span></div>`}
+          <div class="fila"><span>Dolarones regalados</span><span>${Dn(r.dolarones_regalados)}</span></div>
+          <span class="nota">Desde que arrancó el programa.</span></article>` : '',
+        detalleDe([
+          '<strong>Compras:</strong> los tickets del mes de la tienda, WhatsApp y revendedoras (los mismos del resumen). Mercado Libre no se cuenta aquí.',
+          '<strong>Regresaron:</strong> socios con dos compras o más ÷ socios, desde siempre.',
+          NOTA_PRIVACIDAD,
+        ]),
+      ];
+    },
+  },
+};
+
+DETALLE.whatsapp = {
+  titulo: 'Pedidos por WhatsApp',
+  pintar(d) {
+    const c = d.canal; const p = d.pedidos_mes; const a = d.apartados; const e = d.entrega; const r = d.reglas;
+    const cuantos = (n) => `${entero(n)} ${n === 1 ? 'pedido' : 'pedidos'}`;
+    const filaPedidos = (nombre, n) => filaBarra(nombre, cuantos(n), n, p.total, 'var(--acento)');
+    const entregas = e.tienda + e.envio;
+    return [
+      titularDe(`Los pedidos por WhatsApp${c.incluye_revendedoras ? ' (con los de revendedoras)' : ''} dejaron <strong>${pesos(c.total)}</strong> y hoy hay <strong>${entero(a.abiertos)}</strong> ${a.abiertos === 1 ? 'apartado abierto esperando' : 'apartados abiertos esperando'} que los paguen o los recojan.`),
+      tarjeta('Pedidos cerrados', entero(c.tickets), '<p class="frase chica">Ya pagados completos y cobrados este mes.</p>'),
+      tarjeta('Ticket promedio', pesos(c.ticket_promedio), '<p class="frase chica">Lo que deja cada pedido.</p>'),
+      `<article class="tarjeta" style="gap:14px"><p class="etiqueta">Qué pasó con los pedidos del mes</p>
+        ${p.total > 0 ? [filaPedidos('Cerrados', p.cerrados), filaPedidos('Apartados abiertos', p.abiertos), filaPedidos('Vencidos', p.vencidos), filaPedidos('Cancelados', p.cancelados)].join('') : '<p class="frase chica">Todavía no hay pedidos apartados este mes.</p>'}
+        <p class="frase chica">De los ${cuantos(p.total)} que se apartaron en ${nombreMes(d)}. Un apartado dura ${r.dias_apartado} días; si no se paga, las piezas regresan al piso.${c.incluye_revendedoras ? ` Los de revendedoras duran ${r.horas_revendedora} horas.` : ''}</p></article>`,
+      `<article class="tarjeta" style="gap:10px"><p class="etiqueta">Apartados abiertos hoy</p>
+        <div class="fila"><span>Valor de lo apartado (con envío)</span><span>${pesos(a.valor)}</span></div>
+        <div class="fila"><span>Ya pagado (anticipos y abonos)</span><span>${pesos(a.pagado)}</span></div>
+        <div class="fila"><span>Falta por cobrar</span><span>${pesos(a.falta)}</span></div>
+        ${barra(pct(a.pagado, a.valor), 'var(--acento)')}
+        <p class="frase chica">El anticipo mínimo es ${r.anticipo_pct} % del valor de las piezas; en envío a domicilio, ${pesos(r.anticipo_envio)}.${c.incluye_revendedoras ? ' Las revendedoras apartan sin anticipo.' : ''}</p></article>`,
+      `<article class="tarjeta" style="gap:10px"><p class="etiqueta">Cómo se entregan</p>
+        ${entregas > 0 ? `<div class="fila"><span>Recoger en tienda</span><span>${cuantos(e.tienda)} · ${pct(e.tienda, entregas)} %</span></div>
+        <div class="fila"><span>Envío a domicilio</span><span>${cuantos(e.envio)} · ${pct(e.envio, entregas)} %</span></div>
+        ${e.envios_pendientes > 0 ? `<p class="frase"><strong>${entero(e.envios_pendientes)} ${e.envios_pendientes === 1 ? 'envío ya pagado espera' : 'envíos ya pagados esperan'}</strong> que se anote la guía.</p>` : ''}` : '<p class="frase chica">Sin pedidos todavía.</p>'}</article>`,
+      detalleDe([
+        '<strong>Pedidos cerrados:</strong> las ventas del mes que vinieron de un pedido por WhatsApp (los mismos del resumen). Los demás números son de los pedidos que se apartaron en el mes, sea cual sea su estado hoy.',
+        '<strong>Falta por cobrar:</strong> valor de las piezas apartadas (con el envío) menos lo que ya se pagó, pedido por pedido.',
+        '<strong>Apartados abiertos hoy:</strong> todos los que siguen apartados, sin importar el mes en que se hicieron.',
+        c.incluye_revendedoras ? 'Con menos de 5 revendedoras con ventas, sus pedidos van sumados a los de WhatsApp.' : 'Las revendedoras (5 o más con ventas) tienen su propia vista y no están en estos números.',
+        NOTA_PRIVACIDAD,
+      ]),
+    ];
+  },
+};
+
+DETALLE.revendedoras = {
+  titulo: 'Revendedoras',
+  pintar(d) {
+    if (!d.disponible) return [titularDe('Las revendedoras se muestran aparte cuando sean 5 o más.'), detalleDe([NOTA_PRIVACIDAD])];
+    const maxCat = d.categorias.reduce((s, c) => s + c.total, 0);
+    return [
+      titularDe(`${entero(d.personas)} revendedoras cerraron ${entero(d.pedidos)} pedidos por <strong>${pesos(d.total)}</strong> este mes y ganaron <strong>${pesos(d.comision)}</strong> de comisión.`),
+      tarjeta('Revendedoras activas', entero(d.personas), '<p class="frase chica">Con al menos un pedido cobrado.</p>'),
+      tarjeta('Pedidos cobrados', entero(d.pedidos)),
+      tarjeta('Ticket promedio', pesos(d.ticket_promedio)),
+      tarjeta('Comisión ganada', pesos(d.comision), `<p class="frase chica">${d.comision_pct} % del precio, sin envío.</p>`),
+      d.categorias.length ? `<article class="tarjeta" style="gap:14px"><p class="etiqueta">Qué venden</p>
+        ${d.categorias.map((c) => filaBarra(escapar(categoria(c.categoria)), `${pct(c.total, maxCat)} %`, c.total, maxCat, 'var(--acento)')).join('')}</article>` : '',
+      `<article class="tarjeta" style="gap:10px"><p class="etiqueta">Pedidos por cobrar</p>
+        <div class="fila"><span>Apartados de revendedoras abiertos</span><span>${entero(d.apartados_abiertos.n)} · ${pesos(d.apartados_abiertos.valor)}</span></div>
+        <p class="frase chica">Todavía no cuentan como venta: se suman cuando la clienta paga.</p></article>`,
+      detalleDe([
+        `<strong>Revendedoras activas:</strong> las que tuvieron al menos un pedido cobrado en el mes. Esta vista solo existe cuando son 5 o más.`,
+        `<strong>Comisión:</strong> ${d.comision_pct} % del precio de las piezas de cada pedido cobrado, sin el envío, redondeada por pedido.`,
+        '<strong>Qué venden:</strong> porcentaje del importe de las piezas de sus pedidos cobrados, por categoría.',
+        'Aquí nunca aparece el nombre de una revendedora ni de sus clientas.',
+      ]),
+    ];
+  },
+};
+
+DETALLE.mercadolibre = {
+  titulo: 'Mercado Libre',
+  pintar(d) {
+    const v = d.vendido; const pu = d.publicaciones; const q = d.queda;
+    const maxCat = Math.max(1, ...d.por_categoria.map((c) => c.total));
+    const estimadas = v.piezas - v.piezas_reales;
+    const piezasTxt = (n) => `${entero(n)} ${n === 1 ? 'pieza' : 'piezas'}`;
+    const filaQ = (n, x, signo = '') => `<div class="fila"><span>${n}</span><span>${signo}${pesos(x)}</span></div>`;
+    return [
+      titularDe(`En Mercado Libre vendimos ${d.estimado ? 'unos ' : ''}<strong>${pesos(v.total)}</strong>${d.estimado ? ' (estimado)' : ''} en ${nombreMes(d)}: ${piezasTxt(v.piezas)}.${q ? ` Después de comisión y envío nos quedan <strong>${pesos(q.queda)}</strong>.` : ''}${d.por_atender > 0 ? ` Hay ${entero(d.por_atender)} ${d.por_atender === 1 ? 'orden' : 'órdenes'} por atender.` : ''}`),
+      `<article class="tarjeta"><p class="etiqueta">${d.estimado ? 'Vendido (estimado)' : 'Vendido'}</p><p class="cifra">${montoML({ estimado: d.estimado, total: v.total })}</p>${marcaML(d)}
+        ${v.piezas > 0 ? `<p class="frase chica">${entero(v.piezas_reales)} de ${piezasTxt(v.piezas)} con el precio real${estimadas > 0 ? `; ${piezasTxt(estimadas)} con el precio publicado.` : '.'}</p>` : ''}</article>`,
+      q ? `<article class="tarjeta" style="gap:10px"><p class="etiqueta">Lo que nos queda</p><p class="cifra">${pesos(q.queda)}</p>
+        ${filaQ('Precio de venta', q.vendido)}${filaQ('Comisión de Mercado Libre', q.comision, '− ')}${filaQ('Envío que paga la tienda', q.envio, '− ')}
+        <p class="frase chica">De ${piezasTxt(q.piezas)}${q.piezas < v.piezas ? ` de ${entero(v.piezas)} (las demás aún no traen comisión o envío)` : ''}. Antes de retenciones de impuestos.</p></article>`
+        : `<article class="tarjeta"><p class="etiqueta">Lo que nos queda</p><p class="cifra">—</p>
+        ${falta('Todavía no tenemos precio, comisión y envío de ninguna venta de este mes: no mostramos cuánto nos queda')}</article>`,
+      tarjeta('Piezas vendidas', entero(v.piezas), `<p class="frase chica">Este mes.</p>`),
+      tarjeta('Publicaciones activas', entero(pu.activas), '<p class="frase chica">Piezas a la venta hoy.</p>'),
+      tarjeta('Días en venderse', d.dias_en_venderse === null ? '—' : entero(d.dias_en_venderse),
+        d.dias_en_venderse === null ? '<span class="nota">Se muestra con 3 ventas o más con fecha de publicación</span>' : '<p class="frase chica">Promedio desde que se publica.</p>'),
+      `<article class="tarjeta" style="gap:10px"><p class="etiqueta">De lo publicado, qué se vendió</p>
+        <div class="fila"><span>Publicadas alguna vez</span><span>${entero(pu.publicadas)}</span></div>
+        <div class="fila"><span>Con al menos una venta</span><span>${entero(pu.con_venta)} · ${pct(pu.con_venta, pu.publicadas)} %</span></div>
+        <div class="fila"><span>Activas hoy</span><span>${entero(pu.activas)}</span></div></article>`,
+      d.por_categoria.length ? `<article class="tarjeta" style="gap:14px"><p class="etiqueta">Qué categorías venden más</p>
+        ${d.por_categoria.map((c) => filaBarra(escapar(categoria(c.categoria)), `${entero(c.piezas)} ${c.piezas === 1 ? 'pieza' : 'piezas'} · ${c.piezas_reales < c.piezas ? '≈ ' : ''}${pesos(c.total)}`, c.total, maxCat, 'var(--acento)')).join('')}</article>` : '',
+      `<article class="tarjeta" style="gap:10px"><p class="etiqueta">Por atender</p>
+        <div class="fila"><span>Órdenes por atender en Avisos</span><span>${entero(d.por_atender)}</span></div>
+        <div class="fila"><span>Canceladas este mes</span><span>${entero(d.canceladas)}</span></div>
+        ${estimadas > 0 ? falta(`Falta guardar el precio real de ${piezasTxt(estimadas)}: por eso parte del total es estimado. Se va llenando solo`) : ''}</article>`,
+      detalleDe([
+        '<strong>Vendido:</strong> piezas vendidas × el precio real que cobró Mercado Libre. Solo donde todavía no lo tenemos se usa el precio publicado, y entonces se marca como estimado. No está sumado en las ventas de la tienda.',
+        '<strong>Lo que nos queda:</strong> precio de venta − comisión de Mercado Libre − envío que paga la tienda, solo de las piezas que ya tienen los tres datos. No descuenta las retenciones de impuestos (ISR/IVA): Mercado Libre no las entrega en la orden.',
+        '<strong>Días en venderse:</strong> del día que se publicó la pieza al día de la orden, de las que guardan la fecha de publicación.',
+        '<strong>Por atender:</strong> órdenes que nadie ha marcado como atendidas en Avisos.',
+      ]),
+    ];
+  },
+};
+
+// ---------- Ruteo: /tablero = resumen; /tablero?vista=<nombre> = detalle ----------
+
+const vista = new URLSearchParams(location.search).get('vista');
+
+function pintarDetalle(d) {
+  const def = DETALLE[vista];
+  $('titulo').textContent = def.titulo;
+  $('mes').textContent = `${nombreMes(d)[0].toUpperCase()}${nombreMes(d).slice(1)} ${d.mes.clave.slice(0, 4)} · pesos mexicanos · actualizado ${new Date(d.generado_en).toLocaleString('es-MX', { dateStyle: 'medium', timeStyle: 'short' })}`;
+  $('contenido').innerHTML = [...def.pintar(d), volverAbajo].filter(Boolean).join('');
+  $('estado').hidden = true;
+  $('contenido').hidden = false;
+}
+
+function falla(mensaje) {
+  $('estado').innerHTML = `${escapar(mensaje)} <a href="/tablero" style="color:var(--acento)">Volver al resumen</a>`;
+  $('estado').className = 'error';
+}
+
+document.title = `El Dolarón — ${vista && DETALLE[vista] ? DETALLE[vista].titulo : 'tablero'}`;
+try {
+  if (vista !== null && !Object.hasOwn(DETALLE, vista)) {
+    $('atras').hidden = false;
+    falla('Esa vista no existe.');
+  } else {
+    if (vista !== null) $('atras').hidden = false;
+    const r = await fetch(vista === null ? '/api/tablero' : `/api/tablero?vista=${encodeURIComponent(vista)}`, { cache: 'no-store' });
+    if (!r.ok) throw new Error(r.status === 401 || r.status === 403 ? 'Tu cuenta no tiene acceso a este tablero.' : 'No se pudo cargar el tablero. Intenta de nuevo en unos minutos.');
+    const d = await r.json();
+    if (vista === null) pintar(d); else pintarDetalle(d);
+  }
+} catch (e) {
+  $('estado').textContent = e instanceof Error ? e.message : 'No se pudo cargar el tablero.';
+  $('estado').className = 'error';
+}
+</script>
+</body>
+</html>

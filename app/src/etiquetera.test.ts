@@ -4,7 +4,8 @@
 // etiqueta, que es donde se rompio todo lo anterior.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { tsplEtiqueta, tsplBanda, tsplMarco, tsplPruebaCodigo, tsplPruebaLargos, partirNombre, NOMBRE_MAX, TSPL_REGLA, TSPL_CALIBRAR, tsplCodigo, leerCodigos } from '../public/etiquetera.js';
+import { tsplEtiqueta, tsplBanda, tsplMarco, tsplPruebaCodigo, tsplPruebaLargos, partirNombre, NOMBRE_MAX, TSPL_REGLA, TSPL_CALIBRAR, tsplCodigo, leerCodigos,
+  reconectarEtiquetera, etiqueteraLista, reclamarEtiquetas, soltarEtiquetas, adoptarMarca, adoptarMarcas, olvidarMarca, marcarImpresa, impresas, desmarcarDesde } from '../public/etiquetera.js';
 
 const PIEZA = {
   nombre: 'Taza de ceramica azul',
@@ -289,6 +290,109 @@ test('un cambio de precio despues de imprimir regresa la pieza a la lista; uno i
   delete (globalThis as any).localStorage;
 });
 
+test('corregir nombre o talla despues de imprimir regresa la pieza para reimprimir (#361)', async () => {
+  const guardado = new Map<string, string>();
+  (globalThis as any).localStorage = { getItem: (k: string) => guardado.get(k) ?? null, setItem: (k: string, v: string) => guardado.set(k, v) };
+  const { marcarImpresa, impresas, etiquetaVigente } = await import('../public/etiquetera.js');
+  const pieza = { precio: 10000, precio_lista: 0, nombre: 'Playera Cat & Jack', talla: 'M', stock: 1 };
+  marcarImpresa('a', '2026-10-18T18:00:00.000Z', pieza);
+  const marca = impresas().a;
+  assert.equal(etiquetaVigente(marca, pieza), true);
+  assert.equal(etiquetaVigente(marca, { ...pieza, nombre: 'Sudadera All in Motion' }), false);
+  assert.equal(etiquetaVigente(marca, { ...pieza, talla: 'L' }), false);
+  assert.equal(etiquetaVigente(marca, { ...pieza, nombre: ' Playera Cat & Jack ' }), true);   // espacios no se imprimen
+  // Marca de antes de guardar el nombre: solo el precio decide.
+  guardado.set('etiqueta-impresas', JSON.stringify({ b: { hora: '2026-10-18T17:00:00.000Z', precio: 10000, precio_lista: 0 } }));
+  assert.equal(etiquetaVigente(impresas().b, { ...pieza, nombre: 'Otra cosa' }), true);
+  delete (globalThis as any).localStorage;
+});
+
+test('el grado A, B o C se imprime en un recuadro, sin tocar el resto de la etiqueta (#453)', () => {
+  const sin = tsplEtiqueta(PIEZA);
+  for (const [estado, letra, palabra] of [['nuevo', 'A', 'Nuevo'], ['danado', 'B', 'Danado'], ['liquidacion', 'C', 'Liquidacion']] as const) {
+    const tspl = tsplEtiqueta({ ...PIEZA, estado_fisico: estado });
+    const caja = tspl.match(/^BOX (\d+),(\d+),(\d+),(\d+),3$/m)!;
+    assert.ok(caja, 'falta el recuadro');
+    assert.ok(tspl.includes(`,"4",0,1,1,"${letra}"`), `falta la letra ${letra}`);
+    // La palabra va al pie solo si no es A (A es lo de siempre) y la A deja el pie como estaba.
+    assert.equal(tspl.includes(` - ${palabra}"`), letra !== 'A');
+    if (letra === 'A') assert.ok(tspl.includes('"ED-000123 - 2026-S38"'));
+    const [x0, y0, x1, y1] = caja.slice(1).map(Number);
+    // Dentro de la etiqueta, a la derecha del precio de venta ($120 = 16..144), a la izquierda del precio de lista ($199) y arriba de las barras (y=108).
+    assert.ok(x0 >= 16 + 4 * 32 && x1 <= 406 - 16 - 4 * 24, `recuadro fuera de su zona: ${caja[0]}`);
+    assert.ok(y0 >= 54 && y1 <= 108);
+    // Las barras, el precio y el nombre se quedan donde estaban.
+    for (const linea of sin.split('\r\n').filter((l) => /^(TEXT|BAR|BARCODE) /.test(l) && !l.includes(`,"4",0`) && !l.endsWith(`"${pie(sin)}"`))) {
+      assert.ok(tspl.includes(linea), `cambio: ${linea}`);
+    }
+  }
+});
+
+test('Ropa omite recuadro, letra y palabra del grado, incluso con estados anteriores; MG los conserva', () => {
+  for (const estado_fisico of ['nuevo', 'danado', 'liquidacion']) {
+    const mg = tsplEtiqueta({ ...PIEZA, categoria: 'hogar', estado_fisico });
+    for (const ropa of [{ categoria: 'ropa' }, { precio_ropa: 12000 }]) {
+      const tspl = tsplEtiqueta({ ...PIEZA, ...ropa, estado_fisico });
+      assert.doesNotMatch(tspl, /^BOX |,"4",0,1,1,"[ABC]"| - (Nuevo|Danado|Liquidacion)"/m);
+      assert.match(tspl, /"ED-000123 - 2026-S38"/);
+      for (const linea of tspl.split('\r\n').filter(l => l && !l.includes(',170,')))
+        assert.ok(mg.includes(linea), `Se conserva la calibración y el contenido: ${linea}`);
+    }
+    assert.match(mg, /^BOX /m);
+    assert.match(mg, /,"4",0,1,1,"[ABC]"/);
+  }
+});
+
+test('el grado interno de Ropa no pide reimpresión; nombre, talla y precio sí', async () => {
+  const { etiquetaVigente } = await import('../public/etiquetera.js');
+  const { avisoReimpresion } = await import('../public/ficha.js');
+  const pieza = { ...PIEZA, categoria: 'ropa', talla: 'M', destino: 'etiqueta', stock: 2, estado_fisico: 'nuevo' };
+  const marca = { ...pieza, estado_fisico: 'danado' };
+  assert.equal(etiquetaVigente(marca, pieza), true);
+  assert.equal(avisoReimpresion(marca, marca, pieza), null);
+  for (const cambio of [{ nombre: 'Camisa' }, { talla: 'L' }, { precio: 10000 }]) {
+    assert.equal(etiquetaVigente(marca, { ...pieza, ...cambio }), false);
+    assert.doesNotMatch(avisoReimpresion(marca, marca, { ...pieza, ...cambio })!, /grado|A ·|B ·|C ·/);
+  }
+});
+
+const pie = (tspl: string) => tspl.match(/^TEXT \d+,170,"1",0,1,1,"(.*)"$/m)![1];
+
+test('sin precio de lista el recuadro del grado va al borde derecho; con precios largos no se encima (#453)', () => {
+  const borde = tsplEtiqueta({ ...PIEZA, precio_lista: 0, estado_fisico: 'danado' }).match(/^BOX (\d+),/m)!;
+  assert.equal(Number(borde[1]) + 44, 406 - 16);
+  const largo = tsplEtiqueta({ ...PIEZA, precio: 150000, precio_lista: 999900, estado_fisico: 'liquidacion' });
+  const [, x0, , x1] = largo.match(/^BOX (\d+),\d+,(\d+),/m)!.map(Number) as number[];
+  assert.ok(x0 >= 16 + 5 * 32, 'se encima con el precio de venta');
+  assert.ok(Number(largo.match(/^BAR (\d+),/m)![1]) > Number(largo.match(/^BOX \d+,\d+,(\d+),/m)![1]), 'se encima con el precio de lista');
+});
+
+test('la palabra del grado no se pasa del ancho del pie (#453)', () => {
+  const tspl = tsplEtiqueta({ ...PIEZA, talla: 'XXL-TALLA-MUY-LARGA-QUE-NO-CABE', estado_fisico: 'liquidacion' });
+  assert.ok(!tspl.includes('Liquidacion"'), 'la palabra no cabe y debe quedarse solo la letra');
+  assert.ok(/^TEXT \d+,\d+,"4",0,1,1,"C"$/m.test(tspl));
+});
+
+test('cambiar el grado de una pieza etiquetada la regresa para reimprimir; marcas sin grado se leen como A (#453)', async () => {
+  const guardado = new Map<string, string>();
+  (globalThis as any).localStorage = { getItem: (k: string) => guardado.get(k) ?? null, setItem: (k: string, v: string) => guardado.set(k, v) };
+  const { marcarImpresa, impresas, etiquetaVigente } = await import('../public/etiquetera.js');
+  const pieza = { precio: 10000, precio_lista: 0, nombre: 'Playera', talla: 'M', stock: 1, estado_fisico: 'danado' };
+  marcarImpresa('a', '2026-10-22T18:00:00.000Z', pieza);
+  assert.equal(impresas().a.estado_fisico, 'danado');
+  assert.equal(etiquetaVigente(impresas().a, pieza), true);
+  assert.equal(etiquetaVigente(impresas().a, { ...pieza, estado_fisico: 'nuevo' }), false);
+  assert.equal(etiquetaVigente(impresas().a, { ...pieza, estado_fisico: 'liquidacion' }), false);
+  assert.equal(etiquetaVigente(impresas().a, { ...pieza, estado_fisico: 'liquidacion', stock: 0 }), true);   // sin existencia no hay etiqueta que cambiar
+
+  // Marca guardada antes del grado: compatible con A, desactualizada si hoy es B o C.
+  guardado.set('etiqueta-impresas', JSON.stringify({ v: { hora: '2026-10-22T17:00:00.000Z', precio: 10000, precio_lista: 0, nombre: 'Playera', talla: 'M' } }));
+  assert.equal(etiquetaVigente(impresas().v, { ...pieza, estado_fisico: 'nuevo' }), true);
+  assert.equal(etiquetaVigente(impresas().v, { ...pieza, estado_fisico: undefined }), true);
+  assert.equal(etiquetaVigente(impresas().v, pieza), false);
+  delete (globalThis as any).localStorage;
+});
+
 test('la prueba de codigos largos usa la etiqueta real y el mismo ancho de barra', () => {
   const tspl = tsplPruebaLargos();
   const barras = [...tspl.matchAll(/BARCODE (\d+),\d+,"128",56,0,0,(\d+),\d+,"(\d+)"/g)];
@@ -318,4 +422,148 @@ test('leerCodigos: lo pegado de Excel, con cantidad o sin ella, y lo que no se p
   const { filas, malas } = leerCodigos('Código\tCantidad\r\n7501234567890\t3\nSAL-0042\n\nABC;2\nDEF,0\ncon espacio\t1\n12345678901234\t1\nA"B\t1');
   assert.deepEqual(filas, [{ codigo: '7501234567890', cantidad: 3 }, { codigo: 'SAL-0042', cantidad: 1 }, { codigo: 'ABC', cantidad: 2 }]);
   assert.deepEqual(malas, ['Código\tCantidad', 'DEF,0', 'con espacio\t1', '12345678901234\t1', 'A"B\t1']);
+});
+
+test('reconectar sin clic (#440): sin getDevices o sin una AE240 recordada no hay nada que hacer; con una, queda lista', async () => {
+  const navegador = globalThis.navigator as unknown as { bluetooth?: unknown };
+  const aparato = (name: string) => ({
+    name, addEventListener() {},
+    gatt: { connected: false, disconnect() {}, connect: async () => ({ getPrimaryService: async () => ({
+      getCharacteristic: async () => ({ properties: { writeWithoutResponse: true }, writeValueWithoutResponse: async () => {} }) }) }) },
+  });
+  try {
+    navegador.bluetooth = {};   // Chrome sin getDevices
+    assert.equal(await reconectarEtiquetera(), false);
+    navegador.bluetooth = { getDevices: async () => [aparato('Otra cosa')] };
+    assert.equal(await reconectarEtiquetera(), false);
+    navegador.bluetooth = { getDevices: async () => { throw new Error('bloqueado'); } };
+    assert.equal(await reconectarEtiquetera(), false);
+    assert.equal(etiqueteraLista(), false);
+    navegador.bluetooth = { getDevices: async () => [aparato('Otra cosa'), aparato('AE240-bt_1DDE-LE')] };
+    assert.equal(await reconectarEtiquetera(), true);
+    assert.equal(etiqueteraLista(), true);
+  } finally { delete navegador.bluetooth; }
+});
+
+/** localStorage y fetch de mentira mientras corre `fn`. */
+async function conNavegador<R>(fetchFalso: typeof fetch, fn: (almacen: Map<string, string>) => Promise<R> | R): Promise<R> {
+  const almacen = new Map<string, string>(), g = globalThis as any;
+  const previos = [Object.getOwnPropertyDescriptor(g, 'localStorage'), g.fetch];
+  Object.defineProperty(g, 'localStorage', { configurable: true, writable: true,
+    value: { getItem: (k: string) => almacen.get(k) ?? null, setItem: (k: string, v: string) => almacen.set(k, v), removeItem: (k: string) => almacen.delete(k) } });
+  g.fetch = fetchFalso;
+  try { return await fn(almacen); } finally {
+    if (previos[0]) Object.defineProperty(g, 'localStorage', previos[0]); else delete g.localStorage;
+    g.fetch = previos[1];
+  }
+}
+
+test('reclamarEtiquetas (#440): manda ids, origen y versión; sin red lanza con sinRed; un error HTTP lanza sin sinRed', async () => {
+  const llamadas: any[] = [];
+  await conNavegador((async (ruta: string, op: any) => { llamadas.push({ ruta, ...op, body: JSON.parse(op.body) });
+    return { ok: true, json: async () => ({ reclamadas: ['a'], marcas: {} }) }; }) as never, async () => {
+    const r = await reclamarEtiquetas(['a'], { reimprimir: true, version: 'v1', origen: 'celular' });
+    assert.deepEqual(r.reclamadas, ['a']);
+    assert.deepEqual(llamadas[0].body, { ids: ['a'], reimprimir: true, version: 'v1', origen: 'celular' });
+    assert.equal(llamadas[0].method, 'POST');
+  });
+  await conNavegador((async () => { throw new TypeError('Failed to fetch'); }) as never, async () => {
+    await assert.rejects(() => reclamarEtiquetas(['a']), (e: any) => e.sinRed === true && /Sin red/.test(e.message));
+  });
+  await conNavegador((async () => ({ ok: false, status: 403, json: async () => ({ error: 'Tu cuenta no tiene permiso para esto.' }) })) as never, async () => {
+    await assert.rejects(() => reclamarEtiquetas(['a']), (e: any) => e.sinRed === undefined && /permiso/.test(e.message));
+  });
+});
+
+test('soltarEtiquetas (#440): lotes de 100, true si la base quedó sin ellas, false (sin lanzar) si falla', async () => {
+  const lotes: number[] = [];
+  await conNavegador((async (_r: string, op: any) => { lotes.push(JSON.parse(op.body).ids.length); assert.equal(op.method, 'DELETE'); return { ok: true }; }) as never, async () => {
+    const ids = Array.from({ length: 230 }, (_, i) => String(i));
+    assert.equal(await soltarEtiquetas(ids, Object.fromEntries(ids.map((i) => [i, 'H']))), true);
+  });
+  assert.deepEqual(lotes, [100, 100, 30]);
+  await conNavegador((async () => { throw new Error('sin red'); }) as never, async () => assert.equal(await soltarEtiquetas(['a'], { a: 'H' }), false));
+  await conNavegador((async () => ({ ok: false })) as never, async () => assert.equal(await soltarEtiquetas(['a'], { a: 'H' }), false));
+});
+
+test('marcas locales (#440): adoptar la de la base respeta la local igual, reemplaza la distinta y olvidarMarca la quita', async () => {
+  await conNavegador((async () => { throw new Error('no se usa'); }) as never, async (almacen) => {
+    const dice = (precio: number) => ({ etiqueta_en: '2026-10-23T10:00:00.000Z', etiqueta_precio: precio, etiqueta_precio_lista: 0, etiqueta_nombre: 'Playera', etiqueta_talla: 'M' });
+    // Sin marca local: se adopta con la hora de la base, el grado de hoy y la señal de que ya está en la base.
+    adoptarMarca('a', dice(9900), { estado_fisico: 'danado' });
+    assert.deepEqual(impresas().a, { hora: '2026-10-23T10:00:00.000Z', precio: 9900, precio_lista: 0, nombre: 'Playera', talla: 'M', estado_fisico: 'danado', base: true, propia: false });
+    // La local igual se respeta (su hora y su grado) y solo gana la señal de la base.
+    marcarImpresa('b', '2026-10-23T09:00:00.000Z', { precio: 9900, precio_lista: 0, nombre: 'Playera', talla: 'M', estado_fisico: 'nuevo' });
+    adoptarMarcas([['b', dice(9900), { estado_fisico: 'danado' }]]);
+    assert.deepEqual(impresas().b, { hora: '2026-10-23T09:00:00.000Z', precio: 9900, precio_lista: 0, nombre: 'Playera', talla: 'M', estado_fisico: 'nuevo', base: true, propia: true });
+    // La local distinta (otro dispositivo reimprimió con otro precio) se reemplaza.
+    adoptarMarca('b', dice(8800), { estado_fisico: 'nuevo' });
+    assert.equal(impresas().b.precio, 8800);
+    assert.equal(impresas().b.hora, '2026-10-23T10:00:00.000Z');
+    olvidarMarca('a');
+    assert.deepEqual(Object.keys(impresas()), ['b']);
+    assert.equal(JSON.parse(almacen.get('etiqueta-impresas')!).a, undefined);
+    // «No salió desde aquí» devuelve las que se mandaron desde esa y las que siguen.
+    marcarImpresa('c', '2026-10-23T11:00:00.000Z', { precio: 1 }); marcarImpresa('d', '2026-10-23T12:00:00.000Z', { precio: 1 });
+    assert.deepEqual(desmarcarDesde('c').sort(), ['c', 'd']);
+    assert.deepEqual(Object.keys(impresas()), ['b']);
+    assert.deepEqual(desmarcarDesde('zzz'), []);
+  });
+});
+
+test('«No salió desde aquí» solo considera marcas propias: una adoptada no se suelta y las viejas sin señal cuentan como propias (#464)', async () => {
+  await conNavegador((async () => { throw new Error('no se usa'); }) as never, async (almacen) => {
+    const dice = { etiqueta_en: '2026-10-23T12:00:00.000Z', etiqueta_precio: 1, etiqueta_precio_lista: 0, etiqueta_nombre: 'X', etiqueta_talla: '' };
+    marcarImpresa('a', '2026-10-23T11:00:00.000Z', { precio: 1 });
+    adoptarMarca('b', dice, {});   // de otro dispositivo, y posterior
+    marcarImpresa('c', '2026-10-23T13:00:00.000Z', { precio: 1 });
+    assert.equal(impresas().a.propia, true); assert.equal(impresas().b.propia, false);
+    assert.deepEqual(desmarcarDesde('b'), []);                      // la adoptada no se puede soltar desde aquí
+    assert.deepEqual(Object.keys(impresas()), ['a', 'b', 'c']);
+    assert.deepEqual(desmarcarDesde('a').sort(), ['a', 'c']);       // las propias desde esa sí; la adoptada en medio se queda
+    assert.deepEqual(Object.keys(impresas()), ['b']);
+    almacen.set('etiqueta-impresas', JSON.stringify({ v: { hora: '2026-10-01T00:00:00.000Z', precio: 1 } }));   // de antes de adoptar: sin señal
+    assert.deepEqual(desmarcarDesde('v'), ['v']);
+  });
+});
+
+test('marcarImpresa guarda la hora del reclamo propio (en) para soltar solo ese reclamo (#464)', async () => {
+  await conNavegador((async () => { throw new Error('no se usa'); }) as never, async () => {
+    marcarImpresa('a', '2026-10-23T11:00:00.000Z', { precio: 1 }, true, '2026-10-23T11:00:00.123Z');
+    assert.equal(impresas().a.en, '2026-10-23T11:00:00.123Z');
+    marcarImpresa('b', '2026-10-23T11:00:00.000Z', { precio: 1 });
+    assert.equal('en' in impresas().b, false);
+  });
+});
+
+test('soltarEtiquetas con `en` (#464): manda la hora de cada reclamo y no suelta lo que no tiene hora', async () => {
+  const cuerpos: any[] = [];
+  await conNavegador((async (_r: string, op: any) => { cuerpos.push(JSON.parse(op.body)); return { ok: true }; }) as never, async () => {
+    assert.equal(await soltarEtiquetas(['a', 'b'], { a: 'H1', b: undefined as never }), true);
+    assert.deepEqual(cuerpos, [{ ids: ['a'], etiquetas_en: { a: 'H1' } }]);
+    assert.equal(await soltarEtiquetas(['x'], { y: 'H' }), true);   // nada con hora: ni siquiera se llama
+    assert.equal(cuerpos.length, 1);
+    assert.equal(await soltarEtiquetas(['a']), true);               // sin `en` no hay reclamo propio que soltar: no se llama
+    assert.equal(cuerpos.length, 1);
+  });
+});
+
+test('reclamarEtiquetas (#464): solo una red caída permite seguir sin la base; un tiempo agotado no', async () => {
+  const agotado = Object.assign(new Error('The operation timed out.'), { name: 'TimeoutError' });
+  await conNavegador((async () => { throw agotado; }) as never, async () => {
+    await assert.rejects(() => reclamarEtiquetas(['a']), (e: any) => e.sinRed === undefined && /no respondió a tiempo/.test(e.message));
+  });
+  await conNavegador((async () => { throw Object.assign(new Error('aborted'), { name: 'AbortError' }); }) as never, async () => {
+    await assert.rejects(() => reclamarEtiquetas(['a']), (e: any) => e.sinRed === undefined);
+  });
+  await conNavegador((async () => ({ ok: false, status: 503, json: async () => ({}) })) as never, async () => {
+    await assert.rejects(() => reclamarEtiquetas(['a']), (e: any) => e.sinRed === undefined && /503/.test(e.message));
+  });
+  const navegador = globalThis.navigator as unknown as { onLine?: boolean };
+  navegador.onLine = false;
+  try {
+    await conNavegador((async () => { throw agotado; }) as never, async () => {
+      await assert.rejects(() => reclamarEtiquetas(['a']), (e: any) => e.sinRed === true);   // sin conexión declarada por el navegador
+    });
+  } finally { delete navegador.onLine; }
 });
