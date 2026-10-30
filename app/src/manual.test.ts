@@ -3,7 +3,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { permiso, puede, esDeCaja, type Rol } from './cuentas.ts';
-import { estadoMia, agruparMias, cobradoMias } from '../public/vender.js';
+import { estadoMia, agruparMias, cobradoMias, gananciaDe, gananciaSemana } from '../public/vender.js';
 
 const leer = (ruta: string) => readFileSync(ruta, 'utf8').replace(/\r\n/g, '\n');
 const manual = leer('public/manual.html');
@@ -88,7 +88,7 @@ test('los chips de «Mis ventas» salen de estadoMia() con las ventas de ejemplo
 test('las reglas confirmadas por Isaac están en el manual y el tamaño cabe en el presupuesto', () => {
   for (const frase of ['10 % del precio de cada pieza que la tienda cobra (sin contar el envío)', 'cada lunes por transferencia',
     'Jardín Hidalgo 129, Soledad', 'de 11 a. m. a 8 p. m.', '48 horas', '$99', '$1,000', 'los viernes', 'Máximo 10 piezas apartadas sin pago a la vez',
-    'PRÁCTICA: no se manda nada de verdad', 'La app todavía no calcula tu ganancia']) {
+    'PRÁCTICA: no se manda nada de verdad', 'En «Mis ventas» la app te muestra']) {
     assert.ok(manual.includes(frase), frase);
   }
   for (const id of ['entrar', 'compartir', 'varias', 'buscar', 'vendi', 'avisar', 'mis-ventas', 'cancelar', 'ganancia', 'ayuda']) assert.ok(manual.includes(`id="${id}"`), id);
@@ -97,4 +97,36 @@ test('las reglas confirmadas por Isaac están en el manual y el tamaño cabe en 
   assert.match(manual, /font: 18px\/1\.5/);
   assert.match(manual, /min-height: 56px/);
   assert.match(manual, /@media print/);
+});
+
+test('gananciaDe: 10 % del precio de lo vendido, sin envío y redondeado a centavos', () => {
+  assert.equal(gananciaDe({ estado: 'vendido', subtotal: 25000, envio: 9900 }), 2500);
+  assert.equal(gananciaDe({ estado: 'vendido', subtotal: 12345, envio: 0 }), 1235);
+  assert.equal(gananciaDe({ estado: 'apartado', subtotal: 25000, envio: 0 }), 0);
+  assert.equal(gananciaDe({ estado: 'cancelado', subtotal: 25000, envio: 0 }), 0);
+});
+
+test('gananciaSemana: lunes 00:00 a domingo 23:59 de la tienda (UTC-6), solo lo que tiene liquidado_en', () => {
+  // Miércoles 28/10/2026 12:00 en la tienda; su semana va del lunes 26/10 06:00Z al lunes 02/11 06:00Z.
+  const ahora = Date.parse('2026-10-28T18:00:00Z');
+  const v = (liquidado_en: string | null) => ({ estado: 'vendido', subtotal: 10000, liquidado_en });
+  const pedidos = [
+    v('2026-10-26T05:59:59Z'), // domingo 23:59:59 de la semana anterior: fuera
+    v('2026-10-26T06:00:00Z'), // lunes 00:00: dentro
+    v('2026-11-02T05:59:59Z'), // domingo 23:59:59: dentro
+    v('2026-11-02T06:00:00Z'), // lunes siguiente: fuera
+    v(null),                   // sin liquidar: no cuenta
+    { estado: 'apartado', subtotal: 10000, liquidado_en: '2026-10-28T00:00:00Z' },
+  ];
+  assert.equal(gananciaSemana(pedidos, ahora), 2000);
+  // El domingo 23:59 de la tienda todavía es la misma semana; el lunes 00:00 ya empieza otra.
+  assert.equal(gananciaSemana(pedidos, Date.parse('2026-11-02T05:59:59Z')), 2000);
+  assert.equal(gananciaSemana(pedidos, Date.parse('2026-11-02T06:00:00Z')), 1000); // solo el liquidado el lunes 00:00
+  assert.equal(gananciaSemana([], ahora), 0);
+});
+
+test('Mis ventas muestra la ganancia con los ayudantes de vender.js', () => {
+  const html = readFileSync(new URL('../public/vender.html', import.meta.url), 'utf8');
+  assert.match(html, /Tu ganancia esta semana: \$\{pesos\(gananciaSemana\(pedidos, ahora\)\)\} · te pagamos el lunes/);
+  assert.match(html, /Tu ganancia: \$\{pesos\(gananciaDe\(p\)\)\}/);
 });

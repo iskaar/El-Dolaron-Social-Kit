@@ -261,7 +261,7 @@
 <script type="module">
 import { CATEGORIAS } from '/categorias.js';
 import { pesos, telefonoInteresado, codigoDeRespuesta, textoWhatsApp, crearTarjeta, compartirTarjetas, descargarTarjetas, enlaceApartar, textoSeguimiento,
-  textoAvisoCliente, enlaceCliente, estadoMia, agruparMias, cobradoMias, fechaLegible, horaLegible } from '/vender.js';
+  textoAvisoCliente, enlaceCliente, estadoMia, agruparMias, cobradoMias, gananciaDe, gananciaSemana, fechaLegible, horaLegible } from '/vender.js';
 
 const $ = (id) => document.getElementById(id);
 const decir = (id, texto, error = false) => { $(id).textContent = texto; $(id).className = `aviso${error ? ' error' : ''}`; };
@@ -613,6 +613,7 @@ function tarjetaMia(p, ahora) {
   textoEn(fila, 'p', `${p.lineas.map((l) => l.nombre).join(', ')} · ${pesos(p.subtotal + p.envio)}`);
   const estado = estadoMia(p, ahora);
   textoEn(fila, 'p', estado.texto, `chip ${estado.clase}`);
+  if (p.estado === 'vendido') textoEn(fila, 'p', `Tu ganancia: ${pesos(gananciaDe(p))}`, 'nota');
   textoEn(fila, 'p', p.entrega === 'envio' ? 'Envío a su casa' : 'Recoge en la tienda', 'nota');
   textoEn(fila, 'p', `Folio P-${p.folio} · ${p.lineas.map((l) => l.codigo).join(', ')}`, 'nota');
   const acciones = textoEn(fila, 'div', '', 'acciones-mia');
@@ -643,6 +644,7 @@ function pintarMias(pedidos) {
   const grupos = agruparMias(pedidos), ahora = Date.now();
   const resumen = textoEn(lista, 'div', '', 'resumen');
   textoEn(resumen, 'p', `Ventas que la tienda ya cobró: ${pesos(cobradoMias(pedidos))}`, 'fuerte');
+  textoEn(resumen, 'p', `Tu ganancia esta semana: ${pesos(gananciaSemana(pedidos, ahora))} · te pagamos el lunes`, 'fuerte');
   textoEn(resumen, 'p', `${grupos.esperando.length} esperando pago`);
   for (const [titulo, lote] of [['Esperando pago', grupos.esperando], ['Ya pagadas', grupos.pagadas], ['Anteriores', grupos.anteriores]]) {
     if (!lote.length) continue;

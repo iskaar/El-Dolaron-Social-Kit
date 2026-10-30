@@ -107,6 +107,22 @@ export function agruparMias(pedidos) {
 /** Lo vendido que la tienda ya cobró (centavos). No es comisión. */
 export const cobradoMias = (pedidos) => pedidos.filter((p) => p.estado === 'vendido').reduce((suma, p) => suma + p.subtotal, 0);
 
+/** Ganancia de la revendedora: 10 % del precio de la pieza, sin envío (Isaac, 29/10/2026, #599). */
+const COMISION = 0.10;
+/** Centavos; `subtotal` ya excluye el envío. Solo lo que la tienda cobró. */
+export const gananciaDe = (pedido) => pedido.estado === 'vendido' ? Math.round(pedido.subtotal * COMISION) : 0;
+
+/** Ganancia de lo cobrado en la semana de la tienda (lunes 00:00 a domingo 23:59, UTC-6 fijo). Se paga el lunes siguiente. */
+export function gananciaSemana(pedidos, ahoraMs) {
+  const MX = -6 * 3_600_000, DIA = 86_400_000;
+  const local = ahoraMs + MX;
+  const lunes = local - (local % DIA) - ((new Date(local).getUTCDay() + 6) % 7) * DIA - MX;
+  return pedidos.reduce((suma, p) => {
+    const t = p.liquidado_en ? Date.parse(p.liquidado_en) : NaN;
+    return t >= lunes && t < lunes + 7 * DIA ? suma + gananciaDe(p) : suma;
+  }, 0);
+}
+
 /** Parte el nombre en hasta `lineasMax` líneas que caben en `anchoMax`; recorta con «…». `ctx`: cualquier objeto con measureText. */
 export function partirNombre(ctx, texto, anchoMax, lineasMax) {
   const cabe = (t) => ctx.measureText(t).width <= anchoMax;
