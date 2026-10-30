@@ -7,6 +7,7 @@ import { estadoMia, agruparMias, cobradoMias, gananciaDe, gananciaSemana } from 
 
 const leer = (ruta: string) => readFileSync(ruta, 'utf8').replace(/\r\n/g, '\n');
 const manual = leer('public/manual.html');
+const manualPublico = leer('../site/public/revendedoras.html');
 const app = leer('public/vender.html') + leer('public/vender.js');
 const cuenta = (...roles: Rol[]) => ({ correo: 'x@prueba.mx', nombre: '', caja: '', activo: true, editar_inventario: false, roles });
 
@@ -45,7 +46,9 @@ test('el manual no hace red: sin fetch, sin API, sin wa.me, sin compartir del te
     assert.ok(!manual.includes(prohibido), `manual.html no debe contener ${prohibido}`);
   }
   // Ninguna página, imagen ni fuente de otro dominio. Solo se importa el código de la propia app.
-  assert.ok(!/(?:src|href)="https?:/.test(manual) && !/url\(\s*['"]?https?:/.test(manual));
+  // Único enlace externo: «Abrir la tienda» (tarjeta 1), un <a href> que solo navega; el manual público no puede ser un callejón sin salida.
+  assert.deepEqual([...manual.matchAll(/(?:src|href)="(https?:[^"]*)"/g)].map((m) => m[1]), ['https://viste.com.mx/vender']);
+  assert.ok(!/url\(\s*['"]?https?:/.test(manual));
   assert.deepEqual([...manual.matchAll(/import\(\s*'([^']+)'/g)].map((m) => m[1]), ['/vender.js']);
   assert.ok(manual.includes('Esta práctica no cargó. Pídele ayuda a la tienda.'));
 });
@@ -129,4 +132,13 @@ test('Mis ventas muestra la ganancia con los ayudantes de vender.js', () => {
   const html = readFileSync(new URL('../public/vender.html', import.meta.url), 'utf8');
   assert.match(html, /Tu ganancia esta semana: \$\{pesos\(gananciaSemana\(pedidos, ahora\)\)\} · te pagamos el lunes/);
   assert.match(html, /Tu ganancia: \$\{pesos\(gananciaDe\(p\)\)\}/);
+});
+
+test('el manual público (eldolaron.com/revendedoras, sin Access) y su vender.js son copias exactas de las de app/ (#624)', () => {
+  assert.equal(manualPublico, manual, 'site/public/revendedoras.html se desfasó: vuelve a copiar app/public/manual.html');
+  assert.equal(leer('../site/public/vender.js'), leer('public/vender.js'), 'site/public/vender.js se desfasó: vuelve a copiar app/public/vender.js');
+  // Es público: sin CLABE ni teléfono personal (ningún «488»: prefijo de números personales).
+  assert.ok(!/\d{18}/.test(manualPublico.replace(/[\s-]/g, '')), 'hay una secuencia de 18 dígitos');
+  assert.ok(!manualPublico.includes('488'), 'el manual público no debe contener 488');
+  assert.match(manualPublico, /<meta name="robots" content="noindex">/);
 });

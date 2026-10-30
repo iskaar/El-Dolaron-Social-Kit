@@ -1,0 +1,614 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<meta name="robots" content="noindex">
+<title>Manual de la revendedora — El Dolarón</title>
+<style>
+  :root { --azul:#16366B; --rojo:#D72B32; --amarillo:#FFD447; --linea:#dfe3ea; --verde:#1f7a4d; --rojo-texto:#B3141B; --gris:#5B6478;
+    --fondo-ok:#E4F3EA; --fondo-error:#FDECEC; --fondo-aviso:#FFF6D9; --aviso-texto:#6B5400; --deshab-fondo:#E9EDF4; --marco:#4b5563; }
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  body { margin: 0; background: #f4f6f9; color: #1a1f2b; font: 18px/1.5 system-ui, -apple-system, sans-serif; }
+  header.top { background: var(--azul); color: #fff; padding: 14px 16px; }
+  header.top h1 { margin: 0; font-size: 22px; }
+  header.top p { margin: 4px 0 0; }
+  main { max-width: 640px; margin: auto; padding: 16px 12px 60px; }
+  a { color: var(--azul); }
+  :is(button, a, input, select, textarea, summary):focus-visible { outline: 3px solid #d08b00; outline-offset: 3px; }
+  .indice { margin: 0 0 8px; padding: 0; list-style: none; display: grid; gap: 8px; }
+  .indice a { display: flex; align-items: center; gap: 10px; min-height: 56px; padding: 8px 12px; background: #fff; border: 2px solid var(--azul); border-radius: 10px; font-weight: 700; text-decoration: none; }
+  .indice b { flex: none; width: 32px; height: 32px; border-radius: 50%; background: var(--azul); color: #fff; text-align: center; line-height: 32px; }
+  .tarea { margin: 28px 0; scroll-margin-top: 12px; overflow-wrap: anywhere; }
+  .tarea h2 { display: flex; gap: 10px; align-items: center; margin: 0 0 4px; font-size: 22px; color: var(--azul); }
+  .tarea h2 b { flex: none; width: 36px; height: 36px; border-radius: 50%; background: var(--azul); color: #fff; text-align: center; line-height: 36px; font-size: 18px; }
+  .objetivo { margin: 0 0 12px; font-size: 20px; font-weight: 700; }
+  .aviso-modulo { margin: 12px 0; padding: 12px; border: 2px solid var(--rojo-texto); border-radius: 10px; background: var(--fondo-error); color: var(--rojo-texto); font-weight: 700; }
+  .tarjeta-texto { background: #fff; border: 1px solid var(--linea); border-radius: 12px; padding: 14px; }
+  .tarjeta-texto ul { margin: 8px 0; padding-left: 22px; } .tarjeta-texto li { margin: 8px 0; }
+  .ctl-fila { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 12px; }
+  .ctl { display: inline-flex; align-items: center; justify-content: center; min-height: 56px; padding: 10px 16px; border: 2px solid var(--azul); border-radius: 10px; background: #fff; color: var(--azul); font: inherit; font-weight: 700; text-decoration: none; cursor: pointer; }
+  .ctl.sig { background: var(--azul); color: #fff; }
+  .paso-texto { min-height: 3.2em; margin: 12px 0 0; padding: 10px 12px; background: var(--fondo-aviso); border-left: 6px solid var(--aviso-texto); border-radius: 6px; font-weight: 700; }
+  .solo-imprimir { display: none; margin: 8px 0 0; padding-left: 26px; }
+  .nota-tarjeta { margin: 10px 0 0; font-size: 16px; color: #2c3547; }
+  .nota-tarjeta strong { color: var(--azul); }
+
+  /* Entrar: pasos dibujados (misma idea que la imagen de WhatsApp) */
+  .pasos-dibujo { list-style: none; margin: 0; padding: 0; display: grid; gap: 14px; }
+  .pasos-dibujo > li { display: grid; grid-template-columns: 40px 1fr; gap: 6px 12px; padding: 12px; background: #fff; border: 1px solid var(--linea); border-radius: 12px; }
+  .pasos-dibujo .n { grid-row: 1 / span 2; width: 40px; height: 40px; border-radius: 50%; background: var(--azul); color: #fff; font-weight: 800; text-align: center; line-height: 40px; }
+  .pasos-dibujo .t { font-weight: 800; }
+  .dibujo { grid-column: 2; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 8px; background: #eef1f6; border-radius: 10px; font-size: 16px; }
+  .dibujo .barra-dir { flex: 1; min-width: 0; padding: 8px 10px; background: #fff; border: 2px solid #8995aa; border-radius: 999px; font-family: ui-monospace, monospace; overflow-wrap: anywhere; }
+  .dibujo .campo { flex: 1; min-width: 0; padding: 10px; background: #fff; border: 2px solid #8995aa; border-radius: 8px; overflow-wrap: anywhere; }
+  .dibujo .bot { padding: 10px 14px; background: var(--azul); color: #fff; border-radius: 8px; font-weight: 800; }
+  .dibujo .correo { flex: 1 1 100%; padding: 8px 10px; background: #fff; border-radius: 8px; border-left: 6px solid var(--rojo); }
+  .dibujo .spam { padding: 6px 10px; background: var(--fondo-aviso); border: 2px dashed var(--aviso-texto); border-radius: 8px; font-weight: 700; }
+  .dibujo .codigo-dib { padding: 8px 14px; background: #fff; border: 2px dashed var(--azul); border-radius: 8px; font: 800 24px ui-monospace, monospace; letter-spacing: 3px; }
+  .inicio-dos { display: grid; gap: 12px; margin-top: 12px; }
+  .inicio-dos > div { padding: 12px; background: #fff; border: 1px solid var(--linea); border-radius: 12px; }
+  .inicio-dos h3 { margin: 0 0 6px; font-size: 18px; color: var(--azul); }
+  .inicio-dos p { margin: 6px 0; }
+
+  /* Marco de práctica: gris, esquinas de teléfono, franja fija. No se parece al tono de la app real. */
+  .telefono { border: 4px solid var(--marco); border-radius: 26px; background: #d1d5db; overflow: hidden; }
+  .franja { background: var(--marco); color: #fff; text-align: center; font-size: 14px; font-weight: 800; letter-spacing: .3px; padding: 7px 8px; }
+  .pantalla { display: grid; padding: 6px; min-height: 360px; background: #f4f6f9; align-content: start; }
+  .pantalla > * { grid-area: 1 / 1; min-width: 0; }
+  .pantalla .atenuada { opacity: .3; pointer-events: none; }
+
+  /* Réplica de /vender (cuenta revendedora): mismos tamaños de vender.html con body.rev */
+  .pantalla { font-size: 18px; }
+  .pantalla p { line-height: 1.5; margin: 6px 0; }
+  .pantalla h2, .pantalla h3 { overflow-wrap: anywhere; }
+  .pantalla label { display: block; margin: 10px 0 4px; font-size: 16px; font-weight: 700; }
+  .pantalla input, .pantalla select, .pantalla textarea { width: 100%; min-width: 0; padding: 12px; font: inherit; font-size: 18px; border: 2px solid var(--azul); border-radius: 8px; background: #fff; color: inherit; }
+  .pantalla button, .pantalla .boton { display: inline-flex; align-items: center; justify-content: center; min-height: 56px; padding: 10px 12px; border: 2px solid var(--azul); border-radius: 10px; font: inherit; font-size: 18px; font-weight: 700; text-align: center; color: var(--azul); background: #fff; cursor: pointer; text-decoration: none; }
+  .pantalla button:disabled { opacity: .55; cursor: default; }
+  .pantalla .principal, .pantalla button[aria-pressed="true"] { background: var(--azul); color: #fff; }
+  .pantalla button.texto { min-height: 44px; font-size: 16px; border-color: transparent; background: transparent; text-decoration: underline; }
+  .pantalla .peligro { border-color: var(--rojo-texto); color: var(--rojo-texto); }
+  .pantalla .panel { background: #fff; border: 1px solid var(--linea); border-radius: 12px; padding: 14px; margin-bottom: 14px; }
+  .pantalla summary { display: flex; align-items: center; min-height: 56px; font-size: 18px; font-weight: 700; color: var(--azul); cursor: pointer; }
+  .pantalla .fila { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .pantalla .fila input { flex: 1; }
+  .pantalla .barra { justify-content: space-between; flex-wrap: nowrap; }
+  .pantalla nav { display: flex; gap: 8px; margin: 8px 0 12px; }
+  .pantalla nav button { flex: 1; min-width: 0; flex-direction: column; gap: 2px; min-height: 64px; padding: 6px 2px; font-size: 15px; }
+  .pantalla .ico { display: block; font-size: 22px; line-height: 1; }
+  .pantalla .check { display: flex; align-items: center; gap: 12px; min-height: 56px; margin: 0; }
+  .pantalla .check input { width: 28px; height: 28px; flex: none; }
+  .pantalla .aviso { min-height: 22px; margin: 8px 0; font-size: 18px; overflow-wrap: anywhere; }
+  .pantalla .aviso.estado { font-size: 16px; color: var(--gris); margin: 0; flex: 1; }
+  .pantalla .error { color: #ae1a21; }
+  .pantalla .nota { font-size: 16px; color: var(--gris); }
+  .pantalla .grande { font-size: 18px; }
+  .pantalla .resultado { display: flex; gap: 10px; align-items: center; justify-content: space-between; margin: -6px -6px 10px; padding: 12px; font-size: 18px; font-weight: 700; color: var(--azul); background: var(--fondo-ok); border-bottom: 3px solid var(--verde); }
+  .pantalla .resultado.error { color: var(--rojo-texto); background: var(--fondo-error); border-bottom-color: var(--rojo-texto); }
+  .pantalla .resultado p { flex: 1; margin: 0; }
+  .pantalla .pieza { display: grid; grid-template-columns: 38% 1fr; background: #fff; border: 1px solid var(--linea); border-radius: 10px; overflow: hidden; margin-bottom: 10px; }
+  .pantalla .foto { align-self: start; aspect-ratio: 1; display: flex; align-items: center; justify-content: center; font-size: 54px; }
+  .pantalla .detalle { display: flex; flex-direction: column; padding: 10px; min-width: 0; }
+  .pantalla .pieza h2 { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; margin: 0 0 6px; font-size: 18px; font-weight: 700; color: var(--azul); }
+  .pantalla .precio { font-size: 28px; font-weight: 800; color: var(--azul); }
+  .pantalla .codigo { font-family: ui-monospace, monospace; font-size: 16px; }
+  .pantalla .detalle .check { order: 9; }
+  .pantalla .pieza button { width: 100%; margin-top: 12px; }
+  .pantalla .pieza button.texto { margin-top: 4px; }
+  .pantalla .chip { display: inline-flex; margin: 6px 0; padding: 6px 10px; min-height: 0; border: 2px solid; border-radius: 10px; font-size: 16px; font-weight: 700; line-height: 1.3; text-align: left; }
+  .pantalla button.chip { min-height: 56px; }
+  .pantalla .chip.ok { color: var(--azul); background: var(--fondo-ok); border-color: var(--verde); }
+  .pantalla .chip.aviso { color: var(--aviso-texto); background: var(--fondo-aviso); border-color: var(--aviso-texto); }
+  .pantalla .chip.alerta { color: var(--rojo-texto); background: var(--fondo-error); border-color: var(--rojo-texto); }
+  .pantalla .chip.cerrada { color: var(--gris); background: var(--deshab-fondo); border-color: var(--gris); }
+  .pantalla .resumen p { margin: 4px 0; }
+  .pantalla .fuerte { font-weight: 800; color: var(--azul); }
+  .pantalla .grupo { margin: 18px 0 6px; font-size: 20px; font-weight: 800; color: #1a1f2b; }
+  .pantalla .mia { border-top: 1px solid var(--linea); padding: 12px 0; overflow-wrap: anywhere; }
+  .pantalla .mia h3 { margin: 0 0 4px; font-size: 18px; color: var(--azul); }
+  .pantalla .acciones-mia { display: flex; flex-direction: column; gap: 10px; margin-top: 10px; }
+  .pantalla .acciones-mia > * { width: 100%; }
+  .pantalla .pie { display: flex; gap: 12px; align-items: center; justify-content: center; margin-top: 4px; padding: 10px 8px; background: #fff; border-top: 2px solid var(--azul); }
+  .pantalla .pie .principal { flex: 2; } .pantalla .pie .texto { flex: 1; color: var(--azul); }
+  .pantalla dialog { position: relative; inset: auto; display: block; align-self: start; width: auto; max-height: none; margin: 4px 0 0; padding: 14px; overflow: visible; border: 2px solid var(--azul); border-radius: 12px; background: #fff; color: #1a1f2b; box-shadow: 0 8px 24px rgba(0,0,0,.4); z-index: 2; }
+  .pantalla dialog h2 { margin: 0 0 8px; font-size: 22px; color: var(--azul); }
+  .pantalla dialog h2:focus { outline: none; }
+  .pantalla dialog .acciones { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 12px; }
+  .pantalla dialog .acciones.columna { flex-direction: column; } .pantalla dialog .acciones.columna > * { width: 100%; }
+  .pantalla .reglas { margin: 12px 0 0; padding: 0; list-style: none; font-size: 16px; }
+  .pantalla .reglas li { margin: 4px 0; } .pantalla .reglas li::before { content: "✓ "; color: var(--verde); font-weight: 800; }
+  .pantalla .listo-icono { width: 56px; height: 56px; margin-bottom: 8px; border-radius: 50%; background: var(--verde); color: #fff; font-size: 34px; font-weight: 800; line-height: 56px; text-align: center; }
+  .pantalla #titulo-listo { font-size: 24px; font-weight: 800; }
+  .pantalla .vista-previa { display: flex; gap: 8px; }
+  .tarj { width: 135px; flex: none; border: 1px solid var(--linea); border-radius: 6px; overflow: hidden; background: #fff; }
+  .tarj .foto { aspect-ratio: auto; height: 90px; font-size: 44px; }
+  .tarj .banda { padding: 6px 8px; background: var(--azul); color: #fff; font-size: 12px; line-height: 1.3; }
+  .tarj .banda b { display: block; font-size: 22px; color: var(--amarillo); }
+  .pantalla details .nota { margin: 6px 0; }
+
+  /* Solo del manual (no son de la app): se ven distintos a propósito */
+  .pantalla .ayuda-practica { min-height: 48px; margin: 10px 0 0; border: 2px dashed var(--marco); background: #eceff3; color: #1a1f2b; font-size: 16px; }
+  .pantalla .hoja { background: #eceff3; border-color: var(--marco); box-shadow: none; }
+  .pantalla .hoja h2 { color: #1a1f2b; font-size: 18px; }
+  .pantalla .hoja button { width: 100%; margin-top: 8px; border-color: var(--marco); color: #1a1f2b; }
+  .pantalla .chat, .chat-fuera { margin: 8px 0; padding: 10px 12px; border: 2px dashed var(--marco); border-radius: 12px; background: #e7f6dd; font-size: 16px; white-space: pre-wrap; overflow-wrap: anywhere; }
+  .pantalla .chat-etq { margin: 10px 0 0; font-size: 14px; font-weight: 800; color: var(--marco); }
+  .pantalla .significa { margin: 8px 0; padding: 10px 12px; background: #fff; border-left: 6px solid var(--azul); font-size: 16px; font-weight: 700; }
+
+  /* Resaltado del siguiente paso: anillo grueso Y etiqueta con palabras */
+  .aqui { position: relative; outline: 4px solid #d08b00; outline-offset: 3px; border-radius: 10px; }
+  .aqui::after { content: "👆 Toca aquí"; position: absolute; top: -17px; right: 6px; z-index: 3; padding: 3px 9px; border: 2px solid #1a1f2b; border-radius: 999px; background: var(--amarillo); color: #1a1f2b; font: 800 14px/1.2 system-ui, sans-serif; white-space: nowrap; pointer-events: none; }
+
+  .tabla-errores { display: grid; gap: 10px; margin: 8px 0; }
+  .tabla-errores > div { padding: 10px 12px; background: #fff; border: 1px solid var(--linea); border-left: 6px solid var(--rojo-texto); border-radius: 8px; }
+  .tabla-errores strong { display: block; }
+  .ayuda-tienda { margin-top: 12px; padding: 14px; border: 3px solid var(--azul); border-radius: 12px; background: #fff; font-weight: 700; }
+
+  .sin-practica .telefono, .sin-practica .paso-texto { display: none; }
+  .sin-practica .solo-imprimir { display: block; }
+
+  @media print {
+    body { background: #fff; font-size: 14px; }
+    header.top, .indice, .ctl-fila, .paso-texto, .aviso-modulo, #indice-titulo { display: none !important; }
+    header.top { display: none; }
+    .tarea { break-inside: avoid; margin: 14px 0; }
+    .solo-imprimir { display: block; }
+    .telefono { border-color: #000; background: #fff; }
+    .franja { background: #000; }
+    .pantalla { min-height: 0; background: #fff; }
+    .pantalla .atenuada { opacity: 1; }
+    .pantalla dialog { box-shadow: none; }
+    .aqui { outline: none; } .aqui::after { content: none; }
+    .paso-texto, .tarjeta-texto, .pasos-dibujo > li, .inicio-dos > div { border-color: #000; }
+  }
+</style>
+</head>
+<body>
+<header class="top"><h1>Manual de la revendedora</h1><p>Practica aquí. No se manda nada de verdad.</p></header>
+<main>
+  <p id="aviso-modulo" class="aviso-modulo" hidden>Esta práctica no cargó. Pídele ayuda a la tienda.</p>
+  <h2 id="indice-titulo" style="font-size:20px;margin:0 0 8px;color:var(--azul)">Elige qué quieres aprender</h2>
+  <ol class="indice">
+    <li><a href="#entrar"><b>1</b>Entrar y poner el ícono</a></li>
+    <li><a href="#compartir"><b>2</b>Compartir una pieza</a></li>
+    <li><a href="#varias"><b>3</b>Compartir varias a la vez</a></li>
+    <li><a href="#buscar"><b>4</b>Encontrar la pieza que te piden</a></li>
+    <li><a href="#vendi"><b>5</b>Ya la vendí</a></li>
+    <li><a href="#avisar"><b>6</b>Avisarle a tu cliente</a></li>
+    <li><a href="#mis-ventas"><b>7</b>Mis ventas</a></li>
+    <li><a href="#cancelar"><b>8</b>Cancelar una venta</a></li>
+    <li><a href="#ganancia"><b>9</b>Cuánto ganas y cuándo te pagan</a></li>
+    <li><a href="#ayuda"><b>10</b>Si algo falla</a></li>
+  </ol>
+
+  <section class="tarea" id="entrar">
+    <h2><b>1</b>Entrar y poner el ícono</h2>
+    <p class="objetivo">Entra la primera vez y deja la tienda en tu pantalla.</p>
+    <ol class="pasos-dibujo">
+      <li><span class="n">1</span><span class="t">Abre esta dirección en tu navegador.</span><div class="dibujo"><span class="barra-dir">🔒 viste.com.mx/vender</span><a class="ctl sig" href="https://viste.com.mx/vender">Abrir la tienda</a></div></li>
+      <li><span class="n">2</span><span class="t">Escribe tu correo.</span><div class="dibujo"><span class="campo">tucorreo@ejemplo.com</span></div></li>
+      <li><span class="n">3</span><span class="t">Toca «Send me a code».</span><div class="dibujo"><span class="bot">Send me a code</span></div></li>
+      <li><span class="n">4</span><span class="t">Abre tu correo. Si no llega, mira en Spam.</span><div class="dibujo"><span class="correo">✉️ Tu código de acceso</span><span class="spam">📁 Spam</span></div></li>
+      <li><span class="n">5</span><span class="t">Copia el código del correo.</span><div class="dibujo"><span class="codigo-dib">123456</span><span>(ejemplo)</span></div></li>
+      <li><span class="n">6</span><span class="t">Pégalo en el cuadro y entra.</span><div class="dibujo"><span class="campo">123456</span><span class="bot">Entrar</span></div></li>
+    </ol>
+    <div class="inicio-dos">
+      <div><h3 data-etiqueta="Ponla en tu pantalla de inicio">Ponla en tu pantalla de inicio</h3><p>Así la abres con un toque, como cualquier app.</p></div>
+      <div><h3>Android</h3><p data-etiqueta="Toca los tres puntos ⋮ de arriba. Elige “Instalar app” o “Añadir a la pantalla de inicio”.">Toca los tres puntos ⋮ de arriba. Elige “Instalar app” o “Añadir a la pantalla de inicio”.</p></div>
+      <div><h3>iPhone</h3><p data-etiqueta="Toca el botón de compartir (cuadro con flecha). Elige “Añadir a pantalla de inicio”.">Toca el botón de compartir (cuadro con flecha). Elige “Añadir a pantalla de inicio”.</p></div>
+    </div>
+    <div class="ctl-fila"><a class="ctl sig" href="#compartir">Siguiente tarea →</a></div>
+  </section>
+
+  <section class="tarea" id="compartir" data-tarjeta="compartir">
+    <h2><b>2</b>Compartir una pieza</h2>
+    <p class="objetivo">Mándala por WhatsApp a quien quieras.</p>
+  </section>
+  <section class="tarea" id="varias" data-tarjeta="varias">
+    <h2><b>3</b>Compartir varias a la vez</h2>
+    <p class="objetivo">Elige varias piezas y mándalas juntas.</p>
+  </section>
+  <section class="tarea" id="buscar" data-tarjeta="buscar">
+    <h2><b>4</b>Encontrar la pieza que te piden</h2>
+    <p class="objetivo">Tu cliente te escribe un código. Busca la pieza.</p>
+  </section>
+  <section class="tarea" id="vendi" data-tarjeta="vendi">
+    <h2><b>5</b>Ya la vendí</h2>
+    <p class="objetivo">Te dijeron «la quiero». Aparta la pieza.</p>
+    <p class="nota-tarjeta">Tu cliente paga a la tienda, no a ti. La pieza queda apartada 48 horas. Puedes tener hasta 10 piezas apartadas sin pago a la vez.</p>
+  </section>
+  <section class="tarea" id="avisar" data-tarjeta="avisar">
+    <h2><b>6</b>Avisarle a tu cliente</h2>
+    <p class="objetivo">Dile hasta cuándo tiene para pagar.</p>
+    <p class="nota-tarjeta"><strong>Cómo paga tu cliente:</strong> nunca te paga a ti. Paga a la tienda, en efectivo en caja cuando recoge o por transferencia. Los datos para que tu cliente transfiera te los mandamos por WhatsApp. Guárdalos y reenvíaselos.</p>
+    <p class="nota-tarjeta"><strong>Si tu cliente ya pagó por transferencia:</strong> abre «<span data-etiqueta="Mis ventas">Mis ventas</span>», toca «<span data-etiqueta="Ya me pagó: mandar comprobante">Ya me pagó: mandar comprobante</span>» y sube la foto del comprobante, o escribe la clave de rastreo. La clave viene en el comprobante; no es el «número de referencia». La tienda revisa el pago y lo registra. Mientras lo revisa, la pieza no se vence.</p>
+  </section>
+  <section class="tarea" id="mis-ventas" data-tarjeta="mis-ventas">
+    <h2><b>7</b>Mis ventas</h2>
+    <p class="objetivo">Mira cuáles se vencen y cuáles ya pagaron.</p>
+  </section>
+  <section class="tarea" id="cancelar" data-tarjeta="cancelar">
+    <h2><b>8</b>Cancelar una venta</h2>
+    <p class="objetivo">Si tu cliente ya no la quiere, la pieza vuelve a la venta.</p>
+  </section>
+
+  <section class="tarea" id="ganancia">
+    <h2><b>9</b>Cuánto ganas y cuándo te pagan</h2>
+    <div class="tarjeta-texto">
+      <p class="objetivo" style="margin:0">Tu ganancia: 10 % del precio de cada pieza que la tienda cobra (sin contar el envío). Te pagamos cada lunes por transferencia.</p>
+      <ul>
+        <li>Ejemplo: una pieza de $200 con envío de $99. Tu ganancia es $20 (el 10 % de $200). El envío no cuenta.</li>
+        <li>Tu cliente nunca te paga a ti. Paga a la tienda.</li>
+      </ul>
+      <p class="aviso-modulo" style="background:var(--fondo-aviso);border-color:var(--aviso-texto);color:var(--aviso-texto)">En «Mis ventas» la app te muestra «<span data-etiqueta="Tu ganancia esta semana">Tu ganancia esta semana</span>». «<span data-etiqueta="Ventas que la tienda ya cobró">Ventas que la tienda ya cobró</span>» es lo que pagaron tus clientes, no lo que ganas.</p>
+    </div>
+    <div class="ctl-fila"><a class="ctl sig" href="#ayuda">Siguiente tarea →</a></div>
+  </section>
+
+  <section class="tarea" id="ayuda">
+    <h2><b>10</b>Si algo falla</h2>
+    <p class="objetivo">Casi siempre se arregla con un toque.</p>
+    <div class="tabla-errores">
+      <div><strong data-etiqueta="No cargó. Revisa tu señal y toca «Actualizar».">No cargó. Revisa tu señal y toca «Actualizar».</strong>Acércate al wifi o espera un momento. Toca «Actualizar».</div>
+      <div><strong data-etiqueta="Parece que no hay internet. Revisa tu señal y vuelve a intentar.">Parece que no hay internet. Revisa tu señal y vuelve a intentar.</strong>No se guardó nada. Vuelve a tocar el botón cuando tengas señal.</div>
+      <div><strong data-etiqueta="Esa pieza ya no está disponible. Puede que otra persona la apartó.">Esa pieza ya no está disponible. Puede que otra persona la apartó.</strong>Otra persona se la llevó. Busca otra pieza para tu cliente.</div>
+      <div><strong data-etiqueta="No cargó la foto. Toca “Actualizar”.">No cargó la foto. Toca “Actualizar”.</strong>Espera unos segundos y vuelve a intentar.</div>
+      <div><strong>Máximo 10 piezas apartadas sin pago a la vez.</strong>Espera a que la tienda registre el pago de una, o cancela alguna.</div>
+    </div>
+    <div class="tarjeta-texto">
+      <p style="margin-top:0"><b>Reglas de la tienda</b></p>
+      <ul>
+        <li>Una pieza apartada dura 48 horas. Después vuelve a la venta sola.</li>
+        <li>Tu cliente paga a la tienda: en efectivo en caja al recoger, o por transferencia.</li>
+        <li>Recoger: Jardín Hidalgo 129, Soledad, todos los días de 11 a. m. a 8 p. m.</li>
+        <li>Envío: $99 (gratis desde $1,000 en piezas). Salen los viernes y el cliente paga todo antes de que salga.</li>
+      </ul>
+    </div>
+    <p class="ayuda-tienda">¿Sigues con dudas? Escríbele a la tienda por WhatsApp: 444 543 7754, de 11 a. m. a 8 p. m.</p>
+  </section>
+</main>
+
+<script type="module">
+/* Todo es práctica: no hay llamadas de red ni WhatsApp. Los textos, chips y fechas salen de vender.js, el mismo código de la app. */
+let V = null;
+try { V = await import('/vender.js'); } catch { V = null; }
+
+const H = 3_600_000, AHORA = Date.now();
+const esc = (t) => String(t).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
+const PIEZAS = {
+  a: { id: 'a', codigo: 'ED-009001', nombre: 'Blusa de algodón floral', talla: 'M', precio: 20000, emoji: '👚', tono: '#f7d6e0' },
+  b: { id: 'b', codigo: 'ED-009002', nombre: 'Bolsa tejida color café', precio: 15000, emoji: '👜', tono: '#efe0c9' },
+  c: { id: 'c', codigo: 'ED-009003', nombre: 'Playera deportiva azul', talla: 'L', precio: 12000, emoji: '👕', tono: '#d6e4f7' },
+};
+const CLIENTE = 'Ana Ejemplo';
+// Ventas de ejemplo: `horas` es lo que falta para que venza (se usa 30.5 y 3.5 para que el redondeo no cambie en segundos).
+const VENTAS = /*ventas*/[
+  { folio: 9001, cliente: 'Carla Ejemplo', pieza: 'a', estado: 'apartado', horas: 30.5, entrega: 'tienda' },
+  { folio: 9002, cliente: 'Berta Ejemplo', pieza: 'b', estado: 'apartado', horas: 3.5, entrega: 'envio' },
+  { folio: 9003, cliente: 'Diana Ejemplo', pieza: 'c', estado: 'vendido', horas: 0, entrega: 'tienda' },
+  { folio: 9004, cliente: 'Elena Ejemplo', pieza: 'a', estado: 'cancelado', horas: 0, entrega: 'tienda' },
+]/*fin-ventas*/;
+const pedido = (v) => {
+  const p = PIEZAS[v.pieza];
+  return { folio: v.folio, cliente: v.cliente, estado: v.estado, saldo: 0, entrega: v.entrega, subtotal: p.precio, envio: v.entrega === 'envio' ? 9900 : 0,
+    vence_en: new Date(AHORA + v.horas * H).toISOString(), lineas: [{ nombre: p.nombre, codigo: p.codigo }] };
+};
+
+/* ---------- piezas de la réplica ---------- */
+const foto = (p) => `<div class="foto" role="img" aria-label="${esc(p.nombre)}" style="background:${p.tono}">${p.emoji}</div>`;
+const nav = (activa = 'piezas') => `<nav aria-label="Vista de ventas">
+  <button type="button" aria-pressed="${activa === 'piezas'}"><span class="ico" aria-hidden="true">🛍️</span><span data-etiqueta="Piezas">Piezas</span></button>
+  <button type="button" aria-pressed="${activa === 'mias'}" data-acc="mias"><span class="ico" aria-hidden="true">💵</span><span data-etiqueta="Mis ventas">Mis ventas</span></button>
+  <button type="button" aria-pressed="false"><span class="ico" aria-hidden="true">💬</span><span data-etiqueta="Preguntaron">Preguntaron</span></button>
+</nav>`;
+function pieza(p, { botones = true, marca = '', check = '' } = {}) {
+  return `<article class="pieza">${foto(p)}<div class="detalle">
+    <h2>${esc(p.nombre)}</h2><div class="precio">${V.pesos(p.precio)}</div><div class="codigo">${p.codigo}</div>
+    ${p.talla ? `<div class="nota">Talla ${p.talla}</div>` : ''}${marca}${check}
+    ${botones ? `<button type="button" class="principal" data-acc="compartir" data-etiqueta="Compartir">Compartir</button>
+    <button type="button" data-acc="vendi" data-etiqueta="Ya la vendí">Ya la vendí</button>
+    <button type="button" class="texto" data-etiqueta="Anotar a un cliente">Anotar a un cliente</button>` : ''}</div></article>`;
+}
+const elegir = (p, marcado) => `<label class="check resaltable"><input type="checkbox" data-acc="elegir" data-id="${p.id}" aria-label="Elegir ${esc(p.nombre)} ${p.codigo}"${marcado ? ' checked' : ''}><span data-etiqueta="Elegir">Elegir</span></label>`;
+// Después de apartar la pieza A, la lista sigue con las otras de ejemplo (nunca queda vacía).
+const otras = () => pieza(PIEZAS.b) + pieza(PIEZAS.c);
+const resultado = (html, error = false, boton = '') => `<div class="resultado${error ? ' error' : ''}" role="status"><p>${error ? '⚠ ' : ''}${html}</p>${boton}</div>`;
+const etiqueta = (t) => `<span data-etiqueta="${t}">${t}</span>`;
+const cuerpo = (base, dialogo = '') => `<div class="base${dialogo ? ' atenuada' : ''}">${base}</div>${dialogo}`;
+const bandaEstado = (hora = AHORA) => `<div class="fila barra"><p class="aviso estado"><span data-etiqueta="Actualizado a las">Actualizado a las</span> ${V.horaLegible(hora)}</p><button type="button" data-acc="actualizar" data-etiqueta="Actualizar">Actualizar</button></div>`;
+const mensajeEn = (texto) => `<p class="chat-etq">Así lo recibe tu cliente en WhatsApp:</p><div class="chat">${esc(texto)}</div>`;
+
+function tarjetaMia(p, { chip = false, abrir = '', acciones = '' } = {}) {
+  const e = V.estadoMia(p, Date.now());
+  const marca = chip ? `<button type="button" class="chip ${e.clase}" data-acc="chip" data-clase="${e.clase}">${esc(e.texto)}</button>` : `<span class="chip ${e.clase}">${esc(e.texto)}</span>`;
+  return `<article class="mia"><h3>${esc(p.cliente)}</h3><p>${esc(p.lineas.map((l) => l.nombre).join(', '))} · ${V.pesos(p.subtotal + p.envio)}</p>
+    <div>${marca}</div>${abrir === e.clase ? `<p class="significa">${SIGNIFICA[e.clase]}</p>` : ''}
+    <p class="nota">${p.entrega === 'envio' ? '<span data-etiqueta="Envío a su casa">Envío a su casa</span>' : '<span data-etiqueta="Recoge en la tienda">Recoge en la tienda</span>'}</p>
+    <p class="nota">Folio P-${p.folio} · ${p.lineas.map((l) => l.codigo).join(', ')}</p>${acciones}</article>`;
+}
+const SIGNIFICA = {
+  aviso: 'Esperando pago: tu cliente aún no paga en la tienda. Tiene esas horas. Avísale.',
+  alerta: 'Se vence pronto: quedan pocas horas. Avísale hoy. Si no paga, la pieza vuelve a la venta.',
+  ok: 'Cobrada: la tienda ya recibió el pago de tu cliente.',
+  cerrada: 'Cerrada: ya no se cobra. La pieza volvió a la venta.',
+};
+
+/* ---------- las tarjetas con práctica ---------- */
+const DEFS = {
+  compartir: {
+    pasos: [
+      { acc: 'compartir', texto: 'Toca «Compartir» en la pieza.' },
+      { acc: 'enviar', texto: 'Espera la foto. Luego toca «Enviar por WhatsApp».' },
+      { acc: 'chat', texto: 'Elige a quién se la mandas. Tú eliges el grupo o el cliente.' },
+    ],
+    fin: '¡Listo! Tu cliente recibe la foto con precio y código. Toca «Volver».',
+    inicio: () => ({ dlg: null, lista: false, compartida: false }),
+    final: () => ({ dlg: null, lista: true, compartida: true }),
+    vista(est) {
+      const p = PIEZAS.a, marca = est.compartida ? '<div><span class="chip ok" data-etiqueta="✓ Ya la compartiste">✓ Ya la compartiste</span></div>' : '';
+      const base = nav() + pieza(p, { marca });
+      if (est.dlg === 'hoja') return cuerpo(base, `<dialog open class="hoja" aria-labelledby="t-hoja"><h2 id="t-hoja" tabindex="-1">Compartir con...</h2>
+        <p class="nota">Así se ve el menú del teléfono. En el tuyo salen tus chats.</p>
+        <button type="button" data-acc="chat">💬 Grupo de ejemplo</button><button type="button" data-acc="chat">💬 Cliente Ejemplo</button></dialog>`);
+      if (est.dlg !== 'compartir') return cuerpo(base);
+      return cuerpo(base, `<dialog open aria-labelledby="t-comp"><h2 id="t-comp" tabindex="-1" data-etiqueta="Compartir en WhatsApp">Compartir en WhatsApp</h2>
+        <div class="vista-previa"><div class="tarj">${foto(p)}<div class="banda">${esc(p.nombre)}<b>${V.pesos(p.precio)}</b>${p.codigo}</div></div></div>
+        <p class="aviso" role="status">${est.compartida ? '<span data-etiqueta="✓ Listo. Compartiste">✓ Listo. Compartiste</span> 1 pieza.'
+          : est.lista ? '<span data-etiqueta="Fotos listas.">Fotos listas.</span> Revisa precio y código antes de enviar.' : '<span data-etiqueta="Preparando foto">Preparando foto</span> 1 de 1…'}</p>
+        <div class="acciones columna"><button type="button" class="principal" data-acc="enviar" data-etiqueta="Enviar por WhatsApp"${est.lista && !est.compartida ? '' : ' disabled'}>Enviar por WhatsApp</button>
+        <button type="button" class="texto" data-acc="volver" data-etiqueta="Volver">Volver</button></div>
+        <details><summary data-etiqueta="¿No se abrió WhatsApp?">¿No se abrió WhatsApp?</summary>
+          <label for="txt-wa" data-etiqueta="Texto para WhatsApp">Texto para WhatsApp</label><textarea id="txt-wa" rows="6" readonly>${esc(V.textoWhatsApp([p], true))}</textarea>
+          <p class="nota" data-etiqueta="El texto se copia antes de compartir. Si WhatsApp no lo incluye, pégalo. Tú eliges el grupo y envías.">El texto se copia antes de compartir. Si WhatsApp no lo incluye, pégalo. Tú eliges el grupo y envías.</p>
+          <div class="acciones columna"><button type="button" data-etiqueta="Guardar las fotos y abrir WhatsApp">Guardar las fotos y abrir WhatsApp</button><button type="button" data-etiqueta="Abrir WhatsApp">Abrir WhatsApp</button></div>
+        </details></dialog>`);
+    },
+    al: {
+      compartir(est, el, esperar) {
+        Object.assign(est, { dlg: 'compartir', lista: false, compartida: false });
+        esperar(1000, (e) => { if (e.dlg === 'compartir') e.lista = true; });
+      },
+      enviar(est) { est.dlg = 'hoja'; },
+      chat(est) { Object.assign(est, { dlg: 'compartir', compartida: true, lista: true }); },
+      volver(est) { est.dlg = null; },
+    },
+  },
+
+  varias: {
+    pasos: [
+      { acc: 'elegir', sel: ':not(:checked)', texto: 'Toca «Elegir» en la primera pieza.' },
+      { acc: 'elegir', sel: ':not(:checked)', texto: 'Elige la segunda pieza.' },
+      { acc: 'elegir', sel: ':not(:checked)', texto: 'Elige la tercera. Abajo sale cuántas llevas.' },
+    ],
+    fin: 'Listo: llevas 3 piezas. Abajo dice «Compartir 3 en WhatsApp». Para empezar de nuevo toca «Quitar elegidas».',
+    inicio: () => ({ sel: {} }),
+    final: () => ({ sel: { a: true, b: true, c: true } }),
+    vista(est) {
+      const n = Object.values(est.sel).filter(Boolean).length;
+      return cuerpo(nav() + Object.values(PIEZAS).map((p) => pieza(p, { botones: false, check: elegir(p, est.sel[p.id]) })).join('')
+        + (n ? `<div class="pie"><button type="button" class="principal"><span data-etiqueta="Compartir">Compartir</span> ${n} en WhatsApp</button><button type="button" class="texto" data-acc="quitar" data-etiqueta="Quitar elegidas">Quitar elegidas</button></div>` : '')
+        + '<p class="nota" data-etiqueta="Máximo 10 piezas a la vez.">Máximo 10 piezas a la vez.</p>');
+    },
+    al: {
+      elegir(est, el) { est.sel[el.dataset.id] = el.checked; return el.checked; },
+      quitar(est) { est.sel = {}; },
+    },
+  },
+
+  buscar: {
+    pasos: [
+      { acc: 'ejemplo', texto: 'Toca «Escribir el ejemplo». Así pegas lo que escribió tu cliente.' },
+      { acc: 'buscar', texto: 'Toca «Buscar la pieza». Sale la pieza con su código.' },
+    ],
+    fin: 'Ya salió la pieza, con sus botones. En la tarjeta 5 la apartas con «Ya la vendí».',
+    inicio: () => ({ texto: '', hallada: null, aviso: null }),
+    final: () => ({ texto: 'la quiero ED-009001', hallada: 'a', aviso: null }),
+    vista(est) {
+      const base = (est.aviso ? resultado(etiqueta(est.aviso), true) : '') + nav()
+        + '<p class="chat-etq">Tu cliente te escribió por WhatsApp:</p><div class="chat">Hola, la quiero ED-009001</div>'
+        + `<details class="panel" open><summary data-etiqueta="Me escribieron con un código">Me escribieron con un código</summary>
+          <form data-acc="buscar"><label for="codigo" data-etiqueta="Pega aquí el mensaje de tu cliente">Pega aquí el mensaje de tu cliente</label>
+          <div class="fila"><input id="codigo" name="texto" maxlength="160" autocomplete="off" placeholder="Ejemplo: la quiero ED-002335" value="${esc(est.texto)}"><button class="principal" type="submit" data-etiqueta="Buscar la pieza">Buscar la pieza</button></div></form>
+          <button type="button" class="ayuda-practica" data-acc="ejemplo">Escribir el ejemplo</button><p class="nota">Solo práctica: aquí no se puede pegar de verdad.</p></details>`
+        + (est.hallada ? pieza(PIEZAS[est.hallada]) : '');
+      return cuerpo(base);
+    },
+    al: {
+      ejemplo(est) { est.texto = 'la quiero ED-009001'; est.aviso = null; },
+      buscar(est) {
+        const codigo = V.codigoDeRespuesta(est.texto);
+        est.hallada = null;
+        if (!codigo) { est.aviso = 'Pega el mensaje de tu cliente. Debe traer el código, por ejemplo ED-002335.'; return false; }
+        const p = Object.values(PIEZAS).find((x) => x.codigo === codigo);
+        if (!p) { est.aviso = 'Esa pieza ya no está disponible. Puede que otra persona la apartó.'; return false; }
+        est.aviso = null; est.hallada = p.id;
+      },
+    },
+  },
+
+  vendi: {
+    pasos: [
+      { acc: 'vendi', texto: 'Toca «Ya la vendí» en la pieza.' },
+      { acc: 'llenar', texto: 'Escribe quién la compró y su WhatsApp. Aquí toca «Llenar con ejemplo».' },
+      { acc: 'guardar', texto: 'Toca «Guardar venta».' },
+    ],
+    fin: '¡Venta guardada! La pieza ya no sale en la lista. Sigue con la tarjeta 6: avisarle a tu cliente.',
+    inicio: () => ({ dlg: false, cliente: '', tel: '', entrega: 'tienda', err: '', guardada: false }),
+    final: () => ({ dlg: true, cliente: CLIENTE, tel: '444 123 4567', entrega: 'tienda', err: '', guardada: false }),
+    vista(est) {
+      const p = PIEZAS.a;
+      if (est.guardada) return cuerpo(nav() + otras());
+      const base = nav() + pieza(p);
+      if (!est.dlg) return cuerpo(base);
+      return cuerpo(base, `<dialog open aria-labelledby="t-vendi"><h2 id="t-vendi" tabindex="-1" data-etiqueta="Ya la vendí">Ya la vendí</h2><p class="grande">${p.codigo} · ${esc(p.nombre)} · ${V.pesos(p.precio)}</p>
+        <form data-acc="guardar">
+          <label for="v-cliente" data-etiqueta="¿Quién la compró?">¿Quién la compró?</label><input id="v-cliente" name="cliente" maxlength="80" required autocomplete="off" value="${esc(est.cliente)}">
+          <label for="v-tel" data-etiqueta="WhatsApp de quien la compró">WhatsApp de quien la compró</label><input id="v-tel" name="tel" type="tel" inputmode="tel" maxlength="24" required autocomplete="off" value="${esc(est.tel)}">
+          <p class="nota" data-etiqueta="10 números. Ejemplo: 444 123 4567">10 números. Ejemplo: 444 123 4567</p>
+          <label for="v-entrega" data-etiqueta="¿Cómo la recibe?">¿Cómo la recibe?</label>
+          <select id="v-entrega" name="entrega" data-render="1"><option value="tienda"${est.entrega === 'tienda' ? ' selected' : ''}>La recoge en la tienda</option><option value="envio"${est.entrega === 'envio' ? ' selected' : ''}>Se la mandan a su casa (envío)</option></select>
+          ${est.entrega === 'envio' ? '<p class="nota"><strong data-etiqueta="Envío $99. Gratis si compra $1,000 o más en piezas.">Envío $99. Gratis si compra $1,000 o más en piezas.</strong></p>' : ''}
+          <button type="button" class="ayuda-practica" data-acc="llenar">Llenar con ejemplo</button>
+          <ul class="reglas"><li>La pieza queda apartada 48 horas.</li><li>Quien la compró paga en la tienda.</li><li>Si no paga a tiempo, la pieza vuelve a la venta.</li></ul>
+          <p class="aviso error" role="status">${est.err ? `<span data-etiqueta="Escribe los 10 números del WhatsApp de quien la compró.">${esc(est.err)}</span>` : ''}</p>
+          <div class="acciones"><button class="principal" type="submit" data-etiqueta="Guardar venta">Guardar venta</button><button type="button" data-acc="volver" data-etiqueta="Volver">Volver</button></div>
+        </form></dialog>`);
+    },
+    al: {
+      vendi(est) { est.dlg = true; est.err = ''; },
+      llenar(est) { Object.assign(est, { cliente: CLIENTE, tel: '444 123 4567', err: '' }); },
+      guardar(est) {
+        if (!V.telefonoInteresado(est.tel)) { est.err = 'Escribe los 10 números del WhatsApp de quien la compró.'; return false; }
+        Object.assign(est, { dlg: false, guardada: true, err: '' });
+      },
+      volver(est) { est.dlg = false; },
+    },
+  },
+
+  avisar: {
+    pasos: [
+      { acc: 'avisar', texto: 'Toca el botón azul «Avisarle a… por WhatsApp» para avisarle a tu cliente.' },
+    ],
+    fin: 'Listo: así le llega tu aviso. Si no paga en 48 horas, la pieza vuelve a la venta sola. Luego toca «Seguir con otras piezas».',
+    inicio: () => ({ dlg: true, aviso: false }),
+    final: () => ({ dlg: true, aviso: true }),
+    vista(est) {
+      const p = PIEZAS.a, vence = new Date(AHORA + 48 * H).toISOString();
+      const base = nav() + otras();
+      if (!est.dlg) return cuerpo(base);
+      return cuerpo('', `<dialog open aria-labelledby="titulo-listo"><div class="listo-icono" aria-hidden="true">✓</div>
+        <h2 id="titulo-listo" tabindex="-1" data-etiqueta="¡Venta guardada!">¡Venta guardada!</h2>
+        <p class="grande">${p.codigo} · ${esc(p.nombre)} para ${CLIENTE}.</p>
+        <p class="grande"><strong><span data-etiqueta="Tienes hasta el">Tienes hasta el</span> ${V.fechaLegible(vence)} para que pague.</strong></p>
+        <p class="nota" data-etiqueta="El pago se hace en la tienda. Si no paga a tiempo, la pieza vuelve a la venta.">El pago se hace en la tienda. Si no paga a tiempo, la pieza vuelve a la venta.</p>
+        <div class="acciones columna"><button type="button" class="principal" data-acc="avisar"><span><span data-etiqueta="Avisarle a">Avisarle a</span> ${CLIENTE} por WhatsApp</span></button>
+        <button type="button" data-acc="seguir" data-etiqueta="Seguir con otras piezas">Seguir con otras piezas</button></div>
+        ${est.aviso ? mensajeEn(V.textoAvisoCliente(p, CLIENTE, vence)) + '<p class="nota">En la app de verdad se abre WhatsApp con este mensaje. Tú solo lo envías.</p>' : ''}</dialog>`);
+    },
+    al: {
+      avisar(est) { est.aviso = true; },
+      seguir(est) { est.dlg = false; },
+    },
+  },
+
+  'mis-ventas': {
+    pasos: [
+      { acc: 'mias', texto: 'Toca «Mis ventas».' },
+      { acc: 'chip', sel: '[data-clase="alerta"]', texto: '¿Cuál se vence primero? Toca la roja que dice «Se vence pronto».' },
+      { acc: 'chip', sel: '[data-clase="ok"]', texto: '¿Cuál ya pagó? Toca la verde que dice «Cobrada».' },
+    ],
+    fin: '¡Muy bien! Roja: avísale hoy. Verde: la tienda ya cobró. Toca «Actualizar» para ver cambios.',
+    inicio: () => ({ vista: 'piezas', abierto: '', hora: AHORA }),
+    final: () => ({ vista: 'mias', abierto: 'alerta', hora: AHORA }),
+    vista(est) {
+      if (est.vista !== 'mias') return cuerpo(nav() + pieza(PIEZAS.a));
+      const pedidos = VENTAS.map(pedido), g = V.agruparMias(pedidos);
+      let html = nav('mias') + bandaEstado(est.hora)
+        + '<p class="nota" data-etiqueta="Tus ventas de los últimos 60 días. El cliente paga a la tienda: transferencia o en caja al recoger.">Tus ventas de los últimos 60 días. El cliente paga a la tienda: transferencia o en caja al recoger.</p>'
+        + `<div class="resumen"><p class="fuerte"><span data-etiqueta="Ventas que la tienda ya cobró:">Ventas que la tienda ya cobró:</span> ${V.pesos(V.cobradoMias(pedidos))}</p><p>${g.esperando.length} <span data-etiqueta="esperando pago">esperando pago</span></p></div>`;
+      for (const [titulo, lote] of [['Esperando pago', g.esperando], ['Ya pagadas', g.pagadas], ['Anteriores', g.anteriores]]) {
+        if (!lote.length) continue;
+        html += `<h2 class="grupo" data-etiqueta="${titulo}">${titulo}</h2>` + lote.map((p) => tarjetaMia(p, { chip: true, abrir: est.abierto })).join('');
+      }
+      return cuerpo(html);
+    },
+    al: {
+      mias(est) { est.vista = 'mias'; },
+      chip(est, el) { est.abierto = el.dataset.clase; },
+      actualizar(est) { est.hora = Date.now(); },
+    },
+  },
+
+  cancelar: {
+    pasos: [
+      { acc: 'cancelar', texto: 'Toca «Cancelar venta».' },
+      { acc: 'si', texto: 'Toca «Sí, cancelar».' },
+      { acc: 'entendido', texto: 'Lee el aviso verde y toca «Entendido».' },
+    ],
+    fin: '¡Listo! La venta pasó a «Anteriores» y la pieza volvió a la venta.',
+    inicio: () => ({ dlg: false, cancelada: false, aviso: false }),
+    final: () => ({ dlg: false, cancelada: true, aviso: false }),
+    vista(est) {
+      const v = VENTAS[0], p = pedido(est.cancelada ? { ...v, estado: 'cancelado' } : v);
+      const botones = est.cancelada ? '' : `<div class="acciones-mia"><button type="button" class="principal">Avisarle a ${esc(p.cliente)}</button><button type="button" class="peligro" data-acc="cancelar" data-etiqueta="Cancelar venta">Cancelar venta</button></div>`;
+      const base = (est.aviso ? resultado(`✓ Venta a ${esc(p.cliente)} ${etiqueta('cancelada. La pieza volvió a la venta.')}`, false, '<button type="button" data-acc="entendido" data-etiqueta="Entendido">Entendido</button>') : '')
+        + nav('mias') + `<h2 class="grupo" data-etiqueta="${est.cancelada ? 'Anteriores' : 'Esperando pago'}">${est.cancelada ? 'Anteriores' : 'Esperando pago'}</h2>`
+        + tarjetaMia(p, { acciones: botones });
+      if (!est.dlg) return cuerpo(base);
+      return cuerpo(base, `<dialog open aria-labelledby="t-canc"><h2 id="t-canc" tabindex="-1"><span data-etiqueta="¿Cancelar la venta a">¿Cancelar la venta a</span> ${esc(p.cliente)}?</h2>
+        <p data-etiqueta="La pieza vuelve a estar en venta.">La pieza vuelve a estar en venta.</p>
+        <div class="acciones"><button type="button" class="peligro" data-acc="si" data-etiqueta="Sí, cancelar">Sí, cancelar</button><button type="button" data-acc="no" data-etiqueta="No, dejarla">No, dejarla</button></div></dialog>`);
+    },
+    al: {
+      cancelar(est) { est.dlg = true; },
+      si(est) { Object.assign(est, { dlg: false, cancelada: true, aviso: true }); },
+      no(est) { est.dlg = false; },
+      entendido(est) { est.aviso = false; },
+    },
+  },
+};
+
+/* ---------- motor: un paso a la vez ---------- */
+const motores = [];
+function montar(id, def) {
+  const sec = document.getElementById(id);
+  (sec.querySelector('.nota-tarjeta') ?? sec.querySelector('.objetivo')).insertAdjacentHTML('afterend', `<div class="telefono"><div class="franja">PRÁCTICA: no se manda nada de verdad</div><div class="pantalla"></div></div>
+    <p class="paso-texto" role="status" aria-live="polite"></p><ol class="solo-imprimir">${[...def.pasos.map((p) => p.texto), def.fin].map((t) => `<li>${esc(t)}</li>`).join('')}</ol>`);
+  sec.insertAdjacentHTML('beforeend', `<div class="ctl-fila"><button type="button" class="ctl repetir">↺ Repetir</button>${sec.nextElementSibling?.id ? `<a class="ctl sig" href="#${sec.nextElementSibling.id}">Siguiente tarea →</a>` : ''}</div>`);
+  const marco = sec.querySelector('.pantalla'), pie = sec.querySelector('.paso-texto');
+  let est, paso = 0, pista = false, reloj = 0, foco = '';
+  const esperar = (ms, fn) => { clearTimeout(reloj); reloj = setTimeout(() => { fn(est); pintar(); }, ms); };
+  function pintar() {
+    marco.innerHTML = def.vista(est);
+    const actual = def.pasos[paso];
+    let blanco = actual && marco.querySelector(`[data-acc="${actual.acc}"]${actual.sel ?? ''}`);
+    if (blanco?.tagName === 'FORM') blanco = blanco.querySelector('[type=submit]');   // se toca el botón, no todo el formulario
+    (blanco?.closest('.resaltable') ?? blanco)?.classList.add('aqui');
+    pie.textContent = (pista ? 'Ese botón aquí no hace nada. ' : '') + (actual ? `Paso ${paso + 1} de ${def.pasos.length}: ${actual.texto}` : def.fin);
+    const titulo = marco.querySelector('dialog h2');
+    if (titulo && titulo.id !== foco) titulo.focus({ preventScroll: true });
+    foco = titulo?.id ?? '';
+  }
+  function actuar(el) {
+    pista = false;
+    const j = def.pasos.findIndex((s, i) => i >= paso && el.matches(`[data-acc="${s.acc}"]${s.sel ?? ''}`));
+    const accion = def.al[el.dataset.acc];
+    if (!accion && j < 0) pista = true;
+    else if ((accion ? accion(est, el, esperar) : true) !== false && j >= 0) paso = j + 1;
+    pintar();
+  }
+  marco.addEventListener('click', (e) => {
+    const el = e.target.closest('[data-acc]');
+    if (el && el.tagName !== 'FORM') actuar(el);
+    else if (!el && e.target.closest('button, a')) { pista = true; pintar(); }
+  });
+  marco.addEventListener('submit', (e) => { e.preventDefault(); const f = e.target.closest('[data-acc]'); if (f) actuar(f); });
+  marco.addEventListener('input', (e) => { if (e.target.name) est[e.target.name] = e.target.value; });
+  marco.addEventListener('change', (e) => { if (e.target.name) est[e.target.name] = e.target.value; if (e.target.dataset.render) pintar(); });
+  const poner = (nuevo, n) => { clearTimeout(reloj); est = nuevo; paso = n; pista = false; foco = ''; pintar(); };
+  const m = { reiniciar: () => poner(def.inicio(), 0), finalizar: () => poner(def.final(), def.pasos.length) };
+  sec.querySelector('.repetir').addEventListener('click', () => { m.reiniciar(); marco.closest('.telefono').scrollIntoView({ block: 'nearest' }); });
+  m.reiniciar();
+  motores.push(m);
+}
+
+if (V) {
+  for (const [id, def] of Object.entries(DEFS)) montar(id, def);
+  // Al imprimir, cada tarjeta se ve en su estado final y sin botones.
+  addEventListener('beforeprint', () => motores.forEach((m) => m.finalizar()));
+  addEventListener('afterprint', () => motores.forEach((m) => m.reiniciar()));
+} else {
+  // Sin vender.js no hay réplica: se muestran los pasos como texto fijo.
+  document.getElementById('aviso-modulo').hidden = false;
+  document.body.classList.add('sin-practica');
+  for (const [id, def] of Object.entries(DEFS)) {
+    const sec = document.getElementById(id);
+    sec.insertAdjacentHTML('beforeend', `<ol class="solo-imprimir">${[...def.pasos.map((p) => p.texto), def.fin].map((t) => `<li>${esc(t)}</li>`).join('')}</ol>`);
+  }
+}
+</script>
+</body>
+</html>

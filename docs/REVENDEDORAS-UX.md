@@ -265,7 +265,7 @@ Los mensajes que vienen del servidor (`datos.error`, p. ej. «Pieza o cantidad i
 > Tu ganancia: {comisión}.
 > Si algo no sale, escríbeme aquí. 💙
 
-**P-3b. Kit de bienvenida sin sesión en persona (#594).** Mensaje y tarjeta listos en `docs/manual-revendedora/`: `bienvenida.txt` (texto para pegar) y `entrar.png` (tarjeta «Cómo entrar», fuente `entrar.html`). Después de entrar, ella practica cada tarea en el manual interactivo: [¿Cómo funciona? Ver el manual](https://viste.com.mx/manual) (`/manual`, detrás de Access; este enlace es solo para Isaac, `/vender` no lo lleva todavía). Los datos de pago no van en el repositorio, que es público: se mandan por WhatsApp.
+**P-3b. Kit de bienvenida sin sesión en persona (#594).** Mensaje y tarjeta listos en `docs/manual-revendedora/`: `bienvenida.txt` (texto para pegar) y `entrar.png` (tarjeta «Cómo entrar», fuente `entrar.html`). Después de entrar, ella practica cada tarea en el manual interactivo: [¿Cómo funciona? Ver el manual](https://eldolaron.com/revendedoras): copia pública, sin Access, del manual (`site/public/revendedoras.html` y `vender.js`, #624) para que la revendedora lo abra antes de saber entrar; su tarjeta 1 trae el botón «Abrir la tienda» hacia `viste.com.mx/vender`. Una prueba de `manual.test.ts` exige que sean idénticas a `app/public/manual.html` y `vender.js`: al cambiar el manual, vuelve a copiarlos. Dentro de la app sigue en `/manual`, detrás de Access. Los datos de pago no van en el repositorio, que es público: se mandan por WhatsApp.
 
 **P-4. Seguimiento.** Primera semana: mensaje al día siguiente («¿pudiste entrar?»); revisar en `/reportes` que haya ventas; si lleva 3 días sin abrir, llamarla. No mandar videos largos: una captura de pantalla por duda.
 
