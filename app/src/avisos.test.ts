@@ -22,7 +22,7 @@ test('solicitud de acceso nueva: un correo a los duenos activos; repetirla no vu
   assert.equal(t.enviados[0].to, DUENO);
   assert.equal(t.enviados[0].from.email, REMITENTE);
   assert.match(t.enviados[0].subject, /Rosa/);
-  assert.match(t.enviados[0].text, /capturar ropa[\s\S]*https:\/\/caja\.prueba\/cuentas/);
+  assert.match(t.enviados[0].text, /capturar ropa[\s\S]*https:\/\/caja\.prueba\/avisos/);
   assert.equal((await t.pedir('/api/solicitudes/acceso', { nombre: 'Rosa', justificacion: 'otra vez' })).status, 200);
   await t.esperar();
   assert.equal(t.enviados.length, 1);

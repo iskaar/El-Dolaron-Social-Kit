@@ -8,11 +8,24 @@
  * El push del navegador (VAPID) vive en push.ts (Issue #600).
  */
 import { leerRoles } from './cuentas.ts';
+import { pushADuenos } from './push.ts';   // import circular con push.ts: ambos solo se usan dentro de funciones
 
 export const REMITENTE = 'avisos@eldolaron.com';
 
+/**
+ * Push al dueño (como CEP y Ayuda); sin dispositivo que lo reciba, correo con el enlace a /avisos,
+ * donde ya se aprueba de un toque (Issue #607). Un fallo se registra y no tumba la solicitud.
+ */
 export async function enviarAviso(env: Env, request: Request, asunto: string, texto: string): Promise<void> {
-  await correoADuenos(env, asunto, `${texto}\n\nApruébala o recházala en ${new URL(request.url).origin}/cuentas`);
+  try {
+    if (!await pushADuenos(env, asunto, texto)) {
+      await correoADuenos(env, asunto, `${texto}
+
+Apruébala o recházala en ${new URL(request.url).origin}/avisos`);
+    }
+  } catch (error) {
+    console.error(JSON.stringify({ mensaje: 'aviso al dueño fallido', asunto, error: String(error) }));
+  }
 }
 
 /** Un correo a cada dueño activo, tal cual. Lo usa también la venta en Mercado Libre (Issue #427). */
