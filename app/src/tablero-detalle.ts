@@ -5,8 +5,11 @@
 import { lineasNetas } from './netas.ts';
 import { diasEnVentaPorCategoria, inventarioEnPiso } from './reportes.ts';
 import { D_ALTA, D_PREMIO, MINIMO_COMPRA, MAXIMO_REFERIDOS } from './referidos.ts';
+import { DIAS_APARTADO, HORAS_REVENDEDORA } from './pedidos.ts';
+import { ANTICIPO_ENVIO, ANTICIPO_PORCENTAJE } from '../public/venta.js';
+import { COMISION } from '../public/vender.js';
 import {
-  apertura, canalesDelMes, desdeComparacion, gastosDelMes, mercadoLibre, personasVisibles, resumenDeVentas,
+  apertura, canalesDelMes, comisionDelMes, desdeComparacion, gastosDelMes, mercadoLibre, personasVisibles, resumenDeVentas,
   ventasPorDia, type Calendario, type FilaCanal,
 } from './tablero-comun.ts';
 
@@ -231,4 +234,136 @@ async function clientes(env: Env, cal: Calendario) {
   };
 }
 
-export const DETALLES: Record<string, Vista> = { ventas, tienda, mercancia, gastos, clientes };
+// --- Pedidos por WhatsApp
+
+// Cuenta de revendedora (mismo criterio que el canal): solo se usa para decidir si sus pedidos van con WhatsApp.
+const ES_REVENDEDORA = `(u.correo is not null)`;
+const UNE_REVENDEDORA = `left join usuarios u on u.correo = p.vendedora and (',' || u.roles || ',') like '%,revendedora,%'`;
+// Valor de un pedido: sus piezas al precio pactado mas el envio (como `faltante` en pedidos.ts).
+const TOTAL_PEDIDO = `(coalesce((select sum(l.precio * l.cantidad) from pedido_lineas l where l.pedido_id = p.id), 0) + p.envio)`;
+
+async function whatsapp(env: Env, cal: Calendario) {
+  const [canales, delMes, abiertos] = await Promise.all([
+    canalesDelMes(env, cal),
+    // Los pedidos que se apartaron este mes, por como van hoy y como se entregan.
+    env.DB.prepare(
+      `select p.estado, p.entrega, ${ES_REVENDEDORA} as es_rev, count(*) as n,
+         coalesce(sum(case when p.estado = 'vendido' and p.entrega = 'envio' and p.guia = '' then 1 else 0 end), 0) as sin_guia
+       from pedidos p ${UNE_REVENDEDORA} where p.creado_en >= ? and p.creado_en < ?
+       group by p.estado, p.entrega, es_rev`,
+    ).bind(apertura(cal.primero), apertura(cal.siguiente))
+      .all<{ estado: string; entrega: string; es_rev: number; n: number; sin_guia: number }>(),
+    // Apartados abiertos HOY (de cualquier mes): valor, lo ya pagado y lo que falta, por pedido sin pasar de cero.
+    env.DB.prepare(
+      `select es_rev, count(*) as n, coalesce(sum(total), 0) as total, coalesce(sum(saldo), 0) as pagado,
+         coalesce(sum(max(0, total - saldo)), 0) as falta
+       from (select ${ES_REVENDEDORA} as es_rev, ${TOTAL_PEDIDO} as total, p.saldo from pedidos p ${UNE_REVENDEDORA} where p.estado = 'apartado')
+       group by es_rev`,
+    ).all<{ es_rev: number; n: number; total: number; pagado: number; falta: number }>(),
+  ]);
+  const canal = repartirCanales(canales.results, 'mes');
+  const conRevendedoras = canal.whatsapp.incluye_revendedoras;
+  const suyos = <T extends { es_rev: number }>(f: T) => f.es_rev === 0 || conRevendedoras;
+  const pedidos = delMes.results.filter(suyos);
+  const cuenta = (estado: string) => pedidos.filter((f) => f.estado === estado).reduce((s, f) => s + f.n, 0);
+  const aparte = abiertos.results.filter(suyos);
+  const suma = (campo: 'n' | 'total' | 'pagado' | 'falta') => aparte.reduce((s, f) => s + f[campo], 0);
+  const entrega = (clave: string) => pedidos.filter((f) => f.entrega === clave).reduce((s, f) => s + f.n, 0);
+  return {
+    ...cabecera('whatsapp', cal),
+    canal: {
+      total: canal.whatsapp.total, tickets: canal.whatsapp.tickets,
+      ticket_promedio: canal.whatsapp.tickets ? Math.round(canal.whatsapp.total / canal.whatsapp.tickets) : 0,
+      incluye_revendedoras: conRevendedoras,
+    },
+    pedidos_mes: { total: pedidos.reduce((s, f) => s + f.n, 0), cerrados: cuenta('vendido'), abiertos: cuenta('apartado'), vencidos: cuenta('vencido'), cancelados: cuenta('cancelado') },
+    apartados: { abiertos: suma('n'), valor: suma('total'), pagado: suma('pagado'), falta: suma('falta') },
+    entrega: { tienda: entrega('tienda'), envio: entrega('envio'), envios_pendientes: pedidos.reduce((s, f) => s + f.sin_guia, 0) },
+    // Las reglas salen del codigo de pedidos y de la caja: aqui no se repiten.
+    reglas: { dias_apartado: DIAS_APARTADO, horas_revendedora: HORAS_REVENDEDORA, anticipo_pct: ANTICIPO_PORCENTAJE, anticipo_envio: ANTICIPO_ENVIO },
+  };
+}
+
+// --- Revendedoras (solo con 5 o mas con ventas en el mes: antes, su venta es casi el pago de una persona)
+
+async function revendedoras(env: Env, cal: Calendario) {
+  const canales = await canalesDelMes(env, cal);
+  const rev = canales.results.find((f) => f.canal === 'revendedoras');
+  // Sin datos y sin cifras: ni siquiera cuantas hay.
+  if (personasVisibles(rev?.personas ?? 0) === null) return { ...cabecera('revendedoras', cal), disponible: false };
+  const [comision, categorias, apartados] = await Promise.all([
+    comisionDelMes(env, cal),
+    // Que se vende (solo categorias; el envio no es una categoria).
+    env.DB.prepare(
+      `${lineasNetas('v.creado_en >= ? and v.creado_en < ?')}
+       select case when p.sin_inventario = 1 then 'bandas' else coalesce(nullif(p.categoria, ''), 'sin categoria') end as categoria,
+         coalesce(sum(n.neta), 0) as total
+       from netas n join ventas v on v.id = n.venta join pedidos pe on pe.id = v.pedido_id
+         join usuarios u on u.correo = pe.vendedora and (',' || u.roles || ',') like '%,revendedora,%'
+         left join productos p on p.id = n.producto_id
+       where n.propietario = 'dolaron' and n.codigo != 'ENVIO' group by categoria order by total desc, categoria`,
+    ).bind(apertura(cal.primero), apertura(cal.siguiente)).all<{ categoria: string; total: number }>(),
+    env.DB.prepare(
+      `select count(*) as n, coalesce(sum(total), 0) as total
+       from (select ${TOTAL_PEDIDO} as total from pedidos p ${UNE_REVENDEDORA} where p.estado = 'apartado' and ${ES_REVENDEDORA})`,
+    ).first<{ n: number; total: number }>(),
+  ]);
+  return {
+    ...cabecera('revendedoras', cal),
+    disponible: true,
+    personas: rev!.personas,
+    pedidos: rev!.tickets,
+    total: rev!.total,
+    ticket_promedio: rev!.tickets ? Math.round(rev!.total / rev!.tickets) : 0,
+    comision,
+    comision_pct: Math.round(COMISION * 100),
+    categorias: categorias.results,
+    apartados_abiertos: { n: apartados?.n ?? 0, valor: apartados?.total ?? 0 },
+  };
+}
+
+// --- Mercado Libre (estimado: no se guarda el precio real, la comision ni el envio de cada orden)
+
+async function mercadolibre(env: Env, cal: Calendario) {
+  const desde = apertura(cal.primero);
+  const hasta = apertura(cal.siguiente);
+  const [ml, publicadas, categorias, atender, dias] = await Promise.all([
+    mercadoLibre(env, cal.primero, cal),
+    env.DB.prepare(
+      `select coalesce(sum(case when m.ml_item_id is not null then 1 else 0 end), 0) as publicadas,
+         coalesce(sum(case when m.estado = 'activa' then 1 else 0 end), 0) as activas,
+         (select count(distinct v.producto_id) from ml_ventas v where v.estado != 'cancelada') as con_venta
+       from ml_publicaciones m join productos p on p.id = m.producto_id where p.propietario = 'dolaron'`,
+    ).first<{ publicadas: number; activas: number; con_venta: number }>(),
+    env.DB.prepare(
+      `select coalesce(nullif(p.categoria, ''), 'sin categoria') as categoria, coalesce(sum(m.cantidad), 0) as piezas,
+         coalesce(sum(m.cantidad * coalesce(pub.precio_ml, 0)), 0) as total
+       from ml_ventas m join productos p on p.id = m.producto_id left join ml_publicaciones pub on pub.producto_id = m.producto_id
+       where m.estado != 'cancelada' and p.propietario = 'dolaron' and m.recibido_en >= ? and m.recibido_en < ?
+       group by categoria order by total desc, categoria`,
+    ).bind(desde, hasta).all<{ categoria: string; piezas: number; total: number }>(),
+    env.DB.prepare(
+      `select coalesce(sum(case when atendida_en = '' and estado != 'cancelada' then 1 else 0 end), 0) as por_atender,
+         coalesce(sum(case when estado = 'cancelada' and recibido_en >= ? and recibido_en < ? then 1 else 0 end), 0) as canceladas
+       from ml_ventas`,
+    ).bind(desde, hasta).first<{ por_atender: number; canceladas: number }>(),
+    // Del dia que se publico la pieza al dia de la orden (solo las que guardan la fecha de publicacion).
+    env.DB.prepare(
+      `select count(*) as n, avg(julianday(substr(m.recibido_en, 1, 10)) - julianday(substr(pub.publicado_en, 1, 10))) as promedio
+       from ml_ventas m join ml_publicaciones pub on pub.producto_id = m.producto_id
+       where m.estado != 'cancelada' and pub.publicado_en != '' and julianday(pub.publicado_en) is not null`,
+    ).first<{ n: number; promedio: number | null }>(),
+  ]);
+  return {
+    ...cabecera('mercadolibre', cal),
+    estimado: true,
+    vendido: { total: ml?.total ?? 0, piezas: ml?.piezas ?? 0 },
+    publicaciones: { publicadas: publicadas?.publicadas ?? 0, activas: publicadas?.activas ?? 0, con_venta: publicadas?.con_venta ?? 0 },
+    por_categoria: categorias.results,
+    por_atender: atender?.por_atender ?? 0,
+    canceladas: atender?.canceladas ?? 0,
+    dias_en_venderse: (dias?.n ?? 0) >= 3 && dias?.promedio != null ? Math.max(0, dias.promedio) : null,
+  };
+}
+
+export const DETALLES: Record<string, Vista> = { ventas, tienda, mercancia, gastos, clientes, whatsapp, revendedoras, mercadolibre };
