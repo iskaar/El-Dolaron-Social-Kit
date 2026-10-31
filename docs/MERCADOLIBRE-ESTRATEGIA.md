@@ -315,3 +315,5 @@ Terceros (sin confirmar oficialmente):
 Proyecto:
 
 - [app-estado] Lectura del código el 28/10/2026: `app/src/mercadolibre.ts`, `app/public/mercadolibre.html`, `docs/MERCADOLIBRE.md`, `docs/MERCADOLIBRE-API.md`; costos observados en Seller Center el 24/10/2026 (Issue #522).
+
+Continuación (30/10/2026): [docs/MERCADOLIBRE-VENTAS.md](MERCADOLIBRE-VENTAS.md), Issue #636.
