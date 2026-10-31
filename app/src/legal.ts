@@ -10,11 +10,14 @@
 // 10 (punto 8); cupones (punto 6 quater); el punto 7 pasa de la promocion de apertura, ya terminada,
 // al programa de referidos; la cancelacion cubre vales juntos y premios de referidos (punto 10).
 // El aviso sube a 2026-10-v3 (referidos y cupones).
+// Version 2026-10-v6, 30 de octubre de 2026 (Issue #631): v5 no se desplego; solo cambia el punto 7.
+// Piloto familia y amigos: un codigo de la tienda con 50 registros que da solo los 50 D al unirse,
+// y solo esas cuentas tienen codigo DOL. PENDIENTE: visto bueno del abogado. El aviso sigue en v3.
 // Viven aqui y no en variables porque Cloudflare limita cada
 // variable a 5 KB. Cambiar este texto exige subir BASES_APROBADAS_VERSION.
 
 export const BASES = `BASES DEL PROGRAMA DOLARONES
-Versión 2026-10-v5, 30 de octubre de 2026
+Versión 2026-10-v6, 30 de octubre de 2026
 
 1. Organizador
 María Teresa Ferrusca Pérez, RFC FEPT660329TH4, con nombre comercial El Dolarón, en Jardín Hidalgo 129, Zona Centro, Soledad de Graciano Sánchez, San Luis Potosí, C.P. 78430.
@@ -74,13 +77,14 @@ Reglas del cupón:
 - La parte de una compra pagada con un cupón no genera Dolarones ni un vale nuevo (punto 6 bis). Si se cancela esa compra, lo usado regresa al mismo cupón (punto 10).
 
 7. Invita a alguien (referidos)
-Cada socio puede invitar a otras personas a unirse a Dolarones. Si se cumplen las condiciones de este punto, las dos personas reciben Dolarones.
-- Código. Cada socio tiene en su portal un código de invitación: las letras DOL, su número de socio y una letra de verificación. Ejemplo: DOL42K.
+Mientras dure el piloto con familia y amigos, solo algunos socios pueden invitar a otras personas a unirse a Dolarones. Si se cumplen las condiciones de este punto, las dos personas reciben Dolarones.
+- Código de familia y amigos. El Dolarón comparte un código propio que admite hasta 50 registros en total. Quien se une con él recibe los 50 Dolarones de «Al unirse», pero no el premio por su compra, y nadie recibe premio por esa invitación. Si el código ya llegó a su límite, quien lo recibió puede registrarse sin él.
+- Código de invitación. Solo quien se unió con el código de familia y amigos tiene en su portal un código de invitación: las letras DOL, su número de socio y una letra de verificación. Ejemplo: DOL42K. Quien se une con un código de invitación, o sin código, no recibe uno.
 - Quién lo puede usar. Solo una persona que crea su membresía nueva en el portal y escribe el código al registrarse. Quien ya es socio no recibe nada por usar un código, y nadie puede usar el suyo. Cada persona se une con un código una sola vez.
 - Al unirse. La persona nueva recibe 50 Dolarones. Se pueden usar desde ese momento, vencen 30 días después y se gastan como los ganados por compras, sin mínimo de ticket.
 - Premio por su compra. Cuando la persona invitada, identificada como socia, hace una compra en la que paga $150.00 o más en dinero, se liberan 25 Dolarones para ella y 25 para quien la invitó. Lo pagado con Dolarones no cuenta para ese mínimo. Si la compra es de menos, no se libera nada y el premio queda pendiente para la primera compra que sí cumpla. Cada invitación libera su premio una sola vez.
 - Esos 25 Dolarones se pueden usar a partir del día siguiente a la compra, vencen 12 meses después de ella y se gastan como los ganados por compras.
-- Límite. Cada socio puede invitar hasta 10 personas. Si un código ya llegó a su límite, quien lo recibió puede registrarse sin él.
+- Límite. Cada código de invitación admite hasta 10 personas. Si un código ya llegó a su límite, quien lo recibió puede registrarse sin él.
 - Si se cancela la compra que liberó un premio, ver el punto 10.
 - El Dolarón puede terminar el programa de referidos. Desde ese momento no se aceptan códigos nuevos. A quien ya se unió con un código se le respetan sus 50 Dolarones y el premio de su primera compra que cumpla.
 La promoción de apertura, con premios de Dolarones para las primeras personas en registrarse o llegar a la tienda, ya terminó. Los premios ya otorgados se respetan hasta su vencimiento, 24 horas después de otorgados, y se siguen gastando en tickets de $1,000 MXN o más, calculados antes de descontar Dolarones.

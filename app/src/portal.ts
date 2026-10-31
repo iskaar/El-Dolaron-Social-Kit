@@ -109,12 +109,12 @@ export async function registro(request: Request, env: Env, auth: Identidad): Pro
     body.bases_version !== env.BASES_APROBADAS_VERSION || body.acepta_bases !== true || body.declara_mayor_edad !== true)
     return json({ error: 'Nombre, declaración de mayoría de edad y aceptación vigente requeridos.' }, 400);
   let socio = await cliente(env, auth.uid);
-  // Referido (#489): solo cuenta una membresía nueva. Quien ya existe ignora el código (reintento idempotente).
-  let referenteId: string | null = null;
+  // Referido (#489) o piloto (#631): solo cuenta una membresía nueva. Quien ya existe ignora el código (reintento idempotente).
+  let alta: { referenteId: string | null } | null = null;
   if (!socio && body.referido_codigo) {
     const revision = await revisarCodigo(env, body.referido_codigo, auth);
     if (!revision.ok) return json({ error: revision.error }, revision.status);
-    referenteId = revision.referenteId;
+    alta = { referenteId: revision.referenteId };
   }
   if (socio) {
     try {
@@ -136,16 +136,16 @@ export async function registro(request: Request, env: Env, auth: Identidad): Pro
         select ?, coalesce(max(numero), 0) + 1, ?, ?, ?, ?, 'portal', ?, ? from clientes`)
         .bind(id, nombre, auth.telefono,
           env.BASES_APROBADAS_VERSION, ahora.toISOString(), ahora.toISOString(), auth.uid),
-        ...(referenteId ? sentenciasDeAlta(env, { nuevoId: id, referenteId, ahora }) : [])]);
+        ...(alta ? sentenciasDeAlta(env, { nuevoId: id, referenteId: alta.referenteId, ahora }) : [])]);
     } catch (error) {
       socio = await cliente(env, auth.uid);
       if (!socio) {
         if (String(error).includes('clientes.telefono')) return json({ error: 'El teléfono requiere revisión presencial.' }, 409);
-        if (String(error).includes('tope de referidos'))
+        if (/tope de referidos|tope del piloto/.test(String(error)))
           return json({ error: 'Ese código ya llegó a su límite de referidos. Quítalo para registrarte sin él.' }, 409);
         throw error;
       }
-      referenteId = null;
+      alta = null;
     }
   }
   socio = (await cliente(env, auth.uid))!;
@@ -153,7 +153,7 @@ export async function registro(request: Request, env: Env, auth: Identidad): Pro
   if (env.PREMIOS_APERTURA === 'si' && !await premioActual(env, socio.id)) await premio(env, 'online', socio.id, ahora);
   return json({ id: socio.id, numero: socio.numero, nombre: socio.nombre,
     ...(await saldo(env, socio.id, new Date().toISOString())), premio: await premioActual(env, socio.id),
-    referido_otorgado: referenteId ? D_ALTA : 0 }, 200);
+    referido_otorgado: alta ? D_ALTA : 0 }, 200);
 }
 
 export async function llegada(request: Request, env: Env, autor: string): Promise<Response> {

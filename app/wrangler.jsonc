@@ -36,7 +36,7 @@
     // Encendido de Dolarones (Isaac, 01/10). Altas, vales y premios esperan a
     // PROMOCION_INICIO: lunes 5/10/2026, 11:00 hora de la tienda (UTC-6).
     // Apagado de emergencia: quitar PORTAL_REGISTRO_ABIERTO o VALES_ABIERTOS y desplegar.
-    "BASES_APROBADAS_VERSION": "2026-10-v5",
+    "BASES_APROBADAS_VERSION": "2026-10-v6",
     "PROMOCION_INICIO": "2026-10-05T17:00:00Z",
     "VALES_ABIERTOS": "si",
     // Promo de inauguracion (Issue #487): se enciende con PROMO_DESDE, PROMO_HASTA y PROMO_CUPO (ver descuentos.ts).
