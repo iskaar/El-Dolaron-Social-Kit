@@ -1,5 +1,4 @@
 @font-face { font-family: "Anton"; src: url("assets/fonts/anton-400.woff2") format("woff2"); font-display: swap; }
-@font-face { font-family: "Rye"; src: url("assets/fonts/rye-400.woff2") format("woff2"); font-display: swap; }
 @font-face { font-family: "Fraunces"; src: url("assets/fonts/fraunces-normal.woff2") format("woff2"); font-weight: 100 900; font-display: swap; }
 @font-face { font-family: "Fraunces"; src: url("assets/fonts/fraunces-italic.woff2") format("woff2"); font-weight: 100 900; font-style: italic; font-display: swap; }
 @font-face { font-family: "Archivo"; src: url("assets/fonts/archivo-variable.woff2") format("woff2"); font-weight: 100 900; font-display: swap; }
@@ -7,7 +6,7 @@
 :root {
   --navy: #16366B;
   --red: #D72B32;
-  --red-text: #B3141B;   /* rojo para letra chica: 4.5:1 o más sobre blanco, amarillo y cupón; en carteles y etiquetas de cartón da 3:1 o más para precios grandes (Issues #241, #339) */
+  --red-text: #B3141B;   /* rojo para letra chica: 4.5:1 o más sobre blanco y amarillo (Issues #241, #339) */
   --yellow: #FFD447;
   --wa: #25D366;         /* verde WhatsApp: botones que abren WhatsApp */
   --wa-ink: #0A3B26;     /* letra sobre --wa: 6.5:1 */
@@ -18,9 +17,7 @@
   /* Ritmo vertical: todas las secciones respiran igual. */
   --section: clamp(56px, 8vw, 96px);
   --section-s: clamp(40px, 6vw, 64px);
-  /* Inclinaciones: solo objetos pegados (sellos, cintas, etiquetas, cupones); nunca párrafos ni tarjetas con texto. */
-  --tilt-s: 1deg;
-  --tilt-m: 2deg;
+  /* Inclinación: solo sellos; nunca párrafos ni tarjetas con texto. */
   --tilt-l: 3deg;
   color: var(--navy);
   font-family: "Archivo", "Trebuchet MS", sans-serif;
@@ -60,10 +57,6 @@ p { line-height: 1.6; }
 .portal-link { padding: 11px 16px; background: var(--yellow); border: 2px solid var(--navy); box-shadow: 3px 3px 0 var(--navy); }
 
 /* Piezas comunes */
-.tape { display: inline-block; padding: .34em .85em .36em; font-family: var(--display); font-variation-settings: var(--display-axes); font-weight: 800; letter-spacing: -.01em; line-height: 1.1;
-  clip-path: polygon(0 8%, 3% 0, 22% 5%, 48% 0, 74% 6%, 97% 0, 100% 10%, 98% 52%, 100% 92%, 96% 100%, 70% 95%, 45% 100%, 20% 94%, 2% 100%, 0 88%, 2% 47%); }
-.tape-yellow { background: var(--yellow); color: var(--navy); rotate: calc(-1 * var(--tilt-m)); }
-.tape-navy { background: var(--navy); color: var(--white); rotate: var(--tilt-s); }
 .button { display: inline-flex; align-items: center; justify-content: center; gap: 12px; min-height: 54px; padding: 14px 22px; border: 2px solid var(--navy); border-radius: 2px; color: var(--navy); box-shadow: 4px 4px 0 var(--navy); text-decoration: none; font-size: 16px; font-weight: 800; line-height: 1.3; transition: transform 150ms ease, box-shadow 150ms ease, background-color 150ms ease; }
 .button svg { width: 24px; height: 24px; }
 .button-yellow { background: var(--yellow); }
@@ -88,10 +81,10 @@ h2 { font-family: var(--display); font-variation-settings: var(--display-axes); 
 /* Portada */
 .hero { position: relative; overflow: hidden; display: grid; grid-template-columns: minmax(0, 1.08fr) minmax(0, .92fr); align-items: center; gap: 32px; padding: 36px max(56px, calc((100vw - 1280px) / 2)) 52px; }
 .hero-copy { position: relative; z-index: 1; min-width: 0; }
-.hero-kicker { font-size: 18px; margin-bottom: 14px; }
+.hero-kicker { margin-bottom: 14px; font-size: 18px; font-weight: 700; line-height: 1.3; }
 .hero-title { max-width: 11ch; font-family: var(--display); font-variation-settings: var(--display-axes); font-weight: 900; font-size: clamp(48px, 6.2vw, 96px); line-height: .98; letter-spacing: -.03em; }
 .hero-title em { color: var(--red); font-style: italic; }
-.hero-sub { margin-top: 16px; font-size: clamp(20px, 2.1vw, 30px); }
+.hero-sub { margin-top: 16px; font-family: var(--display); font-variation-settings: var(--display-axes); font-weight: 700; font-size: clamp(22px, 2.2vw, 28px); line-height: 1.15; letter-spacing: -.01em; }
 .intro { max-width: 470px; margin-top: 18px; font-size: 18px; font-weight: 500; }
 .hero-stamp { display: inline-flex; flex-direction: column; margin-top: 24px; padding: 8px 14px 6px; border: 3px solid var(--red); border-radius: 4px; color: var(--red-text); font-family: "Anton", sans-serif; font-size: 22px; line-height: 1.1; text-transform: uppercase; rotate: calc(-1 * var(--tilt-l)); }
 .hero-stamp span { font-family: "Archivo", sans-serif; font-size: 12px; font-weight: 800; letter-spacing: .14em; }
@@ -158,76 +151,32 @@ h2 { font-family: var(--display); font-variation-settings: var(--display-axes); 
   @keyframes sombra-pegar { from { opacity: .35; } }
 }
 
-/* Se busca (Issue #339): carteles del viejo oeste clavados en la pared, con lo de mayor precio.
-   Papel envejecido = grano + manchas + orillas tostadas; orilla rasgada con clip-path, sombra en el <li>. */
-.wanted { padding-block: var(--section); scroll-margin-top: 16px; }
-.wanted-grid { list-style: none; margin: 40px 0 0; padding: 0; display: flex; flex-wrap: wrap; justify-content: center; gap: 44px 32px; }
-.wanted-grid li { flex: 0 0 calc((100% - 64px) / 3); filter: drop-shadow(2px 7px 7px rgb(60 40 15 / .32)); rotate: -.8deg; }
-.wanted-grid li:nth-child(3n + 2) { rotate: .7deg; }
-.wanted-grid li:nth-child(3n) { rotate: -.3deg; }
-.poster { --ink: #2B2116; position: relative; display: flex; flex-direction: column; height: 100%; padding: 15% 11% 11%; color: var(--ink); text-align: center;
-  background: url("assets/cartel-se-busca.webp") center / 100% 100% no-repeat; }
-/* Cabeza del clavo sobre el agujero que trae la hoja (49 % del ancho, 5 % del alto). */
-.poster::before { content: ""; position: absolute; top: 5%; left: 49%; width: 13px; height: 13px; translate: -50% -50%; border-radius: 50%; background: radial-gradient(circle at 35% 35%, #CFC8BC, #6B6256 60%, #3B342C); box-shadow: 1px 2px 2px rgb(0 0 0 / .4); }
-.poster-head { font-family: "Rye", Georgia, serif; font-size: clamp(34px, 3.6vw, 52px); font-weight: 400; line-height: 1; letter-spacing: .02em; text-transform: uppercase; text-shadow: 1px 1px 0 rgb(43 33 22 / .18); }
-.poster-kicker { margin-top: 10px; font-family: "Archivo", sans-serif; font-size: 12px; font-weight: 800; letter-spacing: .14em; line-height: 1.2; text-transform: uppercase; }
-.poster-kicker:empty { display: none; }
-.poster-name { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden; min-height: 2.4em; margin: 4px 4px 12px; font-family: var(--display); font-variation-settings: var(--display-axes); font-weight: 800; font-size: 20px; line-height: 1.2; overflow-wrap: anywhere; text-wrap: balance; }
+/* Los más buscados (Issues #339, #630): tarjetas como las del catálogo, más grandes, con lo de mayor precio. */
+.wanted { padding-block: var(--section-s) var(--section); scroll-margin-top: 16px; }
+.wanted-grid { list-style: none; margin: 40px 0 0; padding: 0; display: flex; flex-wrap: wrap; justify-content: center; gap: 36px 32px; }
+.wanted-grid li { display: flex; flex: 0 0 calc((100% - 64px) / 3); }
+.wanted-item { display: flex; flex-direction: column; flex: 1; min-width: 0; background: var(--white); border: 2px solid var(--navy); box-shadow: 4px 4px 0 var(--navy); }
 /* La foto es un botón (abre el visor grande); el chip «Ver foto» avisa que se puede tocar. */
-.poster-photo { position: relative; display: block; width: 100%; aspect-ratio: 1; padding: 0; overflow: hidden; border: 3px solid var(--ink); background: var(--white); cursor: pointer; }
-.poster-photo img { width: 100%; height: 100%; object-fit: cover; filter: sepia(.12) contrast(1.04); }
-.poster-photo.con-recorte { border: 0; background: transparent; }
-.poster-photo.con-recorte img { object-fit: contain; filter: drop-shadow(0 8px 7px rgb(60 40 15 / .38)); }
-.poster-zoom { position: absolute; right: 6px; bottom: 6px; padding: 4px 8px 3px; border: 1.5px solid var(--ink); background: rgb(246 238 216 / .94); color: var(--ink); font: 800 12px/1.1 "Archivo", sans-serif; letter-spacing: .04em; text-transform: uppercase; pointer-events: none; }
+.wanted-photo { position: relative; display: block; width: 100%; aspect-ratio: 4 / 5; padding: 0; overflow: hidden; border: 0; border-bottom: 2px solid var(--navy); background: var(--mist); cursor: pointer; }
+.wanted-photo img { width: 100%; height: 100%; object-fit: cover; }
+.wanted-photo.con-recorte { padding: 8%; }
+.wanted-photo.con-recorte img { object-fit: contain; filter: drop-shadow(0 6px 6px rgb(22 54 107 / .18)); }
 /* Sello de goma «¡Última pieza!» (Issue #339): tinta roja gastada, chueco, encima de la foto. */
-.poster-stamp { position: absolute; top: 14px; left: 10px; padding: 8px 14px 5px; border: 3px solid var(--red); outline: 1.5px solid var(--red); outline-offset: 2px; border-radius: 4px;
-  background: rgb(246 238 216 / .9); color: var(--red-text); font-family: "Anton", sans-serif; font-size: clamp(22px, 2.2vw, 30px); line-height: 1.1; letter-spacing: .05em; text-transform: uppercase; rotate: -8deg; pointer-events: none;
+.wanted-stamp { position: absolute; top: 14px; left: 12px; padding: 8px 14px 5px; border: 3px solid var(--red); outline: 1.5px solid var(--red); outline-offset: 2px; border-radius: 4px;
+  background: rgb(255 255 255 / .9); color: var(--red-text); font-family: "Anton", sans-serif; font-size: clamp(22px, 2.2vw, 30px); line-height: 1.1; letter-spacing: .05em; text-transform: uppercase; rotate: -8deg; pointer-events: none;
   -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.55' numOctaves='2'/%3E%3CfeColorMatrix values='0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 -1.3 1.65'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url%28%23n%29'/%3E%3C/svg%3E");
   mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.55' numOctaves='2'/%3E%3CfeColorMatrix values='0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 -1.3 1.65'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url%28%23n%29'/%3E%3C/svg%3E"); }
-.poster-seen { margin-top: 10px; font-family: var(--display); font-style: italic; font-size: 15px; line-height: 1.3; text-wrap: balance; }
-.poster-foot { display: flex; flex-direction: column; align-items: center; gap: 14px; margin-top: auto; padding-top: 14px; }
-.poster-price { display: flex; flex-direction: column; align-items: center; gap: 6px; color: var(--red-text); font-family: "Anton", sans-serif; font-size: 46px; line-height: 1; }
-.poster-was { display: flex; flex-wrap: wrap; justify-content: center; align-items: baseline; gap: 2px 10px; color: var(--ink); font-family: "Archivo", sans-serif; font-size: 15px; font-weight: 700; line-height: 1.2; }
-.poster-was b { font-weight: 800; }
-.poster-ask { min-height: 52px; padding: 8px 18px; gap: 8px; font-size: 15px; }
+.wanted-body { display: flex; flex-direction: column; flex: 1; gap: 4px; padding: 18px 20px 20px; }
+.wanted-body .piece-brand { min-height: 1.6em; }
+/* Nombres largos: 2 líneas y el mismo alto en todas, para que precios y botones queden alineados. */
+.wanted-name { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; min-height: 2.3em; font-family: var(--display); font-variation-settings: var(--display-axes); font-weight: 800; font-size: 22px; line-height: 1.15; letter-spacing: -.01em; overflow-wrap: anywhere; }
+.wanted-price { display: flex; flex-direction: column; gap: 6px; margin-top: auto; padding-top: 12px; color: var(--red); font-family: "Anton", sans-serif; font-size: clamp(36px, 4vw, 56px); line-height: 1; }
+.wanted-was { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 12px; color: var(--navy); font-family: "Archivo", sans-serif; font-size: 15px; font-weight: 600; line-height: 1.3; }
+.wanted-was s { color: var(--red-text); }
+.wanted-was b { font-weight: 800; }
+.wanted-ask { align-self: flex-start; min-height: 52px; margin-top: 18px; padding: 8px 18px; gap: 8px; font-size: 15px; }
 .wanted-hint { display: none; }
-/* El rojo de foco casi no se distingue del papel tostado: sobre el cartel el foco es azul. */
-.poster a:focus-visible, .poster button:focus-visible { outline-color: var(--navy); }
 .wanted-grid:focus-visible { outline: 3px solid var(--navy); outline-offset: -3px; }
-
-/* Etiqueta de cartón (Issue #339): la etiqueta es imagen y el precio es texto rojo, así sirve para cualquier precio. */
-.tag { display: flex; flex-direction: column; align-items: center; justify-content: center; aspect-ratio: 2 / 1; padding: 0 4% 0 27%; color: var(--red-text); font-family: "Anton", sans-serif; line-height: 1; rotate: -3deg;
-  background: url("assets/etiqueta-vacia.webp") center / 100% 100% no-repeat; filter: drop-shadow(1px 3px 3px rgb(60 40 15 / .3)); }
-.tag small { margin-top: .12em; color: var(--navy); font-family: "Archivo", sans-serif; font-size: max(11px, .3em); font-weight: 800; letter-spacing: .06em; text-transform: uppercase; }
-
-/* Franja: dos cintas cruzadas, la de enfrente corre como marquesina */
-.ticker { position: relative; z-index: 2; height: 96px; margin-top: -28px; overflow: clip; }
-.ticker-back, .ticker-band { position: absolute; left: -5%; width: 110%; }
-.ticker-back { top: 30px; height: 44px; background: repeating-linear-gradient(-45deg, var(--red) 0 22px, var(--yellow) 22px 44px); rotate: 1.6deg; }
-.ticker-band { top: 22px; padding: 11px 0 9px; background: var(--navy); border-block: 3px solid var(--yellow); rotate: -1.4deg; box-shadow: 0 6px 0 rgb(22 54 107 / .18); }
-.ticker-track { display: flex; width: max-content; margin: 0; color: var(--white); font-family: "Anton", sans-serif; font-size: 22px; line-height: 1.3; letter-spacing: .06em; text-transform: uppercase; white-space: nowrap; }
-.ticker-run { display: flex; align-items: center; }
-.ticker-run b { margin-inline: 26px; color: var(--yellow); font-weight: 400; }
-.ticker-pause { position: absolute; z-index: 3; right: 14px; top: 17px; display: grid; place-items: center; width: 34px; height: 34px; padding: 0; border: 2px solid var(--yellow); border-radius: 50%; background: var(--navy); color: var(--yellow); font: 900 11px/1 "Archivo", sans-serif; cursor: pointer; }
-.ticker-pause[aria-pressed="true"]::after { content: "▶"; }
-.ticker-pause[aria-pressed="false"]::after { content: "❚❚"; }
-.ticker.pausada .ticker-track { animation-play-state: paused; }
-/* Cupones vintage: talón perforado, bordes dentados, doble filete */
-.group-card { --coupon: #F3E6BF; display: grid; grid-template-columns: 70px 1fr; color: var(--navy); text-decoration: none; rotate: calc(-1 * var(--tilt-s)); transition: rotate 180ms ease, translate 180ms ease;
-  background: var(--coupon) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 .35 0 0 0 0 .28 0 0 0 0 .16 0 0 0 .22 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url%28%23n%29'/%3E%3C/svg%3E");
-  -webkit-mask: radial-gradient(circle 6px at 0 50%, #0000 97%, #000) 0 0 / 51% 16px repeat-y, radial-gradient(circle 6px at 100% 50%, #0000 97%, #000) 100% 0 / 51% 16px repeat-y;
-  mask: radial-gradient(circle 6px at 0 50%, #0000 97%, #000) 0 0 / 51% 16px repeat-y, radial-gradient(circle 6px at 100% 50%, #0000 97%, #000) 100% 0 / 51% 16px repeat-y; }
-.group-card + .group-card { rotate: var(--tilt-s); }
-.groups-cards { filter: drop-shadow(5px 7px 0 rgb(0 0 0 / .28)); }
-.coupon-stub { display: flex; align-items: center; justify-content: space-between; padding: 18px 0; writing-mode: vertical-rl; rotate: 180deg; border-left: 3px dashed var(--navy); font-family: "Anton", sans-serif; font-size: 20px; letter-spacing: .18em; text-transform: uppercase; }
-.coupon-yellow .coupon-stub { background: var(--yellow); }
-.coupon-cream .coupon-stub { background: var(--red); color: var(--white); border-left-color: var(--coupon); }
-.coupon-stub span:last-child { font-family: "Archivo", sans-serif; font-size: 12px; font-weight: 800; letter-spacing: .12em; }
-.coupon-body { display: grid; gap: 4px; margin: 10px 14px 10px 12px; padding: 18px 22px 16px; border: 2px solid var(--navy); box-shadow: inset 0 0 0 3px var(--coupon), inset 0 0 0 4px var(--navy); }
-.coupon-kicker { font-family: var(--display); font-variation-settings: var(--display-axes); font-size: 18px; font-style: italic; font-weight: 500; color: var(--red-text); }
-.group-name { font-family: var(--display); font-variation-settings: var(--display-axes); font-weight: 900; font-size: clamp(28px, 2.6vw, 38px); line-height: 1.05; letter-spacing: -.02em; text-wrap: balance; }
-.group-text { font-size: 15px; font-weight: 600; }
-.group-go { justify-self: start; margin-top: 10px; padding: 6px 12px 5px; border: 2px solid var(--navy); border-radius: 3px; font-family: "Anton", sans-serif; font-size: 15px; letter-spacing: .06em; text-transform: uppercase; rotate: -2deg; }
 
 /* Novedades: recortes pegados con cinta */
 .catalog { padding-block: var(--section-s) var(--section); scroll-margin-top: 16px; background: var(--mist); }
@@ -280,19 +229,20 @@ h2 { font-family: var(--display); font-variation-settings: var(--display-axes); 
 .piece-dialog-price { margin-top: 0; padding: 4px 12px 2px; background: var(--yellow); }
 .piece-dialog-ask { margin-top: 0; padding-inline: 16px; }
 
-/* Ropa: etiquetas de precio colgadas */
+/* Ropa: escalera de precios en Anton (Issue #630) */
 .ropa { padding-block: var(--section); scroll-margin-top: 16px; }
-.tiers { list-style: none; margin: 40px 0 28px; padding: 0; display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 28px 24px; }
-.tiers .tag { font-size: clamp(34px, 3.4vw, 50px); transition: rotate 220ms ease; }
-.tiers .tag:nth-child(even) { rotate: 2deg; }
+.price-ladder { list-style: none; margin: 40px 0 32px; padding: 0; display: flex; flex-wrap: wrap; justify-content: space-between; gap: 20px 40px; }
+.ladder-num { display: block; color: var(--red); font-family: "Anton", sans-serif; font-size: clamp(56px, 9vw, 128px); line-height: .95; }
+.ladder-note { display: block; margin-top: 8px; font-size: 14px; font-weight: 600; }
 
-/* Grupos: cupones para recortar sobre tinta azul */
+/* Grupos: tarjetas blancas sobre tinta azul punteada; la sombra dura va en amarillo porque la azul se pierde en el fondo. */
 .groups { background: var(--navy) radial-gradient(rgb(255 255 255 / .07) 1.2px, transparent 1.4px) 0 0 / 9px 9px; color: var(--white); }
 .groups a:focus-visible { outline-color: var(--yellow); }
-/* La máscara del cupón recorta todo lo de afuera: el foco va dentro (Issue #241). */
-.groups .group-card:focus-visible { outline: none; }
-/* Foco de dos trazos (Issue #311): blanco contra el azul del cupón 11.84:1; azul contra el crema 9.52:1. */
-.groups .group-card:focus-visible .coupon-body { outline: 3px solid var(--navy); outline-offset: 3px; box-shadow: 0 0 0 3px var(--white), inset 0 0 0 3px var(--coupon), inset 0 0 0 4px var(--navy); }
+.group-card { display: flex; flex-direction: column; align-items: flex-start; padding: clamp(22px, 2.6vw, 32px); background: var(--white); color: var(--navy); border: 2px solid var(--navy); box-shadow: 4px 4px 0 var(--yellow); }
+.group-card h3 { font-family: var(--display); font-variation-settings: var(--display-axes); font-weight: 800; font-size: clamp(26px, 2.4vw, 34px); line-height: 1.05; letter-spacing: -.02em; text-wrap: balance; }
+.group-card p { margin: 8px 0 20px; font-size: 16px; font-weight: 500; }
+/* Dentro de la tarjeta blanca el foco vuelve al rojo de todo el sitio. */
+.groups .group-card a:focus-visible { outline-color: var(--red); }
 .groups-layout { display: grid; grid-template-columns: 1fr 1.1fr; gap: 72px; align-items: center; padding-block: var(--section); }
 .groups-copy .section-lede { margin-top: 18px; max-width: 440px; }
 .groups-cards { display: grid; gap: 26px; }
@@ -353,25 +303,17 @@ dd { margin: 0; line-height: 1.5; }
   .button-whatsapp:hover { background: var(--wa); }
   .button:hover > span:not(.wa-logo), .text-link:hover > span, .portal-link:hover > span { transform: translate(2px, -2px); }
   .chip:hover { background: var(--yellow); }
-  .group-card:hover { rotate: 0deg; translate: 0 -4px; }
-  .group-card:hover .group-go { background: var(--navy); color: var(--white); }
   .chip[aria-pressed="true"]:hover { background: var(--red); }
   .piece:hover { translate: -2px -2px; box-shadow: 7px 7px 0 var(--navy); }
-  .tiers .tag:hover { rotate: 0deg; }
 }
 /* Pulsar = sellar: la sombra dura se hunde rápido y vuelve con la transición existente. Feedback para táctil, donde no hay hover. */
 .button:active, .portal-link:active { transform: translate(2px, 2px); box-shadow: 2px 2px 0 var(--navy); transition-duration: 60ms; }
 .chip:active { translate: 1px 1px; box-shadow: 1px 1px 0 var(--navy); }
 .piece:active { translate: 2px 2px; box-shadow: 2px 2px 0 var(--navy); }
-.group-card:active { translate: 0 2px; }
 /* Barra fija de celular: WhatsApp y Catálogo siempre a la mano; en escritorio no existe. */
 .sticky-bar { display: none; }
 @media (prefers-reduced-motion: no-preference) {
-  .hero-sub { animation: cut-drop 560ms 560ms cubic-bezier(.2, .9, .3, 1.3) backwards; }
-  .ticker-track { animation: ticker 38s linear infinite; }
-  @keyframes ticker { to { translate: -50% 0; } }
   .visit-details.motion-enter, .dolarones-symbol.motion-enter { animation: paper-settle 650ms cubic-bezier(.2, .9, .3, 1.3); }
-  @keyframes cut-drop { from { opacity: 0; translate: 0 -36px; scale: 1.15; } }
   @keyframes paper-settle { from { translate: 0 -18px; rotate: -6deg; } }
   /* Las tarjetas nuevas se asientan como recortes; escalonado solo donde hay sibling-index() (Chrome 138+, Safari 26.2+). */
   .piece { animation: card-settle 320ms cubic-bezier(.2, .9, .3, 1.1) backwards; animation-delay: calc(mod(sibling-index() - 1, 8) * 35ms); }
@@ -386,12 +328,11 @@ dd { margin: 0; line-height: 1.5; }
   .hero { padding: 32px 32px 44px; gap: 20px; }
   .hero-title { font-size: clamp(44px, 7vw, 80px); }
   .header nav { gap: 20px; }
-  .tiers { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .groups-layout, .visit-layout { gap: 48px; }
   .dolarones-symbol { width: 220px; margin-right: 8px; }
 }
 @media (max-width: 1000px) {
-  /* Con tres por fila los carteles de 761 a 1000 px quedan angostos: de dos en dos. */
+  /* Con tres por fila las tarjetas de 761 a 1000 px quedan angostas: de dos en dos. */
   .wanted-grid li { flex-basis: calc((100% - 32px) / 2); }
 }
 @media (max-width: 900px) {
@@ -408,10 +349,6 @@ dd { margin: 0; line-height: 1.5; }
   .hero .button { padding-inline: 14px; }
   .hero-stamp { font-size: 19px; }
   .hero-art { width: min(100%, 360px); margin: 12px auto 0; }
-  .ticker { height: 80px; margin-top: -18px; }
-  .ticker-pause { top: 18px; right: 8px; width: 30px; height: 30px; }
-  .ticker-track { font-size: 17px; }
-  .ticker-run b { margin-inline: 16px; }
   .section-head { grid-template-columns: 1fr; }
   .groups-layout, .visit-layout { grid-template-columns: 1fr; }
   .dolarones-symbol { display: none; }
@@ -433,12 +370,11 @@ dd { margin: 0; line-height: 1.5; }
   .header nav { gap: 14px; font-size: 12px; }
   .portal-link { padding: 9px 11px; }
   h2 { font-size: clamp(32px, 9vw, 48px); }
-  /* Fila deslizable con el siguiente cartel asomando: un cartel a la vez se lee completo en 390 px. */
+  /* Fila deslizable con la siguiente tarjeta asomando: una a la vez se lee completa en 390 px. */
   .wanted-hint { display: block; margin-top: 18px; font-size: 14px; font-weight: 800; }
-  .wanted-grid { flex-wrap: nowrap; justify-content: flex-start; gap: 18px; margin: 4px -20px 0; padding: 14px 20px 30px; overflow-x: auto; scroll-snap-type: x mandatory; scroll-padding-inline: 20px; overscroll-behavior-x: contain; }
-  .wanted-grid li, .wanted-grid li:nth-child(n) { flex: 0 0 min(80vw, 330px); scroll-snap-align: start; rotate: 0deg; }
-  .poster { padding-bottom: 14%; }
-  .poster-ask { align-self: stretch; }
+  .wanted-grid { flex-wrap: nowrap; justify-content: flex-start; gap: 18px; margin: 4px -20px 0; padding: 14px 20px 12px; overflow-x: auto; scroll-snap-type: x mandatory; scroll-padding-inline: 20px; overscroll-behavior-x: contain; }
+  .wanted-grid li { flex: 0 0 min(80vw, 330px); scroll-snap-align: start; }
+  .wanted-ask { align-self: stretch; }
   .catalog-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 26px 14px; }
   .piece-body { padding: 10px 10px 12px; }
   .piece h3 { font-size: 14px; }
@@ -450,10 +386,7 @@ dd { margin: 0; line-height: 1.5; }
   .chips-wrap { margin-inline: -20px; -webkit-mask-image: linear-gradient(90deg, #000 0, #000 calc(100% - 38px), transparent 100%); mask-image: linear-gradient(90deg, #000 0, #000 calc(100% - 38px), transparent 100%); }
   .chips { flex-wrap: nowrap; overflow-x: auto; padding: 0 38px 6px 20px; scrollbar-width: none; }
   .chip { flex-shrink: 0; font-size: 14px; padding-inline: 10px; }
-  .tiers { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px 14px; }
-  .group-card { grid-template-columns: 52px 1fr; }
-  .coupon-stub { font-size: 16px; }
-  .coupon-body { padding: 14px 16px 12px; margin: 8px 10px 8px 8px; }
+  .price-ladder { justify-content: flex-start; gap: 18px 32px; }
   .visit-details { padding: 38px 26px 30px; }
   .footer { flex-direction: column; align-items: flex-start; }
 }
@@ -474,5 +407,4 @@ dd { margin: 0; line-height: 1.5; }
   html { scroll-behavior: auto; }
   *, *::before, *::after { animation: none !important; transition: none !important; }
   ::view-transition-group(*), ::view-transition-old(*), ::view-transition-new(*) { animation: none !important; }
-  .ticker-pause { display: none; }
 }
