@@ -45,7 +45,7 @@
 
   if (typeof module !== "undefined") module.exports = { precio, consulta, apiBase, codigoDePieza };
 
-  // Los precios con su precio de lista tachado, igual en carteles, tarjetas y visor.
+  // Los precios con su precio de lista tachado, igual en tarjetas y visor.
   function pintarPrecio(nodo, pieza) {
     nodo.textContent = precio(pieza.precio);
     if (pieza.precio_lista > pieza.precio) {
@@ -58,7 +58,7 @@
     }
   }
 
-  // «Los más buscados» (Issue #339): lo de mayor precio que sigue a la venta, en carteles de «Se busca».
+  // «Los más buscados» (Issue #339): lo de mayor precio que sigue a la venta, en tarjetas como las del catálogo (Issue #630).
   // Si la API falla o trae menos de 3 con foto, la sección se queda oculta.
   async function buscados(seccion) {
     try {
@@ -72,30 +72,19 @@
       const lista = seccion.querySelector(".wanted-grid");
       for (const pieza of conFoto) {
         const li = document.createElement("li");
-        const cartel = document.createElement("article");
-        cartel.className = "poster";
-        cartel.setAttribute("aria-label", pieza.ultima ? `${pieza.nombre}, última pieza` : pieza.nombre);
-        const cabeza = document.createElement("p");
-        cabeza.className = "poster-head";
-        cabeza.textContent = "Se busca";
-        const nombre = document.createElement("h3");
-        nombre.className = "poster-name";
-        nombre.textContent = pieza.nombre;
-        // Marca (lo que vende «calidad americana») o, si no hay, la categoría.
-        const rubro = pieza.marca || (CATEGORIAS.find(([k]) => k === pieza.categoria) || [])[1];
-        const linea = document.createElement("p");
-        linea.className = "poster-kicker";
-        linea.textContent = rubro && rubro !== "Otros" ? rubro : "";
-        // La foto abre el visor grande (el mismo del catálogo): las fotos de celular se ven recortadas en cuadro.
+        const item = document.createElement("article");
+        item.className = "wanted-item";
+        item.setAttribute("aria-label", pieza.ultima ? `${pieza.nombre}, última pieza` : pieza.nombre);
+        // La foto abre el visor grande (el mismo del catálogo): las fotos de celular se ven recortadas.
         const foto = document.createElement("button");
         foto.type = "button";
-        foto.className = "poster-photo";
+        foto.className = "wanted-photo";
         foto.setAttribute("aria-label", `Ver foto completa: ${pieza.nombre}`);
         const img = new Image();
         img.alt = "";
         img.loading = "lazy";
         img.decoding = "async";
-        // Una foto rota quita su cartel; con menos de 3 la sección vuelve a ocultarse.
+        // Una foto rota quita su tarjeta; con menos de 3 la sección vuelve a ocultarse.
         if (pieza.recorte) foto.classList.add("con-recorte");
         img.addEventListener("error", () => {
           if (pieza.recorte && img.src === pieza.recorte) { foto.classList.remove("con-recorte"); img.src = pieza.foto; return; }
@@ -103,31 +92,36 @@
         });
         img.src = pieza.recorte || pieza.foto;
         const zoom = document.createElement("span");
-        zoom.className = "poster-zoom";
+        zoom.className = "piece-zoom";
         zoom.setAttribute("aria-hidden", "true");
         zoom.textContent = "Ver foto";
         foto.append(img, zoom);
         if (pieza.ultima) {
           // Sello de goma sobre la foto: lo dice el servidor cuando queda una sola pieza.
           const sello = document.createElement("span");
-          sello.className = "poster-stamp";
+          sello.className = "wanted-stamp";
           sello.setAttribute("aria-hidden", "true");
           sello.textContent = "¡Última pieza!";
           foto.append(sello);
         }
         foto.addEventListener("click", () => abrirVisor(pieza, foto, img));
-        const visto = document.createElement("p");
-        visto.className = "poster-seen";
-        visto.textContent = "Visto por última vez en Jardín Hidalgo 129";
-        const pie = document.createElement("div");
-        pie.className = "poster-foot";
+        const cuerpo = document.createElement("div");
+        cuerpo.className = "wanted-body";
+        // Marca (lo que vende «calidad americana») o, si no hay, la categoría.
+        const rubro = pieza.marca || (CATEGORIAS.find(([k]) => k === pieza.categoria) || [])[1];
+        const linea = document.createElement("p");
+        linea.className = "piece-brand";
+        linea.textContent = rubro && rubro !== "Otros" ? rubro : "";
+        const nombre = document.createElement("h3");
+        nombre.className = "wanted-name";
+        nombre.textContent = pieza.nombre;
         const valor = document.createElement("p");
-        valor.className = "poster-price";
+        valor.className = "wanted-price";
         valor.textContent = precio(pieza.precio);
         if (pieza.precio_lista > pieza.precio) {
           // Precio de lista tachado y el ahorro en pesos, calculado con los mismos centavos que manda la API.
           const antes = document.createElement("span");
-          antes.className = "poster-was";
+          antes.className = "wanted-was";
           const lista = document.createElement("s");
           const aviso = document.createElement("span");
           aviso.className = "sr-only";
@@ -139,27 +133,21 @@
           valor.append(antes);
         }
         const apartar = document.createElement("a");
-        apartar.className = "button button-whatsapp poster-ask";
+        apartar.className = "button button-whatsapp wanted-ask";
         apartar.href = consulta(pieza, "quiero apartar");
         apartar.setAttribute("aria-label", `Apartar por WhatsApp: ${pieza.nombre}`);
         apartar.innerHTML = WHATSAPP_ICONO;
         apartar.append("Apartar por WhatsApp");
-        pie.append(valor, apartar);
-        cartel.append(cabeza, linea, nombre, foto, visto, pie);
-        li.append(cartel);
+        cuerpo.append(linea, nombre, valor, apartar);
+        item.append(foto, cuerpo);
+        li.append(item);
         lista.append(li);
       }
       seccion.hidden = false;
     } catch {}
   }
-  // Pausar la cinta que corre (Issue #241, WCAG «pausar, detener, ocultar»).
-  const pausa = typeof document !== "undefined" && document.querySelector(".ticker-pause");
-  if (pausa) pausa.addEventListener("click", () => {
-    const pausada = pausa.closest(".ticker").classList.toggle("pausada");
-    pausa.setAttribute("aria-pressed", String(pausada));
-  });
-  const cartel = typeof document !== "undefined" && document.getElementById("buscados");
-  if (cartel) buscados(cartel);
+  const destacados = typeof document !== "undefined" && document.getElementById("buscados");
+  if (destacados) buscados(destacados);
   const root = typeof document !== "undefined" && document.getElementById("catalogo");
   if (!root) return;
 
@@ -203,7 +191,7 @@
   // Sin soporte o con movimiento reducido, el visor abre y cierra de golpe como hasta ahora.
   const conMorph = typeof document.startViewTransition === "function"
     && typeof matchMedia === "function" && !matchMedia("(prefers-reduced-motion: reduce)").matches;
-  let fotoOrigen = null;   // la <img> de la tarjeta o cartel que abrió el visor
+  let fotoOrigen = null;   // la <img> de la tarjeta que abrió el visor
 
   function abrirVisor(pieza, disparador, img) {
     if (!dialog) return;

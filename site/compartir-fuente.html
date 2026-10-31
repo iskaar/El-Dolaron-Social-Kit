@@ -5,6 +5,11 @@
 <meta charset="utf-8">
 <link rel="stylesheet" href="public/styles.css">
 <style>
+  /* Rye y la cinta ya no viven en public/styles.css (Issue #630): se quedan aquí para poder regenerar la imagen igual. */
+  @font-face { font-family: "Rye"; src: url("public/assets/fonts/rye-400.woff2") format("woff2"); font-display: swap; }
+  .tape { display: inline-block; padding: .34em .85em .36em; font-family: var(--display); font-variation-settings: var(--display-axes); font-weight: 800; letter-spacing: -.01em; line-height: 1.1;
+    clip-path: polygon(0 8%, 3% 0, 22% 5%, 48% 0, 74% 6%, 97% 0, 100% 10%, 98% 52%, 100% 92%, 96% 100%, 70% 95%, 45% 100%, 20% 94%, 2% 100%, 0 88%, 2% 47%); }
+  .tape-yellow { background: var(--yellow); color: var(--navy); rotate: -2deg; }
   html, body { margin: 0; width: 1200px; height: 630px; overflow: hidden; background: #fff; }
   .lienzo { position: relative; width: 1200px; height: 630px; }
   .copia { position: absolute; left: 64px; top: 46px; width: 600px; }
