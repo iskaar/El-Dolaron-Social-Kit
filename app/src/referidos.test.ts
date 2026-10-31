@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import worker from './worker.ts';
 import { tienda, codigoPrueba, PRODUCTO } from './prueba-d1.ts';
-import { codigoReferido, numeroDeCodigo } from './referidos.ts';
+import { codigoReferido, numeroDeCodigo, CODIGO_PILOTO } from './referidos.ts';
 
 const codificar = (x: unknown) => Buffer.from(JSON.stringify(x)).toString('base64url');
 const token = (uid: string, phone: string) => {
@@ -39,6 +39,12 @@ function montar(abierto = 'si') {
     nombre: 'Cliente', acepta_bases: true, declara_mayor_edad: true, bases_version: 'prueba-1',
     ...(codigo === undefined ? {} : { referido_codigo: codigo }),
   }, 'POST');
+  // Referente del piloto (#631) sin pasar por el alta con CODIGO_PILOTO: sin sus 50 D, las pruebas de premios quedan igual.
+  const referente = async (n: number) => {
+    const r = (await registrar(n)).body;
+    db.prepare("insert into piloto_socios (cliente_id, creado_en) values (?, '')").run(r.id);
+    return r;
+  };
   const lotes = (id: string) => db.prepare('select origen, importe, restante from dolarones_lotes where cliente_id = ? order by creado_en, rowid').all(id) as
     { origen: string; importe: number; restante: number }[];
   const precio = (centavos: number) => db.prepare('update productos set precio = ? where id = ?').run(centavos, PRODUCTO);
@@ -48,7 +54,7 @@ function montar(abierto = 'si') {
       forma_pago: 'efectivo', efectivo: 100_000, ...extra }).then((r) => ({ ...r, id }));
   };
   const estado = (nuevo: string) => db.prepare('select estado, venta_id from referidos where nuevo_id = ?').get(nuevo) as { estado: string; venta_id: string | null };
-  return { db, env, pedir, llamar, registrar, lotes, precio, comprar, estado,
+  return { db, env, pedir, llamar, registrar, referente, lotes, precio, comprar, estado,
     cerrar: () => { globalThis.fetch = fetchOriginal; db.close(); } };
 }
 
@@ -80,7 +86,7 @@ test('sin PREMIOS_APERTURA el alta con código sigue dando los 50 D de referido 
   const p = montar();
   delete p.env.PREMIOS_APERTURA;
   try {
-    const a = (await p.registrar(1)).body;
+    const a = await p.referente(1);
     assert.equal(a.premio, null);
     const b = await p.registrar(2, codigoReferido(a.numero));
     assert.equal(b.status, 200, JSON.stringify(b.body));
@@ -93,7 +99,7 @@ test('sin PREMIOS_APERTURA el alta con código sigue dando los 50 D de referido 
 test('alta con código: 50 D a 30 días; sin código, inválido, o propio no dan nada', async () => {
   const p = montar();
   try {
-    const a = (await p.registrar(1)).body;
+    const a = await p.referente(1);
     assert.equal((await p.llamar('/api/portal/config', '', '')).body.referidos, true);
     const codigo = codigoReferido(a.numero);
 
@@ -131,21 +137,55 @@ test('alta con código: 50 D a 30 días; sin código, inválido, o propio no dan
     const r = (await p.llamar('/api/portal/referidos', 'u1', tel(1))).body;
     assert.deepEqual([r.codigo, r.referidos, r.liberados, r.pendientes, r.maximo], [codigo, 1, 0, 1, 10]);
     const mio = (await p.llamar('/api/portal/referidos', 'u2', tel(2))).body;
-    assert.equal(mio.codigo, codigoReferido(b.body.numero));
     assert.deepEqual(mio.mi_referido, { estado: 'pendiente' });
 
-    // Sin lista ni compra previa: quien se acaba de registrar ya puede referir.
-    const c = await p.registrar(5, mio.codigo);
-    assert.equal(c.status, 200, JSON.stringify(c.body));
-    assert.equal(c.body.referido_otorgado, 50_00);
-    assert.equal((await p.llamar('/api/portal/referidos', 'u2', tel(2))).body.referidos, 1);
+    // Piloto (#631): quien se une con un DOL no recibe código propio, y el suyo no sirve.
+    assert.equal(mio.codigo, null);
+    assert.equal(mio.puede_referir, false);
+    assert.equal((await p.registrar(5, codigoReferido(b.body.numero))).status, 400);
+  } finally { p.cerrar(); }
+});
+
+test('piloto familia y amigos (#631): el código da 50 D y código DOL, sin premio por compra; tope de 50', async () => {
+  const p = montar();
+  try {
+    const a = await p.registrar(1, ` ${CODIGO_PILOTO.toLowerCase().slice(0, 3)}-${CODIGO_PILOTO.slice(3)} `);
+    assert.equal(a.status, 200, JSON.stringify(a.body));
+    assert.equal(a.body.referido_otorgado, 50_00);
+    assert.deepEqual(p.lotes(a.body.id).filter((l) => l.origen === 'referido').map((l) => l.restante), [50_00]);
+    assert.equal(p.db.prepare('select count(*) as n from referidos').get()!.n, 0);
+    const r = (await p.llamar('/api/portal/referidos', 'u1', tel(1))).body;
+    assert.deepEqual([r.puede_referir, r.codigo, r.maximo, r.mi_referido], [true, codigoReferido(a.body.numero), 10, null]);
+
+    // Su compra de $150 no libera nada: no tiene referente.
+    p.precio(150_00);
+    assert.equal((await p.comprar(a.body.id)).cuerpo.referido_liberado, 0);
+    // Quien invita con su DOL sí sigue las reglas de siempre.
+    const b = (await p.registrar(2, r.codigo)).body;
+    assert.equal(b.referido_otorgado, 50_00);
+    assert.equal((await p.comprar(b.id)).cuerpo.referido_liberado, 25_00);
+
+    // Sin código: sin DOL, y el número de ese socio no sirve como código.
+    const c = (await p.registrar(3)).body;
+    assert.equal((await p.llamar('/api/portal/referidos', 'u3', tel(3))).body.codigo, null);
+    assert.equal((await p.registrar(4, codigoReferido(c.numero))).status, 400);
+
+    // 50 registros con el código del piloto; el 51 no crea nada y puede registrarse sin él.
+    for (let n = 5; n <= 53; n++) assert.equal((await p.registrar(n, CODIGO_PILOTO)).status, 200, String(n));
+    const clientes = p.db.prepare('select count(*) as n from clientes').get()!.n;
+    const lleno = await p.registrar(54, CODIGO_PILOTO);
+    assert.equal(lleno.status, 409);
+    assert.equal(p.db.prepare('select count(*) as n from clientes').get()!.n, clientes);
+    assert.equal((await p.registrar(54)).status, 200);
+    // Aunque la lectura previa se salte (carrera), el trigger deshace el batch.
+    assert.throws(() => p.db.prepare("insert into piloto_socios (cliente_id, creado_en) values (?, '')").run(c.id), /tope del piloto/);
   } finally { p.cerrar(); }
 });
 
 test('tope de 10 por número: la persona 11 no recibe nada, ni siquiera el socio', async () => {
   const p = montar();
   try {
-    const a = (await p.registrar(1)).body;
+    const a = await p.referente(1);
     const codigo = codigoReferido(a.numero);
     for (let n = 2; n <= 11; n++) assert.equal((await p.registrar(n, codigo)).status, 200, String(n));
     const clientes = p.db.prepare('select count(*) as n from clientes').get()!.n;
@@ -167,7 +207,7 @@ test('tope de 10 por número: la persona 11 no recibe nada, ni siquiera el socio
 test('libera 25 + 25 con $150 en dinero, una sola vez, y no con $149.99', async () => {
   const p = montar();
   try {
-    const a = (await p.registrar(1)).body;
+    const a = await p.referente(1);
     const b = (await p.registrar(2, codigoReferido(a.numero))).body;
     const premios = (id: string) => p.lotes(id).filter((l) => l.origen === 'referido' && l.importe === 25_00).length;
 
@@ -211,7 +251,7 @@ test('libera 25 + 25 con $150 en dinero, una sola vez, y no con $149.99', async 
 test('los Dolarones usados no cuentan para el mínimo de $150', async () => {
   const p = montar();
   try {
-    const a = (await p.registrar(1)).body;
+    const a = await p.referente(1);
     const codigo = codigoReferido(a.numero);
     const b = (await p.registrar(2, codigo)).body;
     const c = (await p.registrar(3, codigo)).body;
@@ -234,7 +274,7 @@ test('los Dolarones usados no cuentan para el mínimo de $150', async () => {
 test('cancelar el ticket que liberó retira los 25 + 25 y deja al referido pendiente para otra compra', async () => {
   const p = montar();
   try {
-    const a = (await p.registrar(1)).body;
+    const a = await p.referente(1);
     const b = (await p.registrar(2, codigoReferido(a.numero))).body;
     p.precio(150_00);
     const primera = await p.comprar(b.id);
@@ -257,7 +297,7 @@ test('cancelar el ticket que liberó retira los 25 + 25 y deja al referido pendi
 test('si ya se gastó lo liberado, cancelar el ticket no procede (mismo criterio que lo ganado, #135)', async () => {
   const p = montar();
   try {
-    const a = (await p.registrar(1)).body;
+    const a = await p.referente(1);
     const b = (await p.registrar(2, codigoReferido(a.numero))).body;
     p.precio(150_00);
     const primera = await p.comprar(b.id);

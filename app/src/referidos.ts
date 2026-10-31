@@ -1,13 +1,15 @@
 /**
- * Referidos Dolarones (Issues #489, #597). Las bases 2026-10-v5 (punto 7) los describen y
- * esperan el visto bueno del abogado; las reglas son estas:
+ * Referidos Dolarones (Issues #489, #597, #631). Las bases 2026-10-v6 (punto 7) los describen
+ * (aprobadas por el abogado el 30/10/2026); las reglas son estas:
  *
  * - Quien se une al portal con el codigo de un referente recibe 50 D (30 dias).
  * - Al cobrarle una compra con al menos $150 en dinero, el nuevo y el referente
  *   reciben 25 D cada uno (12 meses, desde la medianoche siguiente).
  * - Cada referente admite hasta 10 personas (tambien en SQL: trigger referidos_tope).
- * - Abierto a todo socio del portal (Issue #597): sin REFERIDOS_ABIERTO='si' el programa
- *   esta apagado; con ella, todo socio tiene codigo. Sin requisito de compra previa.
+ * - Sin REFERIDOS_ABIERTO='si' el programa esta apagado.
+ * - Piloto familia y amigos (Issue #631): Isaac comparte CODIGO_PILOTO (50 registros, trigger
+ *   piloto_tope). Da solo los 50 D al unirse, sin referente ni premio por compra. Solo esas
+ *   cuentas (tabla piloto_socios) tienen codigo DOL; quien se une con un DOL no recibe uno.
  *
  * Centavos enteros como todo el dinero (1 D = 100). Nada aqui usa azar: el codigo
  * sale del numero de socio y los premios los fija la venta, en su mismo batch.
@@ -21,6 +23,10 @@ export const D_PREMIO = 25_00;
 export const MINIMO_COMPRA = 150_00;
 /** Tambien esta en migracion-055-referidos.sql (trigger referidos_tope). */
 export const MAXIMO_REFERIDOS = 10;
+// ponytail: un solo codigo fijo; tabla de codigos si algun dia hay otro piloto.
+export const CODIGO_PILOTO = 'EDS1026';
+/** Tambien esta en migracion-065-piloto-familia.sql (trigger piloto_tope). */
+export const MAXIMO_PILOTO = 50;
 export const DIAS_ALTA = 30;
 export const MESES_PREMIO = 12;
 
@@ -47,13 +53,18 @@ export const programaActivo = (env: Env) => env.REFERIDOS_ABIERTO === 'si';
 
 type Sentencia = D1PreparedStatement;
 
-/** Registro con codigo: la fila de referidos y los 50 D, para el mismo batch que crea el socio. */
-export function sentenciasDeAlta(env: Env, p: { nuevoId: string; referenteId: string; ahora: Date }): Sentencia[] {
+/**
+ * Registro con codigo, para el mismo batch que crea el socio: la fila de referidos (o del
+ * piloto, sin referente) y los 50 D.
+ */
+export function sentenciasDeAlta(env: Env, p: { nuevoId: string; referenteId: string | null; ahora: Date }): Sentencia[] {
   const iso = p.ahora.toISOString();
   const lote = crypto.randomUUID();
   return [
-    env.DB.prepare(`insert into referidos (nuevo_id, referente_id, estado, creado_en) values (?, ?, 'pendiente', ?)`)
-      .bind(p.nuevoId, p.referenteId, iso),
+    p.referenteId
+      ? env.DB.prepare(`insert into referidos (nuevo_id, referente_id, estado, creado_en) values (?, ?, 'pendiente', ?)`)
+        .bind(p.nuevoId, p.referenteId, iso)
+      : env.DB.prepare('insert into piloto_socios (cliente_id, creado_en) values (?, ?)').bind(p.nuevoId, iso),
     env.DB.prepare(`insert into dolarones_lotes (id, cliente_id, origen, venta_id, importe, restante, disponible_desde, vence_en, creado_en)
       values (?, ?, 'referido', null, ?, ?, ?, ?, ?)`)
       .bind(lote, p.nuevoId, D_ALTA, D_ALTA, iso, new Date(p.ahora.getTime() + DIAS_ALTA * 86_400_000).toISOString(), iso),
@@ -117,29 +128,37 @@ export function sentenciasDeReversoReferido(env: Env, ventaId: string, autor: st
   ];
 }
 
-type Revision = { ok: true; referenteId: string } | { ok: false; status: number; error: string };
+/** referenteId null: codigo del piloto. */
+type Revision = { ok: true; referenteId: string | null } | { ok: false; status: number; error: string };
 
-/** El codigo que escribio quien se registra: existe, no es suyo y no esta lleno. */
+const lleno: Revision = { ok: false, status: 409, error: 'Ese código ya llegó a su límite de referidos. Quítalo para registrarte sin él.' };
+
+/** El codigo que escribio quien se registra: el del piloto, o un DOL de una cuenta del piloto que no es suya y no esta llena. */
 export async function revisarCodigo(env: Env, codigo: unknown, quien: { uid: string; telefono: string }): Promise<Revision> {
   if (!programaActivo(env)) return { ok: false, status: 400, error: 'Los referidos todavía no están disponibles. Quita el código para registrarte.' };
+  if (String(codigo ?? '').toUpperCase().replace(/[^A-Z0-9]/g, '') === CODIGO_PILOTO) {
+    const { total } = (await env.DB.prepare('select count(*) as total from piloto_socios').first<{ total: number }>())!;
+    return total >= MAXIMO_PILOTO ? lleno : { ok: true, referenteId: null };
+  }
   const invalido: Revision = { ok: false, status: 400, error: 'Ese código no es válido. Revísalo o quítalo para registrarte sin él.' };
   const numero = numeroDeCodigo(codigo);
   if (!numero) return invalido;
-  const referente = await env.DB.prepare('select id, telefono, auth_uid from clientes where numero = ?')
+  const referente = await env.DB.prepare(`select id, telefono, auth_uid from clientes
+    where numero = ? and id in (select cliente_id from piloto_socios)`)
     .bind(numero).first<{ id: string; telefono: string; auth_uid: string | null }>();
   if (!referente) return invalido;
   if (referente.telefono === quien.telefono || referente.auth_uid === quien.uid)
     return { ok: false, status: 400, error: 'No puedes usar tu propio código.' };
   const { total } = (await env.DB.prepare('select count(*) as total from referidos where referente_id = ?')
     .bind(referente.id).first<{ total: number }>())!;
-  if (total >= MAXIMO_REFERIDOS)
-    return { ok: false, status: 409, error: 'Ese código ya llegó a su límite de referidos. Quítalo para registrarte sin él.' };
+  if (total >= MAXIMO_REFERIDOS) return lleno;
   return { ok: true, referenteId: referente.id };
 }
 
 /** Lo que muestra el portal: tu codigo, cuantos llevas y como va tu propia invitacion. */
 export async function resumenReferidos(env: Env, socio: { id: string; numero: number }) {
-  const puede = programaActivo(env);
+  const puede = programaActivo(env) &&
+    !!await env.DB.prepare('select 1 from piloto_socios where cliente_id = ?').bind(socio.id).first();
   const llevas = puede ? await env.DB.prepare(
     `select count(*) as total, coalesce(sum(estado = 'liberado'), 0) as liberados from referidos where referente_id = ?`)
     .bind(socio.id).first<{ total: number; liberados: number }>() : null;
