@@ -4,9 +4,9 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { tienda } from './prueba-d1.ts';
 
-const MONTOS = [19, 29, 49, 79, 99, 119, 129, 149, 199];
+const MONTOS = [19, 29, 39, 49, 69, 79, 99, 119, 129, 149, 199];
 
-test('/api/familias ofrece los nueve montos y cada familia sembrada tiene sus nueve productos', async () => {
+test('/api/familias ofrece los once montos y cada familia sembrada tiene sus once productos', async () => {
   const { db, pedir } = tienda();
   const { montos, familias } = (await pedir('/api/familias')).cuerpo;
   assert.deepEqual(montos, MONTOS);
@@ -23,7 +23,7 @@ test('/api/familias ofrece los nueve montos y cada familia sembrada tiene sus nu
       assert.equal(p.stock, 0);
     }
   }
-  assert.equal((db.prepare(`select count(*) as n from productos where destino like 'banda_%'`).get() as { n: number }).n, 18 * 9);
+  assert.equal((db.prepare(`select count(*) as n from productos where destino like 'banda_%'`).get() as { n: number }).n, 18 * 11);
 });
 
 test('la migracion 024 es repetible: correrla otra vez no duplica nada', async () => {
@@ -42,7 +42,7 @@ test('una familia nueva nace con los nueve montos, y el precio de la configuraci
   assert.equal(r.status, 201, JSON.stringify(r.cuerpo));
   const filas = db.prepare(`select codigo, precio from productos where destino like ? order by precio`)
     .all(`banda_${r.cuerpo.prefijo}%`) as { codigo: string; precio: number }[];
-  assert.equal(filas.length, 9);
+  assert.equal(filas.length, 11);
   assert.ok(filas.some((f) => f.codigo === `${r.cuerpo.prefijo.toUpperCase()}119`));
   assert.equal(filas.find((f) => f.codigo.endsWith('129'))?.precio, 12500);
 });
