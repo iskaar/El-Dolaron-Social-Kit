@@ -165,6 +165,19 @@ const tick = () => new Promise((r) => setImmediate(r));
   await tick();
   assert.equal(consultas.at(-1), null);   // malformado: carga normal, sin búsqueda
 
+  // Línea de existencias de la portada (Issue #630): el total sin filtros con separador de miles; si la API falla, no aparece.
+  const linea = Object.assign(new Nodo(), { hidden: true });
+  pagina(async () => ({ ok: true, json: async () => ({ piezas: [], total: 2108, hay_mas: false, siguiente: null }) }),
+    { document: { querySelector: (k) => (k === ".hero-stock" ? linea : null) } });
+  await tick();
+  assert.equal(linea.hidden, false);
+  assert.equal(linea.textContent, "2,108 piezas en tienda hoy");
+  const lineaMala = Object.assign(new Nodo(), { hidden: true });
+  pagina(async () => ({ ok: false, json: async () => ({}) }), { document: { querySelector: (k) => (k === ".hero-stock" ? lineaMala : null) } });
+  await tick();
+  assert.equal(lineaMala.hidden, true);
+  assert.equal(lineaMala.textContent, "");
+
   // Búsqueda por ?q= y botón Limpiar.
   p.partes[".search-input"].value = "  nada  ";
   p.partes[".catalog-search"].listeners.submit({ preventDefault() {} });
@@ -196,5 +209,5 @@ const tick = () => new Promise((r) => setImmediate(r));
   assert.equal(lenta.partes[".catalog-search"].hidden, false);
   assert.equal(lenta.partes[".catalog-fallback"].hidden, true);
   assert.deepEqual(lenta.textos().map((t) => t[0]), ["Ya"]);
-  console.log("Validated catalog prices in centavos, varied hero picks, WhatsApp text, development-only API override, search, photo viewer, retry, size and timeout");
+  console.log("Validated catalog prices in centavos, varied hero picks, stock line, WhatsApp text, development-only API override, search, photo viewer, retry, size and timeout");
 })().catch((error) => { console.error(error); process.exitCode = 1; });

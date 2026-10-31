@@ -171,6 +171,7 @@
   let controller = null;
   const TIEMPO = "tiempo";
   let cargado = false;
+  const existencias = typeof document.querySelector === "function" ? document.querySelector(".hero-stock") : null;
 
   // Morph miniatura → visor con View Transitions (Chrome 111+, Safari 18+, Firefox 144+).
   // Sin soporte o con movimiento reducido, el visor abre y cierra de golpe como hasta ahora.
@@ -255,15 +256,8 @@
     if (pieza.talla) body.append(el("p", "piece-size", `Talla ${pieza.talla}`));
     const price = el("p", "piece-price");
     pintarPrecio(price, pieza);
-    const ask = el("a", "button button-whatsapp piece-link");
-    ask.innerHTML = WHATSAPP_ICONO;
-    // En celular la tarjeta mide ~170 px: se lee «Preguntar» con el logo; el aria-label lleva el texto completo.
-    const texto = el("span", "", "Preguntar");
-    texto.append(el("span", "piece-link-extra", " por WhatsApp"));
-    ask.append(texto);
-    ask.href = consulta(pieza);
-    ask.setAttribute("aria-label", `Preguntar por WhatsApp: ${pieza.nombre}`);
-    body.append(price, el("p", "piece-code", pieza.codigo), ask);
+    // Sin botón por tarjeta (Issue #630): toda la tarjeta abre el visor (CSS: .piece-photo::after) y el visor trae «Preguntar por WhatsApp».
+    body.append(price, el("p", "piece-code", pieza.codigo));
     li.append(photo, body);
     return li;
   }
@@ -291,6 +285,11 @@
       if (!data || !Array.isArray(data.piezas)) throw new Error("Respuesta inesperada");
       if (mio.signal.aborted) throw new Error("Cancelada");
       cargado = true;
+      // Dato real bajo el párrafo de la portada: el total del catálogo sin filtros. Si la API falla, la línea no aparece.
+      if (existencias && existencias.hidden && !categoria && !busqueda && Number(data.total) > 0) {
+        existencias.textContent = `${new Intl.NumberFormat("es-MX").format(Number(data.total))} piezas en tienda hoy`;
+        existencias.hidden = false;
+      }
       proxima = pedida + 1;
       chips.hidden = false;
       if (searchForm) searchForm.hidden = false;
@@ -303,7 +302,7 @@
       }
       more.hidden = !data.hay_mas;
       status.textContent = grid.children.length
-        ? `${grid.children.length} de ${Number(data.total) || grid.children.length} piezas`
+        ? `${grid.children.length} de ${new Intl.NumberFormat("es-MX").format(Number(data.total) || grid.children.length)} piezas`
         : busqueda
           ? `No encontramos piezas para «${busqueda}». Prueba otra palabra o pregunta por WhatsApp.`
           : "Por ahora no hay piezas en esta categoría. Prueba otra o pregunta por WhatsApp.";

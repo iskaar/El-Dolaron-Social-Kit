@@ -45,9 +45,9 @@ p { line-height: 1.6; }
 .masthead { border-bottom: 3px solid var(--ink); }
 .header { display: flex; align-items: center; justify-content: space-between; min-height: 92px; gap: 24px; }
 .brand { width: 196px; flex-shrink: 0; }
-.header nav { display: flex; align-items: center; gap: 32px; font-family: var(--display); font-size: 20px; font-weight: 600; letter-spacing: .01em; }
+.header nav { display: flex; align-items: center; gap: 36px; font-family: var(--display); font-size: 24px; font-weight: 700; letter-spacing: .01em; }
 .header nav a { text-decoration: none; }
-.portal-link { display: inline-flex; align-items: center; min-height: 44px; padding: 0 18px; background: var(--sun); font-weight: 700; transition: background-color 150ms ease; }
+.portal-link { display: inline-flex; align-items: center; min-height: 48px; padding: 0 20px; background: var(--sun); transition: background-color 150ms ease; }
 
 /* Botones: planos, rectos, sin sombra. */
 .button { display: inline-flex; align-items: center; justify-content: center; gap: 10px; min-height: 48px; padding: 0 20px; border: 2px solid transparent; border-radius: 0; color: var(--ink); text-decoration: none; font-family: var(--display); font-size: 19px; font-weight: 700; letter-spacing: .02em; line-height: 1.1; cursor: pointer; transition: background-color 150ms ease; }
@@ -66,9 +66,11 @@ h2 { font-family: var(--display); font-weight: 700; font-size: clamp(36px, 4.6vw
 .section-lede { max-width: 70ch; font-size: 17px; color: var(--slate); }
 
 /* Portada: titular a la izquierda, página de catálogo viva a la derecha. */
-.hero { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); align-items: center; gap: clamp(40px, 6vw, 96px); padding-block: clamp(40px, 6vw, 80px) var(--section-s); }
+/* La página de catálogo manda: a 1440 px la columna derecha mide ~668 px. */
+.hero { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.25fr); align-items: center; gap: clamp(40px, 5.5vw, 80px); padding-block: clamp(40px, 6vw, 80px) var(--section-s); }
 .hero-title { max-width: 9ch; font-family: var(--display); font-weight: 800; font-size: clamp(52px, 7vw, 112px); line-height: .92; letter-spacing: -.01em; text-wrap: balance; }
 .intro { max-width: 34em; margin-top: 28px; font-size: 18px; }
+.hero-stock { margin-top: 18px; color: var(--slate); font-family: var(--display); font-size: 22px; font-weight: 700; letter-spacing: .01em; }
 .hero-hours { margin-top: 36px; font-size: 15px; color: var(--slate); }
 .hero-directions { display: inline-block; margin-top: 2px; font-size: 15px; }
 /* La pila de respaldo (tools/pila_stickers.py) y la cuadrícula viva comparten celda y geometría: lienzo cuadrado,
@@ -117,9 +119,11 @@ h2 { font-family: var(--display); font-weight: 700; font-size: clamp(36px, 4.6vw
 .chip-raya { position: absolute; inset: auto 0 2px; height: 3px; background: var(--ink); opacity: 0; }
 .chip[aria-pressed="true"] .chip-raya { opacity: 1; view-transition-name: chip-activo; }
 .catalog-status { margin-top: 20px; min-height: 26px; font-size: 15px; color: var(--slate); }
-.catalog-grid { list-style: none; margin: 14px 0 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(208px, 1fr)); gap: 20px; }
-.piece { display: flex; flex-direction: column; padding: 12px; background: var(--paper); }
-.piece-photo { position: relative; display: block; width: 100%; aspect-ratio: 4 / 5; padding: 0; overflow: hidden; border: 0; background: var(--mist); cursor: pointer; }
+.catalog-grid { list-style: none; margin: 14px 0 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 20px; }   /* 4 columnas a 1440: las 24 piezas por página llenan 6 filas */
+/* Toda la tarjeta abre el visor: el ::after del botón de la foto la cubre (el botón es estático; .piece es el bloque contenedor). */
+.piece { position: relative; display: flex; flex-direction: column; padding: 12px; background: var(--paper); }
+.piece-photo::after { content: ""; position: absolute; inset: 0; }
+.piece-photo { display: block; width: 100%; aspect-ratio: 4 / 5; padding: 0; overflow: hidden; border: 0; background: var(--mist); cursor: pointer; }
 .piece-photo img { width: 100%; height: 100%; object-fit: cover; }
 .piece-photo.con-recorte { padding: 8%; }
 .piece-photo.con-recorte img { object-fit: contain; }
@@ -127,12 +131,9 @@ h2 { font-family: var(--display); font-weight: 700; font-size: clamp(36px, 4.6vw
 .piece h3 { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; font-size: 15px; font-weight: 600; line-height: 1.35; overflow-wrap: anywhere; }
 .piece-brand, .piece-size { margin-top: 2px; font-size: 13px; line-height: 1.4; color: var(--slate); }
 .piece-size { color: var(--ink); font-weight: 600; }
-.piece-price { margin-top: auto; padding-top: 10px; color: var(--price); font-family: var(--display); font-size: 24px; font-weight: 800; line-height: 1.1; }
+.piece-price { margin-top: auto; padding-top: 12px; color: var(--price); font-family: var(--display); font-size: 28px; font-weight: 800; line-height: 1.1; }
 .piece-price s, .piece-dialog-price s { margin-left: 8px; color: var(--slate); font-family: "Archivo", sans-serif; font-size: 13px; font-weight: 500; }
 .piece-code { margin-top: 2px; font-size: 12px; line-height: 1.4; color: var(--slate); letter-spacing: .02em; }
-.piece-link { min-height: 44px; margin-top: 14px; padding: 0 10px; gap: 8px; font-size: 16px; }
-.piece-link .wa-logo { width: 22px; height: 22px; }
-.button.piece-link .wa-logo svg { width: 14px; height: 14px; }
 .catalog-more { margin: 40px auto 0; display: flex; }
 .catalog-fallback { max-width: 580px; margin-top: 28px; padding: 28px; background: var(--paper); }
 .catalog-fallback h3 { font-family: var(--display); font-size: 28px; font-weight: 700; line-height: 1.1; }
@@ -222,7 +223,7 @@ dd { margin: 0; line-height: 1.5; }
   .button-whatsapp:hover { background: color-mix(in srgb, var(--wa) 92%, #000); }
   .button-outline:hover { background: color-mix(in srgb, var(--ink) 8%, transparent); }
   .portal-link:hover { background: color-mix(in srgb, var(--sun) 92%, #000); }
-  .hero-cell:hover, .piece-photo:hover, .wanted-photo:hover { background: color-mix(in srgb, var(--mist) 92%, var(--ink)); }
+  .hero-cell:hover, .piece:hover .piece-photo, .wanted-photo:hover { background: color-mix(in srgb, var(--mist) 92%, var(--ink)); }
   .chip:hover { color: var(--ink); }
 }
 .button:active, .portal-link:active { translate: 0 1px; }
@@ -257,7 +258,7 @@ dd { margin: 0; line-height: 1.5; }
   .header { min-height: 76px; }
   .brand { width: 140px; }
   .nav-link { display: none; }
-  .header nav { gap: 18px; font-size: 18px; }
+  .header nav { gap: 18px; font-size: 20px; }
   .portal-link { padding-inline: 12px; }
   .hero { padding-top: 36px; }
   .intro { font-size: 17px; margin-top: 22px; }
@@ -272,9 +273,8 @@ dd { margin: 0; line-height: 1.5; }
   .piece { padding: 8px; }
   .piece-body { padding: 10px 2px 2px; }
   .piece h3 { font-size: 14px; }
+  .piece-price { font-size: 24px; }
   .piece-price s { display: block; margin-left: 0; font-size: 12px; }
-  .piece-link { font-size: 17px; gap: 8px; padding-inline: 6px; }
-  .piece-link-extra { display: none; }
   .chips-wrap { margin-inline: -20px; }
   .chips { padding-left: 20px; }
   .price-ladder { justify-content: flex-start; gap: 18px 28px; }
@@ -283,7 +283,7 @@ dd { margin: 0; line-height: 1.5; }
 @media (max-width: 480px) {
   .header { gap: 12px; }
   .brand { width: 118px; }
-  .header nav { gap: 14px; font-size: 17px; }
+  .header nav { gap: 14px; font-size: 19px; }
   .visit-link { display: none; }
   .portal-link { white-space: nowrap; padding-inline: 10px; }
   .actions .button { flex: 1 1 auto; }

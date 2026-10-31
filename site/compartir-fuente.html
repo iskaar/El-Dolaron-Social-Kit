@@ -1,7 +1,7 @@
 <!doctype html>
-<!-- Fuente de la imagen para compartir (Issues #343, #630). Captura a 1200x630 con Chrome; fuentes y estilos de public/styles.css.
-     public/assets/el-dolaron-compartir-v2.jpg se hizo con el diseño anterior; si se regenera con esta fuente, cambia el nombre
-     del archivo (v3) y las etiquetas og:image/twitter:image, porque WhatsApp y Facebook guardan la vista previa por URL. -->
+<!-- Fuente de public/assets/el-dolaron-compartir-v3.jpg (Issues #343, #630). Captura a 1200x630 con Chrome; fuentes y estilos de
+     public/styles.css. Si se regenera, cambia el nombre del archivo (v4) y las etiquetas og:image/twitter:image y el JSON-LD,
+     porque WhatsApp y Facebook guardan la vista previa por URL. -->
 <html lang="es-MX">
 <head>
 <meta charset="utf-8">
@@ -9,10 +9,10 @@
 <style>
   html, body { margin: 0; width: 1200px; height: 630px; overflow: hidden; background: var(--paper); }
   .lienzo { position: relative; width: 1200px; height: 630px; }
-  .copia { position: absolute; left: 64px; top: 52px; width: 560px; }
+  .copia { position: absolute; left: 64px; top: 50px; width: 560px; }
   .copia img.logo { width: 280px; height: auto; }
-  .copia h1 { margin: 34px 0 0; font-family: var(--display); font-weight: 800; font-size: 92px; line-height: .92; letter-spacing: -.01em; color: var(--ink); }
-  .catalogo { position: absolute; right: 64px; top: 52px; width: 440px; height: 440px; }
+  .copia h1 { margin: 28px 0 0; font-family: var(--display); font-weight: 800; font-size: 88px; line-height: .92; letter-spacing: -.01em; color: var(--ink); max-width: 9ch; text-wrap: balance; }
+  .catalogo { position: absolute; right: 64px; top: 50px; width: 456px; height: 456px; }
   .banda { position: absolute; left: 0; right: 0; bottom: 0; height: 74px; display: flex; align-items: center; gap: 40px; padding-inline: 64px;
     background: var(--ink); color: var(--paper); font-family: var(--display); font-size: 28px; font-weight: 700; letter-spacing: .01em; }
 </style>

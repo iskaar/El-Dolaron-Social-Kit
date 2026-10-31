@@ -32,10 +32,12 @@ Dos familias, nada más (`var(--display)` y Archivo):
 
 - **Big Shoulders Display** variable (400–900), licencia SIL Open Font License 1.1 (OFL). Cartelería americana condensada:
   `h1` (800, `clamp(52px, 7vw, 112px)`, interlineado .92), `h2` (700, `clamp(36px, 4.6vw, 64px)`), `h3`, precios (800),
-  navegación (600, 20 px), pestañas (600, 18 px) y botones (700, 19 px).
+  navegación (700, 24 px), pestañas (600, 18 px) y botones (700, 19 px).
 - **Archivo** variable: texto corrido (17 px / 1.6, máximo 70 caracteres por línea), formularios, nombres de pieza y etiquetas.
 - Nada en mayúsculas sostenidas salvo siglas. Sin cursivas en titulares. Sin etiquetas chicas encima de los títulos.
-- Las tres tipografías display anteriores se retiraron del sitio en el Issue #630; la app de caja conserva sus propias fuentes en `app/public/fuentes/`.
+- Las tres tipografías display anteriores se retiraron del sitio en el Issue #630: `styles.css` no las declara ni se precargan. Sus woff2
+  siguen en `assets/fonts/` solo porque `05-Guia-y-textos/Manual-de-marca.html` las carga; se borran cuando el manual migre.
+  La app de caja conserva sus propias fuentes en `app/public/fuentes/`.
 
 ## Logo
 
@@ -47,10 +49,12 @@ Variantes de una tinta, tamaños mínimos, protección y usos incorrectos: ver e
 
 - **Regla de catálogo** (`.section-head`): cada sección abre con una regla de 3 px en tinta, el `h2` y una línea de entrada en
   `--slate` (a la derecha en escritorio). Sin «Sección X ·» ni flechas.
-- **Cabecera**: logo, navegación en Big Shoulders 600 (Catálogo, Ropa, Visítanos) y «Mis Dolarones» en `--sun`. Borde inferior de 3 px.
+- **Cabecera**: logo, navegación en Big Shoulders 700 a 24 px (Catálogo, Ropa, Visítanos) y «Mis Dolarones» en `--sun`. Borde inferior de 3 px.
 - **Botones** (`.button`): planos, rectos, 48 px de alto. `button-ink` (relleno azul), `button-outline` (borde azul de 2 px),
   `button-whatsapp` (verde con el logo). Al pasar el cursor oscurecen 8 % con `color-mix`; al pulsar bajan 1 px.
-- **Portada** (`.hero`): titular, párrafo, «Ver catálogo» y «WhatsApp», horario y «Cómo llegar» como texto. A la derecha, una
+- **Portada** (`.hero`): titular, párrafo, línea de existencias real («2,108 piezas en tienda hoy», del `total` de la primera
+  consulta sin filtros; sin API no aparece), «Ver catálogo» y «WhatsApp», horario y «Cómo llegar» como texto. La columna
+  derecha es la más ancha (`1fr 1.25fr`, ~668 px a 1440). A la derecha, una
   **página de catálogo viva** (`.hero-catalog`): 6 recortes de `/api/catalogo?recorte=1` (`variadas()` en `catalogo.js`: sin
   repetir marca ni tipo de pieza) en 3×2 con su precio. La imagen del HTML es `assets/pila.webp`, que `tools/pila_stickers.py`
   genera cada semana con **la misma geometría** (lienzo cuadrado, 3×2, separación del 2 %, celdas de 384×588 en `--mist`,
@@ -60,8 +64,8 @@ Variantes de una tinta, tamaños mínimos, protección y usos incorrectos: ver e
   precio enorme en `--price`, precio de lista tachado y «Ahorras $X», marca de texto «Última pieza» con borde rojo de 2 px sobre
   la esquina de la foto (la decide el servidor) y «Apartar por WhatsApp». Mínimo 3; en celular es una fila deslizable.
 - **Tarjetas de catálogo** (`.piece`): blancas, sin borde ni sombra, sobre el fondo `--mist`; marco 4:5 en `--mist`, nombre a
-  2 líneas, marca y talla, precio Big Shoulders 800 en rojo, precio de lista tachado chico, código `ED-…` en `--slate` y
-  «Preguntar por WhatsApp» («Preguntar» en celular).
+  2 líneas, marca y talla, precio Big Shoulders 800 en rojo, precio de lista tachado chico y código `ED-…` en `--slate`. Sin
+  botón propio: toda la tarjeta abre el visor, que trae «Preguntar por WhatsApp».
 - **Pestañas de categoría** (`.chip`): texto en Big Shoulders 600, sin fondo; la activa en tinta con raya de 3 px. Una sola fila
   que se desliza si no cabe.
 - **Ropa** (`.price-ladder`): escalera tipográfica $50 · $80 · $100 · $150 · $200 en numerales de hasta 128 px. Solo precios confirmados.
