@@ -1,6 +1,6 @@
 /**
- * Referidos Dolarones, prototipo con conocidos (Issue #489). Reglas propuestas, NO
- * aprobadas todavia por Isaac ni contempladas en las bases 2026-10-v4:
+ * Referidos Dolarones (Issues #489, #597). Las bases 2026-10-v5 (punto 7) los describen y
+ * esperan el visto bueno del abogado; las reglas son estas:
  *
  * - Quien se une al portal con el codigo de un referente recibe 50 D (30 dias).
  * - Al cobrarle una compra con al menos $150 en dinero, el nuevo y el referente

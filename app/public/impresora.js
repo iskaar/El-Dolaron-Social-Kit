@@ -308,7 +308,8 @@ export async function imprimirTicket(venta, lineas) {
     partes.push(renglonMonto('Saldo disponible', d(venta.socio.saldo)));
     partes.push(separador());
   }
-  if (venta.vale_usado) partes.push(...partesVale(venta.vale_usado, 'SALDO DEL VALE ANTERIOR'));
+  for (const usado of venta.vales_usados ?? (venta.vale_usado ? [venta.vale_usado] : []))
+    partes.push(...partesVale(usado, 'SALDO DEL VALE ANTERIOR'));
   if (venta.vale_emitido) partes.push(...partesVale(venta.vale_emitido));
   if (venta.vale_pendiente) partes.push(linea('Elegibilidad de vale sin confirmar.'),
     linea('Consulta en caja con este ticket tras sincronizar.'));

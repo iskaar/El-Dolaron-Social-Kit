@@ -21,6 +21,54 @@ function abrir() {
   return { ...t, emitir, canjear, cancelar };
 }
 
+test('varios vales en un ticket (17/10): gasta primero el que vence antes, no toca el que sobra y cancelar los regresa', async () => {
+  const t = abrir();
+  try {
+    const [a, b, c] = [(await t.emitir()).vale, (await t.emitir()).vale, (await t.emitir()).vale];   // 10 D cada uno
+    t.db.prepare(`update vales_dolarones set vence_en = '2099-01-01T00:00:00.000Z' where id = ?`).run(a.id);
+    t.db.prepare(`update vales_dolarones set vence_en = '2098-01-01T00:00:00.000Z' where id = ?`).run(b.id);
+    const restante = (id:string) => t.db.prepare('select restante from vales_dolarones where id = ?').get(id)!.restante;
+
+    assert.equal((await t.canjear([a.codigo, a.codigo] as never, 500)).status, 400);
+    assert.equal((await t.canjear([a.codigo, b.codigo] as never, 2001)).status, 409);   // juntos tienen 20 D
+    const canje = await t.canjear([a.codigo, b.codigo, c.codigo] as never, 1500);
+    assert.equal(canje.status, 201, JSON.stringify(canje.cuerpo));
+    // c vence primero (30 dias), luego b (2098); a (2099) no hacia falta.
+    assert.deepEqual([restante(c.id), restante(b.id), restante(a.id)], [0, 500, 1000]);
+    assert.deepEqual(canje.cuerpo.vales_usados.map((v:{ id:string }) => v.id), [c.id, b.id]);
+    assert.equal(canje.cuerpo.vale_usado.id, c.id);
+    assert.equal(t.db.prepare(`select count(*) as n from vales_movimientos where vale_id = ? and tipo = 'canje'`).get(a.id)!.n, 0);
+
+    assert.equal((await t.cancelar(canje.cuerpo.id)).status, 200);
+    assert.deepEqual([restante(c.id), restante(b.id), restante(a.id)], [1000, 1000, 1000]);
+  } finally { t.db.close(); }
+});
+
+test('un cupón y un vale se juntan en un ticket; el reintento con el mismo folio no gasta dos veces', async () => {
+  const t = abrir();
+  try {
+    const { vale } = await t.emitir();                                          // 10 D
+    const cupon = (await t.pedir('/api/cupones', { id:crypto.randomUUID(), importe:1500, motivo:'cortesía' })).cuerpo.cupon;   // 15 D
+    t.db.prepare(`update vales_dolarones set vence_en = '2098-01-01T00:00:00.000Z' where id = ?`).run(vale.id);
+    const restante = (id:string) => t.db.prepare('select restante from vales_dolarones where id = ?').get(id)!.restante;
+    const pedido = venta({ codigo_vale:[vale.codigo, cupon.codigo], dolarones:2000, efectivo:25000 - 2000 });
+    const canje = await t.pedir('/api/ventas', pedido);
+    assert.equal(canje.status, 201, JSON.stringify(canje.cuerpo));
+    // El cupón vence a los 30 días, antes que el vale de 2098: sale primero.
+    assert.deepEqual(canje.cuerpo.vales_usados.map((v:{ id:string }) => v.id), [cupon.id, vale.id]);
+    assert.deepEqual([restante(cupon.id), restante(vale.id)], [0, 500]);
+
+    const repetido = await t.pedir('/api/ventas', pedido);
+    assert.equal(repetido.status, 200);
+    assert.equal(repetido.cuerpo.duplicada, true);
+    assert.deepEqual(repetido.cuerpo.vales_usados.map((v:{ id:string }) => v.id), [cupon.id, vale.id]);
+    assert.equal(repetido.cuerpo.vale_usado.id, cupon.id);
+    assert.deepEqual([restante(cupon.id), restante(vale.id)], [0, 500]);
+    // Otra lista de vales con el mismo folio es otra venta: no se acepta.
+    assert.equal((await t.pedir('/api/ventas', { ...pedido, codigo_vale:[vale.codigo] })).status, 409);
+  } finally { t.db.close(); }
+});
+
 test('ticket pagado con vale: pieza responde 409; completo devuelve dinero, stock y saldo una sola vez', async () => {
   const t = abrir();
   try {
