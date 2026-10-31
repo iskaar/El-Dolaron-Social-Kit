@@ -12,7 +12,7 @@
 // El aviso sube a 2026-10-v3 (referidos y cupones).
 // Version 2026-10-v6, 30 de octubre de 2026 (Issue #631): v5 no se desplego; solo cambia el punto 7.
 // Piloto familia y amigos: un codigo de la tienda con 50 registros que da solo los 50 D al unirse,
-// y solo esas cuentas tienen codigo DOL. PENDIENTE: visto bueno del abogado. El aviso sigue en v3.
+// y solo esas cuentas tienen codigo DOL. Aprobada por el abogado el 30 de octubre de 2026. El aviso sigue en v3.
 // Viven aqui y no en variables porque Cloudflare limita cada
 // variable a 5 KB. Cambiar este texto exige subir BASES_APROBADAS_VERSION.
 
