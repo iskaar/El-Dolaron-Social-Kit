@@ -1,7 +1,7 @@
 name: Deploy del sitio
 
 # Issue #531. Publica eldolaron.com (Worker el-dolaron-web) en cada push a main que
-# toque site/, cada lunes 06:00 UTC (la rotación semanal de la pila de stickers) y a
+# toque site/, cada lunes 06:00 UTC (la rotación semanal de la pila de la portada) y a
 # mano. Autorizado por Isaac el 25/10/2026 con el secreto CLOUDFLARE_API_TOKEN; el repo
 # nunca guarda el token. No ampliar sin nueva autorización.
 #

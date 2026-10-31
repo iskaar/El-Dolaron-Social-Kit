@@ -186,25 +186,13 @@
     {
       "file": "site/public/styles.css",
       "title": "Estilos del sitio público",
-      "description": "Diseño adaptable con la paleta original de El Dolarón.",
+      "description": "Diseño «El catálogo» (Issue #630): tinta azul sobre papel blanco, Big Shoulders Display y Archivo, precios grandes en rojo; ver site/DESIGN.md.",
       "format": "CSS"
     },
     {
-      "file": "site/public/motion.js",
-      "title": "Movimiento puntual del sitio público",
-      "description": "Activa una sola entrada por acento visible; respeta movimiento reducido y conserva el contenido sin JavaScript.",
-      "format": "JS"
-    },
-    {
-      "file": "site/public/stickers.js",
-      "title": "Stickers despegables de la portada",
-      "description": "Pone cinco stickers de recortes reales del catálogo, que se despegan, sobre la pila de la portada; si la API falla se queda solo la pila.",
-      "format": "JS"
-    },
-    {
       "file": "site/public/assets/pila.webp",
-      "title": "Pila semanal de stickers de la portada",
-      "description": "Trece recortes reales del catálogo con borde blanco troquelado y sombra, generada cada semana con tools/pila_stickers.py (Issue #531). Es la imagen LCP y el respaldo de la portada; los stickers vivos van encima.",
+      "title": "Página de catálogo semanal de la portada",
+      "description": "Seis recortes reales del catálogo en cuadrícula 3×2 con su precio, generada cada semana con tools/pila_stickers.py (Issues #531, #630). Es la imagen LCP y el respaldo de la cuadrícula viva de la portada (misma geometría).",
       "width": 1200,
       "height": 1200,
       "format": "WEBP",
@@ -212,7 +200,7 @@
     },
     {
       "file": "site/public/assets/pila-640.webp",
-      "title": "Pila semanal de la portada, versión chica",
+      "title": "Página de catálogo de la portada, versión chica",
       "description": "La misma pila a 640 px para celulares (srcset).",
       "width": 640,
       "height": 640,
@@ -221,27 +209,9 @@
     },
     {
       "file": "site/public/assets/pila.json",
-      "title": "Piezas de la pila semanal",
-      "description": "Semana, fecha de generación y, por pieza, código, nombre, precio, caja (fracciones del cuadrado) y giro. stickers.js lo lee para no repetir esas piezas en los stickers vivos.",
+      "title": "Piezas de la página de catálogo semanal",
+      "description": "Semana, fecha de generación y, por pieza, código, nombre, precio y caja (fracciones del cuadrado). El sitio ya no lo lee; queda como registro de la pila publicada.",
       "format": "JSON"
-    },
-    {
-      "file": "site/public/assets/cartel-se-busca.webp",
-      "title": "Hoja de cartel «Se busca» (vacía)",
-      "description": "Papel envejecido con orillas rasgadas, doble filete y agujero de clavo, sin texto; fondo de los carteles de «Los más buscados» del sitio (Issue #339). Generada con Codex.",
-      "width": 760,
-      "height": 1140,
-      "format": "WEBP",
-      "background": "transparent"
-    },
-    {
-      "file": "site/public/assets/etiqueta-vacia.webp",
-      "title": "Etiqueta de cartón vacía",
-      "description": "Etiqueta colgante de cartón con hilo, sin texto; el sitio escribe el precio encima en rojo (carteles y sección de ropa, Issue #339). Generada con Codex.",
-      "width": 640,
-      "height": 320,
-      "format": "WEBP",
-      "background": "transparent"
     },
     {
       "file": "app/public/marketplace.html",

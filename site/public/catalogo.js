@@ -43,7 +43,33 @@
     return /^ED-\d{1,10}$/i.test(valor) ? valor.toUpperCase() : "";
   }
 
-  if (typeof module !== "undefined") module.exports = { precio, consulta, apiBase, codigoDePieza };
+  // Portada (Issue #630): piezas con recorte y foto https, sin repetir marca ni tipo (primera palabra del nombre),
+  // para que la página de catálogo no salga con cuatro globos iguales.
+  function variadas(piezas, n) {
+    const vistas = new Set();
+    const elegidas = [];
+    for (const p of Array.isArray(piezas) ? piezas : []) {
+      if (!/^https:\/\//.test(p.recorte || "") || !/^https:\/\//.test(p.foto || "")) continue;
+      const claves = [`m:${String(p.marca || "").trim().toLowerCase()}`, `n:${String(p.nombre || "").trim().split(/\s+/)[0].toLowerCase()}`]
+        .filter((k) => k.length > 2);
+      if (claves.some((k) => vistas.has(k))) continue;
+      claves.forEach((k) => vistas.add(k));
+      elegidas.push(p);
+      if (elegidas.length === n) break;
+    }
+    return elegidas;
+  }
+
+  if (typeof module !== "undefined") module.exports = { precio, consulta, apiBase, codigoDePieza, variadas };
+
+  const el = (tag, className, text) => {
+    const node = document.createElement(tag);
+    if (className) node.className = className;
+    if (text !== undefined) node.textContent = text;
+    return node;
+  };
+  // ponytail: la ropa se captura sin nombre propio; hasta tener marca/equipo dice «Ropa americana».
+  const nombreDe = (pieza) => (pieza.nombre === "Ropa" ? "Ropa americana" : pieza.nombre);
 
   // Los precios con su precio de lista tachado, igual en carteles, tarjetas y visor.
   function pintarPrecio(nodo, pieza) {
@@ -58,7 +84,7 @@
     }
   }
 
-  // «Los más buscados» (Issue #339): lo de mayor precio que sigue a la venta, en carteles de «Se busca».
+  // «Los más buscados» (Issues #339, #630): lo de mayor precio que sigue a la venta, en marcos grandes con el precio enorme.
   // Si la API falla o trae menos de 3 con foto, la sección se queda oculta.
   async function buscados(seccion) {
     try {
@@ -71,93 +97,47 @@
       if (!conFoto.every((p) => typeof p.ultima === "boolean")) return;
       const lista = seccion.querySelector(".wanted-grid");
       for (const pieza of conFoto) {
-        const li = document.createElement("li");
-        const cartel = document.createElement("article");
-        cartel.className = "poster";
-        cartel.setAttribute("aria-label", pieza.ultima ? `${pieza.nombre}, última pieza` : pieza.nombre);
-        const cabeza = document.createElement("p");
-        cabeza.className = "poster-head";
-        cabeza.textContent = "Se busca";
-        const nombre = document.createElement("h3");
-        nombre.className = "poster-name";
-        nombre.textContent = pieza.nombre;
-        // Marca (lo que vende «calidad americana») o, si no hay, la categoría.
-        const rubro = pieza.marca || (CATEGORIAS.find(([k]) => k === pieza.categoria) || [])[1];
-        const linea = document.createElement("p");
-        linea.className = "poster-kicker";
-        linea.textContent = rubro && rubro !== "Otros" ? rubro : "";
-        // La foto abre el visor grande (el mismo del catálogo): las fotos de celular se ven recortadas en cuadro.
-        const foto = document.createElement("button");
+        const li = el("li", "wanted-item");
+        li.setAttribute("aria-label", pieza.ultima ? `${nombreDe(pieza)}, última pieza` : nombreDe(pieza));
+        // La foto abre el visor grande (el mismo del catálogo).
+        const foto = el("button", "wanted-photo");
         foto.type = "button";
-        foto.className = "poster-photo";
-        foto.setAttribute("aria-label", `Ver foto completa: ${pieza.nombre}`);
+        foto.setAttribute("aria-label", `Ver foto completa: ${nombreDe(pieza)}`);
         const img = new Image();
         img.alt = "";
         img.loading = "lazy";
         img.decoding = "async";
-        // Una foto rota quita su cartel; con menos de 3 la sección vuelve a ocultarse.
+        // Una foto rota quita su marco; con menos de 3 la sección vuelve a ocultarse.
         if (pieza.recorte) foto.classList.add("con-recorte");
         img.addEventListener("error", () => {
           if (pieza.recorte && img.src === pieza.recorte) { foto.classList.remove("con-recorte"); img.src = pieza.foto; return; }
           li.remove(); if (lista.children.length < 3) seccion.hidden = true;
         });
         img.src = pieza.recorte || pieza.foto;
-        const zoom = document.createElement("span");
-        zoom.className = "poster-zoom";
-        zoom.setAttribute("aria-hidden", "true");
-        zoom.textContent = "Ver foto";
-        foto.append(img, zoom);
-        if (pieza.ultima) {
-          // Sello de goma sobre la foto: lo dice el servidor cuando queda una sola pieza.
-          const sello = document.createElement("span");
-          sello.className = "poster-stamp";
-          sello.setAttribute("aria-hidden", "true");
-          sello.textContent = "¡Última pieza!";
-          foto.append(sello);
-        }
+        foto.append(img);
+        // «Última pieza»: marca de texto sobre la esquina de la foto; lo dice el servidor cuando queda una sola.
+        if (pieza.ultima) { const marca = el("span", "wanted-flag", "Última pieza"); marca.setAttribute("aria-hidden", "true"); foto.append(marca); }
         foto.addEventListener("click", () => abrirVisor(pieza, foto, img));
-        const visto = document.createElement("p");
-        visto.className = "poster-seen";
-        visto.textContent = "Visto por última vez en Jardín Hidalgo 129";
-        const pie = document.createElement("div");
-        pie.className = "poster-foot";
-        const valor = document.createElement("p");
-        valor.className = "poster-price";
-        valor.textContent = precio(pieza.precio);
+        const valor = el("p", "wanted-price", precio(pieza.precio));
         if (pieza.precio_lista > pieza.precio) {
           // Precio de lista tachado y el ahorro en pesos, calculado con los mismos centavos que manda la API.
-          const antes = document.createElement("span");
-          antes.className = "poster-was";
-          const lista = document.createElement("s");
-          const aviso = document.createElement("span");
-          aviso.className = "sr-only";
-          aviso.textContent = "Precio de lista ";
-          lista.append(aviso, precio(pieza.precio_lista));
-          const ahorro = document.createElement("b");
-          ahorro.textContent = `Ahorras ${precio(pieza.precio_lista - pieza.precio)}`;
-          antes.append(lista, ahorro);
+          const antes = el("span", "wanted-was");
+          const tachado = el("s");
+          tachado.append(el("span", "sr-only", "Precio de lista "), precio(pieza.precio_lista));
+          antes.append(tachado, el("b", "", `Ahorras ${precio(pieza.precio_lista - pieza.precio)}`));
           valor.append(antes);
         }
-        const apartar = document.createElement("a");
-        apartar.className = "button button-whatsapp poster-ask";
+        const apartar = el("a", "button button-whatsapp wanted-ask");
         apartar.href = consulta(pieza, "quiero apartar");
-        apartar.setAttribute("aria-label", `Apartar por WhatsApp: ${pieza.nombre}`);
+        apartar.setAttribute("aria-label", `Apartar por WhatsApp: ${nombreDe(pieza)}`);
         apartar.innerHTML = WHATSAPP_ICONO;
         apartar.append("Apartar por WhatsApp");
-        pie.append(valor, apartar);
-        cartel.append(cabeza, linea, nombre, foto, visto, pie);
-        li.append(cartel);
+        li.append(foto, el("h3", "wanted-name", nombreDe(pieza)), valor, apartar);
         lista.append(li);
       }
       seccion.hidden = false;
     } catch {}
   }
-  // Pausar la cinta que corre (Issue #241, WCAG «pausar, detener, ocultar»).
-  const pausa = typeof document !== "undefined" && document.querySelector(".ticker-pause");
-  if (pausa) pausa.addEventListener("click", () => {
-    const pausada = pausa.closest(".ticker").classList.toggle("pausada");
-    pausa.setAttribute("aria-pressed", String(pausada));
-  });
   const cartel = typeof document !== "undefined" && document.getElementById("buscados");
   if (cartel) buscados(cartel);
   const root = typeof document !== "undefined" && document.getElementById("catalogo");
@@ -191,13 +171,6 @@
   let controller = null;
   const TIEMPO = "tiempo";
   let cargado = false;
-
-  const el = (tag, className, text) => {
-    const node = document.createElement(tag);
-    if (className) node.className = className;
-    if (text !== undefined) node.textContent = text;
-    return node;
-  };
 
   // Morph miniatura → visor con View Transitions (Chrome 111+, Safari 18+, Firefox 144+).
   // Sin soporte o con movimiento reducido, el visor abre y cierra de golpe como hasta ahora.
@@ -236,9 +209,6 @@
     });
   }
 
-  // La portada (stickers.js) abre el mismo visor con este evento.
-  if (typeof document.addEventListener === "function") document.addEventListener("dolaron:ver-pieza", (ev) => { const d = ev.detail || {}; if (d.pieza) abrirVisor(d.pieza, d.disparador, d.img); });
-
   function cerrarVisor() {
     if (!conMorph || !fotoOrigen || !fotoOrigen.style) { dialog.close(); return; }
     const origen = fotoOrigen;
@@ -266,7 +236,7 @@
     if (conFoto) {
       if (pieza.recorte) photo.classList.add("con-recorte");
       photo.type = "button";
-      photo.setAttribute("aria-label", `Ver foto completa: ${pieza.nombre}`);
+      photo.setAttribute("aria-label", `Ver foto completa: ${nombreDe(pieza)}`);
       const img = new Image();
       img.alt = "";
       img.loading = "lazy";
@@ -276,24 +246,24 @@
         else img.remove();
       });
       img.src = pieza.recorte || pieza.foto;
-      const zoom = el("span", "piece-zoom", "Ver foto");
-      zoom.setAttribute("aria-hidden", "true");
-      photo.append(img, zoom);
+      photo.append(img);
       photo.addEventListener("click", () => abrirVisor(pieza, photo, img));
     }
     const body = el("div", "piece-body");
-    // ponytail: la ropa se captura sin nombre propio; hasta tener marca/equipo dice «Ropa americana».
-    body.append(el("h3", "", pieza.nombre === "Ropa" ? "Ropa americana" : pieza.nombre));
+    body.append(el("h3", "", nombreDe(pieza)));
     if (pieza.marca) body.append(el("p", "piece-brand", pieza.marca));
     if (pieza.talla) body.append(el("p", "piece-size", `Talla ${pieza.talla}`));
     const price = el("p", "piece-price");
     pintarPrecio(price, pieza);
     const ask = el("a", "button button-whatsapp piece-link");
     ask.innerHTML = WHATSAPP_ICONO;
-    ask.append("Preguntar por WhatsApp");
+    // En celular la tarjeta mide ~170 px: se lee «Preguntar» con el logo; el aria-label lleva el texto completo.
+    const texto = el("span", "", "Preguntar");
+    texto.append(el("span", "piece-link-extra", " por WhatsApp"));
+    ask.append(texto);
     ask.href = consulta(pieza);
     ask.setAttribute("aria-label", `Preguntar por WhatsApp: ${pieza.nombre}`);
-    body.append(price, ask);
+    body.append(price, el("p", "piece-code", pieza.codigo), ask);
     li.append(photo, body);
     return li;
   }
@@ -371,6 +341,9 @@
 
   for (const [clave, nombre] of CATEGORIAS) {
     const chip = el("button", "chip", nombre);
+    const raya = el("span", "chip-raya");
+    raya.setAttribute("aria-hidden", "true");
+    chip.append(raya);
     chip.type = "button";
     chip.setAttribute("aria-pressed", String(clave === categoria));
     chip.addEventListener("click", () => {
@@ -392,4 +365,45 @@
     if (clearBtn) clearBtn.hidden = false;
   } else deseada = "";
   cargar(true);
+
+  // Portada viva (Issue #630): 6 recortes reales con su precio, misma geometría que la pila de respaldo
+  // (assets/pila.webp). La pila se queda mientras carga, sin JS o si la API falla; se cambia cuando las 6 fotos cargaron.
+  async function portada(figura) {
+    const lista = figura.querySelector(".hero-catalog");
+    const respaldo = figura.querySelector("img");
+    if (!lista || !respaldo) return;
+    try {
+      const response = await fetch(`${base}/api/catalogo?recorte=1`, { headers: { accept: "application/json" } });
+      if (!response.ok) return;
+      const data = await response.json();
+      const elegidas = variadas(data && data.piezas, 6);
+      // ponytail: con menos de 6 o una foto rota se queda la pila completa; reemplazar huecos si llega a pasar seguido.
+      if (elegidas.length < 6) return;
+      const cargas = elegidas.map((pieza, i) => {
+        const li = el("li");
+        li.style.setProperty("--i", String(i));
+        const celda = el("button", "hero-cell");
+        celda.type = "button";
+        celda.setAttribute("aria-label", `${nombreDe(pieza)}, ${precio(pieza.precio)}. Ver foto completa`);
+        const img = new Image();
+        img.alt = "";
+        img.decoding = "async";
+        img.src = pieza.recorte;
+        const valor = el("span", "hero-price", precio(pieza.precio));
+        valor.setAttribute("aria-hidden", "true");
+        celda.append(img, valor);
+        celda.addEventListener("click", () => abrirVisor(pieza, celda, img));
+        li.append(celda);
+        lista.append(li);
+        return img.decode();
+      });
+      await Promise.all(cargas);
+      lista.hidden = false;
+      respaldo.hidden = true;
+    } catch {
+      lista.replaceChildren();
+    }
+  }
+  const arte = document.querySelector(".hero-art");
+  if (arte) portada(arte);
 })();

@@ -10,39 +10,40 @@
 <title>Política de privacidad | El Dolarón</title>
 <style>
   @font-face { font-family: Archivo; src: url("assets/fonts/archivo-variable.woff2") format("woff2"); font-weight: 100 900; font-display: swap; }
-  @font-face { font-family: Fraunces; src: url("assets/fonts/fraunces-normal.woff2") format("woff2"); font-weight: 100 900; font-display: swap; }
-  :root { --azul: #16366B; --rojo: #D72B32; --bruma: #F2F5FA; --amarillo: #FFD447; }
+  @font-face { font-family: "Big Shoulders Display"; src: url("assets/fonts/big-shoulders-display-variable.woff2") format("woff2"); font-weight: 400 900; font-display: swap; }
+  /* Mismos tokens y tipografía que styles.css («El catálogo», Issue #630). */
+  :root { --azul: #16366B; --pizarra: #5A6A86; --bruma: #F2F5FA; --amarillo: #FFD447; }
   * { box-sizing: border-box; }
   body { margin: 0; color: var(--azul); background: #fff; font: 16px/1.7 Archivo, "Trebuchet MS", sans-serif; }
   .wrap { width: min(1120px, calc(100% - 40px)); margin-inline: auto; }
-  header { border-bottom: 5px double var(--azul); }
+  header { border-bottom: 3px solid var(--azul); }
   .cabecera { display: flex; align-items: center; justify-content: space-between; gap: 20px; padding-block: 20px; }
   .marca img { display: block; width: 220px; max-width: 100%; height: auto; }
   a { color: inherit; text-underline-offset: .2em; overflow-wrap: anywhere; }
-  a:focus-visible { outline: 3px solid var(--rojo); outline-offset: 5px; }
+  a:focus-visible { outline: 3px solid var(--azul); outline-offset: 3px; }
   .saltar { position: absolute; top: 8px; left: 8px; padding: 12px 18px; background: var(--amarillo); transform: translateY(-150%); }
   .saltar:focus { transform: none; }
   .intro { padding-block: clamp(28px, 5vw, 56px); max-width: 820px; }
-  h1, h2 { font-family: Fraunces, Georgia, serif; font-variation-settings: "SOFT" 100, "WONK" 1; line-height: 1.12; }
-  h1 { margin: 0 0 20px; font-size: clamp(38px, 6vw, 66px); font-weight: 850; letter-spacing: -.035em; }
-  h2 { margin: 0 0 14px; font-size: clamp(25px, 3vw, 32px); font-weight: 800; }
+  h1, h2 { font-family: "Big Shoulders Display", "Arial Narrow", sans-serif; line-height: 1; }
+  h1 { margin: 0 0 20px; font-size: clamp(40px, 6vw, 72px); font-weight: 800; letter-spacing: -.01em; text-wrap: balance; }
+  h2 { margin: 0 0 14px; font-size: clamp(28px, 3vw, 36px); font-weight: 700; }
   p { margin: 0 0 16px; }
-  .actualizada { margin-top: 24px; margin-bottom: 0; font-size: 14px; }
+  .actualizada { margin-top: 24px; margin-bottom: 0; font-size: 14px; color: var(--pizarra); }
   .acciones { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 24px; }
-  .boton { display: inline-block; padding: 12px 18px; border: 2px solid var(--azul); background: var(--amarillo); font-weight: 750; text-decoration: none; box-shadow: 3px 3px 0 var(--azul); }
-  .boton.secundario { background: #fff; }
+  .boton { display: inline-flex; align-items: center; min-height: 48px; padding: 0 20px; border: 2px solid var(--azul); background: var(--azul); color: #fff; font: 700 19px/1.1 "Big Shoulders Display", "Arial Narrow", sans-serif; letter-spacing: .02em; text-decoration: none; }
+  .boton.secundario { background: #fff; color: var(--azul); }
   .contenido { display: grid; grid-template-columns: 240px minmax(0, 1fr); gap: 48px; align-items: start; padding-bottom: 56px; }
   .indice { position: sticky; top: 24px; padding-top: 18px; border-top: 3px solid var(--azul); }
   .indice p { font-weight: 750; margin-bottom: 10px; }
   .indice ul { list-style: none; padding: 0; margin: 0; }
   .indice a { display: block; padding-block: 7px; }
-  article { min-width: 0; padding: clamp(22px, 4vw, 42px); background: #fff; border: 2px solid var(--azul); box-shadow: 5px 5px 0 var(--azul); }
+  article { min-width: 0; padding-top: 18px; border-top: 3px solid var(--azul); }
   section { scroll-margin-top: 24px; }
-  section + section { margin-top: 32px; padding-top: 32px; border-top: 1px solid #cfd6e0; }
+  section + section { margin-top: 32px; padding-top: 32px; border-top: 1px solid rgb(22 54 107 / .16); }
   ul, ol { margin: 0 0 16px; padding-left: 24px; }
   li + li { margin-top: 9px; }
   .nota { padding: 16px 20px; background: var(--bruma); border-left: 4px solid var(--azul); }
-  footer { padding-block: 28px; border-top: 5px double var(--azul); font-size: 14px; }
+  footer { padding-block: 28px; border-top: 3px solid var(--azul); font-size: 14px; }
   footer p { margin-bottom: 8px; }
   @media (max-width: 760px) {
     .contenido { grid-template-columns: 1fr; gap: 24px; }
@@ -65,7 +66,7 @@
     .wrap { width: 100%; }
     .indice, .acciones, .saltar, .cabecera > a:last-child { display: none; }
     .contenido { display: block; }
-    article { padding: 0; border: 0; box-shadow: none; }
+    article { padding: 0; border: 0; }
     h2 { break-after: avoid; }
   }
 </style>

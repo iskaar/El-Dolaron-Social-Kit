@@ -1,6 +1,6 @@
 // Run: node tools/check_site_catalogo.cjs
 const assert = require("node:assert/strict");
-const { precio, consulta, apiBase, codigoDePieza } = require("../site/public/catalogo.js");
+const { precio, consulta, apiBase, codigoDePieza, variadas } = require("../site/public/catalogo.js");
 
 assert.equal(precio(15000), "$150");
 assert.equal(precio(24950), "$249.50");
@@ -23,6 +23,20 @@ for (const bad of ["javascript:alert(1)", "https://evil.example", "ftp://127.0.0
 assert.equal(codigoDePieza("?pieza=ED-000123"), "ED-000123");
 assert.equal(codigoDePieza("?x=1&pieza=ed-7"), "ED-7");
 for (const bad of ["", "?pieza=", "?pieza=ED-", "?pieza=ED-1%20OR%201", "?pieza=<script>", "?pieza=ED-12345678901", "?q=ED-1"]) assert.equal(codigoDePieza(bad), "");
+
+// Portada (Issue #630): solo recortes y fotos https, sin repetir marca ni tipo de pieza (cuatro globos iguales no).
+{
+  const f = (codigo, nombre, marca, recorte = true) => ({ codigo, nombre, marca, foto: `https://x/${codigo}.jpg`, recorte: recorte ? `https://x/r/${codigo}.png` : null });
+  const piezas = [
+    f("ED-1", "Letrero neón Open", "Pen+Gear"), f("ED-2", "Globos Minnidip", "Minnidip"), f("ED-3", "Globos Minnidip", "Minnidip"),
+    f("ED-4", "Globos Mnnidip", "Mnnidip"), f("ED-5", "Toalla de playa", "Sun Squad"), f("ED-6", "Vela", "", false),
+    { ...f("ED-7", "Caja de fieltro", "Brightroom"), recorte: "http://x/r/ED-7.png" }, f("ED-8", "Dulces Sugarfina", "Sugarfina"),
+    f("ED-9", "Dulces otra marca", "Otra"), f("ED-10", "Cortina", "Sun Squad"), f("ED-11", "Calzones Pampers", ""),
+  ];
+  assert.deepEqual(variadas(piezas, 6).map((p) => p.codigo), ["ED-1", "ED-2", "ED-5", "ED-8", "ED-11"]);
+  assert.deepEqual(variadas(piezas, 2).map((p) => p.codigo), ["ED-1", "ED-2"]);
+  assert.deepEqual(variadas(null, 6), []);
+}
 
 // Catálogo en una página falsa (Issue #241): reintento, talla, tiempo agotado y botón Reintentar.
 const { readFileSync } = require("node:fs");
@@ -182,5 +196,5 @@ const tick = () => new Promise((r) => setImmediate(r));
   assert.equal(lenta.partes[".catalog-search"].hidden, false);
   assert.equal(lenta.partes[".catalog-fallback"].hidden, true);
   assert.deepEqual(lenta.textos().map((t) => t[0]), ["Ya"]);
-  console.log("Validated catalog prices in centavos, WhatsApp text, development-only API override, search, photo viewer, retry, size and timeout");
+  console.log("Validated catalog prices in centavos, varied hero picks, WhatsApp text, development-only API override, search, photo viewer, retry, size and timeout");
 })().catch((error) => { console.error(error); process.exitCode = 1; });

@@ -1,38 +1,30 @@
 <!doctype html>
-<!-- Fuente de public/assets/el-dolaron-compartir-v2.jpg (Issue #343). Captura a 1200x630 con Chrome; fuentes y estilos de public/styles.css. -->
+<!-- Fuente de la imagen para compartir (Issues #343, #630). Captura a 1200x630 con Chrome; fuentes y estilos de public/styles.css.
+     public/assets/el-dolaron-compartir-v2.jpg se hizo con el diseño anterior; si se regenera con esta fuente, cambia el nombre
+     del archivo (v3) y las etiquetas og:image/twitter:image, porque WhatsApp y Facebook guardan la vista previa por URL. -->
 <html lang="es-MX">
 <head>
 <meta charset="utf-8">
 <link rel="stylesheet" href="public/styles.css">
 <style>
-  html, body { margin: 0; width: 1200px; height: 630px; overflow: hidden; background: #fff; }
+  html, body { margin: 0; width: 1200px; height: 630px; overflow: hidden; background: var(--paper); }
   .lienzo { position: relative; width: 1200px; height: 630px; }
-  .copia { position: absolute; left: 64px; top: 46px; width: 600px; }
-  .copia img.logo { width: 300px; height: auto; filter: drop-shadow(2px 3px 0 rgb(22 54 107 / .18)); }
-  .copia .tape { margin-top: 26px; font-size: 22px; }
-  .copia h1 { margin: 18px 0 0; font-family: var(--display); font-variation-settings: var(--display-axes); font-weight: 900; font-size: 78px; line-height: .98; letter-spacing: -.03em; color: var(--navy); }
-  .copia h1 em { color: var(--red); font-style: italic; }
-  .collage { position: absolute; right: 18px; top: 4px; width: 520px; height: 520px; }
-  .cartel { position: absolute; right: 410px; bottom: 96px; width: 176px; padding: 30px 14px 22px; text-align: center; color: #2B2116; rotate: 6deg;
-    background: url("public/assets/cartel-se-busca.webp") center / 100% 100% no-repeat; filter: drop-shadow(2px 6px 6px rgb(60 40 15 / .35)); }
-  .cartel b { display: block; font-family: "Rye", serif; font-weight: 400; font-size: 27px; line-height: 1; text-transform: uppercase; white-space: nowrap; }
-  .cartel span { display: block; margin-top: 8px; font-family: var(--display); font-weight: 800; font-size: 15px; line-height: 1.15; }
-  .cartel i { display: block; margin-top: 8px; color: var(--red-text); font-family: "Anton", sans-serif; font-style: normal; font-size: 26px; }
-  .banda { position: absolute; left: 0; right: 0; bottom: 0; height: 74px; display: flex; align-items: center; justify-content: center; gap: 22px;
-    background: var(--navy); border-top: 4px solid var(--yellow); color: #fff; font-family: "Anton", sans-serif; font-size: 27px; letter-spacing: .05em; text-transform: uppercase; }
-  .banda b { color: var(--yellow); font-weight: 400; }
+  .copia { position: absolute; left: 64px; top: 52px; width: 560px; }
+  .copia img.logo { width: 280px; height: auto; }
+  .copia h1 { margin: 34px 0 0; font-family: var(--display); font-weight: 800; font-size: 92px; line-height: .92; letter-spacing: -.01em; color: var(--ink); }
+  .catalogo { position: absolute; right: 64px; top: 52px; width: 440px; height: 440px; }
+  .banda { position: absolute; left: 0; right: 0; bottom: 0; height: 74px; display: flex; align-items: center; gap: 40px; padding-inline: 64px;
+    background: var(--ink); color: var(--paper); font-family: var(--display); font-size: 28px; font-weight: 700; letter-spacing: .01em; }
 </style>
 </head>
 <body>
 <div class="lienzo">
   <div class="copia">
     <img class="logo" src="public/assets/el-dolaron-logo.png" alt="">
-    <div><span class="tape tape-yellow">Saldos americanos · Soledad, S.L.P.</span></div>
-    <h1>Marcas americanas, <em>a precio de saldo.</em></h1>
+    <h1>Marcas americanas, a precio de saldo.</h1>
   </div>
-  <img class="collage" src="public/assets/pila.webp" alt="">
-  <div class="cartel"><b>Se busca</b><span>Lo de más valor en tienda</span><i>¡Pregunta!</i></div>
-  <div class="banda"><span>Jardín Hidalgo 129</span><b>★</b><span>Abierto todos los días de 11 a 8</span><b>★</b><span>eldolaron.com</span></div>
+  <img class="catalogo" src="public/assets/pila.webp" alt="">
+  <div class="banda"><span>Jardín Hidalgo 129, Soledad</span><span>Abierto todos los días de 11 a 8</span><span>eldolaron.com</span></div>
 </div>
 </body>
 </html>
