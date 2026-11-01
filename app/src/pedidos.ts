@@ -14,7 +14,7 @@ import { VENDIBLE } from './catalogo.ts';
 import { sentenciasVale } from './vales.ts';
 import { envioDe, anticipoMinimoDe, ANTICIPO, viernesDeEnvio, claveRastreoDe } from '../public/venta.js';
 import { leerTransferencia, sentenciaTransferencia, respuestaClaveUsada, esChoqueDeClave, excedenteDe } from './transferencias.ts';
-import { hayReportePendiente, reportesDeRevendedora, reportesPendientes, rechazarPago } from './pagos-reportados.ts';
+import { hayReportePendiente, reportesDe, reportesPendientes, rechazarPago } from './pagos-reportados.ts';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const FORMAS_PAGO = new Set(['efectivo', 'tarjeta', 'transferencia']);
@@ -54,7 +54,7 @@ const COLUMNAS = `id, folio, cliente, telefono, entrega, envio, vendedora, estad
 interface FilaPedido {
   id: string; folio: number; estado: string; entrega: string; envio: number; saldo: number;
   vendedora: string; cliente: string; telefono: string; creado_en: string;
-  anticipo: number; vence_en: string; saldo_vence_en: string; revision: number; liquidado_en: string | null; caja: string; forma_pago: string;
+  anticipo: number; vence_en: string; saldo_vence_en: string; revision: number; liquidado_en: string | null; caja: string; forma_pago: string; guia: string;
   [campo: string]: unknown;
 }
 interface LineaPedido { pedido_id: string; producto_id: string; codigo: string; nombre: string; precio: number; cantidad: number }
@@ -375,19 +375,27 @@ export async function apartarPortal(request: Request, env: Env, ctx: ExecutionCo
 }
 
 /**
- * Los apartados de una revendedora: los abiertos (indice por estado) y lo de los ultimos 60 dias.
- * ponytail: pedidos no tiene indice por vendedora; el historial se acota a los ultimos 400 folios.
- * Mejora: indice (vendedora, creado_en) en una migracion cuando el volumen lo pida.
+ * Los apartados de un dueno (la revendedora por `vendedora`, el socio del portal por `telefono`): los abiertos (indice por estado)
+ * y lo de los ultimos 60 dias, con el ultimo reporte de pago de cada uno.
+ * ponytail: pedidos no tiene indice por vendedora ni telefono; el historial se acota a los ultimos 400 folios.
+ * Mejora: indice (vendedora, creado_en) / (telefono, creado_en) en una migracion cuando el volumen lo pida.
  */
-export async function pedidosDeRevendedora(env: Env, correo: string): Promise<Response> {
+async function pedidosDe(env: Env, dueno: 'vendedora' | 'telefono', valor: string) {
+  const columna = dueno === 'telefono' ? 'telefono' : 'vendedora';
   const desde = new Date(Date.now() - 60 * 86_400_000).toISOString();
   const [abiertos, recientes, reportes] = await Promise.all([
-    leerPedidos(env, "estado = 'apartado' and vendedora = ?", [correo], 'folio desc', 50),
-    leerPedidos(env, 'folio > (select coalesce(max(folio), 0) - 400 from pedidos) and vendedora = ? and creado_en >= ?', [correo, desde], 'folio desc', 100),
-    reportesDeRevendedora(env, correo, desde),
+    leerPedidos(env, `estado = 'apartado' and ${columna} = ?`, [valor], 'folio desc', 50),
+    leerPedidos(env, `folio > (select coalesce(max(folio), 0) - 400 from pedidos) and ${columna} = ? and creado_en >= ?`, [valor, desde], 'folio desc', 100),
+    reportesDe(env, dueno, valor, desde),
   ]);
   const porFolio = new Map([...recientes, ...abiertos].map((p) => [p.folio, p]));
-  const pedidos = [...porFolio.values()].sort((a, b) => b.folio - a.folio).map((p) => ({
+  return { pedidos: [...porFolio.values()].sort((a, b) => b.folio - a.folio), reportes };
+}
+
+/** Los apartados de una revendedora (#575). */
+export async function pedidosDeRevendedora(env: Env, correo: string): Promise<Response> {
+  const { pedidos: todos, reportes } = await pedidosDe(env, 'vendedora', correo);
+  const pedidos = todos.map((p) => ({
     folio: p.folio, estado: p.estado, vence_en: p.vence_en, cliente: p.cliente, telefono: p.telefono, entrega: p.entrega,
     envio: p.envio, saldo: p.saldo, creado_en: p.creado_en, subtotal: p.subtotal, liquidado_en: p.liquidado_en,
     lineas: p.lineas.map(({ codigo, nombre, precio, cantidad }) => ({ codigo, nombre, precio, cantidad })),
@@ -399,10 +407,32 @@ export async function pedidosDeRevendedora(env: Env, correo: string): Promise<Re
   return json({ pedidos });
 }
 
-/** Cancelar uno suyo y sin pago. Las condiciones van en SQL: dos cancelaciones (o el cron) devuelven la existencia una vez. */
-export async function cancelarDeRevendedora(folio: number, env: Env, ctx: ExecutionContext, correo: string): Promise<Response> {
+/**
+ * Los apartados de un socio del portal (#669): por telefono (el vinculo socio-pedido), asi tambien salen los que la tienda levanto
+ * por WhatsApp a ese numero. Nunca `caja`, `corte_id`, `vendedora` ni nada de otros clientes.
+ */
+export async function apartadosDeSocio(env: Env, telefono: string): Promise<Response> {
+  const { pedidos, reportes } = await pedidosDe(env, 'telefono', telefono);
+  return new Response(JSON.stringify({ apartados: pedidos.map((p) => ({
+    folio: p.folio, estado: p.estado, vence_en: p.vence_en, entrega: p.entrega, envio: p.envio, subtotal: p.subtotal,
+    saldo: p.saldo, faltante: p.faltante, liquidado_en: p.liquidado_en, guia: p.guia,
+    viernes_envio: p.entrega === 'envio' ? p.viernes_envio : null, creado_en: p.creado_en,
+    lineas: p.lineas.map(({ codigo, nombre, precio, cantidad }) => ({ codigo, nombre, precio, cantidad })),
+    // Solo lo que levanto el portal y sigue sin dinero ni pago por revisar; lo demas lo cancela la tienda.
+    cancelable: p.estado === 'apartado' && Number(p.saldo) === 0 && p.vendedora === VENDEDORA_PORTAL && reportes.get(p.folio)?.estado !== 'pendiente',
+    pago_reportado: reportes.get(p.folio) ?? null,
+  })) }), { headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' } });
+}
+
+/** Cancelar uno suyo y sin pago (revendedora: su correo; socio del portal: 'portal' + su telefono). */
+export const cancelarDeRevendedora = (folio: number, env: Env, ctx: ExecutionContext, correo: string) => cancelarSuyo(folio, env, ctx, correo);
+export const cancelarDeSocio = (folio: number, env: Env, ctx: ExecutionContext, telefono: string) => cancelarSuyo(folio, env, ctx, VENDEDORA_PORTAL, telefono);
+
+/** Las condiciones van en SQL: dos cancelaciones (o el cron) devuelven la existencia una vez. */
+async function cancelarSuyo(folio: number, env: Env, ctx: ExecutionContext, vendedora: string, telefono?: string): Promise<Response> {
   const pedido = await pedidoPor(env, 'folio = ?', folio);
-  if (!pedido || pedido.vendedora !== correo) return json({ error: 'El pedido no existe.' }, 404);
+  if (!pedido || pedido.vendedora !== vendedora || (telefono !== undefined && pedido.telefono !== telefono))
+    return json({ error: 'El pedido no existe.' }, 404);
   if (pedido.estado !== 'apartado' || Number(pedido.saldo) !== 0)
     return json({ error: 'Ya no se puede cancelar aquí: pídelo a la tienda.' }, 409);
   const momento = new Date();
@@ -410,10 +440,11 @@ export async function cancelarDeRevendedora(folio: number, env: Env, ctx: Execut
   // #609: con un pago reportado sin revisar la pieza no se cancela (el cliente ya pago); lo decide la tienda.
   const sinReporte = `and not ${hayReportePendiente('?1')}`;
   const [, marca] = await env.DB.batch([
-    devolverApartado(env, pedido.id, ahora, `and vendedora = ?3 and saldo = 0 and liquidado_en is null ${sinReporte}`, correo),
+    devolverApartado(env, pedido.id, ahora, `and vendedora = ?3 ${telefono === undefined ? '' : 'and telefono = ?4'} and saldo = 0 and liquidado_en is null ${sinReporte}`,
+      vendedora, ...(telefono === undefined ? [] : [telefono])),
     env.DB.prepare(`update pedidos set estado = 'cancelado', saldo_vence_en = ?2, actualizado_en = ?3, revision = revision + 1
-      where id = ?1 and estado = 'apartado' and saldo = 0 and liquidado_en is null and vendedora = ?4 ${sinReporte}`)
-      .bind(pedido.id, sumarMeses(momento, 1), ahora, correo),
+      where id = ?1 and estado = 'apartado' and saldo = 0 and liquidado_en is null and vendedora = ?4 ${telefono === undefined ? '' : 'and telefono = ?5'} ${sinReporte}`)
+      .bind(pedido.id, sumarMeses(momento, 1), ahora, vendedora, ...(telefono === undefined ? [] : [telefono])),
   ]);
   if (!marca.meta.changes) return json({ error: 'Ya no se puede cancelar aquí: pídelo a la tienda.' }, 409);
   ctx.waitUntil(conciliarSeguro(env, { productoIds: await productosDe(env, pedido.id) }));

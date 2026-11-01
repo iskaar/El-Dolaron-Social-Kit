@@ -2,6 +2,7 @@ import qrcode from './vendor/qrcode-generator.js';
 import { svgCode128, codigoEnDigitos, codigoDeDigitos } from './code128.js';
 import { iniciarCatalogo } from './catalogo-ficha.js';
 import { iniciarApartar } from './apartar.js';
+import { iniciarApartados } from './apartados.js';
 
 const $ = (id) => document.getElementById(id);
 const d = (c) => (c / 100).toLocaleString('es-MX', { maximumFractionDigits:2 }) + ' D';
@@ -155,6 +156,7 @@ async function cargarCuenta() {
     $('monedero').hidden = false;
     estado();
     referidos();
+    misApartados.cargar();
     ubicarCatalogo(true);
     socioListo = true;
     const pendiente = piezaPendiente();
@@ -313,7 +315,9 @@ $('salir').addEventListener('click', () => accion($('salir'), async () => {
 }));
 
 // El catálogo es público: arranca aunque el monedero no esté disponible.
-const apartador = iniciarApartar({ api, estaListo:() => socioListo, irAAcceso, alTerminar:() => $('ficha-dialogo').close() });
+const misApartados = iniciarApartados({ api });
+const apartador = iniciarApartar({ api, estaListo:() => socioListo, irAAcceso, alTerminar:() => $('ficha-dialogo').close(),
+  alVerApartados: async () => { await misApartados.cargar(); $('apartados').scrollIntoView({ behavior:'smooth', block:'start' }); } });
 const catalogo = iniciarCatalogo({ apartar:(pieza) => apartador.abrir(pieza) });
 
 try {
@@ -333,6 +337,7 @@ try {
     ocultarCodigo();
     if (user) { cargarCuenta(); return; }
     socioListo = false;
+    misApartados.limpiar();
     ubicarCatalogo(false);
     $('monedero').hidden = true; $('registro').hidden = true; $('salir').hidden = true;
     $('acceso').hidden = false; $('telefono-form').hidden = false; $('sms-form').hidden = true;

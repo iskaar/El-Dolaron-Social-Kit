@@ -3,6 +3,8 @@ import assert from 'node:assert/strict';
 import worker from './worker.ts';
 import { tienda, PRODUCTO } from './prueba-d1.ts';
 import { readFileSync } from 'node:fs';
+import { vencerPedidos } from './pedidos.ts';
+import { viernesDeEnvio } from '../public/venta.js';
 
 const codificar = (x: unknown) => Buffer.from(JSON.stringify(x)).toString('base64url');
 const token = (uid: string, phone: string, extra: Record<string, unknown> = {}) => {
@@ -205,7 +207,7 @@ test('allowlist pública sirve sólo portal y assets necesarios; no abre caja, a
       return new Response(readFileSync('public/' + (ruta === '/portal' ? 'portal.html' : ruta === '/manual' ? 'manual.html' : ruta.slice(1))),
         { headers:{ 'content-type':ruta === '/portal' || ruta === '/manual' ? 'text/html' : 'text/javascript' } });
     } } as unknown as Fetcher;
-    for (const ruta of ['/', '/portal', '/portal.html', '/portal.js', '/catalogo-ficha.js', '/apartar.js', '/portal.css', '/code128.js', '/vendor/qrcode-generator.js', '/el-dolaron-logo.png',
+    for (const ruta of ['/', '/portal', '/portal.html', '/portal.js', '/catalogo-ficha.js', '/apartar.js', '/apartados.js', '/portal.css', '/code128.js', '/vendor/qrcode-generator.js', '/el-dolaron-logo.png',
       '/manual', '/manual.js', '/vender.js']) {
       const r = await worker.fetch!(new Request('https://portal.prueba' + ruta) as never, p.env, {} as never);
       assert.equal(r.status, 200, ruta);
@@ -218,7 +220,7 @@ test('allowlist pública sirve sólo portal y assets necesarios; no abre caja, a
       '/cajero.js', '/venta.js', '/vender', '/vender.html', '/manual.html', '/manual/', '/api/vender', '/api/ventas', '/api/socios/codigo', '/api/socios/vincular',
       '/api/foto/123', '/api/portal/llegada', '/foo/portal.html'])
       assert.equal((await p.llamar(ruta, '')).status, 404, ruta);
-    assert.equal(leidos.length, 13);
+    assert.equal(leidos.length, 14);
     // El manual (#623) sale solo por GET/HEAD.
     assert.equal((await p.llamar('/manual', '', {}, 'POST')).status, 404);
     assert.equal((await p.llamar('/portal.js', '', {}, 'POST')).status, 404);
@@ -473,5 +475,141 @@ test('POST /api/portal/apartar (#668): pide sesión, socio y bases vigentes; el 
     assert.equal(sin.status, 409);
     assert.match(sin.body.error, /bases vigentes/);
     assert.equal(p.db.prepare('select stock from productos where id = ?').get(id)!.stock, 1);
+  } finally { p.cerrar(); }
+});
+
+/* ---------- Mis apartados (#669) ---------- */
+
+let consecutivoApartados = 800;
+function piezaVendible(p: ReturnType<typeof portalDePrueba>, precio = 25000, stock = 1) {
+  const n = ++consecutivoApartados;
+  const id = `c${String(n).padStart(7, '0')}-1111-4111-8111-111111111111`, codigo = `ED-000${n}`;
+  p.db.prepare(`insert into productos (id, codigo, nombre, precio, stock, estado_analisis, foto_key, semana_ingreso, creado_en, actualizado_en)
+    values (?, ?, 'Chamarra Levis', ?, ?, 'listo', ?, 'S40', '', '')`).run(id, codigo, precio, stock, `fotos/${id}.jpg`);
+  (p.env.FOTOS as any).objetos.set(`fotos/${id}.jpg`, Uint8Array.from([0xff, 0xd8, 0xff, 0xd9]).buffer);
+  return { id, codigo };
+}
+const stockPieza = (p: ReturnType<typeof portalDePrueba>, id: string) => Number(p.db.prepare('select stock from productos where id = ?').get(id)!.stock);
+
+test('GET /api/portal/apartados (#669): solo los de su teléfono (también los de la tienda), sin datos internos y con cancelable correcto', async () => {
+  const p = portalDePrueba();
+  try {
+    const A = token('uid-a', '+524441112222'), B = token('uid-b', '+524443334444');
+    assert.equal((await p.llamar('/api/portal/apartados', token('uid-a', '+524441112222', { aud: 'otro' }))).status, 401);
+    assert.equal((await p.llamar('/api/portal/apartados', A)).status, 404);   // aún no es socio
+    await p.registrar('uid-a', '+524441112222');
+    await p.registrar('uid-b', '+524443334444');
+    assert.equal((await p.llamar('/api/portal/apartados', A, {}, 'POST')).status, 405);
+    assert.deepEqual((await p.llamar('/api/portal/apartados', A)).body, { apartados: [] });
+
+    const sinPago = piezaVendible(p), envio = piezaVendible(p, 25000), revisando = piezaVendible(p), deB = piezaVendible(p), deTienda = piezaVendible(p, 25000, 3);
+    const apartar = (auth: string, pieza: { codigo: string }, entrega = 'tienda') =>
+      p.llamar('/api/portal/apartar', auth, { id: crypto.randomUUID(), codigo: pieza.codigo, entrega }, 'POST');
+    assert.equal((await apartar(A, sinPago)).status, 201);
+    assert.equal((await apartar(A, envio, 'envio')).status, 201);
+    assert.equal((await apartar(A, revisando)).status, 201);
+    assert.equal((await apartar(B, deB)).status, 201);
+    // La tienda levantó un apartado por WhatsApp a ese mismo teléfono (con $100 de anticipo): también es suyo.
+    const tienda = await p.pedir('/api/pedidos', { id: crypto.randomUUID(), lineas: [{ producto_id: deTienda.id, cantidad: 1 }], cliente: 'Lucía', telefono: '4441112222',
+      entrega: 'tienda', anticipo: 10000, forma_pago: 'efectivo', caja: 'Caja 1' });
+    assert.equal(tienda.status, 201, JSON.stringify(tienda.cuerpo));
+    // Un pago por revisar en el tercero del portal (#609/B2).
+    p.db.prepare("insert into pagos_reportados (pedido_id, solicitud_id, clave_rastreo, reportado_por, reportado_en) values ((select id from pedidos where folio = 3), ?, 'ABCDEF12', 'portal:x', ?)")
+      .run(crypto.randomUUID(), new Date().toISOString());
+
+    const lista = (await p.llamar('/api/portal/apartados', A)).body.apartados as Record<string, any>[];
+    assert.deepEqual(lista.map((a) => a.folio), [5, 3, 2, 1]);   // el 4 es de B; folio descendente
+    const por = (folio: number) => lista.find((a) => a.folio === folio)!;
+    for (const a of lista) {
+      assert.deepEqual(Object.keys(a).sort(), ['cancelable', 'creado_en', 'entrega', 'envio', 'estado', 'faltante', 'folio', 'guia', 'lineas', 'liquidado_en', 'pago_reportado', 'saldo', 'subtotal', 'vence_en', 'viernes_envio']);
+      assert.deepEqual(Object.keys(a.lineas[0]).sort(), ['cantidad', 'codigo', 'nombre', 'precio']);
+    }
+    assert.deepEqual([por(1).cancelable, por(1).faltante, por(1).viernes_envio, por(1).pago_reportado], [true, 25000, null, null]);
+    assert.equal(por(1).lineas[0].codigo, sinPago.codigo);
+    assert.deepEqual([por(2).entrega, por(2).envio, por(2).faltante, por(2).cancelable], ['envio', 9900, 34900, true]);
+    assert.equal(por(2).viernes_envio, null);   // el viernes se fija al liquidar
+    assert.deepEqual([por(3).cancelable, por(3).pago_reportado.estado], [false, 'pendiente']);
+    assert.deepEqual([por(5).cancelable, por(5).saldo, por(5).faltante], [false, 10000, 15000]);   // lo levantó la tienda: solo ella lo cancela
+    assert.equal(Date.parse(por(1).vence_en) - Date.parse(por(1).creado_en), 24 * 3_600_000);
+    // B solo ve el suyo.
+    assert.deepEqual(((await p.llamar('/api/portal/apartados', B)).body.apartados as any[]).map((a) => a.folio), [4]);
+
+    // La tienda registra el abono del paquete de envío: sigue abierto, ya no es cancelable desde el portal.
+    const abono = await p.pedir('/api/pedidos/2/abonos', { id: crypto.randomUUID(), importe: 10000, forma_pago: 'efectivo', caja: 'Caja 1' });
+    assert.equal(abono.status, 200, JSON.stringify(abono.cuerpo));
+    const despues = ((await p.llamar('/api/portal/apartados', A)).body.apartados as any[]).find((a) => a.folio === 2);
+    assert.deepEqual([despues.cancelable, despues.saldo, despues.faltante], [false, 10000, 24900]);
+    const liquidar = await p.pedir('/api/pedidos/2/abonos', { id: crypto.randomUUID(), importe: 24900, forma_pago: 'efectivo', caja: 'Caja 1' });
+    assert.equal(liquidar.status, 200);
+    const vendido = ((await p.llamar('/api/portal/apartados', A)).body.apartados as any[]).find((a) => a.folio === 2);
+    assert.deepEqual([vendido.estado, vendido.faltante, vendido.guia, vendido.viernes_envio === viernesDeEnvio(vendido.liquidado_en)], ['vendido', 0, '', true]);
+    assert.equal((await p.pedir('/api/pedidos/2/guia', { guia: 'DHL 434' }, 'PUT')).status, 200);
+    assert.equal(((await p.llamar('/api/portal/apartados', A)).body.apartados as any[]).find((a) => a.folio === 2).guia, 'DHL 434');
+  } finally { p.cerrar(); }
+});
+
+test('POST /api/portal/apartados/:folio/cancelar (#669): devuelve la existencia una vez; ajeno 404; con pago, de la tienda o por revisar, 409', async () => {
+  const p = portalDePrueba();
+  try {
+    const A = token('uid-a', '+524441112222'), B = token('uid-b', '+524443334444');
+    await p.registrar('uid-a', '+524441112222');
+    await p.registrar('uid-b', '+524443334444');
+    const a = piezaVendible(p), b = piezaVendible(p), c = piezaVendible(p), d = piezaVendible(p, 25000, 3);
+    const apartar = (auth: string, pieza: { codigo: string }) => p.llamar('/api/portal/apartar', auth, { id: crypto.randomUUID(), codigo: pieza.codigo, entrega: 'tienda' }, 'POST');
+    assert.equal((await apartar(A, a)).status, 201);   // folio 1
+    assert.equal((await apartar(A, b)).status, 201);   // folio 2
+    assert.equal((await apartar(A, c)).status, 201);   // folio 3
+    assert.equal(stockPieza(p, a.id), 0);
+    const cancelar = (auth: string, folio: number, metodo = 'POST') => p.llamar(`/api/portal/apartados/${folio}/cancelar`, auth, metodo === 'POST' ? {} : undefined, metodo);
+
+    assert.equal((await cancelar(A, 1, 'GET')).status, 405);
+    assert.equal((await cancelar(B, 1)).status, 404);   // folio ajeno: ni se entera
+    assert.equal((await cancelar(A, 99)).status, 404);
+    assert.equal(stockPieza(p, a.id), 0);
+    // Cancelar: la pieza vuelve una sola vez, aunque lleguen dos cancelaciones.
+    const [x, y] = await Promise.all([cancelar(A, 1), cancelar(A, 1)]);
+    assert.deepEqual([x.status, y.status].sort(), [200, 409]);
+    assert.equal(stockPieza(p, a.id), 1);
+    assert.equal(p.db.prepare('select estado from pedidos where folio = 1').get()!.estado, 'cancelado');
+    assert.equal((await cancelar(A, 1)).status, 409);
+    assert.equal(stockPieza(p, a.id), 1);
+    // Y deja un cupo: el tope cuenta solo los apartados sin pago.
+    const lista = (await p.llamar('/api/portal/apartados', A)).body.apartados as any[];
+    assert.deepEqual([lista.find((e) => e.folio === 1).estado, lista.find((e) => e.folio === 1).cancelable], ['cancelado', false]);
+
+    // Con un pago por revisar no se cancela (el cliente ya pagó): lo decide la tienda.
+    p.db.prepare("insert into pagos_reportados (pedido_id, solicitud_id, clave_rastreo, reportado_por, reportado_en) values ((select id from pedidos where folio = 2), ?, 'ABCDEF12', 'portal:x', ?)")
+      .run(crypto.randomUUID(), new Date().toISOString());
+    assert.equal((await cancelar(A, 2)).status, 409);
+    assert.equal(stockPieza(p, b.id), 0);
+    // Con dinero registrado tampoco.
+    assert.equal((await p.pedir('/api/pedidos/3/abonos', { id: crypto.randomUUID(), importe: 10000, forma_pago: 'efectivo', caja: 'Caja 1' })).status, 200);
+    assert.equal((await cancelar(A, 3)).status, 409);
+    assert.equal(stockPieza(p, c.id), 0);
+    // Un apartado que levantó la tienda con su número no es del portal: 404 (lo cancela la tienda).
+    const tienda = await p.pedir('/api/pedidos', { id: crypto.randomUUID(), lineas: [{ producto_id: d.id, cantidad: 1 }], cliente: 'Lucía', telefono: '4441112222',
+      entrega: 'tienda', anticipo: 10000, forma_pago: 'efectivo', caja: 'Caja 1' });
+    assert.equal((await cancelar(A, tienda.cuerpo.pedido.folio)).status, 404);
+    assert.equal(stockPieza(p, d.id), 2);
+  } finally { p.cerrar(); }
+});
+
+test('la foto del catálogo sigue saliendo mientras la pieza está apartada (para «Mis apartados») y no la de una agotada sin pedido', async () => {
+  const p = portalDePrueba();
+  try {
+    await p.registrar('uid-a', '+524441112222');
+    const a = piezaVendible(p), agotada = piezaVendible(p, 25000, 0);
+    const foto = (codigo: string) => worker.fetch!(new Request(`https://portal.prueba/api/catalogo/foto/${codigo}`) as never, p.env, { waitUntil() {} } as never);
+    assert.equal((await foto(a.codigo)).status, 200);
+    assert.equal((await p.llamar('/api/portal/apartar', token('uid-a', '+524441112222'), { id: crypto.randomUUID(), codigo: a.codigo, entrega: 'tienda' }, 'POST')).status, 201);
+    assert.equal(stockPieza(p, a.id), 0);
+    assert.equal((await foto(a.codigo)).status, 200);
+    assert.equal((await foto(agotada.codigo)).status, 404);
+    // Vencida o cancelada vuelve a la venta (stock 1) y sigue sirviéndose por ser vendible.
+    assert.equal(await vencerPedidos(p.env, new Date(Date.now() + 25 * 3_600_000)), 1);
+    assert.equal((await foto(a.codigo)).status, 200);
+    // Ya sin pedido abierto, agotarse la deja sin foto como a cualquier otra.
+    p.db.prepare('update productos set stock = 0 where id = ?').run(a.id);
+    assert.equal((await foto(a.codigo)).status, 404);
   } finally { p.cerrar(); }
 });
