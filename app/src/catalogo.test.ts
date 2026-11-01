@@ -333,7 +333,10 @@ test('la caja pide solo lo cambiado del catalogo, incluidas las piezas que salen
   const r = await t.pedir('/api/catalogo?desde=2026-10-15T11:00:00.000Z', undefined, 'GET');
   assert.equal(r.status, 200);
   assert.ok(Date.parse(r.cuerpo.ahora));
-  assert.deepEqual(r.cuerpo.piezas.map((p: any) => [p.codigo, p.precio]), [['ED-000002', 0]]);
+  // Las bandas que siembra la migracion 066 tienen fecha de hoy: tambien llegan a la caja.
+  const cambios = r.cuerpo.piezas.map((p: any) => [p.codigo, p.precio]);
+  assert.deepEqual(cambios.filter(([c]: any) => !/^[A-Z]{1,2}\d+$/.test(c)), [['ED-000002', 0]]);
+  assert.ok(cambios.some(([c]: any) => c === 'MN39'), 'la banda MN39 deberia viajar en el delta');
   assert.equal((await t.pedir('/api/catalogo?desde=ayer', undefined, 'GET')).status, 400);
   // Sin `desde`, la lista completa de siempre (la usan pedidos y la carga inicial de la caja).
   assert.ok(Array.isArray((await t.pedir('/api/catalogo', undefined, 'GET')).cuerpo));
