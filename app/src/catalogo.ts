@@ -112,6 +112,14 @@ const normalizarBusqueda = (q: string) =>
   q.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[\\%_]/g, (c) => `\\${c}`);
 
 async function listar(env: Env, url: URL): Promise<Response> {
+  // Issue #671: ?codigo=ED-… = exactamente esa pieza (la vista previa del sitio); q= también coincidiría con ED-0001234.
+  const codigo = url.searchParams.get('codigo');
+  if (codigo !== null) {
+    if (!CODIGO.test(codigo)) return json({ error: 'Código no válido.' }, 400);
+    const p = await env.DB.prepare(`select p.codigo, p.nombre, p.marca, p.categoria, p.talla, p.precio, p.precio_lista, p.stock, p.creado_en, p.recorte_estado, p.recorte_revision from productos p
+      where ${VENDIBLE} and p.codigo = ?`).bind(codigo).first<Record<string, any>>();
+    return json({ piezas: p ? [{ ...aPieza(p, url), ultima: p.stock === 1 }] : [] }, 200, { 'cache-control': 'public, max-age=300' });
+  }
   const categoria = url.searchParams.get('categoria');
   if (categoria !== null && !CLAVES_CATEGORIA.includes(categoria)) return json({ error: 'Categoría no válida.' }, 400);
   const qCruda = url.searchParams.get('q');
