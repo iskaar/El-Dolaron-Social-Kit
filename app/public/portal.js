@@ -1,5 +1,6 @@
 import qrcode from './vendor/qrcode-generator.js';
 import { svgCode128, codigoEnDigitos, codigoDeDigitos } from './code128.js';
+import { iniciarCatalogo } from './catalogo-ficha.js';
 
 const $ = (id) => document.getElementById(id);
 const d = (c) => (c / 100).toLocaleString('es-MX', { maximumFractionDigits:2 }) + ' D';
@@ -39,6 +40,11 @@ function guardarReferido(codigo) {
     history.replaceState(null, '', '/' + url.search + url.hash);
   }
   $('referido').value = referidoPendiente();
+}
+// Catálogo (#649, D7): una sola sección. Sin sesión va debajo del formulario; con sesión, dentro del monedero.
+function ubicarCatalogo(dentroDelMonedero) {
+  if (dentroDelMonedero) $('referidos').after($('catalogo'));
+  else $('registro').after($('catalogo'));
 }
 let enlaceReferido = '';
 async function referidos() {
@@ -116,6 +122,7 @@ async function cargarCuenta() {
     if (!uid || uid !== auth.currentUser?.uid) return;
     $('acceso').hidden = true;
     $('registro').hidden = true;
+    ubicarCatalogo(false);   // el monedero se oculta mientras recarga: el catálogo no
     $('monedero').hidden = true;
     $('salir').hidden = false;
     if (yo.bases_version !== config.bases_version) {
@@ -134,36 +141,17 @@ async function cargarCuenta() {
     $('monedero').hidden = false;
     estado();
     referidos();
-    novedades();
+    ubicarCatalogo(true);
     await pasarVale();
   } catch (e) {
     if (!uid || uid !== auth.currentUser?.uid) return;
+    ubicarCatalogo(false);
     $('monedero').hidden = true;
     $('registro').hidden = e.status !== 404 || !config.registro_abierto;
     $('acceso').hidden = true;
     $('salir').hidden = false;
     estado(e.status === 404 ? (config.registro_abierto ? 'Completa tu membresía para continuar.' : 'Las nuevas membresías todavía no están abiertas.') : errorDeAuth(e), e.status !== 404);
   }
-}
-// Mismo origen que /api/catalogo (#205). Si falla, la sección simplemente no aparece.
-async function novedades() {
-  if ($('novedades-lista').childElementCount) return;
-  try {
-    const r = await fetch('/api/catalogo?pagina=1', { headers:{ accept:'application/json' } });
-    if (!r.ok) return;
-    const { piezas } = await r.json();
-    $('novedades-lista').replaceChildren(...(piezas || []).slice(0, 6).map((p) => {
-      const li = document.createElement('li'), a = document.createElement('a');
-      a.href = 'https://wa.me/524445437754?text=' + encodeURIComponent('Hola, me interesa ' + p.nombre + ' (' + p.codigo + ') de ' + pesos(p.precio) + '. ¿Sigue disponible?');
-      const img = new Image(); img.alt = ''; img.loading = 'lazy'; img.src = p.foto;
-      img.addEventListener('error', () => img.remove());
-      const nombre = document.createElement('span'), precio = document.createElement('strong');
-      nombre.textContent = p.nombre; precio.textContent = pesos(p.precio);
-      if (p.precio_lista > p.precio) { const s = document.createElement('s'); s.textContent = pesos(p.precio_lista); precio.append(s); }
-      a.append(img, nombre, precio); li.append(a); return li;
-    }));
-    $('novedades').hidden = !$('novedades-lista').childElementCount;
-  } catch { /* Sin catálogo, el monedero sigue igual. */ }
 }
 async function actualizarSaldo() {
   const s = await api('saldo');
@@ -304,6 +292,9 @@ $('salir').addEventListener('click', () => accion($('salir'), async () => {
   await sdk.signOut(auth);
 }));
 
+// El catálogo es público: arranca aunque el monedero no esté disponible. Invita a entrar solo si el formulario está a la vista.
+iniciarCatalogo({ sinSesion: () => !$('acceso').hidden });
+
 try {
   const r = await fetch('/api/portal/config', { cache:'no-store' });
   if (!r.ok) throw new Error('El monedero no está disponible. Intenta más tarde.');
@@ -320,6 +311,7 @@ try {
   sdk.onAuthStateChanged(auth, (user) => {
     ocultarCodigo();
     if (user) { cargarCuenta(); return; }
+    ubicarCatalogo(false);
     $('monedero').hidden = true; $('registro').hidden = true; $('salir').hidden = true;
     $('acceso').hidden = false; $('telefono-form').hidden = false; $('sms-form').hidden = true;
     $('titular').textContent = ''; $('recibos').replaceChildren(); $('vinculo').hidden = true;
