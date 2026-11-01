@@ -20,7 +20,7 @@ function guardarVale(codigo) {
 let valeEnMemoria = null;
 {
   const leido = codigoDeDigitos(location.hash.slice(1));
-  if (leido?.startsWith('DP-')) { guardarVale(leido); history.replaceState(null, '', '/'); }
+  if (leido?.startsWith('DP-')) { guardarVale(leido); history.replaceState(null, '', '/' + location.search); }
   else if (valePendiente()) guardarVale(valePendiente());
 }
 // Referidos (#489): el enlace /?r=DOL42K se guarda en este teléfono hasta registrarse. El código
@@ -32,7 +32,12 @@ function guardarReferido(codigo) {
 }
 {
   const leido = new URLSearchParams(location.search).get('r');
-  if (leido && /^[A-Za-z0-9 -]{3,20}$/.test(leido)) { guardarReferido(leido.toUpperCase()); history.replaceState(null, '', '/' + location.hash); }
+  if (leido && /^[A-Za-z0-9 -]{3,20}$/.test(leido)) {
+    guardarReferido(leido.toUpperCase());
+    // Solo se quita ?r=; conserva lo demás (p. ej. ?pieza=, que reabrirá la ficha: Issue #649).
+    const url = new URL(location.href); url.searchParams.delete('r');
+    history.replaceState(null, '', '/' + url.search + url.hash);
+  }
   $('referido').value = referidoPendiente();
 }
 let enlaceReferido = '';
@@ -219,7 +224,7 @@ $('telefono-form').addEventListener('submit', (e) => {
     if (Date.now() < reenviarDesde) throw new Error('Espera un minuto antes de pedir otro SMS.');
     await sdk.setPersistence(auth, $('recordar').checked ? sdk.browserLocalPersistence : sdk.browserSessionPersistence);
     verificador?.clear();
-    verificador = new sdk.RecaptchaVerifier(auth, 'recaptcha', { size:'normal' });
+    verificador = new sdk.RecaptchaVerifier(auth, 'enviar', { size:'invisible' });
     confirmacion = await sdk.signInWithPhoneNumber(auth, '+52' + $('telefono').value.trim(), verificador);
     reenviarDesde = Date.now() + 60_000;
     $('destino-sms').textContent = 'Enviamos un código al +52 ' + $('telefono').value.trim();
@@ -233,6 +238,10 @@ $('sms-form').addEventListener('submit', (e) => {
     await confirmacion.confirm($('sms').value.trim());
     $('sms').value = '';
   });
+});
+// Al teclear (o autollenar) el sexto dígito se envía solo; el botón queda para quien pegue el código.
+$('sms').addEventListener('input', () => {
+  if (/^[0-9]{6}$/.test($('sms').value.trim()) && !$('verificar').disabled) $('sms-form').requestSubmit();
 });
 $('cambiar-telefono').addEventListener('click', () => {
   confirmacion = null; $('sms').value = '';
