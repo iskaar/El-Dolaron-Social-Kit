@@ -65,9 +65,10 @@ test('con pieza reescribe título, descripción, imagen y url; el resto queda ig
   assert.match(html, /<title>Sudadera Nike · \$150 \| El Dolarón<\/title>/);
   assert.match(html, /og:title" content="Sudadera Nike · \$150 \| El Dolarón"/);
   assert.match(html, /og:description" content="¡Última pieza! Apártala con \$100 por 7 días\./);
-  assert.match(html, new RegExp(`og:image" content="${RECORTE}"`));
-  assert.match(html, new RegExp(`twitter:image" content="${RECORTE}"`));
+  assert.match(html, new RegExp(`og:image" content="${FOTO}"`));
+  assert.match(html, new RegExp(`twitter:image" content="${FOTO}"`));
   assert.match(html, /og:image:alt" content="Sudadera Nike"/);
+  assert.doesNotMatch(html, /recorte/);   // con recorte presente la imagen sigue siendo la foto
   assert.match(html, /og:url" content="https:\/\/eldolaron\.com\/\?pieza=ED-000123"/);
   assert.match(html, /twitter:card" content="summary_large_image"/);
   assert.doesNotMatch(html, /og:image:(width|height)/);
@@ -75,7 +76,7 @@ test('con pieza reescribe título, descripción, imagen y url; el resto queda ig
   assert.match(html, /<link rel="canonical" href="https:\/\/eldolaron\.com\/">/);
 });
 
-test('sin recorte usa la foto; bajo $100 el apartado dice que se paga completa; sin última no la anuncia', async () => {
+test('sin recorte también usa la foto; bajo $100 el apartado dice que se paga completa; sin última no la anuncia', async () => {
   api(async () => json(pieza({ precio: 5000 })));
   const html = await (await pedir('/?pieza=ED-000123', assets())).text();
   assert.match(html, new RegExp(`og:image" content="${FOTO}"`));

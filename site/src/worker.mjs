@@ -28,7 +28,8 @@ async function buscar(codigo) {
     const r = await fetch(`${API}?codigo=${codigo}`, { signal: AbortSignal.timeout(ESPERA_MS) });
     if (!r.ok) return null;
     const p = (await r.json())?.piezas?.[0];
-    const imagen = p?.recorte || p?.foto;
+    // ponytail: siempre la foto (JPEG), nunca el recorte: es un WebP transparente y WhatsApp/Facebook lo pintan sobre fondo oscuro; el soporte de WebP en vistas previas es irregular.
+    const imagen = p?.foto;
     if (!p || p.codigo !== codigo || typeof p.nombre !== 'string' || !p.nombre.trim()
       || !Number.isInteger(p.precio) || p.precio <= 0 || typeof imagen !== 'string' || !imagen.startsWith(FOTOS)) return null;
     return { nombre: p.nombre.trim(), precio: p.precio, ultima: p.ultima, imagen };
