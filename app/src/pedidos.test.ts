@@ -7,7 +7,7 @@ import { readFileSync, readdirSync } from 'node:fs';
 import { tienda, PRODUCTO, codigoPrueba, datosTransferencia } from './prueba-d1.ts';
 import { permiso } from './cuentas.ts';
 import { PUBLICABLE } from './mercadolibre.ts';
-import { vencerPedidos, telefonoDe, apartarPortal, HORAS_PORTAL, APARTADOS_PORTAL } from './pedidos.ts';
+import { vencerPedidos, telefonoDe, apartarPortal, cancelarDeSocio, HORAS_PORTAL, APARTADOS_PORTAL } from './pedidos.ts';
 import { viernesDeEnvio } from '../public/venta.js';
 import worker from './worker.ts';
 
@@ -1062,4 +1062,130 @@ test('apartar desde el portal: a las 24 h el cron lo vence y devuelve la pieza u
   assert.equal(stockDe(db, b.id), 0);
   assert.equal(filaPedido(db, 1).estado, 'vencido');
   assert.equal(filaPedido(db, 2).estado, 'apartado');
+});
+
+/* ---------- Carrito: apartar varias piezas en un pedido (#681) ---------- */
+
+const apartarVarias = async (t: ReturnType<typeof tienda>, codigos: unknown, extra: Record<string, unknown> = {}, socio = SOCIA) => {
+  const cuerpo = { id: crypto.randomUUID(), codigos, entrega: 'tienda', ...extra };
+  const r = await apartarPortal(peticionPortal(cuerpo), t.env, t.ctx as never, socio);
+  return { status: r.status, cuerpo: (await r.json()) as Record<string, any>, id: cuerpo.id as string };
+};
+
+test('carrito (#681): 3 piezas = un pedido, -1 de cada existencia en el mismo batch, $100 por todo y reintento idéntico', async () => {
+  const t = tienda();
+  const { db } = t;
+  const [a, b, c] = [vendible(db, 25000, 2), vendible(db, 18000, 1), vendible(db, 6000, 1)];
+  // Los códigos repetidos cuentan una vez (son piezas únicas) y las minúsculas se normalizan.
+  const r = await apartarVarias(t, [a.codigo, b.codigo.toLowerCase(), c.codigo, a.codigo]);
+  assert.equal(r.status, 201, JSON.stringify(r.cuerpo));
+  assert.equal(r.cuerpo.pedido.lineas.length, 3);
+  assert.deepEqual(r.cuerpo.pedido.lineas.map((l: any) => l.cantidad), [1, 1, 1]);
+  assert.equal(r.cuerpo.pedido.subtotal, 49000);
+  assert.equal(r.cuerpo.a_pagar, 10000);   // $100 por todo el pedido
+  assert.equal(r.cuerpo.concepto, 'P-1');
+  assert.deepEqual([stockDe(db, a.id), stockDe(db, b.id), stockDe(db, c.id)], [1, 0, 0]);
+  assert.equal((db.prepare('select count(*) as n from pedidos').get() as { n: number }).n, 1);
+  assert.equal((db.prepare('select count(*) as n from pedido_lineas').get() as { n: number }).n, 3);
+  const p = filaPedido(db, 1);
+  assert.deepEqual([p.vendedora, p.telefono, p.anticipo, p.saldo], ['portal', '4441112222', 0, 0]);
+
+  // Reintento con el mismo id y los mismos códigos (respuesta perdida): el mismo pedido, sin bajar otra vez las existencias.
+  const otra = await apartarPortal(peticionPortal({ id: r.id, codigos: [a.codigo, b.codigo, c.codigo], entrega: 'tienda' }), t.env, t.ctx as never, SOCIA);
+  assert.equal(otra.status, 200);
+  assert.equal(((await otra.json()) as any).pedido.lineas.length, 3);
+  assert.deepEqual([stockDe(db, a.id), stockDe(db, b.id), stockDe(db, c.id)], [1, 0, 0]);
+  assert.equal((db.prepare('select count(*) as n from pedidos').get() as { n: number }).n, 1);
+});
+
+test('carrito (#681): $100 por todo el pedido aunque las piezas sean baratas; si todo cuesta menos, se paga completo; el envío sale del subtotal', async () => {
+  const t = tienda();
+  const { db } = t;
+  const baratas = [vendible(db, 4000, 1), vendible(db, 4000, 1), vendible(db, 4000, 1)];   // $120 juntas
+  assert.equal((await apartarVarias(t, baratas.map((x) => x.codigo))).cuerpo.a_pagar, 10000);
+  const dos = [vendible(db, 3000, 1), vendible(db, 3000, 1)];   // $60 juntas: se paga completo
+  const completo = await apartarVarias(t, dos.map((x) => x.codigo));
+  assert.deepEqual([completo.cuerpo.a_pagar, completo.cuerpo.pedido.subtotal], [6000, 6000]);
+  // Envío: $99 bajo $1,000 de subtotal total; gratis desde $1,000 sumando las piezas.
+  const medias = [vendible(db, 30000, 1), vendible(db, 30000, 1)];
+  const conEnvio = await apartarVarias(t, medias.map((x) => x.codigo), { entrega: 'envio' });
+  assert.deepEqual([conEnvio.cuerpo.pedido.subtotal, conEnvio.cuerpo.pedido.envio, conEnvio.cuerpo.a_pagar], [60000, 9900, 10000]);
+  const cuatro = [0, 1, 2, 3].map(() => vendible(db, 30000, 1));
+  db.prepare("update pedidos set estado = 'cancelado'").run();   // libera el tope solo para esta prueba
+  const gratis = await apartarVarias(t, cuatro.map((x) => x.codigo), { entrega: 'envio' });
+  assert.deepEqual([gratis.cuerpo.pedido.subtotal, gratis.cuerpo.pedido.envio], [120000, 0]);
+});
+
+test('carrito (#681): una pieza agotada = 409 con sus códigos y ninguna existencia tocada; quitada, el mismo carrito sí pasa', async () => {
+  const t = tienda();
+  const { db } = t;
+  const [a, b, c] = [vendible(db, 25000, 1), vendible(db, 25000, 1), vendible(db, 25000, 1)];
+  db.prepare('update productos set stock = 0 where id = ?').run(b.id);
+  const sinB = await apartarVarias(t, [a.codigo, b.codigo, c.codigo]);
+  assert.equal(sinB.status, 409);
+  assert.deepEqual(sinB.cuerpo.no_disponibles, [b.codigo]);
+  assert.match(sinB.cuerpo.error, /^Una pieza ya no está disponible/);
+  assert.deepEqual([stockDe(db, a.id), stockDe(db, c.id)], [1, 1]);
+  assert.equal((db.prepare('select count(*) as n from pedidos').get() as { n: number }).n, 0);
+  // Dos agotadas: las dos en la lista.
+  db.prepare('update productos set stock = 0 where id = ?').run(c.id);
+  const dos = await apartarVarias(t, [a.codigo, b.codigo, c.codigo]);
+  assert.deepEqual(dos.cuerpo.no_disponibles, [b.codigo, c.codigo]);
+  assert.match(dos.cuerpo.error, /^2 piezas ya no están disponibles/);
+  // Código que no existe: 404 con su código.
+  const noHay = await apartarVarias(t, [a.codigo, 'ED-999999']);
+  assert.equal(noHay.status, 404);
+  assert.deepEqual(noHay.cuerpo.no_disponibles, ['ED-999999']);
+  // La pantalla quita las que ya no están y vuelve a intentar con las demás.
+  const bien = await apartarVarias(t, [a.codigo]);
+  assert.equal(bien.status, 201);
+  assert.equal(stockDe(db, a.id), 0);
+});
+
+test('carrito (#681): si una pieza se vende entre la lectura y el batch, el batch entero se deshace y el 409 dice cuál', async () => {
+  const t = tienda();
+  const { db, env } = t;
+  const [a, b] = [vendible(db, 25000, 1), vendible(db, 25000, 1)];
+  const batch = env.DB.batch.bind(env.DB);
+  // Otra socia se lleva la b justo antes de que corra el batch de esta.
+  env.DB.batch = (async (sentencias: D1PreparedStatement[]) => { db.prepare('update productos set stock = 0 where id = ?').run(b.id); return batch(sentencias); }) as typeof env.DB.batch;
+  const r = await apartarVarias(t, [a.codigo, b.codigo]);
+  assert.equal(r.status, 409);
+  assert.deepEqual(r.cuerpo.no_disponibles, [b.codigo]);
+  assert.equal(stockDe(db, a.id), 1);   // la a no se tocó: ni pedido ni líneas a medias
+  assert.equal((db.prepare('select count(*) as n from pedidos').get() as { n: number }).n, 0);
+  assert.equal((db.prepare('select count(*) as n from pedido_lineas').get() as { n: number }).n, 0);
+});
+
+test('carrito (#681): `codigo` suelto sigue valiendo; el tope de 3 es por pedido (no por pieza); 10 piezas máximo; lista vacía o mala = 400', async () => {
+  const t = tienda();
+  const { db } = t;
+  assert.equal((await apartarEnPortal(t, vendible(db, 25000, 1).codigo)).status, 201);   // contrato anterior
+  // Tres pedidos sin pago (1 + 3 + 3 piezas) llenan el tope; el cuarto se rechaza por pedidos, no por piezas.
+  assert.equal((await apartarVarias(t, [0, 1, 2].map(() => vendible(db, 25000, 1).codigo))).status, 201);
+  assert.equal((await apartarVarias(t, [0, 1, 2].map(() => vendible(db, 25000, 1).codigo))).status, 201);
+  const cuarto = await apartarVarias(t, [vendible(db, 25000, 1).codigo]);
+  assert.equal(cuarto.status, 409);
+  assert.match(cuarto.cuerpo.error, /3 apartados sin pago/);
+  const otra = { nombre: 'Marta Otra', telefono: '4449998888' };
+  const diez = Array.from({ length: 10 }, () => vendible(db, 25000, 1));
+  const r10 = await apartarVarias(t, diez.map((x) => x.codigo), {}, otra);
+  assert.equal(r10.status, 201, JSON.stringify(r10.cuerpo));   // diez piezas en un solo pedido cuentan como un apartado
+  assert.equal(r10.cuerpo.pedido.lineas.length, 10);
+  const once = Array.from({ length: 11 }, () => vendible(db, 25000, 1));
+  const r11 = await apartarVarias(t, once.map((x) => x.codigo), {}, otra);
+  assert.equal(r11.status, 400);
+  assert.deepEqual(once.map((x) => stockDe(db, x.id)), once.map(() => 1));
+  for (const malo of [[], 'ED-000101', [''], ['ED-1', 'otra cosa'], [123], null]) assert.equal((await apartarVarias(t, malo, {}, otra)).status, 400, JSON.stringify(malo));
+});
+
+test('carrito (#681): cancelar un pedido de varias piezas devuelve todas las existencias, una sola vez', async () => {
+  const t = tienda();
+  const { db, env } = t;
+  const [a, b, c] = [vendible(db, 25000, 1), vendible(db, 25000, 2), vendible(db, 25000, 1)];
+  assert.equal((await apartarVarias(t, [a.codigo, b.codigo, c.codigo])).status, 201);
+  assert.deepEqual([stockDe(db, a.id), stockDe(db, b.id), stockDe(db, c.id)], [0, 1, 0]);
+  const [x, y] = await Promise.all([cancelarDeSocio(1, env, t.ctx as never, SOCIA.telefono), cancelarDeSocio(1, env, t.ctx as never, SOCIA.telefono)]);
+  assert.deepEqual([x.status, y.status].sort(), [200, 409]);
+  assert.deepEqual([stockDe(db, a.id), stockDe(db, b.id), stockDe(db, c.id)], [1, 2, 1]);
 });

@@ -175,9 +175,27 @@ Una sola ficha, usada en cuatro lugares: el visor del sitio, el catálogo del po
 └──────────────────────────────────┘
 ```
 
-**Qué pasa al tocar «Lo quiero».** Abre WhatsApp con `Quiero producto ED-…` (enlace `wa.me/524445437754?text=Quiero%20producto%20ED-001850`, con el código de la pieza abierta). Decisión de Isaac 1/11: una sola acción, sin opciones; el equipo pregunta recoger o envío en el chat. No hay hoja de opciones ni «Preguntar por WhatsApp» en la ficha (el botón rojo ya es WhatsApp). Las menciones a la hoja en 4.1 (S3, S4) y en T6 quedan sin efecto hasta que la fase «Después» rediseñe ese paso.
+**Qué pasa al tocar «Lo quiero».** *(Reemplazado el 1/11 por 4.2: «Comprar ya» y «Agregar al carrito»; lo que sigue describe el estado hasta #672.)* Abre WhatsApp con `Quiero producto ED-…` (enlace `wa.me/524445437754?text=Quiero%20producto%20ED-001850`, con el código de la pieza abierta). Decisión de Isaac 1/11: una sola acción, sin opciones; el equipo pregunta recoger o envío en el chat. No hay hoja de opciones ni «Preguntar por WhatsApp» en la ficha (el botón rojo ya es WhatsApp). Las menciones a la hoja en 4.1 (S3, S4) y en T6 quedan sin efecto hasta que la fase «Después» rediseñe ese paso.
 
 **Zoom.** Doble toque alterna 1× / 2.5×; pellizco escala entre 1× y 4×; arrastrar mueve la foto acercada; al cerrar vuelve a 1×. Sin librería: `pointer events` + `transform`, unas 60 líneas. Al pasar de 1×, la `<img>` cambia a la foto original (`/api/catalogo/foto/`, que ya se sirve a tamaño completo) si estaba mostrando el recorte. `touch-action: none` dentro de la foto para que el gesto no se lo quede el navegador (mismo truco que los stickers de la portada, #537).
+
+### 4.2 «Comprar ya», «Agregar al carrito» y el resumen de un paso (#681, C2)
+
+Pedido de Isaac (1/11, tras probar #668 en su celular): un carrito «como Mercado Libre y Amazon», con «comprar ya» o «agregar al carrito», y menos fricción en la hoja de apartar (le preguntaba dónde recoger y le pedía todo el total). Cambia la barra de la ficha del portal y del sitio:
+
+```
+┌──────────────────────────────────┐
+│ $250  [       Comprar ya       ]  │  primario rojo 56 px: apartar ahora, directo al resumen
+│ [      Agregar al carrito      ]  │  secundario 52 px; con la pieza dentro: «En tu carrito (n) · Ver carrito»
+│ ¿Dudas? Pregunta por WhatsApp   Compartir │  enlace discreto (`Quiero producto ED-…`)
+└──────────────────────────────────┘
+```
+
+- **Carrito:** botón «Carrito (n)» fijo en la cabecera del catálogo; hoja con foto, nombre, precio, «Quitar», total y «Apartar todo». Lista de códigos en `localStorage` (tope 10, una unidad por código: son piezas únicas); sin cuenta ni sincronía entre dispositivos (`ponytail:` en el código). Al abrirlo se revalida cada pieza contra `GET /api/catalogo?codigo=`: las vendidas salen como «Se vendió» y no suman.
+- **Resumen de un paso**, el mismo para «Comprar ya» y «Apartar todo»: piezas, total, «¿Cómo la recibes?» con **«Recoger en tienda» preseleccionada** (o «Envío a domicilio: $99, gratis desde $1,000 sobre el total, sale el viernes X»), **«Apartas con $100»** (o el total si todo cuesta menos), «Falta por pagar $Y al recoger / antes del envío» y «Apartar por $100». Un toque si no cambia nada; el botón queda a la vista aunque el pedido sea largo.
+- **Servidor:** `POST /api/portal/apartar {id, codigos, entrega}` crea **un** pedido con todas las líneas y baja la existencia de todas en el mismo batch; si alguna ya no está, 409 con `no_disponibles` y no se aparta nada (contrato en `CONTRATO-PORTAL.md`). El tope de 3 sin pago cuenta pedidos.
+- **Sitio:** la misma ficha y el mismo carrito (copia deliberada, otro `localStorage`); «Comprar ya» y «Apartar todo» abren `https://dolarones.eldolaron.com/?carrito=ED-1,ED-2` y el portal abre el resumen de esas piezas (registro de #647 si no hay sesión).
+- **Medición:** `carrito_agregar`, `comprar_ya` y `carrito_apartar`.
 
 **Tarjeta en el catálogo (lista).** Foto 4:5 con sello «¡Última pieza!» cuando aplica; nombre; talla; precio con lista tachada; una línea «● Disponible»; **un solo botón «Lo quiero»** que abre la ficha (no WhatsApp directo: la ficha es donde se decide). El chip «Ver foto» desaparece: toda la tarjeta abre la ficha.
 
@@ -242,7 +260,7 @@ Validación de la fase: `npm test`, `npm run typecheck`, `python tools/validate_
 | # | Qué | Por qué espera |
 | --- | --- | --- |
 | C1 | Pago con tarjeta directo en la ficha (Checkout Pro o similar) | Comisión ≈ 3.5 % + $4 + IVA por operación en tickets de $50–$300; conciliación con corte de caja. |
-| C2 | Apartar varias piezas en un pedido (los pedidos ya tienen líneas) | Primero medir si alguien quiere dos a la vez. |
+| C2 | **HECHO en el portal (#681, parte 1; el sitio, parte 2).** Apartar varias piezas en un pedido (los pedidos ya tienen líneas): carrito, «Comprar ya» y resumen de un paso, ver 4.2. | Isaac lo pidió el 1/11, sin esperar la medición. |
 | C3 | Reseñas de la tienda (Google) y foto del local en la ficha | Necesita reseñas reales acumuladas. |
 | C4 | Entrega local el mismo día en Soledad («Llega hoy») | Costo y logística; hoy envíos solo los viernes. |
 | C5 | Catálogo oficial de WhatsApp (Commerce Manager) sincronizado desde D1 | Integración nueva con Meta; duplicaría la fuente visible de stock. |
@@ -264,7 +282,7 @@ Las dos últimas filas ya se pueden medir **hoy**, antes de tocar nada: cuántos
 
 ### 6.1 Cómo consultar los eventos (A6, Issue #651)
 
-Los eventos de la ficha se guardan en Workers Analytics Engine, dataset `el_dolaron_eventos` (el sandbox usa `el_dolaron_eventos_sandbox`), con el binding `EVENTOS`. El dataset se crea solo con la primera escritura tras el deploy. Cada punto lleva `blob1` = evento, `blob2` = código de pieza, `blob3` = origen (`sitio` o `portal`); nada de IP, agente de usuario, cookies ni datos de personas. Eventos que manda el cliente desde el 1/11: `ficha_abierta`, `lo_quiero` (abre WhatsApp) y `compartir`. El servidor sigue aceptando también `apartar_recoger`, `apartar_envio`, `preguntar` y `whatsapp_abierto` por compatibilidad; ya no se mandan. El evento `catalogo` de la tabla de arriba no se mide todavía.
+Los eventos de la ficha se guardan en Workers Analytics Engine, dataset `el_dolaron_eventos` (el sandbox usa `el_dolaron_eventos_sandbox`), con el binding `EVENTOS`. El dataset se crea solo con la primera escritura tras el deploy. Cada punto lleva `blob1` = evento, `blob2` = código de pieza, `blob3` = origen (`sitio` o `portal`); nada de IP, agente de usuario, cookies ni datos de personas. Eventos que manda el cliente desde el 1/11: `ficha_abierta`, `lo_quiero` (abre WhatsApp: desde #681 es el enlace «¿Dudas? Pregunta por WhatsApp»), `compartir`, `apartado_portal` (por pieza apartada) y, de #681, `carrito_agregar`, `comprar_ya` y `carrito_apartar` (por pieza, cuando el pedido salió del carrito). El servidor sigue aceptando también `apartar_recoger`, `apartar_envio`, `preguntar` y `whatsapp_abierto` por compatibilidad; ya no se mandan. El evento `catalogo` de la tabla de arriba no se mide todavía.
 
 Se consulta con la [SQL API de Analytics Engine](https://developers.cloudflare.com/analytics/analytics-engine/sql-api/) (`POST https://api.cloudflare.com/client/v4/accounts/<ACCOUNT_ID>/analytics_engine/sql`, el SQL va en el cuerpo). Necesita un token de API con permiso **Account Analytics: Read**, que crea Isaac en el panel de Cloudflare; no se guarda en el repositorio.
 

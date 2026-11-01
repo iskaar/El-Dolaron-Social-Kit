@@ -337,10 +337,24 @@ export const apartarRevendedora = (request: Request, env: Env, ctx: ExecutionCon
 export const VENDEDORA_PORTAL = 'portal';
 const CODIGO_PIEZA = /^ED-\d{1,10}$/;
 
+/** Piezas por pedido del portal (#681): el carrito del navegador topa en lo mismo. */
+export const PIEZAS_PORTAL = 10;
+
+/** De las piezas pedidas, las que ya no se pueden apartar (no vendibles o sin existencia). Se consulta tambien tras un 409 del batch. */
+async function noDisponibles(env: Env, codigos: string[]): Promise<string[]> {
+  const { results } = await env.DB.prepare(`select p.codigo from productos p where p.codigo in (${codigos.map(() => '?').join(',')}) and (${VENDIBLE})`)
+    .bind(...codigos).all<{ codigo: string }>();
+  const hay = new Set(results.map((f) => f.codigo));
+  return codigos.filter((c) => !hay.has(c));
+}
+const textoNoDisponibles = (n: number, de: number) => n === 1 ? (de === 1 ? 'Esa pieza ya no está disponible.' : 'Una pieza ya no está disponible.') : `${n} piezas ya no están disponibles.`;
+
 /**
- * Apartar desde el portal (#668): `POST /api/portal/apartar { id, codigo, entrega }`. Nada del cuerpo es de confianza salvo la pieza
- * y la entrega: nombre y telefono salen del socio autenticado y el precio de `productos`. Lo demas es `crearPedido` en modo portal
- * (stock - 1 en el mismo batch, UUID idempotente, 24 h de plazo, tope de 3 sin pago).
+ * Apartar desde el portal (#668, carrito en #681): `POST /api/portal/apartar { id, codigos: ['ED-…', …], entrega }` (`codigo` suelto
+ * sigue valiendo: es una lista de una). Nada del cuerpo es de confianza salvo las piezas y la entrega: nombre y telefono salen del socio
+ * autenticado y el precio, el anticipo y el envio de `productos` / `venta.js`. Lo demas es `crearPedido` en modo portal
+ * (stock - 1 de cada pieza en el mismo batch que el pedido, UUID idempotente, 24 h de plazo, tope de 3 pedidos sin pago).
+ * Si alguna ya no esta, el batch entero se deshace: 409 con `no_disponibles` para que la pantalla las quite y reintente.
  */
 export async function apartarPortal(request: Request, env: Env, ctx: ExecutionContext, socio: { nombre: string; telefono: string }): Promise<Response> {
   const sinCache = { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' };
@@ -350,19 +364,30 @@ export async function apartarPortal(request: Request, env: Env, ctx: ExecutionCo
   const telefono = telefonoDe(socio.telefono);
   if (!UUID.test(id)) return json({ error: 'Identificador invalido.' }, 400);
   if (!telefono) return json({ error: 'Tu teléfono necesita revisión en la tienda antes de apartar.' }, 409);
-  // El reintento de un apartado que ya bajo la existencia no vuelve a buscar la pieza (ya no es VENDIBLE): lo responde crearPedidoDe.
+  // El reintento de un apartado que ya bajo la existencia no vuelve a buscar las piezas (ya no son VENDIBLE): lo responde crearPedidoDe.
   let lineas: { producto_id: string; cantidad: number }[] = [];
+  let codigos: string[] = [];
   if (!await pedidoPor(env, 'id = ?', id)) {
-    const codigo = String(cuerpo.codigo ?? '').trim().toUpperCase();
-    if (!CODIGO_PIEZA.test(codigo)) return json({ error: 'Código de pieza inválido.' }, 400);
-    const pieza = await env.DB.prepare(`select p.id, (${VENDIBLE}) as vendible from productos p where p.codigo = ?`)
-      .bind(codigo).first<{ id: string; vendible: number }>();
-    if (!pieza) return json({ error: 'La pieza no existe.' }, 404);
-    if (!pieza.vendible) return json({ error: 'Esa pieza ya no está disponible.' }, 409);
-    lineas = [{ producto_id: pieza.id, cantidad: 1 }];
+    const pedidos = Array.isArray(cuerpo.codigos) ? cuerpo.codigos : [cuerpo.codigo];
+    codigos = [...new Set(pedidos.map((c) => String(c ?? '').trim().toUpperCase()))];   // son piezas unicas: una unidad por codigo
+    if (pedidos.length > PIEZAS_PORTAL || codigos.length > PIEZAS_PORTAL) return json({ error: `Un pedido lleva hasta ${PIEZAS_PORTAL} piezas.` }, 400);
+    if (!codigos.length || codigos.some((c) => !CODIGO_PIEZA.test(c))) return json({ error: 'Código de pieza inválido.' }, 400);
+    const { results } = await env.DB.prepare(`select p.id, p.codigo, (${VENDIBLE}) as vendible from productos p where p.codigo in (${codigos.map(() => '?').join(',')})`)
+      .bind(...codigos).all<{ id: string; codigo: string; vendible: number }>();
+    const faltan = codigos.filter((c) => !results.some((f) => f.codigo === c));
+    if (faltan.length) return json({ error: codigos.length === 1 ? 'La pieza no existe.' : `${faltan.length === 1 ? 'Una pieza no existe' : `${faltan.length} piezas no existen`}.`, no_disponibles: faltan }, 404);
+    const fuera = results.filter((f) => !f.vendible).map((f) => f.codigo);
+    if (fuera.length) return json({ error: textoNoDisponibles(fuera.length, codigos.length), no_disponibles: fuera }, 409);
+    lineas = results.map((f) => ({ producto_id: f.id, cantidad: 1 }));
   }
   const r = await crearPedidoDe({ id, lineas, cliente: socio.nombre.slice(0, 80), telefono, entrega: cuerpo.entrega }, env, ctx, VENDEDORA_PORTAL, 'portal');
-  if (r.status !== 200 && r.status !== 201) return new Response(r.body, { status: r.status, headers: sinCache });
+  if (r.status !== 200 && r.status !== 201) {
+    // Ganada por otro entre la lectura y el batch: el batch se deshizo completo; se dice cuales ya no estan.
+    const falla = await r.json() as Record<string, unknown>;
+    const fuera = r.status === 409 && codigos.length && /ya no está disponible/.test(String(falla.error)) ? await noDisponibles(env, codigos) : [];
+    return new Response(JSON.stringify(fuera.length ? { ...falla, error: textoNoDisponibles(fuera.length, codigos.length), no_disponibles: fuera } : falla),
+      { status: r.status, headers: sinCache });
+  }
   const { pedido } = await r.json() as { pedido: NonNullable<Awaited<ReturnType<typeof pedidoPor>>> };
   return new Response(JSON.stringify({
     pedido: { folio: pedido.folio, vence_en: pedido.vence_en, entrega: pedido.entrega, envio: pedido.envio, subtotal: pedido.subtotal,

@@ -1,7 +1,7 @@
 // Catálogo completo y ficha de pieza del portal (Issue #649, docs/UX-COMPRA.md §4).
 //
 // COPIA DELIBERADA de site/public/catalogo.js (Issue #645): el sitio nunca importa de app/ ni la app de site/.
-// Si cambian el enlace de «Lo quiero», la línea de apartado, el zoom o los filtros (#672), cámbialos en los dos lados.
+// Si cambian los botones de la ficha (#681), el enlace de «¿Dudas?», la línea de apartado, el zoom o los filtros (#672), cámbialos en los dos lados.
 // venta.js no se sirve en el host del portal (lo prueba portal.test.ts), por eso las constantes y viernesDeEnvio
 // se copian aquí; src/catalogo-ficha.test.ts falla si se separan de venta.js o de categorias.js.
 
@@ -94,8 +94,13 @@ export function lineaApartado(pieza, ahora = Date.now()) {
   return `${paga} Recoge en Soledad (11 a 8) o te la enviamos el viernes ${fechaCorta(viernesDeEnvio(ahora))} (envío nacional gratis desde ${precio(ENVIO_GRATIS_DESDE)}; si no, ${precio(ENVIO_COSTO)}).`;
 }
 
-// «Lo quiero» (docs/UX-COMPRA.md §4): un solo mensaje corto; el equipo pregunta recoger o envío en el chat.
-export const enlaceLoQuiero = (pieza) => `${WHATSAPP}?text=${encodeURIComponent(`Quiero producto ${pieza.codigo}`)}`;
+// «¿Dudas? Pregunta por WhatsApp» (docs/UX-COMPRA.md §4, #681): un solo mensaje corto; el equipo pregunta recoger o envío en el chat.
+// Una pieza o varias (el resumen del carrito para quien aún no se registra).
+export function enlaceLoQuiero(piezas) {
+  const codigos = [].concat(piezas).map((p) => p.codigo);
+  const texto = codigos.length > 1 ? `Quiero estos productos: ${codigos.join(', ')}` : `Quiero producto ${codigos[0]}`;
+  return `${WHATSAPP}?text=${encodeURIComponent(texto)}`;
+}
 
 const el = (tag, className, text) => {
   const node = document.createElement(tag);
@@ -108,8 +113,8 @@ const TIEMPO = 'tiempo';
 
 /**
  * Arma el catálogo en <section id="catalogo"> y la ficha en <dialog id="ficha-dialogo"> (portal.html).
- * `opciones.apartar(pieza)` (#668) abre la hoja de «Apartar aquí» (apartar.js); sin ella el botón no se muestra.
- * Devuelve { abrir(codigo, conHoja) }: abre la ficha de una pieza (y su hoja) al volver del registro.
+ * `opciones.comprar(pieza)` (#668/#681) abre el resumen de «Comprar ya» (apartar.js); `opciones.carrito` (carrito.js) da
+ * { tiene(codigo), agregar(pieza), cantidad(), abrir() } para «Agregar al carrito». Sin cada una, su botón no se muestra.
  */
 export function iniciarCatalogo(opciones = {}) {
   const root = document.getElementById('catalogo');
@@ -124,8 +129,8 @@ export function iniciarCatalogo(opciones = {}) {
   const dialogClose = f('.ficha-cerrar'), dialogImg = f('.ficha-img'), dialogTitle = f('.ficha-titulo');
   const dialogMeta = f('.ficha-meta'), dialogPrice = f('.ficha-precio');
   const fotoBox = f('.ficha-foto'), selloUltima = f('.ficha-sello'), botonZoom = f('.ficha-zoom'), pista = f('.ficha-pista');
-  const compra = f('.ficha-compra'), precioBarra = f('.ficha-barprecio'), botonQuiero = f('.ficha-quiero');
-  const botonCompartir = f('.ficha-compartir'), avisoFicha = f('.ficha-aviso'), botonApartar = f('.ficha-apartar');
+  const compra = f('.ficha-compra'), precioBarra = f('.ficha-barprecio'), botonDudas = f('.ficha-dudas');
+  const botonCompartir = f('.ficha-compartir'), avisoFicha = f('.ficha-aviso'), botonComprar = f('.ficha-comprar'), botonCarrito = f('.ficha-carrito');
   const elegido = filtrosDeUrl(location.search);   // categoría, talla, banda de precio y «Llegó esta semana» (#672)
   let actual = null, busqueda = '', focoAnterior = null, controller = null, cargado = false;
   let deseada = codigoDePieza(location.search);   // pieza a abrir tras la primera carga (#590)
@@ -232,7 +237,7 @@ export function iniciarCatalogo(opciones = {}) {
     } catch { /* medir nunca rompe la ficha */ }
   }
 
-  // ---- «Lo quiero» (enlace directo a WhatsApp) y Compartir ----
+  // ---- «Comprar ya», «Agregar al carrito», «¿Dudas?» (enlace directo a WhatsApp) y Compartir ----
   async function compartir() {
     if (!actual) return;
     evento('compartir', actual.codigo);
@@ -243,10 +248,27 @@ export function iniciarCatalogo(opciones = {}) {
     try { await navigator.clipboard.writeText(url); avisoFicha.textContent = 'Enlace copiado'; }
     catch { avisoFicha.textContent = `Copia este enlace: ${url}`; }
   }
-  botonQuiero.addEventListener('click', () => { if (actual) evento('lo_quiero', actual.codigo); });   // el enlace lo abre el navegador
+  // «lo_quiero» sigue siendo el evento de «abrió WhatsApp desde la ficha»: la métrica de #651 no cambia de nombre.
+  botonDudas.addEventListener('click', () => { if (actual) evento('lo_quiero', actual.codigo); });   // el enlace lo abre el navegador
   botonCompartir.addEventListener('click', compartir);
-  botonApartar.hidden = !opciones.apartar;
-  botonApartar.addEventListener('click', () => { if (actual) opciones.apartar(actual); });
+  botonComprar.hidden = !opciones.comprar;
+  botonComprar.addEventListener('click', () => { if (!actual) return; evento('comprar_ya', actual.codigo); opciones.comprar(actual); });
+  // Con la pieza ya en el carrito el botón pasa a «Ver carrito» (como Amazon): un segundo toque no la agrega otra vez.
+  const carrito = opciones.carrito;
+  botonCarrito.hidden = !carrito;
+  const pintarCarrito = () => {
+    botonCarrito.textContent = actual && carrito?.tiene(actual.codigo) ? `En tu carrito (${carrito.cantidad()}) · Ver carrito` : 'Agregar al carrito';
+  };
+  botonCarrito.addEventListener('click', () => {
+    if (!actual) return;
+    if (carrito.tiene(actual.codigo)) { carrito.abrir(); return; }
+    const estado = carrito.agregar(actual);
+    if (estado === 'agregado') {
+      evento('carrito_agregar', actual.codigo);
+      avisoFicha.textContent = `Agregado al carrito. Llevas ${carrito.cantidad()} ${carrito.cantidad() === 1 ? 'pieza' : 'piezas'}.`;
+    } else if (estado === 'lleno') avisoFicha.textContent = 'Tu carrito está lleno (10 piezas). Aparta lo que llevas y luego sigue con las demás.';
+    pintarCarrito();
+  });
 
   function abrirFicha(pieza, disparador) {
     focoAnterior = disparador;
@@ -263,7 +285,8 @@ export function iniciarCatalogo(opciones = {}) {
     selloUltima.hidden = pieza.ultima !== true;   // lo decide el servidor; sin el campo no se muestra nada
     compra.textContent = lineaApartado(pieza);
     avisoFicha.textContent = '';
-    botonQuiero.href = enlaceLoQuiero(pieza);
+    botonDudas.href = enlaceLoQuiero(pieza);
+    pintarCarrito();
     dialog.showModal();
     dialogClose.focus();
     mostrarPista();
@@ -439,5 +462,4 @@ export function iniciarCatalogo(opciones = {}) {
   more.addEventListener('click', () => cargar(false));
   retry.addEventListener('click', () => cargar(true));
   cargar(true);
-  return { async abrir(codigo, conHoja) { const pieza = await abrirPorCodigo(codigo); if (pieza && conHoja) opciones.apartar?.(pieza); } };
 }

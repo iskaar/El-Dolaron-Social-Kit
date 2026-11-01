@@ -15,17 +15,19 @@ test('las constantes y viernesDeEnvio copiados coinciden con venta.js y categori
   assert.deepEqual(ficha.CATEGORIAS, [['', 'Todo'], ...CATEGORIAS]);
 });
 
-test('«Lo quiero» es un solo mensaje corto con el código; bajo $100 se paga completa', () => {
+test('«¿Dudas? Pregunta por WhatsApp» es un solo mensaje corto con el código (o con todos los del carrito); bajo $100 se paga completa', () => {
   const pieza = { codigo: 'ED-000123', nombre: 'Chamarra Levis', talla: 'M', precio: 250_00 };
   const ahora = Date.parse('2026-10-31T18:00:00Z'); // sábado → viernes 6 de noviembre
   assert.equal(ficha.enlaceLoQuiero(pieza), 'https://wa.me/524445437754?text=Quiero%20producto%20ED-000123');
+  assert.equal(ficha.enlaceLoQuiero([pieza]), ficha.enlaceLoQuiero(pieza));
+  assert.equal(decodeURIComponent(ficha.enlaceLoQuiero([pieza, { codigo: 'ED-000124' }])), 'https://wa.me/524445437754?text=Quiero estos productos: ED-000123, ED-000124');
   assert.match(ficha.lineaApartado(pieza, ahora), /^Apártala con \$100 por 7 días\./);
   assert.match(ficha.lineaApartado({ ...pieza, precio: 60_00 }, ahora), /^Se paga completa al apartar\./);
   assert.equal(ficha.codigoDePieza('?pieza=ed-12'), 'ED-12');
   assert.equal(ficha.codigoDePieza('?pieza=x'), '');
 });
 
-test('portal.html trae todo lo que catalogo-ficha.js busca y el catálogo ya no manda a eldolaron.com ni abre WhatsApp desde la tarjeta', () => {
+test('portal.html trae todo lo que catalogo-ficha.js busca, la ficha tiene «Comprar ya» y «Agregar al carrito» y el catálogo no manda a eldolaron.com ni abre WhatsApp desde la tarjeta', () => {
   const html = readFileSync('public/portal.html', 'utf8');
   const js = readFileSync('public/catalogo-ficha.js', 'utf8');
   const clases = new Set([...html.matchAll(/class="([^"]*)"/g)].flatMap((m) => m[1].split(' ')));
@@ -37,9 +39,13 @@ test('portal.html trae todo lo que catalogo-ficha.js busca y el catálogo ya no 
   }
   assert.match(html, /id="catalogo"/);
   assert.match(html, /Disponible hoy en tienda<\/p>\s*<p class="ficha-cond">Condición A · Como nueva<\/p>/);
-  // «Lo quiero» es un enlace a WhatsApp (el código se agrega al abrir la pieza); no hay hoja de opciones ni «Preguntar por WhatsApp» en la ficha.
-  assert.match(html, /<a class="ficha-quiero" href="https:\/\/wa\.me\/524445437754" target="_blank" rel="noopener">Lo quiero<\/a>/);
-  assert.doesNotMatch(html, /ficha-hoja|ficha-op|data-op|ficha-entra|ficha-preguntar/);
+  // #681: «Comprar ya» (primario) y «Agregar al carrito»; «¿Dudas?» es el enlace a WhatsApp (el código se agrega al abrir la pieza). «Lo quiero» ya no es botón.
+  const barra = html.slice(html.indexOf('class="ficha-barra"'), html.indexOf('</dialog>', html.indexOf('class="ficha-barra"')));
+  assert.ok(barra.indexOf('ficha-comprar') < barra.indexOf('ficha-carrito') && barra.indexOf('ficha-carrito') < barra.indexOf('ficha-dudas'));
+  assert.match(barra, /<a class="ficha-sec ficha-dudas" href="https:\/\/wa\.me\/524445437754" target="_blank" rel="noopener">¿Dudas\? Pregunta por WhatsApp<\/a>/);
+  assert.match(barra, /<p class="ficha-aviso" role="status" aria-live="polite"><\/p>/);   // «Agregado al carrito» se anuncia
+  assert.match(html, /<button class="carrito-boton" type="button" aria-haspopup="dialog">Carrito \(<span class="carrito-n">0<\/span>\)<\/button>/);
+  assert.doesNotMatch(html, /ficha-hoja|ficha-op|data-op|ficha-entra|ficha-preguntar|ficha-quiero/);
   assert.doesNotMatch(html, /eldolaron\.com\/#catalogo|novedades/);
   assert.doesNotMatch(readFileSync('public/portal.js', 'utf8'), /novedades|wa\.me\/524445437754\?text/);
   // D7: el catálogo ya no cuelga de la sesión.
@@ -73,4 +79,7 @@ test('filtros: portal.html trae el contenedor de filtros dentro de #catalogo y e
   }
   const css = readFileSync('public/portal.css', 'utf8');
   assert.match(css, /\.catalogo-talla-select \{[^}]*min-height:44px/);
+  // 44 px o más en los botones táctiles del carrito.
+  for (const regla of ['carrito-boton', 'carrito-quitar', 'ficha-carrito']) assert.match(css, new RegExp(`\.${regla} \{[^}]*min-height:(44|52)px`), regla);
+  assert.match(css, /\.ficha-comprar \{[^}]*min-height:56px/);
 });

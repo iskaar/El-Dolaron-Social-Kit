@@ -58,8 +58,11 @@
     </div>
   </section>
   <section id="catalogo" class="catalogo" aria-labelledby="titulo-catalogo">
-    <h2 id="titulo-catalogo">Lo nuevo en tienda</h2>
-    <p class="nota">Toca una pieza para verla completa y apartarla. Las piezas cambian todos los días.</p>
+    <div class="catalogo-cabeza">
+      <h2 id="titulo-catalogo">Lo nuevo en tienda</h2>
+      <button class="carrito-boton" type="button" aria-haspopup="dialog">Carrito (<span class="carrito-n">0</span>)</button>
+    </div>
+    <p class="nota">Toca una pieza para verla completa y comprarla. Las piezas cambian todos los días.</p>
     <form class="catalogo-buscar" role="search" hidden>
       <label for="catalogo-q">Buscar en el catálogo</label>
       <input id="catalogo-q" type="search" maxlength="80" enterkeyhint="search" placeholder="Nombre, marca, talla o código" autocomplete="off">
@@ -193,16 +196,28 @@
       </div>
     </div>
     <div class="ficha-barra">
-      <div class="ficha-principal"><span class="ficha-barprecio"></span><a class="ficha-quiero" href="https://wa.me/524445437754" target="_blank" rel="noopener">Lo quiero</a></div>
-      <button class="ficha-apartar" type="button" hidden>Apartar aquí</button>
-      <div class="ficha-secundarios"><button class="ficha-sec ficha-compartir" type="button">Compartir</button></div>
+      <div class="ficha-principal"><span class="ficha-barprecio"></span><button class="ficha-comprar" type="button" hidden>Comprar ya</button></div>
+      <button class="ficha-carrito" type="button" hidden>Agregar al carrito</button>
+      <div class="ficha-secundarios"><a class="ficha-sec ficha-dudas" href="https://wa.me/524445437754" target="_blank" rel="noopener">¿Dudas? Pregunta por WhatsApp</a><button class="ficha-sec ficha-compartir" type="button">Compartir</button></div>
       <p class="ficha-aviso" role="status" aria-live="polite"></p>
     </div>
   </div>
 </dialog>
+<dialog id="carrito-dialogo" aria-labelledby="carrito-titulo">
+  <h2 id="carrito-titulo" class="carrito-titulo" tabindex="-1">Tu carrito</h2>
+  <p class="carrito-aviso nota" role="status" aria-live="polite"></p>
+  <p class="carrito-vacio" hidden>Tu carrito está vacío. Abre una pieza y toca «Agregar al carrito».</p>
+  <ul class="carrito-lista"></ul>
+  <div class="carrito-resumen" hidden>
+    <p class="carrito-total"></p>
+    <p class="nota">El envío y lo que pagas hoy los ves en el siguiente paso.</p>
+    <button class="carrito-apartar" type="button">Apartar todo</button>
+  </div>
+  <button class="carrito-cerrar secundario" type="button">Seguir viendo piezas</button>
+</dialog>
 <dialog id="apartar-dialogo" aria-labelledby="apartar-titulo">
   <h2 id="apartar-titulo" class="apartar-titulo" tabindex="-1"></h2>
-  <p class="apartar-pieza"></p>
+  <ul class="apartar-piezas"></ul>
   <div class="apartar-invitado" hidden>
     <p>Regístrate en un minuto para apartar aquí, o escríbenos por WhatsApp.</p>
     <p class="nota">Entra con tu celular. Acumulas Dolarones en cada compra (1 D = $1 en tienda), ves tus compras y tus apartados.</p>
@@ -210,18 +225,27 @@
     <a class="apartar-whatsapp boton-enlace" href="https://wa.me/524445437754" target="_blank" rel="noopener">Seguir por WhatsApp</a>
   </div>
   <form class="apartar-form" hidden>
+    <p class="apartar-total"></p>
+    <p class="apartar-desglose nota"></p>
     <fieldset>
-      <legend>¿Cómo la quieres?</legend>
+      <legend>¿Cómo la recibes?</legend>
       <label class="apartar-opcion"><input type="radio" name="apartar-entrega" value="tienda" checked>
-        <span><b>Recogerla en Soledad</b><small>Todos los días de 11 a 8</small></span></label>
+        <span><b>Recoger en tienda</b><small>Soledad, todos los días de 11 a 8</small></span></label>
       <label class="apartar-opcion"><input type="radio" name="apartar-entrega" value="envio">
-        <span><b>Que me la envíen</b><small>Sale los viernes · <span class="apartar-envio-costo"></span></small></span></label>
+        <span><b>Envío a domicilio</b><small>Envío <span class="apartar-envio-costo"></span></small></span></label>
     </fieldset>
-    <p class="apartar-explica"></p>
-    <p class="nota">Tienes 24 horas para transferir. Si no pagas, la pieza vuelve a la venta.</p>
-    <button class="apartar-enviar" type="submit">Apartar</button>
-    <p class="apartar-error" role="alert"></p>
+    <p class="apartar-apartas"></p>
+    <p class="apartar-falta"></p>
+    <p class="apartar-explica nota"></p>
+    <p class="nota">Tienes 24 horas para transferir. Si no pagas, lo apartado vuelve a la venta.</p>
+    <div class="apartar-pie">
+      <p class="apartar-error" role="alert"></p>
+      <button class="apartar-enviar" type="submit">Apartar</button>
+    </div>
   </form>
+  <div class="apartar-vacio" hidden>
+    <p>Las piezas que querías ya se vendieron. Abre el catálogo para ver lo nuevo.</p>
+  </div>
   <div class="apartar-listo" hidden>
     <p class="apartar-folio"></p>
     <p class="apartar-pagar">Transfiere <strong class="apartar-monto"></strong> con este concepto:</p>
