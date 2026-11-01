@@ -65,10 +65,10 @@ Conclusión: el único «botón de pagar» de El Dolarón es una persona con el 
 | --- | --- | --- |
 | Catálogo público con cursor, categoría, búsqueda, foto y recorte; CORS a eldolaron.com; caché 300 s | `app/src/catalogo.ts` | Misma fuente para sitio y portal. Falta exponer `ultima` en la lista (hoy solo en `destacados`) y, si se decide, `grado`. |
 | Visor con morph (View Transitions), `<dialog>` accesible, enlace `?pieza=` | `site/public/catalogo.js`, `styles.css` | Base de la ficha. Se extiende, no se reemplaza. |
-| Apartado 15 % redondeado al peso hacia arriba; envío $100 de anticipo; $99 / gratis desde $1,000 | `app/public/venta.js` `anticipoMinimoDe`, `envioDe`, `viernesDeEnvio` | Isaac fijó el 31/10 el apartado en **$100 para cualquier pieza** (D8): el mensaje público ya no depende de `ANTICIPO_PORCENTAJE`; la constante se ajusta en B1 cuando el apartado se cree en línea. El sitio no importa código de `app/` (regla de `site/README.md`): se copia la constante de envío, como ya se hace con `CATEGORIAS`. |
+| Apartado de $100 fijos (`ANTICIPO`, `anticipoMinimoDe`; #662); $99 / gratis desde $1,000 | `app/public/venta.js` `anticipoMinimoDe`, `envioDe`, `viernesDeEnvio` | Isaac fijó el 31/10 el apartado en **$100 para cualquier pieza** (D8): `venta.js` ya cobra así (#662, sin `ANTICIPO_PORCENTAJE`). El sitio no importa código de `app/` (regla de `site/README.md`): se copia la constante de envío, como ya se hace con `CATEGORIAS`. |
 | Pedidos: apartar, saldo, vencimiento por cron, envío, cierre en caja | `app/src/pedidos.ts` (#269) | Fase «Después»: el apartado en línea es un pedido más, con `vendedora` = portal. |
 | Identidad del cliente por SMS (Firebase), `clientes.auth_uid`, bases aceptadas | `app/src/portal.ts` | Quien aparta en línea ya está identificado; no hay que inventar otra cuenta. |
-| Clave de rastreo única por transferencia; CLABE de la tienda (Mercado Pago 722…) | `app/src/transferencias.ts`, `docs/CEP-BANXICO.md` | Pagar el 15 % por SPEI sin servicio nuevo. |
+| Clave de rastreo única por transferencia; CLABE de la tienda (Mercado Pago 722…) | `app/src/transferencias.ts`, `docs/CEP-BANXICO.md` | Pagar el apartado de $100 por SPEI sin servicio nuevo. |
 | Reporte de pago con foto del comprobante, revisado por la tienda | `app/src/pagos-reportados.ts` (#609) | Hoy solo para revendedoras; el cliente del portal puede usar el mismo flujo. |
 | Avisos al dueño + Web Push | `app/src/avisos.ts` (#600, #607) | «Apartado nuevo por pagar» llega al teléfono del equipo. |
 | Asistente de WhatsApp con `buscar_productos` y `SCORE` de intención | `whatsapp/asistente.mjs` | Puede mandar el enlace `?pieza=` de la ficha (hoy tiene prohibido pegar enlaces de piezas: habría que cambiar esa regla). |
@@ -326,9 +326,9 @@ Resultado esperado tras «Ahora»: T1–T4 y T6 en 3 de 3; T5 depende de B5.
 
 **Supuestos derivados de D8** (si alguno está mal, corregir en el Issue #643 antes de A5):
 
-1. El apartado pasa de 15 % a **$100 fijos** para cualquier pieza, se recoja o se envíe. Hoy `venta.js` calcula 15 % para recoger (`ANTICIPO_PORCENTAJE`) y $100 solo para envío; el personal lo sigue cobrando así en `/pedidos` hasta que B1 cambie la constante. Mientras, el mensaje público dice $100 y una pieza de menos de $100 se paga completa.
+1. **Confirmado por Isaac el 1/11/2026 (Issue #662).** El apartado pasa de 15 % a **$100 fijos** para cualquier pieza, se recoja o se envíe; una pieza de menos de $100 se paga completa (`anticipoMinimoDe = min(subtotal, ANTICIPO)`). La app (`venta.js`, `/pedidos`, `/vender`, tablero) y el bot de WhatsApp ya lo dicen; el Worker de WhatsApp se despliega aparte.
 2. Debajo de $1,000 el envío sigue costando **$99** (`ENVIO_COSTO`) y se dice en la ficha para no esconder cargos. En la tarjeta basta «Envío gratis desde $1,000».
-3. Los datos oficiales del 22/10 y `app/src/legal.ts` hablan de 15 %: A5 actualiza solo el sitio; el texto legal se toca cuando Isaac confirme el supuesto 1.
+3. Los datos oficiales del 22/10 hablaban de 15 %. `app/src/legal.ts` no contiene la regla de apartado (verificado en #662): no hay texto legal que cambiar por esto.
 
 **Pendientes nuevos (de la sección 4.1):**
 

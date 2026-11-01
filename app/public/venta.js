@@ -93,11 +93,10 @@ export function anticipoDePedido(saldo, total, dolarones = 0) {
   return Math.max(0, Math.min(saldo, total - dolarones));
 }
 
-/** Apartados (#434): 15% de las piezas al peso hacia arriba; $100 al abrir un paquete. */
-export const ANTICIPO_ENVIO = 100_00;
-export const ANTICIPO_PORCENTAJE = 15;
-export const anticipoMinimoDe = (subtotal, entrega) => entrega === 'envio'
-  ? ANTICIPO_ENVIO : Math.ceil(subtotal * ANTICIPO_PORCENTAJE / 100 / 100) * 100;
+/** Apartados (#662): $100 fijos, se recoja o se envíe; si las piezas cuestan menos, se paga el total. */
+export const ANTICIPO = 100_00;
+export const ANTICIPO_ENVIO = ANTICIPO;   // alias para importadores existentes
+export const anticipoMinimoDe = (subtotal) => Math.min(subtotal, ANTICIPO);   // la entrega ya no cambia el mínimo
 export const ENVIO_COSTO = 99_00;
 export const ENVIO_GRATIS_DESDE = 1000_00;
 export const envioDe = (subtotal) => (subtotal > 0 && subtotal < ENVIO_GRATIS_DESDE ? ENVIO_COSTO : 0);

@@ -6,7 +6,7 @@ import { lineasNetas } from './netas.ts';
 import { diasEnVentaPorCategoria, inventarioEnPiso } from './reportes.ts';
 import { D_ALTA, D_PREMIO, MINIMO_COMPRA, MAXIMO_REFERIDOS } from './referidos.ts';
 import { DIAS_APARTADO, HORAS_REVENDEDORA } from './pedidos.ts';
-import { ANTICIPO_ENVIO, ANTICIPO_PORCENTAJE } from '../public/venta.js';
+import { ANTICIPO } from '../public/venta.js';
 import { COMISION } from '../public/vender.js';
 import {
   apertura, canalML, canalesDelMes, comisionDelMes, desdeComparacion, gastosDelMes, mercadoLibre, personasVisibles, quedaML, SQL_ML, resumenDeVentas,
@@ -280,7 +280,7 @@ async function whatsapp(env: Env, cal: Calendario) {
     apartados: { abiertos: suma('n'), valor: suma('total'), pagado: suma('pagado'), falta: suma('falta') },
     entrega: { tienda: entrega('tienda'), envio: entrega('envio'), envios_pendientes: pedidos.reduce((s, f) => s + f.sin_guia, 0) },
     // Las reglas salen del codigo de pedidos y de la caja: aqui no se repiten.
-    reglas: { dias_apartado: DIAS_APARTADO, horas_revendedora: HORAS_REVENDEDORA, anticipo_pct: ANTICIPO_PORCENTAJE, anticipo_envio: ANTICIPO_ENVIO },
+    reglas: { dias_apartado: DIAS_APARTADO, horas_revendedora: HORAS_REVENDEDORA, anticipo: ANTICIPO },
   };
 }
 

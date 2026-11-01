@@ -102,7 +102,7 @@
 
     <div class="panel" id="nuevo">
       <h2>Nuevo apartado</h2>
-      <p class="nota" style="margin:0">Recoger: 15% de las piezas, al peso hacia arriba, sin mínimo. Envío: abre tu paquete con $100 y agrega piezas sin otro anticipo. Tienes 7 días; en envío se renuevan con cada pieza o abono. Enviamos los viernes: liquida antes del jueves a las 20:00 para salir esa semana.</p>
+      <p class="nota" style="margin:0">Apartas con $100 (o el total si la pieza cuesta menos), se recoja o se envíe. En envío, abre tu paquete con $100 y agrega piezas sin otro anticipo. Tienes 7 días; en envío se renuevan con cada pieza o abono. Enviamos los viernes: liquida antes del jueves a las 20:00 para salir esa semana.</p>
       <label for="codigo">Código de la pieza (ED-…, o solo los números)</label>
       <div class="fila">
         <input id="codigo" autocomplete="off" inputmode="text" placeholder="Escanea o escribe el código">
@@ -239,7 +239,7 @@
 </dialog>
 
 <script type="module">
-import { envioDe, anticipoMinimoDe, ANTICIPO_ENVIO, transferenciaDe, BANCOS } from '/venta.js';
+import { envioDe, anticipoMinimoDe, transferenciaDe, BANCOS } from '/venta.js';
 import { codigoDeDigitos } from '/code128.js';
 
 const $ = (id) => document.getElementById(id);
@@ -369,8 +369,8 @@ function calcular() {
   const subtotal = piezas.reduce((suma, p) => suma + p.precio * p.cantidad, 0);
   const envio = entrega() === 'envio' ? envioDe(subtotal) : 0;
   const total = subtotal + envio;
-  const anticipo = entrega() === 'envio' ? ANTICIPO_ENVIO : Math.round(Number($('anticipo').value || 0) * 100);
-  const minimo = anticipoMinimoDe(subtotal, entrega());
+  const minimo = anticipoMinimoDe(subtotal);
+  const anticipo = entrega() === 'envio' ? minimo : Math.round(Number($('anticipo').value || 0) * 100);
   let motivo = '';
   if (!piezas.length) motivo = 'Agrega al menos una pieza.';
   else if (!($('cliente').value.trim())) motivo = 'Escribe el nombre del cliente.';
@@ -390,9 +390,9 @@ function pintar() {
       <button type="button" data-quitar="${i}" aria-label="Quitar ${escapar(p.nombre)}">✕</button>
     </div>`).join('');
   const envioElegido = entrega() === 'envio';
-  // En tienda se puede recibir más del 15%; el paquete abre con $100 y sigue con abonos.
+  // En tienda se puede recibir más de $100; el paquete abre con $100 y sigue con abonos.
   $('anticipo').readOnly = envioElegido;
-  const minimo = anticipoMinimoDe(piezas.reduce((s, p) => s + p.precio * p.cantidad, 0), entrega());
+  const minimo = anticipoMinimoDe(piezas.reduce((s, p) => s + p.precio * p.cantidad, 0));
   if (envioElegido || !anticipoTocado) $('anticipo').value = String(minimo / 100);
   $('anticipo').min = String(minimo / 100);
   const c = calcular();
@@ -400,7 +400,7 @@ function pintar() {
   $('c-envio-etiqueta').textContent = envioElegido ? 'Envío' : 'Entrega';
   $('c-envio').textContent = !envioElegido ? 'en tienda' : c.envio ? pesos(c.envio) : c.subtotal ? 'gratis' : '—';
   $('c-total').textContent = pesos(c.total);
-  $('anticipo-ayuda').textContent = envioElegido ? '$100 cuentan para el total. Después agrega piezas sin otro anticipo y abona hasta liquidar. Envío $99; gratis desde $1,000 en piezas.' : `15% al peso hacia arriba: mínimo ${pesos(minimo)}, sin mínimo fijo.`;
+  $('anticipo-ayuda').textContent = envioElegido ? `${pesos(minimo)} cuentan para el total. Después agrega piezas sin otro anticipo y abona hasta liquidar. Envío $99; gratis desde $1,000 en piezas.` : `Mínimo ${pesos(minimo)} ($100, o el total si la pieza cuesta menos). Puedes recibir más; cuenta para el total.`;
   validar();
 }
 function validar() {
@@ -426,10 +426,10 @@ const totalDe = (p) => p.subtotal + p.envio;
 const mensajeConfirmar = (p) => `¡Hola ${nombreDe(p)}! Tu apartado P-${p.folio} en El Dolarón quedó registrado: ${piezasDe(p)}. `
   + `Anticipo recibido: ${pesos(p.anticipo)}. Total: ${pesos(totalDe(p))}. `
   + (p.entrega === 'envio'
-    ? (p.liquidado_en ? `Liquidado. Sale el viernes ${fecha(p.viernes_envio + 'T12:00:00-06:00')}. ` : `Faltan ${pesos(p.faltante)}. Abres con $100 y puedes agregar piezas sin otro anticipo. `)
+    ? (p.liquidado_en ? `Liquidado. Sale el viernes ${fecha(p.viernes_envio + 'T12:00:00-06:00')}. ` : `Faltan ${pesos(p.faltante)}. Abres con ${pesos(p.anticipo)} y puedes agregar piezas sin otro anticipo. `)
       + 'Liquida piezas + envío antes del jueves a las 20:00 para salir ese viernes; desde esa hora sale el viernes siguiente. Envío $99, gratis desde $1,000 en piezas. '
       + (p.liquidado_en ? '' : `Tu paquete vence el ${fecha(p.vence_en)}; cada pieza o abono renueva 7 días. Al vencer, lo pagado queda como saldo a favor por 1 mes.`)
-    : `Anticipo de al menos 15% al peso hacia arriba, sin mínimo. Recógelo en Jardín Hidalgo #129 a más tardar el ${fecha(p.vence_en)}. Si no lo recoges a tiempo, tu anticipo queda como saldo a favor por 1 mes.`);
+    : `Anticipo de al menos $100 (o el total si la pieza cuesta menos). Recógelo en Jardín Hidalgo #129 a más tardar el ${fecha(p.vence_en)}. Si no lo recoges a tiempo, tu anticipo queda como saldo a favor por 1 mes.`);
 const mensajeRecordar = (p) => `Hola ${nombreDe(p)}, te recordamos que tu apartado P-${p.folio} vence el ${fecha(p.vence_en)}. ¡Te esperamos!`;
 const mensajeSaldo = (p) => `Hola ${nombreDe(p)}, tu apartado P-${p.folio} venció. Tu anticipo quedó como saldo a favor de ${pesos(p.saldo)} hasta el ${fecha(p.saldo_vence_en)}: menciona P-${p.folio} en caja.`;
 const mensajeGuia = (p) => `Hola ${nombreDe(p)}, tu pedido P-${p.folio} ya va en camino. Número de guía: ${p.guia}.`;

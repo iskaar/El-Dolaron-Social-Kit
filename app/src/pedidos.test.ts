@@ -102,13 +102,13 @@ test('dos pedidos por la ultima pieza: uno gana y el otro recibe 409 sin dejar n
   assert.equal((db.prepare('select count(*) as n from pedidos').get() as { n: number }).n, 1);
 });
 
-test('reglas del pedido: 15% local, $100 al abrir envío, tarifa, teléfono, etiquetas y caja para todo cobro', async () => {
+test('reglas del pedido: $100 de anticipo, tienda y envío, tarifa, teléfono, etiquetas y caja para todo cobro', async () => {
   const { db, pedir } = tienda();
   assert.equal(telefonoDe('+52 (444) 123-4567'), '4441234567');
   assert.equal(telefonoDe('123'), null);
 
-  assert.equal((await apartar(pedir, { anticipo: 3799 })).status, 400);
-  assert.equal((await apartar(pedir, { anticipo: 3800 })).status, 201);           // $250 × 15% = $37.50 → $38
+  assert.equal((await apartar(pedir, { anticipo: 9999 })).status, 400);
+  assert.equal((await apartar(pedir, { anticipo: 10000 })).status, 201);          // $250: $100 fijos, no 15 %
   assert.equal((await apartar(pedir, { anticipo: 25001 })).status, 400);          // pasa del total
   assert.equal((await apartar(pedir, { cliente: '  ' })).status, 400);
   assert.equal((await apartar(pedir, { telefono: '12345' })).status, 400);
@@ -470,18 +470,43 @@ test('una pieza de tienda sigue apartandose aunque el pedido venga con una pieza
   assert.equal(stockDe(db, b), 4);
 });
 
-test('una prenda de $50 se aparta con $8: D1 guarda el dinero real y el corte lo cuenta', async () => {
+test('apartado de $100 fijos (#662): $150 pide $100 y $60 se paga completo, recogiendo o con envío', async () => {
+  const { db, pedir } = tienda();
+  const caro = [{ producto_id: pieza(db, 15000, 5), cantidad: 1 }];
+  const barato = [{ producto_id: pieza(db, 6000, 5), cantidad: 1 }];
+  // Recoger una pieza de $150: $50 no alcanza, $100 sí.
+  assert.equal((await apartar(pedir, { lineas: caro, anticipo: 5000 })).status, 400);
+  assert.equal((await apartar(pedir, { lineas: caro, anticipo: 9999 })).status, 400);
+  assert.equal((await apartar(pedir, { lineas: caro, anticipo: 10000 })).cuerpo.pedido.anticipo, 10000);
+  // Recoger una de $60: el anticipo es el total.
+  assert.equal((await apartar(pedir, { lineas: barato, anticipo: 5999 })).status, 400);
+  assert.equal((await apartar(pedir, { lineas: barato, anticipo: 6000 })).cuerpo.pedido.anticipo, 6000);
+  // Envío de $150 + $99: abre con $100 exactos.
+  assert.equal((await apartar(pedir, { lineas: caro, entrega: 'envio', anticipo: 5000 })).status, 400);
+  assert.equal((await apartar(pedir, { lineas: caro, entrega: 'envio', anticipo: 12000 })).status, 400);
+  const envioCaro = await apartar(pedir, { lineas: caro, entrega: 'envio', anticipo: 10000 });
+  assert.equal(envioCaro.cuerpo.pedido.anticipo, 10000);
+  assert.equal(envioCaro.cuerpo.pedido.faltante, 14900);
+  // Envío de $60 + $99: el anticipo mínimo es el total de la pieza; $100 también abre el paquete.
+  assert.equal((await apartar(pedir, { lineas: barato, entrega: 'envio', anticipo: 5999 })).status, 400);
+  const envioBarato = await apartar(pedir, { lineas: barato, entrega: 'envio', anticipo: 6000 });
+  assert.equal(envioBarato.status, 201, JSON.stringify(envioBarato.cuerpo));
+  assert.equal(envioBarato.cuerpo.pedido.faltante, 9900);
+  assert.equal((await apartar(pedir, { lineas: barato, entrega: 'envio', anticipo: 10000 })).status, 201);
+});
+
+test('una prenda de $50 se aparta con sus $50 completos: D1 guarda el dinero real y el corte lo cuenta', async () => {
   const { db, pedir } = tienda();
   const prenda = pieza(db, 5000, 1);
   const lineas = [{ producto_id: prenda, cantidad: 1 }];
-  assert.equal((await apartar(pedir, { lineas, anticipo: 799 })).status, 400);
-  const r = await apartar(pedir, { lineas, anticipo: 800, forma_pago: 'efectivo' });
+  assert.equal((await apartar(pedir, { lineas, anticipo: 4999 })).status, 400);
+  const r = await apartar(pedir, { lineas, anticipo: 5000, forma_pago: 'efectivo' });
   assert.equal(r.status, 201, JSON.stringify(r.cuerpo));
-  assert.equal(r.cuerpo.pedido.anticipo, 800);
-  assert.equal(r.cuerpo.pedido.saldo, 800);
+  assert.equal(r.cuerpo.pedido.anticipo, 5000);
+  assert.equal(r.cuerpo.pedido.saldo, 5000);
   assert.equal(stockDe(db, prenda), 0);
-  const c = await pedir('/api/cortes', { id: crypto.randomUUID(), caja: 'Caja 1', efectivo_contado: 50800 });
-  assert.equal(c.cuerpo.efectivo_ventas, 800);
+  const c = await pedir('/api/cortes', { id: crypto.randomUUID(), caja: 'Caja 1', efectivo_contado: 55000 });
+  assert.equal(c.cuerpo.efectivo_ventas, 5000);
   assert.equal(c.cuerpo.diferencia, 0);
 });
 

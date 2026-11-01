@@ -16,7 +16,7 @@ export const CATEGORIAS = [
   ['deportes', 'Deportes'], ['otros', 'Otros'],
 ];
 
-// Copia de app/public/venta.js (ANTICIPO_ENVIO, ENVIO_COSTO, ENVIO_GRATIS_DESDE), en centavos.
+// Copia de app/public/venta.js (ANTICIPO, ENVIO_COSTO, ENVIO_GRATIS_DESDE), en centavos.
 export const APARTADO = 100_00;
 export const ENVIO_COSTO = 99_00;
 export const ENVIO_GRATIS_DESDE = 1000_00;

@@ -14,7 +14,7 @@ const RESPUESTAS = [
   { palabras: ['ubicacion', 'direccion', 'donde', 'llegar', 'ubicados', 'calle', 'soledad', 'mapa'],
     texto: 'Estamos en Jardín Hidalgo 129, Centro, Soledad de Graciano Sánchez. Abrimos todos los días de 11 a. m. a 8 p. m. Mapa: https://maps.app.goo.gl/RgWXq1AUvyXsV9ts6' },
   { palabras: ['apartar', 'aparto', 'apartado', 'apartan', 'separar', 'separan', 'reservar'],
-    texto: 'Sí apartamos en tienda: dejas el 15 % del valor y te lo guardamos 7 días. Escríbenos qué te interesa y el equipo te confirma.' },
+    texto: 'Sí apartamos en tienda: dejas $100 (o el total si cuesta menos) y te lo guardamos 7 días. Escríbenos qué te interesa y el equipo te confirma.' },
   { palabras: ['horario', 'abren', 'abierto', 'cierran', 'hora'],
     texto: 'Estamos abiertos todos los días de 11 a. m. a 8 p. m.' },
   { palabras: ['telefono', 'numero', 'llamar', 'marcar', 'whatsapp'],

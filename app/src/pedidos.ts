@@ -11,7 +11,7 @@ import { cajaDe } from './corte.ts';
 import { sumarMeses } from './dolarones.ts';
 import { conciliarSeguro } from './mercadolibre.ts';
 import { sentenciasVale } from './vales.ts';
-import { envioDe, anticipoMinimoDe, ANTICIPO_ENVIO, viernesDeEnvio, claveRastreoDe } from '../public/venta.js';
+import { envioDe, anticipoMinimoDe, ANTICIPO, viernesDeEnvio, claveRastreoDe } from '../public/venta.js';
 import { leerTransferencia, sentenciaTransferencia, respuestaClaveUsada, esChoqueDeClave, excedenteDe } from './transferencias.ts';
 import { hayReportePendiente, reportesDeRevendedora, reportesPendientes, rechazarPago } from './pagos-reportados.ts';
 
@@ -239,11 +239,12 @@ async function crearPedido(request: Request, env: Env, ctx: ExecutionContext, co
   const envio = entrega === 'envio' ? envioDe(subtotal) : 0;
   const total = subtotal + envio;
   const anticipo = revendedora ? 0 : Number(cuerpo.anticipo);
-  const minimo = revendedora ? 0 : anticipoMinimoDe(subtotal, entrega);
+  const minimo = revendedora ? 0 : anticipoMinimoDe(subtotal);
   if (!Number.isSafeInteger(total) || !Number.isSafeInteger(anticipo) || anticipo < minimo || anticipo > total)
     return json({ error: `El anticipo mínimo es $${minimo / 100} y no pasa del total.` }, 400);
-  if (!revendedora && entrega === 'envio' && anticipo !== ANTICIPO_ENVIO)
-    return json({ error: 'El paquete de envío se abre con $100; el resto se recibe como abonos.' }, 400);
+  // Envío: el paquete abre con $100 (o el total de las piezas si cuestan menos); el resto entra como abonos.
+  if (!revendedora && entrega === 'envio' && anticipo !== minimo && anticipo !== ANTICIPO)
+    return json({ error: 'El paquete de envío se abre con $100 (o el total de las piezas si cuestan menos); el resto se recibe como abonos.' }, 400);
   // Transferencia (#593): todo anticipo de apartado o envio por transferencia lleva la clave de rastreo del comprobante.
   const transf = !revendedora && formaPago === 'transferencia' && anticipo > 0 ? leerTransferencia(cuerpo, anticipo) : null;
   if (transf && !transf.ok) return json({ error: transf.error, campo: transf.campo }, 400);
