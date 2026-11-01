@@ -93,6 +93,12 @@ test('el prompt solo afirma los datos aprobados', () => {
   assert.match(PROMPT, /Jardín Hidalgo 129/);
   assert.match(PROMPT, /\$100 \(o el total si la pieza cuesta menos\).*7 días/);
   assert.match(PROMPT, /envíos.*no afirmes ni niegues/);
+  // Issue #673: la ficha de una pieza concreta sí se puede pegar; cualquier otro enlace sigue prohibido.
+  assert.doesNotMatch(PROMPT, /no pegues enlaces de piezas/);
+  assert.match(PROMPT, /Si la persona pregunta por una pieza concreta o por una sola de las que encontraste, puedes pegar su enlace \(campo url de la herramienta\)/);
+  assert.match(PROMPT, /ahí la ve de cerca y la aparta con «Lo quiero»/);
+  assert.match(PROMPT, /Nunca inventes enlaces ni pegues más de uno por mensaje/);
+  assert.match(PROMPT, /Los únicos otros enlaces que puedes pegar son los dos de los grupos y el del mapa/);
 });
 
 test('llama al modelo con el prompt y el historial, y propaga los errores', async () => {
@@ -331,6 +337,22 @@ test('#499 B.4: si el modelo falla después de buscar, no manda tarjetas sueltas
     await correr(env, [texto('p4', '5214421234567', '¿tienen blusas bonitas para regalar a mi hermana?')]);
     assert.equal(r.meta.length, 1);
     assert.equal(r.meta[0].type, 'text');
+  } finally { r.restaurar(); }
+});
+
+test('#673: si el texto ya trae el enlace de ED-000001, el Worker no repite su tarjeta y manda las demás', async () => {
+  const productos = [pieza(1), pieza(2), pieza(3), pieza(4)];
+  const r = redSecuencia([usar('buscar_productos', { q: 'blusa' }),
+    textoFinal('Esta te puede interesar, ahí la ve de cerca y la aparta con «Lo quiero»: https://eldolaron.com/?pieza=ED-000001\nSCORE: 6')]);
+  const tienda = tiendaSimulada({ '/api/asistente/productos': { productos } });
+  try {
+    const env = entorno({}, { ANTHROPIC_API_KEY: 'clave', ASISTENTE_TOKEN: 'token-enlace', TIENDA: tienda });
+    await correr(env, [texto('p5', '5214421234567', '¿tienen blusas talla M?')]);
+    assert.equal(r.meta[0].type, 'text');
+    assert.match(r.meta[0].text.body, /\?pieza=ED-000001/);
+    const tarjetas = r.meta.slice(1);
+    assert.equal(tarjetas.length, MAX_TARJETAS);
+    assert.deepEqual(tarjetas.map((m) => m.image.caption.match(/ED-\d+/)[0]), ['ED-000002', 'ED-000003', 'ED-000004']);
   } finally { r.restaurar(); }
 });
 

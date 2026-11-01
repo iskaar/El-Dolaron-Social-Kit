@@ -4,6 +4,8 @@ import { atenderAlta } from './alta.mjs';
 import { esFinDeConversacion, estaPausado, generarRespuesta, guardarTurno, interpretar, leerHistorial, pausar, RETENCION_SEGUNDOS } from './asistente.mjs';
 
 const encoder = new TextEncoder();
+// Issue #673: si el texto ya trae el enlace ?pieza=<codigo> de una pieza, no se repite su tarjeta.
+const enlaceDePieza = (texto, codigo) => new RegExp(`\\?pieza=${codigo}(?![\\w-])`).test(texto);
 const maxBytes = 1024 * 1024;
 const reply = (text, status = 200) => new Response(text, {
   status,
@@ -157,7 +159,7 @@ async function responderMensajes(event, env) {
               // Issue #499 (B.4): las piezas con foto pública de la última búsqueda van como tarjetas.
               const consultar = env.TIENDA && env.ASISTENTE_TOKEN ? async (nombre, entrada) => {
                 const resultado = await consultarTienda(env, nombre, entrada);
-                if (nombre === 'buscar_productos') tarjetas = (resultado.productos ?? []).filter((p) => p.foto && p.codigo).slice(0, MAX_TARJETAS);
+                if (nombre === 'buscar_productos') tarjetas = (resultado.productos ?? []).filter((p) => p.foto && p.codigo);
                 return resultado;
               } : null;
               respuesta = interpretar(await generarRespuesta(historial, recortar(texto), env.ANTHROPIC_API_KEY, consultar));
@@ -173,7 +175,7 @@ async function responderMensajes(event, env) {
         if (!respuesta.texto) continue;
         if (!await enviarYGuardar(env, desde, de, respuesta.texto)) continue;
         await guardarTurno(env.EVENTS, de, texto, respuesta.texto);
-        for (const p of tarjetas) await enviarYGuardar(env, desde, de, `${p.nombre} · ${p.precio} · ${p.codigo}\n${p.url}`, p.foto);
+        for (const p of tarjetas.filter((t) => !enlaceDePieza(respuesta.texto, t.codigo)).slice(0, MAX_TARJETAS)) await enviarYGuardar(env, desde, de, `${p.nombre} · ${p.precio} · ${p.codigo}\n${p.url}`, p.foto);
         if (respuesta.escalar) await pausar(env.EVENTS, de);
       }
     }
