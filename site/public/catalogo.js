@@ -98,10 +98,43 @@
     return `${paga} Recoge en Soledad (11 a 8) o te la enviamos el viernes ${fechaCorta(viernesDeEnvio(ahora))} (envío nacional gratis desde ${precio(ENVIO_GRATIS_DESDE)}; si no, ${precio(ENVIO_COSTO)}).`;
   }
 
-  // «Lo quiero» (docs/UX-COMPRA.md §4): un solo mensaje corto; el equipo pregunta recoger o envío en el chat.
+  // «¿Dudas? Pregunta por WhatsApp» (docs/UX-COMPRA.md §4, #681): un solo mensaje corto; el equipo pregunta recoger o envío en el chat.
   const enlaceLoQuiero = (pieza) => `${WHATSAPP}?text=${encodeURIComponent(`Quiero producto ${pieza.codigo}`)}`;
 
-  if (typeof module !== "undefined") module.exports = { precio, apiBase, codigoDePieza, viernesDeEnvio, fechaCorta, lineaApartado, enlaceLoQuiero, BANDAS, filtrosDeUrl, paramsDeFiltros, busquedaConFiltros };
+  // Carrito (Issue #681, C2 de #643). COPIA DELIBERADA de app/public/carrito.js (el sitio no importa de app/): misma clave, mismo tope
+  // de 10 piezas, mismos códigos ED-… y misma revisión contra GET /api/catalogo?codigo=. tools/check_site_catalogo.cjs vigila que sigan iguales.
+  // ponytail: el carrito vive en el localStorage de ESTE navegador, sin cuenta ni sincronía entre dispositivos y aparte del del portal;
+  // «Comprar ya» y «Apartar todo» pasan las piezas al portal por la URL y allá se revisa todo de nuevo (precio, existencia y sesión).
+  const TOPE_CARRITO = 10;
+  const CLAVE_CARRITO = "carrito-dolaron";
+  const PORTAL = "https://dolarones.eldolaron.com";
+  const CODIGO = /^ED-\d{1,10}$/;
+  // Códigos válidos, en mayúsculas, sin repetir (son piezas únicas) y hasta el tope.
+  const codigosValidos = (lista) => [...new Set((Array.isArray(lista) ? lista : []).map((c) => String(c == null ? "" : c).trim().toUpperCase()).filter((c) => CODIGO.test(c)))].slice(0, TOPE_CARRITO);
+  // { lista, estado: 'agregado' | 'ya_estaba' | 'lleno' }
+  function agregarCodigo(lista, codigo) {
+    if (lista.includes(codigo)) return { lista, estado: "ya_estaba" };
+    if (lista.length >= TOPE_CARRITO) return { lista, estado: "lleno" };
+    return { lista: [...lista, codigo], estado: "agregado" };
+  }
+  // El portal lee ?carrito=ED-1,ED-2, lo suma a su carrito y abre el resumen de esas piezas (con registro si no hay sesión).
+  const urlPortal = (codigos) => `${PORTAL}/?carrito=${codigosValidos(codigos).join(",")}`;
+  // Revisa cada código contra el catálogo público: disponible, vendida (el catálogo ya no la trae) o fallo de red.
+  async function piezasDe(codigos, base, pedir = (url) => fetch(url, { cache: "no-store", headers: { accept: "application/json" } })) {
+    const lecturas = await Promise.all(codigos.map(async (codigo) => {
+      try {
+        const r = await pedir(`${base}/api/catalogo?codigo=${encodeURIComponent(codigo)}`);
+        if (!r.ok) return { codigo, fallo: true };
+        const pieza = ((await r.json()).piezas || []).find((x) => x.codigo === codigo);
+        return pieza ? { codigo, pieza } : { codigo, vendida: true };
+      } catch { return { codigo, fallo: true }; }
+    }));
+    return { disponibles: lecturas.filter((l) => l.pieza).map((l) => l.pieza), vendidas: lecturas.filter((l) => l.vendida).map((l) => l.codigo),
+      fallaron: lecturas.filter((l) => l.fallo).map((l) => l.codigo) };
+  }
+
+  if (typeof module !== "undefined") module.exports = { precio, apiBase, codigoDePieza, viernesDeEnvio, fechaCorta, lineaApartado, enlaceLoQuiero, BANDAS, filtrosDeUrl, paramsDeFiltros, busquedaConFiltros,
+    TOPE_CARRITO, CLAVE_CARRITO, codigosValidos, agregarCodigo, urlPortal, piezasDe };
 
   // Los precios con su precio de lista tachado, igual en tarjetas y visor.
   function pintarPrecio(nodo, pieza) {
@@ -249,9 +282,21 @@
   const pista = root.querySelector(".ficha-pista");
   const compra = root.querySelector(".ficha-compra");
   const precioBarra = root.querySelector(".ficha-barprecio");
-  const botonQuiero = root.querySelector(".ficha-quiero");
+  const botonComprar = root.querySelector(".ficha-comprar");
+  const botonCarrito = root.querySelector(".ficha-carrito");
+  const botonDudas = root.querySelector(".ficha-dudas");
   const botonCompartir = root.querySelector(".ficha-compartir");
   const avisoFicha = root.querySelector(".ficha-aviso");
+  const carritoBoton = root.querySelector(".cart-button");
+  const carritoN = root.querySelector(".cart-n");
+  const cartDialog = root.querySelector(".cart-dialog");
+  const cartTitle = root.querySelector(".cart-title");
+  const cartNotice = root.querySelector(".cart-notice");
+  const cartEmpty = root.querySelector(".cart-empty");
+  const cartList = root.querySelector(".cart-list");
+  const cartSummary = root.querySelector(".cart-summary");
+  const cartTotal = root.querySelector(".cart-total");
+  const cartApartar = root.querySelector(".cart-apartar");
   let actual = null;   // pieza que muestra la ficha
   const elegido = filtrosDeUrl(location.search);   // categoría, talla, banda de precio y «Llegó esta semana» (Issue #672)
   let busqueda = "";
@@ -378,7 +423,7 @@
     setTimeout(() => { pista.hidden = true; }, 3000);
   }
 
-  // ---- Ficha: «Lo quiero» (enlace directo a WhatsApp) y Compartir ----
+  // ---- Ficha: «Comprar ya», «Agregar al carrito», «¿Dudas?» (enlace directo a WhatsApp) y Compartir ----
   async function compartir() {
     if (!actual) return;
     evento("compartir", actual.codigo);
@@ -389,8 +434,121 @@
     try { await navigator.clipboard.writeText(url); avisoFicha.textContent = "Enlace copiado"; }
     catch { avisoFicha.textContent = `Copia este enlace: ${url}`; }
   }
-  if (botonQuiero) botonQuiero.addEventListener("click", () => { if (actual) evento("lo_quiero", actual.codigo); });   // el enlace lo abre el navegador
+  // «lo_quiero» sigue siendo el evento de «abrió WhatsApp desde la ficha»: la métrica de #651 no cambia de nombre.
+  if (botonDudas) botonDudas.addEventListener("click", () => { if (actual) evento("lo_quiero", actual.codigo); });   // el enlace lo abre el navegador
+  // «Comprar ya» es un enlace al portal con la pieza en la URL; el evento sale antes de que cambie la página.
+  if (botonComprar) botonComprar.addEventListener("click", () => { if (actual) evento("comprar_ya", actual.codigo); });
   if (botonCompartir) botonCompartir.addEventListener("click", compartir);
+
+  // ---- Carrito: lista de códigos en este navegador, botón «Carrito (n)» y hoja con las piezas ----
+  let carrito = [];
+  try { carrito = codigosValidos(JSON.parse(localStorage.getItem(CLAVE_CARRITO) || "[]")); } catch {}
+  function guardarCarrito() {
+    try { localStorage.setItem(CLAVE_CARRITO, JSON.stringify(carrito)); } catch {}
+    if (carritoN) carritoN.textContent = `Carrito (${carrito.length})`;
+  }
+  guardarCarrito();
+  // Otra pestaña cambió el carrito: esta lo recoge.
+  if (typeof addEventListener === "function") addEventListener("storage", (e) => {
+    if (e.key !== CLAVE_CARRITO) return;
+    try { carrito = codigosValidos(JSON.parse(e.newValue || "[]")); } catch { carrito = []; }
+    guardarCarrito();
+  });
+  // Con la pieza ya en el carrito el botón pasa a «Ver carrito» (como Amazon): un segundo toque no la agrega otra vez.
+  function pintarBotonCarrito() {
+    if (botonCarrito) botonCarrito.textContent = actual && carrito.includes(actual.codigo) ? `En tu carrito (${carrito.length}) · Ver carrito` : "Agregar al carrito";
+  }
+  if (botonCarrito) botonCarrito.addEventListener("click", () => {
+    if (!actual) return;
+    if (carrito.includes(actual.codigo)) { abrirCarrito(); return; }
+    const r = agregarCodigo(carrito, actual.codigo);
+    carrito = r.lista;
+    guardarCarrito();
+    if (r.estado === "agregado") {
+      evento("carrito_agregar", actual.codigo);
+      if (avisoFicha) avisoFicha.textContent = `Agregado al carrito. Llevas ${carrito.length} ${carrito.length === 1 ? "pieza" : "piezas"}.`;
+    } else if (r.estado === "lleno" && avisoFicha) avisoFicha.textContent = "Tu carrito está lleno (10 piezas). Aparta lo que llevas y luego sigue con las demás.";
+    pintarBotonCarrito();
+  });
+  let revision = { disponibles: [], vendidas: [], fallaron: [] };
+  let generacion = 0;
+  function pintarCarrito() {
+    const { disponibles, vendidas, fallaron } = revision;
+    const suma = disponibles.reduce((s, p) => s + p.precio, 0);
+    cartList.replaceChildren(...carrito.map((codigo) => {
+      const pieza = disponibles.find((p) => p.codigo === codigo);
+      const vendida = vendidas.includes(codigo);
+      const fallo = fallaron.includes(codigo);
+      const li = el("li", `cart-item${vendida ? " vendida" : ""}`);
+      const foto = el("span", "cart-photo");
+      if (pieza && /^https?:\/\//.test(pieza.foto || "")) {
+        const img = new Image();
+        img.alt = ""; img.loading = "lazy"; img.decoding = "async";
+        img.addEventListener("error", () => img.remove());
+        img.src = pieza.foto;
+        foto.append(img);
+      }
+      const nombre = pieza ? pieza.nombre : codigo;
+      const datos = el("div", "cart-data");
+      datos.append(el("p", "cart-name", nombre),
+        el("p", vendida || fallo ? "cart-price cart-sold" : "cart-price", vendida ? "Se vendió" : fallo ? "No pudimos revisarla" : pieza ? precio(pieza.precio) : ""));
+      const quitar = el("button", "button button-paper cart-remove", "Quitar");
+      quitar.type = "button";
+      quitar.setAttribute("aria-label", `Quitar ${nombre} del carrito`);
+      quitar.addEventListener("click", () => {
+        carrito = carrito.filter((c) => c !== codigo);
+        guardarCarrito();
+        revision = { disponibles: disponibles.filter((p) => p.codigo !== codigo), vendidas: vendidas.filter((c) => c !== codigo), fallaron: fallaron.filter((c) => c !== codigo) };
+        cartNotice.textContent = `Quitaste ${nombre}.`;
+        pintarCarrito();
+        const siguiente = cartList.querySelector && cartList.querySelector(".cart-remove");
+        (siguiente || cartTitle).focus();
+        pintarBotonCarrito();
+      });
+      li.append(foto, datos, quitar);
+      return li;
+    }));
+    cartTitle.textContent = `Tu carrito (${carrito.length})`;
+    cartEmpty.hidden = carrito.length > 0;
+    cartSummary.hidden = carrito.length === 0;
+    cartTotal.textContent = `Total de las piezas: ${precio(suma)}`;
+    // «Apartar todo» lleva al portal solo las piezas que siguen disponibles, y no sin haberlas podido revisar.
+    const puede = disponibles.length > 0 && fallaron.length === 0;
+    cartApartar.hidden = !puede;
+    if (puede) cartApartar.href = urlPortal(disponibles.map((p) => p.codigo));
+  }
+  async function abrirCarrito() {
+    if (!cartDialog) return;
+    const mia = ++generacion;
+    cartNotice.textContent = "";
+    revision = { disponibles: [], vendidas: [], fallaron: [] };
+    cartList.replaceChildren();
+    cartEmpty.hidden = true;
+    cartSummary.hidden = true;
+    cartTitle.textContent = `Tu carrito (${carrito.length})`;
+    if (typeof cartDialog.showModal === "function") cartDialog.showModal(); else cartDialog.open = true;
+    cartTitle.focus();
+    if (!carrito.length) { pintarCarrito(); return; }
+    cartNotice.textContent = "Revisando que sigan disponibles…";
+    const r = await piezasDe(carrito, base);
+    if (mia !== generacion || !cartDialog.open) return;
+    revision = r;
+    pintarCarrito();
+    cartNotice.textContent = r.fallaron.length ? "No pudimos revisar todas las piezas. Revisa tu red y vuelve a abrir el carrito."
+      : r.vendidas.length ? `${r.vendidas.length === 1 ? "Una pieza ya se vendió" : `${r.vendidas.length} piezas ya se vendieron`}: no ${r.vendidas.length === 1 ? "cuenta" : "cuentan"} en el total.` : "";
+  }
+  if (cartDialog && carritoBoton) {
+    carritoBoton.addEventListener("click", abrirCarrito);
+    cartApartar.addEventListener("click", () => { for (const p of revision.disponibles) evento("carrito_apartar", p.codigo); });   // el enlace al portal lo abre el navegador
+    for (const cerrar of cartDialog.querySelectorAll(".cart-close")) cerrar.addEventListener("click", () => cartDialog.close());
+    cartDialog.addEventListener("click", (ev) => { if (ev.target === cartDialog) cartDialog.close(); });
+    // Las que ya se vendieron se avisaron una vez: al cerrar salen del carrito.
+    cartDialog.addEventListener("close", () => {
+      generacion++;
+      if (revision.vendidas.length) { carrito = carrito.filter((c) => !revision.vendidas.includes(c)); guardarCarrito(); }
+      pintarBotonCarrito();
+    });
+  }
 
   function abrirVisor(pieza, disparador, img) {
     if (!dialog) return;
@@ -418,7 +576,9 @@
     if (selloUltima) selloUltima.hidden = pieza.ultima !== true;   // lo decide el servidor; sin el campo no se muestra nada
     if (compra) compra.textContent = lineaApartado(pieza);
     if (avisoFicha) avisoFicha.textContent = "";
-    if (botonQuiero) botonQuiero.href = enlaceLoQuiero(pieza);
+    if (botonDudas) botonDudas.href = enlaceLoQuiero(pieza);
+    if (botonComprar) botonComprar.href = urlPortal([pieza.codigo]);
+    pintarBotonCarrito();
     const abrir = () => {
       if (typeof dialog.showModal === "function") dialog.showModal();
       else dialog.open = true;

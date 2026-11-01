@@ -96,6 +96,7 @@
     </section>
     <section id="catalogo" class="catalog" aria-labelledby="catalogo-titulo">
       <div class="wrap">
+        <div class="catalog-bar"><button class="button button-paper cart-button" type="button" aria-haspopup="dialog"><span class="cart-n">Carrito (0)</span></button></div>
         <header class="section-head"><p class="section-label">Sección B · Cambia todos los días</p><h2 id="catalogo-titulo">Lo nuevo en tienda</h2><p class="section-lede">Lo que ves aquí está en la tienda hoy. Cambia todos los días.</p></header>
         <form class="catalog-search" role="search">
           <label class="search-label" for="catalogo-buscar">Buscar en el catálogo</label>
@@ -134,11 +135,24 @@
               </div>
             </div>
             <div class="piece-dialog-bar">
-              <div class="ficha-principal"><span class="ficha-barprecio"></span><a class="button ficha-quiero" href="https://wa.me/524445437754" target="_blank" rel="noopener">Lo quiero</a></div>
-              <div class="ficha-secundarios"><button class="ficha-sec ficha-compartir" type="button">Compartir</button></div>
+              <div class="ficha-principal"><span class="ficha-barprecio"></span><a class="button ficha-comprar" href="https://dolarones.eldolaron.com/">Comprar ya</a></div>
+              <button class="button button-paper ficha-carrito" type="button">Agregar al carrito</button>
+              <div class="ficha-secundarios"><a class="ficha-sec ficha-dudas" href="https://wa.me/524445437754" target="_blank" rel="noopener">¿Dudas? Pregunta por WhatsApp</a><button class="ficha-sec ficha-compartir" type="button">Compartir</button></div>
               <p class="ficha-aviso" role="status" aria-live="polite"></p>
             </div>
           </div>
+        </dialog>
+        <dialog class="cart-dialog" aria-labelledby="carrito-titulo">
+          <h3 id="carrito-titulo" class="cart-title" tabindex="-1">Tu carrito</h3>
+          <p class="cart-notice" role="status" aria-live="polite"></p>
+          <p class="cart-empty" hidden>Tu carrito está vacío. Abre una pieza y toca «Agregar al carrito».</p>
+          <ul class="cart-list"></ul>
+          <div class="cart-summary" hidden>
+            <p class="cart-total"></p>
+            <p class="cart-hint">El envío y lo que pagas hoy los ves en el siguiente paso, en tu cuenta de Dolarones.</p>
+            <a class="button button-navy cart-apartar" href="https://dolarones.eldolaron.com/" hidden>Apartar todo</a>
+          </div>
+          <button class="button button-paper cart-close" type="button">Seguir viendo piezas</button>
         </dialog>
         <noscript><p>Activa JavaScript para ver el catálogo, o <a href="#grupos">únete a nuestros grupos de WhatsApp</a>.</p></noscript>
       </div>
@@ -166,7 +180,7 @@
     </section>
     <section class="how wrap" aria-labelledby="como-comprar">
       <header class="section-head"><p class="section-label">Sección F · Cómo comprar</p><h2 id="como-comprar">¿Ya tienes algo en mente?</h2><p class="section-lede">Tres pasos, sin vueltas.</p></header>
-      <ol class="steps"><li><h3>Elige tu pieza</h3><p>Búscala en el catálogo y toca «Lo quiero».</p></li><li><h3>Apártala con $100</h3><p>Paga por transferencia o en la tienda. Te la guardamos 7 días.</p></li><li><h3>Recógela o te la enviamos</h3><p>Recógela en Jardín Hidalgo 129, de 11 a 8, todos los días. O te la enviamos el viernes: envío nacional gratis desde $1,000, si no $99. Pedidos hasta el jueves 8 p. m.</p></li></ol>
+      <ol class="steps"><li><h3>Elige tu pieza</h3><p>Búscala en el catálogo y toca «Comprar ya», o agrégala al carrito si quieres llevar varias.</p></li><li><h3>Apártala con $100</h3><p>Paga por transferencia o en la tienda. Te la guardamos 7 días.</p></li><li><h3>Recógela o te la enviamos</h3><p>Recógela en Jardín Hidalgo 129, de 11 a 8, todos los días. O te la enviamos el viernes: envío nacional gratis desde $1,000, si no $99. Pedidos hasta el jueves 8 p. m.</p></li></ol>
     </section>
     <section id="visitanos" class="visit" aria-labelledby="visita-titulo">
       <div class="wrap">
