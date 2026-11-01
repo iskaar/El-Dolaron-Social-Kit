@@ -191,7 +191,7 @@
 <dialog id="dlg-rechazar" aria-labelledby="dlg-rechazar-titulo">
   <h2 id="dlg-rechazar-titulo">Rechazar el pago reportado</h2>
   <p id="dlg-rechazar-texto"></p>
-  <label for="rechazar-motivo">¿Por qué? La revendedora lo verá.</label>
+  <label for="rechazar-motivo">¿Por qué? Quien lo mandó lo verá.</label>
   <input id="rechazar-motivo" maxlength="140" autocomplete="off" placeholder="Ejemplo: no nos llegó ese dinero">
   <div class="aviso error" id="rechazar-aviso" role="alert"></div>
   <div class="botones">
@@ -536,7 +536,7 @@ function reporteHtml(p) {
   if (!r) return '';
   const datos = [r.clave && `clave ${escapar(r.clave)}`, r.monto && pesos(r.monto), bancoNombre(r.banco_emisor)].filter(Boolean).join(' · ');
   const foto = !r.comprobante_key ? '' : esDueno ? ` · <a href="/api/pagos-reportados/${r.id}/comprobante" target="_blank" rel="noopener noreferrer">Ver foto ↗</a>` : ' · con foto (solo la ve el dueño)';
-  return `<div class="reporte"><b>${escapar(r.revendedora)} dice que su cliente ya pagó.</b> ${datos || 'Sin clave'}${foto}. Revisa que el dinero haya llegado, luego regístralo o recházalo.</div>`;
+  return `<div class="reporte"><b>${escapar(r.revendedora)} ${r.desde_portal ? 'dice que ya pagó (desde el portal)' : 'dice que su cliente ya pagó'}.</b> ${datos || 'Sin clave'}${foto}. Revisa que el dinero haya llegado, luego regístralo o recházalo.</div>`;
 }
 const botonesReporte = (p) => p.reporte
   ? `<button class="boton chico relleno" type="button" data-registrar="${p.folio}">Registrar pago</button><button class="boton chico rojo" type="button" data-rechazar="${p.folio}">Rechazar</button>` : '';
@@ -649,7 +649,7 @@ $('rechazar-si').addEventListener('click', async () => {
     const cuerpo = await r.json().catch(() => ({}));
     if (!r.ok) { decir('rechazar-aviso', cuerpo.error ?? 'No se pudo rechazar.', 'error'); $('rechazar-si').disabled = false; return; }
     $('dlg-rechazar').close();
-    decir('aviso-lista', `Pago de P-${folioARechazar} rechazado. La revendedora ve el motivo.`, 'ok');
+    decir('aviso-lista', `Pago de P-${folioARechazar} rechazado. Quien lo mandó ve el motivo.`, 'ok');
   } catch {
     decir('rechazar-aviso', 'Sin red: no se rechazó. Intenta otra vez.', 'error');
     $('rechazar-si').disabled = false;

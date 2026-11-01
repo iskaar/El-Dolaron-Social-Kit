@@ -47,9 +47,9 @@ function medir(nombre, codigo) {
 /**
  * Arma la hoja <dialog id="apartar-dialogo"> (portal.html). `api(ruta, cuerpo)` es la del portal (token incluido),
  * `estaListo()` dice si hay un socio registrado, `irAAcceso(codigo)` lleva al registro y vuelve a la pieza al terminar,
- * `alTerminar()` se llama al cerrar la confirmación, `alVerApartados()` si toca «Ver mis apartados» (#669). Devuelve { abrir(pieza) }.
+ * `alTerminar()` se llama al cerrar la confirmación, `alVerApartados()` si toca «Ver mis apartados» (#669), `alPagar(info)` si toca «Ya pagué» (#670: abre la hoja de pago). Devuelve { abrir(pieza) }.
  */
-export function iniciarApartar({ api, estaListo, irAAcceso, alTerminar, alVerApartados }) {
+export function iniciarApartar({ api, estaListo, irAAcceso, alTerminar, alVerApartados, alPagar }) {
   const dialogo = document.getElementById('apartar-dialogo');
   if (!dialogo) return { abrir() {} };
   const q = (sel) => dialogo.querySelector(sel);
@@ -57,7 +57,7 @@ export function iniciarApartar({ api, estaListo, irAAcceso, alTerminar, alVerApa
   const form = q('.apartar-form'), enviar = q('.apartar-enviar'), error = q('.apartar-error'), explica = q('.apartar-explica');
   const radios = [...dialogo.querySelectorAll('input[name="apartar-entrega"]')];
   const vistas = { invitado: q('.apartar-invitado'), form, listo: q('.apartar-listo') };
-  let pieza = null, intento = null, hecho = false;
+  let pieza = null, intento = null, hecho = false, pagar = null;
 
   const entrega = () => radios.find((r) => r.checked)?.value === 'envio' ? 'envio' : 'tienda';
   function ver(vista, texto) {
@@ -85,7 +85,8 @@ export function iniciarApartar({ api, estaListo, irAAcceso, alTerminar, alVerApa
     q('.apartar-copiar-clabe').dataset.clabe = clabe;
     q('.apartar-sin-datos').hidden = !!r.datos_pago;
     q('.apartar-pedir-datos').href = enlaceWhatsApp(mensajeDatos(pedido.folio));
-    q('.apartar-pague').href = enlaceWhatsApp(mensajePague(pedido.folio));
+    q('.apartar-pague-wa').href = enlaceWhatsApp(mensajePague(pedido.folio));
+    pagar = { folio: pedido.folio, nombre: pedido.lineas[0]?.nombre ?? pieza.nombre, monto: r.a_pagar, concepto: r.concepto, datos_pago: r.datos_pago };
   }
 
   form.addEventListener('submit', async (e) => {
@@ -114,6 +115,7 @@ export function iniciarApartar({ api, estaListo, irAAcceso, alTerminar, alVerApa
     try { await navigator.clipboard.writeText(e.currentTarget.dataset.clabe); aviso.textContent = 'CLABE copiada.'; }
     catch { aviso.textContent = 'No se pudo copiar: mantén presionado el número para copiarlo.'; }
   });
+  q('.apartar-pague').addEventListener('click', () => { if (pagar) alPagar?.(pagar); });
   q('.apartar-ver').addEventListener('click', () => { dialogo.close(); alVerApartados?.(); });
   for (const cerrar of dialogo.querySelectorAll('.apartar-cerrar')) cerrar.addEventListener('click', () => dialogo.close());
   dialogo.addEventListener('click', (ev) => { if (ev.target === dialogo) dialogo.close(); });

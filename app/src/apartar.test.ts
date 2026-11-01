@@ -104,9 +104,10 @@ test('hoja con sesión: elige entrega, el reintento conserva el UUID, éxito mue
   const llamadas: any[] = [];
   let fallar: any = new TypeError('Failed to fetch');
   let terminado = 0;
+  const pagos: unknown[] = [];
   const hoja = apartar.iniciarApartar({
     api: async (ruta: string, cuerpo: any) => { llamadas.push({ ruta, ...cuerpo }); if (fallar) throw fallar; return RESPUESTA({ datos_pago: `Banco de prueba\nCLABE ${'9'.repeat(18)}\nTitular de prueba` }); },
-    estaListo: () => true, irAAcceso: () => {}, alTerminar: () => { terminado++; } });
+    estaListo: () => true, irAAcceso: () => {}, alTerminar: () => { terminado++; }, alPagar: (info: unknown) => { pagos.push(info); } });
   hoja.abrir(PIEZA);
   assert.deepEqual(d.vista(), ['form']);
   assert.equal(d.nodo('.apartar-enviar').textContent, 'Apartar por $100');
@@ -136,7 +137,12 @@ test('hoja con sesión: elige entrega, el reintento conserva el UUID, éxito mue
   assert.equal(d.nodo('.apartar-sin-datos').hidden, true);
   assert.equal(d.nodo('.apartar-copiar-clabe').hidden, false);
   assert.equal(d.nodo('.apartar-copiar-clabe').dataset.clabe, '9'.repeat(18));
-  assert.equal(d.nodo('.apartar-pague').href, 'https://wa.me/524445437754?text=Pagu%C3%A9%20el%20apartado%20P-7');
+  assert.equal(d.nodo('.apartar-pague-wa').href, 'https://wa.me/524445437754?text=Pagu%C3%A9%20el%20apartado%20P-7');
+  // «Ya pagué» abre la hoja de pago con lo que respondió el servidor (#670).
+  d.nodo('.apartar-pague').oyentes.click();
+  assert.deepEqual(pagos, [{ folio: 7, nombre: 'Chamarra Levis', monto: 10000, concepto: 'P-7', datos_pago: `Banco de prueba
+CLABE ${'9'.repeat(18)}
+Titular de prueba` }]);
   assert.deepEqual(d.eventos, [{ evento: 'apartado_portal', codigo: 'ED-000123', origen: 'portal' }]);
   d.nodo('.apartar-cerrar').oyentes.click();
   assert.equal(terminado, 1);

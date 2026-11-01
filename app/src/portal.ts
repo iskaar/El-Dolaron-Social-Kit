@@ -2,6 +2,7 @@ import { saldo, codigoAleatorio, hashCodigo, basesListas, promocionIniciada } fr
 import { reclamarVale } from './vales.ts';
 import { programaActivo, revisarCodigo, resumenReferidos, sentenciasDeAlta, D_ALTA } from './referidos.ts';
 import { apartarPortal, apartadosDeSocio, cancelarDeSocio, telefonoDe } from './pedidos.ts';
+import { reportarPago, subirFoto } from './pagos-reportados.ts';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const DIA = 86_400_000;
@@ -299,13 +300,18 @@ export async function portal(request: Request, env: Env, url: URL, ctx: Executio
     return apartarPortal(request, env, ctx, socio);
   }
   // Mis apartados (#669): por telefono; el socio solo ve y cancela lo suyo.
-  const apartado = /^\/api\/portal\/apartados(?:\/(\d{1,9})\/(cancelar))?$/.exec(url.pathname);
+  const apartado = /^\/api\/portal\/apartados(?:\/(\d{1,9})\/(cancelar|pago|comprobante))?$/.exec(url.pathname);
   if (apartado) {
     const telefono = telefonoDe(socio.telefono);
     if (!telefono) return json({ error: 'Tu teléfono necesita revisión en la tienda.' }, 409);
-    const cancelar = apartado[1] !== undefined;
-    if (request.method !== (cancelar ? 'POST' : 'GET')) return json({ error: 'Método no permitido.' }, 405);
-    return cancelar ? cancelarDeSocio(Number(apartado[1]), env, ctx, telefono) : apartadosDeSocio(env, telefono);
+    const accion = apartado[2];
+    if (request.method !== (accion ? 'POST' : 'GET')) return json({ error: 'Método no permitido.' }, 405);
+    if (!accion) return apartadosDeSocio(env, telefono);
+    const folio = Number(apartado[1]);
+    if (accion === 'cancelar') return cancelarDeSocio(folio, env, ctx, telefono);
+    // Pago (#670): la foto del comprobante y el reporte, como las revendedoras pero con el socio como dueño (por telefono).
+    const dueno = { quien: `portal:${socio.id}`, telefono, nombre: socio.nombre };
+    return accion === 'pago' ? reportarPago(folio, request, env, ctx, dueno) : subirFoto(folio, request, env, dueno);
   }
   if (url.pathname === '/api/portal/referidos' && request.method === 'GET') return json(await resumenReferidos(env, socio));
   if (url.pathname === '/api/portal/yo' && request.method === 'GET')

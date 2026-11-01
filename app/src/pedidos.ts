@@ -413,7 +413,7 @@ export async function pedidosDeRevendedora(env: Env, correo: string): Promise<Re
  */
 export async function apartadosDeSocio(env: Env, telefono: string): Promise<Response> {
   const { pedidos, reportes } = await pedidosDe(env, 'telefono', telefono);
-  return new Response(JSON.stringify({ apartados: pedidos.map((p) => ({
+  return new Response(JSON.stringify({ datos_pago: env.PORTAL_DATOS_PAGO?.trim() || null, apartados: pedidos.map((p) => ({
     folio: p.folio, estado: p.estado, vence_en: p.vence_en, entrega: p.entrega, envio: p.envio, subtotal: p.subtotal,
     saldo: p.saldo, faltante: p.faltante, liquidado_en: p.liquidado_en, guia: p.guia,
     viernes_envio: p.entrega === 'envio' ? p.viernes_envio : null, creado_en: p.creado_en,

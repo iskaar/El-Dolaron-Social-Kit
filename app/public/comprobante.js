@@ -23,6 +23,7 @@ async function aJpeg(archivo) {
  * Sube el archivo del input, rellena los campos que el modelo leyo y deja en input.dataset la foto (key) y la fecha leida:
  * la pagina las manda al guardar. `ids` = { clave, monto, banco, aviso } de la pantalla; `$` = su getElementById.
  * La revendedora (#609) lo usa con su propia ruta (`ids.ruta`) y sus propios textos (`ids.texto`: { leido(lista), noLeyo, sinRed }).
+ * El socio del portal (#670) agrega `ids.cabeceras`: async () => ({ authorization }).
  */
 export async function adjuntar(input, ids, $) {
   const archivo = input.files?.[0];
@@ -34,7 +35,9 @@ export async function adjuntar(input, ids, $) {
   aviso.textContent = 'Leyendo el comprobante…';
   try {
     const blob = await aJpeg(archivo);
-    const r = await fetch(ids.ruta ?? '/api/transferencias/comprobante', { method: 'POST', headers: { 'content-type': 'image/jpeg' }, body: blob });
+    // El portal (#670) manda su token por `ids.cabeceras`; la caja y las revendedoras van por Access y no lo necesitan.
+    const extra = ids.cabeceras ? await ids.cabeceras() : {};
+    const r = await fetch(ids.ruta ?? '/api/transferencias/comprobante', { method: 'POST', headers: { 'content-type': 'image/jpeg', ...extra }, body: blob });
     if (!r.ok) throw Object.assign(new Error(String(r.status)), { servidor: [409, 413, 415, 429].includes(r.status) ? (await r.json().catch(() => ({}))).error : '' });
     const { key, lectura } = await r.json();
     input.dataset.key = key || '';
