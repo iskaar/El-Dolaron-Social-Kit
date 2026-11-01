@@ -5,7 +5,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { tienda, PRODUCTO } from './prueba-d1.ts';
 import { DIAS_APARTADO, HORAS_REVENDEDORA } from './pedidos.ts';
-import { ANTICIPO_ENVIO, ANTICIPO_PORCENTAJE } from '../public/venta.js';
+import { ANTICIPO } from '../public/venta.js';
 import { CAJERO, cuenta, pedido, REVENDEDORA, sinDatosPrivados, venta, vista, type T } from './tablero-prueba.ts';
 
 let folio = 100;
@@ -58,7 +58,7 @@ test('whatsapp: con una revendedora sus pedidos van sumados; cada cifra cuadra y
   assert.equal(d.apartados.valor - d.apartados.pagado, d.apartados.falta);
   assert.deepEqual(d.entrega, { tienda: 6, envio: 3, envios_pendientes: 1 });   // 2 envios vendidos y 1 apartado; solo 1 vendido sin guia
   // Las reglas son las del codigo, no numeros repetidos aqui.
-  assert.deepEqual(d.reglas, { dias_apartado: DIAS_APARTADO, horas_revendedora: HORAS_REVENDEDORA, anticipo_pct: ANTICIPO_PORCENTAJE, anticipo_envio: ANTICIPO_ENVIO });
+  assert.deepEqual(d.reglas, { dias_apartado: DIAS_APARTADO, horas_revendedora: HORAS_REVENDEDORA, anticipo: ANTICIPO });
   sinDatosPrivados(d, [v1, v2, 'GUIA-PRIVADA-1']);
   t.db.close();
 });

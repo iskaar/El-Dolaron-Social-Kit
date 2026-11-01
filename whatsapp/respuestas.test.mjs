@@ -29,7 +29,7 @@ test('sin promocion vigente: las preguntas de promo invitan a los grupos y a la 
   const ubicacion = respuestaPara('¿Dónde están?');
   assert.match(ubicacion, /Jardín Hidalgo 129/);
   assert.match(ubicacion, GRUPOS[2]);
-  assert.match(respuestaPara('me lo pueden apartar'), /15 %.*7 días/);
+  assert.match(respuestaPara('me lo pueden apartar'), /\$100.*7 días/);
 });
 
 test('respuestaFija devuelve null cuando hace falta el modelo y esSimple separa lo corto de lo largo (#499)', () => {

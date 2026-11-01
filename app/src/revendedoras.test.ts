@@ -323,7 +323,7 @@ test('cancelar: solo lo propio, solo apartado sin pago; dos veces devuelve la ex
   assert.equal((await t.pedir(`/api/vender/apartados/${folio}/cancelar`, {})).status, 404);
   comoUsuario(t.env, DUENO);
   const deTienda = await t.pedir('/api/pedidos', { id: crypto.randomUUID(), lineas: [{ producto_id: q.id, cantidad: 1 }], cliente: 'Z',
-    telefono: '4441234567', entrega: 'tienda', anticipo: 3000, forma_pago: 'efectivo', caja: 'Caja 1' });
+    telefono: '4441234567', entrega: 'tienda', anticipo: 10000, forma_pago: 'efectivo', caja: 'Caja 1' });
   assert.equal(deTienda.status, 201);
   comoUsuario(t.env, ANA);
   assert.equal((await t.pedir(`/api/vender/apartados/${deTienda.cuerpo.pedido.folio}/cancelar`, {})).status, 404);
@@ -448,10 +448,10 @@ test('el abono a un apartado normal de tienda (con anticipo) sigue rechazado; la
   const t = mundo();
   const p = pieza(t.db);
   const normal = await t.pedir('/api/pedidos', { id: crypto.randomUUID(), lineas: [{ producto_id: p.id, cantidad: 1 }], cliente: 'Z',
-    telefono: '4441234567', entrega: 'tienda', anticipo: 3000, forma_pago: 'efectivo', caja: 'Caja 1' });
+    telefono: '4441234567', entrega: 'tienda', anticipo: 10000, forma_pago: 'efectivo', caja: 'Caja 1' });
   assert.equal(normal.status, 201);
   assert.equal((await abonar(t, normal.cuerpo.pedido.folio, 100)).status, 409);
-  assert.equal(fila(t.db, 'select saldo from pedidos where id = ?', normal.id ?? normal.cuerpo.pedido.id).saldo, 3000);
+  assert.equal(fila(t.db, 'select saldo from pedidos where id = ?', normal.id ?? normal.cuerpo.pedido.id).saldo, 10000);
   assert.equal((t.db.prepare('select count(*) as n from pedido_movimientos').get() as any).n, 0);
   // agregar piezas sigue siendo solo de paquetes de envio, tambien para el apartado de revendedora
   comoUsuario(t.env, ANA);
@@ -621,7 +621,7 @@ test('/api/reportes: por revendedora, pedidos vendidos, piezas e importe de lo q
   // un apartado normal de la tienda, otro vendedor: no sale en el reporte de revendedoras
   const e = pieza(t.db, { precio: 5000 });
   const normal = await t.pedir('/api/pedidos', { id: crypto.randomUUID(), lineas: [{ producto_id: e.id, cantidad: 1 }], cliente: 'Z',
-    telefono: '4441234567', entrega: 'tienda', anticipo: 800, forma_pago: 'efectivo', caja: 'Caja 1' });
+    telefono: '4441234567', entrega: 'tienda', anticipo: 5000, forma_pago: 'efectivo', caja: 'Caja 1' });
   assert.equal(normal.status, 201);
 
   const cobra = async (ped: { id: string }, productos: Record<string, unknown>[], anticipo = 0) => {

@@ -30,7 +30,7 @@ function usuario(db: DatabaseSync, correo: string, rol: Rol, nombre = 'Marta') {
 test('texto de una pieza: centavos, antes, talla, acentos y cierre exactos', () => {
   assert.equal(textoWhatsApp([{ nombre: 'Blusa de algodón', talla: 'M', precio: 20050, precio_lista: 30000, codigo: 'ED-1234' }]),
     '🛍️ Blusa de algodón · Talla M\n💵 $200.50 (antes $300)\n🔖 ED-1234\n🔗 https://eldolaron.com/?pieza=ED-1234#catalogo\n'
-    + 'Apártala con el 15 % por 7 días: responde con el código.\n🚚 Envíos todos los viernes.\n📍 Jardín Hidalgo 129, Soledad · todos los días de 11 a 8');
+    + 'Apártala con $100 por 7 días: responde con el código.\n🚚 Envíos todos los viernes.\n📍 Jardín Hidalgo 129, Soledad · todos los días de 11 a 8');
   const simple = textoWhatsApp([{ nombre: 'Jarrón\n azul', talla: null, precio: 10000, precio_lista: 10000, codigo: 'ED-1' }]);
   assert.match(simple, /^🛍️ Jarrón azul\n💵 \$100\n/);
   assert.ok(!simple.includes('antes') && !simple.includes('Talla'));
@@ -38,17 +38,17 @@ test('texto de una pieza: centavos, antes, talla, acentos y cierre exactos', () 
   assert.throws(() => textoWhatsApp(Array(11).fill({})));
 });
 
-test('texto para revendedora: sin el apartado con 15 % por 7 días y sin prometer anticipo (#575)', () => {
+test('texto para revendedora: sin el apartado con $100 por 7 días y sin prometer anticipo (#575)', () => {
   const pieza = { nombre: 'Blusa', talla: 'M', precio: 20000, precio_lista: 30000, codigo: 'ED-1234' };
   const texto = textoWhatsApp([pieza], true);
   assert.ok(texto.includes('Apártala: responde con el código.'));
   assert.ok(!/15 %|7 días|\$100/.test(texto));
   assert.ok(texto.includes('Envíos todos los viernes') && texto.includes('Jardín Hidalgo 129'));
-  assert.ok(!/15 %|7 días/.test(textoWhatsApp([pieza, pieza], true)));
-  assert.match(textoWhatsApp([pieza]), /15 % por 7 días/);   // la caja no cambia
+  assert.ok(!/\$100|7 días/.test(textoWhatsApp([pieza, pieza], true)));
+  assert.match(textoWhatsApp([pieza]), /\$100 por 7 días/);   // la caja no cambia
   const i = { cliente: 'Ana', nombre: 'Blusa', codigo: 'ED-1', disponibilidad: 'Disponible' };
-  assert.ok(!/15 %|7 días/.test(textoSeguimiento(i, true)));
-  assert.match(textoSeguimiento(i), /15 % por 7 días/);
+  assert.ok(!/\$100|7 días/.test(textoSeguimiento(i, true)));
+  assert.match(textoSeguimiento(i), /\$100 por 7 días/);
 });
 
 test('varias piezas: una línea por pieza y un solo cierre, hasta diez', () => {
@@ -312,9 +312,9 @@ test('pedidos prellena pieza y cliente por URL, escapa texto y nunca manda un an
   assert.equal($('telefono').value, '4441234567');
   assert.equal($('codigo').value, '');
   assert.match($('piezas').innerHTML, /Blusa &lt;azul&gt;/);
-  // Prellena el mínimo de la regla vigente (sin #434: $100; con #434: 15 % de $200 = $30), nunca lo envía.
+  // Prellena el mínimo de la regla vigente ($100 fijos, #662), nunca lo envía.
   const reglas = venta as Record<string, any>;
-  const minimo = reglas.anticipoMinimoDe ? reglas.anticipoMinimoDe(20000, 'tienda') : reglas.ANTICIPO_MINIMO;
+  const minimo = reglas.anticipoMinimoDe ? reglas.anticipoMinimoDe(20000) : reglas.ANTICIPO_MINIMO;
   assert.equal($('anticipo').value, String(minimo / 100));
   assert.ok(llamadas.every((r) => r.startsWith('GET')));
   assert.equal(limpia, '/pedidos');

@@ -547,7 +547,7 @@ DETALLE.whatsapp = {
         <div class="fila"><span>Ya pagado (anticipos y abonos)</span><span>${pesos(a.pagado)}</span></div>
         <div class="fila"><span>Falta por cobrar</span><span>${pesos(a.falta)}</span></div>
         ${barra(pct(a.pagado, a.valor), 'var(--acento)')}
-        <p class="frase chica">El anticipo mínimo es ${r.anticipo_pct} % del valor de las piezas; en envío a domicilio, ${pesos(r.anticipo_envio)}.${c.incluye_revendedoras ? ' Las revendedoras apartan sin anticipo.' : ''}</p></article>`,
+        <p class="frase chica">El anticipo mínimo es ${pesos(r.anticipo)} fijos, se recoja o se envíe; si las piezas cuestan menos, se paga el total.${c.incluye_revendedoras ? ' Las revendedoras apartan sin anticipo.' : ''}</p></article>`,
       `<article class="tarjeta" style="gap:10px"><p class="etiqueta">Cómo se entregan</p>
         ${entregas > 0 ? `<div class="fila"><span>Recoger en tienda</span><span>${cuantos(e.tienda)} · ${pct(e.tienda, entregas)} %</span></div>
         <div class="fila"><span>Envío a domicilio</span><span>${cuantos(e.envio)} · ${pct(e.envio, entregas)} %</span></div>

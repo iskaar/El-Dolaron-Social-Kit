@@ -2,12 +2,12 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import * as ficha from '../public/catalogo-ficha.js';
-import { ANTICIPO_ENVIO, ENVIO_COSTO, ENVIO_GRATIS_DESDE, viernesDeEnvio } from '../public/venta.js';
+import { ANTICIPO, ENVIO_COSTO, ENVIO_GRATIS_DESDE, viernesDeEnvio } from '../public/venta.js';
 import { CATEGORIAS } from '../public/categorias.js';
 
 // catalogo-ficha.js es copia de la ficha del sitio y no puede importar venta.js (el host del portal no lo sirve): estas pruebas la atan a su fuente.
 test('las constantes y viernesDeEnvio copiados coinciden con venta.js y categorias.js', () => {
-  assert.equal(ficha.APARTADO, ANTICIPO_ENVIO);
+  assert.equal(ficha.APARTADO, ANTICIPO);
   assert.equal(ficha.ENVIO_COSTO, ENVIO_COSTO);
   assert.equal(ficha.ENVIO_GRATIS_DESDE, ENVIO_GRATIS_DESDE);
   for (const iso of ['2026-10-29T13:00:00Z', '2026-10-30T05:00:00Z', '2026-11-01T18:00:00Z', '2026-11-06T02:00:00Z'])

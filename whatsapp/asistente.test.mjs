@@ -91,7 +91,7 @@ test('el prompt solo afirma los datos aprobados', () => {
   assert.match(PROMPT, /otras promociones o descuentos/);
   // Issue #497: la ubicación y el apartado son datos aprobados; los envíos se escalan.
   assert.match(PROMPT, /Jardín Hidalgo 129/);
-  assert.match(PROMPT, /15 % del valor.*7 días/);
+  assert.match(PROMPT, /\$100 \(o el total si la pieza cuesta menos\).*7 días/);
   assert.match(PROMPT, /envíos.*no afirmes ni niegues/);
 });
 

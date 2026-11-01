@@ -3,7 +3,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { runInNewContext } from 'node:vm';
-import { totales, agregar, leerMultiplicador, efectivoAlcanza, saldoCanjeable, dolaronesGanados, maximoCanje, desfaseReloj, anticipoDePedido, envioDe, anticipoMinimoDe, viernesDeEnvio, promoInauguracion, letreroPromo, PROMO_DESCUENTO, PROMO_MINIMO, transferenciaDe, CLAVE_DESDE } from '../public/venta.js';
+import { totales, agregar, leerMultiplicador, efectivoAlcanza, saldoCanjeable, dolaronesGanados, maximoCanje, desfaseReloj, anticipoDePedido, envioDe, anticipoMinimoDe, ANTICIPO, ANTICIPO_ENVIO, viernesDeEnvio, promoInauguracion, letreroPromo, PROMO_DESCUENTO, PROMO_MINIMO, transferenciaDe, CLAVE_DESDE } from '../public/venta.js';
 
 interface Linea { codigo: string; nombre: string; precio: number; cantidad: number }
 const pieza = (codigo: string, precio: number) => ({ codigo, nombre: codigo, precio });
@@ -145,11 +145,14 @@ test('envio de un pedido: $99 bajo $1,000 de piezas, gratis desde $1,000', () =>
   assert.equal(envioDe(2500_00), 0);
 });
 
-test('apartado: 15% al peso hacia arriba sin mínimo; paquete abre con $100', () => {
-  for (const [subtotal, anticipo] of [[0, 0], [50_00, 8_00], [100_00, 15_00], [100_01, 16_00], [250_00, 38_00], [1000_00, 150_00]]) {
+test('apartado (#662): $100 fijos en tienda y envío; bajo $100 se paga el total', () => {
+  for (const [subtotal, anticipo] of [[0, 0], [50_00, 50_00], [60_00, 60_00], [99_99, 99_99], [100_00, 100_00], [150_00, 100_00], [250_00, 100_00], [1000_00, 100_00]]) {
+    assert.equal(anticipoMinimoDe(subtotal, 'recoger'), anticipo);
     assert.equal(anticipoMinimoDe(subtotal, 'tienda'), anticipo);
-    assert.equal(anticipoMinimoDe(subtotal, 'envio'), 100_00);
+    assert.equal(anticipoMinimoDe(subtotal, 'envio'), anticipo);
   }
+  assert.equal(ANTICIPO, 100_00);
+  assert.equal(ANTICIPO_ENVIO, ANTICIPO);
 });
 
 test('viernes de envío: corte estricto del jueves 20:00, con UTC-6 fijo', () => {
