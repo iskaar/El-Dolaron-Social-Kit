@@ -29,17 +29,20 @@ function portalDePrueba() {
     const claims = JSON.parse(Buffer.from(t.split('.')[1], 'base64url').toString()) as { sub: string; phone_number: string };
     return Response.json({ users: [{ localId: claims.sub, phoneNumber: claims.phone_number, ...(validSince === undefined ? {} : { validSince: String(validSince) }) }] });
   };
+  // Lo que la app deja para despues de responder (avisos): `esperar()` lo termina.
+  const pendientes: Promise<unknown>[] = [];
   const llamar = async (ruta: string, auth: string, body?: unknown, method = 'GET') => {
     const response = await worker.fetch!(new Request(`https://portal.prueba${ruta}`, {
       method, headers: { authorization: `Bearer ${auth}`, 'content-type': 'application/json' },
       body: body === undefined ? undefined : JSON.stringify(body),
-    }) as never, env, { waitUntil() {} } as never);
+    }) as never, env, { waitUntil: (x: Promise<unknown>) => { pendientes.push(x); } } as never);
     return { status: response.status, body: await response.json() as Record<string, any> };
   };
   const registrar = (uid: string, phone: string) => llamar('/api/portal/registro', token(uid, phone), {
     nombre: 'Cliente', acepta_bases: true, declara_mayor_edad:true, bases_version: 'prueba-1',
   }, 'POST');
-  return { db, env, pedir, llamar, registrar, setValidSince: (v: number | undefined) => { validSince = v; },
+  const esperar = async () => { await Promise.allSettled(pendientes.splice(0)); };
+  return { db, env, pedir, llamar, registrar, esperar, setValidSince: (v: number | undefined) => { validSince = v; },
     cerrar: () => { globalThis.fetch = fetchOriginal; db.close(); } };
 }
 
@@ -207,7 +210,7 @@ test('allowlist pública sirve sólo portal y assets necesarios; no abre caja, a
       return new Response(readFileSync('public/' + (ruta === '/portal' ? 'portal.html' : ruta === '/manual' ? 'manual.html' : ruta.slice(1))),
         { headers:{ 'content-type':ruta === '/portal' || ruta === '/manual' ? 'text/html' : 'text/javascript' } });
     } } as unknown as Fetcher;
-    for (const ruta of ['/', '/portal', '/portal.html', '/portal.js', '/catalogo-ficha.js', '/apartar.js', '/apartados.js', '/portal.css', '/code128.js', '/vendor/qrcode-generator.js', '/el-dolaron-logo.png',
+    for (const ruta of ['/', '/portal', '/portal.html', '/portal.js', '/catalogo-ficha.js', '/apartar.js', '/apartados.js', '/pagos.js', '/comprobante.js', '/portal.css', '/code128.js', '/vendor/qrcode-generator.js', '/el-dolaron-logo.png',
       '/manual', '/manual.js', '/vender.js']) {
       const r = await worker.fetch!(new Request('https://portal.prueba' + ruta) as never, p.env, {} as never);
       assert.equal(r.status, 200, ruta);
@@ -220,7 +223,7 @@ test('allowlist pública sirve sólo portal y assets necesarios; no abre caja, a
       '/cajero.js', '/venta.js', '/vender', '/vender.html', '/manual.html', '/manual/', '/api/vender', '/api/ventas', '/api/socios/codigo', '/api/socios/vincular',
       '/api/foto/123', '/api/portal/llegada', '/foo/portal.html'])
       assert.equal((await p.llamar(ruta, '')).status, 404, ruta);
-    assert.equal(leidos.length, 14);
+    assert.equal(leidos.length, 16);
     // El manual (#623) sale solo por GET/HEAD.
     assert.equal((await p.llamar('/manual', '', {}, 'POST')).status, 404);
     assert.equal((await p.llamar('/portal.js', '', {}, 'POST')).status, 404);
@@ -500,7 +503,7 @@ test('GET /api/portal/apartados (#669): solo los de su teléfono (también los d
     await p.registrar('uid-a', '+524441112222');
     await p.registrar('uid-b', '+524443334444');
     assert.equal((await p.llamar('/api/portal/apartados', A, {}, 'POST')).status, 405);
-    assert.deepEqual((await p.llamar('/api/portal/apartados', A)).body, { apartados: [] });
+    assert.deepEqual((await p.llamar('/api/portal/apartados', A)).body, { datos_pago: null, apartados: [] });
 
     const sinPago = piezaVendible(p), envio = piezaVendible(p, 25000), revisando = piezaVendible(p), deB = piezaVendible(p), deTienda = piezaVendible(p, 25000, 3);
     const apartar = (auth: string, pieza: { codigo: string }, entrega = 'tienda') =>
@@ -611,5 +614,157 @@ test('la foto del catálogo sigue saliendo mientras la pieza está apartada (par
     // Ya sin pedido abierto, agotarse la deja sin foto como a cualquier otra.
     p.db.prepare('update productos set stock = 0 where id = ?').run(a.id);
     assert.equal((await foto(a.codigo)).status, 404);
+  } finally { p.cerrar(); }
+});
+
+/* ---------- Ya pagué: el socio reporta su transferencia (#670) ---------- */
+
+const JPEG = new Uint8Array([0xff, 0xd8, 0xff, 0xd9]);
+const claveUnica = (() => { let n = 0; return () => `PORTAL${String(++n).padStart(8, '0')}`; })();
+
+async function socioConApartado(p: ReturnType<typeof portalDePrueba>, uid = 'uid-a', telefono = '+524441112222') {
+  await p.registrar(uid, telefono);
+  const auth = token(uid, telefono);
+  const pieza = piezaVendible(p);
+  const r = await p.llamar('/api/portal/apartar', auth, { id: crypto.randomUUID(), codigo: pieza.codigo, entrega: 'tienda' }, 'POST');
+  assert.equal(r.status, 201, JSON.stringify(r.body));
+  return { auth, pieza, folio: r.body.pedido.folio as number };
+}
+const subirComprobante = async (p: ReturnType<typeof portalDePrueba>, auth: string, folio: number, cuerpo: BodyInit = JPEG, tipo = 'image/jpeg') => {
+  const r = await worker.fetch!(new Request(`https://portal.prueba/api/portal/apartados/${folio}/comprobante`,
+    { method: 'POST', headers: { authorization: `Bearer ${auth}`, 'content-type': tipo }, body: cuerpo }) as never, p.env, { waitUntil() {} } as never);
+  return { status: r.status, body: (await r.json().catch(() => ({}))) as Record<string, any> };
+};
+const reportarPortal = (p: ReturnType<typeof portalDePrueba>, auth: string, folio: number, cuerpo: Record<string, unknown> = {}) =>
+  p.llamar(`/api/portal/apartados/${folio}/pago`, auth, { id: crypto.randomUUID(), clave_rastreo: claveUnica(), ...cuerpo }, 'POST');
+
+test('el socio reporta su pago (#670): queda pendiente a nombre del portal, el aviso no lleva clave ni teléfono y el apartado no vence', async () => {
+  const p = portalDePrueba();
+  try {
+    const enviados: { subject: string; text: string }[] = [];
+    (p.env as any).CORREO = { send: async (m: any) => { enviados.push(m); } };
+    const { auth, folio } = await socioConApartado(p);
+    const clave = claveUnica();
+    const id = crypto.randomUUID();
+    const r = await p.llamar(`/api/portal/apartados/${folio}/pago`, auth, { id, clave_rastreo: ` ${clave.toLowerCase()} `, monto: 10000, banco_emisor: '40012' }, 'POST');
+    assert.equal(r.status, 201, JSON.stringify(r.body));
+    assert.deepEqual([r.body.reporte.estado, r.body.reporte.motivo], ['pendiente', '']);
+    const fila = p.db.prepare('select * from pagos_reportados').get()!;
+    assert.deepEqual([fila.clave_rastreo, fila.monto, fila.banco_emisor, String(fila.reportado_por).startsWith('portal:')], [clave, 10000, '40012', true]);
+    assert.equal(fila.reportado_por, `portal:${p.db.prepare("select id from clientes where auth_uid = 'uid-a'").get()!.id}`);
+    // No es dinero: ni saldo ni movimientos; el apartado sigue abierto.
+    assert.deepEqual({ ...p.db.prepare('select saldo, estado from pedidos where folio = ?').get(folio)! }, { saldo: 0, estado: 'apartado' });
+    assert.equal(p.db.prepare('select count(*) as n from pedido_movimientos').get()!.n, 0);
+    await p.esperar();
+    assert.equal(enviados.length, 1);
+    assert.match(enviados[0].text, new RegExp(`Cliente mandó el pago de P-${folio} desde el portal\\.`));
+    for (const secreto of [clave, '4441112222', 'uid-a']) assert.ok(!enviados[0].text.includes(secreto) && !enviados[0].subject.includes(secreto), secreto);
+    // Reintento con el mismo id: el mismo reporte, sin duplicar ni volver a avisar.
+    const otra = await p.llamar(`/api/portal/apartados/${folio}/pago`, auth, { id, clave_rastreo: clave }, 'POST');
+    assert.deepEqual([otra.status, otra.body.reporte.id], [200, r.body.reporte.id]);
+    assert.equal(p.db.prepare('select count(*) as n from pagos_reportados').get()!.n, 1);
+    // Un segundo pendiente en el mismo pedido: 409. Y una clave ya usada en otro: 409.
+    assert.equal((await reportarPortal(p, auth, folio)).status, 409);
+    // El cron no lo vence mientras la tienda lo revisa; el socio ve «Pago en revisión» y ya no lo puede cancelar.
+    assert.equal(await vencerPedidos(p.env, new Date(Date.now() + 48 * 3_600_000)), 0);
+    const lista = (await p.llamar('/api/portal/apartados', auth)).body.apartados as any[];
+    assert.deepEqual([lista[0].pago_reportado.estado, lista[0].cancelable], ['pendiente', false]);
+    assert.equal((await p.llamar(`/api/portal/apartados/${folio}/cancelar`, auth, {}, 'POST')).status, 409);
+  } finally { p.cerrar(); }
+});
+
+test('el socio solo reporta lo suyo: folio ajeno 404, clave repetida 409, foto de otro pedido o de otro socio rechazada, método y validaciones', async () => {
+  const p = portalDePrueba();
+  try {
+    const a = await socioConApartado(p, 'uid-a', '+524441112222');
+    const b = await socioConApartado(p, 'uid-b', '+524443334444');
+    assert.equal((await reportarPortal(p, b.auth, a.folio)).status, 404);
+    assert.equal((await subirComprobante(p, b.auth, a.folio)).status, 404);
+    assert.equal((await reportarPortal(p, a.auth, 999)).status, 404);
+    assert.equal((await p.llamar(`/api/portal/apartados/${a.folio}/pago`, a.auth)).status, 405);
+    assert.equal((await p.llamar(`/api/portal/apartados/${a.folio}/comprobante`, a.auth)).status, 405);
+    assert.equal((await p.llamar(`/api/portal/apartados/${a.folio}/pago`, token('uid-a', '+524441112222', { aud: 'otro' }), {}, 'POST')).status, 401);
+    assert.equal(p.db.prepare('select count(*) as n from pagos_reportados').get()!.n, 0);
+
+    const mala = (cuerpo: Record<string, unknown>) => p.llamar(`/api/portal/apartados/${a.folio}/pago`, a.auth, { id: crypto.randomUUID(), ...cuerpo }, 'POST');
+    assert.equal((await mala({})).body.campo, 'clave');                                 // ni foto ni clave
+    assert.equal((await mala({ clave_rastreo: 'abc' })).body.campo, 'clave');           // 6 a 30
+    assert.equal((await mala({ clave_rastreo: claveUnica(), banco_emisor: '99999' })).body.campo, 'banco');
+    assert.equal((await mala({ clave_rastreo: claveUnica(), monto: -5 })).body.campo, 'monto');
+    assert.equal((await p.llamar(`/api/portal/apartados/${a.folio}/pago`, a.auth, { clave_rastreo: claveUnica() }, 'POST')).status, 400);   // sin id
+
+    // La foto: la sube y se guarda bajo su pedido; no sirve en el de otro ni subida por otro socio.
+    const subida = await subirComprobante(p, a.auth, a.folio);
+    assert.equal(subida.status, 200, JSON.stringify(subida.body));
+    assert.match(subida.body.key, /^comprobantes\/[0-9a-f-]{36}\.jpg$/);
+    assert.equal(p.db.prepare('select subido_por from comprobantes_subidos where comprobante_key = ?').get(subida.body.key)!.subido_por.startsWith('portal:'), true);
+    assert.equal((await subirComprobante(p, a.auth, a.folio, 'no es imagen', 'text/plain')).status, 415);
+    const ajena = await reportarPortal(p, b.auth, b.folio, { comprobante_key: subida.body.key, clave_rastreo: undefined });
+    assert.deepEqual([ajena.status, ajena.body.campo], [400, 'foto']);
+    const conFoto = await reportarPortal(p, a.auth, a.folio, { comprobante_key: subida.body.key, clave_rastreo: undefined, fecha_comprobante: '2026-11-02' });
+    assert.equal(conFoto.status, 201, JSON.stringify(conFoto.body));
+
+    // Una clave sirve para un solo pago: B no puede mandar la que ya espera en el pedido de A.
+    const clave = p.db.prepare('select clave_rastreo from pagos_reportados').get()!.clave_rastreo;
+    assert.equal(clave, null);
+    const usada = claveUnica();
+    p.db.prepare("update pagos_reportados set estado = 'rechazado', motivo = 'x'").run();
+    assert.equal((await reportarPortal(p, a.auth, a.folio, { clave_rastreo: usada })).status, 201);
+    const repetida = await reportarPortal(p, b.auth, b.folio, { clave_rastreo: usada });
+    assert.deepEqual([repetida.status, repetida.body.campo], [409, 'clave']);
+    assert.equal(p.db.prepare('select count(*) as n from pagos_reportados').get()!.n, 2);
+  } finally { p.cerrar(); }
+});
+
+test('la tienda acepta el reporte del socio con el abono, o lo rechaza con motivo y el socio manda otro', async () => {
+  const p = portalDePrueba();
+  try {
+    const { auth, folio } = await socioConApartado(p);
+    const primero = await reportarPortal(p, auth, folio);
+    assert.equal(primero.status, 201);
+    // La tienda lo rechaza: el socio lo ve con el motivo, el plazo sigue y puede mandar otro.
+    assert.equal((await p.pedir(`/api/pedidos/${folio}/rechazar-pago`, { motivo: 'No llegó el dinero' })).status, 200);
+    const visto = ((await p.llamar('/api/portal/apartados', auth)).body.apartados as any[])[0];
+    assert.deepEqual([visto.pago_reportado.estado, visto.pago_reportado.motivo, visto.cancelable], ['rechazado', 'No llegó el dinero', true]);
+    const segundo = await reportarPortal(p, auth, folio);
+    assert.equal(segundo.status, 201, JSON.stringify(segundo.body));
+    // El abono que registra la tienda acepta el reporte en el mismo batch y el apartado pasa a 7 días.
+    const abono = await p.pedir(`/api/pedidos/${folio}/abonos`, { id: crypto.randomUUID(), importe: 10000, forma_pago: 'efectivo', caja: 'Caja 1' });
+    assert.equal(abono.status, 200, JSON.stringify(abono.cuerpo));
+    const aceptado = p.db.prepare("select estado from pagos_reportados order by id desc limit 1").get()!;
+    assert.equal(aceptado.estado, 'aceptado');
+    const final = ((await p.llamar('/api/portal/apartados', auth)).body.apartados as any[])[0];
+    assert.deepEqual([final.saldo, final.cancelable, final.pago_reportado.estado], [10000, false, 'aceptado']);
+    // Con dinero registrado ya no se manda otro pago desde aquí.
+    assert.equal((await reportarPortal(p, auth, folio)).status, 409);
+    // /pedidos muestra quién mandó el pago por el nombre del socio, no por su id interno.
+    const aparte = await socioConApartado(p, 'uid-b', '+524443334444');
+    await reportarPortal(p, aparte.auth, aparte.folio);
+    const lista = (await p.pedir('/api/pedidos', undefined, 'GET')).cuerpo.pedidos as any[];
+    const reporte = lista.find((x) => x.folio === aparte.folio).reporte;
+    assert.deepEqual([reporte.revendedora, reporte.desde_portal], ['Cliente', 1]);
+  } finally { p.cerrar(); }
+});
+
+test('el socio también paga en línea lo que levantó otra cuenta a su teléfono (revendedora), y la revendedora sigue reportando lo suyo', async () => {
+  const p = portalDePrueba();
+  try {
+    const ANA = 'ana@revende.mx';
+    p.db.prepare("insert into usuarios (correo, nombre, roles, activo, creado_en, actualizado_en) values (?, 'Ana R.', 'revendedora', 1, '', '')").run(ANA);
+    await p.registrar('uid-a', '+524441112222');
+    const auth = token('uid-a', '+524441112222');
+    const pieza = piezaVendible(p);
+    (p.env as any).DEV_USUARIO = ANA;
+    const ap = await p.pedir('/api/vender/apartar', { id: crypto.randomUUID(), lineas: [{ producto_id: pieza.id, cantidad: 1 }], cliente: 'Lucía', telefono: '4441112222', entrega: 'tienda' });
+    assert.equal(ap.status, 201, JSON.stringify(ap.cuerpo));
+    const folio = ap.cuerpo.pedido.folio;
+    // Lo ve el socio (por teléfono) pero no es cancelable desde el portal; sí puede mandar su pago.
+    const vista = ((await p.llamar('/api/portal/apartados', auth)).body.apartados as any[])[0];
+    assert.deepEqual([vista.folio, vista.cancelable], [folio, false]);
+    assert.equal((await reportarPortal(p, auth, folio)).status, 201);
+    // La revendedora ve el reporte pendiente de su venta y no puede mandar otro encima.
+    const suyos = (await p.pedir('/api/vender/mios', undefined, 'GET')).cuerpo.pedidos as any[];
+    assert.equal(suyos[0].pago_reportado.estado, 'pendiente');
+    assert.equal((await p.pedir(`/api/vender/apartados/${folio}/pago`, { id: crypto.randomUUID(), clave_rastreo: claveUnica() })).status, 409);
   } finally { p.cerrar(); }
 });

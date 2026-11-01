@@ -138,6 +138,34 @@
   <p class="nota">Comprobante de compra. No es factura fiscal.</p>
   <form method="dialog"><button>Cerrar recibo</button></form>
 </dialog>
+<dialog id="pago-dialogo" aria-labelledby="pago-titulo">
+  <h2 id="pago-titulo" class="pago-titulo" tabindex="-1">Ya pagué</h2>
+  <p class="pago-resumen"></p>
+  <p class="pago-rechazado error" role="alert" hidden></p>
+  <p>Transfiere <strong class="pago-monto-texto"></strong> con el concepto <strong class="pago-concepto"></strong></p>
+  <div class="pago-con-datos" hidden>
+    <p class="pago-datos apartar-datos"></p>
+    <button class="pago-copiar-clabe secundario" type="button" hidden>Copiar CLABE</button>
+    <p class="pago-copiado nota" role="status" aria-live="polite"></p>
+  </div>
+  <form class="pago-form" novalidate>
+    <label for="pago-foto">Foto del comprobante</label>
+    <input id="pago-foto" type="file" accept="image/*" aria-describedby="pago-foto-aviso">
+    <p id="pago-foto-aviso" class="nota" role="status" aria-live="polite"></p>
+    <label for="pago-clave">Clave de rastreo</label>
+    <input id="pago-clave" autocomplete="off" autocapitalize="characters" spellcheck="false" maxlength="40" aria-describedby="pago-ayuda">
+    <p id="pago-ayuda" class="nota">Viene en tu comprobante. No es el «número de referencia».</p>
+    <label for="pago-banco">Banco desde el que pagaste</label>
+    <select id="pago-banco"><option value="">No sé / otro banco</option></select>
+    <label for="pago-monto">Monto que transferiste (pesos)</label>
+    <input id="pago-monto" inputmode="decimal" autocomplete="off" maxlength="12">
+    <p class="nota">Manda la foto, la clave o las dos. La tienda revisa el pago y lo registra; mientras tanto tu apartado no se vence.</p>
+    <p class="pago-aviso" role="alert"></p>
+    <button class="pago-enviar" type="submit">Mandar mi pago</button>
+    <button class="pago-cerrar secundario" type="button">Volver</button>
+  </form>
+  <a class="pago-whatsapp boton-enlace" href="https://wa.me/524445437754" target="_blank" rel="noopener">Prefiero mandarlo por WhatsApp</a>
+</dialog>
 <dialog id="apartado-cancelar" aria-labelledby="cancelar-titulo">
   <h2 id="cancelar-titulo">Cancelar apartado</h2>
   <p class="cancelar-pregunta"></p>
@@ -209,7 +237,8 @@
     </div>
     <p class="apartar-entrega-info nota"></p>
     <p class="apartar-vence"></p>
-    <a class="apartar-pague boton-enlace" href="https://wa.me/524445437754" target="_blank" rel="noopener">Ya pagué: mandar comprobante por WhatsApp</a>
+    <button class="apartar-pague" type="button">Ya pagué: mandar comprobante</button>
+    <a class="apartar-pague-wa nota" href="https://wa.me/524445437754" target="_blank" rel="noopener">o mándalo por WhatsApp</a>
     <button class="apartar-ver secundario" type="button">Ver mis apartados</button>
   </div>
   <button class="apartar-cerrar secundario" type="button">Cerrar</button>

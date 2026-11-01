@@ -20,8 +20,8 @@ test('chips: cuenta regresiva en horas con umbrales, pago en revisión, rechazad
   assert.match(chip({ vence_en: enHoras(-1) }).texto, /Ya venció/);
   assert.deepEqual(chip({ pago_reportado: { estado: 'pendiente', motivo: '' } }), { clase: 'aviso', texto: '⏳ Pago en revisión · la tienda lo está revisando' });
   assert.deepEqual(chip({ pago_reportado: { estado: 'rechazado', motivo: 'No llegó el dinero' } }), { clase: 'alerta', texto: '⚠ No encontramos tu pago: No llegó el dinero' });
-  assert.deepEqual(chip({ saldo: 10000, faltante: 15000, vence_en: enHoras(150) }), { clase: 'ok', texto: '✓ Listo para recoger' });
-  assert.deepEqual(chip({ entrega: 'envio', envio: 9900, saldo: 10000, faltante: 24900 }), { clase: 'aviso', texto: '✓ Abonaste $100 · completa el pago para el envío' });
+  assert.deepEqual(chip({ saldo: 10000, faltante: 15000, vence_en: enHoras(150) }), { clase: 'ok', texto: '✓ Pago recibido · Listo para recoger' });
+  assert.deepEqual(chip({ entrega: 'envio', envio: 9900, saldo: 10000, faltante: 24900 }), { clase: 'aviso', texto: '✓ Pago recibido ($100) · completa el pago para el envío' });
   assert.deepEqual(chip({ estado: 'vendido', entrega: 'envio', saldo: 0, faltante: 0, viernes_envio: '2026-11-06' }), { clase: 'ok', texto: '✓ Pagado · Se envía el viernes 6 de noviembre' });
   assert.deepEqual(chip({ estado: 'vendido', entrega: 'envio', guia: 'DHL 434', viernes_envio: '2026-11-06' }), { clase: 'ok', texto: '✓ Enviado · guía DHL 434' });
   assert.deepEqual(chip({ estado: 'vendido' }), { clase: 'ok', texto: '✓ Compra completada' });
@@ -89,9 +89,10 @@ test('la lista agrupa por urgencia, deja lo cerrado en «Anteriores», cancela c
     base({ folio: 4, estado: 'cancelado', cancelable: false }),
   ];
   const llamadas: string[] = [];
-  const mios = apartados.iniciarApartados({ api: async (ruta: string, cuerpo?: unknown) => {
+  const pagos: unknown[] = [];
+  const mios = apartados.iniciarApartados({ alPagar: (info: unknown) => { pagos.push(info); }, api: async (ruta: string, cuerpo?: unknown) => {
     llamadas.push(cuerpo === undefined ? ruta : `${ruta} ${JSON.stringify(cuerpo)}`);
-    if (ruta === 'apartados') return { apartados: lista };
+    if (ruta === 'apartados') return { apartados: lista, datos_pago: 'Banco de prueba' };
     lista = lista.map((a) => (a.folio === 2 ? { ...a, estado: 'cancelado', cancelable: false } : a));
     return { ok: true, folio: 2 };
   } });
@@ -107,11 +108,14 @@ test('la lista agrupa por urgencia, deja lo cerrado en «Anteriores», cancela c
   const primera = principal.children[0];
   assert.ok(d.textos(primera).includes('Blusa'));
   assert.ok(d.textos(primera).includes('⚠ Vence en 3 h'));
+  // «Ya pagué» abre la hoja de pago (#670) con lo del servidor: folio, qué transferir, concepto y datos de pago.
   const pague = d.todos(primera).find((x) => x.className.includes('apartado-pague'));
-  assert.equal(pague.href, 'https://wa.me/524445437754?text=Pagu%C3%A9%20el%20apartado%20P-2');
+  assert.equal(pague.textContent, 'Ya pagué');
+  pague.oyentes.click();
+  assert.deepEqual(pagos, [{ folio: 2, nombre: 'Blusa', monto: 10000, concepto: 'P-2', datos_pago: 'Banco de prueba', rechazado: '' }]);
   const tercera = principal.children[2];
   assert.equal(d.todos(tercera).some((x) => x.className.includes('apartado-pague') || x.className.includes('apartado-cancelar')), false);   // con dinero ya solo la tienda
-  assert.ok(d.textos(tercera).includes('✓ Listo para recoger'));
+  assert.ok(d.textos(tercera).includes('✓ Pago recibido · Listo para recoger'));
 
   // Cancelar P-2: pregunta, y solo al confirmar manda el POST y recarga.
   d.todos(primera).find((x) => x.className.includes('apartado-cancelar')).oyentes.click();

@@ -134,6 +134,15 @@ dialog::backdrop { background:#16366b99; }
 .apartar-concepto { display:block; padding:14px; border:2px dashed var(--azul); text-align:center; font-size:28px; letter-spacing:2px; }
 .apartar-datos { white-space:pre-wrap; overflow-wrap:anywhere; padding:12px; background:#eef2f8; }
 .apartar-vence { font-weight:700; }
+/* Ya pagué (#670) */
+#pago-dialogo select { width:100%; padding:13px 14px; font:inherit; font-size:18px; border:1px solid #96a5bc; border-radius:6px; color:var(--azul); background:white; }
+#pago-dialogo input[type=file] { font-size:16px; }
+#pago-dialogo h2 { margin:0 0 4px; font-size:26px; }
+.pago-resumen { margin:0 0 8px; font-weight:700; overflow-wrap:anywhere; }
+.pago-aviso, #pago-foto-aviso { min-height:1.2em; }
+.pago-aviso.error, #pago-foto-aviso.error, .pago-rechazado { color:var(--rojo); font-weight:700; }
+.apartar-pague-wa { display:block; text-align:center; margin:12px 0 0; }
+.apartar-pague { margin-top:12px; background:var(--amarillo); color:var(--azul); }
 /* Mis apartados (#669) */
 .apartados { margin-top:28px; }
 .apartados-lista, .apartados-previos-lista { list-style:none; padding:0; margin:0; }
@@ -151,7 +160,7 @@ dialog::backdrop { background:#16366b99; }
 .apartado-detalle { font-size:15px; }
 .apartado-acciones { display:flex; gap:8px; flex-wrap:wrap; }
 .apartado-acciones > * { flex:1 1 130px; margin:6px 0 0; min-height:48px; }
-.apartado-acciones .boton-enlace { display:flex; align-items:center; justify-content:center; padding:8px 12px; }
+.apartado-pague { background:var(--amarillo); color:var(--azul); }
 .apartados-previos summary { font-weight:700; }
 .cancelar-si { background:var(--rojo); }
 .boton-enlace { display:block; margin-top:16px; padding:12px 18px; border-radius:6px; background:var(--amarillo); color:var(--azul); font-weight:700; text-align:center; text-decoration:none; }

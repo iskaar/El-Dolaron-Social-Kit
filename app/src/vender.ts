@@ -3,7 +3,7 @@ import { VENDIBLE } from './catalogo.ts';
 import { CLAVES_CATEGORIA } from '../public/categorias.js';
 import { telefonoInteresado } from '../public/vender.js';
 import { apartarRevendedora, pedidosDeRevendedora, cancelarDeRevendedora } from './pedidos.ts';
-import { reportarPago, subirFotoDeRevendedora } from './pagos-reportados.ts';
+import { reportarPagoDeRevendedora, subirFotoDeRevendedora } from './pagos-reportados.ts';
 
 const PAGINA = 24;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -179,7 +179,7 @@ export async function rutaVender(request: Request, env: Env, url: URL, correo: s
     if (request.method !== metodo) return json({ error: 'Método no permitido.' }, 405);
     if (!revendedora) return json({ error: 'Solo las revendedoras apartan sin anticipo. En la tienda, aparta desde Pedidos.' }, 403);
     if (cancelar) return cancelarDeRevendedora(Number(cancelar[1]), env, ctx, correo);
-    if (pago) return pago[2] === 'pago' ? reportarPago(Number(pago[1]), request, env, ctx, correo) : subirFotoDeRevendedora(Number(pago[1]), request, env, correo);
+    if (pago) return pago[2] === 'pago' ? reportarPagoDeRevendedora(Number(pago[1]), request, env, ctx, correo) : subirFotoDeRevendedora(Number(pago[1]), request, env, correo);
     return metodo === 'GET' ? pedidosDeRevendedora(env, correo) : apartarRevendedora(request, env, ctx, correo);
   }
   return pathname === '/api/vender' || pathname === '/api/interesados' || detalle

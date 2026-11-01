@@ -3,6 +3,7 @@ import { svgCode128, codigoEnDigitos, codigoDeDigitos } from './code128.js';
 import { iniciarCatalogo } from './catalogo-ficha.js';
 import { iniciarApartar } from './apartar.js';
 import { iniciarApartados } from './apartados.js';
+import { iniciarPagos } from './pagos.js';
 
 const $ = (id) => document.getElementById(id);
 const d = (c) => (c / 100).toLocaleString('es-MX', { maximumFractionDigits:2 }) + ' D';
@@ -315,8 +316,11 @@ $('salir').addEventListener('click', () => accion($('salir'), async () => {
 }));
 
 // El catálogo es público: arranca aunque el monedero no esté disponible.
-const misApartados = iniciarApartados({ api });
+// «Ya pagué» (#670): la hoja de pago la abren «Mis apartados» y la confirmación de apartar; al mandar, la lista se refresca.
+const pagos = iniciarPagos({ api, token:() => auth.currentUser?.getIdToken(), alReportar:() => misApartados.cargar() });
+const misApartados = iniciarApartados({ api, alPagar:(info) => pagos.abrir(info) });
 const apartador = iniciarApartar({ api, estaListo:() => socioListo, irAAcceso, alTerminar:() => $('ficha-dialogo').close(),
+  alPagar:(info) => pagos.abrir(info),
   alVerApartados: async () => { await misApartados.cargar(); $('apartados').scrollIntoView({ behavior:'smooth', block:'start' }); } });
 const catalogo = iniciarCatalogo({ apartar:(pieza) => apartador.abrir(pieza) });
 

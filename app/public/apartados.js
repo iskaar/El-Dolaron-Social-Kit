@@ -4,7 +4,7 @@
 // aquí solo se pintan. Los textos de estado salen de funciones puras (estadoApartado, detalleApartado) para poder probarlas.
 import { pesos, fechaLegible, agruparMias } from './vender.js';
 import { APARTADO, fechaCorta } from './catalogo-ficha.js';
-import { enlaceWhatsApp, mensajePague } from './apartar.js';
+import { aPagarDe } from './apartar.js';
 
 const HORA = 3_600_000;
 
@@ -21,8 +21,8 @@ export function estadoApartado(p, ahora = Date.now()) {
   const reporte = p.pago_reportado;
   if (reporte?.estado === 'pendiente') return { clase: 'aviso', texto: '⏳ Pago en revisión · la tienda lo está revisando' };
   if (p.saldo > 0) {
-    return p.entrega === 'envio' ? { clase: 'aviso', texto: `✓ Abonaste ${pesos(p.saldo)} · completa el pago para el envío` }
-      : { clase: 'ok', texto: '✓ Listo para recoger' };
+    return p.entrega === 'envio' ? { clase: 'aviso', texto: `✓ Pago recibido (${pesos(p.saldo)}) · completa el pago para el envío` }
+      : { clase: 'ok', texto: '✓ Pago recibido · Listo para recoger' };
   }
   // Un reporte rechazado no quita el plazo: el motivo va primero y la cuenta regresiva en el detalle.
   if (reporte?.estado === 'rechazado') return { clase: 'alerta', texto: `⚠ No encontramos tu pago${reporte.motivo ? `: ${reporte.motivo}` : ''}` };
@@ -63,16 +63,16 @@ const el = (tag, className, text) => {
 };
 
 /**
- * Arma <section id="apartados"> (portal.html). `api(ruta, cuerpo)` es la del portal (token incluido).
+ * Arma <section id="apartados"> (portal.html). `api(ruta, cuerpo)` es la del portal (token incluido); `alPagar(info)` abre la hoja «Ya pagué» (pagos.js, #670).
  * Devuelve { cargar(), limpiar() }: cargar() vuelve a pedir la lista; limpiar() oculta todo al cerrar sesión.
  */
-export function iniciarApartados({ api }) {
+export function iniciarApartados({ api, alPagar }) {
   const seccion = document.getElementById('apartados');
   if (!seccion) return { cargar: async () => {}, limpiar() {} };
   const q = (sel) => seccion.querySelector(sel);
   const lista = q('.apartados-lista'), previos = q('.apartados-previos'), listaPrevios = q('.apartados-previos-lista'), aviso = q('.apartados-aviso');
   const dialogo = document.getElementById('apartado-cancelar'), confirmar = dialogo?.querySelector('.cancelar-si'), pregunta = dialogo?.querySelector('.cancelar-pregunta'), falla = dialogo?.querySelector('.cancelar-error');
-  let datos = [], folioACancelar = 0, generacion = 0;
+  let datos = [], datosPago = null, folioACancelar = 0, generacion = 0;
 
   function tarjeta(p, ahora) {
     const primera = p.lineas[0];
@@ -95,9 +95,11 @@ export function iniciarApartados({ api }) {
     );
     const acciones = el('div', 'apartado-acciones');
     if (puedeAvisarPago(p)) {
-      const pague = el('a', 'boton-enlace apartado-pague', 'Ya pagué');
-      pague.href = enlaceWhatsApp(mensajePague(p.folio));
-      pague.target = '_blank'; pague.rel = 'noopener';
+      const rechazado = p.pago_reportado?.estado === 'rechazado';
+      const pague = el('button', 'apartado-pague', rechazado ? 'Mandar otro pago' : 'Ya pagué');
+      pague.type = 'button';
+      pague.addEventListener('click', () => alPagar?.({ folio: p.folio, nombre: primera?.nombre ?? 'Pieza', monto: aPagarDe(p.subtotal), concepto: `P-${p.folio}`, datos_pago: datosPago,
+        rechazado: rechazado ? `La tienda no encontró tu pago${p.pago_reportado.motivo ? `: ${p.pago_reportado.motivo}` : ''}. Manda otro comprobante.` : '' }));
       acciones.append(pague);
     }
     if (p.cancelable) {
@@ -128,7 +130,7 @@ export function iniciarApartados({ api }) {
     try {
       const r = await api('apartados');
       if (mia !== generacion) return;   // llegó una carga más nueva (o cerraron sesión)
-      datos = r.apartados;
+      datos = r.apartados; datosPago = r.datos_pago ?? null;
       pintar();
     } catch { if (mia === generacion && !datos.length) seccion.hidden = true; /* sin apartados, el monedero sigue igual */ }
   }
