@@ -47,6 +47,6 @@ jobs:
         run: npm run typecheck
       # El catálogo y el movimiento del sitio (Issue #241): mismo Node, sin dependencias.
       - name: Storefront scripts
-        run: node ../tools/check_site_catalogo.cjs && node ../tools/check_site_motion.cjs && node ../tools/check_site_stickers.cjs
+        run: node ../tools/check_site_catalogo.cjs && node ../tools/check_site_motion.cjs && node ../tools/check_site_stickers.cjs && node --test ../site/worker.test.mjs
       - name: WhatsApp webhook
         run: node --test ../whatsapp/worker.test.mjs

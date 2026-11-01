@@ -67,6 +67,27 @@ test('catalogo: lista solo piezas vendibles, sin campos internos', async () => {
   } finally { t.db.close(); }
 });
 
+test('catalogo (Issue #671): ?codigo= devuelve exactamente esa pieza vendible, o ninguna', async () => {
+  const t = publica();
+  try {
+    const una = pieza(t, { stock: 1 });
+    const prefijo = pieza(t, { codigo: `${una}7` });   // q=${una} también coincidiría con esta
+    const agotada = pieza(t, { stock: 0 });
+    const { piezas } = await leer(await t.llamar(`/api/catalogo?codigo=${una}`));
+    assert.equal(piezas.length, 1);
+    assert.equal(piezas[0].codigo, una);
+    assert.equal(piezas[0].ultima, true);
+    assert.ok(!('stock' in piezas[0]));
+    const r = await t.llamar(`/api/catalogo?codigo=${prefijo}`);
+    assert.equal(r.headers.get('cache-control'), 'public, max-age=300');
+    assert.equal((await leer(r)).piezas[0].codigo, prefijo);
+    assert.deepEqual((await leer(await t.llamar(`/api/catalogo?codigo=${agotada}`))).piezas, []);
+    assert.deepEqual((await leer(await t.llamar('/api/catalogo?codigo=ED-999999'))).piezas, []);
+    assert.equal((await t.llamar('/api/catalogo?codigo=xx')).status, 400);
+    assert.equal((await t.llamar('/api/catalogo?codigo=')).status, 400);
+  } finally { t.db.close(); }
+});
+
 test('catalogo: precio_lista solo si es mayor que el precio', async () => {
   const t = publica();
   try {
