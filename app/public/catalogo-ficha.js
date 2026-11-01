@@ -200,9 +200,18 @@ export function iniciarCatalogo({ sinSesion = () => false } = {}) {
     setTimeout(() => { pista.hidden = true; }, 3000);
   }
 
+  // Medición de la ficha (Issue #651): solo evento, código de pieza y origen. Mismo host, sin CORS; errores en silencio.
+  function evento(nombre, codigo) {
+    try {
+      const cuerpo = JSON.stringify({ evento: nombre, codigo, origen: 'portal' });
+      if (!(navigator.sendBeacon && navigator.sendBeacon('/api/catalogo/evento', cuerpo))) fetch('/api/catalogo/evento', { method: 'POST', body: cuerpo, keepalive: true }).catch(() => {});
+    } catch { /* medir nunca rompe la ficha */ }
+  }
+
   // ---- «Lo quiero», hoja de tres opciones y Compartir ----
   function abrirHoja() {
     if (!actual) return;
+    evento('lo_quiero', actual.codigo);
     const ahora = Date.now();
     for (const op of opciones) op.href = enlaceQuiero(actual, op.dataset.op, ahora);
     avisoEntrada.hidden = !sinSesion();   // D5: invitado con aviso
@@ -218,6 +227,7 @@ export function iniciarCatalogo({ sinSesion = () => false } = {}) {
   }
   async function compartir() {
     if (!actual) return;
+    evento('compartir', actual.codigo);
     const url = `https://eldolaron.com/?pieza=${encodeURIComponent(actual.codigo)}`;
     try {
       if (navigator.share) { await navigator.share({ title: actual.nombre, text: `${actual.nombre} en El Dolarón`, url }); return; }
@@ -229,10 +239,13 @@ export function iniciarCatalogo({ sinSesion = () => false } = {}) {
   hojaCerrar.addEventListener('click', () => cerrarHoja(true));
   hoja.addEventListener('click', (ev) => { if (ev.target === hoja) cerrarHoja(true); });
   botonCompartir.addEventListener('click', compartir);
+  for (const op of opciones) op.addEventListener('click', () => { if (actual) evento(op.dataset.op === 'preguntar' ? 'preguntar' : `apartar_${op.dataset.op}`, actual.codigo); });
+  dialogAsk.addEventListener('click', () => { if (actual) evento('whatsapp_abierto', actual.codigo); });
 
   function abrirFicha(pieza, disparador) {
     focoAnterior = disparador;
     actual = pieza;
+    evento('ficha_abierta', pieza.codigo);
     cerrarHoja(false);
     reiniciarZoom();
     dialogTitle.textContent = pieza.nombre;

@@ -421,3 +421,65 @@ test('catalogo (Issue #526): ?recorte=1 lista solo piezas con recorte listo y re
     assert.equal(p2.siguiente, null);
   } finally { t.db.close(); }
 });
+
+test('catalogo (Issue #651): POST /evento escribe solo evento, codigo y origen y responde 204', async () => {
+  const t = publica();
+  try {
+    const puntos: any[] = [];
+    (t.env as any).EVENTOS = { writeDataPoint: (p: unknown) => puntos.push(p) };
+    const enviar = (cuerpo: string, ruta = '/api/catalogo/evento', host = HOST, method = 'POST') =>
+      worker.fetch!(new Request(`https://${host}${ruta}`, { method, ...(method === 'POST' ? { body: cuerpo } : {}),
+        headers: { 'content-type': 'text/plain;charset=UTF-8', 'cf-connecting-ip': '203.0.113.9', 'user-agent': 'x', cookie: 'a=b' } }) as never, t.env, t.ctx as never);
+    const bueno = JSON.stringify({ evento: 'lo_quiero', codigo: 'ED-000123', origen: 'sitio' });
+    const r = await enviar(bueno);
+    assert.equal(r.status, 204);
+    assert.equal(r.headers.get('access-control-allow-origin'), 'https://eldolaron.com');
+    assert.deepEqual(puntos, [{ blobs: ['lo_quiero', 'ED-000123', 'sitio'], indexes: ['lo_quiero'] }]);
+    for (const e of ['ficha_abierta', 'apartar_recoger', 'apartar_envio', 'preguntar', 'whatsapp_abierto', 'compartir'])
+      assert.equal((await enviar(JSON.stringify({ evento: e, codigo: 'ED-1', origen: 'portal' }))).status, 204);
+    assert.equal(puntos.length, 7);
+
+    const malos = [
+      '{"evento":"otro","codigo":"ED-000123","origen":"sitio"}',
+      '{"evento":"lo_quiero","codigo":"XX-1","origen":"sitio"}',
+      '{"evento":"lo_quiero","codigo":"ED-12345678901","origen":"sitio"}',
+      '{"evento":"lo_quiero","codigo":"ED-1","origen":"app"}',
+      '{"evento":"lo_quiero","codigo":"ED-1"}',
+      '{"evento":["lo_quiero"],"codigo":"ED-1","origen":"sitio"}',
+      'no es json', 'null', '[]', '',
+      JSON.stringify({ evento: 'lo_quiero', codigo: 'ED-1', origen: 'sitio', relleno: 'x'.repeat(400) }),
+    ];
+    for (const m of malos) assert.equal((await enviar(m)).status, 400, m);
+    assert.equal(puntos.length, 7, 'lo invalido no escribe');
+
+    assert.equal((await enviar('', '/api/catalogo/evento', HOST, 'GET')).status, 405);
+    const o = await enviar('', '/api/catalogo/evento', HOST, 'OPTIONS');
+    assert.equal(o.status, 204);
+    assert.match(o.headers.get('access-control-allow-methods') ?? '', /POST/);
+    assert.equal(o.headers.get('access-control-allow-origin'), 'https://eldolaron.com');
+
+    // Solo el host publico: en el del personal la ruta no existe (cae en Access).
+    const n = puntos.length;
+    const staff = await enviar(bueno, '/api/catalogo/evento', 'escaner.prueba');
+    assert.notEqual(staff.status, 204);
+    assert.equal(puntos.length, n);
+  } finally { t.db.close(); }
+});
+
+test('catalogo (Issue #651): sin el binding EVENTOS responde 204 igual', async () => {
+  const t = publica();
+  try {
+    delete (t.env as any).EVENTOS;
+    const r = await worker.fetch!(new Request(`https://${HOST}/api/catalogo/evento`, { method: 'POST', body: '{"evento":"compartir","codigo":"ED-5","origen":"portal"}' }) as never, t.env, t.ctx as never);
+    assert.equal(r.status, 204);
+  } finally { t.db.close(); }
+});
+
+test('catalogo (Issue #651): /evento pasa por el tope por IP del host publico', async () => {
+  const t = publica();
+  try {
+    (t.env as any).LIMITE_PORTAL = { limit: async () => ({ success: false }) };
+    const r = await worker.fetch!(new Request(`https://${HOST}/api/catalogo/evento`, { method: 'POST', body: '{"evento":"compartir","codigo":"ED-5","origen":"portal"}' }) as never, t.env, t.ctx as never);
+    assert.equal(r.status, 429);
+  } finally { t.db.close(); }
+});
