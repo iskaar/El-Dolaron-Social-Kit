@@ -21,10 +21,10 @@ Tienda de barrio con calidad americana (`site/DESIGN.md`): cercana, directa y si
 2. **Ropa americana y mercancía general.** Ropa; hogar, belleza, juguetes y más (`index.html`).
 3. **Calidad americana, pieza por pieza.** Se revisan, fotografían y etiquetan una por una (`que-es-un-saldo.html`).
 4. **Precio claro.** Ropa desde $50 por prenda; el precio va en la etiqueta; el resto, en el catálogo (`index.html`).
-5. **Las piezas cambian todos los días; confirma por WhatsApp** disponibilidad, precio y condición (`index.html`).
+5. **Lo que ves en el catálogo está en tienda hoy; apártalo con $100 y te lo guardamos 7 días.** Las piezas cambian todos los días (`index.html`, `que-es-un-saldo.html`). Decisión del 31/10/2026: ya no se pide «confirmar por WhatsApp» lo que el catálogo muestra.
 6. **Entérate primero:** grupos de WhatsApp de Ropa y de Mercancía General (`index.html`).
 7. **Compra y gana Dolarones:** 1 Dolarón = $1.00 en tienda; registrarte es gratis y compras a los mismos precios (`index.html`, `app/public/portal.html`).
-8. **Compra en sucursal:** Jardín Hidalgo 129, Zona Centro, Soledad de Graciano Sánchez, S.L.P., C.P. 78430; todos los días de 11:00 a. m. a 8:00 p. m.; efectivo, transferencia y tarjeta; recogida en la sucursal (`index.html`, `que-es-un-saldo.html`).
+8. **Compra en sucursal:** Jardín Hidalgo 129, Zona Centro, Soledad de Graciano Sánchez, S.L.P., C.P. 78430; todos los días de 11:00 a. m. a 8:00 p. m.; efectivo, transferencia y tarjeta; recogida en la sucursal o envío nacional los viernes, gratis desde $1,000 (si no, $99) (`index.html`, `que-es-un-saldo.html`).
 9. **Qué es un saldo:** mercancía vendida por debajo de su precio original, de pallets de liquidación de Estados Unidos (`que-es-un-saldo.html`).
 
 ## 3. Vocabulario
@@ -41,11 +41,11 @@ Tienda de barrio con calidad americana (`site/DESIGN.md`): cercana, directa y si
 | **Socio / membresía** | Cliente registrado en Dolarones (gratis, voluntario, mayores de 18). |
 | **Vale** | Papel impreso con Dolarones para quien compra sin registrarse: 5 por cada $100, vence a los 30 días (`index.html`, sección E). |
 | **Cupón** | Dos usos: el cupón visual de los grupos de WhatsApp («Vale por tu lugar…») y el «cupón en Dolarones» con que caja devuelve una pieza (`app/public/ticket.js`). |
-| **Apartar** | Reservar una pieza con anticipo (ver inconsistencia 4). |
-| **Sucursal / recogida** | Único canal de entrega hoy: se recoge en la tienda. |
+| **Apartar** / **Lo quiero** | Reservar una pieza con $100 por 7 días (decisiones del 31/10/2026, sección 8). «Lo quiero» es el botón de cada pieza: abre la ficha, donde se elige recoger, envío o preguntar. |
+| **Sucursal / recogida / envío** | Se recoge en la tienda o se envía los viernes (corte el jueves a las 8 p. m.); envío nacional gratis desde $1,000, si no $99. |
 | **Preguntar / confirmar por WhatsApp** | Forma estándar de cerrar la conversación. |
 
-**Evitar:** «súper precios» (texto viejo del kit), «oferta barata», «el más barato», «remate», «ganga»; «envío», «a domicilio», «garantía» o «devolución» sin política aprobada; «original» o «auténtico» sin comprobar; «gratis» salvo registrarse en Dolarones y unirse a los grupos; «dólar» como precio; nombrar a Target, Walmart, JCPenney o Dollar General como proveedores.
+**Evitar:** «súper precios» (texto viejo del kit), «oferta barata», «el más barato», «remate», «ganga»; «a domicilio», «garantía» o «devolución» sin política aprobada (el envío sí se nombra, con la política vigente: viernes, gratis desde $1,000, si no $99); «original» o «auténtico» sin comprobar; «gratis» salvo registrarse en Dolarones, unirse a los grupos y el envío nacional desde $1,000; «dólar» como precio; nombrar a Target, Walmart, JCPenney o Dollar General como proveedores.
 
 ## 4. Reglas por canal
 
@@ -54,7 +54,7 @@ Tienda de barrio con calidad americana (`site/DESIGN.md`): cercana, directa y si
 | **WhatsApp 1 a 1** | 1 a 3 líneas; responde al producto o código. | Pocos, solo en fichas de pieza (🛍️ nombre, 💵 precio, 🔖 código; `app/public/vender.js` en la rama `origin/agent/codex/431-vender`). | «Compártenos la foto o el nombre para revisar los detalles» (`Textos-para-redes.txt`). |
 | **WhatsApp grupos** | Lista corta `código · nombre · precio` con un solo cierre al final. | Mínimos. | Pedidos por privado, no en el grupo (`docs/MARKETING-30-DIAS.md`). |
 | **Facebook / Instagram** | Una pieza o cuatro novedades; nombre, precio y un detalle. | 🇺🇸 como sello de marca; etiquetas `#ElDolarón #MercancíaAmericana`. | «Escríbenos para consultar disponibilidad»; «¿Cuál te interesa?». |
-| **Sitio** (`site/public/`) | Frases cortas; titular y una línea. | Ninguno. | «Ver catálogo», «Preguntar por WhatsApp», «Cómo llegar». |
+| **Sitio** (`site/public/`) | Frases cortas; titular y una línea. | Ninguno. | «Ver catálogo», «Lo quiero», «Cómo llegar»; «Preguntar por WhatsApp» solo dentro de la ficha. |
 | **Ticket impreso** (`app/public/impresora.js`) | Solo datos de venta y «Gracias por su compra». | Ninguno. | Ninguna. La impresora térmica imprime sin acentos («EL DOLARON»): limitación de hardware, no regla de marca. |
 | **Mercado Libre** (`docs/MERCADOLIBRE.md`, `app/src/mercadolibre.ts`) | Título y descripción factuales: nombre, marca, condición. | Ninguno (el código los elimina con `sinEmojis`). | Ninguna promocional. Fotos sin logos ni textos. |
 
@@ -95,9 +95,18 @@ Reglas vigentes para el manual de marca. No se corrigieron aún los archivos del
 4. **WhatsApp: 444 543 7754, único oficial.** El 444 854 5980 no es WhatsApp (inconsistencia 2).
 5. **Dirección:** Jardín Hidalgo 129, Zona Centro, Soledad de Graciano Sánchez, S.L.P., C.P. 78430.
 6. **Horario:** «11 a. m. a 8 p. m.», todos los días; en espacio corto, «de 11 a 8» (inconsistencia 3).
-7. **Apartado en tienda:** 15 % del valor del producto, por 7 días (inconsistencia 4).
+7. **Apartado en tienda:** 15 % del valor del producto, por 7 días (inconsistencia 4). **[Reemplazada 31/10/2026: $100 por 7 días, ver sección 8.]**
 8. **Envío:** $100 de anticipo al apartar el primer producto, que se liquida antes de enviar. Envíos todos los viernes (corte el jueves a las 8 p. m.). Costo del envío: $99 en compras de menos de $1,000 y gratis desde $1,000.
 9. **Portal Dolarones:** no nombra personas; dice «muéstralo en caja» en lugar de «Muestra este código a Isaac en la tienda» (inconsistencia 8).
 10. **Marketplace y Mercado Libre:** el contacto dirige a WhatsApp, no a Messenger (inconsistencia 5).
 
 Pendiente de corregir en archivos (otro Issue): `Textos-para-redes.txt`, `docs/MARKETING-30-DIAS.md`, `app/public/impresora.js`, `app/public/portal.html`, `app/public/marketplace.html` y los textos de la app que usen horario, teléfono, apartado o descriptor distintos.
+
+## 8. Decisiones de Isaac (31/10/2026, Issue #643)
+
+Reemplazan lo que digan en contra las secciones 2 a 7 de este documento. Detalle en `docs/UX-COMPRA.md`, sección 8.
+
+1. **Verbo del botón: «Lo quiero»** (D2). Sustituye a «Preguntar por WhatsApp» y «Apartar por WhatsApp» en las tarjetas del sitio; el botón abre la ficha de la pieza.
+2. **«Aparta con $100»** (D8): el apartado son $100 por 7 días, para recoger o para envío (una pieza de menos de $100 se paga completa). Reemplaza el 15 % de la decisión 7 de la sección 7.
+3. **«Envío nacional gratis a partir de $1,000»** (D8). Debajo de $1,000 el envío cuesta $99 y se dice, para no esconder cargos. Envíos los viernes, corte el jueves a las 8 p. m.
+4. **Certeza en el catálogo** (D3): lo que se muestra está en tienda hoy; las tarjetas dicen «Disponible» y no piden confirmar por WhatsApp.

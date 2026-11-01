@@ -1,9 +1,6 @@
 (() => {
   const WHATSAPP = "https://wa.me/524445437754";
   const API = "https://dolarones.eldolaron.com";
-  // El mismo ícono del botón de WhatsApp de la portada (index.html).
-  // Logo de WhatsApp (Simple Icons, CC0) en círculo blanco: se reconoce de un vistazo.
-  const WHATSAPP_ICONO = '<span class="wa-logo" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413Z"/></svg></span>';
   // Copia de app/public/categorias.js: el sitio no importa código de otras carpetas.
   const CATEGORIAS = [
     ["", "Todo"], ["ropa", "Ropa y calzado"], ["accesorios", "Bolsas y accesorios"],
@@ -95,6 +92,30 @@
     }
   }
 
+  // Piezas de las dos listas (Issue #648): sello «¡Última pieza!», línea «Disponible» y botón «Lo quiero».
+  // El botón abre la ficha, nunca WhatsApp: ahí se decide cómo apartar.
+  function crearSello() {
+    const sello = document.createElement("span");
+    sello.className = "wanted-stamp";
+    sello.setAttribute("aria-hidden", "true");
+    sello.textContent = "¡Última pieza!";
+    return sello;
+  }
+  function lineaDisponible() {
+    const linea = document.createElement("p");
+    linea.className = "piece-disp";
+    linea.textContent = "Disponible";
+    return linea;
+  }
+  function botonQuieroTarjeta(pieza, clase) {
+    const boton = document.createElement("button");
+    boton.type = "button";
+    boton.className = `button piece-quiero ${clase}`.trim();
+    boton.textContent = "Lo quiero";
+    boton.setAttribute("aria-label", `Lo quiero: ${pieza.nombre}${pieza.ultima === true ? ", última pieza" : ""}`);
+    return boton;
+  }
+
   // «Los más buscados» (Issue #339): lo de mayor precio que sigue a la venta, en tarjetas como las del catálogo (Issue #630).
   // Si la API falla o trae menos de 3 con foto, la sección se queda oculta.
   async function buscados(seccion) {
@@ -112,11 +133,9 @@
         const item = document.createElement("article");
         item.className = "wanted-item";
         item.setAttribute("aria-label", pieza.ultima ? `${pieza.nombre}, última pieza` : pieza.nombre);
-        // La foto abre el visor grande (el mismo del catálogo): las fotos de celular se ven recortadas.
-        const foto = document.createElement("button");
-        foto.type = "button";
+        // Toda la tarjeta abre la ficha; la foto ya no es un botón aparte.
+        const foto = document.createElement("div");
         foto.className = "wanted-photo";
-        foto.setAttribute("aria-label", `Ver foto completa: ${pieza.nombre}`);
         const img = new Image();
         img.alt = "";
         img.loading = "lazy";
@@ -128,20 +147,8 @@
           li.remove(); if (lista.children.length < 3) seccion.hidden = true;
         });
         img.src = pieza.recorte || pieza.foto;
-        const zoom = document.createElement("span");
-        zoom.className = "piece-zoom";
-        zoom.setAttribute("aria-hidden", "true");
-        zoom.textContent = "Ver foto";
-        foto.append(img, zoom);
-        if (pieza.ultima) {
-          // Sello de goma sobre la foto: lo dice el servidor cuando queda una sola pieza.
-          const sello = document.createElement("span");
-          sello.className = "wanted-stamp";
-          sello.setAttribute("aria-hidden", "true");
-          sello.textContent = "¡Última pieza!";
-          foto.append(sello);
-        }
-        foto.addEventListener("click", () => abrirVisor(pieza, foto, img));
+        foto.append(img);
+        if (pieza.ultima) foto.append(crearSello());   // lo dice el servidor cuando queda una sola pieza
         const cuerpo = document.createElement("div");
         cuerpo.className = "wanted-body";
         // Marca (lo que vende «calidad americana») o, si no hay, la categoría.
@@ -169,13 +176,9 @@
           antes.append(lista, ahorro);
           valor.append(antes);
         }
-        const apartar = document.createElement("a");
-        apartar.className = "button button-whatsapp wanted-ask";
-        apartar.href = consulta(pieza, "quiero apartar");
-        apartar.setAttribute("aria-label", `Apartar por WhatsApp: ${pieza.nombre}`);
-        apartar.innerHTML = WHATSAPP_ICONO;
-        apartar.append("Apartar por WhatsApp");
-        cuerpo.append(linea, nombre, valor, apartar);
+        const quiero = botonQuieroTarjeta(pieza, "wanted-ask");
+        cuerpo.append(linea, nombre, valor, lineaDisponible(), quiero);
+        item.addEventListener("click", () => abrirVisor(pieza, quiero, img));
         item.append(foto, cuerpo);
         li.append(item);
         lista.append(li);
@@ -394,7 +397,7 @@
     evento("ficha_abierta", pieza.codigo);
     cerrarHoja(false);
     reiniciarZoom();
-    if (dialogImg) { dialogImg.src = pieza.foto; dialogImg.alt = pieza.nombre; }   // siempre la foto completa, no el recorte
+    if (dialogImg) { if (pieza.foto) dialogImg.src = pieza.foto; else dialogImg.removeAttribute("src"); dialogImg.alt = pieza.nombre; }   // siempre la foto completa, no el recorte
     if (dialogMeta) {
       // Marca (o categoría si no hay) · talla · código
       const rubro = pieza.marca || (CATEGORIAS.find(([k]) => k === pieza.categoria) || [])[1];
@@ -462,12 +465,11 @@
   function tarjeta(pieza) {
     const li = el("li", "piece");
     const conFoto = /^https?:\/\//.test(pieza.foto || "");
-    const photo = el(conFoto ? "button" : "div", "piece-photo");
+    const photo = el("div", "piece-photo");
+    let img = null;
     if (conFoto) {
       if (pieza.recorte) photo.classList.add("con-recorte");
-      photo.type = "button";
-      photo.setAttribute("aria-label", `Ver foto completa: ${pieza.nombre}`);
-      const img = new Image();
+      img = new Image();
       img.alt = "";
       img.loading = "lazy";
       img.decoding = "async";
@@ -476,11 +478,9 @@
         else img.remove();
       });
       img.src = pieza.recorte || pieza.foto;
-      const zoom = el("span", "piece-zoom", "Ver foto");
-      zoom.setAttribute("aria-hidden", "true");
-      photo.append(img, zoom);
-      photo.addEventListener("click", () => abrirVisor(pieza, photo, img));
+      photo.append(img);
     }
+    if (pieza.ultima === true) photo.append(crearSello());
     const body = el("div", "piece-body");
     // ponytail: la ropa se captura sin nombre propio; hasta tener marca/equipo dice «Ropa americana».
     body.append(el("h3", "", pieza.nombre === "Ropa" ? "Ropa americana" : pieza.nombre));
@@ -488,13 +488,11 @@
     if (pieza.talla) body.append(el("p", "piece-size", `Talla ${pieza.talla}`));
     const price = el("p", "piece-price");
     pintarPrecio(price, pieza);
-    const ask = el("a", "button button-whatsapp piece-link");
-    ask.innerHTML = WHATSAPP_ICONO;
-    ask.append("Preguntar por WhatsApp");
-    ask.href = consulta(pieza);
-    ask.setAttribute("aria-label", `Preguntar por WhatsApp: ${pieza.nombre}`);
-    body.append(price, ask);
+    const quiero = botonQuieroTarjeta(pieza, "");
+    body.append(price, lineaDisponible(), quiero);
     li.append(photo, body);
+    // Toda la tarjeta abre la ficha; el foco vuelve al botón al cerrarla.
+    li.addEventListener("click", () => abrirVisor(pieza, quiero, img));
     return li;
   }
 
