@@ -15,9 +15,9 @@ Documentos hermanos: [REVENDEDORAS-UX.md](REVENDEDORAS-UX.md) (principios P1–P
 3. **El sitio habla con duda.** «Confirma disponibilidad por WhatsApp», «pregunta si sigue disponible», «¿Sigue disponible?» aparecen cinco veces. El catálogo ya sale de D1 con caché de 5 minutos: podemos hablar con certeza («Disponible hoy · 1 pieza») y lo hacemos sonar inseguro.
 4. **Lo que hacen los grandes se resume en cinco cosas:** la foto se agranda con el dedo; el precio va con el costo de entrega y la fecha; la disponibilidad está junto al botón; el botón de compra siempre está a la vista (barra fija abajo); y el camino al pago no pide hablar con nadie. Mercado Libre, Amazon y TikTok Shop coinciden en las cinco [OBSERVADO]; Baymard y NN/g lo respaldan [LEÍDO].
 5. **Lo que no aplica:** carrito de varias unidades (nuestras piezas son únicas), reseñas por producto, meses sin intereses en tickets de $50–$300, «llega mañana» (enviamos los viernes) y contadores falsos de urgencia.
-6. **Fase «Ahora» (una semana, sin API nueva ni migración):** una sola **ficha de pieza** compartida por sitio y portal: foto con zoom (doble toque y pellizco), precio con ahorro, «Disponible hoy», cómo se compra en una línea (apartado 15 %, recoger o envío del viernes) y un botón rojo **«Lo quiero»** de 56 px que abre WhatsApp con el mensaje ya escrito y la intención elegida (recoger / envío / solo preguntar). El portal muestra el catálogo completo sin salir y, debajo del inicio de sesión, lo nuevo sin pedir SMS.
-7. **Fase «Después» (2–4 semanas):** «Apartar» de verdad desde el celular con lo que ya existe: pedidos de #269 (15 % / 7 días; envío con $100), identidad del portal (SMS), transferencia con clave de rastreo (#593) y comprobante (#609). El pago con link de Mercado Pago queda detrás de una decisión de Isaac porque requiere credenciales en el Worker.
-8. **Medir desde el día uno.** Hoy no sabemos cuántas personas abren una foto ni cuántas tocan WhatsApp. Propuesta: contar eventos sin cookies ni datos personales; la herramienta exacta es la decisión D1.
+6. **Fase «Ahora» (una semana, sin API nueva ni migración):** una sola **ficha de pieza** compartida por sitio y portal: foto con zoom (doble toque y pellizco), precio con ahorro, «Disponible hoy», cómo se compra en una línea (apartado con $100, recoger o envío del viernes) y un botón rojo **«Lo quiero»** de 56 px que abre WhatsApp con el mensaje ya escrito y la intención elegida (recoger / envío / solo preguntar). El portal muestra el catálogo completo sin salir y, debajo del inicio de sesión, lo nuevo sin pedir SMS.
+7. **Fase «Después» (2–4 semanas):** «Apartar» de verdad desde el celular con lo que ya existe: pedidos de #269 (apartado $100 / 7 días, decisión D8), identidad del portal (SMS), transferencia con clave de rastreo (#593) y comprobante (#609). El link de Mercado Pago queda fuera por ahora (D4, 31/10): el pago es transferencia + comprobante.
+8. **Medir desde el día uno.** Hoy no sabemos cuántas personas abren una foto ni cuántas tocan WhatsApp. Decisión D1 (31/10): Workers Analytics Engine, sin cookies ni datos personales.
 9. **Probar con tres clientes reales** las cinco tareas de la sección 7 antes y después de la fase «Ahora». Una captura en el navegador no sustituye a una persona con su teléfono.
 10. **Decisiones de negocio pendientes** (sección 8): texto «Lo quiero» vs «Apartar», compromiso de «lo que ves está en tienda», Mercado Pago, apartar sin ser socio, mostrar condición A/B/C, catálogo sin sesión en el portal, y cómo medir.
 
@@ -65,7 +65,7 @@ Conclusión: el único «botón de pagar» de El Dolarón es una persona con el 
 | --- | --- | --- |
 | Catálogo público con cursor, categoría, búsqueda, foto y recorte; CORS a eldolaron.com; caché 300 s | `app/src/catalogo.ts` | Misma fuente para sitio y portal. Falta exponer `ultima` en la lista (hoy solo en `destacados`) y, si se decide, `grado`. |
 | Visor con morph (View Transitions), `<dialog>` accesible, enlace `?pieza=` | `site/public/catalogo.js`, `styles.css` | Base de la ficha. Se extiende, no se reemplaza. |
-| Apartado 15 % redondeado al peso hacia arriba; envío $100 de anticipo; $99 / gratis desde $1,000 | `app/public/venta.js` `anticipoMinimoDe`, `envioDe`, `viernesDeEnvio` | El texto «Apártala con $23» se calcula con la misma aritmética. El sitio no importa código de `app/` (regla de `site/README.md`): se copia la constante, como ya se hace con `CATEGORIAS`. |
+| Apartado 15 % redondeado al peso hacia arriba; envío $100 de anticipo; $99 / gratis desde $1,000 | `app/public/venta.js` `anticipoMinimoDe`, `envioDe`, `viernesDeEnvio` | Isaac fijó el 31/10 el apartado en **$100 para cualquier pieza** (D8): el mensaje público ya no depende de `ANTICIPO_PORCENTAJE`; la constante se ajusta en B1 cuando el apartado se cree en línea. El sitio no importa código de `app/` (regla de `site/README.md`): se copia la constante de envío, como ya se hace con `CATEGORIAS`. |
 | Pedidos: apartar, saldo, vencimiento por cron, envío, cierre en caja | `app/src/pedidos.ts` (#269) | Fase «Después»: el apartado en línea es un pedido más, con `vendedora` = portal. |
 | Identidad del cliente por SMS (Firebase), `clientes.auth_uid`, bases aceptadas | `app/src/portal.ts` | Quien aparta en línea ya está identificado; no hay que inventar otra cuenta. |
 | Clave de rastreo única por transferencia; CLABE de la tienda (Mercado Pago 722…) | `app/src/transferencias.ts`, `docs/CEP-BANXICO.md` | Pagar el 15 % por SPEI sin servicio nuevo. |
@@ -161,11 +161,12 @@ Una sola ficha, usada en cuatro lugares: el visor del sitio, el catálogo del po
 │ Sudadera con gorro                │  Nombre 20 px
 │ $150  ~~$450~~  Ahorras $300      │  Precio Anton 36 px rojo; lista tachada; ahorro en negritas
 │ ● Disponible hoy en tienda        │  Verde + punto + palabra (P5 de REVENDEDORAS)
-│ Apártala con $23 por 7 días.      │  anticipoMinimoDe(precio) → 15 % redondeado al peso
+│ Apártala con $100 por 7 días.     │  D8 (31/10): $100 fijos; una pieza de menos de $100 se paga completa
 │ Recoge en Soledad (11 a 8) o      │
-│ te la enviamos el viernes 7       │  viernesDeEnvio(); «$99 · gratis desde $1,000»
-│ ($99 · gratis desde $1,000).      │
-│ Condición A · Llegó esta semana   │  (si D6 lo aprueba) · fecha real de captura
+│ te la enviamos el viernes 7.      │  viernesDeEnvio()
+│ Envío nacional gratis desde       │  D8 (31/10); el «$99» bajo $1,000 sale de envioDe() y se dice
+│ $1,000 (antes, $99).              │  para no esconder cargos (NN/g)
+│ Condición A · Llegó esta semana   │  D6 aprobado 31/10 (hoy solo se publican piezas A) · fecha de captura
 ├──────────────────────────────────┤
 │ ┌──────────────────────────────┐ │  Barra fija abajo mientras la ficha está abierta
 │ │ $150   [    Lo quiero     ]  │ │  Botón rojo 56 px; precio a la izquierda
@@ -176,23 +177,45 @@ Una sola ficha, usada en cuatro lugares: el visor del sitio, el catálogo del po
 
 **Qué pasa al tocar «Lo quiero».** Se abre una hoja con tres opciones grandes (56 px cada una), en este orden:
 
-1. **Apartarla y recogerla en tienda** → WhatsApp con: «Hola, quiero apartar *Sudadera Nike talla M* (ED-001850) de $150. Dejo $23 de apartado y paso a recogerla a Jardín Hidalgo 129.»
-2. **Apartarla con envío** → «…de $150. Dejo $100 de anticipo para el envío del viernes 7 (envío $99). ¿Me pasan los datos para transferir?»
+1. **Apartarla y recogerla en tienda** → WhatsApp con: «Hola, quiero apartar *Sudadera Nike talla M* (ED-001850) de $150. Dejo $100 de apartado y paso a recogerla a Jardín Hidalgo 129.»
+2. **Apartarla con envío** → «…de $150. Dejo $100 de apartado para el envío del viernes 7 (gratis desde $1,000; si no, $99). ¿Me pasan los datos para transferir?»
 3. **Solo preguntar algo** → «Hola, tengo una pregunta sobre *Sudadera Nike talla M* (ED-001850) de $150.»
 
-En la fase «Ahora» las tres van a WhatsApp (sin API nueva). En la fase «Después», la 1 y la 2 **crean el apartado** en D1 desde el portal y piden el pago; WhatsApp queda para la 3 y para quien no quiera registrarse.
+En la fase «Ahora» las tres van a WhatsApp (sin API nueva). En la fase «Después», la 1 y la 2 **crean el apartado** en D1 desde el portal y piden el pago; WhatsApp queda para la 3 y para quien elija **continuar como invitado** (D5, 31/10): antes de mandarlo a WhatsApp, una línea le dice lo que gana registrándose (sección 4.1).
 
 **Zoom.** Doble toque alterna 1× / 2.5×; pellizco escala entre 1× y 4×; arrastrar mueve la foto acercada; al cerrar vuelve a 1×. Sin librería: `pointer events` + `transform`, unas 60 líneas. Al pasar de 1×, la `<img>` cambia a la foto original (`/api/catalogo/foto/`, que ya se sirve a tamaño completo) si estaba mostrando el recorte. `touch-action: none` dentro de la foto para que el gesto no se lo quede el navegador (mismo truco que los stickers de la portada, #537).
 
 **Tarjeta en el catálogo (lista).** Foto 4:5 con sello «¡Última pieza!» cuando aplica; nombre; talla; precio con lista tachada; una línea «● Disponible»; **un solo botón «Lo quiero»** que abre la ficha (no WhatsApp directo: la ficha es donde se decide). El chip «Ver foto» desaparece: toda la tarjeta abre la ficha.
 
-**Catálogo en el portal.** La misma lista, con los chips de categoría, dentro del portal (`/api/catalogo` es del mismo origen). Visible **debajo del formulario de SMS** cuando no hay sesión (si D7 lo aprueba) y dentro del monedero cuando sí la hay. «Ver todo el catálogo» deja de sacar a otro dominio.
+**Catálogo en el portal.** La misma lista, con los chips de categoría, dentro del portal (`/api/catalogo` es del mismo origen). Visible **debajo del formulario de SMS** cuando no hay sesión (D7 aprobado 31/10) y dentro del monedero cuando sí la hay. «Ver todo el catálogo» deja de sacar a otro dominio.
+
+### 4.1 Entrar y registrarse sin fricción (pregunta de Isaac, 31/10)
+
+Hoy registrarse cuesta **tres pantallas, tres casillas obligatorias y un reCAPTCHA visible** («No soy un robot»): teléfono + casilla de consentimiento SMS + casilla «mantener sesión» + captcha + botón → código de 6 dígitos → nombre + código de referido + casilla «acepto las bases» + casilla «mayor de 18» → «Crear mi membresía». La portada dice «Tus Dolarones, contigo» a alguien que todavía no sabe qué es un Dolarón. [CÓDIGO: `app/public/portal.html`, `portal.js` L165–215]
+
+Lo que hacen Mercado Libre, Amazon y las apps de transporte [OBSERVADO]: piden el teléfono, mandan el código, lo autollenan, y el consentimiento va como texto bajo el botón («Al continuar aceptas…»). El captcha no se ve. El nombre se pide después, cuando hace falta. Y se registra a la persona **en el momento en que lo necesita** (al apartar), no antes de dejarla ver la tienda.
+
+Propuesta (Issue hijo A7), de más a menos valor por línea de código:
+
+| # | Cambio | Decisión |
+| --- | --- | --- |
+| S1 | **reCAPTCHA invisible:** `size:'invisible'` ligado al botón «Recibir código». El desafío solo aparece si Google sospecha. Es cambiar una palabra en `portal.js`. | Ninguna |
+| S2 | **El código SMS se envía solo** al teclear el sexto dígito (`autocomplete="one-time-code"` ya lo autollena en iOS y Android). | Ninguna |
+| S3 | **Decir qué gana antes de pedir el teléfono:** «Entra con tu celular. Acumulas Dolarones en cada compra (1 D = $1 en tienda), ves tus compras y tus apartados.» La misma frase, en una línea, en la hoja de «Lo quiero» del invitado: «Registrarme (1 min)» o «Seguir como invitado». | D11: la cifra exacta («10 D por cada $100») depende de #635 |
+| S4 | **Recordar la pieza:** si llegó desde «Lo quiero», al terminar el SMS vuelve a la ficha con la hoja abierta (`?pieza=` sobrevive al inicio de sesión). | Ninguna |
+| S5 | **Una casilla en vez de dos** en el registro: «Tengo 18 años o más y acepto las bases de Dolarones y el aviso de privacidad». El servidor sigue recibiendo `acepta_bases` y `declara_mayor_edad` en `true`; el contrato de la API no cambia. | **D10** (texto legal; el abogado aprobó las bases, no el formulario) |
+| S6 | **Consentimiento SMS como texto, no casilla:** «Al continuar aceptas recibir un SMS de verificación · Aviso de privacidad». `CONTRATO-PORTAL.md` dice que los textos legales se muestran antes del consentimiento y envío de SMS: se cumple si el aviso está enlazado y visible antes del botón. | **D9** (cambia una línea del contrato del portal) |
+| S7 | «Mantener mi sesión» marcado por omisión y en una sola línea; hoy ocupa dos párrafos. | Ninguna |
+
+Lo que **no** se hace y por qué: entrar con Google o Facebook (otro proveedor y no da teléfono, que es la identidad del socio en caja); código por WhatsApp en vez de SMS (necesita tokens personalizados de Firebase y el Worker de WhatsApp: candidato C7 para «Más adelante», no ahora); registro sin teléfono (la caja identifica al socio por teléfono y código).
+
+Medida: una persona nueva entra desde «Lo quiero» y termina su registro en **menos de 60 segundos** (tarea T6 de la sección 7).
 
 ---
 
 ## 5. Plan por fases
 
-Cada letra es un Issue hijo y un PR. Modelo: el hilo principal escribe el brief; un agente implementa; prueba en celular real antes de mergear; Isaac despliega.
+Cada letra es un Issue hijo y un PR. Modelo: el hilo principal escribe el brief; un agente implementa; prueba en celular real antes de mergear; Isaac despliega. Issues abiertos el 31/10: A1 #645, A2 #648, A3 #649, A4 #646, A5 #650, A6 #651, A7 #647.
 
 ### Fase «Ahora» — una semana, sin migración, un campo nuevo en una respuesta existente
 
@@ -203,7 +226,8 @@ Cada letra es un Issue hijo y un PR. Modelo: el hilo principal escribe el brief;
 | A3 | **Portal:** novedades → ficha (misma de A1, movida a un módulo compartible o copiada: decidir en el PR respetando que el sitio no importa de `app/`); catálogo completo con chips y «Ver más» dentro del portal; «Lo quiero» con las mismas tres opciones. Novedades visibles sin sesión (D7). | `app/public/portal.html`, `portal.js`, `portal.css`; permitir `/categorias.js` en el host del portal si se reutiliza | M |
 | A4 | **API:** `ultima: true` cuando `stock = 1` en la lista de `/api/catalogo` (hoy solo en `destacados`); `llegado_en` (fecha de captura, solo día) para «Llegó esta semana». Sin exponer cantidades. Prueba en `catalogo.test.ts`. | `app/src/catalogo.ts` | S |
 | A5 | **Textos de certeza en el sitio:** reemplazar las cinco frases de duda (H7) y poner apartado/envío en «Cómo comprar» y en la sección Ropa. Revisar con `docs/marca/VOZ.md`. | `site/public/index.html` | S |
-| A6 | **Medición mínima:** eventos `ficha_abierta`, `lo_quiero`, `whatsapp_abierto`, `compartir` con código de pieza y origen (sitio/portal), sin cookies ni datos personales. La herramienta la fija D1; si se elige Workers Analytics Engine, es un binding en `wrangler.jsonc` y un `POST /api/catalogo/evento` con tope por IP. | `app/src/catalogo.ts`, `wrangler.jsonc`, `catalogo.js`, `portal.js` | S–M |
+| A6 | **Medición mínima:** eventos `ficha_abierta`, `lo_quiero`, `whatsapp_abierto`, `compartir` con código de pieza y origen (sitio/portal), sin cookies ni datos personales. D1 (31/10): Workers Analytics Engine: binding `analytics_engine_datasets` en `wrangler.jsonc` y `POST /api/catalogo/evento` con el tope por IP que ya existe (`LIMITE_PORTAL`). | `app/src/catalogo.ts`, `wrangler.jsonc`, `catalogo.js`, `portal.js` | S–M |
+| A7 | **Entrar y registrarse con menos pasos** (sección 4.1): reCAPTCHA invisible, autoenvío del código, beneficios antes del teléfono, volver a la pieza, una casilla (si D10) y consentimiento como texto (si D9). | `app/public/portal.html`, `portal.js`, `portal.css`; `docs/CONTRATO-PORTAL.md` si D9 | S |
 
 Validación de la fase: `npm test`, `npm run typecheck`, `python tools/validate_assets.py`, `python tools/validate_site.py`, `node tools/check_site_catalogo.cjs`; capturas a 360 px y 390 px; **las cinco tareas de la sección 7 con tres personas**.
 
@@ -211,10 +235,10 @@ Validación de la fase: `npm test`, `npm run typecheck`, `python tools/validate_
 
 | # | Qué | Reutiliza | Decisión previa |
 | --- | --- | --- | --- |
-| B1 | **Apartar desde el portal.** `POST /api/portal/apartar {codigo, entrega}` crea un pedido de #269 (15 % o $100 de envío, 7 días, `vendedora` = «portal», `cliente_id` del socio) y baja la existencia en el mismo batch. Responde el importe a pagar, la CLABE y la clave que debe traer la transferencia. | `pedidos.ts`, `portal.ts`, `transferencias.ts` | D5 (¿solo socios?) |
+| B1 | **Apartar desde el portal.** `POST /api/portal/apartar {codigo, entrega}` crea un pedido de #269 (apartado $100 por D8, 7 días, `vendedora` = «portal», `cliente_id` del socio) y baja la existencia en el mismo batch. Responde el importe a pagar, la CLABE y la clave que debe traer la transferencia. | `pedidos.ts`, `portal.ts`, `transferencias.ts`, `venta.js` (`anticipoMinimoDe` → $100) | D5 resuelta: el socio aparta en línea; el invitado va a WhatsApp con el aviso de beneficios |
 | B2 | **Pagar el apartado:** el cliente transfiere y sube el comprobante o la clave de rastreo desde el portal; la tienda lo acepta en `/pedidos` como hoy con las revendedoras. Aviso push al equipo. | `pagos-reportados.ts` (#609), `avisos.ts` | Ninguna |
 | B3 | **«Mis apartados» en el portal:** vence en N días (cuenta regresiva, P9 de REVENDEDORAS), cuánto falta por pagar, «listo para recoger», envío del viernes con guía. | `pedidos.ts` lectura filtrada por `cliente_id` | Ninguna |
-| B4 | **Link de pago de Mercado Pago por pedido** (tarjeta, SPEI, efectivo en OXXO): el Worker crea el link y la notificación de pago cierra el anticipo solo. | Credenciales nuevas en el Worker, webhook | **D4** (servicio y credenciales) |
+| B4 | **Link de pago de Mercado Pago por pedido** (tarjeta, SPEI, efectivo en OXXO): el Worker crea el link y la notificación de pago cierra el anticipo solo. | Credenciales nuevas en el Worker, webhook | **D4 (31/10): no por ahora.** Reabrir con el número de apartados del primer mes |
 | B5 | **Vista previa por pieza al compartir** (`og:image` con la foto, título con nombre y precio): requiere que `eldolaron.com/?pieza=` pase por un Worker que sirva el HTML con las etiquetas correctas. «Compartir» en la ficha con `navigator.share`. | `site/wrangler.jsonc` + script nuevo | Cambio estructural del sitio: anotar en Issue |
 | B6 | **Filtros que sirven:** talla (ropa y calzado) y bandas de precio ($50 / $80 / $100 / $150 / $200+); «Llegó hoy». | `catalogo.ts` ya filtra por `q` y categoría | Ninguna |
 | B7 | **El asistente manda la ficha:** permitirle pegar `https://eldolaron.com/?pieza=ED-…` cuando el cliente pregunta por una pieza concreta, y ofrecer «Lo quiero» desde ahí. | `whatsapp/asistente.mjs` (regla de enlaces) | Revisar con #499 |
@@ -258,23 +282,38 @@ Tres clientes (no personal, no familia que ya conoce la app), cada una con su pr
 | T3 | «Apártala.» | Llega al mensaje de WhatsApp con la pieza y el importe del apartado sin escribir nada. |
 | T4 | «¿Cuánto te costaría que te la mandaran y cuándo llegaría?» | Lo dice sin salir de la ficha. |
 | T5 | «Mándasela a una amiga.» | Comparte un enlace que abre esa pieza (B5 para que la vista previa muestre la foto). |
+| T6 | «Regístrate para ver tu apartado aquí.» (desde la hoja de «Lo quiero») | Termina en menos de 60 segundos y vuelve a la pieza. |
 
-Resultado esperado tras «Ahora»: T1–T4 en 3 de 3; T5 depende de B5.
+Resultado esperado tras «Ahora»: T1–T4 y T6 en 3 de 3; T5 depende de B5.
 
 ---
 
-## 8. Decisiones para Isaac (en el Issue #643)
+## 8. Decisiones (Isaac, 31/10/2026, en respuesta al Issue #643)
 
-| # | Decisión | Recomendación de este documento |
+| # | Decisión | Respuesta de Isaac | Efecto en el plan |
+| --- | --- | --- | --- |
+| D1 | Cómo medir | **Workers Analytics Engine autorizado** («let's set it up») | A6: binding nuevo en `wrangler.jsonc` + `POST /api/catalogo/evento` |
+| D2 | Verbo del botón | **«Lo quiero»** | Tarjeta y ficha; «Apartarla» dentro de la hoja |
+| D3 | «Disponible hoy» con caché de 5 min | **Sí** | Con «Actualizado hace N min» chiquito |
+| D4 | Mercado Pago | **No por ahora; sin servicios nuevos** | B4 sale del plan; el pago es transferencia + comprobante (B2) |
+| D5 | Apartar sin registrarse | **Se puede «continuar como invitado», avisando lo que gana al registrarse** | Invitado → WhatsApp prellenado; socio → apartado en línea (B1); sección 4.1 S3 |
+| D6 | Condición A/B/C pública | **Sí** | Hoy el catálogo público solo incluye piezas A (`PUBLICABLE` en `mercadolibre.ts` excluye `danado` y `liquidacion`): la ficha dice «Condición A · Como nueva». Publicar B/C sería otra decisión |
+| D7 | Catálogo sin sesión en el portal | **Sí** | A3 |
+| D8 | Qué publicar | **«Envío nacional gratis a partir de $1,000» y «Aparta con $100»** | A1 y A5; supuestos abajo |
+
+**Supuestos derivados de D8** (si alguno está mal, corregir en el Issue #643 antes de A5):
+
+1. El apartado pasa de 15 % a **$100 fijos** para cualquier pieza, se recoja o se envíe. Hoy `venta.js` calcula 15 % para recoger (`ANTICIPO_PORCENTAJE`) y $100 solo para envío; el personal lo sigue cobrando así en `/pedidos` hasta que B1 cambie la constante. Mientras, el mensaje público dice $100 y una pieza de menos de $100 se paga completa.
+2. Debajo de $1,000 el envío sigue costando **$99** (`ENVIO_COSTO`) y se dice en la ficha para no esconder cargos. En la tarjeta basta «Envío gratis desde $1,000».
+3. Los datos oficiales del 22/10 y `app/src/legal.ts` hablan de 15 %: A5 actualiza solo el sitio; el texto legal se toca cuando Isaac confirme el supuesto 1.
+
+**Pendientes nuevos (de la sección 4.1):**
+
+| # | Decisión | Recomendación |
 | --- | --- | --- |
-| D1 | **Cómo medir.** (a) Workers Analytics Engine: binding en la misma cuenta de Cloudflare, sin cookies, consulta por SQL; (b) Cloudflare Web Analytics: un script de terceros en la página; (c) tabla en D1: escrituras públicas, hay que limitarlas; (d) no medir. | (a). Es la misma cuenta, no agrega proveedor, y cuenta eventos por pieza. Requiere tu autorización por ser un binding nuevo. |
-| D2 | **Verbo del botón:** «Lo quiero» (lo pidió el stakeholder) o «Apartar». | «Lo quiero» en la tarjeta y la ficha; «Apartarla» dentro de la hoja de opciones. Probar en T3. |
-| D3 | **Compromiso de certeza:** decir «Disponible hoy» con caché de 5 minutos. Riesgo: una pieza vendida hace 4 minutos todavía se ve. | Sí, con «Actualizado hace N min» chiquito; la caja ya pausa ML al vender. Si se vende, el equipo lo dice por WhatsApp como hoy. |
-| D4 | **Mercado Pago:** autorizar credenciales en el Worker para links de pago (B4), o empezar solo con transferencia + comprobante (B2). | Empezar con B2 (cero servicios nuevos); decidir B4 con el número de apartados del primer mes. |
-| D5 | **Apartar en línea sin ser socio.** ¿Basta el teléfono por SMS (ya es el registro del portal) o se exige aceptar las bases? | Exigir el registro del portal: ya existe, identifica al cliente y da Dolarones. El que no quiera, usa WhatsApp. |
-| D6 | **Mostrar condición A/B/C** al público en la ficha. | Sí: es honesto y explica el precio. Texto: «Condición A: como nueva», «B: con detalle», «C: liquidación». |
-| D7 | **Catálogo visible sin sesión en el portal.** | Sí. Quien llega del QR del vale o de un referido ve la tienda antes de dar su teléfono. |
-| D8 | **Publicar envío $99 / gratis desde $1,000 y apartado 15 % en el sitio.** Confirmados el 22/10 pero nunca publicados. | Sí, en la ficha y en «Cómo comprar». |
+| D9 | Consentimiento SMS como texto bajo el botón en vez de casilla (S6). Cambia una línea de `docs/CONTRATO-PORTAL.md`. | Sí: es el patrón de ML, Amazon y Uber, y el aviso sigue visible antes de enviar. |
+| D10 | Una sola casilla «18 años + bases + aviso» (S5). El servidor no cambia. | Sí. |
+| D11 | Cifra de beneficio en la portada del portal (S3): «10 D por cada $100». | Publicar la tasa vigente; si #635 la cambia, se actualiza el texto. |
 
 ---
 
