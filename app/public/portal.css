@@ -54,14 +54,69 @@ dialog::backdrop { background:#16366b99; }
 #detalle-recibo p { border-bottom:1px solid var(--linea); padding-bottom:8px; }
 .referidos { margin-top:28px; }
 .codigo-referido { display:block; padding:14px; border:2px dashed var(--azul); text-align:center; font-size:28px; letter-spacing:2px; }
-.novedades { margin-top:28px; }
-#novedades-lista { list-style:none; padding:0; display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:12px; }
-#novedades-lista li { margin:0; }
-#novedades-lista a { display:block; height:100%; border:1px solid var(--linea); border-radius:8px; overflow:hidden; color:var(--azul); text-decoration:none; }
-#novedades-lista img { display:block; width:100%; aspect-ratio:1; object-fit:cover; background:#eef2f8; }
-#novedades-lista span { display:block; padding:8px 10px 0; font-size:14px; line-height:1.3; }
-#novedades-lista strong { display:block; padding:4px 10px 10px; }
-#novedades-lista s { margin-left:6px; font-weight:400; font-size:13px; color:#4e617d; }
+.solo-lectores { position:absolute; width:1px; height:1px; overflow:hidden; clip-path:inset(50%); white-space:nowrap; }
+/* Catálogo (#649). Una sola sección: debajo del formulario sin sesión, dentro del monedero con sesión. */
+.catalogo { margin-top:28px; }
+.catalogo-buscar { display:grid; grid-template-columns:minmax(0, 1fr) auto auto; gap:0 8px; align-items:end; }
+.catalogo-buscar label { grid-column:1 / -1; margin:12px 0 6px; }
+.catalogo-buscar input { font-size:16px; }
+.catalogo-buscar button { width:auto; margin:0; }
+.chips { display:flex; gap:8px; overflow-x:auto; margin:14px -24px 0; padding:2px 24px 8px; scrollbar-width:thin; }
+.chip { flex:none; width:auto; min-height:44px; margin:0; padding:8px 14px; border:1px solid var(--azul); border-radius:999px; background:white; color:var(--azul); font-size:14px; white-space:nowrap; }
+.chip[aria-pressed=true] { background:var(--azul); color:white; }
+.catalogo-grid { list-style:none; padding:0; display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:12px; }
+.catalogo-grid li { margin:0; }
+.pieza { display:flex; flex-direction:column; justify-content:flex-start; width:100%; height:100%; min-height:0; margin:0; padding:0; border:1px solid var(--linea); border-radius:8px; overflow:hidden; background:white; color:var(--azul); text-align:left; font-weight:400; }
+.pieza-foto { position:relative; display:block; aspect-ratio:1; background:#eef2f8; }
+.pieza-foto img { display:block; width:100%; height:100%; object-fit:cover; }
+.pieza-sello { position:absolute; left:6px; top:6px; padding:3px 8px; background:var(--rojo); color:white; font-size:12px; font-weight:700; border-radius:4px; }
+.pieza-nombre, .pieza-detalle, .pieza-precio { display:block; padding:6px 10px 0; font-size:14px; line-height:1.3; overflow-wrap:anywhere; }
+.pieza-detalle { color:#4e617d; font-size:13px; }
+.pieza-detalle:empty { display:none; }
+.pieza-precio { padding-bottom:10px; font-size:16px; }
+.pieza-precio s { margin-left:6px; font-weight:400; font-size:13px; color:#4e617d; }
+.catalogo-falla { text-align:center; }
+/* Ficha de pieza: en celular ocupa la pantalla; la hoja «Lo quiero» sube sobre ella. */
+#ficha-dialogo { width:min(560px, calc(100vw - 28px)); max-height:calc(100dvh - 28px); margin:auto; padding:0; overflow:hidden; }
+.ficha-caja { position:relative; display:flex; flex-direction:column; max-height:calc(100dvh - 34px); }
+.ficha-cabeza { flex:none; padding:0 14px 10px; }
+.ficha-cabeza button { width:auto; min-height:44px; margin:10px 0 0; padding:6px 16px; }
+.ficha-scroll { flex:1; min-height:0; overflow-y:auto; overscroll-behavior:contain; }
+.ficha-foto { position:relative; aspect-ratio:4 / 5; width:min(100%, calc(56dvh * .8)); margin-inline:auto; overflow:hidden; background:#eef2f8; touch-action:none; user-select:none; -webkit-user-select:none; }
+.ficha-foto.acercada { cursor:grab; }
+.ficha-img { display:block; width:100%; height:100%; object-fit:contain; transform-origin:center; -webkit-user-drag:none; }
+.ficha-sello { position:absolute; top:12px; left:10px; padding:4px 10px; background:var(--rojo); color:white; font-weight:700; border-radius:4px; }
+.ficha-zoom { position:absolute; right:8px; bottom:8px; width:auto; min-height:44px; margin:0; padding:6px 12px; border:1.5px solid var(--azul); background:rgb(255 255 255 / .92); color:var(--azul); font-size:12px; letter-spacing:.04em; text-transform:uppercase; }
+.ficha-pista { position:absolute; left:50%; top:50%; translate:-50% -50%; margin:0; padding:8px 14px; background:rgb(22 54 107 / .88); color:white; font-weight:700; font-size:14px; white-space:nowrap; pointer-events:none; }
+.ficha-datos { display:grid; gap:6px; padding:14px 16px 22px; }
+.ficha-datos p { margin:0; }
+.ficha-meta { color:#4e617d; font-size:14px; font-weight:700; text-transform:uppercase; letter-spacing:.04em; }
+.ficha-titulo { margin:0; font-size:20px; letter-spacing:0; overflow-wrap:anywhere; }
+.ficha-precio { color:var(--rojo); font-size:36px; font-weight:700; line-height:1.1; }
+.ficha-precio s { margin-left:8px; font-size:16px; font-weight:400; color:#4e617d; }
+.ficha-precio b { margin-left:10px; color:var(--azul); font-size:16px; }
+.ficha-disp { color:#17703A; font-weight:700; }
+.ficha-disp::before { content:"● " / ""; }
+.ficha-cond { font-size:14px; font-weight:700; }
+.ficha-compra { margin-top:4px !important; padding:10px 12px; background:#eef2f8; font-size:15px; line-height:1.4; }
+.ficha-barra { flex:none; display:grid; gap:2px; padding:10px 14px calc(6px + env(safe-area-inset-bottom, 0px)); border-top:5px double var(--azul); background:white; }
+.ficha-principal { display:flex; align-items:center; gap:14px; }
+.ficha-barprecio { font-size:28px; font-weight:900; line-height:1; }
+.ficha-quiero { flex:1; min-height:56px; margin:0; background:var(--rojo); color:white; font-size:20px; }
+.ficha-secundarios { display:flex; justify-content:space-around; gap:8px; }
+.ficha-sec { display:inline-flex; align-items:center; justify-content:center; width:auto; min-height:44px; margin:0; padding:8px 10px; border:0; background:none; color:var(--azul); font:inherit; font-weight:700; text-decoration:underline; text-underline-offset:3px; cursor:pointer; }
+.ficha-aviso { margin:0; text-align:center; font-size:14px; font-weight:700; }
+.ficha-aviso:empty { display:none; }
+.ficha-hoja { position:absolute; inset:0; z-index:3; display:flex; align-items:flex-end; background:rgb(22 54 107 / .6); }
+.ficha-hoja-panel { width:100%; display:grid; gap:12px; padding:18px 16px calc(10px + env(safe-area-inset-bottom, 0px)); border-top:5px double var(--azul); background:white; }
+.ficha-hoja-panel h3, .ficha-hoja-panel p { margin:0; }
+.ficha-entra { padding:10px 12px; background:var(--amarillo); font-size:15px; font-weight:700; }
+.ficha-op { display:flex; align-items:center; min-height:56px; padding:10px 16px; border-radius:6px; background:#128C4A; color:white; font-weight:700; text-decoration:none; }
+.ficha-hoja-cerrar { justify-self:center; }
+@media (max-width:560px) {
+  #ficha-dialogo { width:100vw; max-width:none; height:100dvh; max-height:none; border:0; border-radius:0; }
+  .ficha-caja { max-height:none; height:100%; }
+}
 .boton-enlace { display:block; margin-top:16px; padding:12px 18px; border-radius:6px; background:var(--amarillo); color:var(--azul); font-weight:700; text-align:center; text-decoration:none; }
 footer { padding:20px; border-top:1px solid var(--linea); text-align:center; font-size:13px; color:#4e617d; }
-@media (max-width:360px) { header, main { padding-left:16px; padding-right:16px; } h1 { font-size:32px; } }
+@media (max-width:360px) { header, main { padding-left:16px; padding-right:16px; } h1 { font-size:32px; } .chips { margin-inline:-16px; padding-inline:16px; } }

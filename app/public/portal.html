@@ -57,6 +57,25 @@
       <button id="revisar-vinculo" class="secundario" type="button">Ya vincularon mi cuenta</button>
     </div>
   </section>
+  <section id="catalogo" class="catalogo" aria-labelledby="titulo-catalogo">
+    <h2 id="titulo-catalogo">Lo nuevo en tienda</h2>
+    <p class="nota">Toca una pieza para verla completa y apartarla. Las piezas cambian todos los días.</p>
+    <form class="catalogo-buscar" role="search" hidden>
+      <label for="catalogo-q">Buscar en el catálogo</label>
+      <input id="catalogo-q" type="search" maxlength="80" enterkeyhint="search" placeholder="Nombre, marca, talla o código" autocomplete="off">
+      <button type="submit">Buscar</button>
+      <button class="catalogo-limpiar secundario" type="button" hidden>Limpiar</button>
+    </form>
+    <div class="chips" role="group" aria-label="Filtrar por categoría" hidden></div>
+    <p class="catalogo-estado nota" role="status" aria-live="polite"></p>
+    <ul class="catalogo-grid"></ul>
+    <button class="catalogo-mas secundario" type="button" hidden>Ver más</button>
+    <div class="catalogo-falla" hidden>
+      <p>El catálogo no está disponible por ahora.</p>
+      <button class="catalogo-reintentar secundario" type="button">Reintentar</button>
+      <a class="boton-enlace" href="https://wa.me/524445437754">Preguntar por WhatsApp</a>
+    </div>
+  </section>
   <section id="monedero" hidden aria-labelledby="titulo-monedero">
     <div class="bienvenida"><h1 id="titulo-monedero">Mis Dolarones</h1><p id="titular"></p></div>
     <section class="membresia" aria-label="Tu membresía">
@@ -89,12 +108,6 @@
         <button id="ref-copiar" class="secundario" type="button">Copiar mi enlace</button>
       </div>
     </section>
-    <section id="novedades" class="novedades" hidden aria-labelledby="titulo-novedades">
-      <h2 id="titulo-novedades">Lo nuevo en tienda</h2>
-      <p class="nota">Úsalos en tu próxima visita. Pregunta por WhatsApp si sigue disponible.</p>
-      <ul id="novedades-lista"></ul>
-      <a class="boton-enlace" href="https://eldolaron.com/#catalogo">Ver todo el catálogo</a>
-    </section>
     <button id="actualizar" class="secundario" type="button">Actualizar saldo y compras</button>
     <details><summary>Vencimientos de mi saldo</summary><ul id="vencimientos"></ul></details>
     <section class="compras" aria-labelledby="titulo-compras">
@@ -111,6 +124,42 @@
   <h2 id="titulo-recibo">Recibo de compra</h2><div id="detalle-recibo"></div>
   <p class="nota">Comprobante de compra. No es factura fiscal.</p>
   <form method="dialog"><button>Cerrar recibo</button></form>
+</dialog>
+<dialog id="ficha-dialogo" aria-labelledby="ficha-titulo">
+  <div class="ficha-caja">
+    <div class="ficha-cabeza"><button class="ficha-cerrar secundario" type="button">Cerrar</button></div>
+    <div class="ficha-scroll">
+      <div class="ficha-foto">
+        <img class="ficha-img" alt="" draggable="false">
+        <span class="ficha-sello" hidden>¡Última pieza!</span>
+        <button class="ficha-zoom" type="button" aria-pressed="false">Acercar</button>
+        <p class="ficha-pista" aria-hidden="true" hidden>Toca dos veces para acercar</p>
+      </div>
+      <div class="ficha-datos">
+        <p class="ficha-meta"></p>
+        <h2 id="ficha-titulo" class="ficha-titulo"></h2>
+        <p class="ficha-precio"></p>
+        <p class="ficha-disp">Disponible hoy en tienda</p>
+        <p class="ficha-cond">Condición A · Como nueva</p>
+        <p class="ficha-compra"></p>
+      </div>
+    </div>
+    <div class="ficha-barra">
+      <div class="ficha-principal"><span class="ficha-barprecio"></span><button class="ficha-quiero" type="button">Lo quiero</button></div>
+      <div class="ficha-secundarios"><a class="ficha-sec ficha-preguntar" href="https://wa.me/524445437754">Preguntar por WhatsApp</a><button class="ficha-sec ficha-compartir" type="button">Compartir</button></div>
+      <p class="ficha-aviso" role="status" aria-live="polite"></p>
+    </div>
+    <div class="ficha-hoja" hidden>
+      <div class="ficha-hoja-panel" role="group" aria-labelledby="ficha-hoja-titulo">
+        <h3 id="ficha-hoja-titulo">¿Cómo la quieres?</h3>
+        <p class="ficha-entra" hidden>Entra con tu celular (arriba) y acumulas Dolarones con esta compra. O sigue como invitado:</p>
+        <a class="ficha-op" data-op="recoger" href="https://wa.me/524445437754" target="_blank" rel="noopener">Apartarla y recogerla en tienda</a>
+        <a class="ficha-op" data-op="envio" href="https://wa.me/524445437754" target="_blank" rel="noopener">Apartarla con envío</a>
+        <a class="ficha-op" data-op="preguntar" href="https://wa.me/524445437754" target="_blank" rel="noopener">Solo preguntar algo</a>
+        <button class="ficha-sec ficha-hoja-cerrar" type="button">Cancelar</button>
+      </div>
+    </div>
+  </div>
 </dialog>
 <footer>El Dolarón · Dolarones para tus próximas compras</footer>
 </body>
