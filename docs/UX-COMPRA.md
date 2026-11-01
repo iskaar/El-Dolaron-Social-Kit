@@ -311,9 +311,9 @@ Resultado esperado tras «Ahora»: T1–T4 y T6 en 3 de 3; T5 depende de B5.
 
 | # | Decisión | Recomendación |
 | --- | --- | --- |
-| D9 | Consentimiento SMS como texto bajo el botón en vez de casilla (S6). Cambia una línea de `docs/CONTRATO-PORTAL.md`. | Sí: es el patrón de ML, Amazon y Uber, y el aviso sigue visible antes de enviar. |
-| D10 | Una sola casilla «18 años + bases + aviso» (S5). El servidor no cambia. | Sí. |
-| D11 | Cifra de beneficio en la portada del portal (S3): «10 D por cada $100». | Publicar la tasa vigente; si #635 la cambia, se actualiza el texto. |
+| D9 | Consentimiento SMS como texto bajo el botón en vez de casilla (S6). Cambia una línea de `docs/CONTRATO-PORTAL.md`. | **Decidida: sí** (31/10/2026, #656). Es el patrón de ML, Amazon y Uber, y el aviso sigue visible antes de enviar. |
+| D10 | Una sola casilla «18 años + bases + aviso» (S5). El servidor no cambia. | **Decidida: sí** (31/10/2026, #656). |
+| D11 | Cifra de beneficio en la portada del portal (S3): «10 D por cada $100». | **Decidida: publicar «10 D por cada $100»** (31/10/2026, #656); si #635 la cambia, se actualiza el texto. |
 
 ---
 

@@ -18,15 +18,14 @@
   <p id="vale-aviso" class="vale-aviso" hidden>Tienes un vale de papel por pasar a tu cuenta. Entra o regístrate y lo abonamos solo, con la tarifa de socio: el doble.</p>
   <section id="acceso" hidden aria-labelledby="titulo-acceso">
     <h1 id="titulo-acceso">Entra con tu celular.</h1>
-    <p>Acumulas Dolarones en cada compra (1 Dolarón = $1 en tienda), ves tus compras y, pronto, tus apartados.</p>
+    <p>Acumulas 10 Dolarones por cada $100 de compra (1 Dolarón = $1 en tienda), ves tus compras y, pronto, tus apartados.</p>
     <form id="telefono-form">
       <label for="telefono">Tu número de celular</label>
       <div class="telefono"><span>+52</span><input id="telefono" type="tel" inputmode="numeric"
         autocomplete="tel-national" pattern="[0-9]{10}" maxlength="10" placeholder="10 dígitos" required></div>
-      <label class="opcion"><input id="consiente-sms" type="checkbox" required>
-        Acepto la verificación por SMS y el tratamiento de mi número descrito en el aviso de privacidad.</label>
       <label class="opcion" title="En un dispositivo compartido, desmarca esta opción y cierra sesión al terminar."><input id="recordar" type="checkbox" checked>Mantener mi sesión (desmárcalo en un equipo compartido)</label>
       <button id="enviar" type="submit">Recibir código por SMS</button>
+      <p class="nota">Al continuar aceptas recibir un SMS de verificación y el tratamiento de tu número según el <button id="ver-aviso" class="enlace" type="button">aviso de privacidad</button>.</p>
     </form>
     <form id="sms-form" hidden>
       <label for="sms">Código de 6 dígitos</label>
@@ -48,9 +47,7 @@
         <p class="nota">Con su código recibes 50 D al unirte.</p>
       </div>
       <label class="opcion"><input id="acepta" type="checkbox" required>
-        Leí y acepto las bases de Dolarones y el aviso de privacidad que aparecen abajo.</label>
-      <label class="opcion"><input id="mayor-edad" type="checkbox" required>
-        Declaro que soy mayor de 18 años.</label>
+        Tengo 18 años o más y acepto las bases de Dolarones y el aviso de privacidad que aparecen abajo.</label>
       <button id="registrar" type="submit">Crear mi membresía</button>
     </form>
     <button id="pedir-vinculo" class="secundario" type="button">Ya me registraron en la tienda</button>
@@ -120,7 +117,7 @@
   </section>
   <section id="legal" hidden>
     <details><summary>Bases del programa Dolarones</summary><p id="texto-bases" class="texto-legal"></p></details>
-    <details><summary>Aviso de privacidad</summary><p id="texto-aviso" class="texto-legal"></p></details>
+    <details id="aviso"><summary>Aviso de privacidad</summary><p id="texto-aviso" class="texto-legal"></p></details>
   </section>
 </main>
 <dialog id="recibo-dialogo" aria-labelledby="titulo-recibo">
