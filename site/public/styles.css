@@ -24,7 +24,8 @@
   font-size: 16px;
 }
 * { box-sizing: border-box; }
-html { scroll-behavior: smooth; }
+/* Issue #666: la inclinación de paper-settle ensanchaba la página en celular (421 px en 412). overflow-x: clip en html Y en body (con solo uno Chrome móvil sigue ampliando la ventana); clip, no hidden, para no crear contenedor de scroll: sticky y View Transitions siguen igual. */
+html { scroll-behavior: smooth; overflow-x: clip; }
 /* Transiciones entre páginas (Chrome 126+, Safari 18.2+; Firefox y el resto navegan normal, sin JS). */
 @view-transition { navigation: auto; }
 /* Cabecera y logo persisten: se capturan aparte y el resto hace crossfade. Nombres únicos: el logo del pie NO lo lleva. */
@@ -34,6 +35,7 @@ html { scroll-behavior: smooth; }
 body {
   margin: 0;
   background: var(--white);
+  overflow-x: clip;
 }
 a { color: inherit; text-underline-offset: .25em; }
 a:focus-visible, button:focus-visible { outline: 3px solid var(--red); outline-offset: 4px; }
