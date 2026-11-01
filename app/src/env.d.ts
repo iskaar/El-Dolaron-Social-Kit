@@ -50,6 +50,8 @@ declare global {
     /** Textos finales aprobados; se muestran antes de la aceptación o del SMS. */
     PORTAL_BASES_TEXTO?: string;
     PORTAL_AVISO_TEXTO?: string;
+    /** Banco, CLABE y titular para transferir un apartado (#668). Texto libre que pone Isaac en el panel; nunca en el repo. Ausente = el portal ofrece pedirlos por WhatsApp. */
+    PORTAL_DATOS_PAGO?: string;
     /** Requiere texto legal aprobado y despliegue coordinado. */
     BASES_APROBADAS_VERSION?: string;
     PORTAL_REGISTRO_ABIERTO?: string;

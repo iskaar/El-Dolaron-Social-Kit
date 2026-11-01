@@ -153,10 +153,52 @@
     </div>
     <div class="ficha-barra">
       <div class="ficha-principal"><span class="ficha-barprecio"></span><a class="ficha-quiero" href="https://wa.me/524445437754" target="_blank" rel="noopener">Lo quiero</a></div>
+      <button class="ficha-apartar" type="button" hidden>Apartar aquí</button>
       <div class="ficha-secundarios"><button class="ficha-sec ficha-compartir" type="button">Compartir</button></div>
       <p class="ficha-aviso" role="status" aria-live="polite"></p>
     </div>
   </div>
+</dialog>
+<dialog id="apartar-dialogo" aria-labelledby="apartar-titulo">
+  <h2 id="apartar-titulo" class="apartar-titulo" tabindex="-1"></h2>
+  <p class="apartar-pieza"></p>
+  <div class="apartar-invitado" hidden>
+    <p>Regístrate en un minuto para apartar aquí, o escríbenos por WhatsApp.</p>
+    <p class="nota">Entra con tu celular. Acumulas Dolarones en cada compra (1 D = $1 en tienda), ves tus compras y tus apartados.</p>
+    <button class="apartar-registrar" type="button">Registrarme (1 min)</button>
+    <a class="apartar-whatsapp boton-enlace" href="https://wa.me/524445437754" target="_blank" rel="noopener">Seguir por WhatsApp</a>
+  </div>
+  <form class="apartar-form" hidden>
+    <fieldset>
+      <legend>¿Cómo la quieres?</legend>
+      <label class="apartar-opcion"><input type="radio" name="apartar-entrega" value="tienda" checked>
+        <span><b>Recogerla en Soledad</b><small>Todos los días de 11 a 8</small></span></label>
+      <label class="apartar-opcion"><input type="radio" name="apartar-entrega" value="envio">
+        <span><b>Que me la envíen</b><small>Sale los viernes · <span class="apartar-envio-costo"></span></small></span></label>
+    </fieldset>
+    <p class="apartar-explica"></p>
+    <p class="nota">Tienes 24 horas para transferir. Si no pagas, la pieza vuelve a la venta.</p>
+    <button class="apartar-enviar" type="submit">Apartar</button>
+    <p class="apartar-error" role="alert"></p>
+  </form>
+  <div class="apartar-listo" hidden>
+    <p class="apartar-folio"></p>
+    <p class="apartar-pagar">Transfiere <strong class="apartar-monto"></strong> con este concepto:</p>
+    <strong class="apartar-concepto"></strong>
+    <div class="apartar-con-datos" hidden>
+      <p class="apartar-datos"></p>
+      <button class="apartar-copiar-clabe secundario" type="button" hidden>Copiar CLABE</button>
+      <p class="apartar-copiado nota" role="status" aria-live="polite"></p>
+    </div>
+    <div class="apartar-sin-datos" hidden>
+      <p>Te mandamos los datos para transferir por WhatsApp.</p>
+      <a class="apartar-pedir-datos boton-enlace" href="https://wa.me/524445437754" target="_blank" rel="noopener">Pedir datos de pago</a>
+    </div>
+    <p class="apartar-entrega-info nota"></p>
+    <p class="apartar-vence"></p>
+    <a class="apartar-pague boton-enlace" href="https://wa.me/524445437754" target="_blank" rel="noopener">Ya pagué: mandar comprobante por WhatsApp</a>
+  </div>
+  <button class="apartar-cerrar secundario" type="button">Cerrar</button>
 </dialog>
 <footer>El Dolarón · Dolarones para tus próximas compras</footer>
 </body>

@@ -7,17 +7,17 @@ import { readFileSync, readdirSync } from 'node:fs';
 import { tienda, PRODUCTO, codigoPrueba, datosTransferencia } from './prueba-d1.ts';
 import { permiso } from './cuentas.ts';
 import { PUBLICABLE } from './mercadolibre.ts';
-import { vencerPedidos, telefonoDe } from './pedidos.ts';
+import { vencerPedidos, telefonoDe, apartarPortal, HORAS_PORTAL, APARTADOS_PORTAL } from './pedidos.ts';
 import { viernesDeEnvio } from '../public/venta.js';
 import worker from './worker.ts';
 
 // PRODUCTO vale $250 y hay 50. Los demas se crean aqui.
 let consecutivo = 100;
-function pieza(db: DatabaseSync, precio: number, stock: number) {
+function pieza(db: DatabaseSync, precio: number, stock: number, nombre = `Pieza ${consecutivo + 1}`) {
   const id = crypto.randomUUID();
   db.prepare(`insert into productos (id, codigo, nombre, precio, stock, estado_analisis, foto_key, semana_ingreso, creado_en, actualizado_en)
               values (?, ?, ?, ?, ?, 'listo', 'fotos/x.jpg', 'S40', '', '')`)
-    .run(id, `ED-${String(++consecutivo).padStart(6, '0')}`, `Pieza ${consecutivo}`, precio, stock);
+    .run(id, `ED-${String(++consecutivo).padStart(6, '0')}`, nombre, precio, stock);
   return id;
 }
 const stockDe = (db: DatabaseSync, id: string) => (db.prepare('select stock from productos where id = ?').get(id) as { stock: number }).stock;
@@ -904,4 +904,162 @@ test('056: conserva todos los valores históricos, FK, índices y triggers; acep
     assert.throws(() => db.prepare("update pedido_movimientos set pedido_id = 'ausente' where id = 'abono-ocho'").run(), /FOREIGN KEY constraint/);
     assert.deepEqual(db.prepare('pragma foreign_key_check').all(), []);
   } finally { db.close(); }
+});
+
+/* ---------- Apartar desde el portal (#668) ---------- */
+
+const SOCIA = { nombre: 'Lucía Socia', telefono: '4441112222' };
+const OTRA_SOCIA = { nombre: 'Marta Otra', telefono: '4449998888' };
+/** Una pieza que el catálogo público sí muestra (VENDIBLE: nombre legible, foto, etiqueta, existencia). */
+const vendible = (db: DatabaseSync, precio: number, stock: number) => {
+  const id = pieza(db, precio, stock, 'Chamarra Levis');
+  return { id, codigo: (db.prepare('select codigo from productos where id = ?').get(id) as { codigo: string }).codigo };
+};
+const peticionPortal = (cuerpo: unknown) => new Request('https://portal.prueba/api/portal/apartar', { method: 'POST', body: JSON.stringify(cuerpo) }) as never;
+const apartarEnPortal = async (t: ReturnType<typeof tienda>, codigo: string, extra: Record<string, unknown> = {}, socio = SOCIA) => {
+  const cuerpo = { id: crypto.randomUUID(), codigo, entrega: 'tienda', ...extra };
+  const r = await apartarPortal(peticionPortal(cuerpo), t.env, t.ctx as never, socio);
+  return { status: r.status, cuerpo: (await r.json()) as Record<string, any>, id: cuerpo.id as string, cache: r.headers.get('cache-control') };
+};
+const filaPedido = (db: DatabaseSync, folio: number) => db.prepare('select * from pedidos where folio = ?').get(folio) as Record<string, any>;
+
+test('apartar desde el portal (#668): sin anticipo, 24 h, datos del socio y de la pieza (no del navegador), stock -1 y reintento', async () => {
+  const t = tienda();
+  const { db, env } = t;
+  const a = vendible(db, 25000, 2);
+  (env as any).PORTAL_DATOS_PAGO = ' Banco de prueba\nTitular de prueba ';
+  // Todo lo que el navegador agregue (precio, nombre, teléfono, anticipo, vendedora, caja) se ignora.
+  const r = await apartarEnPortal(t, a.codigo, { cliente: 'Intruso', telefono: '4440000000', precio: 1, anticipo: 99999, vendedora: 'dueno@prueba.mx', caja: 'Caja 1', forma_pago: 'efectivo' });
+  assert.equal(r.status, 201, JSON.stringify(r.cuerpo));
+  assert.equal(r.cache, 'no-store');
+  assert.deepEqual(Object.keys(r.cuerpo).sort(), ['a_pagar', 'concepto', 'datos_pago', 'pedido']);
+  assert.deepEqual(Object.keys(r.cuerpo.pedido).sort(), ['entrega', 'envio', 'folio', 'lineas', 'subtotal', 'vence_en']);
+  assert.equal(r.cuerpo.a_pagar, 10000);
+  assert.equal(r.cuerpo.concepto, 'P-1');
+  assert.equal(r.cuerpo.datos_pago, 'Banco de prueba\nTitular de prueba');
+  assert.deepEqual(r.cuerpo.pedido.lineas, [{ codigo: a.codigo, nombre: 'Chamarra Levis', precio: 25000, cantidad: 1 }]);
+  assert.equal(r.cuerpo.pedido.subtotal, 25000);
+  const p = filaPedido(db, 1);
+  assert.deepEqual([p.vendedora, p.cliente, p.telefono, p.anticipo, p.saldo, p.caja, p.forma_pago, p.estado, p.entrega, p.envio],
+    ['portal', 'Lucía Socia', '4441112222', 0, 0, '', 'transferencia', 'apartado', 'tienda', 0]);
+  assert.equal(HORAS_PORTAL, 24);
+  assert.equal(Date.parse(p.vence_en) - Date.parse(p.creado_en), 24 * 3_600_000);
+  assert.equal(p.vence_en, r.cuerpo.pedido.vence_en);
+  assert.equal(stockDe(db, a.id), 1);
+
+  // Reintento con el mismo id (respuesta perdida): el mismo pedido, sin bajar otra vez la existencia.
+  const otra = await apartarPortal(peticionPortal({ id: r.id, codigo: a.codigo, entrega: 'tienda' }), env, t.ctx as never, SOCIA);
+  assert.equal(otra.status, 200);
+  assert.equal(((await otra.json()) as any).concepto, 'P-1');
+  assert.equal(stockDe(db, a.id), 1);
+  assert.equal((db.prepare('select count(*) as n from pedidos').get() as { n: number }).n, 1);
+  // Aunque esa fue la última unidad y la pieza ya no sea vendible, el reintento sigue respondiendo.
+  const unica = vendible(db, 20000, 1);
+  const primera = await apartarEnPortal(t, unica.codigo);
+  assert.equal(primera.status, 201);
+  assert.equal(stockDe(db, unica.id), 0);
+  const reintento = await apartarPortal(peticionPortal({ id: primera.id, codigo: unica.codigo, entrega: 'tienda' }), env, t.ctx as never, SOCIA);
+  assert.equal(reintento.status, 200);
+  // El mismo id de otro socio no lee ni toma el pedido ajeno.
+  const ajeno = await apartarPortal(peticionPortal({ id: primera.id, codigo: unica.codigo, entrega: 'tienda' }), env, t.ctx as never, OTRA_SOCIA);
+  assert.equal(ajeno.status, 409);
+  // Sin PORTAL_DATOS_PAGO la respuesta lo dice con null.
+  delete (env as any).PORTAL_DATOS_PAGO;
+  assert.equal((await apartarEnPortal(t, a.codigo)).cuerpo.datos_pago, null);
+});
+
+test('apartar desde el portal: tope de 3 sin pago por socio; el pago que registra la tienda libera un cupo y renueva a 7 días', async () => {
+  const t = tienda();
+  const { db, pedir } = t;
+  const piezas = [0, 1, 2, 3].map(() => vendible(db, 25000, 1));
+  for (const p of piezas.slice(0, APARTADOS_PORTAL)) assert.equal((await apartarEnPortal(t, p.codigo)).status, 201);
+  const cuarta = await apartarEnPortal(t, piezas[3].codigo);
+  assert.equal(cuarta.status, 409);
+  assert.match(cuarta.cuerpo.error, /3 apartados sin pago/);
+  assert.equal(stockDe(db, piezas[3].id), 1);   // la cuarta no se tocó
+  // El tope es por socio: otra cuenta aparta aunque la primera esté al límite.
+  assert.equal((await apartarEnPortal(t, piezas[3].codigo, {}, OTRA_SOCIA)).status, 201);
+
+  // La tienda registra el abono del folio 1 (como con las revendedoras): ya no cuenta como "sin pago" y vence a 7 días.
+  const abono = await abonar(pedir, 1, 10000, { forma_pago: 'transferencia' });
+  assert.equal(abono.status, 200, JSON.stringify(abono.cuerpo));
+  const p1 = filaPedido(db, 1);
+  assert.equal(p1.saldo, 10000);
+  assert.ok(Math.abs(Date.parse(p1.vence_en) - Date.now() - 7 * 86_400_000) < 60_000, p1.vence_en);
+  assert.equal((await apartarEnPortal(t, vendible(db, 25000, 1).codigo)).status, 201);
+  assert.equal((await apartarEnPortal(t, vendible(db, 25000, 1).codigo)).status, 409);
+});
+
+test('apartar desde el portal: stock 0, pieza no vendible, FEP o inexistente se rechazan sin dejar pedido; dos socios por la última', async () => {
+  const t = tienda();
+  const { db } = t;
+  const cero = vendible(db, 25000, 1);
+  db.prepare('update productos set stock = 0 where id = ?').run(cero.id);
+  const sinFoto = vendible(db, 25000, 1);
+  db.prepare("update productos set foto_key = '' where id = ?").run(sinFoto.id);
+  const fep = vendible(db, 25000, 1);
+  db.prepare("update productos set propietario = 'fep' where id = ?").run(fep.id);
+  const interna = vendible(db, 25000, 1);
+  db.prepare("update productos set nombre = 'DAMA 150 12' where id = ?").run(interna.id);
+  for (const p of [cero, sinFoto, fep, interna]) {
+    const r = await apartarEnPortal(t, p.codigo);
+    assert.equal(r.status, 409, p.codigo);
+    assert.match(r.cuerpo.error, /ya no está disponible/);
+  }
+  assert.equal((await apartarEnPortal(t, 'ED-999999')).status, 404);
+  assert.equal((await apartarEnPortal(t, 'quiero esa')).status, 400);
+  assert.equal((await apartarEnPortal(t, '')).status, 400);
+  assert.equal((await apartarEnPortal(t, vendible(db, 25000, 1).codigo, { entrega: 'correo' })).status, 400);
+  assert.equal((await apartarEnPortal(t, vendible(db, 25000, 1).codigo, { id: 'no-es-uuid' })).status, 400);
+  assert.equal((db.prepare('select count(*) as n from pedidos').get() as { n: number }).n, 0);
+
+  const ultima = vendible(db, 25000, 1);
+  const [uno, dos] = [await apartarEnPortal(t, ultima.codigo), await apartarEnPortal(t, ultima.codigo, {}, OTRA_SOCIA)];
+  assert.deepEqual([uno.status, dos.status], [201, 409]);
+  assert.equal(stockDe(db, ultima.id), 0);
+  assert.equal((db.prepare('select count(*) as n from pedidos').get() as { n: number }).n, 1);
+});
+
+test('apartar desde el portal con envío: el servidor calcula el envío, abre con $100 y la tienda lo liquida con abonos', async () => {
+  const t = tienda();
+  const { db, pedir } = t;
+  const a = vendible(db, 25000, 1);
+  const r = await apartarEnPortal(t, a.codigo, { entrega: 'envio' });
+  assert.equal(r.status, 201, JSON.stringify(r.cuerpo));
+  assert.deepEqual([r.cuerpo.pedido.entrega, r.cuerpo.pedido.envio, r.cuerpo.a_pagar], ['envio', 9900, 10000]);
+  assert.equal(filaPedido(db, 1).anticipo, 0);
+  // Envío + anticipo 0 acepta abonos (primero $100, luego lo que falta: $249); al completar se emite el ticket y no vence más.
+  assert.equal((await abonar(pedir, 1, 10000, { forma_pago: 'efectivo' })).status, 200);
+  const p1 = filaPedido(db, 1);
+  assert.ok(Math.abs(Date.parse(p1.vence_en) - Date.now() - 7 * 86_400_000) < 60_000);
+  const ultimo = await abonar(pedir, 1, 24900, { forma_pago: 'efectivo' });
+  assert.equal(ultimo.status, 200, JSON.stringify(ultimo.cuerpo));
+  assert.equal(filaPedido(db, 1).estado, 'vendido');
+  assert.equal((db.prepare('select count(*) as n from ventas').get() as { n: number }).n, 1);
+  assert.equal(stockDe(db, a.id), 0);
+
+  // Desde $1,000 el envío es gratis; bajo $100 la pieza se paga completa.
+  const cara = await apartarEnPortal(t, vendible(db, 150000, 1).codigo, { entrega: 'envio' });
+  assert.deepEqual([cara.cuerpo.pedido.envio, cara.cuerpo.a_pagar], [0, 10000]);
+  const barata = await apartarEnPortal(t, vendible(db, 6000, 1).codigo);
+  assert.deepEqual([barata.cuerpo.a_pagar, barata.cuerpo.pedido.subtotal], [6000, 6000]);
+});
+
+test('apartar desde el portal: a las 24 h el cron lo vence y devuelve la pieza una vez; con un pago por revisar no vence', async () => {
+  const t = tienda();
+  const { db, env } = t;
+  const a = vendible(db, 25000, 1);
+  const b = vendible(db, 25000, 1);
+  await apartarEnPortal(t, a.codigo);
+  await apartarEnPortal(t, b.codigo);
+  // El pago que el socio reporta (#609/B2) deja el apartado en pausa para el cron.
+  db.prepare("insert into pagos_reportados (pedido_id, solicitud_id, clave_rastreo, reportado_por, reportado_en) values ((select id from pedidos where folio = 2), ?, 'ABCDEF12', 'portal:x', ?)")
+    .run(crypto.randomUUID(), new Date().toISOString());
+  assert.equal(await vencerPedidos(env, new Date(Date.now() + 23 * 3_600_000)), 0);
+  assert.equal(await vencerPedidos(env, new Date(Date.now() + 25 * 3_600_000)), 1);
+  assert.equal(await vencerPedidos(env, new Date(Date.now() + 25 * 3_600_000)), 0);
+  assert.equal(stockDe(db, a.id), 1);
+  assert.equal(stockDe(db, b.id), 0);
+  assert.equal(filaPedido(db, 1).estado, 'vencido');
+  assert.equal(filaPedido(db, 2).estado, 'apartado');
 });

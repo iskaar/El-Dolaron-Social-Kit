@@ -5,7 +5,7 @@
 // venta.js no se sirve en el host del portal (lo prueba portal.test.ts), por eso las constantes y viernesDeEnvio
 // se copian aquí; src/catalogo-ficha.test.ts falla si se separan de venta.js o de categorias.js.
 
-const WHATSAPP = 'https://wa.me/524445437754';
+export const WHATSAPP = 'https://wa.me/524445437754';
 
 // Copia de app/public/categorias.js (CATEGORIAS), con «Todo» al inicio.
 export const CATEGORIAS = [
@@ -108,8 +108,10 @@ const TIEMPO = 'tiempo';
 
 /**
  * Arma el catálogo en <section id="catalogo"> y la ficha en <dialog id="ficha-dialogo"> (portal.html).
+ * `opciones.apartar(pieza)` (#668) abre la hoja de «Apartar aquí» (apartar.js); sin ella el botón no se muestra.
+ * Devuelve { abrir(codigo, conHoja) }: abre la ficha de una pieza (y su hoja) al volver del registro.
  */
-export function iniciarCatalogo() {
+export function iniciarCatalogo(opciones = {}) {
   const root = document.getElementById('catalogo');
   const dialog = document.getElementById('ficha-dialogo');
   if (!root || !dialog) return;
@@ -123,7 +125,7 @@ export function iniciarCatalogo() {
   const dialogMeta = f('.ficha-meta'), dialogPrice = f('.ficha-precio');
   const fotoBox = f('.ficha-foto'), selloUltima = f('.ficha-sello'), botonZoom = f('.ficha-zoom'), pista = f('.ficha-pista');
   const compra = f('.ficha-compra'), precioBarra = f('.ficha-barprecio'), botonQuiero = f('.ficha-quiero');
-  const botonCompartir = f('.ficha-compartir'), avisoFicha = f('.ficha-aviso');
+  const botonCompartir = f('.ficha-compartir'), avisoFicha = f('.ficha-aviso'), botonApartar = f('.ficha-apartar');
   const elegido = filtrosDeUrl(location.search);   // categoría, talla, banda de precio y «Llegó esta semana» (#672)
   let actual = null, busqueda = '', focoAnterior = null, controller = null, cargado = false;
   let deseada = codigoDePieza(location.search);   // pieza a abrir tras la primera carga (#590)
@@ -243,6 +245,8 @@ export function iniciarCatalogo() {
   }
   botonQuiero.addEventListener('click', () => { if (actual) evento('lo_quiero', actual.codigo); });   // el enlace lo abre el navegador
   botonCompartir.addEventListener('click', compartir);
+  botonApartar.hidden = !opciones.apartar;
+  botonApartar.addEventListener('click', () => { if (actual) opciones.apartar(actual); });
 
   function abrirFicha(pieza, disparador) {
     focoAnterior = disparador;
@@ -316,13 +320,17 @@ export function iniciarCatalogo() {
     return data;
   }
 
-  // ?pieza=: está en la primera página o se pide por código (la búsqueda del servidor incluye `codigo`). Si no aparece, no pasa nada.
-  async function abrirDeseada(piezas) {
-    const codigo = deseada; deseada = '';
-    if (!codigo) return;
+  // Una pieza por código: está entre las ya cargadas o se pide (la búsqueda del servidor incluye `codigo`). Si no aparece, no pasa nada.
+  async function abrirPorCodigo(codigo, piezas = []) {
     let pieza = piezas.find((x) => x.codigo === codigo);
     if (!pieza) { try { pieza = (await pedir(new URLSearchParams({ q: codigo }))).piezas.find((x) => x.codigo === codigo); } catch { /* sin la pieza, queda el catálogo */ } }
     if (pieza && !dialog.open) abrirFicha(pieza, null);
+    return pieza;
+  }
+  // ?pieza= (#590): se abre tras la primera carga.
+  async function abrirDeseada(piezas) {
+    const codigo = deseada; deseada = '';
+    if (codigo) await abrirPorCodigo(codigo, piezas);
   }
 
   // ---- Filtros (#672): chips de categoría, de precio y «Llegó esta semana», más el menú de talla ----
@@ -431,4 +439,5 @@ export function iniciarCatalogo() {
   more.addEventListener('click', () => cargar(false));
   retry.addEventListener('click', () => cargar(true));
   cargar(true);
+  return { async abrir(codigo, conHoja) { const pieza = await abrirPorCodigo(codigo); if (pieza && conHoja) opciones.apartar?.(pieza); } };
 }

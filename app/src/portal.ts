@@ -1,6 +1,7 @@
 import { saldo, codigoAleatorio, hashCodigo, basesListas, promocionIniciada } from './dolarones.ts';
 import { reclamarVale } from './vales.ts';
 import { programaActivo, revisarCodigo, resumenReferidos, sentenciasDeAlta, D_ALTA } from './referidos.ts';
+import { apartarPortal } from './pedidos.ts';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const DIA = 86_400_000;
@@ -224,7 +225,7 @@ export async function vincular(request: Request, env: Env): Promise<Response> {
   return json({ numero: socio.numero, nombre: socio.nombre, vinculado: true });
 }
 
-export async function portal(request: Request, env: Env, url: URL): Promise<Response> {
+export async function portal(request: Request, env: Env, url: URL, ctx: ExecutionContext): Promise<Response> {
   if (url.pathname === '/api/portal/config' && request.method === 'GET') {
     const configurado = basesListas(env) && !!env.FIREBASE_PROJECT_ID && !!env.FIREBASE_WEB_API_KEY;
     return json({ firebase: configurado ? {
@@ -289,6 +290,13 @@ export async function portal(request: Request, env: Env, url: URL): Promise<Resp
       return json({ error: 'Acepta las bases vigentes antes de pasar tu vale.' }, 409);
     const body = await request.json().then((c) => c ?? {}, () => ({})) as { codigo?: unknown };
     return reclamarVale(env, socio.id, String(body.codigo ?? ''));
+  }
+  // Apartar una pieza (#668): pedido sin anticipo con 24 h para pagar por transferencia; nombre y teléfono salen de la cuenta.
+  if (url.pathname === '/api/portal/apartar') {
+    if (request.method !== 'POST') return json({ error: 'Método no permitido.' }, 405);
+    if (!basesListas(env) || socio.bases_version !== env.BASES_APROBADAS_VERSION)
+      return json({ error: 'Acepta las bases vigentes antes de apartar.' }, 409);
+    return apartarPortal(request, env, ctx, socio);
   }
   if (url.pathname === '/api/portal/referidos' && request.method === 'GET') return json(await resumenReferidos(env, socio));
   if (url.pathname === '/api/portal/yo' && request.method === 'GET')

@@ -4,7 +4,7 @@
 
 ## Puertas y autenticación
 
-- El portal sólo responde en el hostname exacto `HOST_PORTAL`. Sin ese valor y sin ruta de Cloudflare, no hay host público. Ese host permite `/`, `/portal`, `/portal.html`, `/portal.js`, `/portal.css`, `/code128.js`, el manual de la revendedora `/manual` con su `/manual.js` y `/vender.js` (solo funciones de texto y fechas; sin API, #623: `https://dolarones.eldolaron.com/manual`) (GET/HEAD) y `/api/portal/*` salvo `/api/portal/llegada`; cualquier otra pantalla, asset, `/api/socios`, `/api/ventas` y API del personal devuelve 404. El host del personal rechaza las API del cliente, salvo llegada. No publicar el cliente detrás de Access ni abrir rutas del personal para autenticarlo.
+- El portal sólo responde en el hostname exacto `HOST_PORTAL`. Sin ese valor y sin ruta de Cloudflare, no hay host público. Ese host permite `/`, `/portal`, `/portal.html`, `/portal.js`, `/catalogo-ficha.js`, `/apartar.js`, `/portal.css`, `/code128.js`, el manual de la revendedora `/manual` con su `/manual.js` y `/vender.js` (solo funciones de texto y fechas; sin API, #623: `https://dolarones.eldolaron.com/manual`) (GET/HEAD) y `/api/portal/*` salvo `/api/portal/llegada`; cualquier otra pantalla, asset, `/api/socios`, `/api/ventas` y API del personal devuelve 404. El host del personal rechaza las API del cliente, salvo llegada. No publicar el cliente detrás de Access ni abrir rutas del personal para autenticarlo.
 - La web obtiene un ID token tras [verificación SMS de Firebase](https://firebase.google.com/docs/auth/web/phone-auth) y lo manda en `Authorization: Bearer <ID_TOKEN>` por HTTPS, nunca en URL. El Worker comprueba proyecto, emisor, tiempos, método `phone`, teléfono E.164 `+52` + diez dígitos y UID. Consulta [accounts:lookup](https://firebase.google.com/docs/reference/rest/auth#section-get-account-info) en cada petición para validar el token ante Firebase, cuenta activa, teléfono actual y `validSince` frente a `auth_time` ([revocación](https://firebase.google.com/docs/auth/admin/manage-sessions)). No registra tokens ni teléfono.
 - El UID de Firebase se guarda único en `clientes.auth_uid`; `clientes.id` sigue como llave histórica de ventas y lotes. `bases_version` y `bases_aceptadas_en` guardan aceptación vigente. El teléfono sólo se usa para contacto y búsqueda del personal. Un UID nuevo con el teléfono de un socio previo recibe 409 y requiere recuperación presencial; jamás se vincula automáticamente. Un UID existente puede actualizar su teléfono verificado si no pertenece a otro socio.
 - Sin `PORTAL_REGISTRO_ABIERTO=si`, versión aprobada distinta de `borrador*`, textos no vacíos `PORTAL_BASES_TEXTO`/`PORTAL_AVISO_TEXTO`, y `PROMOCION_INICIO` UTC alcanzado, las altas y llegadas devuelven 503. Sin textos/versiones aprobados no se habilita el formulario SMS. No hay prerregistro: la vigencia de 30 días comienza al otorgarse. Fecha/hora y tratamiento de casos anteriores requieren aprobación antes de habilitarlo.
@@ -26,6 +26,7 @@ Todas las respuestas privadas usan `Cache-Control: no-store`. No se manda teléf
 | `DELETE /api/portal/codigo` | — | Revoca el código del titular; `{ok:true}`. |
 | `POST /api/portal/vale` | `{codigo}` del vale `DP-…`, por cuerpo | Pasa un vale completo y vigente a la cuenta con tarifa de socio (#258): 201 `{importe, disponible_desde, vence_en}`; repetido por el mismo socio: 200 `{ya_estaba:true}`; de otra cuenta, usado, vencido, cancelado o de compra pagada con D: 409; más de 2 en 7 días: 429. |
 | `GET /api/portal/referidos` | — | `{habilitado, puede_referir, codigo, maximo, referidos, liberados, pendientes, premio, alta, minimo_compra, mi_referido}`. Piloto #489, ver «Referidos». `codigo` es `null` si el teléfono no está en la lista. |
+| `POST /api/portal/apartar` | `{id, codigo, entrega}`: `id` UUID del navegador (idempotente), `codigo` `ED-…` de una pieza del catálogo público, `entrega` `tienda` o `envio` | 201 `{pedido: {folio, vence_en, entrega, envio, subtotal, lineas}, a_pagar, concepto, datos_pago}`; el reintento con el mismo `id` responde 200 el mismo pedido. Ver «Apartar desde el portal». |
 | `POST /api/portal/vinculo` | — | `{codigo, expira_en}`; desafío para socio previo sin UID. |
 | `POST /api/socios/codigo` **personal** | `{codigo}` | Socio, saldo, `maximo`, `expira_en`; lookup no consume ni cobra. |
 | `POST /api/socios/vincular` **dueño** | `{numero, codigo, confirma:true}` | `{numero, nombre, vinculado:true}`; no vincula cuenta ya asociada. |
@@ -35,6 +36,18 @@ Todas las respuestas privadas usan `Cache-Control: no-store`. No se manda teléf
 | `POST /api/portal/llegada` **sólo host del personal** | `{cliente_id}` | `{premio}`; primera llegada recibe 500 D, demás usan 49 cupos presenciales. Reintento devuelve el mismo premio. |
 
 Errores: 400 entrada inválida, 401 token faltante/inválido/vencido/revocado, 404 ruta o recibo inaccesible, 409 conflicto de teléfono, autorización de gasto o reemplazo pendiente, 429 regeneración demasiado rápida, 503 portal cerrado o proveedor no disponible. No devolver detalle de cuentas ajenas.
+
+## Apartar desde el portal — #668 (B1 de #643)
+
+`POST /api/portal/apartar` crea un pedido de `pedidos.ts` (`crearPedido` en modo `portal`, como el modo revendedora de #575) para el socio de la sesión. Nada del cuerpo es de confianza salvo la pieza y la entrega: el nombre y el teléfono salen del socio autenticado, el precio y el envío de `productos` y de `envioDe`.
+
+- Pedido: `vendedora = 'portal'`, `cliente = socio.nombre`, `telefono = socio.telefono`, `anticipo = 0`, `saldo = 0`, `caja = ''`, `forma_pago = 'transferencia'`. El dinero entra después, como abono registrado por la tienda en `/pedidos` (tienda o envío); ese abono renueva el plazo a 7 días, igual que con las revendedoras.
+- La pieza se resuelve por `codigo` y debe ser `VENDIBLE` (la misma condición del catálogo público) con `stock >= 1`; una unidad por pedido. Stock −1 en el mismo batch que el insert del pedido (D1 manda). Pieza inexistente 404; no vendible, sin stock o ganada por otro socio 409.
+- Plazo sin pago: **24 h** (`HORAS_PORTAL`). El cron la vence y devuelve la pieza una vez; con un pago reportado pendiente (#609) no vence. Tope: **3 apartados sin pago a la vez por socio** (`vendedora = 'portal'`, `telefono`, `estado = 'apartado'`, `saldo = 0`); el cuarto responde 409. El tope se lee antes del batch (como el de revendedora): dos peticiones simultáneas pueden pasarse por uno.
+- Requiere sesión, socio registrado y las bases vigentes aceptadas (409 si no).
+- Respuesta: `a_pagar = anticipoMinimoDe(subtotal)` ($100, o el total si la pieza cuesta menos; en envío el paquete abre con eso y el resto entra como abonos), `concepto = 'P-<folio>'` y `datos_pago`: el texto de la variable de entorno `PORTAL_DATOS_PAGO` (banco, CLABE y titular; la fija Isaac en el panel de Cloudflare, **nunca en el repositorio**), o `null` si no existe (la pantalla ofrece pedirlos por WhatsApp).
+- El teléfono vincula socio y pedido: el apartado que la tienda levante por WhatsApp a ese mismo número también es del socio (B3, #669).
+- Medición: evento `apartado_portal` en `/api/catalogo/evento` (`origen = 'portal'`).
 
 ## Premios y migración
 
@@ -69,6 +82,7 @@ npx wrangler d1 execute el-dolaron --remote --file=migracion-021-pedido-hash.sql
 | `PORTAL_REGISTRO_ABIERTO=si` | Registro/promoción pública, además de bases e inicio; no habilita SMS por sí sola. | `app/src/portal.ts:13` |
 | `FIREBASE_PROJECT_ID`, `FIREBASE_WEB_API_KEY` | Configuración y validación de identidad del portal; proveedor Phone, dominio autorizado, cuotas y presupuesto de SMS requieren configuración externa aprobada. | `app/src/portal.ts:21` y `:203`; sin configuración, el frontend se detiene en `app/public/portal.js:206` |
 | `FIREBASE_AUTH_DOMAIN` | Dominio de autenticación opcional; por defecto `<projectId>.firebaseapp.com`. | `app/src/portal.ts:206` y `app/src/worker.ts:1147` |
+| `PORTAL_DATOS_PAGO` | Texto libre con banco, CLABE y titular que se muestra tras apartar (#668). Ausente = la pantalla ofrece pedirlos por WhatsApp. Se fija como variable (no va en `wrangler.jsonc` ni en el repositorio). | `app/src/pedidos.ts` (`apartarPortal`) |
 | `HOST_PORTAL` | Host público aislado; también necesita DNS/ruta autorizados. | `app/src/worker.ts:1135`; rutas en `app/wrangler.jsonc:43` |
 | `REFERIDOS_ABIERTO` | Referidos (#489, #597): `si` da código a todo socio del portal. Ausente = programa apagado; sin ella `/config` devuelve `referidos:false` y un código se rechaza con 400. Apagado de emergencia: quitarla de `wrangler.jsonc` y desplegar. | `app/src/referidos.ts` |
 | `VALES_ABIERTOS=si` | Emisión nueva de papel, además de bases e inicio. | `app/src/vales.ts:6` y `:80` |
