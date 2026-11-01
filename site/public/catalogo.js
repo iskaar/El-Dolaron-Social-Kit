@@ -19,12 +19,6 @@
     }).format(cents / 100);
   }
 
-  function consulta(pieza, quiero = "me interesa") {
-    const talla = pieza.talla ? ` talla ${pieza.talla}` : "";
-    const texto = `Hola, ${quiero} ${pieza.nombre}${talla} (${pieza.codigo}) de ${precio(pieza.precio)}. ¿Sigue disponible?`;
-    return `${WHATSAPP}?text=${encodeURIComponent(texto)}`;
-  }
-
   // ?api= solo sirve para desarrollo: únicamente acepta http(s) hacia esta misma máquina.
   function apiBase(search) {
     try {
@@ -65,19 +59,10 @@
     return `${paga} Recoge en Soledad (11 a 8) o te la enviamos el viernes ${fechaCorta(viernesDeEnvio(ahora))} (envío nacional gratis desde ${precio(ENVIO_GRATIS_DESDE)}; si no, ${precio(ENVIO_COSTO)}).`;
   }
 
-  // Los tres mensajes de la hoja «Lo quiero» (docs/UX-COMPRA.md §4). `opcion`: recoger | envio | preguntar.
-  function mensajeQuiero(pieza, opcion, ahora = Date.now()) {
-    const talla = pieza.talla ? ` talla ${pieza.talla}` : "";
-    const cual = `*${pieza.nombre}${talla}* (${pieza.codigo}) de ${precio(pieza.precio)}`;
-    if (opcion === "preguntar") return `Hola, tengo una pregunta sobre ${cual}.`;
-    // Bajo $100 no hay "apartado": se paga completa.
-    const deja = pieza.precio < APARTADO ? "La pago completa al apartarla" : `Dejo ${precio(APARTADO)} de apartado`;
-    if (opcion === "recoger") return `Hola, quiero apartar ${cual}. ${deja} y paso a recogerla a Jardín Hidalgo 129.`;
-    return `Hola, quiero apartar ${cual}. ${deja} para el envío del viernes ${fechaCorta(viernesDeEnvio(ahora))} (gratis desde ${precio(ENVIO_GRATIS_DESDE)}; si no, ${precio(ENVIO_COSTO)}). ¿Me pasan los datos para transferir?`;
-  }
-  const enlaceQuiero = (pieza, opcion, ahora) => `${WHATSAPP}?text=${encodeURIComponent(mensajeQuiero(pieza, opcion, ahora))}`;
+  // «Lo quiero» (docs/UX-COMPRA.md §4): un solo mensaje corto; el equipo pregunta recoger o envío en el chat.
+  const enlaceLoQuiero = (pieza) => `${WHATSAPP}?text=${encodeURIComponent(`Quiero producto ${pieza.codigo}`)}`;
 
-  if (typeof module !== "undefined") module.exports = { precio, consulta, apiBase, codigoDePieza, viernesDeEnvio, fechaCorta, lineaApartado, mensajeQuiero, enlaceQuiero };
+  if (typeof module !== "undefined") module.exports = { precio, apiBase, codigoDePieza, viernesDeEnvio, fechaCorta, lineaApartado, enlaceLoQuiero };
 
   // Los precios con su precio de lista tachado, igual en tarjetas y visor.
   function pintarPrecio(nodo, pieza) {
@@ -93,7 +78,7 @@
   }
 
   // Piezas de las dos listas (Issue #648): sello «¡Última pieza!», línea «Disponible» y botón «Lo quiero».
-  // El botón abre la ficha, nunca WhatsApp: ahí se decide cómo apartar.
+  // El botón de la tarjeta abre la ficha; WhatsApp se abre desde la ficha.
   function crearSello() {
     const sello = document.createElement("span");
     sello.className = "wanted-stamp";
@@ -215,7 +200,6 @@
   const dialogTitle = root.querySelector(".piece-dialog-title");
   const dialogMeta = root.querySelector(".piece-dialog-meta");
   const dialogPrice = root.querySelector(".piece-dialog-price");
-  const dialogAsk = root.querySelector(".piece-dialog-ask");
   const fotoBox = root.querySelector(".piece-dialog-photo");
   const selloUltima = root.querySelector(".piece-dialog-stamp");
   const botonZoom = root.querySelector(".ficha-zoom");
@@ -225,10 +209,6 @@
   const botonQuiero = root.querySelector(".ficha-quiero");
   const botonCompartir = root.querySelector(".ficha-compartir");
   const avisoFicha = root.querySelector(".ficha-aviso");
-  const hoja = root.querySelector(".ficha-hoja");
-  const hojaCerrar = root.querySelector(".ficha-hoja-cerrar");
-  const opciones = [...root.querySelectorAll(".ficha-op")];
-  const detras = [".piece-dialog-head", ".piece-dialog-scroll", ".piece-dialog-bar"].map((k) => root.querySelector(k));   // se inactivan con la hoja abierta
   let actual = null;   // pieza que muestra la ficha
   let categoria = "";
   let busqueda = "";
@@ -355,22 +335,7 @@
     setTimeout(() => { pista.hidden = true; }, 3000);
   }
 
-  // ---- Ficha: «Lo quiero», hoja de tres opciones y Compartir ----
-  function abrirHoja() {
-    if (!hoja || !actual) return;
-    evento("lo_quiero", actual.codigo);
-    const ahora = Date.now();
-    for (const op of opciones) op.href = enlaceQuiero(actual, op.getAttribute("data-op"), ahora);
-    hoja.hidden = false;
-    for (const nodo of detras) if (nodo) nodo.inert = true;
-    if (opciones[0] && typeof opciones[0].focus === "function") opciones[0].focus();
-  }
-  function cerrarHoja(devolverFoco) {
-    if (!hoja || hoja.hidden) return;
-    hoja.hidden = true;
-    for (const nodo of detras) if (nodo) nodo.inert = false;
-    if (devolverFoco && botonQuiero && typeof botonQuiero.focus === "function") botonQuiero.focus();
-  }
+  // ---- Ficha: «Lo quiero» (enlace directo a WhatsApp) y Compartir ----
   async function compartir() {
     if (!actual) return;
     evento("compartir", actual.codigo);
@@ -381,12 +346,8 @@
     try { await navigator.clipboard.writeText(url); avisoFicha.textContent = "Enlace copiado"; }
     catch { avisoFicha.textContent = `Copia este enlace: ${url}`; }
   }
-  if (botonQuiero) botonQuiero.addEventListener("click", abrirHoja);
-  if (hojaCerrar) hojaCerrar.addEventListener("click", () => cerrarHoja(true));
-  if (hoja) hoja.addEventListener("click", (ev) => { if (ev.target === hoja) cerrarHoja(true); });
+  if (botonQuiero) botonQuiero.addEventListener("click", () => { if (actual) evento("lo_quiero", actual.codigo); });   // el enlace lo abre el navegador
   if (botonCompartir) botonCompartir.addEventListener("click", compartir);
-  for (const op of opciones) op.addEventListener("click", () => { if (actual) evento(op.getAttribute("data-op") === "preguntar" ? "preguntar" : `apartar_${op.getAttribute("data-op")}`, actual.codigo); });
-  if (dialogAsk) dialogAsk.addEventListener("click", () => { if (actual) evento("whatsapp_abierto", actual.codigo); });
 
   function abrirVisor(pieza, disparador, img) {
     if (!dialog) return;
@@ -395,7 +356,6 @@
     if (dialogTitle) dialogTitle.textContent = pieza.nombre;
     actual = pieza;
     evento("ficha_abierta", pieza.codigo);
-    cerrarHoja(false);
     reiniciarZoom();
     if (dialogImg) { if (pieza.foto) dialogImg.src = pieza.foto; else dialogImg.removeAttribute("src"); dialogImg.alt = pieza.nombre; }   // siempre la foto completa, no el recorte
     if (dialogMeta) {
@@ -415,10 +375,7 @@
     if (selloUltima) selloUltima.hidden = pieza.ultima !== true;   // lo decide el servidor; sin el campo no se muestra nada
     if (compra) compra.textContent = lineaApartado(pieza);
     if (avisoFicha) avisoFicha.textContent = "";
-    if (dialogAsk) {
-      dialogAsk.href = consulta(pieza);
-      dialogAsk.setAttribute("aria-label", `Preguntar por WhatsApp: ${pieza.nombre}`);
-    }
+    if (botonQuiero) botonQuiero.href = enlaceLoQuiero(pieza);
     const abrir = () => {
       if (typeof dialog.showModal === "function") dialog.showModal();
       else dialog.open = true;
@@ -453,10 +410,9 @@
       else { dialog.open = false; if (focoAnterior && typeof focoAnterior.focus === "function") focoAnterior.focus(); }
     });
     // Esc y el fondo cierran con el mismo morph.
-    dialog.addEventListener("cancel", (ev) => { ev.preventDefault(); if (hoja && !hoja.hidden) cerrarHoja(true); else cerrarVisor(); });
+    dialog.addEventListener("cancel", (ev) => { ev.preventDefault(); cerrarVisor(); });
     dialog.addEventListener("click", (ev) => { if (ev.target === dialog && typeof dialog.close === "function") cerrarVisor(); });
     dialog.addEventListener("close", () => {
-      cerrarHoja(false);
       reiniciarZoom();
       if (focoAnterior && typeof focoAnterior.focus === "function") focoAnterior.focus();
     });

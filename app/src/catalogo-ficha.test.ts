@@ -15,16 +15,12 @@ test('las constantes y viernesDeEnvio copiados coinciden con venta.js y categori
   assert.deepEqual(ficha.CATEGORIAS, [['', 'Todo'], ...CATEGORIAS]);
 });
 
-test('los textos de «Lo quiero» llevan pieza, precio y día de envío; bajo $100 se paga completa', () => {
+test('«Lo quiero» es un solo mensaje corto con el código; bajo $100 se paga completa', () => {
   const pieza = { codigo: 'ED-000123', nombre: 'Chamarra Levis', talla: 'M', precio: 250_00 };
   const ahora = Date.parse('2026-10-31T18:00:00Z'); // sábado → viernes 6 de noviembre
-  assert.equal(ficha.mensajeQuiero(pieza, 'preguntar', ahora), 'Hola, tengo una pregunta sobre *Chamarra Levis talla M* (ED-000123) de $250.');
-  assert.match(ficha.mensajeQuiero(pieza, 'recoger', ahora), /Dejo \$100 de apartado y paso a recogerla a Jardín Hidalgo 129\.$/);
-  assert.match(ficha.mensajeQuiero(pieza, 'envio', ahora), /viernes 6 de noviembre \(gratis desde \$1,000; si no, \$99\)/);
-  assert.match(ficha.mensajeQuiero({ ...pieza, precio: 60_00 }, 'recoger', ahora), /La pago completa al apartarla/);
+  assert.equal(ficha.enlaceLoQuiero(pieza), 'https://wa.me/524445437754?text=Quiero%20producto%20ED-000123');
   assert.match(ficha.lineaApartado(pieza, ahora), /^Apártala con \$100 por 7 días\./);
   assert.match(ficha.lineaApartado({ ...pieza, precio: 60_00 }, ahora), /^Se paga completa al apartar\./);
-  assert.ok(ficha.enlaceQuiero(pieza, 'recoger', ahora).startsWith('https://wa.me/524445437754?text='));
   assert.equal(ficha.codigoDePieza('?pieza=ed-12'), 'ED-12');
   assert.equal(ficha.codigoDePieza('?pieza=x'), '');
 });
@@ -33,7 +29,7 @@ test('portal.html trae todo lo que catalogo-ficha.js busca y el catálogo ya no 
   const html = readFileSync('public/portal.html', 'utf8');
   const js = readFileSync('public/catalogo-ficha.js', 'utf8');
   const clases = new Set([...html.matchAll(/class="([^"]*)"/g)].flatMap((m) => m[1].split(' ')));
-  const selectores = [...js.matchAll(/\b[qf]\('([^']+)'\)/g)].map((m) => m[1]).concat(['.ficha-op', '.ficha-cabeza', '.ficha-scroll', '.ficha-barra']);
+  const selectores = [...js.matchAll(/\b[qf]\('([^']+)'\)/g)].map((m) => m[1]).concat(['.ficha-cabeza', '.ficha-scroll', '.ficha-barra']);
   assert.ok(selectores.length > 20);
   for (const sel of new Set(selectores.flatMap((s) => s.split(' ')))) {
     const clase = sel.match(/^\.([a-z-]+)/)?.[1];
@@ -41,8 +37,9 @@ test('portal.html trae todo lo que catalogo-ficha.js busca y el catálogo ya no 
   }
   assert.match(html, /id="catalogo"/);
   assert.match(html, /Disponible hoy en tienda<\/p>\s*<p class="ficha-cond">Condición A · Como nueva<\/p>/);
-  assert.match(html, /Entra con tu celular \(arriba\) y acumulas Dolarones con esta compra\. O sigue como invitado:/);
-  assert.equal(html.match(/data-op="/g)?.length, 3);
+  // «Lo quiero» es un enlace a WhatsApp (el código se agrega al abrir la pieza); no hay hoja de opciones ni «Preguntar por WhatsApp» en la ficha.
+  assert.match(html, /<a class="ficha-quiero" href="https:\/\/wa\.me\/524445437754" target="_blank" rel="noopener">Lo quiero<\/a>/);
+  assert.doesNotMatch(html, /ficha-hoja|ficha-op|data-op|ficha-entra|ficha-preguntar/);
   assert.doesNotMatch(html, /eldolaron\.com\/#catalogo|novedades/);
   assert.doesNotMatch(readFileSync('public/portal.js', 'utf8'), /novedades|wa\.me\/524445437754\?text/);
   // D7: el catálogo ya no cuelga de la sesión.

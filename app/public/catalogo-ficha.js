@@ -1,7 +1,7 @@
 // Catálogo completo y ficha de pieza del portal (Issue #649, docs/UX-COMPRA.md §4).
 //
 // COPIA DELIBERADA de site/public/catalogo.js (Issue #645): el sitio nunca importa de app/ ni la app de site/.
-// Si cambian los textos de «Lo quiero», la línea de apartado o el zoom, cámbialos en los dos lados.
+// Si cambian el enlace de «Lo quiero», la línea de apartado o el zoom, cámbialos en los dos lados.
 // venta.js no se sirve en el host del portal (lo prueba portal.test.ts), por eso las constantes y viernesDeEnvio
 // se copian aquí; src/catalogo-ficha.test.ts falla si se separan de venta.js o de categorias.js.
 
@@ -31,12 +31,6 @@ export function precio(centavos) {
   }).format(cents / 100);
 }
 
-export function consulta(pieza, quiero = 'me interesa') {
-  const talla = pieza.talla ? ` talla ${pieza.talla}` : '';
-  const texto = `Hola, ${quiero} ${pieza.nombre}${talla} (${pieza.codigo}) de ${precio(pieza.precio)}. ¿Sigue disponible?`;
-  return `${WHATSAPP}?text=${encodeURIComponent(texto)}`;
-}
-
 // ?pieza=ED-000123 (Issue #590, mismo formato que CODIGO en app/src/catalogo.ts); lo malformado se ignora.
 export function codigoDePieza(search) {
   const valor = (new URLSearchParams(search).get('pieza') || '').trim();
@@ -61,17 +55,8 @@ export function lineaApartado(pieza, ahora = Date.now()) {
   return `${paga} Recoge en Soledad (11 a 8) o te la enviamos el viernes ${fechaCorta(viernesDeEnvio(ahora))} (envío nacional gratis desde ${precio(ENVIO_GRATIS_DESDE)}; si no, ${precio(ENVIO_COSTO)}).`;
 }
 
-// Los tres mensajes de la hoja «Lo quiero» (docs/UX-COMPRA.md §4). `opcion`: recoger | envio | preguntar.
-export function mensajeQuiero(pieza, opcion, ahora = Date.now()) {
-  const talla = pieza.talla ? ` talla ${pieza.talla}` : '';
-  const cual = `*${pieza.nombre}${talla}* (${pieza.codigo}) de ${precio(pieza.precio)}`;
-  if (opcion === 'preguntar') return `Hola, tengo una pregunta sobre ${cual}.`;
-  // Bajo $100 no hay "apartado": se paga completa.
-  const deja = pieza.precio < APARTADO ? 'La pago completa al apartarla' : `Dejo ${precio(APARTADO)} de apartado`;
-  if (opcion === 'recoger') return `Hola, quiero apartar ${cual}. ${deja} y paso a recogerla a Jardín Hidalgo 129.`;
-  return `Hola, quiero apartar ${cual}. ${deja} para el envío del viernes ${fechaCorta(viernesDeEnvio(ahora))} (gratis desde ${precio(ENVIO_GRATIS_DESDE)}; si no, ${precio(ENVIO_COSTO)}). ¿Me pasan los datos para transferir?`;
-}
-export const enlaceQuiero = (pieza, opcion, ahora) => `${WHATSAPP}?text=${encodeURIComponent(mensajeQuiero(pieza, opcion, ahora))}`;
+// «Lo quiero» (docs/UX-COMPRA.md §4): un solo mensaje corto; el equipo pregunta recoger o envío en el chat.
+export const enlaceLoQuiero = (pieza) => `${WHATSAPP}?text=${encodeURIComponent(`Quiero producto ${pieza.codigo}`)}`;
 
 const el = (tag, className, text) => {
   const node = document.createElement(tag);
@@ -84,9 +69,8 @@ const TIEMPO = 'tiempo';
 
 /**
  * Arma el catálogo en <section id="catalogo"> y la ficha en <dialog id="ficha-dialogo"> (portal.html).
- * `sinSesion()` dice si la hoja «Lo quiero» debe invitar a entrar con el celular (D5).
  */
-export function iniciarCatalogo({ sinSesion = () => false } = {}) {
+export function iniciarCatalogo() {
   const root = document.getElementById('catalogo');
   const dialog = document.getElementById('ficha-dialogo');
   if (!root || !dialog) return;
@@ -96,13 +80,10 @@ export function iniciarCatalogo({ sinSesion = () => false } = {}) {
   const fallback = q('.catalogo-falla'), retry = q('.catalogo-reintentar');
   const searchForm = q('.catalogo-buscar'), searchInput = q('.catalogo-buscar input'), clearBtn = q('.catalogo-limpiar');
   const dialogClose = f('.ficha-cerrar'), dialogImg = f('.ficha-img'), dialogTitle = f('.ficha-titulo');
-  const dialogMeta = f('.ficha-meta'), dialogPrice = f('.ficha-precio'), dialogAsk = f('.ficha-preguntar');
+  const dialogMeta = f('.ficha-meta'), dialogPrice = f('.ficha-precio');
   const fotoBox = f('.ficha-foto'), selloUltima = f('.ficha-sello'), botonZoom = f('.ficha-zoom'), pista = f('.ficha-pista');
   const compra = f('.ficha-compra'), precioBarra = f('.ficha-barprecio'), botonQuiero = f('.ficha-quiero');
-  const botonCompartir = f('.ficha-compartir'), avisoFicha = f('.ficha-aviso'), hoja = f('.ficha-hoja');
-  const hojaCerrar = f('.ficha-hoja-cerrar'), avisoEntrada = f('.ficha-entra');
-  const opciones = [...dialog.querySelectorAll('.ficha-op')];
-  const detras = ['.ficha-cabeza', '.ficha-scroll', '.ficha-barra'].map(f);   // se inactivan con la hoja abierta
+  const botonCompartir = f('.ficha-compartir'), avisoFicha = f('.ficha-aviso');
   let actual = null, categoria = '', busqueda = '', focoAnterior = null, controller = null, cargado = false;
   let deseada = codigoDePieza(location.search);   // pieza a abrir tras la primera carga (#590)
   let siguiente = null;                           // cursor de la última página que SÍ llegó: un fallo reintenta la misma (#241)
@@ -208,23 +189,7 @@ export function iniciarCatalogo({ sinSesion = () => false } = {}) {
     } catch { /* medir nunca rompe la ficha */ }
   }
 
-  // ---- «Lo quiero», hoja de tres opciones y Compartir ----
-  function abrirHoja() {
-    if (!actual) return;
-    evento('lo_quiero', actual.codigo);
-    const ahora = Date.now();
-    for (const op of opciones) op.href = enlaceQuiero(actual, op.dataset.op, ahora);
-    avisoEntrada.hidden = !sinSesion();   // D5: invitado con aviso
-    hoja.hidden = false;
-    for (const nodo of detras) nodo.inert = true;
-    opciones[0].focus();
-  }
-  function cerrarHoja(devolverFoco) {
-    if (hoja.hidden) return;
-    hoja.hidden = true;
-    for (const nodo of detras) nodo.inert = false;
-    if (devolverFoco) botonQuiero.focus();
-  }
+  // ---- «Lo quiero» (enlace directo a WhatsApp) y Compartir ----
   async function compartir() {
     if (!actual) return;
     evento('compartir', actual.codigo);
@@ -235,18 +200,13 @@ export function iniciarCatalogo({ sinSesion = () => false } = {}) {
     try { await navigator.clipboard.writeText(url); avisoFicha.textContent = 'Enlace copiado'; }
     catch { avisoFicha.textContent = `Copia este enlace: ${url}`; }
   }
-  botonQuiero.addEventListener('click', abrirHoja);
-  hojaCerrar.addEventListener('click', () => cerrarHoja(true));
-  hoja.addEventListener('click', (ev) => { if (ev.target === hoja) cerrarHoja(true); });
+  botonQuiero.addEventListener('click', () => { if (actual) evento('lo_quiero', actual.codigo); });   // el enlace lo abre el navegador
   botonCompartir.addEventListener('click', compartir);
-  for (const op of opciones) op.addEventListener('click', () => { if (actual) evento(op.dataset.op === 'preguntar' ? 'preguntar' : `apartar_${op.dataset.op}`, actual.codigo); });
-  dialogAsk.addEventListener('click', () => { if (actual) evento('whatsapp_abierto', actual.codigo); });
 
   function abrirFicha(pieza, disparador) {
     focoAnterior = disparador;
     actual = pieza;
     evento('ficha_abierta', pieza.codigo);
-    cerrarHoja(false);
     reiniciarZoom();
     dialogTitle.textContent = pieza.nombre;
     dialogImg.src = pieza.foto; dialogImg.alt = pieza.nombre;   // siempre la foto completa, no el recorte
@@ -258,18 +218,15 @@ export function iniciarCatalogo({ sinSesion = () => false } = {}) {
     selloUltima.hidden = pieza.ultima !== true;   // lo decide el servidor; sin el campo no se muestra nada
     compra.textContent = lineaApartado(pieza);
     avisoFicha.textContent = '';
-    dialogAsk.href = consulta(pieza);
-    dialogAsk.setAttribute('aria-label', `Preguntar por WhatsApp: ${pieza.nombre}`);
+    botonQuiero.href = enlaceLoQuiero(pieza);
     dialog.showModal();
     dialogClose.focus();
     mostrarPista();
   }
   dialogClose.addEventListener('click', () => dialog.close());
-  // Esc cierra primero la hoja y luego la ficha; el fondo (fuera del cuadro) cierra la ficha.
-  dialog.addEventListener('cancel', (ev) => { if (!hoja.hidden) { ev.preventDefault(); cerrarHoja(true); } });
+  // Esc cierra la ficha (comportamiento nativo del dialog); el fondo (fuera del cuadro) también.
   dialog.addEventListener('click', (ev) => { if (ev.target === dialog) dialog.close(); });
   dialog.addEventListener('close', () => {
-    cerrarHoja(false);
     reiniciarZoom();
     if (focoAnterior?.isConnected) focoAnterior.focus();
   });
