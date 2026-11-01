@@ -456,9 +456,9 @@ test('catalogo (Issue #651): POST /evento escribe solo evento, codigo y origen y
     assert.equal(r.status, 204);
     assert.equal(r.headers.get('access-control-allow-origin'), 'https://eldolaron.com');
     assert.deepEqual(puntos, [{ blobs: ['lo_quiero', 'ED-000123', 'sitio'], indexes: ['lo_quiero'] }]);
-    for (const e of ['ficha_abierta', 'apartar_recoger', 'apartar_envio', 'preguntar', 'whatsapp_abierto', 'compartir', 'apartado_portal'])
+    for (const e of ['ficha_abierta', 'apartar_recoger', 'apartar_envio', 'preguntar', 'whatsapp_abierto', 'compartir', 'apartado_portal', 'carrito_agregar', 'comprar_ya', 'carrito_apartar'])
       assert.equal((await enviar(JSON.stringify({ evento: e, codigo: 'ED-1', origen: 'portal' }))).status, 204);
-    assert.equal(puntos.length, 8);
+    assert.equal(puntos.length, 11);
 
     const malos = [
       '{"evento":"otro","codigo":"ED-000123","origen":"sitio"}',
@@ -471,7 +471,7 @@ test('catalogo (Issue #651): POST /evento escribe solo evento, codigo y origen y
       JSON.stringify({ evento: 'lo_quiero', codigo: 'ED-1', origen: 'sitio', relleno: 'x'.repeat(400) }),
     ];
     for (const m of malos) assert.equal((await enviar(m)).status, 400, m);
-    assert.equal(puntos.length, 8, 'lo invalido no escribe');
+    assert.equal(puntos.length, 11, 'lo invalido no escribe');
 
     assert.equal((await enviar('', '/api/catalogo/evento', HOST, 'GET')).status, 405);
     const o = await enviar('', '/api/catalogo/evento', HOST, 'OPTIONS');

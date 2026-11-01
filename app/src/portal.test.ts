@@ -210,7 +210,7 @@ test('allowlist pública sirve sólo portal y assets necesarios; no abre caja, a
       return new Response(readFileSync('public/' + (ruta === '/portal' ? 'portal.html' : ruta === '/manual' ? 'manual.html' : ruta.slice(1))),
         { headers:{ 'content-type':ruta === '/portal' || ruta === '/manual' ? 'text/html' : 'text/javascript' } });
     } } as unknown as Fetcher;
-    for (const ruta of ['/', '/portal', '/portal.html', '/portal.js', '/catalogo-ficha.js', '/apartar.js', '/apartados.js', '/pagos.js', '/comprobante.js', '/portal.css', '/code128.js', '/vendor/qrcode-generator.js', '/el-dolaron-logo.png',
+    for (const ruta of ['/', '/portal', '/portal.html', '/portal.js', '/catalogo-ficha.js', '/apartar.js', '/apartados.js', '/carrito.js', '/pagos.js', '/comprobante.js', '/portal.css', '/code128.js', '/vendor/qrcode-generator.js', '/el-dolaron-logo.png',
       '/manual', '/manual.js', '/vender.js']) {
       const r = await worker.fetch!(new Request('https://portal.prueba' + ruta) as never, p.env, {} as never);
       assert.equal(r.status, 200, ruta);
@@ -223,7 +223,7 @@ test('allowlist pública sirve sólo portal y assets necesarios; no abre caja, a
       '/cajero.js', '/venta.js', '/vender', '/vender.html', '/manual.html', '/manual/', '/api/vender', '/api/ventas', '/api/socios/codigo', '/api/socios/vincular',
       '/api/foto/123', '/api/portal/llegada', '/foo/portal.html'])
       assert.equal((await p.llamar(ruta, '')).status, 404, ruta);
-    assert.equal(leidos.length, 16);
+    assert.equal(leidos.length, 17);
     // El manual (#623) sale solo por GET/HEAD.
     assert.equal((await p.llamar('/manual', '', {}, 'POST')).status, 404);
     assert.equal((await p.llamar('/portal.js', '', {}, 'POST')).status, 404);
@@ -766,5 +766,46 @@ test('el socio también paga en línea lo que levantó otra cuenta a su teléfon
     const suyos = (await p.pedir('/api/vender/mios', undefined, 'GET')).cuerpo.pedidos as any[];
     assert.equal(suyos[0].pago_reportado.estado, 'pendiente');
     assert.equal((await p.pedir(`/api/vender/apartados/${folio}/pago`, { id: crypto.randomUUID(), clave_rastreo: claveUnica() })).status, 409);
+  } finally { p.cerrar(); }
+});
+
+test('POST /api/portal/apartar con carrito (#681): un pedido de varias piezas por la ruta real, 409 con las que ya no están y «Mis apartados» + cancelar con todas', async () => {
+  const p = portalDePrueba();
+  try {
+    const A = token('uid-a', '+524441112222');
+    await p.registrar('uid-a', '+524441112222');
+    const a = piezaVendible(p, 25000), b = piezaVendible(p, 4000), c = piezaVendible(p, 4000);
+    const apartar = (cuerpo: Record<string, unknown>) => p.llamar('/api/portal/apartar', A, { id: crypto.randomUUID(), entrega: 'tienda', ...cuerpo }, 'POST');
+
+    // Una agotada (la ganó otra persona): 409 con su código y nada tocado.
+    p.db.prepare('update productos set stock = 0 where id = ?').run(b.id);
+    const sin = await apartar({ codigos: [a.codigo, b.codigo, c.codigo] });
+    assert.equal(sin.status, 409);
+    assert.deepEqual(sin.body.no_disponibles, [b.codigo]);
+    assert.deepEqual([stockPieza(p, a.id), stockPieza(p, c.id)], [1, 1]);
+    assert.equal(p.db.prepare('select count(*) as n from pedidos').get()!.n, 0);
+    p.db.prepare('update productos set stock = 1 where id = ?').run(b.id);
+
+    const id = crypto.randomUUID();
+    const r = await apartar({ id, codigos: [a.codigo, b.codigo, c.codigo] });
+    assert.equal(r.status, 201, JSON.stringify(r.body));
+    assert.deepEqual([r.body.pedido.lineas.length, r.body.pedido.subtotal, r.body.a_pagar, r.body.concepto], [3, 33000, 10000, 'P-1']);
+    assert.deepEqual([stockPieza(p, a.id), stockPieza(p, b.id), stockPieza(p, c.id)], [0, 0, 0]);
+    assert.equal((await apartar({ id, codigos: [a.codigo, b.codigo, c.codigo] })).status, 200);   // reintento: el mismo pedido
+    assert.equal(p.db.prepare('select count(*) as n from pedidos').get()!.n, 1);
+
+    // «Mis apartados» lo trae como un solo pedido con sus tres líneas, cancelable.
+    const lista = (await p.llamar('/api/portal/apartados', A)).body.apartados as any[];
+    assert.equal(lista.length, 1);
+    assert.deepEqual([lista[0].lineas.length, lista[0].subtotal, lista[0].faltante, lista[0].cancelable], [3, 33000, 33000, true]);
+    assert.deepEqual(lista[0].lineas.map((l: any) => l.codigo).sort(), [a.codigo, b.codigo, c.codigo].sort());
+    // Cancelar devuelve las tres existencias, una sola vez.
+    const [x, y] = await Promise.all([1, 2].map(() => p.llamar('/api/portal/apartados/1/cancelar', A, {}, 'POST')));
+    assert.deepEqual([x.status, y.status].sort(), [200, 409]);
+    assert.deepEqual([stockPieza(p, a.id), stockPieza(p, b.id), stockPieza(p, c.id)], [1, 1, 1]);
+
+    // El contrato anterior (`codigo` suelto) sigue valiendo.
+    assert.equal((await apartar({ codigo: a.codigo })).status, 201);
+    assert.equal(stockPieza(p, a.id), 0);
   } finally { p.cerrar(); }
 });

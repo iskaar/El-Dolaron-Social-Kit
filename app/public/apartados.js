@@ -7,11 +7,13 @@ import { APARTADO, fechaCorta } from './catalogo-ficha.js';
 import { aPagarDe } from './apartar.js';
 
 const HORA = 3_600_000;
+// Un pedido del carrito (#681) trae varias piezas: los textos de abajo pasan al plural.
+const varias = (p) => p.lineas?.length > 1;
 
 /** Chip de estado: { clase, texto }. Cuenta regresiva en horas (P9 de REVENDEDORAS-UX): más de 6 h ámbar, 6 h o menos rojo. */
 export function estadoApartado(p, ahora = Date.now()) {
   if (p.estado === 'cancelado') return { clase: 'cerrada', texto: '✕ Cancelado' };
-  if (p.estado === 'vencido') return { clase: 'cerrada', texto: '✕ Vencido · la pieza volvió a la venta' };
+  if (p.estado === 'vencido') return { clase: 'cerrada', texto: `✕ Vencido · ${varias(p) ? 'las piezas volvieron' : 'la pieza volvió'} a la venta` };
   if (p.estado === 'vendido') {
     if (p.entrega !== 'envio') return { clase: 'ok', texto: '✓ Compra completada' };
     return p.guia ? { clase: 'ok', texto: `✓ Enviado · guía ${p.guia}` }
@@ -27,7 +29,7 @@ export function estadoApartado(p, ahora = Date.now()) {
   // Un reporte rechazado no quita el plazo: el motivo va primero y la cuenta regresiva en el detalle.
   if (reporte?.estado === 'rechazado') return { clase: 'alerta', texto: `⚠ No encontramos tu pago${reporte.motivo ? `: ${reporte.motivo}` : ''}` };
   const resta = Date.parse(p.vence_en) - ahora;
-  if (!(resta > 0)) return { clase: 'alerta', texto: '⚠ Ya venció · en unos minutos la pieza vuelve a la venta' };
+  if (!(resta > 0)) return { clase: 'alerta', texto: `⚠ Ya venció · en unos minutos ${varias(p) ? 'las piezas vuelven' : 'la pieza vuelve'} a la venta` };
   const horas = Math.floor(resta / HORA);
   if (horas < 1) return { clase: 'alerta', texto: '⚠ Vence en menos de 1 h' };
   return { clase: resta <= 6 * HORA ? 'alerta' : 'aviso', texto: `${resta <= 6 * HORA ? '⚠' : '⏳'} Vence en ${horas} h` };
@@ -40,15 +42,15 @@ export function detalleApartado(p, ahora = Date.now()) {
   const total = p.subtotal + p.envio;
   if (p.saldo === 0) {
     if (p.pago_reportado?.estado === 'pendiente') return [`Ya mandaste tu pago de ${pesos(Math.min(total, APARTADO))}: te avisamos al registrarlo.`];
-    lineas.push(`Para apartarla paga ${pesos(Math.min(p.subtotal, APARTADO))} por transferencia. Total ${pesos(total)}.`);
+    lineas.push(`Para ${varias(p) ? 'apartarlas' : 'apartarla'} paga ${pesos(Math.min(p.subtotal, APARTADO))} por transferencia. Total ${pesos(total)}.`);
     if (p.faltante > 0) lineas.push(`Falta por pagar ${pesos(p.faltante)}.`);
     if (Date.parse(p.vence_en) > ahora) lineas.push(`Tienes hasta el ${fechaLegible(p.vence_en)}`);
     return lineas;
   }
-  if (p.faltante > 0) lineas.push(`Falta por pagar ${pesos(p.faltante)}${p.entrega === 'envio' ? '.' : ' al recogerla.'}`);
+  if (p.faltante > 0) lineas.push(`Falta por pagar ${pesos(p.faltante)}${p.entrega === 'envio' ? '.' : varias(p) ? ' al recogerlas.' : ' al recogerla.'}`);
   else lineas.push('Ya está pagada.');
   lineas.push(p.entrega === 'envio' ? `Completa el pago antes del ${fechaLegible(p.vence_en)}; después sale el viernes.`
-    : `Recógela en Soledad antes del ${fechaLegible(p.vence_en)}`);
+    : `${varias(p) ? 'Recógelas' : 'Recógela'} en Soledad antes del ${fechaLegible(p.vence_en)}`);
   return lineas;
 }
 
@@ -61,6 +63,12 @@ const el = (tag, className, text) => {
   if (text !== undefined) node.textContent = text;
   return node;
 };
+// Las piezas de un pedido del carrito, una por renglón (la foto de la tarjeta es la primera).
+function piezasDe(p) {
+  const ul = el('ul', 'apartado-piezas');
+  ul.append(...p.lineas.map((l) => el('li', '', `${l.nombre} · ${pesos(l.precio * l.cantidad)}`)));
+  return ul;
+}
 
 /**
  * Arma <section id="apartados"> (portal.html). `api(ruta, cuerpo)` es la del portal (token incluido); `alPagar(info)` abre la hoja «Ya pagué» (pagos.js, #670).
@@ -89,6 +97,7 @@ export function iniciarApartados({ api, alPagar }) {
     const cuerpo = el('div', 'apartado-cuerpo');
     cuerpo.append(
       el('p', 'apartado-nombre', p.lineas.length > 1 ? `${p.lineas.length} piezas` : primera?.nombre ?? 'Pieza'),
+      ...(p.lineas.length > 1 ? [piezasDe(p)] : []),
       el('p', 'apartado-datos', `P-${p.folio} · ${pesos(p.subtotal + p.envio)} · ${p.entrega === 'envio' ? 'Envío' : 'Recoger en tienda'}`),
       el('p', `apartado-chip ${chip.clase}`, chip.texto),
       ...detalleApartado(p, ahora).map((t) => el('p', 'apartado-detalle', t)),
@@ -98,7 +107,7 @@ export function iniciarApartados({ api, alPagar }) {
       const rechazado = p.pago_reportado?.estado === 'rechazado';
       const pague = el('button', 'apartado-pague', rechazado ? 'Mandar otro pago' : 'Ya pagué');
       pague.type = 'button';
-      pague.addEventListener('click', () => alPagar?.({ folio: p.folio, nombre: primera?.nombre ?? 'Pieza', monto: aPagarDe(p.subtotal), concepto: `P-${p.folio}`, datos_pago: datosPago,
+      pague.addEventListener('click', () => alPagar?.({ folio: p.folio, nombre: p.lineas.length > 1 ? `${p.lineas.length} piezas` : primera?.nombre ?? 'Pieza', monto: aPagarDe(p.subtotal), concepto: `P-${p.folio}`, datos_pago: datosPago,
         rechazado: rechazado ? `La tienda no encontró tu pago${p.pago_reportado.motivo ? `: ${p.pago_reportado.motivo}` : ''}. Manda otro comprobante.` : '' }));
       acciones.append(pague);
     }
@@ -137,7 +146,7 @@ export function iniciarApartados({ api, alPagar }) {
 
   function abrirCancelar(p) {
     folioACancelar = p.folio;
-    pregunta.textContent = `¿Cancelar el apartado P-${p.folio}? La pieza vuelve a la venta. No se te cobra nada.`;
+    pregunta.textContent = `¿Cancelar el apartado P-${p.folio}? ${varias(p) ? 'Las piezas vuelven' : 'La pieza vuelve'} a la venta. No se te cobra nada.`;
     falla.textContent = '';
     dialogo.showModal();
   }

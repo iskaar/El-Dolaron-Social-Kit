@@ -145,3 +145,28 @@ test('sin apartados la sección queda oculta y un 409 al cancelar muestra el mot
   await d.buscar('.cancelar-si').oyentes.click();   // sin folio elegido: el servidor lo rechaza
   assert.equal(d.buscar('.cancelar-error').textContent, 'Ya no se puede cancelar aquí: pídelo a la tienda.');
 });
+
+test('un pedido de varias piezas (carrito, #681): textos en plural, una línea por pieza, «Cancelar» avisa que vuelven todas', async (t) => {
+  t.mock.method(Date, 'now', () => AHORA);
+  const tres = [{ codigo: 'ED-000123', nombre: 'Chamarra Levis', precio: 25000, cantidad: 1 }, { codigo: 'ED-000124', nombre: 'Blusa', precio: 4000, cantidad: 1 }, { codigo: 'ED-000125', nombre: 'Tenis', precio: 6000, cantidad: 1 }];
+  const varias = base({ lineas: tres, subtotal: 35000, faltante: 35000 });
+  assert.deepEqual(apartados.detalleApartado(varias as never, AHORA).slice(0, 2), ['Para apartarlas paga $100 por transferencia. Total $350.', 'Falta por pagar $350.']);
+  assert.match(apartados.detalleApartado(base({ lineas: tres, saldo: 10000, faltante: 25000 }) as never, AHORA)[0], /^Falta por pagar \$250 al recogerlas\.$/);
+  assert.match(apartados.detalleApartado(base({ lineas: tres, saldo: 10000, faltante: 25000 }) as never, AHORA)[1], /^Recógelas en Soledad antes del /);
+  assert.match(apartados.estadoApartado(base({ lineas: tres, estado: 'vencido' }) as never, AHORA).texto, /^✕ Vencido · las piezas volvieron a la venta$/);
+  assert.match(apartados.estadoApartado(base({ lineas: tres, vence_en: enHoras(-1) }) as never, AHORA).texto, /las piezas vuelven a la venta$/);
+  assert.match(apartados.estadoApartado(base({ estado: 'vencido' }) as never, AHORA).texto, /^✕ Vencido · la pieza volvió a la venta$/);   // una sola: como antes
+
+  const d = dom();
+  const pagos: any[] = [];
+  const mios = apartados.iniciarApartados({ alPagar: (info: unknown) => { pagos.push(info); }, api: async () => ({ apartados: [varias], datos_pago: null }) });
+  await mios.cargar();
+  const tarjeta = d.buscar('.apartados-lista').children[0];
+  assert.ok(d.textos(tarjeta).includes('3 piezas'));
+  const renglones = d.todos(tarjeta).find((x) => x.className === 'apartado-piezas')!.children.map((li: any) => li.textContent);
+  assert.deepEqual(renglones, ['Chamarra Levis · $250', 'Blusa · $40', 'Tenis · $60']);
+  d.todos(tarjeta).find((x) => x.className.includes('apartado-pague')).oyentes.click();
+  assert.deepEqual([pagos[0].nombre, pagos[0].monto], ['3 piezas', 10000]);
+  d.todos(tarjeta).find((x) => x.className.includes('apartado-cancelar')).oyentes.click();
+  assert.match(d.buscar('.cancelar-pregunta').textContent, /Las piezas vuelven a la venta\. No se te cobra nada\./);
+});

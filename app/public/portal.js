@@ -2,6 +2,7 @@ import qrcode from './vendor/qrcode-generator.js';
 import { svgCode128, codigoEnDigitos, codigoDeDigitos } from './code128.js';
 import { iniciarCatalogo } from './catalogo-ficha.js';
 import { iniciarApartar } from './apartar.js';
+import { iniciarCarrito, codigosDeUrl, codigosValidos, piezasDe } from './carrito.js';
 import { iniciarApartados } from './apartados.js';
 import { iniciarPagos } from './pagos.js';
 
@@ -95,7 +96,7 @@ async function api(ruta, body, method = body === undefined ? 'GET' : 'POST') {
     headers:{ authorization:'Bearer ' + token, 'content-type':'application/json' },
     body:body === undefined ? undefined : JSON.stringify(body), cache:'no-store' });
   const datos = await r.json();
-  if (!r.ok) throw Object.assign(new Error(datos.error || 'No se pudo completar. Intenta de nuevo.'), { status:r.status });
+  if (!r.ok) throw Object.assign(new Error(datos.error || 'No se pudo completar. Intenta de nuevo.'), { status:r.status, datos });
   return datos;
 }
 function ocultarCodigo() {
@@ -115,17 +116,34 @@ function errorDeAuth(error) {
     'auth/network-request-failed':'No hay conexión. Revisa tu red e intenta otra vez.',
   })[error.code] || error.message || 'No se pudo entrar. Intenta de nuevo.';
 }
-// Apartar (#668): sin sesión de socio, «Apartar aquí» manda al registro y, al terminar, vuelve a la pieza con la hoja abierta.
+// Apartar (#668, #681): sin sesión de socio, el resumen manda al registro y, al terminar, vuelve a las mismas piezas.
+// Las piezas pendientes (una o varias) esperan en sessionStorage: también las que llegan del sitio con ?carrito=.
 const APARTAR = 'apartar-pieza';
-function irAAcceso(codigo) {
-  try { sessionStorage.setItem(APARTAR, codigo); } catch { /* sin almacenamiento: tendrá que volver a abrir la pieza */ }
+function guardarPendientes(codigos) {
+  try { sessionStorage.setItem(APARTAR, codigos.join(',')); } catch { /* sin almacenamiento: tendrá que volver a abrir el carrito */ }
+}
+function irAAcceso(codigos) {
+  guardarPendientes(codigos);
   $('ficha-dialogo').close();
+  $('carrito-dialogo').close();
   const destino = [$('registro'), $('acceso')].find((s) => !s.hidden) ?? $('estado');
   destino.scrollIntoView({ behavior:'smooth', block:'start' });
 }
-function piezaPendiente() {
-  try { const codigo = sessionStorage.getItem(APARTAR) || ''; sessionStorage.removeItem(APARTAR); return /^ED-\d{1,10}$/.test(codigo) ? codigo : ''; }
-  catch { return ''; }
+function piezasPendientes() {
+  try { const lista = (sessionStorage.getItem(APARTAR) || '').split(','); sessionStorage.removeItem(APARTAR); return codigosValidos(lista); }
+  catch { return []; }
+}
+// Abre el resumen de apartar con las piezas que siguen disponibles; las vendidas salen del carrito.
+async function abrirResumen(codigos) {
+  const { disponibles, vendidas, fallaron } = await piezasDe(codigos);
+  carrito.quitar(vendidas);
+  if (fallaron.length) { estado('No pudimos revisar tus piezas. Revisa tu red y abre el carrito otra vez.', true); return; }
+  if (!disponibles.length) { estado('Esas piezas ya se vendieron. Mira lo nuevo en el catálogo.', true); return; }
+  apartador.abrir(disponibles, codigos.length > 1 ? 'carrito' : 'comprar_ya');
+}
+function abrirPendientes() {
+  const codigos = piezasPendientes();
+  if (codigos.length) abrirResumen(codigos);
 }
 async function cargarCuenta() {
   const uid = auth.currentUser?.uid;
@@ -160,8 +178,7 @@ async function cargarCuenta() {
     misApartados.cargar();
     ubicarCatalogo(true);
     socioListo = true;
-    const pendiente = piezaPendiente();
-    if (pendiente) catalogo?.abrir(pendiente, true);
+    abrirPendientes();
     await pasarVale();
   } catch (e) {
     if (!uid || uid !== auth.currentUser?.uid) return;
@@ -319,10 +336,21 @@ $('salir').addEventListener('click', () => accion($('salir'), async () => {
 // «Ya pagué» (#670): la hoja de pago la abren «Mis apartados» y la confirmación de apartar; al mandar, la lista se refresca.
 const pagos = iniciarPagos({ api, token:() => auth.currentUser?.getIdToken(), alReportar:() => misApartados.cargar() });
 const misApartados = iniciarApartados({ api, alPagar:(info) => pagos.abrir(info) });
-const apartador = iniciarApartar({ api, estaListo:() => socioListo, irAAcceso, alTerminar:() => $('ficha-dialogo').close(),
+// Carrito (#681): el resumen (apartar.js) sirve a «Comprar ya» y a «Apartar todo»; apartar una pieza o saber que se vendió la saca del carrito.
+const apartador = iniciarApartar({ api, estaListo:() => socioListo, irAAcceso, alTerminar:() => { $('ficha-dialogo').close(); $('carrito-dialogo').close(); },
+  alApartar:(codigos) => carrito.quitar(codigos), alAgotarse:(codigos) => carrito.quitar(codigos),
   alPagar:(info) => pagos.abrir(info),
   alVerApartados: async () => { await misApartados.cargar(); $('apartados').scrollIntoView({ behavior:'smooth', block:'start' }); } });
-const catalogo = iniciarCatalogo({ apartar:(pieza) => apartador.abrir(pieza) });
+const carrito = iniciarCarrito({ alApartar:(piezas) => apartador.abrir(piezas, 'carrito') });
+iniciarCatalogo({ comprar:(pieza) => apartador.abrir([pieza], 'comprar_ya'), carrito });
+// Del sitio llega ?carrito=ED-1,ED-2 («Comprar ya» o «Apartar todo»): se suma al carrito de aquí y, en cuanto se sabe si hay sesión,
+// abre el resumen de esas piezas (con sesión, directo; sin sesión, con el aviso de registro). Se quita de la URL para no repetirlo al recargar.
+{
+  const url = new URL(location.href);
+  const llegada = codigosDeUrl(location.search);
+  if (url.searchParams.has('carrito')) { url.searchParams.delete('carrito'); history.replaceState(null, '', '/' + url.search + url.hash); }
+  if (llegada.length) { carrito.sumar(llegada); guardarPendientes(llegada); }
+}
 
 try {
   const r = await fetch('/api/portal/config', { cache:'no-store' });
@@ -348,5 +376,6 @@ try {
     $('titular').textContent = ''; $('recibos').replaceChildren(); $('vinculo').hidden = true;
     $('recibo-dialogo').close(); $('detalle-recibo').replaceChildren();
     estado();
+    abrirPendientes();   // sin sesión: el resumen de lo que llegó del sitio, con el aviso de registro
   });
 } catch (e) { estado(errorDeAuth(e), true); }
