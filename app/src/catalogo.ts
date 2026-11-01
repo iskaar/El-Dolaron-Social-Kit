@@ -203,7 +203,7 @@ async function foto(env: Env, codigo: string, recorte = false): Promise<Response
 }
 
 // Medicion de la ficha (Issue #651, docs/UX-COMPRA.md §6). Solo evento, pieza y origen: nada de IP, agente ni identificadores.
-const EVENTOS = ['ficha_abierta', 'lo_quiero', 'apartar_recoger', 'apartar_envio', 'preguntar', 'whatsapp_abierto', 'compartir'];
+const EVENTOS = ['ficha_abierta', 'lo_quiero', 'apartar_recoger', 'apartar_envio', 'preguntar', 'whatsapp_abierto', 'compartir', 'apartado_portal'];
 const ORIGENES = ['sitio', 'portal'];
 
 async function evento(request: Request, env: Env): Promise<Response> {

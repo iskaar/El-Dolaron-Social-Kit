@@ -1,12 +1,13 @@
 import qrcode from './vendor/qrcode-generator.js';
 import { svgCode128, codigoEnDigitos, codigoDeDigitos } from './code128.js';
 import { iniciarCatalogo } from './catalogo-ficha.js';
+import { iniciarApartar } from './apartar.js';
 
 const $ = (id) => document.getElementById(id);
 const d = (c) => (c / 100).toLocaleString('es-MX', { maximumFractionDigits:2 }) + ' D';
 const pesos = (c) => (c / 100).toLocaleString('es-MX', { style:'currency', currency:'MXN' });
 const fecha = (iso) => new Date(iso).toLocaleDateString('es-MX', { timeZone:'America/Mexico_City' });
-let auth, sdk, config, confirmacion, verificador, siguiente = null, venceCodigo = 0, reenviarDesde = 0;
+let auth, sdk, config, confirmacion, verificador, siguiente = null, venceCodigo = 0, reenviarDesde = 0, socioListo = false;
 
 // Vale de papel (Issue #258): su QR abre /v#<dígitos>. Se guarda en este teléfono hasta
 // entrar o registrarse, y entonces pasa a la cuenta sin volver a escanear. El código va
@@ -112,8 +113,21 @@ function errorDeAuth(error) {
     'auth/network-request-failed':'No hay conexión. Revisa tu red e intenta otra vez.',
   })[error.code] || error.message || 'No se pudo entrar. Intenta de nuevo.';
 }
+// Apartar (#668): sin sesión de socio, «Apartar aquí» manda al registro y, al terminar, vuelve a la pieza con la hoja abierta.
+const APARTAR = 'apartar-pieza';
+function irAAcceso(codigo) {
+  try { sessionStorage.setItem(APARTAR, codigo); } catch { /* sin almacenamiento: tendrá que volver a abrir la pieza */ }
+  $('ficha-dialogo').close();
+  const destino = [$('registro'), $('acceso')].find((s) => !s.hidden) ?? $('estado');
+  destino.scrollIntoView({ behavior:'smooth', block:'start' });
+}
+function piezaPendiente() {
+  try { const codigo = sessionStorage.getItem(APARTAR) || ''; sessionStorage.removeItem(APARTAR); return /^ED-\d{1,10}$/.test(codigo) ? codigo : ''; }
+  catch { return ''; }
+}
 async function cargarCuenta() {
   const uid = auth.currentUser?.uid;
+  socioListo = false;
   ocultarCodigo();
   $('recibos').replaceChildren();
   siguiente = null;
@@ -142,6 +156,9 @@ async function cargarCuenta() {
     estado();
     referidos();
     ubicarCatalogo(true);
+    socioListo = true;
+    const pendiente = piezaPendiente();
+    if (pendiente) catalogo?.abrir(pendiente, true);
     await pasarVale();
   } catch (e) {
     if (!uid || uid !== auth.currentUser?.uid) return;
@@ -296,7 +313,8 @@ $('salir').addEventListener('click', () => accion($('salir'), async () => {
 }));
 
 // El catálogo es público: arranca aunque el monedero no esté disponible.
-iniciarCatalogo();
+const apartador = iniciarApartar({ api, estaListo:() => socioListo, irAAcceso, alTerminar:() => $('ficha-dialogo').close() });
+const catalogo = iniciarCatalogo({ apartar:(pieza) => apartador.abrir(pieza) });
 
 try {
   const r = await fetch('/api/portal/config', { cache:'no-store' });
@@ -314,6 +332,7 @@ try {
   sdk.onAuthStateChanged(auth, (user) => {
     ocultarCodigo();
     if (user) { cargarCuenta(); return; }
+    socioListo = false;
     ubicarCatalogo(false);
     $('monedero').hidden = true; $('registro').hidden = true; $('salir').hidden = true;
     $('acceso').hidden = false; $('telefono-form').hidden = false; $('sms-form').hidden = true;

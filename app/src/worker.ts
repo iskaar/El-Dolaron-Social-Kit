@@ -2254,11 +2254,11 @@ async function servirFoto(id: string, env: Env): Promise<Response> {
 }
 
 /** Todo lo que responde el host del portal (dolarones.eldolaron.com): assets fijos, catálogo público y /api/portal/*. */
-async function rutaPortalPublico(request: Request, env: Env, url: URL): Promise<Response> {
+async function rutaPortalPublico(request: Request, env: Env, url: URL, ctx: ExecutionContext): Promise<Response> {
   const { pathname } = url;
   const archivos: Record<string, string> = {
     '/': '/portal', '/portal': '/portal', '/portal.html': '/portal', '/v': '/portal',
-    '/portal.js': '/portal.js', '/catalogo-ficha.js': '/catalogo-ficha.js', '/portal.css': '/portal.css', '/code128.js': '/code128.js', '/vendor/qrcode-generator.js': '/vendor/qrcode-generator.js',
+    '/portal.js': '/portal.js', '/catalogo-ficha.js': '/catalogo-ficha.js', '/apartar.js': '/apartar.js', '/portal.css': '/portal.css', '/code128.js': '/code128.js', '/vendor/qrcode-generator.js': '/vendor/qrcode-generator.js',
     '/el-dolaron-logo.png': '/el-dolaron-logo.png',
     // Manual de la revendedora (#623): práctica con datos de ejemplo, sin API. Importa vender.js (solo funciones puras de texto y fechas).
     '/manual': '/manual', '/manual.js': '/manual.js', '/vender.js': '/vender.js',
@@ -2294,7 +2294,7 @@ async function rutaPortalPublico(request: Request, env: Env, url: URL): Promise<
   if (publico) return publico;
   if (!pathname.startsWith('/api/portal/') || pathname === '/api/portal/llegada')
     return json({ error: 'Ruta no encontrada.' }, 404);
-  try { return await portal(request, env, url); }
+  try { return await portal(request, env, url, ctx); }
   catch { return json({ error: 'Servicio no disponible.' }, 503); }
 }
 
@@ -2314,7 +2314,7 @@ export default {
       if (aviso && request.method === 'POST') return await recibirNotificacion(aviso[1], request, env, ctx);
       // Puerta pública cerrada por defecto. Nunca comparte rutas ni assets del personal.
       if (env.HOST_PORTAL && url.hostname === env.HOST_PORTAL) {
-        const publica = await rutaPortalPublico(request, env, url);
+        const publica = await rutaPortalPublico(request, env, url, ctx);
         // Único host sin Access: el navegador no vuelve a entrar por http.
         const respuesta = new Response(publica.body, publica);
         respuesta.headers.set('strict-transport-security', 'max-age=31536000; includeSubDomains');

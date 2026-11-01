@@ -206,3 +206,23 @@ test('abono: si el servidor rechaza la clave, el cuadro sigue abierto con el err
   assert.notEqual(enviados[1].id, enviados[0].id);
   assert.equal(enviados[1].clave_rastreo, 'EJEMPLO654321');
 });
+
+test('un apartado del portal (#668) se muestra como «Portal» y, sin anticipo, trae su botón de abono', () => {
+  const html = new Map<string, any>();
+  const $ = (id: string) => { if (!html.has(id)) html.set(id, {}); return html.get(id); };
+  const base = { cliente: 'Lucía', telefono: '4441112222', entrega: 'tienda', estado: 'apartado', guia: '', liquidado_en: null, envio: 0,
+    subtotal: 20000, vence_en: '2030-01-01T12:00:00.000Z', lineas: [], vendedora: 'portal', vendedora_nombre: null, anticipo: 0, saldo: 0, faltante: 20000, folio: 4 };
+  const bloque = fuente.slice(fuente.indexOf('const vendedoraDe ='), fuente.indexOf("$('actualizar').addEventListener"));
+  const pintar = runInNewContext(`${bloque}
+pintarLista`, {
+    $, pedidos: [base], Date, guardadas: new Map(), escapar: (t: string) => String(t).replace(/</g, '&lt;'), pesos: (n: number) => `$${n / 100}`, dia: () => '2026-10-22',
+    fecha: (s: string) => s.slice(0, 10), piezasDe: () => 'Prenda', totalDe: () => 20000,
+    enlaceWhatsApp: () => '#', mensajeConfirmar: () => '', mensajeRecordar: () => '', mensajeGuia: () => '', mensajeSaldo: () => '',
+  });
+  pintar();
+  const apartados = $('lista-apartados').innerHTML as string;
+  assert.match(apartados, /Sin anticipo · Vence (?:hoy,|el) 2030-01-01 · Portal/);
+  assert.match(apartados, /Tienda · Portal/);
+  assert.match(apartados, /data-mover="4" data-tipo="abono"/);
+  assert.doesNotMatch(apartados, /portal</);
+});

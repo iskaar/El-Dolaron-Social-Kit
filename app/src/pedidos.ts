@@ -10,6 +10,7 @@
 import { cajaDe } from './corte.ts';
 import { sumarMeses } from './dolarones.ts';
 import { conciliarSeguro } from './mercadolibre.ts';
+import { VENDIBLE } from './catalogo.ts';
 import { sentenciasVale } from './vales.ts';
 import { envioDe, anticipoMinimoDe, ANTICIPO, viernesDeEnvio, claveRastreoDe } from '../public/venta.js';
 import { leerTransferencia, sentenciaTransferencia, respuestaClaveUsada, esChoqueDeClave, excedenteDe } from './transferencias.ts';
@@ -20,9 +21,14 @@ const FORMAS_PAGO = new Set(['efectivo', 'tarjeta', 'transferencia']);
 export const DIAS_APARTADO = 7;
 // Revendedora externa (#575): aparta sin anticipo. El plazo corto lo cierra el cron de siempre (vence_en).
 export const HORAS_REVENDEDORA = 48;
+// Socio del portal (#668): aparta en linea sin anticipo y paga por transferencia; sin pago, 24 h y la pieza vuelve. Al registrar su abono se extiende a 7 dias.
+export const HORAS_PORTAL = 24;
+// Apartados sin pago a la vez por socio: frena que una cuenta deje media tienda trabada 24 h.
+export const APARTADOS_PORTAL = 3;
 // ponytail: el tope se lee justo antes del batch; dos apartados a la vez pueden pasarse por una pieza.
 // Mejora: contar dentro del insert del pedido si algun dia importa.
 const PIEZAS_REVENDEDORA = 10;
+type Modo = 'caja' | 'revendedora' | 'portal';
 const LIMITE_LISTA = 200;
 const ENVIO_ID = '00000000-0000-4000-8000-000000000099';
 
@@ -188,17 +194,23 @@ export function telefonoDe(valor: unknown): string | null {
 }
 
 /**
- * `revendedora` (#575): el mismo pedido sin dinero de por medio. Sin anticipo, saldo ni caja, 48 h de plazo,
- * envio sin cobrar el paquete. Lo decide vender.ts segun la cuenta, nunca el cuerpo de la peticion.
+ * `revendedora` (#575) y `portal` (#668): el mismo pedido sin dinero de por medio. Sin anticipo, saldo ni caja, plazo corto
+ * (48 h / 24 h), envio sin cobrar el paquete. Lo decide quien llama segun la cuenta, nunca el cuerpo de la peticion: en `portal`
+ * `correo` es la constante 'portal' y el dueno es el telefono del socio.
  */
-async function crearPedido(request: Request, env: Env, ctx: ExecutionContext, correo: string, revendedora = false): Promise<Response> {
-  const cuerpo = (await request.json().catch(() => ({}))) as Record<string, unknown>;
+const crearPedido = async (request: Request, env: Env, ctx: ExecutionContext, correo: string, modo: Modo = 'caja'): Promise<Response> =>
+  crearPedidoDe((await request.json().catch(() => ({}))) as Record<string, unknown>, env, ctx, correo, modo);
+
+async function crearPedidoDe(cuerpo: Record<string, unknown>, env: Env, ctx: ExecutionContext, correo: string, modo: Modo): Promise<Response> {
+  const sinDinero = modo !== 'caja';
   const id = String(cuerpo.id ?? '');
   if (!UUID.test(id)) return json({ error: 'Identificador invalido.' }, 400);
   // Reintento tras red caida: el mismo pedido, sin bajar otra vez la existencia.
   const previo = await pedidoPor(env, 'id = ?', id);
   if (previo) {
-    return revendedora && previo.vendedora !== correo
+    const ajeno = modo === 'revendedora' ? previo.vendedora !== correo
+      : modo === 'portal' && (previo.vendedora !== correo || previo.telefono !== telefonoDe(cuerpo.telefono));
+    return ajeno
       ? json({ error: 'El identificador ya corresponde a otro pedido.' }, 409)
       : json({ pedido: previo, excedente_transferencia: await excedenteDe(env, 'anticipo', id) });
   }
@@ -220,10 +232,10 @@ async function crearPedido(request: Request, env: Env, ctx: ExecutionContext, co
   const entrega = String(cuerpo.entrega ?? '');
   if (entrega !== 'tienda' && entrega !== 'envio') return json({ error: 'Entrega invalida.' }, 400);
   // forma_pago es NOT NULL con CHECK: sin dinero recibido da igual, 'transferencia' es lo que se cobrara despues.
-  const formaPago = revendedora ? 'transferencia' : String(cuerpo.forma_pago ?? '');
+  const formaPago = sinDinero ? 'transferencia' : String(cuerpo.forma_pago ?? '');
   if (!FORMAS_PAGO.has(formaPago)) return json({ error: 'Forma de pago invalida.' }, 400);
-  const caja = revendedora ? '' : await cajaDe(env, correo, cuerpo.caja);
-  if (!revendedora && !caja) return json({ error: 'Falta la caja.' }, 400);
+  const caja = sinDinero ? '' : await cajaDe(env, correo, cuerpo.caja);
+  if (!sinDinero && !caja) return json({ error: 'Falta la caja.' }, 400);
 
   const ids = [...cantidades.keys()];
   const { results: filas } = await env.DB.prepare(
@@ -238,19 +250,27 @@ async function crearPedido(request: Request, env: Env, ctx: ExecutionContext, co
   const subtotal = filas.reduce((suma, p) => suma + p.precio * cantidades.get(p.id)!, 0);
   const envio = entrega === 'envio' ? envioDe(subtotal) : 0;
   const total = subtotal + envio;
-  const anticipo = revendedora ? 0 : Number(cuerpo.anticipo);
-  const minimo = revendedora ? 0 : anticipoMinimoDe(subtotal);
+  const anticipo = sinDinero ? 0 : Number(cuerpo.anticipo);
+  const minimo = sinDinero ? 0 : anticipoMinimoDe(subtotal);
   if (!Number.isSafeInteger(total) || !Number.isSafeInteger(anticipo) || anticipo < minimo || anticipo > total)
     return json({ error: `El anticipo mínimo es $${minimo / 100} y no pasa del total.` }, 400);
   // Envío: el paquete abre con $100 (o el total de las piezas si cuestan menos); el resto entra como abonos.
-  if (!revendedora && entrega === 'envio' && anticipo !== minimo && anticipo !== ANTICIPO)
+  if (!sinDinero && entrega === 'envio' && anticipo !== minimo && anticipo !== ANTICIPO)
     return json({ error: 'El paquete de envío se abre con $100 (o el total de las piezas si cuestan menos); el resto se recibe como abonos.' }, 400);
   // Transferencia (#593): todo anticipo de apartado o envio por transferencia lleva la clave de rastreo del comprobante.
-  const transf = !revendedora && formaPago === 'transferencia' && anticipo > 0 ? leerTransferencia(cuerpo, anticipo) : null;
+  const transf = !sinDinero && formaPago === 'transferencia' && anticipo > 0 ? leerTransferencia(cuerpo, anticipo) : null;
   if (transf && !transf.ok) return json({ error: transf.error, campo: transf.campo }, 400);
   const usada = transf && await respuestaClaveUsada(env, transf.clave);
   if (usada) return usada;
-  if (revendedora) {
+  if (modo === 'portal') {
+    // ponytail: el tope se lee justo antes del batch; dos apartados a la vez pueden pasarse por uno (como el de revendedora).
+    // Mejora: contar dentro del insert del pedido si algun dia importa. Solo cuentan los que siguen sin pago.
+    const abiertos = (await env.DB.prepare("select count(*) as n from pedidos where vendedora = ? and telefono = ? and estado = 'apartado' and saldo = 0")
+      .bind(correo, telefono).first<{ n: number }>())?.n ?? 0;
+    if (abiertos >= APARTADOS_PORTAL)
+      return json({ error: `Ya tienes ${APARTADOS_PORTAL} apartados sin pago. Paga o cancela alguno para apartar otra pieza.` }, 409);
+  }
+  if (modo === 'revendedora') {
     // Solo cuentan las que siguen sin pago: una ya pagada y por recoger no bloquea seguir vendiendo.
     const abiertas = (await env.DB.prepare(`select coalesce(sum(l.cantidad), 0) as n from pedidos d
       join pedido_lineas l on l.pedido_id = d.id where d.estado = 'apartado' and d.saldo = 0 and d.vendedora = ?`)
@@ -261,7 +281,7 @@ async function crearPedido(request: Request, env: Env, ctx: ExecutionContext, co
 
   const momento = new Date();
   const ahora = momento.toISOString();
-  const vence = new Date(momento.getTime() + (revendedora ? HORAS_REVENDEDORA * 3_600_000 : DIAS_APARTADO * 86_400_000));
+  const vence = new Date(momento.getTime() + (modo === 'portal' ? HORAS_PORTAL * 3_600_000 : modo === 'revendedora' ? HORAS_REVENDEDORA * 3_600_000 : DIAS_APARTADO * 86_400_000));
   try {
     await env.DB.batch([
       env.DB.prepare(
@@ -311,7 +331,48 @@ async function listarPedidos(env: Env): Promise<Response> {
 
 /** Apartar como revendedora (#575): `POST /api/vender/apartar`. */
 export const apartarRevendedora = (request: Request, env: Env, ctx: ExecutionContext, correo: string) =>
-  crearPedido(request, env, ctx, correo, true);
+  crearPedido(request, env, ctx, correo, 'revendedora');
+
+/** `vendedora` de todo apartado que levanta el portal: no es un correo, es el canal. /pedidos lo muestra como «Portal». */
+export const VENDEDORA_PORTAL = 'portal';
+const CODIGO_PIEZA = /^ED-\d{1,10}$/;
+
+/**
+ * Apartar desde el portal (#668): `POST /api/portal/apartar { id, codigo, entrega }`. Nada del cuerpo es de confianza salvo la pieza
+ * y la entrega: nombre y telefono salen del socio autenticado y el precio de `productos`. Lo demas es `crearPedido` en modo portal
+ * (stock - 1 en el mismo batch, UUID idempotente, 24 h de plazo, tope de 3 sin pago).
+ */
+export async function apartarPortal(request: Request, env: Env, ctx: ExecutionContext, socio: { nombre: string; telefono: string }): Promise<Response> {
+  const sinCache = { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' };
+  const cuerpo = (await request.json().catch(() => null)) as Record<string, unknown> | null;
+  if (!cuerpo || typeof cuerpo !== 'object' || Array.isArray(cuerpo)) return json({ error: 'Pedido inválido.' }, 400);
+  const id = String(cuerpo.id ?? '');
+  const telefono = telefonoDe(socio.telefono);
+  if (!UUID.test(id)) return json({ error: 'Identificador invalido.' }, 400);
+  if (!telefono) return json({ error: 'Tu teléfono necesita revisión en la tienda antes de apartar.' }, 409);
+  // El reintento de un apartado que ya bajo la existencia no vuelve a buscar la pieza (ya no es VENDIBLE): lo responde crearPedidoDe.
+  let lineas: { producto_id: string; cantidad: number }[] = [];
+  if (!await pedidoPor(env, 'id = ?', id)) {
+    const codigo = String(cuerpo.codigo ?? '').trim().toUpperCase();
+    if (!CODIGO_PIEZA.test(codigo)) return json({ error: 'Código de pieza inválido.' }, 400);
+    const pieza = await env.DB.prepare(`select p.id, (${VENDIBLE}) as vendible from productos p where p.codigo = ?`)
+      .bind(codigo).first<{ id: string; vendible: number }>();
+    if (!pieza) return json({ error: 'La pieza no existe.' }, 404);
+    if (!pieza.vendible) return json({ error: 'Esa pieza ya no está disponible.' }, 409);
+    lineas = [{ producto_id: pieza.id, cantidad: 1 }];
+  }
+  const r = await crearPedidoDe({ id, lineas, cliente: socio.nombre.slice(0, 80), telefono, entrega: cuerpo.entrega }, env, ctx, VENDEDORA_PORTAL, 'portal');
+  if (r.status !== 200 && r.status !== 201) return new Response(r.body, { status: r.status, headers: sinCache });
+  const { pedido } = await r.json() as { pedido: NonNullable<Awaited<ReturnType<typeof pedidoPor>>> };
+  return new Response(JSON.stringify({
+    pedido: { folio: pedido.folio, vence_en: pedido.vence_en, entrega: pedido.entrega, envio: pedido.envio, subtotal: pedido.subtotal,
+      lineas: pedido.lineas.map(({ codigo, nombre, precio, cantidad }) => ({ codigo, nombre, precio, cantidad })) },
+    // Envio: el paquete abre con esto y el resto entra como abonos (misma regla de crearPedido); recoger: es el apartado.
+    a_pagar: anticipoMinimoDe(pedido.subtotal), concepto: `P-${pedido.folio}`,
+    // Banco, CLABE y titular los pone Isaac en el panel de Cloudflare; nunca viven en el repo.
+    datos_pago: env.PORTAL_DATOS_PAGO?.trim() || null,
+  }), { status: r.status, headers: sinCache });
+}
 
 /**
  * Los apartados de una revendedora: los abiertos (indice por estado) y lo de los ultimos 60 dias.

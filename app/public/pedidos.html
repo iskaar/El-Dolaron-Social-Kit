@@ -523,10 +523,11 @@ async function cargarLista() {
   pintarLista();
 }
 
-const vendedoraDe = (p) => escapar(String(p.vendedora ?? '').split('@')[0]);
+// 'portal' no es un correo: es el canal de los apartados que hacen los socios desde el portal (#668).
+const vendedoraDe = (p) => p.vendedora === 'portal' ? 'Portal' : escapar(String(p.vendedora ?? '').split('@')[0]);
 // Apartado de revendedora (#575): sin anticipo, dura 48 h y el pago lo registra la tienda con un abono.
 const sinAnticipo = (p) => p.estado === 'apartado' && p.anticipo === 0 && !p.liquidado_en;
-const revendedoraNombre = (p) => escapar(p.vendedora_nombre || String(p.vendedora ?? '').split('@')[0]);
+const revendedoraNombre = (p) => p.vendedora === 'portal' ? 'Portal' : escapar(p.vendedora_nombre || String(p.vendedora ?? '').split('@')[0]);
 
 // Pago que reporto la revendedora (#609): se acepta registrando el abono (llena la ventana de abono) o se rechaza con motivo.
 const bancoNombre = (codigo) => BANCOS.find(([c]) => c === codigo)?.[1] ?? '';

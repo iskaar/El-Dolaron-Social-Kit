@@ -205,7 +205,7 @@ test('allowlist pública sirve sólo portal y assets necesarios; no abre caja, a
       return new Response(readFileSync('public/' + (ruta === '/portal' ? 'portal.html' : ruta === '/manual' ? 'manual.html' : ruta.slice(1))),
         { headers:{ 'content-type':ruta === '/portal' || ruta === '/manual' ? 'text/html' : 'text/javascript' } });
     } } as unknown as Fetcher;
-    for (const ruta of ['/', '/portal', '/portal.html', '/portal.js', '/catalogo-ficha.js', '/portal.css', '/code128.js', '/vendor/qrcode-generator.js', '/el-dolaron-logo.png',
+    for (const ruta of ['/', '/portal', '/portal.html', '/portal.js', '/catalogo-ficha.js', '/apartar.js', '/portal.css', '/code128.js', '/vendor/qrcode-generator.js', '/el-dolaron-logo.png',
       '/manual', '/manual.js', '/vender.js']) {
       const r = await worker.fetch!(new Request('https://portal.prueba' + ruta) as never, p.env, {} as never);
       assert.equal(r.status, 200, ruta);
@@ -218,7 +218,7 @@ test('allowlist pública sirve sólo portal y assets necesarios; no abre caja, a
       '/cajero.js', '/venta.js', '/vender', '/vender.html', '/manual.html', '/manual/', '/api/vender', '/api/ventas', '/api/socios/codigo', '/api/socios/vincular',
       '/api/foto/123', '/api/portal/llegada', '/foo/portal.html'])
       assert.equal((await p.llamar(ruta, '')).status, 404, ruta);
-    assert.equal(leidos.length, 12);
+    assert.equal(leidos.length, 13);
     // El manual (#623) sale solo por GET/HEAD.
     assert.equal((await p.llamar('/manual', '', {}, 'POST')).status, 404);
     assert.equal((await p.llamar('/portal.js', '', {}, 'POST')).status, 404);
@@ -436,5 +436,42 @@ test('apagar la promoción respeta el premio ya otorgado (Issue #611)', async ()
     assert.equal(r.cuerpo.premio.lote_id, a.body.premio.lote_id);
     assert.equal(p.db.prepare('select count(*) as n from primera_llegada').get()!.n, 0);
     assert.equal((await p.registrar('uid-previo', '+524440000612')).body.premio.importe, 300_00);
+  } finally { p.cerrar(); }
+});
+
+test('POST /api/portal/apartar (#668): pide sesión, socio y bases vigentes; el teléfono sale de la cuenta, la pieza del servidor', async () => {
+  const p = portalDePrueba();
+  try {
+    const id = 'c0000001-1111-4111-8111-111111111111';
+    p.db.prepare(`insert into productos (id, codigo, nombre, precio, stock, estado_analisis, foto_key, semana_ingreso, creado_en, actualizado_en)
+      values (?, 'ED-000777', 'Chamarra Levis', 25000, 2, 'listo', 'fotos/x.jpg', 'S40', '', '')`).run(id);
+    const cuerpo = (extra: Record<string, unknown> = {}) => ({ id: crypto.randomUUID(), codigo: 'ED-000777', entrega: 'tienda', ...extra });
+    const auth = token('uid-apartar', '+524441112222');
+    // Sin sesión válida, sin registro y con un método que no es POST.
+    assert.equal((await p.llamar('/api/portal/apartar', token('uid-apartar', '+524441112222', { aud: 'otro' }), cuerpo(), 'POST')).status, 401);
+    assert.equal((await p.llamar('/api/portal/apartar', auth, cuerpo(), 'POST')).status, 404);   // aún no es socio
+    assert.equal((await p.registrar('uid-apartar', '+524441112222')).status, 200);
+    assert.equal((await p.llamar('/api/portal/apartar', auth)).status, 405);
+    assert.equal((await p.pedir('/api/portal/apartar', cuerpo())).status, 404);   // host del personal: ni existe
+    assert.equal(p.db.prepare('select stock from productos where id = ?').get(id)!.stock, 2);
+
+    p.env.PORTAL_DATOS_PAGO = 'Banco de prueba';
+    const mala = await p.llamar('/api/portal/apartar', auth, cuerpo({ codigo: 'otra cosa' }), 'POST');
+    assert.equal(mala.status, 400);
+    const r = await p.llamar('/api/portal/apartar', auth, cuerpo({ cliente: 'Intruso', telefono: '4440000000', precio: 1, anticipo: 99999 }), 'POST');
+    assert.equal(r.status, 201, JSON.stringify(r.body));
+    assert.equal(r.body.concepto, 'P-1');
+    assert.equal(r.body.datos_pago, 'Banco de prueba');
+    assert.equal(r.body.pedido.subtotal, 25000);
+    const fila = p.db.prepare('select vendedora, cliente, telefono, anticipo, saldo from pedidos where folio = 1').get()!;
+    assert.deepEqual({ ...fila }, { vendedora: 'portal', cliente: 'Cliente', telefono: '4441112222', anticipo: 0, saldo: 0 });
+    assert.equal(p.db.prepare('select stock from productos where id = ?').get(id)!.stock, 1);
+
+    // Bases vigentes: quien no las aceptó no aparta (la pantalla le pide aceptarlas primero).
+    p.db.prepare("update clientes set bases_version = 'vieja' where auth_uid = 'uid-apartar'").run();
+    const sin = await p.llamar('/api/portal/apartar', auth, cuerpo(), 'POST');
+    assert.equal(sin.status, 409);
+    assert.match(sin.body.error, /bases vigentes/);
+    assert.equal(p.db.prepare('select stock from productos where id = ?').get(id)!.stock, 1);
   } finally { p.cerrar(); }
 });
