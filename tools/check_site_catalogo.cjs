@@ -1,18 +1,10 @@
 // Run: node tools/check_site_catalogo.cjs
 const assert = require("node:assert/strict");
-const { precio, consulta, apiBase, codigoDePieza, viernesDeEnvio, fechaCorta, lineaApartado, mensajeQuiero } = require("../site/public/catalogo.js");
+const { precio, apiBase, codigoDePieza, viernesDeEnvio, fechaCorta, lineaApartado, enlaceLoQuiero } = require("../site/public/catalogo.js");
 
 assert.equal(precio(15000), "$150");
 assert.equal(precio(24950), "$249.50");
 assert.equal(precio(5), "$0.05");
-assert.equal(
-  consulta({ nombre: "Vestido floral", codigo: "ED-1", precio: 15000 }),
-  "https://wa.me/524445437754?text=" + encodeURIComponent("Hola, me interesa Vestido floral (ED-1) de $150. ¿Sigue disponible?"),
-);
-assert.equal(
-  consulta({ nombre: "Blusa", codigo: "ED-2", precio: 8000, talla: "M" }),
-  "https://wa.me/524445437754?text=" + encodeURIComponent("Hola, me interesa Blusa talla M (ED-2) de $80. ¿Sigue disponible?"),
-);
 assert.equal(apiBase(""), "https://dolarones.eldolaron.com");
 assert.equal(apiBase("?api=http://127.0.0.1:8787"), "http://127.0.0.1:8787");
 for (const bad of ["javascript:alert(1)", "https://evil.example", "ftp://127.0.0.1", "no-es-url"]) {
@@ -24,7 +16,7 @@ assert.equal(codigoDePieza("?pieza=ED-000123"), "ED-000123");
 assert.equal(codigoDePieza("?x=1&pieza=ed-7"), "ED-7");
 for (const bad of ["", "?pieza=", "?pieza=ED-", "?pieza=ED-1%20OR%201", "?pieza=<script>", "?pieza=ED-12345678901", "?q=ED-1"]) assert.equal(codigoDePieza(bad), "");
 
-// Ficha (Issue #645): viernes de envío (jueves 20:00 hora de tienda = corte), línea de apartado y mensajes de «Lo quiero».
+// Ficha (Issue #645): viernes de envío (jueves 20:00 hora de tienda = corte), línea de apartado y enlace de «Lo quiero».
 assert.equal(viernesDeEnvio("2026-10-31T18:00:00Z"), "2026-11-06");   // sábado
 assert.equal(viernesDeEnvio("2026-11-06T01:59:00Z"), "2026-11-06");   // jueves 19:59 en la tienda
 assert.equal(viernesDeEnvio("2026-11-06T02:00:00Z"), "2026-11-13");   // jueves 20:00: ya pasó el corte
@@ -35,10 +27,7 @@ const SABADO = Date.parse("2026-10-31T18:00:00Z");
 assert.equal(lineaApartado({ precio: 15000 }, SABADO), "Apártala con $100 por 7 días. Recoge en Soledad (11 a 8) o te la enviamos el viernes 6 de noviembre (envío nacional gratis desde $1,000; si no, $99).");
 assert.equal(lineaApartado({ precio: 5000 }, SABADO), "Se paga completa al apartar. Recoge en Soledad (11 a 8) o te la enviamos el viernes 6 de noviembre (envío nacional gratis desde $1,000; si no, $99).");
 const sudadera = { nombre: "Sudadera Nike", talla: "M", codigo: "ED-001850", precio: 15000 };
-assert.equal(mensajeQuiero(sudadera, "recoger", SABADO), "Hola, quiero apartar *Sudadera Nike talla M* (ED-001850) de $150. Dejo $100 de apartado y paso a recogerla a Jardín Hidalgo 129.");
-assert.equal(mensajeQuiero(sudadera, "envio", SABADO), "Hola, quiero apartar *Sudadera Nike talla M* (ED-001850) de $150. Dejo $100 de apartado para el envío del viernes 6 de noviembre (gratis desde $1,000; si no, $99). ¿Me pasan los datos para transferir?");
-assert.equal(mensajeQuiero(sudadera, "preguntar", SABADO), "Hola, tengo una pregunta sobre *Sudadera Nike talla M* (ED-001850) de $150.");
-assert.equal(mensajeQuiero({ nombre: "Lámpara", codigo: "ED-7", precio: 8000 }, "recoger", SABADO), "Hola, quiero apartar *Lámpara* (ED-7) de $80. La pago completa al apartarla y paso a recogerla a Jardín Hidalgo 129.");
+assert.equal(enlaceLoQuiero(sudadera), "https://wa.me/524445437754?text=Quiero%20producto%20ED-001850");   // solo el código, nada más
 
 // Catálogo en una página falsa (Issue #241): reintento, talla, tiempo agotado y botón Reintentar.
 const { readFileSync } = require("node:fs");
@@ -63,17 +52,14 @@ function pagina(fetcher, extra = {}) {
   const selectores = [
     ".chips", ".catalog-grid", ".catalog-status", ".catalog-more", ".catalog-fallback", ".catalog-retry",
     ".catalog-search", ".search-input", ".catalog-clear", ".piece-dialog", ".piece-dialog-close",
-    ".piece-dialog-img", ".piece-dialog-title", ".piece-dialog-meta", ".piece-dialog-price", ".piece-dialog-ask",
+    ".piece-dialog-img", ".piece-dialog-title", ".piece-dialog-meta", ".piece-dialog-price",
     ".piece-dialog-photo", ".piece-dialog-stamp", ".ficha-zoom", ".ficha-pista", ".ficha-compra", ".ficha-barprecio", ".ficha-quiero",
-    ".ficha-compartir", ".ficha-aviso", ".ficha-hoja", ".ficha-hoja-cerrar", ".piece-dialog-head", ".piece-dialog-scroll", ".piece-dialog-bar",
+    ".ficha-compartir", ".ficha-aviso", ".piece-dialog-head", ".piece-dialog-scroll", ".piece-dialog-bar",
   ];
   const partes = Object.fromEntries(selectores.map((k) => [k, new Nodo()]));
   partes[".catalog-clear"].hidden = true;
-  partes[".ficha-hoja"].hidden = true;
-  const ops = ["recoger", "envio", "preguntar"].map((op) => { const n = new Nodo(); n.attrs["data-op"] = op; return n; });
   const root = new Nodo();
   root.querySelector = (k) => partes[k];
-  root.querySelectorAll = (k) => (k === ".ficha-op" ? ops : []);
   const relojes = [];
   vm.runInNewContext(fuente, {
     document: { querySelector: () => null, getElementById: (id) => (id === "catalogo" ? root : id === "buscados" && extra.buscados ? extra.buscados : null), createElement: () => new Nodo(), ...extra.document },
@@ -81,7 +67,7 @@ function pagina(fetcher, extra = {}) {
     setTimeout: (fn) => relojes.push(fn), clearTimeout: () => {},
   });
   const textos = () => partes[".catalog-grid"].children.map((li) => li.children[1].children.map((n) => n.textContent));
-  return { partes, root, relojes, textos, ops };
+  return { partes, root, relojes, textos };
 }
 const tick = () => new Promise((r) => setImmediate(r));
 
@@ -176,15 +162,16 @@ const tick = () => new Promise((r) => setImmediate(r));
   await tick();
   assert.equal(consultas.at(-1), null);   // malformado: carga normal, sin búsqueda
 
-  // Ficha (Issue #645): datos, última pieza, línea de apartado, hoja «Lo quiero», zoom y Compartir.
+  // Ficha (Issue #645): datos, última pieza, línea de apartado, enlace «Lo quiero», zoom y Compartir.
   const copiados = [];
+  const eventos = [];
   const ficha = pagina(async () => ({
     ok: true,
     json: async () => ({ piezas: [
       { nombre: "Chamarra", marca: "Levis", talla: "L", codigo: "ED-5", precio: 30000, precio_lista: 90000, ultima: true, foto: "https://x/f.jpg", recorte: "https://x/r.png" },
       { nombre: "Taza", categoria: "hogar", codigo: "ED-6", precio: 4000, foto: "https://x/t.jpg" },
     ], total: 2, hay_mas: false, siguiente: null }),
-  }), { contexto: { navigator: { clipboard: { writeText: async (t) => copiados.push(t) } } } });
+  }), { contexto: { navigator: { clipboard: { writeText: async (t) => copiados.push(t) }, sendBeacon: (url, cuerpo) => { eventos.push(JSON.parse(cuerpo).evento); return true; } } } });
   await tick();
   const f = ficha.partes;
   const abre = (i) => f[".catalog-grid"].children[i].listeners.click();
@@ -201,22 +188,20 @@ const tick = () => new Promise((r) => setImmediate(r));
   assert.equal(f[".piece-dialog-meta"].textContent, "Hogar y cocina · ED-6");   // sin marca, la categoría
   assert.equal(f[".piece-dialog-stamp"].hidden, true);                          // sin `ultima`, nada
   assert.match(f[".ficha-compra"].textContent, /^Se paga completa al apartar\./);
-  // «Lo quiero» abre la hoja con los tres enlaces; Esc cierra solo la hoja.
+  // «Lo quiero» es un enlace directo a WhatsApp con solo el código; no hay hoja ni «Preguntar por WhatsApp».
+  abre(0);
+  assert.equal(f[".ficha-quiero"].href, "https://wa.me/524445437754?text=Quiero%20producto%20ED-5");
+  abre(1);
+  assert.equal(f[".ficha-quiero"].href, "https://wa.me/524445437754?text=Quiero%20producto%20ED-6");   // se actualiza con la pieza abierta
+  assert.equal(f[".piece-dialog"].open, true);
+  // Medición (#651): abrir manda ficha_abierta y tocar «Lo quiero» solo lo_quiero; nada de apartar_*, preguntar ni whatsapp_abierto.
+  eventos.length = 0;
   abre(0);
   f[".ficha-quiero"].listeners.click();
-  assert.equal(f[".ficha-hoja"].hidden, false);
-  assert.equal(f[".piece-dialog-scroll"].inert, true);
-  assert.equal(ficha.ops[0].focused, true);
-  const texto = (op) => decodeURIComponent(ficha.ops[op].href.split("text=")[1]);
-  assert.match(ficha.ops[0].href, /^https:\/\/wa\.me\/524445437754\?text=/);
-  assert.equal(texto(0), "Hola, quiero apartar *Chamarra talla L* (ED-5) de $300. Dejo $100 de apartado y paso a recogerla a Jardín Hidalgo 129.");
-  assert.match(texto(1), /^Hola, quiero apartar \*Chamarra talla L\* \(ED-5\) de \$300\. Dejo \$100 de apartado para el envío del viernes \d+ de \w+ \(gratis desde \$1,000; si no, \$99\)\. ¿Me pasan los datos para transferir\?$/);
-  assert.equal(texto(2), "Hola, tengo una pregunta sobre *Chamarra talla L* (ED-5) de $300.");
-  f[".piece-dialog"].listeners.cancel({ preventDefault() {} });
-  assert.equal(f[".ficha-hoja"].hidden, true);
-  assert.equal(f[".piece-dialog-scroll"].inert, false);
-  assert.equal(f[".ficha-quiero"].focused, true);
-  assert.equal(f[".piece-dialog"].open, true);
+  assert.deepEqual(eventos, ["ficha_abierta", "lo_quiero"]);
+  f[".piece-dialog"].listeners.cancel({ preventDefault() {} });   // Esc cierra la ficha
+  assert.equal(f[".piece-dialog"].open, false);
+  abre(0);
   // Zoom: doble toque acerca a 2.5×, otro doble toque vuelve a 1×, cerrar reinicia.
   const foto = f[".piece-dialog-photo"];
   const toque = (id, t, x, y) => { const e = { pointerId: id, clientX: x, clientY: y, timeStamp: t, target: { closest: () => null } }; foto.listeners.pointerdown(e); foto.listeners.pointerup({ ...e, type: "pointerup" }); };

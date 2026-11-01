@@ -295,8 +295,8 @@ $('salir').addEventListener('click', () => accion($('salir'), async () => {
   await sdk.signOut(auth);
 }));
 
-// El catálogo es público: arranca aunque el monedero no esté disponible. Invita a entrar solo si el formulario está a la vista.
-iniciarCatalogo({ sinSesion: () => !$('acceso').hidden });
+// El catálogo es público: arranca aunque el monedero no esté disponible.
+iniciarCatalogo();
 
 try {
   const r = await fetch('/api/portal/config', { cache:'no-store' });

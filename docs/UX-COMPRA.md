@@ -171,17 +171,11 @@ Una sola ficha, usada en cuatro lugares: el visor del sitio, el catálogo del po
 │ ┌──────────────────────────────┐ │  Barra fija abajo mientras la ficha está abierta
 │ │ $150   [    Lo quiero     ]  │ │  Botón rojo 56 px; precio a la izquierda
 │ └──────────────────────────────┘ │
-│   Preguntar por WhatsApp · Compartir │  Secundarios, texto 16 px, 44 px de alto
+│            Compartir              │  Secundario, texto 16 px, 44 px de alto
 └──────────────────────────────────┘
 ```
 
-**Qué pasa al tocar «Lo quiero».** Se abre una hoja con tres opciones grandes (56 px cada una), en este orden:
-
-1. **Apartarla y recogerla en tienda** → WhatsApp con: «Hola, quiero apartar *Sudadera Nike talla M* (ED-001850) de $150. Dejo $100 de apartado y paso a recogerla a Jardín Hidalgo 129.»
-2. **Apartarla con envío** → «…de $150. Dejo $100 de apartado para el envío del viernes 7 (gratis desde $1,000; si no, $99). ¿Me pasan los datos para transferir?»
-3. **Solo preguntar algo** → «Hola, tengo una pregunta sobre *Sudadera Nike talla M* (ED-001850) de $150.»
-
-En la fase «Ahora» las tres van a WhatsApp (sin API nueva). En la fase «Después», la 1 y la 2 **crean el apartado** en D1 desde el portal y piden el pago; WhatsApp queda para la 3 y para quien elija **continuar como invitado** (D5, 31/10): antes de mandarlo a WhatsApp, una línea le dice lo que gana registrándose (sección 4.1).
+**Qué pasa al tocar «Lo quiero».** Abre WhatsApp con `Quiero producto ED-…` (enlace `wa.me/524445437754?text=Quiero%20producto%20ED-001850`, con el código de la pieza abierta). Decisión de Isaac 1/11: una sola acción, sin opciones; el equipo pregunta recoger o envío en el chat. No hay hoja de opciones ni «Preguntar por WhatsApp» en la ficha (el botón rojo ya es WhatsApp). Las menciones a la hoja en 4.1 (S3, S4) y en T6 quedan sin efecto hasta que la fase «Después» rediseñe ese paso.
 
 **Zoom.** Doble toque alterna 1× / 2.5×; pellizco escala entre 1× y 4×; arrastrar mueve la foto acercada; al cerrar vuelve a 1×. Sin librería: `pointer events` + `transform`, unas 60 líneas. Al pasar de 1×, la `<img>` cambia a la foto original (`/api/catalogo/foto/`, que ya se sirve a tamaño completo) si estaba mostrando el recorte. `touch-action: none` dentro de la foto para que el gesto no se lo quede el navegador (mismo truco que los stickers de la portada, #537).
 
@@ -262,8 +256,7 @@ Validación de la fase: `npm test`, `npm run typecheck`, `python tools/validate_
 | --- | --- | --- | --- |
 | Catálogo visto (sitio o portal) | evento `catalogo` (A6) | Desconocida | — |
 | Ficha abierta | `ficha_abierta` + código | Desconocida | ≥ 25 % de quienes ven el catálogo |
-| «Lo quiero» tocado | `lo_quiero` + opción | Desconocida | ≥ 10 % de las fichas abiertas |
-| WhatsApp abierto con pieza | `whatsapp_abierto` | Desconocida | — |
+| «Lo quiero» tocado (abre WhatsApp) | `lo_quiero` | Desconocida | ≥ 10 % de las fichas abiertas |
 | Apartado registrado | `pedidos` en D1 (ya existe) | Se puede sacar hoy de `/pedidos` | ≥ 30 % de los «Lo quiero» con apartar |
 | Venta cerrada con pedido | `ventas.pedido_id` (ya existe) | Se puede sacar hoy | ≥ 70 % de los apartados (el resto vence) |
 
@@ -271,7 +264,7 @@ Las dos últimas filas ya se pueden medir **hoy**, antes de tocar nada: cuántos
 
 ### 6.1 Cómo consultar los eventos (A6, Issue #651)
 
-Los eventos de la ficha se guardan en Workers Analytics Engine, dataset `el_dolaron_eventos` (el sandbox usa `el_dolaron_eventos_sandbox`), con el binding `EVENTOS`. El dataset se crea solo con la primera escritura tras el deploy. Cada punto lleva `blob1` = evento, `blob2` = código de pieza, `blob3` = origen (`sitio` o `portal`); nada de IP, agente de usuario, cookies ni datos de personas. Eventos: `ficha_abierta`, `lo_quiero`, `apartar_recoger`, `apartar_envio`, `preguntar`, `whatsapp_abierto`, `compartir`. El evento `catalogo` de la tabla de arriba no se mide todavía.
+Los eventos de la ficha se guardan en Workers Analytics Engine, dataset `el_dolaron_eventos` (el sandbox usa `el_dolaron_eventos_sandbox`), con el binding `EVENTOS`. El dataset se crea solo con la primera escritura tras el deploy. Cada punto lleva `blob1` = evento, `blob2` = código de pieza, `blob3` = origen (`sitio` o `portal`); nada de IP, agente de usuario, cookies ni datos de personas. Eventos que manda el cliente desde el 1/11: `ficha_abierta`, `lo_quiero` (abre WhatsApp) y `compartir`. El servidor sigue aceptando también `apartar_recoger`, `apartar_envio`, `preguntar` y `whatsapp_abierto` por compatibilidad; ya no se mandan. El evento `catalogo` de la tabla de arriba no se mide todavía.
 
 Se consulta con la [SQL API de Analytics Engine](https://developers.cloudflare.com/analytics/analytics-engine/sql-api/) (`POST https://api.cloudflare.com/client/v4/accounts/<ACCOUNT_ID>/analytics_engine/sql`, el SQL va en el cuerpo). Necesita un token de API con permiso **Account Analytics: Read**, que crea Isaac en el panel de Cloudflare; no se guarda en el repositorio.
 
