@@ -156,7 +156,7 @@ h2 { font-family: var(--display); font-variation-settings: var(--display-axes); 
 .wanted-grid { list-style: none; margin: 40px 0 0; padding: 0; display: flex; flex-wrap: wrap; justify-content: center; gap: 36px 32px; }
 .wanted-grid li { display: flex; flex: 0 0 calc((100% - 64px) / 3); }
 .wanted-item { display: flex; flex-direction: column; flex: 1; min-width: 0; background: var(--white); border: 2px solid var(--navy); box-shadow: 4px 4px 0 var(--navy); }
-/* La foto es un botón (abre el visor grande); el chip «Ver foto» avisa que se puede tocar. */
+/* Toda la tarjeta abre la ficha (catalogo.js); la foto es solo imagen. */
 .wanted-photo { position: relative; display: block; width: 100%; aspect-ratio: 4 / 5; padding: 0; overflow: hidden; border: 0; border-bottom: 2px solid var(--navy); background: var(--mist); cursor: pointer; }
 .wanted-photo img { width: 100%; height: 100%; object-fit: cover; }
 .wanted-photo.con-recorte { padding: 8%; }
@@ -174,6 +174,7 @@ h2 { font-family: var(--display); font-variation-settings: var(--display-axes); 
 .wanted-was { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 12px; color: var(--navy); font-family: "Archivo", sans-serif; font-size: 15px; font-weight: 600; line-height: 1.3; }
 .wanted-was s { color: var(--red-text); }
 .wanted-was b { font-weight: 800; }
+.wanted-item { cursor: pointer; }
 .wanted-ask { align-self: flex-start; min-height: 52px; margin-top: 18px; padding: 8px 18px; gap: 8px; font-size: 15px; }
 .wanted-hint { display: none; }
 .wanted-grid:focus-visible { outline: 3px solid var(--navy); outline-offset: -3px; }
@@ -193,21 +194,24 @@ h2 { font-family: var(--display); font-variation-settings: var(--display-axes); 
 .chip[aria-pressed="true"]::before { content: "\2713 "; }
 .catalog-status { margin-top: 22px; min-height: 26px; font-size: 15px; font-weight: 700; }
 .catalog-grid { list-style: none; margin: 18px 0 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(214px, 1fr)); gap: 34px 26px; }
-.piece { position: relative; display: flex; flex-direction: column; overflow: hidden; background: var(--white); border: 2px solid var(--navy); box-shadow: 4px 4px 0 var(--navy); transition: translate 150ms ease, box-shadow 150ms ease; }
+.piece { position: relative; cursor: pointer; display: flex; flex-direction: column; overflow: hidden; background: var(--white); border: 2px solid var(--navy); box-shadow: 4px 4px 0 var(--navy); transition: translate 150ms ease, box-shadow 150ms ease; }
 .piece-photo { position: relative; display: block; width: 100%; padding: 0; border: 0; border-bottom: 2px solid var(--navy); aspect-ratio: 4 / 5; overflow: hidden; background: #F1F1EF; cursor: pointer; }
 .piece-photo img { width: 100%; height: 100%; object-fit: cover; }
 .piece-photo.con-recorte { padding: 8%; background: #F4F5F8; }
 .piece-photo.con-recorte img { object-fit: contain; filter: drop-shadow(0 6px 6px rgb(22 54 107 / .18)); }
-.piece-zoom { position: absolute; right: 6px; bottom: 6px; padding: 3px 7px 2px; border: 1.5px solid var(--navy); background: rgb(255 255 255 / .92); color: var(--navy); font: 800 11px/1.1 "Archivo", sans-serif; letter-spacing: .04em; text-transform: uppercase; pointer-events: none; }
 .piece-body { display: flex; flex-direction: column; flex: 1; gap: 2px; padding: 12px 14px 14px; }
 .piece h3 { font-size: 16px; font-weight: 700; line-height: 1.3; overflow-wrap: anywhere; }
 .piece-brand { font-size: 13px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; opacity: .8; }
 .piece-size { font-size: 14px; font-weight: 800; }
 .piece-price { align-self: flex-start; margin-top: auto; padding-top: 8px; font-family: "Anton", sans-serif; font-size: 30px; line-height: 1.15; }
-/* Objetivo táctil de 44 px (NN/g, WCAG 2.5.8): antes era una línea de texto de 14 px. */
-.piece-link { min-height: 46px; margin-top: 12px; padding: 6px 10px; gap: 8px; font-size: 14px; box-shadow: 3px 3px 0 var(--navy); }
+/* «Disponible» y «Lo quiero» de las dos listas (Issue #648). El verde es el de .ficha-disp. */
+.piece-disp { margin-top: 2px; color: #17703A; font-size: 13px; font-weight: 800; line-height: 1.3; }
+.piece-disp::before { content: "● " / ""; }
+/* Objetivo táctil de 44 px (NN/g, WCAG 2.5.8) o más; el botón siempre abre la ficha. */
+.button.piece-quiero { align-self: stretch; min-height: 48px; margin-top: 12px; padding: 6px 12px; background: var(--red); color: var(--white); font-size: 16px; box-shadow: 3px 3px 0 var(--navy); cursor: pointer; }
 .piece-price s { margin-left: 8px; color: var(--red-text); font-family: "Archivo", sans-serif; font-size: 14px; font-weight: 700; }
-.piece-ask { min-height: 46px; margin-top: 16px; padding: 6px 12px; gap: 8px; font-size: 14px; }
+/* El sello de «Los más buscados» reducido para la tarjeta chica. */
+.piece-photo .wanted-stamp { top: 8px; left: 6px; padding: 5px 8px 3px; font-size: 16px; }
 .catalog-more { margin: 40px auto 0; display: flex; }
 .catalog-fallback { max-width: 580px; margin-top: 28px; padding: 28px; background: var(--white); border: 2px solid var(--navy); box-shadow: 4px 4px 0 var(--navy); }
 .catalog-fallback h3 { font-family: var(--display); font-variation-settings: var(--display-axes); font-weight: 900; font-size: 26px; line-height: 1.15; }
@@ -393,7 +397,6 @@ dd { margin: 0; line-height: 1.5; }
   .sticky-bar .button { min-height: 50px; padding-inline: 12px; box-shadow: 3px 3px 0 var(--navy); }
   body:has(.sticky-bar) { padding-bottom: 84px; }
   body:has(dialog[open]) .sticky-bar { display: none; }
-  .piece-link { font-size: 13px; }
   .piece h3 { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
   .header { min-height: 84px; }
   .brand { width: 150px; }
@@ -405,15 +408,12 @@ dd { margin: 0; line-height: 1.5; }
   .wanted-hint { display: block; margin-top: 18px; font-size: 14px; font-weight: 800; }
   .wanted-grid { flex-wrap: nowrap; justify-content: flex-start; gap: 18px; margin: 4px -20px 0; padding: 14px 20px 12px; overflow-x: auto; scroll-snap-type: x mandatory; scroll-padding-inline: 20px; overscroll-behavior-x: contain; }
   .wanted-grid li { flex: 0 0 min(80vw, 330px); scroll-snap-align: start; }
-  .wanted-ask { align-self: stretch; }
   .catalog-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 26px 14px; }
   .piece-body { padding: 10px 10px 12px; }
   .piece h3 { font-size: 14px; }
   .piece-price { font-size: 24px; }
   .piece-price s { display: block; margin-left: 0; font-size: 12px; }
-  .piece-link { font-size: 12px; gap: 6px; padding-inline: 8px 6px; }
-  .piece-link .wa-logo { width: 24px; height: 24px; }
-  .button.piece-link .wa-logo svg { width: 15px; height: 15px; }
+  .button.piece-quiero { font-size: 15px; }
   .chips-wrap { margin-inline: -20px; -webkit-mask-image: linear-gradient(90deg, #000 0, #000 calc(100% - 38px), transparent 100%); mask-image: linear-gradient(90deg, #000 0, #000 calc(100% - 38px), transparent 100%); }
   .chips { flex-wrap: nowrap; overflow-x: auto; padding: 0 38px 6px 20px; scrollbar-width: none; }
   .chip { flex-shrink: 0; font-size: 14px; padding-inline: 10px; }

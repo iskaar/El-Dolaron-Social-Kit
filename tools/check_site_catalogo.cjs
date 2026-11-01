@@ -76,7 +76,7 @@ function pagina(fetcher, extra = {}) {
   root.querySelectorAll = (k) => (k === ".ficha-op" ? ops : []);
   const relojes = [];
   vm.runInNewContext(fuente, {
-    document: { querySelector: () => null, getElementById: (id) => (id === "catalogo" ? root : null), createElement: () => new Nodo(), ...extra.document },
+    document: { querySelector: () => null, getElementById: (id) => (id === "catalogo" ? root : id === "buscados" && extra.buscados ? extra.buscados : null), createElement: () => new Nodo(), ...extra.document },
     location: { search: extra.search || "" }, Image: extra.Image || class extends Nodo {}, matchMedia: extra.matchMedia, fetch: fetcher, ...extra.contexto, AbortController, URL, URLSearchParams, Intl, Number, String, encodeURIComponent,
     setTimeout: (fn) => relojes.push(fn), clearTimeout: () => {},
   });
@@ -117,10 +117,11 @@ const tick = () => new Promise((r) => setImmediate(r));
   assert.ok(!p.textos()[1].some((t) => /Talla/.test(t)));                         // sin talla, sin etiqueta vacía
 
   // Visor de foto completa: abre el diálogo, enfoca Cerrar y al cerrar devuelve el foco a la foto.
-  const fotoBtn = p.partes[".catalog-grid"].children[0].children[0];
-  assert.ok(fotoBtn.classes.has("con-recorte"));
-  assert.match(fotoBtn.children[0].src, /recorte/);
-  fotoBtn.listeners.click();
+  const tarjeta1 = p.partes[".catalog-grid"].children[0];
+  const fotoBtn = tarjeta1.children[1].children.at(-1);   // el foco vuelve al botón «Lo quiero»
+  assert.ok(tarjeta1.children[0].classes.has("con-recorte"));
+  assert.match(tarjeta1.children[0].children[0].src, /recorte/);
+  tarjeta1.listeners.click();
   assert.equal(p.partes[".piece-dialog"].open, true);
   assert.equal(p.partes[".piece-dialog-title"].textContent, "Pieza 1");
   assert.equal(p.partes[".piece-dialog-meta"].textContent, "Levis · Talla M · ED-1");
@@ -140,9 +141,10 @@ const tick = () => new Promise((r) => setImmediate(r));
     Image: class extends Nodo { decode() { return Promise.resolve(); } },
   });
   await tick();
-  const morphBtn = morph.partes[".catalog-grid"].children[0].children[0];
-  const morphImg = morphBtn.children[0];
-  morphBtn.listeners.click();
+  const morphLi = morph.partes[".catalog-grid"].children[0];
+  const morphBtn = morphLi.children[1].children.at(-1);
+  const morphImg = morphLi.children[0].children[0];
+  morphLi.listeners.click();
   assert.equal(morphImg.style.viewTransitionName, "pieza-foto");   // única en la captura «antes»
   await tick();
   assert.equal(morph.partes[".piece-dialog"].open, true);
@@ -185,7 +187,7 @@ const tick = () => new Promise((r) => setImmediate(r));
   }), { contexto: { navigator: { clipboard: { writeText: async (t) => copiados.push(t) } } } });
   await tick();
   const f = ficha.partes;
-  const abre = (i) => f[".catalog-grid"].children[i].children[0].listeners.click();
+  const abre = (i) => f[".catalog-grid"].children[i].listeners.click();
   abre(0);
   assert.equal(f[".piece-dialog-img"].src, "https://x/f.jpg");   // la foto completa, no el recorte
   assert.equal(f[".piece-dialog-meta"].textContent, "Levis · Talla L · ED-5");
@@ -241,6 +243,69 @@ const tick = () => new Promise((r) => setImmediate(r));
   assert.deepEqual(copiados, ["https://eldolaron.com/?pieza=ED-5"]);
   assert.equal(f[".ficha-aviso"].textContent, "Enlace copiado");
 
+  // Tarjetas (Issue #648): «Lo quiero» abre la ficha, sin chip «Ver foto» ni WhatsApp directo, y el sello solo con `ultima: true`.
+  const solo = (nodo, clase) => nodo.children.filter((n) => String(n.className).split(" ").includes(clase));
+  const [conSello, sinSello] = f[".catalog-grid"].children;
+  for (const li of [conSello, sinSello]) {
+    const [foto, cuerpo] = li.children;
+    const quiero = cuerpo.children.at(-1);
+    assert.equal(quiero.textContent, "Lo quiero");
+    assert.equal(quiero.type, "button");
+    assert.match(quiero.className, /(^| )piece-quiero( |$)/);
+    assert.equal(quiero.href, undefined);                       // no es un enlace a WhatsApp
+    assert.equal(cuerpo.children.at(-2).textContent, "Disponible");
+    assert.equal(cuerpo.children.at(-2).className, "piece-disp");
+    assert.ok(![...foto.children, ...cuerpo.children].some((n) => /Ver foto/.test(n.textContent)));
+    assert.equal(typeof li.listeners.click, "function");         // toda la tarjeta abre la ficha
+  }
+  assert.equal(solo(conSello.children[0], "wanted-stamp").length, 1);
+  assert.equal(solo(conSello.children[0], "wanted-stamp")[0].textContent, "¡Última pieza!");
+  assert.equal(solo(sinSello.children[0], "wanted-stamp").length, 0);
+  assert.equal(conSello.children[1].children.at(-1).attrs["aria-label"], "Lo quiero: Chamarra, última pieza");
+  assert.equal(sinSello.children[1].children.at(-1).attrs["aria-label"], "Lo quiero: Taza");
+  // Clic en el botón abre la ficha de esa pieza; el foco vuelve al botón al cerrar.
+  f[".piece-dialog-close"].listeners.click();
+  const botonTaza = sinSello.children[1].children.at(-1);
+  sinSello.listeners.click();
+  assert.equal(f[".piece-dialog-title"].textContent, "Taza");
+  f[".piece-dialog-close"].listeners.click();
+  assert.equal(botonTaza.focused, true);
+
+  // «Los más buscados»: mismas reglas en la otra lista.
+  const lista = new Nodo();
+  const seccion = new Nodo();
+  seccion.hidden = true;
+  seccion.querySelector = () => lista;
+  const mas = pagina(async (url) => {
+    if (new URL(url).pathname.endsWith("/destacados")) {
+      return { ok: true, json: async () => ({ piezas: [
+        { nombre: "Maleta", codigo: "ED-11", precio: 50000, precio_lista: 90000, ultima: true, foto: "https://x/1.jpg" },
+        { nombre: "Bolsa", codigo: "ED-12", precio: 40000, ultima: false, foto: "https://x/2.jpg" },
+        { nombre: "Reloj", codigo: "ED-13", precio: 30000, ultima: false, foto: "https://x/3.jpg" },
+      ] }) };
+    }
+    return { ok: true, json: async () => ({ piezas: [], total: 0, hay_mas: false, siguiente: null }) };
+  }, { buscados: seccion, document: { createElement: () => new Nodo() } });
+  await tick(); await tick();
+  assert.equal(seccion.hidden, false);
+  const items = lista.children.map((li) => li.children[0]);
+  assert.equal(items.length, 3);
+  const sellos = items.map((it) => solo(it.children[0], "wanted-stamp").length);
+  assert.deepEqual(sellos, [1, 0, 0]);
+  for (const it of items) {
+    const quiero = it.children[1].children.at(-1);
+    assert.equal(quiero.textContent, "Lo quiero");
+    assert.equal(quiero.href, undefined);
+    assert.equal(it.children[1].children.at(-2).textContent, "Disponible");
+    assert.ok(!it.children[0].children.some((n) => /Ver foto/.test(n.textContent)));
+    assert.equal(typeof it.listeners.click, "function");
+  }
+  assert.equal(items[0].children[1].children.at(-1).attrs["aria-label"], "Lo quiero: Maleta, última pieza");
+  items[1].listeners.click();
+  assert.equal(mas.partes[".piece-dialog"].open, true);
+  assert.equal(mas.partes[".piece-dialog-title"].textContent, "Bolsa");
+  assert.equal(mas.partes[".piece-dialog-stamp"].hidden, true);
+
   // Búsqueda por ?q= y botón Limpiar.
   p.partes[".search-input"].value = "  nada  ";
   p.partes[".catalog-search"].listeners.submit({ preventDefault() {} });
@@ -272,5 +337,5 @@ const tick = () => new Promise((r) => setImmediate(r));
   assert.equal(lenta.partes[".catalog-search"].hidden, false);
   assert.equal(lenta.partes[".catalog-fallback"].hidden, true);
   assert.deepEqual(lenta.textos().map((t) => t[0]), ["Ya"]);
-  console.log("Validated catalog prices in centavos, WhatsApp text, development-only API override, search, photo viewer, retry, size and timeout");
+  console.log("Validated catalog prices in centavos, WhatsApp text, development-only API override, search, ficha, cards (Lo quiero button, stamp only with ultima), retry, size and timeout");
 })().catch((error) => { console.error(error); process.exitCode = 1; });
