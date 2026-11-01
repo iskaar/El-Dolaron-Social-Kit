@@ -56,19 +56,19 @@
     };
   }
   // Los mismos nombres sirven para la URL de la página y para la consulta a la API.
-  function paramsDeFiltros(f) {
+  function paramsDeFiltros(elegido) {
     const p = new URLSearchParams();
-    if (f.categoria) p.set("categoria", f.categoria);
-    if (f.talla) p.set("talla", f.talla);
-    if (f.banda >= 0) p.set(BANDAS[f.banda][0], String(BANDAS[f.banda][1]));
-    if (f.dias) p.set("dias", String(DIAS_NUEVO));
+    if (elegido.categoria) p.set("categoria", elegido.categoria);
+    if (elegido.talla) p.set("talla", elegido.talla);
+    if (elegido.banda >= 0) p.set(BANDAS[elegido.banda][0], String(BANDAS[elegido.banda][1]));
+    if (elegido.dias) p.set("dias", String(DIAS_NUEVO));
     return p;
   }
   // La búsqueda de la página con los filtros puestos: conserva ?pieza=, ?api= y cualquier otro parámetro.
-  function busquedaConFiltros(search, f) {
+  function busquedaConFiltros(search, elegido) {
     const u = new URLSearchParams(search);
     for (const k of PARAMS_FILTRO) u.delete(k);
-    for (const [k, v] of paramsDeFiltros(f)) u.set(k, v);
+    for (const [k, v] of paramsDeFiltros(elegido)) u.set(k, v);
     const s = u.toString();
     return s ? `?${s}` : "";
   }
@@ -253,7 +253,7 @@
   const botonCompartir = root.querySelector(".ficha-compartir");
   const avisoFicha = root.querySelector(".ficha-aviso");
   let actual = null;   // pieza que muestra la ficha
-  const f = filtrosDeUrl(location.search);   // categoría, talla, banda de precio y «Llegó esta semana» (Issue #672)
+  const elegido = filtrosDeUrl(location.search);   // categoría, talla, banda de precio y «Llegó esta semana» (Issue #672)
   let busqueda = "";
   let deseada = codigoDePieza(location.search);   // pieza a abrir tras la primera carga (#590)
   let focoAnterior = null;
@@ -496,34 +496,34 @@
   }
 
   // ---- Filtros (Issue #672): chips de categoría, de precio y «Llegó esta semana», más el menú de talla ----
-  const hayFiltros = () => Boolean(f.talla) || f.banda >= 0 || f.dias;
+  const hayFiltros = () => Boolean(elegido.talla) || elegido.banda >= 0 || elegido.dias;
   const chipsCategoria = [];   // [clave, chip]
   const chipsExtra = [];       // [() => ¿activo?, chip]
 
   function pintar() {
-    for (const [clave, chip] of chipsCategoria) chip.setAttribute("aria-pressed", String(clave === f.categoria));
+    for (const [clave, chip] of chipsCategoria) chip.setAttribute("aria-pressed", String(clave === elegido.categoria));
     for (const [activo, chip] of chipsExtra) chip.setAttribute("aria-pressed", String(activo()));
-    if (tallaSelect) tallaSelect.value = f.talla;
+    if (tallaSelect) tallaSelect.value = elegido.talla;
   }
   // Menú de tallas con las que hay en la categoría y búsqueda actuales; si la elegida ya no está, se conserva para no esconder el filtro.
   function pintarTallas(tallas) {
     if (!tallaSelect) return;
-    const lista = f.talla && !tallas.includes(f.talla) ? [f.talla, ...tallas] : tallas;
+    const lista = elegido.talla && !tallas.includes(elegido.talla) ? [elegido.talla, ...tallas] : tallas;
     tallaSelect.replaceChildren(...[["", "Todas las tallas"], ...lista.map((t) => [t, t])].map(([valor, texto]) => { const o = el("option", "", texto); o.value = valor; return o; }));
-    tallaSelect.value = f.talla;
+    tallaSelect.value = elegido.talla;
     if (tallaBox) tallaBox.hidden = lista.length === 0;
   }
   // Cada cambio de filtro vuelve a la página 1, queda en la URL (compartir y botón Atrás) y recarga; la búsqueda `q` no se toca.
   function aplicar(cambio) {
     cambio();
     if (typeof history !== "undefined" && typeof history.pushState === "function") {
-      const nueva = busquedaConFiltros(location.search, f);
+      const nueva = busquedaConFiltros(location.search, elegido);
       if (nueva !== location.search) history.pushState(null, "", `${location.pathname}${nueva}${location.hash}`);
     }
     pintar();
     cargar(true);
   }
-  if (typeof addEventListener === "function") addEventListener("popstate", () => { Object.assign(f, filtrosDeUrl(location.search)); pintar(); cargar(true); });
+  if (typeof addEventListener === "function") addEventListener("popstate", () => { Object.assign(elegido, filtrosDeUrl(location.search)); pintar(); cargar(true); });
 
   async function cargar(reiniciar) {
     if (controller) controller.abort();
@@ -536,7 +536,7 @@
     more.hidden = true;
     status.textContent = "Cargando piezas…";
     root.setAttribute("aria-busy", "true");
-    const params = paramsDeFiltros(f);
+    const params = paramsDeFiltros(elegido);
     if (pedida > 1) params.set("pagina", pedida);
     if (siguiente) params.set("despues", siguiente);
     if (busqueda) params.set("q", busqueda);
@@ -603,10 +603,10 @@
   for (const [clave, nombre] of CATEGORIAS) {
     const chip = el("button", "chip", nombre);
     chip.type = "button";
-    chip.setAttribute("aria-pressed", String(clave === f.categoria));
+    chip.setAttribute("aria-pressed", String(clave === elegido.categoria));
     chip.addEventListener("click", () => {
-      if (clave === f.categoria) return;
-      const cambiar = () => aplicar(() => { f.categoria = clave; f.talla = ""; });   // las tallas dependen de la categoría
+      if (clave === elegido.categoria) return;
+      const cambiar = () => aplicar(() => { elegido.categoria = clave; elegido.talla = ""; });   // las tallas dependen de la categoría
       if (conMorph) document.startViewTransition(cambiar); else cambiar();
     });
     chipsCategoria.push([clave, chip]);
@@ -621,9 +621,9 @@
     chipsExtra.push([activo, chip]);
     if (chipsFiltros) chipsFiltros.append(chip);
   }
-  chipFiltro("Llegó esta semana", () => f.dias, () => { f.dias = !f.dias; });
-  BANDAS.forEach(([, , rotulo], i) => chipFiltro(rotulo, () => f.banda === i, () => { f.banda = f.banda === i ? -1 : i; }));
-  if (tallaSelect) tallaSelect.addEventListener("change", () => aplicar(() => { f.talla = tallaSelect.value; }));
+  chipFiltro("Llegó esta semana", () => elegido.dias, () => { elegido.dias = !elegido.dias; });
+  BANDAS.forEach(([, , rotulo], i) => chipFiltro(rotulo, () => elegido.banda === i, () => { elegido.banda = elegido.banda === i ? -1 : i; }));
+  if (tallaSelect) tallaSelect.addEventListener("change", () => aplicar(() => { elegido.talla = tallaSelect.value; }));
   more.addEventListener("click", () => cargar(false));
   retry.addEventListener("click", () => cargar(true));
   if (deseada && searchInput) {   // la búsqueda del servidor ya incluye `codigo`

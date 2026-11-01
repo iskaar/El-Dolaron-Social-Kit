@@ -64,6 +64,9 @@ dialog::backdrop { background:#16366b99; }
 .chips { display:flex; gap:8px; overflow-x:auto; margin:14px -24px 0; padding:2px 24px 8px; scrollbar-width:thin; }
 .chip { flex:none; width:auto; min-height:44px; margin:0; padding:8px 14px; border:1px solid var(--azul); border-radius:999px; background:white; color:var(--azul); font-size:14px; white-space:nowrap; }
 .chip[aria-pressed=true] { background:var(--azul); color:white; }
+.catalogo-talla label { margin:14px 0 6px; }
+.catalogo-talla-select { width:100%; min-height:44px; padding:8px 12px; font:inherit; font-size:16px; border:1px solid #96a5bc; border-radius:6px; background:white; color:var(--azul); }
+.chips-filtros { margin-top:6px; }
 .catalogo-grid { list-style:none; padding:0; display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:12px; }
 .catalogo-grid li { margin:0; }
 .pieza { display:flex; flex-direction:column; justify-content:flex-start; width:100%; height:100%; min-height:0; margin:0; padding:0; border:1px solid var(--linea); border-radius:8px; overflow:hidden; background:white; color:var(--azul); text-align:left; font-weight:400; }

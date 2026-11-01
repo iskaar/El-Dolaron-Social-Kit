@@ -46,3 +46,31 @@ test('portal.html trae todo lo que catalogo-ficha.js busca y el catálogo ya no 
   const portal = readFileSync('public/portal.js', 'utf8');
   assert.doesNotMatch(portal.slice(portal.indexOf('async function cargarCuenta'), portal.indexOf('async function actualizarSaldo')), /iniciarCatalogo/);
 });
+
+// Filtros del catálogo (#672): la copia del portal debe comportarse igual que la del sitio.
+test('filtros: la URL y la consulta usan los mismos nombres y no pisan otros parámetros', () => {
+  assert.deepEqual(ficha.BANDAS.map(([k, v]) => `${k}=${v}`), ['precio_max=5000', 'precio_max=8000', 'precio_max=10000', 'precio_max=15000', 'precio_min=20000']);
+  assert.deepEqual(ficha.filtrosDeUrl(''), { categoria: '', talla: '', banda: -1, dias: false });
+  assert.deepEqual(ficha.filtrosDeUrl('?categoria=ropa&talla=%20Ni%C3%B1o%206%20a%C3%B1os%20/%20S&precio_max=8000&dias=7'), { categoria: 'ropa', talla: 'Niño 6 años / S', banda: 1, dias: true });
+  assert.deepEqual(ficha.filtrosDeUrl('?precio_min=20000'), { categoria: '', talla: '', banda: 4, dias: false });
+  assert.deepEqual(ficha.filtrosDeUrl(`?categoria=armas&precio_max=123&dias=99&talla=${'x'.repeat(40)}`), { categoria: '', talla: 'x'.repeat(30), banda: -1, dias: false });
+  assert.equal(ficha.paramsDeFiltros({ categoria: 'ropa', talla: 'M', banda: 4, dias: true }).toString(), 'categoria=ropa&talla=M&precio_min=20000&dias=7');
+  assert.equal(ficha.busquedaConFiltros('?pieza=ED-9&r=ABC&dias=7&precio_max=5000', { categoria: 'ropa', talla: '', banda: 4, dias: false }), '?pieza=ED-9&r=ABC&categoria=ropa&precio_min=20000');
+  assert.equal(ficha.busquedaConFiltros('?categoria=ropa&talla=M', { categoria: '', talla: '', banda: -1, dias: false }), '');
+});
+
+test('filtros: portal.html trae el contenedor de filtros dentro de #catalogo y el sitio y el portal comparten bandas y reglas', () => {
+  const html = readFileSync('public/portal.html', 'utf8');
+  const catalogo = html.slice(html.indexOf('id="catalogo"'), html.indexOf('id="monedero"'));
+  assert.match(catalogo, /class="catalogo-filtros"/);
+  assert.match(catalogo, /<label for="catalogo-talla">Talla<\/label>\s*<select id="catalogo-talla" class="catalogo-talla-select">/);
+  assert.match(catalogo, /class="chips chips-filtros" role="group" aria-label="Filtrar por precio y novedad"/);
+  const sitio = readFileSync('../site/public/catalogo.js', 'utf8');
+  const bloque = (src: string) => src.slice(src.indexOf('BANDAS = ['), src.indexOf('];', src.indexOf('BANDAS = [')) + 2).replace(/["']/g, "'").replace(/\s+/g, ' ');
+  assert.equal(bloque(readFileSync('public/catalogo-ficha.js', 'utf8')), bloque(sitio));
+  for (const regla of ['DIAS_NUEVO = 7', 'TALLA_MAX = 30']) {
+    assert.ok(sitio.includes(regla) && readFileSync('public/catalogo-ficha.js', 'utf8').includes(regla), regla);
+  }
+  const css = readFileSync('public/portal.css', 'utf8');
+  assert.match(css, /\.catalogo-talla-select \{[^}]*min-height:44px/);
+});
