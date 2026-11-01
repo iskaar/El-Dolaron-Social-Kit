@@ -34,6 +34,45 @@
     return /^ED-\d{1,10}$/i.test(valor) ? valor.toUpperCase() : "";
   }
 
+  // Filtros del catálogo (Issue #672). COPIA DELIBERADA en app/public/catalogo-ficha.js: cambia los dos lados.
+  // Bandas de precio en centavos: [parámetro de la API, valor, rótulo]. «Hasta» es inclusivo; «$200 o más» es precio_min.
+  const BANDAS = [
+    ["precio_max", 5000, "Hasta $50"], ["precio_max", 8000, "Hasta $80"], ["precio_max", 10000, "Hasta $100"],
+    ["precio_max", 15000, "Hasta $150"], ["precio_min", 20000, "$200 o más"],
+  ];
+  const DIAS_NUEVO = 7;   // «Llegó esta semana»
+  const TALLA_MAX = 30;   // mismo tope que la API
+  const PARAMS_FILTRO = ["categoria", "talla", "precio_min", "precio_max", "dias"];
+
+  // Estado de los filtros desde la URL (?categoria=&talla=&precio_max=&dias=); lo desconocido o malformado se ignora.
+  function filtrosDeUrl(search) {
+    const u = new URLSearchParams(search);
+    const categoria = u.get("categoria") || "";
+    return {
+      categoria: CATEGORIAS.some(([clave]) => clave === categoria) ? categoria : "",
+      talla: (u.get("talla") || "").trim().replace(/\s+/g, " ").slice(0, TALLA_MAX),
+      banda: BANDAS.findIndex(([k, v]) => u.get(k) === String(v)),   // -1 = ninguna
+      dias: u.get("dias") === String(DIAS_NUEVO),
+    };
+  }
+  // Los mismos nombres sirven para la URL de la página y para la consulta a la API.
+  function paramsDeFiltros(f) {
+    const p = new URLSearchParams();
+    if (f.categoria) p.set("categoria", f.categoria);
+    if (f.talla) p.set("talla", f.talla);
+    if (f.banda >= 0) p.set(BANDAS[f.banda][0], String(BANDAS[f.banda][1]));
+    if (f.dias) p.set("dias", String(DIAS_NUEVO));
+    return p;
+  }
+  // La búsqueda de la página con los filtros puestos: conserva ?pieza=, ?api= y cualquier otro parámetro.
+  function busquedaConFiltros(search, f) {
+    const u = new URLSearchParams(search);
+    for (const k of PARAMS_FILTRO) u.delete(k);
+    for (const [k, v] of paramsDeFiltros(f)) u.set(k, v);
+    const s = u.toString();
+    return s ? `?${s}` : "";
+  }
+
   // Apartado y envío (Issue #645). Copia de app/public/venta.js (ANTICIPO_ENVIO, ENVIO_COSTO, ENVIO_GRATIS_DESDE):
   // el sitio no importa de app/. Si allá cambian, cámbialas aquí y en los textos de la ficha.
   const APARTADO = 100_00;
@@ -62,7 +101,7 @@
   // «Lo quiero» (docs/UX-COMPRA.md §4): un solo mensaje corto; el equipo pregunta recoger o envío en el chat.
   const enlaceLoQuiero = (pieza) => `${WHATSAPP}?text=${encodeURIComponent(`Quiero producto ${pieza.codigo}`)}`;
 
-  if (typeof module !== "undefined") module.exports = { precio, apiBase, codigoDePieza, viernesDeEnvio, fechaCorta, lineaApartado, enlaceLoQuiero };
+  if (typeof module !== "undefined") module.exports = { precio, apiBase, codigoDePieza, viernesDeEnvio, fechaCorta, lineaApartado, enlaceLoQuiero, BANDAS, filtrosDeUrl, paramsDeFiltros, busquedaConFiltros };
 
   // Los precios con su precio de lista tachado, igual en tarjetas y visor.
   function pintarPrecio(nodo, pieza) {
@@ -194,6 +233,10 @@
   const searchForm = root.querySelector(".catalog-search");
   const searchInput = root.querySelector(".search-input");
   const clearBtn = root.querySelector(".catalog-clear");
+  const filtros = root.querySelector(".catalog-filters");
+  const tallaBox = root.querySelector(".filter-size");
+  const tallaSelect = root.querySelector(".filter-size-select");
+  const chipsFiltros = root.querySelector(".chips-filters");
   const dialog = root.querySelector(".piece-dialog");
   const dialogClose = root.querySelector(".piece-dialog-close");
   const dialogImg = root.querySelector(".piece-dialog-img");
@@ -210,7 +253,7 @@
   const botonCompartir = root.querySelector(".ficha-compartir");
   const avisoFicha = root.querySelector(".ficha-aviso");
   let actual = null;   // pieza que muestra la ficha
-  let categoria = "";
+  const f = filtrosDeUrl(location.search);   // categoría, talla, banda de precio y «Llegó esta semana» (Issue #672)
   let busqueda = "";
   let deseada = codigoDePieza(location.search);   // pieza a abrir tras la primera carga (#590)
   let focoAnterior = null;
@@ -452,6 +495,36 @@
     return li;
   }
 
+  // ---- Filtros (Issue #672): chips de categoría, de precio y «Llegó esta semana», más el menú de talla ----
+  const hayFiltros = () => Boolean(f.talla) || f.banda >= 0 || f.dias;
+  const chipsCategoria = [];   // [clave, chip]
+  const chipsExtra = [];       // [() => ¿activo?, chip]
+
+  function pintar() {
+    for (const [clave, chip] of chipsCategoria) chip.setAttribute("aria-pressed", String(clave === f.categoria));
+    for (const [activo, chip] of chipsExtra) chip.setAttribute("aria-pressed", String(activo()));
+    if (tallaSelect) tallaSelect.value = f.talla;
+  }
+  // Menú de tallas con las que hay en la categoría y búsqueda actuales; si la elegida ya no está, se conserva para no esconder el filtro.
+  function pintarTallas(tallas) {
+    if (!tallaSelect) return;
+    const lista = f.talla && !tallas.includes(f.talla) ? [f.talla, ...tallas] : tallas;
+    tallaSelect.replaceChildren(...[["", "Todas las tallas"], ...lista.map((t) => [t, t])].map(([valor, texto]) => { const o = el("option", "", texto); o.value = valor; return o; }));
+    tallaSelect.value = f.talla;
+    if (tallaBox) tallaBox.hidden = lista.length === 0;
+  }
+  // Cada cambio de filtro vuelve a la página 1, queda en la URL (compartir y botón Atrás) y recarga; la búsqueda `q` no se toca.
+  function aplicar(cambio) {
+    cambio();
+    if (typeof history !== "undefined" && typeof history.pushState === "function") {
+      const nueva = busquedaConFiltros(location.search, f);
+      if (nueva !== location.search) history.pushState(null, "", `${location.pathname}${nueva}${location.hash}`);
+    }
+    pintar();
+    cargar(true);
+  }
+  if (typeof addEventListener === "function") addEventListener("popstate", () => { Object.assign(f, filtrosDeUrl(location.search)); pintar(); cargar(true); });
+
   async function cargar(reiniciar) {
     if (controller) controller.abort();
     const mio = (controller = new AbortController());
@@ -463,11 +536,11 @@
     more.hidden = true;
     status.textContent = "Cargando piezas…";
     root.setAttribute("aria-busy", "true");
-    const params = new URLSearchParams();
+    const params = paramsDeFiltros(f);
     if (pedida > 1) params.set("pagina", pedida);
     if (siguiente) params.set("despues", siguiente);
-    if (categoria) params.set("categoria", categoria);
     if (busqueda) params.set("q", busqueda);
+    if (reiniciar) params.set("tallas", "1");   // el menú de tallas se arma con la primera página de cada búsqueda
     try {
       const response = await fetch(`${base}/api/catalogo?${params}`, { signal: mio.signal, headers: { accept: "application/json" } });
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
@@ -478,6 +551,8 @@
       proxima = pedida + 1;
       chips.hidden = false;
       if (searchForm) searchForm.hidden = false;
+      // Una API anterior a #672 no manda `tallas` ni filtra: sin ella no se muestran filtros que no hacen nada.
+      if (reiniciar && filtros) { filtros.hidden = !Array.isArray(data.tallas); if (!filtros.hidden) pintarTallas(data.tallas); }
       siguiente = data.siguiente || null;
       grid.append(...data.piezas.map(tarjeta));
       if (deseada) {   // Issue #590: solo coincidencia exacta; si no está, queda el mensaje de búsqueda vacía
@@ -489,8 +564,10 @@
       status.textContent = grid.children.length
         ? `${grid.children.length} de ${Number(data.total) || grid.children.length} piezas`
         : busqueda
-          ? `No encontramos piezas para «${busqueda}». Prueba otra palabra o pregunta por WhatsApp.`
-          : "Por ahora no hay piezas en esta categoría. Prueba otra o pregunta por WhatsApp.";
+          ? `No encontramos piezas para «${busqueda}»${hayFiltros() ? " con esos filtros" : ""}. Prueba otra palabra o pregunta por WhatsApp.`
+          : hayFiltros()
+            ? "No hay piezas con esos filtros. Quita alguno para ver más."
+            : "Por ahora no hay piezas en esta categoría. Prueba otra o pregunta por WhatsApp.";
     } catch (error) {
       if (mio.signal.aborted && mio.signal.reason !== TIEMPO) return;   // otra búsqueda la reemplazó
       status.textContent = "";
@@ -526,18 +603,27 @@
   for (const [clave, nombre] of CATEGORIAS) {
     const chip = el("button", "chip", nombre);
     chip.type = "button";
-    chip.setAttribute("aria-pressed", String(clave === categoria));
+    chip.setAttribute("aria-pressed", String(clave === f.categoria));
     chip.addEventListener("click", () => {
-      if (clave === categoria) return;
-      categoria = clave;
-      const cambiar = () => {
-        for (const other of chips.children) other.setAttribute("aria-pressed", String(other === chip));
-        cargar(true);
-      };
+      if (clave === f.categoria) return;
+      const cambiar = () => aplicar(() => { f.categoria = clave; f.talla = ""; });   // las tallas dependen de la categoría
       if (conMorph) document.startViewTransition(cambiar); else cambiar();
     });
+    chipsCategoria.push([clave, chip]);
     chips.append(chip);
   }
+  // Un filtro de precio a la vez; tocar el activo lo quita. «Llegó esta semana» se combina con todo.
+  function chipFiltro(texto, activo, cambio) {
+    const chip = el("button", "chip", texto);
+    chip.type = "button";
+    chip.setAttribute("aria-pressed", String(activo()));
+    chip.addEventListener("click", () => aplicar(cambio));
+    chipsExtra.push([activo, chip]);
+    if (chipsFiltros) chipsFiltros.append(chip);
+  }
+  chipFiltro("Llegó esta semana", () => f.dias, () => { f.dias = !f.dias; });
+  BANDAS.forEach(([, , rotulo], i) => chipFiltro(rotulo, () => f.banda === i, () => { f.banda = f.banda === i ? -1 : i; }));
+  if (tallaSelect) tallaSelect.addEventListener("change", () => aplicar(() => { f.talla = tallaSelect.value; }));
   more.addEventListener("click", () => cargar(false));
   retry.addEventListener("click", () => cargar(true));
   if (deseada && searchInput) {   // la búsqueda del servidor ya incluye `codigo`

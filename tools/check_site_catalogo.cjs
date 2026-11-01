@@ -1,6 +1,6 @@
 // Run: node tools/check_site_catalogo.cjs
 const assert = require("node:assert/strict");
-const { precio, apiBase, codigoDePieza, viernesDeEnvio, fechaCorta, lineaApartado, enlaceLoQuiero } = require("../site/public/catalogo.js");
+const { precio, apiBase, codigoDePieza, viernesDeEnvio, fechaCorta, lineaApartado, enlaceLoQuiero, BANDAS, filtrosDeUrl, paramsDeFiltros, busquedaConFiltros } = require("../site/public/catalogo.js");
 
 assert.equal(precio(15000), "$150");
 assert.equal(precio(24950), "$249.50");
@@ -29,6 +29,18 @@ assert.equal(lineaApartado({ precio: 5000 }, SABADO), "Se paga completa al apart
 const sudadera = { nombre: "Sudadera Nike", talla: "M", codigo: "ED-001850", precio: 15000 };
 assert.equal(enlaceLoQuiero(sudadera), "https://wa.me/524445437754?text=Quiero%20producto%20ED-001850");   // solo el código, nada más
 
+// Filtros (Issue #672): la URL y la consulta a la API usan los mismos nombres; lo malformado se ignora y ?pieza=/?api= se conservan.
+assert.deepEqual(BANDAS.map(([k, v]) => `${k}=${v}`), ["precio_max=5000", "precio_max=8000", "precio_max=10000", "precio_max=15000", "precio_min=20000"]);
+assert.deepEqual(filtrosDeUrl(""), { categoria: "", talla: "", banda: -1, dias: false });
+assert.deepEqual(filtrosDeUrl("?categoria=ropa&talla=%20Ni%C3%B1o%206%20a%C3%B1os%20/%20S&precio_max=8000&dias=7"), { categoria: "ropa", talla: "Niño 6 años / S", banda: 1, dias: true });
+assert.deepEqual(filtrosDeUrl("?precio_min=20000"), { categoria: "", talla: "", banda: 4, dias: false });
+assert.deepEqual(filtrosDeUrl("?categoria=armas&precio_max=123&dias=99&talla=" + "x".repeat(40)), { categoria: "", talla: "x".repeat(30), banda: -1, dias: false });
+assert.equal(paramsDeFiltros({ categoria: "ropa", talla: "M", banda: 4, dias: true }).toString(), "categoria=ropa&talla=M&precio_min=20000&dias=7");
+assert.equal(paramsDeFiltros({ categoria: "", talla: "", banda: -1, dias: false }).toString(), "");
+assert.equal(busquedaConFiltros("?pieza=ED-9&api=http%3A%2F%2F127.0.0.1%3A8787&dias=7&precio_max=5000", { categoria: "ropa", talla: "", banda: 4, dias: false }),
+  "?pieza=ED-9&api=http%3A%2F%2F127.0.0.1%3A8787&categoria=ropa&precio_min=20000");
+assert.equal(busquedaConFiltros("?categoria=ropa&talla=M", { categoria: "", talla: "", banda: -1, dias: false }), "");
+
 // Catálogo en una página falsa (Issue #241): reintento, talla, tiempo agotado y botón Reintentar.
 const { readFileSync } = require("node:fs");
 const { join } = require("node:path");
@@ -55,6 +67,7 @@ function pagina(fetcher, extra = {}) {
     ".piece-dialog-img", ".piece-dialog-title", ".piece-dialog-meta", ".piece-dialog-price",
     ".piece-dialog-photo", ".piece-dialog-stamp", ".ficha-zoom", ".ficha-pista", ".ficha-compra", ".ficha-barprecio", ".ficha-quiero",
     ".ficha-compartir", ".ficha-aviso", ".piece-dialog-head", ".piece-dialog-scroll", ".piece-dialog-bar",
+    ".catalog-filters", ".filter-size", ".filter-size-select", ".chips-filters",
   ];
   const partes = Object.fromEntries(selectores.map((k) => [k, new Nodo()]));
   partes[".catalog-clear"].hidden = true;
@@ -322,5 +335,82 @@ const tick = () => new Promise((r) => setImmediate(r));
   assert.equal(lenta.partes[".catalog-search"].hidden, false);
   assert.equal(lenta.partes[".catalog-fallback"].hidden, true);
   assert.deepEqual(lenta.textos().map((t) => t[0]), ["Ya"]);
+  // Filtros (Issue #672): chips de precio y novedad, menú de talla, URL compartible y búsqueda `q` intacta.
+  const consultas2 = [];
+  const empujadas = [];
+  const sitio = { search: "?api=http%3A%2F%2F127.0.0.1%3A8787&talla=XL&dias=7", pathname: "/", hash: "#catalogo" };
+  const filtrada = pagina(async (url) => {
+    const u = new URL(url);
+    consultas2.push(u.searchParams);
+    const solo = u.searchParams.get("q") === "ninguna" || u.searchParams.get("precio_min") === "99999";
+    return { ok: true, json: async () => ({ piezas: solo ? [] : [{ nombre: "Pieza", codigo: "ED-1", precio: 5000, foto: "https://x/1.jpg" }], total: solo ? 0 : 1, hay_mas: false, siguiente: null,
+      ...(u.searchParams.get("tallas") === "1" ? { tallas: ["S", "M", "L"] } : {}) }) };
+  }, {
+    contexto: { location: sitio, history: { pushState: (_, __, destino) => { empujadas.push(destino); sitio.search = destino.slice(destino.indexOf("?")).replace(/#.*/, ""); } } },
+  });
+  await tick();
+  const g = filtrada.partes;
+  assert.equal(consultas2[0].get("talla"), "XL");               // vienen de la URL
+  assert.equal(consultas2[0].get("dias"), "7");
+  assert.equal(consultas2[0].get("tallas"), "1");               // el menú se pide con la primera página
+  assert.equal(g[".catalog-filters"].hidden, false);
+  assert.deepEqual(g[".filter-size-select"].children.map((o) => o.value), ["", "XL", "S", "M", "L"]);   // la elegida se conserva aunque no venga
+  assert.equal(g[".filter-size-select"].value, "XL");
+  assert.equal(g[".filter-size"].hidden, false);
+  const rotulos = g[".chips-filters"].children.map((c) => c.textContent);
+  assert.deepEqual(rotulos, ["Llegó esta semana", "Hasta $50", "Hasta $80", "Hasta $100", "Hasta $150", "$200 o más"]);
+  assert.deepEqual(g[".chips-filters"].children.map((c) => c.attrs["aria-pressed"]), ["true", "false", "false", "false", "false", "false"]);
+  // Búsqueda y filtros se combinan; quitar un filtro no borra `q`.
+  g[".search-input"].value = "levis";
+  g[".catalog-search"].listeners.submit({ preventDefault() {} });
+  await tick();
+  assert.equal(consultas2.at(-1).get("q"), "levis");
+  const [llego, hasta50, , , , doscientos] = g[".chips-filters"].children;
+  hasta50.listeners.click(); await tick();
+  assert.equal(consultas2.at(-1).get("precio_max"), "5000");
+  assert.equal(consultas2.at(-1).get("q"), "levis");
+  assert.equal(consultas2.at(-1).get("despues"), null);          // vuelve a la primera página
+  assert.equal(hasta50.attrs["aria-pressed"], "true");
+  assert.match(empujadas.at(-1), /^\/\?api=.*&talla=XL&precio_max=5000&dias=7#catalogo$/);
+  doscientos.listeners.click(); await tick();                     // una banda a la vez
+  assert.equal(consultas2.at(-1).get("precio_max"), null);
+  assert.equal(consultas2.at(-1).get("precio_min"), "20000");
+  assert.equal(hasta50.attrs["aria-pressed"], "false");
+  doscientos.listeners.click(); await tick();                     // tocar la activa la quita
+  assert.equal(consultas2.at(-1).get("precio_min"), null);
+  llego.listeners.click(); await tick();
+  assert.equal(consultas2.at(-1).get("dias"), null);
+  assert.equal(consultas2.at(-1).get("q"), "levis");
+  g[".filter-size-select"].value = "M";
+  g[".filter-size-select"].listeners.change(); await tick();
+  assert.equal(consultas2.at(-1).get("talla"), "M");
+  assert.match(sitio.search, /talla=M/);
+  assert.match(sitio.search, /api=/);                             // lo demás de la URL se conserva
+  // Cambiar de categoría suelta la talla (las tallas dependen de la categoría) y conserva precio.
+  hasta50.listeners.click(); await tick();
+  g[".chips"].children[4].listeners.click(); await tick();        // «Hogar y cocina»
+  assert.equal(consultas2.at(-1).get("categoria"), "hogar");
+  assert.equal(consultas2.at(-1).get("talla"), null);
+  assert.equal(consultas2.at(-1).get("precio_max"), "5000");
+  // Sin resultados con filtros, el aviso lo dice.
+  assert.equal(g[".catalog-status"].textContent, "1 de 1 piezas");   // el total se anuncia en el aria-live
+  doscientos.listeners.click(); await tick();
+  assert.equal(consultas2.at(-1).get("precio_min"), "20000");
+  g[".search-input"].value = "ninguna";
+  g[".catalog-search"].listeners.submit({ preventDefault() {} });
+  await tick();
+  assert.match(g[".catalog-status"].textContent, /No encontramos piezas para «ninguna» con esos filtros/);
+  g[".search-input"].value = "";
+  g[".catalog-clear"].listeners.click(); await tick();
+  const sinPiezas = pagina(async (url) => ({ ok: true, json: async () => ({ piezas: [], total: 0, hay_mas: false, siguiente: null, tallas: [] }) }), { search: "?dias=7" });
+  await tick();
+  assert.equal(sinPiezas.partes[".catalog-status"].textContent, "No hay piezas con esos filtros. Quita alguno para ver más.");
+  assert.equal(sinPiezas.partes[".filter-size"].hidden, true);   // sin tallas, sin menú
+
+  // Una API anterior a #672 no manda `tallas`: los filtros no se muestran.
+  const vieja = pagina(async () => ({ ok: true, json: async () => ({ piezas: [{ nombre: "Pieza", codigo: "ED-1", precio: 5000 }], total: 1, hay_mas: false, siguiente: null }) }));
+  await tick();
+  assert.equal(vieja.partes[".catalog-filters"].hidden, true);
+
   console.log("Validated catalog prices in centavos, WhatsApp text, development-only API override, search, ficha, cards (Lo quiero button, stamp only with ultima), retry, size and timeout");
 })().catch((error) => { console.error(error); process.exitCode = 1; });
