@@ -326,3 +326,13 @@ test('la caja muestra el premio de referido en el cobro, con y sin red (los tres
   assert.match(caja, /cuerpo\.referido_liberado > 0 \? ` \$\{avisoReferido\(cuerpo\.referido_liberado\)\}\.`/);
   assert.match(caja, /Referido: \+\$\{dolares\(centavos\)\} para el cliente y para quien lo invitó/);
 });
+
+test('portal: el consentimiento SMS es texto (sin casilla) y el registro usa una sola casilla para bases y mayoría de edad (#656)', () => {
+  const html = readFileSync('public/portal.html', 'utf8');
+  const js = readFileSync('public/portal.js', 'utf8');
+  assert.equal(html.includes('consiente-sms') || html.includes('mayor-edad'), false);
+  assert.equal(html.match(/<input id="acepta" type="checkbox" required>/g)?.length, 1);
+  assert.match(html, /Al continuar aceptas recibir un SMS de verificación/);
+  assert.match(html, /Acumulas 10 Dolarones por cada \$100 de compra/);
+  assert.match(js, /acepta_bases:\$\('acepta'\)\.checked,\s*declara_mayor_edad:\$\('acepta'\)\.checked/);
+});

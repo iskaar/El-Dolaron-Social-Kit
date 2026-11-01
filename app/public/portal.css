@@ -22,6 +22,7 @@ button { min-height:48px; width:100%; margin:16px 0 0; padding:12px 18px; border
 button:disabled { opacity:.55; cursor:wait; }
 button.secundario { background:white; border:1px solid var(--azul); color:var(--azul); }
 button.discreto { width:auto; min-height:44px; padding:6px; margin:0; color:var(--azul); background:white; font-size:14px; text-decoration:underline; }
+button.enlace { display:inline; width:auto; min-height:0; margin:0; padding:0; background:none; color:var(--azul); font-size:inherit; font-weight:400; text-decoration:underline; }
 :focus-visible { outline:3px solid var(--rojo); outline-offset:4px; }
 .nota { color:#4e617d; font-size:14px; }
 .vale-aviso { margin:0 0 16px; padding:12px 14px; border:2px dashed var(--rojo); border-radius:8px; font-size:15px; font-weight:700; }
