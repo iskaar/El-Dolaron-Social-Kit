@@ -29,7 +29,7 @@ function pieza(t: Tienda, extra: Record<string, unknown> = {}): string {
        sin_inventario, stock, foto_key, semana_ingreso, creado_en, actualizado_en)
      values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'S40', ?, '')`,
   ).run(f.id, f.codigo, f.nombre, f.marca, f.categoria, f.talla, f.precio, f.precio_lista, f.estado_fisico, f.estado_analisis, f.destino,
-    f.sin_inventario, f.stock, f.foto_key, new Date(2026, 9, 1, 0, 0, n).toISOString());
+    f.sin_inventario, f.stock, f.foto_key, f.creado_en ?? new Date(2026, 9, 1, 0, 0, n).toISOString());
   if (f.foto_key) (t.env.FOTOS as any).objetos.set(f.foto_key, Uint8Array.from([0xff, 0xd8, 0xff, 0xd9]).buffer);
   return f.codigo;
 }
@@ -502,5 +502,123 @@ test('catalogo (Issue #651): /evento pasa por el tope por IP del host publico', 
     (t.env as any).LIMITE_PORTAL = { limit: async () => ({ success: false }) };
     const r = await worker.fetch!(new Request(`https://${HOST}/api/catalogo/evento`, { method: 'POST', body: '{"evento":"compartir","codigo":"ED-5","origen":"portal"}' }) as never, t.env, t.ctx as never);
     assert.equal(r.status, 429);
+  } finally { t.db.close(); }
+});
+
+const haceDias = (d: number) => new Date(Date.now() - d * 86_400_000).toISOString();
+const codigos = (c: Record<string, any>) => c.piezas.map((p: any) => p.codigo);
+
+test('catalogo (#672): talla compara normalizada y exacta, y se combina con q y categoria', async () => {
+  const t = publica();
+  try {
+    const m = pieza(t, { talla: 'M' });
+    const xl = pieza(t, { talla: 'XL' });
+    const nino = pieza(t, { talla: 'Niño 6 años / S' });
+    pieza(t, { talla: null });
+    const taza = pieza(t, { categoria: 'hogar', talla: 'M', nombre: 'Taza' });
+    assert.deepEqual(codigos(await leer(await t.llamar('/api/catalogo?talla=m'))).sort(), [m, taza].sort());
+    assert.deepEqual(codigos(await leer(await t.llamar('/api/catalogo?talla=%20xl%20'))), [xl]);
+    assert.deepEqual(codigos(await leer(await t.llamar(`/api/catalogo?talla=${encodeURIComponent('  NINO   6 ANOS / s ')}`))), [nino]);
+    assert.deepEqual(codigos(await leer(await t.llamar('/api/catalogo?talla=X'))), [], 'exacta, no por contener');
+    assert.deepEqual(codigos(await leer(await t.llamar('/api/catalogo?talla=M&categoria=ropa'))), [m]);
+    assert.deepEqual(codigos(await leer(await t.llamar('/api/catalogo?talla=M&q=taza'))), [taza]);
+    assert.equal((await leer(await t.llamar('/api/catalogo?talla=m'))).total, 2);
+    assert.equal((await leer(await t.llamar('/api/catalogo?talla='))).total, 5, 'vacia = sin filtro');
+    // Un valor con comillas o SQL es solo texto: no coincide con nada y no rompe.
+    const r = await t.llamar(`/api/catalogo?talla=${encodeURIComponent("M' or '1'='1")}`);
+    assert.equal(r.status, 200);
+    assert.equal((await leer(r)).total, 0);
+    assert.equal((await t.llamar(`/api/catalogo?talla=${'a'.repeat(31)}`)).status, 400);
+    assert.equal((await t.llamar(`/api/catalogo?talla=${encodeURIComponent('Niño 12-18 meses / XL')}`)).status, 200, 'la talla guardada mas larga cabe');
+  } finally { t.db.close(); }
+});
+
+test('catalogo (#672): precio_min y precio_max son inclusivos y validan enteros', async () => {
+  const t = publica();
+  try {
+    const p50 = pieza(t, { precio: 5000 });
+    const p80 = pieza(t, { precio: 8000 });
+    const p150 = pieza(t, { precio: 15000 });
+    const p200 = pieza(t, { precio: 20000 });
+    const p350 = pieza(t, { precio: 35000 });
+    const lista = async (q: string) => codigos(await leer(await t.llamar(`/api/catalogo?${q}`))).sort();
+    assert.deepEqual(await lista('precio_max=5000'), [p50]);
+    assert.deepEqual(await lista('precio_max=8000'), [p50, p80].sort());
+    assert.deepEqual(await lista('precio_min=20000'), [p200, p350].sort());
+    assert.deepEqual(await lista('precio_min=8000&precio_max=15000'), [p80, p150].sort());
+    assert.deepEqual(await lista('precio_min=0'), [p50, p80, p150, p200, p350].sort());
+    assert.equal((await leer(await t.llamar('/api/catalogo?precio_min=20000'))).total, 2);
+    for (const malo of ['precio_max=abc', 'precio_max=-1', 'precio_max=1.5', 'precio_max=', 'precio_min=x', 'precio_min=1e3', 'precio_max=1234567890', 'precio_min=9000&precio_max=8000']) {
+      const r = await t.llamar(`/api/catalogo?${malo}`);
+      assert.equal(r.status, 400, malo);
+      assert.match((await leer(r)).error, /precio/i, malo);
+    }
+  } finally { t.db.close(); }
+});
+
+test('catalogo (#672): dias deja solo lo que llego en esos dias (1 a 30)', async () => {
+  const t = publica();
+  try {
+    const hoy = pieza(t, { creado_en: haceDias(0.1) });
+    const hace5 = pieza(t, { creado_en: haceDias(5) });
+    const hace10 = pieza(t, { creado_en: haceDias(10) });
+    pieza(t); // 1/10/2026: ya fuera de cualquier ventana
+    const lista = async (q: string) => codigos(await leer(await t.llamar(`/api/catalogo?${q}`))).sort();
+    assert.deepEqual(await lista('dias=7'), [hoy, hace5].sort());
+    assert.deepEqual(await lista('dias=1'), [hoy]);
+    assert.deepEqual(await lista('dias=30'), [hoy, hace5, hace10].sort());
+    assert.equal((await leer(await t.llamar('/api/catalogo?dias=7'))).total, 2);
+    assert.equal((await lista('')).length, 4);
+    for (const malo of ['dias=0', 'dias=31', 'dias=abc', 'dias=-3', 'dias=', 'dias=7.5']) assert.equal((await t.llamar(`/api/catalogo?${malo}`)).status, 400, malo);
+  } finally { t.db.close(); }
+});
+
+test('catalogo (#672): tallas=1 lista las tallas distintas en orden conocido, sin la existencia', async () => {
+  const t = publica();
+  try {
+    pieza(t, { talla: 'XL' }); pieza(t, { talla: 'M' }); pieza(t, { talla: 'M' }); pieza(t, { talla: 'S' });
+    pieza(t, { talla: 'Niño 6 años / S' }); pieza(t, { talla: '27' }); pieza(t, { talla: null });
+    pieza(t, { talla: 'Rara B' }); pieza(t, { talla: 'Rara A' });          // fuera de la lista conocida: al final, alfabetico
+    pieza(t, { talla: 'XXS', stock: 0 });                                   // no vendible: su talla no sale
+    pieza(t, { categoria: 'hogar', talla: 'L', nombre: 'Taza', precio: 3000 });
+    const sin = await leer(await t.llamar('/api/catalogo'));
+    assert.ok(!('tallas' in sin), 'solo si se pide');
+    const c = await leer(await t.llamar('/api/catalogo?tallas=1'));
+    assert.deepEqual(c.tallas, ['S', 'M', 'L', 'XL', '27', 'Niño 6 años / S', 'Rara A', 'Rara B']);
+    assert.ok(!JSON.stringify(c).includes('"stock"'));
+    // Sigue la categoria, la busqueda y los demas filtros, pero NO la talla elegida (el menu no se reduce a una opcion).
+    assert.deepEqual((await leer(await t.llamar('/api/catalogo?tallas=1&categoria=hogar'))).tallas, ['L']);
+    assert.deepEqual((await leer(await t.llamar('/api/catalogo?tallas=1&categoria=ropa&talla=M'))).tallas, ['S', 'M', 'XL', '27', 'Niño 6 años / S', 'Rara A', 'Rara B']);
+    assert.deepEqual((await leer(await t.llamar('/api/catalogo?tallas=1&precio_max=5000'))).tallas, ['L']);
+    assert.deepEqual((await leer(await t.llamar('/api/catalogo?tallas=1&q=taza'))).tallas, ['L']);
+    assert.deepEqual((await leer(await t.llamar('/api/catalogo?tallas=1&dias=7'))).tallas, []);
+    assert.equal((await t.llamar('/api/catalogo?tallas=2')).status, 400);
+    assert.equal((await t.llamar('/api/catalogo?tallas=')).status, 400);
+  } finally { t.db.close(); }
+});
+
+test('catalogo (#672): filtros combinados con cursor; total y pagina siguiente usan el mismo filtro', async () => {
+  const t = publica();
+  try {
+    const buenas: string[] = [];
+    for (let i = 0; i < 30; i++) {
+      buenas.push(pieza(t, { talla: 'M', precio: 9000, creado_en: haceDias(2 + i * 0.01) }));
+      pieza(t, { talla: 'L', precio: 9000, creado_en: haceDias(2 + i * 0.01) });          // otra talla
+      pieza(t, { talla: 'M', precio: 30000, creado_en: haceDias(2 + i * 0.01) });         // otro precio
+    }
+    pieza(t, { talla: 'M', precio: 9000, creado_en: haceDias(20) });                       // llego hace mucho
+    const filtros = 'talla=m&precio_max=10000&precio_min=5000&dias=7';
+    const p1 = await leer(await t.llamar(`/api/catalogo?${filtros}&tallas=1`));
+    assert.equal(p1.total, 30);
+    assert.equal(p1.piezas.length, 24);
+    assert.equal(p1.hay_mas, true);
+    assert.ok(p1.tallas.includes('L'), 'la lista de tallas ignora la talla elegida');
+    const p2 = await leer(await t.llamar(`/api/catalogo?${filtros}&despues=${encodeURIComponent(p1.siguiente)}`));
+    assert.equal(p2.total, 30, 'el total no cambia con el cursor');
+    assert.equal(p2.piezas.length, 6);
+    assert.equal(p2.hay_mas, false);
+    assert.deepEqual([...codigos(p1), ...codigos(p2)].sort(), [...buenas].sort());
+    assert.equal(p1.piezas[0].precio, 9000);
+    assert.equal(p1.piezas[0].talla, 'M');
   } finally { t.db.close(); }
 });

@@ -8,6 +8,7 @@
  */
 
 import { CLAVES_CATEGORIA } from '../public/categorias.js';
+import { TALLAS } from '../public/tallas.js';
 import { PUBLICABLE } from './mercadolibre.ts';
 
 const POR_PAGINA = 24;
@@ -111,6 +112,17 @@ const CAMPO_BUSQUEDA = sinAcentosSql(`p.nombre || ' ' || p.marca || ' ' || p.cod
 const normalizarBusqueda = (q: string) =>
   q.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[\\%_]/g, (c) => `\\${c}`);
 
+// Talla (Issue #672): igualdad exacta sin acentos ni mayusculas ni espacios de mas (no es LIKE: «M» no debe traer «XM»).
+const normalizarTalla = (t: string) => t.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().trim().replace(/\s+/g, ' ');
+const SQL_TALLA = sinAcentosSql(`trim(coalesce(p.talla, ''))`);
+const TALLA_MAX = 30; // la talla guardada mas larga mide 21 («Niño 12-18 meses / XL»); el campo admite 30
+const DIAS_MAX = 30;
+// Parametro entero >= 0: undefined si falta, NaN si no es un entero (de hasta 9 digitos).
+const entero = (texto: string | null) => (texto === null ? undefined : /^\d{1,9}$/.test(texto) ? Number(texto) : NaN);
+// Orden conocido de tallas (tallas.js); lo que no este en la lista va al final, alfabetico.
+const ORDEN_TALLA = new Map<string, number>(TALLAS.map((t: string, i: number) => [t, i]));
+const porTalla = (a: string, b: string) => (ORDEN_TALLA.get(a) ?? Infinity) - (ORDEN_TALLA.get(b) ?? Infinity) || a.localeCompare(b, 'es');
+
 async function listar(env: Env, url: URL): Promise<Response> {
   // Issue #671: ?codigo=ED-… = exactamente esa pieza (la vista previa del sitio); q= también coincidiría con ED-0001234.
   const codigo = url.searchParams.get('codigo');
@@ -132,22 +144,44 @@ async function listar(env: Env, url: URL): Promise<Response> {
   const cursor = despues === null ? null : CURSOR.exec(despues);
   if (despues !== null && !cursor) return json({ error: 'Cursor no válido.' }, 400);
 
+  // Issue #672: talla, banda de precio, «Llegó esta semana» y lista de tallas; todo opcional y combinable.
+  const tallaCruda = url.searchParams.get('talla');
+  const talla = tallaCruda === null ? '' : normalizarTalla(tallaCruda);
+  if (talla.length > TALLA_MAX) return json({ error: 'Talla no válida.' }, 400);
+  const precioMin = entero(url.searchParams.get('precio_min'));
+  const precioMax = entero(url.searchParams.get('precio_max'));
+  if (Number.isNaN(precioMin) || Number.isNaN(precioMax)) return json({ error: 'Precio no válido.' }, 400);
+  if (precioMin !== undefined && precioMax !== undefined && precioMin > precioMax) return json({ error: 'Rango de precio no válido.' }, 400);
+  const dias = entero(url.searchParams.get('dias'));
+  if (Number.isNaN(dias) || (dias !== undefined && (dias < 1 || dias > DIAS_MAX))) return json({ error: 'Días no válidos.' }, 400);
+  const tallasTexto = url.searchParams.get('tallas');
+  if (tallasTexto !== null && tallasTexto !== '1') return json({ error: 'Parámetro tallas no válido.' }, 400);
+
   // Issue #526: ?recorte=1 = solo piezas con recorte listo y revisado (la misma condicion que arma la URL `recorte`).
   const conRecorte = url.searchParams.get('recorte') === '1' ? ` and p.recorte_estado = 'listo' and p.recorte_revision = 'ok'` : '';
-  const filtro = `${VENDIBLE}${conRecorte}${categoria === null ? '' : ' and p.categoria = ?'}${q ? ` and ${CAMPO_BUSQUEDA} like ? escape '\\'` : ''}`;
-  const args: unknown[] = [...(categoria === null ? [] : [categoria]), ...(q ? [`%${normalizarBusqueda(q)}%`] : [])];
+  // `base` es todo menos la talla: la lista de tallas (`tallas=1`) se calcula con ella para que el menu no se reduzca a la talla elegida.
+  const base = `${VENDIBLE}${conRecorte}${categoria === null ? '' : ' and p.categoria = ?'}${q ? ` and ${CAMPO_BUSQUEDA} like ? escape '\\'` : ''}`
+    + `${precioMin === undefined ? '' : ' and p.precio >= ?'}${precioMax === undefined ? '' : ' and p.precio <= ?'}${dias === undefined ? '' : ' and p.creado_en >= ?'}`;
+  const argsBase: unknown[] = [...(categoria === null ? [] : [categoria]), ...(q ? [`%${normalizarBusqueda(q)}%`] : []),
+    ...(precioMin === undefined ? [] : [precioMin]), ...(precioMax === undefined ? [] : [precioMax]),
+    ...(dias === undefined ? [] : [new Date(Date.now() - dias * 86_400_000).toISOString()])];
+  const filtro = `${base}${talla ? ` and ${SQL_TALLA} = ?` : ''}`;
+  const args: unknown[] = [...argsBase, ...(talla ? [talla] : [])];
   const desde = cursor ? ' and (p.creado_en < ? or (p.creado_en = ? and p.codigo > ?))' : '';
-  const [filas, cuenta] = await Promise.all([
+  const [filas, cuenta, tallas] = await Promise.all([
     env.DB.prepare(`select p.codigo, p.nombre, p.marca, p.categoria, p.talla, p.precio, p.precio_lista, p.stock, p.creado_en, p.recorte_estado, p.recorte_revision from productos p
       where ${filtro}${desde} order by p.creado_en desc, p.codigo limit ? offset ?`)
       .bind(...args, ...(cursor ? [cursor[1], cursor[1], cursor[2]] : []), POR_PAGINA + 1, cursor ? 0 : (pagina - 1) * POR_PAGINA)
       .all<Record<string, any>>(),
     env.DB.prepare(`select count(*) as n from productos p where ${filtro}`).bind(...args).first<{ n: number }>(),
+    tallasTexto === null ? null : env.DB.prepare(`select distinct p.talla from productos p where ${base} and trim(coalesce(p.talla, '')) <> ''`)
+      .bind(...argsBase).all<{ talla: string }>(),
   ]);
   const hayMas = filas.results.length > POR_PAGINA;
   const ultima = filas.results[POR_PAGINA - 1];
   const piezas = filas.results.slice(0, POR_PAGINA).map((p) => ({ ...aPieza(p, url), ultima: p.stock === 1 })); // solo la marca, nunca stock
-  return json({ piezas, pagina, hay_mas: hayMas, siguiente: hayMas ? `${ultima.creado_en}~${ultima.codigo}` : null, total: cuenta?.n ?? 0 }, 200,
+  return json({ piezas, pagina, hay_mas: hayMas, siguiente: hayMas ? `${ultima.creado_en}~${ultima.codigo}` : null, total: cuenta?.n ?? 0,
+    ...(tallas ? { tallas: tallas.results.map((r) => r.talla).sort(porTalla) } : {}) }, 200,
     { 'cache-control': 'public, max-age=300' });
 }
 

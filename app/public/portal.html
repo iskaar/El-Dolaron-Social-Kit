@@ -67,6 +67,13 @@
       <button class="catalogo-limpiar secundario" type="button" hidden>Limpiar</button>
     </form>
     <div class="chips" role="group" aria-label="Filtrar por categoría" hidden></div>
+    <div class="catalogo-filtros" hidden>
+      <div class="catalogo-talla" hidden>
+        <label for="catalogo-talla">Talla</label>
+        <select id="catalogo-talla" class="catalogo-talla-select"><option value="">Todas las tallas</option></select>
+      </div>
+      <div class="chips chips-filtros" role="group" aria-label="Filtrar por precio y novedad"></div>
+    </div>
     <p class="catalogo-estado nota" role="status" aria-live="polite"></p>
     <ul class="catalogo-grid"></ul>
     <button class="catalogo-mas secundario" type="button" hidden>Ver más</button>
