@@ -253,12 +253,15 @@ $('registro-form').addEventListener('submit', (e) => {
   accion($('registrar'), async () => {
     const codigo = config.referidos ? $('referido').value.trim() : '';
     const r = await api('registro', { nombre:$('nombre').value, acepta_bases:$('acepta').checked,
-      declara_mayor_edad:$('mayor-edad').checked, bases_version:config.bases_version,
+      declara_mayor_edad:$('acepta').checked, bases_version:config.bases_version,
       ...(codigo ? { referido_codigo:codigo } : {}) });
     guardarReferido(null);
     await cargarCuenta();
     if (r.referido_otorgado) estado('¡Listo! Recibiste ' + d(r.referido_otorgado) + ' por unirte con un código.');
   });
+});
+$('ver-aviso').addEventListener('click', () => {
+  $('aviso').open = true; $('aviso').scrollIntoView({ behavior:'smooth', block:'start' });
 });
 $('codigo-form').addEventListener('submit', (e) => {
   e.preventDefault();
