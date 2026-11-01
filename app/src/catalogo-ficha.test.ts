@@ -40,6 +40,7 @@ test('portal.html trae todo lo que catalogo-ficha.js busca y el catálogo ya no 
     if (clase) assert.ok(clases.has(clase), sel);
   }
   assert.match(html, /id="catalogo"/);
+  assert.match(html, /Disponible hoy en tienda<\/p>\s*<p class="ficha-cond">Condición A · Como nueva<\/p>/);
   assert.match(html, /Entra con tu celular \(arriba\) y acumulas Dolarones con esta compra\. O sigue como invitado:/);
   assert.equal(html.match(/data-op="/g)?.length, 3);
   assert.doesNotMatch(html, /eldolaron\.com\/#catalogo|novedades/);
