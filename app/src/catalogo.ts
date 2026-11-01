@@ -188,7 +188,10 @@ async function listar(env: Env, url: URL): Promise<Response> {
 async function foto(env: Env, codigo: string, recorte = false): Promise<Response> {
   const no = () => json({ error: 'Foto no encontrada.' }, 404);
   if (!CODIGO.test(codigo)) return no();
-  const p = await env.DB.prepare(`select p.id, p.foto_key, p.recorte_estado, p.recorte_revision from productos p where ${VENDIBLE} and p.codigo = ?`)
+  // Una pieza apartada (stock 0) sigue enseñando su foto: «Mis apartados» del portal (#669) la pide aqui. No se sirve ninguna otra sin existencia.
+  const p = await env.DB.prepare(`select p.id, p.foto_key, p.recorte_estado, p.recorte_revision from productos p
+    where (${VENDIBLE} or (p.codigo like 'ED-%' and p.propietario = 'dolaron' and exists (select 1 from pedido_lineas l join pedidos d on d.id = l.pedido_id
+      where l.producto_id = p.id and d.estado = 'apartado'))) and p.codigo = ?`)
     .bind(codigo).first<{ id: string; foto_key: string; recorte_estado: string | null; recorte_revision: string | null }>();
   const objeto = p && (!recorte || (p.recorte_estado === 'listo' && p.recorte_revision === 'ok')) && await env.FOTOS.get(recorte ? `recortes/${p.id}.webp` : p.foto_key);
   if (!objeto) return no();

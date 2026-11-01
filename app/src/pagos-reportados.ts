@@ -110,14 +110,18 @@ export async function reportarPago(folio: number, request: Request, env: Env, ct
   return json({ reporte: reporteDe(creado) }, 201);
 }
 
-/** Lo ultimo que paso con el reporte de cada pedido de la revendedora (60 dias), para el chip de «Mis ventas». */
-export async function reportesDeRevendedora(env: Env, correo: string, desde: string) {
+/**
+ * Lo ultimo que paso con el reporte de cada pedido de su dueno (60 dias): la revendedora por `vendedora` (chip de «Mis ventas»)
+ * o el socio del portal por `telefono` (#669, «Mis apartados»; tambien salen los que levanto la tienda a ese numero).
+ */
+export async function reportesDe(env: Env, dueno: 'vendedora' | 'telefono', valor: string, desde: string) {
   const { results } = await env.DB.prepare(`select d.folio, r.estado, r.motivo, r.reportado_en
     from pagos_reportados r join pedidos d on d.id = r.pedido_id
-    where d.vendedora = ? and r.reportado_en >= ? and r.id = (select max(id) from pagos_reportados where pedido_id = r.pedido_id)`)
-    .bind(correo, desde).all<{ folio: number; estado: string; motivo: string; reportado_en: string }>();
+    where d.${dueno === 'telefono' ? 'telefono' : 'vendedora'} = ? and r.reportado_en >= ? and r.id = (select max(id) from pagos_reportados where pedido_id = r.pedido_id)`)
+    .bind(valor, desde).all<{ folio: number; estado: string; motivo: string; reportado_en: string }>();
   return new Map(results.map(({ folio, ...resto }) => [folio, resto]));
 }
+export const reportesDeRevendedora = (env: Env, correo: string, desde: string) => reportesDe(env, 'vendedora', correo, desde);
 
 /** Los reportes por revisar, por id de pedido: /pedidos los pone junto a su apartado. La llave de la foto no es publica (solo el dueno la sirve). */
 export async function reportesPendientes(env: Env) {

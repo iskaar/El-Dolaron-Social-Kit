@@ -93,6 +93,12 @@
         <div><dt>Por liberar</dt><dd id="saldo-pendiente"></dd></div></dl>
     </section>
     <p id="minimo" class="nota" hidden>El regalo de apertura se usa en tickets de $1,000 MXN o más antes de descontar Dolarones. Lo ganado por compras no tiene ese mínimo.</p>
+    <section id="apartados" class="apartados" aria-labelledby="titulo-apartados" hidden>
+      <h2 id="titulo-apartados">Mis apartados</h2>
+      <p class="apartados-aviso nota" role="status" aria-live="polite"></p>
+      <ul class="apartados-lista"></ul>
+      <details class="apartados-previos" hidden><summary class="apartados-resumen-previos">Anteriores</summary><ul class="apartados-previos-lista"></ul></details>
+    </section>
     <form id="codigo-form">
       <p class="nota">Al pagar, muestra tu código en caja. Ahí te preguntan si quieres usar tus Dolarones.</p>
       <button id="mostrar-codigo" type="submit">Mostrar mi código para caja</button>
@@ -131,6 +137,13 @@
   <h2 id="titulo-recibo">Recibo de compra</h2><div id="detalle-recibo"></div>
   <p class="nota">Comprobante de compra. No es factura fiscal.</p>
   <form method="dialog"><button>Cerrar recibo</button></form>
+</dialog>
+<dialog id="apartado-cancelar" aria-labelledby="cancelar-titulo">
+  <h2 id="cancelar-titulo">Cancelar apartado</h2>
+  <p class="cancelar-pregunta"></p>
+  <p class="cancelar-error apartar-error" role="alert"></p>
+  <button class="cancelar-si" type="button">Sí, cancelar</button>
+  <button class="cancelar-no secundario" type="button">No, regresar</button>
 </dialog>
 <dialog id="ficha-dialogo" aria-labelledby="ficha-titulo">
   <div class="ficha-caja">
@@ -197,6 +210,7 @@
     <p class="apartar-entrega-info nota"></p>
     <p class="apartar-vence"></p>
     <a class="apartar-pague boton-enlace" href="https://wa.me/524445437754" target="_blank" rel="noopener">Ya pagué: mandar comprobante por WhatsApp</a>
+    <button class="apartar-ver secundario" type="button">Ver mis apartados</button>
   </div>
   <button class="apartar-cerrar secundario" type="button">Cerrar</button>
 </dialog>

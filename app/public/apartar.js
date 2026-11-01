@@ -47,9 +47,9 @@ function medir(nombre, codigo) {
 /**
  * Arma la hoja <dialog id="apartar-dialogo"> (portal.html). `api(ruta, cuerpo)` es la del portal (token incluido),
  * `estaListo()` dice si hay un socio registrado, `irAAcceso(codigo)` lleva al registro y vuelve a la pieza al terminar,
- * `alTerminar()` se llama al cerrar la confirmación. Devuelve { abrir(pieza) }.
+ * `alTerminar()` se llama al cerrar la confirmación, `alVerApartados()` si toca «Ver mis apartados» (#669). Devuelve { abrir(pieza) }.
  */
-export function iniciarApartar({ api, estaListo, irAAcceso, alTerminar }) {
+export function iniciarApartar({ api, estaListo, irAAcceso, alTerminar, alVerApartados }) {
   const dialogo = document.getElementById('apartar-dialogo');
   if (!dialogo) return { abrir() {} };
   const q = (sel) => dialogo.querySelector(sel);
@@ -114,6 +114,7 @@ export function iniciarApartar({ api, estaListo, irAAcceso, alTerminar }) {
     try { await navigator.clipboard.writeText(e.currentTarget.dataset.clabe); aviso.textContent = 'CLABE copiada.'; }
     catch { aviso.textContent = 'No se pudo copiar: mantén presionado el número para copiarlo.'; }
   });
+  q('.apartar-ver').addEventListener('click', () => { dialogo.close(); alVerApartados?.(); });
   for (const cerrar of dialogo.querySelectorAll('.apartar-cerrar')) cerrar.addEventListener('click', () => dialogo.close());
   dialogo.addEventListener('click', (ev) => { if (ev.target === dialogo) dialogo.close(); });
   dialogo.addEventListener('close', () => { const fue = hecho; hecho = false; if (fue) alTerminar?.(); });
