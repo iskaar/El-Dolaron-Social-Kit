@@ -17,17 +17,15 @@
   <p id="estado" role="status" aria-live="polite">Cargando tu monedero…</p>
   <p id="vale-aviso" class="vale-aviso" hidden>Tienes un vale de papel por pasar a tu cuenta. Entra o regístrate y lo abonamos solo, con la tarifa de socio: el doble.</p>
   <section id="acceso" hidden aria-labelledby="titulo-acceso">
-    <h1 id="titulo-acceso">Tus Dolarones,<br>contigo.</h1>
-    <p>Consulta tu saldo y muestra tu código en caja para acumular o usar Dolarones.</p>
+    <h1 id="titulo-acceso">Entra con tu celular.</h1>
+    <p>Acumulas Dolarones en cada compra (1 Dolarón = $1 en tienda), ves tus compras y, pronto, tus apartados.</p>
     <form id="telefono-form">
       <label for="telefono">Tu número de celular</label>
       <div class="telefono"><span>+52</span><input id="telefono" type="tel" inputmode="numeric"
         autocomplete="tel-national" pattern="[0-9]{10}" maxlength="10" placeholder="10 dígitos" required></div>
       <label class="opcion"><input id="consiente-sms" type="checkbox" required>
         Acepto la verificación por SMS y el tratamiento de mi número descrito en el aviso de privacidad.</label>
-      <label class="opcion"><input id="recordar" type="checkbox" checked>Este es mi teléfono: mantener mi sesión.</label>
-      <p class="nota">En un dispositivo compartido, desmarca esta opción y cierra sesión al terminar.</p>
-      <div id="recaptcha"></div>
+      <label class="opcion" title="En un dispositivo compartido, desmarca esta opción y cierra sesión al terminar."><input id="recordar" type="checkbox" checked>Mantener mi sesión (desmárcalo en un equipo compartido)</label>
       <button id="enviar" type="submit">Recibir código por SMS</button>
     </form>
     <form id="sms-form" hidden>
