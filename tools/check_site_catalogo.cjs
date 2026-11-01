@@ -1,6 +1,6 @@
 // Run: node tools/check_site_catalogo.cjs
 const assert = require("node:assert/strict");
-const { precio, consulta, apiBase, codigoDePieza } = require("../site/public/catalogo.js");
+const { precio, consulta, apiBase, codigoDePieza, viernesDeEnvio, fechaCorta, lineaApartado, mensajeQuiero } = require("../site/public/catalogo.js");
 
 assert.equal(precio(15000), "$150");
 assert.equal(precio(24950), "$249.50");
@@ -24,17 +24,35 @@ assert.equal(codigoDePieza("?pieza=ED-000123"), "ED-000123");
 assert.equal(codigoDePieza("?x=1&pieza=ed-7"), "ED-7");
 for (const bad of ["", "?pieza=", "?pieza=ED-", "?pieza=ED-1%20OR%201", "?pieza=<script>", "?pieza=ED-12345678901", "?q=ED-1"]) assert.equal(codigoDePieza(bad), "");
 
+// Ficha (Issue #645): viernes de envío (jueves 20:00 hora de tienda = corte), línea de apartado y mensajes de «Lo quiero».
+assert.equal(viernesDeEnvio("2026-10-31T18:00:00Z"), "2026-11-06");   // sábado
+assert.equal(viernesDeEnvio("2026-11-06T01:59:00Z"), "2026-11-06");   // jueves 19:59 en la tienda
+assert.equal(viernesDeEnvio("2026-11-06T02:00:00Z"), "2026-11-13");   // jueves 20:00: ya pasó el corte
+assert.equal(viernesDeEnvio("2026-11-06T16:00:00Z"), "2026-11-13");   // viernes
+assert.equal(fechaCorta("2026-11-06"), "6 de noviembre");
+assert.equal(fechaCorta("2026-12-18"), "18 de diciembre");
+const SABADO = Date.parse("2026-10-31T18:00:00Z");
+assert.equal(lineaApartado({ precio: 15000 }, SABADO), "Apártala con $100 por 7 días. Recoge en Soledad (11 a 8) o te la enviamos el viernes 6 de noviembre (envío nacional gratis desde $1,000; si no, $99).");
+assert.equal(lineaApartado({ precio: 5000 }, SABADO), "Se paga completa al apartar. Recoge en Soledad (11 a 8) o te la enviamos el viernes 6 de noviembre (envío nacional gratis desde $1,000; si no, $99).");
+const sudadera = { nombre: "Sudadera Nike", talla: "M", codigo: "ED-001850", precio: 15000 };
+assert.equal(mensajeQuiero(sudadera, "recoger", SABADO), "Hola, quiero apartar *Sudadera Nike talla M* (ED-001850) de $150. Dejo $100 de apartado y paso a recogerla a Jardín Hidalgo 129.");
+assert.equal(mensajeQuiero(sudadera, "envio", SABADO), "Hola, quiero apartar *Sudadera Nike talla M* (ED-001850) de $150. Dejo $100 de apartado para el envío del viernes 6 de noviembre (gratis desde $1,000; si no, $99). ¿Me pasan los datos para transferir?");
+assert.equal(mensajeQuiero(sudadera, "preguntar", SABADO), "Hola, tengo una pregunta sobre *Sudadera Nike talla M* (ED-001850) de $150.");
+assert.equal(mensajeQuiero({ nombre: "Lámpara", codigo: "ED-7", precio: 8000 }, "recoger", SABADO), "Hola, quiero apartar *Lámpara* (ED-7) de $80. La pago completa al apartarla y paso a recogerla a Jardín Hidalgo 129.");
+
 // Catálogo en una página falsa (Issue #241): reintento, talla, tiempo agotado y botón Reintentar.
 const { readFileSync } = require("node:fs");
 const { join } = require("node:path");
 const vm = require("node:vm");
 const fuente = readFileSync(join(__dirname, "../site/public/catalogo.js"), "utf8");
 class Nodo {
-  constructor() { this.children = []; this.listeners = {}; this.attrs = {}; this.hidden = false; this.textContent = ""; this.value = ""; this.open = false; this.focused = false; this.style = {}; this.classes = new Set(); this.classList = { add: (v) => this.classes.add(v), remove: (v) => this.classes.delete(v) }; }
+  constructor() { this.children = []; this.listeners = {}; this.attrs = {}; this.hidden = false; this.textContent = ""; this.value = ""; this.open = false; this.focused = false; this.style = {}; this.inert = false; this.classes = new Set(); this.classList = { add: (v) => this.classes.add(v), remove: (v) => this.classes.delete(v) }; }
   append(...xs) { this.children.push(...xs); }
   prepend(...xs) { this.children.unshift(...xs); }
   replaceChildren(...xs) { this.children = xs; }
   setAttribute(k, v) { this.attrs[k] = v; }
+  getAttribute(k) { return this.attrs[k]; }
+  getBoundingClientRect() { return { left: 0, top: 0, width: 300, height: 375 }; }
   removeAttribute(k) { delete this.attrs[k]; }
   addEventListener(k, fn) { this.listeners[k] = fn; }
   focus() { this.focused = true; }
@@ -46,19 +64,24 @@ function pagina(fetcher, extra = {}) {
     ".chips", ".catalog-grid", ".catalog-status", ".catalog-more", ".catalog-fallback", ".catalog-retry",
     ".catalog-search", ".search-input", ".catalog-clear", ".piece-dialog", ".piece-dialog-close",
     ".piece-dialog-img", ".piece-dialog-title", ".piece-dialog-meta", ".piece-dialog-price", ".piece-dialog-ask",
+    ".piece-dialog-photo", ".piece-dialog-stamp", ".ficha-zoom", ".ficha-pista", ".ficha-compra", ".ficha-barprecio", ".ficha-quiero",
+    ".ficha-compartir", ".ficha-aviso", ".ficha-hoja", ".ficha-hoja-cerrar", ".piece-dialog-head", ".piece-dialog-scroll", ".piece-dialog-bar",
   ];
   const partes = Object.fromEntries(selectores.map((k) => [k, new Nodo()]));
   partes[".catalog-clear"].hidden = true;
+  partes[".ficha-hoja"].hidden = true;
+  const ops = ["recoger", "envio", "preguntar"].map((op) => { const n = new Nodo(); n.attrs["data-op"] = op; return n; });
   const root = new Nodo();
   root.querySelector = (k) => partes[k];
+  root.querySelectorAll = (k) => (k === ".ficha-op" ? ops : []);
   const relojes = [];
   vm.runInNewContext(fuente, {
     document: { querySelector: () => null, getElementById: (id) => (id === "catalogo" ? root : null), createElement: () => new Nodo(), ...extra.document },
-    location: { search: extra.search || "" }, Image: extra.Image || class extends Nodo {}, matchMedia: extra.matchMedia, fetch: fetcher, AbortController, URL, URLSearchParams, Intl, Number, String, encodeURIComponent,
+    location: { search: extra.search || "" }, Image: extra.Image || class extends Nodo {}, matchMedia: extra.matchMedia, fetch: fetcher, ...extra.contexto, AbortController, URL, URLSearchParams, Intl, Number, String, encodeURIComponent,
     setTimeout: (fn) => relojes.push(fn), clearTimeout: () => {},
   });
   const textos = () => partes[".catalog-grid"].children.map((li) => li.children[1].children.map((n) => n.textContent));
-  return { partes, root, relojes, textos };
+  return { partes, root, relojes, textos, ops };
 }
 const tick = () => new Promise((r) => setImmediate(r));
 
@@ -150,6 +173,73 @@ const tick = () => new Promise((r) => setImmediate(r));
   const mala = pagina(async (url) => { consultas.push(new URL(url).searchParams.get("q")); return { ok: true, json: async () => ({ piezas: [], total: 0, hay_mas: false, siguiente: null }) }; }, { search: "?pieza=hola" });
   await tick();
   assert.equal(consultas.at(-1), null);   // malformado: carga normal, sin búsqueda
+
+  // Ficha (Issue #645): datos, última pieza, línea de apartado, hoja «Lo quiero», zoom y Compartir.
+  const copiados = [];
+  const ficha = pagina(async () => ({
+    ok: true,
+    json: async () => ({ piezas: [
+      { nombre: "Chamarra", marca: "Levis", talla: "L", codigo: "ED-5", precio: 30000, precio_lista: 90000, ultima: true, foto: "https://x/f.jpg", recorte: "https://x/r.png" },
+      { nombre: "Taza", categoria: "hogar", codigo: "ED-6", precio: 4000, foto: "https://x/t.jpg" },
+    ], total: 2, hay_mas: false, siguiente: null }),
+  }), { contexto: { navigator: { clipboard: { writeText: async (t) => copiados.push(t) } } } });
+  await tick();
+  const f = ficha.partes;
+  const abre = (i) => f[".catalog-grid"].children[i].children[0].listeners.click();
+  abre(0);
+  assert.equal(f[".piece-dialog-img"].src, "https://x/f.jpg");   // la foto completa, no el recorte
+  assert.equal(f[".piece-dialog-meta"].textContent, "Levis · Talla L · ED-5");
+  assert.equal(f[".piece-dialog-price"].textContent, "$300");   // precio; la lista tachada y el ahorro son nodos hijos
+  assert.equal(f[".piece-dialog-price"].children.at(-1).textContent, "Ahorras $600");
+  assert.equal(f[".ficha-barprecio"].textContent, "$300");
+  assert.equal(f[".piece-dialog-stamp"].hidden, false);
+  assert.match(f[".ficha-compra"].textContent, /^Apártala con \$100 por 7 días\. Recoge en Soledad \(11 a 8\) o te la enviamos el viernes \d+ de \w+ \(envío nacional gratis desde \$1,000; si no, \$99\)\.$/);
+  assert.equal(f[".ficha-pista"].hidden, false);   // primera vez, sin sessionStorage: se muestra
+  abre(1);
+  assert.equal(f[".piece-dialog-meta"].textContent, "Hogar y cocina · ED-6");   // sin marca, la categoría
+  assert.equal(f[".piece-dialog-stamp"].hidden, true);                          // sin `ultima`, nada
+  assert.match(f[".ficha-compra"].textContent, /^Se paga completa al apartar\./);
+  // «Lo quiero» abre la hoja con los tres enlaces; Esc cierra solo la hoja.
+  abre(0);
+  f[".ficha-quiero"].listeners.click();
+  assert.equal(f[".ficha-hoja"].hidden, false);
+  assert.equal(f[".piece-dialog-scroll"].inert, true);
+  assert.equal(ficha.ops[0].focused, true);
+  const texto = (op) => decodeURIComponent(ficha.ops[op].href.split("text=")[1]);
+  assert.match(ficha.ops[0].href, /^https:\/\/wa\.me\/524445437754\?text=/);
+  assert.equal(texto(0), "Hola, quiero apartar *Chamarra talla L* (ED-5) de $300. Dejo $100 de apartado y paso a recogerla a Jardín Hidalgo 129.");
+  assert.match(texto(1), /^Hola, quiero apartar \*Chamarra talla L\* \(ED-5\) de \$300\. Dejo \$100 de apartado para el envío del viernes \d+ de \w+ \(gratis desde \$1,000; si no, \$99\)\. ¿Me pasan los datos para transferir\?$/);
+  assert.equal(texto(2), "Hola, tengo una pregunta sobre *Chamarra talla L* (ED-5) de $300.");
+  f[".piece-dialog"].listeners.cancel({ preventDefault() {} });
+  assert.equal(f[".ficha-hoja"].hidden, true);
+  assert.equal(f[".piece-dialog-scroll"].inert, false);
+  assert.equal(f[".ficha-quiero"].focused, true);
+  assert.equal(f[".piece-dialog"].open, true);
+  // Zoom: doble toque acerca a 2.5×, otro doble toque vuelve a 1×, cerrar reinicia.
+  const foto = f[".piece-dialog-photo"];
+  const toque = (id, t, x, y) => { const e = { pointerId: id, clientX: x, clientY: y, timeStamp: t, target: { closest: () => null } }; foto.listeners.pointerdown(e); foto.listeners.pointerup({ ...e, type: "pointerup" }); };
+  toque(1, 1000, 150, 190); toque(1, 1100, 152, 190);
+  assert.match(f[".piece-dialog-img"].style.transform, /scale\(2\.5\)/);
+  assert.ok(foto.classes.has("acercada"));
+  assert.equal(f[".ficha-zoom"].textContent, "Alejar");
+  toque(1, 2000, 150, 190); toque(1, 2100, 150, 190);
+  assert.equal(f[".piece-dialog-img"].style.transform, "");
+  toque(1, 3000, 150, 190); toque(1, 3600, 150, 190);   // dos toques lentos no son doble toque
+  assert.equal(f[".piece-dialog-img"].style.transform, "");
+  // Pellizco: dos dedos que se separan al doble escalan y el tope es 4×.
+  const d = (id, x, y) => ({ pointerId: id, clientX: x, clientY: y, timeStamp: 5000, target: { closest: () => null } });
+  foto.listeners.pointerdown(d(1, 100, 190)); foto.listeners.pointerdown(d(2, 200, 190));
+  foto.listeners.pointermove(d(2, 300, 190));   // distancia 100 → 200
+  assert.match(f[".piece-dialog-img"].style.transform, /scale\(2\)/);
+  foto.listeners.pointermove(d(2, 900, 190));   // pasa de 4×
+  assert.match(f[".piece-dialog-img"].style.transform, /scale\(4\)/);
+  f[".piece-dialog-close"].listeners.click();
+  assert.equal(f[".piece-dialog-img"].style.transform, "");
+  // Compartir sin navigator.share copia el enlace de la pieza y avisa.
+  abre(0);
+  await f[".ficha-compartir"].listeners.click();
+  assert.deepEqual(copiados, ["https://eldolaron.com/?pieza=ED-5"]);
+  assert.equal(f[".ficha-aviso"].textContent, "Enlace copiado");
 
   // Búsqueda por ?q= y botón Limpiar.
   p.partes[".search-input"].value = "  nada  ";

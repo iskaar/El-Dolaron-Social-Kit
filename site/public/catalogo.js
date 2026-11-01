@@ -43,7 +43,44 @@
     return /^ED-\d{1,10}$/i.test(valor) ? valor.toUpperCase() : "";
   }
 
-  if (typeof module !== "undefined") module.exports = { precio, consulta, apiBase, codigoDePieza };
+  // Apartado y envío (Issue #645). Copia de app/public/venta.js (ANTICIPO_ENVIO, ENVIO_COSTO, ENVIO_GRATIS_DESDE):
+  // el sitio no importa de app/. Si allá cambian, cámbialas aquí y en los textos de la ficha.
+  const APARTADO = 100_00;
+  const ENVIO_COSTO = 99_00;
+  const ENVIO_GRATIS_DESDE = 1000_00;
+  const MESES = ["enero", "febrero", "marzo", "abril", "mayo", "junio", "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre"];
+
+  // Copia de viernesDeEnvio (app/public/venta.js): viernes en fecha de tienda; el jueves a las 20:00 ya pasó el corte. UTC-6 fijo.
+  function viernesDeEnvio(instante) {
+    const local = new Date(new Date(instante).getTime() - 6 * 3_600_000);
+    const dia = local.getUTCDay();
+    let dias = (5 - dia + 7) % 7;
+    if (dia === 5 || (dia === 4 && local.getUTCHours() >= 20)) dias += 7;
+    local.setUTCDate(local.getUTCDate() + dias);
+    return local.toISOString().slice(0, 10);
+  }
+  // «2026-11-06» → «6 de noviembre»
+  const fechaCorta = (iso) => { const [, m, d] = iso.split("-"); return `${Number(d)} de ${MESES[Number(m) - 1]}`; };
+
+  // La línea única de «cómo se compra» de la ficha.
+  function lineaApartado(pieza, ahora = Date.now()) {
+    const paga = pieza.precio < APARTADO ? "Se paga completa al apartar." : `Apártala con ${precio(APARTADO)} por 7 días.`;
+    return `${paga} Recoge en Soledad (11 a 8) o te la enviamos el viernes ${fechaCorta(viernesDeEnvio(ahora))} (envío nacional gratis desde ${precio(ENVIO_GRATIS_DESDE)}; si no, ${precio(ENVIO_COSTO)}).`;
+  }
+
+  // Los tres mensajes de la hoja «Lo quiero» (docs/UX-COMPRA.md §4). `opcion`: recoger | envio | preguntar.
+  function mensajeQuiero(pieza, opcion, ahora = Date.now()) {
+    const talla = pieza.talla ? ` talla ${pieza.talla}` : "";
+    const cual = `*${pieza.nombre}${talla}* (${pieza.codigo}) de ${precio(pieza.precio)}`;
+    if (opcion === "preguntar") return `Hola, tengo una pregunta sobre ${cual}.`;
+    // Bajo $100 no hay "apartado": se paga completa.
+    const deja = pieza.precio < APARTADO ? "La pago completa al apartarla" : `Dejo ${precio(APARTADO)} de apartado`;
+    if (opcion === "recoger") return `Hola, quiero apartar ${cual}. ${deja} y paso a recogerla a Jardín Hidalgo 129.`;
+    return `Hola, quiero apartar ${cual}. ${deja} para el envío del viernes ${fechaCorta(viernesDeEnvio(ahora))} (gratis desde ${precio(ENVIO_GRATIS_DESDE)}; si no, ${precio(ENVIO_COSTO)}). ¿Me pasan los datos para transferir?`;
+  }
+  const enlaceQuiero = (pieza, opcion, ahora) => `${WHATSAPP}?text=${encodeURIComponent(mensajeQuiero(pieza, opcion, ahora))}`;
+
+  if (typeof module !== "undefined") module.exports = { precio, consulta, apiBase, codigoDePieza, viernesDeEnvio, fechaCorta, lineaApartado, mensajeQuiero, enlaceQuiero };
 
   // Los precios con su precio de lista tachado, igual en tarjetas y visor.
   function pintarPrecio(nodo, pieza) {
@@ -168,6 +205,20 @@
   const dialogMeta = root.querySelector(".piece-dialog-meta");
   const dialogPrice = root.querySelector(".piece-dialog-price");
   const dialogAsk = root.querySelector(".piece-dialog-ask");
+  const fotoBox = root.querySelector(".piece-dialog-photo");
+  const selloUltima = root.querySelector(".piece-dialog-stamp");
+  const botonZoom = root.querySelector(".ficha-zoom");
+  const pista = root.querySelector(".ficha-pista");
+  const compra = root.querySelector(".ficha-compra");
+  const precioBarra = root.querySelector(".ficha-barprecio");
+  const botonQuiero = root.querySelector(".ficha-quiero");
+  const botonCompartir = root.querySelector(".ficha-compartir");
+  const avisoFicha = root.querySelector(".ficha-aviso");
+  const hoja = root.querySelector(".ficha-hoja");
+  const hojaCerrar = root.querySelector(".ficha-hoja-cerrar");
+  const opciones = [...root.querySelectorAll(".ficha-op")];
+  const detras = [".piece-dialog-head", ".piece-dialog-scroll", ".piece-dialog-bar"].map((k) => root.querySelector(k));   // se inactivan con la hoja abierta
+  let actual = null;   // pieza que muestra la ficha
   let categoria = "";
   let busqueda = "";
   let deseada = codigoDePieza(location.search);   // pieza a abrir tras la primera carga (#590)
@@ -193,16 +244,161 @@
     && typeof matchMedia === "function" && !matchMedia("(prefers-reduced-motion: reduce)").matches;
   let fotoOrigen = null;   // la <img> de la tarjeta que abrió el visor
 
+  // ---- Ficha: zoom con gestos (Issue #645) ----
+  // Doble toque 1× ↔ 2.5×, pellizco entre 1× y 4×, arrastre mueve la foto acercada. Pointer events + transform, sin librería;
+  // `touch-action: none` en el contenedor (styles.css) evita que el navegador se quede el gesto o acerque la página (mismo truco que stickers.js, #537).
+  const ZOOM_DOBLE = 2.5;
+  const ZOOM_MAX = 4;
+  const zoom = { s: 1, x: 0, y: 0 };
+  const punteros = new Map();   // id → {x, y}
+  let pellizco = null;          // {d, s} al empezar con dos dedos
+  let toque = null;             // {t, x, y, movido} del dedo que está abajo
+  let ultimoToque = null;       // {t, x, y} del toque corto anterior (para el doble)
+  const limite = (v, a, b) => Math.min(b, Math.max(a, v));
+
+  function pintarZoom() {
+    const r = fotoBox.getBoundingClientRect();
+    const mx = (r.width * (zoom.s - 1)) / 2, my = (r.height * (zoom.s - 1)) / 2;
+    zoom.x = limite(zoom.x, -mx, mx);
+    zoom.y = limite(zoom.y, -my, my);
+    dialogImg.style.transform = zoom.s === 1 ? "" : `translate(${zoom.x}px, ${zoom.y}px) scale(${zoom.s})`;
+    fotoBox.classList[zoom.s > 1 ? "add" : "remove"]("acercada");
+    if (botonZoom) { botonZoom.textContent = zoom.s > 1 ? "Alejar" : "Acercar"; botonZoom.setAttribute("aria-pressed", String(zoom.s > 1)); }
+  }
+  // Cambia la escala dejando fijo el punto (px, py), medido desde el centro de la foto.
+  function acercarEn(nueva, px, py) {
+    nueva = limite(nueva, 1, ZOOM_MAX);
+    const k = nueva / zoom.s;
+    zoom.x = px - (px - zoom.x) * k;
+    zoom.y = py - (py - zoom.y) * k;
+    zoom.s = nueva;
+    if (nueva === 1) { zoom.x = 0; zoom.y = 0; }
+    if (nueva > 1 && pista) pista.hidden = true;
+    pintarZoom();
+  }
+  function reiniciarZoom() {
+    if (!fotoBox || !dialogImg) return;
+    punteros.clear(); pellizco = null; toque = null; ultimoToque = null;
+    zoom.s = 1; zoom.x = 0; zoom.y = 0;
+    if (pista) pista.hidden = true;
+    pintarZoom();
+  }
+  const centroDe = () => { const r = fotoBox.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; };
+  const alternarZoom = (x, y) => { const c = centroDe(); acercarEn(zoom.s > 1 ? 1 : ZOOM_DOBLE, x - c.x, y - c.y); };
+
+  if (fotoBox && dialogImg) {
+    fotoBox.addEventListener("pointerdown", (e) => {
+      if (e.target && e.target.closest && e.target.closest("button")) return;   // el botón Acercar no es parte del gesto
+      punteros.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      if (typeof fotoBox.setPointerCapture === "function") { try { fotoBox.setPointerCapture(e.pointerId); } catch {} }
+      if (punteros.size === 1) toque = { t: e.timeStamp, x: e.clientX, y: e.clientY, movido: false };
+      else if (punteros.size === 2) {
+        const [a, b] = [...punteros.values()];
+        pellizco = { d: Math.hypot(a.x - b.x, a.y - b.y) || 1, s: zoom.s };
+        if (toque) toque.movido = true;
+      }
+    });
+    fotoBox.addEventListener("pointermove", (e) => {
+      const antes = punteros.get(e.pointerId);
+      if (!antes) return;
+      const nuevo = { x: e.clientX, y: e.clientY };
+      if (toque && Math.hypot(nuevo.x - toque.x, nuevo.y - toque.y) > 10) toque.movido = true;
+      if (punteros.size === 2 && pellizco) {
+        const viejo = [...punteros.values()];
+        const m0 = { x: (viejo[0].x + viejo[1].x) / 2, y: (viejo[0].y + viejo[1].y) / 2 };
+        punteros.set(e.pointerId, nuevo);
+        const [a, b] = [...punteros.values()];
+        const m1 = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+        const c = centroDe();
+        acercarEn(pellizco.s * (Math.hypot(a.x - b.x, a.y - b.y) / pellizco.d), m1.x - c.x, m1.y - c.y);
+        zoom.x += m1.x - m0.x; zoom.y += m1.y - m0.y;
+        pintarZoom();
+      } else {
+        punteros.set(e.pointerId, nuevo);
+        if (zoom.s > 1) { zoom.x += nuevo.x - antes.x; zoom.y += nuevo.y - antes.y; pintarZoom(); }
+      }
+    });
+    const soltar = (e) => {
+      if (!punteros.delete(e.pointerId)) return;
+      pellizco = null;
+      if (punteros.size > 0) { if (toque) toque.movido = true; return; }   // quedó un dedo: sigue como arrastre, no cuenta como toque
+      const corto = toque && !toque.movido && e.type === "pointerup" && e.timeStamp - toque.t < 300;
+      if (!corto) { ultimoToque = null; toque = null; return; }
+      if (ultimoToque && e.timeStamp - ultimoToque.t < 300 && Math.hypot(toque.x - ultimoToque.x, toque.y - ultimoToque.y) < 30) {
+        ultimoToque = null;
+        alternarZoom(toque.x, toque.y);
+      } else ultimoToque = { t: e.timeStamp, x: toque.x, y: toque.y };
+      toque = null;
+    };
+    fotoBox.addEventListener("pointerup", soltar);
+    fotoBox.addEventListener("pointercancel", soltar);
+  }
+  // Sin gestos (teclado, lector de pantalla): el mismo cambio 1× ↔ 2.5× con un botón.
+  if (botonZoom) botonZoom.addEventListener("click", () => { const c = centroDe(); alternarZoom(c.x, c.y); });
+
+  // Pista de 3 s la primera vez de la sesión; sin almacenamiento, siempre.
+  function mostrarPista() {
+    if (!pista) return;
+    try { if (sessionStorage.getItem("ficha-pista")) return; sessionStorage.setItem("ficha-pista", "1"); } catch {}
+    pista.hidden = false;
+    setTimeout(() => { pista.hidden = true; }, 3000);
+  }
+
+  // ---- Ficha: «Lo quiero», hoja de tres opciones y Compartir ----
+  function abrirHoja() {
+    if (!hoja || !actual) return;
+    const ahora = Date.now();
+    for (const op of opciones) op.href = enlaceQuiero(actual, op.getAttribute("data-op"), ahora);
+    hoja.hidden = false;
+    for (const nodo of detras) if (nodo) nodo.inert = true;
+    if (opciones[0] && typeof opciones[0].focus === "function") opciones[0].focus();
+  }
+  function cerrarHoja(devolverFoco) {
+    if (!hoja || hoja.hidden) return;
+    hoja.hidden = true;
+    for (const nodo of detras) if (nodo) nodo.inert = false;
+    if (devolverFoco && botonQuiero && typeof botonQuiero.focus === "function") botonQuiero.focus();
+  }
+  async function compartir() {
+    if (!actual) return;
+    const url = `https://eldolaron.com/?pieza=${encodeURIComponent(actual.codigo)}`;
+    try {
+      if (navigator.share) { await navigator.share({ title: actual.nombre, text: `${actual.nombre} en El Dolarón`, url }); return; }
+    } catch (error) { if (error && error.name === "AbortError") return; }
+    try { await navigator.clipboard.writeText(url); avisoFicha.textContent = "Enlace copiado"; }
+    catch { avisoFicha.textContent = `Copia este enlace: ${url}`; }
+  }
+  if (botonQuiero) botonQuiero.addEventListener("click", abrirHoja);
+  if (hojaCerrar) hojaCerrar.addEventListener("click", () => cerrarHoja(true));
+  if (hoja) hoja.addEventListener("click", (ev) => { if (ev.target === hoja) cerrarHoja(true); });
+  if (botonCompartir) botonCompartir.addEventListener("click", compartir);
+
   function abrirVisor(pieza, disparador, img) {
     if (!dialog) return;
     focoAnterior = disparador;
     fotoOrigen = img || null;
     if (dialogTitle) dialogTitle.textContent = pieza.nombre;
-    if (dialogImg) { dialogImg.src = pieza.foto; dialogImg.alt = pieza.nombre; }
+    actual = pieza;
+    cerrarHoja(false);
+    reiniciarZoom();
+    if (dialogImg) { dialogImg.src = pieza.foto; dialogImg.alt = pieza.nombre; }   // siempre la foto completa, no el recorte
     if (dialogMeta) {
-      dialogMeta.textContent = [pieza.marca, pieza.talla ? `Talla ${pieza.talla}` : "", pieza.codigo].filter(Boolean).join(" · ");
+      // Marca (o categoría si no hay) · talla · código
+      const rubro = pieza.marca || (CATEGORIAS.find(([k]) => k === pieza.categoria) || [])[1];
+      dialogMeta.textContent = [rubro && rubro !== "Otros" ? rubro : "", pieza.talla ? `Talla ${pieza.talla}` : "", pieza.codigo].filter(Boolean).join(" · ");
     }
-    if (dialogPrice) pintarPrecio(dialogPrice, pieza);
+    if (dialogPrice) {
+      pintarPrecio(dialogPrice, pieza);
+      if (pieza.precio_lista > pieza.precio) {
+        const ahorro = document.createElement("b");
+        ahorro.textContent = `Ahorras ${precio(pieza.precio_lista - pieza.precio)}`;
+        dialogPrice.append(ahorro);
+      }
+    }
+    if (precioBarra) precioBarra.textContent = precio(pieza.precio);
+    if (selloUltima) selloUltima.hidden = pieza.ultima !== true;   // lo decide el servidor; sin el campo no se muestra nada
+    if (compra) compra.textContent = lineaApartado(pieza);
+    if (avisoFicha) avisoFicha.textContent = "";
     if (dialogAsk) {
       dialogAsk.href = consulta(pieza);
       dialogAsk.setAttribute("aria-label", `Preguntar por WhatsApp: ${pieza.nombre}`);
@@ -211,6 +407,7 @@
       if (typeof dialog.showModal === "function") dialog.showModal();
       else dialog.open = true;
       if (dialogClose && typeof dialogClose.focus === "function") dialogClose.focus();
+      mostrarPista();
     };
     if (!conMorph || !fotoOrigen || !fotoOrigen.style) { abrir(); return; }
     // El nombre debe ser único en pantalla: la miniatura lo lleva solo en la captura «antes»;
@@ -240,9 +437,11 @@
       else { dialog.open = false; if (focoAnterior && typeof focoAnterior.focus === "function") focoAnterior.focus(); }
     });
     // Esc y el fondo cierran con el mismo morph.
-    dialog.addEventListener("cancel", (ev) => { ev.preventDefault(); cerrarVisor(); });
+    dialog.addEventListener("cancel", (ev) => { ev.preventDefault(); if (hoja && !hoja.hidden) cerrarHoja(true); else cerrarVisor(); });
     dialog.addEventListener("click", (ev) => { if (ev.target === dialog && typeof dialog.close === "function") cerrarVisor(); });
     dialog.addEventListener("close", () => {
+      cerrarHoja(false);
+      reiniciarZoom();
       if (focoAnterior && typeof focoAnterior.focus === "function") focoAnterior.focus();
     });
   }
