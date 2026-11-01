@@ -40,6 +40,8 @@ declare global {
     DEV_SERVICIO?: string;
     /** Tope por IP a la API del host público (binding ratelimits de wrangler.jsonc). Ausente = sin tope (local, pruebas). */
     LIMITE_PORTAL?: RateLimit;
+    /** Eventos de la ficha del catálogo (Issue #651, catalogo.ts). Workers Analytics Engine; ausente en local y pruebas = no se guarda nada. */
+    EVENTOS?: AnalyticsEngineDataset;
     /** Host público exacto. Ausente = portal inaccesible. */
     HOST_PORTAL?: string;
     FIREBASE_PROJECT_ID?: string;

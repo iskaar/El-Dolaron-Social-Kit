@@ -31,7 +31,8 @@ export const VENDIBLE = `${PUBLICABLE} and ${PRESENTABLE}`;
 
 const CORS = {
   'access-control-allow-origin': ORIGEN_SITIO,
-  'access-control-allow-methods': 'GET, HEAD, OPTIONS',
+  'access-control-allow-methods': 'GET, HEAD, POST, OPTIONS',
+  'access-control-allow-headers': 'content-type',
   'access-control-max-age': '86400',
 };
 
@@ -159,14 +160,37 @@ async function foto(env: Env, codigo: string, recorte = false): Promise<Response
   });
 }
 
+// Medicion de la ficha (Issue #651, docs/UX-COMPRA.md §6). Solo evento, pieza y origen: nada de IP, agente ni identificadores.
+const EVENTOS = ['ficha_abierta', 'lo_quiero', 'apartar_recoger', 'apartar_envio', 'preguntar', 'whatsapp_abierto', 'compartir'];
+const ORIGENES = ['sitio', 'portal'];
+
+async function evento(request: Request, env: Env): Promise<Response> {
+  const malo = () => json({ error: 'Evento no válido.' }, 400);
+  let c: Record<string, unknown> | null = null;
+  try {
+    const texto = await request.text();
+    if (texto.length <= 300) c = JSON.parse(texto); // sendBeacon manda text/plain: se lee el cuerpo, no el content-type
+  } catch { return malo(); }
+  if (!c || typeof c !== 'object') return malo();
+  const { evento: e, codigo, origen } = c;
+  if (typeof e !== 'string' || typeof codigo !== 'string' || typeof origen !== 'string'
+    || !EVENTOS.includes(e) || !CODIGO.test(codigo) || !ORIGENES.includes(origen)) return malo();
+  try { env.EVENTOS?.writeDataPoint({ blobs: [e, codigo, origen], indexes: [e] }); } catch { /* medir nunca rompe la ficha */ }
+  return new Response(null, { status: 204, headers: CORS });
+}
+
 /** null = la ruta no es del catalogo. */
 export async function catalogoPublico(request: Request, env: Env, url: URL): Promise<Response | null> {
   const { pathname } = url;
   const esFoto = pathname.startsWith('/api/catalogo/foto/');
   const esRecorte = pathname.startsWith('/api/catalogo/recorte/');
   const esDestacados = pathname === '/api/catalogo/destacados';
-  if (pathname !== '/api/catalogo' && !esFoto && !esRecorte && !esDestacados) return null;
+  const esEvento = pathname === '/api/catalogo/evento';
+  if (pathname !== '/api/catalogo' && !esFoto && !esRecorte && !esDestacados && !esEvento) return null;
   if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: CORS });
+  if (esEvento) {
+    return request.method === 'POST' ? evento(request, env) : json({ error: 'Método no permitido.' }, 405, { allow: 'POST, OPTIONS' });
+  }
   if (request.method !== 'GET' && request.method !== 'HEAD') {
     return json({ error: 'Método no permitido.' }, 405, { allow: 'GET, HEAD, OPTIONS' });
   }

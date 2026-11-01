@@ -269,6 +269,29 @@ Validación de la fase: `npm test`, `npm run typecheck`, `python tools/validate_
 
 Las dos últimas filas ya se pueden medir **hoy**, antes de tocar nada: cuántos pedidos por semana nacen de WhatsApp y cuántos se cierran. Ese es el número de base del plan. Lo demás requiere A6.
 
+### 6.1 Cómo consultar los eventos (A6, Issue #651)
+
+Los eventos de la ficha se guardan en Workers Analytics Engine, dataset `el_dolaron_eventos` (el sandbox usa `el_dolaron_eventos_sandbox`), con el binding `EVENTOS`. El dataset se crea solo con la primera escritura tras el deploy. Cada punto lleva `blob1` = evento, `blob2` = código de pieza, `blob3` = origen (`sitio` o `portal`); nada de IP, agente de usuario, cookies ni datos de personas. Eventos: `ficha_abierta`, `lo_quiero`, `apartar_recoger`, `apartar_envio`, `preguntar`, `whatsapp_abierto`, `compartir`. El evento `catalogo` de la tabla de arriba no se mide todavía.
+
+Se consulta con la [SQL API de Analytics Engine](https://developers.cloudflare.com/analytics/analytics-engine/sql-api/) (`POST https://api.cloudflare.com/client/v4/accounts/<ACCOUNT_ID>/analytics_engine/sql`, el SQL va en el cuerpo). Necesita un token de API con permiso **Account Analytics: Read**, que crea Isaac en el panel de Cloudflare; no se guarda en el repositorio.
+
+```sql
+-- Embudo de los últimos 7 días
+SELECT blob1 AS evento, count() AS n
+FROM el_dolaron_eventos
+WHERE timestamp > NOW() - INTERVAL '7' DAY
+GROUP BY evento
+ORDER BY n DESC
+
+-- Piezas con más "Lo quiero"
+SELECT blob2 AS codigo, count() AS n
+FROM el_dolaron_eventos
+WHERE blob1 = 'lo_quiero' AND timestamp > NOW() - INTERVAL '7' DAY
+GROUP BY codigo ORDER BY n DESC LIMIT 20
+```
+
+Las cifras son conteos de eventos, no de personas (no hay identificador). Un panel dentro de la app queda para después.
+
 ---
 
 ## 7. Prueba con personas reales (antes y después de «Ahora»)

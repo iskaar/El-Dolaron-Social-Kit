@@ -189,6 +189,14 @@
   if (!root) return;
 
   const base = apiBase(location.search);
+  // Medición de la ficha (Issue #651): solo evento, código de pieza y origen. text/plain evita la consulta previa de CORS; errores en silencio.
+  function evento(nombre, codigo) {
+    try {
+      const url = `${base}/api/catalogo/evento`;
+      const cuerpo = JSON.stringify({ evento: nombre, codigo, origen: "sitio" });
+      if (!(navigator.sendBeacon && navigator.sendBeacon(url, cuerpo))) fetch(url, { method: "POST", body: cuerpo, keepalive: true }).catch(() => {});
+    } catch {}
+  }
   const chips = root.querySelector(".chips");
   const grid = root.querySelector(".catalog-grid");
   const status = root.querySelector(".catalog-status");
@@ -347,6 +355,7 @@
   // ---- Ficha: «Lo quiero», hoja de tres opciones y Compartir ----
   function abrirHoja() {
     if (!hoja || !actual) return;
+    evento("lo_quiero", actual.codigo);
     const ahora = Date.now();
     for (const op of opciones) op.href = enlaceQuiero(actual, op.getAttribute("data-op"), ahora);
     hoja.hidden = false;
@@ -361,6 +370,7 @@
   }
   async function compartir() {
     if (!actual) return;
+    evento("compartir", actual.codigo);
     const url = `https://eldolaron.com/?pieza=${encodeURIComponent(actual.codigo)}`;
     try {
       if (navigator.share) { await navigator.share({ title: actual.nombre, text: `${actual.nombre} en El Dolarón`, url }); return; }
@@ -372,6 +382,8 @@
   if (hojaCerrar) hojaCerrar.addEventListener("click", () => cerrarHoja(true));
   if (hoja) hoja.addEventListener("click", (ev) => { if (ev.target === hoja) cerrarHoja(true); });
   if (botonCompartir) botonCompartir.addEventListener("click", compartir);
+  for (const op of opciones) op.addEventListener("click", () => { if (actual) evento(op.getAttribute("data-op") === "preguntar" ? "preguntar" : `apartar_${op.getAttribute("data-op")}`, actual.codigo); });
+  if (dialogAsk) dialogAsk.addEventListener("click", () => { if (actual) evento("whatsapp_abierto", actual.codigo); });
 
   function abrirVisor(pieza, disparador, img) {
     if (!dialog) return;
@@ -379,6 +391,7 @@
     fotoOrigen = img || null;
     if (dialogTitle) dialogTitle.textContent = pieza.nombre;
     actual = pieza;
+    evento("ficha_abierta", pieza.codigo);
     cerrarHoja(false);
     reiniciarZoom();
     if (dialogImg) { dialogImg.src = pieza.foto; dialogImg.alt = pieza.nombre; }   // siempre la foto completa, no el recorte
