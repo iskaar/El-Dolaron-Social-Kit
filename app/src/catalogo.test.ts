@@ -61,7 +61,9 @@ test('catalogo: lista solo piezas vendibles, sin campos internos', async () => {
       codigo: buena, nombre: 'Buena', marca: 'Levis', categoria: 'ropa', talla: null, precio: 25000, precio_lista: 0,
       foto: `https://${HOST}/api/catalogo/foto/${buena}`,
       recorte: null,
+      llegado_en: '2026-10-01', ultima: false,
     }]);
+    assert.ok(!('stock' in c.piezas[0]), 'la existencia no sale');
   } finally { t.db.close(); }
 });
 
@@ -76,6 +78,32 @@ test('catalogo: precio_lista solo si es mayor que el precio', async () => {
     assert.equal(lista(mayor), 19900);
     assert.equal(lista(igual), 0);
     assert.equal(lista(menor), 0);
+  } finally { t.db.close(); }
+});
+
+test('catalogo (Issue #646): ultima solo con stock 1, llegado_en solo el dia y nunca la existencia', async () => {
+  const t = publica();
+  try {
+    const una = pieza(t, { stock: 1 });
+    const dos = pieza(t, { stock: 2 });
+    const { piezas } = await leer(await t.llamar('/api/catalogo'));
+    const de = (c: string) => piezas.find((p: any) => p.codigo === c);
+    assert.equal(de(una).ultima, true);
+    assert.equal(de(dos).ultima, false);
+    for (const p of piezas) {
+      assert.match(p.llegado_en, /^\d{4}-\d{2}-\d{2}$/);
+      assert.ok(!('stock' in p) && !('cantidad' in p) && !('creado_en' in p));
+    }
+    // destacados: ambos ordenes traen llegado_en sin existencia; ultima sigue solo en ?orden=precio.
+    const porVentas = (await leer(await t.llamar('/api/catalogo/destacados'))).piezas;
+    const porPrecio = (await leer(await t.llamar('/api/catalogo/destacados?orden=precio'))).piezas;
+    for (const p of [...porVentas, ...porPrecio]) {
+      assert.match(p.llegado_en, /^\d{4}-\d{2}-\d{2}$/);
+      assert.ok(!('stock' in p) && !('creado_en' in p));
+    }
+    assert.ok(porVentas.every((p: any) => !('ultima' in p)));
+    assert.equal(porPrecio.find((p: any) => p.codigo === una).ultima, true);
+    assert.equal(porPrecio.find((p: any) => p.codigo === dos).ultima, false);
   } finally { t.db.close(); }
 });
 
