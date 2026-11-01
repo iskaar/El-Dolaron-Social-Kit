@@ -93,6 +93,8 @@ test('el prompt solo afirma los datos aprobados', () => {
   assert.match(PROMPT, /Jardín Hidalgo 129/);
   assert.match(PROMPT, /\$100 \(o el total si la pieza cuesta menos\).*7 días/);
   assert.match(PROMPT, /envíos.*no afirmes ni niegues/);
+  // Issue #673 (2.ª parte): el apartado desde el portal (#668) se dice solo para piezas de buscar_productos.
+  assert.match(PROMPT, /también puede apartarla sola desde su enlace.*«Apartar aquí».*24 horas/);
   // Issue #673: la ficha de una pieza concreta sí se puede pegar; cualquier otro enlace sigue prohibido.
   assert.doesNotMatch(PROMPT, /no pegues enlaces de piezas/);
   assert.match(PROMPT, /Si la persona pregunta por una pieza concreta o por una sola de las que encontraste, puedes pegar su enlace \(campo url de la herramienta\)/);
