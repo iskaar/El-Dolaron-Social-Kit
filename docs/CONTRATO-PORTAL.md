@@ -89,7 +89,7 @@ Pendiente: por instrucción de Isaac, A07 no ejecuta git de escritura. El índic
 
 ## Referidos — prototipo con conocidos, Issue #489
 
-**Estado: en producción (#597), con `REFERIDOS_ABIERTO=si`. Los describen las bases 2026-10-v6 (punto 7; la v5 la aprobó el abogado el 30/10/2026 en PR #355, la v6 del piloto #631 también el 30/10/2026) y el aviso 2026-10-v3.** Migración `app/migracion-055-referidos.sql` (tabla `referidos`, trigger de tope, índice único de movimientos); se corre antes del Worker. Las constantes están en `app/src/referidos.ts`.
+**Estado: en producción (#597), con `REFERIDOS_ABIERTO=si`. Los describen las bases 2026-10-v6 (punto 7; la v5 la aprobó el abogado el 30/10/2026 en PR #355, la v6 del piloto #631 también el 30/10/2026) y el aviso 2026-10-v3. Las bases 2026-10-v7 y el aviso 2026-10-v4 (niveles VIP y Negocio, R1 y R2; #635) esperan el visto bueno del abogado y no están implementadas.** Migración `app/migracion-055-referidos.sql` (tabla `referidos`, trigger de tope, índice único de movimientos); se corre antes del Worker. Las constantes están en `app/src/referidos.ts`.
 
 - **Piloto familia y amigos (#631)**: `CODIGO_PILOTO` (en `referidos.ts`) admite 50 registros (trigger `piloto_tope`, migración 065). Da solo los 50 D del alta, sin referente ni premio por compra; la cuenta queda en `piloto_socios`.
 - **Código del referente**: `DOL` + número de socio + letra de verificación (`DOL42K`), calculado, sin azar ni columna. Con `REFERIDOS_ABIERTO` encendida, solo las cuentas de `piloto_socios` tienen código válido; quien se une con un DOL no recibe uno. Enlace `/?r=<código>`.
