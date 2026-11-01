@@ -48,6 +48,7 @@ function aPieza(p: Record<string, any>, url: URL) {
     precio: p.precio, precio_lista: p.precio_lista > p.precio ? p.precio_lista : 0,
     foto: `${url.origin}/api/catalogo/foto/${p.codigo}`,
     recorte: p.recorte_estado === 'listo' && p.recorte_revision === 'ok' ? `${url.origin}/api/catalogo/recorte/${p.codigo}` : null,
+    llegado_en: String(p.creado_en).slice(0, 10), // solo el dia (Issue #646): "Llego esta semana", sin hora
   };
 }
 
@@ -58,12 +59,12 @@ function aPieza(p: Record<string, any>, url: URL) {
  */
 async function destacados(env: Env, url: URL): Promise<Response> {
   if (url.searchParams.get('orden') === 'precio') {
-    const filas = await env.DB.prepare(`select p.codigo, p.nombre, p.marca, p.categoria, p.talla, p.precio, p.precio_lista, p.stock, p.recorte_estado, p.recorte_revision from productos p
+    const filas = await env.DB.prepare(`select p.codigo, p.nombre, p.marca, p.categoria, p.talla, p.precio, p.precio_lista, p.stock, p.creado_en, p.recorte_estado, p.recorte_revision from productos p
       where ${VENDIBLE} order by p.precio desc, p.creado_en desc, p.codigo limit ?`).bind(DESTACADOS).all<Record<string, any>>();
     return json({ piezas: filas.results.map((p) => ({ ...aPieza(p, url), ultima: p.stock === 1 })) }, 200, { 'cache-control': 'public, max-age=300' });
   }
   const desde = new Date(Date.now() - DIAS_DESTACADOS * 86_400_000).toISOString();
-  const filas = await env.DB.prepare(`select p.codigo, p.nombre, p.marca, p.categoria, p.talla, p.precio, p.precio_lista, p.recorte_estado, p.recorte_revision from productos p
+  const filas = await env.DB.prepare(`select p.codigo, p.nombre, p.marca, p.categoria, p.talla, p.precio, p.precio_lista, p.creado_en, p.recorte_estado, p.recorte_revision from productos p
     left join (select l.codigo, sum(l.cantidad) as n from venta_lineas l join ventas v on v.id = l.venta_id
       where v.cancelada = 0 and v.creado_en >= ? group by l.codigo) s on s.codigo = p.codigo
     where ${VENDIBLE} order by coalesce(s.n, 0) desc, p.creado_en desc, p.codigo limit ?`)
@@ -128,7 +129,7 @@ async function listar(env: Env, url: URL): Promise<Response> {
   const args: unknown[] = [...(categoria === null ? [] : [categoria]), ...(q ? [`%${normalizarBusqueda(q)}%`] : [])];
   const desde = cursor ? ' and (p.creado_en < ? or (p.creado_en = ? and p.codigo > ?))' : '';
   const [filas, cuenta] = await Promise.all([
-    env.DB.prepare(`select p.codigo, p.nombre, p.marca, p.categoria, p.talla, p.precio, p.precio_lista, p.creado_en, p.recorte_estado, p.recorte_revision from productos p
+    env.DB.prepare(`select p.codigo, p.nombre, p.marca, p.categoria, p.talla, p.precio, p.precio_lista, p.stock, p.creado_en, p.recorte_estado, p.recorte_revision from productos p
       where ${filtro}${desde} order by p.creado_en desc, p.codigo limit ? offset ?`)
       .bind(...args, ...(cursor ? [cursor[1], cursor[1], cursor[2]] : []), POR_PAGINA + 1, cursor ? 0 : (pagina - 1) * POR_PAGINA)
       .all<Record<string, any>>(),
@@ -136,7 +137,7 @@ async function listar(env: Env, url: URL): Promise<Response> {
   ]);
   const hayMas = filas.results.length > POR_PAGINA;
   const ultima = filas.results[POR_PAGINA - 1];
-  const piezas = filas.results.slice(0, POR_PAGINA).map((p) => aPieza(p, url));
+  const piezas = filas.results.slice(0, POR_PAGINA).map((p) => ({ ...aPieza(p, url), ultima: p.stock === 1 })); // solo la marca, nunca stock
   return json({ piezas, pagina, hay_mas: hayMas, siguiente: hayMas ? `${ultima.creado_en}~${ultima.codigo}` : null, total: cuenta?.n ?? 0 }, 200,
     { 'cache-control': 'public, max-age=300' });
 }
