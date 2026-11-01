@@ -1,6 +1,7 @@
 // Run: node tools/check_site_catalogo.cjs
 const assert = require("node:assert/strict");
-const { precio, apiBase, codigoDePieza, viernesDeEnvio, fechaCorta, lineaApartado, enlaceLoQuiero, BANDAS, filtrosDeUrl, paramsDeFiltros, busquedaConFiltros } = require("../site/public/catalogo.js");
+const { precio, apiBase, codigoDePieza, viernesDeEnvio, fechaCorta, lineaApartado, enlaceLoQuiero, BANDAS, filtrosDeUrl, paramsDeFiltros, busquedaConFiltros,
+  TOPE_CARRITO, CLAVE_CARRITO, codigosValidos, agregarCodigo, urlPortal, piezasDe } = require("../site/public/catalogo.js");
 
 assert.equal(precio(15000), "$150");
 assert.equal(precio(24950), "$249.50");
@@ -65,12 +66,14 @@ function pagina(fetcher, extra = {}) {
     ".chips", ".catalog-grid", ".catalog-status", ".catalog-more", ".catalog-fallback", ".catalog-retry",
     ".catalog-search", ".search-input", ".catalog-clear", ".piece-dialog", ".piece-dialog-close",
     ".piece-dialog-img", ".piece-dialog-title", ".piece-dialog-meta", ".piece-dialog-price",
-    ".piece-dialog-photo", ".piece-dialog-stamp", ".ficha-zoom", ".ficha-pista", ".ficha-compra", ".ficha-barprecio", ".ficha-quiero",
+    ".piece-dialog-photo", ".piece-dialog-stamp", ".ficha-zoom", ".ficha-pista", ".ficha-compra", ".ficha-barprecio", ".ficha-comprar", ".ficha-carrito", ".ficha-dudas",
+    ".cart-button", ".cart-n", ".cart-dialog", ".cart-title", ".cart-notice", ".cart-empty", ".cart-list", ".cart-summary", ".cart-total", ".cart-apartar", ".cart-close",
     ".ficha-compartir", ".ficha-aviso", ".piece-dialog-head", ".piece-dialog-scroll", ".piece-dialog-bar",
     ".catalog-filters", ".filter-size", ".filter-size-select", ".chips-filters",
   ];
   const partes = Object.fromEntries(selectores.map((k) => [k, new Nodo()]));
   partes[".catalog-clear"].hidden = true;
+  partes[".cart-dialog"].querySelectorAll = () => [partes[".cart-close"]];
   const root = new Nodo();
   root.querySelector = (k) => partes[k];
   const relojes = [];
@@ -175,16 +178,18 @@ const tick = () => new Promise((r) => setImmediate(r));
   await tick();
   assert.equal(consultas.at(-1), null);   // malformado: carga normal, sin búsqueda
 
-  // Ficha (Issue #645): datos, última pieza, línea de apartado, enlace «Lo quiero», zoom y Compartir.
+  // Ficha (Issue #645, #681): datos, última pieza, línea de apartado, «Comprar ya», «¿Dudas?», zoom y Compartir.
   const copiados = [];
   const eventos = [];
+  const almacen = new Map();
   const ficha = pagina(async () => ({
     ok: true,
     json: async () => ({ piezas: [
       { nombre: "Chamarra", marca: "Levis", talla: "L", codigo: "ED-5", precio: 30000, precio_lista: 90000, ultima: true, foto: "https://x/f.jpg", recorte: "https://x/r.png" },
       { nombre: "Taza", categoria: "hogar", codigo: "ED-6", precio: 4000, foto: "https://x/t.jpg" },
     ], total: 2, hay_mas: false, siguiente: null }),
-  }), { contexto: { navigator: { clipboard: { writeText: async (t) => copiados.push(t) }, sendBeacon: (url, cuerpo) => { eventos.push(JSON.parse(cuerpo).evento); return true; } } } });
+  }), { contexto: { localStorage: { getItem: (k) => (almacen.has(k) ? almacen.get(k) : null), setItem: (k, v) => almacen.set(k, v) },
+    navigator: { clipboard: { writeText: async (t) => copiados.push(t) }, sendBeacon: (url, cuerpo) => { eventos.push(JSON.parse(cuerpo).evento); return true; } } } });
   await tick();
   const f = ficha.partes;
   const abre = (i) => f[".catalog-grid"].children[i].listeners.click();
@@ -201,17 +206,37 @@ const tick = () => new Promise((r) => setImmediate(r));
   assert.equal(f[".piece-dialog-meta"].textContent, "Hogar y cocina · ED-6");   // sin marca, la categoría
   assert.equal(f[".piece-dialog-stamp"].hidden, true);                          // sin `ultima`, nada
   assert.match(f[".ficha-compra"].textContent, /^Se paga completa al apartar\./);
-  // «Lo quiero» es un enlace directo a WhatsApp con solo el código; no hay hoja ni «Preguntar por WhatsApp».
+  // «¿Dudas?» es un enlace directo a WhatsApp con solo el código; «Comprar ya» lleva al portal con la pieza en la URL (#681). «Lo quiero» ya no es botón.
   abre(0);
-  assert.equal(f[".ficha-quiero"].href, "https://wa.me/524445437754?text=Quiero%20producto%20ED-5");
+  assert.equal(f[".ficha-dudas"].href, "https://wa.me/524445437754?text=Quiero%20producto%20ED-5");
+  assert.equal(f[".ficha-comprar"].href, "https://dolarones.eldolaron.com/?carrito=ED-5");
+  assert.equal(f[".ficha-carrito"].textContent, "Agregar al carrito");
   abre(1);
-  assert.equal(f[".ficha-quiero"].href, "https://wa.me/524445437754?text=Quiero%20producto%20ED-6");   // se actualiza con la pieza abierta
+  assert.equal(f[".ficha-dudas"].href, "https://wa.me/524445437754?text=Quiero%20producto%20ED-6");   // se actualiza con la pieza abierta
+  assert.equal(f[".ficha-comprar"].href, "https://dolarones.eldolaron.com/?carrito=ED-6");
   assert.equal(f[".piece-dialog"].open, true);
-  // Medición (#651): abrir manda ficha_abierta y tocar «Lo quiero» solo lo_quiero; nada de apartar_*, preguntar ni whatsapp_abierto.
+  // Medición (#651, #681): abrir manda ficha_abierta; «¿Dudas?» solo lo_quiero; «Comprar ya» solo comprar_ya; nada de apartar_*, preguntar ni whatsapp_abierto.
   eventos.length = 0;
   abre(0);
-  f[".ficha-quiero"].listeners.click();
-  assert.deepEqual(eventos, ["ficha_abierta", "lo_quiero"]);
+  f[".ficha-dudas"].listeners.click();
+  f[".ficha-comprar"].listeners.click();
+  assert.deepEqual(eventos, ["ficha_abierta", "lo_quiero", "comprar_ya"]);
+  // «Agregar al carrito»: guarda el código, cuenta, avisa (aria-live), pasa a «Ver carrito» y no lo agrega dos veces.
+  eventos.length = 0;
+  assert.equal(f[".cart-n"].textContent, "Carrito (0)");
+  f[".ficha-carrito"].listeners.click();
+  assert.equal(almacen.get("carrito-dolaron"), '["ED-5"]');
+  assert.equal(f[".cart-n"].textContent, "Carrito (1)");
+  assert.equal(f[".ficha-aviso"].textContent, "Agregado al carrito. Llevas 1 pieza.");
+  assert.equal(f[".ficha-carrito"].textContent, "En tu carrito (1) · Ver carrito");
+  assert.deepEqual(eventos, ["carrito_agregar"]);
+  f[".ficha-carrito"].listeners.click();   // ya está: abre el carrito, no agrega otra vez
+  assert.equal(almacen.get("carrito-dolaron"), '["ED-5"]');
+  assert.deepEqual(eventos, ["carrito_agregar"]);
+  assert.equal(f[".cart-dialog"].open, true);
+  f[".cart-dialog"].close();
+  abre(1);
+  assert.equal(f[".ficha-carrito"].textContent, "Agregar al carrito");   // otra pieza: el botón vuelve a agregar
   f[".piece-dialog"].listeners.cancel({ preventDefault() {} });   // Esc cierra la ficha
   assert.equal(f[".piece-dialog"].open, false);
   abre(0);
@@ -240,6 +265,65 @@ const tick = () => new Promise((r) => setImmediate(r));
   await f[".ficha-compartir"].listeners.click();
   assert.deepEqual(copiados, ["https://eldolaron.com/?pieza=ED-5"]);
   assert.equal(f[".ficha-aviso"].textContent, "Enlace copiado");
+
+  // Hoja del carrito (#681): revisa cada pieza contra el catálogo, marca «Se vendió», «Apartar todo» lleva al portal solo las disponibles.
+  const guardados = new Map([["carrito-dolaron", '["ED-5","ED-9","ED-6"]']]);
+  const eventosBolsa = [];
+  const catalogoBolsa = [{ nombre: "Chamarra", codigo: "ED-5", precio: 30000, foto: "https://x/f.jpg" }, { nombre: "Taza", codigo: "ED-6", precio: 4000, foto: "https://x/t.jpg" }];
+  const contextoBolsa = (almacenBolsa) => ({ localStorage: { getItem: (k) => (almacenBolsa.has(k) ? almacenBolsa.get(k) : null), setItem: (k, v) => almacenBolsa.set(k, v) },
+    navigator: { sendBeacon: (url, cuerpo) => { eventosBolsa.push(JSON.parse(cuerpo).evento); return true; } } });
+  const bolsa = pagina(async (url) => {
+    const c = new URL(url).searchParams.get("codigo");
+    const piezas = catalogoBolsa.filter((p) => !c || p.codigo === c);
+    return { ok: true, json: async () => ({ piezas, total: piezas.length, hay_mas: false, siguiente: null }) };
+  }, { contexto: contextoBolsa(guardados) });
+  await tick();
+  const b = bolsa.partes;
+  assert.equal(b[".cart-n"].textContent, "Carrito (3)");   // lo guardado antes se recupera
+  b[".cart-button"].listeners.click();
+  assert.equal(b[".cart-dialog"].open, true);
+  assert.equal(b[".cart-title"].focused, true);
+  await tick();
+  assert.deepEqual(b[".cart-list"].children.map((li) => li.children[1].children.map((n) => n.textContent)), [["Chamarra", "$300"], ["ED-9", "Se vendió"], ["Taza", "$40"]]);
+  assert.equal(b[".cart-total"].textContent, "Total de las piezas: $340");   // la vendida no suma
+  assert.equal(b[".cart-notice"].textContent, "Una pieza ya se vendió: no cuenta en el total.");
+  assert.equal(b[".cart-apartar"].hidden, false);
+  assert.equal(b[".cart-apartar"].href, "https://dolarones.eldolaron.com/?carrito=ED-5,ED-6");   // la vendida no viaja al portal
+  assert.match(b[".cart-list"].children[1].className, /vendida/);
+  assert.equal(b[".cart-list"].children[0].children[2].attrs["aria-label"], "Quitar Chamarra del carrito");
+  eventosBolsa.length = 0;
+  b[".cart-apartar"].listeners.click();
+  assert.deepEqual(eventosBolsa, ["carrito_apartar", "carrito_apartar"]);   // una por pieza que viaja
+  b[".cart-list"].children[0].children[2].listeners.click();   // Quitar la chamarra
+  assert.equal(guardados.get("carrito-dolaron"), '["ED-9","ED-6"]');
+  assert.equal(b[".cart-total"].textContent, "Total de las piezas: $40");
+  assert.equal(b[".cart-notice"].textContent, "Quitaste Chamarra.");
+  assert.equal(b[".cart-apartar"].href, "https://dolarones.eldolaron.com/?carrito=ED-6");
+  b[".cart-dialog"].close();   // la vendida ya se avisó: sale del carrito al cerrar
+  assert.equal(guardados.get("carrito-dolaron"), '["ED-6"]');
+  assert.equal(b[".cart-n"].textContent, "Carrito (1)");
+  // Sin red no deja apartar algo que no pudo revisar, y no borra piezas por un fallo.
+  const sinRed = new Map([["carrito-dolaron", '["ED-5"]']]);
+  let hayRed = true;
+  const caida = pagina(async (url) => {
+    if (new URL(url).searchParams.get("codigo") && !hayRed) throw new Error("red");
+    return { ok: true, json: async () => ({ piezas: [], total: 0, hay_mas: false, siguiente: null }) };
+  }, { contexto: contextoBolsa(sinRed) });
+  await tick();
+  hayRed = false;
+  caida.partes[".cart-button"].listeners.click();
+  await tick();
+  assert.equal(caida.partes[".cart-apartar"].hidden, true);
+  assert.match(caida.partes[".cart-notice"].textContent, /No pudimos revisar todas las piezas/);
+  assert.equal(caida.partes[".cart-list"].children[0].children[1].children[1].textContent, "No pudimos revisarla");
+  caida.partes[".cart-dialog"].close();
+  assert.equal(sinRed.get("carrito-dolaron"), '["ED-5"]');
+  // Vacío: lo dice y no ofrece apartar.
+  const vacia = pagina(async () => ({ ok: true, json: async () => ({ piezas: [], total: 0, hay_mas: false, siguiente: null }) }), { contexto: contextoBolsa(new Map()) });
+  await tick();
+  vacia.partes[".cart-button"].listeners.click();
+  assert.equal(vacia.partes[".cart-empty"].hidden, false);
+  assert.equal(vacia.partes[".cart-summary"].hidden, true);
 
   // Tarjetas (Issue #648): «Lo quiero» abre la ficha, sin chip «Ver foto» ni WhatsApp directo, y el sello solo con `ultima: true`.
   const solo = (nodo, clase) => nodo.children.filter((n) => String(n.className).split(" ").includes(clase));
@@ -412,5 +496,29 @@ const tick = () => new Promise((r) => setImmediate(r));
   await tick();
   assert.equal(vieja.partes[".catalog-filters"].hidden, true);
 
-  console.log("Validated catalog prices in centavos, WhatsApp text, development-only API override, search, ficha, cards (Lo quiero button, stamp only with ultima), retry, size and timeout");
+  // El carrito del sitio es copia del del portal (app/public/carrito.js): mismas reglas, mismo tope, misma clave y el mismo ?carrito=.
+  const portal = await import(require("node:url").pathToFileURL(join(__dirname, "../app/public/carrito.js")).href);
+  assert.equal(TOPE_CARRITO, 10);
+  assert.equal(portal.TOPE_CARRITO, TOPE_CARRITO);
+  assert.equal(portal.CLAVE_CARRITO, CLAVE_CARRITO);
+  const muchas = Array.from({ length: 14 }, (_, i) => `ED-${i + 1}`);
+  for (const entrada of [[" ed-1 ", "ED-1", "ED-2", "otra cosa", 7, null, "ED-12345678901"], "ED-1", [], muchas, undefined, ["ED-0000000001", "ed-000123"]])
+    assert.deepEqual(codigosValidos(entrada), portal.codigosValidos(entrada), JSON.stringify(entrada));
+  for (const lista of [[], ["ED-1"], muchas.slice(0, 10)]) for (const codigo of ["ED-1", "ED-99"])
+    assert.deepEqual(agregarCodigo(lista, codigo), portal.agregarCodigo(lista, codigo));
+  assert.equal(agregarCodigo(muchas.slice(0, 10), "ED-99").estado, "lleno");
+  // Lo que arma el sitio, lo lee el portal: ?carrito=ED-1,ED-2 → los mismos códigos (y lo ajeno se ignora).
+  assert.equal(urlPortal(["ed-1", "ED-2", "basura"]), "https://dolarones.eldolaron.com/?carrito=ED-1,ED-2");
+  assert.deepEqual(portal.codigosDeUrl(new URL(urlPortal(["ED-1", "ED-2", "ED-3"])).search), ["ED-1", "ED-2", "ED-3"]);
+  assert.equal(new URL(urlPortal(muchas)).origin, "https://dolarones.eldolaron.com");
+  assert.equal(portal.codigosDeUrl(new URL(urlPortal(muchas)).search).length, 10);
+  // La misma revisión contra el catálogo: disponible, vendida o fallo de red.
+  const pedirFalso = async (url) => {
+    const c = new URL(url, "https://x").searchParams.get("codigo");
+    if (c === "ED-3") throw new Error("red");
+    if (c === "ED-4") return { ok: false, json: async () => ({}) };
+    return { ok: true, json: async () => ({ piezas: c === "ED-1" ? [{ codigo: "ED-1", nombre: "A", precio: 100 }] : [] }) };
+  };
+  assert.deepEqual(await piezasDe(["ED-1", "ED-2", "ED-3", "ED-4"], "https://dolarones.eldolaron.com", pedirFalso), await portal.piezasDe(["ED-1", "ED-2", "ED-3", "ED-4"], pedirFalso));
+  console.log("Validated catalog prices in centavos, WhatsApp text, development-only API override, search, ficha (Comprar ya, Agregar al carrito, ¿Dudas?), carrito (hoja, revisión, ?carrito= del portal), cards (Lo quiero button, stamp only with ultima), retry, size and timeout");
 })().catch((error) => { console.error(error); process.exitCode = 1; });

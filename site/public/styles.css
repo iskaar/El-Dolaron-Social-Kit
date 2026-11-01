@@ -230,7 +230,7 @@ h2 { font-family: var(--display); font-variation-settings: var(--display-axes); 
 .piece-dialog-close { min-height: 44px; padding: 6px 16px; font-size: 14px; box-shadow: 2px 2px 0 var(--navy); }
 .piece-dialog-scroll { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
 /* Foto 4:5. `touch-action: none` deja el doble toque, el pellizco y el arrastre a catalogo.js (mismo truco que los stickers, #537). */
-.piece-dialog-photo { position: relative; aspect-ratio: 4 / 5; width: min(100%, calc(56vh * .8)); width: min(100%, calc(56dvh * .8)); margin-inline: auto; overflow: hidden; background: #F1F1EF; touch-action: none; user-select: none; -webkit-user-select: none; }
+.piece-dialog-photo { position: relative; aspect-ratio: 4 / 5; width: min(100%, calc(50vh * .8)); width: min(100%, calc(50dvh * .8)); margin-inline: auto; overflow: hidden; background: #F1F1EF; touch-action: none; user-select: none; -webkit-user-select: none; }
 .piece-dialog-photo.acercada { cursor: grab; }
 .piece-dialog-img { display: block; width: 100%; height: 100%; object-fit: contain; transform-origin: center; -webkit-user-drag: none; view-transition-name: pieza-foto; }
 .piece-dialog-stamp { top: 12px; left: 10px; }
@@ -249,9 +249,10 @@ h2 { font-family: var(--display); font-variation-settings: var(--display-axes); 
 .piece-dialog-bar { flex: none; display: grid; gap: 2px; padding: 10px 14px calc(6px + env(safe-area-inset-bottom, 0px)); border-top: 5px double var(--navy); background: var(--white); }
 .ficha-principal { display: flex; align-items: center; gap: 14px; }
 .ficha-barprecio { font-family: "Anton", sans-serif; font-size: 30px; line-height: 1; }
-.button.ficha-quiero { flex: 1; min-height: 56px; background: var(--red); color: var(--white); font-size: 20px; }
-.ficha-secundarios { display: flex; justify-content: space-around; gap: 8px; }
-.ficha-sec { display: inline-flex; align-items: center; justify-content: center; min-height: 44px; padding: 8px 10px; border: 0; background: none; color: var(--navy); font: 700 16px/1.2 "Archivo", sans-serif; text-decoration: underline; text-underline-offset: 3px; cursor: pointer; }
+.button.ficha-comprar { flex: 1; min-height: 56px; background: var(--red); color: var(--white); font-size: 20px; }
+.button.ficha-carrito { min-height: 52px; margin-top: 8px; font-size: 18px; }
+.ficha-secundarios { display: flex; justify-content: space-between; gap: 12px; }
+.ficha-sec { display: inline-flex; align-items: center; justify-content: center; min-height: 44px; padding: 6px 4px; border: 0; background: none; color: var(--navy); font: 700 16px/1.2 "Archivo", sans-serif; text-decoration: underline; text-underline-offset: 3px; cursor: pointer; }
 .ficha-aviso { text-align: center; font-size: 14px; font-weight: 700; }
 .ficha-aviso:empty { display: none; }
 @media (max-width: 560px) {
@@ -259,6 +260,28 @@ h2 { font-family: var(--display); font-variation-settings: var(--display-axes); 
   .piece-dialog { position: fixed; inset: 0; width: 100%; height: 100%; height: 100dvh; margin: 0; max-width: none; max-height: none; border: 0; box-shadow: none; }
   .piece-dialog-box { max-height: none; height: 100%; }
 }
+/* Carrito (Issue #681): botón fijo arriba a la derecha mientras se recorre el catálogo, y la hoja con las piezas. */
+.catalog-bar { position: sticky; top: 8px; z-index: 5; display: flex; justify-content: flex-end; margin-bottom: 14px; pointer-events: none; }
+.cart-button { pointer-events: auto; min-height: 48px; padding: 8px 16px; box-shadow: 3px 3px 0 var(--navy); }
+.cart-dialog { width: min(500px, calc(100vw - 28px)); max-height: calc(100vh - 28px); max-height: calc(100dvh - 28px); margin: auto; padding: 24px; overflow-y: auto; border: 3px solid var(--navy); background: var(--white); color: var(--navy); box-shadow: 8px 10px 0 rgb(22 54 107 / .4); }
+.cart-dialog::backdrop { background: rgb(22 54 107 / .68); }
+.cart-title { font-family: var(--display); font-variation-settings: var(--display-axes); font-weight: 900; font-size: 26px; line-height: 1.2; }
+.cart-notice { min-height: 1.3em; margin-top: 4px; font-size: 14px; font-weight: 700; }
+.cart-list { list-style: none; margin: 8px 0 0; padding: 0; }
+.cart-item { display: grid; grid-template-columns: 64px minmax(0, 1fr) auto; gap: 12px; align-items: center; padding: 10px 0; border-bottom: 1px solid rgb(22 54 107 / .25); }
+.cart-photo { display: block; aspect-ratio: 4 / 5; overflow: hidden; background: var(--mist); }
+.cart-photo img { display: block; width: 100%; height: 100%; object-fit: cover; }
+.cart-data p { margin: 0; }
+.cart-name { font-weight: 800; overflow-wrap: anywhere; }
+.cart-price { color: var(--red-text); font-weight: 800; }
+.cart-price.cart-sold { color: #4A5568; }
+.cart-item.vendida { opacity: .75; }
+.cart-item.vendida .cart-name { text-decoration: line-through; }
+.button.cart-remove { min-height: 44px; padding: 6px 12px; box-shadow: 2px 2px 0 var(--navy); }
+.cart-total { margin-top: 16px; font-family: "Anton", sans-serif; font-size: 24px; line-height: 1.2; }
+.cart-hint { margin: 6px 0 14px; font-size: 14px; }
+.button.cart-apartar { display: flex; width: 100%; min-height: 56px; font-size: 20px; background: var(--red); }
+.button.cart-close { display: flex; width: 100%; margin-top: 16px; }
 /* Morph miniatura → visor (catalogo.js). */
 ::view-transition-group(pieza-foto) { animation-duration: 300ms; animation-timing-function: cubic-bezier(.2, .9, .3, 1.05); }
 /* Miniatura recortada (cover) y foto completa (contain): ambas caben en el grupo mientras cambia de tamaño. */

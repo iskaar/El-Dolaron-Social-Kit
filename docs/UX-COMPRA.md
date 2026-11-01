@@ -260,7 +260,7 @@ Validación de la fase: `npm test`, `npm run typecheck`, `python tools/validate_
 | # | Qué | Por qué espera |
 | --- | --- | --- |
 | C1 | Pago con tarjeta directo en la ficha (Checkout Pro o similar) | Comisión ≈ 3.5 % + $4 + IVA por operación en tickets de $50–$300; conciliación con corte de caja. |
-| C2 | **HECHO en el portal (#681, parte 1; el sitio, parte 2).** Apartar varias piezas en un pedido (los pedidos ya tienen líneas): carrito, «Comprar ya» y resumen de un paso, ver 4.2. | Isaac lo pidió el 1/11, sin esperar la medición. |
+| C2 | **HECHO (#681: portal en el PR #682, sitio en el siguiente).** Apartar varias piezas en un pedido (los pedidos ya tienen líneas): carrito, «Comprar ya» y resumen de un paso, ver 4.2. | Isaac lo pidió el 1/11, sin esperar la medición. |
 | C3 | Reseñas de la tienda (Google) y foto del local en la ficha | Necesita reseñas reales acumuladas. |
 | C4 | Entrega local el mismo día en Soledad («Llega hoy») | Costo y logística; hoy envíos solo los viernes. |
 | C5 | Catálogo oficial de WhatsApp (Commerce Manager) sincronizado desde D1 | Integración nueva con Meta; duplicaría la fuente visible de stock. |
