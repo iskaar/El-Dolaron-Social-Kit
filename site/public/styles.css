@@ -249,8 +249,8 @@ h2 { font-family: var(--display); font-variation-settings: var(--display-axes); 
 .ficha-aviso { text-align: center; font-size: 14px; font-weight: 700; }
 .ficha-aviso:empty { display: none; }
 @media (max-width: 560px) {
-  /* En celular la ficha ocupa toda la pantalla. */
-  .piece-dialog { width: 100vw; max-width: none; height: 100vh; height: 100dvh; max-height: none; border: 0; box-shadow: none; }
+  /* En celular la ficha ocupa toda la pantalla, fija al viewport (no depende de márgenes automáticos ni del zoom de página). */
+  .piece-dialog { position: fixed; inset: 0; width: 100%; height: 100%; height: 100dvh; margin: 0; max-width: none; max-height: none; border: 0; box-shadow: none; }
   .piece-dialog-box { max-height: none; height: 100%; }
 }
 /* Morph miniatura → visor (catalogo.js). */
