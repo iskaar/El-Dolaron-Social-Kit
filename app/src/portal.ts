@@ -1,4 +1,4 @@
-import { saldo, codigoAleatorio, hashCodigo, basesListas, promocionIniciada } from './dolarones.ts';
+import { saldo, progresoDePromo, codigoAleatorio, hashCodigo, basesListas, promocionIniciada } from './dolarones.ts';
 import { reclamarVale } from './vales.ts';
 import { programaActivo, revisarCodigo, resumenReferidos, sentenciasDeAlta, D_ALTA } from './referidos.ts';
 import { apartarPortal, apartadosDeSocio, cancelarDeSocio, telefonoDe } from './pedidos.ts';
@@ -322,7 +322,9 @@ export async function portal(request: Request, env: Env, url: URL, ctx: Executio
       from dolarones_lotes where cliente_id = ? and restante > 0 and vence_en > ? order by vence_en`)
       .bind(socio.id, new Date().toISOString()).all();
     return json({ disponible_compras: s.disponible - s.regalo_disponible,
-      regalo_sujeto_minimo: s.regalo_disponible, por_liberar: s.por_liberar, disponible_total: s.disponible, lotes });
+      regalo_sujeto_minimo: s.regalo_disponible, por_liberar: s.por_liberar, disponible_total: s.disponible, lotes,
+      // Promo de noviembre (#684): solo mientras corre; fuera del periodo o apagada, la clave no existe.
+      ...(await progresoDePromo(env, socio.id, new Date()).then((p) => p && { promo_meta: p })) });
   }
   if (url.pathname === '/api/portal/recibos' && request.method === 'GET') {
     const pedido = Number(url.searchParams.get('limit') ?? 20);

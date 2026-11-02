@@ -58,6 +58,10 @@ declare global {
     // Issue #611: 'si' reactiva los premios de apertura (registro y llegada). Ausente = no se otorgan nuevos.
     PREMIOS_APERTURA?: string;
     PROMOCION_INICIO?: string;
+    /** Promo de noviembre (#684), ISO UTC: las tres o ninguna (apagada). Periodo [inicio, fin) y vencimiento del bono. */
+    PROMO_META_INICIO?: string;
+    PROMO_META_FIN?: string;
+    PROMO_META_VENCE?: string;
     /** Referidos (#489, #597): 'si' da código a todo socio del portal. Ausente = apagado. */
     REFERIDOS_ABIERTO?: string;
     /** Emisión de vales anónimos: ausente = apagada, requiere bases finales. */

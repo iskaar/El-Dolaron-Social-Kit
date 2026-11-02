@@ -52,7 +52,7 @@ export interface Lote {
 export function repartir(lotes: Lote[], importe: number, ahora: string, total: number): { id: string; importe: number }[] | null {
   const usables = lotes
     .filter((l) => l.restante > 0 && l.disponible_desde <= ahora && l.vence_en > ahora)
-    .filter((l) => l.origen === 'compra' || l.origen === 'referido' || (l.origen === 'regalo' && total >= MINIMO_REGALO))
+    .filter((l) => l.origen === 'compra' || l.origen === 'referido' || l.origen === 'promo' || (l.origen === 'regalo' && total >= MINIMO_REGALO))
     .sort((a, b) => a.vence_en.localeCompare(b.vence_en) || a.id.localeCompare(b.id));
   const reparto: { id: string; importe: number }[] = [];
   let falta = importe;
@@ -63,6 +63,44 @@ export function repartir(lotes: Lote[], importe: number, ahora: string, total: n
     falta -= toma;
   }
   return falta > 0 ? null : reparto;
+}
+
+/* ---------- promo de noviembre (Issue #684), reglas puras ---------- */
+
+/** Cada $3,000 en dinero pagado durante el periodo dan 300 D de bono, sin tope. Centavos. */
+export const PROMO_META = 300_000;
+export const PROMO_BONO = 30_000;
+
+export interface PromoMeta { inicio: string; fin: string; vence: string }
+
+/**
+ * Periodo y vigencia del bono, de PROMO_META_INICIO / _FIN / _VENCE (ISO, UTC). Con cualquiera
+ * ausente o mal formada, o un periodo vacio, la promo esta apagada y nada cambia. Se normalizan
+ * a toISOString() porque se comparan como texto contra `creado_en`.
+ */
+export function promoMeta(env: Env): PromoMeta | null {
+  const crudo = [env.PROMO_META_INICIO, env.PROMO_META_FIN, env.PROMO_META_VENCE];
+  if (!crudo.every((v) => !!v && /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:\.\d{3})?Z$/.test(v) && Number.isFinite(Date.parse(v)))) return null;
+  const [inicio, fin, vence] = crudo.map((v) => new Date(v!).toISOString());
+  return inicio < fin ? { inicio, fin, vence } : null;
+}
+
+/** El instante cae en el periodo: inicio incluido, fin excluido. */
+export const enPeriodoDePromo = (meta: PromoMeta, instante: Date) => {
+  const iso = instante.toISOString();
+  return iso >= meta.inicio && iso < meta.fin;
+};
+
+/**
+ * Bonos nuevos que gana una venta: los multiplos de `meta` que el acumulado alcanza al sumar
+ * `dineroVenta` y que todavia no se han pagado. `otorgados` (bonos vigentes del socio en el
+ * periodo) vale por omision lo que el acumulado ya tenia, que es el caso normal. Contarlos
+ * aparte cubre dos casos: encender la promo despues del 1/11 (el rezago se paga en la primera
+ * venta) y una devolucion que bajo el acumulado (no se vuelve a pagar el mismo bloque).
+ */
+export function bonosDeMeta(acumuladoAntes: number, dineroVenta: number, meta = PROMO_META,
+  otorgados = Math.floor(acumuladoAntes / meta)): number {
+  return Math.max(0, Math.floor((acumuladoAntes + Math.max(0, dineroVenta)) / meta) - otorgados);
 }
 
 export const hex = (bytes: ArrayBuffer | Uint8Array) =>
@@ -177,7 +215,7 @@ export async function buscarSocio(url: URL, env: Env): Promise<Response> {
   return json(await socioConSaldo(env, cliente));
 }
 
-type Resultado = { ok: true; sentencias: D1PreparedStatement[]; ganados: number; referido?: number } | { ok: false; status: number; error: string };
+type Resultado = { ok: true; sentencias: D1PreparedStatement[]; ganados: number; referido?: number; bono_promo?: number } | { ok: false; status: number; error: string };
 
 /**
  * Lo que una venta le hace al saldo, como sentencias para el MISMO batch que
@@ -186,6 +224,8 @@ type Resultado = { ok: true; sentencias: D1PreparedStatement[]; ganados: number;
 export async function sentenciasDeVenta(env: Env, p: {
   ventaId: string; clienteId: string | null; dolarones: number; codigo: string;
   total: number; autor: string; ahora: Date;
+  /** Hora de la venta en la caja (`creado_en`); decide si cae en el periodo de la promo. Omitida: `ahora`. */
+  hora?: Date;
 }): Promise<Resultado> {
   if (!Number.isSafeInteger(p.dolarones) || p.dolarones < 0 || p.dolarones > p.total) {
     return { ok: false, status: 400, error: 'Importe de Dolarones invalido.' };
@@ -235,7 +275,7 @@ export async function sentenciasDeVenta(env: Env, p: {
       sentencias.push(
         env.DB.prepare(
           `update dolarones_lotes set restante = case when vence_en > ? and disponible_desde <= ?
-           and (origen in ('compra', 'referido') or (origen = 'regalo' and ? >= ?)) then restante - ? else -1 end
+           and (origen in ('compra', 'referido', 'promo') or (origen = 'regalo' and ? >= ?)) then restante - ? else -1 end
            where id = ?`,
         ).bind(ahoraIso, ahoraIso, p.total, MINIMO_REGALO, parte.importe, parte.id),
         env.DB.prepare(
@@ -260,15 +300,71 @@ export async function sentenciasDeVenta(env: Env, p: {
       ).bind(cliente.id, lote, p.ventaId, ganados, p.autor, ahoraIso),
     );
   }
+  const bono = await sentenciasDePromo(env, p, cliente.id);
+  sentencias.push(...bono.sentencias);
   // Referidos (#489): la primera compra con $150 en dinero libera 25 D al nuevo y 25 D a quien lo invitó.
   const referente = p.total - p.dolarones >= MINIMO_COMPRA ? await pendienteDe(env, cliente.id) : null;
   if (referente) sentencias.push(...sentenciasDeLiberacion(env, {
     ventaId: p.ventaId, nuevoId: cliente.id, referenteId: referente, autor: p.autor, ahora: p.ahora }));
-  return { ok: true, sentencias, ganados, referido: referente ? D_PREMIO : 0 };
+  return { ok: true, sentencias, ganados, referido: referente ? D_PREMIO : 0, bono_promo: bono.bonos * PROMO_BONO };
 }
 
 /**
- * Deshacer una venta: los Dolarones usados regresan a sus lotes y los ganados
+ * Promo de noviembre (#684): el dinero pagado (total menos Dolarones) de las ventas no canceladas del
+ * socio en el periodo, sin esta venta (todavia no esta insertada), mas el de esta, da los bonos. Cada
+ * bono es un lote origen 'promo' SIN venta_id (el indice unico lotes_venta deja un lote por venta y
+ * esa plaza es de lo ganado por compra) enlazado por su movimiento 'promo', como los referidos.
+ * Una devolucion parcial resta del progreso pero no retira bonos ya pagados (devoluciones.ts solo toca
+ * el lote con venta_id): el bloque no se paga dos veces y hay que reunirlo de nuevo.
+ * ponytail: cada lote verifica en el batch cuantos bonos hay ya (dos cajas a la vez no pagan doble);
+ * la que pierde la carrera no paga y la siguiente venta del socio lo recupera con bonosDeMeta.
+ */
+/** Bonos de la promo que el socio (?1) conserva: su venta cae en el periodo (?2, ?3) y no esta cancelada. */
+const BONOS_VIGENTES = `(select count(*) from dolarones_movimientos m join ventas v on v.id = m.venta_id
+  where m.cliente_id = ?1 and m.tipo = 'promo' and v.cancelada = 0 and v.creado_en >= ?2 and v.creado_en < ?3)`;
+
+/** Dinero pagado del socio en el periodo (?1, ?2, ?3), sin canceladas ni lo devuelto. */
+const DINERO_DEL_PERIODO = `coalesce((select sum(max(0, total - dolarones - devuelto)) from ventas
+  where cliente_id = ?1 and cancelada = 0 and creado_en >= ?2 and creado_en < ?3), 0)`;
+
+/** Para el portal (#684): como va el socio en la meta. null si la promo esta apagada o fuera de su periodo. */
+export async function progresoDePromo(env: Env, clienteId: string, ahora: Date) {
+  const meta = promoMeta(env);
+  if (!meta || !enPeriodoDePromo(meta, ahora)) return null;
+  const fila = await env.DB.prepare(`select ${DINERO_DEL_PERIODO} as acumulado, ${BONOS_VIGENTES} as bonos`)
+    .bind(clienteId, meta.inicio, meta.fin).first<{ acumulado: number; bonos: number }>();
+  return { acumulado: fila?.acumulado ?? 0, meta: PROMO_META, bono: PROMO_BONO, fin: meta.fin, bonos: fila?.bonos ?? 0 };
+}
+
+async function sentenciasDePromo(env: Env, p: { ventaId: string; total: number; dolarones: number; autor: string; ahora: Date; hora?: Date },
+  clienteId: string): Promise<{ sentencias: D1PreparedStatement[]; bonos: number }> {
+  const meta = promoMeta(env);
+  const dinero = p.total - p.dolarones;
+  if (!meta || dinero <= 0 || !enPeriodoDePromo(meta, p.hora ?? p.ahora)) return { sentencias: [], bonos: 0 };
+  const previo = await env.DB.prepare(
+    `select ${DINERO_DEL_PERIODO} as acumulado, ${BONOS_VIGENTES} as otorgados`,
+  ).bind(clienteId, meta.inicio, meta.fin).first<{ acumulado: number; otorgados: number }>();
+  const otorgados = previo?.otorgados ?? 0;
+  const bonos = bonosDeMeta(previo?.acumulado ?? 0, dinero, PROMO_META, otorgados);
+  const ahoraIso = p.ahora.toISOString();
+  const sentencias: D1PreparedStatement[] = [];
+  for (let k = 0; k < bonos; k++) {
+    const lote = crypto.randomUUID();
+    sentencias.push(
+      env.DB.prepare(
+        `insert into dolarones_lotes (id, cliente_id, origen, venta_id, importe, restante, disponible_desde, vence_en, creado_en)
+         select ?4, ?1, 'promo', null, ?5, ?5, ?6, ?7, ?8 where ${BONOS_VIGENTES} = ?9`,
+      ).bind(clienteId, meta.inicio, meta.fin, lote, PROMO_BONO, disponibleDesde(p.ahora), meta.vence, ahoraIso, otorgados + k),
+      env.DB.prepare(
+        `insert into dolarones_movimientos (cliente_id, lote_id, venta_id, tipo, importe, autor, creado_en)
+         select ?, ?, ?, 'promo', ?, ?, ? where exists (select 1 from dolarones_lotes where id = ?)`,
+      ).bind(clienteId, lote, p.ventaId, PROMO_BONO, p.autor, ahoraIso, lote),
+    );
+  }
+  return { sentencias, bonos };
+}
+
+/** Deshacer una venta: los Dolarones usados regresan a sus lotes y los ganados
  * se retiran. Para el mismo batch que marca la venta cancelada.
  *
  * Decision de Isaac (#135): si el cliente ya gasto parte de lo ganado, la
@@ -306,6 +402,22 @@ export async function sentenciasDeCancelacion(env: Env, ventaId: string, autor: 
       then 0 else -1 end where venta_id = ?`).bind(ventaId),
     // Si esta venta liberó un referido (#489), sus 25 + 25 D se retiran y el referido vuelve a pendiente.
     ...sentenciasDeReversoReferido(env, ventaId, autor, ahora),
+    // Si esta venta pago bonos de la promo (#684), se retiran; si ya se gastaron, aborta igual.
+    ...sentenciasDeReversoPromo(env, ventaId, autor, ahora),
+  ];
+}
+
+/** Igual que los referidos: el lote del bono se retira entero o el trigger lote_no_negativo aborta la cancelacion. */
+function sentenciasDeReversoPromo(env: Env, ventaId: string, autor: string, ahora: string): D1PreparedStatement[] {
+  const bonos = `select lote_id from dolarones_movimientos where venta_id = ? and tipo = 'promo'`;
+  return [
+    env.DB.prepare(`insert into dolarones_movimientos (cliente_id, lote_id, venta_id, tipo, importe, autor, creado_en)
+      select cliente_id, id, ?, 'reverso_promo', -restante, ?, ? from dolarones_lotes
+      where restante > 0 and id in (${bonos})`).bind(ventaId, autor, ahora, ventaId),
+    env.DB.prepare(`update dolarones_lotes set restante = case
+      when importe + coalesce((select sum(importe) from dolarones_movimientos
+        where lote_id = dolarones_lotes.id and tipo = 'reverso_promo'), 0) = 0
+      then 0 else -1 end where id in (${bonos})`).bind(ventaId),
   ];
 }
 

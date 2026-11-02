@@ -1213,7 +1213,7 @@ async function cobrarConDolarones(venta, t) {
   venta.referido_liberado = cuerpo.referido_liberado ?? 0;
   if (socio.vale) return { vale:true };
   const saldo = cuerpo.saldo ?? { disponible: socio.disponible - venta.dolarones };
-  return { numero: socio.numero, ganados: cuerpo.ganados ?? dolaronesGanados(t.aPagar), saldo: saldo.disponible };
+  return { numero: socio.numero, ganados: cuerpo.ganados ?? dolaronesGanados(t.aPagar), bono_promo: cuerpo.bono_promo ?? 0, saldo: saldo.disponible };
 }
 
 /* ---------- pedidos por WhatsApp (Issue #269) ---------- */
@@ -1425,6 +1425,7 @@ async function cobrar() {
       venta.referido_liberado = cuerpo.referido_liberado ?? 0;
       if (socioTicket) {
         socioTicket.ganados = cuerpo.ganados ?? 0;
+        socioTicket.bono_promo = cuerpo.bono_promo ?? 0;
         socioTicket.saldo = cuerpo.saldo?.disponible ?? socioTicket.saldo;
       }
     } else {
@@ -1448,6 +1449,7 @@ async function cobrar() {
         venta.referido_liberado = cuerpo.referido_liberado ?? 0;
         if (socioTicket) {
           socioTicket.ganados = cuerpo.ganados ?? 0;
+          socioTicket.bono_promo = cuerpo.bono_promo ?? 0;
           socioTicket.saldo = cuerpo.saldo?.disponible ?? socioTicket.saldo;
         }
       } else {
@@ -1488,6 +1490,7 @@ async function cobrar() {
     const ganados = socioTicket?.ganados || venta.vale_emitido?.importe || 0;
     $('aviso').textContent = (forma === 'efectivo' && efectivo > 0 ? `Cobrado. Cambio ${pesos(t.cambio)}` : 'Cobrado.')
       + (ganados ? ` · Ganó ${dolares(ganados)}` : '')
+      + (socioTicket?.bono_promo > 0 ? ` · Bono noviembre: +${dolares(socioTicket.bono_promo)}` : '')
       + (venta.referido_liberado > 0 ? ` · ${avisoReferido(venta.referido_liberado)}` : '');
     if (pedidoCargado) {
       $('aviso').textContent += ` · Anticipo P-${pedidoCargado.folio} −${pesos(anticipo)}`
@@ -1564,6 +1567,7 @@ async function sincronizar() {
         $('aviso').textContent = venta.recompensa_pendiente
           ? `Venta ${venta.id} sincronizada. Dolarones ganados: ${dolares(cuerpo.ganados)}.`
             + (cuerpo.referido_liberado > 0 ? ` ${avisoReferido(cuerpo.referido_liberado)}.` : '')
+            + (cuerpo.bono_promo > 0 ? ` Bono noviembre: +${dolares(cuerpo.bono_promo)}.` : '')
           : emitido ? `Venta ${venta.id} sincronizada. El vale fue emitido; imprímelo con el folio del ticket.`
           : `Venta ${venta.id} sincronizada. El servidor confirmó que no se emitió vale.`;
         if (venta.imprimir_en) $('aviso').textContent = `Venta ${venta.id} sincronizada. Ticket enviado a ${cuerpo.imprimir_en || venta.imprimir_en}.`;
