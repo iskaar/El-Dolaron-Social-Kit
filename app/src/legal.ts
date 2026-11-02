@@ -13,17 +13,25 @@
 // Version 2026-10-v6, 30 de octubre de 2026 (Issue #631): v5 no se desplego; solo cambia el punto 7.
 // Piloto familia y amigos: un codigo de la tienda con 50 registros que da solo los 50 D al unirse,
 // y solo esas cuentas tienen codigo DOL. Aprobada por el abogado el 30 de octubre de 2026. El aviso sigue en v3.
+// Version 2026-10-v7, 31 de octubre de 2026 (Issue #635). PENDIENTE: visto bueno del abogado.
+// Decididos por Isaac el 31/10: el descuento directo empieza en 1 semana cumplida; sobre $2,500 a la semana se gana la tasa base.
+// Cambios respecto a v6: nivel VIP, racha semanal con Dolarones o descuento directo (punto 6 quinquies);
+// nivel Negocio (punto 6 sexies); en el punto 7, premio del referente VIP que cuenta para su meta (R1) y
+// premio por invitados constantes (R2); el punto 2 permite terminar o cambiar los niveles con aviso;
+// el punto 6 remite a los niveles; el punto 10 cubre devoluciones con niveles. El aviso sube a 2026-10-v4
+// (nivel, eleccion semanal y marca Negocio). No se implementa nada hasta que el abogado apruebe.
 // Viven aqui y no en variables porque Cloudflare limita cada
 // variable a 5 KB. Cambiar este texto exige subir BASES_APROBADAS_VERSION.
 
 export const BASES = `BASES DEL PROGRAMA DOLARONES
-Versión 2026-10-v6, 30 de octubre de 2026
+Versión 2026-10-v7, 31 de octubre de 2026
 
 1. Organizador
 María Teresa Ferrusca Pérez, RFC FEPT660329TH4, con nombre comercial El Dolarón, en Jardín Hidalgo 129, Zona Centro, Soledad de Graciano Sánchez, San Luis Potosí, C.P. 78430.
 
 2. Vigencia del programa
 Del 2 de octubre de 2026 hasta que El Dolarón lo termine con un aviso de 30 días en la tienda. Los Dolarones vigentes al terminar el programa se respetan hasta su vencimiento.
+Los niveles VIP y Negocio (puntos 6 quinquies y 6 sexies) también pueden terminar o cambiar con un aviso de 30 días en la tienda y en el portal. El cambio empieza el primer lunes después de esos 30 días: una semana en curso conserva las condiciones con las que empezó, y los Dolarones ya ganados se respetan hasta su vencimiento.
 
 3. Quién participa
 Personas físicas mayores de 18 años; al registrarse declaran serlo. Registrarse es gratuito y voluntario. Quien no es socio compra igual, a los mismos precios.
@@ -42,6 +50,7 @@ Son un saldo de recompensa para comprar en El Dolarón. 1 Dolarón equivale a $1
 
 6. Cómo se ganan
 Por cada $100.00 completos pagados en efectivo o con tarjeta en una misma compra, el socio gana 10 Dolarones. Ejemplos: una compra de $99 no gana; una de $250 gana 20; una de $1,999 gana 190.
+- Los socios con nivel VIP ganan más, o pueden elegir un descuento directo en lugar de Dolarones (punto 6 quinquies). Esta tasa de 10 Dolarones es la del nivel base.
 - La parte pagada con Dolarones no genera Dolarones.
 - El socio debe identificarse antes de pagar, con el código de su portal, su teléfono o su número de socio. Dar solo el teléfono o el número acumula, pero no autoriza gastar Dolarones (ver punto 8).
 - Una compra ya cobrada no se acumula después. Las compras hechas antes del 2 de octubre de 2026 no generan Dolarones.
@@ -76,6 +85,36 @@ Reglas del cupón:
 - No se puede pasar a una cuenta (punto 6 ter).
 - La parte de una compra pagada con un cupón no genera Dolarones ni un vale nuevo (punto 6 bis). Si se cancela esa compra, lo usado regresa al mismo cupón (punto 10).
 
+6 quinquies. Nivel VIP
+El socio que compra cada semana sube de nivel y gana más Dolarones, o un descuento directo. No hay que pedirlo: todo socio participa.
+- Semana. Va del lunes a las 00:00 al domingo a las 23:59, hora de la tienda. Las semanas se cuentan desde el primer lunes después de que esta versión se publique en el portal; las anteriores no cuentan.
+- Qué cuenta. Solo el dinero pagado (efectivo, tarjeta o transferencia) en compras hechas como socio, en la tienda o en pedidos por WhatsApp. No cuenta lo pagado con Dolarones, vales o cupones, ni lo comprado en Mercado Libre. Una compra sin identificar al socio antes de pagar no cuenta (punto 6).
+- Semana cumplida. La que reúne al menos $2,500.00 pagados en dinero. Las devoluciones y cancelaciones se restan (punto 10). Con descuento directo cuenta lo que realmente se pagó, ya con el descuento.
+- Nivel de la semana. Se fija el lunes a las 00:00, según las semanas cumplidas seguidas que hay justo antes, y vale para todas las compras de esa semana. No cambia durante la semana, aunque ya se haya llegado a la meta.
+  - 0 semanas cumplidas (nivel base): 10 Dolarones por cada $100.00, como en el punto 6. No hay opción de descuento.
+  - 1 semana: 15 Dolarones por cada $100.00, o 11.67 % de descuento.
+  - 2 semanas: 20 Dolarones por cada $100.00, o 13.33 % de descuento.
+  - 3 semanas o más: 25 Dolarones por cada $100.00, o 15 % de descuento.
+- Si una semana no se cumple, la racha vuelve a cero y la semana siguiente empieza en el nivel base.
+- Dolarones. Se ganan por bloques, igual que en el punto 6: 15, 20 o 25 Dolarones por cada $100.00 completos pagados en dinero en una misma compra, nunca un porcentaje de los centavos. Ejemplo con una compra de $1,999.00 (19 bloques): nivel base 190 Dolarones; 1 semana, 285; 2 semanas, 380; 3 semanas o más, 475. Una compra de $99.00 no gana.
+- Tope de Dolarones. En los niveles de 15, 20 y 25, la tasa del nivel se aplica solo a los primeros $2,500.00 pagados en dinero en la semana, es decir, a 25 bloques de $100.00. Con el nivel de 25 Dolarones, lo máximo que se gana con la tasa del nivel es 625 por semana. El dinero que pase de esos $2,500.00 gana la tasa base del punto 6, 10 Dolarones por cada $100.00 completos, y se suma a lo anterior. Los bloques se cuentan sobre el dinero pagado de cada compra: en una compra que cruza los $2,500.00, los bloques que caben en lo que le quedaba a la semana ganan la tasa del nivel y los demás ganan 10. Ejemplo, con nivel de 25: una compra de $2,000.00 gana 500 (20 bloques a 25); otra de $1,000.00 en la misma semana tiene 10 bloques: 5 caben en los $500.00 que le quedaban y ganan 25 cada uno (125), y los otros 5 ganan 10 cada uno (50), así que gana 175; en total, 675. Los premios de referidos (punto 7) no cuentan para este tope.
+- Descuento directo. A partir de 1 semana cumplida, en lugar de Dolarones el socio puede elegir el descuento de su nivel. Se calcula sobre el importe en centavos y se redondea hacia abajo al centavo, como los demás descuentos de la caja. Ejemplo: 15 % de $333.33 son $49.9995 y se descuentan $49.99. Ejemplo con una compra de $1,999.00: 1 semana, descuento de $233.28 (se pagan $1,765.72); 2 semanas, $266.46 (se pagan $1,732.54); 3 semanas o más, $299.85 (se pagan $1,699.15).
+- Tope del descuento. Solo se descuenta la parte de las compras de la semana que sume hasta $2,500.00 a precio de lista; lo demás se paga completo. Ejemplo, con 15 %: una compra de $3,000.00 recibe $375.00 de descuento (15 % de $2,500.00) y se pagan $2,625.00.
+- Con descuento directo no se ganan Dolarones por esa compra. Quien elige descuento debe pagar $2,500.00 en dinero, ya con el descuento, para cumplir la semana: una compra de $2,500.00 a precio de lista con 15 % de descuento se paga con $2,125.00 y no cumple la semana por sí sola.
+- Elegir Dolarones o descuento. Solo puede elegir descuento un socio con al menos una semana cumplida; en el nivel base solo se ganan Dolarones. La elección es por semana. Si el socio no elige, se le dan Dolarones. Puede cambiar a descuento desde su portal, o pidiéndolo en caja, antes de que se cobre su primera compra de la semana. Una vez cobrada una compra, la elección de esa semana ya no cambia. La semana siguiente vuelve a empezar con Dolarones.
+- No se junta. El descuento directo de VIP y de Negocio no se combina con vales, cupones u otro descuento o promoción de la tienda en el mismo ticket. El socio sí puede pagar con los Dolarones de su saldo (punto 8).
+- El nivel es de la cuenta: no se transfiere ni se junta con el de otra cuenta.
+
+6 sexies. Nivel Negocio
+Es para clientes con negocio propio a quienes la tienda quiere surtir. Es por invitación: la tienda decide a quién invita.
+- Cómo se entra. La persona invitada se registra sola en el portal, como cualquier socio, y la tienda marca su cuenta como Negocio. Mientras no esté marcada, aplica el nivel VIP.
+- Descuento. Una semana en que el socio Negocio pagó $3,500.00 o más en dinero (con las mismas reglas de qué cuenta del punto 6 quinquies) le da 25 % de descuento directo en la semana siguiente. Si la siguiente semana también reúne $3,500.00, el 25 % continúa.
+- El 25 % es fijo: no hay escalera, no se ganan Dolarones y no tiene tope de $2,500.00. Se calcula y se redondea igual que el descuento VIP. Ejemplo: una compra de $1,999.00 recibe $499.75 de descuento y se pagan $1,499.25.
+- Si una semana no llega a $3,500.00, la semana siguiente ya no tiene el 25 % y el socio vuelve al nivel VIP, según sus semanas cumplidas seguidas de $2,500.00 o más (una semana de $3,500.00 o más también es semana cumplida de VIP).
+- No se suman niveles. En una semana con el 25 % de Negocio no se aplica además el nivel VIP. Tampoco se junta con vales, cupones u otro descuento o promoción (punto 6 quinquies).
+- El socio Negocio sigue pudiendo pagar con los Dolarones que ya tenga.
+- Los clientes Negocio son distintos de las revendedoras, que venden por comisión.
+
 7. Invita a alguien (referidos)
 Mientras dure el piloto con familia y amigos, solo algunos socios pueden invitar a otras personas a unirse a Dolarones. Si se cumplen las condiciones de este punto, las dos personas reciben Dolarones.
 - Código de familia y amigos. El Dolarón comparte un código propio que admite hasta 50 registros en total. Quien se une con él recibe los 50 Dolarones de «Al unirse», pero no el premio por su compra, y nadie recibe premio por esa invitación. Si el código ya llegó a su límite, quien lo recibió puede registrarse sin él.
@@ -84,9 +123,11 @@ Mientras dure el piloto con familia y amigos, solo algunos socios pueden invitar
 - Al unirse. La persona nueva recibe 50 Dolarones. Se pueden usar desde ese momento, vencen 30 días después y se gastan como los ganados por compras, sin mínimo de ticket.
 - Premio por su compra. Cuando la persona invitada, identificada como socia, hace una compra en la que paga $150.00 o más en dinero, se liberan 25 Dolarones para ella y 25 para quien la invitó. Lo pagado con Dolarones no cuenta para ese mínimo. Si la compra es de menos, no se libera nada y el premio queda pendiente para la primera compra que sí cumpla. Cada invitación libera su premio una sola vez.
 - Esos 25 Dolarones se pueden usar a partir del día siguiente a la compra, vencen 12 meses después de ella y se gastan como los ganados por compras.
+- Si quien invitó ya es VIP (premio R1). Es VIP en este punto quien, al cobrarse la compra de la persona invitada, tiene al menos una semana cumplida seguida (punto 6 quinquies). Sus 25 Dolarones no se entregan. En su lugar, $25.00 cuentan como dinero pagado para la meta de $2,500.00 de la semana en que se cobra esa compra. Esos $25.00 solo sirven para la meta: no ganan Dolarones ni descuento. La persona invitada recibe igual sus 50 Dolarones al unirse y sus 25 por su compra. Quien invitó y todavía no es VIP recibe sus 25 Dolarones como se explica arriba.
+- Premio por invitados constantes (premio R2). Si quien invitó es VIP en la semana que cierra, y una persona que invitó, identificada como socia, paga $500.00 o más en dinero en dos semanas seguidas (con las reglas de qué cuenta del punto 6 quinquies), quien invitó recibe 25 Dolarones al cierre de la segunda semana. Después el conteo de esa persona vuelve a cero y empieza de nuevo la semana siguiente; una semana que no llegue a $500.00 también lo reinicia. Ejemplo: si la persona invitada paga $600.00 y $520.00 en dos semanas seguidas, quien la invitó recibe 25 Dolarones; si paga $600.00 y luego $300.00, no recibe nada. Este premio se puede usar a partir del día siguiente al cierre de la segunda semana, vence 12 meses después de ese cierre y se gasta como los ganados por compras. No cuenta para el tope de 625 Dolarones por semana del punto 6 quinquies, ni para la meta de la semana. Quien invitó no ve cuánto paga cada persona invitada; solo recibe el premio.
 - Límite. Cada código de invitación admite hasta 10 personas. Si un código ya llegó a su límite, quien lo recibió puede registrarse sin él.
 - Si se cancela la compra que liberó un premio, ver el punto 10.
-- El Dolarón puede terminar el programa de referidos. Desde ese momento no se aceptan códigos nuevos. A quien ya se unió con un código se le respetan sus 50 Dolarones y el premio de su primera compra que cumpla.
+- El Dolarón puede terminar el programa de referidos. Desde ese momento no se aceptan códigos nuevos. A quien ya se unió con un código se le respetan sus 50 Dolarones y el premio de su primera compra que cumpla. Los premios R2 ya pagados se respetan; un conteo de dos semanas que no haya terminado al cerrar el programa no paga.
 La promoción de apertura, con premios de Dolarones para las primeras personas en registrarse o llegar a la tienda, ya terminó. Los premios ya otorgados se respetan hasta su vencimiento, 24 horas después de otorgados, y se siguen gastando en tickets de $1,000 MXN o más, calculados antes de descontar Dolarones.
 
 8. Cómo se usan
@@ -98,19 +139,24 @@ El cliente sin registro presenta su vale o cupón impreso. En caja se consulta s
 No compartas códigos SMS, tu sesión ni el código de barras: quien copie un código vigente podría gastar tu saldo disponible. En dispositivos compartidos, no conserves la sesión y ciérrala al terminar. Generar otro código o cerrar sesión invalida el anterior (requiere conexión). El encargado revisa presencialmente la vinculación de una membresía previa; un teléfono coincidente no la vincula automáticamente. No hay recuperación automática de una cuenta ya vinculada.
 
 10. Devoluciones y cancelaciones
-Si se cancela o devuelve una compra, los Dolarones usados en ella regresan al saldo y los que se ganaron con ella se retiran. Los Dolarones que regresan conservan su vencimiento original: la cancelación y las reimpresiones no lo amplían. Con vales y cupones sucede igual: lo usado regresa al vale o cupón del que salió y conserva su vencimiento; si se juntaron varios, cada parte regresa al suyo. El vale generado por la compra se retira. Si la compra liberó un premio de referidos (punto 7), se retiran los 25 Dolarones de cada una de las dos personas y la invitación queda pendiente hasta una nueva compra que cumpla la condición. Si lo que esa compra generó (Dolarones de socio, vale o premio de referidos) ya se gastó en todo o en parte, la compra no se cancela sola; se aclara en la tienda antes de devolver dinero o mercancía. Si la tienda ofrece un cupón en lugar de dinero (punto 6 quater), el cliente puede rechazarlo. Los derechos del consumidor por ley no cambian por este programa.
+Si se cancela o devuelve una compra, los Dolarones usados en ella regresan al saldo y los que se ganaron con ella se retiran. Los Dolarones que regresan conservan su vencimiento original: la cancelación y las reimpresiones no lo amplían. Con vales y cupones sucede igual: lo usado regresa al vale o cupón del que salió y conserva su vencimiento; si se juntaron varios, cada parte regresa al suyo. El vale generado por la compra se retira. Si la compra liberó un premio de referidos (punto 7), se retiran los 25 Dolarones de cada una de las dos personas (si quien invitó es VIP, ver abajo) y la invitación queda pendiente hasta una nueva compra que cumpla la condición. Si lo que esa compra generó (Dolarones de socio, vale o premio de referidos) ya se gastó en todo o en parte, la compra no se cancela sola; se aclara en la tienda antes de devolver dinero o mercancía. Si la tienda ofrece un cupón en lugar de dinero (punto 6 quater), el cliente puede rechazarlo. Los derechos del consumidor por ley no cambian por este programa.
+Con los niveles VIP y Negocio (puntos 6 quinquies y 6 sexies):
+- Lo devuelto o cancelado se resta del dinero de la semana en que se hace la devolución, no de la semana de la compra. Una semana ya cerrada no se vuelve a calcular: su nivel y su racha no cambian. Ejemplo: quien compra $2,500.00 el domingo y los devuelve el lunes conserva esa semana cumplida, pero esos $2,500.00 se restan a la semana del lunes.
+- Los Dolarones ganados con una tasa VIP se retiran como los demás: se vuelven a calcular, con la tasa de esa compra, sobre el dinero que sigue pagado, y se retira la diferencia.
+- Un descuento directo se devuelve en proporción: cada pieza se devuelve por la parte de lo que se cobró por ella, ya con el descuento, no por su precio de lista.
+- Si la compra liberó un premio R1 (punto 7), los $25.00 que contaron para la meta se restan de la semana en que se cancela la compra. Un premio R2 ya pagado no se retira.
 
 11. Aclaraciones
 En la tienda, de 11:00 a 20:00 todos los días, por WhatsApp al 444 543 7754 o por teléfono fijo al 444 854 5980.`;
 
 export const AVISO = `AVISO DE PRIVACIDAD INTEGRAL - SOCIOS DOLARONES
-Versión 2026-10-v3, 30 de octubre de 2026
+Versión 2026-10-v4, 31 de octubre de 2026
 
 Responsable
 María Teresa Ferrusca Pérez, RFC FEPT660329TH4 (El Dolarón), Jardín Hidalgo 129, Zona Centro, Soledad de Graciano Sánchez, S.L.P., C.P. 78430.
 
 Datos que tratamos
-Nombre, teléfono celular, correo opcional en registros presenciales y el historial de compras, Dolarones ganados, usados y saldo. Si te uniste con un código de invitación, quién te invitó y si ya se liberó el premio; si invitas a otras personas, cuántas se unieron con tu código y si se liberó su premio (ves solo esas cifras, no sus datos). En tu portal ves tu saldo, sus vencimientos y un recibo de cada compra hecha como socio (piezas, importes y forma de pago); es un comprobante de compra, no una factura fiscal. Para el acceso web se conserva el identificador de tu cuenta con el proveedor SMS, la versión de bases aceptada y la fecha. No hay PIN de socio; el servidor conserva una huella del código temporal, su límite, vigencia y uso, no el código legible. No pedimos datos sensibles, domicilio, fecha de nacimiento ni identificación oficial.
+Nombre, teléfono celular, correo opcional en registros presenciales y el historial de compras, Dolarones ganados, usados y saldo. Si te uniste con un código de invitación, quién te invitó y si ya se liberó el premio; si invitas a otras personas, cuántas se unieron con tu código y si se liberó su premio (ves solo esas cifras, no sus datos). Para los niveles VIP y Negocio: cuánto dinero pagas cada semana, tu nivel y tus semanas cumplidas seguidas, si elegiste Dolarones o descuento en la semana y si la tienda marcó tu cuenta como Negocio (cliente con negocio propio). Para el premio por invitados constantes, la tienda usa cuánto dinero paga cada persona que invitaste por semana; quien invita no ve esos importes. En tu portal ves tu saldo, sus vencimientos y un recibo de cada compra hecha como socio (piezas, importes y forma de pago); es un comprobante de compra, no una factura fiscal. Para el acceso web se conserva el identificador de tu cuenta con el proveedor SMS, la versión de bases aceptada y la fecha. No hay PIN de socio; el servidor conserva una huella del código temporal, su límite, vigencia y uso, no el código legible. No pedimos datos sensibles, domicilio, fecha de nacimiento ni identificación oficial.
 
 Vales sin registro
 Se conserva únicamente información de la compra y del vale: el código legible, para que el personal autorizado pueda reimprimirlo, la venta que lo generó, su saldo, movimientos y vigencia. Los cupones se guardan igual; el de una devolución conserva además la venta de origen, y el que emite la tienda, su motivo y quién lo autorizó. No se crea un perfil de socio ni se pide teléfono o nombre. Quien tenga el papel puede gastar su saldo.
@@ -119,7 +165,7 @@ Verificación por SMS
 Para entrar al portal, tu número se envía a un proveedor de verificación, Google Firebase Authentication. Este proveedor envía el código SMS, guarda el identificador de tu cuenta y tu número, y puede recibir datos técnicos de tu navegador (como la dirección IP) y de la comprobación anti-abuso reCAPTCHA. Para eso, tu navegador carga código de esos servicios y, si eliges mantener la sesión, guarda en tu dispositivo la sesión del proveedor. Sin esa verificación no se puede usar el portal; comprar y acumular en la tienda, sí. El proveedor puede estar fuera de México.
 
 Para qué los usamos (finalidades necesarias)
-Registrarte como socio; verificar tu teléfono y darte acceso al portal; identificarte en la caja; calcular, abonar y descontar Dolarones; mostrarte tu saldo y tus recibos; registrar quién invitó a quién y si se liberó el premio de referidos; evitar registros duplicados; y atender aclaraciones. No usamos tus datos para publicidad. Si en el futuro quisiéramos enviarte promociones, te pediremos un consentimiento aparte, y negarte no afectará tu participación.
+Registrarte como socio; verificar tu teléfono y darte acceso al portal; identificarte en la caja; calcular, abonar y descontar Dolarones; calcular tu nivel VIP o Negocio y aplicar tu descuento o tus Dolarones de la semana; mostrarte tu saldo y tus recibos; registrar quién invitó a quién y si se liberó el premio de referidos y pagar el premio por invitados constantes; evitar registros duplicados; y atender aclaraciones. No usamos tus datos para publicidad. Si en el futuro quisiéramos enviarte promociones, te pediremos un consentimiento aparte, y negarte no afectará tu participación.
 
 Con quién los compartimos
 No vendemos tus datos ni los usamos para publicidad de terceros. Se guardan en servicios de cómputo en la nube (Cloudflare, Inc.) que los procesan por cuenta de El Dolarón. El número con el que entras al portal lo procesa el proveedor de verificación por SMS descrito arriba (Google), junto con el operador que entrega el mensaje. Nadie más recibe tus datos, salvo una autoridad que los pida conforme a la ley.
@@ -133,4 +179,4 @@ Mientras seas socio y 12 meses después, por aclaraciones y obligaciones contabl
 Cambios a este aviso
 Se publicarán en la tienda y se te informarán al usar el programa.
 
-Versión 2026-10-v3, 30 de octubre de 2026`;
+Versión 2026-10-v4, 31 de octubre de 2026`;
