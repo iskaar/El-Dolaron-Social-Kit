@@ -1709,8 +1709,10 @@ async function registrarVenta(request: Request, env: Env, ctx: ExecutionContext,
       where venta_id = ? and tipo = 'compra'`).bind(id).first<{ importe:number }>();
     const referido = await env.DB.prepare(`select coalesce(sum(importe), 0) as importe from dolarones_movimientos
       where venta_id = ? and tipo = 'referido_nuevo'`).bind(id).first<{ importe:number }>();
+    const bono = await env.DB.prepare(`select coalesce(sum(importe), 0) as importe from dolarones_movimientos
+      where venta_id = ? and tipo = 'promo'`).bind(id).first<{ importe:number }>();
     const respuesta = json({ id, duplicada:true, imprimir_en:previo.imprimir_en, ganados:ganado?.importe ?? 0,
-      referido_liberado:referido?.importe ?? 0,
+      referido_liberado:referido?.importe ?? 0, bono_promo:bono?.importe ?? 0,
       anticipo:previo.anticipo, saldo_pedido:previo.pedido_id ? await saldoDe(env, previo.pedido_id) : null,
       excedente_transferencia:await excedenteDe(env, 'venta', id),
       vale_emitido:await valeDeVenta(env, id), ...(await usadosEnVenta(env, id)) }, 200);
@@ -1805,7 +1807,7 @@ async function registrarVenta(request: Request, env: Env, ctx: ExecutionContext,
 
   // Valida socio, código y saldo; consumo y venta se confirman en el mismo batch.
   const recompensa = await sentenciasDeVenta(env, {
-    ventaId: id, clienteId, dolarones:codigoVale.length ? 0 : dolarones, codigo: String(venta.codigo_socio ?? ''), total, autor: correo, ahora: momento,
+    ventaId: id, clienteId, dolarones:codigoVale.length ? 0 : dolarones, codigo: String(venta.codigo_socio ?? ''), total, autor: correo, ahora: momento, hora: new Date(horaVenta),
   });
   if (!recompensa.ok) {
     const concurrente = await reintento();
@@ -1896,7 +1898,7 @@ async function registrarVenta(request: Request, env: Env, ctx: ExecutionContext,
   // Si una pieza publicada en Mercado Libre se agoto, se pausa alla (D1 manda). Despues de responder.
   ctx.waitUntil(conciliarSeguro(env, { productoIds: preparado.lineas.filter((l) => !l.sinInventario).map((l) => l.producto_id) }));
   const respuesta = json({
-    id, total, descuento, dolarones, imprimir_en:imprimirEn, cambio: Math.max(0, efectivo - aPagar), ganados: recompensa.ganados, referido_liberado: recompensa.referido ?? 0,
+    id, total, descuento, dolarones, imprimir_en:imprimirEn, cambio: Math.max(0, efectivo - aPagar), ganados: recompensa.ganados, referido_liberado: recompensa.referido ?? 0, bono_promo: recompensa.bono_promo ?? 0,
     anticipo, saldo_pedido: pedidoId ? await saldoDe(env, pedidoId) : null,
     excedente_transferencia: transf?.ok ? transf.excedente : 0,
     saldo: clienteId ? await saldo(env, clienteId, ahora) : null,

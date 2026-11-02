@@ -47,6 +47,14 @@
     // app en el DevCenter. ML_CLIENT_ID, ML_CLIENT_SECRET, ML_LLAVE_TOKENS y
     // ML_RUTA_NOTIFICACIONES son secretos (wrangler secret put), no van aqui.
     "ML_REDIRECT_URI": "https://escaner.viste.com.mx/ml/callback",
+    // Promo de noviembre (Issue #684): cada $3,000 en dinero pagado en el periodo dan 300 D de bono.
+    // APAGADA. Se enciende quitando los // de las tres lineas y desplegando, SOLO con las bases aprobadas
+    // por el abogado (decide Isaac). Cuenta las compras desde el 1/11 aunque se encienda despues.
+    // Periodo [inicio, fin) y vencimiento del bono, en UTC (hora de la tienda UTC-6):
+    //   inicio 2026-11-01 00:00, fin 2026-12-01 00:00, el bono vence el 31/12/2026 a las 23:59:59.
+    // "PROMO_META_INICIO": "2026-11-01T06:00:00Z",
+    // "PROMO_META_FIN": "2026-12-01T06:00:00Z",
+    // "PROMO_META_VENCE": "2027-01-01T06:00:00Z",
     "PORTAL_REGISTRO_ABIERTO": "si",
     // Referidos abiertos a todo socio (Issue #597). Apagado de emergencia: quitarla y desplegar.
     "REFERIDOS_ABIERTO": "si",
