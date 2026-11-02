@@ -102,6 +102,13 @@ export function enlaceLoQuiero(piezas) {
   return `${WHATSAPP}?text=${encodeURIComponent(texto)}`;
 }
 
+// Deslizar horizontal sobre la foto (#688): +1 = siguiente (dedo hacia la izquierda), -1 = anterior, 0 = no fue un deslizar.
+// Pide 60 px y que el gesto sea claramente horizontal para no robar el scroll vertical de la ficha.
+export function pasoDeslizar(dx, dy, umbral = 60) {
+  if (Math.abs(dx) < umbral || Math.abs(dx) < Math.abs(dy) * 1.5) return 0;
+  return dx < 0 ? 1 : -1;
+}
+
 const el = (tag, className, text) => {
   const node = document.createElement(tag);
   if (className) node.className = className;
@@ -131,10 +138,13 @@ export function iniciarCatalogo(opciones = {}) {
   const fotoBox = f('.ficha-foto'), selloUltima = f('.ficha-sello'), botonZoom = f('.ficha-zoom'), pista = f('.ficha-pista');
   const compra = f('.ficha-compra'), precioBarra = f('.ficha-barprecio'), botonDudas = f('.ficha-dudas');
   const botonCompartir = f('.ficha-compartir'), avisoFicha = f('.ficha-aviso'), botonComprar = f('.ficha-comprar'), botonCarrito = f('.ficha-carrito');
+  const botonAnterior = f('.ficha-anterior'), botonSiguiente = f('.ficha-siguiente'), contador = f('.ficha-contador'), fichaScroll = f('.ficha-scroll');
   const elegido = filtrosDeUrl(location.search);   // categoría, talla, banda de precio y «Llegó esta semana» (#672)
   let actual = null, busqueda = '', focoAnterior = null, controller = null, cargado = false;
   let deseada = codigoDePieza(location.search);   // pieza a abrir tras la primera carga (#590)
   let siguiente = null;                           // cursor de la última página que SÍ llegó: un fallo reintenta la misma (#241)
+  const cargadas = [];                            // [{ pieza, boton }] en el orden del catálogo: por aquí se desliza la ficha (#688)
+  let total = 0;
 
   // ---- Zoom con gestos (copia de la ficha del sitio, Issue #645) ----
   // Doble toque 1× ↔ 2.5×, pellizco entre 1× y 4×, arrastre mueve la foto acercada. Pointer events + transform, sin librería;
@@ -182,7 +192,7 @@ export function iniciarCatalogo(opciones = {}) {
     else if (punteros.size === 2) {
       const [a, b] = [...punteros.values()];
       pellizco = { d: Math.hypot(a.x - b.x, a.y - b.y) || 1, s: zoom.s };
-      if (toque) toque.movido = true;
+      if (toque) { toque.movido = true; toque.pellizco = true; }
     }
   });
   fotoBox.addEventListener('pointermove', (e) => {
@@ -209,6 +219,10 @@ export function iniciarCatalogo(opciones = {}) {
     if (!punteros.delete(e.pointerId)) return;
     pellizco = null;
     if (punteros.size > 0) { if (toque) toque.movido = true; return; }   // quedó un dedo: sigue como arrastre, no cuenta como toque
+    if (toque?.movido && !toque.pellizco && zoom.s === 1 && e.type === 'pointerup') {
+      const paso = pasoDeslizar(e.clientX - toque.x, e.clientY - toque.y);
+      if (paso) { toque = null; ultimoToque = null; moverFicha(paso); return; }
+    }
     const corto = toque && !toque.movido && e.type === 'pointerup' && e.timeStamp - toque.t < 300;
     if (!corto) { ultimoToque = null; toque = null; return; }
     if (ultimoToque && e.timeStamp - ultimoToque.t < 300 && Math.hypot(toque.x - ultimoToque.x, toque.y - ultimoToque.y) < 30) {
@@ -270,8 +284,7 @@ export function iniciarCatalogo(opciones = {}) {
     pintarCarrito();
   });
 
-  function abrirFicha(pieza, disparador) {
-    focoAnterior = disparador;
+  function pintarFicha(pieza) {
     actual = pieza;
     evento('ficha_abierta', pieza.codigo);
     reiniciarZoom();
@@ -287,10 +300,47 @@ export function iniciarCatalogo(opciones = {}) {
     avisoFicha.textContent = '';
     botonDudas.href = enlaceLoQuiero(pieza);
     pintarCarrito();
+    pintarNav();
+  }
+  function abrirFicha(pieza, disparador) {
+    focoAnterior = disparador;
+    pintarFicha(pieza);
     dialog.showModal();
     dialogClose.focus();
     mostrarPista();
   }
+  // ---- Anterior / Siguiente (#688): recorre `cargadas` en el orden del catálogo; al final pide la siguiente página ----
+  const indiceActual = () => cargadas.findIndex((c) => c.pieza === actual);
+  function pintarNav() {
+    const i = indiceActual();
+    botonAnterior.disabled = i <= 0;
+    botonSiguiente.disabled = i < 0 || (i >= cargadas.length - 1 && more.hidden);
+    contador.textContent = i < 0 ? '' : `${i + 1} de ${Math.max(total, cargadas.length)}`;
+  }
+  let moviendo = false;
+  async function moverFicha(paso) {
+    if (moviendo || !dialog.open) return;
+    const i = indiceActual();
+    if (i < 0) return;
+    let j = i + paso;
+    if (j >= cargadas.length && !more.hidden) {
+      moviendo = true; botonSiguiente.disabled = true;
+      try { await cargar(false); } finally { moviendo = false; }
+      if (!dialog.open || indiceActual() !== i) return;
+    }
+    if (j < 0 || j >= cargadas.length) { pintarNav(); return; }
+    focoAnterior = cargadas[j].boton;
+    reiniciarZoom();
+    pintarFicha(cargadas[j].pieza);
+    fichaScroll.scrollTop = 0;
+  }
+  botonAnterior.addEventListener('click', () => moverFicha(-1));
+  botonSiguiente.addEventListener('click', () => moverFicha(1));
+  dialog.addEventListener('keydown', (ev) => {
+    if (ev.target.matches('input, textarea, select')) return;
+    if (ev.key === 'ArrowLeft') { ev.preventDefault(); moverFicha(-1); }
+    else if (ev.key === 'ArrowRight') { ev.preventDefault(); moverFicha(1); }
+  });
   dialogClose.addEventListener('click', () => dialog.close());
   // Esc cierra la ficha (comportamiento nativo del dialog); el fondo (fuera del cuadro) también.
   dialog.addEventListener('click', (ev) => { if (ev.target === dialog) dialog.close(); });
@@ -331,6 +381,7 @@ export function iniciarCatalogo(opciones = {}) {
     pintarPrecio(valor, pieza);
     boton.append(foto, nombre, detalle, valor);
     boton.addEventListener('click', () => abrirFicha(pieza, boton));
+    cargadas.push({ pieza, boton });
     li.append(boton);
     return li;
   }
@@ -387,7 +438,7 @@ export function iniciarCatalogo(opciones = {}) {
     const mio = (controller = new AbortController());
     // 15 s y se da por fallida: una red lenta no deja «Cargando…» para siempre.
     const reloj = setTimeout(() => mio.abort(TIEMPO), 15000);
-    if (reiniciar) { siguiente = null; grid.replaceChildren(); }
+    if (reiniciar) { siguiente = null; grid.replaceChildren(); cargadas.length = 0; }
     fallback.hidden = true;
     more.hidden = true;
     status.textContent = 'Cargando piezas…';
@@ -408,6 +459,8 @@ export function iniciarCatalogo(opciones = {}) {
       siguiente = data.siguiente || null;
       grid.append(...data.piezas.map(tarjeta));
       more.hidden = !data.hay_mas;
+      total = Number(data.total) || 0;
+      if (dialog.open) pintarNav();
       status.textContent = grid.children.length ? `${grid.children.length} de ${Number(data.total) || grid.children.length} piezas` : busqueda
         ? `No encontramos piezas para «${busqueda}»${hayFiltros() ? ' con esos filtros' : ''}. Prueba otra palabra o pregunta por WhatsApp.`
         : hayFiltros()

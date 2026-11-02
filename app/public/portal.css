@@ -87,7 +87,13 @@ dialog::backdrop { background:#16366b99; }
 #ficha-dialogo { width:min(560px, calc(100vw - 28px)); max-height:calc(100dvh - 28px); margin:auto; padding:0; overflow:hidden; }
 .ficha-caja { position:relative; display:flex; flex-direction:column; max-height:calc(100dvh - 34px); }
 .ficha-cabeza { flex:none; padding:0 14px 10px; }
+.ficha-cabeza { display:flex; flex-wrap:wrap; justify-content:space-between; align-items:flex-end; gap:8px; }
 .ficha-cabeza button { width:auto; min-height:44px; margin:10px 0 0; padding:6px 16px; }
+/* Anterior / Siguiente (#688): también flechas del teclado y deslizar sobre la foto sin zoom. */
+.ficha-nav { display:flex; align-items:center; gap:6px; }
+.ficha-nav button { padding:6px 10px; font-size:14px; }
+.ficha-nav button:disabled { opacity:.35; }
+.ficha-contador { min-width:4.5em; margin-top:10px; text-align:center; font-size:13px; font-weight:700; color:#4e617d; white-space:nowrap; }
 .ficha-scroll { flex:1; min-height:0; overflow-y:auto; overscroll-behavior:contain; }
 .ficha-foto { position:relative; aspect-ratio:4 / 5; width:min(100%, calc(50dvh * .8)); margin-inline:auto; overflow:hidden; background:#eef2f8; touch-action:none; user-select:none; -webkit-user-select:none; }
 .ficha-foto.acercada { cursor:grab; }
