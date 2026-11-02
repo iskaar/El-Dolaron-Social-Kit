@@ -83,3 +83,11 @@ test('filtros: portal.html trae el contenedor de filtros dentro de #catalogo y e
   for (const regla of ['carrito-boton', 'carrito-quitar', 'ficha-carrito']) assert.match(css, new RegExp(`\.${regla} \{[^}]*min-height:(44|52)px`), regla);
   assert.match(css, /\.ficha-comprar \{[^}]*min-height:56px/);
 });
+
+test('pasoDeslizar (#688): izquierda = siguiente, derecha = anterior; corto o vertical no cuenta', () => {
+  assert.equal(ficha.pasoDeslizar(-80, 10), 1);
+  assert.equal(ficha.pasoDeslizar(80, -10), -1);
+  assert.equal(ficha.pasoDeslizar(-40, 0), 0);      // no llegó al umbral
+  assert.equal(ficha.pasoDeslizar(-80, 70), 0);     // más vertical que horizontal: es scroll
+  assert.equal(ficha.pasoDeslizar(0, -200), 0);
+});

@@ -184,7 +184,14 @@
 </dialog>
 <dialog id="ficha-dialogo" aria-labelledby="ficha-titulo">
   <div class="ficha-caja">
-    <div class="ficha-cabeza"><button class="ficha-cerrar secundario" type="button">Cerrar</button></div>
+    <div class="ficha-cabeza">
+      <button class="ficha-cerrar secundario" type="button">Cerrar</button>
+      <div class="ficha-nav">
+        <button class="ficha-anterior secundario" type="button" aria-label="Pieza anterior">&lsaquo; Anterior</button>
+        <span class="ficha-contador" aria-live="polite"></span>
+        <button class="ficha-siguiente secundario" type="button" aria-label="Pieza siguiente">Siguiente &rsaquo;</button>
+      </div>
+    </div>
     <div class="ficha-scroll">
       <div class="ficha-foto">
         <img class="ficha-img" alt="" draggable="false">
