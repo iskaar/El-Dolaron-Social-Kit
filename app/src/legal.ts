@@ -13,7 +13,7 @@
 // Version 2026-10-v6, 30 de octubre de 2026 (Issue #631): v5 no se desplego; solo cambia el punto 7.
 // Piloto familia y amigos: un codigo de la tienda con 50 registros que da solo los 50 D al unirse,
 // y solo esas cuentas tienen codigo DOL. Aprobada por el abogado el 30 de octubre de 2026. El aviso sigue en v3.
-// Version 2026-11-v7, 1 de noviembre de 2026 (Issue #684). PENDIENTE: visto bueno del abogado.
+// Version 2026-11-v7, 1 de noviembre de 2026 (Issue #684). Aprobada por el abogado el 2 de noviembre de 2026.
 // Cambios respecto a v6: punto 7 bis nuevo, promocion de noviembre (cada $3,000 en dinero dan 300 D de bono,
 // vencen el 31/12/2026; decisiones de Isaac del 1/11 sobre retiro, rezago, vale y devoluciones tardias). Aclaraciones sin cambiar reglas (auditoria docs/auditorias/2026-11-01-bases-dolarones.md):
 // hora de la tienda (punto 2); «dinero» incluye transferencia y lo ganado se usa desde las 00:00 del dia siguiente
