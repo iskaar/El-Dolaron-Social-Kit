@@ -35,9 +35,9 @@ test('bonosDeMeta: cruza múltiplos de $3,000, también varios en una venta', ()
 });
 
 test('promoMeta: apagada si falta o está mal cualquier variable; el periodo es [inicio, fin)', () => {
-  const ok = { PROMO_META_INICIO: '2026-11-01T06:00:00Z', PROMO_META_FIN: '2026-12-01T06:00:00Z', PROMO_META_VENCE: '2027-02-01T06:00:00Z' };
+  const ok = { PROMO_META_INICIO: '2026-11-01T06:00:00Z', PROMO_META_FIN: '2026-12-01T06:00:00Z', PROMO_META_VENCE: '2027-01-01T06:00:00Z' };
   const meta = promoMeta(ok as unknown as Env)!;
-  assert.deepEqual(meta, { inicio: '2026-11-01T06:00:00.000Z', fin: '2026-12-01T06:00:00.000Z', vence: '2027-02-01T06:00:00.000Z' });
+  assert.deepEqual(meta, { inicio: '2026-11-01T06:00:00.000Z', fin: '2026-12-01T06:00:00.000Z', vence: '2027-01-01T06:00:00.000Z' });
   for (const [campo, malo] of [['PROMO_META_INICIO', undefined], ['PROMO_META_FIN', ''], ['PROMO_META_VENCE', 'enero'], ['PROMO_META_FIN', '2026-99-99T00:00:00Z'],
     ['PROMO_META_FIN', '2026-11-01T06:00:00Z']] as const)
     assert.equal(promoMeta({ ...ok, [campo]: malo } as unknown as Env), null, `${campo}=${malo}`);
