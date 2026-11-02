@@ -1,0 +1,85 @@
+# Auditoría de las bases Dolarones — 1 de noviembre de 2026
+
+Issue #684. Compara las bases `2026-10-v6` y el aviso `2026-10-v3` (`app/src/legal.ts`) con lo que hace el código en `main` (00cd9bd) y con las decisiones de [RECOMPENSAS-DOLARONES.md](../RECOMPENSAS-DOLARONES.md) §2. No es asesoría legal: prepara la revisión del abogado.
+
+Archivos revisados: `dolarones.ts`, `referidos.ts`, `vales.ts` (vales y cupones), `devoluciones.ts`, `cancelaciones.ts`, `descuentos.ts`, `portal.ts`, `pedidos.ts`, `worker.ts` (registrar venta), `migracion-039-cupones.sql`, `wrangler.jsonc`, `public/venta.js`.
+
+Hallazgos: **coincide**, **ambiguo** (el texto admite dos lecturas o no dice algo que el cliente puede encontrar), **contradice** (el texto promete otra cosa que el código), **falta** (el código hace algo que las bases no cuentan). Lo marcado «aplicado en v7» ya está en el borrador `2026-11-v7`; el resto queda como propuesta.
+
+## Contradicciones
+
+| Punto | Qué dice | Qué hace el código o decidió Isaac | Hallazgo | Propuesta |
+| --- | --- | --- | --- | --- |
+| 2 y 6 | El programa rige desde el 2/10/2026; «las compras hechas antes del 2 de octubre de 2026 no generan Dolarones». | `PROMOCION_INICIO = 2026-10-05T17:00:00Z` (5/10, 11:00): antes no se ganan Dolarones, no se emiten vales y el portal no registra (`promocionIniciada`). Una compra de socio entre el 2/10 y el 5/10 a las 11:00 no ganó. | Contradice (histórico). | DECISIÓN PENDIENTE 1. |
+| 10 | «Si se cancela o devuelve una compra… si la compra liberó un premio de referidos, se retiran los 25 Dolarones de cada una de las dos personas». | `sentenciasDeReversoReferido` solo corre en la cancelación completa. Una devolución parcial no toca el premio, aunque el dinero pagado quede por debajo de $150. | Contradice en devoluciones parciales. | DECISIÓN PENDIENTE 2. |
+| 6, 8 | Se gana por lo pagado «en efectivo o con tarjeta»; el resto «se paga en efectivo o con tarjeta». | `FORMAS_PAGO` incluye transferencia, y lo ganado se calcula sobre `total − dolarones` sin mirar la forma de pago (también cuenta el anticipo de un pedido). | Contradice (el código da más de lo escrito). | Aplicado en v7: «en dinero (efectivo, tarjeta o transferencia)». Define además «dinero», que los puntos 6 bis a 7 usan sin definir. |
+| 10 | «Los Dolarones usados en ella regresan al saldo» (sin distinguir devolución parcial). | Devolución parcial: «dinero primero» (Isaac, 30/09; `repartirDevolucion`). Se regresa dinero hasta lo pagado en dinero y solo el excedente vuelve como Dolarones. Lo ganado se recalcula sobre el dinero que sigue pagado. | Contradice en devoluciones parciales. | Aplicado en v7 (aclaración de la regla vigente). |
+
+## Tabla punto por punto
+
+| Punto | Qué dice | Qué hace el código o decidió Isaac | Hallazgo | Propuesta |
+| --- | --- | --- | --- | --- |
+| 1 Organizador | Titular, RFC y domicilio. | Decisión del 29/09 (#135). | Coincide. | — |
+| 2 Vigencia | Desde el 2/10; termina con aviso de 30 días; lo vigente se respeta. | Ver contradicción del inicio. El aviso de 30 días no tiene código (no hace falta). | Coincide salvo el inicio. Las bases usan «hora de la tienda» (6 bis, 6 ter) sin definirla. | Aplicado en v7: «Todas las fechas y horas de estas bases son hora de la tienda (hora del centro de México, UTC-6)». El código usa UTC−6 fijo (`MX` en `dolarones.ts`). |
+| 3 Quién participa | Mayores de 18 declarados; gratis. | `declara_mayor_edad` obligatorio en portal y tienda. | Coincide. Usa «socio» antes de definirlo (punto 4). | Propuesta v8: punto de definiciones (socio, cuenta o membresía, portal, dinero, hora de la tienda, ticket, encargado). |
+| 4 Registro | Uno por persona y teléfono; SMS en línea; en tienda, el «encargado» vincula. | Teléfono único (`clientes.telefono`). La vinculación exige código DV de 5 minutos, número de socio y que el teléfono verificado por SMS sea el registrado; solo el **dueño** puede vincular (`/api/socios/vincular` no está en `cuentas.ts`). | Ambiguo: «encargado» no está definido y en el código es el dueño. | DECISIÓN PENDIENTE 11. |
+| 5 Qué son | 1 D = $1; cualquier producto; parcial; no se cambian por dinero. | `repartir` permite pagar todo el ticket con D. Un pedido con envío liquidado a distancia (`ventaDePaquete`) no admite D, ni siquiera para la línea «Envío». | Ambiguo menor: ¿el envío es «producto»? | Propuesta v8: «Sirven para cualquier producto de la tienda y se usan en la caja». |
+| 6 Cómo se ganan | 10 D por cada $100 completos; identificarse antes de pagar; se usan «a partir del día siguiente»; vencen a los 12 meses. | `dolaronesGanados(total − dolarones)`, por bloques. `disponibleDesde`: 00:00 del día siguiente, hora de la tienda. `sumarMeses(12)`: misma fecha y hora; si el día no existe, el último del mes. Ambas usan la hora en que el servidor registra la venta: una venta cobrada sin red y registrada otro día se libera un día después. | Coincide; «día siguiente» ambiguo. «Una compra ya cobrada no se acumula después» choca con 6 ter. | Aplicado en v7: «a partir de las 00:00 del día siguiente» y «salvo cuando se pasa un vale a la cuenta (punto 6 ter)». La hora de una venta sin red queda como nota técnica. |
+| 6 bis Vale impreso | 5 D por cada $100 en dinero; usable desde la siguiente compra; vence a los 30 días exactos; al portador; no junto con crédito de socio. | `sentenciasVale`: solo sin socio; `vence_en = emisión + 30 × 24 h`; nace disponible pero la venta que lo emite ya no puede usarlo. | Coincide. | — |
+| 6 ter Pasar vale a cuenta | Vale completo, sin usar, vigente, sin D; 10 D por cada $100; 2 vales cada 7 días. | `reclamarVale`: exige `restante = importe`, sin cancelación, sin socio en la venta; tope de 2 en 7 × 24 h móviles; abona con la fecha de la compra. Una devolución parcial baja el `restante` del vale (`retirarVale`), así que ese vale **ya no se puede pasar**. | Ambiguo: «completo, sin usar» no dice que una devolución parcial lo impide. | DECISIÓN PENDIENTE 9. |
+| 6 quater Cupones | Por devolución (opcional para el cliente) o de cortesía; 30 días; al portador; no con membresía; no se pasa a cuenta. | `nuevoCupon`: 30 × 24 h, disponible al emitirse; `reclamarVale` rechaza cupones. El importe del cupón por devolución es `cupon_porcentaje` (1–200 %, lo fija el dueño en /reportes) del dinero devuelto. Cupón manual hasta $10,000 con PIN de dueño. | Coincide («el importe es el que muestra el cupón»). Un socio que recibe un cupón por devolución solo puede usarlo comprando sin identificarse, y entonces esa compra no le da Dolarones. | DECISIÓN PENDIENTE 15. |
+| 7 Referidos | Piloto EDS1026 de 50 registros, solo 50 D al unirse; código DOL solo para cuentas del piloto; 50 D al unirse (30 días, sin mínimo); 25 + 25 D con la primera compra de $150 o más en dinero (12 meses, día siguiente); tope de 10; terminar respeta lo ganado. | `referidos.ts`: `MAXIMO_PILOTO = 50`, `D_ALTA = 50_00` con `vence = alta + 30 × 24 h`, `MINIMO_COMPRA = 150_00` sobre `total − dolarones`, `MAXIMO_REFERIDOS = 10`, triggers de tope. Apagar `REFERIDOS_ABIERTO` solo cierra códigos nuevos; el premio pendiente se sigue pagando. Solo el registro por portal acepta código. | Coincide. | — |
+| 7 Apertura | Premios ya otorgados vencen a las 24 h y piden ticket de $1,000 antes de descontar D. | `PREMIOS_APERTURA` apagado desde el 30/10 (#611); todo premio otorgado ya venció. `MINIMO_REGALO` sigue en el código. | Coincide, pero el párrafo ya no tiene efecto. | DECISIÓN PENDIENTE 12. |
+| 8 Cómo se usan | Código del portal de 5 min y un canje; primero lo que vence antes; vales y cupones hasta 10, no con membresía; vale perdido no se repone. | `codigos_cliente` 5 min, `on conflict` invalida el anterior; `repartir` ordena por `vence_en`; `MAXIMO_VALES = 10`; vales y socio en el mismo ticket se rechazan. | Coincide; faltaba transferencia. | Aplicado en v7: «en efectivo, con tarjeta o por transferencia». |
+| 9 Seguridad | No compartir códigos; vinculación presencial; sin recuperación automática. | Coincide con `portal.ts`. | Coincide. «Encargado» igual que en el punto 4. | Ver DECISIÓN PENDIENTE 11. |
+| 10 Cancelaciones | Lo usado regresa con su vencimiento original; lo ganado se retira; vales y cupones regresan al suyo; si lo generado ya se gastó, la compra no se cancela sola; derechos del consumidor intactos. | Cancelación completa: regresa cada canje a su lote (`sentenciasDeCancelacion`); un lote vencido recibe el regreso pero ya no se puede usar. Devolución parcial: lo que regresa va al lote **que vence al último** de los usados en esa compra (favorece al cliente). Si se gastó cualquier parte de lo ganado, el trigger aborta (#135). Ticket con anticipo de pedido: no se cancela ni devuelve en la caja, lo resuelve el dueño. Ticket pagado con vale o cupón: no admite devolución parcial. Ticket con piezas devueltas en cupón: no se cancela completo, solo pieza por pieza. | Coincide en cancelación completa; ver contradicciones en parcial y referidos. Faltan las tres restricciones de la caja. | Aplicado en v7: «dinero primero». DECISIÓN PENDIENTE 10 para vales y cupones. Las otras dos restricciones son de operación y no cambian el resultado para el cliente; propuesta v8: «Algunas devoluciones se resuelven con el dueño de la tienda». |
+| 11 Aclaraciones | Tienda 11:00–20:00, WhatsApp 444 543 7754, fijo 444 854 5980. | Datos oficiales del 22/10. | Coincide. | — |
+| Aviso | Datos: nombre, teléfono, correo opcional, compras, Dolarones, referidos, recibos. «No pedimos domicilio.» | Desde #668–#670 (en `main`) el socio aparta piezas en el portal, ve sus apartados por teléfono y sube **fotos del comprobante de transferencia** con clave de rastreo (`pagos-reportados.ts`, R2 privado). El aviso v3 no lo menciona. La promoción de noviembre no usa datos nuevos: sale del historial de compras ya declarado y de la finalidad «calcular, abonar y descontar Dolarones». | Falta (apartados y comprobantes), sin relación con la promoción. | El aviso no cambia en v7. DECISIÓN PENDIENTE 13. |
+
+## Promoción de noviembre (punto 7 bis): contraste con la rama de código
+
+La rama `agent/claude/684-promo-noviembre` todavía está en trabajo (sin commits al 1/11). El texto 7 bis sigue las reglas de Isaac del Issue #684. Donde la rama hace otra cosa, se marca aquí para resolver antes de aprobar.
+
+| Tema | Texto 7 bis | Rama de código (borrador) | Hallazgo |
+| --- | --- | --- | --- |
+| Qué cuenta | Dinero de compras cobradas en la tienda a la cuenta del socio; no Dolarones, no Mercado Libre. | `total − dolarones − devuelto` de ventas con `cliente_id` en el periodo, por `creado_en` (hora de la caja). Mercado Libre no crea ventas. | Coincide. |
+| Vale pasado a cuenta (6 ter) | No cuenta. | Contaría: `reclamarVale` pone `cliente_id` a la venta del vale. | DECISIÓN PENDIENTE 5. |
+| Pedidos con envío | Solo cuenta lo cobrado en la tienda. | `ventaDePaquete` crea la venta sin socio: no cuenta ni gana el 10 %. | DECISIÓN PENDIENTE 6. |
+| Compras antes de encender | Cuentan desde el 1/11; el bono se abona al publicarse. | El rezago se paga con la siguiente compra del socio dentro del periodo. Quien no vuelva a comprar en noviembre no lo recibe. | DECISIÓN PENDIENTE 4. Promesa que hoy el sistema no cumple. |
+| Cancelación o devolución | Resta del acumulado; si queda por debajo de un bloque ya pagado, el bono se retira; si se gastó, se aclara en la tienda. | Solo retira el bono si se cancela completa la compra que completó el bloque. Las devoluciones parciales y la cancelación de otras compras solo bajan el acumulado. | DECISIÓN PENDIENTE 3. Con la rama, quien paga $2,999 y luego $1 recibe el bono con la compra de $1, devuelve lo de $2,999 y conserva 300 D. |
+| Vencimiento | 31/01/2027 23:59:59, hora de la tienda. | `PROMO_META_VENCE` es una variable; debe valer `2027-02-01T05:59:59Z` (o `06:00:00Z` si el vencimiento es exclusivo, como `vence_en > ahora`). | Revisar al configurar. |
+| Uso | Desde las 00:00 del día siguiente, sin mínimo, primero lo que vence antes. | `disponibleDesde(ahora)`; `repartir` acepta `promo` y ordena por vencimiento. | Coincide. |
+
+## Términos que se usan antes de definirse
+
+«Socio» (punto 3, se define en el 4); «dinero» (6 bis a 7, nunca definido; aplicado en v7 en el punto 6); «hora de la tienda» (6 bis, 6 ter; aplicado en v7 en el punto 2); «portal» (punto 4, sin dirección); «encargado» (puntos 4 y 9); «cuenta» y «membresía» se usan como sinónimos; «ticket» y «compra» también; «Usar máximo» es el nombre de un botón de la caja; «código de su portal» (punto 6) y «código» (punto 8). Propuesta para v8: un punto «Definiciones» después del 1.
+
+## Aclaraciones aplicadas en el borrador 2026-11-v7
+
+No cambian reglas: describen lo que el código ya hace o lo que Isaac ya decidió.
+
+1. Punto 2: todas las fechas y horas son hora de la tienda (centro de México, UTC−6).
+2. Punto 6: «en dinero (efectivo, tarjeta o transferencia)» en lugar de «en efectivo o con tarjeta».
+3. Punto 6: «salvo cuando se pasa un vale a la cuenta (punto 6 ter)».
+4. Punto 6: «a partir de las 00:00 del día siguiente a la compra».
+5. Punto 8: «en efectivo, con tarjeta o por transferencia».
+6. Punto 10: devolución parcial con «dinero primero» y recálculo de lo ganado.
+7. Punto 10: remite al punto 7 bis para el bono de noviembre.
+
+## Decisiones pendientes para Isaac
+
+1. **Inicio del acumulado.** Las bases dicen que se gana desde el 2/10; el sistema empezó el 5/10 a las 11:00. ¿Hubo compras de socio entre el 2/10 y el 5/10 a las 11:00? Si las hubo, ¿se les abonan a mano los Dolarones o se corrige el texto a «desde el 5 de octubre de 2026 a las 11:00»?
+2. **Devolución parcial y premio de referidos.** ¿Una devolución parcial que deja la compra por debajo de $150 en dinero retira los 25 + 25 D? (a) Sí: hay que cambiar el código. (b) No: el texto debe decir «si se cancela la compra completa».
+3. **Bono de noviembre y devoluciones.** Si el socio devuelve o cancela una compra y su acumulado queda por debajo de un bloque que ya le dio bono, ¿se retira ese bono aunque la compra devuelta no sea la que completó el bloque? (a) Sí, como dice el texto 7 bis: la rama de código debe cambiar. (b) No, se conserva y hay que volver a juntar lo devuelto: el texto debe cambiar.
+4. **Bonos alcanzados antes de encender la promoción.** ¿Se abonan todos al encenderla, como dice el texto (requiere un abono único en el código), o con la siguiente compra del socio en noviembre, como hace la rama? Con la segunda opción, quien ya llegó a la meta y no vuelve a comprar en noviembre no recibe nada, y el texto tendría que decirlo.
+5. **Vale pasado a la cuenta.** ¿La compra de un vale que el socio pasa a su cuenta en noviembre cuenta para la meta? El texto dice que no (la compra no se cobró a su cuenta); la rama la contaría.
+6. **Pedidos con envío.** Un pedido del portal o de WhatsApp pagado completo por transferencia y enviado se registra como venta sin socio: no gana el 10 % (genera un vale anónimo de 5 %) ni cuenta para la meta. ¿Se ligan a la cuenta del socio y cuentan, o se quedan fuera, como dice hoy el texto («cobradas en la tienda»)?
+7. **Anticipos de octubre.** Un pedido apartado en octubre y cobrado en noviembre cuenta completo para la meta, anticipo incluido, porque manda la fecha de la venta. ¿Está bien?
+8. **Devoluciones después del 30/11.** El texto dice que una devolución en diciembre de una compra de noviembre también resta y puede retirar el bono. ¿Confirmas, o se congela el acumulado al cerrar noviembre?
+9. **Vale con devolución parcial.** Hoy no se puede pasar a una cuenta. ¿Se permite pasar lo que le queda, o se aclara en el punto 6 ter «ni de una compra con devoluciones»?
+10. **Ticket pagado con vale o cupón.** Solo se cancela completo, no pieza por pieza. ¿Se dice en las bases o se implementa la devolución parcial al vale?
+11. **Quién vincula.** Las bases dicen «el encargado»; el sistema solo deja al dueño. ¿El texto dice «el dueño de la tienda» o se habilita a encargados?
+12. **Promoción de apertura.** Todos sus premios ya vencieron. ¿Se quita ese párrafo del punto 7 en la próxima versión?
+13. **Aviso de privacidad.** No cubre los apartados del portal ni las fotos de comprobantes de transferencia que sube el socio (#668–#670, ya en `main`). ¿Se prepara un aviso v4 con esos datos? El PR #661 también propone un aviso v4 y habría que unirlos.
+14. **Combinación con VIP.** El texto dice que la promoción no se combina con niveles o promociones que se publiquen después, salvo que sus bases digan otra cosa. No nombra VIP porque no existe en las bases vigentes. ¿Te parece bien así?
+15. **Cupón por devolución de un socio.** Para usarlo tiene que comprar sin identificarse, así que esa compra no le da Dolarones. ¿Se deja así o se permite usar un cupón con membresía?
