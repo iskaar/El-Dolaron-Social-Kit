@@ -47,7 +47,7 @@ Contraste entre el primer borrador del 7 bis y la rama `agent/claude/684-promo-n
 | Pedidos con envío | Solo cuenta lo cobrado en la tienda. | `ventaDePaquete` crea la venta sin socio: no cuenta ni gana el 10 %. | DECISIÓN PENDIENTE 6. |
 | Compras antes de encender | Borrador: el bono se abonaba al publicarse. | El rezago se paga con la siguiente compra del socio en el periodo con algo de dinero. Quien no vuelva a comprar en noviembre no lo recibe. | **Resuelta (4):** el texto sigue al código y lo dice expresamente. |
 | Cancelación o devolución | Borrador: retiraba el bono si el acumulado quedaba bajo un bloque ya pagado. | Solo retira el bono si se cancela completa la compra que completó el bloque. Las devoluciones parciales y la cancelación de otras compras solo bajan el acumulado. | **Resuelta (3 y 8):** el texto sigue al código, también después del 30/11. Riesgo aceptado: quien paga $2,999 y luego $1 y devuelve lo de $2,999 conserva el bono. |
-| Vencimiento | 31/01/2027 23:59:59, hora de la tienda. | `PROMO_META_VENCE` es una variable; debe valer `2027-02-01T05:59:59Z` (o `06:00:00Z` si el vencimiento es exclusivo, como `vence_en > ahora`). | Revisar al configurar. |
+| Vencimiento | 31/12/2026 23:59:59, hora de la tienda. | `PROMO_META_VENCE` es una variable; debe valer `2027-01-01T05:59:59Z` (o `06:00:00Z` si el vencimiento es exclusivo, como `vence_en > ahora`). | Revisar al configurar. |
 | Uso | Desde las 00:00 del día siguiente, sin mínimo, primero lo que vence antes. | `disponibleDesde(ahora)`; `repartir` acepta `promo` y ordena por vencimiento. | Coincide. |
 
 ## Términos que se usan antes de definirse

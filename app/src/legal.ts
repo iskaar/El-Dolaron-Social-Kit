@@ -15,7 +15,7 @@
 // y solo esas cuentas tienen codigo DOL. Aprobada por el abogado el 30 de octubre de 2026. El aviso sigue en v3.
 // Version 2026-11-v7, 1 de noviembre de 2026 (Issue #684). PENDIENTE: visto bueno del abogado.
 // Cambios respecto a v6: punto 7 bis nuevo, promocion de noviembre (cada $3,000 en dinero dan 300 D de bono,
-// vencen el 31/01/2027; decisiones de Isaac del 1/11 sobre retiro, rezago, vale y devoluciones tardias). Aclaraciones sin cambiar reglas (auditoria docs/auditorias/2026-11-01-bases-dolarones.md):
+// vencen el 31/12/2026; decisiones de Isaac del 1/11 sobre retiro, rezago, vale y devoluciones tardias). Aclaraciones sin cambiar reglas (auditoria docs/auditorias/2026-11-01-bases-dolarones.md):
 // hora de la tienda (punto 2); «dinero» incluye transferencia y lo ganado se usa desde las 00:00 del dia siguiente
 // (punto 6, como ya hace el codigo); excepcion del vale pasado a cuenta (punto 6); devolucion parcial «dinero
 // primero» (punto 10, regla de Isaac del 30/09). El aviso sigue en v3. El PR #661 (VIP, en espera) uso
@@ -105,7 +105,7 @@ Del 1 de noviembre de 2026 a las 00:00 al 30 de noviembre de 2026 a las 23:59:59
 - Cuándo. Cuenta la fecha y hora de la compra. Cuentan las compras desde el 1 de noviembre de 2026, aunque esta versión de las bases se publique después.
 - Sin tope. 300 Dolarones al juntar $3,000.00, otros 300 al juntar $6,000.00, otros 300 al juntar $9,000.00, y así sucesivamente. Ejemplo: quien paga $1,800.00 el 3 de noviembre y $1,500.00 el 10 de noviembre junta $3,300.00; con la compra del 10 recibe el bono de 300 Dolarones, y los $300.00 que sobran cuentan para los siguientes $3,000.00. Por esas dos compras gana además 180 y 150 Dolarones (punto 6). En una compra de $2,000.00 pagada con 500 Dolarones y $1,500.00 en efectivo, cuentan $1,500.00.
 - Al cerrar el mes. Lo que no complete un bloque de $3,000.00 al terminar el 30 de noviembre no da bono ni pasa a otro mes.
-- Uso y vencimiento. El bono se puede usar a partir de las 00:00 del día siguiente a la compra con la que se completó el bloque, sin mínimo de compra, y vence el 31 de enero de 2027 a las 23:59:59. Se gasta como los Dolarones ganados por compras (punto 8).
+- Uso y vencimiento. El bono se puede usar a partir de las 00:00 del día siguiente a la compra con la que se completó el bloque, sin mínimo de compra, y vence el 31 de diciembre de 2026 a las 23:59:59. Se gasta como los Dolarones ganados por compras (punto 8).
 - Bloques completados antes de publicarse esta versión, o al pasar un vale a la cuenta. Ese bono se abona con la siguiente compra del socio en noviembre en la que pague algo en dinero, sea del monto que sea, y se puede usar desde las 00:00 del día siguiente a esa compra. Si el socio no vuelve a comprar en noviembre, ese bono no se abona.
 - Cancelaciones y devoluciones. Lo cancelado o devuelto se resta del dinero juntado, aunque la cancelación o devolución sea después del 30 de noviembre, así que hará falta más dinero para completar el siguiente bloque. Un bono ya abonado solo se retira si se cancela completa la compra con la que se completó su bloque; si ese bono ya se gastó en todo o en parte, esa cancelación no procede sola: se aclara en la tienda (punto 10). Las demás cancelaciones y devoluciones no retiran bonos ya abonados.
 - Esta promoción no se combina con otros niveles o promociones de Dolarones que se publiquen después, salvo que sus bases digan otra cosa.
