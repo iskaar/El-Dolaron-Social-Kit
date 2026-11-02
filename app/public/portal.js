@@ -190,6 +190,20 @@ async function cargarCuenta() {
     estado(e.status === 404 ? (config.registro_abierto ? 'Completa tu membresía para continuar.' : 'Las nuevas membresías todavía no están abiertas.') : errorDeAuth(e), e.status !== 404);
   }
 }
+// Promo de noviembre (#684): sin promo_meta (apagada o fuera de fechas) la sección no existe.
+function pintarPromo(p) {
+  $('promo-meta').hidden = !p;
+  if (!p) return;
+  const bloque = p.acumulado % p.meta;
+  $('promo-texto').textContent = 'Llevas ' + pesos(bloque) + ' de ' + pesos(p.meta) + ' en noviembre' +
+    (p.acumulado >= p.meta ? ' (pagaste ' + pesos(p.acumulado) + ' en total)' : '') +
+    '. Te faltan ' + pesos(p.meta - bloque) + ' para ganar ' + d(p.bono) + (p.bonos ? ' más.' : '.');
+  $('promo-barra').value = bloque / p.meta;
+  $('promo-barra').setAttribute('aria-valuetext', pesos(bloque) + ' de ' + pesos(p.meta));
+  $('promo-bonos').textContent = p.bonos
+    ? 'Bonos ganados: ' + p.bonos + ' (' + d(p.bonos * p.bono) + '). Cada ' + pesos(p.meta) + ' en dinero suma otro.'
+    : 'Aún no ganas bono. Cada ' + pesos(p.meta) + ' que pagues en dinero este mes suma ' + d(p.bono) + ', sin tope.';
+}
 async function actualizarSaldo() {
   const s = await api('saldo');
   $('saldo').textContent = d(s.disponible_total);
@@ -197,9 +211,10 @@ async function actualizarSaldo() {
   $('saldo-regalo').textContent = d(s.regalo_sujeto_minimo);
   $('saldo-pendiente').textContent = d(s.por_liberar);
   $('minimo').hidden = !s.regalo_sujeto_minimo;
+  pintarPromo(s.promo_meta);
   $('vencimientos').replaceChildren(...s.lotes.map((l) => {
     const li = document.createElement('li');
-    li.textContent = d(l.restante) + (l.origen === 'regalo' ? ' de apertura' : l.origen === 'referido' ? ' por referidos' : ' por compras') +
+    li.textContent = d(l.restante) + (l.origen === 'regalo' ? ' de apertura' : l.origen === 'referido' ? ' por referidos' : l.origen === 'promo' ? ' de bono de noviembre' : ' por compras') +
       ' · vence ' + fecha(l.vence_en) + (Date.parse(l.disponible_desde) > Date.now() ? ' · disponible desde ' + fecha(l.disponible_desde) : '');
     return li;
   }));

@@ -255,7 +255,7 @@ export function imprimirVale(vale) {
 
 /**
  * @param venta {{ total: number, forma_pago: 'efectivo'|'tarjeta'|'transferencia', efectivo: number, cambio: number, creado_en: string,
- *   dolarones?: number, socio?: { numero: number, ganados: number, saldo: number } | null }}
+ *   dolarones?: number, socio?: { numero: number, ganados: number, bono_promo?: number, saldo: number } | null }}
  * @param lineas {{ nombre: string, precio: number, cantidad: number }[]}
  */
 export async function imprimirTicket(venta, lineas) {
@@ -305,6 +305,7 @@ export async function imprimirTicket(venta, lineas) {
     const d = (centavos) => `${centavos / 100} D`;
     partes.push(linea(`Socio #${venta.socio.numero}`));
     if (venta.socio.ganados) partes.push(renglonMonto('Ganaste (usables desde manana)', d(venta.socio.ganados)));
+    if (venta.socio.bono_promo) partes.push(renglonMonto('Bono noviembre (desde manana)', d(venta.socio.bono_promo)));
     partes.push(renglonMonto('Saldo disponible', d(venta.socio.saldo)));
     partes.push(separador());
   }

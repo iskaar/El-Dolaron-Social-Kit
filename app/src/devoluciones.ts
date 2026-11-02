@@ -92,9 +92,11 @@ export async function detalleVenta(id: string, env: Env, paraImprimir = false): 
   if (!paraImprimir) return json({ ...venta, cliente_id:undefined, pedido_id:undefined, pedido_folio:folio, socio, lineas, devoluciones });
   const ganados = socio ? await env.DB.prepare(`select coalesce(sum(importe), 0) as importe
     from dolarones_movimientos where venta_id = ? and tipo = 'compra'`).bind(id).first<{ importe:number }>() : null;
+  const bono = socio ? await env.DB.prepare(`select coalesce(sum(importe), 0) as importe
+    from dolarones_movimientos where venta_id = ? and tipo = 'promo'`).bind(id).first<{ importe:number }>() : null;
   const saldoActual = venta.cliente_id ? await saldo(env, venta.cliente_id, new Date().toISOString()) : null;
   const respuesta = json({ ...venta, cliente_id: undefined, pedido_id: undefined, pedido_folio: folio,
-    socio:socio && { ...socio, ganados:ganados?.importe ?? 0, saldo:saldoActual?.disponible ?? 0 }, lineas, devoluciones,
+    socio:socio && { ...socio, ganados:ganados?.importe ?? 0, bono_promo:bono?.importe ?? 0, saldo:saldoActual?.disponible ?? 0 }, lineas, devoluciones,
     vale_emitido:await valeDeVenta(env, id), ...(await usadosEnVenta(env, id)) });
   respuesta.headers.set('cache-control', 'no-store');
   return respuesta;
