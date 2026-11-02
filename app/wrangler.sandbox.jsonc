@@ -43,8 +43,8 @@
     "PROMO_HASTA": "2026-10-13T06:00:00Z",
     "PROMO_CUPO": "3",
     // Promo de noviembre (Issue #684): cada $3,000 en dinero pagado en el periodo dan 300 D de bono.
-    // APAGADA. Se enciende quitando los // de las tres lineas y desplegando, SOLO con las bases aprobadas
-    // por el abogado (decide Isaac). Cuenta las compras desde el 1/11 aunque se encienda despues.
+    // ENCENDIDA el 2/11/2026 con las bases 2026-11-v7 aprobadas por el abogado. Para apagarla,
+    // comentar las tres lineas y desplegar. Cuenta las compras desde el 1/11 aunque se encienda despues.
     // Periodo [inicio, fin) y vencimiento del bono, en UTC (hora de la tienda UTC-6):
     //   inicio 2026-11-01 00:00, fin 2026-12-01 00:00, el bono vence el 31/12/2026 a las 23:59:59.
     "PROMO_META_INICIO": "2026-11-01T06:00:00Z",
