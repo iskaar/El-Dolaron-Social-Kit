@@ -73,7 +73,7 @@
   <div class="paso">
     <h2>3. Prueba de impresión</h2>
     <p>
-      Se llena solo con lo que encuentren los pasos de arriba. Prueba los tres idiomas:
+      Se llena solo con lo que encuentren los pasos de arriba. Prueba los cuatro idiomas:
       basta con que <b>uno</b> saque algo en la etiqueta — anota cuál fue.
     </p>
     <div class="botones">
@@ -83,6 +83,7 @@
       <button id="probar-tspl" class="claro" type="button" disabled>Probar TSPL</button>
       <button id="probar-escpos" class="claro" type="button" disabled>Probar ESC/POS</button>
       <button id="probar-cpcl" class="claro" type="button" disabled>Probar CPCL</button>
+      <button id="probar-zpl" class="claro" type="button" disabled>Probar ZPL</button>
     </div>
   </div>
 
@@ -132,7 +133,7 @@ function registrarDestino(etiqueta, escribir) {
   destinos.set(clave, { etiqueta, escribir });
   if (destinos.size === 1) destino.innerHTML = '';
   destino.insertAdjacentHTML('beforeend', `<option value="${clave}">${etiqueta}</option>`);
-  for (const id of ['probar-tspl', 'probar-escpos', 'probar-cpcl']) {
+  for (const id of ['probar-tspl', 'probar-escpos', 'probar-cpcl', 'probar-zpl']) {
     document.getElementById(id).disabled = false;
   }
 }
@@ -241,6 +242,8 @@ const PRUEBAS = {
     'TEXT 4 0 30 30 PRUEBA CPCL', 'TEXT 4 0 30 90 $123',
     'FORM', 'PRINT', '',
   ].join('\r\n'),
+  // ZPL (#691): si la AE240 lo entiende, la guía de Mercado Envíos (response_type=zpl2) se le manda tal cual.
+  zpl: '^XA^PW406^LL203^FO8,8^GB390,187,2^FS^FO24,28^A0N,40,40^FDPRUEBA ZPL^FS^FO24,100^A0N,60,60^FD$123^FS^XZ',
   escpos: `\x1b@PRUEBA ESC/POS\n$123\n\n\n`,
 };
 
@@ -262,6 +265,7 @@ async function probar(idioma) {
 document.getElementById('probar-tspl').addEventListener('click', () => probar('tspl'));
 document.getElementById('probar-escpos').addEventListener('click', () => probar('escpos'));
 document.getElementById('probar-cpcl').addEventListener('click', () => probar('cpcl'));
+document.getElementById('probar-zpl').addEventListener('click', () => probar('zpl'));
 
 document.getElementById('copiar').addEventListener('click', async () => {
   await navigator.clipboard.writeText(salida.textContent);
