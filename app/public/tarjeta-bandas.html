@@ -20,6 +20,7 @@
   .subtitulo { text-align: center; font-size: 12px; color: #5b6478; margin-bottom: 8mm; }
   .familias { display: grid; grid-template-columns: 1fr 1fr; gap: 0 8mm; }
   .familia { break-inside: avoid; }
+  .familias .grupo { grid-column: 1 / -1; font-size: 16px; color: var(--azul); border-bottom: 2px solid var(--azul); margin: 6mm 0 3mm; break-after: avoid; }
   .familia h2 { font-size: 13px; text-align: center; color: var(--azul); margin: 0 0 2mm; }
   .bote { display: flex; align-items: center; justify-content: space-between; gap: 4mm;
     padding: 3mm 0; border-top: 1px solid #e6e9ef; }
@@ -59,9 +60,12 @@
 import { svgCode128 } from '/code128.js';
 
 // Las familias y los montos salen de la tabla `familias` (GET /api/familias).
-const { montos, familias } = await (await fetch('/api/familias')).json();
+// ?todas=1: tambien las de FEP (#694), en su propio grupo al final; la caja las cobra igual.
+const { montos, familias } = await (await fetch('/api/familias?todas=1')).json();
+familias.sort((a, b) => (a.propietario === 'fep') - (b.propietario === 'fep'));
 
-document.getElementById('familias').innerHTML = familias.map((f) => `
+document.getElementById('familias').innerHTML = familias.map((f, i) => `
+  ${f.propietario === 'fep' && familias[i - 1]?.propietario !== 'fep' ? '<h2 class="grupo">FEP</h2>' : ''}
   <div class="familia">
     <h2>${f.nombre}</h2>
     ${montos.map((precio) => {

@@ -130,7 +130,7 @@ export function permiso(pathname: string, metodo: string): Regla {
   if (ruta === '/api/ropa-ia' || ruta.startsWith('/api/ropa-ia/')) return CAPTURA;
   if (metodo === 'GET' && /^\/api\/recortes\/[^/]+\/imagen$/.test(ruta)) return [...CAPTURA, ...VENDER];
   if (ruta === '/api/recortes' || ruta.startsWith('/api/recortes/')) return CAPTURA;
-  if (ruta === '/api/familias') return metodo === 'GET' ? TODOS : DUENO;
+  if (ruta === '/api/familias') return metodo === 'GET' ? [...TODOS, 'finanzas'] : ['finanzas'];   // #694: FEP tiene sus propias familias
   if (ruta === '/api/borradores/manual') return DUENO;   // captura sin foto (Issue #115)
   // Captura por UPC (Issue #365): el precio sale del manifiesto, no de quien captura.
   // Solo El Dolarón: FEP (finanzas) no tiene manifiesto.
