@@ -10,6 +10,13 @@
     ["deportes", "Deportes"], ["otros", "Otros"],
   ];
 
+  // Deslizar horizontal sobre la foto (#690, igual que el portal #688): +1 = siguiente (dedo hacia la izquierda), -1 = anterior, 0 = no fue un deslizar.
+  // Pide 60 px y que el gesto sea claramente horizontal para no robar el scroll vertical de la ficha.
+  function pasoDeslizar(dx, dy, umbral = 60) {
+    if (Math.abs(dx) < umbral || Math.abs(dx) < Math.abs(dy) * 1.5) return 0;
+    return dx < 0 ? 1 : -1;
+  }
+
   // Los precios llegan en centavos MXN enteros.
   function precio(centavos) {
     const cents = Number(centavos) || 0;
@@ -133,7 +140,7 @@
       fallaron: lecturas.filter((l) => l.fallo).map((l) => l.codigo) };
   }
 
-  if (typeof module !== "undefined") module.exports = { precio, apiBase, codigoDePieza, viernesDeEnvio, fechaCorta, lineaApartado, enlaceLoQuiero, BANDAS, filtrosDeUrl, paramsDeFiltros, busquedaConFiltros,
+  if (typeof module !== "undefined") module.exports = { precio, apiBase, codigoDePieza, viernesDeEnvio, fechaCorta, lineaApartado, enlaceLoQuiero, BANDAS, filtrosDeUrl, paramsDeFiltros, busquedaConFiltros, pasoDeslizar,
     TOPE_CARRITO, CLAVE_CARRITO, codigosValidos, agregarCodigo, urlPortal, piezasDe };
 
   // Los precios con su precio de lista tachado, igual en tarjetas y visor.
@@ -287,6 +294,10 @@
   const botonDudas = root.querySelector(".ficha-dudas");
   const botonCompartir = root.querySelector(".ficha-compartir");
   const avisoFicha = root.querySelector(".ficha-aviso");
+  const botonAnterior = root.querySelector(".ficha-anterior");
+  const botonSiguiente = root.querySelector(".ficha-siguiente");
+  const contador = root.querySelector(".ficha-contador");
+  const fichaScroll = root.querySelector(".piece-dialog-scroll");
   const carritoBoton = root.querySelector(".cart-button");
   const carritoN = root.querySelector(".cart-n");
   const cartDialog = root.querySelector(".cart-dialog");
@@ -298,6 +309,8 @@
   const cartTotal = root.querySelector(".cart-total");
   const cartApartar = root.querySelector(".cart-apartar");
   let actual = null;   // pieza que muestra la ficha
+  const cargadas = [];   // [{ pieza, boton }] en el orden de las tarjetas: por aquí se desliza la ficha (#690)
+  let total = 0;
   const elegido = filtrosDeUrl(location.search);   // categoría, talla, banda de precio y «Llegó esta semana» (Issue #672)
   let busqueda = "";
   let deseada = codigoDePieza(location.search);   // pieza a abrir tras la primera carga (#590)
@@ -374,7 +387,7 @@
       else if (punteros.size === 2) {
         const [a, b] = [...punteros.values()];
         pellizco = { d: Math.hypot(a.x - b.x, a.y - b.y) || 1, s: zoom.s };
-        if (toque) toque.movido = true;
+        if (toque) { toque.movido = true; toque.pellizco = true; }
       }
     });
     fotoBox.addEventListener("pointermove", (e) => {
@@ -401,6 +414,10 @@
       if (!punteros.delete(e.pointerId)) return;
       pellizco = null;
       if (punteros.size > 0) { if (toque) toque.movido = true; return; }   // quedó un dedo: sigue como arrastre, no cuenta como toque
+      if (toque && toque.movido && !toque.pellizco && zoom.s === 1 && e.type === "pointerup") {
+        const paso = pasoDeslizar(e.clientX - toque.x, e.clientY - toque.y);
+        if (paso) { toque = null; ultimoToque = null; moverFicha(paso); return; }
+      }
       const corto = toque && !toque.movido && e.type === "pointerup" && e.timeStamp - toque.t < 300;
       if (!corto) { ultimoToque = null; toque = null; return; }
       if (ultimoToque && e.timeStamp - ultimoToque.t < 300 && Math.hypot(toque.x - ultimoToque.x, toque.y - ultimoToque.y) < 30) {
@@ -550,10 +567,7 @@
     });
   }
 
-  function abrirVisor(pieza, disparador, img) {
-    if (!dialog) return;
-    focoAnterior = disparador;
-    fotoOrigen = img || null;
+  function pintarVisor(pieza) {
     if (dialogTitle) dialogTitle.textContent = pieza.nombre;
     actual = pieza;
     evento("ficha_abierta", pieza.codigo);
@@ -579,6 +593,13 @@
     if (botonDudas) botonDudas.href = enlaceLoQuiero(pieza);
     if (botonComprar) botonComprar.href = urlPortal([pieza.codigo]);
     pintarBotonCarrito();
+    pintarNav();
+  }
+  function abrirVisor(pieza, disparador, img) {
+    if (!dialog) return;
+    focoAnterior = disparador;
+    fotoOrigen = img || null;
+    pintarVisor(pieza);
     const abrir = () => {
       if (typeof dialog.showModal === "function") dialog.showModal();
       else dialog.open = true;
@@ -596,6 +617,42 @@
       await Promise.race([dialogImg && typeof dialogImg.decode === "function" ? dialogImg.decode().catch(() => {}) : null, new Promise((r) => setTimeout(r, 250))]);
     });
   }
+
+  // ---- Anterior / Siguiente (#690): recorre `cargadas` en el orden del catálogo; al final pide la siguiente página ----
+  // Por código y no por objeto: la pieza que abre la portada (stickers.js) también cuenta si está en el catálogo cargado.
+  const indiceActual = () => (actual ? cargadas.findIndex((c) => c.pieza.codigo === actual.codigo) : -1);
+  function pintarNav() {
+    if (!botonAnterior || !botonSiguiente || !contador) return;
+    const i = indiceActual();
+    botonAnterior.disabled = i <= 0;
+    botonSiguiente.disabled = i < 0 || (i >= cargadas.length - 1 && more.hidden);
+    contador.textContent = i < 0 ? "" : `${i + 1} de ${Math.max(total, cargadas.length)}`;
+  }
+  let moviendo = false;
+  async function moverFicha(paso) {
+    if (moviendo || !dialog || !dialog.open) return;
+    const i = indiceActual();
+    if (i < 0) return;
+    const j = i + paso;
+    if (j >= cargadas.length && !more.hidden) {
+      moviendo = true; botonSiguiente.disabled = true;
+      try { await cargar(false); } finally { moviendo = false; }
+      if (!dialog.open || indiceActual() !== i) return;
+    }
+    if (j < 0 || j >= cargadas.length) { pintarNav(); return; }
+    focoAnterior = cargadas[j].boton;
+    fotoOrigen = null;   // el cierre ya no vuelve a la miniatura que abrió la ficha
+    reiniciarZoom();
+    pintarVisor(cargadas[j].pieza);
+    if (fichaScroll) fichaScroll.scrollTop = 0;
+  }
+  if (botonAnterior) botonAnterior.addEventListener("click", () => moverFicha(-1));
+  if (botonSiguiente) botonSiguiente.addEventListener("click", () => moverFicha(1));
+  if (dialog) dialog.addEventListener("keydown", (ev) => {
+    if (ev.target.matches("input, textarea, select")) return;
+    if (ev.key === "ArrowLeft") { ev.preventDefault(); moverFicha(-1); }
+    else if (ev.key === "ArrowRight") { ev.preventDefault(); moverFicha(1); }
+  });
 
   // La portada (stickers.js) abre el mismo visor con este evento.
   if (typeof document.addEventListener === "function") document.addEventListener("dolaron:ver-pieza", (ev) => { const d = ev.detail || {}; if (d.pieza) abrirVisor(d.pieza, d.disparador, d.img); });
@@ -652,6 +709,7 @@
     li.append(photo, body);
     // Toda la tarjeta abre la ficha; el foco vuelve al botón al cerrarla.
     li.addEventListener("click", () => abrirVisor(pieza, quiero, img));
+    cargadas.push({ pieza, boton: quiero });
     return li;
   }
 
@@ -690,7 +748,7 @@
     const mio = (controller = new AbortController());
     // 15 s y se da por fallida: una red lenta no deja «Cargando…» para siempre.
     const reloj = setTimeout(() => mio.abort(TIEMPO), 15000);
-    if (reiniciar) { siguiente = null; proxima = 1; grid.replaceChildren(); }
+    if (reiniciar) { siguiente = null; proxima = 1; grid.replaceChildren(); cargadas.length = 0; }
     const pedida = proxima;
     fallback.hidden = true;
     more.hidden = true;
@@ -721,6 +779,8 @@
         if (pieza) abrirVisor(pieza, null, null);
       }
       more.hidden = !data.hay_mas;
+      total = Number(data.total) || 0;
+      if (dialog && dialog.open) pintarNav();
       status.textContent = grid.children.length
         ? `${grid.children.length} de ${Number(data.total) || grid.children.length} piezas`
         : busqueda

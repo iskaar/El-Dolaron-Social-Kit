@@ -1,6 +1,6 @@
 // Run: node tools/check_site_catalogo.cjs
 const assert = require("node:assert/strict");
-const { precio, apiBase, codigoDePieza, viernesDeEnvio, fechaCorta, lineaApartado, enlaceLoQuiero, BANDAS, filtrosDeUrl, paramsDeFiltros, busquedaConFiltros,
+const { precio, apiBase, codigoDePieza, viernesDeEnvio, fechaCorta, lineaApartado, enlaceLoQuiero, BANDAS, filtrosDeUrl, paramsDeFiltros, busquedaConFiltros, pasoDeslizar,
   TOPE_CARRITO, CLAVE_CARRITO, codigosValidos, agregarCodigo, urlPortal, piezasDe } = require("../site/public/catalogo.js");
 
 assert.equal(precio(15000), "$150");
@@ -29,6 +29,13 @@ assert.equal(lineaApartado({ precio: 15000 }, SABADO), "Apártala con $100 por 7
 assert.equal(lineaApartado({ precio: 5000 }, SABADO), "Se paga completa al apartar. Recoge en Soledad (11 a 8) o te la enviamos el viernes 6 de noviembre (envío nacional gratis desde $1,000; si no, $99).");
 const sudadera = { nombre: "Sudadera Nike", talla: "M", codigo: "ED-001850", precio: 15000 };
 assert.equal(enlaceLoQuiero(sudadera), "https://wa.me/524445437754?text=Quiero%20producto%20ED-001850");   // solo el código, nada más
+
+// Deslizar entre piezas (#690, igual que el portal #688): izquierda = siguiente, derecha = anterior; corto o vertical no cuenta.
+assert.equal(pasoDeslizar(-80, 10), 1);
+assert.equal(pasoDeslizar(80, -10), -1);
+assert.equal(pasoDeslizar(-40, 0), 0);
+assert.equal(pasoDeslizar(-80, 70), 0);
+assert.equal(pasoDeslizar(0, -200), 0);
 
 // Filtros (Issue #672): la URL y la consulta a la API usan los mismos nombres; lo malformado se ignora y ?pieza=/?api= se conservan.
 assert.deepEqual(BANDAS.map(([k, v]) => `${k}=${v}`), ["precio_max=5000", "precio_max=8000", "precio_max=10000", "precio_max=15000", "precio_min=20000"]);
