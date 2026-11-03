@@ -547,7 +547,8 @@ async function enlazar(aparato) {
  * volver a probar con la impresora enfrente.
  */
 async function enviar(texto) {
-  const datos = new TextEncoder().encode(texto);
+  // Texto TSPL, o bytes ya armados (BITMAP de la guía de ML, #691: TextEncoder rompería los bytes > 127).
+  const datos = typeof texto === 'string' ? new TextEncoder().encode(texto) : texto;
   const sinRespuesta = caracteristica.properties.writeWithoutResponse;
   for (let i = 0; i < datos.length; i += 20) {
     const trozo = datos.slice(i, i + 20);
