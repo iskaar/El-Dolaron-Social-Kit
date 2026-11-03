@@ -1562,7 +1562,7 @@ async function zip(nombre: string, contenido: string, { metodo = 8, descriptor =
   return unir(local, central, u32(0x06054b50), u16(0), u16(0), u16(1), u16(1), u32(central.length), u32(local.length), u16(0));
 }
 
-const PDF = bytesDe('%PDF-1.4 guia de prueba  ÿ fin');
+const PDF = bytesDe('%PDF-1.4 guia de prueba \u0000\u00ff\u0080 fin');
 const ZPL = '^XA^FO20,20^A0N,40,40^FDGuía ML ñ^FS^XZ';
 
 test('guía (#691): PDF pasa tal cual, sin guardar nada; ZPL sale del ZIP de ML (con y sin descriptor, deflate y stored)', () => conML(async (t) => {
