@@ -148,6 +148,11 @@
 
   <section class="panel" id="panel-ventas" aria-labelledby="h-ventas" hidden>
     <h2 id="h-ventas">Ventas en Mercado Libre</h2>
+    <div id="barra-impresora" style="display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-bottom:12px">
+      <button type="button" id="conectar-impresora" class="boton">Conectar impresora</button>
+      <button type="button" id="otra-impresora" class="boton">¿No aparece la impresora?</button>
+      <span id="estado-impresora" class="nota" role="status">Impresora de guías (AE240): sin conectar.</span>
+    </div>
     <div id="recordatorio"></div>
     <div id="lista-ventas" aria-live="polite"></div>
     <div style="margin-top:12px"><button type="button" id="ver-mas-ventas" hidden>Ver más</button></div>
@@ -342,6 +347,28 @@ async function cargarGuia(orderId) {
 // Un solo trabajo a la vez: dos guias mezcladas por BLE saldrian cortadas.
 let imprimiendoGuia = false;
 
+// Conectar la AE240 antes de imprimir (#691). «¿No aparece?» muestra todos los aparatos, como en /bandas.
+function pintarImpresora(texto) {
+  $('estado-impresora').textContent = texto ?? (etiqueteraLista()
+    ? 'Impresora de guías (AE240): conectada.' : 'Impresora de guías (AE240): sin conectar.');
+  $('conectar-impresora').textContent = etiqueteraLista() ? 'Reconectar impresora' : 'Conectar impresora';
+}
+function fallaImpresora(error) {
+  return error?.name === 'NotFoundError'
+    ? 'No se escogió impresora. Préndela y vuelve a intentar, o usa «¿No aparece la impresora?».'
+    : /disconnected/i.test(error?.message ?? '')
+      ? 'La impresora soltó la conexión. Apágala y préndela, cierra otras pestañas que la usen y vuelve a intentar.'
+      : `No se pudo conectar la impresora: ${error?.message ?? error}`;
+}
+async function conectarDesdeBoton(cualquiera) {
+  if (!navigator.bluetooth) { pintarImpresora('Este navegador no tiene Bluetooth: abre esta pantalla en Chrome en la PC de caja.'); return; }
+  pintarImpresora('Conectando…');
+  try { await conectarEtiquetera({ cualquiera }); pintarImpresora(); }
+  catch (error) { pintarImpresora(fallaImpresora(error)); }
+}
+$('conectar-impresora').addEventListener('click', () => conectarDesdeBoton(false));
+$('otra-impresora').addEventListener('click', () => conectarDesdeBoton(true));
+
 async function imprimirGuia(orderId, avisar) {
   if (!navigator.bluetooth) { avisar('Para imprimir la guía abre esta pantalla en la PC de caja (Chrome con Bluetooth), o usa «Abrir PDF».', true); return; }
   if (imprimiendoGuia) { avisar('Espera a que termine la guía anterior.', true); return; }
@@ -351,9 +378,9 @@ async function imprimirGuia(orderId, avisar) {
     if (!etiqueteraLista()) {
       avisar('Conectando…');
       try { await conectarEtiquetera(); } catch (error) {
-        avisar(error?.name === 'NotFoundError' ? 'No se escogió la impresora.' : `No se pudo conectar la AE240: ${error?.message ?? error}`, true);
+        avisar(fallaImpresora(error), true);
         return;
-      }
+      } finally { pintarImpresora(); }
     }
     avisar('Mandando guía…');
     const guia = await cargarGuia(orderId);
@@ -362,6 +389,7 @@ async function imprimirGuia(orderId, avisar) {
     else avisar(`No salió la guía: ${errorEnvio() || 'revisa la AE240'}.`, true);
   } finally {
     imprimiendoGuia = false;
+    pintarImpresora();
   }
 }
 
