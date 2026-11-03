@@ -248,16 +248,16 @@ async function tokenValido(env: Env, descartar?: string): Promise<{ token: strin
 }
 
 /**
- * Llama a la API de ML con el token de la cuenta conectada (lo renueva si esta
- * por vencer, y una vez mas si ML lo rechaza). Devuelve el JSON, o lanza ErrorML.
+ * La peticion autenticada a ML (renueva el token si esta por vencer, y una vez mas si ML lo
+ * rechaza con 401) y su Response sin leer: sirve igual para JSON que para bytes (la guia, #691).
  */
-export async function mlFetch(env: Env, ruta: string, init: RequestInit & { json?: unknown } = {}): Promise<any> {
+async function mlCrudo(env: Env, ruta: string, init: RequestInit & { json?: unknown } = {}, accept = 'application/json'): Promise<Response> {
   let descartar: string | undefined;
   for (let vez = 0; vez < 2; vez++) {
     const { token, cifrado } = await tokenValido(env, descartar);
     const cabeceras = new Headers(init.headers);
     cabeceras.set('authorization', `Bearer ${token}`);
-    cabeceras.set('accept', 'application/json');
+    cabeceras.set('accept', accept);
     let cuerpoPedido = init.body;
     if (init.json !== undefined) {
       cuerpoPedido = JSON.stringify(init.json);
@@ -265,17 +265,27 @@ export async function mlFetch(env: Env, ruta: string, init: RequestInit & { json
     }
     const { json: _json, ...resto } = init;
     const respuesta = await fetch(`${API}${ruta}`, { ...resto, body: cuerpoPedido, headers: cabeceras });
-    const texto = await respuesta.text();
-    let cuerpo: any = null;
-    try { cuerpo = texto ? JSON.parse(texto) : null; } catch { /* no era JSON */ }
     if (respuesta.status === 401 && vez === 0) {
       descartar = cifrado;
+      await respuesta.body?.cancel();
       continue;
     }
-    if (!respuesta.ok) throw errorDe(respuesta.status, cuerpo, texto);
-    return cuerpo;
+    return respuesta;
   }
   throw errorLocal(401, 'no_autorizado', 'Mercado Libre rechazó la sesión.');
+}
+
+/**
+ * Llama a la API de ML con el token de la cuenta conectada (lo renueva si esta
+ * por vencer, y una vez mas si ML lo rechaza). Devuelve el JSON, o lanza ErrorML.
+ */
+export async function mlFetch(env: Env, ruta: string, init: RequestInit & { json?: unknown } = {}): Promise<any> {
+  const respuesta = await mlCrudo(env, ruta, init);
+  const texto = await respuesta.text();
+  let cuerpo: any = null;
+  try { cuerpo = texto ? JSON.parse(texto) : null; } catch { /* no era JSON */ }
+  if (!respuesta.ok) throw errorDe(respuesta.status, cuerpo, texto);
+  return cuerpo;
 }
 
 /**
@@ -429,6 +439,74 @@ async function listarVentas(env: Env, url: URL): Promise<Response> {
     pendientes_conflicto: await contarConflictos(env),
     hay_mas: results.length > 50,
   });
+}
+
+/* ---------- guia de Mercado Envios (#691) ---------- */
+
+/**
+ * La primera entrada de un ZIP, sin libreria. ML manda el ZPL como un ZIP con un .txt. Java
+ * (y casi todos) escriben el tamano comprimido DESPUES de los datos (bit 3) y dejan 0 en el
+ * encabezado local: en ese caso el tamano sale del directorio central (al final del archivo).
+ */
+export async function primeraEntradaZip(zip: Uint8Array): Promise<Uint8Array> {
+  const v = new DataView(zip.buffer, zip.byteOffset, zip.byteLength);
+  const malo = () => errorLocal(502, 'zip_invalido', 'Mercado Libre mandó la guía en un formato que no se pudo leer.');
+  if (zip.length < 30 || v.getUint32(0, true) !== 0x04034b50) throw malo();
+  const metodo = v.getUint16(8, true);
+  let comprimido = v.getUint32(18, true);
+  if ((v.getUint16(6, true) & 8) && comprimido === 0) {
+    let fin = zip.length - 22;   // fin del directorio central: firma 0x06054b50
+    while (fin >= 0 && v.getUint32(fin, true) !== 0x06054b50) fin--;
+    if (fin < 0) throw malo();
+    const entrada = v.getUint32(fin + 16, true);
+    if (entrada + 24 > zip.length || v.getUint32(entrada, true) !== 0x02014b50) throw malo();
+    comprimido = v.getUint32(entrada + 20, true);
+  }
+  const inicio = 30 + v.getUint16(26, true) + v.getUint16(28, true);
+  if (inicio + comprimido > zip.length) throw malo();
+  const datos = zip.subarray(inicio, inicio + comprimido);
+  if (metodo === 0) return datos;
+  if (metodo !== 8) throw malo();
+  return new Uint8Array(await new Response(new Response(datos).body!.pipeThrough(new DecompressionStream('deflate-raw'))).arrayBuffer());
+}
+
+const SIN_GUIA = 'Esta venta no lleva guía de Mercado Envíos.';
+const GUIA_NO_LISTA = 'La guía todavía no está lista en Mercado Libre: el envío debe estar listo para imprimir (y no ser Flex ni retiro en persona).';
+
+/**
+ * GET /api/ml/guia/{orden}?formato=pdf|zpl. No guarda nada: pide la guia a ML y la entrega.
+ * ASUNCION a verificar en prod: GET /shipment_labels?shipment_ids=ID&response_type=pdf|zpl2
+ * contesta 200 con los bytes solo si el envio esta ready_to_ship; si no, 4xx con JSON.
+ */
+async function guia(env: Env, orden: string, url: URL): Promise<Response> {
+  const formato = url.searchParams.get('formato') ?? 'pdf';
+  if (formato !== 'pdf' && formato !== 'zpl') return json({ error: 'El formato debe ser pdf o zpl.' }, 400);
+  if (!/^\d{1,20}$/.test(orden)) return json({ error: 'Número de orden inválido.' }, 400);
+  try {
+    const envio = (await mlFetch(env, `/orders/${orden}`))?.shipping?.id;
+    if (!envio) return json({ error: SIN_GUIA, mensaje: SIN_GUIA }, 409);
+    const r = await mlCrudo(env, `/shipment_labels?shipment_ids=${encodeURIComponent(String(envio))}&response_type=${formato === 'zpl' ? 'zpl2' : 'pdf'}`, {}, '*/*');
+    if (!r.ok) {
+      const texto = await r.text();
+      let cuerpo: any = null;
+      try { cuerpo = JSON.parse(texto); } catch { /* no era JSON */ }
+      const falla = errorDe(r.status, cuerpo, texto);
+      // 400/404: ML no tiene guia para ese envio (aun). Lo demas (401, 429, 5xx) sigue el camino comun.
+      if (r.status === 400 || r.status === 404) return json({ error: GUIA_NO_LISTA, mensaje: GUIA_NO_LISTA, detalle: falla.detalle }, 409);
+      throw falla;
+    }
+    const bytes = new Uint8Array(await r.arrayBuffer());
+    const sin_cache = { 'cache-control': 'no-store' };
+    if (formato === 'pdf') {
+      if (String.fromCharCode(...bytes.subarray(0, 4)) !== '%PDF') throw errorLocal(502, 'pdf_invalido', 'Mercado Libre no mandó un PDF. Intenta de nuevo en un rato.');
+      return new Response(bytes, { headers: { 'content-type': 'application/pdf', 'content-disposition': `inline; filename="guia-${orden}.pdf"`, ...sin_cache } });
+    }
+    const zpl = new TextDecoder().decode(await primeraEntradaZip(bytes));
+    if (!zpl.includes('^XA')) throw errorLocal(502, 'zpl_invalido', 'Mercado Libre no mandó la guía en ZPL. Intenta de nuevo en un rato.');
+    return new Response(zpl, { headers: { 'content-type': 'text/plain; charset=utf-8', ...sin_cache } });
+  } catch (error) {
+    return respuestaError(error, 'No se pudo traer la guía.');
+  }
 }
 
 async function guardarConfig(request: Request, env: Env): Promise<Response> {
@@ -1529,6 +1607,8 @@ export async function rutaML(request: Request, env: Env, url: URL): Promise<Resp
   if (pathname === '/api/ml/conectar' && metodo === 'GET') return conectar(env, url);
   if (pathname === '/api/ml/piezas' && metodo === 'GET') return listarPiezas(env, url);
   if (pathname === '/api/ml/ventas' && metodo === 'GET') return listarVentas(env, url);
+  const deGuia = /^\/api\/ml\/guia\/([^/]+)$/.exec(pathname);
+  if (deGuia && metodo === 'GET') return guia(env, deGuia[1], url);
   const accion = /^\/api\/ml\/(preparar|publicar|pausar|reactivar)\/([^/]+)$/.exec(pathname);
   if (accion && metodo === 'POST') {
     if (accion[1] === 'preparar') return preparar(env, accion[2], request);
