@@ -167,6 +167,7 @@
 <script type="module">
 import { enlacePreciosML } from '/precios-ml.js';
 import { conectarEtiquetera, etiqueteraLista, mandarTspl, errorEnvio } from '/etiquetera.js';
+import { tsplDePdf } from '/guia-tspl.js';
 const $ = (id) => document.getElementById(id);
 const OTRO = '__otro';
 
@@ -329,16 +330,19 @@ function infoVenta(v) {
 
 /*
  * Guia de Mercado Envios (#691) directo a la AE240, con rollo de 100 x 150 mm.
- * ponytail: esta via manda el ZPL que entrega ML (/api/ml/guia/{orden}?formato=zpl) tal cual, y
- * depende de que la AE240 entienda ZPL (prueba «Probar ZPL» de /sonda-impresora, #691). Si no lo
- * entiende, la via PDF -> mapa de bits -> TSPL BITMAP se enchufa AQUI: cambia `cargarGuia` por una
- * que rasterice /api/ml/guia/{orden} (PDF) y devuelva el TSPL; `imprimirGuia` no cambia.
+ * La AE240 no entiende ZPL (2/11: el ZPL de ML salio «enviado» y no imprimio): `cargarGuia` pide el
+ * PDF y guia-tspl.js lo convierte en TSPL BITMAP. ?formato=zpl sigue en el Worker por si cambia la impresora.
  */
 async function cargarGuia(orderId) {
   let r;
-  try { r = await fetch(`/api/ml/guia/${encodeURIComponent(orderId)}?formato=zpl`); } catch { return { error: 'No se pudo hablar con el servidor.' }; }
+  try { r = await fetch(`/api/ml/guia/${encodeURIComponent(orderId)}?formato=pdf`); } catch { return { error: 'No se pudo hablar con el servidor.' }; }
+  if (r.ok) {
+    // La AE240 no imprimió el ZPL de ML (2/11): el PDF se dibuja y se manda como TSPL BITMAP.
+    // ?invertir=1 en la URL voltea la polaridad si la guía sale en negativo.
+    try { return { tspl: await tsplDePdf(new Uint8Array(await r.arrayBuffer()), { invertir: new URLSearchParams(location.search).has('invertir') }) }; }
+    catch (error) { return { error: `No se pudo preparar la guía: ${error?.message ?? error}` }; }
+  }
   const texto = await r.text();
-  if (r.ok) return { tspl: texto };
   let mensaje = '';
   try { mensaje = JSON.parse(texto).error; } catch { /* no era JSON */ }
   return { error: typeof mensaje === 'string' && mensaje ? mensaje : 'No se pudo traer la guía.' };
@@ -382,7 +386,7 @@ async function imprimirGuia(orderId, avisar) {
         return;
       } finally { pintarImpresora(); }
     }
-    avisar('Mandando guía…');
+    avisar('Mandando guía… tarda 1 a 2 minutos por Bluetooth, no cierres la pantalla.');
     const guia = await cargarGuia(orderId);
     if (guia.error) { avisar(guia.error, true); return; }
     if (await mandarTspl(guia.tspl)) avisar('Guía enviada: revisa la AE240.');
