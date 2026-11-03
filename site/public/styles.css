@@ -226,7 +226,12 @@ h2 { font-family: var(--display); font-variation-settings: var(--display-axes); 
 .piece-dialog::backdrop { background: rgb(22 54 107 / .68); }
 /* Ficha de pieza (Issue #645): cabecera fija, zona que se desplaza (foto + datos) y barra fija abajo con «Lo quiero». */
 .piece-dialog-box { position: relative; display: flex; flex-direction: column; max-height: calc(100vh - 34px); max-height: calc(100dvh - 34px); }
-.piece-dialog-head { flex: none; display: flex; align-items: center; padding: 10px 14px; }
+.piece-dialog-head { flex: none; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 10px 14px; }
+/* Anterior / Siguiente (#690): también flechas del teclado y deslizar sobre la foto sin zoom. */
+.ficha-nav { display: flex; align-items: center; gap: 6px; margin-left: auto; }
+.ficha-nav .button { min-height: 44px; padding: 6px 10px; font-size: 14px; box-shadow: 2px 2px 0 var(--navy); }
+.ficha-nav .button:disabled { opacity: .35; box-shadow: none; }
+.ficha-contador { min-width: 4.5em; text-align: center; font: 800 13px/1.2 "Archivo", sans-serif; white-space: nowrap; }
 .piece-dialog-close { min-height: 44px; padding: 6px 16px; font-size: 14px; box-shadow: 2px 2px 0 var(--navy); }
 .piece-dialog-scroll { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
 /* Foto 4:5. `touch-action: none` deja el doble toque, el pellizco y el arrastre a catalogo.js (mismo truco que los stickers, #537). */
