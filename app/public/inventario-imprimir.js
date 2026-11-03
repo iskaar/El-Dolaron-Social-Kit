@@ -14,7 +14,7 @@ export async function iniciar(ctx) {
   const et = boton('Etiquetas', () => elegir(false)), ba = boton('Bandas', () => elegir(true));
   for (const [b,id,panel] of [[et,'tab-etiquetas',etiquetas],[ba,'tab-bandas',bandas]]) { b.id=id;b.setAttribute('role','tab');b.setAttribute('aria-controls',panel.id);panel.setAttribute('role','tabpanel');panel.setAttribute('aria-labelledby',id); }
   function elegir(b,avisar=true) { if(avisar){const t=b?'Elige una banda':'Etiquetas por imprimir';ponerNeutro(t);mensaje(t);}etiquetas.hidden=b;bandas.hidden=!b;et.setAttribute('aria-selected',String(!b));ba.setAttribute('aria-selected',String(b));et.tabIndex=b?-1:0;ba.tabIndex=b?0:-1; }
-  elegir(false,false); pestanas.append(et,ba); if(ctx.identidad.usuario?.roles.includes('finanzas')||ctx.identidad.vendedor) ba.hidden=true;   // las bandas se imprimen en la computadora
+  elegir(false,false); pestanas.append(et,ba); if(ctx.identidad.vendedor) ba.hidden=true;   // las bandas se imprimen en la computadora
   pestanas.onkeydown=(e)=>{if(['ArrowLeft','ArrowRight'].includes(e.key)){e.preventDefault();elegir(bandas.hidden);}};
   const conectar = nodo('button','Conectar impresora','primario'); conectar.type='button'; conectar.id='conectar-impresora';
   const avisoConexion=nodo('div',undefined,'tarjeta conexion-aviso');avisoConexion.append(conectar);
@@ -99,9 +99,9 @@ export async function iniciar(ctx) {
     for(const f of familias){const b=boton(f.nombre,()=>pintarFamilia(f));b.dataset.prefijo=f.prefijo;chips.append(b);}
     bandas.append(chips,nodo('h3','Cantidad por banda'),stepper(cantidad,n=>cantidad=n,{max:200,nombre:'Cantidad por banda'}),rejilla);
     if(familiaElegida)pintarFamilia(familiaElegida);else bandas.append(nodo('p','Aún no hay familias'));
-    if(dueno)bandas.append(boton('Crear familia',()=>{const c=nodo('form'),l=nodo('label','Nombre de familia'),input=nodo('input');input.maxLength=24;l.append(input);c.append(l,boton('Crear familia',async()=>{const f=await api('/api/familias',{nombre:input.value});await cargarBandas(f.prefijo);cerrarHoja();},'primario'));c.onsubmit=e=>e.preventDefault();hoja('Crear familia',c);}));
+    if(dueno||ctx.identidad.usuario?.roles.includes('finanzas'))bandas.append(boton('Crear familia',()=>{const c=nodo('form'),l=nodo('label','Nombre de familia'),input=nodo('input');input.maxLength=24;l.append(input);c.append(l,boton('Crear familia',async()=>{const f=await api('/api/familias',{nombre:input.value});await cargarBandas(f.prefijo);cerrarHoja();},'primario'));c.onsubmit=e=>e.preventDefault();hoja('Crear familia',c);}));
   }
-  if(!ctx.identidad.vendedor&&!ctx.identidad.usuario?.roles.includes('finanzas'))await cargarBandas();
+  if(!ctx.identidad.vendedor)await cargarBandas();
   async function imprimirPiezas(ids,copias=new Map(),opciones={}){
     const ok=await motor.imprimir(ids,copias,false,opciones);contar();actualizarConexion();foco();return ok;
   }

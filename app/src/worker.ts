@@ -433,12 +433,13 @@ async function listarBorradores(url: URL, env: Env, propietario: string): Promis
 
 const CATEGORIAS = new Set(CLAVES_CATEGORIA);
 
-/** Etiqueta individual, o una banda de una familia que existe en la tabla `familias`. */
-async function destinoValido(destino: string, env: Env): Promise<boolean> {
+/** Etiqueta individual, o una banda de una familia del propietario de la pieza que existe en la tabla `familias`. */
+async function destinoValido(destino: string, env: Env, propietario: string): Promise<boolean> {
   if (destino === 'etiqueta') return true;
   if (!esDestinoBanda(destino)) return false;
   const prefijo = /^banda_([a-z]+)/.exec(destino)![1];
-  return (await env.DB.prepare('select 1 from familias where prefijo = ?').bind(prefijo).first()) !== null;
+  // Solo una familia del mismo propietario que la pieza (#694): FEP no usa las bandas de la tienda ni al reves.
+  return (await env.DB.prepare('select 1 from familias where prefijo = ? and propietario = ?').bind(prefijo, propietario).first()) !== null;
 }
 
 /**
@@ -527,7 +528,7 @@ async function corregirBorrador(id: string, cambios: Record<string, unknown>, en
     }
   }
 
-  if (!await destinoValido(destino, env)) {
+  if (!await destinoValido(destino, env, fila.propietario)) {
     return json({ error: 'Destino invalido.' }, 400);
   }
   // Guardar deja la pieza `listo`: una etiqueta sin nombre o sin precio bloquearia la cola de impresion (#335).
@@ -1492,8 +1493,15 @@ async function guardarCalibracion(request: Request, env: Env): Promise<Response>
   return json({ corrimiento: Number(config.etiqueta_corrimiento ?? 0), modulo: Number(config.etiqueta_modulo ?? 0) });
 }
 
-async function listarFamilias(env: Env): Promise<Response> {
-  const { results } = await env.DB.prepare('select clave, nombre, prefijo from familias order by rowid').all();
+/**
+ * Cada quien ve las familias de su propietario (#694). `?todas=1` trae las de los dos
+ * (la tarjeta de bandas de la caja), pero FEP nunca ve las de la tienda.
+ */
+async function listarFamilias(env: Env, propietario: string, todas: boolean): Promise<Response> {
+  const verTodas = todas && propietario !== 'fep';
+  const { results } = await env.DB.prepare(
+    `select clave, nombre, prefijo, propietario from familias ${verTodas ? '' : 'where propietario = ?'} order by rowid`,
+  ).bind(...(verTodas ? [] : [propietario])).all();
   return json({ montos: MONTOS_BANDA, familias: results });
 }
 
@@ -1502,7 +1510,7 @@ async function listarFamilias(env: Env): Promise<Response> {
  * de catalogo (sin existencias, como las demas bandas), en un solo batch. El
  * prefijo del codigo sale del nombre y nunca choca con uno ya usado.
  */
-async function crearFamilia(request: Request, env: Env): Promise<Response> {
+async function crearFamilia(request: Request, env: Env, propietario: string): Promise<Response> {
   const { nombre: crudo } = (await request.json()) as { nombre?: unknown };
   const nombre = String(crudo ?? '').replace(/["\\]/g, ' ').replace(/\s+/g, ' ').trim();
   if (nombre.length < 2 || nombre.length > 24) {
@@ -1528,17 +1536,17 @@ async function crearFamilia(request: Request, env: Env): Promise<Response> {
   const config = await leerConfig(env);
   const ahora = new Date().toISOString();
   await env.DB.batch([
-    env.DB.prepare('insert into familias (clave, nombre, prefijo, creado_en) values (?, ?, ?, ?)')
-      .bind(clave, nombre, prefijo, ahora),
+    env.DB.prepare('insert into familias (clave, nombre, prefijo, creado_en, propietario) values (?, ?, ?, ?, ?)')
+      .bind(clave, nombre, prefijo, ahora, propietario),
     ...MONTOS_BANDA.map((monto) => env.DB.prepare(
       `insert into productos (id, codigo, nombre, categoria, precio_lista, precio, estado_fisico,
                               estado_analisis, destino, stock, sin_inventario, semana_ingreso,
-                              foto_key, creado_en, actualizado_en)
-       values (?, ?, ?, 'otros', 0, ?, 'nuevo', 'listo', ?, 0, 1, 'S00', '', ?, ?)`,
+                              foto_key, creado_en, actualizado_en, propietario)
+       values (?, ?, ?, 'otros', 0, ?, 'nuevo', 'listo', ?, 0, 1, 'S00', '', ?, ?, ?)`,
     ).bind(
       crypto.randomUUID(), `${prefijo.toUpperCase()}${monto}`, `${nombre} $${monto}`,
       Number.parseInt(config[`banda_${monto}`] ?? '', 10) || monto * 100,
-      `banda_${prefijo}${monto}`, ahora, ahora,
+      `banda_${prefijo}${monto}`, ahora, ahora, propietario,
     )),
   ]);
   return json({ clave, nombre, prefijo }, 201);
@@ -2535,9 +2543,9 @@ export default {
 
       if (pathname === '/api/familias') {
         if (request.method === 'POST') {
-          return await crearFamilia(request, env);
+          return await crearFamilia(request, env, propietarioDe(usuario));
         }
-        return await listarFamilias(env);
+        return await listarFamilias(env, propietarioDe(usuario), url.searchParams.get('todas') === '1');
       }
 
       if (pathname === '/api/catalogo') {
