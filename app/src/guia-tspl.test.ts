@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { tsplDeImagen } from '../public/guia-tspl.js';
+import { tsplDeImagen, cajaDeTinta } from '../public/guia-tspl.js';
 
 // Imagen RGBA de `ancho` × `alto` en blanco, con los puntos dados en negro.
 function imagen(ancho: number, alto: number, negros: Array<[number, number]>) {
@@ -30,4 +30,9 @@ test('guía → TSPL: huecos cortos quedan dentro del mismo BITMAP; invertir vol
   const j = latin1(inv).indexOf('BITMAP 0,0,1,1,0,') + 'BITMAP 0,0,1,1,0,'.length;
   assert.equal(inv[j], 0b00000001);
   assert.ok(!latin1(tsplDeImagen(imagen(8, 4, []), 8, 4)).includes('BITMAP'), 'una guía en blanco no manda mapa');
+});
+
+test('cajaDeTinta (#691): recuadro de lo impreso dentro de la hoja; en blanco da null', () => {
+  assert.deepEqual(cajaDeTinta(imagen(20, 10, [[3, 2], [12, 7]]), 20, 10), { x: 3, y: 2, ancho: 10, alto: 6 });
+  assert.equal(cajaDeTinta(imagen(5, 5, []), 5, 5), null);
 });
