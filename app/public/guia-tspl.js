@@ -10,6 +10,16 @@
 export const ANCHO_PUNTOS = 800;   // 100 mm × 8 puntos/mm
 export const ALTO_PUNTOS = 1200;   // 150 mm
 const MEDIDA_GUIA = ['SIZE 100 mm,150 mm', 'GAP 2 mm,0 mm', 'DIRECTION 1', 'CLS'];
+// Aire alrededor de la guía, en puntos (3 mm): un descuadre de pocos milímetros no corta el borde, y
+// deja espacio para el corrimiento calibrado del rollo chico (etiquetera.js, /calibrar-etiqueta).
+export const MARGEN_GUIA = 24;
+
+/**
+ * Remide el rollo de guías (2/11: la guía real arrancó ~2 cm antes de la etiqueta y cruzó el corte).
+ * Igual que TSPL_CALIBRAR del rollo chico: la AE240 avanza un par de etiquetas leyendo el sensor y
+ * se queda con la altura y separación reales. Correrlo cada vez que se cambia de rollo.
+ */
+export const TSPL_CALIBRAR_GUIA = 'SIZE 100 mm,150 mm\r\nGAP 2 mm,0 mm\r\nGAPDETECT\r\n';
 const HUECO_MAX = 16;   // filas en blanco que se toleran dentro de un mismo BITMAP antes de partirlo
 
 /**
@@ -92,9 +102,10 @@ function lienzo(ancho, alto) {
  * Primera página del PDF → TSPL. Dos pasadas: una baja (2 px por punto) para hallar el recuadro de
  * la guía dentro de la hoja, y otra a la escala justa para que ese recuadro llene 100 × 150 mm; se
  * copia 1:1 (sin volver a escalar, para no emborronar las barras) y se gira 90° si viene acostado.
+ * Llena la etiqueta menos MARGEN_GUIA por lado; `y0` (puntos, el corrimiento calibrado) la baja o sube.
  * pdf.js se carga hasta el primer uso: /mercadolibre no paga sus 1.7 MB al abrir.
  */
-export async function tsplDePdf(bytes, opciones) {
+export async function tsplDePdf(bytes, { y0 = 0, ...opciones } = {}) {
   const pdfjs = await import('/vendor/pdf.min.mjs');
   pdfjs.GlobalWorkerOptions.workerSrc = '/vendor/pdf.worker.min.mjs';
   const pdf = await pdfjs.getDocument({ data: bytes }).promise;
@@ -111,7 +122,9 @@ export async function tsplDePdf(bytes, opciones) {
     const pw = Math.min(vBaja.width / BAJA, (caja.x + caja.ancho) / BAJA + MARGEN) - px;
     const ph = Math.min(vBaja.height / BAJA, (caja.y + caja.alto) / BAJA + MARGEN) - py;
     const girar = pw > ph;
-    const escala = girar ? Math.min(ANCHO_PUNTOS / ph, ALTO_PUNTOS / pw) : Math.min(ANCHO_PUNTOS / pw, ALTO_PUNTOS / ph);
+    const [utilW, utilH] = [ANCHO_PUNTOS - 2 * MARGEN_GUIA, ALTO_PUNTOS - 2 * MARGEN_GUIA];
+    const escala = girar ? Math.min(utilW / ph, utilH / pw) : Math.min(utilW / pw, utilH / ph);
+    const corrido = Math.max(-MARGEN_GUIA, Math.min(MARGEN_GUIA, Math.round(y0)));
     const vAlta = pagina.getViewport({ scale: escala });
     const alta = lienzo(vAlta.width, vAlta.height);
     await pagina.render({ canvasContext: alta.ctx, viewport: vAlta }).promise;
@@ -120,9 +133,9 @@ export async function tsplDePdf(bytes, opciones) {
     const final = lienzo(ANCHO_PUNTOS, ALTO_PUNTOS);
     if (girar) {
       // 90° a la derecha: el ancho de la guía corre a lo largo de la etiqueta. Centrada.
-      final.ctx.translate(ANCHO_PUNTOS - Math.floor((ANCHO_PUNTOS - sh) / 2), Math.floor((ALTO_PUNTOS - sw) / 2));
+      final.ctx.translate(ANCHO_PUNTOS - Math.floor((ANCHO_PUNTOS - sh) / 2), Math.floor((ALTO_PUNTOS - sw) / 2) + corrido);
       final.ctx.rotate(Math.PI / 2);
-    } else final.ctx.translate(Math.floor((ANCHO_PUNTOS - sw) / 2), Math.floor((ALTO_PUNTOS - sh) / 2));
+    } else final.ctx.translate(Math.floor((ANCHO_PUNTOS - sw) / 2), Math.floor((ALTO_PUNTOS - sh) / 2) + corrido);
     final.ctx.drawImage(alta.canvas, sx, sy, sw, sh, 0, 0, sw, sh);
     return tsplDeImagen(final.ctx.getImageData(0, 0, ANCHO_PUNTOS, ALTO_PUNTOS).data, ANCHO_PUNTOS, ALTO_PUNTOS, opciones);
   } finally {

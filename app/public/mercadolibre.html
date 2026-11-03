@@ -151,8 +151,10 @@
     <div id="barra-impresora" style="display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-bottom:12px">
       <button type="button" id="conectar-impresora" class="boton">Conectar impresora</button>
       <button type="button" id="otra-impresora" class="boton">¿No aparece la impresora?</button>
+      <button type="button" id="calibrar-guias" class="boton">Calibrar rollo de guías</button>
       <span id="estado-impresora" class="nota" role="status">Impresora de guías (AE240): sin conectar.</span>
     </div>
+    <p class="nota" style="margin:-4px 0 12px">Cada vez que pongas el rollo de 100 × 150 mm, toca «Calibrar rollo de guías» una vez: la impresora avanza un par de etiquetas para medirlo. Al regresar al rollo chico, remídelo en <a href="/calibrar-etiqueta">Calibrar etiqueta</a>.</p>
     <div id="recordatorio"></div>
     <div id="lista-ventas" aria-live="polite"></div>
     <div style="margin-top:12px"><button type="button" id="ver-mas-ventas" hidden>Ver más</button></div>
@@ -166,8 +168,8 @@
 
 <script type="module">
 import { enlacePreciosML } from '/precios-ml.js';
-import { conectarEtiquetera, etiqueteraLista, mandarTspl, errorEnvio } from '/etiquetera.js';
-import { tsplDePdf } from '/guia-tspl.js';
+import { conectarEtiquetera, etiqueteraLista, mandarTspl, errorEnvio, corrimiento } from '/etiquetera.js';
+import { tsplDePdf, TSPL_CALIBRAR_GUIA } from '/guia-tspl.js';
 const $ = (id) => document.getElementById(id);
 const OTRO = '__otro';
 
@@ -339,7 +341,7 @@ async function cargarGuia(orderId) {
   if (r.ok) {
     // La AE240 no imprimió el ZPL de ML (2/11): el PDF se dibuja y se manda como TSPL BITMAP.
     // ?invertir=1 en la URL voltea la polaridad si la guía sale en negativo.
-    try { return { tspl: await tsplDePdf(new Uint8Array(await r.arrayBuffer()), { invertir: new URLSearchParams(location.search).has('invertir') }) }; }
+    try { return { tspl: await tsplDePdf(new Uint8Array(await r.arrayBuffer()), { invertir: new URLSearchParams(location.search).has('invertir'), y0: corrimiento() }) }; }
     catch (error) { return { error: `No se pudo preparar la guía: ${error?.message ?? error}` }; }
   }
   const texto = await r.text();
@@ -372,6 +374,15 @@ async function conectarDesdeBoton(cualquiera) {
 }
 $('conectar-impresora').addEventListener('click', () => conectarDesdeBoton(false));
 $('otra-impresora').addEventListener('click', () => conectarDesdeBoton(true));
+$('calibrar-guias').addEventListener('click', async () => {
+  if (imprimiendoGuia) { pintarImpresora('Espera a que termine la guía que se está mandando.'); return; }
+  if (!etiqueteraLista()) { await conectarDesdeBoton(false); if (!etiqueteraLista()) return; }
+  pintarImpresora('Midiendo el rollo… la impresora avanza un par de etiquetas.');
+  pintarImpresora(await mandarTspl(TSPL_CALIBRAR_GUIA)
+    ? 'Rollo medido. Ya puedes imprimir guías.' : `No se pudo calibrar: ${errorEnvio() || 'revisa la AE240'}.`);
+});
+// Cortar el envío a media guía deja a la AE240 esperando bytes del mapa: la siguiente sale encimada.
+addEventListener('beforeunload', (ev) => { if (imprimiendoGuia) ev.preventDefault(); });
 
 async function imprimirGuia(orderId, avisar) {
   if (!navigator.bluetooth) { avisar('Para imprimir la guía abre esta pantalla en la PC de caja (Chrome con Bluetooth), o usa «Abrir PDF».', true); return; }
