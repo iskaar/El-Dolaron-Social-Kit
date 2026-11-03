@@ -50,6 +50,8 @@ class SimML {
   envios = new Map<string, unknown>();
   fallarEnvios = false;
   fallarOrdenes = false;
+  /** Guias de Mercado Envios (#691): bytes por shipment y formato (`pdf`/`zpl2`); sin entrada = ML contesta 400 (envio no listo). */
+  guias = new Map<string, Uint8Array>();
   productoActivo = true;
   /** Lo que contesta la IA (Gemini) a la propuesta de atributos (por omisión, nada); null = no responde. Cada cuerpo pedido se anota en `pedidosIA`. */
   ia: ((cuerpo: any) => Record<string, string>) | null = () => ({});
@@ -127,6 +129,11 @@ class SimML {
       if (this.fallarEnvios) return { status: 500, cuerpo: { message: 'internal', error: 'internal_error', status: 500 } };
       return this.envios.has(envio[1]) ? { cuerpo: this.envios.get(envio[1]) } : { status: 404, cuerpo: { message: 'no shipment', error: 'not_found', status: 404 } };
     }
+    const etiqueta = /^\/shipment_labels\?shipment_ids=([^&]+)&response_type=(pdf|zpl2)$/.exec(ruta);
+    if (metodo === 'GET' && etiqueta) {
+      return this.guias.has(`${etiqueta[1]}:${etiqueta[2]}`) ? { cuerpo: this.guias.get(`${etiqueta[1]}:${etiqueta[2]}`) }
+        : { status: 400, cuerpo: { message: 'shipment not ready to print', error: 'bad_request', status: 400 } };
+    }
     const orden = /^\/orders\/(\d+)$/.exec(ruta);
     if (metodo === 'GET' && orden && this.fallarOrdenes) return { status: 500, cuerpo: { message: 'internal', error: 'internal_error', status: 500 } };
     if (metodo === 'GET' && orden && this.detalle.has(orden[1])) return { cuerpo: this.detalle.get(orden[1]) };
@@ -155,6 +162,7 @@ function instalar(sim: SimML) {
     sim.llamadas.push(llamada);
     await sim.antesDe?.(llamada);
     const { status = 200, cuerpo: respuesta } = sim.responder(llamada);
+    if (respuesta instanceof Uint8Array) return new Response(respuesta, { status, headers: { 'content-type': 'application/octet-stream' } });
     return new Response(JSON.stringify(respuesta), { status, headers: { 'content-type': 'application/json' } });
   }) as typeof fetch;
 }
@@ -1532,3 +1540,76 @@ test('conteo: un faltante (robo) que deja la pieza sin existencias la pausa en M
     assert.equal(t.sim.items.get(itemId)!.status, 'paused');
   });
 });
+
+/* ---------- guia de Mercado Envios (#691) ---------- */
+
+const bytesDe = (texto: string) => new TextEncoder().encode(texto);
+const unir = (...partes: Uint8Array[]) => Uint8Array.from(partes.flatMap((p) => [...p]));
+const u16 = (n: number) => Uint8Array.of(n & 255, n >> 8);
+const u32 = (n: number) => Uint8Array.of(n & 255, (n >> 8) & 255, (n >> 16) & 255, n >>> 24);
+const deflate = async (b: Uint8Array) => new Uint8Array(await new Response(new Response(b).body!.pipeThrough(new CompressionStream('deflate-raw'))).arrayBuffer());
+
+/** Un ZIP de una entrada. `descriptor` = como lo escribe Java: bit 3, tamanos en 0 en el encabezado local y reales en el directorio central. */
+async function zip(nombre: string, contenido: string, { metodo = 8, descriptor = true } = {}) {
+  const crudo = bytesDe(contenido);
+  const datos = metodo === 8 ? await deflate(crudo) : crudo;
+  const n = bytesDe(nombre);
+  const local = unir(u32(0x04034b50), u16(20), u16(descriptor ? 8 : 0), u16(metodo), u16(0), u16(0), u32(0),
+    u32(descriptor ? 0 : datos.length), u32(descriptor ? 0 : crudo.length), u16(n.length), u16(0), n, datos,
+    ...(descriptor ? [u32(0x08074b50), u32(0), u32(datos.length), u32(crudo.length)] : []));
+  const central = unir(u32(0x02014b50), u16(20), u16(20), u16(descriptor ? 8 : 0), u16(metodo), u16(0), u16(0), u32(0),
+    u32(datos.length), u32(crudo.length), u16(n.length), u16(0), u16(0), u16(0), u16(0), u32(0), u32(0), n);
+  return unir(local, central, u32(0x06054b50), u16(0), u16(0), u16(1), u16(1), u32(central.length), u32(local.length), u16(0));
+}
+
+const PDF = bytesDe('%PDF-1.4 guia de prueba  ÿ fin');
+const ZPL = '^XA^FO20,20^A0N,40,40^FDGuía ML ñ^FS^XZ';
+
+test('guía (#691): PDF pasa tal cual, sin guardar nada; ZPL sale del ZIP de ML (con y sin descriptor, deflate y stored)', () => conML(async (t) => {
+  t.sim.ordenes.set('9701', ordenConPrecio(9701, [['MLM1', 1, 100, 10]], 'SHP-9'));
+  t.sim.guias.set('SHP-9:pdf', PDF);
+  const tablas = () => JSON.stringify(t.db.prepare('select count(*) n from ml_ventas').get());
+  const antes = tablas();
+
+  const pdf = await t.enviar('/api/ml/guia/9701', undefined, 'GET');
+  assert.equal(pdf.status, 200);
+  assert.equal(pdf.headers.get('content-type'), 'application/pdf');
+  assert.equal(pdf.headers.get('content-disposition'), 'inline; filename="guia-9701.pdf"');
+  assert.deepEqual(new Uint8Array(await pdf.arrayBuffer()), PDF);
+  assert.equal(tablas(), antes);
+  assert.equal(t.sim.de('GET', /shipment_labels/).at(-1)!.ruta, '/shipment_labels?shipment_ids=SHP-9&response_type=pdf');
+
+  for (const opciones of [{}, { descriptor: false }, { metodo: 0, descriptor: false }]) {
+    t.sim.guias.set('SHP-9:zpl2', await zip('guia.txt', ZPL, opciones));
+    const r = await t.enviar('/api/ml/guia/9701?formato=zpl', undefined, 'GET');
+    assert.equal(r.status, 200, JSON.stringify(opciones));
+    assert.match(r.headers.get('content-type')!, /^text\/plain/);
+    assert.equal(await r.text(), ZPL, JSON.stringify(opciones));
+  }
+  assert.equal(t.sim.de('GET', /shipment_labels/).at(-1)!.ruta, '/shipment_labels?shipment_ids=SHP-9&response_type=zpl2');
+}));
+
+test('guía (#691): sin envío 409; envío no listo (ML 400/404) con mensaje legible; formato u orden inválidos; respuesta rara de ML no se manda a la impresora', () => conML(async (t) => {
+  t.sim.ordenes.set('9702', ordenConPrecio(9702, [['MLM1', 1, 100, 10]], null));
+  const sin = await t.pedir('/api/ml/guia/9702', undefined, 'GET');
+  assert.equal(sin.status, 409);
+  assert.equal(sin.cuerpo.mensaje, 'Esta venta no lleva guía de Mercado Envíos.');
+  assert.equal(t.sim.de('GET', /shipment_labels/).length, 0);
+
+  t.sim.ordenes.set('9703', ordenConPrecio(9703, [['MLM1', 1, 100, 10]], 'SHP-10'));
+  const noLista = await t.pedir('/api/ml/guia/9703?formato=zpl', undefined, 'GET');
+  assert.equal(noLista.status, 409);
+  assert.match(noLista.cuerpo.error, /^La guía todavía no está lista en Mercado Libre/);
+  assert.match(noLista.cuerpo.detalle, /not ready/);
+
+  assert.equal((await t.pedir('/api/ml/guia/9999', undefined, 'GET')).status, 422);   // orden desconocida: error de ML traducido por el camino común
+  assert.equal((await t.pedir('/api/ml/guia/9703?formato=png', undefined, 'GET')).status, 400);
+  assert.equal((await t.pedir('/api/ml/guia/abc', undefined, 'GET')).status, 400);
+
+  t.sim.guias.set('SHP-10:pdf', bytesDe('<html>no soy pdf</html>'));
+  assert.equal((await t.pedir('/api/ml/guia/9703', undefined, 'GET')).status, 502);
+  t.sim.guias.set('SHP-10:zpl2', bytesDe('no soy zip'));
+  assert.equal((await t.pedir('/api/ml/guia/9703?formato=zpl', undefined, 'GET')).status, 502);
+  t.sim.guias.set('SHP-10:zpl2', await zip('guia.txt', 'texto sin comandos'));
+  assert.equal((await t.pedir('/api/ml/guia/9703?formato=zpl', undefined, 'GET')).status, 502);
+}));

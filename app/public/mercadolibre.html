@@ -161,6 +161,7 @@
 
 <script type="module">
 import { enlacePreciosML } from '/precios-ml.js';
+import { conectarEtiquetera, etiqueteraLista, mandarTspl, errorEnvio } from '/etiquetera.js';
 const $ = (id) => document.getElementById(id);
 const OTRO = '__otro';
 
@@ -321,7 +322,60 @@ function infoVenta(v) {
   return ['neutro', '•', String(v.estado ?? '—')];
 }
 
-function filaVenta(v) {
+/*
+ * Guia de Mercado Envios (#691) directo a la AE240, con rollo de 100 x 150 mm.
+ * ponytail: esta via manda el ZPL que entrega ML (/api/ml/guia/{orden}?formato=zpl) tal cual, y
+ * depende de que la AE240 entienda ZPL (prueba «Probar ZPL» de /sonda-impresora, #691). Si no lo
+ * entiende, la via PDF -> mapa de bits -> TSPL BITMAP se enchufa AQUI: cambia `cargarGuia` por una
+ * que rasterice /api/ml/guia/{orden} (PDF) y devuelva el TSPL; `imprimirGuia` no cambia.
+ */
+async function cargarGuia(orderId) {
+  let r;
+  try { r = await fetch(`/api/ml/guia/${encodeURIComponent(orderId)}?formato=zpl`); } catch { return { error: 'No se pudo hablar con el servidor.' }; }
+  const texto = await r.text();
+  if (r.ok) return { tspl: texto };
+  let mensaje = '';
+  try { mensaje = JSON.parse(texto).error; } catch { /* no era JSON */ }
+  return { error: typeof mensaje === 'string' && mensaje ? mensaje : 'No se pudo traer la guía.' };
+}
+
+// Un solo trabajo a la vez: dos guias mezcladas por BLE saldrian cortadas.
+let imprimiendoGuia = false;
+
+async function imprimirGuia(orderId, avisar) {
+  if (!navigator.bluetooth) { avisar('Para imprimir la guía abre esta pantalla en la PC de caja (Chrome con Bluetooth), o usa «Abrir PDF».', true); return; }
+  if (imprimiendoGuia) { avisar('Espera a que termine la guía anterior.', true); return; }
+  imprimiendoGuia = true;
+  try {
+    // Web Bluetooth pide un clic: conectar va ANTES de cualquier espera de red.
+    if (!etiqueteraLista()) {
+      avisar('Conectando…');
+      try { await conectarEtiquetera(); } catch (error) {
+        avisar(error?.name === 'NotFoundError' ? 'No se escogió la impresora.' : `No se pudo conectar la AE240: ${error?.message ?? error}`, true);
+        return;
+      }
+    }
+    avisar('Mandando guía…');
+    const guia = await cargarGuia(orderId);
+    if (guia.error) { avisar(guia.error, true); return; }
+    if (await mandarTspl(guia.tspl)) avisar('Guía enviada: revisa la AE240.');
+    else avisar(`No salió la guía: ${errorEnvio() || 'revisa la AE240'}.`, true);
+  } finally {
+    imprimiendoGuia = false;
+  }
+}
+
+function accionesGuia(orderId) {
+  const estadoGuia = h('div', { class: 'nota', role: 'status', style: 'margin-top:4px' });
+  const avisar = (texto, malo = false) => { estadoGuia.textContent = texto; estadoGuia.className = malo ? 'error-texto' : 'nota'; };
+  return h('div', { style: 'margin-top:6px' },
+    h('div', { style: 'display:flex; gap:8px; flex-wrap:wrap' },
+      h('button', { class: 'boton primario', type: 'button', onclick: () => imprimirGuia(orderId, avisar) }, 'Imprimir guía'),
+      h('a', { class: 'boton', href: `/api/ml/guia/${encodeURIComponent(orderId)}`, target: '_blank', rel: 'noopener noreferrer' }, 'Abrir PDF')),
+    estadoGuia);
+}
+
+function filaVenta(v, conGuia = false) {
   const [clase, icono, texto] = infoVenta(v);
   const reciente = Date.now() - new Date(v.recibido_en).getTime() < 7 * 86_400_000;
   const conflicto = v.conflicto && v.estado !== 'cancelada';
@@ -333,7 +387,8 @@ function filaVenta(v) {
       conflicto
         ? h('div', { class: 'error-texto' }, '⚠ Ya no había esta pieza en tienda: cancela la venta en Mercado Libre y avisa al comprador.')
         : (v.estado === 'descontada' && reciente
-          ? h('div', { class: 'nota', style: 'margin-top:4px' }, '📦 Saca la pieza del piso de venta y empácala.') : null)),
+          ? h('div', { class: 'nota', style: 'margin-top:4px' }, '📦 Saca la pieza del piso de venta y empácala.') : null),
+      conGuia && v.estado === 'descontada' ? accionesGuia(v.order_id) : null),
     v.permalink ? h('a', { class: 'boton', href: v.permalink, target: '_blank', rel: 'noopener noreferrer' }, 'Ver en ML ↗') : null);
 }
 
@@ -341,7 +396,7 @@ function pintarVentas() {
   const n = estado?.ventas_sin_despachar ?? 0;
   $('recordatorio').replaceChildren(...(n > 0 ? [h('div', { class: 'aviso', style: 'margin-bottom:12px' },
     `📦 ${n} venta${n === 1 ? '' : 's'} de los últimos 7 días. Saca la pieza del piso de venta y empácala.`)] : []));
-  $('lista-ventas').replaceChildren(...(ventas.length ? ventas.map(filaVenta)
+  $('lista-ventas').replaceChildren(...(ventas.length ? ventas.map((v, i) => filaVenta(v, ventas.findIndex((x) => x.order_id === v.order_id) === i))
     : [h('div', { class: 'vacio' }, 'Todavía no hay ventas en Mercado Libre.')]));
   $('ver-mas-ventas').hidden = !hayMasVentas;
 }
