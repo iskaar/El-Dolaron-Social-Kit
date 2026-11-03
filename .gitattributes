@@ -5,3 +5,5 @@
 *.json text eol=lf
 *.txt text eol=lf
 *.md text eol=lf
+# Librerías vendoreadas: se sirven byte a byte como las publica su autor (sin CRLF de Windows, #691).
+app/public/vendor/** -text
