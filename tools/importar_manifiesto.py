@@ -3,6 +3,8 @@
     python tools/importar_manifiesto.py sandbox [--maximo N]
     python tools/importar_manifiesto.py produccion [--maximo N]
     python tools/importar_manifiesto.py local          (la D1 de `wrangler dev`)
+    python tools/importar_manifiesto.py produccion --solo-contar   (compara y cuenta; no escribe)
+    ... --archivo RUTA.xlsx                             (lee un .xlsx local en vez de descargar)
     python tools/importar_manifiesto.py --prueba        (solo la comprobacion de abajo)
 
 Baja la hoja como .xlsx (sin sesion: se lee con el enlace), toma cada pestaña
@@ -115,10 +117,10 @@ def centavos(texto: str) -> int | None:
 
 
 def renglones(camion: str, filas: list[list[str]]) -> list[dict]:
-    """Los productos de una pestaña. Si la pestaña ya no empieza con "Truck <id>",
-    cambio de formato y las columnas por posicion ya no son confiables."""
-    if not filas or not filas[0] or not filas[0][0].startswith(f"Truck {camion}"):
-        raise ValueError(f"la pestaña Truck {camion} no existe o cambio de formato")
+    """Los productos de una pestaña. Se acepta si A1 empieza con "Truck <id>" o si algun
+    renglon de datos trae ese id en la columna A (A1 puede cambiar, p. ej. a "M14");
+    si no, cambio de formato y las columnas por posicion ya no son confiables."""
+    encabezado = bool(filas and filas[0] and filas[0][0].startswith(f"Truck {camion}"))
     salida = []
     for f in filas:
         if len(f) <= max(UPC, *DEPARTAMENTOS) or f[TRUCK].strip() != camion or not f[PALLET].strip():
@@ -130,6 +132,8 @@ def renglones(camion: str, filas: list[list[str]]) -> list[dict]:
         departamento = next((f[i].strip() for i in DEPARTAMENTOS if f[i].strip().lower() not in SIN_DATO), "")
         salida.append({"upc": upc, "descripcion": html.unescape(f[DESCRIPCION]).strip()[:200], "precio_usd": precio,
                        "departamento": departamento[:80], "tcin": f[TCIN].strip()})
+    if not encabezado and not salida:
+        raise ValueError(f"la pestaña Truck {camion} no existe o cambio de formato")
     return salida
 
 
@@ -185,16 +189,18 @@ def wrangler(*args: str) -> str:
     return resultado.stdout
 
 
-def main(destino: str, maximo: int = MAXIMO) -> None:
+def main(destino: str, maximo: int = MAXIMO, solo_contar: bool = False, archivo: str = "") -> None:
     base, banderas = DESTINOS[destino]
-    pestañas = pestañas_truck(descargar())
+    pestañas = pestañas_truck(Path(archivo).read_bytes() if archivo else descargar())
     camiones = sorted(pestañas)
     todos = []
+    omitidos = 0
     for camion in camiones:
         try:
             filas = renglones(camion, pestañas[camion])
         except ValueError as error:
             print(f"  se omite: {error}")
+            omitidos += 1
             continue
         print(f"  Truck {camion}: {len(filas)} renglones")
         todos += filas
@@ -205,6 +211,10 @@ def main(destino: str, maximo: int = MAXIMO) -> None:
     cambios = diferencia(nuevos, actuales)
     print(f"{len(camiones)} camiones, {len(todos)} renglones, {len(nuevos)} UPC; "
           f"en la base {len(actuales)}; nuevos o cambiados: {len(cambios)}")
+    if solo_contar:   # solo SELECT arriba; aqui termina, sin INSERT
+        nuevos_n = sum(r["upc"] not in actuales for r in cambios)
+        print(f"Solo conteo: nuevos {nuevos_n}, cambiados {len(cambios) - nuevos_n}, pestañas omitidas {omitidos}. No se escribio nada.")
+        return
     if not cambios:
         return
     if len(cambios) > maximo:
@@ -227,6 +237,13 @@ def prueba() -> None:
     r = renglones("123", filas)
     assert [x["upc"] for x in r] == ["191907910414"] * 2 + ["123456789012"] * 2, r
     assert r[0]["departamento"] == "SNACKS" and r[1]["departamento"] == "CANDY"
+    cambiada = [["M14"]] + filas[1:]   # A1 ya no dice "Truck 123": los renglones con TRUCK = 123 bastan
+    assert [x["upc"] for x in renglones("123", cambiada)] == [x["upc"] for x in r]
+    try:
+        renglones("999", cambiada)
+        raise AssertionError("A1 cambiado y sin renglones del camion no debe pasar")
+    except ValueError:
+        pass
     filas[1][DESCRIPCION] = 'Chuckle &amp; Roar &quot;niños&quot; &#39;juego&#39; &lt;3&gt;'
     assert renglones("123", filas)[0]["descripcion"] == 'Chuckle & Roar "niños" \'juego\' <3>'
     try:
@@ -248,11 +265,19 @@ def prueba() -> None:
 
 
 if __name__ == "__main__":
-    if sys.argv[1:] == ["--prueba"]:
+    args = sys.argv[1:]
+    if args == ["--prueba"]:
         prueba()
-    elif len(sys.argv) == 2 and sys.argv[1] in DESTINOS:
-        main(sys.argv[1])
-    elif len(sys.argv) == 4 and sys.argv[1] in DESTINOS and sys.argv[2] == "--maximo" and sys.argv[3].isdigit():
-        main(sys.argv[1], int(sys.argv[3]))
+        sys.exit()
+    ruta = ""
+    if "--archivo" in args and args.index("--archivo") + 1 < len(args):
+        i = args.index("--archivo")
+        ruta = args[i + 1]
+        del args[i:i + 2]
+    contar = "--solo-contar" in args
+    if contar:
+        args.remove("--solo-contar")
+    if args and args[0] in DESTINOS and (len(args) == 1 or (len(args) == 3 and args[1] == "--maximo" and args[2].isdigit())):
+        main(args[0], int(args[2]) if len(args) == 3 else MAXIMO, contar, ruta)
     else:
         sys.exit(__doc__)
