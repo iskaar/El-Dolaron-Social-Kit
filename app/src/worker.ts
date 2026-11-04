@@ -10,7 +10,7 @@ import { fichaDeManifiesto, normalizarUpc, precioListaMxn, type FichaManifiesto 
 import { decodificarNombre } from './nombre.ts';
 import { codigoLeido, SIN_CODIGO } from '../public/upc.js';
 import { ESTADOS } from '../public/estados.js';
-import { guardarImagenComoFoto, imagenGuardada, procesarRellenoImagenes, rutaImagenUpc, rutaImagenPieza } from './imagenes-upc.ts';
+import { guardarImagenComoFoto, imagenGuardada, procesarRellenoImagenes, procesarRellenoUpcitemdb, rutaImagenUpc, rutaImagenPieza } from './imagenes-upc.ts';
 import { PRENDAS_ROPA, PRECIOS_ROPA } from '../public/ropa.js';
 import { procesarColaRopa, rutaRopaAdmin } from './ropa-ia.ts';
 import { calcularPrecio, ajustarManual, esDestinoBanda, prefijoParaFamilia, MONTOS_BANDA, type Destino } from './precio.ts';
@@ -2821,7 +2821,8 @@ export default {
     ctx.waitUntil(vencerPedidos(env));
     ctx.waitUntil(procesarColaRopa(env));
     ctx.waitUntil((async () => { await procesarRecortes(env); await revisarRecortes(env); await ajustarRecortesViejos(env); })());
-    ctx.waitUntil(procesarRellenoImagenes(env));
+    // #718: UPCitemdb va después, para no competir con el relleno de las referencias de Target.
+    ctx.waitUntil(procesarRellenoImagenes(env).then(() => procesarRellenoUpcitemdb(env)).catch((error) => console.error(JSON.stringify({ mensaje: 'relleno de imágenes fallido', error: String(error).slice(0, 200) }))));
     // Piezas que se quedaron en `pendiente` y fotos/recortes de R2 sin pieza (#481).
     ctx.waitUntil(rescatarPendientes(env).catch((error) => console.error(JSON.stringify({ mensaje: 'rescate de pendientes fallido', error: String(error).slice(0, 200) }))));
     if (esCorridaSemanal(evento.scheduledTime ?? Date.now())) {

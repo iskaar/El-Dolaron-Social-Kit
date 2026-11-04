@@ -122,6 +122,35 @@ Target 30 minutos (por isolate) y la pantalla pide hacerlo a mano: «Ver product
 abre la página en el teléfono, la persona pasa la verificación, guarda la imagen y la sube con
 «Subir foto». Si el bloqueo se vuelve frecuente, guardar la pausa en D1 y revisar el volumen.
 
+## UPCitemdb (#718)
+
+Segunda fuente de imagen por UPC, sin raspar Target: `GET https://api.upcitemdb.com/prod/trial/lookup?upc=<upc>`
+(JSON, plan gratuito sin llave: 100 consultas al día y 429 en ráfagas). Se acepta solo si `items[0].upc` o
+`items[0].ean` coincide con el UPC pedido (ignorando ceros iniciales). Prefiere la primera imagen
+`target.scene7.com`; si no hay, la primera HTTPS válida. Timeout de 10 s, una consulta a la vez.
+
+- **Cron de 15 min** (después del relleno de referencias): hasta 5 UPC únicos por corrida, con 10 s entre
+  consultas, de piezas de El Dolarón `listo` sin foto y con UPC, `stock > 0` primero y luego las más recientes.
+  Las que ya tienen referencia confirmada de Target las atiende el relleno de #413.
+  - UPC **en el manifiesto** con imagen scene7: `imagenes_upc` con el TCIN de la hoja (`confirmado_por = 'sistema'`)
+    y copia por `guardarImagenComoFoto`. Si `model` difiere del TCIN, se usa el de la hoja y queda un aviso en consola.
+  - UPC **fuera del manifiesto** (o imagen de otro dominio): descarga acotada de Fase 2 (3 redirecciones, 6 MiB,
+    `image/*`) y `fotos/<id>.jpg` con put condicional en R2 y `UPDATE ... WHERE foto_key = ''` para todas las piezas
+    de El Dolarón con ese UPC sin foto. No pasa por `imagenes_upc`.
+  - Nunca toca fotos propias, FEP, descartadas, nombre, precio, stock ni `estado_analisis`.
+- **Al escanear**: si Target falla (reto, 403/429, pausa, 404, sin imagen), prueba UPCitemdb antes del mensaje de
+  verificación manual. Solo una imagen scene7 con UPC coincidente se responde, con la misma forma que la de Target.
+  Aplica a UPC del manifiesto; los de fuera los cubre el cron.
+- **Presupuesto**: 80 consultas al día (UTC) en `config.upcitemdb_consultas_<AAAA-MM-DD>` (atómico; escaneo y cron
+  lo comparten; el contador de días anteriores se borra). Un 429 o un error detiene la corrida sin marcar nada.
+- **Sin resultado**: UPC sin coincidencia ni imagen, o cuya copia falló, queda en `config.upcitemdb_sin_<upc>`
+  (fecha) y no se vuelve a consultar durante 30 días. No necesita migración.
+- **Subir al plan DEV** ($99/mes, 20,000 al día, llave en `/prod/v1/`): cambiar el endpoint, enviar la llave desde una
+  variable de entorno (nombre propuesto `UPCITEMDB_KEY`, secreto de Worker; no existe ni está en `wrangler`) y subir
+  `PRESUPUESTO_UPCITEMDB` y el lote en `app/src/imagenes-upc.ts`. Requiere decisión de Isaac.
+- **Prueba en producción pendiente**: que `api.upcitemdb.com` responda desde Workers y un escaneo real con Target
+  bloqueado. Si bloquea a Workers, la alternativa es el mismo relleno como script local en la PC de la caja.
+
 ## Activación (Isaac)
 
 1. La migración 044 y el manifiesto de #365 deben estar presentes.
