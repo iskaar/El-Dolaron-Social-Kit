@@ -267,7 +267,7 @@ export function filaSolicitud(ctx, s, { compacta = false, alResolver = () => {},
       if (s.codigo) hecho.append(nodo('small', `La etiqueta pegada dice ${pesos(antes)}: ya no es el precio.`));
       if (ctx.identidad.vendedor) hecho.append(nodo('small', 'Reimprime la etiqueta desde la computadora.'));
       else hecho.append(boton('Reimprimir etiqueta', async () => {
-        const salio = await ctx.imprimir([s.producto_id], new Map([[s.producto_id, 1]]));
+        const salio = await ctx.imprimir([s.producto_id], new Map([[s.producto_id, 1]]), { reimprimir:true });   // pedida a propósito: sale aunque la base ya la tenga reclamada (#713)
         if (salio) mensaje('Etiqueta enviada', 'etiqueta');
       }, 'primario'));
     }

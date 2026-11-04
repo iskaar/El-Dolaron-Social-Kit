@@ -309,7 +309,7 @@ export async function iniciar(ctx) {
       mensaje('Sin registro · toma foto','aviso');const fila=nodo('div',undefined,'acciones');fila.append(boton('Buscar en internet',()=>buscarDesconocida(actual),'buscar-internet'),boton('Tomar foto',()=>fotoNueva(actual),'primario'));carta.append(fila);
     }else if(actual.tipo==='guardada')tarjeta.append(nodo('p','✓ Guardada'));
     const k=actual.impresas||actual.cantidad||1; // lo que se acaba de sumar (existente) o guardar
-    if(actual.faltaEtiqueta&&p.estado_analisis==='listo')tarjeta.append(boton(`Imprimir ${k} ${k===1?'etiqueta':'etiquetas'}`,async()=>{const ok=await ctx.imprimir([p.id],new Map([[p.id,k]]));if(ok){actual.faltaEtiqueta=false;mensaje('Etiqueta enviada','etiqueta');}}));
+    if(actual.faltaEtiqueta&&p.estado_analisis==='listo')tarjeta.append(boton(`Imprimir ${k} ${k===1?'etiqueta':'etiquetas'}`,async()=>{const ok=await ctx.imprimir([p.id],new Map([[p.id,k]]),{reimprimir:true});if(ok){actual.faltaEtiqueta=false;mensaje('Etiqueta enviada','etiqueta');}}));
   }
   function pintarImagen(a,foto){if(!a.imagen?.url){foto.textContent='Sin foto';return;}const img=nodo('img');img.src=a.imagen.url;img.alt=a.imagen.nombre||a.ficha.nombre;img.referrerPolicy='no-referrer';img.onerror=()=>{img.remove();foto.textContent='Sin foto';};foto.replaceChildren(img);}
   async function imagen(a,foto){try{

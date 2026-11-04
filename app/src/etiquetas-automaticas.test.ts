@@ -1113,3 +1113,15 @@ test('Imprimir en el celular no pide /api/foto de las piezas sin foto (#464)', a
     assert.match(vista, /if\(p\.foto_key\)imagen\.src=`\/api\/foto\/\$\{p\.id\}`;else imagen\.hidden=true/);
   } finally { t.db.close(); }
 });
+
+test('#713: reimprimir una pieza vendida no sale y el aviso dice por qué, sin anunciar un envío', async () => {
+  const t = tienda();
+  try {
+    const { pc } = await dosDispositivos(t);
+    const id = agregar(t, DESPUES, 'listo', 0);   // vendida: sin existencia, no hay etiqueta que sacar
+    assert.equal(await pc.imprimir([id], new Map([[id, 1]]), false, { reimprimir: true }), false);
+    assert.deepEqual(pc.estado.enviadas, []);
+    assert.match(pc.$('resumen').textContent, /^No se imprimió: la pieza ya no se puede imprimir/);
+    assert.doesNotMatch(pc.$('resumen').textContent, /enviad/i);
+  } finally { t.db.close(); }
+});

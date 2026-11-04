@@ -292,6 +292,7 @@ document.getElementById('imprimir').addEventListener('click', () => {
  * a proposito tambien sale. Sin ellas, lo que ya reclamo otro dispositivo (PC o celular) se omite.
  */
 async function imprimir(ids, pedidas = new Map(), automatico = false, opciones = {}) {
+  if (imprimiendo && !automatico) resumen.textContent = 'Espera: todavía se están enviando etiquetas. No se imprimió; vuelve a pulsar al terminar.';   // #713: antes callaba
   if (imprimiendo || ids.length === 0) return false;
   vista?.inicio?.(ids, pedidas);
   imprimiendo = true;
@@ -384,7 +385,10 @@ async function imprimir(ids, pedidas = new Map(), automatico = false, opciones =
         terminadas += 1;
       }
     }
-    resumen.textContent = `${terminadas} piezas enviadas${omitidas ? `; ${omitidas} ya las había enviado otro dispositivo y no se repitieron` : ''}${rechazadas ? `; ${rechazadas} ${rechazadas === 1 ? 'pieza ya no se puede imprimir' : 'piezas ya no se pueden imprimir'} (vendidas o cambiaron)` : ''}. Si alguna no salió, usa «Mostrar impresas» y «No salió desde aquí».`;
+    // Nada salió y no fue por falla de la impresora: se dice por qué, sin presentarlo como envío (#713).
+    resumen.textContent = terminadas + omitidas === 0 && rechazadas > 0
+      ? `No se imprimió: ${rechazadas === 1 ? 'la pieza ya no se puede imprimir' : 'las piezas ya no se pueden imprimir'} (vendidas o cambiaron).`
+      : `${terminadas} piezas enviadas${omitidas ? `; ${omitidas} ya las había enviado otro dispositivo y no se repitieron` : ''}${rechazadas ? `; ${rechazadas} ${rechazadas === 1 ? 'pieza ya no se puede imprimir' : 'piezas ya no se pueden imprimir'} (vendidas o cambiaron)` : ''}. Si alguna no salió, usa «Mostrar impresas» y «No salió desde aquí».`;
     // true solo si salió alguna etiqueta o ya la había sacado otro dispositivo; si todo se rechazó (vendidas o cambiaron), nada salió.
     // Excepción (#468): la automática no se pausa si la única pieza se descartó entre listar y preparar (el servidor devuelve []):
     // no hubo falla de impresión. A mano sigue siendo false: nada salió y quien llama no debe decir «Etiqueta enviada».
