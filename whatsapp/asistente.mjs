@@ -67,7 +67,7 @@ export const HERRAMIENTAS = [{
   input_schema: { type: 'object', properties: {
     q: { type: 'string', description: 'Palabra o frase del nombre, por ejemplo "camisa"' },
     categoria: { type: 'string', enum: CLAVES_CATEGORIA },
-    talla: { type: 'string', description: 'Talla de adulto (XS, S, M, L, XL, XXL, 3XL) o de niño, por ejemplo "Niño 6 años"' },
+    talla: { type: 'string', description: 'Talla de adulto (XS, S, M, L, XL, XXL, 3XL, Unitalla) o de niño, por ejemplo "Niño 6 años" o "Niño Unitalla"' },
     precio_min: { type: 'number', description: 'Precio mínimo en pesos' },
     precio_max: { type: 'number', description: 'Precio máximo en pesos' },
   } },

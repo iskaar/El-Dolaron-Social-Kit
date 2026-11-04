@@ -271,7 +271,8 @@ test('precio de ropa en producción y sandbox con rol de captura; valores altera
     assert.equal((await capturarRopa(t, prod, '20000')).status, 201);
     assert.equal(t.db.prepare('select precio from productos where id=?').get(prod)!.precio, 20000);
     t.env.AMBIENTE = 'sandbox';
-    for (const precio of ['', 'NaN', '-5000', '5001', '19900', '50', '8000.5']) {
+    // #714: un precio fuera de los escalones ya no es inválido para el dueño (ver ropa-prendas.test.ts); sí lo es el que no es entero positivo.
+    for (const precio of ['', 'NaN', '-5000', '0', '8000.5']) {
       const id = crypto.randomUUID();
       assert.equal((await capturarRopa(t, id, precio)).status, 400);
       assert.equal(await t.env.FOTOS.get(`fotos/${id}.jpg`), null);

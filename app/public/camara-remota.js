@@ -44,8 +44,8 @@ export function formularioFoto(s, foto) {
     f.set('solo_foto', '1');
   } else {
     f.set('estado_fisico', s.params.estado_fisico ?? 'nuevo');
-    for (const k of ['cantidad', 'upc', 'talla', 'prenda', 'marca', 'precio_ropa']) {
-      if (s.params[k] !== undefined) f.set(k, String(s.params[k]));
+    for (const k of ['cantidad', 'upc', 'talla', 'prenda', 'marca', 'precio_ropa', 'paquete']) {
+      if (s.params[k] !== undefined && !(k === 'paquete' && !s.params[k])) f.set(k, String(s.params[k]));
     }
   }
   f.set('foto', foto, `${s.pieza_id}.jpg`);

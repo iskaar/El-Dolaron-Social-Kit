@@ -165,7 +165,7 @@ export async function iniciarCelular(ctx,captura) {
     if(ropaSinCodigo&&!captura.tablero.validar())throw new Error('Completa talla y precio');
     const edicion=a?.tipo==='nueva'?cambiosTarjeta(a):{};
     const r=registroFoto(foto,{id:a?.id||crypto.randomUUID(),estado_fisico:ropaSinCodigo?'nuevo':a?.estado||captura.estado(),cantidad:a?.cantidad||captura.cantidad(),...(ropaSinCodigo?captura.tablero.valores():{upc:upc??'',...(a?.talla?{talla:a.talla}:{}),nombre_edit:edicion.nombre,precio_edit:edicion.precio})});
-    await guardar(r);sesion.set(r.id,{...r,url:URL.createObjectURL(foto),subida:false});captura.flujo.limpiar();captura.contador.poner(1);pintar();mensaje(navigator.onLine?'Foto guardada en el teléfono':'Sin red · foto en el teléfono',navigator.onLine?'ok':'aviso');
+    await guardar(r);sesion.set(r.id,{...r,url:URL.createObjectURL(foto),subida:false});captura.flujo.limpiar();captura.tablero.reiniciarPaquete();captura.contador.poner(1);pintar();mensaje(navigator.onLine?'Foto guardada en el teléfono':'Sin red · foto en el teléfono',navigator.onLine?'ok':'aviso');
     if(localStorage.getItem('inventario-vibracion')!=='false')navigator.vibrate?.(30);void subir();return r;
   }
   // El obturador nunca toca una pieza ya registrada (#549): con el topper guardado en pantalla, la foto de la playera era
@@ -219,7 +219,7 @@ export async function iniciarCelular(ctx,captura) {
     }else if(revisar)c.append(nodo('p',actual.nombre??''));
     if(!esRopa(actual))c.append(opciones(ESTADOS,actual.estado_fisico,v=>{cambios.estado_fisico=v;if(campoPrecio&&!tocoPrecio&&actual.precios?.[v])campoPrecio.value=String(actual.precios[v]/100);actualizar();},'Grado'));
     c.append(stepper(cantidad,n=>{cantidad=n;actualizar();},{max:999,nombre:'Piezas'}));
-    const tablero=ropaSinCodigo?ropa({pc:()=>false,mensaje,recordar:false,inicial:{talla:tallaActual,prenda:actual.prenda||'',marca:actual.marca||'',precio_ropa:actual.precio},cambiar:()=>actualizar()}):null;
+    const tablero=ropaSinCodigo?ropa({pc:()=>false,mensaje,recordar:false,inicial:{talla:tallaActual,prenda:actual.prenda||'',marca:actual.marca||'',paquete:actual.paquete||0,precio_ropa:actual.precio},dueno:ctx.dueno,cambiar:()=>actualizar()}):null;
     if(tablero)c.append(tablero.raiz);else if(tallaActual||esRopa(actual))c.append(talla(v=>{tallaActual=v;actualizar();},tallaActual));
     const marca=estadoEnvio({...actual,id}).marca;if(marca)c.append(nodo('p',`La etiqueta pegada dice $${marca.precio/100}`,'aviso'));
     const guardarBoton=boton(revisar?(etiqueteraLista()?'Guardar e imprimir':'Guardar'):'Guardar cambios',async()=>{
@@ -228,13 +228,13 @@ export async function iniciarCelular(ctx,captura) {
       if(!navigator.onLine&&(revisar||!local||cantidad!==actual.stock))return mensaje(revisar?'Sin red: se guarda al volver la señal':'Sin red: se suma al volver la señal','aviso');
       if(tablero&&!tablero.validar())return;
       if(calzado&&!tallaActual)return mensaje('Falta número de calzado: elige la talla','aviso');
-      const r=tablero?.valores();if(r){cambios={...cambios,prenda:r.prenda,marca:r.marca,precio:r.precio_ropa};tallaActual=r.talla;}
+      const r=tablero?.valores();if(r){cambios={...cambios,prenda:r.prenda,marca:r.marca,paquete:r.paquete,precio:r.precio_ropa};tallaActual=r.talla;}
       if(revisar){
         // La existencia y la talla primero: si fallan no se confirma nada. Una pieza sin etiqueta previa imprime todo junto (sin etiquetarCorreccion).
         const ed=campoPrecio||(nombre!==actual.nombre)?cambiosTarjeta({nombre:nombre!==actual.nombre?nombre:undefined,precio:tocoPrecio?campoPrecio.value:undefined,ficha:{precio_lista:actual.precio_lista}}):{};
         if(cantidad!==actual.stock){await corregirExistencia(api,actual,id,cantidad,folioExistencia);actual.stock=cantidad;}
         if(tallaActual&&tallaActual!==actual.talla){await api(`/api/borradores/${id}/talla`,{talla:tallaActual},'PATCH');actual.talla=tallaActual;}
-        const guardada=await api(`/api/borradores/${id}/revision`,{confirmar:true,...(cambios.estado_fisico!==actual.estado_fisico?{estado_fisico:cambios.estado_fisico}:{}),...(r?{prenda:r.prenda,marca:r.marca,precio:r.precio_ropa}:{}),...ed},'PATCH');
+        const guardada=await api(`/api/borradores/${id}/revision`,{confirmar:true,...(cambios.estado_fisico!==actual.estado_fisico?{estado_fisico:cambios.estado_fisico}:{}),...(r?{prenda:r.prenda,marca:r.marca,paquete:r.paquete,precio:r.precio_ropa}:{}),...ed},'PATCH');
         Object.assign(datos,{cantidad,talla:tallaActual,estado_fisico:guardada.estado_fisico,nombre:guardada.nombre,precio:guardada.precio,por_revisar:0});
         cerrarHoja();await imprimirRevisada(id,cantidad,guardada.nombre);
         if(guardada.aviso)mensaje(guardada.aviso,'aviso');
@@ -248,7 +248,7 @@ export async function iniciarCelular(ctx,captura) {
             if(tallaActual&&tallaActual!==remota.talla)await api(`/api/borradores/${id}/talla`,{talla:tallaActual},'PATCH');
           }catch(e){if(e.status!==404)throw e;}
         }
-        local={...local,cantidad,talla:tallaActual||null,estado_fisico:cambios.estado_fisico,...(r?{prenda:r.prenda,marca:r.marca,precio_ropa:r.precio_ropa,correccion_ficha:{...local.correccion_ficha,...cambios}}:{}),version:(local.version??0)+1};await guardar(local);Object.assign(datos,local);sesion.set(id,datos);
+        local={...local,cantidad,talla:tallaActual||null,estado_fisico:cambios.estado_fisico,...(r?{prenda:r.prenda,marca:r.marca,paquete:r.paquete,precio_ropa:r.precio_ropa,correccion_ficha:{...local.correccion_ficha,...cambios}}:{}),version:(local.version??0)+1};await guardar(local);Object.assign(datos,local);sesion.set(id,datos);
       }else{
         // La corrección propia conserva la ventana y validaciones de /captura; nunca se encola.
         if(cantidad!==actual.stock){
@@ -262,7 +262,7 @@ export async function iniciarCelular(ctx,captura) {
         // #708: cambiar el grado recalcula el precio; con etiqueta pegada, hay que reimprimirla (misma comparación que la ficha).
         else if(guardada&&guardada.precio!==actual.precio){const re=avisoReimpresion(estadoEnvio({...actual,id}).marca,actual,{...actual,...guardada,destino:'etiqueta'});avisoPrecio=re?`${re} Reimprime la etiqueta.`:`Precio ${pesos(actual.precio)} → ${pesos(guardada.precio)}`;}
         if(guardada)Object.assign(datos,{precio:guardada.precio});
-        Object.assign(datos,{cantidad,talla:tallaActual,estado_fisico:cambios.estado_fisico,...(r?{precio_ropa:guardada?.solicitud_precio||guardada?.aviso?guardada.precio:r.precio_ropa,prenda:r.prenda,marca:r.marca}:{})});
+        Object.assign(datos,{cantidad,talla:tallaActual,estado_fisico:cambios.estado_fisico,...(r?{precio_ropa:guardada?.solicitud_precio||guardada?.aviso?guardada.precio:r.precio_ropa,prenda:r.prenda,marca:r.marca,paquete:r.paquete}:{})});
       }
       cerrarHoja();mensaje(avisoPrecio||'Cambios guardados',avisoPrecio?'aviso':'ok');pintar();
     },'primario');if(!revisar)bloquear(guardarBoton,'Sin cambios');c.append(guardarBoton);
