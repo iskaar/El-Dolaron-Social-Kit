@@ -1,7 +1,7 @@
 import { guardar, leer, borrar, pendientes } from './cola-fotos.js';
 import { registroFoto, crearSubida } from './foto-pendiente.js';
 import { crearCamara, crearReposoCamara } from './camara-inventario.js';
-import { aJpeg, reducirArchivo } from './foto.js';
+import { reducirArchivo } from './foto.js';
 import { ESTADOS } from './estados.js';
 import { ropa, opciones, talla } from './inventario-ropa.js';
 import { stepper, bloquear, cerrarHoja } from './inventario-ui.js';
@@ -15,7 +15,7 @@ import { avisoReimpresion, pesos } from './ficha.js';
 export async function iniciarCelular(ctx,captura) {
   const {$,nodo,boton,mensaje,hoja,api,confirmar}=ctx;
   const visor=nodo('div',undefined,'visor'),video=nodo('video');video.playsInline=true;video.muted=true;video.autoplay=true;video.setAttribute('aria-label','Vista de la cámara');visor.append(video);
-  const accionesVisor=nodo('div',undefined,'acciones visor-acciones'),reanudar=boton('Empezar',encender,'primario'),subirArchivo=boton('Subir foto',()=>archivo.click(),'visor-subir'),menu=boton('⋯',opcionesCamara,'visor-menu');menu.setAttribute('aria-label','Opciones de cámara');accionesVisor.append(subirArchivo,menu,reanudar);visor.append(accionesVisor);
+  const accionesVisor=nodo('div',undefined,'acciones visor-acciones'),reanudar=boton('Empezar',encender,'primario'),subirArchivo=boton('Subir foto',()=>galeria.click(),'visor-subir'),menu=boton('⋯',opcionesCamara,'visor-menu');menu.setAttribute('aria-label','Opciones de cámara');accionesVisor.append(subirArchivo,menu,reanudar);visor.append(accionesVisor);
   let usarCamara=true,abriendoCamara=false;try{usarCamara=sessionStorage.getItem('inventario-camara')!=='false';}catch{}
   async function cambiarCamara(encendida){usarCamara=encendida;try{sessionStorage.setItem('inventario-camara',String(usarCamara));}catch{}if(usarCamara)await encender();else{camara.pausar();visor.classList.remove('bloqueada');visor.querySelector('.permiso-camara')?.remove();pintarCamara();}}
   const alternar=boton('',()=>cambiarCamara(!camara.pista()),'alternar-camara');
@@ -26,9 +26,11 @@ export async function iniciarCelular(ctx,captura) {
   const todas=boton('Ver todas',()=>{const c=nodo('div',undefined,'lista-capturas');for(const r of sesion.values())c.append(miniatura(r));hoja('Capturas de 24 h',c);});const revisarBoton=boton('',()=>{const r=porRevisar()[0];if(r)return corregir(r.id);},'revisar-pendientes');revisarBoton.hidden=true;
   const encabezado=nodo('div',undefined,'cabecera-carrusel');encabezado.append(contador,revisarBoton,todas);tira.prepend(encabezado);
   const archivo=nodo('input');archivo.type='file';archivo.accept='image/*';archivo.setAttribute('capture','environment');archivo.hidden=true;
+  // Galería (#707): mismo manejador, sin capture: «Subir foto» abre los archivos, no la cámara.
+  const galeria=nodo('input');galeria.type='file';galeria.accept='image/*';galeria.hidden=true;
   async function empezar(){if(inicio.hidden)return;inicio.hidden=true;sonar('ok');if(usarCamara)await encender();}
   const inicio=nodo('div',undefined,'empezar-captura');inicio.append(nodo('h2','Capturar'),boton('Empezar',empezar,'primario'),nodo('p','Cámara y sonido'));
-  captura.entrada.prepend(visor,tira);captura.entrada.append(archivo);$('modo-capturar').append(inicio);
+  captura.entrada.prepend(visor,tira);captura.entrada.append(archivo,galeria);$('modo-capturar').append(inicio);
   captura.disparo.className='disparo';
   captura.sinFoto.hidden=true;
   captura.entrada.classList.add('captura-movil');captura.entrada.append(captura.pieza);captura.pieza.className='pieza-movil';
@@ -37,7 +39,7 @@ export async function iniciarCelular(ctx,captura) {
   for(const b of captura.grado.querySelectorAll('button')){const t=b.textContent;b.setAttribute('aria-label',t);b.textContent=({nuevo:'A\nNuevo',danado:'B\nDañado',liquidacion:'C\nLiq.'})[b.dataset.valor];}
   visor.after(captura.tablero.raiz);
   captura.tablero.sincronizar();
-  const sesion=new Map();let revisando=null,disparando=false,tomandoPara=null,enviando=false,despierto=null,archivoPara=null,revisionFoto=null;
+  const sesion=new Map();let revisando=null,nativa=false,reanudarNativa=false,tomandoPara=null,enviando=false,despierto=null,archivoPara=null,revisionFoto=null;
   let contextoAudio;
   function sonar(tipo){
     const tonos={ok:[[880,90]],mas:[[1320,60]],existe:[[1320,60],[1320,60]],sin:[[440,120],[330,120]],error:[[220,250],[180,250]],etiqueta:[[1046,80],[1568,120]],revisar:[[660,80],[880,80],[1100,100]]}[tipo]||[];
@@ -50,9 +52,13 @@ export async function iniciarCelular(ctx,captura) {
   function sincronizarReposo(){reposo.pausar(!camara.pista()||$('hoja').open||document.hidden||$('modo-capturar').hidden);}
   // Mientras el capturista teclea nombre o precio la cámara no lee: un código ajeno no guarda una tarjeta a medias.
   const escribiendoTarjeta=()=>{const e=document.activeElement;return !!e&&e.matches?.('input:not([readonly])')&&captura.pieza.contains(e);};
-  const camara=crearCamara({video,puedeLeer:()=>!revisando&&!$('hoja').open&&!escribiendoTarjeta(),alLeer:codigo=>{reposo.actividad();ctx.recibir(codigo,'camara').then(()=>sonar(captura.flujo.actual()?.tipo==='existente'?'existe':captura.flujo.actual()?.tipo==='sin-registro'?'sin':'ok')).catch(e=>{mensaje(e.message,'aviso');sonar('error');});},alEstado:pintarCamara});
+  const camara=crearCamara({video,puedeLeer:()=>!revisando&&!nativa&&!$('hoja').open&&!escribiendoTarjeta(),alLeer:codigo=>{reposo.actividad();ctx.recibir(codigo,'camara').then(()=>sonar(captura.flujo.actual()?.tipo==='existente'?'existe':captura.flujo.actual()?.tipo==='sin-registro'?'sin':'ok')).catch(e=>{mensaje(e.message,'aviso');sonar('error');});},alEstado:pintarCamara});
   for(const evento of ['pointerdown','input','keydown','scroll'])document.addEventListener(evento,()=>{if(!$('modo-capturar').hidden)reposo.actividad();},{capture:true,passive:true});
   document.addEventListener('visibilitychange',sincronizarReposo);
+  // Al volver de la cámara nativa (#707): inventario.js apaga el lector con blur/visibilitychange; aquí se reabre solo (si estaba encendido)
+  // tras un momento sin leer (en iOS el visor sigue en pantalla bajo el selector). Sin esto cada foto exigiría tocar «Reanudar».
+  function liberarNativa(){setTimeout(()=>{nativa=false;if(reanudarNativa&&!document.hidden&&usarCamara&&(!camara.pista()||camara.pista().readyState==='ended')){reanudarNativa=false;void encender();}},1500);}
+  document.addEventListener('visibilitychange',()=>{if(!document.hidden)liberarNativa();});window.addEventListener('focus',liberarNativa);
   new MutationObserver(sincronizarReposo).observe($('hoja'),{attributes:true,attributeFilter:['open']});
   setInterval(()=>{sincronizarReposo();reposo.comprobar();},1000);
   pintarCamara();
@@ -165,14 +171,14 @@ export async function iniciarCelular(ctx,captura) {
   // El obturador nunca toca una pieza ya registrada (#549): con el topper guardado en pantalla, la foto de la playera era
   // del topper (mismo id y UPC: el Worker la tomaba por reintento y pisaba su imagen). Reemplazar es «Foto nueva» en la tarjeta.
   async function tomar(a=piezaSinRegistrar(captura.flujo.actual())){
-    if(disparando)return;
     if(captura.esRopa()&&!a?.upc&&!captura.tablero.validar()){sonar('error');return;}
     if(faltaCalzado(a)){sonar('error');mensaje('Elige el número de calzado','aviso');return;}
-    if(!camara.pista()||!video.videoWidth){archivoPara=a;archivo.click();return;}
-    disparando=true;try{const foto=await aJpeg(video,video.videoWidth,video.videoHeight);if(!foto)throw new Error('No se pudo tomar foto');await conservar(foto,a);}finally{disparando=false;}
+    abrirNativa(a);   // #707: toda foto sale de la cámara del teléfono (flash, resolución); el video solo lee códigos
   }
-  archivo.onchange=async()=>{const f=archivo.files?.[0];if(!f)return;try{const foto=await reducirArchivo(f);if(archivoPara?.existente){await reemplazarFoto(archivoPara.existente,foto);cerrarHoja();}else if(archivoPara?.local)await retomarLocal(archivoPara.local,foto);else await conservar(foto,piezaSinRegistrar(archivoPara||captura.flujo.actual()));}catch(e){mensaje(e.message,'error');}finally{archivo.value='';archivoPara=null;}};
-  archivo.oncancel=()=>{archivoPara=null;};
+  function abrirNativa(para){archivoPara=para;nativa=true;reanudarNativa=usarCamara&&!!camara.pista();archivo.click();}
+  async function alElegir(entrada){const f=entrada.files?.[0];if(!f){nativa=false;return;}try{const foto=await reducirArchivo(f);if(archivoPara?.existente){await reemplazarFoto(archivoPara.existente,foto);cerrarHoja();}else if(archivoPara?.local)await retomarLocal(archivoPara.local,foto);else await conservar(foto,piezaSinRegistrar(archivoPara||captura.flujo.actual()));}catch(e){mensaje(e.message,'error');}finally{entrada.value='';archivoPara=null;nativa=false;}}
+  archivo.onchange=()=>alElegir(archivo);galeria.onchange=()=>alElegir(galeria);
+  archivo.oncancel=galeria.oncancel=()=>{archivoPara=null;nativa=false;};
   async function reemplazarFoto(p,foto){
     reposo.actividad();
     if(!navigator.onLine)throw new Error('Sin red · conserva la foto');
@@ -181,7 +187,7 @@ export async function iniciarCelular(ctx,captura) {
   }
   async function fotoPieza(p){
     return new Promise(resolve=>{
-    const c=nodo('div');c.append(nodo('p','Tomar foto de la pieza'),boton('Tomar foto',async()=>{if(!camara.pista()||!video.videoWidth){archivoPara={existente:p};archivo.click();return;}await reemplazarFoto(p,await aJpeg(video,video.videoWidth,video.videoHeight));cerrarHoja();},'primario'),boton('Subir foto',()=>{archivoPara={existente:p};archivo.click();}));hoja('Foto nueva',c);$('hoja').addEventListener('close',resolve,{once:true});
+    const c=nodo('div');c.append(nodo('p','Tomar foto de la pieza'),boton('Tomar foto',()=>abrirNativa({existente:p}),'primario'),boton('Subir foto',()=>{archivoPara={existente:p};galeria.click();}));hoja('Foto nueva',c);$('hoja').addEventListener('close',resolve,{once:true});
     });
   }
   async function retomarLocal(r,foto){reposo.actividad();r={...r,foto,version:(r.version??0)+1};await guardar(r);const anterior=sesion.get(r.id)?.url;if(anterior)URL.revokeObjectURL(anterior);sesion.set(r.id,{...sesion.get(r.id),...r,url:URL.createObjectURL(foto)});pintar();}
@@ -260,7 +266,7 @@ export async function iniciarCelular(ctx,captura) {
       }
       cerrarHoja();mensaje(avisoPrecio||'Cambios guardados',avisoPrecio?'aviso':'ok');pintar();
     },'primario');if(!revisar)bloquear(guardarBoton,'Sin cambios');c.append(guardarBoton);
-    c.append(boton('Retomar foto',async()=>{if(local){if(camara.pista()&&video.videoWidth)await retomarLocal(local,await aJpeg(video,video.videoWidth,video.videoHeight));else{archivoPara={local};archivo.click();}}else{await fotoPieza({...datos,id});}if(local)cerrarHoja();}));
+    c.append(boton('Retomar foto',async()=>{if(local){abrirNativa({local});cerrarHoja();}else await fotoPieza({...datos,id});}));
     const descartar=boton('Descartar',async b=>{
       if(b.dataset.confirmar!=='true'){b.dataset.confirmar='true';b.textContent='¿Descartar esta pieza?';b.classList.add('confirmando');mensaje('Se descarta la captura completa','aviso');setTimeout(()=>{b.dataset.confirmar='false';b.textContent='Descartar';b.classList.remove('confirmando');},4000);return;}
       if(!navigator.onLine)return mensaje('Sin red · vuelve a intentar','aviso');await api(`/api/borradores/${id}/revision`,{},'DELETE');await borrar(id);if(datos.url)URL.revokeObjectURL(datos.url);sesion.delete(id);cerrarHoja();pintar();mensaje('Captura descartada','ok');
@@ -269,7 +275,7 @@ export async function iniciarCelular(ctx,captura) {
   }
   function opcionesCamara(){
     const c=nodo('div',undefined,'formulario');
-    c.append(boton('Subir foto',()=>{archivoPara=null;archivo.click();}));
+    c.append(boton('Subir foto',()=>{archivoPara=null;galeria.click();}));
     if(ctx.dueno)c.append(boton('Pieza sin foto',()=>captura.manual()));const pista=camara.pista(),rango=pista?.getCapabilities?.().zoom;
     if(rango&&rango.max>rango.min){const l=nodo('label','Zoom'),input=nodo('input');input.type='range';Object.assign(input,{min:rango.min,max:rango.max,step:rango.step||.1,value:pista.getSettings().zoom||rango.min});input.oninput=()=>{const zoom=Number(input.value);if(pista.getSettings().zoom!==zoom)pista.applyConstraints({advanced:[{zoom}]}).catch(()=>{});localStorage.setItem('captura-zoom',input.value);};l.append(input);c.append(l);}
     c.append(boton('Producto sin código',()=>{captura.flujo.limpiar();cerrarHoja();}),boton('Reanudar cámara',async()=>{cerrarHoja();await cambiarCamara(true);}),boton('Escribir código',()=>{cerrarHoja();$('busqueda').hidden=false;$('consulta').inputMode='numeric';$('consulta').focus();}));hoja('Cámara',c);
