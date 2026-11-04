@@ -109,6 +109,14 @@ async function fotoDeReferencia(r: Referencia, env: Env) {
   throw new Error('La imagen sigue descargándose. Reintenta al escanear.');
 }
 
+/** Piezas de El Dolarón con ese UPC y sin foto. Variantes con ceros para usar el índice productos_upc, no ltrim (recorre la tabla). */
+async function piezasSinFoto(upc: string, env: Env): Promise<string[]> {
+  const claves = Array.from({ length: 15 - upc.length }, (_, i) => upc.padStart(upc.length + i, '0'));
+  const { results } = await env.DB.prepare(`select id from productos where upc in (${claves.map(() => '?').join(', ')})
+    and propietario = 'dolaron' and foto_key = '' and estado_analisis <> 'descartado'`).bind(...claves).all<{ id: string }>();
+  return results.map((r) => r.id);
+}
+
 /** Solo añade foto: ni análisis, ni precio, ni stock. La confirmación queda en D1 para reintentar. */
 export async function guardarImagenComoFoto(upc: string, env: Env): Promise<void> {
   try {
@@ -117,10 +125,7 @@ export async function guardarImagenComoFoto(upc: string, env: Env): Promise<void
     if (!r || !imagenValida(r.url)) return;
     const { key, foto } = await fotoDeReferencia(r, env);
     const bytes = await foto.arrayBuffer();
-    // Se llama en cada escaneo: variantes con ceros para usar el índice productos_upc, no ltrim (recorre la tabla).
-    const claves = Array.from({ length: 15 - r.upc.length }, (_, i) => r.upc.padStart(r.upc.length + i, '0'));
-    const { results } = await env.DB.prepare(`select id from productos where upc in (${claves.map(() => '?').join(', ')})
-      and propietario = 'dolaron' and foto_key = '' and estado_analisis <> 'descartado'`).bind(...claves).all<{ id: string }>();
+    const results = (await piezasSinFoto(r.upc, env)).map((id) => ({ id }));
     for (const { id } of results) {
       const fotoKey = `fotos/${id}.jpg`;
       const creada = await env.FOTOS.put(fotoKey, bytes, {
@@ -236,6 +241,26 @@ async function candidataDePagina(pagina: string) {
   return null;
 }
 
+/** #413/#718: foto de una sola pieza desde una URL externa. Put condicional en R2 y UPDATE solo si sigue sin foto. */
+async function guardarFotoPieza(env: Env, id: string, cuerpo: Blob, tipo: string, url: string): Promise<'ok' | 'ocupada' | 'cambio'> {
+  const fotoKey = `fotos/${id}.jpg`;
+  const creada = await env.FOTOS.put(fotoKey, cuerpo, {
+    onlyIf: { etagDoesNotMatch: '*' }, httpMetadata: { contentType: tipo }, customMetadata: { imagen_busqueda: url },
+  });
+  if (!creada) {
+    const existente = await env.FOTOS.get(fotoKey);
+    await existente?.body.cancel();
+    // #413: recupera un UPDATE fallido de esta URL; una foto propia nunca se reemplaza.
+    if (existente?.customMetadata?.imagen_busqueda !== url) return 'ocupada';
+  }
+  const { meta } = await env.DB.prepare(`update productos set foto_key = ?, actualizado_en = ?,
+      recorte_estado = 'original', recorte_fecha = null, recorte_revision = null,
+      ropa_ia_estado = case when categoria = 'ropa' and nombre = 'Ropa' and ropa_ia_estado is null then 'descartado' else ropa_ia_estado end
+    where id = ? and propietario = 'dolaron' and foto_key = '' and estado_analisis <> 'descartado'`)
+    .bind(fotoKey, new Date().toISOString(), id).run();
+  return meta.changes ? 'ok' : 'cambio';
+}
+
 /** #413: solo /admin, después de verificar host, rol y propietario en el Worker. */
 export async function rutaImagenPieza(request: Request, env: Env, pathname: string): Promise<Response | null> {
   const ruta = /^\/api\/borradores\/([^/]+)\/imagen(\/buscar)?$/.exec(pathname);
@@ -272,23 +297,141 @@ export async function rutaImagenPieza(request: Request, env: Env, pathname: stri
   const fotoKey = `fotos/${id}.jpg`;
   try {
     const { cuerpo, tipo } = await descargarImagen(datos.imagen, 3);
-    const creada = await env.FOTOS.put(fotoKey, cuerpo, {
-      onlyIf: { etagDoesNotMatch: '*' }, httpMetadata: { contentType: tipo }, customMetadata: { imagen_busqueda: datos.imagen },
-    });
-    if (!creada) {
-      const existente = await env.FOTOS.get(fotoKey);
-      await existente?.body.cancel();
-      // #413: recupera un UPDATE fallido de esta URL; una foto propia nunca se reemplaza.
-      if (existente?.customMetadata?.imagen_busqueda !== datos.imagen) return json({ error: 'La pieza ya tiene otra foto. Recarga la ficha.' }, 409);
-    }
-    const { meta } = await env.DB.prepare(`update productos set foto_key = ?, actualizado_en = ?,
-        recorte_estado = 'original', recorte_fecha = null, recorte_revision = null,
-        ropa_ia_estado = case when categoria = 'ropa' and nombre = 'Ropa' and ropa_ia_estado is null then 'descartado' else ropa_ia_estado end
-      where id = ? and propietario = 'dolaron' and foto_key = '' and estado_analisis <> 'descartado'`)
-      .bind(fotoKey, new Date().toISOString(), id).run();
-    return meta.changes ? json({ id, foto_key: fotoKey }) : json({ error: 'La pieza cambió o ya tiene foto. Recarga la ficha.' }, 409);
+    const resultado = await guardarFotoPieza(env, id, cuerpo, tipo, datos.imagen);
+    if (resultado === 'ocupada') return json({ error: 'La pieza ya tiene otra foto. Recarga la ficha.' }, 409);
+    return resultado === 'ok' ? json({ id, foto_key: fotoKey }) : json({ error: 'La pieza cambió o ya tiene foto. Recarga la ficha.' }, 409);
   } catch {
     return json({ error: 'No se pudo guardar la imagen. Reintenta o sube una foto.' }, 502);
+  }
+}
+
+/** Referencia confirmada por «sistema» (#532). No pisa una decisión ya tomada para el mismo TCIN; true si cambió algo. */
+async function guardarReferencia(env: Env, upc: string, tcin: string, url: string, nombre: string, upcFuente: string): Promise<boolean> {
+  const { meta } = await env.DB.prepare(`insert into imagenes_upc (upc, tcin, url, nombre, upc_fuente, confirmado_por, confirmado_en)
+    select ?, ?, ?, ?, ?, ?, ? where exists (select 1 from manifiesto where upc = ? and tcin = ?)
+    on conflict (upc) do update set tcin = excluded.tcin, url = excluded.url, nombre = excluded.nombre,
+      upc_fuente = excluded.upc_fuente, confirmado_por = excluded.confirmado_por, confirmado_en = excluded.confirmado_en
+    where imagenes_upc.tcin <> excluded.tcin or imagenes_upc.confirmado_en = ''`)
+    .bind(upc, tcin, url, nombre.trim().slice(0, 200), upcFuente, 'sistema', new Date().toISOString(), upc, tcin).run();
+  return meta.changes > 0;
+}
+
+// #718: UPCitemdb (plan gratuito, sin llave) devuelve la imagen de Target por UPC sin raspar Target.
+// Plan DEV ($99/mes, 20,000/día): llave en /prod/v1/ con la variable UPCITEMDB_KEY (aún no existe ni se usa).
+const UPCITEMDB = 'https://api.upcitemdb.com/prod/trial/lookup';
+const PRESUPUESTO_UPCITEMDB = 80; // de 100/día: el resto queda para el escaneo y las ráfagas
+const POR_CORRIDA_UPCITEMDB = 5;
+const REINTENTO_SIN_RESULTADO_DIAS = 30;
+let pausaUpcitemdbMs = 10_000; // el plan gratuito da 429 en ráfagas
+/** Solo para pruebas. */
+export const pausarUpcitemdbPor = (ms: number) => { pausaUpcitemdbMs = ms; };
+const claveConsultas = () => `upcitemdb_consultas_${new Date().toISOString().slice(0, 10)}`;
+
+/** Gasta una consulta del día en D1 (atómico); false si el presupuesto se agotó. */
+async function gastarConsultaUpcitemdb(env: Env): Promise<boolean> {
+  const clave = claveConsultas();
+  const { meta } = await env.DB.prepare(`insert into config (clave, valor) values (?, '1')
+    on conflict (clave) do update set valor = cast(cast(valor as integer) + 1 as text) where cast(valor as integer) < ?`)
+    .bind(clave, PRESUPUESTO_UPCITEMDB).run();
+  if (!meta.changes) return false;
+  await env.DB.prepare("delete from config where clave like 'upcitemdb_consultas_%' and clave < ?").bind(clave).run();
+  return true;
+}
+
+/** UPC sin imagen utilizable: no se vuelve a consultar durante 30 días. */
+const marcarSinImagen = (env: Env, upc: string) => env.DB.prepare(`insert into config (clave, valor) values (?, ?)
+  on conflict (clave) do update set valor = excluded.valor`).bind(`upcitemdb_sin_${upc}`, new Date().toISOString().slice(0, 10)).run();
+
+interface Hallazgo { imagen: string; titulo: string; model: string }
+
+const avisarModelo = (upc: string, tcin: string, h: Hallazgo) => {
+  if (h.model && h.model !== tcin) console.warn(JSON.stringify({ mensaje: 'upcitemdb: model distinto al TCIN del manifiesto', upc, tcin, model: h.model }));
+};
+
+/** Hallazgo con UPC verificado, null si no hay imagen (queda marcado) o 'alto' si hay que dejar de consultar (límite, error). */
+async function consultarUpcitemdb(upc: string, env: Env): Promise<Hallazgo | null | 'alto'> {
+  if (!await gastarConsultaUpcitemdb(env)) return 'alto';
+  try {
+    // Al normalizar, un UPC-A de 12 dígitos con cero inicial queda en 11.
+    const respuesta = await fetch(`${UPCITEMDB}?upc=${upc.padStart(12, '0')}`, {
+      redirect: 'manual', signal: AbortSignal.timeout(10_000),
+      headers: { 'user-agent': 'ElDolaron-escaner/1.0 (+https://eldolaron.com)', accept: 'application/json' },
+    });
+    if (respuesta.status !== 200) {
+      await respuesta.body?.cancel();
+      console.warn(JSON.stringify({ mensaje: 'upcitemdb no respondió', status: respuesta.status }));
+      return 'alto';
+    }
+    const datos = await leerJson(respuesta.body, 500_000) as { code?: string; items?: Array<Record<string, unknown>> };
+    if (datos.code === 'EXCEED_LIMIT') return 'alto';
+    const item = datos.code === 'OK' ? datos.items?.[0] : undefined;
+    const coincide = !!item && [item.upc, item.ean].some((c) => typeof c === 'string' && normalizarUpc(c) === upc);
+    const imagenes = Array.isArray(item?.images) ? item.images.filter(httpsValida) : [];
+    // Regla automática conservadora (#718): solo entra sola la imagen scene7; otras fuentes quedan para «Buscar imagen» en /admin.
+    const imagen = imagenes.find(imagenValida);
+    if (!coincide || !imagen) { await marcarSinImagen(env, upc); return null; }
+    return { imagen, titulo: typeof item!.title === 'string' ? item!.title : '', model: typeof item!.model === 'string' ? item!.model : '' };
+  } catch (error) {
+    console.error(JSON.stringify({ mensaje: 'upcitemdb fallido', upc, error: error instanceof Error ? error.message.slice(0, 200) : 'error desconocido' }));
+    return 'alto';
+  }
+}
+
+/** Escaneo: Target falló; solo una imagen scene7 con UPC coincidente se acepta, con la misma forma de respuesta. */
+async function respaldoUpcitemdb(upc: string, tcin: string, env: Env, ctx: ExecutionContext): Promise<Response | null> {
+  const h = await consultarUpcitemdb(upc, env);
+  if (!h || h === 'alto' || !imagenValida(h.imagen)) return null;
+  avisarModelo(upc, tcin, h);
+  if (await guardarReferencia(env, upc, tcin, h.imagen, h.titulo || upc, upc)) ctx.waitUntil(guardarImagenComoFoto(upc, env));
+  const imagen = await imagenGuardada(upc, env);
+  return imagen ? json({ imagen }) : null;
+}
+
+/** Cron: da la foto a todas las piezas de El Dolarón sin foto con ese UPC. */
+async function guardarHallazgo(upc: string, h: Hallazgo, env: Env): Promise<void> {
+  const fuente = await env.DB.prepare('select tcin from manifiesto where upc = ?').bind(upc).first<{ tcin: string }>();
+  if (fuente && /^\d{1,12}$/.test(fuente.tcin)) {
+    // En el manifiesto: la referencia conserva el TCIN de la hoja y el join de guardarImagenComoFoto sigue valiendo.
+    avisarModelo(upc, fuente.tcin, h);
+    await guardarReferencia(env, upc, fuente.tcin, h.imagen, h.titulo || upc, upc);
+    await guardarImagenComoFoto(upc, env);
+    return;
+  }
+  const { cuerpo, tipo } = await descargarImagen(h.imagen, 3);
+  for (const id of await piezasSinFoto(upc, env)) await guardarFotoPieza(env, id, cuerpo, tipo, h.imagen);
+}
+
+/**
+ * #718: hasta 5 UPC por corrida de piezas listas sin foto (con stock primero), una consulta a la vez y con pausa.
+ * Las que ya tienen referencia confirmada las atiende procesarRellenoImagenes.
+ */
+export async function procesarRellenoUpcitemdb(env: Env): Promise<void> {
+  const usadas = await env.DB.prepare('select valor from config where clave = ?').bind(claveConsultas()).first<{ valor: string }>();
+  if (Number(usadas?.valor ?? 0) >= PRESUPUESTO_UPCITEMDB) return;
+  const desde = new Date(Date.now() - REINTENTO_SIN_RESULTADO_DIAS * 86_400_000).toISOString().slice(0, 10);
+  const { results } = await env.DB.prepare(`select ltrim(upc, '0') as codigo, max(stock > 0) as con_stock, max(creado_en) as creado
+    from productos where propietario = 'dolaron' and estado_analisis = 'listo' and foto_key = '' and upc <> ''
+      and not exists (select 1 from config where clave = 'upcitemdb_sin_' || ltrim(productos.upc, '0') and valor > ?)
+    group by ltrim(upc, '0') order by con_stock desc, creado desc limit 25`).bind(desde).all<{ codigo: string }>();
+  const validos = results.map((r) => r.codigo).filter((c) => /^\d{6,14}$/.test(c));
+  for (const c of results.map((r) => r.codigo)) if (!validos.includes(c)) await marcarSinImagen(env, c);
+  // ponytail: si 25 referencias confirmadas fallan para siempre, ocupan el lote; entonces subir el límite o marcarlas.
+  const conReferencia = validos.length ? new Set((await env.DB.prepare(`select i.upc from imagenes_upc i
+    join manifiesto m on m.upc = i.upc and m.tcin = i.tcin
+    where i.confirmado_en <> '' and i.upc in (${validos.map(() => '?').join(', ')})`).bind(...validos).all<{ upc: string }>()).results.map((r) => r.upc)) : new Set<string>();
+  let consultadas = 0;
+  for (const upc of validos.filter((c) => !conReferencia.has(c)).slice(0, POR_CORRIDA_UPCITEMDB)) {
+    if (consultadas++) await new Promise((resolve) => setTimeout(resolve, pausaUpcitemdbMs));
+    const h = await consultarUpcitemdb(upc, env);
+    if (h === 'alto') return;
+    if (!h) continue;
+    try {
+      await guardarHallazgo(upc, h, env);
+      if ((await piezasSinFoto(upc, env)).length) await marcarSinImagen(env, upc);
+    } catch (error) {
+      console.error(JSON.stringify({ mensaje: 'imagen de upcitemdb sin foto', upc, error: error instanceof Error ? error.message.slice(0, 200) : 'error desconocido' }));
+      await marcarSinImagen(env, upc);
+    }
   }
 }
 
@@ -348,6 +491,13 @@ export async function rutaImagenUpc(request: Request, env: Env, pathname: string
     return meta.changes ? json({ imagen: await imagenGuardada(upc, env) }) : json({ error: 'La imagen cambió. Vuelve a buscarla.' }, 409);
   }
 
+  const deTarget = await consultarTarget(upc, fuente, env, ctx);
+  // #718: si Target no da la imagen (reto, 404, sin og:image, pausa), UPCitemdb antes de pedir foto a mano.
+  if (![422, 502, 503].includes(deTarget.status)) return deTarget;
+  return await respaldoUpcitemdb(upc, fuente.tcin, env, ctx) ?? deTarget;
+}
+
+async function consultarTarget(upc: string, fuente: { tcin: string }, env: Env, ctx: ExecutionContext): Promise<Response> {
   if (Date.now() < pausaTargetHasta) return json({ error: VERIFICACION }, 503);
   try {
     // Una consulta por UPC, solo al escanearlo y luego en caché: volumen de persona, no de crawler.
@@ -378,14 +528,8 @@ export async function rutaImagenUpc(request: Request, env: Env, pathname: string
     // Si cambió la hoja o alguien confirmó mientras llegaba HTTP, no se pisa su decisión.
     // #532: la imagen de Target se confirma sola siempre (confirmado_por = 'sistema') y pasa a ser la foto de las piezas sin foto;
     // si la página trae un código distinto al escaneado ya se rechazó arriba.
-    const guardada = await env.DB.prepare(`insert into imagenes_upc (upc, tcin, url, nombre, upc_fuente, confirmado_por, confirmado_en)
-      select ?, ?, ?, ?, ?, ?, ? where exists (select 1 from manifiesto where upc = ? and tcin = ?)
-      on conflict (upc) do update set tcin = excluded.tcin, url = excluded.url, nombre = excluded.nombre,
-        upc_fuente = excluded.upc_fuente, confirmado_por = excluded.confirmado_por, confirmado_en = excluded.confirmado_en
-      where imagenes_upc.tcin <> excluded.tcin or imagenes_upc.confirmado_en = ''`)
-      .bind(upc, fuente.tcin, datos.image_url, datos.title.trim().slice(0, 200), datos.barcode,
-        'sistema', new Date().toISOString(), upc, fuente.tcin).run();
-    if (guardada.meta.changes) ctx.waitUntil(guardarImagenComoFoto(upc, env));
+    const guardada = await guardarReferencia(env, upc, fuente.tcin, datos.image_url, datos.title, datos.barcode);
+    if (guardada) ctx.waitUntil(guardarImagenComoFoto(upc, env));
     const imagen = await imagenGuardada(upc, env);
     return imagen ? json({ imagen }) : json({ error: 'El enlace cambió. Vuelve a escanear.' }, 409);
   } catch (error) {

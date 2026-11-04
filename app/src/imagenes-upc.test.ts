@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { tienda, DUENO, PRODUCTO } from './prueba-d1.ts';
 import worker, { permitidaParaVendedor } from './worker.ts';
-import { reiniciarPausaTarget } from './imagenes-upc.ts';
+import { reiniciarPausaTarget, pausarUpcitemdbPor } from './imagenes-upc.ts';
 import { codigoLeido, normalizarUpc } from '../public/upc.js';
 import { procesarRecortes } from './recortes.ts';
 import { procesarColaRopa } from './ropa-ia.ts';
@@ -420,7 +420,8 @@ test('páginas ajenas, códigos distintos y errores no dejan imágenes', async (
     new Response('no', { status: 404 }), new Response('no', { status: 500 }), new Response(null, { status: 301 }),
     new Response('x'.repeat(3_000_001)),
   ];
-  t.mock.method(globalThis, 'fetch', async () => respuestas.shift()!);
+  // #718: UPCitemdb también falla aquí (500): solo las respuestas de Target salen de la cola.
+  t.mock.method(globalThis, 'fetch', async (url: string) => String(url).includes('target.com') ? respuestas.shift()! : new Response('no', { status: 500 }));
   const status = [];
   for (let i = 0; i < 7; i++) status.push((await pedir(RUTA, {})).status);
   assert.deepEqual(status, [422, 422, 422, 422, 502, 502, 502]);
@@ -431,7 +432,9 @@ test('páginas ajenas, códigos distintos y errores no dejan imágenes', async (
 test('la verificación «mantén presionado» de Target pausa las consultas en vez de insistir', async (t) => {
   const { db, pedir } = preparar();
   let llamadas = 0;
-  t.mock.method(globalThis, 'fetch', async () => {
+  t.mock.method(globalThis, 'fetch', async (url: string) => {
+    // #718: el respaldo de UPCitemdb (que aquí también falla) no cuenta como insistir en Target.
+    if (!String(url).includes('target.com')) return new Response('no', { status: 500 });
     llamadas++;
     return new Response('<div id="px-captcha"></div><p>Press &amp; Hold to confirm you are a human</p>', { status: 403 });
   });
@@ -527,4 +530,190 @@ test('un producto ya identificado en el catálogo funciona aunque no esté en la
   assert.equal(db.prepare('select id from productos where id=?').get(id), undefined);
   assert.equal(db.prepare('select precio from productos where id=?').get(PRODUCTO)!.precio, 25000);
   assert.equal(db.prepare('select stock from productos where id=?').get(PRODUCTO)!.stock, 52);
+});
+
+// ---- #718: UPCitemdb como fuente de imagen por UPC ----
+pausarUpcitemdbPor(0);
+const SCENE7 = 'https://target.scene7.com/is/image/Target/GUEST_upcitemdb';
+const AJENA = 'https://m.media-amazon.com/images/I/foto.jpg';
+const hoy = () => new Date().toISOString().slice(0, 10);
+const item = (upc: string, images: string[], extra: Record<string, unknown> = {}) =>
+  ({ ean: upc.padStart(13, '0'), upc, title: 'Estuche UPCitemdb', brand: 'Yoobi', model: TCIN, images, ...extra });
+const respuestaUpcitemdb = (items: unknown[]) => Response.json({ code: 'OK', total: items.length, items });
+
+/** Simula UPCitemdb por UPC pedido; los CDN de imagen responden aparte y Target (u otra cosa) da 403. */
+function simular(t: { mock: { method: (...args: any[]) => any } }, porUpc: (upc: string) => Response) {
+  const consultas: string[] = [];
+  t.mock.method(globalThis, 'fetch', async (url: string) => {
+    const u = String(url);
+    if (u.startsWith('https://api.upcitemdb.com/prod/trial/lookup?upc=')) {
+      consultas.push(new URL(u).searchParams.get('upc')!);
+      return porUpc(consultas.at(-1)!);
+    }
+    if (u.startsWith('https://target.scene7.com/') || u.startsWith('https://m.media-amazon.com/')) return fotoTarget();
+    return new Response('no', { status: 403 });
+  });
+  return { consultas };
+}
+function pieza(db: ReturnType<typeof preparar>['db'], upc: string, extra = '', stock = 2, creado = '2026-10-01') {
+  const id = crypto.randomUUID();
+  db.prepare(`insert into productos (id, upc, nombre, precio, stock, estado_analisis, semana_ingreso, creado_en, actualizado_en)
+    values (?, ?, 'Estuche', 123, ?, 'listo', 'S40', ?, ?)`).run(id, upc, stock, creado, creado);
+  if (extra) db.prepare(`update productos set ${extra} where id = ?`).run(id);
+  return id;
+}
+const fotoDe = (db: ReturnType<typeof preparar>['db'], id: string) => db.prepare('select foto_key from productos where id=?').get(id)!.foto_key;
+
+test('#718 cron: UPC en el manifiesto toma la imagen scene7 con el UPC coincidente y el TCIN de la hoja', async (t) => {
+  const { db, env, ctx, esperar } = preparar();
+  const id = pieza(db, '0' + UPC);
+  const antes = db.prepare('select nombre, precio, stock, estado_analisis from productos where id=?').get(id);
+  const avisos = t.mock.method(console, 'warn', () => {});
+  const { consultas } = simular(t, () => respuestaUpcitemdb([item(UPC, [AJENA, SCENE7], { model: '999' })]));
+  await worker.scheduled!({} as never, env, ctx as never); await esperar();
+  assert.deepEqual(consultas, [UPC]);
+  const ref = db.prepare('select tcin, url, confirmado_por, upc_fuente from imagenes_upc where upc=?').get(UPC)!;
+  assert.deepEqual({ ...ref }, { tcin: TCIN, url: SCENE7, confirmado_por: 'sistema', upc_fuente: UPC });
+  assert.equal(fotoDe(db, id), `fotos/${id}.jpg`);
+  assert.deepEqual(db.prepare('select nombre, precio, stock, estado_analisis from productos where id=?').get(id), antes);
+  assert.match(String(avisos.mock.calls.map((c) => c.arguments[0]).find((m) => /model distinto/.test(String(m)))), /"model":"999"/);
+  // Ya tiene foto: la siguiente corrida no consulta.
+  await worker.scheduled!({} as never, env, ctx as never); await esperar();
+  assert.equal(consultas.length, 1);
+  assert.equal(db.prepare('select valor from config where clave=?').get(`upcitemdb_consultas_${hoy()}`)!.valor, '1');
+});
+
+test('#718 cron: UPC que no coincide o sin imagen no da foto y no se vuelve a consultar', async (t) => {
+  const { db, env, ctx, esperar } = preparar();
+  const distinto = pieza(db, '111111111111'), sinImagen = pieza(db, '222222222222'), vacio = pieza(db, '333333333333');
+  const { consultas } = simular(t, (upc) => upc === '111111111111' ? respuestaUpcitemdb([item('999999999999', [SCENE7])])
+    : upc === '222222222222' ? respuestaUpcitemdb([item(upc, ['http://inseguro.mx/a.jpg'])]) : respuestaUpcitemdb([]));
+  await worker.scheduled!({} as never, env, ctx as never); await esperar();
+  assert.equal(consultas.length, 3);
+  for (const id of [distinto, sinImagen, vacio]) assert.equal(fotoDe(db, id), '');
+  assert.equal(db.prepare("select count(*) n from config where clave like 'upcitemdb_sin_%'").get()!.n, 3);
+  await worker.scheduled!({} as never, env, ctx as never); await esperar();
+  assert.equal(consultas.length, 3);
+  // Pasados 30 días se vuelve a intentar.
+  db.prepare("update config set valor='2000-01-01' where clave like 'upcitemdb_sin_%'").run();
+  await worker.scheduled!({} as never, env, ctx as never); await esperar();
+  assert.equal(consultas.length, 6);
+});
+
+test('#718 cron: fuera del manifiesto da foto a todas las piezas de El Dolarón sin foto y respeta propias, FEP y descartadas', async (t) => {
+  const { db, env, ctx, esperar } = preparar();
+  const UPC2 = '555555555555';
+  const a = pieza(db, UPC2), b = pieza(db, '0' + UPC2, "categoria = 'ropa', nombre = 'Ropa'", 0);
+  const propia = pieza(db, UPC2, "foto_key = 'fotos/propia.jpg'"), fep = pieza(db, UPC2, "propietario = 'fep'");
+  const descartada = pieza(db, UPC2, "estado_analisis = 'descartado'");
+  const { consultas } = simular(t, () => respuestaUpcitemdb([item(UPC2, ['http://x.mx/a.jpg', AJENA, SCENE7])]));
+  await worker.scheduled!({} as never, env, ctx as never); await esperar();
+  assert.deepEqual(consultas, [UPC2]);
+  // Sin manifiesto no pasa por imagenes_upc; la imagen scene7 gana si está, aunque no sea la primera.
+  assert.equal(db.prepare('select count(*) n from imagenes_upc').get()!.n, 0);
+  for (const id of [a, b]) {
+    assert.equal(fotoDe(db, id), `fotos/${id}.jpg`);
+    assert.equal((await env.FOTOS.get(`fotos/${id}.jpg`))!.customMetadata?.imagen_busqueda, SCENE7);
+    assert.equal(db.prepare('select recorte_estado from productos where id=?').get(id)!.recorte_estado, 'original');
+  }
+  assert.equal(db.prepare('select ropa_ia_estado from productos where id=?').get(b)!.ropa_ia_estado, 'descartado');
+  assert.equal(db.prepare('select ropa_ia_estado from productos where id=?').get(a)!.ropa_ia_estado, null);
+  assert.equal(fotoDe(db, propia), 'fotos/propia.jpg');
+  for (const id of [fep, descartada]) { assert.equal(fotoDe(db, id), ''); assert.equal(await env.FOTOS.get(`fotos/${id}.jpg`), null); }
+});
+
+test('#718 cron: sin imagen scene7 no guarda foto, marca el UPC y no vuelve a consultar', async (t) => {
+  const { db, env, ctx, esperar } = preparar();
+  const id = pieza(db, '666666666666');
+  const { consultas } = simular(t, () => respuestaUpcitemdb([item('666666666666', ['http://x.mx/a.jpg', AJENA])]));
+  await worker.scheduled!({} as never, env, ctx as never); await esperar();
+  assert.equal(consultas.length, 1);
+  assert.equal(fotoDe(db, id), '');
+  assert.equal(await env.FOTOS.get(`fotos/${id}.jpg`), null);
+  assert.equal(db.prepare('select count(*) n from config where clave = ?').get('upcitemdb_sin_666666666666')!.n, 1);
+  await worker.scheduled!({} as never, env, ctx as never); await esperar();
+  assert.equal(consultas.length, 1);
+});
+
+test('#718 cron: hasta 5 UPC por corrida, con stock primero; un 429 detiene la corrida sin marcarlos', async (t) => {
+  const { db, env, ctx, esperar } = preparar();
+  const sinStock = pieza(db, '700000000000', '', 0, '2026-10-30');
+  for (let i = 1; i <= 6; i++) pieza(db, String(700000000000 + i), '', 2, `2026-10-0${i}`);
+  const { consultas } = simular(t, () => respuestaUpcitemdb([]));
+  await worker.scheduled!({} as never, env, ctx as never); await esperar();
+  // Las de stock, de la más nueva a la más vieja; la de stock cero (aunque sea la más reciente) espera.
+  assert.deepEqual(consultas, ['700000000006', '700000000005', '700000000004', '700000000003', '700000000002']);
+  assert.equal(fotoDe(db, sinStock), '');
+  db.prepare("delete from config where clave like 'upcitemdb_sin_%'").run();
+  t.mock.restoreAll();
+  const limite = simular(t, () => new Response('{"code":"TOO_FAST"}', { status: 429 }));
+  await worker.scheduled!({} as never, env, ctx as never); await esperar();
+  assert.equal(limite.consultas.length, 1);
+  assert.equal(db.prepare("select count(*) n from config where clave like 'upcitemdb_sin_%'").get()!.n, 0);
+});
+
+test('#718 cron: con el presupuesto del día agotado no consulta; el contador de ayer se borra', async (t) => {
+  const { db, env, ctx, esperar } = preparar();
+  pieza(db, '800000000001');
+  db.prepare("insert into config (clave, valor) values (?, '80'), ('upcitemdb_consultas_2000-01-01', '33')").run(`upcitemdb_consultas_${hoy()}`);
+  const { consultas } = simular(t, () => respuestaUpcitemdb([]));
+  await worker.scheduled!({} as never, env, ctx as never); await esperar();
+  assert.equal(consultas.length, 0);
+  // Con 79 usadas queda exactamente una: la consulta gasta la última y borra los días anteriores.
+  db.prepare('update config set valor = ? where clave = ?').run('79', `upcitemdb_consultas_${hoy()}`);
+  pieza(db, '800000000002');
+  await worker.scheduled!({} as never, env, ctx as never); await esperar();
+  assert.equal(consultas.length, 1);
+  assert.equal(db.prepare('select valor from config where clave=?').get(`upcitemdb_consultas_${hoy()}`)!.valor, '80');
+  assert.equal(db.prepare("select count(*) n from config where clave = 'upcitemdb_consultas_2000-01-01'").get()!.n, 0);
+});
+
+test('#718 escaneo: si Target pide verificación, UPCitemdb da la imagen como referencia de sistema', async (t) => {
+  const { db, pedir, esperar } = preparar();
+  const id = pieza(db, UPC);
+  const { consultas } = simular(t, () => respuestaUpcitemdb([item(UPC, [SCENE7])]));
+  const r = await pedir(RUTA, {});
+  assert.equal(r.status, 200);
+  assert.equal(r.cuerpo.imagen.url, SCENE7);
+  assert.equal(r.cuerpo.imagen.tcin, TCIN);
+  assert.equal(r.cuerpo.imagen.confirmada, true);
+  assert.equal(r.cuerpo.imagen.codigo_verificado, true);
+  await esperar();
+  assert.deepEqual(consultas, [UPC]);
+  assert.equal(db.prepare('select confirmado_por from imagenes_upc').get()!.confirmado_por, 'sistema');
+  assert.equal(fotoDe(db, id), `fotos/${id}.jpg`);
+  // El siguiente escaneo ya no sale a ninguna parte.
+  assert.equal((await pedir(RUTA, {})).cuerpo.imagen.url, `/api/manifiesto/${UPC}/imagen/catalogo`);
+  assert.equal(consultas.length, 1);
+});
+
+test('#718 escaneo: UPCitemdb sin imagen scene7, con otro UPC, con 429 o sin presupuesto deja el aviso de Target', async (t) => {
+  const { db, pedir } = preparar();
+  const casos: Array<() => Response> = [
+    () => respuestaUpcitemdb([item(UPC, [AJENA])]),
+    () => respuestaUpcitemdb([item('999999999999', [SCENE7])]),
+    () => new Response('{}', { status: 429 }),
+  ];
+  for (const caso of casos) {
+    reiniciarPausaTarget();
+    simular(t, caso);
+    const r = await pedir(RUTA, {});
+    assert.equal(r.status, 503);
+    assert.match(r.cuerpo.error, /verificación/);
+    t.mock.restoreAll();
+  }
+  assert.equal(db.prepare('select count(*) n from imagenes_upc').get()!.n, 0);
+  db.prepare("insert or replace into config (clave, valor) values (?, '80')").run(`upcitemdb_consultas_${hoy()}`);
+  reiniciarPausaTarget();
+  const { consultas } = simular(t, () => respuestaUpcitemdb([item(UPC, [SCENE7])]));
+  assert.equal((await pedir(RUTA, {})).status, 503);
+  assert.equal(consultas.length, 0);
+});
+
+test('#718 escaneo: Target sin página (404) también prueba UPCitemdb y sigue pidiendo foto si no hay', async (t) => {
+  const { pedir } = preparar();
+  t.mock.method(globalThis, 'fetch', async (url: string) => String(url).includes('upcitemdb') ? respuestaUpcitemdb([]) : new Response('no', { status: 404 }));
+  const r = await pedir(RUTA, {});
+  assert.equal(r.status, 422);
+  assert.match(r.cuerpo.error, /ya no tiene/);
 });
