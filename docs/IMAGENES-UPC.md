@@ -126,15 +126,15 @@ abre la página en el teléfono, la persona pasa la verificación, guarda la ima
 
 Segunda fuente de imagen por UPC, sin raspar Target: `GET https://api.upcitemdb.com/prod/trial/lookup?upc=<upc>`
 (JSON, plan gratuito sin llave: 100 consultas al día y 429 en ráfagas). Se acepta solo si `items[0].upc` o
-`items[0].ean` coincide con el UPC pedido (ignorando ceros iniciales). Prefiere la primera imagen
-`target.scene7.com`; si no hay, la primera HTTPS válida. Timeout de 10 s, una consulta a la vez.
+`items[0].ean` coincide con el UPC pedido (ignorando ceros iniciales). Toma la primera imagen
+`target.scene7.com`. Solo entran solas las imágenes de target.scene7.com; otras fuentes quedan para «Buscar imagen» en /admin (decisión pendiente en #718). Timeout de 10 s, una consulta a la vez.
 
 - **Cron de 15 min** (después del relleno de referencias): hasta 5 UPC únicos por corrida, con 10 s entre
   consultas, de piezas de El Dolarón `listo` sin foto y con UPC, `stock > 0` primero y luego las más recientes.
   Las que ya tienen referencia confirmada de Target las atiende el relleno de #413.
   - UPC **en el manifiesto** con imagen scene7: `imagenes_upc` con el TCIN de la hoja (`confirmado_por = 'sistema'`)
     y copia por `guardarImagenComoFoto`. Si `model` difiere del TCIN, se usa el de la hoja y queda un aviso en consola.
-  - UPC **fuera del manifiesto** (o imagen de otro dominio): descarga acotada de Fase 2 (3 redirecciones, 6 MiB,
+  - UPC **fuera del manifiesto**: descarga acotada de Fase 2 (3 redirecciones, 6 MiB,
     `image/*`) y `fotos/<id>.jpg` con put condicional en R2 y `UPDATE ... WHERE foto_key = ''` para todas las piezas
     de El Dolarón con ese UPC sin foto. No pasa por `imagenes_upc`.
   - Nunca toca fotos propias, FEP, descartadas, nombre, precio, stock ni `estado_analisis`.

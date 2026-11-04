@@ -622,12 +622,17 @@ test('#718 cron: fuera del manifiesto da foto a todas las piezas de El Dolarón 
   for (const id of [fep, descartada]) { assert.equal(fotoDe(db, id), ''); assert.equal(await env.FOTOS.get(`fotos/${id}.jpg`), null); }
 });
 
-test('#718 cron: sin imagen scene7 toma la primera HTTPS válida', async (t) => {
+test('#718 cron: sin imagen scene7 no guarda foto, marca el UPC y no vuelve a consultar', async (t) => {
   const { db, env, ctx, esperar } = preparar();
   const id = pieza(db, '666666666666');
-  simular(t, () => respuestaUpcitemdb([item('666666666666', ['http://x.mx/a.jpg', AJENA])]));
+  const { consultas } = simular(t, () => respuestaUpcitemdb([item('666666666666', ['http://x.mx/a.jpg', AJENA])]));
   await worker.scheduled!({} as never, env, ctx as never); await esperar();
-  assert.equal((await env.FOTOS.get(`fotos/${id}.jpg`))!.customMetadata?.imagen_busqueda, AJENA);
+  assert.equal(consultas.length, 1);
+  assert.equal(fotoDe(db, id), '');
+  assert.equal(await env.FOTOS.get(`fotos/${id}.jpg`), null);
+  assert.equal(db.prepare('select count(*) n from config where clave = ?').get('upcitemdb_sin_666666666666')!.n, 1);
+  await worker.scheduled!({} as never, env, ctx as never); await esperar();
+  assert.equal(consultas.length, 1);
 });
 
 test('#718 cron: hasta 5 UPC por corrida, con stock primero; un 429 detiene la corrida sin marcarlos', async (t) => {

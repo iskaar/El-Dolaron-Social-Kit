@@ -367,7 +367,8 @@ async function consultarUpcitemdb(upc: string, env: Env): Promise<Hallazgo | nul
     const item = datos.code === 'OK' ? datos.items?.[0] : undefined;
     const coincide = !!item && [item.upc, item.ean].some((c) => typeof c === 'string' && normalizarUpc(c) === upc);
     const imagenes = Array.isArray(item?.images) ? item.images.filter(httpsValida) : [];
-    const imagen = imagenes.find(imagenValida) ?? imagenes[0];
+    // Regla automática conservadora (#718): solo entra sola la imagen scene7; otras fuentes quedan para «Buscar imagen» en /admin.
+    const imagen = imagenes.find(imagenValida);
     if (!coincide || !imagen) { await marcarSinImagen(env, upc); return null; }
     return { imagen, titulo: typeof item!.title === 'string' ? item!.title : '', model: typeof item!.model === 'string' ? item!.model : '' };
   } catch (error) {
@@ -389,7 +390,7 @@ async function respaldoUpcitemdb(upc: string, tcin: string, env: Env, ctx: Execu
 /** Cron: da la foto a todas las piezas de El Dolarón sin foto con ese UPC. */
 async function guardarHallazgo(upc: string, h: Hallazgo, env: Env): Promise<void> {
   const fuente = await env.DB.prepare('select tcin from manifiesto where upc = ?').bind(upc).first<{ tcin: string }>();
-  if (fuente && /^\d{1,12}$/.test(fuente.tcin) && imagenValida(h.imagen)) {
+  if (fuente && /^\d{1,12}$/.test(fuente.tcin)) {
     // En el manifiesto: la referencia conserva el TCIN de la hoja y el join de guardarImagenComoFoto sigue valiendo.
     avisarModelo(upc, fuente.tcin, h);
     await guardarReferencia(env, upc, fuente.tcin, h.imagen, h.titulo || upc, upc);
