@@ -507,10 +507,16 @@ async function corregirBorrador(id: string, cambios: Record<string, unknown>, en
   let precio: number;
   let destino: string;
 
+  // #708: cambiar el grado de una pieza ya capturada sin escribir precio recalcula con la banda del grado nuevo.
+  // Sin precio de lista, o en una banda (su precio es el de la banda), se conserva el precio.
+  const porGrado = cambios.precio === undefined && estadoFisico !== fila.estado_fisico;
+  let precioPedido: number | null = null;
   if (cambios.precio === undefined) {
     const calculado = calcularPrecio({ precioLista, categoria, estadoFisico, config });
-    precio = calculado.precio;
     destino = cambios.destino === undefined ? calculado.destino : String(cambios.destino);
+    precio = porGrado && (precioLista <= 0 || esDestinoBanda(destino)) ? fila.precio : calculado.precio;
+    // #479: quien no autoriza el precio de una pieza con etiqueta guarda el grado y pide el precio nuevo al dueño.
+    if (porGrado && precio !== fila.precio && !autorizarPrecio(usuario, fila)) { precioPedido = precio; precio = fila.precio; }
   } else {
     precio = Math.round(Number(cambios.precio));
     destino = cambios.destino === undefined ? fila.destino : String(cambios.destino);
@@ -595,7 +601,12 @@ async function corregirBorrador(id: string, cambios: Record<string, unknown>, en
     }
     guardada.stock = ajuste.despues;
   }
-  return json({ id, nombre, categoria, marca, talla, upc, precio_lista: precioLista, precio, estado_fisico: estadoFisico, destino, stock: guardada.stock });
+  const salida = { id, nombre, categoria, marca, talla, upc, precio_lista: precioLista, precio, estado_fisico: estadoFisico, destino, stock: guardada.stock };
+  if (precioPedido === null) return json(salida);
+  const pedida = await crearSolicitud(env, id, fila.propietario, por, { id: crypto.randomUUID(), sentido: precioPedido > fila.precio ? 'subir' : 'bajar', sugerido: precioPedido, nota: 'Por cambio de grado' });
+  // 409 = ya había una pendiente de esta pieza: el dueño ya la tiene. Otro error: el grado quedó guardado, el precio no.
+  const error = pedida.status === 409 || pedida.ok ? '' : (await pedida.json().catch(() => ({})) as { error?: string }).error ?? 'No se pudo pedir el cambio de precio.';
+  return json({ ...salida, solicitud_precio: !error, aviso: error || 'Grado guardado. El precio nuevo se pidió al dueño' });
 }
 
 /**
@@ -1139,11 +1150,13 @@ async function revisarCaptura(id: string, request: Request, env: Env, correo: st
   const conflicto = cambios.estado_fisico !== undefined ? await conflictoUpc(env, fila.upc || '', grado, fila.propietario, id) : null;
   if (conflicto) return conflicto;
   // #479: quien no autoriza el precio de una pieza con etiqueta lo pide al dueño; lo demás se guarda como siempre.
-  const pidePrecio = typeof cambios.precio === 'number' && cambios.precio !== fila.precio && !autorizarPrecio(usuario, fila);
-  // Cambiar el grado de una pieza por revisar sin tocar el precio lo recalcula con la banda del grado, como al guardar la tarjeta UPC.
+  // Cambiar el grado sin tocar el precio lo recalcula con la banda del grado, como al guardar la tarjeta UPC; también en una pieza ya
+  // confirmada (#708). Sin precio de lista se conserva el precio.
   const porGrado = cambios.precio === undefined && cambios.estado_fisico !== undefined && cambios.estado_fisico !== fila.estado_fisico
-    && fila.por_revisar && conBanda && fila.precio_lista > 0
+    && conBanda && fila.precio_lista > 0
     ? calcularPrecio({ precioLista: fila.precio_lista, categoria: fila.categoria || 'otros', estadoFisico: grado, config: await leerConfig(env) }).precio : null;
+  const sugerido = typeof cambios.precio === 'number' ? cambios.precio : porGrado;
+  const pidePrecio = sugerido !== null && sugerido !== fila.precio && !autorizarPrecio(usuario, fila);
   const precioNuevo = pidePrecio ? null : cambios.precio ?? porGrado;
   const resultado = await env.DB.prepare(`update productos set precio = coalesce(?, precio),
       estado_fisico = coalesce(?, estado_fisico), nombre = ?, marca = ?, actualizado_en = ?, modificado_por = ?,
@@ -1158,8 +1171,7 @@ async function revisarCaptura(id: string, request: Request, env: Env, correo: st
   const guardada = await env.DB.prepare(`select id, precio, estado_fisico, estado_analisis, stock, talla, codigo, nombre, marca, por_revisar from productos where ${alcance}`)
     .bind(id, correo, desde).first<{ nombre: string; marca: string }>();
   if (guardada && pidePrecio) {
-    const sugerido = cambios.precio as number;
-    const pedida = await crearSolicitud(env, id, fila.propietario, correo, { id: crypto.randomUUID(), sentido: sugerido > fila.precio ? 'subir' : 'bajar', sugerido, nota: 'Desde la miniatura de captura' });
+    const pedida = await crearSolicitud(env, id, fila.propietario, correo, { id: crypto.randomUUID(), sentido: sugerido! > fila.precio ? 'subir' : 'bajar', sugerido, nota: cambios.precio === undefined ? 'Por cambio de grado' : 'Desde la miniatura de captura' });
     // 409 = ya había una pendiente de esta pieza: el dueño ya la tiene. Otro error: lo demás quedó guardado, el precio no.
     const error = pedida.status === 409 || pedida.ok ? '' : (await pedida.json().catch(() => ({})) as { error?: string }).error ?? 'No se pudo pedir el cambio de precio.';
     return json({ ...guardada, prenda: prendaDeNombre(guardada.nombre, guardada.marca), solicitud_precio: !error,

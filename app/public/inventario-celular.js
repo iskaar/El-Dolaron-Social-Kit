@@ -10,6 +10,7 @@ import { esRopa } from './ropa.js';
 import { cambiosTarjeta, capturaImpresa, corregirExistencia, etiquetasPorCorreccion, faltaCalzado, piezaSinRegistrar } from './inventario-capturar.js';
 import { etiqueteraLista } from './etiquetera.js';
 import { esCalzado } from './tallas.js';
+import { avisoReimpresion, pesos } from './ficha.js';
 
 export async function iniciarCelular(ctx,captura) {
   const {$,nodo,boton,mensaje,hoja,api,confirmar}=ctx;
@@ -252,6 +253,9 @@ export async function iniciarCelular(ctx,captura) {
         // #479: con etiqueta el precio no lo cambia el capturista: se pide al dueño y se sigue mostrando el precio actual.
         const guardada=r||cambios.estado_fisico!==actual.estado_fisico?await api(`/api/borradores/${id}/revision`,cambios,'PATCH'):null;
         if(guardada?.aviso)avisoPrecio=guardada.aviso;
+        // #708: cambiar el grado recalcula el precio; con etiqueta pegada, hay que reimprimirla (misma comparación que la ficha).
+        else if(guardada&&guardada.precio!==actual.precio){const re=avisoReimpresion(estadoEnvio({...actual,id}).marca,actual,{...actual,...guardada,destino:'etiqueta'});avisoPrecio=re?`${re} Reimprime la etiqueta.`:`Precio ${pesos(actual.precio)} → ${pesos(guardada.precio)}`;}
+        if(guardada)Object.assign(datos,{precio:guardada.precio});
         Object.assign(datos,{cantidad,talla:tallaActual,estado_fisico:cambios.estado_fisico,...(r?{precio_ropa:guardada?.solicitud_precio||guardada?.aviso?guardada.precio:r.precio_ropa,prenda:r.prenda,marca:r.marca}:{})});
       }
       cerrarHoja();mensaje(avisoPrecio||'Cambios guardados',avisoPrecio?'aviso':'ok');pintar();

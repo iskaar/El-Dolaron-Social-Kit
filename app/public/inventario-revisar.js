@@ -1,7 +1,8 @@
 import { CATEGORIAS } from './categorias.js';
 import { ESTADOS, nombreEstado } from './estados.js';
 import { agruparSesiones } from './sesiones.js';
-import { cuerpoCorreccion, resolverRepetida } from './ficha.js';
+import { cuerpoCorreccion, resolverRepetida, avisoReimpresion } from './ficha.js';
+import { estadoEnvio } from './envio-etiquetas.js';
 import { enlacePreciosML } from './precios-ml.js';
 import { copiarParaMarketplace } from './compartir.js';
 import { cerrarHoja, bloquear } from './inventario-ui.js';
@@ -45,6 +46,8 @@ export function cuerpoRevision(p, campos, dueno, recalcular=false) {
   const e=existenciaNueva(p,campos);if(e?.error)return e;
   const cuerpo={...r.cuerpo,...(e&&p.estado_analisis!=='listo'?{stock:e.valor,stock_esperado:e.esperado}:{}),categoria:campos.categoria||p.categoria,estado_fisico:campos.estado_fisico||p.estado_fisico};
   if(recalcular){if(p.codigo&&!dueno)return {error:'El precio lo cambia el dueño'};delete cuerpo.precio;}
+  // #708: solo cambió el grado y el precio sigue siendo el de la pieza → sin precio, el servidor recalcula con la banda del grado (o lo pide al dueño). Un precio editado se manda.
+  else if(cuerpo.estado_fisico!==p.estado_fisico&&cuerpo.precio===p.precio&&destino==='etiqueta')delete cuerpo.precio;
   return {cuerpo};
 }
 
@@ -202,11 +205,13 @@ export async function iniciar(ctx) {
     if(p.estado_analisis==='listo'){const f=ficha.pieza?.()?.id===p.id?ficha.pieza():p,d=desdePieza(f);campos={...campos,...Object.fromEntries(Object.keys(d).filter(k=>ocultoEnListo(p,k)).map(k=>[k,d[k]]))};}
     const r=cuerpoRevision(p,campos,dueno,recalcular);if(r.error)throw new Error(r.error);
     const e=existenciaNueva(p,campos),audita=e&&p.estado_analisis==='listo';
-    const datos=await api(`/api/borradores/${p.id}`,r.cuerpo,'PATCH');Object.assign(p,datos,{estado_analisis:'listo'});borradores.delete(p.id);
+    const antes={...p},datos=await api(`/api/borradores/${p.id}`,r.cuerpo,'PATCH');Object.assign(p,datos,{estado_analisis:'listo'});borradores.delete(p.id);
     // Una pieza `listo` ya es vendible: su existencia se fija por el ajuste auditado con la que se vio (`esperado`), igual que en la ficha.
     let aviso;if(audita)try{p.stock=(await api(`/api/piezas/${p.id}/existencia`,{id:crypto.randomUUID(),fijar_a:e.valor,esperado:e.esperado,motivo:'correccion'})).despues;}catch(x){aviso=x.status===409?'Datos guardados, pero la existencia cambió desde que abriste la pieza (venta, apartado o ajuste). Revísala y corrígela de nuevo.':x.status===403?'Datos guardados, pero tu cuenta no puede ajustar la existencia.':`Datos guardados, pero la existencia no cambió: ${x.message}`;}
     if(aviso){if(abierta?.id===p.id)await abrir(p);throw new Error(aviso);}
-    mensaje('Cambios guardados','ok');if(abierta?.id===p.id)await abrir(p);return datos;
+    // #708: el precio nuevo de una pieza con etiqueta (o su grado) deja la etiqueta pegada desactualizada: mismo aviso que la ficha.
+    const reimprimir=avisoReimpresion(estadoEnvio(antes).marca,antes,p);
+    mensaje(datos.aviso||(reimprimir?`Cambios guardados. ${reimprimir} Reimprime la etiqueta.`:'Cambios guardados'),datos.aviso||reimprimir?'aviso':'ok');if(abierta?.id===p.id)await abrir(p);return datos;
   }
   async function accion(p,accion,confirmada=false){
     if(!puedeEditar)return;

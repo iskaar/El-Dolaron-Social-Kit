@@ -289,7 +289,7 @@ function ficha(p) {
   }
 
   // La existencia solo viaja si la tocaste: la caja pudo vender desde que se abrio la ficha.
-  let stockMostrado = String(p.stock ?? 1);
+  let stockMostrado = String(p.stock ?? 1), precioMostrado = pesos(p.precio), gradoMostrado = p.estado_fisico;
   const base = () => ({
     nombre: valor('nombre'), marca: valor('marca'), categoria: valor('categoria'), talla: valor('talla'),
     estado_fisico: valor('estado_fisico'), precio_lista: centavos(valor('precio_lista')),
@@ -309,17 +309,20 @@ function ficha(p) {
       }
       return false;
     }
-    nodo.querySelector('[data-campo="precio"]').value = pesos(datos.precio);
+    nodo.querySelector('[data-campo="precio"]').value = precioMostrado = pesos(datos.precio);
+    gradoMostrado = datos.estado_fisico;
     nodo.querySelector('[data-campo="destino"]').value = datos.destino;
     stockMostrado = String(datos.stock);
     nodo.querySelector('[data-campo="stock"]').value = stockMostrado;
-    aviso.textContent = 'Guardado';
-    aviso.style.color = '#2c7a3f';
+    aviso.textContent = datos.aviso || 'Guardado';
+    aviso.style.color = datos.aviso ? '' : '#2c7a3f';
     return true;
   }
 
   // Usado por "Guardar todo": misma sentencia que el boton Guardar de esta ficha.
-  nodo.guardarFicha = () => !puedeEditarInventario ? Promise.resolve(false) : enviar({ ...base(), precio: centavos(valor('precio')), destino: valor('destino') });
+  nodo.guardarFicha = () => !puedeEditarInventario ? Promise.resolve(false) : enviar({ ...base(), destino: valor('destino'),
+    // #708: si solo cambió el grado, sin precio el servidor recalcula con la banda del grado (o lo pide al dueño).
+    ...(valor('estado_fisico') !== gradoMostrado && valor('precio') === precioMostrado && valor('destino') === 'etiqueta' ? {} : { precio: centavos(valor('precio')) }) });
 
   // Compartido por Retomar foto y Pedir foto al celular: la foto ya esta en R2 con la misma llave.
   function fotoReemplazada() {
