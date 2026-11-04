@@ -8,6 +8,17 @@ export function opciones(opciones, valor, cambiar, nombre) {
   return c;
 }
 
+/**
+ * Selector secundario (edad, número de calzado, otra marca): en la página abre la hoja; dentro de una hoja (Revisar antes de
+ * imprimir) se pinta debajo del `ancla`. Abrir otra hoja reemplazaba la revisión y «Usar talla» la cerraba sin guardar (#705).
+ * Devuelve cómo cerrarlo.
+ */
+function abrirSub(ancla,titulo,contenido){
+  if(!ancla.closest?.('dialog')){hoja(titulo,contenido);return cerrarHoja;}
+  const panel=nodo('div',undefined,'sub-hoja');panel.append(nodo('h3',titulo),contenido);
+  ancla.querySelector(':scope > .sub-hoja')?.remove();ancla.append(panel);return ()=>panel.remove();
+}
+
 let numeroRodillo=0, edadSesion=EDADES_NINO.indexOf('4 años');
 
 /** scrollTop/fila elige la opción del centro; poner sincroniza sin emitir cambios. */
@@ -36,14 +47,14 @@ export function talla(ponerValor, inicial = '') {
   const avisar=()=>ponerValor(elegida==='Niño'?`Niño ${EDADES_NINO[edad]}${infantil?' / '+infantil:''}`:elegida in calzado?calzadoValor(elegida,calzado[elegida]):elegida);
   function elegir(t){elegida=t;if(t==='Niño')abrirNino();else if(t in calzado)abrirCalzado(t);else avisar();}
   function abrirNino(){
-    const c=nodo('div',undefined,'nino'),edades=rodillo(EDADES_NINO,edad,i=>{edad=edadSesion=i;avisar();},'Edad');
-    c.append(edades,opciones([['','Sin talla'],...TALLAS_NINO.map(t=>[t,t])],infantil,t=>{infantil=t;avisar();},'Talla de niño'),boton('Usar talla',()=>{avisar();cerrarHoja();},'primario'));
-    hoja('Talla de niño',c);edades.poner(edad);avisar();
+    const c=nodo('div',undefined,'nino'),edades=rodillo(EDADES_NINO,edad,i=>{edad=edadSesion=i;avisar();},'Edad');let cerrar;
+    c.append(edades,opciones([['','Sin talla'],...TALLAS_NINO.map(t=>[t,t])],infantil,t=>{infantil=t;avisar();},'Talla de niño'),boton('Usar talla',()=>{avisar();cerrar();},'primario'));
+    cerrar=abrirSub(raiz,'Talla de niño',c);edades.poner(edad);avisar();
   }
   function abrirCalzado(t){
-    const c=nodo('div',undefined,'nino'),numeros=rodillo(TABLAS_CALZADO[t].map(calzadoRenglon),calzado[t],i=>{calzado[t]=i;avisar();},'Talla de calzado (US)');
-    c.append(numeros,boton('Usar talla',()=>{avisar();cerrarHoja();},'primario'));
-    hoja(t==='Calzado niño'?'Calzado de niño (US · cm MX)':t==='Calzado M'?'Calzado de mujer (US · cm MX)':'Calzado de hombre (US · cm MX)',c);numeros.poner(calzado[t]);avisar();
+    const c=nodo('div',undefined,'nino'),numeros=rodillo(TABLAS_CALZADO[t].map(calzadoRenglon),calzado[t],i=>{calzado[t]=i;avisar();},'Talla de calzado (US)');let cerrar;
+    c.append(numeros,boton('Usar talla',()=>{avisar();cerrar();},'primario'));
+    cerrar=abrirSub(raiz,t==='Calzado niño'?'Calzado de niño (US · cm MX)':t==='Calzado M'?'Calzado de mujer (US · cm MX)':'Calzado de hombre (US · cm MX)',c);numeros.poner(calzado[t]);avisar();
   }
   raiz.append(adultos);return raiz;
 }
@@ -54,12 +65,12 @@ export function ropa({ pc, mensaje, cambiar=()=>{}, recordar=true, inicial={} })
   const notificar=()=>{cambiar({...valores});};
   function elegir(campo,valor){valores[campo]=valor;if(campo==='prenda'&&PRECIO_PRENDA[valor])valores.precio_ropa=PRECIO_PRENDA[valor];if(recordar)try{for(const k of ['prenda','marca','precio_ropa'])localStorage.setItem('captura-'+k,valores[k]??'');}catch{}sincronizar(campo);notificar();}
   const grupos=[];
-  function grupo(campo,titulo,lista){
+  function grupo(campo,titulo,lista,cerrar=cerrarHoja){
     const c=nodo('div'),chips=opciones(lista,valores[campo],v=>elegir(campo,v),titulo);c.append(chips);let input;
     if(campo==='marca'){const l=nodo('label','Otra marca');input=nodo('input');input.maxLength=40;input.value=valores.marca;input.setAttribute('list','marcas-recientes-inventario');
       const dl=nodo('datalist');dl.id='marcas-recientes-inventario';let recientes=[];try{recientes=JSON.parse(localStorage.getItem('captura-marcas-recientes')||'[]');}catch{}
       for(const m of recientes){const o=nodo('option');o.value=m;dl.append(o);}input.onchange=()=>{const m=input.value.trim();elegir('marca',m);if(recordar&&m&&!MARCAS_ROPA.includes(m))try{localStorage.setItem('captura-marcas-recientes',JSON.stringify([m,...recientes.filter(x=>x!==m)].slice(0,10)));}catch{}};l.append(input,dl);c.append(l);}
-    if(['prenda','marca'].includes(campo))c.append(boton('Quitar',()=>{elegir(campo,'');if(!pc())cerrarHoja();}));
+    if(['prenda','marca'].includes(campo))c.append(boton('Quitar',()=>{elegir(campo,'');if(!pc())cerrar();}));
     if(!pc())grupos.length=0;grupos.push([campo,chips,input]);
     return c;
   }
@@ -72,7 +83,7 @@ export function ropa({ pc, mensaje, cambiar=()=>{}, recordar=true, inicial={} })
     const ruedas=nodo('div',undefined,'rodillos-ropa');
     for(const [titulo,rueda] of [['Prenda',prenda],['Precio',precio]]){const c=nodo('div');c.append(nodo('span',titulo),rueda);ruedas.append(c);}raiz.append(ruedas);
     marcas=opciones([['','Sin marca'],...MARCAS_ROPA.slice(0,4).map(m=>[m,m])],valores.marca,v=>elegir('marca',v),'Marca');marcas.classList.add('marcas-ropa');
-    otra=boton('Otra…',()=>hoja('Marca',grupo('marca','Marca',MARCAS_ROPA.map(m=>[m,m]))));marcas.append(otra);raiz.append(marcas);
+    otra=boton('Otra…',()=>{let cerrar;cerrar=abrirSub(raiz,'Marca',grupo('marca','Marca',MARCAS_ROPA.map(m=>[m,m]),()=>cerrar()));});marcas.append(otra);raiz.append(marcas);
   }
   const tallas=talla(v=>{valores.talla=v;tallas.classList.remove('falta');notificar();},valores.talla);tallas.setAttribute('aria-label','Talla');raiz.append(tallas);
   function sincronizar(campo){

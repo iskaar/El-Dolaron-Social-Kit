@@ -9,6 +9,7 @@ import { estadoEnvio, sincronizarMarcas, marcaDeLaBase } from './envio-etiquetas
 import { esRopa } from './ropa.js';
 import { cambiosTarjeta, capturaImpresa, corregirExistencia, etiquetasPorCorreccion, faltaCalzado, piezaSinRegistrar } from './inventario-capturar.js';
 import { etiqueteraLista } from './etiquetera.js';
+import { esCalzado } from './tallas.js';
 
 export async function iniciarCelular(ctx,captura) {
   const {$,nodo,boton,mensaje,hoja,api,confirmar}=ctx;
@@ -201,7 +202,9 @@ export async function iniciarCelular(ctx,captura) {
     let cambios={estado_fisico:actual.estado_fisico},cantidad=actual.stock,tallaActual=actual.talla||'',cambiado=false;
     const actualizar=()=>{cambiado=true;bloquear(guardarBoton,'');};
     let nombre=actual.nombre,tocoPrecio=false,campoPrecio=null;
-    if(revisar&&!esRopa(actual)){
+    // Prenda + marca + precio fijo es de la ropa sin código; ropa o calzado con UPC se revisa como mercancía: nombre, precio y talla (#705).
+    const ropaSinCodigo=esRopa(actual)&&!actual.upc,calzado=revisar&&!ropaSinCodigo&&esCalzado(actual);
+    if(revisar&&!ropaSinCodigo){
       const ln=nodo('label','Nombre / descripción'),cn=nodo('input'),lp=nodo('label','Precio ($)');campoPrecio=nodo('input');
       cn.value=nombre??'';cn.maxLength=120;cn.readOnly=!(ctx.dueno||ctx.identidad.usuario?.editar_inventario===true);cn.oninput=()=>{nombre=cn.value;actualizar();};
       campoPrecio.value=String(actual.precio/100);campoPrecio.inputMode='decimal';campoPrecio.readOnly=!ctx.dueno;campoPrecio.oninput=()=>{tocoPrecio=true;actualizar();};
@@ -209,14 +212,15 @@ export async function iniciarCelular(ctx,captura) {
     }else if(revisar)c.append(nodo('p',actual.nombre??''));
     if(!esRopa(actual))c.append(opciones(ESTADOS,actual.estado_fisico,v=>{cambios.estado_fisico=v;if(campoPrecio&&!tocoPrecio&&actual.precios?.[v])campoPrecio.value=String(actual.precios[v]/100);actualizar();},'Grado'));
     c.append(stepper(cantidad,n=>{cantidad=n;actualizar();},{max:999,nombre:'Piezas'}));
-    const tablero=esRopa(actual)?ropa({pc:()=>false,mensaje,recordar:false,inicial:{talla:tallaActual,prenda:actual.prenda||'',marca:actual.marca||'',precio_ropa:actual.precio},cambiar:()=>actualizar()}):null;
-    if(tablero)c.append(tablero.raiz);else if(tallaActual)c.append(talla(v=>{tallaActual=v;actualizar();},tallaActual));
+    const tablero=ropaSinCodigo?ropa({pc:()=>false,mensaje,recordar:false,inicial:{talla:tallaActual,prenda:actual.prenda||'',marca:actual.marca||'',precio_ropa:actual.precio},cambiar:()=>actualizar()}):null;
+    if(tablero)c.append(tablero.raiz);else if(tallaActual||esRopa(actual))c.append(talla(v=>{tallaActual=v;actualizar();},tallaActual));
     const marca=estadoEnvio({...actual,id}).marca;if(marca)c.append(nodo('p',`La etiqueta pegada dice $${marca.precio/100}`,'aviso'));
     const guardarBoton=boton(revisar?(etiqueteraLista()?'Guardar e imprimir':'Guardar'):'Guardar cambios',async()=>{
       if(!cambiado&&!revisar)return mensaje('Sin cambios','aviso');
       let avisoPrecio='';
       if(!navigator.onLine&&(revisar||!local||cantidad!==actual.stock))return mensaje(revisar?'Sin red: se guarda al volver la señal':'Sin red: se suma al volver la señal','aviso');
       if(tablero&&!tablero.validar())return;
+      if(calzado&&!tallaActual)return mensaje('Falta número de calzado: elige la talla','aviso');
       const r=tablero?.valores();if(r){cambios={...cambios,prenda:r.prenda,marca:r.marca,precio:r.precio_ropa};tallaActual=r.talla;}
       if(revisar){
         // La existencia y la talla primero: si fallan no se confirma nada. Una pieza sin etiqueta previa imprime todo junto (sin etiquetarCorreccion).
