@@ -124,7 +124,7 @@ export async function iniciar(ctx) {
   async function verPieza(s){const p=piezas.find(o=>o.id===s.producto_id);if(p)return abrir(p);await ctx.cambiarModo('buscar');$('consulta').value=s.codigo||s.nombre;$('busqueda').requestSubmit();}
   document.addEventListener('precios',()=>{etiquetasFiltro();textoCuenta();});
   function agregarRepetidas(grupos){
-    for(const g of grupos){const key=`${g.upc}~${g.estado_fisico}`,previo=repetidas.get(key);if(previo){for(const p of g.piezas)if(!previo.piezas.some(o=>o.id===p.id))previo.piezas.push(p);}else repetidas.set(key,g);}
+    for(const g of grupos){const key=`${g.upc}~${g.estado_fisico}~${g.talla??''}`,previo=repetidas.get(key);if(previo){for(const p of g.piezas)if(!previo.piezas.some(o=>o.id===p.id))previo.piezas.push(p);}else repetidas.set(key,g);}
   }
   async function cargarMasRepetidas(){
     if(cargandoRepetidas||!siguienteRepetidas)return;
@@ -136,7 +136,7 @@ export async function iniciar(ctx) {
     visibles=[];guardarTodo.hidden=true;activos.replaceChildren();barra.hidden=true;placeholder.hidden=true;nota.hidden=true;lista.replaceChildren();
     for(const g of repetidas.values()){
       if(filtro.busca&&!normalizar([g.upc,...g.piezas.flatMap(p=>[p.codigo,p.nombre])].join(' ')).includes(normalizar(/^\d+$/.test(filtro.busca)?normalizarUpc(filtro.busca):filtro.busca)))continue;
-      const li=nodo('li',undefined,'grupo-repetidas'),titulo=nodo('h3',`UPC ${g.upc}${g.piezas.every(esRopa)?'':` · ${nombreEstado(g.estado_fisico)}`}`);
+      const li=nodo('li',undefined,'grupo-repetidas'),titulo=nodo('h3',`UPC ${g.upc}${g.talla?` · talla ${g.talla}`:''}${g.piezas.every(esRopa)?'':` · ${nombreEstado(g.estado_fisico)}`}`);
       const label=nodo('label','Conservar'),select=nodo('select');
       for(const p of g.piezas){const o=nodo('option',`${p.codigo||'Sin etiqueta'} · ${p.nombre||'Sin nombre'} · ×${p.stock}`);o.value=p.id;select.append(o);}
       select.id=`conservar-${g.upc}-${g.estado_fisico}`;select.value=g.destino_id;select.onchange=()=>{g.destino_id=select.value;pintar();$(select.id)?.focus();};label.append(select);li.append(titulo,label);

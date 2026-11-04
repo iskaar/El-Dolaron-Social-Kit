@@ -3,7 +3,7 @@ import { propietarioDe, puedeEditarInventario, type Usuario } from './cuentas.ts
 import { MOTIVOS } from './conteo.ts';
 import { conciliarSeguro } from './mercadolibre.ts';
 import { pendienteDe } from './solicitudes-precio.ts';
-import { UPC_VISIBLE, repetidaUpc } from './upc-inventario.ts';
+import { UPC_VISIBLE, claveTalla, repetidaUpc } from './upc-inventario.ts';
 import { normalizarUpc } from '../public/upc.js';
 
 const PAGINA = 25;
@@ -63,21 +63,22 @@ async function piezasRepetidas(env: Env, url: URL, usuario: Usuario | null): Pro
       exists (select 1 from productos r indexed by productos_upc_grado where r.sin_inventario = 0
         and r.estado_analisis <> 'descartado' and r.upc is not null and r.upc <> ''
         and r.propietario = p.propietario and ltrim(r.upc, '0') = ltrim(p.upc, '0')
-        and r.estado_fisico = p.estado_fisico and r.id <> p.id) as repetida
+        and r.estado_fisico = p.estado_fisico and coalesce(r.talla, '') = coalesce(p.talla, '') and r.id <> p.id) as repetida
     from productos p indexed by productos_upc_grado where p.propietario = ? and ${UPC_VISIBLE}
       ${cursor ? "and ltrim(p.upc, '0') >= ? and (ltrim(p.upc, '0'), p.estado_fisico, coalesce(p.codigo, ''), p.rowid) > (?, ?, ?, ?)" : ''}
     order by ltrim(p.upc, '0'), p.estado_fisico, coalesce(p.codigo, ''), p.rowid limit 81`)
     .bind(propietario, ...(cursor ? [cursor[0],...cursor] : [])).all<Pieza & { fila:number; clave:string; etiqueta:string; repetida:number }>();
-  const lote = results.slice(0,80), grupos = new Map<string,{upc:string;estado_fisico:string;piezas:Partial<Pieza>[];destino_id:string}>();
+  const lote = results.slice(0,80), grupos = new Map<string,{upc:string;estado_fisico:string;talla:string;piezas:Partial<Pieza>[];destino_id:string}>();
   for (const { fila: _fila, etiqueta: _etiqueta, clave, repetida, ...p } of lote) {
     if (!repetida || !normalizarUpc(clave)) continue;
-    const key = `${clave}~${p.estado_fisico}`;
-    if (!grupos.has(key)) grupos.set(key,{upc:clave,estado_fisico:p.estado_fisico,piezas:[],destino_id:''});
+    // #709: una talla distinta es otra pieza, nunca una repetida.
+    const key = `${clave}~${p.estado_fisico}~${claveTalla(p.talla)}`;
+    if (!grupos.has(key)) grupos.set(key,{upc:clave,estado_fisico:p.estado_fisico,talla:claveTalla(p.talla),piezas:[],destino_id:''});
     grupos.get(key)!.piezas.push(p);
   }
   // Claves contiguas: a lo sumo 41 grupos y una consulta indexada por destino.
   for (const g of grupos.values()) {
-    const destino = await repetidaUpc(env,g.upc,g.estado_fisico,propietario);
+    const destino = await repetidaUpc(env,g.upc,g.estado_fisico,g.talla,propietario);
     if (destino) {
       g.destino_id = destino.id;
       if (!g.piezas.some(p => p.id === destino.id)) g.piezas.unshift(destino);
@@ -254,9 +255,9 @@ async function juntarPiezas(request: Request, env: Env, id: string, usuario: Usu
       || typeof cuerpo.destino_id !== 'string' || !UUID.test(cuerpo.destino_id) || id === cuerpo.destino_id)
     return json({ error:'Identificador inválido.' }, 400);
   const propietario = propietarioDe(usuario), destinoId = cuerpo.destino_id;
-  const { results: piezas } = await env.DB.prepare(`select id, codigo, stock, upc, estado_fisico, estado_analisis
+  const { results: piezas } = await env.DB.prepare(`select id, codigo, stock, upc, estado_fisico, estado_analisis, talla
     from productos where id in (?, ?) and propietario = ? and sin_inventario = 0`)
-    .bind(id, destinoId, propietario).all<{ id:string; codigo:string | null; stock:number; upc:string | null; estado_fisico:string; estado_analisis:string }>();
+    .bind(id, destinoId, propietario).all<{ id:string; codigo:string | null; stock:number; upc:string | null; estado_fisico:string; estado_analisis:string; talla:string | null }>();
   if (piezas.length !== 2) return json({ error:'Pieza no encontrada.' }, 404);
   const previo = () => env.DB.prepare(`select producto_id, cantidad, antes, despues, ajustado_por from conteo_ajustes where id = ?`)
     .bind(cuerpo.id).first<{ producto_id:string; cantidad:number; antes:number; despues:number; ajustado_por:string }>();
@@ -274,17 +275,18 @@ async function juntarPiezas(request: Request, env: Env, id: string, usuario: Usu
   const origen = piezas.find(p => p.id === id)!, destino = piezas.find(p => p.id === destinoId)!;
   if (!origen.codigo || !destino.codigo) return json({ error:'Sin dos etiquetas, usa la fusión de borradores.' }, 409);
   if (origen.estado_fisico !== destino.estado_fisico) return json({ error:'Sólo puedes juntar piezas del mismo grado.' }, 409);
+  if (claveTalla(origen.talla) !== claveTalla(destino.talla)) return json({ error:'Sólo puedes juntar piezas de la misma talla.' }, 409);
   if (origen.stock + destino.stock > 999) return json({ error:'La suma supera 999 piezas.' }, 409);
   const ahora = new Date().toISOString();
   const efectos = await env.DB.batch([
     env.DB.prepare(`update productos set stock = 0, upc = null, modificado_por = ?, actualizado_en = ? where id = ?
       and propietario = ? and sin_inventario = 0 and estado_analisis <> 'descartado'
-      and stock = ? and upc is ? and codigo = ? and estado_fisico = ?
+      and stock = ? and upc is ? and codigo = ? and estado_fisico = ? and coalesce(talla, '') = ?
       and exists (select 1 from productos where id = ? and propietario = ? and sin_inventario = 0
-        and estado_analisis <> 'descartado' and codigo = ? and estado_fisico = ? and upc is ? and stock + ? <= 999)
+        and estado_analisis <> 'descartado' and codigo = ? and estado_fisico = ? and coalesce(talla, '') = ? and upc is ? and stock + ? <= 999)
       and not exists (select 1 from conteo_ajustes where id in (?, ?))`)
-      .bind(usuario!.correo, ahora, id, propietario, origen.stock, origen.upc, origen.codigo, origen.estado_fisico,
-        destinoId, propietario, destino.codigo, origen.estado_fisico, destino.upc, origen.stock, cuerpo.id, `${cuerpo.id}:destino`),
+      .bind(usuario!.correo, ahora, id, propietario, origen.stock, origen.upc, origen.codigo, origen.estado_fisico, claveTalla(origen.talla),
+        destinoId, propietario, destino.codigo, origen.estado_fisico, claveTalla(origen.talla), destino.upc, origen.stock, cuerpo.id, `${cuerpo.id}:destino`),
     env.DB.prepare(`insert into conteo_ajustes
       (id, producto_id, codigo, nombre, motivo, cantidad, antes, despues, ajustado_por, ajustado_en)
       select ?, id, codigo, nombre, 'correccion', ?, ?, 0, ?, ? from productos where id = ? and changes() = 1`)

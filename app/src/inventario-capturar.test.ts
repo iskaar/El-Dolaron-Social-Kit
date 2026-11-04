@@ -470,7 +470,7 @@ test('#552: POST /api/borradores/upc guarda la talla, la etiqueta la imprime y u
   assert.equal(t.db.prepare('select talla from productos where id=?').get(sin.id)!.talla, null);
 });
 
-test('#552: una talla que no existe es 400 y no deja fila; una talla nueva no cambia una pieza ya registrada', async t0 => {
+test('#552/#709: una talla que no existe es 400 y no deja fila; otra talla es otra pieza y la misma talla suma sin cambiar la talla', async t0 => {
   const t = calzado(); t0.after(async () => { await t.esperar(); t.db.close(); });
   for (const mala of ['99', 'Niño 9', 'm', 27, ['27']]) {
     assert.equal((await t.pedir('/api/borradores/upc', altaCalzado({ talla: mala }))).status, 400, JSON.stringify(mala));
@@ -478,8 +478,13 @@ test('#552: una talla que no existe es 400 y no deja fila; una talla nueva no ca
   assert.equal(t.db.prepare('select count(*) n from productos where upc is not null').get()!.n, 0);
   const primera = altaCalzado({ talla: '27' });
   await t.pedir('/api/borradores/upc', primera);
-  const suma = await t.pedir('/api/borradores/upc', altaCalzado({ talla: '28' }));
+  const otra = await t.pedir('/api/borradores/upc', altaCalzado({ talla: '28' }));
+  assert.equal(otra.status, 201);
+  assert.notEqual(otra.cuerpo.id, primera.id, '#709: la talla 28 es otra pieza');
+  assert.equal(t.db.prepare('select stock from productos where id=?').get(primera.id)!.stock, 1);
+  const suma = await t.pedir('/api/borradores/upc', altaCalzado({ talla: '27' }));
   assert.equal(suma.status, 201);
+  assert.equal(suma.cuerpo.id, primera.id);
   assert.equal(t.db.prepare('select talla from productos where id=?').get(primera.id)!.talla, '27', 'sumar no cambia la talla');
   assert.equal(t.db.prepare('select stock from productos where id=?').get(primera.id)!.stock, 2);
 });
