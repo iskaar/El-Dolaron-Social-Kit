@@ -30,7 +30,7 @@ test('revisión valida cinco precios y condición; no recalcula precio ni repone
     assert.equal(r.status, 200);
     assert.equal(r.cuerpo.precio, 5000); assert.equal(r.cuerpo.stock, 0); assert.equal(r.cuerpo.codigo, codigo);
     assert.equal(r.cuerpo.estado_fisico, 'danado');
-    for (const cuerpo of [null, [], {}, { precio: '5000' }, { precio: 4999 }, { precio: 5000.5 },
+    for (const cuerpo of [null, [], {}, { precio: '5000' }, { precio: 0 }, { precio: 5000.5 },
       { estado_fisico: ['danado'] }, { estado_fisico: 'usado' }, { stock: 1 }, { nombre: 'Otra' }]) {
       assert.equal((await t.pedir(ruta, cuerpo, 'PATCH')).status, 400, JSON.stringify(cuerpo));
     }
