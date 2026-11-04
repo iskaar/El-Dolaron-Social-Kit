@@ -1258,7 +1258,10 @@ test('venta en ML de la última pieza: stock 0 y publicación vendida; si D1 ya 
     await avisar(t, '/orders/9101');
     await t.esperar();
     assert.equal(stockDe(t, id), 1);
-    // ...y ya se reactivo en ML (la conciliacion sigue al aviso).
+    // Con 1 existencia y sin confirmacion en piso no se reactiva sola (#727); confirmada, se reactiva con el boton.
+    assert.equal(estadoDe(t, id), 'pausada');
+    confirmarEnPiso(t, id);
+    assert.equal((await t.pedir(`/api/ml/reactivar/${id}`, {})).status, 200);
     assert.equal(estadoDe(t, id), 'activa');
     assert.equal(t.sim.items.get(itemId)!.status, 'active');
   });
@@ -1344,7 +1347,70 @@ test('venta en tienda: si se agota una pieza publicada, se pausa en ML', async (
     // Se cancela la venta: la pieza regresa y el cron la reactiva.
     const ticket = t.db.prepare('select venta_id from venta_lineas where producto_id = ?').get(id) as { venta_id: string };
     assert.equal((await t.pedir(`/api/ventas/${ticket.venta_id}/cancelar`, { motivo: 'prueba' })).status, 200);
+    confirmarEnPiso(t, id);   // #727: con 1 existencia el cron solo la reactiva si alguien la confirmo en piso
     await worker.scheduled!({ cron: '*/15 * * * *' } as never, t.env, t.ctx as never);
+    await t.esperar();
+    assert.equal(estadoDe(t, id), 'activa');
+    assert.deepEqual(t.sim.items.get(itemId), { id: itemId, status: 'active', available_quantity: 1 });
+  });
+});
+
+const TEXTO_PISO = (n: number) => `Tiene ${n} existencias: confirma la pieza en piso escaneando su etiqueta en Inventario antes de reactivarla.`;
+
+test('conciliar (#727): la orden cancelada devuelve 1 existencia sin confirmar: queda pausada con el aviso; confirmada, se reactiva con el botón', async () => {
+  await conML(async (t) => {
+    const { id, itemId } = await publicarPieza(t, pieza(t, { stock: 1 }));
+    t.sim.ordenes.set('9501', orden(9501, 'paid', [[itemId, 1]]));
+    await avisar(t, '/orders/9501');
+    await t.esperar();
+    assert.equal(estadoDe(t, id), 'vendida');
+    t.sim.ordenes.set('9501', orden(9501, 'cancelled', [[itemId, 1]]));
+    await avisar(t, '/orders/9501');
+    await t.esperar();
+    assert.equal(stockDe(t, id), 1);
+    assert.deepEqual({ ...(t.db.prepare('select estado, ultimo_error from ml_publicaciones where producto_id = ?').get(id) as object) },
+      { estado: 'pausada', ultimo_error: TEXTO_PISO(1) });
+    assert.equal(t.sim.items.get(itemId)!.status, 'paused');
+    // El cron siguiente no la reactiva ni borra el aviso.
+    await worker.scheduled!({} as never, t.env, t.ctx as never);
+    await t.esperar();
+    assert.equal(estadoDe(t, id), 'pausada');
+    assert.equal(t.sim.items.get(itemId)!.status, 'paused');
+    // Confirmada en piso: el boton Reactivar la reactiva y limpia el aviso.
+    confirmarEnPiso(t, id);
+    assert.equal((await t.pedir(`/api/ml/reactivar/${id}`, {})).status, 200);
+    assert.deepEqual({ ...(t.db.prepare('select estado, ultimo_error from ml_publicaciones where producto_id = ?').get(id) as object) },
+      { estado: 'activa', ultimo_error: '' });
+    assert.deepEqual(t.sim.items.get(itemId), { id: itemId, status: 'active', available_quantity: 1 });
+  });
+});
+
+test('conciliar (#727): si ML la dejaba activa, sin confirmar con 2 existencias se pausa en ML; con 3 se reactiva sin confirmar', async () => {
+  await conML(async (t) => {
+    const a = await publicarPieza(t, pieza(t, { stock: 1 }));
+    const b = await publicarPieza(t, pieza(t, { stock: 1 }));
+    for (const x of [a, b]) t.db.prepare(`update ml_publicaciones set estado = 'pausada_por_venta' where producto_id = ?`).run(x.id);   // ML sigue activa (aviso perdido)
+    t.db.prepare('update productos set stock = 2 where id = ?').run(a.id);
+    t.db.prepare('update productos set stock = 3 where id = ?').run(b.id);
+    await worker.scheduled!({} as never, t.env, t.ctx as never);
+    await t.esperar();
+    assert.equal(estadoDe(t, a.id), 'pausada');
+    assert.equal(t.sim.items.get(a.itemId)!.status, 'paused');
+    assert.equal((t.db.prepare('select ultimo_error as e from ml_publicaciones where producto_id = ?').get(a.id) as { e: string }).e, TEXTO_PISO(2));
+    assert.equal(estadoDe(t, b.id), 'activa');
+    assert.deepEqual(t.sim.items.get(b.itemId), { id: b.itemId, status: 'active', available_quantity: 3 });
+  });
+});
+
+test('conciliar (#727): con 1 existencia y confirmación vigente al correr el cron, se reactiva como siempre', async () => {
+  await conML(async (t) => {
+    const { id, itemId } = await publicarPieza(t, pieza(t, { stock: 1 }));
+    t.db.prepare(`update ml_publicaciones set estado = 'pausada_por_venta' where producto_id = ?`).run(id);
+    t.sim.items.get(itemId)!.status = 'paused';
+    t.db.prepare('update productos set stock = 2 where id = ?').run(id);
+    t.db.prepare('update productos set stock = 1 where id = ?').run(id);
+    confirmarEnPiso(t, id);   // despues del cambio de stock: el trigger la habria borrado antes
+    await worker.scheduled!({} as never, t.env, t.ctx as never);
     await t.esperar();
     assert.equal(estadoDe(t, id), 'activa');
     assert.deepEqual(t.sim.items.get(itemId), { id: itemId, status: 'active', available_quantity: 1 });
@@ -1382,6 +1448,7 @@ test('cron: pausa lo agotado, iguala cantidades, respeta pausas del dueño y rec
 
     // Vuelve a haber existencias de la agotada: se reactiva.
     t.db.prepare('update productos set stock = 1 where id = ?').run(a.id);
+    confirmarEnPiso(t, a.id);   // #727: con 1 existencia hace falta la confirmacion en piso
     await worker.scheduled!({} as never, t.env, t.ctx as never);
     await t.esperar();
     assert.equal(estadoDe(t, a.id), 'activa');

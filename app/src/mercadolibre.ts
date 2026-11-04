@@ -1244,9 +1244,9 @@ export async function conciliarPublicaciones(env: Env, filtro: Filtro = {}): Pro
   if (filtro.itemIds) { condiciones.push(`m.ml_item_id in (${unidos(filtro.itemIds)})`); valores.push(...filtro.itemIds); }
   if ((filtro.productoIds && !filtro.productoIds.length) || (filtro.itemIds && !filtro.itemIds.length)) return;
   const { results: filas } = await env.DB.prepare(
-    `select m.producto_id, m.ml_item_id, m.estado, p.stock
+    `select m.producto_id, m.ml_item_id, m.estado, p.stock, p.existencia_confirmada_en
      from ml_publicaciones m join productos p on p.id = m.producto_id where ${condiciones.join(' and ')}`,
-  ).bind(...valores).all<{ producto_id: string; ml_item_id: string; estado: string; stock: number }>();
+  ).bind(...valores).all<{ producto_id: string; ml_item_id: string; estado: string; stock: number; existencia_confirmada_en: string | null }>();
   if (filas.length === 0) return;   // nada publicado: ni siquiera se pide token
 
   const poner = (productoId: string, estado: string, error = '') => env.DB.prepare(
@@ -1265,6 +1265,7 @@ export async function conciliarPublicaciones(env: Env, filtro: Filtro = {}): Pro
       const ml = enML.get(f.ml_item_id);
       if (!ml) continue;
       const poner_ml = (cambios: Record<string, unknown>) => mlFetch(env, `/items/${f.ml_item_id}`, { method: 'PUT', json: cambios });
+      const piso = faltaPiso(f.stock, f.existencia_confirmada_en, 'reactivarla');
       try {
         if (ml.status === 'closed') {
           if (f.estado !== 'vendida') await poner(f.producto_id, 'cerrada');
@@ -1273,6 +1274,10 @@ export async function conciliarPublicaciones(env: Env, filtro: Filtro = {}): Pro
             if (ml.status === 'active') await poner_ml({ status: 'paused' });
             await poner(f.producto_id, 'pausada_por_venta');
           }
+        } else if ((f.estado === 'pausada_por_venta' || f.estado === 'vendida') && piso) {
+          // #727: con menos de 3 y sin confirmacion en piso no se reactiva sola (p. ej. al cancelarse la orden); queda pausada y avisa.
+          if (ml.status === 'active') await poner_ml({ status: 'paused' });
+          await poner(f.producto_id, 'pausada', piso);
         } else if (f.estado === 'pausada_por_venta' || f.estado === 'vendida') {
           await poner_ml({ status: 'active', available_quantity: f.stock });
           await poner(f.producto_id, 'activa');
