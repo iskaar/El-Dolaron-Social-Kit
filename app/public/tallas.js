@@ -1,6 +1,6 @@
 /**
  * Tallas de ropa (Issue #218): una sola lista para la captura, el admin y el servidor.
- * Se guarda como texto: "M" de adulto, o "Niño 6 años / S" (la talla de niño es opcional); calzado "25.5" o "Niño 15".
+ * Se guarda como texto: "M" de adulto, o "Niño 6 años / S" (la talla de niño es opcional); calzado "25.5", "Niño 15" o "Niño 15-16" (pantufla por rango).
  * El separador y los meses van en ASCII: la etiqueta TSPL no imprime acentos ni puntos medios.
  */
 export const TALLAS_ADULTO = ['XXS', 'XS', 'S', 'M', 'L', 'XL', 'XXL', '3XL'];
@@ -14,7 +14,6 @@ export const TALLAS_NINO = ['XS', 'S', 'M', 'L', 'XL'];
  */
 const medios = (desde, hasta) => Array.from({ length: (hasta - desde) * 2 + 1 }, (_, i) => String(desde + i / 2));
 export const TALLAS_CALZADO_ADULTO = medios(22, 32);
-export const TALLAS_CALZADO_NINO = medios(10, 25);
 
 /**
  * Conversion US -> MX (cm) como pares explicitos [us, cm]: es una calibracion, no una formula.
@@ -22,7 +21,10 @@ export const TALLAS_CALZADO_NINO = medios(10, 25);
  * Hombre cm = US + 18; mujer cm = US + 17; nino aproximado (C = toddler/little kid, Y = youth).
  * Nino: terna [us, cm, eu]; la EU es la estandar tipo Nike (#552), tambien calibracion editable: la caja puede traer
  * cualquiera de las dos y buscarCalzado las encuentra por US, por EU o por cm.
+ * Pantuflas de nino (#703) vienen por rango ("Girls' Slipper 9-10"): renglon '9-10C' que guarda el rango en cm ('15-16'),
+ * EU = extremos de la tabla; va despues del medio numero inferior (9C, 9.5C, 9-10C, 10C).
  */
+const ordenCm = (cm) => cm.includes('-') ? parseFloat(cm) + 0.75 : Number(cm);   // '15-16' entre '15.5' y '16'
 export const CALZADO_US_HOMBRE = [
   ['6', '24'], ['6.5', '24.5'], ['7', '25'], ['7.5', '25.5'], ['8', '26'], ['8.5', '26.5'], ['9', '27'], ['9.5', '27.5'],
   ['10', '28'], ['10.5', '28.5'], ['11', '29'], ['11.5', '29.5'], ['12', '30'], ['12.5', '30.5'], ['13', '31'], ['14', '32'],
@@ -32,11 +34,14 @@ export const CALZADO_US_MUJER = [
   ['9', '26'], ['9.5', '26.5'], ['10', '27'], ['10.5', '27.5'], ['11', '28'], ['12', '29'],
 ];
 export const CALZADO_US_NINO = [
-  ['4C', '10', '19.5'], ['4.5C', '10.5', '20'], ['5C', '11', '21'], ['5.5C', '11.5', '21.5'], ['6C', '12', '22'], ['6.5C', '12.5', '22.5'], ['7C', '13', '23.5'], ['7.5C', '13.5', '24'],
-  ['8C', '14', '25'], ['8.5C', '14.5', '25.5'], ['9C', '15', '26'], ['9.5C', '15.5', '26.5'], ['10C', '16', '27'], ['10.5C', '16.5', '27.5'], ['11C', '17', '28'], ['11.5C', '17.5', '28.5'],
-  ['12C', '18', '29.5'], ['12.5C', '18.5', '30'], ['13C', '19', '31'], ['13.5C', '19.5', '31.5'], ['1Y', '20', '32'], ['1.5Y', '20.5', '33'], ['2Y', '21', '33.5'], ['2.5Y', '21.5', '34'],
-  ['3Y', '22', '35'], ['3.5Y', '22.5', '35.5'], ['4Y', '23', '36'], ['4.5Y', '23.5', '36.5'], ['5Y', '24', '37.5'], ['5.5Y', '24.5', '38'], ['6Y', '24.5', '38.5'], ['7Y', '25', '40'],
+  ['4C', '10', '19.5'], ['4.5C', '10.5', '20'], ['5C', '11', '21'], ['5.5C', '11.5', '21.5'], ['5-6C', '11-12', '21-22'], ['6C', '12', '22'], ['6.5C', '12.5', '22.5'], ['7C', '13', '23.5'], ['7.5C', '13.5', '24'],
+  ['7-8C', '13-14', '23.5-25'], ['8C', '14', '25'], ['8.5C', '14.5', '25.5'], ['9C', '15', '26'], ['9.5C', '15.5', '26.5'], ['9-10C', '15-16', '26-27'], ['10C', '16', '27'], ['10.5C', '16.5', '27.5'], ['11C', '17', '28'], ['11.5C', '17.5', '28.5'],
+  ['11-12C', '17-18', '28-29.5'], ['12C', '18', '29.5'], ['12.5C', '18.5', '30'], ['13C', '19', '31'], ['13.5C', '19.5', '31.5'], ['13C-1Y', '19-20', '31-32'], ['1Y', '20', '32'], ['1.5Y', '20.5', '33'], ['2Y', '21', '33.5'], ['2.5Y', '21.5', '34'],
+  ['2-3Y', '21-22', '33.5-35'], ['3Y', '22', '35'], ['3.5Y', '22.5', '35.5'], ['4Y', '23', '36'], ['4.5Y', '23.5', '36.5'], ['4-5Y', '23-24', '36-37.5'], ['5Y', '24', '37.5'], ['5.5Y', '24.5', '38'], ['6Y', '24.5', '38.5'], ['7Y', '25', '40'],
 ];
+/** cm validos de nino: medios numeros y los rangos de pantufla de la tabla, en el orden del rodillo (catalogo ordena por TALLAS). */
+export const TALLAS_CALZADO_NINO = [...new Set([...medios(10, 25), ...CALZADO_US_NINO.map(([, cm]) => cm)])]
+  .sort((a, b) => ordenCm(a) - ordenCm(b));
 
 /** Chips de calzado del capturador y del celular, con su tabla y su posicion inicial (talla US). */
 export const TABLAS_CALZADO = { 'Calzado H': CALZADO_US_HOMBRE, 'Calzado M': CALZADO_US_MUJER, 'Calzado niño': CALZADO_US_NINO };

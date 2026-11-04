@@ -6,7 +6,7 @@ import assert from 'node:assert/strict';
 import worker from './worker.ts';
 import { tienda } from './prueba-d1.ts';
 import { tallaValida, tallaUs, TABLAS_CALZADO, CALZADO_US_HOMBRE, CALZADO_US_MUJER, CALZADO_US_NINO, TALLAS_CALZADO_NINO,
-  buscarCalzado, tipoCalzadoDeNombre, esCalzado, calzadoRenglon } from '../public/tallas.js';
+  buscarCalzado, tipoCalzadoDeNombre, esCalzado, calzadoRenglon, calzadoGuardado } from '../public/tallas.js';
 import { tsplEtiqueta } from '../public/etiquetera.js';
 
 const HOST = 'dolarones.prueba';
@@ -157,11 +157,23 @@ test('los desplegables de ficha, Revisar y admin rotulan cada cm de calzado con 
 test('calzado de nino (#552): cada terna [us, cm, eu] guarda un cm valido y la EU no se repite', () => {
   for (const [us, cm, eu] of CALZADO_US_NINO) {
     assert.ok(TALLAS_CALZADO_NINO.includes(cm), `${us} -> ${cm}`);
-    assert.ok(Number(eu) >= 19 && Number(eu) <= 40, `${us} EU ${eu}`);
+    for (const n of eu.split('-')) assert.ok(Number(n) >= 19 && Number(n) <= 40, `${us} EU ${eu}`);   // rango de pantufla: cada extremo (#703)
   }
   assert.equal(new Set(CALZADO_US_NINO.map(([, , eu]) => eu)).size, CALZADO_US_NINO.length);
   assert.equal(calzadoRenglon(['11C', '17', '28']), 'US 11C · EU 28 · 17');
   assert.equal(calzadoRenglon(['9', '27']), 'US 9 · 27');
+});
+
+test('pantufla de nino por rango (#703): «Girls Slipper 9-10» se guarda Niño 15-16 y queda entre 15.5 y 16', () => {
+  const [fila] = buscarCalzado('9-10');
+  assert.deepEqual([fila.tipo, fila.rotulo, fila.valor], ['Calzado niño', 'US 9-10C · EU 26-27 · 15-16', 'Niño 15-16']);
+  assert.ok(tallaValida('Niño 15-16'));
+  assert.equal(tallaUs('Niño 15-16'), 'US 9-10C');
+  assert.deepEqual(TALLAS_CALZADO_NINO.slice(TALLAS_CALZADO_NINO.indexOf('15'), TALLAS_CALZADO_NINO.indexOf('16') + 1), ['15', '15.5', '15-16', '16']);
+  assert.deepEqual(calzadoGuardado('Niño 15-16'), { tipo: 'Calzado niño', indice: CALZADO_US_NINO.findIndex(([us]) => us === '9-10C') });
+  assert.equal(tipoCalzadoDeNombre("Squishmallows Girls' Slipper"), 'Calzado niño');
+  assert.match(tsplEtiqueta({ nombre: 'Pantuflas', precio: 30000, precio_lista: 0, codigo: 'ED-000779', semana_ingreso: 'S45', talla: 'Niño 15-16' }),
+    /ED-000779 \/ Nino 15-16 - S45/);
 });
 
 test('buscarCalzado: el numero de la caja por US, C/Y, EU y cm; exactos antes que prefijos (#552)', () => {
