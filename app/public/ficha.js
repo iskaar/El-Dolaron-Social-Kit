@@ -2,7 +2,7 @@
 // talla y precios. Es un módulo para que /pieza y la pantalla única de #446 usen lo mismo.
 // Todo dato de la pieza entra con textContent/value, nunca como HTML.
 import { CATEGORIAS } from './categorias.js';
-import { nombreEstado } from './estados.js';
+import { ESTADOS, nombreEstado } from './estados.js';
 import { TALLAS, tallaUs } from './tallas.js';
 import { etiquetaVigente, precioImpreso } from './etiquetera.js';
 import { estadoEnvio } from './envio-etiquetas.js';
@@ -48,6 +48,9 @@ export const aCentavos = (texto) => {
  * Cuerpo del PATCH /api/borradores/:id. Sin `precio` el servidor recalcula precio y destino desde la
  * configuración (pisaría un precio puesto a mano) y con `stock` pisaría una venta intercalada: por eso
  * el cuerpo SIEMPRE lleva precio y destino y NUNCA stock. Quien no ve el campo de precio manda el actual.
+ * Excepción (#708/#715): si solo cambió el grado (`campos.estado_fisico`) y el precio sigue siendo el de la pieza,
+ * con etiqueta individual no se manda `precio` para que el servidor recalcule con la banda del grado nuevo
+ * (o lo pida al dueño). Un precio editado se manda; una banda conserva el suyo en el servidor. Revisar usa lo mismo.
  */
 export function cuerpoCorreccion(pieza, campos, puedePrecio) {
   const nombre = String(campos.nombre ?? '').trim();
@@ -61,14 +64,22 @@ export function cuerpoCorreccion(pieza, campos, puedePrecio) {
   }
   const upc = campos.upc === undefined ? undefined : String(campos.upc).trim();
   if (upc && !normalizarUpc(upc)) return { error:'Código de barras inválido.' };
-  return { cuerpo:{ nombre, marca:String(campos.marca ?? '').trim(), talla:String(campos.talla ?? '').trim(),
-    precio_lista:lista, precio, destino:pieza.destino, ...(upc !== undefined && upc !== (pieza.upc ?? '') ? {upc} : {}) } };
+  const cuerpo = { nombre, marca:String(campos.marca ?? '').trim(), talla:String(campos.talla ?? '').trim(),
+    precio_lista:lista, precio, destino:pieza.destino, ...(upc !== undefined && upc !== (pieza.upc ?? '') ? {upc} : {}) };
+  if (campos.estado_fisico && campos.estado_fisico !== (pieza.estado_fisico ?? 'nuevo')) {
+    cuerpo.estado_fisico = campos.estado_fisico;
+    if (precio === pieza.precio && pieza.destino === 'etiqueta') delete cuerpo.precio;
+  }
+  return { cuerpo };
 }
 
 /** Qué cambia, en líneas para confirmar. `marca` es lo que este navegador imprimió (etiquetera.impresas). */
 export function resumenCorreccion(pieza, cuerpo, marca) {
   const lineas = [];
-  if (cuerpo.precio !== pieza.precio) {
+  if (cuerpo.estado_fisico && cuerpo.estado_fisico !== pieza.estado_fisico)
+    lineas.push(`Grado ${nombreEstado(pieza.estado_fisico)} → ${nombreEstado(cuerpo.estado_fisico)}.`
+      + (cuerpo.precio === undefined ? ' El precio se recalcula con la banda del grado nuevo; si no te toca cambiarlo, se pide al dueño.' : ''));
+  if (cuerpo.precio !== undefined && cuerpo.precio !== pieza.precio) {
     const pegado = marca?.precio ?? pieza.precio;
     lineas.push(`Precio ${pesos(pieza.precio)} → ${pesos(cuerpo.precio)}.`
       + (pieza.codigo ? ` La etiqueta pegada dice ${pesos(pegado)}: la caja cobrará ${pesos(cuerpo.precio)} desde ahora.`
@@ -141,6 +152,8 @@ export function crearFicha({ mensaje, alAbrir = () => {}, confirmar = (texto) =>
   async function cerrarCamaraUpc() { ++camaraTurno; await apagarUpc?.(); apagarUpc = null; if ($('e-upc-visor')) $('e-upc-visor').hidden = true; }
   // Calzado: el valor es el cm que se guarda y el rotulo, la talla US de la caja (#546).
   for (const t of TALLAS) { const o = document.createElement('option'); o.value = t; if (tallaUs(t)) o.label = tallaUs(t); $('tallas').append(o); }
+
+  for (const [v, t] of ESTADOS) { const o = document.createElement('option'); o.value = v; o.textContent = t; $('e-estado')?.append(o); }
 
   function pintar() {
     $('ficha').hidden = !pieza;
@@ -264,6 +277,7 @@ export function crearFicha({ mensaje, alAbrir = () => {}, confirmar = (texto) =>
     $('e-precio').value = (pieza.precio / 100).toFixed(2); $('e-lista').value = pieza.precio_lista > 0 ? (pieza.precio_lista / 100).toFixed(2) : '';
     $('nota-precio').textContent = pieza.destino !== 'etiqueta' ? 'Pieza de banda: el precio se cambia en /admin.'
       : puedePrecio ? '' : 'El precio lo cambia solo el dueño.';
+    if ($('campo-estado')) { $('campo-estado').hidden = esRopa(pieza); $('e-estado').value = pieza.estado_fisico ?? 'nuevo'; }
     $('reimprimir').hidden = true;
     $('corregir').hidden = false; pintar();
     $('e-nombre').focus();
@@ -272,7 +286,8 @@ export function crearFicha({ mensaje, alAbrir = () => {}, confirmar = (texto) =>
   async function guardarCorreccion() {
     if (!pieza || !puedeEditar || guardando) return;
     const r = cuerpoCorreccion(pieza, { nombre:$('e-nombre').value, marca:$('e-marca').value, talla:$('e-talla').value,
-      precio:$('e-precio').value, precio_lista:$('e-lista').value, upc:$('e-upc')?.value }, puedePrecio);
+      precio:$('e-precio').value, precio_lista:$('e-lista').value, upc:$('e-upc')?.value,
+      estado_fisico:esRopa(pieza) ? undefined : $('e-estado')?.value }, puedePrecio);
     if (r.error) return mensaje(r.error);
     const lineas = resumenCorreccion(pieza, r.cuerpo, estadoEnvio(pieza).marca);
     if (!lineas.length) return mensaje('No hay cambios que guardar.');
@@ -282,10 +297,11 @@ export function crearFicha({ mensaje, alAbrir = () => {}, confirmar = (texto) =>
     let texto;
     try {
       const g = await api(`/api/borradores/${antes.id}`, r.cuerpo, 'PATCH');
-      texto = `${g.nombre}: cambios guardados.`;
+      texto = `${g.nombre}: cambios guardados.` + (g.estado_fisico !== antes.estado_fisico ? ` Grado ${nombreEstado(g.estado_fisico)}, precio ${pesos(g.precio)}.` : '')
+        + (g.aviso ? ` ${g.aviso}.` : '');
       if (pieza?.id === antes.id && turno === apertura) {
         Object.assign(pieza, { nombre:g.nombre, marca:g.marca, talla:g.talla, precio:g.precio, precio_lista:g.precio_lista,
-          destino:g.destino, stock:g.stock, upc:g.upc ?? pieza.upc, estado_analisis:'listo' });
+          destino:g.destino, stock:g.stock, upc:g.upc ?? pieza.upc, estado_fisico:g.estado_fisico ?? pieza.estado_fisico, estado_analisis:'listo' });
         await cerrarCamaraUpc();
         $('corregir').hidden = true;
         const aviso = avisoReimpresion(estadoEnvio(antes).marca, antes, pieza);
@@ -293,9 +309,12 @@ export function crearFicha({ mensaje, alAbrir = () => {}, confirmar = (texto) =>
         if (aviso) $('reimprimir-texto').textContent = aviso;
       }
     } catch (error) {
-      if (error.status === 409 && error.datos?.existente && turno === apertura) alRepetida(antes, error.datos.existente, r.cuerpo.upc ?? antes.upc);
+      const dup = error.status === 409 && error.datos?.existente;
+      // Con otro grado la hoja de fusión dejaría la pieza en el grado viejo: solo se avisa cuál es la que ya existe (#709).
+      if (dup && r.cuerpo.estado_fisico) texto = `Ya existe ${dup.codigo || dup.nombre} con ese UPC, grado ${nombreEstado(r.cuerpo.estado_fisico)}${dup.talla ? ` y talla ${dup.talla}` : ''}. No se cambió el grado.`;
+      else if (dup && turno === apertura) alRepetida(antes, dup, r.cuerpo.upc ?? antes.upc);
       if (error.status === 403 && pieza?.id === antes.id) puedeEditar = false;
-      texto = error.message;
+      texto ??= error.message;
     }
     guardando = false; pintar(); mensaje(texto);
   }

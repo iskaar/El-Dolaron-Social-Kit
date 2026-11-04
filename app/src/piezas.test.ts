@@ -252,7 +252,7 @@ function pantalla(responder: (url: string, cuerpo?: any) => unknown | Promise<un
     document: { getElementById: $, createElement: (tag: string) => new Nodo(tag),
       querySelectorAll: () => $('resultados').children.map((li) => li.children[0]),
       addEventListener: (e: string, fn: Function) => { eventos[e] = fn; }, body: new Nodo() },
-    CATEGORIAS: [['ropa', 'Ropa']], nombreEstado: () => 'A · Nuevo',
+    CATEGORIAS: [['ropa', 'Ropa']], nombreEstado: () => 'A · Nuevo', ESTADOS: [['nuevo', 'A · Nuevo'], ['danado', 'B · Dañado']],
     matchMedia: () => ({ matches: true }), AbortSignal, crypto, confirm:confirmar,
     performance: { now: () => 0 },
     setTimeout: (fn: Function, ms: number) => { temporizadores.push({ fn, ms }); return temporizadores.length; }, clearTimeout: () => {},
@@ -552,6 +552,14 @@ test('pantalla: corregir desde la ficha confirma, manda precio y destino sin sto
   await rechazo.api.abrir(p.id); rechazo.$('editar').eventos.click(); rechazo.$('e-nombre').value = 'Otro';
   await rechazo.$('corregir').eventos.submit({ preventDefault() {} }); await new Promise(setImmediate);
   assert.equal(rechazo.llamadas.filter((u) => u.includes('borradores')).length, 0);
+  // #715: el selector de grado manda estado_fisico y, si el precio no cambió, no manda precio (el servidor recalcula con la banda).
+  const grado = pantalla((url, cuerpo) => cuerpo ? (enviados.push({ url, cuerpo }), { ...p, ...cuerpo, precio:41000, estado_fisico:'danado' }) : { pieza:{ ...p, estado_fisico:'nuevo' }, ...permisos, historial:[] });
+  await grado.api.abrir(p.id); grado.$('editar').eventos.click();
+  assert.equal(grado.$('campo-estado').hidden, false); assert.equal(grado.$('e-estado').value, 'nuevo');
+  grado.$('e-estado').value = 'danado'; enviados.length = 0;
+  await grado.$('corregir').eventos.submit({ preventDefault() {} }); await new Promise(setImmediate);
+  assert.deepEqual(enviados[0].cuerpo, { nombre:'Chamarra', marca:'Levis', talla:'M', precio_lista:60000, destino:'etiqueta', estado_fisico:'danado' });
+  assert.match(grado.$('estado').textContent, /precio \$410\.00/);
   // Sin precio de dueño: el campo no sale y se manda el precio actual.
   permisos = { puede_editar:true, puede_precio:false };
   const cap = pantalla((url, cuerpo) => cuerpo ? (enviados.push({ url, cuerpo }), { ...p, ...cuerpo }) : { pieza:{ ...p }, ...permisos, historial:[] });

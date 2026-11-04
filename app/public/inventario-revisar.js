@@ -45,9 +45,8 @@ export function cuerpoRevision(p, campos, dueno, recalcular=false) {
   if(r.error)return r;
   const e=existenciaNueva(p,campos);if(e?.error)return e;
   const cuerpo={...r.cuerpo,...(e&&p.estado_analisis!=='listo'?{stock:e.valor,stock_esperado:e.esperado}:{}),categoria:campos.categoria||p.categoria,estado_fisico:campos.estado_fisico||p.estado_fisico};
+  // #708: solo cambió el grado y el precio sigue igual → cuerpoCorreccion ya omitió el precio (el servidor recalcula con la banda).
   if(recalcular){if(p.codigo&&!dueno)return {error:'El precio lo cambia el dueño'};delete cuerpo.precio;}
-  // #708: solo cambió el grado y el precio sigue siendo el de la pieza → sin precio, el servidor recalcula con la banda del grado (o lo pide al dueño). Un precio editado se manda.
-  else if(cuerpo.estado_fisico!==p.estado_fisico&&cuerpo.precio===p.precio&&destino==='etiqueta')delete cuerpo.precio;
   return {cuerpo};
 }
 
