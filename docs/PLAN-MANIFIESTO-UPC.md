@@ -34,8 +34,14 @@ el código completo leído, con sus ceros iniciales, en `productos.upc`.
 1. **Carga** — `python tools/importar_manifiesto.py sandbox|produccion|local`. Baja cada
    pestaña `Truck <id>` listada en "Available Truckloads", deja un renglón por UPC (gana la
    versión más repetida; empate → precio más alto) y escribe en `manifiesto` **solo lo nuevo
-   o cambiado**: la primera vez son ~73 mil escrituras, después la diferencia. Se corre a mano
-   cuando la hoja cambie. `--prueba` corre su comprobación.
+   o cambiado**: la primera vez son ~73 mil escrituras, después la diferencia. `--prueba` corre
+   su comprobación. **La carga es manual**: no hay cron ni workflow, y `GET /api/manifiesto/<upc>`
+   solo lee la tabla `manifiesto`; si nadie corre el comando, la app no ve la hoja nueva. Última
+   carga conocida en producción: 21/10/2026 (Issue #720). Para saber si vale la pena cargar:
+   `python tools/importar_manifiesto.py produccion --solo-contar` baja la hoja, la compara con
+   D1 (solo SELECT) e imprime UPC nuevos, cambiados y pestañas omitidas sin escribir nada
+   (`--archivo RUTA.xlsx` usa una copia local). Una pestaña vale si A1 dice `Truck <id>` o si
+   sus renglones traen ese id en la columna A. Los UPC que salen de la hoja no se borran.
 2. **`/escanear`** — el lector (USB/Bluetooth teclea el número y Enter) o la cámara del
    teléfono (Chrome de Android) lee el código. `GET /api/manifiesto/<upc>` regresa nombre,
    categoría, precio de Target, precio de lista, precio de venta y el enlace a Target.
