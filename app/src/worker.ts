@@ -108,7 +108,7 @@ const CORRECCION_CAPTURA = /^\/api\/borradores\/([^/]+)\/(existencia|talla|revis
 export function permitidaParaVendedor(pathname: string, metodo: string): boolean {
   if (/^\/(inventario|pieza)(?:\.html)?\/?$/.test(pathname)) return metodo === 'GET';
   if (pathname === '/api/piezas' || /^\/api\/piezas\/[^/]+$/.test(pathname) || /^\/api\/foto\/[^/]+$/.test(pathname)) return metodo === 'GET';
-  if (/^\/api\/piezas\/[^/]+\/(existencia|juntar|solicitud-precio)$/.test(pathname)) return metodo === 'POST';
+  if (/^\/api\/piezas\/[^/]+\/(existencia|confirmar-existencia|juntar|solicitud-precio)$/.test(pathname)) return metodo === 'POST';
   // Precios por revisar (#451): el servidor exige el rol de dueño para listar y resolver.
   if (pathname === '/api/solicitudes-precio') return metodo === 'GET';
   if (/^\/api\/solicitudes-precio\/[^/]+$/.test(pathname)) return metodo === 'POST';

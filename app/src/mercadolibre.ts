@@ -323,7 +323,7 @@ async function perfilML(env: Env): Promise<{ id: string; nickname: string; usaFa
 interface Pieza {
   id: string; codigo: string | null; nombre: string; categoria: string; marca: string; precio: number;
   estado_fisico: string; stock: number; destino: string; sin_inventario: number; estado_analisis: string; foto_key: string;
-  talla: string | null; upc: string | null;
+  talla: string | null; upc: string | null; existencia_confirmada_en: string | null;
 }
 
 const productoDe = (p: Pieza) => ({
@@ -337,10 +337,15 @@ export const PUBLICABLE = `p.destino = 'etiqueta' and p.sin_inventario = 0 and p
   and p.foto_key <> '' and p.codigo like 'ED-%' and p.estado_fisico <> 'danado' and p.estado_fisico <> 'liquidacion'
   and p.propietario = 'dolaron'`;
 
+// Menos de este stock exige confirmacion fisica en piso (#724); la migracion 068 la borra si el stock cambia.
+export const PISO_MINIMO = 3;
+const faltaPiso = (stock: number, confirmada: string | null | undefined, verbo: string) => stock < PISO_MINIMO && !confirmada
+  ? `Tiene ${stock} existencias: confirma la pieza en piso escaneando su etiqueta en Inventario antes de ${verbo}.` : null;
+
 async function piezaPublicable(env: Env, id: string): Promise<{ ok: true; pieza: Pieza } | { ok: false; status: number; error: string }> {
   if (!ID_PIEZA.test(id)) return { ok: false, status: 404, error: 'La pieza no existe.' };
   const p = await env.DB.prepare(
-    `select id, codigo, nombre, categoria, marca, precio, estado_fisico, stock, destino, sin_inventario, estado_analisis, foto_key, talla, upc
+    `select id, codigo, nombre, categoria, marca, precio, estado_fisico, stock, destino, sin_inventario, estado_analisis, foto_key, talla, upc, existencia_confirmada_en
      from productos where id = ?`,
   ).bind(id).first<Pieza>();
   if (!p) return { ok: false, status: 404, error: 'La pieza no existe.' };
@@ -352,6 +357,8 @@ async function piezaPublicable(env: Env, id: string): Promise<{ ok: true; pieza:
   if (p.estado_analisis !== 'listo') return no('Primero revisa la pieza en el admin.');
   if (!p.foto_key) return no('La pieza no tiene foto.');
   if (p.stock <= 0) return no('La pieza no tiene existencias.');
+  const piso = faltaPiso(p.stock, p.existencia_confirmada_en, 'publicarla');
+  if (piso) return no(piso);
   return { ok: true, pieza: p };
 }
 
@@ -607,7 +614,7 @@ async function listarPiezas(env: Env, url: URL): Promise<Response> {
   const min = Math.max(0, Math.floor(Number(url.searchParams.get('min') ?? 0)) || 0);
   const orden = ORDENES[url.searchParams.get('orden') ?? ''] ?? ORDENES.recientes;
   const { results } = await env.DB.prepare(
-    `select p.id, p.codigo, p.nombre, p.categoria, p.marca, p.precio, p.estado_fisico, p.stock,
+    `select p.id, p.codigo, p.nombre, p.categoria, p.marca, p.precio, p.estado_fisico, p.stock, p.existencia_confirmada_en,
             m.producto_id as m_id, m.ml_item_id, m.estado, m.precio_ml, m.permalink, m.ultimo_error, m.actualizado_en
      from productos p left join ml_publicaciones m on m.producto_id = p.id
      where (${donde})${busca}${min ? ' and p.stock >= ?' : ''}
@@ -620,6 +627,8 @@ async function listarPiezas(env: Env, url: URL): Promise<Response> {
         id: f.id, codigo: f.codigo, nombre: f.nombre, categoria: f.categoria, marca: f.marca,
         precio: f.precio, estado_fisico: f.estado_fisico, stock: f.stock,
       },
+      // #724: con menos de PISO_MINIMO existencias hace falta esta confirmacion fisica (nula = falta).
+      existencia_confirmada_en: f.existencia_confirmada_en,
       publicacion: f.m_id === null ? null : {
         ml_item_id: f.ml_item_id, estado: f.estado, precio_ml: f.precio_ml, permalink: f.permalink,
         ultimo_error: f.ultimo_error, actualizado_en: f.actualizado_en,
@@ -1198,10 +1207,12 @@ async function cambiarEstado(env: Env, id: string, accion: 'pausar' | 'reactivar
   if (!ID_PIEZA.test(id)) return json({ error: 'La pieza no existe.' }, 404);
   const pub = await leerPublicacion(env, id);
   if (!pub?.ml_item_id) return json({ error: 'Esta pieza no está publicada en Mercado Libre.' }, 404);
-  const pieza = await env.DB.prepare('select stock from productos where id = ?').bind(id).first<{ stock: number }>();
+  const pieza = await env.DB.prepare('select stock, existencia_confirmada_en from productos where id = ?').bind(id).first<{ stock: number; existencia_confirmada_en: string | null }>();
   const validos = accion === 'pausar' ? ['activa'] : ['pausada', 'pausada_por_venta', 'vendida'];
   if (!validos.includes(pub.estado)) return json({ error: `No se puede ${accion} una publicación en estado «${pub.estado}».` }, 409);
   if (accion === 'reactivar' && !((pieza?.stock ?? 0) > 0)) return json({ error: 'La pieza no tiene existencias.' }, 409);
+  const piso = accion === 'reactivar' ? faltaPiso(pieza!.stock, pieza!.existencia_confirmada_en, 'reactivarla') : null;
+  if (piso) return json({ error: piso }, 409);
   try {
     await mlFetch(env, `/items/${pub.ml_item_id}`, {
       method: 'PUT',

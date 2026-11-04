@@ -24,6 +24,10 @@ const ficha = crearFicha({ mensaje, confirmar, integrada:true, antesCamara:apaga
   $('solo-consulta').hidden = dueno || identidad.usuario?.editar_inventario === true;
   for (const b of document.querySelectorAll('.resultado')) b.setAttribute('aria-current', String(b.dataset.id === p.id));
   $('acciones-ficha').replaceChildren();
+  // #724: con menos de 3 existencias, Mercado Libre pide que alguien confirme la pieza en piso escaneando su etiqueta.
+  if (p.stock > 0 && p.stock < 3) $('acciones-ficha').append(nodo('p', p.existencia_confirmada_en
+    ? `Existencia confirmada en piso: ${new Date(p.existencia_confirmada_en).toLocaleString('es-MX')} · ${p.existencia_confirmada_por}`
+    : 'Falta confirmar en piso: escanea la etiqueta de esta pieza para poder publicarla en Mercado Libre.', 'ayuda'));
   if (dueno || identidad.usuario?.editar_inventario === true) $('acciones-ficha').append(boton('Fijar a…', () => {
     const form=$('fijar');form.hidden=false;hoja('Fijar existencia',form);
     $('hoja').addEventListener('close',()=>{form.hidden=true;$('existencia').prepend(form);},{once:true});
@@ -147,10 +151,21 @@ if (dueno) {
   });
   addEventListener('online', actualizarPrecios);
 }
-async function recibir({ codigo }) {
+// Escanear (lector o cámara; no teclear) la etiqueta de la pieza abierta confirma su existencia en piso (#724).
+async function confirmarEnPiso(codigo, origen) {
+  const p = piezaActual;
+  if (origen === 'caja' || !p?.codigo || p.stock < 1 || p.stock >= 3 || p.codigo !== codigo.trim().toUpperCase()) return;
+  if (!(dueno || identidad.usuario?.editar_inventario === true)) return mensaje('Tu cuenta no puede confirmar existencias.', 'aviso');
+  if (p.existencia_confirmada_en) return mensaje(`Ya confirmada en piso · ${p.codigo}`, 'ok');
+  try {
+    await api(`/api/piezas/${p.id}/confirmar-existencia`, { codigo:p.codigo, esperado:p.stock });
+    await ficha.abrir(p.id); mensaje(`Existencia confirmada en piso · ${p.codigo}`, 'ok');
+  } catch (e) { mensaje(e.message, 'error'); }
+}
+async function recibir({ codigo, origen }) {
   if ($('hoja').open) return;
   $('consulta').value = codigo;
-  if (modo === 'buscar') await buscar(false, true);
+  if (modo === 'buscar') { await buscar(false, true); await confirmarEnPiso(codigo, origen); }
   else if ($(`modo-${modo}`).dataset.activo) await (await cargar(modo)).leer?.(codigo);
 }
 const lector=escucharLector((lectura) => recibir(lectura).catch(e=>mensaje(e.message,'error')), { caja:$('consulta') });
@@ -174,7 +189,7 @@ observador?.observe($('mas'));
 $('volver').onclick = async () => { if(modo==='revisar') (await cargar('revisar')).cerrar(); ficha.cerrar(); piezaActual = null; document.body.classList.remove('con-ficha'); foco(); };
 $('solo-consulta').onclick = () => hoja('Solo consulta', nodo('p', 'Tu cuenta no puede editar. Pídelo al dueño.'));
 $('camara-etiqueta').onclick = async () => {
-  try { await apagarCamaras(); $('visor').hidden = false; const { abrirCamara } = await import('./camara.js'); apagar = await abrirCamara('visor', (codigo) => recibir({ codigo })); }
+  try { await apagarCamaras(); $('visor').hidden = false; const { abrirCamara } = await import('./camara.js'); apagar = await abrirCamara('visor', (codigo) => recibir({ codigo, origen:'camara' })); }
   catch(e) { mensaje(e.message, 'error'); }
 };
 $('menu').onclick = () => {

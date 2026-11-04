@@ -161,7 +161,8 @@ export async function buscarPiezas(env: Env, url: URL, propietario: string): Pro
 
 async function fichaPieza(env: Env, id: string, usuario: Usuario | null): Promise<Response> {
   if (!UUID.test(id)) return json({ error: 'Identificador inválido.' }, 400);
-  const pieza = await env.DB.prepare(`select ${COLUMNAS} from productos p
+  // #724: la confirmación física en piso viaja solo en la ficha (migración 068); las listas no la traen.
+  const pieza = await env.DB.prepare(`select ${COLUMNAS}, p.existencia_confirmada_en, p.existencia_confirmada_por from productos p
     where p.id = ? and p.propietario = ? and ${VISIBLE}`).bind(id, propietarioDe(usuario)).first<Pieza>();
   if (!pieza) return json({ error: 'Pieza no encontrada.' }, 404);
   // shortcut: índice por fecha existente; añadir (producto_id, ajustado_en) si el historial supera 10 mil filas.
@@ -247,6 +248,29 @@ async function cambiarExistencia(request: Request, env: Env, id: string, usuario
     : json({ error: 'Pieza no encontrada.' }, 404);
 }
 
+/**
+ * Confirmación física en piso (#724): quien escaneó la etiqueta (`codigo`) con la pieza en la mano y viendo `esperado` existencias.
+ * Ambos deben coincidir con D1 ahora: si el stock cambió mientras tanto, no se confirma algo que ya no es lo que se vio. La migración 068
+ * borra la confirmación en cuanto el stock cambia, venga de donde venga; repetirla solo renueva la marca.
+ */
+async function confirmarExistencia(request: Request, env: Env, id: string, usuario: Usuario | null): Promise<Response> {
+  if (!puedeEditarInventario(usuario)) return json({ error: 'Tu cuenta no tiene permiso para editar inventario.' }, 403);
+  const cuerpo = await request.json().catch(() => null) as { codigo?: unknown; esperado?: unknown } | null;
+  if (!UUID.test(id) || typeof cuerpo?.codigo !== 'string' || !Number.isInteger(cuerpo.esperado))
+    return json({ error: 'Envía el código de la etiqueta y la existencia que ves.' }, 400);
+  const propietario = propietarioDe(usuario), ahora = new Date().toISOString();
+  const actual = await env.DB.prepare(`select p.codigo, p.stock from productos p where p.id = ? and p.propietario = ? and ${VISIBLE}`)
+    .bind(id, propietario).first<{ codigo: string | null; stock: number }>();
+  if (!actual) return json({ error: 'Pieza no encontrada.' }, 404);
+  if (!actual.codigo || actual.codigo !== cuerpo.codigo.trim().toUpperCase())
+    return json({ error: 'La etiqueta escaneada no es de esta pieza.' }, 409);
+  const { meta } = await env.DB.prepare(`update productos set existencia_confirmada_en = ?, existencia_confirmada_por = ?
+    where id = ? and propietario = ? and codigo = ? and stock = ? and stock > 0 and sin_inventario = 0 and estado_analisis <> 'descartado'`)
+    .bind(ahora, usuario!.correo, id, propietario, actual.codigo, cuerpo.esperado).run();
+  if (meta.changes !== 1) return json({ error: 'La existencia cambió o no hay piezas. Revisa y vuelve a escanear.', stock: actual.stock }, 409);
+  return json({ id, stock: cuerpo.esperado, existencia_confirmada_en: ahora, existencia_confirmada_por: usuario!.correo });
+}
+
 /** Conserva ambos códigos: la etiqueta vieja sigue resolviendo en caja, con existencia cero. */
 async function juntarPiezas(request: Request, env: Env, id: string, usuario: Usuario | null, ctx: ExecutionContext): Promise<Response> {
   if (!puedeEditarInventario(usuario)) return json({ error:'Tu cuenta no tiene permiso para editar inventario.' }, 403);
@@ -308,6 +332,9 @@ export async function rutaPiezas(request: Request, env: Env, url: URL, usuario: 
     : json({ error:'Método no permitido.' }, 405);
   const juntar = /^\/api\/piezas\/([^/]+)\/juntar$/.exec(url.pathname);
   if (juntar) return request.method === 'POST' ? juntarPiezas(request, env, juntar[1], usuario, ctx)
+    : json({ error:'Método no permitido.' }, 405);
+  const confirmar = /^\/api\/piezas\/([^/]+)\/confirmar-existencia$/.exec(url.pathname);
+  if (confirmar) return request.method === 'POST' ? confirmarExistencia(request, env, confirmar[1], usuario)
     : json({ error:'Método no permitido.' }, 405);
   const existencia = /^\/api\/piezas\/([^/]+)\/existencia$/.exec(url.pathname);
   if (existencia) return request.method === 'POST' ? cambiarExistencia(request, env, existencia[1], usuario, ctx)
