@@ -14,7 +14,11 @@ function ropaUI(bloquearAlmacenamiento=false) {
     scrollTop=0;offsetHeight=44;onclick:Function=()=>{};onkeydown:Function=()=>{};
     classList={toggle:(c:string,activa:boolean)=>{const clases=new Set(this.className.split(' ').filter(Boolean));activa?clases.add(c):clases.delete(c);this.className=[...clases].join(' ');},add:(c:string)=>this.classList.toggle(c,true),remove:(c:string)=>this.classList.toggle(c,false)};
     get firstElementChild(){return this.children[0];}
-    append(...n:Nodo[]){this.children.push(...n);}
+    padre:Nodo|null=null;enHoja=false;
+    append(...n:Nodo[]){for(const x of n)x.padre=this;this.children.push(...n);}
+    closest(){let n:Nodo|null=this;while(n&&!n.enHoja)n=n.padre;return n;}
+    querySelector(){return this.children.find(n=>n.className==='sub-hoja')??null;}
+    remove(){if(this.padre)this.padre.children=this.padre.children.filter(x=>x!==this);}
     setAttribute(k:string,v:string){this.atributos[k]=v;}
     getAttribute(k:string){return this.atributos[k];}
     removeAttribute(k:string){delete this.atributos[k];}
@@ -104,6 +108,23 @@ test('corregir calzado: se elige talla US, se guarda el cm MX y "Niño 19" no ca
   assert.equal(chip(ui.talla(()=>{},'22'),'Calzado M').atributos['aria-pressed'],'true');
   assert.equal(chip(ui.talla(()=>{},'32'),'Calzado H').atributos['aria-pressed'],'true');
   assert.equal(chip(ui.talla(()=>{},'Niño 6 años / S'),'Niño').atributos['aria-pressed'],'true');
+});
+
+test('dentro de la hoja «Revisar antes de imprimir» el número de calzado se elige ahí mismo, sin cerrar la revisión (#705)',()=>{
+  const ui=ropaUI(),valores:string[]=[],revision=new (ui.ropa({pc:()=>false,mensaje:()=>{}}).raiz.constructor)();revision.enHoja=true;
+  const t=ui.talla((v:string)=>valores.push(v));revision.append(t);
+  const chip=(n:string)=>t.children[0].children.find((b:any)=>b.dataset.valor===n);
+  chip('Calzado niño').onclick();
+  assert.equal(ui.hojas.length,0,'no abre otra hoja encima de la revisión');
+  const panel=t.querySelector();assert.ok(panel,'el rodillo queda debajo de los chips');
+  const rueda=ui.buscar(panel,'Talla de calzado (US)')!;ui.desplazar(rueda,rueda.children.findIndex((r:any)=>r.textContent==='US 9-10C · EU 26-27 · 15-16'));
+  assert.equal(valores.at(-1),'Niño 15-16');
+  panel.children[1].children.find((b:any)=>b.textContent==='Usar talla').onclick();
+  assert.equal(t.querySelector(),null,'«Usar talla» cierra solo el selector');
+  chip('Niño').onclick();chip('Calzado H').onclick();
+  assert.equal(t.children.filter((n:any)=>n.className==='sub-hoja').length,1,'un selector a la vez');
+  // Fuera de una hoja (la captura) sigue abriendo la hoja de siempre.
+  const suelta=ui.talla(()=>{});suelta.children[0].children.find((b:any)=>b.dataset.valor==='Calzado niño').onclick();assert.equal(ui.hojas.length,1);
 });
 
 test('calzadoGuardado: el chip activo gana si tiene el cm; si no, hombre; lo que no es calzado no se toca (#546)',()=>{

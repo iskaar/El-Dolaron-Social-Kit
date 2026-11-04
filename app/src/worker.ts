@@ -1043,7 +1043,7 @@ async function corregirCaptura(id: string, campo: string, request: Request, env:
   // La existencia directa nunca toca una `listo`: si el análisis la terminó después de la lectura de arriba, 0 filas (#468).
   const resultado = await env.DB.prepare(
     `update productos set ${columna} = ?, actualizado_en = ?, modificado_por = ? where id = ? and capturado_por = ? and creado_en > ?
-       and (${sinFoto ? alcanceSinFoto : campo === 'existencia' ? "estado_analisis <> 'listo'" : "upc is null or estado_analisis <> 'listo'"}) and estado_analisis <> 'descartado'
+       and (${sinFoto ? alcanceSinFoto : campo === 'existencia' ? "estado_analisis <> 'listo'" : "upc is null or estado_analisis <> 'listo' or por_revisar = 1"}) and estado_analisis <> 'descartado'
        ${campo === 'existencia' ? `and not ${CAPTURA_SUMADA}` : ''}`,
   )
     .bind(valor, new Date().toISOString(), correo, id, correo, desde)
@@ -1074,9 +1074,12 @@ async function revisarCaptura(id: string, request: Request, env: Env, correo: st
   const fila = await env.DB.prepare(`select id, precio, precio_lista, estado_fisico, estado_analisis, stock, talla, codigo, nombre, marca, categoria, upc, propietario, por_revisar from productos where ${alcance}`)
     .bind(id, correo, desde).first<{ id: string; nombre: string; marca: string; categoria: string; estado_analisis: string; precio: number; precio_lista: number; estado_fisico: string; stock: number; talla: string | null; codigo: string | null; upc:string | null; propietario:string; por_revisar: number }>();
   if (!fila) return json({ error: 'Solo puedes corregir lo que capturaste en las últimas 24 horas.' }, 404);
+  // Precio de banda: todo menos la ropa sin código. Ropa o calzado con UPC (manifiesto, catálogo o internet) trae su nombre y
+  // su precio de lista; prenda + marca + precio fijo es solo de la ropa capturada por foto sin código (#705).
+  const conBanda = fila.categoria !== 'ropa' || !!fila.upc;
   if (request.method === 'GET') {
     // Revisión de una pieza nueva (#573): el precio de cada grado, para que la tarjeta lo muestre al cambiar A/B/C.
-    const config = fila.por_revisar && fila.categoria !== 'ropa' && fila.precio_lista > 0 ? await leerConfig(env) : null;
+    const config = fila.por_revisar && conBanda && fila.precio_lista > 0 ? await leerConfig(env) : null;
     const precios = config && Object.fromEntries([...ESTADOS_FISICOS].map((e) =>
       [e, calcularPrecio({ precioLista: fila.precio_lista, categoria: fila.categoria || 'otros', estadoFisico: e, config }).precio]));
     return json({ ...fila, prenda: prendaDeNombre(fila.nombre, fila.marca), ...(precios ? { precios } : {}) });
@@ -1111,7 +1114,7 @@ async function revisarCaptura(id: string, request: Request, env: Env, correo: st
     return json({ error: 'Corrección invalida.' }, 400);
   }
   // #573: en la revisión de una pieza nueva el precio y el nombre se editan como en la tarjeta UPC. Ropa conserva sus precios fijos.
-  const libre = fila.categoria !== 'ropa' && !!fila.por_revisar;
+  const libre = conBanda && !!fila.por_revisar;
   if (cambios.precio !== undefined && (typeof cambios.precio !== 'number'
       || (libre ? !Number.isSafeInteger(cambios.precio) || cambios.precio <= 0 : !PRECIOS_ROPA.includes(cambios.precio)))) {
     return json({ error: libre ? 'Escribe un precio mayor a cero en pesos.' : 'Escoge $200, $150, $100, $80 o $50 MXN.' }, 400);
@@ -1139,7 +1142,7 @@ async function revisarCaptura(id: string, request: Request, env: Env, correo: st
   const pidePrecio = typeof cambios.precio === 'number' && cambios.precio !== fila.precio && !autorizarPrecio(usuario, fila);
   // Cambiar el grado de una pieza por revisar sin tocar el precio lo recalcula con la banda del grado, como al guardar la tarjeta UPC.
   const porGrado = cambios.precio === undefined && cambios.estado_fisico !== undefined && cambios.estado_fisico !== fila.estado_fisico
-    && fila.por_revisar && fila.categoria !== 'ropa' && fila.precio_lista > 0
+    && fila.por_revisar && conBanda && fila.precio_lista > 0
     ? calcularPrecio({ precioLista: fila.precio_lista, categoria: fila.categoria || 'otros', estadoFisico: grado, config: await leerConfig(env) }).precio : null;
   const precioNuevo = pidePrecio ? null : cambios.precio ?? porGrado;
   const resultado = await env.DB.prepare(`update productos set precio = coalesce(?, precio),
@@ -1284,6 +1287,11 @@ async function reclamarLote(env: Env, propietario: string, ids: string[], { reim
        or etiqueta_nombre <> excluded.etiqueta_nombre or etiqueta_talla <> excluded.etiqueta_talla`,
     ).bind(ahora, origen, id, propietario, version, version, forzar);
   }));
+  const reclamadas = ids.filter((_, i) => (resultados[i]?.meta?.changes ?? 0) > 0);
+  // Una etiqueta que sí salió (Buscar, Imprimir) ya no espera su revisión (#705): sin esto el ✎ de Capturar no se quitaba.
+  // La impresión automática nunca llega aquí con una pieza por revisar: imprimir-lote la salta.
+  if (reclamadas.length) await env.DB.prepare('update productos set por_revisar = 0 where por_revisar = 1 and id in (select value from json_each(?))')
+    .bind(JSON.stringify(reclamadas)).run();
   const { results } = await env.DB.prepare(
     `select producto_id, etiqueta_en, etiqueta_precio, etiqueta_precio_lista, etiqueta_nombre, etiqueta_talla, etiqueta_origen
      from etiquetas_enviadas where producto_id in (select value from json_each(?))
@@ -1292,7 +1300,7 @@ async function reclamarLote(env: Env, propietario: string, ids: string[], { reim
   // `ahora` es la hora de ESTE reclamo: la que quedo en cada fila de `reclamadas` al ganar. No se relee de `marcas`,
   // donde otra pantalla pudo reclamar de nuevo entre el batch y la lectura; con la hora ajena soltar borraria su reclamo.
   return {
-    reclamadas: ids.filter((_, i) => (resultados[i]?.meta?.changes ?? 0) > 0),
+    reclamadas,
     ahora,
     marcas: Object.fromEntries(results.map(({ producto_id, ...marca }) => [producto_id, marca])),
   };

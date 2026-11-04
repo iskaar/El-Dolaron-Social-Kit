@@ -7,7 +7,7 @@ import { aCentavos } from './ficha.js';
 import { stepper, bloquear, cerrarHoja } from './inventario-ui.js';
 import { montarPrecio } from './inventario-precio.js';
 import { esRopa as piezaRopa } from './ropa.js';
-import { buscarCalzado, tipoCalzadoDeNombre, tallaUs } from './tallas.js';
+import { buscarCalzado, tipoCalzadoDeNombre, tallaUs, esCalzado } from './tallas.js';
 import { HUECO_LECTOR } from './lector.js';
 import { leerMultiplicador } from './venta.js';
 
@@ -103,6 +103,8 @@ export function crearCaptura({ api, imprimir, cambiar=()=>{}, enLinea=()=>naviga
       // Pieza ya creada (UPC buscado en internet): se ajusta la existencia vista y luego «Guardar» la confirma y libera su etiqueta (#573).
       const cuerpo=cuerpoRevision(abierta),vista=abierta.ficha.stock;
       if(abierta.cantidad!==vista){await corregirExistencia(api,{estado_analisis:'listo',upc:abierta.upc,stock:vista},abierta.id,abierta.cantidad);abierta.ficha.stock=abierta.cantidad;}
+      // El número de calzado (#705) antes de confirmar: si no se guarda, la etiqueta no sale.
+      if(abierta.talla&&abierta.talla!==abierta.ficha.talla){await api(`/api/borradores/${abierta.id}/talla`,{talla:abierta.talla},'PATCH');abierta.ficha.talla=abierta.talla;}
       const confirmada=await api(`/api/borradores/${abierta.id}/revision`,cuerpo,'PATCH');
       actual={...abierta,tipo:'guardada',pieza:{...confirmada,id:abierta.id}};pintar();
       actual.faltaEtiqueta=!await imprimir(abierta.id,abierta.cantidad,{});pintar();return confirmada;
@@ -305,7 +307,8 @@ export async function iniciar(ctx) {
     const r=await api(`/api/borradores/${a.id}/revision`);
     if(!r.por_revisar)return flujo.elegir({...datos,tiene_foto:datos.con_foto});   // otro dispositivo ya la confirmó
     flujo.retomar({tipo:'nueva',revision:true,imagenBuscada:true,id:a.id,upc:a.upc,cantidad:r.stock,estado:r.estado_fisico,estadoInicial:r.estado_fisico,
-      ficha:{nombre:r.nombre,precio:r.precio,precios:r.precios,precio_lista:r.precio_lista,stock:r.stock},imagen:datos.con_foto?{url:`/api/foto/${a.id}`,nombre:r.nombre}:{}});
+      ...(r.talla?{talla:r.talla}:{}),
+      ficha:{nombre:r.nombre,precio:r.precio,precios:r.precios,precio_lista:r.precio_lista,stock:r.stock,categoria:r.categoria,talla:r.talla,calzado:esCalzado(r)},imagen:datos.con_foto?{url:`/api/foto/${a.id}`,nombre:r.nombre}:{}});
   }
   async function fotoPieza(p){
     if(!pc())return movil.fotoPieza(p);
