@@ -1,6 +1,6 @@
 import { codigoLeido, normalizarUpc } from './upc.js';
 import { etiqueteraLista } from './etiquetera.js';
-import { ropa, opciones } from './inventario-ropa.js';
+import { ropa, opciones, talla as selectorTalla } from './inventario-ropa.js';
 import { ESTADOS } from './estados.js';
 import { CATEGORIAS } from './categorias.js';
 import { aCentavos } from './ficha.js';
@@ -36,7 +36,9 @@ export function cuerpoRevision(a){
   return c;
 }
 /** Calzado del manifiesto sin su número de la caja (#552): no se guarda, imprime ni fotografía hasta elegirlo. */
-export const faltaCalzado=a=>a?.tipo==='nueva'&&a.ficha?.calzado&&!a.talla?'Falta número de calzado':'';
+export const faltaCalzado=a=>a?.tipo==='nueva'&&!a.talla?(a.ficha?.calzado?'Falta número de calzado':a.otraTalla?'Falta talla':''):'';
+/** ¿Esta pieza ya registrada puede tener hermanas de otra talla (#709)? Tiene código de barras y talla, o es ropa o calzado. */
+export const admiteOtraTalla=p=>!!p?.upc&&!!normalizarUpc(p.upc)&&(!!p.talla||piezaRopa(p)||esCalzado(p));
 /**
  * La pieza actual que todavía recibe la foto del obturador: una tarjeta del manifiesto o un código sin registro (su foto la crea).
  * Una pieza ya registrada (`guardada`/`existente`) no: la foto es de una pieza nueva; reemplazar la suya es «Foto nueva» (#549).
@@ -136,6 +138,21 @@ export function crearCaptura({ api, imprimir, cambiar=()=>{}, enLinea=()=>naviga
     catch(e){if(e.status!==404)throw e;actual={tipo:'sin-registro',id:uuid(),upc:codigo,cantidad:n,estado:grado};}
     pintar();
   }
+  /**
+   * «Otra talla» (#709): misma identidad (UPC) con otra talla es otra pieza, con su propio ED-. Abre la tarjeta de alta por UPC de
+   * una pieza nueva que pide la talla (número de caja si es calzado); `POST /api/borradores/upc` con `talla` la crea o, si esa talla
+   * ya existía con este grado, suma a ella.
+   */
+  async function otraTalla(p){
+    if(!permiteUpc)throw new Error('Tu cuenta no da de alta por código de barras.');
+    if(!enLinea())throw new Error('Sin red: no se puede abrir otra talla');
+    if(!admiteOtraTalla(p))throw new Error('Esta pieza no tiene código de barras.');
+    if(actual?.tipo==='nueva'&&tarjetaEditada(actual))throw new Error('Guarda la tarjeta editada antes de abrir otra talla');
+    const ficha=await api('/api/manifiesto/'+p.upc);
+    ficha.calzado=!!ficha.calzado||esCalzado(p);
+    actual={tipo:'nueva',id:uuid(),upc:p.upc,ficha,enCamino:false,cantidad:1,estado:piezaRopa(ficha)?'nuevo':p.estado_fisico,otraTalla:true};
+    actual.estadoInicial=actual.estado;resultados=[];siguiente=null;pintar();
+  }
   // Sumar `n` es un solo ajuste auditado (delta n, mismo folio al reintentar) y n etiquetas; el servidor lo topa en 999.
   async function sumar(p,n=1){
     if(!enLinea())throw new Error('Sin red: se suma al volver la señal');
@@ -151,7 +168,7 @@ export function crearCaptura({ api, imprimir, cambiar=()=>{}, enLinea=()=>naviga
     ajuste=null;pintar();return actual;
   }
   const serial=(fn)=>{const resultado=fila.then(fn);fila=resultado.catch(()=>{});return resultado;};
-  return { leer:(...args)=>serial(()=>leer(...args)),guardar:()=>serial(guardar),sumar:(p,n)=>serial(()=>sumar(p,n)),
+  return { leer:(...args)=>serial(()=>leer(...args)),guardar:()=>serial(guardar),sumar:(p,n)=>serial(()=>sumar(p,n)),otraTalla:p=>serial(()=>otraTalla(p)),
     elegir(p){actual={tipo:'existente',pieza:p};pintar();},
     retomar(a){actual=a;pintar();},
     // Grado de la tarjeta (#573): cambia el precio mostrado al de ese grado, salvo que el dueño ya hubiera escrito otro.
@@ -229,6 +246,7 @@ export async function iniciar(ctx) {
     turnoImpresion=r.catch(()=>{});return r;
   }
   const flujo=crearCaptura({api,imprimir,permiteSumar:dueno||ctx.identidad.usuario?.editar_inventario===true,permiteUpc:!ctx.identidad.usuario?.roles.includes('finanzas'),cambiar:pintar});
+  const altaUpc=!ctx.identidad.usuario?.roles.includes('finanzas');   // misma regla que permiteUpc, para «Otra talla»
   async function recibirExistente(p,llave){
     const a={tipo:'guardada',pieza:p,cantidad:p.sumadas,faltaEtiqueta:true};flujo.retomar(a);
     // Sin impresora conectada igual se pide: queda «falta etiqueta» y la alerta del modo enfocado.
@@ -242,6 +260,8 @@ export async function iniciar(ctx) {
     lista.replaceChildren();
     const varias=resultados.length>1;lista.hidden=encabezadoLista.hidden=!varias;if(!pendienteFoto)remota.replaceChildren();
     for(const p of resultados)lista.append(resultado(p,()=>flujo.elegir(p)));
+    // Varias tallas del mismo código (#709): una por talla, más «Otra talla» para una que aún no existe.
+    if(varias&&altaUpc&&resultados.every(p=>admiteOtraTalla(p)&&normalizarUpc(p.upc)===normalizarUpc(resultados[0].upc))){const li=nodo('li');li.append(boton('Otra talla',()=>flujo.otraTalla(resultados[0])));lista.append(li);}
     if(siguiente){const li=nodo('li');li.append(boton('Buscar más',()=>flujo.leer(consulta,true)));lista.append(li);}
     pieza.replaceChildren();
     if(pc())disparo.classList.toggle('primario',!actual);
@@ -260,20 +280,24 @@ export async function iniciar(ctx) {
       campoPrecio.value=actual.precio??String((p.precios?.[actual.estado]??p.precio)/100);campoPrecio.inputMode='decimal';campoPrecio.readOnly=!dueno;
       campoPrecio.oninput=()=>{actual.precio=campoPrecio.value;};precio.append(campoPrecio);tarjeta.append(nombre,precio);
       for(const campo of [campoNombre,campoPrecio])vigilarLectorEnCampo(campo,{salir:()=>{campo.blur();foco();},alLeer:codigo=>ctx.recibir(codigo,'usb').catch(e=>mensaje(e.message,'error'))});
+      if(actual.otraTalla)tarjeta.append(nodo('p','Otra talla de este código: se guarda como pieza aparte','ayuda'));
       if(p.calzado){
         const numero=numeroCalzado({nodo,boton},actual,p,()=>{actualizarDisparo();bloquear(botonGuardar,faltaCalzado(actual));});tarjeta.append(numero.raiz);
         vigilarLectorEnCampo(numero.campo,{salir:lector=>{if(!lector)numero.elegirPrimero();numero.campo.blur();foco();},alLeer:codigo=>ctx.recibir(codigo,'usb').catch(e=>mensaje(e.message,'error'))});
+      }else if(actual.otraTalla){
+        const selector=selectorTalla(v=>{actual.talla=v;actualizarDisparo();bloquear(botonGuardar,faltaCalzado(actual));},actual.talla??'');selector.setAttribute('aria-label','Talla');tarjeta.append(selector);
       }
     }else{
       tarjeta.append(nodo('h2',p?.nombre||'Sin registro'));
       if(p)tarjeta.append(nodo('strong',pesos(p.precios?.[actual.estado]??p.precio),'precio'));
     }
     if(actual.tipo==='existente'){
-      tarjeta.append(nodo('p',`Existencia ${p.stock}${!p.tiene_foto?' · sin foto':''}`));
+      tarjeta.append(nodo('p',`Existencia ${p.stock}${p.talla?` · talla ${p.talla}`:''}${!p.tiene_foto?' · sin foto':''}`));
       const maximo=Math.max(1,999-p.stock),rotulo=k=>p.estado_analisis==='listo'?`Sumar ${k} e imprimir ${k}`:`Sumar ${k}`;let n=Math.min(actual.cantidad||1,maximo);
       const sumar=boton(rotulo(n),async()=>{await flujo.sumar(p,n);hoy+=n;textoHoy();mensaje(flujo.actual()?.faltaEtiqueta?'Guardada · falta etiqueta':'Guardada · etiqueta enviada',flujo.actual()?.faltaEtiqueta?'aviso':'etiqueta');if(!p.tiene_foto&&!p.foto_key)await fotoPieza(p);foco();},p.tiene_foto?'primario':'');
       const conPermiso=dueno||ctx.identidad.usuario?.editar_inventario===true;
       if(conPermiso){bloquear(sumar,!navigator.onLine?'Sin red: se suma al volver la señal':'');const fila=nodo('div',undefined,'acciones');fila.append(stepper(n,v=>{n=v;sumar.textContent=rotulo(n);},{min:1,max:maximo,nombre:'Piezas a sumar'}),sumar,boton(p.tiene_foto?'Foto nueva':'Añadir foto',()=>fotoPieza(p),p.tiene_foto?'':'primario'));carta.append(fila);}else tarjeta.append(nodo('p','Solo consulta','solo-consulta'));
+      if(altaUpc&&admiteOtraTalla(p))carta.append(boton('Otra talla',()=>flujo.otraTalla(p)));
       const precioPedido=nodo('div',undefined,'bloque-precio');carta.append(precioPedido);montarPrecio(ctx,precioPedido,p);
     }else if(actual.tipo==='nueva'){
       const fila=nodo('div',undefined,'acciones');if(!piezaRopa(p))tarjeta.append(opciones(ESTADOS,actual.estado,e=>flujo.gradoNueva(e),'Grado de esta pieza'));carta.append(fila);

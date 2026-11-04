@@ -46,7 +46,7 @@ export function resultado(p, alElegir = () => ficha.abrir(p.id), reimprimir = fa
   if (conFoto) { imagen.src = `/api/foto/${p.id}`; foto.replaceChildren(imagen); }
   imagen.onerror = () => { foto.textContent = 'Sin foto'; };
   const texto = nodo('span', undefined, 'texto-pieza'), codigo = nodo(p.codigo ? 'code' : 'small', p.codigo || 'Sin código');
-  texto.append(codigo, nodo('b', p.nombre || 'Sin nombre'), nodo('small', `${pesos(p.precio)}${p.upc ? ` · ${p.upc}` : ''}${!conFoto ? ' · sin foto' : ''}`));
+  texto.append(codigo, nodo('b', p.nombre || 'Sin nombre'), nodo('small', `${pesos(p.precio)}${p.upc ? ` · ${p.upc}` : ''}${p.talla ? ` · talla ${p.talla}` : ''}${!conFoto ? ' · sin foto' : ''}`));
   b.append(foto, texto, nodo('span', `×${p.stock}`, 'insignia')); li.append(b);
   if (reimprimir) li.className = 'fila-busqueda';
   if (reimprimir && p.codigo && etiquetable(p)) {
