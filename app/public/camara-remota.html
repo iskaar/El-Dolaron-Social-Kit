@@ -19,15 +19,12 @@
   #titulo { font-size: 17px; font-weight: 700; overflow-wrap: anywhere; }
   #detalle { font-size: 14px; color: #c5d0e4; margin-top: 4px; }
   #visor { position: relative; aspect-ratio: 4 / 3; background: #000; border-radius: 12px; overflow: hidden; }
-  video, #vista { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; }
-  #vista { display: none; }
-  #zoom { width: 100%; accent-color: #fff; }
+  #vista { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; display: none; }
   button { border: 0; border-radius: 10px; padding: 12px 16px; font-size: 16px; font-weight: 700;
     background: #eef1f6; color: #111; cursor: pointer; }
   button:disabled { opacity: .5; }
   button.principal { background: var(--amarillo); }
-  #disparo { width: 88px; height: 88px; border-radius: 50%; margin: 0 auto; display: block; background: #fff;
-    border: 6px solid var(--amarillo); }
+  #disparo { margin: 0 auto; display: block; padding: 18px 32px; font-size: 20px; background: var(--amarillo); }
   #disparo[hidden], [hidden] { display: none; }
   #acciones { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; }
   #error { color: #ff9d9d; font-size: 14px; min-height: 18px; }
@@ -37,32 +34,32 @@
 <main>
   <header><h1>Cámara para la PC</h1><span id="escucha" role="status">Apagada</span></header>
   <div id="tarjeta"><div id="titulo">Sin solicitudes.</div><div id="detalle">Toca «Empezar» y deja esta pantalla abierta y encendida.</div></div>
-  <div id="visor"><video id="video" playsinline muted></video><img id="vista" alt="Foto enviada"></div>
-  <input id="zoom" type="range" aria-label="Zoom de la cámara" hidden>
-  <button id="disparo" type="button" aria-label="Tomar foto" hidden></button>
+  <div id="visor"><img id="vista" alt="Foto enviada"></div>
+  <!-- #707: la foto sale de la cámara nativa del celular (flash, resolución); esta página ya no abre el video. -->
+  <input id="nativa" type="file" accept="image/*" capture="environment" hidden>
+  <button id="disparo" type="button" aria-label="Tomar foto" hidden>Tomar foto</button>
   <div id="error" role="alert"></div>
   <div id="acciones">
     <button id="empezar" class="principal" type="button">Empezar</button>
     <button id="nopuedo" type="button" hidden>No puedo</button>
     <button id="reintentar" type="button" hidden>Reintentar envío</button>
-    <button id="pausa" type="button" hidden>Pausar cámara</button>
     <button id="recargar" type="button" hidden>Entrar de nuevo</button>
   </div>
 </main>
 <script type="module">
-import { aJpeg } from '/foto.js';
+import { reducirArchivo } from '/foto.js';
 import { SONDEO_CELULAR_MS, ESPERAS_SUBIDA_MS, FALLOS_SIN_SESION, desfase, abierta, estadoDe, segundosRestantes, reloj, inactivo, formularioFoto } from '/camara-remota.js';
 
 const RUTA = '/api/camara/solicitud';
 const $ = (id) => document.getElementById(id);
-const el = Object.fromEntries(['escucha', 'tarjeta', 'titulo', 'detalle', 'video', 'vista', 'zoom', 'disparo', 'error',
-  'empezar', 'nopuedo', 'reintentar', 'pausa', 'recargar'].map((id) => [id, $(id)]));
+const el = Object.fromEntries(['escucha', 'tarjeta', 'titulo', 'detalle', 'vista', 'nativa', 'disparo', 'error',
+  'empezar', 'nopuedo', 'reintentar', 'recargar'].map((id) => [id, $(id)]));
 
 // Cada celular tiene su UUID: así el servidor distingue «el mismo celular reintentó» de «otro la tomó».
 let telefono = crypto.randomUUID();
 try { telefono = localStorage.getItem('camara-remota-telefono') || telefono; localStorage.setItem('camara-remota-telefono', telefono); } catch { /* sin localStorage: UUID de esta pestaña */ }
 
-let flujo = null, temporizador = null, activo = false, ocupado = false, bloqueado = false;
+let temporizador = null, activo = false, ocupado = false, bloqueado = false;
 let actual = null;        // solicitud que este celular tomó
 let foto = null;          // Blob en memoria: nunca se escribe en cola-fotos.js ni en IndexedDB
 let desfaseMs = 0, ultimaActividad = Date.now(), fallos = 0, ultimoId = '';
@@ -73,41 +70,6 @@ const decir = (titulo, detalle = '', pide = false) => {
 const post = (ruta, cuerpo) => fetch(`${RUTA}/${ruta}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(cuerpo) });
 const pausar = (ms) => new Promise((ok) => setTimeout(ok, ms));
 
-/* ---------- cámara (copiada de captura.html; el zoom usa su propia clave) ---------- */
-
-async function abrirCamara() {
-  if (flujo) return true;
-  try {
-    flujo = await navigator.mediaDevices.getUserMedia({
-      video: { facingMode: { ideal: 'environment' }, width: { ideal: 1920 }, aspectRatio: { ideal: 4 / 3 }, zoom: true }, audio: false });
-    el.video.srcObject = flujo;
-    await el.video.play().catch(() => {});
-    prepararZoom(flujo.getVideoTracks()[0]);
-    el.pausa.textContent = 'Pausar cámara';
-    el.error.textContent = '';
-    return true;
-  } catch {
-    el.error.textContent = 'No se pudo abrir la cámara. Revisa los permisos del navegador.';
-    return false;
-  }
-}
-function cerrarCamara() {
-  flujo?.getTracks().forEach((t) => t.stop());
-  flujo = null; el.video.srcObject = null; el.zoom.hidden = true;
-  el.pausa.textContent = 'Reanudar cámara';
-}
-function prepararZoom(pista) {
-  const rango = pista?.getCapabilities?.().zoom;
-  el.zoom.hidden = !rango || rango.max <= rango.min;
-  if (el.zoom.hidden) return;
-  let guardado = NaN;
-  try { guardado = Number(localStorage.getItem('camara-remota-zoom') ?? NaN); } catch { /* lo más abierto */ }
-  Object.assign(el.zoom, { min: rango.min, max: rango.max, step: rango.step || 0.1 });
-  el.zoom.value = Number.isFinite(guardado) ? Math.min(rango.max, Math.max(rango.min, guardado)) : rango.min;
-  const aplicar = () => pista.applyConstraints({ advanced: [{ zoom: Number(el.zoom.value) }] }).catch(() => {});
-  el.zoom.oninput = () => { aplicar(); try { localStorage.setItem('camara-remota-zoom', el.zoom.value); } catch { /* idem */ } };
-  aplicar();
-}
 async function mantenerPantalla() {
   try { await navigator.wakeLock?.request('screen'); } catch { /* sin Wake Lock: queda el tiempo de pantalla del sistema */ }
 }
@@ -166,8 +128,7 @@ async function atender(s) {
   if (!r.ok) return soltar(d.error ?? 'No se pudo tomar la solicitud.');
   navigator.vibrate?.(200);
   actual = d.solicitud;
-  if (!await abrirCamara()) return;
-  el.disparo.hidden = false; el.nopuedo.hidden = false; el.pausa.hidden = false;
+  el.disparo.hidden = false; el.nopuedo.hidden = false;
   decir(`Foto para: ${actual.titulo || 'pieza nueva'}`, '', true);
   mostrarTiempo(actual);
 }
@@ -209,9 +170,13 @@ function terminarEnvio() {
   setTimeout(() => { el.vista.style.display = 'none'; URL.revokeObjectURL(miniatura); decir('Sin solicitudes.', 'Deja esta pantalla abierta y encendida.'); }, 2000);
 }
 
-el.disparo.addEventListener('click', async () => {
-  if (!actual || ocupado || !el.video.videoWidth) return;
-  foto = await aJpeg(el.video, el.video.videoWidth, el.video.videoHeight);
+// El clic del usuario abre la cámara nativa (un input file exige gesto: por eso la solicitud muestra este botón).
+el.disparo.addEventListener('click', () => { if (actual && !ocupado) el.nativa.click(); });
+el.nativa.addEventListener('change', async () => {
+  const archivo = el.nativa.files?.[0];
+  el.nativa.value = '';
+  if (!archivo || !actual || ocupado) return;   // cancelada, o la PC soltó la solicitud mientras tomabas la foto
+  try { foto = await reducirArchivo(archivo); } catch { el.error.textContent = 'No se pudo leer la foto. Intenta de nuevo.'; return; }
   enviar();
 });
 el.reintentar.addEventListener('click', enviar);
@@ -220,20 +185,17 @@ el.nopuedo.addEventListener('click', async () => {
   await post(`${actual.id}/cancelar`, { motivo: 'No puedo' }).catch(() => {});
   actual = null; soltar('Avisé a la PC.');
 });
-el.pausa.addEventListener('click', () => { if (flujo) cerrarCamara(); else abrirCamara(); });
 el.recargar.addEventListener('click', () => location.reload());
 
 el.empezar.addEventListener('click', async () => {
-  // Chrome exige un gesto para la cámara y el Wake Lock: por eso el botón.
+  // Chrome exige un gesto para el Wake Lock: por eso el botón.
   if (navigator.locks && !bloqueado) {
     // Una sola pestaña escucha por celular; el bloqueo se suelta al cerrarla.
     bloqueado = await new Promise((ok) => navigator.locks.request('camara-remota', { ifAvailable: true },
       (candado) => { ok(!!candado); return candado ? new Promise(() => {}) : undefined; }));
     if (!bloqueado) { el.error.textContent = 'Ya hay otra pestaña de este celular escuchando.'; return; }
   }
-  if (!await abrirCamara()) return;
   mantenerPantalla();
-  el.pausa.hidden = false;
   decir('Sin solicitudes.', 'Deja esta pantalla abierta y encendida.');
   seguir();
 });
