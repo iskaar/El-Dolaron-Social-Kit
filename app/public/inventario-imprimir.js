@@ -44,7 +44,7 @@ export async function iniciar(ctx) {
   // Solo el nodo visual de estado anuncia: el motor conserva sus mensajes y sus controles.
   let estadoParcial=null,totalLote=0,enviadasLote=0;
   Object.defineProperty(resumen,'textContent',{get(){return this._texto||'';},set(t){this._texto=t;
-    let texto=t,tipo=/fall|error|cort|detuvo|incierto|desconect/i.test(t)?'aviso':/enviad/i.test(t)?'etiqueta':'neutro';
+    let texto=t,tipo=/fall|error|cort|detuvo|incierto|desconect|no se imprimi/i.test(t)?'aviso':/enviad/i.test(t)?'etiqueta':'neutro';
     const avance=/etiqueta (\d+) de (\d+)/.exec(t);
     if(estadoParcial&&/cort|Detenido|detuvo/i.test(t)){texto=`Salieron ${estadoParcial.hechas} de ${estadoParcial.total}`;tipo='error';}
     else if(avance)texto=`Enviando ${enviadasLote+Number(avance[1])}/${totalLote||avance[2]}`;
