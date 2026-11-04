@@ -11,7 +11,7 @@ import { decodificarNombre } from './nombre.ts';
 import { codigoLeido, SIN_CODIGO } from '../public/upc.js';
 import { ESTADOS } from '../public/estados.js';
 import { guardarImagenComoFoto, imagenGuardada, procesarRellenoImagenes, rutaImagenUpc, rutaImagenPieza } from './imagenes-upc.ts';
-import { PRENDAS_ROPA, PRECIOS_ROPA } from '../public/ropa.js';
+import { PRENDAS_ROPA, PRECIOS_ROPA, nombreRopa, partesDeNombre, paqueteValido } from '../public/ropa.js';
 import { procesarColaRopa, rutaRopaAdmin } from './ropa-ia.ts';
 import { calcularPrecio, ajustarManual, esDestinoBanda, prefijoParaFamilia, MONTOS_BANDA, type Destino } from './precio.ts';
 import { efectivoAlcanza, promoInauguracion, CLAVE_DESDE, claveRastreoDe } from '../public/venta.js';
@@ -163,10 +163,12 @@ const estacionValida = (valor: unknown): valor is string =>
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const FOTO_MAX_BYTES = 6 * 1024 * 1024;
 const textoCapturaRopa = (valor: unknown) => typeof valor === 'string' && valor.trim().length <= 40 && !/[\r\n]/.test(valor);
-const nombreRopa = (prenda: string, marca: string) => [prenda || 'Ropa', marca].filter(Boolean).join(' ');
-const prendaDeNombre = (nombre: string, marca: string) => {
-  const base = marca && nombre.endsWith(` ${marca}`) ? nombre.slice(0, -(marca.length + 1)) : nombre;
-  return base === 'Ropa' ? '' : base;
+// nombreRopa / partesDeNombre (public/ropa.js, #714): el paquete ×N vive solo en el nombre; las respuestas llevan `prenda` y `paquete`.
+/** Paquete del formulario: ausente, vacío o 0 = sin paquete; si viene, entero de 2 a 24. null = inválido. */
+const paqueteDe = (valor: unknown): number | null => {
+  if (valor === undefined || valor === null || valor === '' || valor === 0 || valor === '0') return 0;
+  const n = typeof valor === 'number' ? valor : /^\d{1,3}$/.test(String(valor)) ? Number(valor) : NaN;
+  return paqueteValido(n) ? n : null;
 };
 const capturaRopaDisponible = (env: Env) => !env.AMBIENTE || env.AMBIENTE === 'produccion' || env.AMBIENTE === 'sandbox';
 
@@ -216,6 +218,7 @@ async function crearBorrador(request: Request, env: Env, ctx: ExecutionContext, 
   const marcaRaw = formulario.get('marca') ?? '';
   const prenda = typeof prendaRaw === 'string' ? prendaRaw.trim() : '\n';
   const marca = typeof marcaRaw === 'string' ? marcaRaw.trim() : '\n';
+  const paquete = paqueteDe(formulario.get('paquete'));
 
   if (!UUID.test(id)) {
     return json({ error: 'Identificador invalido.' }, 400);
@@ -226,8 +229,12 @@ async function crearBorrador(request: Request, env: Env, ctx: ExecutionContext, 
   if (talla !== null && !tallaValida(talla)) {
     return json({ error: 'Talla invalida.' }, 400);
   }
-  if (precioRopa !== null && (!capturaRopaDisponible(env) || !PRECIOS_ROPA.includes(precioRopa))) {
+  // Ropa sin código (#714): los escalones los usa cualquiera; un precio libre (entero de centavos > 0) solo quien fija precios (dueño).
+  if (precioRopa !== null && (!capturaRopaDisponible(env) || !Number.isSafeInteger(precioRopa) || precioRopa <= 0)) {
     return json({ error: 'Precio de ropa invalido.' }, 400);
+  }
+  if (paquete === null) {
+    return json({ error: 'Paquete invalido: de 2 a 24 piezas.' }, 400);
   }
   if (!textoCapturaRopa(prendaRaw) || (prenda && !PRENDAS_ROPA.includes(prenda)) || !textoCapturaRopa(marcaRaw)) {
     return json({ error: 'Prenda o marca invalida.' }, 400);
@@ -239,7 +246,12 @@ async function crearBorrador(request: Request, env: Env, ctx: ExecutionContext, 
     return json({ error: 'La foto pesa demasiado.' }, 413);
   }
 
-  const propietario = propietarioDe(await leerUsuario(env, correo));
+  const usuario = await leerUsuario(env, correo);
+  const propietario = propietarioDe(usuario);
+  // 400 y no 403: un 403 detiene la cola de fotos del celular como si hubiera vencido la sesión.
+  if (precioRopa !== null && !PRECIOS_ROPA.includes(precioRopa) && !autorizarPrecio(usuario, { codigo: null, preciadaPorSistema: true })) {
+    return json({ error: 'Solo el dueño escribe un precio fuera de los escalones de ropa.' }, 400);
+  }
   const existente = await env.DB.prepare('select id, nombre, precio, estado_fisico, estado_analisis, stock, talla, propietario, foto_key from productos where id = ?')
     .bind(id).first<{ estado_analisis: string; propietario: string; foto_key: string }>();
   if (existente && existente.propietario !== propietario) return json({ error: 'Pieza no encontrada.' }, 404);
@@ -312,13 +324,13 @@ async function crearBorrador(request: Request, env: Env, ctx: ExecutionContext, 
                               estado_fisico, stock, talla, foto_key, capturado_por, creado_en, actualizado_en, propietario, por_revisar)
        values (?, ?, ?, 'ropa', ?, 'listo', 'etiqueta', ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
        on conflict (id) do nothing`,
-    ).bind(id, nombreRopa(prenda, marca), marca, precioRopa, semanaIngreso(ahora), estadoFisico, cantidad, talla, fotoKey,
+    ).bind(id, nombreRopa(prenda, marca, paquete), marca, precioRopa, semanaIngreso(ahora), estadoFisico, cantidad, talla, fotoKey,
       capturadoPor, ahora.toISOString(), ahora.toISOString(), propietario).run();
     await subirFoto();
     const guardada = await env.DB.prepare('select id, nombre, marca, precio, estado_fisico, estado_analisis, stock, talla, codigo, por_revisar from productos where id = ?')
       .bind(id).first<{ estado_analisis: string; nombre: string; marca: string; codigo: string | null }>();
     if (guardada?.estado_analisis === 'descartado' && !guardada.codigo) await env.FOTOS.delete(fotoKey);
-    return json(guardada ? { ...guardada, prenda: prendaDeNombre(guardada.nombre, guardada.marca) } : guardada, 201);
+    return json(guardada ? { ...guardada, ...partesDeNombre(guardada.nombre, guardada.marca) } : guardada, 201);
   }
   const fotoGuardada = await env.DB.prepare(
     `insert into productos (id, semana_ingreso, estado_fisico, stock, talla, foto_key, capturado_por, creado_en, actualizado_en, propietario, upc, por_revisar)
@@ -1103,7 +1115,7 @@ async function revisarCaptura(id: string, request: Request, env: Env, correo: st
     const config = fila.por_revisar && conBanda && fila.precio_lista > 0 ? await leerConfig(env) : null;
     const precios = config && Object.fromEntries([...ESTADOS_FISICOS].map((e) =>
       [e, calcularPrecio({ precioLista: fila.precio_lista, categoria: fila.categoria || 'otros', estadoFisico: e, config }).precio]));
-    return json({ ...fila, prenda: prendaDeNombre(fila.nombre, fila.marca), ...(precios ? { precios } : {}) });
+    return json({ ...fila, ...partesDeNombre(fila.nombre, fila.marca), ...(precios ? { precios } : {}) });
   }
   if (request.method === 'DELETE') {
     const retirable = `${alcance}
@@ -1130,17 +1142,22 @@ async function revisarCaptura(id: string, request: Request, env: Env, correo: st
   if (request.method !== 'PATCH') return json({ error: 'Metodo no permitido.' }, 405);
   const cambios = await request.json().catch(() => null) as Record<string, unknown> | null;
   if (!cambios || Array.isArray(cambios) || typeof cambios !== 'object' || !Object.keys(cambios).length
-      || Object.keys(cambios).some((k) => !['precio', 'estado_fisico', 'prenda', 'marca', 'nombre', 'confirmar'].includes(k))
+      || Object.keys(cambios).some((k) => !['precio', 'estado_fisico', 'prenda', 'marca', 'paquete', 'nombre', 'confirmar'].includes(k))
       || (cambios.confirmar !== undefined && cambios.confirmar !== true)) {
     return json({ error: 'Corrección invalida.' }, 400);
   }
   // #573: en la revisión de una pieza nueva el precio y el nombre se editan como en la tarjeta UPC. Ropa conserva sus precios fijos.
   const libre = conBanda && !!fila.por_revisar;
-  if (cambios.precio !== undefined && (typeof cambios.precio !== 'number'
-      || (libre ? !Number.isSafeInteger(cambios.precio) || cambios.precio <= 0 : !PRECIOS_ROPA.includes(cambios.precio)))) {
-    return json({ error: libre ? 'Escribe un precio mayor a cero en pesos.' : 'Escoge $200, $150, $100, $80 o $50 MXN.' }, 400);
-  }
   const usuario = await leerUsuario(env, correo);
+  // Ropa sin código (#714): escalones para todos; un precio libre solo lo escribe quien fija precios (dueño). Repetir el precio actual no cuenta.
+  const fijo = typeof cambios.precio === 'number' && PRECIOS_ROPA.includes(cambios.precio);
+  if (cambios.precio !== undefined && (typeof cambios.precio !== 'number' || !Number.isSafeInteger(cambios.precio) || cambios.precio <= 0
+      || (conBanda && !libre && !fijo))) {
+    return json({ error: conBanda && !libre ? 'Escoge $300, $200, $150, $120, $100, $80 o $50 MXN.' : 'Escribe un precio mayor a cero en pesos.' }, 400);
+  }
+  if (!conBanda && cambios.precio !== undefined && !fijo && cambios.precio !== fila.precio && !autorizarPrecio(usuario, { codigo: null, preciadaPorSistema: true })) {
+    return json({ error: 'Solo el dueño escribe un precio fuera de los escalones de ropa.' }, 403);
+  }
   const nombreEditado = cambios.nombre === undefined ? undefined : typeof cambios.nombre === 'string' ? decodificarNombre(cambios.nombre).trim().slice(0, 120) : '';
   if (nombreEditado !== undefined && !libre) return json({ error: 'El nombre solo se corrige al revisar una pieza nueva (en ropa sale de prenda y marca).' }, 400);
   if (nombreEditado === '') return json({ error: 'El nombre no puede quedar vacío.' }, 400);
@@ -1152,10 +1169,13 @@ async function revisarCaptura(id: string, request: Request, env: Env, correo: st
   }
   if ((cambios.prenda !== undefined && (!textoCapturaRopa(cambios.prenda) || (String(cambios.prenda).trim() !== '' && !PRENDAS_ROPA.includes(String(cambios.prenda).trim()))))
       || (cambios.marca !== undefined && !textoCapturaRopa(cambios.marca))) return json({ error: 'Prenda o marca invalida.' }, 400);
-  if ((cambios.prenda !== undefined || cambios.marca !== undefined) && fila.categoria !== 'ropa') return json({ error: 'Solo se corrige prenda y marca en ropa.' }, 400);
-  const prenda = cambios.prenda === undefined ? prendaDeNombre(fila.nombre, fila.marca) : cambios.prenda as string;
+  const paqueteNuevo = cambios.paquete === undefined ? undefined : typeof cambios.paquete === 'number' ? paqueteDe(cambios.paquete) : null;
+  if (paqueteNuevo === null) return json({ error: 'Paquete invalido: de 2 a 24 piezas.' }, 400);
+  if ((cambios.prenda !== undefined || cambios.marca !== undefined || paqueteNuevo !== undefined) && fila.categoria !== 'ropa') return json({ error: 'Solo se corrige prenda, marca y paquete en ropa.' }, 400);
+  const actualRopa = partesDeNombre(fila.nombre, fila.marca);
+  const prenda = cambios.prenda === undefined ? actualRopa.prenda : cambios.prenda as string;
   const marca = cambios.marca === undefined ? fila.marca : cambios.marca as string;
-  const nombre = nombreEditado ?? (cambios.prenda === undefined && cambios.marca === undefined ? fila.nombre : nombreRopa(prenda.trim(), marca.trim()));
+  const nombre = nombreEditado ?? (cambios.prenda === undefined && cambios.marca === undefined && paqueteNuevo === undefined ? fila.nombre : nombreRopa(prenda.trim(), marca.trim(), paqueteNuevo ?? actualRopa.paquete));
   const grado = String(cambios.estado_fisico ?? fila.estado_fisico);
   const conflicto = cambios.estado_fisico !== undefined ? await conflictoUpc(env, fila.upc || '', grado, claveTalla(fila.talla), fila.propietario, id) : null;
   if (conflicto) return conflicto;
@@ -1184,10 +1204,10 @@ async function revisarCaptura(id: string, request: Request, env: Env, correo: st
     const pedida = await crearSolicitud(env, id, fila.propietario, correo, { id: crypto.randomUUID(), sentido: sugerido! > fila.precio ? 'subir' : 'bajar', sugerido, nota: cambios.precio === undefined ? 'Por cambio de grado' : 'Desde la miniatura de captura' });
     // 409 = ya había una pendiente de esta pieza: el dueño ya la tiene. Otro error: lo demás quedó guardado, el precio no.
     const error = pedida.status === 409 || pedida.ok ? '' : (await pedida.json().catch(() => ({})) as { error?: string }).error ?? 'No se pudo pedir el cambio de precio.';
-    return json({ ...guardada, prenda: prendaDeNombre(guardada.nombre, guardada.marca), solicitud_precio: !error,
+    return json({ ...guardada, ...partesDeNombre(guardada.nombre, guardada.marca), solicitud_precio: !error,
       aviso: error || 'Se pidió el cambio de precio al dueño' });
   }
-  return json(guardada ? { ...guardada, prenda: prendaDeNombre(guardada.nombre, guardada.marca) } : guardada);
+  return json(guardada ? { ...guardada, ...partesDeNombre(guardada.nombre, guardada.marca) } : guardada);
 }
 
 /**

@@ -56,7 +56,7 @@ test('ropa sin código sigue con prenda, marca y precio fijo', async (t0) => {
   const r = await worker.fetch!(new Request('https://caja.prueba/api/borradores', { method: 'POST', body: ropa }) as never, t.env, t.ctx as never);
   assert.equal(r.status, 201);
   assert.equal(t.fila(id).nombre, 'Pijama Squishmallows');
-  assert.equal((await t.pedir(`/api/borradores/${id}/revision`, { confirmar: true, precio: 17900 }, 'PATCH')).status, 400, 'precio fuera de la lista de ropa');
+  assert.equal((await t.pedir(`/api/borradores/${id}/revision`, { confirmar: true, precio: 0 }, 'PATCH')).status, 400, 'precio no positivo (el libre es del dueño: ropa-prendas.test.ts)');
   assert.equal((await t.pedir(`/api/borradores/${id}/revision`, { confirmar: true, nombre: 'Otro' }, 'PATCH')).status, 400, 'el nombre sale de prenda y marca');
   assert.equal(t.fila(id).por_revisar, 1);
 });

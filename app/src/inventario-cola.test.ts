@@ -4,9 +4,10 @@ import { readFileSync } from 'node:fs';
 import { runInNewContext } from 'node:vm';
 import { registroFoto, crearSubida, formularioPendiente } from '../public/foto-pendiente.js';
 import { crearCamara } from '../public/camara-inventario.js';
+import { aCentavos } from '../public/ficha.js';
 import { permitidaParaVendedor } from './worker.ts';
-import { PRENDAS_ROPA, MARCAS_ROPA, PRECIO_PRENDA, PRECIOS_ROPA } from '../public/ropa.js';
-import { TALLAS_ADULTO, EDADES_NINO, TALLAS_NINO, TABLAS_CALZADO, CALZADO_INICIAL, calzadoRenglon, calzadoValor, calzadoGuardado } from '../public/tallas.js';
+import { PRENDAS_ROPA, MARCAS_ROPA, PRECIO_PRENDA, PRECIOS_ROPA, PAQUETES, PAQUETE_MAX, paqueteValido } from '../public/ropa.js';
+import { TALLAS_ADULTO, TALLA_NINO_UNICA, EDADES_NINO, TALLAS_NINO, TABLAS_CALZADO, CALZADO_INICIAL, calzadoRenglon, calzadoValor, calzadoGuardado } from '../public/tallas.js';
 
 function ropaUI(bloquearAlmacenamiento=false) {
   class Nodo {
@@ -28,7 +29,7 @@ function ropaUI(bloquearAlmacenamiento=false) {
   const almacen=new Map<string,string>(),hojas:Nodo[]=[];
   const fuente=readFileSync('public/inventario-ropa.js','utf8').replace(/^import .*;\r?\n/gm,'').replaceAll('export ','');
   const ui=runInNewContext(fuente+';({ropa,talla,rodillo})',{
-    PRENDAS_ROPA,MARCAS_ROPA,PRECIO_PRENDA,PRECIOS_ROPA,TALLAS_ADULTO,EDADES_NINO,TALLAS_NINO,TABLAS_CALZADO,CALZADO_INICIAL,calzadoRenglon,calzadoValor,calzadoGuardado,
+    PRENDAS_ROPA,MARCAS_ROPA,PRECIO_PRENDA,PRECIOS_ROPA,PAQUETES,PAQUETE_MAX,paqueteValido,TALLA_NINO_UNICA,aCentavos,TALLAS_ADULTO,EDADES_NINO,TALLAS_NINO,TABLAS_CALZADO,CALZADO_INICIAL,calzadoRenglon,calzadoValor,calzadoGuardado,
     nodo:(_tag:string,texto='',clase='')=>Object.assign(new Nodo(),{textContent:texto,className:clase}),
     boton:(texto:string,accion:Function)=>Object.assign(new Nodo(),{textContent:texto,onclick:accion}),
     hoja:(_titulo:string,c:Nodo)=>hojas.push(c),cerrarHoja(){},matchMedia:()=>({matches:true}),
@@ -250,4 +251,72 @@ test('host del capturista sirve las importaciones de Capturar, Buscar, Revisar e
   for(const archivo of ['inventario-imprimir.js','imprimir-lote.js','etiquetera.js','impresora.js','code128.js'])assert.equal(permitidaParaVendedor('/'+archivo,'GET'),true,archivo);   // imprimir desde el celular (#440)
   for(const ruta of ['/admin','/api/config','/api/etiquetas','/api/etiquetas/enviadas','/etiquetas'])assert.equal(permitidaParaVendedor(ruta,'GET'),false,ruta);
   const fuente=readFileSync('public/cola-fotos.js','utf8');assert.match(fuente,/indexedDB.open\('eldolaron', 1\)/);assert.match(fuente,/createObjectStore\('pendientes', \{ keyPath: 'id' \}\)/);
+});
+
+test('paquete ×N (#714): chip aparte de la prenda, «Otro…» de 2 a 24, no se recuerda y vuelve a «Sin paquete» con cada pieza',()=>{
+  const ui=ropaUI(),tablero=ui.ropa({pc:()=>false,mensaje:()=>{}});tablero.sincronizar();
+  const paquetes=ui.buscar(tablero.raiz,'Paquete')!;
+  assert.deepEqual(paquetes.children.map(n=>n.textContent),['Sin paquete','×2','×3','×4','×5','×6','Otro…']);
+  assert.equal(tablero.valores().paquete,0);assert.equal(paquetes.children[0].getAttribute('aria-pressed'),'true');
+  paquetes.children[2].onclick();
+  assert.equal(tablero.valores().paquete,3);assert.equal(paquetes.children[2].getAttribute('aria-pressed'),'true');
+  // Otro…: abre un campo numérico; un valor fuera de 2 a 24 no se acepta.
+  const avisos:string[]=[],con=ui.ropa({pc:()=>false,mensaje:(m:string)=>avisos.push(m)});con.sincronizar();
+  const chips=ui.buscar(con.raiz,'Paquete')!,otro=chips.children.at(-1)!;
+  otro.onclick();
+  const hoja=ui.hojas.at(-1)!,campo=hoja.children[0].children[0] as any,usar=hoja.children[1];
+  assert.equal(campo.type,'number');assert.equal(campo.min,'2');assert.equal(campo.max,'24');
+  for(const mal of ['1','25','','2.5']){campo.value=mal;usar.onclick();assert.equal(con.valores().paquete,0,mal);}
+  assert.equal(avisos.length,4);assert.equal(otro.getAttribute('aria-pressed'),'false','Otro… no queda marcado si no se eligió');
+  campo.value='12';usar.onclick();
+  assert.equal(con.valores().paquete,12);assert.equal(otro.textContent,'×12');assert.equal(otro.getAttribute('aria-pressed'),'true');
+  // Lo que viaja en el formulario de la cola; sin paquete no viaja.
+  con.valores().paquete===12&&assert.equal(formularioPendiente(registroFoto(new Blob(['f']),{...con.valores(),talla:'M',precio_ropa:10000})).get('paquete'),'12');
+  // Nada se recuerda: un tablero nuevo (otra sesión) empieza sin paquete, y la pieza siguiente también.
+  assert.equal(ui.ropa({pc:()=>false,mensaje:()=>{}}).valores().paquete,0);
+  assert.equal([...ui.almacen.keys()].some(k=>k.includes('paquete')),false);
+  con.reiniciarPaquete();assert.equal(con.valores().paquete,0);assert.equal(otro.textContent,'Otro…');assert.equal(chips.children[0].getAttribute('aria-pressed'),'true');
+  tablero.reiniciarPaquete();assert.equal(tablero.valores().paquete,0);
+  // La corrección arranca con el paquete que ya tiene la pieza.
+  assert.equal(ui.ropa({pc:()=>false,mensaje:()=>{},recordar:false,inicial:{paquete:4}}).valores().paquete,4);
+});
+
+test('prendas de calzado y accesorios en el rodillo y Unitalla como chip de talla (#714)',()=>{
+  const ui=ropaUI(),tablero=ui.ropa({pc:()=>false,mensaje:()=>{}});tablero.sincronizar();
+  const prenda=ui.buscar(tablero.raiz,'Prenda')!,textos=prenda.children.map(n=>n.textContent);
+  for(const p of ['Pantuflas','Tenis','Gorro','Guantes','Ropa interior'])assert.ok(textos.includes(p),p);
+  ui.desplazar(prenda,textos.indexOf('Pantuflas'));assert.equal(tablero.valores().prenda,'Pantuflas');assert.equal(tablero.valores().precio_ropa,12000);
+  ui.desplazar(prenda,textos.length-1);assert.equal(tablero.valores().prenda,PRENDAS_ROPA.at(-1),'el último renglón del rodillo se alcanza');
+  const tallas=ui.buscar(tablero.raiz,'Talla')!.children[0];
+  assert.ok(tallas.children.some(n=>n.dataset.valor==='Unitalla'));
+  tallas.children.find(n=>n.dataset.valor==='Unitalla')!.onclick();assert.equal(tablero.valores().talla,'Unitalla');assert.equal(tablero.faltante(),'');
+  tallas.children.find(n=>n.dataset.valor==='Niño Unitalla')!.onclick();assert.equal(tablero.valores().talla,'Niño Unitalla');
+  assert.equal(ui.hojas.length,0,'Niño Unitalla es un chip directo: no abre edad ni letra');
+  // Al corregir una pieza que ya la tiene, el chip queda marcado y no se confunde con «Niño…» (edad).
+  const corr=ui.ropa({pc:()=>false,mensaje:()=>{},recordar:false,inicial:{talla:'Niño Unitalla',prenda:'Gorro',precio_ropa:8000}});corr.sincronizar();
+  const chips=ui.buscar(corr.raiz,'Talla')!.children[0];
+  assert.equal(chips.children.find(n=>n.dataset.valor==='Niño Unitalla')!.getAttribute('aria-pressed'),'true');
+  assert.equal(chips.children.find(n=>n.dataset.valor==='Niño')!.getAttribute('aria-pressed'),'false');
+});
+
+test('«Otro precio» (#714): solo aparece para el dueño, acepta pesos y no se mueve al desplazar el rodillo',()=>{
+  const sin=ropaUI(),normal=sin.ropa({pc:()=>false,mensaje:()=>{}});normal.sincronizar();
+  const botones=(n:any):any[]=>[n,...n.children.flatMap(botones)];
+  assert.equal(botones(normal.raiz).some(n=>n.textContent==='Otro precio'),false,'quien no fija precios no lo ve');
+  const ui=ropaUI(),avisos:string[]=[],dueno=ui.ropa({pc:()=>false,mensaje:(m:string)=>avisos.push(m),dueno:true});dueno.sincronizar();
+  const boton=botones(dueno.raiz).find(n=>n.textContent==='Otro precio')!;
+  boton.onclick();
+  const hoja=ui.hojas.at(-1)!,campo=hoja.children[0].children[0] as any,usar=hoja.children[1];
+  for(const mal of ['','0','abc','-5','1234567890']){campo.value=mal;usar.onclick();}
+  assert.equal(dueno.valores().precio_ropa,null);assert.equal(avisos.length,5);
+  campo.value='235.5';usar.onclick();
+  assert.equal(dueno.valores().precio_ropa,23550);assert.equal(boton.textContent,'$235.5');assert.equal(boton.getAttribute('aria-pressed'),'true');
+  assert.equal(dueno.faltante(),'Falta talla','con precio libre solo falta la talla');
+  // Un precio libre no deja el rodillo eligiendo $300 por un scroll programático.
+  const precio=ui.buscar(dueno.raiz,'Precio')!;ui.desplazar(precio,3);
+  assert.equal(dueno.valores().precio_ropa,PRECIOS_ROPA[3]);assert.equal(boton.textContent,'Otro precio');
+  // Corregir una pieza con precio libre ya guardado no lo cambia por abrir la hoja.
+  const corr=ui.ropa({pc:()=>false,mensaje:()=>{},recordar:false,dueno:true,inicial:{precio_ropa:17900}});corr.sincronizar();
+  assert.equal(corr.valores().precio_ropa,17900);
+  assert.equal(botones(corr.raiz).find(n=>n.textContent==='$179')!.getAttribute('aria-pressed'),'true');
 });

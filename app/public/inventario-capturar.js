@@ -215,7 +215,7 @@ export async function iniciar(ctx) {
   const tipo=nodo('div',undefined,'segmentado');tipo.setAttribute('role','group');tipo.setAttribute('aria-label','Tipo de pieza');
   let esRopa=localStorage.getItem('captura-modo')==='ropa',estado='nuevo',cantidad=1,pendienteFoto=false,consulta='',movil;
   const mercancia=boton('Mercancía',()=>elegirTipo(false)),prenda=boton('Ropa',()=>elegirTipo(true));tipo.append(mercancia,prenda);
-  const tablero=ropa({pc,mensaje,cambiar:()=>actualizarDisparo()});
+  const tablero=ropa({pc,mensaje,dueno,cambiar:()=>actualizarDisparo()});
   const grado=opciones(ESTADOS,estado,e=>{estado=e;flujo.estado(e);},'Grado');
   const contador=stepper(1,n=>cantidad=n,{nombre:'Piezas'});
   const lista=nodo('ul',undefined,'lista'),pieza=nodo('div'),remota=nodo('div',undefined,'solicitud-celular');
@@ -347,7 +347,7 @@ export async function iniciar(ctx) {
     if(pendienteFoto)return;
     pendienteFoto=true;actualizarDisparo();if(!a)pieza.replaceChildren();
     const id=a?.id||crypto.randomUUID(),params={cantidad:a?.cantidad||cantidad,estado_fisico:esRopa&&!a?.upc?'nuevo':a?.estado||estado,...(a?.upc?{upc:a.upc,...(a.talla?{talla:a.talla}:{})}:esRopa?tablero.valores():{upc:''})};
-    try{const {pedirFoto}=await import('./camara-pc.js');$('chip-celular').textContent='● Esperando foto';const r=await pedirFoto({tipo:'pieza_nueva',pieza_id:id,params,contenedor:remota});if(['lista','cancelada'].includes(r.estado))remota.replaceChildren();if(r.estado==='lista'){hoy+=params.cantidad;textoHoy();const d=await api(`/api/piezas/${id}`);flujo.elegir(d.pieza);contador.poner(1);$('chip-celular').textContent='● Celular · Listo';mensaje('Foto recibida','ok');}else{$('chip-celular').textContent='■ No responde';mensaje(r.motivo||'El celular no responde','aviso');}}
+    try{const {pedirFoto}=await import('./camara-pc.js');$('chip-celular').textContent='● Esperando foto';const r=await pedirFoto({tipo:'pieza_nueva',pieza_id:id,params,contenedor:remota});if(['lista','cancelada'].includes(r.estado))remota.replaceChildren();if(r.estado==='lista'){hoy+=params.cantidad;textoHoy();if(esRopa&&!a)tablero.reiniciarPaquete();const d=await api(`/api/piezas/${id}`);flujo.elegir(d.pieza);contador.poner(1);$('chip-celular').textContent='● Celular · Listo';mensaje('Foto recibida','ok');}else{$('chip-celular').textContent='■ No responde';mensaje(r.motivo||'El celular no responde','aviso');}}
     finally{pendienteFoto=false;actualizarDisparo();if(!flujo.actual())vacioPieza();foco();}
   }
   function manual(){

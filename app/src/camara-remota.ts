@@ -2,6 +2,7 @@ import { propietarioDe, type Usuario } from './cuentas.ts';
 import { normalizarUpc } from './manifiesto.ts';
 import { SIN_CODIGO } from '../public/upc.js';
 import { ESTADOS } from '../public/estados.js';
+import { paqueteValido } from '../public/ropa.js';
 
 interface Solicitud {
   correo: string;
@@ -20,7 +21,7 @@ interface Solicitud {
 }
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const CLAVES = ['estado_fisico', 'cantidad', 'upc', 'talla', 'prenda', 'marca', 'precio_ropa'];
+const CLAVES = ['estado_fisico', 'cantidad', 'upc', 'talla', 'prenda', 'marca', 'precio_ropa', 'paquete'];
 export const CONSULTA_BUZON = 'select * from camara_remota where correo = ?';
 const vencida = (s: Solicitud, ahora: string) => ['pendiente', 'tomada'].includes(s.estado) && s.vence_en <= ahora;
 
@@ -41,6 +42,7 @@ function paramsValidos(params: Record<string, unknown>): boolean {
   if (params.estado_fisico !== undefined && !ESTADOS.some(([e]) => e === params.estado_fisico)) return false;
   if (params.upc !== undefined && (typeof params.upc !== 'string' || (params.upc !== SIN_CODIGO && !normalizarUpc(params.upc)))) return false;
   if (['talla', 'prenda', 'marca'].some((k) => params[k] !== undefined && (typeof params[k] !== 'string' || (params[k] as string).length > 80))) return false;
+  if (params.paquete !== undefined && params.paquete !== 0 && !paqueteValido(params.paquete as number)) return false;   // 0 = sin paquete
   return params.precio_ropa === undefined || (typeof params.precio_ropa === 'number' && Number.isSafeInteger(params.precio_ropa) && params.precio_ropa >= 0);
 }
 
