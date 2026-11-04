@@ -219,7 +219,11 @@ const cuerpoPublicar = (extra: Record<string, unknown> = {}) => ({
   guia_fila_id: '26008:1', descripcion: 'Jeans nuevos', ...extra,
 });
 
+/** #724: lo que hace la ruta cuando alguien escanea la etiqueta en piso; los demás tests parten de piezas ya confirmadas. */
+const confirmarEnPiso = (t: Tienda, id: string) =>
+  t.db.prepare(`update productos set existencia_confirmada_en = '2026-11-04T12:00:00.000Z', existencia_confirmada_por = ? where id = ?`).run(DUENO, id);
 const publicarPieza = async (t: Tienda, id = pieza(t)) => {
+  confirmarEnPiso(t, id);
   const r = await t.pedir(`/api/ml/publicar/${id}`, cuerpoPublicar());
   assert.equal(r.status, 201, JSON.stringify(r.cuerpo));
   return { id, itemId: r.cuerpo.publicacion.ml_item_id as string };
@@ -785,6 +789,63 @@ test('pausar y reactivar: cambian ML y la fila; sin existencias no se reactiva',
     assert.equal((await t.pedir(`/api/ml/pausar/${pieza(t)}`, {})).status, 404);   // sin publicar
   });
 });
+
+test('piso (#724): con menos de 3 existencias no se publica sin confirmar en piso; confirmar lo permite y un cambio de stock lo invalida', () => conML(async (t) => {
+  const id = pieza(t, { stock: 2 });
+  const codigo = (t.db.prepare('select codigo from productos where id = ?').get(id) as { codigo: string }).codigo;
+  const texto = 'Tiene 2 existencias: confirma la pieza en piso escaneando su etiqueta en Inventario antes de publicarla.';
+  for (const ruta of ['publicar', 'preparar']) {
+    const r = await t.pedir(`/api/ml/${ruta}/${id}`, ruta === 'publicar' ? cuerpoPublicar() : {});
+    assert.equal(r.status, 409);
+    assert.equal(r.cuerpo.error, texto);
+  }
+  assert.equal(t.sim.llamadas.some((l) => l.metodo === 'POST' && l.ruta === '/items'), false);
+  let lista = (await t.pedir('/api/ml/piezas?filtro=pendientes')).cuerpo.piezas;
+  assert.equal(lista[0].existencia_confirmada_en, null);
+
+  // La etiqueta debe ser de la pieza y la existencia la que se vio.
+  const ruta = `/api/piezas/${id}/confirmar-existencia`;
+  assert.equal((await t.pedir(ruta, { codigo: 'ED-999999', esperado: 2 })).status, 409);
+  assert.equal((await t.pedir(ruta, { codigo, esperado: 5 })).status, 409);
+  assert.equal((await t.pedir(ruta, { codigo })).status, 400);
+  assert.equal((await t.pedir('/api/ml/publicar/' + id, cuerpoPublicar())).status, 409);
+  const ok = await t.pedir(ruta, { codigo: codigo.toLowerCase(), esperado: 2 });
+  assert.equal(ok.status, 200, JSON.stringify(ok.cuerpo));
+  assert.equal(ok.cuerpo.existencia_confirmada_por, DUENO);
+  lista = (await t.pedir('/api/ml/piezas?filtro=pendientes')).cuerpo.piezas;
+  assert.equal(lista[0].existencia_confirmada_en, ok.cuerpo.existencia_confirmada_en);
+  assert.equal((await t.pedir(`/api/piezas/${id}`)).cuerpo.pieza.existencia_confirmada_en, ok.cuerpo.existencia_confirmada_en);
+
+  // Un cambio de stock posterior (aquí, un ajuste real) borra la confirmación; dejar el mismo stock no.
+  t.db.prepare('update productos set stock = 2 where id = ?').run(id);
+  assert.equal((t.db.prepare('select existencia_confirmada_en as e from productos where id = ?').get(id) as { e: string | null }).e, ok.cuerpo.existencia_confirmada_en);
+  const ajuste = await t.pedir(`/api/piezas/${id}/existencia`, { id: crypto.randomUUID(), delta: -1, motivo: 'merma' });
+  assert.equal(ajuste.status, 200, JSON.stringify(ajuste.cuerpo));
+  assert.equal((t.db.prepare('select existencia_confirmada_en as e from productos where id = ?').get(id) as { e: string | null }).e, null);
+  const otra = await t.pedir(`/api/ml/publicar/${id}`, cuerpoPublicar());
+  assert.equal(otra.status, 409);
+  assert.equal(otra.cuerpo.error, 'Tiene 1 existencias: confirma la pieza en piso escaneando su etiqueta en Inventario antes de publicarla.');
+
+  // Confirmada de nuevo, se publica; con 3 o más nunca se pidió nada.
+  assert.equal((await t.pedir(ruta, { codigo, esperado: 1 })).status, 200);
+  assert.equal((await t.pedir(`/api/ml/publicar/${id}`, cuerpoPublicar())).status, 201);
+  const normal = pieza(t, { stock: 3 });
+  assert.equal((await t.pedir(`/api/ml/publicar/${normal}`, cuerpoPublicar())).status, 201);
+}));
+
+test('piso (#724): reactivar con menos de 3 existencias exige confirmación vigente', () => conML(async (t) => {
+  const { id } = await publicarPieza(t, pieza(t, { stock: 2 }));
+  const codigo = (t.db.prepare('select codigo from productos where id = ?').get(id) as { codigo: string }).codigo;
+  assert.equal((await t.pedir(`/api/ml/pausar/${id}`, {})).status, 200);
+  assert.equal((await t.pedir(`/api/ml/reactivar/${id}`, {})).status, 200);   // sigue confirmada
+  await t.pedir(`/api/ml/pausar/${id}`, {});
+  t.db.prepare('update productos set stock = 1 where id = ?').run(id);        // se vendió una: la confirmación ya no vale
+  const r = await t.pedir(`/api/ml/reactivar/${id}`, {});
+  assert.equal(r.status, 409);
+  assert.equal(r.cuerpo.error, 'Tiene 1 existencias: confirma la pieza en piso escaneando su etiqueta en Inventario antes de reactivarla.');
+  assert.equal((await t.pedir(`/api/piezas/${id}/confirmar-existencia`, { codigo, esperado: 1 })).status, 200);
+  assert.equal((await t.pedir(`/api/ml/reactivar/${id}`, {})).status, 200);
+}));
 
 test('piezas: pendientes, publicadas y todas; 50 por página', async () => {
   await conML(async (t) => {

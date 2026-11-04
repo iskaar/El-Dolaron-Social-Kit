@@ -498,6 +498,11 @@ function filaPieza(item) {
       h('span', {}, `Tienda ${pesos(p.precio)}`),
       h('span', {}, `Existencias: ${p.stock}`),
       pub?.precio_ml != null ? h('span', {}, `Mercado Libre ${pesos(pub.precio_ml)}`) : null));
+  // #724: con menos de 3 existencias solo se publica o reactiva con confirmación física en piso (escanear la etiqueta en Inventario).
+  const sinPiso = p.stock < 3 && !item.existencia_confirmada_en;
+  const motivoPiso = 'Confirma la pieza en piso escaneando su etiqueta en Inventario';
+  if (sinPiso) info.append(h('span', { class: 'insignia mal' }, '⚠ Falta confirmar en piso'));
+  else if (p.stock < 3) info.append(h('div', { class: 'meta' }, `Confirmada en piso: ${new Date(item.existencia_confirmada_en).toLocaleString('es-MX')}`));
   const acciones = h('div', { class: 'acciones' });
   const publicable = !pub || (pub.estado === 'error' && !pub.ml_item_id);
   if (pub) {
@@ -509,10 +514,10 @@ function filaPieza(item) {
     }
     const k = String(pub.estado ?? '').toLowerCase();
     if (['activa', 'active'].includes(k)) acciones.append(botonCambio(p, 'pausar', 'Pausar'));
-    if (esPausada(pub.estado)) acciones.append(botonCambio(p, 'reactivar', 'Reactivar'));
+    if (esPausada(pub.estado)) acciones.append(botonCambio(p, 'reactivar', 'Reactivar', sinPiso && motivoPiso));
   }
   if (publicable) {
-    acciones.append(h('button', { type: 'button', class: 'primario', onclick: () => abrirPublicar(p) },
+    acciones.append(h('button', { type: 'button', class: 'primario', onclick: () => abrirPublicar(p), disabled: sinPiso, title: sinPiso ? motivoPiso : null },
       pub ? 'Reintentar publicar…' : 'Publicar…'));
   }
   return h('div', { class: 'pieza' },
@@ -520,9 +525,9 @@ function filaPieza(item) {
     info, acciones);
 }
 
-function botonCambio(p, accion, texto) {
+function botonCambio(p, accion, texto, bloqueado = false) {
   return h('button', {
-    type: 'button',
+    type: 'button', disabled: !!bloqueado, title: bloqueado || null,
     onclick: async (e) => {
       const boton = e.currentTarget;
       boton.disabled = true;
