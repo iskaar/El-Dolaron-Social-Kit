@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { runInNewContext } from 'node:vm';
 import { tienda, PRODUCTO, DUENO } from './prueba-d1.ts';
-import { totales, efectivoAlcanza, saldoCanjeable, dolaronesGanados } from '../public/venta.js';
+import { totales, efectivoAlcanza, saldoCanjeable, dolaronesGanados, debePreguntarSocio } from '../public/venta.js';
 
 const venta = (extra:Record<string, unknown> = {}) => ({ id:crypto.randomUUID(),
   lineas:[{ producto_id:PRODUCTO, cantidad:1 }], forma_pago:'tarjeta', efectivo:0,
@@ -233,7 +233,7 @@ test('celular sin red guarda imprimir_en; no imprime localmente ni abre el cajó
   };
   const cobrar = runInNewContext(`let idVenta = null, creadoEnVenta = null, cobrando = false;
     ${cobro}; cobrar`, {
-    crypto, Date, $, AbortSignal, Object,
+    crypto, Date, $, AbortSignal, Object, debePreguntarSocio, navigator:{ onLine:false },   // sin red no se pregunta por el socio (#730)
     lineas:[{ producto_id:PRODUCTO, codigo:'ED-000001', nombre:'Ventilador', precio:25000, cantidad:1 }],
     socio:null, catalogo:new Map(), pedidoCargado:null,
     impresionRemota:() => true, exigirCaja:() => true, cajaActual:() => 'Caja 1', dolaronesPedidos:() => 0,

@@ -3,7 +3,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { runInNewContext } from 'node:vm';
-import { totales, agregar, leerMultiplicador, efectivoAlcanza, saldoCanjeable, dolaronesGanados, maximoCanje, desfaseReloj, anticipoDePedido, envioDe, anticipoMinimoDe, ANTICIPO, ANTICIPO_ENVIO, viernesDeEnvio, promoInauguracion, letreroPromo, PROMO_DESCUENTO, PROMO_MINIMO, transferenciaDe, CLAVE_DESDE } from '../public/venta.js';
+import { totales, agregar, leerMultiplicador, efectivoAlcanza, saldoCanjeable, dolaronesGanados, maximoCanje, desfaseReloj, anticipoDePedido, envioDe, anticipoMinimoDe, ANTICIPO, ANTICIPO_ENVIO, viernesDeEnvio, promoInauguracion, letreroPromo, PROMO_DESCUENTO, PROMO_MINIMO, transferenciaDe, CLAVE_DESDE, debePreguntarSocio } from '../public/venta.js';
 
 interface Linea { codigo: string; nombre: string; precio: number; cantidad: number }
 const pieza = (codigo: string, precio: number) => ({ codigo, nombre: codigo, precio });
@@ -173,7 +173,9 @@ test('viernes de envío: corte estricto del jueves 20:00, con UTC-6 fijo', () =>
 
 // Cobro con pedido (Issue #269): el saldo solo existe en el servidor, asi que nunca se encola sin red.
 const cajaFuente = readFileSync('public/caja.html', 'utf8');
-const cobroPedido = (fetchSimulado: () => Promise<unknown>, respuestaForma = 'efectivo', opciones: { sinPedido?: boolean; valores?: Record<string, string> } = {}) => {
+const cobroPedido = (fetchSimulado: () => Promise<unknown>, respuestaForma = 'efectivo', opciones: { sinPedido?: boolean; valores?: Record<string, string>; socio?: unknown; sinRed?: boolean; respuestaSocio?: string } = {}) => {
+  const preguntasSocio: number[] = [];
+  const abiertas: string[] = [];
   const guardadas: unknown[] = [];
   const preguntas: number[] = [];
   const enviadas: any[] = [];
@@ -185,7 +187,8 @@ const cobroPedido = (fetchSimulado: () => Promise<unknown>, respuestaForma = 'ef
   const contexto: Record<string, unknown> = {
     crypto, Date, $, AbortSignal, Object, Math, totales, efectivoAlcanza, saldoCanjeable, dolaronesGanados, anticipoDePedido, transferenciaDe, CLAVE_DESDE,
     lineas: [{ producto_id: 'p1', codigo: 'ED-000001', nombre: 'Ventilador', precio: 30000, cantidad: 1 }],
-    socio: null, catalogo: new Map(), pedidoCargado: opciones.sinPedido ? null : { id: 'ped-1', folio: 17, saldo: 10000 },
+    socio: opciones.socio ?? null, valesCargados: [], catalogo: new Map(), debePreguntarSocio, navigator: { onLine: !opciones.sinRed },
+    preguntarSocio: async () => { preguntasSocio.push(1); return opciones.respuestaSocio ?? 'cobrar'; }, window: { open: (ruta: string) => abiertas.push(ruta) }, pedidoCargado: opciones.sinPedido ? null : { id: 'ped-1', folio: 17, saldo: 10000 },
     preguntarForma: async (aPagar: number) => { preguntas.push(aPagar); return respuestaForma; },
     impresionRemota: () => false, exigirCaja: () => true, cajaActual: () => 'Caja 1', dolaronesPedidos: () => 0,
     descuento: null, descuentoAplicado: () => 0, promoActual: () => 0, totalNeto: () => 30000, pintarDescuento() {},
@@ -200,7 +203,7 @@ const cobroPedido = (fetchSimulado: () => Promise<unknown>, respuestaForma = 'ef
   const errorClave = cajaFuente.slice(cajaFuente.indexOf('function errorClave('), cajaFuente.indexOf("for (const id of ['clave-rastreo'"));
   const cobrar = runInNewContext(`let idVenta = null, creadoEnVenta = null, cobrando = false, formaElegida = false;
     ${avisoRojo}\n${conPedido}\n${errorClave}\n${cobro}; cobrar`, contexto);
-  return { cobrar, contexto, guardadas, enviadas, preguntas, $ };
+  return { cobrar, contexto, guardadas, enviadas, preguntas, preguntasSocio, abiertas, $ };
 };
 
 test('17/10: aunque escriba el efectivo, si no eligio la forma se pregunta; con tarjeta no se manda efectivo', async () => {
@@ -335,4 +338,46 @@ test('letrero de promos en la caja: cuántas quedan solo dentro de la ventana', 
   assert.equal(letreroPromo({ ...ventana, restantes: 37 }, Date.parse('2026-10-24T16:59:59Z')), '', 'antes de abrir');
   assert.equal(letreroPromo({ ...ventana, restantes: 37 }, Date.parse('2026-10-26T02:00:00Z')), '', 'ya cerró');
   assert.equal(letreroPromo(null, dentro), '', 'sin configurar');
+});
+
+test('cobrar sin socio real pregunta (#730): sin socio o solo con vale, y solo con red', () => {
+  assert.equal(debePreguntarSocio(null, true), true);
+  assert.equal(debePreguntarSocio({ vale: true, disponible: 100_00 }, true), true);
+  assert.equal(debePreguntarSocio({ numero: 7, disponible: 0 }, true), false);
+  assert.equal(debePreguntarSocio(null, false), false);
+  assert.equal(debePreguntarSocio({ vale: true }, false), false);
+});
+
+test('cobrar sin socio (#730): «buscarlo» y «darlo de alta» no cobran y dejan el foco en el socio; «cobrar así» cobra como hoy', async () => {
+  const ok = async () => ({ ok: true, status: 201, json: async () => ({ id: 'x', ganados: 0, vale_emitido: null, saldo_pedido: null }) });
+  for (const [respuesta, abre] of [['buscar', 0], ['alta', 1], ['', 0]] as const) {
+    const c = cobroPedido(ok, 'tarjeta', { sinPedido: true, respuestaSocio: respuesta });
+    await c.cobrar();
+    assert.equal(c.preguntasSocio.length, 1, respuesta);
+    assert.equal(c.enviadas.length, 0, respuesta);               // nada se cobra ni se encola
+    assert.equal(c.guardadas.length, 0, respuesta);
+    assert.deepEqual(c.abiertas, abre ? ['/socios'] : [], respuesta);
+    assert.equal(c.$('socio').enfocado, true, respuesta);
+  }
+  const asi = cobroPedido(ok, 'tarjeta', { sinPedido: true, respuestaSocio: 'cobrar' });
+  await asi.cobrar();
+  assert.equal(asi.enviadas.length, 1);
+  assert.equal(asi.enviadas[0].cliente_id, null);
+  assert.deepEqual(asi.abiertas, []);
+});
+
+test('cobrar con socio real, o sin red, no pregunta; con solo vale sí (#730)', async () => {
+  const ok = async () => ({ ok: true, status: 201, json: async () => ({ id: 'x', ganados: 0, vale_emitido: null, saldo_pedido: null }) });
+  const conSocio = cobroPedido(ok, 'tarjeta', { sinPedido: true, socio: { id: 's1', numero: 7, disponible: 0 } });
+  await conSocio.cobrar();
+  assert.equal(conSocio.preguntasSocio.length, 0);
+  assert.equal(conSocio.enviadas.length, 1);
+  const sinRed = cobroPedido(ok, 'tarjeta', { sinPedido: true, sinRed: true });
+  await sinRed.cobrar();
+  assert.equal(sinRed.preguntasSocio.length, 0);
+  assert.equal(sinRed.enviadas.length, 1);
+  const conVale = cobroPedido(ok, 'tarjeta', { sinPedido: true, socio: { vale: true, disponible: 0 }, respuestaSocio: 'buscar' });
+  await conVale.cobrar();
+  assert.equal(conVale.preguntasSocio.length, 1);
+  assert.equal(conVale.enviadas.length, 0);
 });

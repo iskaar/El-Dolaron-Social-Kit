@@ -184,6 +184,12 @@ export function maximoCanje(socio, total, ahora = Date.now()) {
   return Math.max(0, Math.min(total, saldoCanjeable(socio, total), socio.maximo));
 }
 
+/**
+ * ¿Preguntar por el socio antes de cobrar? (#730) Sí si la venta no tiene socio real (ninguno, o solo vale de papel)
+ * y hay red: sin red no se pueden buscar socios.
+ */
+export const debePreguntarSocio = (socio, enLinea) => !!enLinea && (!socio || !!socio.vale);
+
 /** Agrega una pieza al ticket, juntando lineas repetidas del mismo codigo. */
 export function agregar(lineas, pieza, cantidad = 1) {
   const existente = lineas.find((l) => l.codigo === pieza.codigo && l.precio === pieza.precio);
