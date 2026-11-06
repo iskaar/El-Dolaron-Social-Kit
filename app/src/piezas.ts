@@ -54,7 +54,7 @@ async function piezasRepetidas(env: Env, url: URL, usuario: Usuario | null): Pro
   if (crudo !== null) {
     try { cursor = JSON.parse(crudo); } catch { /* se valida abajo */ }
     if (!Array.isArray(cursor) || cursor.length !== 4 || typeof cursor[0] !== 'string' || cursor[0].length > 80
-        || !['nuevo','danado','liquidacion'].includes(cursor[1]) || typeof cursor[2] !== 'string' || cursor[2].length > 80
+        || !['nuevo','danado','liquidacion','caducado'].includes(cursor[1]) || typeof cursor[2] !== 'string' || cursor[2].length > 80
         || !Number.isSafeInteger(cursor[3]) || cursor[3] < 1)
       return json({ error:'Cursor inválido.' }, 400);
   }

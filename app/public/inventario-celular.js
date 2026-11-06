@@ -36,7 +36,8 @@ export async function iniciarCelular(ctx,captura) {
   captura.entrada.classList.add('captura-movil');captura.entrada.append(captura.pieza);captura.pieza.className='pieza-movil';
   captura.tipo.classList.add('tipo-cabecera');$('menu').before(captura.tipo);captura.escribir.hidden=true;
   const barra=nodo('div',undefined,'barra-captura');barra.setAttribute('role','group');barra.setAttribute('aria-label','Controles de captura');barra.append(captura.grado,captura.disparo,captura.contador);captura.entrada.append(barra);
-  for(const b of captura.grado.querySelectorAll('button')){const t=b.textContent;b.setAttribute('aria-label',t);b.textContent=({nuevo:'A\nNuevo',danado:'B\nDañado',liquidacion:'C\nLiq.'})[b.dataset.valor];}
+  for(const b of captura.grado.querySelectorAll('button')){const t=b.textContent;b.setAttribute('aria-label',t);b.textContent=({nuevo:'A\nNuevo',danado:'B\nDañado',liquidacion:'C\nLiq.',caducado:'D
+Caduc.'})[b.dataset.valor];}
   visor.after(captura.tablero.raiz);
   captura.tablero.sincronizar();
   const sesion=new Map();let revisando=null,nativa=false,reanudarNativa=false,tomandoPara=null,enviando=false,despierto=null,archivoPara=null,revisionFoto=null;

@@ -522,13 +522,15 @@ async function corregirBorrador(id: string, cambios: Record<string, unknown>, en
   // #708: cambiar el grado de una pieza ya capturada sin escribir precio recalcula con la banda del grado nuevo.
   // Sin precio de lista, o en una banda (su precio es el de la banda), se conserva el precio.
   const porGrado = cambios.precio === undefined && estadoFisico !== fila.estado_fisico;
+  // #733: grado D = merma sin precio. Pasar a D no pide precio al dueño; la pieza queda en $0 y nunca se vende.
+  const esCaducado = estadoFisico === 'caducado';
   let precioPedido: number | null = null;
   if (cambios.precio === undefined) {
     const calculado = calcularPrecio({ precioLista, categoria, estadoFisico, config });
     destino = cambios.destino === undefined ? calculado.destino : String(cambios.destino);
     precio = porGrado && (precioLista <= 0 || esDestinoBanda(destino)) ? fila.precio : calculado.precio;
     // #479: quien no autoriza el precio de una pieza con etiqueta guarda el grado y pide el precio nuevo al dueño.
-    if (porGrado && precio !== fila.precio && !autorizarPrecio(usuario, fila)) { precioPedido = precio; precio = fila.precio; }
+    if (porGrado && !esCaducado && precio !== fila.precio && !autorizarPrecio(usuario, fila)) { precioPedido = precio; precio = fila.precio; }
   } else {
     precio = Math.round(Number(cambios.precio));
     destino = cambios.destino === undefined ? fila.destino : String(cambios.destino);
@@ -546,14 +548,16 @@ async function corregirBorrador(id: string, cambios: Record<string, unknown>, en
     }
   }
 
+  if (esCaducado) precio = 0;
   if (!await destinoValido(destino, env, fila.propietario)) {
     return json({ error: 'Destino invalido.' }, 400);
   }
   // Guardar deja la pieza `listo`: una etiqueta sin nombre o sin precio bloquearia la cola de impresion (#335).
-  if (destino === 'etiqueta' && (!nombre.trim() || precio <= 0)) {
+  // La D no tiene precio ni se imprime: solo necesita nombre.
+  if (destino === 'etiqueta' && (!nombre.trim() || (precio <= 0 && !esCaducado))) {
     return json({ error: 'Una pieza con etiqueta necesita nombre y un precio mayor a cero para quedar lista.' }, 400);
   }
-  if (precio !== fila.precio && !autorizarPrecio(usuario, fila)) {
+  if (precio !== fila.precio && !esCaducado && !autorizarPrecio(usuario, fila)) {
     return json({ error: 'Esta pieza ya tiene etiqueta: solo el dueño cambia su precio.' }, 403);
   }
 
@@ -634,10 +638,11 @@ async function altaManual(cuerpo: Record<string, unknown>, env: Env, correo: str
   const id = String(cuerpo.id ?? '');
   if (!UUID.test(id)) return json({ error: 'Identificador invalido.' }, 400);
   if (!String(cuerpo.nombre ?? '').trim()) return json({ error: 'Falta el nombre.' }, 400);
-  if (!(Number(cuerpo.precio_lista) > 0) && !(Number(cuerpo.precio) > 0)) {
+  const grado = String(cuerpo.estado_fisico ?? 'nuevo');
+  // Grado D (#733): merma sin precio.
+  if (grado !== 'caducado' && !(Number(cuerpo.precio_lista) > 0) && !(Number(cuerpo.precio) > 0)) {
     return json({ error: 'Escribe el precio de lista o el de venta.' }, 400);
   }
-  const grado = String(cuerpo.estado_fisico ?? 'nuevo');
   const cantidad = Number(cuerpo.stock ?? 1);
   if (!ESTADOS_FISICOS.has(grado) || !Number.isInteger(cantidad) || cantidad < 1 || cantidad > 999)
     return json({ error:'Grado o cantidad inválidos.' }, 400);
@@ -865,8 +870,9 @@ async function capturarPorUpc(request: Request, env: Env, correo: string, ctx?: 
   if (resultado instanceof Response) return resultado;
   const { ficha, precioLista, precioManual, config } = resultado;
   const nombre = nombreEditado ?? decodificarNombre(ficha.nombre || ficha.descripcion).trim().slice(0, 120), categoria = ficha.categoria || 'otros';
-  const precio = cuerpo.precio === undefined ? precioManual ?? calcularPrecio({ precioLista, categoria, estadoFisico: estado, config }).precio : cuerpo.precio as number;
-  if (!nombre || !CATEGORIAS.has(categoria) || !Number.isSafeInteger(precio) || precio <= 0 || !Number.isSafeInteger(precioLista) || precioLista < 0) {
+  const caducado = estado === 'caducado';   // #733: merma sin precio, siempre $0
+  const precio = caducado ? 0 : cuerpo.precio === undefined ? precioManual ?? calcularPrecio({ precioLista, categoria, estadoFisico: estado, config }).precio : cuerpo.precio as number;
+  if (!nombre || !CATEGORIAS.has(categoria) || !Number.isSafeInteger(precio) || (precio <= 0 && !caducado) || !Number.isSafeInteger(precioLista) || precioLista < 0) {
     return json({ error: 'El producto necesita nombre, categoría y precio válidos.' }, 400);
   }
   const ahora = new Date();
@@ -948,7 +954,7 @@ export async function identificarPieza(id: string, upc: string, env: Env, ultimo
   const precioLista = ficha ? pesosDeLista(ficha, config) * 100 : 0;
   const precio = ficha ? calcularPrecio({ precioLista, categoria: ficha.categoria, estadoFisico: fila.estado_fisico, config }).precio : 0;
   // Sin nombre seguro o sin precio no se imprime: queda en `error` (con el nombre que diera la foto).
-  const completa = !!ficha && ficha.nombre.trim() !== '' && ficha.confianza >= 0.5 && precio > 0;
+  const completa = !!ficha && ficha.nombre.trim() !== '' && ficha.confianza >= 0.5 && (precio > 0 || fila.estado_fisico === 'caducado');
   if (completa) {
     await env.DB.prepare(`update productos set nombre = ?, marca = ?, categoria = ?, precio_lista = ?, precio = ?, precio_sugerido = ?,
         estado_analisis = 'listo', actualizado_en = ?, modificado_por = 'cola' where id = ? and estado_analisis in ('pendiente', 'error')`)
@@ -1182,12 +1188,13 @@ async function revisarCaptura(id: string, request: Request, env: Env, correo: st
   // #479: quien no autoriza el precio de una pieza con etiqueta lo pide al dueño; lo demás se guarda como siempre.
   // Cambiar el grado sin tocar el precio lo recalcula con la banda del grado, como al guardar la tarjeta UPC; también en una pieza ya
   // confirmada (#708). Sin precio de lista se conserva el precio.
-  const porGrado = cambios.precio === undefined && cambios.estado_fisico !== undefined && cambios.estado_fisico !== fila.estado_fisico
+  const aCaducado = grado === 'caducado';   // #733: la D queda en $0 y no pide precio al dueño
+  const porGrado = aCaducado ? 0 : cambios.precio === undefined && cambios.estado_fisico !== undefined && cambios.estado_fisico !== fila.estado_fisico
     && conBanda && fila.precio_lista > 0
     ? calcularPrecio({ precioLista: fila.precio_lista, categoria: fila.categoria || 'otros', estadoFisico: grado, config: await leerConfig(env) }).precio : null;
-  const sugerido = typeof cambios.precio === 'number' ? cambios.precio : porGrado;
-  const pidePrecio = sugerido !== null && sugerido !== fila.precio && !autorizarPrecio(usuario, fila);
-  const precioNuevo = pidePrecio ? null : cambios.precio ?? porGrado;
+  const sugerido = aCaducado ? 0 : typeof cambios.precio === 'number' ? cambios.precio : porGrado;
+  const pidePrecio = !aCaducado && sugerido !== null && sugerido !== fila.precio && !autorizarPrecio(usuario, fila);
+  const precioNuevo = pidePrecio ? null : aCaducado ? 0 : cambios.precio ?? porGrado;
   const resultado = await env.DB.prepare(`update productos set precio = coalesce(?, precio),
       estado_fisico = coalesce(?, estado_fisico), nombre = ?, marca = ?, actualizado_en = ?, modificado_por = ?,
       por_revisar = case when ? = 1 then 0 else por_revisar end where ${alcance} and estado_analisis = 'listo'
@@ -1615,14 +1622,15 @@ async function catalogo(env: Env, url: URL): Promise<Response> {
     if (!Number.isFinite(Date.parse(desde))) return json({ error: 'Fecha invalida.' }, 400);
     const ahora = new Date().toISOString();
     const { results } = await env.DB.prepare(
-      `select id, codigo, nombre, case when estado_analisis = 'descartado' then 0 else precio end as precio, sin_inventario, stock, propietario
+      `select id, codigo, nombre, case when estado_analisis = 'descartado' then 0 else precio end as precio, sin_inventario, stock, propietario, estado_fisico
        from productos where actualizado_en > ? and codigo is not null and codigo <> ''`,
     ).bind(new Date(desde).toISOString()).all();
     return json({ ahora, piezas: results });
   }
   const { results } = await env.DB.prepare(
-    `select id, codigo, nombre, precio, sin_inventario, stock, propietario
-     from productos where codigo is not null and codigo <> '' and precio > 0 and estado_analisis <> 'descartado'
+    // Grado D (#733): sin precio, pero la caja la recibe para avisar que no se vende en vez de «código no encontrado».
+    `select id, codigo, nombre, precio, sin_inventario, stock, propietario, estado_fisico
+     from productos where codigo is not null and codigo <> '' and (precio > 0 or estado_fisico = 'caducado') and estado_analisis <> 'descartado'
      order by nombre`,
   ).all();
   return json(results);
@@ -1643,6 +1651,7 @@ interface ProductoVenta {
   precio: number;
   sin_inventario: number;
   propietario?: string;
+  estado_fisico?: string;
   precio_anterior?: number | null;
   precio_cambiado_en?: string | null;
 }
@@ -1686,6 +1695,10 @@ export function prepararLineas(
     const producto = productos.get(productoId);
     if (!producto) {
       return { ok: false, error: 'Producto inexistente.' };
+    }
+    // Grado D (#733): merma caducada. El servidor la rechaza aunque la caja la haya dejado pasar.
+    if (producto.estado_fisico === 'caducado') {
+      return { ok: false, error: `${producto.nombre || producto.codigo || 'La pieza'} está caducada (grado D): no se vende.` };
     }
     const cambio = Date.parse(producto.precio_cambiado_en ?? '');
     const precioCaja = Number.isInteger(l.precio) && l.precio === producto.precio_anterior
@@ -1787,7 +1800,7 @@ async function registrarVenta(request: Request, env: Env, ctx: ExecutionContext,
   }
   const huecos = idsPedidos.map(() => '?').join(',');
   const { results: filas } = await env.DB.prepare(
-    `select id, codigo, nombre, precio, sin_inventario, propietario, precio_anterior, precio_cambiado_en from productos where id in (${huecos})`,
+    `select id, codigo, nombre, precio, sin_inventario, propietario, estado_fisico, precio_anterior, precio_cambiado_en from productos where id in (${huecos})`,
   )
     .bind(...idsPedidos)
     .all<ProductoVenta>();
@@ -2272,7 +2285,7 @@ async function exportarInventarioCsv(env: Env): Promise<Response> {
 
 // Issue #202: esta pieza azul sigue retenida hasta corregir la identificación gato/perro.
 const RETENIDO_MARKETPLACE = '87ddd327-2058-435d-98ea-651a6e54c09a';
-const ELEGIBLE_MARKETPLACE = `stock >= 1 and sin_inventario = 0 and precio > 0
+const ELEGIBLE_MARKETPLACE = `stock >= 1 and sin_inventario = 0 and precio > 0 and estado_fisico <> 'caducado'
   and typeof(precio) = 'integer' and trim(nombre) != '' and destino = 'etiqueta'
   and foto_key = 'fotos/' || id || '.jpg' and estado_analisis = 'listo' and id != ? and propietario = 'dolaron'`;
 

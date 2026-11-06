@@ -46,6 +46,7 @@ export const rangoDe = (url: URL) => {
  * Foto de lo que hay en piso AHORA (Issue #174), sin importar el periodo del reporte: piezas individuales
  * ya etiquetadas (con codigo) y con existencia. Quedan fuera las bandas (no tienen fecha de captura propia),
  * lo agotado y lo que aun esta en la cola de revision sin etiqueta. Las danadas SI cuentan: estan en piso.
+ * Las de grado D (caducidad, #733) NO: es merma que nunca se vende y no entra al inventario vendible ni a su valor.
  * Antiguedad = dias de la tienda (UTC-6) desde `creado_en`, y los tramos van por semanas completas.
  * Una fecha vacia o invalida no se adivina: va aparte, en `sin_fecha`.
  */
@@ -57,7 +58,7 @@ export async function inventarioEnPiso(env: Env, ahora = Date.now()) {
             else max(0, cast(julianday(?) - julianday(substr(datetime(creado_en, '-6 hours'), 1, 10)) as integer)) end as dias
      from productos
      where sin_inventario = 0 and stock > 0 and destino = 'etiqueta' and codigo is not null and codigo != ''
-       and propietario = 'dolaron'`,
+       and propietario = 'dolaron' and estado_fisico <> 'caducado'`,
   )
     .bind(hoyTienda(ahora))
     .all<{ id: string; codigo: string; nombre: string; categoria: string; precio: number; stock: number; creado_en: string; dias: number | null }>();
@@ -92,6 +93,31 @@ export async function inventarioEnPiso(env: Env, ahora = Date.now()) {
       .sort((a, b) => b.dias! - a.dias! || valorDe(b) - valorDe(a) || a.codigo.localeCompare(b.codigo))
       .slice(0, 15)
       .map(({ id, codigo, nombre, categoria, precio, stock, creado_en, dias }) => ({ id, codigo, nombre, categoria, precio, stock, creado_en, dias })),
+  };
+}
+
+/**
+ * Merma por caducidad (#733): piezas de grado D capturadas en el periodo (`creado_en >= desde`, el mismo filtro de las ventas).
+ * No es inventario vendible ni se cobra. Sin costo propio en el sistema: el valor es el precio de lista (el de la hoja del
+ * manifiesto o el de la captura) x existencia; una pieza sin precio de lista suma 0 y se cuenta en `sin_valor`.
+ * ponytail: se trae la lista completa y se suma en JS; el detalle se corta a 100.
+ */
+export async function mermaCaducidad(env: Env, desde: string) {
+  const { results } = await env.DB.prepare(
+    `select id, codigo, nombre, coalesce(nullif(categoria, ''), 'sin categoria') as categoria, precio_lista, stock, creado_en
+     from productos
+     where estado_fisico = 'caducado' and estado_analisis <> 'descartado' and sin_inventario = 0
+       and propietario = 'dolaron' and creado_en >= ?
+     order by creado_en desc, rowid desc`,
+  )
+    .bind(desde)
+    .all<{ id: string; codigo: string | null; nombre: string; categoria: string; precio_lista: number; stock: number; creado_en: string }>();
+  return {
+    piezas: results.length,
+    unidades: results.reduce((suma, f) => suma + f.stock, 0),
+    valor_lista: results.reduce((suma, f) => suma + f.precio_lista * f.stock, 0),
+    sin_valor: results.filter((f) => f.precio_lista <= 0).length,
+    detalle: results.slice(0, 100),
   };
 }
 
@@ -334,6 +360,7 @@ export async function reportes(url: URL, env: Env): Promise<Response> {
     por_categoria: porCategoria,
     por_categoria_anterior: porCategoriaAnterior,
     inventario: await inventarioEnPiso(env),
+    merma_caducidad: await mermaCaducidad(env, desde),
     top_productos: topProductos,
     precio_sugerido: { n: precioSugerido?.n ?? 0, promedio_pct: precioSugerido?.promedio_pct ?? null },
     dias_en_venta_por_categoria: diasEnVenta,

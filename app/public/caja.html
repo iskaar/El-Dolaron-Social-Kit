@@ -704,7 +704,7 @@ async function cargarCatalogo() {
       const consulta = await fetch(`/api/catalogo?desde=${encodeURIComponent(catalogoDesde.toISOString())}`);
       const { ahora, piezas } = await consulta.json();
       for (const p of piezas) {
-        if (p.precio > 0) catalogo.set(p.codigo, p);
+        if (p.precio > 0 || p.estado_fisico === 'caducado') catalogo.set(p.codigo, p);
         else catalogo.delete(p.codigo);
       }
       catalogoDesde = new Date(Date.parse(ahora) - TRASLAPE_MS);
@@ -860,6 +860,13 @@ function agregarCodigo(leido, reintento = false) {
     return false;
   }
 
+  // Grado D (#733): merma caducada. No se agrega y el servidor tampoco la vendería.
+  if (pieza.estado_fisico === 'caducado') {
+    $('aviso').textContent = `${pieza.nombre || pieza.codigo}: CADUCADA (grado D). No se vende; apártala y no la cobres.`;
+    $('aviso').style.color = '#D72B32';
+    return false;
+  }
+
   // Las piezas son unicas: si ya se vendio, escanear su etiqueta otra vez seria
   // cobrar algo que no esta en el anaquel y dejar el inventario en negativo.
   if (!pieza.sin_inventario) {
@@ -900,6 +907,7 @@ function buscarPorTexto(texto) {
     return palabras.filter((w) => suyas.has(w)).length;
   };
   return [...catalogo.values()]
+    .filter((p) => p.estado_fisico !== 'caducado')   // la D no se ofrece ni en la búsqueda
     .filter((p) => { const paja = sinAcentos(`${p.nombre} ${p.codigo}`); return palabras.every((w) => paja.includes(w)); })
     .sort((a, b) => enteras(b) - enteras(a))
     .slice(0, 10);

@@ -115,6 +115,11 @@ export function calcularPrecio({ precioLista, categoria, estadoFisico, config }:
     return { precio: 0, destino: 'etiqueta' };
   }
 
+  // Grado D, caducidad (#733): merma sin precio. Nunca se vende, así que no hay banda ni porcentaje.
+  if (estadoFisico === 'caducado') {
+    return { precio: 0, destino: 'etiqueta' };
+  }
+
   // Grado C, liquidación total (#371): un % del precio de lista, sin sumar el de categoría.
   if (estadoFisico === 'liquidacion') {
     return conEtiqueta((precioLista * entero(config, 'pct_liquidacion', 20)) / 100, precioLista);

@@ -522,7 +522,7 @@ export async function analizarBorrador(
     // porcentaje de la configuracion. El porcentaje nunca describio como cobra
     // —dos piezas de `hogar` fueron a 57 % y a 29 %— pero es un arranque honesto.
     // La liquidación (C) siempre va por su %: la sugerencia de la IA no conoce el grado (#371).
-    const conEjemplos = ejemplos.length >= EJEMPLOS_MINIMOS && ficha.precio_venta_mxn > 0 && fila.estado_fisico !== 'liquidacion'
+    const conEjemplos = ejemplos.length >= EJEMPLOS_MINIMOS && ficha.precio_venta_mxn > 0 && fila.estado_fisico !== 'liquidacion' && fila.estado_fisico !== 'caducado'
       && ficha.confianza >= CONFIANZA_SUGERENCIA;
     const { precio, destino } = conEjemplos
       ? precioDesdeSugerencia({ precioLista, sugerido: ficha.precio_venta_mxn * 100 })
@@ -534,7 +534,8 @@ export async function analizarBorrador(
     // Sin nombre o con precio 0 la pieza no esta lista: queda en `error`
     // para revisarla, con lo que se encontro. Si no, la cola automatica de /etiquetas
     // se queda esperando una pieza que nadie va a completar (#335).
-    const completa = ficha.nombre.trim() !== '' && precio > 0;
+    // La D (caducidad, #733) no tiene precio: con nombre queda lista.
+    const completa = ficha.nombre.trim() !== '' && (precio > 0 || fila.estado_fisico === 'caducado');
     // Sin precio y con código: sigue `pendiente` mientras la cola busca el código; ella la deja lista o aparte.
     const aLaCola = !completa && !buscar && !!fila.upc && !!env.BUSQUEDAS;
     const escrita = await env.DB.prepare(
