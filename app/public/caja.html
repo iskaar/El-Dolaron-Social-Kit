@@ -419,6 +419,17 @@ if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw-caja.js'
   </form>
 </dialog>
 
+<dialog id="dlg-socio" aria-labelledby="dlg-socio-titulo">
+  <h2 id="dlg-socio-titulo">¿El cliente es socio?</h2>
+  <p id="dlg-socio-texto"></p>
+  <form method="dialog" class="dlg-botones">
+    <!-- Sin cobro por omision: Enter y Escape solo regresan a buscar (#730). -->
+    <button value="buscar" class="primario" autofocus>Es socio: buscarlo</button>
+    <button value="alta">Darlo de alta</button>
+    <button value="cobrar">No quiere ser socio: cobrar así</button>
+  </form>
+</dialog>
+
 <dialog id="dlg-dolarones" aria-labelledby="dlg-titulo">
   <h2 id="dlg-titulo">¿Usar Dolarones?</h2>
   <p id="dlg-texto"></p>
@@ -430,7 +441,7 @@ if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw-caja.js'
 </dialog>
 <script type="module">
 import { CATEGORIAS_GASTO } from '/categorias.js';
-import { totales, agregar, leerMultiplicador, efectivoAlcanza, dolaronesGanados, saldoCanjeable, maximoCanje, MINIMO_REGALO, descuentoDe, TOPE_DESCUENTO, DENOMINACIONES, contadoDe, promoInauguracion, letreroPromo, desfaseReloj, anticipoDePedido, transferenciaDe, CLAVE_DESDE, BANCOS } from '/venta.js';
+import { totales, agregar, leerMultiplicador, efectivoAlcanza, dolaronesGanados, saldoCanjeable, maximoCanje, MINIMO_REGALO, descuentoDe, TOPE_DESCUENTO, DENOMINACIONES, contadoDe, promoInauguracion, letreroPromo, desfaseReloj, anticipoDePedido, transferenciaDe, CLAVE_DESDE, BANCOS, debePreguntarSocio } from '/venta.js';
 import { abrirCamara } from '/camara.js';
 import {
   reconectarImpresora, conectarImpresora, impresoraLista, imprimirTicket, abrirCajon, explicarErrorUsb, errorImpresora,
@@ -1314,6 +1325,17 @@ function preguntarForma(aPagar, efectivo) {
   return new Promise((listo) => d.addEventListener('close', () => listo(d.returnValue), { once: true }));
 }
 
+// Sin socio real la venta no gana Dolarones y no se puede ligar despues (#730). Devuelve la opcion elegida o '' si cierra.
+function preguntarSocio() {
+  const d = $('dlg-socio');
+  $('dlg-socio-texto').textContent = 'Esta venta no tiene socio, así que no ganaría Dolarones.'
+    + (socio?.vale ? ` Si buscas al socio, ${valesCargados.length > 1 ? 'los vales salen' : 'el vale sale'} del ticket (puedes volver a escanear${valesCargados.length > 1 ? 'los' : 'lo'}).` : '')
+    + ' Para darlo de alta se abre otra pestaña y esta venta se queda aquí.';
+  d.returnValue = '';
+  d.showModal();
+  return new Promise((listo) => d.addEventListener('close', () => listo(d.returnValue), { once: true }));
+}
+
 /** El error de la clave o del monto va junto a sus campos y el foco regresa al que falló. */
 function errorClave(r) {
   $('clave-error').textContent = r.error;
@@ -1383,6 +1405,16 @@ async function cobrar() {
     if (!$('banco-emisor').value) { pintar(); return errorClave({ campo: 'banco', error: 'Elige el banco de donde salió la transferencia (viene en el comprobante).' }); }
   }
   $('clave-error').textContent = '';
+
+  // Sin socio real (o solo con vale) y con red, nadie cobra sin preguntar (#730). Todo lo de arriba ya pasó: la ventana es lo último antes de cobrar.
+  if (debePreguntarSocio(socio, navigator.onLine)) {
+    const r = await preguntarSocio();
+    if (r !== 'cobrar') {
+      if (r === 'alta') window.open('/socios', '_blank');
+      $('socio').focus();
+      return;
+    }
+  }
 
   cobrando = true;
   pintar();
