@@ -4,8 +4,11 @@
 // etiqueta, que es donde se rompio todo lo anterior.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { tsplEtiqueta, tsplBanda, tsplMarco, tsplPruebaCodigo, tsplPruebaLargos, partirNombre, NOMBRE_MAX, TSPL_REGLA, TSPL_CALIBRAR, tsplCodigo, leerCodigos,
+import { tsplEtiqueta, tsplBanda, tsplMarco, tsplPruebaCodigo, tsplPruebaLargos, partirNombre, NOMBRE_MAX, NOMBRE_MAX_PIEZA, TSPL_REGLA, TSPL_CALIBRAR, tsplCodigo, leerCodigos,
   reconectarEtiquetera, etiqueteraLista, reclamarEtiquetas, soltarEtiquetas, adoptarMarca, adoptarMarcas, olvidarMarca, marcarImpresa, impresas, desmarcarDesde } from '../public/etiquetera.js';
+
+// El letrero (#737) es la unica linea que cambia con la categoria: TEXT x,y,"3",0,2,2,"11".
+const LETRERO = /^TEXT \d+,\d+,"3",0,2,2,"\d{1,2}"$/;
 
 const PIEZA = {
   nombre: 'Taza de ceramica azul',
@@ -335,7 +338,7 @@ test('Ropa omite recuadro, letra y palabra del grado, incluso con estados anteri
       const tspl = tsplEtiqueta({ ...PIEZA, ...ropa, estado_fisico });
       assert.doesNotMatch(tspl, /^BOX |,"4",0,1,1,"[ABC]"| - (Nuevo|Danado|Liquidacion)"/m);
       assert.match(tspl, /"ED-000123 - 2026-S38"/);
-      for (const linea of tspl.split('\r\n').filter(l => l && !l.includes(',170,')))
+      for (const linea of tspl.split('\r\n').filter(l => l && !l.includes(',170,') && !LETRERO.test(l)))
         assert.ok(mg.includes(linea), `Se conserva la calibración y el contenido: ${linea}`);
     }
     assert.match(mg, /^BOX /m);
@@ -566,4 +569,74 @@ test('reclamarEtiquetas (#464): solo una red caída permite seguir sin la base; 
       await assert.rejects(() => reclamarEtiquetas(['a']), (e: any) => e.sinRed === true);   // sin conexión declarada por el navegador
     });
   } finally { delete navegador.onLine; }
+});
+
+/* ---------- Letrero del plano (#737) ---------- */
+
+type Caja = { que: string; x0: number; y0: number; x1: number; y1: number };
+const LETRA: Record<number, number[]> = { 1: [8, 12], 2: [12, 20], 3: [16, 24], 4: [24, 32] };
+
+/** El rectangulo de cada elemento de la etiqueta, a partir de las ordenes TSPL (el codigo de barras se estima como centrarBarras). */
+function cajas(tspl: string): Caja[] {
+  return tspl.split('\r\n').flatMap((l): Caja[] => {
+    let m = l.match(/^TEXT (\d+),(\d+),"(\d)",0,(\d),(\d),"(.*)"$/);
+    if (m) {
+      const [x, y, f, ax, ay] = m.slice(1, 6).map(Number);
+      return [{ que: l, x0: x, y0: y, x1: x + m[6].length * LETRA[f][0] * ax, y1: y + LETRA[f][1] * ay }];
+    }
+    if ((m = l.match(/^BAR (\d+),(\d+),(\d+),(\d+)$/))) return [{ que: l, x0: +m[1], y0: +m[2], x1: +m[1] + +m[3], y1: +m[2] + +m[4] }];
+    if ((m = l.match(/^BOX (\d+),(\d+),(\d+),(\d+),\d+$/))) return [{ que: l, x0: +m[1], y0: +m[2], x1: +m[3], y1: +m[4] }];
+    if ((m = l.match(/^BARCODE (\d+),(\d+),"128",(\d+),0,0,(\d+),\d+,"(.*)"$/))) {
+      return [{ que: l, x0: +m[1], y0: +m[2], x1: +m[1] + (11 * (m[5].length + 2) + 13) * +m[4], y1: +m[2] + +m[3] }];
+    }
+    return [];
+  });
+}
+
+test('el letrero se imprime arriba a la derecha y no toca nombre, precios, grado, barras ni pie (ropa y MG, con y sin lista)', () => {
+  const nombres = ['Taza', 'Cobija matrimonial de invierno color gris jaspeado', 'x'.repeat(60)];
+  const casos = [
+    { categoria: 'ropa', nombre: 'Brasier Auden', numero: '8' },        // ropa, 1 digito
+    { categoria: 'ropa', nombre: 'Playera Hanes', numero: '15' },       // ropa, 2 digitos
+    { categoria: 'hogar', nombre: 'Cobija', numero: '33' },             // MG, 2 digitos
+    { categoria: 'accesorios', nombre: 'Collar', numero: '7' },         // MG, 1 digito
+  ];
+  for (const caso of casos) for (const lista of [0, 39900, 999900]) for (const largo of nombres) for (const precio of [5000, 12000, 150000]) {
+    const tspl = tsplEtiqueta({ ...PIEZA, categoria: caso.categoria, nombre: `${caso.nombre} ${largo}`,
+      precio, precio_lista: lista > precio ? lista : 0, estado_fisico: 'danado' }, 1, 0, 4);
+    const todas = cajas(tspl);
+    const [letrero] = todas.filter((c) => LETRERO.test(c.que));
+    assert.ok(letrero, 'falta el letrero');
+    assert.equal(letrero.que.match(/"(\d+)"$/)![1], caso.numero);
+    // Dentro de la etiqueta (margen derecho de 16) y por encima de y=58, donde empieza el grado.
+    assert.ok(letrero.x0 >= 0 && letrero.x1 === 406 - 16 && letrero.y0 >= 0 && letrero.y1 <= 58, letrero.que);
+    for (const otra of todas.filter((c) => c !== letrero)) {
+      const separadas = otra.x1 <= letrero.x0 || otra.x0 >= letrero.x1 || otra.y1 <= letrero.y0 || otra.y0 >= letrero.y1;
+      assert.ok(separadas, `el letrero (${letrero.que}) se encima con ${otra.que}`);
+    }
+    // El grado solo existe en MG y sigue ahi.
+    assert.equal(/^BOX /m.test(tspl), caso.categoria !== 'ropa');
+  }
+});
+
+test('el letrero se mueve con el corrimiento como el resto del diseno', () => {
+  const y = (tspl: string) => Number(tspl.split('\r\n').find((l) => LETRERO.test(l))!.split(',')[1]);
+  assert.equal(y(tsplEtiqueta(PIEZA, 1, 0, 4)), 8);
+  assert.equal(y(tsplEtiqueta(PIEZA, 1, 20, 4)), 28);
+  assert.equal(y(tsplEtiqueta(PIEZA, 1, -50, 4)), 0);   // el mismo tope que el primer renglon
+});
+
+test('el nombre de la etiqueta de pieza cede la esquina del letrero (25 caracteres por renglon)', () => {
+  const [primero, segundo] = partirNombre('Cobija matrimonial de invierno color gris jaspeado', NOMBRE_MAX_PIEZA);
+  assert.ok(primero.length <= NOMBRE_MAX_PIEZA && segundo.length <= NOMBRE_MAX_PIEZA);
+  assert.ok(16 + NOMBRE_MAX_PIEZA * 12 <= 406 - 16 - 2 * 32);
+  assert.ok(NOMBRE_MAX_PIEZA < NOMBRE_MAX);
+});
+
+test('el letrero sale de la categoria, el nombre, la marca y la talla de la pieza', () => {
+  const numero = (pieza: object) => tsplEtiqueta({ ...PIEZA, ...pieza }).split('\r\n').find((l) => LETRERO.test(l))!.match(/"(\d+)"$/)![1];
+  assert.equal(numero({ categoria: 'ropa', nombre: 'Blusa', marca: 'Universal Thread' }), '3');
+  assert.equal(numero({ categoria: 'ropa', nombre: 'Playera', marca: 'Cat & Jack' }), '23');
+  assert.equal(numero({ categoria: 'hogar', nombre: 'Toalla de playa' }), '35');
+  assert.equal(numero({}), '25');   // sin categoria, como la pieza de prueba antigua
 });

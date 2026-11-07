@@ -16,6 +16,7 @@
 import { sinAcentos } from './impresora.js';
 import { nombreEstado } from './estados.js';
 import { esRopa } from './ropa.js';
+import { letrero } from './letreros.js';
 
 const SERVICIO = '0000fff0-0000-1000-8000-00805f9b34fb';
 const CARACTERISTICA = '0000fff2-0000-1000-8000-00805f9b34fb';
@@ -32,8 +33,14 @@ const ANCHO_PRECIO_LISTA = 24; // fuente "2" ampliada x2
 // Recuadro del grado (A/B/C, Issue #453): a la altura del precio, con la letra en fuente "4" (24 x 32).
 const GRADO_ANCHO = 44;
 const GRADO_ALTO = 44;
-const GRADO_Y = 54;
+const GRADO_Y = 58;   // 4 puntos mas abajo que el precio (y=54) para ceder la esquina de arriba al letrero (#737); termina en 102, como el precio
 const PRIMER_RENGLON = 8;  // lo mas alto del diseno, y el tope del corrimiento
+// Numero de letrero del plano (#737): esquina superior derecha, fuente "3" ampliada x2 (32 x 48 por digito, el mismo
+// tamano que el precio, que ya se probo en la AE240). Ocupa y=8..56, a la altura del nombre, justo encima del recuadro
+// del grado (y=58) y del precio de lista (y=62). Se reservan 2 digitos para que el largo del nombre no dependa de cuantos lleve.
+const LETRERO_Y = PRIMER_RENGLON;
+const LETRERO_DIGITO = 32;
+const LETRERO_RESERVA = 2 * LETRERO_DIGITO + 10;   // los dos digitos y 10 puntos de aire contra el nombre
 
 // Ancho de la barra angosta, en puntos (8 = 1 mm a 203 dpi).
 //
@@ -60,6 +67,8 @@ export function guardarModulo(puntos) {
 
 /** Lo que cabe en un renglon de nombre, en caracteres. */
 export const NOMBRE_MAX = Math.floor((ANCHO - MARGEN * 2) / ANCHO_NOMBRE);
+/** Lo que cabe en un renglon de la etiqueta de pieza, que cede la esquina de arriba a la derecha al letrero (#737). */
+export const NOMBRE_MAX_PIEZA = Math.floor((ANCHO - MARGEN * 2 - LETRERO_RESERVA) / ANCHO_NOMBRE);
 
 const CLAVE_CORRIMIENTO = 'etiqueta-corrimiento';
 
@@ -140,19 +149,19 @@ const limpiar = (texto) => sinAcentos(texto).replace(/["\\]/g, ' ');
  * solo: si no se parte aqui, el nombre largo se sale de la etiqueta en vez de
  * bajar de renglon. Lo que no cabe se corta con "..".
  */
-export function partirNombre(nombre) {
+export function partirNombre(nombre, maximo = NOMBRE_MAX) {
   const palabras = limpiar(nombre).split(/\s+/).filter(Boolean);
   const renglones = [];
   for (const palabra of palabras) {
     const ultimo = renglones[renglones.length - 1];
-    if (ultimo !== undefined && `${ultimo} ${palabra}`.length <= NOMBRE_MAX) {
+    if (ultimo !== undefined && `${ultimo} ${palabra}`.length <= maximo) {
       renglones[renglones.length - 1] = `${ultimo} ${palabra}`;
     } else {
       renglones.push(palabra);
     }
   }
-  const cabe = renglones.slice(0, 2).map((r) => r.slice(0, NOMBRE_MAX));
-  if (renglones.length > 2) cabe[1] = `${cabe[1].slice(0, NOMBRE_MAX - 2)}..`;
+  const cabe = renglones.slice(0, 2).map((r) => r.slice(0, maximo));
+  if (renglones.length > 2) cabe[1] = `${cabe[1].slice(0, maximo - 2)}..`;
   return cabe.length > 0 ? cabe : ['El Dolaron'];
 }
 
@@ -171,7 +180,7 @@ const centrarBarras = (contenido, ancho) =>
 /**
  * El trabajo TSPL de una pieza. Exportada para probarla sin impresora enfrente.
  *
- * @param pieza {{ nombre: string, precio: number, precio_lista: number, codigo: string, semana_ingreso: string, estado_fisico?: string }}
+ * @param pieza {{ nombre: string, precio: number, precio_lista: number, codigo: string, semana_ingreso: string, estado_fisico?: string, categoria?: string, marca?: string, talla?: string }}
  * @param copias cuantas etiquetas iguales — una por pieza en existencia
  * @param y0 corrimiento vertical en puntos, de la calibracion
  */
@@ -182,7 +191,7 @@ export function tsplEtiqueta(pieza, copias = 1, y0 = corrimiento(), barra = modu
   const desplazamiento = Math.max(y0, -PRIMER_RENGLON);
   const y = (base) => base + desplazamiento;
   const pesos = (centavos) => `$${Math.round(centavos / 100)}`;
-  const [primero, segundo] = partirNombre(pieza.nombre || 'El Dolaron');
+  const [primero, segundo] = partirNombre(pieza.nombre || 'El Dolaron', NOMBRE_MAX_PIEZA);
   const precio = pesos(pieza.precio);
   // La barra codifica solo el numero, sin "ED-" ni todos los ceros: el codigo
   // completo no cabe legible en 50.8 mm. buscarPieza() en caja.html reconstruye
@@ -212,12 +221,17 @@ export function tsplEtiqueta(pieza, copias = 1, y0 = corrimiento(), barra = modu
   ];
   if (segundo) ordenes.push(`TEXT ${MARGEN},${y(30)},"2",0,1,1,"${segundo}"`);
 
+  // Letrero del plano (#737): a que mueble va la pieza. Pegado al borde derecho, arriba de todo lo demas (sube y baja con
+  // el corrimiento como el resto del diseno).
+  const cifras = String(letrero(pieza));
+  ordenes.push(`TEXT ${ANCHO - MARGEN - cifras.length * LETRERO_DIGITO},${y(LETRERO_Y)},"3",0,2,2,"${cifras}"`);
+
   // El precio es lo que se lee de lejos: se lleva la fuente mas grande que cabe.
   ordenes.push(`TEXT ${MARGEN},${y(54)},"3",0,2,2,"${precio}"`);
 
   // El recuadro del grado va al borde derecho; si hay precio de lista tachado,
   // se recorre a su izquierda. Nunca invade el precio de venta ni el codigo de
-  // barras (esta debajo de y=102 y el recuadro termina en 98).
+  // barras (esta debajo de y=102 y el recuadro termina en 102).
   let xGrado = ANCHO - MARGEN - GRADO_ANCHO;
 
   if (pieza.precio_lista > pieza.precio) {

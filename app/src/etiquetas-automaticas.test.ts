@@ -29,6 +29,8 @@ test('/api/etiquetas conserva categoría al imprimir y reimprimir: Ropa sin grad
     const prendas = r.cuerpo.filter((p: any) => p.categoria === 'ropa');
     const generales = r.cuerpo.filter((p: any) => p.categoria === 'hogar');
     assert.equal(prendas.length, 1); assert.equal(generales.length, 1);
+    // El letrero (#737) se calcula con categoría, nombre, marca y talla: la respuesta que alimenta la etiqueta trae las cuatro.
+    for (const p of r.cuerpo) for (const campo of ['categoria', 'nombre', 'marca', 'talla']) assert.ok(campo in p, `falta ${campo}`);
     assert.doesNotMatch(tsplEtiqueta(prendas[0]), /^BOX |,"4",0,1,1,"[ABC]"/m);
     assert.match(tsplEtiqueta(generales[0]), /,"4",0,1,1,"B"/);
     const actuales = r.cuerpo.map((p: any) => p.codigo);
@@ -260,7 +262,9 @@ test('nombre largo de ropa cabe en los dos renglones actuales de AE240', () => {
   assert.equal(primero, 'Traje de bano Universal Thread');
   assert.equal(segundo, undefined);
   assert.ok(primero.length <= NOMBRE_MAX);
-  assert.ok(tsplEtiqueta({ codigo: 'ED-000001', nombre: 'Traje de baño Universal Thread', precio: 15000, precio_lista: 0, semana_ingreso: '2026-S41' }).includes('Universal Thread'));
+  // En la etiqueta de pieza el renglon cede la esquina al letrero (#737): ya no cabe en uno, pero las dos mitades salen enteras.
+  const tspl = tsplEtiqueta({ codigo: 'ED-000001', nombre: 'Traje de baño Universal Thread', precio: 15000, precio_lista: 0, semana_ingreso: '2026-S41' });
+  assert.ok(tspl.includes('"Traje de bano Universal"') && tspl.includes('"Thread"'));
 });
 
 test('precio de ropa en producción y sandbox con rol de captura; valores alterados no guardan foto ni producto', async () => {
