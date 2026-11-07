@@ -76,6 +76,11 @@ export const textoAvisoCliente = (pieza, cliente, venceEn) => `Hola ${unaLinea(c
   + `${pieza.talla ? ` talla ${unaLinea(pieza.talla)}` : ''} (${pieza.codigo}) por ${pesos(pieza.precio)}. `
   + `La tengo apartada hasta el ${fechaLegible(venceEn)} Para pagar, escríbeme y te paso los datos de la tienda.`;
 
+/** Bienvenida al socio recién dado de alta (#739). El mínimo de $1,000 solo se menciona si el alta trae regalo de apertura (regalo > 0 centavos). */
+export const textoBienvenidaSocio = (socio) => `Hola ${unaLinea(socio.nombre)}, te damos la bienvenida a Dolarones de El Dolarón. `
+  + `Tu número de socio es el ${socio.numero}. Para ver tu saldo de Dolarones, entra con tu celular a https://dolarones.eldolaron.com`
+  + (socio.regalo > 0 ? ' Tu regalo de apertura se usa en compras de $1,000 MXN o más antes de descontar Dolarones.' : '');
+
 const HORA = 3_600_000;
 /** Chip de «Mis ventas»: { clase, texto }. Umbrales: más de 6 h ámbar, 6 h o menos rojo, menos de 1 h «menos de 1 h». */
 export function estadoMia(pedido, ahoraMs) {

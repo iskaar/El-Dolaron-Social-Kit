@@ -8,7 +8,7 @@ import { tienda, DUENO, datosTransferencia } from './prueba-d1.ts';
 import { permiso, puede, esDeCaja, type Rol } from './cuentas.ts';
 import * as venta from '../public/venta.js';
 import { textoWhatsApp, telefonoInteresado, codigoDeRespuesta, enlaceApartar, textoSeguimiento, compartirTarjetas, crearTarjeta, partirNombre,
-  fechaLegible, horaLegible, textoAvisoCliente, enlaceCliente, estadoMia, agruparMias, cobradoMias } from '../public/vender.js';
+  fechaLegible, horaLegible, textoAvisoCliente, textoBienvenidaSocio, enlaceCliente, estadoMia, agruparMias, cobradoMias } from '../public/vender.js';
 
 function pieza(db: DatabaseSync, cambios: Record<string, unknown> = {}) {
   const id = crypto.randomUUID();
@@ -442,6 +442,16 @@ test('aviso al cliente: nombre, talla solo si existe, código, precio en pesos, 
   const url = new URL(enlaceCliente('4441234567', 'Hola & más'));
   assert.equal(url.origin + url.pathname, 'https://wa.me/524441234567');
   assert.equal(url.searchParams.get('text'), 'Hola & más');
+});
+
+test('bienvenida al socio (#739): nombre, número y portal; el mínimo de $1,000 solo con regalo de apertura', () => {
+  const sin = textoBienvenidaSocio({ numero: 42, nombre: ' Ana\n María ', regalo: 0 });
+  assert.equal(sin, 'Hola Ana María, te damos la bienvenida a Dolarones de El Dolarón. Tu número de socio es el 42. '
+    + 'Para ver tu saldo de Dolarones, entra con tu celular a https://dolarones.eldolaron.com');
+  assert.ok(!sin.includes('1,000'));
+  assert.match(textoBienvenidaSocio({ numero: 42, nombre: 'Ana', regalo: 5000 }), /compras de \$1,000 MXN o más antes de descontar Dolarones.$/);
+  const url = new URL(enlaceCliente('4441234567', sin));
+  assert.equal(url.searchParams.get('text'), sin);
 });
 
 test('chip de Mis ventas: umbrales de 6 h y 1 h, vencido por reloj, pago registrado y estados cerrados', () => {
