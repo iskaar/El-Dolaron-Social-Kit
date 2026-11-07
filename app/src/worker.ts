@@ -98,7 +98,7 @@ const RUTAS_VENDEDOR = new Set(['/captura', '/foto.js', '/tallas.js', '/api/salu
   // Imprimir desde el celular (#440, Isaac 23/10): el motor y su pestaña; el permiso se cobra en la API.
   '/inventario-imprimir.js', '/imprimir-lote.js',
   '/inventario', '/inventario.css', '/inventario.js', '/inventario-ui.js', '/lector.js', '/ficha.js',
-  '/venta.js', '/etiquetera.js', '/impresora.js', '/camara.js', '/vendor/html5-qrcode.min.js', '/ropa.js',
+  '/venta.js', '/etiquetera.js', '/letreros.js', '/impresora.js', '/camara.js', '/vendor/html5-qrcode.min.js', '/ropa.js',
   // #459: imports de /inventario que faltaban (code128.js vía impresora.js; camara-pc.js por import() dinámico).
   '/code128.js', '/camara-pc.js',
   // #463: «Cerrar sesión» del menú de /inventario (import dinámico).
@@ -1292,7 +1292,7 @@ async function prepararEtiquetas(request: Request, env: Env, propietario: string
   }
 
   const { results } = await env.DB.prepare(
-    `select id, codigo, nombre, categoria, talla, precio, precio_lista, semana_ingreso, destino, stock, estado_fisico,
+    `select id, codigo, nombre, categoria, marca, talla, precio, precio_lista, semana_ingreso, destino, stock, estado_fisico,
        ${VERSION_ETIQUETA} as etiqueta_version
      from productos where id in (select value from json_each(?)) and propietario = ? and estado_analisis <> 'descartado' order by rowid`,
   )
