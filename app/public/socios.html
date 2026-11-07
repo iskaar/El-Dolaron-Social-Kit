@@ -28,6 +28,9 @@
   #listo .regalo { display: inline-block; margin: 10px 0; padding: 8px 14px; border-radius: 999px;
     background: var(--amarillo); color: var(--azul); font-weight: 800; font-size: 18px; }
   #listo p { margin: 6px 0; }
+  a.boton { display: block; margin-top: 16px; padding: 16px; font-size: 18px; font-weight: 800; border-radius: 12px;
+    background: #25D366; color: #073b1c; text-decoration: none; }
+  a.boton:focus-visible, button:focus-visible { outline: 3px solid var(--azul); outline-offset: 2px; }
 </style>
 <script src="/cajero.js"></script>
 </head>
@@ -71,6 +74,7 @@
     <div class="regalo" id="listo-regalo" hidden></div>
     <p id="listo-vence"></p>
     <p id="listo-saldo"></p>
+    <a id="listo-wa" class="boton" href="#" target="_blank" rel="noopener">Mandar por WhatsApp</a>
     <button id="acreditar-alta" type="button">Acreditar llegada física</button>
     <button id="otro" type="button">Registrar a otro cliente</button>
   </section>
@@ -99,6 +103,7 @@
 </main>
 
 <script type="module">
+import { textoBienvenidaSocio, enlaceCliente } from '/vender.js';
 const $ = (id) => document.getElementById(id);
 const d = (centavos) => `${(centavos / 100).toLocaleString('es-MX')} Dolarones`;
 // Un id por alta: si la red falla despues de guardar, reintentar no crea otro socio.
@@ -138,6 +143,7 @@ $('alta').addEventListener('submit', async (e) => {
       ? `Se pueden usar desde hoy, completos o en partes, hasta el ${new Date(socio.regalo_vence).toLocaleDateString('es-MX')}.`
       : '';
     $('listo-saldo').textContent = `Saldo: ${d(socio.disponible)}`;
+    $('listo-wa').href = enlaceCliente(socio.telefono, textoBienvenidaSocio(socio));
     $('alta').hidden = true;
     $('listo').hidden = false;
   } catch {
@@ -151,6 +157,7 @@ $('otro').addEventListener('click', () => {
   $('alta').reset();
   idAlta = crypto.randomUUID();
   $('listo').hidden = true;
+  $('listo-wa').href = '#';
   $('alta').hidden = false;
   $('nombre').focus();
 });
