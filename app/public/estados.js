@@ -2,10 +2,12 @@
 // El grado se imprime en la etiqueta de MG (letra A/B/C
 // en un recuadro, Issue #453, por instrucción de Isaac; antes no se imprimía).
 // A = nuevo y B = dañado de siempre; C es liquidación total y solo se vende en la tienda.
+// D es merma caducada (#733): se captura para tener el registro, no tiene precio y NUNCA se vende ni se ofrece.
 export const ESTADOS = [
   ['nuevo', 'A · Nuevo'],
   ['danado', 'B · Dañado'],
   ['liquidacion', 'C · Liquidación'],
+  ['caducado', 'D · Caducidad'],
 ];
 export const nombreEstado = (estado) => (ESTADOS.find(([e]) => e === estado) ?? ESTADOS[0])[1];
 export const siguienteEstado = (estado) => ESTADOS[(ESTADOS.findIndex(([e]) => e === estado) + 1) % ESTADOS.length][0];

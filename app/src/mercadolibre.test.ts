@@ -1741,3 +1741,86 @@ test('guía (#691): sin envío 409; envío no listo (ML 400/404) con mensaje leg
   t.sim.guias.set('SHP-10:zpl2', await zip('guia.txt', 'texto sin comandos'));
   assert.equal((await t.pedir('/api/ml/guia/9703?formato=zpl', undefined, 'GET')).status, 502);
 }));
+
+/* ---------- grado D · Caducidad (#733) ---------- */
+
+const gradoDe = (t: Tienda, id: string) => (t.db.prepare('select estado_fisico from productos where id = ?').get(id) as { estado_fisico: string }).estado_fisico;
+const ML_ACTIVA = 'Pausa primero su publicación de Mercado Libre.';
+
+test('#733: pasar a D con la publicación de ML activa se rechaza (409) en PATCH de borrador y en revisión; pausada, sí se puede', async () => {
+  await conML(async (t) => {
+    const { id } = await publicarPieza(t);
+    // La revisión de celular solo toca lo que capturó quien pide, en las últimas 24 h.
+    t.db.prepare('update productos set capturado_por = ?, creado_en = ? where id = ?').run(DUENO, new Date().toISOString(), id);
+    for (const [ruta, cuerpo] of [[`/api/borradores/${id}`, { nombre: "Jeans Levi's 501 Hombre", estado_fisico: 'caducado' }], [`/api/borradores/${id}/revision`, { estado_fisico: 'caducado' }]] as const) {
+      const r = await t.pedir(ruta, cuerpo, 'PATCH');
+      assert.equal(r.status, 409, `${ruta}: ${JSON.stringify(r.cuerpo)}`);
+      assert.equal(r.cuerpo.error, ML_ACTIVA);
+      assert.equal(gradoDe(t, id), 'nuevo', `${ruta}: el grado no cambia`);
+    }
+    // Otros cambios de la misma pieza siguen funcionando con la publicación activa.
+    assert.equal((await t.pedir(`/api/borradores/${id}/revision`, { estado_fisico: 'danado' }, 'PATCH')).status, 200);
+    assert.equal(gradoDe(t, id), 'danado');
+    // Pausada la publicación, ya se puede pasar a D por cualquiera de los dos caminos.
+    assert.equal((await t.pedir(`/api/ml/pausar/${id}`, {})).status, 200);
+    assert.equal((await t.pedir(`/api/borradores/${id}/revision`, { estado_fisico: 'caducado' }, 'PATCH')).status, 200);
+    assert.equal(gradoDe(t, id), 'caducado');
+  });
+});
+
+test('#733: la foto reenviada con grado D no pasa a D una pieza con publicación de ML activa', async () => {
+  await conML(async (t) => {
+    const { id } = await publicarPieza(t);
+    t.db.prepare('update productos set capturado_por = ?, upc = null where id = ?').run(DUENO, id);
+    const f = new FormData();
+    f.set('id', id); f.set('estado_fisico', 'caducado'); f.set('cantidad', '1');
+    f.set('foto', new Blob(['foto'], { type: 'image/jpeg' }), 'foto.jpg');
+    const r = await worker.fetch!(new Request('https://caja.prueba/api/borradores', { method: 'POST', body: f }) as never, t.env, t.ctx as never);
+    assert.equal(r.status, 409);
+    assert.equal(((await r.json()) as { error: string }).error, ML_ACTIVA);
+    assert.equal(gradoDe(t, id), 'nuevo');
+  });
+});
+
+test('#733: «Reactivar» no reactiva la publicación pausada de una pieza D', async () => {
+  await conML(async (t) => {
+    const { id, itemId } = await publicarPieza(t);
+    assert.equal((await t.pedir(`/api/ml/pausar/${id}`, {})).status, 200);
+    t.db.prepare("update productos set estado_fisico = 'caducado' where id = ?").run(id);
+    const r = await t.pedir(`/api/ml/reactivar/${id}`, {});
+    assert.equal(r.status, 409);
+    assert.match(r.cuerpo.error, /caducada/);
+    assert.equal(estadoDe(t, id), 'pausada');
+    assert.equal(t.sim.items.get(itemId)!.status, 'paused');
+    // Control: con grado A la misma pieza sí se reactiva.
+    t.db.prepare("update productos set estado_fisico = 'nuevo' where id = ?").run(id);
+    assert.equal((await t.pedir(`/api/ml/reactivar/${id}`, {})).status, 200);
+  });
+});
+
+test('#733: el cron de conciliación no reactiva una pieza D (pausada por venta o pausada) y pausa en ML la que sigue activa', async () => {
+  await conML(async (t) => {
+    const a = await publicarPieza(t);   // pausada_por_venta con existencias: sin D el cron la reactiva
+    const b = await publicarPieza(t);   // ML activa aunque la pieza ya es D
+    for (const x of [a, b]) t.db.prepare("update productos set estado_fisico = 'caducado' where id = ?").run(x.id);
+    t.db.prepare("update ml_publicaciones set estado = 'pausada_por_venta' where producto_id = ?").run(a.id);
+    t.sim.items.get(a.itemId)!.status = 'paused';
+    await worker.scheduled!({} as never, t.env, t.ctx as never);
+    await t.esperar();
+    assert.equal(estadoDe(t, a.id), 'pausada');
+    assert.equal(t.sim.items.get(a.itemId)!.status, 'paused');
+    assert.equal(estadoDe(t, b.id), 'pausada');
+    assert.equal(t.sim.items.get(b.itemId)!.status, 'paused');
+    // El dueño la reactiva a mano en ML: el siguiente cron la vuelve a pausar.
+    t.sim.items.get(a.itemId)!.status = 'active';
+    await worker.scheduled!({} as never, t.env, t.ctx as never);
+    await t.esperar();
+    assert.equal(t.sim.items.get(a.itemId)!.status, 'paused');
+    // Control: con grado A la misma pausada_por_venta sí se reactiva.
+    t.db.prepare("update productos set estado_fisico = 'nuevo' where id = ?").run(a.id);
+    t.db.prepare("update ml_publicaciones set estado = 'pausada_por_venta' where producto_id = ?").run(a.id);
+    await worker.scheduled!({} as never, t.env, t.ctx as never);
+    await t.esperar();
+    assert.equal(estadoDe(t, a.id), 'activa');
+  });
+});

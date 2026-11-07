@@ -409,6 +409,16 @@
     </div>
   </section>
 
+  <section aria-labelledby="t-merma">
+    <h2 class="titulo-bloque" id="t-merma">Merma por caducidad</h2>
+    <article class="panel">
+      <div class="tarjetas" id="merma-resumen" style="margin-bottom: 14px"></div>
+      <div id="merma-detalle" style="overflow-x:auto"></div>
+      <p class="nota">Piezas de grado D · Caducidad capturadas en el periodo de arriba. No se venden ni suman al inventario en piso.
+        El valor es el precio de lista × existencia (no hay costo de compra en el sistema).</p>
+    </article>
+  </section>
+
   <section aria-labelledby="t-exportar">
     <h2 class="titulo-bloque" id="t-exportar">Exportar</h2>
     <div class="exportar">
@@ -725,7 +735,19 @@ function pintarPiso(inv) {
       inv.mas_viejas.map((p) => [p.codigo, p.nombre || '—', nombreCat(p.categoria), p.dias, p.stock, pesos(p.precio)]), [3, 4, 5]);
 }
 
+function pintarMerma(m) {
+  $('merma-resumen').innerHTML = [
+    tarjeta('Piezas caducadas', m.piezas.toLocaleString('es-MX')),
+    tarjeta('Unidades', m.unidades.toLocaleString('es-MX')),
+    tarjeta('Valor de lista', pesos(m.valor_lista), m.sin_valor ? `<div class="delta">${escapar(cuenta(m.sin_valor, 'pieza', 'piezas'))} sin precio de lista</div>` : ''),
+  ].join('');
+  $('merma-detalle').innerHTML = m.detalle.length === 0 ? '<div class="vacio">Sin merma por caducidad en este periodo.</div>'
+    : tabla(['Fecha', 'Código', 'Pieza', 'Categoría', 'Unidades', 'Valor de lista'],
+      m.detalle.map((p) => [fechaHora(p.creado_en), p.codigo || '—', p.nombre || '—', nombreCat(p.categoria), p.stock, p.precio_lista > 0 ? pesos(p.precio_lista * p.stock) : '—']), [4, 5]);
+}
+
 function pintarInventario(r) {
+  pintarMerma(r.merma_caducidad);
   pintarPiso(r.inventario);
   $('precio-sugerido').innerHTML = r.precio_sugerido.n === 0
     ? '<div class="vacio">Todavía no hay piezas con precio sugerido y precio final.</div>'

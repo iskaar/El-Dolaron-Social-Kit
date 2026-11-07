@@ -332,10 +332,10 @@ const productoDe = (p: Pieza) => ({
 });
 
 // Lo que se puede publicar: pieza individual, revisada, con foto y existencias; nunca bandas, dañadas (B)
-// ni liquidación (C, solo en tienda, #371). `<> 'danado'` se queda literal: lo exige el índice parcial de recortes.
+// ni liquidación (C, solo en tienda, #371) ni caducidad (D, merma que nunca se vende, #733). `<> 'danado'` se queda literal: lo exige el índice parcial de recortes.
 export const PUBLICABLE = `p.destino = 'etiqueta' and p.sin_inventario = 0 and p.estado_analisis = 'listo' and p.stock > 0
   and p.foto_key <> '' and p.codigo like 'ED-%' and p.estado_fisico <> 'danado' and p.estado_fisico <> 'liquidacion'
-  and p.propietario = 'dolaron'`;
+  and p.estado_fisico <> 'caducado' and p.propietario = 'dolaron'`;
 
 // Menos de este stock exige confirmacion fisica en piso (#724); la migracion 068 la borra si el stock cambia.
 export const PISO_MINIMO = 3;
@@ -353,7 +353,7 @@ async function piezaPublicable(env: Env, id: string): Promise<{ ok: true; pieza:
   if (p.sin_inventario || p.destino !== 'etiqueta' || !/^ED-/.test(p.codigo ?? '')) {
     return no('Solo se publican piezas individuales con etiqueta ED-; las bandas no.');
   }
-  if (p.estado_fisico !== 'nuevo') return no('Mercado Libre no tiene la condición «dañado» ni «liquidación»: esta pieza no se puede publicar.');
+  if (p.estado_fisico !== 'nuevo') return no('Mercado Libre no tiene la condición «dañado», «liquidación» ni «caducidad»: esta pieza no se puede publicar.');
   if (p.estado_analisis !== 'listo') return no('Primero revisa la pieza en el admin.');
   if (!p.foto_key) return no('La pieza no tiene foto.');
   if (p.stock <= 0) return no('La pieza no tiene existencias.');
@@ -1207,9 +1207,11 @@ async function cambiarEstado(env: Env, id: string, accion: 'pausar' | 'reactivar
   if (!ID_PIEZA.test(id)) return json({ error: 'La pieza no existe.' }, 404);
   const pub = await leerPublicacion(env, id);
   if (!pub?.ml_item_id) return json({ error: 'Esta pieza no está publicada en Mercado Libre.' }, 404);
-  const pieza = await env.DB.prepare('select stock, existencia_confirmada_en from productos where id = ?').bind(id).first<{ stock: number; existencia_confirmada_en: string | null }>();
+  const pieza = await env.DB.prepare('select stock, existencia_confirmada_en, estado_fisico from productos where id = ?').bind(id).first<{ stock: number; existencia_confirmada_en: string | null; estado_fisico: string }>();
   const validos = accion === 'pausar' ? ['activa'] : ['pausada', 'pausada_por_venta', 'vendida'];
   if (!validos.includes(pub.estado)) return json({ error: `No se puede ${accion} una publicación en estado «${pub.estado}».` }, 409);
+  // #733: la caducada (D) nunca se vuelve a ofrecer.
+  if (accion === 'reactivar' && pieza?.estado_fisico === 'caducado') return json({ error: 'La pieza está caducada (grado D): no se reactiva en Mercado Libre.' }, 409);
   if (accion === 'reactivar' && !((pieza?.stock ?? 0) > 0)) return json({ error: 'La pieza no tiene existencias.' }, 409);
   const piso = accion === 'reactivar' ? faltaPiso(pieza!.stock, pieza!.existencia_confirmada_en, 'reactivarla') : null;
   if (piso) return json({ error: piso }, 409);
@@ -1244,9 +1246,9 @@ export async function conciliarPublicaciones(env: Env, filtro: Filtro = {}): Pro
   if (filtro.itemIds) { condiciones.push(`m.ml_item_id in (${unidos(filtro.itemIds)})`); valores.push(...filtro.itemIds); }
   if ((filtro.productoIds && !filtro.productoIds.length) || (filtro.itemIds && !filtro.itemIds.length)) return;
   const { results: filas } = await env.DB.prepare(
-    `select m.producto_id, m.ml_item_id, m.estado, p.stock, p.existencia_confirmada_en
+    `select m.producto_id, m.ml_item_id, m.estado, p.stock, p.existencia_confirmada_en, p.estado_fisico
      from ml_publicaciones m join productos p on p.id = m.producto_id where ${condiciones.join(' and ')}`,
-  ).bind(...valores).all<{ producto_id: string; ml_item_id: string; estado: string; stock: number; existencia_confirmada_en: string | null }>();
+  ).bind(...valores).all<{ producto_id: string; ml_item_id: string; estado: string; stock: number; existencia_confirmada_en: string | null; estado_fisico: string }>();
   if (filas.length === 0) return;   // nada publicado: ni siquiera se pide token
 
   const poner = (productoId: string, estado: string, error = '') => env.DB.prepare(
@@ -1269,6 +1271,10 @@ export async function conciliarPublicaciones(env: Env, filtro: Filtro = {}): Pro
       try {
         if (ml.status === 'closed') {
           if (f.estado !== 'vendida') await poner(f.producto_id, 'cerrada');
+        } else if (f.estado_fisico === 'caducado') {
+          // #733: la D nunca se ofrece ni se reactiva sola; si ML la tenía activa (o el dueño la reactivó allá), se pausa.
+          if (ml.status === 'active') await poner_ml({ status: 'paused' });
+          if (f.estado !== 'pausada' && f.estado !== 'vendida') await poner(f.producto_id, 'pausada', 'Pieza caducada (grado D): no se reactiva.');
         } else if (f.stock <= 0) {
           if (f.estado === 'activa' || f.estado === 'error') {
             if (ml.status === 'active') await poner_ml({ status: 'paused' });

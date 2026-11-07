@@ -239,12 +239,12 @@ async function crearPedidoDe(cuerpo: Record<string, unknown>, env: Env, ctx: Exe
 
   const ids = [...cantidades.keys()];
   const { results: filas } = await env.DB.prepare(
-    `select id, codigo, precio, sin_inventario, propietario from productos where id in (${ids.map(() => '?').join(',')})`,
-  ).bind(...ids).all<{ id: string; codigo: string | null; precio: number; sin_inventario: number; propietario: string }>();
+    `select id, codigo, precio, sin_inventario, propietario, estado_fisico from productos where id in (${ids.map(() => '?').join(',')})`,
+  ).bind(...ids).all<{ id: string; codigo: string | null; precio: number; sin_inventario: number; propietario: string; estado_fisico: string }>();
   // FEP no acepta anticipos en tienda (decision de Isaac, #269): el anticipo no tiene a donde ir en su caja.
   if (filas.some((p) => p.propietario === 'fep'))
     return json({ error: 'Las piezas de FEP no se pueden apartar: no aceptamos anticipos de FEP en tienda.' }, 400);
-  if (filas.length !== ids.length || filas.some((p) => !p.codigo || !(p.precio > 0) || p.sin_inventario !== 0))
+  if (filas.length !== ids.length || filas.some((p) => !p.codigo || !(p.precio > 0) || p.sin_inventario !== 0 || p.estado_fisico === 'caducado'))
     return json({ error: 'Solo piezas con etiqueta.' }, 400);
 
   const subtotal = filas.reduce((suma, p) => suma + p.precio * cantidades.get(p.id)!, 0);
@@ -525,9 +525,9 @@ async function moverPaquete(folio: number, tipo: 'pieza' | 'abono', request: Req
   let precio = 0;
   let precioCatalogo = 0;
   if (tipo === 'pieza') {
-    const producto = await env.DB.prepare('select precio, propietario, codigo, sin_inventario from productos where id = ?')
-      .bind(productoId).first<{ precio: number; propietario: string; codigo: string | null; sin_inventario: number }>();
-    if (!producto || producto.propietario !== 'dolaron' || !producto.codigo || producto.sin_inventario || !Number.isSafeInteger(producto.precio) || producto.precio <= 0)
+    const producto = await env.DB.prepare('select precio, propietario, codigo, sin_inventario, estado_fisico from productos where id = ?')
+      .bind(productoId).first<{ precio: number; propietario: string; codigo: string | null; sin_inventario: number; estado_fisico: string }>();
+    if (!producto || producto.propietario !== 'dolaron' || !producto.codigo || producto.sin_inventario || !Number.isSafeInteger(producto.precio) || producto.precio <= 0 || producto.estado_fisico === 'caducado')
       return json({ error: 'Solo piezas con etiqueta de El Dolarón.' }, 400);
     // Si se suma otra unidad del mismo producto, conserva el precio de esa línea.
     precioCatalogo = producto.precio;
