@@ -155,6 +155,17 @@ const FRANJA_SANDBOX = `<div style="background:#D72B32;color:#fff;text-align:cen
   SANDBOX · solo pruebas: aquí no se cobra de verdad ni se registran socios reales</div>`;
 
 const ESTADOS_FISICOS = new Set(ESTADOS.map(([estado]) => estado));
+
+// #733: pasar a D (caducidad) con la publicación de Mercado Libre activa la dejaría a la venta. El UPDATE de cada camino
+// lleva `SIN_ML_ACTIVA` (sin carrera); si no escribe, `rechazoPorMl` da el mensaje.
+const ERROR_ML_ACTIVA = 'Pausa primero su publicación de Mercado Libre.';
+const SIN_ML_ACTIVA = `not (? = 'caducado' and estado_fisico <> 'caducado'
+  and exists (select 1 from ml_publicaciones m where m.producto_id = productos.id and m.estado = 'activa'))`;
+async function rechazoPorMl(env: Env, id: string, nuevo: string, anterior: string): Promise<Response | null> {
+  if (nuevo !== 'caducado' || anterior === 'caducado') return null;
+  const activa = await env.DB.prepare("select 1 as x from ml_publicaciones where producto_id = ? and estado = 'activa'").bind(id).first();
+  return activa ? json({ error: ERROR_ML_ACTIVA }, 409) : null;
+}
 // Transferencia: confirmada por Isaac como forma de pago; sin ella se capturaba
 // como efectivo o tarjeta y descuadraba el corte (Issue #93).
 const FORMAS_PAGO = new Set(['efectivo', 'tarjeta', 'transferencia']);
@@ -350,6 +361,8 @@ async function crearBorrador(request: Request, env: Env, ctx: ExecutionContext, 
        modificado_por = excluded.capturado_por,
        actualizado_en = excluded.actualizado_en
        where productos.estado_analisis <> 'descartado'
+         and not (excluded.estado_fisico = 'caducado' and productos.estado_fisico <> 'caducado'
+           and exists (select 1 from ml_publicaciones m where m.producto_id = productos.id and m.estado = 'activa'))
          and not exists (select 1 from productos otra where ${UPC_VISIBLE}
            and propietario = productos.propietario and ltrim(upc, '0') = ltrim(productos.upc, '0')
            and estado_fisico = excluded.estado_fisico and coalesce(talla, '') = coalesce(excluded.talla, '') and id <> productos.id)`,
@@ -358,9 +371,11 @@ async function crearBorrador(request: Request, env: Env, ctx: ExecutionContext, 
       id, normalizarUpc(upc), propietario, normalizarUpc(upc), estadoFisico, claveTalla(talla), id, id)
     .run();
   if (!fotoGuardada.meta.changes) {
-    const retenida = await env.DB.prepare('select upc, estado_analisis from productos where id = ?')
-      .bind(id).first<{ upc:string | null; estado_analisis:string }>();
+    const retenida = await env.DB.prepare('select upc, estado_analisis, estado_fisico from productos where id = ?')
+      .bind(id).first<{ upc:string | null; estado_analisis:string; estado_fisico:string }>();
     if (retenida?.estado_analisis !== 'descartado') {
+      const porMl = retenida ? await rechazoPorMl(env, id, estadoFisico, retenida.estado_fisico) : null;
+      if (porMl) return porMl;
       if (!retenida && upc) {
         const sumada = await sumarUpc(id, upc, estadoFisico, claveTalla(talla), cantidad, env, correo, undefined, propietario);
         if (sumada) return sumada;
@@ -569,7 +584,7 @@ async function corregirBorrador(id: string, cambios: Record<string, unknown>, en
      where id = ?
        and estado_analisis <> 'descartado'
        and (? = 0 or ? = '' or not exists (select 1 from productos where ${MISMO_UPC} and id <> ?))
-       and upc is ? and estado_fisico = ?
+       and upc is ? and estado_fisico = ? and ${SIN_ML_ACTIVA}
        ${captura ? `and capturado_por = ? and upc = ? and propietario = 'dolaron'
          and estado_analisis in ('pendiente', 'error') and (codigo is null or codigo = '')
          and not exists (select 1 from venta_lineas where producto_id = productos.id)` : ''}
@@ -583,7 +598,7 @@ async function corregirBorrador(id: string, cambios: Record<string, unknown>, en
       // Sin `stock` en el cuerpo no se toca: la caja pudo vender piezas desde que se abrio la ficha. Una `listo` tampoco (#473).
       cambios.stock === undefined || listoAlLeer ? null : stock, ahora, upc ?? null, por, id,
       verificarUpc ? 1 : 0, normalizarUpc(upc), fila.propietario, normalizarUpc(upc), estadoFisico, claveTalla(talla), id,
-      fila.upc ?? null, fila.estado_fisico, ...(captura ? [captura.correo, captura.upc] : []),
+      fila.upc ?? null, fila.estado_fisico, estadoFisico, ...(captura ? [captura.correo, captura.upc] : []),
       ...(precioEsperado === undefined ? [] : [precioEsperado]), ...(solicitudId ? [solicitudId] : []));
   // #451: si el dueño cambia el precio por esta vía y había una solicitud pendiente, se cierra en el mismo batch,
   // solo si la pieza sigue viva y el precio de verdad cambia.
@@ -603,6 +618,10 @@ async function corregirBorrador(id: string, cambios: Record<string, unknown>, en
   } else guardada = await actualizar.first<{ stock: number }>();
 
   // `precioEsperado` (#451): el precio solo cambia si sigue valiendo lo que vio quien lo cambia.
+  if (!guardada) {
+    const porMl = await rechazoPorMl(env, id, estadoFisico, fila.estado_fisico);
+    if (porMl) return porMl;
+  }
   if (!guardada) return precioEsperado !== undefined ? json({ error: 'El precio de la pieza cambió. Revisa el precio actual.' }, 409)
     : await conflictoUpc(env, upc || '', estadoFisico, claveTalla(talla), fila.propietario, id) ?? json({ error: 'La pieza cambió o ya fue eliminada.' }, 409);
   // Otro proceso la dejó `listo` entre la lectura y el UPDATE: el guardado no escribió su existencia (#473).
@@ -1198,13 +1217,13 @@ async function revisarCaptura(id: string, request: Request, env: Env, correo: st
   const resultado = await env.DB.prepare(`update productos set precio = coalesce(?, precio),
       estado_fisico = coalesce(?, estado_fisico), nombre = ?, marca = ?, actualizado_en = ?, modificado_por = ?,
       por_revisar = case when ? = 1 then 0 else por_revisar end where ${alcance} and estado_analisis = 'listo'
-      and upc is ? and estado_fisico = ?
+      and upc is ? and estado_fisico = ? and ${SIN_ML_ACTIVA}
       and (? = 0 or ? = '' or not exists (select 1 from productos where ${MISMO_UPC} and id <> ?))
       and (? is null or precio_lista = 0 or precio_lista >= ?)`)
     .bind(precioNuevo, cambios.estado_fisico ?? null, nombre, marca.trim(), ahora, correo, cambios.confirmar ? 1 : 0, id, correo, desde,
-      fila.upc, fila.estado_fisico, cambios.estado_fisico === undefined ? 0 : 1, normalizarUpc(fila.upc), fila.propietario, normalizarUpc(fila.upc), grado, claveTalla(fila.talla), id,
+      fila.upc, fila.estado_fisico, grado, cambios.estado_fisico === undefined ? 0 : 1, normalizarUpc(fila.upc), fila.propietario, normalizarUpc(fila.upc), grado, claveTalla(fila.talla), id,
       precioNuevo, precioNuevo).run();
-  if (!resultado.meta.changes) return json({ error: 'La captura no está lista, fue eliminada o el precio supera el de lista.' }, 409);
+  if (!resultado.meta.changes) return await rechazoPorMl(env, id, grado, fila.estado_fisico) ?? json({ error: 'La captura no está lista, fue eliminada o el precio supera el de lista.' }, 409);
   const guardada = await env.DB.prepare(`select id, precio, estado_fisico, estado_analisis, stock, talla, codigo, nombre, marca, por_revisar from productos where ${alcance}`)
     .bind(id, correo, desde).first<{ nombre: string; marca: string }>();
   if (guardada && pidePrecio) {
