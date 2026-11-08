@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>El Dolarón — mis retos</title>
+<style>
+  :root { --azul:#16366B; --rojo:#D72B32; --verde:#1f7a4d; --amarillo:#FFD447; --linea:#dfe3ea; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: #f4f6f9; color: #1a1f2b; font-family: system-ui, -apple-system, sans-serif; }
+  header { background: var(--azul); color: #fff; padding: 10px 18px; display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+  header h1 { font-size: 17px; margin: 0; flex: 1; }
+  header a { color: var(--amarillo); font-size: 13px; }
+  main { max-width: 720px; margin: 0 auto; padding: 16px; display: grid; gap: 14px; }
+  h2 { margin: 0; font-size: 18px; color: var(--azul); }
+  .nota { font-size: 13px; color: #5b6478; }
+  .tarjeta { background: #fff; border: 1px solid var(--linea); border-radius: 12px; padding: 14px; display: grid; gap: 10px; }
+  .saldo { font-size: 34px; font-weight: 800; color: var(--verde); }
+  table { width: 100%; border-collapse: collapse; font-size: 15px; }
+  th { text-align: left; font-size: 13px; color: #5b6478; font-weight: 600; }
+  th:not(:first-child), td:not(:first-child) { text-align: right; }
+  th, td { padding: 6px 4px; border-bottom: 1px solid var(--linea); }
+  tr:last-child td { border-bottom: 0; }
+  ul { margin: 0; padding: 0; list-style: none; display: grid; gap: 6px; }
+  li { display: flex; justify-content: space-between; gap: 10px; }
+  li b { color: var(--verde); white-space: nowrap; }
+  .error { color: var(--rojo); font-size: 14px; min-height: 18px; }
+</style>
+<script src="/cajero.js"></script>
+</head>
+<body>
+<header><h1>Mis retos</h1><a href="/caja">Caja</a><a href="/">Inicio</a></header>
+<main>
+  <div class="error" id="error" role="alert"></div>
+  <section class="tarjeta">
+    <h2>Mis Dolarones</h2>
+    <div class="saldo" id="saldo" aria-live="polite">—</div>
+    <div class="nota" id="saldo-nota">Se canjean en la caja como cualquier Dolarón.</div>
+  </section>
+  <section class="tarjeta">
+    <h2>Mi semana</h2>
+    <table>
+      <thead><tr><th scope="col">&nbsp;</th><th scope="col">Esta semana</th><th scope="col">Mi promedio (4 semanas)</th></tr></thead>
+      <tbody id="semana"></tbody>
+    </table>
+    <div class="nota">Solo tú ves estos números.</div>
+  </section>
+  <section class="tarjeta">
+    <h2>Mis logros</h2>
+    <div class="nota" id="mes"></div>
+    <ul id="logros"><li class="nota">Cargando…</li></ul>
+    <div class="nota">Los logros se acreditan unos 8 días después de la venta, cuando ya no pueden cancelarse ni devolverse.</div>
+  </section>
+  <section class="tarjeta">
+    <h2>Cómo ganar</h2>
+    <ul id="reglas"></ul>
+  </section>
+</main>
+<script type="module">
+const $ = (id) => document.getElementById(id);
+const pesos = (centavos) => `$${(centavos / 100).toLocaleString('es-MX', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+const fecha = (iso) => new Date(iso).toLocaleDateString('es-MX', { dateStyle: 'medium' });
+const celda = (tag, texto) => Object.assign(document.createElement(tag), { textContent: texto });
+const fila = (...celdas) => { const tr = document.createElement('tr'); tr.append(...celdas); return tr; };
+const item = (texto, d) => { const li = document.createElement('li'); li.append(celda('span', texto)); if (d != null) li.append(celda('b', `+${d} D`)); return li; };
+
+try {
+  const r = await fetch('/api/retos/mios');
+  // 401 con PIN lo atiende cajero.js (pide el PIN y recarga).
+  if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error ?? `Error ${r.status}`);
+  const m = await r.json();
+  $('saldo').textContent = pesos(m.saldo);
+  if (m.por_liberar > 0) $('saldo-nota').textContent += ` ${pesos(m.por_liberar)} más se liberan pronto.`;
+  const { semana: s, promedio_4_semanas: p } = m;
+  $('semana').replaceChildren(
+    fila(celda('td', 'Ventas atendidas'), celda('td', pesos(s.ventas)), celda('td', pesos(p.ventas))),
+    fila(celda('td', 'Tickets'), celda('td', s.tickets), celda('td', p.tickets)),
+    fila(celda('td', 'Socios nuevos'), celda('td', s.socios), celda('td', p.socios)),
+    fila(celda('td', 'Apartados cerrados'), celda('td', s.apartados), celda('td', p.apartados)));
+  $('mes').textContent = `Este mes llevas ${m.mes.ganado} de ${m.mes.tope} D posibles.`;
+  $('logros').replaceChildren(...(m.logros.length
+    ? m.logros.map((l) => item(`${fecha(l.fecha)} · ${l.etiqueta}${l.d ? '' : ' (tope del mes)'}`, l.d))
+    : [item('Todavía no hay logros. ¡Vamos por el primero!')]));
+  $('reglas').replaceChildren(...m.reglas.map((x) => item(x.texto, x.d)));
+} catch (error) {
+  $('error').textContent = `No se pudo cargar: ${error.message}.`;
+}
+</script>
+</body>
+</html>

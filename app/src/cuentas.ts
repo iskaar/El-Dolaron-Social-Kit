@@ -62,6 +62,8 @@ const CAJA: Rol[] = ['cajero', 'computadora'];
 // /vender y sus API: la caja y la revendedora. Va aparte de CAJA a proposito: esDeCaja compara por identidad
 // y la computadora sigue necesitando el PIN aqui (si fuera [...CAJA, 'revendedora'] el PIN desapareceria).
 const VENDER: Rol[] = [...CAJA, 'revendedora'];
+// /retos (#752): lo propio de cada empleada. Como CAJA (la computadora entra con el PIN del cajero) mas capturista, que tambien figura como quien atendio.
+const RETOS: Rol[] = [...CAJA, 'capturista'];
 const TODOS: Rol[] = ['cajero', 'capturista'];
 const DUENO: Rol[] = [];
 const AUXILIAR: Rol[] = ['auxiliar'];
@@ -87,6 +89,7 @@ const PANTALLAS: Record<string, Rol[]> = {
   '/pedidos': CAJA,
   '/vender': VENDER,
   '/manual': VENDER,   // manual interactivo de la revendedora (#594): practica con datos de ejemplo, sin API
+  '/retos': RETOS,   // Mis retos (Issue #752)
   '/avisos': CAJA,   // ventas de Mercado Libre por atender (Issue #429)
   '/tarjeta-bandas': TODOS,
   '/reportes': DUENO,
@@ -180,6 +183,7 @@ export function permiso(pathname: string, metodo: string): Regla {
   // Dar por buena a mano una transferencia que Banxico no confirmo (#603): solo el dueño, aunque el resto de avisos sea de caja.
   if (/^\/api\/avisos\/transferencias\/\d+\/validar$/.test(ruta)) return DUENO;
   if (ruta === '/api/avisos' || ruta.startsWith('/api/avisos/')) return CAJA;   // centro de avisos (Issue #429)
+  if (ruta === '/api/retos/mios') return RETOS;   // solo lo propio de quien pregunta (Issue #752)
   if (ruta === '/api/ayuda') return CAJA;   // botón «Ayuda» (Issue #600); /api/push/* es del dueño, por omisión
   if (ruta === '/api/impresiones' || ruta.startsWith('/api/impresiones/')) return CAJA;
 
@@ -187,7 +191,7 @@ export function permiso(pathname: string, metodo: string): Regla {
 }
 
 /** Lo de caja: lo unico que abre el PIN del cajero. */
-export const esDeCaja = (regla: Regla) => regla === CAJA || regla === VENDER;
+export const esDeCaja = (regla: Regla) => regla === CAJA || regla === VENDER || regla === RETOS;
 
 /** La cuenta de la computadora de caja: para cobrar necesita el PIN de un cajero. */
 export const soloComputadora = (usuario: Usuario | null) =>

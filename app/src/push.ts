@@ -99,6 +99,14 @@ export async function pushADuenos(env: Env, titulo: string, cuerpo: string): Pro
   return enviados.filter(Boolean).length;
 }
 
+/** Push a los dispositivos de una persona (por correo); no mira roles. Devuelve cuántos lo aceptaron. */
+export async function pushA(env: Env, correo: string, titulo: string, cuerpo: string): Promise<number> {
+  if (!env.VAPID_JWK) return 0;
+  const jwk = JSON.parse(env.VAPID_JWK) as JsonWebKey;
+  const { results } = await env.DB.prepare('select endpoint, p256dh, auth from push_suscripciones where correo = ?').bind(correo).all<Suscripcion>();
+  return (await Promise.all(results.map((s) => enviar(env, jwk, s, titulo, cuerpo)))).filter(Boolean).length;
+}
+
 /** /api/ayuda (caja, a nombre del cajero con PIN) y /api/push/* (solo el dueño, por permiso()). */
 export async function rutaPush(request: Request, env: Env, pathname: string, correo: string): Promise<Response | null> {
   if (pathname === '/api/ayuda' && request.method === 'POST') {

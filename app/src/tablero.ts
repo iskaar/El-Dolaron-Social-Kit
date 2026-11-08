@@ -24,7 +24,7 @@ export async function calcularTablero(env: Env, ahora = Date.now()) {
     inventarioEnPiso(env, ahora),
     diasEnVentaPorCategoria(env),
     env.DB.prepare(
-      `select (select count(*) from clientes) as socios,
+      `select (select count(*) from clientes where registrado_por <> 'retos') as socios,
          (select count(*) from (select cliente_id from ventas where cliente_id is not null and cancelada = 0
             group by cliente_id having count(*) >= 2)) as regresaron`,
     ).first<{ socios: number; regresaron: number }>(),

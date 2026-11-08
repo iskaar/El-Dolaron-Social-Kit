@@ -45,7 +45,8 @@ export async function rutaNomina(request: Request, env: Env, url: URL, correo: s
   if (request.method === 'POST' && url.pathname === '/api/nomina/entrada') return marcarEntrada(request, env);
   if (request.method === 'GET' && url.pathname === '/api/nomina') {
     const { results } = await env.DB.prepare(
-      `select e.id, e.nombre, e.periodo, e.pago_dia, e.dias, e.hora_entrada, e.activo, e.correo,
+      `select e.id, e.nombre, e.periodo, e.pago_dia, e.dias, e.hora_entrada, e.activo, e.correo, e.cliente_id,
+         (select case when c.telefono like 'retos-%' then '' else c.telefono end from clientes c where c.id = e.cliente_id) as cliente_telefono,
          (select ${DEBE} from nomina_movimientos m where m.empleado_id = e.id) as debe,
          (select ${ADELANTOS} from nomina_movimientos m where m.empleado_id = e.id) as adelantos
        from empleados e order by e.activo desc, e.nombre`,
@@ -148,6 +149,16 @@ async function guardarEmpleado(request: Request, env: Env, id: string): Promise<
   // Cuenta de la app (#751): sin la llave no se toca lo ya ligado; '' desliga; si no, debe ser cajero/capturista activo.
   const correo = c.correo === undefined ? null : String(c.correo).trim();
   if (correo && !(await esVendedora(env, correo))) return json({ error: 'Esa cuenta no existe o no es de cajero o capturista.' }, 400);
+  // Cuenta de socia (#752): el telefono de un socio existente (se normaliza como en la caja: solo digitos). Vacio o ausente no toca la liga.
+  const digitos = String(c.telefono_socia ?? '').replace(/\D/g, '');
+  const telefonoSocia = digitos.length === 12 && digitos.startsWith('52') ? digitos.slice(2) : digitos;
+  let clienteId: string | null = null;
+  if (telefonoSocia) {
+    clienteId = (await env.DB.prepare('select id from clientes where telefono = ?').bind(telefonoSocia).first<{ id: string }>())?.id ?? null;
+    if (!clienteId) return json({ error: 'No hay ningún socio con ese teléfono.' }, 404);
+    if (await env.DB.prepare('select 1 from empleados where cliente_id = ? and id <> ?').bind(clienteId, id).first())
+      return json({ error: 'Esa cuenta de socio ya está ligada a otro empleado.' }, 409);
+  }
   if (!nombre || !['diario', 'quincenal'].includes(periodo)) return json({ error: 'Nombre o periodo inválido.' }, 400);
   if (!Number.isInteger(pagoDia) || pagoDia <= 0 || pagoDia > IMPORTE_MAXIMO) return json({ error: 'Pago diario inválido.' }, 400);
   if (!dias.every((d) => Number.isInteger(d) && d >= 0 && d <= 6)) return json({ error: 'Días inválidos.' }, 400);
@@ -167,8 +178,8 @@ async function guardarEmpleado(request: Request, env: Env, id: string): Promise<
         values (?, ?, ?, ?, ?, ?, ?, ?, ?) on conflict(id) do nothing`)
         .bind(id, nombre, periodo, pagoDia, JSON.stringify(dias), hora, pinHash, correo ?? '', new Date().toISOString()).run();
     } else {
-      await env.DB.prepare(`update empleados set nombre=?, periodo=?, pago_dia=?, dias=?, hora_entrada=?, pin_hash=?, correo=coalesce(?, correo) where id=?`)
-        .bind(nombre, periodo, pagoDia, JSON.stringify(dias), hora, pinHash, correo, id).run();
+      await env.DB.prepare(`update empleados set nombre=?, periodo=?, pago_dia=?, dias=?, hora_entrada=?, pin_hash=?, correo=coalesce(?, correo), cliente_id=coalesce(?, cliente_id) where id=?`)
+        .bind(nombre, periodo, pagoDia, JSON.stringify(dias), hora, pinHash, correo, clienteId, id).run();
     }
   } catch (error) {
     if (/unique/i.test(String(error))) return json({ error: 'Esa cuenta ya está ligada a otro empleado.' }, 409);
