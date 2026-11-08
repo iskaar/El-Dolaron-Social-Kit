@@ -3,7 +3,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { runInNewContext } from 'node:vm';
-import { totales, agregar, leerMultiplicador, efectivoAlcanza, saldoCanjeable, dolaronesGanados, maximoCanje, desfaseReloj, anticipoDePedido, envioDe, anticipoMinimoDe, ANTICIPO, ANTICIPO_ENVIO, viernesDeEnvio, promoInauguracion, letreroPromo, PROMO_DESCUENTO, PROMO_MINIMO, transferenciaDe, CLAVE_DESDE, debePreguntarSocio } from '../public/venta.js';
+import { totales, agregar, leerMultiplicador, efectivoAlcanza, saldoCanjeable, dolaronesGanados, maximoCanje, desfaseReloj, anticipoDePedido, envioDe, anticipoMinimoDe, ANTICIPO, ANTICIPO_ENVIO, viernesDeEnvio, promoInauguracion, letreroPromo, PROMO_DESCUENTO, PROMO_MINIMO, transferenciaDe, CLAVE_DESDE, debePreguntarSocio, guiaVale } from '../public/venta.js';
 
 interface Linea { codigo: string; nombre: string; precio: number; cantidad: number }
 const pieza = (codigo: string, precio: number) => ({ codigo, nombre: codigo, precio });
@@ -380,4 +380,108 @@ test('cobrar con socio real, o sin red, no pregunta; con solo vale sí (#730)', 
   await conVale.cobrar();
   assert.equal(conVale.preguntasSocio.length, 1);
   assert.equal(conVale.enviadas.length, 0);
+});
+
+test('guía de vale para quien quiere ser socio (#758): QR solo si todos son de compra completos y vigentes', () => {
+  const ahora = Date.parse('2026-11-08T12:00:00Z');
+  const completo = { codigo: 'DP-1', completo: true, expira_en: '2026-11-30T00:00:00Z' };
+  const cupon = { codigo: 'DP-2', completo: false, expira_en: '2026-11-30T00:00:00Z' };
+  const vencido = { ...completo, expira_en: '2026-11-08T11:00:00Z' };
+  assert.equal(guiaVale([], ahora), '');
+  assert.equal(guiaVale(undefined, ahora), '');
+  assert.match(guiaVale([completo], ahora), /QR.*pasa a su cuenta al doble.*hasta 2 vales por semana.*busca como socio/);
+  assert.match(guiaVale([completo, completo], ahora), /^Son vales de compra completos/);
+  assert.match(guiaVale([cupon], ahora), /no se pueden pasar a una cuenta.*sin ser socio.*no acumula.*antes de que venza/);
+  assert.doesNotMatch(guiaVale([cupon], ahora), /QR/);
+  assert.match(guiaVale([vencido], ahora), /no se pueden pasar/, 'venció en el ticket: ya no pasa');
+  assert.match(guiaVale([completo, cupon], ahora), /un cupón o un vale usado en parte, no/, 'mezcla: mensaje corto y genérico');
+  assert.equal(guiaVale([{ codigo: 'DP-3', expira_en: '2026-11-30T00:00:00Z' }], ahora).includes('QR'), false, 'servidor viejo sin `completo`');
+});
+
+// Socio y vale no se juntan (#758): se pregunta antes de quitar uno por otro, y cancelar deja el ticket intacto.
+const buscarConAviso = (inicial: { socio?: any; vales?: any[] }, texto: string, respuesta: string, vale = false) => {
+  const elementos = new Map<string, any>();
+  const $ = (id: string) => {
+    if (!elementos.has(id)) elementos.set(id, { value: '', textContent: '', innerHTML: '', hidden: false, style: {}, focus() { this.enfocado = true; },
+      ...(id === 'dlg-reemplazo' ? { open: false, returnValue: '', showModal() { this.open = true; },
+        addEventListener(_: string, fn: () => void) { setTimeout(() => { this.open = false; this.returnValue = respuesta; fn(); }); } } : {}) });
+    return elementos.get(id);
+  };
+  $('socio').value = texto;
+  const pedidos: string[] = [];
+  const cuerpo = vale ? { vale: true, disponible: 1000, maximo: 1000, expira_en: '2099-01-01T00:00:00Z', completo: true }
+    : { numero: 7, nombre: 'Ana', disponible: 500, maximo: 500, expira_en: '2099-01-01T00:00:00Z' };
+  const contexto = { $, guiaVale, dolares: String, escapar: String, idVenta: 'x', pintar() {}, preguntarDolarones() {}, avisoRojo() {}, setTimeout, Promise, Date, Math,
+    fetch: async (ruta: string) => { pedidos.push(ruta); return { ok: true, json: async () => cuerpo }; },
+    codigoDeDigitos: () => null };
+  const bloque = cajaFuente.slice(cajaFuente.indexOf('function pintarSocio()'), cajaFuente.indexOf("$('buscar-socio').addEventListener"));
+  const buscar = runInNewContext(`let socio = ${JSON.stringify(inicial.socio ?? null)}, valesCargados = ${JSON.stringify(inicial.vales ?? [])}, busquedaSocio = 0,
+    cobrando = false, valesPrueba = false, codigoSocio = '', usarTodos = false;
+    ${bloque}; ({ buscarSocio, estado: () => ({ socio, valesCargados }) })`, contexto);
+  return { ...buscar, $, pedidos };
+};
+const valeEnTicket = { socio: { vale: true, disponible: 1000, maximo: 1000, expira_en: '2099-01-01T00:00:00Z' }, vales: [{ codigo: 'DP-AAAAAAAAAAAAAAAA', completo: true, expira_en: '2099-01-01T00:00:00Z' }] };
+const socioEnTicket = { socio: { numero: 7, nombre: 'Ana', disponible: 500, maximo: 500, expira_en: '2099-01-01T00:00:00Z' } };
+
+test('buscar socio con vale en el ticket pregunta; cancelar deja el vale y no consulta nada', async () => {
+  const c = buscarConAviso(valeEnTicket, '#7', '');
+  await c.buscarSocio();
+  assert.match(c.$('dlg-reemplazo-texto').textContent, /no se combinan.*el vale sale del ticket.*QR/);
+  assert.equal(c.$('dlg-reemplazo-ok').textContent, 'Quitar el vale y buscar al socio');
+  assert.equal(c.pedidos.length, 0);
+  assert.equal(c.estado().socio.vale, true);
+  assert.equal(c.estado().valesCargados.length, 1);
+  assert.equal(c.$('socio').value, '');
+});
+
+test('buscar socio con vale en el ticket y aceptar: sale el vale y entra el socio', async () => {
+  const c = buscarConAviso(valeEnTicket, '#7', 'quitar');
+  await c.buscarSocio();
+  assert.deepEqual(c.pedidos, ['/api/socios?q=%237']);
+  assert.equal(c.estado().socio.numero, 7);
+  assert.equal(c.estado().valesCargados.length, 0);
+});
+
+test('escanear un vale con socio en el ticket pregunta; cancelar deja al socio, aceptar lo cambia por el vale', async () => {
+  const cancela = buscarConAviso(socioEnTicket, 'DP-BBBBBBBBBBBBBBBB', '', true);
+  await cancela.buscarSocio();
+  assert.match(cancela.$('dlg-reemplazo-texto').textContent, /socio en el ticket \(#7 · Ana\).*no se combinan/);
+  assert.equal(cancela.pedidos.length, 0);
+  assert.equal(cancela.estado().socio.numero, 7);
+  assert.equal(cancela.$('socio').value, '#7');
+
+  const acepta = buscarConAviso(socioEnTicket, 'DP-BBBBBBBBBBBBBBBB', 'quitar', true);
+  await acepta.buscarSocio();
+  assert.deepEqual(acepta.pedidos, ['/api/vales/buscar']);
+  assert.equal(acepta.estado().socio.vale, true);
+  assert.equal(acepta.estado().valesCargados[0].completo, true);
+});
+
+test('sumar otro vale a un vale, o un socio a otro socio, no pregunta (no hay mezcla)', async () => {
+  const sumar = buscarConAviso(valeEnTicket, 'DP-BBBBBBBBBBBBBBBB', '', true);
+  await sumar.buscarSocio();
+  assert.equal(sumar.$('dlg-reemplazo').open, false);
+  assert.equal(sumar.estado().valesCargados.length, 2);
+  const otro = buscarConAviso(socioEnTicket, '#7', '');
+  await otro.buscarSocio();
+  assert.equal(otro.$('dlg-reemplazo-texto').textContent, '');
+});
+
+test('ventana «¿El cliente es socio?» con vale: guía y «Usar el vale sin socio»; sin vale conserva su texto', async () => {
+  const preguntarSocio = cajaFuente.slice(cajaFuente.indexOf('function preguntarSocio()'), cajaFuente.indexOf('/** El error de la clave'));
+  const armar = (socio: unknown, valesCargados: unknown[]) => {
+    const boton = { textContent: '' }; const texto = { textContent: '' };
+    const d: any = { returnValue: 'x', showModal() {}, addEventListener() {}, querySelector: () => boton };
+    const $ = (id: string) => (id === 'dlg-socio' ? d : texto);
+    runInNewContext(`${preguntarSocio}; preguntarSocio()`, { $, socio, valesCargados, guiaVale, Promise });
+    return { boton: boton.textContent, texto: texto.textContent };
+  };
+  const cupon = armar({ vale: true }, [{ codigo: 'DP-1', completo: false, expira_en: '2099-01-01T00:00:00Z' }]);
+  assert.equal(cupon.boton, 'Usar el vale sin socio');
+  assert.match(cupon.texto, /no se pueden pasar a una cuenta.*sin ser socio/);
+  const compra = armar({ vale: true }, [{ codigo: 'DP-1', completo: true, expira_en: '2099-01-01T00:00:00Z' }]);
+  assert.match(compra.texto, /escanear su QR/);
+  const sin = armar(null, []);
+  assert.equal(sin.boton, 'No quiere ser socio: cobrar así');
+  assert.doesNotMatch(sin.texto, /vale/i);
 });

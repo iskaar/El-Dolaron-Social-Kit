@@ -433,6 +433,16 @@ if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw-caja.js'
   </form>
 </dialog>
 
+<dialog id="dlg-reemplazo" aria-labelledby="dlg-reemplazo-titulo">
+  <h2 id="dlg-reemplazo-titulo">Socio y vale no se juntan</h2>
+  <p id="dlg-reemplazo-texto"></p>
+  <form method="dialog" class="dlg-botones">
+    <!-- Cancelar por omision: Enter (el lector lo manda) y Escape dejan el ticket como estaba (#758). -->
+    <button value="" class="primario" autofocus>Cancelar: dejar el ticket como está</button>
+    <button value="quitar" id="dlg-reemplazo-ok"></button>
+  </form>
+</dialog>
+
 <dialog id="dlg-dolarones" aria-labelledby="dlg-titulo">
   <h2 id="dlg-titulo">¿Usar Dolarones?</h2>
   <p id="dlg-texto"></p>
@@ -444,7 +454,7 @@ if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw-caja.js'
 </dialog>
 <script type="module">
 import { CATEGORIAS_GASTO } from '/categorias.js';
-import { totales, agregar, leerMultiplicador, efectivoAlcanza, dolaronesGanados, saldoCanjeable, maximoCanje, MINIMO_REGALO, descuentoDe, TOPE_DESCUENTO, DENOMINACIONES, contadoDe, promoInauguracion, letreroPromo, desfaseReloj, anticipoDePedido, transferenciaDe, CLAVE_DESDE, BANCOS, debePreguntarSocio } from '/venta.js';
+import { totales, agregar, leerMultiplicador, efectivoAlcanza, dolaronesGanados, saldoCanjeable, maximoCanje, MINIMO_REGALO, descuentoDe, TOPE_DESCUENTO, DENOMINACIONES, contadoDe, promoInauguracion, letreroPromo, desfaseReloj, anticipoDePedido, transferenciaDe, CLAVE_DESDE, BANCOS, debePreguntarSocio, guiaVale } from '/venta.js';
 import { abrirCamara } from '/camara.js';
 import {
   reconectarImpresora, conectarImpresora, impresoraLista, imprimirTicket, abrirCajon, explicarErrorUsb, errorImpresora,
@@ -1119,12 +1129,35 @@ function quitarSocio() {
   pintarSocio();
 }
 
+/** Los vales y cupones no se combinan con una membresía (bases, puntos 6 quater y 8): se pregunta antes de quitar uno por otro (#758). */
+function confirmarReemplazo(texto, boton) {
+  const d = $('dlg-reemplazo');
+  if (d.open) return Promise.resolve(false);
+  $('dlg-reemplazo-texto').textContent = texto;
+  $('dlg-reemplazo-ok').textContent = boton;
+  d.returnValue = '';
+  d.showModal();
+  return new Promise((listo) => d.addEventListener('close', () => listo(d.returnValue === 'quitar'), { once: true }));
+}
+
 async function buscarSocio() {
   if (cobrando) return;
   // El lector manda vales y codigos de socio solo en digitos (code128.js).
   const q = codigoDeDigitos($('socio').value) ?? $('socio').value.trim();
   if (!q) return;
   const esVale = q.startsWith('DP-') || (valesPrueba && /^\d{6}$/.test(q));
+  // Vale sobre socio, o socio sobre vale: nunca se quita uno en silencio. Cancelar deja el ticket intacto.
+  if (esVale && socio && !socio.vale) {
+    const sigue = await confirmarReemplazo(`Ya hay un socio en el ticket (#${socio.numero} · ${socio.nombre}). Los vales y cupones no se combinan con una membresía en el mismo ticket.`
+      + ' Si sigues, se quita al socio y se usa el vale.', 'Quitar al socio y usar el vale');
+    if (!sigue) { $('socio').value = '#' + socio.numero; $('codigo').focus(); return; }
+  } else if (!esVale && socio?.vale) {
+    const varios = valesCargados.length > 1;
+    const sigue = await confirmarReemplazo(`${varios ? `Hay ${valesCargados.length} vales` : 'Hay un vale'} en el ticket (${dolares(socio.disponible)}). Los vales y cupones no se combinan con una membresía en el mismo ticket.`
+      + ` Si sigues, ${varios ? 'los vales salen' : 'el vale sale'} del ticket (puedes volver a escanear${varios ? 'los' : 'lo'}). ${guiaVale(valesCargados)}`,
+      varios ? 'Quitar los vales y buscar al socio' : 'Quitar el vale y buscar al socio');
+    if (!sigue) { $('socio').value = ''; $('codigo').focus(); return; }
+  }
   // Otro vale con un vale ya cargado se suma (Isaac, 17/10); un socio o un vale sobre un socio reemplaza.
   const sumar = esVale && !!socio?.vale;
   if (sumar && valesCargados.some((v) => v.codigo === q)) {
@@ -1159,7 +1192,7 @@ async function buscarSocio() {
       $('socio-info').style.color = '#D72B32';
       return;
     }
-    if (esVale) valesCargados.push({ codigo:q, disponible:cuerpo.disponible, expira_en:cuerpo.expira_en });
+    if (esVale) valesCargados.push({ codigo:q, disponible:cuerpo.disponible, expira_en:cuerpo.expira_en, completo:cuerpo.completo });
     socio = sumar ? { ...socio, disponible:socio.disponible + cuerpo.disponible, maximo:socio.maximo + cuerpo.maximo,
       expira_en:Date.parse(cuerpo.expira_en) < Date.parse(socio.expira_en) ? cuerpo.expira_en : socio.expira_en } : cuerpo;
     codigoSocio = sumar ? codigoSocio : esCodigo ? q : '';
@@ -1363,8 +1396,9 @@ function preguntarForma(aPagar, efectivo) {
 function preguntarSocio() {
   const d = $('dlg-socio');
   $('dlg-socio-texto').textContent = 'Esta venta no tiene socio, así que no ganaría Dolarones.'
-    + (socio?.vale ? ` Si buscas al socio, ${valesCargados.length > 1 ? 'los vales salen' : 'el vale sale'} del ticket (puedes volver a escanear${valesCargados.length > 1 ? 'los' : 'lo'}).` : '')
+    + (socio?.vale ? ` Los vales no se juntan con una membresía: si buscas al socio, ${valesCargados.length > 1 ? 'los vales salen' : 'el vale sale'} del ticket (puedes volver a escanear${valesCargados.length > 1 ? 'los' : 'lo'}). ${guiaVale(valesCargados)}` : '')
     + ' Para darlo de alta se abre otra pestaña y esta venta se queda aquí.';
+  d.querySelector('[value="cobrar"]').textContent = socio?.vale ? (valesCargados.length > 1 ? 'Usar los vales sin socio' : 'Usar el vale sin socio') : 'No quiere ser socio: cobrar así';
   d.returnValue = '';
   d.showModal();
   return new Promise((listo) => d.addEventListener('close', () => listo(d.returnValue), { once: true }));

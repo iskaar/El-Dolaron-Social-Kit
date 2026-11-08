@@ -190,6 +190,26 @@ export function maximoCanje(socio, total, ahora = Date.now()) {
  */
 export const debePreguntarSocio = (socio, enLinea) => !!enLinea && (!socio || !!socio.vale);
 
+/**
+ * Guía para la cajera cuando hay vale(s) en el ticket y el cliente quiere ser socio (#758). Los vales no se
+ * juntan con una membresía; solo uno de compra, completo, sin usar y vigente (`completo`, lo dice el servidor)
+ * puede pasar a una cuenta (bases, punto 6 ter). '' si no hay vales.
+ */
+export function guiaVale(vales, ahora = Date.now()) {
+  if (!vales?.length) return '';
+  const pasa = (v) => !!v.completo && Date.parse(v.expira_en) > ahora;
+  const plural = vales.length > 1;
+  if (vales.every(pasa))
+    return `${plural ? 'Son vales' : 'Es un vale'} de compra completo${plural ? 's' : ''} y sin usar: el cliente puede escanear su QR con su celular,`
+      + ' entrar o registrarse, y el vale pasa a su cuenta al doble (10 D por cada $100 en vez de 5; hasta 2 vales por semana).'
+      + ' Después se le busca como socio con su código y paga con los Dolarones de su cuenta.';
+  if (!vales.some(pasa))
+    return `${plural ? 'Son cupones o vales usados' : 'Es un cupón o un vale usado'} en parte: no se pueden pasar a una cuenta.`
+      + ' El cliente puede usarlo hoy sin ser socio (esta compra no acumula Dolarones) o registrarse y guardarlo para otra compra antes de que venza.';
+  return 'Un vale de compra completo y sin usar puede pasarse a la cuenta del cliente desde su celular (QR); un cupón o un vale usado en parte, no.'
+    + ' Esos se usan hoy sin socio o se guardan para otra compra antes de que venzan.';
+}
+
 /** Agrega una pieza al ticket, juntando lineas repetidas del mismo codigo. */
 export function agregar(lineas, pieza, cantidad = 1) {
   const existente = lineas.find((l) => l.codigo === pieza.codigo && l.precio === pieza.precio);
