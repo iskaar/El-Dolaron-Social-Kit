@@ -230,3 +230,76 @@ test('ligar la cuenta de socia por telefono: el cron acredita ahi y no crea una 
     assert.equal((t.db.prepare('select count(*) as n from clientes').get() as { n: number }).n, 1);   // ninguna cuenta nueva
   } finally { t.db.close(); }
 });
+
+test('/api/retos/mios: la meta de la tienda sale solo como porcentaje, nunca el total en pesos', async () => {
+  const { t, config, empleado, vender, mios } = escenario();
+  try {
+    config({ bono_tienda_meta_semana: 50000, bono_tienda_pb: 150 });
+    await empleado('Ana', 'ana@prueba.mx');
+    await vender('beto@prueba.mx', hoyTienda());   // 25,000 centavos de la semana, atendidos por otra persona
+    const m = (await mios('ana@prueba.mx')).cuerpo;
+    assert.equal(m.tienda_pct, 50);
+    assert.equal(Number.isInteger(m.tienda_pct), true);
+    assert.equal(m.tienda_alcanzada, false);
+    assert.equal(m.bono_pct, 1.5);
+    // Ni el total (25000), ni la meta (50000), ni llaves con su nombre: con el porcentaje y la meta se despejaria el total.
+    const texto = JSON.stringify(m);
+    assert.equal(texto.includes('25000'), false);
+    assert.equal(texto.includes('50000'), false);
+    assert.deepEqual(Object.keys(m).filter((k) => /meta|total/.test(k) && k !== 'tienda_alcanzada'), []);
+    assert.equal(m.semana.ventas, 0);   // lo de Ana, no lo de la tienda
+    // Superar la meta: pasa de 100 y se marca alcanzada.
+    await vender('beto@prueba.mx', hoyTienda()); await vender('beto@prueba.mx', hoyTienda());
+    const arriba = (await mios('ana@prueba.mx')).cuerpo;
+    assert.equal(arriba.tienda_pct, 150);
+    assert.equal(arriba.tienda_alcanzada, true);
+  } finally { t.db.close(); }
+});
+
+test('/api/retos/mios: racha en curso con datos reales; hoy sin venta no la corta ni la cuenta', async () => {
+  const { t, empleado, trabajo, vender, mios } = escenario();
+  try {
+    const hoy = hoyTienda();
+    const ana = await empleado('Ana', 'ana@prueba.mx');
+    const sinFicha = (await mios('ana@prueba.mx')).cuerpo.racha;
+    assert.deepEqual([sinFicha.largo, sinFicha.cajas, sinFicha.hoy], [0, 0, 'sin_registro']);
+    for (const k of [2, 1]) { trabajo(ana, sumarDias(hoy, -k)); await vender('ana@prueba.mx', sumarDias(hoy, -k)); }
+    trabajo(ana, hoy);   // llego hoy, todavia no vende
+    const pendiente = (await mios('ana@prueba.mx')).cuerpo.racha;
+    assert.deepEqual([pendiente.largo, pendiente.cajas, pendiente.meta, pendiente.d, pendiente.hoy], [2, 2, 5, 100, 'pendiente']);
+    await vender('ana@prueba.mx', hoy);
+    const vendio = (await mios('ana@prueba.mx')).cuerpo.racha;
+    assert.deepEqual([vendio.largo, vendio.cajas, vendio.hoy], [3, 3, 'vendio']);
+    // Un dia trabajado sin venta en el pasado la corta; un dia libre no.
+    trabajo(ana, sumarDias(hoy, -4));   // sin venta
+    trabajo(ana, sumarDias(hoy, -5)); await vender('ana@prueba.mx', sumarDias(hoy, -5));
+    assert.equal((await mios('ana@prueba.mx')).cuerpo.racha.largo, 3);   // el -3 es libre (no trabajo); el -4 sin venta la corta
+    // Una persona sin ficha de empleada no trae racha.
+    t.db.prepare(`insert into usuarios (correo, nombre, roles, activo, creado_en, actualizado_en) values ('cris@prueba.mx', 'Cris', 'cajero', 1, '', '')`).run();
+    assert.equal((await mios('cris@prueba.mx')).cuerpo.racha, null);
+  } finally { t.db.close(); }
+});
+
+test('/api/retos/mios: Dolarones en camino con su fecha, logros por tipo e ids para el aviso de premio nuevo', async () => {
+  const { t, soloUno, empleado, piezaAntigua, vender, mios } = escenario();
+  try {
+    soloUno('reto_d_viejo');
+    await empleado('Ana', 'ana@prueba.mx');
+    piezaAntigua();
+    await vender('ana@prueba.mx'); await vender('ana@prueba.mx');
+    await otorgarLogros(t.env);
+    const cliente = (t.db.prepare(`select cliente_id from empleados where correo = 'ana@prueba.mx'`).get() as { cliente_id: string }).cliente_id;
+    const futuro = new Date(Date.now() + 3 * DIA_MS).toISOString();
+    t.db.prepare(`insert into dolarones_lotes (id, cliente_id, origen, venta_id, importe, restante, disponible_desde, vence_en, creado_en)
+      values ('lote-futuro', ?, 'compra', null, 8000, 8000, ?, '2099-01-01T00:00:00Z', '')`).run(cliente, futuro);
+    const m = (await mios('ana@prueba.mx')).cuerpo;
+    assert.equal(m.por_liberar, 8000);
+    assert.equal(m.liberan_el, futuro);
+    assert.deepEqual(m.logros_por_tipo, { antiguedad: 2 });
+    assert.equal(m.logros.every((l: { id: string }) => typeof l.id === 'string' && l.id.length > 0), true);
+    assert.ok(m.reglas.every((r: { etiqueta: string }) => r.etiqueta));
+    // Sin cuenta ligada no hay fecha que inventar.
+    const sola = (await mios('beto@prueba.mx')).cuerpo;
+    assert.deepEqual([sola.liberan_el, sola.por_liberar, sola.racha], [null, 0, null]);
+  } finally { t.db.close(); }
+});

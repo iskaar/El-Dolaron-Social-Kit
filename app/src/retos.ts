@@ -7,7 +7,7 @@
  */
 import { lineasNetas } from './netas.ts';
 import { hoyTienda, delDia } from './reportes.ts';
-import { lunesDe, sumarDias } from './equipo.ts';
+import { lunesDe, sumarDias, semanasBono, configBono } from './equipo.ts';
 import { saldo, sumarMeses } from './dolarones.ts';
 import { pushA } from './push.ts';
 
@@ -41,6 +41,18 @@ interface Candidato { correo: string; logro: string; ref: string; d: number }
 
 /** Venta que cuenta: no cancelada, sin devolucion (ni de dinero ni de Dolarones) y que no es compra de la propia empleada. */
 const VENTA_VALIDA = `v.cancelada = 0 and v.devuelto = 0 and v.dolarones_devueltos = 0 and v.cliente_id is not e.cliente_id`;
+
+/** Dias trabajados de `e` hasta `hasta` (el mas reciente primero) y si en cada uno atendio al menos una venta. Base de la racha: la usa el cron y /api/retos/mios. */
+async function diasConVenta(env: Env, e: { id: string; correo: string; cliente_id: string }, hasta: string, limite: number) {
+  // ponytail: el dia de la venta se saca con diaTienda por fila; ventas_vendedora acota por persona. Con miles de ventas por persona, usar rangos por dia.
+  const { results } = await env.DB.prepare(
+    `select a.fecha, exists(select 1 from ventas v where v.vendedora = ?1 and v.cancelada = 0 and v.devuelto = 0
+       and v.dolarones_devueltos = 0 and v.cliente_id is not ?2
+       and substr(datetime(v.creado_en, '-6 hours'), 1, 10) = a.fecha) as vendio
+     from asistencias a where a.empleado_id = ?3 and a.fecha <= ?4 order by a.fecha desc limit ?5`,
+  ).bind(e.correo, e.cliente_id, e.id, hasta, limite).all<{ fecha: string; vendio: number }>();
+  return results;
+}
 
 /** Lo que ganaron las empleadas ligadas el dia `dia` de la tienda, sin importar si ya se registro. */
 async function candidatosDelDia(env: Env, cfg: ConfigRetos, dia: string): Promise<Candidato[]> {
@@ -89,13 +101,7 @@ async function candidatosDelDia(env: Env, cfg: ConfigRetos, dia: string): Promis
        where e.activo = 1 and e.correo <> '' and a.fecha = ?`,
     ).bind(dia).all<{ id: string; correo: string; cliente_id: string }>();
     for (const e of trabajan) {
-      // ponytail: el dia de la venta se saca con diaTienda por fila; ventas_vendedora acota por persona. Con miles de ventas por persona, usar rangos por dia.
-      const { results: dias } = await env.DB.prepare(
-        `select a.fecha, exists(select 1 from ventas v where v.vendedora = ?1 and v.cancelada = 0 and v.devuelto = 0
-           and v.dolarones_devueltos = 0 and v.cliente_id is not ?2
-           and substr(datetime(v.creado_en, '-6 hours'), 1, 10) = a.fecha) as vendio
-         from asistencias a where a.empleado_id = ?3 and a.fecha <= ?4 order by a.fecha desc limit ?5`,
-      ).bind(e.correo, e.cliente_id, e.id, dia, cfg.reto_racha_dias * 40).all<{ fecha: string; vendio: number }>();
+      const dias = await diasConVenta(env, e, dia, cfg.reto_racha_dias * 40);
       let largo = 0;
       while (largo < dias.length && dias[largo].vendio) largo++;
       if (largo > 0 && largo % cfg.reto_racha_dias === 0) agregar([{ correo: e.correo, ref: dia }], 'racha', cfg.reto_d_racha);
@@ -196,22 +202,48 @@ async function numerosDe(env: Env, correo: string, desdeDia: string, hastaDia: s
  * de las 4 semanas cerradas anteriores, sus logros y el saldo de su cuenta. Dinero en centavos; `d` en Dolarones enteros.
  */
 export async function misRetos(env: Env, correo: string, ahora = Date.now()): Promise<Response> {
-  const lunes = lunesDe(hoyTienda(ahora));
-  const [semana, previas, cfg, logros, mes, emp] = await Promise.all([
+  const hoy = hoyTienda(ahora);
+  const lunes = lunesDe(hoy);
+  const iso = new Date(ahora).toISOString();
+  const [semana, previas, cfg, logros, porTipo, mes, emp, [plan], bono] = await Promise.all([
     numerosDe(env, correo, lunes, sumarDias(lunes, 7)),
     numerosDe(env, correo, sumarDias(lunes, -28), lunes),
     configRetos(env),
-    env.DB.prepare('select creado_en, logro, d from retos_logros where correo = ? order by creado_en desc, id limit 50')
-      .bind(correo).all<{ creado_en: string; logro: string; d: number }>(),
+    env.DB.prepare('select id, creado_en, logro, d from retos_logros where correo = ? order by creado_en desc, id limit 50')
+      .bind(correo).all<{ id: string; creado_en: string; logro: string; d: number }>(),
+    env.DB.prepare('select logro, count(*) as n from retos_logros where correo = ? group by logro').bind(correo).all<{ logro: string; n: number }>(),
     env.DB.prepare(`select coalesce(sum(d), 0) as d from retos_logros where correo = ? and substr(datetime(creado_en, '-6 hours'), 1, 7) = ?`)
-      .bind(correo, hoyTienda(ahora).slice(0, 7)).first<{ d: number }>(),
-    env.DB.prepare('select nombre, cliente_id from empleados where correo = ? and activo = 1').bind(correo).first<{ nombre: string; cliente_id: string }>(),
+      .bind(correo, hoy.slice(0, 7)).first<{ d: number }>(),
+    env.DB.prepare('select id, nombre, cliente_id from empleados where correo = ? and activo = 1').bind(correo).first<{ id: string; nombre: string; cliente_id: string }>(),
+    semanasBono(env, [lunes]),   // mismo total y meta que el bono; solo sale el porcentaje
+    configBono(env),
   ]);
   const promedio = Object.fromEntries(Object.entries(previas).map(([k, v]) => [k, Math.round(v * 10 / 4) / 10]));
-  const cuenta = emp?.cliente_id ? await saldo(env, emp.cliente_id, new Date(ahora).toISOString()) : null;
+  const cuenta = emp?.cliente_id ? await saldo(env, emp.cliente_id, iso) : null;
+  const liberan = emp?.cliente_id
+    ? await env.DB.prepare('select min(disponible_desde) as d from dolarones_lotes where cliente_id = ?1 and vence_en > ?2 and disponible_desde > ?2 and restante > 0')
+      .bind(emp.cliente_id, iso).first<{ d: string | null }>()
+    : null;
+
+  // Racha en curso: dias trabajados seguidos con venta. Un dia de hoy aun sin venta no la corta ni la cuenta (todavia puede vender).
+  let racha = null;
+  if (emp && cfg.reto_racha_dias > 0 && cfg.reto_d_racha > 0) {
+    let dias = await diasConVenta(env, { id: emp.id, correo, cliente_id: emp.cliente_id }, hoy, cfg.reto_racha_dias * 40);
+    const trabajoHoy = dias[0]?.fecha === hoy;
+    const estado = !trabajoHoy ? 'sin_registro' : dias[0].vendio ? 'vendio' : 'pendiente';
+    if (estado === 'pendiente') dias = dias.slice(1);
+    let largo = 0;
+    while (largo < dias.length && dias[largo].vendio) largo++;
+    // Cajas llenas del bloque actual: el premio cae en cada multiplo, asi que 5 muestra 5 de 5 y 6 muestra 1 de 5.
+    racha = { largo, cajas: largo ? (largo - 1) % cfg.reto_racha_dias + 1 : 0, meta: cfg.reto_racha_dias, d: cfg.reto_d_racha, hoy: estado };
+  }
   return json({
-    nombre: emp?.nombre ?? '', semana: { desde: lunes, ...semana }, promedio_4_semanas: promedio,
-    logros: logros.results.map((l) => ({ fecha: l.creado_en, logro: l.logro, etiqueta: ETIQUETAS[l.logro] ?? l.logro, d: l.d })),
+    nombre: emp?.nombre ?? '', semana: { desde: lunes, hoy, dia: (new Date(`${hoy}T12:00:00Z`).getUTCDay() + 6) % 7 + 1, ...semana }, promedio_4_semanas: promedio,
+    // Meta de la tienda: SOLO el porcentaje (decision de Isaac, #760). Ni el total ni la meta en pesos salen del servidor.
+    tienda_pct: plan.meta > 0 ? Math.floor(plan.ventas * 100 / plan.meta) : 0, tienda_alcanzada: plan.alcanzada, bono_pct: bono.pb / 100,
+    racha, liberan_el: liberan?.d ?? null,
+    logros: logros.results.map((l) => ({ id: l.id, fecha: l.creado_en, logro: l.logro, etiqueta: ETIQUETAS[l.logro] ?? l.logro, d: l.d })),
+    logros_por_tipo: Object.fromEntries(porTipo.results.map((t) => [t.logro, t.n])),
     mes: { ganado: mes?.d ?? 0, tope: cfg.reto_d_tope_mes },
     saldo: cuenta?.disponible ?? 0, por_liberar: cuenta?.por_liberar ?? 0,
     reglas: [
@@ -220,6 +252,6 @@ export async function misRetos(env: Env, correo: string, ahora = Date.now()): Pr
       { logro: 'racha', texto: `${cfg.reto_racha_dias} días trabajados seguidos, cada uno con al menos una venta`, d: cfg.reto_d_racha },
       { logro: 'socio', texto: 'Registra un socio que compra ese mismo día', d: cfg.reto_d_socio },
       { logro: 'apartado', texto: 'Cierra un apartado tuyo', d: cfg.reto_d_apartado },
-    ],
+    ].map((r) => ({ ...r, etiqueta: ETIQUETAS[r.logro] })),
   });
 }
