@@ -164,6 +164,7 @@ export function permiso(pathname: string, metodo: string): Regla {
   if (ruta === '/api/portal/llegada' && metodo === 'POST') return CAJA;
   if (ruta === '/api/cajon') return CAJA;
   if (ruta === '/api/cortes' || ruta === '/api/retiros') return CAJA;
+  if (ruta === '/api/vendedoras') return CAJA;
   if (ruta === '/api/cajeros' || ruta === '/api/cajeros/entrar' || ruta === '/api/cajeros/salir') return CAJA;
   // Contar piezas de alto valor (Issue #219): cualquier cuenta de piso. Ajustar y ver el rastro es del dueno (default).
   if (ruta === '/api/conteo') return TODOS;

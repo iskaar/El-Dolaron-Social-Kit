@@ -45,6 +45,20 @@ export async function listarCajeros(env: Env): Promise<Response> {
   return json(results.filter((u) => puedeCobrar(leerRoles(u.roles))).map(({ correo, nombre }) => ({ correo, nombre })));
 }
 
+const atiende = (roles: Rol[]) => roles.includes('cajero') || roles.includes('capturista');
+
+/** Quien puede figurar como «quien atendio» una venta (#750): cuentas activas con rol cajero o capturista. */
+export async function listarVendedoras(env: Env): Promise<Response> {
+  const { results } = await env.DB.prepare(`select correo, nombre, roles from usuarios where activo = 1 order by nombre`)
+    .all<{ correo: string; nombre: string; roles: string }>();
+  return json(results.filter((u) => atiende(leerRoles(u.roles))).map(({ correo, nombre }) => ({ correo, nombre })));
+}
+
+export async function esVendedora(env: Env, correo: string): Promise<boolean> {
+  const usuario = await leerUsuario(env, correo);
+  return !!usuario?.activo && atiende(usuario.roles);
+}
+
 interface FilaPin { correo: string; nombre: string; roles: string; caja: string; pin_hash: string; pin_sal: string; pin_bloqueo: string }
 
 /**

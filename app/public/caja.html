@@ -255,6 +255,9 @@ if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw-caja.js'
       </div>
     </div>
 
+    <label for="vendedora">¿Quién atendió?</label>
+    <select id="vendedora"><option value="">— sin elegir —</option></select>
+
     <label for="forma">Forma de pago</label>
     <select id="forma">
       <option value="efectivo">Efectivo</option>
@@ -613,6 +616,29 @@ fetch('/api/yo').then((r) => r.json()).then(({ usuario, cajero }) => {
   $('caja-nombre').closest('label').firstChild.textContent = 'Tu caja ';
   pintarImpresora();
 }).catch(() => { /* sin red: la de la computadora */ });
+
+// Issue #750: quien atendió en piso (no siempre quien cobra). Por omisión, quien cobra; la última elección se
+// recuerda mientras dure esta sesión del PIN (si entra otro cajero, vuelve a su nombre). Sin red, la lista de la última vez.
+fetch('/api/yo').then((r) => r.json()).then(async ({ usuario, cajero }) => {
+  const turno = (cajero ?? usuario)?.correo ?? '';
+  let lista = [];
+  try {
+    const r = await fetch('/api/vendedoras');
+    if (!r.ok) throw new Error();
+    lista = await r.json();
+    localStorage.setItem('vendedoras', JSON.stringify(lista));
+  } catch { try { lista = JSON.parse(localStorage.getItem('vendedoras')) ?? []; } catch { /* sin lista */ } }
+  if (!Array.isArray(lista)) return;
+  $('vendedora').innerHTML = '<option value="">— sin elegir —</option>' + lista.map((u) =>
+    `<option value="${escapar(u.correo)}">${escapar(u.nombre || u.correo)}</option>`).join('');
+  let elegida = turno;
+  try { const g = JSON.parse(sessionStorage.getItem('vendedora')); if (g?.turno === turno) elegida = g.correo; } catch { /* idem */ }
+  $('vendedora').value = elegida;
+  if ($('vendedora').value !== elegida) $('vendedora').value = '';   // la cajera en turno puede no ser de la lista (p. ej. solo dueño)
+  $('vendedora').addEventListener('change', () => {
+    try { sessionStorage.setItem('vendedora', JSON.stringify({ turno, correo: $('vendedora').value })); } catch { /* idem */ }
+  });
+}).catch(() => { /* sin red ni lista: se cobra sin atribuir */ });
 
 /* ---------- impresión remota: destino recordado y sin efectivo ---------- */
 const impresionRemota = () => !impresoraLista() && $('modo-remoto').checked;
@@ -1441,6 +1467,7 @@ async function cobrar() {
       cliente_id: socio?.id ?? null,
       dolarones: usados,
       caja: cajaActual(),
+      ...($('vendedora').value ? { vendedora: $('vendedora').value } : {}),
       descuento_id: descuentoAplicado() ? descuento.id : null,
       promo: promoActual(),
       ...(pedidoCargado ? { pedido_id: pedidoCargado.id, anticipo } : {}),
