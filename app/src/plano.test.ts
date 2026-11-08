@@ -35,7 +35,7 @@ test('GET /api/plano: forma, quién soy y solo empleados activos', async () => {
     como('ana@prueba.mx');
     const r = await t.pedir('/api/plano');
     assert.equal(r.status, 200);
-    assert.deepEqual(r.cuerpo, { areas: { 3: ana }, empleados: [{ id: ana, nombre: 'Ana' }], yo: ana, puede_asignar: false });
+    assert.deepEqual(r.cuerpo, { areas: { 3: ana }, nombres: {}, empleados: [{ id: ana, nombre: 'Ana' }], yo: ana, puede_asignar: false });
     como(DUENO);
     const dueno = await t.pedir('/api/plano');
     assert.equal(dueno.cuerpo.yo, null);
@@ -70,5 +70,54 @@ test('letrero fuera de 1-36 o empleado inexistente/inactivo: 400 y no guarda', a
     }
     assert.equal((await t.pedir('/api/plano', {}, 'PUT')).status, 400);
     assert.equal(t.db.prepare(`select count(*) as n from config where clave = 'plano_areas'`).get()!.n, 0);
+  } finally { t.db.close(); }
+});
+
+test('el dueño renombra letreros: se conserva, se mezcla, vacío lo quita; otro rol recibe 403', async () => {
+  const { t, empleado, como } = escenario();
+  try {
+    await empleado('Ana', 'ana@prueba.mx');
+    como('ana@prueba.mx');
+    assert.equal((await t.pedir('/api/plano', { nombres: { 5: 'Caja' } }, 'PUT')).status, 403);
+    assert.deepEqual((await t.pedir('/api/plano')).cuerpo.nombres, {});
+    como(DUENO);
+    const r = await t.pedir('/api/plano', { nombres: { 5: '  Caja y exhibidor  ', 22: 'Cabello y peinado', 36: 'Ñandú'.repeat(16) } }, 'PUT');
+    assert.equal(r.status, 200);
+    assert.deepEqual(r.cuerpo.nombres, { 5: 'Caja y exhibidor', 22: 'Cabello y peinado', 36: 'Ñandú'.repeat(16) });
+    como('ana@prueba.mx');   // todos lo leen
+    assert.equal((await t.pedir('/api/plano')).cuerpo.nombres[22], 'Cabello y peinado');
+    como(DUENO);
+    assert.equal((await t.pedir('/api/plano', { nombres: { 22: '', 5: '   ' } }, 'PUT')).status, 200);   // vacío = vuelve al del plano
+    assert.deepEqual((await t.pedir('/api/plano')).cuerpo.nombres, { 36: 'Ñandú'.repeat(16) });
+  } finally { t.db.close(); }
+});
+
+test('nombres inválidos: letrero fuera de 1-36, texto largo o que no es texto dan 400 y no guardan nada', async () => {
+  const { t } = escenario();
+  try {
+    assert.equal((await t.pedir('/api/plano', { nombres: { 1: 'Bien' } }, 'PUT')).status, 200);
+    for (const nombres of [{ 0: 'x' }, { 37: 'x' }, { '01': 'x' }, { x: 'x' }, { 1.5: 'x' }, { 2: 'a'.repeat(81) }, { 2: 7 }, { 2: null }, { 2: ['x'] }, { 1: 'Otro', 2: 7 }, ['x'], null, 'x'])
+      assert.equal((await t.pedir('/api/plano', { nombres }, 'PUT')).status, 400, JSON.stringify(nombres));
+    assert.equal((await t.pedir('/api/plano', { nombres: { 2: 'a'.repeat(80) } }, 'PUT')).status, 200);   // 80 sí
+    assert.deepEqual((await t.pedir('/api/plano')).cuerpo.nombres, { 1: 'Bien', 2: 'a'.repeat(80) });
+  } finally { t.db.close(); }
+});
+
+test('guardar solo áreas no borra los nombres, y solo nombres no borra las áreas', async () => {
+  const { t, empleado } = escenario();
+  try {
+    const ana = await empleado('Ana');
+    assert.equal((await t.pedir('/api/plano', { nombres: { 5: 'Caja' } }, 'PUT')).status, 200);
+    assert.equal((await t.pedir('/api/plano', { areas: { 3: ana } }, 'PUT')).status, 200);
+    let g = (await t.pedir('/api/plano')).cuerpo;
+    assert.deepEqual([g.areas, g.nombres], [{ 3: ana }, { 5: 'Caja' }]);
+    assert.equal((await t.pedir('/api/plano', { nombres: { 7: 'Joyería' } }, 'PUT')).status, 200);
+    g = (await t.pedir('/api/plano')).cuerpo;
+    assert.deepEqual([g.areas, g.nombres], [{ 3: ana }, { 5: 'Caja', 7: 'Joyería' }]);
+    // juntos, y si uno es inválido no se guarda ninguno
+    assert.equal((await t.pedir('/api/plano', { areas: { 4: ana }, nombres: { 99: 'x' } }, 'PUT')).status, 400);
+    assert.equal((await t.pedir('/api/plano', { areas: { 4: ana }, nombres: { 8: 'Uñas' } }, 'PUT')).status, 200);
+    g = (await t.pedir('/api/plano')).cuerpo;
+    assert.deepEqual([g.areas, g.nombres], [{ 4: ana }, { 5: 'Caja', 7: 'Joyería', 8: 'Uñas' }]);
   } finally { t.db.close(); }
 });
