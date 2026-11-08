@@ -45,13 +45,16 @@ export async function buscarVale(request: Request, env: Env): Promise<Response> 
   const codigo = String(body.codigo ?? '');
   if (!codigoValeValido(env, codigo)) return json({ error:'Código de vale inválido.' }, 400);
   const ahora = new Date().toISOString();
-  const vale = await env.DB.prepare(`select k.restante, k.vence_en from vales_dolarones k
+  const vale = await env.DB.prepare(`select k.restante, k.importe, k.vence_en, k.origen, v.dolarones, v.cliente_id
+    from vales_dolarones k
     left join ventas v on v.id = k.venta_id where k.codigo = ? and coalesce(v.cancelada, 0) = 0
     and k.restante > 0 and k.disponible_desde <= ? and k.vence_en > ?`)
-    .bind(codigo, ahora, ahora).first<{ restante: number; vence_en: string }>();
+    .bind(codigo, ahora, ahora).first<{ restante:number; importe:number; vence_en:string; origen:string; dolarones:number | null; cliente_id:string | null }>();
   if (!vale) return json({ error:'Vale no disponible: aún no liberado, vencido, agotado o cancelado.' }, 403);
+  // Solo informativo para la caja (#758): `completo` = lo mismo que exige reclamarVale para pasarlo a una cuenta.
+  const completo = vale.origen === 'compra' && vale.restante === vale.importe && !vale.dolarones && !vale.cliente_id;
   return json({ vale:true, disponible:vale.restante, maximo:vale.restante,
-    expira_en:vale.vence_en, regalo_disponible:0, por_liberar:0 });
+    expira_en:vale.vence_en, regalo_disponible:0, por_liberar:0, origen:vale.origen, completo });
 }
 
 export async function reimprimirVale(env: Env, id: string): Promise<Response> {

@@ -69,6 +69,27 @@ test('un cupón y un vale se juntan en un ticket; el reintento con el mismo foli
   } finally { t.db.close(); }
 });
 
+test('buscar vale dice origen y si está completo (#758): solo el de compra intacto se puede pasar a una cuenta', async () => {
+  const t = abrir();
+  try {
+    const { vale } = await t.emitir();
+    const cupon = (await t.pedir('/api/cupones', { id:crypto.randomUUID(), importe:1500, motivo:'cortesía' })).cuerpo.cupon;
+    const buscar = async (codigo:string) => (await t.pedir('/api/vales/buscar', { codigo })).cuerpo;
+    const intacto = await buscar(vale.codigo);
+    assert.equal(intacto.origen, 'compra');
+    assert.equal(intacto.completo, true);
+    assert.equal(intacto.disponible, 1000, 'lo que ya devolvía no cambia');
+    const delCupon = await buscar(cupon.codigo);
+    assert.deepEqual([delCupon.origen, delCupon.completo], ['manual', false]);
+    // Usado en parte, y el vale que sale de una compra pagada con vale: ninguno se puede pasar.
+    const canje = await t.canjear(vale.codigo, 500);
+    assert.equal(canje.status, 201);
+    assert.equal((await buscar(vale.codigo)).completo, false);
+    const nuevo = await buscar(canje.cuerpo.vale_emitido.codigo);
+    assert.deepEqual([nuevo.origen, nuevo.completo], ['compra', false]);
+  } finally { t.db.close(); }
+});
+
 test('ticket pagado con vale: pieza responde 409; completo devuelve dinero, stock y saldo una sola vez', async () => {
   const t = abrir();
   try {
