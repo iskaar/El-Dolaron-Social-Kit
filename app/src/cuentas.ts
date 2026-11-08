@@ -90,6 +90,7 @@ const PANTALLAS: Record<string, Rol[]> = {
   '/vender': VENDER,
   '/manual': VENDER,   // manual interactivo de la revendedora (#594): practica con datos de ejemplo, sin API
   '/retos': RETOS,   // Mis retos (Issue #752)
+  '/plano': RETOS,   // Plano del local (Issue #756): se lee en piso; asignar áreas lo cierra la API al dueño
   '/avisos': CAJA,   // ventas de Mercado Libre por atender (Issue #429)
   '/tarjeta-bandas': TODOS,
   '/reportes': DUENO,
@@ -183,6 +184,7 @@ export function permiso(pathname: string, metodo: string): Regla {
   // Dar por buena a mano una transferencia que Banxico no confirmo (#603): solo el dueño, aunque el resto de avisos sea de caja.
   if (/^\/api\/avisos\/transferencias\/\d+\/validar$/.test(ruta)) return DUENO;
   if (ruta === '/api/avisos' || ruta.startsWith('/api/avisos/')) return CAJA;   // centro de avisos (Issue #429)
+  if (ruta === '/api/plano') return metodo === 'GET' ? RETOS : DUENO;   // Issue #756
   if (ruta === '/api/retos/mios') return RETOS;   // solo lo propio de quien pregunta (Issue #752)
   if (ruta === '/api/ayuda') return CAJA;   // botón «Ayuda» (Issue #600); /api/push/* es del dueño, por omisión
   if (ruta === '/api/impresiones' || ruta.startsWith('/api/impresiones/')) return CAJA;

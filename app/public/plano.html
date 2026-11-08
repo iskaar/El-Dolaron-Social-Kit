@@ -1,0 +1,301 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>El Dolarón — plano del local</title>
+<style>
+  :root { --azul:#16366B; --rojo:#D72B32; --verde:#1f7a4d; --amarillo:#FFD447; --linea:#dfe3ea; --tinta:#1B2430; --gris:#5b6478; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: #f4f6f9; color: #1a1f2b; font-family: system-ui, -apple-system, sans-serif; }
+  header { background: var(--azul); color: #fff; padding: 10px 16px; display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+  header h1 { font-size: 17px; margin: 0; flex: 1; }
+  header a { color: var(--amarillo); font-size: 13px; }
+  main { max-width: 760px; margin: 0 auto; padding: 12px 16px 40px; display: grid; gap: 12px; }
+  h2 { margin: 0; font-size: 15px; color: var(--azul); }
+  .nota { font-size: 13px; color: var(--gris); }
+  .tarjeta { background: #fff; border: 1px solid var(--linea); border-radius: 12px; padding: 12px; display: grid; gap: 10px; }
+  .error { color: var(--rojo); font-size: 14px; min-height: 0; }
+  .error:empty { display: none; }
+  form { display: grid; grid-template-columns: 1fr auto; gap: 8px; }
+  form input, form select, button { font: inherit; font-size: 15px; border: 1px solid var(--linea); border-radius: 8px; padding: 9px 11px; background: #fff; color: inherit; }
+  form select { grid-column: 1 / -1; }
+  button { cursor: pointer; }
+  button.primario, button[aria-pressed="true"] { background: var(--azul); color: #fff; border-color: var(--azul); }
+  .barra { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  .barra .nota { flex: 1; min-width: 160px; }
+  #resultado { display: grid; gap: 6px; }
+  #resultado:empty { display: none; }
+  #resultado .fila { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
+  .n { min-width: 34px; padding: 4px 9px; border-radius: 999px; border: 0; background: #e8ecf3; color: var(--tinta); font-weight: 800; font-size: 15px; text-align: center; }
+  .n.gde { font-size: 26px; min-width: 52px; padding: 4px 14px; }
+  .estado { position: relative; background: #fff; border: 1px solid var(--linea); border-radius: 12px; overflow: hidden; touch-action: none; height: 64vh; min-height: 380px; }
+  .estado svg { width: 100%; height: 100%; display: block; cursor: grab; user-select: none; -webkit-user-select: none; }
+  .estado svg.drag { cursor: grabbing; }
+  .zoom { position: absolute; right: 10px; top: 10px; display: flex; flex-direction: column; gap: 6px; }
+  .zoom button { width: 40px; height: 40px; padding: 0; font-size: 20px; line-height: 1; }
+  .pista { position: absolute; left: 10px; bottom: 8px; font-size: 11px; color: var(--gris); background: rgba(255,255,255,.85); padding: 3px 7px; border-radius: 6px; pointer-events: none; }
+  .cat { display: inline-block; margin: 3px 6px 0 0; padding: 2px 8px; border-radius: 999px; font-size: 13px; color: #fff; }
+  .cara { margin-top: 6px; }
+  .quien { font-size: 14px; margin-top: 4px; }
+  .quien.vacio { color: var(--gris); }
+  .leyenda { display: flex; flex-wrap: wrap; gap: 6px; }
+  .leyenda button { display: inline-flex; align-items: center; gap: 6px; text-align: left; padding: 6px 10px; font-size: 14px; }
+  .leyenda i { width: 12px; height: 12px; border-radius: 3px; flex: none; }
+  .leyenda button[aria-pressed="true"] { outline: 2px solid var(--rojo); }
+  .rejilla { display: grid; grid-template-columns: repeat(auto-fill, minmax(44px, 1fr)); gap: 6px; }
+  .rejilla .n { padding: 9px 0; min-width: 0; cursor: pointer; }
+  .n.asignado { color: #fff; }
+  /* svg */
+  .wall { fill: none; stroke: var(--azul); stroke-width: 3; }
+  .floor { fill: #FBFCFE; stroke: #C9D2DF; stroke-width: 1; }
+  .ramp { fill: url(#plano-rampa); stroke: #9AA7B8; stroke-width: 1; }
+  .ghost { fill: #E9EEF5; stroke: #9AA7B8; stroke-width: .8; stroke-dasharray: 3 2; }
+  .door { stroke: var(--amarillo); stroke-width: 4; }
+  .fx { stroke: #fff; stroke-width: 1; cursor: pointer; transition: opacity .15s; }
+  .fx.sel { stroke: var(--rojo); stroke-width: 2; }
+  .lbl { font-size: 5.2px; fill: #fff; font-weight: 700; pointer-events: none; text-anchor: middle; }
+  .lbl.dark { fill: var(--tinta); }
+  .zone { font-size: 6px; fill: var(--gris); font-weight: 600; text-anchor: middle; pointer-events: none; }
+  .col { fill: var(--rojo); }
+  .coltxt { font-size: 4.6px; fill: var(--rojo); font-weight: 700; pointer-events: none; }
+  .num { pointer-events: none; }
+  .num circle { fill: #fff; stroke: var(--tinta); stroke-width: .8; }
+  .num circle.hl { stroke: var(--rojo); stroke-width: 2; }
+  .num text { font-size: 5px; font-weight: 800; fill: var(--tinta); text-anchor: middle; dominant-baseline: central; }
+</style>
+<script src="/cajero.js"></script>
+</head>
+<body>
+<header><h1>Plano del local</h1><a href="/caja">Caja</a><a href="/">Inicio</a></header>
+<main>
+  <div class="error" id="error" role="alert"></div>
+  <section class="tarjeta">
+    <h2>¿Dónde va?</h2>
+    <form id="buscar">
+      <input id="q" type="text" inputmode="search" autocomplete="off" placeholder="Nombre de la pieza o escanea su código" aria-label="Nombre o código de la pieza">
+      <button class="primario" type="submit">Buscar</button>
+      <select id="cat" aria-label="Categoría de la pieza"><option value="">Categoría (si buscas por nombre)</option></select>
+    </form>
+    <div id="resultado" aria-live="polite"></div>
+  </section>
+  <div class="barra">
+    <button id="mias" type="button" aria-pressed="false">Mis áreas</button>
+    <button id="asignar" type="button" hidden>Asignar áreas</button>
+    <button id="ajustar" type="button">Ajustar plano</button>
+    <span class="nota" id="aviso" role="status"></span>
+  </div>
+  <div class="estado" id="estado">
+    <svg id="svg" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Plano del local con los letreros del 1 al 36"></svg>
+    <div class="zoom"><button type="button" data-zoom="in" aria-label="Acercar">+</button><button type="button" data-zoom="out" aria-label="Alejar">−</button></div>
+    <div class="pista">Arrastra · pellizca para acercar · toca un mueble</div>
+  </div>
+  <section class="tarjeta" id="sel"><span class="nota">Toca cualquier mueble del plano para ver qué va ahí y quién lo tiene a cargo.</span></section>
+  <section class="tarjeta" id="modo-asignar" hidden>
+    <h2>Asignar áreas</h2>
+    <div class="nota">Elige a la persona y toca los letreros (en el plano o abajo): un toque asigna, otro toque al mismo letrero lo quita.</div>
+    <div class="barra"><button id="guardar" class="primario" type="button">Guardar</button><button id="cancelar" type="button">Cancelar</button></div>
+  </section>
+  <section class="tarjeta">
+    <h2>Quién tiene qué</h2>
+    <div class="leyenda" id="leyenda"></div>
+    <div class="nota" id="libres"></div>
+  </section>
+  <section class="tarjeta">
+    <h2>Letreros</h2>
+    <div class="rejilla" id="rejilla"></div>
+  </section>
+</main>
+<script type="module">
+import { FAM, LETREROS, crearPlano, numerosDe, categoriasDe, muebleDe } from '/plano.js';
+import { letrero } from '/letreros.js';
+import { CATEGORIAS } from '/categorias.js';
+
+const $ = (id) => document.getElementById(id);
+const nodo = (tag, texto, props = {}) => Object.assign(document.createElement(tag), { textContent: texto ?? '' }, props);
+const PALETA = ['#D72B32', '#16366B', '#1f7a4d', '#8E5BD1', '#F28C28', '#2BA39A', '#A0714F', '#E35A94', '#5F6B7A', '#3F7FD1'];
+const TODOS = Array.from({ length: LETREROS }, (_, i) => i + 1);
+
+let areas = {}, empleados = [], yo = null, puede = false;   // lo guardado en el servidor
+let borrador = null;      // en «Asignar áreas»: lo que se va armando
+let quien = null;         // a quién se asigna
+let resaltado = null;     // letreros resaltados (búsqueda, Mis áreas o una persona)
+let seleccion = null;     // [mueble, cara]
+
+const vigente = () => borrador ?? areas;
+const color = (id) => PALETA[empleados.findIndex((e) => e.id === id) % PALETA.length];
+const nombre = (id) => empleados.find((e) => e.id === id)?.nombre;
+const deQuien = (id) => TODOS.filter((n) => vigente()[n] === id);
+const error = (t = '') => { $('error').textContent = t; };
+
+const plano = crearPlano($('estado'), $('svg'), (f, cara) => elegir(f, cara));
+
+for (const [clave, texto] of CATEGORIAS) $('cat').append(nodo('option', texto, { value: clave }));
+
+function quienTiene(n) {
+  const id = vigente()[n];
+  return nodo('div', id ? `A cargo: ${nombre(id)}` : 'Sin responsable asignado', { className: 'quien' + (id ? '' : ' vacio') });
+}
+
+function mostrar(f, cara) {
+  seleccion = [f, cara];
+  plano.marcar(f);
+  const nums = numerosDe(f);
+  const caras = f.faces ? [0, 1] : [0];
+  $('sel').replaceChildren(nodo('b', f.name), nodo('div', f.zone, { className: 'nota' }), ...caras.map((c) => {
+    const bloque = nodo('div', '', { className: 'cara' });
+    if (nums[c] != null) bloque.append(nodo('span', nums[c], { className: 'n' }), nodo('span', f.faces ? (c ? ' Cara derecha' : ' Cara izquierda') : '', { className: 'nota' }));
+    bloque.append(nodo('div'), ...categoriasDe(f, c).map((x) => nodo('span', x.t, { className: 'cat', style: `background:${FAM[x.f].c}` })));
+    if (nums[c] != null) bloque.append(quienTiene(nums[c]));
+    return bloque;
+  }));
+}
+
+function elegir(f, cara) {
+  if (borrador && quien) {
+    const n = numerosDe(f)[cara];
+    if (n != null) alternar(n);
+  }
+  mostrar(f, cara);
+}
+
+function alternar(n) {
+  if (borrador[n] === quien) delete borrador[n]; else borrador[n] = quien;
+  pintar();
+}
+
+function pintar() {
+  const mapa = vigente();
+  plano.colorear((n) => (mapa[n] ? color(mapa[n]) : null));
+  plano.resaltar(resaltado);
+  $('rejilla').replaceChildren(...TODOS.map((n) => {
+    const b = nodo('button', n, { type: 'button', className: 'n' + (mapa[n] ? ' asignado' : ''), title: nombre(mapa[n]) ?? 'Sin asignar' });
+    if (mapa[n]) b.style.background = color(mapa[n]);
+    b.onclick = () => { const m = muebleDe(n); if (borrador && quien) alternar(n); else { resaltar([n]); plano.enfocar(n); } if (m) mostrar(m.f, m.cara); };
+    return b;
+  }));
+  // En «Asignar áreas» salen todas las personas; fuera de ahí, solo las que tienen letreros.
+  $('leyenda').replaceChildren(...empleados.filter((e) => borrador || deQuien(e.id).length).map((e) => {
+    const b = nodo('button', '', { type: 'button' });
+    const mios = deQuien(e.id);
+    b.append(nodo('i', '', { style: `background:${color(e.id)}` }), nodo('span', `${e.nombre}${mios.length ? ` · ${mios.join(', ')}` : ''}`));
+    const activa = borrador ? quien === e.id : resaltado?.length === mios.length && mios.length > 0 && mios.every((n) => resaltado.includes(n));
+    b.setAttribute('aria-pressed', String(activa));
+    b.onclick = () => { if (borrador) { quien = e.id; pintar(); } else { resaltar(activa ? null : mios); } };
+    return b;
+  }));
+  const libres = TODOS.filter((n) => !mapa[n]);
+  $('libres').textContent = libres.length ? `Sin asignar: ${libres.join(', ')}.` : 'Todos los letreros tienen responsable.';
+  $('mias').setAttribute('aria-pressed', String(!!yo && !borrador && resaltado?.length > 0 && resaltado.every((n) => mapa[n] === yo)));
+}
+
+function resaltar(nums, aviso = '') {
+  resaltado = nums?.length ? nums : null;
+  $('aviso').textContent = aviso;
+  pintar();
+}
+
+/* ---------- ¿Dónde va? ---------- */
+const esCodigo = (q) => /^(?:ed-?\d{1,10}|\d{6,14})$/i.test(q);
+
+/** La pieza por código: inventario (capturista, dueño) o, para la caja, la lista de /vender. null = no existe. */
+async function buscarPieza(q) {
+  const ed = /^ed-?(\d+)$/i.exec(q);
+  for (const ruta of ['/api/piezas/resolver', '/api/vender']) {
+    const r = await fetch(`${ruta}?${new URLSearchParams({ q: ed ? `ED-${ed[1].padStart(6, '0')}` : q })}`);
+    if (r.status === 403) continue;   // este rol no lee el inventario: probar con la lista de venta
+    if (r.status === 404) return null;
+    if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error ?? `Error ${r.status}`);
+    const datos = await r.json();
+    return datos.piezas?.[0] ?? datos.ficha ?? null;
+  }
+  throw new Error('Tu cuenta no puede buscar por código. Busca por nombre.');
+}
+
+/** Letreros de un nombre sin categoría: los de las categorías donde alguna palabra del nombre decide algo. */
+const porNombre = (nombreTexto) => [...new Set(CATEGORIAS.map(([clave]) => clave)
+  .filter((categoria) => letrero({ categoria, nombre: nombreTexto }) !== letrero({ categoria, nombre: '' }))
+  .map((categoria) => letrero({ categoria, nombre: nombreTexto })))].sort((a, b) => a - b);
+
+$('buscar').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  error();
+  const q = $('q').value.trim();
+  if (!q) return;
+  try {
+    let nums, titulo = q;
+    if (esCodigo(q)) {
+      const pieza = await buscarPieza(q);
+      if (!pieza) { $('resultado').replaceChildren(nodo('div', 'No encontré esa pieza.')); resaltar(null); return; }
+      nums = [letrero(pieza)];
+      titulo = `${pieza.nombre}${pieza.codigo ? ` (${pieza.codigo})` : ''}`;
+    } else {
+      nums = $('cat').value ? [letrero({ categoria: $('cat').value, nombre: q })] : porNombre(q);
+    }
+    if (!nums.length) {
+      $('resultado').replaceChildren(nodo('div', `Con «${q}» solo no se sabe: elige la categoría.`));
+      resaltar(null); return;
+    }
+    $('resultado').replaceChildren(nodo('b', titulo), ...nums.map((n) => {
+      const m = muebleDe(n);
+      const fila = nodo('div', '', { className: 'fila' });
+      const b = nodo('button', n, { type: 'button', className: 'n gde' });
+      b.onclick = () => { plano.enfocar(n); if (m) mostrar(m.f, m.cara); };
+      fila.append(b, nodo('span', `${m?.f.name ?? ''} · ${nombre(areas[n]) ? `a cargo: ${nombre(areas[n])}` : 'sin responsable'}`));
+      return fila;
+    }));
+    resaltar(nums);
+    plano.enfocar(nums[0]);
+    const m = muebleDe(nums[0]);
+    if (m) mostrar(m.f, m.cara);
+    $('estado').scrollIntoView({ behavior: 'smooth', block: 'center' });
+    $('q').select();
+  } catch (x) { error(`No se pudo buscar: ${x.message}`); }
+});
+
+/* ---------- Mis áreas ---------- */
+$('mias').onclick = () => {
+  if (borrador) return;
+  if (!yo) return resaltar(null, 'Tu cuenta no está ligada a una persona de Nómina: pídele al dueño que la ligue.');
+  const mios = deQuien(yo);
+  if ($('mias').getAttribute('aria-pressed') === 'true') return resaltar(null);
+  resaltar(mios, mios.length ? `Tus letreros: ${mios.join(', ')}.` : 'Todavía no tienes letreros asignados.');
+};
+$('ajustar').onclick = () => plano.ajustar();
+
+/* ---------- Asignar áreas (solo dueño; el servidor lo vuelve a verificar) ---------- */
+function modoAsignar(on) {
+  borrador = on ? { ...areas } : null;
+  quien = on ? empleados[0]?.id ?? null : null;
+  $('modo-asignar').hidden = !on;
+  $('asignar').hidden = on || !puede;
+  resaltar(null);
+  if (on && !quien) { error('No hay personas activas en Nómina para asignar.'); }
+}
+$('asignar').onclick = () => modoAsignar(true);
+$('cancelar').onclick = () => modoAsignar(false);
+$('guardar').onclick = async () => {
+  error();
+  $('guardar').disabled = true;
+  try {
+    const r = await fetch('/api/plano', { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ areas: borrador }) });
+    const datos = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(datos.error ?? `Error ${r.status}`);
+    areas = datos.areas;
+    modoAsignar(false);
+    $('aviso').textContent = 'Áreas guardadas.';
+  } catch (x) { error(`No se guardó: ${x.message}`); }
+  finally { $('guardar').disabled = false; }
+};
+
+try {
+  const r = await fetch('/api/plano');
+  // 401 con PIN lo atiende cajero.js (pide el PIN y recarga).
+  if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error ?? `Error ${r.status}`);
+  ({ areas, empleados, yo, puede_asignar: puede } = await r.json());
+  $('asignar').hidden = !puede;
+} catch (x) { error(`No se pudo cargar: ${x.message}.`); }
+pintar();
+</script>
+</body>
+</html>

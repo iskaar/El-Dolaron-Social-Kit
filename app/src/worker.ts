@@ -39,6 +39,7 @@ import { UPC_VISIBLE, MISMO_UPC, claveTalla, PIEZA_UPC, CAPTURA_SUMADA, conflict
 import { rutaCamaraRemota } from './camara-remota.ts';
 import { rutaNomina } from './nomina.ts';
 import { reporteEquipo, registrarBonoSemana } from './equipo.ts';
+import { rutaPlano } from './plano.ts';
 import { misRetos, otorgarLogros, esCorridaDiaria } from './retos.ts';
 import { rutaTablero } from './tablero.ts';
 import { diaTienda, hoyTienda, rangoDias, rangoDe, delDia, DIA, reportes } from './reportes.ts';
@@ -2546,6 +2547,8 @@ export default {
 
       // Mis retos (Issue #752): solo lo de quien pregunta; el correo es el del servidor (PIN del cajero o su cuenta).
       if (pathname === '/api/retos/mios' && request.method === 'GET') return await misRetos(env, correo);
+      // Plano del local (Issue #756): áreas por letrero; leer es de piso, escribir solo del dueño.
+      if (pathname === '/api/plano') return await rutaPlano(request, env, usuario, correo);
       // Centro de avisos (Issue #429): ventas de ML por atender, a nombre del cajero que la marca.
       if (pathname === '/api/avisos' && request.method === 'GET') {
         // Ventas de ML + transferencias que Banxico no confirmo (#603): la caja las ve como aviso, el dueño las valida.
