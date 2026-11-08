@@ -52,7 +52,7 @@ export interface Lote {
 export function repartir(lotes: Lote[], importe: number, ahora: string, total: number): { id: string; importe: number }[] | null {
   const usables = lotes
     .filter((l) => l.restante > 0 && l.disponible_desde <= ahora && l.vence_en > ahora)
-    .filter((l) => l.origen === 'compra' || l.origen === 'referido' || l.origen === 'promo' || (l.origen === 'regalo' && total >= MINIMO_REGALO))
+    .filter((l) => l.origen === 'compra' || l.origen === 'referido' || l.origen === 'promo' || l.origen === 'reto' || (l.origen === 'regalo' && total >= MINIMO_REGALO))
     .sort((a, b) => a.vence_en.localeCompare(b.vence_en) || a.id.localeCompare(b.id));
   const reparto: { id: string; importe: number }[] = [];
   let falta = importe;
@@ -275,7 +275,7 @@ export async function sentenciasDeVenta(env: Env, p: {
       sentencias.push(
         env.DB.prepare(
           `update dolarones_lotes set restante = case when vence_en > ? and disponible_desde <= ?
-           and (origen in ('compra', 'referido', 'promo') or (origen = 'regalo' and ? >= ?)) then restante - ? else -1 end
+           and (origen in ('compra', 'referido', 'promo', 'reto') or (origen = 'regalo' and ? >= ?)) then restante - ? else -1 end
            where id = ?`,
         ).bind(ahoraIso, ahoraIso, p.total, MINIMO_REGALO, parte.importe, parte.id),
         env.DB.prepare(

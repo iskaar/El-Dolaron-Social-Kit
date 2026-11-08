@@ -214,7 +214,7 @@ async function actualizarSaldo() {
   pintarPromo(s.promo_meta);
   $('vencimientos').replaceChildren(...s.lotes.map((l) => {
     const li = document.createElement('li');
-    li.textContent = d(l.restante) + (l.origen === 'regalo' ? ' de apertura' : l.origen === 'referido' ? ' por referidos' : l.origen === 'promo' ? ' de bono de noviembre' : ' por compras') +
+    li.textContent = d(l.restante) + (l.origen === 'regalo' ? ' de apertura' : l.origen === 'referido' ? ' por referidos' : l.origen === 'promo' ? ' de bono de noviembre' : l.origen === 'reto' ? ' por retos' : ' por compras') +
       ' · vence ' + fecha(l.vence_en) + (Date.parse(l.disponible_desde) > Date.now() ? ' · disponible desde ' + fecha(l.disponible_desde) : '');
     return li;
   }));

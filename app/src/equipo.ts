@@ -12,7 +12,7 @@ const json = (cuerpo: unknown, status = 200) => new Response(JSON.stringify(cuer
   status, headers: { 'content-type': 'application/json; charset=utf-8' },
 });
 const DIA_MS = 86_400_000;
-const sumarDias = (dia: string, n: number) => new Date(Date.parse(`${dia}T12:00:00Z`) + n * DIA_MS).toISOString().slice(0, 10);
+export const sumarDias = (dia: string, n: number) => new Date(Date.parse(`${dia}T12:00:00Z`) + n * DIA_MS).toISOString().slice(0, 10);
 /** El lunes de la semana de `dia` (lunes a domingo). */
 export const lunesDe = (dia: string) => sumarDias(dia, -((new Date(`${dia}T12:00:00Z`).getUTCDay() + 6) % 7));
 /** Los lunes de las `n` semanas ya cerradas (la de hoy no), de la mas reciente a la mas vieja. */

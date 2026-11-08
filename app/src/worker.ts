@@ -39,6 +39,7 @@ import { UPC_VISIBLE, MISMO_UPC, claveTalla, PIEZA_UPC, CAPTURA_SUMADA, conflict
 import { rutaCamaraRemota } from './camara-remota.ts';
 import { rutaNomina } from './nomina.ts';
 import { reporteEquipo, registrarBonoSemana } from './equipo.ts';
+import { misRetos, otorgarLogros, esCorridaDiaria } from './retos.ts';
 import { rutaTablero } from './tablero.ts';
 import { diaTienda, hoyTienda, rangoDias, rangoDe, delDia, DIA, reportes } from './reportes.ts';
 
@@ -2543,6 +2544,8 @@ export default {
         if (respuestaPush) return respuestaPush;
       }
 
+      // Mis retos (Issue #752): solo lo de quien pregunta; el correo es el del servidor (PIN del cajero o su cuenta).
+      if (pathname === '/api/retos/mios' && request.method === 'GET') return await misRetos(env, correo);
       // Centro de avisos (Issue #429): ventas de ML por atender, a nombre del cajero que la marca.
       if (pathname === '/api/avisos' && request.method === 'GET') {
         // Ventas de ML + transferencias que Banxico no confirmo (#603): la caja las ve como aviso, el dueño las valida.
@@ -2888,6 +2891,10 @@ export default {
     ctx.waitUntil(procesarRellenoImagenes(env).then(() => procesarRellenoUpcitemdb(env)).catch((error) => console.error(JSON.stringify({ mensaje: 'relleno de imágenes fallido', error: String(error).slice(0, 200) }))));
     // Piezas que se quedaron en `pendiente` y fotos/recortes de R2 sin pieza (#481).
     ctx.waitUntil(rescatarPendientes(env).catch((error) => console.error(JSON.stringify({ mensaje: 'rescate de pendientes fallido', error: String(error).slice(0, 200) }))));
+    // Logros de las empleadas (#752): una vez al dia, 03:00 de la tienda. Idempotente.
+    if (esCorridaDiaria(evento.scheduledTime ?? Date.now())) {
+      ctx.waitUntil(otorgarLogros(env, evento.scheduledTime ?? Date.now()).catch((error) => console.error(JSON.stringify({ mensaje: 'logros de retos fallidos', error: String(error).slice(0, 200) }))));
+    }
     if (esCorridaSemanal(evento.scheduledTime ?? Date.now())) {
       ctx.waitUntil(reportarHuerfanosR2(env).catch((error) => console.error(JSON.stringify({ mensaje: 'reporte de huerfanos fallido', error: String(error).slice(0, 200) }))));
     }
