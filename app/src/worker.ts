@@ -38,6 +38,7 @@ import { rutaSolicitudesPrecio, crearSolicitud } from './solicitudes-precio.ts';
 import { UPC_VISIBLE, MISMO_UPC, claveTalla, PIEZA_UPC, CAPTURA_SUMADA, conflictoCapturaSumada, capturaSumada, sumarCaptura, conflictoUpc, corregirUpc, upcValido, type PiezaUpc } from './upc-inventario.ts';
 import { rutaCamaraRemota } from './camara-remota.ts';
 import { rutaNomina } from './nomina.ts';
+import { reporteEquipo, registrarBonoSemana } from './equipo.ts';
 import { rutaTablero } from './tablero.ts';
 import { diaTienda, hoyTienda, rangoDias, rangoDe, delDia, DIA, reportes } from './reportes.ts';
 
@@ -2741,6 +2742,8 @@ export default {
       if (pathname === '/api/reportes') {
         return await reportes(url, env);
       }
+      if (pathname === '/api/reportes/equipo' && request.method === 'GET') return await reporteEquipo(url, env);
+      if (pathname === '/api/reportes/equipo/bono' && request.method === 'POST') return await registrarBonoSemana(request, env, correo);
       if (pathname === '/api/reportes/tickets') {
         return await ticketsDelRango(url, env);
       }

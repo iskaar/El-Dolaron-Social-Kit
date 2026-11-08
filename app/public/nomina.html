@@ -77,6 +77,7 @@
         <option value="3">Mi&eacute;rcoles</option><option value="4">Jueves</option><option value="5">Viernes</option><option value="6">S&aacute;bado</option>
       </select></label>
       <label class="solo-editar">Hora de entrada<input name="hora_entrada" type="time"></label>
+      <label class="solo-editar">Cuenta de la app (bono de la tienda)<select name="correo"></select></label>
       <label class="solo-editar">PIN propio (6 d&iacute;gitos)<input name="pin" type="password" inputmode="numeric" maxlength="6" autocomplete="new-password"></label>
       <label class="solo-devengo">Fecha<input name="fecha" type="date"></label>
       <label class="con-dinero" id="etiqueta-importe">Efectivo que se entrega ($)<input name="importe" type="number" min="0.01" step="0.01"></label>
@@ -114,6 +115,7 @@
         <option value="2">Martes</option><option value="3">Mi&eacute;rcoles</option><option value="4">Jueves</option>
         <option value="5">Viernes</option><option value="6">S&aacute;bado</option></select></label>
       <label>Hora de entrada<input id="hora-entrada" type="time"></label>
+      <label>Cuenta de la app (bono de la tienda)<select id="correo-alta"></select></label>
       <label>PIN propio (6 d&iacute;gitos)<input id="pin-alta" type="password" inputmode="numeric" maxlength="6" autocomplete="new-password"></label>
       <button>Guardar empleado</button>
     </form>
@@ -132,6 +134,7 @@ const escapar = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;
 const avisar = (texto) => { $('estado').textContent = texto; };
 
 let personas = [];
+let cuentas = [];
 let config = null;
 let actual = null;          // { empleado, tipo } de la accion abierta
 let idPendiente = null;     // mismo id hasta que se guarde: reintentar no registra dos veces
@@ -153,6 +156,10 @@ async function api(url, cuerpo, metodo = cuerpo ? 'POST' : 'GET') {
 async function cargar() {
   const datos = await api('/api/nomina');
   personas = datos.empleados;
+  cuentas = datos.cuentas;
+  const opcionesCuenta = '<option value="">Sin ligar</option>' + cuentas.map((c) => `<option value="${escapar(c.correo)}">${escapar(c.nombre)} (${escapar(c.correo)})</option>`).join('');
+  $('correo-alta').innerHTML = opcionesCuenta;
+  $('accion-form').elements.correo.innerHTML = opcionesCuenta;
   config = datos.config;
   $('checador-activo').checked = !!config.checador_activo;
   $('config-bono').hidden = !config.checador_activo;
@@ -203,6 +210,7 @@ function abrir(empleado, tipo) {
   f.elements.pago_dia.value = empleado.pago_dia / 100;
   [...f.elements.dias.options].forEach((o) => { o.selected = JSON.parse(empleado.dias).includes(Number(o.value)); });
   f.elements.hora_entrada.value = empleado.hora_entrada || '';
+  f.elements.correo.value = empleado.correo || '';
   if (tipo === 'pago') f.elements.importe.value = Math.max(0, empleado.debe) / 100 || '';
   $('etiqueta-importe').firstChild.textContent = tipo === 'adelanto' ? 'Importe del adelanto ($)' : 'Efectivo que se entrega ($)';
   const ver = (clase, visible) => f.querySelectorAll(clase).forEach((n) => { n.hidden = !visible; });
@@ -286,7 +294,7 @@ $('accion-form').addEventListener('submit', async (ev) => {
       await api(`/api/nomina/empleados/${empleado.id}`, {
         nombre: f.elements.nombre.value, periodo: f.elements.periodo.value, pago_dia: centavos(f.elements.pago_dia.value),
         dias: [...f.elements.dias.selectedOptions].map((o) => Number(o.value)),
-        hora_entrada: f.elements.hora_entrada.value, pin: f.elements.pin.value,
+        hora_entrada: f.elements.hora_entrada.value, pin: f.elements.pin.value, correo: f.elements.correo.value,
       }, 'PUT');
     } else {
       const cuerpo = { id: idPendiente, empleado_id: empleado.id, tipo, nota: f.elements.nota.value };
@@ -378,7 +386,7 @@ $('alta').addEventListener('submit', async (ev) => {
     await api(`/api/nomina/empleados/${crypto.randomUUID()}`, {
       nombre: $('nombre').value, periodo: $('periodo').value, pago_dia: centavos($('pago-dia').value),
       dias: [...$('dias').selectedOptions].map((o) => Number(o.value)), hora_entrada: $('hora-entrada').value,
-      pin: $('pin-alta').value,
+      pin: $('pin-alta').value, correo: $('correo-alta').value,
     });
     $('alta').reset();
     avisar('Empleado guardado.');
