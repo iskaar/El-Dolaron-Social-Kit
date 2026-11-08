@@ -25,7 +25,7 @@ import {
   permiso, puede, quienEs, leerUsuario, yo, pedirAcceso, listarCuentas, guardarCuenta, resolverSolicitud, propietarioDe,
   esDeCaja, soloComputadora, esRevendedora, esInversionista, CAJAS, puedeEditarInventario, type Usuario,
 } from './cuentas.ts';
-import { cajeroEnTurno, listarCajeros, entrar, salir, ponerPin } from './cajeros.ts';
+import { cajeroEnTurno, listarCajeros, listarVendedoras, esVendedora, entrar, salir, ponerPin } from './cajeros.ts';
 import { rutaPush } from './push.ts';
 import { rutaCep, transferenciasPorValidar, validarTransferencia } from './cep.ts';
 import { subirComprobante, verComprobante } from './comprobante.ts';
@@ -1746,7 +1746,7 @@ async function registrarVenta(request: Request, env: Env, ctx: ExecutionContext,
     efectivo?: unknown; creado_en?: unknown;
     cliente_id?: unknown; dolarones?: unknown; codigo_socio?: unknown; codigo_vale?: unknown; caja?: unknown; imprimir_en?: unknown;
     descuento_id?: unknown; promo?: unknown; sin_red?: unknown; pedido_id?: unknown; anticipo?: unknown;
-    clave_rastreo?: unknown; monto_transferido?: unknown;
+    clave_rastreo?: unknown; monto_transferido?: unknown; vendedora?: unknown;
   };
   const id = String(venta.id ?? '');
   if (!UUID.test(id)) {
@@ -1774,6 +1774,7 @@ async function registrarVenta(request: Request, env: Env, ctx: ExecutionContext,
   // cambiado despues de una venta no debe romper un reintento legitimo.
   // imprimir_en es el destino del papel, no el pedido: el primer registro lo
   // fija; reintentar desde otra estación no mueve ni duplica el ticket.
+  const vendedora = typeof venta.vendedora === 'string' ? venta.vendedora : '';
   const pedido = JSON.stringify({
     lineas:(venta.lineas as LineaVenta[]).map((l) => [String(l.producto_id ?? ''), l.cantidad]),
     forma_pago:formaPago, efectivo:venta.efectivo ?? 0, creado_en:venta.creado_en ?? null,
@@ -1783,6 +1784,7 @@ async function registrarVenta(request: Request, env: Env, ctx: ExecutionContext,
     // Solo si lo trae: el hash de las ventas sin descuento no cambia y sus reintentos siguen valiendo.
     ...(venta.descuento_id ? { descuento_id:venta.descuento_id } : {}),
     ...(venta.promo ? { promo:venta.promo } : {}),
+    ...(vendedora ? { vendedora } : {}),
     ...(venta.pedido_id ? { pedido_id:venta.pedido_id, anticipo:venta.anticipo ?? 0 } : {}),
     // Igual: solo si la trae (#593), para que los reintentos de ventas sin clave sigan valiendo.
     ...(venta.clave_rastreo ? { clave_rastreo:claveRastreoDe(venta.clave_rastreo), monto_transferido:venta.monto_transferido ?? 0 } : {}),
@@ -1812,6 +1814,11 @@ async function registrarVenta(request: Request, env: Env, ctx: ExecutionContext,
   };
   const yaExiste = await reintento();
   if (yaExiste) return yaExiste;
+  // Quien atendio en piso (#750): opcional ('' = sin atribuir). Va despues del reintento: una venta ya registrada
+  // sigue valiendo aunque esa cuenta se desactive despues.
+  if (venta.vendedora != null && venta.vendedora !== '' && !(vendedora && await esVendedora(env, vendedora))) {
+    return json({ error: 'Quien atendió debe ser una cuenta activa de cajero o capturista.' }, 400);
+  }
 
   const idsPedidos = [...new Set((venta.lineas as LineaVenta[]).map((l) => String(l.producto_id ?? '')))];
   if (idsPedidos.some((pid) => !UUID.test(pid))) {
@@ -1924,12 +1931,12 @@ async function registrarVenta(request: Request, env: Env, ctx: ExecutionContext,
   const sentencias = [
     env.DB.prepare(
       `insert into ventas (id, total, forma_pago, efectivo, cambio, creado_en, registrado_en, cliente_id, dolarones,
-                           caja, cajero, pedido_hash, imprimir_en, descuento, descuento_id, promo, anticipo, pedido_id)
-       values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                           caja, cajero, pedido_hash, imprimir_en, descuento, descuento_id, promo, anticipo, pedido_id, vendedora)
+       values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).bind(id, total, formaPago, efectivo, Math.max(0, efectivo - aPagar), creadoEn, ahora, clienteId, dolarones,
       // Quien cobro sale de Access; la caja es la suya (Issue #105) o la de la
       // computadora. Una venta encolada antes del corte de caja llega sin caja: ''.
-      await cajaDe(env, correo, venta.caja), correo, pedidoHash, imprimirEn, descuento, descuentoId, promo, anticipo, pedidoId),
+      await cajaDe(env, correo, venta.caja), correo, pedidoHash, imprimirEn, descuento, descuentoId, promo, anticipo, pedidoId, vendedora),
     ...(transf ? [sentenciaTransferencia(env, transf, correo, ahora, 'venta', { venta: id })] : []),
     ...preparado.lineas.map((l) =>
       env.DB.prepare(
@@ -2035,7 +2042,7 @@ async function tomarImpresion(id: string, request: Request, env: Env, correo: st
 
 // Lo que lleva un renglon de la lista de tickets (ticket.js `renglonTicket`), del dia o del rango.
 const COLUMNAS_TICKET = `v.id, v.total, v.forma_pago, v.cancelada, v.creado_en, v.dolarones, v.devuelto, v.dolarones_devueltos,
-            v.caja, v.cajero, v.cliente_id is not null as con_socio,
+            v.caja, v.cajero, v.vendedora, v.cliente_id is not null as con_socio,
             (select group_concat(nombre, ' · ') from venta_lineas where venta_id = v.id) as piezas,
             (select coalesce(sum(cantidad), 0) from venta_lineas where venta_id = v.id) as cantidad,
             (select coalesce(sum(cancelada_cantidad), 0) from venta_lineas where venta_id = v.id) as cancelada_cantidad`;
@@ -2506,6 +2513,7 @@ export default {
       const respuestaImagen = await rutaImagenUpc(request, env, pathname, correo, ctx);
       if (respuestaImagen) return respuestaImagen;
       if (pathname === '/api/cajeros' && request.method === 'GET') return await listarCajeros(env);
+      if (pathname === '/api/vendedoras' && request.method === 'GET') return await listarVendedoras(env);
       if (pathname === '/api/cajeros/entrar' && request.method === 'POST') return await entrar(request, env);
       if (pathname === '/api/cajeros/salir' && request.method === 'POST') return await salir(request, env);
       if (pathname === '/api/cuentas/pin' && request.method === 'PUT') return await ponerPin(request, env);
