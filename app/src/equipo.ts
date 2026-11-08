@@ -33,7 +33,7 @@ export function repartirBono<T extends { correo: string; dias: number }>(bolsa: 
 }
 
 interface ConfigBono { pb: number; meta: number }
-async function configBono(env: Env): Promise<ConfigBono> {
+export async function configBono(env: Env): Promise<ConfigBono> {
   const { results } = await env.DB.prepare(`select clave, valor from config where clave in ('bono_tienda_pb', 'bono_tienda_meta_semana')`)
     .all<{ clave: string; valor: string }>();
   const v = (clave: string, omision: number) => {
