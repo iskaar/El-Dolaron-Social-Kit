@@ -48,10 +48,14 @@ export async function listarCajeros(env: Env): Promise<Response> {
 const atiende = (roles: Rol[]) => roles.includes('cajero') || roles.includes('capturista');
 
 /** Quien puede figurar como «quien atendio» una venta (#750): cuentas activas con rol cajero o capturista. */
-export async function listarVendedoras(env: Env): Promise<Response> {
+export async function vendedoras(env: Env): Promise<{ correo: string; nombre: string }[]> {
   const { results } = await env.DB.prepare(`select correo, nombre, roles from usuarios where activo = 1 order by nombre`)
     .all<{ correo: string; nombre: string; roles: string }>();
-  return json(results.filter((u) => atiende(leerRoles(u.roles))).map(({ correo, nombre }) => ({ correo, nombre })));
+  return results.filter((u) => atiende(leerRoles(u.roles))).map(({ correo, nombre }) => ({ correo, nombre }));
+}
+
+export async function listarVendedoras(env: Env): Promise<Response> {
+  return json(await vendedoras(env));
 }
 
 export async function esVendedora(env: Env, correo: string): Promise<boolean> {

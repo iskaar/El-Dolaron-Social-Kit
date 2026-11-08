@@ -373,6 +373,27 @@
     </article>
   </section>
 
+  <section aria-labelledby="t-equipo">
+    <h2 class="titulo-bloque" id="t-equipo">Equipo</h2>
+    <article class="panel">
+      <div id="equipo-detalle" style="overflow-x:auto"></div>
+      <p class="nota">Por persona en el periodo. Ventas: neto de los tickets que atendió (sin cancelados, menos devoluciones; «Sin atribuir» son
+        ventas sin vendedora). Socios: altas que registró y cuántos compraron ese mismo día. Apartados: cerrados en caja. Piezas: capturadas y
+        cuántas se vendieron en sus primeros 14 días. Días: asistencias de su empleado en Nómina (hay que ligar su cuenta allá).</p>
+    </article>
+    <article class="panel" style="margin-top:14px">
+      <header><h3>Bono semanal de la tienda <span class="subtitulo">últimas 8 semanas cerradas, lunes a domingo</span></h3></header>
+      <form id="equipo-config" style="display:flex;flex-wrap:wrap;gap:12px;align-items:end;margin-bottom:12px">
+        <label>Porcentaje de las ventas netas (%) <input id="bono-pct" type="number" min="0" step="0.01" style="width:90px"></label>
+        <label>Meta de la semana ($) <input id="bono-meta" type="number" min="0" step="1" style="width:130px"></label>
+        <button type="submit">Guardar</button> <span id="aviso-bono" role="status"></span>
+      </form>
+      <div id="bono-semanas" style="overflow-x:auto"></div>
+      <p class="nota">Solo hay bono si las ventas netas de la semana superan la meta. La bolsa se reparte entre quienes trabajaron esa semana según sus días
+        (el resto de centavos, a quien más días tuvo). Registrar crea un bono en Nómina fechado el domingo de la semana; hacerlo dos veces no duplica.</p>
+    </article>
+  </section>
+
   <section aria-labelledby="t-inventario">
     <h2 class="titulo-bloque" id="t-inventario">Precios e inventario</h2>
     <div class="malla">
@@ -766,12 +787,71 @@ function pintarInventario(r) {
     }));
 }
 
+/* ---------- equipo y bono semanal (Issue #751) ---------- */
+
+function pintarEquipo(e) {
+  const n = (x) => x.toLocaleString('es-MX');
+  $('equipo-detalle').innerHTML = !e.personas.length ? '<div class="vacio">Sin personas con actividad en este periodo.</div>'
+    : `<table class="tabla"><thead><tr><th>Persona</th><th class="num">Ventas netas</th><th class="num">Tickets</th><th class="num">Socios</th>
+         <th class="num">Compraron ese día</th><th class="num">Apartados</th><th class="num">Piezas</th><th class="num">Vendidas en 14 días</th><th class="num">Días</th></tr></thead>
+       <tbody>${e.personas.map((x) => `
+         <tr><td>${escapar(x.nombre)}</td><td class="num">${pesos(x.ventas)}</td><td class="num">${n(x.tickets)}</td><td class="num">${n(x.socios)}</td>
+           <td class="num">${n(x.socios_compraron)}</td><td class="num">${n(x.apartados)}</td><td class="num">${n(x.capturadas)}</td>
+           <td class="num">${n(x.vendidas_14)}</td><td class="num">${n(x.dias_trabajados)}</td></tr>`).join('')}</tbody></table>`;
+  $('bono-pct').value = e.config.pb / 100;
+  $('bono-meta').value = e.config.meta / 100;
+  $('bono-semanas').innerHTML = `<table class="tabla"><thead><tr><th>Semana</th><th class="num">Ventas netas</th><th class="num">Meta</th><th>Meta alcanzada</th>
+      <th class="num">Bolsa</th><th>Reparto</th><th></th></tr></thead><tbody>${e.semanas.map((s) => {
+    const hayParte = s.partes.some((p) => p.importe > 0);
+    const reparto = !s.alcanzada ? 'Sin bono: no llegó a la meta'
+      : s.partes.length ? s.partes.map((p) => `${escapar(p.nombre)} (${n(p.dias)} d): ${pesos(p.importe)}${p.registrado ? ' ✓' : ''}`).join('<br>')
+      : 'Nadie con cuenta ligada trabajó esa semana';
+    const accion = s.alcanzada && hayParte
+      ? (s.partes.some((p) => p.importe > 0 && !p.registrado)
+        ? `<button type="button" data-semana="${s.lunes}">Registrar bono de la semana ${diaCorto(s.lunes)}</button>` : 'Registrado') : '';
+    return `<tr><td>${diaCorto(s.lunes)} – ${diaCorto(s.domingo)}</td><td class="num">${pesos(s.ventas)}</td><td class="num">${pesos(s.meta)}</td>
+      <td>${s.alcanzada ? 'Sí' : 'No'}</td><td class="num">${pesos(s.bolsa)}</td><td>${reparto}</td><td>${accion}</td></tr>`;
+  }).join('')}</tbody></table>`;
+}
+
+async function cargarEquipo() {
+  try {
+    const r = await fetch(`/api/reportes/equipo?dias=${diasActual}`);
+    if (!r.ok) throw new Error();
+    pintarEquipo(await r.json());
+  } catch { $('equipo-detalle').innerHTML = '<div class="vacio">No se pudo cargar el equipo.</div>'; }
+}
+
+function avisoBono(texto, ok) { $('aviso-bono').textContent = texto; $('aviso-bono').style.color = ok ? 'var(--bien)' : 'var(--mal)'; }
+$('equipo-config').addEventListener('submit', async (ev) => {
+  ev.preventDefault();
+  const r = await fetch('/api/config', {
+    method: 'PUT', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ bono_tienda_pb: Math.round(Number($('bono-pct').value) * 100), bono_tienda_meta_semana: Math.round(Number($('bono-meta').value) * 100) }),
+  });
+  const cuerpo = await r.json().catch(() => ({}));
+  avisoBono(r.ok ? 'Guardado.' : (cuerpo.error ?? 'No se pudo guardar.'), r.ok);
+  if (r.ok) cargarEquipo();
+});
+$('bono-semanas').addEventListener('click', async (ev) => {
+  const semana = ev.target.dataset?.semana;
+  if (!semana) return;
+  ev.target.disabled = true;
+  const r = await fetch('/api/reportes/equipo/bono', {
+    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ semana }),
+  });
+  const cuerpo = await r.json().catch(() => ({}));
+  avisoBono(r.ok ? `Registrado: ${cuerpo.creados.length} nuevos, ${cuerpo.ya_estaban.length} ya estaban.` : (cuerpo.error ?? 'No se pudo registrar.'), r.ok);
+  cargarEquipo();
+});
+
 async function cargar() {
   $('principal').classList.add('cargando');   // se queda el cuadro anterior, atenuado: sin saltos
   try {
     const r = await (await fetch(`/api/reportes?dias=${diasActual}`)).json();
     ultimoReporte = r;
     pintarResumen(r); pintarVentas(r); pintarCuadre(r); pintarCaja(r); pintarCancelaciones(r); pintarDescuentos(r); pintarRevendedoras(r); pintarInventario(r);
+    cargarEquipo();
   } finally {
     $('principal').classList.remove('cargando');
   }

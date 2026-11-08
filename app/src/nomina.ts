@@ -6,6 +6,7 @@
 import { CAJAS } from './cuentas.ts';
 import { cajaDe } from './corte.ts';
 import { hashPin } from './dolarones.ts';
+import { vendedoras, esVendedora } from './cajeros.ts';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const PIN_INTENTOS = 5;
@@ -44,12 +45,13 @@ export async function rutaNomina(request: Request, env: Env, url: URL, correo: s
   if (request.method === 'POST' && url.pathname === '/api/nomina/entrada') return marcarEntrada(request, env);
   if (request.method === 'GET' && url.pathname === '/api/nomina') {
     const { results } = await env.DB.prepare(
-      `select e.id, e.nombre, e.periodo, e.pago_dia, e.dias, e.hora_entrada, e.activo,
+      `select e.id, e.nombre, e.periodo, e.pago_dia, e.dias, e.hora_entrada, e.activo, e.correo,
          (select ${DEBE} from nomina_movimientos m where m.empleado_id = e.id) as debe,
          (select ${ADELANTOS} from nomina_movimientos m where m.empleado_id = e.id) as adelantos
        from empleados e order by e.activo desc, e.nombre`,
     ).all();
-    return json({ empleados: results, config: await configNomina(env) });
+    // `cuentas`: a quien se puede ligar un empleado (#751); /api/vendedoras es de caja y la nomina la ve el auxiliar.
+    return json({ empleados: results, config: await configNomina(env), cuentas: await vendedoras(env) });
   }
 
   if (request.method === 'PUT' && url.pathname === '/api/nomina/config') return guardarConfig(request, env);
@@ -143,6 +145,9 @@ async function guardarEmpleado(request: Request, env: Env, id: string): Promise<
   const dias = Array.isArray(c.dias) ? c.dias : [];
   const hora = c.hora_entrada === '' || c.hora_entrada == null ? null : String(c.hora_entrada);
   const pin = String(c.pin ?? '');
+  // Cuenta de la app (#751): sin la llave no se toca lo ya ligado; '' desliga; si no, debe ser cajero/capturista activo.
+  const correo = c.correo === undefined ? null : String(c.correo).trim();
+  if (correo && !(await esVendedora(env, correo))) return json({ error: 'Esa cuenta no existe o no es de cajero o capturista.' }, 400);
   if (!nombre || !['diario', 'quincenal'].includes(periodo)) return json({ error: 'Nombre o periodo inválido.' }, 400);
   if (!Number.isInteger(pagoDia) || pagoDia <= 0 || pagoDia > IMPORTE_MAXIMO) return json({ error: 'Pago diario inválido.' }, 400);
   if (!dias.every((d) => Number.isInteger(d) && d >= 0 && d <= 6)) return json({ error: 'Días inválidos.' }, 400);
@@ -156,15 +161,20 @@ async function guardarEmpleado(request: Request, env: Env, id: string): Promise<
     pinHash = `${salHex}:${await hashPin(pin, salHex)}`;
   }
   if (!pinHash) return json({ error: 'Asigna un PIN de 6 dígitos al empleado.' }, 400);
-  if (request.method === 'POST') {
-    await env.DB.prepare(`insert into empleados (id, nombre, periodo, pago_dia, dias, hora_entrada, pin_hash, creado_en)
-      values (?, ?, ?, ?, ?, ?, ?, ?) on conflict(id) do nothing`)
-      .bind(id, nombre, periodo, pagoDia, JSON.stringify(dias), hora, pinHash, new Date().toISOString()).run();
-  } else {
-    await env.DB.prepare(`update empleados set nombre=?, periodo=?, pago_dia=?, dias=?, hora_entrada=?, pin_hash=? where id=?`)
-      .bind(nombre, periodo, pagoDia, JSON.stringify(dias), hora, pinHash, id).run();
+  try {
+    if (request.method === 'POST') {
+      await env.DB.prepare(`insert into empleados (id, nombre, periodo, pago_dia, dias, hora_entrada, pin_hash, correo, creado_en)
+        values (?, ?, ?, ?, ?, ?, ?, ?, ?) on conflict(id) do nothing`)
+        .bind(id, nombre, periodo, pagoDia, JSON.stringify(dias), hora, pinHash, correo ?? '', new Date().toISOString()).run();
+    } else {
+      await env.DB.prepare(`update empleados set nombre=?, periodo=?, pago_dia=?, dias=?, hora_entrada=?, pin_hash=?, correo=coalesce(?, correo) where id=?`)
+        .bind(nombre, periodo, pagoDia, JSON.stringify(dias), hora, pinHash, correo, id).run();
+    }
+  } catch (error) {
+    if (/unique/i.test(String(error))) return json({ error: 'Esa cuenta ya está ligada a otro empleado.' }, 409);
+    throw error;
   }
-  return json({ id, nombre, periodo, pago_dia: pagoDia, dias, hora_entrada: hora, tiene_pin: !!pinHash }, request.method === 'POST' ? 201 : 200);
+  return json({ id, nombre, periodo, pago_dia: pagoDia, dias, hora_entrada: hora, tiene_pin: !!pinHash, correo }, request.method === 'POST' ? 201 : 200);
 }
 
 async function resumenPeriodo(env: Env, empleadoId: string): Promise<Response> {
