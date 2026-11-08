@@ -13,13 +13,15 @@ const TABLA = [
     [21, ['Tenis Nike', 'Zapatos de vestir', 'Botas vaqueras', 'Sandalias Havaianas', 'Pantuflas']],
     [8, ['Brasier Auden', 'Bra deportivo', 'Calzones', 'Panty', 'Boxer Hanes', 'Trusa', 'Calcetines Hanes', 'Calcetas']],
     [23, ['Playera niño', 'Vestido niña', 'Conjunto bebé', 'Pants Boys']],
-    [4, ['Camisa caballero', 'Chamarra hombre', 'Saco Goodfellow & Co']],
-    [22, ['Playera caballero', 'Pantalón hombre', 'Jeans Original Use']],
+    // Todo lo de caballero va al rack 4, colgado o doblado (#762: el 22 ya es solo cabello).
+    [4, ['Camisa caballero', 'Chamarra hombre', 'Saco Goodfellow & Co', 'Playera caballero', 'Pantalón hombre', 'Jeans Original Use']],
     [3, ['Blusa Universal Thread', 'Camisa', 'Vestido', 'Falda', 'Chamarra', 'Saco', 'Abrigo']],
     [15, ['Playera Wild Fable', 'Jeans', 'Sudadera', 'Short', 'Ropa']],
   ]),
   ...casos('accesorios', [[7, ['Collar', 'Aretes', 'Pulsera', 'Anillo', 'Joyería']], [14, ['Bolsa', 'Cartera', '']]]),
-  ...casos('belleza', [[5, ['Labial', 'Rímel', 'Base líquida', 'Sombras', 'Delineador', 'Rubor', 'Maquillaje']], [8, ['Esmalte', 'Uñas postizas']], [10, ['Shampoo']]]),
+  ...casos('belleza', [[5, ['Labial', 'Rímel', 'Base líquida', 'Sombras', 'Delineador', 'Rubor', 'Maquillaje']], [8, ['Esmalte', 'Uñas postizas']],
+    [22, ['Cabello', 'Shampoo', 'Champú', 'Acondicionador', 'Tinte', 'Cepillo', 'Peine', 'Plancha', 'Secadora', 'Rizador', 'Tenazas', 'Spray para el pelo']],
+    [10, ['Crema', 'Perfume', '']]]),
   ...casos('hogar', [
     [35, ['Toalla de playa Mickey']], [33, ['Toalla', 'Cobija']], [34, ['Almohada', 'Funda']],
     [19, ['Sábana', 'Edredón', 'Colcha', 'Cortina']], [12, ['Cuadro', 'Vela', 'Florero', 'Adorno', 'Marco', 'Decoración']],
@@ -63,10 +65,18 @@ test('ropa: la marca y la talla tambien deciden', () => {
   assert.equal(letrero({ categoria: 'ropa', nombre: 'Blusa', marca: 'Art Class' }), 23);
   assert.equal(letrero({ categoria: 'ropa', nombre: 'Playera', talla: 'Niño 6 años / S' }), 23);
   assert.equal(letrero({ categoria: 'ropa', nombre: 'Camisa', marca: 'Goodfellow & Co' }), 4);
-  assert.equal(letrero({ categoria: 'ropa', nombre: 'Playera', marca: 'Original Use' }), 22);
+  assert.equal(letrero({ categoria: 'ropa', nombre: 'Playera', marca: 'Original Use' }), 4);
   assert.equal(letrero({ categoria: 'ropa', nombre: 'Playera', marca: 'Universal Thread', talla: 'M' }), 15);
   // «mens» no es «womens»
   assert.equal(letrero({ categoria: 'ropa', nombre: "Women's Blusa" }), 3);
+});
+
+test('cabello va al 22 pero maquillaje y uñas ganan; caballero doblada va al 4; calzado sigue en el 21', () => {
+  assert.equal(letrero({ categoria: 'belleza', nombre: 'Cepillo de maquillaje' }), 5);
+  assert.equal(letrero({ categoria: 'belleza', nombre: 'Cepillo para uñas' }), 8);
+  assert.equal(letrero({ categoria: 'belleza', nombre: 'Peluche' }), 10);   // «pelo» no es «peluche»
+  assert.equal(letrero({ categoria: 'ropa', nombre: 'Pantalón caballero doblado' }), 4);
+  assert.equal(letrero({ categoria: 'ropa', nombre: 'Zapatos caballero' }), 21);
 });
 
 test('la ropa capturada con precio de ropa tambien es ropa aunque no traiga categoria', () => {

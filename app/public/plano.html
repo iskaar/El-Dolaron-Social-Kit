@@ -14,6 +14,7 @@
   main { max-width: 760px; margin: 0 auto; padding: 12px 16px 40px; display: grid; gap: 12px; }
   h2 { margin: 0; font-size: 15px; color: var(--azul); }
   .nota { font-size: 13px; color: var(--gris); }
+  [hidden] { display: none !important; }   /* .tarjeta (display:grid) tapaba el atributo hidden de las tarjetas de modo */
   .tarjeta { background: #fff; border: 1px solid var(--linea); border-radius: 12px; padding: 12px; display: grid; gap: 10px; }
   .error { color: var(--rojo); font-size: 14px; min-height: 0; }
   .error:empty { display: none; }
@@ -82,6 +83,7 @@
   <div class="barra">
     <button id="mias" type="button" aria-pressed="false">Mis áreas</button>
     <button id="asignar" type="button" hidden>Asignar áreas</button>
+    <button id="renombrar" type="button" hidden>Editar nombres</button>
     <button id="ajustar" type="button">Ajustar plano</button>
     <span class="nota" id="aviso" role="status"></span>
   </div>
@@ -95,6 +97,16 @@
     <h2>Asignar áreas</h2>
     <div class="nota">Elige a la persona y toca los letreros (en el plano o abajo): un toque asigna, otro toque al mismo letrero lo quita.</div>
     <div class="barra"><button id="guardar" class="primario" type="button">Guardar</button><button id="cancelar" type="button">Cancelar</button></div>
+  </section>
+  <section class="tarjeta" id="modo-nombres" hidden>
+    <h2>Editar nombres</h2>
+    <div class="nota">Toca un letrero (en el plano o abajo) y escribe cómo quieres que se llame. Cambiar el nombre no cambia a qué letrero se mandan las piezas: eso lo deciden las etiquetas. Déjalo vacío para volver al nombre del plano.</div>
+    <form id="form-nombre">
+      <input id="nombre-texto" type="text" maxlength="80" autocomplete="off" disabled aria-label="Nombre del letrero">
+      <button class="primario" id="nombre-guardar" type="submit" disabled>Guardar</button>
+    </form>
+    <div class="nota" id="nombre-cual">Elige un letrero.</div>
+    <div class="barra"><button id="nombres-listo" type="button">Listo</button></div>
   </section>
   <section class="tarjeta">
     <h2>Quién tiene qué</h2>
@@ -116,16 +128,21 @@ const nodo = (tag, texto, props = {}) => Object.assign(document.createElement(ta
 const PALETA = ['#D72B32', '#16366B', '#1f7a4d', '#8E5BD1', '#F28C28', '#2BA39A', '#A0714F', '#E35A94', '#5F6B7A', '#3F7FD1'];
 const TODOS = Array.from({ length: LETREROS }, (_, i) => i + 1);
 
-let areas = {}, empleados = [], yo = null, puede = false;   // lo guardado en el servidor
+let areas = {}, nombres = {}, empleados = [], yo = null, puede = false;   // lo guardado en el servidor
 let borrador = null;      // en «Asignar áreas»: lo que se va armando
 let quien = null;         // a quién se asigna
 let resaltado = null;     // letreros resaltados (búsqueda, Mis áreas o una persona)
 let seleccion = null;     // [mueble, cara]
+let renombrando = false;  // en «Editar nombres»
+let letreroEditado = null;
 
 const vigente = () => borrador ?? areas;
 const color = (id) => PALETA[empleados.findIndex((e) => e.id === id) % PALETA.length];
 const nombre = (id) => empleados.find((e) => e.id === id)?.nombre;
 const deQuien = (id) => TODOS.filter((n) => vigente()[n] === id);
+/** El nombre del plano de un letrero (el de plano.js) y el que se ve: el del dueño, si lo cambió. */
+const nombreBase = (n) => { const m = muebleDe(n); return m ? categoriasDe(m.f, m.cara).map((c) => c.t).join(' · ') : ''; };
+const nombreVisto = (n) => nombres[n] || nombreBase(n);
 const error = (t = '') => { $('error').textContent = t; };
 
 const plano = crearPlano($('estado'), $('svg'), (f, cara) => elegir(f, cara));
@@ -145,17 +162,20 @@ function mostrar(f, cara) {
   $('sel').replaceChildren(nodo('b', f.name), nodo('div', f.zone, { className: 'nota' }), ...caras.map((c) => {
     const bloque = nodo('div', '', { className: 'cara' });
     if (nums[c] != null) bloque.append(nodo('span', nums[c], { className: 'n' }), nodo('span', f.faces ? (c ? ' Cara derecha' : ' Cara izquierda') : '', { className: 'nota' }));
-    bloque.append(nodo('div'), ...categoriasDe(f, c).map((x) => nodo('span', x.t, { className: 'cat', style: `background:${FAM[x.f].c}` })));
+    const cats = categoriasDe(f, c);
+    const propio = nums[c] != null && nombres[nums[c]];
+    bloque.append(nodo('div'), ...(propio ? [nodo('span', propio, { className: 'cat', style: `background:${FAM[cats[0].f].c}` })]
+      : cats.map((x) => nodo('span', x.t, { className: 'cat', style: `background:${FAM[x.f].c}` }))));
+    if (propio) bloque.append(nodo('div', `Nombre en el plano: ${nombreBase(nums[c])}`, { className: 'nota' }));
     if (nums[c] != null) bloque.append(quienTiene(nums[c]));
     return bloque;
   }));
 }
 
 function elegir(f, cara) {
-  if (borrador && quien) {
-    const n = numerosDe(f)[cara];
-    if (n != null) alternar(n);
-  }
+  const n = numerosDe(f)[cara];
+  if (borrador && quien && n != null) alternar(n);
+  if (renombrando && n != null) editarNombre(n);
   mostrar(f, cara);
 }
 
@@ -166,12 +186,13 @@ function alternar(n) {
 
 function pintar() {
   const mapa = vigente();
+  plano.rotular(nombres);
   plano.colorear((n) => (mapa[n] ? color(mapa[n]) : null));
   plano.resaltar(resaltado);
   $('rejilla').replaceChildren(...TODOS.map((n) => {
     const b = nodo('button', n, { type: 'button', className: 'n' + (mapa[n] ? ' asignado' : ''), title: nombre(mapa[n]) ?? 'Sin asignar' });
     if (mapa[n]) b.style.background = color(mapa[n]);
-    b.onclick = () => { const m = muebleDe(n); if (borrador && quien) alternar(n); else { resaltar([n]); plano.enfocar(n); } if (m) mostrar(m.f, m.cara); };
+    b.onclick = () => { const m = muebleDe(n); if (renombrando) editarNombre(n); if (borrador && quien) alternar(n); else { resaltar([n]); plano.enfocar(n); } if (m) mostrar(m.f, m.cara); };
     return b;
   }));
   // En «Asignar áreas» salen todas las personas; fuera de ahí, solo las que tienen letreros.
@@ -241,7 +262,7 @@ $('buscar').addEventListener('submit', async (e) => {
       const fila = nodo('div', '', { className: 'fila' });
       const b = nodo('button', n, { type: 'button', className: 'n gde' });
       b.onclick = () => { plano.enfocar(n); if (m) mostrar(m.f, m.cara); };
-      fila.append(b, nodo('span', `${m?.f.name ?? ''} · ${nombre(areas[n]) ? `a cargo: ${nombre(areas[n])}` : 'sin responsable'}`));
+      fila.append(b, nodo('span', `${nombres[n] || m?.f.name || ''} · ${nombre(areas[n]) ? `a cargo: ${nombre(areas[n])}` : 'sin responsable'}`));
       return fila;
     }));
     resaltar(nums);
@@ -268,11 +289,12 @@ function modoAsignar(on) {
   borrador = on ? { ...areas } : null;
   quien = on ? empleados[0]?.id ?? null : null;
   $('modo-asignar').hidden = !on;
-  $('asignar').hidden = on || !puede;
+  $('asignar').hidden = on || !puede || renombrando;
+  $('renombrar').hidden = on || !puede || renombrando;
   resaltar(null);
   if (on && !quien) { error('No hay personas activas en Nómina para asignar.'); }
 }
-$('asignar').onclick = () => modoAsignar(true);
+$('asignar').onclick = () => { if (!renombrando) modoAsignar(true); };
 $('cancelar').onclick = () => modoAsignar(false);
 $('guardar').onclick = async () => {
   error();
@@ -288,12 +310,53 @@ $('guardar').onclick = async () => {
   finally { $('guardar').disabled = false; }
 };
 
+/* ---------- Editar nombres (solo dueño; el servidor lo vuelve a verificar) ---------- */
+function editarNombre(n) {
+  letreroEditado = n;
+  $('nombre-texto').disabled = $('nombre-guardar').disabled = false;
+  $('nombre-texto').value = nombreVisto(n);
+  $('nombre-cual').textContent = `Letrero ${n} · nombre en el plano: ${nombreBase(n)}`;
+  $('nombre-texto').focus();
+}
+function modoNombres(on) {
+  renombrando = on;
+  letreroEditado = null;
+  $('modo-nombres').hidden = !on;
+  $('renombrar').hidden = on || !puede;
+  $('asignar').hidden = on || !puede;
+  $('nombre-texto').value = ''; $('nombre-texto').disabled = $('nombre-guardar').disabled = true;
+  $('nombre-cual').textContent = 'Elige un letrero.';
+  error();
+}
+$('renombrar').onclick = () => { if (!borrador) modoNombres(true); };
+$('nombres-listo').onclick = () => modoNombres(false);
+$('form-nombre').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  error();
+  const n = letreroEditado, texto = $('nombre-texto').value.trim();
+  if (n == null) return;
+  $('nombre-guardar').disabled = true;
+  try {
+    // Lo igual al nombre del plano no se guarda: se quita el nombre propio.
+    const r = await fetch('/api/plano', { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ nombres: { [n]: texto === nombreBase(n) ? '' : texto } }) });
+    const datos = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(datos.error ?? `Error ${r.status}`);
+    nombres = datos.nombres;
+    $('aviso').textContent = `Letrero ${n} guardado.`;
+    pintar();
+    const m = muebleDe(n);
+    if (m) mostrar(m.f, m.cara);
+    $('nombre-texto').value = nombreVisto(n);
+  } catch (x) { error(`No se guardó: ${x.message}`); }
+  finally { $('nombre-guardar').disabled = false; }
+});
+
 try {
   const r = await fetch('/api/plano');
   // 401 con PIN lo atiende cajero.js (pide el PIN y recarga).
   if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error ?? `Error ${r.status}`);
-  ({ areas, empleados, yo, puede_asignar: puede } = await r.json());
-  $('asignar').hidden = !puede;
+  ({ areas, nombres = {}, empleados, yo, puede_asignar: puede } = await r.json());
+  $('asignar').hidden = $('renombrar').hidden = !puede;
 } catch (x) { error(`No se pudo cargar: ${x.message}.`); }
 pintar();
 </script>

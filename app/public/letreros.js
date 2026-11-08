@@ -20,7 +20,11 @@ const tabla = (reglas) => reglas.map(([letrero, lista]) => [letrero, palabras(li
 // categoria -> [letrero de omision, reglas por palabra clave en el nombre]
 const POR_CATEGORIA = {
   accesorios: [14, tabla([[7, 'joyeria|arete|collar|pulsera|anillo']])],
-  belleza: [10, tabla([[5, 'maquillaje|labial|sombra|rimel|rubor|delineador|base'], [8, 'esmalte|unas']])],
+  // Maquillaje y uñas van antes que cabello: «cepillo de maquillaje» o «base» no se van al 22.
+  belleza: [10, tabla([
+    [5, 'maquillaje|labial|sombra|rimel|rubor|delineador|base'], [8, 'esmalte|unas'],
+    [22, 'cabello|pelo|shampoo|champu|acondicionador|tinte|cepillo|peine|plancha|secadora|secador|rizador|tenaza'],
+  ])],
   hogar: [11, tabla([
     [35, 'toalla de playa'], [33, 'toalla|cobija'], [34, 'almohada|funda'], [19, 'sabana|edredon|colcha|cortina'],
     [12, 'cuadro|vela|florero|adorno|marco|decoracion'], [20, 'organizador|contenedor|cesto|canasta'],
@@ -34,7 +38,8 @@ const POR_CATEGORIA = {
   despensa: [26, tabla([[20, 'detergente|limpiador|cloro|desinfectante|jabon para'], [27, 'desechable|servilleta|bolsa de basura|aluminio|popote']])],
 };
 
-// Ropa: calzado, interior, ninos, caballero y dama (lo demas). Colgada va a los racks de la entrada, doblada a las paredes.
+// Ropa: calzado, interior, ninos, caballero y dama (lo demas). Caballero va siempre al rack 4; en dama, colgada va al
+// rack y doblada a la pared. El 22 es solo cabello (Issue #762).
 const INTERIOR = palabras('brasier|bra|calzon|panty|boxer|trusa|calcetin|calceta');
 const NINOS = palabras('nino|nina|bebe|toddler|kid|boy|girl|infant');
 const MARCA_NINOS = /cat ?(?:&|and) ?jack|art class/;
@@ -46,9 +51,8 @@ const letreroRopa = (pieza, nombre, marca) => {
   if (esCalzado(pieza)) return 21;
   if (INTERIOR.test(nombre)) return 8;
   if (NINOS.test(nombre) || MARCA_NINOS.test(`${nombre} ${marca}`) || sinAcentos(pieza.talla ?? '').toLowerCase().startsWith('nino')) return 23;
-  const colgada = COLGADA.test(nombre);
-  if (CABALLERO.test(nombre) || MARCA_CABALLERO.test(`${nombre} ${marca}`)) return colgada ? 4 : 22;
-  return colgada ? 3 : 15;
+  if (CABALLERO.test(nombre) || MARCA_CABALLERO.test(`${nombre} ${marca}`)) return 4;
+  return COLGADA.test(nombre) ? 3 : 15;
 };
 
 /** El letrero (entero 1-36) de una pieza `{ categoria, nombre, marca, talla }`. Siempre devuelve uno. */
