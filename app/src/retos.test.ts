@@ -202,3 +202,31 @@ test('una base nueva (schema + migraciones) trae cliente_id y el libro de logros
     assert.throws(() => t.db.prepare(`insert into retos_logros (id, correo, logro, ref, d, creado_en) values ('2', 'a', 'x', 'r', 1, '')`).run());
   } finally { t.db.close(); }
 });
+
+test('ligar la cuenta de socia por telefono: el cron acredita ahi y no crea una cuenta de relleno', async () => {
+  const { t, soloUno, empleado, piezaAntigua, vender, lotes } = escenario();
+  try {
+    soloUno('reto_d_viejo');
+    const id = await empleado('Ana', 'ana@prueba.mx');
+    t.db.prepare(`insert into clientes (id, numero, nombre, telefono, bases_version, registrado_por, creado_en) values ('socia', 1, 'Ana socia', '5512345678', 'v', 'otro@prueba.mx', '')`).run();
+    const editar = (extra: Record<string, unknown>) => t.pedir(`/api/nomina/empleados/${id}`,
+      { nombre: 'Ana', periodo: 'diario', pago_dia: 30000, dias: [1], ...extra }, 'PUT');
+
+    assert.equal((await editar({ telefono_socia: '5599999999' })).status, 404);   // ningun socio con ese telefono
+    assert.equal((await editar({ telefono_socia: '' })).status, 200);             // vacio: sin cambio
+    assert.equal((t.db.prepare('select cliente_id from empleados where id = ?').get(id) as { cliente_id: string }).cliente_id, '');
+    assert.equal((await editar({ telefono_socia: '+52 (55) 1234-5678' })).status, 200);   // se normaliza a 10 digitos
+    assert.equal((t.db.prepare('select cliente_id from empleados where id = ?').get(id) as { cliente_id: string }).cliente_id, 'socia');
+    assert.equal((await editar({})).status, 200);   // sin la llave tampoco la desliga
+    assert.equal((t.db.prepare('select cliente_id from empleados where id = ?').get(id) as { cliente_id: string }).cliente_id, 'socia');
+
+    const lista = (await t.pedir('/api/nomina')).cuerpo.empleados.find((e: { id: string }) => e.id === id);
+    assert.deepEqual([lista.cliente_id, lista.cliente_telefono], ['socia', '5512345678']);
+
+    piezaAntigua();
+    await vender('ana@prueba.mx');
+    await otorgarLogros(t.env);
+    assert.deepEqual(lotes().map((l) => [l.cliente_id, l.importe]), [['socia', 5000]]);
+    assert.equal((t.db.prepare('select count(*) as n from clientes').get() as { n: number }).n, 1);   // ninguna cuenta nueva
+  } finally { t.db.close(); }
+});

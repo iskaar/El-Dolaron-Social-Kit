@@ -184,14 +184,14 @@ async function clientes(env: Env, cal: Calendario) {
   const [filasDia, socios, nuevos, dolarones, referidos] = await Promise.all([
     ventasPorDia(env, cal.primero, cal),
     env.DB.prepare(
-      `select (select count(*) from clientes) as socios,
+      `select (select count(*) from clientes where registrado_por <> 'retos') as socios,
          (select count(*) from (select cliente_id from ventas where cliente_id is not null and cancelada = 0
             group by cliente_id having count(*) >= 2)) as regresaron`,
     ).first<{ socios: number; regresaron: number }>(),
     // Altas del mes por dia de la tienda; por semana se suman abajo y las de menos de 5 no se muestran.
     env.DB.prepare(
       `select substr(datetime(creado_en, '-6 hours'), 1, 10) as dia, count(*) as n from clientes
-       where creado_en >= ? and creado_en < ? group by dia`,
+       where registrado_por <> 'retos' and creado_en >= ? and creado_en < ? group by dia`,
     ).bind(apertura(cal.primero), apertura(cal.siguiente)).all<{ dia: string; n: number }>(),
     sociosConDolarones(env, apertura(cal.primero), apertura(cal.siguiente), false),
     env.DB.prepare(

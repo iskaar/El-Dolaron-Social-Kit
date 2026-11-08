@@ -78,6 +78,7 @@
       </select></label>
       <label class="solo-editar">Hora de entrada<input name="hora_entrada" type="time"></label>
       <label class="solo-editar">Cuenta de la app (bono de la tienda)<select name="correo"></select></label>
+      <label class="solo-editar">Tel&eacute;fono de socia (sus Dolarones de retos)<input name="telefono_socia" type="tel" inputmode="numeric" placeholder="Vac&iacute;o = sin cambio"></label>
       <label class="solo-editar">PIN propio (6 d&iacute;gitos)<input name="pin" type="password" inputmode="numeric" maxlength="6" autocomplete="new-password"></label>
       <label class="solo-devengo">Fecha<input name="fecha" type="date"></label>
       <label class="con-dinero" id="etiqueta-importe">Efectivo que se entrega ($)<input name="importe" type="number" min="0.01" step="0.01"></label>
@@ -211,6 +212,7 @@ function abrir(empleado, tipo) {
   [...f.elements.dias.options].forEach((o) => { o.selected = JSON.parse(empleado.dias).includes(Number(o.value)); });
   f.elements.hora_entrada.value = empleado.hora_entrada || '';
   f.elements.correo.value = empleado.correo || '';
+  f.elements.telefono_socia.placeholder = empleado.cliente_telefono ? `Ligada a ${empleado.cliente_telefono}; vacío = sin cambio` : 'Vacío = sin cambio';
   if (tipo === 'pago') f.elements.importe.value = Math.max(0, empleado.debe) / 100 || '';
   $('etiqueta-importe').firstChild.textContent = tipo === 'adelanto' ? 'Importe del adelanto ($)' : 'Efectivo que se entrega ($)';
   const ver = (clase, visible) => f.querySelectorAll(clase).forEach((n) => { n.hidden = !visible; });
@@ -294,7 +296,7 @@ $('accion-form').addEventListener('submit', async (ev) => {
       await api(`/api/nomina/empleados/${empleado.id}`, {
         nombre: f.elements.nombre.value, periodo: f.elements.periodo.value, pago_dia: centavos(f.elements.pago_dia.value),
         dias: [...f.elements.dias.selectedOptions].map((o) => Number(o.value)),
-        hora_entrada: f.elements.hora_entrada.value, pin: f.elements.pin.value, correo: f.elements.correo.value,
+        hora_entrada: f.elements.hora_entrada.value, pin: f.elements.pin.value, correo: f.elements.correo.value, telefono_socia: f.elements.telefono_socia.value,
       }, 'PUT');
     } else {
       const cuerpo = { id: idPendiente, empleado_id: empleado.id, tipo, nota: f.elements.nota.value };
