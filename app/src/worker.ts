@@ -2064,6 +2064,44 @@ async function ventasDelDia(url: URL, env: Env): Promise<Response> {
   return json(results);
 }
 
+// ponytail: la ventana de busqueda de una devolucion es fija (no hay politica escrita de plazo, #764).
+const DEVOLUCION_DIAS = 90;
+const DEVOLUCION_MAX = 30;
+
+/**
+ * Buscar la venta de una devolucion (#764): por la pieza escaneada (etiqueta ED-… o numero suelto, como
+ * en la caja; o su UPC con o sin ceros, como buscarPiezas), por palabras del nombre o por el inicio del
+ * folio. Misma forma de renglon que `ventasDelDia` mas `lineas`: los ids de las lineas que coinciden.
+ */
+async function buscarVentas(url: URL, env: Env): Promise<Response> {
+  const q = (url.searchParams.get('buscar') ?? '').trim();
+  if (q.length < 3 || q.length > 80) return json({ error: 'Escribe al menos 3 caracteres (máximo 80).' }, 400);
+  const ed = /^ed-?(\d{1,10})$/i.exec(q);
+  const digitos = /^\d{1,14}$/.test(q);
+  const codigo = ed ? `ED-${ed[1].padStart(6, '0')}` : digitos && q.length <= 6 ? `ED-${q.padStart(6, '0')}` : q.toUpperCase();
+  const upc = digitos && q.length >= 6 ? q.replace(/^0+/, '') || '0' : null;
+  const variantes = upc ? Array.from({ length: 15 - upc.length }, (_, i) => upc.padStart(upc.length + i, '0')) : [];
+  // Un numero suelto es una etiqueta o un UPC, no un nombre ("banda 119" si busca por nombre).
+  const palabras = digitos ? [] : q.split(/\s+/).filter(Boolean).slice(0, 5);
+  // shortcut: lower() de SQLite no pliega acentos, como en buscarPiezas.
+  const cond = `(l.codigo = ? or l.producto_id in (select id from productos where codigo = ?
+      ${upc ? `union select id from productos where upc in (${variantes.map(() => '?').join(',')})` : ''})
+    ${palabras.length ? `or (${palabras.map(() => 'instr(lower(l.nombre), lower(?)) > 0').join(' and ')})` : ''})`;
+  const datos = [codigo, codigo, ...variantes, ...palabras];
+  const folio = /^[0-9a-f-]{8,36}$/i.test(q) ? `${q.toLowerCase()}%` : null;
+  const desde = new Date(Date.now() - DEVOLUCION_DIAS * 86_400_000).toISOString();
+  const { results } = await env.DB.prepare(
+    `select ${COLUMNAS_TICKET},
+            (select group_concat(l.id) from venta_lineas l where l.venta_id = v.id and ${cond}) as lineas
+     from ventas v where v.creado_en >= ?
+       and (${folio ? 'v.id like ? or ' : ''}exists (select 1 from venta_lineas l where l.venta_id = v.id and ${cond}))
+     order by v.creado_en desc, v.id desc limit ?`,
+  )
+    .bind(...datos, desde, ...(folio ? [folio] : []), ...datos, DEVOLUCION_MAX)
+    .all();
+  return json(results);
+}
+
 /**
  * El boton «Abrir cajon» (Issue #97): quien y cuando. El cajon ya se abrio en
  * la caja; esto solo lo registra, y puede llegar tarde si no habia red.
@@ -2663,6 +2701,7 @@ export default {
         if (request.method === 'POST') {
           return await registrarVenta(request, env, ctx, correo);
         }
+        if (url.searchParams.has('buscar')) return await buscarVentas(url, env);
         return url.searchParams.get('lista') ? await ventasDelDia(url, env) : await corte(url, env);
       }
 
