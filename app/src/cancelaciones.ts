@@ -8,8 +8,7 @@
 import { cajaDe } from './corte.ts';
 import { leerUsuario, leerRoles } from './cuentas.ts';
 import { verificarPin } from './cajeros.ts';
-import { sentenciasDeCancelacion } from './dolarones.ts';
-import { cancelarVales } from './vales.ts';
+import { sentenciasDeReverso } from './reversos.ts';
 import { TICKET_CON_ANTICIPO } from './pedidos.ts';
 import { avisarDueno } from './avisos.ts';
 
@@ -82,8 +81,7 @@ export async function cancelarCore(
            where id = ? and sin_inventario = 0`,
         ).bind(l.cantidad, ahora, l.producto_id),
       ),
-      ...(await sentenciasDeCancelacion(env, id, canceladaPor, ahora)),
-      ...(await cancelarVales(env, id, canceladaPor, ahora)),
+      ...(await sentenciasDeReverso(env, { ventaId: id, clienteId: null, autor: canceladaPor, ahora, completa: true })),
       ...extra(ahora),
     ]);
   } catch (error) {

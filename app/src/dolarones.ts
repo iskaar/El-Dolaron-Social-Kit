@@ -8,7 +8,7 @@
  */
 
 import { dolaronesGanados, MINIMO_REGALO } from '../public/venta.js';
-import { MINIMO_COMPRA, D_PREMIO, pendienteDe, sentenciasDeLiberacion, sentenciasDeReversoReferido } from './referidos.ts';
+import { MINIMO_COMPRA, D_PREMIO, pendienteDe, sentenciasDeLiberacion } from './referidos.ts';
 
 // America/Mexico_City no tiene horario de verano desde 2022: siempre UTC-6.
 const MX = -6 * 3_600_000;
@@ -365,7 +365,8 @@ async function sentenciasDePromo(env: Env, p: { ventaId: string; total: number; 
 }
 
 /** Deshacer una venta: los Dolarones usados regresan a sus lotes y los ganados
- * se retiran. Para el mismo batch que marca la venta cancelada.
+ * se retiran. Para el mismo batch que marca la venta cancelada. Referidos, bono de promo y vales
+ * los suma reversos.ts (un solo registro de programas, Issue #765).
  *
  * Decision de Isaac (#135): si el cliente ya gasto parte de lo ganado, la
  * cancelacion no procede sola (el trigger aborta el batch) y se aclara en la
@@ -400,15 +401,80 @@ export async function sentenciasDeCancelacion(env: Env, ventaId: string, autor: 
       when importe + coalesce((select sum(importe) from dolarones_movimientos
         where lote_id = dolarones_lotes.id and tipo = 'reverso_compra'), 0) = 0
       then 0 else -1 end where venta_id = ?`).bind(ventaId),
-    // Si esta venta liberó un referido (#489), sus 25 + 25 D se retiran y el referido vuelve a pendiente.
-    ...sentenciasDeReversoReferido(env, ventaId, autor, ahora),
-    // Si esta venta pago bonos de la promo (#684), se retiran; si ya se gastaron, aborta igual.
-    ...sentenciasDeReversoPromo(env, ventaId, autor, ahora),
   ];
 }
 
+/**
+ * Cancelar una pieza del ticket (Issue #138): regresan `dolarones` al saldo y
+ * lo ganado se recalcula sobre `pagadoRestante`, el dinero que el ticket sigue
+ * teniendo cobrado. Para el mismo batch que registra la devolucion.
+ *
+ * Lo que regresa va al lote que vence al ultimo: al cliente le dura mas. Lo
+ * ganado de más se retira; si ya se gastó, el batch aborta como al cancelar
+ * el ticket completo (decisión de Isaac, #135).
+ */
+export async function sentenciasDeDevolucion(env: Env, p: {
+  ventaId: string; dolarones: number; pagadoRestante: number; autor: string; ahora: string;
+}): Promise<D1PreparedStatement[]> {
+  const sentencias: D1PreparedStatement[] = [];
+
+  let falta = p.dolarones;
+  for (const canje of falta > 0 ? await canjesPendientes(env, p.ventaId) : []) {
+    if (falta === 0) break;
+    const regresa = Math.min(canje.importe, falta);
+    falta -= regresa;
+    sentencias.push(
+      env.DB.prepare('update dolarones_lotes set restante = restante + ? where id = ?').bind(regresa, canje.lote_id),
+      env.DB.prepare(
+        `insert into dolarones_movimientos (cliente_id, lote_id, venta_id, tipo, importe, autor, creado_en)
+         values (?, ?, ?, 'reverso_canje', ?, ?, ?)`,
+      ).bind(canje.cliente_id, canje.lote_id, p.ventaId, regresa, p.autor, p.ahora),
+    );
+  }
+
+  const compra = await env.DB.prepare(
+    `select l.id, l.cliente_id, l.importe, l.restante,
+       coalesce((select -sum(importe) from dolarones_movimientos
+                 where lote_id = l.id and tipo = 'reverso_compra'), 0) as retirado
+     from dolarones_lotes l where l.venta_id = ?`,
+  )
+    .bind(p.ventaId)
+    .first<{ id: string; cliente_id: string; importe: number; restante: number; retirado: number }>();
+  if (compra) {
+    const retira = Math.max(0, compra.importe - compra.retirado - dolaronesGanados(p.pagadoRestante));
+    if (retira > 0) {
+      sentencias.push(
+        // Si ya se gastó crédito (también desde otra caja), aborta todo.
+        env.DB.prepare(`update dolarones_lotes set restante = case
+          when restante = importe + coalesce((select sum(importe) from dolarones_movimientos
+            where lote_id = dolarones_lotes.id and tipo = 'reverso_compra'), 0)
+          then restante - ? else -1 end where id = ?`).bind(retira, compra.id),
+        env.DB.prepare(
+          `insert into dolarones_movimientos (cliente_id, lote_id, venta_id, tipo, importe, autor, creado_en)
+           values (?, ?, ?, 'reverso_compra', ?, ?, ?)`,
+        ).bind(compra.cliente_id, compra.id, p.ventaId, -retira, p.autor, p.ahora),
+      );
+    }
+  }
+  return sentencias;
+}
+
+/** Lo canjeado en una venta que todavia no regresa a su lote, por lote; el que vence al ultimo primero. */
+async function canjesPendientes(env: Env, ventaId: string) {
+  const { results } = await env.DB.prepare(
+    `select m.cliente_id, m.lote_id, -sum(m.importe) as importe
+     from dolarones_movimientos m join dolarones_lotes l on l.id = m.lote_id
+     where m.venta_id = ? and m.tipo in ('canje', 'reverso_canje')
+     group by m.cliente_id, m.lote_id having sum(m.importe) < 0
+     order by max(l.vence_en) desc, m.lote_id`,
+  )
+    .bind(ventaId)
+    .all<{ cliente_id: string; lote_id: string; importe: number }>();
+  return results;
+}
+
 /** Igual que los referidos: el lote del bono se retira entero o el trigger lote_no_negativo aborta la cancelacion. */
-function sentenciasDeReversoPromo(env: Env, ventaId: string, autor: string, ahora: string): D1PreparedStatement[] {
+export function sentenciasDeReversoPromo(env: Env, ventaId: string, autor: string, ahora: string): D1PreparedStatement[] {
   const bonos = `select lote_id from dolarones_movimientos where venta_id = ? and tipo = 'promo'`;
   return [
     env.DB.prepare(`insert into dolarones_movimientos (cliente_id, lote_id, venta_id, tipo, importe, autor, creado_en)

@@ -325,6 +325,24 @@ El regalo autoriza 15,000 D nominales, no demuestra que cueste $15,000 de mercan
 
 Un +50 universal agrega 50,000 D por 1,000 altas o 500,000 D por 10,000 altas, además del regalo. Por eso no se activa sin presupuesto. Separar en el reporte: D emitidos, pendientes, canjeados, vencidos, revertidos, deuda por devoluciones, saldo vigente y costo de mercancía cuando esté disponible. Nunca presentar un costo de margen inventado como ganancia.
 
+## Devoluciones y ofertas nuevas
+
+Qué hace cada programa cuando una venta se cancela completa o se devuelve una parte (bases, punto 10). El código vive en un solo registro, `app/src/reversos.ts`; `cancelarCore`, `cancelarPieza` y `devolverEnCupon` lo llaman por igual (Issue #765).
+
+| Programa | Cancelar todo | Devolver pieza (dinero o cupón) |
+| --- | --- | --- |
+| D usados (canje de lotes) | regresan a su lote | regresan (lo que pasa de lo pagado en dinero) |
+| D ganados por compra | se retiran | se recalculan sobre lo que sigue pagado |
+| Vale emitido (sin socio) | se retira | se recalcula |
+| Vales usados | regresan al vale o cupón | bloqueado: «cancélalo completo» |
+| Referidos 25+25 D | se retiran | no se tocan (bases) |
+| Bono promo noviembre | se retira | no se toca; el progreso resta lo devuelto (derivado) |
+| Retos / bono equipo | derivados de la venta | derivados de la venta |
+
+Si lo que generó la compra ya se gastó, la cancelación se rechaza y se aclara en la tienda (bases, punto 10).
+
+**Para una oferta nueva: agrega su entrada en `src/reversos.ts`** (`PROGRAMAS`), con los `tipo`/`origen` que inserta y su acción en `completa` y `parcial`: sentencias SQL para el mismo batch, `derivado` (se recalcula leyendo la venta) o `nada` (con la razón). La prueba `src/reversos.test.ts` lee el código y falla si hay un `tipo` o `origen` insertado en `dolarones_movimientos`, `vales_movimientos`, `dolarones_lotes` o `vales_dolarones` que ninguna entrada reclame; lo que no nace de una venta (altas, regalos, cupones) va en `SIN_VENTA` con su razón. Un cambio que altere lo que una devolución hace con un programa existente cambia las bases: abogado antes de mergear.
+
 ## Fuentes
 
 - Clark & Zack (2023), [Engineered highs: reward variability and frequency](https://www.sciencedirect.com/science/article/pii/S0306460323000217)
