@@ -13,9 +13,9 @@
  */
 
 import { cajaDe } from './corte.ts';
-import { dolaronesGanados } from '../public/venta.js';
-import { leerCupon, nuevoCupon, porcentajeCupon, retirarVale, usadosEnVenta, valeDeVenta } from './vales.ts';
+import { leerCupon, nuevoCupon, porcentajeCupon, usadosEnVenta, valeDeVenta } from './vales.ts';
 import { saldo } from './dolarones.ts';
+import { sentenciasDeReverso } from './reversos.ts';
 import { TICKET_CON_ANTICIPO } from './pedidos.ts';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -179,12 +179,10 @@ export async function cancelarPieza(
           'update productos set stock = stock + ?, actualizado_en = ? where id = ? and sin_inventario = 0',
         ).bind(cantidad, ahora, linea.producto_id)]
         : []),
-      ...(venta.cliente_id
-        ? await sentenciasDeDevolucion(env, {
-          ventaId, dolarones: reparto.dolarones, pagadoRestante: pagado - venta.devuelto - reparto.dinero,
-          autor: correo, ahora,
-        })
-        : await retirarVale(env, ventaId, correo, ahora, pagado - venta.devuelto - reparto.dinero)),
+      ...(await sentenciasDeReverso(env, {
+        ventaId, clienteId: venta.cliente_id, autor: correo, ahora, completa: false,
+        dolarones: reparto.dolarones, pagadoRestante: pagado - venta.devuelto - reparto.dinero,
+      })),
     ]);
   } catch (error) {
     const texto = String(error);
@@ -304,11 +302,10 @@ export async function devolverEnCupon(ventaId: string, request: Request, env: En
            dolarones_devueltos = dolarones_devueltos + ? where id = ?`,
       ).bind(venta.revision + 1, base, base, dolaronesDevueltos - venta.dolarones_devueltos, ventaId),
       ...sentencias,
-      ...(venta.cliente_id
-        ? await sentenciasDeDevolucion(env, {
-          ventaId, dolarones: dolaronesDevueltos - venta.dolarones_devueltos, pagadoRestante: pagado - devuelto, autor: correo, ahora: iso,
-        })
-        : await retirarVale(env, ventaId, correo, iso, pagado - devuelto)),
+      ...(await sentenciasDeReverso(env, {
+        ventaId, clienteId: venta.cliente_id, autor: correo, ahora: iso, completa: false,
+        dolarones: dolaronesDevueltos - venta.dolarones_devueltos, pagadoRestante: pagado - devuelto,
+      })),
       sentencia,
     ]);
   } catch (error) {
@@ -342,73 +339,3 @@ export async function reimprimirCupon(ventaId: string, valeId: string, env: Env)
   respuesta.headers.set('cache-control', 'no-store');
   return respuesta;
 }
-
-/** Lo canjeado en una venta que todavia no regresa a su lote, por lote; el que vence al ultimo primero. */
-async function canjesPendientes(env: Env, ventaId: string) {
-  const { results } = await env.DB.prepare(
-    `select m.cliente_id, m.lote_id, -sum(m.importe) as importe
-     from dolarones_movimientos m join dolarones_lotes l on l.id = m.lote_id
-     where m.venta_id = ? and m.tipo in ('canje', 'reverso_canje')
-     group by m.cliente_id, m.lote_id having sum(m.importe) < 0
-     order by max(l.vence_en) desc, m.lote_id`,
-  )
-    .bind(ventaId)
-    .all<{ cliente_id: string; lote_id: string; importe: number }>();
-  return results;
-}
-
-/**
- * Cancelar una pieza del ticket (Issue #138): regresan `dolarones` al saldo y
- * lo ganado se recalcula sobre `pagadoRestante`, el dinero que el ticket sigue
- * teniendo cobrado. Para el mismo batch que registra la devolucion.
- *
- * Lo que regresa va al lote que vence al ultimo: al cliente le dura mas. Lo
- * ganado de más se retira; si ya se gastó, el batch aborta como al cancelar
- * el ticket completo (decisión de Isaac, #135).
- */
-async function sentenciasDeDevolucion(env: Env, p: {
-  ventaId: string; dolarones: number; pagadoRestante: number; autor: string; ahora: string;
-}): Promise<D1PreparedStatement[]> {
-  const sentencias: D1PreparedStatement[] = [];
-
-  let falta = p.dolarones;
-  for (const canje of falta > 0 ? await canjesPendientes(env, p.ventaId) : []) {
-    if (falta === 0) break;
-    const regresa = Math.min(canje.importe, falta);
-    falta -= regresa;
-    sentencias.push(
-      env.DB.prepare('update dolarones_lotes set restante = restante + ? where id = ?').bind(regresa, canje.lote_id),
-      env.DB.prepare(
-        `insert into dolarones_movimientos (cliente_id, lote_id, venta_id, tipo, importe, autor, creado_en)
-         values (?, ?, ?, 'reverso_canje', ?, ?, ?)`,
-      ).bind(canje.cliente_id, canje.lote_id, p.ventaId, regresa, p.autor, p.ahora),
-    );
-  }
-
-  const compra = await env.DB.prepare(
-    `select l.id, l.cliente_id, l.importe, l.restante,
-       coalesce((select -sum(importe) from dolarones_movimientos
-                 where lote_id = l.id and tipo = 'reverso_compra'), 0) as retirado
-     from dolarones_lotes l where l.venta_id = ?`,
-  )
-    .bind(p.ventaId)
-    .first<{ id: string; cliente_id: string; importe: number; restante: number; retirado: number }>();
-  if (compra) {
-    const retira = Math.max(0, compra.importe - compra.retirado - dolaronesGanados(p.pagadoRestante));
-    if (retira > 0) {
-      sentencias.push(
-        // Si ya se gastó crédito (también desde otra caja), aborta todo.
-        env.DB.prepare(`update dolarones_lotes set restante = case
-          when restante = importe + coalesce((select sum(importe) from dolarones_movimientos
-            where lote_id = dolarones_lotes.id and tipo = 'reverso_compra'), 0)
-          then restante - ? else -1 end where id = ?`).bind(retira, compra.id),
-        env.DB.prepare(
-          `insert into dolarones_movimientos (cliente_id, lote_id, venta_id, tipo, importe, autor, creado_en)
-           values (?, ?, ?, 'reverso_compra', ?, ?, ?)`,
-        ).bind(compra.cliente_id, compra.id, p.ventaId, -retira, p.autor, p.ahora),
-      );
-    }
-  }
-  return sentencias;
-}
-

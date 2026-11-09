@@ -146,19 +146,15 @@ export async function retirarVale(env: Env, ventaId:string, autor:string, ahora:
   ];
 }
 
-export async function cancelarVales(env: Env, ventaId:string, autor:string, ahora:string): Promise<D1PreparedStatement[]> {
+/** Cancelar la venta completa: lo gastado en ella regresa al vale o cupón del que salió, con su vencimiento. */
+export async function reponerValesUsados(env: Env, ventaId:string, autor:string, ahora:string): Promise<D1PreparedStatement[]> {
   const { results:canjes } = await env.DB.prepare(`select vale_id, -importe as importe from vales_movimientos
     where venta_id = ? and tipo = 'canje'`).bind(ventaId).all<{ vale_id:string; importe:number }>();
-  return [
-    // Una compra emisora con crédito aún gastado requiere resolución, no crear
-    // dinero al cancelar ni retirar silenciosamente una deuda del cliente.
-    ...(await retirarVale(env, ventaId, autor, ahora)),
-    ...canjes.flatMap((c) => [
-      env.DB.prepare('update vales_dolarones set restante = restante + ? where id = ?').bind(c.importe, c.vale_id),
-      env.DB.prepare(`insert into vales_movimientos (vale_id, venta_id, tipo, importe, autor, creado_en)
-        values (?, ?, 'reverso_canje', ?, ?, ?)`).bind(c.vale_id, ventaId, c.importe, autor, ahora),
-    ]),
-  ];
+  return canjes.flatMap((c) => [
+    env.DB.prepare('update vales_dolarones set restante = restante + ? where id = ?').bind(c.importe, c.vale_id),
+    env.DB.prepare(`insert into vales_movimientos (vale_id, venta_id, tipo, importe, autor, creado_en)
+      values (?, ?, 'reverso_canje', ?, ?, ?)`).bind(c.vale_id, ventaId, c.importe, autor, ahora),
+  ]);
 }
 
 // Pasar el vale a la cuenta (Issue #258). Isaac: solo vales completos y vigentes,
