@@ -61,7 +61,8 @@
   #cobrar { width: 100%; margin-top: 12px; padding: 18px; font-size: 20px; font-weight: 800;
     border: 0; border-radius: 12px; background: var(--verde); color: #fff; cursor: pointer; }
   #cobrar:disabled { background: #c8cfda; cursor: not-allowed; }
-  #abrir-cajon { width: 100%; margin-top: 8px; padding: 10px; font-size: 14px; border: 1px solid var(--azul);
+  #dev-lista { max-height: 50vh; overflow-y: auto; margin-top: 8px; }
+  #abrir-cajon, #abrir-devolucion { width: 100%; margin-top: 8px; padding: 10px; font-size: 14px; border: 1px solid var(--azul);
     background: #fff; color: var(--azul); border-radius: 10px; cursor: pointer; }
   #cancelar { width: 100%; margin-top: 8px; padding: 10px; font-size: 14px; border: 1px solid var(--rojo);
     background: #fff; color: var(--rojo); border-radius: 10px; cursor: pointer; }
@@ -286,6 +287,7 @@ if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw-caja.js'
     <div id="cambio"></div>
     <button id="cobrar" type="button" disabled>Cobrar</button>
     <button id="cancelar" type="button">Cancelar venta</button>
+    <button id="abrir-devolucion" type="button">Devolución</button>
     <button id="abrir-cajon" type="button">Abrir cajón</button>
     <div id="aviso"></div>
     <div id="impresiones-destino" hidden></div>
@@ -386,6 +388,18 @@ if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw-caja.js'
       <button id="corte-imprimir" type="button" class="secundario">Imprimir otra vez</button>
       <button id="corte-cerrar" type="button">Cerrar</button>
     </div>
+  </div>
+</dialog>
+
+<dialog id="dialogo-devolucion" aria-labelledby="dev-titulo">
+  <h2 id="dev-titulo">Devolución</h2>
+  <label for="dev-q" class="nota">Escanea la pieza o el ticket, o escribe el nombre</label>
+  <input id="dev-q" type="text" maxlength="80" autocomplete="off" aria-describedby="dev-aviso">
+  <div class="aviso-dialogo" id="dev-aviso" role="status"></div>
+  <div id="dev-lista"></div>
+  <div class="acciones">
+    <button id="dev-buscar" type="button">Buscar</button>
+    <button id="dev-cerrar" type="button" class="secundario">Cerrar</button>
   </div>
 </dialog>
 
@@ -1828,6 +1842,8 @@ $('tickets').addEventListener('toggle', cargarTickets);
 
 /* ---------- ventana del ticket: desglose y cancelacion por pieza (Issue #138) ---------- */
 
+// Devolucion (#764): ticket -> ids de las lineas que coinciden con la busqueda.
+let encontradas = new Map();
 // Ticket abierto en la ventana, y el id de la cancelacion en curso: se genera
 // al abrir el formulario, asi un doble clic o un reintento no devuelven dos veces.
 let ticketAbierto = null;
@@ -1841,7 +1857,8 @@ $('lista-tickets').addEventListener('click', (e) => {
   if (fila) abrirTicket(fila.dataset.ticket);
 });
 
-async function abrirTicket(id) {
+// Con `resaltar` (o lo que la busqueda de una devolucion encontro en este ticket) se marcan esas piezas.
+async function abrirTicket(id, resaltar = encontradas.get(id) ?? []) {
   $('ticket-aviso').textContent = '';
   $('ticket-contenido').innerHTML = '<p class="nota">Cargando…</p>';
   if (!$('dialogo-ticket').open) $('dialogo-ticket').showModal();
@@ -1850,7 +1867,7 @@ async function abrirTicket(id) {
     const cuerpo = await r.json();
     if (!r.ok) throw new Error(cuerpo.error ?? 'No se pudo abrir el ticket.');
     ticketAbierto = cuerpo;
-    $('ticket-contenido').innerHTML = pintarDetalle(cuerpo, { editable: true });
+    $('ticket-contenido').innerHTML = pintarDetalle(cuerpo, { editable: true, resaltar });
     if (!cuerpo.cancelada) $('ticket-contenido').insertAdjacentHTML('beforeend',
       `<p class="nota">Venta: ${escapar(cuerpo.id)}</p><button type="button" data-imprimir-ticket>Reimprimir ticket</button>`);
   } catch (error) {
@@ -1859,7 +1876,46 @@ async function abrirTicket(id) {
 }
 
 $('ticket-cerrar').addEventListener('click', () => $('dialogo-ticket').close());
-$('dialogo-ticket').addEventListener('close', () => { ticketAbierto = null; idCancelacion = null; aprobacionCancelar = null; $('codigo').focus(); });
+$('dialogo-ticket').addEventListener('close', () => {
+  ticketAbierto = null; idCancelacion = null; aprobacionCancelar = null;
+  ($('dialogo-devolucion').open ? $('dev-q') : $('codigo')).focus();
+});
+
+/* ---------- devolucion: buscar la venta por la pieza, el nombre o el folio (#764) ---------- */
+
+$('abrir-devolucion').addEventListener('click', () => {
+  $('dev-q').value = ''; $('dev-aviso').textContent = ''; $('dev-lista').innerHTML = ''; encontradas = new Map();
+  $('dialogo-devolucion').showModal();
+  $('dev-q').focus();
+});
+$('dev-cerrar').addEventListener('click', () => $('dialogo-devolucion').close());
+$('dialogo-devolucion').addEventListener('close', () => { encontradas = new Map(); $('codigo').focus(); });
+
+async function buscarDevolucion() {
+  // Aqui nada se agrega al ticket: solo se busca lo que el lector (o el teclado) escribio.
+  const q = $('dev-q').value.trim();
+  if (q.length < 3) { $('dev-aviso').textContent = 'Escribe al menos 3 caracteres.'; return; }
+  $('dev-aviso').textContent = 'Buscando…'; $('dev-lista').innerHTML = '';
+  try {
+    const r = await fetch(`/api/ventas?buscar=${encodeURIComponent(q)}`);
+    const cuerpo = await r.json();
+    if (!r.ok) { $('dev-aviso').textContent = cuerpo.error ?? 'No se pudo buscar.'; return; }
+    encontradas = new Map(cuerpo.map((t) => [t.id, (t.lineas ?? '').split(',').filter(Boolean).map(Number)]));
+    if (cuerpo.length === 0) { $('dev-aviso').textContent = 'No hay ventas de los últimos 90 días con eso. Prueba con el nombre o con el folio del ticket.'; return; }
+    $('dev-aviso').textContent = '';
+    if (cuerpo.length === 1) { $('dev-q').select(); abrirTicket(cuerpo[0].id); return; }
+    $('dev-lista').innerHTML = cuerpo.map((t) => renglonTicket(t, { completo: true })).join('');
+  } catch {
+    $('dev-aviso').textContent = 'Sin red: para cancelar una venta hace falta conexión.';
+  }
+}
+$('dev-buscar').addEventListener('click', buscarDevolucion);
+// Enter (el lector lo manda) busca; la ventana es modal, asi que el escaneo no llega al campo del ticket.
+$('dev-q').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); buscarDevolucion(); } });
+$('dev-lista').addEventListener('click', (e) => {
+  const fila = e.target.closest('[data-ticket]');
+  if (fila) abrirTicket(fila.dataset.ticket);
+});
 
 // Cancelar pide el motivo dentro de la ventana (nada de prompt()/confirm() nativos,
 // que congelan la pestana): un clic abre el campo, otro clic ya confirmado envia.

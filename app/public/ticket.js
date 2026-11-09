@@ -38,9 +38,10 @@ export function renglonTicket(t, { completo = false } = {}) {
 
 /**
  * El contenido de la ventana. Con `editable`, cada pieza que sigue en el
- * ticket lleva «Cancelar» y al final va «Cancelar todo lo que queda».
+ * ticket lleva «Cancelar» y al final va «Cancelar todo lo que queda». `resaltar`: ids de
+ * las lineas que la busqueda de una devolucion encontro (#764).
  */
-export function pintarDetalle(t, { editable = false } = {}) {
+export function pintarDetalle(t, { editable = false, resaltar = [] } = {}) {
   asegurarEstilos();
   const quedan = t.lineas.reduce((n, l) => n + l.cantidad - l.cancelada_cantidad, 0);
   const puedeCancelar = editable && !t.cancelada && quedan > 0;
@@ -49,8 +50,8 @@ export function pintarDetalle(t, { editable = false } = {}) {
   const renglones = t.lineas.map((l) => {
     const resto = l.cantidad - l.cancelada_cantidad;
     return `
-      <tr class="${resto === 0 || t.cancelada ? 'devuelta' : ''}">
-        <td>${escapar(l.nombre)}<div class="codigo">${escapar(l.codigo)}</div></td>
+      <tr class="${resto === 0 || t.cancelada ? 'devuelta' : ''}${resaltar.includes(l.id) ? ' buscada' : ''}">
+        <td>${escapar(l.nombre)}<div class="codigo">${escapar(l.codigo)}</div>${resaltar.includes(l.id) ? '<div class="menos">Pieza buscada</div>' : ''}</td>
         <td class="num">${resto}${l.cancelada_cantidad ? `<div class="menos">${l.cancelada_cantidad} cancelada${l.cancelada_cantidad > 1 ? 's' : ''}</div>` : ''}</td>
         <td class="num">${pesos(l.precio)}</td>
         <td class="num">${pesos(l.precio * resto)}</td>
@@ -178,6 +179,8 @@ function asegurarEstilos() {
     .ventana-ticket .num { text-align: right; white-space: nowrap; }
     .ventana-ticket .codigo { font-size: 11px; color: #78839a; font-family: ui-monospace, monospace; }
     .ventana-ticket .menos { font-size: 11px; color: #D72B32; }
+    .ventana-ticket tr.buscada td { background: #fff4c2; }
+    .ventana-ticket tr.buscada td:first-child { box-shadow: inset 4px 0 #D72B32; }
     .ventana-ticket tr.devuelta td:not(:last-child) { color: #9aa2b1; text-decoration: line-through; }
     .ventana-ticket .cifras { margin-top: 10px; }
     .ventana-ticket .cifras td { padding: 3px 4px; }
