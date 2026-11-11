@@ -28,23 +28,76 @@ export const GASTOS_DEL_MES = `select id, fecha, categoria, importe, nota, orige
             and datetime(r.creado_en) < datetime(?, '+6 hours')
             and not exists (select 1 from gastos g where g.retiro_id = r.id)`;
 
+/** Comprobante de un gasto (#770): solo estos tipos; la extension sale del tipo, nunca del nombre del archivo. */
+const TIPOS_COMPROBANTE: Record<string, string> = {
+  'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp', 'application/pdf': 'pdf', 'application/xml': 'xml', 'text/xml': 'xml',
+};
+const TIPO_POR_EXT: Record<string, string> = { jpg: 'image/jpeg', png: 'image/png', webp: 'image/webp', pdf: 'application/pdf', xml: 'application/xml' };
+const MAX_COMPROBANTE = 10 * 1024 * 1024;
+
+async function borrarObjeto(env: Env, key: string | null | undefined) {
+  if (!key) return;
+  try { await env.FOTOS.delete(key); } catch (error) {
+    console.error(JSON.stringify({ mensaje: 'no se pudo borrar el comprobante de R2', key, error: String(error).slice(0, 200) }));
+  }
+}
+
+/** PUT/GET /api/gastos/:id/comprobante. Mismo permiso que /api/gastos (cuentas.ts); trae facturas con RFC, nunca en cache. */
+async function rutaComprobante(request: Request, env: Env, id: string): Promise<Response> {
+  if (!UUID.test(id)) return json({ error: 'Gasto invalido.' }, 400);
+  const gasto = await env.DB.prepare('select comprobante_key from gastos where id = ?').bind(id).first<{ comprobante_key: string | null }>();
+  if (!gasto) return json({ error: 'Gasto no encontrado.' }, 404);
+
+  if (request.method === 'GET') {
+    const objeto = gasto.comprobante_key ? await env.FOTOS.get(gasto.comprobante_key) : null;
+    if (!gasto.comprobante_key || !objeto) return json({ error: 'Este gasto no tiene comprobante.' }, 404);
+    const tipo = TIPO_POR_EXT[gasto.comprobante_key.split('.').pop() ?? ''] ?? 'application/octet-stream';
+    // Chrome no abre su visor de PDF bajo `sandbox`; el PDF ya viene de la lista blanca y va con nosniff.
+    return new Response(objeto.body, { headers: {
+      'content-type': tipo, 'cache-control': 'no-store', 'x-content-type-options': 'nosniff',
+      ...(tipo === 'application/pdf' ? {} : { 'content-security-policy': 'sandbox' }),
+      'content-disposition': tipo === 'application/xml' ? 'attachment' : 'inline',
+    } });
+  }
+
+  if (request.method === 'PUT') {
+    const tipo = (request.headers.get('content-type') ?? '').split(';')[0].trim().toLowerCase();
+    const ext = TIPOS_COMPROBANTE[tipo];
+    if (!ext) return json({ error: 'El comprobante debe ser JPEG, PNG, WebP, PDF o XML.' }, 415);
+    if (Number(request.headers.get('content-length')) > MAX_COMPROBANTE) return json({ error: 'El comprobante pesa mas de 10 MB.' }, 413);
+    const datos = await request.arrayBuffer();
+    if (datos.byteLength === 0 || datos.byteLength > MAX_COMPROBANTE) return json({ error: 'El comprobante esta vacio o pesa mas de 10 MB.' }, 413);
+    const key = `gastos/${id}/${crypto.randomUUID()}.${ext}`;
+    await env.FOTOS.put(key, datos, { httpMetadata: { contentType: TIPO_POR_EXT[ext] } });
+    const resultado = await env.DB.prepare('update gastos set comprobante_key = ? where id = ?').bind(key, id).run();
+    if (!resultado.meta.changes) { await borrarObjeto(env, key); return json({ error: 'Gasto no encontrado.' }, 404); }
+    await borrarObjeto(env, gasto.comprobante_key);   // despues de apuntar al nuevo: si falla, queda huerfano, no roto
+    return json({ id, con_comprobante: true });
+  }
+  return json({ error: 'Metodo no permitido.' }, 405);
+}
+
 export async function rutaGastos(request: Request, env: Env, url: URL, correo: string): Promise<Response> {
+  const idComprobante = /^\/api\/gastos\/([^/]+)\/comprobante$/.exec(url.pathname)?.[1];
+  if (idComprobante) return rutaComprobante(request, env, idComprobante);
+
   if (request.method === 'GET') {
     const mes = url.searchParams.get('mes') ?? '';
     if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(mes)) return json({ error: 'Mes invalido.' }, 400);
     const desde = `${mes}-01`;
     const hasta = new Date(Date.UTC(Number(mes.slice(0, 4)), Number(mes.slice(5)), 1)).toISOString().slice(0, 10);
     const { results } = await env.DB.prepare(
-      `select id, fecha, categoria, importe, nota, origen, retiro_id, caja, creado_por, creado_en from (${GASTOS_DEL_MES})
-       order by fecha desc, creado_en desc`,
+      `select u.id, u.fecha, u.categoria, u.importe, u.nota, u.origen, u.retiro_id, u.caja, u.creado_por, u.creado_en,
+              coalesce((select comprobante_key is not null from gastos g where g.id = u.id), 0) as con_comprobante
+         from (${GASTOS_DEL_MES}) u order by u.fecha desc, u.creado_en desc`,
     ).bind(desde, hasta, `${desde}T00:00:00`, `${hasta}T00:00:00`).all<{
       id: string; fecha: string; categoria: string; importe: number; nota: string; origen: string;
-      retiro_id: string | null; caja: string | null; creado_por: string; creado_en: string;
+      retiro_id: string | null; caja: string | null; creado_por: string; creado_en: string; con_comprobante: number;
     }>();
     const por_categoria = new Map<string, number>();
     for (const gasto of results) por_categoria.set(gasto.categoria, (por_categoria.get(gasto.categoria) ?? 0) + gasto.importe);
     const total = results.reduce((suma, gasto) => suma + gasto.importe, 0);
-    return json({ gastos: results, por_categoria: [...por_categoria].map(([categoria, importe]) => ({ categoria, importe })), total });
+    return json({ gastos: results.map((g) => ({ ...g, con_comprobante: g.con_comprobante === 1 })), por_categoria: [...por_categoria].map(([categoria, importe]) => ({ categoria, importe })), total });
   }
 
   if (request.method === 'POST' && url.pathname === '/api/gastos') {
@@ -83,8 +136,11 @@ export async function rutaGastos(request: Request, env: Env, url: URL, correo: s
 
   const id = /^\/api\/gastos\/([^/]+)$/.exec(url.pathname)?.[1];
   if (request.method === 'DELETE' && id && UUID.test(id)) {
+    const previo = await env.DB.prepare("select comprobante_key from gastos where id = ? and origen = 'fuera'").bind(id).first<{ comprobante_key: string | null }>();
     const resultado = await env.DB.prepare("delete from gastos where id = ? and origen = 'fuera'").bind(id).run();
-    return resultado.meta.changes ? json({ id }) : json({ error: 'Solo se pueden borrar gastos pagados fuera.' }, 400);
+    if (!resultado.meta.changes) return json({ error: 'Solo se pueden borrar gastos pagados fuera.' }, 400);
+    await borrarObjeto(env, previo?.comprobante_key);
+    return json({ id });
   }
   return json({ error: 'Metodo no permitido.' }, 405);
 }
