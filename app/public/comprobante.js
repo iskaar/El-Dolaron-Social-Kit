@@ -5,7 +5,7 @@
  */
 const LADO_MAX = 1600;
 
-async function aJpeg(archivo) {
+export async function aJpeg(archivo) {
   const bitmap = await createImageBitmap(archivo);
   try {
     const escala = Math.min(1, LADO_MAX / Math.max(bitmap.width, bitmap.height));

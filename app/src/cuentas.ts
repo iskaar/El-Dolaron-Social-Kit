@@ -126,7 +126,7 @@ export function permiso(pathname: string, metodo: string): Regla {
 
   if (ruta === '/api/tablero') return metodo === 'GET' ? INVERSIONISTA : DUENO;
   if (ruta === '/api/mensajes' || ruta === '/api/mensajes/responder') return DUENO;
-  if (ruta === '/api/gastos' || /^\/api\/gastos\/[^/]+$/.test(ruta)) return AUXILIAR;
+  if (ruta === '/api/gastos' || /^\/api\/gastos\/[^/]+(\/comprobante)?$/.test(ruta)) return AUXILIAR;
   if (ruta === '/api/nomina/entrada' || ruta === '/api/nomina/checador') return CAJA;
   if (ruta === '/api/nomina' || ruta.startsWith('/api/nomina/')) return AUXILIAR;
   if (ruta === '/api/config') return metodo === 'GET' ? CAPTURA_FEP : DUENO;

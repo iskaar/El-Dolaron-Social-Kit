@@ -22,6 +22,8 @@
   .ancho { grid-column:1/-1; }
   button { min-height:44px; padding:9px 14px; border:0; border-radius:8px; background:var(--azul); color:white; font-weight:650; cursor:pointer; }
   button:disabled { opacity:.6; }
+  a.ver { display:inline-block; margin-right:8px; padding:7px 4px; color:var(--azul); font-size:13px; font-weight:650; }
+  button.adjuntar { min-height:36px; padding:5px 9px; margin-right:8px; background:white; border:1px solid var(--azul); color:var(--azul); font-size:13px; }
   button.borrar { min-height:36px; padding:5px 9px; background:white; border:1px solid var(--rojo); color:var(--rojo); font-size:13px; }
   .barra-mes { display:flex; align-items:end; gap:10px; flex-wrap:wrap; }
   .barra-mes label { min-width:180px; }
@@ -62,8 +64,10 @@
       <label>Origen<select id="origen"><option value="fuera">Fuera de caja</option><option value="caja">Del cajón</option></select></label>
       <label id="caja-campo" hidden>Caja<select id="caja"><option>Caja 1</option><option>Caja 2</option><option>Caja 3</option></select></label>
       <label class="ancho">Nota<textarea id="nota" maxlength="200" rows="2"></textarea></label>
+      <label class="ancho">Comprobante (opcional)<input id="comprobante" type="file" accept="image/*,application/pdf,.xml"></label>
       <button class="ancho" id="guardar" type="submit">Registrar gasto</button>
     </form>
+    <input id="adjuntar-archivo" type="file" accept="image/*,application/pdf,.xml" hidden aria-label="Elegir comprobante del gasto">
     <p id="estado" role="status" aria-live="polite"></p>
   </section>
   <section>
@@ -95,7 +99,7 @@ async function cargar() {
   $('filas').innerHTML = datos.gastos.map((g) => `<tr>
     <td data-label="Fecha">${escapar(g.fecha)}</td><td data-label="Categoría">${escapar(nombres.get(g.categoria) || (g.categoria === 'sin_categoria' ? 'Sin categoría' : g.categoria))}</td>
     <td data-label="Nota">${escapar(g.nota || '—')}${g.caja ? ` · ${escapar(g.caja)}` : ''}</td><td data-label="Origen">${g.origen === 'caja' ? 'Caja' : 'Fuera'}</td>
-    <td class="importe" data-label="Importe">${pesos(g.importe)}</td><td class="acciones">${g.origen === 'fuera' ? `<button class="borrar" data-borrar="${g.id}">Borrar</button>` : ''}</td></tr>`).join('') || '<tr><td>Sin gastos este mes.</td></tr>';
+    <td class="importe" data-label="Importe">${pesos(g.importe)}</td><td class="acciones">${g.con_comprobante ? `<a class="ver" href="/api/gastos/${g.id}/comprobante" target="_blank" rel="noopener">Ver comprobante</a>` : (g.origen === 'fuera' || g.retiro_id) ? `<button class="adjuntar" data-adjuntar="${g.id}">Adjuntar</button>` : ''}${g.origen === 'fuera' ? `<button class="borrar" data-borrar="${g.id}">Borrar</button>` : ''}</td></tr>`).join('') || '<tr><td>Sin gastos este mes.</td></tr>';
 }
 function escapar(texto) { return String(texto).replace(/[&<>"']/g, (c) => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' })[c]); }
 $('mes').addEventListener('change', () => cargar().catch((e) => { $('estado').textContent = e.message; }));
@@ -110,6 +114,33 @@ $('filas').addEventListener('click', async (e) => {
     await cargar();
   } catch (error) { $('estado').textContent = error.message; boton.disabled = false; }
 });
+// Sube el comprobante de un gasto ya guardado. Las fotos se reducen a JPEG como en la caja (comprobante.js); PDF y XML van tal cual.
+async function subirComprobante(id, archivo) {
+  let cuerpo = archivo;
+  let tipo = archivo.type;
+  if (tipo.startsWith('image/')) {
+    const { aJpeg } = await import('/comprobante.js');
+    cuerpo = await aJpeg(archivo);
+    tipo = 'image/jpeg';
+  } else if (!tipo && /\.xml$/i.test(archivo.name)) tipo = 'application/xml';
+  const r = await fetch(`/api/gastos/${encodeURIComponent(id)}/comprobante`, { method:'PUT', headers:{ 'content-type':tipo }, body:cuerpo });
+  if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || 'No se pudo subir el comprobante.');
+}
+let gastoAdjuntar = '';
+$('filas').addEventListener('click', (e) => {
+  const boton = e.target.closest('[data-adjuntar]');
+  if (!boton) return;
+  gastoAdjuntar = boton.dataset.adjuntar;
+  $('adjuntar-archivo').click();
+});
+$('adjuntar-archivo').addEventListener('change', async () => {
+  const archivo = $('adjuntar-archivo').files[0];
+  $('adjuntar-archivo').value = '';
+  if (!archivo || !gastoAdjuntar) return;
+  $('estado').textContent = 'Subiendo comprobante…';
+  try { await subirComprobante(gastoAdjuntar, archivo); $('estado').textContent = 'Comprobante guardado.'; await cargar(); }
+  catch (error) { $('estado').textContent = `${error.message} Toca «Adjuntar» para reintentar.`; }
+});
 // Mismo id hasta que se guarde: reintentar con mala señal no registra el gasto dos veces.
 let idPendiente = crypto.randomUUID();
 $('formulario').addEventListener('submit', async (e) => {
@@ -121,9 +152,15 @@ $('formulario').addEventListener('submit', async (e) => {
     const r = await fetch('/api/gastos', { method:'POST', headers:{ 'content-type':'application/json' }, body:JSON.stringify(cuerpo) });
     const datos = await r.json();
     if (!r.ok) throw new Error(datos.error || 'No se pudo registrar.');
+    const id = idPendiente, archivo = $('comprobante').files[0];
     idPendiente = crypto.randomUUID();
+    $('comprobante').value = '';
     $('importe').value = ''; $('nota').value = ''; $('categoria').value = '';
     $('estado').textContent = 'Gasto registrado.';
+    if (archivo) {
+      try { await subirComprobante(id, archivo); $('estado').textContent = 'Gasto registrado con su comprobante.'; }
+      catch (error) { $('estado').textContent = `Gasto registrado, pero el comprobante no se subió: ${error.message} Usa «Adjuntar» en la lista para reintentar.`; }
+    }
     $('mes').value = cuerpo.fecha.slice(0, 7);
     await cargar();
   } catch (error) { $('estado').textContent = error.message; }
