@@ -150,10 +150,10 @@ export function agruparGastos(porCategoria: Map<string, number>) {
   return grupos;
 }
 
-/** Gastos del mes por categoria (una sola vez cada gasto de caja) mas la nomina pagada, que es un solo total. */
+/** Gastos de operacion del mes por categoria (una sola vez cada gasto de caja) mas la nomina pagada, que es un solo total. Excluye los pagos a inversionistas (reparto, #768). */
 export async function gastosDelMes(env: Env, cal: Calendario) {
   const [filas, nomina] = await Promise.all([
-    env.DB.prepare(`select categoria, sum(importe) as importe from (${GASTOS_DEL_MES}) group by categoria`)
+    env.DB.prepare(`select categoria, sum(importe) as importe from (${GASTOS_DEL_MES}) where categoria != 'inversionistas' group by categoria`)
       .bind(cal.primero, cal.siguiente, `${cal.primero}T00:00:00`, `${cal.siguiente}T00:00:00`)
       .all<{ categoria: string; importe: number }>(),
     env.DB.prepare(

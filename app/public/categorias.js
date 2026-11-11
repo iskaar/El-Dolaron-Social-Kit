@@ -35,5 +35,7 @@ export const CATEGORIAS_GASTO = [
   ['internet_telefono', 'Internet y teléfono'],
   ['contador', 'Contador'],
   ['publicidad', 'Publicidad'],
+  // Reparto a inversionistas, no gasto de operacion: /gastos lo lista; tablero y caja no lo cuentan ni lo ofrecen.
+  ['inversionistas', 'Pagos a inversionistas'],
   ['otros', 'Otros'],
 ];

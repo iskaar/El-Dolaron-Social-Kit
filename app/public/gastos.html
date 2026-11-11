@@ -82,13 +82,15 @@ const hoy = new Intl.DateTimeFormat('en-CA', { timeZone:'America/Mexico_City' })
 $('fecha').value = hoy;
 $('mes').value = hoy.slice(0, 7);
 $('categoria').innerHTML = '<option value="">Elige categoría</option>' + CATEGORIAS_GASTO.map(([clave, nombre]) => `<option value="${clave}">${nombre}</option>`).join('');
+$('categoria').addEventListener('change', () => { $('nota').placeholder = $('categoria').value === 'inversionistas' ? '¿A quién?' : ''; });
 $('origen').addEventListener('change', () => { $('caja-campo').hidden = $('origen').value !== 'caja'; });
 
 async function cargar() {
   const r = await fetch(`/api/gastos?mes=${encodeURIComponent($('mes').value)}`, { cache:'no-store' });
   const datos = await r.json();
   if (!r.ok) throw new Error(datos.error || 'No se pudieron cargar los gastos.');
-  $('total').textContent = `Total: ${pesos(datos.total)}`;
+  const inversionistas = datos.por_categoria.find((x) => x.categoria === 'inversionistas')?.importe || 0;
+  $('total').textContent = `Gastos de operación: ${pesos(datos.total - inversionistas)}` + (inversionistas ? ` · Pagos a inversionistas: ${pesos(inversionistas)}` : '');
   $('categorias').innerHTML = datos.por_categoria.map((x) => `<div class="categoria"><span>${escapar(nombres.get(x.categoria) || (x.categoria === 'sin_categoria' ? 'Sin categoría' : x.categoria))}</span><b>${pesos(x.importe)}</b></div>`).join('') || '<span>Sin gastos este mes.</span>';
   $('filas').innerHTML = datos.gastos.map((g) => `<tr>
     <td data-label="Fecha">${escapar(g.fecha)}</td><td data-label="Categoría">${escapar(nombres.get(g.categoria) || (g.categoria === 'sin_categoria' ? 'Sin categoría' : g.categoria))}</td>

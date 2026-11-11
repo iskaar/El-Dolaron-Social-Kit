@@ -76,7 +76,8 @@ export async function registrarRetiro(request: Request, env: Env, correo: string
   const categoria = tipo === 'gasto' ? String(cuerpo.categoria ?? '') : '';
   if (!UUID.test(id)) return json({ error: 'Identificador invalido.' }, 400);
   if (!tipo) return json({ error: 'Tipo invalido.' }, 400);
-  if (tipo === 'gasto' && !CATEGORIAS_GASTO.some(([clave]) => clave === categoria)) return json({ error: 'Categoría invalida.' }, 400);
+  // Un cajero no paga inversionistas (#768): esa categoria solo entra por /api/gastos.
+  if (tipo === 'gasto' && (categoria === 'inversionistas' || !CATEGORIAS_GASTO.some(([clave]) => clave === categoria))) return json({ error: 'Categoría invalida.' }, 400);
   if (!caja) return json({ error: 'Falta la caja.' }, 400);
   if (!Number.isInteger(importe) || importe <= 0 || importe > 10_000_000) return json({ error: 'Importe invalido.' }, 400);
   if (!motivo) return json({ error: tipo === 'gasto' ? 'Escribe en que se gasto.' : 'Escribe el motivo del retiro.' }, 400);

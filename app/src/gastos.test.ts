@@ -67,3 +67,29 @@ test('reintentar el mismo gasto de caja no lo duplica ni duplica su retiro', asy
   assert.equal(t.db.prepare('select count(*) n from gastos').get()!.n, 1);
   assert.equal(t.db.prepare(`select count(*) n from retiros where tipo = 'gasto'`).get()!.n, 1);
 });
+
+test('pagos a inversionistas (#768): salen en /api/gastos, no cuentan en /api/tablero y la caja no los registra', async () => {
+  const t = tienda();
+  const fecha = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Mexico_City' });
+  const mes = fecha.slice(0, 7);
+  const antes = (await t.pedir('/api/tablero', undefined, 'GET')).cuerpo;
+  assert.equal((await t.pedir('/api/gastos', { fecha, categoria: 'luz', importe: 3000, origen: 'fuera' })).status, 201);
+  const reparto = await t.pedir('/api/gastos', { fecha, categoria: 'inversionistas', importe: 50000, nota: 'Pago de prueba', origen: 'fuera' });
+  assert.equal(reparto.status, 201);
+  const desdeCajon = await t.pedir('/api/gastos', { fecha, categoria: 'inversionistas', importe: 7000, origen: 'caja', caja: 'Caja 1' });
+  assert.equal(desdeCajon.status, 201);
+
+  const lista = (await t.pedir(`/api/gastos?mes=${mes}`, undefined, 'GET')).cuerpo;
+  assert.equal(lista.gastos.filter((g: { categoria: string }) => g.categoria === 'inversionistas').length, 2);
+  assert.equal(lista.por_categoria.find((x: { categoria: string }) => x.categoria === 'inversionistas').importe, 57000);
+
+  const despues = (await t.pedir('/api/tablero', undefined, 'GET')).cuerpo;
+  assert.equal(despues.gastos.total, antes.gastos.total + 3000);
+  assert.equal(despues.ventas_menos_gastos, antes.ventas_menos_gastos - 3000);
+  assert.ok(!despues.gastos.por_categoria.some((x: { categoria: string }) => x.categoria === 'inversionistas'));
+
+  assert.equal((await t.pedir('/api/retiros', {
+    id: crypto.randomUUID(), tipo: 'gasto', caja: 'Caja 1', importe: 500, motivo: 'Reparto', categoria: 'inversionistas',
+  })).status, 400);
+  t.db.close();
+});

@@ -482,6 +482,7 @@ import { codigoDeDigitos } from '/code128.js';
 
 // Issue #326: la categoria del gasto sale de la lista compartida con el servidor.
 document.getElementById('retiro-categoria').innerHTML = '<option value="">Elige categoría</option>' + CATEGORIAS_GASTO
+  .filter(([clave]) => clave !== 'inversionistas')
   .map(([clave, nombre]) => `<option value="${clave}">${nombre}</option>`).join('');
 
 // Issue #281: los errores de JavaScript de la caja llegan a los logs del servidor (/api/errores).
