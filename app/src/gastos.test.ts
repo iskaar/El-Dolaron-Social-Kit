@@ -127,6 +127,10 @@ test('comprobante del gasto (#770): subir, ver, reemplazar, rechazar tipo y tama
   const llaveXml = llaveActual();
   assert.match(llaveXml, /\.xml$/);
   assert.equal((await t.enviar(ruta)).headers.get('content-disposition'), 'attachment');
+  assert.equal((await t.enviar(ruta)).headers.get('content-security-policy'), 'sandbox');
+  assert.equal((await subir('application/pdf', '%PDF-1')).status, 200);   // el visor de PDF de Chrome no abre bajo sandbox
+  const pdf = await t.enviar(ruta);
+  assert.deepEqual([pdf.headers.get('content-type'), pdf.headers.get('content-security-policy'), pdf.headers.get('content-disposition')], ['application/pdf', null, 'inline']);
 
   assert.equal((await subir('image/svg+xml', '<svg/>')).status, 415);
   assert.equal((await subir('text/html', '<html/>')).status, 415);

@@ -52,8 +52,10 @@ async function rutaComprobante(request: Request, env: Env, id: string): Promise<
     const objeto = gasto.comprobante_key ? await env.FOTOS.get(gasto.comprobante_key) : null;
     if (!gasto.comprobante_key || !objeto) return json({ error: 'Este gasto no tiene comprobante.' }, 404);
     const tipo = TIPO_POR_EXT[gasto.comprobante_key.split('.').pop() ?? ''] ?? 'application/octet-stream';
+    // Chrome no abre su visor de PDF bajo `sandbox`; el PDF ya viene de la lista blanca y va con nosniff.
     return new Response(objeto.body, { headers: {
-      'content-type': tipo, 'cache-control': 'no-store', 'x-content-type-options': 'nosniff', 'content-security-policy': 'sandbox',
+      'content-type': tipo, 'cache-control': 'no-store', 'x-content-type-options': 'nosniff',
+      ...(tipo === 'application/pdf' ? {} : { 'content-security-policy': 'sandbox' }),
       'content-disposition': tipo === 'application/xml' ? 'attachment' : 'inline',
     } });
   }
