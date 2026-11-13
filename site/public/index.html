@@ -71,6 +71,15 @@
     <a class="brand" href="#" aria-label="El Dolarón, inicio"><img src="assets/el-dolaron-logo.webp" width="600" height="157" alt="El Dolarón"></a>
     <nav aria-label="Principal"><a class="catalog-link" href="#catalogo">Catálogo</a><a class="nav-link" href="#ropa">Ropa</a><a class="visit-link" href="#visitanos">Visítanos</a><a class="portal-link" href="https://dolarones.eldolaron.com/">Mis Dolarones <span aria-hidden="true">↗</span></a></nav>
   </header></div>
+  <section class="promo" id="promo-buen-fin" aria-labelledby="promo-titulo">
+    <p class="promo-title" id="promo-titulo">Buen Fin en El Dolarón</p>
+    <p class="promo-offer"><strong>50 %</strong> en toda la tienda · <strong>20 %</strong> en ropa</p>
+    <p class="promo-dates">Del 14 al 17 de noviembre. Y sigues ganando Dolarones.</p>
+  </section>
+  <script>
+    /* Issue #772: la promo se oculta sola al terminar el 17/11 (hora de la tienda, UTC-6); sin JavaScript se queda visible. Se puede borrar después. */
+    if (Date.now() >= Date.parse('2026-11-18T06:00:00Z')) document.getElementById('promo-buen-fin').hidden = true;
+  </script>
   <main id="contenido">
     <section class="hero" aria-labelledby="titulo">
       <div class="hero-copy">
