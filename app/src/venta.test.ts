@@ -517,7 +517,7 @@ test('Buen Fin: el precio baja a peso entero (nunca menos del % anunciado), el 0
 });
 
 test('Buen Fin: letrero solo con la ventana abierta', () => {
-  assert.equal(letreroBuenFin(BUENFIN, T('2026-11-16T12:00:00Z')), 'Buen Fin: 50 % · ropa 20 %');
+  assert.equal(letreroBuenFin(BUENFIN, T('2026-11-16T12:00:00Z')), 'Descuento: 50 % · ropa 20 %');
   assert.equal(letreroBuenFin(BUENFIN, T('2026-11-18T12:00:00Z')), '');
   assert.equal(letreroBuenFin(null, T('2026-11-16T12:00:00Z')), '');
 });

@@ -66,7 +66,7 @@ export function precioBuenFin(precio, categoria, momento, ventana) {
 /** Letrero de la caja mientras corre el Buen Fin; '' fuera de la ventana. */
 export const letreroBuenFin = (ventana, momento) =>
   precioBuenFin(10000, '', momento, ventana) < 10000
-    ? `Buen Fin: ${BUENFIN_PORCENTAJE} % · ropa ${BUENFIN_PORCENTAJE_ROPA} %` : '';
+    ? `Descuento: ${BUENFIN_PORCENTAJE} % · ropa ${BUENFIN_PORCENTAJE_ROPA} %` : '';
 
 /** Letrero de la caja (Isaac, 24/10): cuántas promos quedan mientras la ventana está abierta; '' fuera de ella. */
 export function letreroPromo(promo, momento) {
