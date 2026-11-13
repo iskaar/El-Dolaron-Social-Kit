@@ -190,11 +190,11 @@ Fondo `--azul`, texto blanco, alto 56 (celular) / 64 (PC), `padding: 0 var(--gut
 | Trabajando | fondo azul-hondo, glifo `●` amarillo | `Imprimiendo 3/12` · `Auto · 3 en cola` |
 | Aviso | fondo `--amarillo`, texto `--tinta`, `▲` | `Sin conectar` · `Sin red · 4` |
 | Error | fondo `--rojo`, texto blanco, `■` | `No responde` |
-| No aplica | borde punteado, texto `#C5D0E4` | `Celular · Apagado` |
+| No aplica | borde punteado, texto `#C5D0E4` | `Espejo · Apagado` (el chip dice `Espejo · Encendido` cuando está activo; #775) |
 
 Tocar un chip abre hoja/popover con su detalle y **una** acción primaria:
 - Impresora: nombre (AE240-bt), estado, `[Conectar impresora]` (primario) · `¿No aparece?` (texto) · `Detener` (peligro, solo si envía) · interruptor `Automática` con «N en cola».
-- Celular (PC): «Escuchando desde hace 12 s» · `[Pedir foto de prueba]` · enlace «Abrir en el celular» (`/camara-remota`).
+- Espejo (PC, #775; en celular el interruptor vive en `⋯`): interruptor «Espejo con el otro aparato» (por aparato, recordado, encendido por omisión) y, como respaldo, enlace «Cámara para la PC (respaldo)» (`/camara-remota`). Encendido, la tarjeta de Capturar (foto, cantidad, grado, talla, nombre y precio al terminar el campo) se ve y se trabaja en la PC y en el celular de la misma cuenta; Buscar, Revisar e Imprimir no se reflejan.
 - Red: «Fotos sin subir: 4» · `[Subir ahora]`.
 Cambio de estado se anuncia **una vez** en la línea de estado (polite), nunca desde el chip.
 
@@ -673,7 +673,7 @@ Patrón de vacío: glifo grande (48 px, trazo azul), **una línea** de 20/800, *
 Abre «Cámara para la PC» en el celular y toca Empezar.
 [[ Reintentar ]]  [ Subir foto desde esta PC ]  [ Cancelar ]
 ```
-Chip `Celular · No responde` (rojo). La solicitud caduca a los 2:00 sin crear pieza. El celular, en su pantalla, usa `/camara-remota` (sin modos): estados visibles `Escuchando`, `Piden una foto`, `Foto enviada`.
+Respaldo de #444 (el chip se llama `Espejo`, #775; mientras espera dice `● Esperando foto` y al terminar vuelve a `Espejo · …`). La solicitud caduca a los 2:00 sin crear pieza. El celular, en su pantalla, usa `/camara-remota` (sin modos): estados visibles `Escuchando`, `Piden una foto`, `Foto enviada`.
 
 **Sesión vencida**: línea de error «Tu sesión venció» + `[Entrar]`; Capturar sigue guardando localmente.
 

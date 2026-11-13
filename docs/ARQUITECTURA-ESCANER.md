@@ -351,6 +351,27 @@ Excepciones aceptadas por Isaac (22/10): la foto remota vive solo en memoria del
 por `cola-fotos.js` (la cola reprocesaría toda foto como pieza nueva); y repetir sobrescribe la
 foto como «Retomar foto». Requiere red y hardware real (prueba física pendiente).
 
+## Espejo de captura: PC y celular trabajan la misma pieza (Issue #775)
+
+Una fila por cuenta (`espejo_captura`, migración 073, llave `correo`) con la tarjeta actual de Capturar (`estado`, JSON de
+≤ 8 KB), una `version` entera y el `dispositivo` que la escribió. `GET /api/captura/espejo` la devuelve (versión 0 si no hay fila)
+y `PUT` escribe `{version_esperada, estado, dispositivo}` con **una sola sentencia** (`insert … on conflict do update … where
+version = ?`): `meta.changes` dice si aplicó; si no, 409 con la vigente. Responde en el host de la PC y en `captura.viste.com.mx`,
+solo para la cuenta propia y los roles que abren `/inventario`. **Es solo un puntero**: nunca escribe inventario ni precios;
+Guardar, foto, existencia y precio usan las rutas de siempre, que el servidor autoriza.
+
+Cliente (`public/espejo-captura.js`, usado por `inventario-capturar.js`): cada aparato tiene un UUID en localStorage y publica la
+tarjeta al cambiar (con 400 ms de retardo; nombre y precio al terminar el campo, no letra por letra). Una pieza por guardar
+(`nueva`, `sin-registro`) viaja con su UUID de siempre, así que Guardar o subir foto desde cualquiera de los dos usa la misma
+`id` y no duplica (`/api/borradores/upc` y `/api/borradores` son idempotentes por id). Una pieza ya registrada (`existente`,
+`guardada`) viaja solo por su `pieza_id` y el otro aparato la recarga de D1. Se consulta cada 2 s solo con Capturar visible. Se
+aplica una versión mayor de **otro** dispositivo; lo que uno mismo escribió (eco) nunca se reaplica ni se republica (se compara
+contra lo último sincronizado). La primera lectura tras abrir o encender solo aplica si es de hace menos de 10 min. En 409 gana la
+vigente. Interruptor por aparato (`espejo-captura-encendido`), encendido por omisión. La etiqueta la imprime el aparato que
+guarda; el otro ve «Falta etiqueta» con su botón, y `capturaImpresa` sigue evitando repetir la misma captura en un aparato. La
+foto de una pieza nueva subida desde el celular publica la pieza registrada (con `refresco`) para que la PC la vea con foto.
+`/camara-remota` y «Pedir foto al celular» siguen como respaldo.
+
 ## Orden de entrega
 
 1. Esqueleto: Worker desplegado, D1 creada, R2 creado, `GET /api/config` respondiendo. Probar el despliegue antes de escribir funcionalidad.

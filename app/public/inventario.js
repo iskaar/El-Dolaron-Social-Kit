@@ -3,6 +3,7 @@ import { api, crearFicha, pesos, resolverRepetida } from './ficha.js';
 import { $, nodo, boton, mensaje, hoja, confirmar, prepararHoja, stepper, cerrarHoja, ponerNeutro, bloquear } from './inventario-ui.js';
 import { montarPrecio, refrescarPrecios } from './inventario-precio.js';
 import { crearEnfocado } from './inventario-enfocado.js';
+import { espejoEncendido, fijarEspejo, textoChip } from './espejo-captura.js';
 
 prepararHoja();
 const pc = () => matchMedia('(min-width:1000px)').matches;
@@ -199,6 +200,7 @@ $('menu').onclick = () => {
     const b = boton(texto, () => { const activo = localStorage.getItem(`inventario-${clave}`) !== 'false'; localStorage.setItem(`inventario-${clave}`, String(!activo)); b.setAttribute('aria-checked', String(!activo)); });
     b.setAttribute('role','switch'); b.setAttribute('aria-checked', String(localStorage.getItem(`inventario-${clave}`) !== 'false')); c.append(b);
   }
+  if (!pc() && modo === 'capturar') c.append(interruptorEspejo());
   if (!pc() && modo === 'capturar') {
     const e = boton('Modo enfocado', () => { cerrarHoja(); enfocado.poner(!enfocado.activo()); });
     e.setAttribute('role','switch'); e.setAttribute('aria-checked', String(enfocado.activo())); c.append(e);
@@ -209,7 +211,16 @@ $('menu').onclick = () => {
   hoja('Menú', c);
 };
 $('chip-red').onclick = () => { const c = nodo('div'); c.append(nodo('p', $('chip-red').textContent), boton('Subir ahora', async () => { await (await cargar('capturar')).subir?.(); } ,'primario')); hoja('Red', c); };
-$('chip-celular').onclick = () => { const a = nodo('a','Abrir en el celular'); a.href = '/camara-remota'; hoja('Cámara para la PC', a); };
+// Espejo de captura (#775): la tarjeta de Capturar se comparte con el otro aparato de la misma cuenta; se enciende o apaga por aparato.
+const interruptorEspejo = () => {
+  const b = boton('Espejo con el otro aparato', () => { fijarEspejo(!espejoEncendido()); b.setAttribute('aria-checked', String(espejoEncendido())); $('chip-celular').textContent = textoChip(); });
+  b.setAttribute('role', 'switch'); b.setAttribute('aria-checked', String(espejoEncendido())); return b;
+};
+$('chip-celular').textContent = textoChip();
+$('chip-celular').onclick = () => {
+  const c = nodo('div', undefined, 'formulario'), a = nodo('a', 'Cámara para la PC (respaldo)'); a.href = '/camara-remota';
+  c.append(interruptorEspejo(), nodo('p', 'Lo que escaneas aquí aparece en el celular y al revés: foto, cantidad, grado, nombre y precio.', 'ayuda'), a); hoja('Espejo de captura', c);
+};
 $('chip-impresora').onclick = async () => { if ($('modo-imprimir').dataset.activo) await (await cargar('imprimir')).conexion(); else mensaje('Conecta desde Etiquetas', 'aviso'); };
 document.addEventListener('click', (e) => {
   const b=e.target.closest?.('[aria-disabled="true"]');
