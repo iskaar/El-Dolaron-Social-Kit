@@ -75,7 +75,7 @@ export async function iniciarCelular(ctx,captura) {
   ctx.problemas.cola=()=>{const sin=[...sesion.values()].filter(r=>!r.subida);if(!sin.length)avance=Date.now();return{sinSubir:sin.length,sinAvanceMs:Date.now()-avance,colaError:sin.some(r=>r.estado==='error'||r.estado==='sesion'),sesion:sin.some(r=>r.estado==='sesion')};};
   const subida=crearSubida({pendientes,leer,borrar,pausada:id=>revisando===id,
     alEstado(estado,r){if(estado==='subiendo')avance=Date.now();const datos=sesion.get(r.id);if(datos)datos.estado=estado;pintar();if(estado==='sesion')mensaje('Tu sesión venció · vuelve a entrar','error');},
-    async alSubir(r,d){if(d.existente){sesion.delete(r.id);sesion.set(d.id,{...d,subida:true,cantidad:r.cantidad,estado:d.estado_analisis==='pendiente'?'analizando':'subida'});pintar();await captura.recibirExistente(d,r.id);return;}if(d.estado_analisis==='descartado'){sesion.delete(r.id);pintar();return;}sesion.set(r.id,{...sesion.get(r.id),...r,subida:true,estado:d.estado_analisis==='pendiente'?'analizando':'subida',...d,cantidad:d.stock??r.cantidad});pintar();void prepararRevision(d);}
+    async alSubir(r,d){if(d.existente){sesion.delete(r.id);sesion.set(d.id,{...d,subida:true,cantidad:r.cantidad,estado:d.estado_analisis==='pendiente'?'analizando':'subida'});pintar();await captura.recibirExistente(d,r.id);return;}if(d.estado_analisis==='descartado'){sesion.delete(r.id);pintar();return;}sesion.set(r.id,{...sesion.get(r.id),...r,subida:true,estado:d.estado_analisis==='pendiente'?'analizando':'subida',...d,cantidad:d.stock??r.cantidad});pintar();if(!captura.flujo.actual())void captura.espejo.pieza(d.id);void prepararRevision(d);}   // #775: la PC ve la pieza ya con foto (si aquí no hay otra tarjeta en curso)
   });
   /**
    * Una pieza nueva con foto NO imprime sola (#573): al quedar `listo` con precio pasa a «por revisar» (✎ en su miniatura) y
@@ -183,7 +183,7 @@ export async function iniciarCelular(ctx,captura) {
     reposo.actividad();
     if(!navigator.onLine)throw new Error('Sin red · conserva la foto');
     revisionFoto=foto;const f=new FormData();f.set('id',p.id);f.set('solo_foto','1');f.set('estado_fisico',p.estado_fisico||'nuevo');f.set('foto',foto,`${p.id}.jpg`);
-    const r=await fetch('/api/borradores',{method:'POST',body:f});if(!r.ok)throw new Error((await r.json()).error||'No se subió la foto');revisionFoto=null;mensaje('Foto reemplazada','ok');
+    const r=await fetch('/api/borradores',{method:'POST',body:f});if(!r.ok)throw new Error((await r.json()).error||'No se subió la foto');revisionFoto=null;mensaje('Foto reemplazada','ok');void captura.espejo.pieza(p.id);
   }
   async function fotoPieza(p){
     return new Promise(resolve=>{

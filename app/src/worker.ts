@@ -37,6 +37,7 @@ import { rutaPiezas, buscarPiezas, escribirExistencia, autorizarPrecio } from '.
 import { rutaSolicitudesPrecio, crearSolicitud } from './solicitudes-precio.ts';
 import { UPC_VISIBLE, MISMO_UPC, claveTalla, PIEZA_UPC, CAPTURA_SUMADA, conflictoCapturaSumada, capturaSumada, sumarCaptura, conflictoUpc, corregirUpc, upcValido, type PiezaUpc } from './upc-inventario.ts';
 import { rutaCamaraRemota } from './camara-remota.ts';
+import { rutaEspejoCaptura } from './espejo-captura.ts';
 import { rutaNomina } from './nomina.ts';
 import { reporteEquipo, registrarBonoSemana } from './equipo.ts';
 import { rutaPlano } from './plano.ts';
@@ -104,6 +105,8 @@ const RUTAS_VENDEDOR = new Set(['/captura', '/foto.js', '/tallas.js', '/api/salu
   '/venta.js', '/etiquetera.js', '/letreros.js', '/impresora.js', '/camara.js', '/vendor/html5-qrcode.min.js', '/ropa.js',
   // #459: imports de /inventario que faltaban (code128.js vía impresora.js; camara-pc.js por import() dinámico).
   '/code128.js', '/camara-pc.js',
+  // Espejo de captura (#775): reglas del cliente; la API se permite abajo.
+  '/espejo-captura.js',
   // #463: «Cerrar sesión» del menú de /inventario (import dinámico).
   '/cerrar-sesion.js']);
 const CORRECCION_CAPTURA = /^\/api\/borradores\/([^/]+)\/(existencia|talla|revision)$/;
@@ -122,6 +125,7 @@ export function permitidaParaVendedor(pathname: string, metodo: string): boolean
   if (/^\/api\/borradores\/[0-9a-f-]{36}$/.test(pathname)) return ['PATCH', 'DELETE'].includes(metodo);
   if (/^\/api\/borradores\/[^/]+\/(fusionar|analizar|imagen\/buscar)$/.test(pathname)) return metodo === 'POST';
   if (/^\/api\/borradores\/[^/]+\/imagen$/.test(pathname)) return metodo === 'PUT';
+  if (pathname === '/api/captura/espejo') return metodo === 'GET' || metodo === 'PUT';   // #775: el celular también publica
   if (pathname === '/camara-remota' || pathname === '/camara-remota.js') return metodo === 'GET';
   if (pathname === '/api/camara/solicitud') return metodo === 'GET';
   if (/^\/api\/camara\/solicitud\/[^/]+\/(tomar|lista|cancelar)$/.test(pathname)) return metodo === 'POST';
@@ -2524,6 +2528,7 @@ export default {
       if (pathname === '/api/yo') {
         return await yo(env, correo, soloComputadora(await leerUsuario(env, correo)) ? await cajeroEnTurno(request, env) : null, !!env.HOST_VENDEDOR && url.hostname === env.HOST_VENDEDOR);
       }
+      if (pathname === '/api/captura/espejo') return await rutaEspejoCaptura(request, env, usuario!);
       if (pathname === '/api/camara/solicitud' || pathname.startsWith('/api/camara/solicitud/')) {
         return await rutaCamaraRemota(request, env, pathname, usuario!);
       }

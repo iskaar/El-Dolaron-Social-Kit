@@ -124,6 +124,9 @@ export function permiso(pathname: string, metodo: string): Regla {
   if ((ruta === '/api/camara/solicitud' && ['GET', 'PUT'].includes(metodo))
       || (metodo === 'POST' && /^\/api\/camara\/solicitud\/[^/]+\/(tomar|lista|cancelar)$/.test(ruta))) return CAPTURA;
 
+  // Espejo de captura (#775): quien puede abrir Capturar en /inventario; el servidor lo ata a la cuenta propia.
+  if (ruta === '/api/captura/espejo' && ['GET', 'PUT'].includes(metodo)) return CAPTURA_FEP;
+
   if (ruta === '/api/tablero') return metodo === 'GET' ? INVERSIONISTA : DUENO;
   if (ruta === '/api/mensajes' || ruta === '/api/mensajes/responder') return DUENO;
   if (ruta === '/api/gastos' || /^\/api\/gastos\/[^/]+(\/comprobante)?$/.test(ruta)) return AUXILIAR;
