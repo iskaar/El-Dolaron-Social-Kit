@@ -43,6 +43,31 @@ export function promoInauguracion(subtotal, momento, promo) {
   return momento >= desde && momento < hasta && subtotal >= PROMO_MINIMO ? PROMO_DESCUENTO : 0;
 }
 
+/**
+ * Buen Fin (Isaac, 13/11, Issue #772): del 14 al 17/11 la tienda va a 50 % y la ropa a 20 %. Se aplica al
+ * PRECIO de cada pieza (no al ticket), asi una devolucion regresa lo que se pago por esa pieza. La ventana
+ * viene del servidor (BUENFIN_DESDE/BUENFIN_HASTA): sin ella no hay descuento. El precio baja a peso entero
+ * (nunca se da menos del % anunciado); un precio de 0 se queda en 0 y nunca baja de $1. La usan la caja
+ * (para mostrar) y el servidor (para cobrar), con la hora de la venta.
+ * @param {{ desde: string, hasta: string } | null} ventana
+ */
+export const BUENFIN_PORCENTAJE = 50;
+export const BUENFIN_PORCENTAJE_ROPA = 20;
+// Producto del envio: nunca lleva descuento.
+export const ENVIO_ID = '00000000-0000-4000-8000-000000000099';
+
+export function precioBuenFin(precio, categoria, momento, ventana) {
+  if (!ventana || !Number.isInteger(precio) || precio <= 0) return precio;
+  if (!(momento >= Date.parse(ventana.desde) && momento < Date.parse(ventana.hasta))) return precio;
+  const pagado = 100 - (categoria === 'ropa' ? BUENFIN_PORCENTAJE_ROPA : BUENFIN_PORCENTAJE);
+  return Math.min(precio, Math.max(100, Math.floor((precio * pagado) / 10000) * 100));
+}
+
+/** Letrero de la caja mientras corre el Buen Fin; '' fuera de la ventana. */
+export const letreroBuenFin = (ventana, momento) =>
+  precioBuenFin(10000, '', momento, ventana) < 10000
+    ? `Buen Fin: ${BUENFIN_PORCENTAJE} % · ropa ${BUENFIN_PORCENTAJE_ROPA} %` : '';
+
 /** Letrero de la caja (Isaac, 24/10): cuántas promos quedan mientras la ventana está abierta; '' fuera de ella. */
 export function letreroPromo(promo, momento) {
   if (!promoInauguracion(PROMO_MINIMO, momento, promo)) return '';

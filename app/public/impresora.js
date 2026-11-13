@@ -281,6 +281,7 @@ export async function imprimirTicket(venta, lineas) {
   for (const l of lineas) {
     partes.push(linea(sinAcentos(l.nombre).slice(0, COLUMNAS)));
     partes.push(renglonMonto(`  ${l.cantidad} x ${pesos(l.precio)}`, pesos(l.precio * l.cantidad)));
+    if (l.precio_lista > l.precio) partes.push(linea(`  Buen Fin: antes ${pesos(l.precio_lista)}`));
   }
   partes.push(separador());
   if (venta.descuento > 0) {
