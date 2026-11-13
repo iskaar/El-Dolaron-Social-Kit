@@ -14,7 +14,7 @@ import { guardarImagenComoFoto, imagenGuardada, procesarRellenoImagenes, procesa
 import { PRENDAS_ROPA, PRECIOS_ROPA, nombreRopa, partesDeNombre, paqueteValido } from '../public/ropa.js';
 import { procesarColaRopa, rutaRopaAdmin } from './ropa-ia.ts';
 import { calcularPrecio, ajustarManual, esDestinoBanda, prefijoParaFamilia, MONTOS_BANDA, type Destino } from './precio.ts';
-import { efectivoAlcanza, promoInauguracion, CLAVE_DESDE, claveRastreoDe } from '../public/venta.js';
+import { efectivoAlcanza, promoInauguracion, CLAVE_DESDE, claveRastreoDe, precioBuenFin, ENVIO_ID } from '../public/venta.js';
 import { semanaIngreso } from '../public/semana.js';
 import { detalleVenta, cancelarPieza, devolverEnCupon, reimprimirCupon } from './devoluciones.ts';
 import { cancelarVenta, listarCancelaciones, estadoSolicitud } from './cancelaciones.ts';
@@ -54,7 +54,7 @@ import { catalogoPublico, revisionCatalogo } from './catalogo.ts';
 import { rescatarPendientes, esCorridaSemanal, reportarHuerfanosR2 } from './huerfanos.ts';
 import { procesarRecortes, revisarRecortes, ajustarRecortesViejos, reiniciarRecorte, rutaRecortesAdmin } from './recortes.ts';
 import { rutaML, recibirNotificacion, conciliarSeguro, sincronizar, publicacionViva, avisosPendientes, atenderVentaML } from './mercadolibre.ts';
-import { pedirDescuento, validarDescuento, listarDescuentos, listarDuenos, promoDe, promoRestantes } from './descuentos.ts';
+import { pedirDescuento, validarDescuento, listarDescuentos, listarDuenos, promoDe, promoRestantes, buenFinDe } from './descuentos.ts';
 import { listarAltoValor, revisarConteo, ajustarExistencia, listarAjustes } from './conteo.ts';
 import { rutaPedidos, vencerPedidos, sentenciasDePedido, saldoDe, enPedido } from './pedidos.ts';
 import { leerTransferencia, sentenciaTransferencia, respuestaClaveUsada, esChoqueDeClave, excedenteDe } from './transferencias.ts';
@@ -1644,14 +1644,14 @@ async function catalogo(env: Env, url: URL): Promise<Response> {
     if (!Number.isFinite(Date.parse(desde))) return json({ error: 'Fecha invalida.' }, 400);
     const ahora = new Date().toISOString();
     const { results } = await env.DB.prepare(
-      `select id, codigo, nombre, case when estado_analisis = 'descartado' then 0 else precio end as precio, sin_inventario, stock, propietario, estado_fisico
+      `select id, codigo, nombre, case when estado_analisis = 'descartado' then 0 else precio end as precio, sin_inventario, stock, propietario, estado_fisico, categoria
        from productos where actualizado_en > ? and codigo is not null and codigo <> ''`,
     ).bind(new Date(desde).toISOString()).all();
     return json({ ahora, piezas: results });
   }
   const { results } = await env.DB.prepare(
     // Grado D (#733): sin precio, pero la caja la recibe para avisar que no se vende en vez de «código no encontrado».
-    `select id, codigo, nombre, precio, sin_inventario, stock, propietario, estado_fisico
+    `select id, codigo, nombre, precio, sin_inventario, stock, propietario, estado_fisico, categoria
      from productos where codigo is not null and codigo <> '' and (precio > 0 or estado_fisico = 'caducado') and estado_analisis <> 'descartado'
      order by nombre`,
   ).all();
@@ -1662,6 +1662,8 @@ interface LineaVenta {
   codigo?: unknown;
   nombre?: unknown;
   precio?: unknown;
+  // Precio de catalogo que vio la caja; con Buen Fin `precio` ya viene rebajado (#772). Solo sirve para el precio anterior.
+  precio_lista?: unknown;
   cantidad?: unknown;
   producto_id?: unknown;
 }
@@ -1676,6 +1678,9 @@ interface ProductoVenta {
   estado_fisico?: string;
   precio_anterior?: number | null;
   precio_cambiado_en?: string | null;
+  categoria?: string;
+  /** Precio pactado en un pedido apartado (#772): no entra al Buen Fin. */
+  pactado?: boolean;
 }
 
 // El precio que mostro la caja gana si es el anterior y el cambio es reciente (decision 7/10).
@@ -1698,11 +1703,14 @@ interface LineaPreparada {
  * min de la hora de la venta (la caja aun no refrescaba el catalogo). Es
  * pura a proposito, para poder probarla sin D1: worker.ts solo junta el mapa
  * de productos antes de llamarla.
+ * Buen Fin (#772): dentro de la ventana el precio de cada pieza baja segun su categoria, con la hora de la venta
+ * (una venta cobrada sin red conserva lo que vio el cliente). Nunca se escribe en productos.precio.
  */
 export function prepararLineas(
   lineasCliente: LineaVenta[],
   productos: Map<string, ProductoVenta>,
   horaVenta = Date.now(),
+  buenFin: { desde: string; hasta: string } | null = null,
 ): { ok: true; lineas: LineaPreparada[] } | { ok: false; error: string } {
   if (lineasCliente.length === 0) {
     return { ok: false, error: 'La venta no tiene piezas.' };
@@ -1723,13 +1731,17 @@ export function prepararLineas(
       return { ok: false, error: `${producto.nombre || producto.codigo || 'La pieza'} está caducada (grado D): no se vende.` };
     }
     const cambio = Date.parse(producto.precio_cambiado_en ?? '');
-    const precioCaja = Number.isInteger(l.precio) && l.precio === producto.precio_anterior
+    const vistoCaja = l.precio_lista ?? l.precio;
+    const precioCaja = Number.isInteger(vistoCaja) && vistoCaja === producto.precio_anterior
       && horaVenta <= cambio + VENTANA_PRECIO_ANTERIOR;
+    const base = precioCaja ? (vistoCaja as number) : producto.precio;
+    // Un solo lugar decide quien entra: excluir a FEP (propietario) o a otros seria una linea mas aqui.
+    const entra = !producto.pactado && producto.id !== ENVIO_ID && producto.codigo !== 'ENVIO';
     lineas.push({
       producto_id: producto.id,
       codigo: producto.codigo ?? '',
       nombre: producto.nombre,
-      precio: precioCaja ? (l.precio as number) : producto.precio,
+      precio: entra ? precioBuenFin(base, producto.categoria, horaVenta, buenFin) : base,
       cantidad,
       sinInventario: producto.sin_inventario === 1,
       propietario: producto.propietario ?? 'dolaron',
@@ -1829,7 +1841,7 @@ async function registrarVenta(request: Request, env: Env, ctx: ExecutionContext,
   }
   const huecos = idsPedidos.map(() => '?').join(',');
   const { results: filas } = await env.DB.prepare(
-    `select id, codigo, nombre, precio, sin_inventario, propietario, estado_fisico, precio_anterior, precio_cambiado_en from productos where id in (${huecos})`,
+    `select id, codigo, nombre, precio, sin_inventario, propietario, estado_fisico, precio_anterior, precio_cambiado_en, categoria from productos where id in (${huecos})`,
   )
     .bind(...idsPedidos)
     .all<ProductoVenta>();
@@ -1843,14 +1855,14 @@ async function registrarVenta(request: Request, env: Env, ctx: ExecutionContext,
       .bind(String(venta.pedido_id)).all<{ producto_id: string; precio: number }>();
     for (const l of pactadas) {
       const producto = productos.get(l.producto_id);
-      if (producto) productos.set(l.producto_id, { ...producto, precio: l.precio, precio_anterior: null });
+      if (producto) productos.set(l.producto_id, { ...producto, precio: l.precio, precio_anterior: null, pactado: true });
     }
   }
 
   // Hora fiable de la venta (la de la caja): una hora futura no se acepta.
   const horaCaja = Date.parse(String(venta.creado_en ?? ''));
   const horaVenta = Number.isFinite(horaCaja) && horaCaja <= Date.now() + 300_000 ? horaCaja : Date.now();
-  const preparado = prepararLineas(venta.lineas as LineaVenta[], productos, horaVenta);
+  const preparado = prepararLineas(venta.lineas as LineaVenta[], productos, horaVenta, buenFinDe(env));
   if (!preparado.ok) {
     return json({ error: preparado.error }, 400);
   }
@@ -2728,6 +2740,7 @@ export default {
       {
         const promo = promoDe(env), restantes = promo && await promoRestantes(env);
         return json({ habilitado:valesAbiertos(env), prueba:env.AMBIENTE === 'sandbox', promo:promo && (restantes === null ? promo : { ...promo, restantes }),
+          buenfin:buenFinDe(env),
           cupon_porcentaje:await porcentajeCupon(env) });
       }
       if (pathname === '/api/vales/buscar' && request.method === 'POST')

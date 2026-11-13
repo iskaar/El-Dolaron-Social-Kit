@@ -208,3 +208,87 @@ test('el precio que mostro la caja gana si es el anterior y el cambio es de hace
   assert.equal(tardeTarjeta.status, 201);
   assert.equal((t.db.prepare('select total from ventas order by rowid desc').get() as any).total, 30000);
 });
+
+// Buen Fin (#772): el servidor cobra con la hora de la venta y nunca le cree el precio a la caja.
+const BUENFIN = { desde: '2026-11-14T06:00:00Z', hasta: '2026-11-18T06:00:00Z' };
+const ROPA = 'b2222222-2222-4222-8222-222222222222';
+
+test('Buen Fin: prepararLineas rebaja por categoria, no toca envio ni pedidos pactados y respeta el precio anterior', () => {
+  const dentro = Date.parse('2026-11-15T18:00:00Z');
+  const productos = new Map<string, any>([
+    ['a', { id: 'a', codigo: 'ED-1', nombre: 'Ventilador', precio: 25000, sin_inventario: 0, categoria: 'hogar' }],
+    ['r', { id: 'r', codigo: 'ED-2', nombre: 'Playera', precio: 12000, sin_inventario: 0, categoria: 'ropa' }],
+    ['e', { id: '00000000-0000-4000-8000-000000000099', codigo: 'ENVIO', nombre: 'Envío', precio: 9900, sin_inventario: 1, categoria: 'otros' }],
+    ['p', { id: 'p', codigo: 'ED-3', nombre: 'Apartada', precio: 8000, sin_inventario: 0, categoria: 'hogar', pactado: true }],
+    ['v', { id: 'v', codigo: 'ED-4', nombre: 'Cambio de precio', precio: 30000, sin_inventario: 0, categoria: 'hogar',
+      precio_anterior: 20000, precio_cambiado_en: new Date(dentro - 60_000).toISOString() }],
+  ]);
+  const ids = ['a', 'r', 'e', 'p'].map((producto_id) => ({ producto_id, cantidad: 1, precio: 1 }));
+  const r = prepararLineas(ids, productos, dentro, BUENFIN);
+  assert.ok(r.ok);
+  assert.deepEqual(r.lineas.map((l) => l.precio), [12500, 9600, 9900, 8000]);
+  // Fuera de la ventana, o sin ella, igual que hoy.
+  for (const [hora, ventana] of [[Date.parse('2026-11-18T06:00:00Z'), BUENFIN], [dentro, null]] as const) {
+    const fuera = prepararLineas(ids, productos, hora, ventana);
+    assert.ok(fuera.ok);
+    assert.deepEqual(fuera.lineas.map((l) => l.precio), [25000, 12000, 9900, 8000]);
+  }
+  // El precio que vio la caja (de catalogo, precio_lista) sigue valiendo 10 min; el Buen Fin se aplica encima.
+  const anterior = prepararLineas([{ producto_id: 'v', cantidad: 1, precio: 10000, precio_lista: 20000 }], productos, dentro, BUENFIN);
+  assert.ok(anterior.ok);
+  assert.equal(anterior.lineas[0].precio, 10000);
+  // Un precio_lista inventado no baja el precio: manda el del catalogo.
+  const inventado = prepararLineas([{ producto_id: 'v', cantidad: 1, precio: 1, precio_lista: 1 }], productos, dentro, BUENFIN);
+  assert.ok(inventado.ok);
+  assert.equal(inventado.lineas[0].precio, 15000);
+});
+
+test('Buen Fin: ticket mixto cobra ropa -20 % y lo demas -50 %, no se le cree a la caja y devolver regresa lo pagado', async () => {
+  const t = tienda();
+  t.db.prepare(`insert into productos (id, codigo, nombre, categoria, precio, stock, semana_ingreso, creado_en, actualizado_en)
+    values (?, 'ED-000002', 'Playera', 'ropa', 12000, 10, 'S40', '', '')`).run(ROPA);
+  t.db.prepare(`update productos set categoria = 'hogar' where id = ?`).run(PRODUCTO);
+  // El servidor no acepta una hora de caja futura: el reloj de la prueba va despues de la ventana.
+  const ahoraReal = Date.now;
+  Date.now = () => Date.parse('2026-11-19T00:00:00Z');
+  try {
+    t.env.BUENFIN_DESDE = BUENFIN.desde;
+    t.env.BUENFIN_HASTA = BUENFIN.hasta;
+    const venta = (extra: Record<string, unknown>) => ({
+      id: crypto.randomUUID(), forma_pago: 'tarjeta', efectivo: 0, caja: 'Caja 1',
+      lineas: [{ producto_id: PRODUCTO, cantidad: 1, precio: 1 }, { producto_id: ROPA, cantidad: 1, precio: 1 }], ...extra,
+    });
+    const precios = (id: unknown) => t.db.prepare('select precio from venta_lineas where venta_id = ? order by rowid').all(id).map((l: any) => l.precio);
+
+    // Dentro de la ventana: una caja que manda $0.01 por pieza no cobra de menos.
+    const dentro = venta({ creado_en: '2026-11-15T18:00:00Z' });
+    const r = await t.pedir('/api/ventas', dentro);
+    assert.equal(r.status, 201, JSON.stringify(r.cuerpo));
+    assert.deepEqual(precios(dentro.id), [12500, 9600]);
+    assert.equal((t.db.prepare('select total from ventas where id = ?').get(dentro.id) as any).total, 22100);
+    assert.equal(r.cuerpo.total, 22100);
+
+    // Fuera de la ventana nada cambia.
+    const antes = venta({ creado_en: '2026-11-13T18:00:00Z' });
+    assert.equal((await t.pedir('/api/ventas', antes)).status, 201);
+    assert.deepEqual(precios(antes.id), [25000, 12000]);
+    // Sin red: la hora de la caja decide (vendida el 17 y sincronizada despues, conserva el descuento).
+    const tarde = venta({ creado_en: '2026-11-18T05:59:00Z' });
+    assert.equal((await t.pedir('/api/ventas', tarde)).status, 201);
+    assert.deepEqual(precios(tarde.id), [12500, 9600]);
+
+    // La caja recibe la categoria en su catalogo y la ventana en su configuracion.
+    const cat = await t.pedir('/api/catalogo', undefined, 'GET');
+    assert.equal(cat.status, 200);
+    const config = await t.pedir('/api/vales/config', undefined, 'GET');
+    assert.deepEqual(config.cuerpo.buenfin, BUENFIN);
+
+    // Devolver una pieza regresa lo que se pago por ella, no el precio de lista.
+    const ticket = (await t.pedir(`/api/ventas/${dentro.id}`, undefined, 'GET')).cuerpo;
+    const lineaRopa = ticket.lineas.find((l: any) => l.codigo === 'ED-000002');
+    const dev = await t.pedir(`/api/ventas/${dentro.id}/lineas/${lineaRopa.id}/cancelar`,
+      { id: crypto.randomUUID(), cantidad: 1, motivo: 'no le quedo', caja: 'Caja 1' });
+    assert.equal(dev.status, 201, JSON.stringify(dev.cuerpo));
+    assert.equal(dev.cuerpo.devuelto, 9600);
+  } finally { Date.now = ahoraReal; t.db.close(); }
+});

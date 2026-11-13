@@ -3,7 +3,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { runInNewContext } from 'node:vm';
-import { totales, agregar, leerMultiplicador, efectivoAlcanza, saldoCanjeable, dolaronesGanados, maximoCanje, desfaseReloj, anticipoDePedido, envioDe, anticipoMinimoDe, ANTICIPO, ANTICIPO_ENVIO, viernesDeEnvio, promoInauguracion, letreroPromo, PROMO_DESCUENTO, PROMO_MINIMO, transferenciaDe, CLAVE_DESDE, debePreguntarSocio, guiaVale } from '../public/venta.js';
+import { totales, agregar, leerMultiplicador, efectivoAlcanza, saldoCanjeable, dolaronesGanados, maximoCanje, desfaseReloj, anticipoDePedido, envioDe, anticipoMinimoDe, ANTICIPO, ANTICIPO_ENVIO, viernesDeEnvio, promoInauguracion, letreroPromo, PROMO_DESCUENTO, PROMO_MINIMO, transferenciaDe, CLAVE_DESDE, debePreguntarSocio, guiaVale, precioBuenFin, letreroBuenFin } from '../public/venta.js';
 
 interface Linea { codigo: string; nombre: string; precio: number; cantidad: number }
 const pieza = (codigo: string, precio: number) => ({ codigo, nombre: codigo, precio });
@@ -484,4 +484,40 @@ test('ventana «¿El cliente es socio?» con vale: guía y «Usar el vale sin so
   const sin = armar(null, []);
   assert.equal(sin.boton, 'No quiere ser socio: cobrar así');
   assert.doesNotMatch(sin.texto, /vale/i);
+});
+
+// Buen Fin (#772): 14/11 00:00 a 17/11 23:59:59 hora de la tienda (UTC-6).
+const BUENFIN = { desde: '2026-11-14T06:00:00Z', hasta: '2026-11-18T06:00:00Z' };
+const T = (iso: string) => Date.parse(iso);
+
+test('Buen Fin: 50 % en todo y 20 % en ropa dentro de la ventana', () => {
+  const dentro = T('2026-11-15T18:00:00Z');
+  assert.equal(precioBuenFin(25000, 'hogar', dentro, BUENFIN), 12500);
+  assert.equal(precioBuenFin(25000, 'ropa', dentro, BUENFIN), 20000);
+  assert.equal(precioBuenFin(25000, undefined, dentro, BUENFIN), 12500);
+});
+
+test('Buen Fin: los limites son [desde, hasta) y fuera nada cambia', () => {
+  assert.equal(precioBuenFin(25000, 'hogar', T('2026-11-14T05:59:59.999Z'), BUENFIN), 25000);
+  assert.equal(precioBuenFin(25000, 'hogar', T('2026-11-14T06:00:00Z'), BUENFIN), 12500);
+  assert.equal(precioBuenFin(25000, 'hogar', T('2026-11-18T05:59:59.999Z'), BUENFIN), 12500);
+  assert.equal(precioBuenFin(25000, 'hogar', T('2026-11-18T06:00:00Z'), BUENFIN), 25000);
+  assert.equal(precioBuenFin(25000, 'hogar', T('2026-11-15T18:00:00Z'), null), 25000);
+  assert.equal(precioBuenFin(25000, 'hogar', T('2026-11-15T18:00:00Z'), { desde: 'x', hasta: 'y' }), 25000);
+});
+
+test('Buen Fin: el precio baja a peso entero (nunca menos del % anunciado), el 0 sigue en 0 y no queda gratis', () => {
+  const dentro = T('2026-11-15T18:00:00Z');
+  assert.equal(precioBuenFin(9900, 'hogar', dentro, BUENFIN), 4900);     // 49.50 -> 49
+  assert.equal(precioBuenFin(11900, 'ropa', dentro, BUENFIN), 9500);     // 95.20 -> 95
+  assert.equal(precioBuenFin(12000, 'ropa', dentro, BUENFIN), 9600);
+  assert.equal(precioBuenFin(0, 'hogar', dentro, BUENFIN), 0);
+  assert.equal(precioBuenFin(100, 'hogar', dentro, BUENFIN), 100);       // $1 no pasa a $0
+  assert.equal(precioBuenFin(5000, 'hogar', dentro, BUENFIN), 2500);
+});
+
+test('Buen Fin: letrero solo con la ventana abierta', () => {
+  assert.equal(letreroBuenFin(BUENFIN, T('2026-11-16T12:00:00Z')), 'Descuento: 50 % · ropa 20 %');
+  assert.equal(letreroBuenFin(BUENFIN, T('2026-11-18T12:00:00Z')), '');
+  assert.equal(letreroBuenFin(null, T('2026-11-16T12:00:00Z')), '');
 });

@@ -69,6 +69,9 @@ declare global {
     /** Promo de inauguracion (ISO, UTC): ambas o ninguna. Quitarlas y desplegar la apaga. */
     PROMO_DESDE?: string;
     PROMO_HASTA?: string;
+    /** Buen Fin (Issue #772), ISO UTC: ambas o ninguna. Descuento por pieza dentro de [desde, hasta). Quitarlas y desplegar lo apaga. */
+    BUENFIN_DESDE?: string;
+    BUENFIN_HASTA?: string;
     /** Cuantos tickets reciben la promo (Issue #250). Ausente = sin tope. */
     PROMO_CUPO?: string;
     /** Conteo de alto valor (Issue #219): precio minimo en centavos. Ausente = 30000. */

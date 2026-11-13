@@ -21,6 +21,7 @@
   #estado-red.sin-red { background: var(--rojo); }
   #promo-cupo { font-size: 15px; font-weight: 700; padding: 4px 12px; border-radius: 999px; background: #FFD447; color: #1a1f2b; }
   #promo-cupo.agotada { background: var(--rojo); color: #fff; }
+  #buenfin { font-size: 15px; font-weight: 700; padding: 4px 12px; border-radius: 999px; background: #D72B32; color: #fff; }
   main { flex: 1; display: grid; grid-template-columns: 1fr 340px; gap: 16px; padding: 16px; min-height: 0; }
   .panel { background: #fff; border: 1px solid var(--linea); border-radius: 12px; padding: 14px;
     display: flex; flex-direction: column; min-height: 0; }
@@ -176,6 +177,7 @@ if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw-caja.js'
   </label>
   <span id="estado-red">en línea</span>
   <span id="promo-cupo" role="status" hidden></span>
+  <span id="buenfin" role="status" hidden></span>
   <button id="marcar-entrada" type="button" hidden>Marcar entrada</button>
   <button id="abrir-retiro" type="button">Gasto / retiro</button>
   <button id="abrir-corte" type="button">Corte</button>
@@ -468,7 +470,7 @@ if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw-caja.js'
 </dialog>
 <script type="module">
 import { CATEGORIAS_GASTO } from '/categorias.js';
-import { totales, agregar, leerMultiplicador, efectivoAlcanza, dolaronesGanados, saldoCanjeable, maximoCanje, MINIMO_REGALO, descuentoDe, TOPE_DESCUENTO, DENOMINACIONES, contadoDe, promoInauguracion, letreroPromo, desfaseReloj, anticipoDePedido, transferenciaDe, CLAVE_DESDE, BANCOS, debePreguntarSocio, guiaVale } from '/venta.js';
+import { totales, agregar, leerMultiplicador, efectivoAlcanza, dolaronesGanados, saldoCanjeable, maximoCanje, MINIMO_REGALO, descuentoDe, TOPE_DESCUENTO, DENOMINACIONES, contadoDe, promoInauguracion, letreroPromo, desfaseReloj, anticipoDePedido, transferenciaDe, CLAVE_DESDE, BANCOS, debePreguntarSocio, guiaVale, precioBuenFin, letreroBuenFin } from '/venta.js';
 import { abrirCamara } from '/camara.js';
 import {
   reconectarImpresora, conectarImpresora, impresoraLista, imprimirTicket, abrirCajon, explicarErrorUsb, errorImpresora,
@@ -558,6 +560,10 @@ let valesPrueba = false;
 let cuponPorcentaje = null;
 // Ventana de la promo de inauguracion (/api/vales/config); la ultima conocida sirve sin red.
 let promoConfig = (() => { try { return JSON.parse(localStorage.getItem('promo-inauguracion')) || null; } catch { return null; } })();
+// Ventana del Buen Fin (#772), misma fuente y misma copia sin red que la promo.
+let buenFinConfig = (() => { try { return JSON.parse(localStorage.getItem('buenfin')) || null; } catch { return null; } })();
+/** Precio de una pieza ahora mismo, con Buen Fin si corre; el servidor lo vuelve a calcular con la hora de la venta. */
+const precioHoy = (pieza) => pieza.codigo === 'ENVIO' ? pieza.precio : precioBuenFin(pieza.precio, pieza.categoria, Date.now(), buenFinConfig);
 const notaVales = () => {
   $('nota-vales').textContent = valesHabilitados === true
     ? 'Sin socio: 5 D por cada $100 completos, en vale de 30 días. Con socio: 10 D. El teléfono sólo acumula.'
@@ -574,6 +580,11 @@ async function cargarConfigVales() {
     valesHabilitados = c && typeof c.habilitado === 'boolean' ? c.habilitado : null;
     valesPrueba = c?.prueba === true;
     cuponPorcentaje = Number.isInteger(c?.cupon_porcentaje) ? c.cupon_porcentaje : null;
+    if (c && 'buenfin' in c) {
+      buenFinConfig = c.buenfin;
+      try { localStorage.setItem('buenfin', JSON.stringify(buenFinConfig)); } catch {}
+      pintar();
+    }
     if (c && 'promo' in c) {
       promoConfig = c.promo;
       try { localStorage.setItem('promo-inauguracion', JSON.stringify(promoConfig)); } catch {}
@@ -772,6 +783,9 @@ async function cargarCatalogo() {
 
 /** Letrero del encabezado: el cajero ve cuántas promos quedan (se actualiza con la consulta de cada minuto). */
 function pintarPromoCupo() {
+  const buenFin = letreroBuenFin(buenFinConfig, Date.now());
+  $('buenfin').hidden = !buenFin;
+  $('buenfin').textContent = buenFin;
   const letrero = letreroPromo(promoConfig, Date.now());
   $('promo-cupo').hidden = !letrero;
   $('promo-cupo').textContent = letrero;
@@ -795,7 +809,7 @@ function pintar() {
   $('ticket').innerHTML = lineas.map((l, i) => `
     <div class="renglon">
       ${l.producto_id ? `<img class="foto" src="/api/foto/${encodeURIComponent(l.producto_id)}" alt="" loading="lazy" onerror="this.style.visibility='hidden'">` : '<div></div>'}
-      <div><div class="nombre">${escapar(l.nombre)}</div><div class="codigo">${escapar(l.codigo)}</div></div>
+      <div><div class="nombre">${escapar(l.nombre)}</div><div class="codigo">${escapar(l.codigo)}${l.precio_lista > l.precio ? ` · Descuento, antes <s>${pesos(l.precio_lista)}</s>` : ''}</div></div>
       <div>x${l.cantidad}</div>
       <div class="importe">${pesos(l.precio * l.cantidad)}</div>
       <button type="button" data-quitar="${i}" aria-label="Quitar" ${cobrando ? 'disabled' : ''}>✕</button>
@@ -934,7 +948,7 @@ function agregarCodigo(leido, reintento = false) {
   }
 
   lineas = agregar(lineas, {
-    codigo: pieza.codigo, nombre: pieza.nombre, precio: pieza.precio, producto_id: pieza.id,
+    codigo: pieza.codigo, nombre: pieza.nombre, precio: precioHoy(pieza), precio_lista: pieza.precio, producto_id: pieza.id,
   }, cantidad);
   idVenta = null;
   $('aviso').textContent = '';
@@ -969,7 +983,7 @@ function pintarSugerencias() {
   const piezas = texto.trim().length >= 2 && !buscarPieza(texto) ? buscarPorTexto(texto) : [];
   $('sugerencias').innerHTML = piezas.map((p) => `
     <button type="button" data-codigo="${escapar(p.codigo)}">
-      <span>${escapar(p.nombre)}</span><span class="codigo">${escapar(p.codigo)} · ${pesos(p.precio)}</span>
+      <span>${escapar(p.nombre)}</span><span class="codigo">${escapar(p.codigo)} · ${pesos(precioHoy(p))}</span>
     </button>`).join('');
 }
 
@@ -1508,8 +1522,8 @@ async function cobrar() {
     }
     const venta = {
       id: idVenta,
-      lineas: lineas.map(({ codigo, nombre, precio, cantidad, producto_id }) =>
-        ({ codigo, nombre, precio, cantidad, producto_id })),
+      lineas: lineas.map(({ codigo, nombre, precio, precio_lista, cantidad, producto_id }) =>
+        ({ codigo, nombre, precio, ...(precio_lista > precio ? { precio_lista } : {}), cantidad, producto_id })),
       forma_pago: forma,
       efectivo: forma === 'efectivo' ? efectivo : 0,
       creado_en: creadoEnVenta,
