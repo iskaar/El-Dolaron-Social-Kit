@@ -69,6 +69,13 @@ export async function capturaSumada(env: Env, id: string, correo: string) {
       and ajustado_por = ?)`).bind(id, id, correo).first<PiezaUpc & { sumadas: number }>();
 }
 
+/**
+ * #783: las etiquetas de un «+N» de captura quedan debidas con el folio de su ajuste (migración 074). Va en el mismo batch que el ajuste:
+ * si el ajuste no quedó, o es un reintento del mismo folio, no inserta nada.
+ */
+export const deudaEtiquetas = (env: Env, folio: string) => env.DB.prepare(`insert into etiquetas_deuda (id, producto_id, copias, creado_en)
+  select id, producto_id, cantidad, ajustado_en from conteo_ajustes where id = ? and motivo = 'entrada' on conflict (id) do nothing`).bind(folio);
+
 /** Misma guarda y changes() de cambiarExistencia: cero filas nunca deja rastro ni repone stock. */
 export async function sumarCaptura(env: Env, id: string, upc: string, grado: string, talla: string, cantidad: number, correo: string, propietario = 'dolaron') {
   const previa = await capturaSumada(env, id, correo);
@@ -86,6 +93,7 @@ export async function sumarCaptura(env: Env, id: string, upc: string, grado: str
       select ?, id, coalesce(codigo, ''), nombre, 'entrada', ?, stock - ?, stock, ?, ? from productos
       where id = ? and actualizado_en = ? and changes() = 1`)
       .bind(id, cantidad, cantidad, correo, ahora, pieza.id, ahora),
+    deudaEtiquetas(env, id),
   ]);
   const guardada = await capturaSumada(env, id, correo);
   if (guardada) return guardada;
