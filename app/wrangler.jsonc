@@ -55,7 +55,7 @@
     "PROMO_META_INICIO": "2026-11-01T06:00:00Z",
     "PROMO_META_FIN": "2026-12-01T06:00:00Z",
     "PROMO_META_VENCE": "2027-01-01T06:00:00Z",
-    // Buen Fin (Issue #772): sab 14/11 00:00 a mar 17/11 23:59:59 hora de la tienda (UTC-6): 50 % en todo, 20 % en ropa,
+    // Buen Fin (Issue #772): sab 14/11 00:00 a mar 17/11 23:59:59 hora de la tienda (UTC-6): 30 % en mercancia general, 20 % en ropa,
     // por pieza y sin tocar productos.precio. Para apagarlo, quitar las dos lineas y desplegar. Intervalo [desde, hasta).
     "BUENFIN_DESDE": "2026-11-14T06:00:00Z",
     "BUENFIN_HASTA": "2026-11-18T06:00:00Z",

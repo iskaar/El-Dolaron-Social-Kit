@@ -44,14 +44,14 @@ export function promoInauguracion(subtotal, momento, promo) {
 }
 
 /**
- * Buen Fin (Isaac, 13/11, Issue #772): del 14 al 17/11 la tienda va a 50 % y la ropa a 20 %. Se aplica al
+ * Buen Fin (Isaac, 13/11, Issue #772): del 14 al 17/11 la mercancia general va a 30 % y la ropa a 20 %. Se aplica al
  * PRECIO de cada pieza (no al ticket), asi una devolucion regresa lo que se pago por esa pieza. La ventana
  * viene del servidor (BUENFIN_DESDE/BUENFIN_HASTA): sin ella no hay descuento. El precio baja a peso entero
  * (nunca se da menos del % anunciado); un precio de 0 se queda en 0 y nunca baja de $1. La usan la caja
  * (para mostrar) y el servidor (para cobrar), con la hora de la venta.
  * @param {{ desde: string, hasta: string } | null} ventana
  */
-export const BUENFIN_PORCENTAJE = 50;
+export const BUENFIN_PORCENTAJE = 30;
 export const BUENFIN_PORCENTAJE_ROPA = 20;
 // Producto del envio: nunca lleva descuento.
 export const ENVIO_ID = '00000000-0000-4000-8000-000000000099';

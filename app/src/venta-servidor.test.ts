@@ -226,7 +226,7 @@ test('Buen Fin: prepararLineas rebaja por categoria, no toca envio ni pedidos pa
   const ids = ['a', 'r', 'e', 'p'].map((producto_id) => ({ producto_id, cantidad: 1, precio: 1 }));
   const r = prepararLineas(ids, productos, dentro, BUENFIN);
   assert.ok(r.ok);
-  assert.deepEqual(r.lineas.map((l) => l.precio), [12500, 9600, 9900, 8000]);
+  assert.deepEqual(r.lineas.map((l) => l.precio), [17500, 9600, 9900, 8000]);
   // Fuera de la ventana, o sin ella, igual que hoy.
   for (const [hora, ventana] of [[Date.parse('2026-11-18T06:00:00Z'), BUENFIN], [dentro, null]] as const) {
     const fuera = prepararLineas(ids, productos, hora, ventana);
@@ -236,14 +236,14 @@ test('Buen Fin: prepararLineas rebaja por categoria, no toca envio ni pedidos pa
   // El precio que vio la caja (de catalogo, precio_lista) sigue valiendo 10 min; el Buen Fin se aplica encima.
   const anterior = prepararLineas([{ producto_id: 'v', cantidad: 1, precio: 10000, precio_lista: 20000 }], productos, dentro, BUENFIN);
   assert.ok(anterior.ok);
-  assert.equal(anterior.lineas[0].precio, 10000);
+  assert.equal(anterior.lineas[0].precio, 14000);
   // Un precio_lista inventado no baja el precio: manda el del catalogo.
   const inventado = prepararLineas([{ producto_id: 'v', cantidad: 1, precio: 1, precio_lista: 1 }], productos, dentro, BUENFIN);
   assert.ok(inventado.ok);
-  assert.equal(inventado.lineas[0].precio, 15000);
+  assert.equal(inventado.lineas[0].precio, 21000);
 });
 
-test('Buen Fin: ticket mixto cobra ropa -20 % y lo demas -50 %, no se le cree a la caja y devolver regresa lo pagado', async () => {
+test('Buen Fin: ticket mixto cobra ropa -20 % y lo demas -30 %, no se le cree a la caja y devolver regresa lo pagado', async () => {
   const t = tienda();
   t.db.prepare(`insert into productos (id, codigo, nombre, categoria, precio, stock, semana_ingreso, creado_en, actualizado_en)
     values (?, 'ED-000002', 'Playera', 'ropa', 12000, 10, 'S40', '', '')`).run(ROPA);
@@ -264,9 +264,9 @@ test('Buen Fin: ticket mixto cobra ropa -20 % y lo demas -50 %, no se le cree a 
     const dentro = venta({ creado_en: '2026-11-15T18:00:00Z' });
     const r = await t.pedir('/api/ventas', dentro);
     assert.equal(r.status, 201, JSON.stringify(r.cuerpo));
-    assert.deepEqual(precios(dentro.id), [12500, 9600]);
-    assert.equal((t.db.prepare('select total from ventas where id = ?').get(dentro.id) as any).total, 22100);
-    assert.equal(r.cuerpo.total, 22100);
+    assert.deepEqual(precios(dentro.id), [17500, 9600]);
+    assert.equal((t.db.prepare('select total from ventas where id = ?').get(dentro.id) as any).total, 27100);
+    assert.equal(r.cuerpo.total, 27100);
 
     // Fuera de la ventana nada cambia.
     const antes = venta({ creado_en: '2026-11-13T18:00:00Z' });
@@ -275,7 +275,7 @@ test('Buen Fin: ticket mixto cobra ropa -20 % y lo demas -50 %, no se le cree a 
     // Sin red: la hora de la caja decide (vendida el 17 y sincronizada despues, conserva el descuento).
     const tarde = venta({ creado_en: '2026-11-18T05:59:00Z' });
     assert.equal((await t.pedir('/api/ventas', tarde)).status, 201);
-    assert.deepEqual(precios(tarde.id), [12500, 9600]);
+    assert.deepEqual(precios(tarde.id), [17500, 9600]);
 
     // La caja recibe la categoria en su catalogo y la ventana en su configuracion.
     const cat = await t.pedir('/api/catalogo', undefined, 'GET');
