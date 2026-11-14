@@ -341,6 +341,24 @@ test('apartados y pedidos son solo de Soledad; una cuenta de sucursal no captura
   assert.equal(m.stock(), 50);
 });
 
+test('una cuenta de sucursal no aparta desde /vender ni escribe existencia de Soledad por ropa-ia, conteo o piezas', async () => {
+  const m = montar();
+  const cuenta = (correo: string, roles: string) => m.db.prepare(`insert into usuarios (correo, nombre, roles, activo, tienda, creado_en, actualizado_en) values (?, 'X', ?, 1, 'salk', '', '')`).run(correo, roles);
+  cuenta('rev@prueba.mx', 'revendedora'); cuenta('duenosalk@prueba.mx', 'dueno'); cuenta('capsalk@prueba.mx', 'capturista');
+  const antes = conteos(m.db);
+  const rev = m.yo('rev@prueba.mx'), duenoSalk = m.yo('duenosalk@prueba.mx'), cap = m.yo('capsalk@prueba.mx');
+  const apartar = await rev('/api/vender/apartar', { id: crypto.randomUUID(), producto_id: PRODUCTO, cliente: 'Ana', telefono: '4441234567' });
+  assert.equal(apartar.status, 409, JSON.stringify(apartar.cuerpo));
+  assert.match(apartar.cuerpo.error, /solo de Soledad/);
+  assert.equal((await rev('/api/vender/apartados/1/cancelar', {})).status, 409);
+  assert.equal((await rev('/api/vender/apartados/1/pago', {})).status, 409);
+  assert.equal((await duenoSalk('/api/conteo/ajustes', { id: crypto.randomUUID(), producto_id: PRODUCTO, contado: 1, esperado: 50 })).status, 403);
+  assert.equal((await cap('/api/ropa-ia/x', {})).status, 403);
+  assert.equal((await duenoSalk(`/api/piezas/${PRODUCTO}/existencia`, { id: crypto.randomUUID(), delta: -1, motivo: 'merma' })).status, 403);
+  assert.deepEqual(conteos(m.db), antes);
+  assert.equal(m.stock(), 50);
+});
+
 test('fusión, juntar y descarte se bloquean si la pieza tiene unidades en una sucursal o en camino', async () => {
   const m = montar();
   const cap = m.yo(CAPTURISTA);

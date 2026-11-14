@@ -184,9 +184,10 @@ const estacionValida = (valor: unknown, tienda: string): valor is string =>
 // R3 de #793: apartados, pedidos, portal, vendedoras y WhatsApp son solo de Soledad. Una terminal de sucursal no aparta por sistema en esta
 // etapa: se rechaza, no descuenta de Soledad.
 const APARTADOS_SOLO_SOLEDAD = 'Los apartados y pedidos son solo de Soledad: una sucursal no aparta por sistema en esta etapa.';
-const SOLO_SOLEDAD = /^\/api\/pedidos(?:\/.*)?$/;
+// Incluye lo que llega a pedidos.ts por /api/vender (apartar, cancelar y pagar apartados propios de la revendedora): descuenta y libera productos.stock.
+const SOLO_SOLEDAD = /^\/api\/(?:pedidos(?:\/.*)?|vender\/(?:apartar|apartados\/.*))$/;
 // R3: captura, «+N», suma por UPC, fusión, descarte y ajustes de Soledad. Una cuenta de sucursal no captura.
-const CAPTURA_SOLEDAD = /^\/api\/(?:borradores|piezas)(?:\/.*)?$/;
+const CAPTURA_SOLEDAD = /^\/api\/(?:borradores|piezas|ropa-ia|conteo\/ajustes)(?:\/.*)?$/;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const FOTO_MAX_BYTES = 6 * 1024 * 1024;
 const textoCapturaRopa = (valor: unknown) => typeof valor === 'string' && valor.trim().length <= 40 && !/[\r\n]/.test(valor);
