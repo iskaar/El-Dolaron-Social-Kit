@@ -21,7 +21,7 @@ function entorno(respuestas: any[] | ((ruta: string) => any) = [], imprimirResul
     localStorage: { getItem: (k: string) => almacen.get(k) ?? null, setItem: (k: string, v: string) => almacen.set(k, v) },
     mensaje: (t: string, tipo: string) => mensajes.push([t, tipo]), sonar: (t: string) => sonidos.push(t), pintar() {}, sesion,
     setTimeout: (f: () => void) => { if (relojManual) timers.push(f); else f(); }, Promise, Math, JSON, console,
-    etiqueteraLista: () => lista, $: () => ({ textContent: resumen }),
+    etiqueteraLista: () => lista, noImprime: () => false, $: () => ({ textContent: resumen }),
     api: async (ruta: string) => { llamadasApi++; peticiones.push(ruta); const r = typeof respuestas === 'function' ? (respuestas as any)(ruta) : respuestas.shift(); if (r instanceof Error) throw r; return r; },
     imprimir: async (id: string, n: number, opciones: unknown) => { envios.push({ id, n, opciones: { ...(opciones as object) } }); return typeof imprimirResultado === 'function' ? imprimirResultado() : imprimirResultado; },
   };
@@ -212,7 +212,7 @@ function correccion(lista: any[] | Error, { impresa = false } = {}) {
     api: async (ruta: string) => { consultas.push(ruta); if (lista instanceof Error) throw lista; return lista; },
     mensaje: (t: string, tipo: string) => mensajes.push([t, tipo]),
     captura: { imprimirPieza: (id: string, n: number, opciones: unknown) => impresiones.push({ id, n, opciones: { ...(opciones as object) } }) },
-    estadoEnvio: () => ({ marca: undefined }), capturaImpresa: () => impresa, etiquetasPorCorreccion, marcaDeLaBase, etiqueteraLista: () => true, $: () => ({}), Promise, setTimeout, console,
+    estadoEnvio: () => ({ marca: undefined }), capturaImpresa: () => impresa, etiquetasPorCorreccion, marcaDeLaBase, etiqueteraLista: () => true, noImprime: () => false, $: () => ({}), Promise, setTimeout, console,
   };
   runInNewContext(`${etiquetar}
 globalThis.etiquetarCorreccion = etiquetarCorreccion;`, contexto);

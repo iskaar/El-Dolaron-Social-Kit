@@ -8,7 +8,7 @@ import { stepper, bloquear, cerrarHoja } from './inventario-ui.js';
 import { estadoEnvio, sincronizarMarcas, marcaDeLaBase } from './envio-etiquetas.js';
 import { esRopa } from './ropa.js';
 import { cambiosTarjeta, capturaImpresa, corregirExistencia, etiquetasPorCorreccion, faltaCalzado, piezaSinRegistrar } from './inventario-capturar.js';
-import { etiqueteraLista } from './etiquetera.js';
+import { etiqueteraLista, noImprime } from './etiquetera.js';
 import { esCalzado } from './tallas.js';
 import { avisoReimpresion, pesos } from './ficha.js';
 
@@ -126,6 +126,7 @@ export async function iniciarCelular(ctx,captura) {
     const ok=await captura.imprimirCaptura(id,id,Math.min(99,n),{}),dato=sesion.get(id);
     if(dato){dato.estado='subida';dato.por_revisar=0;dato.faltaEtiqueta=!ok;}
     if(ok){mensaje(`Sale la etiqueta: ${nombre} ×${Math.min(99,n)}`,'etiqueta');sonar('etiqueta');}
+    else if(noImprime())mensaje(`Guardada · la etiqueta de ${nombre} ×${Math.min(99,n)} sale en la PC`,'aviso');   // #781: sin ✓ ni «falta etiqueta»
     else mensaje(`Guardada · falta etiqueta: ${razonSinEtiqueta()}`,'aviso');
     pintar();return ok;
   }
@@ -137,7 +138,8 @@ export async function iniciarCelular(ctx,captura) {
   async function etiquetarCorreccion(id,datos,actual,cantidad){
     const remota=await marcaDeLaBase(api,id);
     const faltan=etiquetasPorCorreccion({antes:actual.stock,despues:cantidad,estado_analisis:actual.estado_analisis,marca:estadoEnvio({...actual,id}).marca,etiqueta_en:remota?remota.etiqueta_en:datos.etiqueta_en,impresa:capturaImpresa(id)});
-    if(faltan)void captura.imprimirPieza(id,faltan,{reimprimir:true});
+    if(faltan&&noImprime())mensaje(`Faltan ${faltan} ${faltan===1?'etiqueta':'etiquetas'}: este aparato no imprime. Reimprímelas en la PC desde Buscar`,'aviso');   // #781: la automática de la PC no repite lo que ya salió
+    else if(faltan)void captura.imprimirPieza(id,faltan,{reimprimir:true});
     else if(!remota&&cantidad>actual.stock&&actual.estado_analisis==='listo')mensaje('No se pudo comprobar la etiqueta: si la original ya salió, reimprime las que faltan desde Buscar','aviso');
   }
   async function subir(){

@@ -241,7 +241,9 @@ addEventListener('online', red); addEventListener('offline', red); red();
 visualViewport?.addEventListener('resize', () => document.body.classList.toggle('teclado-abierto', visualViewport.height < innerHeight * .7));
 await cambiarModo(new URLSearchParams(location.search).has('pieza') ? 'buscar' : modos.includes(location.hash.slice(1)) ? location.hash.slice(1) : modos.includes(localStorage.getItem('inventario-modo')) ? localStorage.getItem('inventario-modo') : modos[0]);
 // Celular (#440): recupera sin clic la impresora que el navegador recuerda; si no se puede, el chip sigue pidiendo conectarla.
-if (!pc() && modos.includes('imprimir') && navigator.bluetooth?.getDevices) void import('./etiquetera.js').then(async (m) => {
-  if (await m.reconectarEtiquetera()) { $('chip-impresora').textContent = '● Impresora · Lista'; $('chip-impresora').classList.remove('aviso'); }
+// «Este aparato no imprime» (#781): no reconecta ni toca Bluetooth (reconectarEtiquetera lo respeta) y el chip lo dice desde el inicio.
+if (modos.includes('imprimir')) void import('./etiquetera.js').then(async (m) => {
+  if (m.noImprime()) { $('chip-impresora').textContent = '○ No imprime'; $('chip-impresora').classList.remove('aviso'); }
+  else if (!pc() && navigator.bluetooth?.getDevices && await m.reconectarEtiquetera()) { $('chip-impresora').textContent = '● Impresora · Lista'; $('chip-impresora').classList.remove('aviso'); }
 }).catch(() => {});
 const inicial = new URLSearchParams(location.search).get('pieza'); if (inicial) { $('consulta').value = inicial; await buscar(false, true); }
