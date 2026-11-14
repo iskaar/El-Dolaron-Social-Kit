@@ -5,7 +5,7 @@
  * (migración 077); lo que va en un bulto abierto o cerrado no es de ninguna tienda hasta recibirse. D1 es el único maestro:
  * no hay copia derivada. Todo se escribe dentro del batch de quien llama.
  */
-import { TIENDA_CENTRAL } from './cuentas.ts';
+import { TIENDA_CENTRAL, TIENDAS, type Tienda } from './cuentas.ts';
 
 /**
  * Unidades que `delta` mueve de una pieza en una tienda, como sentencias para el batch de quien llama. Un delta negativo que
@@ -56,4 +56,42 @@ export async function unidadesEn(env: Env, tienda: string, productoId: string): 
   }
   return (await env.DB.prepare('select unidades from existencia_tienda where producto_id = ? and tienda = ?').bind(productoId, tienda)
     .first<{ unidades: number }>())?.unidades ?? 0;
+}
+
+/** Las sucursales (todas las tiendas menos la central), en el orden de TIENDAS. Constantes del código: seguras para armar SQL. */
+// Función y no constante: cuentas.ts importa (en cadena) este módulo y TIENDAS aún no existe al cargarlo.
+export const sucursales = () => (Object.keys(TIENDAS) as Tienda[]).filter((t) => t !== TIENDA_CENTRAL);
+
+/** SQL: unidades de la pieza `col` en todas las sucursales juntas. */
+export const enSucursalesSql = (col: string) =>
+  `coalesce((select sum(e.unidades) from existencia_tienda e where e.producto_id = ${col}), 0)`;
+
+/** SQL: unidades de la pieza `col` en una sucursal. `tienda` es una clave de TIENDAS (nunca texto del navegador). */
+export const enTiendaSql = (col: string, tienda: Tienda) =>
+  `coalesce((select e.unidades from existencia_tienda e where e.producto_id = ${col} and e.tienda = '${tienda}'), 0)`;
+
+/** SQL: unidades de la pieza `col` en un bulto abierto o cerrado (en camino): no son de ninguna tienda hasta recibirse. */
+export const enCaminoSql = (col: string) =>
+  `coalesce((select sum(bl.cantidad) from bulto_lineas bl join bultos bu on bu.id = bl.bulto_id
+    where bl.producto_id = ${col} and bl.quitada_en is null and bu.estado in ('abierto', 'cerrado')), 0)`;
+
+/**
+ * SQL: la existencia total de la pieza = Soledad + sucursales + en camino (#793). `stock` es la expresión de Soledad (`productos.stock`
+ * o `p.stock`); `col` el id de la pieza. Sin sucursales ni bultos vale exactamente `stock`.
+ */
+export const existenciaTotalSql = (stock: string, col: string) => `(${stock} + ${enSucursalesSql(col)} + ${enCaminoSql(col)})`;
+
+export interface Desglose { soledad: number; sucursales: Record<string, number>; en_camino: number; total: number }
+
+/** El desglose de una pieza: Soledad, cada sucursal (0 si nunca llegó), en camino y total. Solo lectura. */
+export async function desglosePieza(env: Env, productoId: string): Promise<Desglose | null> {
+  const fila = await env.DB.prepare(`select stock as soledad, ${enCaminoSql('productos.id')} as en_camino,
+      ${sucursales().map((t) => `${enTiendaSql('productos.id', t)} as t_${t}`).join(', ')}
+    from productos where id = ?`).bind(productoId).first<Record<string, number>>();
+  if (!fila) return null;
+  const porTienda = Object.fromEntries(sucursales().map((t) => [t, fila[`t_${t}`]]));
+  return {
+    soledad: fila.soledad, sucursales: porTienda, en_camino: fila.en_camino,
+    total: fila.soledad + fila.en_camino + Object.values(porTienda).reduce((s, n) => s + n, 0),
+  };
 }

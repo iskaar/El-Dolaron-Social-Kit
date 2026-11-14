@@ -23,7 +23,7 @@ import { CLAVES_CATEGORIA } from '../public/categorias.js';
 import { tallaValida, esCalzado } from '../public/tallas.js';
 import {
   permiso, puede, quienEs, leerUsuario, yo, pedirAcceso, listarCuentas, guardarCuenta, resolverSolicitud, propietarioDe,
-  esDeCaja, soloComputadora, esRevendedora, esInversionista, cajasDe, tiendaDe, TIENDA_CENTRAL, puedeEditarInventario, type Usuario,
+  esDeCaja, soloComputadora, esRevendedora, esInversionista, cajasDe, tiendaDe, esTienda, TIENDA_CENTRAL, puedeEditarInventario, type Usuario,
 } from './cuentas.ts';
 import { cajeroEnTurno, listarCajeros, listarVendedoras, esVendedora, entrar, salir, ponerPin } from './cajeros.ts';
 import { rutaPush } from './push.ts';
@@ -33,7 +33,7 @@ import { verFotoReportada } from './pagos-reportados.ts';
 import { registrarSocio, buscarSocio, buscarPorCodigo, basesListas, sentenciasDeVenta, saldo } from './dolarones.ts';
 import { registrarCorte, registrarRetiro, rutaTerminal, ultimoCorte, cajaDe, CajaAjena } from './corte.ts';
 import { rutaGastos } from './gastos.ts';
-import { sentenciasMover, esExistenciaInsuficiente, fueraDeSoledad, tieneUnidadesFuera, MENSAJE_FUERA_DE_SOLEDAD } from './existencias.ts';
+import { sentenciasMover, esExistenciaInsuficiente, fueraDeSoledad, tieneUnidadesFuera, MENSAJE_FUERA_DE_SOLEDAD, sucursales, enCaminoSql, enTiendaSql, existenciaTotalSql } from './existencias.ts';
 import { rutaBultos } from './bultos.ts';
 import { rutaPiezas, buscarPiezas, escribirExistencia, autorizarPrecio } from './piezas.ts';
 import { rutaSolicitudesPrecio, crearSolicitud } from './solicitudes-precio.ts';
@@ -186,8 +186,9 @@ const estacionValida = (valor: unknown, tienda: string): valor is string =>
 const APARTADOS_SOLO_SOLEDAD = 'Los apartados y pedidos son solo de Soledad: una sucursal no aparta por sistema en esta etapa.';
 // Incluye lo que llega a pedidos.ts por /api/vender (apartar, cancelar y pagar apartados propios de la revendedora): descuenta y libera productos.stock.
 const SOLO_SOLEDAD = /^\/api\/(?:pedidos(?:\/.*)?|vender\/(?:apartar|apartados\/.*))$/;
-// R3: captura, «+N», suma por UPC, fusión, descarte y ajustes de Soledad. Una cuenta de sucursal no captura.
-const CAPTURA_SOLEDAD = /^\/api\/(?:borradores|piezas|ropa-ia|conteo\/ajustes)(?:\/.*)?$/;
+// R3: captura, «+N», suma por UPC, fusión, descarte y ajustes de Soledad. Una cuenta de sucursal no captura. (`/api/conteo/ajustes` ya no va aquí: #798
+// lo hace actuar sobre la existencia de la tienda de la cuenta.)
+const CAPTURA_SOLEDAD = /^\/api\/(?:borradores|piezas|ropa-ia)(?:\/.*)?$/;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const FOTO_MAX_BYTES = 6 * 1024 * 1024;
 const textoCapturaRopa = (valor: unknown) => typeof valor === 'string' && valor.trim().length <= 40 && !/[\r\n]/.test(valor);
@@ -2182,7 +2183,7 @@ async function tomarImpresion(id: string, request: Request, env: Env, correo: st
 
 // Lo que lleva un renglon de la lista de tickets (ticket.js `renglonTicket`), del dia o del rango.
 const COLUMNAS_TICKET = `v.id, v.total, v.forma_pago, v.cancelada, v.creado_en, v.dolarones, v.devuelto, v.dolarones_devueltos,
-            v.caja, v.cajero, v.vendedora, v.cliente_id is not null as con_socio,
+            v.caja, v.cajero, v.vendedora, v.tienda, v.cliente_id is not null as con_socio,
             (select group_concat(nombre, ' · ') from venta_lineas where venta_id = v.id) as piezas,
             (select coalesce(sum(cantidad), 0) from venta_lineas where venta_id = v.id) as cantidad,
             (select coalesce(sum(cancelada_cantidad), 0) from venta_lineas where venta_id = v.id) as cancelada_cantidad`;
@@ -2340,6 +2341,9 @@ function filtrosTickets(url: URL) {
     const valor = q.get(campo);
     if (valor) { filtros.push(`v.${campo} = ?`); datos.push(valor); }
   }
+  // #798: la tienda donde se cobró (ventas.tienda). Una clave que no existe no filtra nada: igual que `forma_pago` inválida.
+  const tienda = q.get('tienda');
+  if (esTienda(tienda)) { filtros.push('v.tienda = ?'); datos.push(tienda); }
   const estado = q.get('estado');
   if (estado === 'vigente') filtros.push('v.cancelada = 0');
   if (estado === 'cancelado') filtros.push('v.cancelada = 1');
@@ -2464,25 +2468,30 @@ async function exportarVentasCsv(env: Env): Promise<Response> {
 }
 
 async function exportarInventarioCsv(env: Env): Promise<Response> {
+  // #798: `stock` es la existencia total (Soledad + sucursales + en camino); con los datos de hoy es productos.stock. Al final, el desglose.
   const { results } = await env.DB.prepare(
     `select codigo, nombre, categoria, marca, precio_lista, precio, precio_sugerido, estado_fisico,
-            estado_analisis, destino, stock, sin_inventario, semana_ingreso, capturado_por, creado_en
+            estado_analisis, destino, ${existenciaTotalSql('stock', 'productos.id')} as stock, sin_inventario, semana_ingreso, capturado_por, creado_en,
+            stock as en_soledad, ${sucursales().map((t) => `${enTiendaSql('productos.id', t)} as en_${t}`).join(', ')}, ${enCaminoSql('productos.id')} as en_camino
      from productos where propietario = 'dolaron' order by creado_en`,
   ).all<{
     codigo: string; nombre: string; categoria: string; marca: string; precio_lista: number; precio: number;
     precio_sugerido: number; estado_fisico: string; estado_analisis: string; destino: string;
     stock: number; sin_inventario: number; semana_ingreso: string; capturado_por: string; creado_en: string;
-  }>();
+    en_soledad: number; en_camino: number;
+  } & Record<string, number>>();
 
   const filas = results.map((f) => [
     f.codigo ?? '', f.nombre, f.categoria, f.marca, pesosDe(f.precio_lista), pesosDe(f.precio),
     f.precio_sugerido ? pesosDe(f.precio_sugerido) : '', f.estado_fisico, f.estado_analisis, f.destino,
     f.sin_inventario ? '' : f.stock, f.semana_ingreso, f.capturado_por, f.creado_en,
+    f.sin_inventario ? '' : f.en_soledad, ...sucursales().map((t) => f.sin_inventario ? '' : f[`en_${t}`]), f.sin_inventario ? '' : f.en_camino,
   ]);
   return respuestaCsv(
     'inventario.csv',
     ['codigo', 'nombre', 'categoria', 'marca', 'precio_lista', 'precio', 'precio_sugerido', 'estado_fisico',
-      'estado_analisis', 'destino', 'stock', 'semana_ingreso', 'capturado_por', 'creado_en'],
+      'estado_analisis', 'destino', 'stock', 'semana_ingreso', 'capturado_por', 'creado_en',
+      'en_soledad', ...sucursales().map((t) => `en_${t}`), 'en_camino'],
     filas,
   );
 }
@@ -2754,10 +2763,10 @@ export default {
       }
 
       // Conteo de piezas de alto valor (Issue #219, conteo.ts). Contar: cualquier cuenta de piso; ajustar y el rastro: dueno.
-      if (pathname === '/api/conteo' && request.method === 'GET') return await listarAltoValor(env, propietarioDe(usuario));
-      if (pathname === '/api/conteo' && request.method === 'POST') return await revisarConteo(request, env, propietarioDe(usuario));
+      if (pathname === '/api/conteo' && request.method === 'GET') return await listarAltoValor(env, propietarioDe(usuario), tienda);
+      if (pathname === '/api/conteo' && request.method === 'POST') return await revisarConteo(request, env, propietarioDe(usuario), tienda);
       if (pathname === '/api/conteo/ajustes' && request.method === 'GET') return await listarAjustes(env, propietarioDe(usuario));
-      if (pathname === '/api/conteo/ajustes' && request.method === 'POST') return await ajustarExistencia(request, env, correo, ctx, propietarioDe(usuario));
+      if (pathname === '/api/conteo/ajustes' && request.method === 'POST') return await ajustarExistencia(request, env, correo, ctx, propietarioDe(usuario), tienda, usuario);
 
       if (pathname.startsWith('/api/ml/') || pathname === '/ml/callback') {
         const respuestaML = await rutaML(request, env, url);

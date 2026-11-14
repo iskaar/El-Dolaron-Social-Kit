@@ -73,6 +73,7 @@ export async function calcularTablero(env: Env, ahora = Date.now()) {
     inventario: {
       piezas: inventario.unidades,
       valor: inventario.valor,
+      por_tienda: inventario.por_tienda,   // #798: dónde está (solo agregados): Soledad, cada sucursal y en camino
       semanas_de_inventario: semanasDeInventario,
       por_antiguedad: inventario.por_antiguedad,
       sin_fecha: inventario.sin_fecha,

@@ -187,18 +187,40 @@ export function crearFicha({ mensaje, alAbrir = () => {}, confirmar = (texto) =>
   }
 
   const MOTIVOS_TEXTO = { fusion:'Fusión', descarte:'Descarte' };   // el resto ya se lee tal cual
-  function pintarHistorial(historial) {
+  // #798: dónde está la pieza. Un servidor viejo no manda `existencia`: sin ella no se pinta nada y la ficha queda como antes.
+  const LUGARES = { soledad:'Soledad', salk:'Avenida Salk', romero:'Coronel Romero' };
+  const lugar = (clave) => LUGARES[clave] ?? clave;
+  function pintarDesglose(existencia) {
+    const p = $('desglose');
+    if (!p) return;   // una página vieja en caché sin el nodo: la ficha queda como antes
+    if (!existencia) { p.hidden = true; return; }
+    const partes = [`Soledad ${existencia.soledad}`, ...Object.entries(existencia.sucursales ?? {}).map(([t, n]) => `${lugar(t)} ${n}`), `En camino ${existencia.en_camino}`];
+    p.textContent = `${partes.join(' · ')} · Total ${existencia.total}`;
+    p.hidden = existencia.total === existencia.soledad;   // solo Soledad tiene la pieza: el número de arriba ya lo dice todo
+  }
+  // Salidas y entradas por bulto (#798): con su folio y la tienda de cada movimiento.
+  const textoBulto = (m) => {
+    const dir = m.tipo === 'bulto_salida' ? `Sale de ${lugar(m.tienda)} en bulto` : m.tipo === 'bulto_entrada' ? `Entra a ${lugar(m.tienda)} por bulto`
+      : m.tipo === 'bulto_regreso' ? `Regresa a ${lugar(m.tienda)} (quitada del bulto)` : `Vuelve a ${lugar(m.tienda)} (bulto cancelado)`;
+    return `${new Date(m.en).toLocaleString('es-MX', { timeZone:'America/Mexico_City' })} · ${m.cantidad > 0 ? '+' : ''}${m.cantidad} · ${dir} ${m.folio} · ${m.por ?? ''}`;
+  };
+  function pintarHistorial(historial, bultos = [], tiendasDe = {}) {
     $('historial').replaceChildren();
-    for (const a of historial) {
+    const fecha = (x) => x.ajustado_en ?? x.en ?? '';
+    const todo = [...historial.map((a) => ({ a })), ...bultos.map((m) => ({ m }))]
+      .sort((x, y) => (fecha(y.a ?? y.m) < fecha(x.a ?? x.m) ? -1 : fecha(y.a ?? y.m) > fecha(x.a ?? x.m) ? 1 : 0));
+    for (const { a, m } of todo) {
       const li = document.createElement('li');
-      if (a.campo) li.textContent = textoCambio(a);   // cambio de campo (bitácora #485)
+      if (m) li.textContent = textoBulto(m);
+      else if (a.campo) li.textContent = textoCambio(a);   // cambio de campo (bitácora #485)
       else {
         const delta = a.despues - a.antes;
-        li.textContent = `${new Date(a.ajustado_en).toLocaleString('es-MX', { timeZone:'America/Mexico_City' })} · ${delta > 0 ? '+' : ''}${delta} · ${a.antes} → ${a.despues} · ${MOTIVOS_TEXTO[a.motivo] ?? a.motivo} · ${a.ajustado_por}`;
+        const donde = tiendasDe[a.id] ? ` · en ${lugar(tiendasDe[a.id])}` : '';
+        li.textContent = `${new Date(a.ajustado_en).toLocaleString('es-MX', { timeZone:'America/Mexico_City' })} · ${delta > 0 ? '+' : ''}${delta} · ${a.antes} → ${a.despues} · ${MOTIVOS_TEXTO[a.motivo] ?? a.motivo} · ${a.ajustado_por}${donde}`;
       }
       $('historial').append(li);
     }
-    if (!historial.length) { const li = document.createElement('li'); li.textContent = 'Sin cambios registrados.'; $('historial').append(li); }
+    if (!todo.length) { const li = document.createElement('li'); li.textContent = 'Sin cambios registrados.'; $('historial').append(li); }
   }
 
   function cerrarFormulario() { void cerrarCamaraUpc(); $('corregir').hidden = true; $('reimprimir').hidden = true; }
@@ -211,14 +233,15 @@ export function crearFicha({ mensaje, alAbrir = () => {}, confirmar = (texto) =>
     const turno = ++apertura;
     quitarDeshacer(); cerrarFormulario();
     $('motivo').value = 'correccion'; $('fijar-a').value = '';
-    pieza = null; pintar();
+    pieza = null; pintarDesglose(null); pintar();
     try {
       const datos = await api(`/api/piezas/${id}`);
       if (turno !== apertura) return;
       pieza = datos.pieza;
       puedeEditar = datos.puede_editar === true;
       puedePrecio = datos.puede_precio === true;
-      pintarHistorial(datos.historial);
+      pintarHistorial(datos.historial, datos.movimientos_bulto, datos.tienda_de_ajustes);
+      pintarDesglose(datos.existencia);
       pintar();
       alAbrir(pieza, datos);
       mensaje(`Pieza abierta: ${pieza.nombre}. Existencia ${pieza.stock}.`);
@@ -261,7 +284,7 @@ export function crearFicha({ mensaje, alAbrir = () => {}, confirmar = (texto) =>
     if (!pendiente && pieza?.id === operacion.piezaId && turno === apertura) {
       try {
         const datos = await api(`/api/piezas/${operacion.piezaId}`);
-        if (turno === apertura) { pieza = datos.pieza; puedeEditar = datos.puede_editar === true; puedePrecio = datos.puede_precio === true; pintarHistorial(datos.historial); }
+        if (turno === apertura) { pieza = datos.pieza; puedeEditar = datos.puede_editar === true; puedePrecio = datos.puede_precio === true; pintarHistorial(datos.historial, datos.movimientos_bulto, datos.tienda_de_ajustes); pintarDesglose(datos.existencia); }
       } catch { texto += ' No se pudo actualizar la ficha; vuelve a abrirla.'; }
     }
     enviando = false; pintar(); $('reintentar').hidden = !pendiente;

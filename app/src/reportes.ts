@@ -1,6 +1,8 @@
 // Consultas de /reportes y los helpers de fecha de la tienda. /tablero (Issue #610) reutiliza lo exportado.
 import { lineasNetas } from './netas.ts';
 import { tramoDeDias, TRAMOS_ANTIGUEDAD } from '../public/graficas.js';
+import { TIENDAS, TIENDA_CENTRAL, cajasDe, esTienda, type Tienda } from './cuentas.ts';
+import { sucursales, enCaminoSql, enTiendaSql, existenciaTotalSql } from './existencias.ts';
 
 const json = (cuerpo: unknown, status = 200) => new Response(JSON.stringify(cuerpo), {
   status, headers: { 'content-type': 'application/json; charset=utf-8' },
@@ -42,6 +44,19 @@ export const rangoDe = (url: URL) => {
   return rangoDias(Number.isFinite(dias) ? Math.min(365, Math.max(1, dias)) : 30);
 };
 
+/** Unidades y valor por dónde están: Soledad, cada sucursal y en camino. Las claves van siempre (en 0 si no hay nada). */
+function desgloseDeInventario(filas: ({ precio: number; soledad: number; en_camino: number } & Record<string, number>)[]) {
+  const lugar = () => ({ unidades: 0, valor: 0 });
+  const por: Record<string, { unidades: number; valor: number }> = { [TIENDA_CENTRAL]: lugar(), ...Object.fromEntries(sucursales().map((t) => [t, lugar()])), en_camino: lugar() };
+  for (const f of filas) {
+    const suma = (clave: string, unidades: number) => { por[clave].unidades += unidades; por[clave].valor += f.precio * unidades; };
+    suma(TIENDA_CENTRAL, f.soledad);
+    for (const t of sucursales()) suma(t, f[`t_${t}`]);
+    suma('en_camino', f.en_camino);
+  }
+  return por;
+}
+
 /**
  * Foto de lo que hay en piso AHORA (Issue #174), sin importar el periodo del reporte: piezas individuales
  * ya etiquetadas (con codigo) y con existencia. Quedan fuera las bandas (no tienen fecha de captura propia),
@@ -52,16 +67,22 @@ export const rangoDe = (url: URL) => {
  */
 export async function inventarioEnPiso(env: Env, ahora = Date.now()) {
   // ponytail: se trae toda la lista y se suma en JS; con decenas de miles de piezas en piso conviene agrupar en SQL.
+  // #798: la existencia de una pieza es Soledad + sucursales + en camino (bulto abierto o cerrado), para que la mercancía no
+  // «desaparezca» del valor al meterla a un bulto. `stock` de cada fila es esa existencia total; el desglose viaja en `soledad`,
+  // `en_camino` y `t_<tienda>`. Sin sucursales ni bultos el total es exactamente `productos.stock`, como antes.
   const { results } = await env.DB.prepare(
-    `select id, codigo, nombre, coalesce(nullif(categoria, ''), 'sin categoria') as categoria, precio, stock, creado_en,
+    `select id, codigo, nombre, coalesce(nullif(categoria, ''), 'sin categoria') as categoria, precio,
+       ${existenciaTotalSql('stock', 'productos.id')} as stock, stock as soledad, ${enCaminoSql('productos.id')} as en_camino,
+       ${sucursales().map((t) => `${enTiendaSql('productos.id', t)} as t_${t}`).join(', ')}, creado_en,
        case when julianday(creado_en) is null then null
             else max(0, cast(julianday(?) - julianday(substr(datetime(creado_en, '-6 hours'), 1, 10)) as integer)) end as dias
      from productos
-     where sin_inventario = 0 and stock > 0 and destino = 'etiqueta' and codigo is not null and codigo != ''
+     where sin_inventario = 0 and ${existenciaTotalSql('stock', 'productos.id')} > 0 and destino = 'etiqueta' and codigo is not null and codigo != ''
        and propietario = 'dolaron' and estado_fisico <> 'caducado'`,
   )
     .bind(hoyTienda(ahora))
-    .all<{ id: string; codigo: string; nombre: string; categoria: string; precio: number; stock: number; creado_en: string; dias: number | null }>();
+    .all<{ id: string; codigo: string; nombre: string; categoria: string; precio: number; stock: number; soledad: number; en_camino: number;
+      creado_en: string; dias: number | null } & Record<string, number>>();
 
   const valorDe = (f: { precio: number; stock: number }) => f.precio * f.stock;
   const tramos = new Map(TRAMOS_ANTIGUEDAD.map(([clave]) => [clave, { tramo: clave, piezas: 0, unidades: 0, valor: 0 }]));
@@ -84,6 +105,8 @@ export async function inventarioEnPiso(env: Env, ahora = Date.now()) {
     piezas: results.length,
     unidades: results.reduce((suma, f) => suma + f.stock, 0),
     valor: results.reduce((suma, f) => suma + valorDe(f), 0),
+    // #798: desglose de las mismas unidades y su valor por dónde están (Soledad, cada sucursal, en camino). Suma = unidades y valor de arriba.
+    por_tienda: desgloseDeInventario(results),
     por_antiguedad: [...tramos.values()],
     sin_fecha: sinFecha,
     por_categoria: [...categorias.values()]
@@ -104,7 +127,8 @@ export async function inventarioEnPiso(env: Env, ahora = Date.now()) {
  */
 export async function mermaCaducidad(env: Env, desde: string) {
   const { results } = await env.DB.prepare(
-    `select id, codigo, nombre, coalesce(nullif(categoria, ''), 'sin categoria') as categoria, precio_lista, stock, creado_en
+    `select id, codigo, nombre, coalesce(nullif(categoria, ''), 'sin categoria') as categoria, precio_lista,
+       ${existenciaTotalSql('stock', 'productos.id')} as stock, creado_en
      from productos
      where estado_fisico = 'caducado' and estado_analisis <> 'descartado' and sin_inventario = 0
        and propietario = 'dolaron' and creado_en >= ?
@@ -145,10 +169,20 @@ export async function diasEnVentaPorCategoria(env: Env) {
 export async function reportes(url: URL, env: Env): Promise<Response> {
   const rango = rangoDe(url);
   const { dias, desde } = rango;
+  // #798: `?tienda=` acota las VENTAS a una tienda (ventas.tienda, congelada al cobrar); sin él, el negocio completo. La clave se valida contra
+  // TIENDAS, así que es seguro ponerla en el SQL. El inventario es una foto del negocio y no se filtra: trae su propio desglose por tienda.
+  const pedida = url.searchParams.get('tienda') ?? '';
+  if (pedida && !esTienda(pedida)) return json({ error: 'Tienda invalida.' }, 400);
+  const tienda: Tienda | null = esTienda(pedida) ? pedida : null;
+  const deTienda = tienda ? ` and v.tienda = '${tienda}'` : '';          // sobre ventas con alias v
+  const deTiendaSola = tienda ? ` and tienda = '${tienda}'` : '';        // sobre ventas sin alias
+  // Los pedidos y apartados son solo de Soledad (R3 de #793): filtrando una sucursal no aportan anticipos ni abonos.
+  const sinPedidos = tienda && tienda !== TIENDA_CENTRAL ? ' and 0' : '';
+  const deCajas = (columna: string) => tienda ? ` and ${columna} in (${cajasDe(tienda).map((c) => `'${c}'`).join(', ')})` : '';
 
   // Solo lo de la tienda (propietario 'dolaron', Issue #298): el neto de cada ticket va repartido por pieza.
   const resumen = await env.DB.prepare(
-    `${lineasNetas('v.creado_en >= ?')}
+    `${lineasNetas(`v.creado_en >= ?${deTienda}`)}
      select count(distinct venta) as ventas, coalesce(sum(neta), 0) as total, coalesce(sum(cant), 0) as piezas
      from netas where propietario = 'dolaron'`,
   )
@@ -157,7 +191,7 @@ export async function reportes(url: URL, env: Env): Promise<Response> {
 
   // El periodo de igual largo justo antes, para las flechas de «vs periodo anterior».
   const anterior = await env.DB.prepare(
-    `${lineasNetas('v.creado_en >= ? and v.creado_en < ?')}
+    `${lineasNetas(`v.creado_en >= ? and v.creado_en < ?${deTienda}`)}
      select count(distinct venta) as ventas, coalesce(sum(neta), 0) as total, coalesce(sum(cant), 0) as piezas
      from netas where propietario = 'dolaron'`,
   )
@@ -167,10 +201,10 @@ export async function reportes(url: URL, env: Env): Promise<Response> {
   // De bruto a vendido, sin que sobre ni falte un centavo: lo cobrado en todos los
   // tickets, menos lo devuelto por piezas, menos lo que valian los cancelados completos.
   const cuadre = await env.DB.prepare(
-    `${lineasNetas('v.creado_en >= ?')}
-     select (select coalesce(sum(total), 0) from ventas where creado_en >= ?) as bruto,
-       (select coalesce(sum(devuelto + dolarones_devueltos), 0) from ventas where creado_en >= ?) as devoluciones_pieza,
-       (select coalesce(sum(case when cancelada = 1 then total - devuelto - dolarones_devueltos end), 0) from ventas where creado_en >= ?) as cancelados,
+    `${lineasNetas(`v.creado_en >= ?${deTienda}`)}
+     select (select coalesce(sum(total), 0) from ventas where creado_en >= ?${deTiendaSola}) as bruto,
+       (select coalesce(sum(devuelto + dolarones_devueltos), 0) from ventas where creado_en >= ?${deTiendaSola}) as devoluciones_pieza,
+       (select coalesce(sum(case when cancelada = 1 then total - devuelto - dolarones_devueltos end), 0) from ventas where creado_en >= ?${deTiendaSola}) as cancelados,
        (select coalesce(sum(neta), 0) from netas where propietario = 'fep') as fep`,
   )
     .bind(desde, desde, desde, desde)
@@ -181,15 +215,15 @@ export async function reportes(url: URL, env: Env): Promise<Response> {
     // Cobrado en el ticket (netas.ts ya descuenta el anticipo) mas el anticipo de los pedidos recibidos
     // en el periodo: el dinero entra el dia del apartado, no el de la venta. Los Dolarones usados
     // (neta - cobrado - anticipo) van en su propia fila.
-    `${lineasNetas('v.creado_en >= ?')}
+    `${lineasNetas(`v.creado_en >= ?${deTienda}`)}
      select forma_pago, sum(tickets) as tickets, sum(total) as total from (
        select forma_pago, count(distinct venta) as tickets, coalesce(sum(cobrado), 0) as total
        from cobros where propietario = 'dolaron' group by forma_pago
        union all
-       select forma_pago, 0, coalesce(sum(anticipo), 0) from pedidos where creado_en >= ? group by forma_pago
+       select forma_pago, 0, coalesce(sum(anticipo), 0) from pedidos where creado_en >= ?${sinPedidos} group by forma_pago
        union all
        select forma_pago, 0, coalesce(sum(importe), 0) from pedido_movimientos
-       where tipo = 'abono' and creado_en >= ? group by forma_pago
+       where tipo = 'abono' and creado_en >= ?${sinPedidos} group by forma_pago
        union all
        select 'dolarones', count(distinct case when neta - cobrado - anticipo_linea <> 0 then venta end),
          coalesce(sum(neta - cobrado - anticipo_linea), 0)
@@ -200,7 +234,7 @@ export async function reportes(url: URL, env: Env): Promise<Response> {
     .all<{ forma_pago: string; tickets: number; total: number }>();
 
   const { results: ventasPorDia } = await env.DB.prepare(
-    `${lineasNetas('v.creado_en >= ?')}
+    `${lineasNetas(`v.creado_en >= ?${deTienda}`)}
      select ${diaTienda('creado_en')} as dia, count(distinct venta) as tickets, sum(neta) as total
      from netas where propietario = 'dolaron' group by dia order by dia`,
   )
@@ -209,7 +243,7 @@ export async function reportes(url: URL, env: Env): Promise<Response> {
   const { results: piezasPorDia } = await env.DB.prepare(
     `select ${diaTienda('v.creado_en')} as dia, coalesce(sum(l.cantidad - l.cancelada_cantidad), 0) as piezas
      from venta_lineas l join ventas v on v.id = l.venta_id
-     where v.cancelada = 0 and v.creado_en >= ? and l.propietario = 'dolaron' group by dia`,
+     where v.cancelada = 0 and v.creado_en >= ?${deTienda} and l.propietario = 'dolaron' group by dia`,
   )
     .bind(desde)
     .all<{ dia: string; piezas: number }>();
@@ -218,7 +252,7 @@ export async function reportes(url: URL, env: Env): Promise<Response> {
 
   // Mapa de calor de /reportes: dia de la semana (0 = domingo, como %w) y hora, ambos de la tienda (UTC-6).
   const { results: porHora } = await env.DB.prepare(
-    `${lineasNetas('v.creado_en >= ?')}
+    `${lineasNetas(`v.creado_en >= ?${deTienda}`)}
      select cast(strftime('%w', datetime(creado_en, '-6 hours')) as integer) as dia_semana,
        cast(strftime('%H', datetime(creado_en, '-6 hours')) as integer) as hora,
        count(distinct venta) as tickets, sum(neta) as total
@@ -229,7 +263,7 @@ export async function reportes(url: URL, env: Env): Promise<Response> {
 
   // Lo vendido por categoria (las bandas juntas), del periodo y del anterior de igual largo: mismas reglas en los dos.
   const ventasPorCategoria = (anteriorAlPeriodo: boolean) => env.DB.prepare(
-    `${lineasNetas(`v.creado_en >= ? ${anteriorAlPeriodo ? 'and v.creado_en < ?' : ''}`)}
+    `${lineasNetas(`v.creado_en >= ? ${anteriorAlPeriodo ? 'and v.creado_en < ?' : ''}${deTienda}`)}
      select case when p.sin_inventario = 1 then 'bandas' else coalesce(nullif(p.categoria, ''), 'sin categoria') end as categoria,
        coalesce(sum(n.neta), 0) as total, coalesce(sum(n.cant), 0) as piezas
      from netas n left join productos p on p.id = n.producto_id
@@ -242,7 +276,7 @@ export async function reportes(url: URL, env: Env): Promise<Response> {
   const { results: porCategoriaAnterior } = await ventasPorCategoria(true);
 
   const { results: topProductos } = await env.DB.prepare(
-    `${lineasNetas('v.creado_en >= ?')}
+    `${lineasNetas(`v.creado_en >= ?${deTienda}`)}
      select codigo, nombre, sum(cant) as cantidad, sum(neta) as total
      from netas where producto_id is not null and cant > 0 and propietario = 'dolaron'
      group by codigo, nombre order by cantidad desc, total desc limit 10`,
@@ -268,12 +302,12 @@ export async function reportes(url: URL, env: Env): Promise<Response> {
        v.forma_pago, v.cancelada_en, v.cancelada_por, v.motivo_cancelacion,
        (select group_concat(nombre, ' · ') from venta_lineas
         where venta_id = v.id and cantidad > cancelada_cantidad) as piezas, 'ticket' as tipo
-     from ventas v where v.cancelada = 1 and v.creado_en >= ?
+     from ventas v where v.cancelada = 1 and v.creado_en >= ?${deTienda}
      union all
      select d.venta_id, d.importe, d.dolarones, d.forma_pago, d.creado_en, d.autor, d.motivo,
        d.cantidad || ' × ' || l.nombre, 'pieza'
      from devoluciones d join venta_lineas l on l.id = d.linea_id join ventas v on v.id = d.venta_id
-     where v.creado_en >= ?
+     where v.creado_en >= ?${deTienda}
      order by 5 desc`,
   )
     .bind(desde, desde)
@@ -283,7 +317,7 @@ export async function reportes(url: URL, env: Env): Promise<Response> {
     }>();
 
   const { results: aperturas } = await env.DB.prepare(
-    `select abierto_en, abierto_por, caja from cajon_aperturas where abierto_en >= ? order by abierto_en desc`,
+    `select abierto_en, abierto_por, caja from cajon_aperturas where abierto_en >= ?${deCajas('caja')} order by abierto_en desc`,
   )
     .bind(desde)
     .all<{ abierto_en: string; abierto_por: string; caja: string }>();
@@ -292,13 +326,13 @@ export async function reportes(url: URL, env: Env): Promise<Response> {
     `select id, caja, cajero, desde, hasta, tickets, fondo_inicial, efectivo_ventas, efectivo_devoluciones, retiros,
             gastos, nomina, efectivo_esperado, efectivo_contado, diferencia, tarjeta_sistema, tarjeta_terminal, transferencias,
             dolarones, fondo_siguiente, entregado, notas
-     from cortes where hasta >= ? order by hasta desc`,
+     from cortes where hasta >= ?${deCajas('caja')} order by hasta desc`,
   )
     .bind(desde)
     .all();
 
   const { results: retiros } = await env.DB.prepare(
-    `select creado_en, tipo, caja, cajero, importe, motivo from retiros where creado_en >= ? order by creado_en desc`,
+    `select creado_en, tipo, caja, cajero, importe, motivo from retiros where creado_en >= ?${deCajas('caja')} order by creado_en desc`,
   )
     .bind(desde)
     .all();
@@ -310,7 +344,7 @@ export async function reportes(url: URL, env: Env): Promise<Response> {
        sum(case when coalesce(promo, 0) > 0 then 1 else 0 end) as promo_tickets, coalesce(sum(promo), 0) as promo,
        sum(case when coalesce(descuento, 0) - coalesce(promo, 0) > 0 then 1 else 0 end) as otros_tickets,
        coalesce(sum(coalesce(descuento, 0) - coalesce(promo, 0)), 0) as otros
-     from ventas where cancelada = 0 and coalesce(descuento, 0) > 0 and creado_en >= ? group by dia order by dia`,
+     from ventas where cancelada = 0 and coalesce(descuento, 0) > 0 and creado_en >= ?${deTiendaSola} group by dia order by dia`,
   )
     .bind(desde)
     .all<{ dia: string; promo_tickets: number; promo: number; otros_tickets: number; otros: number }>();
@@ -326,7 +360,7 @@ export async function reportes(url: URL, env: Env): Promise<Response> {
          where l.venta_id = v.id and l.codigo != 'ENVIO')), 0) as piezas,
        coalesce(sum(v.total - v.devuelto - v.dolarones_devueltos), 0) as importe
      from ventas v join pedidos p on p.id = v.pedido_id join usuarios u on u.correo = p.vendedora
-     where v.cancelada = 0 and v.creado_en >= ? and v.pedido_id is not null
+     where v.cancelada = 0 and v.creado_en >= ?${deTienda} and v.pedido_id is not null
        and (',' || u.roles || ',') like '%,revendedora,%'
      group by p.vendedora order by importe desc`,
   )
@@ -335,6 +369,7 @@ export async function reportes(url: URL, env: Env): Promise<Response> {
 
   return json({
     dias, dia_desde: rango.dia_desde, dia_hasta: rango.dia_hasta,
+    tienda: tienda ?? '', tiendas: Object.entries(TIENDAS).map(([clave, { nombre }]) => ({ clave, nombre })),
     resumen: {
       ventas: resumen?.ventas ?? 0,
       total: resumen?.total ?? 0,

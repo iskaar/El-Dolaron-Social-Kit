@@ -4,7 +4,7 @@ import { api, crearFicha, pesos } from './ficha.js';
 
 const $ = (id) => document.getElementById(id);
 const mensaje = (texto) => { $('estado').textContent = texto; };
-let siguiente = null, consulta = '', generacion = 0;
+let siguiente = null, consulta = '', tienda = '', generacion = 0;
 let apagarCamara = null;
 
 // La ficha (datos, existencia ± y corrección) vive en ficha.js; aquí solo la búsqueda, el lector y la cámara.
@@ -22,7 +22,7 @@ function resultado(p) {
   foto.alt = ''; foto.loading = 'lazy';
   if (p.tiene_foto) foto.src = `/api/foto/${p.id}`; else foto.hidden = true;
   const texto = document.createElement('span'), nombre = document.createElement('b'), detalle = document.createElement('small'), stock = document.createElement('span');
-  nombre.textContent = p.nombre || 'Sin nombre'; detalle.textContent = `${p.codigo || 'Sin código'} · ${pesos(p.precio)}`; stock.textContent = `×${p.stock}`;
+  nombre.textContent = p.nombre || 'Sin nombre'; detalle.textContent = `${p.codigo || 'Sin código'} · ${pesos(p.precio)}`; stock.textContent = `×${p.stock}${p.existencia && p.existencia.total !== p.stock ? ` (total ${p.existencia.total})` : ''}`;
   texto.append(nombre, detalle); b.append(foto, texto, stock);
   foto.addEventListener('error', () => { foto.hidden = true; });
   b.addEventListener('click', () => { void abrir(p.id); }); li.append(b); return li;
@@ -33,17 +33,17 @@ async function buscar(mas = false) {
   const turno = ++generacion;
   if (!mas) {
     ficha.cerrar();
-    consulta = $('consulta').value.trim(); siguiente = null; $('resultados').replaceChildren();
+    consulta = $('consulta').value.trim(); tienda = $('tienda').value; siguiente = null; $('resultados').replaceChildren();
     $('mas').hidden = true; document.body.classList.remove('con-ficha');
   }
   // En celular, enfocar tras leer con la cámara abre el teclado encima del resultado.
   if (matchMedia('(min-width:1000px)').matches) foco();
   const q = consulta;
-  if (!q) return mensaje('Escribe un código o el nombre de la pieza.');
+  if (!q && !tienda) return mensaje('Escribe un código o el nombre de la pieza.');
   $('mas').disabled = true;
   mensaje('Buscando…');
   try {
-    const datos = await api(`/api/piezas?q=${encodeURIComponent(q)}${siguiente ? `&cursor=${encodeURIComponent(siguiente)}` : ''}`);
+    const datos = await api(`/api/piezas?q=${encodeURIComponent(q)}${tienda ? `&tienda=${encodeURIComponent(tienda)}` : ''}${siguiente ? `&cursor=${encodeURIComponent(siguiente)}` : ''}`);
     if (turno !== generacion) return;
     siguiente = datos.siguiente;
     $('resultados').append(...datos.piezas.map(resultado));
@@ -59,6 +59,7 @@ async function buscar(mas = false) {
 
 $('busqueda').addEventListener('submit', (e) => { e.preventDefault(); void buscar(); });
 $('mas').addEventListener('click', () => void buscar(true));
+$('tienda').addEventListener('change', () => void buscar());
 $('consulta').addEventListener('input', () => {
   ++generacion; ficha.cerrar(); siguiente = null;
   $('mas').hidden = true; $('mas').disabled = false; $('resultados').replaceChildren();
