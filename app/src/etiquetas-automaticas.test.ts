@@ -116,7 +116,7 @@ const CELULAR = 'captura.prueba';
  * usan las funciones reales de etiquetera.js sobre el almacenamiento de ESTA pagina; solo el reclamo y la liberacion
  * (que son fetch) pasan por el Worker real, por el host de la PC o por el del celular.
  */
-async function pagina(t: ReturnType<typeof tienda>, ambiente = 'sandbox', almacen = new Map<string, string>(), host = 'caja.prueba', vista: unknown = null) {
+async function pagina(t: ReturnType<typeof tienda>, ambiente = 'sandbox', almacen = new Map<string, string>(), host = 'caja.prueba', vista: unknown = null, inicial: Record<string, unknown> = {}) {
   const elementos = new Map<string, any>();
   const $ = (id: string) => {
     if (!elementos.has(id)) elementos.set(id, { textContent: '', hidden: false, disabled: false, innerHTML: '', style: {},
@@ -126,7 +126,9 @@ async function pagina(t: ReturnType<typeof tienda>, ambiente = 'sandbox', almace
   const estado = { conectada: true, falloBle: false, falloRed: false, falloMarca: false, permiso: 0, exigirDudosa: true,
     enviadas: [] as { id: string; copias: number }[], detenido: false, antesDePreparar: null as null | (() => Promise<void>),
     reclamos: [] as { ids: string[]; reimprimir?: boolean; preparar?: boolean }[], liberadas: [] as string[][], antesDeReclamar: null as null | (() => void | Promise<void>),
-    sinRedParaReclamar: false, tiempoAgotado: false, liberadasEn: [] as (Record<string, string> | null)[], rutas: [] as string[] };
+    sinRedParaReclamar: false, tiempoAgotado: false, liberadasEn: [] as (Record<string, string> | null)[], rutas: [] as string[],
+    reconectable: true, reconexiones: 0 };
+  Object.assign(estado, inicial);   // el estado de la impresora al ABRIR la página (#784)
   const pedir = pedirPor(t, host);
   const almacenWeb = { getItem: (k: string) => almacen.get(k) ?? null, setItem: (k: string, v: string) => almacen.set(k, v), removeItem: (k: string) => almacen.delete(k) };
   /** Las funciones de etiquetera.js leen globalThis.localStorage: aqui apunta al almacenamiento de esta pagina mientras corren. */
@@ -149,6 +151,9 @@ async function pagina(t: ReturnType<typeof tienda>, ambiente = 'sandbox', almace
     // «Este aparato no imprime» (#781): con el interruptor en el almacenamiento de esta pagina, lo decide la guarda REAL de etiquetera.js.
     conectarEtiquetera: async () => { if (conAlmacen(noImprimeReal)()) await conAlmacen(conectarReal)(); estado.permiso++; estado.conectada = true; },
     etiqueteraLista: () => estado.conectada && !conAlmacen(noImprimeReal)(),
+    noImprime: conAlmacen(noImprimeReal),
+    // Sin clic (getDevices): solo lo logra si la AE240 recordada está prendida; nunca abre el selector.
+    reconectarEtiquetera: async () => { estado.reconexiones++; if (conAlmacen(noImprimeReal)()) return false; if (estado.reconectable) estado.conectada = true; return estado.conectada; },
     imprimirEtiquetas: async (p: any, copias: number, avanzar: any) => {
       if (estado.exigirDudosa) assert.equal(almacen.get('etiqueta-automatica-dudosa'), p.id);
       estado.enviadas.push({ id: p.id, copias });
@@ -183,7 +188,7 @@ async function pagina(t: ReturnType<typeof tienda>, ambiente = 'sandbox', almace
     setInterval() {}, AbortSignal, encodeURIComponent, Date, Map, Set, console,
   };
   const api = await runInNewContext(`(async () => { ${fuente}
-    return { iniciarAutomatica, imprimirNuevas, imprimir, pausarAutomatica, cargar, noSalio, activa: () => automaticaActiva };
+    return { iniciarAutomatica, imprimirNuevas, imprimir, pausarAutomatica, cargar, noSalio, reanudacion, activa: () => automaticaActiva };
   })()`, contexto);
   /** Reclama como lo hace imprimir() y deja lo reclamado en el almacenamiento, como si la página se hubiera cerrado antes de mandarlo. */
   const reclamarComoOtraPagina = async (ids: string[]) => {
@@ -1238,5 +1243,113 @@ test('#781: «Este aparato no imprime» — ningún camino de impresión aparta 
     normal.estado.exigirDudosa = false;
     assert.equal(await normal.imprimir([nueva], new Map()), true);
     assert.equal(t.db.prepare("select etiqueta_origen o from etiquetas_enviadas where producto_id=?").get(nueva)!.o, 'celular');
+  } finally { t.db.close(); }
+});
+
+test('#784: la automática encendida se reanuda sola al recargar, con la misma sesión y sin abrir el selector Bluetooth', async () => {
+  const t = tienda();
+  try {
+    const p = await pagina(t);
+    await p.iniciarAutomatica();
+    assert.equal(p.almacen.get('etiqueta-automatica-encendida'), '1');
+    const id = agregar(t);   // llegó mientras la PC estaba recargando
+    const recarga = await pagina(t, 'sandbox', p.almacen, 'caja.prueba', null, { conectada: false });
+    await recarga.reanudacion;
+    assert.equal(recarga.activa(), true);
+    assert.equal(recarga.estado.reconexiones, 1);
+    assert.equal(recarga.estado.permiso, 0, 'sin clic no hay conectarEtiquetera');
+    assert.equal(recarga.almacen.get('etiqueta-automatica-desde'), DESDE);
+    assert.deepEqual(recarga.estado.enviadas, [{ id, copias: 1 }]);
+    assert.equal(recarga.$('automatica').textContent, 'Pausar impresión automática');
+  } finally { t.db.close(); }
+});
+
+test('#784: pausar a mano (botón, Detener o pausa de /inventario) olvida la automática: la recarga no la reanuda', async () => {
+  const t = tienda();
+  try {
+    for (const pausar of [(p: any) => p.iniciarAutomatica(), (p: any) => p.$('detener').eventos.get('click')(), (p: any) => p.pausarAutomatica()]) {
+      const p = await pagina(t);
+      await p.iniciarAutomatica();
+      await pausar(p);
+      assert.equal(p.activa(), false);
+      assert.equal(p.almacen.has('etiqueta-automatica-encendida'), false);
+      const recarga = await pagina(t, 'sandbox', p.almacen, 'caja.prueba', null, { conectada: false });
+      await recarga.reanudacion;
+      assert.equal(recarga.activa(), false);
+      assert.equal(recarga.estado.reconexiones, 0);
+      assert.doesNotMatch(recarga.$('automatica').textContent, /estaba encendida/);
+    }
+    // Una falla de la impresora no la olvida: la recarga lo vuelve a intentar.
+    const falla = await pagina(t);
+    await falla.iniciarAutomatica();
+    agregar(t);
+    falla.estado.falloBle = true;
+    await falla.imprimirNuevas();
+    assert.equal(falla.activa(), false);
+    assert.equal(falla.almacen.get('etiqueta-automatica-encendida'), '1');
+  } finally { t.db.close(); }
+});
+
+test('#784: con un envío incierto la recarga no reanuda y el botón lo dice; «Nueva sesión» lo olvida', async () => {
+  const t = tienda();
+  try {
+    const id = agregar(t);
+    const almacen = new Map([['etiqueta-automatica-encendida', '1'], ['etiqueta-automatica-desde', DESDE], ['etiqueta-automatica-dudosa', id]]);
+    const recarga = await pagina(t, 'sandbox', almacen, 'caja.prueba', null, { conectada: false });
+    await recarga.reanudacion;
+    assert.equal(recarga.activa(), false);
+    assert.deepEqual(recarga.estado.enviadas, []);
+    assert.match(recarga.$('resumen').textContent, /incierto/);
+    assert.match(recarga.$('automatica').textContent, /estaba encendida.*incierto/);
+    recarga.$('nueva-sesion').eventos.get('click')();
+    assert.equal(almacen.has('etiqueta-automatica-encendida'), false);
+    assert.equal(recarga.$('automatica').textContent, 'Retomar / iniciar impresión automática');
+  } finally { t.db.close(); }
+});
+
+test('#784: si la recarga no puede reconectar la impresora avisa, y un toque la reconecta y reanuda', async () => {
+  const t = tienda();
+  try {
+    const id = agregar(t);
+    const almacen = new Map([['etiqueta-automatica-encendida', '1'], ['etiqueta-automatica-desde', DESDE]]);
+    const avisos: any[] = [];
+    const vista = { controles: (c: any) => avisos.push(c.avisoAutomatica) };
+    const recarga = await pagina(t, 'sandbox', almacen, 'caja.prueba', vista, { conectada: false, reconectable: false });
+    await recarga.reanudacion;
+    const AVISO = 'La automática estaba encendida: toca para reconectar la impresora';
+    assert.equal(recarga.activa(), false);
+    assert.equal(recarga.estado.permiso, 0, 'sin clic no se abre el selector');
+    assert.deepEqual(recarga.estado.enviadas, []);
+    assert.equal(recarga.$('automatica').textContent, AVISO);
+    assert.equal(recarga.$('resumen').textContent, AVISO);
+    assert.equal(avisos.at(-1), AVISO, 'la vista de /inventario recibe el aviso');
+    assert.equal(almacen.get('etiqueta-automatica-encendida'), '1', 'sigue encendida hasta que alguien la apague');
+    // El toque es un clic real: conecta (aquí sí hay permiso) y sigue con la misma sesión.
+    await recarga.$('automatica').eventos.get('click')();
+    assert.equal(recarga.estado.permiso, 1);
+    assert.equal(recarga.activa(), true);
+    assert.deepEqual(recarga.estado.enviadas, [{ id, copias: 1 }]);
+    assert.equal(recarga.$('automatica').textContent, 'Pausar impresión automática');
+    assert.equal(avisos.at(-1), '');
+  } finally { t.db.close(); }
+});
+
+test('#784: «Este aparato no imprime» olvida la automática y la recarga no la reanuda ni avisa de reconectar', async () => {
+  const t = tienda();
+  try {
+    const p = await pagina(t);
+    await p.iniciarAutomatica();
+    assert.equal(p.almacen.get('etiqueta-automatica-encendida'), '1');
+    p.almacen.set('etiqueta-no-imprime', '1');   // el interruptor (#781) enciende y /inventario pausa el motor
+    p.pausarAutomatica();
+    assert.equal(p.almacen.has('etiqueta-automatica-encendida'), false);
+    // Aunque la bandera hubiera quedado de antes, la recarga la borra sin tocar Bluetooth.
+    p.almacen.set('etiqueta-automatica-encendida', '1');
+    const recarga = await pagina(t, 'sandbox', p.almacen, 'caja.prueba', null, { conectada: false });
+    await recarga.reanudacion;
+    assert.equal(recarga.activa(), false);
+    assert.equal(recarga.almacen.has('etiqueta-automatica-encendida'), false);
+    assert.equal(recarga.estado.reconexiones, 0);
+    assert.doesNotMatch(recarga.$('automatica').textContent, /estaba encendida/);
   } finally { t.db.close(); }
 });

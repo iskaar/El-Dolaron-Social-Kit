@@ -1,5 +1,5 @@
 import {
-  conectarEtiquetera, etiqueteraLista, imprimirEtiquetas, historialTexto, detenerEnvio, envioDetenido,
+  conectarEtiquetera, reconectarEtiquetera, noImprime, etiqueteraLista, imprimirEtiquetas, historialTexto, detenerEnvio, envioDetenido,
   errorEnvio, etiquetaVigente, precioImpreso, gradoImpreso, esPropia,
 } from '/etiquetera.js';
 
@@ -254,12 +254,13 @@ async function conectarDesdeClic(cualquiera) {
     avisarFalla(error);
   }
   pintarImpresora();
+  if (avisoAutomatica && etiqueteraLista()) await iniciarAutomatica();   // el toque que conecta también reanuda la automática (#784)
 }
 botonConectar.addEventListener('click', () => conectarDesdeClic(false));
 document.getElementById('otra').addEventListener('click', () => conectarDesdeClic(true));
 
 document.getElementById('detener').addEventListener('click', () => {
-  pausarAutomatica();
+  pausarAutomatica();   // a mano: se olvida que estaba encendida
   detenerEnvio();
 });
 
@@ -446,22 +447,34 @@ let cambiosDesde = null;   // hora del SERVIDOR de la última consulta, menos un
 const TRASLAPE_MS = 2 * 60_000;
 let automaticaActiva = false;
 let consultandoAutomatica = false;
+// «Automática encendida» sobrevive a recargar la página (#784): sin esto una recarga la dejaba apagada sin avisar.
+// Pausarla a mano, «Nueva sesión», «Este aparato no imprime» y el tope de 2000 la olvidan; una falla (impresora, red) la conserva.
+const CLAVE_ENCENDIDA = 'etiqueta-automatica-encendida';
+const recordarAutomatica = (encendida) => {
+  try { if (encendida) localStorage.setItem(CLAVE_ENCENDIDA, '1'); else localStorage.removeItem(CLAVE_ENCENDIDA); } catch { /* sin almacenamiento no se recuerda */ }
+};
+const automaticaRecordada = () => { try { return localStorage.getItem(CLAVE_ENCENDIDA) === '1'; } catch { return false; } };
+// Aviso persistente cuando la recarga no pudo reanudarla sola: queda en el botón hasta que un toque la reanude.
+let avisoAutomatica = '';
+const AVISO_RECONECTAR = 'La automática estaba encendida: toca para reconectar la impresora';
 
 function pintarControles() {
   document.getElementById('imprimir').disabled = imprimiendo || automaticaActiva;
   document.getElementById('marcar').disabled = imprimiendo || automaticaActiva;
   botonAutomatica.disabled = !automaticaActiva && (imprimiendo || consultandoAutomatica);
   document.getElementById('nueva-sesion').disabled = automaticaActiva || imprimiendo || consultandoAutomatica;
-  botonAutomatica.textContent = automaticaActiva ? 'Pausar impresión automática' : 'Retomar / iniciar impresión automática';
-  vista?.controles?.({ imprimiendo, automaticaActiva });
+  botonAutomatica.textContent = automaticaActiva ? 'Pausar impresión automática' : avisoAutomatica || 'Retomar / iniciar impresión automática';
+  vista?.controles?.({ imprimiendo, automaticaActiva, avisoAutomatica });
 }
 
-function pausarAutomatica() {
+/** `conservar`: pausa por falla (se vuelve a intentar al recargar); sin él es una pausa a mano y se olvida. */
+function pausarAutomatica(conservar = false) {
   automaticaActiva = false;
+  if (conservar !== true) { recordarAutomatica(false); avisoAutomatica = ''; }
   pintarControles();
 }
 
-async function iniciarAutomatica() {
+async function iniciarAutomatica(reanudar = false) {
   if (!automaticaDisponible()) return;
   if (automaticaActiva) {
     pausarAutomatica();
@@ -472,16 +485,21 @@ async function iniciarAutomatica() {
   if (imprimiendo || consultandoAutomatica) return;
   if (!navigator.bluetooth || !navigator.locks) {
     resumen.textContent = 'Abre esta página en Chrome o Edge en la computadora con Bluetooth.';
+    if (reanudar) avisoAutomatica = 'La automática estaba encendida: ábrela en Chrome o Edge en la computadora con Bluetooth';
     return;
   }
   consultandoAutomatica = true;
   pintarControles();
   try {
-    // El permiso se pide en el clic, antes de consultar el servidor.
-    if (!etiqueteraLista()) await conectarEtiquetera();
+    // El permiso se pide en el clic, antes de consultar el servidor. Al recargar (#784) no hay clic: solo se reconecta la ya recordada.
+    if (!etiqueteraLista()) {
+      if (!reanudar) await conectarEtiquetera();
+      else if (!await reconectarEtiquetera()) { avisoAutomatica = AVISO_RECONECTAR; resumen.textContent = avisoAutomatica; return; }
+    }
     const dudosa = localStorage.getItem(CLAVE_DUDOSA);
     if (dudosa) {
       resumen.textContent = `Envío incierto (${dudosa}). Revisa el papel y la foto; imprime esa pieza manualmente o márcala como impresa antes de retomar.`;
+      if (reanudar) avisoAutomatica = 'La automática estaba encendida pero hay un envío incierto: revísalo antes de retomar';
       return;
     }
     const respuesta = await fetch('/api/salud', { cache: 'no-store', signal: AbortSignal.timeout(15000) });
@@ -492,16 +510,27 @@ async function iniciarAutomatica() {
     localStorage.setItem(CLAVE_SESION, automaticaDesde);
     cambiosDesde = null;
     automaticaActiva = true;
+    avisoAutomatica = '';
+    recordarAutomatica(true);
     detenerEnvio(false);
-    resumen.textContent = 'Automática activa. Toma las fotos en la cámara del mismo entorno; esperando nombre y precio.';
+    resumen.textContent = reanudar ? 'Automática reanudada tras recargar. Esperando la siguiente foto.' : 'Automática activa. Toma las fotos en la cámara del mismo entorno; esperando nombre y precio.';
   } catch (error) {
     avisarFalla(error);
+    if (reanudar) avisoAutomatica ||= AVISO_RECONECTAR;
   } finally {
     consultandoAutomatica = false;
     pintarImpresora();
     pintarControles();
   }
   await imprimirNuevas();
+}
+
+/** Al abrir la página: si la automática estaba encendida se reanuda sola, o el botón avisa por qué no (#784). */
+async function reanudarAutomatica() {
+  if (!automaticaRecordada()) return;
+  if (noImprime()) return recordarAutomatica(false);   // «Este aparato no imprime» la apaga para siempre en este aparato
+  if (!automaticaDisponible()) { resumen.textContent = 'La automática estaba encendida pero no se pudo confirmar el entorno. Recarga la página con red.'; return; }
+  await iniciarAutomatica(true);
 }
 
 async function imprimirNuevas() {
@@ -513,7 +542,7 @@ async function imprimirNuevas() {
     await navigator.locks.request('etiqueta-automatica', { ifAvailable: true }, async (lock) => {
       if (!lock) { resumen.textContent = 'Ya imprime otra pantalla'; return; }
       if (localStorage.getItem(CLAVE_DUDOSA)) {
-        pausarAutomatica();
+        pausarAutomatica(true);
         resumen.textContent = 'Hay un envío incierto. Revisa el papel y recupera esa pieza manualmente antes de retomar.';
         return;
       }
@@ -572,7 +601,7 @@ async function imprimirNuevas() {
         cola.push(p);
       }
       if (cola.length) {
-        if (!await imprimir(cola.map((p) => p.id), new Map(), true)) pausarAutomatica();
+        if (!await imprimir(cola.map((p) => p.id), new Map(), true)) pausarAutomatica(true);
       } else {
         resumen.textContent = bloqueo || esperando || 'Automática activa. Esperando la siguiente foto.';
       }
@@ -583,7 +612,7 @@ async function imprimirNuevas() {
       }
     });
   } catch (error) {
-    pausarAutomatica();
+    pausarAutomatica(true);
     resumen.textContent = `${error.message} La impresión automática está pausada; retoma cuando se resuelva.`;
   } finally {
     consultandoAutomatica = false;
@@ -591,10 +620,13 @@ async function imprimirNuevas() {
   }
 }
 
-botonAutomatica.addEventListener('click', iniciarAutomatica);
+botonAutomatica.addEventListener('click', () => iniciarAutomatica());
 document.getElementById('nueva-sesion').addEventListener('click', () => {
   if (!automaticaDisponible() || automaticaActiva || imprimiendo || consultandoAutomatica) return;
   localStorage.removeItem(CLAVE_SESION);
+  recordarAutomatica(false);
+  avisoAutomatica = '';
+  pintarControles();
   resumen.textContent = 'Nueva sesión preparada. Inicia la impresión automática antes de tomar las próximas fotos; las pendientes anteriores quedan para impresión manual.';
 });
 // Con `cambios` cada consulta lee solo lo modificado (índice de la migración 038), y la tienda está en
@@ -618,7 +650,8 @@ try {
   lista.innerHTML = '<div class="vacio">No se pudo cargar la lista.</div>';
   resumen.textContent = `No se pudo cargar la lista de etiquetas: ${error.message} Recarga la página para intentar de nuevo.`;
 }
-return { imprimir, pintar, cargar, iniciarAutomatica, pausarAutomatica,
+const reanudacion = reanudarAutomatica();   // sin esperar: no frena la apertura de la página (reconectar puede tardar)
+return { imprimir, pintar, cargar, iniciarAutomatica, pausarAutomatica, reanudacion,
   conexion: conectarDesdeClic, activa: () => automaticaActiva,
   filtrar(codigo) { filtroCodigo = codigo; pintar(); },
   seleccionar(ids) { for (const p of piezas) { if (ids.includes(p.id)) desmarcadas.delete(p.id); else desmarcadas.add(p.id); } pintar(); },

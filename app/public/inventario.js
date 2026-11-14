@@ -244,6 +244,8 @@ await cambiarModo(new URLSearchParams(location.search).has('pieza') ? 'buscar' :
 // «Este aparato no imprime» (#781): no reconecta ni toca Bluetooth (reconectarEtiquetera lo respeta) y el chip lo dice desde el inicio.
 if (modos.includes('imprimir')) void import('./etiquetera.js').then(async (m) => {
   if (m.noImprime()) { $('chip-impresora').textContent = '○ No imprime'; $('chip-impresora').classList.remove('aviso'); }
+  // La automática estaba encendida (#784): el motor de Imprimir la reanuda al cargar, aunque la PC siga en Capturar.
+  else if (pc() && (() => { try { return localStorage.getItem('etiqueta-automatica-encendida') === '1'; } catch { return false; } })()) await cargar('imprimir');
   else if (!pc() && navigator.bluetooth?.getDevices && await m.reconectarEtiquetera()) { $('chip-impresora').textContent = '● Impresora · Lista'; $('chip-impresora').classList.remove('aviso'); }
 }).catch(() => {});
 const inicial = new URLSearchParams(location.search).get('pieza'); if (inicial) { $('consulta').value = inicial; await buscar(false, true); }

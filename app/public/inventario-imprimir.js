@@ -55,10 +55,11 @@ export async function iniciar(ctx) {
   }});
   let elegidas=[], parcial=false; const restantes=new Map();
   function contar(){elegidas=[...lista.querySelectorAll('input[type=checkbox]:checked')];const n=elegidas.reduce((n,c)=>n+Number(lista.querySelector(`.copias[data-id="${c.value}"]`)?.value||1),0);seleccion.textContent=`${elegidas.length} elegidas · ${n} etiquetas`;imprimir.textContent=parcial?`Reconectar y seguir (${n})`:`Imprimir ${n} etiquetas`;bloquear(imprimir,noImprime()?MENSAJE_NO_IMPRIME:!etiqueteraLista()&&!parcial?'Conecta la impresora':!n?'Elige piezas':'');}
+  let avisoAuto='';   // la automática estaba encendida y la recarga no pudo reanudarla sola (#784)
   const vista={
   inicio(ids,pedidas){estadoParcial=null;enviadasLote=0;totalLote=[...pedidas.values()].reduce((n,v)=>n+v,0);},
   conexion(){actualizarConexion();contar();},
-  controles({imprimiendo,automaticaActiva}){imprimir.disabled=false;detener.hidden=!(imprimiendo||automaticaActiva||parcial);contar();if(imprimiendo||automaticaActiva)bloquear(imprimir,imprimiendo?'Espera el envío':'Pausa la automática');},
+  controles({imprimiendo,automaticaActiva,avisoAutomatica}){if(avisoAutomatica&&avisoAutomatica!==avisoAuto)mensaje(avisoAutomatica,'aviso');avisoAuto=avisoAutomatica||'';conectar.textContent=avisoAuto?'Reconectar y reanudar la automática':'Conectar impresora';actualizarConexion();imprimir.disabled=false;detener.hidden=!(imprimiendo||automaticaActiva||parcial);contar();if(imprimiendo||automaticaActiva)bloquear(imprimir,imprimiendo?'Espera el envío':'Pausa la automática');},
   progreso(p,hechas,total){mensaje(`Enviando ${hechas}/${total}`);},
   resultado(p,hechas,total,ok){enviadasLote+=hechas;if(ok){restantes.delete(p.id);parcial=false;}else if(hechas>0){restantes.set(p.id,total-hechas);parcial=true;detener.hidden=false;estadoParcial={hechas:enviadasLote,total:totalLote||total};mensaje(`Salieron ${hechas} de ${total}`,'aviso');}},
   pintar({ piezas, hechas, pendientes, visibles, filtroCodigo, desmarcadas, idDudoso, copiasDe }){
@@ -93,7 +94,7 @@ export async function iniciar(ctx) {
     if(!ctx.identidad.vendedor){const auto=boton('Automática',async()=>{await motor.iniciarAutomatica();auto.setAttribute('aria-checked',String(motor.activa()));});auto.setAttribute('role','switch');auto.setAttribute('aria-checked',String(motor.activa()));c.append(auto,boton('Nueva sesión',()=>motorBoton('nueva-sesion').click()));}
     c.append(boton('Detener',()=>{motor.pausarAutomatica();detenerEnvio();},'peligro'));hoja('Impresora',c);
   }
-  function actualizarConexion(){const lista=etiqueteraLista(),no=noImprime();$('chip-impresora').textContent=no?'○ No imprime':lista?'● Impresora · Lista':'▲ Sin conectar';$('chip-impresora').classList.toggle('aviso',!lista&&!no);avisoConexion.hidden=lista||parcial||no;}
+  function actualizarConexion(){const lista=etiqueteraLista(),no=noImprime();$('chip-impresora').textContent=no?'○ No imprime':avisoAuto?'▲ Automática apagada · toca':lista?'● Impresora · Lista':'▲ Sin conectar';$('chip-impresora').classList.toggle('aviso',(!lista||!!avisoAuto)&&!no);avisoConexion.hidden=(lista&&!avisoAuto)||parcial||no;}
   setInterval(actualizarConexion,2000);
   let familiaElegida, cantidad=20;
   async function cargarBandas(elegir){
