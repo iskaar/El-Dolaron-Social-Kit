@@ -179,6 +179,7 @@ if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw-caja.js'
   <button id="abrir-retiro" type="button">Gasto / retiro</button>
   <button id="abrir-corte" type="button">Corte</button>
   <a href="/socios">Alta de socios</a>
+  <a href="/bultos">Bultos</a>
   <a href="/admin">Cola de revisión</a>
   <a href="/avisos" id="avisos-ml" target="_blank" hidden></a>
   <button id="pedir-ayuda" type="button" aria-live="polite">Ayuda</button>
@@ -938,6 +939,12 @@ function agregarCodigo(leido, reintento = false) {
   if (/^P-?\d+$/i.test(codigo.trim())) {
     cargarPedido(Number(codigo.trim().replace(/\D/g, '')));
     return 'pedido';   // la camara se cierra para dejar ver el aviso
+  }
+  // Folio de un bulto (BU-K7Q2M, #795): no es una pieza; se recibe en /bultos, no se cobra.
+  if (/^BU-?[A-Z0-9]{5}$/i.test(codigo.trim())) {
+    $('aviso').textContent = `${codigo.trim().toUpperCase()} es un bulto, no una pieza. Recíbelo en «Bultos».`;
+    $('aviso').style.color = '#D72B32';
+    return false;
   }
   if (/^D[CP]-/.test(codigo.trim())) {
     $('socio').value = codigo.trim();

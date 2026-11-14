@@ -1,5 +1,6 @@
 /** Consulta y ajuste de inventario con rastro (#441). */
-import { propietarioDe, puedeEditarInventario, type Usuario } from './cuentas.ts';
+import { propietarioDe, puedeEditarInventario, esTienda, TIENDA_CENTRAL, type Usuario } from './cuentas.ts';
+import { fueraDeSoledad, unidadesEn, tieneUnidadesFuera, MENSAJE_FUERA_DE_SOLEDAD } from './existencias.ts';
 import { MOTIVOS } from './conteo.ts';
 import { conciliarSeguro } from './mercadolibre.ts';
 import { pendienteDe } from './solicitudes-precio.ts';
@@ -174,7 +175,13 @@ async function fichaPieza(env: Env, id: string, usuario: Usuario | null): Promis
     from productos_cambios where producto_id = ? order by en desc, id desc limit ${HISTORIAL}`).bind(id).all<Record<string, unknown> & { en: string }>();
   const historial = [...ajustes.map((a) => ({ a, fecha: a.ajustado_en })), ...cambios.map((a) => ({ a, fecha: a.en }))]
     .sort((x, y) => (x.fecha < y.fecha ? 1 : x.fecha > y.fecha ? -1 : 0)).slice(0, HISTORIAL).map(({ a }) => a);
-  return json({ pieza, historial, puede_editar: puedeEditarInventario(usuario), puede_precio: !!usuario?.activo && usuario.roles.includes('dueno'),
+  // #795: las salidas y entradas por bulto (vista movimientos_existencia, migración 077) y lo que hay en cada sucursal. Aparte de `historial`
+  // para que sus consumidores no cambien de forma.
+  const { results: movimientos_bulto } = await env.DB.prepare(`select tipo, cantidad, por, en, referencia as folio, tienda
+    from movimientos_existencia where producto_id = ? and tipo like 'bulto\_%' escape '\\' order by en desc limit 20`).bind(id).all();
+  const { results: en_sucursales } = await env.DB.prepare('select tienda, unidades from existencia_tienda where producto_id = ? and unidades > 0 order by tienda')
+    .bind(id).all();
+  return json({ pieza, historial, movimientos_bulto, en_sucursales, puede_editar: puedeEditarInventario(usuario), puede_precio: !!usuario?.activo && usuario.roles.includes('dueno'),
     solicitud_precio: await pendienteDe(env, id) });
 }
 
@@ -216,6 +223,42 @@ export async function escribirExistencia(env: Env, ctx: ExecutionContext, a: {
   return ajuste;
 }
 
+/**
+ * Ajuste de faltante o sobrante en una sucursal (R3 de #793): la existencia propia de esa tienda, con renglón en `conteo_ajustes` (con
+ * tienda), condicional en SQL y con folio idempotente, como el de Soledad. Solo el dueño; nunca toca productos.stock.
+ */
+async function ajustarSucursal(env: Env, id: string, tienda: string, cuerpo: Record<string, unknown>, usuario: Usuario | null,
+  delta: number, motivo: string, esperado: number | undefined): Promise<Response> {
+  const folio = cuerpo.id as string;
+  const guardado = () => env.DB.prepare(`select id, producto_id, motivo, cantidad, antes, despues, ajustado_por, ajustado_en, tienda
+    from conteo_ajustes where id = ?`).bind(folio).first<Ajuste & { tienda: string }>();
+  const responder = (a: Ajuste & { tienda: string }) => a.producto_id === id && a.tienda === tienda && a.ajustado_por === usuario!.correo
+      && a.motivo === motivo && a.despues - a.antes === delta ? json(a) : json({ error: 'El folio ya pertenece a otro ajuste.' }, 409);
+  const previo = await guardado();
+  if (previo) return responder(previo);
+  const pieza = await env.DB.prepare(`select id from productos p where p.id = ? and p.propietario = ? and ${VISIBLE}`)
+    .bind(id, propietarioDe(usuario)).first();
+  if (!pieza) return json({ error: 'Pieza no encontrada.' }, 404);
+  const ahora = new Date().toISOString();
+  await env.DB.batch([
+    env.DB.prepare(`insert into existencia_tienda (producto_id, tienda, unidades, actualizado_en) values (?, ?, 0, ?)
+      on conflict (producto_id, tienda) do nothing`).bind(id, tienda, ahora),
+    env.DB.prepare(`update existencia_tienda set unidades = unidades + ?, actualizado_en = ?
+      where producto_id = ? and tienda = ? and unidades + ? between 0 and 999 ${esperado !== undefined ? 'and unidades = ?' : ''}
+        and not exists (select 1 from conteo_ajustes where id = ?)`)
+      .bind(delta, ahora, id, tienda, delta, ...(esperado !== undefined ? [esperado] : []), folio),
+    // changes() evita rastro falso si otro intento dejó la misma marca en este milisegundo (mismo patrón que escribirExistencia).
+    env.DB.prepare(`insert into conteo_ajustes (id, producto_id, codigo, nombre, motivo, cantidad, antes, despues, ajustado_por, ajustado_en, tienda)
+      select ?, p.id, coalesce(p.codigo, ''), p.nombre, ?, ?, e.unidades - ?, e.unidades, ?, ?, e.tienda
+      from existencia_tienda e join productos p on p.id = e.producto_id
+      where e.producto_id = ? and e.tienda = ? and e.actualizado_en = ? and changes() = 1`)
+      .bind(folio, motivo, Math.abs(delta), delta, usuario!.correo, ahora, id, tienda, ahora),
+  ]);
+  const ajuste = await guardado();
+  if (ajuste) return responder(ajuste);
+  return json({ error: 'La existencia de la sucursal cambió o queda fuera de 0 a 999. Revisa y vuelve a intentar.', tienda, existencia: await unidadesEn(env, tienda, id) }, 409);
+}
+
 async function cambiarExistencia(request: Request, env: Env, id: string, usuario: Usuario | null, ctx: ExecutionContext): Promise<Response> {
   if (!puedeEditarInventario(usuario)) return json({ error: 'Tu cuenta no tiene permiso para editar inventario.' }, 403);
   const cuerpo = await request.json().catch(() => null) as Record<string, unknown> | null;
@@ -231,6 +274,13 @@ async function cambiarExistencia(request: Request, env: Env, id: string, usuario
   if (!delta || typeof motivo !== 'string' || ![...MOTIVOS, 'entrada', 'correccion'].includes(motivo)
       || (delta > 0 && (motivo === 'robo' || motivo === 'merma')) || (delta < 0 && motivo === 'entrada'))
     return json({ error: 'Escoge un motivo válido para subir o bajar existencia.' }, 400);
+  // #795: `tienda` (solo el dueño) ajusta la existencia de una sucursal; sin ella, Soledad como siempre.
+  if (cuerpo.tienda !== undefined && cuerpo.tienda !== TIENDA_CENTRAL) {
+    if (!esTienda(cuerpo.tienda)) return json({ error: 'Tienda inválida.' }, 400);
+    if (!usuario?.roles.includes('dueno')) return json({ error: 'Solo el dueño ajusta la existencia de una sucursal.' }, 403);
+    if (motivo === 'entrada') return json({ error: 'En una sucursal la existencia llega por bulto: ajusta con corrección.' }, 400);
+    return ajustarSucursal(env, id, cuerpo.tienda, cuerpo, usuario, delta, motivo, fijar ? cuerpo.esperado as number : undefined);
+  }
   const propietario = propietarioDe(usuario);
   const actual = () => env.DB.prepare(`select p.stock from productos p
     where p.id = ? and p.propietario = ? and ${VISIBLE}`).bind(id, propietario).first<{ stock: number }>();
@@ -303,6 +353,7 @@ async function juntarPiezas(request: Request, env: Env, id: string, usuario: Usu
   if (origen.estado_fisico !== destino.estado_fisico) return json({ error:'Sólo puedes juntar piezas del mismo grado.' }, 409);
   if (claveTalla(origen.talla) !== claveTalla(destino.talla)) return json({ error:'Sólo puedes juntar piezas de la misma talla.' }, 409);
   if (origen.stock + destino.stock > 999) return json({ error:'La suma supera 999 piezas.' }, 409);
+  if (await tieneUnidadesFuera(env, id)) return json({ error:MENSAJE_FUERA_DE_SOLEDAD }, 409);   // R3 de #793
   const ahora = new Date().toISOString();
   const efectos = await env.DB.batch([
     env.DB.prepare(`update productos set stock = 0, upc = null, modificado_por = ?, actualizado_en = ? where id = ?
@@ -310,7 +361,8 @@ async function juntarPiezas(request: Request, env: Env, id: string, usuario: Usu
       and stock = ? and upc is ? and codigo = ? and estado_fisico = ? and coalesce(talla, '') = ?
       and exists (select 1 from productos where id = ? and propietario = ? and sin_inventario = 0
         and estado_analisis <> 'descartado' and codigo = ? and estado_fisico = ? and coalesce(talla, '') = ? and upc is ? and stock + ? <= 999)
-      and not exists (select 1 from conteo_ajustes where id in (?, ?))`)
+      and not exists (select 1 from conteo_ajustes where id in (?, ?))
+      and not ${fueraDeSoledad('productos.id')}`)
       .bind(usuario!.correo, ahora, id, propietario, origen.stock, origen.upc, origen.codigo, origen.estado_fisico, claveTalla(origen.talla),
         destinoId, propietario, destino.codigo, origen.estado_fisico, claveTalla(origen.talla), destino.upc, origen.stock, cuerpo.id, `${cuerpo.id}:destino`),
     env.DB.prepare(`insert into conteo_ajustes

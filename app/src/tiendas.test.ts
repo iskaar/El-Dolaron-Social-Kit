@@ -2,6 +2,7 @@
 // Sucursales 1/3 (#793, #794): cada caja y cada cuenta pertenece a una tienda; la tienda la decide el servidor.
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import type { DatabaseSync } from 'node:sqlite';
 import { tienda, PRODUCTO, DUENO } from './prueba-d1.ts';
 import { TIENDAS, CAJAS, cajasDe, tiendaDe, esTienda, TIENDA_CENTRAL, type Usuario } from './cuentas.ts';
 
@@ -113,22 +114,19 @@ test('la computadora sin tienda no cobra (R2): 403 en lo de caja, después del P
   assert.equal((db.prepare('select count(*) as n from ventas').get() as { n: number }).n, 0);
 });
 
-test('terminal de sucursal: la venta se rechaza (409) sin escribir nada ni tocar existencias; apartados y cancelaciones también', async () => {
+const conteos = (db: DatabaseSync) => Object.fromEntries((db.prepare("select name from sqlite_master where type = 'table' and name not like 'sqlite_%'").all() as { name: string }[])
+  .map(({ name }) => [name, (db.prepare(`select count(*) as n from "${name}"`).get() as { n: number }).n]));
+
+test('terminal de sucursal: vender una pieza que nunca llegó aborta el ticket sin escribir nada; apartados y pedidos se rechazan', async () => {
   const { db, entrar, venta, pedir, stock } = montar('salk');
   const token = await entrar();
-  const antes = ['ventas', 'ventas_lineas', 'dolarones_movimientos', 'devoluciones'].map((tabla) => {
-    try { return (db.prepare(`select count(*) as n from ${tabla}`).get() as { n: number }).n; } catch { return -1; }
-  });
+  const antes = conteos(db);
   const r = await venta(token, { caja: 'Salk 1' });
   assert.equal(r.status, 409);
-  assert.match(r.cuerpo.error, /sucursal aún no tiene existencias/);
+  assert.match(r.cuerpo.error, /existencia suficiente en esta sucursal/);
   assert.equal((await pedir('/api/pedidos', {}, 'POST', { 'x-cajero': token })).status, 409);
-  assert.equal((await pedir(`/api/ventas/${crypto.randomUUID()}/cancelar`, {}, 'POST', { 'x-cajero': token })).status, 409);
-  assert.equal(stock(), 50);
-  const despues = ['ventas', 'ventas_lineas', 'dolarones_movimientos', 'devoluciones'].map((tabla) => {
-    try { return (db.prepare(`select count(*) as n from ${tabla}`).get() as { n: number }).n; } catch { return -1; }
-  });
-  assert.deepEqual(despues, antes);
+  assert.equal(stock(), 50, 'Soledad no se toca');
+  assert.deepEqual(conteos(db), antes, 'ni venta, ni líneas, ni fila de existencia a medias');
 });
 
 test('terminal de sucursal: lo que no mueve existencia sí funciona con su caja (corte)', async () => {

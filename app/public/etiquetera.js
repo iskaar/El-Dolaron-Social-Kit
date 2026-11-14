@@ -364,6 +364,32 @@ export function tsplCodigo(codigo, y0 = corrimiento(), barra = modulo()) {
 }
 
 /**
+ * La etiqueta del bulto (#795): destino arriba, el folio en Code 128 y en letras grandes, y origen, piezas y fecha abajo. El folio empieza con
+ * BU- (nunca digitos ni ED-): si se escanea en la venta, la caja avisa que es un bulto. Misma geometria y mismo calibrado que tsplCodigo.
+ *
+ * @param bulto {{ folio: string, destino: string, origen: string, piezas: number, fecha: string }}
+ */
+export function tsplBulto(bulto, y0 = corrimiento(), barra = modulo()) {
+  const { folio } = bulto;
+  if (!codigoImprimible(folio)) throw new Error('El folio del bulto no se puede imprimir.');
+  const desplazamiento = Math.max(y0, -PRIMER_RENGLON);
+  const y = (base) => base + desplazamiento;
+  const ancho = Math.max(BARRA_MINIMA, barraQueCabe(folio, barra));
+  const tope = Math.floor((ANCHO - MARGEN * 2) / 16);   // fuente "3" sin ampliar: 16 puntos por letra
+  const destino = limpiar(`A: ${bulto.destino}`).toUpperCase().slice(0, tope);
+  const pie = limpiar(`${bulto.origen} ${bulto.piezas} pzas ${bulto.fecha}`).slice(0, Math.floor((ANCHO - MARGEN * 2) / ANCHO_NOMBRE));
+  return `${[
+    ...MEDIDA,
+    'CLS',
+    `TEXT ${centrar(destino, 16)},${y(PRIMER_RENGLON)},"3",0,1,1,"${destino}"`,
+    `BARCODE ${centrarBarras(folio, ancho)},${y(PRIMER_RENGLON + 36)},"128",72,0,0,${ancho},${ancho * 2},"${folio}"`,
+    `TEXT ${centrar(folio, 32)},${y(124)},"3",0,2,2,"${folio}"`,
+    `TEXT ${centrar(pie, ANCHO_NOMBRE)},${y(176)},"2",0,1,1,"${pie}"`,
+    'PRINT 1,1',
+  ].join('\r\n')}\r\n`;
+}
+
+/**
  * Lo pegado de Excel: un renglon por codigo, y la cantidad en la columna de al
  * lado (tabulador, coma o punto y coma; sin cantidad = 1). Lo que no se puede
  * imprimir (encabezados, codigos con acentos o muy largos) regresa en `malas`.

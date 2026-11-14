@@ -33,6 +33,8 @@ import { verFotoReportada } from './pagos-reportados.ts';
 import { registrarSocio, buscarSocio, buscarPorCodigo, basesListas, sentenciasDeVenta, saldo } from './dolarones.ts';
 import { registrarCorte, registrarRetiro, rutaTerminal, ultimoCorte, cajaDe, CajaAjena } from './corte.ts';
 import { rutaGastos } from './gastos.ts';
+import { sentenciasMover, esExistenciaInsuficiente, fueraDeSoledad, tieneUnidadesFuera, MENSAJE_FUERA_DE_SOLEDAD } from './existencias.ts';
+import { rutaBultos } from './bultos.ts';
 import { rutaPiezas, buscarPiezas, escribirExistencia, autorizarPrecio } from './piezas.ts';
 import { rutaSolicitudesPrecio, crearSolicitud } from './solicitudes-precio.ts';
 import { UPC_VISIBLE, MISMO_UPC, claveTalla, PIEZA_UPC, CAPTURA_SUMADA, conflictoCapturaSumada, capturaSumada, sumarCaptura, conflictoUpc, corregirUpc, upcValido, type PiezaUpc } from './upc-inventario.ts';
@@ -179,9 +181,12 @@ async function rechazoPorMl(env: Env, id: string, nuevo: string, anterior: strin
 const FORMAS_PAGO = new Set(['efectivo', 'tarjeta', 'transferencia']);
 const estacionValida = (valor: unknown, tienda: string): valor is string =>
   typeof valor === 'string' && cajasDe(tienda).includes(valor);
-// Una sucursal todavia no tiene existencias en el sistema (#793, PR 2): lo que mueve existencia de Soledad no corre desde ella.
-const SUCURSAL_SIN_EXISTENCIAS = 'Esta sucursal aún no tiene existencias en el sistema.';
-const MUEVE_EXISTENCIA = /^\/api\/(?:ventas|pedidos(?:\/.*)?|ventas\/[^/]+\/(?:cancelar|lineas\/\d+\/cancelar|cupon))$/;
+// R3 de #793: apartados, pedidos, portal, vendedoras y WhatsApp son solo de Soledad. Una terminal de sucursal no aparta por sistema en esta
+// etapa: se rechaza, no descuenta de Soledad.
+const APARTADOS_SOLO_SOLEDAD = 'Los apartados y pedidos son solo de Soledad: una sucursal no aparta por sistema en esta etapa.';
+const SOLO_SOLEDAD = /^\/api\/pedidos(?:\/.*)?$/;
+// R3: captura, «+N», suma por UPC, fusión, descarte y ajustes de Soledad. Una cuenta de sucursal no captura.
+const CAPTURA_SOLEDAD = /^\/api\/(?:borradores|piezas)(?:\/.*)?$/;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const FOTO_MAX_BYTES = 6 * 1024 * 1024;
 const textoCapturaRopa = (valor: unknown) => typeof valor === 'string' && valor.trim().length <= 40 && !/[\r\n]/.test(valor);
@@ -1069,6 +1074,7 @@ async function corregirCaptura(id: string, campo: string, request: Request, env:
     const cancelable = `id = ? and capturado_por = ? and upc is not null and creado_en > ? and estado_analisis ${sinFoto ? "<> 'descartado'" : "not in ('listo', 'descartado')"}
         ${sinFoto ? `and ${alcanceSinFoto}` : ''}
         and not ${CAPTURA_SUMADA}
+        and not ${fueraDeSoledad('productos.id')}
         and not exists (select 1 from venta_lineas where producto_id = productos.id)`;
     // Rastro (#480): mismo filtro en ambas sentencias del lote, así que solo hay renglón si la cancelación ocurre.
     const [, { meta }] = await env.DB.batch([
@@ -1156,6 +1162,7 @@ async function revisarCaptura(id: string, request: Request, env: Env, correo: st
   if (request.method === 'DELETE') {
     const retirable = `${alcance}
         and not ${CAPTURA_SUMADA}
+        and not ${fueraDeSoledad('productos.id')}
         and not exists (select 1 from venta_lineas where producto_id = productos.id)
         and not exists (select 1 from ml_publicaciones where producto_id = productos.id)`;
     // Rastro (#480): mismo filtro en ambas sentencias del lote, así que solo hay renglón si la baja ocurre.
@@ -1515,6 +1522,7 @@ async function leerCalibracion(env: Env): Promise<Response> {
 
 /** Mismas restricciones de venta, pedido y publicación, comprobadas dentro del batch. */
 const BORRADOR_RETIRABLE = `sin_inventario = 0
+  and not ${fueraDeSoledad('productos.id')}
   and not exists (select 1 from venta_lineas where producto_id = productos.id)
   and not exists (select 1 from pedido_lineas where producto_id = productos.id)
   and not exists (select 1 from ml_publicaciones where producto_id = productos.id
@@ -1541,6 +1549,7 @@ async function fusionarBorrador(id: string, request: Request, env: Env, propieta
   }
   if (await publicacionViva(env, id)) return json({ error: 'Tiene publicación en Mercado Libre: ciérrala primero.' }, 409);
   if (await enPedido(env, id)) return json({ error: 'Está en un pedido: no se puede borrar.' }, 409);
+  if (await tieneUnidadesFuera(env, id) || await tieneUnidadesFuera(env, destinoId)) return json({ error: MENSAJE_FUERA_DE_SOLEDAD }, 409);   // R3 de #793
 
   const ahora = new Date().toISOString();
   let borrado: D1Result;
@@ -1552,6 +1561,7 @@ async function fusionarBorrador(id: string, request: Request, env: Env, propieta
           and coalesce(codigo, '') = ?4 and estado_analisis <> 'descartado' and ${BORRADOR_RETIRABLE})
         and exists (select 1 from productos where id = ?2 and propietario = ?3
           and estado_analisis <> 'descartado' and sin_inventario = 0
+          and not ${fueraDeSoledad('productos.id')}
           and estado_fisico = (select estado_fisico from productos where id = ?1)
           and coalesce(talla, '') = (select coalesce(talla, '') from productos where id = ?1)
           and (?4 = '' or coalesce(codigo, '') = '')
@@ -1597,6 +1607,7 @@ async function descartarBorrador(id: string, env: Env, propietario: string, corr
   if (!fila || fila.estado_analisis === 'descartado') return json({ id, descartado: true });
   if (await publicacionViva(env, id)) return json({ error: 'Tiene publicación en Mercado Libre: ciérrala primero.' }, 409);
   if (await enPedido(env, id)) return json({ error: 'Está en un pedido: no se puede borrar.' }, 409);
+  if (await tieneUnidadesFuera(env, id)) return json({ error: MENSAJE_FUERA_DE_SOLEDAD }, 409);   // R3 de #793
   let borrado: D1Result;
   try {
     const resultados = await env.DB.batch([
@@ -1739,23 +1750,33 @@ async function crearFamilia(request: Request, env: Env, propietario: string): Pr
  * las piezas que ya no se venden (precio 0) para que la caja las quite. Traer las
  * ~3000 piezas cada minuto agotaba la cuota diaria de lecturas de D1 (15/10).
  */
-async function catalogo(env: Env, url: URL): Promise<Response> {
+async function catalogo(env: Env, url: URL, tienda: string): Promise<Response> {
+  // #795: la caja de una sucursal recibe la existencia de SU tienda (existencia_tienda) en lugar de productos.stock (Soledad). Las bandas y
+  // botes (sin_inventario) no cuentan existencia y conservan su valor. Un cambio de existencia de la sucursal no mueve productos.actualizado_en:
+  // el catálogo incremental también trae lo que cambió en existencia_tienda.
+  const sucursal = tienda !== TIENDA_CENTRAL;
+  const stock = sucursal
+    ? `case when sin_inventario = 1 then stock else coalesce((select e.unidades from existencia_tienda e where e.producto_id = productos.id and e.tienda = ?), 0) end as stock`
+    : 'stock';
+  const cambio = sucursal
+    ? '(actualizado_en > ? or exists (select 1 from existencia_tienda e where e.producto_id = productos.id and e.tienda = ? and e.actualizado_en > ?))'
+    : 'actualizado_en > ?';
   const desde = url.searchParams.get('desde');
   if (desde !== null) {
     if (!Number.isFinite(Date.parse(desde))) return json({ error: 'Fecha invalida.' }, 400);
     const ahora = new Date().toISOString();
     const { results } = await env.DB.prepare(
-      `select id, codigo, nombre, case when estado_analisis = 'descartado' then 0 else precio end as precio, sin_inventario, stock, propietario, estado_fisico, categoria
-       from productos where actualizado_en > ? and codigo is not null and codigo <> ''`,
-    ).bind(new Date(desde).toISOString()).all();
+      `select id, codigo, nombre, case when estado_analisis = 'descartado' then 0 else precio end as precio, sin_inventario, ${stock}, propietario, estado_fisico, categoria
+       from productos where ${cambio} and codigo is not null and codigo <> ''`,
+    ).bind(...(sucursal ? [tienda, new Date(desde).toISOString(), tienda, new Date(desde).toISOString()] : [new Date(desde).toISOString()])).all();
     return json({ ahora, piezas: results });
   }
   const { results } = await env.DB.prepare(
     // Grado D (#733): sin precio, pero la caja la recibe para avisar que no se vende en vez de «código no encontrado».
-    `select id, codigo, nombre, precio, sin_inventario, stock, propietario, estado_fisico, categoria
+    `select id, codigo, nombre, precio, sin_inventario, ${stock}, propietario, estado_fisico, categoria
      from productos where codigo is not null and codigo <> '' and (precio > 0 or estado_fisico = 'caducado') and estado_analisis <> 'descartado'
      order by nombre`,
-  ).all();
+  ).bind(...(sucursal ? [tienda] : [])).all();
   return json(results);
 }
 
@@ -2002,6 +2023,7 @@ async function registrarVenta(request: Request, env: Env, ctx: ExecutionContext,
   const anticipo = pedidoId ? Number(venta.anticipo ?? 0) : 0;
   if (pedidoId ? !UUID.test(pedidoId) || !Number.isInteger(anticipo) || anticipo < 0 : Number(venta.anticipo ?? 0) !== 0)
     return json({ error: 'Pedido o anticipo invalido.' }, 400);
+  if (pedidoId && tienda !== TIENDA_CENTRAL) return json({ error: APARTADOS_SOLO_SOLEDAD }, 409);
   const porPagar = total - (Number.isInteger(dolarones) ? dolarones : 0);
   if (anticipo > porPagar) return json({ error: 'El anticipo no puede pasar de lo que se cobra.' }, 400);
   const aPagar = porPagar - anticipo;
@@ -2068,13 +2090,11 @@ async function registrarVenta(request: Request, env: Env, ctx: ExecutionContext,
     // Sin `max(0, ...)`: si dos ventas concurrentes se pelean la ultima pieza,
     // el trigger `stock_no_negativo` (migracion 006) aborta esta sentencia y
     // con ella todo el batch, en vez de dejar que ambas "ganen".
+    // #795: la existencia que baja es la de la tienda de la terminal (R3 de #793): Soledad = productos.stock, una sucursal = existencia_tienda.
+    // Vender en sucursal una pieza que nunca llegó o ya se agotó ahí aborta el ticket completo (trigger existencia_tienda_no_negativa).
     ...preparado.lineas
       .filter((l) => !l.sinInventario)
-      .map((l) =>
-        env.DB.prepare(
-          `update productos set stock = stock - ?, actualizado_en = ? where id = ?`,
-        ).bind(l.cantidad, ahora, l.producto_id),
-      ),
+      .flatMap((l) => sentenciasMover(env, tienda, l.producto_id, -l.cantidad, ahora)),
     ...recompensa.sentencias,
     ...vale.sentencias,
   ];
@@ -2095,8 +2115,9 @@ async function registrarVenta(request: Request, env: Env, ctx: ExecutionContext,
     if (String(error).includes('codigo de socio invalido')) {
       return json({ error: 'Código de socio usado, vencido o actualizado. Pide otro al cliente.' }, 409);
     }
-    if (String(error).includes('stock insuficiente')) {
-      return json({ error: 'No hay existencia suficiente para completar la venta.' }, 409);
+    if (esExistenciaInsuficiente(error)) {
+      return json({ error: tienda === TIENDA_CENTRAL ? 'No hay existencia suficiente para completar la venta.'
+        : 'No hay existencia suficiente en esta sucursal para completar la venta.' }, 409);
     }
     if (String(error).includes('saldo insuficiente')) {
       return json({ error: 'El saldo de Dolarones cambio. Vuelve a buscar al socio.' }, 409);
@@ -2111,7 +2132,8 @@ async function registrarVenta(request: Request, env: Env, ctx: ExecutionContext,
     throw error;
   }
   // Si una pieza publicada en Mercado Libre se agoto, se pausa alla (D1 manda). Despues de responder.
-  ctx.waitUntil(conciliarSeguro(env, { productoIds: preparado.lineas.filter((l) => !l.sinInventario).map((l) => l.producto_id) }));
+  // Solo Soledad publica en Mercado Libre: una venta de sucursal no toca su existencia.
+  if (tienda === TIENDA_CENTRAL) ctx.waitUntil(conciliarSeguro(env, { productoIds: preparado.lineas.filter((l) => !l.sinInventario).map((l) => l.producto_id) }));
   const respuesta = json({
     id, total, descuento, dolarones, imprimir_en:imprimirEn, cambio: Math.max(0, efectivo - aPagar), ganados: recompensa.ganados, referido_liberado: recompensa.referido ?? 0, bono_promo: recompensa.bono_promo ?? 0,
     anticipo, saldo_pedido: pedidoId ? await saldoDe(env, pedidoId) : null,
@@ -2632,8 +2654,11 @@ export default {
           // R2: una computadora de caja sin tienda no cobra.
           if (!tienda && pathname.startsWith('/api/')) return json({ error: 'Esta computadora no tiene tienda asignada. Pídele al dueño que se la asigne en Cuentas.' }, 403);
         }
-        if (tienda !== TIENDA_CENTRAL && request.method === 'POST' && MUEVE_EXISTENCIA.test(pathname)) {
-          return json({ error: SUCURSAL_SIN_EXISTENCIAS }, 409);
+        if (tienda !== TIENDA_CENTRAL && request.method === 'POST' && SOLO_SOLEDAD.test(pathname)) {
+          return json({ error: APARTADOS_SOLO_SOLEDAD }, 409);
+        }
+        if (tienda !== TIENDA_CENTRAL && request.method !== 'GET' && CAPTURA_SOLEDAD.test(pathname)) {
+          return json({ error: 'Una cuenta de sucursal no captura ni ajusta la existencia de Soledad: la mercancía se captura y etiqueta allá.' }, 403);
         }
       }
 
@@ -2807,11 +2832,15 @@ export default {
       }
 
       if (pathname === '/api/catalogo') {
-        return await catalogo(env, url);
+        return await catalogo(env, url, tienda);
       }
       // Issue #220: piezas que no pueden salir en el sitio, para corregir en /admin. Solo el dueno (cuentas.ts).
       if (pathname === '/api/catalogo/revision' && request.method === 'GET') {
         return await revisionCatalogo(env);
+      }
+
+      if (pathname === '/api/bultos' || pathname.startsWith('/api/bultos/')) {
+        return await rutaBultos(request, env, ctx, url, usuario, correo, tienda);
       }
 
       if (pathname.startsWith('/api/pedidos')) {
@@ -2888,16 +2917,16 @@ export default {
 
       const cancelacion = pathname.match(/^\/api\/ventas\/([^/]+)\/cancelar$/);
       if (cancelacion && request.method === 'POST') {
-        return await cancelarVenta(cancelacion[1], request, env, correo, ctx);
+        return await cancelarVenta(cancelacion[1], request, env, correo, tienda, ctx);
       }
       const cancelacionPieza = pathname.match(/^\/api\/ventas\/([^/]+)\/lineas\/(\d+)\/cancelar$/);
       if (cancelacionPieza && request.method === 'POST') {
-        return await cancelarPieza(cancelacionPieza[1], Number(cancelacionPieza[2]), request, env, correo);
+        return await cancelarPieza(cancelacionPieza[1], Number(cancelacionPieza[2]), request, env, correo, tienda);
       }
       // Cupones en lugar de devolver dinero (Issue #330).
       const cupon = pathname.match(/^\/api\/ventas\/([^/]+)\/cupon(?:\/([^/]+))?$/);
       if (cupon && request.method === 'POST') {
-        return cupon[2] ? await reimprimirCupon(cupon[1], cupon[2], env) : await devolverEnCupon(cupon[1], request, env, correo);
+        return cupon[2] ? await reimprimirCupon(cupon[1], cupon[2], env) : await devolverEnCupon(cupon[1], request, env, correo, tienda);
       }
       if (pathname === '/api/cupones' && request.method === 'POST') return await emitirCuponManual(request, env, correo);
       const ticket = pathname.match(/^\/api\/ventas\/([^/]+)$/);

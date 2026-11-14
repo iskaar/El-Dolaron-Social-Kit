@@ -108,7 +108,7 @@ export async function ajustarExistencia(request: Request, env: Env, correo: stri
 export async function listarAjustes(env: Env, propietario: string): Promise<Response> {
   const desde = new Date(Date.now() - 30 * DIA_MS).toISOString();
   const { results } = await env.DB.prepare(
-    `select producto_id, codigo, nombre, motivo, cantidad, antes, despues, ajustado_por, ajustado_en
+    `select producto_id, codigo, nombre, motivo, cantidad, antes, despues, ajustado_por, ajustado_en, tienda
      from conteo_ajustes where ajustado_en >= ?
        and not exists (select 1 from productos p where p.id = conteo_ajustes.producto_id and p.propietario <> ?)
      order by ajustado_en desc`,

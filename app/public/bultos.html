@@ -1,0 +1,275 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>El Dolarón — bultos</title>
+<style>
+  :root { --azul:#16366B; --rojo:#D72B32; --amarillo:#FFD447; --linea:#dfe3ea; --verde:#2c7a3f; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: #f4f6f9; color: #1a1f2b; font-family: system-ui, -apple-system, sans-serif; }
+  header { background: var(--azul); color: #fff; padding: 14px 20px; display: flex; gap: 16px; align-items: center; flex-wrap: wrap; }
+  header h1 { font-size: 18px; margin: 0; flex: 1; }
+  header a { color: var(--amarillo); font-size: 14px; }
+  main { padding: 20px; max-width: 900px; margin: 0 auto; }
+  nav { display: flex; gap: 8px; margin-bottom: 16px; flex-wrap: wrap; }
+  nav button { background: #eef1f6; color: #1a1f2b; }
+  nav button[aria-selected="true"] { background: var(--azul); color: #fff; }
+  .panel { background: #fff; border: 1px solid var(--linea); border-radius: 12px; padding: 16px; margin-bottom: 20px; }
+  .panel h2 { font-size: 15px; margin: 0 0 12px; }
+  .fila { display: flex; gap: 10px; align-items: center; padding: 8px 0; border-top: 1px solid var(--linea); flex-wrap: wrap; }
+  .fila:first-of-type { border-top: 0; }
+  .fila .grande { flex: 1; min-width: 160px; }
+  .folio { font-family: ui-monospace, monospace; font-weight: 700; font-size: 18px; letter-spacing: 1px; }
+  input[type=text], select { padding: 10px 12px; border: 1px solid var(--linea); border-radius: 8px; font-size: 16px; }
+  input[type=text] { flex: 1; min-width: 180px; }
+  button { border: 0; border-radius: 8px; padding: 10px 14px; font-size: 14px; font-weight: 600; cursor: pointer; background: var(--azul); color: #fff; }
+  button.claro { background: #eef1f6; color: #1a1f2b; }
+  button.peligro { background: #fff; color: var(--rojo); border: 1px solid var(--rojo); }
+  button:disabled { opacity: .5; cursor: default; }
+  .aviso { font-size: 14px; min-height: 1.2em; margin: 8px 0 0; color: var(--rojo); }
+  .aviso.ok { color: var(--verde); }
+  .vacio, small { color: #5b6478; font-size: 13px; }
+  .total { font-weight: 700; }
+  [hidden] { display: none !important; }
+</style>
+<script src="/cajero.js"></script>
+</head>
+<body>
+<header>
+  <h1>Bultos</h1>
+  <a href="/" id="inicio">← Inicio</a>
+</header>
+<main>
+  <nav role="tablist">
+    <button type="button" role="tab" id="t-armar" data-vista="armar" hidden>Armar</button>
+    <button type="button" role="tab" id="t-camino" data-vista="camino" hidden>En camino</button>
+    <button type="button" role="tab" id="t-recibir" data-vista="recibir">Recibir</button>
+  </nav>
+
+  <section id="v-armar" hidden>
+    <div class="panel" id="nuevo">
+      <h2>Armar un bulto</h2>
+      <div class="fila">
+        <label>Va a <select id="destino"></select></label>
+        <label id="fila-origen" hidden>Sale de <select id="origen"></select></label>
+        <button type="button" id="crear">Abrir bulto</button>
+      </div>
+      <p class="vacio">Cada bulto sale de Soledad; escanea la etiqueta de cada pieza, ciérralo e imprime su etiqueta. Las bandas y los botes viajan sin escanear.</p>
+    </div>
+    <div class="panel" id="abierto" hidden>
+      <h2>Bulto <span class="folio" id="folio-abierto"></span> → <span id="destino-abierto"></span></h2>
+      <div class="fila">
+        <input type="text" id="codigo" placeholder="Escanea la etiqueta o escribe el código" autocomplete="off" inputmode="text">
+        <button type="button" id="agregar">Agregar</button>
+      </div>
+      <p class="aviso" id="aviso-armar" role="status"></p>
+      <div id="lineas"></div>
+      <p class="total" id="resumen-abierto"></p>
+      <div class="fila">
+        <button type="button" id="cerrar">Cerrar e imprimir etiqueta</button>
+        <button type="button" class="peligro" id="cancelar">Cancelar bulto</button>
+        <button type="button" class="claro" id="soltar">Dejar para después</button>
+      </div>
+    </div>
+    <div class="panel">
+      <h2>Bultos abiertos</h2>
+      <div id="abiertos"></div>
+    </div>
+  </section>
+
+  <section id="v-camino" hidden>
+    <div class="panel">
+      <h2>En camino</h2>
+      <div id="camino"></div>
+    </div>
+  </section>
+
+  <section id="v-recibir">
+    <div class="panel">
+      <h2>Recibir un bulto</h2>
+      <p class="vacio" style="margin-top:0">Escanea el folio de la etiqueta del bulto o escríbelo (BU- y cinco caracteres). Las piezas entran a la existencia de esta tienda; no se vuelven a escanear una por una.</p>
+      <div class="fila">
+        <input type="text" id="folio" placeholder="BU-XXXXX" autocomplete="off" autocapitalize="characters" maxlength="12">
+        <button type="button" id="recibir">Recibir</button>
+      </div>
+      <p class="aviso" id="aviso-recibir" role="status"></p>
+      <div id="recibido"></div>
+    </div>
+    <div class="panel">
+      <h2>Esperados en esta tienda</h2>
+      <div id="entrantes"></div>
+    </div>
+  </section>
+</main>
+<script type="module">
+import { escucharLector } from '/lector.js';
+import { tsplBulto, conectarEtiquetera, etiqueteraLista, mandarTspl, errorEnvio } from '/etiquetera.js';
+
+const $ = (id) => document.getElementById(id);
+const escapar = (texto) => String(texto ?? '').replace(/[<>&"]/g, (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;' }[c]));
+const pesos = (centavos) => (centavos / 100).toLocaleString('es-MX', { style: 'currency', currency: 'MXN' });
+const aviso = (id, texto, ok = false) => { $(id).textContent = texto; $(id).classList.toggle('ok', ok); };
+// La computadora de caja entra con el PIN del cajero: /cajero.js lo pide y agrega su token a cada llamada de /api/ (sin él, 401).
+const pedir = async (ruta, cuerpo, metodo = cuerpo === undefined ? 'GET' : 'POST') => {
+  const r = await fetch(ruta, { method: metodo, headers: { 'content-type': 'application/json' },
+    ...(cuerpo === undefined ? {} : { body: JSON.stringify(cuerpo) }) });
+  return { ok: r.ok, status: r.status, cuerpo: await r.json().catch(() => ({})) };
+};
+
+const { usuario } = await (await fetch('/api/yo')).json();
+const roles = usuario?.activo ? usuario.roles : [];
+const dueno = roles.includes('dueno');
+const arma = dueno || roles.includes('capturista');
+const TIENDAS = { soledad: 'Soledad', salk: 'Avenida Salk', romero: 'Coronel Romero' };
+$('inicio').href = roles.includes('computadora') && !dueno ? '/caja' : '/';
+
+let abierto = null;   // el bulto que se está armando (folio)
+const vistas = { armar: arma, camino: arma, recibir: true };
+for (const [v, ver] of Object.entries(vistas)) $(`t-${v}`).hidden = !ver;
+function ir(vista) {
+  for (const v of Object.keys(vistas)) { $(`v-${v}`).hidden = v !== vista; $(`t-${v}`).setAttribute('aria-selected', String(v === vista)); }
+  if (vista === 'armar') cargarAbiertos();
+  if (vista === 'camino') cargarCamino();
+  if (vista === 'recibir') cargarEntrantes();
+  (vista === 'armar' ? ($('abierto').hidden ? $('destino') : $('codigo')) : vista === 'recibir' ? $('folio') : document.body).focus?.();
+}
+document.querySelector('nav').addEventListener('click', (e) => { const b = e.target.closest('[data-vista]'); if (b) ir(b.dataset.vista); });
+
+/* ---------- armar ---------- */
+const nombresDeTiendas = Object.entries(TIENDAS);
+$('destino').innerHTML = nombresDeTiendas.filter(([c]) => dueno || c !== 'soledad').map(([c, n]) => `<option value="${c}">${n}</option>`).join('');
+$('origen').innerHTML = nombresDeTiendas.map(([c, n]) => `<option value="${c}">${n}</option>`).join('');
+$('fila-origen').hidden = !dueno;   // solo el dueño arma desde una sucursal (regresar mercancía a Soledad)
+
+const lineas = (b) => b.lineas.length === 0 ? '<p class="vacio">Sin piezas todavía.</p>' : b.lineas.map((l) => `
+  <div class="fila"><span class="grande"><b>${escapar(l.codigo)}</b> ${escapar(l.nombre)} <small>×${l.cantidad} · ${pesos(l.precio)}</small></span>
+    ${b.estado === 'abierto' ? `<button type="button" class="claro" data-quitar="${l.id}">Quitar</button>` : ''}</div>`).join('');
+function pintarAbierto(b) {
+  abierto = b.estado === 'abierto' ? b : null;
+  $('abierto').hidden = !abierto;
+  if (!abierto) return;
+  $('folio-abierto').textContent = b.folio;
+  $('destino-abierto').textContent = b.destino_nombre;
+  $('lineas').innerHTML = lineas(b);
+  $('resumen-abierto').textContent = `${b.piezas} pieza${b.piezas === 1 ? '' : 's'} · ${pesos(b.valor)} a precio de hoy`;
+  $('cerrar').disabled = b.piezas === 0;
+}
+async function abrir(folio) {
+  const r = await pedir(`/api/bultos/${folio}`);
+  if (!r.ok) return aviso('aviso-armar', r.cuerpo.error ?? 'No se pudo abrir el bulto.');
+  aviso('aviso-armar', '');
+  pintarAbierto(r.cuerpo);
+  $('codigo').focus();
+}
+async function cargarAbiertos() {
+  const r = await pedir('/api/bultos?estado=abierto');
+  $('abiertos').innerHTML = !r.ok || r.cuerpo.length === 0 ? '<p class="vacio">No hay bultos abiertos.</p>' : r.cuerpo.map((b) => `
+    <div class="fila"><span class="folio">${b.folio}</span><span class="grande">→ ${escapar(b.destino_nombre)} <small>${b.piezas} pieza${b.piezas === 1 ? '' : 's'}</small></span>
+      <button type="button" class="claro" data-abrir="${b.folio}">Continuar</button></div>`).join('');
+}
+$('abiertos').addEventListener('click', (e) => { const b = e.target.closest('[data-abrir]'); if (b) abrir(b.dataset.abrir); });
+$('crear').addEventListener('click', async () => {
+  const r = await pedir('/api/bultos', { id: crypto.randomUUID(), destino: $('destino').value, ...(dueno ? { origen: $('origen').value } : {}) });
+  if (!r.ok) return aviso('aviso-armar', r.cuerpo.error ?? 'No se pudo abrir el bulto.');
+  pintarAbierto(r.cuerpo);
+  $('codigo').focus();
+});
+// Cada escaneo lleva su UUID: si la red falla y se reintenta, el servidor no mete dos veces. El UUID se renueva solo cuando el servidor contestó.
+let escaneoPendiente = null;
+async function agregar(codigo) {
+  if (!abierto || !codigo.trim()) return;
+  escaneoPendiente = escaneoPendiente?.codigo === codigo ? escaneoPendiente : { codigo, id: crypto.randomUUID() };
+  const r = await pedir(`/api/bultos/${abierto.folio}/piezas`, { id: escaneoPendiente.id, codigo }).catch(() => null);
+  if (!r) return aviso('aviso-armar', 'Sin red: no se agregó. Vuelve a escanear la misma etiqueta cuando haya conexión.');
+  escaneoPendiente = null;
+  if (!r.ok) return aviso('aviso-armar', r.cuerpo.error ?? 'No se pudo agregar.');
+  pintarAbierto(r.cuerpo);
+  const a = r.cuerpo.agregada;
+  aviso('aviso-armar', a ? `${a.codigo} · ${a.nombre}` : 'Ya estaba agregada.', true);
+}
+$('agregar').addEventListener('click', () => { const c = $('codigo').value; $('codigo').value = ''; agregar(c); $('codigo').focus(); });
+$('codigo').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); $('agregar').click(); } });
+// El lector manda ráfagas de teclas fuera de los campos: se toman como un código escaneado.
+escucharLector(({ codigo }) => { if (!$('v-armar').hidden && abierto) agregar(codigo); else if (!$('v-recibir').hidden) { $('folio').value = codigo; $('recibir').click(); } }, { caja: null });
+$('lineas').addEventListener('click', async (e) => {
+  const b = e.target.closest('[data-quitar]');
+  if (!b || !abierto) return;
+  const r = await pedir(`/api/bultos/${abierto.folio}/quitar`, { linea: b.dataset.quitar });
+  if (!r.ok) return aviso('aviso-armar', r.cuerpo.error ?? 'No se pudo quitar.');
+  pintarAbierto(r.cuerpo);
+  aviso('aviso-armar', 'Pieza quitada: volvió a la existencia de origen.', true);
+});
+$('soltar').addEventListener('click', () => { pintarAbierto({ estado: '' }); cargarAbiertos(); });
+$('cancelar').addEventListener('click', async () => {
+  if (!abierto || !confirm(`¿Cancelar el bulto ${abierto.folio}? Todas sus piezas vuelven a la existencia de origen.`)) return;
+  const r = await pedir(`/api/bultos/${abierto.folio}/cancelar`, {});
+  if (!r.ok) return aviso('aviso-armar', r.cuerpo.error ?? 'No se pudo cancelar.');
+  pintarAbierto({ estado: '' });
+  aviso('aviso-armar', 'Bulto cancelado: todo volvió al origen.', true);
+  cargarAbiertos();
+});
+
+/* ---------- etiqueta del bulto en la AE240 (etiquetera.js: misma geometría y calibración que las demás) ---------- */
+async function imprimirEtiqueta(b, aviso_) {
+  // Pedir la impresora gasta el permiso del clic: va antes de cualquier espera.
+  if (!etiqueteraLista()) {
+    try { await conectarEtiquetera(); } catch (error) { aviso(aviso_, `No se conectó la impresora: ${error.message}. El bulto quedó cerrado; reimprime desde «En camino».`); return false; }
+  }
+  const ok = await mandarTspl(tsplBulto(b.etiqueta));
+  aviso(aviso_, ok ? `Etiqueta de ${b.folio} impresa. Pégala al bulto.` : `No salió la etiqueta (${errorEnvio() || 'sin enlace'}). Reimprime desde «En camino».`, ok);
+  return ok;
+}
+$('cerrar').addEventListener('click', async () => {
+  if (!abierto) return;
+  const r = await pedir(`/api/bultos/${abierto.folio}/cerrar`, {});
+  if (!r.ok) return aviso('aviso-armar', r.cuerpo.error ?? 'No se pudo cerrar.');
+  const cerrado = r.cuerpo;
+  pintarAbierto({ estado: '' });
+  await imprimirEtiqueta(cerrado, 'aviso-armar');
+  cargarAbiertos();
+});
+
+/* ---------- en camino ---------- */
+async function cargarCamino() {
+  const r = await pedir('/api/bultos');
+  const cerrados = (r.cuerpo ?? []).filter?.((b) => b.estado === 'cerrado') ?? [];
+  $('camino').innerHTML = !r.ok || cerrados.length === 0 ? '<p class="vacio">No hay bultos en camino.</p>' : cerrados.map((b) => `
+    <div class="fila"><span class="folio">${b.folio}</span>
+      <span class="grande">${escapar(b.origen_nombre)} → ${escapar(b.destino_nombre)} <small>${b.piezas} pieza${b.piezas === 1 ? '' : 's'} · ${pesos(b.valor)}</small></span>
+      <button type="button" class="claro" data-imprimir="${b.folio}">Reimprimir etiqueta</button></div>`).join('') + '<p class="aviso" id="aviso-camino" role="status"></p>';
+}
+$('camino').addEventListener('click', async (e) => {
+  const b = e.target.closest('[data-imprimir]');
+  if (!b) return;
+  const r = await pedir(`/api/bultos/${b.dataset.imprimir}`);
+  if (r.ok) await imprimirEtiqueta(r.cuerpo, 'aviso-camino');
+});
+
+/* ---------- recibir ---------- */
+const resumen = (b) => `<div class="fila"><span class="grande"><span class="folio">${b.folio}</span> → ${escapar(b.destino_nombre)}
+  <small>${b.piezas} pieza${b.piezas === 1 ? '' : 's'} · ${pesos(b.valor)}</small></span></div>${(b.lineas ?? []).map((l) =>
+  `<div class="fila"><span class="grande"><b>${escapar(l.codigo)}</b> ${escapar(l.nombre)} <small>×${l.cantidad}</small></span></div>`).join('')}`;
+async function cargarEntrantes() {
+  const r = await pedir('/api/bultos/entrantes');
+  $('entrantes').innerHTML = !r.ok ? `<p class="vacio">${escapar(r.cuerpo.error ?? 'Sin conexión.')}</p>` : r.cuerpo.length === 0
+    ? '<p class="vacio">No hay bultos en camino hacia esta tienda.</p>' : r.cuerpo.map((b) => `
+    <div class="fila"><span class="folio">${b.folio}</span><span class="grande">de ${escapar(b.origen_nombre)} <small>${b.piezas} pieza${b.piezas === 1 ? '' : 's'}</small></span>
+      <button type="button" class="claro" data-recibir="${b.folio}">Recibir</button></div>`).join('');
+}
+async function recibir(folio) {
+  const r = await pedir('/api/bultos/recibir', { folio });
+  if (!r.ok) { $('recibido').innerHTML = ''; return aviso('aviso-recibir', r.cuerpo.error ?? 'No se pudo recibir.'); }
+  aviso('aviso-recibir', r.cuerpo.ya_estaba ? `El bulto ${r.cuerpo.folio} ya se había recibido: no se sumó otra vez.` : `Recibido ${r.cuerpo.folio}: ${r.cuerpo.piezas} piezas entraron a la existencia de ${r.cuerpo.destino_nombre}.`, true);
+  $('recibido').innerHTML = resumen(r.cuerpo);
+  $('folio').value = '';
+  cargarEntrantes();
+}
+$('recibir').addEventListener('click', () => recibir($('folio').value));
+$('folio').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); $('recibir').click(); } });
+$('entrantes').addEventListener('click', (e) => { const b = e.target.closest('[data-recibir]'); if (b) recibir(b.dataset.recibir); });
+
+ir(arma ? 'armar' : 'recibir');
+</script>
+</body>
+</html>

@@ -13,7 +13,7 @@
  */
 
 import { cajaDe } from './corte.ts';
-import { TIENDA_CENTRAL } from './cuentas.ts';
+import { sentenciasMover } from './existencias.ts';
 import { leerCupon, nuevoCupon, porcentajeCupon, usadosEnVenta, valeDeVenta } from './vales.ts';
 import { saldo } from './dolarones.ts';
 import { sentenciasDeReverso } from './reversos.ts';
@@ -108,7 +108,7 @@ export async function detalleVenta(id: string, env: Env, paraImprimir = false): 
  * genera al abrir el formulario: un reintento tras red caida no devuelve dos veces.
  */
 export async function cancelarPieza(
-  ventaId: string, lineaId: number, request: Request, env: Env, correo: string,
+  ventaId: string, lineaId: number, request: Request, env: Env, correo: string, tienda: string,
 ): Promise<Response> {
   if (!UUID.test(ventaId)) return json({ error: 'Identificador de venta invalido.' }, 400);
   const cuerpo = (await request.json().catch(() => ({}))) as {
@@ -170,16 +170,12 @@ export async function cancelarPieza(
       env.DB.prepare('update venta_lineas set cancelada_cantidad = cancelada_cantidad + ? where id = ?')
         .bind(cantidad, linea.id),
       env.DB.prepare(
-        `insert into devoluciones (id, venta_id, linea_id, cantidad, importe, dolarones, forma_pago, caja, autor, motivo, creado_en)
-         values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `insert into devoluciones (id, venta_id, linea_id, cantidad, importe, dolarones, forma_pago, caja, autor, motivo, creado_en, tienda)
+         values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       ).bind(id, ventaId, linea.id, cantidad, reparto.dinero, reparto.dolarones, devolverEn,
-        await cajaDe(env, correo, cuerpo.caja, TIENDA_CENTRAL), correo, motivo, ahora),
-      // Los bins no regresan existencia: nadie cuenta cuantas piezas hay en un bote.
-      ...(linea.producto_id
-        ? [env.DB.prepare(
-          'update productos set stock = stock + ?, actualizado_en = ? where id = ? and sin_inventario = 0',
-        ).bind(cantidad, ahora, linea.producto_id)]
-        : []),
+        await cajaDe(env, correo, cuerpo.caja, tienda), correo, motivo, ahora, tienda),
+      // Los bins no regresan existencia: nadie cuenta cuantas piezas hay en un bote. La pieza entra a la tienda donde se devuelve (R3 de #793).
+      ...(linea.producto_id ? sentenciasMover(env, tienda, linea.producto_id, cantidad, ahora, true) : []),
       ...(await sentenciasDeReverso(env, {
         ventaId, clienteId: venta.cliente_id, autor: correo, ahora, completa: false,
         dolarones: reparto.dolarones, pagadoRestante: pagado - venta.devuelto - reparto.dinero,
@@ -218,7 +214,7 @@ const piezasQueQuedan = async (env: Env, ventaId: string) => (await env.DB.prepa
  * como siempre. `id` (de la caja) es el id del cupón: un reenvio no emite dos.
  * `lineas`: [{ linea, cantidad }] o 'todo' (lo que queda del ticket).
  */
-export async function devolverEnCupon(ventaId: string, request: Request, env: Env, correo: string): Promise<Response> {
+export async function devolverEnCupon(ventaId: string, request: Request, env: Env, correo: string, tienda: string): Promise<Response> {
   if (!UUID.test(ventaId)) return json({ error: 'Identificador de venta invalido.' }, 400);
   const cuerpo = (await request.json().catch(() => ({}))) as { id?: unknown; lineas?: unknown; motivo?: unknown; caja?: unknown };
   const id = String(cuerpo.id ?? '');
@@ -256,7 +252,7 @@ export async function devolverEnCupon(ventaId: string, request: Request, env: En
   let base = 0;
   const ahora = new Date();
   const iso = ahora.toISOString();
-  const caja = await cajaDe(env, correo, cuerpo.caja, TIENDA_CENTRAL);
+  const caja = await cajaDe(env, correo, cuerpo.caja, tienda);
   const sentencias: D1PreparedStatement[] = [];
   for (const p of pedidas) {
     const linea = todas.find((l) => l.id === p.linea);
@@ -275,15 +271,12 @@ export async function devolverEnCupon(ventaId: string, request: Request, env: En
     sentencias.push(
       env.DB.prepare('update venta_lineas set cancelada_cantidad = cancelada_cantidad + ? where id = ?').bind(p.cantidad, linea.id),
       env.DB.prepare(
-        `insert into devoluciones (id, venta_id, linea_id, cantidad, importe, dolarones, cupon, vale_id, forma_pago, caja, autor, motivo, creado_en)
-         values (?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `insert into devoluciones (id, venta_id, linea_id, cantidad, importe, dolarones, cupon, vale_id, forma_pago, caja, autor, motivo, creado_en, tienda)
+         values (?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       ).bind(crypto.randomUUID(), ventaId, linea.id, p.cantidad, reparto.dolarones, reparto.dinero, id, venta.forma_pago,
-        caja, correo, motivo, iso),
+        caja, correo, motivo, iso, tienda),
       // Los bins no regresan existencia: nadie cuenta cuantas piezas hay en un bote.
-      ...(linea.producto_id
-        ? [env.DB.prepare('update productos set stock = stock + ?, actualizado_en = ? where id = ? and sin_inventario = 0')
-          .bind(p.cantidad, iso, linea.producto_id)]
-        : []),
+      ...(linea.producto_id ? sentenciasMover(env, tienda, linea.producto_id, p.cantidad, iso, true) : []),
     );
   }
   const porcentaje = await porcentajeCupon(env);
