@@ -23,7 +23,7 @@ import { CLAVES_CATEGORIA } from '../public/categorias.js';
 import { tallaValida, esCalzado } from '../public/tallas.js';
 import {
   permiso, puede, quienEs, leerUsuario, yo, pedirAcceso, listarCuentas, guardarCuenta, resolverSolicitud, propietarioDe,
-  esDeCaja, soloComputadora, esRevendedora, esInversionista, CAJAS, puedeEditarInventario, type Usuario,
+  esDeCaja, soloComputadora, esRevendedora, esInversionista, cajasDe, tiendaDe, TIENDA_CENTRAL, puedeEditarInventario, type Usuario,
 } from './cuentas.ts';
 import { cajeroEnTurno, listarCajeros, listarVendedoras, esVendedora, entrar, salir, ponerPin } from './cajeros.ts';
 import { rutaPush } from './push.ts';
@@ -31,7 +31,7 @@ import { rutaCep, transferenciasPorValidar, validarTransferencia } from './cep.t
 import { subirComprobante, verComprobante } from './comprobante.ts';
 import { verFotoReportada } from './pagos-reportados.ts';
 import { registrarSocio, buscarSocio, buscarPorCodigo, basesListas, sentenciasDeVenta, saldo } from './dolarones.ts';
-import { registrarCorte, registrarRetiro, rutaTerminal, ultimoCorte, cajaDe } from './corte.ts';
+import { registrarCorte, registrarRetiro, rutaTerminal, ultimoCorte, cajaDe, CajaAjena } from './corte.ts';
 import { rutaGastos } from './gastos.ts';
 import { rutaPiezas, buscarPiezas, escribirExistencia, autorizarPrecio } from './piezas.ts';
 import { rutaSolicitudesPrecio, crearSolicitud } from './solicitudes-precio.ts';
@@ -177,8 +177,11 @@ async function rechazoPorMl(env: Env, id: string, nuevo: string, anterior: strin
 // Transferencia: confirmada por Isaac como forma de pago; sin ella se capturaba
 // como efectivo o tarjeta y descuadraba el corte (Issue #93).
 const FORMAS_PAGO = new Set(['efectivo', 'tarjeta', 'transferencia']);
-const estacionValida = (valor: unknown): valor is string =>
-  typeof valor === 'string' && CAJAS.includes(valor);
+const estacionValida = (valor: unknown, tienda: string): valor is string =>
+  typeof valor === 'string' && cajasDe(tienda).includes(valor);
+// Una sucursal todavia no tiene existencias en el sistema (#793, PR 2): lo que mueve existencia de Soledad no corre desde ella.
+const SUCURSAL_SIN_EXISTENCIAS = 'Esta sucursal aún no tiene existencias en el sistema.';
+const MUEVE_EXISTENCIA = /^\/api\/(?:ventas|pedidos(?:\/.*)?|ventas\/[^/]+\/(?:cancelar|lineas\/\d+\/cancelar|cupon))$/;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const FOTO_MAX_BYTES = 6 * 1024 * 1024;
 const textoCapturaRopa = (valor: unknown) => typeof valor === 'string' && valor.trim().length <= 40 && !/[\r\n]/.test(valor);
@@ -1853,7 +1856,7 @@ export function prepararLineas(
  * asi que reenviar la cola despues de una red caida no duplica el ticket ni
  * vuelve a descontar existencias.
  */
-async function registrarVenta(request: Request, env: Env, ctx: ExecutionContext, correo: string): Promise<Response> {
+async function registrarVenta(request: Request, env: Env, ctx: ExecutionContext, correo: string, tienda: string): Promise<Response> {
   const venta = (await request.json()) as {
     id?: unknown; lineas?: unknown; forma_pago?: unknown;
     efectivo?: unknown; creado_en?: unknown;
@@ -1876,12 +1879,15 @@ async function registrarVenta(request: Request, env: Env, ctx: ExecutionContext,
     return json({ error: 'Forma de pago invalida.' }, 400);
   }
   const imprimirEn = venta.imprimir_en === undefined ? null : venta.imprimir_en;
-  if (venta.imprimir_en !== undefined && !estacionValida(imprimirEn)) {
+  if (venta.imprimir_en !== undefined && !estacionValida(imprimirEn, tienda)) {
     return json({ error: 'Caja invalida.' }, 400);
   }
   if (imprimirEn && formaPago === 'efectivo') {
     return json({ error: 'En el celular sólo tarjeta o transferencia; no se puede cobrar efectivo con impresión remota.' }, 400);
   }
+  // Quien cobro sale de Access; la caja es la suya (Issue #105) o la de la computadora, y debe ser de esta tienda (#793).
+  // Se resuelve antes de escribir nada: una caja ajena rechaza la venta completa. Una venta encolada antes del corte de caja llega sin caja: ''.
+  const caja = await cajaDe(env, correo, venta.caja, tienda);
 
   // Se compara el pedido que mando la caja, no el catalogo actual: un precio
   // cambiado despues de una venta no debe romper un reintento legitimo.
@@ -2044,12 +2050,10 @@ async function registrarVenta(request: Request, env: Env, ctx: ExecutionContext,
   const sentencias = [
     env.DB.prepare(
       `insert into ventas (id, total, forma_pago, efectivo, cambio, creado_en, registrado_en, cliente_id, dolarones,
-                           caja, cajero, pedido_hash, imprimir_en, descuento, descuento_id, promo, anticipo, pedido_id, vendedora)
-       values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                           caja, cajero, pedido_hash, imprimir_en, descuento, descuento_id, promo, anticipo, pedido_id, vendedora, tienda)
+       values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).bind(id, total, formaPago, efectivo, Math.max(0, efectivo - aPagar), creadoEn, ahora, clienteId, dolarones,
-      // Quien cobro sale de Access; la caja es la suya (Issue #105) o la de la
-      // computadora. Una venta encolada antes del corte de caja llega sin caja: ''.
-      await cajaDe(env, correo, venta.caja), correo, pedidoHash, imprimirEn, descuento, descuentoId, promo, anticipo, pedidoId, vendedora),
+      caja, correo, pedidoHash, imprimirEn, descuento, descuentoId, promo, anticipo, pedidoId, vendedora, tienda),
     ...(transf ? [sentenciaTransferencia(env, transf, correo, ahora, 'venta', { venta: id })] : []),
     ...preparado.lineas.map((l) =>
       env.DB.prepare(
@@ -2121,10 +2125,10 @@ async function registrarVenta(request: Request, env: Env, ctx: ExecutionContext,
 }
 
 /** Últimas 3 h desde la aceptación: una venta sin red entra al sincronizar. */
-async function listarImpresiones(url: URL, env: Env, correo: string): Promise<Response> {
+async function listarImpresiones(url: URL, env: Env, correo: string, tienda: string): Promise<Response> {
   const pedida = url.searchParams.get('caja');
-  if (!estacionValida(pedida)) return json({ error: 'Estación de impresión inválida.' }, 400);
-  const caja = await cajaDe(env, correo, pedida);
+  if (!estacionValida(pedida, tienda)) return json({ error: 'Estación de impresión inválida.' }, 400);
+  const caja = await cajaDe(env, correo, pedida, tienda);
   const { results } = await env.DB.prepare(`select id from ventas
     where imprimir_en = ? and impreso_en is null and cancelada = 0 and registrado_en >= ?
     order by registrado_en, id limit 10`)
@@ -2136,13 +2140,13 @@ async function listarImpresiones(url: URL, env: Env, correo: string): Promise<Re
   return respuesta;
 }
 
-async function tomarImpresion(id: string, request: Request, env: Env, correo: string): Promise<Response> {
+async function tomarImpresion(id: string, request: Request, env: Env, correo: string, tienda: string): Promise<Response> {
   if (!UUID.test(id)) return json({ error: 'Identificador de venta inválido.' }, 400);
   const cuerpo = await request.json().catch(() => ({})) as { caja?: unknown } | null;
   const pedida = cuerpo?.caja;
-  if (!estacionValida(pedida))
+  if (!estacionValida(pedida, tienda))
     return json({ error: 'Estación de impresión inválida.' }, 400);
-  const caja = await cajaDe(env, correo, pedida);
+  const caja = await cajaDe(env, correo, pedida, tienda);
   const ahora = new Date().toISOString();
   // ponytail: tomar antes del USB evita duplicados; si falla o se cierra la
   // pestaña después, se reimprime manualmente desde Ventas de hoy.
@@ -2217,7 +2221,7 @@ async function buscarVentas(url: URL, env: Env): Promise<Response> {
  * la caja; esto solo lo registra, y puede llegar tarde si no habia red.
  * Idempotente por id, como las ventas.
  */
-async function registrarAperturaCajon(request: Request, env: Env, correo: string): Promise<Response> {
+async function registrarAperturaCajon(request: Request, env: Env, correo: string, tienda: string): Promise<Response> {
   const cuerpo = (await request.json().catch(() => ({}))) as { id?: unknown; abierto_en?: unknown; caja?: unknown };
   const id = String(cuerpo.id ?? '');
   const abiertoEn = String(cuerpo.abierto_en ?? '');
@@ -2227,7 +2231,7 @@ async function registrarAperturaCajon(request: Request, env: Env, correo: string
     `insert into cajon_aperturas (id, abierto_por, abierto_en, registrado_en, caja) values (?, ?, ?, ?, ?)
      on conflict (id) do nothing`,
   )
-    .bind(id, correo, new Date(abiertoEn).toISOString(), new Date().toISOString(), await cajaDe(env, correo, cuerpo.caja))
+    .bind(id, correo, new Date(abiertoEn).toISOString(), new Date().toISOString(), await cajaDe(env, correo, cuerpo.caja, tienda))
     .run();
   return json({ id }, 201);
 }
@@ -2602,6 +2606,8 @@ export default {
       }
       let correo = acceso;
       const usuario = regla !== 'cuenta' ? await leerUsuario(env, acceso) : null;
+      // La tienda de lo que se cobra es la de esta cuenta de Access (R1 de #793), nunca la que mande el navegador.
+      const tienda = tiendaDe(usuario);
       if (regla !== 'cuenta') {
         if (!puede(usuario, regla)) {
           // Una pantalla lleva a donde se pide acceso; una llamada de la API
@@ -2623,6 +2629,11 @@ export default {
           const cajero = await cajeroEnTurno(request, env);
           if (cajero) correo = cajero.correo;
           else if (pathname.startsWith('/api/')) return json({ error: 'Escribe tu PIN de cajero.', pin: true }, 401);
+          // R2: una computadora de caja sin tienda no cobra.
+          if (!tienda && pathname.startsWith('/api/')) return json({ error: 'Esta computadora no tiene tienda asignada. Pídele al dueño que se la asigne en Cuentas.' }, 403);
+        }
+        if (tienda !== TIENDA_CENTRAL && request.method === 'POST' && MUEVE_EXISTENCIA.test(pathname)) {
+          return json({ error: SUCURSAL_SIN_EXISTENCIAS }, 409);
         }
       }
 
@@ -2810,15 +2821,15 @@ export default {
 
       if (pathname === '/api/ventas') {
         if (request.method === 'POST') {
-          return await registrarVenta(request, env, ctx, correo);
+          return await registrarVenta(request, env, ctx, correo, tienda);
         }
         if (url.searchParams.has('buscar')) return await buscarVentas(url, env);
         return url.searchParams.get('lista') ? await ventasDelDia(url, env) : await corte(url, env);
       }
 
-      if (pathname === '/api/impresiones' && request.method === 'GET') return await listarImpresiones(url, env, correo);
+      if (pathname === '/api/impresiones' && request.method === 'GET') return await listarImpresiones(url, env, correo, tienda);
       const impresion = /^\/api\/impresiones\/([^/]+)\/tomar$/.exec(pathname);
-      if (impresion && request.method === 'POST') return await tomarImpresion(impresion[1], request, env, correo);
+      if (impresion && request.method === 'POST') return await tomarImpresion(impresion[1], request, env, correo, tienda);
 
       if (pathname === '/api/mensajes' && request.method === 'GET') return await mensajesApi(env);
       if (pathname === '/api/mensajes/responder' && request.method === 'POST') return await responderApi(request, env, correo);
@@ -2856,23 +2867,23 @@ export default {
         return await vincular(request, env);
 
       if (pathname === '/api/cortes') {
-        if (request.method === 'POST') return await registrarCorte(request, env, correo);
-        if (request.method === 'GET') return await ultimoCorte(url, env, correo);
+        if (request.method === 'POST') return await registrarCorte(request, env, correo, tienda);
+        if (request.method === 'GET') return await ultimoCorte(url, env, correo, tienda);
         return json({ error: 'Metodo no permitido.' }, 405);
       }
       if (pathname === '/api/retiros' && request.method === 'POST') {
-        return await registrarRetiro(request, env, correo);
+        return await registrarRetiro(request, env, correo, tienda);
       }
       if (pathname === '/api/terminal') return await rutaTerminal(request, env, correo);   // solo el dueno (cuentas.ts)
       if (pathname === '/api/gastos' || pathname.startsWith('/api/gastos/')) {
-        return await rutaGastos(request, env, url, correo);
+        return await rutaGastos(request, env, url, correo, tienda);
       }
       if (pathname === '/api/nomina' || pathname.startsWith('/api/nomina/')) {
-        return await rutaNomina(request, env, url, correo);
+        return await rutaNomina(request, env, url, correo, tienda);
       }
 
       if (pathname === '/api/cajon' && request.method === 'POST') {
-        return await registrarAperturaCajon(request, env, correo);
+        return await registrarAperturaCajon(request, env, correo, tienda);
       }
 
       const cancelacion = pathname.match(/^\/api\/ventas\/([^/]+)\/cancelar$/);
@@ -3017,6 +3028,7 @@ export default {
       }
       return pantalla;
     } catch (error) {
+      if (error instanceof CajaAjena) return json({ error: error.message }, 400);
       // El segmento secreto de /api/ml/notificaciones/<secreto> no va al log.
       console.error(JSON.stringify({ mensaje: 'fallo en la peticion', pathname: pathname.replace(/^(\/api\/ml\/notificaciones\/).+/, '$1<secreto>'), error: String(error),
         pila: error instanceof Error ? error.stack?.slice(0, 2000) : undefined }));

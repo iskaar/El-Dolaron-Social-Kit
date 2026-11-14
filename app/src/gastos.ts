@@ -77,7 +77,7 @@ async function rutaComprobante(request: Request, env: Env, id: string): Promise<
   return json({ error: 'Metodo no permitido.' }, 405);
 }
 
-export async function rutaGastos(request: Request, env: Env, url: URL, correo: string): Promise<Response> {
+export async function rutaGastos(request: Request, env: Env, url: URL, correo: string, tienda: string): Promise<Response> {
   const idComprobante = /^\/api\/gastos\/([^/]+)\/comprobante$/.exec(url.pathname)?.[1];
   if (idComprobante) return rutaComprobante(request, env, idComprobante);
 
@@ -118,7 +118,7 @@ export async function rutaGastos(request: Request, env: Env, url: URL, correo: s
     let retiroId: string | null = null;
     if (origen === 'caja') {
       if (!cuerpo.caja) return json({ error: 'Falta la caja.' }, 400);
-      const caja = await cajaDe(env, correo, cuerpo.caja);
+      const caja = await cajaDe(env, correo, cuerpo.caja, tienda);
       if (!CAJAS.includes(caja)) return json({ error: 'Caja invalida.' }, 400);
       retiroId = id;   // tablas distintas: el mismo UUID amarra el gasto con su retiro
       sentencias.push(env.DB.prepare(
