@@ -3,7 +3,7 @@ import {
   errorEnvio, etiquetaVigente, precioImpreso, gradoImpreso, esPropia,
 } from '/etiquetera.js';
 
-import { estadoEnvio, prepararYReclamar, liberarEnvio, noSalio, reclamarSinImprimir, sincronizarMarcas } from './envio-etiquetas.js';
+import { estadoEnvio, prepararYReclamar, liberarEnvio, noSalio, reclamarSinImprimir, sincronizarMarcas, seImprime, reclamarDeudas, soltarDeudas } from './envio-etiquetas.js';
 import { nombreEstado } from '/estados.js';
 import { esRopa } from './ropa.js';
 
@@ -605,6 +605,7 @@ async function imprimirNuevas() {
       } else {
         resumen.textContent = bloqueo || esperando || 'Automática activa. Esperando la siguiente foto.';
       }
+      await imprimirDeudas();   // #783: después de la cola, nunca antes
       // shortcut: el endpoint limita a 2000 capturas por sesión; empezar otra al alcanzar el tope.
       if (!cambios && llegadas.length === 2000) {
         pausarAutomatica();
@@ -616,6 +617,62 @@ async function imprimirNuevas() {
     resumen.textContent = `${error.message} La impresión automática está pausada; retoma cuando se resuelva.`;
   } finally {
     consultandoAutomatica = false;
+    pintarControles();
+  }
+}
+
+/**
+ * Etiquetas debidas por un «+N» capturado en otro aparato (#783): la pieza ya existía, así que no entra por `desde`/`creado_en`.
+ * El servidor guarda una deuda por folio de suma; se reclama (una sola pantalla gana) y salen N copias, topadas a la existencia de ahora.
+ * Va después de la cola y no espera a nadie. Consultar o reclamar con falla se reintenta en la siguiente vuelta sin pausar; si falla la
+ * impresión sí se pausa, como en la cola, y lo reclamado que no salió se suelta (salvo lo que ya salió en parte: el resto se saca a mano).
+ */
+async function imprimirDeudas() {
+  if (!automaticaActiva || imprimiendo) return;
+  let ganadas, ahora;
+  try {
+    const respuesta = await fetch(`/api/etiquetas/deudas?desde=${encodeURIComponent(automaticaDesde)}`, { cache: 'no-store', signal: AbortSignal.timeout(15000) });
+    if (!respuesta.ok) return;
+    const debidas = await respuesta.json();
+    if (!debidas.length) return;
+    const reclamo = await reclamarDeudas(debidas.map((d) => d.id));
+    ganadas = debidas.filter((d) => reclamo.reclamadas.includes(d.id));
+    ahora = reclamo.ahora;
+  } catch { return; }
+  const sinEnviar = Object.fromEntries(ganadas.map((d) => [d.id, ahora]));   // folio -> hora del reclamo propio, de lo aún sin mandar
+  imprimiendo = true;
+  pintarControles();
+  try {
+    for (const d of ganadas) {
+      if (!automaticaActiva || envioDetenido()) return;
+      const respuesta = await fetch('/api/etiquetas', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ids: [d.producto_id] }), signal: AbortSignal.timeout(15000) });
+      if (!respuesta.ok) throw new Error(`No se pudo preparar la etiqueta de una suma (error HTTP ${respuesta.status}).`);
+      const [p] = await respuesta.json();
+      const copias = Math.min(d.copias, p?.stock ?? 0);
+      if (!p || !seImprime(p) || copias <= 0) { delete sinEnviar[d.id]; continue; }   // vendida o cambiada: nada que imprimir, la deuda queda saldada
+      resumen.textContent = `Imprimiendo ${copias} ${copias === 1 ? 'etiqueta' : 'etiquetas'} de una suma: ${p.nombre}…`;
+      localStorage.setItem(CLAVE_DUDOSA, p.id);   // como en la cola: si la página se cierra a media impresión, no se reenvía a ciegas
+      let hechas = 0;
+      const salio = await imprimirEtiquetas(p, copias,
+        (n) => { hechas = n; resumen.textContent = `Etiquetas de una suma (${p.nombre}): ${n} de ${copias}…`; },
+        (segundos) => { resumen.textContent = `Pausa de ${segundos} s para que la impresora vacíe lo que tiene…`; });
+      pintarHistorial();
+      if (!salio) {
+        if (hechas > 0) delete sinEnviar[d.id];
+        resumen.textContent = `Se cortó la impresión de las etiquetas de una suma (${p.nombre}): ${errorEnvio()}. `
+          + (hechas > 0 ? `Salieron ${hechas} de ${copias}: saca las que faltan en Buscar → Reimprimir.` : 'Sigue pendiente.') + ' La impresión automática está pausada.';
+        pausarAutomatica(true);
+        return;
+      }
+      localStorage.removeItem(CLAVE_DUDOSA);
+      delete sinEnviar[d.id];
+    }
+  } catch (error) {
+    pausarAutomatica(true);
+    resumen.textContent = `${error.message} La impresión automática está pausada; retoma cuando se resuelva.`;
+  } finally {
+    if (Object.keys(sinEnviar).length) await soltarDeudas(sinEnviar);
+    imprimiendo = false;
     pintarControles();
   }
 }

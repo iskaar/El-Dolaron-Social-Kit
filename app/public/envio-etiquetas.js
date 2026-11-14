@@ -17,7 +17,7 @@ export function estadoEnvio(pieza, accion = 'consultar', hora, base = false, en)
 }
 
 /** Lo que la base aceptaria reclamar: la pieza vendida o sin nombre, precio o etiqueta ya no tiene que imprimirse. */
-const seImprime = (p) => p.stock > 0 && p.precio > 0 && p.destino === 'etiqueta' && !!p.nombre?.trim();
+export const seImprime = (p) => p.stock > 0 && p.precio > 0 && p.destino === 'etiqueta' && !!p.nombre?.trim();
 
 /** Lo que dice la etiqueta enviada segun la base, con la forma de una pieza. */
 const diceLaBase = (marca) => ({ precio: marca.etiqueta_precio, precio_lista: marca.etiqueta_precio_lista, nombre: marca.etiqueta_nombre, talla: marca.etiqueta_talla });
@@ -140,4 +140,25 @@ async function subirMarcas(piezas, antes) {
       }
     }
   } catch { /* sin red: la siguiente carga lo vuelve a intentar */ }
+}
+
+/**
+ * Etiquetas debidas por un «+N» de captura (#783): el servidor guarda una por folio de suma y quien la reclama primero la imprime.
+ * Reclamar lanza si falla (sin respuesta no se imprime a ciegas: la otra pantalla podría sacarla); devuelve { reclamadas, existen, ahora }.
+ */
+export async function reclamarDeudas(ids) {
+  const respuesta = await fetch('/api/etiquetas/deudas', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ids }), signal: AbortSignal.timeout(15000) });
+  const cuerpo = await respuesta.json().catch(() => ({}));
+  if (!respuesta.ok) throw new Error(cuerpo.error ?? `Error HTTP ${respuesta.status}. Revisa la red y la sesion.`);
+  return cuerpo;
+}
+
+/** «No salió»: suelta lo reclamado (`en`: folio -> hora del reclamo propio) para que otra pantalla la saque. true si quedó; nunca lanza. */
+export async function soltarDeudas(en) {
+  const ids = Object.keys(en);
+  if (!ids.length) return true;
+  try {
+    const respuesta = await fetch('/api/etiquetas/deudas', { method: 'DELETE', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ids, etiquetas_en: en }), signal: AbortSignal.timeout(15000) });
+    return respuesta.ok;
+  } catch { return false; }
 }

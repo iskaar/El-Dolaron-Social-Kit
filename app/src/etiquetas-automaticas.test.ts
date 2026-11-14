@@ -9,6 +9,7 @@ import { tsplEtiqueta, etiquetaVigente, partirNombre, NOMBRE_MAX, precioImpreso,
   desmarcarDesde as desmarcarReal, olvidarMarca as olvidarReal, adoptarMarca as adoptarReal, adoptarMarcas as adoptarVarias, esPropia, noImprime as noImprimeReal, conectarEtiquetera as conectarReal } from '../public/etiquetera.js';
 import { esRopa } from '../public/ropa.js';
 import { nombreEstado } from '../public/estados.js';
+import { reclamarDeudas, soltarDeudas } from '../public/envio-etiquetas.js';
 
 const modulo = readFileSync('public/imprimir-lote.js', 'utf8');
 const fuente = readFileSync('public/envio-etiquetas.js', 'utf8').replace(/^import .*;$/gm, '').replace(/^export /gm, '') + '\n'
@@ -1351,5 +1352,192 @@ test('#784: «Este aparato no imprime» olvida la automática y la recarga no la
     assert.equal(recarga.almacen.has('etiqueta-automatica-encendida'), false);
     assert.equal(recarga.estado.reconexiones, 0);
     assert.doesNotMatch(recarga.$('automatica').textContent, /estaba encendida/);
+  } finally { t.db.close(); }
+});
+
+// ---------- #783: las etiquetas de un «+N» capturado en otro aparato ----------
+
+const UPC_SUMA = '0012345678905', ANTES_DE_SUMAR = '2026-10-11T14:30:00.000Z';
+
+/** Una pieza lista y con su etiqueta ya enviada (antes de la suma), de las que el escáner reconoce por UPC; con `stock` en existencia. */
+function sembrarSumable(t: ReturnType<typeof tienda>, stock = 3) {
+  t.db.prepare(`insert or ignore into manifiesto (upc, descripcion, precio_usd, tcin, nombre, actualizado_en) values ('12345678905', 'Termo', 10, '', 'Termo', '')`).run();
+  Object.assign(t.env, { BUSQUEDAS: { send: async () => {} }, AMBIENTE: 'sandbox' });
+  const id = crypto.randomUUID();
+  t.db.prepare(`insert into productos (id, codigo, upc, nombre, categoria, estado_analisis, estado_fisico, destino, precio, stock, semana_ingreso, creado_en, actualizado_en)
+    values (?, 'ED-000777', ?, 'Termo', 'ropa', 'listo', 'nuevo', 'etiqueta', 7900, ?, '2026-S41', ?, ?)`).run(id, UPC_SUMA, stock, ANTES, ANTES);
+  t.db.prepare(`insert into etiquetas_enviadas values (?, ?, 7900, 0, 'Termo', '', 'pc')`).run(id, ANTES_DE_SUMAR);
+  return id;
+}
+/** El «+N» de la captura (escanear lo que ya existe): el celular sin impresora no hace más que sumar. */
+const sumarPorUpc = (t: ReturnType<typeof tienda>, n: number, folio = crypto.randomUUID()) =>
+  t.pedir('/api/borradores/upc', { id: folio, upc: UPC_SUMA, stock: n, estado_fisico: 'nuevo' }).then((r) => ({ ...r, folio }));
+const deudas = (t: ReturnType<typeof tienda>) => t.db.prepare('select id, producto_id, copias, reclamada_en from etiquetas_deuda order by creado_en, rowid').all() as any[];
+
+test('#783: un +N sumado desde un aparato sin impresora sale solo en la automática de la PC, una vez, con N copias', async () => {
+  const t = tienda();
+  try {
+    const id = sembrarSumable(t, 3);
+    const suma = await sumarPorUpc(t, 2);
+    assert.equal(suma.status, 201);
+    assert.equal(t.db.prepare('select stock from productos where id=?').get(id)!.stock, 5);
+    assert.deepEqual(deudas(t).map((d) => [d.id, d.producto_id, d.copias, d.reclamada_en]), [[suma.folio, id, 2, '']], 'una deuda por suma, con el folio del ajuste');
+    const pc = await pagina(t);
+    await pc.iniciarAutomatica();
+    assert.deepEqual(pc.estado.enviadas, [{ id, copias: 2 }], 'las N de la suma, no las 5 de la existencia');
+    assert.notEqual(deudas(t)[0].reclamada_en, '');
+    await pc.imprimirNuevas(); await pc.imprimirNuevas();
+    assert.equal(pc.estado.enviadas.length, 1, 'no se repite en las vueltas siguientes');
+    // Otra PC abierta (o la misma tras recargar con la sesión guardada) tampoco la repite.
+    const otra = await pagina(t);
+    await otra.iniciarAutomatica();
+    assert.deepEqual(otra.estado.enviadas, []);
+    assert.equal(t.db.prepare('select etiqueta_en e from etiquetas_enviadas where producto_id=?').get(id)!.e, ANTES_DE_SUMAR, 'la marca de la etiqueta original no se toca');
+  } finally { t.db.close(); }
+});
+
+test('#783: dos PC a la vez con la misma deuda: solo una imprime; dos reclamos simultáneos en el servidor: solo uno gana', async () => {
+  const t = tienda();
+  try {
+    const id = sembrarSumable(t);
+    const { folio } = await sumarPorUpc(t, 2);
+    const [a, b] = await Promise.all([pagina(t), pagina(t)]);
+    await Promise.all([a.iniciarAutomatica(), b.iniciarAutomatica()]);
+    assert.deepEqual([...a.estado.enviadas, ...b.estado.enviadas], [{ id, copias: 2 }]);
+    // El reclamo en sí: dos peticiones simultáneas al servidor por la misma deuda.
+    const otra = (await sumarPorUpc(t, 1)).folio;
+    const [r1, r2] = await Promise.all([t.pedir('/api/etiquetas/deudas', { ids: [otra] }), t.pedir('/api/etiquetas/deudas', { ids: [otra] })]);
+    assert.equal(r1.cuerpo.reclamadas.length + r2.cuerpo.reclamadas.length, 1, 'solo una gana');
+    assert.deepEqual([r1.cuerpo.existen, r2.cuerpo.existen], [[otra], [otra]], 'la que pierde sabe que existe y que la tiene otra pantalla');
+    assert.equal((await t.pedir('/api/etiquetas/deudas', { ids: [folio] })).cuerpo.reclamadas.length, 0, 'tampoco la ya impresa');
+  } finally { t.db.close(); }
+});
+
+test('#783: si el aparato que sumó imprimió las etiquetas en el momento, la PC no las repite; si no salieron, se sueltan y la PC las saca', async () => {
+  const t = tienda();
+  try {
+    const id = sembrarSumable(t, 3);
+    const hechas = await sumarPorUpc(t, 2), falla = await sumarPorUpc(t, 1);
+    const fuente = readFileSync('public/inventario-capturar.js', 'utf8');
+    const trozo = fuente.slice(fuente.indexOf('async function conDeuda'), fuente.indexOf('async function imprimir(id,n,opciones)'));
+    const anterior = globalThis.fetch;
+    globalThis.fetch = (async (ruta: string, opciones?: any) => {
+      const r = await t.pedir(ruta, opciones?.body ? JSON.parse(opciones.body) : undefined, opciones?.method);
+      return { ok: r.status < 300, status: r.status, json: async () => r.cuerpo };
+    }) as never;
+    try {
+      let salidas = 0;
+      const celular: any = runInNewContext(`${trozo};conDeuda`, { reclamarDeudas, soltarDeudas });
+      // El celular con impresora: reclama antes de imprimir, imprime, y la deuda queda saldada.
+      assert.equal(await celular(hechas.folio, async () => { salidas++; assert.notEqual(deudas(t).find((d) => d.id === hechas.folio)!.reclamada_en, ''); return true; }), true);
+      assert.equal(salidas, 1);
+      // La que no salió se suelta, para que la PC la saque.
+      assert.equal(await celular(falla.folio, async () => { salidas++; return false; }), false);
+      assert.equal(deudas(t).find((d) => d.id === falla.folio)!.reclamada_en, '');
+      // Si otra pantalla ya la tiene, no imprime: no repite lo de la PC.
+      assert.equal((await t.pedir('/api/etiquetas/deudas', { ids: [falla.folio] })).cuerpo.reclamadas.length, 1);
+      assert.equal(await celular(falla.folio, async () => { salidas++; return true; }), true);
+      assert.equal(salidas, 2, 'no volvió a imprimir');
+      // Sin folio, o con un folio que no existe en la base, imprime como siempre.
+      assert.equal(await celular(undefined, async () => { salidas++; return true; }), true);
+      assert.equal(await celular(crypto.randomUUID(), async () => { salidas++; return true; }), true);
+      assert.equal(salidas, 4);
+    } finally { globalThis.fetch = anterior; }
+    // La PC solo saca lo que nadie tiene: la del celular que imprimió y la reclamada arriba no se repiten.
+    t.db.prepare("update etiquetas_deuda set reclamada_en='' where id=?").run(falla.folio);
+    const pc = await pagina(t);
+    await pc.iniciarAutomatica();
+    assert.deepEqual(pc.estado.enviadas, [{ id, copias: 1 }]);
+  } finally { t.db.close(); }
+});
+
+test('#783: reintentar la misma suma (UPC o ajuste «Sumar») no duplica la deuda ni las etiquetas', async () => {
+  const t = tienda();
+  try {
+    const id = sembrarSumable(t, 3);
+    const a = await sumarPorUpc(t, 2);
+    assert.equal((await sumarPorUpc(t, 2, a.folio)).cuerpo.stock, 5, 'el reintento no suma otra vez');
+    const folio = crypto.randomUUID();
+    for (let i = 0; i < 2; i++) assert.equal((await t.pedir(`/api/piezas/${id}/existencia`, { id: folio, delta: 1, motivo: 'entrada', etiquetas: true })).status, 200);
+    assert.deepEqual(deudas(t).map((d) => [d.id, d.copias]), [[a.folio, 2], [folio, 1]]);
+    // Un ajuste que no es de captura (sin `etiquetas`, o de otro motivo: conteo, ficha, devolución) no deja deuda.
+    assert.equal((await t.pedir(`/api/piezas/${id}/existencia`, { id: crypto.randomUUID(), delta: 1, motivo: 'entrada' })).status, 200);
+    assert.equal((await t.pedir(`/api/piezas/${id}/existencia`, { id: crypto.randomUUID(), delta: 1, motivo: 'correccion', etiquetas: true })).status, 200);
+    assert.equal(deudas(t).length, 2);
+    const pc = await pagina(t);
+    await pc.iniciarAutomatica(); await pc.imprimirNuevas();
+    assert.deepEqual(pc.estado.enviadas.map((e: any) => e.copias).sort(), [1, 2]);
+  } finally { t.db.close(); }
+});
+
+test('#783: lo vendido o sin existencia no se imprime; el tope es la existencia de ahora', async () => {
+  const t = tienda();
+  try {
+    const vendida = sembrarSumable(t, 1);
+    await sumarPorUpc(t, 2);
+    t.db.prepare('update productos set stock=0 where id=?').run(vendida);
+    const pc = await pagina(t);
+    await pc.iniciarAutomatica();
+    assert.deepEqual(pc.estado.enviadas, [], 'sin existencia no hay nada que etiquetar');
+    t.db.prepare('update productos set stock=1 where id=?').run(vendida);
+    await pc.imprimirNuevas();
+    assert.deepEqual(pc.estado.enviadas, [{ id: vendida, copias: 1 }], 'debía 2 pero solo queda 1');
+  } finally { t.db.close(); }
+  // Dejó de estar de etiqueta: tampoco sale.
+  const u = tienda();
+  try {
+    const id = sembrarSumable(u, 3);
+    await sumarPorUpc(u, 2);
+    u.db.prepare("update productos set destino='caja' where id=?").run(id);
+    const p2 = await pagina(u); await p2.iniciarAutomatica();
+    assert.deepEqual(p2.estado.enviadas, []);
+  } finally { u.db.close(); }
+});
+
+test('#783: si la etiqueta original aún no sale, el +N va con ella y no queda una deuda aparte; una suma de antes de la sesión no se imprime', async () => {
+  const t = tienda();
+  try {
+    const id = sembrarSumable(t, 3);
+    t.db.prepare('delete from etiquetas_enviadas where producto_id=?').run(id);   // la etiqueta normal sacará toda la existencia, con el +N
+    await sumarPorUpc(t, 2);
+    const pc = await pagina(t);
+    await pc.iniciarAutomatica();
+    assert.deepEqual(pc.estado.enviadas, []);
+    assert.deepEqual((await t.pedir(`/api/etiquetas/deudas?desde=${DESDE}`)).cuerpo, []);
+    // Con la etiqueta original ya enviada antes de la suma, la deuda se ofrece, pero solo a las sesiones que empezaron antes de ella.
+    t.db.prepare(`insert into etiquetas_enviadas values (?, ?, 7900, 0, 'Termo', '', 'pc')`).run(id, ANTES_DE_SUMAR);
+    assert.equal((await t.pedir(`/api/etiquetas/deudas?desde=${DESDE}`)).cuerpo.length, 1);
+    assert.deepEqual((await t.pedir('/api/etiquetas/deudas?desde=2999-01-01T00:00:00.000Z')).cuerpo, []);
+    assert.equal((await t.pedir('/api/etiquetas/deudas?desde=ayer')).status, 400);
+  } finally { t.db.close(); }
+});
+
+test('#783: la automática no se frena por una deuda; una impresión que falla suelta la deuda para que otra pantalla la saque', async () => {
+  const t = tienda();
+  try {
+    const id = sembrarSumable(t, 3);
+    await sumarPorUpc(t, 2);
+    // Una pieza nueva de la sesión sale en la misma vuelta, antes que la deuda.
+    const nueva = agregar(t, DESPUES, 'listo', 1);
+    const pc = await pagina(t);
+    await pc.iniciarAutomatica();
+    assert.deepEqual(pc.estado.enviadas, [{ id: nueva, copias: 1 }, { id, copias: 2 }]);
+    // Si falla el envío (BLE) sin salir nada: se suelta (reclamada_en vacío), la automática se pausa, y otra pantalla la imprime.
+    const falla = await sumarPorUpc(t, 1);
+    const mala = await pagina(t);
+    mala.estado.falloBle = true;
+    await mala.iniciarAutomatica();
+    assert.equal(mala.activa(), false, 'se pausa como cuando falla la cola');
+    assert.equal(deudas(t).find((d) => d.id === falla.folio)!.reclamada_en, '', 'quedó suelta');
+    const buena = await pagina(t);
+    await buena.iniciarAutomatica();
+    assert.deepEqual(buena.estado.enviadas, [{ id, copias: 1 }]);
+    // Una falla al CONSULTAR las deudas (p. ej. sin migración) no pausa ni frena la cola normal.
+    const sinDeudas = await pagina(t);
+    t.db.exec('alter table etiquetas_deuda rename to etiquetas_deuda_x');
+    const otra = agregar(t, DESPUES, 'listo', 1);
+    await sinDeudas.iniciarAutomatica();
+    assert.equal(sinDeudas.activa(), true);
+    assert.ok(sinDeudas.estado.enviadas.some((e: any) => e.id === otra));
   } finally { t.db.close(); }
 });

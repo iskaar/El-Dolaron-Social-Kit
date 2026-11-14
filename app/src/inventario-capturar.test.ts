@@ -102,7 +102,8 @@ test('UPC de Ropa ignora el grado de MG y conserva el estado interno al sumar; M
   await flujo.leer(ropa.upc);
   assert.equal(flujo.actual()?.pieza.stock, 2);
   assert.equal(flujo.actual()?.pieza.estado_fisico, 'danado');
-  assert.deepEqual(Object.keys(cuerpos[0]).sort(), ['delta', 'id', 'motivo']);
+  assert.deepEqual(Object.keys(cuerpos[0]).sort(), ['delta', 'etiquetas', 'id', 'motivo']);
+  assert.equal(cuerpos[0].etiquetas, true, '#783: el +N de la captura pide que el servidor deje debidas sus etiquetas');
 });
 
 test('un UPC nuevo identificado como Ropa usa nuevo aunque MG tenga B o C seleccionado', async () => {

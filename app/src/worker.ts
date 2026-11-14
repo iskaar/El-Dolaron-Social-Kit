@@ -154,6 +154,7 @@ export function permitidaParaVendedor(pathname: string, metodo: string): boolean
   if (pathname === '/api/etiquetas') return metodo === 'POST';
   if (pathname === '/api/etiquetas/enviadas') return ['POST', 'DELETE'].includes(metodo);
   if (pathname === '/api/etiquetas/pendientes') return metodo === 'GET';   // la lista corta de Imprimir (#493)
+  if (pathname === '/api/etiquetas/deudas') return ['GET', 'POST', 'DELETE'].includes(metodo);   // etiquetas de un «+N» (#783): el celular que sumó las reclama; la automática las lee
   if (/^\/api\/borradores\/upc\/[^/]+$/.test(pathname)) return pathname.endsWith('/buscar') ? metodo === 'POST' : metodo === 'GET';
   return (pathname === '/api/borradores' || pathname === '/api/borradores/upc') && metodo === 'POST';
 }
@@ -1408,6 +1409,55 @@ async function soltarEtiquetas(request: Request, env: Env, propietario: string):
        and producto_id in (select id from productos where propietario = ?)`,
   ).bind(JSON.stringify(pares), propietario).run();
   return json({ soltadas: meta.changes });
+}
+
+/**
+ * Etiquetas debidas por un «+N» de captura (#783, migración 074). Una fila por suma, con el folio de su ajuste.
+ *  - GET `?desde=`: las pendientes creadas desde esa hora que la automática de la PC puede imprimir ya: la pieza sigue lista, con código,
+ *    existencia y una etiqueta enviada ANTES de la suma (si aún no salió, la etiqueta normal ya trae la existencia con el +N).
+ *    `copias` = lo debido topado a la existencia de ahora. Lee solo el índice parcial de pendientes.
+ *  - POST `{ ids }` (folios): reclamarlas. Una sentencia condicional por folio (`reclamada_en = ''`), así que dos pantallas no ganan la
+ *    misma. `reclamadas` = las que ganó esta petición, `existen` = las que hay (una que existe y no se ganó la tiene otra pantalla),
+ *    `ahora` = la hora del reclamo, para soltar solo lo propio.
+ *  - DELETE `{ ids, etiquetas_en }`: «no salió», mismo trato que soltarEtiquetas: solo se suelta si sigue siendo ESE reclamo.
+ */
+async function deudasEtiquetas(request: Request, env: Env, url: URL, propietario: string): Promise<Response> {
+  if (request.method === 'GET') {
+    const desde = url.searchParams.get('desde');
+    if (!desde || !Number.isFinite(Date.parse(desde)) || new Date(desde).toISOString() !== desde) return json({ error: 'Fecha inválida.' }, 400);
+    const { results } = await env.DB.prepare(
+      `select d.id, d.producto_id, min(d.copias, p.stock) as copias
+       from etiquetas_deuda d join productos p on p.id = d.producto_id join etiquetas_enviadas e on e.producto_id = d.producto_id
+       where d.reclamada_en = '' and d.creado_en >= ? and p.propietario = ? and p.sin_inventario = 0 and p.estado_analisis = 'listo'
+         and p.destino = 'etiqueta' and p.precio > 0 and p.stock > 0 and p.por_revisar = 0 and p.codigo <> '' and trim(p.nombre) <> ''
+         and e.etiqueta_en < d.creado_en
+       order by d.creado_en limit 50`,
+    ).bind(desde, propietario).all();
+    return json(results);
+  }
+  const cuerpo = (await request.json().catch(() => null)) as { ids?: unknown; etiquetas_en?: unknown } | null;
+  const ids = idsDeEtiquetas(cuerpo);
+  if (!ids) return json({ error: 'Selecciona entre 1 y 100 etiquetas.' }, 400);
+  const propia = 'exists (select 1 from productos where id = etiquetas_deuda.producto_id and propietario = ?)';
+  if (request.method === 'DELETE') {
+    const en = cuerpo?.etiquetas_en;
+    if (en === null || typeof en !== 'object' || Array.isArray(en)) return json({ error: 'Reclamos inválidos.' }, 400);
+    const mapa = en as Record<string, unknown>;
+    const pares = ids.filter((id) => mapa[id] !== undefined).map((id) => ({ id, en: mapa[id] }));
+    if (pares.some((p) => typeof p.en !== 'string' || p.en.length === 0 || p.en.length > 40)) return json({ error: 'Reclamos inválidos.' }, 400);
+    if (pares.length === 0) return json({ soltadas: 0 });
+    const { meta } = await env.DB.prepare(
+      `update etiquetas_deuda set reclamada_en = ''
+       where exists (select 1 from json_each(?) j where json_extract(j.value, '$.id') = etiquetas_deuda.id and json_extract(j.value, '$.en') = etiquetas_deuda.reclamada_en) and ${propia}`,
+    ).bind(JSON.stringify(pares), propietario).run();
+    return json({ soltadas: meta.changes });
+  }
+  const ahora = new Date().toISOString();
+  const resultados = await env.DB.batch(ids.map((id) => env.DB.prepare(
+    `update etiquetas_deuda set reclamada_en = ? where id = ? and reclamada_en = '' and ${propia}`).bind(ahora, id, propietario)));
+  const { results } = await env.DB.prepare(`select id from etiquetas_deuda where id in (select value from json_each(?)) and ${propia}`)
+    .bind(JSON.stringify(ids), propietario).all<{ id: string }>();
+  return json({ reclamadas: ids.filter((_, i) => (resultados[i]?.meta?.changes ?? 0) > 0), existen: results.map((r) => r.id), ahora });
 }
 
 /** Solo lo que la etiquetera necesita (Issue #89): el celular lo lee, no ve el resto de `config`. */
@@ -2822,6 +2872,9 @@ export default {
 
       if (pathname === '/api/etiquetas/pendientes' && request.method === 'GET') {
         return await listarEtiquetasPendientes(env, propietarioDe(await leerUsuario(env, correo)));
+      }
+      if (pathname === '/api/etiquetas/deudas' && ['GET', 'POST', 'DELETE'].includes(request.method)) {
+        return await deudasEtiquetas(request, env, url, propietarioDe(await leerUsuario(env, correo)));
       }
       if (pathname === '/api/etiquetas' && request.method === 'POST') {
         return await prepararEtiquetas(request, env, propietarioDe(await leerUsuario(env, correo)), correo, !!env.HOST_VENDEDOR && url.hostname === env.HOST_VENDEDOR);

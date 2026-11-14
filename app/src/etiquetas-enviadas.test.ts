@@ -43,7 +43,8 @@ test('el host del celular sirve la pestaña Imprimir y deja pasar solo las API d
     assert.equal(permitidaParaVendedor(ruta, 'GET'), true, ruta);
     assert.equal(permitidaParaVendedor(ruta, 'POST'), false, `POST ${ruta}`);
   }
-  const abiertas: [string, string][] = [['/api/calibracion', 'GET'], ['/api/etiquetas', 'POST'], ['/api/etiquetas/enviadas', 'POST'], ['/api/etiquetas/enviadas', 'DELETE']];
+  const abiertas: [string, string][] = [['/api/calibracion', 'GET'], ['/api/etiquetas', 'POST'], ['/api/etiquetas/enviadas', 'POST'], ['/api/etiquetas/enviadas', 'DELETE'],
+    ['/api/etiquetas/deudas', 'GET'], ['/api/etiquetas/deudas', 'POST'], ['/api/etiquetas/deudas', 'DELETE']];
   for (const [ruta, metodo] of abiertas) assert.equal(permitidaParaVendedor(ruta, metodo), true, `${metodo} ${ruta}`);
   // Lo que sigue siendo de la PC: calibrar, listar, la pantalla /etiquetas, bandas, configuración.
   const cerradas: [string, string][] = [['/api/calibracion', 'PUT'], ['/api/calibracion', 'POST'], ['/api/etiquetas', 'GET'], ['/api/etiquetas', 'DELETE'],
@@ -54,7 +55,7 @@ test('el host del celular sirve la pestaña Imprimir y deja pasar solo las API d
 
 test('permisos por rol de las API de etiquetas: dueño, capturista y FEP sí; cajero y auxiliar no; calibrar solo quien captura', () => {
   const usuario = (rol: string) => ({ correo: 'x@y.mx', nombre: '', roles: [rol] as never, activo: true, caja: '' });
-  for (const [ruta, metodo] of [['/api/etiquetas', 'POST'], ['/api/etiquetas/enviadas', 'POST'], ['/api/etiquetas/enviadas', 'DELETE'], ['/api/calibracion', 'GET']] as const) {
+  for (const [ruta, metodo] of [['/api/etiquetas', 'POST'], ['/api/etiquetas/enviadas', 'POST'], ['/api/etiquetas/enviadas', 'DELETE'], ['/api/etiquetas/deudas', 'POST'], ['/api/calibracion', 'GET']] as const) {
     for (const rol of ['dueno', 'capturista', 'finanzas']) assert.equal(puede(usuario(rol), permiso(ruta, metodo)), true, `${rol} ${metodo} ${ruta}`);
     for (const rol of ['cajero', 'auxiliar', 'computadora']) assert.equal(puede(usuario(rol), permiso(ruta, metodo)), false, `${rol} ${metodo} ${ruta}`);
   }
@@ -523,5 +524,29 @@ test('sondeo por lote: un solo GET ?cambios= trae lo que quedó listo, aunque se
     const filas = r.cuerpo as unknown as { id: string; estado_analisis: string; nombre: string; precio: number; stock: number }[];
     assert.deepEqual(filas.map((x) => x.id).sort(), pendientes.slice(0, 2).sort());
     assert.deepEqual(filas.map((x) => [x.estado_analisis, x.nombre, x.precio, x.stock]), [['listo', 'Chamarra', 14900, 3], ['listo', 'Chamarra', 14900, 3]]);
+  } finally { p.db.close(); }
+});
+
+test('#783: las etiquetas debidas por un +N: el capturista del celular las reclama y las suelta; el cajero no; FEP no ve ni reclama las de la tienda', async () => {
+  const p = montar();
+  try {
+    const id = p.pieza();
+    p.db.prepare(`insert into etiquetas_deuda (id, producto_id, copias, creado_en) values (?, ?, 2, ?)`).run('d1d1d1d1-0000-4000-8000-000000000001', id, new Date().toISOString());
+    const folio = 'd1d1d1d1-0000-4000-8000-000000000001';
+    p.como(CAJERO);
+    assert.equal((await p.pc('/api/etiquetas/deudas', { ids: [folio] })).status, 403);
+    p.como(FEP);
+    const ajena = await p.pc('/api/etiquetas/deudas', { ids: [folio] });
+    assert.deepEqual([ajena.cuerpo.reclamadas, ajena.cuerpo.existen], [[], []], 'otro propietario: ni la ve ni la gana');
+    assert.equal((await p.pc('/api/etiquetas/deudas', { ids: [folio], etiquetas_en: { [folio]: 'x' } }, 'DELETE')).cuerpo.soltadas, 0);
+    p.como(CAPTURISTA);
+    const r = await p.celular('/api/etiquetas/deudas', { ids: [folio] });
+    assert.deepEqual([r.status, r.cuerpo.reclamadas], [200, [folio]]);
+    assert.equal((await p.celular('/api/etiquetas/deudas', { ids: [folio] })).cuerpo.reclamadas.length, 0);
+    assert.equal((await p.celular('/api/etiquetas/deudas', { ids: ['no-es-uuid'] })).status, 400);
+    // Solo se suelta el reclamo propio: con otra hora no pasa nada.
+    assert.equal((await p.celular('/api/etiquetas/deudas', { ids: [folio], etiquetas_en: { [folio]: 'otra-hora' } }, 'DELETE')).cuerpo.soltadas, 0);
+    assert.equal((await p.celular('/api/etiquetas/deudas', { ids: [folio], etiquetas_en: { [folio]: r.cuerpo.ahora } }, 'DELETE')).cuerpo.soltadas, 1);
+    assert.equal((await p.celular('/api/etiquetas/deudas', { ids: [folio] })).cuerpo.reclamadas.length, 1);
   } finally { p.db.close(); }
 });

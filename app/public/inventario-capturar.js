@@ -1,5 +1,6 @@
 import { codigoLeido, normalizarUpc } from './upc.js';
 import { etiqueteraLista, noImprime } from './etiquetera.js';
+import { reclamarDeudas, soltarDeudas } from './envio-etiquetas.js';
 import { ropa, opciones, talla as selectorTalla } from './inventario-ropa.js';
 import { ESTADOS } from './estados.js';
 import { CATEGORIAS } from './categorias.js';
@@ -113,8 +114,8 @@ export function crearCaptura({ api, imprimir, cambiar=()=>{}, enLinea=()=>naviga
       actual.faltaEtiqueta=!await imprimir(abierta.id,abierta.cantidad,{});pintar();return confirmada;
     }
     const guardada=await api('/api/borradores/upc',{id:abierta.id,upc:abierta.upc,stock:abierta.cantidad,estado_fisico:abierta.estado,...(abierta.talla?{talla:abierta.talla}:{}),...cambiosTarjeta(abierta)});
-    actual={...abierta,tipo:'guardada',pieza:guardada};pintar();
-    const salio=guardada.estado_analisis&&guardada.estado_analisis!=='listo'?false:await imprimir(guardada.id,abierta.cantidad,{reimprimir:!!guardada.existente});actual.faltaEtiqueta=!salio;pintar();return guardada;
+    actual={...abierta,tipo:'guardada',pieza:guardada,...(guardada.existente&&{deuda:abierta.id})};pintar();
+    const salio=guardada.estado_analisis&&guardada.estado_analisis!=='listo'?false:await imprimir(guardada.id,abierta.cantidad,{reimprimir:!!guardada.existente,...(guardada.existente&&{deuda:abierta.id})});actual.faltaEtiqueta=!salio;pintar();return guardada;
   }
   async function leer(texto,mas=false){
     if(!enLinea())throw new Error('Sin red · toma foto');
@@ -159,13 +160,13 @@ export function crearCaptura({ api, imprimir, cambiar=()=>{}, enLinea=()=>naviga
     if(!enLinea())throw new Error('Sin red: se suma al volver la señal');
     if(ajuste&&ajuste.pieza.id!==p.id)throw new Error('Resuelve primero el ajuste pendiente');
     if(ajuste&&ajuste.cuerpo.delta!==n)throw new Error(`Hay un ajuste pendiente de ${ajuste.cuerpo.delta}: reintenta con esa cantidad`);
-    ajuste??={pieza:p,cuerpo:{id:uuid(),delta:n,motivo:'entrada'},confirmado:false};
+    ajuste??={pieza:p,cuerpo:{id:uuid(),delta:n,motivo:'entrada',etiquetas:true},confirmado:false};   // `etiquetas`: el servidor deja debidas las n etiquetas (#783)
     if(!ajuste.confirmado){
       try{const r=await api(`/api/piezas/${p.id}/existencia`,ajuste.cuerpo);ajuste.confirmado=true;ajuste.pieza={...p,stock:r.despues};}
       catch(e){if(e.status===409)ajuste=null;throw e;} // 409: no se aplicó (supera 999 o cambió la existencia); se puede elegir otra cantidad
     }
-    actual={tipo:'existente',pieza:ajuste.pieza,cantidad:1,impresas:n};pintar();
-    const salio=ajuste.pieza.estado_analisis&&ajuste.pieza.estado_analisis!=='listo'?false:await imprimir(p.id,n,{reimprimir:true});actual.faltaEtiqueta=!salio;
+    actual={tipo:'existente',pieza:ajuste.pieza,cantidad:1,impresas:n,deuda:ajuste.cuerpo.id};pintar();
+    const salio=ajuste.pieza.estado_analisis&&ajuste.pieza.estado_analisis!=='listo'?false:await imprimir(p.id,n,{reimprimir:true,deuda:ajuste.cuerpo.id});actual.faltaEtiqueta=!salio;
     ajuste=null;pintar();return actual;
   }
   const serial=(fn)=>{const resultado=fila.then(fn);fila=resultado.catch(()=>{});return resultado;};
@@ -240,7 +241,11 @@ export async function iniciar(ctx) {
   }
   // Modo enfocado (#461): una etiqueta pedida sin impresora conectada queda como alerta hasta que se conecte.
   let impresionPedida=false;ctx.problemas.impresora=()=>{if(impresionPedida&&etiqueteraLista())impresionPedida=false;return impresionPedida;};
-  async function imprimir(id,n,opciones){if(noImprime())return false;/* #781: la etiqueta sale en la PC; ni alerta ni reclamo */if(!etiqueteraLista()){impresionPedida=true;return false;}impresionPedida=false;return ctx.imprimir([id],new Map([[id,n]]),opciones);}
+  /** #783: las etiquetas de un «+N» (`folio` de su suma) se reclaman antes de imprimir: si la PC (u otra pantalla) ya las tiene no se repiten, y si no salen se sueltan para que la PC las saque. Sin folio o sin respuesta de la base se imprime como siempre. */
+  async function conDeuda(folio,imprimirYa){let en=null;
+    if(folio){try{const r=await reclamarDeudas([folio]);if(r.reclamadas.includes(folio))en={[folio]:r.ahora};else if(r.existen.includes(folio))return true;}catch{/* sin respuesta: imprime como antes */}}
+    const salio=await imprimirYa();if(en&&!salio)await soltarDeudas(en);return salio;}
+  async function imprimir(id,n,opciones){if(noImprime())return false;/* #781: la etiqueta sale en la PC; ni alerta ni reclamo */if(!etiqueteraLista()){impresionPedida=true;return false;}impresionPedida=false;return conDeuda(opciones?.deuda,()=>ctx.imprimir([id],new Map([[id,n]]),opciones));}
   // Etiqueta automática de una captura con foto (#464): una a la vez, y nunca dos veces para la misma captura (`llave` = su id de subida).
   let turnoImpresion=Promise.resolve();
   function imprimirCaptura(llave,id,n,opciones){
@@ -252,9 +257,9 @@ export async function iniciar(ctx) {
   /** «Guardada» tras guardar/sumar: con el interruptor «Este aparato no imprime» (#781) no hay ✓ ni «falta etiqueta», la etiqueta sale en la PC. */
   function avisoGuardada(){const falta=flujo.actual()?.faltaEtiqueta;if(noImprime())mensaje('Guardada · la etiqueta sale en la PC','aviso');else mensaje(falta?'Guardada · falta etiqueta':'Guardada · etiqueta enviada',falta?'aviso':'etiqueta');}
   async function recibirExistente(p,llave){
-    const a={tipo:'guardada',pieza:p,cantidad:p.sumadas,faltaEtiqueta:true};flujo.retomar(a);
+    const a={tipo:'guardada',pieza:p,cantidad:p.sumadas,faltaEtiqueta:true,...(llave&&{deuda:llave})};flujo.retomar(a);
     // Sin impresora conectada igual se pide: queda «falta etiqueta» y la alerta del modo enfocado.
-    if(p.estado_analisis==='listo'){a.faltaEtiqueta=!await(llave?imprimirCaptura(llave,p.id,p.sumadas,{reimprimir:true}):imprimir(p.id,p.sumadas,{reimprimir:true}));flujo.retomar(a);}
+    if(p.estado_analisis==='listo'){a.faltaEtiqueta=!await(llave?imprimirCaptura(llave,p.id,p.sumadas,{reimprimir:true,deuda:llave}):imprimir(p.id,p.sumadas,{reimprimir:true}));flujo.retomar(a);}
     mensaje(`Ya existía · +${p.sumadas}${p.codigo?` a ${p.codigo}`:''}${p.estado_analisis==='listo'?(noImprime()?' · la etiqueta sale en la PC':a.faltaEtiqueta?' · falta etiqueta':' · etiqueta enviada'):''}`,'aviso');
   }
 
@@ -314,7 +319,7 @@ export async function iniciar(ctx) {
       mensaje('Sin registro · toma foto','aviso');const fila=nodo('div',undefined,'acciones');fila.append(boton('Buscar en internet',()=>buscarDesconocida(actual),'buscar-internet'),boton('Tomar foto',()=>fotoNueva(actual),'primario'));carta.append(fila);
     }else if(actual.tipo==='guardada')tarjeta.append(nodo('p','✓ Guardada'));
     const k=actual.impresas||actual.cantidad||1; // lo que se acaba de sumar (existente) o guardar
-    if(actual.faltaEtiqueta&&p.estado_analisis==='listo'&&!noImprime())tarjeta.append(boton(`Imprimir ${k} ${k===1?'etiqueta':'etiquetas'}`,async()=>{const ok=await ctx.imprimir([p.id],new Map([[p.id,k]]),{reimprimir:true});if(ok){actual.faltaEtiqueta=false;mensaje('Etiqueta enviada','etiqueta');ctx.espejoCambio?.();}}));   // el otro aparato ve que ya salió
+    if(actual.faltaEtiqueta&&p.estado_analisis==='listo'&&!noImprime())tarjeta.append(boton(`Imprimir ${k} ${k===1?'etiqueta':'etiquetas'}`,async()=>{const ok=await conDeuda(actual.deuda,()=>ctx.imprimir([p.id],new Map([[p.id,k]]),{reimprimir:true}));if(ok){actual.faltaEtiqueta=false;mensaje('Etiqueta enviada','etiqueta');ctx.espejoCambio?.();}}));   // el otro aparato ve que ya salió
   }
   function pintarImagen(a,foto){if(!a.imagen?.url){foto.textContent='Sin foto';return;}const img=nodo('img');img.src=a.imagen.url;img.alt=a.imagen.nombre||a.ficha.nombre;img.referrerPolicy='no-referrer';img.onerror=()=>{img.remove();foto.textContent='Sin foto';};foto.replaceChildren(img);}
   async function imagen(a,foto){try{

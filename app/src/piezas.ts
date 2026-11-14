@@ -3,7 +3,7 @@ import { propietarioDe, puedeEditarInventario, type Usuario } from './cuentas.ts
 import { MOTIVOS } from './conteo.ts';
 import { conciliarSeguro } from './mercadolibre.ts';
 import { pendienteDe } from './solicitudes-precio.ts';
-import { UPC_VISIBLE, claveTalla, repetidaUpc } from './upc-inventario.ts';
+import { UPC_VISIBLE, claveTalla, repetidaUpc, deudaEtiquetas } from './upc-inventario.ts';
 import { normalizarUpc } from '../public/upc.js';
 
 const PAGINA = 25;
@@ -193,7 +193,7 @@ export const ajusteGuardado = (env: Env, folio: string) => env.DB.prepare(`selec
  */
 export async function escribirExistencia(env: Env, ctx: ExecutionContext, a: {
   id: string; propietario: string; folio: string; delta: number; motivo: string; correo: string;
-  esperado?: number; donde?: string; args?: unknown[];
+  esperado?: number; donde?: string; args?: unknown[]; deuda?: boolean;
 }): Promise<Ajuste | null> {
   const ahora = new Date().toISOString();
   await env.DB.batch([
@@ -208,6 +208,8 @@ export async function escribirExistencia(env: Env, ctx: ExecutionContext, a: {
       select ?, id, coalesce(codigo, ''), nombre, ?, ?, stock - ?, stock, ?, ? from productos
       where id = ? and propietario = ? and actualizado_en = ? and changes() = 1`)
       .bind(a.folio, a.motivo, Math.abs(a.delta), a.delta, a.correo, ahora, a.id, a.propietario, ahora),
+    // #783: el «+N» de captura deja debidas sus etiquetas, en el mismo batch (misma regla que sumarCaptura).
+    ...(a.deuda && a.motivo === 'entrada' && a.delta > 0 ? [deudaEtiquetas(env, a.folio)] : []),
   ]);
   const ajuste = await ajusteGuardado(env, a.folio);
   if (ajuste) ctx.waitUntil(conciliarSeguro(env, { productoIds: [a.id] }));
@@ -241,7 +243,7 @@ async function cambiarExistencia(request: Request, env: Env, id: string, usuario
   if (previo) return responder(previo);
 
   const ajuste = await escribirExistencia(env, ctx, { id, propietario, folio: cuerpo.id, delta, motivo, correo: usuario!.correo,
-    esperado: fijar ? cuerpo.esperado as number : undefined });
+    esperado: fijar ? cuerpo.esperado as number : undefined, deuda: cuerpo.etiquetas === true });
   if (ajuste) return responder(ajuste);
   const pieza = await actual();
   return pieza ? json({ error: 'La existencia cambió o queda fuera de 0 a 999. Revisa y vuelve a intentar.', stock: pieza.stock }, 409)

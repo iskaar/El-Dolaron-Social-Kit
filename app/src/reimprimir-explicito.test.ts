@@ -34,7 +34,7 @@ test('«Imprimir N etiquetas» de una captura que quedó sin etiqueta también f
   const b = botones();
   const linea = corte(capturar, "    if(actual.faltaEtiqueta&&p.estado_analisis==='listo'&&!noImprime())", '\n');   // la línea del botón
   const actual = { faltaEtiqueta: true, impresas: 0, cantidad: 3 };
-  runInNewContext(`const k=actual.impresas||actual.cantidad||1;${linea}`, { ...b.entorno, noImprime: () => false, actual, p: { id: 'p2', estado_analisis: 'listo' }, tarjeta: falso(), ctx: b.ctx });
+  runInNewContext(`const k=actual.impresas||actual.cantidad||1;${linea}`, { ...b.entorno, noImprime: () => false, conDeuda: (_folio: string, imprimirYa: () => unknown) => imprimirYa(), actual, p: { id: 'p2', estado_analisis: 'listo' }, tarjeta: falso(), ctx: b.ctx });
   await b.pulsables.get('Imprimir 3 etiquetas')!();
   assert.equal(JSON.stringify(b.envios[0].ids), '["p2"]');
   assert.equal(b.envios[0].copias.get('p2'), 3);
