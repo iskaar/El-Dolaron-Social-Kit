@@ -18,6 +18,7 @@ async function montar() {
   t.db.prepare(`insert into usuarios (correo, nombre, roles, activo, caja, creado_en, actualizado_en) values
     ('${TIENDA}', 'Computadora', 'computadora', 1, '', '', ''),
     ('${ANA}', 'Ana', 'cajero', 1, 'Caja 2', '', '')`).run();
+  t.db.prepare(`update usuarios set tienda = 'soledad' where roles = 'computadora'`).run();   // R2 de #793: la computadora cobra solo con tienda
   await t.pedir('/api/cuentas/pin', { correo: DUENO, pin: PIN_DUENO }, 'PUT');
   await t.pedir('/api/cuentas/pin', { correo: ANA, pin: PIN_ANA }, 'PUT');
   const como = (correo: string) => { (t.env as unknown as { DEV_USUARIO: string }).DEV_USUARIO = correo; };

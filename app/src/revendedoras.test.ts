@@ -24,7 +24,8 @@ function pieza(db: DatabaseSync, cambios: Record<string, unknown> = {}) {
   return fila;
 }
 function cuenta(db: DatabaseSync, correo: string, roles: string, nombre = correo.split('@')[0]) {
-  db.prepare("insert into usuarios (correo, nombre, roles, activo, creado_en, actualizado_en) values (?, ?, ?, 1, '', '')").run(correo, nombre, roles);
+  db.prepare("insert into usuarios (correo, nombre, roles, activo, tienda, creado_en, actualizado_en) values (?, ?, ?, 1, ?, '', '')")
+    .run(correo, nombre, roles, roles.includes('computadora') ? 'soledad' : '');   // R2 de #793
 }
 const stockDe = (db: DatabaseSync, id: string) => (db.prepare('select stock from productos where id = ?').get(id) as { stock: number }).stock;
 const comoUsuario = (env: Env, correo: string) => { (env as unknown as Record<string, string>).DEV_USUARIO = correo; };
