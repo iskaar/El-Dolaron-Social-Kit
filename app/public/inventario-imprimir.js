@@ -1,5 +1,5 @@
 import { iniciarEtiquetas } from './imprimir-lote.js';
-import { estadoEnvio, noSalio } from './envio-etiquetas.js';
+import { estadoEnvio, noSalio, avisoPC } from './envio-etiquetas.js';
 import { conectarEtiquetera, etiqueteraLista, imprimirBanda, detenerEnvio, historialTexto, precioImpreso, gradoImpreso, esPropia, noImprime, ponerNoImprime, MENSAJE_NO_IMPRIME } from './etiquetera.js';
 import { nombreEstado } from './estados.js';
 import { esRopa } from './ropa.js';
@@ -109,7 +109,7 @@ export async function iniciar(ctx) {
   }
   if(!ctx.identidad.vendedor)await cargarBandas();
   async function imprimirPiezas(ids,copias=new Map(),opciones={}){
-    const ok=await motor.imprimir(ids,copias,false,opciones);contar();actualizarConexion();foco();return ok;
+    const ok=await motor.imprimir(ids,copias,false,opciones);const pc=avisoPC();if(pc)mensaje(pc,ok?'aviso':'error');/* #787: «Mandadas N a la PC» de un aparato que no imprime */contar();actualizarConexion();foco();return ok;
   }
   document.addEventListener('keydown',e=>{if(!raiz.hidden&&e.ctrlKey&&e.key.toLowerCase()==='p'){e.preventDefault();imprimir.click();}});
   return { conexion, imprimir:imprimirPiezas, abrir:()=>motor.cargar(), leer:codigo=>{elegir(false);motor.filtrar(codigo);}, pausar(){} };

@@ -3,6 +3,7 @@
 // aquí solo se oculta lo que la cuenta no puede hacer. Dinero siempre en centavos MXN enteros.
 // Todo dato de la pieza entra con textContent, nunca como HTML.
 import { api, aCentavos, pesos } from './ficha.js';
+import { avisoPC } from './envio-etiquetas.js';
 import { $, nodo, boton, mensaje, hoja, confirmar, cerrarHoja, bloquear, restaurarNeutro } from './inventario-ui.js';
 
 export const MAXIMO = 10_000_000;   // $100,000: el mismo tope que el servidor
@@ -268,7 +269,7 @@ export function filaSolicitud(ctx, s, { compacta = false, alResolver = () => {},
       if (ctx.identidad.vendedor) hecho.append(nodo('small', 'Reimprime la etiqueta desde la computadora.'));
       else hecho.append(boton('Reimprimir etiqueta', async () => {
         const salio = await ctx.imprimir([s.producto_id], new Map([[s.producto_id, 1]]), { reimprimir:true });   // pedida a propósito: sale aunque la base ya la tenga reclamada (#713)
-        if (salio) mensaje('Etiqueta enviada', 'etiqueta');
+        if (salio && !avisoPC()) mensaje('Etiqueta enviada', 'etiqueta');   // sin impresora ya avisó «Mandadas N a la PC» (#787)
       }, 'primario'));
     }
     form.replaceWith(hecho); texto.focus({ preventScroll:true });

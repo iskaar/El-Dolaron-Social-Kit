@@ -128,7 +128,7 @@ async function pagina(t: ReturnType<typeof tienda>, ambiente = 'sandbox', almace
     enviadas: [] as { id: string; copias: number }[], detenido: false, antesDePreparar: null as null | (() => Promise<void>),
     reclamos: [] as { ids: string[]; reimprimir?: boolean; preparar?: boolean }[], liberadas: [] as string[][], antesDeReclamar: null as null | (() => void | Promise<void>),
     sinRedParaReclamar: false, tiempoAgotado: false, liberadasEn: [] as (Record<string, string> | null)[], rutas: [] as string[],
-    reconectable: true, reconexiones: 0 };
+    reconectable: true, reconexiones: 0, perderRespuesta: false };
   Object.assign(estado, inicial);   // el estado de la impresora al ABRIR la página (#784)
   const pedir = pedirPor(t, host);
   const almacenWeb = { getItem: (k: string) => almacen.get(k) ?? null, setItem: (k: string, v: string) => almacen.set(k, v), removeItem: (k: string) => almacen.delete(k) };
@@ -147,6 +147,7 @@ async function pagina(t: ReturnType<typeof tienda>, ambiente = 'sandbox', almace
       estado.rutas.push(ruta);
       if (ruta === '/api/salud') return { ok: true, json: async () => ({ estado: 'ok', ambiente, ahora: DESDE }) };
       const r = await pedir(ruta, opciones?.body ? JSON.parse(opciones.body) : undefined, opciones?.method);
+      if (estado.perderRespuesta && ruta === '/api/etiquetas/deudas' && opciones?.method === 'POST') { estado.perderRespuesta = false; throw new Error('se cortó la red'); }   // la base la recibió, el aparato no lo supo
       return { ok: r.status < 300, status: r.status, json: async () => r.cuerpo };
     },
     // «Este aparato no imprime» (#781): con el interruptor en el almacenamiento de esta pagina, lo decide la guarda REAL de etiquetera.js.
@@ -186,10 +187,10 @@ async function pagina(t: ReturnType<typeof tienda>, ambiente = 'sandbox', almace
       return (await pedir('/api/etiquetas/enviadas', en ? { ids: sueltas, etiquetas_en: Object.fromEntries(sueltas.map((id) => [id, en[id]])) } : { ids: sueltas }, 'DELETE')).status === 200;
     },
     detenerEnvio: (valor = true) => { estado.detenido = valor; }, envioDetenido: () => estado.detenido, errorEnvio: () => 'BLE falló',
-    setInterval() {}, AbortSignal, encodeURIComponent, Date, Map, Set, console,
+    setInterval() {}, AbortSignal, encodeURIComponent, Date, Map, Set, console, crypto,
   };
   const api = await runInNewContext(`(async () => { ${fuente}
-    return { iniciarAutomatica, imprimirNuevas, imprimir, pausarAutomatica, cargar, noSalio, reanudacion, activa: () => automaticaActiva };
+    return { iniciarAutomatica, imprimirNuevas, imprimir, pausarAutomatica, cargar, noSalio, reanudacion, activa: () => automaticaActiva, avisoPC };
   })()`, contexto);
   /** Reclama como lo hace imprimir() y deja lo reclamado en el almacenamiento, como si la página se hubiera cerrado antes de mandarlo. */
   const reclamarComoOtraPagina = async (ids: string[]) => {
@@ -1219,7 +1220,7 @@ test('#781: «Este aparato no imprime» — ningún camino de impresión aparta 
     const id = agregar(t, DESPUES, 'listo', 2), otra = agregar(t, DESPUES, 'listo', 1);
     const sinApartar = () => assert.equal(t.db.prepare('select count(*) n from etiquetas_enviadas').get()!.n, 0);
     // Manual (lista Imprimir, Reimprimir de Buscar/ficha, +N, correccion, precio: todos entran por imprimir()), con y sin reimprimir.
-    for (const opciones of [{}, { reimprimir: true }, { deLista: true }]) {
+    for (const opciones of [{}, { deLista: true }]) {
       assert.equal(await celular.imprimir([id, otra], new Map([[id, 2]]), false, opciones), false);
       assert.match(celular.$('resumen').textContent, /no imprime.*PC/);
       assert.doesNotMatch(celular.$('resumen').textContent, /enviad/i);
@@ -1228,6 +1229,10 @@ test('#781: «Este aparato no imprime» — ningún camino de impresión aparta 
     assert.deepEqual(celular.estado.enviadas, []);
     assert.equal(celular.estado.permiso, 0);
     assert.equal(celular.estado.rutas.some((r: string) => r.startsWith('/api/etiquetas')), false);
+    // Reimprimir explícito (#787): no reclama ni toca Bluetooth; solo deja una deuda para la PC (aquí, de piezas nunca impresas: no hay deuda).
+    assert.equal(await celular.imprimir([id, otra], new Map([[id, 2]]), false, { reimprimir: true }), true);
+    assert.deepEqual(celular.estado.reclamos, []);
+    assert.deepEqual(celular.estado.rutas.filter((r: string) => r.startsWith('/api/etiquetas')), ['/api/etiquetas/deudas']);
     sinApartar();
     assert.deepEqual(celular.marcas(), {}, 'tampoco marca nada como impreso en el navegador');
     // La automatica tampoco arranca en un aparato que no imprime.
@@ -1539,5 +1544,132 @@ test('#783: la automática no se frena por una deuda; una impresión que falla s
     await sinDeudas.iniciarAutomatica();
     assert.equal(sinDeudas.activa(), true);
     assert.ok(sinDeudas.estado.enviadas.some((e: any) => e.id === otra));
+  } finally { t.db.close(); }
+});
+
+// ---------- #787: cada botón de impresión de un aparato que no imprime manda sus etiquetas a la PC ----------
+
+const sinImprimir = () => new Map([['etiqueta-no-imprime', '1']]);
+const deudasPC = (t: ReturnType<typeof tienda>) => t.db.prepare('select id, producto_id, copias, reimpresion, reclamada_en from etiquetas_deuda order by creado_en, rowid').all() as any[];
+
+test('#787: Reimprimir / Varias copias desde un aparato que no imprime deja una deuda que la PC imprime una vez, topada a la existencia', async () => {
+  const t = tienda();
+  try {
+    const id = sembrarSumable(t, 5);
+    t.db.prepare('update etiquetas_enviadas set etiqueta_en=? where producto_id=?').run('2999-01-01T00:00:00.000Z', id);   // la marca no es anterior a la deuda: una reimpresión pedida no depende de eso
+    const celular = await pagina(t, 'produccion', sinImprimir(), CELULAR_HOST);
+    celular.estado.exigirDudosa = false;
+    assert.equal(await celular.imprimir([id], new Map([[id, 3]]), false, { reimprimir: true }), true);
+    assert.equal(celular.avisoPC(), 'Mandadas 3 a la PC');
+    assert.deepEqual(celular.estado.enviadas, [], 'el celular no imprime');
+    assert.deepEqual(celular.estado.reclamos, [], 'ni reclama');
+    assert.deepEqual(deudasPC(t).map((d) => [d.producto_id, d.copias, d.reimpresion, d.reclamada_en]), [[id, 3, 1, '']]);
+    // Más de lo que hay: el aviso dice lo que sí saldrá, la PC imprime hasta la existencia de ese momento.
+    assert.equal(await celular.imprimir([id], new Map([[id, 10]]), false, { reimprimir: true }), true);
+    assert.equal(celular.avisoPC(), 'Mandadas 5 a la PC');
+    const pc = await pagina(t);
+    await pc.iniciarAutomatica();
+    assert.deepEqual(pc.estado.enviadas, [{ id, copias: 3 }, { id, copias: 5 }]);
+    await pc.imprimirNuevas(); await pc.imprimirNuevas();
+    assert.equal(pc.estado.enviadas.length, 2, 'cada deuda sale una sola vez');
+    assert.ok(deudasPC(t).every((d) => d.reclamada_en !== ''));
+    // Otra PC no las repite.
+    const otra = await pagina(t);
+    await otra.iniciarAutomatica();
+    assert.deepEqual(otra.estado.enviadas, []);
+  } finally { t.db.close(); }
+});
+
+test('#787: un reintento (se perdió la respuesta, o el mismo folio) no duplica la deuda ni las etiquetas', async () => {
+  const t = tienda();
+  try {
+    const id = sembrarSumable(t, 5);
+    const celular = await pagina(t, 'produccion', sinImprimir(), CELULAR_HOST);
+    celular.estado.perderRespuesta = true;
+    assert.equal(await celular.imprimir([id], new Map([[id, 2]]), false, { reimprimir: true }), false, 'sin respuesta no se da por mandada');
+    assert.match(celular.avisoPC(), /^No se mandó a la PC/);
+    assert.equal(deudasPC(t).length, 1, 'la base sí la recibió');
+    assert.equal(await celular.imprimir([id], new Map([[id, 2]]), false, { reimprimir: true }), true);
+    assert.equal(celular.avisoPC(), 'Mandadas 2 a la PC');
+    assert.equal(deudasPC(t).length, 1, 'el reintento reusa el folio');
+    // Ya confirmada, un toque nuevo es OTRA reimpresión pedida a propósito.
+    assert.equal(await celular.imprimir([id], new Map([[id, 2]]), false, { reimprimir: true }), true);
+    assert.equal(deudasPC(t).length, 2);
+    // En el servidor: el mismo folio no crea otra.
+    const folio = deudasPC(t)[0].id, cuerpo = { crear: [{ id: folio, producto_id: id, copias: 2 }] };
+    assert.equal((await t.pedir('/api/etiquetas/deudas', cuerpo)).cuerpo.resultados[0].estado, 'ya');
+    const pc = await pagina(t);
+    await pc.iniciarAutomatica();
+    assert.deepEqual(pc.estado.enviadas, [{ id, copias: 2 }, { id, copias: 2 }]);
+    assert.equal((await t.pedir('/api/etiquetas/deudas', cuerpo)).cuerpo.resultados[0].estado, 'ya', 'ni después de impresa');
+    assert.equal(deudasPC(t).length, 2);
+  } finally { t.db.close(); }
+});
+
+test('#787: una pieza que nunca se ha impreso no deja deuda: la cola normal de la PC la saca completa, una sola vez', async () => {
+  const t = tienda();
+  try {
+    const nueva = agregar(t, DESPUES, 'listo', 2);
+    const celular = await pagina(t, 'produccion', sinImprimir(), CELULAR_HOST);
+    assert.equal(await celular.imprimir([nueva], new Map([[nueva, 1]]), false, { reimprimir: true }), true);
+    assert.match(celular.avisoPC(), /aún sin imprimir.*cola normal/);
+    assert.doesNotMatch(celular.avisoPC(), /Mandadas/);
+    assert.deepEqual(deudasPC(t), []);
+    const pc = await pagina(t);
+    await pc.iniciarAutomatica(); await pc.imprimirNuevas();
+    assert.deepEqual(pc.estado.enviadas, [{ id: nueva, copias: 2 }]);
+    // Ya impresa, una reimpresión sí deja deuda.
+    assert.equal(await celular.imprimir([nueva], new Map([[nueva, 1]]), false, { reimprimir: true }), true);
+    assert.equal(celular.avisoPC(), 'Mandadas 1 a la PC');
+    await pc.imprimirNuevas();
+    assert.deepEqual(pc.estado.enviadas, [{ id: nueva, copias: 2 }, { id: nueva, copias: 1 }]);
+  } finally { t.db.close(); }
+});
+
+test('#787: lo vendido, de otro propietario o fuera de rango no deja deuda; un aparato que sí imprime sigue como siempre', async () => {
+  const t = tienda();
+  try {
+    const id = sembrarSumable(t, 3);
+    const vendida = crypto.randomUUID(), ajena = crypto.randomUUID();
+    for (const [otra, propietario, stock] of [[vendida, 'dolaron', 0], [ajena, 'fep', 2]] as const) {
+      t.db.prepare(`insert into productos (id, codigo, nombre, categoria, estado_analisis, estado_fisico, destino, precio, stock, semana_ingreso, creado_en, actualizado_en, propietario)
+        values (?, ?, 'Termo', 'ropa', 'listo', 'nuevo', 'etiqueta', 7900, ?, '2026-S41', ?, ?, ?)`).run(otra, `ED-${otra.slice(0, 6)}`, stock, ANTES, ANTES, propietario);
+      t.db.prepare(`insert into etiquetas_enviadas values (?, ?, 7900, 0, 'Termo', '', 'pc')`).run(otra, ANTES_DE_SUMAR);
+    }
+    const crear = (d: any) => t.pedir('/api/etiquetas/deudas', { crear: [d] });
+    const base = { id: crypto.randomUUID(), producto_id: id, copias: 1 };
+    assert.equal((await crear({ ...base, producto_id: vendida })).cuerpo.resultados[0].estado, 'rechazada');
+    assert.equal((await crear({ ...base, producto_id: ajena })).cuerpo.resultados[0].estado, 'rechazada');
+    for (const malo of [{ copias: 0 }, { copias: 100 }, { copias: 1.5 }, { copias: '2' }, { id: 'x' }, { producto_id: 'x' }]) assert.equal((await crear({ ...base, ...malo })).status, 400);
+    for (const mala of [[], 'x', Array.from({ length: 51 }, () => ({ ...base, id: crypto.randomUUID() })), [base, base]]) assert.equal((await t.pedir('/api/etiquetas/deudas', { crear: mala })).status, 400);
+    assert.deepEqual(deudasPC(t), []);
+    assert.equal((await crear(base)).cuerpo.resultados[0].estado, 'creada');
+    // Un aparato que imprime: imprime él mismo, sin deuda.
+    const normal = await pagina(t, 'produccion', new Map(), CELULAR_HOST);
+    normal.estado.exigirDudosa = false;
+    assert.equal(await normal.imprimir([id], new Map([[id, 2]]), false, { reimprimir: true }), true);
+    assert.deepEqual(normal.estado.enviadas, [{ id, copias: 2 }]);
+    assert.equal(normal.avisoPC(), '');
+    assert.equal(deudasPC(t).length, 1, 'solo la de arriba');
+  } finally { t.db.close(); }
+});
+
+test('#787: la corrección de cantidad en un aparato que no imprime manda las que faltan a la PC, y solo con `aPC`', async () => {
+  const t = tienda();
+  try {
+    const id = sembrarSumable(t, 5);
+    const celular = await pagina(t, 'produccion', sinImprimir(), CELULAR_HOST);
+    const fuenteCapturar = readFileSync('public/inventario-capturar.js', 'utf8');
+    const trozo = fuenteCapturar.slice(fuenteCapturar.indexOf('let impresionPedida=false;'), fuenteCapturar.indexOf('const flujo=crearCaptura'));
+    const ctx: any = { problemas: {}, imprimir: (ids: string[], copias: Map<string, number>, opciones: unknown) => celular.imprimir(ids, copias, false, opciones) };
+    const imprimirPieza = runInNewContext(`${trozo};imprimir`, { ctx, etiqueteraLista: () => true, noImprime: () => true, Map });
+    // Los caminos de siempre (+N, guardar) no mandan nada desde aquí: el +N ya tiene su deuda por folio.
+    assert.equal(await imprimirPieza(id, 3, { reimprimir: true }), false);
+    assert.deepEqual(deudasPC(t), []);
+    assert.equal(await imprimirPieza(id, 3, { reimprimir: true, aPC: true }), true);
+    assert.equal(celular.avisoPC(), 'Mandadas 3 a la PC');
+    const pc = await pagina(t);
+    await pc.iniciarAutomatica();
+    assert.deepEqual(pc.estado.enviadas, [{ id, copias: 3 }]);
   } finally { t.db.close(); }
 });

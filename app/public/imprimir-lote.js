@@ -3,7 +3,7 @@ import {
   errorEnvio, etiquetaVigente, precioImpreso, gradoImpreso, esPropia,
 } from '/etiquetera.js';
 
-import { estadoEnvio, prepararYReclamar, liberarEnvio, noSalio, reclamarSinImprimir, sincronizarMarcas, seImprime, reclamarDeudas, soltarDeudas } from './envio-etiquetas.js';
+import { estadoEnvio, prepararYReclamar, liberarEnvio, noSalio, reclamarSinImprimir, sincronizarMarcas, seImprime, reclamarDeudas, soltarDeudas, mandarAPC, avisoPC } from './envio-etiquetas.js';
 import { nombreEstado } from '/estados.js';
 import { esRopa } from './ropa.js';
 
@@ -310,6 +310,9 @@ document.getElementById('imprimir').addEventListener('click', () => {
  * a proposito tambien sale. Sin ellas, lo que ya reclamo otro dispositivo (PC o celular) se omite.
  */
 async function imprimir(ids, pedidas = new Map(), automatico = false, opciones = {}) {
+  avisoPC('');
+  // «Este aparato no imprime» (#787): una reimpresión explícita no toca Bluetooth ni reclama: queda como deuda para la automática de la PC.
+  if (!automatico && opciones.reimprimir === true && noImprime()) return mandarAPC(ids.map((id) => ({ producto_id: id, copias: Math.min(99, Math.max(1, pedidas.get(id) ?? 1)) })));
   if (imprimiendo && !automatico) resumen.textContent = 'Espera: todavía se están enviando etiquetas. No se imprimió; vuelve a pulsar al terminar.';   // #713: antes callaba
   if (imprimiendo || ids.length === 0) return false;
   vista?.inicio?.(ids, pedidas);
@@ -650,16 +653,17 @@ async function imprimirDeudas() {
       const [p] = await respuesta.json();
       const copias = Math.min(d.copias, p?.stock ?? 0);
       if (!p || !seImprime(p) || copias <= 0) { delete sinEnviar[d.id]; continue; }   // vendida o cambiada: nada que imprimir, la deuda queda saldada
-      resumen.textContent = `Imprimiendo ${copias} ${copias === 1 ? 'etiqueta' : 'etiquetas'} de una suma: ${p.nombre}…`;
+      const de = d.reimpresion ? 'mandadas desde otro aparato' : 'de una suma';
+      resumen.textContent = `Imprimiendo ${copias} ${copias === 1 ? 'etiqueta' : 'etiquetas'} ${de}: ${p.nombre}…`;
       localStorage.setItem(CLAVE_DUDOSA, p.id);   // como en la cola: si la página se cierra a media impresión, no se reenvía a ciegas
       let hechas = 0;
       const salio = await imprimirEtiquetas(p, copias,
-        (n) => { hechas = n; resumen.textContent = `Etiquetas de una suma (${p.nombre}): ${n} de ${copias}…`; },
+        (n) => { hechas = n; resumen.textContent = `Etiquetas ${de} (${p.nombre}): ${n} de ${copias}…`; },
         (segundos) => { resumen.textContent = `Pausa de ${segundos} s para que la impresora vacíe lo que tiene…`; });
       pintarHistorial();
       if (!salio) {
         if (hechas > 0) delete sinEnviar[d.id];
-        resumen.textContent = `Se cortó la impresión de las etiquetas de una suma (${p.nombre}): ${errorEnvio()}. `
+        resumen.textContent = `Se cortó la impresión de las etiquetas ${de} (${p.nombre}): ${errorEnvio()}. `
           + (hechas > 0 ? `Salieron ${hechas} de ${copias}: saca las que faltan en Buscar → Reimprimir.` : 'Sigue pendiente.') + ' La impresión automática está pausada.';
         pausarAutomatica(true);
         return;

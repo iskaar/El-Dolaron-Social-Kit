@@ -162,3 +162,43 @@ export async function soltarDeudas(en) {
     return respuesta.ok;
   } catch { return false; }
 }
+
+/**
+ * Reimpresión pedida desde un aparato que no imprime (#787): una deuda por pieza en la base, que la automática de la PC imprime una vez.
+ * El folio lo genera el cliente y se conserva 10 min mientras no haya respuesta: si la respuesta se perdió, reintentar no duplica.
+ * Una pieza nunca impresa NO deja deuda: ya está en la cola normal de la PC, que la saca con toda su existencia.
+ * Deja el aviso para mostrar en `avisoPC()` (`avisoPC('')` lo borra); devuelve true si algo quedó mandado o ya estaba en la cola.
+ */
+const intentosPC = new Map();   // «pieza|copias» -> { id, en }
+let textoPC = '';
+export function avisoPC(texto) { if (texto !== undefined) textoPC = texto; return textoPC; }
+export async function mandarAPC(pedidas) {
+  const ahora = Date.now();
+  const crear = pedidas.map(({ producto_id, copias }) => {
+    const llave = `${producto_id}|${copias}`, previo = intentosPC.get(llave);
+    const intento = previo && ahora - previo.en < 600000 ? previo : { id: crypto.randomUUID(), en: ahora };
+    intentosPC.set(llave, intento);
+    return { id: intento.id, producto_id, copias };
+  });
+  let resultados;
+  try {
+    const respuesta = await fetch('/api/etiquetas/deudas', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ crear }), signal: AbortSignal.timeout(15000) });
+    const cuerpo = await respuesta.json().catch(() => ({}));
+    if (!respuesta.ok) throw new Error(cuerpo.error ?? `Error HTTP ${respuesta.status}. Revisa la red y la sesion.`);
+    resultados = cuerpo.resultados;
+  } catch (error) {
+    avisoPC(`No se mandó a la PC: ${error.message} Vuelve a intentar.`);
+    return false;
+  }
+  let mandadas = 0, encoladas = 0, rechazadas = 0;
+  resultados.forEach((r, i) => {
+    if (r.estado !== 'rechazada') intentosPC.delete(`${pedidas[i].producto_id}|${pedidas[i].copias}`);
+    if (r.estado === 'creada' || r.estado === 'ya') mandadas += r.copias;
+    else if (r.estado === 'pendiente') encoladas += 1;
+    else rechazadas += 1;
+  });
+  avisoPC([mandadas ? `Mandadas ${mandadas} a la PC` : '',
+    encoladas ? `${encoladas === 1 ? 'una pieza' : `${encoladas} piezas`} aún sin imprimir: la PC ${encoladas === 1 ? 'la saca' : 'las saca'} con su cola normal` : '',
+    rechazadas ? `${rechazadas === 1 ? 'una pieza ya no se puede imprimir' : `${rechazadas} piezas ya no se pueden imprimir`} (vendidas o cambiaron)` : ''].filter(Boolean).join('; '));
+  return mandadas + encoladas > 0;
+}
