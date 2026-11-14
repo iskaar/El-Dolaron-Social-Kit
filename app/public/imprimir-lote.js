@@ -218,7 +218,8 @@ lista.addEventListener('click', async (e) => {
 
 /** Traduce la falla de Bluetooth a algo accionable parado junto a la impresora. */
 function avisarFalla(error) {
-  resumen.textContent = error.name === 'NotFoundError'
+  resumen.textContent = error.noImprime ? error.message   // «Este aparato no imprime» (#781): sin reclamar nada, la etiqueta sale en la PC
+    : error.name === 'NotFoundError'
     ? 'No se escogió impresora. Préndela y vuelve a intentar, o usa «¿No aparece la impresora?».'
     : /disconnected/i.test(error.message)
       ? 'La impresora soltó la conexión. Apágala y préndela, cierra cualquier otra pestaña o programa que la use (y desconéctala del Bluetooth de Windows si aparece como conectada) y vuelve a intentar.'

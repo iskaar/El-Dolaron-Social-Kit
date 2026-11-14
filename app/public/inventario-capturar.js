@@ -1,5 +1,5 @@
 import { codigoLeido, normalizarUpc } from './upc.js';
-import { etiqueteraLista } from './etiquetera.js';
+import { etiqueteraLista, noImprime } from './etiquetera.js';
 import { ropa, opciones, talla as selectorTalla } from './inventario-ropa.js';
 import { ESTADOS } from './estados.js';
 import { CATEGORIAS } from './categorias.js';
@@ -240,7 +240,7 @@ export async function iniciar(ctx) {
   }
   // Modo enfocado (#461): una etiqueta pedida sin impresora conectada queda como alerta hasta que se conecte.
   let impresionPedida=false;ctx.problemas.impresora=()=>{if(impresionPedida&&etiqueteraLista())impresionPedida=false;return impresionPedida;};
-  async function imprimir(id,n,opciones){if(!etiqueteraLista()){impresionPedida=true;return false;}impresionPedida=false;return ctx.imprimir([id],new Map([[id,n]]),opciones);}
+  async function imprimir(id,n,opciones){if(noImprime())return false;/* #781: la etiqueta sale en la PC; ni alerta ni reclamo */if(!etiqueteraLista()){impresionPedida=true;return false;}impresionPedida=false;return ctx.imprimir([id],new Map([[id,n]]),opciones);}
   // Etiqueta automática de una captura con foto (#464): una a la vez, y nunca dos veces para la misma captura (`llave` = su id de subida).
   let turnoImpresion=Promise.resolve();
   function imprimirCaptura(llave,id,n,opciones){
@@ -249,11 +249,13 @@ export async function iniciar(ctx) {
   }
   const flujo=crearCaptura({api,imprimir,permiteSumar:dueno||ctx.identidad.usuario?.editar_inventario===true,permiteUpc:!ctx.identidad.usuario?.roles.includes('finanzas'),cambiar:pintar});
   const altaUpc=!ctx.identidad.usuario?.roles.includes('finanzas');   // misma regla que permiteUpc, para «Otra talla»
+  /** «Guardada» tras guardar/sumar: con el interruptor «Este aparato no imprime» (#781) no hay ✓ ni «falta etiqueta», la etiqueta sale en la PC. */
+  function avisoGuardada(){const falta=flujo.actual()?.faltaEtiqueta;if(noImprime())mensaje('Guardada · la etiqueta sale en la PC','aviso');else mensaje(falta?'Guardada · falta etiqueta':'Guardada · etiqueta enviada',falta?'aviso':'etiqueta');}
   async function recibirExistente(p,llave){
     const a={tipo:'guardada',pieza:p,cantidad:p.sumadas,faltaEtiqueta:true};flujo.retomar(a);
     // Sin impresora conectada igual se pide: queda «falta etiqueta» y la alerta del modo enfocado.
     if(p.estado_analisis==='listo'){a.faltaEtiqueta=!await(llave?imprimirCaptura(llave,p.id,p.sumadas,{reimprimir:true}):imprimir(p.id,p.sumadas,{reimprimir:true}));flujo.retomar(a);}
-    mensaje(`Ya existía · +${p.sumadas}${p.codigo?` a ${p.codigo}`:''}${p.estado_analisis==='listo'?(a.faltaEtiqueta?' · falta etiqueta':' · etiqueta enviada'):''}`,'aviso');
+    mensaje(`Ya existía · +${p.sumadas}${p.codigo?` a ${p.codigo}`:''}${p.estado_analisis==='listo'?(noImprime()?' · la etiqueta sale en la PC':a.faltaEtiqueta?' · falta etiqueta':' · etiqueta enviada'):''}`,'aviso');
   }
 
   const vacioPieza=()=>{if(pc()&&!pieza.children.length)pieza.append(nodo('p','Escanea un código para empezar','vacio'));};
@@ -296,15 +298,15 @@ export async function iniciar(ctx) {
     }
     if(actual.tipo==='existente'){
       tarjeta.append(nodo('p',`Existencia ${p.stock}${p.talla?` · talla ${p.talla}`:''}${!p.tiene_foto?' · sin foto':''}`));
-      const maximo=Math.max(1,999-p.stock),rotulo=k=>p.estado_analisis==='listo'?`Sumar ${k} e imprimir ${k}`:`Sumar ${k}`;let n=Math.min(actual.cantidad||1,maximo);
-      const sumar=boton(rotulo(n),async()=>{await flujo.sumar(p,n);hoy+=n;textoHoy();mensaje(flujo.actual()?.faltaEtiqueta?'Guardada · falta etiqueta':'Guardada · etiqueta enviada',flujo.actual()?.faltaEtiqueta?'aviso':'etiqueta');if(!p.tiene_foto&&!p.foto_key)await fotoPieza(p);foco();},p.tiene_foto?'primario':'');
+      const maximo=Math.max(1,999-p.stock),rotulo=k=>p.estado_analisis==='listo'&&!noImprime()?`Sumar ${k} e imprimir ${k}`:`Sumar ${k}`;let n=Math.min(actual.cantidad||1,maximo);
+      const sumar=boton(rotulo(n),async()=>{await flujo.sumar(p,n);hoy+=n;textoHoy();avisoGuardada();if(!p.tiene_foto&&!p.foto_key)await fotoPieza(p);foco();},p.tiene_foto?'primario':'');
       const conPermiso=dueno||ctx.identidad.usuario?.editar_inventario===true;
       if(conPermiso){bloquear(sumar,!navigator.onLine?'Sin red: se suma al volver la señal':'');const fila=nodo('div',undefined,'acciones');fila.append(stepper(n,v=>{n=v;sumar.textContent=rotulo(n);},{min:1,max:maximo,nombre:'Piezas a sumar'}),sumar,boton(p.tiene_foto?'Foto nueva':'Añadir foto',()=>fotoPieza(p),p.tiene_foto?'':'primario'));carta.append(fila);}else tarjeta.append(nodo('p','Solo consulta','solo-consulta'));
       if(altaUpc&&admiteOtraTalla(p))carta.append(boton('Otra talla',()=>flujo.otraTalla(p)));
       const precioPedido=nodo('div',undefined,'bloque-precio');carta.append(precioPedido);montarPrecio(ctx,precioPedido,p);
     }else if(actual.tipo==='nueva'){
       const fila=nodo('div',undefined,'acciones');if(!piezaRopa(p))tarjeta.append(opciones(ESTADOS,actual.estado,e=>flujo.gradoNueva(e),'Grado de esta pieza'));carta.append(fila);
-      botonGuardar=boton(etiqueteraLista()?'Guardar e imprimir':'Guardar',async()=>{await flujo.guardar();hoy+=actual.cantidad;textoHoy();const p=flujo.actual()?.pieza;mensaje(p?.existente?`Ya existía · +${p.sumadas}${p.codigo?` a ${p.codigo}`:''}`:flujo.actual()?.faltaEtiqueta?'Guardada · falta etiqueta':'Guardada · etiqueta enviada',p?.existente?'aviso':flujo.actual()?.faltaEtiqueta?'aviso':'etiqueta');foco();},'primario');
+      botonGuardar=boton(etiqueteraLista()?'Guardar e imprimir':'Guardar',async()=>{await flujo.guardar();hoy+=actual.cantidad;textoHoy();const p=flujo.actual()?.pieza;if(p?.existente)mensaje(`Ya existía · +${p.sumadas}${p.codigo?` a ${p.codigo}`:''}${noImprime()?' · la etiqueta sale en la PC':''}`,'aviso');else avisoGuardada();foco();},'primario');
       bloquear(botonGuardar,faltaCalzado(actual));fila.append(stepper(actual.cantidad,n=>flujo.cantidad(n),{min:0,max:999,nombre:'Piezas de este código'}),botonGuardar);
       if(!actual.imagenBuscada){actual.imagenBuscada=true;void imagen(actual,foto);}
       else if(actual.imagen)pintarImagen(actual,foto);
@@ -312,7 +314,7 @@ export async function iniciar(ctx) {
       mensaje('Sin registro · toma foto','aviso');const fila=nodo('div',undefined,'acciones');fila.append(boton('Buscar en internet',()=>buscarDesconocida(actual),'buscar-internet'),boton('Tomar foto',()=>fotoNueva(actual),'primario'));carta.append(fila);
     }else if(actual.tipo==='guardada')tarjeta.append(nodo('p','✓ Guardada'));
     const k=actual.impresas||actual.cantidad||1; // lo que se acaba de sumar (existente) o guardar
-    if(actual.faltaEtiqueta&&p.estado_analisis==='listo')tarjeta.append(boton(`Imprimir ${k} ${k===1?'etiqueta':'etiquetas'}`,async()=>{const ok=await ctx.imprimir([p.id],new Map([[p.id,k]]),{reimprimir:true});if(ok){actual.faltaEtiqueta=false;mensaje('Etiqueta enviada','etiqueta');ctx.espejoCambio?.();}}));   // el otro aparato ve que ya salió
+    if(actual.faltaEtiqueta&&p.estado_analisis==='listo'&&!noImprime())tarjeta.append(boton(`Imprimir ${k} ${k===1?'etiqueta':'etiquetas'}`,async()=>{const ok=await ctx.imprimir([p.id],new Map([[p.id,k]]),{reimprimir:true});if(ok){actual.faltaEtiqueta=false;mensaje('Etiqueta enviada','etiqueta');ctx.espejoCambio?.();}}));   // el otro aparato ve que ya salió
   }
   function pintarImagen(a,foto){if(!a.imagen?.url){foto.textContent='Sin foto';return;}const img=nodo('img');img.src=a.imagen.url;img.alt=a.imagen.nombre||a.ficha.nombre;img.referrerPolicy='no-referrer';img.onerror=()=>{img.remove();foto.textContent='Sin foto';};foto.replaceChildren(img);}
   async function imagen(a,foto){try{

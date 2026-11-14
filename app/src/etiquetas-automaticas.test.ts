@@ -6,7 +6,7 @@ import { runInNewContext } from 'node:vm';
 import { tienda, DUENO } from './prueba-d1.ts';
 import worker from './worker.ts';
 import { tsplEtiqueta, etiquetaVigente, partirNombre, NOMBRE_MAX, precioImpreso, textoImpreso, gradoImpreso, impresas as marcasReales, marcarImpresa as marcarReal,
-  desmarcarDesde as desmarcarReal, olvidarMarca as olvidarReal, adoptarMarca as adoptarReal, adoptarMarcas as adoptarVarias, esPropia } from '../public/etiquetera.js';
+  desmarcarDesde as desmarcarReal, olvidarMarca as olvidarReal, adoptarMarca as adoptarReal, adoptarMarcas as adoptarVarias, esPropia, noImprime as noImprimeReal, conectarEtiquetera as conectarReal } from '../public/etiquetera.js';
 import { esRopa } from '../public/ropa.js';
 import { nombreEstado } from '../public/estados.js';
 
@@ -146,7 +146,9 @@ async function pagina(t: ReturnType<typeof tienda>, ambiente = 'sandbox', almace
       const r = await pedir(ruta, opciones?.body ? JSON.parse(opciones.body) : undefined, opciones?.method);
       return { ok: r.status < 300, status: r.status, json: async () => r.cuerpo };
     },
-    conectarEtiquetera: async () => { estado.permiso++; estado.conectada = true; }, etiqueteraLista: () => estado.conectada,
+    // «Este aparato no imprime» (#781): con el interruptor en el almacenamiento de esta pagina, lo decide la guarda REAL de etiquetera.js.
+    conectarEtiquetera: async () => { if (conAlmacen(noImprimeReal)()) await conAlmacen(conectarReal)(); estado.permiso++; estado.conectada = true; },
+    etiqueteraLista: () => estado.conectada && !conAlmacen(noImprimeReal)(),
     imprimirEtiquetas: async (p: any, copias: number, avanzar: any) => {
       if (estado.exigirDudosa) assert.equal(almacen.get('etiqueta-automatica-dudosa'), p.id);
       estado.enviadas.push({ id: p.id, copias });
@@ -1197,5 +1199,44 @@ test('#713: reimprimir una pieza vendida no sale y el aviso dice por qué, sin a
     assert.deepEqual(pc.estado.enviadas, []);
     assert.match(pc.$('resumen').textContent, /^No se imprimió: la pieza ya no se puede imprimir/);
     assert.doesNotMatch(pc.$('resumen').textContent, /enviad/i);
+  } finally { t.db.close(); }
+});
+
+test('#781: «Este aparato no imprime» — ningún camino de impresión aparta ni marca etiquetas, y el aviso lo dice', async () => {
+  const t = tienda();
+  try {
+    const interruptor = () => new Map([['etiqueta-no-imprime', '1']]);
+    const celular = await pagina(t, 'produccion', interruptor(), CELULAR_HOST), pc = await pagina(t);
+    celular.estado.exigirDudosa = pc.estado.exigirDudosa = false;
+    // El celular sigue «conectado» a la AE240 que recuerda (BLE que escribe sin sacar papel): justo el caso de la prueba del 13/11.
+    assert.equal(celular.estado.conectada, true);
+    const id = agregar(t, DESPUES, 'listo', 2), otra = agregar(t, DESPUES, 'listo', 1);
+    const sinApartar = () => assert.equal(t.db.prepare('select count(*) n from etiquetas_enviadas').get()!.n, 0);
+    // Manual (lista Imprimir, Reimprimir de Buscar/ficha, +N, correccion, precio: todos entran por imprimir()), con y sin reimprimir.
+    for (const opciones of [{}, { reimprimir: true }, { deLista: true }]) {
+      assert.equal(await celular.imprimir([id, otra], new Map([[id, 2]]), false, opciones), false);
+      assert.match(celular.$('resumen').textContent, /no imprime.*PC/);
+      assert.doesNotMatch(celular.$('resumen').textContent, /enviad/i);
+    }
+    assert.deepEqual(celular.estado.reclamos, [], 'ni preparar ni reclamar en la base');
+    assert.deepEqual(celular.estado.enviadas, []);
+    assert.equal(celular.estado.permiso, 0);
+    assert.equal(celular.estado.rutas.some((r: string) => r.startsWith('/api/etiquetas')), false);
+    sinApartar();
+    assert.deepEqual(celular.marcas(), {}, 'tampoco marca nada como impreso en el navegador');
+    // La automatica tampoco arranca en un aparato que no imprime.
+    await celular.iniciarAutomatica();
+    assert.equal(celular.activa(), false);
+    assert.equal(celular.estado.permiso, 0);
+    sinApartar();
+    // La PC (sin interruptor) saca las dos: no las dio por impresas nadie.
+    assert.equal(await pc.imprimir([id, otra], new Map([[id, 2]])), true);
+    assert.deepEqual(pc.estado.enviadas, [{ id, copias: 2 }, { id: otra, copias: 1 }]);
+    assert.equal(t.db.prepare("select count(*) n from etiquetas_enviadas where etiqueta_origen='pc'").get()!.n, 2);
+    // Apagado el interruptor, el celular vuelve a imprimir como siempre.
+    const nueva = agregar(t, DESPUES, 'listo', 1), normal = await pagina(t, 'produccion', new Map(), CELULAR_HOST);
+    normal.estado.exigirDudosa = false;
+    assert.equal(await normal.imprimir([nueva], new Map()), true);
+    assert.equal(t.db.prepare("select etiqueta_origen o from etiquetas_enviadas where producto_id=?").get(nueva)!.o, 'celular');
   } finally { t.db.close(); }
 });

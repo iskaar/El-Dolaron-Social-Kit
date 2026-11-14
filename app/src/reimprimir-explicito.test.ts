@@ -32,9 +32,9 @@ test('«Reimprimir etiqueta» del precio cambiado (dueño en Capturar) fuerza la
 
 test('«Imprimir N etiquetas» de una captura que quedó sin etiqueta también fuerza: una marca vieja en D1 no la deja callada', async () => {
   const b = botones();
-  const linea = corte(capturar, "    if(actual.faltaEtiqueta&&p.estado_analisis==='listo')", '\n');   // la línea del botón
+  const linea = corte(capturar, "    if(actual.faltaEtiqueta&&p.estado_analisis==='listo'&&!noImprime())", '\n');   // la línea del botón
   const actual = { faltaEtiqueta: true, impresas: 0, cantidad: 3 };
-  runInNewContext(`const k=actual.impresas||actual.cantidad||1;${linea}`, { ...b.entorno, actual, p: { id: 'p2', estado_analisis: 'listo' }, tarjeta: falso(), ctx: b.ctx });
+  runInNewContext(`const k=actual.impresas||actual.cantidad||1;${linea}`, { ...b.entorno, noImprime: () => false, actual, p: { id: 'p2', estado_analisis: 'listo' }, tarjeta: falso(), ctx: b.ctx });
   await b.pulsables.get('Imprimir 3 etiquetas')!();
   assert.equal(JSON.stringify(b.envios[0].ids), '["p2"]');
   assert.equal(b.envios[0].copias.get('p2'), 3);

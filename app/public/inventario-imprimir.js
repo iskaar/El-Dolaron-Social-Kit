@@ -1,6 +1,6 @@
 import { iniciarEtiquetas } from './imprimir-lote.js';
 import { estadoEnvio, noSalio } from './envio-etiquetas.js';
-import { conectarEtiquetera, etiqueteraLista, imprimirBanda, detenerEnvio, historialTexto, precioImpreso, gradoImpreso, esPropia } from './etiquetera.js';
+import { conectarEtiquetera, etiqueteraLista, imprimirBanda, detenerEnvio, historialTexto, precioImpreso, gradoImpreso, esPropia, noImprime, ponerNoImprime, MENSAJE_NO_IMPRIME } from './etiquetera.js';
 import { nombreEstado } from './estados.js';
 import { esRopa } from './ropa.js';
 import { semanaIngreso } from './semana.js';
@@ -34,7 +34,7 @@ export async function iniciar(ctx) {
   const todas=boton('Todas',()=>{motorBoton('todas').click();contar();});
   const menu=boton('⋯',()=>{
     const c=nodo('div',undefined,'formulario');
-    c.append(boton('Marcar como impresas',()=>{motorBoton('marcar').click();cerrarHoja();}),boton('Historial de envíos',()=>hoja('Historial de envíos',nodo('pre',historialTexto()))));
+    c.append(boton('Marcar como impresas',()=>{if(noImprime()){cerrarHoja();return mensaje(MENSAJE_NO_IMPRIME,'aviso');}motorBoton('marcar').click();cerrarHoja();}),boton('Historial de envíos',()=>hoja('Historial de envíos',nodo('pre',historialTexto()))));
     hoja('Etiquetas',c);
   });menu.setAttribute('aria-label','Acciones de etiquetas');
   const controles=nodo('div',undefined,'acciones');controles.append(todas,mostrar,menu);
@@ -45,7 +45,7 @@ export async function iniciar(ctx) {
   // Solo el nodo visual de estado anuncia: el motor conserva sus mensajes y sus controles.
   let estadoParcial=null,totalLote=0,enviadasLote=0;
   Object.defineProperty(resumen,'textContent',{get(){return this._texto||'';},set(t){this._texto=t;
-    let texto=t,tipo=/fall|error|cort|detuvo|incierto|desconect|no se imprimi/i.test(t)?'aviso':/enviad/i.test(t)?'etiqueta':'neutro';
+    let texto=t,tipo=/fall|error|cort|detuvo|incierto|desconect|no se imprimi|no imprime/i.test(t)?'aviso':/enviad/i.test(t)?'etiqueta':'neutro';
     const avance=/etiqueta (\d+) de (\d+)/.exec(t);
     if(estadoParcial&&/cort|Detenido|detuvo/i.test(t)){texto=`Salieron ${estadoParcial.hechas} de ${estadoParcial.total}`;tipo='error';}
     else if(avance)texto=`Enviando ${enviadasLote+Number(avance[1])}/${totalLote||avance[2]}`;
@@ -54,7 +54,7 @@ export async function iniciar(ctx) {
     mensaje(texto,tipo);
   }});
   let elegidas=[], parcial=false; const restantes=new Map();
-  function contar(){elegidas=[...lista.querySelectorAll('input[type=checkbox]:checked')];const n=elegidas.reduce((n,c)=>n+Number(lista.querySelector(`.copias[data-id="${c.value}"]`)?.value||1),0);seleccion.textContent=`${elegidas.length} elegidas · ${n} etiquetas`;imprimir.textContent=parcial?`Reconectar y seguir (${n})`:`Imprimir ${n} etiquetas`;bloquear(imprimir,!etiqueteraLista()&&!parcial?'Conecta la impresora':!n?'Elige piezas':'');}
+  function contar(){elegidas=[...lista.querySelectorAll('input[type=checkbox]:checked')];const n=elegidas.reduce((n,c)=>n+Number(lista.querySelector(`.copias[data-id="${c.value}"]`)?.value||1),0);seleccion.textContent=`${elegidas.length} elegidas · ${n} etiquetas`;imprimir.textContent=parcial?`Reconectar y seguir (${n})`:`Imprimir ${n} etiquetas`;bloquear(imprimir,noImprime()?MENSAJE_NO_IMPRIME:!etiqueteraLista()&&!parcial?'Conecta la impresora':!n?'Elige piezas':'');}
   const vista={
   inicio(ids,pedidas){estadoParcial=null;enviadasLote=0;totalLote=[...pedidas.values()].reduce((n,v)=>n+v,0);},
   conexion(){actualizarConexion();contar();},
@@ -84,19 +84,23 @@ export async function iniciar(ctx) {
   lista.addEventListener('change',contar);lista.addEventListener('click',()=>queueMicrotask(contar));
   async function conexion(){
     const c=nodo('div',undefined,'formulario');
+    // «Este aparato no imprime» (#781): por aparato; encendido no conecta, no aparta etiquetas y la PC saca todo.
+    const apagado=boton('Este aparato no imprime',()=>{const on=ponerNoImprime(!noImprime());if(on){motor.pausarAutomatica();detenerEnvio();}actualizarConexion();contar();mensaje(on?MENSAJE_NO_IMPRIME:'Este aparato vuelve a imprimir. Conecta la impresora.',on?'aviso':'neutro');conexion();});
+    apagado.setAttribute('role','switch');apagado.setAttribute('aria-checked',String(noImprime()));c.append(apagado);
+    if(noImprime()){c.append(nodo('p','Lo que captures aquí no aparta etiquetas: salen en la PC (automática) o en la lista Imprimir de otro aparato.','ayuda'));hoja('Impresora',c);return;}
     if(!navigator.bluetooth)c.append(nodo('p','Este navegador no imprime. Usa Chrome o Edge.'));
     else c.append(boton('Conectar impresora',async()=>{await motor.conexion(false);actualizarConexion();cerrarHoja();},'primario'),boton('¿No aparece?',async()=>{await motor.conexion(true);actualizarConexion();cerrarHoja();}));
     if(!ctx.identidad.vendedor){const auto=boton('Automática',async()=>{await motor.iniciarAutomatica();auto.setAttribute('aria-checked',String(motor.activa()));});auto.setAttribute('role','switch');auto.setAttribute('aria-checked',String(motor.activa()));c.append(auto,boton('Nueva sesión',()=>motorBoton('nueva-sesion').click()));}
     c.append(boton('Detener',()=>{motor.pausarAutomatica();detenerEnvio();},'peligro'));hoja('Impresora',c);
   }
-  function actualizarConexion(){const lista=etiqueteraLista();$('chip-impresora').textContent=lista?'● Impresora · Lista':'▲ Sin conectar';$('chip-impresora').classList.toggle('aviso',!lista);avisoConexion.hidden=lista||parcial;}
+  function actualizarConexion(){const lista=etiqueteraLista(),no=noImprime();$('chip-impresora').textContent=no?'○ No imprime':lista?'● Impresora · Lista':'▲ Sin conectar';$('chip-impresora').classList.toggle('aviso',!lista&&!no);avisoConexion.hidden=lista||parcial||no;}
   setInterval(actualizarConexion,2000);
   let familiaElegida, cantidad=20;
   async function cargarBandas(elegir){
     const {familias,montos}=await api('/api/familias');bandas.replaceChildren();
     const chips=nodo('div',undefined,'chips');familiaElegida=familias.find(f=>f.prefijo===(elegir||localStorage.getItem('bandas-familia')))||familias[0];
     const rejilla=nodo('div',undefined,'rejilla-bandas');
-    function pintarFamilia(f){familiaElegida=f;localStorage.setItem('bandas-familia',f.prefijo);for(const b of chips.children)b.setAttribute('aria-pressed',String(b.dataset.prefijo===f.prefijo));rejilla.replaceChildren();for(const monto of montos){const codigo=f.prefijo.toUpperCase()+monto;const b=boton('',async()=>{if(!etiqueteraLista())return conexion();detenerEnvio(false);const n=cantidad;mensaje(`Enviando ${n} de ${codigo}`);const ok=await imprimirBanda({familia:f.nombre,precioPesos:monto,codigo,semana:semanaIngreso(new Date())},n,(hechas)=>mensaje(`Enviando ${hechas}/${n}`),(s)=>mensaje(`Pausa de ${s} s`,'aviso'));if(ok){b.append(nodo('small',`✓ ${n}`));mensaje(`Enviadas ${n} etiquetas`,'etiqueta');}else mensaje('Se cortó la impresora','error');});b.append(nodo('strong',`$${monto}`,'precio'),nodo('code',codigo));rejilla.append(b);}}
+    function pintarFamilia(f){familiaElegida=f;localStorage.setItem('bandas-familia',f.prefijo);for(const b of chips.children)b.setAttribute('aria-pressed',String(b.dataset.prefijo===f.prefijo));rejilla.replaceChildren();for(const monto of montos){const codigo=f.prefijo.toUpperCase()+monto;const b=boton('',async()=>{if(noImprime())return mensaje(MENSAJE_NO_IMPRIME,'aviso');if(!etiqueteraLista())return conexion();detenerEnvio(false);const n=cantidad;mensaje(`Enviando ${n} de ${codigo}`);const ok=await imprimirBanda({familia:f.nombre,precioPesos:monto,codigo,semana:semanaIngreso(new Date())},n,(hechas)=>mensaje(`Enviando ${hechas}/${n}`),(s)=>mensaje(`Pausa de ${s} s`,'aviso'));if(ok){b.append(nodo('small',`✓ ${n}`));mensaje(`Enviadas ${n} etiquetas`,'etiqueta');}else mensaje('Se cortó la impresora','error');});b.append(nodo('strong',`$${monto}`,'precio'),nodo('code',codigo));rejilla.append(b);}}
     for(const f of familias){const b=boton(f.nombre,()=>pintarFamilia(f));b.dataset.prefijo=f.prefijo;chips.append(b);}
     bandas.append(chips,nodo('h3','Cantidad por banda'),stepper(cantidad,n=>cantidad=n,{max:200,nombre:'Cantidad por banda'}),rejilla);
     if(familiaElegida)pintarFamilia(familiaElegida);else bandas.append(nodo('p','Aún no hay familias'));

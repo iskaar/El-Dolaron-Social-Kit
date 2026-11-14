@@ -477,8 +477,32 @@ export const TSPL_REGLA = `${[
 let caracteristica = null;
 let ultimoError = '';   // lo que dijo el navegador la ultima vez que fallo el envio
 
+/**
+ * «Este aparato no imprime» (#781): el interruptor de cada navegador. Con el celular recordando la AE240 que en realidad
+ * saca la PC, el envio parecia correcto pero no salia papel, y la etiqueta quedaba apartada en la base. Encendido, ESTE
+ * aparato no se conecta ni imprime ni aparta etiquetas: lo que captura espera a la automatica de la PC o a otro aparato.
+ * Es la unica guarda: etiqueteraLista/conectarEtiquetera/reconectarEtiquetera/mandarTspl pasan por aqui, y todo boton
+ * que reclama una etiqueta (prepararYReclamar) solo lo hace despues de comprobar que la impresora esta lista.
+ */
+const CLAVE_NO_IMPRIME = 'etiqueta-no-imprime';
+export const MENSAJE_NO_IMPRIME = 'Este aparato no imprime: la etiqueta sale en la PC.';
+
+export function noImprime() {
+  try { return globalThis.localStorage?.getItem(CLAVE_NO_IMPRIME) === '1'; } catch { return false; }
+}
+
+/** Enciende o apaga el interruptor; al encender suelta la conexion actual. Devuelve como quedo. */
+export function ponerNoImprime(valor) {
+  try { if (valor) globalThis.localStorage?.setItem(CLAVE_NO_IMPRIME, '1'); else globalThis.localStorage?.removeItem(CLAVE_NO_IMPRIME); } catch { /* sin almacenamiento no se puede recordar */ }
+  if (valor) {
+    caracteristica = null;
+    try { impresora?.gatt?.disconnect(); } catch { /* ya estaba suelta */ }
+  }
+  return noImprime();
+}
+
 export function etiqueteraLista() {
-  return caracteristica !== null;
+  return caracteristica !== null && !noImprime();
 }
 
 /**
@@ -502,6 +526,7 @@ export function etiqueteraLista() {
  * reconectarEtiquetera() recupera el aparato recordado cuando el navegador lo permite.
  */
 export async function conectarEtiquetera({ cualquiera = false } = {}) {
+  if (noImprime()) throw Object.assign(new Error(MENSAJE_NO_IMPRIME), { noImprime: true });   // antes de pedir permiso Bluetooth
   const aparato = await navigator.bluetooth.requestDevice(cualquiera
     ? { acceptAllDevices: true, optionalServices: [SERVICIO] }
     : { filters: [{ namePrefix: 'AE240' }], optionalServices: [SERVICIO] });
@@ -520,6 +545,7 @@ let impresora = null;   // el aparato escogido, para reconectar sin clic
  * la misma impresora desde dos pestanas a la vez mezcla los trabajos.
  */
 export async function reconectarEtiquetera(espera = 8000) {
+  if (noImprime()) return false;   // sin tocar Bluetooth (#781)
   if (caracteristica) return true;
   try {
     let aparato = impresora;
@@ -579,6 +605,7 @@ let reconectada = false;   // si mandarCopias tuvo que reconectar a media pieza
  * aparato ya escogido y lo vuelve a mandar. Devuelve false si ni asi salio.
  */
 export async function mandarTspl(tspl) {
+  if (noImprime()) { ultimoError = MENSAJE_NO_IMPRIME; return false; }
   for (let intento = 1; intento <= 2; intento += 1) {
     if (!caracteristica && impresora) {
       try {

@@ -79,7 +79,7 @@ test('modo enfocado (#464): el host del capturista también imprime, así que un
     let lista=false;const envios:any[]=[];
     const ctx:any={identidad:{vendedor},problemas:{},etiqueteraLista:()=>lista,imprimir:async(...a:any[])=>{envios.push(a);return true;}};
     ctx.ctx=ctx;
-    const imprimir=runInNewContext(`${trozo};imprimir`,{ctx,etiqueteraLista:()=>lista,Map});
+    const imprimir=runInNewContext(`${trozo};imprimir`,{ctx,etiqueteraLista:()=>lista,noImprime:()=>false,Map});
     assert.equal(await imprimir('a',1),false,'sin impresora no sale');
     assert.equal(ctx.problemas.impresora(),true,`alerta pedida (vendedor=${vendedor})`);
     lista=true;
