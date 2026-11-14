@@ -34,6 +34,8 @@
   .renglon .marca button { padding: 3px 8px; font-size: 12px; margin-left: 6px; }
   .barra input[type=search] { width: 190px; padding: 9px 12px; font-size: 14px;
     border: 1px solid var(--linea); border-radius: 8px; }
+  #capturistas { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
+  #capturistas button:not([aria-pressed=true]) { background: #fff; color: #1a1f2b; border: 1px solid var(--linea); }
   .vacio { padding: 24px; text-align: center; color: #5b6478; }
   .ayuda { font-size: 13px; color: #5b6478; line-height: 1.45; margin: 0 0 16px; max-width: 70ch; }
 </style>
@@ -104,6 +106,7 @@
     <pre id="historial"></pre>
   </details>
 
+  <div id="capturistas" hidden></div>
   <div class="lista" id="lista"><div class="vacio">Cargando…</div></div>
 </main>
 

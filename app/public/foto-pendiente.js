@@ -18,7 +18,7 @@ export function crearSubida({ pendientes, leer, borrar, enviar = fetch, pausada 
   let ocupada=false,idSubiendo=null;
   return { id:()=>idSubiendo, async subir(){
     if(ocupada)return;ocupada=true;let cambiada=false;
-    try{for(const entrada of await pendientes()){
+    try{for(const entrada of [...await pendientes()].sort((a,b)=>(a.creado??0)-(b.creado??0))){   // en orden de captura (#779): el servidor pone creado_en al subir
       const r=await leer(entrada.id);if(!r||pausada(r.id))continue;idSubiendo=r.id;alEstado('subiendo',r);
       try{
         const respuesta=await enviar('/api/borradores',{method:'POST',body:formularioPendiente(r)});

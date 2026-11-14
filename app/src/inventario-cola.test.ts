@@ -180,6 +180,13 @@ test('Inventario drena registros de /escanear y /captura; conserva las fotos ant
   assert.equal(cuerpos.at(-1)!.get('precio_ropa'),'5000');assert.equal(cuerpos.at(-1)!.get('marca'),'Wild Fable');
 });
 
+test('#779: la cola sin red sube en orden de captura (creado), no en el orden del almacén',async()=>{
+  const reg=(id:string,creado:number)=>({id,foto:new Blob([id]),cantidad:1,estado_fisico:'nuevo',creado});
+  const cola=new Map([reg('c',300),reg('a',100),reg('b',200)].map(r=>[r.id,r]));const orden:string[]=[];
+  const subida=crearSubida({pendientes:async()=>[...cola.values()],leer:async id=>cola.get(id),borrar:async id=>cola.delete(id),enviar:async(_ruta,o)=>{orden.push((o.body as FormData).get('id') as string);return Response.json({id:(o.body as FormData).get('id')});}});
+  await subida.subir();assert.deepEqual(orden,['a','b','c']);assert.equal(cola.size,0);
+});
+
 test('versión nueva y corrección pendiente no se borran con una respuesta anterior',async()=>{
   const r={...registroFoto(new Blob(['foto']),{id:'ropa',precio_ropa:10000,talla:'M'}),version:0,correccion_ficha:{precio:10000,estado_fisico:'nuevo'}};
   const cola=new Map([[r.id,r]]);let cambiar=true,fallarCorreccion=false;const llamadas:string[]=[];

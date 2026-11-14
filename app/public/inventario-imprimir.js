@@ -19,6 +19,7 @@ export async function iniciar(ctx) {
   const conectar = nodo('button','Conectar impresora','primario'); conectar.type='button'; conectar.id='conectar-impresora';
   const avisoConexion=nodo('div',undefined,'tarjeta conexion-aviso');avisoConexion.append(conectar);
   const lista=nodo('ul',undefined,'lista');lista.id='lista';
+  const capturistas=nodo('div',undefined,'chips');capturistas.id='capturistas';capturistas.hidden=true;   // filtro por capturista (#779): lo pinta el motor
   const barra=nodo('div',undefined,'acciones-fijas');const seleccion=nodo('span','');
   const imprimir=nodo('button','Imprimir seleccionadas'); imprimir.type='button'; imprimir.id='imprimir';imprimir.className='primario';
   // Los botones que opera el motor comparten su contrato con la página anterior.
@@ -39,7 +40,7 @@ export async function iniciar(ctx) {
   const controles=nodo('div',undefined,'acciones');controles.append(todas,mostrar,menu);
   const detener=boton('Detener',()=>motorBoton('detener').click(),'peligro');detener.hidden=true;
   barra.append(seleccion,imprimir,detener);
-  etiquetas.append(avisoConexion,controles,lista,barra,operaciones,resumen,historial,estado,ayuda,filtro);raiz.append(pestanas,etiquetas,bandas);
+  etiquetas.append(avisoConexion,controles,capturistas,lista,barra,operaciones,resumen,historial,estado,ayuda,filtro);raiz.append(pestanas,etiquetas,bandas);
   const motorBoton=(id)=>raiz.querySelector('#'+id);
   // Solo el nodo visual de estado anuncia: el motor conserva sus mensajes y sus controles.
   let estadoParcial=null,totalLote=0,enviadasLote=0;
