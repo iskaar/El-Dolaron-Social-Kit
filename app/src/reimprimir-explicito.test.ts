@@ -16,7 +16,7 @@ function botones() {
   const pulsables = new Map<string, () => Promise<void>>(), envios: { ids: string[]; copias: Map<string, number>; opciones: unknown }[] = [], mensajes: string[] = [];
   const ctx = { identidad: { vendedor: false }, imprimir: async (ids: string[], copias: Map<string, number>, opciones?: unknown) => { envios.push({ ids, copias, opciones }); return true; } };
   const boton = (texto: string, accion: () => Promise<void>) => { pulsables.set(texto, accion); return falso(); };
-  return { pulsables, envios, mensajes, ctx, entorno: { boton, nodo: falso, mensaje: (t: string) => mensajes.push(t), pesos: (c: number) => `$${c / 100}`, Map } };
+  return { pulsables, envios, mensajes, ctx, entorno: { boton, nodo: falso, mensaje: (t: string) => mensajes.push(t), avisoPC: () => '', pesos: (c: number) => `$${c / 100}`, Map } };
 }
 
 test('«Reimprimir etiqueta» del precio cambiado (dueño en Capturar) fuerza la reimpresión', async () => {
@@ -32,7 +32,7 @@ test('«Reimprimir etiqueta» del precio cambiado (dueño en Capturar) fuerza la
 
 test('«Imprimir N etiquetas» de una captura que quedó sin etiqueta también fuerza: una marca vieja en D1 no la deja callada', async () => {
   const b = botones();
-  const linea = corte(capturar, "    if(actual.faltaEtiqueta&&p.estado_analisis==='listo'&&!noImprime())", '\n');   // la línea del botón
+  const linea = corte(capturar, "    if(actual.faltaEtiqueta&&p.estado_analisis==='listo'&&(!noImprime()||!actual.deuda))", '\n');   // la línea del botón
   const actual = { faltaEtiqueta: true, impresas: 0, cantidad: 3 };
   runInNewContext(`const k=actual.impresas||actual.cantidad||1;${linea}`, { ...b.entorno, noImprime: () => false, conDeuda: (_folio: string, imprimirYa: () => unknown) => imprimirYa(), actual, p: { id: 'p2', estado_analisis: 'listo' }, tarjeta: falso(), ctx: b.ctx });
   await b.pulsables.get('Imprimir 3 etiquetas')!();

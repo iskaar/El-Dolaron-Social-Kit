@@ -1411,8 +1411,52 @@ async function soltarEtiquetas(request: Request, env: Env, propietario: string):
   return json({ soltadas: meta.changes });
 }
 
+/** Lo que la automática de la PC puede etiquetar de una pieza (alias `p`): lista, de etiqueta, con nombre, precio y existencia. El código (`p.codigo <> ''`) se pide aparte: se asigna al imprimir la primera vez. */
+const PIEZA_ETIQUETABLE = `p.sin_inventario = 0 and p.estado_analisis = 'listo' and p.destino = 'etiqueta' and p.precio > 0 and p.stock > 0
+  and p.por_revisar = 0 and trim(p.nombre) <> ''`;
+
 /**
- * Etiquetas debidas por un «+N» de captura (#783, migración 074). Una fila por suma, con el folio de su ajuste.
+ * POST `{ crear: [{ id, producto_id, copias }] }` (#787): un aparato que no imprime manda una REIMPRESIÓN explícita a la PC.
+ * `id` lo genera el cliente: un reintento (`on conflict do nothing`) no duplica. `copias` 1..99; la automática las topa a la existencia al imprimir.
+ * Solo si la etiqueta original YA salió (hay marca en etiquetas_enviadas): una pieza nunca impresa ya está en la cola normal de la PC,
+ * que la saca con toda su existencia, y una deuda más la sacaría dos veces. Por pieza: `creada`, `ya` (reintento), `pendiente` o `rechazada`.
+ */
+async function crearDeudasEtiquetas(env: Env, propietario: string, crear: unknown): Promise<Response> {
+  if (!Array.isArray(crear) || crear.length === 0 || crear.length > 50) return json({ error: 'Selecciona entre 1 y 50 etiquetas.' }, 400);
+  const pedidas = new Map<string, { id: string; producto_id: string; copias: number }>();
+  for (const c of crear as Array<Record<string, unknown>>) {
+    const { id, producto_id: pieza, copias } = c ?? {};
+    if (typeof id !== 'string' || !UUID.test(id) || typeof pieza !== 'string' || !UUID.test(pieza) || !Number.isInteger(copias) || (copias as number) < 1 || (copias as number) > 99) {
+      return json({ error: 'Etiqueta inválida: id, pieza y copias de 1 a 99.' }, 400);
+    }
+    if (pedidas.has(id)) return json({ error: 'Etiqueta repetida.' }, 400);
+    pedidas.set(id, { id, producto_id: pieza, copias: copias as number });
+  }
+  const lista = [...pedidas.values()], ahora = new Date().toISOString();
+  const resultados = await env.DB.batch(lista.map((d) => env.DB.prepare(
+    `insert into etiquetas_deuda (id, producto_id, copias, creado_en, reimpresion)
+     select ?, p.id, ?, ?, 1 from productos p
+     where p.id = ? and p.propietario = ? and ${PIEZA_ETIQUETABLE} and p.codigo <> '' and exists (select 1 from etiquetas_enviadas e where e.producto_id = p.id)
+     on conflict (id) do nothing`).bind(d.id, d.copias, ahora, d.producto_id, propietario)));
+  const piezas = new Map((await env.DB.prepare(
+    `select p.id, p.stock, ${PIEZA_ETIQUETABLE} as ok, exists (select 1 from etiquetas_enviadas e where e.producto_id = p.id) as impresa
+     from productos p where p.propietario = ? and p.id in (select value from json_each(?))`)
+    .bind(propietario, JSON.stringify([...new Set(lista.map((d) => d.producto_id))])).all<{ id: string; stock: number; ok: number; impresa: number }>()).results.map((r) => [r.id, r]));
+  const existentes = new Set((await env.DB.prepare(
+    `select d.id || '|' || d.producto_id as llave from etiquetas_deuda d join productos p on p.id = d.producto_id and p.propietario = ?
+     where d.id in (select value from json_each(?))`)
+    .bind(propietario, JSON.stringify(lista.map((d) => d.id))).all<{ llave: string }>()).results.map((r) => r.llave));
+  return json({ resultados: lista.map((d, i) => {
+    const pieza = piezas.get(d.producto_id);
+    const copias = Math.min(d.copias, pieza?.stock ?? 0);
+    if ((resultados[i]?.meta?.changes ?? 0) > 0) return { id: d.id, estado: 'creada', copias };
+    if (existentes.has(`${d.id}|${d.producto_id}`)) return { id: d.id, estado: 'ya', copias };
+    return { id: d.id, estado: pieza?.ok && !pieza.impresa ? 'pendiente' : 'rechazada', copias: 0 };
+  }) });
+}
+
+/**
+ * Etiquetas debidas (#783, migración 074; reimpresiones #787, migración 075). Una por «+N» de captura (folio de su ajuste) o por reimpresión pedida. Una fila por suma, con el folio de su ajuste.
  *  - GET `?desde=`: las pendientes creadas desde esa hora que la automática de la PC puede imprimir ya: la pieza sigue lista, con código,
  *    existencia y una etiqueta enviada ANTES de la suma (si aún no salió, la etiqueta normal ya trae la existencia con el +N).
  *    `copias` = lo debido topado a la existencia de ahora. Lee solo el índice parcial de pendientes.
@@ -1426,16 +1470,16 @@ async function deudasEtiquetas(request: Request, env: Env, url: URL, propietario
     const desde = url.searchParams.get('desde');
     if (!desde || !Number.isFinite(Date.parse(desde)) || new Date(desde).toISOString() !== desde) return json({ error: 'Fecha inválida.' }, 400);
     const { results } = await env.DB.prepare(
-      `select d.id, d.producto_id, min(d.copias, p.stock) as copias
-       from etiquetas_deuda d join productos p on p.id = d.producto_id join etiquetas_enviadas e on e.producto_id = d.producto_id
-       where d.reclamada_en = '' and d.creado_en >= ? and p.propietario = ? and p.sin_inventario = 0 and p.estado_analisis = 'listo'
-         and p.destino = 'etiqueta' and p.precio > 0 and p.stock > 0 and p.por_revisar = 0 and p.codigo <> '' and trim(p.nombre) <> ''
-         and e.etiqueta_en < d.creado_en
+      `select d.id, d.producto_id, min(d.copias, p.stock) as copias, d.reimpresion
+       from etiquetas_deuda d join productos p on p.id = d.producto_id left join etiquetas_enviadas e on e.producto_id = d.producto_id
+       where d.reclamada_en = '' and d.creado_en >= ? and p.propietario = ? and ${PIEZA_ETIQUETABLE} and p.codigo <> ''
+         and (d.reimpresion = 1 or e.etiqueta_en < d.creado_en)
        order by d.creado_en limit 50`,
     ).bind(desde, propietario).all();
     return json(results);
   }
-  const cuerpo = (await request.json().catch(() => null)) as { ids?: unknown; etiquetas_en?: unknown } | null;
+  const cuerpo = (await request.json().catch(() => null)) as { ids?: unknown; etiquetas_en?: unknown; crear?: unknown } | null;
+  if (request.method === 'POST' && cuerpo?.crear !== undefined) return await crearDeudasEtiquetas(env, propietario, cuerpo.crear);
   const ids = idsDeEtiquetas(cuerpo);
   if (!ids) return json({ error: 'Selecciona entre 1 y 100 etiquetas.' }, 400);
   const propia = 'exists (select 1 from productos where id = etiquetas_deuda.producto_id and propietario = ?)';

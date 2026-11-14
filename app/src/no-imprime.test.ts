@@ -74,10 +74,11 @@ test('Capturar con el interruptor: la etiqueta ni se pide ni deja la alerta roja
 test('los textos de Capturar y de la revision no prometen ni confirman etiqueta con el interruptor', () => {
   const capturar = readFileSync('public/inventario-capturar.js', 'utf8'), celular = readFileSync('public/inventario-celular.js', 'utf8');
   assert.match(capturar, /noImprime\(\)\)mensaje\('Guardada · la etiqueta sale en la PC','aviso'\)/);
-  assert.match(capturar, /!noImprime\(\)\)tarjeta\.append\(boton\(`Imprimir/, '«Imprimir N etiquetas» no se ofrece');
+  assert.match(capturar, /\(!noImprime\(\)\|\|!actual\.deuda\)\)tarjeta\.append\(boton\(noImprime\(\)\?`Mandar \$\{k\} a la PC`:`Imprimir/, '#787: sin impresora el botón manda a la PC, salvo si la suma ya dejó su deuda');
   assert.match(capturar, /estado_analisis==='listo'&&!noImprime\(\)\?`Sumar \$\{k\} e imprimir/, '«Sumar N e imprimir N» pasa a «Sumar N»');
   assert.match(celular, /noImprime\(\)\)mensaje\(`Guardada · la etiqueta de/);
-  assert.match(celular, /faltan&&noImprime\(\)\)mensaje\(`Faltan/, 'la correccion de cantidad dice que se reimprime en la PC');
+  assert.doesNotMatch(celular, /Reimprímelas en la PC desde Buscar/, '#787: la correccion de cantidad ya manda las que faltan a la PC');
+  assert.match(celular, /captura\.imprimirPieza\(id,faltan,\{reimprimir:true,aPC:true\}\)/);
   const hoja = readFileSync('public/inventario-imprimir.js', 'utf8');
   assert.match(hoja, /boton\('Este aparato no imprime'[\s\S]*setAttribute\('role','switch'\)/, 'el interruptor vive en la hoja Impresora');
   assert.match(hoja, /'○ No imprime'/, 'el chip lo dice');

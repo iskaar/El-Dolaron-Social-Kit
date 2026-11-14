@@ -138,8 +138,7 @@ export async function iniciarCelular(ctx,captura) {
   async function etiquetarCorreccion(id,datos,actual,cantidad){
     const remota=await marcaDeLaBase(api,id);
     const faltan=etiquetasPorCorreccion({antes:actual.stock,despues:cantidad,estado_analisis:actual.estado_analisis,marca:estadoEnvio({...actual,id}).marca,etiqueta_en:remota?remota.etiqueta_en:datos.etiqueta_en,impresa:capturaImpresa(id)});
-    if(faltan&&noImprime())mensaje(`Faltan ${faltan} ${faltan===1?'etiqueta':'etiquetas'}: este aparato no imprime. Reimprímelas en la PC desde Buscar`,'aviso');   // #781: la automática de la PC no repite lo que ya salió
-    else if(faltan)void captura.imprimirPieza(id,faltan,{reimprimir:true});
+    if(faltan)void captura.imprimirPieza(id,faltan,{reimprimir:true,aPC:true});   // #787: sin impresora (#781) las que faltan van a la PC como deuda; la automática no repite lo que ya salió
     else if(!remota&&cantidad>actual.stock&&actual.estado_analisis==='listo')mensaje('No se pudo comprobar la etiqueta: si la original ya salió, reimprime las que faltan desde Buscar','aviso');
   }
   async function subir(){

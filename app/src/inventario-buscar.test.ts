@@ -27,7 +27,7 @@ function tarjetas(imprimir: Function = async () => true, vendedor = false) {
   const codigo = readFileSync('public/inventario.js', 'utf8').split('export function resultado(')[1].split('const filtroCorto')[0];
   const resultado = runInNewContext(`${ui}\nfunction resultado(${codigo}\nresultado`, {
     document: { createElement: (tag: string) => new Nodo(tag), createElementNS: (_ns: string, tag: string) => new Nodo(tag), getElementById: $ },
-    identidad: { vendedor }, contexto: { imprimir }, ficha: { abrir: (id: string) => abiertas.push(id) },
+    identidad: { vendedor }, contexto: { imprimir }, avisoPC: () => '', ficha: { abrir: (id: string) => abiertas.push(id) },
     pesos: () => '$450.00', setTimeout: () => 0, clearTimeout() {},
   });
   return { resultado, $, abiertas };

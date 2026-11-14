@@ -3,6 +3,7 @@ import { api, crearFicha, pesos, resolverRepetida } from './ficha.js';
 import { $, nodo, boton, mensaje, hoja, confirmar, prepararHoja, stepper, cerrarHoja, ponerNeutro, bloquear } from './inventario-ui.js';
 import { montarPrecio, refrescarPrecios } from './inventario-precio.js';
 import { crearEnfocado } from './inventario-enfocado.js';
+import { avisoPC } from './envio-etiquetas.js';
 import { espejoEncendido, fijarEspejo, textoChip } from './espejo-captura.js';
 
 prepararHoja();
@@ -57,7 +58,7 @@ export function resultado(p, alElegir = () => ficha.abrir(p.id), reimprimir = fa
   if (reimprimir && p.codigo && etiquetable(p)) {
     const imprimir = boton('', async (boton) => {
       bloquear(boton, 'Espera el envío'); boton.setAttribute('aria-busy', 'true');
-      try { if (await contexto.imprimir([p.id], new Map([[p.id,1]]), { reimprimir:true })) mensaje(`Etiqueta enviada · ${p.codigo}`, 'etiqueta'); }
+      try { if (await contexto.imprimir([p.id], new Map([[p.id,1]]), { reimprimir:true }) && !avisoPC()) mensaje(`Etiqueta enviada · ${p.codigo}`, 'etiqueta'); }   // con «Este aparato no imprime» el aviso «Mandadas N a la PC» ya salió (#787)
       finally { bloquear(boton, ''); boton.setAttribute('aria-busy', 'false'); }
     }, 'reimprimir-pieza');
     const icono = document.createElementNS('http://www.w3.org/2000/svg', 'svg'), uso = document.createElementNS('http://www.w3.org/2000/svg', 'use');
