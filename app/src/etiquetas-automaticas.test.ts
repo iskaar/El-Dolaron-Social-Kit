@@ -527,6 +527,33 @@ test('si una prenda espera su precio, el aviso dice cuál es y a qué hora se ca
   } finally { t.db.close(); }
 });
 
+test('#779: una pieza que espera detiene solo a su capturista; la cola de los demás sigue y el aviso dice de quién es', async () => {
+  const t = tienda();
+  try {
+    const sinPrecio = agregar(t, '2026-10-11T16:00:00.000Z', 'pendiente'), deAna = agregar(t, '2026-10-11T16:01:00.000Z'), deBeto = agregar(t, '2026-10-11T16:02:00.000Z');
+    t.db.prepare("update productos set nombre='Chamarra azul', precio=0, capturado_por='ana@prueba.mx' where id=?").run(sinPrecio);
+    t.db.prepare("update productos set capturado_por='ana@prueba.mx' where id=?").run(deAna);
+    t.db.prepare("update productos set capturado_por='beto@prueba.mx' where id=?").run(deBeto);
+    const p = await pagina(t);
+    await p.iniciarAutomatica();
+    assert.deepEqual(p.estado.enviadas.map((e: any) => e.id), [deBeto], 'lo de Beto sale; lo de Ana (detrás de su pieza sin precio) espera');
+    t.db.prepare("update productos set estado_analisis='listo', precio=7900, actualizado_en=strftime('%Y-%m-%dT%H:%M:%fZ','now') where id=?").run(sinPrecio);
+    await p.imprimirNuevas();
+    assert.deepEqual(p.estado.enviadas.map((e: any) => e.id), [deBeto, sinPrecio, deAna], 'al llegar el precio, lo de Ana sale en el orden de su mesa');
+  } finally { t.db.close(); }
+});
+
+test('#779: el aviso de espera nombra al capturista', async () => {
+  const t = tienda();
+  try {
+    const pieza = agregar(t, DESPUES, 'pendiente');
+    t.db.prepare("update productos set nombre='Chamarra azul', precio=0, capturado_por='ana@prueba.mx' where id=?").run(pieza);
+    const p = await pagina(t);
+    await p.iniciarAutomatica();
+    assert.match(p.$('resumen').textContent, /^Esperando precio de: Chamarra azul \(capturada .*\)\. Es de ana;/);
+  } finally { t.db.close(); }
+});
+
 test('fallo de BLE pausa y una recarga no reenvía una pieza incierta', async () => {
   const t = tienda();
   try {
@@ -639,6 +666,48 @@ test('cambios trae solo lo modificado de la sesión, incluidas las descartadas (
     assert.equal((await t.pedir(`/api/borradores?desde=${DESDE}&cambios=ayer`)).status, 400);
     // Sin `cambios`, la lista de siempre: sin descartadas.
     assert.equal((await t.pedir(`/api/borradores?desde=${DESDE}`)).cuerpo.some((p: any) => p.id === quitada), false);
+  } finally { t.db.close(); }
+});
+
+test('#779: con 2 o más capturistas la lista ofrece un filtro; solo lo elegido se pinta y llega a la vista, «Todos» deja todo', async () => {
+  const t = tienda();
+  try {
+    const deAna = agregar(t), deBeto = agregar(t), otraAna = agregar(t);
+    t.db.prepare("update productos set nombre='Pieza de Ana', capturado_por='ana@prueba.mx' where id in (?, ?)").run(deAna, otraAna);
+    t.db.prepare("update productos set nombre='Pieza de Beto', capturado_por='beto@prueba.mx' where id=?").run(deBeto);
+    const p = await pagina(t, 'sandbox', new Map(), 'caja.prueba');
+    await p.cargar();
+    const chips = () => p.$('capturistas');
+    assert.equal(chips().hidden, false);
+    assert.match(chips().innerHTML, /Todos.*ana.*beto/s);
+    assert.match(p.$('lista').innerHTML, /Pieza de Ana.*Pieza de Beto|Pieza de Beto.*Pieza de Ana/s);
+    const elegir = (clave: string | null) => chips().eventos.get('click')({ target: { closest: () => ({ dataset: { capturista: clave ?? '', todos: String(clave === null) } }) } });
+    await elegir('beto@prueba.mx');
+    assert.doesNotMatch(p.$('lista').innerHTML, /Pieza de Ana/);
+    assert.match(p.$('lista').innerHTML, /Pieza de Beto/);
+    assert.match(p.$('resumen').textContent, /^1 piezas por etiquetar/);
+    await elegir(null);
+    assert.match(p.$('lista').innerHTML, /Pieza de Ana/);
+    // Con un solo capturista no hay filtro.
+    t.db.prepare("update productos set capturado_por='ana@prueba.mx' where id=?").run(deBeto);
+    await p.cargar();
+    assert.equal(chips().hidden, true);
+  } finally { t.db.close(); }
+});
+
+test('#779: en /inventario la vista recibe solo lo del capturista elegido', async () => {
+  const t = tienda();
+  try {
+    const deAna = agregar(t), deBeto = agregar(t);
+    t.db.prepare("update productos set capturado_por='ana@prueba.mx' where id=?").run(deAna);
+    t.db.prepare("update productos set capturado_por='beto@prueba.mx' where id=?").run(deBeto);
+    const vistos: string[][] = [];
+    const vista = { pintar: ({ visibles }: { visibles: { id: string }[] }) => vistos.push(Array.from(visibles, (p) => p.id)), controles() {} };
+    const p = await pagina(t, 'sandbox', new Map(), 'caja.prueba', vista);
+    await p.cargar();
+    assert.deepEqual(vistos.at(-1)!.sort(), [deAna, deBeto].sort());
+    await p.$('capturistas').eventos.get('click')({ target: { closest: () => ({ dataset: { capturista: 'ana@prueba.mx', todos: 'false' } }) } });
+    assert.deepEqual(vistos.at(-1), [deAna]);
   } finally { t.db.close(); }
 });
 

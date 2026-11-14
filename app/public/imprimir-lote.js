@@ -23,6 +23,9 @@ let verImpresas = false;
 // oculta por el filtro no se vuelve a marcar al cambiarlo.
 const desmarcadas = new Set();
 let filtroCodigo = '';
+// Capturista elegido en el filtro (su correo, '' si la pieza no lo trae); null = todos (#779).
+let filtroCapturista = null;
+const quienDe = (correo) => String(correo ?? '').split('@')[0] || 'sin nombre';
 // El lector manda el numero sin "ED-" y sin ceros de relleno ("0006" para
 // ED-000006), asi que los digitos se comparan como numero. Tambien acepta
 // escribir el codigo completo, o su inicio, como "ED-0000".
@@ -73,12 +76,21 @@ function pintar() {
   const vigente = (p) => estadoEnvio(p).vigente;
   // Precio, nombre o talla cambiados despues de imprimir: la etiqueta pegada miente. Van arriba,
   // fuera de la numeracion, porque esas piezas ya no estan en la fila de captura.
-  const cambiadas = piezas.filter((p) => hechas[p.id] && !vigente(p));
-  const nuevas = piezas.filter((p) => !hechas[p.id]);
-  const pendientes = [...cambiadas, ...nuevas];
-  const visibles = verImpresas ? [...cambiadas, ...piezas.filter((p) => !cambiadas.includes(p))] : pendientes;
+  const separar = (lista) => {
+    const cambiadas = lista.filter((p) => hechas[p.id] && !vigente(p));
+    const pendientes = [...cambiadas, ...lista.filter((p) => !hechas[p.id])];
+    return { cambiadas, pendientes, visibles: verImpresas ? [...cambiadas, ...lista.filter((p) => !cambiadas.includes(p))] : pendientes };
+  };
+  const todo = separar(piezas);
+  // Cada capturista tiene su mesa (#779): con 2 o mas en la lista, un filtro deja ver, contar y mandar solo lo de uno.
+  const capturistas = [...new Set(todo.visibles.map((p) => p.capturado_por ?? ''))];
+  if (capturistas.length < 2 || !capturistas.includes(filtroCapturista)) filtroCapturista = null;
+  const { cambiadas, pendientes, visibles } = filtroCapturista === null ? todo : separar(piezas.filter((p) => (p.capturado_por ?? '') === filtroCapturista));
+  const cuadro = document.getElementById('capturistas');
+  cuadro.hidden = capturistas.length < 2;
+  cuadro.innerHTML = cuadro.hidden ? '' : [null, ...capturistas].map((c) => `<button type="button" data-capturista="${escapar(c ?? '')}" data-todos="${c === null}" aria-pressed="${c === filtroCapturista}">${c === null ? 'Todos' : escapar(quienDe(c))}</button>`).join('');
   if (vista) { vista.pintar({ piezas, hechas, pendientes, visibles, filtroCodigo, desmarcadas, idDudoso, copiasDe }); return; }
-  verBoton.textContent = verImpresas ? 'Ocultar impresas' : `Mostrar impresas (${piezas.length - pendientes.length})`;
+  verBoton.textContent = verImpresas ? 'Ocultar impresas' : `Mostrar impresas (${piezas.length - todo.pendientes.length})`;
 
   resumen.textContent = `${pendientes.length} piezas por etiquetar`
     + (cambiadas.length ? ` · ${cambiadas.length} corregidas para reimprimir (arriba)` : '');
@@ -147,6 +159,10 @@ lista.addEventListener('change', (e) => {
   if (e.target.type !== 'checkbox') return;
   if (e.target.checked) desmarcadas.delete(e.target.value);
   else desmarcadas.add(e.target.value);
+});
+document.getElementById('capturistas').addEventListener('click', (e) => {
+  const b = e.target.closest?.('[data-capturista]');
+  if (b) { filtroCapturista = b.dataset.todos === 'true' ? null : b.dataset.capturista; pintar(); }
 });
 document.getElementById('buscar-codigo').addEventListener('input', (e) => {
   filtroCodigo = e.target.value;
@@ -519,13 +535,16 @@ async function imprimirNuevas() {
       const nuevas = [...piezasSesion.values()].sort((a, b) => a.creado_en.localeCompare(b.creado_en));
       const hechas = estadoEnvio().marcas;
       const cola = [];
-      let esperando = '';
+      let esperando = '', bloqueo = '';
+      // Cada capturista tiene su propia mesa: lo que espera de uno solo detiene las siguientes de ese mismo capturista (#779).
+      const bloqueados = new Set();
       for (const p of nuevas) {
         // La automática imprime ropa y lo escaneado (#369); el resto de la mercancía general
         // se imprime a mano y nunca detiene la cola (#335).
         // Del escáner: `upc` con código, o vacío si se dio de alta solo con foto (#379). Las fotos de /captura lo traen nulo.
         const delEscaner = p.upc != null;
         if ((p.categoria !== 'ropa' && !delEscaner) || estadoEnvio(p).vigente || p.stock <= 0 || p.destino !== 'etiqueta') continue;
+        if (bloqueados.has(p.capturado_por)) continue;
         const quien = `${p.nombre?.trim() || 'pieza sin nombre'} (capturada ${hora(p.creado_en)})`;
         // Una pieza nueva solo sale de aquí después de «Guardar» en su tarjeta de revisión (#573); mientras, no detiene la cola.
         if (p.por_revisar) { esperando ||= `Por revisar en la tarjeta (precio, cantidad y grado): ${quien}. La cola sigue.`; continue; }
@@ -543,17 +562,18 @@ async function imprimirNuevas() {
         }
         // Conservar el orden de la mesa aunque un análisis posterior termine primero.
         if (!lista) {
-          esperando = p.estado_analisis === 'error'
+          bloqueo ||= (p.estado_analisis === 'error'
             ? `Una foto necesita revisión: ${quien}. Completa nombre y precio en la cola de revisión.`
-            : `Esperando precio de: ${quien}.`;
-          break;
+            : `Esperando precio de: ${quien}.`) + (p.capturado_por ? ` Es de ${quienDe(p.capturado_por)}; lo de los demás sigue.` : '');
+          bloqueados.add(p.capturado_por);
+          continue;
         }
         cola.push(p);
       }
       if (cola.length) {
         if (!await imprimir(cola.map((p) => p.id), new Map(), true)) pausarAutomatica();
       } else {
-        resumen.textContent = esperando || 'Automática activa. Esperando la siguiente foto.';
+        resumen.textContent = bloqueo || esperando || 'Automática activa. Esperando la siguiente foto.';
       }
       // shortcut: el endpoint limita a 2000 capturas por sesión; empezar otra al alcanzar el tope.
       if (!cambios && llegadas.length === 2000) {
