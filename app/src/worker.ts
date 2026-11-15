@@ -23,10 +23,11 @@ import { CLAVES_CATEGORIA } from '../public/categorias.js';
 import { tallaValida, esCalzado } from '../public/tallas.js';
 import {
   permiso, puede, quienEs, leerUsuario, yo, pedirAcceso, listarCuentas, guardarCuenta, resolverSolicitud, propietarioDe,
-  esDeCaja, soloComputadora, esRevendedora, esInversionista, cajasDe, tiendaDe, esTienda, TIENDA_CENTRAL, puedeEditarInventario, type Usuario,
+  esDeCaja, soloComputadora, esRevendedora, esInversionista, cajasDe, tiendaDe, TIENDAS, esTienda, TIENDA_CENTRAL, puedeEditarInventario, type Usuario,
 } from './cuentas.ts';
 import { cajeroEnTurno, listarCajeros, listarVendedoras, esVendedora, entrar, salir, ponerPin } from './cajeros.ts';
 import { rutaPush } from './push.ts';
+import { avisosDePedidos, marcarRenglon, type Accion } from './avisos-pedidos.ts';
 import { rutaCep, transferenciasPorValidar, validarTransferencia } from './cep.ts';
 import { subirComprobante, verComprobante } from './comprobante.ts';
 import { verFotoReportada } from './pagos-reportados.ts';
@@ -181,11 +182,6 @@ async function rechazoPorMl(env: Env, id: string, nuevo: string, anterior: strin
 const FORMAS_PAGO = new Set(['efectivo', 'tarjeta', 'transferencia']);
 const estacionValida = (valor: unknown, tienda: string): valor is string =>
   typeof valor === 'string' && cajasDe(tienda).includes(valor);
-// R3 de #793: apartados, pedidos, portal, vendedoras y WhatsApp son solo de Soledad. Una terminal de sucursal no aparta por sistema en esta
-// etapa: se rechaza, no descuenta de Soledad.
-const APARTADOS_SOLO_SOLEDAD = 'Los apartados y pedidos son solo de Soledad: una sucursal no aparta por sistema en esta etapa.';
-// Incluye lo que llega a pedidos.ts por /api/vender (apartar, cancelar y pagar apartados propios de la revendedora): descuenta y libera productos.stock.
-const SOLO_SOLEDAD = /^\/api\/(?:pedidos(?:\/.*)?|vender\/(?:apartar|apartados\/.*))$/;
 // R3: captura, «+N», suma por UPC, fusión, descarte y ajustes de Soledad. Una cuenta de sucursal no captura. (`/api/conteo/ajustes` ya no va aquí: #798
 // lo hace actuar sobre la existencia de la tienda de la cuenta.)
 const CAPTURA_SOLEDAD = /^\/api\/(?:borradores|piezas|ropa-ia)(?:\/.*)?$/;
@@ -2025,7 +2021,6 @@ async function registrarVenta(request: Request, env: Env, ctx: ExecutionContext,
   const anticipo = pedidoId ? Number(venta.anticipo ?? 0) : 0;
   if (pedidoId ? !UUID.test(pedidoId) || !Number.isInteger(anticipo) || anticipo < 0 : Number(venta.anticipo ?? 0) !== 0)
     return json({ error: 'Pedido o anticipo invalido.' }, 400);
-  if (pedidoId && tienda !== TIENDA_CENTRAL) return json({ error: APARTADOS_SOLO_SOLEDAD }, 409);
   const porPagar = total - (Number.isInteger(dolarones) ? dolarones : 0);
   if (anticipo > porPagar) return json({ error: 'El anticipo no puede pasar de lo que se cobra.' }, 400);
   const aPagar = porPagar - anticipo;
@@ -2064,7 +2059,7 @@ async function registrarVenta(request: Request, env: Env, ctx: ExecutionContext,
     return json({ error:vale.error }, vale.status);
   }
 
-  const conPedido = pedidoId ? await sentenciasDePedido(env, { pedidoId, ventaId: id, anticipo, ahora, total, lineas: preparado.lineas }) : null;
+  const conPedido = pedidoId ? await sentenciasDePedido(env, { pedidoId, ventaId: id, anticipo, ahora, tienda, total, lineas: preparado.lineas }) : null;
   if (conPedido && !conPedido.ok) {
     const concurrente = await reintento();
     if (concurrente) return concurrente;
@@ -2664,9 +2659,6 @@ export default {
           // R2: una computadora de caja sin tienda no cobra.
           if (!tienda && pathname.startsWith('/api/')) return json({ error: 'Esta computadora no tiene tienda asignada. Pídele al dueño que se la asigne en Cuentas.' }, 403);
         }
-        if (tienda !== TIENDA_CENTRAL && request.method === 'POST' && SOLO_SOLEDAD.test(pathname)) {
-          return json({ error: APARTADOS_SOLO_SOLEDAD }, 409);
-        }
         if (tienda !== TIENDA_CENTRAL && request.method !== 'GET' && CAPTURA_SOLEDAD.test(pathname)) {
           return json({ error: 'Una cuenta de sucursal no captura ni ajusta la existencia de Soledad: la mercancía se captura y etiqueta allá.' }, 403);
         }
@@ -2736,7 +2728,7 @@ export default {
 
       // Botón «Ayuda» de la caja y notificaciones push al dueño (Issue #600, push.ts).
       if (pathname === '/api/ayuda' || pathname.startsWith('/api/push/')) {
-        const respuestaPush = await rutaPush(request, env, pathname, correo);
+        const respuestaPush = await rutaPush(request, env, pathname, correo, acceso);
         if (respuestaPush) return respuestaPush;
       }
 
@@ -2747,7 +2739,16 @@ export default {
       // Centro de avisos (Issue #429): ventas de ML por atender, a nombre del cajero que la marca.
       if (pathname === '/api/avisos' && request.method === 'GET') {
         // Ventas de ML + transferencias que Banxico no confirmo (#603): la caja las ve como aviso, el dueño las valida.
-        return json({ ...await (await avisosPendientes(env)).json() as object, transferencias: await transferenciasPorValidar(env) });
+        // #800: más los avisos de apartados de la tienda de esta terminal (el dueño ve las de todas).
+        const tiendas = usuario?.roles.includes('dueno') ? Object.keys(TIENDAS) : [tienda];
+        return json({ ...await (await avisosPendientes(env)).json() as object, transferencias: await transferenciasPorValidar(env), ...await avisosDePedidos(env, tiendas) });
+      }
+      // #800: un toque cierra un aviso de apartado, a nombre de quien lo hace. Quien no es dueño solo marca lo de su tienda.
+      const marcarPedido = pathname.match(/^\/api\/avisos\/pedidos\/(\d{1,9})\/([0-9a-f-]{36})\/(separar|mandar|llego|regreso)$/i);
+      if (marcarPedido && request.method === 'POST') {
+        const r = await marcarRenglon(env, Number(marcarPedido[1]), marcarPedido[2].toLowerCase(), marcarPedido[3] as Accion, correo, usuario?.roles.includes('dueno') ? '' : tienda);
+        return r === 'ok' ? json({ ok: true }) : r === 'no_existe' ? json({ error: 'Esa pieza no está en ese pedido.' }, 404)
+          : json({ error: 'Alguien más ya lo marcó, o ya no aplica. Recarga la lista.' }, 409);
       }
       // Comprobante de transferencia (#603): leerlo al cobrar (caja) y verlo después (solo el dueño, ya filtrado por permiso()).
       if (pathname === '/api/transferencias/comprobante' && request.method === 'POST') return await subirComprobante(request, env);
@@ -2854,7 +2855,7 @@ export default {
       }
 
       if (pathname.startsWith('/api/pedidos')) {
-        const respuestaPedidos = await rutaPedidos(request, env, ctx, pathname, correo);
+        const respuestaPedidos = await rutaPedidos(request, env, ctx, pathname, correo, tienda);
         if (respuestaPedidos) return respuestaPedidos;
       }
 

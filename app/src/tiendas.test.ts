@@ -117,14 +117,15 @@ test('la computadora sin tienda no cobra (R2): 403 en lo de caja, después del P
 const conteos = (db: DatabaseSync) => Object.fromEntries((db.prepare("select name from sqlite_master where type = 'table' and name not like 'sqlite_%'").all() as { name: string }[])
   .map(({ name }) => [name, (db.prepare(`select count(*) as n from "${name}"`).get() as { n: number }).n]));
 
-test('terminal de sucursal: vender una pieza que nunca llegó aborta el ticket sin escribir nada; apartados y pedidos se rechazan', async () => {
+test('terminal de sucursal: vender una pieza que nunca llegó aborta el ticket sin escribir nada; los pedidos ya no se rechazan por la tienda (#800)', async () => {
   const { db, entrar, venta, pedir, stock } = montar('salk');
   const token = await entrar();
   const antes = conteos(db);
   const r = await venta(token, { caja: 'Salk 1' });
   assert.equal(r.status, 409);
   assert.match(r.cuerpo.error, /existencia suficiente en esta sucursal/);
-  assert.equal((await pedir('/api/pedidos', {}, 'POST', { 'x-cajero': token })).status, 409);
+  // #800: un pedido desde sucursal ya llega a la validación (400 por el cuerpo vacío), no a un rechazo por tienda.
+  assert.equal((await pedir('/api/pedidos', {}, 'POST', { 'x-cajero': token })).status, 400);
   assert.equal(stock(), 50, 'Soledad no se toca');
   assert.deepEqual(conteos(db), antes, 'ni venta, ni líneas, ni fila de existencia a medias');
 });

@@ -176,8 +176,6 @@ export async function reportes(url: URL, env: Env): Promise<Response> {
   const tienda: Tienda | null = esTienda(pedida) ? pedida : null;
   const deTienda = tienda ? ` and v.tienda = '${tienda}'` : '';          // sobre ventas con alias v
   const deTiendaSola = tienda ? ` and tienda = '${tienda}'` : '';        // sobre ventas sin alias
-  // Los pedidos y apartados son solo de Soledad (R3 de #793): filtrando una sucursal no aportan anticipos ni abonos.
-  const sinPedidos = tienda && tienda !== TIENDA_CENTRAL ? ' and 0' : '';
   const deCajas = (columna: string) => tienda ? ` and ${columna} in (${cajasDe(tienda).map((c) => `'${c}'`).join(', ')})` : '';
 
   // Solo lo de la tienda (propietario 'dolaron', Issue #298): el neto de cada ticket va repartido por pieza.
@@ -220,10 +218,10 @@ export async function reportes(url: URL, env: Env): Promise<Response> {
        select forma_pago, count(distinct venta) as tickets, coalesce(sum(cobrado), 0) as total
        from cobros where propietario = 'dolaron' group by forma_pago
        union all
-       select forma_pago, 0, coalesce(sum(anticipo), 0) from pedidos where creado_en >= ?${sinPedidos} group by forma_pago
+       select forma_pago, 0, coalesce(sum(anticipo), 0) from pedidos where creado_en >= ?${deCajas('caja')} group by forma_pago
        union all
        select forma_pago, 0, coalesce(sum(importe), 0) from pedido_movimientos
-       where tipo = 'abono' and creado_en >= ?${sinPedidos} group by forma_pago
+       where tipo = 'abono' and creado_en >= ?${deCajas('caja')} group by forma_pago
        union all
        select 'dolarones', count(distinct case when neta - cobrado - anticipo_linea <> 0 then venta end),
          coalesce(sum(neta - cobrado - anticipo_linea), 0)

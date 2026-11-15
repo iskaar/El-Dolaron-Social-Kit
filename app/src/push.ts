@@ -6,7 +6,7 @@
  * VAPID_JWK o sin dispositivos, la ayuda llega por correo (avisos.ts).
  */
 import { correoADuenos, REMITENTE } from './avisos.ts';
-import { leerRoles, leerUsuario, CAJAS } from './cuentas.ts';
+import { leerRoles, leerUsuario, tiendaDe, CAJAS, type Rol, type Usuario } from './cuentas.ts';
 
 const json = (cuerpo: unknown, status = 200) =>
   new Response(JSON.stringify(cuerpo), { status, headers: { 'content-type': 'application/json; charset=utf-8' } });
@@ -99,6 +99,24 @@ export async function pushADuenos(env: Env, titulo: string, cuerpo: string): Pro
   return enviados.filter(Boolean).length;
 }
 
+/**
+ * Push a los dispositivos de una tienda (#800): las cuentas de Access de esa tienda que activaron notificaciones y los dueños.
+ * La tienda de una cuenta es la de `tiendaDe` (sin tienda = Soledad). Devuelve cuántos lo aceptaron.
+ */
+export async function pushATienda(env: Env, tienda: string, titulo: string, cuerpo: string): Promise<number> {
+  if (!env.VAPID_JWK) return 0;
+  const jwk = JSON.parse(env.VAPID_JWK) as JsonWebKey;
+  const { results } = await env.DB.prepare(
+    `select s.endpoint, s.p256dh, s.auth, u.roles, u.tienda from push_suscripciones s
+     join usuarios u on u.correo = s.correo where u.activo = 1`,
+  ).all<Suscripcion & { roles: string; tienda: string }>();
+  const destino = results.filter((s) => {
+    const roles = leerRoles(s.roles) as Rol[];
+    return roles.includes('dueno') || tiendaDe({ roles, tienda: s.tienda } as Usuario) === tienda;
+  });
+  return (await Promise.all(destino.map((s) => enviar(env, jwk, s, titulo, cuerpo)))).filter(Boolean).length;
+}
+
 /** Push a los dispositivos de una persona (por correo); no mira roles. Devuelve cuántos lo aceptaron. */
 export async function pushA(env: Env, correo: string, titulo: string, cuerpo: string): Promise<number> {
   if (!env.VAPID_JWK) return 0;
@@ -108,7 +126,7 @@ export async function pushA(env: Env, correo: string, titulo: string, cuerpo: st
 }
 
 /** /api/ayuda (caja, a nombre del cajero con PIN) y /api/push/* (solo el dueño, por permiso()). */
-export async function rutaPush(request: Request, env: Env, pathname: string, correo: string): Promise<Response | null> {
+export async function rutaPush(request: Request, env: Env, pathname: string, correo: string, acceso = correo): Promise<Response | null> {
   if (pathname === '/api/ayuda' && request.method === 'POST') {
     const cuerpo = (await request.json().catch(() => ({}))) as Record<string, unknown>;
     const caja = CAJAS.includes(String(cuerpo.caja)) ? ` en ${cuerpo.caja}` : '';
@@ -133,7 +151,8 @@ export async function rutaPush(request: Request, env: Env, pathname: string, cor
     await env.DB.prepare(
       `insert into push_suscripciones (endpoint, correo, p256dh, auth, creado_en) values (?, ?, ?, ?, ?)
        on conflict(endpoint) do update set correo = excluded.correo, p256dh = excluded.p256dh, auth = excluded.auth`,
-    ).bind(s.endpoint, correo, s.p256dh, s.auth, new Date().toISOString()).run();
+    // #800: la suscripción es de la cuenta de Access de la terminal (la que tiene tienda), no del cajero que escribió su PIN.
+    ).bind(s.endpoint, acceso, s.p256dh, s.auth, new Date().toISOString()).run();
     // La prueba llega solo a este dispositivo: así se sabe que este quedó bien.
     const prueba = await enviar(env, JSON.parse(env.VAPID_JWK), s, 'El Dolarón', 'Notificaciones activadas.');
     return json({ ok: true, prueba });

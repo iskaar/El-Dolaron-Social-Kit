@@ -4,11 +4,13 @@ import { conClaude } from './analisis.ts';
 const ahora = () => new Date().toISOString();
 const resp = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json; charset=utf-8' } });
 
+// ponytail: el índice parcial exige `stock > 0` (Soledad): una pieza que solo está en una sucursal sin haber tenido recorte espera a volver a
+// Soledad. Toda pieza se captura en Soledad, así que casi siempre ya lo tiene. Mejora: otro índice parcial por existencia_tienda.
 export async function procesarRecortes(env: Env): Promise<void> {
   const activa = await env.DB.prepare("select valor from config where clave='recortes_activo'").first<{ valor: string }>();
   if (activa?.valor !== '1') return;
   const { results } = await env.DB.prepare(`select p.id, p.foto_key from productos p indexed by productos_recortes_pendientes
-    where p.recorte_estado is null and ${VENDIBLE} order by creado_en limit 20`).all<{ id: string; foto_key: string }>();
+    where p.recorte_estado is null and p.stock > 0 and ${VENDIBLE} order by creado_en limit 20`).all<{ id: string; foto_key: string }>();
   for (const fila of results) {
     try {
       const foto = await env.FOTOS.get(fila.foto_key);

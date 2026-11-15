@@ -61,7 +61,7 @@ test('catalogo: lista solo piezas vendibles, sin campos internos', async () => {
       codigo: buena, nombre: 'Buena', marca: 'Levis', categoria: 'ropa', talla: null, precio: 25000, precio_lista: 0,
       foto: `https://${HOST}/api/catalogo/foto/${buena}`,
       recorte: null,
-      llegado_en: '2026-10-01', ultima: false,
+      llegado_en: '2026-10-01', tiendas: ['Soledad'], ultima: false,
     }]);
     assert.ok(!('stock' in c.piezas[0]), 'la existencia no sale');
   } finally { t.db.close(); }

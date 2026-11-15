@@ -610,8 +610,14 @@ async function contarAvisos() {
   try {
     const r = await fetch('/api/avisos');
     if (!r.ok) return;
-    const { ventas_ml: ml, transferencias = [] } = await r.json();
+    const { ventas_ml: ml, transferencias = [], por_separar = [], por_mandar = [], por_llegar = [], por_regresar = [] } = await r.json();
     const partes = [];
+    // #800: apartados de esta tienda por atender (la página vieja en caché no trae estas listas: quedan vacías).
+    const pieza = (n) => `${n} pieza${n === 1 ? '' : 's'}`;
+    if (por_separar.length) partes.push(`🔖 ${pieza(por_separar.length)} por separar (apartadas en línea)`);
+    if (por_mandar.length) partes.push(`🚚 ${pieza(por_mandar.length)} por mandar a otra tienda`);
+    if (por_llegar.length) partes.push(`📥 ${pieza(por_llegar.length)} por llegar: marca «Ya llegó»`);
+    if (por_regresar.length) partes.push(`↩ ${pieza(por_regresar.length)} por regresar al piso`);
     if (ml.length) partes.push(`📦 ${ml.length} venta${ml.length === 1 ? '' : 's'} de Mercado Libre por atender`);
     if (transferencias.length) partes.push(`⚠ ${transferencias.length} transferencia${transferencias.length === 1 ? '' : 's'} por validar con el dueño`);
     $('avisos-ml').hidden = partes.length === 0;
@@ -940,18 +946,19 @@ function agregarCodigo(leido, reintento = false) {
     cargarPedido(Number(codigo.trim().replace(/\D/g, '')));
     return 'pedido';   // la camara se cierra para dejar ver el aviso
   }
-  // Folio de un bulto (BU-K7Q2M, #795): no es una pieza; se recibe en /bultos, no se cobra.
-  if (/^BU-?[A-Z0-9]{5}$/i.test(codigo.trim())) {
-    $('aviso').textContent = `${codigo.trim().toUpperCase()} es un bulto, no una pieza. Recíbelo en «Bultos».`;
-    $('aviso').style.color = '#D72B32';
-    return false;
-  }
   if (/^D[CP]-/.test(codigo.trim())) {
     $('socio').value = codigo.trim();
     buscarSocio();
     return 'socio'; // la camara se cierra para dejar ver el pop-up de Dolarones
   }
   const pieza = buscarPieza(codigo);
+  // Folio de un bulto (BU- y 5 caracteres de su alfabeto, #795): no es una pieza; se recibe en /bultos, no se cobra. Va DESPUÉS de buscar la
+  // pieza: «bufanda» o un código de catálogo con esa forma se cobra como siempre; solo un texto sin pieza y con la forma exacta del folio es un bulto.
+  if (!pieza && /^BU-[A-HJ-NP-Z2-9]{5}$/i.test(codigo.trim())) {
+    $('aviso').textContent = `${codigo.trim().toUpperCase()} es un bulto, no una pieza. Recíbelo en «Bultos».`;
+    $('aviso').style.color = '#D72B32';
+    return false;
+  }
   if (!pieza) {
     $('aviso').textContent = `Código no encontrado: ${codigo}`;
     $('aviso').style.color = '#D72B32';

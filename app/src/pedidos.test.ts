@@ -785,7 +785,7 @@ test('056: base vacía completa, con todas las migraciones en una transacción y
     assert.deepEqual(db.prepare('pragma foreign_key_check').all(), []);
     assert.deepEqual(db.prepare('select * from pedidos').all(), []);
     assert.deepEqual(db.prepare('select * from pedido_movimientos').all(), []);
-    assert.deepEqual(db.prepare('pragma table_info(pedidos)').all().slice(-2).map((c) => c.name), ['revision', 'liquidado_en']);
+    assert.deepEqual(db.prepare('pragma table_info(pedidos)').all().slice(-3).map((c) => c.name), ['revision', 'liquidado_en', 'recoge_en']);
   } finally { db.close(); }
 });
 
@@ -933,11 +933,11 @@ test('apartar desde el portal (#668): sin anticipo, 24 h, datos del socio y de l
   assert.equal(r.status, 201, JSON.stringify(r.cuerpo));
   assert.equal(r.cache, 'no-store');
   assert.deepEqual(Object.keys(r.cuerpo).sort(), ['a_pagar', 'concepto', 'datos_pago', 'pedido']);
-  assert.deepEqual(Object.keys(r.cuerpo.pedido).sort(), ['entrega', 'envio', 'folio', 'lineas', 'subtotal', 'vence_en']);
+  assert.deepEqual(Object.keys(r.cuerpo.pedido).sort(), ['entrega', 'envio', 'folio', 'lineas', 'lista_para_entregar', 'recoge_en_nombre', 'subtotal', 'vence_en']);
   assert.equal(r.cuerpo.a_pagar, 10000);
   assert.equal(r.cuerpo.concepto, 'P-1');
   assert.equal(r.cuerpo.datos_pago, 'Banco de prueba\nTitular de prueba');
-  assert.deepEqual(r.cuerpo.pedido.lineas, [{ codigo: a.codigo, nombre: 'Chamarra Levis', precio: 25000, cantidad: 1 }]);
+  assert.deepEqual(r.cuerpo.pedido.lineas, [{ codigo: a.codigo, nombre: 'Chamarra Levis', precio: 25000, cantidad: 1, tienda_nombre: 'Soledad', lista: true }]);
   assert.equal(r.cuerpo.pedido.subtotal, 25000);
   const p = filaPedido(db, 1);
   assert.deepEqual([p.vendedora, p.cliente, p.telefono, p.anticipo, p.saldo, p.caja, p.forma_pago, p.estado, p.entrega, p.envio],

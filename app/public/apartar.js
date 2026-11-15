@@ -20,18 +20,33 @@ export function resumenDe(subtotal, entrega) {
 }
 
 /** Qué pasa según cómo la quiere: una frase corta, con los importes que calcula el servidor al apartar. `piezas` solo cambia el plural. */
-export function explicaEntrega(precio, entrega, ahora = Date.now(), piezas = 1) {
+export function explicaEntrega(precio, entrega, ahora = Date.now(), piezas = 1, tienda = 'Soledad') {
   const varias = piezas > 1;
   const pagar = aPagarDe(precio);
   if (entrega !== 'envio') {
     return pagar >= precio
-      ? `Pagas ${pesos(precio)} por transferencia y pasas por ${varias ? 'ellas' : 'ella'} a Soledad.`
+      ? `Pagas ${pesos(precio)} por transferencia y pasas por ${varias ? 'ellas' : 'ella'} a ${tienda}.`
       : `Pagas ${pesos(pagar)} por transferencia y el resto al recoger${varias ? 'las' : 'la'}. Con tu pago te ${varias ? 'las' : 'la'} guardamos 7 días.`;
   }
   const envio = envioDe(precio);
   const resto = precio + envio - pagar;
   return `Pagas ${pesos(pagar)} ahora${resto ? ` y abonas el resto (${pesos(resto)}${envio ? `, con envío de ${pesos(envio)}` : ', el envío es gratis'}); cada abono te da 7 días más` : ''}. `
     + `Cuando el pago esté completo sale el viernes (si fuera hoy, el ${fechaCorta(viernesDeEnvio(ahora))}).`;
+}
+
+/**
+ * Dónde está lo apartado (#800): si ya está en la tienda donde se recoge, o en cuál está y que la mandan al pagar. Solo nombres de tienda,
+ * nunca cuántas hay ni horarios. '' si el servidor no manda `lista` (respuesta anterior).
+ */
+export function textoUbicacion(pedido) {
+  const fuera = (pedido.lineas ?? []).filter((l) => l.lista === false);
+  if (!pedido.recoge_en_nombre || !(pedido.lineas ?? []).some((l) => typeof l.lista === 'boolean')) return '';
+  const varias = pedido.lineas.length > 1;
+  if (!fuera.length) return pedido.entrega === 'envio' ? '' : `${varias ? 'Tus piezas ya están' : 'Tu pieza ya está'} en ${pedido.recoge_en_nombre}.`;
+  const donde = [...new Set(fuera.map((l) => l.tienda_nombre))].join(' y ');
+  return pedido.entrega === 'envio'
+    ? `${fuera.length > 1 ? 'Algunas piezas están' : 'Una pieza está'} en ${donde}: la mandan a ${pedido.recoge_en_nombre} antes de enviar tu paquete.`
+    : `${fuera.length > 1 ? 'Algunas piezas están' : 'Tu pieza está'} en ${donde}: la mandan a ${pedido.recoge_en_nombre} cuando pagues y te avisamos al llegar.`;
 }
 
 /** «$99 (gratis desde $1,000) · sale el viernes 6 de noviembre»; con subtotal desde $1,000, «Gratis · sale…». */
@@ -84,6 +99,8 @@ export function iniciarApartar({ api, estaListo, irAAcceso, alTerminar, alVerApa
   let piezas = [], origen = 'comprar_ya', intento = null, hecho = false, pagar = null;
 
   const entrega = () => radios.find((r) => r.checked)?.value === 'envio' ? 'envio' : 'tienda';
+  const recoge = q('.apartar-recoge');
+  const tiendaElegida = () => recoge.selectedOptions?.[0]?.textContent ?? 'Soledad';
   const subtotal = () => piezas.reduce((suma, p) => suma + p.precio, 0);
   function ver(vista, texto) {
     for (const [clave, nodo] of Object.entries(vistas)) nodo.hidden = clave !== vista;
@@ -104,11 +121,13 @@ export function iniciarApartar({ api, estaListo, irAAcceso, alTerminar, alVerApa
     q('.apartar-desglose').textContent = r.envio ? `Piezas ${pesos(r.subtotal)} + envío ${pesos(r.envio)}` : entrega() === 'envio' ? 'Envío gratis' : '';
     q('.apartar-apartas').textContent = `Apartas con ${pesos(r.apartas)}`;
     q('.apartar-falta').textContent = r.falta > 0 ? `Falta por pagar ${pesos(r.falta)} ${entrega() === 'envio' ? 'antes del envío' : 'al recoger'}.` : 'No falta nada: pagas todo ahora.';
-    explica.textContent = explicaEntrega(r.subtotal, entrega(), Date.now(), piezas.length);
+    explica.textContent = explicaEntrega(r.subtotal, entrega(), Date.now(), piezas.length, tiendaElegida());
+    q('.apartar-recoge-bloque').hidden = entrega() === 'envio';   // un envío sale de Soledad
     enviar.textContent = `Apartar por ${pesos(r.apartas)}`;
     q('.apartar-envio-costo').textContent = textoEnvio(r.subtotal);
   }
   for (const r of radios) r.addEventListener('change', pintarForm);
+  recoge.addEventListener('change', pintarForm);
 
   function pintarListo(r) {
     const { pedido } = r;
@@ -116,7 +135,7 @@ export function iniciarApartar({ api, estaListo, irAAcceso, alTerminar, alVerApa
     q('.apartar-vence').textContent = `Tienes hasta el ${fechaLegible(pedido.vence_en)} (${horasHasta(pedido.vence_en)} h) para pagar. Si no, ${pedido.lineas.length > 1 ? 'las piezas vuelven' : 'la pieza vuelve'} a la venta.`;
     q('.apartar-monto').textContent = pesos(r.a_pagar);
     q('.apartar-concepto').textContent = r.concepto;
-    q('.apartar-entrega-info').textContent = explicaEntrega(pedido.subtotal, pedido.entrega, Date.now(), pedido.lineas.length);
+    q('.apartar-entrega-info').textContent = [explicaEntrega(pedido.subtotal, pedido.entrega, Date.now(), pedido.lineas.length, pedido.recoge_en_nombre ?? 'Soledad'), textoUbicacion(pedido)].filter(Boolean).join(' ');
     const datos = q('.apartar-datos'), clabe = clabeDe(r.datos_pago);
     datos.textContent = r.datos_pago ?? '';
     q('.apartar-con-datos').hidden = !r.datos_pago;
@@ -143,11 +162,11 @@ export function iniciarApartar({ api, estaListo, irAAcceso, alTerminar, alVerApa
     const eleccion = entrega();
     const codigos = piezas.map((p) => p.codigo);
     // El mismo UUID mientras sean las mismas piezas y entrega: un reintento tras perder la red no aparta dos veces.
-    const clave = `${codigos.join(',')}|${eleccion}`;
+    const clave = `${codigos.join(',')}|${eleccion}|${eleccion === 'tienda' ? recoge.value ?? '' : ''}`;
     if (intento?.clave !== clave) intento = { clave, id: crypto.randomUUID() };
     enviar.disabled = true; error.textContent = '';
     try {
-      const r = await api('apartar', { id: intento.id, codigos, entrega: eleccion });
+      const r = await api('apartar', { id: intento.id, codigos, entrega: eleccion, ...(eleccion === 'tienda' && recoge.value ? { recoge_en: recoge.value } : {}) });
       intento = null; hecho = true;
       for (const codigo of codigos) {
         medir('apartado_portal', codigo);

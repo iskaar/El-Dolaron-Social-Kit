@@ -73,9 +73,9 @@ test('el dueño activa push: se guarda, recibe una prueba con VAPID válido; la 
   assert.equal(t.llegadas.length, 2);
   assert.equal(t.correos.length, 0);
 
-  // El cajero no puede registrar dispositivos ni leer la llave.
-  assert.equal((await t.pedir('/api/push/suscripcion', { endpoint, keys: t.keys })).status, 403);
-  assert.equal((await t.pedir('/api/push/clave', undefined)).status, 403);
+  // #800: las cuentas de caja también activan notificaciones (avisos de apartados de su tienda); sin sesión de caja sigue cerrado.
+  assert.equal((await t.pedir('/api/push/clave', undefined)).status, 200);
+  assert.equal((await t.pedir('/api/push/suscripcion', { endpoint: 'https://web.push.apple.com/otro', keys: t.keys })).status, 200);
 });
 
 test('suscripción vencida (410) se borra y la ayuda cae al correo; datos inválidos se rechazan', async () => {

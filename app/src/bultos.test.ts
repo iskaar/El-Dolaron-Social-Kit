@@ -329,10 +329,10 @@ test('el catálogo de la caja trae la existencia de su tienda, también en el in
   assert.equal(await existencia(soledad), 48);
 });
 
-test('apartados y pedidos son solo de Soledad; una cuenta de sucursal no captura ni ajusta Soledad; una venta de sucursal no usa un apartado', async () => {
+test('una cuenta de sucursal no captura ni ajusta Soledad; sus pedidos y ventas con pedido llegan a la validación (#800: ya no son solo de Soledad)', async () => {
   const m = montar();
   const salk = await m.terminal(PC_SALK);
-  assert.equal((await salk('/api/pedidos', {})).status, 409);
+  assert.equal((await salk('/api/pedidos', {})).status, 400);
   assert.equal((await salk('/api/ventas', { id: crypto.randomUUID(), pedido_id: crypto.randomUUID(), lineas: [{ producto_id: PRODUCTO, cantidad: 1 }], forma_pago: 'efectivo', efectivo: 25000, caja: 'Salk 1' })).status, 409);
   m.db.prepare("insert into usuarios (correo, nombre, roles, activo, tienda, creado_en, actualizado_en) values ('capsalk@prueba.mx', 'Cap', 'capturista', 1, 'salk', '', '')").run();
   const cap = m.yo('capsalk@prueba.mx');
@@ -341,17 +341,15 @@ test('apartados y pedidos son solo de Soledad; una cuenta de sucursal no captura
   assert.equal(m.stock(), 50);
 });
 
-test('una cuenta de sucursal no aparta desde /vender ni escribe existencia de Soledad por ropa-ia o piezas', async () => {
+test('una revendedora de cualquier tienda llega a la validación al apartar (#800); ropa-ia y piezas siguen sin escribir Soledad desde sucursal', async () => {
   const m = montar();
   const cuenta = (correo: string, roles: string) => m.db.prepare(`insert into usuarios (correo, nombre, roles, activo, tienda, creado_en, actualizado_en) values (?, 'X', ?, 1, 'salk', '', '')`).run(correo, roles);
   cuenta('rev@prueba.mx', 'revendedora'); cuenta('duenosalk@prueba.mx', 'dueno'); cuenta('capsalk@prueba.mx', 'capturista');
   const antes = conteos(m.db);
   const rev = m.yo('rev@prueba.mx'), duenoSalk = m.yo('duenosalk@prueba.mx'), cap = m.yo('capsalk@prueba.mx');
   const apartar = await rev('/api/vender/apartar', { id: crypto.randomUUID(), producto_id: PRODUCTO, cliente: 'Ana', telefono: '4441234567' });
-  assert.equal(apartar.status, 409, JSON.stringify(apartar.cuerpo));
-  assert.match(apartar.cuerpo.error, /solo de Soledad/);
-  assert.equal((await rev('/api/vender/apartados/1/cancelar', {})).status, 409);
-  assert.equal((await rev('/api/vender/apartados/1/pago', {})).status, 409);
+  assert.equal(apartar.status, 400, JSON.stringify(apartar.cuerpo));   // sin `lineas`: la validación, no un rechazo por tienda
+  assert.doesNotMatch(apartar.cuerpo.error, /solo de Soledad/);
   assert.equal((await cap('/api/ropa-ia/x', {})).status, 403);
   assert.equal((await duenoSalk(`/api/piezas/${PRODUCTO}/existencia`, { id: crypto.randomUUID(), delta: -1, motivo: 'merma' })).status, 403);
   assert.deepEqual(conteos(m.db), antes);

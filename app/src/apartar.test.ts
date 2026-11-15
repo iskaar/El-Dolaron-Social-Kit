@@ -269,3 +269,43 @@ test('hoja con sesión: sin datos de pago ofrece pedirlos; un 409 del servidor (
   assert.equal(d.nodo('.apartar-sin-datos').hidden, false);
   assert.match(decodeURIComponent(d.nodo('.apartar-pedir-datos').href), /P-7.*datos para transferir/);
 });
+
+test('¿Dónde recoges? (#800): manda recoge_en, el resumen nombra la tienda, el envío esconde el selector y la ubicación dice dónde está la pieza', async () => {
+  const d = dominio();
+  const llamadas: any[] = [];
+  const hoja = apartar.iniciarApartar({ api: async (ruta: string, cuerpo: any) => { llamadas.push({ ruta, ...cuerpo }); return RESPUESTA(); },
+    estaListo: () => true, irAAcceso: () => {}, alTerminar: () => {}, alApartar: () => {}, alPagar: () => {} });
+  const recoge = d.nodo('.apartar-recoge');
+  recoge.value = 'salk'; recoge.selectedOptions = [{ textContent: 'Avenida Salk' }];
+  hoja.abrir([OTRA]);
+  assert.match(d.nodo('.apartar-explica').textContent, /pasas por ella a Avenida Salk\.$/);
+  assert.equal(d.nodo('.apartar-recoge-bloque').hidden, false);
+  await d.enviar();
+  assert.equal(llamadas[0].recoge_en, 'salk');
+  assert.equal(llamadas[0].entrega, 'tienda');
+  d.radios[0].checked = false; d.radios[1].checked = true;
+  d.radios[1].oyentes.change();
+  assert.equal(d.nodo('.apartar-recoge-bloque').hidden, true, 'un envío sale de Soledad: no se elige tienda');
+  // Sin el campo `lista` (servidor anterior) no se dice nada; con él, solo nombres de tienda.
+  assert.equal(apartar.textoUbicacion({ entrega: 'tienda', lineas: [{ nombre: 'X' }] }), '');
+  const base = { entrega: 'tienda', recoge_en_nombre: 'Coronel Romero' };
+  assert.equal(apartar.textoUbicacion({ ...base, lineas: [{ lista: true, tienda_nombre: 'Coronel Romero' }] }), 'Tu pieza ya está en Coronel Romero.');
+  assert.equal(apartar.textoUbicacion({ ...base, lineas: [{ lista: false, tienda_nombre: 'Avenida Salk' }] }),
+    'Tu pieza está en Avenida Salk: la mandan a Coronel Romero cuando pagues y te avisamos al llegar.');
+});
+
+test('portal.html ofrece las tiendas de TIENDAS en «¿Dónde recoges?» y los textos de apartados usan la tienda del pedido', async () => {
+  const { TIENDAS } = await import('./cuentas.ts');
+  const html = readFileSync('public/portal.html', 'utf8');
+  const opciones = [...html.match(/<select id="apartar-recoge"[\s\S]*?<\/select>/)![0].matchAll(/<option value="([^"]+)">([^<]+)<\/option>/g)].map((m) => [m[1], m[2]]);
+  assert.deepEqual(opciones, Object.entries(TIENDAS).map(([clave, t]) => [clave, t.nombre]));
+  const { estadoApartado, detalleApartado } = await import('../public/apartados.js');
+  const ahora = Date.parse('2026-11-14T18:00:00Z');
+  const pedido = { estado: 'apartado', entrega: 'tienda', saldo: 10000, subtotal: 25000, envio: 0, faltante: 15000, vence_en: '2026-11-20T18:00:00Z',
+    recoge_en_nombre: 'Coronel Romero', lista_para_entregar: false, lineas: [{ lista: false, tienda_nombre: 'Avenida Salk' }] };
+  assert.match(estadoApartado(pedido, ahora).texto, /Pago recibido · tu pieza viene a Coronel Romero; te avisamos cuando llegue/);
+  assert.match(estadoApartado({ ...pedido, lista_para_entregar: true }, ahora).texto, /Listo para recoger/);
+  assert.match(estadoApartado({ ...pedido, lista_para_entregar: undefined }, ahora).texto, /Listo para recoger/, 'un servidor anterior no manda el campo');
+  assert.match(detalleApartado(pedido, ahora).join(' '), /Recógela en Coronel Romero antes del/);
+  assert.match(detalleApartado({ ...pedido, recoge_en_nombre: undefined }, ahora).join(' '), /Recógela en Soledad antes del/);
+});

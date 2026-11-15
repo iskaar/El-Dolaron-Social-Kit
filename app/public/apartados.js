@@ -4,7 +4,7 @@
 // aquí solo se pintan. Los textos de estado salen de funciones puras (estadoApartado, detalleApartado) para poder probarlas.
 import { pesos, fechaLegible, agruparMias } from './vender.js';
 import { APARTADO, fechaCorta } from './catalogo-ficha.js';
-import { aPagarDe } from './apartar.js';
+import { aPagarDe, textoUbicacion } from './apartar.js';
 
 const HORA = 3_600_000;
 // Un pedido del carrito (#681) trae varias piezas: los textos de abajo pasan al plural.
@@ -24,6 +24,7 @@ export function estadoApartado(p, ahora = Date.now()) {
   if (reporte?.estado === 'pendiente') return { clase: 'aviso', texto: '⏳ Pago en revisión · la tienda lo está revisando' };
   if (p.saldo > 0) {
     return p.entrega === 'envio' ? { clase: 'aviso', texto: `✓ Pago recibido (${pesos(p.saldo)}) · completa el pago para el envío` }
+      : p.lista_para_entregar === false ? { clase: 'aviso', texto: `✓ Pago recibido · tu pieza viene a ${p.recoge_en_nombre}; te avisamos cuando llegue` }
       : { clase: 'ok', texto: '✓ Pago recibido · Listo para recoger' };
   }
   // Un reporte rechazado no quita el plazo: el motivo va primero y la cuenta regresiva en el detalle.
@@ -45,12 +46,14 @@ export function detalleApartado(p, ahora = Date.now()) {
     lineas.push(`Para ${varias(p) ? 'apartarlas' : 'apartarla'} paga ${pesos(Math.min(p.subtotal, APARTADO))} por transferencia. Total ${pesos(total)}.`);
     if (p.faltante > 0) lineas.push(`Falta por pagar ${pesos(p.faltante)}.`);
     if (Date.parse(p.vence_en) > ahora) lineas.push(`Tienes hasta el ${fechaLegible(p.vence_en)}`);
+    const donde = textoUbicacion(p);   // #800: ya está en la tienda donde recoges, o en cuál está y que la mandan al pagar
+    if (donde) lineas.push(donde);
     return lineas;
   }
   if (p.faltante > 0) lineas.push(`Falta por pagar ${pesos(p.faltante)}${p.entrega === 'envio' ? '.' : varias(p) ? ' al recogerlas.' : ' al recogerla.'}`);
   else lineas.push('Ya está pagada.');
   lineas.push(p.entrega === 'envio' ? `Completa el pago antes del ${fechaLegible(p.vence_en)}; después sale el viernes.`
-    : `${varias(p) ? 'Recógelas' : 'Recógela'} en Soledad antes del ${fechaLegible(p.vence_en)}`);
+    : `${varias(p) ? 'Recógelas' : 'Recógela'} en ${p.recoge_en_nombre ?? 'Soledad'} antes del ${fechaLegible(p.vence_en)}`);
   return lineas;
 }
 
@@ -98,7 +101,7 @@ export function iniciarApartados({ api, alPagar }) {
     cuerpo.append(
       el('p', 'apartado-nombre', p.lineas.length > 1 ? `${p.lineas.length} piezas` : primera?.nombre ?? 'Pieza'),
       ...(p.lineas.length > 1 ? [piezasDe(p)] : []),
-      el('p', 'apartado-datos', `P-${p.folio} · ${pesos(p.subtotal + p.envio)} · ${p.entrega === 'envio' ? 'Envío' : 'Recoger en tienda'}`),
+      el('p', 'apartado-datos', `P-${p.folio} · ${pesos(p.subtotal + p.envio)} · ${p.entrega === 'envio' ? 'Envío' : p.recoge_en_nombre && p.recoge_en_nombre !== 'Soledad' ? `Recoger en ${p.recoge_en_nombre}` : 'Recoger en tienda'}`),
       el('p', `apartado-chip ${chip.clase}`, chip.texto),
       ...detalleApartado(p, ahora).map((t) => el('p', 'apartado-detalle', t)),
     );

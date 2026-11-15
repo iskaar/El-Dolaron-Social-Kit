@@ -8,7 +8,9 @@
  */
 
 import { cajaDe } from './corte.ts';
-import { TIENDA_CENTRAL } from './cuentas.ts';
+import { TIENDA_CENTRAL, TIENDAS, esTienda, tiendaDeCaja, type Tienda } from './cuentas.ts';
+import { sentenciasMover, esExistenciaInsuficiente, enTiendaSql } from './existencias.ts';
+import { avisarTiendas, nombreTienda } from './avisos-pedidos.ts';
 import { sumarMeses } from './dolarones.ts';
 import { conciliarSeguro } from './mercadolibre.ts';
 import { VENDIBLE } from './catalogo.ts';
@@ -32,6 +34,8 @@ const PIEZAS_REVENDEDORA = 10;
 type Modo = 'caja' | 'revendedora' | 'portal';
 const LIMITE_LISTA = 200;
 const ENVIO_ID = '00000000-0000-4000-8000-000000000099';
+/** La tienda que despacha los envíos (R7 de #793). Hoy solo Soledad envía; una constante para abrirlo después por tienda. */
+export const TIENDA_ENVIO = 'soledad';   // literal: cuentas.ts y este módulo se importan en cadena y TIENDA_CENTRAL aún no existe al cargar
 
 /** Lo que dice el 409 de cancelar un ticket que uso saldo de pedido (devoluciones.ts y cancelaciones.ts). */
 export const TICKET_CON_ANTICIPO =
@@ -49,16 +53,20 @@ function json(cuerpo: unknown, status = 200): Response {
 /* ---------- lectura ---------- */
 
 const COLUMNAS = `id, folio, cliente, telefono, entrega, envio, vendedora, estado, vence_en, anticipo, forma_pago,
-  saldo, saldo_vence_en, guia, venta_id, creado_en, actualizado_en, revision, liquidado_en, caja,
+  saldo, saldo_vence_en, guia, venta_id, creado_en, actualizado_en, revision, liquidado_en, caja, recoge_en,
   (select u.nombre from usuarios u where u.correo = pedidos.vendedora) as vendedora_nombre`;
 
 interface FilaPedido {
   id: string; folio: number; estado: string; entrega: string; envio: number; saldo: number;
   vendedora: string; cliente: string; telefono: string; creado_en: string;
   anticipo: number; vence_en: string; saldo_vence_en: string; revision: number; liquidado_en: string | null; caja: string; forma_pago: string; guia: string;
+  recoge_en: string;
   [campo: string]: unknown;
 }
-interface LineaPedido { pedido_id: string; producto_id: string; codigo: string; nombre: string; precio: number; cantidad: number }
+interface LineaPedido {
+  pedido_id: string; producto_id: string; codigo: string; nombre: string; precio: number; cantidad: number;
+  tienda: string; separada_en: string | null; enviada_en: string | null; enviada_desde: string | null; llego_en: string | null;
+}
 
 /** El paquete conserva el precio pactado; recoger mantiene el precio de catálogo de #269. */
 async function leerPedidos(env: Env, donde: string, args: unknown[], orden = 'folio desc', limite = LIMITE_LISTA) {
@@ -68,14 +76,20 @@ async function leerPedidos(env: Env, donde: string, args: unknown[], orden = 'fo
   if (!results.length) return [];
   const { results: piezas } = await env.DB.prepare(
     `select l.pedido_id, p.id as producto_id, p.codigo, p.nombre,
-       case when pe.entrega = 'envio' then l.precio else p.precio end as precio, l.cantidad
+       case when pe.entrega = 'envio' then l.precio else p.precio end as precio, l.cantidad,
+       l.tienda, l.separada_en, l.enviada_en, l.enviada_desde, l.llego_en
      from pedido_lineas l join productos p on p.id = l.producto_id join pedidos pe on pe.id = l.pedido_id
      where l.pedido_id in (select id from pedidos where ${donde}) order by p.nombre`,
   ).bind(...args).all<LineaPedido>();
   return results.map((fila) => {
-    const lineas = piezas.filter((l) => l.pedido_id === fila.id).map(({ pedido_id, ...resto }) => resto);
+    // #800: dónde está cada pieza. `lista` = ya está en la tienda donde se recoge (o sale el envío) y no va en camino.
+    const lineas = piezas.filter((l) => l.pedido_id === fila.id).map(({ pedido_id, separada_en, enviada_en, enviada_desde, llego_en, ...resto }) => ({
+      ...resto, tienda_nombre: nombreTienda(resto.tienda), separada: !!separada_en,
+      en_camino: !!enviada_en && !llego_en, desde_nombre: enviada_desde ? nombreTienda(enviada_desde) : null,
+      lista: resto.tienda === fila.recoge_en && (!enviada_en || !!llego_en),
+    }));
     const subtotal = lineas.reduce((suma, l) => suma + l.precio * l.cantidad, 0);
-    return { ...fila, subtotal, lineas,
+    return { ...fila, subtotal, lineas, recoge_en_nombre: nombreTienda(fila.recoge_en), lista_para_entregar: lineas.every((l) => l.lista),
       faltante: fila.estado === 'apartado' ? Math.max(0, subtotal + Number(fila.envio) - Number(fila.saldo)) : 0,
       viernes_envio: fila.liquidado_en ? viernesDeEnvio(String(fila.liquidado_en)) : null };
   });
@@ -90,13 +104,26 @@ const pedidoPor = async (env: Env, donde: string, valor: unknown) => (await leer
  * antes de la sentencia que cambia su estado, en el mismo batch: la condicion se
  * evalua en SQL, asi que dos cancelaciones (o el cron y una venta) juntas
  * regresan la existencia una sola vez.
+ * #800: cada renglon regresa a SU tienda (`pedido_lineas.tienda`): Soledad = productos.stock; una sucursal = existencia_tienda, creando la
+ * fila si esa tienda nunca tuvo la pieza. Son dos sentencias (las dos leen el mismo estado: ninguna cambia el del pedido), asi que quien
+ * llama las reparte en su batch y su sentencia de estado va despues.
  */
-export const devolverApartado = (env: Env, pedidoId: string, ahora: string, condicion = '', ...extra: unknown[]) => env.DB.prepare(
-  `update productos set stock = stock + (select cantidad from pedido_lineas where pedido_id = ?1 and producto_id = productos.id),
-                        actualizado_en = ?2
-   where id in (select producto_id from pedido_lineas where pedido_id = ?1)
-     and exists (select 1 from pedidos where id = ?1 and estado = 'apartado' ${condicion})`,
-).bind(pedidoId, ahora, ...extra);
+export const devolverApartado = (env: Env, pedidoId: string, ahora: string, condicion = '', ...extra: unknown[]): D1PreparedStatement[] => {
+  const apartado = `exists (select 1 from pedidos where id = ?1 and estado = 'apartado' ${condicion})`;
+  return [
+    env.DB.prepare(
+      `update productos set stock = stock + (select cantidad from pedido_lineas where pedido_id = ?1 and producto_id = productos.id and tienda = '${TIENDA_CENTRAL}'),
+                            actualizado_en = ?2
+       where id in (select producto_id from pedido_lineas where pedido_id = ?1 and tienda = '${TIENDA_CENTRAL}')
+         and ${apartado}`,
+    ).bind(pedidoId, ahora, ...extra),
+    env.DB.prepare(
+      `insert into existencia_tienda (producto_id, tienda, unidades, actualizado_en)
+       select l.producto_id, l.tienda, l.cantidad, ?2 from pedido_lineas l where l.pedido_id = ?1 and l.tienda <> '${TIENDA_CENTRAL}' and ${apartado}
+       on conflict (producto_id, tienda) do update set unidades = unidades + excluded.unidades, actualizado_en = excluded.actualizado_en`,
+    ).bind(pedidoId, ahora, ...extra),
+  ];
+};
 
 async function productosDe(env: Env, pedidoId: string): Promise<string[]> {
   const { results } = await env.DB.prepare('select producto_id from pedido_lineas where pedido_id = ?')
@@ -119,12 +146,28 @@ export async function enPedido(env: Env, productoId: string): Promise<boolean> {
  * aborta el batch si otra venta gasto el saldo (o ya vencio) entre la lectura y aqui.
  */
 export async function sentenciasDePedido(env: Env, p: {
-  pedidoId: string; ventaId: string; anticipo: number; ahora: string;
+  pedidoId: string; ventaId: string; anticipo: number; ahora: string; tienda: string;
   total: number; lineas: { producto_id: string; cantidad: number; precio: number }[];
 }): Promise<{ ok: true; sentencias: D1PreparedStatement[] } | { ok: false; error: string; status: number }> {
-  const pedido = await env.DB.prepare('select saldo, saldo_vence_en, estado, entrega, revision, liquidado_en from pedidos where id = ?')
-    .bind(p.pedidoId).first<{ saldo: number; saldo_vence_en: string; estado: string; entrega: string; revision: number; liquidado_en: string | null }>();
+  const pedido = await env.DB.prepare('select saldo, saldo_vence_en, estado, entrega, revision, liquidado_en, recoge_en from pedidos where id = ?')
+    .bind(p.pedidoId).first<{ saldo: number; saldo_vence_en: string; estado: string; entrega: string; revision: number; liquidado_en: string | null; recoge_en: string }>();
   if (!pedido) return { ok: false, status: 409, error: 'El pedido no existe.' };
+  // #800: un apartado se cobra en una caja de la tienda donde se recoge y solo cuando todas sus piezas ya están ahí. (El saldo a favor de un
+  // pedido cancelado o vencido no tiene piezas que entregar: se gasta en cualquier tienda.) Una pieza que se mande justo ahora cambia
+  // `revision` y el update de abajo aborta el ticket.
+  if (pedido.estado === 'apartado') {
+    if (pedido.recoge_en !== p.tienda)
+      return { ok: false, status: 409, error: `Este pedido se recoge en ${nombreTienda(pedido.recoge_en)}. Cóbralo en una caja de esa tienda.` };
+    const { results: faltan } = await env.DB.prepare(
+      `select pr.codigo, pr.nombre, l.tienda, l.enviada_desde, l.enviada_en, l.llego_en from pedido_lineas l join productos pr on pr.id = l.producto_id
+       where l.pedido_id = ? and (l.tienda <> ? or (l.enviada_en is not null and l.llego_en is null)) order by pr.nombre`,
+    ).bind(p.pedidoId, pedido.recoge_en).all<{ codigo: string; nombre: string; tienda: string; enviada_desde: string | null; enviada_en: string | null; llego_en: string | null }>();
+    if (faltan.length) {
+      const f = faltan[0];
+      const donde = f.enviada_en ? `viene de ${nombreTienda(f.enviada_desde ?? '')} y falta marcar «Ya llegó» en Avisos` : `está en ${nombreTienda(f.tienda)}`;
+      return { ok: false, status: 409, error: `Todavía falta ${f.nombre} (${f.codigo}): ${donde}.${faltan.length > 1 ? ` Y ${faltan.length - 1} más.` : ''}` };
+    }
+  }
   const envioApartado = pedido.estado === 'apartado' && pedido.entrega === 'envio';
   if (envioApartado) {
     // Los paquetes nuevos se liquidan con abonos. Los ya pagados de #269 todavía cierran en caja.
@@ -141,7 +184,7 @@ export async function sentenciasDePedido(env: Env, p: {
   return {
     ok: true,
     sentencias: [
-      devolverApartado(env, p.pedidoId, p.ahora),
+      ...devolverApartado(env, p.pedidoId, p.ahora),
       env.DB.prepare(
         `update pedidos set saldo = case when revision = ?5 and (saldo_vence_en > ?1
                               or (estado = 'apartado' and entrega = 'envio' and liquidado_en is not null))
@@ -169,8 +212,8 @@ async function ventaDePaquete(env: Env, pedidoId: string, ventaId: string, total
   if (!vale.ok) throw new Error(vale.error);
   return [
     env.DB.prepare(`insert into ventas (id, total, forma_pago, efectivo, cambio, creado_en, registrado_en,
-      caja, cajero, anticipo, pedido_id) values (?, ?, ?, 0, 0, ?, ?, ?, ?, ?, ?)`)
-      .bind(ventaId, total, formaPago, ahora, ahora, caja, correo, total, pedidoId),
+      caja, cajero, anticipo, pedido_id, tienda) values (?, ?, ?, 0, 0, ?, ?, ?, ?, ?, ?, ?)`)
+      .bind(ventaId, total, formaPago, ahora, ahora, caja, correo, total, pedidoId, tiendaDeCaja(caja)),
     env.DB.prepare(`insert into venta_lineas (venta_id, producto_id, codigo, nombre, precio, cantidad, propietario)
       select ?1, p.id, p.codigo, p.nombre, l.precio, l.cantidad, 'dolaron'
       from pedido_lineas l join productos p on p.id = l.producto_id where l.pedido_id = ?2
@@ -199,10 +242,54 @@ export function telefonoDe(valor: unknown): string | null {
  * (48 h / 24 h), envio sin cobrar el paquete. Lo decide quien llama segun la cuenta, nunca el cuerpo de la peticion: en `portal`
  * `correo` es la constante 'portal' y el dueno es el telefono del socio.
  */
-const crearPedido = async (request: Request, env: Env, ctx: ExecutionContext, correo: string, modo: Modo = 'caja'): Promise<Response> =>
-  crearPedidoDe((await request.json().catch(() => ({}))) as Record<string, unknown>, env, ctx, correo, modo);
+const crearPedido = async (request: Request, env: Env, ctx: ExecutionContext, correo: string, modo: Modo = 'caja', terminal: string | null = null): Promise<Response> =>
+  crearPedidoDe((await request.json().catch(() => ({}))) as Record<string, unknown>, env, ctx, correo, modo, terminal);
 
-async function crearPedidoDe(cuerpo: Record<string, unknown>, env: Env, ctx: ExecutionContext, correo: string, modo: Modo): Promise<Response> {
+/**
+ * La existencia de cada pieza por tienda (Soledad = productos.stock; sucursales = existencia_tienda): de donde puede salir una unidad
+ * apartada. Es una lectura previa; lo que protege es el batch (stock_no_negativo / existencia_tienda_no_negativa aborta si otra venta ganó).
+ */
+async function existenciasPorTienda(env: Env, ids: string[]): Promise<Map<string, Record<string, number>>> {
+  const huecos = ids.map(() => '?').join(',');
+  const [soledad, sucursales] = await Promise.all([
+    env.DB.prepare(`select id, stock from productos where id in (${huecos})`).bind(...ids).all<{ id: string; stock: number }>(),
+    env.DB.prepare(`select producto_id, tienda, unidades from existencia_tienda where producto_id in (${huecos}) and unidades > 0`).bind(...ids)
+      .all<{ producto_id: string; tienda: string; unidades: number }>(),
+  ]);
+  const mapa = new Map<string, Record<string, number>>(soledad.results.map((f) => [f.id, { [TIENDA_CENTRAL]: f.stock }]));
+  for (const f of sucursales.results) if (esTienda(f.tienda)) mapa.get(f.producto_id)![f.tienda] = f.unidades;
+  return mapa;
+}
+
+/**
+ * De qué tienda sale una pieza (un renglón sale de UNA sola tienda): la que tenga las unidades completas, prefiriendo la tienda donde
+ * se recoge, luego Soledad, luego la que más tenga. null = ninguna tienda sola alcanza.
+ */
+export function elegirOrigen(unidades: Record<string, number>, necesita: number, recogeEn: string): string | null {
+  const alcanzan = (Object.keys(TIENDAS) as string[]).filter((t) => (unidades[t] ?? 0) >= necesita);
+  return [recogeEn, TIENDA_CENTRAL].find((t) => alcanzan.includes(t))
+    ?? [...alcanzan].sort((a, b) => unidades[b] - unidades[a])[0] ?? null;
+}
+
+const CONTABLE = `propietario = 'dolaron' and sin_inventario = 0 and codigo is not null and codigo != ''`;
+
+/**
+ * Las sentencias que sacan `n` unidades de `origen` para apartarlas. Soledad: como siempre (el candado de precio y de pieza ajena va en el
+ * mismo update; -1 aborta por stock_no_negativo). Sucursal: el mismo candado sobre `productos` sin cambiar su existencia, y la resta en
+ * existencia_tienda, que aborta el batch si otra venta ya se llevó la unidad.
+ */
+function sentenciasApartar(env: Env, origen: string, productoId: string, n: number, precio: number, ahora: string): D1PreparedStatement[] {
+  if (origen === TIENDA_CENTRAL) {
+    return [env.DB.prepare(`update productos set stock = case when precio = ?4 and ${CONTABLE} then stock - ?1 else -1 end, actualizado_en = ?2 where id = ?3`)
+      .bind(n, ahora, productoId, precio)];
+  }
+  return [
+    env.DB.prepare(`update productos set stock = case when precio = ?2 and ${CONTABLE} then stock else -1 end where id = ?1`).bind(productoId, precio),
+    ...sentenciasMover(env, origen, productoId, -n, ahora),
+  ];
+}
+
+async function crearPedidoDe(cuerpo: Record<string, unknown>, env: Env, ctx: ExecutionContext, correo: string, modo: Modo, terminal: string | null): Promise<Response> {
   const sinDinero = modo !== 'caja';
   const id = String(cuerpo.id ?? '');
   if (!UUID.test(id)) return json({ error: 'Identificador invalido.' }, 400);
@@ -235,8 +322,13 @@ async function crearPedidoDe(cuerpo: Record<string, unknown>, env: Env, ctx: Exe
   // forma_pago es NOT NULL con CHECK: sin dinero recibido da igual, 'transferencia' es lo que se cobrara despues.
   const formaPago = sinDinero ? 'transferencia' : String(cuerpo.forma_pago ?? '');
   if (!FORMAS_PAGO.has(formaPago)) return json({ error: 'Forma de pago invalida.' }, 400);
-  const caja = sinDinero ? '' : await cajaDe(env, correo, cuerpo.caja, TIENDA_CENTRAL);
+  // #800: la caja es de la tienda de la terminal. Dónde recoge el cliente lo propone el navegador (ausente = Soledad, como las páginas viejas);
+  // en un envío es la tienda que envía. El servidor valida la clave: nunca es texto libre.
+  const caja = sinDinero ? '' : await cajaDe(env, correo, cuerpo.caja, terminal ?? TIENDA_CENTRAL);
   if (!sinDinero && !caja) return json({ error: 'Falta la caja.' }, 400);
+  const pedidaRecoge = cuerpo.recoge_en === undefined || cuerpo.recoge_en === null || cuerpo.recoge_en === '' ? TIENDA_CENTRAL : cuerpo.recoge_en;
+  if (!esTienda(pedidaRecoge)) return json({ error: 'Esa tienda no existe.' }, 400);
+  const recogeEn: string = entrega === 'envio' ? TIENDA_ENVIO : pedidaRecoge;
 
   const ids = [...cantidades.keys()];
   const { results: filas } = await env.DB.prepare(
@@ -280,6 +372,15 @@ async function crearPedidoDe(cuerpo: Record<string, unknown>, env: Env, ctx: Exe
       return json({ error: `Máximo ${PIEZAS_REVENDEDORA} piezas apartadas sin pago a la vez (ahora tienes ${abiertas}). Espera a que la tienda registre el pago o cancela alguna.` }, 409);
   }
 
+  // #800: cada renglón sale de una sola tienda; si ninguna tiene las unidades completas ya no está disponible.
+  const existencias = await existenciasPorTienda(env, ids);
+  const origenes = new Map<string, string>();
+  for (const productoId of ids) {
+    const origen = elegirOrigen(existencias.get(productoId) ?? {}, cantidades.get(productoId)!, recogeEn);
+    if (!origen) return json({ error: 'Alguna pieza ya no está disponible.' }, 409);
+    origenes.set(productoId, origen);
+  }
+
   const momento = new Date();
   const ahora = momento.toISOString();
   const vence = new Date(momento.getTime() + (modo === 'portal' ? HORAS_PORTAL * 3_600_000 : modo === 'revendedora' ? HORAS_REVENDEDORA * 3_600_000 : DIAS_APARTADO * 86_400_000));
@@ -287,19 +388,19 @@ async function crearPedidoDe(cuerpo: Record<string, unknown>, env: Env, ctx: Exe
     await env.DB.batch([
       env.DB.prepare(
         `insert into pedidos (id, folio, cliente, telefono, entrega, envio, vendedora, estado, vence_en, anticipo,
-                              forma_pago, caja, saldo, saldo_vence_en, creado_en, actualizado_en)
-         values (?, (select coalesce(max(folio), 0) + 1 from pedidos), ?, ?, ?, ?, ?, 'apartado', ?, ?, ?, ?, ?, ?, ?, ?)`,
+                              forma_pago, caja, saldo, saldo_vence_en, creado_en, actualizado_en, recoge_en)
+         values (?, (select coalesce(max(folio), 0) + 1 from pedidos), ?, ?, ?, ?, ?, 'apartado', ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       ).bind(id, cliente, telefono, entrega, envio, correo, vence.toISOString(), anticipo, formaPago, caja,
-        anticipo, sumarMeses(vence, 1), ahora, ahora),
+        anticipo, sumarMeses(vence, 1), ahora, ahora, recogeEn),
       ...(transf ? [sentenciaTransferencia(env, transf, correo, ahora, 'anticipo', { pedido: id })] : []),
+      // Nace separada la pieza que sale de la tienda de quien levanta el pedido (la tiene a la mano); las demás esperan su aviso.
       ...ids.map((productoId) => env.DB.prepare(
-        'insert into pedido_lineas (pedido_id, producto_id, cantidad, precio) values (?, ?, ?, ?)',
-      ).bind(id, productoId, cantidades.get(productoId), filas.find((p) => p.id === productoId)!.precio)),
-      // Sin max(0, ...): el trigger stock_no_negativo (migracion 006) aborta todo el batch si ya no hay.
-      ...ids.map((productoId) => env.DB.prepare(
-        `update productos set stock = case when precio = ?4 and propietario = 'dolaron' and sin_inventario = 0
-           and codigo is not null and codigo != '' then stock - ?1 else -1 end, actualizado_en = ?2 where id = ?3`,
-      ).bind(cantidades.get(productoId), ahora, productoId, filas.find((p) => p.id === productoId)!.precio)),
+        'insert into pedido_lineas (pedido_id, producto_id, cantidad, precio, tienda, separada_en, separada_por) values (?, ?, ?, ?, ?, ?, ?)',
+      ).bind(id, productoId, cantidades.get(productoId), filas.find((p) => p.id === productoId)!.precio, origenes.get(productoId),
+        origenes.get(productoId) === terminal ? ahora : null, origenes.get(productoId) === terminal ? correo : null)),
+      // Sin max(0, ...): los triggers stock_no_negativo (006) y existencia_tienda_no_negativa (077) abortan todo el batch si ya no hay.
+      ...ids.flatMap((productoId) => sentenciasApartar(env, origenes.get(productoId)!, productoId, cantidades.get(productoId)!,
+        filas.find((p) => p.id === productoId)!.precio, ahora)),
       ...(entrega === 'envio' && anticipo === total ? await ventaDePaquete(env, id, id, total, ahora, correo, caja, formaPago) : []),
     ]);
   } catch (error) {
@@ -307,12 +408,18 @@ async function crearPedidoDe(cuerpo: Record<string, unknown>, env: Env, ctx: Exe
     const ya = await pedidoPor(env, 'id = ?', id);
     if (ya) return json({ pedido: ya, excedente_transferencia: await excedenteDe(env, 'anticipo', id) });
     if (transf && esChoqueDeClave(error)) return (await respuestaClaveUsada(env, transf.clave)) ?? json({ error: 'Esa clave de rastreo ya se usó.', campo: 'clave' }, 409);
-    if (String(error).includes('stock insuficiente')) return json({ error: 'Alguna pieza ya no está disponible.' }, 409);
+    if (esExistenciaInsuficiente(error)) return json({ error: 'Alguna pieza ya no está disponible.' }, 409);
     throw error;
   }
   // Las piezas apartadas dejan de estar a la venta tambien en Mercado Libre (D1 manda).
   ctx.waitUntil(conciliarSeguro(env, { productoIds: ids }));
-  return json({ pedido: await pedidoPor(env, 'id = ?', id), excedente_transferencia: transf?.ok ? transf.excedente : 0 }, 201);
+  const creado = await pedidoPor(env, 'id = ?', id);
+  // R7 de #793: la tienda donde está la pieza recibe el aviso cuando la aparta alguien que no es su propio mostrador.
+  ctx.waitUntil(avisarTiendas(env, [...origenes.entries()].filter(([, origen]) => origen !== terminal).map(([productoId, origen]) => ({
+    tienda: origen, titulo: 'Pieza por separar',
+    cuerpo: `Separa ${cantidades.get(productoId)! > 1 ? `${cantidades.get(productoId)} piezas` : 'una pieza'} del pedido P-${creado!.folio}. Se recoge en ${nombreTienda(recogeEn)}.`,
+  }))));
+  return json({ pedido: creado, excedente_transferencia: transf?.ok ? transf.excedente : 0 }, 201);
 }
 
 /** Apartados, envios por mandar y saldos a favor vigentes. */
@@ -381,7 +488,7 @@ export async function apartarPortal(request: Request, env: Env, ctx: ExecutionCo
     if (fuera.length) return json({ error: textoNoDisponibles(fuera.length, codigos.length), no_disponibles: fuera }, 409);
     lineas = results.map((f) => ({ producto_id: f.id, cantidad: 1 }));
   }
-  const r = await crearPedidoDe({ id, lineas, cliente: socio.nombre.slice(0, 80), telefono, entrega: cuerpo.entrega }, env, ctx, VENDEDORA_PORTAL, 'portal');
+  const r = await crearPedidoDe({ id, lineas, cliente: socio.nombre.slice(0, 80), telefono, entrega: cuerpo.entrega, recoge_en: cuerpo.recoge_en }, env, ctx, VENDEDORA_PORTAL, 'portal', null);
   if (r.status !== 200 && r.status !== 201) {
     // Ganada por otro entre la lectura y el batch: el batch se deshizo completo; se dice cuales ya no estan.
     const falla = await r.json() as Record<string, unknown>;
@@ -392,7 +499,8 @@ export async function apartarPortal(request: Request, env: Env, ctx: ExecutionCo
   const { pedido } = await r.json() as { pedido: NonNullable<Awaited<ReturnType<typeof pedidoPor>>> };
   return new Response(JSON.stringify({
     pedido: { folio: pedido.folio, vence_en: pedido.vence_en, entrega: pedido.entrega, envio: pedido.envio, subtotal: pedido.subtotal,
-      lineas: pedido.lineas.map(({ codigo, nombre, precio, cantidad }) => ({ codigo, nombre, precio, cantidad })) },
+      recoge_en_nombre: pedido.recoge_en_nombre, lista_para_entregar: pedido.lista_para_entregar,
+      lineas: pedido.lineas.map(({ codigo, nombre, precio, cantidad, tienda_nombre, lista }) => ({ codigo, nombre, precio, cantidad, tienda_nombre, lista })) },
     // Envio: el paquete abre con esto y el resto entra como abonos (misma regla de crearPedido); recoger: es el apartado.
     a_pagar: anticipoMinimoDe(pedido.subtotal), concepto: `P-${pedido.folio}`,
     // Banco, CLABE y titular los pone Isaac en el panel de Cloudflare; nunca viven en el repo.
@@ -424,7 +532,8 @@ export async function pedidosDeRevendedora(env: Env, correo: string): Promise<Re
   const pedidos = todos.map((p) => ({
     folio: p.folio, estado: p.estado, vence_en: p.vence_en, cliente: p.cliente, telefono: p.telefono, entrega: p.entrega,
     envio: p.envio, saldo: p.saldo, creado_en: p.creado_en, subtotal: p.subtotal, liquidado_en: p.liquidado_en,
-    lineas: p.lineas.map(({ codigo, nombre, precio, cantidad }) => ({ codigo, nombre, precio, cantidad })),
+    recoge_en_nombre: p.recoge_en_nombre, lista_para_entregar: p.lista_para_entregar,
+    lineas: p.lineas.map(({ codigo, nombre, precio, cantidad, tienda_nombre, lista }) => ({ codigo, nombre, precio, cantidad, tienda_nombre, lista })),
     // Con dinero registrado, o con un pago por revisar (#609), ya solo lo cancela la tienda.
     cancelable: p.estado === 'apartado' && Number(p.saldo) === 0 && reportes.get(p.folio)?.estado !== 'pendiente',
     // Lo ultimo que paso con el pago que ella reporto: { estado: pendiente | aceptado | rechazado, motivo, reportado_en } o null.
@@ -443,7 +552,8 @@ export async function apartadosDeSocio(env: Env, telefono: string): Promise<Resp
     folio: p.folio, estado: p.estado, vence_en: p.vence_en, entrega: p.entrega, envio: p.envio, subtotal: p.subtotal,
     saldo: p.saldo, faltante: p.faltante, liquidado_en: p.liquidado_en, guia: p.guia,
     viernes_envio: p.entrega === 'envio' ? p.viernes_envio : null, creado_en: p.creado_en,
-    lineas: p.lineas.map(({ codigo, nombre, precio, cantidad }) => ({ codigo, nombre, precio, cantidad })),
+    recoge_en_nombre: p.recoge_en_nombre, lista_para_entregar: p.lista_para_entregar,
+    lineas: p.lineas.map(({ codigo, nombre, precio, cantidad, tienda_nombre, lista }) => ({ codigo, nombre, precio, cantidad, tienda_nombre, lista })),
     // Solo lo que levanto el portal y sigue sin dinero ni pago por revisar; lo demas lo cancela la tienda.
     cancelable: p.estado === 'apartado' && Number(p.saldo) === 0 && p.vendedora === VENDEDORA_PORTAL && reportes.get(p.folio)?.estado !== 'pendiente',
     pago_reportado: reportes.get(p.folio) ?? null,
@@ -465,21 +575,21 @@ async function cancelarSuyo(folio: number, env: Env, ctx: ExecutionContext, vend
   const ahora = momento.toISOString();
   // #609: con un pago reportado sin revisar la pieza no se cancela (el cliente ya pago); lo decide la tienda.
   const sinReporte = `and not ${hayReportePendiente('?1')}`;
-  const [, marca] = await env.DB.batch([
-    devolverApartado(env, pedido.id, ahora, `and vendedora = ?3 ${telefono === undefined ? '' : 'and telefono = ?4'} and saldo = 0 and liquidado_en is null ${sinReporte}`,
+  const resultados = await env.DB.batch([
+    ...devolverApartado(env, pedido.id, ahora, `and vendedora = ?3 ${telefono === undefined ? '' : 'and telefono = ?4'} and saldo = 0 and liquidado_en is null ${sinReporte}`,
       vendedora, ...(telefono === undefined ? [] : [telefono])),
     env.DB.prepare(`update pedidos set estado = 'cancelado', saldo_vence_en = ?2, actualizado_en = ?3, revision = revision + 1
       where id = ?1 and estado = 'apartado' and saldo = 0 and liquidado_en is null and vendedora = ?4 ${telefono === undefined ? '' : 'and telefono = ?5'} ${sinReporte}`)
       .bind(pedido.id, sumarMeses(momento, 1), ahora, vendedora, ...(telefono === undefined ? [] : [telefono])),
   ]);
-  if (!marca.meta.changes) return json({ error: 'Ya no se puede cancelar aquí: pídelo a la tienda.' }, 409);
+  if (!resultados.at(-1)!.meta.changes) return json({ error: 'Ya no se puede cancelar aquí: pídelo a la tienda.' }, 409);
   ctx.waitUntil(conciliarSeguro(env, { productoIds: await productosDe(env, pedido.id) }));
   return json({ ok: true, folio });
 }
 
 /** Un movimiento tiene ID del navegador y contenido fijo: una respuesta perdida no cobra ni aparta dos veces. */
 async function moverPaquete(folio: number, tipo: 'pieza' | 'abono', request: Request,
-  env: Env, ctx: ExecutionContext, correo: string): Promise<Response> {
+  env: Env, ctx: ExecutionContext, correo: string, terminal: string): Promise<Response> {
   const cuerpo = (await request.json().catch(() => ({}))) as Record<string, unknown>;
   const id = String(cuerpo.id ?? '');
   if (!UUID.test(id)) return json({ error: 'Identificador inválido.' }, 400);
@@ -487,7 +597,7 @@ async function moverPaquete(folio: number, tipo: 'pieza' | 'abono', request: Req
   const cantidad = Number(cuerpo.cantidad);
   const importe = Number(cuerpo.importe);
   const formaPago = String(cuerpo.forma_pago ?? '');
-  const caja = tipo === 'abono' ? await cajaDe(env, correo, cuerpo.caja, TIENDA_CENTRAL) : '';
+  const caja = tipo === 'abono' ? await cajaDe(env, correo, cuerpo.caja, terminal) : '';
   if (tipo === 'pieza' && (!UUID.test(productoId) || !Number.isInteger(cantidad) || cantidad < 1 || cantidad > 999))
     return json({ error: 'Pieza o cantidad inválida.' }, 400);
   if (tipo === 'abono' && (!Number.isSafeInteger(importe) || importe <= 0 || !FORMAS_PAGO.has(formaPago) || !caja))
@@ -525,6 +635,7 @@ async function moverPaquete(folio: number, tipo: 'pieza' | 'abono', request: Req
   const vence = new Date(momento.getTime() + DIAS_APARTADO * 86_400_000);
   let precio = 0;
   let precioCatalogo = 0;
+  let origen: string = TIENDA_CENTRAL;
   if (tipo === 'pieza') {
     const producto = await env.DB.prepare('select precio, propietario, codigo, sin_inventario, estado_fisico from productos where id = ?')
       .bind(productoId).first<{ precio: number; propietario: string; codigo: string | null; sin_inventario: number; estado_fisico: string }>();
@@ -533,6 +644,12 @@ async function moverPaquete(folio: number, tipo: 'pieza' | 'abono', request: Req
     // Si se suma otra unidad del mismo producto, conserva el precio de esa línea.
     precioCatalogo = producto.precio;
     precio = pedido.lineas.find((l) => l.producto_id === productoId)?.precio ?? precioCatalogo;
+    // #800: otra unidad de una pieza que ya está en el pedido sale de la tienda de ese renglón; una pieza nueva, de donde la haya.
+    const existencias = (await existenciasPorTienda(env, [productoId])).get(productoId) ?? {};
+    const linea = pedido.lineas.find((l) => l.producto_id === productoId);
+    const elegido = linea ? ((existencias[linea.tienda] ?? 0) >= cantidad ? linea.tienda : null) : elegirOrigen(existencias, cantidad, pedido.recoge_en);
+    if (!elegido) return json({ error: 'Alguna pieza ya no está disponible.' }, 409);
+    origen = elegido;
   }
   const subtotal = pedido.subtotal + (tipo === 'pieza' ? precio * cantidad : 0);
   const envio = tipo === 'pieza' ? envioDe(subtotal) : Number(pedido.envio);
@@ -548,7 +665,7 @@ async function moverPaquete(folio: number, tipo: 'pieza' | 'abono', request: Req
         and (entrega = 'envio'${sinAnticipo ? " or (entrega = 'tienda' and anticipo = 0)" : ''})
         and liquidado_en is null and (vence_en > ?2 or ${tipo === 'abono' ? hayReportePendiente('pedidos.id') : '0'}) ${tipo === 'pieza' ? `and exists (select 1 from productos
           where id = ?4 and propietario = 'dolaron' and sin_inventario = 0 and codigo is not null and codigo != ''
-          and stock >= ?5 and precio = ?6)` : ''} then saldo else -1 end where id = ?3`)
+          and ${origen === TIENDA_CENTRAL ? 'stock' : enTiendaSql('productos.id', origen as Tienda)} >= ?5 and precio = ?6)` : ''} then saldo else -1 end where id = ?3`)
         .bind(pedido.revision, ahora, pedido.id, ...(tipo === 'pieza' ? [productoId, cantidad, precioCatalogo] : [])),
       env.DB.prepare(`insert into pedido_movimientos
         (id, pedido_id, tipo, solicitud, importe, forma_pago, caja, autor, creado_en, respuesta)
@@ -559,13 +676,11 @@ async function moverPaquete(folio: number, tipo: 'pieza' | 'abono', request: Req
       ...(tipo === 'abono' ? [env.DB.prepare(`update pagos_reportados set estado = 'aceptado', revisado_por = ?, revisado_en = ?, movimiento_id = ?
         where pedido_id = ? and estado = 'pendiente'`).bind(correo, ahora, id, pedido.id)] : []),
       ...(tipo === 'pieza' ? [
-        env.DB.prepare(`insert into pedido_lineas (pedido_id, producto_id, cantidad, precio) values (?, ?, ?, ?)
+        env.DB.prepare(`insert into pedido_lineas (pedido_id, producto_id, cantidad, precio, tienda, separada_en, separada_por) values (?, ?, ?, ?, ?, ?, ?)
           on conflict (pedido_id, producto_id) do update set cantidad = cantidad + excluded.cantidad`)
-          .bind(pedido.id, productoId, cantidad, precio),
-        // El trigger rechaza stock negativo; también revierte línea, movimiento y plazo si cambió el producto.
-        env.DB.prepare(`update productos set stock = case when propietario = 'dolaron' and sin_inventario = 0
-          and codigo is not null and codigo != '' then stock - ?1 else -1 end, actualizado_en = ?2 where id = ?3`)
-          .bind(cantidad, ahora, productoId),
+          .bind(pedido.id, productoId, cantidad, precio, origen, origen === terminal ? ahora : null, origen === terminal ? correo : null),
+        // Los triggers rechazan existencia negativa; también revierten línea, movimiento y plazo si cambió el producto.
+        ...sentenciasApartar(env, origen, productoId, cantidad, precioCatalogo, ahora),
       ] : []),
       env.DB.prepare(`update pedidos set saldo = saldo + ?1, envio = ?2, vence_en = ?3,
         saldo_vence_en = ?4, actualizado_en = ?5, revision = revision + 1 where id = ?6`)
@@ -582,11 +697,15 @@ async function moverPaquete(folio: number, tipo: 'pieza' | 'abono', request: Req
     const repetido = await reintento();
     if (repetido) return repetido;
     if (transf && esChoqueDeClave(error)) return (await respuestaClaveUsada(env, transf.clave)) ?? json({ error: 'Esa clave de rastreo ya se usó.', campo: 'clave' }, 409);
-    if (String(error).includes('stock insuficiente')) return json({ error: 'Alguna pieza ya no está disponible.' }, 409);
+    if (esExistenciaInsuficiente(error)) return json({ error: 'Alguna pieza ya no está disponible.' }, 409);
     if (String(error).includes('saldo de pedido invalido')) return json({ error: 'El paquete cambió o venció. Actualiza la lista.' }, 409);
     throw error;
   }
-  if (tipo === 'pieza') ctx.waitUntil(conciliarSeguro(env, { productoIds: [productoId] }));
+  if (tipo === 'pieza') {
+    ctx.waitUntil(conciliarSeguro(env, { productoIds: [productoId] }));
+    if (origen !== terminal) ctx.waitUntil(avisarTiendas(env, [{ tienda: origen, titulo: 'Pieza por separar',
+      cuerpo: `Separa ${cantidad > 1 ? `${cantidad} piezas` : 'una pieza'} del pedido P-${folio}. Se recoge en ${nombreTienda(pedido.recoge_en)}.` }]));
+  }
   return (await reintento())!;
 }
 
@@ -596,14 +715,14 @@ async function cancelarPedido(folio: number, env: Env, ctx: ExecutionContext): P
   if (pedido.estado !== 'apartado' || pedido.liquidado_en) return json({ error: 'Solo se cancela un apartado sin liquidar.' }, 409);
   const momento = new Date();
   const ahora = momento.toISOString();
-  const [, marca] = await env.DB.batch([
-    devolverApartado(env, pedido.id, ahora, 'and liquidado_en is null'),
+  const resultados = await env.DB.batch([
+    ...devolverApartado(env, pedido.id, ahora, 'and liquidado_en is null'),
     env.DB.prepare(
       `update pedidos set estado = 'cancelado', saldo_vence_en = ?, actualizado_en = ?, revision = revision + 1
        where id = ? and estado = 'apartado' and liquidado_en is null`,
     ).bind(sumarMeses(momento, 1), ahora, pedido.id),
   ]);
-  if (!marca.meta.changes) return json({ error: 'Alguien más cambió este pedido. Vuelve a abrirlo.' }, 409);
+  if (!resultados.at(-1)!.meta.changes) return json({ error: 'Alguien más cambió este pedido. Vuelve a abrirlo.' }, 409);
   ctx.waitUntil(conciliarSeguro(env, { productoIds: await productosDe(env, pedido.id) }));
   return json({ pedido: await pedidoPor(env, 'id = ?', pedido.id) });
 }
@@ -616,6 +735,8 @@ async function guardarGuia(folio: number, request: Request, env: Env): Promise<R
   if (!pedido) return json({ error: 'El pedido no existe.' }, 404);
   if (pedido.entrega !== 'envio' || pedido.estado !== 'vendido' || !pedido.liquidado_en)
     return json({ error: 'Solo se guarda guía de un envío liquidado con ticket.' }, 409);
+  // #800: el paquete sale de la tienda que envía; una pieza que sigue en una sucursal o en camino todavía no está ahí.
+  if (!pedido.lista_para_entregar) return json({ error: `Todavía faltan piezas por llegar a ${nombreTienda(pedido.recoge_en)}: revisa Avisos antes de mandar el paquete.` }, 409);
   const guardada = await env.DB.prepare(`update pedidos set guia = ?, actualizado_en = ?
     where id = ? and estado = 'vendido' and liquidado_en is not null`)
     .bind(guia, new Date().toISOString(), pedido.id).run();
@@ -624,13 +745,13 @@ async function guardarGuia(folio: number, request: Request, env: Env): Promise<R
 }
 
 /** null = la ruta no es de pedidos. El permiso (CAJA) ya lo cobro cuentas.ts. */
-export async function rutaPedidos(request: Request, env: Env, ctx: ExecutionContext, pathname: string, correo: string): Promise<Response | null> {
+export async function rutaPedidos(request: Request, env: Env, ctx: ExecutionContext, pathname: string, correo: string, tienda: string): Promise<Response | null> {
   const m = /^\/api\/pedidos(?:\/(\d{1,9})(?:\/(cancelar|guia|piezas|abonos|rechazar-pago))?)?$/.exec(pathname);
   if (!m) return null;
   const metodo = request.method;
   const folio = m[1] === undefined ? null : Number(m[1]);
   if (folio === null) {
-    if (metodo === 'POST') return crearPedido(request, env, ctx, correo);
+    if (metodo === 'POST') return crearPedido(request, env, ctx, correo, 'caja', tienda);
     if (metodo === 'GET') return listarPedidos(env);
   } else if (m[2] === undefined) {
     if (metodo === 'GET') {
@@ -642,7 +763,7 @@ export async function rutaPedidos(request: Request, env: Env, ctx: ExecutionCont
   } else if (m[2] === 'rechazar-pago') {
     if (metodo === 'POST') return rechazarPago(folio, request, env, correo);
   } else if (m[2] === 'piezas' || m[2] === 'abonos') {
-    if (metodo === 'POST') return moverPaquete(folio, m[2] === 'piezas' ? 'pieza' : 'abono', request, env, ctx, correo);
+    if (metodo === 'POST') return moverPaquete(folio, m[2] === 'piezas' ? 'pieza' : 'abono', request, env, ctx, correo, tienda);
   } else if (metodo === 'PUT') {
     return guardarGuia(folio, request, env);
   }
@@ -664,14 +785,14 @@ export async function vencerPedidos(env: Env, momento = new Date()): Promise<num
     ).bind(ahora).all<{ id: string }>();
     for (const { id } of results) {
       try {
-        const [, marca] = await env.DB.batch([
-          devolverApartado(env, id, ahora, `and liquidado_en is null and vence_en <= ?2 and not ${hayReportePendiente('?1')}`),
+        const resultados = await env.DB.batch([
+          ...devolverApartado(env, id, ahora, `and liquidado_en is null and vence_en <= ?2 and not ${hayReportePendiente('?1')}`),
           env.DB.prepare(
             `update pedidos set estado = 'vencido', saldo_vence_en = ?1, actualizado_en = ?2, revision = revision + 1
              where id = ?3 and estado = 'apartado' and liquidado_en is null and vence_en <= ?2 and not ${hayReportePendiente('?3')}`,
           ).bind(sumarMeses(momento, 1), ahora, id),
         ]);
-        if (marca.meta.changes) { vencidos++; tocados.push(...await productosDe(env, id)); }
+        if (resultados.at(-1)!.meta.changes) { vencidos++; tocados.push(...await productosDe(env, id)); }
       } catch (error) {
         console.error(JSON.stringify({ mensaje: 'vencer pedido', id, error: String(error) }));
       }

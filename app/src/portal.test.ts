@@ -524,8 +524,8 @@ test('GET /api/portal/apartados (#669): solo los de su teléfono (también los d
     assert.deepEqual(lista.map((a) => a.folio), [5, 3, 2, 1]);   // el 4 es de B; folio descendente
     const por = (folio: number) => lista.find((a) => a.folio === folio)!;
     for (const a of lista) {
-      assert.deepEqual(Object.keys(a).sort(), ['cancelable', 'creado_en', 'entrega', 'envio', 'estado', 'faltante', 'folio', 'guia', 'lineas', 'liquidado_en', 'pago_reportado', 'saldo', 'subtotal', 'vence_en', 'viernes_envio']);
-      assert.deepEqual(Object.keys(a.lineas[0]).sort(), ['cantidad', 'codigo', 'nombre', 'precio']);
+      assert.deepEqual(Object.keys(a).sort(), ['cancelable', 'creado_en', 'entrega', 'envio', 'estado', 'faltante', 'folio', 'guia', 'lineas', 'liquidado_en', 'lista_para_entregar', 'pago_reportado', 'recoge_en_nombre', 'saldo', 'subtotal', 'vence_en', 'viernes_envio']);
+      assert.deepEqual(Object.keys(a.lineas[0]).sort(), ['cantidad', 'codigo', 'lista', 'nombre', 'precio', 'tienda_nombre']);
     }
     assert.deepEqual([por(1).cancelable, por(1).faltante, por(1).viernes_envio, por(1).pago_reportado], [true, 25000, null, null]);
     assert.equal(por(1).lineas[0].codigo, sinPago.codigo);
