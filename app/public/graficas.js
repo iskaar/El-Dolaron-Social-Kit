@@ -51,6 +51,16 @@ export const flechaCambio = (c) => `${c.direccion === 'sube' ? '▲' : c.direcci
 const MS_DIA = 86_400_000;
 export const sumarDias = (dia, n) => new Date(Date.parse(`${dia}T00:00:00Z`) + n * MS_DIA).toISOString().slice(0, 10);
 
+/**
+ * LAS FECHAS DE /reportes (#802 B5): un formato para un dia («15 nov», `diaCorto`) y uno para un instante («15 nov 2026, 8:29 p.m.», `fechaHora`),
+ * en la hora del aparato. Ninguna vista escribe otro. `FECHAS_TICKET` es lo mismo para las listas de tickets (ticket.js las recibe como
+ * opcion para no cambiar la ventana de la caja).
+ */
+const diaMes = (iso, opciones) => new Date(iso).toLocaleDateString('es-MX', opciones).replace('.', '');   // «nov.» -> «nov»
+const horaDe = (iso) => new Date(iso).toLocaleTimeString('es-MX', { hour: 'numeric', minute: '2-digit' });
+export const fechaHora = (iso) => `${diaMes(iso, { day: 'numeric', month: 'short', year: 'numeric' })}, ${horaDe(iso)}`;
+export const FECHAS_TICKET = { fecha: (iso) => diaMes(iso, { day: 'numeric', month: 'short' }), hora: horaDe };
+
 /** Un renglon por dia del rango, con ceros donde no hubo ventas: una barra ausente no es un cero. */
 export function rellenarDias(porDia, desdeDia, hastaDia) {
   const mapa = new Map(porDia.map((f) => [f.dia, f]));

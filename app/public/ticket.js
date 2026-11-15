@@ -20,7 +20,7 @@ export const vigente = (t) => (t.cancelada ? 0 : t.total - t.devuelto - t.dolaro
  * Un renglon de la lista de tickets. `data-ticket` abre la ventana. Con `completo`
  * (reportes, donde la lista cruza dias y cajas) lleva fecha, caja, socio y Dolarones.
  */
-export function renglonTicket(t, { completo = false } = {}) {
+export function renglonTicket(t, { completo = false, fechas = { fecha, hora } } = {}) {
   asegurarEstilos();
   const parcial = !t.cancelada && t.cancelada_cantidad > 0;
   const estado = t.cancelada ? 'cancelado' : parcial ? `${t.cancelada_cantidad} de ${t.cantidad} devueltas` : '';
@@ -28,7 +28,7 @@ export function renglonTicket(t, { completo = false } = {}) {
     <button type="button" class="ticket-fila ${t.cancelada ? 'cancelada' : ''}" data-ticket="${escapar(t.id)}">
       <span class="ticket-principal">
         <b>${pesos(vigente(t))}</b>${parcial ? ` <s>${pesos(t.total)}</s>` : ''}
-        · ${completo ? `${fecha(t.creado_en)} ` : ''}${hora(t.creado_en)} · ${FORMAS[t.forma_pago] ?? escapar(t.forma_pago)}
+        · ${completo ? `${fechas.fecha(t.creado_en)} ` : ''}${fechas.hora(t.creado_en)} · ${FORMAS[t.forma_pago] ?? escapar(t.forma_pago)}
         ${completo ? `· ${escapar(t.caja || 'sin caja')}${t.con_socio ? ' · socio' : ''}${t.dolarones ? ` · ${dolares(t.dolarones)}` : ''}` : ''}
         <span class="piezas">${escapar(t.piezas)}</span>
       </span>
@@ -41,8 +41,9 @@ export function renglonTicket(t, { completo = false } = {}) {
  * ticket lleva «Cancelar» y al final va «Cancelar todo lo que queda». `resaltar`: ids de
  * las lineas que la busqueda de una devolucion encontro (#764).
  */
-export function pintarDetalle(t, { editable = false, resaltar = [] } = {}) {
+export function pintarDetalle(t, { editable = false, resaltar = [], fechas = { fecha, hora } } = {}) {
   asegurarEstilos();
+  const { fecha, hora } = fechas;   // reportes pasa los formatos compartidos (graficas.js); la caja, los de siempre
   const quedan = t.lineas.reduce((n, l) => n + l.cantidad - l.cancelada_cantidad, 0);
   const puedeCancelar = editable && !t.cancelada && quedan > 0;
   const socio = t.socio ? ` · Socio #${t.socio.numero} ${escapar(t.socio.nombre)}` : '';

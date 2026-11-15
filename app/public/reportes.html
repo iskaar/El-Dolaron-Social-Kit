@@ -769,7 +769,7 @@ import { CATEGORIAS } from '/categorias.js';
 import {
   escapar, pesos, pesosConSigno, dolarones, cambio, rellenarDias, sumarDias, diaCorto, diaLargo, diaSemana, textoPeriodo,
   verificarCuadre, mapaCalor, mapaCalorHtml, tablaCalor, activarGlobos, barrasHorizontales, apilada, tabla,
-  flechaCambio, TRAMOS_ANTIGUEDAD, pasoOrdinal, graficaTiempo,
+  flechaCambio, TRAMOS_ANTIGUEDAD, pasoOrdinal, graficaTiempo, fechaHora, FECHAS_TICKET,
 } from '/graficas.js';
 import {
   COMPARACIONES, GRANOS, granosPermitidos, tarjetasKpi, tarjetasHtml, datosTendencia, leyendaTendencia, tablaTendencia, metaHtml, graficaMeta, tablaMeta,
@@ -784,8 +784,6 @@ import * as Finanzas from '/reportes-finanzas.js';
 import { CLAVES_DE_PARTE, PARTES_FOTO, PARTES_SIN_TIENDA } from '/reportes-partes.js';
 
 const $ = (id) => document.getElementById(id);
-// Hora de la tienda (la del navegador), no UTC como se guarda.
-const fechaHora = (iso) => new Date(iso).toLocaleString('es-MX', { dateStyle: 'short', timeStyle: 'short' });
 const FORMAS = [
   ['efectivo', 'Efectivo', 'var(--serie-1)'], ['tarjeta', 'Tarjeta', 'var(--serie-2)'],
   ['transferencia', 'Transferencia', 'var(--serie-3)'], ['dolarones', 'Dolarones', 'var(--serie-4)'],
@@ -906,7 +904,7 @@ async function pedirPartes(partes) {
   try { await Promise.all(esperas); } catch { return false; }
   return partes.every(parteVigente);
 }
-function sello() { $('actualizado').textContent = `Actualizado ${new Date().toLocaleString('es-MX', { dateStyle: 'medium', timeStyle: 'short' })}`; }
+function sello() { $('actualizado').textContent = `Actualizado ${fechaHora(new Date())}`; }
 
 // Lo unico que no cambia con el periodo ni la tienda y hace falta antes de nada: el dia de la primera venta («Desde la apertura») y las tiendas. Una vez.
 let basePromesa = null;
@@ -1958,7 +1956,7 @@ async function cargarTickets(mas = false) {
       $('tickets-rango').innerHTML = '';
     }
     if (!mas && r.tickets.length === 0) $('tickets-rango').innerHTML = '<div class="vacio">Sin tickets con esos filtros.</div>';
-    $('tickets-rango').insertAdjacentHTML('beforeend', r.tickets.map((t) => renglonTicket(t, { completo: true })).join(''));
+    $('tickets-rango').insertAdjacentHTML('beforeend', r.tickets.map((t) => renglonTicket(t, { completo: true, fechas: FECHAS_TICKET })).join(''));
     $('tickets-mas').hidden = !r.hay_mas;
   } catch {
     $('tickets-rango').innerHTML = '<div class="vacio">No se pudieron cargar los tickets.</div>';
@@ -1983,7 +1981,7 @@ $('tickets-rango').addEventListener('click', async (e) => {
   const r = await fetch(`/api/ventas/${fila.dataset.ticket}`);
   const cuerpo = await r.json().catch(() => ({}));
   $('ticket-contenido').innerHTML = r.ok
-    ? pintarDetalle(cuerpo)
+    ? pintarDetalle(cuerpo, { fechas: FECHAS_TICKET })
     : `<p class="nota" style="color:var(--mal)">${escapar(cuerpo.error ?? 'No se pudo abrir el ticket.')}</p>`;
 });
 $('ticket-cerrar').addEventListener('click', () => $('dialogo-ticket').close());

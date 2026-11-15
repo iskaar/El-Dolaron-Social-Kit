@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import {
   pesos, dolarones, pesosEje, pesosConSigno, cambio, rellenarDias, textoPeriodo, verificarCuadre,
   PASOS_CALOR, pasoCalor, pasosDeLaEscala, horasConVentas, textoHora, rangoHora, mapaCalor, mapaCalorHtml, tablaCalor,
-  TRAMOS_ANTIGUEDAD, tramoDeDias, pasoOrdinal, flechaCambio, barrasHorizontales, apilada, minigrafica, graficaTiempo, escalaNumero, columnas, lineaSerie, leyendaSeries,
+  TRAMOS_ANTIGUEDAD, tramoDeDias, pasoOrdinal, flechaCambio, fechaHora, FECHAS_TICKET, barrasHorizontales, apilada, minigrafica, graficaTiempo, escalaNumero, columnas, lineaSerie, leyendaSeries,
 } from '../public/graficas.js';
 import { rangoDias } from './worker.ts';
 
@@ -307,4 +307,12 @@ test('graficaTiempo: columnas, lineas de comparacion y promedio, y cada cubeta c
   assert.doesNotMatch(linea, /tabindex/);
   // Un titulo malicioso no entra como HTML.
   assert.doesNotMatch(graficaTiempo([{ ...datos[0], titulo: '"><script>x</script>' }], { ancho: 700 }), /<script>/);
+});
+
+test('B5: una fecha con hora y un dia, cada uno con un solo formato', () => {
+  const instante = '2026-11-15T12:00:00Z';   // el 15 en cualquier zona de las Americas y Europa
+  assert.match(fechaHora(instante), /^15 nov 2026, \d{1,2}:\d{2} [ap]\.m\.$/);
+  assert.equal(FECHAS_TICKET.fecha(instante), '15 nov');
+  assert.match(FECHAS_TICKET.hora(instante), /^\d{1,2}:\d{2} [ap]\.m\.$/);
+  assert.doesNotMatch(fechaHora(instante), /dom|domingo|\//, 'ni dia de la semana ni 15/11/26');
 });
