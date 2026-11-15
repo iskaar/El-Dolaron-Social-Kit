@@ -267,6 +267,10 @@ const nombreMes = (mes) => mayuscula(new Date(`${mes}-15T12:00:00`).toLocaleDate
 const mesCorto = (dia) => new Date(`${dia.slice(0, 7)}-15T12:00:00`).toLocaleDateString('es-MX', { month: 'short', year: '2-digit' }).replace('.', '');
 const rangoTexto = (desde, hasta) => (desde === hasta ? diaCorto(desde) : `${diaCorto(desde)} – ${diaCorto(hasta)}`);
 
+/** El nombre de la cubeta en la pantalla: nunca «cubeta», siempre la unidad (día, semana o mes). */
+export const unidadGrano = (grano, n) => ({ dia: n === 1 ? 'día' : 'días', semana: n === 1 ? 'semana' : 'semanas', mes: n === 1 ? 'mes' : 'meses' }[grano]);
+export const COMPARACION_POR_GRANO = { dia: 'día contra día', semana: 'semana contra semana', mes: 'mes contra mes' };
+
 /** «Comparado con 21 sep – 18 oct» (y el aviso cuando los dos periodos no tienen el mismo largo). */
 export function textoComparacion(d) {
   if (!d.comparacion) return 'Sin comparar';
@@ -293,6 +297,8 @@ export function tarjetasKpi(d, inv) {
   const sinGastos = t.gastos == null;
   const resultado = (x) => (x.gastos == null ? null : x.ventas - x.gastos);
   const dias = d.periodo.dias;
+  // Retiros de caja sin clasificar (no son gasto conocido): se avisan, no se suman.
+  const sinClasificar = d.retiros_sin_clasificar && d.retiros_sin_clasificar.n > 0 ? d.retiros_sin_clasificar : null;
 
   const tarjetas = [
     { clave: 'ventas', etiqueta: 'Ventas netas', valor: pesos(t.ventas), cambio: hayComp ? cambioKpi(t.ventas, a.ventas) : null,
@@ -310,10 +316,11 @@ export function tarjetasKpi(d, inv) {
     { clave: 'gastos', etiqueta: 'Gastos', valor: sinGastos ? '—' : pesos(t.gastos),
       cambio: !sinGastos && a && a.gastos > 0 ? cambioKpi(t.gastos, a.gastos, { bueno: 'baja' }) : null,
       serie: sinGastos ? [] : serie((c) => c.gastos), clase: 's2',
-      pie: sinGastos ? 'Los gastos no se registran por tienda: elige «Todas las tiendas»' : t.ventas > 0 ? `${pct1((t.gastos * 100) / t.ventas)} de las ventas netas` : 'Sin ventas en el periodo' },
+      pie: sinGastos ? 'Los gastos no se registran por tienda: elige «Todas las tiendas»' : t.ventas > 0 ? `${pct1((t.gastos * 100) / t.ventas)} de las ventas netas` : 'Sin ventas en el periodo',
+      nota: sinClasificar ? `No incluye ${cuenta(sinClasificar.n, 'retiro', 'retiros')} de caja por ${pesos(sinClasificar.importe)} sin clasificar (nómina u otros)` : null },
     { clave: 'resultado', etiqueta: 'Resultado operativo', valor: sinGastos ? '—' : pesos(resultado(t)),
       cambio: !sinGastos && a ? cambioKpi(resultado(t), resultado(a), { tipo: 'abs' }) : null,
-      serie: sinGastos ? [] : serie(resultado), clase: 's3', pie: sinGastos ? 'Necesita los gastos, que no son por tienda' : 'Ventas netas − gastos, antes del costo de la mercancía' },
+      serie: sinGastos ? [] : serie(resultado), clase: 's3', pie: sinGastos ? 'Necesita los gastos, que no son por tienda' : `Ventas netas − gastos, antes del costo de la mercancía${sinClasificar ? ' y de los retiros sin clasificar' : ''}` },
   ];
 
   // Valor en piso: una foto de AHORA (no hay historial de inventario): sin minigrafica ni cambio.
@@ -340,7 +347,7 @@ export function tarjetasHtml(tarjetas) {
     const mini = k.serie.length >= 2 ? `<div class="mini-caja">${minigrafica(k.serie, { clase: k.clase, etiqueta: `Tendencia de ${k.etiqueta}` })}</div>` : '';
     const avance = k.avance
       ? `<div class="avance" role="img" aria-label="${escapar(k.avance.texto)}"><i style="width:${Math.min(100, Math.max(0, k.avance.pct))}%"></i></div><div class="pie">${escapar(k.avance.texto)}</div>` : '';
-    return `<div class="tarjeta kpi"><div class="etq">${escapar(k.etiqueta)}</div><div class="valor">${escapar(k.valor)}</div>${delta}${mini}${avance}${k.pie ? `<div class="pie">${escapar(k.pie)}</div>` : ''}</div>`;
+    return `<div class="tarjeta kpi"><div class="etq">${escapar(k.etiqueta)}</div><div class="valor">${escapar(k.valor)}</div>${delta}${mini}${avance}${k.pie ? `<div class="pie">${escapar(k.pie)}</div>` : ''}${k.nota ? `<div class="pie aviso-pie">${escapar(k.nota)}</div>` : ''}</div>`;
   }).join('');
 }
 
@@ -358,7 +365,7 @@ export function datosTendencia(d) {
   const hayComp = !!(d.anterior && d.anterior.tickets > 0);
   return d.cubetas.map((c, i) => {
     const detalle = [`${cuenta(c.tickets, 'ticket', 'tickets')} · ${cuenta(c.piezas, 'pieza', 'piezas')}`];
-    if (c.parcial) detalle.push('Cubeta parcial: el periodo la corta');
+    if (c.parcial) detalle.push(`${mayuscula(unidadGrano(d.grano, 1))} parcial: el periodo la corta`);
     if (c.anterior && hayComp) {
       const camb = cambio(c.ventas, c.anterior.ventas);
       detalle.push(`Comparado: ${pesos(c.anterior.ventas)}${camb ? ` · ${flechaCambio(camb)}` : ''}${c.anterior.dias < c.dias ? ` (solo ${c.anterior.dias} de ${c.dias} días)` : ''}`);

@@ -8,7 +8,7 @@ import { sumarDias } from '../public/graficas.js';
 import {
   mesAtras, ventanaComparacion, cubetas, granosPermitidos, granoEfectivo, armarCubetas, promedioMovil, calcularMeta, ritmoPorCubeta,
   cambioKpi, hallazgos, hallazgosHtml, tarjetasKpi, tarjetasHtml, textoComparacion, UMBRALES, edadPromedio, datosTendencia, metaHtml, canalesHtml,
-  categoriasHtml,
+  categoriasHtml, leyendaTendencia, tablaTendencia, unidadGrano,
 } from '../public/reportes-resumen.js';
 
 /* ---------- puras ---------- */
@@ -524,6 +524,7 @@ test('con tienda: gastos, meta y Mercado Libre no se inventan por tienda; los ca
   assert.equal(salk.cubetas[0].gastos, null);
   assert.deepEqual(salk.meta, { solo_negocio: true });
   assert.equal(salk.canales.mercado_libre, null);
+  assert.equal(salk.retiros_sin_clasificar, null);
   assert.equal(todo.totales.gastos, 1000);
   assert.equal(salk.canales.tienda.ventas, 25000);
   assert.equal((await resumen(t, 'dias=7&tienda=narnia')).status, 400);
@@ -559,3 +560,60 @@ test('parametros invalidos y permiso: solo el dueno, y 400 en vez de 500', async
   assert.equal((await resumen(t, 'dias=7')).status, 200);
   t.db.close();
 });
+
+test('retiros sin clasificar: se cuentan aparte y no cambian los gastos ni el resultado', async () => {
+  const t = tienda();
+  t.db.prepare('update productos set stock = 100 where id = ?').run(PRODUCTO);
+  const hoy = hoyTienda(), ayer = sumarDias(hoy, -1), viejo = sumarDias(hoy, -20);
+  await vender(t, ayer);
+  const sin = (await resumen(t, 'dias=7')).cuerpo;
+  assert.deepEqual(sin.retiros_sin_clasificar, { n: 0, importe: 0 });
+
+  const retiro = t.db.prepare("insert into retiros (id, tipo, caja, cajero, importe, motivo, corte_id, creado_en, categoria) values (?, ?, 'Caja 1', 'c@prueba.mx', ?, 'm', null, ?, '')");
+  retiro.run('s1', 'retiro', 30000, `${ayer}T18:00:00.000Z`);        // cuenta
+  retiro.run('s2', 'retiro', 12000, `${hoy}T18:00:00.000Z`);         // cuenta
+  retiro.run('s3', 'retiro', 5000, `${viejo}T18:00:00.000Z`);        // fuera del periodo
+  retiro.run('s4', 'gasto', 7000, `${ayer}T18:00:00.000Z`);          // gasto de caja: ya esta en los gastos, no es «sin clasificar»
+  retiro.run('s5', 'retiro', 9000, `${ayer}T18:00:00.000Z`);         // con fila en gastos: no cuenta
+  t.db.prepare("insert into gastos (id, fecha, categoria, importe, nota, origen, retiro_id, creado_por, creado_en) values ('g5', ?, 'limpieza', 9000, '', 'caja', 's5', 'x', '')").run(ayer);
+  const antes = sin.totales.gastos;
+  const d = (await resumen(t, 'dias=7')).cuerpo;
+  assert.deepEqual(d.retiros_sin_clasificar, { n: 2, importe: 42000 });
+  assert.equal(d.totales.gastos, antes + 9000 + 7000);              // solo lo clasificado: el gasto de caja y el de limpieza
+  assert.equal(d.totales.ventas - d.totales.gastos, 25000 - 16000);   // el resultado tampoco cuenta los retiros sin clasificar
+  t.db.close();
+});
+
+test('las tarjetas avisan de los retiros sin clasificar solo cuando hay', () => {
+  const d: any = {
+    ...base(), grano: 'dia', meta_mes: '2026-11', meta: { solo_negocio: true }, retiros_sin_clasificar: { n: 0, importe: 0 },
+    cubetas: Array.from({ length: 3 }, (_, i) => ({ desde: `2026-11-0${i + 1}`, hasta: `2026-11-0${i + 1}`, dias: 1, parcial: false, ventas: 1, tickets: 1, piezas: 1, descuento: 0, gastos: 0, anterior: null })),
+  };
+  const limpio = tarjetasHtml(tarjetasKpi(d, null));
+  assert.doesNotMatch(limpio, /sin clasificar/);
+  assert.match(limpio, /antes del costo de la mercancía<\/div>/);
+  d.retiros_sin_clasificar = { n: 3, importe: 123456 };
+  const k = tarjetasKpi(d, null);
+  const html = tarjetasHtml(k);
+  assert.match(html, /No incluye 3 retiros de caja por \$1,234\.56 sin clasificar \(nómina u otros\)/);
+  assert.match(html, /antes del costo de la mercancía y de los retiros sin clasificar/);
+  assert.equal(k[5].valor, '$8,000.00');                            // el total de gastos no cambia
+  assert.equal(k[6].valor, '$12,000.00');
+  d.retiros_sin_clasificar = { n: 1, importe: 500 };
+  assert.match(tarjetasHtml(tarjetasKpi(d, null)), /No incluye 1 retiro de caja por \$5\.00/);
+  d.retiros_sin_clasificar = null;                                   // con tienda elegida no se pide
+  assert.doesNotMatch(tarjetasHtml(tarjetasKpi(d, null)), /sin clasificar/);
+});
+
+test('la pantalla habla de dias, semanas y meses, nunca de cubetas', () => {
+  assert.equal(unidadGrano('dia', 28), 'días');
+  assert.equal(unidadGrano('semana', 1), 'semana');
+  assert.equal(unidadGrano('mes', 3), 'meses');
+  for (const grano of ['dia', 'semana', 'mes']) {
+    const d: any = { ...base(), grano, meta_mes: '2026-11', meta: { solo_negocio: true }, comparar: 'anterior', retiros_sin_clasificar: { n: 1, importe: 100 },
+      cubetas: [{ desde: '2026-11-02', hasta: '2026-11-08', dias: 7, parcial: true, ventas: 100, tickets: 1, piezas: 1, descuento: 0, gastos: 0, anterior: { ventas: 50, tickets: 1, piezas: 1, descuento: 0, gastos: 0, dias: 5 } }] };
+    const texto = [tarjetasHtml(tarjetasKpi(d, null)), leyendaTendencia(d), tablaTendencia(d), JSON.stringify(datosTendencia(d)), hallazgosHtml(hallazgos(d)), canalesHtmlSeguro(d)].join(' ');
+    assert.doesNotMatch(texto, /cubeta/i);
+  }
+});
+const canalesHtmlSeguro = (d: any) => canalesHtml({ ...d, canales: { tienda: { ventas: 1, tickets: 1, anterior: 1 }, whatsapp: { ventas: 0, tickets: 0, anterior: 0 }, revendedoras: { ventas: 0, tickets: 0, anterior: 0 }, mercado_libre: null } });

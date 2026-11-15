@@ -1,7 +1,7 @@
 // GET /api/reportes/resumen (Issue #802): el Resumen ejecutivo de /reportes.
 // Ventas netas, tickets, piezas, descuentos y gastos del periodo y de la comparacion, por cubeta (dia, semana o mes); canales,
 // categorias y la meta del mes. Las ventas salen de `lineasNetas` (mismo neto que /api/reportes), los gastos de la misma
-// definicion que el tablero de inversionistas. Seis consultas, todas sobre un rango: nada por producto.
+// definicion que el tablero de inversionistas. Siete consultas (cuatro con tienda), todas sobre un rango: nada por producto.
 import { lineasNetas } from './netas.ts';
 import { GASTOS_DEL_MES } from './gastos.ts';
 import { diaTienda, rangoDe } from './reportes.ts';
@@ -55,7 +55,7 @@ export async function reporteResumen(url: URL, env: Env, ahora = Date.now()): Pr
   const fechaFin = sumarDias(periodo.hasta, 1);
   const fechaIni = ventana && ventana.desde < periodo.desde ? ventana.desde : periodo.desde;
 
-  const [filasDia, filasCategoria, filasDescuento, filasGasto, filasML, meta] = await Promise.all([
+  const [filasDia, filasCategoria, filasDescuento, filasGasto, filasML, meta, sinClasificar] = await Promise.all([
     // 1. Ventas netas, tickets y piezas por dia y canal. Un ticket tiene un solo dia y un solo canal: los tickets suman sin repetirse.
     env.DB.prepare(
       `${lineasNetas(`v.creado_en >= ? and v.creado_en < ?${deTienda}`)}
@@ -102,6 +102,13 @@ export async function reporteResumen(url: URL, env: Env, ahora = Date.now()): Pr
     ).bind(...ventanaA, ...ventanaA, ...(ventanaB ?? ['', ''])).all<FilaML & { ventana: string }>(),
     // 6. La meta del mes.
     env.DB.prepare("select valor from config where clave = 'meta_ventas_mes'").first<{ valor: string }>(),
+    // 7. Retiros de caja sin clasificar: dinero que salio del cajon como `retiro` (no `gasto`) y no esta en `gastos`. NO entran a los gastos
+    //    (no se sabe que son: nomina, reparto u otra cosa); solo se cuentan para que la pantalla diga lo que el total deja fuera.
+    tienda ? Promise.resolve(null) : env.DB.prepare(
+      `select count(*) as n, coalesce(sum(r.importe), 0) as importe from retiros r
+       where r.tipo = 'retiro' and r.creado_en >= ? and r.creado_en < ?
+         and not exists (select 1 from gastos g where g.retiro_id = r.id)`,
+    ).bind(...ventanaA).first<{ n: number; importe: number }>(),
   ]);
 
   // --- de las filas a un mapa por dia
@@ -166,6 +173,7 @@ export async function reporteResumen(url: URL, env: Env, ahora = Date.now()): Pr
     cubetas,
     canales: { tienda: canal('tienda'), whatsapp: canal('whatsapp'), revendedoras: canal('revendedoras'), mercado_libre: mercadoLibre },
     categorias,
+    retiros_sin_clasificar: tienda ? null : { n: sinClasificar?.n ?? 0, importe: sinClasificar?.importe ?? 0 },
     mejor_dia: mejor, dias_con_ventas: diasConVentas,
     meta_mes: mes, meta: metaMes,
   });
