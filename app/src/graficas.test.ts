@@ -215,6 +215,23 @@ test('el mapa de calor admite conteos sin cambiar el de dinero', () => {
   assert.ok(mapaCalorHtml(mapaCalor([{ dia_semana: 1, hora: 9, tickets: 1, total: 12345 }])).includes('$123'));
 });
 
+test('la leyenda del mapa de conteos chicos usa un escalon por valor; con conteos grandes queda como siempre', () => {
+  const formato = { ...FORMATO_CALOR_DINERO, entero: true, valor: (n: number) => `${n}`, eje: String, vacio: 'Sin datos', titulo: 'Conteos', escala: 'Mas oscuro, mas' };
+  const leyenda = (maximo: number) => {
+    const html = mapaCalorHtml(mapaCalor([{ dia_semana: 1, hora: 9, tickets: maximo, total: maximo }, { dia_semana: 2, hora: 9, tickets: 1, total: 1 }]), formato);
+    return [...html.matchAll(/<span class="calor-paso"><i class="celda p(\d)"><\/i>([^<]+)<\/span>/g)].map((m) => [Number(m[1]), m[2]]);
+  };
+  assert.deepEqual(leyenda(3), [[2, '1'], [4, '2'], [6, '3']]);          // 1, 2, 3: sin «hasta 0», «0–1» ni «1–1»
+  assert.deepEqual(leyenda(1), [[6, '1']]);
+  assert.deepEqual(leyenda(5).map((p) => p[1]), ['1', '2', '3', '4', '5']);
+  const textos = leyenda(40).map((p) => p[1]);
+  assert.equal(new Set(textos).size, 6);                                // seis pasos, todos distintos
+  assert.equal(textos[0], 'hasta 7');
+  // Los conteos grandes y el dinero siguen igual que antes.
+  const dinero = mapaCalorHtml(mapaCalor([{ dia_semana: 1, hora: 9, tickets: 1, total: 120_000 }]));
+  assert.ok(dinero.includes('hasta $200') && dinero.includes('$1,000–$1,200'));
+});
+
 test('escalaNumero: marcas 1, 2, 5 y con `entero` nunca fracciones', () => {
   const e = escalaNumero(123_456);
   assert.ok(e.tope >= 123_456);

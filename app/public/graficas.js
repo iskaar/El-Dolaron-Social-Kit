@@ -174,7 +174,7 @@ export const FORMATO_CALOR_DINERO = {
  * con ventas es un cuadro redondeado en su paso de la escala (clase `p1`..`p6`, los colores viven en la
  * pagina) y se puede enfocar; las vacias solo llevan borde. Solo la celda mas fuerte lleva su importe escrito.
  */
-export function mapaCalorHtml(mapa, fmt = FORMATO_CALOR_DINERO) {
+export function mapaCalorHtml(mapa, fmt = FORMATO_CALOR_DINERO) {   // fmt.entero: la escala es de conteos enteros
   const { horas, filas, maximo, mejor } = mapa;
   const encabezado = horas.map((h) => `<div class="calor-hora">${h}</div>`).join('');
   const cuerpo = filas.map((f) => `<div class="calor-dia">${escapar(f.nombre)}</div>` + f.celdas.map((c) => {
@@ -186,8 +186,11 @@ export function mapaCalorHtml(mapa, fmt = FORMATO_CALOR_DINERO) {
       ? `<div class="celda p${c.paso}${c === mejor ? ' mejor' : ''}" data-tip="${tip}" tabindex="0" role="img" aria-label="${aria}">${c === mejor ? escapar(fmt.eje(c.total)) : ''}</div>`
       : `<div class="celda vacia" data-tip="${tip}" role="img" aria-label="${aria}"></div>`;
   }).join('')).join('');
-  const leyenda = pasosDeLaEscala(maximo).map((p, i, todos) =>
-    `<span class="calor-paso"><i class="celda p${p.paso}"></i>${escapar(i === 0 ? `hasta ${fmt.eje(p.hasta)}` : `${fmt.eje(todos[i - 1].hasta)}–${fmt.eje(p.hasta)}`)}</span>`).join('');
+  // Conteos chicos (`fmt.entero`, maximo menor que los pasos): un escalon por cada valor posible (1, 2, 3...), sin rangos repetidos como «1–1» o «hasta 0».
+  const leyenda = fmt.entero && maximo < PASOS_CALOR
+    ? Array.from({ length: maximo }, (_, i) => `<span class="calor-paso"><i class="celda p${pasoCalor(i + 1, maximo)}"></i>${escapar(fmt.eje(i + 1))}</span>`).join('')
+    : pasosDeLaEscala(maximo).map((p, i, todos) =>
+      `<span class="calor-paso"><i class="celda p${p.paso}"></i>${escapar(i === 0 ? `hasta ${fmt.eje(p.hasta)}` : `${fmt.eje(todos[i - 1].hasta)}–${fmt.eje(p.hasta)}`)}</span>`).join('');
   return `<div class="calor" style="--horas:${horas.length}" role="group" aria-label="${escapar(fmt.titulo)}">
       <div></div>${encabezado}${cuerpo}</div>
     <div class="calor-leyenda" aria-label="${escapar(fmt.escala)}"><span class="calor-paso sec">${escapar(fmt.vacio)}</span><i class="celda vacia"></i>${leyenda}</div>`;
