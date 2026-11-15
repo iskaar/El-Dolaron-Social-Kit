@@ -143,7 +143,7 @@ const tickets = (n) => `${n.toLocaleString('es-MX')} ${n === 1 ? 'ticket' : 'tic
  * Del reporte (`por_hora`: [{ dia_semana, hora, tickets, total }]) al mapa: siete filas, de lunes a
  * domingo, y una columna por hora del rango. `mejor` es la celda mas fuerte (la primera si empatan).
  */
-export function mapaCalor(porHora) {
+export function mapaCalor(porHora, detalleDe = (n) => (n ? tickets(n) : 'Sin ventas')) {
   const { desde, hasta } = horasConVentas(porHora);
   const horas = Array.from({ length: hasta - desde + 1 }, (_, i) => desde + i);
   const celda = new Map(porHora.map((f) => [`${f.dia_semana}-${f.hora}`, f]));
@@ -155,7 +155,7 @@ export function mapaCalor(porHora) {
       const c = { dia_semana: dia, dia: nombre, hora, tickets: f?.tickets ?? 0, total: f?.total ?? 0 };
       c.paso = pasoCalor(c.total, maximo);
       c.titulo = `${nombre} ${rangoHora(hora)}`;
-      c.detalle = c.tickets ? tickets(c.tickets) : 'Sin ventas';
+      c.detalle = detalleDe(c.tickets);
       if (c.total > 0 && (!mejor || c.total > mejor.total)) mejor = c;
       return c;
     });
@@ -164,35 +164,40 @@ export function mapaCalor(porHora) {
   return { horas, filas, maximo, mejor };
 }
 
+/** Lo que cambia entre el mapa de ventas (dinero) y otros mapas, p. ej. capturas por hora (conteos): `valor`, `eje`, `vacio`, `titulo` y `escala`. */
+export const FORMATO_CALOR_DINERO = {
+  valor: pesos, eje: pesosEje, vacio: 'Sin ventas', titulo: 'Ventas por día de la semana y hora', escala: 'Escala: más oscuro es más vendido',
+};
+
 /**
  * El mapa de calor como HTML: una cuadricula con los dias a la izquierda y las horas arriba. Cada celda
  * con ventas es un cuadro redondeado en su paso de la escala (clase `p1`..`p6`, los colores viven en la
  * pagina) y se puede enfocar; las vacias solo llevan borde. Solo la celda mas fuerte lleva su importe escrito.
  */
-export function mapaCalorHtml(mapa) {
+export function mapaCalorHtml(mapa, fmt = FORMATO_CALOR_DINERO) {
   const { horas, filas, maximo, mejor } = mapa;
   const encabezado = horas.map((h) => `<div class="calor-hora">${h}</div>`).join('');
   const cuerpo = filas.map((f) => `<div class="calor-dia">${escapar(f.nombre)}</div>` + f.celdas.map((c) => {
-    const valor = c.total > 0 ? pesos(c.total) : 'Sin ventas';
+    const valor = c.total > 0 ? fmt.valor(c.total) : fmt.vacio;
     const aria = escapar(`${c.titulo}: ${valor}, ${c.detalle}`);
     const tip = escapar([c.titulo, valor, ...(c.total > 0 ? [c.detalle] : [])].join('\n'));
     // ponytail: solo las celdas con ventas entran al tabulador (168 paradas serian un castigo); la tabla cubre el resto.
     return c.paso
-      ? `<div class="celda p${c.paso}${c === mejor ? ' mejor' : ''}" data-tip="${tip}" tabindex="0" role="img" aria-label="${aria}">${c === mejor ? escapar(pesosEje(c.total)) : ''}</div>`
+      ? `<div class="celda p${c.paso}${c === mejor ? ' mejor' : ''}" data-tip="${tip}" tabindex="0" role="img" aria-label="${aria}">${c === mejor ? escapar(fmt.eje(c.total)) : ''}</div>`
       : `<div class="celda vacia" data-tip="${tip}" role="img" aria-label="${aria}"></div>`;
   }).join('')).join('');
   const leyenda = pasosDeLaEscala(maximo).map((p, i, todos) =>
-    `<span class="calor-paso"><i class="celda p${p.paso}"></i>${escapar(i === 0 ? `hasta ${pesosEje(p.hasta)}` : `${pesosEje(todos[i - 1].hasta)}–${pesosEje(p.hasta)}`)}</span>`).join('');
-  return `<div class="calor" style="--horas:${horas.length}" role="group" aria-label="Ventas por día de la semana y hora">
+    `<span class="calor-paso"><i class="celda p${p.paso}"></i>${escapar(i === 0 ? `hasta ${fmt.eje(p.hasta)}` : `${fmt.eje(todos[i - 1].hasta)}–${fmt.eje(p.hasta)}`)}</span>`).join('');
+  return `<div class="calor" style="--horas:${horas.length}" role="group" aria-label="${escapar(fmt.titulo)}">
       <div></div>${encabezado}${cuerpo}</div>
-    <div class="calor-leyenda" aria-label="Escala: más oscuro es más vendido"><span class="calor-paso sec">Sin ventas</span><i class="celda vacia"></i>${leyenda}</div>`;
+    <div class="calor-leyenda" aria-label="${escapar(fmt.escala)}"><span class="calor-paso sec">${escapar(fmt.vacio)}</span><i class="celda vacia"></i>${leyenda}</div>`;
 }
 
 /** La misma informacion en tabla: dia por hora (importes con centavos) y el total de cada dia. */
-export function tablaCalor(mapa) {
-  const celda = (c) => (c.total > 0 ? pesos(c.total) : '—');
+export function tablaCalor(mapa, valor = pesos) {
+  const celda = (c) => (c.total > 0 ? valor(c.total) : '—');
   return tabla(['Día', ...mapa.horas.map(textoHora), 'Total'],
-    mapa.filas.map((f) => [f.nombre, ...f.celdas.map(celda), pesos(f.total)]),
+    mapa.filas.map((f) => [f.nombre, ...f.celdas.map(celda), valor(f.total)]),
     mapa.horas.map((_, i) => i + 1).concat(mapa.horas.length + 1));
 }
 
@@ -401,6 +406,88 @@ export function tabla(encabezados, filas, numericas = []) {
   const clase = (i) => (numericas.includes(i) ? ' class="num"' : '');
   return `<table class="tabla"><thead><tr>${encabezados.map((h, i) => `<th${clase(i)}>${escapar(h)}</th>`).join('')}</tr></thead>
     <tbody>${filas.map((f) => `<tr>${f.map((c, i) => `<td${clase(i)}>${escapar(c)}</td>`).join('')}</tr>`).join('')}</tbody></table>`;
+}
+
+/* ---------- columnas apiladas con linea de referencia y linea con huecos (#802, vista Capturas); las marcas son las de escalaNumero ---------- */
+
+const numero = (n) => n.toLocaleString('es-MX', { maximumFractionDigits: 1 });
+// Cuantas etiquetas del eje caben: una cada `paso` columnas, contando desde la ultima.
+const pasoEtiquetas = (ancho, n, minimo = 54) => Math.max(1, Math.ceil(minimo / (ancho / n)));
+
+/**
+ * Columnas apiladas en el tiempo (o un histograma, con una sola serie). `d`:
+ * { etiquetas: [..], titulos: [..], series: [{ nombre, color, valores: [..] }], unidad: 'capturas',
+ *   linea?: { nombre, valores: [numero | null, ..] } }. La linea de referencia (p. ej. el promedio de 7 dias) cruza las columnas
+ * sobre la misma escala; un null corta el trazo. Cada columna lleva su globo con el total y cada serie, y se alcanza con Tab.
+ */
+export function graficaColumnas(d, { ancho, alto = 240, formato = numero, descripcion = 'Gráfica de columnas' }) {
+  const n = d.etiquetas.length;
+  const ml = 44, mr = 10, mt = 16, mb = 28;
+  const pw = Math.max(40, ancho - ml - mr), ph = alto - mt - mb;
+  const totales = d.etiquetas.map((_, i) => d.series.reduce((s, x) => s + (x.valores[i] ?? 0), 0));
+  const maximo = Math.max(0, ...totales, ...(d.linea?.valores ?? []).map((v) => v ?? 0));
+  const { tope, marcas } = escalaNumero(maximo, { entero: true });
+  const y = (v) => mt + ph - (v / tope) * ph;
+  const slot = pw / n, ancho_barra = Math.min(28, Math.max(3, slot * 0.66)), cada = pasoEtiquetas(ancho, n);
+  const rejilla = marcas.map((m) => `
+    <line class="${m === 0 ? 'eje' : 'rejilla'}" x1="${ml}" x2="${ancho - mr}" y1="${y(m)}" y2="${y(m)}"/>
+    <text class="marca" x="${ml - 8}" y="${y(m) + 4}" text-anchor="end">${formato(m)}</text>`).join('');
+  const columnas = d.etiquetas.map((etiqueta, i) => {
+    const x = ml + i * slot + (slot - ancho_barra) / 2;
+    let base = 0;
+    const segmentos = d.series.map((s) => {
+      const v = s.valores[i] ?? 0;
+      if (v <= 0) return '';
+      const arriba = base + v, r = `<rect x="${x}" y="${y(arriba)}" width="${ancho_barra}" height="${Math.max(0.5, y(base) - y(arriba))}" style="fill:${s.color};stroke:var(--superficie);stroke-width:1"/>`;
+      base = arriba;
+      return r;
+    }).join('');
+    const detalle = d.series.filter((s) => (s.valores[i] ?? 0) > 0).map((s) => `${s.nombre}: ${formato(s.valores[i])}`);
+    const extra = d.linea?.valores[i] != null ? [`${d.linea.nombre}: ${formato(d.linea.valores[i])}`] : [];
+    const tip = escapar([d.titulos?.[i] ?? etiqueta, totales[i] ? `${formato(totales[i])} ${d.unidad ?? ''}`.trim() : `Sin ${d.unidad ?? 'datos'}`, ...detalle, ...extra].join('\n'));
+    const marca = (n - 1 - i) % cada === 0 ? `<text class="marca" x="${ml + i * slot + slot / 2}" y="${alto - 8}" text-anchor="middle">${escapar(etiqueta)}</text>` : '';
+    return `<g>${segmentos}${marca}<rect class="hit" style="cursor:default" x="${ml + i * slot}" y="${mt}" width="${slot}" height="${ph}" data-tip="${tip}" tabindex="0" role="img" aria-label="${tip.replace(/\n/g, ', ')}"/></g>`;
+  }).join('');
+  let lineaRef = '';
+  if (d.linea) {
+    const tramos = [];
+    d.linea.valores.forEach((v, i) => {
+      if (v == null) { tramos.push(null); return; }
+      const punto = `${(ml + i * slot + slot / 2).toFixed(1)},${y(v).toFixed(1)}`;
+      if (tramos.length && tramos.at(-1)) tramos.at(-1).push(punto); else tramos.push([punto]);
+    });
+    lineaRef = tramos.filter((t) => t && t.length > 1).map((t) => `<path d="M${t.join(' L')}" style="fill:none;stroke:var(--tinta);stroke-width:2;stroke-dasharray:5 3;stroke-linejoin:round"/>`).join('');
+  }
+  return `<svg class="svg-grafica" width="${ancho}" height="${alto}" viewBox="0 0 ${ancho} ${alto}" role="group" aria-label="${escapar(descripcion)}">${rejilla}${columnas}${lineaRef}</svg>`;
+}
+
+/**
+ * Linea de un valor por punto (p. ej. la mediana por semana). `puntos`: [{ etiqueta, titulo, valor | null, detalle: [..] }]; un null
+ * corta la linea (semana sin datos: no es cero). `formato` escribe la marca del eje y el valor del globo.
+ */
+export function graficaLinea(puntos, { ancho, alto = 240, formato = numero, descripcion = 'Gráfica de línea' }) {
+  const n = puntos.length;
+  const ml = 52, mr = 14, mt = 16, mb = 28;
+  const pw = Math.max(40, ancho - ml - mr), ph = alto - mt - mb;
+  const { tope, marcas } = escalaNumero(Math.max(0, ...puntos.map((p) => p.valor ?? 0)), { entero: true });
+  const slot = pw / n, x = (i) => ml + i * slot + slot / 2, y = (v) => mt + ph - (v / tope) * ph, cada = pasoEtiquetas(ancho, n, 60);
+  const rejilla = marcas.map((m) => `
+    <line class="${m === 0 ? 'eje' : 'rejilla'}" x1="${ml}" x2="${ancho - mr}" y1="${y(m)}" y2="${y(m)}"/>
+    <text class="marca" x="${ml - 8}" y="${y(m) + 4}" text-anchor="end">${escapar(formato(m))}</text>`).join('');
+  const tramos = [];
+  puntos.forEach((p, i) => {
+    if (p.valor == null) { tramos.push(null); return; }
+    const punto = `${x(i).toFixed(1)},${y(p.valor).toFixed(1)}`;
+    if (tramos.length && tramos.at(-1)) tramos.at(-1).push(punto); else tramos.push([punto]);
+  });
+  const trazos = tramos.filter((t) => t && t.length > 1).map((t) => `<path class="trazo" d="M${t.join(' L')}"/>`).join('');
+  const marcasX = puntos.map((p, i) => ((n - 1 - i) % cada === 0 ? `<text class="marca" x="${x(i)}" y="${alto - 8}" text-anchor="middle">${escapar(p.etiqueta)}</text>` : '')).join('');
+  const dots = puntos.map((p, i) => {
+    const tip = escapar([p.titulo ?? p.etiqueta, p.valor == null ? 'Sin datos' : formato(p.valor), ...(p.detalle ?? [])].join('\n'));
+    return `${p.valor == null ? '' : `<circle class="punto-fin" cx="${x(i)}" cy="${y(p.valor)}" r="4"/>`}
+      <rect class="hit" style="cursor:default" x="${ml + i * slot}" y="${mt}" width="${slot}" height="${ph}" data-tip="${tip}" tabindex="0" role="img" aria-label="${tip.replace(/\n/g, ', ')}"/>`;
+  }).join('');
+  return `<svg class="svg-grafica" width="${ancho}" height="${alto}" viewBox="0 0 ${ancho} ${alto}" role="group" aria-label="${escapar(descripcion)}">${rejilla}${marcasX}${trazos}${dots}</svg>`;
 }
 
 /* ---------- series en el tiempo: columnas y linea (vista Dolarones, #802) ---------- */
