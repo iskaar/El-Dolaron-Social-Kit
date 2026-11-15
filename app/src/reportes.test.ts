@@ -4,7 +4,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { tienda, codigoPrueba, PRODUCTO } from './prueba-d1.ts';
 import { verificarCuadre, rellenarDias } from '../public/graficas.js';
-import { rangoDe, rangoDias, hoyTienda, RangoInvalido } from './reportes.ts';
+import { rangoDe, rangoDias, hoyTienda, RangoInvalido, PARTES_REPORTE } from './reportes.ts';
 
 type Pedir = ReturnType<typeof tienda>['pedir'];
 
@@ -353,4 +353,76 @@ test('/api/reportes trae el dia de la primera venta (para «Desde la apertura»)
   db.prepare('update ventas set creado_en = ?, registrado_en = ? where id = ?').run(cuando, cuando, v.id);
   await vender(pedir, 'Caja 1');
   assert.equal((await pedir('/api/reportes?dias=7')).cuerpo.primera_venta, '2025-12-31');
+});
+
+/* ---------- #802 A6: `partes=` calcula solo las secciones que pide la vista ---------- */
+
+const CLAVES_DE_PARTE: Record<string, string[]> = {
+  primera_venta: ['primera_venta'], resumen: ['resumen'], anterior: ['anterior'], cuadre: ['cuadre'], forma_pago: ['por_forma_pago'], por_dia: ['por_dia'], por_hora: ['por_hora'],
+  categorias: ['por_categoria', 'por_categoria_anterior'], inventario: ['inventario'], merma: ['merma_caducidad'], top_productos: ['top_productos'], precio_sugerido: ['precio_sugerido'],
+  dias_en_venta: ['dias_en_venta_por_categoria'], cancelaciones: ['cancelaciones'], aperturas: ['aperturas_cajon'], cortes: ['cortes'], retiros: ['retiros'],
+  revendedoras: ['revendedoras'], descuentos: ['descuentos'],
+};
+const CABECERA = ['dias', 'dia_desde', 'dia_hasta', 'tienda', 'tiendas'];
+
+async function sembrarParaPartes(t: ReturnType<typeof tienda>) {
+  const { db, pedir } = t;
+  db.prepare('update productos set stock = 100 where id = ?').run(PRODUCTO);
+  pieza(db, 'P1', { dias: 30, precio: 12000, stock: 3 });
+  pieza(db, 'P2', { dias: 3, estado_fisico: 'caducado', stock: 1 });
+  await vender(pedir, 'Caja 1');
+  await vender(pedir, 'Caja 1', { forma_pago: 'tarjeta', efectivo: 0 });
+  const salk = await vender(pedir, 'Caja 2', { forma_pago: 'transferencia', efectivo: 0 });
+  db.prepare("update ventas set tienda = 'salk', descuento = 1000, promo = 1000 where id = ?").run(salk.id);
+  const cancelada = await vender(pedir, 'Caja 2');
+  assert.equal((await pedir(`/api/ventas/${cancelada.id}/cancelar`, { motivo: 'prueba', caja: 'Caja 2' })).status, 200);
+  db.prepare("insert into cajon_aperturas (id, abierto_por, abierto_en, registrado_en, caja) values ('a1', 'x@x', ?, ?, 'Caja 1')").run(new Date().toISOString(), new Date().toISOString());
+}
+
+test('partes=: cada seccion sola trae exactamente lo mismo que en la respuesta completa y sin el parametro no cambia nada', async () => {
+  const t = tienda();
+  await sembrarParaPartes(t);
+  assert.deepEqual([...PARTES_REPORTE].sort(), Object.keys(CLAVES_DE_PARTE).sort(), 'cada parte tiene sus claves en este contrato');
+  for (const tiendaQ of ['', '&tienda=salk']) {
+    const completo = (await t.pedir(`/api/reportes?dias=7${tiendaQ}`)).cuerpo;
+    assert.ok(completo.resumen.ventas > 0 && completo.por_dia.length > 0 && completo.inventario.piezas > 0, 'hay datos: la igualdad no es entre vacios');
+    for (const clave of [...CABECERA, 'primera_venta', ...Object.values(CLAVES_DE_PARTE).flat()]) assert.ok(clave in completo, `la respuesta completa trae ${clave}`);
+    for (const [parte, claves] of Object.entries(CLAVES_DE_PARTE)) {
+      const sola = (await t.pedir(`/api/reportes?dias=7${tiendaQ}&partes=${parte}`)).cuerpo;
+      assert.deepEqual(Object.keys(sola).sort(), [...CABECERA, ...claves].sort(), `${parte}: solo su cabecera y sus claves`);
+      for (const clave of [...CABECERA, ...claves]) assert.deepEqual(sola[clave], completo[clave], `${parte}.${clave}${tiendaQ}`);
+    }
+    // Todas juntas (en cualquier orden) son la respuesta completa, clave por clave y en el mismo orden.
+    const juntas = (await t.pedir(`/api/reportes?dias=7${tiendaQ}&partes=${[...PARTES_REPORTE].reverse().join(',')}`)).cuerpo;
+    assert.deepEqual(juntas, completo);
+    assert.deepEqual(Object.keys(juntas), Object.keys(completo));
+    // Dos partes mezcladas traen cada una lo suyo.
+    const dos = (await t.pedir(`/api/reportes?dias=7${tiendaQ}&partes=cuadre,resumen`)).cuerpo;
+    assert.deepEqual([dos.cuadre, dos.resumen], [completo.cuadre, completo.resumen]);
+  }
+  // La respuesta completa de siempre: ni una clave de menos.
+  const sin = (await t.pedir('/api/reportes?dias=7')).cuerpo;
+  assert.deepEqual(Object.keys(sin), ['dias', 'dia_desde', 'dia_hasta', 'primera_venta', 'tienda', 'tiendas', 'resumen', 'anterior', 'cuadre', 'por_forma_pago', 'por_dia', 'por_hora',
+    'por_categoria', 'por_categoria_anterior', 'inventario', 'merma_caducidad', 'top_productos', 'precio_sugerido', 'dias_en_venta_por_categoria', 'cancelaciones',
+    'aperturas_cajon', 'cortes', 'retiros', 'revendedoras', 'descuentos']);
+  t.db.close();
+});
+
+test('partes=: lo desconocido es 400, `partes=` vacio trae solo la cabecera y cada parte corre solo sus sentencias', async () => {
+  const t = tienda();
+  await sembrarParaPartes(t);
+  for (const q of ['partes=nada', 'partes=resumen,nada', 'partes=INVENTARIO']) assert.equal((await t.pedir(`/api/reportes?dias=7&${q}`)).status, 400, q);
+  assert.deepEqual(Object.keys((await t.pedir('/api/reportes?dias=7&partes=')).cuerpo), CABECERA);
+  const visto: string[] = [];
+  const preparar = t.env.DB.prepare.bind(t.env.DB);
+  (t.env.DB as unknown as { prepare: (sql: string) => unknown }).prepare = (sql: string) => { visto.push(sql); return preparar(sql); };
+  const cuenta = async (q: string) => { visto.length = 0; assert.equal((await t.pedir(`/api/reportes?dias=7${q}`)).status, 200); return visto.length; };
+  const base = await cuenta('&partes=');                       // el acceso del usuario
+  assert.equal(await cuenta('&partes=primera_venta'), base + 1);
+  assert.equal(await cuenta('&partes=inventario'), base + 1);
+  assert.equal(await cuenta('&partes=resumen,anterior'), base + 2);
+  assert.equal(await cuenta('&partes=categorias'), base + 2);
+  assert.equal(await cuenta('&partes=por_dia'), base + 2);
+  assert.equal(await cuenta(''), base + 21, 'sin partes: las 21 de siempre');
+  t.db.close();
 });
