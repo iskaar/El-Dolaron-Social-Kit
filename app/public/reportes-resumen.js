@@ -91,16 +91,17 @@ export function granoEfectivo(pedido, desde, hasta) {
 }
 
 const MEDIDAS = ['ventas', 'tickets', 'piezas', 'descuento', 'gastos'];
-const sumarEn = (destino, fuente) => { if (fuente) for (const m of MEDIDAS) destino[m] += fuente[m] ?? 0; };
-const ceros = () => ({ ventas: 0, tickets: 0, piezas: 0, descuento: 0, gastos: 0 });
 
 /**
  * De lo de cada dia a las cubetas del periodo, sus totales y los de la comparacion. `porDia`: Map dia -> {ventas, tickets,
  * piezas, descuento, gastos} (los dias que faltan valen cero). `ventana`: de ventanaComparacion o null. Los totales son la suma
  * de las cubetas: lo que dibuja la grafica y lo que dicen las tarjetas es lo mismo. La cubeta lleva `anterior` (null si la
  * ventana ya se acabo) con los dias que le tocaron; con `sinGastos` los gastos van en null (no se llevan por tienda).
+ * `medidas` (Control y Equipo, #802) cambia las cifras que se suman por dia; por omision, las del Resumen.
  */
-export function armarCubetas({ desde, hasta, grano, ventana, porDia, sinGastos = false }) {
+export function armarCubetas({ desde, hasta, grano, ventana, porDia, sinGastos = false, medidas = MEDIDAS }) {
+  const ceros = () => Object.fromEntries(medidas.map((m) => [m, 0]));
+  const sumarEn = (destino, fuente) => { if (fuente) for (const m of medidas) destino[m] += fuente[m] ?? 0; };
   const totales = ceros();
   const anterior = ventana ? ceros() : null;
   let indice = 0;

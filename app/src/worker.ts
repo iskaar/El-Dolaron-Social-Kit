@@ -44,6 +44,7 @@ import { rutaEspejoCaptura } from './espejo-captura.ts';
 import { rutaNomina } from './nomina.ts';
 import { reporteEquipo, registrarBonoSemana } from './equipo.ts';
 import { reporteCapturas } from './reportes-capturas.ts';
+import { reporteControl } from './reportes-control.ts';
 import { reporteDolarones } from './reportes-dolarones.ts';
 import { rutaPlano } from './plano.ts';
 import { misRetos, otorgarLogros, esCorridaDiaria } from './retos.ts';
@@ -53,6 +54,8 @@ import { reporteResumen } from './reportes-resumen.ts';
 import { reporteInventario } from './reportes-inventario.ts';
 import { reporteVentas } from './reportes-ventas.ts';
 import { reporteClientes } from './reportes-clientes.ts';
+import { reporteFinanzas } from './reportes-finanzas.ts';
+import { configInvalida } from '../public/reportes-finanzas.js';
 
 // Las pruebas importan estos dos desde aqui.
 export { hoyTienda, rangoDias };
@@ -1646,7 +1649,7 @@ async function guardarConfig(request: Request, env: Env): Promise<Response> {
   }
   for (const [clave, valor] of entradas) {
     const numero = Math.round(Number(valor));
-    if (!/^[a-z_0-9]{1,40}$/.test(clave) || !Number.isFinite(numero) || numero < 0) {
+    if (!/^[a-z_0-9]{1,40}$/.test(clave) || !Number.isFinite(numero) || numero < 0 || configInvalida(clave, valor)) {
       return json({ error: `Valor invalido para ${clave}.` }, 400);
     }
     await env.DB.prepare(
@@ -2961,9 +2964,11 @@ export default {
       if (pathname === '/api/reportes/inventario' && request.method === 'GET') return await reporteInventario(url, env);
       if (pathname === '/api/reportes/ventas' && request.method === 'GET') return await reporteVentas(url, env);
       if (pathname === '/api/reportes/clientes' && request.method === 'GET') return await reporteClientes(url, env);
+      if (pathname === '/api/reportes/finanzas' && request.method === 'GET') return await reporteFinanzas(url, env);
       if (pathname === '/api/reportes/equipo' && request.method === 'GET') return await reporteEquipo(url, env);
       if (pathname === '/api/reportes/equipo/bono' && request.method === 'POST') return await registrarBonoSemana(request, env, correo);
       if (pathname === '/api/reportes/capturas' && request.method === 'GET') return await reporteCapturas(url, env);
+      if (pathname === '/api/reportes/control' && request.method === 'GET') return await reporteControl(url, env);
       if (pathname === '/api/reportes/tickets') {
         return await ticketsDelRango(url, env);
       }

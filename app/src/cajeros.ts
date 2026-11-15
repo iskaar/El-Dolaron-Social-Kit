@@ -45,7 +45,7 @@ export async function listarCajeros(env: Env): Promise<Response> {
   return json(results.filter((u) => puedeCobrar(leerRoles(u.roles))).map(({ correo, nombre }) => ({ correo, nombre })));
 }
 
-const atiende = (roles: Rol[]) => roles.includes('cajero') || roles.includes('capturista');
+export const atiende = (roles: Rol[]) => roles.includes('cajero') || roles.includes('capturista');
 
 /** Quien puede figurar como «quien atendio» una venta (#750): cuentas activas con rol cajero o capturista. */
 export async function vendedoras(env: Env): Promise<{ correo: string; nombre: string }[]> {

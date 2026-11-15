@@ -193,7 +193,7 @@ export function embudoTabla(r) {
 /* ---------- horario ---------- */
 
 export const FORMATO_CALOR_CAPTURAS = {
-  ...FORMATO_CALOR_DINERO, valor: (n) => cuenta(n, 'captura', 'capturas'), eje: (n) => n0(n), vacio: 'Sin capturas',
+  ...FORMATO_CALOR_DINERO, entero: true, valor: (n) => cuenta(n, 'captura', 'capturas'), eje: (n) => n0(n), vacio: 'Sin capturas',
   titulo: 'Capturas por día de la semana y hora', escala: 'Escala: el tono más fuerte es más capturas',
 };
 export const mapaHorario = (r) => mapaCalor(r.por_hora.map((f) => ({ dia_semana: f.dia_semana, hora: f.hora, tickets: f.n, total: f.n })),
