@@ -47,6 +47,8 @@
 
     <label for="telefono">Teléfono (10 dígitos)</label>
     <input id="telefono" type="tel" inputmode="numeric" maxlength="14" required>
+    <label for="telefono-confirma">Confirma el teléfono</label>
+    <input id="telefono-confirma" type="tel" inputmode="numeric" maxlength="14" required autocomplete="off">
     <div class="nota">Con este número lo buscan en la caja. Un teléfono, un socio.</div>
 
     <label for="correo">Correo (opcional)</label>
@@ -86,15 +88,6 @@
     <button id="acreditar-llegada" type="button">Buscar y confirmar llegada</button>
     <div id="aviso-llegada" role="status"></div>
   </details>
-  <details class="panel" style="margin-top:16px" id="vincular-panel" hidden>
-    <summary>Vincular una membresía previa (sólo el dueño, en persona)</summary>
-    <label for="vincular-numero">Número de socio</label><input id="vincular-numero" type="text" inputmode="numeric">
-    <label for="vincular-codigo">Código de vinculación que muestra el cliente</label>
-    <input id="vincular-codigo" type="text" autocomplete="off" autocapitalize="none" spellcheck="false">
-    <p class="nota">Confirma que la persona presente es el titular de la membresía. Controlar un teléfono no basta si cambió de dueño.</p>
-    <button id="vincular" type="button">Confirmar titular y vincular</button>
-    <div id="aviso-vinculo" role="status"></div>
-  </details>
   <details class="panel" style="margin-top:16px">
     <summary>Bases y aviso para leer antes del alta</summary>
     <p id="texto-bases" style="white-space:pre-wrap"></p>
@@ -110,6 +103,7 @@ const d = (centavos) => `${(centavos / 100).toLocaleString('es-MX')} Dolarones`;
 let idAlta = crypto.randomUUID();
 let ultimoSocio = null;
 
+$('telefono-confirma').addEventListener('paste', (e) => e.preventDefault());
 $('alta').addEventListener('input', (e) => {
   if (e.target.id !== 'bases' && e.target.id !== 'mayor-edad') idAlta = crypto.randomUUID();
   $('aviso').textContent = '';
@@ -119,6 +113,13 @@ $('alta').addEventListener('submit', async (e) => {
   e.preventDefault();
   if (!$('bases').checked) { $('aviso').textContent = 'Falta que el cliente acepte las bases y el aviso.'; return; }
   if (!$('mayor-edad').checked) { $('aviso').textContent = 'Falta que el cliente declare ser mayor de 18 años.'; return; }
+
+  // #807: el teléfono liga la membresía al SMS del portal; un error de dedo la daría a otra persona.
+  if ($('telefono').value.replace(/\D/g, '') !== $('telefono-confirma').value.replace(/\D/g, '')) {
+    $('aviso').textContent = 'Los teléfonos no coinciden. Escríbelos de nuevo.';
+    $('telefono-confirma').focus();
+    return;
+  }
 
   $('registrar').disabled = true;
   try {
@@ -186,23 +187,7 @@ $('acreditar-llegada').addEventListener('click', async () => {
   } catch (e) { $('aviso-llegada').textContent = e.message || 'Sin red. Intenta de nuevo.'; }
   finally { $('acreditar-llegada').disabled = false; }
 });
-$('vincular').addEventListener('click', async () => {
-  const numero = Number($('vincular-numero').value);
-  if (!confirm(`¿Confirmas que el cliente presente es el titular del socio #${numero} y autorizas vincular su acceso?`)) return;
-  $('vincular').disabled = true;
-  try {
-    const r = await fetch('/api/socios/vincular', { method:'POST', headers:{ 'content-type':'application/json' },
-      body:JSON.stringify({ numero, codigo:$('vincular-codigo').value.trim(), confirma:true }) });
-    const cuerpo = await r.json();
-    if (!r.ok) throw new Error(cuerpo.error);
-    $('aviso-vinculo').textContent = `Acceso vinculado a #${cuerpo.numero}, ${cuerpo.nombre}.`;
-    $('vincular-codigo').value = '';
-  } catch (e) { $('aviso-vinculo').textContent = e.message || 'Sin red. Intenta de nuevo.'; }
-  finally { $('vincular').disabled = false; }
-});
 try {
-  const yo = await (await fetch('/api/yo')).json();
-  $('vincular-panel').hidden = !yo.usuario?.roles?.includes('dueno');
   const legal = await (await fetch('/api/socios/legal')).json();
   $('texto-bases').textContent = legal.bases;
   $('texto-aviso').textContent = legal.aviso;

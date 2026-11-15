@@ -204,7 +204,9 @@ export async function registrarSocio(request: Request, env: Env, autor: string):
 
 /** La caja busca por telefono (10 digitos) o por numero de socio. */
 export async function buscarSocio(url: URL, env: Env): Promise<Response> {
-  const q = (url.searchParams.get('q') ?? '').replace(/\D/g, '');
+  const crudo = url.searchParams.get('q') ?? '';
+  // Unas letras (un código DV-… viejo, un nombre) no son un número de socio: sin esto cargaba al socio de sus dígitos.
+  const q = /[a-z]/i.test(crudo) ? '' : crudo.replace(/\D/g, '');
   if (!q) return json({ error: 'Escribe el telefono o el numero de socio.' }, 400);
   const cliente = await env.DB.prepare(
     `select id, numero, nombre, telefono from clientes where ${q.length === 10 ? 'telefono' : 'numero'} = ?`,

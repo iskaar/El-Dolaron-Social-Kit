@@ -335,13 +335,6 @@ $('ref-copiar').addEventListener('click', () => accion($('ref-copiar'), async ()
 }));
 $('actualizar').addEventListener('click', () => accion($('actualizar'), cargarCuenta));
 $('mas-recibos').addEventListener('click', () => accion($('mas-recibos'), async () => { await recibos(); estado(); }));
-$('pedir-vinculo').addEventListener('click', () => accion($('pedir-vinculo'), async () => {
-  const r = await api('vinculo', {});
-  $('codigo-vinculo').textContent = r.codigo;
-  $('vinculo').hidden = false;
-  estado('El código de vinculación vence en 5 minutos. No autoriza gastos.');
-}));
-$('revisar-vinculo').addEventListener('click', () => accion($('revisar-vinculo'), cargarCuenta));
 $('salir').addEventListener('click', () => accion($('salir'), async () => {
   try { await api('codigo', undefined, 'DELETE'); } catch { /* El código también vence en 5 minutos. */ }
   await sdk.signOut(auth);
@@ -388,7 +381,7 @@ try {
     ubicarCatalogo(false);
     $('monedero').hidden = true; $('registro').hidden = true; $('salir').hidden = true;
     $('acceso').hidden = false; $('telefono-form').hidden = false; $('sms-form').hidden = true;
-    $('titular').textContent = ''; $('recibos').replaceChildren(); $('vinculo').hidden = true;
+    $('titular').textContent = ''; $('recibos').replaceChildren();
     $('recibo-dialogo').close(); $('detalle-recibo').replaceChildren();
     estado();
     abrirPendientes();   // sin sesión: el resumen de lo que llegó del sitio, con el aviso de registro

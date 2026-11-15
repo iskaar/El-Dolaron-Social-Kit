@@ -286,31 +286,89 @@ test('barcode privado: monto limitado, caducidad, un solo uso e idempotencia de 
   } finally { p.cerrar(); }
 });
 
-test('logout revoca el código y sólo el dueño vincula un registro presencial, sin perder historial', async () => {
+test('logout revoca el código de la sesión', async () => {
   const p = portalDePrueba();
   try {
-    const a = await p.registrar('a', '+524440001111');
+    await p.registrar('a', '+524440001111');
     const auth = token('a', '+524440001111');
     const k = await p.llamar('/api/portal/codigo', auth, { maximo:0 }, 'POST');
     assert.equal((await p.llamar('/api/portal/codigo', auth, undefined, 'DELETE')).status, 200);
     assert.equal((await p.pedir('/api/socios/codigo', { codigo:k.body.codigo })).status, 403);
+  } finally { p.cerrar(); }
+});
+
+test('el alta de tienda entra al portal con el SMS de su teléfono: misma membresía, mismo historial (#807)', async () => {
+  const p = portalDePrueba();
+  try {
     const previo = await p.pedir('/api/socios', { id:crypto.randomUUID(), nombre:'Socio previo', telefono:'4445556666', acepta_bases:true, declara_mayor_edad:true });
     assert.equal(previo.status, 201);
-    assert.equal((await p.registrar('nuevo', '+524445556666')).status, 409);
-    const vk = await p.llamar('/api/portal/vinculo', token('nuevo', '+524445556666'), {}, 'POST');
-    assert.equal(vk.status, 201);
-    assert.equal((await p.llamar('/api/portal/yo', token('nuevo', '+524445556666'))).status, 404);
-    const body = { numero:previo.cuerpo.numero, codigo:vk.body.codigo, confirma:true };
-    p.db.prepare(`insert into usuarios (correo, nombre, roles, activo, creado_en, actualizado_en)
-      values ('cajero@prueba.mx', 'Caja', 'cajero', 1, '', '')`).run();
-    p.env.DEV_USUARIO = 'cajero@prueba.mx';
-    assert.equal((await p.pedir('/api/socios/vincular', body)).status, 403);
-    p.env.DEV_USUARIO = 'dueno@prueba.mx';
-    assert.equal((await p.pedir('/api/socios/vincular', { ...body, numero:a.body.numero })).status, 409);
-    assert.equal((await p.pedir('/api/socios/vincular', body)).status, 200);
-    assert.equal((await p.llamar('/api/portal/yo', token('nuevo', '+524445556666'))).body.id, previo.cuerpo.id);
-    assert.equal((await p.pedir('/api/socios/vincular', body)).status, 403);
-    assert.equal(p.db.prepare('select count(*) as n from clientes').get()!.n, 2);
+    // Acumula desde el primer día: compra en caja antes de entrar al portal.
+    const venta = await p.pedir('/api/ventas', { id:crypto.randomUUID(), cliente_id:previo.cuerpo.id,
+      lineas:[{ producto_id:PRODUCTO, cantidad:1 }], forma_pago:'efectivo', efectivo:25000 });
+    assert.equal(venta.status, 201);
+    const clientes = () => p.db.prepare('select count(*) as n from clientes').get()!.n;
+    const antes = clientes();
+    const nuevo = token('nuevo', '+524445556666');
+
+    const yo = await p.llamar('/api/portal/yo', nuevo);
+    assert.equal(yo.status, 200, JSON.stringify(yo.body));
+    assert.equal(yo.body.id, previo.cuerpo.id);
+    assert.equal(yo.body.numero, previo.cuerpo.numero);
+    assert.equal(clientes(), antes);
+    assert.equal(p.db.prepare('select auth_uid from clientes where id = ?').get(previo.cuerpo.id)!.auth_uid, 'nuevo');
+    assert.equal((await p.llamar('/api/portal/saldo', nuevo)).body.por_liberar, 2000);
+    assert.deepEqual((await p.llamar('/api/portal/recibos', nuevo)).body.recibos.map((r: any) => r.id), [venta.cuerpo.id]);
+
+    // Registrarse después es idempotente: ni segunda fila ni otro número.
+    const registro = await p.registrar('nuevo', '+524445556666');
+    assert.equal(registro.status, 200, JSON.stringify(registro.body));
+    assert.equal(registro.body.id, previo.cuerpo.id);
+    assert.equal(clientes(), antes);
+
+    // Quien ya tiene acceso no se reasigna: otro UID con ese teléfono sigue en 409 y sin membresía.
+    const intruso = token('intruso', '+524445556666');
+    assert.equal((await p.registrar('intruso', '+524445556666')).status, 409);
+    assert.equal((await p.llamar('/api/portal/yo', intruso)).status, 404);
+    assert.equal(p.db.prepare('select auth_uid from clientes where id = ?').get(previo.cuerpo.id)!.auth_uid, 'nuevo');
+    assert.equal(clientes(), antes);
+
+    // Un teléfono sin alta no recibe ninguna membresía.
+    const ajeno = await p.llamar('/api/portal/yo', token('ajeno', '+524449990000'));
+    assert.equal(ajeno.status, 404);
+    assert.equal(ajeno.body.error, 'Registro requerido.');
+    assert.equal(clientes(), antes);
+  } finally { p.cerrar(); }
+});
+
+test('una membresía que ya tiene acceso no pasa a otro UID aunque coincida el teléfono (#807)', async () => {
+  const p = portalDePrueba();
+  try {
+    const a = await p.registrar('uid-a', '+524440001111');
+    assert.equal(a.status, 200);
+    assert.equal((await p.registrar('uid-b', '+524440001111')).status, 409);
+    assert.equal((await p.llamar('/api/portal/yo', token('uid-b', '+524440001111'))).status, 404);
+    assert.equal((await p.llamar('/api/portal/yo', token('uid-a', '+524440001111'))).body.id, a.body.id);
+  } finally { p.cerrar(); }
+});
+
+test('la caja busca por teléfono o número de socio; unas letras no son un número de socio (#807)', async () => {
+  const p = portalDePrueba();
+  try {
+    const previo = await p.pedir('/api/socios', { id:crypto.randomUUID(), nombre:'Socio previo', telefono:'4445556666', acepta_bases:true, declara_mayor_edad:true });
+    assert.equal(previo.status, 201);
+    const otro = await p.pedir('/api/socios', { id:crypto.randomUUID(), nombre:'Otro', telefono:'4447778888', acepta_bases:true, declara_mayor_edad:true });
+    const buscar = (q: string) => p.pedir(`/api/socios?q=${encodeURIComponent(q)}`);
+    for (const q of [`#${previo.cuerpo.numero}`, String(previo.cuerpo.numero), '4445556666', '444 555 6666', '444-555-6666'])
+      assert.equal((await buscar(q)).cuerpo.id, previo.cuerpo.id, q);
+    // El DV-… de un vínculo viejo traía dígitos y cargaba al socio equivocado.
+    for (const q of ['DV-a1B2c3D4e5F6g7H8', `DV-${otro.cuerpo.numero}`, 'abc', `${otro.cuerpo.numero}x`]) {
+      const r = await buscar(q);
+      assert.equal(r.status, 400, q);
+      assert.equal(r.cuerpo.error, 'Escribe el telefono o el numero de socio.');
+      assert.equal(r.cuerpo.id, undefined, q);
+    }
+    assert.equal((await buscar('')).status, 400);
+    assert.equal((await buscar('99')).status, 404);
   } finally { p.cerrar(); }
 });
 
