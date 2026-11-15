@@ -12,6 +12,14 @@ import {
   MEDIDAS_CONTROL, MAX_MOTIVOS, TRAMOS_DEMORA,
 } from '../public/reportes-control.js';
 
+test('B3: subir los descuentos aprobados es desfavorable (rojo), igual que en Resumen y Ventas', () => {
+  const ceros = Object.fromEntries(MEDIDAS_CONTROL.map((m) => [m, 0]));
+  const d = { comparar: 'anterior', comparacion: { desde: 'a', hasta: 'b', dias: 1 }, cubetas: [], totales: { ...ceros, tickets: 10, desc_n: 6 }, anterior: { ...ceros, tickets: 10, desc_n: 3 } };
+  const k = tarjetasControl(d).find((x: any) => x.clave === 'desc');
+  assert.equal(k.cambio.tono, 'mal');
+  assert.equal(tarjetasControl({ ...d, totales: { ...d.totales, desc_n: 1 } }).find((x: any) => x.clave === 'desc').cambio.tono, 'bien');
+});
+
 type T = ReturnType<typeof tienda>;
 const suma = (xs: number[]) => xs.reduce((s, x) => s + x, 0);
 const llamar = (t: T, consulta: string) => t.pedir(`/api/reportes/control?${consulta}`, undefined, 'GET');

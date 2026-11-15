@@ -210,7 +210,7 @@ export function tarjetasControl(d) {
     { ...comunes, clave: 'dif', etiqueta: 'Diferencia de cortes', valor: hayCortes ? pesosConSigno(t.dif) : '—',
       cambio: hayCortes && a && a.cortes_n > 0 ? cambio(t.dif, a.dif, { tipo: 'abs', bueno: 'neutro' }) : null, serie: serie((c) => c.dif), clase: 's3',
       pie: hayCortes ? `${cuenta(t.cortes_n, 'corte', 'cortes')}: ${n0(t.cortes_corto)} con faltante · ${n0(t.cortes_sobra)} con sobrante · ${n0(t.cortes_exacto)} exactos` : 'Sin cortes en el periodo' },
-    { ...comunes, clave: 'desc', etiqueta: 'Descuentos aprobados', valor: n0(t.desc_n), cambio: cambio(t.desc_n, a?.desc_n, { bueno: 'neutro' }),
+    { ...comunes, clave: 'desc', etiqueta: 'Descuentos aprobados', valor: n0(t.desc_n), cambio: cambio(t.desc_n, a?.desc_n),   // subir el descuento es desfavorable, como en Resumen y Ventas
       serie: serie((c) => c.desc_n), clase: 's1', pie: `${pesos(t.desc_monto)} fuera de la promoción` },
   ];
 }
