@@ -80,11 +80,12 @@
   .seg button:hover { background: var(--lavado); }
   .seg button[aria-pressed="true"] { background: var(--acento); color: #fff; font-weight: 600; }
   .campo { display: inline-flex; gap: 6px; align-items: center; font-size: 12px; color: var(--tinta-2); white-space: nowrap; flex: none; }
-  .campo select, select.campo, .campo input, .filtros-tickets select { border: 1px solid var(--borde); background: var(--superficie); border-radius: 5px;
-    padding: 5px 6px; font-size: 13px; color: var(--tinta); }
+  .campo select, .campo input, .filtros-tickets select { border: 1px solid var(--borde); background: var(--superficie); border-radius: 5px;
+    padding: 6px 8px; font-size: 13px; color: var(--tinta); }
   .pers { display: inline-flex; gap: 10px; align-items: center; flex: none; }
   .pers[hidden] { display: none; }
-  select#f-tienda[hidden] { display: none; }
+  .campo[hidden] { display: none; }
+  .fila-periodo, .fila-acciones { display: contents; }   /* en escritorio, todo en una fila; en celular, filas propias */
   .btn { border: 1px solid var(--borde); background: var(--superficie); border-radius: 5px; padding: 6px 12px; cursor: pointer; font-size: 13px;
     font-weight: 600; white-space: nowrap; flex: none; color: var(--tinta); }
   .btn:hover { background: var(--lavado); }
@@ -232,7 +233,12 @@
     .riel a { white-space: nowrap; padding: 7px 11px; }
     .riel .grupo { display: none; }
     .trabajo { border-left: 0; padding-left: max(16px, env(safe-area-inset-left, 0px)); }
-    .filtros { position: static; flex-wrap: nowrap; overflow-x: auto; scrollbar-width: thin; }
+    .filtros { position: static; flex-direction: column; align-items: stretch; gap: 8px; }
+    .fila-periodo { display: block; min-width: 0; max-width: 100%; overflow-x: auto; scrollbar-width: thin; }   /* los atajos se desplazan en su fila */
+    .fila-periodo .seg { display: flex; width: max-content; }
+    .pers { flex-wrap: wrap; gap: 8px 12px; }
+    .fila-acciones { display: flex; gap: 8px 12px; align-items: center; flex-wrap: wrap; justify-content: space-between; }   /* siempre visible */
+    .campo select { max-width: 52vw; }
     .filtros .btn { margin-left: 0; }
     .tarjeta { min-width: 0; flex-basis: 42%; }
     .tarjeta .valor { font-size: 20px; }
@@ -272,13 +278,15 @@
   </nav>
   <div class="trabajo gutter">
     <div class="filtros" role="group" aria-label="Filtros del reporte">
-      <div class="seg" id="rango" role="group" aria-label="Periodo"></div>
+      <div class="fila-periodo"><div class="seg" id="rango" role="group" aria-label="Periodo"></div></div>
       <span class="pers" id="pers" hidden>
         <label class="campo">Desde <input type="date" id="f-desde"></label>
         <label class="campo">Hasta <input type="date" id="f-hasta"></label>
       </span>
-      <select id="f-tienda" class="campo" aria-label="Tienda de las ventas" hidden></select>
-      <button type="button" class="btn" id="imprimir">Imprimir o guardar PDF</button>
+      <div class="fila-acciones">
+        <label class="campo" id="c-tienda" hidden>Tienda <select id="f-tienda"></select></label>
+        <button type="button" class="btn" id="imprimir">Imprimir o guardar PDF</button>
+      </div>
     </div>
     <p class="periodo-txt"><span><span id="p-etq">Del</span> <b id="p-texto">—</b></span><span id="p-anterior"></span><span id="aviso-periodo" role="status"></span></p>
 
@@ -679,7 +687,7 @@ function pintarTiendas(r) {
   // Solo se ofrece cuando hay más de una tienda en el servidor; un cliente viejo en caché simplemente no la ve.
   if (!Array.isArray(r.tiendas) || r.tiendas.length < 2) return;
   const selector = $('f-tienda');
-  selector.hidden = false;
+  $('c-tienda').hidden = false;
   if (selector.options.length !== r.tiendas.length + 1) {
     selector.innerHTML = '<option value="">Todas las tiendas</option>' +
       r.tiendas.map((t) => `<option value="${escapar(t.clave)}">${escapar(t.nombre)}</option>`).join('');
