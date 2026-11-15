@@ -5,6 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>El Dolarón — reportes</title>
 <style>
+  /* Archivo: la misma del tablero, servida por la app (licencia OFL), sin Google Fonts. */
+  @font-face { font-family: Archivo; src: url("/fuentes/archivo-variable.woff2") format("woff2"); font-weight: 100 900; font-display: swap; }
   /* Colores por rol, claro y oscuro (skill dataviz). Series validadas con validate_palette.js:
      azul, naranja, aqua y amarillo pasan los seis chequeos en los dos modos; el contraste
      bajo de aqua/amarillo en claro se compensa con la leyenda con importes y la tabla. */
@@ -45,38 +47,67 @@
 
   * { box-sizing: border-box; }
   body { margin: 0; background: var(--pagina); color: var(--tinta);
-    font-family: system-ui, -apple-system, "Segoe UI", sans-serif; -webkit-text-size-adjust: 100%; }
+    font-family: Archivo, system-ui, -apple-system, "Segoe UI", sans-serif; font-size: 14px; line-height: 1.4; -webkit-text-size-adjust: 100%; }
   a { color: inherit; }
   .sec { color: var(--tinta-2); }
   .num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
 
-  /* ---- barra superior y filtros ---- */
-  header.barra { background: var(--marca); color: #fff; padding: 12px 20px; display: flex; gap: 16px;
-    align-items: center; flex-wrap: wrap; }
-  header.barra h1 { font-size: 18px; margin: 0; flex: 1; font-weight: 700; letter-spacing: .01em; }
+  /* ---- franja de marca, riel de vistas y barra de filtros (cascaron de #802) ---- */
+  :focus-visible { outline: 2px solid var(--serie-1); outline-offset: 2px; }
+  button, select, input { font: inherit; color: inherit; }
+  .gutter { padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+  header.barra { background: var(--marca); color: #fff; }
+  header.barra .dentro { max-width: 1360px; margin: 0 auto; display: flex; gap: 6px 16px; align-items: center; flex-wrap: wrap; padding-block: 11px; }
+  header.barra h1 { margin: 0; font-size: 17px; font-weight: 500; flex: 1; min-width: 170px; }
+  header.barra h1 b { font-weight: 800; letter-spacing: .02em; text-transform: uppercase; }
+  header.barra .hora { font-size: 12px; opacity: .8; }
   header.barra a { color: var(--marca-claro); text-decoration: none; font-size: 14px; }
   header.barra a:hover { text-decoration: underline; }
-  .filtros { position: sticky; top: 0; z-index: 5; background: var(--pagina); border-bottom: 1px solid var(--borde); }
-  .filtros > div { max-width: 1120px; margin: 0 auto; padding: 10px 20px; display: flex; gap: 14px; align-items: center; flex-wrap: wrap; }
-  .segmentos { display: inline-flex; border: 1px solid var(--borde); border-radius: 10px; background: var(--superficie); padding: 2px; }
-  .segmentos button { border: 0; background: none; color: var(--tinta-2); font: inherit; font-size: 13px; padding: 6px 12px;
-    border-radius: 8px; cursor: pointer; }
-  .segmentos button:hover { background: var(--lavado); }
-  .segmentos button[aria-pressed="true"] { background: var(--acento); color: #fff; font-weight: 600; }
-  .periodo { font-size: 13px; color: var(--tinta-2); display: flex; gap: 4px 14px; flex-wrap: wrap; flex: 1; }
-  .periodo b { color: var(--tinta); font-weight: 600; }
-  .filtros button.imprimir { border: 1px solid var(--borde); background: var(--superficie); color: var(--tinta); font: inherit;
-    font-size: 13px; padding: 6px 12px; border-radius: 10px; cursor: pointer; }
 
-  main { max-width: 1120px; margin: 0 auto; padding: 20px; display: grid; grid-template-columns: minmax(0, 1fr); gap: 28px; transition: opacity .15s; }
+  .app { max-width: 1360px; margin: 0 auto; display: grid; grid-template-columns: 184px minmax(0, 1fr); align-items: start; }
+  .riel { position: sticky; top: 0; display: flex; flex-direction: column; gap: 2px; padding-block: 16px; padding-right: 8px; }
+  .riel a { display: block; padding: 8px 10px; border-radius: 4px; text-decoration: none; color: var(--tinta-2); font-weight: 500; }
+  .riel a:hover { background: var(--lavado); }
+  .riel a[aria-current="page"] { background: var(--lavado); color: var(--tinta); font-weight: 700; }
+  .riel .grupo { font-size: 10.5px; letter-spacing: .09em; text-transform: uppercase; color: var(--tinta-2); padding: 12px 10px 4px; }
+  .trabajo { min-width: 0; border-left: 1px solid var(--borde); padding-left: 20px; padding-bottom: 48px; }
+  .filtros { position: sticky; top: 0; z-index: 5; background: var(--pagina); border-bottom: 1px solid var(--borde);
+    display: flex; gap: 10px 14px; align-items: center; flex-wrap: wrap; padding-block: 10px; }
+  .seg { display: inline-flex; border: 1px solid var(--borde); border-radius: 5px; overflow: hidden; background: var(--superficie); flex: none; }
+  .seg button { border: 0; background: none; padding: 6px 10px; cursor: pointer; white-space: nowrap; font-size: 13px;
+    border-right: 1px solid var(--borde); color: var(--tinta); }
+  .seg button:last-child { border-right: 0; }
+  .seg button:hover { background: var(--lavado); }
+  .seg button[aria-pressed="true"] { background: var(--acento); color: #fff; font-weight: 600; }
+  .campo { display: inline-flex; gap: 6px; align-items: center; font-size: 12px; color: var(--tinta-2); white-space: nowrap; flex: none; }
+  .campo select, select.campo, .campo input, .filtros-tickets select { border: 1px solid var(--borde); background: var(--superficie); border-radius: 5px;
+    padding: 5px 6px; font-size: 13px; color: var(--tinta); }
+  .pers { display: inline-flex; gap: 10px; align-items: center; flex: none; }
+  .pers[hidden] { display: none; }
+  select#f-tienda[hidden] { display: none; }
+  .btn { border: 1px solid var(--borde); background: var(--superficie); border-radius: 5px; padding: 6px 12px; cursor: pointer; font-size: 13px;
+    font-weight: 600; white-space: nowrap; flex: none; color: var(--tinta); }
+  .btn:hover { background: var(--lavado); }
+  .filtros .btn { margin-left: auto; }
+  .periodo-txt { margin: 0; padding-block: 10px 0; font-size: 12.5px; color: var(--tinta-2); display: flex; flex-wrap: wrap; gap: 2px 14px; }
+  .periodo-txt b { color: var(--tinta); font-weight: 600; }
+  #aviso-periodo { color: var(--mal); font-weight: 600; }
+
+  main { padding-top: 4px; transition: opacity .15s; }
   main.cargando { opacity: .55; }
-  h2.titulo-bloque { font-size: 13px; font-weight: 700; margin: 0 0 12px; color: var(--tinta-2); text-transform: uppercase; letter-spacing: .08em; }
+  .vista { display: grid; grid-template-columns: minmax(0, 1fr); gap: 28px; }
+  .vista[hidden] { display: none; }
+  .vista > h2 { font-size: 22px; font-weight: 700; margin: 14px 0 -10px; letter-spacing: -.01em; text-wrap: balance; }
+  .vista > h2:focus { outline: none; }
+  .vista > h2:focus-visible { outline: 2px solid var(--serie-1); outline-offset: 4px; }
+
+  .titulo-bloque { font-size: 13px; font-weight: 700; margin: 0 0 12px; color: var(--tinta-2); text-transform: uppercase; letter-spacing: .08em; }
   .malla { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; }
   @media (min-width: 861px) { .malla.dos { grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); } .malla.iguales { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); } }
 
-  .panel { background: var(--superficie); border: 1px solid var(--borde); border-radius: 14px; padding: 18px 20px; min-width: 0; overflow-x: auto; }
-  .panel header { display: flex; align-items: baseline; gap: 10px; margin-bottom: 14px; }
-  .panel h3 { font-size: 15px; margin: 0; font-weight: 650; flex: 1; }
+  .panel { background: var(--superficie); border: 1px solid var(--borde); border-radius: 6px; padding: 12px 14px 14px; min-width: 0; overflow-x: auto; }
+  .panel header { display: flex; align-items: baseline; gap: 10px; margin-bottom: 10px; }
+  .panel h4 { font-size: 14px; margin: 0; font-weight: 700; flex: 1; min-width: 0; }
   .panel .subtitulo { font-size: 12px; color: var(--tinta-2); font-weight: 400; margin-left: 8px; }
   .alterna { border: 0; background: none; color: var(--tinta-2); font: inherit; font-size: 12px; cursor: pointer; text-decoration: underline;
     text-underline-offset: 3px; padding: 2px 0; }
@@ -94,10 +125,12 @@
   .delta { font-size: 13px; color: var(--tinta-2); }
   .delta .chip { font-weight: 700; margin-right: 6px; white-space: nowrap; }
   .delta .sube { color: var(--bien); } .delta .baja { color: var(--mal); }
-  .tarjetas { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; }
-  .tarjeta { background: var(--superficie); border: 1px solid var(--borde); border-radius: 14px; padding: 14px 16px; min-width: 0; }
-  .tarjeta .etq { font-size: 12px; color: var(--tinta-2); }
-  .tarjeta .valor { font-size: 24px; font-weight: 650; margin-top: 3px; overflow-wrap: anywhere; }
+  /* Tarjetas de KPI como la maqueta: una tira con rayas, no cajas sueltas. */
+  .tarjetas { display: flex; flex-wrap: wrap; background: var(--superficie); border: 1px solid var(--borde); border-radius: 6px; overflow: hidden; }
+  .tarjeta { flex: 1 1 170px; min-width: 150px; padding: 12px 14px 10px; border-right: 1px solid var(--borde); border-bottom: 1px solid var(--borde);
+    margin: 0 -1px -1px 0; }
+  .tarjeta .etq { font-size: 11px; letter-spacing: .07em; text-transform: uppercase; color: var(--tinta-2); font-weight: 600; }
+  .tarjeta .valor { font-size: 24px; font-weight: 700; margin-top: 3px; overflow-wrap: anywhere; font-variant-numeric: tabular-nums; letter-spacing: -.015em; }
   .tarjeta .delta { margin-top: 3px; font-size: 12px; }
 
   /* ---- graficas ---- */
@@ -192,9 +225,25 @@
   dialog .acciones { display: flex; justify-content: flex-end; margin-top: 14px; }
   dialog .acciones button { padding: 10px 16px; font-size: 15px; border-radius: 10px; border: 0; cursor: pointer; background: var(--marca); color: #fff; font-weight: 700; }
 
+  @media (max-width: 860px) {
+    .app { grid-template-columns: minmax(0, 1fr); }
+    .riel { flex-direction: row; overflow-x: auto; padding-block: 6px; padding-right: max(16px, env(safe-area-inset-right, 0px)); z-index: 6;
+      background: var(--pagina); border-bottom: 1px solid var(--borde); scrollbar-width: none; }
+    .riel a { white-space: nowrap; padding: 7px 11px; }
+    .riel .grupo { display: none; }
+    .trabajo { border-left: 0; padding-left: max(16px, env(safe-area-inset-left, 0px)); }
+    .filtros { position: static; flex-wrap: nowrap; overflow-x: auto; scrollbar-width: thin; }
+    .filtros .btn { margin-left: 0; }
+    .tarjeta { min-width: 0; flex-basis: 42%; }
+    .tarjeta .valor { font-size: 20px; }
+    header.barra .hora { display: none; }
+  }
+  @media (prefers-reduced-motion: reduce) { main { transition: none; } }
+
   @media print {
-    header.barra a, .filtros button, .alterna, .ver-mas, .exportar, .fondo-caja, .filtros-tickets { display: none !important; }
-    .filtros { position: static; border: 0; }
+    header.barra a, .riel, .filtros, .alterna, .ver-mas, .exportar, .fondo-caja, .filtros-tickets { display: none !important; }
+    .app { display: block; }
+    .trabajo { border: 0; padding: 0; }
     :root { color-scheme: light; }
     body { background: #fff; }
     .panel, .tarjeta { break-inside: avoid; box-shadow: none; }
@@ -203,67 +252,249 @@
 </style>
 </head>
 <body>
-<header class="barra">
-  <h1>El Dolarón · Reportes</h1>
+<header class="barra"><div class="dentro gutter">
+  <h1><b>El Dolarón</b> · Reportes</h1>
+  <span class="hora" id="actualizado"></span>
   <a href="/admin">← Cola de revisión</a>
   <a href="/caja">Caja →</a>
-</header>
+</div></header>
 
-<div class="filtros"><div>
-  <div class="segmentos" id="rango" role="group" aria-label="Periodo"></div>
-  <select id="f-tienda" aria-label="Tienda de las ventas" hidden></select>
-  <div class="periodo"><span>Del <b id="p-texto">—</b></span><span id="p-anterior"></span></div>
-  <button type="button" class="imprimir" id="imprimir">Imprimir o guardar PDF</button>
-</div></div>
+<div class="app">
+  <nav class="riel gutter" id="nav" aria-label="Vistas del reporte">
+    <span class="grupo" aria-hidden="true">Vistas</span>
+    <a href="#resumen" data-v="resumen">Resumen</a>
+    <a href="#ventas" data-v="ventas">Ventas</a>
+    <a href="#inventario" data-v="inventario">Inventario</a>
+    <a href="#finanzas" data-v="finanzas">Finanzas</a>
+    <a href="#equipo" data-v="equipo">Equipo</a>
+    <a href="#control" data-v="control">Control</a>
+    <a href="#tickets" data-v="tickets">Tickets</a>
+  </nav>
+  <div class="trabajo gutter">
+    <div class="filtros" role="group" aria-label="Filtros del reporte">
+      <div class="seg" id="rango" role="group" aria-label="Periodo"></div>
+      <span class="pers" id="pers" hidden>
+        <label class="campo">Desde <input type="date" id="f-desde"></label>
+        <label class="campo">Hasta <input type="date" id="f-hasta"></label>
+      </span>
+      <select id="f-tienda" class="campo" aria-label="Tienda de las ventas" hidden></select>
+      <button type="button" class="btn" id="imprimir">Imprimir o guardar PDF</button>
+    </div>
+    <p class="periodo-txt"><span><span id="p-etq">Del</span> <b id="p-texto">—</b></span><span id="p-anterior"></span><span id="aviso-periodo" role="status"></span></p>
 
 <main id="principal">
 
-  <section class="principal" aria-labelledby="t-resumen">
-    <h2 class="titulo-bloque" id="t-resumen">Resumen</h2>
+  <section class="vista" id="v-resumen" data-vista="resumen" aria-labelledby="h-resumen">
+    <h2 id="h-resumen" tabindex="-1">Resumen</h2>
+    <div class="principal">
     <div class="hero">
       <div class="etq">Vendido</div>
       <div class="valor" id="h-total">—</div>
       <div class="delta" id="h-delta"></div>
     </div>
     <div class="tarjetas" id="tarjetas"></div>
+    </div>
   </section>
 
-  <section aria-labelledby="t-ventas">
-    <h2 class="titulo-bloque" id="t-ventas">Ventas</h2>
+  <section class="vista" id="v-ventas" data-vista="ventas" aria-labelledby="h-ventas" hidden>
+    <h2 id="h-ventas" tabindex="-1">Ventas</h2>
+    <div>
     <div class="malla dos">
       <article class="panel" id="p-dias">
-        <header><h3>Ventas por día <span class="subtitulo" id="dias-sub"></span></h3><button type="button" class="alterna">Ver tabla</button></header>
+        <header><h4>Ventas por día <span class="subtitulo" id="dias-sub"></span></h4><button type="button" class="alterna">Ver tabla</button></header>
         <div class="vista-grafica"><div id="graf-dias"></div>
-          <p class="nota" id="dias-nota">Toca una columna para ver solo los tickets de ese día.</p></div>
+          <p class="nota" id="dias-nota">Toca una columna para ir a los tickets de ese día.</p></div>
         <div class="vista-tabla" id="tabla-dias"></div>
       </article>
       <article class="panel" id="p-pago">
-        <header><h3>Forma de pago</h3></header>
+        <header><h4>Forma de pago</h4></header>
         <div id="por-forma-pago"></div>
         <p class="nota">Lo cobrado en dinero por forma de pago y lo pagado con Dolarones: juntos suman lo vendido.</p>
       </article>
     </div>
     <article class="panel" id="p-horas" style="margin-top:16px">
-      <header><h3>Ventas por hora y día <span class="subtitulo">hora de la tienda</span></h3><button type="button" class="alterna">Ver tabla</button></header>
+      <header><h4>Ventas por hora y día <span class="subtitulo">hora de la tienda</span></h4><button type="button" class="alterna">Ver tabla</button></header>
       <div class="vista-grafica" id="mapa-horas"></div>
       <div class="vista-tabla" id="tabla-horas"></div>
       <p class="nota" id="horas-nota"></p>
     </article>
     <div class="malla iguales" style="margin-top:16px">
       <article class="panel" id="p-cat">
-        <header><h3>Por categoría</h3><button type="button" class="alterna">Ver tabla</button></header>
+        <header><h4>Por categoría</h4><button type="button" class="alterna">Ver tabla</button></header>
         <div class="vista-grafica"><div id="por-categoria"></div><p class="nota" id="cat-nota"></p></div>
         <div class="vista-tabla" id="tabla-cat"></div>
       </article>
       <article class="panel">
-        <header><h3>Piezas más vendidas</h3></header>
+        <header><h4>Piezas más vendidas</h4></header>
         <div id="top-productos"></div>
       </article>
     </div>
+    </div>
+    <section aria-labelledby="t-descuentos">
+      <h3 class="titulo-bloque" id="t-descuentos">Descuentos y promociones</h3>
+    <article class="panel">
+      <div class="tarjetas" id="descuentos-resumen" style="margin-bottom: 14px"></div>
+      <div id="descuentos-detalle" style="overflow-x:auto"></div>
+      <p class="nota">Lo que se dejó de cobrar: la promo de inauguración ($100 en compras de $300 o más) y los descuentos aprobados por el dueño.
+        Los tickets cancelados no cuentan.</p>
+    </article>
+    </section>
+    <section aria-labelledby="t-revendedoras">
+      <h3 class="titulo-bloque" id="t-revendedoras">Revendedoras</h3>
+    <article class="panel">
+      <div id="revendedoras-detalle" style="overflow-x:auto"></div>
+      <p class="nota">Lo que cada revendedora cerró en el periodo: pedidos que apartó y la tienda cobró en caja. El importe es el del ticket
+        que los cerró (sin cancelados, menos devoluciones). El pago a la tienda lo registra el personal en Pedidos; la comisión se calcula con este importe.</p>
+    </article>
+    </section>
   </section>
 
-  <section aria-labelledby="t-tickets">
-    <h2 class="titulo-bloque" id="t-tickets">Tickets</h2>
+  <section class="vista" id="v-inventario" data-vista="inventario" aria-labelledby="h-inventario" hidden>
+    <h2 id="h-inventario" tabindex="-1">Inventario</h2>
+    <section aria-labelledby="t-inventario">
+      <h3 class="titulo-bloque" id="t-inventario">Precios e inventario</h3>
+    <div class="malla">
+      <article class="panel" id="p-piso">
+        <header><h4>Inventario en piso <span class="subtitulo">piezas individuales con etiqueta y existencia</span></h4></header>
+        <div class="tarjetas" id="piso-resumen"></div>
+        <div id="piso-por-tienda" hidden></div>
+        <p class="nota">Foto del momento: no depende del periodo de arriba. No incluye bandas (no tienen fecha de captura propia) ni piezas agotadas
+          o aún sin etiqueta. Las dañadas sí cuentan: siguen en piso. El valor es precio de tienda × existencia.</p>
+      </article>
+      <div class="malla iguales">
+        <article class="panel" id="p-antiguedad">
+          <header><h4>Antigüedad <span class="subtitulo">semanas desde la captura</span></h4></header>
+          <div id="piso-antiguedad"></div>
+          <p class="nota">La barra y el porcentaje son por valor a precio de tienda; de las piezas más nuevas a las más viejas.
+            La leyenda es la tabla: trae las piezas y el importe de cada tramo.</p>
+        </article>
+        <article class="panel" id="p-piso-cat">
+          <header><h4>Por categoría <span class="subtitulo">valor en piso</span></h4><button type="button" class="alterna">Ver tabla</button></header>
+          <div class="vista-grafica" id="piso-categoria"></div>
+          <div class="vista-tabla" id="tabla-piso-cat"></div>
+        </article>
+      </div>
+      <article class="panel" id="p-viejas">
+        <header><h4>Las más viejas <span class="subtitulo">candidatas a rebaja</span></h4></header>
+        <div id="piso-viejas"></div>
+        <p class="nota">Las 15 piezas con más días en piso desde su captura (días de la tienda, no horas).</p>
+      </article>
+      <div class="malla iguales">
+        <article class="panel"><header><h4>Precio sugerido vs. precio final</h4></header><div id="precio-sugerido"></div>
+          <p class="nota">Qué tan lejos anda la IA del precio que de verdad se cobra. Sirve para ajustar los porcentajes de la configuración con datos, no a ojo.</p></article>
+        <article class="panel"><header><h4>Días en venta por categoría</h4></header><div id="dias-en-venta"></div>
+          <p class="nota">Días entre la captura y la venta. No incluye bins: no son piezas individuales con fecha de captura propia.</p></article>
+      </div>
+    </div>
+    </section>
+    <section aria-labelledby="t-merma">
+      <h3 class="titulo-bloque" id="t-merma">Merma por caducidad</h3>
+    <article class="panel">
+      <div class="tarjetas" id="merma-resumen" style="margin-bottom: 14px"></div>
+      <div id="merma-detalle" style="overflow-x:auto"></div>
+      <p class="nota">Piezas de grado D · Caducidad capturadas en el periodo de arriba. No se venden ni suman al inventario en piso.
+        El valor es el precio de lista × existencia (no hay costo de compra en el sistema).</p>
+    </article>
+    </section>
+  </section>
+
+  <section class="vista" id="v-finanzas" data-vista="finanzas" aria-labelledby="h-finanzas" hidden>
+    <h2 id="h-finanzas" tabindex="-1">Finanzas</h2>
+    <section aria-labelledby="t-cuadre">
+      <h3 class="titulo-bloque" id="t-cuadre">Cuadre al centavo</h3>
+    <article class="panel">
+      <div class="banda-cuadre" id="cuadre-banda"></div>
+      <div id="cuadre"></div>
+      <p class="nota">Cada sección se suma por su lado y se compara con lo vendido. Si alguna diferencia no es $0.00 aparece aquí
+        en centavos: es algo que revisar (un descuento, una devolución mal registrada), no un redondeo que se esconda.</p>
+    </article>
+    </section>
+    <section aria-labelledby="t-caja">
+      <h3 class="titulo-bloque" id="t-caja">Caja y efectivo</h3>
+      <div class="malla">
+      <article class="panel">
+        <header><h4>Cortes de caja</h4></header>
+        <div class="fondo-caja">
+          <label for="fondo-caja">Fondo de caja: lo que se queda en cada cajón después del corte ($)</label>
+          <input id="fondo-caja" type="number" min="0" step="1" inputmode="numeric">
+          <button id="guardar-fondo" type="button">Guardar</button>
+          <span id="aviso-fondo"></span>
+        </div>
+        <div class="fondo-caja">
+          <label for="cupon-porcentaje">Devolución en cupón: % de lo pagado que se regresa en Dolarones (100 = lo mismo)</label>
+          <input id="cupon-porcentaje" type="number" min="1" max="200" step="1" inputmode="numeric">
+          <button id="guardar-cupon" type="button">Guardar</button>
+          <span id="aviso-cupon"></span>
+        </div>
+        <div id="cortes" style="overflow-x:auto"></div>
+        <p class="nota">Conteo ciego: el cajero registra lo contado antes de ver lo esperado. Diferencia = contado − esperado.
+          «Tarjeta» compara lo cobrado en el sistema con el cierre de la terminal.</p>
+      </article>
+      <article class="panel">
+        <header><h4>Terminal de tarjeta</h4></header>
+        <div class="tarjetas" id="terminal-resumen" style="margin-bottom: 14px"></div>
+        <div class="fondo-caja">
+          <label for="terminal-importe">Pago de la terminal que recibiste tú, fuera del cajón ($)</label>
+          <input id="terminal-importe" type="number" min="1" step="0.5" inputmode="decimal">
+          <input id="terminal-nota" type="text" maxlength="200" placeholder="Nota (opcional)" aria-label="Nota del pago">
+          <button id="terminal-registrar" type="button">Registrar pago</button>
+          <span id="aviso-terminal"></span>
+        </div>
+        <div id="terminal-pagos" style="overflow-x:auto"></div>
+        <details><summary>Lo que se le cuenta por corte</summary><div id="terminal-cortes" style="overflow-x:auto"></div></details>
+        <p class="nota">El dueño de la terminal paga en efectivo el 100 % de lo cobrado con tarjeta. Por corte se cuenta el cierre
+          de la terminal; si no se capturó, lo de tarjeta en el sistema. Lo que entra al cajón lo registra la caja en «Gasto / retiro»;
+          lo que te da a ti, aquí. Las ventas con tarjeta cuentan desde su corte.</p>
+      </article>
+        <article class="panel"><header><h4>Gastos y retiros de efectivo</h4></header><div id="retiros" style="overflow-x:auto"></div></article>
+      </div>
+    </section>
+  </section>
+
+  <section class="vista" id="v-equipo" data-vista="equipo" aria-labelledby="h-equipo" hidden>
+    <h2 id="h-equipo" tabindex="-1">Equipo</h2>
+    <div>
+    <article class="panel">
+      <div id="equipo-detalle" style="overflow-x:auto"></div>
+      <p class="nota">Por persona en el periodo. Ventas: neto de los tickets que atendió (sin cancelados, menos devoluciones; «Sin atribuir» son
+        ventas sin vendedora). Socios: altas que registró y cuántos compraron ese mismo día. Apartados: cerrados en caja. Piezas: capturadas y
+        cuántas se vendieron en sus primeros 14 días. Días: asistencias de su empleado en Nómina (hay que ligar su cuenta allá).</p>
+    </article>
+    <article class="panel" style="margin-top:14px">
+      <header><h4>Bono semanal de la tienda <span class="subtitulo">últimas 8 semanas cerradas, lunes a domingo</span></h4></header>
+      <form id="equipo-config" style="display:flex;flex-wrap:wrap;gap:12px;align-items:end;margin-bottom:12px">
+        <label>Porcentaje de las ventas netas (%) <input id="bono-pct" type="number" min="0" step="0.01" style="width:90px"></label>
+        <label>Meta de la semana ($) <input id="bono-meta" type="number" min="0" step="1" style="width:130px"></label>
+        <button type="submit">Guardar</button> <span id="aviso-bono" role="status"></span>
+      </form>
+      <div id="bono-semanas" style="overflow-x:auto"></div>
+      <p class="nota">Solo hay bono si las ventas netas de la semana superan la meta. La bolsa se reparte entre quienes trabajaron esa semana según sus días
+        (el resto de centavos, a quien más días tuvo). Registrar crea un bono en Nómina fechado el domingo de la semana; hacerlo dos veces no duplica.</p>
+    </article>
+    </div>
+  </section>
+
+  <section class="vista" id="v-control" data-vista="control" aria-labelledby="h-control" hidden>
+    <h2 id="h-control" tabindex="-1">Control</h2>
+    <section aria-labelledby="t-control">
+      <h3 class="titulo-bloque" id="t-control">Cancelaciones y devoluciones</h3>
+    <article class="panel">
+      <div class="tarjetas" id="cancelaciones-resumen" style="margin-bottom: 14px"></div>
+      <div id="cancelaciones-detalle" style="overflow-x:auto"></div>
+      <p class="nota">Cada cancelación exige un motivo y queda con el correo de quien la hizo. Revisa aquí lo que no cuadre: un patrón de
+        cancelaciones de un mismo correo, o motivos que no convencen.</p>
+    </article>
+    </section>
+    <section aria-labelledby="t-cajon">
+      <h3 class="titulo-bloque" id="t-cajon">Cajón abierto sin venta</h3>
+        <article class="panel"><div id="aperturas-cajon" style="overflow-x:auto"></div>
+          <p class="nota">Cada vez que alguien usa «Abrir cajón» en la caja, con su correo y la hora. Una venta en efectivo abre el cajón sola y no aparece aquí.</p></article>
+    </section>
+  </section>
+
+  <section class="vista" id="v-tickets" data-vista="tickets" aria-labelledby="h-tickets" hidden>
+    <h2 id="h-tickets" tabindex="-1">Tickets</h2>
+    <div>
     <article class="panel">
       <div class="tarjetas" id="tickets-resumen" style="margin-bottom: 14px"></div>
       <div class="filtros-tickets">
@@ -288,168 +519,18 @@
       <p class="nota">Toca un ticket para ver sus piezas, el cobro y lo que se devolvió. Las piezas se cancelan desde la caja.
         «Vendido» es lo que los tickets siguen valiendo, sin cancelados ni devoluciones.</p>
     </article>
-  </section>
-
-  <section aria-labelledby="t-cuadre">
-    <h2 class="titulo-bloque" id="t-cuadre">Cuadre al centavo</h2>
-    <article class="panel">
-      <div class="banda-cuadre" id="cuadre-banda"></div>
-      <div id="cuadre"></div>
-      <p class="nota">Cada sección se suma por su lado y se compara con lo vendido. Si alguna diferencia no es $0.00 aparece aquí
-        en centavos: es algo que revisar (un descuento, una devolución mal registrada), no un redondeo que se esconda.</p>
-    </article>
-  </section>
-
-  <section aria-labelledby="t-caja">
-    <h2 class="titulo-bloque" id="t-caja">Caja y efectivo</h2>
-    <div class="malla">
-      <article class="panel">
-        <header><h3>Cortes de caja</h3></header>
-        <div class="fondo-caja">
-          <label for="fondo-caja">Fondo de caja: lo que se queda en cada cajón después del corte ($)</label>
-          <input id="fondo-caja" type="number" min="0" step="1" inputmode="numeric">
-          <button id="guardar-fondo" type="button">Guardar</button>
-          <span id="aviso-fondo"></span>
-        </div>
-        <div class="fondo-caja">
-          <label for="cupon-porcentaje">Devolución en cupón: % de lo pagado que se regresa en Dolarones (100 = lo mismo)</label>
-          <input id="cupon-porcentaje" type="number" min="1" max="200" step="1" inputmode="numeric">
-          <button id="guardar-cupon" type="button">Guardar</button>
-          <span id="aviso-cupon"></span>
-        </div>
-        <div id="cortes" style="overflow-x:auto"></div>
-        <p class="nota">Conteo ciego: el cajero registra lo contado antes de ver lo esperado. Diferencia = contado − esperado.
-          «Tarjeta» compara lo cobrado en el sistema con el cierre de la terminal.</p>
-      </article>
-      <article class="panel">
-        <header><h3>Terminal de tarjeta</h3></header>
-        <div class="tarjetas" id="terminal-resumen" style="margin-bottom: 14px"></div>
-        <div class="fondo-caja">
-          <label for="terminal-importe">Pago de la terminal que recibiste tú, fuera del cajón ($)</label>
-          <input id="terminal-importe" type="number" min="1" step="0.5" inputmode="decimal">
-          <input id="terminal-nota" type="text" maxlength="200" placeholder="Nota (opcional)" aria-label="Nota del pago">
-          <button id="terminal-registrar" type="button">Registrar pago</button>
-          <span id="aviso-terminal"></span>
-        </div>
-        <div id="terminal-pagos" style="overflow-x:auto"></div>
-        <details><summary>Lo que se le cuenta por corte</summary><div id="terminal-cortes" style="overflow-x:auto"></div></details>
-        <p class="nota">El dueño de la terminal paga en efectivo el 100 % de lo cobrado con tarjeta. Por corte se cuenta el cierre
-          de la terminal; si no se capturó, lo de tarjeta en el sistema. Lo que entra al cajón lo registra la caja en «Gasto / retiro»;
-          lo que te da a ti, aquí. Las ventas con tarjeta cuentan desde su corte.</p>
-      </article>
-      <div class="malla iguales">
-        <article class="panel"><header><h3>Gastos y retiros de efectivo</h3></header><div id="retiros" style="overflow-x:auto"></div></article>
-        <article class="panel"><header><h3>Cajón abierto sin venta</h3></header><div id="aperturas-cajon" style="overflow-x:auto"></div>
-          <p class="nota">Cada vez que alguien usa «Abrir cajón» en la caja, con su correo y la hora. Una venta en efectivo abre el cajón sola y no aparece aquí.</p></article>
-      </div>
     </div>
-  </section>
-
-  <section aria-labelledby="t-control">
-    <h2 class="titulo-bloque" id="t-control">Cancelaciones y devoluciones</h2>
-    <article class="panel">
-      <div class="tarjetas" id="cancelaciones-resumen" style="margin-bottom: 14px"></div>
-      <div id="cancelaciones-detalle" style="overflow-x:auto"></div>
-      <p class="nota">Cada cancelación exige un motivo y queda con el correo de quien la hizo. Revisa aquí lo que no cuadre: un patrón de
-        cancelaciones de un mismo correo, o motivos que no convencen.</p>
-    </article>
-  </section>
-
-  <section aria-labelledby="t-descuentos">
-    <h2 class="titulo-bloque" id="t-descuentos">Descuentos y promociones</h2>
-    <article class="panel">
-      <div class="tarjetas" id="descuentos-resumen" style="margin-bottom: 14px"></div>
-      <div id="descuentos-detalle" style="overflow-x:auto"></div>
-      <p class="nota">Lo que se dejó de cobrar: la promo de inauguración ($100 en compras de $300 o más) y los descuentos aprobados por el dueño.
-        Los tickets cancelados no cuentan.</p>
-    </article>
-  </section>
-
-  <section aria-labelledby="t-revendedoras">
-    <h2 class="titulo-bloque" id="t-revendedoras">Revendedoras</h2>
-    <article class="panel">
-      <div id="revendedoras-detalle" style="overflow-x:auto"></div>
-      <p class="nota">Lo que cada revendedora cerró en el periodo: pedidos que apartó y la tienda cobró en caja. El importe es el del ticket
-        que los cerró (sin cancelados, menos devoluciones). El pago a la tienda lo registra el personal en Pedidos; la comisión se calcula con este importe.</p>
-    </article>
-  </section>
-
-  <section aria-labelledby="t-equipo">
-    <h2 class="titulo-bloque" id="t-equipo">Equipo</h2>
-    <article class="panel">
-      <div id="equipo-detalle" style="overflow-x:auto"></div>
-      <p class="nota">Por persona en el periodo. Ventas: neto de los tickets que atendió (sin cancelados, menos devoluciones; «Sin atribuir» son
-        ventas sin vendedora). Socios: altas que registró y cuántos compraron ese mismo día. Apartados: cerrados en caja. Piezas: capturadas y
-        cuántas se vendieron en sus primeros 14 días. Días: asistencias de su empleado en Nómina (hay que ligar su cuenta allá).</p>
-    </article>
-    <article class="panel" style="margin-top:14px">
-      <header><h3>Bono semanal de la tienda <span class="subtitulo">últimas 8 semanas cerradas, lunes a domingo</span></h3></header>
-      <form id="equipo-config" style="display:flex;flex-wrap:wrap;gap:12px;align-items:end;margin-bottom:12px">
-        <label>Porcentaje de las ventas netas (%) <input id="bono-pct" type="number" min="0" step="0.01" style="width:90px"></label>
-        <label>Meta de la semana ($) <input id="bono-meta" type="number" min="0" step="1" style="width:130px"></label>
-        <button type="submit">Guardar</button> <span id="aviso-bono" role="status"></span>
-      </form>
-      <div id="bono-semanas" style="overflow-x:auto"></div>
-      <p class="nota">Solo hay bono si las ventas netas de la semana superan la meta. La bolsa se reparte entre quienes trabajaron esa semana según sus días
-        (el resto de centavos, a quien más días tuvo). Registrar crea un bono en Nómina fechado el domingo de la semana; hacerlo dos veces no duplica.</p>
-    </article>
-  </section>
-
-  <section aria-labelledby="t-inventario">
-    <h2 class="titulo-bloque" id="t-inventario">Precios e inventario</h2>
-    <div class="malla">
-      <article class="panel" id="p-piso">
-        <header><h3>Inventario en piso <span class="subtitulo">piezas individuales con etiqueta y existencia</span></h3></header>
-        <div class="tarjetas" id="piso-resumen"></div>
-        <div id="piso-por-tienda" hidden></div>
-        <p class="nota">Foto del momento: no depende del periodo de arriba. No incluye bandas (no tienen fecha de captura propia) ni piezas agotadas
-          o aún sin etiqueta. Las dañadas sí cuentan: siguen en piso. El valor es precio de tienda × existencia.</p>
-      </article>
-      <div class="malla iguales">
-        <article class="panel" id="p-antiguedad">
-          <header><h3>Antigüedad <span class="subtitulo">semanas desde la captura</span></h3></header>
-          <div id="piso-antiguedad"></div>
-          <p class="nota">La barra y el porcentaje son por valor a precio de tienda; de las piezas más nuevas a las más viejas.
-            La leyenda es la tabla: trae las piezas y el importe de cada tramo.</p>
-        </article>
-        <article class="panel" id="p-piso-cat">
-          <header><h3>Por categoría <span class="subtitulo">valor en piso</span></h3><button type="button" class="alterna">Ver tabla</button></header>
-          <div class="vista-grafica" id="piso-categoria"></div>
-          <div class="vista-tabla" id="tabla-piso-cat"></div>
-        </article>
-      </div>
-      <article class="panel" id="p-viejas">
-        <header><h3>Las más viejas <span class="subtitulo">candidatas a rebaja</span></h3></header>
-        <div id="piso-viejas"></div>
-        <p class="nota">Las 15 piezas con más días en piso desde su captura (días de la tienda, no horas).</p>
-      </article>
-      <div class="malla iguales">
-        <article class="panel"><header><h3>Precio sugerido vs. precio final</h3></header><div id="precio-sugerido"></div>
-          <p class="nota">Qué tan lejos anda la IA del precio que de verdad se cobra. Sirve para ajustar los porcentajes de la configuración con datos, no a ojo.</p></article>
-        <article class="panel"><header><h3>Días en venta por categoría</h3></header><div id="dias-en-venta"></div>
-          <p class="nota">Días entre la captura y la venta. No incluye bins: no son piezas individuales con fecha de captura propia.</p></article>
-      </div>
-    </div>
-  </section>
-
-  <section aria-labelledby="t-merma">
-    <h2 class="titulo-bloque" id="t-merma">Merma por caducidad</h2>
-    <article class="panel">
-      <div class="tarjetas" id="merma-resumen" style="margin-bottom: 14px"></div>
-      <div id="merma-detalle" style="overflow-x:auto"></div>
-      <p class="nota">Piezas de grado D · Caducidad capturadas en el periodo de arriba. No se venden ni suman al inventario en piso.
-        El valor es el precio de lista × existencia (no hay costo de compra en el sistema).</p>
-    </article>
-  </section>
-
-  <section aria-labelledby="t-exportar">
-    <h2 class="titulo-bloque" id="t-exportar">Exportar</h2>
+    <section aria-labelledby="t-exportar">
+      <h3 class="titulo-bloque" id="t-exportar">Exportar</h3>
     <div class="exportar">
       <a href="/api/reportes/ventas.csv">Exportar ventas (CSV)</a>
       <a href="/api/reportes/inventario.csv">Exportar inventario (CSV)</a>
     </div>
+    </section>
   </section>
 </main>
+  </div>
+</div>
 
 <dialog id="dialogo-ticket" class="ventana-ticket">
   <div id="ticket-contenido"></div>
@@ -468,7 +549,6 @@ import {
 const $ = (id) => document.getElementById(id);
 // Hora de la tienda (la del navegador), no UTC como se guarda.
 const fechaHora = (iso) => new Date(iso).toLocaleString('es-MX', { dateStyle: 'short', timeStyle: 'short' });
-const RANGOS = [[7, '7 días'], [30, '30 días'], [90, '90 días'], [365, '12 meses']];
 const FORMAS = [
   ['efectivo', 'Efectivo', 'var(--serie-1)'], ['tarjeta', 'Tarjeta', 'var(--serie-2)'],
   ['transferencia', 'Transferencia', 'var(--serie-3)'], ['dolarones', 'Dolarones', 'var(--serie-4)'],
@@ -480,33 +560,120 @@ const NOMBRES_CAT = new Map(CATEGORIAS);
 const nombreCat = (c) => NOMBRES_CAT.get(c) ?? mayuscula(c === 'sin categoria' ? 'sin categoría' : c);
 const decimal = (n) => n.toLocaleString('es-MX', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
 
-let diasActual = 30;
+const DIA = /^\d{4}-\d{2}-\d{2}$/;
+const MAX_DIAS = 366;   // el mismo tope del servidor
+const PERIODOS = [['hoy', 'Hoy'], ['7', '7 días'], ['28', '28 días'], ['mes', 'Este mes'], ['mes-pasado', 'Mes pasado'], ['apertura', 'Desde la apertura'], ['custom', 'Personalizado']];
+const VISTAS = ['resumen', 'ventas', 'inventario', 'finanzas', 'equipo', 'control', 'tickets'];
+const NOMBRES_VISTA = { resumen: 'Resumen', ventas: 'Ventas', inventario: 'Inventario', finanzas: 'Finanzas', equipo: 'Equipo', control: 'Control', tickets: 'Tickets' };
+// El dia de la tienda (UTC-6), como lo calcula el servidor: «hoy» y «este mes» no dependen de la zona del navegador.
+const hoyTienda = () => new Date(Date.now() - 6 * 3_600_000).toISOString().slice(0, 10);
+
+let periodo = { clave: '28', desde: '', hasta: '' };   // desde y hasta solo valen en «Personalizado»
+let primeraVenta;          // undefined = aun no se sabe; null = no hay ventas; si no, el dia de la primera venta («Desde la apertura»)
 let tiendaActual = '';    // #798: '' = el negocio completo; si no, la clave de una tienda (ventas.tienda)
 let datosDias = [];        // los dias del rango, con ceros, para la grafica
 let diaElegido = null;     // un dia (clic en su columna) que filtra los tickets
 let ultimoReporte = null;
+let textoAntes = '';       // «19 oct – 15 nov»: el periodo contra el que se compara
+let vistaActual = '';
+let turnoCarga = 0;
+// Lo que depende del periodo pero no viaja en /api/reportes se pide la primera vez que se ve su vista, no en cada cambio.
+const pendientes = new Set(['equipo', 'tickets', 'finanzas']);
 
 /* ---------- periodo ---------- */
 
-function pintarRango() {
-  $('rango').innerHTML = RANGOS.map(([d, texto]) =>
-    `<button type="button" data-dias="${d}" aria-pressed="${d === diasActual}">${texto}</button>`).join('');
+// Lo que se le pide a la API: `dias=N` para los atajos de siempre, `desde`/`hasta` (dias de la tienda) para el resto.
+function consultaPeriodo() {
+  const hoy = hoyTienda();
+  const q = new URLSearchParams();
+  const entre = (desde, hasta) => { q.set('desde', desde); q.set('hasta', hasta); return q; };
+  switch (periodo.clave) {
+    case 'hoy': q.set('dias', 1); return q;
+    case '7': q.set('dias', 7); return q;
+    case '28': q.set('dias', 28); return q;
+    case 'mes': return entre(`${hoy.slice(0, 8)}01`, hoy);
+    case 'mes-pasado': {
+      const fin = sumarDias(`${hoy.slice(0, 8)}01`, -1);
+      return entre(`${fin.slice(0, 8)}01`, fin);
+    }
+    case 'apertura': {   // de la primera venta a hoy; el servidor no acepta mas de 366 dias
+      const tope = sumarDias(hoy, -(MAX_DIAS - 1));
+      return entre(primeraVenta && primeraVenta > tope ? primeraVenta : tope, hoy);
+    }
+    default: return entre(periodo.desde, periodo.hasta);
+  }
 }
-$('rango').addEventListener('click', (e) => {
-  const dias = e.target.dataset?.dias;
-  if (!dias || Number(dias) === diasActual) return;
-  diasActual = Number(dias);
+const periodoDefinitivo = () => periodo.clave !== 'apertura' || primeraVenta !== undefined;
+
+function avisoPeriodo(texto) { $('aviso-periodo').textContent = texto; }
+
+function validarPersonalizado(desde, hasta) {
+  if (!DIA.test(desde) || !DIA.test(hasta)) return '';   // falta una: se espera a la otra
+  if (desde > hasta) return 'La fecha inicial es posterior a la final.';
+  if (hasta > hoyTienda()) return 'La fecha final no puede ser futura.';
+  if ((Date.parse(`${hasta}T12:00:00Z`) - Date.parse(`${desde}T12:00:00Z`)) / 86_400_000 + 1 > MAX_DIAS) return `El periodo no puede pasar de ${MAX_DIAS} días.`;
+  return null;
+}
+
+function pintarRango() {
+  $('rango').innerHTML = PERIODOS.map(([clave, texto]) =>
+    `<button type="button" data-periodo="${clave}" aria-pressed="${clave === periodo.clave}">${texto}</button>`).join('');
+  $('pers').hidden = periodo.clave !== 'custom';
+  $('f-desde').value = periodo.desde;
+  $('f-hasta').value = periodo.hasta;
+  $('f-desde').max = $('f-hasta').max = hoyTienda();
+}
+
+// La URL de la pagina lleva periodo y tienda (la vista va en el #): un enlace reproduce lo que se ve.
+function guardarUrl() {
+  const q = new URLSearchParams();
+  if (periodo.clave === 'custom') { q.set('desde', periodo.desde); q.set('hasta', periodo.hasta); } else q.set('periodo', periodo.clave);
+  if (tiendaActual) q.set('tienda', tiendaActual);
+  try { history.replaceState(null, '', `${location.pathname}?${q}${location.hash}`); } catch { /* sin historial: el enlace no se actualiza */ }
+}
+function leerUrl() {
+  const q = new URLSearchParams(location.search);
+  const desde = q.get('desde') ?? '', hasta = q.get('hasta') ?? '';
+  if (DIA.test(desde) && DIA.test(hasta)) periodo = { clave: 'custom', desde, hasta };
+  else if (PERIODOS.some(([clave]) => clave === q.get('periodo') && clave !== 'custom')) periodo = { clave: q.get('periodo'), desde: '', hasta: '' };
+  tiendaActual = q.get('tienda') ?? '';
+}
+
+// Cambia el periodo o la tienda: una sola peticion de /api/reportes; equipo, tickets y finanzas se piden al ver su vista.
+function recargar() {
   diaElegido = null;
+  for (const v of ['equipo', 'tickets']) pendientes.add(v);
+  guardarUrl();
   pintarRango();
   cargar();
-  cargarTickets();
+}
+$('rango').addEventListener('click', (e) => {
+  const clave = e.target.dataset?.periodo;
+  if (!clave || clave === periodo.clave) return;
+  if (clave === 'custom') {   // arranca con lo que se esta viendo: no hay nada que pedir hasta que cambie una fecha
+    periodo = { clave, desde: ultimoReporte?.dia_desde ?? hoyTienda(), hasta: ultimoReporte?.dia_hasta ?? hoyTienda() };
+    guardarUrl();
+    pintarRango();
+    return;
+  }
+  periodo = { clave, desde: '', hasta: '' };
+  avisoPeriodo('');
+  recargar();
 });
+for (const id of ['f-desde', 'f-hasta']) {
+  $(id).addEventListener('change', () => {
+    const desde = $('f-desde').value, hasta = $('f-hasta').value;
+    const problema = validarPersonalizado(desde, hasta);
+    avisoPeriodo(problema ?? '');
+    if (problema !== null) return;
+    periodo = { clave: 'custom', desde, hasta };
+    recargar();
+  });
+}
 // #798: las ventas, el corte, los retiros y los tickets se acotan a una tienda; el inventario es la foto de todo el negocio.
 $('f-tienda').addEventListener('change', () => {
   tiendaActual = $('f-tienda').value;
-  diaElegido = null;
-  cargar();
-  cargarTickets();
+  recargar();
 });
 function pintarTiendas(r) {
   // Solo se ofrece cuando hay más de una tienda en el servidor; un cliente viejo en caché simplemente no la ve.
@@ -519,7 +686,40 @@ function pintarTiendas(r) {
   }
   selector.value = tiendaActual;
 }
-$('imprimir').addEventListener('click', () => window.print());
+$('imprimir').addEventListener('click', () => window.print());   // imprime la vista que se ve: las demas estan ocultas
+
+/* ---------- vistas: se cambia el #, sin recargar; atras vuelve a la anterior ---------- */
+
+function mostrarVista(inicial = false) {
+  const pedida = location.hash.slice(1);
+  const vista = VISTAS.includes(pedida) ? pedida : 'resumen';   // un # desconocido cae en Resumen
+  const cambio = vista !== vistaActual;
+  for (const s of document.querySelectorAll('.vista')) s.hidden = s.dataset.vista !== vista;
+  for (const a of $('nav').querySelectorAll('a')) {
+    if (a.dataset.v === vista) a.setAttribute('aria-current', 'page'); else a.removeAttribute('aria-current');
+  }
+  document.title = `${NOMBRES_VISTA[vista]} · El Dolarón — reportes`;
+  vistaActual = vista;
+  cargarVista();
+  if (cambio && !inicial) {
+    window.scrollTo(0, 0);
+    $(`h-${vista}`).focus({ preventScroll: true });   // quien navega con teclado o lector llega al titulo de la vista
+    $('nav').querySelector('[aria-current]')?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+  }
+}
+window.addEventListener('hashchange', () => mostrarVista());
+
+// Lo de una vista que depende del periodo y no viene en /api/reportes: se pide al verla, una vez por periodo.
+function cargarVista() {
+  if (!periodoDefinitivo()) return;   // «Desde la apertura» todavia espera saber cual es la primera venta
+  if (vistaActual === 'equipo' && pendientes.delete('equipo')) cargarEquipo();
+  if (vistaActual === 'tickets' && pendientes.delete('tickets')) cargarTickets();
+  if (vistaActual === 'finanzas' && pendientes.delete('finanzas')) { cargarFondo(); cargarTerminal(); }
+}
+function pedirTickets() {   // el filtro de dia cambio: se vuelve a pedir ahora si se ve, o al verlos
+  pendientes.add('tickets');
+  cargarVista();
+}
 
 /* ---------- tarjetas ---------- */
 
@@ -536,9 +736,12 @@ function tarjeta(etiqueta, valor, extra = '') {
 
 function pintarResumen(r) {
   const { resumen: x, anterior: a } = r;
-  const antes = `${diaCorto(sumarDias(r.dia_desde, -r.dias))} – ${diaCorto(sumarDias(r.dia_desde, -1))}`;
+  const antes = r.dias === 1 ? diaCorto(sumarDias(r.dia_desde, -1)) : `${diaCorto(sumarDias(r.dia_desde, -r.dias))} – ${diaCorto(sumarDias(r.dia_desde, -1))}`;
+  textoAntes = antes;
+  $('p-etq').textContent = r.dias === 1 ? 'Día' : 'Del';
   $('p-texto').textContent = textoPeriodo(r.dia_desde, r.dia_hasta);
-  $('p-anterior').textContent = `Comparado con ${antes}`;
+  // Si el periodo abre el dia de la primera venta, antes no hubo nada que comparar.
+  $('p-anterior').textContent = r.dia_desde === r.primera_venta ? 'Sin periodo anterior para comparar' : `Comparado con ${antes}`;
   $('h-total').textContent = pesos(x.total);
   const c = cambio(x.total, a.total);
   $('h-delta').innerHTML = c
@@ -575,7 +778,8 @@ $('graf-dias').addEventListener('click', (e) => {
   if (!dia) return;
   diaElegido = diaElegido === dia ? null : dia;
   pintarDias();
-  cargarTickets();
+  pedirTickets();
+  if (diaElegido) location.hash = '#tickets';   // el filtro de dia se ve (y se quita) donde estan los tickets
 });
 $('graf-dias').addEventListener('keydown', (e) => {
   if ((e.key === 'Enter' || e.key === ' ') && e.target.dataset?.dia) { e.preventDefault(); e.target.dispatchEvent(new MouseEvent('click', { bubbles: true })); }
@@ -636,7 +840,7 @@ function pintarVentas(r) {
           + (hayAntes ? `\nPeriodo anterior: ${previo > 0 ? pesos(previo) : 'sin ventas'}${c ? ` · ${c.texto}` : ''}` : '') };
     }));
   $('cat-nota').textContent = cats.length === 0 ? '' : hayAntes
-    ? `El cambio compara con el periodo anterior de igual largo (${$('p-anterior').textContent.replace('Comparado con ', '')}); «nueva» es una categoría que antes no vendió.`
+    ? `El cambio compara con el periodo anterior de igual largo (${textoAntes}); «nueva» es una categoría que antes no vendió.`
     : 'No hubo ventas en el periodo anterior: no hay con qué comparar.';
   // En la tabla tambien entran las categorias que vendieron antes y ahora no (−100%): en las barras no hay nada que dibujar.
   const soloAntes = r.por_categoria_anterior.filter((f) => !r.por_categoria.some((x) => x.categoria === f.categoria));
@@ -850,7 +1054,7 @@ function pintarEquipo(e) {
 
 async function cargarEquipo() {
   try {
-    const r = await fetch(`/api/reportes/equipo?dias=${diasActual}`);
+    const r = await fetch(`/api/reportes/equipo?${consultaPeriodo()}`);
     if (!r.ok) throw new Error();
     pintarEquipo(await r.json());
   } catch { $('equipo-detalle').innerHTML = '<div class="vacio">No se pudo cargar el equipo.</div>'; }
@@ -879,16 +1083,31 @@ $('bono-semanas').addEventListener('click', async (ev) => {
   cargarEquipo();
 });
 
-async function cargar() {
+// Una sola peticion por cambio de periodo o tienda: todas las vistas se pintan con lo mismo; cambiar de vista no pide nada.
+async function cargar(reintento = false) {
+  const turno = ++turnoCarga;
   $('principal').classList.add('cargando');   // se queda el cuadro anterior, atenuado: sin saltos
   try {
-    const r = await (await fetch(`/api/reportes?dias=${diasActual}${tiendaActual ? `&tienda=${encodeURIComponent(tiendaActual)}` : ''}`)).json();
+    const q = consultaPeriodo();
+    if (tiendaActual) q.set('tienda', tiendaActual);
+    cargarVista();   // si el periodo ya es definitivo, lo de la vista que se ve se pide en paralelo
+    const respuesta = await fetch(`/api/reportes?${q}`);
+    const r = await respuesta.json().catch(() => ({}));
+    if (turno !== turnoCarga) return;   // llego tarde: ya se pidio otro periodo
+    if (!respuesta.ok) { avisoPeriodo(r.error ?? 'No se pudo cargar el reporte.'); return; }
+    avisoPeriodo('');
+    primeraVenta = r.primera_venta ?? null;
+    // «Desde la apertura» arranca en la primera venta, que solo se sabe con la primera respuesta: se pide de nuevo ya con ese dia.
+    if (periodo.clave === 'apertura' && !reintento && consultaPeriodo().get('desde') !== r.dia_desde) return await cargar(true);
+    cargarVista();
     ultimoReporte = r;
+    $('actualizado').textContent = `Actualizado ${new Date().toLocaleString('es-MX', { dateStyle: 'medium', timeStyle: 'short' })}`;
     pintarTiendas(r);
     pintarResumen(r); pintarVentas(r); pintarCuadre(r); pintarCaja(r); pintarCancelaciones(r); pintarDescuentos(r); pintarRevendedoras(r); pintarInventario(r);
-    cargarEquipo();
+  } catch {
+    if (turno === turnoCarga) avisoPeriodo('No se pudo cargar el reporte. Revisa la conexión.');
   } finally {
-    $('principal').classList.remove('cargando');
+    if (turno === turnoCarga) $('principal').classList.remove('cargando');
   }
 }
 
@@ -991,6 +1210,7 @@ $('guardar-cupon').addEventListener('click', async () => {
 /* ---------- tickets del periodo, con filtros y su desglose (Issues #138, #164) ---------- */
 
 let paginaTickets = 0;
+let turnoTickets = 0;
 
 function opciones(selector, todas, valores) {
   const actual = selector.value;
@@ -1002,7 +1222,9 @@ function opciones(selector, todas, valores) {
 // `mas`: la siguiente pagina de los mismos filtros, que se agrega a la lista.
 async function cargarTickets(mas = false) {
   paginaTickets = mas ? paginaTickets + 1 : 0;
-  const params = new URLSearchParams({ dias: diasActual, pagina: paginaTickets });
+  const turno = ++turnoTickets;
+  const params = consultaPeriodo();
+  params.set('pagina', paginaTickets);
   if (tiendaActual) params.set('tienda', tiendaActual);
   for (const [campo, id] of [['forma_pago', 'f-forma'], ['caja', 'f-caja'], ['cajero', 'f-cajero'], ['estado', 'f-estado']]) {
     if ($(id).value) params.set(campo, $(id).value);
@@ -1019,6 +1241,7 @@ async function cargarTickets(mas = false) {
     ? `<span class="chip-dia">Solo ${escapar(diaLargo(diaElegido))} <button type="button" id="quitar-dia" aria-label="Quitar el filtro de día">×</button></span>` : '';
   try {
     const r = await (await fetch(`/api/reportes/tickets?${params}`)).json();
+    if (turno !== turnoTickets) return;   // llego tarde: ya se pidio otra lista
     if (!mas) {
       opciones($('f-caja'), 'Todas las cajas', r.cajas);
       opciones($('f-cajero'), 'Todos los cajeros', r.cajeros);
@@ -1071,10 +1294,9 @@ document.addEventListener('click', (e) => {
 });
 
 activarGlobos(document.body);
+leerUrl();
 pintarRango();
-cargarFondo();
-cargarTerminal();
-cargarTickets();
+mostrarVista(true);
 await cargar();
 </script>
 </body>
