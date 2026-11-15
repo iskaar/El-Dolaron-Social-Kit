@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>El Dolarón — reportes</title>
+<link rel="stylesheet" href="/reportes-dolarones.css">
 <style>
   /* Archivo: la misma del tablero, servida por la app (licencia OFL), sin Google Fonts. */
   @font-face { font-family: Archivo; src: url("/fuentes/archivo-variable.woff2") format("woff2"); font-weight: 100 900; font-display: swap; }
@@ -318,6 +319,7 @@
     <span class="grupo" aria-hidden="true">Vistas</span>
     <a href="#resumen" data-v="resumen">Resumen</a>
     <a href="#ventas" data-v="ventas">Ventas</a>
+    <a href="#dolarones" data-v="dolarones">Dolarones</a>
     <a href="#inventario" data-v="inventario">Inventario</a>
     <a href="#finanzas" data-v="finanzas">Finanzas</a>
     <a href="#equipo" data-v="equipo">Equipo</a>
@@ -448,6 +450,12 @@
         que los cerró (sin cancelados, menos devoluciones). El pago a la tienda lo registra el personal en Pedidos; la comisión se calcula con este importe.</p>
     </article>
     </section>
+  </section>
+
+  <section class="vista" id="v-dolarones" data-vista="dolarones" aria-labelledby="h-dolarones" hidden>
+    <h2 id="h-dolarones" tabindex="-1">Dolarones</h2>
+    <p class="nota" style="margin:0">Todo el programa: lo que se regala, lo que regresa y lo que se debe. 1 D = $1.</p>
+    <div id="dolarones-contenido" style="display:grid;gap:16px;min-width:0"><p class="vacio">Cargando…</p></div>
   </section>
 
   <section class="vista" id="v-inventario" data-vista="inventario" aria-labelledby="h-inventario" hidden>
@@ -640,6 +648,7 @@
 
 <script type="module">
 import { renglonTicket, pintarDetalle } from '/ticket.js';
+import { vistaDolarones, graficas as graficasDolarones } from '/reportes-dolarones.js';
 import { CATEGORIAS } from '/categorias.js';
 import {
   escapar, pesos, pesosConSigno, dolarones, cambio, rellenarDias, sumarDias, diaCorto, diaLargo, diaSemana, textoPeriodo,
@@ -668,8 +677,8 @@ const decimal = (n) => n.toLocaleString('es-MX', { minimumFractionDigits: 1, max
 const DIA = /^\d{4}-\d{2}-\d{2}$/;
 const MAX_DIAS = 366;   // el mismo tope del servidor
 const PERIODOS = [['hoy', 'Hoy'], ['7', '7 días'], ['28', '28 días'], ['mes', 'Este mes'], ['mes-pasado', 'Mes pasado'], ['apertura', 'Desde la apertura'], ['custom', 'Personalizado']];
-const VISTAS = ['resumen', 'ventas', 'inventario', 'finanzas', 'equipo', 'control', 'tickets'];
-const NOMBRES_VISTA = { resumen: 'Resumen', ventas: 'Ventas', inventario: 'Inventario', finanzas: 'Finanzas', equipo: 'Equipo', control: 'Control', tickets: 'Tickets' };
+const VISTAS = ['resumen', 'ventas', 'dolarones', 'inventario', 'finanzas', 'equipo', 'control', 'tickets'];
+const NOMBRES_VISTA = { resumen: 'Resumen', ventas: 'Ventas', dolarones: 'Dolarones', inventario: 'Inventario', finanzas: 'Finanzas', equipo: 'Equipo', control: 'Control', tickets: 'Tickets' };
 // El dia de la tienda (UTC-6), como lo calcula el servidor: «hoy» y «este mes» no dependen de la zona del navegador.
 const hoyTienda = () => new Date(Date.now() - 6 * 3_600_000).toISOString().slice(0, 10);
 
@@ -683,7 +692,7 @@ let textoAntes = '';       // «19 oct – 15 nov»: el periodo contra el que se
 let vistaActual = '';
 let turnoCarga = 0;
 // Lo que depende del periodo pero no viaja en /api/reportes se pide la primera vez que se ve su vista, no en cada cambio.
-const pendientes = new Set(['resumen', 'equipo', 'tickets', 'finanzas']);
+const pendientes = new Set(['resumen', 'equipo', 'tickets', 'finanzas', 'dolarones']);
 // Resumen (#802): «Comparar con» y el grano. Viven en la URL junto al periodo y la tienda; por ahora solo el Resumen reacciona.
 let comparar = 'anterior';   // 'anterior' (la de siempre), 'mes' (mismo periodo del mes pasado) o 'ninguna'
 let granoPedido = '';        // '' = automatico (por dia hasta 35 dias, despues por semana)
@@ -757,7 +766,7 @@ function leerUrl() {
 // Cambia el periodo o la tienda: una sola peticion de /api/reportes; equipo, tickets y finanzas se piden al ver su vista.
 function recargar() {
   diaElegido = null;
-  for (const v of ['resumen', 'equipo', 'tickets']) pendientes.add(v);
+  for (const v of ['resumen', 'equipo', 'tickets', 'dolarones']) pendientes.add(v);
   guardarUrl();
   pintarRango();
   cargar();
@@ -829,6 +838,7 @@ window.addEventListener('hashchange', () => mostrarVista());
 // Lo de una vista que depende del periodo y no viene en /api/reportes: se pide al verla, una vez por periodo.
 function cargarVista() {
   if (!periodoDefinitivo()) return;   // «Desde la apertura» todavia espera saber cual es la primera venta
+  if (vistaActual === 'dolarones' && pendientes.delete('dolarones')) cargarDolarones();
   if (vistaActual === 'resumen' && pendientes.delete('resumen')) cargarResumen();
   if (vistaActual === 'equipo' && pendientes.delete('equipo')) cargarEquipo();
   if (vistaActual === 'tickets' && pendientes.delete('tickets')) cargarTickets();
@@ -1280,6 +1290,34 @@ function pintarEquipo(e) {
   }).join('')}</tbody></table>`;
 }
 
+/* ---------- Dolarones (#802): una peticion al ver la vista, una vez por periodo y tienda ---------- */
+let datosDolarones = null;
+let turnoDolarones = 0;
+function dibujarDolarones() {
+  if (!datosDolarones) return;
+  const huecos = [...$('dolarones-contenido').querySelectorAll('.graf-d')];
+  if (!huecos.length || !huecos[0].clientWidth) return;   // oculta: se dibuja al verla
+  const svg = graficasDolarones(datosDolarones, (id) => $('dolarones-contenido').querySelector(`[data-grafica="${id}"]`).clientWidth);
+  for (const h of huecos) h.innerHTML = svg[h.dataset.grafica] ?? '';
+}
+async function cargarDolarones() {
+  const turno = ++turnoDolarones;
+  const q = consultaPeriodo();
+  if (tiendaActual) q.set('tienda', tiendaActual);
+  try {
+    const respuesta = await fetch(`/api/reportes/dolarones?${q}`);
+    const r = await respuesta.json().catch(() => ({}));
+    if (turno !== turnoDolarones) return;
+    if (!respuesta.ok) { $('dolarones-contenido').innerHTML = `<p class="vacio">${escapar(r.error ?? 'No se pudo cargar la vista de Dolarones.')}</p>`; return; }
+    datosDolarones = r;
+    $('dolarones-contenido').innerHTML = vistaDolarones(r);
+    dibujarDolarones();
+  } catch {
+    if (turno === turnoDolarones) $('dolarones-contenido').innerHTML = '<p class="vacio">No se pudo cargar la vista de Dolarones. Revisa la conexión.</p>';
+  }
+}
+new ResizeObserver(() => dibujarDolarones()).observe($('dolarones-contenido'));
+
 async function cargarEquipo() {
   try {
     const r = await fetch(`/api/reportes/equipo?${consultaPeriodo()}`);
@@ -1518,7 +1556,7 @@ document.addEventListener('click', (e) => {
   if (!boton) return;
   const enTabla = boton.closest('.panel').classList.toggle('en-tabla');
   boton.textContent = enTabla ? 'Ver gráfica' : 'Ver tabla';
-  if (!enTabla) pintarDias();
+  if (!enTabla) { pintarDias(); dibujarDolarones(); }
 });
 
 activarGlobos(document.body);

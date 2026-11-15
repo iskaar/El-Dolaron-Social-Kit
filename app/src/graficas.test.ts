@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import {
   pesos, dolarones, pesosEje, pesosConSigno, escala, cambio, rellenarDias, textoPeriodo, verificarCuadre,
   PASOS_CALOR, pasoCalor, pasosDeLaEscala, horasConVentas, textoHora, rangoHora, mapaCalor, mapaCalorHtml, tablaCalor,
-  TRAMOS_ANTIGUEDAD, tramoDeDias, pasoOrdinal, flechaCambio, barrasHorizontales, apilada, minigrafica, graficaTiempo,
+  TRAMOS_ANTIGUEDAD, tramoDeDias, pasoOrdinal, flechaCambio, barrasHorizontales, apilada, minigrafica, graficaTiempo, escalaNumero, columnas, lineaSerie, leyendaSeries,
 } from '../public/graficas.js';
 import { rangoDias } from './worker.ts';
 
@@ -173,6 +173,29 @@ test('apilada: la columna extra (piezas) entra en todas las filas de la leyenda'
   assert.match(html, /<td class="num sec">3 piezas<\/td><td class="num">\$75\.00<\/td><td class="num sec">75\.0%<\/td>/);
   assert.equal(html.match(/<tr>/g)!.length, 2);
   assert.equal(apilada([{ nombre: 'a', valor: 1, color: 'x', texto: '$0.01' }]).includes('piezas'), false);
+});
+
+test('escalaNumero: marcas 1, 2, 5 y con `entero` nunca fracciones', () => {
+  const e = escalaNumero(123_456);
+  assert.ok(e.tope >= 123_456);
+  const pasos = e.marcas.slice(1).map((m: number, i: number) => m - e.marcas[i]);
+  assert.ok(pasos.every((p: number) => p === pasos[0]));
+  assert.ok(escalaNumero(3, { entero: true }).marcas.every(Number.isInteger));
+  assert.ok(escalaNumero(0).tope > 0, 'sin datos la escala no se divide entre cero');
+});
+
+test('columnas y lineaSerie: ceros sin columna pero con globo, nombres escapados y apiladas con total', () => {
+  const categorias = [{ etiqueta: '1 nov', titulo: '1 nov 2026' }, { etiqueta: '2 nov', titulo: '2 nov 2026' }];
+  const series = [{ nombre: 'Emitidos', color: 'var(--serie-1)', valores: [1000, 0] }, { nombre: 'Canjeados <b>', color: 'var(--serie-2)', valores: [500, 0] }];
+  const agrupadas = columnas({ categorias, series, ancho: 400 });
+  assert.equal(agrupadas.match(/<rect x=/g)!.length, 2, 'los ceros no pintan columna');
+  assert.equal(agrupadas.match(/class="hit"/g)!.length, 2, 'pero cada categoria tiene su globo');
+  assert.ok(agrupadas.includes('Canjeados &lt;b&gt;: 500'));
+  assert.match(columnas({ categorias, series, ancho: 400, modo: 'apiladas' }), /Total: 1500/);
+  assert.ok(!columnas({ categorias, series: [{ nombre: 'x', color: 'red', valores: [0, 0] }], ancho: 400 }).includes('NaN'));
+  assert.equal(lineaSerie({ categorias, valores: [100, 300], nombre: 'Saldo', ancho: 400 }).match(/<circle/g)!.length, 2);
+  assert.ok(!lineaSerie({ categorias: [categorias[0]], valores: [0], nombre: 'Saldo', ancho: 300 }).includes('NaN'));
+  assert.equal(leyendaSeries(series).match(/class="llave"/g)!.length, 2);
 });
 
 test('minigrafica: una linea por tramo continuo, los huecos no se dibujan y con menos de dos puntos no hay nada', () => {
