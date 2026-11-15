@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import {
   pesos, dolarones, pesosEje, pesosConSigno, cambio, rellenarDias, textoPeriodo, verificarCuadre,
   PASOS_CALOR, pasoCalor, pasosDeLaEscala, horasConVentas, textoHora, rangoHora, mapaCalor, mapaCalorHtml, tablaCalor,
-  TRAMOS_ANTIGUEDAD, tramoDeDias, pasoOrdinal, flechaCambio, fechaHora, FECHAS_TICKET, barrasHorizontales, apilada, minigrafica, graficaTiempo, escalaNumero, columnas, lineaSerie, leyendaSeries,
+  TRAMOS_ANTIGUEDAD, tramoDeDias, pasoOrdinal, flechaCambio, fechaHora, FECHAS_TICKET, indiceTeclado, barrasHorizontales, apilada, minigrafica, graficaTiempo, escalaNumero, columnas, lineaSerie, leyendaSeries,
 } from '../public/graficas.js';
 import { rangoDias } from './worker.ts';
 
@@ -315,4 +315,15 @@ test('B5: una fecha con hora y un dia, cada uno con un solo formato', () => {
   assert.equal(FECHAS_TICKET.fecha(instante), '15 nov');
   assert.match(FECHAS_TICKET.hora(instante), /^\d{1,2}:\d{2} [ap]\.m\.$/);
   assert.doesNotMatch(fechaHora(instante), /dom|domingo|\//, 'ni dia de la semana ni 15/11/26');
+});
+
+test('B7: las flechas mueven el foco dentro de una grafica sin salirse de ella', () => {
+  assert.equal(indiceTeclado(3, 28, 'ArrowRight'), 4);
+  assert.equal(indiceTeclado(3, 28, 'ArrowLeft'), 2);
+  assert.equal(indiceTeclado(27, 28, 'ArrowRight'), 27, 'el ultimo no da la vuelta ni sale');
+  assert.equal(indiceTeclado(0, 28, 'ArrowLeft'), 0);
+  assert.equal(indiceTeclado(5, 28, 'Home'), 0);
+  assert.equal(indiceTeclado(5, 28, 'End'), 27);
+  assert.equal(indiceTeclado(5, 28, 'ArrowDown'), 6);
+  assert.equal(indiceTeclado(5, 28, 'Tab'), null, 'Tab no se atrapa: sale de la grafica por su cuenta');
 });

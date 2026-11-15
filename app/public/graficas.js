@@ -267,6 +267,54 @@ export function activarGlobos(raiz) {
   document.addEventListener('keydown', (e) => { if (e.key === 'Escape') ocultarGlobo(); });
 }
 
+/* ---------- teclado: una sola parada de tabulador por grafica (#802 B7) ---------- */
+
+// Cada grafica (columnas, linea, mapa de calor, barras, barra apilada) es UNA parada del tabulador: dentro, las flechas, Inicio y Fin pasan de un
+// elemento al siguiente (y el globo los lee). Tab sale de la grafica, nunca queda atrapado; la tabla de «Ver tabla» es la alternativa para quien no
+// use el globo. Los elementos siguen llevando su `tabindex` (0 o -1: el que esta activo lleva 0), asi que el HTML de cada grafica no cambia.
+const GRUPOS_TECLADO = 'svg.svg-grafica, .calor, .hbarras, .apilada';
+const TECLAS_DE = (grupo) => (grupo.matches('.hbarras') ? ['ArrowUp', 'ArrowDown'] : grupo.matches('.calor') ? ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'] : ['ArrowLeft', 'ArrowRight']);
+
+/** A que elemento pasa el foco: `actual` (0..total-1) y la tecla -> indice nuevo, o null si la tecla no mueve nada. */
+export function indiceTeclado(actual, total, tecla) {
+  if (tecla === 'Home') return 0;
+  if (tecla === 'End') return total - 1;
+  if (tecla === 'ArrowRight' || tecla === 'ArrowDown') return Math.min(total - 1, actual + 1);
+  if (tecla === 'ArrowLeft' || tecla === 'ArrowUp') return Math.max(0, actual - 1);
+  return null;
+}
+
+const elementosDe = (grupo) => [...grupo.querySelectorAll('[tabindex]')];
+function unaParada(raiz) {
+  for (const grupo of raiz.querySelectorAll(GRUPOS_TECLADO)) {
+    if (grupo.dataset.parada) continue;
+    const items = elementosDe(grupo);
+    if (items.length < 2) continue;
+    grupo.dataset.parada = '1';
+    items.forEach((el, i) => el.setAttribute('tabindex', i === 0 ? '0' : '-1'));
+  }
+}
+
+/** Activa lo anterior en todo lo que se dibuje dentro de `raiz`, ahora y cuando las vistas se redibujen. */
+export function activarTeclado(raiz) {
+  unaParada(raiz);
+  new MutationObserver(() => unaParada(raiz)).observe(raiz, { childList: true, subtree: true });
+  raiz.addEventListener('focusin', (e) => {   // el elemento donde cae el foco (clic o flecha) es el que Tab encuentra al volver
+    const grupo = e.target.closest?.(GRUPOS_TECLADO);
+    if (!grupo?.dataset.parada || e.target.getAttribute('tabindex') === null) return;
+    for (const el of elementosDe(grupo)) el.setAttribute('tabindex', el === e.target ? '0' : '-1');
+  });
+  raiz.addEventListener('keydown', (e) => {
+    const grupo = e.target.closest?.(GRUPOS_TECLADO);
+    if (!grupo?.dataset.parada || e.target.getAttribute('tabindex') === null || e.altKey || e.ctrlKey || e.metaKey) return;
+    if (e.key !== 'Home' && e.key !== 'End' && !TECLAS_DE(grupo).includes(e.key)) return;
+    const items = elementosDe(grupo), nuevo = indiceTeclado(items.indexOf(e.target), items.length, e.key);
+    if (nuevo === null) return;
+    e.preventDefault();
+    items[nuevo].focus();
+  });
+}
+
 /* ---------- graficas ---------- */
 
 const MAX_COLUMNAS = 45;   // pasado esto, una linea: 365 barras ya no se leen

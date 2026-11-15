@@ -791,7 +791,7 @@ import { CATEGORIAS } from '/categorias.js';
 import {
   escapar, pesos, pesosConSigno, dolarones, cambio, rellenarDias, sumarDias, diaCorto, diaLargo, diaSemana, textoPeriodo,
   verificarCuadre, mapaCalor, mapaCalorHtml, tablaCalor, activarGlobos, barrasHorizontales, apilada, tabla,
-  flechaCambio, TRAMOS_ANTIGUEDAD, pasoOrdinal, graficaTiempo, fechaHora, FECHAS_TICKET,
+  flechaCambio, TRAMOS_ANTIGUEDAD, pasoOrdinal, graficaTiempo, fechaHora, FECHAS_TICKET, activarTeclado,
 } from '/graficas.js';
 import {
   COMPARACIONES, GRANOS, granosPermitidos, tarjetasKpi, tarjetasHtml, datosTendencia, leyendaTendencia, tablaTendencia, metaHtml, graficaMeta, tablaMeta,
@@ -2018,6 +2018,7 @@ document.addEventListener('click', (e) => {
 });
 
 activarGlobos(document.body);
+activarTeclado($('principal'));   // cada grafica es una sola parada del tabulador; dentro, las flechas
 leerUrl();
 pintarRango();
 pintarPeriodo();
