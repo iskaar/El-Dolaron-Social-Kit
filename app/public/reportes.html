@@ -5,6 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>El Dolarón — reportes</title>
 <link rel="stylesheet" href="/reportes-dolarones.css">
+<link rel="stylesheet" href="/reportes-capturas.css">
+<link rel="stylesheet" href="/reportes-ventas.css">
 <link rel="stylesheet" href="/reportes-inventario.css">
 <style>
   /* Archivo: la misma del tablero, servida por la app (licencia OFL), sin Google Fonts. */
@@ -143,7 +145,7 @@
   .fila-r { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; }
   @media (min-width: 861px) { .fila-r.r-g21 { grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); } }
   .fila-r.r-g3 { grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr)); }
-  #r-kpis .tarjeta { flex: 1 1 22%; min-width: 190px; display: flex; flex-direction: column; gap: 3px; }
+  #r-kpis .tarjeta, #c-kpis .tarjeta { flex: 1 1 22%; min-width: 190px; display: flex; flex-direction: column; gap: 3px; }
   .tarjeta.kpi .valor { font-size: 25px; margin-top: 0; }
   .tarjeta.kpi .delta { margin-top: 0; }
   .tarjeta.kpi .pie { font-size: 11.5px; color: var(--tinta-2); }
@@ -285,8 +287,8 @@
     .pers { flex-wrap: wrap; gap: 8px 12px; }
     .fila-vista { display: flex; gap: 8px 12px; align-items: center; flex-wrap: wrap; }
     .fila-vista[hidden] { display: none; }
-    #r-kpis .tarjeta { flex-basis: 42%; min-width: 0; }
-    #r-kpis .tarjeta .valor { font-size: 19px; }
+    #r-kpis .tarjeta, #c-kpis .tarjeta { flex-basis: 42%; min-width: 0; }
+    #r-kpis .tarjeta .valor, #c-kpis .tarjeta .valor { font-size: 19px; }
     .fila-acciones { display: flex; gap: 8px 12px; align-items: center; flex-wrap: wrap; justify-content: space-between; }   /* siempre visible */
     .campo select { max-width: 52vw; }
     .filtros .btn { margin-left: 0; }
@@ -322,6 +324,7 @@
     <a href="#ventas" data-v="ventas">Ventas</a>
     <a href="#dolarones" data-v="dolarones">Dolarones</a>
     <a href="#inventario" data-v="inventario">Inventario</a>
+    <a href="#capturas" data-v="capturas">Capturas</a>
     <a href="#finanzas" data-v="finanzas">Finanzas</a>
     <a href="#equipo" data-v="equipo">Equipo</a>
     <a href="#control" data-v="control">Control</a>
@@ -402,55 +405,86 @@
 
   <section class="vista" id="v-ventas" data-vista="ventas" aria-labelledby="h-ventas" hidden>
     <h2 id="h-ventas" tabindex="-1">Ventas</h2>
-    <div>
-    <div class="malla dos">
-      <article class="panel" id="p-dias">
-        <header><h4>Ventas por día <span class="subtitulo" id="dias-sub"></span></h4><button type="button" class="alterna">Ver tabla</button></header>
-        <div class="vista-grafica"><div id="graf-dias"></div>
-          <p class="nota" id="dias-nota">Toca una columna para ir a los tickets de ese día.</p></div>
-        <div class="vista-tabla" id="tabla-dias"></div>
+    <p class="bajada">Cómo se mueven las ventas, de qué están hechas, cuándo se compra y cuánto cuesta descontar. Suma lo mismo que Resumen.</p>
+    <div id="ventas-cuerpo">
+      <p class="vacio" id="v-estado" role="status">Cargando las ventas…</p>
+      <div class="tarjetas" id="v-kpis"></div>
+      <article class="panel" id="p-v-tendencia">
+        <header><h4>Ventas netas <span class="subtitulo" id="v-tend-sub"></span></h4><button type="button" class="alterna">Ver tabla</button></header>
+        <div class="vista-grafica">
+          <div id="v-leyenda-tendencia"></div>
+          <div id="v-graf-tendencia"></div>
+          <p class="nota" id="v-tend-nota"></p>
+        </div>
+        <div class="vista-tabla" id="v-tabla-tendencia"></div>
       </article>
-      <article class="panel" id="p-pago">
-        <header><h4>Forma de pago</h4></header>
-        <div id="por-forma-pago"></div>
-        <p class="nota">Lo cobrado en dinero por forma de pago y lo pagado con Dolarones: juntos suman lo vendido.</p>
+      <article class="panel" id="p-v-categorias">
+        <header><h4>Categorías en el tiempo <span class="subtitulo" id="v-cat-sub"></span></h4><button type="button" class="alterna">Ver tabla</button></header>
+        <div class="vista-grafica"><div class="graf-v" data-grafica="categorias"></div><p class="nota" id="v-cat-nota"></p></div>
+        <div class="vista-tabla" id="v-tabla-categorias"></div>
       </article>
+      <div class="malla iguales">
+        <article class="panel" id="p-v-canales">
+          <header><h4>Canales en el tiempo <span class="subtitulo" id="v-can-sub"></span></h4><button type="button" class="alterna">Ver tabla</button></header>
+          <div class="vista-grafica"><div class="graf-v" data-grafica="canales"></div><p class="nota" id="v-can-nota"></p></div>
+          <div class="vista-tabla" id="v-tabla-canales"></div>
+        </article>
+        <article class="panel" id="p-pago">
+          <header><h4>Forma de pago en el tiempo <span class="subtitulo" id="v-pago-sub"></span></h4><button type="button" class="alterna">Ver tabla</button></header>
+          <div class="vista-grafica"><div class="graf-v" data-grafica="pago"></div>
+            <p class="nota" style="margin-bottom:8px">Del periodo completo:</p>
+            <div id="por-forma-pago"></div>
+            <p class="nota">Lo cobrado en dinero por forma de pago y lo pagado con Dolarones: juntos suman lo vendido. El anticipo de un apartado entra el día en que se apartó, no el de la venta.</p></div>
+          <div class="vista-tabla" id="v-tabla-pago"></div>
+        </article>
+      </div>
+      <article class="panel" id="p-horas">
+        <header><h4>Ventas por hora y día <span class="subtitulo">hora de la tienda</span></h4><button type="button" class="alterna">Ver tabla</button></header>
+        <div class="vista-grafica" id="mapa-horas"></div>
+        <div class="vista-tabla" id="tabla-horas"></div>
+        <p class="nota" id="horas-nota"></p>
+      </article>
+      <article class="panel" id="p-v-tickets">
+        <header><h4>Tamaño de los tickets <span class="subtitulo">importe neto y piezas</span></h4><button type="button" class="alterna">Ver tabla</button></header>
+        <div class="vista-grafica">
+          <div class="dos-graf">
+            <div><p class="nota" style="margin:0 0 4px">Importe del ticket, en pesos</p><div class="graf-v" data-grafica="tickets_monto"></div></div>
+            <div><p class="nota" style="margin:0 0 4px">Piezas por ticket</p><div class="graf-v" data-grafica="tickets_piezas"></div></div>
+          </div>
+          <p class="nota" id="v-tickets-nota"></p></div>
+        <div class="vista-tabla" id="v-tabla-tickets"></div>
+      </article>
+      <div class="malla iguales">
+        <article class="panel" id="p-cat">
+          <header><h4>Por categoría</h4><button type="button" class="alterna">Ver tabla</button></header>
+          <div class="vista-grafica"><div id="por-categoria"></div><p class="nota" id="cat-nota"></p></div>
+          <div class="vista-tabla" id="tabla-cat"></div>
+        </article>
+        <article class="panel">
+          <header><h4>Piezas más vendidas</h4></header>
+          <div id="top-productos"></div>
+        </article>
+      </div>
+      <section aria-labelledby="t-descuentos">
+        <h3 class="titulo-bloque" id="t-descuentos">Descuentos y promociones</h3>
+        <article class="panel" id="p-v-descuentos">
+          <header><h4>Lo que se dejó de cobrar <span class="subtitulo" id="v-desc-sub"></span></h4><button type="button" class="alterna">Ver tabla</button></header>
+          <div class="tarjetas" id="descuentos-resumen" style="margin-bottom: 14px"></div>
+          <div class="vista-grafica"><div class="graf-v" data-grafica="descuentos"></div></div>
+          <div class="vista-tabla"><div id="v-tabla-descuentos"></div><div id="descuentos-detalle" style="overflow-x:auto"></div></div>
+          <p class="nota">Lo que se dejó de cobrar: la promo de inauguración ($100 en compras de $300 o más) y los descuentos aprobados por el dueño.
+            Los tickets cancelados no cuentan.</p>
+        </article>
+      </section>
+      <section aria-labelledby="t-revendedoras">
+        <h3 class="titulo-bloque" id="t-revendedoras">Revendedoras</h3>
+        <article class="panel">
+          <div id="revendedoras-detalle" style="overflow-x:auto"></div>
+          <p class="nota">Lo que cada revendedora cerró en el periodo: pedidos que apartó y la tienda cobró en caja. El importe es el del ticket
+            que los cerró (sin cancelados, menos devoluciones). El pago a la tienda lo registra el personal en Pedidos; la comisión se calcula con este importe.</p>
+        </article>
+      </section>
     </div>
-    <article class="panel" id="p-horas" style="margin-top:16px">
-      <header><h4>Ventas por hora y día <span class="subtitulo">hora de la tienda</span></h4><button type="button" class="alterna">Ver tabla</button></header>
-      <div class="vista-grafica" id="mapa-horas"></div>
-      <div class="vista-tabla" id="tabla-horas"></div>
-      <p class="nota" id="horas-nota"></p>
-    </article>
-    <div class="malla iguales" style="margin-top:16px">
-      <article class="panel" id="p-cat">
-        <header><h4>Por categoría</h4><button type="button" class="alterna">Ver tabla</button></header>
-        <div class="vista-grafica"><div id="por-categoria"></div><p class="nota" id="cat-nota"></p></div>
-        <div class="vista-tabla" id="tabla-cat"></div>
-      </article>
-      <article class="panel">
-        <header><h4>Piezas más vendidas</h4></header>
-        <div id="top-productos"></div>
-      </article>
-    </div>
-    </div>
-    <section aria-labelledby="t-descuentos">
-      <h3 class="titulo-bloque" id="t-descuentos">Descuentos y promociones</h3>
-    <article class="panel">
-      <div class="tarjetas" id="descuentos-resumen" style="margin-bottom: 14px"></div>
-      <div id="descuentos-detalle" style="overflow-x:auto"></div>
-      <p class="nota">Lo que se dejó de cobrar: la promo de inauguración ($100 en compras de $300 o más) y los descuentos aprobados por el dueño.
-        Los tickets cancelados no cuentan.</p>
-    </article>
-    </section>
-    <section aria-labelledby="t-revendedoras">
-      <h3 class="titulo-bloque" id="t-revendedoras">Revendedoras</h3>
-    <article class="panel">
-      <div id="revendedoras-detalle" style="overflow-x:auto"></div>
-      <p class="nota">Lo que cada revendedora cerró en el periodo: pedidos que apartó y la tienda cobró en caja. El importe es el del ticket
-        que los cerró (sin cancelados, menos devoluciones). El pago a la tienda lo registra el personal en Pedidos; la comisión se calcula con este importe.</p>
-    </article>
-    </section>
   </section>
 
   <section class="vista" id="v-dolarones" data-vista="dolarones" aria-labelledby="h-dolarones" hidden>
@@ -526,6 +560,19 @@
           o aún sin etiqueta. Las dañadas sí cuentan: siguen en piso. El valor es precio de tienda × existencia.</p>
       </article>
     </section>
+  </section>
+
+  <section class="vista" id="v-capturas" data-vista="capturas" aria-labelledby="h-capturas" hidden>
+    <h2 id="h-capturas" tabindex="-1">Capturas</h2>
+    <div class="filtros-tickets">
+      <label class="campo">Pausa
+        <select id="f-pausa" aria-label="Intervalo que cuenta como pausa">
+          <option value="5">5 min</option><option value="10" selected>10 min</option><option value="15">15 min</option><option value="20">20 min</option>
+        </select></label>
+      <span class="sec">Entre dos capturas seguidas de la misma persona, un intervalo mayor que la pausa es un descanso y no cuenta como tiempo de captura.</span>
+    </div>
+    <p class="nota" id="capturas-tienda" hidden>Las capturas se hacen en la tienda central: este reporte no se filtra por la tienda elegida arriba.</p>
+    <div id="capturas-contenido" style="display:grid;gap:28px;min-width:0"></div>
   </section>
 
   <section class="vista" id="v-finanzas" data-vista="finanzas" aria-labelledby="h-finanzas" hidden>
@@ -681,6 +728,8 @@ import {
   COMPARACIONES, GRANOS, granosPermitidos, tarjetasKpi, tarjetasHtml, datosTendencia, leyendaTendencia, tablaTendencia, metaHtml, graficaMeta, tablaMeta,
   hallazgos, hallazgosHtml, canalesHtml, tablaCanales, categoriasHtml, tablaCategorias, textoComparacion, unidadGrano, COMPARACION_POR_GRANO,
 } from '/reportes-resumen.js';
+import { montarCapturas } from '/reportes-capturas.js';
+import * as Ventas from '/reportes-ventas.js';
 
 const $ = (id) => document.getElementById(id);
 // Hora de la tienda (la del navegador), no UTC como se guarda.
@@ -699,23 +748,23 @@ const decimal = (n) => n.toLocaleString('es-MX', { minimumFractionDigits: 1, max
 const DIA = /^\d{4}-\d{2}-\d{2}$/;
 const MAX_DIAS = 366;   // el mismo tope del servidor
 const PERIODOS = [['hoy', 'Hoy'], ['7', '7 días'], ['28', '28 días'], ['mes', 'Este mes'], ['mes-pasado', 'Mes pasado'], ['apertura', 'Desde la apertura'], ['custom', 'Personalizado']];
-const VISTAS = ['resumen', 'ventas', 'dolarones', 'inventario', 'finanzas', 'equipo', 'control', 'tickets'];
-const NOMBRES_VISTA = { resumen: 'Resumen', ventas: 'Ventas', dolarones: 'Dolarones', inventario: 'Inventario', finanzas: 'Finanzas', equipo: 'Equipo', control: 'Control', tickets: 'Tickets' };
+const VISTAS = ['resumen', 'ventas', 'dolarones', 'inventario', 'capturas', 'finanzas', 'equipo', 'control', 'tickets'];
+const VISTAS_CON_COMPARACION = ['resumen', 'ventas'];
+const NOMBRES_VISTA = { resumen: 'Resumen', ventas: 'Ventas', dolarones: 'Dolarones', inventario: 'Inventario', capturas: 'Capturas', finanzas: 'Finanzas', equipo: 'Equipo', control: 'Control', tickets: 'Tickets' };
 // El dia de la tienda (UTC-6), como lo calcula el servidor: «hoy» y «este mes» no dependen de la zona del navegador.
 const hoyTienda = () => new Date(Date.now() - 6 * 3_600_000).toISOString().slice(0, 10);
 
 let periodo = { clave: '28', desde: '', hasta: '' };   // desde y hasta solo valen en «Personalizado»
 let primeraVenta;          // undefined = aun no se sabe; null = no hay ventas; si no, el dia de la primera venta («Desde la apertura»)
 let tiendaActual = '';    // #798: '' = el negocio completo; si no, la clave de una tienda (ventas.tienda)
-let datosDias = [];        // los dias del rango, con ceros, para la grafica
 let diaElegido = null;     // un dia (clic en su columna) que filtra los tickets
 let ultimoReporte = null;
 let textoAntes = '';       // «19 oct – 15 nov»: el periodo contra el que se compara
 let vistaActual = '';
 let turnoCarga = 0;
 // Lo que depende del periodo pero no viaja en /api/reportes se pide la primera vez que se ve su vista, no en cada cambio.
-const pendientes = new Set(['resumen', 'equipo', 'tickets', 'finanzas', 'dolarones', 'inventario']);
-// Resumen (#802): «Comparar con» y el grano. Viven en la URL junto al periodo y la tienda; por ahora solo el Resumen reacciona.
+const pendientes = new Set(['resumen', 'ventas', 'equipo', 'tickets', 'finanzas', 'dolarones', 'inventario']);
+// Resumen y Ventas (#802): «Comparar con» y el grano. Viven en la URL junto al periodo y la tienda; solo estas dos vistas reaccionan.
 let comparar = 'anterior';   // 'anterior' (la de siempre), 'mes' (mismo periodo del mes pasado) o 'ninguna'
 let granoPedido = '';        // '' = automatico (por dia hasta 35 dias, despues por semana)
 let datosResumen = null;     // la ultima respuesta de /api/reportes/resumen
@@ -773,6 +822,7 @@ function guardarUrl() {
   if (tiendaActual) q.set('tienda', tiendaActual);
   if (comparar !== 'anterior') q.set('comparar', comparar);
   if (granoPedido) q.set('grano', granoPedido);
+  if (pausa !== 10) q.set('pausa', pausa);
   try { history.replaceState(null, '', `${location.pathname}?${q}${location.hash}`); } catch { /* sin historial: el enlace no se actualiza */ }
 }
 function leerUrl() {
@@ -783,12 +833,14 @@ function leerUrl() {
   tiendaActual = q.get('tienda') ?? '';
   if (COMPARACIONES.includes(q.get('comparar'))) comparar = q.get('comparar');
   if (GRANOS.includes(q.get('grano'))) granoPedido = q.get('grano');
+  if ([5, 10, 15, 20].includes(Number(q.get('pausa')))) pausa = Number(q.get('pausa'));
+  $('f-pausa').value = pausa;
 }
 
 // Cambia el periodo o la tienda: una sola peticion de /api/reportes; equipo, tickets y finanzas se piden al ver su vista.
 function recargar() {
   diaElegido = null;
-  for (const v of ['resumen', 'equipo', 'tickets', 'dolarones', 'inventario']) pendientes.add(v);
+  for (const v of ['resumen', 'ventas', 'equipo', 'tickets', 'dolarones', 'inventario']) pendientes.add(v);
   guardarUrl();
   pintarRango();
   cargar();
@@ -846,7 +898,7 @@ function mostrarVista(inicial = false) {
   }
   document.title = `${NOMBRES_VISTA[vista]} · El Dolarón — reportes`;
   vistaActual = vista;
-  $('fila-vista').hidden = vista !== 'resumen';   // Comparar con y grano: solo donde reaccionan
+  $('fila-vista').hidden = !VISTAS_CON_COMPARACION.includes(vista);   // Comparar con y grano: solo donde reaccionan
   textoAnterior();
   cargarVista();
   if (cambio && !inicial) {
@@ -863,9 +915,11 @@ function cargarVista() {
   if (vistaActual === 'dolarones' && pendientes.delete('dolarones')) cargarDolarones();
   if (vistaActual === 'inventario' && pendientes.delete('inventario')) cargarInventario();
   if (vistaActual === 'resumen' && pendientes.delete('resumen')) cargarResumen();
+  if (vistaActual === 'ventas' && pendientes.delete('ventas')) cargarVentas();
   if (vistaActual === 'equipo' && pendientes.delete('equipo')) cargarEquipo();
   if (vistaActual === 'tickets' && pendientes.delete('tickets')) cargarTickets();
   if (vistaActual === 'finanzas' && pendientes.delete('finanzas')) { cargarFondo(); cargarTerminal(); }
+  if (vistaActual === 'capturas') cargarCapturas();
 }
 function pedirTickets() {   // el filtro de dia cambio: se vuelve a pedir ahora si se ve, o al verlos
   pendientes.add('tickets');
@@ -891,9 +945,9 @@ function pintarResumen(r) {
 
 /* ---------- Resumen ejecutivo (#802) ---------- */
 
-// Debajo de la barra: contra que se compara lo que se ve. En el Resumen manda «Comparar con»; en las demas vistas, el periodo anterior.
+// Debajo de la barra: contra que se compara lo que se ve. En Resumen y Ventas manda «Comparar con»; en las demas vistas, el periodo anterior.
 function textoAnterior() {
-  $('p-anterior').textContent = vistaActual === 'resumen' && datosResumen ? textoComparacion(datosResumen) : textoAnteriorBase;
+  $('p-anterior').textContent = VISTAS_CON_COMPARACION.includes(vistaActual) && datosResumen ? textoComparacion(datosResumen) : textoAnteriorBase;
 }
 
 function consultaResumen() {
@@ -904,22 +958,25 @@ function consultaResumen() {
   return q;
 }
 
+/** Pide /api/reportes/resumen y pinta Resumen. Devuelve la respuesta (Ventas la reusa) o null si fallo o llego tarde. */
 async function cargarResumen() {
   const turno = ++turnoResumen;
   $('resumen-cuerpo').classList.add('pidiendo');   // se queda el cuadro anterior, atenuado: sin saltos
   try {
     const respuesta = await fetch(`/api/reportes/resumen?${consultaResumen()}`);
     const d = await respuesta.json().catch(() => ({}));
-    if (turno !== turnoResumen) return;   // llego tarde: ya se pidio otra cosa
+    if (turno !== turnoResumen) return null;   // llego tarde: ya se pidio otra cosa
     if (!respuesta.ok) {
       $('r-estado').textContent = d.error ?? 'No se pudo cargar el resumen.';
       $('r-estado').hidden = false;
-      return;
+      return null;
     }
     datosResumen = d;
     pintarResumenEjecutivo();
+    return d;
   } catch {
     if (turno === turnoResumen) { $('r-estado').textContent = 'No se pudo cargar el resumen. Revisa la conexión.'; $('r-estado').hidden = false; }
+    return null;
   } finally {
     if (turno === turnoResumen) $('resumen-cuerpo').classList.remove('pidiendo');
   }
@@ -939,12 +996,14 @@ const GRANO_TEXTO = { dia: 'por día', semana: 'por semana (lunes a domingo)', m
 
 function pintarTendencia() {
   const d = datosResumen;
-  const caja = $('graf-tendencia');
-  const ancho = Math.floor(caja.clientWidth);
-  if (!d || !ancho) return;   // oculta: se pinta al verse (ResizeObserver)
-  // Sin una sola venta (ni en la comparacion) no hay nada que graficar: una escala de $0 a $1 no dice nada.
-  if (d.totales.ventas === 0 && !(d.anterior?.ventas > 0)) { caja.innerHTML = '<div class="vacio">Sin ventas en este periodo.</div>'; return; }
-  caja.innerHTML = graficaTiempo(datosTendencia(d), { ancho, alto: 290, seleccion: d.grano === 'dia' ? diaElegido : null, clicable: d.grano === 'dia' });
+  for (const id of ['graf-tendencia', 'v-graf-tendencia']) {   // la misma grafica en Resumen y en Ventas
+    const caja = $(id);
+    const ancho = Math.floor(caja.clientWidth);
+    if (!d || !ancho) continue;   // oculta: se pinta al verse (ResizeObserver)
+    // Sin una sola venta (ni en la comparacion) no hay nada que graficar: una escala de $0 a $1 no dice nada.
+    if (d.totales.ventas === 0 && !(d.anterior?.ventas > 0)) { caja.innerHTML = '<div class="vacio">Sin ventas en este periodo.</div>'; continue; }
+    caja.innerHTML = graficaTiempo(datosTendencia(d), { ancho, alto: 290, seleccion: d.grano === 'dia' ? diaElegido : null, clicable: d.grano === 'dia' });
+  }
 }
 function pintarMeta() {
   const d = datosResumen;
@@ -954,6 +1013,7 @@ function pintarMeta() {
   caja.innerHTML = graficaMeta(d, { ancho });
 }
 new ResizeObserver(() => pintarTendencia()).observe($('graf-tendencia'));
+new ResizeObserver(() => pintarTendencia()).observe($('v-graf-tendencia'));
 new ResizeObserver(() => pintarMeta()).observe($('graf-meta'));
 
 function pintarResumenEjecutivo() {
@@ -965,11 +1025,12 @@ function pintarResumenEjecutivo() {
   pintarGrano(d);
   $('r-kpis').innerHTML = tarjetasHtml(tarjetasKpi(d, d.inventario));
 
-  $('tend-sub').textContent = `${GRANO_TEXTO[d.grano]} · ${d.cubetas.length.toLocaleString('es-MX')} ${unidadGrano(d.grano, d.cubetas.length)}`;
-  $('leyenda-tendencia').innerHTML = leyendaTendencia(d);
-  $('tabla-tendencia').innerHTML = tablaTendencia(d);
+  const subTendencia = `${GRANO_TEXTO[d.grano]} · ${d.cubetas.length.toLocaleString('es-MX')} ${unidadGrano(d.grano, d.cubetas.length)}`;
+  $('tend-sub').textContent = $('v-tend-sub').textContent = subTendencia;
+  $('leyenda-tendencia').innerHTML = $('v-leyenda-tendencia').innerHTML = leyendaTendencia(d);
+  $('tabla-tendencia').innerHTML = $('v-tabla-tendencia').innerHTML = tablaTendencia(d);
   const parciales = d.cubetas.filter((c) => c.parcial).length;
-  $('tend-nota').textContent = [
+  $('tend-nota').textContent = $('v-tend-nota').textContent = [
     d.grano === 'dia' ? 'Toca una columna para ir a los tickets de ese día.' : '',
     parciales ? `La primera o la última ${unidadGrano(d.grano, 1)} está cortada por el periodo: vende menos de lo normal.` : '',
     d.comparacion ? `La línea punteada es la comparación, ${COMPARACION_POR_GRANO[d.grano]}.` : '',
@@ -992,59 +1053,36 @@ function pintarResumenEjecutivo() {
   $('tabla-categorias').innerHTML = tablaCategorias(d, nombreCat);
 }
 
+// Comparar con y grano cambian lo de Resumen y lo de Ventas: se vuelve a pedir lo de la vista que se ve, y la otra al visitarla.
+function aplicarControles() {
+  guardarUrl();
+  pendientes.add('resumen'); pendientes.add('ventas');
+  cargarVista();
+}
 $('f-comparar').addEventListener('change', () => {
   comparar = $('f-comparar').value;
-  guardarUrl();
-  cargarResumen();
+  aplicarControles();
 });
 $('grano').addEventListener('click', (e) => {
   const clave = e.target.dataset?.grano;
   if (!clave || e.target.disabled || (clave === datosResumen?.grano && clave === granoPedido)) return;
   granoPedido = clave;
-  guardarUrl();
-  cargarResumen();
+  aplicarControles();
 });
-// Una columna por dia: igual que en Ventas, filtra los tickets de ese dia.
-$('graf-tendencia').addEventListener('click', (e) => {
-  const dia = e.target.closest?.('[data-dia]')?.dataset.dia;
-  if (!dia) return;
-  diaElegido = diaElegido === dia ? null : dia;
-  pintarTendencia();
-  pintarDias();
-  pedirTickets();
-  if (diaElegido) location.hash = '#tickets';
-});
-$('graf-tendencia').addEventListener('keydown', (e) => {
-  if ((e.key === 'Enter' || e.key === ' ') && e.target.dataset?.dia) { e.preventDefault(); e.target.dispatchEvent(new MouseEvent('click', { bubbles: true })); }
-});
-
-/* ---------- ventas por dia ---------- */
-
-function pintarDias() {
-  const caja = $('graf-dias');
-  const ancho = Math.floor(caja.clientWidth);
-  if (!ancho || !datosDias.length) return;
-  const datos = datosDias.map((d) => ({
-    clave: d.dia, etiqueta: datosDias.length <= 10 ? `${diaSemana(d.dia)} ${d.dia.slice(8).replace(/^0/, '')}` : diaCorto(d.dia),
-    titulo: mayuscula(diaLargo(d.dia)), valor: d.total,
-    detalle: [cuenta(d.tickets, 'ticket', 'tickets'), cuenta(d.piezas, 'pieza', 'piezas')],
-  }));
-  caja.innerHTML = graficaDias(datos, { ancho, seleccion: diaElegido });
-  activarLinea(caja, datos);
+// Una columna por dia filtra los tickets de ese dia (la tendencia de Resumen y la de Ventas).
+for (const id of ['graf-tendencia', 'v-graf-tendencia']) {
+  $(id).addEventListener('click', (e) => {
+    const dia = e.target.closest?.('[data-dia]')?.dataset.dia;
+    if (!dia) return;
+    diaElegido = diaElegido === dia ? null : dia;
+    pintarTendencia();
+    pedirTickets();
+    if (diaElegido) location.hash = '#tickets';   // el filtro de dia se ve (y se quita) donde estan los tickets
+  });
+  $(id).addEventListener('keydown', (e) => {
+    if ((e.key === 'Enter' || e.key === ' ') && e.target.dataset?.dia) { e.preventDefault(); e.target.dispatchEvent(new MouseEvent('click', { bubbles: true })); }
+  });
 }
-new ResizeObserver(() => pintarDias()).observe($('graf-dias'));
-
-$('graf-dias').addEventListener('click', (e) => {
-  const dia = e.target.closest?.('[data-dia]')?.dataset.dia;
-  if (!dia) return;
-  diaElegido = diaElegido === dia ? null : dia;
-  pintarDias();
-  pedirTickets();
-  if (diaElegido) location.hash = '#tickets';   // el filtro de dia se ve (y se quita) donde estan los tickets
-});
-$('graf-dias').addEventListener('keydown', (e) => {
-  if ((e.key === 'Enter' || e.key === ' ') && e.target.dataset?.dia) { e.preventDefault(); e.target.dispatchEvent(new MouseEvent('click', { bubbles: true })); }
-});
 
 /* ---------- el resto de ventas ---------- */
 
@@ -1059,13 +1097,6 @@ function pintarHoras(porHora) {
 }
 
 function pintarVentas(r) {
-  datosDias = rellenarDias(r.por_dia, r.dia_desde, r.dia_hasta);
-  $('dias-sub').textContent = `${cuenta(datosDias.length, 'día', 'días')} · ${datosDias.filter((d) => d.tickets).length} con ventas`;
-  $('dias-nota').hidden = datosDias.length > 45 ? true : false;
-  pintarDias();
-  $('tabla-dias').innerHTML = tabla(['Fecha', 'Vendido', 'Tickets', 'Piezas'],
-    [...datosDias].reverse().map((d) => [mayuscula(diaLargo(d.dia)), pesos(d.total), d.tickets, d.piezas]), [1, 2, 3]);
-
   pintarHoras(r.por_hora);
 
   const total = r.resumen.total;
@@ -1315,6 +1346,58 @@ function pintarEquipo(e) {
   }).join('')}</tbody></table>`;
 }
 
+/* ---------- Ventas (#802): /api/reportes/ventas junto con /api/reportes/resumen (las tarjetas y la tendencia salen de Resumen) ---------- */
+let datosVentas = null;
+let turnoVentas = 0;
+function dibujarVentas() {
+  if (!datosResumen || !datosVentas || datosResumen.cubetas.length !== datosVentas.cubetas.length) return;
+  const huecos = [...$('ventas-cuerpo').querySelectorAll('.graf-v')].filter((h) => h.clientWidth);   // las ocultas se dibujan al verse
+  if (!huecos.length) return;
+  const ancho = Object.fromEntries(huecos.map((h) => [h.dataset.grafica, h.clientWidth]));
+  const g = Ventas.graficas(datosResumen, datosVentas, (id) => ancho[id] || 640, nombreCat);
+  for (const h of huecos) h.innerHTML = g[h.dataset.grafica] ?? '';
+}
+function pintarVentasNuevas() {
+  const d = datosResumen, v = datosVentas;
+  if (!d || !v) return;
+  if (d.cubetas.length !== v.cubetas.length) { $('v-estado').textContent = 'Los datos de Ventas y de Resumen no son del mismo periodo. Recarga la página.'; $('v-estado').hidden = false; return; }
+  $('v-estado').hidden = true;
+  $('v-kpis').innerHTML = tarjetasHtml(Ventas.tarjetasVentas(d, v));
+  const sub = `${GRANO_TEXTO[d.grano]}`;
+  for (const id of ['v-cat-sub', 'v-can-sub', 'v-desc-sub']) $(id).textContent = sub;
+  $('v-pago-sub').textContent = `${GRANO_TEXTO[d.grano]} · % de lo cobrado`;
+  $('v-cat-nota').textContent = Ventas.notaCategorias(v);
+  $('v-can-nota').textContent = Ventas.notaCanales(v);
+  $('v-tickets-nota').textContent = Ventas.textoTickets(v);
+  $('v-tabla-categorias').innerHTML = Ventas.tablaCategorias(d, v, nombreCat);
+  $('v-tabla-canales').innerHTML = Ventas.tablaCanales(d, v);
+  $('v-tabla-pago').innerHTML = Ventas.tablaPago(d, v);
+  $('v-tabla-tickets').innerHTML = Ventas.tablaTickets(v);
+  // Por dia, la tabla de siempre (abajo) es la misma; por semana o mes se agrega la de cada cubeta.
+  $('v-tabla-descuentos').innerHTML = d.grano === 'dia' ? '' : `${Ventas.tablaDescuentos(d, v)}<p class="nota" style="margin:12px 0 6px">Por día:</p>`;
+  dibujarVentas();
+}
+async function cargarVentas() {
+  const turno = ++turnoVentas;
+  $('ventas-cuerpo').classList.add('pidiendo');   // se queda el cuadro anterior, atenuado: sin saltos
+  const falla = (texto) => { $('v-estado').textContent = texto; $('v-estado').hidden = false; };
+  try {
+    // El resumen se pide una sola vez por periodo: si Resumen ya lo trajo, no se repite.
+    const [resumen, respuesta] = await Promise.all([pendientes.delete('resumen') ? cargarResumen() : datosResumen, fetch(`/api/reportes/ventas?${consultaResumen()}`)]);
+    const v = await respuesta.json().catch(() => ({}));
+    if (turno !== turnoVentas) return;   // llego tarde: ya se pidio otra cosa
+    if (!respuesta.ok) { falla(v.error ?? 'No se pudieron cargar las ventas.'); return; }
+    if (!resumen) { falla('No se pudo cargar el resumen del periodo. Revisa la conexión.'); return; }
+    datosVentas = v;
+    pintarVentasNuevas();
+  } catch {
+    if (turno === turnoVentas) falla('No se pudieron cargar las ventas. Revisa la conexión.');
+  } finally {
+    if (turno === turnoVentas) $('ventas-cuerpo').classList.remove('pidiendo');
+  }
+}
+new ResizeObserver(() => dibujarVentas()).observe($('ventas-cuerpo'));
+
 /* ---------- Dolarones (#802): una peticion al ver la vista, una vez por periodo y tienda ---------- */
 let datosDolarones = null;
 let turnoDolarones = 0;
@@ -1407,6 +1490,35 @@ $('bono-semanas').addEventListener('click', async (ev) => {
   avisoBono(r.ok ? `Registrado: ${cuerpo.creados.length} nuevos, ${cuerpo.ya_estaban.length} ya estaban.` : (cuerpo.error ?? 'No se pudo registrar.'), r.ok);
   cargarEquipo();
 });
+
+/* ---------- capturas (Issue #802): una peticion al ver la vista, y otra solo si cambia el periodo o la pausa ---------- */
+
+let pausa = 10;              // minutos que cuentan como descanso entre dos capturas de una persona
+let capturasClave = '';      // lo ultimo que se pidio
+let turnoCapturas = 0;
+async function cargarCapturas() {
+  $('capturas-tienda').hidden = !tiendaActual;   // las capturas son de la tienda central: no se filtran por tienda, y se dice
+  const q = consultaPeriodo();
+  q.set('pausa', pausa);
+  if (q.toString() === capturasClave) return;
+  capturasClave = q.toString();
+  const turno = ++turnoCapturas, caja = $('capturas-contenido');
+  caja.style.opacity = '.55';
+  try {
+    const respuesta = await fetch(`/api/reportes/capturas?${q}`);
+    const datos = await respuesta.json().catch(() => ({}));
+    if (turno !== turnoCapturas) return;   // llego tarde: ya se pidio otra
+    if (!respuesta.ok) throw new Error(datos.error);
+    montarCapturas(caja, datos);
+  } catch (e) {
+    if (turno !== turnoCapturas) return;
+    capturasClave = '';   // para que volver a la vista lo intente otra vez
+    caja.innerHTML = `<div class="vacio">${escapar(e.message || 'No se pudieron cargar las capturas.')}</div>`;
+  } finally {
+    if (turno === turnoCapturas) caja.style.opacity = '';
+  }
+}
+$('f-pausa').addEventListener('change', () => { pausa = Number($('f-pausa').value); guardarUrl(); cargarCapturas(); });
 
 // Una sola peticion por cambio de periodo o tienda: todas las vistas se pintan con lo mismo; cambiar de vista no pide nada.
 async function cargar(reintento = false) {
@@ -1592,7 +1704,7 @@ $('tickets-mas').addEventListener('click', () => cargarTickets(true));
 $('chip-dia').addEventListener('click', (e) => {
   if (e.target.id !== 'quitar-dia') return;
   diaElegido = null;
-  pintarDias();
+  pintarTendencia();
   cargarTickets();
 });
 
@@ -1615,7 +1727,7 @@ document.addEventListener('click', (e) => {
   if (!boton) return;
   const enTabla = boton.closest('.panel').classList.toggle('en-tabla');
   boton.textContent = enTabla ? 'Ver gráfica' : 'Ver tabla';
-  if (!enTabla) { pintarDias(); dibujarDolarones(); dibujarInventario(); }
+  if (!enTabla) { dibujarVentas(); dibujarDolarones(); dibujarInventario(); }
 });
 
 activarGlobos(document.body);

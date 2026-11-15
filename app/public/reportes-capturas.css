@@ -1,0 +1,6 @@
+/* Vista «Capturas» de /reportes (#802): lo propio de la vista. Las tarjetas comparten la rejilla de #r-kpis (reportes.html). */
+
+/* Horario de captura: las celdas se encogen para que todas las horas con capturas quepan en media fila; en celular, la tabla se desplaza dentro de su panel. */
+#c-calor .calor { grid-template-columns: 72px repeat(var(--horas), minmax(26px, 1fr)); width: 100%; min-width: 0; gap: 3px; }
+#c-calor .celda { height: 34px; }
+@media (max-width: 860px) { #c-calor .calor { width: max-content; min-width: 100%; } }

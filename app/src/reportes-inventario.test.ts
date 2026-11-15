@@ -261,6 +261,20 @@ test('un rango pasado y cerrado: solo sus semanas, y las ventas posteriores cuen
   assert.equal(r.cohortes.vendido_4.pct, 50);
 });
 
+test('las bandas (sin_inventario) no son inventario: ni capturadas ni vendidas, aunque compartan categoria', async () => {
+  const t = tienda();
+  const banda = pieza(t, 10, 5);
+  t.db.prepare("update productos set sin_inventario = 1, categoria = 'hogar' where id = ?").run(banda);
+  const normal = pieza(t, 10, 5);
+  t.db.prepare("update productos set categoria = 'hogar' where id = ?").run(normal);
+  await vender(t, normal, 1, 5);
+  const r = await inventario(t, 'dias=28');
+  assert.equal(r.flujo.total.vendidas, 1);
+  assert.equal(r.flujo.total.capturadas, 5, 'solo la pieza normal: 4 en existencia + 1 vendida');
+  assert.equal(r.flujo.total.piezas, 1);
+  assert.equal(r.dias_en_venta.unidades, 1);
+});
+
 test('tienda: una clave invalida es 400 y una valida no cambia nada (la vista es del negocio completo)', async () => {
   const t = tienda();
   pieza(t, 10, 2);

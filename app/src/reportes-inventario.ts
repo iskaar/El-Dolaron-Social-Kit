@@ -170,13 +170,13 @@ export async function reporteInventario(url: URL, env: Env, ahora = Date.now()):
          sum(coalesce(aj.fuera, 0)) as sin_venta, sum(coalesce(vp.v1, 0)) as v1, sum(coalesce(vp.v2, 0)) as v2, sum(coalesce(vp.v4, 0)) as v4, sum(coalesce(vp.v8, 0)) as v8
        from productos p left join vp on vp.pid = p.id left join pa on pa.pid = p.id left join aj on aj.pid = p.id
        where ${CAPTURABLE} and p.creado_en >= ?1 and p.creado_en < ?2 and julianday(p.creado_en) is not null
-       group by dia order by dia`,
+       group by 1 order by 1`,
     ).bind(cohorteDesde, cohorteHasta).all<Omit<FilaDia, 'unidades'>>(),
     // 2. Salidas por semana del periodo (tickets y Mercado Libre de piezas del inventario).
     env.DB.prepare(
       `with ${salidas('?2')}
        select ${lunes('s.fecha')} as lunes, sum(s.cant) as vendidas, sum(case when s.ml = 1 then s.cant else 0 end) as ml
-       from sal s cross join productos p on p.id = s.pid where p.propietario = 'dolaron' and p.sin_inventario = 0 group by lunes`,
+       from sal s cross join productos p on p.id = s.pid where p.propietario = 'dolaron' and p.sin_inventario = 0 group by 1`,
     ).bind(desde, hasta).all<{ lunes: string; vendidas: number; ml: number }>(),
     // 3. Dias de la captura a la venta de lo vendido en el periodo y en el anterior, como histograma.
     env.DB.prepare(
@@ -184,7 +184,7 @@ export async function reporteInventario(url: URL, env: Env, ahora = Date.now()):
        select case when s.fecha >= ?3 then 'a' else 'b' end as v,
          min(${TOPE_DIAS_EN_VENTA}, max(0, cast(julianday(${dia('s.fecha')}) - julianday(${dia('p.creado_en')}) as integer))) as d, sum(s.cant) as n
        from sal s cross join productos p on p.id = s.pid
-       where p.propietario = 'dolaron' and p.sin_inventario = 0 and julianday(p.creado_en) is not null group by v, d`,
+       where p.propietario = 'dolaron' and p.sin_inventario = 0 and julianday(p.creado_en) is not null group by 1, 2`,
     ).bind(rango.anterior_desde, hasta, desde).all<{ v: string; d: number; n: number }>(),
     // 4. Rebajas del periodo por semana: un renglon por cambio de precio (una pieza puede aportar varios).
     env.DB.prepare(
@@ -192,7 +192,7 @@ export async function reporteInventario(url: URL, env: Env, ahora = Date.now()):
          select c.producto_id as pid, c.en, (cast(c.antes as integer) - cast(c.despues as integer)) * 100.0 / cast(c.antes as integer) as pct
          from productos_cambios c join productos p on p.id = c.producto_id where ${regla} and c.en >= ?1 and c.en < ?2)
        select ${lunes('en')} as lunes, count(*) as eventos, count(distinct pid) as piezas, sum(pct) as suma_pct,
-         (select count(distinct pid) from ev) as piezas_total from ev group by lunes`,
+         (select count(distinct pid) from ev) as piezas_total from ev group by 1`,
     ).bind(desde, hasta).all<{ lunes: string; eventos: number; piezas: number; suma_pct: number; piezas_total: number }>(),
     // 5. Desde cuando existe el registro: el primer renglon (id autoincremental), sin recorrer la tabla.
     env.DB.prepare('select en from productos_cambios order by id limit 1').first<{ en: string }>(),

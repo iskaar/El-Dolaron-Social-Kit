@@ -353,9 +353,9 @@ export function tarjetasHtml(tarjetas) {
 
 /* ---------- la serie principal ---------- */
 
-const etiquetaCubeta = (c, grano, n) => (grano === 'dia' ? (n <= 10 ? `${diaSemana(c.desde)} ${c.desde.slice(8).replace(/^0/, '')}` : diaCorto(c.desde))
+export const etiquetaCubeta = (c, grano, n) => (grano === 'dia' ? (n <= 10 ? `${diaSemana(c.desde)} ${c.desde.slice(8).replace(/^0/, '')}` : diaCorto(c.desde))
   : grano === 'semana' ? diaCorto(c.desde) : mesCorto(c.desde));
-const tituloCubeta = (c, grano) => (grano === 'dia' ? mayuscula(diaLargo(c.desde))
+export const tituloCubeta = (c, grano) => (grano === 'dia' ? mayuscula(diaLargo(c.desde))
   : `${grano === 'semana' ? `Semana del ${rangoTexto(c.desde, c.hasta)}` : mayuscula(new Date(`${c.desde.slice(0, 7)}-15T12:00:00`).toLocaleDateString('es-MX', { month: 'long', year: 'numeric' }))}${c.parcial ? ` (parcial: ${c.dias} ${c.dias === 1 ? 'día' : 'días'})` : ''}`);
 
 /** Lo que pide graficaTiempo: una fila por cubeta con su comparacion alineada, el promedio movil (solo por dia) y el ritmo de la meta. */

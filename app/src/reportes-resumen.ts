@@ -25,7 +25,7 @@ const dia = (porDia: Map<string, Medidas>, clave: string) => {
 const entre = (clave: string, desde: string, hasta: string) => clave >= desde && clave <= hasta;
 
 /** Los canales como /tablero (tablero-comun.ts): sin pedido = tienda; pedido de una revendedora = revendedoras; el resto, WhatsApp. */
-const CANAL = `case when v.pedido_id is null then 'tienda' when u.correo is not null then 'revendedoras' else 'whatsapp' end`;
+export const CANAL = `case when v.pedido_id is null then 'tienda' when u.correo is not null then 'revendedoras' else 'whatsapp' end`;
 
 export async function reporteResumen(url: URL, env: Env, ahora = Date.now()): Promise<Response> {
   const rango = rangoDe(url, ahora);
@@ -74,7 +74,7 @@ export async function reporteResumen(url: URL, env: Env, ahora = Date.now()): Pr
          coalesce(sum(case when n.creado_en >= ? and n.creado_en < ? then n.cant end), 0) as piezas,
          coalesce(sum(case when n.creado_en >= ? and n.creado_en < ? then n.neta end), 0) as anterior
        from netas n left join productos p on p.id = n.producto_id
-       where n.propietario = 'dolaron' group by categoria`,
+       where n.propietario = 'dolaron' group by 1`,   // por posicion: `group by categoria` agrupaba por la columna p.categoria y mezclaba las bandas con la ropa (#802)
     ).bind(comparaDesde, ventasHasta, ...ventanaA, ...ventanaA, ...(ventanaB ?? ['', ''])).all<{ categoria: string; total: number; piezas: number; anterior: number }>(),
     // 3. Lo descontado por dia: la misma suma de `ventas.descuento` (sin cancelados) que el bloque de descuentos de /api/reportes.
     env.DB.prepare(
