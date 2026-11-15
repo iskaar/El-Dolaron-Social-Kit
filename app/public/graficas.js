@@ -177,7 +177,7 @@ export const FORMATO_CALOR_DINERO = {
 export function mapaCalorHtml(mapa, fmt = FORMATO_CALOR_DINERO) {   // fmt.entero: la escala es de conteos enteros
   const { horas, filas, maximo, mejor } = mapa;
   const encabezado = horas.map((h) => `<div class="calor-hora">${h}</div>`).join('');
-  const cuerpo = filas.map((f) => `<div class="calor-dia">${escapar(f.nombre)}</div>` + f.celdas.map((c) => {
+  const cuerpo = filas.map((f) => `<div class="calor-dia"><span class="largo">${escapar(f.nombre)}</span><span class="corto" aria-hidden="true">${escapar(f.nombre.slice(0, 3))}</span></div>` + f.celdas.map((c) => {
     const valor = c.total > 0 ? fmt.valor(c.total) : fmt.vacio;
     const aria = escapar(`${c.titulo}: ${valor}, ${c.detalle}`);
     const tip = escapar([c.titulo, valor, ...(c.total > 0 ? [c.detalle] : [])].join('\n'));

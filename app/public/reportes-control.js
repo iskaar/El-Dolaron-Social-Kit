@@ -298,7 +298,7 @@ export function tablaPersonas(d) {
   ].map((v) => `<td class="num"><b>${escapar(v)}</b></td>`).join('')}</tr>`;
   const cabeza = ['Persona', 'Tickets cobrados', 'Tickets cancelados', '% de sus tickets', 'Piezas devueltas', 'Importe devuelto', 'Cajón sin venta',
     'Descuentos pedidos', 'Importe pedido', 'Descuentos aprobados', 'Autoaprobados'];
-  return `<table class="tabla"><thead><tr>${cabeza.map((h, i) => `<th${i ? ' class="num"' : ''}>${h}</th>`).join('')}</tr></thead>
+  return `<table class="tabla fija"><thead><tr>${cabeza.map((h, i) => `<th${i ? ' class="num"' : ''}>${h}</th>`).join('')}</tr></thead>
     <tbody>${d.personas.map(fila).join('')}${total}</tbody></table>`;
 }
 

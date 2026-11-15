@@ -140,7 +140,7 @@ export function tablaPersonas(r) {
     n0(x.sin_tiempo.rafaga + x.sin_tiempo.sin_autor),
   ].map((t) => `<td class="num"><b>${escapar(t)}</b></td>`).join('')}</tr>`;
   const cabeza = ['Persona', 'Capturas', 'Días activos', 'Horas activas', 'Piezas por hora', 'Tiempo mediano', 'Corregidas', 'Descartadas', 'Vendidas a 14 días', 'Sin tiempo medible'];
-  return `<table class="tabla"><thead><tr>${cabeza.map((h, i) => `<th${i ? ' class="num"' : ''}>${h}</th>`).join('')}</tr></thead>
+  return `<table class="tabla fija"><thead><tr>${cabeza.map((h, i) => `<th${i ? ' class="num"' : ''}>${h}</th>`).join('')}</tr></thead>
     <tbody>${r.personas.map(fila).join('')}${total}</tbody></table>`;
 }
 
