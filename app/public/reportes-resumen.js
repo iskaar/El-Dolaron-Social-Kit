@@ -2,7 +2,7 @@
 // Funciones puras (sin DOM): las usan el servidor (src/reportes-resumen.ts) y la pagina, y se prueban en
 // src/reportes-resumen.test.ts. Todo el dinero va en centavos enteros; los dias son dias de la tienda (UTC-6).
 import {
-  escapar, pesos, pesosConSigno, cambio, flechaCambio, sumarDias, diaCorto, diaLargo, diaSemana, minigrafica, escala, pesosEje,
+  escapar, pesos, pesosConSigno, cambio, flechaCambio, sumarDias, diaCorto, diaLargo, diaSemana, minigrafica, escalaNumero, pesosEje, promedioMovil,
   barrasHorizontales, apilada, tabla, textoPeriodo,
 } from './graficas.js';
 
@@ -122,10 +122,7 @@ export function armarCubetas({ desde, hasta, grano, ventana, porDia, sinGastos =
   return { cubetas: lista, totales, anterior };
 }
 
-/** Promedio movil de `n` valores: null hasta que hay `n` (no se promedia con menos, seria otra cosa). */
-export function promedioMovil(valores, n = 7) {
-  return valores.map((_, i) => (i < n - 1 ? null : Math.round(valores.slice(i - n + 1, i + 1).reduce((s, v) => s + v, 0) / n)));
-}
+export { promedioMovil };   // el de graficas.js: lo usan Resumen (centavos enteros) y Capturas (un decimal)
 
 /* ---------- meta del mes ---------- */
 
@@ -277,16 +274,18 @@ export const rangoTexto = (desde, hasta, anioRef = '') => {
 
 /** El nombre de la cubeta en la pantalla: nunca «cubeta», siempre la unidad (día, semana o mes). */
 export const unidadGrano = (grano, n) => ({ dia: n === 1 ? 'día' : 'días', semana: n === 1 ? 'semana' : 'semanas', mes: n === 1 ? 'mes' : 'meses' }[grano]);
+/** «La primera o la última semana está cortada por el periodo», con el genero de cada unidad («El primer o el último mes está cortado...»). */
+export const cortadaPorElPeriodo = (grano) => (grano === 'mes' ? 'El primer o el último mes está cortado por el periodo' : `La primera o la última ${unidadGrano(grano, 1)} está cortada por el periodo`);
 export const COMPARACION_POR_GRANO = { dia: 'día contra día', semana: 'semana contra semana', mes: 'mes contra mes' };
 
 /** «Comparado con 21 sep – 18 oct» (y el aviso cuando los dos periodos no tienen el mismo largo). */
 export function textoComparacion(d) {
-  if (!d.comparacion) return 'Sin comparar';
+  if (!d.comparacion) return TEXTO_COMPARACION.apagada;
   const c = d.comparacion, anio = d.periodo.hasta.slice(0, 4);
   const base = d.comparar === 'mes' ? `Comparado con el mismo periodo del mes pasado: ${rangoTexto(c.desde, c.hasta, anio)}` : `Comparado con ${rangoTexto(c.desde, c.hasta, anio)}`;
   return c.dias === d.periodo.dias ? base : `${base} (${cuenta(c.dias, 'día', 'días')} contra ${d.periodo.dias})`;
 }
-const vsCorto = (d) => (d.comparar === 'mes' ? 'vs mes pasado' : 'vs anterior');
+export const vsCorto = (d) => (d.comparar === 'mes' ? 'vs mes pasado' : 'vs anterior');
 
 /* ---------- tarjetas ---------- */
 
@@ -345,13 +344,37 @@ export function edadPromedio(inv) {
   return piezas ? filas.reduce((s, c) => s + c.dias_promedio * c.piezas, 0) / piezas : null;
 }
 
+/**
+ * EL VOCABULARIO DE LA COMPARACION (#802 B1): lo que dice el renglon de cambio de una tarjeta, igual en las diez vistas. Se decide aqui y nadie
+ * escribe otra frase:
+ *  - hay cambio calculado: chip «▲ +12.3 %» (flecha y signo escritos, el color solo los refuerza) y `vs` («vs anterior», «vs mes pasado»);
+ *  - la comparacion esta apagada («Sin comparar» en «Comparar con»): «Sin comparar»;
+ *  - el periodo comparado no tiene datos (ni una venta): «Sin datos en el periodo comparado» (vale para tarjetas de cualquier tema, no solo ventas);
+ *  - hay datos en el periodo comparado pero esta cifra no tiene base (era cero o no existia): «Sin base de comparación»;
+ *  - la cifra es una foto de ahora y no tiene historial (inventario en piso, cola por revisar): «Foto de hoy: sin historial para comparar».
+ * Una vista vieja sin comparacion (Tickets) no escribe nada. `k.delta` (texto) reemplaza el renglon cuando la tarjeta lo explica con sus
+ * palabras (p. ej. «Cargando…»); `k.sinDelta` lo omite.
+ */
+export const TEXTO_COMPARACION = {
+  apagada: 'Sin comparar',
+  foto: 'Foto de hoy: sin historial para comparar',
+  sinDatos: 'Sin datos en el periodo comparado',
+  sinBase: 'Sin base de comparación',
+};
+export function deltaHtml(k) {
+  if (k.sinDelta) return '';
+  let texto;
+  if (k.delta) texto = k.delta;
+  else if (k.foto) texto = TEXTO_COMPARACION.foto;
+  else if (!k.comparando) texto = TEXTO_COMPARACION.apagada;
+  else if (k.cambio) return `<div class="delta"><span class="chip ${k.cambio.tono}">${escapar(`${k.cambio.flecha} ${k.cambio.texto}`)}</span>${escapar(k.vs)}</div>`;
+  else texto = k.hayComp ? TEXTO_COMPARACION.sinBase : TEXTO_COMPARACION.sinDatos;
+  return `<div class="delta">${escapar(texto)}</div>`;
+}
+
 export function tarjetasHtml(tarjetas) {
   return tarjetas.map((k) => {
-    let delta;
-    if (k.foto) delta = '<div class="delta">Sin historial de inventario para comparar</div>';
-    else if (!k.comparando) delta = '<div class="delta">Sin comparar</div>';
-    else if (k.cambio) delta = `<div class="delta"><span class="chip ${k.cambio.tono}">${escapar(`${k.cambio.flecha} ${k.cambio.texto}`)}</span>${escapar(k.vs)}</div>`;
-    else delta = `<div class="delta">${k.hayComp ? 'Sin base de comparación' : 'Sin ventas en el periodo comparado'}</div>`;
+    const delta = deltaHtml(k);
     const mini = k.serie.length >= 2 ? `<div class="mini-caja">${minigrafica(k.serie, { clase: k.clase, etiqueta: `Tendencia de ${k.etiqueta}` })}</div>` : '';
     const avance = k.avance
       ? `<div class="avance" role="img" aria-label="${escapar(k.avance.texto)}"><i style="width:${Math.min(100, Math.max(0, k.avance.pct))}%"></i></div><div class="pie">${escapar(k.avance.texto)}</div>` : '';
@@ -395,7 +418,7 @@ export function leyendaTendencia(d) {
   if (hayComp) items.push(['comp', d.comparar === 'mes' ? 'Mismo periodo del mes pasado' : 'Periodo anterior']);
   if (d.meta && d.meta.monto) items.push(['ritmo', 'Ritmo de la meta']);
   return `<div class="leyenda-linea">${items.map(([clase, texto]) => `<span><i class="llave-${clase}"></i>${escapar(texto)}</span>`).join('')}</div>${
-    d.comparacion && !hayComp ? '<p class="nota">No hubo ventas en el periodo comparado: no hay línea de comparación.</p>' : ''}`;
+    d.comparacion && !hayComp ? `<p class="nota">${TEXTO_COMPARACION.sinDatos}: no hay línea de comparación.</p>` : ''}`;
 }
 
 export function tablaTendencia(d) {
@@ -434,7 +457,7 @@ export function graficaMeta(d, { ancho, alto = 190 }) {
   const ml = 58, mr = 12, mt = 12, mb = 24;
   const pw = Math.max(40, ancho - ml - mr), ph = alto - mt - mb;
   const maximo = Math.max(m.monto, m.proyeccion, m.acumulado);
-  const { tope, marcas } = escala(maximo, 3);
+  const { tope, marcas } = escalaNumero(maximo, { objetivo: 3, dinero: true });
   const x = (dia) => ml + ((dia - 1) / Math.max(1, m.dias_mes - 1)) * pw;
   const y = (v) => mt + ph - (v / tope) * ph;
   const rejilla = marcas.map((v) => `<line class="${v === 0 ? 'eje' : 'rejilla'}" x1="${ml}" x2="${ancho - mr}" y1="${y(v)}" y2="${y(v)}"/><text class="marca" x="${ml - 8}" y="${y(v) + 4}" text-anchor="end">${pesosEje(v)}</text>`).join('');

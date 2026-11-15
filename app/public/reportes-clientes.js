@@ -2,8 +2,8 @@
 // Funciones puras (sin DOM): las usa el servidor (src/reportes-clientes.ts, `armarClientes`) y la pagina, y se prueban en
 // src/reportes-clientes.test.ts. Dinero en centavos enteros; los dias son dias de la tienda (UTC-6).
 // «Socio» es una fila de `clientes`; las cuentas del equipo (registrado_por = 'retos') no son clientes y no cuentan como socios.
-import { escapar, pesos, pesosEje, sumarDias, diaCorto, tabla, columnas, graficaLinea, leyendaSeries } from './graficas.js';
-import { cubetas as listaCubetas, cambioKpi, diasEntre, etiquetaCubeta, tituloCubeta, unidadGrano } from './reportes-resumen.js';
+import { escapar, pesos, pesosEje, sumarDias, diaCorto, tabla, columnas, lineaSerie, leyendaSeries } from './graficas.js';
+import { cubetas as listaCubetas, cambioKpi, vsCorto, cortadaPorElPeriodo, diasEntre, etiquetaCubeta, tituloCubeta, unidadGrano } from './reportes-resumen.js';
 
 const num = (n) => Number(n).toLocaleString('es-MX');
 const un = (v) => v.toLocaleString('es-MX', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
@@ -137,8 +137,9 @@ const chica = (n) => (n < MUESTRA_MIN ? ` · muestra chica (${num(n)})` : '');
 export function tarjetasClientes(d) {
   const t = d.totales, a = d.anterior, sc = d.cubetas;
   const comparando = !!d.comparacion;
-  const vs = d.comparar === 'mes' ? 'vs mes pasado' : 'vs anterior';
-  const k = (clave, etiqueta, valor, cambio, serie, pie) => ({ clave, etiqueta, valor, cambio: comparando ? cambio : null, serie, clase: 's1', pie, vs, hayComp: comparando, comparando });
+  const vs = vsCorto(d);
+  const hayComp = !!a && (a.tickets_socio + a.tickets_sin > 0 || a.socios > 0 || a.nuevos > 0);   // el periodo comparado tuvo algo
+  const k = (clave, etiqueta, valor, cambio, serie, pie) => ({ clave, etiqueta, valor, cambio: comparando ? cambio : null, serie, clase: 's1', pie, vs, hayComp, comparando });
   const nuevosCanal = CANALES_ALTA.map(([c, nombre]) => [nombre, t.nuevos_canal[c]]).filter(([, n]) => n > 0).map(([nombre, n]) => `${nombre.toLowerCase()} ${num(n)}`).join(' · ');
   const totalTickets = t.tickets_socio + t.tickets_sin, totalVentas = t.ventas_socio + t.ventas_sin;
   const ticketCon = ticketMedio(t.ventas_socio, t.tickets_socio), ticketSin = ticketMedio(t.ventas_sin, t.tickets_sin);
@@ -292,7 +293,7 @@ export function vistaClientes(d) {
   const parciales = d.cubetas.some((c) => c.parcial);
   const aviso = avisosClientes(d);
   const subGrano = `${grano} · ${num(n)} ${unidadGrano(d.grano, n)}`;
-  const notaParcial = parciales ? `La primera o la última ${unidadGrano(d.grano, 1)} está cortada por el periodo: tiene menos días.` : '';
+  const notaParcial = parciales ? `${cortadaPorElPeriodo(d.grano)}: tiene menos días.` : '';
   const sinNada = d.totales.tickets_socio + d.totales.tickets_sin === 0 && d.totales.nuevos === 0 && d.con_historia === 0;
   return `${aviso.map((t) => `<p class="nota aviso-tienda">${escapar(t)}</p>`).join('')}
     ${sinNada ? '<p class="vacio">Sin socios ni ventas en este periodo.</p>' : ''}
@@ -335,9 +336,9 @@ export function graficas(d, anchoDe) {
   return {
     altas: altas.length === 0 ? vacio('Sin altas en este periodo.') : columnas({ categorias: e, series: altas, ancho: ancho('altas'), modo: 'apiladas', entero: true, fmtValor: num }),
     participacion: p.every((v) => v == null) ? vacio('Sin tickets desde que empezó el programa en este periodo.')
-      : graficaLinea(d.cubetas.map((c, i) => ({ etiqueta: e[i].etiqueta, titulo: e[i].titulo, valor: p[i] == null ? null : Math.round(p[i] * 10) / 10,
-        detalle: [`${num(c.tickets_socio)} de ${cuenta(c.tickets_socio + c.tickets_sin, 'ticket', 'tickets')}`] })),
-      { ancho: ancho('participacion'), formato: (v) => `${un(v)} %`, descripcion: 'Porcentaje de tickets con socio' }),
+      : lineaSerie({ categorias: d.cubetas.map((c, i) => ({ etiqueta: e[i].etiqueta, titulo: e[i].titulo, detalle: [`${num(c.tickets_socio)} de ${cuenta(c.tickets_socio + c.tickets_sin, 'ticket', 'tickets')}`] })),
+        valores: p.map((v) => (v == null ? null : Math.round(v * 10) / 10)), nombre: 'Tickets con socio', ancho: ancho('participacion'), area: false, entero: true,
+        fmtEje: (v) => `${un(v)} %`, fmtValor: (v) => `${un(v)} %`, descripcion: 'Porcentaje de tickets con socio' }),
     ventas: ventas.every((s) => s.valores.every((v) => v === 0)) ? vacio('Sin ventas en este periodo.')
       : columnas({ categorias: e, series: ventas, ancho: ancho('ventas'), modo: 'apiladas', fmtEje: pesosEje, fmtValor: pesos }),
     compras: histograma('compras', nombresCompras(), compras.map((x) => x.socios), 'Ningún socio ha comprado todavía.'),

@@ -13,7 +13,7 @@ import {
   escapar, pesos, pesosEje, pesosConSigno, tabla, columnas, leyendaSeries, barrasHorizontales, mapaCalor, mapaCalorHtml, tablaCalor,
   FORMATO_CALOR_DINERO,
 } from './graficas.js';
-import { armarCubetas, cambioKpi, tarjetasHtml, etiquetaCubeta, tituloCubeta } from './reportes-resumen.js';
+import { armarCubetas, cambioKpi, vsCorto, tarjetasHtml, etiquetaCubeta, tituloCubeta } from './reportes-resumen.js';
 import { MAX_COLUMNAS } from './reportes-ventas.js';
 
 const n0 = (n) => Number(n ?? 0).toLocaleString('es-MX');
@@ -188,7 +188,7 @@ export function armarControl({ desde, hasta, grano, ventana, ventas, eventos, ap
 export function tarjetasControl(d) {
   const t = d.totales, a = d.anterior, sc = d.cubetas;
   const hayComp = !!(a && a.tickets > 0);
-  const comunes = { vs: d.comparar === 'mes' ? 'vs mes pasado' : 'vs anterior', hayComp, comparando: !!d.comparacion };
+  const comunes = { vs: vsCorto(d), hayComp, comparando: !!d.comparacion };
   const tasa = (x) => (x.bruto > 0 ? (x.canc_valor * 100) / x.bruto : null);
   const cambio = (actual, previo, opciones = { bueno: 'baja' }) => (hayComp ? cambioKpi(actual, previo, opciones) : null);
   const hayCortes = t.cortes_n > 0;
@@ -210,7 +210,7 @@ export function tarjetasControl(d) {
     { ...comunes, clave: 'dif', etiqueta: 'Diferencia de cortes', valor: hayCortes ? pesosConSigno(t.dif) : '—',
       cambio: hayCortes && a && a.cortes_n > 0 ? cambio(t.dif, a.dif, { tipo: 'abs', bueno: 'neutro' }) : null, serie: serie((c) => c.dif), clase: 's3',
       pie: hayCortes ? `${cuenta(t.cortes_n, 'corte', 'cortes')}: ${n0(t.cortes_corto)} con faltante · ${n0(t.cortes_sobra)} con sobrante · ${n0(t.cortes_exacto)} exactos` : 'Sin cortes en el periodo' },
-    { ...comunes, clave: 'desc', etiqueta: 'Descuentos aprobados', valor: n0(t.desc_n), cambio: cambio(t.desc_n, a?.desc_n, { bueno: 'neutro' }),
+    { ...comunes, clave: 'desc', etiqueta: 'Descuentos aprobados', valor: n0(t.desc_n), cambio: cambio(t.desc_n, a?.desc_n),   // subir el descuento es desfavorable, como en Resumen y Ventas
       serie: serie((c) => c.desc_n), clase: 's1', pie: `${pesos(t.desc_monto)} fuera de la promoción` },
   ];
 }
@@ -298,7 +298,7 @@ export function tablaPersonas(d) {
   ].map((v) => `<td class="num"><b>${escapar(v)}</b></td>`).join('')}</tr>`;
   const cabeza = ['Persona', 'Tickets cobrados', 'Tickets cancelados', '% de sus tickets', 'Piezas devueltas', 'Importe devuelto', 'Cajón sin venta',
     'Descuentos pedidos', 'Importe pedido', 'Descuentos aprobados', 'Autoaprobados'];
-  return `<table class="tabla"><thead><tr>${cabeza.map((h, i) => `<th${i ? ' class="num"' : ''}>${h}</th>`).join('')}</tr></thead>
+  return `<table class="tabla fija"><thead><tr>${cabeza.map((h, i) => `<th${i ? ' class="num"' : ''}>${h}</th>`).join('')}</tr></thead>
     <tbody>${d.personas.map(fila).join('')}${total}</tbody></table>`;
 }
 

@@ -3,9 +3,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  pesos, dolarones, pesosEje, pesosConSigno, escala, cambio, rellenarDias, textoPeriodo, verificarCuadre,
+  pesos, dolarones, pesosEje, pesosConSigno, cambio, rellenarDias, textoPeriodo, verificarCuadre,
   PASOS_CALOR, pasoCalor, pasosDeLaEscala, horasConVentas, textoHora, rangoHora, mapaCalor, mapaCalorHtml, tablaCalor,
-  TRAMOS_ANTIGUEDAD, tramoDeDias, pasoOrdinal, flechaCambio, barrasHorizontales, apilada, minigrafica, graficaTiempo, escalaNumero, columnas, lineaSerie, leyendaSeries,
+  TRAMOS_ANTIGUEDAD, tramoDeDias, pasoOrdinal, flechaCambio, fechaHora, FECHAS_TICKET, indiceTeclado, celdaCsv, valorCsv, csvDeTablas, nombreCsv, barrasHorizontales, apilada, minigrafica, graficaTiempo, escalaNumero, columnas, lineaSerie, leyendaSeries,
 } from '../public/graficas.js';
 import { rangoDias } from './worker.ts';
 
@@ -24,15 +24,15 @@ test('pesos siempre lleva centavos, sin pasar por decimales', () => {
   assert.equal(pesosEje(250000), '$2,500');
 });
 
-test('escala da marcas redondas que cubren el maximo', () => {
-  assert.deepEqual(escala(0).marcas, [0, 25, 50, 75, 100]);   // sin ventas: de $0 a $1
-  const e = escala(123_456);                 // $1,234.56
+test('escalaNumero con `dinero` da marcas redondas en pesos que cubren el maximo', () => {
+  assert.deepEqual(escalaNumero(0, { dinero: true }).marcas, [0, 25, 50, 75, 100]);   // sin ventas: de $0 a $1
+  const e = escalaNumero(123_456, { dinero: true });                 // $1,234.56
   assert.ok(e.tope >= 123_456);
   assert.equal(e.marcas[0], 0);
   const pasos = e.marcas.slice(1).map((m, i) => m - e.marcas[i]);
   assert.ok(pasos.every((p) => p === pasos[0]), 'pasos iguales');
   assert.ok([1, 2, 2.5, 5].includes(pasos[0] / 100 / 10 ** Math.floor(Math.log10(pasos[0] / 100))), 'paso redondo');
-  assert.equal(escala(100_000).tope, 100_000);   // $1,000 exacto: no se pasa de largo
+  assert.equal(escalaNumero(100_000, { dinero: true }).tope, 100_000);   // $1,000 exacto: no se pasa de largo
 });
 
 test('cambio contra el periodo anterior', () => {
@@ -183,13 +183,13 @@ test('apilada: la columna extra (piezas) entra en todas las filas de la leyenda'
 });
 
 /* ---------- series sin dinero: columnas apiladas, histograma y linea (#802, vista Capturas) ---------- */
-import { graficaColumnas, graficaLinea, FORMATO_CALOR_DINERO } from '../public/graficas.js';
+import { FORMATO_CALOR_DINERO, promedioMovil } from '../public/graficas.js';
 
-test('graficaColumnas apila en orden, pone el total en el globo y deja una columna enfocable por dia', () => {
-  const d = { unidad: 'capturas', etiquetas: ['1', '2', '3'], titulos: ['Lunes 1', 'Martes 2', 'Miércoles 3'],
+test('columnas apiladas con `unidad` y `linea`: total en el globo, una columna enfocable por dia y la linea de referencia con su hueco', () => {
+  const d = { unidad: 'capturas', categorias: [{ etiqueta: '1', titulo: 'Lunes 1' }, { etiqueta: '2', titulo: 'Martes 2' }, { etiqueta: '3', titulo: 'Miércoles 3' }],
     series: [{ nombre: 'Ana', color: 'var(--serie-1)', valores: [4, 0, 2] }, { nombre: 'Beto', color: 'var(--serie-2)', valores: [1, 0, 3] }],
     linea: { nombre: 'Promedio', valores: [null, 2, 3] } };
-  const svg = graficaColumnas(d, { ancho: 600 });
+  const svg = columnas({ ...d, ancho: 600, modo: 'apiladas', entero: true });
   assert.equal((svg.match(/class="hit"/g) ?? []).length, 3);
   assert.equal((svg.match(/var\(--serie-1\)/g) ?? []).length, 2);   // ana pinta 2 de 3 dias: la de cero no deja barra
   assert.ok(svg.includes('Lunes 1'));
@@ -198,16 +198,24 @@ test('graficaColumnas apila en orden, pone el total en el globo y deja una colum
   assert.equal((svg.match(/<path /g) ?? []).length, 1);   // un solo trazo de referencia, sin el null del principio
   assert.ok(!svg.includes('NaN') && !svg.includes('undefined'));
   // Sin datos y con un solo punto no revienta.
-  assert.match(graficaColumnas({ etiquetas: ['a'], series: [{ nombre: 'x', color: 'red', valores: [0] }] }, { ancho: 300 }), /<svg/);
+  assert.match(columnas({ categorias: [{ etiqueta: 'a', titulo: 'a' }], series: [{ nombre: 'x', color: 'red', valores: [0] }], ancho: 300, modo: 'apiladas', entero: true }), /<svg/);
 });
 
-test('graficaLinea corta el trazo donde no hay dato en lugar de bajarlo a cero', () => {
-  const puntos = [{ etiqueta: 'a', valor: 60 }, { etiqueta: 'b', valor: null }, { etiqueta: 'c', valor: 90 }, { etiqueta: 'd', valor: 80 }];
-  const svg = graficaLinea(puntos, { ancho: 600 });
+test('lineaSerie corta el trazo donde no hay dato en lugar de bajarlo a cero', () => {
+  const categorias = ['a', 'b', 'c', 'd'].map((etiqueta) => ({ etiqueta }));
+  const svg = lineaSerie({ categorias, valores: [60, null, 90, 80], nombre: 'Mediana', ancho: 600, area: false, entero: true });
   assert.equal((svg.match(/class="trazo"/g) ?? []).length, 1);   // a queda solo (sin trazo) y c-d forman el unico tramo
   assert.equal((svg.match(/<circle/g) ?? []).length, 3);
   assert.ok(svg.includes('Sin datos'));
   assert.ok(!svg.includes('NaN'));
+  assert.doesNotMatch(svg, /class="area"/);   // sin `area`, solo la linea
+  assert.equal((lineaSerie({ categorias, valores: [60, null, 90, 80], nombre: 'M', ancho: 600 }).match(/class="area"/g) ?? []).length, 1);   // un area por tramo largo
+});
+
+test('promedioMovil: nada hasta tener `n` valores; enteros por omision y un decimal si se pide', () => {
+  assert.deepEqual(promedioMovil([7, 7, 7, 7, 7, 7, 14, 21], 7), [null, null, null, null, null, null, 8, 10]);
+  assert.deepEqual(promedioMovil([1, 2, 3], 7), [null, null, null]);
+  assert.deepEqual(promedioMovil([1, 1, 2], 3, 1), [null, null, 1.3]);
 });
 
 test('el mapa de calor admite conteos sin cambiar el de dinero', () => {
@@ -299,4 +307,69 @@ test('graficaTiempo: columnas, lineas de comparacion y promedio, y cada cubeta c
   assert.doesNotMatch(linea, /tabindex/);
   // Un titulo malicioso no entra como HTML.
   assert.doesNotMatch(graficaTiempo([{ ...datos[0], titulo: '"><script>x</script>' }], { ancho: 700 }), /<script>/);
+});
+
+test('B5: una fecha con hora y un dia, cada uno con un solo formato', () => {
+  const instante = '2026-11-15T12:00:00Z';   // el 15 en cualquier zona de las Americas y Europa
+  assert.match(fechaHora(instante), /^15 nov 2026, \d{1,2}:\d{2} [ap]\.m\.$/);
+  assert.equal(FECHAS_TICKET.fecha(instante), '15 nov');
+  assert.match(FECHAS_TICKET.hora(instante), /^\d{1,2}:\d{2} [ap]\.m\.$/);
+  assert.doesNotMatch(fechaHora(instante), /dom|domingo|\//, 'ni dia de la semana ni 15/11/26');
+});
+
+test('B7: las flechas mueven el foco dentro de una grafica sin salirse de ella', () => {
+  assert.equal(indiceTeclado(3, 28, 'ArrowRight'), 4);
+  assert.equal(indiceTeclado(3, 28, 'ArrowLeft'), 2);
+  assert.equal(indiceTeclado(27, 28, 'ArrowRight'), 27, 'el ultimo no da la vuelta ni sale');
+  assert.equal(indiceTeclado(0, 28, 'ArrowLeft'), 0);
+  assert.equal(indiceTeclado(5, 28, 'Home'), 0);
+  assert.equal(indiceTeclado(5, 28, 'End'), 27);
+  assert.equal(indiceTeclado(5, 28, 'ArrowDown'), 6);
+  assert.equal(indiceTeclado(5, 28, 'Tab'), null, 'Tab no se atrapa: sale de la grafica por su cuenta');
+});
+
+test('B10: los numeros de la tabla pasan al CSV como numeros planos y lo demas como texto', () => {
+  assert.equal(valorCsv('$1,234.56'), '1234.56');
+  assert.equal(valorCsv('$12,345,678.00'), '12345678.00');
+  assert.equal(valorCsv('−$0.50'), '-0.50');            // el menos tipografico es un menos
+  assert.equal(valorCsv('+$15.50'), '15.50');
+  assert.equal(valorCsv('12.3 %'), '12.3');
+  assert.equal(valorCsv('120.50 D'), '120.50');
+  assert.equal(valorCsv('1,234'), '1234');
+  assert.equal(valorCsv('42'), '42');
+  assert.equal(valorCsv('—'), '', 'sin dato: celda vacia');
+  assert.equal(valorCsv('Lunes 10:00–11:00'), 'Lunes 10:00–11:00');
+  assert.equal(valorCsv('▲ +12.3%'), '▲ +12.3%');
+  assert.equal(valorCsv('3:05 min'), '3:05 min');
+  assert.equal(valorCsv('  Camisa   azul '), 'Camisa azul');
+});
+
+test('B10: las celdas que empiezan con = + - @ (o tab o retorno) se neutralizan como en el CSV del servidor', () => {
+  for (const peligro of ['=HYPERLINK("http://evil")', '+1+1', '-2+3', '@SUM(A1)', '\t=1', '\r=1']) {
+    assert.match(celdaCsv(peligro), /^"?'/, `${JSON.stringify(peligro)} lleva apostrofe`);
+  }
+  assert.equal(celdaCsv('=1+1'), "'=1+1");
+  assert.equal(celdaCsv('=HYPERLINK("x")'), `"'=HYPERLINK(""x"")"`);   // comillas dobladas y el apostrofe adentro, igual que el servidor
+  assert.equal(celdaCsv('-12.50'), '-12.50', 'un numero negativo no es una formula');
+  assert.equal(celdaCsv('Ventilador'), 'Ventilador');
+  assert.equal(celdaCsv('a,b'), '"a,b"');
+  assert.equal(celdaCsv('dice "hola"'), '"dice ""hola"""');
+  // Pasa por la tabla entera: la formula llega neutralizada aunque venga de un nombre escrito por otra persona.
+  const csv = csvDeTablas([{ encabezados: ['Pieza', 'Importe'], filas: [["=cmd|' /C calc'!A0", '$5.00'], ['@x', '−$1.00']] }]);
+  assert.ok(csv.includes("'=cmd"), csv);
+  assert.ok(csv.includes("'@x,-1.00"), csv);
+});
+
+test('B10: el CSV de una tabla lleva BOM, saltos CRLF, un renglon por fila y una linea en blanco entre tablas', () => {
+  const csv = csvDeTablas([
+    { encabezados: ['Periodo', 'Ventas netas'], filas: [['15 nov', '$1,000.00'], ['16 nov', '—']] },
+    { encabezados: ['Piezas', 'Tickets'], filas: [['1 pieza', '4']] },
+  ]);
+  assert.equal(csv, '﻿Periodo,Ventas netas\r\n15 nov,1000.00\r\n16 nov,\r\n\r\nPiezas,Tickets\r\n1 pieza,4');
+  assert.equal(csvDeTablas([{ encabezados: ['Año'], filas: [['Camión']] }]).charCodeAt(0), 0xfeff);   // los acentos sobreviven
+});
+
+test('B10: el archivo se llama como la vista, el panel y el periodo', () => {
+  assert.equal(nombreCsv('resumen', 'Categorías ', '2026-10-19', '2026-11-15'), 'resumen-categorias-2026-10-19_2026-11-15.csv');
+  assert.equal(nombreCsv('ventas', 'Forma de pago en el tiempo', '2026-11-01', '2026-11-15', 'salk'), 'ventas-forma-de-pago-en-el-tiempo-2026-11-01_2026-11-15-salk.csv');
 });

@@ -117,8 +117,10 @@
   .panel header { display: flex; align-items: baseline; gap: 10px; margin-bottom: 10px; }
   .panel h4 { font-size: 14px; margin: 0; font-weight: 700; flex: 1; min-width: 0; }
   .panel .subtitulo { font-size: 12px; color: var(--tinta-2); font-weight: 400; margin-left: 8px; }
-  .alterna { border: 0; background: none; color: var(--tinta-2); font: inherit; font-size: 12px; cursor: pointer; text-decoration: underline;
+  .alterna, .csv-panel { border: 0; background: none; color: var(--tinta-2); font: inherit; font-size: 12px; cursor: pointer; text-decoration: underline;
     text-underline-offset: 3px; padding: 2px 0; }
+  .csv-panel { margin-left: -2px; }
+  .csv-panel[hidden] { display: none; }
   .panel .vista-tabla { display: none; max-height: 380px; overflow: auto; }
   .panel.en-tabla .vista-tabla { display: block; }
   .panel.en-tabla .vista-grafica { display: none; }
@@ -223,6 +225,7 @@
   .calor { display: grid; grid-template-columns: 84px repeat(var(--horas), minmax(40px, 76px)); gap: 4px; width: max-content; min-width: 100%; }
   .calor-hora { font-size: 11px; color: var(--tinta-2); text-align: center; align-self: end; font-variant-numeric: tabular-nums; }
   .calor-dia { font-size: 12px; color: var(--tinta-2); align-self: center; position: sticky; left: 0; background: var(--superficie); z-index: 1; }
+  .calor-dia .corto { display: none; }
   .celda { height: 40px; border-radius: 7px; display: flex; align-items: center; justify-content: center; font-size: 10.5px;
     font-weight: 700; color: var(--calor-texto); font-variant-numeric: tabular-nums; }
   .celda.vacia { border: 1px solid var(--rejilla); }
@@ -231,6 +234,13 @@
   .calor .celda:hover, .calor .celda:focus-visible { outline: 2px solid var(--tinta); outline-offset: 1px; }
   .calor-leyenda { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 4px; margin-top: 14px; font-size: 12px; color: var(--tinta-2); }
   .calor-leyenda .celda { width: 22px; height: 14px; border-radius: 4px; }
+  /* Tablas anchas por persona (Equipo, Control, Capturas): la primera columna se queda fija al desplazarse. */
+  .tabla.fija th:first-child, .tabla.fija td:first-child { position: sticky; left: 0; z-index: 2; background: var(--superficie); box-shadow: 1px 0 0 var(--rejilla); }
+  .tabla.fija th:first-child { z-index: 3; }
+  .cols-todas { display: none; border: 0; background: none; color: var(--tinta-2); font-size: 12px; text-decoration: underline; text-underline-offset: 3px; cursor: pointer; padding: 2px 0; }
+  .bono-parte { display: inline-block; margin: 0 12px 2px 0; white-space: nowrap; }
+  #bono-semanas td, #bono-semanas th { white-space: nowrap; }   /* una semana, una fila: el reparto ocupa el resto */
+  #bono-semanas td:nth-child(6) { white-space: normal; min-width: 240px; }
   .calor-paso { display: inline-flex; align-items: center; gap: 4px; margin-right: 8px; white-space: nowrap; }
   .calor-paso .celda { display: inline-block; }
   .globo { position: fixed; z-index: 50; pointer-events: none; background: var(--superficie); color: var(--tinta);
@@ -299,17 +309,44 @@
     .tarjeta { min-width: 0; flex-basis: 42%; }
     .tarjeta .valor { font-size: 20px; }
     header.barra .hora { display: none; }
+    /* Mapas de calor en celular: la cuadricula cabe en el panel (dias abreviados, celdas chicas, sin el importe dentro de la celda: va en el globo y en la nota). */
+    .calor { grid-template-columns: 30px repeat(var(--horas), minmax(0, 1fr)); gap: 2px; width: auto; min-width: 0; }
+    .calor-hora { font-size: 9px; }
+    .calor-dia .largo { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+    .calor-dia .corto { display: inline; }
+    .calor-dia { font-size: 11px; }
+    .calor .celda { height: 22px; border-radius: 4px; font-size: 0; }
+    /* Tablas anchas por persona: menos aire y encabezados en dos renglones; las columnas de menor prioridad se ven con «Ver todas las columnas». */
+    .tabla.fija th, .tabla.fija td { padding: 6px 6px; font-size: 12px; }
+    .tabla.fija th.num { white-space: normal; min-width: 64px; vertical-align: bottom; }
+    .tabla.fija .ordena { white-space: normal; text-align: right; }
+    .tabla.fija:not(.todas) .baja { display: none; }
+    .cols-todas { display: inline-block; margin: 0 0 8px; }
   }
   @media (prefers-reduced-motion: reduce) { main { transition: none; } }
 
+  .solo-impresion { display: none; }
   @media print {
-    header.barra a, .riel, .filtros, .alterna, .ver-mas, .exportar, .fondo-caja, .filtros-tickets { display: none !important; }
+    @page { margin: 12mm; }
+    /* Lo que es para operar y no para leer no se imprime: formularios (bono, fondo, cupon, pago y comision de la terminal), botones y filtros. */
+    header.barra a, .riel, .filtros, .alterna, .ver-mas, .exportar, .fondo-caja, .filtros-tickets, #equipo-config, .cols-todas, .csv-panel, .chip-dia, #aviso-bono { display: none !important; }
+    .solo-impresion { display: inline !important; }
     .app { display: block; }
     .trabajo { border: 0; padding: 0; }
     :root { color-scheme: light; }
     body { background: #fff; }
-    .panel, .tarjeta { break-inside: avoid; box-shadow: none; }
-    .lista-tickets, .panel .vista-tabla { max-height: none; overflow: visible; }
+    /* Un panel puede partirse entre paginas (si no, una grafica alta deja media pagina en blanco): se parten por renglones, no por la mitad de uno. */
+    .panel { overflow: visible; box-shadow: none; }
+    .tarjeta, .tabla tr, .svg-grafica, .hbarra, .calor, .meta-num { break-inside: avoid; box-shadow: none; }
+    .panel header, .panel h4, .leyenda-series, .leyenda-linea { break-after: avoid; }
+    .titulo-bloque { break-after: avoid; }
+    /* Cuatro tarjetas por fila, como en escritorio: el papel mide menos de 861 px y caeria en el diseno de celular. */
+    .tarjeta, #r-kpis .tarjeta, #c-kpis .tarjeta { flex: 1 1 22% !important; min-width: 0 !important; }
+    .tarjeta .valor, #r-kpis .tarjeta .valor, #c-kpis .tarjeta .valor { font-size: 21px !important; }
+    .lista-tickets, .panel .vista-tabla, .tabla.fija { max-height: none; overflow: visible; }
+    .tabla.fija .baja { display: table-cell !important; }
+    .svg-grafica { max-height: 300px; }   /* en el papel el ancho es otro que el medido en pantalla: una grafica no crece sin limite */
+    main { transition: none; }
   }
 </style>
 </head>
@@ -342,7 +379,7 @@
         <label class="campo">Desde <input type="date" id="f-desde"></label>
         <label class="campo">Hasta <input type="date" id="f-hasta"></label>
       </span>
-      <!-- Comparar con y grano (#802): por ahora solo el Resumen reacciona; las demas vistas los adoptaran y quitaran el `hidden`. -->
+      <!-- Comparar con y grano (#802): se muestran solo en las vistas de VISTAS_CON_COMPARACION (Resumen, Ventas, Clientes, Finanzas, Control y Equipo); en las demas el JS los oculta. -->
       <div class="fila-vista" id="fila-vista" hidden>
         <label class="campo">Comparar con
           <select id="f-comparar">
@@ -361,7 +398,7 @@
         <button type="button" class="btn" id="imprimir">Imprimir o guardar PDF</button>
       </div>
     </div>
-    <p class="periodo-txt"><span><span id="p-etq">Del</span> <b id="p-texto">—</b></span><span id="p-anterior"></span><span id="aviso-periodo" role="status"></span></p>
+    <p class="periodo-txt"><span><span id="p-etq">Del</span> <b id="p-texto">—</b></span><span id="p-anterior"></span><span class="solo-impresion" id="p-impresion"></span><span id="aviso-periodo" role="status"></span></p>
 
 <main id="principal">
 
@@ -739,7 +776,7 @@
       <div id="chip-dia" hidden></div>
       <div class="lista-tickets" id="tickets-rango"></div>
       <button id="tickets-mas" type="button" class="ver-mas" hidden>Ver más tickets</button>
-      <div class="exportar" style="margin-top: 10px"><a id="exportar-tickets" href="/api/reportes/tickets.csv">Exportar estos tickets (CSV)</a></div>
+      <div class="exportar" style="margin-top: 10px"><a id="exportar-tickets" href="/api/reportes/tickets.csv">Exportar estos tickets (CSV) · del periodo y los filtros</a></div>
       <p class="nota">Toca un ticket para ver sus piezas, el cobro y lo que se devolvió. Las piezas se cancelan desde la caja.
         «Vendido» es lo que los tickets siguen valiendo, sin cancelados ni devoluciones.</p>
     </article>
@@ -747,9 +784,10 @@
     <section aria-labelledby="t-exportar">
       <h3 class="titulo-bloque" id="t-exportar">Exportar</h3>
     <div class="exportar">
-      <a href="/api/reportes/ventas.csv">Exportar ventas (CSV)</a>
-      <a href="/api/reportes/inventario.csv">Exportar inventario (CSV)</a>
+      <a href="/api/reportes/ventas.csv">Exportar ventas (CSV) · todo el historial</a>
+      <a href="/api/reportes/inventario.csv">Exportar inventario (CSV) · todo, como está hoy</a>
     </div>
+    <p class="nota">Estos dos no dependen del periodo ni de la tienda elegidos arriba: ventas trae todas las ventas desde la apertura, de todas las tiendas, e inventario trae todas las piezas como están hoy. El de tickets, de arriba, sí respeta el periodo, la tienda y los filtros.</p>
     </section>
   </section>
 </main>
@@ -768,12 +806,12 @@ import { vistaInventario, graficas as graficasInventario, tarjetasInventario, av
 import { CATEGORIAS } from '/categorias.js';
 import {
   escapar, pesos, pesosConSigno, dolarones, cambio, rellenarDias, sumarDias, diaCorto, diaLargo, diaSemana, textoPeriodo,
-  verificarCuadre, mapaCalor, mapaCalorHtml, tablaCalor, graficaDias, activarLinea, activarGlobos, barrasHorizontales, apilada, tabla,
-  flechaCambio, TRAMOS_ANTIGUEDAD, pasoOrdinal, graficaTiempo,
+  verificarCuadre, mapaCalor, mapaCalorHtml, tablaCalor, activarGlobos, barrasHorizontales, apilada, tabla,
+  flechaCambio, TRAMOS_ANTIGUEDAD, pasoOrdinal, graficaTiempo, fechaHora, FECHAS_TICKET, activarTeclado, csvDeTablas, nombreCsv,
 } from '/graficas.js';
 import {
   COMPARACIONES, GRANOS, granosPermitidos, tarjetasKpi, tarjetasHtml, datosTendencia, leyendaTendencia, tablaTendencia, metaHtml, graficaMeta, tablaMeta,
-  hallazgos, hallazgosHtml, canalesHtml, tablaCanales, categoriasHtml, tablaCategorias, textoComparacion, unidadGrano, COMPARACION_POR_GRANO, rangoTexto,
+  hallazgos, hallazgosHtml, canalesHtml, tablaCanales, categoriasHtml, tablaCategorias, textoComparacion, unidadGrano, COMPARACION_POR_GRANO, rangoTexto, TEXTO_COMPARACION, cortadaPorElPeriodo,
 } from '/reportes-resumen.js';
 import { montarCapturas } from '/reportes-capturas.js';
 import * as Ventas from '/reportes-ventas.js';
@@ -784,8 +822,6 @@ import * as Finanzas from '/reportes-finanzas.js';
 import { CLAVES_DE_PARTE, PARTES_FOTO, PARTES_SIN_TIENDA } from '/reportes-partes.js';
 
 const $ = (id) => document.getElementById(id);
-// Hora de la tienda (la del navegador), no UTC como se guarda.
-const fechaHora = (iso) => new Date(iso).toLocaleString('es-MX', { dateStyle: 'short', timeStyle: 'short' });
 const FORMAS = [
   ['efectivo', 'Efectivo', 'var(--serie-1)'], ['tarjeta', 'Tarjeta', 'var(--serie-2)'],
   ['transferencia', 'Transferencia', 'var(--serie-3)'], ['dolarones', 'Dolarones', 'var(--serie-4)'],
@@ -906,7 +942,7 @@ async function pedirPartes(partes) {
   try { await Promise.all(esperas); } catch { return false; }
   return partes.every(parteVigente);
 }
-function sello() { $('actualizado').textContent = `Actualizado ${new Date().toLocaleString('es-MX', { dateStyle: 'medium', timeStyle: 'short' })}`; }
+function sello() { $('actualizado').textContent = `Actualizado ${fechaHora(new Date())}`; }
 
 // Lo unico que no cambia con el periodo ni la tienda y hace falta antes de nada: el dia de la primera venta («Desde la apertura») y las tiendas. Una vez.
 let basePromesa = null;
@@ -1082,7 +1118,7 @@ function pintarPeriodo() {
   $('p-etq').textContent = r.dias === 1 ? 'Día' : 'Del';
   $('p-texto').textContent = textoPeriodo(r.desde, r.hasta);
   // Si el periodo abre el dia de la primera venta, antes no hubo nada que comparar.
-  textoAnteriorBase = r.desde === primeraVenta ? 'Sin periodo anterior para comparar' : `Comparado con ${antes}`;
+  textoAnteriorBase = r.desde === primeraVenta ? TEXTO_COMPARACION.sinDatos : `Comparado con ${antes}`;
   textoAnterior();
 }
 
@@ -1091,7 +1127,11 @@ function pintarPeriodo() {
 // Debajo de la barra: contra que se compara lo que se ve. En Resumen y Ventas manda «Comparar con»; en las demas vistas, el periodo anterior.
 function textoAnterior() {
   const datos = vistaActual === 'clientes' ? datosClientes : vistaActual === 'control' ? datosControl : vistaActual === 'equipo' ? datosEquipo : vistaActual === 'finanzas' ? datosFinanzas : datosResumen;   // cada vista con comparacion trae la suya (mismo periodo y mismas ventanas)
-  $('p-anterior').textContent = VISTAS_CON_COMPARACION.includes(vistaActual) && datos ? textoComparacion(datos) : textoAnteriorBase;
+  // Lo que el papel debe decir y la pantalla ya muestra en los filtros: la tienda y como se agrupa (el periodo y la comparacion ya van arriba).
+  const tienda = tiendasLista.find((t) => t.clave === tiendaActual)?.nombre ?? 'Todas las tiendas';
+  $('p-impresion').textContent = `Tienda: ${tienda}${VISTAS_CON_COMPARACION.includes(vistaActual) && datos?.grano ? ` · Agrupado por ${{ dia: 'día', semana: 'semana', mes: 'mes' }[datos.grano]}` : ''}`;
+  // Tickets no compara con nada: no dice «Comparado con...».
+  $('p-anterior').textContent = vistaActual === 'tickets' ? '' : VISTAS_CON_COMPARACION.includes(vistaActual) && datos ? textoComparacion(datos) : textoAnteriorBase;
 }
 
 function consultaResumen() {
@@ -1176,7 +1216,7 @@ function pintarResumenEjecutivo() {
   const parciales = d.cubetas.filter((c) => c.parcial).length;
   $('tend-nota').textContent = $('v-tend-nota').textContent = [
     d.grano === 'dia' ? 'Toca una columna para ir a los tickets de ese día.' : '',
-    parciales ? `La primera o la última ${unidadGrano(d.grano, 1)} está cortada por el periodo: vende menos de lo normal.` : '',
+    parciales ? `${cortadaPorElPeriodo(d.grano)}: vende menos de lo normal.` : '',
     d.comparacion ? `La línea punteada es la comparación, ${COMPARACION_POR_GRANO[d.grano]}.` : '',
   ].filter(Boolean).join(' ');
   pintarTendencia();
@@ -1277,7 +1317,7 @@ function pintarVentas(r, total) {
     }));
   $('cat-nota').textContent = cats.length === 0 ? '' : hayAntes
     ? `El cambio compara con el periodo anterior de igual largo (${textoAntes}); «nueva» es una categoría que antes no vendió.`
-    : 'No hubo ventas en el periodo anterior: no hay con qué comparar.';
+    : `${TEXTO_COMPARACION.sinDatos}: no hay con qué comparar.`;
   // En la tabla tambien entran las categorias que vendieron antes y ahora no (−100%): en las barras no hay nada que dibujar.
   const soloAntes = r.por_categoria_anterior.filter((f) => !r.por_categoria.some((x) => x.categoria === f.categoria));
   $('tabla-cat').innerHTML = tabla(['Categoría', 'Vendido', 'Piezas', '% del total', 'Periodo anterior', 'Cambio'],
@@ -1476,15 +1516,15 @@ function pintarEquipo(e) {
   textoAnterior();
   $('bono-pct').value = e.config.pb / 100;
   $('bono-meta').value = e.config.meta / 100;
-  $('bono-semanas').innerHTML = `<table class="tabla"><thead><tr><th>Semana</th><th class="num">Ventas netas</th><th class="num">Meta</th><th>Meta alcanzada</th>
+  $('bono-semanas').innerHTML = `<table class="tabla fija"><thead><tr><th>Semana</th><th class="num">Ventas netas</th><th class="num">Meta</th><th>Meta alcanzada</th>
       <th class="num">Bolsa</th><th>Reparto</th><th></th></tr></thead><tbody>${e.semanas.map((s) => {
     const hayParte = s.partes.some((p) => p.importe > 0);
     const reparto = !s.alcanzada ? 'Sin bono: no llegó a la meta'
-      : s.partes.length ? s.partes.map((p) => `${escapar(p.nombre)} (${n(p.dias)} d): ${pesos(p.importe)}${p.registrado ? ' ✓' : ''}`).join('<br>')
+      : s.partes.length ? s.partes.map((p) => `<span class="bono-parte">${escapar(p.nombre)} (${n(p.dias)} d): ${pesos(p.importe)}${p.registrado ? ' ✓' : ''}</span>`).join('')
       : 'Nadie con cuenta ligada trabajó esa semana';
     const accion = s.alcanzada && hayParte
       ? (s.partes.some((p) => p.importe > 0 && !p.registrado)
-        ? `<button type="button" data-semana="${s.lunes}">Registrar bono de la semana ${diaCorto(s.lunes)}</button>` : 'Registrado') : '';
+        ? `<button type="button" data-semana="${s.lunes}" aria-label="Registrar bono de la semana del ${diaCorto(s.lunes)}">Registrar</button>` : 'Registrado') : '';
     return `<tr><td>${diaCorto(s.lunes)} – ${diaCorto(s.domingo)}</td><td class="num">${pesos(s.ventas)}</td><td class="num">${pesos(s.meta)}</td>
       <td>${s.alcanzada ? 'Sí' : 'No'}</td><td class="num">${pesos(s.bolsa)}</td><td>${reparto}</td><td>${accion}</td></tr>`;
   }).join('')}</tbody></table>`;
@@ -1957,7 +1997,7 @@ async function cargarTickets(mas = false) {
       $('tickets-rango').innerHTML = '';
     }
     if (!mas && r.tickets.length === 0) $('tickets-rango').innerHTML = '<div class="vacio">Sin tickets con esos filtros.</div>';
-    $('tickets-rango').insertAdjacentHTML('beforeend', r.tickets.map((t) => renglonTicket(t, { completo: true })).join(''));
+    $('tickets-rango').insertAdjacentHTML('beforeend', r.tickets.map((t) => renglonTicket(t, { completo: true, fechas: FECHAS_TICKET })).join(''));
     $('tickets-mas').hidden = !r.hay_mas;
   } catch {
     $('tickets-rango').innerHTML = '<div class="vacio">No se pudieron cargar los tickets.</div>';
@@ -1982,7 +2022,7 @@ $('tickets-rango').addEventListener('click', async (e) => {
   const r = await fetch(`/api/ventas/${fila.dataset.ticket}`);
   const cuerpo = await r.json().catch(() => ({}));
   $('ticket-contenido').innerHTML = r.ok
-    ? pintarDetalle(cuerpo)
+    ? pintarDetalle(cuerpo, { fechas: FECHAS_TICKET })
     : `<p class="nota" style="color:var(--mal)">${escapar(cuerpo.error ?? 'No se pudo abrir el ticket.')}</p>`;
 });
 $('ticket-cerrar').addEventListener('click', () => $('dialogo-ticket').close());
@@ -1996,7 +2036,51 @@ document.addEventListener('click', (e) => {
   if (!enTabla) { dibujarVentas(); dibujarDolarones(); dibujarInventario(); dibujarFinanzas(); }
 });
 
+
+/* ---------- CSV por panel (#802 B10): un enlace «CSV» junto a «Ver tabla» en cada panel que tiene tabla ---------- */
+// Se agrega a todo panel con «Ver tabla», aunque las vistas lo dibujen despues; descarga la misma tabla que se ve (graficas.js `csvDeTablas`).
+function agregarCsv() {
+  for (const alterna of document.querySelectorAll('.panel header .alterna')) {
+    let boton = alterna.nextElementSibling?.classList.contains('csv-panel') ? alterna.nextElementSibling : null;
+    if (!boton) {
+      boton = document.createElement('button');
+      boton.type = 'button';
+      boton.className = 'csv-panel';
+      boton.textContent = 'CSV';
+      boton.title = 'Descargar esta tabla como CSV (se abre en Excel)';
+      alterna.after(boton);
+    }
+    boton.hidden = alterna.hidden || !alterna.closest('.panel').querySelector('.vista-tabla table');
+  }
+}
+let csvPendiente = false;
+new MutationObserver(() => { if (csvPendiente) return; csvPendiente = true; queueMicrotask(() => { csvPendiente = false; agregarCsv(); }); })
+  .observe($('principal'), { childList: true, subtree: true });
+agregarCsv();
+const textoCelda = (c) => c.textContent.replace(/\s+/g, ' ').trim();
+document.addEventListener('click', (e) => {
+  const boton = e.target.closest?.('.csv-panel');
+  if (!boton) return;
+  const panel = boton.closest('.panel');
+  const tablas = [...panel.querySelectorAll('.vista-tabla table')].map((t) => ({
+    encabezados: [...(t.tHead?.rows[0]?.cells ?? [])].map(textoCelda),
+    filas: [...t.tBodies].flatMap((b) => [...b.rows]).map((f) => [...f.cells].map(textoCelda)),
+  }));
+  if (!tablas.length) return;
+  const titulo = panel.querySelector('h4').cloneNode(true);
+  titulo.querySelector('.subtitulo')?.remove();
+  const { desde, hasta } = rangoActual();
+  const archivo = nombreCsv(vistaActual, titulo.textContent, desde, hasta, tiendaActual);
+  const url = URL.createObjectURL(new Blob([csvDeTablas(tablas)], { type: 'text/csv;charset=utf-8' }));
+  const a = Object.assign(document.createElement('a'), { href: url, download: archivo });
+  document.body.append(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 10_000);
+});
+
 activarGlobos(document.body);
+activarTeclado($('principal'));   // cada grafica es una sola parada del tabulador; dentro, las flechas
 leerUrl();
 pintarRango();
 pintarPeriodo();

@@ -8,10 +8,29 @@ import { sumarDias } from '../public/graficas.js';
 import {
   mesAtras, ventanaComparacion, cubetas, granosPermitidos, granoEfectivo, armarCubetas, promedioMovil, calcularMeta, ritmoPorCubeta,
   cambioKpi, hallazgos, hallazgosHtml, tarjetasKpi, tarjetasHtml, textoComparacion, UMBRALES, edadPromedio, datosTendencia, metaHtml, canalesHtml,
-  categoriasHtml, leyendaTendencia, tablaTendencia, unidadGrano, rangoTexto,
+  categoriasHtml, leyendaTendencia, tablaTendencia, unidadGrano, rangoTexto, deltaHtml, TEXTO_COMPARACION, cortadaPorElPeriodo,
 } from '../public/reportes-resumen.js';
 
 /* ---------- puras ---------- */
+
+test('B8: la nota de la cubeta cortada concuerda en genero con su unidad', () => {
+  assert.equal(cortadaPorElPeriodo('semana'), 'La primera o la última semana está cortada por el periodo');
+  assert.equal(cortadaPorElPeriodo('mes'), 'El primer o el último mes está cortado por el periodo');
+});
+
+test('B1: el renglon de cambio de una tarjeta dice lo mismo en todas las vistas, estado por estado', () => {
+  const cambio = cambioKpi(120, 100);
+  const base = { comparando: true, hayComp: true, vs: 'vs anterior', cambio: null };
+  assert.match(deltaHtml({ ...base, cambio }), /▲ \+20\.0%<\/span>vs anterior/);
+  assert.equal(deltaHtml({ ...base, comparando: false }), '<div class="delta">Sin comparar</div>');
+  assert.equal(deltaHtml({ ...base, hayComp: false }), '<div class="delta">Sin datos en el periodo comparado</div>');
+  assert.equal(deltaHtml(base), '<div class="delta">Sin base de comparación</div>');
+  assert.equal(deltaHtml({ ...base, foto: true }), `<div class="delta">${TEXTO_COMPARACION.foto}</div>`);
+  assert.equal(deltaHtml({ ...base, foto: true, cambio }), `<div class="delta">${TEXTO_COMPARACION.foto}</div>`, 'una foto no compara aunque traiga cambio');
+  assert.equal(deltaHtml({ ...base, sinDelta: true }), '');
+  assert.equal(deltaHtml({ ...base, delta: 'Cargando…' }), '<div class="delta">Cargando…</div>');
+  assert.doesNotMatch(Object.values(TEXTO_COMPARACION).join(' '), /ventas/i, 'el vocabulario no habla de ventas: vale para cualquier tarjeta');
+});
 
 test('A3: el texto de la comparacion lleva el año cuando cruza de año o es de otro año, y no cuando es del mismo', () => {
   const d = (periodo: { desde: string; hasta: string; dias: number }, comparacion: { desde: string; hasta: string; dias: number }) => ({ comparar: 'anterior', periodo, comparacion });
@@ -263,7 +282,7 @@ test('las tarjetas: 8, con el color por significado y el valor en piso sin cambi
   const html = tarjetasHtml(k);
   assert.equal((html.match(/class="tarjeta kpi"/g) ?? []).length, 8);
   assert.match(html, /▲ \+11\.1%/);
-  assert.match(html, /Sin historial de inventario/);
+  assert.match(html, /Foto de hoy: sin historial para comparar/);
   assert.match(html, /Meta de noviembre: 37\.5 %/);
   // Sin comparar o sin base: lo dice.
   d.comparacion = null; d.anterior = null; d.comparar = 'ninguna';

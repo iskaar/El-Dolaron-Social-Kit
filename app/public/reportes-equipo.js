@@ -4,12 +4,12 @@
 // dias de la tienda (UTC-6).
 //
 // A QUIEN SE ATRIBUYE UNA VENTA. A la persona que la caja marca como «quien atendio» (`ventas.vendedora`, una cuenta de cajero o
-// capturista; migracion 069). Esa columna existe desde noviembre: antes, y siempre que la caja no la manda, la venta queda
+// capturista; migracion 069). Esa columna es nueva: antes, y siempre que la caja no la manda, la venta queda
 // «Sin atribuir». No es `ventas.cajero` (quien cobro con su PIN, que usa Control). La pantalla dice desde que dia hay datos, calculado
 // de la primera venta con vendedora, y cuanto de las ventas netas esta atribuido. Las cancelaciones de cada persona son los tickets
 // completos que ELLA atendio y luego se cancelaron (en el periodo de la venta, como en Control); no las que ella hizo.
 import { escapar, pesos, pesosEje, tabla, columnas, leyendaSeries, diaCorto } from './graficas.js';
-import { armarCubetas, cambioKpi, tarjetasHtml, etiquetaCubeta, tituloCubeta } from './reportes-resumen.js';
+import { armarCubetas, cambioKpi, vsCorto, tarjetasHtml, etiquetaCubeta, tituloCubeta } from './reportes-resumen.js';
 import { MAX_COLUMNAS } from './reportes-ventas.js';
 
 const n0 = (n) => Number(n ?? 0).toLocaleString('es-MX');
@@ -132,7 +132,7 @@ const sumarUnDia = (dia, n) => new Date(Date.parse(`${dia}T12:00:00Z`) + n * 86_
 export function tarjetasEquipo(d) {
   const t = d.totales, a = d.anterior, sc = d.cubetas;
   const hayComp = !!(a && a.tickets_total > 0);
-  const comunes = { vs: d.comparar === 'mes' ? 'vs mes pasado' : 'vs anterior', hayComp, comparando: !!d.comparacion };
+  const comunes = { vs: vsCorto(d), hayComp, comparando: !!d.comparacion };
   const cambio = (actual, previo, opciones = {}) => (hayComp ? cambioKpi(actual, previo, opciones) : null);
   const serie = (f) => { const s = sc.map(f); return s.some((v) => v) ? s : []; };   // una serie sin un solo dato no dibuja una linea plana
   const ticket = (x) => (x.tickets ? Math.round(x.ventas / x.tickets) : null);
@@ -196,7 +196,9 @@ const metricas = (p) => ({
   capturadas: p.capturadas, vendidas_14: p.vendidas_14, dias_trabajados: p.dias_trabajados,
 });
 
-/** Las columnas de la tabla: [clave, encabezado, como se escribe]. */
+/** Las columnas de la tabla: [clave, encabezado, como se escribe]. En celular solo se ven las de PRIORIDAD (las demas, con «Ver todas las columnas»). */
+const BAJA_PRIORIDAD = new Set(['piezas_ticket', 'dias_con_venta', 'por_dia', 'socios_compraron', 'apartados', 'vendidas_14']);
+const baja = (clave) => (BAJA_PRIORIDAD.has(clave) ? ' baja' : '');
 export const COLUMNAS = [
   ['ventas', 'Ventas netas', (m) => pesos(m.ventas)], ['tickets', 'Tickets', (m) => n0(m.tickets)],
   ['ticket', 'Ticket promedio', (m) => (m.ticket == null ? '—' : pesos(Math.round(m.ticket)))], ['piezas_ticket', 'Piezas por ticket', (m) => (m.piezas_ticket == null ? '—' : n2(m.piezas_ticket))],
@@ -225,9 +227,9 @@ export function tablaPersonas(d, orden = { clave: 'ventas', descendente: true })
   const hayAsist = !!d.asistencias.desde;
   const t = d.totales, sa = d.sin_atribuir;
   const celda = (clave, texto, p) => {
-    if (clave === 'capturadas') return `<td class="num">${p.capturadas ? `<a href="#capturas" title="Ver el tiempo y la productividad de las capturas">${escapar(n0(p.capturadas))}</a>` : '0'}</td>`;
-    if (clave === 'dias_trabajados') return `<td class="num">${escapar(hayAsist ? n0(p.dias_trabajados) : '—')}</td>`;
-    return `<td class="num">${escapar(texto)}</td>`;
+    if (clave === 'capturadas') return `<td class="num${baja(clave)}">${p.capturadas ? `<a href="#capturas" title="Ver el tiempo y la productividad de las capturas">${escapar(n0(p.capturadas))}</a>` : '0'}</td>`;
+    if (clave === 'dias_trabajados') return `<td class="num${baja(clave)}">${escapar(hayAsist ? n0(p.dias_trabajados) : '—')}</td>`;
+    return `<td class="num${baja(clave)}">${escapar(texto)}</td>`;
   };
   const filaDe = (p, clase = '') => {
     const m = metricas(p);
@@ -238,7 +240,7 @@ export function tablaPersonas(d, orden = { clave: 'ventas', descendente: true })
   const sinFila = sa.tickets || sa.socios || sa.cancelaciones || sa.capturadas || sa.apartados;
   const filaSin = sinFila ? filaDe(sa, ' class="sec"') : '';
   const pt = d.portal ?? { socios: 0, socios_compraron: 0 };
-  const filaPortal = pt.socios ? `<tr class="sec"><td>Por el portal (sin persona)</td>${COLUMNAS.map(([clave]) => `<td class="num">${clave === 'socios' ? n0(pt.socios) : clave === 'socios_compraron' ? n0(pt.socios_compraron) : '—'}</td>`).join('')}</tr>` : '';
+  const filaPortal = pt.socios ? `<tr class="sec"><td>Por el portal (sin persona)</td>${COLUMNAS.map(([clave]) => `<td class="num${baja(clave)}">${clave === 'socios' ? n0(pt.socios) : clave === 'socios_compraron' ? n0(pt.socios_compraron) : '—'}</td>`).join('')}</tr>` : '';
   const fila = (clave) => {
     if (clave === 'ventas') return pesos(t.ventas_total);
     if (clave === 'tickets') return n0(t.tickets_total);
@@ -252,13 +254,13 @@ export function tablaPersonas(d, orden = { clave: 'ventas', descendente: true })
     if (clave === 'dias_trabajados') return hayAsist ? n0(t.dias_trab) : '—';
     return '—';
   };
-  const total = `<tr><td><b>Total</b></td>${COLUMNAS.map(([clave]) => `<td class="num"><b>${escapar(fila(clave))}</b></td>`).join('')}</tr>`;
+  const total = `<tr><td><b>Total</b></td>${COLUMNAS.map(([clave]) => `<td class="num${baja(clave)}"><b>${escapar(fila(clave))}</b></td>`).join('')}</tr>`;
   const cabeza = COLUMNAS.map(([clave, texto]) => {
     const activa = orden.clave === clave;
-    return `<th class="num"${activa ? ` aria-sort="${orden.descendente ? 'descending' : 'ascending'}"` : ''}><button type="button" class="ordena" data-orden="${clave}">${escapar(texto)}${activa ? (orden.descendente ? ' ▼' : ' ▲') : ''}</button></th>`;
+    return `<th class="num${baja(clave)}"${activa ? ` aria-sort="${orden.descendente ? 'descending' : 'ascending'}"` : ''}><button type="button" class="ordena" data-orden="${clave}">${escapar(texto)}${activa ? (orden.descendente ? ' ▼' : ' ▲') : ''}</button></th>`;
   }).join('');
   const cuerpo = d.personas.some((p) => p.correo) || filaSin || filaPortal ? `${gente.map((p) => filaDe(p)).join('')}${filaSin}${filaPortal}${total}` : `<tr><td colspan="${COLUMNAS.length + 1}" class="vacio">Sin personas con actividad en este periodo.</td></tr>`;
-  return `<table class="tabla"><thead><tr><th><button type="button" class="ordena" data-orden="nombre">Persona${orden.clave === 'nombre' ? (orden.descendente ? ' ▲' : ' ▼') : ''}</button></th>${cabeza}</tr></thead><tbody>${cuerpo}</tbody></table>`;
+  return `<table class="tabla fija"><thead><tr><th><button type="button" class="ordena" data-orden="nombre">Persona${orden.clave === 'nombre' ? (orden.descendente ? ' ▲' : ' ▼') : ''}</button></th>${cabeza}</tr></thead><tbody>${cuerpo}</tbody></table>`;
 }
 
 /* ---------- la vista ---------- */
@@ -277,7 +279,7 @@ export const avisoTienda = 'Con una tienda elegida, las ventas, los tickets, los
 /** El texto de la atribucion: desde que dia hay datos y cuanto de las ventas esta atribuido (siempre dicho, nunca solo en el color). */
 export function notaAtribucion(d) {
   const at = d.atribucion, t = d.totales;
-  if (at.desde === null) return 'Ninguna venta tiene todavía a quien la atendió (la caja la manda desde noviembre): todo está en «Sin atribuir» y las cifras por persona de ventas quedan en cero.';
+  if (at.desde === null) return 'Ninguna venta tiene todavía a quien la atendió (la caja aún no la manda): todo está en «Sin atribuir» y las cifras por persona de ventas quedan en cero.';
   const antes = at.dentro_del_periodo ? ` El periodo empieza antes: lo anterior al ${diaCorto(at.desde)} no tiene a quién atribuirse y baja el porcentaje del periodo (${pct(t.ventas, t.ventas_total)}).` : '';
   return `Una venta se atribuye a quien la caja marcó como «quien atendió» (cuenta de cajero o capturista); hay datos desde el ${diaCorto(at.desde)}. Desde ese día, ${pct(at.desde_ventas, at.desde_total)} de las ventas netas tiene persona.${antes}`;
 }
@@ -294,6 +296,7 @@ export function htmlVista(d, orden) {
       `${hayVentas ? leyendaSeries(series) : ''}<div data-grafica="ventas">${hayVentas ? '' : vacio('Sin ventas en este periodo.')}</div>`, hayVentas ? tablaSerie(d) : '',
       `${escapar(notaAtribucion(d))}`)}
     <article class="panel" id="eq-personas"><header><h4>Por persona <span class="subtitulo">periodo elegido · toca un encabezado para ordenar</span></h4></header>
+      <button type="button" class="cols-todas" aria-pressed="false">Ver todas las columnas</button>
       <div id="eq-tabla" style="overflow-x:auto">${tablaPersonas(d, orden)}</div>
       <p class="nota"><b>Cómo comparar.</b> Los totales de quien trabajó más días siempre serán mayores: para comparar usa ticket promedio, piezas por ticket o ventas por día con venta.
         «pocos días» marca a quien tiene menos de ${POCOS_DIAS} días con venta en el periodo: su promedio todavía no dice mucho.
@@ -327,12 +330,21 @@ export function montarEquipo(raiz, d) {
     return o;
   });
   raiz.onclick = (e) => {
+    const mas = e.target.closest?.('.cols-todas');   // en celular: las columnas de menor prioridad se ocultan hasta que se pidan
+    if (mas) {
+      const todas = mas.getAttribute('aria-pressed') !== 'true';
+      mas.setAttribute('aria-pressed', String(todas));
+      mas.textContent = todas ? 'Ver menos columnas' : 'Ver todas las columnas';
+      raiz.querySelector('#eq-tabla table')?.classList.toggle('todas', todas);
+      return;
+    }
     const clave = e.target.closest?.('.ordena')?.dataset.orden;
     if (!clave) return;
     // Un toque ordena de mayor a menor; otro toque a la misma columna, al reves. El nombre arranca de la A a la Z.
     orden.descendente = orden.clave === clave ? !orden.descendente : clave !== 'nombre';
     orden.clave = clave;
     raiz.querySelector('#eq-tabla').innerHTML = tablaPersonas(d, orden);
+    raiz.querySelector('#eq-tabla table')?.classList.toggle('todas', raiz.querySelector('.cols-todas')?.getAttribute('aria-pressed') === 'true');
     raiz.querySelector(`#eq-tabla [data-orden="${clave}"]`)?.focus();
   };
 }
