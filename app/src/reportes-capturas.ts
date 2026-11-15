@@ -162,12 +162,13 @@ export async function reporteCapturas(url: URL, env: Env, ahora = Date.now()): P
     ).bind(desde, hasta).all<{ id: string; ia: string | null; ia_listo: string | null; corregida: number }>(),
     // La primera venta de cada pieza del periodo, en UNA consulta que arranca por las ventas desde el inicio del periodo
     // (indice ventas_creado, luego venta_lineas_venta y la llave de productos) y por Mercado Libre. Sin subconsulta por pieza.
+    // `cross join` fija ese orden: sin el, SQLite arranca por las piezas del periodo y recorre las ventas una vez por pieza.
     env.DB.prepare(
       `select x.producto_id as id, min(x.en) as primera from (
-         select l.producto_id, v.creado_en as en from ventas v join venta_lineas l on l.venta_id = v.id join productos p on p.id = l.producto_id
+         select l.producto_id, v.creado_en as en from ventas v cross join venta_lineas l on l.venta_id = v.id cross join productos p on p.id = l.producto_id
          where v.creado_en >= ? and v.cancelada = 0 and l.cantidad > l.cancelada_cantidad and ${propias}
          union all
-         select m.producto_id, m.recibido_en from ml_ventas m join productos p on p.id = m.producto_id
+         select m.producto_id, m.recibido_en from ml_ventas m cross join productos p on p.id = m.producto_id
          where m.recibido_en >= ? and m.estado = 'descontada' and m.descontado > 0 and ${propias}) x
        group by x.producto_id`,
     ).bind(desde, desde, hasta, desde, desde, hasta).all<{ id: string; primera: string }>(),
