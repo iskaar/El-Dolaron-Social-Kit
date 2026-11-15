@@ -1,0 +1,25 @@
+/* Vista «Inventario» de /reportes (#802): tarjetas, cohortes de venta y rebajas. Los tokens de color son los de la pagina. */
+#inv-aviso { margin: -14px 0 0; max-width: 90ch; }
+
+/* Tarjetas: la misma rejilla de Resumen, de tres por fila porque son seis (dos filas parejas); dos por fila en celular. */
+#inv-kpis .tarjeta { flex: 1 1 30%; min-width: 190px; display: flex; flex-direction: column; gap: 3px; }
+@media (max-width: 860px) { #inv-kpis .tarjeta { flex-basis: 42%; min-width: 0; } #inv-kpis .tarjeta .valor { font-size: 19px; } }
+.tarjetas.pequenas { margin: 0 0 12px; }
+.tarjetas.pequenas .tarjeta { flex: 1 1 120px; min-width: 110px; }
+
+/* Cohortes: una celda por semana de captura y plazo, en la escala secuencial del mapa de horas (1 = mas claro en claro, mas oscuro en oscuro). */
+.cohorte-caja { overflow-x: auto; }
+.tabla.cohorte { min-width: 520px; }
+.tabla.cohorte th[scope="row"] { text-align: left; font-weight: 600; white-space: nowrap; }
+.tabla.cohorte td.num { font-variant-numeric: tabular-nums; }
+.tabla.cohorte td.p1, .tabla.cohorte td.p2, .tabla.cohorte td.p3 { color: var(--tinta); font-weight: 600; }
+.tabla.cohorte td.p4, .tabla.cohorte td.p5, .tabla.cohorte td.p6 { color: var(--calor-texto); font-weight: 700; }
+.tabla.cohorte td.p1 { background: var(--calor-1); } .tabla.cohorte td.p2 { background: var(--calor-2); } .tabla.cohorte td.p3 { background: var(--calor-3); }
+.tabla.cohorte td.p4 { background: var(--calor-4); } .tabla.cohorte td.p5 { background: var(--calor-5); } .tabla.cohorte td.p6 { background: var(--calor-6); }
+.tabla.cohorte td.cero { color: var(--tinta-2); border: 1px solid var(--rejilla); }
+.tabla.cohorte td.sin { color: var(--tinta-2); }
+
+.sub-h { font-size: 13px; margin: 16px 0 6px; font-weight: 700; }
+.lectura-rebajas { margin: 0 0 8px; font-size: 13.5px; }
+.nota.aviso-pie { color: var(--aviso); font-weight: 600; margin: 4px 0 8px; }
+#v-inventario .sec { color: var(--tinta-2); }
