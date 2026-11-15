@@ -955,11 +955,12 @@ function guardarUrl() {
 function leerUrl() {
   const q = new URLSearchParams(location.search);
   const desde = q.get('desde') ?? '', hasta = q.get('hasta') ?? '';
+  let corregido = false;
   // Un enlace con fechas que no se pueden atender (mal escritas, futuras, de mas de 366 dias) cae en el periodo por omision y lo avisa (A9).
   if (q.has('desde') || q.has('hasta')) {
     const problema = DIA.test(desde) && DIA.test(hasta) ? validarPersonalizado(desde, hasta) : 'Las fechas del enlace no son válidas.';
     if (problema === null) periodo = { clave: 'custom', desde, hasta };
-    else avisoPeriodo(`${problema || 'Las fechas del enlace no son válidas.'} Se muestra el periodo por omisión.`);
+    else { avisoPeriodo(`${problema || 'Las fechas del enlace no son válidas.'} Se muestra el periodo por omisión.`); corregido = true; }
   }
   if (periodo.clave === 'custom') { /* ya valido arriba */ }
   else if (PERIODOS.some(([clave]) => clave === q.get('periodo') && clave !== 'custom')) periodo = { clave: q.get('periodo'), desde: '', hasta: '' };
@@ -968,6 +969,7 @@ function leerUrl() {
   if (GRANOS.includes(q.get('grano'))) granoPedido = q.get('grano');
   if ([5, 10, 15, 20].includes(Number(q.get('pausa')))) pausa = Number(q.get('pausa'));
   $('f-pausa').value = pausa;
+  if (corregido) guardarUrl();   // la barra de direcciones deja de traer las fechas que no sirven
 }
 
 // Cambia el periodo o la tienda: se pide lo de la vista que se ve (y solo lo que le falta); las demas, al visitarlas.
