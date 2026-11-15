@@ -5,6 +5,7 @@ import assert from 'node:assert/strict';
 import { tienda, codigoPrueba, PRODUCTO } from './prueba-d1.ts';
 import { verificarCuadre, rellenarDias } from '../public/graficas.js';
 import { rangoDe, rangoDias, hoyTienda, RangoInvalido } from './reportes.ts';
+import { lineasNetas } from './netas.ts';
 import { CLAVES_DE_PARTE, PARTES_REPORTE } from '../public/reportes-partes.js';
 
 type Pedir = ReturnType<typeof tienda>['pedir'];
@@ -420,4 +421,28 @@ test('partes=: lo desconocido es 400, `partes=` vacio trae solo la cabecera y ca
   assert.equal(await cuenta('&partes=por_dia'), base + 2);
   assert.equal(await cuenta(''), base + 21, 'sin partes: las 21 de siempre');
   t.db.close();
+});
+
+test('A7: los tickets «con Dolarones» se cuentan por ticket: el redondeo por pieza de un ticket con anticipo no cuenta un ticket que no uso Dolarones', async () => {
+  const { db, pedir } = tienda();
+  const ahora = new Date().toISOString();
+  const ticket = (anticipo: number, dolarones: number, piezas: number, precio: number) => {
+    const id = crypto.randomUUID();
+    db.prepare(`insert into ventas (id, total, forma_pago, efectivo, cambio, creado_en, registrado_en, caja, cajero, anticipo, dolarones)
+                values (?, ?, 'efectivo', ?, 0, ?, ?, 'Caja 1', 'x@x', ?, ?)`).run(id, piezas * precio - 0, piezas * precio - dolarones, ahora, ahora, anticipo, dolarones);
+    for (let i = 0; i < piezas; i++) db.prepare(`insert into venta_lineas (venta_id, producto_id, codigo, nombre, precio, cantidad, propietario, cancelada_cantidad) values (?, ?, 'X', 'x', ?, 1, 'dolaron', 0)`).run(id, PRODUCTO, precio);
+    return id;
+  };
+  ticket(10000, 0, 3, 11900);   // 3 piezas iguales y $100 de anticipo: el cobrado y el anticipo se reparten con +1 y -1 centavo por pieza, y el ticket no usa Dolarones
+  const { desde, hasta } = rangoDias(1);
+  // El defecto, comprobado: por pieza SI hay diferencias distintas de cero aunque el ticket sume cero.
+  const porPieza = db.prepare(`${lineasNetas('v.creado_en >= ? and v.creado_en < ?')} select count(distinct venta) as n, sum(neta - cobrado - anticipo_linea) as suma from cobros where neta - cobrado - anticipo_linea <> 0`).get(desde, hasta) as { n: number; suma: number };
+  assert.deepEqual({ ...porPieza }, { n: 1, suma: 0 });
+  const dolarones = async (q = '') => (await pedir(`/api/reportes?dias=1${q}&partes=forma_pago`)).cuerpo.por_forma_pago.find((f: { forma_pago: string }) => f.forma_pago === 'dolarones');
+  assert.deepEqual(await dolarones(), { forma_pago: 'dolarones', tickets: 0, total: 0 });
+  ticket(0, 1000, 2, 25000);    // un ticket que si pago $10 con Dolarones
+  assert.deepEqual(await dolarones(), { forma_pago: 'dolarones', tickets: 1, total: 1000 });
+  // Lo mismo por dia (Ventas y Finanzas): la suma de los dias es el total y los tickets, los de arriba.
+  const porDia = (await pedir(`/api/reportes/ventas?dias=1`)).cuerpo;
+  assert.equal(porDia.pago.find((f: { clave: string }) => f.clave === 'dolarones').total, 1000);
 });

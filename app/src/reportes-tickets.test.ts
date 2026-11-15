@@ -2,6 +2,7 @@
 // Tickets del rango en /reportes (Issue #164): filtros, totales y paginacion contra SQLite real.
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { tienda, codigoPrueba, DUENO, PRODUCTO } from './prueba-d1.ts';
 
 type Pedir = ReturnType<typeof tienda>['pedir'];
@@ -151,4 +152,29 @@ test('solo el dueno exporta los tickets', async () => {
     assert.equal(r.status, 403, correo);
     assert.ok(!r.texto.includes('fecha,ticket'), 'no filtra ni el encabezado');
   }
+});
+
+test('A5: los tickets vendidos de Tickets (sin los cancelados) son los mismos que cuentan Resumen y Equipo', async () => {
+  const { db, pedir } = tienda();
+  db.prepare('update productos set stock = 100 where id = ?').run(PRODUCTO);
+  await vender(pedir, 'Caja 1');
+  await vender(pedir, 'Caja 1', { forma_pago: 'tarjeta', efectivo: 0 });
+  const doble = await vender(pedir, 'Caja 1', { lineas: [{ producto_id: PRODUCTO, cantidad: 2 }], efectivo: 50000 });
+  const linea = (await pedir(`/api/ventas/${doble.id}`)).cuerpo.lineas[0].id;
+  assert.equal((await pedir(`/api/ventas/${doble.id}/lineas/${linea}/cancelar`, { id: crypto.randomUUID(), cantidad: 1, motivo: 'talla', caja: 'Caja 1' })).status, 201);
+  const cancelada = await vender(pedir, 'Caja 2');
+  assert.equal((await pedir(`/api/ventas/${cancelada.id}/cancelar`, { motivo: 'prueba', caja: 'Caja 2' })).status, 200);
+  const T = (await tickets(pedir)).cuerpo.resumen;
+  assert.equal(T.tickets, 4);                       // el total incluye el cancelado: la pantalla lo rotula y muestra «vendidos» aparte
+  assert.equal(T.cancelados, 1);
+  const R = (await pedir('/api/reportes/resumen?dias=7')).cuerpo, E = (await pedir('/api/reportes/equipo?dias=7')).cuerpo;
+  assert.equal(T.tickets - T.cancelados, R.totales.tickets);
+  assert.equal(T.tickets - T.cancelados, E.totales.tickets_total);
+  assert.match(readFileSync('public/reportes.html', 'utf8'), /tarjeta\('Tickets vendidos', \(x\.tickets - x\.cancelados\)/);
+});
+
+test('A4: «Ver más tickets» oculto de verdad: el display de su clase no le gana al atributo hidden', () => {
+  const html = readFileSync('public/reportes.html', 'utf8');
+  assert.match(html, /<button id="tickets-mas"[^>]*class="ver-mas" hidden>/);
+  assert.match(html, /\.ver-mas\[hidden\]\s*\{\s*display:\s*none;?\s*\}/);
 });

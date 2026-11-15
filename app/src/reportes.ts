@@ -74,6 +74,9 @@ export const rangoDe = (url: URL, ahora = Date.now()) => {
  * el dia del apartado, no el de la venta. Los Dolarones usados (neta - cobrado - anticipo) van en su propia fila. Con `porDia` cada
  * fila trae ademas el dia de la tienda en que entro el dinero (#802, vista Ventas): sumadas dan lo mismo que sin dia.
  * D1 admite 5 terminos por compound SELECT: son 4.
+ * Los tickets «con Dolarones» se cuentan por TICKET (suma de lo que cada pieza le debe a Dolarones <> 0), no por pieza: el reparto por pieza del cobrado y del
+ * anticipo redondea cada uno por su lado y en un ticket con anticipo y piezas iguales deja +1/-1 centavo en piezas sueltas aunque el ticket no use Dolarones
+ * (contaba un ticket de mas; el importe siempre cuadro). #802 A7.
  */
 export function consultaFormaPago(deTienda: string, deCajas: (columna: string) => string, porDia = false) {
   const dia = (columna: string) => (porDia ? `${diaTienda(columna)} as dia, ` : '');
@@ -88,9 +91,9 @@ export function consultaFormaPago(deTienda: string, deCajas: (columna: string) =
        select ${dia('creado_en')}forma_pago, 0, coalesce(sum(importe), 0) from pedido_movimientos
        where tipo = 'abono' and creado_en >= ? and creado_en < ?${deCajas('caja')} group by ${g}forma_pago
        union all
-       select ${dia('creado_en')}'dolarones', count(distinct case when neta - cobrado - anticipo_linea <> 0 then venta end),
-         coalesce(sum(neta - cobrado - anticipo_linea), 0)
-       from cobros where propietario = 'dolaron'${porDia ? ' group by dia' : ''}
+       select ${g}'dolarones', coalesce(sum(d <> 0), 0), coalesce(sum(d), 0) from (
+         select ${dia('creado_en')}sum(neta - cobrado - anticipo_linea) as d from cobros where propietario = 'dolaron' group by venta
+       )${porDia ? ' group by dia' : ''}
      ) group by ${g}forma_pago`;
 }
 

@@ -260,6 +260,7 @@
   .ver-mas, .fondo-caja button, .exportar a { padding: 8px 14px; font: inherit; font-size: 13px; border: 1px solid var(--borde); border-radius: 10px;
     background: var(--superficie); color: var(--tinta); cursor: pointer; text-decoration: none; font-weight: 600; display: inline-block; }
   .ver-mas { margin-top: 10px; }
+  .ver-mas[hidden] { display: none; }   /* sin esto el display de arriba le gana al atributo hidden y «Ver más» se veia siempre */
   .fondo-caja { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 14px; font-size: 14px; }
   .fondo-caja label { flex-basis: 100%; color: var(--tinta-2); font-size: 13px; }
   .fondo-caja input { width: 130px; padding: 8px 10px; font: inherit; font-size: 15px; border: 1px solid var(--borde); border-radius: 8px;
@@ -1947,7 +1948,7 @@ async function cargarTickets(mas = false) {
       opciones($('f-cajero'), 'Todos los cajeros', r.cajeros);
       const x = r.resumen;
       $('tickets-resumen').innerHTML = [
-        tarjeta('Tickets', x.tickets.toLocaleString('es-MX')), tarjeta('Vendido', pesos(x.vendido)),
+        tarjeta('Tickets vendidos', (x.tickets - x.cancelados).toLocaleString('es-MX'), '<div class="delta">sin contar los cancelados</div>'), tarjeta('Vendido', pesos(x.vendido)),
         tarjeta('Piezas', x.piezas.toLocaleString('es-MX')), tarjeta('Dolarones usados', dolarones(x.dolarones)),
         tarjeta('Cancelados', x.cancelados.toLocaleString('es-MX')),
       ].join('');
