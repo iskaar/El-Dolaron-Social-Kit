@@ -4,6 +4,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { tienda, codigoPrueba, PRODUCTO } from './prueba-d1.ts';
 import { verificarCuadre, rellenarDias } from '../public/graficas.js';
+import { rangoDe, rangoDias, hoyTienda, RangoInvalido } from './reportes.ts';
 
 type Pedir = ReturnType<typeof tienda>['pedir'];
 
@@ -241,4 +242,115 @@ test('reportes con dias basura no se caen: dias invalidos usan el valor por omis
   const r = await pedir('/api/reportes?dias=abc', undefined, 'GET');
   assert.equal(r.status, 200, JSON.stringify(r.cuerpo));
   assert.equal(r.cuerpo.dias, 30);
+});
+
+/* ---------- rango por fechas (#802) ---------- */
+
+const rango = (consulta: string, ahora = Date.parse('2026-11-15T20:00:00Z')) => rangoDe(new URL(`https://x/api/reportes?${consulta}`), ahora);
+const invalido = (consulta: string, ahora?: number) => assert.throws(() => rango(consulta, ahora), RangoInvalido, consulta);
+
+test('rangoDe: desde/hasta son dias de la tienda, ambos inclusive, con tope arriba y periodo anterior de igual largo', () => {
+  const r = rango('desde=2026-11-01&hasta=2026-11-10');
+  assert.equal(r.dias, 10);
+  assert.deepEqual([r.dia_desde, r.dia_hasta], ['2026-11-01', '2026-11-10']);
+  assert.equal(r.desde, '2026-11-01T06:00:00.000Z');             // 00:00 de la tienda
+  assert.equal(r.hasta, '2026-11-11T06:00:00.000Z');             // las 00:00 del dia siguiente: el 10 entra completo, el 11 no
+  assert.equal(r.anterior_desde, '2026-10-22T06:00:00.000Z');    // 10 dias justo antes: 22 oct - 31 oct
+  assert.equal(rango('desde=2026-11-15&hasta=2026-11-15').dias, 1);   // un solo dia, hoy
+  assert.equal(rango('desde=2026-02-28&hasta=2026-03-01').dias, 2);
+  assert.equal(rango('desde=2025-11-15&hasta=2026-11-15').dias, 366);   // el maximo
+});
+
+test('rangoDe: fechas mal formadas, a medias, al reves, futuras o de mas de 366 dias se rechazan', () => {
+  for (const mala of [
+    'desde=2026-11-01', 'hasta=2026-11-10', 'desde=&hasta=', 'desde=2026-11-01&hasta=ayer', 'desde=2026-13-01&hasta=2026-11-10',
+    'desde=2026-02-30&hasta=2026-11-10', 'desde=2026-1-1&hasta=2026-11-10',
+    'desde=2026-11-10&hasta=2026-11-01',                         // al reves
+    'desde=2026-11-10&hasta=2026-11-16',                         // mañana (hoy es 15)
+    'desde=2025-11-14&hasta=2026-11-15',                         // 367 dias
+  ]) invalido(mala);
+  // Hoy en la tienda va seis horas detras de UTC: 16 nov 03:00 UTC = 15 nov 21:00, asi que el 16 todavia es futuro.
+  assert.equal(rango('desde=2026-11-15&hasta=2026-11-15', Date.parse('2026-11-16T03:00:00Z')).dias, 1);
+  invalido('desde=2026-11-16&hasta=2026-11-16', Date.parse('2026-11-16T03:00:00Z'));
+});
+
+test('rangoDe: dias= sigue igual (omision 30, tope 365, basura = omision) y trae su cierre', () => {
+  const ahora = Date.parse('2026-11-15T20:00:00Z');
+  assert.deepEqual(rango('dias=7', ahora), rangoDias(7, ahora));
+  assert.equal(rango('', ahora).dias, 30);
+  assert.equal(rango('dias=abc', ahora).dias, 30);
+  assert.equal(rango('dias=9999', ahora).dias, 365);
+  assert.equal(rango('dias=0', ahora).dias, 1);
+  const siete = rango('dias=7', ahora);
+  assert.deepEqual([siete.dia_desde, siete.dia_hasta, siete.desde, siete.anterior_desde],
+    ['2026-11-09', '2026-11-15', '2026-11-09T06:00:00.000Z', '2026-11-02T06:00:00.000Z']);
+  assert.equal(siete.hasta, '2026-11-16T06:00:00.000Z');
+  assert.equal(rango('dias=7&desde=2026-11-01&hasta=2026-11-03', ahora).dias, 3);   // con fechas, mandan las fechas
+});
+
+/** Mueve una venta a `dia` (de la tienda) a mediodia. */
+const alDia = (db: ReturnType<typeof tienda>['db'], id: string, dia: string) => {
+  const cuando = `${dia}T18:00:00.000Z`;   // 12:00 en la tienda
+  db.prepare('update ventas set creado_en = ?, registrado_en = ? where id = ?').run(cuando, cuando, id);
+};
+const hoyMenos = (n: number) => hoyTienda(Date.now() - n * 86_400_000);
+
+test('un rango pasado cerrado deja fuera lo vendido despues: reporte, equipo, tickets y sus selectores', async () => {
+  const { db, pedir } = tienda();
+  db.prepare('update productos set stock = 100 where id = ?').run(PRODUCTO);
+  const vieja = await vender(pedir, 'Caja 1');       // hace 10 dias: dentro
+  const reciente = await vender(pedir, 'Caja 2');    // hace 2 dias: despues del cierre
+  const hoy = await vender(pedir, 'Caja 1');         // hoy: despues del cierre
+  assert.ok([vieja, reciente, hoy].every((v) => v.status === 201));
+  alDia(db, vieja.id, hoyMenos(10));
+  alDia(db, reciente.id, hoyMenos(2));
+  const rangoPasado = `desde=${hoyMenos(12)}&hasta=${hoyMenos(5)}`;
+
+  const r = (await pedir(`/api/reportes?${rangoPasado}`)).cuerpo;
+  assert.equal(r.resumen.total, 25000);              // solo la de hace 10 dias; sin tope arriba sumaria las tres
+  assert.equal(r.resumen.ventas, 1);
+  assert.equal(r.dias, 8);
+  assert.deepEqual([r.dia_desde, r.dia_hasta], [hoyMenos(12), hoyMenos(5)]);
+  assert.equal(r.cuadre.bruto, 25000);
+  assert.deepEqual(r.por_dia.map((d: { dia: string }) => d.dia), [hoyMenos(10)]);
+  assert.equal(r.por_forma_pago.reduce((s: number, f: { total: number }) => s + f.total, 0), 25000);
+  assert.equal(r.top_productos[0].cantidad, 1);
+  assert.deepEqual(verificarCuadre(r).filter((c: { ok: boolean }) => !c.ok), []);
+  assert.equal(r.anterior.total, 0);                 // los 8 dias antes del 12: nada vendido ahi
+
+  const dosDias = (await pedir(`/api/reportes?desde=${hoyMenos(3)}&hasta=${hoyMenos(1)}`)).cuerpo;
+  assert.equal(dosDias.resumen.total, 25000);        // solo la reciente: la de hoy sigue fuera
+  assert.equal(dosDias.resumen.ventas, 1);
+
+  const tk = (await pedir(`/api/reportes/tickets?${rangoPasado}`)).cuerpo;
+  assert.deepEqual(tk.tickets.map((t: { id: string }) => t.id), [vieja.id]);
+  assert.equal(tk.resumen.tickets, 1);
+  assert.deepEqual(tk.cajas, ['Caja 1']);            // los selectores tampoco ven lo posterior
+  const equipo = (await pedir(`/api/reportes/equipo?${rangoPasado}`)).cuerpo;
+  assert.equal(equipo.personas.reduce((s: number, p: { tickets: number }) => s + (p.tickets || 0), 0), 1);
+  // Con dias= todo lo reciente sigue entrando, como siempre.
+  assert.equal((await pedir('/api/reportes?dias=30')).cuerpo.resumen.ventas, 3);
+  assert.equal((await pedir('/api/reportes/tickets?dias=30')).cuerpo.resumen.tickets, 3);
+});
+
+test('la API rechaza con 400 un rango que no se puede atender, en reporte, tickets, CSV y equipo', async () => {
+  const { pedir } = tienda();
+  const manana = hoyTienda(Date.now() + 86_400_000);
+  for (const ruta of ['/api/reportes', '/api/reportes/tickets', '/api/reportes/tickets.csv', '/api/reportes/equipo']) {
+    for (const consulta of ['desde=2026-01-01', `desde=${hoyTienda()}&hasta=${manana}`, 'desde=2024-01-01&hasta=2026-01-01', 'desde=x&hasta=y']) {
+      const r = await pedir(`${ruta}?${consulta}`, undefined, 'GET');
+      assert.equal(r.status, 400, `${ruta}?${consulta}`);
+    }
+  }
+});
+
+test('/api/reportes trae el dia de la primera venta (para «Desde la apertura») o null sin ventas', async () => {
+  const { db, pedir } = tienda();
+  db.prepare('update productos set stock = 100 where id = ?').run(PRODUCTO);
+  assert.equal((await pedir('/api/reportes?dias=7')).cuerpo.primera_venta, null);
+  const v = await vender(pedir, 'Caja 1');
+  const cuando = '2026-01-01T03:30:00.000Z';   // 31 dic 21:30 en la tienda
+  db.prepare('update ventas set creado_en = ?, registrado_en = ? where id = ?').run(cuando, cuando, v.id);
+  await vender(pedir, 'Caja 1');
+  assert.equal((await pedir('/api/reportes?dias=7')).cuerpo.primera_venta, '2025-12-31');
 });

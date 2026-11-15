@@ -84,33 +84,33 @@ export async function semanasBono(env: Env, lunes: string[]) {
 /** GET /api/reportes/equipo?dias=N: tabla por persona del rango y las ultimas 8 semanas cerradas. */
 export async function reporteEquipo(url: URL, env: Env): Promise<Response> {
   const rango = rangoDe(url);
-  const { desde } = rango;
+  const { desde, hasta } = rango;
   type Fila = { correo: string; [campo: string]: string | number };
   const [ventas, socios, apartados, piezas, trabajados] = await Promise.all([
     // Neto por ticket (igual que el Resumen), atribuido a quien atendio; '' = sin atribuir.
     env.DB.prepare(
-      `${lineasNetas('v.creado_en >= ?')}
+      `${lineasNetas('v.creado_en >= ? and v.creado_en < ?')}
        select v.vendedora as correo, count(distinct n.venta) as tickets, coalesce(sum(n.neta), 0) as ventas
        from netas n join ventas v on v.id = n.venta where n.propietario = 'dolaron' group by v.vendedora`,
-    ).bind(desde).all<Fila>(),
+    ).bind(desde, hasta).all<Fila>(),
     env.DB.prepare(
       `select c.registrado_por as correo, count(*) as socios,
          coalesce(sum(exists(select 1 from ventas v where v.cliente_id = c.id and v.cancelada = 0
            and substr(datetime(v.creado_en, '-6 hours'), 1, 10) = substr(datetime(c.creado_en, '-6 hours'), 1, 10))), 0) as socios_compraron
-       from clientes c where c.creado_en >= ? group by c.registrado_por`,
-    ).bind(desde).all<Fila>(),
+       from clientes c where c.creado_en >= ? and c.creado_en < ? group by c.registrado_por`,
+    ).bind(desde, hasta).all<Fila>(),
     env.DB.prepare(
       `select p.vendedora as correo, count(*) as apartados from pedidos p join ventas v on v.id = p.venta_id
-       where p.estado = 'vendido' and v.cancelada = 0 and v.creado_en >= ? group by p.vendedora`,
-    ).bind(desde).all<Fila>(),
+       where p.estado = 'vendido' and v.cancelada = 0 and v.creado_en >= ? and v.creado_en < ? group by p.vendedora`,
+    ).bind(desde, hasta).all<Fila>(),
     env.DB.prepare(
       `select p.capturado_por as correo, count(*) as capturadas,
          coalesce(sum(exists(select 1 from venta_lineas l join ventas v on v.id = l.venta_id
            where l.producto_id = p.id and v.cancelada = 0 and l.cantidad > l.cancelada_cantidad
              and julianday(v.creado_en) - julianday(p.creado_en) <= 14)), 0) as vendidas_14
-       from productos p where p.capturado_por <> '' and p.creado_en >= ? and p.sin_inventario = 0
+       from productos p where p.capturado_por <> '' and p.creado_en >= ? and p.creado_en < ? and p.sin_inventario = 0
          and p.propietario = 'dolaron' and p.estado_analisis <> 'descartado' group by p.capturado_por`,
-    ).bind(desde).all<Fila>(),
+    ).bind(desde, hasta).all<Fila>(),
     env.DB.prepare(
       `select e.correo, count(*) as dias_trabajados from asistencias a join empleados e on e.id = a.empleado_id
        where e.correo <> '' and a.fecha >= ? and a.fecha <= ? group by e.correo`,
