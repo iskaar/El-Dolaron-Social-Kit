@@ -1,10 +1,10 @@
 // Vista «Dolarones» de /reportes (Issue #802): del JSON de /api/reportes/dolarones al HTML y las graficas.
 // Todo son funciones puras (sin DOM): se prueban en src/reportes-dolarones-js.test.ts. Dinero en centavos, 1 D = 100.
 import {
-  escapar, dolarones, cambio, flechaCambio, diaCorto, textoPeriodo, tabla, apilada, barrasHorizontales, pesos,
-  columnas, lineaSerie, leyendaSeries, minigrafica,
+  escapar, dolarones, diaCorto, textoPeriodo, tabla, apilada, barrasHorizontales, pesos,
+  columnas, lineaSerie, leyendaSeries,
 } from './graficas.js';
-import { cambioKpi } from './reportes-resumen.js';
+import { cambioKpi, tarjetasHtml } from './reportes-resumen.js';
 
 const num = (n) => Number(n).toLocaleString('es-MX');
 const pct1 = (x) => `${(x * 100).toLocaleString('es-MX', { minimumFractionDigits: 1, maximumFractionDigits: 1 })} %`;
@@ -51,19 +51,11 @@ export function bandaCuadre(r) {
 
 /* ---------- tarjetas ---------- */
 
-function delta(actual, previo, { texto = 'vs periodo anterior', bueno = 'neutro', pp = false } = {}) {
-  // La flecha, el texto y el tono salen de cambioKpi, el mismo de las tarjetas de Resumen.
-  const c = pp
-    ? (actual == null || previo == null ? null : cambioKpi(actual * 100, previo * 100, { tipo: 'pp', bueno }))
-    : cambioKpi(actual, previo, { tipo: 'pct', bueno });
-  if (!c) return '<div class="delta">Sin periodo anterior para comparar</div>';
-  return `<div class="delta"><span class="chip ${c.tono}">${escapar(`${c.flecha} ${c.texto}`)}</span>${escapar(texto)}</div>`;
-}
-
-// Mismo marcado que las tarjetas de Resumen (`.tarjeta.kpi`); `serie` pinta la minigrafica si hay al menos dos puntos.
-const tarjeta = (etq, valor, extra = '', pie = '', serie = [], clase = 's1') =>
-  `<div class="tarjeta kpi"><div class="etq">${escapar(etq)}</div><div class="valor">${escapar(valor)}</div>${extra}${
-    serie.length >= 2 ? `<div class="mini-caja">${minigrafica(serie, { clase, etiqueta: `Tendencia de ${etq}` })}</div>` : ''}${pie ? `<div class="pie">${escapar(pie)}</div>` : ''}</div>`;
+// Mismo marcado y mismo vocabulario de comparacion que todas las vistas (`tarjetasHtml`, reportes-resumen.js). Dolarones siempre compara con el
+// periodo anterior de igual largo. `pp`: las dos cifras son proporciones (0 a 1) y el cambio se dice en puntos porcentuales.
+const cambioDe = (actual, previo, { pp = false, bueno = 'neutro' } = {}) => (pp
+  ? (actual == null || previo == null ? null : cambioKpi(actual * 100, previo * 100, { tipo: 'pp', bueno }))
+  : cambioKpi(actual, previo, { tipo: 'pct', bueno }));
 
 /** Fecha corta de un dia «2026-11-20» -> «20 nov». */
 const fechaCorta = (d) => (d ? diaCorto(d) : '');
@@ -78,21 +70,24 @@ export function tarjetas(r) {
     : `De ${dolarones(tasa.base)} que cerraron su plazo en el periodo, ${dolarones(tasa.canjeado)} se usaron`;
   const cierre = tasa.base;
   const serie = r.serie;
-  return [
-    tarjeta('Emitidos en el periodo', dolarones(p.emitidos), delta(p.emitidos, p.emitidos_antes),
-      porcentaje(p.emitidos, p.ventas_netas) ? `${porcentaje(p.emitidos, p.ventas_netas)} de las ventas netas` : 'Sin ventas netas con qué comparar', serie.map((c) => c.emitidos), 's1'),
-    tarjeta('Canjeados', dolarones(p.canjeados), delta(p.canjeados, p.canjeados_antes), 'Usados como pago en caja', serie.map((c) => c.canjeados), 's2'),
-    tarjeta('Tasa de canje', tasa.tasa === null ? 'Sin datos' : pct1(tasa.tasa), delta(tasa.tasa, tasaAntes.tasa, { pp: true, bueno: 'sube' }), pieTasa),
-    tarjeta('Saldo vivo', dolarones(s.vivo), delta(s.vivo, s.vivo_inicio, { texto: 'vs inicio del periodo' }),
-      `Lo que la tienda debe · disponible ${dolarones(s.disponible)} · por liberar ${dolarones(s.por_liberar)}`, serie.map((c) => c.vivo), 's1'),
-    tarjeta('Por vencer en 30 días', dolarones(s.por_vencer_30), `<div class="delta">${escapar(porcentaje(s.por_vencer_30, s.vivo) ? `${porcentaje(s.por_vencer_30, s.vivo)} del saldo vivo` : 'Sin saldo vivo')}</div>`, 'Si no se usa'),
-    tarjeta('Vencidos sin usar', dolarones(p.vencidos), delta(p.vencidos, p.vencidos_antes),
-      cierre > 0 ? `${porcentaje(p.vencidos, cierre)} de lo que cerró su plazo` : 'Ya no se pueden canjear', serie.map((c) => c.vencidos), 's3'),
-    tarjeta('Costo del programa', costo === null ? 'Sin datos' : pct1(costo), delta(costo, costoAntes, { pp: true, bueno: 'baja' }),
-      'Dolarones canjeados (sin cupones) sobre las ventas netas'),
-    tarjeta('Tickets pagados con Dolarones', num(e.con.tickets), delta(e.con.tickets, r.efecto.tickets_antes),
-      porcentaje(e.con.tickets, e.tickets) ? `${porcentaje(e.con.tickets, e.tickets)} de los tickets` : 'Sin tickets en el periodo'),
-  ].join('');
+  const hayComp = p.ventas_netas_antes > 0 || p.emitidos_antes > 0 || p.canjeados_antes > 0 || p.vencidos_antes > 0;   // el periodo anterior tuvo algo
+  const k = (etiqueta, valor, { cambio = null, vs = 'vs anterior', pie = '', serie: s2 = [], clase = 's1', delta = '', sinDelta = false, base = hayComp } = {}) =>
+    ({ etiqueta, valor, cambio, vs, pie, serie: s2, clase, delta, sinDelta, comparando: true, hayComp: base });
+  return tarjetasHtml([
+    k('Emitidos en el periodo', dolarones(p.emitidos), { cambio: cambioDe(p.emitidos, p.emitidos_antes), serie: serie.map((c) => c.emitidos), clase: 's1',
+      pie: porcentaje(p.emitidos, p.ventas_netas) ? `${porcentaje(p.emitidos, p.ventas_netas)} de las ventas netas` : 'Sin ventas netas con qué comparar' }),
+    k('Canjeados', dolarones(p.canjeados), { cambio: cambioDe(p.canjeados, p.canjeados_antes), serie: serie.map((c) => c.canjeados), clase: 's2', pie: 'Usados como pago en caja' }),
+    k('Tasa de canje', tasa.tasa === null ? 'Sin datos' : pct1(tasa.tasa), { cambio: cambioDe(tasa.tasa, tasaAntes.tasa, { pp: true, bueno: 'sube' }), pie: pieTasa }),
+    k('Saldo vivo', dolarones(s.vivo), { cambio: cambioDe(s.vivo, s.vivo_inicio), vs: 'vs inicio del periodo', base: true, serie: serie.map((c) => c.vivo), clase: 's1',
+      pie: `Lo que la tienda debe · disponible ${dolarones(s.disponible)} · por liberar ${dolarones(s.por_liberar)}` }),
+    k('Por vencer en 30 días', dolarones(s.por_vencer_30), { delta: porcentaje(s.por_vencer_30, s.vivo) ? `${porcentaje(s.por_vencer_30, s.vivo)} del saldo vivo` : 'Sin saldo vivo', pie: 'Si no se usa' }),
+    k('Vencidos sin usar', dolarones(p.vencidos), { cambio: cambioDe(p.vencidos, p.vencidos_antes), serie: serie.map((c) => c.vencidos), clase: 's3',
+      pie: cierre > 0 ? `${porcentaje(p.vencidos, cierre)} de lo que cerró su plazo` : 'Ya no se pueden canjear' }),
+    k('Costo del programa', costo === null ? 'Sin datos' : pct1(costo), { cambio: cambioDe(costo, costoAntes, { pp: true, bueno: 'baja' }),
+      pie: 'Dolarones canjeados (sin cupones) sobre las ventas netas' }),
+    k('Tickets pagados con Dolarones', num(e.con.tickets), { cambio: cambioDe(e.con.tickets, r.efecto.tickets_antes),
+      pie: porcentaje(e.con.tickets, e.tickets) ? `${porcentaje(e.con.tickets, e.tickets)} de los tickets` : 'Sin tickets en el periodo' }),
+  ]);
 }
 
 /* ---------- series: datos para las graficas y sus tablas ---------- */

@@ -1,9 +1,9 @@
 // Vista «Inventario» de /reportes (Issue #802): del JSON de /api/reportes/inventario (y de la foto de /api/reportes) al HTML y las graficas.
 // Todo son funciones puras (sin DOM): se prueban en src/reportes-inventario-js.test.ts. Dinero en centavos; las cantidades son unidades.
 import {
-  escapar, pesos, diaCorto, tabla, columnas, leyendaSeries, minigrafica, pasoCalor, PASOS_CALOR, TRAMOS_ANTIGUEDAD,
+  escapar, pesos, diaCorto, tabla, columnas, leyendaSeries, pasoCalor, PASOS_CALOR, TRAMOS_ANTIGUEDAD,
 } from './graficas.js';
-import { cambioKpi, edadPromedio } from './reportes-resumen.js';
+import { cambioKpi, tarjetasHtml, edadPromedio } from './reportes-resumen.js';
 import { etiquetaCubeta } from './reportes-dolarones.js';
 
 const num = (n) => Number(n).toLocaleString('es-MX');
@@ -27,22 +27,10 @@ export function avisoTienda(nombre) {
 
 /* ---------- tarjetas ---------- */
 
-const tarjeta = (etq, valor, delta, pie = '', serie = [], clase = 's1') =>
-  `<div class="tarjeta kpi"><div class="etq">${escapar(etq)}</div><div class="valor">${escapar(valor)}</div>${delta}${
-    serie.length >= 2 ? `<div class="mini-caja">${minigrafica(serie, { clase, etiqueta: `Tendencia de ${etq}` })}</div>` : ''}${pie ? `<div class="pie">${escapar(pie)}</div>` : ''}</div>`;
-const foto = '<div class="delta">Foto de hoy: no hay historial para comparar</div>';
-const cargando = '<div class="delta">Cargando…</div>';
-
-/** Una cifra que cambia contra el periodo anterior: ▲/▼ y texto, nunca solo color. */
-function delta(actual, previo, opciones, texto = 'vs periodo anterior') {
-  const c = cambioKpi(actual, previo, opciones);
-  if (!c) return '<div class="delta">Sin periodo anterior para comparar</div>';
-  return `<div class="delta"><span class="chip ${c.tono}">${escapar(`${c.flecha} ${c.texto}`)}</span>${escapar(texto)}</div>`;
-}
-
 /**
- * Las seis tarjetas. `r`: /api/reportes/inventario (null mientras carga); `base`: /api/reportes (la foto de ahora y la merma).
- * Lo de piso es una foto de hoy y no lleva minigrafica ni «vs antes»; vendido a 4 semanas y dias en venta si dependen del periodo.
+ * Las seis tarjetas, con el mismo marcado y vocabulario de comparacion que todas las vistas (`tarjetasHtml`, reportes-resumen.js). `r`:
+ * /api/reportes/inventario (null mientras carga); `base`: /api/reportes (la foto de ahora y la merma). Lo de piso es una foto de hoy y no lleva
+ * minigrafica ni «vs anterior»; vendido a 4 semanas y dias en venta dependen del periodo.
  */
 export function tarjetasInventario(r, base) {
   const inv = base?.inventario, merma = base?.merma_caducidad;
@@ -50,19 +38,21 @@ export function tarjetasInventario(r, base) {
   const v4 = r?.cohortes.vendido_4;
   const serie4 = r ? r.cohortes.semanas.filter((s) => s.pct[4] !== null).map((s) => s.pct[4]) : [];
   const dv = r?.dias_en_venta;
-  return [
-    tarjeta('Valor en piso', inv ? pesos(inv.valor) : '—', inv ? foto : cargando, inv ? `${cuenta(inv.unidades, 'unidad', 'unidades')} a precio de tienda · todo el negocio` : ''),
-    tarjeta('Piezas en piso', inv ? num(inv.piezas) : '—', inv ? foto : cargando, inv ? `${cuenta(inv.sin_fecha.piezas, 'pieza', 'piezas')} sin fecha de captura` : ''),
-    tarjeta('Antigüedad promedio', edad == null ? (inv ? 'Sin datos' : '—') : dias(Math.round(edad)), inv ? foto : cargando, 'Días desde la captura, por pieza en piso'),
-    tarjeta('Vendido a 4 semanas', !r ? '—' : v4.pct === null ? 'Sin datos' : pct1(v4.pct),
-      !r ? cargando : v4.pct === null ? '<div class="delta">Ninguna semana de captura tiene aún 4 semanas</div>' : `<div class="delta">${escapar(`${cuenta(v4.semanas, 'semana', 'semanas')} de captura con 4 semanas cumplidas`)}</div>`,
-      !r ? '' : v4.pct === null ? 'Unidades vendidas a 4 semanas de capturadas' : `${num(v4.vendidas)} de ${num(v4.unidades)} unidades capturadas se vendieron en 4 semanas`, serie4, 's1'),
-    tarjeta('Días en venta', !r ? '—' : dv.mediana === null ? 'Sin datos' : dias(dv.mediana),
-      !r ? cargando : dv.mediana === null ? '<div class="delta">Sin ventas con fecha de captura en el periodo</div>' : delta(dv.mediana, dv.mediana_antes, { bueno: 'baja' }),
-      !r ? '' : dv.mediana === null ? 'Mediana de captura a venta' : `Mediana de captura a venta · ${cuenta(dv.unidades, 'unidad', 'unidades')} vendidas en el periodo`),
-    tarjeta('Merma por caducidad', merma ? pesos(merma.valor_lista) : '—', merma ? '<div class="delta">Capturada en el periodo · sin periodo anterior para comparar</div>' : cargando,
-      merma ? `${cuenta(merma.piezas, 'pieza', 'piezas')}, a precio de lista` : ''),
-  ].join('');
+  const cargando = 'Cargando…';
+  const k = (etiqueta, valor, o = {}) => ({ etiqueta, valor, cambio: null, vs: 'vs anterior', pie: '', serie: [], clase: 's1', comparando: true, hayComp: true, ...o });
+  return tarjetasHtml([
+    k('Valor en piso', inv ? pesos(inv.valor) : '—', { foto: !!inv, delta: inv ? '' : cargando, pie: inv ? `${cuenta(inv.unidades, 'unidad', 'unidades')} a precio de tienda · todo el negocio` : '' }),
+    k('Piezas en piso', inv ? num(inv.piezas) : '—', { foto: !!inv, delta: inv ? '' : cargando, pie: inv ? `${cuenta(inv.sin_fecha.piezas, 'pieza', 'piezas')} sin fecha de captura` : '' }),
+    k('Antigüedad promedio', edad == null ? (inv ? 'Sin datos' : '—') : dias(Math.round(edad)), { foto: !!inv, delta: inv ? '' : cargando, pie: 'Días desde la captura, por pieza en piso' }),
+    k('Vendido a 4 semanas', !r ? '—' : v4.pct === null ? 'Sin datos' : pct1(v4.pct), { serie: serie4,
+      delta: !r ? cargando : v4.pct === null ? 'Ninguna semana de captura tiene aún 4 semanas' : `${cuenta(v4.semanas, 'semana', 'semanas')} de captura con 4 semanas cumplidas`,
+      pie: !r ? '' : v4.pct === null ? 'Unidades vendidas a 4 semanas de capturadas' : `${num(v4.vendidas)} de ${num(v4.unidades)} unidades capturadas se vendieron en 4 semanas` }),
+    k('Días en venta', !r ? '—' : dv.mediana === null ? 'Sin datos' : dias(dv.mediana), {
+      cambio: !r || dv.mediana === null ? null : cambioKpi(dv.mediana, dv.mediana_antes, { bueno: 'baja' }), hayComp: dv?.mediana_antes != null,
+      delta: !r ? cargando : dv.mediana === null ? 'Sin ventas con fecha de captura en el periodo' : '',
+      pie: !r ? '' : dv.mediana === null ? 'Mediana de captura a venta' : `Mediana de captura a venta · ${cuenta(dv.unidades, 'unidad', 'unidades')} vendidas en el periodo` }),
+    k('Merma por caducidad', merma ? pesos(merma.valor_lista) : '—', { delta: merma ? 'Capturada en el periodo' : cargando, pie: merma ? `${cuenta(merma.piezas, 'pieza', 'piezas')}, a precio de lista` : '' }),
+  ]);
 }
 
 /* ---------- entradas y salidas ---------- */

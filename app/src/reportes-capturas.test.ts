@@ -232,7 +232,7 @@ test('capturas: un periodo sin capturas responde ceros y huecos, no inventa nada
   assert.deepEqual(r.bitacora, { desde: null, dentro_del_periodo: false, sin_datos: true });
   assert.equal(r.etiquetas.desde, null);
   // La pantalla tampoco se rompe sin datos.
-  assert.match(tarjetasCapturas(r), /Sin periodo anterior/);
+  assert.match(tarjetasCapturas(r), /Sin datos en el periodo comparado/);
   assert.match(htmlVista(r), /Sin capturas en este periodo/);
   assert.match(graficaDe('serie', r, 600), /<svg/);
   assert.match(graficaDe('tiempo', r, 600), /<svg/);

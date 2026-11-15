@@ -287,8 +287,8 @@ test('la comparacion y el grano: la semana suma lo mismo que los dias; las tarje
   assert.equal(C.anterior.tickets, 0);                                              // antes de ayer-6 no hay ventas
   const tarjetas = tarjetasControl(C);
   assert.equal(tarjetas.length, 8);
-  assert.ok(tarjetas.every((k: any) => k.comparando === true && k.hayComp === false));   // sin ventas en el periodo comparado: «Sin ventas en el periodo comparado»
-  assert.match(tarjetasHtml(tarjetas), /Sin ventas en el periodo comparado/);
+  assert.ok(tarjetas.every((k: any) => k.comparando === true && k.hayComp === false));   // sin ventas en el periodo comparado: «Sin datos en el periodo comparado»
+  assert.match(tarjetasHtml(tarjetas), /Sin datos en el periodo comparado/);
   // Con ventas antes: se pide una ventana que las contenga y los cambios llevan flecha escrita.
   const E = (await llamar(t, `desde=${dia(3)}&hasta=${dia(2)}`)).cuerpo;            // periodo: dias 3 y 2; antes: dias 5 y 4
   assert.equal(E.anterior.tickets, 5);

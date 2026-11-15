@@ -11,7 +11,7 @@
 //    NUNCA se restan: se muestran aparte para que alguien los clasifique.
 //  - Resultado operativo = ventas netas - gastos de operacion, ANTES del costo de la mercancia (el sistema no lo registra).
 import { escapar, pesos, pesosEje, tabla, columnas, leyendaSeries, escalaNumero, sumarDias, diaCorto, diaLargo } from './graficas.js';
-import { cubetas as listaCubetas, cambioKpi, etiquetaCubeta, tituloCubeta } from './reportes-resumen.js';
+import { cubetas as listaCubetas, cambioKpi, vsCorto, etiquetaCubeta, tituloCubeta } from './reportes-resumen.js';
 import { FORMAS, MAX_COLUMNAS } from './reportes-ventas.js';
 import { CATEGORIAS_GASTO } from './categorias.js';
 
@@ -188,7 +188,7 @@ export function armarFinanzas({ desde, hasta, grano, ventana, soloVentas = false
 /** Las 6 tarjetas, con el mismo marcado y las mismas reglas de color que las de Resumen (se pintan con `tarjetasHtml` de reportes-resumen.js). */
 export function tarjetasFinanzas(d) {
   const t = d.totales, a = d.anterior, sc = d.cubetas;
-  const vs = d.comparar === 'mes' ? 'vs mes pasado' : 'vs anterior';
+  const vs = vsCorto(d);
   const comparando = !!d.comparacion;
   const comunes = { vs, comparando, hayComp: true };
   const dias = d.periodo.dias;

@@ -2,10 +2,10 @@
 // Todo lo que no toca el DOM se prueba en src/reportes-capturas.test.ts; solo `montarCapturas` usa document.
 // Como en graficas.js: marcas delgadas, una tabla equivalente para cada grafica y el color nunca lleva solo el significado.
 import {
-  escapar, cambio, flechaCambio, diaCorto, diaLargo, diaSemana, mapaCalor, mapaCalorHtml, tablaCalor, FORMATO_CALOR_DINERO,
-  barrasHorizontales, tabla, minigrafica, leyendaSeries, columnas, lineaSerie, promedioMovil as promedioMovilBase,
+  escapar, diaCorto, diaLargo, diaSemana, mapaCalor, mapaCalorHtml, tablaCalor, FORMATO_CALOR_DINERO,
+  barrasHorizontales, tabla, leyendaSeries, columnas, lineaSerie, promedioMovil as promedioMovilBase,
 } from './graficas.js';
-import { cambioKpi } from './reportes-resumen.js';
+import { cambioKpi, tarjetasHtml } from './reportes-resumen.js';
 
 const mayuscula = (t) => (t ? t[0].toUpperCase() + t.slice(1) : t);
 const n0 = (n) => Number(n ?? 0).toLocaleString('es-MX');
@@ -96,36 +96,27 @@ export function notaDesde(r) {
 
 /* ---------- tarjetas ---------- */
 
-// Mismo marcado que las tarjetas de Resumen y Dolarones (`.tarjeta.kpi`, `cambioKpi`): `bueno` dice si subir es bueno, malo o ni lo uno ni lo otro;
-// la flecha y el signo van escritos y el color solo los refuerza. `serie` pinta la minigrafica si hay al menos dos puntos.
-function delta(actual, previo, formato, bueno = 'sube') {
-  const c = actual == null || previo == null ? null : cambioKpi(actual, previo, { bueno });
-  if (!c) return '<div class="delta">Sin periodo anterior para comparar</div>';
-  return `<div class="delta"><span class="chip ${c.tono}">${escapar(`${c.flecha} ${c.texto}`)}</span>${escapar(`antes: ${formato(previo)}`)}</div>`;
-}
-const pie = (texto) => `<div class="pie">${escapar(texto)}</div>`;
-const tarjeta = (etq, valor, extra = '', serie = [], clase = 's1') =>
-  `<div class="tarjeta kpi"><div class="etq">${escapar(etq)}</div><div class="valor">${escapar(valor)}</div>${extra}${
-    serie.length >= 2 ? `<div class="mini-caja">${minigrafica(serie, { clase, etiqueta: `Tendencia de ${etq}` })}</div>` : ''}</div>`;
-
+// Mismo marcado y mismo vocabulario de comparacion que todas las vistas (`tarjetasHtml` y `cambioKpi`, reportes-resumen.js). Capturas siempre compara
+// con el periodo anterior de igual largo. `bueno` dice si subir es bueno, malo o ni lo uno ni lo otro; la flecha y el signo van escritos.
 export function tarjetasCapturas(r) {
   const x = r.resumen, a = r.anterior, c = x.corregidas, cola = r.pendientes.por_revisar;
   const porColumna = r.serie.map((s) => s.total), porDia = r.serie.map((s) => (s.dias ? s.total / s.dias : null));
-  return `<div class="tarjetas" id="c-kpis">${[
-    tarjeta('Capturas del periodo', n0(x.capturas), delta(x.capturas, a.capturas, n0) + (x.sumas ? pie(`y ${cuenta(x.sumas, 'suma', 'sumas')} a piezas que ya existían`) : ''), porColumna, 's1'),
-    tarjeta('Por día', x.por_dia == null ? '—' : n1(x.por_dia), delta(x.por_dia, a.por_dia, n1) + pie(`${cuenta(x.dias_con_captura, 'día', 'días')} con captura`), porDia, 's1'),
-    tarjeta('Tiempo por captura', duracion(x.tiempo_mediano_s), delta(x.tiempo_mediano_s, a.tiempo_mediano_s, duracion, 'baja')   // menos es mejor
-      + pie(`Mediana de ${cuenta(x.medidas, 'intervalo medido', 'intervalos medidos')} · menos es mejor`), r.tiempo_semanal.map((s) => s.mediana_s), 's2'),
-    tarjeta('Piezas por hora activa', x.piezas_por_hora == null ? '—' : n1(x.piezas_por_hora), delta(x.piezas_por_hora, a.piezas_por_hora, n1),
-      r.tiempo_semanal.map((s) => s.piezas_por_hora), 's3'),
-    tarjeta('Horas activas de captura', `${n1(x.horas_activas)} h`, delta(x.horas_activas, a.horas_activas, (v) => `${n1(v)} h`, 'neutro') + pie('Suma de personas, sin contar pausas')),
-    tarjeta('De captura a etiqueta', duracionLarga(x.captura_a_etiqueta_s),
-      pie(x.captura_a_etiqueta_n ? `Mediana de ${cuenta(x.captura_a_etiqueta_n, 'pieza', 'piezas')} con etiqueta registrada`
-        : r.etiquetas.desde ? 'Sin etiquetas registradas en el periodo' : 'Aún no se registran etiquetas')),
-    tarjeta('Corregidas tras la IA', pct(c.n, c.base),
-      pie(c.base ? `${n0(c.n)} de ${n0(c.base)} piezas que llenó la IA · ${notaDesde(r)}` : `Sin piezas llenadas por la IA · ${notaDesde(r)}`)),
-    tarjeta('Cola por revisar', n0(cola.n), pie(cola.n ? `ahora · la más vieja lleva ${edad(cola.mas_vieja, r.ahora)}` : 'ahora · nada esperando')),
-  ].join('')}</div>`;
+  const hayComp = a.capturas > 0;
+  const k = (etiqueta, valor, { actual, previo, bueno = 'sube', pie = '', serie = [], clase = 's1', foto = false, sinDelta = false } = {}) =>
+    ({ etiqueta, valor, cambio: actual == null || previo == null ? null : cambioKpi(actual, previo, { bueno }), vs: 'vs anterior', pie, serie, clase, foto, sinDelta, comparando: true, hayComp });
+  return `<div class="tarjetas" id="c-kpis">${tarjetasHtml([
+    k('Capturas del periodo', n0(x.capturas), { actual: x.capturas, previo: a.capturas, serie: porColumna, pie: x.sumas ? `y ${cuenta(x.sumas, 'suma', 'sumas')} a piezas que ya existían` : '' }),
+    k('Por día', x.por_dia == null ? '—' : n1(x.por_dia), { actual: x.por_dia, previo: a.por_dia, serie: porDia, pie: `${cuenta(x.dias_con_captura, 'día', 'días')} con captura` }),
+    k('Tiempo por captura', duracion(x.tiempo_mediano_s), { actual: x.tiempo_mediano_s, previo: a.tiempo_mediano_s, bueno: 'baja', clase: 's2',   // menos es mejor
+      serie: r.tiempo_semanal.map((s) => s.mediana_s), pie: `Mediana de ${cuenta(x.medidas, 'intervalo medido', 'intervalos medidos')} · menos es mejor` }),
+    k('Piezas por hora activa', x.piezas_por_hora == null ? '—' : n1(x.piezas_por_hora), { actual: x.piezas_por_hora, previo: a.piezas_por_hora, clase: 's3', serie: r.tiempo_semanal.map((s) => s.piezas_por_hora) }),
+    k('Horas activas de captura', `${n1(x.horas_activas)} h`, { actual: x.horas_activas, previo: a.horas_activas, bueno: 'neutro', pie: 'Suma de personas, sin contar pausas' }),
+    k('De captura a etiqueta', duracionLarga(x.captura_a_etiqueta_s), { sinDelta: true,
+      pie: x.captura_a_etiqueta_n ? `Mediana de ${cuenta(x.captura_a_etiqueta_n, 'pieza', 'piezas')} con etiqueta registrada` : r.etiquetas.desde ? 'Sin etiquetas registradas en el periodo' : 'Aún no se registran etiquetas' }),
+    k('Corregidas tras la IA', pct(c.n, c.base), { sinDelta: true,
+      pie: c.base ? `${n0(c.n)} de ${n0(c.base)} piezas que llenó la IA · ${notaDesde(r)}` : `Sin piezas llenadas por la IA · ${notaDesde(r)}` }),
+    k('Cola por revisar', n0(cola.n), { foto: true, pie: cola.n ? `ahora · la más vieja lleva ${edad(cola.mas_vieja, r.ahora)}` : 'ahora · nada esperando' }),
+  ])}</div>`;
 }
 
 /* ---------- tablas ---------- */

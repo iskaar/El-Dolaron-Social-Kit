@@ -48,7 +48,7 @@ test('las ocho tarjetas, con cifras de la API y mensajes honestos cuando no hay 
   assert.match(vistaDolarones(r), /al cierre de cada día/);
   assert.match(vistaDolarones({ ...r, grano: 'semana' }), /al cierre de cada semana/);
   assert.match(html, /Sin datos/, 'la tasa de canje no se inventa');
-  assert.match(html, /Sin periodo anterior para comparar/);
+  assert.match(html, /Sin datos en el periodo comparado/);
   const v = tarjetas(vacia);
   assert.match(v, /0\.00 D/);
   assert.match(v, /Sin ventas netas con qué comparar/);

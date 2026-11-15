@@ -9,7 +9,7 @@
 // de la primera venta con vendedora, y cuanto de las ventas netas esta atribuido. Las cancelaciones de cada persona son los tickets
 // completos que ELLA atendio y luego se cancelaron (en el periodo de la venta, como en Control); no las que ella hizo.
 import { escapar, pesos, pesosEje, tabla, columnas, leyendaSeries, diaCorto } from './graficas.js';
-import { armarCubetas, cambioKpi, tarjetasHtml, etiquetaCubeta, tituloCubeta } from './reportes-resumen.js';
+import { armarCubetas, cambioKpi, vsCorto, tarjetasHtml, etiquetaCubeta, tituloCubeta } from './reportes-resumen.js';
 import { MAX_COLUMNAS } from './reportes-ventas.js';
 
 const n0 = (n) => Number(n ?? 0).toLocaleString('es-MX');
@@ -132,7 +132,7 @@ const sumarUnDia = (dia, n) => new Date(Date.parse(`${dia}T12:00:00Z`) + n * 86_
 export function tarjetasEquipo(d) {
   const t = d.totales, a = d.anterior, sc = d.cubetas;
   const hayComp = !!(a && a.tickets_total > 0);
-  const comunes = { vs: d.comparar === 'mes' ? 'vs mes pasado' : 'vs anterior', hayComp, comparando: !!d.comparacion };
+  const comunes = { vs: vsCorto(d), hayComp, comparando: !!d.comparacion };
   const cambio = (actual, previo, opciones = {}) => (hayComp ? cambioKpi(actual, previo, opciones) : null);
   const serie = (f) => { const s = sc.map(f); return s.some((v) => v) ? s : []; };   // una serie sin un solo dato no dibuja una linea plana
   const ticket = (x) => (x.tickets ? Math.round(x.ventas / x.tickets) : null);

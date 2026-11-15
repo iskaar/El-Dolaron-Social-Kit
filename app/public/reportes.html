@@ -773,7 +773,7 @@ import {
 } from '/graficas.js';
 import {
   COMPARACIONES, GRANOS, granosPermitidos, tarjetasKpi, tarjetasHtml, datosTendencia, leyendaTendencia, tablaTendencia, metaHtml, graficaMeta, tablaMeta,
-  hallazgos, hallazgosHtml, canalesHtml, tablaCanales, categoriasHtml, tablaCategorias, textoComparacion, unidadGrano, COMPARACION_POR_GRANO, rangoTexto,
+  hallazgos, hallazgosHtml, canalesHtml, tablaCanales, categoriasHtml, tablaCategorias, textoComparacion, unidadGrano, COMPARACION_POR_GRANO, rangoTexto, TEXTO_COMPARACION,
 } from '/reportes-resumen.js';
 import { montarCapturas } from '/reportes-capturas.js';
 import * as Ventas from '/reportes-ventas.js';
@@ -1082,7 +1082,7 @@ function pintarPeriodo() {
   $('p-etq').textContent = r.dias === 1 ? 'Día' : 'Del';
   $('p-texto').textContent = textoPeriodo(r.desde, r.hasta);
   // Si el periodo abre el dia de la primera venta, antes no hubo nada que comparar.
-  textoAnteriorBase = r.desde === primeraVenta ? 'Sin periodo anterior para comparar' : `Comparado con ${antes}`;
+  textoAnteriorBase = r.desde === primeraVenta ? TEXTO_COMPARACION.sinDatos : `Comparado con ${antes}`;
   textoAnterior();
 }
 
@@ -1091,7 +1091,8 @@ function pintarPeriodo() {
 // Debajo de la barra: contra que se compara lo que se ve. En Resumen y Ventas manda «Comparar con»; en las demas vistas, el periodo anterior.
 function textoAnterior() {
   const datos = vistaActual === 'clientes' ? datosClientes : vistaActual === 'control' ? datosControl : vistaActual === 'equipo' ? datosEquipo : vistaActual === 'finanzas' ? datosFinanzas : datosResumen;   // cada vista con comparacion trae la suya (mismo periodo y mismas ventanas)
-  $('p-anterior').textContent = VISTAS_CON_COMPARACION.includes(vistaActual) && datos ? textoComparacion(datos) : textoAnteriorBase;
+  // Tickets no compara con nada: no dice «Comparado con...».
+  $('p-anterior').textContent = vistaActual === 'tickets' ? '' : VISTAS_CON_COMPARACION.includes(vistaActual) && datos ? textoComparacion(datos) : textoAnteriorBase;
 }
 
 function consultaResumen() {
@@ -1277,7 +1278,7 @@ function pintarVentas(r, total) {
     }));
   $('cat-nota').textContent = cats.length === 0 ? '' : hayAntes
     ? `El cambio compara con el periodo anterior de igual largo (${textoAntes}); «nueva» es una categoría que antes no vendió.`
-    : 'No hubo ventas en el periodo anterior: no hay con qué comparar.';
+    : `${TEXTO_COMPARACION.sinDatos}: no hay con qué comparar.`;
   // En la tabla tambien entran las categorias que vendieron antes y ahora no (−100%): en las barras no hay nada que dibujar.
   const soloAntes = r.por_categoria_anterior.filter((f) => !r.por_categoria.some((x) => x.categoria === f.categoria));
   $('tabla-cat').innerHTML = tabla(['Categoría', 'Vendido', 'Piezas', '% del total', 'Periodo anterior', 'Cambio'],

@@ -43,7 +43,7 @@ test('las seis tarjetas: lo de piso es foto de hoy, sin minigrafica ni «vs ante
   for (const etq of ['Valor en piso', 'Piezas en piso', 'Antigüedad promedio', 'Vendido a 4 semanas', 'Días en venta', 'Merma por caducidad']) assert.ok(html.includes(etq), etq);
   assert.equal(html.match(/class="tarjeta kpi"/g)!.length, 6, 'el mismo marcado que las tarjetas de Resumen');
   assert.equal(html.match(/Foto de hoy/g)!.length, 3);
-  assert.match(html, /Foto de hoy: no hay historial para comparar/);
+  assert.match(html, /Foto de hoy: sin historial para comparar/);
   assert.ok(html.includes('Mediana de captura a venta'));
   assert.equal(html.match(/<svg class="mini /g)?.length ?? 0, 0, 'una sola cohorte madura: no hay tendencia que dibujar');
   const vacio = tarjetasInventario(vacia, baseVacia);
@@ -61,7 +61,7 @@ test('con dos cohortes maduras el vendido a 4 semanas lleva su minigrafica', () 
   assert.equal(html.match(/<svg class="mini /g)!.length, 1);
   assert.match(html, /20\.0 %/);
   assert.match(html, /▼ −20\.0%/, 'los dias en venta bajaron: flecha y texto');
-  assert.match(html, /vs periodo anterior/);
+  assert.match(html, /vs anterior/);
 });
 
 test('el aviso de tienda dice que la vista no se filtra', () => {

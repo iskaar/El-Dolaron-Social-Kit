@@ -3,7 +3,7 @@
 // src/reportes-clientes.test.ts. Dinero en centavos enteros; los dias son dias de la tienda (UTC-6).
 // «Socio» es una fila de `clientes`; las cuentas del equipo (registrado_por = 'retos') no son clientes y no cuentan como socios.
 import { escapar, pesos, pesosEje, sumarDias, diaCorto, tabla, columnas, lineaSerie, leyendaSeries } from './graficas.js';
-import { cubetas as listaCubetas, cambioKpi, diasEntre, etiquetaCubeta, tituloCubeta, unidadGrano } from './reportes-resumen.js';
+import { cubetas as listaCubetas, cambioKpi, vsCorto, diasEntre, etiquetaCubeta, tituloCubeta, unidadGrano } from './reportes-resumen.js';
 
 const num = (n) => Number(n).toLocaleString('es-MX');
 const un = (v) => v.toLocaleString('es-MX', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
@@ -137,8 +137,9 @@ const chica = (n) => (n < MUESTRA_MIN ? ` · muestra chica (${num(n)})` : '');
 export function tarjetasClientes(d) {
   const t = d.totales, a = d.anterior, sc = d.cubetas;
   const comparando = !!d.comparacion;
-  const vs = d.comparar === 'mes' ? 'vs mes pasado' : 'vs anterior';
-  const k = (clave, etiqueta, valor, cambio, serie, pie) => ({ clave, etiqueta, valor, cambio: comparando ? cambio : null, serie, clase: 's1', pie, vs, hayComp: comparando, comparando });
+  const vs = vsCorto(d);
+  const hayComp = !!a && (a.tickets_socio + a.tickets_sin > 0 || a.socios > 0 || a.nuevos > 0);   // el periodo comparado tuvo algo
+  const k = (clave, etiqueta, valor, cambio, serie, pie) => ({ clave, etiqueta, valor, cambio: comparando ? cambio : null, serie, clase: 's1', pie, vs, hayComp, comparando });
   const nuevosCanal = CANALES_ALTA.map(([c, nombre]) => [nombre, t.nuevos_canal[c]]).filter(([, n]) => n > 0).map(([nombre, n]) => `${nombre.toLowerCase()} ${num(n)}`).join(' · ');
   const totalTickets = t.tickets_socio + t.tickets_sin, totalVentas = t.ventas_socio + t.ventas_sin;
   const ticketCon = ticketMedio(t.ventas_socio, t.tickets_socio), ticketSin = ticketMedio(t.ventas_sin, t.tickets_sin);

@@ -13,7 +13,7 @@ import {
   escapar, pesos, pesosEje, pesosConSigno, tabla, columnas, leyendaSeries, barrasHorizontales, mapaCalor, mapaCalorHtml, tablaCalor,
   FORMATO_CALOR_DINERO,
 } from './graficas.js';
-import { armarCubetas, cambioKpi, tarjetasHtml, etiquetaCubeta, tituloCubeta } from './reportes-resumen.js';
+import { armarCubetas, cambioKpi, vsCorto, tarjetasHtml, etiquetaCubeta, tituloCubeta } from './reportes-resumen.js';
 import { MAX_COLUMNAS } from './reportes-ventas.js';
 
 const n0 = (n) => Number(n ?? 0).toLocaleString('es-MX');
@@ -188,7 +188,7 @@ export function armarControl({ desde, hasta, grano, ventana, ventas, eventos, ap
 export function tarjetasControl(d) {
   const t = d.totales, a = d.anterior, sc = d.cubetas;
   const hayComp = !!(a && a.tickets > 0);
-  const comunes = { vs: d.comparar === 'mes' ? 'vs mes pasado' : 'vs anterior', hayComp, comparando: !!d.comparacion };
+  const comunes = { vs: vsCorto(d), hayComp, comparando: !!d.comparacion };
   const tasa = (x) => (x.bruto > 0 ? (x.canc_valor * 100) / x.bruto : null);
   const cambio = (actual, previo, opciones = { bueno: 'baja' }) => (hayComp ? cambioKpi(actual, previo, opciones) : null);
   const hayCortes = t.cortes_n > 0;
