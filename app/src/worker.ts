@@ -50,6 +50,7 @@ import { misRetos, otorgarLogros, esCorridaDiaria } from './retos.ts';
 import { rutaTablero } from './tablero.ts';
 import { diaTienda, hoyTienda, rangoDias, rangoDe, delDia, DIA, reportes, RangoInvalido } from './reportes.ts';
 import { reporteResumen } from './reportes-resumen.ts';
+import { reporteVentas } from './reportes-ventas.ts';
 
 // Las pruebas importan estos dos desde aqui.
 export { hoyTienda, rangoDias };
@@ -2955,6 +2956,7 @@ export default {
       }
       if (pathname === '/api/reportes/dolarones' && request.method === 'GET') return await reporteDolarones(url, env);
       if (pathname === '/api/reportes/resumen' && request.method === 'GET') return await reporteResumen(url, env);
+      if (pathname === '/api/reportes/ventas' && request.method === 'GET') return await reporteVentas(url, env);
       if (pathname === '/api/reportes/equipo' && request.method === 'GET') return await reporteEquipo(url, env);
       if (pathname === '/api/reportes/equipo/bono' && request.method === 'POST') return await registrarBonoSemana(request, env, correo);
       if (pathname === '/api/reportes/capturas' && request.method === 'GET') return await reporteCapturas(url, env);
