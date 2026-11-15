@@ -16,7 +16,7 @@ import { FORMAS, MAX_COLUMNAS } from './reportes-ventas.js';
 import { CATEGORIAS_GASTO } from './categorias.js';
 
 const num = (n) => Number(n).toLocaleString('es-MX');
-const un = (v) => v.toLocaleString('es-MX', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+const un = (v) => v.toLocaleString('es-MX', { minimumFractionDigits: 1, maximumFractionDigits: 1 }).replace('-', '−');   // el menos de verdad, como el de pesos()
 const cuenta = (n, uno, varios) => `${num(n)} ${n === 1 ? uno : varios}`;
 const mayuscula = (t) => (t ? t[0].toUpperCase() + t.slice(1) : t);
 const suma = (xs) => xs.reduce((s, x) => s + x, 0);
