@@ -277,7 +277,7 @@ export function tablaDemora(d) {
     d.demora.map((t) => [t.nombre, n0(t.ticket), n0(t.pieza), pct(t.ticket + t.pieza, total)]), [1, 2, 3]);
 }
 
-const formatoCalor = (uno, varios, titulo) => ({ ...FORMATO_CALOR_DINERO, valor: (n) => cuenta(n, uno, varios), eje: n0, vacio: `Sin ${varios}`, titulo, escala: `Escala: el tono más fuerte es más ${varios}` });
+const formatoCalor = (uno, varios, titulo) => ({ ...FORMATO_CALOR_DINERO, entero: true, valor: (n) => cuenta(n, uno, varios), eje: n0, vacio: `Sin ${varios}`, titulo, escala: `Escala: el tono más fuerte es más ${varios}` });
 const mapaDe = (filas, uno, varios) => mapaCalor(filas.map((f) => ({ dia_semana: f.dia_semana, hora: f.hora, tickets: f.n, total: f.n })), (n) => (n ? cuenta(n, uno, varios) : `Sin ${varios}`));
 
 /* ---------- por persona ---------- */

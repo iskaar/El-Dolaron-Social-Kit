@@ -312,6 +312,27 @@ test('la pantalla escapa todo lo que escriben otras personas: motivos, nombres y
   t.db.close();
 });
 
+test('la hora de un movimiento es la de la tienda (UTC-6): una accion a las 23:30 de un sabado cae en sabado 23, aunque en UTC ya sea domingo', async () => {
+  const t = tienda();
+  t.db.prepare('update productos set stock = 100000 where id = ?').run(PRODUCTO);
+  let sabado = 1;
+  while (new Date(`${dia(sabado)}T12:00:00Z`).getUTCDay() !== 6) sabado++;           // el sabado mas reciente de ayer hacia atras
+  const tarde = a(dia(sabado), 23, 30);
+  assert.equal(new Date(tarde).getUTCDay(), 0);                                      // en UTC es domingo 05:30
+  const v = await vender(t, dia(sabado), DUENO, 2);
+  await cancelar(t, v, DUENO, 11 * 60 + 30, 'x');                                    // la venta fue a las 12:00; el cancelado, a las 23:30
+  const v2 = await vender(t, dia(sabado), DUENO, 2);
+  await devolver(t, v2, DUENO, 11 * 60 + 30, 'x');                                   // la devolucion, a las 23:30
+  apertura(t, DUENO, tarde);
+  assert.equal(t.db.prepare('select cancelada_en from ventas where id = ?').get(v)!.cancelada_en, tarde);
+  const C = (await llamar(t, 'dias=14')).cuerpo;
+  assert.deepEqual(C.por_hora.movimientos, [{ dia_semana: 6, hora: 23, n: 2 }]);
+  assert.deepEqual(C.por_hora.cajon, [{ dia_semana: 6, hora: 23, n: 1 }]);
+  assert.equal(C.cubetas.find((c: any) => c.desde === dia(sabado)).cajon_n, 1);       // y cuenta en el sabado, no en el domingo
+  assert.deepEqual(momentoTienda(tarde), { dia: dia(sabado), hora: 23, dia_semana: 6 });
+  t.db.close();
+});
+
 test('tiempo entre la venta y el movimiento: tramos, y un reloj de caja adelantado cuenta como cero', () => {
   const venta = '2026-11-10T16:00:00.000Z';   // 10:00 de la tienda
   assert.equal(tramoDemora(venta, '2026-11-10T16:05:00.000Z'), 0);     // justo en la ventana del cajero
