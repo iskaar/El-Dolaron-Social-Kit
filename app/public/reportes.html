@@ -7,6 +7,7 @@
 <link rel="stylesheet" href="/reportes-dolarones.css">
 <link rel="stylesheet" href="/reportes-capturas.css">
 <link rel="stylesheet" href="/reportes-ventas.css">
+<link rel="stylesheet" href="/reportes-clientes.css">
 <link rel="stylesheet" href="/reportes-inventario.css">
 <style>
   /* Archivo: la misma del tablero, servida por la app (licencia OFL), sin Google Fonts. */
@@ -322,6 +323,7 @@
     <span class="grupo" aria-hidden="true">Vistas</span>
     <a href="#resumen" data-v="resumen">Resumen</a>
     <a href="#ventas" data-v="ventas">Ventas</a>
+    <a href="#clientes" data-v="clientes">Clientes</a>
     <a href="#dolarones" data-v="dolarones">Dolarones</a>
     <a href="#inventario" data-v="inventario">Inventario</a>
     <a href="#capturas" data-v="capturas">Capturas</a>
@@ -485,6 +487,12 @@
         </article>
       </section>
     </div>
+  </section>
+
+  <section class="vista" id="v-clientes" data-vista="clientes" aria-labelledby="h-clientes" hidden>
+    <h2 id="h-clientes" tabindex="-1">Clientes</h2>
+    <p class="bajada">Socios del programa Dolarones: cuántos entran, cuánto compran y cuántos regresan. El saldo y los vales están en <a class="enlace" href="#dolarones">Ver Dolarones</a>.</p>
+    <div id="clientes-contenido" style="display:grid;gap:16px;min-width:0"><p class="vacio">Cargando…</p></div>
   </section>
 
   <section class="vista" id="v-dolarones" data-vista="dolarones" aria-labelledby="h-dolarones" hidden>
@@ -730,6 +738,7 @@ import {
 } from '/reportes-resumen.js';
 import { montarCapturas } from '/reportes-capturas.js';
 import * as Ventas from '/reportes-ventas.js';
+import * as Clientes from '/reportes-clientes.js';
 
 const $ = (id) => document.getElementById(id);
 // Hora de la tienda (la del navegador), no UTC como se guarda.
@@ -748,9 +757,9 @@ const decimal = (n) => n.toLocaleString('es-MX', { minimumFractionDigits: 1, max
 const DIA = /^\d{4}-\d{2}-\d{2}$/;
 const MAX_DIAS = 366;   // el mismo tope del servidor
 const PERIODOS = [['hoy', 'Hoy'], ['7', '7 días'], ['28', '28 días'], ['mes', 'Este mes'], ['mes-pasado', 'Mes pasado'], ['apertura', 'Desde la apertura'], ['custom', 'Personalizado']];
-const VISTAS = ['resumen', 'ventas', 'dolarones', 'inventario', 'capturas', 'finanzas', 'equipo', 'control', 'tickets'];
-const VISTAS_CON_COMPARACION = ['resumen', 'ventas'];
-const NOMBRES_VISTA = { resumen: 'Resumen', ventas: 'Ventas', dolarones: 'Dolarones', inventario: 'Inventario', capturas: 'Capturas', finanzas: 'Finanzas', equipo: 'Equipo', control: 'Control', tickets: 'Tickets' };
+const VISTAS = ['resumen', 'ventas', 'clientes', 'dolarones', 'inventario', 'capturas', 'finanzas', 'equipo', 'control', 'tickets'];
+const VISTAS_CON_COMPARACION = ['resumen', 'ventas', 'clientes'];
+const NOMBRES_VISTA = { resumen: 'Resumen', ventas: 'Ventas', clientes: 'Clientes', dolarones: 'Dolarones', inventario: 'Inventario', capturas: 'Capturas', finanzas: 'Finanzas', equipo: 'Equipo', control: 'Control', tickets: 'Tickets' };
 // El dia de la tienda (UTC-6), como lo calcula el servidor: «hoy» y «este mes» no dependen de la zona del navegador.
 const hoyTienda = () => new Date(Date.now() - 6 * 3_600_000).toISOString().slice(0, 10);
 
@@ -763,12 +772,13 @@ let textoAntes = '';       // «19 oct – 15 nov»: el periodo contra el que se
 let vistaActual = '';
 let turnoCarga = 0;
 // Lo que depende del periodo pero no viaja en /api/reportes se pide la primera vez que se ve su vista, no en cada cambio.
-const pendientes = new Set(['resumen', 'ventas', 'equipo', 'tickets', 'finanzas', 'dolarones', 'inventario']);
+const pendientes = new Set(['resumen', 'ventas', 'clientes', 'equipo', 'tickets', 'finanzas', 'dolarones', 'inventario']);
 // Resumen y Ventas (#802): «Comparar con» y el grano. Viven en la URL junto al periodo y la tienda; solo estas dos vistas reaccionan.
 let comparar = 'anterior';   // 'anterior' (la de siempre), 'mes' (mismo periodo del mes pasado) o 'ninguna'
 let granoPedido = '';        // '' = automatico (por dia hasta 35 dias, despues por semana)
 let datosResumen = null;     // la ultima respuesta de /api/reportes/resumen
 let turnoResumen = 0;
+let datosClientes = null;    // la ultima respuesta de /api/reportes/clientes
 let textoAnteriorBase = '';  // «Comparado con ...» de /api/reportes: el de las demas vistas
 
 /* ---------- periodo ---------- */
@@ -840,7 +850,7 @@ function leerUrl() {
 // Cambia el periodo o la tienda: una sola peticion de /api/reportes; equipo, tickets y finanzas se piden al ver su vista.
 function recargar() {
   diaElegido = null;
-  for (const v of ['resumen', 'ventas', 'equipo', 'tickets', 'dolarones', 'inventario']) pendientes.add(v);
+  for (const v of ['resumen', 'ventas', 'clientes', 'equipo', 'tickets', 'dolarones', 'inventario']) pendientes.add(v);
   guardarUrl();
   pintarRango();
   cargar();
@@ -916,6 +926,7 @@ function cargarVista() {
   if (vistaActual === 'inventario' && pendientes.delete('inventario')) cargarInventario();
   if (vistaActual === 'resumen' && pendientes.delete('resumen')) cargarResumen();
   if (vistaActual === 'ventas' && pendientes.delete('ventas')) cargarVentas();
+  if (vistaActual === 'clientes' && pendientes.delete('clientes')) cargarClientes();
   if (vistaActual === 'equipo' && pendientes.delete('equipo')) cargarEquipo();
   if (vistaActual === 'tickets' && pendientes.delete('tickets')) cargarTickets();
   if (vistaActual === 'finanzas' && pendientes.delete('finanzas')) { cargarFondo(); cargarTerminal(); }
@@ -947,7 +958,8 @@ function pintarResumen(r) {
 
 // Debajo de la barra: contra que se compara lo que se ve. En Resumen y Ventas manda «Comparar con»; en las demas vistas, el periodo anterior.
 function textoAnterior() {
-  $('p-anterior').textContent = VISTAS_CON_COMPARACION.includes(vistaActual) && datosResumen ? textoComparacion(datosResumen) : textoAnteriorBase;
+  const base = vistaActual === 'clientes' ? datosClientes : datosResumen;   // Clientes trae su propia comparacion
+  $('p-anterior').textContent = VISTAS_CON_COMPARACION.includes(vistaActual) && base ? textoComparacion(base) : textoAnteriorBase;
 }
 
 function consultaResumen() {
@@ -1056,7 +1068,7 @@ function pintarResumenEjecutivo() {
 // Comparar con y grano cambian lo de Resumen y lo de Ventas: se vuelve a pedir lo de la vista que se ve, y la otra al visitarla.
 function aplicarControles() {
   guardarUrl();
-  pendientes.add('resumen'); pendientes.add('ventas');
+  pendientes.add('resumen'); pendientes.add('ventas'); pendientes.add('clientes');
   cargarVista();
 }
 $('f-comparar').addEventListener('change', () => {
@@ -1397,6 +1409,39 @@ async function cargarVentas() {
   }
 }
 new ResizeObserver(() => dibujarVentas()).observe($('ventas-cuerpo'));
+
+/* ---------- Clientes (#802): una peticion al ver la vista, una vez por periodo, tienda, comparacion y grano ---------- */
+let turnoClientes = 0;
+function dibujarClientes() {
+  if (!datosClientes) return;
+  const huecos = [...$('clientes-contenido').querySelectorAll('.graf-c')].filter((h) => h.clientWidth);   // las ocultas se dibujan al verse
+  if (!huecos.length) return;
+  const ancho = Object.fromEntries(huecos.map((h) => [h.dataset.grafica, h.clientWidth]));
+  const g = Clientes.graficas(datosClientes, (id) => ancho[id] || 640);
+  for (const h of huecos) h.innerHTML = g[h.dataset.grafica] ?? '';
+}
+async function cargarClientes() {
+  const turno = ++turnoClientes;
+  const caja = $('clientes-contenido');
+  caja.style.opacity = '.55';   // se queda el cuadro anterior, atenuado: sin saltos
+  try {
+    const respuesta = await fetch(`/api/reportes/clientes?${consultaResumen()}`);
+    const r = await respuesta.json().catch(() => ({}));
+    if (turno !== turnoClientes) return;
+    if (!respuesta.ok) { caja.innerHTML = `<p class="vacio">${escapar(r.error ?? 'No se pudo cargar la vista de Clientes.')}</p>`; return; }
+    datosClientes = r;
+    caja.innerHTML = Clientes.vistaClientes(r);
+    $('c-kpis').innerHTML = tarjetasHtml(Clientes.tarjetasClientes(r));
+    pintarGrano(r);
+    textoAnterior();
+    dibujarClientes();
+  } catch {
+    if (turno === turnoClientes) caja.innerHTML = '<p class="vacio">No se pudo cargar la vista de Clientes. Revisa la conexión.</p>';
+  } finally {
+    if (turno === turnoClientes) caja.style.opacity = '';
+  }
+}
+new ResizeObserver(() => dibujarClientes()).observe($('clientes-contenido'));
 
 /* ---------- Dolarones (#802): una peticion al ver la vista, una vez por periodo y tienda ---------- */
 let datosDolarones = null;
