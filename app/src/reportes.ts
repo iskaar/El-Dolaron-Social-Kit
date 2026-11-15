@@ -67,6 +67,32 @@ export const rangoDe = (url: URL, ahora = Date.now()) => {
   return rangoDias(Number.isFinite(dias) ? Math.min(365, Math.max(1, dias)) : 30, ahora);
 };
 
+/**
+ * Lo cobrado por forma de pago (y los Dolarones como una forma mas), con los 3 pares desde/hasta de `bind` (ventas, pedidos, abonos).
+ * Cobrado en el ticket (netas.ts ya descuenta el anticipo) mas el anticipo de los pedidos recibidos en el periodo: el dinero entra
+ * el dia del apartado, no el de la venta. Los Dolarones usados (neta - cobrado - anticipo) van en su propia fila. Con `porDia` cada
+ * fila trae ademas el dia de la tienda en que entro el dinero (#802, vista Ventas): sumadas dan lo mismo que sin dia.
+ * D1 admite 5 terminos por compound SELECT: son 4.
+ */
+export function consultaFormaPago(deTienda: string, deCajas: (columna: string) => string, porDia = false) {
+  const dia = (columna: string) => (porDia ? `${diaTienda(columna)} as dia, ` : '');
+  const g = porDia ? 'dia, ' : '';
+  return `${lineasNetas(`v.creado_en >= ? and v.creado_en < ?${deTienda}`)}
+     select ${g}forma_pago, sum(tickets) as tickets, sum(total) as total from (
+       select ${dia('creado_en')}forma_pago, count(distinct venta) as tickets, coalesce(sum(cobrado), 0) as total
+       from cobros where propietario = 'dolaron' group by ${g}forma_pago
+       union all
+       select ${dia('creado_en')}forma_pago, 0, coalesce(sum(anticipo), 0) from pedidos where creado_en >= ? and creado_en < ?${deCajas('caja')} group by ${g}forma_pago
+       union all
+       select ${dia('creado_en')}forma_pago, 0, coalesce(sum(importe), 0) from pedido_movimientos
+       where tipo = 'abono' and creado_en >= ? and creado_en < ?${deCajas('caja')} group by ${g}forma_pago
+       union all
+       select ${dia('creado_en')}'dolarones', count(distinct case when neta - cobrado - anticipo_linea <> 0 then venta end),
+         coalesce(sum(neta - cobrado - anticipo_linea), 0)
+       from cobros where propietario = 'dolaron'${porDia ? ' group by dia' : ''}
+     ) group by ${g}forma_pago`;
+}
+
 /** Unidades y valor por dónde están: Soledad, cada sucursal y en camino. Las claves van siempre (en 0 si no hay nada). */
 function desgloseDeInventario(filas: ({ precio: number; soledad: number; en_camino: number } & Record<string, number>)[]) {
   const lugar = () => ({ unidades: 0, valor: 0 });
@@ -232,25 +258,7 @@ export async function reportes(url: URL, env: Env): Promise<Response> {
     .first<{ bruto: number; devoluciones_pieza: number; cancelados: number; fep: number }>();
 
   // Lo cobrado en dinero por forma de pago, y lo pagado con Dolarones como una forma mas.
-  const { results: porFormaPago } = await env.DB.prepare(
-    // Cobrado en el ticket (netas.ts ya descuenta el anticipo) mas el anticipo de los pedidos recibidos
-    // en el periodo: el dinero entra el dia del apartado, no el de la venta. Los Dolarones usados
-    // (neta - cobrado - anticipo) van en su propia fila.
-    `${lineasNetas(`v.creado_en >= ? and v.creado_en < ?${deTienda}`)}
-     select forma_pago, sum(tickets) as tickets, sum(total) as total from (
-       select forma_pago, count(distinct venta) as tickets, coalesce(sum(cobrado), 0) as total
-       from cobros where propietario = 'dolaron' group by forma_pago
-       union all
-       select forma_pago, 0, coalesce(sum(anticipo), 0) from pedidos where creado_en >= ? and creado_en < ?${deCajas('caja')} group by forma_pago
-       union all
-       select forma_pago, 0, coalesce(sum(importe), 0) from pedido_movimientos
-       where tipo = 'abono' and creado_en >= ? and creado_en < ?${deCajas('caja')} group by forma_pago
-       union all
-       select 'dolarones', count(distinct case when neta - cobrado - anticipo_linea <> 0 then venta end),
-         coalesce(sum(neta - cobrado - anticipo_linea), 0)
-       from cobros where propietario = 'dolaron'
-     ) group by forma_pago`,
-  )
+  const { results: porFormaPago } = await env.DB.prepare(consultaFormaPago(deTienda, deCajas))
     .bind(desde, hasta, desde, hasta, desde, hasta)
     .all<{ forma_pago: string; tickets: number; total: number }>();
 
@@ -289,7 +297,7 @@ export async function reportes(url: URL, env: Env): Promise<Response> {
        coalesce(sum(n.neta), 0) as total, coalesce(sum(n.cant), 0) as piezas
      from netas n left join productos p on p.id = n.producto_id
      where n.propietario = 'dolaron'
-     group by categoria order by total desc`,
+     group by 1 order by total desc`,   // por posicion: `group by categoria` agrupaba por la columna p.categoria y mezclaba las bandas con la ropa (#802)
   )
     .bind(...(anteriorAlPeriodo ? [rango.anterior_desde, desde] : [desde, hasta]))
     .all<{ categoria: string; total: number; piezas: number }>();
