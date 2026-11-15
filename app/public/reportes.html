@@ -260,6 +260,7 @@
   .ver-mas, .fondo-caja button, .exportar a { padding: 8px 14px; font: inherit; font-size: 13px; border: 1px solid var(--borde); border-radius: 10px;
     background: var(--superficie); color: var(--tinta); cursor: pointer; text-decoration: none; font-weight: 600; display: inline-block; }
   .ver-mas { margin-top: 10px; }
+  .ver-mas[hidden] { display: none; }   /* sin esto el display de arriba le gana al atributo hidden y «Ver más» se veia siempre */
   .fondo-caja { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 14px; font-size: 14px; }
   .fondo-caja label { flex-basis: 100%; color: var(--tinta-2); font-size: 13px; }
   .fondo-caja input { width: 130px; padding: 8px 10px; font: inherit; font-size: 15px; border: 1px solid var(--borde); border-radius: 8px;
@@ -772,7 +773,7 @@ import {
 } from '/graficas.js';
 import {
   COMPARACIONES, GRANOS, granosPermitidos, tarjetasKpi, tarjetasHtml, datosTendencia, leyendaTendencia, tablaTendencia, metaHtml, graficaMeta, tablaMeta,
-  hallazgos, hallazgosHtml, canalesHtml, tablaCanales, categoriasHtml, tablaCategorias, textoComparacion, unidadGrano, COMPARACION_POR_GRANO,
+  hallazgos, hallazgosHtml, canalesHtml, tablaCanales, categoriasHtml, tablaCategorias, textoComparacion, unidadGrano, COMPARACION_POR_GRANO, rangoTexto,
 } from '/reportes-resumen.js';
 import { montarCapturas } from '/reportes-capturas.js';
 import * as Ventas from '/reportes-ventas.js';
@@ -780,6 +781,7 @@ import * as Clientes from '/reportes-clientes.js';
 import { montarControl } from '/reportes-control.js';
 import { montarEquipo } from '/reportes-equipo.js';
 import * as Finanzas from '/reportes-finanzas.js';
+import { CLAVES_DE_PARTE, PARTES_FOTO, PARTES_SIN_TIENDA } from '/reportes-partes.js';
 
 const $ = (id) => document.getElementById(id);
 // Hora de la tienda (la del navegador), no UTC como se guarda.
@@ -808,11 +810,9 @@ let periodo = { clave: '28', desde: '', hasta: '' };   // desde y hasta solo val
 let primeraVenta;          // undefined = aun no se sabe; null = no hay ventas; si no, el dia de la primera venta («Desde la apertura»)
 let tiendaActual = '';    // #798: '' = el negocio completo; si no, la clave de una tienda (ventas.tienda)
 let diaElegido = null;     // un dia (clic en su columna) que filtra los tickets
-let ultimoReporte = null;
 let textoAntes = '';       // «19 oct – 15 nov»: el periodo contra el que se compara
 let vistaActual = '';
-let turnoCarga = 0;
-// Lo que depende del periodo pero no viaja en /api/reportes se pide la primera vez que se ve su vista, no en cada cambio.
+// Lo que depende del periodo se pide la primera vez que se ve su vista y otra vez solo si cambio el periodo o la tienda (nunca al cambiar de vista).
 const pendientes = new Set(['resumen', 'ventas', 'clientes', 'equipo', 'control', 'tickets', 'finanzas', 'finanzas-datos', 'dolarones', 'inventario']);
 // Resumen, Ventas, Finanzas, Control y Equipo (#802): «Comparar con» y el grano. Viven en la URL junto al periodo y la tienda; solo estas vistas reaccionan.
 let comparar = 'anterior';   // 'anterior' (la de siempre), 'mes' (mismo periodo del mes pasado) o 'ninguna'
@@ -849,10 +849,84 @@ function consultaPeriodo() {
 }
 const periodoDefinitivo = () => periodo.clave !== 'apertura' || primeraVenta !== undefined;
 
+// El periodo que se pide, con sus fechas, calculado aqui (el servidor calcula lo mismo): el encabezado no espera a ninguna respuesta.
+function rangoActual() {
+  const q = consultaPeriodo();
+  if (q.has('desde')) {
+    const desde = q.get('desde'), hasta = q.get('hasta');
+    return { desde, hasta, dias: Math.round((Date.parse(`${hasta}T12:00:00Z`) - Date.parse(`${desde}T12:00:00Z`)) / 86_400_000) + 1 };
+  }
+  const dias = Number(q.get('dias')), hasta = hoyTienda();
+  return { desde: sumarDias(hasta, -(dias - 1)), hasta, dias };
+}
+
+/* ---------- /api/reportes por partes (#802, A6): cada vista pide solo lo que pinta, una vez por periodo y tienda ---------- */
+
+let reporte = {};            // lo que han traido las partes pedidas, por clave de la respuesta: una parte vale solo mientras `vigente` diga que es del periodo y la tienda de ahora
+let tiendasLista = [];       // las tiendas del servidor (para el selector y el aviso de Inventario)
+const vigente = new Map();   // parte -> { clave, en }: de que periodo y tienda es lo que hay en `reporte` y cuando llego
+const enVuelo = new Map();   // parte -> { clave, promesa }: una misma parte no se pide dos veces a la vez
+const VIDA_FOTO = 5 * 60_000;   // las fotos de ahora (inventario...) se repiten como mucho cada 5 minutos, no con cada cambio de periodo
+function claveParte(parte) {
+  if (PARTES_FOTO.includes(parte)) return 'foto';
+  const q = consultaPeriodo();
+  if (tiendaActual && !PARTES_SIN_TIENDA.includes(parte)) q.set('tienda', tiendaActual);
+  return q.toString();
+}
+function parteVigente(parte) {
+  const v = vigente.get(parte);
+  return !!v && v.clave === claveParte(parte) && (v.clave !== 'foto' || Date.now() - v.en < VIDA_FOTO);
+}
+/** Pide en UNA peticion las partes de /api/reportes que faltan (o ya no valen). Devuelve true si todas las pedidas quedaron vigentes. Nunca lanza. */
+async function pedirPartes(partes) {
+  const nuevas = [], esperas = [];
+  for (const parte of partes) {
+    if (parteVigente(parte)) continue;
+    const clave = claveParte(parte), vuelo = enVuelo.get(parte);
+    if (vuelo?.clave === clave) esperas.push(vuelo.promesa); else nuevas.push([parte, clave]);
+  }
+  if (nuevas.length) {
+    const q = consultaPeriodo();
+    if (tiendaActual) q.set('tienda', tiendaActual);
+    q.set('partes', nuevas.map(([parte]) => parte).join(','));
+    const promesa = fetch(`/api/reportes?${q}`).then(async (r) => {
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d.error ?? 'No se pudo cargar el reporte.');
+      if (Array.isArray(d.tiendas)) tiendasLista = d.tiendas;
+      for (const [parte, clave] of nuevas) {
+        if (claveParte(parte) !== clave) continue;   // llego tarde: ya se pidio otro periodo u otra tienda
+        for (const k of CLAVES_DE_PARTE[parte]) reporte[k] = d[k];
+        vigente.set(parte, { clave, en: Date.now() });
+      }
+      sello();
+    }).finally(() => { for (const [parte] of nuevas) if (enVuelo.get(parte)?.promesa === promesa) enVuelo.delete(parte); });
+    for (const [parte, clave] of nuevas) enVuelo.set(parte, { clave, promesa });
+    esperas.push(promesa);
+  }
+  try { await Promise.all(esperas); } catch { return false; }
+  return partes.every(parteVigente);
+}
+function sello() { $('actualizado').textContent = `Actualizado ${new Date().toLocaleString('es-MX', { dateStyle: 'medium', timeStyle: 'short' })}`; }
+
+// Lo unico que no cambia con el periodo ni la tienda y hace falta antes de nada: el dia de la primera venta («Desde la apertura») y las tiendas. Una vez.
+let basePromesa = null;
+function cargarBase() {
+  basePromesa ??= pedirPartes(['primera_venta']).then((ok) => {
+    basePromesa = null;
+    if (!ok) { avisoPeriodo('No se pudo cargar el reporte. Revisa la conexión.'); return; }
+    primeraVenta = reporte.primera_venta ?? null;
+    pintarTiendas();
+    pintarPeriodo();
+    cargarVista();   // «Desde la apertura» esperaba este dia para saber su periodo
+  });
+}
+
 function avisoPeriodo(texto) { $('aviso-periodo').textContent = texto; }
 
+const diaReal = (d) => DIA.test(d) && !Number.isNaN(Date.parse(`${d}T00:00:00Z`)) && new Date(`${d}T00:00:00Z`).toISOString().slice(0, 10) === d;
 function validarPersonalizado(desde, hasta) {
   if (!DIA.test(desde) || !DIA.test(hasta)) return '';   // falta una: se espera a la otra
+  if (!diaReal(desde) || !diaReal(hasta)) return 'Una de las fechas no existe en el calendario.';
   if (desde > hasta) return 'La fecha inicial es posterior a la final.';
   if (hasta > hoyTienda()) return 'La fecha final no puede ser futura.';
   if ((Date.parse(`${hasta}T12:00:00Z`) - Date.parse(`${desde}T12:00:00Z`)) / 86_400_000 + 1 > MAX_DIAS) return `El periodo no puede pasar de ${MAX_DIAS} días.`;
@@ -881,28 +955,38 @@ function guardarUrl() {
 function leerUrl() {
   const q = new URLSearchParams(location.search);
   const desde = q.get('desde') ?? '', hasta = q.get('hasta') ?? '';
-  if (DIA.test(desde) && DIA.test(hasta)) periodo = { clave: 'custom', desde, hasta };
+  let corregido = false;
+  // Un enlace con fechas que no se pueden atender (mal escritas, futuras, de mas de 366 dias) cae en el periodo por omision y lo avisa (A9).
+  if (q.has('desde') || q.has('hasta')) {
+    const problema = DIA.test(desde) && DIA.test(hasta) ? validarPersonalizado(desde, hasta) : 'Las fechas del enlace no son válidas.';
+    if (problema === null) periodo = { clave: 'custom', desde, hasta };
+    else { avisoPeriodo(`${problema || 'Las fechas del enlace no son válidas.'} Se muestra el periodo por omisión.`); corregido = true; }
+  }
+  if (periodo.clave === 'custom') { /* ya valido arriba */ }
   else if (PERIODOS.some(([clave]) => clave === q.get('periodo') && clave !== 'custom')) periodo = { clave: q.get('periodo'), desde: '', hasta: '' };
   tiendaActual = q.get('tienda') ?? '';
   if (COMPARACIONES.includes(q.get('comparar'))) comparar = q.get('comparar');
   if (GRANOS.includes(q.get('grano'))) granoPedido = q.get('grano');
   if ([5, 10, 15, 20].includes(Number(q.get('pausa')))) pausa = Number(q.get('pausa'));
   $('f-pausa').value = pausa;
+  if (corregido) guardarUrl();   // la barra de direcciones deja de traer las fechas que no sirven
 }
 
-// Cambia el periodo o la tienda: una sola peticion de /api/reportes; equipo, tickets y finanzas se piden al ver su vista.
+// Cambia el periodo o la tienda: se pide lo de la vista que se ve (y solo lo que le falta); las demas, al visitarlas.
 function recargar() {
   diaElegido = null;
   for (const v of ['resumen', 'ventas', 'clientes', 'equipo', 'control', 'tickets', 'dolarones', 'inventario', 'finanzas-datos']) pendientes.add(v);
   guardarUrl();
   pintarRango();
-  cargar();
+  pintarPeriodo();
+  if (primeraVenta === undefined) cargarBase(); else cargarVista();
 }
 $('rango').addEventListener('click', (e) => {
   const clave = e.target.dataset?.periodo;
   if (!clave || clave === periodo.clave) return;
   if (clave === 'custom') {   // arranca con lo que se esta viendo: no hay nada que pedir hasta que cambie una fecha
-    periodo = { clave, desde: ultimoReporte?.dia_desde ?? hoyTienda(), hasta: ultimoReporte?.dia_hasta ?? hoyTienda() };
+    const actual = rangoActual();
+    periodo = { clave, desde: actual.desde, hasta: actual.hasta };
     guardarUrl();
     pintarRango();
     return;
@@ -926,14 +1010,14 @@ $('f-tienda').addEventListener('change', () => {
   tiendaActual = $('f-tienda').value;
   recargar();
 });
-function pintarTiendas(r) {
+function pintarTiendas() {
   // Solo se ofrece cuando hay más de una tienda en el servidor; un cliente viejo en caché simplemente no la ve.
-  if (!Array.isArray(r.tiendas) || r.tiendas.length < 2) return;
+  if (tiendasLista.length < 2) return;
   const selector = $('f-tienda');
   $('c-tienda').hidden = false;
-  if (selector.options.length !== r.tiendas.length + 1) {
+  if (selector.options.length !== tiendasLista.length + 1) {
     selector.innerHTML = '<option value="">Todas las tiendas</option>' +
-      r.tiendas.map((t) => `<option value="${escapar(t.clave)}">${escapar(t.nombre)}</option>`).join('');
+      tiendasLista.map((t) => `<option value="${escapar(t.clave)}">${escapar(t.nombre)}</option>`).join('');
   }
   selector.value = tiendaActual;
 }
@@ -968,6 +1052,8 @@ function cargarVista() {
   if (vistaActual === 'dolarones' && pendientes.delete('dolarones')) cargarDolarones();
   if (vistaActual === 'inventario' && pendientes.delete('inventario')) cargarInventario();
   if (vistaActual === 'resumen' && pendientes.delete('resumen')) cargarResumen();
+  // El valor en piso de las tarjetas es la foto de ahora (inventario): se pide una vez, no con cada periodo, y solo Resumen la pinta (Ventas reusa el resumen sin ella).
+  if (vistaActual === 'resumen' && !parteVigente('inventario')) pedirPartes(['inventario']).then((ok) => { if (ok && datosResumen) pintarResumenEjecutivo(); });
   if (vistaActual === 'ventas' && pendientes.delete('ventas')) cargarVentas();
   if (vistaActual === 'clientes' && pendientes.delete('clientes')) cargarClientes();
   if (vistaActual === 'equipo' && pendientes.delete('equipo')) cargarEquipo();
@@ -988,15 +1074,16 @@ function tarjeta(etiqueta, valor, extra = '') {
   return `<div class="tarjeta"><div class="etq">${escapar(etiqueta)}</div><div class="valor">${escapar(valor)}</div>${extra}</div>`;
 }
 
-function pintarResumen(r) {
-  const antes = r.dias === 1 ? diaCorto(sumarDias(r.dia_desde, -1)) : `${diaCorto(sumarDias(r.dia_desde, -r.dias))} – ${diaCorto(sumarDias(r.dia_desde, -1))}`;
+// El periodo de arriba («Del 19 oct – 15 nov») y contra que se compara por omision; no espera a ninguna respuesta.
+function pintarPeriodo() {
+  const r = rangoActual();
+  const antes = rangoTexto(sumarDias(r.desde, -r.dias), sumarDias(r.desde, -1), r.hasta.slice(0, 4));   // el periodo de igual largo justo antes (con año si cruza o es de otro año)
   textoAntes = antes;
   $('p-etq').textContent = r.dias === 1 ? 'Día' : 'Del';
-  $('p-texto').textContent = textoPeriodo(r.dia_desde, r.dia_hasta);
+  $('p-texto').textContent = textoPeriodo(r.desde, r.hasta);
   // Si el periodo abre el dia de la primera venta, antes no hubo nada que comparar.
-  textoAnteriorBase = r.dia_desde === r.primera_venta ? 'Sin periodo anterior para comparar' : `Comparado con ${antes}`;
+  textoAnteriorBase = r.desde === primeraVenta ? 'Sin periodo anterior para comparar' : `Comparado con ${antes}`;
   textoAnterior();
-  pintarResumenEjecutivo();   // el valor en piso de las tarjetas sale de este mismo reporte
 }
 
 /* ---------- Resumen ejecutivo (#802) ---------- */
@@ -1076,7 +1163,7 @@ new ResizeObserver(() => pintarMeta()).observe($('graf-meta'));
 function pintarResumenEjecutivo() {
   const d = datosResumen;
   if (!d) return;
-  d.inventario = ultimoReporte?.inventario ?? null;   // foto de ahora: ya viene en /api/reportes, no se vuelve a leer
+  d.inventario = reporte.inventario ?? null;   // foto de ahora: se pide aparte y no depende del periodo
   $('r-estado').hidden = true;
   textoAnterior();
   pintarGrano(d);
@@ -1153,10 +1240,10 @@ function pintarHoras(porHora) {
     : '';
 }
 
-function pintarVentas(r) {
+// `total`: lo vendido del periodo (el de Resumen, que suma lo mismo que el neto de /api/reportes).
+function pintarVentas(r, total) {
   pintarHoras(r.por_hora);
 
-  const total = r.resumen.total;
   $('por-forma-pago').innerHTML = apilada(FORMAS.map(([clave, nombre, color]) => {
     const valor = r.por_forma_pago.find((f) => f.forma_pago === clave)?.total ?? 0;
     return { nombre, valor, color, texto: clave === 'dolarones' ? `${dolarones(valor)}` : pesos(valor) };
@@ -1250,6 +1337,9 @@ function pintarCaja(r) {
        <tbody>${r.retiros.map((x) => `
          <tr><td>${fechaHora(x.creado_en)}</td><td>${({ gasto: 'Gasto', terminal: 'Entra: terminal', nomina: 'Nómina' })[x.tipo] ?? 'Retiro'}</td><td>${escapar(x.caja || 'Al dueño')}</td>
            <td>${escapar(x.cajero)}</td><td>${escapar(x.motivo)}</td><td class="num">${pesos(x.importe)}</td></tr>`).join('')}</tbody></table>`;
+}
+
+function pintarAperturas(r) {
   $('aperturas-cajon').innerHTML = r.aperturas_cajon.length === 0 ? '<div class="vacio">Nadie abrió el cajón sin venta en este periodo.</div>'
     : `<table class="tabla"><thead><tr><th>Fecha</th><th>Caja</th><th>Quién</th></tr></thead>
        <tbody>${r.aperturas_cajon.map((a) => `
@@ -1355,7 +1445,7 @@ function pintarMerma(m) {
 }
 
 function pintarInventario(r) {
-  $('inv-aviso').textContent = avisoTienda(r.tiendas?.find((t) => t.clave === tiendaActual)?.nombre ?? '');
+  $('inv-aviso').textContent = avisoTienda(tiendasLista.find((t) => t.clave === tiendaActual)?.nombre ?? '');
   $('inv-kpis').innerHTML = tarjetasInventario(datosInventario, r);
   pintarMerma(r.merma_caducidad);
   pintarPiso(r.inventario);
@@ -1403,6 +1493,8 @@ function pintarEquipo(e) {
 /* ---------- Ventas (#802): /api/reportes/ventas junto con /api/reportes/resumen (las tarjetas y la tendencia salen de Resumen) ---------- */
 let datosVentas = null;
 let turnoVentas = 0;
+// Lo de Ventas que viaja en /api/reportes (mapa de horas, forma de pago, categorias contra el periodo anterior, mas vendidas, descuentos, revendedoras).
+const PARTES_VENTAS = ['forma_pago', 'categorias', 'por_hora', 'top_productos', 'descuentos', 'revendedoras'];
 function dibujarVentas() {
   if (!datosResumen || !datosVentas || datosResumen.cubetas.length !== datosVentas.cubetas.length) return;
   const huecos = [...$('ventas-cuerpo').querySelectorAll('.graf-v')].filter((h) => h.clientWidth);   // las ocultas se dibujan al verse
@@ -1437,13 +1529,15 @@ async function cargarVentas() {
   const falla = (texto) => { $('v-estado').textContent = texto; $('v-estado').hidden = false; };
   try {
     // El resumen se pide una sola vez por periodo: si Resumen ya lo trajo, no se repite.
-    const [resumen, respuesta] = await Promise.all([pendientes.delete('resumen') ? cargarResumen() : datosResumen, fetch(`/api/reportes/ventas?${consultaResumen()}`)]);
+    const [resumen, respuesta, legado] = await Promise.all([pendientes.delete('resumen') ? cargarResumen() : datosResumen, fetch(`/api/reportes/ventas?${consultaResumen()}`), pedirPartes(PARTES_VENTAS)]);
     const v = await respuesta.json().catch(() => ({}));
     if (turno !== turnoVentas) return;   // llego tarde: ya se pidio otra cosa
     if (!respuesta.ok) { falla(v.error ?? 'No se pudieron cargar las ventas.'); return; }
     if (!resumen) { falla('No se pudo cargar el resumen del periodo. Revisa la conexión.'); return; }
     datosVentas = v;
     pintarVentasNuevas();
+    if (!legado) { falla('No se pudieron cargar el mapa de horas, las categorías, los descuentos y las revendedoras. Revisa la conexión.'); pendientes.add('ventas'); return; }
+    pintarVentas(reporte, resumen.totales.ventas); pintarDescuentos(reporte); pintarRevendedoras(reporte);
   } catch {
     if (turno === turnoVentas) falla('No se pudieron cargar las ventas. Revisa la conexión.');
   } finally {
@@ -1487,6 +1581,8 @@ new ResizeObserver(() => dibujarClientes()).observe($('clientes-contenido'));
 /* ---------- Finanzas (#802): una peticion a /api/reportes/finanzas al ver la vista, una vez por periodo, tienda, comparacion y grano ---------- */
 let datosFinanzas = null;
 let turnoFinanzas = 0;
+// Lo de Finanzas que viaja en /api/reportes: el cuadre al centavo (cada suma por su lado) y los cortes y retiros de caja.
+const PARTES_FINANZAS = ['resumen', 'cuadre', 'por_dia', 'forma_pago', 'categorias', 'por_hora', 'cortes', 'retiros'];
 function dibujarFinanzas() {
   const d = datosFinanzas;
   if (!d) return;
@@ -1521,12 +1617,14 @@ async function cargarFinanzas() {
   $('finanzas-cuerpo').classList.add('pidiendo');   // se queda el cuadro anterior, atenuado: sin saltos
   const falla = (texto) => { $('f-estado').textContent = texto; $('f-estado').hidden = false; pendientes.add('finanzas-datos'); };
   try {
-    const respuesta = await fetch(`/api/reportes/finanzas?${consultaResumen()}`);
+    const [respuesta, legado] = await Promise.all([fetch(`/api/reportes/finanzas?${consultaResumen()}`), pedirPartes(PARTES_FINANZAS)]);
     const d = await respuesta.json().catch(() => ({}));
     if (turno !== turnoFinanzas) return;   // llego tarde: ya se pidio otra cosa
     if (!respuesta.ok) { falla(d.error ?? 'No se pudieron cargar las finanzas.'); return; }
     datosFinanzas = d;
     pintarFinanzas();
+    if (legado) { pintarCuadre(reporte); pintarCaja(reporte); }
+    else falla('No se pudieron cargar el cuadre, los cortes y los retiros. Revisa la conexión.');
   } catch {
     if (turno === turnoFinanzas) falla('No se pudieron cargar las finanzas. Revisa la conexión.');
   } finally {
@@ -1579,7 +1677,8 @@ async function cargarInventario() {
   if (tiendaActual) q.set('tienda', tiendaActual);
   const fallo = (texto) => { for (const id of ['inv-flujo', 'inv-cohortes', 'inv-rebajas']) $(id).innerHTML = `<p class="vacio">${escapar(texto)}</p>`; };
   try {
-    const respuesta = await fetch(`/api/reportes/inventario?${q}`);
+    // La foto de ahora (en piso, precio sugerido, dias en venta) se pide una vez; lo que cambia con el periodo (la merma) se pide con cada periodo.
+    const [respuesta, legado] = await Promise.all([fetch(`/api/reportes/inventario?${q}`), pedirPartes(['inventario', 'merma', 'precio_sugerido', 'dias_en_venta'])]);
     const r = await respuesta.json().catch(() => ({}));
     if (turno !== turnoInventario) return;
     if (!respuesta.ok) { fallo(r.error ?? 'No se pudo cargar la vista de Inventario.'); return; }
@@ -1589,7 +1688,8 @@ async function cargarInventario() {
     $('inv-cohortes').innerHTML = html.cohortes;
     $('inv-rebajas').innerHTML = html.rebajas;
     $('dias-mediana').textContent = textoMediana(r);
-    if (ultimoReporte) $('inv-kpis').innerHTML = tarjetasInventario(r, ultimoReporte);
+    if (legado) pintarInventario(reporte);
+    else { pendientes.add('inventario'); $('inv-kpis').innerHTML = tarjetasInventario(r, null); for (const id of ['merma-detalle', 'piso-resumen', 'precio-sugerido', 'dias-en-venta']) $(id).innerHTML = '<div class="vacio">No se pudo cargar. Revisa la conexión.</div>'; }
     dibujarInventario();
   } catch {
     if (turno === turnoInventario) fallo('No se pudo cargar la vista de Inventario. Revisa la conexión.');
@@ -1620,7 +1720,7 @@ async function cargarControl() {
   const turno = ++turnoControl, caja = $('control-contenido');
   caja.style.opacity = '.55';
   try {
-    const r = await fetch(`/api/reportes/control?${consultaResumen()}`);
+    const [r, legado] = await Promise.all([fetch(`/api/reportes/control?${consultaResumen()}`), pedirPartes(['cancelaciones', 'aperturas'])]);
     const datos = await r.json().catch(() => ({}));
     if (turno !== turnoControl) return;   // llego tarde: ya se pidio otra cosa
     if (!r.ok) throw new Error(datos.error);
@@ -1628,6 +1728,8 @@ async function cargarControl() {
     montarControl(caja, datos);
     pintarGrano(datos);
     textoAnterior();
+    if (legado) { pintarCancelaciones(reporte); pintarAperturas(reporte); }
+    else { pendientes.add('control'); for (const id of ['cancelaciones-detalle', 'aperturas-cajon']) $(id).innerHTML = '<div class="vacio">No se pudo cargar el detalle. Revisa la conexión.</div>'; }
   } catch (error) {
     if (turno === turnoControl) caja.innerHTML = `<div class="vacio">${escapar(error.message || 'No se pudo cargar el control.')}</div>`;
   } finally {
@@ -1686,34 +1788,6 @@ async function cargarCapturas() {
   }
 }
 $('f-pausa').addEventListener('change', () => { pausa = Number($('f-pausa').value); guardarUrl(); cargarCapturas(); });
-
-// Una sola peticion por cambio de periodo o tienda: todas las vistas se pintan con lo mismo; cambiar de vista no pide nada.
-async function cargar(reintento = false) {
-  const turno = ++turnoCarga;
-  $('principal').classList.add('cargando');   // se queda el cuadro anterior, atenuado: sin saltos
-  try {
-    const q = consultaPeriodo();
-    if (tiendaActual) q.set('tienda', tiendaActual);
-    cargarVista();   // si el periodo ya es definitivo, lo de la vista que se ve se pide en paralelo
-    const respuesta = await fetch(`/api/reportes?${q}`);
-    const r = await respuesta.json().catch(() => ({}));
-    if (turno !== turnoCarga) return;   // llego tarde: ya se pidio otro periodo
-    if (!respuesta.ok) { avisoPeriodo(r.error ?? 'No se pudo cargar el reporte.'); return; }
-    avisoPeriodo('');
-    primeraVenta = r.primera_venta ?? null;
-    // «Desde la apertura» arranca en la primera venta, que solo se sabe con la primera respuesta: se pide de nuevo ya con ese dia.
-    if (periodo.clave === 'apertura' && !reintento && consultaPeriodo().get('desde') !== r.dia_desde) return await cargar(true);
-    cargarVista();
-    ultimoReporte = r;
-    $('actualizado').textContent = `Actualizado ${new Date().toLocaleString('es-MX', { dateStyle: 'medium', timeStyle: 'short' })}`;
-    pintarTiendas(r);
-    pintarResumen(r); pintarVentas(r); pintarCuadre(r); pintarCaja(r); pintarCancelaciones(r); pintarDescuentos(r); pintarRevendedoras(r); pintarInventario(r);
-  } catch {
-    if (turno === turnoCarga) avisoPeriodo('No se pudo cargar el reporte. Revisa la conexión.');
-  } finally {
-    if (turno === turnoCarga) $('principal').classList.remove('cargando');
-  }
-}
 
 /* ---------- terminal de tarjeta (Issue #515) ---------- */
 let idPagoTerminal = crypto.randomUUID();   // reintentar no duplica el pago
@@ -1876,7 +1950,7 @@ async function cargarTickets(mas = false) {
       opciones($('f-cajero'), 'Todos los cajeros', r.cajeros);
       const x = r.resumen;
       $('tickets-resumen').innerHTML = [
-        tarjeta('Tickets', x.tickets.toLocaleString('es-MX')), tarjeta('Vendido', pesos(x.vendido)),
+        tarjeta('Tickets vendidos', (x.tickets - x.cancelados).toLocaleString('es-MX'), '<div class="delta">sin contar los cancelados</div>'), tarjeta('Vendido', pesos(x.vendido)),
         tarjeta('Piezas', x.piezas.toLocaleString('es-MX')), tarjeta('Dolarones usados', dolarones(x.dolarones)),
         tarjeta('Cancelados', x.cancelados.toLocaleString('es-MX')),
       ].join('');
@@ -1925,8 +1999,9 @@ document.addEventListener('click', (e) => {
 activarGlobos(document.body);
 leerUrl();
 pintarRango();
+pintarPeriodo();
 mostrarVista(true);
-await cargar();
+cargarBase();
 </script>
 </body>
 </html>

@@ -49,6 +49,13 @@ test('rellenarDias pone ceros en los dias sin ventas, incluso cruzando de mes', 
   assert.match(textoPeriodo('2026-09-27', '2026-10-04'), /2026$/);
 });
 
+test('textoPeriodo (#802 A3): el año al final si no cruza; en los dos extremos si cruza de año', () => {
+  assert.equal(textoPeriodo('2026-09-27', '2026-10-04'), '27 sep – 4 oct 2026');
+  assert.equal(textoPeriodo('2026-11-15', '2026-11-15'), '15 nov 2026');
+  assert.equal(textoPeriodo('2025-11-15', '2026-11-15'), '15 nov 2025 – 15 nov 2026');
+  assert.equal(textoPeriodo('2025-12-29', '2026-01-04'), '29 dic 2025 – 4 ene 2026');
+});
+
 test('rangoDias: dias completos de la tienda (UTC-6) y el periodo anterior de igual largo', () => {
   // 4/oct 22:00 hora de la tienda = 5/oct 04:00 UTC: sigue siendo 4 de octubre.
   const r = rangoDias(7, Date.parse('2026-10-05T04:00:00Z'));

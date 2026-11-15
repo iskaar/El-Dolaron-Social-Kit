@@ -184,7 +184,7 @@ export function panelFlujo(r) {
   const d = datosFlujo(r);
   const parcial = r.flujo.semanas.some((w) => w.parcial);
   return panel('i-flujo', 'Entradas y salidas', 'unidades por semana, de lunes a domingo', 'flujo', tablaFlujo(r),
-    `${resumenFlujo(r)} Capturadas = lo que se capturó en la semana (vendidas hasta hoy + existencia de hoy + apartadas); vendidas = unidades netas de tickets no cancelados más Mercado Libre.${parcial ? ' Las semanas de los extremos cubren solo los días del periodo.' : ''}`,
+    `${resumenFlujo(r)} Capturadas = lo que se capturó en la semana (vendidas hasta hoy + existencia de hoy + apartadas); vendidas = unidades netas de tickets no cancelados más Mercado Libre. No cuenta las piezas caducadas (grado D, merma) ni las descartadas: por eso sale menos que las capturas de la vista Capturas.${parcial ? ' Las semanas de los extremos cubren solo los días del periodo.' : ''}`,
     leyendaSeries(d.series));
 }
 

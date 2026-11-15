@@ -345,6 +345,74 @@ test('consultas: ninguna subconsulta por pieza sobre venta_lineas, nada de compo
   t.db.close();
 });
 
+test('A1: con una tienda elegida, ventas, tickets, cancelaciones y apartados son de esa tienda; socios, capturas y asistencias siguen del negocio; el bono no cambia', async () => {
+  const t = tienda();
+  const v = await sembrar(t);
+  // a2 (2 piezas, con el apartado de Ana) y b1 pasan a Salk; a4 (cancelado, de Ana) tambien.
+  for (const id of [v.a2, v.b1, v.a4]) t.db.prepare("update ventas set tienda = 'salk' where id = ?").run(id);
+  const todo = (await llamar(t, 'dias=10')).cuerpo, salk = (await llamar(t, 'dias=10&tienda=salk')).cuerpo, soledad = (await llamar(t, 'dias=10&tienda=soledad')).cuerpo;
+  assert.equal(todo.tienda, ''); assert.equal(salk.tienda, 'salk');
+  assert.equal(salk.totales.ventas_total, 25000 * 2 + 25000 * 3, 'solo a2 y b1');
+  assert.equal(salk.totales.tickets_total, 2);
+  assert.equal(salk.totales.cancel_n, 1);                                          // a4
+  assert.equal(salk.totales.ventas_total + soledad.totales.ventas_total, todo.totales.ventas_total, 'el negocio es la suma de las tiendas');
+  const ana = (c: any) => c.personas.find((p: Persona) => p.correo === ANA);
+  assert.deepEqual([ana(salk).tickets, ana(salk).ventas, ana(salk).apartados, ana(salk).cancelaciones], [1, 50000, 1, 1]);
+  assert.equal(salk.sin_atribuir.tickets, 0);
+  assert.equal(salk.atribucion.desde, dia(4), 'desde cuando hay ventas atribuidas en ESA tienda');
+  // Lo que no tiene tienda no se filtra: es lo mismo con y sin ella.
+  for (const m of ['socios', 'socios_compraron', 'capturadas', 'vendidas_14', 'dias_trab']) assert.equal(salk.totales[m], todo.totales[m], m);
+  const sinFiltro = (c: any) => c.personas.filter((p: Persona) => p.correo).map((p: Persona) => [p.correo, p.socios, p.capturadas, p.dias_trabajados]);
+  assert.deepEqual(sinFiltro(salk), sinFiltro(todo));
+  // El bono es del negocio completo: nunca cambia por la tienda.
+  assert.deepEqual(salk.semanas, todo.semanas); assert.deepEqual(salk.config, todo.config);
+  assert.equal((await llamar(t, 'dias=10&tienda=narnia')).status, 400);
+  // La pantalla lo dice: que se filtra, que no, y las tarjetas de lo que no se filtra lo marcan.
+  const htmlSalk = htmlVista(salk, { clave: 'ventas', descendente: true });
+  assert.match(htmlSalk, /no se registran por tienda/);
+  assert.doesNotMatch(htmlVista(todo, { clave: 'ventas', descendente: true }), /no se registran por tienda/);
+  const pies = Object.fromEntries(tarjetasEquipo(salk).map((k: any) => [k.clave, k.pie]));
+  for (const k of ['socios', 'capturadas', 'dias']) assert.match(pies[k], /negocio completo/, k);
+  t.db.close();
+});
+
+test('A2: portal y retos no son personas: las altas por portal van en un renglon aparte y retos no cuenta como socio', async () => {
+  const t = tienda();
+  await sembrar(t);
+  socio(t, 10, 'portal', a(dia(2), 10)); socio(t, 11, 'portal', a(dia(3), 10)); socio(t, 12, 'retos', a(dia(2), 11)); socio(t, 13, '', a(dia(2), 12));
+  const E = (await llamar(t, 'dias=10')).cuerpo;
+  assert.deepEqual(E.personas.map((p: Persona) => p.correo).filter((c: string) => c && !c.includes('@')), []);
+  assert.equal(E.personas.some((p: Persona) => p.nombre === 'portal' || p.nombre === 'retos'), false);
+  assert.deepEqual(E.portal, { socios: 2, socios_compraron: 0 });
+  const gente = E.personas.filter((p: Persona) => p.correo) as Persona[];
+  // 2 de Ana + 1 de Beto + 2 de portal + 1 sin registro; los de retos no son clientes.
+  assert.equal(E.totales.socios, 6);
+  assert.equal(suma(gente.map((p) => p.socios as number)) + E.portal.socios + E.sin_atribuir.socios, E.totales.socios);
+  const html = tablaPersonas(E);
+  assert.match(html, /Por el portal \(sin persona\)/);
+  assert.doesNotMatch(html, /<td>portal<\/td>|<td>retos<\/td>/);
+  t.db.close();
+});
+
+test('A8: las capturas sin cuenta no son de una persona pero Equipo las cuenta aparte: Equipo + sin cuenta es lo que dice Capturas', async () => {
+  const t = tienda();
+  await sembrar(t);
+  pieza(t, '', a(dia(2), 8)); pieza(t, '', a(dia(3), 8)); pieza(t, '', a(dia(40), 8));   // dos del periodo y una anterior
+  const E = (await llamar(t, 'dias=10')).cuerpo, C = (await t.pedir('/api/reportes/capturas?dias=10', undefined, 'GET')).cuerpo;
+  assert.equal(E.capturas_sin_cuenta.capturadas, 2);
+  assert.equal(E.totales.capturadas, suma((E.personas as Persona[]).filter((p) => p.correo).map((p) => p.capturadas as number)));
+  assert.equal(E.totales.capturadas + E.capturas_sin_cuenta.capturadas, C.resumen.capturas, 'Equipo + sin cuenta = Capturas');
+  assert.ok(E.personas.every((p: Persona) => p.correo !== '' || p.capturadas === 0), 'no hay un renglon de persona para lo sin cuenta');
+  const pie = (d: any) => tarjetasEquipo(d).find((k: any) => k.clave === 'capturadas').pie;
+  assert.match(pie(E), /2 capturas sin cuenta no están aquí/);
+  assert.match(htmlVista(E, { clave: 'ventas', descendente: true }), /2 capturas del periodo no tienen cuenta/);
+  const sin = (await llamar(t, 'dias=1')).cuerpo;                                    // un periodo sin capturas sin cuenta no dice nada de ellas
+  assert.equal(sin.capturas_sin_cuenta.capturadas, 0);
+  assert.doesNotMatch(pie(sin), /sin cuenta/);
+  assert.doesNotMatch(htmlVista(sin, { clave: 'ventas', descendente: true }), /no tienen cuenta/);
+  t.db.close();
+});
+
 /* ---------- las funciones puras de la pantalla ---------- */
 
 const persona = (nombre: string, extra: Partial<Record<string, number | string>> = {}) => ({ correo: `${nombre.toLowerCase()}@x`, nombre, ventas: 0, tickets: 0, piezas: 0, socios: 0, socios_compraron: 0,

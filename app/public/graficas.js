@@ -79,10 +79,11 @@ export const diaLargo = (dia) =>
   fechaDe(dia).toLocaleDateString('es-MX', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
 export const diaSemana = (dia) => fechaDe(dia).toLocaleDateString('es-MX', { weekday: 'short' }).replace('.', '');
 
-/** «27 sep – 4 oct 2026» */
+/** «27 sep – 4 oct 2026»; si el rango cruza de año, el año va en los dos extremos: «15 nov 2025 – 15 nov 2026». */
 export function textoPeriodo(desdeDia, hastaDia) {
-  const anio = hastaDia.slice(0, 4);
-  return desdeDia === hastaDia ? `${diaCorto(hastaDia)} ${anio}` : `${diaCorto(desdeDia)} – ${diaCorto(hastaDia)} ${anio}`;
+  const conAnio = (dia) => `${diaCorto(dia)} ${dia.slice(0, 4)}`;
+  if (desdeDia === hastaDia) return conAnio(hastaDia);
+  return desdeDia.slice(0, 4) === hastaDia.slice(0, 4) ? `${diaCorto(desdeDia)} – ${conAnio(hastaDia)}` : `${conAnio(desdeDia)} – ${conAnio(hastaDia)}`;
 }
 
 /* ---------- cuadre: que todo sume lo mismo, al centavo ---------- */

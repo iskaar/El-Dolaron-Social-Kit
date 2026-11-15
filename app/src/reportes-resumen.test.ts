@@ -8,10 +8,23 @@ import { sumarDias } from '../public/graficas.js';
 import {
   mesAtras, ventanaComparacion, cubetas, granosPermitidos, granoEfectivo, armarCubetas, promedioMovil, calcularMeta, ritmoPorCubeta,
   cambioKpi, hallazgos, hallazgosHtml, tarjetasKpi, tarjetasHtml, textoComparacion, UMBRALES, edadPromedio, datosTendencia, metaHtml, canalesHtml,
-  categoriasHtml, leyendaTendencia, tablaTendencia, unidadGrano,
+  categoriasHtml, leyendaTendencia, tablaTendencia, unidadGrano, rangoTexto,
 } from '../public/reportes-resumen.js';
 
 /* ---------- puras ---------- */
+
+test('A3: el texto de la comparacion lleva el año cuando cruza de año o es de otro año, y no cuando es del mismo', () => {
+  const d = (periodo: { desde: string; hasta: string; dias: number }, comparacion: { desde: string; hasta: string; dias: number }) => ({ comparar: 'anterior', periodo, comparacion });
+  // 366 dias terminando el 15 nov 2026: lo de antes cae en 2024-2025
+  assert.equal(textoComparacion(d({ desde: '2025-11-15', hasta: '2026-11-15', dias: 366 }, { desde: '2024-11-14', hasta: '2025-11-14', dias: 366 })),
+    'Comparado con 14 nov 2024 – 14 nov 2025');
+  // un solo dia de otro año
+  assert.equal(textoComparacion(d({ desde: '2026-01-01', hasta: '2026-01-01', dias: 1 }, { desde: '2025-12-31', hasta: '2025-12-31', dias: 1 })), 'Comparado con 31 dic 2025');
+  // mismo año: sin año, como siempre
+  assert.equal(textoComparacion(d({ desde: '2026-10-19', hasta: '2026-11-15', dias: 28 }, { desde: '2026-09-21', hasta: '2026-10-18', dias: 28 })), 'Comparado con 21 sep – 18 oct');
+  assert.equal(rangoTexto('2026-10-01', '2026-10-01', '2026'), '1 oct');
+  assert.equal(rangoTexto('2025-12-29', '2026-01-04', '2026'), '29 dic 2025 – 4 ene 2026');
+});
 
 test('mesAtras: el mismo dia del mes pasado; si no existe, el ultimo', () => {
   assert.deepEqual(mesAtras('2026-11-15'), { dia: '2026-10-15', recortado: false });
