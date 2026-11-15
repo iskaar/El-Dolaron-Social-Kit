@@ -4,7 +4,7 @@
 // dias de la tienda (UTC-6).
 //
 // A QUIEN SE ATRIBUYE UNA VENTA. A la persona que la caja marca como «quien atendio» (`ventas.vendedora`, una cuenta de cajero o
-// capturista; migracion 069). Esa columna existe desde noviembre: antes, y siempre que la caja no la manda, la venta queda
+// capturista; migracion 069). Esa columna es nueva: antes, y siempre que la caja no la manda, la venta queda
 // «Sin atribuir». No es `ventas.cajero` (quien cobro con su PIN, que usa Control). La pantalla dice desde que dia hay datos, calculado
 // de la primera venta con vendedora, y cuanto de las ventas netas esta atribuido. Las cancelaciones de cada persona son los tickets
 // completos que ELLA atendio y luego se cancelaron (en el periodo de la venta, como en Control); no las que ella hizo.
@@ -277,7 +277,7 @@ export const avisoTienda = 'Con una tienda elegida, las ventas, los tickets, los
 /** El texto de la atribucion: desde que dia hay datos y cuanto de las ventas esta atribuido (siempre dicho, nunca solo en el color). */
 export function notaAtribucion(d) {
   const at = d.atribucion, t = d.totales;
-  if (at.desde === null) return 'Ninguna venta tiene todavía a quien la atendió (la caja la manda desde noviembre): todo está en «Sin atribuir» y las cifras por persona de ventas quedan en cero.';
+  if (at.desde === null) return 'Ninguna venta tiene todavía a quien la atendió (la caja aún no la manda): todo está en «Sin atribuir» y las cifras por persona de ventas quedan en cero.';
   const antes = at.dentro_del_periodo ? ` El periodo empieza antes: lo anterior al ${diaCorto(at.desde)} no tiene a quién atribuirse y baja el porcentaje del periodo (${pct(t.ventas, t.ventas_total)}).` : '';
   return `Una venta se atribuye a quien la caja marcó como «quien atendió» (cuenta de cajero o capturista); hay datos desde el ${diaCorto(at.desde)}. Desde ese día, ${pct(at.desde_ventas, at.desde_total)} de las ventas netas tiene persona.${antes}`;
 }
