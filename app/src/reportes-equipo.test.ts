@@ -394,6 +394,25 @@ test('A2: portal y retos no son personas: las altas por portal van en un renglon
   t.db.close();
 });
 
+test('A8: las capturas sin cuenta no son de una persona pero Equipo las cuenta aparte: Equipo + sin cuenta es lo que dice Capturas', async () => {
+  const t = tienda();
+  await sembrar(t);
+  pieza(t, '', a(dia(2), 8)); pieza(t, '', a(dia(3), 8)); pieza(t, '', a(dia(40), 8));   // dos del periodo y una anterior
+  const E = (await llamar(t, 'dias=10')).cuerpo, C = (await t.pedir('/api/reportes/capturas?dias=10', undefined, 'GET')).cuerpo;
+  assert.equal(E.capturas_sin_cuenta.capturadas, 2);
+  assert.equal(E.totales.capturadas, suma((E.personas as Persona[]).filter((p) => p.correo).map((p) => p.capturadas as number)));
+  assert.equal(E.totales.capturadas + E.capturas_sin_cuenta.capturadas, C.resumen.capturas, 'Equipo + sin cuenta = Capturas');
+  assert.ok(E.personas.every((p: Persona) => p.correo !== '' || p.capturadas === 0), 'no hay un renglon de persona para lo sin cuenta');
+  const pie = (d: any) => tarjetasEquipo(d).find((k: any) => k.clave === 'capturadas').pie;
+  assert.match(pie(E), /2 capturas sin cuenta no están aquí/);
+  assert.match(htmlVista(E, { clave: 'ventas', descendente: true }), /2 capturas del periodo no tienen cuenta/);
+  const sin = (await llamar(t, 'dias=1')).cuerpo;                                    // un periodo sin capturas sin cuenta no dice nada de ellas
+  assert.equal(sin.capturas_sin_cuenta.capturadas, 0);
+  assert.doesNotMatch(pie(sin), /sin cuenta/);
+  assert.doesNotMatch(htmlVista(sin, { clave: 'ventas', descendente: true }), /no tienen cuenta/);
+  t.db.close();
+});
+
 /* ---------- las funciones puras de la pantalla ---------- */
 
 const persona = (nombre: string, extra: Partial<Record<string, number | string>> = {}) => ({ correo: `${nombre.toLowerCase()}@x`, nombre, ventas: 0, tickets: 0, piezas: 0, socios: 0, socios_compraron: 0,

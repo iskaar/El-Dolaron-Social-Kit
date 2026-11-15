@@ -318,3 +318,16 @@ test('compararRebajas: la tasa esperada usa la mezcla de edades de las rebajadas
   assert.equal(compararRebajas([]).comparables.pct, null);
   assert.equal(sumarDias('2026-01-31', 1), '2026-02-01');
 });
+
+test('A8: Inventario no cuenta las piezas caducadas (merma, grado D) y Capturas si: esa es la diferencia entre sus totales', async () => {
+  const t = tienda();
+  t.db.prepare('delete from productos where id = ?').run(PRODUCTO);
+  for (const dias of [3, 4, 5]) pieza(t, dias, 1);
+  const caducada = pieza(t, 2, 1);
+  t.db.prepare("update productos set estado_fisico = 'caducado' where id = ?").run(caducada);
+  const flujo = (await inventario(t)).flujo;
+  const capturas = (await t.pedir('/api/reportes/capturas?dias=28')).cuerpo;
+  assert.equal(flujo.total.piezas, 3, 'Inventario: sin la caducada');
+  assert.equal(capturas.resumen.capturas, 4, 'Capturas: todas las piezas capturadas, la caducada tambien');
+  t.db.close();
+});

@@ -100,6 +100,7 @@ test('entradas y salidas: columnas con la tabla como respaldo, neto con flecha y
   const panel = panelFlujo(r);
   assert.match(panel, /data-grafica="flujo"/);
   assert.match(panel, /Ver tabla/);
+  assert.match(panel, /No cuenta las piezas caducadas \(grado D, merma\) ni las descartadas/);   // A8: por que no coincide con Capturas
   assert.match(resumenFlujo(r), /neto [▲▼=]/);
   assert.match(resumenFlujo(vacia), /Sin capturas ni ventas/);
   const g = graficas(r, () => 640);

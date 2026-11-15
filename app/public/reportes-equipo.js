@@ -36,7 +36,7 @@ const ceros = () => Object.fromEntries(MEDIDAS_EQUIPO.map((m) => [m, 0]));
  *  - `atribucionDesde`: el primer dia con una venta atribuida (de todo el historial) o null.
  * `personas` conserva los campos y el filtro de siempre (un renglon por cuenta, mas «Sin atribuir» solo si tiene tickets); `sin_atribuir`
  * trae siempre lo de las cuentas vacias, para que nada se pierda aunque no tenga renglon. `portal` son las altas que la socia hizo sola en el portal:
- * no son de ninguna persona y la tabla las muestra aparte.
+ * no son de ninguna persona y la tabla las muestra aparte; `capturas_sin_cuenta`, las piezas capturadas con `capturado_por` vacio (no entran a las personas ni a los totales).
  */
 export function armarEquipo({ desde, hasta, grano, ventana, ventas, cancelaciones, socios, apartados, capturas, asistencias, usuarios, vendedoras, atribucionDesde }) {
   const enPeriodo = (dia) => dia >= desde && dia <= hasta;
@@ -79,7 +79,11 @@ export function armarEquipo({ desde, hasta, grano, ventana, ventas, cancelacione
     destino.socios += f.socios; destino.socios_compraron += f.socios_compraron;
   }
   for (const f of apartados) if (enPeriodo(f.dia)) fila(f.correo).apartados += f.apartados;
+  // Una captura sin cuenta (`capturado_por` vacio) no es de ninguna persona: no entra a la tabla ni a los totales de Equipo, pero se cuenta aparte
+  // para que Equipo + sin cuenta sea lo que dice Capturas.
+  const sinCuenta = { capturadas: 0, vendidas_14: 0 };
   for (const f of capturas) {
+    if (!f.correo) { if (enPeriodo(f.dia)) { sinCuenta.capturadas += f.capturadas; sinCuenta.vendidas_14 += f.vendidas_14; } continue; }
     const x = dia(f.dia); x.capturadas += f.capturadas; x.vendidas_14 += f.vendidas_14;
     if (enPeriodo(f.dia)) { const p = fila(f.correo); p.capturadas += f.capturadas; p.vendidas_14 += f.vendidas_14; }
   }
@@ -114,6 +118,7 @@ export function armarEquipo({ desde, hasta, grano, ventana, ventas, cancelacione
     serie_sin_atribuir: valores(serie.get('') ?? []),
     sin_atribuir: sin,
     portal,
+    capturas_sin_cuenta: sinCuenta,
     atribucion: { desde: atribucionDesde ?? null, dentro_del_periodo: !!atribucionDesde && atribucionDesde > desde, desde_ventas: vistos.ventas, desde_total: vistos.ventas_total },
     personas: limpias.filter((p) => p.correo || p.tickets).sort((a, b) => String(a.nombre).localeCompare(String(b.nombre))),
   };
@@ -150,7 +155,7 @@ export function tarjetasEquipo(d) {
     { ...comunes, clave: 'socios', etiqueta: 'Socios dados de alta', valor: n0(t.socios), cambio: cambio(t.socios, a?.socios), serie: serie((c) => c.socios), clase: 's3',
       pie: `${n0(t.socios_compraron)} compraron ese mismo día${d.tienda ? ' · negocio completo' : ''}` },
     { ...comunes, clave: 'capturadas', etiqueta: 'Piezas capturadas', valor: n0(t.capturadas), cambio: cambio(t.capturadas, a?.capturadas), serie: serie((c) => c.capturadas), clase: 's3',
-      pie: `${n0(t.vendidas_14)} vendidas en sus primeros 14 días · detalle en Capturas${d.tienda ? ' · negocio completo' : ''}` },
+      pie: `${n0(t.vendidas_14)} vendidas en sus primeros 14 días${(d.capturas_sin_cuenta?.capturadas ?? 0) > 0 ? ` · ${cuenta(d.capturas_sin_cuenta.capturadas, 'captura sin cuenta no está', 'capturas sin cuenta no están')} aquí` : ''} · detalle en Capturas${d.tienda ? ' · negocio completo' : ''}` },
     { ...comunes, clave: 'dias', etiqueta: 'Días trabajados', valor: hayAsist ? n0(t.dias_trab) : '—', cambio: hayAsist ? cambio(t.dias_trab, a?.dias_trab, { bueno: 'neutro' }) : null,
       serie: hayAsist ? serie((c) => c.dias_trab) : [], clase: 's2',
       pie: hayAsist ? `Suma de días de asistencia · registros desde el ${diaCorto(d.asistencias.desde)}${d.tienda ? ' · negocio completo' : ''}` : 'Nómina aún no tiene asistencias registradas' },
@@ -295,7 +300,7 @@ export function htmlVista(d, orden) {
         «Tickets cancelados» son los tickets completos que la persona atendió y luego se cancelaron (cuentan en su bruto, no en sus ventas netas); lo que cada quien cancela está en Control.
         Socios: altas que registró y cuántos compraron ese mismo día; las que la socia hizo sola en el portal van en su propio renglón. Apartados: cerrados en caja. «Vendidas a 14 días»: de las piezas que capturó en el periodo, cuántas se vendieron
         en sus primeras dos semanas; las de los últimos 14 días aún pueden venderse, así que no es una tasa. El tiempo y la calidad de las capturas están en Capturas.
-        Días trabajados: asistencias de su empleado en Nómina (hay que ligar su cuenta allá)${hayAsist ? '' : '; Nómina todavía no tiene asistencias, por eso aparece «—»'}.</p>
+        ${(d.capturas_sin_cuenta?.capturadas ?? 0) > 0 ? `Piezas capturadas: solo las de una cuenta; ${cuenta(d.capturas_sin_cuenta.capturadas, 'captura del periodo no tiene cuenta', 'capturas del periodo no tienen cuenta')} y por eso falta${d.capturas_sin_cuenta.capturadas === 1 ? '' : 'n'} aquí (Capturas sí ${d.capturas_sin_cuenta.capturadas === 1 ? 'la' : 'las'} cuenta). ` : ''}Días trabajados: asistencias de su empleado en Nómina (hay que ligar su cuenta allá)${hayAsist ? '' : '; Nómina todavía no tiene asistencias, por eso aparece «—»'}.</p>
     </article>`;
 }
 

@@ -133,7 +133,7 @@ export async function reporteEquipo(url: URL, env: Env, ahora = Date.now()): Pro
       `select ${diaTienda('v.creado_en')} as dia, p.vendedora as correo, count(*) as apartados from pedidos p join ventas v on v.id = p.venta_id
        where p.estado = 'vendido' and v.cancelada = 0 and v.creado_en >= ? and v.creado_en < ?${deTienda} group by 1, 2`,
     ).bind(desde, hasta).all(),
-    // Piezas capturadas por dia y persona y cuantas se vendieron en sus primeros 14 dias. La primera venta de cada pieza sale de UNA pasada
+    // Piezas capturadas por dia y persona (las de `capturado_por` vacio vienen aparte, como `capturas_sin_cuenta`) y cuantas se vendieron en sus primeros 14 dias. La primera venta de cada pieza sale de UNA pasada
     // que arranca por las ventas del rango (indice ventas_creado, luego venta_lineas_venta y la llave de productos); `cross join` fija ese orden.
     // Antes era un `exists` por pieza sobre venta_lineas, que no tiene indice por producto. Solo cuenta la caja, como antes (Mercado Libre no).
     env.DB.prepare(
@@ -145,7 +145,7 @@ export async function reporteEquipo(url: URL, env: Env, ahora = Date.now()): Pro
          where v.creado_en >= ? and v.cancelada = 0 and l.cantidad > l.cancelada_cantidad
            and q.creado_en >= ? and q.creado_en < ? and q.sin_inventario = 0 and q.propietario = 'dolaron'
          group by l.producto_id) f on f.producto_id = p.id
-       where p.capturado_por <> '' and p.creado_en >= ? and p.creado_en < ? and p.sin_inventario = 0
+       where p.creado_en >= ? and p.creado_en < ? and p.sin_inventario = 0
          and p.propietario = 'dolaron' and p.estado_analisis <> 'descartado' group by 1, 2`,
     ).bind(desde, desde, hasta, desde, hasta).all(),
     // Dias de asistencia por dia y cuenta ligada ('' = empleado sin cuenta: cuenta en el total, no en una persona).
