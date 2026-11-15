@@ -7,6 +7,7 @@
 <link rel="stylesheet" href="/reportes-dolarones.css">
 <link rel="stylesheet" href="/reportes-capturas.css">
 <link rel="stylesheet" href="/reportes-ventas.css">
+<link rel="stylesheet" href="/reportes-control.css">
 <style>
   /* Archivo: la misma del tablero, servida por la app (licencia OFL), sin Google Fonts. */
   @font-face { font-family: Archivo; src: url("/fuentes/archivo-variable.woff2") format("woff2"); font-weight: 100 900; font-display: swap; }
@@ -609,13 +610,9 @@
 
   <section class="vista" id="v-equipo" data-vista="equipo" aria-labelledby="h-equipo" hidden>
     <h2 id="h-equipo" tabindex="-1">Equipo</h2>
+    <p class="bajada">Cómo le va a cada persona en el tiempo: ventas que atendió, tickets, socios y capturas, con cifras que se pueden comparar.</p>
+    <div id="equipo-contenido" style="display:grid;gap:16px;min-width:0"><p class="vacio" role="status">Cargando el equipo…</p></div>
     <div>
-    <article class="panel">
-      <div id="equipo-detalle" style="overflow-x:auto"></div>
-      <p class="nota">Por persona en el periodo. Ventas: neto de los tickets que atendió (sin cancelados, menos devoluciones; «Sin atribuir» son
-        ventas sin vendedora). Socios: altas que registró y cuántos compraron ese mismo día. Apartados: cerrados en caja. Piezas: capturadas y
-        cuántas se vendieron en sus primeros 14 días. Días: asistencias de su empleado en Nómina (hay que ligar su cuenta allá).</p>
-    </article>
     <article class="panel" style="margin-top:14px">
       <header><h4>Bono semanal de la tienda <span class="subtitulo">últimas 8 semanas cerradas, lunes a domingo</span></h4></header>
       <form id="equipo-config" style="display:flex;flex-wrap:wrap;gap:12px;align-items:end;margin-bottom:12px">
@@ -632,8 +629,10 @@
 
   <section class="vista" id="v-control" data-vista="control" aria-labelledby="h-control" hidden>
     <h2 id="h-control" tabindex="-1">Control</h2>
+    <p class="bajada">Dinero que regresa, cajón abierto sin venta, cortes que no cuadran y descuentos aprobados: cuánto, cuándo y con quién, con el detalle al final.</p>
+    <div id="control-contenido" style="display:grid;gap:16px;min-width:0"><p class="vacio" role="status">Cargando el control…</p></div>
     <section aria-labelledby="t-control">
-      <h3 class="titulo-bloque" id="t-control">Cancelaciones y devoluciones</h3>
+      <h3 class="titulo-bloque" id="t-control">Detalle: cancelaciones y devoluciones</h3>
     <article class="panel">
       <div class="tarjetas" id="cancelaciones-resumen" style="margin-bottom: 14px"></div>
       <div id="cancelaciones-detalle" style="overflow-x:auto"></div>
@@ -642,7 +641,7 @@
     </article>
     </section>
     <section aria-labelledby="t-cajon">
-      <h3 class="titulo-bloque" id="t-cajon">Cajón abierto sin venta</h3>
+      <h3 class="titulo-bloque" id="t-cajon">Detalle: cajón abierto sin venta</h3>
         <article class="panel"><div id="aperturas-cajon" style="overflow-x:auto"></div>
           <p class="nota">Cada vez que alguien usa «Abrir cajón» en la caja, con su correo y la hora. Una venta en efectivo abre el cajón sola y no aparece aquí.</p></article>
     </section>
@@ -708,6 +707,8 @@ import {
 } from '/reportes-resumen.js';
 import { montarCapturas } from '/reportes-capturas.js';
 import * as Ventas from '/reportes-ventas.js';
+import { montarControl } from '/reportes-control.js';
+import { montarEquipo } from '/reportes-equipo.js';
 
 const $ = (id) => document.getElementById(id);
 // Hora de la tienda (la del navegador), no UTC como se guarda.
@@ -727,7 +728,7 @@ const DIA = /^\d{4}-\d{2}-\d{2}$/;
 const MAX_DIAS = 366;   // el mismo tope del servidor
 const PERIODOS = [['hoy', 'Hoy'], ['7', '7 días'], ['28', '28 días'], ['mes', 'Este mes'], ['mes-pasado', 'Mes pasado'], ['apertura', 'Desde la apertura'], ['custom', 'Personalizado']];
 const VISTAS = ['resumen', 'ventas', 'dolarones', 'inventario', 'capturas', 'finanzas', 'equipo', 'control', 'tickets'];
-const VISTAS_CON_COMPARACION = ['resumen', 'ventas'];
+const VISTAS_CON_COMPARACION = ['resumen', 'ventas', 'control', 'equipo'];
 const NOMBRES_VISTA = { resumen: 'Resumen', ventas: 'Ventas', dolarones: 'Dolarones', inventario: 'Inventario', capturas: 'Capturas', finanzas: 'Finanzas', equipo: 'Equipo', control: 'Control', tickets: 'Tickets' };
 // El dia de la tienda (UTC-6), como lo calcula el servidor: «hoy» y «este mes» no dependen de la zona del navegador.
 const hoyTienda = () => new Date(Date.now() - 6 * 3_600_000).toISOString().slice(0, 10);
@@ -741,11 +742,13 @@ let textoAntes = '';       // «19 oct – 15 nov»: el periodo contra el que se
 let vistaActual = '';
 let turnoCarga = 0;
 // Lo que depende del periodo pero no viaja en /api/reportes se pide la primera vez que se ve su vista, no en cada cambio.
-const pendientes = new Set(['resumen', 'ventas', 'equipo', 'tickets', 'finanzas', 'dolarones']);
+const pendientes = new Set(['resumen', 'ventas', 'equipo', 'control', 'tickets', 'finanzas', 'dolarones']);
 // Resumen y Ventas (#802): «Comparar con» y el grano. Viven en la URL junto al periodo y la tienda; solo estas dos vistas reaccionan.
 let comparar = 'anterior';   // 'anterior' (la de siempre), 'mes' (mismo periodo del mes pasado) o 'ninguna'
 let granoPedido = '';        // '' = automatico (por dia hasta 35 dias, despues por semana)
 let datosResumen = null;     // la ultima respuesta de /api/reportes/resumen
+let datosControl = null;     // y las de Control y Equipo (traen su periodo, grano y comparacion)
+let datosEquipo = null;
 let turnoResumen = 0;
 let textoAnteriorBase = '';  // «Comparado con ...» de /api/reportes: el de las demas vistas
 
@@ -818,7 +821,7 @@ function leerUrl() {
 // Cambia el periodo o la tienda: una sola peticion de /api/reportes; equipo, tickets y finanzas se piden al ver su vista.
 function recargar() {
   diaElegido = null;
-  for (const v of ['resumen', 'ventas', 'equipo', 'tickets', 'dolarones']) pendientes.add(v);
+  for (const v of ['resumen', 'ventas', 'equipo', 'control', 'tickets', 'dolarones']) pendientes.add(v);
   guardarUrl();
   pintarRango();
   cargar();
@@ -894,6 +897,7 @@ function cargarVista() {
   if (vistaActual === 'resumen' && pendientes.delete('resumen')) cargarResumen();
   if (vistaActual === 'ventas' && pendientes.delete('ventas')) cargarVentas();
   if (vistaActual === 'equipo' && pendientes.delete('equipo')) cargarEquipo();
+  if (vistaActual === 'control' && pendientes.delete('control')) cargarControl();
   if (vistaActual === 'tickets' && pendientes.delete('tickets')) cargarTickets();
   if (vistaActual === 'finanzas' && pendientes.delete('finanzas')) { cargarFondo(); cargarTerminal(); }
   if (vistaActual === 'capturas') cargarCapturas();
@@ -924,7 +928,8 @@ function pintarResumen(r) {
 
 // Debajo de la barra: contra que se compara lo que se ve. En Resumen y Ventas manda «Comparar con»; en las demas vistas, el periodo anterior.
 function textoAnterior() {
-  $('p-anterior').textContent = VISTAS_CON_COMPARACION.includes(vistaActual) && datosResumen ? textoComparacion(datosResumen) : textoAnteriorBase;
+  const d = vistaActual === 'control' ? datosControl : vistaActual === 'equipo' ? datosEquipo : datosResumen;   // cada vista trae su comparacion
+  $('p-anterior').textContent = VISTAS_CON_COMPARACION.includes(vistaActual) && d ? textoComparacion(d) : textoAnteriorBase;
 }
 
 function consultaResumen() {
@@ -1033,7 +1038,7 @@ function pintarResumenEjecutivo() {
 // Comparar con y grano cambian lo de Resumen y lo de Ventas: se vuelve a pedir lo de la vista que se ve, y la otra al visitarla.
 function aplicarControles() {
   guardarUrl();
-  pendientes.add('resumen'); pendientes.add('ventas');
+  for (const v of ['resumen', 'ventas', 'control', 'equipo']) pendientes.add(v);
   cargarVista();
 }
 $('f-comparar').addEventListener('change', () => {
@@ -1298,13 +1303,10 @@ function pintarInventario(r) {
 
 function pintarEquipo(e) {
   const n = (x) => x.toLocaleString('es-MX');
-  $('equipo-detalle').innerHTML = !e.personas.length ? '<div class="vacio">Sin personas con actividad en este periodo.</div>'
-    : `<table class="tabla"><thead><tr><th>Persona</th><th class="num">Ventas netas</th><th class="num">Tickets</th><th class="num">Socios</th>
-         <th class="num">Compraron ese día</th><th class="num">Apartados</th><th class="num">Piezas</th><th class="num">Vendidas en 14 días</th><th class="num">Días</th></tr></thead>
-       <tbody>${e.personas.map((x) => `
-         <tr><td>${escapar(x.nombre)}</td><td class="num">${pesos(x.ventas)}</td><td class="num">${n(x.tickets)}</td><td class="num">${n(x.socios)}</td>
-           <td class="num">${n(x.socios_compraron)}</td><td class="num">${n(x.apartados)}</td><td class="num">${n(x.capturadas)}</td>
-           <td class="num">${n(x.vendidas_14)}</td><td class="num">${n(x.dias_trabajados)}</td></tr>`).join('')}</tbody></table>`;
+  datosEquipo = e;
+  montarEquipo($('equipo-contenido'), e);   // tarjetas, ventas por persona en el tiempo y la tabla por persona (#802)
+  pintarGrano(e);
+  textoAnterior();
   $('bono-pct').value = e.config.pb / 100;
   $('bono-meta').value = e.config.meta / 100;
   $('bono-semanas').innerHTML = `<table class="tabla"><thead><tr><th>Semana</th><th class="num">Ventas netas</th><th class="num">Meta</th><th>Meta alcanzada</th>
@@ -1401,12 +1403,42 @@ async function cargarDolarones() {
 }
 new ResizeObserver(() => dibujarDolarones()).observe($('dolarones-contenido'));
 
+let turnoEquipo = 0;
 async function cargarEquipo() {
+  const turno = ++turnoEquipo, caja = $('equipo-contenido');
+  caja.style.opacity = '.55';
   try {
-    const r = await fetch(`/api/reportes/equipo?${consultaPeriodo()}`);
-    if (!r.ok) throw new Error();
-    pintarEquipo(await r.json());
-  } catch { $('equipo-detalle').innerHTML = '<div class="vacio">No se pudo cargar el equipo.</div>'; }
+    const r = await fetch(`/api/reportes/equipo?${consultaResumen()}`);
+    const datos = await r.json().catch(() => ({}));
+    if (turno !== turnoEquipo) return;   // llego tarde: ya se pidio otra cosa
+    if (!r.ok) throw new Error(datos.error);
+    pintarEquipo(datos);
+  } catch (error) {
+    if (turno === turnoEquipo) caja.innerHTML = `<div class="vacio">${escapar(error.message || 'No se pudo cargar el equipo.')}</div>`;
+  } finally {
+    if (turno === turnoEquipo) caja.style.opacity = '';
+  }
+}
+
+/* ---------- Control (#802): una peticion al ver la vista, una vez por periodo, tienda, comparacion y grano ---------- */
+let turnoControl = 0;
+async function cargarControl() {
+  const turno = ++turnoControl, caja = $('control-contenido');
+  caja.style.opacity = '.55';
+  try {
+    const r = await fetch(`/api/reportes/control?${consultaResumen()}`);
+    const datos = await r.json().catch(() => ({}));
+    if (turno !== turnoControl) return;   // llego tarde: ya se pidio otra cosa
+    if (!r.ok) throw new Error(datos.error);
+    datosControl = datos;
+    montarControl(caja, datos);
+    pintarGrano(datos);
+    textoAnterior();
+  } catch (error) {
+    if (turno === turnoControl) caja.innerHTML = `<div class="vacio">${escapar(error.message || 'No se pudo cargar el control.')}</div>`;
+  } finally {
+    if (turno === turnoControl) caja.style.opacity = '';
+  }
 }
 
 function avisoBono(texto, ok) { $('aviso-bono').textContent = texto; $('aviso-bono').style.color = ok ? 'var(--bien)' : 'var(--mal)'; }
