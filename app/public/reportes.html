@@ -4,6 +4,8 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>El Dolarón — reportes</title>
+<link rel="stylesheet" href="/reportes-dolarones.css">
+<link rel="stylesheet" href="/reportes-capturas.css">
 <style>
   /* Archivo: la misma del tablero, servida por la app (licencia OFL), sin Google Fonts. */
   @font-face { font-family: Archivo; src: url("/fuentes/archivo-variable.woff2") format("woff2"); font-weight: 100 900; font-display: swap; }
@@ -134,6 +136,50 @@
   .tarjeta .valor { font-size: 24px; font-weight: 700; margin-top: 3px; overflow-wrap: anywhere; font-variant-numeric: tabular-nums; letter-spacing: -.015em; }
   .tarjeta .delta { margin-top: 3px; font-size: 12px; }
 
+  /* ---- Resumen ejecutivo (#802): tarjetas con minigrafica, tendencia, meta y hallazgos ---- */
+  .bajada { margin: -14px 0 0; color: var(--tinta-2); font-size: 13.5px; max-width: 70ch; }
+  #resumen-cuerpo { display: grid; gap: 16px; min-width: 0; transition: opacity .15s; }
+  #resumen-cuerpo.pidiendo { opacity: .55; }
+  .fila-r { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; }
+  @media (min-width: 861px) { .fila-r.r-g21 { grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); } }
+  .fila-r.r-g3 { grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr)); }
+  #r-kpis .tarjeta, #c-kpis .tarjeta { flex: 1 1 22%; min-width: 190px; display: flex; flex-direction: column; gap: 3px; }
+  .tarjeta.kpi .valor { font-size: 25px; margin-top: 0; }
+  .tarjeta.kpi .delta { margin-top: 0; }
+  .tarjeta.kpi .pie { font-size: 11.5px; color: var(--tinta-2); }
+  .tarjeta.kpi .aviso-pie { color: var(--aviso); font-weight: 600; }
+  .mini-caja { margin-top: 2px; }
+  .mini { display: block; width: 100%; height: 34px; overflow: visible; }
+  .mini .linea { fill: none; stroke: var(--serie-1); stroke-width: 1.6; stroke-linejoin: round; stroke-linecap: round; vector-effect: non-scaling-stroke; }
+  .mini .area { fill: var(--serie-1); fill-opacity: .12; stroke: none; }
+  .mini.s2 .linea { stroke: var(--serie-2); } .mini.s2 .area { fill: var(--serie-2); }
+  .mini.s3 .linea { stroke: var(--serie-3); } .mini.s3 .area { fill: var(--serie-3); }
+  .avance { height: 6px; border-radius: 3px; background: var(--lavado); overflow: hidden; margin-top: 2px; }
+  .avance i { display: block; height: 100%; background: var(--acento); border-radius: 3px; }
+  .chip { font-weight: 700; margin-right: 6px; white-space: nowrap; }
+  .chip.bien { color: var(--bien); } .chip.mal { color: var(--mal); } .chip.neu { color: var(--tinta-2); }
+  .hallazgos { margin: 0; padding: 0; list-style: none; display: grid; gap: 11px; }
+  .hallazgos li { display: grid; grid-template-columns: 20px minmax(0, 1fr); gap: 8px; font-size: 13.5px; }
+  .hallazgos .g { font-weight: 700; } .hallazgos .g.bien { color: var(--bien); } .hallazgos .g.mal { color: var(--mal); } .hallazgos .g.neu { color: var(--tinta-2); }
+  .meta-num { font-size: 30px; font-weight: 700; font-variant-numeric: tabular-nums; letter-spacing: -.02em; line-height: 1.1; }
+  .meta-num small { font-size: 13px; font-weight: 500; color: var(--tinta-2); letter-spacing: 0; }
+  .pares { display: grid; grid-template-columns: 1fr auto; gap: 4px 12px; font-size: 13px; margin: 10px 0 12px; }
+  .pares dt { color: var(--tinta-2); } .pares dd { margin: 0; }
+  .leyenda-linea { display: flex; flex-wrap: wrap; gap: 4px 16px; font-size: 12px; color: var(--tinta-2); margin: 0 0 8px; }
+  .leyenda-linea span { white-space: nowrap; }
+  .leyenda-linea i { display: inline-block; width: 18px; height: 0; border-top: 2px solid var(--acento); vertical-align: middle; margin-right: 6px; }
+  .leyenda-linea i.llave-barra { width: 10px; height: 10px; border: 0; background: var(--acento); border-radius: 2px; }
+  .leyenda-linea i.llave-media { border-top-color: var(--serie-4); }
+  .leyenda-linea i.llave-comp { border-top: 2px dashed var(--tinta-2); }
+  .leyenda-linea i.llave-ritmo { border-top: 2px dotted var(--serie-2); }
+  .svg-grafica .media { fill: none; stroke: var(--serie-4); stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+  .svg-grafica .comp { fill: none; stroke: var(--tinta-2); stroke-width: 1.6; stroke-dasharray: 5 4; }
+  .svg-grafica .ritmo { fill: none; stroke: var(--serie-2); stroke-width: 1.8; stroke-dasharray: 1.5 4; stroke-linecap: round; }
+  .svg-grafica .media-punto { fill: var(--serie-4); } .svg-grafica .comp-punto { fill: var(--tinta-2); } .svg-grafica .ritmo-punto { fill: var(--serie-2); }
+  .svg-grafica .hit.pasiva { cursor: default; }
+  .fila-vista { display: contents; }
+  .fila-vista[hidden] { display: none; }
+
   /* ---- graficas ---- */
   .svg-grafica { display: block; width: 100%; height: auto; overflow: visible; }
   .svg-grafica .rejilla { stroke: var(--rejilla); stroke-width: 1; }
@@ -237,6 +283,10 @@
     .fila-periodo { display: block; min-width: 0; max-width: 100%; overflow-x: auto; scrollbar-width: thin; }   /* los atajos se desplazan en su fila */
     .fila-periodo .seg { display: flex; width: max-content; }
     .pers { flex-wrap: wrap; gap: 8px 12px; }
+    .fila-vista { display: flex; gap: 8px 12px; align-items: center; flex-wrap: wrap; }
+    .fila-vista[hidden] { display: none; }
+    #r-kpis .tarjeta, #c-kpis .tarjeta { flex-basis: 42%; min-width: 0; }
+    #r-kpis .tarjeta .valor, #c-kpis .tarjeta .valor { font-size: 19px; }
     .fila-acciones { display: flex; gap: 8px 12px; align-items: center; flex-wrap: wrap; justify-content: space-between; }   /* siempre visible */
     .campo select { max-width: 52vw; }
     .filtros .btn { margin-left: 0; }
@@ -270,6 +320,7 @@
     <span class="grupo" aria-hidden="true">Vistas</span>
     <a href="#resumen" data-v="resumen">Resumen</a>
     <a href="#ventas" data-v="ventas">Ventas</a>
+    <a href="#dolarones" data-v="dolarones">Dolarones</a>
     <a href="#inventario" data-v="inventario">Inventario</a>
     <a href="#capturas" data-v="capturas">Capturas</a>
     <a href="#finanzas" data-v="finanzas">Finanzas</a>
@@ -284,6 +335,20 @@
         <label class="campo">Desde <input type="date" id="f-desde"></label>
         <label class="campo">Hasta <input type="date" id="f-hasta"></label>
       </span>
+      <!-- Comparar con y grano (#802): por ahora solo el Resumen reacciona; las demas vistas los adoptaran y quitaran el `hidden`. -->
+      <div class="fila-vista" id="fila-vista" hidden>
+        <label class="campo">Comparar con
+          <select id="f-comparar">
+            <option value="anterior">Periodo anterior</option>
+            <option value="mes">Mismo periodo del mes pasado</option>
+            <option value="ninguna">Sin comparar</option>
+          </select></label>
+        <div class="seg" id="grano" role="group" aria-label="Agrupar por">
+          <button type="button" data-grano="dia" aria-pressed="true">Día</button>
+          <button type="button" data-grano="semana" aria-pressed="false">Semana</button>
+          <button type="button" data-grano="mes" aria-pressed="false">Mes</button>
+        </div>
+      </div>
       <div class="fila-acciones">
         <label class="campo" id="c-tienda" hidden>Tienda <select id="f-tienda"></select></label>
         <button type="button" class="btn" id="imprimir">Imprimir o guardar PDF</button>
@@ -295,13 +360,44 @@
 
   <section class="vista" id="v-resumen" data-vista="resumen" aria-labelledby="h-resumen">
     <h2 id="h-resumen" tabindex="-1">Resumen</h2>
-    <div class="principal">
-    <div class="hero">
-      <div class="etq">Vendido</div>
-      <div class="valor" id="h-total">—</div>
-      <div class="delta" id="h-delta"></div>
-    </div>
-    <div class="tarjetas" id="tarjetas"></div>
+    <p class="bajada">Cómo va el negocio en el periodo elegido, contra la comparación y contra la meta del mes.</p>
+    <div id="resumen-cuerpo">
+      <p class="vacio" id="r-estado" role="status">Cargando el resumen…</p>
+      <div class="tarjetas" id="r-kpis"></div>
+      <div class="fila-r r-g21">
+        <article class="panel" id="p-tendencia">
+          <header><h4>Ventas netas <span class="subtitulo" id="tend-sub"></span></h4><button type="button" class="alterna">Ver tabla</button></header>
+          <div class="vista-grafica">
+            <div id="leyenda-tendencia"></div>
+            <div id="graf-tendencia"></div>
+            <p class="nota" id="tend-nota"></p>
+          </div>
+          <div class="vista-tabla" id="tabla-tendencia"></div>
+        </article>
+        <article class="panel" id="p-meta">
+          <header><h4 id="meta-titulo">Meta del mes</h4><button type="button" class="alterna" id="meta-alterna" hidden>Ver tabla</button></header>
+          <div id="r-meta"></div>
+          <div class="vista-grafica"><div id="graf-meta"></div></div>
+          <div class="vista-tabla" id="tabla-meta"></div>
+        </article>
+      </div>
+      <div class="fila-r r-g3">
+        <article class="panel">
+          <header><h4>Qué cambió</h4></header>
+          <div id="r-cambios"></div>
+          <p class="nota">Reglas fijas con umbral sobre los mismos datos del reporte (categorías, mejor día, descuento, gastos y piezas viejas en piso); no es texto generado.</p>
+        </article>
+        <article class="panel" id="p-canales">
+          <header><h4>Canales <span class="subtitulo">ventas netas</span></h4><button type="button" class="alterna">Ver tabla</button></header>
+          <div class="vista-grafica" id="r-canales"></div>
+          <div class="vista-tabla" id="tabla-canales"></div>
+        </article>
+        <article class="panel" id="p-categorias">
+          <header><h4>Categorías <span class="subtitulo" id="cat-sub">contra la comparación</span></h4><button type="button" class="alterna">Ver tabla</button></header>
+          <div class="vista-grafica" id="r-categorias"></div>
+          <div class="vista-tabla" id="tabla-categorias"></div>
+        </article>
+      </div>
     </div>
   </section>
 
@@ -356,6 +452,12 @@
         que los cerró (sin cancelados, menos devoluciones). El pago a la tienda lo registra el personal en Pedidos; la comisión se calcula con este importe.</p>
     </article>
     </section>
+  </section>
+
+  <section class="vista" id="v-dolarones" data-vista="dolarones" aria-labelledby="h-dolarones" hidden>
+    <h2 id="h-dolarones" tabindex="-1">Dolarones</h2>
+    <p class="nota" style="margin:0">Todo el programa: lo que se regala, lo que regresa y lo que se debe. 1 D = $1.</p>
+    <div id="dolarones-contenido" style="display:grid;gap:16px;min-width:0"><p class="vacio">Cargando…</p></div>
   </section>
 
   <section class="vista" id="v-inventario" data-vista="inventario" aria-labelledby="h-inventario" hidden>
@@ -561,12 +663,17 @@
 
 <script type="module">
 import { renglonTicket, pintarDetalle } from '/ticket.js';
+import { vistaDolarones, graficas as graficasDolarones } from '/reportes-dolarones.js';
 import { CATEGORIAS } from '/categorias.js';
 import {
   escapar, pesos, pesosConSigno, dolarones, cambio, rellenarDias, sumarDias, diaCorto, diaLargo, diaSemana, textoPeriodo,
   verificarCuadre, mapaCalor, mapaCalorHtml, tablaCalor, graficaDias, activarLinea, activarGlobos, barrasHorizontales, apilada, tabla,
-  flechaCambio, TRAMOS_ANTIGUEDAD, pasoOrdinal,
+  flechaCambio, TRAMOS_ANTIGUEDAD, pasoOrdinal, graficaTiempo,
 } from '/graficas.js';
+import {
+  COMPARACIONES, GRANOS, granosPermitidos, tarjetasKpi, tarjetasHtml, datosTendencia, leyendaTendencia, tablaTendencia, metaHtml, graficaMeta, tablaMeta,
+  hallazgos, hallazgosHtml, canalesHtml, tablaCanales, categoriasHtml, tablaCategorias, textoComparacion, unidadGrano, COMPARACION_POR_GRANO,
+} from '/reportes-resumen.js';
 import { montarCapturas } from '/reportes-capturas.js';
 
 const $ = (id) => document.getElementById(id);
@@ -586,8 +693,8 @@ const decimal = (n) => n.toLocaleString('es-MX', { minimumFractionDigits: 1, max
 const DIA = /^\d{4}-\d{2}-\d{2}$/;
 const MAX_DIAS = 366;   // el mismo tope del servidor
 const PERIODOS = [['hoy', 'Hoy'], ['7', '7 días'], ['28', '28 días'], ['mes', 'Este mes'], ['mes-pasado', 'Mes pasado'], ['apertura', 'Desde la apertura'], ['custom', 'Personalizado']];
-const VISTAS = ['resumen', 'ventas', 'inventario', 'capturas', 'finanzas', 'equipo', 'control', 'tickets'];
-const NOMBRES_VISTA = { resumen: 'Resumen', ventas: 'Ventas', inventario: 'Inventario', capturas: 'Capturas', finanzas: 'Finanzas', equipo: 'Equipo', control: 'Control', tickets: 'Tickets' };
+const VISTAS = ['resumen', 'ventas', 'dolarones', 'inventario', 'capturas', 'finanzas', 'equipo', 'control', 'tickets'];
+const NOMBRES_VISTA = { resumen: 'Resumen', ventas: 'Ventas', dolarones: 'Dolarones', inventario: 'Inventario', capturas: 'Capturas', finanzas: 'Finanzas', equipo: 'Equipo', control: 'Control', tickets: 'Tickets' };
 // El dia de la tienda (UTC-6), como lo calcula el servidor: «hoy» y «este mes» no dependen de la zona del navegador.
 const hoyTienda = () => new Date(Date.now() - 6 * 3_600_000).toISOString().slice(0, 10);
 
@@ -601,7 +708,13 @@ let textoAntes = '';       // «19 oct – 15 nov»: el periodo contra el que se
 let vistaActual = '';
 let turnoCarga = 0;
 // Lo que depende del periodo pero no viaja en /api/reportes se pide la primera vez que se ve su vista, no en cada cambio.
-const pendientes = new Set(['equipo', 'tickets', 'finanzas']);
+const pendientes = new Set(['resumen', 'equipo', 'tickets', 'finanzas', 'dolarones']);
+// Resumen (#802): «Comparar con» y el grano. Viven en la URL junto al periodo y la tienda; por ahora solo el Resumen reacciona.
+let comparar = 'anterior';   // 'anterior' (la de siempre), 'mes' (mismo periodo del mes pasado) o 'ninguna'
+let granoPedido = '';        // '' = automatico (por dia hasta 35 dias, despues por semana)
+let datosResumen = null;     // la ultima respuesta de /api/reportes/resumen
+let turnoResumen = 0;
+let textoAnteriorBase = '';  // «Comparado con ...» de /api/reportes: el de las demas vistas
 
 /* ---------- periodo ---------- */
 
@@ -652,6 +765,8 @@ function guardarUrl() {
   const q = new URLSearchParams();
   if (periodo.clave === 'custom') { q.set('desde', periodo.desde); q.set('hasta', periodo.hasta); } else q.set('periodo', periodo.clave);
   if (tiendaActual) q.set('tienda', tiendaActual);
+  if (comparar !== 'anterior') q.set('comparar', comparar);
+  if (granoPedido) q.set('grano', granoPedido);
   if (pausa !== 10) q.set('pausa', pausa);
   try { history.replaceState(null, '', `${location.pathname}?${q}${location.hash}`); } catch { /* sin historial: el enlace no se actualiza */ }
 }
@@ -661,6 +776,8 @@ function leerUrl() {
   if (DIA.test(desde) && DIA.test(hasta)) periodo = { clave: 'custom', desde, hasta };
   else if (PERIODOS.some(([clave]) => clave === q.get('periodo') && clave !== 'custom')) periodo = { clave: q.get('periodo'), desde: '', hasta: '' };
   tiendaActual = q.get('tienda') ?? '';
+  if (COMPARACIONES.includes(q.get('comparar'))) comparar = q.get('comparar');
+  if (GRANOS.includes(q.get('grano'))) granoPedido = q.get('grano');
   if ([5, 10, 15, 20].includes(Number(q.get('pausa')))) pausa = Number(q.get('pausa'));
   $('f-pausa').value = pausa;
 }
@@ -668,7 +785,7 @@ function leerUrl() {
 // Cambia el periodo o la tienda: una sola peticion de /api/reportes; equipo, tickets y finanzas se piden al ver su vista.
 function recargar() {
   diaElegido = null;
-  for (const v of ['equipo', 'tickets']) pendientes.add(v);
+  for (const v of ['resumen', 'equipo', 'tickets', 'dolarones']) pendientes.add(v);
   guardarUrl();
   pintarRango();
   cargar();
@@ -726,6 +843,8 @@ function mostrarVista(inicial = false) {
   }
   document.title = `${NOMBRES_VISTA[vista]} · El Dolarón — reportes`;
   vistaActual = vista;
+  $('fila-vista').hidden = vista !== 'resumen';   // Comparar con y grano: solo donde reaccionan
+  textoAnterior();
   cargarVista();
   if (cambio && !inicial) {
     window.scrollTo(0, 0);
@@ -738,6 +857,8 @@ window.addEventListener('hashchange', () => mostrarVista());
 // Lo de una vista que depende del periodo y no viene en /api/reportes: se pide al verla, una vez por periodo.
 function cargarVista() {
   if (!periodoDefinitivo()) return;   // «Desde la apertura» todavia espera saber cual es la primera venta
+  if (vistaActual === 'dolarones' && pendientes.delete('dolarones')) cargarDolarones();
+  if (vistaActual === 'resumen' && pendientes.delete('resumen')) cargarResumen();
   if (vistaActual === 'equipo' && pendientes.delete('equipo')) cargarEquipo();
   if (vistaActual === 'tickets' && pendientes.delete('tickets')) cargarTickets();
   if (vistaActual === 'finanzas' && pendientes.delete('finanzas')) { cargarFondo(); cargarTerminal(); }
@@ -750,39 +871,149 @@ function pedirTickets() {   // el filtro de dia cambio: se vuelve a pedir ahora 
 
 /* ---------- tarjetas ---------- */
 
-// `sube` es bueno: tickets, ticket promedio y piezas. Dolarones y devoluciones no se comparan.
-function deltaHtml(actual, previo, formato) {
-  const c = cambio(actual, previo);
-  if (!c) return '<div class="delta">Sin periodo anterior para comparar</div>';
-  return `<div class="delta"><span class="chip ${c.direccion}">${flechaCambio(c)}</span>antes: ${escapar(formato(previo))}</div>`;
-}
-
 function tarjeta(etiqueta, valor, extra = '') {
   return `<div class="tarjeta"><div class="etq">${escapar(etiqueta)}</div><div class="valor">${escapar(valor)}</div>${extra}</div>`;
 }
 
 function pintarResumen(r) {
-  const { resumen: x, anterior: a } = r;
   const antes = r.dias === 1 ? diaCorto(sumarDias(r.dia_desde, -1)) : `${diaCorto(sumarDias(r.dia_desde, -r.dias))} – ${diaCorto(sumarDias(r.dia_desde, -1))}`;
   textoAntes = antes;
   $('p-etq').textContent = r.dias === 1 ? 'Día' : 'Del';
   $('p-texto').textContent = textoPeriodo(r.dia_desde, r.dia_hasta);
   // Si el periodo abre el dia de la primera venta, antes no hubo nada que comparar.
-  $('p-anterior').textContent = r.dia_desde === r.primera_venta ? 'Sin periodo anterior para comparar' : `Comparado con ${antes}`;
-  $('h-total').textContent = pesos(x.total);
-  const c = cambio(x.total, a.total);
-  $('h-delta').innerHTML = c
-    ? `<span class="chip ${c.direccion}">${flechaCambio(c)}</span>${escapar(`vs ${pesos(a.total)} del periodo anterior (${antes}) · ${pesosConSigno(x.total - a.total)}`)}`
-    : `${escapar(cuenta(x.ventas, 'ticket', 'tickets'))} · sin periodo anterior para comparar`;
-  const usados = r.por_forma_pago.find((f) => f.forma_pago === 'dolarones')?.total ?? 0;
-  $('tarjetas').innerHTML = [
-    tarjeta('Tickets', x.ventas.toLocaleString('es-MX'), deltaHtml(x.ventas, a.ventas, (v) => v.toLocaleString('es-MX'))),
-    tarjeta('Ticket promedio', pesos(x.ticket_promedio), deltaHtml(x.ticket_promedio, a.ticket_promedio, pesos)),
-    tarjeta('Piezas vendidas', x.piezas.toLocaleString('es-MX'), deltaHtml(x.piezas, a.piezas, (v) => v.toLocaleString('es-MX'))),
-    tarjeta('Dolarones usados', dolarones(usados), `<div class="delta">${escapar(pesos(usados))} del total</div>`),
-    tarjeta('Devuelto y cancelado', pesos(r.cancelaciones.total), `<div class="delta">${escapar(cuenta(r.cancelaciones.n, 'movimiento', 'movimientos'))}</div>`),
-  ].join('');
+  textoAnteriorBase = r.dia_desde === r.primera_venta ? 'Sin periodo anterior para comparar' : `Comparado con ${antes}`;
+  textoAnterior();
+  pintarResumenEjecutivo();   // el valor en piso de las tarjetas sale de este mismo reporte
 }
+
+/* ---------- Resumen ejecutivo (#802) ---------- */
+
+// Debajo de la barra: contra que se compara lo que se ve. En el Resumen manda «Comparar con»; en las demas vistas, el periodo anterior.
+function textoAnterior() {
+  $('p-anterior').textContent = vistaActual === 'resumen' && datosResumen ? textoComparacion(datosResumen) : textoAnteriorBase;
+}
+
+function consultaResumen() {
+  const q = consultaPeriodo();
+  if (tiendaActual) q.set('tienda', tiendaActual);
+  q.set('comparar', comparar);
+  if (granoPedido) q.set('grano', granoPedido);
+  return q;
+}
+
+async function cargarResumen() {
+  const turno = ++turnoResumen;
+  $('resumen-cuerpo').classList.add('pidiendo');   // se queda el cuadro anterior, atenuado: sin saltos
+  try {
+    const respuesta = await fetch(`/api/reportes/resumen?${consultaResumen()}`);
+    const d = await respuesta.json().catch(() => ({}));
+    if (turno !== turnoResumen) return;   // llego tarde: ya se pidio otra cosa
+    if (!respuesta.ok) {
+      $('r-estado').textContent = d.error ?? 'No se pudo cargar el resumen.';
+      $('r-estado').hidden = false;
+      return;
+    }
+    datosResumen = d;
+    pintarResumenEjecutivo();
+  } catch {
+    if (turno === turnoResumen) { $('r-estado').textContent = 'No se pudo cargar el resumen. Revisa la conexión.'; $('r-estado').hidden = false; }
+  } finally {
+    if (turno === turnoResumen) $('resumen-cuerpo').classList.remove('pidiendo');
+  }
+}
+
+function pintarGrano(d) {
+  const permitidos = granosPermitidos(d.periodo.desde, d.periodo.hasta);
+  for (const b of $('grano').querySelectorAll('button')) {
+    b.setAttribute('aria-pressed', String(b.dataset.grano === d.grano));
+    b.disabled = !permitidos[b.dataset.grano];
+    b.title = b.disabled ? 'El periodo es más corto que esta agrupación' : '';
+  }
+  $('f-comparar').value = comparar;
+}
+
+const GRANO_TEXTO = { dia: 'por día', semana: 'por semana (lunes a domingo)', mes: 'por mes' };
+
+function pintarTendencia() {
+  const d = datosResumen;
+  const caja = $('graf-tendencia');
+  const ancho = Math.floor(caja.clientWidth);
+  if (!d || !ancho) return;   // oculta: se pinta al verse (ResizeObserver)
+  // Sin una sola venta (ni en la comparacion) no hay nada que graficar: una escala de $0 a $1 no dice nada.
+  if (d.totales.ventas === 0 && !(d.anterior?.ventas > 0)) { caja.innerHTML = '<div class="vacio">Sin ventas en este periodo.</div>'; return; }
+  caja.innerHTML = graficaTiempo(datosTendencia(d), { ancho, alto: 290, seleccion: d.grano === 'dia' ? diaElegido : null, clicable: d.grano === 'dia' });
+}
+function pintarMeta() {
+  const d = datosResumen;
+  const caja = $('graf-meta');
+  const ancho = Math.floor(caja.clientWidth);
+  if (!d || !ancho) return;
+  caja.innerHTML = graficaMeta(d, { ancho });
+}
+new ResizeObserver(() => pintarTendencia()).observe($('graf-tendencia'));
+new ResizeObserver(() => pintarMeta()).observe($('graf-meta'));
+
+function pintarResumenEjecutivo() {
+  const d = datosResumen;
+  if (!d) return;
+  d.inventario = ultimoReporte?.inventario ?? null;   // foto de ahora: ya viene en /api/reportes, no se vuelve a leer
+  $('r-estado').hidden = true;
+  textoAnterior();
+  pintarGrano(d);
+  $('r-kpis').innerHTML = tarjetasHtml(tarjetasKpi(d, d.inventario));
+
+  $('tend-sub').textContent = `${GRANO_TEXTO[d.grano]} · ${d.cubetas.length.toLocaleString('es-MX')} ${unidadGrano(d.grano, d.cubetas.length)}`;
+  $('leyenda-tendencia').innerHTML = leyendaTendencia(d);
+  $('tabla-tendencia').innerHTML = tablaTendencia(d);
+  const parciales = d.cubetas.filter((c) => c.parcial).length;
+  $('tend-nota').textContent = [
+    d.grano === 'dia' ? 'Toca una columna para ir a los tickets de ese día.' : '',
+    parciales ? `La primera o la última ${unidadGrano(d.grano, 1)} está cortada por el periodo: vende menos de lo normal.` : '',
+    d.comparacion ? `La línea punteada es la comparación, ${COMPARACION_POR_GRANO[d.grano]}.` : '',
+  ].filter(Boolean).join(' ');
+  pintarTendencia();
+
+  const mes = new Date(`${d.meta_mes}-15T12:00:00`).toLocaleDateString('es-MX', { month: 'long' });
+  $('meta-titulo').textContent = `Meta de ${mes}`;
+  $('r-meta').innerHTML = metaHtml(d);
+  $('tabla-meta').innerHTML = tablaMeta(d);
+  $('meta-alterna').hidden = !d.meta.monto;
+  if (!d.meta.monto) $('p-meta').classList.remove('en-tabla');
+  pintarMeta();
+
+  $('r-cambios').innerHTML = hallazgosHtml(hallazgos(d, { nombreCategoria: nombreCat }));
+  $('r-canales').innerHTML = canalesHtml(d);
+  $('tabla-canales').innerHTML = tablaCanales(d);
+  $('cat-sub').textContent = d.comparacion ? 'contra la comparación' : 'sin comparar';
+  $('r-categorias').innerHTML = categoriasHtml(d, nombreCat);
+  $('tabla-categorias').innerHTML = tablaCategorias(d, nombreCat);
+}
+
+$('f-comparar').addEventListener('change', () => {
+  comparar = $('f-comparar').value;
+  guardarUrl();
+  cargarResumen();
+});
+$('grano').addEventListener('click', (e) => {
+  const clave = e.target.dataset?.grano;
+  if (!clave || e.target.disabled || (clave === datosResumen?.grano && clave === granoPedido)) return;
+  granoPedido = clave;
+  guardarUrl();
+  cargarResumen();
+});
+// Una columna por dia: igual que en Ventas, filtra los tickets de ese dia.
+$('graf-tendencia').addEventListener('click', (e) => {
+  const dia = e.target.closest?.('[data-dia]')?.dataset.dia;
+  if (!dia) return;
+  diaElegido = diaElegido === dia ? null : dia;
+  pintarTendencia();
+  pintarDias();
+  pedirTickets();
+  if (diaElegido) location.hash = '#tickets';
+});
+$('graf-tendencia').addEventListener('keydown', (e) => {
+  if ((e.key === 'Enter' || e.key === ' ') && e.target.dataset?.dia) { e.preventDefault(); e.target.dispatchEvent(new MouseEvent('click', { bubbles: true })); }
+});
 
 /* ---------- ventas por dia ---------- */
 
@@ -1079,6 +1310,34 @@ function pintarEquipo(e) {
   }).join('')}</tbody></table>`;
 }
 
+/* ---------- Dolarones (#802): una peticion al ver la vista, una vez por periodo y tienda ---------- */
+let datosDolarones = null;
+let turnoDolarones = 0;
+function dibujarDolarones() {
+  if (!datosDolarones) return;
+  const huecos = [...$('dolarones-contenido').querySelectorAll('.graf-d')];
+  if (!huecos.length || !huecos[0].clientWidth) return;   // oculta: se dibuja al verla
+  const svg = graficasDolarones(datosDolarones, (id) => $('dolarones-contenido').querySelector(`[data-grafica="${id}"]`).clientWidth);
+  for (const h of huecos) h.innerHTML = svg[h.dataset.grafica] ?? '';
+}
+async function cargarDolarones() {
+  const turno = ++turnoDolarones;
+  const q = consultaPeriodo();
+  if (tiendaActual) q.set('tienda', tiendaActual);
+  try {
+    const respuesta = await fetch(`/api/reportes/dolarones?${q}`);
+    const r = await respuesta.json().catch(() => ({}));
+    if (turno !== turnoDolarones) return;
+    if (!respuesta.ok) { $('dolarones-contenido').innerHTML = `<p class="vacio">${escapar(r.error ?? 'No se pudo cargar la vista de Dolarones.')}</p>`; return; }
+    datosDolarones = r;
+    $('dolarones-contenido').innerHTML = vistaDolarones(r);
+    dibujarDolarones();
+  } catch {
+    if (turno === turnoDolarones) $('dolarones-contenido').innerHTML = '<p class="vacio">No se pudo cargar la vista de Dolarones. Revisa la conexión.</p>';
+  }
+}
+new ResizeObserver(() => dibujarDolarones()).observe($('dolarones-contenido'));
+
 async function cargarEquipo() {
   try {
     const r = await fetch(`/api/reportes/equipo?${consultaPeriodo()}`);
@@ -1346,7 +1605,7 @@ document.addEventListener('click', (e) => {
   if (!boton) return;
   const enTabla = boton.closest('.panel').classList.toggle('en-tabla');
   boton.textContent = enTabla ? 'Ver gráfica' : 'Ver tabla';
-  if (!enTabla) pintarDias();
+  if (!enTabla) { pintarDias(); dibujarDolarones(); }
 });
 
 activarGlobos(document.body);

@@ -146,9 +146,10 @@ test('capturas: tiempo por captura, personas, rafagas y sesiones del rango pasad
 
   // La captura de las 23:59:50 es del 27 y la de las 00:00:20 es del 28 (dia de la tienda, no UTC).
   assert.deepEqual(r.serie.map((s: { clave: string; total: number }) => [s.clave, s.total]), [[D1, 11], [D2, 1]]);
+  assert.deepEqual(r.serie.map((c: { dias: number }) => c.dias), [1, 1]);   // dias con captura de cada columna
   assert.deepEqual(r.serie[0].personas, { [ANA]: 8, [BETO]: 2, '': 1 });
   assert.deepEqual(r.serie[1].personas, { [ANA]: 1 });
-  assert.deepEqual(r.tiempo_semanal, [{ lunes: '2026-10-26', mediana_s: 50, n: 6 }]);
+  assert.deepEqual(r.tiempo_semanal, [{ lunes: '2026-10-26', mediana_s: 50, n: 6, piezas_por_hora: 54 }]);
   const horario = (dia: number, hora: number) => r.por_hora.find((h: { dia_semana: number; hora: number }) => h.dia_semana === dia && h.hora === hora)?.n;
   assert.equal(horario(2, 10), 8);   // martes 10:00 hora de la tienda
   assert.equal(horario(2, 23), 1);

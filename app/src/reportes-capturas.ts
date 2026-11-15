@@ -290,29 +290,33 @@ export async function reporteCapturas(url: URL, env: Env, ahora = Date.now()): P
   // Serie por dia (hasta 35 dias) o por semana de lunes a domingo, con una columna por cada una, aunque vaya en cero.
   const grano = rango.dias <= MAX_DIAS_POR_DIA ? 'dia' : 'semana';
   const claveDe = (dia: string) => (grano === 'dia' ? dia : lunesDe(dia));
-  const serie: { clave: string; desde: string; hasta: string; parcial: boolean; total: number; personas: Record<string, number> }[] = [];
+  const serie: { clave: string; desde: string; hasta: string; parcial: boolean; total: number; dias: number; personas: Record<string, number> }[] = [];
   for (let c = claveDe(rango.dia_desde); c <= rango.dia_hasta; c = sumarDias(c, grano === 'dia' ? 1 : 7)) {
     const fin = grano === 'dia' ? c : sumarDias(c, 6);
     const [d, h] = [c < rango.dia_desde ? rango.dia_desde : c, fin > rango.dia_hasta ? rango.dia_hasta : fin];
-    serie.push({ clave: c, desde: d, hasta: h, parcial: d !== c || h !== fin, total: 0, personas: {} });
+    serie.push({ clave: c, desde: d, hasta: h, parcial: d !== c || h !== fin, total: 0, dias: 0, personas: {} });
   }
   const columna = new Map(serie.map((s) => [s.clave, s]));
   const porHoraDia = new Map<string, number>();
+  const diasDeColumna = new Map<string, Set<string>>();   // dias con captura de cada columna: la minigrafica de «por dia»
   for (const e of actuales) {
     if (!e.pieza) continue;
     const t = horaDeTienda(e.ms), s = columna.get(claveDe(t.dia))!;
     s.total += 1;
+    diasDeColumna.set(s.clave, (diasDeColumna.get(s.clave) ?? new Set()).add(t.dia));
     s.personas[e.correo] = (s.personas[e.correo] ?? 0) + 1;
     porHoraDia.set(`${t.dia_semana}-${t.hora}`, (porHoraDia.get(`${t.dia_semana}-${t.hora}`) ?? 0) + 1);
   }
+  for (const [clave, dias] of diasDeColumna) columna.get(clave)!.dias = dias.size;
   const semanas = new Map<string, number[]>();
   for (const e of actuales) if (e.clase === 'medida') {
     const lunes = lunesDe(horaDeTienda(e.ms).dia);
     semanas.set(lunes, [...(semanas.get(lunes) ?? []), e.seg!]);
   }
-  const tiempoSemanal: { lunes: string; mediana_s: number | null; n: number }[] = [];
+  const tiempoSemanal: { lunes: string; mediana_s: number | null; n: number; piezas_por_hora: number | null }[] = [];
   for (let l = lunesDe(rango.dia_desde); l <= rango.dia_hasta; l = sumarDias(l, 7)) {
-    tiempoSemanal.push({ lunes: l, mediana_s: mediana(semanas.get(l) ?? []), n: (semanas.get(l) ?? []).length });
+    const seg = semanas.get(l) ?? [];
+    tiempoSemanal.push({ lunes: l, mediana_s: mediana(seg), n: seg.length, piezas_por_hora: porHora(seg.length, horas(seg)) });
   }
 
   const viejas = (n: number | null, vieja: string | null) => ({ n: n ?? 0, mas_vieja: vieja });

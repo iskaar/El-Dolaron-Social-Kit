@@ -3,8 +3,9 @@
 // Como en graficas.js: marcas delgadas, una tabla equivalente para cada grafica y el color nunca lleva solo el significado.
 import {
   escapar, cambio, flechaCambio, diaCorto, diaLargo, diaSemana, mapaCalor, mapaCalorHtml, tablaCalor, FORMATO_CALOR_DINERO,
-  graficaColumnas, graficaLinea, barrasHorizontales, tabla,
+  graficaColumnas, graficaLinea, barrasHorizontales, tabla, minigrafica, leyendaSeries, columnas,
 } from './graficas.js';
+import { cambioKpi } from './reportes-resumen.js';
 
 const mayuscula = (t) => (t ? t[0].toUpperCase() + t.slice(1) : t);
 const n0 = (n) => Number(n ?? 0).toLocaleString('es-MX');
@@ -97,25 +98,29 @@ export function notaDesde(r) {
 
 /* ---------- tarjetas ---------- */
 
-// `menosEsMejor`: bajar es bueno (tiempo); `neutro`: ni bueno ni malo (horas). La flecha y el signo van escritos; el color solo los refuerza.
-function delta(actual, previo, formato, { menosEsMejor = false, neutro = false } = {}) {
-  const c = cambio(actual ?? 0, previo ?? 0);
-  if (actual == null || !c) return '<div class="delta">Sin periodo anterior para comparar</div>';
-  const clase = neutro || c.direccion === 'igual' ? '' : (c.direccion === 'sube') === !menosEsMejor ? 'sube' : 'baja';
-  return `<div class="delta"><span class="chip ${clase}">${escapar(flechaCambio(c))}</span>antes: ${escapar(formato(previo))}</div>`;
+// Mismo marcado que las tarjetas de Resumen y Dolarones (`.tarjeta.kpi`, `cambioKpi`): `bueno` dice si subir es bueno, malo o ni lo uno ni lo otro;
+// la flecha y el signo van escritos y el color solo los refuerza. `serie` pinta la minigrafica si hay al menos dos puntos.
+function delta(actual, previo, formato, bueno = 'sube') {
+  const c = actual == null || previo == null ? null : cambioKpi(actual, previo, { bueno });
+  if (!c) return '<div class="delta">Sin periodo anterior para comparar</div>';
+  return `<div class="delta"><span class="chip ${c.tono}">${escapar(`${c.flecha} ${c.texto}`)}</span>${escapar(`antes: ${formato(previo)}`)}</div>`;
 }
-const pie = (texto) => `<div class="delta">${escapar(texto)}</div>`;
-const tarjeta = (etiqueta, valor, extra = '') => `<div class="tarjeta"><div class="etq">${escapar(etiqueta)}</div><div class="valor">${escapar(valor)}</div>${extra}</div>`;
+const pie = (texto) => `<div class="pie">${escapar(texto)}</div>`;
+const tarjeta = (etq, valor, extra = '', serie = [], clase = 's1') =>
+  `<div class="tarjeta kpi"><div class="etq">${escapar(etq)}</div><div class="valor">${escapar(valor)}</div>${extra}${
+    serie.length >= 2 ? `<div class="mini-caja">${minigrafica(serie, { clase, etiqueta: `Tendencia de ${etq}` })}</div>` : ''}</div>`;
 
 export function tarjetasCapturas(r) {
   const x = r.resumen, a = r.anterior, c = x.corregidas, cola = r.pendientes.por_revisar;
-  return `<div class="tarjetas">${[
-    tarjeta('Capturas del periodo', n0(x.capturas), delta(x.capturas, a.capturas, n0) + (x.sumas ? pie(`y ${cuenta(x.sumas, 'suma', 'sumas')} a piezas que ya existían`) : '')),
-    tarjeta('Por día', x.por_dia == null ? '—' : n1(x.por_dia), delta(x.por_dia, a.por_dia, n1) + pie(`${cuenta(x.dias_con_captura, 'día', 'días')} con captura`)),
-    tarjeta('Tiempo por captura', duracion(x.tiempo_mediano_s), delta(x.tiempo_mediano_s, a.tiempo_mediano_s, duracion, { menosEsMejor: true })
-      + pie(`Mediana de ${cuenta(x.medidas, 'intervalo medido', 'intervalos medidos')} · menos es mejor`)),
-    tarjeta('Piezas por hora activa', x.piezas_por_hora == null ? '—' : n1(x.piezas_por_hora), delta(x.piezas_por_hora, a.piezas_por_hora, n1)),
-    tarjeta('Horas activas de captura', `${n1(x.horas_activas)} h`, delta(x.horas_activas, a.horas_activas, (v) => `${n1(v)} h`, { neutro: true }) + pie('Suma de personas, sin contar pausas')),
+  const porColumna = r.serie.map((s) => s.total), porDia = r.serie.map((s) => (s.dias ? s.total / s.dias : null));
+  return `<div class="tarjetas" id="c-kpis">${[
+    tarjeta('Capturas del periodo', n0(x.capturas), delta(x.capturas, a.capturas, n0) + (x.sumas ? pie(`y ${cuenta(x.sumas, 'suma', 'sumas')} a piezas que ya existían`) : ''), porColumna, 's1'),
+    tarjeta('Por día', x.por_dia == null ? '—' : n1(x.por_dia), delta(x.por_dia, a.por_dia, n1) + pie(`${cuenta(x.dias_con_captura, 'día', 'días')} con captura`), porDia, 's1'),
+    tarjeta('Tiempo por captura', duracion(x.tiempo_mediano_s), delta(x.tiempo_mediano_s, a.tiempo_mediano_s, duracion, 'baja')   // menos es mejor
+      + pie(`Mediana de ${cuenta(x.medidas, 'intervalo medido', 'intervalos medidos')} · menos es mejor`), r.tiempo_semanal.map((s) => s.mediana_s), 's2'),
+    tarjeta('Piezas por hora activa', x.piezas_por_hora == null ? '—' : n1(x.piezas_por_hora), delta(x.piezas_por_hora, a.piezas_por_hora, n1),
+      r.tiempo_semanal.map((s) => s.piezas_por_hora), 's3'),
+    tarjeta('Horas activas de captura', `${n1(x.horas_activas)} h`, delta(x.horas_activas, a.horas_activas, (v) => `${n1(v)} h`, 'neutro') + pie('Suma de personas, sin contar pausas')),
     tarjeta('De captura a etiqueta', duracionLarga(x.captura_a_etiqueta_s),
       pie(x.captura_a_etiqueta_n ? `Mediana de ${cuenta(x.captura_a_etiqueta_n, 'pieza', 'piezas')} con etiqueta registrada`
         : r.etiquetas.desde ? 'Sin etiquetas registradas en el periodo' : 'Aún no se registran etiquetas')),
@@ -127,7 +132,7 @@ export function tarjetasCapturas(r) {
 
 /* ---------- tablas ---------- */
 
-const llave = (color) => `<span class="llave" style="background:${color}"></span>`;
+const llave = (color) => `<span style="display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:8px;background:${color}"></span>`;
 const celdaNum = (t) => `<td class="num">${escapar(t)}</td>`;
 
 /** Por persona, con la fila de Total sacada de los totales del servidor (los mismos de las tarjetas). */
@@ -201,8 +206,6 @@ function panel(id, titulo, sub, grafica, tablaHtml, nota = '') {
     <div class="${tablaHtml ? 'vista-grafica' : ''}">${grafica}</div>${tablaHtml ? `<div class="vista-tabla">${tablaHtml}</div>` : ''}${nota ? `<p class="nota">${nota}</p>` : ''}</article>`;
 }
 
-const leyenda = (grupos) => `<table class="leyenda"><tbody>${grupos.map((g) => `<tr><td>${llave(g.color)}${escapar(g.nombre)}</td></tr>`).join('')}</tbody></table>`;
-
 /** La serie por día (o semana) y persona en tabla, lo más reciente primero. */
 export function tablaSerie(r) {
   const d = datosSerie(r);
@@ -223,7 +226,7 @@ export function htmlVista(r) {
   return `
     <div class="principal">${tarjetasCapturas(r)}</div>
     <div class="malla dos">
-      ${panel('c-dia', 'Capturas', `${grano}, por persona`, `<div data-grafica="serie"></div>${leyenda(datosSerie(r).grupos)}`, tablaSerie(r),
+      ${panel('c-dia', 'Capturas', `${grano}, por persona`, `${leyendaSeries(datosSerie(r).grupos)}<div data-grafica="serie"></div>`, tablaSerie(r),
         r.grano === 'dia' ? 'La línea punteada es el promedio de los últimos 7 días.' : 'Con más de 35 días la gráfica agrupa por semana.')}
       ${panel('c-tiempo', 'Tiempo por captura', 'mediana por semana', '<div data-grafica="tiempo"></div>',
         tabla(['Semana', 'Mediana', 'Intervalos medidos'], [...r.tiempo_semanal].reverse().map((s) => [`Semana del ${diaCorto(s.lunes)}`, duracion(s.mediana_s), n0(s.n)]), [1, 2]),
@@ -256,7 +259,8 @@ export function htmlVista(r) {
 export function graficaDe(clave, r, ancho) {
   if (clave === 'serie') return graficaColumnas(datosSerie(r), { ancho, descripcion: `Capturas ${r.grano === 'dia' ? 'por día' : 'por semana'}, por persona` });
   if (clave === 'tiempo') return graficaLinea(datosTiempo(r), { ancho, formato: (s) => duracion(s), descripcion: 'Mediana semanal del tiempo por captura' });
-  return graficaColumnas(datosHistograma(r), { ancho, descripcion: 'Distribución del tiempo por captura' });
+  const h = datosHistograma(r);   // el histograma usa las columnas de Dolarones: una serie, marcas enteras
+  return columnas({ categorias: h.etiquetas.map((e) => ({ etiqueta: e, titulo: e })), series: h.series, ancho, entero: true, fmtValor: n0 });
 }
 
 /** Pone la vista en `raiz` y dibuja las gráficas al ancho de su hueco; se redibujan solas si el hueco cambia (ventana, «Ver tabla»). */
