@@ -43,6 +43,7 @@ import { rutaCamaraRemota } from './camara-remota.ts';
 import { rutaEspejoCaptura } from './espejo-captura.ts';
 import { rutaNomina } from './nomina.ts';
 import { reporteEquipo, registrarBonoSemana } from './equipo.ts';
+import { reporteDolarones } from './reportes-dolarones.ts';
 import { rutaPlano } from './plano.ts';
 import { misRetos, otorgarLogros, esCorridaDiaria } from './retos.ts';
 import { rutaTablero } from './tablero.ts';
@@ -2950,6 +2951,7 @@ export default {
       if (pathname === '/api/reportes') {
         return await reportes(url, env);
       }
+      if (pathname === '/api/reportes/dolarones' && request.method === 'GET') return await reporteDolarones(url, env);
       if (pathname === '/api/reportes/equipo' && request.method === 'GET') return await reporteEquipo(url, env);
       if (pathname === '/api/reportes/equipo/bono' && request.method === 'POST') return await registrarBonoSemana(request, env, correo);
       if (pathname === '/api/reportes/tickets') {
