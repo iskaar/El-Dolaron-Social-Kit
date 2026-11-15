@@ -99,8 +99,9 @@ export function iniciarApartar({ api, estaListo, irAAcceso, alTerminar, alVerApa
   let piezas = [], origen = 'comprar_ya', intento = null, hecho = false, pagar = null;
 
   const entrega = () => radios.find((r) => r.checked)?.value === 'envio' ? 'envio' : 'tienda';
-  const recoge = q('.apartar-recoge');
-  const tiendaElegida = () => recoge.selectedOptions?.[0]?.textContent ?? 'Soledad';
+  // #800: con el HTML viejo en caché y este script nuevo no existen estos nodos: todo lo de abajo es opcional y sin ellos se aparta como antes.
+  const recoge = q('.apartar-recoge'), bloqueRecoge = q('.apartar-recoge-bloque');
+  const tiendaElegida = () => recoge?.selectedOptions?.[0]?.textContent ?? 'Soledad';
   const subtotal = () => piezas.reduce((suma, p) => suma + p.precio, 0);
   function ver(vista, texto) {
     for (const [clave, nodo] of Object.entries(vistas)) nodo.hidden = clave !== vista;
@@ -122,12 +123,12 @@ export function iniciarApartar({ api, estaListo, irAAcceso, alTerminar, alVerApa
     q('.apartar-apartas').textContent = `Apartas con ${pesos(r.apartas)}`;
     q('.apartar-falta').textContent = r.falta > 0 ? `Falta por pagar ${pesos(r.falta)} ${entrega() === 'envio' ? 'antes del envío' : 'al recoger'}.` : 'No falta nada: pagas todo ahora.';
     explica.textContent = explicaEntrega(r.subtotal, entrega(), Date.now(), piezas.length, tiendaElegida());
-    q('.apartar-recoge-bloque').hidden = entrega() === 'envio';   // un envío sale de Soledad
+    if (bloqueRecoge) bloqueRecoge.hidden = entrega() === 'envio';   // un envío sale de Soledad
     enviar.textContent = `Apartar por ${pesos(r.apartas)}`;
     q('.apartar-envio-costo').textContent = textoEnvio(r.subtotal);
   }
   for (const r of radios) r.addEventListener('change', pintarForm);
-  recoge.addEventListener('change', pintarForm);
+  recoge?.addEventListener('change', pintarForm);
 
   function pintarListo(r) {
     const { pedido } = r;
@@ -162,11 +163,11 @@ export function iniciarApartar({ api, estaListo, irAAcceso, alTerminar, alVerApa
     const eleccion = entrega();
     const codigos = piezas.map((p) => p.codigo);
     // El mismo UUID mientras sean las mismas piezas y entrega: un reintento tras perder la red no aparta dos veces.
-    const clave = `${codigos.join(',')}|${eleccion}|${eleccion === 'tienda' ? recoge.value ?? '' : ''}`;
+    const clave = `${codigos.join(',')}|${eleccion}|${eleccion === 'tienda' ? recoge?.value ?? '' : ''}`;
     if (intento?.clave !== clave) intento = { clave, id: crypto.randomUUID() };
     enviar.disabled = true; error.textContent = '';
     try {
-      const r = await api('apartar', { id: intento.id, codigos, entrega: eleccion, ...(eleccion === 'tienda' && recoge.value ? { recoge_en: recoge.value } : {}) });
+      const r = await api('apartar', { id: intento.id, codigos, entrega: eleccion, ...(eleccion === 'tienda' && recoge?.value ? { recoge_en: recoge.value } : {}) });
       intento = null; hecho = true;
       for (const codigo of codigos) {
         medir('apartado_portal', codigo);

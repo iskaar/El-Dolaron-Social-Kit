@@ -309,3 +309,19 @@ test('portal.html ofrece las tiendas de TIENDAS en «¿Dónde recoges?» y los t
   assert.match(detalleApartado(pedido, ahora).join(' '), /Recógela en Coronel Romero antes del/);
   assert.match(detalleApartado({ ...pedido, recoge_en_nombre: undefined }, ahora).join(' '), /Recógela en Soledad antes del/);
 });
+
+test('HTML viejo en caché con el script nuevo (#800): sin los nodos de «¿Dónde recoges?» se aparta como antes, sin recoge_en y con Soledad', async () => {
+  const d = dominio();
+  const consulta = d.dialogo.querySelector;
+  d.dialogo.querySelector = (sel: string) => (sel === '.apartar-recoge' || sel === '.apartar-recoge-bloque' ? null : consulta(sel));
+  const llamadas: any[] = [];
+  const hoja = apartar.iniciarApartar({ api: async (ruta: string, cuerpo: any) => { llamadas.push({ ruta, ...cuerpo }); return RESPUESTA(); },
+    estaListo: () => true, irAAcceso: () => {}, alTerminar: () => {}, alApartar: () => {}, alPagar: () => {} });
+  hoja.abrir([OTRA]);
+  assert.match(d.nodo('.apartar-explica').textContent, /pasas por ella a Soledad\.$/);
+  d.radios[0].checked = false; d.radios[1].checked = true;
+  d.radios[1].oyentes.change();
+  d.radios[0].checked = true; d.radios[1].checked = false;
+  await d.enviar();
+  assert.deepEqual(Object.keys(llamadas[0]).sort(), ['codigos', 'entrega', 'id', 'ruta']);
+});

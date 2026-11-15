@@ -572,7 +572,7 @@ $('ver-mias').addEventListener('click', () => mostrar('mias'));
 /* ---------- Ya la vendí (solo revendedoras, #575): aparta 48 h sin anticipo ---------- */
 
 let piezaVendida = null, intentoVendida = null, apartando = false;
-const mostrarEnvio = () => { $('linea-envio').hidden = $('vendida-entrega').value !== 'envio'; $('bloque-recoge').hidden = $('vendida-entrega').value === 'envio'; };
+const mostrarEnvio = () => { $('linea-envio').hidden = $('vendida-entrega').value !== 'envio'; const b = $('bloque-recoge'); if (b) b.hidden = $('vendida-entrega').value === 'envio'; };
 $('vendida-entrega').addEventListener('change', mostrarEnvio);
 function abrirVendida(p, interesado = null) {
   if (intentoVendida) {
@@ -605,9 +605,9 @@ $('form-vendida').addEventListener('submit', async (e) => {
   if (!telefono) return decir('aviso-vendida', 'Escribe los 10 números del WhatsApp de quien la compró.', true);
   // Un solo id por intento: si se pierde la respuesta, reintentar no aparta dos veces.
   intentoVendida ??= { id: crypto.randomUUID(), lineas: [{ producto_id: piezaVendida.id, cantidad: 1 }],
-    cliente: $('vendida-cliente').value.trim(), telefono, entrega: $('vendida-entrega').value, recoge_en: $('vendida-recoge').value };
+    cliente: $('vendida-cliente').value.trim(), telefono, entrega: $('vendida-entrega').value, ...($('vendida-recoge')?.value ? { recoge_en: $('vendida-recoge').value } : {}) };
   apartando = true;
-  for (const id of ['guardar-vendida', 'cerrar-vendida', 'vendida-cliente', 'vendida-telefono', 'vendida-entrega', 'vendida-recoge']) $(id).disabled = true;
+  for (const id of ['guardar-vendida', 'cerrar-vendida', 'vendida-cliente', 'vendida-telefono', 'vendida-entrega', 'vendida-recoge']) { const n = $(id); if (n) n.disabled = true; }
   try {
     const { pedido } = await api('/api/vender/apartar', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(intentoVendida) });
     const { cliente, telefono: tel } = intentoVendida;
@@ -621,7 +621,7 @@ $('form-vendida').addEventListener('submit', async (e) => {
   } finally {
     apartando = false;
     for (const id of ['guardar-vendida', 'cerrar-vendida']) $(id).disabled = false;
-    for (const id of ['vendida-cliente', 'vendida-telefono', 'vendida-entrega', 'vendida-recoge']) $(id).disabled = !!intentoVendida;
+    for (const id of ['vendida-cliente', 'vendida-telefono', 'vendida-entrega', 'vendida-recoge']) { const n = $(id); if (n) n.disabled = !!intentoVendida; }
   }
 });
 
@@ -876,8 +876,9 @@ try {
   revendedora = yo.revendedora === true;
   // ¿En qué tienda recoge el cliente?: las tres tiendas, con la de esta cuenta por omisión (una respuesta sin `tiendas` deja Soledad).
   if (Array.isArray(yo.tiendas) && yo.tiendas.length) {
-    $('vendida-recoge').replaceChildren(...yo.tiendas.map((t) => new Option(t.nombre, t.clave)));
-    if (yo.tiendas.some((t) => t.clave === yo.tienda)) $('vendida-recoge').value = yo.tienda;
+    const recoge = $('vendida-recoge');
+    recoge?.replaceChildren(...yo.tiendas.map((t) => new Option(t.nombre, t.clave)));
+    if (recoge && yo.tiendas.some((t) => t.clave === yo.tienda)) recoge.value = yo.tienda;
   }
   if (revendedora) modoRevendedora();
   try { compartidas = new Set(JSON.parse(localStorage.getItem(`vender-compartidas:${correo}`) || '[]')); } catch { /* sin memoria */ }
