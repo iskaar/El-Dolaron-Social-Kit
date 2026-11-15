@@ -47,7 +47,7 @@ import { diaTienda, hoyTienda, rangoDias, rangoDe, delDia, DIA, reportes } from 
 
 // Las pruebas importan estos dos desde aqui.
 export { hoyTienda, rangoDias };
-import { portal, llegada, vincular } from './portal.ts';
+import { portal, llegada } from './portal.ts';
 import { mensajesApi, responderApi } from './mensajes.ts';
 import { rutaAsistente } from './asistente.ts';
 import { sentenciasVale, buscarVale, valeDeVenta, usadosEnVenta, reimprimirVale, valesAbiertos, emitirCuponManual, porcentajeCupon } from './vales.ts';
@@ -2851,9 +2851,6 @@ export default {
         return await buscarPorCodigo(request, env);
       if (pathname === '/api/socios/legal' && request.method === 'GET')
         return json({ disponible:basesListas(env), bases:env.PORTAL_BASES_TEXTO || '', aviso:env.PORTAL_AVISO_TEXTO || '' });
-      // Sin entrada en cuentas.ts: únicamente el dueño puede aprobar un vínculo.
-      if (pathname === '/api/socios/vincular' && request.method === 'POST')
-        return await vincular(request, env);
 
       if (pathname === '/api/cortes') {
         if (request.method === 'POST') return await registrarCorte(request, env, correo);

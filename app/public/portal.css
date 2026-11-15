@@ -47,7 +47,6 @@ summary { cursor:pointer; font-weight:700; }
 ul { padding-left:20px; }
 li { margin:10px 0; }
 #recibos button { margin:0; border-bottom:1px solid var(--linea); border-radius:0; background:white; color:var(--azul); text-align:left; display:flex; flex-wrap:wrap; justify-content:space-between; gap:4px 16px; }
-#codigo-vinculo { display:block; overflow-wrap:anywhere; padding:14px; border:2px solid var(--azul); text-align:center; }
 .texto-legal { white-space:pre-wrap; font-size:14px; overflow-wrap:anywhere; }
 dialog { width:min(500px, 94vw); max-height:90vh; border:2px solid var(--azul); border-radius:10px; padding:24px; color:var(--azul); }
 dialog::backdrop { background:#16366b99; }

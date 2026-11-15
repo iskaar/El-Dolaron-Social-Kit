@@ -68,6 +68,15 @@ async function cliente(env: Env, uid: string): Promise<Cliente | null> {
     .bind(uid).first<Cliente>();
 }
 
+/** #807 (decisión de Isaac, 15/11/2026): quien entra por SMS con el teléfono de un alta de tienda sin acceso recibe esa misma membresía. */
+async function socioDe(env: Env, auth: Identidad): Promise<Cliente | null> {
+  const socio = await cliente(env, auth.uid);
+  if (socio) return socio;
+  const { meta } = await env.DB.prepare(`update clientes set auth_uid = ? where telefono = ? and auth_uid is null
+    and not exists (select 1 from clientes where auth_uid = ?)`).bind(auth.uid, auth.telefono, auth.uid).run();
+  return meta.changes ? cliente(env, auth.uid) : null;
+}
+
 async function premio(env: Env, canal: 'online' | 'tienda', clienteId: string, ahora: Date, orden?: number): Promise<void> {
   const lote = crypto.randomUUID();
   const iso = ahora.toISOString();
@@ -110,7 +119,7 @@ export async function registro(request: Request, env: Env, auth: Identidad): Pro
   if (nombre.length < 2 || nombre.length > 80 ||
     body.bases_version !== env.BASES_APROBADAS_VERSION || body.acepta_bases !== true || body.declara_mayor_edad !== true)
     return json({ error: 'Nombre, declaración de mayoría de edad y aceptación vigente requeridos.' }, 400);
-  let socio = await cliente(env, auth.uid);
+  let socio = await socioDe(env, auth);
   // Referido (#489) o piloto (#631): solo cuenta una membresía nueva. Quien ya existe ignora el código (reintento idempotente).
   let alta: { referenteId: string | null } | null = null;
   if (!socio && body.referido_codigo) {
@@ -200,32 +209,6 @@ export async function llegada(request: Request, env: Env, autor: string): Promis
   return json({ premio: await premioActual(env, id) });
 }
 
-/** El dueño coteja al cliente presente antes de vincular un registro previo. */
-export async function vincular(request: Request, env: Env): Promise<Response> {
-  const body = await request.json().then((c) => c ?? {}, () => ({})) as { codigo?: unknown; numero?: unknown; confirma?: unknown };
-  const codigo = String(body.codigo ?? '');
-  const numero = Number(body.numero);
-  if (!codigo.startsWith('DV-') || !Number.isSafeInteger(numero) || numero < 1 || body.confirma !== true)
-    return json({ error: 'Confirma al titular presente, su número de socio y su código de vinculación.' }, 400);
-  const hash = await hashCodigo(codigo);
-  const ahora = new Date().toISOString();
-  const vinculo = await env.DB.prepare('select auth_uid, telefono from vinculos_portal where token_hash = ? and expira_en > ?')
-    .bind(hash, ahora).first<{ auth_uid: string; telefono: string }>();
-  if (!vinculo) return json({ error: 'Código de vinculación inválido o vencido.' }, 403);
-  await env.DB.batch([
-    env.DB.prepare(`update clientes set auth_uid = ? where numero = ? and telefono = ? and auth_uid is null
-      and exists(select 1 from vinculos_portal where token_hash = ? and expira_en > ?)
-      and not exists(select 1 from clientes where auth_uid = ?)`)
-      .bind(vinculo.auth_uid, numero, vinculo.telefono, hash, ahora, vinculo.auth_uid),
-    env.DB.prepare(`update vinculos_portal set expira_en = '' where token_hash = ?
-      and exists(select 1 from clientes where numero = ? and telefono = ? and auth_uid = ?)`)
-      .bind(hash, numero, vinculo.telefono, vinculo.auth_uid),
-  ]);
-  const socio = await cliente(env, vinculo.auth_uid);
-  if (!socio || socio.numero !== numero) return json({ error: 'El socio no coincide o ya tiene otro acceso. Requiere aclaración con Isaac.' }, 409);
-  return json({ numero: socio.numero, nombre: socio.nombre, vinculado: true });
-}
-
 export async function portal(request: Request, env: Env, url: URL, ctx: ExecutionContext): Promise<Response> {
   if (url.pathname === '/api/portal/config' && request.method === 'GET') {
     const configurado = basesListas(env) && !!env.FIREBASE_PROJECT_ID && !!env.FIREBASE_WEB_API_KEY;
@@ -239,22 +222,7 @@ export async function portal(request: Request, env: Env, url: URL, ctx: Executio
   const auth = await identidad(request, env);
   if (!auth) return json({ error: 'Sesión inválida.' }, 401);
   if (url.pathname === '/api/portal/registro' && request.method === 'POST') return registro(request, env, auth);
-  if (url.pathname === '/api/portal/vinculo' && request.method === 'POST') {
-    if (!basesListas(env)) return json({ error: 'Portal no disponible.' }, 503);
-    if (await cliente(env, auth.uid)) return json({ error: 'Tu cuenta ya está vinculada.' }, 409);
-    const codigo = codigoAleatorio('DV');
-    const ahora = new Date();
-    const expira = new Date(ahora.getTime() + 5 * 60_000).toISOString();
-    const { meta } = await env.DB.prepare(`insert into vinculos_portal
-      (auth_uid, token_hash, telefono, creado_en, expira_en) values (?, ?, ?, ?, ?)
-      on conflict(auth_uid) do update set token_hash = excluded.token_hash, telefono = excluded.telefono,
-      creado_en = excluded.creado_en, expira_en = excluded.expira_en where vinculos_portal.creado_en <= ?`)
-      .bind(auth.uid, await hashCodigo(codigo), auth.telefono, ahora.toISOString(), expira,
-        new Date(ahora.getTime() - 5_000).toISOString()).run();
-    if (!meta.changes) return json({ error: 'Espera 5 segundos antes de generar otro código.' }, 429);
-    return json({ codigo, expira_en: expira }, 201);
-  }
-  const socio = await cliente(env, auth.uid);
+  const socio = await socioDe(env, auth);
   if (!socio) return json({ error: 'Registro requerido.' }, 404);
   if (url.pathname === '/api/portal/codigo' && request.method === 'DELETE') {
     await env.DB.prepare("update codigos_cliente set expira_en = '' where cliente_id = ? and auth_uid = ?")
