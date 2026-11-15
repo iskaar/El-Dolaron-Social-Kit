@@ -323,14 +323,28 @@
   }
   @media (prefers-reduced-motion: reduce) { main { transition: none; } }
 
+  .solo-impresion { display: none; }
   @media print {
-    header.barra a, .riel, .filtros, .alterna, .ver-mas, .exportar, .fondo-caja, .filtros-tickets { display: none !important; }
+    @page { margin: 12mm; }
+    /* Lo que es para operar y no para leer no se imprime: formularios (bono, fondo, cupon, pago y comision de la terminal), botones y filtros. */
+    header.barra a, .riel, .filtros, .alterna, .ver-mas, .exportar, .fondo-caja, .filtros-tickets, #equipo-config, .cols-todas, .csv-panel, .chip-dia, #aviso-bono { display: none !important; }
+    .solo-impresion { display: inline !important; }
     .app { display: block; }
     .trabajo { border: 0; padding: 0; }
     :root { color-scheme: light; }
     body { background: #fff; }
-    .panel, .tarjeta { break-inside: avoid; box-shadow: none; }
-    .lista-tickets, .panel .vista-tabla { max-height: none; overflow: visible; }
+    /* Un panel puede partirse entre paginas (si no, una grafica alta deja media pagina en blanco): se parten por renglones, no por la mitad de uno. */
+    .panel { overflow: visible; box-shadow: none; }
+    .tarjeta, .tabla tr, .svg-grafica, .hbarra, .calor, .meta-num { break-inside: avoid; box-shadow: none; }
+    .panel header, .panel h4, .leyenda-series, .leyenda-linea { break-after: avoid; }
+    .titulo-bloque { break-after: avoid; }
+    /* Cuatro tarjetas por fila, como en escritorio: el papel mide menos de 861 px y caeria en el diseno de celular. */
+    .tarjeta, #r-kpis .tarjeta, #c-kpis .tarjeta { flex: 1 1 22% !important; min-width: 0 !important; }
+    .tarjeta .valor, #r-kpis .tarjeta .valor, #c-kpis .tarjeta .valor { font-size: 21px !important; }
+    .lista-tickets, .panel .vista-tabla, .tabla.fija { max-height: none; overflow: visible; }
+    .tabla.fija .baja { display: table-cell !important; }
+    .svg-grafica { max-height: 300px; }   /* en el papel el ancho es otro que el medido en pantalla: una grafica no crece sin limite */
+    main { transition: none; }
   }
 </style>
 </head>
@@ -382,7 +396,7 @@
         <button type="button" class="btn" id="imprimir">Imprimir o guardar PDF</button>
       </div>
     </div>
-    <p class="periodo-txt"><span><span id="p-etq">Del</span> <b id="p-texto">—</b></span><span id="p-anterior"></span><span id="aviso-periodo" role="status"></span></p>
+    <p class="periodo-txt"><span><span id="p-etq">Del</span> <b id="p-texto">—</b></span><span id="p-anterior"></span><span class="solo-impresion" id="p-impresion"></span><span id="aviso-periodo" role="status"></span></p>
 
 <main id="principal">
 
@@ -1111,6 +1125,9 @@ function pintarPeriodo() {
 // Debajo de la barra: contra que se compara lo que se ve. En Resumen y Ventas manda «Comparar con»; en las demas vistas, el periodo anterior.
 function textoAnterior() {
   const datos = vistaActual === 'clientes' ? datosClientes : vistaActual === 'control' ? datosControl : vistaActual === 'equipo' ? datosEquipo : vistaActual === 'finanzas' ? datosFinanzas : datosResumen;   // cada vista con comparacion trae la suya (mismo periodo y mismas ventanas)
+  // Lo que el papel debe decir y la pantalla ya muestra en los filtros: la tienda y como se agrupa (el periodo y la comparacion ya van arriba).
+  const tienda = tiendasLista.find((t) => t.clave === tiendaActual)?.nombre ?? 'Todas las tiendas';
+  $('p-impresion').textContent = `Tienda: ${tienda}${VISTAS_CON_COMPARACION.includes(vistaActual) && datos?.grano ? ` · Agrupado por ${{ dia: 'día', semana: 'semana', mes: 'mes' }[datos.grano]}` : ''}`;
   // Tickets no compara con nada: no dice «Comparado con...».
   $('p-anterior').textContent = vistaActual === 'tickets' ? '' : VISTAS_CON_COMPARACION.includes(vistaActual) && datos ? textoComparacion(datos) : textoAnteriorBase;
 }
