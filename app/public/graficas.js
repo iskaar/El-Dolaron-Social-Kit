@@ -402,3 +402,103 @@ export function tabla(encabezados, filas, numericas = []) {
   return `<table class="tabla"><thead><tr>${encabezados.map((h, i) => `<th${clase(i)}>${escapar(h)}</th>`).join('')}</tr></thead>
     <tbody>${filas.map((f) => `<tr>${f.map((c, i) => `<td${clase(i)}>${escapar(c)}</td>`).join('')}</tr>`).join('')}</tbody></table>`;
 }
+
+/* ---------- series en el tiempo: columnas y linea (vista Dolarones, #802) ---------- */
+
+/** Marcas 1, 2, 5 x 10^k hasta cubrir el maximo, en las unidades que sean (centavos, cuentas). `entero`: nunca menos de 1. */
+export function escalaNumero(maximo, { objetivo = 4, entero = false } = {}) {
+  const m = Math.max(Number(maximo) || 0, entero ? 4 : 1);
+  const crudo = m / objetivo;
+  const magnitud = 10 ** Math.floor(Math.log10(crudo));
+  let paso = [1, 2, 5, 10].map((k) => k * magnitud).find((p) => p >= crudo) ?? 10 * magnitud;
+  if (entero) paso = Math.max(1, Math.ceil(paso));
+  const marcas = [0];
+  while (marcas.at(-1) < m) marcas.push(Math.round(marcas.length * paso * 1e6) / 1e6);
+  return { tope: marcas.at(-1), marcas };
+}
+
+const MARGEN = { ml: 56, mr: 10, mt: 14, mb: 28 };
+
+function ejes(ancho, alto, tope, marcas, fmtEje) {
+  const { ml, mr, mt, mb } = MARGEN;
+  const pw = Math.max(40, ancho - ml - mr), ph = alto - mt - mb;
+  const y = (v) => mt + ph - (v / tope) * ph;
+  const rejilla = marcas.map((m) => `
+    <line class="${m === 0 ? 'eje' : 'rejilla'}" x1="${ml}" x2="${ancho - mr}" y1="${y(m)}" y2="${y(m)}"/>
+    <text class="marca" x="${ml - 8}" y="${y(m) + 4}" text-anchor="end">${escapar(fmtEje(m))}</text>`).join('');
+  return { pw, ph, y, rejilla };
+}
+
+const etiquetasEje = (categorias, slot, ml, alto) => {
+  const paso = Math.max(1, Math.ceil(64 / slot));
+  return categorias.map((c, i) => (categorias.length - 1 - i) % paso === 0
+    ? `<text class="marca" x="${ml + i * slot + slot / 2}" y="${alto - 8}" text-anchor="middle">${escapar(c.etiqueta)}</text>` : '').join('');
+};
+
+/**
+ * Columnas por categoria (un dia, una semana): `modo` 'agrupadas' (una columna por serie) o 'apiladas'.
+ * `categorias`: [{ etiqueta, titulo }]; `series`: [{ nombre, color, valores }]. Cada categoria es un blanco con su globo
+ * (titulo, cada serie y, apiladas, el total). Las categorias sin nada no pintan columna, pero si globo.
+ */
+export function columnas({ categorias, series, ancho, alto = 240, modo = 'agrupadas', fmtEje = String, fmtValor = String, entero = false }) {
+  const n = categorias.length;
+  const { ml, mt } = MARGEN;
+  const maximo = Math.max(0, ...categorias.map((_, i) => (modo === 'apiladas'
+    ? series.reduce((s, x) => s + Math.max(0, x.valores[i]), 0) : Math.max(0, ...series.map((x) => x.valores[i])))));
+  const { tope, marcas } = escalaNumero(maximo, { entero });
+  const { pw, ph, y, rejilla } = ejes(ancho, alto, tope, marcas, fmtEje);
+  const slot = pw / n;
+  const grupo = Math.min(slot * 0.78, modo === 'apiladas' ? 44 : 22 * series.length);
+  const base = y(0);
+  const cuerpo = categorias.map((c, i) => {
+    const x0 = ml + i * slot + (slot - grupo) / 2;
+    let barras = '';
+    if (modo === 'apiladas') {
+      let acumulado = 0;
+      for (const s of series) {
+        const v = Math.max(0, s.valores[i]);
+        if (v > 0) {
+          const top = y(acumulado + v), bajo = y(acumulado);
+          barras += `<rect x="${x0}" y="${top}" width="${grupo}" height="${Math.max(1, bajo - top - 1)}" rx="2" style="fill:${s.color}"/>`;
+        }
+        acumulado += v;
+      }
+    } else {
+      const ancho_b = Math.max(2, (grupo - (series.length - 1) * 2) / series.length);
+      series.forEach((s, j) => {
+        const v = Math.max(0, s.valores[i]);
+        if (v > 0) barras += `<rect x="${x0 + j * (ancho_b + 2)}" y="${y(v)}" width="${ancho_b}" height="${Math.max(1, base - y(v))}" rx="2" style="fill:${s.color}"/>`;
+      });
+    }
+    const lineas = [c.titulo, ...series.map((s) => `${s.nombre}: ${fmtValor(s.valores[i])}`)];
+    if (modo === 'apiladas') lineas.push(`Total: ${fmtValor(series.reduce((t, s) => t + s.valores[i], 0))}`);
+    return `<g class="col">${barras}<rect class="hit" x="${ml + i * slot}" y="${mt}" width="${slot}" height="${ph}"
+      data-tip="${escapar(lineas.join('\n'))}" tabindex="0" role="img" aria-label="${escapar(lineas.join(', '))}"/></g>`;
+  }).join('');
+  return `<svg class="svg-grafica" width="${ancho}" height="${alto}" viewBox="0 0 ${ancho} ${alto}" role="group"
+    aria-label="${escapar(series.map((s) => s.nombre).join(', '))} por ${n} periodos">${rejilla}${cuerpo}${etiquetasEje(categorias, slot, ml, alto)}</svg>`;
+}
+
+/** Una linea con area y un punto por categoria (el globo de cada punto trae su valor). `valores`: un numero por categoria. */
+export function lineaSerie({ categorias, valores, nombre, ancho, alto = 240, fmtEje = String, fmtValor = String, color = 'var(--acento)' }) {
+  const n = categorias.length;
+  const { ml, mt } = MARGEN;
+  const { tope, marcas } = escalaNumero(Math.max(0, ...valores));
+  const { pw, ph, y, rejilla } = ejes(ancho, alto, tope, marcas, fmtEje);
+  const slot = pw / n;
+  const x = (i) => ml + i * slot + slot / 2;
+  const puntos = valores.map((v, i) => `${x(i).toFixed(1)},${y(v).toFixed(1)}`);
+  const trazo = `M${puntos.join(' L')}`;
+  const area = `${trazo} L${x(n - 1)},${y(0)} L${x(0)},${y(0)} Z`;
+  const marcasPunto = valores.map((v, i) => {
+    const lineas = [categorias[i].titulo, `${nombre}: ${fmtValor(v)}`];
+    return `<circle cx="${x(i)}" cy="${y(v)}" r="${i === n - 1 ? 4 : 3}" style="fill:${color};stroke:var(--superficie);stroke-width:2"/>
+      <rect class="hit" x="${ml + i * slot}" y="${mt}" width="${slot}" height="${ph}" data-tip="${escapar(lineas.join('\n'))}" tabindex="0" role="img" aria-label="${escapar(lineas.join(', '))}"/>`;
+  }).join('');
+  return `<svg class="svg-grafica" width="${ancho}" height="${alto}" viewBox="0 0 ${ancho} ${alto}" role="group" aria-label="${escapar(nombre)}">
+    ${rejilla}<path class="area" d="${area}" style="fill:${color}"/><path class="trazo" d="${trazo}" style="stroke:${color}"/>${marcasPunto}${etiquetasEje(categorias, slot, ml, alto)}</svg>`;
+}
+
+/** La leyenda de una grafica de varias series: llave de color y nombre (el color nunca es lo unico: ahi esta el nombre y la tabla). */
+export const leyendaSeries = (series) => `<div class="leyenda-series">${series.map((s) =>
+  `<span><i class="llave" style="background:${s.color}"></i>${escapar(s.nombre)}</span>`).join('')}</div>`;
