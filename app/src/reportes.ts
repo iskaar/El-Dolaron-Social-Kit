@@ -3,6 +3,7 @@ import { lineasNetas } from './netas.ts';
 import { tramoDeDias, TRAMOS_ANTIGUEDAD, sumarDias } from '../public/graficas.js';
 import { TIENDAS, TIENDA_CENTRAL, cajasDe, esTienda, type Tienda } from './cuentas.ts';
 import { sucursales, enCaminoSql, enTiendaSql, existenciaTotalSql } from './existencias.ts';
+import { CLAVES_DE_PARTE, PARTES_REPORTE } from '../public/reportes-partes.js';
 
 const json = (cuerpo: unknown, status = 200) => new Response(JSON.stringify(cuerpo), {
   status, headers: { 'content-type': 'application/json; charset=utf-8' },
@@ -208,6 +209,10 @@ export async function diasEnVentaPorCategoria(env: Env) {
   return results;
 }
 
+type Parte = string;
+// El orden de las claves de la respuesta completa (el de siempre): una respuesta parcial las deja en el mismo orden.
+const CLAVES_REPORTE = Object.values(CLAVES_DE_PARTE).flat().filter((clave) => clave !== 'primera_venta');
+
 /**
  * Reportes: todo sale de consultas contra D1 en el momento, nada se precalcula
  * ni vive en otra tabla. `dias` acota lo que tiene sentido por rango (ventas del
@@ -219,13 +224,6 @@ export async function diasEnVentaPorCategoria(env: Env) {
  * `tienda`, `tiendas`) mas lo que pidio; sin el parametro devuelve TODO, el mismo JSON de siempre. Cada vista de /reportes pide solo lo
  * que pinta: antes cada cambio de periodo corria las 21 consultas, la foto de inventario incluida.
  */
-export const PARTES_REPORTE = ['primera_venta', 'resumen', 'anterior', 'cuadre', 'forma_pago', 'por_dia', 'por_hora', 'categorias', 'inventario', 'merma',
-  'top_productos', 'precio_sugerido', 'dias_en_venta', 'cancelaciones', 'aperturas', 'cortes', 'retiros', 'revendedoras', 'descuentos'] as const;
-type Parte = typeof PARTES_REPORTE[number];
-// El orden de las claves de la respuesta completa (el de siempre): una respuesta parcial las deja en el mismo orden.
-const CLAVES_REPORTE = ['resumen', 'anterior', 'cuadre', 'por_forma_pago', 'por_dia', 'por_hora', 'por_categoria', 'por_categoria_anterior', 'inventario', 'merma_caducidad',
-  'top_productos', 'precio_sugerido', 'dias_en_venta_por_categoria', 'cancelaciones', 'aperturas_cajon', 'cortes', 'retiros', 'revendedoras', 'descuentos'];
-
 export async function reportes(url: URL, env: Env): Promise<Response> {
   const rango = rangoDe(url);
   const { dias, desde, hasta } = rango;
@@ -237,8 +235,8 @@ export async function reportes(url: URL, env: Env): Promise<Response> {
   const deTienda = tienda ? ` and v.tienda = '${tienda}'` : '';          // sobre ventas con alias v
   const deTiendaSola = tienda ? ` and tienda = '${tienda}'` : '';        // sobre ventas sin alias
   const deCajas = (columna: string) => tienda ? ` and ${columna} in (${cajasDe(tienda).map((c) => `'${c}'`).join(', ')})` : '';
-  const pedidas = url.searchParams.has('partes') ? (url.searchParams.get('partes') ?? '').split(',').filter(Boolean) : [...PARTES_REPORTE];
-  const mala = pedidas.find((x) => !(PARTES_REPORTE as readonly string[]).includes(x));
+  const pedidas: string[] = url.searchParams.has('partes') ? (url.searchParams.get('partes') ?? '').split(',').filter(Boolean) : [...PARTES_REPORTE];
+  const mala = pedidas.find((x) => !PARTES_REPORTE.includes(x));
   if (mala) return json({ error: `Parte invalida: ${mala.slice(0, 40)}.` }, 400);
   const pide = (parte: Parte) => pedidas.includes(parte);
   const datos: Record<string, unknown> = {};   // lo calculado, por clave de la respuesta

@@ -4,7 +4,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { tienda, codigoPrueba, PRODUCTO } from './prueba-d1.ts';
 import { verificarCuadre, rellenarDias } from '../public/graficas.js';
-import { rangoDe, rangoDias, hoyTienda, RangoInvalido, PARTES_REPORTE } from './reportes.ts';
+import { rangoDe, rangoDias, hoyTienda, RangoInvalido } from './reportes.ts';
+import { CLAVES_DE_PARTE, PARTES_REPORTE } from '../public/reportes-partes.js';
 
 type Pedir = ReturnType<typeof tienda>['pedir'];
 
@@ -357,12 +358,6 @@ test('/api/reportes trae el dia de la primera venta (para «Desde la apertura»)
 
 /* ---------- #802 A6: `partes=` calcula solo las secciones que pide la vista ---------- */
 
-const CLAVES_DE_PARTE: Record<string, string[]> = {
-  primera_venta: ['primera_venta'], resumen: ['resumen'], anterior: ['anterior'], cuadre: ['cuadre'], forma_pago: ['por_forma_pago'], por_dia: ['por_dia'], por_hora: ['por_hora'],
-  categorias: ['por_categoria', 'por_categoria_anterior'], inventario: ['inventario'], merma: ['merma_caducidad'], top_productos: ['top_productos'], precio_sugerido: ['precio_sugerido'],
-  dias_en_venta: ['dias_en_venta_por_categoria'], cancelaciones: ['cancelaciones'], aperturas: ['aperturas_cajon'], cortes: ['cortes'], retiros: ['retiros'],
-  revendedoras: ['revendedoras'], descuentos: ['descuentos'],
-};
 const CABECERA = ['dias', 'dia_desde', 'dia_hasta', 'tienda', 'tiendas'];
 
 async function sembrarParaPartes(t: ReturnType<typeof tienda>) {
