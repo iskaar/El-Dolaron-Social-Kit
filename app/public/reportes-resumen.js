@@ -3,7 +3,7 @@
 // src/reportes-resumen.test.ts. Todo el dinero va en centavos enteros; los dias son dias de la tienda (UTC-6).
 import {
   escapar, pesos, pesosConSigno, cambio, flechaCambio, sumarDias, diaCorto, diaLargo, diaSemana, minigrafica, escala, pesosEje,
-  barrasHorizontales, apilada, tabla,
+  barrasHorizontales, apilada, tabla, textoPeriodo,
 } from './graficas.js';
 
 /* ---------- fechas ---------- */
@@ -266,7 +266,14 @@ const pct1 = (v) => `${un(v)} %`;
 const cuenta = (n, uno, varios) => `${entero(n)} ${n === 1 ? uno : varios}`;
 const nombreMes = (mes) => mayuscula(new Date(`${mes}-15T12:00:00`).toLocaleDateString('es-MX', { month: 'long' }));
 const mesCorto = (dia) => new Date(`${dia.slice(0, 7)}-15T12:00:00`).toLocaleDateString('es-MX', { month: 'short', year: '2-digit' }).replace('.', '');
-const rangoTexto = (desde, hasta) => (desde === hasta ? diaCorto(desde) : `${diaCorto(desde)} – ${diaCorto(hasta)}`);
+/**
+ * «21 sep – 18 oct». Lleva el año (en los dos extremos) cuando el rango cruza de año o cae en un año distinto de `anioRef`
+ * (el del periodo que se mira): «14 nov 2024 – 14 nov 2025» nunca se lee como del periodo actual.
+ */
+export const rangoTexto = (desde, hasta, anioRef = '') => {
+  if (desde.slice(0, 4) !== hasta.slice(0, 4) || (anioRef && desde.slice(0, 4) !== anioRef)) return textoPeriodo(desde, hasta);
+  return desde === hasta ? diaCorto(desde) : `${diaCorto(desde)} – ${diaCorto(hasta)}`;
+};
 
 /** El nombre de la cubeta en la pantalla: nunca «cubeta», siempre la unidad (día, semana o mes). */
 export const unidadGrano = (grano, n) => ({ dia: n === 1 ? 'día' : 'días', semana: n === 1 ? 'semana' : 'semanas', mes: n === 1 ? 'mes' : 'meses' }[grano]);
@@ -275,8 +282,8 @@ export const COMPARACION_POR_GRANO = { dia: 'día contra día', semana: 'semana 
 /** «Comparado con 21 sep – 18 oct» (y el aviso cuando los dos periodos no tienen el mismo largo). */
 export function textoComparacion(d) {
   if (!d.comparacion) return 'Sin comparar';
-  const c = d.comparacion;
-  const base = d.comparar === 'mes' ? `Comparado con el mismo periodo del mes pasado: ${rangoTexto(c.desde, c.hasta)}` : `Comparado con ${rangoTexto(c.desde, c.hasta)}`;
+  const c = d.comparacion, anio = d.periodo.hasta.slice(0, 4);
+  const base = d.comparar === 'mes' ? `Comparado con el mismo periodo del mes pasado: ${rangoTexto(c.desde, c.hasta, anio)}` : `Comparado con ${rangoTexto(c.desde, c.hasta, anio)}`;
   return c.dias === d.periodo.dias ? base : `${base} (${cuenta(c.dias, 'día', 'días')} contra ${d.periodo.dias})`;
 }
 const vsCorto = (d) => (d.comparar === 'mes' ? 'vs mes pasado' : 'vs anterior');
