@@ -53,6 +53,7 @@ import { diaTienda, hoyTienda, rangoDias, rangoDe, delDia, DIA, reportes, RangoI
 import { reporteResumen } from './reportes-resumen.ts';
 import { reporteInventario } from './reportes-inventario.ts';
 import { reporteVentas } from './reportes-ventas.ts';
+import { reporteClientes } from './reportes-clientes.ts';
 import { reporteFinanzas } from './reportes-finanzas.ts';
 import { configInvalida } from '../public/reportes-finanzas.js';
 
@@ -2962,6 +2963,7 @@ export default {
       if (pathname === '/api/reportes/resumen' && request.method === 'GET') return await reporteResumen(url, env);
       if (pathname === '/api/reportes/inventario' && request.method === 'GET') return await reporteInventario(url, env);
       if (pathname === '/api/reportes/ventas' && request.method === 'GET') return await reporteVentas(url, env);
+      if (pathname === '/api/reportes/clientes' && request.method === 'GET') return await reporteClientes(url, env);
       if (pathname === '/api/reportes/finanzas' && request.method === 'GET') return await reporteFinanzas(url, env);
       if (pathname === '/api/reportes/equipo' && request.method === 'GET') return await reporteEquipo(url, env);
       if (pathname === '/api/reportes/equipo/bono' && request.method === 'POST') return await registrarBonoSemana(request, env, correo);
