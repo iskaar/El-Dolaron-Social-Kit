@@ -592,3 +592,48 @@ export function graficaTiempo(datos, { ancho, alto = 250, seleccion = null, clic
   return `<svg class="svg-grafica" width="${ancho}" height="${alto}" viewBox="0 0 ${ancho} ${alto}" role="img"
     aria-label="${escapar(nombre)}, de ${escapar(datos[0].titulo)} a ${escapar(datos[n - 1].titulo)}">${rejilla}${cuerpo}${trazo('ritmo', 'ritmo')}${trazo('comparacion', 'comp')}${trazo('media', 'media')}${maxTexto}${zonas}</svg>`;
 }
+
+/* ---------- CSV por panel (#802 B10): la misma tabla que se ve en «Ver tabla», generada en el navegador ---------- */
+
+/**
+ * Una celda de CSV, con el mismo criterio que `celdaCsv` del servidor (worker.ts): entre comillas si trae coma, comilla o salto de linea, y un
+ * texto que empieza con = + - @ tab o retorno lleva un apostrofe delante para que Excel no lo ejecute como formula. Un numero plano
+ * (con signo menos y decimales, `-12.50`) se deja tal cual.
+ */
+export function celdaCsv(texto) {
+  const t = String(texto ?? '');
+  if (/^[=+\-@\t\r]/.test(t) && !/^-?\d+(\.\d+)?$/.test(t)) return /[",\r\n]/.test(t) ? `"'${t.replace(/"/g, '""')}"` : `'${t}`;
+  return /[",\r\n]/.test(t) ? `"${t.replace(/"/g, '""')}"` : t;
+}
+
+/**
+ * El texto de una celda de la tabla -> lo que va al CSV: «$1,234.56», «+$15.50», «−$0.50», «12.3 %» y «120.50 D» son numeros (sin simbolo ni
+ * separador de miles; el signo menos de verdad cuenta como «-»); «—» (sin dato) queda vacio; todo lo demas es texto tal cual.
+ */
+export function valorCsv(texto) {
+  const t = String(texto ?? '').replace(/\s+/g, ' ').trim();
+  if (t === '—') return '';
+  const m = /^([+\-−]?)\$?(\d{1,3}(?:,\d{3})+|\d+)(\.\d+)?(?: ?%| D)?$/.exec(t);
+  if (!m) return t;
+  return `${m[1] === '-' || m[1] === '−' ? '-' : ''}${m[2].replace(/,/g, '')}${m[3] ?? ''}`;
+}
+
+/**
+ * El CSV de una o varias tablas ya dibujadas: `tablas` = [{ encabezados: [..], filas: [[..], ..] }]; con varias, una linea en blanco entre ellas.
+ * UTF-8 con BOM (sin el, Excel abre mal los acentos) y saltos CRLF, como el CSV del servidor.
+ */
+export function csvDeTablas(tablas) {
+  const lineas = [];
+  tablas.forEach((t, i) => {
+    if (i) lineas.push('');
+    lineas.push(t.encabezados.map((h) => celdaCsv(String(h).replace(/\s+/g, ' ').trim())).join(','));
+    for (const fila of t.filas) lineas.push(fila.map((c) => celdaCsv(valorCsv(c))).join(','));
+  });
+  return `﻿${lineas.join('\r\n')}`;
+}
+
+/** «resumen-categorias-2026-10-19_2026-11-15.csv»: vista, panel, periodo y, si hay, la tienda. */
+export function nombreCsv(vista, panel, desde, hasta, tienda = '') {
+  const limpio = (t) => String(t).normalize('NFD').replace(/\p{M}/gu, '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+  return `${[limpio(vista), limpio(panel), `${desde}_${hasta}`, limpio(tienda)].filter(Boolean).join('-')}.csv`;
+}

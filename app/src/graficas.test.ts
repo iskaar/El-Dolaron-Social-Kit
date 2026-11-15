@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import {
   pesos, dolarones, pesosEje, pesosConSigno, cambio, rellenarDias, textoPeriodo, verificarCuadre,
   PASOS_CALOR, pasoCalor, pasosDeLaEscala, horasConVentas, textoHora, rangoHora, mapaCalor, mapaCalorHtml, tablaCalor,
-  TRAMOS_ANTIGUEDAD, tramoDeDias, pasoOrdinal, flechaCambio, fechaHora, FECHAS_TICKET, indiceTeclado, barrasHorizontales, apilada, minigrafica, graficaTiempo, escalaNumero, columnas, lineaSerie, leyendaSeries,
+  TRAMOS_ANTIGUEDAD, tramoDeDias, pasoOrdinal, flechaCambio, fechaHora, FECHAS_TICKET, indiceTeclado, celdaCsv, valorCsv, csvDeTablas, nombreCsv, barrasHorizontales, apilada, minigrafica, graficaTiempo, escalaNumero, columnas, lineaSerie, leyendaSeries,
 } from '../public/graficas.js';
 import { rangoDias } from './worker.ts';
 
@@ -326,4 +326,50 @@ test('B7: las flechas mueven el foco dentro de una grafica sin salirse de ella',
   assert.equal(indiceTeclado(5, 28, 'End'), 27);
   assert.equal(indiceTeclado(5, 28, 'ArrowDown'), 6);
   assert.equal(indiceTeclado(5, 28, 'Tab'), null, 'Tab no se atrapa: sale de la grafica por su cuenta');
+});
+
+test('B10: los numeros de la tabla pasan al CSV como numeros planos y lo demas como texto', () => {
+  assert.equal(valorCsv('$1,234.56'), '1234.56');
+  assert.equal(valorCsv('$12,345,678.00'), '12345678.00');
+  assert.equal(valorCsv('−$0.50'), '-0.50');            // el menos tipografico es un menos
+  assert.equal(valorCsv('+$15.50'), '15.50');
+  assert.equal(valorCsv('12.3 %'), '12.3');
+  assert.equal(valorCsv('120.50 D'), '120.50');
+  assert.equal(valorCsv('1,234'), '1234');
+  assert.equal(valorCsv('42'), '42');
+  assert.equal(valorCsv('—'), '', 'sin dato: celda vacia');
+  assert.equal(valorCsv('Lunes 10:00–11:00'), 'Lunes 10:00–11:00');
+  assert.equal(valorCsv('▲ +12.3%'), '▲ +12.3%');
+  assert.equal(valorCsv('3:05 min'), '3:05 min');
+  assert.equal(valorCsv('  Camisa   azul '), 'Camisa azul');
+});
+
+test('B10: las celdas que empiezan con = + - @ (o tab o retorno) se neutralizan como en el CSV del servidor', () => {
+  for (const peligro of ['=HYPERLINK("http://evil")', '+1+1', '-2+3', '@SUM(A1)', '\t=1', '\r=1']) {
+    assert.match(celdaCsv(peligro), /^"?'/, `${JSON.stringify(peligro)} lleva apostrofe`);
+  }
+  assert.equal(celdaCsv('=1+1'), "'=1+1");
+  assert.equal(celdaCsv('=HYPERLINK("x")'), `"'=HYPERLINK(""x"")"`);   // comillas dobladas y el apostrofe adentro, igual que el servidor
+  assert.equal(celdaCsv('-12.50'), '-12.50', 'un numero negativo no es una formula');
+  assert.equal(celdaCsv('Ventilador'), 'Ventilador');
+  assert.equal(celdaCsv('a,b'), '"a,b"');
+  assert.equal(celdaCsv('dice "hola"'), '"dice ""hola"""');
+  // Pasa por la tabla entera: la formula llega neutralizada aunque venga de un nombre escrito por otra persona.
+  const csv = csvDeTablas([{ encabezados: ['Pieza', 'Importe'], filas: [["=cmd|' /C calc'!A0", '$5.00'], ['@x', '−$1.00']] }]);
+  assert.ok(csv.includes("'=cmd"), csv);
+  assert.ok(csv.includes("'@x,-1.00"), csv);
+});
+
+test('B10: el CSV de una tabla lleva BOM, saltos CRLF, un renglon por fila y una linea en blanco entre tablas', () => {
+  const csv = csvDeTablas([
+    { encabezados: ['Periodo', 'Ventas netas'], filas: [['15 nov', '$1,000.00'], ['16 nov', '—']] },
+    { encabezados: ['Piezas', 'Tickets'], filas: [['1 pieza', '4']] },
+  ]);
+  assert.equal(csv, '﻿Periodo,Ventas netas\r\n15 nov,1000.00\r\n16 nov,\r\n\r\nPiezas,Tickets\r\n1 pieza,4');
+  assert.equal(csvDeTablas([{ encabezados: ['Año'], filas: [['Camión']] }]).charCodeAt(0), 0xfeff);   // los acentos sobreviven
+});
+
+test('B10: el archivo se llama como la vista, el panel y el periodo', () => {
+  assert.equal(nombreCsv('resumen', 'Categorías ', '2026-10-19', '2026-11-15'), 'resumen-categorias-2026-10-19_2026-11-15.csv');
+  assert.equal(nombreCsv('ventas', 'Forma de pago en el tiempo', '2026-11-01', '2026-11-15', 'salk'), 'ventas-forma-de-pago-en-el-tiempo-2026-11-01_2026-11-15-salk.csv');
 });

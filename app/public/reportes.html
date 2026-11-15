@@ -117,8 +117,10 @@
   .panel header { display: flex; align-items: baseline; gap: 10px; margin-bottom: 10px; }
   .panel h4 { font-size: 14px; margin: 0; font-weight: 700; flex: 1; min-width: 0; }
   .panel .subtitulo { font-size: 12px; color: var(--tinta-2); font-weight: 400; margin-left: 8px; }
-  .alterna { border: 0; background: none; color: var(--tinta-2); font: inherit; font-size: 12px; cursor: pointer; text-decoration: underline;
+  .alterna, .csv-panel { border: 0; background: none; color: var(--tinta-2); font: inherit; font-size: 12px; cursor: pointer; text-decoration: underline;
     text-underline-offset: 3px; padding: 2px 0; }
+  .csv-panel { margin-left: -2px; }
+  .csv-panel[hidden] { display: none; }
   .panel .vista-tabla { display: none; max-height: 380px; overflow: auto; }
   .panel.en-tabla .vista-tabla { display: block; }
   .panel.en-tabla .vista-grafica { display: none; }
@@ -805,7 +807,7 @@ import { CATEGORIAS } from '/categorias.js';
 import {
   escapar, pesos, pesosConSigno, dolarones, cambio, rellenarDias, sumarDias, diaCorto, diaLargo, diaSemana, textoPeriodo,
   verificarCuadre, mapaCalor, mapaCalorHtml, tablaCalor, activarGlobos, barrasHorizontales, apilada, tabla,
-  flechaCambio, TRAMOS_ANTIGUEDAD, pasoOrdinal, graficaTiempo, fechaHora, FECHAS_TICKET, activarTeclado,
+  flechaCambio, TRAMOS_ANTIGUEDAD, pasoOrdinal, graficaTiempo, fechaHora, FECHAS_TICKET, activarTeclado, csvDeTablas, nombreCsv,
 } from '/graficas.js';
 import {
   COMPARACIONES, GRANOS, granosPermitidos, tarjetasKpi, tarjetasHtml, datosTendencia, leyendaTendencia, tablaTendencia, metaHtml, graficaMeta, tablaMeta,
@@ -2032,6 +2034,49 @@ document.addEventListener('click', (e) => {
   const enTabla = boton.closest('.panel').classList.toggle('en-tabla');
   boton.textContent = enTabla ? 'Ver gráfica' : 'Ver tabla';
   if (!enTabla) { dibujarVentas(); dibujarDolarones(); dibujarInventario(); dibujarFinanzas(); }
+});
+
+
+/* ---------- CSV por panel (#802 B10): un enlace «CSV» junto a «Ver tabla» en cada panel que tiene tabla ---------- */
+// Se agrega a todo panel con «Ver tabla», aunque las vistas lo dibujen despues; descarga la misma tabla que se ve (graficas.js `csvDeTablas`).
+function agregarCsv() {
+  for (const alterna of document.querySelectorAll('.panel header .alterna')) {
+    let boton = alterna.nextElementSibling?.classList.contains('csv-panel') ? alterna.nextElementSibling : null;
+    if (!boton) {
+      boton = document.createElement('button');
+      boton.type = 'button';
+      boton.className = 'csv-panel';
+      boton.textContent = 'CSV';
+      boton.title = 'Descargar esta tabla como CSV (se abre en Excel)';
+      alterna.after(boton);
+    }
+    boton.hidden = alterna.hidden || !alterna.closest('.panel').querySelector('.vista-tabla table');
+  }
+}
+let csvPendiente = false;
+new MutationObserver(() => { if (csvPendiente) return; csvPendiente = true; queueMicrotask(() => { csvPendiente = false; agregarCsv(); }); })
+  .observe($('principal'), { childList: true, subtree: true });
+agregarCsv();
+const textoCelda = (c) => c.textContent.replace(/\s+/g, ' ').trim();
+document.addEventListener('click', (e) => {
+  const boton = e.target.closest?.('.csv-panel');
+  if (!boton) return;
+  const panel = boton.closest('.panel');
+  const tablas = [...panel.querySelectorAll('.vista-tabla table')].map((t) => ({
+    encabezados: [...(t.tHead?.rows[0]?.cells ?? [])].map(textoCelda),
+    filas: [...t.tBodies].flatMap((b) => [...b.rows]).map((f) => [...f.cells].map(textoCelda)),
+  }));
+  if (!tablas.length) return;
+  const titulo = panel.querySelector('h4').cloneNode(true);
+  titulo.querySelector('.subtitulo')?.remove();
+  const { desde, hasta } = rangoActual();
+  const archivo = nombreCsv(vistaActual, titulo.textContent, desde, hasta, tiendaActual);
+  const url = URL.createObjectURL(new Blob([csvDeTablas(tablas)], { type: 'text/csv;charset=utf-8' }));
+  const a = Object.assign(document.createElement('a'), { href: url, download: archivo });
+  document.body.append(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 10_000);
 });
 
 activarGlobos(document.body);
