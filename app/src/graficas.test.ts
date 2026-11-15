@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import {
   pesos, dolarones, pesosEje, pesosConSigno, escala, cambio, rellenarDias, textoPeriodo, verificarCuadre,
   PASOS_CALOR, pasoCalor, pasosDeLaEscala, horasConVentas, textoHora, rangoHora, mapaCalor, mapaCalorHtml, tablaCalor,
-  TRAMOS_ANTIGUEDAD, tramoDeDias, pasoOrdinal, flechaCambio, barrasHorizontales, apilada, escalaNumero, columnas, lineaSerie, leyendaSeries,
+  TRAMOS_ANTIGUEDAD, tramoDeDias, pasoOrdinal, flechaCambio, barrasHorizontales, apilada, minigrafica, graficaTiempo, escalaNumero, columnas, lineaSerie, leyendaSeries,
 } from '../public/graficas.js';
 import { rangoDias } from './worker.ts';
 
@@ -196,4 +196,43 @@ test('columnas y lineaSerie: ceros sin columna pero con globo, nombres escapados
   assert.equal(lineaSerie({ categorias, valores: [100, 300], nombre: 'Saldo', ancho: 400 }).match(/<circle/g)!.length, 2);
   assert.ok(!lineaSerie({ categorias: [categorias[0]], valores: [0], nombre: 'Saldo', ancho: 300 }).includes('NaN'));
   assert.equal(leyendaSeries(series).match(/class="llave"/g)!.length, 2);
+});
+
+test('minigrafica: una linea por tramo continuo, los huecos no se dibujan y con menos de dos puntos no hay nada', () => {
+  assert.equal(minigrafica([]), '');
+  assert.equal(minigrafica([5]), '');
+  assert.equal(minigrafica([null, 5, null]), '');
+  const svg = minigrafica([1, 2, 3, 4], { clase: 's2', etiqueta: 'Tendencia <b>' });
+  assert.match(svg, /class="mini s2"/);
+  assert.equal((svg.match(/class="linea"/g) ?? []).length, 1);
+  assert.doesNotMatch(svg, /<b>/);                                  // la etiqueta va escapada
+  const hueco = minigrafica([1, 2, null, 4, 5]);
+  assert.equal((hueco.match(/class="linea"/g) ?? []).length, 2);    // un hueco parte la linea en dos
+  assert.match(minigrafica([3, 3, 3]), /class="linea" d="M0\.00,17\.00 L50\.00,17\.00 L100\.00,17\.00"/);   // plana: a media altura
+});
+
+test('graficaTiempo: columnas, lineas de comparacion y promedio, y cada cubeta con su globo', () => {
+  const datos = Array.from({ length: 7 }, (_, i) => ({
+    clave: `2026-11-0${i + 1}`, etiqueta: `${i + 1}`, titulo: `Dia ${i + 1}`, valor: (i + 1) * 10000, detalle: ['1 ticket'],
+    media: i >= 2 ? 20000 : null, comparacion: i === 3 ? null : 15000, ritmo: i === 0 ? null : 12000,
+  }));
+  const svg = graficaTiempo(datos, { ancho: 700, clicable: true });
+  assert.equal((svg.match(/<path class="barra/g) ?? []).length, 7);
+  assert.equal((svg.match(/data-dia="/g) ?? []).length, 7);
+  assert.match(svg, /<path class="comp"/);
+  assert.equal((svg.match(/<path class="comp"/g) ?? []).length, 2);   // el null de la cubeta 4 corta la linea en dos
+  assert.match(svg, /<path class="media"/);
+  assert.match(svg, /<path class="ritmo"/);
+  assert.ok(svg.includes(`data-tip="${['Dia 7', '$700.00', '1 ticket'].join(String.fromCharCode(10))}"`));
+  const pasiva = graficaTiempo(datos, { ancho: 700 });
+  assert.doesNotMatch(pasiva, /data-dia=/);
+  assert.match(pasiva, /class="hit pasiva"/);
+  assert.equal(graficaTiempo([], { ancho: 700 }), '');
+  // Con mas de 45 cubetas es una linea con area y solo el gran total entra al teclado por zona: sin tabindex en 60 zonas.
+  const muchos = Array.from({ length: 60 }, (_, i) => ({ clave: `d${i}`, etiqueta: `${i}`, titulo: `D${i}`, valor: 100 * i, detalle: [] }));
+  const linea = graficaTiempo(muchos, { ancho: 700 });
+  assert.match(linea, /<path class="trazo"/);
+  assert.doesNotMatch(linea, /tabindex/);
+  // Un titulo malicioso no entra como HTML.
+  assert.doesNotMatch(graficaTiempo([{ ...datos[0], titulo: '"><script>x</script>' }], { ancho: 700 }), /<script>/);
 });

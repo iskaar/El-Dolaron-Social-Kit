@@ -43,7 +43,10 @@ test('las ocho tarjetas, con cifras de la API y mensajes honestos cuando no hay 
   const html = tarjetas(r);
   for (const etq of ['Emitidos en el periodo', 'Canjeados', 'Tasa de canje', 'Saldo vivo', 'Por vencer en 30 días', 'Vencidos sin usar', 'Costo del programa', 'Tickets pagados con Dolarones'])
     assert.ok(html.includes(etq), etq);
-  assert.equal(html.match(/class="tarjeta"/g)!.length, 8);
+  assert.equal(html.match(/class="tarjeta kpi"/g)!.length, 8, 'el mismo marcado que las tarjetas de Resumen');
+  assert.equal(html.match(/<svg class="mini /g)!.length, 4, 'minigrafica en emitidos, canjeados, vencidos y saldo vivo');
+  assert.match(vistaDolarones(r), /al cierre de cada día/);
+  assert.match(vistaDolarones({ ...r, grano: 'semana' }), /al cierre de cada semana/);
   assert.match(html, /Sin datos/, 'la tasa de canje no se inventa');
   assert.match(html, /Sin periodo anterior para comparar/);
   const v = tarjetas(vacia);

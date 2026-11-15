@@ -2,8 +2,9 @@
 // Todo son funciones puras (sin DOM): se prueban en src/reportes-dolarones-js.test.ts. Dinero en centavos, 1 D = 100.
 import {
   escapar, dolarones, cambio, flechaCambio, diaCorto, textoPeriodo, tabla, apilada, barrasHorizontales, pesos,
-  columnas, lineaSerie, leyendaSeries,
+  columnas, lineaSerie, leyendaSeries, minigrafica,
 } from './graficas.js';
+import { cambioKpi } from './reportes-resumen.js';
 
 const num = (n) => Number(n).toLocaleString('es-MX');
 const pct1 = (x) => `${(x * 100).toLocaleString('es-MX', { minimumFractionDigits: 1, maximumFractionDigits: 1 })} %`;
@@ -51,22 +52,18 @@ export function bandaCuadre(r) {
 /* ---------- tarjetas ---------- */
 
 function delta(actual, previo, { texto = 'vs periodo anterior', bueno = 'neutro', pp = false } = {}) {
-  const sin = '<div class="delta">Sin periodo anterior para comparar</div>';
-  if (pp) {
-    if (actual === null || previo === null) return sin;
-    const d = Math.round((actual - previo) * 1000) / 10;
-    const dir = d > 0 ? 'sube' : d < 0 ? 'baja' : 'igual';
-    const clase = bueno === 'neutro' || d === 0 ? 'igual' : (bueno === 'sube') === (d > 0) ? 'sube' : 'baja';
-    return `<div class="delta"><span class="chip ${clase}">${dir === 'sube' ? '▲' : dir === 'baja' ? '▼' : '='} ${d > 0 ? '+' : d < 0 ? '−' : ''}${Math.abs(d).toLocaleString('es-MX', { minimumFractionDigits: 1 })} pp</span>${escapar(texto)}</div>`;
-  }
-  const c = cambio(actual, previo);
-  if (!c) return sin;
-  const clase = bueno === 'neutro' || c.direccion === 'igual' ? 'igual' : (bueno === 'sube') === (c.direccion === 'sube') ? 'sube' : 'baja';
-  return `<div class="delta"><span class="chip ${clase}">${escapar(flechaCambio(c))}</span>${escapar(texto)}</div>`;
+  // La flecha, el texto y el tono salen de cambioKpi, el mismo de las tarjetas de Resumen.
+  const c = pp
+    ? (actual == null || previo == null ? null : cambioKpi(actual * 100, previo * 100, { tipo: 'pp', bueno }))
+    : cambioKpi(actual, previo, { tipo: 'pct', bueno });
+  if (!c) return '<div class="delta">Sin periodo anterior para comparar</div>';
+  return `<div class="delta"><span class="chip ${c.tono}">${escapar(`${c.flecha} ${c.texto}`)}</span>${escapar(texto)}</div>`;
 }
 
-const tarjeta = (etq, valor, extra = '', pie = '') =>
-  `<div class="tarjeta"><div class="etq">${escapar(etq)}</div><div class="valor">${escapar(valor)}</div>${extra}${pie ? `<div class="delta">${escapar(pie)}</div>` : ''}</div>`;
+// Mismo marcado que las tarjetas de Resumen (`.tarjeta.kpi`); `serie` pinta la minigrafica si hay al menos dos puntos.
+const tarjeta = (etq, valor, extra = '', pie = '', serie = [], clase = 's1') =>
+  `<div class="tarjeta kpi"><div class="etq">${escapar(etq)}</div><div class="valor">${escapar(valor)}</div>${extra}${
+    serie.length >= 2 ? `<div class="mini-caja">${minigrafica(serie, { clase, etiqueta: `Tendencia de ${etq}` })}</div>` : ''}${pie ? `<div class="pie">${escapar(pie)}</div>` : ''}</div>`;
 
 /** Fecha corta de un dia «2026-11-20» -> «20 nov». */
 const fechaCorta = (d) => (d ? diaCorto(d) : '');
@@ -80,16 +77,17 @@ export function tarjetas(r) {
     ? `Aún no cierra su plazo nada del periodo${r.proximo_cierre ? `; lo próximo cierra el ${fechaCorta(r.proximo_cierre)}` : ''}`
     : `De ${dolarones(tasa.base)} que cerraron su plazo en el periodo, ${dolarones(tasa.canjeado)} se usaron`;
   const cierre = tasa.base;
+  const serie = r.serie;
   return [
     tarjeta('Emitidos en el periodo', dolarones(p.emitidos), delta(p.emitidos, p.emitidos_antes),
-      porcentaje(p.emitidos, p.ventas_netas) ? `${porcentaje(p.emitidos, p.ventas_netas)} de las ventas netas` : 'Sin ventas netas con qué comparar'),
-    tarjeta('Canjeados', dolarones(p.canjeados), delta(p.canjeados, p.canjeados_antes), 'Usados como pago en caja'),
+      porcentaje(p.emitidos, p.ventas_netas) ? `${porcentaje(p.emitidos, p.ventas_netas)} de las ventas netas` : 'Sin ventas netas con qué comparar', serie.map((c) => c.emitidos), 's1'),
+    tarjeta('Canjeados', dolarones(p.canjeados), delta(p.canjeados, p.canjeados_antes), 'Usados como pago en caja', serie.map((c) => c.canjeados), 's2'),
     tarjeta('Tasa de canje', tasa.tasa === null ? 'Sin datos' : pct1(tasa.tasa), delta(tasa.tasa, tasaAntes.tasa, { pp: true, bueno: 'sube' }), pieTasa),
     tarjeta('Saldo vivo', dolarones(s.vivo), delta(s.vivo, s.vivo_inicio, { texto: 'vs inicio del periodo' }),
-      `Lo que la tienda debe · disponible ${dolarones(s.disponible)} · por liberar ${dolarones(s.por_liberar)}`),
+      `Lo que la tienda debe · disponible ${dolarones(s.disponible)} · por liberar ${dolarones(s.por_liberar)}`, serie.map((c) => c.vivo), 's1'),
     tarjeta('Por vencer en 30 días', dolarones(s.por_vencer_30), `<div class="delta">${escapar(porcentaje(s.por_vencer_30, s.vivo) ? `${porcentaje(s.por_vencer_30, s.vivo)} del saldo vivo` : 'Sin saldo vivo')}</div>`, 'Si no se usa'),
     tarjeta('Vencidos sin usar', dolarones(p.vencidos), delta(p.vencidos, p.vencidos_antes),
-      cierre > 0 ? `${porcentaje(p.vencidos, cierre)} de lo que cerró su plazo` : 'Ya no se pueden canjear'),
+      cierre > 0 ? `${porcentaje(p.vencidos, cierre)} de lo que cerró su plazo` : 'Ya no se pueden canjear', serie.map((c) => c.vencidos), 's3'),
     tarjeta('Costo del programa', costo === null ? 'Sin datos' : pct1(costo), delta(costo, costoAntes, { pp: true, bueno: 'baja' }),
       'Dolarones canjeados (sin cupones) sobre las ventas netas'),
     tarjeta('Tickets pagados con Dolarones', num(e.con.tickets), delta(e.con.tickets, r.efecto.tickets_antes),
@@ -198,11 +196,11 @@ export function vistaDolarones(r) {
   return `${bandaCuadre(r)}
     ${aviso}
     ${todoVacio ? `<p class="vacio">${escapar(desde)}</p>` : ''}
-    <div class="tarjetas">${tarjetas(r)}</div>
+    <div class="tarjetas" id="d-kpis">${tarjetas(r)}</div>
     <div class="malla dos">
       ${panel('d-sem', 'Emitidos, canjeados y vencidos', grano, 'semana', tablaSerie(d.categorias, d.series, dolarones, false),
         'Lo emitido que no regresa en su plazo termina en «vencidos»: los vales, los regalos y los 50 D de registro a los 30 días; lo ganado por socios a los 12 meses.', leyendaSeries(d.series))}
-      ${panel('d-vivo', 'Saldo vivo', 'al cierre de cada periodo', 'vivo', tabla(['Periodo', 'Saldo vivo'], d.categorias.map((c, i) => [c.titulo, dolarones(d.vivo[i])]), [1]),
+      ${panel('d-vivo', 'Saldo vivo', r.grano === 'dia' ? 'al cierre de cada día' : 'al cierre de cada semana', 'vivo', tabla(['Periodo', 'Saldo vivo'], d.categorias.map((c, i) => [c.titulo, dolarones(d.vivo[i])]), [1]),
         'Es un pasivo: mercancía que la tienda ya prometió. Se reconstruye de los movimientos y las fechas de vencimiento, y el último punto es el de ahora.')}
     </div>
     <div class="malla iguales">

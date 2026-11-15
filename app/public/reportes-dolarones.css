@@ -17,3 +17,7 @@
 .pares dt { color: var(--tinta-2); } .pares dd { margin: 0; }
 #d-origen-t, #d-saldos { overflow-x: auto; }
 .delta .chip.igual { color: var(--tinta-2); }
+
+/* Tarjetas: la misma rejilla que #r-kpis de Resumen (4 por fila en escritorio, 2 en celular). */
+#d-kpis .tarjeta { flex: 1 1 22%; min-width: 190px; display: flex; flex-direction: column; gap: 3px; }
+@media (max-width: 860px) { #d-kpis .tarjeta { flex-basis: 42%; min-width: 0; } #d-kpis .tarjeta .valor { font-size: 19px; } }

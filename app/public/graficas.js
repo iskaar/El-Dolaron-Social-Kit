@@ -502,3 +502,100 @@ export function lineaSerie({ categorias, valores, nombre, ancho, alto = 240, fmt
 /** La leyenda de una grafica de varias series: llave de color y nombre (el color nunca es lo unico: ahi esta el nombre y la tabla). */
 export const leyendaSeries = (series) => `<div class="leyenda-series">${series.map((s) =>
   `<span><i class="llave" style="background:${s.color}"></i>${escapar(s.nombre)}</span>`).join('')}</div>`;
+
+/* ---------- minigrafica y serie en el tiempo (Issue #802: Resumen) ---------- */
+
+/**
+ * Minigrafica sin ejes: una linea con area que se estira al ancho de su caja (viewBox 100 de ancho).
+ * `valores` puede traer null: un hueco, no un cero. Con menos de dos puntos no hay tendencia que dibujar ('').
+ * `clase` es el tono de la serie (s1, s2, s3 = --serie-1..3); `etiqueta` la lee el lector de pantalla.
+ */
+export function minigrafica(valores, { alto = 34, clase = 's1', etiqueta = '' } = {}) {
+  const n = valores.length;
+  const reales = valores.filter((v) => v != null && Number.isFinite(v));
+  if (n < 2 || reales.length < 2) return '';
+  const minimo = Math.min(...reales), maximo = Math.max(...reales);
+  const rango = maximo - minimo || 1;
+  const x = (i) => (i / (n - 1)) * 100;
+  const y = (v) => (maximo === minimo ? alto / 2 : alto - 3 - ((v - minimo) / rango) * (alto - 6));
+  const tramos = [];
+  let actual = [];
+  valores.forEach((v, i) => {
+    if (v == null || !Number.isFinite(v)) { if (actual.length) tramos.push(actual); actual = []; } else actual.push([x(i), y(v)]);
+  });
+  if (actual.length) tramos.push(actual);
+  const trazos = tramos.filter((t) => t.length >= 2).map((t) => {
+    const linea = `M${t.map(([px, py]) => `${px.toFixed(2)},${py.toFixed(2)}`).join(' L')}`;
+    return `<path class="area" d="${linea} L${t.at(-1)[0].toFixed(2)},${alto} L${t[0][0].toFixed(2)},${alto} Z"/><path class="linea" d="${linea}"/>`;
+  }).join('');
+  return `<svg class="mini ${escapar(clase)}" viewBox="0 0 100 ${alto}" preserveAspectRatio="none" height="${alto}" role="img" aria-label="${escapar(etiqueta)}">${trazos}</svg>`;
+}
+
+/**
+ * Una serie por cubeta (dia, semana o mes) con lo que ayuda a leerla: columnas de `valor` (hasta 45; despues, linea con area), y
+ * encima, si vienen, `media` (promedio movil, trazo continuo), `comparacion` (el periodo comparado, punteado gris, alineado cubeta a
+ * cubeta) y `ritmo` (el paso de la meta, punteado de color). Un null corta la linea: no hay dato, no es un cero. `datos`:
+ * [{ clave, etiqueta, titulo, valor, detalle: [..], media?, comparacion?, ritmo? }]. Con `clicable` cada cubeta lleva data-dia
+ * (la clave) para filtrar los tickets de ese dia; `seleccion` apaga las demas.
+ */
+export function graficaTiempo(datos, { ancho, alto = 250, seleccion = null, clicable = false, nombre = 'Ventas netas' }) {
+  const n = datos.length;
+  if (n === 0) return '';
+  const ml = 58, mr = 12, mt = 18, mb = 26;
+  const pw = Math.max(40, ancho - ml - mr), ph = alto - mt - mb;
+  const todos = datos.flatMap((d) => [d.valor, d.media, d.comparacion, d.ritmo]).filter((v) => v != null && Number.isFinite(v));
+  const maximo = Math.max(0, ...todos);
+  const { tope, marcas } = escala(maximo);
+  const y = (v) => mt + ph - (v / tope) * ph;
+  const barras = n <= MAX_COLUMNAS;
+  const slot = pw / n;
+  const x = (i) => (barras ? ml + i * slot + slot / 2 : ml + (n === 1 ? pw / 2 : (i / (n - 1)) * pw));
+
+  const rejilla = marcas.map((m) => `
+    <line class="${m === 0 ? 'eje' : 'rejilla'}" x1="${ml}" x2="${ancho - mr}" y1="${y(m)}" y2="${y(m)}"/>
+    <text class="marca" x="${ml - 8}" y="${y(m) + 4}" text-anchor="end">${pesosEje(m)}</text>`).join('');
+
+  // Una linea por serie, cortada donde falta el dato.
+  const trazo = (campo, clase) => {
+    const tramos = [];
+    let actual = [];
+    datos.forEach((d, i) => {
+      if (d[campo] == null || !Number.isFinite(d[campo])) { if (actual.length) tramos.push(actual); actual = []; } else actual.push(`${x(i).toFixed(1)},${y(d[campo]).toFixed(1)}`);
+    });
+    if (actual.length) tramos.push(actual);
+    return tramos.map((t) => (t.length > 1 ? `<path class="${clase}" d="M${t.join(' L')}"/>` : `<circle class="${clase}-punto" cx="${t[0].split(',')[0]}" cy="${t[0].split(',')[1]}" r="2.5"/>`)).join('');
+  };
+
+  const tip = (d) => escapar([d.titulo, d.valor ? pesos(d.valor) : 'Sin ventas', ...d.detalle].join('\n'));
+  const aria = (d) => escapar(`${d.titulo}: ${d.valor ? pesos(d.valor) : 'sin ventas'}, ${d.detalle.join(', ')}`);
+  const mayor = Math.max(...datos.map((e) => e.valor));
+  const iMax = datos.findIndex((d) => d.valor === mayor && d.valor > 0);
+  const paso = Math.max(1, Math.ceil(54 / Math.max(slot, 1)));
+  const etiquetaDe = (i) => `<text class="marca" x="${x(i)}" y="${alto - 8}" text-anchor="middle">${escapar(datos[i].etiqueta)}</text>`;
+
+  let cuerpo = '';
+  if (barras) {
+    const ancho_barra = Math.min(28, Math.max(3, slot * 0.62));
+    const base = y(0);
+    cuerpo = datos.map((d, i) => {
+      const bx = x(i) - ancho_barra / 2, top = y(d.valor), r = Math.min(4, (base - top) / 2);
+      const barra = d.valor > 0
+        ? `<path class="barra${seleccion && seleccion !== d.clave ? ' apagada' : ''}" d="M${bx},${base} V${top + r} Q${bx},${top} ${bx + r},${top} H${bx + ancho_barra - r} Q${bx + ancho_barra},${top} ${bx + ancho_barra},${top + r} V${base} Z"/>` : '';
+      return `<g class="col${seleccion === d.clave ? ' elegida' : ''}">${barra}${(n - 1 - i) % paso === 0 ? etiquetaDe(i) : ''}</g>`;
+    }).join('');
+  } else {
+    const puntos = datos.map((d, i) => `${x(i).toFixed(1)},${y(d.valor).toFixed(1)}`);
+    const linea = `M${puntos.join(' L')}`;
+    const salto = Math.max(1, Math.ceil(n / Math.max(1, Math.floor(pw / 70))));
+    cuerpo = `<path class="area" d="${linea} L${x(n - 1)},${y(0)} L${x(0)},${y(0)} Z"/><path class="trazo" d="${linea}"/>`
+      + datos.map((_, i) => (i % salto === 0 ? etiquetaDe(i) : '')).join('');
+  }
+  // Una zona sensible por cubeta; solo con pocas cubetas se pueden recorrer con Tab (366 paradas serian un castigo: la tabla cubre el resto).
+  const ancho_hit = barras ? slot : Math.max(2, pw / Math.max(1, n - 1));
+  const zonas = datos.map((d, i) => `<rect class="hit${clicable ? '' : ' pasiva'}" x="${(barras ? ml + i * slot : x(i) - ancho_hit / 2).toFixed(1)}" y="${mt}" width="${ancho_hit.toFixed(1)}" height="${ph}"
+    ${clicable ? `data-dia="${escapar(d.clave)}" role="button"` : 'role="img"'} data-tip="${tip(d)}" ${n <= MAX_COLUMNAS ? 'tabindex="0"' : ''} aria-label="${aria(d)}"/>`).join('');
+  const maxTexto = barras && iMax >= 0
+    ? `<text class="valor-max" x="${Math.min(Math.max(x(iMax), ml + 38), ancho - mr - 38)}" y="${y(datos[iMax].valor) - 6}" text-anchor="middle">${pesos(datos[iMax].valor)}</text>` : '';
+  return `<svg class="svg-grafica" width="${ancho}" height="${alto}" viewBox="0 0 ${ancho} ${alto}" role="img"
+    aria-label="${escapar(nombre)}, de ${escapar(datos[0].titulo)} a ${escapar(datos[n - 1].titulo)}">${rejilla}${cuerpo}${trazo('ritmo', 'ritmo')}${trazo('comparacion', 'comp')}${trazo('media', 'media')}${maxTexto}${zonas}</svg>`;
+}
