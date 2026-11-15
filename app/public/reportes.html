@@ -7,6 +7,7 @@
 <link rel="stylesheet" href="/reportes-dolarones.css">
 <link rel="stylesheet" href="/reportes-capturas.css">
 <link rel="stylesheet" href="/reportes-ventas.css">
+<link rel="stylesheet" href="/reportes-inventario.css">
 <style>
   /* Archivo: la misma del tablero, servida por la app (licencia OFL), sin Google Fonts. */
   @font-face { font-family: Archivo; src: url("/fuentes/archivo-variable.woff2") format("woff2"); font-weight: 100 900; font-display: swap; }
@@ -494,16 +495,28 @@
 
   <section class="vista" id="v-inventario" data-vista="inventario" aria-labelledby="h-inventario" hidden>
     <h2 id="h-inventario" tabindex="-1">Inventario</h2>
-    <section aria-labelledby="t-inventario">
-      <h3 class="titulo-bloque" id="t-inventario">Precios e inventario</h3>
+    <p class="bajada">Lo que hay en piso hoy, qué tan rápido sale y qué se está quedando.</p>
+    <p class="nota aviso-tienda" id="inv-aviso" style="margin:0"></p>
+    <div class="tarjetas" id="inv-kpis"></div>
+    <section aria-labelledby="t-inv-flujo">
+      <h3 class="titulo-bloque" id="t-inv-flujo">Entradas y salidas</h3>
+      <div id="inv-flujo"><p class="vacio">Cargando…</p></div>
+    </section>
+    <section aria-labelledby="t-inv-rapido">
+      <h3 class="titulo-bloque" id="t-inv-rapido">Qué tan rápido se vende</h3>
     <div class="malla">
-      <article class="panel" id="p-piso">
-        <header><h4>Inventario en piso <span class="subtitulo">piezas individuales con etiqueta y existencia</span></h4></header>
-        <div class="tarjetas" id="piso-resumen"></div>
-        <div id="piso-por-tienda" hidden></div>
-        <p class="nota">Foto del momento: no depende del periodo de arriba. No incluye bandas (no tienen fecha de captura propia) ni piezas agotadas
-          o aún sin etiqueta. Las dañadas sí cuentan: siguen en piso. El valor es precio de tienda × existencia.</p>
-      </article>
+      <div id="inv-cohortes"><p class="vacio">Cargando…</p></div>
+      <div class="malla iguales">
+        <article class="panel"><header><h4>Días en venta por categoría</h4></header><div class="nota" id="dias-mediana" style="margin:0 0 10px"></div><div id="dias-en-venta"></div>
+          <p class="nota">Días entre la captura y la venta, de siempre y no solo del periodo. No incluye bins: no son piezas individuales con fecha de captura propia.</p></article>
+        <article class="panel"><header><h4>Precio sugerido vs. precio final</h4></header><div id="precio-sugerido"></div>
+          <p class="nota">Qué tan lejos anda la IA del precio que de verdad se cobra. Sirve para ajustar los porcentajes de la configuración con datos, no a ojo.</p></article>
+      </div>
+    </div>
+    </section>
+    <section aria-labelledby="t-inventario">
+      <h3 class="titulo-bloque" id="t-inventario">Qué se está quedando</h3>
+    <div class="malla">
       <div class="malla iguales">
         <article class="panel" id="p-antiguedad">
           <header><h4>Antigüedad <span class="subtitulo">semanas desde la captura</span></h4></header>
@@ -522,13 +535,11 @@
         <div id="piso-viejas"></div>
         <p class="nota">Las 15 piezas con más días en piso desde su captura (días de la tienda, no horas).</p>
       </article>
-      <div class="malla iguales">
-        <article class="panel"><header><h4>Precio sugerido vs. precio final</h4></header><div id="precio-sugerido"></div>
-          <p class="nota">Qué tan lejos anda la IA del precio que de verdad se cobra. Sirve para ajustar los porcentajes de la configuración con datos, no a ojo.</p></article>
-        <article class="panel"><header><h4>Días en venta por categoría</h4></header><div id="dias-en-venta"></div>
-          <p class="nota">Días entre la captura y la venta. No incluye bins: no son piezas individuales con fecha de captura propia.</p></article>
-      </div>
     </div>
+    </section>
+    <section aria-labelledby="t-inv-rebajas">
+      <h3 class="titulo-bloque" id="t-inv-rebajas">Rebajas</h3>
+      <div id="inv-rebajas"><p class="vacio">Cargando…</p></div>
     </section>
     <section aria-labelledby="t-merma">
       <h3 class="titulo-bloque" id="t-merma">Merma por caducidad</h3>
@@ -538,6 +549,16 @@
       <p class="nota">Piezas de grado D · Caducidad capturadas en el periodo de arriba. No se venden ni suman al inventario en piso.
         El valor es el precio de lista × existencia (no hay costo de compra en el sistema).</p>
     </article>
+    </section>
+    <section aria-labelledby="t-inv-donde">
+      <h3 class="titulo-bloque" id="t-inv-donde">Dónde está el inventario</h3>
+      <article class="panel" id="p-piso">
+        <header><h4>Inventario en piso <span class="subtitulo">piezas individuales con etiqueta y existencia</span></h4></header>
+        <div class="tarjetas" id="piso-resumen"></div>
+        <div id="piso-por-tienda" hidden></div>
+        <p class="nota">Foto del momento: no depende del periodo de arriba. No incluye bandas (no tienen fecha de captura propia) ni piezas agotadas
+          o aún sin etiqueta. Las dañadas sí cuentan: siguen en piso. El valor es precio de tienda × existencia.</p>
+      </article>
     </section>
   </section>
 
@@ -696,6 +717,7 @@
 <script type="module">
 import { renglonTicket, pintarDetalle } from '/ticket.js';
 import { vistaDolarones, graficas as graficasDolarones } from '/reportes-dolarones.js';
+import { vistaInventario, graficas as graficasInventario, tarjetasInventario, avisoTienda, textoMediana } from '/reportes-inventario.js';
 import { CATEGORIAS } from '/categorias.js';
 import {
   escapar, pesos, pesosConSigno, dolarones, cambio, rellenarDias, sumarDias, diaCorto, diaLargo, diaSemana, textoPeriodo,
@@ -741,7 +763,7 @@ let textoAntes = '';       // «19 oct – 15 nov»: el periodo contra el que se
 let vistaActual = '';
 let turnoCarga = 0;
 // Lo que depende del periodo pero no viaja en /api/reportes se pide la primera vez que se ve su vista, no en cada cambio.
-const pendientes = new Set(['resumen', 'ventas', 'equipo', 'tickets', 'finanzas', 'dolarones']);
+const pendientes = new Set(['resumen', 'ventas', 'equipo', 'tickets', 'finanzas', 'dolarones', 'inventario']);
 // Resumen y Ventas (#802): «Comparar con» y el grano. Viven en la URL junto al periodo y la tienda; solo estas dos vistas reaccionan.
 let comparar = 'anterior';   // 'anterior' (la de siempre), 'mes' (mismo periodo del mes pasado) o 'ninguna'
 let granoPedido = '';        // '' = automatico (por dia hasta 35 dias, despues por semana)
@@ -818,7 +840,7 @@ function leerUrl() {
 // Cambia el periodo o la tienda: una sola peticion de /api/reportes; equipo, tickets y finanzas se piden al ver su vista.
 function recargar() {
   diaElegido = null;
-  for (const v of ['resumen', 'ventas', 'equipo', 'tickets', 'dolarones']) pendientes.add(v);
+  for (const v of ['resumen', 'ventas', 'equipo', 'tickets', 'dolarones', 'inventario']) pendientes.add(v);
   guardarUrl();
   pintarRango();
   cargar();
@@ -846,7 +868,7 @@ for (const id of ['f-desde', 'f-hasta']) {
     recargar();
   });
 }
-// #798: las ventas, el corte, los retiros y los tickets se acotan a una tienda; el inventario es la foto de todo el negocio.
+// #798: las ventas, el corte, los retiros y los tickets se acotan a una tienda; el inventario es la foto de todo el negocio (la vista Inventario no la filtra).
 $('f-tienda').addEventListener('change', () => {
   tiendaActual = $('f-tienda').value;
   recargar();
@@ -891,6 +913,7 @@ window.addEventListener('hashchange', () => mostrarVista());
 function cargarVista() {
   if (!periodoDefinitivo()) return;   // «Desde la apertura» todavia espera saber cual es la primera venta
   if (vistaActual === 'dolarones' && pendientes.delete('dolarones')) cargarDolarones();
+  if (vistaActual === 'inventario' && pendientes.delete('inventario')) cargarInventario();
   if (vistaActual === 'resumen' && pendientes.delete('resumen')) cargarResumen();
   if (vistaActual === 'ventas' && pendientes.delete('ventas')) cargarVentas();
   if (vistaActual === 'equipo' && pendientes.delete('equipo')) cargarEquipo();
@@ -1275,6 +1298,8 @@ function pintarMerma(m) {
 }
 
 function pintarInventario(r) {
+  $('inv-aviso').textContent = avisoTienda(r.tiendas?.find((t) => t.clave === tiendaActual)?.nombre ?? '');
+  $('inv-kpis').innerHTML = tarjetasInventario(datosInventario, r);
   pintarMerma(r.merma_caducidad);
   pintarPiso(r.inventario);
   $('precio-sugerido').innerHTML = r.precio_sugerido.n === 0
@@ -1400,6 +1425,40 @@ async function cargarDolarones() {
   }
 }
 new ResizeObserver(() => dibujarDolarones()).observe($('dolarones-contenido'));
+
+/* ---------- Inventario (#802): lo de siempre viaja en /api/reportes; flujo, cohortes y rebajas se piden al ver la vista ---------- */
+let datosInventario = null;
+let turnoInventario = 0;
+function dibujarInventario() {
+  if (!datosInventario) return;
+  const huecos = [...$('v-inventario').querySelectorAll('.graf-i')];
+  if (!huecos.length || !huecos[0].clientWidth) return;   // oculta: se dibuja al verla
+  const svg = graficasInventario(datosInventario, (id) => $('v-inventario').querySelector(`[data-grafica="${id}"]`)?.clientWidth ?? 0);   // sin hueco (p. ej. sin rebajas) no hay ancho
+  for (const h of huecos) h.innerHTML = svg[h.dataset.grafica] ?? '';
+}
+async function cargarInventario() {
+  const turno = ++turnoInventario;
+  const q = consultaPeriodo();
+  if (tiendaActual) q.set('tienda', tiendaActual);
+  const fallo = (texto) => { for (const id of ['inv-flujo', 'inv-cohortes', 'inv-rebajas']) $(id).innerHTML = `<p class="vacio">${escapar(texto)}</p>`; };
+  try {
+    const respuesta = await fetch(`/api/reportes/inventario?${q}`);
+    const r = await respuesta.json().catch(() => ({}));
+    if (turno !== turnoInventario) return;
+    if (!respuesta.ok) { fallo(r.error ?? 'No se pudo cargar la vista de Inventario.'); return; }
+    datosInventario = r;
+    const html = vistaInventario(r);
+    $('inv-flujo').innerHTML = html.flujo;
+    $('inv-cohortes').innerHTML = html.cohortes;
+    $('inv-rebajas').innerHTML = html.rebajas;
+    $('dias-mediana').textContent = textoMediana(r);
+    if (ultimoReporte) $('inv-kpis').innerHTML = tarjetasInventario(r, ultimoReporte);
+    dibujarInventario();
+  } catch {
+    if (turno === turnoInventario) fallo('No se pudo cargar la vista de Inventario. Revisa la conexión.');
+  }
+}
+new ResizeObserver(() => dibujarInventario()).observe($('v-inventario'));
 
 async function cargarEquipo() {
   try {
@@ -1668,7 +1727,7 @@ document.addEventListener('click', (e) => {
   if (!boton) return;
   const enTabla = boton.closest('.panel').classList.toggle('en-tabla');
   boton.textContent = enTabla ? 'Ver gráfica' : 'Ver tabla';
-  if (!enTabla) { dibujarVentas(); dibujarDolarones(); }
+  if (!enTabla) { dibujarVentas(); dibujarDolarones(); dibujarInventario(); }
 });
 
 activarGlobos(document.body);
