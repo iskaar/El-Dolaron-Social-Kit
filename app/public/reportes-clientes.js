@@ -3,7 +3,7 @@
 // src/reportes-clientes.test.ts. Dinero en centavos enteros; los dias son dias de la tienda (UTC-6).
 // «Socio» es una fila de `clientes`; las cuentas del equipo (registrado_por = 'retos') no son clientes y no cuentan como socios.
 import { escapar, pesos, pesosEje, sumarDias, diaCorto, tabla, columnas, lineaSerie, leyendaSeries } from './graficas.js';
-import { cubetas as listaCubetas, cambioKpi, vsCorto, diasEntre, etiquetaCubeta, tituloCubeta, unidadGrano } from './reportes-resumen.js';
+import { cubetas as listaCubetas, cambioKpi, vsCorto, cortadaPorElPeriodo, diasEntre, etiquetaCubeta, tituloCubeta, unidadGrano } from './reportes-resumen.js';
 
 const num = (n) => Number(n).toLocaleString('es-MX');
 const un = (v) => v.toLocaleString('es-MX', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
@@ -293,7 +293,7 @@ export function vistaClientes(d) {
   const parciales = d.cubetas.some((c) => c.parcial);
   const aviso = avisosClientes(d);
   const subGrano = `${grano} · ${num(n)} ${unidadGrano(d.grano, n)}`;
-  const notaParcial = parciales ? `La primera o la última ${unidadGrano(d.grano, 1)} está cortada por el periodo: tiene menos días.` : '';
+  const notaParcial = parciales ? `${cortadaPorElPeriodo(d.grano)}: tiene menos días.` : '';
   const sinNada = d.totales.tickets_socio + d.totales.tickets_sin === 0 && d.totales.nuevos === 0 && d.con_historia === 0;
   return `${aviso.map((t) => `<p class="nota aviso-tienda">${escapar(t)}</p>`).join('')}
     ${sinNada ? '<p class="vacio">Sin socios ni ventas en este periodo.</p>' : ''}

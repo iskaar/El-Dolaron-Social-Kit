@@ -739,7 +739,7 @@
       <div id="chip-dia" hidden></div>
       <div class="lista-tickets" id="tickets-rango"></div>
       <button id="tickets-mas" type="button" class="ver-mas" hidden>Ver más tickets</button>
-      <div class="exportar" style="margin-top: 10px"><a id="exportar-tickets" href="/api/reportes/tickets.csv">Exportar estos tickets (CSV)</a></div>
+      <div class="exportar" style="margin-top: 10px"><a id="exportar-tickets" href="/api/reportes/tickets.csv">Exportar estos tickets (CSV) · del periodo y los filtros</a></div>
       <p class="nota">Toca un ticket para ver sus piezas, el cobro y lo que se devolvió. Las piezas se cancelan desde la caja.
         «Vendido» es lo que los tickets siguen valiendo, sin cancelados ni devoluciones.</p>
     </article>
@@ -747,9 +747,10 @@
     <section aria-labelledby="t-exportar">
       <h3 class="titulo-bloque" id="t-exportar">Exportar</h3>
     <div class="exportar">
-      <a href="/api/reportes/ventas.csv">Exportar ventas (CSV)</a>
-      <a href="/api/reportes/inventario.csv">Exportar inventario (CSV)</a>
+      <a href="/api/reportes/ventas.csv">Exportar ventas (CSV) · todo el historial</a>
+      <a href="/api/reportes/inventario.csv">Exportar inventario (CSV) · todo, como está hoy</a>
     </div>
+    <p class="nota">Estos dos no dependen del periodo ni de la tienda elegidos arriba: ventas trae todas las ventas desde la apertura, de todas las tiendas, e inventario trae todas las piezas como están hoy. El de tickets, de arriba, sí respeta el periodo, la tienda y los filtros.</p>
     </section>
   </section>
 </main>
@@ -773,7 +774,7 @@ import {
 } from '/graficas.js';
 import {
   COMPARACIONES, GRANOS, granosPermitidos, tarjetasKpi, tarjetasHtml, datosTendencia, leyendaTendencia, tablaTendencia, metaHtml, graficaMeta, tablaMeta,
-  hallazgos, hallazgosHtml, canalesHtml, tablaCanales, categoriasHtml, tablaCategorias, textoComparacion, unidadGrano, COMPARACION_POR_GRANO, rangoTexto, TEXTO_COMPARACION,
+  hallazgos, hallazgosHtml, canalesHtml, tablaCanales, categoriasHtml, tablaCategorias, textoComparacion, unidadGrano, COMPARACION_POR_GRANO, rangoTexto, TEXTO_COMPARACION, cortadaPorElPeriodo,
 } from '/reportes-resumen.js';
 import { montarCapturas } from '/reportes-capturas.js';
 import * as Ventas from '/reportes-ventas.js';
@@ -1175,7 +1176,7 @@ function pintarResumenEjecutivo() {
   const parciales = d.cubetas.filter((c) => c.parcial).length;
   $('tend-nota').textContent = $('v-tend-nota').textContent = [
     d.grano === 'dia' ? 'Toca una columna para ir a los tickets de ese día.' : '',
-    parciales ? `La primera o la última ${unidadGrano(d.grano, 1)} está cortada por el periodo: vende menos de lo normal.` : '',
+    parciales ? `${cortadaPorElPeriodo(d.grano)}: vende menos de lo normal.` : '',
     d.comparacion ? `La línea punteada es la comparación, ${COMPARACION_POR_GRANO[d.grano]}.` : '',
   ].filter(Boolean).join(' ');
   pintarTendencia();

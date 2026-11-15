@@ -274,6 +274,8 @@ export const rangoTexto = (desde, hasta, anioRef = '') => {
 
 /** El nombre de la cubeta en la pantalla: nunca «cubeta», siempre la unidad (día, semana o mes). */
 export const unidadGrano = (grano, n) => ({ dia: n === 1 ? 'día' : 'días', semana: n === 1 ? 'semana' : 'semanas', mes: n === 1 ? 'mes' : 'meses' }[grano]);
+/** «La primera o la última semana está cortada por el periodo», con el genero de cada unidad («El primer o el último mes está cortado...»). */
+export const cortadaPorElPeriodo = (grano) => (grano === 'mes' ? 'El primer o el último mes está cortado por el periodo' : `La primera o la última ${unidadGrano(grano, 1)} está cortada por el periodo`);
 export const COMPARACION_POR_GRANO = { dia: 'día contra día', semana: 'semana contra semana', mes: 'mes contra mes' };
 
 /** «Comparado con 21 sep – 18 oct» (y el aviso cuando los dos periodos no tienen el mismo largo). */

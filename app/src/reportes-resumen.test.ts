@@ -8,10 +8,15 @@ import { sumarDias } from '../public/graficas.js';
 import {
   mesAtras, ventanaComparacion, cubetas, granosPermitidos, granoEfectivo, armarCubetas, promedioMovil, calcularMeta, ritmoPorCubeta,
   cambioKpi, hallazgos, hallazgosHtml, tarjetasKpi, tarjetasHtml, textoComparacion, UMBRALES, edadPromedio, datosTendencia, metaHtml, canalesHtml,
-  categoriasHtml, leyendaTendencia, tablaTendencia, unidadGrano, rangoTexto, deltaHtml, TEXTO_COMPARACION,
+  categoriasHtml, leyendaTendencia, tablaTendencia, unidadGrano, rangoTexto, deltaHtml, TEXTO_COMPARACION, cortadaPorElPeriodo,
 } from '../public/reportes-resumen.js';
 
 /* ---------- puras ---------- */
+
+test('B8: la nota de la cubeta cortada concuerda en genero con su unidad', () => {
+  assert.equal(cortadaPorElPeriodo('semana'), 'La primera o la última semana está cortada por el periodo');
+  assert.equal(cortadaPorElPeriodo('mes'), 'El primer o el último mes está cortado por el periodo');
+});
 
 test('B1: el renglon de cambio de una tarjeta dice lo mismo en todas las vistas, estado por estado', () => {
   const cambio = cambioKpi(120, 100);
