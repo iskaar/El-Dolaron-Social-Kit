@@ -61,12 +61,13 @@ interface Fila {
 }
 
 /**
- * Todos los hechos de los dos libros en un solo recorrido, ya agrupados por dia: la cantidad de filas que vuelve
+ * Todos los hechos de UN libro, ya agrupados por dia (D1 no admite mas de 5 terminos en un compound SELECT: cada libro
+ * va en su consulta, de cuatro): la cantidad de filas que vuelve
  * depende de los dias y los origenes, no de cuantos vales haya. Categorias: emision, traspaso, canje, reverso_canje,
  * retiro, otro (suman al saldo), asiento (el movimiento de alta, solo para comparar) y guardado (la columna restante).
  * Con `tienda` cada hecho trae la de su venta (ventas.tienda) y la de la venta que dio origen a su lote o vale.
  */
-export function consultaLibro(conTienda: boolean) {
+export function consultaLibro(conTienda: boolean, libro: Libro) {
   // La venta que dio origen a cada lote (para su tienda), calculada una sola vez.
   const cte = conTienda
     ? `with lv as materialized (select l2.id as lote, coalesce(l2.venta_id, mm.venta_id) as venta from dolarones_lotes l2
@@ -90,6 +91,7 @@ export function consultaLibro(conTienda: boolean) {
       (cat <> 'guardado' and fecha > vence) as tardio, por_liberar,
       ${tiendaDe('venta_evt')} as t_evt, ${tiendaDe('venta_lote')} as t_lote, sum(importe) as importe, count(*) as n
     from (
+${libro === 'socio' ? `
       select 'socio' as libro, ${origenLote} as origen, 'emision' as cat, l.creado_en as fecha, l.importe - coalesce(k.importe, 0) as importe,
         l.vence_en as vence, ${ventaLote} as venta_evt, ${ventaLote} as venta_lote, 0 as por_liberar
       from dolarones_lotes l left join vales_dolarones k on k.venta_id = l.venta_id and k.reclamado_por = l.cliente_id ${lv}
@@ -102,8 +104,10 @@ export function consultaLibro(conTienda: boolean) {
       union all
       select 'socio', ${origenLote}, 'guardado', '', l.restante, l.vence_en, null, ${ventaLote}, l.disponible_desde > ?1
       from dolarones_lotes l ${lv}
-      union all
-      select 'vale', ${origenVale}, 'emision', v.creado_en, v.importe, v.vence_en, ${ventaVale}, ${ventaVale}, 0
+`
+      : `
+      select 'vale' as libro, ${origenVale} as origen, 'emision' as cat, v.creado_en as fecha, v.importe as importe, v.vence_en as vence,
+        ${ventaVale} as venta_evt, ${ventaVale} as venta_lote, 0 as por_liberar
       from vales_dolarones v
       union all
       select 'vale', ${origenVale}, 'traspaso', v.reclamado_en, -v.importe, v.vence_en, ${ventaVale}, ${ventaVale}, 0
@@ -116,6 +120,7 @@ export function consultaLibro(conTienda: boolean) {
       union all
       select 'vale', ${origenVale}, 'guardado', '', v.restante, v.vence_en, null, ${ventaVale}, 0
       from vales_dolarones v
+`}
     )
     group by libro, origen, cat, vigente, dia, dia_vence, tardio, por_liberar, t_evt, t_lote`;
 }
@@ -269,8 +274,9 @@ export async function reporteDolarones(url: URL, env: Env, ahora = Date.now()): 
   const deTiendaVale = tienda ? ` and (select tienda from ventas where id = coalesce(v.venta_id, v.venta_origen)) = '${tienda}'` : '';
   const enPeriodoVentas = `s.cancelada = 0 and s.creado_en >= ?1 and s.creado_en < ?2${tienda ? ` and s.tienda = '${tienda}'` : ''}`;
 
-  const [libro, actual, previo, tickets, resultados, tardanza, saldos] = await Promise.all([
-    env.DB.prepare(consultaLibro(!!tienda)).bind(ahoraIso).all<Fila>(),
+  const [libroSocio, libroVale, actual, previo, tickets, resultados, tardanza, saldos] = await Promise.all([
+    env.DB.prepare(consultaLibro(!!tienda, 'socio')).bind(ahoraIso).all<Fila>(),
+    env.DB.prepare(consultaLibro(!!tienda, 'vale')).bind(ahoraIso).all<Fila>(),
     efecto(desde, hasta),
     efecto(antes.desde, desde),
     // Los Dolarones que dicen los tickets contra lo que dicen los movimientos de esos mismos tickets: cancelados fuera de los dos.
@@ -317,7 +323,7 @@ export async function reporteDolarones(url: URL, env: Env, ahora = Date.now()): 
     ).bind(ahoraIso).all<{ numero: number; saldo: number; disponible: number; por_liberar: number; vence_primero: string; ultima_compra: string | null }>(),
   ]);
 
-  const filas = libro.results.map((f) => ({ ...f, importe: Number(f.importe) })) as Fila[];
+  const filas = [...libroSocio.results, ...libroVale.results].map((f) => ({ ...f, importe: Number(f.importe) })) as Fila[];
   const porOrigen = totalesPorOrigen(filas);
   const hayOtro = porOrigen.has('otro');
   const origenes = ORIGENES.filter((o) => o.clave !== 'otro' || hayOtro);

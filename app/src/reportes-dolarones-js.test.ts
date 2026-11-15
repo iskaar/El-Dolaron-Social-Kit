@@ -92,7 +92,7 @@ test('las graficas salen de los datos y cada serie coincide con su tabla', async
   assert.equal(cal.categorias.length, 9, 'ocho semanas y «despues»');
   assert.equal(cal.series.flatMap((s: { valores: number[] }) => s.valores).reduce((a: number, b: number) => a + b, 0), r.saldo.vivo);
   // Sin datos tampoco hay NaN ni graficas rotas.
-  for (const svg of Object.values(graficas(vacia, () => 300))) assert.ok(!(svg as string).includes('NaN'));
+  for (const svg of Object.values(graficas(vacia, () => 300))) { assert.ok(!(svg as string).includes('NaN')); assert.match(svg as string, /class="vacio"/, 'sin datos: un aviso, no ejes en cero'); }
   assert.deepEqual(etiquetaCubeta({ desde: '2026-11-09', hasta: '2026-11-15', parcial: false }), { etiqueta: '9–15 nov', titulo: '9 nov – 15 nov 2026' });
   assert.match(etiquetaCubeta({ desde: '2026-10-28', hasta: '2026-11-01', parcial: true }).titulo, /parcial/);
 });

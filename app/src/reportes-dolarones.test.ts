@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import { tienda, codigoPrueba, PRODUCTO } from './prueba-d1.ts';
 import { reclamarVale } from './vales.ts';
 import { permiso } from './cuentas.ts';
-import { cubetas, flujoEntre, vivoAlCierre, totalesPorOrigen, cohorteCerrada } from './reportes-dolarones.ts';
+import { cubetas, flujoEntre, vivoAlCierre, totalesPorOrigen, cohorteCerrada, consultaLibro } from './reportes-dolarones.ts';
 
 const DIA_MS = 86_400_000;
 const hace = (dias: number) => new Date(Date.now() - dias * DIA_MS).toISOString();
@@ -277,6 +277,11 @@ test('la respuesta no lleva nombres, telefonos ni correos: un socio es solo su n
 test('solo el dueno ve la vista: la ruta nueva cae en el permiso por omision', () => {
   assert.deepEqual(permiso('/api/reportes/dolarones', 'GET'), permiso('/api/reportes', 'GET'));
   assert.deepEqual(permiso('/api/reportes/dolarones', 'GET'), []);
+});
+
+test('D1 admite a lo mas 5 terminos por compound SELECT: cada consulta del libro se queda en cuatro', () => {
+  for (const conTienda of [false, true]) for (const libro of ['socio', 'vale'] as const)
+    assert.ok((consultaLibro(conTienda, libro).match(/union all/g) ?? []).length + 1 <= 5, `${libro} ${conTienda}`);
 });
 
 test('las piezas puras: cubetas, vivo al cierre, flujo y cohorte', () => {

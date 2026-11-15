@@ -13,7 +13,7 @@ const enD = (c) => Math.round(c / 100).toLocaleString('es-MX');   // eje: D ente
 
 export const COLORES_ORIGEN = {
   vale: 'var(--serie-1)', socio: 'var(--serie-2)', promo: 'var(--serie-3)', regalo: 'var(--serie-4)',
-  referido: 'var(--d-5)', equipo: 'var(--d-6)', cupon: 'var(--apagado)', otro: 'var(--tinta-2)',
+  referido: 'var(--d-5)', equipo: 'var(--d-6)', cupon: 'var(--d-gris)', otro: 'var(--tinta-2)',
 };
 const colorDe = (o) => COLORES_ORIGEN[o] ?? 'var(--tinta-2)';
 
@@ -111,7 +111,7 @@ export function datosSerie(r) {
   const series = [
     { nombre: 'Emitidos', color: 'var(--serie-1)', valores: r.serie.map((c) => c.emitidos) },
     { nombre: 'Canjeados', color: 'var(--serie-2)', valores: r.serie.map((c) => c.canjeados) },
-    { nombre: 'Vencidos sin usar', color: 'var(--apagado)', valores: r.serie.map((c) => c.vencidos) },
+    { nombre: 'Vencidos sin usar', color: 'var(--d-gris)', valores: r.serie.map((c) => c.vencidos) },
   ];
   const origenes = r.origenes.filter((o) => r.serie.some((c) => c.por_origen[o.clave]));
   const porOrigen = (origenes.length ? origenes : r.origenes.slice(0, 1)).map((o) => ({ nombre: o.nombre, color: colorDe(o.clave), valores: r.serie.map((c) => c.por_origen[o.clave] ?? 0) }));
@@ -148,7 +148,7 @@ export function tablaOrigen(r) {
 export function panelVales(r) {
   const v = r.vales;
   if (v.emitidos === 0) return '<div class="vacio">Sin vales emitidos en este periodo.</div>';
-  const colores = { completo: 'var(--serie-3)', parcial: 'var(--serie-1)', vencido: 'var(--apagado)', vivo: 'var(--serie-4)', cuenta: 'var(--serie-2)', retirado: 'var(--tinta-2)' };
+  const colores = { completo: 'var(--serie-3)', parcial: 'var(--serie-1)', vencido: 'var(--d-gris)', vivo: 'var(--serie-4)', cuenta: 'var(--serie-2)', retirado: 'var(--tinta-2)' };
   return apilada(v.resultados.map((x) => ({ nombre: x.nombre, valor: x.n, color: colores[x.clave], texto: `${num(x.n)} ${x.n === 1 ? 'vale' : 'vales'}`, extra: dolarones(x.importe) })));
 }
 
@@ -163,12 +163,12 @@ export function efectoVenta(r) {
   const medio = (neto, n) => (n > 0 ? Math.round(neto / n) : 0);
   const con = medio(e.con.neto, e.con.tickets), sin = medio(e.sin.neto, e.sin.tickets);
   const barras = barrasHorizontales([
-    { nombre: 'Ticket promedio con Dolarones', valor: con, texto: e.con.tickets ? pesos(con) : 'Sin tickets', tip: `Con Dolarones\n${pesos(con)}\n${num(e.con.tickets)} tickets` },
-    { nombre: 'Ticket promedio sin Dolarones', valor: sin, texto: e.sin.tickets ? pesos(sin) : 'Sin tickets', tip: `Sin Dolarones\n${pesos(sin)}\n${num(e.sin.tickets)} tickets` },
+    { nombre: 'Con Dolarones', valor: con, texto: e.con.tickets ? pesos(con) : 'Sin tickets', tip: `Con Dolarones\n${pesos(con)}\n${num(e.con.tickets)} tickets` },
+    { nombre: 'Sin Dolarones', valor: sin, texto: e.sin.tickets ? pesos(sin) : 'Sin tickets', tip: `Sin Dolarones\n${pesos(sin)}\n${num(e.sin.tickets)} tickets` },
   ]);
   const porD = e.con.dolarones > 0 ? pesos(Math.round((e.con.dinero * 100) / e.con.dolarones)) : '—';
   const par = (a, b, fuerte = false) => `<dt>${escapar(a)}</dt><dd class="num">${fuerte ? '<b>' : ''}${escapar(b)}${fuerte ? '</b>' : ''}</dd>`;
-  return `${barras}<dl class="pares">${par('Tickets pagados con Dolarones', num(e.con.tickets))}${par('Dolarones usados en ellos', dolarones(e.con.dolarones))}
+  return `<p class="nota" style="margin:0 0 8px">Ticket promedio</p>${barras}<dl class="pares">${par('Tickets pagados con Dolarones', num(e.con.tickets))}${par('Dolarones usados en ellos', dolarones(e.con.dolarones))}
     ${par('Dinero que entró en esos tickets', pesos(e.con.dinero))}${par('Dinero por cada D canjeado', porD, true)}</dl>
     <p class="nota">El ticket promedio es lo vendido neto de cada ticket, con la parte pagada en Dolarones. Quien regresa a usar sus Dolarones paga el resto en efectivo, tarjeta o transferencia.</p>`;
 }
@@ -232,11 +232,12 @@ export function vistaDolarones(r) {
 export function graficas(r, anchoDe) {
   const d = datosSerie(r), cal = datosCalendario(r), h = datosHistograma(r);
   const ancho = (id) => Math.max(220, Math.floor(anchoDe(id)));
+  const sinNada = (series, mensaje) => (series.every((x) => x.valores.every((v) => v === 0)) ? `<div class="vacio">${mensaje}</div>` : null);
   return {
-    semana: columnas({ categorias: d.categorias, series: d.series, ancho: ancho('semana'), fmtEje: enD, fmtValor: dolarones }),
-    vivo: lineaSerie({ categorias: d.categorias, valores: d.vivo, nombre: 'Saldo vivo', ancho: ancho('vivo'), fmtEje: enD, fmtValor: dolarones }),
-    origen: columnas({ categorias: d.categorias, series: d.porOrigen, ancho: ancho('origen'), modo: 'apiladas', fmtEje: enD, fmtValor: dolarones }),
-    dias: columnas({ categorias: h.categorias, series: [{ nombre: 'Canjes de vales', color: 'var(--serie-1)', valores: h.valores }], ancho: ancho('dias'), alto: 200, entero: true, fmtValor: num }),
-    calendario: columnas({ categorias: cal.categorias, series: cal.series, ancho: ancho('calendario'), alto: 220, modo: 'apiladas', fmtEje: enD, fmtValor: dolarones }),
+    semana: sinNada(d.series, 'Sin movimientos en el periodo.') ?? columnas({ categorias: d.categorias, series: d.series, ancho: ancho('semana'), fmtEje: enD, fmtValor: dolarones }),
+    vivo: sinNada([{ valores: d.vivo }], 'Sin saldo vivo en el periodo.') ?? lineaSerie({ categorias: d.categorias, valores: d.vivo, nombre: 'Saldo vivo', ancho: ancho('vivo'), fmtEje: enD, fmtValor: dolarones }),
+    origen: sinNada(d.porOrigen, 'Sin emisiones en el periodo.') ?? columnas({ categorias: d.categorias, series: d.porOrigen, ancho: ancho('origen'), modo: 'apiladas', fmtEje: enD, fmtValor: dolarones }),
+    dias: sinNada([{ valores: h.valores }], 'Sin canjes de vales en el periodo.') ?? columnas({ categorias: h.categorias, series: [{ nombre: 'Canjes de vales', color: 'var(--serie-1)', valores: h.valores }], ancho: ancho('dias'), alto: 200, entero: true, fmtValor: num }),
+    calendario: sinNada(cal.series, 'Nada por vencer en las próximas semanas.') ?? columnas({ categorias: cal.categorias, series: cal.series, ancho: ancho('calendario'), alto: 220, modo: 'apiladas', fmtEje: enD, fmtValor: dolarones }),
   };
 }

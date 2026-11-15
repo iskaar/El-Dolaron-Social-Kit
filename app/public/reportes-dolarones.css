@@ -1,7 +1,7 @@
 /* Vista «Dolarones» de /reportes (#802): colores de origen que no estan en la pagina y lo propio de la vista. */
-:root { --d-5: #7a5ac8; --d-6: #c2478f; }
-@media (prefers-color-scheme: dark) { :root:where(:not([data-theme="light"])) { --d-5: #9c82e6; --d-6: #e070ae; } }
-:root[data-theme="dark"] { --d-5: #9c82e6; --d-6: #e070ae; }
+:root { --d-5: #7a5ac8; --d-6: #c2478f; --d-gris: #8a8984; }
+@media (prefers-color-scheme: dark) { :root:where(:not([data-theme="light"])) { --d-5: #9c82e6; --d-6: #e070ae; --d-gris: #8f8e86; } }
+:root[data-theme="dark"] { --d-5: #9c82e6; --d-6: #e070ae; --d-gris: #8f8e86; }
 
 .banda-saldo { border: 1px solid var(--bien); border-radius: 6px; padding: 10px 14px; background: var(--superficie); }
 .banda-saldo.ok { border-color: var(--bien); } .banda-saldo.ok > b { color: var(--bien); }
