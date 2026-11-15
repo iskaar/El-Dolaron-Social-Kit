@@ -35,7 +35,8 @@ const ceros = () => Object.fromEntries(MEDIDAS_EQUIPO.map((m) => [m, 0]));
  *  - `usuarios`: { correo, nombre };  `vendedoras`: { correo } (cuentas que atienden: salen aunque no hayan hecho nada);
  *  - `atribucionDesde`: el primer dia con una venta atribuida (de todo el historial) o null.
  * `personas` conserva los campos y el filtro de siempre (un renglon por cuenta, mas «Sin atribuir» solo si tiene tickets); `sin_atribuir`
- * trae siempre lo de las cuentas vacias, para que nada se pierda aunque no tenga renglon.
+ * trae siempre lo de las cuentas vacias, para que nada se pierda aunque no tenga renglon. `portal` son las altas que la socia hizo sola en el portal:
+ * no son de ninguna persona y la tabla las muestra aparte.
  */
 export function armarEquipo({ desde, hasta, grano, ventana, ventas, cancelaciones, socios, apartados, capturas, asistencias, usuarios, vendedoras, atribucionDesde }) {
   const enPeriodo = (dia) => dia >= desde && dia <= hasta;
@@ -68,9 +69,14 @@ export function armarEquipo({ desde, hasta, grano, ventana, ventas, cancelacione
     dia(f.dia).cancel_n += f.n;
     if (enPeriodo(f.dia)) { const p = fila(f.correo); p.cancelaciones += f.n; p.cancelaciones_valor += f.valor; }
   }
+  // Quien dio el alta solo es una persona si es el correo de una cuenta: 'portal' (se registro sola) va en su renglon aparte y cualquier otro
+  // valor que no sea un correo (el servidor ya deja fuera 'retos', que no son clientes) cae en «Sin atribuir».
+  const portal = { socios: 0, socios_compraron: 0 };
   for (const f of socios) {
     const x = dia(f.dia); x.socios += f.socios; x.socios_compraron += f.socios_compraron;
-    if (enPeriodo(f.dia)) { const p = fila(f.correo); p.socios += f.socios; p.socios_compraron += f.socios_compraron; }
+    if (!enPeriodo(f.dia)) continue;
+    const destino = f.correo === 'portal' ? portal : fila(String(f.correo ?? '').includes('@') ? f.correo : '');
+    destino.socios += f.socios; destino.socios_compraron += f.socios_compraron;
   }
   for (const f of apartados) if (enPeriodo(f.dia)) fila(f.correo).apartados += f.apartados;
   for (const f of capturas) {
@@ -107,6 +113,7 @@ export function armarEquipo({ desde, hasta, grano, ventana, ventas, cancelacione
     serie_personas: seriePersonas,
     serie_sin_atribuir: valores(serie.get('') ?? []),
     sin_atribuir: sin,
+    portal,
     atribucion: { desde: atribucionDesde ?? null, dentro_del_periodo: !!atribucionDesde && atribucionDesde > desde, desde_ventas: vistos.ventas, desde_total: vistos.ventas_total },
     personas: limpias.filter((p) => p.correo || p.tickets).sort((a, b) => String(a.nombre).localeCompare(String(b.nombre))),
   };
@@ -141,12 +148,12 @@ export function tarjetasEquipo(d) {
     { ...comunes, clave: 'ticket', etiqueta: 'Ticket promedio', valor: ticket(t) == null ? '—' : pesos(ticket(t)), cambio: a ? cambio(ticket(t), ticket(a)) : null,
       serie: serie(ticket), clase: 's1', pie: ppt(t) == null ? 'Sin tickets atribuidos' : `${n2(ppt(t))} piezas por ticket` },
     { ...comunes, clave: 'socios', etiqueta: 'Socios dados de alta', valor: n0(t.socios), cambio: cambio(t.socios, a?.socios), serie: serie((c) => c.socios), clase: 's3',
-      pie: `${n0(t.socios_compraron)} compraron ese mismo día` },
+      pie: `${n0(t.socios_compraron)} compraron ese mismo día${d.tienda ? ' · negocio completo' : ''}` },
     { ...comunes, clave: 'capturadas', etiqueta: 'Piezas capturadas', valor: n0(t.capturadas), cambio: cambio(t.capturadas, a?.capturadas), serie: serie((c) => c.capturadas), clase: 's3',
-      pie: `${n0(t.vendidas_14)} vendidas en sus primeros 14 días · detalle en Capturas` },
+      pie: `${n0(t.vendidas_14)} vendidas en sus primeros 14 días · detalle en Capturas${d.tienda ? ' · negocio completo' : ''}` },
     { ...comunes, clave: 'dias', etiqueta: 'Días trabajados', valor: hayAsist ? n0(t.dias_trab) : '—', cambio: hayAsist ? cambio(t.dias_trab, a?.dias_trab, { bueno: 'neutro' }) : null,
       serie: hayAsist ? serie((c) => c.dias_trab) : [], clase: 's2',
-      pie: hayAsist ? `Suma de días de asistencia · registros desde el ${diaCorto(d.asistencias.desde)}` : 'Nómina aún no tiene asistencias registradas' },
+      pie: hayAsist ? `Suma de días de asistencia · registros desde el ${diaCorto(d.asistencias.desde)}${d.tienda ? ' · negocio completo' : ''}` : 'Nómina aún no tiene asistencias registradas' },
     { ...comunes, clave: 'personas', etiqueta: 'Personas con ventas', valor: n0(d.personas.filter((p) => p.correo && p.tickets > 0).length), cambio: null, serie: [], clase: 's1',
       pie: 'Con al menos un ticket atribuido en el periodo' },
   ];
@@ -225,6 +232,8 @@ export function tablaPersonas(d, orden = { clave: 'ventas', descendente: true })
   const gente = ordenarPersonas(d.personas.filter((p) => p.correo), orden.clave, orden.descendente);
   const sinFila = sa.tickets || sa.socios || sa.cancelaciones || sa.capturadas || sa.apartados;
   const filaSin = sinFila ? filaDe(sa, ' class="sec"') : '';
+  const pt = d.portal ?? { socios: 0, socios_compraron: 0 };
+  const filaPortal = pt.socios ? `<tr class="sec"><td>Por el portal (sin persona)</td>${COLUMNAS.map(([clave]) => `<td class="num">${clave === 'socios' ? n0(pt.socios) : clave === 'socios_compraron' ? n0(pt.socios_compraron) : '—'}</td>`).join('')}</tr>` : '';
   const fila = (clave) => {
     if (clave === 'ventas') return pesos(t.ventas_total);
     if (clave === 'tickets') return n0(t.tickets_total);
@@ -243,7 +252,7 @@ export function tablaPersonas(d, orden = { clave: 'ventas', descendente: true })
     const activa = orden.clave === clave;
     return `<th class="num"${activa ? ` aria-sort="${orden.descendente ? 'descending' : 'ascending'}"` : ''}><button type="button" class="ordena" data-orden="${clave}">${escapar(texto)}${activa ? (orden.descendente ? ' ▼' : ' ▲') : ''}</button></th>`;
   }).join('');
-  const cuerpo = d.personas.some((p) => p.correo) || filaSin ? `${gente.map((p) => filaDe(p)).join('')}${filaSin}${total}` : `<tr><td colspan="${COLUMNAS.length + 1}" class="vacio">Sin personas con actividad en este periodo.</td></tr>`;
+  const cuerpo = d.personas.some((p) => p.correo) || filaSin || filaPortal ? `${gente.map((p) => filaDe(p)).join('')}${filaSin}${filaPortal}${total}` : `<tr><td colspan="${COLUMNAS.length + 1}" class="vacio">Sin personas con actividad en este periodo.</td></tr>`;
   return `<table class="tabla"><thead><tr><th><button type="button" class="ordena" data-orden="nombre">Persona${orden.clave === 'nombre' ? (orden.descendente ? ' ▲' : ' ▼') : ''}</button></th>${cabeza}</tr></thead><tbody>${cuerpo}</tbody></table>`;
 }
 
@@ -256,6 +265,9 @@ function panel(id, titulo, sub, grafica, tablaHtml, nota = '') {
   return `<article class="panel" id="${id}"><header><h4>${titulo}${sub ? ` <span class="subtitulo">${sub}</span>` : ''}</h4>${tablaHtml ? '<button type="button" class="alterna">Ver tabla</button>' : ''}</header>
     <div class="${tablaHtml ? 'vista-grafica' : ''}">${grafica}</div>${tablaHtml ? `<div class="vista-tabla">${tablaHtml}</div>` : ''}${nota ? `<p class="nota">${nota}</p>` : ''}</article>`;
 }
+
+/** Con una tienda elegida: lo que se filtra y lo que no (socios, capturas y asistencias no se registran por tienda; el bono tampoco se filtra). */
+export const avisoTienda = 'Con una tienda elegida, las ventas, los tickets, los tickets cancelados y los apartados son de esa tienda. Los socios dados de alta, las piezas capturadas y los días trabajados no se registran por tienda: siguen siendo del negocio completo, igual que el bono semanal de abajo.';
 
 /** El texto de la atribucion: desde que dia hay datos y cuanto de las ventas esta atribuido (siempre dicho, nunca solo en el color). */
 export function notaAtribucion(d) {
@@ -272,7 +284,7 @@ export function htmlVista(d, orden) {
   const hayAsist = !!d.asistencias.desde;
   return `
     <div class="principal"><div class="tarjetas" id="eq-kpis">${tarjetasHtml(tarjetasEquipo(d))}</div></div>
-    ${d.tienda ? '<p class="nota" style="margin:0">Equipo no se filtra por la tienda elegida arriba: sus cifras son de todo el negocio.</p>' : ''}
+    ${d.tienda ? `<p class="nota" style="margin:0">${escapar(avisoTienda)}</p>` : ''}
     ${panel('eq-tiempo', 'Ventas por persona en el tiempo', `${GRANO[d.grano]} · ventas netas`,
       `${hayVentas ? leyendaSeries(series) : ''}<div data-grafica="ventas">${hayVentas ? '' : vacio('Sin ventas en este periodo.')}</div>`, hayVentas ? tablaSerie(d) : '',
       `${escapar(notaAtribucion(d))}`)}
@@ -281,7 +293,7 @@ export function htmlVista(d, orden) {
       <p class="nota"><b>Cómo comparar.</b> Los totales de quien trabajó más días siempre serán mayores: para comparar usa ticket promedio, piezas por ticket o ventas por día con venta.
         «pocos días» marca a quien tiene menos de ${POCOS_DIAS} días con venta en el periodo: su promedio todavía no dice mucho.
         «Tickets cancelados» son los tickets completos que la persona atendió y luego se cancelaron (cuentan en su bruto, no en sus ventas netas); lo que cada quien cancela está en Control.
-        Socios: altas que registró y cuántos compraron ese mismo día. Apartados: cerrados en caja. «Vendidas a 14 días»: de las piezas que capturó en el periodo, cuántas se vendieron
+        Socios: altas que registró y cuántos compraron ese mismo día; las que la socia hizo sola en el portal van en su propio renglón. Apartados: cerrados en caja. «Vendidas a 14 días»: de las piezas que capturó en el periodo, cuántas se vendieron
         en sus primeras dos semanas; las de los últimos 14 días aún pueden venderse, así que no es una tasa. El tiempo y la calidad de las capturas están en Capturas.
         Días trabajados: asistencias de su empleado en Nómina (hay que ligar su cuenta allá)${hayAsist ? '' : '; Nómina todavía no tiene asistencias, por eso aparece «—»'}.</p>
     </article>`;
