@@ -174,3 +174,52 @@ test('apilada: la columna extra (piezas) entra en todas las filas de la leyenda'
   assert.equal(html.match(/<tr>/g)!.length, 2);
   assert.equal(apilada([{ nombre: 'a', valor: 1, color: 'x', texto: '$0.01' }]).includes('piezas'), false);
 });
+
+/* ---------- series sin dinero: columnas apiladas, histograma y linea (#802, vista Capturas) ---------- */
+import { escalaNumerica, graficaColumnas, graficaLinea, FORMATO_CALOR_DINERO } from '../public/graficas.js';
+
+test('escalaNumerica: marcas redondas y, con entero, nunca fracciones', () => {
+  assert.deepEqual(escalaNumerica(57, { entero: true }).marcas, [0, 20, 40, 60]);
+  assert.deepEqual(escalaNumerica(1, { entero: true }).marcas, [0, 1]);
+  assert.deepEqual(escalaNumerica(0, { entero: true }).marcas, [0, 1]);   // sin datos: una escala minima, no una division entre cero
+  assert.deepEqual(escalaNumerica(8).marcas, [0, 2, 4, 6, 8]);
+  assert.deepEqual(escalaNumerica(0.4).marcas, [0, 0.5, 1]);   // sin `entero` si admite fracciones
+  assert.ok(escalaNumerica(780, { entero: true }).tope >= 780);
+});
+
+test('graficaColumnas apila en orden, pone el total en el globo y deja una columna enfocable por dia', () => {
+  const d = { unidad: 'capturas', etiquetas: ['1', '2', '3'], titulos: ['Lunes 1', 'Martes 2', 'Miércoles 3'],
+    series: [{ nombre: 'Ana', color: 'var(--serie-1)', valores: [4, 0, 2] }, { nombre: 'Beto', color: 'var(--serie-2)', valores: [1, 0, 3] }],
+    linea: { nombre: 'Promedio', valores: [null, 2, 3] } };
+  const svg = graficaColumnas(d, { ancho: 600 });
+  assert.equal((svg.match(/class="hit"/g) ?? []).length, 3);
+  assert.equal((svg.match(/var\(--serie-1\)/g) ?? []).length, 2);   // ana pinta 2 de 3 dias: la de cero no deja barra
+  assert.ok(svg.includes('Lunes 1'));
+  assert.ok(svg.includes('5 capturas') && svg.includes('Ana: 4') && svg.includes('Beto: 1') && svg.includes('Promedio: 3'));
+  assert.ok(svg.includes('Sin capturas'));   // el dia en cero se dice, no queda mudo
+  assert.equal((svg.match(/<path /g) ?? []).length, 1);   // un solo trazo de referencia, sin el null del principio
+  assert.ok(!svg.includes('NaN') && !svg.includes('undefined'));
+  // Sin datos y con un solo punto no revienta.
+  assert.match(graficaColumnas({ etiquetas: ['a'], series: [{ nombre: 'x', color: 'red', valores: [0] }] }, { ancho: 300 }), /<svg/);
+});
+
+test('graficaLinea corta el trazo donde no hay dato en lugar de bajarlo a cero', () => {
+  const puntos = [{ etiqueta: 'a', valor: 60 }, { etiqueta: 'b', valor: null }, { etiqueta: 'c', valor: 90 }, { etiqueta: 'd', valor: 80 }];
+  const svg = graficaLinea(puntos, { ancho: 600 });
+  assert.equal((svg.match(/class="trazo"/g) ?? []).length, 1);   // a queda solo (sin trazo) y c-d forman el unico tramo
+  assert.equal((svg.match(/<circle/g) ?? []).length, 3);
+  assert.ok(svg.includes('Sin datos'));
+  assert.ok(!svg.includes('NaN'));
+});
+
+test('el mapa de calor admite conteos sin cambiar el de dinero', () => {
+  const datos = [{ dia_semana: 2, hora: 10, tickets: 8, total: 8 }, { dia_semana: 3, hora: 11, tickets: 2, total: 2 }];
+  const mapa = mapaCalor(datos, (n) => `${n} capturas`);
+  assert.equal(mapa.mejor.detalle, '8 capturas');
+  const html = mapaCalorHtml(mapa, { ...FORMATO_CALOR_DINERO, valor: (n) => `${n} capturas`, eje: String, vacio: 'Sin capturas', titulo: 'Capturas por hora', escala: 'Más oscuro, más capturas' });
+  assert.ok(html.includes('8 capturas') && html.includes('Sin capturas') && html.includes('Capturas por hora'));
+  assert.ok(!html.includes('$'));
+  assert.ok(tablaCalor(mapa, String).includes('>8<'));
+  // Sin pasar formato sigue siendo dinero.
+  assert.ok(mapaCalorHtml(mapaCalor([{ dia_semana: 1, hora: 9, tickets: 1, total: 12345 }])).includes('$123'));
+});

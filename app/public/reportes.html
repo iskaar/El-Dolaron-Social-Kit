@@ -271,6 +271,7 @@
     <a href="#resumen" data-v="resumen">Resumen</a>
     <a href="#ventas" data-v="ventas">Ventas</a>
     <a href="#inventario" data-v="inventario">Inventario</a>
+    <a href="#capturas" data-v="capturas">Capturas</a>
     <a href="#finanzas" data-v="finanzas">Finanzas</a>
     <a href="#equipo" data-v="equipo">Equipo</a>
     <a href="#control" data-v="control">Control</a>
@@ -404,6 +405,19 @@
         El valor es el precio de lista × existencia (no hay costo de compra en el sistema).</p>
     </article>
     </section>
+  </section>
+
+  <section class="vista" id="v-capturas" data-vista="capturas" aria-labelledby="h-capturas" hidden>
+    <h2 id="h-capturas" tabindex="-1">Capturas</h2>
+    <div class="filtros-tickets">
+      <label class="campo">Pausa
+        <select id="f-pausa" aria-label="Intervalo que cuenta como pausa">
+          <option value="5">5 min</option><option value="10" selected>10 min</option><option value="15">15 min</option><option value="20">20 min</option>
+        </select></label>
+      <span class="sec">Entre dos capturas seguidas de la misma persona, un intervalo mayor que la pausa es un descanso y no cuenta como tiempo de captura.</span>
+    </div>
+    <p class="nota" id="capturas-tienda" hidden>Las capturas se hacen en la tienda central: este reporte no se filtra por la tienda elegida arriba.</p>
+    <div id="capturas-contenido" style="display:grid;gap:28px;min-width:0"></div>
   </section>
 
   <section class="vista" id="v-finanzas" data-vista="finanzas" aria-labelledby="h-finanzas" hidden>
@@ -553,6 +567,7 @@ import {
   verificarCuadre, mapaCalor, mapaCalorHtml, tablaCalor, graficaDias, activarLinea, activarGlobos, barrasHorizontales, apilada, tabla,
   flechaCambio, TRAMOS_ANTIGUEDAD, pasoOrdinal,
 } from '/graficas.js';
+import { montarCapturas } from '/reportes-capturas.js';
 
 const $ = (id) => document.getElementById(id);
 // Hora de la tienda (la del navegador), no UTC como se guarda.
@@ -571,8 +586,8 @@ const decimal = (n) => n.toLocaleString('es-MX', { minimumFractionDigits: 1, max
 const DIA = /^\d{4}-\d{2}-\d{2}$/;
 const MAX_DIAS = 366;   // el mismo tope del servidor
 const PERIODOS = [['hoy', 'Hoy'], ['7', '7 días'], ['28', '28 días'], ['mes', 'Este mes'], ['mes-pasado', 'Mes pasado'], ['apertura', 'Desde la apertura'], ['custom', 'Personalizado']];
-const VISTAS = ['resumen', 'ventas', 'inventario', 'finanzas', 'equipo', 'control', 'tickets'];
-const NOMBRES_VISTA = { resumen: 'Resumen', ventas: 'Ventas', inventario: 'Inventario', finanzas: 'Finanzas', equipo: 'Equipo', control: 'Control', tickets: 'Tickets' };
+const VISTAS = ['resumen', 'ventas', 'inventario', 'capturas', 'finanzas', 'equipo', 'control', 'tickets'];
+const NOMBRES_VISTA = { resumen: 'Resumen', ventas: 'Ventas', inventario: 'Inventario', capturas: 'Capturas', finanzas: 'Finanzas', equipo: 'Equipo', control: 'Control', tickets: 'Tickets' };
 // El dia de la tienda (UTC-6), como lo calcula el servidor: «hoy» y «este mes» no dependen de la zona del navegador.
 const hoyTienda = () => new Date(Date.now() - 6 * 3_600_000).toISOString().slice(0, 10);
 
@@ -637,6 +652,7 @@ function guardarUrl() {
   const q = new URLSearchParams();
   if (periodo.clave === 'custom') { q.set('desde', periodo.desde); q.set('hasta', periodo.hasta); } else q.set('periodo', periodo.clave);
   if (tiendaActual) q.set('tienda', tiendaActual);
+  if (pausa !== 10) q.set('pausa', pausa);
   try { history.replaceState(null, '', `${location.pathname}?${q}${location.hash}`); } catch { /* sin historial: el enlace no se actualiza */ }
 }
 function leerUrl() {
@@ -645,6 +661,8 @@ function leerUrl() {
   if (DIA.test(desde) && DIA.test(hasta)) periodo = { clave: 'custom', desde, hasta };
   else if (PERIODOS.some(([clave]) => clave === q.get('periodo') && clave !== 'custom')) periodo = { clave: q.get('periodo'), desde: '', hasta: '' };
   tiendaActual = q.get('tienda') ?? '';
+  if ([5, 10, 15, 20].includes(Number(q.get('pausa')))) pausa = Number(q.get('pausa'));
+  $('f-pausa').value = pausa;
 }
 
 // Cambia el periodo o la tienda: una sola peticion de /api/reportes; equipo, tickets y finanzas se piden al ver su vista.
@@ -723,6 +741,7 @@ function cargarVista() {
   if (vistaActual === 'equipo' && pendientes.delete('equipo')) cargarEquipo();
   if (vistaActual === 'tickets' && pendientes.delete('tickets')) cargarTickets();
   if (vistaActual === 'finanzas' && pendientes.delete('finanzas')) { cargarFondo(); cargarTerminal(); }
+  if (vistaActual === 'capturas') cargarCapturas();
 }
 function pedirTickets() {   // el filtro de dia cambio: se vuelve a pedir ahora si se ve, o al verlos
   pendientes.add('tickets');
@@ -1090,6 +1109,35 @@ $('bono-semanas').addEventListener('click', async (ev) => {
   avisoBono(r.ok ? `Registrado: ${cuerpo.creados.length} nuevos, ${cuerpo.ya_estaban.length} ya estaban.` : (cuerpo.error ?? 'No se pudo registrar.'), r.ok);
   cargarEquipo();
 });
+
+/* ---------- capturas (Issue #802): una peticion al ver la vista, y otra solo si cambia el periodo o la pausa ---------- */
+
+let pausa = 10;              // minutos que cuentan como descanso entre dos capturas de una persona
+let capturasClave = '';      // lo ultimo que se pidio
+let turnoCapturas = 0;
+async function cargarCapturas() {
+  $('capturas-tienda').hidden = !tiendaActual;   // las capturas son de la tienda central: no se filtran por tienda, y se dice
+  const q = consultaPeriodo();
+  q.set('pausa', pausa);
+  if (q.toString() === capturasClave) return;
+  capturasClave = q.toString();
+  const turno = ++turnoCapturas, caja = $('capturas-contenido');
+  caja.style.opacity = '.55';
+  try {
+    const respuesta = await fetch(`/api/reportes/capturas?${q}`);
+    const datos = await respuesta.json().catch(() => ({}));
+    if (turno !== turnoCapturas) return;   // llego tarde: ya se pidio otra
+    if (!respuesta.ok) throw new Error(datos.error);
+    montarCapturas(caja, datos);
+  } catch (e) {
+    if (turno !== turnoCapturas) return;
+    capturasClave = '';   // para que volver a la vista lo intente otra vez
+    caja.innerHTML = `<div class="vacio">${escapar(e.message || 'No se pudieron cargar las capturas.')}</div>`;
+  } finally {
+    if (turno === turnoCapturas) caja.style.opacity = '';
+  }
+}
+$('f-pausa').addEventListener('change', () => { pausa = Number($('f-pausa').value); guardarUrl(); cargarCapturas(); });
 
 // Una sola peticion por cambio de periodo o tienda: todas las vistas se pintan con lo mismo; cambiar de vista no pide nada.
 async function cargar(reintento = false) {
