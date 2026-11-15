@@ -3,7 +3,7 @@
 // Como en graficas.js: marcas delgadas, una tabla equivalente para cada grafica y el color nunca lleva solo el significado.
 import {
   escapar, cambio, flechaCambio, diaCorto, diaLargo, diaSemana, mapaCalor, mapaCalorHtml, tablaCalor, FORMATO_CALOR_DINERO,
-  graficaColumnas, graficaLinea, barrasHorizontales, tabla, minigrafica, leyendaSeries, columnas,
+  barrasHorizontales, tabla, minigrafica, leyendaSeries, columnas, lineaSerie, promedioMovil as promedioMovilBase,
 } from './graficas.js';
 import { cambioKpi } from './reportes-resumen.js';
 
@@ -36,10 +36,8 @@ export function edad(desdeIso, ahoraIso) {
   return min < 60 ? `${Math.max(1, Math.round(min))} min` : min < 2880 ? `${Math.round(min / 60)} h` : `${Math.round(min / 1440)} días`;
 }
 
-/** Promedio de los últimos `n` valores; null mientras no haya `n` (sin rampa falsa al arrancar). */
-export function promedioMovil(valores, n = 7) {
-  return valores.map((_, i) => (i < n - 1 ? null : Math.round((valores.slice(i - n + 1, i + 1).reduce((s, v) => s + v, 0) / n) * 10) / 10));
-}
+/** Promedio de los últimos `n` valores con un decimal; null mientras no haya `n` (sin rampa falsa al arrancar). El mismo cálculo de Resumen (graficas.js). */
+export const promedioMovil = (valores, n = 7) => promedioMovilBase(valores, n, 1);
 
 const COLORES = ['var(--serie-1)', 'var(--serie-2)', 'var(--serie-3)', 'var(--serie-4)'];
 export const COLOR_SIN_ATRIBUIR = 'var(--apagado)';
@@ -59,7 +57,7 @@ export function agruparPersonas(personas) {
   return salida;
 }
 
-/** La serie del servidor lista para `graficaColumnas`: una columna por día (hasta 35 días) o por semana, y el promedio de 7 días solo por día. */
+/** La serie del servidor lista para `columnas` (`graficaDe` la traduce): una columna por día (hasta 35 días) o por semana, y el promedio de 7 días solo por día. */
 export function datosSerie(r) {
   const grupos = agruparPersonas(r.personas);
   const dia = r.grano === 'dia';
@@ -255,10 +253,20 @@ export function htmlVista(r) {
     </div>`;
 }
 
+const num1 = (n) => Number(n).toLocaleString('es-MX', { maximumFractionDigits: 1 });
+
 /** Gráficas SVG del ancho que hay. */
 export function graficaDe(clave, r, ancho) {
-  if (clave === 'serie') return graficaColumnas(datosSerie(r), { ancho, descripcion: `Capturas ${r.grano === 'dia' ? 'por día' : 'por semana'}, por persona` });
-  if (clave === 'tiempo') return graficaLinea(datosTiempo(r), { ancho, formato: (s) => duracion(s), descripcion: 'Mediana semanal del tiempo por captura' });
+  if (clave === 'serie') {
+    const d = datosSerie(r);
+    return columnas({ categorias: d.etiquetas.map((etiqueta, i) => ({ etiqueta, titulo: d.titulos[i] })), series: d.series, linea: d.linea ?? null, unidad: d.unidad, modo: 'apiladas',
+      ancho, entero: true, fmtEje: num1, fmtValor: num1, descripcion: `Capturas ${r.grano === 'dia' ? 'por día' : 'por semana'}, por persona` });
+  }
+  if (clave === 'tiempo') {
+    const puntos = datosTiempo(r);
+    return lineaSerie({ categorias: puntos, valores: puntos.map((p) => p.valor), nombre: 'Mediana', ancho, area: false, entero: true, fmtEje: duracion, fmtValor: duracion,
+      descripcion: 'Mediana semanal del tiempo por captura' });
+  }
   const h = datosHistograma(r);   // el histograma usa las columnas de Dolarones: una serie, marcas enteras
   return columnas({ categorias: h.etiquetas.map((e) => ({ etiqueta: e, titulo: e })), series: h.series, ancho, entero: true, fmtValor: n0 });
 }

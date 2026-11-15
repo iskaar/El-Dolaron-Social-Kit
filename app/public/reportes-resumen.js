@@ -2,7 +2,7 @@
 // Funciones puras (sin DOM): las usan el servidor (src/reportes-resumen.ts) y la pagina, y se prueban en
 // src/reportes-resumen.test.ts. Todo el dinero va en centavos enteros; los dias son dias de la tienda (UTC-6).
 import {
-  escapar, pesos, pesosConSigno, cambio, flechaCambio, sumarDias, diaCorto, diaLargo, diaSemana, minigrafica, escala, pesosEje,
+  escapar, pesos, pesosConSigno, cambio, flechaCambio, sumarDias, diaCorto, diaLargo, diaSemana, minigrafica, escalaNumero, pesosEje, promedioMovil,
   barrasHorizontales, apilada, tabla, textoPeriodo,
 } from './graficas.js';
 
@@ -122,10 +122,7 @@ export function armarCubetas({ desde, hasta, grano, ventana, porDia, sinGastos =
   return { cubetas: lista, totales, anterior };
 }
 
-/** Promedio movil de `n` valores: null hasta que hay `n` (no se promedia con menos, seria otra cosa). */
-export function promedioMovil(valores, n = 7) {
-  return valores.map((_, i) => (i < n - 1 ? null : Math.round(valores.slice(i - n + 1, i + 1).reduce((s, v) => s + v, 0) / n)));
-}
+export { promedioMovil };   // el de graficas.js: lo usan Resumen (centavos enteros) y Capturas (un decimal)
 
 /* ---------- meta del mes ---------- */
 
@@ -434,7 +431,7 @@ export function graficaMeta(d, { ancho, alto = 190 }) {
   const ml = 58, mr = 12, mt = 12, mb = 24;
   const pw = Math.max(40, ancho - ml - mr), ph = alto - mt - mb;
   const maximo = Math.max(m.monto, m.proyeccion, m.acumulado);
-  const { tope, marcas } = escala(maximo, 3);
+  const { tope, marcas } = escalaNumero(maximo, { objetivo: 3, dinero: true });
   const x = (dia) => ml + ((dia - 1) / Math.max(1, m.dias_mes - 1)) * pw;
   const y = (v) => mt + ph - (v / tope) * ph;
   const rejilla = marcas.map((v) => `<line class="${v === 0 ? 'eje' : 'rejilla'}" x1="${ml}" x2="${ancho - mr}" y1="${y(v)}" y2="${y(v)}"/><text class="marca" x="${ml - 8}" y="${y(v) + 4}" text-anchor="end">${pesosEje(v)}</text>`).join('');

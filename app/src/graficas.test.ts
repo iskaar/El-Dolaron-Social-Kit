@@ -3,7 +3,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  pesos, dolarones, pesosEje, pesosConSigno, escala, cambio, rellenarDias, textoPeriodo, verificarCuadre,
+  pesos, dolarones, pesosEje, pesosConSigno, cambio, rellenarDias, textoPeriodo, verificarCuadre,
   PASOS_CALOR, pasoCalor, pasosDeLaEscala, horasConVentas, textoHora, rangoHora, mapaCalor, mapaCalorHtml, tablaCalor,
   TRAMOS_ANTIGUEDAD, tramoDeDias, pasoOrdinal, flechaCambio, barrasHorizontales, apilada, minigrafica, graficaTiempo, escalaNumero, columnas, lineaSerie, leyendaSeries,
 } from '../public/graficas.js';
@@ -24,15 +24,15 @@ test('pesos siempre lleva centavos, sin pasar por decimales', () => {
   assert.equal(pesosEje(250000), '$2,500');
 });
 
-test('escala da marcas redondas que cubren el maximo', () => {
-  assert.deepEqual(escala(0).marcas, [0, 25, 50, 75, 100]);   // sin ventas: de $0 a $1
-  const e = escala(123_456);                 // $1,234.56
+test('escalaNumero con `dinero` da marcas redondas en pesos que cubren el maximo', () => {
+  assert.deepEqual(escalaNumero(0, { dinero: true }).marcas, [0, 25, 50, 75, 100]);   // sin ventas: de $0 a $1
+  const e = escalaNumero(123_456, { dinero: true });                 // $1,234.56
   assert.ok(e.tope >= 123_456);
   assert.equal(e.marcas[0], 0);
   const pasos = e.marcas.slice(1).map((m, i) => m - e.marcas[i]);
   assert.ok(pasos.every((p) => p === pasos[0]), 'pasos iguales');
   assert.ok([1, 2, 2.5, 5].includes(pasos[0] / 100 / 10 ** Math.floor(Math.log10(pasos[0] / 100))), 'paso redondo');
-  assert.equal(escala(100_000).tope, 100_000);   // $1,000 exacto: no se pasa de largo
+  assert.equal(escalaNumero(100_000, { dinero: true }).tope, 100_000);   // $1,000 exacto: no se pasa de largo
 });
 
 test('cambio contra el periodo anterior', () => {
@@ -183,13 +183,13 @@ test('apilada: la columna extra (piezas) entra en todas las filas de la leyenda'
 });
 
 /* ---------- series sin dinero: columnas apiladas, histograma y linea (#802, vista Capturas) ---------- */
-import { graficaColumnas, graficaLinea, FORMATO_CALOR_DINERO } from '../public/graficas.js';
+import { FORMATO_CALOR_DINERO, promedioMovil } from '../public/graficas.js';
 
-test('graficaColumnas apila en orden, pone el total en el globo y deja una columna enfocable por dia', () => {
-  const d = { unidad: 'capturas', etiquetas: ['1', '2', '3'], titulos: ['Lunes 1', 'Martes 2', 'Miércoles 3'],
+test('columnas apiladas con `unidad` y `linea`: total en el globo, una columna enfocable por dia y la linea de referencia con su hueco', () => {
+  const d = { unidad: 'capturas', categorias: [{ etiqueta: '1', titulo: 'Lunes 1' }, { etiqueta: '2', titulo: 'Martes 2' }, { etiqueta: '3', titulo: 'Miércoles 3' }],
     series: [{ nombre: 'Ana', color: 'var(--serie-1)', valores: [4, 0, 2] }, { nombre: 'Beto', color: 'var(--serie-2)', valores: [1, 0, 3] }],
     linea: { nombre: 'Promedio', valores: [null, 2, 3] } };
-  const svg = graficaColumnas(d, { ancho: 600 });
+  const svg = columnas({ ...d, ancho: 600, modo: 'apiladas', entero: true });
   assert.equal((svg.match(/class="hit"/g) ?? []).length, 3);
   assert.equal((svg.match(/var\(--serie-1\)/g) ?? []).length, 2);   // ana pinta 2 de 3 dias: la de cero no deja barra
   assert.ok(svg.includes('Lunes 1'));
@@ -198,16 +198,24 @@ test('graficaColumnas apila en orden, pone el total en el globo y deja una colum
   assert.equal((svg.match(/<path /g) ?? []).length, 1);   // un solo trazo de referencia, sin el null del principio
   assert.ok(!svg.includes('NaN') && !svg.includes('undefined'));
   // Sin datos y con un solo punto no revienta.
-  assert.match(graficaColumnas({ etiquetas: ['a'], series: [{ nombre: 'x', color: 'red', valores: [0] }] }, { ancho: 300 }), /<svg/);
+  assert.match(columnas({ categorias: [{ etiqueta: 'a', titulo: 'a' }], series: [{ nombre: 'x', color: 'red', valores: [0] }], ancho: 300, modo: 'apiladas', entero: true }), /<svg/);
 });
 
-test('graficaLinea corta el trazo donde no hay dato en lugar de bajarlo a cero', () => {
-  const puntos = [{ etiqueta: 'a', valor: 60 }, { etiqueta: 'b', valor: null }, { etiqueta: 'c', valor: 90 }, { etiqueta: 'd', valor: 80 }];
-  const svg = graficaLinea(puntos, { ancho: 600 });
+test('lineaSerie corta el trazo donde no hay dato en lugar de bajarlo a cero', () => {
+  const categorias = ['a', 'b', 'c', 'd'].map((etiqueta) => ({ etiqueta }));
+  const svg = lineaSerie({ categorias, valores: [60, null, 90, 80], nombre: 'Mediana', ancho: 600, area: false, entero: true });
   assert.equal((svg.match(/class="trazo"/g) ?? []).length, 1);   // a queda solo (sin trazo) y c-d forman el unico tramo
   assert.equal((svg.match(/<circle/g) ?? []).length, 3);
   assert.ok(svg.includes('Sin datos'));
   assert.ok(!svg.includes('NaN'));
+  assert.doesNotMatch(svg, /class="area"/);   // sin `area`, solo la linea
+  assert.equal((lineaSerie({ categorias, valores: [60, null, 90, 80], nombre: 'M', ancho: 600 }).match(/class="area"/g) ?? []).length, 1);   // un area por tramo largo
+});
+
+test('promedioMovil: nada hasta tener `n` valores; enteros por omision y un decimal si se pide', () => {
+  assert.deepEqual(promedioMovil([7, 7, 7, 7, 7, 7, 14, 21], 7), [null, null, null, null, null, null, 8, 10]);
+  assert.deepEqual(promedioMovil([1, 2, 3], 7), [null, null, null]);
+  assert.deepEqual(promedioMovil([1, 1, 2], 3, 1), [null, null, 1.3]);
 });
 
 test('el mapa de calor admite conteos sin cambiar el de dinero', () => {
