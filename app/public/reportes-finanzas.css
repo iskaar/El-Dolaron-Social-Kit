@@ -1,0 +1,32 @@
+/* Vista «Finanzas» de /reportes (#802): la rejilla de Resumen para las tarjetas, el estado de resultados y las marcas de los cortes. */
+#finanzas-cuerpo { display: grid; gap: 16px; min-width: 0; transition: opacity .15s; }
+#finanzas-cuerpo.pidiendo { opacity: .55; }
+#finanzas-cuerpo .graf-f { min-width: 0; }
+#finanzas-cuerpo .pares { margin: 0 0 12px; }
+
+/* Tarjetas: la misma rejilla que #r-kpis de Resumen (4 por fila en escritorio, 2 en celular). */
+#f-kpis .tarjeta { flex: 1 1 22%; min-width: 190px; display: flex; flex-direction: column; gap: 3px; }
+@media (max-width: 860px) { #f-kpis .tarjeta { flex-basis: 42%; min-width: 0; } #f-kpis .tarjeta .valor { font-size: 19px; } }
+@media (prefers-reduced-motion: reduce) { #finanzas-cuerpo { transition: none; } }
+
+/* Estado de resultados: la tabla se desplaza dentro de su panel (nunca la pagina) y el concepto se queda a la vista. */
+.est-res { min-width: 100%; }
+.est-res th.num, .est-res td.num { padding-inline: 10px; }
+.est-res th:first-child, .est-res td:first-child { position: sticky; left: 0; z-index: 1; background: var(--superficie); min-width: 150px; }
+.est-res tr.total td { font-weight: 700; border-top: 1px solid var(--eje); }
+.est-res tr.sangria td:first-child { padding-left: 24px; }
+.est-res tr.sangria td:not(:first-child) { color: var(--tinta-2); }
+.est-res tr.grupo td { font-size: 11px; letter-spacing: .07em; text-transform: uppercase; color: var(--tinta-2); font-weight: 600; padding-top: 14px; border-bottom: 0; }
+.est-res tr.aparte td { color: var(--tinta-2); }
+.est-res tr.grupo.aparte td { border-top: 1px dashed var(--eje); }
+.est-res tr.porcentaje td { color: var(--tinta-2); }
+.est-res td.acumulado { font-weight: 700; border-left: 1px solid var(--rejilla); }
+.est-res .neg { color: var(--mal); }
+
+/* Diferencias de corte: la forma (▲ sobrante, ▼ faltante, ● exacto) y las palabras llevan el significado; el color solo ayuda. */
+.svg-grafica .tallo { stroke-width: 2; }
+.svg-grafica .c-sobra { fill: var(--aviso); stroke: var(--aviso); }
+.svg-grafica .c-falta { fill: var(--mal); stroke: var(--mal); }
+.svg-grafica .c-exacto { fill: var(--bien); stroke: none; }
+.svg-grafica path.c-sobra, .svg-grafica path.c-falta { stroke-width: 1; stroke-linejoin: round; }
+.svg-grafica .suma-corte { fill: none; stroke: var(--serie-1); stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
