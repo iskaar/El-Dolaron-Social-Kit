@@ -7,6 +7,7 @@
 <link rel="stylesheet" href="/reportes-dolarones.css">
 <link rel="stylesheet" href="/reportes-capturas.css">
 <link rel="stylesheet" href="/reportes-ventas.css">
+<link rel="stylesheet" href="/reportes-finanzas.css">
 <style>
   /* Archivo: la misma del tablero, servida por la app (licencia OFL), sin Google Fonts. */
   @font-face { font-family: Archivo; src: url("/fuentes/archivo-variable.woff2") format("woff2"); font-weight: 100 900; font-display: swap; }
@@ -556,6 +557,7 @@
 
   <section class="vista" id="v-finanzas" data-vista="finanzas" aria-labelledby="h-finanzas" hidden>
     <h2 id="h-finanzas" tabindex="-1">Finanzas</h2>
+    <p class="bajada">Qué entró, qué salió por concepto y qué queda, mes por mes. Las ventas y los gastos suman lo mismo que Resumen; el cuadre es la prueba de que todo suma al centavo.</p>
     <section aria-labelledby="t-cuadre">
       <h3 class="titulo-bloque" id="t-cuadre">Cuadre al centavo</h3>
     <article class="panel">
@@ -565,6 +567,36 @@
         en centavos: es algo que revisar (un descuento, una devolución mal registrada), no un redondeo que se esconda.</p>
     </article>
     </section>
+    <div id="finanzas-cuerpo">
+      <p class="vacio" id="f-estado" role="status">Cargando las finanzas…</p>
+      <p class="nota" id="f-tienda-aviso" hidden>Con una tienda elegida, las ventas, las diferencias de corte y lo cobrado por forma de pago son de esa tienda. Los gastos, la nómina,
+        los retiros sin clasificar y los pagos a inversionistas son de todo el negocio y no se calculan por tienda: elige «Todas las tiendas» para ver el resultado.</p>
+      <div class="tarjetas" id="f-kpis"></div>
+      <article class="panel" id="p-f-estado">
+        <header><h4>Estado de resultados <span class="subtitulo">por mes calendario, hora de la tienda</span></h4></header>
+        <div id="f-estado-tabla"></div>
+        <p class="nota" id="f-estado-nota"></p>
+      </article>
+      <article class="panel" id="p-f-gastos">
+        <header><h4>Gastos en el tiempo <span class="subtitulo" id="f-gastos-sub"></span></h4><button type="button" class="alterna">Ver tabla</button></header>
+        <div class="vista-grafica"><div class="graf-f" data-grafica="gastos"></div><p class="nota" id="f-gastos-nota"></p></div>
+        <div class="vista-tabla" id="f-tabla-gastos"></div>
+      </article>
+      <div class="malla iguales">
+        <article class="panel" id="p-f-cortes">
+          <header><h4>Diferencias de corte <span class="subtitulo">contado − esperado</span></h4><button type="button" class="alterna">Ver tabla</button></header>
+          <div class="vista-grafica"><div id="f-cortes-resumen"></div><div class="graf-f" data-grafica="cortes"></div>
+            <p class="nota">Una marca por corte de caja del periodo. Sobrante: se contó más de lo esperado; faltante: menos. La línea es la suma de las diferencias hasta ese corte.</p></div>
+          <div class="vista-tabla" id="f-tabla-cortes"></div>
+        </article>
+        <article class="panel" id="p-f-pago">
+          <header><h4>Cobrado por forma de pago <span class="subtitulo" id="f-pago-sub"></span></h4><button type="button" class="alterna">Ver tabla</button></header>
+          <div class="vista-grafica"><div class="graf-f" data-grafica="pago"></div>
+            <p class="nota">Lo cobrado en dinero; el anticipo de un apartado entra el día en que se apartó. Los Dolarones no son dinero cobrado: están en Ventas.</p></div>
+          <div class="vista-tabla" id="f-tabla-pago"></div>
+        </article>
+      </div>
+    </div>
     <section aria-labelledby="t-caja">
       <h3 class="titulo-bloque" id="t-caja">Caja y efectivo</h3>
       <div class="malla">
@@ -589,6 +621,13 @@
       <article class="panel">
         <header><h4>Terminal de tarjeta</h4></header>
         <div class="tarjetas" id="terminal-resumen" style="margin-bottom: 14px"></div>
+        <div id="terminal-comision" style="margin-bottom: 14px"></div>
+        <div class="fondo-caja">
+          <label for="comision-terminal">Comisión de la terminal: % de lo cobrado con tarjeta (opcional, de 0 a 20 con dos decimales; 0 la apaga)</label>
+          <input id="comision-terminal" type="text" inputmode="decimal" maxlength="5" autocomplete="off">
+          <button id="guardar-comision" type="button">Guardar</button>
+          <span id="aviso-comision" role="status"></span>
+        </div>
         <div class="fondo-caja">
           <label for="terminal-importe">Pago de la terminal que recibiste tú, fuera del cajón ($)</label>
           <input id="terminal-importe" type="number" min="1" step="0.5" inputmode="decimal">
@@ -708,6 +747,7 @@ import {
 } from '/reportes-resumen.js';
 import { montarCapturas } from '/reportes-capturas.js';
 import * as Ventas from '/reportes-ventas.js';
+import * as Finanzas from '/reportes-finanzas.js';
 
 const $ = (id) => document.getElementById(id);
 // Hora de la tienda (la del navegador), no UTC como se guarda.
@@ -727,7 +767,7 @@ const DIA = /^\d{4}-\d{2}-\d{2}$/;
 const MAX_DIAS = 366;   // el mismo tope del servidor
 const PERIODOS = [['hoy', 'Hoy'], ['7', '7 días'], ['28', '28 días'], ['mes', 'Este mes'], ['mes-pasado', 'Mes pasado'], ['apertura', 'Desde la apertura'], ['custom', 'Personalizado']];
 const VISTAS = ['resumen', 'ventas', 'dolarones', 'inventario', 'capturas', 'finanzas', 'equipo', 'control', 'tickets'];
-const VISTAS_CON_COMPARACION = ['resumen', 'ventas'];
+const VISTAS_CON_COMPARACION = ['resumen', 'ventas', 'finanzas'];
 const NOMBRES_VISTA = { resumen: 'Resumen', ventas: 'Ventas', dolarones: 'Dolarones', inventario: 'Inventario', capturas: 'Capturas', finanzas: 'Finanzas', equipo: 'Equipo', control: 'Control', tickets: 'Tickets' };
 // El dia de la tienda (UTC-6), como lo calcula el servidor: «hoy» y «este mes» no dependen de la zona del navegador.
 const hoyTienda = () => new Date(Date.now() - 6 * 3_600_000).toISOString().slice(0, 10);
@@ -741,8 +781,8 @@ let textoAntes = '';       // «19 oct – 15 nov»: el periodo contra el que se
 let vistaActual = '';
 let turnoCarga = 0;
 // Lo que depende del periodo pero no viaja en /api/reportes se pide la primera vez que se ve su vista, no en cada cambio.
-const pendientes = new Set(['resumen', 'ventas', 'equipo', 'tickets', 'finanzas', 'dolarones']);
-// Resumen y Ventas (#802): «Comparar con» y el grano. Viven en la URL junto al periodo y la tienda; solo estas dos vistas reaccionan.
+const pendientes = new Set(['resumen', 'ventas', 'equipo', 'tickets', 'finanzas', 'finanzas-datos', 'dolarones']);
+// Resumen, Ventas y Finanzas (#802): «Comparar con» y el grano. Viven en la URL junto al periodo y la tienda; solo estas tres vistas reaccionan.
 let comparar = 'anterior';   // 'anterior' (la de siempre), 'mes' (mismo periodo del mes pasado) o 'ninguna'
 let granoPedido = '';        // '' = automatico (por dia hasta 35 dias, despues por semana)
 let datosResumen = null;     // la ultima respuesta de /api/reportes/resumen
@@ -818,7 +858,7 @@ function leerUrl() {
 // Cambia el periodo o la tienda: una sola peticion de /api/reportes; equipo, tickets y finanzas se piden al ver su vista.
 function recargar() {
   diaElegido = null;
-  for (const v of ['resumen', 'ventas', 'equipo', 'tickets', 'dolarones']) pendientes.add(v);
+  for (const v of ['resumen', 'ventas', 'equipo', 'tickets', 'dolarones', 'finanzas-datos']) pendientes.add(v);
   guardarUrl();
   pintarRango();
   cargar();
@@ -896,6 +936,7 @@ function cargarVista() {
   if (vistaActual === 'equipo' && pendientes.delete('equipo')) cargarEquipo();
   if (vistaActual === 'tickets' && pendientes.delete('tickets')) cargarTickets();
   if (vistaActual === 'finanzas' && pendientes.delete('finanzas')) { cargarFondo(); cargarTerminal(); }
+  if (vistaActual === 'finanzas' && pendientes.delete('finanzas-datos')) cargarFinanzas();
   if (vistaActual === 'capturas') cargarCapturas();
 }
 function pedirTickets() {   // el filtro de dia cambio: se vuelve a pedir ahora si se ve, o al verlos
@@ -924,7 +965,8 @@ function pintarResumen(r) {
 
 // Debajo de la barra: contra que se compara lo que se ve. En Resumen y Ventas manda «Comparar con»; en las demas vistas, el periodo anterior.
 function textoAnterior() {
-  $('p-anterior').textContent = VISTAS_CON_COMPARACION.includes(vistaActual) && datosResumen ? textoComparacion(datosResumen) : textoAnteriorBase;
+  const datos = vistaActual === 'finanzas' ? datosFinanzas : datosResumen;   // cada vista con comparacion trae la suya (mismo periodo y mismas ventanas)
+  $('p-anterior').textContent = VISTAS_CON_COMPARACION.includes(vistaActual) && datos ? textoComparacion(datos) : textoAnteriorBase;
 }
 
 function consultaResumen() {
@@ -1030,10 +1072,10 @@ function pintarResumenEjecutivo() {
   $('tabla-categorias').innerHTML = tablaCategorias(d, nombreCat);
 }
 
-// Comparar con y grano cambian lo de Resumen y lo de Ventas: se vuelve a pedir lo de la vista que se ve, y la otra al visitarla.
+// Comparar con y grano cambian lo de Resumen, Ventas y Finanzas: se vuelve a pedir lo de la vista que se ve, y las otras al visitarlas.
 function aplicarControles() {
   guardarUrl();
-  pendientes.add('resumen'); pendientes.add('ventas');
+  pendientes.add('resumen'); pendientes.add('ventas'); pendientes.add('finanzas-datos');
   cargarVista();
 }
 $('f-comparar').addEventListener('change', () => {
@@ -1373,6 +1415,57 @@ async function cargarVentas() {
 }
 new ResizeObserver(() => dibujarVentas()).observe($('ventas-cuerpo'));
 
+/* ---------- Finanzas (#802): una peticion a /api/reportes/finanzas al ver la vista, una vez por periodo, tienda, comparacion y grano ---------- */
+let datosFinanzas = null;
+let turnoFinanzas = 0;
+function dibujarFinanzas() {
+  const d = datosFinanzas;
+  if (!d) return;
+  const huecos = [...$('finanzas-cuerpo').querySelectorAll('.graf-f')].filter((h) => h.clientWidth);   // las ocultas se dibujan al verse
+  if (!huecos.length) return;
+  const ancho = Object.fromEntries(huecos.map((h) => [h.dataset.grafica, h.clientWidth]));
+  const g = Finanzas.graficas(d, (id) => ancho[id] || 640);
+  for (const h of huecos) h.innerHTML = g[h.dataset.grafica] ?? '';
+}
+function pintarFinanzas() {
+  const d = datosFinanzas;
+  if (!d) return;
+  $('f-estado').hidden = true;
+  textoAnterior();
+  pintarGrano(d);
+  $('f-tienda-aviso').hidden = !d.tienda;
+  $('f-kpis').innerHTML = tarjetasHtml(Finanzas.tarjetasFinanzas(d));
+  $('f-estado-tabla').innerHTML = Finanzas.estadoHtml(d);
+  $('f-estado-nota').textContent = Finanzas.notaEstado(d);
+  $('f-gastos-sub').textContent = GRANO_TEXTO[d.grano];
+  $('f-pago-sub').textContent = GRANO_TEXTO[d.grano];
+  $('f-gastos-nota').textContent = Finanzas.notaGastos(d);
+  $('f-tabla-gastos').innerHTML = d.totales.gastos == null ? '<div class="vacio">Los gastos son del negocio completo: elige «Todas las tiendas».</div>' : Finanzas.tablaGastos(d);
+  $('f-tabla-pago').innerHTML = Finanzas.tablaPago(d);
+  $('f-cortes-resumen').innerHTML = Finanzas.resumenCortesHtml(d);
+  $('f-tabla-cortes').innerHTML = d.efectivo.cortes.length ? Finanzas.tablaCortes(d) : '<div class="vacio">Sin cortes en este periodo.</div>';
+  $('terminal-comision').innerHTML = Finanzas.comisionHtml(d);
+  dibujarFinanzas();
+}
+async function cargarFinanzas() {
+  const turno = ++turnoFinanzas;
+  $('finanzas-cuerpo').classList.add('pidiendo');   // se queda el cuadro anterior, atenuado: sin saltos
+  const falla = (texto) => { $('f-estado').textContent = texto; $('f-estado').hidden = false; pendientes.add('finanzas-datos'); };
+  try {
+    const respuesta = await fetch(`/api/reportes/finanzas?${consultaResumen()}`);
+    const d = await respuesta.json().catch(() => ({}));
+    if (turno !== turnoFinanzas) return;   // llego tarde: ya se pidio otra cosa
+    if (!respuesta.ok) { falla(d.error ?? 'No se pudieron cargar las finanzas.'); return; }
+    datosFinanzas = d;
+    pintarFinanzas();
+  } catch {
+    if (turno === turnoFinanzas) falla('No se pudieron cargar las finanzas. Revisa la conexión.');
+  } finally {
+    if (turno === turnoFinanzas) $('finanzas-cuerpo').classList.remove('pidiendo');
+  }
+}
+new ResizeObserver(() => dibujarFinanzas()).observe($('finanzas-cuerpo'));
+
 /* ---------- Dolarones (#802): una peticion al ver la vista, una vez por periodo y tienda ---------- */
 let datosDolarones = null;
 let turnoDolarones = 0;
@@ -1549,6 +1642,8 @@ async function cargarFondo() {
     const config = await (await fetch('/api/config')).json();
     $('fondo-caja').value = Math.round(Number(config.fondo_caja ?? 50000) / 100);
     $('cupon-porcentaje').value = config.cupon_porcentaje ?? 100;
+    const bp = Finanzas.bpDeConfig(config[Finanzas.CLAVE_COMISION]);
+    $('comision-terminal').value = bp ? (bp / 100).toFixed(2) : '';
   } catch { /* sin red: se ve al recargar */ }
 }
 $('guardar-fondo').addEventListener('click', async () => {
@@ -1566,6 +1661,29 @@ $('guardar-fondo').addEventListener('click', async () => {
   const cuerpo = await r.json().catch(() => ({}));
   aviso.textContent = r.ok ? 'Guardado. Aplica desde el siguiente corte de cada caja.' : (cuerpo.error ?? 'No se pudo guardar.');
   aviso.style.color = r.ok ? 'var(--bien)' : 'var(--mal)';
+});
+
+// Comision de la terminal (#802): opcional; se guarda en puntos base enteros (350 = 3.50 %) en la misma `config` que el fondo y el cupon, y solo la guarda el dueno.
+// La estimacion de la pantalla (ventas con tarjeta × porcentaje) no se suma a los gastos.
+$('guardar-comision').addEventListener('click', async () => {
+  const aviso = $('aviso-comision');
+  const valido = Finanzas.validarComisionPct($('comision-terminal').value);
+  if (valido.error) {
+    aviso.textContent = valido.error;
+    aviso.style.color = 'var(--mal)';
+    return;
+  }
+  const r = await fetch('/api/config', {
+    method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ [Finanzas.CLAVE_COMISION]: valido.bp }),
+  });
+  const cuerpo = await r.json().catch(() => ({}));
+  aviso.textContent = r.ok ? (valido.bp > 0 ? 'Guardado.' : 'Guardado: la comisión estimada queda apagada.') : (cuerpo.error ?? 'No se pudo guardar.');
+  aviso.style.color = r.ok ? 'var(--bien)' : 'var(--mal)';
+  if (r.ok && datosFinanzas) {
+    const bp = Finanzas.bpDeConfig(valido.bp);
+    datosFinanzas.terminal = { ...datosFinanzas.terminal, comision_bp: bp, comision: Finanzas.comisionDe(datosFinanzas.terminal.tarjeta, bp) };
+    $('terminal-comision').innerHTML = Finanzas.comisionHtml(datosFinanzas);
+  }
 });
 
 // Issue #330: la caja lo lee de /api/vales/config (cada minuto) y lo aplica a la siguiente devolución en cupón.
@@ -1668,7 +1786,7 @@ document.addEventListener('click', (e) => {
   if (!boton) return;
   const enTabla = boton.closest('.panel').classList.toggle('en-tabla');
   boton.textContent = enTabla ? 'Ver gráfica' : 'Ver tabla';
-  if (!enTabla) { dibujarVentas(); dibujarDolarones(); }
+  if (!enTabla) { dibujarVentas(); dibujarDolarones(); dibujarFinanzas(); }
 });
 
 activarGlobos(document.body);
