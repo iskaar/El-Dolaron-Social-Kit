@@ -55,12 +55,20 @@ export async function iniciar(ctx) {
   }});
   let elegidas=[], parcial=false; const restantes=new Map();
   function contar(){elegidas=[...lista.querySelectorAll('input[type=checkbox]:checked')];const n=elegidas.reduce((n,c)=>n+Number(lista.querySelector(`.copias[data-id="${c.value}"]`)?.value||1),0);seleccion.textContent=`${elegidas.length} elegidas · ${n} etiquetas`;imprimir.textContent=parcial?`Reconectar y seguir (${n})`:`Imprimir ${n} etiquetas`;bloquear(imprimir,noImprime()?MENSAJE_NO_IMPRIME:!etiqueteraLista()&&!parcial?'Conecta la impresora':!n?'Elige piezas':'');}
+  const puedeSumar=dueno||ctx.identidad.usuario?.editar_inventario===true;   // quien puede sumar existencia (el servidor lo vuelve a exigir)
   let avisoAuto='';   // la automática estaba encendida y la recarga no pudo reanudarla sola (#784)
   const vista={
   inicio(ids,pedidas){estadoParcial=null;enviadasLote=0;totalLote=[...pedidas.values()].reduce((n,v)=>n+v,0);},
   conexion(){actualizarConexion();contar();},
   controles({imprimiendo,automaticaActiva,avisoAutomatica}){if(avisoAutomatica&&avisoAutomatica!==avisoAuto)mensaje(avisoAutomatica,'aviso');avisoAuto=avisoAutomatica||'';conectar.textContent=avisoAuto?'Reconectar y reanudar la automática':'Conectar impresora';actualizarConexion();imprimir.disabled=false;detener.hidden=!(imprimiendo||automaticaActiva||parcial);contar();if(imprimiendo||automaticaActiva)bloquear(imprimir,imprimiendo?'Espera el envío':'Pausa la automática');},
   progreso(p,hechas,total){mensaje(`Enviando ${hechas}/${total}`);},
+  // #825: pedir más etiquetas que piezas contadas abre esta hoja (no un confirm nativo, que bloquea Bluetooth). La opción segura va primero y es la principal; cerrar la hoja cancela.
+  preguntarExistencia({texto,sumar,imprimir,pedida,contadas}){return new Promise(resolve=>{
+    const c=nodo('div',undefined,'formulario');
+    c.append(nodo('p',texto),boton(imprimir,()=>{totalLote-=pedida-contadas;resolve('contadas');cerrarHoja();},'primario'));
+    if(puedeSumar)c.append(boton(sumar,()=>{resolve('sumar');cerrarHoja();}));
+    hoja('¿Cuántas piezas hay?',c);$('hoja').addEventListener('close',()=>resolve(null),{once:true});
+  });},
   resultado(p,hechas,total,ok){enviadasLote+=hechas;if(ok){restantes.delete(p.id);parcial=false;}else if(hechas>0){restantes.set(p.id,total-hechas);parcial=true;detener.hidden=false;estadoParcial={hechas:enviadasLote,total:totalLote||total};mensaje(`Salieron ${hechas} de ${total}`,'aviso');}},
   pintar({ piezas, hechas, pendientes, visibles, filtroCodigo, desmarcadas, idDudoso, copiasDe }){
     mostrar.setAttribute('aria-checked',String(visibles.length>pendientes.length));lista.replaceChildren();

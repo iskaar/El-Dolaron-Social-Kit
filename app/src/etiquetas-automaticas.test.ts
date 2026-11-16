@@ -128,7 +128,7 @@ async function pagina(t: ReturnType<typeof tienda>, ambiente = 'sandbox', almace
     enviadas: [] as { id: string; copias: number }[], detenido: false, antesDePreparar: null as null | (() => Promise<void>),
     reclamos: [] as { ids: string[]; reimprimir?: boolean; preparar?: boolean }[], liberadas: [] as string[][], antesDeReclamar: null as null | (() => void | Promise<void>),
     sinRedParaReclamar: false, tiempoAgotado: false, liberadasEn: [] as (Record<string, string> | null)[], rutas: [] as string[],
-    reconectable: true, reconexiones: 0, perderRespuesta: false };
+    reconectable: true, reconexiones: 0, perderRespuesta: false, perderExistencia: false, cortaEn: 1 };
   Object.assign(estado, inicial);   // el estado de la impresora al ABRIR la página (#784)
   const pedir = pedirPor(t, host);
   const almacenWeb = { getItem: (k: string) => almacen.get(k) ?? null, setItem: (k: string, v: string) => almacen.set(k, v), removeItem: (k: string) => almacen.delete(k) };
@@ -148,6 +148,7 @@ async function pagina(t: ReturnType<typeof tienda>, ambiente = 'sandbox', almace
       if (ruta === '/api/salud') return { ok: true, json: async () => ({ estado: 'ok', ambiente, ahora: DESDE }) };
       const r = await pedir(ruta, opciones?.body ? JSON.parse(opciones.body) : undefined, opciones?.method);
       if (estado.perderRespuesta && ruta === '/api/etiquetas/deudas' && opciones?.method === 'POST') { estado.perderRespuesta = false; throw new Error('se cortó la red'); }   // la base la recibió, el aparato no lo supo
+      if (estado.perderExistencia && /\/existencia$/.test(ruta)) { estado.perderExistencia = false; throw new Error('se cortó la red'); }   // #825: la base aplicó la suma, el aparato no lo supo
       return { ok: r.status < 300, status: r.status, json: async () => r.cuerpo };
     },
     // «Este aparato no imprime» (#781): con el interruptor en el almacenamiento de esta pagina, lo decide la guarda REAL de etiquetera.js.
@@ -160,7 +161,7 @@ async function pagina(t: ReturnType<typeof tienda>, ambiente = 'sandbox', almace
       if (estado.exigirDudosa) assert.equal(almacen.get('etiqueta-automatica-dudosa'), p.id);
       estado.enviadas.push({ id: p.id, copias });
       // Como el real: falla (false) solo si salieron menos de las pedidas, y la primera etiqueta ya pudo haber salido.
-      if (estado.falloBle) { if (copias > 1) avanzar(1); return false; }
+      if (estado.falloBle) { if (copias > 1) avanzar(Math.min(estado.cortaEn, copias - 1)); return false; }
       avanzar(1);
       return true;
     },
@@ -1672,4 +1673,253 @@ test('#787: la corrección de cantidad en un aparato que no imprime manda las qu
     await pc.iniciarAutomatica();
     assert.deepEqual(pc.estado.enviadas, [{ id, copias: 3 }]);
   } finally { t.db.close(); }
+});
+
+/* ---------- #825: cada etiqueta es una unidad contada ---------- */
+
+const stockDe = (t: ReturnType<typeof tienda>, id: string) => t.db.prepare('select stock from productos where id=?').get(id)!.stock as number;
+const ajustesDe = (t: ReturnType<typeof tienda>, id: string) =>
+  t.db.prepare('select motivo, cantidad, antes, despues, ajustado_por from conteo_ajustes where producto_id=? order by rowid').all(id).map((a) => ({ ...a }));
+const enviadasDe = (t: ReturnType<typeof tienda>, id: string) => t.db.prepare('select count(*) n from etiquetas_enviadas where producto_id=?').get(id)!.n as number;
+/** Una página con la hoja de «¿Cuántas piezas hay?»: `respuestas` es lo que va tocando la persona; `antes` corre mientras la hoja está abierta. */
+async function conPregunta(t: ReturnType<typeof tienda>, respuestas: (string | null)[], host = 'caja.prueba', antes?: (caso: any) => void) {
+  const preguntas: any[] = [];
+  const vista = { pintar() {}, controles() {}, preguntarExistencia: async (caso: any) => { preguntas.push(caso); antes?.(caso); return respuestas.shift() ?? null; } };
+  const p = await pagina(t, host === CELULAR ? 'produccion' : 'sandbox', new Map(), host, vista);
+  p.estado.exigirDudosa = false;
+  return { p, preguntas };
+}
+
+test('#825: 3 etiquetas de una pieza con 1 contada desde la lista pregunta; «Hay 1» saca 1 y no toca la existencia', async () => {
+  const t = tienda();
+  try {
+    const id = agregar(t, DESPUES, 'listo', 1);
+    const { p, preguntas } = await conPregunta(t, ['contadas']);
+    assert.equal(await p.imprimir([id], new Map([[id, 3]]), false, { deLista: true }), true);
+    assert.equal(preguntas.length, 1);
+    assert.equal(preguntas[0].texto, 'Vas a imprimir 3 etiquetas y el sistema tiene 1 pieza de Camisa. ¿Cuántas piezas hay?');
+    assert.equal(preguntas[0].sumar, 'Hay 3: sumar 2 a la existencia e imprimir');
+    assert.equal(preguntas[0].imprimir, 'Hay 1: imprimir 1');
+    assert.deepEqual(p.estado.enviadas, [{ id, copias: 1 }]);
+    assert.equal(stockDe(t, id), 1);
+    assert.deepEqual(ajustesDe(t, id), []);
+  } finally { t.db.close(); }
+});
+
+test('#825: «Hay 3» suma 2 por el ajuste auditado (quién y cuándo), imprime 3 y no deja una deuda que las repita', async () => {
+  const t = tienda();
+  try {
+    const id = agregar(t, DESPUES, 'listo', 1);
+    const { p } = await conPregunta(t, ['sumar']);
+    assert.equal(await p.imprimir([id], new Map([[id, 3]]), false, { deLista: true }), true);
+    assert.deepEqual(p.estado.enviadas, [{ id, copias: 3 }]);
+    assert.equal(stockDe(t, id), 3);
+    assert.deepEqual(ajustesDe(t, id), [{ motivo: 'entrada', cantidad: 2, antes: 1, despues: 3, ajustado_por: DUENO }]);
+    assert.equal(t.db.prepare('select count(*) n from etiquetas_deuda').get()!.n, 0, 'la suma no deja deuda: las 3 salieron aquí, no se repiten en la PC');
+    assert.ok(p.marcas()[id], 'queda marcada como impresa');
+  } finally { t.db.close(); }
+});
+
+test('#825: cerrar la hoja o cancelar no imprime, no suma y suelta lo reclamado', async () => {
+  const t = tienda();
+  try {
+    const id = agregar(t, DESPUES, 'listo', 1), otra = agregar(t, DESPUES, 'listo', 1);
+    const { p } = await conPregunta(t, [null]);
+    assert.equal(await p.imprimir([otra, id], new Map([[id, 3]]), false, { deLista: true }), false);
+    assert.deepEqual(p.estado.enviadas, [], 'tampoco sale la otra pieza: la pregunta va antes de mandar nada');
+    assert.equal(stockDe(t, id), 1);
+    assert.deepEqual(ajustesDe(t, id), []);
+    assert.equal(enviadasDe(t, id) + enviadasDe(t, otra), 0, 'lo reclamado se soltó');
+    assert.match(p.$('resumen').textContent, /^No se imprimió: no se confirmó cuántas piezas hay\. La existencia no cambió\./);
+  } finally { t.db.close(); }
+});
+
+test('#825: si la existencia cambió mientras la hoja estaba abierta, «Hay N» no suma y no sale nada', async () => {
+  const t = tienda();
+  try {
+    const id = agregar(t, DESPUES, 'listo', 1);
+    const { p } = await conPregunta(t, ['sumar'], 'caja.prueba', () => { t.db.prepare('update productos set stock = 2 where id = ?').run(id); });   // una venta o ajuste ajeno
+    assert.equal(await p.imprimir([id], new Map([[id, 3]]), false, { deLista: true }), false);
+    assert.deepEqual(p.estado.enviadas, []);
+    assert.equal(stockDe(t, id), 2, 'solo cambió lo ajeno');
+    assert.deepEqual(ajustesDe(t, id), []);
+    assert.equal(enviadasDe(t, id), 0);
+    assert.match(p.$('resumen').textContent, /^No se imprimió: no se pudo sumar a la existencia \(La existencia cambió/);
+  } finally { t.db.close(); }
+});
+
+test('#825: una cuenta sin permiso de editar inventario no puede sumar: el servidor lo rechaza y no sale nada', async () => {
+  const t = tienda();
+  try {
+    t.db.prepare("insert into usuarios (correo, nombre, roles, activo, editar_inventario, creado_en, actualizado_en) values ('capt@prueba.mx', 'Capt', 'capturista', 1, 0, '', '')").run();
+    t.env.DEV_USUARIO = 'capt@prueba.mx';
+    const id = agregar(t, DESPUES, 'listo', 1);
+    const { p } = await conPregunta(t, ['sumar']);
+    assert.equal(await p.imprimir([id], new Map([[id, 2]]), false, { deLista: true }), false);
+    assert.deepEqual(p.estado.enviadas, []);
+    assert.equal(stockDe(t, id), 1);
+    assert.match(p.$('resumen').textContent, /no tiene permiso/);
+  } finally { t.db.close(); }
+});
+
+test('#825: Reimprimir / «Varias copias…» de la ficha (reimprimir) pasa por la misma pregunta; 1 copia de una pieza con existencia no pregunta', async () => {
+  const t = tienda();
+  try {
+    const id = agregar(t, DESPUES, 'listo', 2);
+    const { p, preguntas } = await conPregunta(t, ['contadas']);
+    assert.equal(await p.imprimir([id], new Map([[id, 1]]), false, { reimprimir: true }), true);
+    assert.equal(preguntas.length, 0, 'una etiqueta dañada de una pieza con existencia es un clic');
+    assert.equal(await p.imprimir([id], new Map([[id, 5]]), false, { reimprimir: true }), true);
+    assert.equal(preguntas.length, 1);
+    assert.deepEqual(p.estado.enviadas, [{ id, copias: 1 }, { id, copias: 2 }]);
+    assert.equal(stockDe(t, id), 2);
+  } finally { t.db.close(); }
+});
+
+test('#825: el celular (host de captura) se comporta igual que la PC: pregunta, suma con rastro y saca las 3', async () => {
+  const t = tienda();
+  try {
+    const id = agregar(t, DESPUES, 'listo', 1);
+    const { p, preguntas } = await conPregunta(t, ['sumar'], CELULAR);
+    assert.equal(await p.imprimir([id], new Map([[id, 3]]), false, { reimprimir: true }), true);
+    assert.equal(preguntas.length, 1);
+    assert.deepEqual(p.estado.enviadas, [{ id, copias: 3 }]);
+    assert.deepEqual(ajustesDe(t, id), [{ motivo: 'entrada', cantidad: 2, antes: 1, despues: 3, ajustado_por: DUENO }]);
+  } finally { t.db.close(); }
+});
+
+test('#825: sin preguntar cuando lo pedido cabe en lo contado (la columna de la lista empieza en la existencia)', async () => {
+  const t = tienda();
+  try {
+    const id = agregar(t, DESPUES, 'listo', 4);
+    const { p, preguntas } = await conPregunta(t, []);
+    assert.equal(await p.imprimir([id], new Map([[id, 4]]), false, { deLista: true }), true);
+    assert.equal(await p.imprimir([id], new Map(), false, { reimprimir: true }), true);   // sin cantidad: una por pieza en existencia
+    assert.equal(preguntas.length, 0);
+    assert.deepEqual(p.estado.enviadas, [{ id, copias: 4 }, { id, copias: 4 }]);
+  } finally { t.db.close(); }
+});
+
+test('#825: reintento tras una impresión parcial — lo que ya salió cuenta contra la existencia', async () => {
+  const t = tienda();
+  try {
+    const id = agregar(t, DESPUES, 'listo', 3);
+    const { p, preguntas } = await conPregunta(t, ['contadas']);
+    p.estado.falloBle = true;
+    assert.equal(await p.imprimir([id], new Map([[id, 3]]), false, { deLista: true }), false);   // salió 1 de 3
+    p.estado.falloBle = false;
+    // La pantalla de la PC vuelve a pedir 3 (su casilla empieza en la existencia): ya salió 1.
+    assert.equal(await p.imprimir([id], new Map([[id, 3]]), false, { deLista: true }), true);
+    assert.equal(preguntas.length, 1, 'no se vuelven a sacar las 3');
+    assert.match(preguntas[0].texto, /^Vas a imprimir 3 etiquetas \(ya salieron 1\) y el sistema tiene 3 piezas de Camisa\./);
+    assert.equal(preguntas[0].imprimir, 'Hay 3: imprimir 2');
+    assert.deepEqual(p.estado.enviadas, [{ id, copias: 3 }, { id, copias: 2 }], 'en total 1 + 2 = 3 etiquetas para 3 piezas');
+    assert.equal(stockDe(t, id), 3);
+  } finally { t.db.close(); }
+});
+
+test('#825: reintento parcial tras «Hay N»: continuar con lo que falta no vuelve a preguntar ni a sumar', async () => {
+  const t = tienda();
+  try {
+    const id = agregar(t, DESPUES, 'listo', 1);
+    const { p, preguntas } = await conPregunta(t, ['sumar']);
+    p.estado.falloBle = true;
+    assert.equal(await p.imprimir([id], new Map([[id, 3]]), false, { deLista: true }), false);   // «Hay 3»: suma 2, sale 1 de 3
+    assert.equal(stockDe(t, id), 3);
+    p.estado.falloBle = false;
+    assert.equal(await p.imprimir([id], new Map([[id, 2]]), false, { deLista: true }), true);   // «Reconectar y seguir (2)»: 1 + 2 = 3 piezas
+    assert.equal(preguntas.length, 1);
+    assert.deepEqual(p.estado.enviadas, [{ id, copias: 3 }, { id, copias: 2 }]);
+    assert.equal(ajustesDe(t, id).length, 1, 'una sola suma');
+  } finally { t.db.close(); }
+});
+
+test('#825: si lo ya impreso agota lo contado (una venta bajó la existencia), «Hay M» no saca nada y no se presenta como envío', async () => {
+  const t = tienda();
+  try {
+    const id = agregar(t, DESPUES, 'listo', 3);
+    const { p } = await conPregunta(t, ['contadas']);
+    p.estado.falloBle = true; p.estado.cortaEn = 2;
+    assert.equal(await p.imprimir([id], new Map([[id, 3]]), false, { deLista: true }), false);   // salieron 2 de 3
+    p.estado.falloBle = false;
+    t.db.prepare('update productos set stock = 2 where id = ?').run(id);   // se vendió una: las 2 que salieron ya son todas las contadas
+    assert.equal(await p.imprimir([id], new Map([[id, 1]]), false, { deLista: true }), false);
+    assert.equal(p.estado.enviadas.length, 1, 'no sale ninguna más');
+    assert.match(p.$('resumen').textContent, /1 sin etiquetas nuevas: ya salieron todas las piezas contadas/);
+  } finally { t.db.close(); }
+});
+
+test('#825: una respuesta perdida de la suma no la duplica al reintentar', async () => {
+  const t = tienda();
+  try {
+    const id = agregar(t, DESPUES, 'listo', 1);
+    const { p, preguntas } = await conPregunta(t, ['sumar', 'sumar']);
+    p.estado.perderExistencia = true;   // la base suma 2, la respuesta no llega
+    assert.equal(await p.imprimir([id], new Map([[id, 3]]), false, { deLista: true }), false);
+    assert.deepEqual(p.estado.enviadas, []);
+    assert.equal(stockDe(t, id), 3);
+    assert.match(p.$('resumen').textContent, /^No se imprimió: no se pudo sumar/);
+    // Reintentar: ya hay 3 contadas, no pregunta de nuevo, no vuelve a sumar e imprime.
+    assert.equal(await p.imprimir([id], new Map([[id, 3]]), false, { deLista: true }), true);
+    assert.equal(preguntas.length, 1);
+    assert.equal(ajustesDe(t, id).length, 1);
+    assert.deepEqual(p.estado.enviadas, [{ id, copias: 3 }]);
+  } finally { t.db.close(); }
+});
+
+test('#825: la pantalla /etiquetas (sin vista) pregunta con su recuadro y respeta cada respuesta', async () => {
+  const t = tienda();
+  try {
+    const id = agregar(t, DESPUES, 'listo', 1), otra = agregar(t, DESPUES, 'listo', 1);
+    const p = await pagina(t);
+    p.estado.exigirDudosa = false;
+    const caja = p.$('existencia-pregunta');
+    caja.hidden = true;   // como en la página: oculto hasta que se pregunta
+    const pulsar = async (boton: string) => {
+      for (let i = 0; i < 100 && caja.hidden !== false; i++) await espera(5);
+      assert.equal(caja.hidden, false, 'el recuadro se muestra');
+      p.$(boton).onclick();
+    };
+    let lote = p.imprimir([id], new Map([[id, 3]]), false, { deLista: true });
+    await pulsar('existencia-imprimir');
+    assert.equal(await lote, true);
+    assert.equal(p.$('existencia-texto').textContent, 'Vas a imprimir 3 etiquetas y el sistema tiene 1 pieza de Camisa. ¿Cuántas piezas hay?');
+    assert.equal(p.$('existencia-sumar').textContent, 'Hay 3: sumar 2 a la existencia e imprimir');
+    assert.equal(caja.hidden, true);
+    lote = p.imprimir([otra], new Map([[otra, 2]]), false, { deLista: true });
+    await pulsar('existencia-sumar');
+    assert.equal(await lote, true);
+    assert.deepEqual(p.estado.enviadas, [{ id, copias: 1 }, { id: otra, copias: 2 }]);
+    assert.equal(stockDe(t, otra), 2);
+    lote = p.imprimir([id], new Map([[id, 4]]), false, { reimprimir: true });
+    await pulsar('existencia-cancelar');
+    assert.equal(await lote, false);
+    assert.equal(p.estado.enviadas.length, 2);
+  } finally { t.db.close(); }
+});
+
+test('#825: la automática sigue igual: saca la existencia sin preguntar', async () => {
+  const t = tienda();
+  try {
+    t.env.AMBIENTE = 'sandbox';
+    const id = agregar(t, DESPUES, 'listo', 3);
+    const { p, preguntas } = await conPregunta(t, []);
+    await p.iniciarAutomatica();
+    assert.deepEqual(p.estado.enviadas, [{ id, copias: 3 }]);
+    assert.equal(preguntas.length, 0);
+  } finally { t.db.close(); }
+});
+
+test('#825: las pantallas usan la hoja y la página, no confirm()/prompt() nativos, que bloquean la sesión Bluetooth', () => {
+  for (const archivo of ['public/imprimir-lote.js', 'public/inventario-imprimir.js']) {
+    assert.doesNotMatch(readFileSync(archivo, 'utf8'), /(^|[^.\w])(confirm|prompt|alert)\(/m, archivo);
+  }
+  const vista = readFileSync('public/inventario-imprimir.js', 'utf8');
+  assert.match(vista, /preguntarExistencia\(\{texto,sumar,imprimir,pedida,contadas\}\)/);
+  assert.match(vista, /hoja\('¿Cuántas piezas hay\?',c\)/);
+  assert.match(vista, /if\(puedeSumar\)c\.append\(boton\(sumar/);
+  // La opción segura es la principal y la de sumar no.
+  assert.match(vista, /boton\(imprimir,\(\)=>\{totalLote-=pedida-contadas;resolve\('contadas'\);cerrarHoja\(\);\},'primario'\)/);
+  const pagina = readFileSync('public/etiquetas.html', 'utf8');
+  for (const id of ['existencia-pregunta', 'existencia-texto', 'existencia-imprimir', 'existencia-sumar', 'existencia-cancelar']) assert.ok(pagina.includes(`id="${id}"`), id);
 });
