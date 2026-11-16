@@ -299,12 +299,13 @@ export function contadoDe(conteo) {
 /* ---------- Avisos y teclado de la caja (#817): lógica pura, para probarla sin pantalla ---------- */
 
 /**
- * ¿Lo escrito en el campo de escaneo es texto para buscar por nombre («bufanda», «juguetes 49») y no un código?
- * Un código es solo dígitos (etiqueta, lector), ED-…, P-17, DC-/DP-… o BU-…; un «3*» antes no cambia lo que es.
+ * ¿Lo escrito en el campo de escaneo es texto para buscar por nombre («bufanda», «juguetes 49») y no algo que pueda ser un código?
+ * Un código es solo dígitos (etiqueta, lector), ED-…, P-17, DC-/DP-… , BU-…, una banda (una o dos letras y el monto: JU49, R19)
+ * o el QR de un vale (una URL); un «3*» antes no cambia lo que es.
  */
 export function esBusquedaPorTexto(texto) {
   const t = (leerMultiplicador(texto)?.codigo ?? texto).trim();
-  return /\p{L}/u.test(t) && !/^(ED-|P-?\d+$|D[CP]-|BU-)/i.test(t);
+  return /\p{L}/u.test(t) && !/^(ED-|P-?\d+$|D[CP]-|BU-|[a-z]{1,2}\d+$|https?:\/\/)/i.test(t);
 }
 
 /**

@@ -11,6 +11,8 @@ import {
   avisoCorteSinEnviar, GASTO_MAXIMO_CAJERO, gastoRequiereDueno, centavosDeTexto, alertaConteo, pesosExactos, PIEZAS_IMPROBABLES,
 } from '../public/venta.js';
 import { LIMITE_GASTO_CAJERO } from './corte.ts';
+import { codigoDeDigitos, codigoEnDigitos } from '../public/code128.js';
+import { agregar, guiaVale, descuentoDe, TOPE_DESCUENTO } from '../public/venta.js';
 import { tienda, codigoPrueba, PRODUCTO } from './prueba-d1.ts';
 
 const fuente = readFileSync('public/caja.html', 'utf8').replace(/\r\n/g, '\n');
@@ -25,9 +27,11 @@ const tick = () => new Promise((r) => setTimeout(r, 0));
 
 /* ---------- lógica pura ---------- */
 
-test('«parece texto»: solo lo que tiene letras y no es ED-, P-, DC-/DP-, BU- ni dígitos se busca por nombre', () => {
-  for (const texto of ['bufanda', 'juguetes 49', '3*bufanda', 'budín', 'ñoño', 'camisa roja']) assert.equal(esBusquedaPorTexto(texto), true, texto);
-  for (const codigo of ['123', '000123', '7501234567890', 'ED-000123', 'ed-1', 'P-17', 'p17', 'DC-abc', 'DP-XYZ', 'BU-K7Q2M', '3*ED-000001', ' 45 ', '5*123'])
+test('«parece texto»: solo lo que tiene letras y no puede ser un código (ED-, P-, DC-/DP-, BU-, banda, URL de vale, dígitos) se busca por nombre', () => {
+  for (const texto of ['bufanda', 'bufanda azul', 'juguetes 49', '3*juguetes', '3*bufanda', 'budín', 'ñoño', 'camisa roja']) assert.equal(esBusquedaPorTexto(texto), true, texto);
+  const vale = 'https://dolarones.eldolaron.com/v#' + codigoEnDigitos('DP-abcdefghijklmnop');
+  for (const codigo of ['123', '000123', '7501234567890', 'ED-000123', 'ed-1', 'P-17', 'p17', 'DC-abc', 'DP-XYZ', 'BU-K7Q2M', '3*ED-000001', ' 45 ', '5*123',
+    'JU49', 'ju49', 'JU199', 'R19', '3*JU49', vale, 'http://x.mx/a'])
     assert.equal(esBusquedaPorTexto(codigo), false, codigo);
 });
 
@@ -106,6 +110,9 @@ const avisoFalso = () => {
 };
 
 interface Opciones {
+  errorImpresora?: string;
+  descuento?: unknown;
+  remota?: boolean;
   fetch?: (ruta: string, opciones: any) => Promise<unknown>;
   abrirCajon?: () => unknown;
   imprimirTicket?: () => unknown;
@@ -128,17 +135,18 @@ function montarCobro(op: Opciones = {}) {
     transferenciaDe, CLAVE_DESDE, debePreguntarSocio, navigator: { onLine: true }, window: { open() {} },
     document: { createElement: () => ({ style: {}, textContent: '' }) },
     lineas: [{ producto_id: 'p1', codigo: 'ED-000001', nombre: 'Ventilador', precio: 30000, cantidad: 1 }],
+    errorImpresora: () => op.errorImpresora ?? 'USB falló',
     socio: null, valesCargados: [], catalogo: new Map(), pedidoCargado: op.pedido ? { id: 'ped-1', folio: 17, saldo: 10000 } : null,
     preguntarSocio: async () => 'cobrar', preguntarForma: async () => 'efectivo',
-    impresionRemota: () => false, exigirCaja: () => true, cajaActual: () => 'Caja 1', dolaronesPedidos: () => 0,
-    descuento: null, descuentoAplicado: () => 0, promoActual: () => 0, totalNeto: () => 30000, pintarDescuento() {},
+    impresionRemota: () => !!op.remota, exigirCaja: () => true, cajaActual: () => 'Caja 1', dolaronesPedidos: () => 0,
+    descuento: op.descuento ?? null, descuentoAplicado: () => ((op.descuento as any)?.estado === 'aprobada' ? (op.descuento as any).monto : 0), descuentoDe, TOPE_DESCUENTO, promoActual: () => 0, totalNeto: () => 30000, pintarDescuento() {},
     pesos: String, dolares: String, quitarSocio() {}, sincronizar() {}, cargarCatalogo() {}, pintarImpresora() {}, promoConfig: null,
     abrirCajon: op.abrirCajon ?? (async () => true), imprimirTicket: op.imprimirTicket ?? (async () => true),
     store: async (almacen: string, _m: string, fn: any) => fn({ put(v: unknown) { if (almacen === 'ventas') guardadas.push(v); } }),
     fetch: op.fetch ?? (async () => ({ ok: true, status: 201, json: async () => ({ id: 'x', ganados: 0, vale_emitido: null, saldo_pedido: 0 }) })),
   };
   const avisoRojo = fuente.slice(fuente.indexOf('const avisoRojo ='), fuente.indexOf('\n', fuente.indexOf('const avisoRojo =')));
-  const falla = entre('function pintarFalla(', '\n}\n') + '\n}\n';
+  const falla = entre('function textoFalla(', '/**\n * Escribir o escanear P-17');
   const conPedido = entre('async function cobrarConPedido(', '/* ---------- cobro: primero');
   const errorClave = entre('function errorClave(', "for (const id of ['clave-rastreo'");
   const cobro = entre('async function cobrar()', 'let sincronizando = false;');
@@ -170,7 +178,7 @@ test('#817 folio: el id existe antes del primer pintar() de cobrar, que es el qu
   assert.ok(typeof c.vistos[0] === 'string' && (c.vistos[0] as string).length > 20, `el primer pintar() vio ${String(c.vistos[0])}`);
 });
 
-test('#817 cajón e impresora: si fallan, el aviso de «Cobrado» lo dice en rojo y no frena el cobro, llegue antes o después del aviso', async () => {
+test('#817 cajón e impresora: si fallan con la impresora conectada, el aviso de «Cobrado» lo dice en rojo y no frena el cobro, llegue antes o después del aviso', async () => {
   // Fallan al instante (antes de que el aviso exista) y fallan tarde (después de verlo).
   for (const tarde of [false, true]) {
     let soltar: () => void = () => {};
@@ -206,27 +214,99 @@ test('#817 cajón e impresora: si todo sale bien no se agrega nada; con tarjeta 
   assert.equal(otro.$('aviso').hijos.length, 0, 'la falla del ticket anterior no se pega al aviso nuevo');
 });
 
+test('#817 cajón e impresora: sin impresora conectada es una sola línea tranquila (el pie ya dice «Impresora no conectada»), no dos rojas', async () => {
+  const efectivo = montarCobro({ errorImpresora: 'no conectada', abrirCajon: async () => false, imprimirTicket: async () => false });
+  await efectivo.cobrar(); await tick();
+  assert.deepEqual(efectivo.$('aviso').hijos.map((h: any) => h.textContent), ['Sin impresora: abre el cajón con la llave.']);
+  assert.equal(efectivo.$('aviso').hijos[0].style.cssText.includes('#D72B32'), false);
+  assert.match(efectivo.$('aviso').textContent, /^Cobrado/);
+
+  const tarjeta = montarCobro({ valores: { forma: 'tarjeta' }, errorImpresora: 'no conectada', imprimirTicket: async () => false });
+  await tarjeta.cobrar(); await tick();
+  assert.equal(tarjeta.$('aviso').hijos.length, 0, 'con tarjeta y sin impresora no hay nada que decir aparte del pie');
+});
+
+test('#817 cobrar: los retornos antes del cobro dejan el foco en #codigo, no en «Cobrar» (el Enter del lector lo pulsaría otra vez)', async () => {
+  const casos: [string, Opciones, RegExp][] = [
+    ['descuento pendiente', { descuento: { estado: 'pendiente' } }, /El descuento sigue esperando al dueño/],
+    ['descuento sobre el tope', { descuento: { estado: 'aprobada', tipo: 'monto', valor: 29000, monto: 29000 } }, /pasa del 50% del ticket/],
+    ['impresión remota con efectivo', { remota: true, valores: { 'imprimir-en': 'Caja 2' } }, /En el celular sólo tarjeta o transferencia/],
+    ['faltan pesos', { valores: { efectivo: '100' } }, /^Faltan/],
+  ];
+  for (const [nombre, op, mensaje] of casos) {
+    const c = montarCobro(op);
+    await c.cobrar();
+    assert.match(c.$('aviso').textContent, mensaje, nombre);
+    assert.equal(c.$('codigo').enfocado, true, nombre);
+    assert.equal(c.guardadas.length, 0, nombre);
+  }
+  const regalo = montarCobro();
+  regalo.contexto.dolaronesPedidos = () => 5000;   // socio null: no alcanza ni el saldo canjeable
+  await regalo.cobrar();
+  assert.match(regalo.$('aviso').textContent, /Los regalos de apertura/);
+  assert.equal(regalo.$('codigo').enfocado, true);
+});
+
 /* ---------- Dolarones: límite de espera y reintento ---------- */
 
-function montarDolarones(error: unknown) {
+/** Cobro con Dolarones con respuestas guionadas: un Error se lanza (red, timeout) y un objeto es la respuesta del servidor. */
+function montarDolarones(respuestas: any[], socio: Record<string, unknown> = {}) {
   const llamadas: any[] = [];
-  const $ = (() => { const el = { textContent: '', style: {} }; return () => el; })();
-  const cobrarConDolarones = runInNewContext(`${entre('async function cobrarConDolarones(', '/* ---------- pedidos por WhatsApp')}; cobrarConDolarones`, {
-    $, AbortSignal, Date, Object, dolaronesGanados, promoAgotada() {},
-    codigoSocio: 'DC-x', socio: { maximo: 99999, expira_en: '2099-01-01T00:00:00Z', vale: false, numero: 7, disponible: 5000 }, valesCargados: [],
-    fetch: async (_r: string, o: any) => { llamadas.push(o); throw error; },
-  });
-  return { cobrarConDolarones, llamadas, $ };
+  const el = { textContent: '', style: {} };
+  const contexto = {
+    $: () => el, AbortSignal, Date, Object, dolaronesGanados, promoAgotada() {}, valesCargados: [],
+    codigoSocio: 'DC-x', socio: { maximo: 99999, expira_en: '2099-01-01T00:00:00Z', vale: false, numero: 7, disponible: 5000, ...socio },
+    fetch: async (_r: string, o: any) => {
+      llamadas.push(JSON.parse(o.body));
+      const siguiente = respuestas.shift();
+      if (siguiente instanceof Error || siguiente instanceof DOMException) throw siguiente;
+      return siguiente;
+    },
+  };
+  const rutina = runInNewContext(`let folioIncierto = null; ${entre('async function cobrarConDolarones(', '/* ---------- pedidos por WhatsApp')};
+    ({ cobrarConDolarones, incierto: () => folioIncierto })`, contexto);
+  return { ...rutina, llamadas, aviso: el, socio: contexto.socio as Record<string, unknown> };
 }
+const respuesta = (status: number, cuerpo: Record<string, unknown>) => ({ ok: status < 400, status, json: async () => cuerpo });
+const VENTA = { id: 'folio-1', dolarones: 1000 };
 
 test('#817 Dolarones: la petición tiene el mismo límite de 15 s y, si vence, dice que se puede volver a tocar Cobrar', async () => {
-  const vencida = montarDolarones(new DOMException('timeout', 'TimeoutError'));
-  assert.equal(await vencida.cobrarConDolarones({ dolarones: 1000 }, { aPagar: 5000 }), false);
-  assert.ok(vencida.llamadas[0].signal instanceof AbortSignal);
-  assert.match(vencida.$().textContent, /No se supo si se cobró\. Toca Cobrar otra vez.*mismo folio no se cobra dos veces.*Ventas de hoy/);
-  const sinRed = montarDolarones(new TypeError('Failed to fetch'));
-  await sinRed.cobrarConDolarones({ dolarones: 1000 }, { aPagar: 5000 });
-  assert.match(sinRed.$().textContent, /^Sin red: no se pudo cobrar con Dolarones/);
+  const vencida = montarDolarones([new DOMException('timeout', 'TimeoutError')]);
+  assert.equal(await vencida.cobrarConDolarones({ ...VENTA }, { aPagar: 5000 }), false);
+  assert.ok(vencida.llamadas.length === 1);
+  assert.match(vencida.aviso.textContent, /No se supo si se cobró\. Toca Cobrar otra vez.*mismo folio no se cobra dos veces.*Ventas de hoy/);
+  const sinRed = montarDolarones([new TypeError('Failed to fetch')]);
+  await sinRed.cobrarConDolarones({ ...VENTA }, { aPagar: 5000 });
+  assert.match(sinRed.aviso.textContent, /^Sin red: no se pudo cobrar con Dolarones/);
+  assert.match(fuente, /signal: AbortSignal\.timeout\(15000\)/, 'la fetch de Dolarones lleva la señal (la prueba solo ve que hay una)');
+});
+
+test('#817 Dolarones: tras un timeout el reintento va al servidor con el mismo folio y código aunque aquí parezca vencido; un 4xx cierra la duda', async () => {
+  const c = montarDolarones([new DOMException('timeout', 'TimeoutError'), respuesta(200, { id: 'folio-1', duplicada: true, ganados: 0 }),
+    new DOMException('timeout', 'TimeoutError'), respuesta(403, { error: 'Código de socio usado, vencido o actualizado. Pide otro al cliente.' })]);
+  await c.cobrarConDolarones({ ...VENTA }, { aPagar: 5000 });
+  assert.equal(c.incierto(), 'folio-1');
+  c.socio.expira_en = '2000-01-01T00:00:00Z';                  // pasó el minuto del código mientras tanto
+  const resultado = await c.cobrarConDolarones({ ...VENTA }, { aPagar: 5000 });
+  assert.equal(c.llamadas.length, 2, 'el reintento sí salió');
+  assert.deepEqual(c.llamadas[1], { ...VENTA, codigo_socio: 'DC-x' }, 'mismo folio y mismo código');
+  assert.ok(resultado, 'duplicada se toma como cobrado');
+  assert.equal(c.incierto(), null, 'una respuesta del servidor cierra la duda');
+  // Sin duda, un código vencido sigue sin salir.
+  assert.equal(await c.cobrarConDolarones({ ...VENTA }, { aPagar: 5000 }), false);
+  assert.equal(c.llamadas.length, 2);
+  assert.match(c.aviso.textContent, /debe autorizar este importe y mostrar un código vigente/);
+
+  // Un rechazo definitivo (4xx) también cierra la duda; un 5xx no.
+  const d = montarDolarones([new DOMException('timeout', 'TimeoutError'), respuesta(403, { error: 'Código de socio usado, vencido o actualizado.' })]);
+  await d.cobrarConDolarones({ ...VENTA }, { aPagar: 5000 });
+  d.socio.expira_en = '2000-01-01T00:00:00Z';
+  assert.equal(await d.cobrarConDolarones({ ...VENTA }, { aPagar: 5000 }), false);
+  assert.equal(d.llamadas.length, 2);
+  assert.equal(d.incierto(), null);
+  const e = montarDolarones([respuesta(503, { error: 'D1 no responde' })]);
+  await e.cobrarConDolarones({ ...VENTA }, { aPagar: 5000 });
+  assert.equal(e.incierto(), 'folio-1', 'un 5xx no dice si se cobró');
 });
 
 test('#817 Dolarones: reintentar el mismo folio con el mismo código de socio responde `duplicada` (el servidor lo revisa antes de validar el código)', async () => {
@@ -269,10 +349,11 @@ function montarEscaneo() {
   const catalogo = [{ codigo: 'ED-000001', nombre: 'Bufanda roja', precio: 5000 }, { codigo: 'ED-000002', nombre: 'Bufanda azul', precio: 6000 }];
   const contexto = {
     $, leerMultiplicador, escapar: String, pesos: String, precioHoy: (p: any) => p.precio, TONO_PIEZA: {}, TONO_RECHAZO: {}, sonar() {},
-    moverSugerencia, esBusquedaPorTexto,
+    moverSugerencia, esBusquedaPorTexto, codigoDeDigitos,
     buscarPieza: (t: string) => catalogo.find((p) => p.codigo === t.trim().toUpperCase()),
     buscarPorTexto: (t: string) => catalogo.filter((p) => p.nombre.toLowerCase().includes(t.trim().toLowerCase())),
-    agregarCodigo: (leido: string, reintento = false) => { agregadas.push([leido, reintento]); return true; },
+    // Como el real: true si entró una pieza del catálogo, false si no se encontró.
+    agregarCodigo: (leido: string, reintento = false) => { agregadas.push([leido, reintento]); return !!catalogo.find((p) => p.codigo === (leerMultiplicador(leido)?.codigo ?? leido).trim().toUpperCase()); },
   };
   runInNewContext(`${entre('/** Agrega con sonido', '/* ---------- socio y Dolarones')}\n${entre("$('codigo').addEventListener('keydown'", '// Camara del celular')}`, contexto);
   const tecla = (key: string) => {
@@ -340,6 +421,26 @@ test('#817 teclado: las flechas sin sugerencias no se tragan la tecla', () => {
   assert.equal(e.tecla('ArrowDown').evitado, false);
 });
 
+test('#817 teclado: lo que puede ser un código (banda JU49, QR de vale, ED-, dígitos) se limpia y conserva su recarga de catálogo; solo el texto se queda', () => {
+  const vale = 'https://dolarones.eldolaron.com/v#' + codigoEnDigitos('DP-abcdefghijklmnop');
+  for (const codigo of ['JU49', vale, 'ED-000123', '7501234567890', '3*JU49']) {
+    const e = montarEscaneo();
+    e.escribir(codigo);
+    e.tecla('Enter');
+    assert.deepEqual(e.agregadas, [[codigo, false]], `${codigo}: reintento de catálogo permitido`);
+    assert.equal(e.codigo.value, '', `${codigo}: campo limpio`);
+    assert.equal(e.codigo.seleccionado, false, codigo);
+  }
+  for (const texto of ['bufanda azul', '3*juguetes']) {
+    const e = montarEscaneo();
+    e.escribir(texto);
+    e.tecla('Enter');
+    assert.deepEqual(e.agregadas, [[texto, true]], `${texto}: sin reintento`);
+    assert.equal(e.codigo.value, texto);
+    assert.equal(e.codigo.seleccionado, true);
+  }
+});
+
 /* ---------- ticket, cancelar, rueda ---------- */
 
 test('#817 renglón: Mayús + clic quita el renglón entero; el clic solo quita una pieza', () => {
@@ -366,26 +467,35 @@ test('#817 renglón: el botón ✕ dice qué quita', () => {
   assert.match(fuente, /aria-label="Quitar \$\{escapar\(l\.nombre\)\}"/);
 });
 
-test('#817 cancelar: con 3 piezas pide un segundo toque; con 2 o vacío cancela de una vez', () => {
-  const montar = (lineas: any[], extra: Record<string, unknown> = {}) => {
-    const temporizadores: (() => void)[] = [];
-    const estado: any = { lineas, idVenta: 'x', limpiadas: 0 };
-    const elementos = new Map<string, any>();
-    const $ = (id: string) => {
-      if (!elementos.has(id)) elementos.set(id, { value: '', textContent: id === 'cancelar' ? 'Cancelar venta' : '', style: {}, dataset: {}, focus() {}, addEventListener(_t: string, f: any) { this.clic = f; } });
-      return elementos.get(id);
-    };
-    runInNewContext(entre('// Con descuento aprobado, pedido cargado', 'function pintarRed()'), {
-      $, totales, cancelarPideConfirmar, descuento: null, pedidoCargado: null, sinPromo: false, formaElegida: false, ...extra,
-      get lineas() { return estado.lineas; }, set lineas(v) { estado.lineas = v; },
-      idVenta: 'x', pintarDescuento() {}, quitarSocio() { estado.limpiadas++; }, pintar() {}, clearTimeout() {},
-      setTimeout: (f: () => void) => { temporizadores.push(f); return temporizadores.length; },
-      document: { addEventListener() {} },
-    });
-    return { estado, $, temporizadores, clic: () => $('cancelar').clic() };
+function montarCancelar(lineas: any[], extra: Record<string, unknown> = {}) {
+  const temporizadores: (() => void)[] = [];
+  const estado: any = { lineas, activo: '', limpiadas: 0 };
+  const elementos = new Map<string, any>();
+  const $ = (id: string) => {
+    if (!elementos.has(id)) elementos.set(id, { value: '', textContent: id === 'cancelar' ? 'Cancelar venta' : '', style: {}, dataset: {},
+      focus() { estado.activo = id; }, addEventListener(_t: string, f: any) { this.clic = f; } });
+    return elementos.get(id);
   };
-  const linea = (cantidad: number) => ({ codigo: 'A', precio: 100, cantidad });
-  const tres = montar([linea(3)]);
+  const rutinas = runInNewContext(`let cancelarArmado = null; ${entre('// Con descuento aprobado, pedido cargado', 'function pintarRed()')}
+    ({ revisarCancelarArmado })`, {
+    $, totales, cancelarPideConfirmar, descuento: null, pedidoCargado: null, sinPromo: false, formaElegida: false, ...extra,
+    get lineas() { return estado.lineas; }, set lineas(v) { estado.lineas = v; },
+    idVenta: 'x', pintarDescuento() {}, quitarSocio() { estado.limpiadas++; }, pintar() {}, clearTimeout() {},
+    setTimeout: (f: () => void) => { temporizadores.push(f); return temporizadores.length; },
+    document: { addEventListener() {} },
+  });
+  return {
+    estado, $, temporizadores, revisar: rutinas.revisarCancelarArmado,
+    // Un clic de ratón enfoca el botón antes de que corra el manejador.
+    clic: () => { estado.activo = 'cancelar'; $('cancelar').clic(); },
+    // Lo que hace el navegador con el Enter del lector: pulsa el botón si él tiene el foco; en #codigo solo agrega piezas.
+    enterDelLector: () => { if (estado.activo === 'cancelar') $('cancelar').clic(); },
+  };
+}
+const linea = (cantidad: number) => ({ codigo: 'A', precio: 100, cantidad });
+
+test('#817 cancelar: con 3 piezas pide un segundo toque; con 2 o vacío cancela de una vez', () => {
+  const tres = montarCancelar([linea(3)]);
   tres.clic();
   assert.equal(tres.estado.lineas.length, 1, 'el primer toque no borra');
   assert.equal(tres.$('cancelar').textContent, 'Toca otra vez para borrar el ticket');
@@ -394,24 +504,64 @@ test('#817 cancelar: con 3 piezas pide un segundo toque; con 2 o vacío cancela 
   assert.equal(tres.estado.lineas.length, 0);
   assert.equal(tres.$('cancelar').textContent, 'Cancelar venta');
 
-  const vencido = montar([linea(3)]);
+  const vencido = montarCancelar([linea(3)]);
   vencido.clic();
   vencido.temporizadores[0]();   // pasaron 4 s sin el segundo toque
   assert.equal(vencido.$('cancelar').textContent, 'Cancelar venta');
   vencido.clic();
   assert.equal(vencido.estado.lineas.length, 1, 'otra vez pide confirmar');
 
-  const dos = montar([linea(2)]);
+  const dos = montarCancelar([linea(2)]);
   dos.clic();
   assert.equal(dos.estado.lineas.length, 0);
   assert.equal(dos.$('aviso').textContent, 'Venta cancelada');
 
-  const aprobado = montar([linea(1)], { descuento: { estado: 'aprobada' } });
+  const aprobado = montarCancelar([linea(1)], { descuento: { estado: 'aprobada' } });
   aprobado.clic();
   assert.equal(aprobado.estado.lineas.length, 1);
-  const vacio = montar([]);
+  const vacio = montarCancelar([]);
   vacio.clic();
   assert.equal(vacio.$('aviso').textContent, 'Venta cancelada');
+});
+
+test('#817 cancelar: tras el primer toque el foco vuelve a #codigo y el Enter del lector no borra el ticket', () => {
+  const c = montarCancelar([linea(3)]);
+  c.clic();
+  assert.equal(c.estado.activo, 'codigo', 'el foco salió del botón');
+  c.enterDelLector();                          // un escaneo dentro de los 4 s...
+  c.enterDelLector();                          // ...o dos
+  assert.equal(c.estado.lineas.length, 1, 'el ticket sigue');
+  assert.equal(c.estado.limpiadas, 0);
+  // El control: si el foco se quedara en el botón (como antes), ese Enter sí lo borraría.
+  c.estado.activo = 'cancelar';
+  c.enterDelLector();
+  assert.equal(c.estado.lineas.length, 0);
+});
+
+test('#817 cancelar: el toque armado se desarma si el ticket cambia o se cobra; el ticket siguiente vuelve a pedirlo', () => {
+  const c = montarCancelar([linea(3)]);
+  c.clic();
+  c.estado.lineas = [linea(4)];                // agregó una pieza
+  c.revisar();                                 // pintar() lo llama en cada cambio
+  assert.equal(c.$('cancelar').textContent, 'Cancelar venta');
+  c.clic();
+  assert.equal(c.estado.lineas.length, 1, 'otra vez pide confirmar, no borra');
+
+  const cobro = montarCancelar([linea(3)]);
+  cobro.clic();
+  cobro.estado.lineas = [];                    // se cobró (cobrar() vacía el ticket y su finally pinta)
+  cobro.revisar();
+  cobro.estado.lineas = [linea(3)];            // y el siguiente ticket llega a 3 piezas antes de los 4 s
+  cobro.clic();
+  assert.equal(cobro.estado.lineas.length, 1, 'un solo toque no borra el ticket nuevo');
+
+  const igual = montarCancelar([linea(3)]);
+  igual.clic();
+  igual.revisar();                             // pintar() sin cambios (consulta de promos, etc.) no lo desarma
+  igual.clic();
+  assert.equal(igual.estado.lineas.length, 0);
+  const fuentePintar = entre('function pintar() {', 'const subtotal');
+  assert.match(fuentePintar, /revisarCancelarArmado\(\);/, 'pintar() revisa el toque armado');
 });
 
 test('#817 rueda: en un campo numérico con foco se le quita el foco antes de que gire el valor y se le devuelve; fuera de eso no toca nada', () => {
@@ -632,18 +782,71 @@ test('#817 tonos: las constantes de calibración están arriba del script, el so
   assert.equal(creados.length, 2, 'el tono de rechazo es doble');
 });
 
-test('#817 agregarCodigo: el catálogo vacío tiene su aviso, y todo sonido sale del resultado de escanear()', () => {
-  assert.match(fuente, /catalogo\.size === 0\n\s+\? 'El catálogo no ha cargado\. Recarga la página con red \(F5\)\.'/);
-  const escanear = entre('function escanear(', '\n}\n');
-  assert.match(escanear, /r === true\) sonar\(TONO_PIEZA\)/);
-  assert.match(escanear, /r === false\) sonar\(TONO_RECHAZO\)/);
-  assert.equal(fuente.match(/escanear\(/g)!.length >= 4, true, 'lector, sugerencias, Enter y cámara');
+function montarAgregar(piezas: any[], { enLinea = true, recarga = [] as any[] } = {}) {
+  const $ = (() => { const el = { textContent: '', style: {} }; return () => el; })();
+  const escaneos: [string, boolean][] = [];
+  const recargas: number[] = [];
+  const catalogo = new Map(piezas.map((p) => [p.codigo, p]));
+  const contexto: Record<string, unknown> = {
+    $, catalogo, agregar, leerMultiplicador, codigoDeDigitos, avisoExistencia, precioHoy: (p: any) => p.precio, Map, Date,
+    navigator: { onLine: enLinea }, pintar() {}, cargarPedido() {}, buscarSocio() {},
+    // El catálogo que baja la recarga: reemplaza lo que había (como cargarCatalogo).
+    cargarCatalogo: async () => { recargas.push(1); for (const p of recarga) catalogo.set(p.codigo, p); },
+    escanear: (leido: string, reintento: boolean) => { escaneos.push([leido, reintento]); return true; },
+  };
+  const rutina = runInNewContext(`let cobrando = false, idVenta = null, lineas = [];
+    ${entre('function buscarPieza(', '/* ---------- busqueda a mano')}
+    ({ agregarCodigo, lineas: () => lineas })`, contexto);
+  return { ...rutina, aviso: $(), escaneos, recargas };
+}
+const pieza = (codigo: string, stock: number, extra: Record<string, unknown> = {}) => ({ codigo, nombre: `Pieza ${codigo}`, precio: 5000, stock, id: `id-${codigo}`, ...extra });
+
+test('#817 agregarCodigo: el catálogo vacío dice que no ha cargado (y recarga una vez); con catálogo, «no encontrado»', async () => {
+  const vacio = montarAgregar([]);
+  assert.equal(vacio.agregarCodigo('ED-000001'), false);
+  assert.equal(vacio.aviso.textContent, 'El catálogo no ha cargado. Recarga la página con red (F5).');
+  await tick();
+  assert.equal(vacio.recargas.length, 1);
+  const con = montarAgregar([pieza('ED-000002', 1)]);
+  assert.equal(con.agregarCodigo('ED-000001'), false);
+  assert.equal(con.aviso.textContent, 'Código no encontrado: ED-000001');
 });
 
-test('#817 pie del catálogo: «sin actualizar» se asigna completo, no se acumula', () => {
-  const bloque = entre('async function cargarCatalogo()', '/* ---------- ticket');
-  assert.doesNotMatch(bloque, /\+= ' · sin actualizar'/);
-  assert.match(bloque, /textContent = `\$\{catalogo\.size\} códigos · sin actualizar`/);
+test('#817 agregarCodigo: sin existencia dice qué hacer, baja el catálogo UNA vez y, si ya hay, la agrega; sin red o ya reintentado no recarga', async () => {
+  const sinExistencia = 'Pieza ED-000001 ya se vendió, está apartada o no está en esta tienda. Si es de un pedido, escanea su folio (P-…).';
+  const a = montarAgregar([pieza('ED-000001', 0)], { recarga: [pieza('ED-000001', 1)] });
+  assert.equal(a.agregarCodigo('ED-000001'), false);
+  assert.equal(a.aviso.textContent, sinExistencia, 'el aviso sale sin esperar la recarga');
+  await tick();
+  assert.equal(a.recargas.length, 1);
+  assert.deepEqual(a.escaneos, [['ED-000001', true]], 'con la existencia nueva se reintenta una vez');
+
+  const sigueVendida = montarAgregar([pieza('ED-000001', 0)], { recarga: [pieza('ED-000001', 0)] });
+  sigueVendida.agregarCodigo('ED-000001');
+  await tick();
+  assert.equal(sigueVendida.recargas.length, 1);
+  assert.deepEqual(sigueVendida.escaneos, [], 'sigue vendida: nada más que el aviso');
+
+  const reintento = montarAgregar([pieza('ED-000001', 0)]);
+  reintento.agregarCodigo('ED-000001', true);
+  const sinRed = montarAgregar([pieza('ED-000001', 0)], { enLinea: false });
+  sinRed.agregarCodigo('ED-000001');
+  await tick();
+  assert.equal(reintento.recargas.length + sinRed.recargas.length, 0);
+  const ya = montarAgregar([pieza('ED-000001', 1)]);
+  assert.equal(ya.agregarCodigo('ED-000001'), true);
+  assert.equal(ya.agregarCodigo('ED-000001'), false);
+  assert.equal(ya.aviso.textContent, 'Pieza ED-000001 ya está en este ticket.');
+});
+
+test('#817 pie del catálogo: sin red el texto se asigna completo, no se acumula cada minuto', async () => {
+  const pie = { textContent: '' };
+  const cargar = runInNewContext(`let catalogo = new Map();
+    ${entre('const CATALOGO_COMPLETO_MS', '/* ---------- ticket')}; cargarCatalogo`, {
+    $: () => pie, Map, Date, Number, store: async () => undefined, fetch: async () => { throw new TypeError('sin red'); },
+  });
+  await cargar(); await cargar(); await cargar();
+  assert.equal(pie.textContent, '0 códigos · sin actualizar');
 });
 
 test('#817 pie de ventas por sincronizar: singular y plural', async () => {
@@ -668,22 +871,86 @@ test('#817 gasto: se avisa al escribir el importe pero no se bloquea el registro
   assert.equal(correr('gasto', '100'), '');
   assert.equal(correr('gasto', '100.50'), 'Más de $100: lo registra el dueño.');
   assert.equal(correr('retiro', '5000'), '');
-  assert.doesNotMatch(entre("$('retiro-registrar').addEventListener", '/* ---------- corte de caja'), /requiereDueno|Más de \$100/);
 });
 
-test('#817 cerrar sesión sin red: si el módulo no carga, avisa en vez de no hacer nada', () => {
-  const bloque = entre("$('cerrar-sesion').addEventListener", "$('abrir-corte').addEventListener");
-  assert.match(bloque, /try \{ \(\{ cerrarSesion \} = await import\('\/cerrar-sesion\.js'\)\); \}\n\s+catch \{ avisoRojo\('Sin red: no se puede cerrar sesión\.'\); return; \}/);
+test('#817 cerrar sesión sin red: si el módulo no carga, avisa y no cierra; con red cierra', async () => {
+  // `import()` dinámico no corre dentro de vm: se cambia por una función del contexto y se prueba lo que el manejador hace con su resultado.
+  const bloque = entre("$('cerrar-sesion').addEventListener", "$('abrir-corte').addEventListener").replace("import('/cerrar-sesion.js')", "importar('/cerrar-sesion.js')");
+  assert.match(bloque, /importar\(/, 'el reemplazo aplicó');
+  for (const sinRed of [true, false]) {
+    let manejador: () => Promise<void> = async () => {};
+    const avisos: string[] = []; const cierres: unknown[] = [];
+    runInNewContext(bloque, {
+      $: () => ({ addEventListener: (_t: string, f: any) => { manejador = f; } }), avisoRojo: (t: string) => avisos.push(t), store() {},
+      importar: async () => { if (sinRed) throw new TypeError('Failed to fetch dynamically imported module'); return { cerrarSesion: async (o: unknown) => { cierres.push(o); } }; },
+    });
+    await manejador();
+    assert.deepEqual(avisos, sinRed ? ['Sin red: no se puede cerrar sesión.'] : []);
+    assert.equal(cierres.length, sinRed ? 0 : 1);
+  }
 });
 
-test('#817 foco: tras ligar un socio y tras «Usar todos» el lector sigue en #codigo', () => {
-  const buscar = entre('async function buscarSocio()', "$('buscar-socio').addEventListener");
-  assert.match(buscar, /pintar\(\);\n\s+\$\('codigo'\)\.focus\(\);[^\n]*\n\s+preguntarDolarones\(\);/);
-  const cerrar = entre('function cerrarDialogo(', "$('dlg-todos').addEventListener");
-  assert.match(cerrar, /if \(usar === 'otra'\) \$\('dolarones'\)\.focus\(\);\n\s+else \$\('codigo'\)\.focus\(\);/);
+function montarBuscarSocio(respuesta: { ok: boolean; cuerpo: Record<string, unknown> }) {
+  const orden: string[] = [];
+  const elementos = new Map<string, any>();
+  const $ = (id: string) => {
+    if (!elementos.has(id)) elementos.set(id, { value: '', textContent: '', innerHTML: '', hidden: false, style: {}, focus() { orden.push(`foco:${id}`); } });
+    return elementos.get(id);
+  };
+  $('socio').value = '#7';
+  const rutinas = runInNewContext(`let socio = null, valesCargados = [], busquedaSocio = 0, cobrando = false, valesPrueba = false, codigoSocio = '', usarTodos = false;
+    ${entre('function pintarSocio()', "$('buscar-socio').addEventListener")}; ({ buscarSocio })`, {
+    $, guiaVale, dolares: String, escapar: String, idVenta: 'x', pintar() {}, avisoRojo() {}, setTimeout, Promise, Date, Math, codigoDeDigitos,
+    preguntarDolarones() { orden.push('ventana-dolarones'); },
+    fetch: async () => ({ ok: respuesta.ok, json: async () => respuesta.cuerpo }),
+  });
+  return { ...rutinas, orden, $ };
+}
+
+test('#817 foco: tras ligar un socio el lector sigue en #codigo (antes de abrir la ventana de Dolarones); si no se encuentra, el foco se queda en la búsqueda', async () => {
+  const bien = montarBuscarSocio({ ok: true, cuerpo: { numero: 7, nombre: 'Ana', disponible: 500, maximo: 500, expira_en: '2099-01-01T00:00:00Z' } });
+  await bien.buscarSocio();
+  assert.deepEqual(bien.orden, ['foco:codigo', 'ventana-dolarones']);
+  const mal = montarBuscarSocio({ ok: false, cuerpo: { error: 'No se encontró el socio.' } });
+  await mal.buscarSocio();
+  assert.deepEqual(mal.orden, [], 'sin socio no se mueve el foco');
 });
 
-test('#817 «Ventas de hoy» abierta se refresca al actualizar el corte (tras cobrar y sincronizar)', () => {
-  assert.match(entre('async function actualizarCorte()', '/* ---------- eventos'), /\n  cargarTickets\(\);/);
-  assert.match(entre('async function sincronizar()', 'async function pendientes()'), /await actualizarCorte\(\)/);
+test('#817 foco: «Usar todos» y «No usar» devuelven el foco a #codigo; «Otra cantidad» lo deja en Dolarones', () => {
+  const montar = () => {
+    const orden: string[] = [];
+    const $ = (id: string) => ({ close() { orden.push(`cerrar:${id}`); }, focus() { orden.push(`foco:${id}`); } });
+    const rutinas = runInNewContext(`let usarTodos = false, idVenta = 'x'; ${entre('function cerrarDialogo(', "$('dlg-todos').addEventListener")}
+      ({ cerrarDialogo, usarTodos: () => usarTodos })`, { $, pintar() { orden.push('pintar'); } });
+    return { ...rutinas, orden };
+  };
+  const todos = montar(); todos.cerrarDialogo('todos');
+  assert.equal(todos.usarTodos(), true);
+  assert.deepEqual(todos.orden, ['cerrar:dlg-dolarones', 'pintar', 'foco:codigo']);
+  const no = montar(); no.cerrarDialogo('no');
+  assert.deepEqual(no.orden.slice(-1), ['foco:codigo']);
+  const otra = montar(); otra.cerrarDialogo('otra');
+  assert.deepEqual(otra.orden.slice(-1), ['foco:dolarones']);
+});
+
+test('#817 «Ventas de hoy» abierta se refresca tras cobrar y sincronizar (actualizarCorte, aun sin red)', async () => {
+  for (const sinRed of [false, true]) {
+    let listas = 0;
+    const corte = { textContent: '' };
+    const actualizar = runInNewContext(`${entre('async function actualizarCorte()', '/* ---------- eventos')}; actualizarCorte`, {
+      $: () => corte, cargarTickets: () => { listas++; },
+      fetch: async () => { if (sinRed) throw new TypeError('sin red'); return { json: async () => ({ por_forma_pago: [{ tickets: 2 }], piezas: 5 }) }; },
+    });
+    await actualizar();
+    assert.equal(listas, 1, `sinRed=${sinRed}`);
+    assert.equal(corte.textContent, sinRed ? '' : 'Hoy: 2 ventas · 5 piezas');
+  }
+  // sincronizar() termina siempre en actualizarCorte(): ahí se refresca la lista.
+  let corteActualizado = 0;
+  const sincronizar = runInNewContext(`${entre('let sincronizando = false;', 'async function pendientes()')}; sincronizar`, {
+    store: async () => [], fetch: async () => { throw new Error('sin red'); }, AbortSignal, $: () => ({ textContent: '' }), dolares: String,
+    pintarResultadosVales() {}, pendientes() {}, pintarRechazadas() {}, actualizarCorte: () => { corteActualizado++; },
+  });
+  await sincronizar();
+  assert.equal(corteActualizado, 1);
 });

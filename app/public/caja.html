@@ -597,6 +597,8 @@ let sinPromo = false;
 let idVenta = null;
 let creadoEnVenta = null;
 let cobrando = false;
+let cancelarArmado = null;      // { temporizador, firma }: «Cancelar venta» ya pidió el segundo toque (#817)
+let folioIncierto = null;       // folio de un cobro con Dolarones cuya respuesta no se supo: su reintento va con el mismo folio y código (#817)
 let formaElegida = false;       // la cajera tocó la forma de pago en esta venta (#260)
 // Pedido por WhatsApp cargado en el ticket (Issue #269): { id, folio, saldo } o null. Su saldo solo
 // existe en el servidor, así que con pedido el cobro espera al servidor y nunca se encola.
@@ -887,6 +889,7 @@ function pintarPromoCupo() {
 }
 function pintar() {
   pintarPromoCupo();
+  revisarCancelarArmado();
   // Uno en % se aprueba para ese ticket exacto: si cambia, hay que pedir otro. Uno en
   // pesos se queda en el ticket hasta vaciarlo o quitarlo (Isaac, 17/10).
   const subtotal = totales(lineas).subtotal;
@@ -943,7 +946,8 @@ function pintar() {
     usados || anticipo ? `A pagar ${pesos(t.aPagar)}` : '',
   ].filter(Boolean).join(' · ');
   const canjeable = saldoCanjeable(socio, t.total);
-  const autorizado = !usados || (codigoSocio && usados <= socio.maximo && Date.parse(socio.expira_en) > Date.now());
+  // Con la respuesta de este folio en duda (#817), el código se sigue dando por bueno: el servidor contesta `duplicada` sin validarlo.
+  const autorizado = !usados || (codigoSocio && usados <= socio.maximo && ((folioIncierto && folioIncierto === idVenta) || Date.parse(socio.expira_en) > Date.now()));
   $('usar-maximo').disabled = cobrando || !codigoSocio || maximoCanje(socio, t.total) === 0;
   for (const id of ['codigo', 'socio', 'buscar-socio', 'quitar-socio', 'dolarones', 'efectivo', 'forma', 'cancelar', 'pedir-descuento', 'quitar-descuento', 'quitar-pedido', 'clave-rastreo', 'monto-transferido', 'banco-emisor', 'comprobante']) $(id).disabled = cobrando;
   // Transferencia desde $300 (#593): aparecen la clave de rastreo y el monto del comprobante.
@@ -1045,6 +1049,9 @@ function agregarCodigo(leido, reintento = false) {
     if (sinExistencia) {
       $('aviso').textContent = sinExistencia;
       $('aviso').style.color = '#D72B32';
+      // La existencia local puede estar vieja (otra caja, una devolución): se baja el catálogo una vez, como con «no encontrado», y si
+      // ahora sí hay, entra. El aviso ya está en pantalla: no se retrasa.
+      if (!reintento && navigator.onLine) cargarCatalogo().then(() => { if (catalogo.get(pieza.codigo)?.stock > pieza.stock) escanear(leido, true); });
       return false;
     }
   }
@@ -1446,7 +1453,10 @@ $('usar-maximo').addEventListener('click', () => {
  * de autorización sólo vive en memoria; nunca se encola en el disco.
  */
 async function cobrarConDolarones(venta, t) {
-  if (!codigoSocio || venta.dolarones > socio.maximo || Date.parse(socio.expira_en) <= Date.now()) {
+  // Si la respuesta de este folio se perdió, reintentar va al servidor con el mismo folio y el mismo código aunque aquí parezca vencido
+  // (#817): pedir un código nuevo cambiaría el folio y una venta ya registrada se registraría dos veces.
+  const incierto = folioIncierto === venta.id;
+  if (!codigoSocio || venta.dolarones > socio.maximo || (!incierto && Date.parse(socio.expira_en) <= Date.now())) {
     $('aviso').textContent = 'El cliente debe autorizar este importe y mostrar un código vigente desde su cuenta.';
     $('aviso').style.color = '#D72B32';
     return false;
@@ -1462,12 +1472,15 @@ async function cobrarConDolarones(venta, t) {
   } catch (error) {
     // Sin respuesta en 15 s no se sabe si se cobró. Reintentar con el mismo folio es seguro: registrarVenta contesta
     // `duplicada` antes de validar el código del socio o del vale (#817).
+    folioIncierto = venta.id;
     $('aviso').textContent = error?.name === 'TimeoutError' || error?.name === 'AbortError'
       ? 'No se supo si se cobró. Toca Cobrar otra vez: con el mismo folio no se cobra dos veces. Si no avanza, abre Ventas de hoy antes de cobrar de nuevo.'
       : 'Sin red: no se pudo cobrar con Dolarones. Intenta otra vez o cobra sin Dolarones.';
     $('aviso').style.color = '#D72B32';
     return false;
   }
+  // Una respuesta del servidor (que no sea 5xx) cierra la duda: el folio vuelve a seguir las reglas de siempre.
+  folioIncierto = respuesta.status >= 500 ? venta.id : null;
   const cuerpo = await respuesta.json().catch(() => ({}));
   if (!respuesta.ok) {
     if (cuerpo.promo_agotada) promoAgotada();
@@ -1491,11 +1504,20 @@ async function cobrarConDolarones(venta, t) {
 /* ---------- pedidos por WhatsApp (Issue #269) ---------- */
 
 const avisoRojo = (texto) => { $('aviso').textContent = texto; $('aviso').style.color = '#D72B32'; return false; };
-/** Agrega una falla en rojo al aviso del cobro `nodo`; si ya salió otro aviso, no se pega a ese (#817). */
-function pintarFalla(texto, nodo) {
+/**
+ * Qué decir cuando el cajón no abrió o el ticket no salió (#817). Sin impresora conectada no es una falla nueva (el pie ya dice
+ * «Impresora no conectada»): una sola línea tranquila, y solo para el cajón. Con impresora que falló, cada cosa en rojo.
+ */
+function textoFalla(clave) {
+  const sinImpresora = !errorImpresora() || errorImpresora() === 'no conectada';
+  if (clave === 'cajon') return sinImpresora ? { texto: 'Sin impresora: abre el cajón con la llave.', calmo: true } : { texto: 'El cajón no abrió: ábrelo con la llave.' };
+  return sinImpresora ? null : { texto: 'El ticket no se imprimió: reimprímelo desde Ventas de hoy.' };
+}
+/** Agrega una falla al aviso del cobro `nodo`; si ya salió otro aviso, no se pega a ese (#817). */
+function pintarFalla({ texto, calmo }, nodo) {
   if ($('aviso').firstChild !== nodo) return;
   const falla = document.createElement('div');
-  falla.style.cssText = 'color:#D72B32;font-weight:700';
+  falla.style.cssText = calmo ? 'color:#5b6478' : 'color:#D72B32;font-weight:700';
   falla.textContent = texto;
   $('aviso').append(falla);
 }
@@ -1630,18 +1652,21 @@ async function cobrar() {
   const imprimirEn = impresionRemota() ? $('imprimir-en').value : undefined;
   if (imprimirEn && forma === 'efectivo') {
     $('aviso').textContent = 'En el celular sólo tarjeta o transferencia';
+    $('codigo').focus();   // en los retornos de aquí en adelante el foco sale de «Cobrar»: el Enter del lector no lo vuelve a pulsar (#817)
     return;
   }
   const usados = dolaronesPedidos();
   if (descuento?.estado === 'pendiente') {
     $('aviso').textContent = 'El descuento sigue esperando al dueño. Espera su respuesta o aprieta «Quitar descuento».';
     $('aviso').style.color = '#D72B32';
+    $('codigo').focus();
     return;
   }
   // Uno en pesos sobrevive a quitar piezas: si ya pasa del tope, no se cobra a escondidas sin él.
   if (descuentoAplicado() && 'error' in descuentoDe(descuento, totales(lineas).subtotal)) {
     $('aviso').textContent = `El descuento pasa del ${TOPE_DESCUENTO}% del ticket. Agrega piezas o aprieta «Quitar descuento».`;
     $('aviso').style.color = '#D72B32';
+    $('codigo').focus();
     return;
   }
   const anticipo = pedidoCargado ? anticipoDePedido(pedidoCargado.saldo, totalNeto(), usados) : 0;
@@ -1649,6 +1674,7 @@ async function cobrar() {
   if (usados > saldoCanjeable(socio, t.total)) {
     $('aviso').textContent = 'Los regalos de apertura requieren un ticket de $1,000 MXN o más antes de descontar Dolarones. Revisa el importe solicitado.';
     $('aviso').style.color = '#D72B32';
+    $('codigo').focus();
     return;
   }
   // Si la cajera no eligió la forma en esta venta, se pregunta siempre (#260; 17/10, un pago con tarjeta quedó en
@@ -1664,6 +1690,9 @@ async function cobrar() {
   if (!efectivoAlcanza({ formaPago: forma, total: t.aPagar, efectivo })) {
     $('aviso').textContent = efectivo === 0 ? 'Falta el efectivo recibido.' : `Faltan ${pesos(t.falta)}`;
     $('aviso').style.color = '#D72B32';
+    // Hoy no enfocaba nada y «Cobrar» seguía con el foco. #efectivo atraparía los dígitos del lector (los sumaría al importe), así que se
+    // elige #codigo: el cajero toca el campo de efectivo para corregirlo.
+    $('codigo').focus();
     return;
   }
   // Transferencia desde $300 (#593): clave de rastreo y monto del comprobante, validados igual que en el servidor.
@@ -1773,12 +1802,12 @@ async function cobrar() {
     // Lo que falle se agrega en rojo al aviso de «Cobrado» (#817), sin esperarlo: el cobro no se frena.
     const fallas = [];
     let nodoAviso = null;
-    const fallo = (texto) => (nodoAviso ? pintarFalla(texto, nodoAviso) : fallas.push(texto));
+    const fallo = (clave) => { const falla = textoFalla(clave); if (falla) (nodoAviso ? pintarFalla(falla, nodoAviso) : fallas.push(falla)); };
     if (!venta.imprimir_en) {
-      if (forma === 'efectivo') abrirCajon()?.then((abrio) => { if (!abrio) fallo('El cajón no abrió: ábrelo con la llave.'); });
+      if (forma === 'efectivo') abrirCajon()?.then((abrio) => { if (!abrio) fallo('cajon'); });
       imprimirTicket({ ...venta, total: t.total, descuento: t.descuento, cambio: t.cambio, socio: socioTicket,
         ...(pedidoCargado ? { pedido_folio: pedidoCargado.folio } : {}) }, venta.lineas)
-        .then((impreso) => { pintarImpresora(); if (!impreso) fallo('El ticket no se imprimió: reimprímelo desde Ventas de hoy.'); });
+        .then((impreso) => { pintarImpresora(); if (!impreso) fallo('ticket'); });
     }
 
     // Un lugar menos del cupo: sin red, la caja no sigue dando la promo sin fin. La consulta de cada minuto corrige.
@@ -1817,7 +1846,7 @@ async function cobrar() {
     if (venta.recompensa_pendiente) $('aviso').textContent += ' · Se revisará si ganó Dolarones al sincronizar.';
     $('aviso').style.color = '#1f7a4d';
     nodoAviso = $('aviso').firstChild;
-    for (const texto of fallas) pintarFalla(texto, nodoAviso);
+    for (const falla of fallas) pintarFalla(falla, nodoAviso);
     lineas = [];
     idVenta = null;
     pedidoCargado = null;
@@ -2476,10 +2505,12 @@ $('codigo').addEventListener('keydown', (e) => {
   const elegida = sugerenciaActiva >= 0 ? $('sugerencias').children[sugerenciaActiva]?.dataset.codigo : null;
   if (elegida) { e.preventDefault(); elegirSugerencia(elegida); return; }
   // Texto para buscar por nombre sin pieza: se queda en el campo con sus sugerencias. Queda seleccionado: lo que escriba o escanee
-  // el lector después lo reemplaza y no se pega a un texto viejo. Sin reintento de catálogo: no es una etiqueta.
-  const buscaTexto = esBusquedaPorTexto(e.target.value) && !buscarPieza(leerMultiplicador(e.target.value)?.codigo ?? e.target.value);
-  escanear(e.target.value, buscaTexto);
-  if (buscaTexto) { e.target.select(); return; }
+  // el lector después lo reemplaza y no se pega a un texto viejo. Lo que pueda ser un código (dígitos, ED-, bandas JU49, el QR de un vale)
+  // se trata como siempre, con su recarga de catálogo.
+  const escrito = leerMultiplicador(e.target.value)?.codigo ?? e.target.value;
+  const buscaTexto = esBusquedaPorTexto(codigoDeDigitos(escrito) ?? escrito) && !buscarPieza(escrito);
+  const resultado = escanear(e.target.value, buscaTexto);
+  if (buscaTexto && resultado === false) { e.target.select(); return; }
   e.target.value = '';
   pintarSugerencias();
 });
@@ -2927,16 +2958,28 @@ document.addEventListener('keydown', (e) => {
   if (lineas.length) { $('aviso').textContent = 'Esc otra vez para borrar el ticket.'; $('aviso').style.color = '#5b6478'; }
 });
 
-// Con descuento aprobado, pedido cargado o 3 piezas o más, «Cancelar venta» (y doble Esc) pide un segundo toque (#817).
-let cancelarArmado = null;
+// Con descuento aprobado, pedido cargado o 3 piezas o más, «Cancelar venta» (y doble Esc) pide un segundo toque (#817). El toque queda
+// armado 4 s sobre ESTE ticket: si el ticket cambia (otra pieza, un cobro) se desarma, y pintar() lo revisa en cada cambio.
+const firmaTicket = () => JSON.stringify([lineas.map((l) => [l.codigo, l.cantidad]), descuento?.estado ?? '', pedidoCargado?.id ?? '']);
+function desarmarCancelar() {
+  if (!cancelarArmado) return;
+  clearTimeout(cancelarArmado.temporizador);
+  cancelarArmado = null;
+  $('cancelar').textContent = 'Cancelar venta';
+}
+function revisarCancelarArmado() {
+  if (cancelarArmado && cancelarArmado.firma !== firmaTicket()) desarmarCancelar();
+}
 $('cancelar').addEventListener('click', () => {
   if (!cancelarArmado && cancelarPideConfirmar({ piezas: totales(lineas).piezas, descuentoAprobado: descuento?.estado === 'aprobada', pedido: !!pedidoCargado })) {
     $('cancelar').textContent = 'Toca otra vez para borrar el ticket';
     $('aviso').textContent = 'Toca otra vez para borrar el ticket.'; $('aviso').style.color = '#D72B32';
-    cancelarArmado = setTimeout(() => { cancelarArmado = null; $('cancelar').textContent = 'Cancelar venta'; }, 4000);
+    cancelarArmado = { firma: firmaTicket(), temporizador: setTimeout(desarmarCancelar, 4000) };
+    // El foco sale del botón: el Enter con el que el lector termina cada escaneo lo pulsaría otra vez y borraría el ticket (#817).
+    $('codigo').focus();
     return;
   }
-  clearTimeout(cancelarArmado); cancelarArmado = null; $('cancelar').textContent = 'Cancelar venta';
+  desarmarCancelar();
   lineas = []; idVenta = null; pedidoCargado = null; descuento = null; sinPromo = false; pintarDescuento(); quitarSocio(); $('efectivo').value = ''; $('clave-rastreo').value = ''; $('monto-transferido').value = ''; $('banco-emisor').value = ''; $('comprobante').value = ''; $('comprobante').dataset.key = ''; $('comprobante-aviso').textContent = ''; $('clave-error').textContent = ''; $('forma').value = 'efectivo'; formaElegida = false; $('aviso').textContent = 'Venta cancelada';
   $('aviso').style.color = '#5b6478'; pintar(); $('codigo').focus();
 });
