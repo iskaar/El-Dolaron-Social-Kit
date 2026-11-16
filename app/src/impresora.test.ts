@@ -257,6 +257,23 @@ test('el corte impreso lista las piezas del conteo, de mayor a menor', async () 
   assert.match(texto, /CONTEO\n +1 x \$500\.00 +\$500\.00\n +2 x \$100\.00 +\$200\.00\n +1 x \$50\.00 +\$50\.00/);
 });
 
+test('el corte impreso de un corte por total (sin conteo) no trae tabla de denominaciones (#817)', async () => {
+  const { pedazos } = impresoraFalsa();
+  const { reconectarImpresora, imprimirCorte } = await import('../public/impresora.js');
+  await reconectarImpresora();
+  const antes = pedazos.length;
+  await imprimirCorte({
+    caja: 'Caja 1', cajero: 'caja@prueba.mx', desde: null, hasta: '2026-10-03T02:05:00Z', tickets: 1,
+    fondo_inicial: 50000, efectivo_ventas: 25000, efectivo_devoluciones: 0, retiros: 0, gastos: 0,
+    efectivo_esperado: 75000, efectivo_contado: 123450, diferencia: 48450,
+    tarjeta_sistema: 0, tarjeta_terminal: 0, transferencias: 0, dolarones: 0,
+    fondo_siguiente: 50000, entregado: 73450, notas: '', conteo: '{}',
+  });
+  const texto = new TextDecoder().decode(Uint8Array.from(pedazos.slice(antes).flatMap((p) => [...p])));
+  assert.match(texto, /Contado +\$1234\.50/);
+  assert.doesNotMatch(texto, /CONTEO/);
+});
+
 test('QR del vale (Issue #258): URL al portal con el código tras #; la caja lo sigue leyendo; invita solo si está completo', async () => {
   const { pedazos } = impresoraFalsa();
   const { reconectarImpresora, imprimirVale, codigoQrVale, URL_VALE } = await import('../public/impresora.js');

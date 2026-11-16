@@ -295,3 +295,67 @@ export function contadoDe(conteo) {
   }
   return suma;
 }
+
+/* ---------- Avisos y teclado de la caja (#817): lógica pura, para probarla sin pantalla ---------- */
+
+/**
+ * ¿Lo escrito en el campo de escaneo es texto para buscar por nombre («bufanda», «juguetes 49») y no algo que pueda ser un código?
+ * Un código es solo dígitos (etiqueta, lector), ED-…, P-17, DC-/DP-… , BU-…, una banda (una o dos letras y el monto: JU49, R19)
+ * o el QR de un vale (una URL); un «3*» antes no cambia lo que es.
+ */
+export function esBusquedaPorTexto(texto) {
+  const t = (leerMultiplicador(texto)?.codigo ?? texto).trim();
+  return /\p{L}/u.test(t) && !/^(ED-|P-?\d+$|D[CP]-|BU-|[a-z]{1,2}\d+$|https?:\/\/)/i.test(t);
+}
+
+/**
+ * Por qué no entra la pieza al ticket; '' si sí entra. `stock` es la existencia de esta tienda, `enTicket` lo que ya
+ * hay de ella en el ticket y `cantidad` lo que se quiere agregar.
+ */
+export function avisoExistencia(nombre, stock, enTicket, cantidad) {
+  if (stock - enTicket >= cantidad) return '';
+  if (enTicket > 0 && stock <= 1) return `${nombre} ya está en este ticket.`;
+  if (enTicket > 0 || (cantidad > 1 && stock > 0)) return `${nombre}: solo hay ${stock} en existencia.`;
+  return `${nombre} ya se vendió, está apartada o no está en esta tienda. Si es de un pedido, escanea su folio (P-…).`;
+}
+
+/** Sugerencia resaltada tras una flecha (-1 = ninguna). Arriba desde la primera vuelve a «ninguna»: Enter entonces es el del lector. */
+export const moverSugerencia = (actual, total, tecla) =>
+  total <= 0 ? -1 : tecla === 'ArrowDown' ? Math.min(actual + 1, total - 1) : Math.max(actual - 1, -1);
+
+/** «Cancelar venta» (y doble Esc) pide un segundo toque si se perdería trabajo: descuento aprobado, pedido cargado o 3 piezas o más. */
+export const cancelarPideConfirmar = ({ piezas, descuentoAprobado, pedido }) =>
+  piezas > 0 && (!!descuentoAprobado || !!pedido || piezas >= 3);
+
+/** «1 venta» / «2 ventas». */
+export const nVentas = (n) => `${n} ${n === 1 ? 'venta' : 'ventas'}`;
+
+/** Por qué el corte no puede seguir si algo no llegó al servidor; '' si puede. Sin red y sin cola no hay «0 ventas»: es la red. */
+export function avisoCorteSinEnviar(pendientes, enLinea) {
+  if (pendientes) return `Hay ${nVentas(pendientes)} sin sincronizar. Espera a tener red antes del corte.`;
+  return enLinea ? '' : 'Sin red: el corte necesita conexión.';
+}
+
+/** Gasto que un cajero puede pagar del cajón sin el dueño, en centavos: el mismo tope del servidor (corte.ts). */
+export const GASTO_MAXIMO_CAJERO = 10000;
+/** Aviso previo en pantalla; el servidor es quien decide. */
+export const gastoRequiereDueno = (tipo, importe) => tipo === 'gasto' && importe > GASTO_MAXIMO_CAJERO;
+
+/** Dinero con sus dos decimales: «$1,234.50». */
+export const pesosExactos = (centavos) => dinero(centavos);
+
+/** Total de efectivo escrito en pesos con centavos → centavos enteros; null si está vacío, no es número o pasa de $1,000,000 (tope del servidor). */
+export function centavosDeTexto(texto) {
+  const t = String(texto ?? '').trim();
+  if (!/^(\d+(\.\d{1,2})?|\.\d{1,2})$/.test(t)) return null;
+  const centavos = Math.round(Number(t) * 100);
+  return centavos <= 100_000_000 ? centavos : null;
+}
+
+/** Piezas de una sola denominación a partir de las cuales se pide confirmar al contar (no bloquea). */
+export const PIEZAS_IMPROBABLES = 200;
+/** «¿Seguro? 250 × $5.00 = $1,250.00» para una cantidad improbable de una denominación; '' si es normal. */
+export function alertaConteo(denominacion, piezas) {
+  return Number.isInteger(piezas) && piezas > PIEZAS_IMPROBABLES
+    ? `¿Seguro? ${piezas} × ${dinero(denominacion)} = ${dinero(piezas * denominacion)}` : '';
+}
