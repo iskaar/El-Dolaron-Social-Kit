@@ -1845,6 +1845,11 @@ async function cobrar() {
           socioTicket.bono_promo = cuerpo.bono_promo ?? 0;
           socioTicket.saldo = cuerpo.saldo?.disponible ?? socioTicket.saldo;
         }
+      } else if (lineas.some((l) => l.en_mano)) {
+        // #832: una venta con una pieza «en la mano» nunca se encola: el ticket sigue abierto con el mismo folio (idVenta) y se toca el mismo botón.
+        $('aviso').textContent = 'No se supo si se cobró. No cambies el ticket: toca el mismo botón de cobro otra vez (es el mismo folio, no se cobra doble).';
+        $('aviso').style.color = '#D72B32';
+        return;
       } else {
         // Ya se cobro asi: el servidor respeta la promo que vio el cliente aunque el cupo se haya acabado.
         venta.sin_red = true;

@@ -68,7 +68,7 @@ const esc = (texto) => String(texto ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&
 const pesos = (centavos) => (centavos / 100).toLocaleString('es-MX', { style: 'currency', currency: 'MXN' });
 const fecha = (iso) => new Date(iso).toLocaleString('es-MX', { dateStyle: 'short', timeStyle: 'short' });
 const MOTIVOS = ['robo', 'merma', 'error de captura'];
-const MOTIVOS_TEXTO = { fusion: 'Fusión', descarte: 'Descarte' };
+const MOTIVOS_TEXTO = { fusion: 'Fusión', descarte: 'Descarte', hallada_en_caja: 'Hallada en caja (vendida con la pieza en la mano)' };
 
 let piezas = [];
 let faltantesActuales = [];

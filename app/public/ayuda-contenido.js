@@ -316,7 +316,7 @@ export const ESCENARIOS = [
       'Cóbrala como siempre: la caja corrige la existencia en la misma venta y el dueño recibe un aviso para revisar de dónde salió. No subas la existencia por tu cuenta.',
       'Si la caja no deja venderla así o te sobran etiquetas iguales, avisa al encargado.',
     ],
-    ojo: 'Sin red no se puede: la venta se queda sin hacer. Una pieza apartada, caducada (grado D), descartada o con una venta de Mercado Libre por atender tampoco se vende así.',
+    ojo: 'Sin red no se puede: la venta se queda sin hacer, y si no se supo si el cobro salió, toca el mismo botón de cobro otra vez sin cambiar el ticket. Una pieza apartada, caducada (grado D), descartada, que va en un bulto sin recibir, con una cancelación pendiente o con una venta de Mercado Libre por atender tampoco se vende así.',
     ver: ['ya-se-vendio', 'cuando-llamar-al-encargado'],
     pantalla: 'caja',
     textos: ['La tengo en la mano: venderla', ['venta', 'Tiene otra etiqueta igual'], ['venta', 'Estaba devuelta o apartada'], ['venta', 'No sé']],

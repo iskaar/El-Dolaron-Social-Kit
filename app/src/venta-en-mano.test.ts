@@ -116,17 +116,43 @@ test('si alguien subió la existencia entre lo que vio la caja y el cobro, no se
   assert.equal(t.correos.length, 0, 'sin ajuste no hay aviso al dueño');
 });
 
-test('si la existencia cambió y ya no alcanza, no se ajusta de más y la venta falla nombrando la pieza', async () => {
-  const t = montar();
-  const token = await t.entrar();
-  // La caja vio 1 y quiere 2 (faltante 1), pero entretanto se vendió la que había: hay 0. Ajustar 1 «a ciegas» dejaría vender 1 de las 2.
-  const r = await t.vender(token, t.cuerpo([mano(CERO, { cantidad: 2, en_mano: { motivo: 'no_se', esperado: 1 } })]));
-  assert.equal(r.status, 409);
-  assert.match(r.cuerpo.error, /Quita Lámpara: ya no está disponible\./);
-  assert.equal(r.cuerpo.codigo, 'ED-000002');
-  assert.equal(t.stock(), 0);
-  assert.equal(t.ajustes().length, 0);
-  assert.equal(t.ventas(), 0);
+/** Como si el impedimento apareciera DESPUÉS de la lectura previa: se agrega justo antes de que corra el batch de la venta. */
+function antesDelBatch(t: ReturnType<typeof montar>, hacer: () => void) {
+  const batch = t.env.DB.batch.bind(t.env.DB);
+  t.env.DB.batch = (async (sentencias: never[]) => { hacer(); return batch(sentencias); }) as never;
+}
+const apartar = (t: ReturnType<typeof montar>, id = CERO) => t.db.exec(`insert into pedidos (id, folio, cliente, telefono, entrega, vendedora, estado, vence_en, anticipo, saldo, forma_pago, saldo_vence_en, creado_en, actualizado_en)
+  values ('ped-${id}', 21, 'X', '4441234567', 'tienda', 'portal', 'apartado', 'z', 0, 0, 'transferencia', 'z', '', '');
+  insert into pedido_lineas (pedido_id, producto_id, cantidad, precio) values ('ped-${id}', '${id}', 1, 10000)`);
+const enBulto = (t: ReturnType<typeof montar>, estado = 'cerrado', origen = 'soledad', destino = 'salk', id = CERO) => t.db.exec(`
+  insert into bultos (id, folio, origen, destino, estado, creado_por, creado_en) values ('bu-${id}', 'BU-K7Q2M', '${origen}', '${destino}', 'abierto', 'x', '');
+  insert into bulto_lineas (id, bulto_id, producto_id, cantidad, creado_por, creado_en) values ('bl-${id}', 'bu-${id}', '${id}', 1, 'x', '');
+  ${estado === 'abierto' ? '' : `update bultos set estado = '${estado}' where id = 'bu-${id}'`}`);
+const cancelacionPendiente = (t: ReturnType<typeof montar>, ventaId: string) => t.db.prepare(`insert into solicitudes (id, tipo, correo, nombre, justificacion, datos, estado, creado_en)
+  values (?, 'cancelacion', 'x', '', 'x', ?, 'pendiente', '')`).run(crypto.randomUUID(), JSON.stringify({ venta_id: ventaId }));
+
+test('si la guarda del batch bloquea el ajuste (apartado, orden de ML, bulto o cancelación pendiente aparecidos tras la lectura previa), la venta falla y el 409 nombra la pieza', async () => {
+  const casos: [string, (t: ReturnType<typeof montar>) => void][] = [
+    ['apartado', (t) => apartar(t)],
+    ['orden de ML', (t) => t.db.exec(`insert into ml_ventas (order_id, ml_item_id, producto_id, cantidad, estado, descontado, recibido_en) values ('o', 'i', '${CERO}', 1, 'descontada', 1, '')`)],
+    ['bulto', (t) => enBulto(t)],
+    ['cancelación pendiente', (t) => { t.db.prepare('insert into ventas (id, total, forma_pago, efectivo, cambio, creado_en, registrado_en) values (?, 1, ?, 1, 0, ?, ?)').run('v-vieja', 'efectivo', '', '');
+      t.db.prepare('insert into venta_lineas (venta_id, producto_id, codigo, nombre, precio, cantidad) values (?, ?, ?, ?, 1, 1)').run('v-vieja', CERO, 'ED-000002', 'Lámpara');
+      cancelacionPendiente(t, 'v-vieja'); }],
+  ];
+  for (const [que, impedimento] of casos) {
+    const t = montar();
+    const token = await t.entrar();
+    antesDelBatch(t, () => impedimento(t));
+    const r = await t.vender(token, t.cuerpo([mano(), { producto_id: PRODUCTO, cantidad: 1 }], { efectivo: 40000 }));
+    assert.equal(r.status, 409, `${que}: ${JSON.stringify(r.cuerpo)}`);
+    assert.match(r.cuerpo.error, /Quita Lámpara: ya no está disponible\./, que);
+    assert.equal(r.cuerpo.codigo, 'ED-000002', que);
+    assert.equal(t.stock(), 0, que);
+    assert.equal(t.stock(PRODUCTO), 50, `${que}: el ticket completo se deshace`);
+    assert.equal(t.ajustes().length, 0, que);
+    assert.equal((t.db.prepare('select count(*) n from ventas where id <> ?').get('v-vieja') as { n: number }).n, 0, que);
+  }
 });
 
 test('con una línea marcada y otra sin existencia que sí falla, el ticket completo se deshace: ni venta ni ajuste', async () => {
@@ -225,6 +251,8 @@ test('marca mal formada: motivo desconocido, existencia no entera, esperado mayo
     ['no es objeto', mano(CERO, { en_mano: true })],
     ['nulo', mano(CERO, { en_mano: null })],
     ['esperado suficiente', mano(CERO, { en_mano: { motivo: 'no_se', esperado: 1 } })],
+    ['esperado distinto de 0 aunque falte', mano(CERO, { cantidad: 2, en_mano: { motivo: 'no_se', esperado: 1 } })],
+    ['más de una pieza', mano(CERO, { cantidad: 2 })],
   ] as const) {
     const r = await t.vender(token, t.cuerpo([linea]));
     assert.equal(r.status, 400, `${que}: ${JSON.stringify(r.cuerpo)}`);
@@ -301,7 +329,7 @@ test('una venta sin marca no cambia: mismo hash que antes y ningún renglón nue
 
 test('las condiciones del batch bastan por sí solas (la lectura previa no es la que protege): apartada, orden de Mercado Libre, folio repetido o existencia distinta', async () => {
   const t = montar();
-  const marca = (id: string, extra: Partial<MarcaEnMano> = {}): MarcaEnMano => ({ producto_id: id, codigo: 'x', nombre: 'x', cantidad: 1, esperado: 0, faltante: 1, motivo: 'no_se', ...extra });
+  const marca = (id: string, extra: Partial<MarcaEnMano> = {}): MarcaEnMano => ({ producto_id: id, codigo: 'x', nombre: 'x', cantidad: 1, esperado: 0, faltante: 1, motivo: 'no_se', otras: '', ...extra });
   const correr = async (m: MarcaEnMano, venta = crypto.randomUUID()) => {
     const r = await t.env.DB.batch(sentenciasEnMano(t.env, { tienda: 'soledad', ventaId: venta, correo: ANA, caja: 'Caja 1', ahora: new Date().toISOString(), marcas: [m] }));
     return { cambios: r[0].meta.changes, venta };
@@ -322,4 +350,164 @@ test('las condiciones del batch bastan por sí solas (la lectura previa no es la
   t.db.prepare('update productos set stock = 0').run();
   assert.equal((await correr(marca(CERO), venta)).cambios, 0, 'mismo folio y pieza: ya se ajustó una vez');
   assert.equal(t.ajustes().length, 2, 'solo los dos que sí aplicaron (el primero y el de la orden atendida)');
+});
+
+test('las mismas condiciones protegen en una sucursal, también cuando la fila de existencia_tienda ya se creó en el mismo batch', async () => {
+  const t = montar('salk');
+  const marca = (id: string): MarcaEnMano => ({ producto_id: id, codigo: 'x', nombre: 'x', cantidad: 1, esperado: 0, faltante: 1, motivo: 'no_se', otras: '' });
+  const correr = async () => {
+    const r = await t.env.DB.batch(sentenciasEnMano(t.env, { tienda: 'salk', ventaId: crypto.randomUUID(), correo: ANA, caja: 'Salk 1', ahora: new Date().toISOString(), marcas: [marca(CERO)] }));
+    return r.map((x) => x.meta.changes);   // [asegurar fila, ajuste, rastro]
+  };
+  const unidades = () => (t.db.prepare('select unidades from existencia_tienda where producto_id = ? and tienda = ?').get(CERO, 'salk') as { unidades: number } | undefined)?.unidades;
+  apartar(t);
+  assert.deepEqual(await correr(), [1, 0, 0], 'apartada: la fila se asegura en 0 y nada más');
+  assert.equal(unidades(), 0);
+  assert.deepEqual((await correr()).slice(1), [0, 0], 'con la fila ya creada, igual');
+  t.db.exec(`update pedidos set estado = 'cancelado'`);
+  t.db.exec(`insert into ml_ventas (order_id, ml_item_id, producto_id, cantidad, estado, descontado, recibido_en) values ('o', 'i', '${CERO}', 1, 'recibida', 0, '')`);
+  assert.deepEqual((await correr()).slice(1), [0, 0], 'orden de ML por atender');
+  t.db.exec(`update ml_ventas set atendida_en = 'hoy'`);
+  enBulto(t, 'abierto');
+  assert.deepEqual((await correr()).slice(1), [0, 0], 'bulto abierto');
+  t.db.exec(`update bultos set estado = 'cerrado'`);
+  assert.deepEqual((await correr()).slice(1), [0, 0], 'bulto cerrado');
+  t.db.exec(`update bultos set estado = 'recibido'`);
+  assert.deepEqual((await correr()).slice(1), [1, 1], 'bulto ya recibido: ya no impide');
+  assert.equal(unidades(), 1);
+  assert.equal(t.ajustes().length, 1);
+});
+
+test('una pieza que va en un bulto sin recibir no se vende «en la mano», en el origen ni en el destino, y dice qué bulto recibir', async () => {
+  for (const [terminal, que] of [['soledad', 'origen'], ['salk', 'destino']] as const) {
+    for (const estado of ['abierto', 'cerrado']) {
+      const t = montar(terminal);
+      const token = await t.entrar();
+      enBulto(t, estado);
+      const r = await t.vender(token, t.cuerpo([mano()]));
+      assert.equal(r.status, 409, `${que} ${estado}: ${JSON.stringify(r.cuerpo)}`);
+      assert.match(r.cuerpo.error, /Va en el bulto BU-K7Q2M: recíbelo primero en «Bultos»\./);
+      assert.equal(t.ventas(), 0);
+      assert.equal(t.ajustes().length, 0);
+      assert.equal(t.stock(), 0);
+    }
+  }
+  // Un bulto recibido, o la pieza quitada de él, ya no la retiene.
+  const t = montar();
+  const token = await t.entrar();
+  enBulto(t, 'abierto');
+  t.db.exec(`update bulto_lineas set quitada_en = 'hoy'`);
+  assert.equal((await t.vender(token, t.cuerpo([mano()]))).status, 201);
+});
+
+test('una cancelación pendiente de una venta de esta pieza la frena; resuelta o de otra pieza, no', async () => {
+  const t = montar();
+  const token = await t.entrar();
+  t.db.prepare('update productos set stock = 1 where id = ?').run(CERO);
+  const anterior = t.cuerpo([{ producto_id: CERO, cantidad: 1 }]);
+  assert.equal((await t.vender(token, anterior)).status, 201);
+  cancelacionPendiente(t, anterior.id as string);
+  const r = await t.vender(token, t.cuerpo([mano()]));
+  assert.equal(r.status, 409);
+  assert.match(r.cuerpo.error, /Hay una cancelación pendiente de una venta de esta pieza: espera la respuesta del dueño\./);
+  assert.equal(t.ajustes().length, 0);
+  // La misma pendiente no frena otra pieza.
+  const otra = await t.vender(token, t.cuerpo([{ producto_id: PRODUCTO, cantidad: 1 }], { efectivo: 25000 }));
+  assert.equal(otra.status, 201);
+  t.db.exec(`update solicitudes set estado = 'rechazada'`);
+  assert.equal((await t.vender(token, t.cuerpo([mano()]))).status, 201);
+});
+
+test('unidades registradas en OTRA tienda no impiden vender: se avisa al dueño y queda en la fila de /avisos', async () => {
+  const t = montar();
+  const token = await t.entrar();
+  t.db.exec(`insert into existencia_tienda (producto_id, tienda, unidades, actualizado_en) values ('${CERO}', 'salk', 1, ''), ('${CERO}', 'romero', 2, '')`);
+  const r = await t.vender(token, t.cuerpo([mano()]));
+  assert.equal(r.status, 201, JSON.stringify(r.cuerpo));
+  assert.equal(t.stock(), 0);
+  const [a] = t.ajustes();
+  assert.equal(a.otras, 'Coronel Romero tiene 2 registradas de esta pieza: revisa si es la misma. Avenida Salk tiene 1 registrada de esta pieza: revisa si es la misma.');
+  await t.esperar();
+  assert.equal(t.correos.length, 1);
+  assert.match(t.correos[0].text, /Avenida Salk tiene 1 registrada de esta pieza: revisa si es la misma\./);
+  t.como(DUENO);
+  assert.equal(((await t.pedir('/api/ventas-sin-existencia', undefined, 'GET')).cuerpo as unknown as any[])[0].otras, a.otras);
+  // Y desde una sucursal, Soledad cuenta como «otra».
+  const s = montar('salk');
+  const tokenS = await s.entrar();
+  s.db.prepare('update productos set stock = 3 where id = ?').run(CERO);
+  assert.equal((await s.vender(tokenS, s.cuerpo([mano()]))).status, 201);
+  assert.equal(s.ajustes()[0].otras, 'Soledad tiene 3 registradas de esta pieza: revisa si es la misma.');
+  const sola = montar();
+  assert.equal((await sola.vender(await sola.entrar(), sola.cuerpo([mano()]))).status, 201);
+  assert.equal(sola.ajustes()[0].otras, '', 'sin unidades en otras tiendas no hay nada que decir');
+});
+
+test('cancelar o devolver una venta anterior de la pieza, cuando después se vendió «en la mano», avisa al dueño sin cambiar la existencia', async () => {
+  const t = montar();
+  const token = await t.entrar();
+  t.db.prepare('update productos set stock = 1 where id = ?').run(CERO);
+  const anterior = t.cuerpo([{ producto_id: CERO, cantidad: 1 }]);
+  assert.equal((await t.vender(token, anterior)).status, 201);
+  t.db.prepare('update ventas set registrado_en = ? where id = ?').run(new Date(Date.now() - 3600_000).toISOString(), anterior.id);
+  const en_mano = t.cuerpo([mano()]);
+  assert.equal((await t.vender(token, en_mano)).status, 201);
+  await t.esperar();
+  assert.equal(t.correos.length, 1, 'el aviso de la venta en la mano');
+  // Cancelar la venta de ESTA misma pieza «en la mano»: no hay nada que revisar.
+  const propia = await t.pedir(`/api/ventas/${en_mano.id}/cancelar`, { motivo: 'error de cobro', caja: 'Caja 1' }, 'POST', { 'x-cajero': token });
+  assert.equal(propia.status, 200);
+  await t.esperar();
+  assert.equal(t.correos.length, 1);
+  t.db.prepare('update productos set stock = 0 where id = ?').run(CERO);
+  // Cancelar la anterior regresa una unidad que quizá ya no existe: se avisa, y la existencia se mueve igual que siempre (+1).
+  const r = await t.pedir(`/api/ventas/${anterior.id}/cancelar`, { motivo: 'error de cobro', caja: 'Caja 1' }, 'POST', { 'x-cajero': token });
+  assert.equal(r.status, 200, JSON.stringify(r.cuerpo));
+  assert.equal(t.stock(), 1);
+  await t.esperar();
+  assert.equal(t.correos.length, 2);
+  assert.equal(t.correos[1].subject, 'Revisa la existencia: Cancelación de una venta');
+  assert.match(t.correos[1].text, /ED-000002 Lámpara.*Esta pieza se vendió después con «La tengo en la mano»: revisa la existencia\./);
+  // Repetir la cancelación (ya estaba cancelada) no vuelve a avisar.
+  await t.pedir(`/api/ventas/${anterior.id}/cancelar`, { motivo: 'error de cobro', caja: 'Caja 1' }, 'POST', { 'x-cajero': token });
+  await t.esperar();
+  assert.equal(t.correos.length, 2);
+  // Una devolución de la pieza de otra venta anterior, sin «en la mano» posterior, no avisa.
+  const normal = t.cuerpo([{ producto_id: PRODUCTO, cantidad: 1 }], { efectivo: 25000 });
+  await t.vender(token, normal);
+  await t.pedir(`/api/ventas/${normal.id}/cancelar`, { motivo: 'error de cobro', caja: 'Caja 1' }, 'POST', { 'x-cajero': token });
+  await t.esperar();
+  assert.equal(t.correos.length, 2);
+});
+
+test('devolver una pieza suelta de una venta anterior también avisa', async () => {
+  const t = montar();
+  const token = await t.entrar();
+  t.db.prepare('update productos set stock = 1 where id = ?').run(CERO);
+  const anterior = t.cuerpo([{ producto_id: CERO, cantidad: 1 }]);
+  await t.vender(token, anterior);
+  t.db.prepare('update ventas set registrado_en = ? where id = ?').run(new Date(Date.now() - 3600_000).toISOString(), anterior.id);
+  await t.vender(token, t.cuerpo([mano()]));
+  await t.esperar();
+  const lineaId = (t.db.prepare('select id from venta_lineas where venta_id = ?').get(anterior.id) as { id: number }).id;
+  const r = await t.pedir(`/api/ventas/${anterior.id}/lineas/${lineaId}/cancelar`, { id: crypto.randomUUID(), cantidad: 1, motivo: 'se arrepintió', caja: 'Caja 1' }, 'POST', { 'x-cajero': token });
+  assert.ok([200, 201].includes(r.status), JSON.stringify(r.cuerpo));
+  await t.esperar();
+  assert.equal(t.correos.at(-1)!.subject, 'Revisa la existencia: Devolución de una pieza');
+});
+
+test('un reintento del mismo folio no vuelve a avisar al dueño', async () => {
+  const t = montar();
+  const token = await t.entrar();
+  const c = t.cuerpo([mano()]);
+  assert.equal((await t.vender(token, c)).status, 201);
+  await t.esperar();
+  assert.equal(t.correos.length, 1);
+  for (let i = 0; i < 2; i++) {
+    const otra = await t.vender(token, c);
+    assert.equal(otra.cuerpo.duplicada, true);
+    await t.esperar();
+  }
+  assert.equal(t.correos.length, 1, 'ningún aviso más por el reintento');
+  assert.equal(t.ajustes().length, 1);
 });

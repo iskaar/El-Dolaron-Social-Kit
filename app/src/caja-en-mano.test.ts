@@ -6,7 +6,7 @@ import { readFileSync } from 'node:fs';
 import { runInNewContext } from 'node:vm';
 import {
   agregar, leerMultiplicador, avisoExistencia, totales, efectivoAlcanza, saldoCanjeable, dolaronesGanados, anticipoDePedido, transferenciaDe, CLAVE_DESDE,
-  debePreguntarSocio, descuentoDe, TOPE_DESCUENTO, puedeVenderEnMano, MOTIVOS_EN_MANO, SIN_RED_EN_MANO,
+  debePreguntarSocio, descuentoDe, TOPE_DESCUENTO, puedeVenderEnMano, MOTIVOS_EN_MANO, SIN_RED_EN_MANO, moverSugerencia, esBusquedaPorTexto,
 } from '../public/venta.js';
 import { codigoDeDigitos } from '../public/code128.js';
 
@@ -57,11 +57,12 @@ function montar(piezas: any[], { enLinea = true } = {}) {
   const contexto: Record<string, unknown> = {
     $, catalogo, agregar, leerMultiplicador, codigoDeDigitos, avisoExistencia, puedeVenderEnMano, MOTIVOS_EN_MANO, SIN_RED_EN_MANO, Map, Date, Math,
     precioHoy: (p: any) => p.precio, navigator: red, cargarPedido() {}, buscarSocio() {}, cargarCatalogo: async () => {},
-    pintar: () => pintados.push(1), sonar() {}, escanear() {}, TONO_PIEZA: {}, document: { createElement: () => elemento() },
+    pintar: () => pintados.push(1), sonar() {}, TONO_RECHAZO: {}, escapar: String, pesos: String, moverSugerencia, esBusquedaPorTexto, TONO_PIEZA: {}, document: { createElement: () => elemento() },
   };
   const rutina = runInNewContext(`let cobrando = false, idVenta = null, lineas = [];
     ${entre('/* ---------- «La tengo en la mano» (#832) ---------- */', '/**\n * La etiqueta impresa codifica')}
-    ${entre('function buscarPieza(', '/* ---------- busqueda a mano')}
+    ${entre('function buscarPieza(', '/* ---------- socio y Dolarones')}
+    ${entre("$('codigo').addEventListener('keydown'", '// Camara del celular')}
     ({ agregarCodigo, lineas: () => lineas, quitar: (i) => { lineas = lineas.filter((_, j) => j !== i); }, cobrando: (v) => { cobrando = v; } })`, contexto);
   return { ...rutina, $, panel: $('en-mano'), aviso: $('aviso'), codigo: $('codigo'), pintados, catalogo, red };
 }
@@ -239,4 +240,63 @@ test('cobrar sin red con una pieza marcada: no se envía ni se encola, lo dice y
   const normal = montarCobro({ enLinea: false, marcada: false, respuesta: async () => { throw new Error('sin red'); } });
   await normal.cobrar();
   assert.equal(normal.guardadas.length, 1, 'el resto de las ventas sin red sigue en cola');
+});
+
+test('cobrar: si no se sabe cómo salió el cobro (timeout, error de red con la red arriba o 5xx), la venta marcada NO se encola: el ticket sigue abierto con el mismo folio', async () => {
+  const fallas: [string, () => Promise<any>][] = [
+    ['timeout', async () => { throw new DOMException('timeout', 'TimeoutError'); }],
+    ['error de red', async () => { throw new TypeError('Failed to fetch'); }],
+    ['5xx', async () => ({ ok: false, status: 503, json: async () => ({}) })],
+  ];
+  for (const [que, falla] of fallas) {
+    let llamada = 0;
+    const c = montarCobro({ respuesta: async () => (llamada++ === 0 ? falla() : { ok: true, status: 201, json: async () => ({ id: 'x', ganados: 0, vale_emitido: null }) }) as any });
+    await c.cobrar();
+    assert.equal(c.guardadas.length, 0, `${que}: nada en IndexedDB`);
+    assert.match(c.$('aviso').textContent, /toca el mismo botón de cobro otra vez/, que);
+    assert.equal(c.$('aviso').style.color, '#D72B32', que);
+    assert.equal(c.$('codigo').enfocado, true, que);
+    await c.cobrar();   // el mismo botón
+    assert.equal(c.enviadas.length, 2, que);
+    assert.equal(c.enviadas[1].id, c.enviadas[0].id, `${que}: el mismo folio en el reintento`);
+    assert.deepEqual(c.enviadas[1].lineas, c.enviadas[0].lineas, que);
+    assert.match(c.$('aviso').textContent, /^Cobrado/, que);
+    assert.equal(c.guardadas.length, 0, que);
+  }
+  // Sin la marca, la misma falla sigue encolando la venta para reintentarla sola (nada cambia).
+  const normal = montarCobro({ marcada: false, respuesta: async () => { throw new Error('sin red'); } });
+  await normal.cobrar();
+  assert.equal(normal.guardadas.length, 1);
+});
+
+test('lector: caracteres + Enter nunca activan «venderla» ni un motivo; lo que hacen es escanear (y quitar la oferta)', () => {
+  const c = montar([pieza('ED-000001', 0), pieza('ED-000002', 4)]);
+  const codigo = c.codigo;
+  const enter = () => codigo.oyentes.keydown({ key: 'Enter', target: codigo, preventDefault() {} });
+  const escanear = (texto: string) => {
+    codigo.value = texto;                       // el lector teclea en el campo que tiene el foco: #codigo
+    codigo.oyentes.input?.({});
+    enter();
+  };
+  escanear('ED-000001');
+  const [venderla] = botones(c.panel);
+  assert.deepEqual(Object.keys(venderla.oyentes), ['click'], 'el botón solo responde a un clic: ni keydown, ni keypress ni keyup');
+  assert.equal(venderla.enfocado, 0);
+  assert.equal(codigo.value, '', 'el Enter del lector limpia #codigo, que conserva el foco');
+  // Un escaneo perdido o repetido (otro Enter, con o sin texto) no toca el botón.
+  enter();
+  escanear('ED-000001');
+  assert.equal(c.lineas().length, 0);
+  assert.equal(textos(c.panel).length, 1, 'la oferta sigue siendo solo el botón, sin motivos');
+  // Con los motivos a la vista, lo que se escanea los quita y no elige ninguno.
+  venderla.click();
+  assert.equal(botones(c.panel).length, 3);
+  for (const b of botones(c.panel)) assert.deepEqual(Object.keys(b.oyentes), ['click']);
+  escanear('ED-000002');
+  assert.equal(c.panel.hidden, true);
+  assert.deepEqual(JSON.parse(JSON.stringify(c.lineas().map((l: any) => [l.codigo, l.en_mano ?? null]))), [['ED-000002', null]]);
+  // Y un Enter a secas con el campo vacío no hace nada.
+  codigo.value = '';
+  enter();
+  assert.equal(c.lineas().length, 1);
 });

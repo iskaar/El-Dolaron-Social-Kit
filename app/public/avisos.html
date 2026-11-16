@@ -310,6 +310,7 @@ function filaSinExistencia(s) {
       h('div', { class: 'nombre' }, h('span', { class: 'codigo' }, s.codigo), ' · ', s.nombre),
       h('div', { class: 'nota' }, `${[s.caja, s.tienda_nombre].filter(Boolean).join(', ')} · cajero ${s.cajero} · ${fecha(s.ajustado_en)}`),
       h('div', {}, `Existencia ${s.antes} → ${s.despues} y luego la venta la bajó. Motivo que escogió: `, h('b', {}, s.razon_texto)),
+      s.otras ? h('div', { class: 'accion' }, s.otras) : null,
       s.cancelada ? h('div', { class: 'accion' }, 'La venta se canceló después: la pieza volvió a la existencia.') : null,
     ], [h('a', { class: 'boton', href: `/inventario?pieza=${encodeURIComponent(s.codigo)}` }, 'Abrir en Inventario ↗')]);
 }

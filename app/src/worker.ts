@@ -28,7 +28,7 @@ import {
 import { cajeroEnTurno, listarCajeros, listarVendedoras, esVendedora, entrar, salir, ponerPin } from './cajeros.ts';
 import { rutaPush } from './push.ts';
 import { reportarRechazo, listarRechazadas, resolverRechazada } from './ventas-rechazadas.ts';
-import { validarEnMano, sentenciasEnMano, avisarEnMano, listarEnMano, cubiertasPorAjuste } from './venta-en-mano.ts';
+import { validarEnMano, sentenciasEnMano, avisarEnMano, listarEnMano, cubiertasPorAjuste, avisarReverso } from './venta-en-mano.ts';
 import { avisosDePedidos, marcarRenglon, type Accion } from './avisos-pedidos.ts';
 import { rutaCep, transferenciasPorValidar, validarTransferencia } from './cep.ts';
 import { subirComprobante, verComprobante } from './comprobante.ts';
@@ -2003,7 +2003,7 @@ async function registrarVenta(request: Request, env: Env, ctx: ExecutionContext,
   if (!preparado.ok) {
     return json({ error: preparado.error }, 400);
   }
-  const enMano = await validarEnMano(env, venta.lineas as LineaVenta[], preparado.lineas);
+  const enMano = await validarEnMano(env, tienda, venta.lineas as LineaVenta[], preparado.lineas);
   if (!enMano.ok) return json({ error: enMano.error }, enMano.status);
 
   const subtotal = preparado.lineas.reduce((suma, l) => suma + l.precio * l.cantidad, 0);
@@ -2136,7 +2136,7 @@ async function registrarVenta(request: Request, env: Env, ctx: ExecutionContext,
       // #819: qué pieza ya no está (lectura aparte, después del aborto; no cambia si se acepta la venta). Con pedido las apartadas vuelven a la
       // existencia dentro del batch, así que una lectura posterior no distingue cuál faltó: se queda el mensaje general.
       // #832: la pieza «en la mano» con la existencia que vio la caja estaba cubierta por su ajuste: no es la que faltó.
-      const cubiertas = await cubiertasPorAjuste(env, tienda, enMano.marcas).catch(() => new Set<string>());
+      const cubiertas = await cubiertasPorAjuste(env, tienda, id, enMano.marcas).catch(() => new Set<string>());
       const faltantes = pedidoId ? [] : await piezasSinExistencia(env, tienda, preparado.lineas.filter((l) => !cubiertas.has(l.producto_id))).catch(() => []);
       const quita = faltantes.map((f) => f.nombre || f.codigo).join(', ');
       return json({ error: quita ? `${base} Quita ${quita}: ya no está disponible.` : base, ...faltantes[0], faltantes }, 409);
@@ -2749,7 +2749,12 @@ export default {
       if (solicitud && request.method === 'GET') return await estadoSolicitud(env, solicitud[1], correo);
       const resolver = pathname.match(/^\/api\/solicitudes\/([^/]+)\/resolver$/);
       if (resolver && request.method === 'POST') {
-        return await resolverSolicitud(resolver[1], request, env, correo);
+        const resuelta = await resolverSolicitud(resolver[1], request, env, correo);
+        // #832: la cancelación aprobada a distancia regresa sus piezas; la respuesta trae la venta (id) y `cancelada`.
+        const cuerpoResuelta = resuelta.ok ? await resuelta.clone().json().catch(() => null) as Record<string, unknown> | null : null;
+        if (cuerpoResuelta?.cancelada && !cuerpoResuelta.ya_estaba && typeof cuerpoResuelta.id === 'string')
+          ctx.waitUntil(avisarReverso(env, request, cuerpoResuelta.id, 'Cancelación aprobada de una venta'));
+        return resuelta;
       }
 
       // Botón «Ayuda» de la caja y notificaciones push al dueño (Issue #600, push.ts).
@@ -2958,18 +2963,25 @@ export default {
       const resolverRechazo = pathname.match(/^\/api\/ventas-rechazadas\/([^/]+)\/resolver$/);
       if (resolverRechazo && request.method === 'POST') return await resolverRechazada(resolverRechazo[1], request, env, correo);
 
+      // #832: si lo que regresa una cancelación o devolución se vendió después «en la mano», el dueño lo sabe (no cambia ninguna existencia).
+      const conAvisoReverso = async (r: Response, ventaId: string, que: string, lineaId?: number) => {
+        const c = r.ok ? await r.clone().json().catch(() => null) as Record<string, unknown> | null : null;
+        if (c && !c.ya_estaba && !c.duplicada && !c.pendiente) ctx.waitUntil(avisarReverso(env, request, ventaId, que, lineaId));
+        return r;
+      };
       const cancelacion = pathname.match(/^\/api\/ventas\/([^/]+)\/cancelar$/);
       if (cancelacion && request.method === 'POST') {
-        return await cancelarVenta(cancelacion[1], request, env, correo, tienda, ctx);
+        return await conAvisoReverso(await cancelarVenta(cancelacion[1], request, env, correo, tienda, ctx), cancelacion[1], 'Cancelación de una venta');
       }
       const cancelacionPieza = pathname.match(/^\/api\/ventas\/([^/]+)\/lineas\/(\d+)\/cancelar$/);
       if (cancelacionPieza && request.method === 'POST') {
-        return await cancelarPieza(cancelacionPieza[1], Number(cancelacionPieza[2]), request, env, correo, tienda);
+        return await conAvisoReverso(await cancelarPieza(cancelacionPieza[1], Number(cancelacionPieza[2]), request, env, correo, tienda), cancelacionPieza[1],
+          'Devolución de una pieza', Number(cancelacionPieza[2]));
       }
       // Cupones en lugar de devolver dinero (Issue #330).
       const cupon = pathname.match(/^\/api\/ventas\/([^/]+)\/cupon(?:\/([^/]+))?$/);
       if (cupon && request.method === 'POST') {
-        return cupon[2] ? await reimprimirCupon(cupon[1], cupon[2], env) : await devolverEnCupon(cupon[1], request, env, correo, tienda);
+        return cupon[2] ? await reimprimirCupon(cupon[1], cupon[2], env) : await conAvisoReverso(await devolverEnCupon(cupon[1], request, env, correo, tienda), cupon[1], 'Devolución en cupón');
       }
       if (pathname === '/api/cupones' && request.method === 'POST') return await emitirCuponManual(request, env, correo);
       const ticket = pathname.match(/^\/api\/ventas\/([^/]+)$/);
