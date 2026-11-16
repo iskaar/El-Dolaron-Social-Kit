@@ -16,7 +16,7 @@ import { procesarColaRopa, rutaRopaAdmin } from './ropa-ia.ts';
 import { calcularPrecio, ajustarManual, esDestinoBanda, prefijoParaFamilia, MONTOS_BANDA, type Destino } from './precio.ts';
 import { efectivoAlcanza, promoInauguracion, CLAVE_DESDE, claveRastreoDe, precioBuenFin, ENVIO_ID, huellaTicket } from '../public/venta.js';
 import { semanaIngreso } from '../public/semana.js';
-import { detalleVenta, cancelarPieza, devolverEnCupon, reimprimirCupon } from './devoluciones.ts';
+import { detalleVenta, cancelarPieza, devolverEnCupon, reimprimirCupon, retirarSolicitud, listarSolicitudes } from './devoluciones.ts';
 import { cancelarVenta, listarCancelaciones, estadoSolicitud } from './cancelaciones.ts';
 import { corregirFormaPago } from './correcciones-pago.ts';
 import { BASES, AVISO } from './legal.ts';
@@ -2765,6 +2765,9 @@ export default {
         const cuerpoResuelta = resuelta.ok ? await resuelta.clone().json().catch(() => null) as Record<string, unknown> | null : null;
         if (cuerpoResuelta?.cancelada && !cuerpoResuelta.ya_estaba && typeof cuerpoResuelta.id === 'string')
           ctx.waitUntil(avisarReverso(env, request, cuerpoResuelta.id, 'Cancelación aprobada de una venta'));
+        // #837: la devolución de dinero de una pieza aprobada a distancia también regresa una unidad (solo la primera vez: sin `duplicada`).
+        if (cuerpoResuelta?.estado === 'aprobada' && typeof cuerpoResuelta.linea_id === 'number' && typeof cuerpoResuelta.venta_id === 'string' && !cuerpoResuelta.duplicada)
+          ctx.waitUntil(avisarReverso(env, request, cuerpoResuelta.venta_id, 'Devolución aprobada de una pieza', cuerpoResuelta.linea_id));
         return resuelta;
       }
 
@@ -2989,9 +2992,14 @@ export default {
       if (correccionPago && request.method === 'POST') return await corregirFormaPago(correccionPago[1], request, env, ctx, correo, tienda);
       const cancelacionPieza = pathname.match(/^\/api\/ventas\/([^/]+)\/lineas\/(\d+)\/cancelar$/);
       if (cancelacionPieza && request.method === 'POST') {
-        return await conAvisoReverso(await cancelarPieza(cancelacionPieza[1], Number(cancelacionPieza[2]), request, env, correo, tienda), cancelacionPieza[1],
+        return await conAvisoReverso(await cancelarPieza(cancelacionPieza[1], Number(cancelacionPieza[2]), request, env, correo, tienda, ctx), cancelacionPieza[1],
           'Devolución de una pieza', Number(cancelacionPieza[2]));
       }
+      // #837: las devoluciones de dinero que esta caja pidio al dueño (pendientes y de las ultimas 24 h) y retirar la propia; antes de /api/ventas/:id.
+      if (pathname === '/api/ventas/devoluciones-pedidas' && request.method === 'GET')
+        return await listarSolicitudes(env, correo, await cajaDe(env, correo, url.searchParams.get('caja'), tienda).catch(() => ''));
+      const retiro = pathname.match(/^\/api\/ventas\/([^/]+)\/retirar-solicitud$/);
+      if (retiro && request.method === 'POST') return await retirarSolicitud(retiro[1], request, env, correo);
       // Cupones en lugar de devolver dinero (Issue #330).
       const cupon = pathname.match(/^\/api\/ventas\/([^/]+)\/cupon(?:\/([^/]+))?$/);
       if (cupon && request.method === 'POST') {

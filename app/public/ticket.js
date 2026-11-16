@@ -45,7 +45,8 @@ export function pintarDetalle(t, { editable = false, resaltar = [], fechas = { f
   asegurarEstilos();
   const { fecha, hora } = fechas;   // reportes pasa los formatos compartidos (graficas.js); la caja, los de siempre
   const quedan = t.lineas.reduce((n, l) => n + l.cantidad - l.cancelada_cantidad, 0);
-  const puedeCancelar = editable && !t.cancelada && quedan > 0;
+  const pendiente = t.devolucion_pendiente;   // #837: una devolución de dinero espera al dueño; mientras tanto el ticket no se toca
+  const puedeCancelar = editable && !t.cancelada && quedan > 0 && !pendiente;
   const socio = t.socio ? ` · Socio #${t.socio.numero} ${escapar(t.socio.nombre)}` : '';
 
   const renglones = t.lineas.map((l) => {
@@ -92,8 +93,12 @@ export function pintarDetalle(t, { editable = false, resaltar = [], fechas = { f
     </ul>`;
   const puedeCorregir = editable && !t.cancelada && (t.corregible ?? []).length > 0;
 
+  const esperando = !pendiente ? '' : `<p class="ticket-cancelado" role="status">Hay una devolución esperando al dueño en este ticket${pendiente.resumen ? `: ${escapar(pendiente.resumen)}` : ''}.
+      ${editable ? `<button type="button" class="secundario" data-retirar-solicitud="${escapar(pendiente.id)}">Retirar la solicitud</button>` : ''}</p>`;
+
   return `
     <h2>Ticket de las ${hora(t.creado_en)}</h2>
+    ${esperando}
     <p class="nota">${fecha(t.creado_en)} · ${FORMAS[t.forma_pago] ?? escapar(t.forma_pago)} · ${escapar(t.caja || 'sin caja')}
       · cobró ${escapar(t.cajero || '—')}${socio}</p>
     ${t.cancelada ? `<p class="ticket-cancelado">Ticket cancelado completo ${fecha(t.cancelada_en)} ${hora(t.cancelada_en)}
@@ -138,10 +143,11 @@ export function comprobanteCancelacion(t) {
   };
 }
 
-// Con `cupon` (el % que el dueño regresa en cupón, Issue #330) va el boton para devolver en cupón en vez de dinero.
+// Con `cupon` (el % que el dueño regresa en cupón, Issue #330) va el boton para devolver en cupón: es lo primero que se ofrece (#837).
 // El cupón es opcional para el cliente (bases v5, punto 6 quater): el cajero le dice el importe y que puede pedir su dinero.
+// Devolver dinero (efectivo, tarjeta o transferencia) lo aprueba el dueño: el servidor lo exige, aquí solo se muestra el camino.
 const botonCupon = (cupon, dato) => cupon
-  ? `<button type="button" class="cupon" ${dato}>Dar cupón (${cupon}% en Dolarones)</button>
+  ? `<button type="button" class="cupon" ${dato}>Devolver en cupón (${cupon}% en Dolarones)</button>
      <small>Solo si el cliente lo acepta: dile el importe y que puede pedir su dinero.</small>` : '';
 
 /** El formulario de una pieza: cuantas (si hay mas de una) y el motivo. */
@@ -150,16 +156,19 @@ export function formularioPieza(lineaId, quedan, cupon = null, forma = 'efectivo
   return `
     <div class="form-cancelar">
       ${quedan > 1 ? `<label>Cuántas <input type="number" class="cantidad-cancelar" min="1" max="${quedan}" value="1" inputmode="numeric"></label>` : ''}
-      ${forma !== 'efectivo' ? `<select class="devolver-en" aria-label="Cómo se devuelve el dinero">
-        <option value="">¿Cómo se devuelve el dinero?</option>
-        <option value="${forma}">${forma === 'tarjeta' ? 'A la tarjeta, en la terminal' : 'Por transferencia'}</option>
-        <option value="efectivo">En efectivo, del cajón</option>
-      </select>` : ''}
       <input type="text" class="motivo-cancelar" maxlength="200" placeholder="Motivo de la cancelación">
-      <div class="botones">
-        <button type="button" class="secundario" data-volver>Volver</button>
-        ${botonCupon(cupon, `data-cupon-linea="${lineaId}"`)}
-        <button type="button" class="quitar" data-confirmar-linea="${lineaId}">Confirmar y devolver</button>
+      ${botonCupon(cupon, `data-cupon-linea="${lineaId}"`)}
+      <div class="dinero">
+        <small>${cupon ? 'Si el cliente prefiere su dinero' : 'Para devolver dinero'}: lo aprueba tu supervisor o el dueño (con su PIN aquí, o enviando la solicitud al dueño).</small>
+        ${forma !== 'efectivo' ? `<select class="devolver-en" aria-label="Cómo se devuelve el dinero">
+          <option value="">¿Cómo se devuelve el dinero?</option>
+          <option value="${forma}">${forma === 'tarjeta' ? 'A la tarjeta, en la terminal' : 'Por transferencia'}</option>
+          <option value="efectivo">En efectivo, del cajón</option>
+        </select>` : ''}
+        <div class="botones">
+          <button type="button" class="secundario" data-volver>Volver</button>
+          <button type="button" class="secundario" data-confirmar-linea="${lineaId}">Devolver dinero</button>
+        </div>
       </div>
     </div>`;
 }
@@ -168,9 +177,9 @@ export function formularioTodo(cupon = null) {
   return `
     <div class="form-cancelar">
       <input type="text" class="motivo-cancelar" maxlength="200" placeholder="Motivo de la cancelación">
+      ${botonCupon(cupon, 'data-cupon-todo')}
       <div class="botones">
         <button type="button" class="secundario" data-volver>Volver</button>
-        ${botonCupon(cupon, 'data-cupon-todo')}
         <button type="button" class="quitar" data-confirmar-todo>Confirmar cancelación</button>
       </div>
     </div>`;
@@ -218,6 +227,9 @@ function asegurarEstilos() {
     .ventana-ticket button.cupon { border: 1px solid #1f7a4d; background: #1f7a4d; color: #fff; border-radius: 8px;
       padding: 6px 10px; font-size: 13px; cursor: pointer; white-space: nowrap; }
     .ventana-ticket button.cupon:disabled { opacity: .5; cursor: not-allowed; }
+    .ventana-ticket .form-cancelar button.cupon { width: 100%; padding: 12px; font-size: 15px; font-weight: 700; white-space: normal; }
+    .ventana-ticket .form-cancelar .dinero { display: grid; gap: 6px; margin-top: 4px; padding-top: 8px; border-top: 1px dashed #dfe3ea; }
+    .ventana-ticket .form-cancelar small { color: #5b6478; font-size: 12px; }
     .ventana-ticket button.secundario { border: 1px solid #dfe3ea; background: #fff; color: #5b6478; border-radius: 8px;
       padding: 6px 10px; font-size: 13px; cursor: pointer; }
     .ventana-ticket .form-cancelar { display: grid; gap: 6px; padding: 6px 0; }

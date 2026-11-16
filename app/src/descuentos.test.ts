@@ -341,7 +341,7 @@ test('cancelar piezas sueltas de un ticket con descuento devuelve su parte de lo
   assert.equal(r.cuerpo.total, 45000);
   const linea = (db.prepare('select id from venta_lineas where venta_id = ?').get(folio) as any).id;
   const cancelarPieza = () => pedir(`/api/ventas/${folio}/lineas/${linea}/cancelar`,
-    { id: crypto.randomUUID(), cantidad: 1, motivo: 'defecto', caja: 'Caja 1' }, 'POST', ana);
+    { id: crypto.randomUUID(), cantidad: 1, motivo: 'defecto', caja: 'Caja 1', aprobador: DUENO, pin: PIN_DUENO }, 'POST', ana);   // devolver dinero lo aprueba el dueño (#837)
 
   const primera = await cancelarPieza();
   assert.equal(primera.status, 201, JSON.stringify(primera.cuerpo));
@@ -453,7 +453,7 @@ test('/reportes: con promo, descuento aprobado, pieza devuelta y ticket cancelad
   assert.equal((await venta({ id: folioC, lineas: lineas(2, 1), efectivo: 100000, descuento_id: await aprobar(83333, 2, 1) })).status, 201);
   const lineaC = (db.prepare('select id from venta_lineas where venta_id = ? and producto_id = ?').get(folioC, PRODUCTO) as any).id;
   assert.equal((await pedir(`/api/ventas/${folioC}/lineas/${lineaC}/cancelar`,
-    { id: crypto.randomUUID(), cantidad: 1, motivo: 'defecto', caja: 'Caja 1' }, 'POST', ana)).status, 201);
+    { id: crypto.randomUUID(), cantidad: 1, motivo: 'defecto', caja: 'Caja 1', aprobador: DUENO, pin: PIN_DUENO }, 'POST', ana)).status, 201);   // devolver dinero lo aprueba el dueño (#837)
   // D: cancelado completo
   const d = await venta({ lineas: lineas(1, 0) });
   assert.equal((await pedir(`/api/ventas/${d.cuerpo.id}/cancelar`, { motivo: 'prueba', caja: 'Caja 1' }, 'POST', ana)).status, 200);
