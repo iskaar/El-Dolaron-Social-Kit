@@ -44,10 +44,24 @@ test('la llegada física pide el código del cliente: ni un número tecleado ni 
   assert.match(socios, /showModal\(\);\s+\$\('dlg-confirmar-no'\)\.focus\(\)/);
   assert.match(socios, /async function acreditarDelCampo\(\) \{\s+if \(\$\('acreditar-llegada'\)\.disabled\) return;/);
   assert.match(socios, /Pide al cliente su código en su celular\./);
-  assert.match(socios, /body:JSON\.stringify\(\{ codigo \}\)/);
+  assert.match(socios, /enviarLlegada\(\{ codigo \}, aviso\)/);
   // El código pasa de la caja al marco por postMessage al mismo origen, no por la URL.
   assert.match(caja, /postMessage\(\{ tipo: 'llegada-codigo', codigo: llegadaAEnviar \}, location\.origin\)/);
   assert.match(caja, /\/socios\?incrustado=1'/);
+});
+
+test('la llegada del alta recién hecha usa la prueba de un solo uso, con confirmación en la página y sin salir de la memoria (#844)', () => {
+  const socios = readFileSync(new URL('../public/socios.html', import.meta.url), 'utf8');
+  const caja = readFileSync(new URL('../public/caja.html', import.meta.url), 'utf8');
+  // La prueba viaja solo en el cuerpo del POST a la API: ni URL, ni almacenamiento, ni mensaje a la caja.
+  assert.match(socios, /enviarLlegada\(\{ prueba: pruebaAlta \}, aviso\)/);
+  assert.doesNotMatch(socios, /localStorage|sessionStorage|indexedDB/);
+  assert.doesNotMatch(socios, /avisarCaja\(\{[^}]*prueba/);
+  assert.doesNotMatch(caja, /prueba_llegada|pruebaAlta/);
+  // Sigue pidiendo confirmar antes de acreditar: Enter no la acepta (misma ventana de #839).
+  assert.match(socios, /async function acreditarAlta\(\) \{[\s\S]*?await confirmar\([\s\S]*?await enviarLlegada\(\{ prueba: pruebaAlta \}/);
+  // Sin prueba (reintento sin ella, alta de otra sesión) cae al código del portal.
+  assert.match(socios, /if \(!pruebaAlta\) \{ pedirCodigo\(\); return; \}/);
 });
 
 // Corre ticketEnDuda, abrirLlegadaPendiente y refrescarSaldoTrasLlegada REALES de caja.html contra una pantalla mínima (#839).
