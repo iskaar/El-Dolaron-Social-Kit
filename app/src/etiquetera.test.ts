@@ -264,13 +264,17 @@ test('#825: imprimirEtiquetas nunca manda más etiquetas que la existencia de la
   assert.equal(await imprimirEtiquetas({ ...PIEZA, stock: 1 }, 3), false);
   assert.match(historialTexto(), /Taza de ceramica azul: SE CORTO \(0 de 1\)/);
   assert.doesNotMatch(historialTexto(), /0 de 3/);
-  // Sin existencia no hay nada que mandar: ni siquiera se anota un envío.
+  // Sin existencia no hay nada que mandar: no se anota un envío y NO devuelve false (eso significaría «se cayó el enlace»), avisa por qué.
   const antes = historialTexto();
-  assert.equal(await imprimirEtiquetas({ ...PIEZA, stock: 0 }, 2), false);
+  await assert.rejects(imprimirEtiquetas({ ...PIEZA, stock: 0 }, 2), /^Error: No hay piezas contadas de Taza de ceramica azul/);
   assert.equal(historialTexto(), antes);
-  // Una pieza sin `stock` numérico (calibración, pruebas) conserva lo que se pida.
-  await imprimirEtiquetas(PIEZA, 3);
+  // Lo que no cuenta existencia conserva lo que se pida: bandas (sin_inventario, stock 0), y piezas sin `stock` numérico (calibración, pruebas).
+  assert.equal(await imprimirEtiquetas({ ...PIEZA, stock: 0, sin_inventario: 1 }, 3), false);
   assert.match(historialTexto(), /Taza de ceramica azul: SE CORTO \(0 de 3\)/);
+  await imprimirEtiquetas({ ...PIEZA, stock: undefined }, 4);
+  assert.match(historialTexto(), /\(0 de 4\)/);
+  await imprimirEtiquetas(PIEZA, 5);
+  assert.match(historialTexto(), /\(0 de 5\)/);
   delete (globalThis as any).localStorage;
 });
 

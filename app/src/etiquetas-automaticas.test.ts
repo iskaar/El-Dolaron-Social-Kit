@@ -1922,4 +1922,9 @@ test('#825: las pantallas usan la hoja y la página, no confirm()/prompt() nativ
   assert.match(vista, /boton\(imprimir,\(\)=>\{totalLote-=pedida-contadas;resolve\('contadas'\);cerrarHoja\(\);\},'primario'\)/);
   const pagina = readFileSync('public/etiquetas.html', 'utf8');
   for (const id of ['existencia-pregunta', 'existencia-texto', 'existencia-imprimir', 'existencia-sumar', 'existencia-cancelar']) assert.ok(pagina.includes(`id="${id}"`), id);
+  // /escanear llama imprimirEtiquetas sin motor: topa a la existencia de ahora y avisa «No hay piezas contadas» en vez de un falso corte.
+  const escanear = readFileSync('public/escanear.html', 'utf8');
+  assert.match(escanear, /const n = Math\.min\(guardada\.sumadas, datos\[0\]\.stock\);/);
+  assert.match(escanear, /if \(n < 1\) throw new Error\(`No hay piezas contadas de \$\{guardada\.codigo\}/);
+  assert.match(escanear, /imprimirEtiquetas\(datos\[0\], n\)\) avisarEtiqueta\(guardada\.codigo, n\)/);
 });

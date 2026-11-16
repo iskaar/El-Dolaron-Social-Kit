@@ -744,11 +744,13 @@ export const envioDetenido = () => detenido;
 /**
  * Imprime las etiquetas de una pieza. Devuelve false si se cayo el enlace.
  * #825: nunca salen mas etiquetas que la existencia que la pieza trae (cada etiqueta es una unidad contada). Las pantallas lo preguntan
- * antes (imprimir-lote.js); esto es el tope de ultima instancia para quien llame directo (/escanear). Sin `stock` numerico no se topa.
+ * antes (imprimir-lote.js); esto es el tope de ultima instancia para quien llame directo (/escanear). No se topa lo que no cuenta
+ * existencia (`sin_inventario`, las bandas) ni una pieza sin `stock` numerico (calibracion, pruebas). Sin existencia NO devuelve false
+ * (eso es «se cayo el enlace» y llevaria a reconectar): lanza «No hay piezas contadas», que los llamadores ya muestran.
  */
-export function imprimirEtiquetas(pieza, copias = 1, alAvanzar, alEsperar) {
-  const n = Number.isInteger(pieza.stock) ? Math.min(copias, pieza.stock) : copias;
-  if (n < 1) return Promise.resolve(false);
+export async function imprimirEtiquetas(pieza, copias = 1, alAvanzar, alEsperar) {
+  const n = Number.isInteger(pieza.stock) && !pieza.sin_inventario ? Math.min(copias, pieza.stock) : copias;
+  if (n < 1) throw new Error(`No hay piezas contadas de ${pieza.nombre || pieza.codigo || 'esta pieza'}: no se imprimió ninguna etiqueta.`);
   return mandarCopias(tsplEtiqueta(pieza, 1), n, alAvanzar, pieza.nombre || pieza.codigo, alEsperar);
 }
 
