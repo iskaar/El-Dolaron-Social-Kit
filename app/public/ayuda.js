@@ -124,7 +124,7 @@ export function montarAyuda(contenedor, { ancla = '', conHash = false, nivel = 2
         h('ol', {}, e.pasos.map((paso) => h('li', {}, conNegritas(paso)))),
         e.ojo ? h('p', { class: 'guia-ojo' }, h('strong', {}, 'Ojo: '), conNegritas(e.ojo)) : null,
         e.si_no ? h('p', { class: 'guia-sino' }, h('strong', {}, 'Si no se resuelve: '), conNegritas(e.si_no)) : null,
-        e.pendiente ? h('p', { class: 'guia-regla' }, REGLA) : null,
+        e.pendiente?.startsWith('¿') ? h('p', { class: 'guia-regla' }, REGLA) : null,   // «Falta en la caja:» es para el desarrollador, no para el cajero
         ver.length ? h('p', { class: 'guia-ver' }, 'Ver también: ', ver.map((v) => h('button', { type: 'button', 'data-ver': v.id }, v.titulo))) : null,
         h('p', { class: 'guia-final' }, conNegritas(FINAL))));
     if (conHash) detalle.addEventListener('toggle', () => {
