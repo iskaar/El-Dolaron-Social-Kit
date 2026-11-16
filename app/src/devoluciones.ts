@@ -13,6 +13,7 @@
  */
 
 import { cajaDe } from './corte.ts';
+import { TIENDA_CENTRAL } from './cuentas.ts';
 import { leerCupon, nuevoCupon, porcentajeCupon, usadosEnVenta, valeDeVenta } from './vales.ts';
 import { saldo } from './dolarones.ts';
 import { sentenciasDeReverso } from './reversos.ts';
@@ -172,7 +173,7 @@ export async function cancelarPieza(
         `insert into devoluciones (id, venta_id, linea_id, cantidad, importe, dolarones, forma_pago, caja, autor, motivo, creado_en)
          values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       ).bind(id, ventaId, linea.id, cantidad, reparto.dinero, reparto.dolarones, devolverEn,
-        await cajaDe(env, correo, cuerpo.caja), correo, motivo, ahora),
+        await cajaDe(env, correo, cuerpo.caja, TIENDA_CENTRAL), correo, motivo, ahora),
       // Los bins no regresan existencia: nadie cuenta cuantas piezas hay en un bote.
       ...(linea.producto_id
         ? [env.DB.prepare(
@@ -255,7 +256,7 @@ export async function devolverEnCupon(ventaId: string, request: Request, env: En
   let base = 0;
   const ahora = new Date();
   const iso = ahora.toISOString();
-  const caja = await cajaDe(env, correo, cuerpo.caja);
+  const caja = await cajaDe(env, correo, cuerpo.caja, TIENDA_CENTRAL);
   const sentencias: D1PreparedStatement[] = [];
   for (const p of pedidas) {
     const linea = todas.find((l) => l.id === p.linea);

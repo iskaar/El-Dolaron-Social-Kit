@@ -110,8 +110,8 @@ test('el auxiliar entra a nómina, cajero no, y checador permite la caja sin PIN
     values ('cajero@prueba.mx','Cajero','cajero',1,'','')`).run();
   t.env.DEV_USUARIO = 'cajero@prueba.mx';
   assert.equal((await t.pedir('/api/nomina', undefined, 'GET')).status, 403);
-  t.db.prepare(`insert into usuarios (correo,nombre,roles,activo,creado_en,actualizado_en)
-    values ('pc@prueba.mx','Caja','computadora',1,'','')`).run();
+  t.db.prepare(`insert into usuarios (correo,nombre,roles,activo,tienda,creado_en,actualizado_en)
+    values ('pc@prueba.mx','Caja','computadora',1,'soledad','','')`).run();
   t.env.DEV_USUARIO = 'pc@prueba.mx';
   assert.equal((await t.pedir('/api/nomina/checador', undefined, 'GET')).status, 200);
 });

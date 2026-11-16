@@ -32,7 +32,7 @@ test('nunca cachea la API, otros origenes, POST, redirecciones, opacas ni no-200
 test('el worker sirve /sw-caja.js como JavaScript a la cuenta de caja', async () => {
   const { db, env, ctx: c } = tienda();
   (env as any).ASSETS = { fetch: async () => new Response(fuente, { headers: { 'content-type': 'text/javascript' } }) };
-  db.prepare(`insert into usuarios (correo, nombre, roles, activo, creado_en, actualizado_en) values ('pc@prueba.mx', 'PC', 'computadora', 1, '', '')`).run();
+  db.prepare(`insert into usuarios (correo, nombre, roles, activo, tienda, creado_en, actualizado_en) values ('pc@prueba.mx', 'PC', 'computadora', 1, 'soledad', '', '')`).run();
   (env as any).DEV_USUARIO = 'pc@prueba.mx';
   const { default: worker } = await import('./worker.ts');
   const r = await worker.fetch!(new Request('https://caja.prueba/sw-caja.js') as never, env, c as never);

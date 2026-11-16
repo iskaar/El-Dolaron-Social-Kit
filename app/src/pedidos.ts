@@ -8,6 +8,7 @@
  */
 
 import { cajaDe } from './corte.ts';
+import { TIENDA_CENTRAL } from './cuentas.ts';
 import { sumarMeses } from './dolarones.ts';
 import { conciliarSeguro } from './mercadolibre.ts';
 import { VENDIBLE } from './catalogo.ts';
@@ -234,7 +235,7 @@ async function crearPedidoDe(cuerpo: Record<string, unknown>, env: Env, ctx: Exe
   // forma_pago es NOT NULL con CHECK: sin dinero recibido da igual, 'transferencia' es lo que se cobrara despues.
   const formaPago = sinDinero ? 'transferencia' : String(cuerpo.forma_pago ?? '');
   if (!FORMAS_PAGO.has(formaPago)) return json({ error: 'Forma de pago invalida.' }, 400);
-  const caja = sinDinero ? '' : await cajaDe(env, correo, cuerpo.caja);
+  const caja = sinDinero ? '' : await cajaDe(env, correo, cuerpo.caja, TIENDA_CENTRAL);
   if (!sinDinero && !caja) return json({ error: 'Falta la caja.' }, 400);
 
   const ids = [...cantidades.keys()];
@@ -486,7 +487,7 @@ async function moverPaquete(folio: number, tipo: 'pieza' | 'abono', request: Req
   const cantidad = Number(cuerpo.cantidad);
   const importe = Number(cuerpo.importe);
   const formaPago = String(cuerpo.forma_pago ?? '');
-  const caja = tipo === 'abono' ? await cajaDe(env, correo, cuerpo.caja) : '';
+  const caja = tipo === 'abono' ? await cajaDe(env, correo, cuerpo.caja, TIENDA_CENTRAL) : '';
   if (tipo === 'pieza' && (!UUID.test(productoId) || !Number.isInteger(cantidad) || cantidad < 1 || cantidad > 999))
     return json({ error: 'Pieza o cantidad inválida.' }, 400);
   if (tipo === 'abono' && (!Number.isSafeInteger(importe) || importe <= 0 || !FORMAS_PAGO.has(formaPago) || !caja))

@@ -14,7 +14,7 @@
   main { padding: 20px; max-width: 900px; margin: 0 auto; }
   .panel { background: #fff; border: 1px solid var(--linea); border-radius: 12px; padding: 16px; margin-bottom: 20px; }
   .panel h2 { font-size: 15px; margin: 0 0 12px; }
-  .fila { display: grid; grid-template-columns: 1.4fr 1fr auto 120px auto auto auto; gap: 10px; align-items: center;
+  .fila { display: grid; grid-template-columns: 1.4fr 1fr auto auto 120px auto auto auto; gap: 10px; align-items: center;
     padding: 10px 0; border-top: 1px solid var(--linea); }
   .fila:first-of-type { border-top: 0; }
   .fila.inactiva { opacity: .55; }
@@ -68,7 +68,7 @@
       <input type="email" data-campo="correo" placeholder="correo@gmail.com">
       <input type="text" data-campo="nombre" placeholder="Nombre">
       <div class="roles"></div>
-      <span></span>
+      <select data-campo="tienda" title="Tienda de la cuenta (obligatoria para la computadora de caja)"></select>
       <button type="button" data-accion="alta">Dar de alta</button>
     </div>
     <p class="aviso" id="aviso-alta"></p>
@@ -80,11 +80,17 @@ const escapar = (texto) => String(texto ?? '').replace(/[<>&"]/g, (c) => ({ '<':
 const NOMBRES = { dueno: 'Dueño', cajero: 'Cajero', capturista: 'Capturista', computadora: 'Computadora de caja (pide PIN)' };
 let ROLES = [];
 let CAJAS = [];
+let TIENDAS = [];   // [{ clave, nombre, cajas }] (#793)
+// Las cajas que se pueden asignar a una cuenta de esa tienda; sin tienda, las de Soledad (la tienda por omision).
+const cajasDeTienda = (clave) => (TIENDAS.find((t) => t.clave === (clave || 'soledad'))?.cajas) ?? CAJAS;
 // Issue #105: la caja del cajero. Sin caja, usa la que se elija en la computadora.
-const selectorCaja = (actual) => `<select data-campo="caja" title="Caja del cajero">
-  <option value="">Caja de la computadora</option>
-  ${CAJAS.map((c) => `<option ${c === actual ? 'selected' : ''}>${escapar(c)}</option>`).join('')}
-</select>`;
+const opcionesCaja = (actual, tienda) => `<option value="">Caja de la computadora</option>
+  ${cajasDeTienda(tienda).map((c) => `<option ${c === actual ? 'selected' : ''}>${escapar(c)}</option>`).join('')}`;
+const selectorCaja = (actual, tienda) => `<select data-campo="caja" title="Caja del cajero (solo las de su tienda)">${opcionesCaja(actual, tienda)}</select>`;
+// #793: «Sin tienda» cuenta como Soledad, salvo la computadora de caja, que no cobra sin tienda.
+const opcionesTienda = (actual) => `<option value="">Sin tienda</option>
+  ${TIENDAS.map((t) => `<option value="${escapar(t.clave)}" ${t.clave === actual ? 'selected' : ''}>${escapar(t.nombre)}</option>`).join('')}`;
+const selectorTienda = (actual) => `<select data-campo="tienda" title="Tienda de la cuenta. La computadora de caja necesita una.">${opcionesTienda(actual)}</select>`;
 
 const casillas = (marcados) => ROLES.map((r) =>
   `<label><input type="checkbox" value="${r}" ${marcados.includes(r) ? 'checked' : ''}>${NOMBRES[r] ?? r}</label>`).join('');
@@ -173,6 +179,7 @@ async function cargar() {
   const datos = await (await fetch('/api/cuentas')).json();
   ROLES = datos.roles;
   CAJAS = datos.cajas ?? [];
+  TIENDAS = datos.tiendas ?? [];
   const solicitudes = datos.solicitudes.filter((s) => s.tipo === 'acceso');
   document.getElementById('titulo-solicitudes').textContent =
     `Solicitudes de acceso${solicitudes.length ? ` (${solicitudes.length})` : ''}`;
@@ -199,7 +206,8 @@ async function cargar() {
         <div><div class="roles">${casillas(u.roles)}</div>
           <label><input type="checkbox" data-campo="editar_inventario" ${u.editar_inventario ? 'checked' : ''}> Editar inventario</label>
           <small>Capturista o FEP; el dueño siempre puede.</small></div>
-        ${selectorCaja(u.caja)}
+        ${selectorTienda(u.tienda)}
+        ${selectorCaja(u.caja, u.tienda)}
         <input type="password" data-campo="pin" inputmode="numeric" maxlength="6" autocomplete="new-password"
           title="PIN de 6 dígitos para entrar en la computadora de caja (Issue #112)"
           placeholder="${u.tiene_pin ? 'PIN ✓ cambiar' : 'PIN 6 dígitos'}">
@@ -209,6 +217,7 @@ async function cargar() {
       </div>`).join('');
 
   document.querySelector('#alta .roles').innerHTML = casillas(['cajero']);
+  document.querySelector('#alta [data-campo="tienda"]').innerHTML = opcionesTienda('');
 }
 
 async function guardar(cuerpo, aviso) {
@@ -268,6 +277,7 @@ document.body.addEventListener('click', async (evento) => {
       roles: rolesDe(nodo),
       activo: nodo.querySelector('[data-campo="activo"]').checked,
       editar_inventario: nodo.querySelector('[data-campo="editar_inventario"]').checked,
+      tienda: nodo.querySelector('[data-campo="tienda"]').value,
       caja: nodo.querySelector('[data-campo="caja"]').value,
     }, nodo.querySelector('.aviso'));
     if (ok) nodo.classList.toggle('inactiva', !nodo.querySelector('[data-campo="activo"]').checked);
@@ -288,12 +298,21 @@ document.body.addEventListener('click', async (evento) => {
       correo: nodo.querySelector('[data-campo="correo"]').value,
       nombre: nodo.querySelector('[data-campo="nombre"]').value,
       roles: rolesDe(nodo),
+      tienda: nodo.querySelector('[data-campo="tienda"]').value,
     }, document.getElementById('aviso-alta'));
     if (ok) {
       nodo.querySelectorAll('input[type=email], input[type=text]').forEach((i) => { i.value = ''; });
       await cargar();
     }
   }
+});
+
+// El selector de caja de una fila se limita a la tienda elegida (#793).
+document.addEventListener('change', (evento) => {
+  if (evento.target.dataset?.campo !== 'tienda') return;
+  const fila = evento.target.closest('.fila');
+  const caja = fila?.querySelector('[data-campo="caja"]');
+  if (caja) caja.innerHTML = opcionesCaja(cajasDeTienda(evento.target.value).includes(caja.value) ? caja.value : '', evento.target.value);
 });
 
 await cargar();

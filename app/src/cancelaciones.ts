@@ -6,7 +6,7 @@
  * (devoluciones.ts).
  */
 import { cajaDe } from './corte.ts';
-import { leerUsuario, leerRoles } from './cuentas.ts';
+import { leerUsuario, leerRoles, TIENDA_CENTRAL } from './cuentas.ts';
 import { verificarPin } from './cajeros.ts';
 import { sentenciasDeReverso } from './reversos.ts';
 import { TICKET_CON_ANTICIPO } from './pedidos.ts';
@@ -74,7 +74,7 @@ export async function cancelarCore(
       env.DB.prepare(
         `update ventas set cancelada = 1, cancelada_en = ?, cancelada_por = ?, motivo_cancelacion = ?, cancelada_caja = ?
          where id = ?`,
-      ).bind(ahora, canceladaPor, motivo, await cajaDe(env, canceladaPor, cajaPedida), id),   // el corte de esa caja cuenta la devolucion
+      ).bind(ahora, canceladaPor, motivo, await cajaDe(env, canceladaPor, cajaPedida, TIENDA_CENTRAL), id),   // sucursal aun no cancela (#793, PR 2); el corte de esa caja cuenta la devolucion
       ...lineas.map((l) =>
         env.DB.prepare(
           `update productos set stock = stock + ?, actualizado_en = ?

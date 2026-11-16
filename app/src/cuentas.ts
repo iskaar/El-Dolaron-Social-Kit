@@ -29,6 +29,7 @@ export interface Usuario {
   roles: Rol[];
   activo: boolean;
   caja: string;   // la caja del cajero (Issue #105); '' = la de la computadora
+  tienda: string;   // clave de TIENDAS (#793); '' = sin tienda (cuenta como Soledad, salvo la computadora de caja: esa no cobra)
   editar_inventario: boolean;
 }
 
@@ -38,11 +39,27 @@ interface FilaUsuario {
   roles: string;
   activo: number;
   caja: string;
+  tienda: string;
   editar_inventario: number;
 }
 
-/** Las cajas que se pueden asignar; las mismas que ofrece /caja. */
-export const CAJAS = ['Caja 1', 'Caja 2', 'Caja 3'];
+/**
+ * Las tiendas y sus cajas (#793). Constantes: tres tiendas no justifican una pantalla. El nombre de caja es la llave de
+ * ventas, retiros, cortes y cajon, y es unico entre tiendas: por eso los cortes quedan separados sin tocar corte.ts.
+ */
+export const TIENDAS = {
+  soledad: { nombre: 'Soledad', cajas: ['Caja 1', 'Caja 2', 'Caja 3'] },
+  salk: { nombre: 'Avenida Salk', cajas: ['Salk 1', 'Salk 2'] },
+  romero: { nombre: 'Coronel Romero', cajas: ['Romero 1', 'Romero 2'] },
+} as const;
+export type Tienda = keyof typeof TIENDAS;
+/** Soledad es bodega central y tienda: la de lo que no dice otra cosa. */
+export const TIENDA_CENTRAL: Tienda = 'soledad';
+export const esTienda = (valor: unknown): valor is Tienda => typeof valor === 'string' && Object.hasOwn(TIENDAS, valor);
+/** Las cajas de una tienda; [] si la clave no existe (no se cobra en una tienda desconocida). */
+export const cajasDe = (tienda: string): readonly string[] => esTienda(tienda) ? TIENDAS[tienda].cajas : [];
+/** Todas las cajas que se pueden asignar, de cualquier tienda. */
+export const CAJAS: string[] = Object.values(TIENDAS).flatMap((t) => [...t.cajas]);
 
 /* ---------- permisos por ruta ---------- */
 
@@ -201,6 +218,14 @@ export const esDeCaja = (regla: Regla) => regla === CAJA || regla === VENDER || 
 /** La cuenta de la computadora de caja: para cobrar necesita el PIN de un cajero. */
 export const soloComputadora = (usuario: Usuario | null) =>
   !!usuario?.roles.includes('computadora') && !usuario.roles.includes('cajero') && !usuario.roles.includes('dueno');
+
+/**
+ * La tienda de lo que se cobra (R1 de #793): la de la cuenta de Access que entra, la computadora de caja o la persona misma
+ * (la computadora es la unica cuenta que se sustituye por el cajero del PIN, asi que el cajero nunca decide la tienda).
+ * Sin tienda cuenta como Soledad, salvo la computadora de caja (R2): '' = no cobra. Nunca viene del navegador.
+ */
+export const tiendaDe = (cuenta: Usuario | null): string =>
+  cuenta?.tienda || (soloComputadora(cuenta) ? '' : TIENDA_CENTRAL);
 
 /**
  * Revendedora externa (#575): tiene el rol y ninguno de caja o dueno. Solo ella usa el apartado sin anticipo,
@@ -369,12 +394,12 @@ export const leerRoles = (texto: string): Rol[] =>
   texto.split(',').map((r) => r.trim()).filter((r): r is Rol => (ROLES as string[]).includes(r));
 
 export async function leerUsuario(env: Env, correo: string): Promise<Usuario | null> {
-  const fila = await env.DB.prepare('select correo, nombre, roles, activo, caja, editar_inventario from usuarios where correo = ?')
+  const fila = await env.DB.prepare('select correo, nombre, roles, activo, caja, tienda, editar_inventario from usuarios where correo = ?')
     .bind(correo)
     .first<FilaUsuario>();
   return fila
     ? { correo: fila.correo, nombre: fila.nombre, roles: leerRoles(fila.roles), activo: fila.activo === 1, caja: fila.caja,
-      editar_inventario: fila.editar_inventario === 1 }
+      tienda: fila.tienda, editar_inventario: fila.editar_inventario === 1 }
     : null;
 }
 
@@ -399,7 +424,12 @@ export async function yo(env: Env, correo: string, cajero: Usuario | null = null
   const modos = usuario?.activo && (usuario.roles.includes('dueno') || usuario.roles.includes('capturista'))
     ? ['capturar', 'buscar', 'revisar', 'imprimir']
     : usuario?.activo && usuario.roles.includes('finanzas') ? ['capturar', 'buscar', ...(puedeEditarInventario(usuario) ? ['revisar'] : []), 'imprimir'] : [];
-  return json({ correo, usuario, solicitud, vendedor, revendedora: esRevendedora(usuario), modos_inventario: modos, cajero: cajero && { correo: cajero.correo, nombre: cajero.nombre, caja: cajero.caja } });
+  // Tienda y cajas de esta terminal (#793); la caja asignada al cajero solo vale si es de esta tienda.
+  const tienda = tiendaDe(usuario);
+  const cajas = cajasDe(tienda);
+  return json({ correo, usuario, solicitud, vendedor, revendedora: esRevendedora(usuario), modos_inventario: modos,
+    tienda, tienda_nombre: esTienda(tienda) ? TIENDAS[tienda].nombre : '', cajas,
+    cajero: cajero && { correo: cajero.correo, nombre: cajero.nombre, caja: cajas.includes(cajero.caja) ? cajero.caja : '' } });
 }
 
 /** Alguien sin cuenta pide entrar. Una sola pendiente por persona: pedir otra vez la actualiza. */
@@ -437,7 +467,7 @@ export async function pedirAcceso(request: Request, env: Env, correo: string, ct
 /** Para /cuentas: todos los usuarios y lo que esta esperando respuesta. */
 export async function listarCuentas(env: Env): Promise<Response> {
   const { results: filas } = await env.DB.prepare(
-    `select correo, nombre, roles, activo, caja, editar_inventario, pin_hash != '' as tiene_pin, creado_en from usuarios
+    `select correo, nombre, roles, activo, caja, tienda, editar_inventario, pin_hash != '' as tiene_pin, creado_en from usuarios
      order by activo desc, nombre`,
   ).all<FilaUsuario & { creado_en: string; tiene_pin: number }>();
   const { results: solicitudes } = await env.DB.prepare(
@@ -446,7 +476,8 @@ export async function listarCuentas(env: Env): Promise<Response> {
   ).all();
   const usuarios = filas.map((f) => ({ ...f, roles: leerRoles(f.roles), activo: f.activo === 1,
     editar_inventario: f.editar_inventario === 1, tiene_pin: f.tiene_pin === 1 }));
-  return json({ usuarios, solicitudes, roles: ROLES, cajas: CAJAS });
+  const tiendas = Object.entries(TIENDAS).map(([clave, { nombre, cajas }]) => ({ clave, nombre, cajas }));
+  return json({ usuarios, solicitudes, roles: ROLES, cajas: CAJAS, tiendas });
 }
 
 /**
@@ -476,28 +507,37 @@ export async function guardarCuenta(request: Request, env: Env): Promise<Respons
   const activo = cuerpo.activo !== false;
   // Sin `caja` en el cuerpo (el alta, o una version vieja de /cuentas) no se toca la que tenga.
   const caja = cuerpo.caja === undefined ? null : String(cuerpo.caja);
+  // Igual con `tienda` (#793): '' = sin tienda.
+  const tienda = cuerpo.tienda === undefined ? null : String(cuerpo.tienda);
   if (cuerpo.editar_inventario !== undefined && typeof cuerpo.editar_inventario !== 'boolean')
     return json({ error: 'Permiso de inventario inválido.' }, 400);
   const editar = cuerpo.editar_inventario === undefined ? null : cuerpo.editar_inventario ? 1 : 0;
   if (caja !== null && caja !== '' && !CAJAS.includes(caja)) return json({ error: 'Caja invalida.' }, 400);
+  if (tienda !== null && tienda !== '' && !esTienda(tienda)) return json({ error: 'Tienda invalida.' }, 400);
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(correo)) return json({ error: 'Correo invalido.' }, 400);
   if (!roles) return json({ error: 'Escoge al menos un rol.' }, 400);
+  // Lo que quedaria guardado: R2 (la computadora de caja necesita tienda) y la caja del cajero debe ser de su tienda.
+  const previa = await leerUsuario(env, correo);
+  const queda = { roles, tienda: tienda ?? previa?.tienda ?? '' } as Usuario;
+  const cajaQueda = caja ?? previa?.caja ?? '';
+  if (activo && !tiendaDe(queda)) return json({ error: 'La computadora de caja necesita su tienda.' }, 400);
+  if (cajaQueda && !cajasDe(tiendaDe(queda)).includes(cajaQueda)) return json({ error: 'Esa caja no es de la tienda de la cuenta.' }, 400);
   const ahora = new Date().toISOString();
   // Sin cuenta activa o sin rol de caja, su sesion de PIN muere con el cambio: reactivarla despues no la revive.
   const cobra = activo && (roles.includes('cajero') || roles.includes('dueno'));
   const fallo = await env.DB.batch([
     env.DB.prepare(
-      `insert into usuarios (correo, nombre, roles, activo, caja, editar_inventario, creado_en, actualizado_en)
-       values (?, ?, ?, ?, coalesce(?, ''), coalesce(?, 0), ?, ?)
+      `insert into usuarios (correo, nombre, roles, activo, caja, tienda, editar_inventario, creado_en, actualizado_en)
+       values (?, ?, ?, ?, coalesce(?, ''), coalesce(?, ''), coalesce(?, 0), ?, ?)
        on conflict (correo) do update set nombre = excluded.nombre, roles = excluded.roles,
-         activo = excluded.activo, caja = coalesce(?, usuarios.caja),
+         activo = excluded.activo, caja = coalesce(?, usuarios.caja), tienda = coalesce(?, usuarios.tienda),
          editar_inventario = coalesce(?, usuarios.editar_inventario), actualizado_en = excluded.actualizado_en`,
-    ).bind(correo, nombre, roles.join(','), activo ? 1 : 0, caja, editar, ahora, ahora, caja, editar),
+    ).bind(correo, nombre, roles.join(','), activo ? 1 : 0, caja, tienda, editar, ahora, ahora, caja, tienda, editar),
     ...(cobra ? [] : [env.DB.prepare('delete from sesiones_cajero where correo = ?').bind(correo)]),
   ]).then(() => null, sinDueno);
   if (fallo) return fallo;
   const guardado = await leerUsuario(env, correo);
-  return json({ correo, nombre, roles, activo, caja: guardado?.caja ?? '', editar_inventario: guardado?.editar_inventario ?? false });
+  return json({ correo, nombre, roles, activo, caja: guardado?.caja ?? '', tienda: guardado?.tienda ?? '', editar_inventario: guardado?.editar_inventario ?? false });
 }
 
 /** Aprobar o rechazar una solicitud: de acceso (Issue #75), de cancelacion (Issue #200) o de descuento (Issue #119). */

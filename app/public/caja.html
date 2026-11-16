@@ -170,9 +170,6 @@ if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw-caja.js'
   <label class="caja-nombre">Esta computadora es
     <select id="caja-nombre">
       <option value="">— elige —</option>
-      <option>Caja 1</option>
-      <option>Caja 2</option>
-      <option>Caja 3</option>
     </select>
   </label>
   <span id="estado-red">en línea</span>
@@ -630,7 +627,27 @@ const avisoReferido = (centavos) => `Referido: +${dolares(centavos)} para el cli
 // Cada venta, cancelacion, retiro y corte lleva la caja: el corte cuenta el
 // dinero de un cajon. Se elige una vez por computadora y se recuerda aqui.
 const CLAVE_CAJA = 'caja-nombre';
-try { $('caja-nombre').value = localStorage.getItem(CLAVE_CAJA) ?? ''; } catch { /* sin memoria: se elige cada vez */ }
+// Las cajas son las de la tienda de esta computadora (#793): las manda /api/yo y se recuerda la ultima lista conocida, para
+// abrir sin red y con la pagina vieja en cache. Sin ninguna, las tres de Soledad (lo de siempre).
+const CAJAS_SOLEDAD = ['Caja 1', 'Caja 2', 'Caja 3'];
+function cajasConocidas() {
+  try { const g = JSON.parse(localStorage.getItem('cajas-tienda')); if (Array.isArray(g) && g.length && g.every((c) => typeof c === 'string')) return g; } catch { /* sin lista guardada */ }
+  return CAJAS_SOLEDAD;
+}
+// Reconstruye «Esta computadora es» e «Imprimir en» con la lista; conserva lo elegido si sigue siendo de la tienda.
+function pintarCajas(lista) {
+  const elegida = $('caja-nombre').value;
+  const imprimir = $('imprimir-en').value;
+  $('caja-nombre').innerHTML = '<option value="">— elige —</option>' + lista.map((c) => `<option>${escapar(c)}</option>`).join('');
+  $('imprimir-en').innerHTML = lista.map((c) => `<option>${escapar(c)}</option>`).join('');
+  $('caja-nombre').value = lista.includes(elegida) ? elegida : '';
+  $('imprimir-en').value = lista.includes(imprimir) ? imprimir : lista[0] ?? '';
+}
+pintarCajas(cajasConocidas());
+try {
+  const guardada = localStorage.getItem(CLAVE_CAJA) ?? '';
+  $('caja-nombre').value = cajasConocidas().includes(guardada) ? guardada : '';
+} catch { /* sin memoria: se elige cada vez */ }
 $('caja-nombre').addEventListener('change', () => {
   try { localStorage.setItem(CLAVE_CAJA, $('caja-nombre').value); } catch { /* idem */ }
   $('aviso').textContent = '';
@@ -643,9 +660,24 @@ const cajaActual = () => $('caja-nombre').value;
 // cualquier computadora (el servidor la usa aunque aqui diga otra). Sin red se
 // queda lo que se eligio en esta computadora. En la computadora de la tienda,
 // la del cajero que entro con su PIN (Issue #112).
-fetch('/api/yo').then((r) => r.json()).then(({ usuario, cajero }) => {
+fetch('/api/yo').then((r) => r.json()).then(({ usuario, cajero, cajas, tienda }) => {
+  // La tienda y sus cajas las decide el servidor por la cuenta de esta computadora (#793). Una respuesta de una version
+  // anterior del servidor no trae `cajas`: se queda la lista conocida.
+  if (Array.isArray(cajas) && cajas.length) {
+    try { localStorage.setItem('cajas-tienda', JSON.stringify(cajas)); } catch { /* idem */ }
+    let guardada = '';
+    try { guardada = localStorage.getItem(CLAVE_CAJA) ?? ''; } catch { /* idem */ }
+    pintarCajas(cajas);
+    if (!$('caja-nombre').value && cajas.includes(guardada)) $('caja-nombre').value = guardada;
+    try { localStorage.setItem(CLAVE_CAJA, $('caja-nombre').value); } catch { /* idem */ }
+    try { localStorage.setItem('imprimir-en', $('imprimir-en').value); } catch { /* idem */ }
+  }
+  if (tienda === '') {
+    $('aviso').textContent = 'Esta computadora no tiene tienda asignada. Pídele al dueño que se la asigne en Cuentas.';
+    $('aviso').style.color = '#D72B32';
+  }
   const caja = (cajero ?? usuario)?.caja;
-  if (!caja) return;
+  if (!caja) { pintarImpresora(); return; }
   $('caja-nombre').value = caja;
   $('caja-nombre').disabled = true;
   $('caja-nombre').title = 'Tu caja, asignada por el dueño';
@@ -678,13 +710,9 @@ fetch('/api/yo').then((r) => r.json()).then(async ({ usuario, cajero }) => {
 
 /* ---------- impresión remota: destino recordado y sin efectivo ---------- */
 const impresionRemota = () => !impresoraLista() && $('modo-remoto').checked;
-// Reusar las estaciones del selector existente, sin otra lista de cajas.
-for (const opcion of $('caja-nombre').options) {
-  if (opcion.value) $('imprimir-en').add(opcion.cloneNode(true));
-}
-$('imprimir-en').value = 'Caja 1';
-try { $('imprimir-en').value = localStorage.getItem('imprimir-en') || 'Caja 1'; } catch { /* se elige cada vez */ }
-if (!$('imprimir-en').value) $('imprimir-en').value = 'Caja 1';
+// Las estaciones son las cajas de la tienda (pintarCajas, mas arriba), sin otra lista.
+try { const g = localStorage.getItem('imprimir-en'); if (g && cajasConocidas().includes(g)) $('imprimir-en').value = g; } catch { /* se elige cada vez */ }
+if (!$('imprimir-en').value) $('imprimir-en').value = 'Caja 1';   // pintarCajas ya eligio la primera de la tienda; esto solo cubre una lista vacia
 $('imprimir-en').addEventListener('change', () => {
   try { localStorage.setItem('imprimir-en', $('imprimir-en').value); } catch { /* idem */ }
 });

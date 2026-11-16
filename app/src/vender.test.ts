@@ -24,7 +24,8 @@ const registro = (producto_id: string, extra: Record<string, unknown> = {}) => (
   id: crypto.randomUUID(), producto_id, cliente: 'Ana', telefono: '4441234567', nota: '', ...extra,
 });
 function usuario(db: DatabaseSync, correo: string, rol: Rol, nombre = 'Marta') {
-  db.prepare("insert into usuarios (correo, nombre, roles, activo, creado_en, actualizado_en) values (?, ?, ?, 1, '', '')").run(correo, nombre, rol);
+  db.prepare("insert into usuarios (correo, nombre, roles, activo, tienda, creado_en, actualizado_en) values (?, ?, ?, 1, ?, '', '')")
+    .run(correo, nombre, rol, rol === 'computadora' ? 'soledad' : '');   // R2 de #793: la computadora cobra solo con tienda
 }
 
 test('texto de una pieza: centavos, antes, talla, acentos y cierre exactos', () => {

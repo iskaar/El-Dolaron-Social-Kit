@@ -36,7 +36,7 @@ async function configNomina(env: Env): Promise<ConfigNomina> {
   };
 }
 
-export async function rutaNomina(request: Request, env: Env, url: URL, correo: string): Promise<Response> {
+export async function rutaNomina(request: Request, env: Env, url: URL, correo: string, tienda: string): Promise<Response> {
   if (request.method === 'GET' && url.pathname === '/api/nomina/checador') {
     if (!(await configNomina(env)).checador_activo) return json({ error: 'Checador apagado.' }, 404);
     const { results } = await env.DB.prepare('select id, nombre from empleados where activo=1 order by nombre').all();
@@ -72,7 +72,7 @@ export async function rutaNomina(request: Request, env: Env, url: URL, correo: s
   const periodo = /^\/api\/nomina\/([^/]+)\/periodo$/.exec(url.pathname);
   if (periodo && UUID.test(periodo[1]) && request.method === 'GET') return resumenPeriodo(env, periodo[1]);
   if (request.method === 'POST' && url.pathname === '/api/nomina/movimientos') {
-    return registrarMovimiento(request, env, correo);
+    return registrarMovimiento(request, env, correo, tienda);
   }
   return json({ error: 'Método no permitido.' }, 405);
 }
@@ -227,7 +227,7 @@ async function resumenPeriodo(env: Env, empleadoId: string): Promise<Response> {
   return json({ desde, hasta, faltas, retardos, bono_sugerido: bonoSugerido });
 }
 
-async function registrarMovimiento(request: Request, env: Env, correo: string): Promise<Response> {
+async function registrarMovimiento(request: Request, env: Env, correo: string, tienda: string): Promise<Response> {
   const c = await request.json().catch(() => ({})) as Record<string, unknown>;
   const id = typeof c.id === 'string' && UUID.test(c.id) ? c.id : '';
   const empleadoId = typeof c.empleado_id === 'string' ? c.empleado_id : '';
@@ -288,7 +288,7 @@ async function registrarMovimiento(request: Request, env: Env, correo: string): 
   const sentencias: D1PreparedStatement[] = [];
   let caja = '';
   if (origen === 'caja') {
-    caja = await cajaDe(env, correo, c.caja);
+    caja = await cajaDe(env, correo, c.caja, tienda);
     if (!CAJAS.includes(caja)) return json({ error: 'Caja inválida.' }, 400);
     sentencias.push(env.DB.prepare(`insert into retiros (id,tipo,caja,cajero,importe,motivo,corte_id,creado_en,categoria)
       values (?, 'nomina', ?, ?, ?, ?, null, ?, '') on conflict(id) do nothing`)

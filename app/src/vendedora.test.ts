@@ -5,8 +5,8 @@ import assert from 'node:assert/strict';
 import { tienda, PRODUCTO } from './prueba-d1.ts';
 
 const usuario = (t: ReturnType<typeof tienda>, correo: string, roles: string, activo = 1) =>
-  t.db.prepare(`insert into usuarios (correo, nombre, roles, activo, creado_en, actualizado_en) values (?, ?, ?, ?, '', '')`)
-    .run(correo, correo.split('@')[0], roles, activo);
+  t.db.prepare(`insert into usuarios (correo, nombre, roles, activo, tienda, creado_en, actualizado_en) values (?, ?, ?, ?, ?, '', '')`)
+    .run(correo, correo.split('@')[0], roles, activo, roles.includes('computadora') ? 'soledad' : '');   // R2 de #793
 const venta = (extra: Record<string, unknown> = {}) => ({
   id: crypto.randomUUID(), lineas: [{ producto_id: PRODUCTO, cantidad: 1 }], forma_pago: 'efectivo', efectivo: 25000, ...extra });
 

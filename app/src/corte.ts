@@ -25,7 +25,7 @@
 
 import { lineasNetas } from './netas.ts';
 import { contadoDe } from '../public/venta.js';
-import { leerUsuario } from './cuentas.ts';
+import { leerUsuario, cajasDe } from './cuentas.ts';
 import { CATEGORIAS_GASTO } from '../public/categorias.js';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -41,14 +41,24 @@ function json(cuerpo: unknown, status = 200): Response {
 /** El nombre de la caja que manda la computadora («Caja 1»). '' si no viene. */
 export const nombreCaja = (valor: unknown) => String(valor ?? '').replace(/\s+/g, ' ').trim().slice(0, 30);
 
+/** La caja que se eligio no es de la tienda donde se cobra (R1 de #793); el Worker la responde 400. */
+export class CajaAjena extends Error {
+  constructor() { super('Esa caja no es de esta tienda.'); }
+}
+
 /**
  * La caja de lo que hace esta persona (Issue #105): la suya si el dueno se la
- * asigno en /cuentas, entre en la computadora que entre; si no tiene, la que se
- * eligio en la computadora.
+ * asigno en /cuentas y es de la tienda donde cobra, entre en la computadora que
+ * entre; si no, la que se eligio en la computadora, que debe ser de esa tienda
+ * (la tienda la decide el servidor, tiendaDe en cuentas.ts). '' si no se eligio.
  */
-export async function cajaDe(env: Env, correo: string, pedida: unknown): Promise<string> {
+export async function cajaDe(env: Env, correo: string, pedida: unknown, tienda: string): Promise<string> {
+  const cajas = cajasDe(tienda);
   const usuario = await leerUsuario(env, correo);
-  return usuario?.caja || nombreCaja(pedida);
+  if (usuario?.caja && cajas.includes(usuario.caja)) return usuario.caja;
+  const elegida = nombreCaja(pedida);
+  if (elegida && !cajas.includes(elegida)) throw new CajaAjena();
+  return elegida;
 }
 
 const texto = (valor: unknown, max: number) => String(valor ?? '').replace(/\s+/g, ' ').trim().slice(0, max);
@@ -65,12 +75,12 @@ export const LIMITE_GASTO_CAJERO = 10000;
  * banco) o un gasto. Se registra antes de abrir el cajon: nunca sale dinero sin
  * rastro.
  */
-export async function registrarRetiro(request: Request, env: Env, correo: string): Promise<Response> {
+export async function registrarRetiro(request: Request, env: Env, correo: string, tienda: string): Promise<Response> {
   const cuerpo = (await request.json().catch(() => ({}))) as Record<string, unknown>;
   const id = String(cuerpo.id ?? '');
   const tipo = cuerpo.tipo === 'gasto' || cuerpo.tipo === 'terminal' ? cuerpo.tipo
     : cuerpo.tipo === undefined || cuerpo.tipo === 'retiro' ? 'retiro' : '';
-  const caja = await cajaDe(env, correo, cuerpo.caja);
+  const caja = await cajaDe(env, correo, cuerpo.caja, tienda);
   const importe = Number(cuerpo.importe);
   const motivo = texto(cuerpo.motivo, 200) || (tipo === 'terminal' ? 'Pago de la terminal' : '');
   const categoria = tipo === 'gasto' ? String(cuerpo.categoria ?? '') : '';
@@ -141,10 +151,10 @@ const devuelto = (forma: string) => `(select ${dinero(forma, 'importe')} from de
 const enEfectivo = (forma = '') => `(select coalesce(sum(d.importe), 0) from devoluciones d join ventas v on v.id = d.venta_id
   where v.corte_id = ?1 and d.corte_id = ?1 and d.forma_pago = 'efectivo' and v.forma_pago != 'efectivo'${forma ? ` and v.forma_pago = '${forma}'` : ''})`;
 
-export async function registrarCorte(request: Request, env: Env, correo: string): Promise<Response> {
+export async function registrarCorte(request: Request, env: Env, correo: string, tienda: string): Promise<Response> {
   const cuerpo = (await request.json().catch(() => ({}))) as Record<string, unknown>;
   const id = String(cuerpo.id ?? '');
-  const caja = await cajaDe(env, correo, cuerpo.caja);
+  const caja = await cajaDe(env, correo, cuerpo.caja, tienda);
   const conteo = cuerpo.conteo as Record<string, number> | undefined;
   const contado = conteo ? contadoDe(conteo) : Number(cuerpo.efectivo_contado);
   const terminal = Number(cuerpo.tarjeta_terminal ?? 0);
@@ -224,8 +234,8 @@ export async function registrarCorte(request: Request, env: Env, correo: string)
 }
 
 /** El ultimo corte de una caja, para reimprimirlo. */
-export async function ultimoCorte(url: URL, env: Env, correo: string): Promise<Response> {
-  const caja = await cajaDe(env, correo, url.searchParams.get('caja'));
+export async function ultimoCorte(url: URL, env: Env, correo: string, tienda: string): Promise<Response> {
+  const caja = await cajaDe(env, correo, url.searchParams.get('caja'), tienda);
   if (!caja) return json({ error: 'Falta la caja.' }, 400);
   const corte = await env.DB.prepare(`${CON_TERMINAL} where c.caja = ? order by c.hasta desc limit 1`)
     .bind(caja)
