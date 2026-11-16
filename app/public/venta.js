@@ -11,6 +11,8 @@ export const TOPE_DESCUENTO = 50;
 export const TOPE_DESCUENTO_CAJERO = 10;
 /** Un descuento aprobado, o uno pendiente, vale 30 minutos (Issue #845). */
 export const VIGENCIA_DESCUENTO_MS = 30 * 60_000;
+/** Cuanto vive un ticket en curso en la caja; tambien lo mas atras que el servidor acepta la hora de una venta con descuento (Issue #845). */
+export const TICKET_VIGENTE_MS = 4 * 3600_000;
 
 /**
  * Cuanto se descuenta, en centavos, para un descuento pedido ({ tipo, valor }:

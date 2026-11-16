@@ -1,6 +1,6 @@
 import { resolverCancelacion } from './cancelaciones.ts';
 import { resolverDevolucion } from './devoluciones.ts';
-import { resolverDescuento, limiteVigencia } from './descuentos.ts';
+import { resolverDescuento, limiteVigencia, AVISO_QUITADA } from './descuentos.ts';
 import { avisarDueno } from './avisos.ts';
 
 /**
@@ -445,7 +445,8 @@ export async function yo(env: Env, correo: string, cajero: Usuario | null = null
   return json({ correo, usuario, solicitud, vendedor, revendedora: esRevendedora(usuario), modos_inventario: modos,
     tienda, tienda_nombre: esTienda(tienda) ? TIENDAS[tienda].nombre : '', cajas,
     tiendas: (Object.keys(TIENDAS) as Tienda[]).map((clave) => ({ clave, nombre: TIENDAS[clave].nombre })),   // #800: dónde puede recoger un cliente
-    cajero: cajero && { correo: cajero.correo, nombre: cajero.nombre, caja: cajas.includes(cajero.caja) ? cajero.caja : '' } });
+    // es_dueno: el dueño con su PIN en la computadora de la caja no tiene el tope de 10 % de un cajero (#845); el servidor lo decide igual.
+    cajero: cajero && { correo: cajero.correo, nombre: cajero.nombre, caja: cajas.includes(cajero.caja) ? cajero.caja : '', es_dueno: cajero.roles.includes('dueno') } });
 }
 
 /** Alguien sin cuenta pide entrar. Una sola pendiente por persona: pedir otra vez la actualiza. */
@@ -560,11 +561,12 @@ export async function guardarCuenta(request: Request, env: Env): Promise<Respons
 export async function resolverSolicitud(id: string, request: Request, env: Env, dueno: string): Promise<Response> {
   const cuerpo = (await request.json().then((c) => c ?? {}, () => ({}))) as { aprobar?: unknown; roles?: unknown };
   const solicitud = await env.DB.prepare(
-    `select id, tipo, correo, nombre, estado from solicitudes where id = ?`,
+    `select id, tipo, correo, nombre, estado, resuelto_por from solicitudes where id = ?`,
   )
     .bind(id)
-    .first<{ id: string; tipo: string; correo: string; nombre: string; estado: string }>();
+    .first<{ id: string; tipo: string; correo: string; nombre: string; estado: string; resuelto_por: string | null }>();
   if (!solicitud) return json({ error: 'La solicitud no existe.' }, 404);
+  if (solicitud.tipo === 'descuento' && solicitud.resuelto_por === 'quitada') return json({ error: AVISO_QUITADA }, 409);
   if (solicitud.estado !== 'pendiente') return json({ error: `Ya estaba ${solicitud.estado}.` }, 409);
   if (solicitud.tipo === 'cancelacion') return resolverCancelacion(env, id, cuerpo.aprobar === true, dueno);
   if (solicitud.tipo === 'devolucion') return resolverDevolucion(env, id, cuerpo.aprobar === true, dueno);

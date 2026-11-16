@@ -561,7 +561,7 @@ test('#845 un descuento aprobado vence a los 30 minutos de aprobarse; el pendien
   assert.equal((await venta({ descuento_id: pedido })).status, 409);
 });
 
-test('#845 el vencimiento se comprueba dentro de la venta, no solo antes: si vence entre la lectura y la escritura, la venta no se escribe', async () => {
+test('#845 el estado de la solicitud se comprueba dentro de la venta, no solo antes: si cambia entre la lectura y la escritura (aquí, vence en la base), la venta no se escribe', async () => {
   const { db, env, pedidoResuelto, venta } = await montar();
   const id = await pedidoResuelto({ valor: 10 }, true);
   db.prepare('update solicitudes set resuelto_en = ? where id = ?').run(hace(29.99), id);
@@ -645,7 +645,7 @@ test('#845 reintentar la venta con el mismo descuento sigue idempotente aunque y
   assert.equal(reintento.cuerpo.duplicada, true);
   assert.equal(db.prepare('select count(*) as n from ventas').get()!.n, 1);
   const sinRed = await pedidoResuelto({ valor: 10 }, true);
-  db.prepare('update solicitudes set resuelto_en = ? where id = ?').run(hace(60), sinRed);
+  db.prepare('update solicitudes set creado_en = ?, resuelto_en = ? where id = ?').run(hace(61), hace(60), sinRed);
   assert.equal((await venta({ descuento_id: sinRed })).status, 409);
   assert.equal((await venta({ descuento_id: sinRed, sin_red: true, creado_en: hace(45) })).status, 201);
 });
@@ -682,4 +682,73 @@ test('#845 la caja manda el ticket y la caja al pedir, cierra en el servidor al 
   // Los botones de pedir son type=button y los campos no escuchan teclas: el Enter con el que el lector termina un escaneo no pide nada.
   assert.doesNotMatch(html, /\$\('descuento-(?:valor|motivo|tipo|pin-dueno|aprobador)'\)\.addEventListener\('(?:keydown|keypress|keyup)'/);
   assert.doesNotMatch(html, /<form[^>]*>[^]*?id="descuento-form"/);
+});
+
+// ---------- Issue #845, revisión de #848: ventas sin red, folio en duda, dueño con PIN, avisos ----------
+
+/** Fija cuándo se pidió y cuándo se aprobó (hace N minutos) el descuento `id`. */
+const fechar = (db: any, id: string, pidio: number, aprobo: number) =>
+  db.prepare('update solicitudes set creado_en = ?, resuelto_en = ? where id = ?').run(hace(pidio), hace(aprobo), id);
+
+test('#845 una venta cobrada sin red y sincronizada con la sesión de otro cajero se registra; con el ticket cambiado, no', async () => {
+  const { como, db, pedir, pedirDescuento, venta, token } = await montar();
+  const BEA = 'bea@prueba.mx', PIN_BEA = '264810';
+  db.prepare(`insert into usuarios (correo, nombre, roles, activo, caja, creado_en, actualizado_en) values (?, 'Bea', 'cajero', 1, 'Caja 1', '', '')`).run(BEA);
+  como(DUENO);
+  await pedir('/api/cuentas/pin', { correo: BEA, pin: PIN_BEA }, 'PUT');
+  como(TIENDA);
+  const deBea = { 'x-cajero': await token(BEA, PIN_BEA) };
+  const id = (await pedirDescuento({ aprobador: DUENO, pin: PIN_DUENO })).cuerpo.id as string;   // lo pidió Ana, en la Caja 2
+  assert.equal((await venta({ descuento_id: id }, 1, deBea)).status, 409);                       // en línea, otra sesión no lo usa
+  assert.equal((await venta({ descuento_id: id, sin_red: true }, 2, deBea)).status, 409);        // sin red, pero otro ticket
+  assert.equal((await venta({ descuento_id: id, sin_red: true }, 1, deBea)).status, 201);        // el suyo, ya pagado: se registra
+  assert.equal(db.prepare('select cajero from ventas').get()!.cajero, BEA);
+});
+
+test('#845 una venta sin red se mide a su hora solo dentro de los límites: ni anterior a la solicitud, ni de hace más de 4 h', async () => {
+  const { db, pedidoResuelto, venta } = await montar();
+  // Aprobado hace 60 min: en línea ya venció; una venta sin red de hace 20 minutos (40 min después de aprobarse, no: 40 antes de ahora)...
+  const id = await pedidoResuelto({ valor: 10 }, true);
+  fechar(db, id, 61, 60);
+  assert.equal((await venta({ descuento_id: id, sin_red: true })).status, 409);                       // sin hora: se mide a ahora
+  assert.equal((await venta({ descuento_id: id, sin_red: true, creado_en: hace(5 * 60) })).status, 409);   // hace 5 h: fuera de la ventana de 4 h
+  assert.equal((await venta({ descuento_id: id, sin_red: true, creado_en: hace(70) })).status, 409);       // antes de la solicitud
+  assert.equal((await venta({ descuento_id: id, sin_red: true, creado_en: hace(45) })).status, 201);       // 15 min después de pedirse: vigente a esa hora
+});
+
+test('#845 el reintento de un folio se mide a la hora de su primer intento: perdido al minuto 29, reintentado al 31 se registra', async () => {
+  const { db, pedidoResuelto, venta } = await montar();
+  const id = await pedidoResuelto({ valor: 10 }, true);
+  fechar(db, id, 32, 31);
+  const folio = crypto.randomUUID();
+  assert.equal((await venta({ id: folio, descuento_id: id })).status, 409);                          // un cobro nuevo a las 31: vencido
+  const reintento = await venta({ id: folio, descuento_id: id, creado_en: hace(2) });                 // su primer intento fue al minuto 29
+  assert.equal(reintento.status, 201, JSON.stringify(reintento.cuerpo));
+  assert.equal(db.prepare('select count(*) as n from ventas').get()!.n, 1);
+  // Lo que el servidor no acepta: una hora anterior a la solicitud.
+  const otro = await pedidoResuelto({ valor: 10 }, true);
+  fechar(db, otro, 32, 31);
+  assert.equal((await venta({ id: crypto.randomUUID(), descuento_id: otro, creado_en: hace(40) })).status, 409);
+});
+
+test('#845 /api/yo dice si quien entró con su PIN es el dueño, para que la caja no le ponga el tope de 10 %', async () => {
+  const { pedir, token, ana } = await montar();
+  assert.equal((await pedir('/api/yo', undefined, 'GET', ana)).cuerpo.cajero.es_dueno, false);
+  assert.equal((await pedir('/api/yo', undefined, 'GET', { 'x-cajero': await token(DUENO, PIN_DUENO) })).cuerpo.cajero.es_dueno, true);
+});
+
+test('#845 si el cajero quitó la solicitud, el dueño lo lee así; un descuento aprobado antes de la huella contesta «ticket cambió», no «otra caja»', async () => {
+  const { como, db, pedir, pedirDescuento, venta, ana } = await montar();
+  const id = (await pedirDescuento()).cuerpo.id as string;
+  await pedir(`/api/descuentos/${id}/quitar`, {}, 'POST', ana);
+  como(DUENO);
+  const r = await pedir(`/api/solicitudes/${id}/resolver`, { aprobar: true });
+  assert.equal(r.status, 409);
+  assert.equal(r.cuerpo.error, 'El cajero ya quitó esta solicitud.');
+  como(TIENDA);
+  const viejo = (await pedirDescuento({ aprobador: DUENO, pin: PIN_DUENO })).cuerpo.id as string;
+  db.prepare(`update solicitudes set datos = json_remove(json_remove(datos, '$.huella'), '$.caja') where id = ?`).run(viejo);
+  const v = await venta({ descuento_id: viejo });
+  assert.equal(v.status, 409);
+  assert.match(v.cuerpo.error, /El ticket cambio/);
 });

@@ -13,7 +13,7 @@
  * exacto que se pidio (huella de piezas, cantidades y subtotal; sustituye la regla del
  * 17/10 en que uno en pesos sobrevivia a los cambios) y solo para la caja que lo pidio.
  */
-import { descuentoDe, huellaTicket, TOPE_DESCUENTO_CAJERO, VIGENCIA_DESCUENTO_MS } from '../public/venta.js';
+import { descuentoDe, huellaTicket, TOPE_DESCUENTO_CAJERO, VIGENCIA_DESCUENTO_MS, TICKET_VIGENTE_MS } from '../public/venta.js';
 import { leerUsuario, leerRoles } from './cuentas.ts';
 import { verificarPin } from './cajeros.ts';
 import { avisarDueno } from './avisos.ts';
@@ -23,6 +23,8 @@ const json = (cuerpo: unknown, status = 200) =>
   new Response(JSON.stringify(cuerpo), { status, headers: { 'content-type': 'application/json; charset=utf-8' } });
 
 const pesos = (centavos: number) => `$${(centavos / 100).toFixed(2)}`;
+/** Lo que ve el dueño al resolver una solicitud que el cajero ya retiro con «Quitar descuento». */
+export const AVISO_QUITADA = 'El cajero ya quitó esta solicitud.';
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 interface Datos { tipo: string; valor: number; subtotal: number; monto: number; via?: string; huella?: string; caja?: string }
@@ -119,8 +121,9 @@ export async function resolverDescuento(env: Env, id: string, aprobar: boolean, 
     `update solicitudes set estado = ?, resuelto_en = ?, resuelto_por = ? where id = ? and estado = 'pendiente' and creado_en >= ?`,
   ).bind(aprobar ? 'aprobada' : 'rechazada', new Date().toISOString(), dueno, id, limiteVigencia()).run();
   if (!gano.meta.changes) {
-    const fila = await env.DB.prepare('select estado from solicitudes where id = ?').bind(id).first<{ estado: string }>();
-    return json({ error: fila?.estado === 'pendiente' ? 'Esa solicitud venció (pasaron 30 minutos): que la pidan otra vez.' : 'Otro dueño ya la resolvió.' }, 409);
+    const fila = await env.DB.prepare('select estado, resuelto_por from solicitudes where id = ?').bind(id).first<{ estado: string; resuelto_por: string | null }>();
+    return json({ error: fila?.estado === 'pendiente' ? 'Esa solicitud venció (pasaron 30 minutos): que la pidan otra vez.'
+      : fila?.resuelto_por === 'quitada' ? AVISO_QUITADA : 'Otro dueño ya la resolvió.' }, 409);
   }
   return json({ id, estado: aprobar ? 'aprobada' : 'rechazada' });
 }
@@ -137,7 +140,12 @@ export async function listarDescuentos(env: Env): Promise<Response> {
 }
 
 /** El ticket que cobra y quien lo cobra: contra esto se compara el descuento (Issue #845). */
-export interface TicketDeCobro { subtotal: number; huella: string; correo: string; caja: string; ahoraMs: number }
+/**
+ * `horaMs`: la hora de la venta que mando la caja (la del primer intento de un folio, o la de una venta cobrada sin red). Con ella
+ * se mide la vigencia mientras no sea anterior a la solicitud ni a 4 h atras; si no, se mide a `ahoraMs`. `sinRed`: una venta
+ * cobrada sin red puede sincronizarse con la sesion de otro cajero: no se compara quien ni desde que caja, pero si el ticket.
+ */
+export interface TicketDeCobro { subtotal: number; huella: string; correo: string; caja: string; ahoraMs: number; horaMs: number; sinRed: boolean }
 
 /**
  * Al cobrar: la solicitud tiene que estar aprobada, vigente (30 minutos), ser de este mismo ticket
@@ -148,32 +156,37 @@ export interface TicketDeCobro { subtotal: number; huella: string; correo: strin
 export async function validarDescuento(
   env: Env, id: string, ticket: TicketDeCobro,
 ): Promise<{ ok: true; monto: number; guarda: D1PreparedStatement } | { ok: false; error: string; status: number }> {
-  const fila = await env.DB.prepare(`select estado, datos, correo, resuelto_en from solicitudes where id = ? and tipo = 'descuento'`)
+  const fila = await env.DB.prepare(`select estado, datos, correo, creado_en, resuelto_en from solicitudes where id = ? and tipo = 'descuento'`)
     .bind(id)
-    .first<{ estado: string; datos: string; correo: string; resuelto_en: string | null }>();
+    .first<{ estado: string; datos: string; correo: string; creado_en: string; resuelto_en: string | null }>();
   const falla = (error: string, status = 409) => ({ ok: false as const, error, status });
   if (!fila) return falla('El descuento no existe.', 400);
   if (fila.estado !== 'aprobada') {
     return falla(`El descuento esta ${fila.estado}: pide otro.`);
   }
-  const limite = limiteVigencia(ticket.ahoraMs);
+  // La hora de la venta de la caja vale si no es anterior a la solicitud ni a 4 h atras ni futura; si no, se mide a la hora del servidor.
+  const hora = Math.min(ticket.horaMs, ticket.ahoraMs);
+  const medidoMs = hora >= Date.parse(fila.creado_en) && hora >= ticket.ahoraMs - TICKET_VIGENTE_MS ? hora : ticket.ahoraMs;
+  const limite = limiteVigencia(medidoMs);
   if (!fila.resuelto_en || fila.resuelto_en < limite) return falla('El descuento venció (pasaron 30 minutos de aprobado): pide otro.');
   const datos = JSON.parse(fila.datos) as Datos;
-  if (fila.correo !== ticket.correo || datos.caja !== ticket.caja) {
-    return falla('Ese descuento lo pidió otra caja u otro cajero: pide otro.');
-  }
+  // Primero el ticket: uno aprobado antes de este cambio no trae huella y se contesta «ticket cambio», no «otra caja».
   if (datos.huella !== ticket.huella) {
     return falla('El ticket cambio despues de aprobar el descuento: pide otro.');
+  }
+  if (!ticket.sinRed && (fila.correo !== ticket.correo || datos.caja !== ticket.caja)) {
+    return falla('Ese descuento lo pidió otra caja u otro cajero: pide otro.');
   }
   const calculo = descuentoDe(datos, ticket.subtotal);
   if ('error' in calculo) return falla(String(calculo.error), 400);
   const usado = await env.DB.prepare('select id from ventas where descuento_id = ?').bind(id).first();
   if (usado) return falla('Ese descuento ya se uso en otra venta.');
-  // Cero filas no aborta un batch; un NOT NULL violado si: `datos` queda en null (y la venta entera revierte) si algo de arriba cambio.
+  // Cero filas no aborta un batch; un NOT NULL violado si: `datos` queda en null (y la venta entera revierte) si el estado de la solicitud
+  // (quitada, rechazada, otra huella) cambio despues de la lectura. La hora no se vuelve a medir aqui: `limite` ya va calculado.
   const guarda = env.DB.prepare(
-    `update solicitudes set datos = case when tipo = 'descuento' and estado = 'aprobada' and correo = ? and resuelto_en >= ?
-       and json_extract(datos, '$.caja') = ? and json_extract(datos, '$.huella') = ? then datos else null end where id = ?`,
-  ).bind(ticket.correo, limite, ticket.caja, ticket.huella, id);
+    `update solicitudes set datos = case when tipo = 'descuento' and estado = 'aprobada' and resuelto_en >= ? and creado_en <= ?
+       and json_extract(datos, '$.huella') = ? and (? = 1 or (correo = ? and json_extract(datos, '$.caja') = ?)) then datos else null end where id = ?`,
+  ).bind(limite, new Date(medidoMs).toISOString(), ticket.huella, ticket.sinRed ? 1 : 0, ticket.correo, ticket.caja, id);
   return { ok: true, monto: calculo.monto, guarda };
 }
 

@@ -141,7 +141,7 @@ function montarCobro(op: Opciones = {}) {
     socio: null, valesCargados: [], catalogo: new Map(), pedidoCargado: op.pedido ? { id: 'ped-1', folio: 17, saldo: 10000 } : null,
     preguntarSocio: async () => 'cobrar',
     impresionRemota: () => !!op.remota, exigirCaja: () => true, cajaActual: () => 'Caja 1', dolaronesPedidos: () => 0,
-    descuento: op.descuento ?? null, descuentoAplicado: () => ((op.descuento as any)?.estado === 'aprobada' ? (op.descuento as any).monto : 0), descuentoDe, TOPE_DESCUENTO, promoActual: () => 0, totalNeto: () => 30000, pintarDescuento() {},
+    descuento: op.descuento ?? null, descuentoAplicado: () => ((op.descuento as any)?.estado === 'aprobada' ? (op.descuento as any).monto : 0), descuentoDe, TOPE_DESCUENTO, revisarVencimientoDescuento: () => false, promoActual: () => 0, totalNeto: () => 30000, pintarDescuento() {},
     pesos: String, dolares: String, quitarSocio() {}, sincronizar() {}, cargarCatalogo() {}, pintarImpresora() {}, promoConfig: null,
     abrirCajon: op.abrirCajon ?? (async () => true), imprimirTicket: op.imprimirTicket ?? (async () => true),
     store: async (almacen: string, _m: string, fn: any) => fn({ put(v: unknown) { if (almacen === 'ventas') guardadas.push(v); } }),

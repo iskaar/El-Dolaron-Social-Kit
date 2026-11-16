@@ -623,10 +623,10 @@ export const ESCENARIOS = [
       'Toca «Pedir descuento» otra vez.',
       'Espera a que el dueño lo apruebe de nuevo.',
     ],
-    ojo: 'Un descuento, en % o en $, vale solo para ese ticket exacto (mismas piezas y cantidades): si cambia, se pierde y «Quitar descuento» lo cierra también en el servidor. Si ya pasaron 30 minutos, la caja dice «El descuento venció»: pide otro. «El descuento pasa del» sale si el descuento ya rebasa 50 % del ticket.',
+    ojo: 'Un descuento, en % o en $, vale solo para ese ticket exacto (mismas piezas y cantidades): si cambia, se pierde y «Quitar descuento» lo cierra también en el servidor. Si ya pasaron 30 minutos, la caja dice «El descuento venció»: pide otro.',
     ver: ['pedir-descuento'],
     pantalla: 'caja',
-    textos: ['El ticket cambió: el descuento ya no aplica', 'Pedir descuento', 'El descuento pasa del', 'Quitar descuento', 'El descuento venció'],
+    textos: ['El ticket cambió: el descuento ya no aplica', 'Pedir descuento', 'Quitar descuento', 'El descuento venció'],
   },
   {
     id: 'precio-no-coincide', categoria: 'descuentos', titulo: 'El precio de la etiqueta no es el de la caja',

@@ -2013,9 +2013,10 @@ async function registrarVenta(request: Request, env: Env, ctx: ExecutionContext,
   let descuento = 0;
   let guardaDescuento: D1PreparedStatement | null = null;
   if (descuentoId) {
-    // Atado a este ticket (piezas, cantidades, subtotal), a esta caja y a quien cobra; una venta sin red se mide a la hora de la caja.
+    // Atado a este ticket (piezas, cantidades, subtotal), a esta caja y a quien cobra (salvo una venta cobrada sin red, que puede sincronizarse
+    // con otro cajero). La vigencia se mide a la hora de la venta de la caja (primer intento de un folio, o venta sin red) dentro de sus limites.
     const valido = await validarDescuento(env, descuentoId, { subtotal, huella: huellaTicket(venta.lineas as LineaVenta[], subtotal), correo, caja,
-      ahoraMs: venta.sin_red === true ? horaVenta : Date.now() });
+      ahoraMs: Date.now(), horaMs: horaVenta, sinRed: venta.sin_red === true });
     if (!valido.ok) return json({ error: valido.error }, valido.status);
     descuento = valido.monto;
     guardaDescuento = valido.guarda;
