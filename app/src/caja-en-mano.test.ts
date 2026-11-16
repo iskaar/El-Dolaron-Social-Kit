@@ -59,11 +59,11 @@ function montar(piezas: any[], { enLinea = true } = {}) {
     precioHoy: (p: any) => p.precio, navigator: red, cargarPedido() {}, buscarSocio() {}, cargarCatalogo: async () => {},
     pintar: () => pintados.push(1), sonar() {}, TONO_RECHAZO: {}, escapar: String, pesos: String, moverSugerencia, esBusquedaPorTexto, TONO_PIEZA: {}, document: { createElement: () => elemento() },
   };
-  const rutina = runInNewContext(`let cobrando = false, idVenta = null, lineas = [];
-    ${entre('/* ---------- «La tengo en la mano» (#832) ---------- */', '/**\n * La etiqueta impresa codifica')}
+  const rutina = runInNewContext(`let cobrando = false, idVenta = null, lineas = [], cobroIncierto = null;
+    ${entre('/** Con el folio en duda el ticket no se toca', '// Pedido por WhatsApp cargado')}
     ${entre('function buscarPieza(', '/* ---------- socio y Dolarones')}
     ${entre("$('codigo').addEventListener('keydown'", '// Camara del celular')}
-    ({ agregarCodigo, lineas: () => lineas, quitar: (i) => { lineas = lineas.filter((_, j) => j !== i); }, cobrando: (v) => { cobrando = v; } })`, contexto);
+    ({ agregarCodigo, ticketEnDuda, lineas: () => lineas, idVenta: () => idVenta, dudar: (id) => { idVenta = id; cobroIncierto = id && { id, boton: 'tarjeta' }; }, quitar: (i) => { lineas = lineas.filter((_, j) => j !== i); }, cobrando: (v) => { cobrando = v; } })`, contexto);
   return { ...rutina, $, panel: $('en-mano'), aviso: $('aviso'), codigo: $('codigo'), pintados, catalogo, red };
 }
 
@@ -187,86 +187,80 @@ test('el renglón del ticket lleva la insignia, y pintar() quita la oferta al em
   assert.ok(fuente.indexOf('id="aviso"') < fuente.indexOf('id="en-mano"') && fuente.indexOf('id="en-mano"') < fuente.indexOf('id="sugerencias"'));
 });
 
-/* ---------- cobrar ---------- */
+/* ---------- con el folio en duda el ticket no se toca ---------- */
 
-function montarCobro({ enLinea = true, marcada = true, respuesta = async (_r: string, _o: any) => ({ ok: true, status: 201, json: async () => ({ id: 'x', ganados: 0, vale_emitido: null }) }) as any } = {}) {
-  const els = new Map<string, any>();
-  const $ = (id: string) => {
-    if (!els.has(id)) els.set(id, { value: id === 'forma' ? 'tarjeta' : '', textContent: '', style: {}, disabled: false, enfocado: false, focus() { this.enfocado = true; } });
-    return els.get(id);
-  };
-  const enviadas: any[] = [];
-  const guardadas: any[] = [];
-  const contexto: Record<string, unknown> = {
-    crypto, Date, $, AbortSignal, Object, Math, totales, efectivoAlcanza, saldoCanjeable, dolaronesGanados, anticipoDePedido, transferenciaDe, CLAVE_DESDE,
-    debePreguntarSocio, navigator: { onLine: enLinea }, window: { open() {} }, document: { createElement: () => ({ style: {}, textContent: '' }) },
-    lineas: [{ producto_id: 'p1', codigo: 'ED-000001', nombre: 'Lámpara', precio: 30000, cantidad: 1, ...(marcada ? { en_mano: { motivo: 'no_se', esperado: 0 } } : {}) }],
-    errorImpresora: () => 'x', socio: null, valesCargados: [], catalogo: new Map(), pedidoCargado: null, SIN_RED_EN_MANO,
-    preguntarSocio: async () => 'cobrar', preguntarForma: async () => 'tarjeta', impresionRemota: () => false, exigirCaja: () => true, cajaActual: () => 'Caja 1',
-    dolaronesPedidos: () => 0, descuento: null, descuentoAplicado: () => 0, descuentoDe, TOPE_DESCUENTO, promoActual: () => 0, totalNeto: () => 30000, pintarDescuento() {},
-    pesos: String, dolares: String, quitarSocio() {}, sincronizar() {}, cargarCatalogo() {}, pintarImpresora() {}, promoConfig: null,
-    abrirCajon: async () => true, imprimirTicket: async () => true,
-    store: async (almacen: string, _m: string, fn: any) => fn({ put(v: unknown) { if (almacen === 'ventas') guardadas.push(v); } }),
-    fetch: async (ruta: string, o: any) => { enviadas.push(JSON.parse(o.body)); return respuesta(ruta, o); },
-  };
-  const avisoRojo = fuente.slice(fuente.indexOf('const avisoRojo ='), fuente.indexOf('\n', fuente.indexOf('const avisoRojo =')));
-  const falla = entre('function textoFalla(', '/**\n * Escribir o escanear P-17');
-  const conPedido = entre('async function cobrarConPedido(', '/* ---------- cobro: primero');
-  const errorClave = entre('function errorClave(', "for (const id of ['clave-rastreo'");
-  const cobro = entre('async function cobrar()', 'let sincronizando = false;');
-  const cobrar = runInNewContext(`let idVenta = null, creadoEnVenta = null, cobrando = false, formaElegida = false;
-    function pintar() {}
-    ${avisoRojo}\n${falla}\n${conPedido}\n${errorClave}\n${cobro}; cobrar`, contexto);
-  return { cobrar, $, enviadas, guardadas };
-}
+const AVISO_DUDA = 'Primero termina el cobro pendiente: toca otra vez el mismo botón.';
 
-test('cobrar: la marca viaja en la línea del pedido al servidor (con su motivo y la existencia que vio la caja) y solo en esa línea', async () => {
-  const c = montarCobro();
-  await c.cobrar();
-  assert.equal(c.enviadas.length, 1);
-  assert.deepEqual(c.enviadas[0].lineas, [{ codigo: 'ED-000001', nombre: 'Lámpara', precio: 30000, cantidad: 1, producto_id: 'p1', en_mano: { motivo: 'no_se', esperado: 0 } }]);
-  const normal = montarCobro({ marcada: false });
-  await normal.cobrar();
-  assert.deepEqual(Object.keys(normal.enviadas[0].lineas[0]), ['codigo', 'nombre', 'precio', 'cantidad', 'producto_id'], 'sin marca el cuerpo no cambia');
-});
-
-test('cobrar sin red con una pieza marcada: no se envía ni se encola, lo dice y el foco sigue en #codigo; sin marca se encola como siempre', async () => {
-  const c = montarCobro({ enLinea: false });
-  await c.cobrar();
-  assert.equal(c.enviadas.length, 0);
-  assert.equal(c.guardadas.length, 0, 'no se encola una venta con una pieza sin existencia');
-  assert.equal(c.$('aviso').textContent, SIN_RED_EN_MANO);
-  assert.equal(c.$('codigo').enfocado, true);
-  const normal = montarCobro({ enLinea: false, marcada: false, respuesta: async () => { throw new Error('sin red'); } });
-  await normal.cobrar();
-  assert.equal(normal.guardadas.length, 1, 'el resto de las ventas sin red sigue en cola');
-});
-
-test('cobrar: si no se sabe cómo salió el cobro (timeout, error de red con la red arriba o 5xx), la venta marcada NO se encola: el ticket sigue abierto con el mismo folio', async () => {
-  const fallas: [string, () => Promise<any>][] = [
-    ['timeout', async () => { throw new DOMException('timeout', 'TimeoutError'); }],
-    ['error de red', async () => { throw new TypeError('Failed to fetch'); }],
-    ['5xx', async () => ({ ok: false, status: 503, json: async () => ({}) })],
-  ];
-  for (const [que, falla] of fallas) {
-    let llamada = 0;
-    const c = montarCobro({ respuesta: async () => (llamada++ === 0 ? falla() : { ok: true, status: 201, json: async () => ({ id: 'x', ganados: 0, vale_emitido: null }) }) as any });
-    await c.cobrar();
-    assert.equal(c.guardadas.length, 0, `${que}: nada en IndexedDB`);
-    assert.match(c.$('aviso').textContent, /toca el mismo botón de cobro otra vez/, que);
-    assert.equal(c.$('aviso').style.color, '#D72B32', que);
-    assert.equal(c.$('codigo').enfocado, true, que);
-    await c.cobrar();   // el mismo botón
-    assert.equal(c.enviadas.length, 2, que);
-    assert.equal(c.enviadas[1].id, c.enviadas[0].id, `${que}: el mismo folio en el reintento`);
-    assert.deepEqual(c.enviadas[1].lineas, c.enviadas[0].lineas, que);
-    assert.match(c.$('aviso').textContent, /^Cobrado/, que);
-    assert.equal(c.guardadas.length, 0, que);
+test('folio en duda (#830): escanear, agregar «en la mano» y el motivo no cambian el ticket ni el folio; sin duda todo sigue igual', () => {
+  for (const marcado of [true, false]) {
+    const c = montar([pieza('ED-000001', 0), pieza('ED-000002', 4)]);
+    if (marcado) { c.agregarCodigo('ED-000001'); botones(c.panel)[0].click(); botones(c.panel)[0].click(); }
+    else c.agregarCodigo('ED-000002');
+    const antes = JSON.stringify(c.lineas());
+    c.dudar('folio-1');
+    // Escanear algo (otra pieza, la misma, un pedido P-17, un socio DC-): el ticket y el folio quedan como están.
+    for (const leido of ['ED-000002', 'ED-000001', '2*ED-000002', 'P-17', 'DC-abc']) {
+      c.aviso.textContent = '';
+      assert.equal(c.agregarCodigo(leido), false, leido);
+      assert.equal(c.aviso.textContent, AVISO_DUDA, leido);
+      assert.equal(c.aviso.style.color, '#D72B32');
+    }
+    assert.equal(JSON.stringify(c.lineas()), antes, `marcado=${marcado}: el ticket no cambió`);
+    assert.equal(c.idVenta(), 'folio-1', 'el folio no se reinició');
+    // Con la pieza «en la mano» ya a la vista, el toque tampoco agrega.
+    c.dudar(null);
+    const otra = montar([pieza('ED-000003', 0)]);
+    otra.agregarCodigo('ED-000003');
+    botones(otra.panel)[0].click();
+    otra.dudar('folio-2');
+    botones(otra.panel)[0].click();
+    otra.aviso.textContent = '';
+    assert.equal(otra.lineas().length, 0, 'no se agregó la marca');
+    // Resuelta la duda (el servidor contestó), se vuelve a poder.
+    otra.dudar(null);
+    assert.equal(otra.agregarCodigo('ED-000003'), false);
+    assert.match(otra.aviso.textContent, /ya se vendió/);
   }
-  // Sin la marca, la misma falla sigue encolando la venta para reintentarla sola (nada cambia).
-  const normal = montarCobro({ marcada: false, respuesta: async () => { throw new Error('sin red'); } });
-  await normal.cobrar();
-  assert.equal(normal.guardadas.length, 1);
+});
+
+test('folio en duda: ✕ (renglón y descuento), quitar descuento, quitar socio y quitar pedido no reinician el folio; sin duda sí', () => {
+  const ticket: any = elemento(), descuento: any = elemento(), socioX: any = elemento();
+  const lineas = [{ codigo: 'ED-000001', cantidad: 1 }];
+  const aviso = elemento();
+  const estado = { idVenta: 'folio-1' as string | null, cobroIncierto: { id: 'folio-1' } as { id: string } | null, pedidoCargado: { id: 'p' } as unknown, descuento: { x: 1 } as unknown };
+  const $ = (id: string) => (id === 'ticket' ? ticket : id === 'quitar-descuento' ? descuento : id === 'quitar-socio' ? socioX : id === 'aviso' ? aviso : elemento());
+  const rutinas = runInNewContext(`let idVenta = ${JSON.stringify('folio-1')}, cobroIncierto = { id: 'folio-1' }, pedidoCargado = { id: 'p' }, descuento = { x: 1 }, lineas = L;
+    const pintar = () => {}, pintarDescuento = () => {}, quitarSocio = () => {};
+    ${entre('/** Con el folio en duda el ticket no se toca', '// Pedido por WhatsApp cargado')}
+    ${entre("$('ticket').addEventListener('click'", '/* ---------- botones de cobro (#830)')}
+    ${entre("$('quitar-descuento').addEventListener('click'", "$('pedir-descuento').addEventListener")}
+    ${entre("$('quitar-socio').addEventListener('click'", '\n\n')}
+    ${entre('function quitarPedido()', "$('quitar-pedido')")}
+    ({ quitarPedido, estado: () => ({ idVenta, pedidoCargado, descuento, lineas }), sinDuda: () => { cobroIncierto = null; } })`, { $, L: lineas });
+  const toque = (el: any, e: any = {}) => el.oyentes.click({ shiftKey: false, ...e });
+  const intentos = () => {
+    toque(ticket, { target: { dataset: { quitar: '0' } } });
+    toque(ticket, { target: { dataset: { quitarDescuento: '' } } });
+    toque(socioX);
+    rutinas.quitarPedido();
+  };
+  intentos();
+  assert.equal(aviso.textContent, AVISO_DUDA);
+  assert.deepEqual(JSON.parse(JSON.stringify(rutinas.estado())), { idVenta: 'folio-1', pedidoCargado: { id: 'p' }, descuento: { x: 1 }, lineas: [{ codigo: 'ED-000001', cantidad: 1 }] });
+  // Sin duda (la caja de siempre): quitar sí reinicia el folio.
+  rutinas.sinDuda();
+  toque(ticket, { target: { dataset: { quitar: '0' } } });
+  assert.equal(rutinas.estado().idVenta, null);
+  assert.deepEqual(rutinas.estado().lineas, []);
+  void estado;
+});
+
+test('folio en duda: la ayuda sale del aviso en rojo y deja el foco donde estaba (el lector sigue en #codigo)', () => {
+  const c = montar([pieza('ED-000001', 3)]);
+  c.dudar('folio-1');
+  c.agregarCodigo('ED-000001');
+  assert.equal(c.codigo.enfocado, 0, 'no se mueve el foco: sigue donde lo dejó cobrar()');
+  assert.equal(c.panel.hidden, true, 'ni se ofrece nada');
 });
 
 test('lector: caracteres + Enter nunca activan «venderla» ni un motivo; lo que hacen es escanear (y quitar la oferta)', () => {
