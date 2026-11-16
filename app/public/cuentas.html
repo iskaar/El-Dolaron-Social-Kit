@@ -42,7 +42,7 @@
 </header>
 <main>
   <section class="panel">
-    <h2 id="titulo-cancelaciones">Cancelaciones por aprobar</h2>
+    <h2 id="titulo-cancelaciones">Cancelaciones y devoluciones por aprobar</h2>
     <div id="cancelaciones"></div>
   </section>
 
@@ -122,12 +122,13 @@ async function cargarCancelaciones() {
   esperando.cancelaciones = lista.length;
   contar();
   document.getElementById('titulo-cancelaciones').textContent =
-    `Cancelaciones por aprobar${lista.length ? ` (${lista.length})` : ''}`;
+    `Cancelaciones y devoluciones por aprobar${lista.length ? ` (${lista.length})` : ''}`;
   document.getElementById('cancelaciones').innerHTML = lista.length === 0
     ? '<p class="vacio">Nada esperando.</p>'
     : lista.map((s) => `
       <div class="solicitud" data-id="${escapar(s.id)}">
-        <div><b>${escapar(s.nombre || s.correo)}</b> <span class="correo">${escapar(s.correo)} · pidió ${fecha(s.creado_en)}</span></div>
+        <div><b>${escapar(s.nombre || s.correo)}</b> <span class="correo">${escapar(s.correo)} · pidió ${fecha(s.creado_en)}</span>${s.tipo === 'devolucion' ? ' · <b>devolver dinero de una pieza</b>' : ''}</div>
+        ${s.tipo === 'devolucion' ? `<div>${escapar(s.resumen ?? '')}</div>` : ''}
         <div>Ticket <span class="correo">${escapar(String(s.venta_id ?? '').slice(0, 8))}</span> · <b>${s.total == null ? '—' : pesos(s.total)}</b>
           · vendido ${s.venta_creado_en ? fecha(s.venta_creado_en) : '—'}</div>
         <div class="justificacion">${escapar(s.motivo)}</div>

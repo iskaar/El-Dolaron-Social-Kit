@@ -227,15 +227,16 @@ test('el dueno rechaza: la venta sigue activa y la solicitud queda rechazada', a
   assert.equal((await pedir(`/api/solicitudes/${solicitud_id}`, undefined, 'GET', ana)).cuerpo.estado, 'rechazada');
 });
 
-test('cancelar una pieza suelta sigue libre para el cajero pasados 5 minutos', async () => {
+test('cancelar una pieza suelta ya no es libre para el cajero: devolver dinero pide al dueño (#837, devolver-dinero.test.ts)', async () => {
   const { vender, pedir, ana, stock } = await montar();
   const id = await vender(VIEJA);
   const antes = stock();
   const ticket = await pedir(`/api/ventas/${id}`, undefined, 'GET', ana);
   const r = await pedir(`/api/ventas/${id}/lineas/${ticket.cuerpo.lineas[0].id}/cancelar`,
     { id: crypto.randomUUID(), cantidad: 1, motivo: 'no le quedo', caja: 'Caja 1' }, 'POST', ana);
-  assert.equal(r.status, 201, JSON.stringify(r.cuerpo));
-  assert.equal(stock(), antes + 1);
+  assert.equal(r.status, 403, JSON.stringify(r.cuerpo));
+  assert.equal(r.cuerpo.requiere_aprobacion, true);
+  assert.equal(stock(), antes);
 });
 
 test('solo la cajera que pidio (o el dueno) lee su solicitud', async () => {

@@ -104,14 +104,15 @@ export async function cancelarCore(
   };
 }
 
-const insertarSolicitud = (
+/** Una fila de aprobacion del dueno; tipo 'devolucion' es la de devolver dinero de una pieza (devoluciones.ts, #837). */
+export const insertarSolicitud = (
   env: Env, id: string, correo: string, nombre: string, motivo: string, datos: object, ahora: string,
-  resuelta: string | null,
+  resuelta: string | null, tipo: 'cancelacion' | 'devolucion' = 'cancelacion',
 ) =>
   env.DB.prepare(
     `insert into solicitudes (id, tipo, correo, nombre, justificacion, datos, estado, creado_en, resuelto_en, resuelto_por)
-     values (?, 'cancelacion', ?, ?, ?, ?, ?, ?, ?, ?)`,
-  ).bind(id, correo, nombre, motivo, JSON.stringify(datos), resuelta ? 'aprobada' : 'pendiente', ahora,
+     values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).bind(id, tipo, correo, nombre, motivo, JSON.stringify(datos), resuelta ? 'aprobada' : 'pendiente', ahora,
     resuelta ? ahora : null, resuelta);
 
 /**
@@ -224,13 +225,13 @@ export async function resolverCancelacion(env: Env, id: string, aprobar: boolean
   return json({ ...r.cuerpo, id: datos.venta_id, solicitud_id: id, estado: 'aprobada' });
 }
 
-/** Para /cuentas: las cancelaciones esperando al dueno, con lo que hace falta para decidir. */
+/** Para /avisos y /cuentas: las cancelaciones y devoluciones de dinero esperando al dueno, con lo que hace falta para decidir. */
 export async function listarCancelaciones(env: Env): Promise<Response> {
   const { results } = await env.DB.prepare(
-    `select s.id, s.correo, s.nombre, s.justificacion as motivo, s.creado_en,
-       json_extract(s.datos, '$.venta_id') as venta_id, v.total, v.creado_en as venta_creado_en
+    `select s.id, s.tipo, s.correo, s.nombre, s.justificacion as motivo, s.creado_en,
+       json_extract(s.datos, '$.resumen') as resumen, json_extract(s.datos, '$.venta_id') as venta_id, v.total, v.creado_en as venta_creado_en
      from solicitudes s left join ventas v on v.id = json_extract(s.datos, '$.venta_id')
-     where s.tipo = 'cancelacion' and s.estado = 'pendiente' order by s.creado_en`,
+     where s.tipo in ('cancelacion', 'devolucion') and s.estado = 'pendiente' order by s.creado_en`,
   ).all();
   return json(results);
 }

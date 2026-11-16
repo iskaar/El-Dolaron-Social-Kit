@@ -2419,7 +2419,10 @@ $('ticket-contenido').addEventListener('click', async (e) => {
     const panel = boton.closest('.aprobacion');
     const aviso = panel.querySelector('.aviso-aprobacion');
     aviso.textContent = '';
-    const peticion = { motivo: aprobacionCancelar.motivo, caja: cajaActual() };
+    const pieza = aprobacionCancelar.linea;   // devolución de dinero de una pieza (#837) o cancelación del ticket completo
+    const peticion = pieza
+      ? { id: aprobacionCancelar.id, cantidad: aprobacionCancelar.cantidad, devolver_en: aprobacionCancelar.devolver_en, motivo: aprobacionCancelar.motivo, caja: cajaActual() }
+      : { motivo: aprobacionCancelar.motivo, caja: cajaActual() };
     if (d.aprobarPin !== undefined) {
       const campoPin = panel.querySelector('.pin-dueno');
       if (!/^\d{6}$/.test(campoPin.value)) { aviso.textContent = 'El PIN es de 6 dígitos.'; campoPin.focus(); return; }
@@ -2431,7 +2434,7 @@ $('ticket-contenido').addEventListener('click', async (e) => {
     for (const b of panel.querySelectorAll('button')) b.disabled = true;
     let r, cuerpo;
     try {
-      r = await fetch(`/api/ventas/${ticketAbierto.id}/cancelar`, {
+      r = await fetch(pieza ? `/api/ventas/${ticketAbierto.id}/lineas/${pieza}/cancelar` : `/api/ventas/${ticketAbierto.id}/cancelar`, {
         method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(peticion),
       });
       cuerpo = await r.json();
@@ -2443,7 +2446,7 @@ $('ticket-contenido').addEventListener('click', async (e) => {
     if (r.status === 202) {
       panel.innerHTML = `<p class="esperando">Esperando aprobación del dueño…</p>
         <p class="nota">Puedes cerrar esta ventana: avisaremos aquí cuando responda.</p>`;
-      esperarAprobacion(cuerpo.solicitud_id, ticketAbierto.id);
+      esperarAprobacion(cuerpo.solicitud_id, ticketAbierto.id, !!pieza);
       return;
     }
     if (!r.ok) {
@@ -2452,7 +2455,7 @@ $('ticket-contenido').addEventListener('click', async (e) => {
       if (d.aprobarPin !== undefined) { panel.querySelector('.pin-dueno').value = ''; panel.querySelector('.pin-dueno').focus(); }
       return;
     }
-    await terminarCancelacion(r, cuerpo, { linea: undefined, cantidad: 1 });
+    await terminarCancelacion(r, cuerpo, pieza ? { linea: pieza, cantidad: aprobacionCancelar.cantidad } : { linea: undefined, cantidad: 1 });
     return;
   }
 
@@ -2563,6 +2566,15 @@ $('ticket-contenido').addEventListener('click', async (e) => {
       $('form-todo').querySelector('.pin-dueno')?.focus();
       return;
     }
+    // Devolver dinero de una pieza siempre lo aprueba el dueño (#837): PIN aquí o solicitud a distancia. El mismo id viaja con la solicitud:
+    // la devolución que sale al aprobarse se llama igual, así un reintento no la repite.
+    if (d.confirmarLinea && r.status === 403 && cuerpo.requiere_aprobacion) {
+      aprobacionCancelar = { motivo, linea: d.confirmarLinea, cantidad, id: idCancelacion, devolver_en: campoDevolver?.value };
+      $('ticket-aviso').textContent = '';
+      form.parentElement.innerHTML = panelAprobacion(cuerpo, true);
+      form.parentElement.querySelector('.pin-dueno')?.focus();
+      return;
+    }
     await terminarCancelacion(r, cuerpo, { linea: d.confirmarLinea, cantidad });
   }
 });
@@ -2591,8 +2603,8 @@ async function terminarCancelacion(r, cuerpo, { linea, cantidad }) {
   await cargarCatalogo();          // la pieza devuelta vuelve a tener existencia
 }
 
-/** Las dos salidas cuando el ticket ya paso la ventana de 5 minutos: PIN del dueño aquí, o pedirlo a distancia. */
-function panelAprobacion({ error, duenos = [] }) {
+/** Las dos salidas cuando hace falta el dueño (ticket de más de 5 minutos, o devolver dinero de una pieza): PIN del dueño aquí, o pedirlo a distancia. */
+function panelAprobacion({ error, duenos = [] }, conVolver = false) {
   return `<div class="aprobacion form-cancelar">
     <p class="nota" style="color:#D72B32;margin:0">${escapar(error)}</p>
     <h3>Aprobar aquí con PIN del dueño</h3>
@@ -2603,19 +2615,20 @@ function panelAprobacion({ error, duenos = [] }) {
          <div class="botones"><button type="button" class="quitar" data-aprobar-pin>Aprobar con PIN</button></div>`}
     <h3>O que lo apruebe a distancia</h3>
     <div class="botones"><button type="button" class="secundario" data-enviar-dueno>Enviar al dueño</button></div>
+    ${conVolver ? '<div class="botones"><button type="button" class="secundario" data-volver>Volver y ofrecer cupón</button></div>' : ''}
     <div class="aviso-dialogo aviso-aprobacion"></div>
   </div>`;
 }
 
 /** Pregunta cada 5 s si el dueño ya respondió; la caja puede seguir cobrando mientras tanto. */
-function esperarAprobacion(solicitudId, ticketId) {
+function esperarAprobacion(solicitudId, ticketId, pieza = false) {
   clearInterval(esperando?.timer);
-  esperando = { solicitudId, ticketId, consultando: false, timer: setInterval(consultarAprobacion, 5000) };
+  esperando = { solicitudId, ticketId, pieza, consultando: false, timer: setInterval(consultarAprobacion, 5000) };
 }
 
 async function consultarAprobacion() {
   if (!esperando || esperando.consultando) return;
-  const { solicitudId, ticketId } = esperando;
+  const { solicitudId, ticketId, pieza } = esperando;
   esperando.consultando = true;
   let estado;
   try {
@@ -2630,16 +2643,24 @@ async function consultarAprobacion() {
   clearInterval(esperando.timer);
   esperando = null;
   const aprobada = estado === 'aprobada';
-  const texto = aprobada ? 'El dueño aprobó la cancelación del ticket.'
-    : estado === 'rechazada' ? 'El dueño rechazó la cancelación: el ticket sigue vigente.'
-    : 'No se encontró la solicitud de cancelación.';
+  const texto = pieza
+    ? (aprobada ? 'El dueño aprobó devolver el dinero de la pieza.'
+      : estado === 'rechazada' ? 'El dueño rechazó devolver el dinero: no se devolvió nada. Ofrece el cupón.'
+      : 'No se encontró la solicitud de devolución.')
+    : (aprobada ? 'El dueño aprobó la cancelación del ticket.'
+      : estado === 'rechazada' ? 'El dueño rechazó la cancelación: el ticket sigue vigente.'
+      : 'No se encontró la solicitud de cancelación.');
   const abierto = $('dialogo-ticket').open && ticketAbierto?.id === ticketId;
   if (abierto) {
     await abrirTicket(ticketId);
-    $('ticket-aviso').textContent = aprobada
-      ? `${texto} Devuelve ${pesos(comprobanteCancelacion(ticketAbierto).dinero)} y regresa las piezas al anaquel.` : texto;
+    // La devolución aprobada se llama igual que su solicitud (mismo id): de ahí sale lo que se devuelve y su comprobante.
+    const i = pieza ? (ticketAbierto?.devoluciones ?? []).findIndex((x) => x.id === solicitudId) : -1;
+    $('ticket-aviso').textContent = !aprobada ? texto
+      : pieza ? `${texto} Devuelve ${pesos(i >= 0 ? ticketAbierto.devoluciones[i].importe : 0)} y regresa la pieza al anaquel.`
+      : `${texto} Devuelve ${pesos(comprobanteCancelacion(ticketAbierto).dinero)} y regresa las piezas al anaquel.`;
     $('ticket-aviso').style.color = aprobada ? '#1f7a4d' : '#D72B32';
-    if (aprobada && ticketAbierto?.cancelada) await imprimirComprobante(comprobanteCancelacion(ticketAbierto));
+    if (aprobada && pieza && i >= 0) await imprimirComprobante(comprobanteDevolucion(ticketAbierto, i));
+    else if (aprobada && ticketAbierto?.cancelada) await imprimirComprobante(comprobanteCancelacion(ticketAbierto));
   } else {
     $('aviso').textContent = `${texto} (ticket ${ticketId.slice(0, 8)})`;
   }

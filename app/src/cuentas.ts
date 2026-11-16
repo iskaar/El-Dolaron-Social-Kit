@@ -1,4 +1,5 @@
 import { resolverCancelacion } from './cancelaciones.ts';
+import { resolverDevolucion } from './devoluciones.ts';
 import { resolverDescuento } from './descuentos.ts';
 import { avisarDueno } from './avisos.ts';
 
@@ -551,7 +552,7 @@ export async function guardarCuenta(request: Request, env: Env): Promise<Respons
   return json({ correo, nombre, roles, activo, caja: guardado?.caja ?? '', tienda: guardado?.tienda ?? '', editar_inventario: guardado?.editar_inventario ?? false });
 }
 
-/** Aprobar o rechazar una solicitud: de acceso (Issue #75), de cancelacion (Issue #200) o de descuento (Issue #119). */
+/** Aprobar o rechazar una solicitud: de acceso (Issue #75), de cancelacion (Issue #200), de devolucion de dinero (#837) o de descuento (Issue #119). */
 export async function resolverSolicitud(id: string, request: Request, env: Env, dueno: string): Promise<Response> {
   const cuerpo = (await request.json().then((c) => c ?? {}, () => ({}))) as { aprobar?: unknown; roles?: unknown };
   const solicitud = await env.DB.prepare(
@@ -562,6 +563,7 @@ export async function resolverSolicitud(id: string, request: Request, env: Env, 
   if (!solicitud) return json({ error: 'La solicitud no existe.' }, 404);
   if (solicitud.estado !== 'pendiente') return json({ error: `Ya estaba ${solicitud.estado}.` }, 409);
   if (solicitud.tipo === 'cancelacion') return resolverCancelacion(env, id, cuerpo.aprobar === true, dueno);
+  if (solicitud.tipo === 'devolucion') return resolverDevolucion(env, id, cuerpo.aprobar === true, dueno);
   if (solicitud.tipo === 'descuento') return resolverDescuento(env, id, cuerpo.aprobar === true, dueno);
   if (solicitud.tipo !== 'acceso') return json({ error: 'Tipo de solicitud desconocido.' }, 400);
 
