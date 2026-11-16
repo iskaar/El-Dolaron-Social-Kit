@@ -1,4 +1,5 @@
 import { resolverCancelacion } from './cancelaciones.ts';
+import { resolverDevolucion } from './devoluciones.ts';
 import { resolverDescuento } from './descuentos.ts';
 import { avisarDueno } from './avisos.ts';
 
@@ -17,9 +18,13 @@ import { avisarDueno } from './avisos.ts';
 // `finanzas`: FEP. Toma fotos y ve solo sus piezas (propietario 'fep'); ver propietarioDe.
 // `auxiliar`: lleva gastos y nomina (Issue #326); no ve reportes, cuentas ni lo demas del dueno.
 // `revendedora`: externa (Issue #575). Solo /vender: aparta 48 h sin anticipo y ve lo suyo; nunca la caja.
+// `supervisor`: lo asigna el dueño (#837) a cuentas que ya tienen otro rol (casi siempre cajero). Aprueba con su PIN, en la caja, devolver dinero y cancelar un ticket pasados 5 minutos; y si es quien cobra, lo hace directo.
+//   Descuentos, cupones y cambios de precio siguen siendo solo del dueño. No abre pantallas por si solo.
 // `inversionista`: socio capitalista (Issue #610). Solo ve /tablero y GET /api/tablero (agregados, sin personas). No es `socio`: esa palabra es el cliente Dolarones.
-export type Rol = 'dueno' | 'cajero' | 'capturista' | 'computadora' | 'finanzas' | 'auxiliar' | 'revendedora' | 'inversionista';
-export const ROLES: readonly Rol[] = ['dueno', 'cajero', 'capturista', 'computadora', 'finanzas', 'auxiliar', 'revendedora', 'inversionista'];
+export type Rol = 'dueno' | 'cajero' | 'capturista' | 'computadora' | 'finanzas' | 'auxiliar' | 'revendedora' | 'inversionista' | 'supervisor';
+export const ROLES: readonly Rol[] = ['dueno', 'cajero', 'capturista', 'computadora', 'finanzas', 'auxiliar', 'revendedora', 'inversionista', 'supervisor'];
+/** Quien autoriza que salga dinero de vuelta al cliente (devolver dinero de una pieza, cancelar pasados 5 minutos): el dueño o un supervisor (#837). */
+export const apruebaDinero = (roles: readonly Rol[]): boolean => roles.includes('dueno') || roles.includes('supervisor');
 /** Lo que recibe alguien al aprobarle el acceso si no se escoge otra cosa. */
 export const ROL_POR_OMISION: Rol = 'cajero';
 
@@ -551,7 +556,7 @@ export async function guardarCuenta(request: Request, env: Env): Promise<Respons
   return json({ correo, nombre, roles, activo, caja: guardado?.caja ?? '', tienda: guardado?.tienda ?? '', editar_inventario: guardado?.editar_inventario ?? false });
 }
 
-/** Aprobar o rechazar una solicitud: de acceso (Issue #75), de cancelacion (Issue #200) o de descuento (Issue #119). */
+/** Aprobar o rechazar una solicitud: de acceso (Issue #75), de cancelacion (Issue #200), de devolucion de dinero (#837) o de descuento (Issue #119). */
 export async function resolverSolicitud(id: string, request: Request, env: Env, dueno: string): Promise<Response> {
   const cuerpo = (await request.json().then((c) => c ?? {}, () => ({}))) as { aprobar?: unknown; roles?: unknown };
   const solicitud = await env.DB.prepare(
@@ -562,6 +567,7 @@ export async function resolverSolicitud(id: string, request: Request, env: Env, 
   if (!solicitud) return json({ error: 'La solicitud no existe.' }, 404);
   if (solicitud.estado !== 'pendiente') return json({ error: `Ya estaba ${solicitud.estado}.` }, 409);
   if (solicitud.tipo === 'cancelacion') return resolverCancelacion(env, id, cuerpo.aprobar === true, dueno);
+  if (solicitud.tipo === 'devolucion') return resolverDevolucion(env, id, cuerpo.aprobar === true, dueno);
   if (solicitud.tipo === 'descuento') return resolverDescuento(env, id, cuerpo.aprobar === true, dueno);
   if (solicitud.tipo !== 'acceso') return json({ error: 'Tipo de solicitud desconocido.' }, 400);
 

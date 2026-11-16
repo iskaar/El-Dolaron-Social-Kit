@@ -26,14 +26,15 @@ export interface MarcaEnMano {
 /**
  * Lo que impide ajustar, la MISMA condición en la lectura previa (para el mensaje) y dentro del batch (la que protege): el folio de la venta aún
  * no ajustó esta pieza, ningún apartado vigente la tiene, ninguna orden de Mercado Libre por atender, ninguna unidad va en un bulto sin recibir
- * (`enCaminoSql`, existencias.ts) y ninguna cancelación pendiente de una venta que la incluye. Binds: folio, pieza, pieza, pieza, pieza.
+ * (`enCaminoSql`, existencias.ts) y ninguna cancelación (o devolución de dinero de esa pieza) pendiente de una venta que la incluye. Binds: folio, pieza, pieza, pieza, pieza.
  */
 export const LIBRE_SQL = `not exists (select 1 from conteo_ajustes where id = ?)
   and not exists (select 1 from pedido_lineas pl join pedidos pe on pe.id = pl.pedido_id where pl.producto_id = ? and pe.estado = 'apartado')
   and not exists (select 1 from ml_ventas where producto_id = ? and estado in ('recibida', 'descontada') and atendida_en = '')
   and ${enCaminoSql('?')} = 0
   and not exists (select 1 from solicitudes s join venta_lineas l on l.venta_id = json_extract(s.datos, '$.venta_id')
-    where s.tipo = 'cancelacion' and s.estado = 'pendiente' and l.producto_id = ?)`;
+    where s.estado = 'pendiente' and l.producto_id = ?
+      and (s.tipo = 'cancelacion' or (s.tipo = 'devolucion' and l.id = json_extract(s.datos, '$.linea_id'))))`;
 const libreArgs = (folio: string, pieza: string) => [folio, pieza, pieza, pieza, pieza];
 
 interface PiezaMarcada {
@@ -80,9 +81,10 @@ export async function validarEnMano(
       return rechazo(`${nombre} tiene una venta de Mercado Libre por atender: no la cobres aquí. Avisa al encargado (Avisos).`);
     const bulto = await env.DB.prepare(`select ${folioEnCaminoSql('?1')} as folio`).bind(p.producto_id).first<{ folio: string | null }>();
     if (bulto?.folio) return rechazo(`${nombre}: Va en el bulto ${bulto.folio}: recíbelo primero en «Bultos».`);
-    if (await env.DB.prepare(`select 1 as x from solicitudes s join venta_lineas l on l.venta_id = json_extract(s.datos, '$.venta_id')
-      where s.tipo = 'cancelacion' and s.estado = 'pendiente' and l.producto_id = ? limit 1`).bind(p.producto_id).first())
-      return rechazo(`${nombre}: Hay una cancelación pendiente de una venta de esta pieza: espera la respuesta del dueño.`);
+    const pendiente = await env.DB.prepare(`select s.tipo from solicitudes s join venta_lineas l on l.venta_id = json_extract(s.datos, '$.venta_id')
+      where s.estado = 'pendiente' and l.producto_id = ?
+        and (s.tipo = 'cancelacion' or (s.tipo = 'devolucion' and l.id = json_extract(s.datos, '$.linea_id'))) limit 1`).bind(p.producto_id).first<{ tipo: string }>();
+    if (pendiente) return rechazo(`${nombre}: Hay una ${pendiente.tipo === 'devolucion' ? 'devolución de dinero' : 'cancelación'} pendiente de una venta de esta pieza: espera la respuesta del dueño.`);
     marcas.push({ producto_id: p.producto_id, codigo: pieza.codigo, nombre: pieza.nombre, cantidad: p.cantidad, esperado, faltante: p.cantidad - esperado, motivo,
       otras: await registradaEnOtras(env, tienda, p.producto_id) });
   }

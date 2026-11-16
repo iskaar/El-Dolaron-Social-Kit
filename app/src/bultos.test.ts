@@ -291,9 +291,11 @@ test('devolución y cancelación entran a la tienda donde se hacen, aunque la ve
   const a = crypto.randomUUID(), b = crypto.randomUUID();
   await venta(a, 3); await venta(b, 2);
   assert.equal(m.stock(), 45);
-  // Una pieza suelta devuelta en Salk entra a Salk.
+  // Una pieza suelta devuelta en Salk entra a Salk. Devolver dinero la aprueba el dueño con su PIN (#837).
   const linea = (m.db.prepare('select id from venta_lineas where venta_id = ?').get(a) as { id: number }).id;
-  const pieza = await salk(`/api/ventas/${a}/lineas/${linea}/cancelar`, { id: crypto.randomUUID(), cantidad: 1, motivo: 'no le quedó', caja: 'Salk 1' });
+  m.como(DUENO);
+  await m.pedir('/api/cuentas/pin', { correo: DUENO, pin: '111222' }, 'PUT');
+  const pieza = await salk(`/api/ventas/${a}/lineas/${linea}/cancelar`, { id: crypto.randomUUID(), cantidad: 1, motivo: 'no le quedó', caja: 'Salk 1', aprobador: DUENO, pin: '111222' });
   assert.equal(pieza.status, 201, JSON.stringify(pieza.cuerpo));
   assert.deepEqual([m.enSucursal('salk'), m.stock()], [1, 45]);
   assert.equal((m.db.prepare('select tienda, caja from devoluciones').get() as { tienda: string }).tienda, 'salk');

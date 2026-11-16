@@ -119,6 +119,51 @@ export async function verificarPin(
   return { fila };
 }
 
+/**
+ * El PIN de quien APRUEBA en la caja (#837): dueño o supervisor que teclea su PIN en la terminal de otro. Mismas reglas que verificarPin
+ * (PBKDF2, el intento se cuenta antes de comparar, 5 intentos y 15 minutos), pero los fallos se cuentan en `intentos_aprobacion`
+ * (migración 082), por aprobador y por caja, no en `usuarios.pin_fallos`: un cajero que adivina PIN de aprobador en su caja no puede
+ * bloquear a ese supervisor fuera de su propio acceso a la caja, ni en otras cajas. A cambio, el PIN de acceso y el de aprobación son el mismo
+ * y el bloqueo de uno no frena al otro: 5 intentos por cada contador, por caja, siguen siendo ~35 intentos por ventana contra 1,000,000 de PIN.
+ */
+export async function verificarPinAprobacion(
+  env: Env, correo: string, pin: string, caja: string, admite: (roles: Rol[]) => boolean,
+): Promise<{ fila: FilaPin } | { error: string; status: number }> {
+  if (!/^\d{6}$/.test(pin)) return { error: 'El PIN es de 6 digitos.', status: 400 };
+  const fila = await env.DB.prepare(
+    `select correo, nombre, roles, caja, pin_hash, pin_sal, pin_bloqueo from usuarios
+     where correo = ? and activo = 1 and pin_hash != ''`,
+  ).bind(correo).first<FilaPin>();
+  if (!fila || !admite(leerRoles(fila.roles))) return { error: 'Sin PIN. Pideselo al dueno.', status: 404 };
+
+  const ahora = new Date();
+  const ahoraIso = ahora.toISOString();
+  const hasta = () => new Date(ahora.getTime() + BLOQUEO_PIN).toISOString();
+  const bloqueado = { error: 'PIN bloqueado por intentos fallidos en esta caja. Espera 15 minutos o pide la aprobación a distancia.', status: 423 };
+  await env.DB.prepare('insert or ignore into intentos_aprobacion (correo, caja) values (?, ?)').bind(correo, caja).run();
+  const intento = await env.DB.prepare('select bloqueo from intentos_aprobacion where correo = ? and caja = ?').bind(correo, caja).first<{ bloqueo: string }>();
+  if ((intento?.bloqueo ?? '') > ahoraIso) return bloqueado;
+
+  // Se cuenta antes de comparar, como en verificarPin: una ráfaga en paralelo no prueba más de INTENTOS_PIN por ventana.
+  const reservado = await env.DB.prepare(
+    `update intentos_aprobacion set fallos = fallos + 1 where correo = ? and caja = ? and bloqueo <= ? and fallos < ? returning fallos`,
+  ).bind(correo, caja, ahoraIso, INTENTOS_PIN).first();
+  if (!reservado) {
+    await env.DB.prepare(
+      `update intentos_aprobacion set bloqueo = ?, fallos = 0 where correo = ? and caja = ? and fallos >= ? and bloqueo <= ?`,
+    ).bind(hasta(), correo, caja, INTENTOS_PIN, ahoraIso).run();
+    return bloqueado;
+  }
+  if (await hashPin(pin, fila.pin_sal) !== fila.pin_hash) {
+    const cierre = await env.DB.prepare(
+      `update intentos_aprobacion set bloqueo = ?, fallos = 0 where correo = ? and caja = ? and fallos >= ? and bloqueo <= ? returning bloqueo`,
+    ).bind(hasta(), correo, caja, INTENTOS_PIN, ahoraIso).first();
+    return { error: cierre ? 'PIN incorrecto. Se bloqueo 15 minutos en esta caja.' : 'PIN incorrecto.', status: 403 };
+  }
+  await env.DB.prepare('update intentos_aprobacion set fallos = 0 where correo = ? and caja = ?').bind(correo, caja).run();
+  return { fila };
+}
+
 export async function entrar(request: Request, env: Env): Promise<Response> {
   const cuerpo = (await request.json().then((c) => c ?? {}, () => ({}))) as { correo?: unknown; pin?: unknown };
   const correo = String(cuerpo.correo ?? '').trim().toLowerCase();
