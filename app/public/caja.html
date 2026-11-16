@@ -88,6 +88,8 @@
   #rechazadas .ticket { border: 1px solid var(--rojo); border-radius: 8px; padding: 8px;
     margin-bottom: 6px; font-size: 13px; color: var(--rojo); }
   #rechazadas .ticket button { margin-left: 6px; }
+  #rechazadas .ticket .nota { color: #5b6478; }
+  .renglon.sin-existencia { outline: 2px solid var(--rojo); background: #fdecec; }
   #pie { padding: 8px 18px 14px; font-size: 13px; color: #5b6478; display: flex; gap: 18px; flex-wrap: wrap; }
   #tickets { margin-top: 14px; border-top: 1px solid var(--linea); padding-top: 10px; }
   #tickets summary { font-size: 13px; color: #5b6478; cursor: pointer; }
@@ -842,7 +844,7 @@ function pintar() {
   guardarTicket();
 
   $('ticket').innerHTML = lineas.map((l, i) => `
-    <div class="renglon">
+    <div class="renglon${l.sin_existencia ? ' sin-existencia' : ''}">
       ${l.producto_id ? `<img class="foto" src="/api/foto/${encodeURIComponent(l.producto_id)}" alt="" loading="lazy" onerror="this.style.visibility='hidden'">` : '<div></div>'}
       <div><div class="nombre">${escapar(l.nombre)}</div><div class="codigo">${escapar(l.codigo)}${l.precio_lista > l.precio ? ` · Descuento, antes <s>${pesos(l.precio_lista)}</s>` : ''}</div></div>
       <div>x${l.cantidad}</div>
@@ -1611,6 +1613,9 @@ async function cobrar() {
       } catch { /* respuesta desconocida: reintento idempotente al sincronizar */ }
       if (r && cuerpo && !r.ok && r.status < 500) {
         if (cuerpo.promo_agotada) promoAgotada();
+        // #819: el servidor dice qué pieza ya no está («Quita X: ya no está disponible.»): ese renglón se resalta y el resto del ticket sigue.
+        const faltan = new Set((cuerpo.faltantes ?? []).map((f) => f.producto_id));
+        for (const l of lineas) l.sin_existencia = faltan.has(l.producto_id);
         $('aviso').textContent = cuerpo.error || 'No se pudo confirmar la venta.';
         $('aviso').style.color = '#D72B32';
         return;
@@ -1763,8 +1768,30 @@ async function sincronizar() {
   } finally {
     sincronizando = false;
     await pendientes();
+    await reportarRechazadas();
     await pintarRechazadas();
     await actualizarCorte();
+  }
+}
+
+/**
+ * #819: una venta rechazada ya estaba cobrada. Se le avisa al servidor (idempotente por el folio; la tienda y el cajero salen de la sesión)
+ * y solo entonces se deja descartar. Sin red o sin sesión se reintenta en la siguiente sincronización.
+ */
+async function reportarRechazadas() {
+  const sinAvisar = (await store('ventas', 'readonly', (s) => s.getAll())).filter((v) => v.estado === 'rechazada' && !v.reportada);
+  for (const v of sinAvisar) {
+    try {
+      const r = await fetch(`/api/ventas/${encodeURIComponent(v.id)}/rechazo`, {
+        method: 'POST', headers: { 'content-type': 'application/json' }, signal: AbortSignal.timeout(10000),
+        body: JSON.stringify({ motivo: v.motivo, forma_pago: v.forma_pago, efectivo: v.efectivo, creado_en: v.creado_en, caja: v.caja,
+          lineas: v.lineas.map(({ codigo, nombre, precio, cantidad }) => ({ codigo, nombre, precio, cantidad })) }),
+      });
+      if (!r.ok) continue;
+      // Se vuelve a leer: otra sincronización pudo cambiar el registro mientras esperaba.
+      const actual = await store('ventas', 'readonly', (s) => s.get(v.id));
+      if (actual?.estado === 'rechazada') await store('ventas', 'readwrite', (s) => s.put({ ...actual, reportada: true }));
+    } catch { /* sin red: se reintenta */ }
   }
 }
 
@@ -1781,15 +1808,18 @@ async function pendientes() {
 }
 
 /** Ventas que el servidor rechazo: visibles con su motivo, y recuperables a mano. */
+let descartarListo = null;   // folio al que ya se le dio el primer clic de «Descartar»
 async function pintarRechazadas() {
   const rechazadas = (await store('ventas', 'readonly', (s) => s.getAll()))
     .filter((v) => v.estado === 'rechazada');
   $('rechazadas').innerHTML = rechazadas.map((v) => `
     <div class="ticket">
       <div><b>${pesos(totales(v.lineas).total)}</b> rechazada — ${escapar(v.motivo)}</div>
+      <div class="nota">${new Date(v.creado_en).toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' })} · ${escapar(v.forma_pago)} · ${totales(v.lineas).piezas} ${totales(v.lineas).piezas === 1 ? 'pieza' : 'piezas'} ·
+        ${v.reportada ? 'Ya se le avisó al dueño.' : 'Avisando al dueño… (necesita red)'}</div>
       <div>
         <button type="button" data-reintentar="${v.id}">Reintentar</button>
-        <button type="button" data-descartar="${v.id}">Descartar</button>
+        <button type="button" data-descartar="${v.id}" ${v.reportada ? '' : 'disabled'}>${descartarListo === v.id ? '¿Seguro? Descartar' : 'Descartar'}</button>
       </div>
     </div>`).join('');
 }
@@ -1801,7 +1831,13 @@ $('rechazadas').addEventListener('click', async (e) => {
     await store('ventas', 'readwrite', (s) => s.put({ ...venta, estado: undefined, motivo: undefined }));
     await pintarRechazadas();
     sincronizar();
+  } else if (descartar && descartarListo !== descartar) {
+    // Es el único registro de dinero ya cobrado: un segundo clic confirma.
+    descartarListo = descartar;
+    setTimeout(() => { if (descartarListo === descartar) { descartarListo = null; pintarRechazadas(); } }, 5000);
+    await pintarRechazadas();
   } else if (descartar) {
+    descartarListo = null;
     await store('ventas', 'readwrite', (s) => s.delete(descartar));
     await pintarRechazadas();
   }
@@ -2397,16 +2433,20 @@ document.querySelector('.tipo-salida').addEventListener('change', pintarTipoSali
 $('pedir-ayuda').addEventListener('click', async () => {
   const boton = $('pedir-ayuda');
   boton.disabled = true;
+  let avisada = false;
   try {
     const r = await fetch('/api/ayuda', {
       method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ caja: $('caja-nombre').value }),
     });
+    // #819: el servidor solo responde 200 si a un celular o un correo del dueño le llegó; si no, dice por qué.
+    avisada = r.ok;
     boton.textContent = r.ok ? 'Ayuda avisada ✓' : ((await r.json().catch(() => ({}))).error ?? 'No se pudo avisar');
   } catch {
     boton.textContent = 'Sin red: no se pudo avisar';
   }
-  // ponytail: 30 s sin repetir para no llenar el celular de avisos.
-  setTimeout(() => { boton.textContent = 'Ayuda'; boton.disabled = false; }, 30_000);
+  // ponytail: 30 s sin repetir solo si el aviso salió (para no llenar el celular); tras un fallo se puede volver a intentar de inmediato.
+  if (!avisada) boton.disabled = false;
+  setTimeout(() => { boton.textContent = 'Ayuda'; boton.disabled = false; }, avisada ? 30_000 : 8_000);
 });
 
 $('abrir-retiro').addEventListener('click', () => {
@@ -2530,7 +2570,9 @@ $('abrir-corte').addEventListener('click', async () => {
   if (!navigator.onLine || pendientes) {
     $('corte-aviso').textContent = `Hay ${pendientes} ventas sin sincronizar. Espera a tener red antes del corte.`;
   } else if (rechazadas) {
-    $('corte-aviso').textContent = `Hay ${rechazadas} ventas rechazadas: reintenta o descarta cada una antes del corte.`;
+    const sinAvisar = cola.some((v) => v.estado === 'rechazada' && !v.reportada);
+    $('corte-aviso').textContent = sinAvisar ? `Hay ${rechazadas} ventas rechazadas y aún no se le avisa al dueño: necesita red. Avísale en persona.`
+      : `Hay ${rechazadas} ventas rechazadas. Ya se le avisó al dueño; descártalas cuando te lo indique.`;
   } else {
     $('corte-registrar').disabled = false;
   }
