@@ -143,11 +143,11 @@ test('caja reintenta un canje tras perder la respuesta con el mismo folio, fecha
       lineas: [{ producto_id: PRODUCTO, cantidad: 1 }], efectivo: 25000, caja: 'Caja 1' });
     const vale = emitida.cuerpo.vale_emitido;
     const fuente = readFileSync('public/caja.html', 'utf8');
-    const cobrar = fuente.slice(fuente.indexOf('async function cobrar()'), fuente.indexOf('let sincronizando = false;'));
+    const cobrar = fuente.slice(fuente.indexOf('async function cobrar('), fuente.indexOf('let sincronizando = false;'));
     const respuestas: number[] = [];
     let reloj = 0;
     // Ejecutar el cobro real con una primera respuesta perdida. Devolver false mantiene el ticket abierto.
-    const repetir = runInNewContext(`let idVenta = null, creadoEnVenta = null, cobrando = false, formaElegida = true;
+    const repetir = runInNewContext(`let idVenta = null, creadoEnVenta = null, cobrando = false;
       ${cobrar}; cobrar`, {
       crypto, debePreguntarSocio, navigator: { onLine: true }, preguntarSocio: async () => 'cobrar',   // #730: «cobrar así»
       Date: class extends Date { constructor() { super(1760000000000 + reloj++ * 1000); } },
@@ -163,8 +163,8 @@ test('caja reintenta un canje tras perder la respuesta con el mismo folio, fecha
         return false;
       },
     });
-    await repetir();
-    await repetir();
+    await repetir('efectivo');   // el botón «Cobrar en efectivo» (#830)
+    await repetir('efectivo');
     assert.deepEqual(respuestas, [201, 200]);
     assert.equal(t.db.prepare('select count(*) as n from ventas').get()!.n, 2);
     assert.equal(t.db.prepare('select stock from productos where id = ?').get(PRODUCTO)!.stock, 48);

@@ -3,7 +3,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { runInNewContext } from 'node:vm';
-import { totales, agregar, leerMultiplicador, efectivoAlcanza, saldoCanjeable, dolaronesGanados, maximoCanje, desfaseReloj, anticipoDePedido, envioDe, anticipoMinimoDe, ANTICIPO, ANTICIPO_ENVIO, viernesDeEnvio, promoInauguracion, letreroPromo, PROMO_DESCUENTO, PROMO_MINIMO, transferenciaDe, CLAVE_DESDE, debePreguntarSocio, guiaVale, precioBuenFin, letreroBuenFin } from '../public/venta.js';
+import { totales, agregar, leerMultiplicador, efectivoAlcanza, montosRapidos, BILLETES, saldoCanjeable, dolaronesGanados, maximoCanje, desfaseReloj, anticipoDePedido, envioDe, anticipoMinimoDe, ANTICIPO, ANTICIPO_ENVIO, viernesDeEnvio, promoInauguracion, letreroPromo, PROMO_DESCUENTO, PROMO_MINIMO, transferenciaDe, CLAVE_DESDE, debePreguntarSocio, guiaVale, precioBuenFin, letreroBuenFin } from '../public/venta.js';
 
 interface Linea { codigo: string; nombre: string; precio: number; cantidad: number }
 const pieza = (codigo: string, precio: number) => ({ codigo, nombre: codigo, precio });
@@ -61,6 +61,27 @@ test('efectivo vacio (0) no alcanza para un total mayor a cero', () => {
 test('efectivo exacto o de sobra si alcanza', () => {
   assert.equal(efectivoAlcanza({ formaPago: 'efectivo', total: 4000, efectivo: 4000 }), true);
   assert.equal(efectivoAlcanza({ formaPago: 'efectivo', total: 4000, efectivo: 5000 }), true);
+});
+
+test('#830 botones rápidos: «Exacto» y hasta 4 billetes mayores que lo que se debe, en centavos enteros', () => {
+  assert.deepEqual(BILLETES, [2000, 5000, 10000, 20000, 50000, 100000]);
+  const montos = (aPagar: number) => montosRapidos(aPagar).map((m) => (m.exacto ? 'exacto' : '') + m.centavos);
+  assert.deepEqual(montos(13000), ['exacto13000', '20000', '50000', '100000']);                 // $130: $200, $500, $1,000
+  assert.deepEqual(montos(1500), ['exacto1500', '2000', '5000', '10000', '20000']);             // $15: tope de 4 billetes
+  assert.deepEqual(montos(1999), ['exacto1999', '2000', '5000', '10000', '20000']);
+  assert.deepEqual(montos(10000), ['exacto10000', '20000', '50000', '100000']);                 // el billete igual a lo que se debe ya es «Exacto»
+  assert.deepEqual(montos(100000), ['exacto100000']);                                           // $1,000: ningún billete cubre más
+  assert.deepEqual(montos(125050), ['exacto125050']);                                           // más de $1,000: solo «Exacto»
+  assert.deepEqual(montos(1), ['exacto1', '2000', '5000', '10000', '20000']);                   // un centavo: Exacto es el importe, no un billete
+  assert.deepEqual(montos(0), []);
+  assert.deepEqual(montos(-500), []);                                                           // Dolarones o pedido de más: nada que cobrar
+  for (const malo of [NaN, 12.5, '300' as unknown as number, null as unknown as number]) assert.deepEqual(montosRapidos(malo), []);
+  // Todo es entero y cada billete cubre lo que se debe: no hay floats ni billetes que no alcancen.
+  for (const a of [1, 99, 1999, 2000, 4999, 10001, 49999, 99999]) {
+    for (const m of montosRapidos(a)) { assert.ok(Number.isInteger(m.centavos)); assert.ok(m.centavos >= a); }
+    assert.equal(montosRapidos(a)[0].centavos, a);
+    assert.ok(montosRapidos(a).length <= 5);
+  }
 });
 
 test('tarjeta no se valida contra el efectivo', () => {
@@ -173,15 +194,14 @@ test('viernes de envío: corte estricto del jueves 20:00, con UTC-6 fijo', () =>
 
 // Cobro con pedido (Issue #269): el saldo solo existe en el servidor, asi que nunca se encola sin red.
 const cajaFuente = readFileSync('public/caja.html', 'utf8');
-const cobroPedido = (fetchSimulado: () => Promise<unknown>, respuestaForma = 'efectivo', opciones: { sinPedido?: boolean; valores?: Record<string, string>; socio?: unknown; sinRed?: boolean; respuestaSocio?: string } = {}) => {
+const cobroPedido = (fetchSimulado: () => Promise<unknown>, forma = 'efectivo', opciones: { sinPedido?: boolean; valores?: Record<string, string>; socio?: unknown; sinRed?: boolean; respuestaSocio?: string } = {}) => {
   const preguntasSocio: number[] = [];
   const abiertas: string[] = [];
   const guardadas: unknown[] = [];
-  const preguntas: number[] = [];
   const enviadas: any[] = [];
   const elementos = new Map<string, any>();
   const $ = (id: string) => {
-    if (!elementos.has(id)) elementos.set(id, { value: opciones.valores?.[id] ?? (id === 'forma' ? 'efectivo' : id === 'efectivo' ? '200' : ''), textContent: '', style: {}, focus() { this.enfocado = true; } });
+    if (!elementos.has(id)) elementos.set(id, { value: opciones.valores?.[id] ?? (id === 'efectivo' ? '200' : ''), textContent: '', style: {}, focus() { this.enfocado = true; } });
     return elementos.get(id);
   };
   const contexto: Record<string, unknown> = {
@@ -189,7 +209,6 @@ const cobroPedido = (fetchSimulado: () => Promise<unknown>, respuestaForma = 'ef
     lineas: [{ producto_id: 'p1', codigo: 'ED-000001', nombre: 'Ventilador', precio: 30000, cantidad: 1 }],
     socio: opciones.socio ?? null, valesCargados: [], catalogo: new Map(), debePreguntarSocio, navigator: { onLine: !opciones.sinRed },
     preguntarSocio: async () => { preguntasSocio.push(1); return opciones.respuestaSocio ?? 'cobrar'; }, abrirAlta: () => abiertas.push('/socios'), pedidoCargado: opciones.sinPedido ? null : { id: 'ped-1', folio: 17, saldo: 10000 },
-    preguntarForma: async (aPagar: number) => { preguntas.push(aPagar); return respuestaForma; },
     impresionRemota: () => false, exigirCaja: () => true, cajaActual: () => 'Caja 1', dolaronesPedidos: () => 0,
     descuento: null, descuentoAplicado: () => 0, promoActual: () => 0, totalNeto: () => 30000, pintarDescuento() {},
     pesos: String, dolares: String, pintar() {}, quitarSocio() {}, sincronizar() {}, cargarCatalogo() {},
@@ -199,23 +218,36 @@ const cobroPedido = (fetchSimulado: () => Promise<unknown>, respuestaForma = 'ef
   };
   const avisoRojo = cajaFuente.slice(cajaFuente.indexOf('const avisoRojo ='), cajaFuente.indexOf('\n', cajaFuente.indexOf('const avisoRojo =')));
   const conPedido = cajaFuente.slice(cajaFuente.indexOf('async function cobrarConPedido('), cajaFuente.indexOf('/* ---------- cobro: primero'));
-  const cobro = cajaFuente.slice(cajaFuente.indexOf('async function cobrar()'), cajaFuente.indexOf('let sincronizando = false;'));
+  const cobro = cajaFuente.slice(cajaFuente.indexOf('async function cobrar('), cajaFuente.indexOf('let sincronizando = false;'));
   const errorClave = cajaFuente.slice(cajaFuente.indexOf('function errorClave('), cajaFuente.indexOf("for (const id of ['clave-rastreo'"));
-  const cobrar = runInNewContext(`let idVenta = null, creadoEnVenta = null, cobrando = false, formaElegida = false;
+  const cobrarReal = runInNewContext(`let idVenta = null, creadoEnVenta = null, cobrando = false;
     ${avisoRojo}\n${conPedido}\n${errorClave}\n${cobro}; cobrar`, contexto);
-  return { cobrar, contexto, guardadas, enviadas, preguntas, preguntasSocio, abiertas, $ };
+  // El argumento es el botón de cobro que se tocó (#830): por omisión, el que dice `forma`.
+  return { cobrar: (f = forma) => cobrarReal(f), contexto, guardadas, enviadas, preguntasSocio, abiertas, $ };
 };
 
-test('17/10: aunque escriba el efectivo, si no eligio la forma se pregunta; con tarjeta no se manda efectivo', async () => {
+// Reemplaza la prueba de la ventana «¿Efectivo o tarjeta?» (17/10, #260): ahora no hay forma por omisión ni ventana, el botón tocado es la elección.
+test('17/10 (#830): la forma sale del botón tocado; tarjeta no manda el efectivo escrito y lo borra; sin una forma conocida no se cobra', async () => {
   const ok = async () => ({ ok: true, status: 201, json: async () => ({ id: 'x', ganados: 0, vale_emitido: null, saldo_pedido: 0 }) });
-  const conTarjeta = cobroPedido(ok, 'tarjeta');
+  const conTarjeta = cobroPedido(ok, 'tarjeta');            // escribió $200 y toca «Cobrar con tarjeta»
   await conTarjeta.cobrar();
-  assert.deepEqual(conTarjeta.preguntas, [20000]);
   assert.equal(conTarjeta.enviadas[0].forma_pago, 'tarjeta');
   assert.equal(conTarjeta.enviadas[0].efectivo, 0);
-  const regresa = cobroPedido(ok, '');
-  await regresa.cobrar();
-  assert.equal(regresa.enviadas.length, 0);                        // «Regresar» (o el Enter del lector) no cobra
+  assert.equal(conTarjeta.$('efectivo').value, '');
+  const conEfectivo = cobroPedido(ok, 'efectivo');
+  await conEfectivo.cobrar();
+  assert.equal(conEfectivo.enviadas[0].forma_pago, 'efectivo');
+  assert.equal(conEfectivo.enviadas[0].efectivo, 20000);
+  for (const rara of ['', 'Efectivo', 'cheque']) {
+    const ninguna = cobroPedido(ok, rara);
+    await ninguna.cobrar();
+    assert.equal(ninguna.enviadas.length, 0, String(rara));
+    assert.equal(ninguna.guardadas.length, 0, String(rara));
+    assert.equal(ninguna.$('efectivo').value, '200', 'sin forma no se toca nada');
+  }
+  const sinDinero = cobroPedido(ok, 'sin-dinero');          // ese botón solo existe con todo cubierto: con $200 por cobrar no cobra
+  await sinDinero.cobrar();
+  assert.equal(sinDinero.enviadas.length, 0);
 });
 
 test('cobro con pedido sin red: avisa y no encola la venta ni cierra el ticket', async () => {

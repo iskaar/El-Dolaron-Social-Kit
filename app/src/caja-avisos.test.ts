@@ -117,6 +117,7 @@ interface Opciones {
   abrirCajon?: () => unknown;
   imprimirTicket?: () => unknown;
   valores?: Record<string, string>;
+  forma?: string;   // el botón de cobro que se toca (#830); sin él, efectivo
   pedido?: boolean;
 }
 function montarCobro(op: Opciones = {}) {
@@ -125,7 +126,7 @@ function montarCobro(op: Opciones = {}) {
   const guardadas: unknown[] = [];
   const $ = (id: string) => {
     if (!elementos.has(id)) {
-      elementos.set(id, id === 'aviso' ? avisoFalso() : { value: op.valores?.[id] ?? (id === 'forma' ? 'efectivo' : id === 'efectivo' ? '300' : ''),
+      elementos.set(id, id === 'aviso' ? avisoFalso() : { value: op.valores?.[id] ?? (id === 'efectivo' ? '300' : ''),
         textContent: '', style: {}, disabled: false, enfocado: false, focus() { if (!this.disabled) this.enfocado = true; } });
     }
     return elementos.get(id);
@@ -137,7 +138,7 @@ function montarCobro(op: Opciones = {}) {
     lineas: [{ producto_id: 'p1', codigo: 'ED-000001', nombre: 'Ventilador', precio: 30000, cantidad: 1 }],
     errorImpresora: () => op.errorImpresora ?? 'USB falló',
     socio: null, valesCargados: [], catalogo: new Map(), pedidoCargado: op.pedido ? { id: 'ped-1', folio: 17, saldo: 10000 } : null,
-    preguntarSocio: async () => 'cobrar', preguntarForma: async () => 'efectivo',
+    preguntarSocio: async () => 'cobrar',
     impresionRemota: () => !!op.remota, exigirCaja: () => true, cajaActual: () => 'Caja 1', dolaronesPedidos: () => 0,
     descuento: op.descuento ?? null, descuentoAplicado: () => ((op.descuento as any)?.estado === 'aprobada' ? (op.descuento as any).monto : 0), descuentoDe, TOPE_DESCUENTO, promoActual: () => 0, totalNeto: () => 30000, pintarDescuento() {},
     pesos: String, dolares: String, quitarSocio() {}, sincronizar() {}, cargarCatalogo() {}, pintarImpresora() {}, promoConfig: null,
@@ -149,11 +150,13 @@ function montarCobro(op: Opciones = {}) {
   const falla = entre('function textoFalla(', '/**\n * Escribir o escanear P-17');
   const conPedido = entre('async function cobrarConPedido(', '/* ---------- cobro: primero');
   const errorClave = entre('function errorClave(', "for (const id of ['clave-rastreo'");
-  const cobro = entre('async function cobrar()', 'let sincronizando = false;');
+  const cobro = entre('async function cobrar(', 'let sincronizando = false;');
   // pintar() es el de la pantalla en lo que importa aquí: deshabilita #codigo mientras se cobra y guarda el folio que ve.
-  const cobrar = runInNewContext(`let idVenta = null, creadoEnVenta = null, cobrando = false, formaElegida = false;
+  const cobrarReal = runInNewContext(`let idVenta = null, creadoEnVenta = null, cobrando = false;
     function pintar() { $('codigo').disabled = cobrando; vistos.push(idVenta); }
     ${avisoRojo}\n${falla}\n${conPedido}\n${errorClave}\n${cobro}; cobrar`, contexto);
+  // Sin argumento se toca «Cobrar en efectivo»; las pruebas de otras formas lo dicen en `forma`.
+  const cobrar = (forma: string = op.forma ?? 'efectivo') => cobrarReal(forma);
   return { cobrar, $, vistos, guardadas, contexto };
 }
 
@@ -201,7 +204,7 @@ test('#817 cajón e impresora: si todo sale bien no se agrega nada; con tarjeta 
   await bien.cobrar(); await tick();
   assert.equal(bien.$('aviso').hijos.length, 0);
 
-  const tarjeta = montarCobro({ valores: { forma: 'tarjeta' }, abrirCajon: () => assert.fail('con tarjeta no se abre el cajón'), imprimirTicket: async () => false });
+  const tarjeta = montarCobro({ forma: 'tarjeta', abrirCajon: () => assert.fail('con tarjeta no se abre el cajón'), imprimirTicket: async () => false });
   await tarjeta.cobrar(); await tick();
   assert.deepEqual(tarjeta.$('aviso').hijos.map((h: any) => h.textContent), ['El ticket no se imprimió: reimprímelo desde Ventas de hoy.']);
 
@@ -221,7 +224,7 @@ test('#817 cajón e impresora: sin impresora conectada es una sola línea tranqu
   assert.equal(efectivo.$('aviso').hijos[0].style.cssText.includes('#D72B32'), false);
   assert.match(efectivo.$('aviso').textContent, /^Cobrado/);
 
-  const tarjeta = montarCobro({ valores: { forma: 'tarjeta' }, errorImpresora: 'no conectada', imprimirTicket: async () => false });
+  const tarjeta = montarCobro({ forma: 'tarjeta', errorImpresora: 'no conectada', imprimirTicket: async () => false });
   await tarjeta.cobrar(); await tick();
   assert.equal(tarjeta.$('aviso').hijos.length, 0, 'con tarjeta y sin impresora no hay nada que decir aparte del pie');
 });
@@ -270,11 +273,11 @@ function montarDolarones(respuestas: any[], socio: Record<string, unknown> = {})
 const respuesta = (status: number, cuerpo: Record<string, unknown>) => ({ ok: status < 400, status, json: async () => cuerpo });
 const VENTA = { id: 'folio-1', dolarones: 1000 };
 
-test('#817 Dolarones: la petición tiene el mismo límite de 15 s y, si vence, dice que se puede volver a tocar Cobrar', async () => {
+test('#817 Dolarones: la petición tiene el mismo límite de 15 s y, si vence, dice que se puede volver a tocar el mismo botón de cobro', async () => {
   const vencida = montarDolarones([new DOMException('timeout', 'TimeoutError')]);
   assert.equal(await vencida.cobrarConDolarones({ ...VENTA }, { aPagar: 5000 }), false);
   assert.ok(vencida.llamadas.length === 1);
-  assert.match(vencida.aviso.textContent, /No se supo si se cobró\. Toca Cobrar otra vez.*mismo folio no se cobra dos veces.*Ventas de hoy/);
+  assert.match(vencida.aviso.textContent, /No se supo si se cobró\. Toca otra vez el mismo botón de cobro.*mismo folio no se cobra dos veces.*Ventas de hoy/);
   const sinRed = montarDolarones([new TypeError('Failed to fetch')]);
   await sinRed.cobrarConDolarones({ ...VENTA }, { aPagar: 5000 });
   assert.match(sinRed.aviso.textContent, /^Sin red: no se pudo cobrar con Dolarones/);
@@ -478,7 +481,7 @@ function montarCancelar(lineas: any[], extra: Record<string, unknown> = {}) {
   };
   const rutinas = runInNewContext(`let cancelarArmado = null; ${entre('// Con descuento aprobado, pedido cargado', 'function pintarRed()')}
     ({ revisarCancelarArmado })`, {
-    $, totales, cancelarPideConfirmar, descuento: null, pedidoCargado: null, sinPromo: false, formaElegida: false, ...extra,
+    $, totales, cancelarPideConfirmar, descuento: null, pedidoCargado: null, sinPromo: false, ...extra,
     get lineas() { return estado.lineas; }, set lineas(v) { estado.lineas = v; },
     idVenta: 'x', pintarDescuento() {}, quitarSocio() { estado.limpiadas++; }, pintar() {}, clearTimeout() {},
     setTimeout: (f: () => void) => { temporizadores.push(f); return temporizadores.length; },

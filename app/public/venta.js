@@ -275,6 +275,20 @@ export function efectivoAlcanza({ formaPago, total, efectivo }) {
   return formaPago !== 'efectivo' || efectivo >= total;
 }
 
+/** Billetes de MXN en centavos: $20, $50, $100, $200, $500 y $1,000. */
+export const BILLETES = [2000, 5000, 10000, 20000, 50000, 100000];
+
+/**
+ * Botones rápidos del «Efectivo recibido» (#830): «Exacto» (lo que se debe) y hasta 4 billetes mayores, en centavos.
+ * Solo llenan el campo; quien cobra es el botón de cobro. Sin nada que pagar no hay botones.
+ * @returns {{ centavos: number, exacto: boolean }[]}
+ */
+export function montosRapidos(aPagar) {
+  if (!Number.isInteger(aPagar) || aPagar <= 0) return [];
+  return [{ centavos: aPagar, exacto: true },
+    ...BILLETES.filter((b) => b > aPagar).slice(0, 4).map((centavos) => ({ centavos, exacto: false }))];
+}
+
 /**
  * Billetes y monedas del corte (Issue #100), en centavos. El de $20 cuenta
  * igual si es billete o moneda.
