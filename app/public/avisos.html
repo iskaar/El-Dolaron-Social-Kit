@@ -245,9 +245,11 @@ function filaDescuento(s) {
 }
 
 function filaCancelacion(s) {
+  const devolucion = s.tipo === 'devolucion';   // #837: devolver dinero de una pieza; al aprobar se devuelve exactamente lo que dice la solicitud
   return tarjeta(s.id, null, [
-    h('div', { class: 'nombre' }, `${s.nombre || s.correo} pide cancelar una venta`),
+    h('div', { class: 'nombre' }, devolucion ? `${s.nombre || s.correo} pide devolver dinero de una pieza` : `${s.nombre || s.correo} pide cancelar una venta`),
     h('div', { class: 'nota' }, `${s.correo} · pidió ${fecha(s.creado_en)}`),
+    devolucion ? h('div', {}, h('b', {}, s.resumen ?? 'una pieza')) : null,
     h('div', {}, `Ticket ${String(s.venta_id ?? '').slice(0, 8)} · `, h('b', {}, s.total == null ? '—' : pesos(s.total)),
       ` · vendido ${s.venta_creado_en ? fecha(s.venta_creado_en) : '—'}`),
     h('div', { class: 'motivo' }, s.motivo),
@@ -317,7 +319,7 @@ function filaSinExistencia(s) {
 
 const SECCIONES = {
   descuentos: { url: '/api/solicitudes/descuentos', titulo: 'Descuentos por aprobar', fila: filaDescuento },
-  cancelaciones: { url: '/api/solicitudes/cancelaciones', titulo: 'Cancelaciones por aprobar', fila: filaCancelacion },
+  cancelaciones: { url: '/api/solicitudes/cancelaciones', titulo: 'Cancelaciones y devoluciones por aprobar', fila: filaCancelacion },
   // acceso viene dentro de /api/cuentas (ahí también están los usuarios; aquí solo importan las solicitudes)
   acceso: { url: '/api/cuentas', titulo: 'Solicitudes de acceso', fila: filaAcceso, lista: (d) => d.solicitudes.filter((x) => x.tipo === 'acceso') },
   precios: { url: '/api/solicitudes-precio?estado=pendiente', titulo: 'Precios por revisar', fila: filaPrecio, lista: (d) => d.solicitudes },

@@ -418,6 +418,26 @@ test('una cancelación pendiente de una venta de esta pieza la frena; resuelta o
   assert.equal((await t.vender(token, t.cuerpo([mano()]))).status, 201);
 });
 
+test('una devolución de dinero pendiente de esa pieza (#837) también la frena; la de otra pieza o ya resuelta, no', async () => {
+  const t = montar();
+  const token = await t.entrar();
+  t.db.prepare('update productos set stock = 1 where id = ?').run(CERO);
+  const anterior = t.cuerpo([{ producto_id: CERO, cantidad: 1 }, { producto_id: PRODUCTO, cantidad: 1 }], { efectivo: 35000 });
+  assert.equal((await t.vender(token, anterior)).status, 201);
+  const lineaDe = (producto: string) => (t.db.prepare('select id from venta_lineas where venta_id = ? and producto_id = ?').get(anterior.id as string, producto) as { id: number }).id;
+  const pendiente = (linea: number) => t.db.prepare(`insert into solicitudes (id, tipo, correo, nombre, justificacion, datos, estado, creado_en)
+    values (?, 'devolucion', 'x', '', 'x', ?, 'pendiente', '')`).run(crypto.randomUUID(), JSON.stringify({ venta_id: anterior.id, linea_id: linea }));
+  pendiente(lineaDe(PRODUCTO));   // pide devolver la OTRA pieza del ticket: esta no se frena
+  assert.equal((await t.vender(token, t.cuerpo([mano()]))).status, 201);
+  t.db.prepare('update productos set stock = 0 where id = ?').run(CERO);
+  pendiente(lineaDe(CERO));
+  const r = await t.vender(token, t.cuerpo([mano()]));
+  assert.equal(r.status, 409);
+  assert.match(r.cuerpo.error, /Hay una devolución de dinero pendiente de una venta de esta pieza: espera la respuesta del dueño./);
+  t.db.exec(`update solicitudes set estado = 'rechazada'`);
+  assert.equal((await t.vender(token, t.cuerpo([mano()]))).status, 201);
+});
+
 test('unidades registradas en OTRA tienda no impiden vender: se avisa al dueño y queda en la fila de /avisos', async () => {
   const t = montar();
   const token = await t.entrar();
@@ -490,10 +510,34 @@ test('devolver una pieza suelta de una venta anterior también avisa', async () 
   await t.vender(token, t.cuerpo([mano()]));
   await t.esperar();
   const lineaId = (t.db.prepare('select id from venta_lineas where venta_id = ?').get(anterior.id) as { id: number }).id;
-  const r = await t.pedir(`/api/ventas/${anterior.id}/lineas/${lineaId}/cancelar`, { id: crypto.randomUUID(), cantidad: 1, motivo: 'se arrepintió', caja: 'Caja 1' }, 'POST', { 'x-cajero': token });
+  t.como(DUENO);   // devolver dinero lo hace el dueño (#837); el aviso de la unidad fantasma es el mismo
+  const r = await t.pedir(`/api/ventas/${anterior.id}/lineas/${lineaId}/cancelar`, { id: crypto.randomUUID(), cantidad: 1, motivo: 'se arrepintió', caja: 'Caja 1' }, 'POST');
   assert.ok([200, 201].includes(r.status), JSON.stringify(r.cuerpo));
   await t.esperar();
   assert.equal(t.correos.at(-1)!.subject, 'Revisa la existencia: Devolución de una pieza');
+});
+
+test('la devolución de dinero que el dueño aprueba a distancia (#837) también avisa; pedirla, no', async () => {
+  const t = montar();
+  const token = await t.entrar();
+  t.db.prepare('update productos set stock = 1 where id = ?').run(CERO);
+  const anterior = t.cuerpo([{ producto_id: CERO, cantidad: 1 }]);
+  await t.vender(token, anterior);
+  t.db.prepare('update ventas set registrado_en = ? where id = ?').run(new Date(Date.now() - 3600_000).toISOString(), anterior.id);
+  await t.vender(token, t.cuerpo([mano()]));
+  await t.esperar();
+  const lineaId = (t.db.prepare('select id from venta_lineas where venta_id = ?').get(anterior.id) as { id: number }).id;
+  const idDev = crypto.randomUUID();
+  const pedida = await t.pedir(`/api/ventas/${anterior.id}/lineas/${lineaId}/cancelar`,
+    { id: idDev, cantidad: 1, motivo: 'se arrepintió', caja: 'Caja 1', solicitar: true }, 'POST', { 'x-cajero': token });
+  assert.equal(pedida.status, 202, JSON.stringify(pedida.cuerpo));
+  await t.esperar();
+  assert.ok(t.correos.every((c) => !c.subject.startsWith('Revisa la existencia')), 'pedirla no regresa ninguna unidad');
+  t.como(DUENO);
+  const r = await t.pedir(`/api/solicitudes/${idDev}/resolver`, { aprobar: true });
+  assert.equal(r.status, 200, JSON.stringify(r.cuerpo));
+  await t.esperar();
+  assert.equal(t.correos.at(-1)!.subject, 'Revisa la existencia: Devolución aprobada de una pieza');
 });
 
 test('un reintento del mismo folio no vuelve a avisar al dueño', async () => {

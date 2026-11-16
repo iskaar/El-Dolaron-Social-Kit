@@ -25,6 +25,8 @@ const json = (cuerpo: unknown, status = 200) =>
 export interface VentaCorregible {
   id: string; total: number; dolarones: number; anticipo: number; forma_pago: string; cancelada: number; revision: number;
   imprimir_en: string | null; corte_id: string | null; tienda: string; devuelta: number; con_clave: number; creado_en: string; caja: string;
+  /** Hay una devolución de dinero esperando al dueño (#837): su solicitud quedó atada a la forma de pago de ahora. */
+  pendiente_devolucion: number;
 }
 
 /** Quien corrige: el dueño puede entre cualquier forma y desde cualquier caja; el cajero, solo efectivo y tarjeta de su caja. `caja`: la de la sesión ('' si no se eligió). */
@@ -41,6 +43,7 @@ export function motivoDeRechazo(v: VentaCorregible, nueva: string, quien: Quien,
   if (v.cancelada) return no('Este ticket está cancelado: no hay forma de pago que corregir.');
   if (v.corte_id) return no('Este ticket ya entró a un corte de caja: su forma de pago ya no se puede corregir aquí. Avísale al dueño.');
   if (v.devuelta) return no('Este ticket tiene piezas devueltas: su forma de pago ya no se puede corregir.');
+  if (v.pendiente_devolucion) return no('Hay una devolución esperando al dueño en este ticket.');
   // Un ticket de otro día, o sin caja, nunca recibe un corte que lo ampare: ni el dueño lo cambia aquí.
   if (v.creado_en < desde) return no('Solo se corrigen ventas de hoy. Avísale al dueño.');
   if (!v.caja) return no('Este ticket no tiene caja: su forma de pago no se puede corregir aquí. Avísale al dueño.');
@@ -61,6 +64,7 @@ export const formasCorregibles = (v: VentaCorregible, quien: Quien) => FORMAS.fi
 const leerVenta = (env: Env, id: string) => env.DB.prepare(
   `select id, total, dolarones, anticipo, forma_pago, cancelada, revision, imprimir_en, corte_id, tienda, creado_en, caja,
           exists (select 1 from devoluciones where venta_id = ventas.id) as devuelta,
+          exists (select 1 from solicitudes where tipo = 'devolucion' and estado = 'pendiente' and json_extract(datos, '$.venta_id') = ventas.id) as pendiente_devolucion,
           exists (select 1 from transferencias_spei where venta_id = ventas.id) as con_clave
    from ventas where id = ?`,
 ).bind(id).first<VentaCorregible>();
@@ -79,7 +83,8 @@ export async function datosCorreccion(env: Env, id: string, sesion?: Quien & { t
 // o sin caja nunca recibe un corte que lo ampare. Lo demás es por si alguna ruta no subiera `revision`.
 const CONDICION = `cancelada = 0 and corte_id is null and revision = ? and creado_en >= ? and caja != ''
   and not exists (select 1 from devoluciones where venta_id = ventas.id)
-  and not exists (select 1 from transferencias_spei where venta_id = ventas.id)`;
+  and not exists (select 1 from transferencias_spei where venta_id = ventas.id)
+  and not exists (select 1 from solicitudes where tipo = 'devolucion' and estado = 'pendiente' and json_extract(datos, '$.venta_id') = ventas.id)`;
 
 /** POST /api/ventas/:id/corregir-pago { id, forma_pago, motivo, caja } — del cajero con PIN o el dueño (permiso() de /api/ventas/...). */
 export async function corregirFormaPago(ventaId: string, request: Request, env: Env, ctx: ExecutionContext, correo: string, tienda: string): Promise<Response> {
