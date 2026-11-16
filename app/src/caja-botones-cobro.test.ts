@@ -8,7 +8,7 @@ import { readFileSync } from 'node:fs';
 import { runInNewContext } from 'node:vm';
 import {
   totales, efectivoAlcanza, saldoCanjeable, dolaronesGanados, anticipoDePedido, transferenciaDe, CLAVE_DESDE, debePreguntarSocio,
-  descuentoDe, TOPE_DESCUENTO, maximoCanje, montosRapidos, montoTransferidoRazonable, MINIMO_REGALO, SIN_RED_EN_MANO,
+  descuentoDe, TOPE_DESCUENTO, huellaTicket, maximoCanje, montosRapidos, montoTransferidoRazonable, MINIMO_REGALO, SIN_RED_EN_MANO,
 } from '../public/venta.js';
 
 const fuente = readFileSync('public/caja.html', 'utf8').replace(/\r\n/g, '\n');
@@ -107,7 +107,8 @@ function armar(op: Opciones = {}) {
     document: { querySelectorAll: (s: string) => (s === '#botones-cobro button' ? BOTONES.map($) : []), createElement: () => ({ style: {}, textContent: '' }) },
     lineas: op.recargar ? [] : [{ producto_id: 'p1', codigo: 'ED-000001', nombre: 'Ventilador', precio: op.precio ?? 30000, cantidad: 1, ...(op.enMano ? { en_mano: { motivo: 'no_se', esperado: 0 } } : {}) }],
     errorImpresora: () => 'no conectada', socio, valesCargados: [], catalogo: new Map(), pedidoCargado: op.recargar ? null : op.pedido ?? null,
-    descuento: op.descuento ?? null,
+    descuento: op.descuento ? { huella: huellaTicket([{ producto_id: 'p1', cantidad: 1 }], op.precio ?? 30000), ...op.descuento } : null,
+    huellaTicket, quitarDescuentoEnServidor() {}, descuentoCerrado: () => false,
     preguntarSocio: async () => op.respuestaSocio ?? 'cobrar', abrirAlta() {},
     impresionRemota: () => !!op.remota, cajaActual: () => (op.sinCaja ? '' : 'Caja 1'), dolaronesPedidos: () => op.dolarones ?? 0,
     descuentoAplicado: () => 0, promoActual: () => 0, totalNeto: () => op.precio ?? 30000, pintarDescuento() {}, promoAgotada() {},

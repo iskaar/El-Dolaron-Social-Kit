@@ -2,7 +2,7 @@
 // Issue #75 fase 3: correo al dueno cuando llega una solicitud pendiente.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { tienda, DUENO } from './prueba-d1.ts';
+import { tienda, DUENO, PRODUCTO } from './prueba-d1.ts';
 import { REMITENTE } from './avisos.ts';
 
 function conCorreo(falla = (_para: string) => false) {
@@ -30,7 +30,7 @@ test('solicitud de acceso nueva: un correo a los duenos activos; repetirla no vu
 
 test('lo que aprueba el propio dueno no avisa; un correo que falla no tumba la solicitud ni a los otros duenos', async () => {
   const t = conCorreo();
-  assert.equal((await t.pedir('/api/descuentos', { tipo: 'porcentaje', valor: 10, motivo: 'x', subtotal: 25000 })).cuerpo.estado, 'aprobada');
+  assert.equal((await t.pedir('/api/descuentos', { tipo: 'porcentaje', valor: 10, motivo: 'x', subtotal: 25000, lineas: [{ producto_id: PRODUCTO, cantidad: 1 }] })).cuerpo.estado, 'aprobada');
   await t.esperar();
   assert.equal(t.enviados.length, 0);
 

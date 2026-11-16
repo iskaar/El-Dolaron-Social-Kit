@@ -91,6 +91,8 @@
     background: var(--azul); color: #fff; cursor: pointer; }
   #descuento-form button.claro { background: #fff; color: var(--azul); }
   #descuento-estado { font-size: 14px; margin-top: 6px; }
+  #descuento-tope { font-size: 13px; color: #5b6478; }
+  #descuento-tope[hidden] { display: none; }
   #impresiones-destino { font-size: 12px; color: #666; margin-top: 4px; }
   #descuento-pin { display: grid; gap: 6px; border-top: 1px solid var(--linea); padding-top: 8px; }
   #descuento-pin h3 { margin: 0; font-size: 13px; color: #5b6478; }
@@ -241,6 +243,7 @@ if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw-caja.js'
         <option value="monto">$ de descuento</option>
       </select>
       <input id="descuento-valor" type="number" min="1" step="1" inputmode="numeric" placeholder="Cuánto" aria-label="Cuánto">
+      <div id="descuento-tope" role="status" hidden></div>
       <input id="descuento-motivo" maxlength="200" placeholder="Motivo (obligatorio)" autocomplete="off">
       <button id="enviar-descuento" type="button">Enviar al dueño</button>
       <div id="descuento-pin">
@@ -520,7 +523,7 @@ if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw-caja.js'
 </dialog>
 <script type="module">
 import { CATEGORIAS_GASTO } from '/categorias.js';
-import { totales, agregar, leerMultiplicador, efectivoAlcanza, montosRapidos, montoTransferidoRazonable, dolaronesGanados, saldoCanjeable, maximoCanje, MINIMO_REGALO, descuentoDe, TOPE_DESCUENTO, DENOMINACIONES, contadoDe, promoInauguracion, letreroPromo, desfaseReloj, anticipoDePedido, transferenciaDe, CLAVE_DESDE, BANCOS, debePreguntarSocio, guiaVale, precioBuenFin, letreroBuenFin,
+import { totales, agregar, leerMultiplicador, efectivoAlcanza, montosRapidos, montoTransferidoRazonable, dolaronesGanados, saldoCanjeable, maximoCanje, MINIMO_REGALO, descuentoDe, TOPE_DESCUENTO, TOPE_DESCUENTO_CAJERO, huellaTicket, DENOMINACIONES, contadoDe, promoInauguracion, letreroPromo, desfaseReloj, anticipoDePedido, transferenciaDe, CLAVE_DESDE, BANCOS, debePreguntarSocio, guiaVale, precioBuenFin, letreroBuenFin,
   esBusquedaPorTexto, avisoExistencia, moverSugerencia, cancelarPideConfirmar, nVentas, avisoCorteSinEnviar, gastoRequiereDueno, pesosExactos, centavosDeTexto, alertaConteo,
   MOTIVOS_EN_MANO, SIN_RED_EN_MANO, puedeVenderEnMano } from '/venta.js';
 import { abrirCamara } from '/camara.js';
@@ -774,6 +777,8 @@ fetch('/api/yo').then((r) => r.json()).then(({ usuario, cajero, cajas, tienda })
     $('aviso').textContent = 'Esta computadora no tiene tienda asignada. Pídele al dueño que se la asigne en Cuentas.';
     $('aviso').style.color = '#D72B32';
   }
+  esDuenoEnCaja = !!(cajero ?? usuario)?.roles?.includes('dueno');
+  pintarTopeDescuento();
   const caja = (cajero ?? usuario)?.caja;
   if (!caja) { pintarImpresora(); return; }
   $('caja-nombre').value = caja;
@@ -921,16 +926,16 @@ function pintar() {
   pintarPromoCupo();
   revisarCancelarArmado();
   if (cobrando) ocultarEnMano();   // #832: la oferta «en la mano» no sobrevive al cobro
-  // Uno en % se aprueba para ese ticket exacto: si cambia, hay que pedir otro. Uno en
-  // pesos se queda en el ticket hasta vaciarlo o quitarlo (Isaac, 17/10).
+  // Un descuento se aprueba para ese ticket exacto (piezas, cantidades y subtotal), en % o en pesos (#845): si cambia, hay que pedir otro.
   const subtotal = totales(lineas).subtotal;
-  if (descuento && (subtotal === 0 || (descuento.tipo !== 'monto' && descuento.subtotal !== subtotal))) {
-    const habiaSolicitud = descuento.estado !== 'rechazada';
+  if (descuento && (subtotal === 0 || descuento.huella !== huellaTicket(lineas, subtotal))) {
+    const habiaSolicitud = !descuentoCerrado();
+    quitarDescuentoEnServidor(descuento);
     descuento = null;
     idVenta = null;
     pintarDescuento(habiaSolicitud && subtotal > 0 ? 'El ticket cambió: el descuento ya no aplica. Pide otro.' : '');
   }
-  $('pedir-descuento').hidden = subtotal === 0 || (!!descuento && descuento.estado !== 'rechazada');
+  $('pedir-descuento').hidden = subtotal === 0 || (!!descuento && !descuentoCerrado());
   if (subtotal === 0) $('descuento-form').hidden = true;
   guardarTicket();
 
@@ -941,7 +946,7 @@ function pintar() {
       <div>x${l.cantidad}</div>
       <div class="importe">${pesos(l.precio * l.cantidad)}</div>
       <button type="button" data-quitar="${i}" aria-label="Quitar ${escapar(l.nombre)}"${l.cantidad > 1 ? ' title="Quita una pieza; Mayús + clic quita el renglón entero"' : ''} ${cobrando ? 'disabled' : ''}>✕</button>
-    </div>`).join('') + (descuento && descuento.estado !== 'rechazada' ? `
+    </div>`).join('') + (descuento && !descuentoCerrado() ? `
     <div class="renglon">
       <div></div>
       <div><div class="nombre">Descuento</div><div class="codigo">${descuento.estado === 'aprobada' ? 'aprobado' : 'esperando al dueño'}</div></div>
@@ -1250,6 +1255,12 @@ function guardarTicket() {
   } catch { /* sin memoria: no se recupera al recargar */ }
 }
 const descuentoAplicado = () => (descuento?.estado === 'aprobada' ? descuento.monto : 0);
+/** Rechazado por el dueño o vencido (30 minutos): ya no cuenta, solo se muestra hasta quitarlo o pedir otro. */
+const descuentoCerrado = () => descuento?.estado === 'rechazada' || descuento?.estado === 'vencida';
+/** «Quitar descuento» cierra la solicitud también en el servidor (#845); sin red no pasa nada: igual vence a los 30 minutos. */
+function quitarDescuentoEnServidor(d) {
+  if (d?.id && d.estado !== 'rechazada' && d.estado !== 'vencida') fetch(`/api/descuentos/${encodeURIComponent(d.id)}/quitar`, { method: 'POST' }).catch(() => {});
+}
 /** Promo de inauguracion del ticket actual; el servidor la vuelve a calcular al cobrar. */
 // La hora guardada solo vale mientras el ticket conserva su folio (reintento); sin folio, cobrar() fijara la de ahora.
 // Con cupo (Issue #250) la caja deja de darla al llegar a 0; sin red sigue con lo último que supo.
@@ -1270,7 +1281,7 @@ function pintarDescuento(aviso = '') {
     el.textContent = `Descuento aprobado: −${pesos(descuento.monto)}`;
     el.style.color = '#1f7a4d';
   } else {
-    el.textContent = 'El dueño rechazó el descuento.';
+    el.textContent = descuento.estado === 'vencida' ? 'El descuento venció (30 minutos). Quítalo y pide otro.' : 'El dueño rechazó el descuento.';
     el.style.color = '#D72B32';
   }
 }
@@ -1280,9 +1291,10 @@ async function consultarDescuento() {
   try {
     const r = await fetch(`/api/solicitudes/${descuento.id}`);
     if (!r.ok) return;
-    const { estado } = await r.json();
+    const { estado, vence_en } = await r.json();
     if (estado === 'pendiente' || descuento?.estado !== 'pendiente') return;
     descuento.estado = estado;
+    descuento.vence_en = vence_en;
     idVenta = null;
     pintarDescuento();
     pintar();
@@ -1300,7 +1312,7 @@ async function cargarDuenos() {
   } catch { $('descuento-pin').hidden = true; }   // sin red tampoco se piden descuentos
 }
 
-$('quitar-descuento').addEventListener('click', () => { if (ticketEnDuda()) return; descuento = null; idVenta = null; pintarDescuento(); pintar(); });
+$('quitar-descuento').addEventListener('click', () => { if (ticketEnDuda()) return; quitarDescuentoEnServidor(descuento); descuento = null; idVenta = null; pintarDescuento(); pintar(); });
 $('pedir-descuento').addEventListener('click', () => {
   $('descuento-form').hidden = false;
   cargarDuenos();
@@ -1323,17 +1335,19 @@ async function enviarDescuento(aprobacion = {}) {
   const falla = (texto) => { $('descuento-estado').textContent = texto; $('descuento-estado').style.color = '#D72B32'; };
   if (calculo.error) return falla(calculo.error);
   if (!motivo) return falla('Escribe el motivo del descuento.');
+  if (pasaDelTopeSinDueno({ tipo, valor }, subtotal) && !aprobacion.aprobador) return falla(AVISO_TOPE);
   if (aprobacion.pin !== undefined && !/^\d{6}$/.test(aprobacion.pin)) return falla('El PIN es de 6 dígitos.');
   try {
     const r = await fetch('/api/descuentos', {
       method: 'POST', headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ tipo, valor, motivo, subtotal, ...aprobacion }),
+      body: JSON.stringify({ tipo, valor, motivo, subtotal, caja: cajaActual(),
+        lineas: lineas.map(({ producto_id, cantidad }) => ({ producto_id, cantidad })), ...aprobacion }),
     });
     const cuerpo = await r.json().catch(() => ({}));
     $('descuento-pin-dueno').value = '';
     if (!r.ok) return falla(cuerpo.error ?? 'No se pudo pedir el descuento.');
     // Pendiente (va al dueño), o ya aprobado: con el PIN del dueño, o porque quien cobra es el dueño.
-    descuento = { id: cuerpo.id, tipo, valor, subtotal, monto: cuerpo.monto, estado: cuerpo.estado };
+    descuento = { id: cuerpo.id, tipo, valor, subtotal, monto: cuerpo.monto, estado: cuerpo.estado, huella: huellaTicket(lineas, subtotal), vence_en: cuerpo.vence_en };
     idVenta = null;
     $('descuento-form').hidden = true;
     $('descuento-valor').value = '';
@@ -1348,7 +1362,21 @@ $('enviar-descuento').addEventListener('click', () => enviarDescuento());
 $('aprobar-descuento-pin').addEventListener('click', () => enviarDescuento({
   aprobador: $('descuento-aprobador').value, pin: $('descuento-pin-dueno').value,
 }));
-$('descuento-valor').placeholder = `Máximo ${TOPE_DESCUENTO}% del ticket`;
+// Tope que aplica a quien está en la caja (#845): el cajero pide hasta 10 %; el dueño en su sesión, hasta 50 %. Más de 10 % solo lo aprueba el dueño con su PIN.
+let esDuenoEnCaja = false;
+const AVISO_TOPE = 'Más de 10 %: lo aprueba el dueño con su PIN';   // el 10 es TOPE_DESCUENTO_CAJERO (venta.js)
+const pasaDelTopeSinDueno = (pedido, subtotal) => !esDuenoEnCaja && 'error' in descuentoDe(pedido, subtotal, TOPE_DESCUENTO_CAJERO) && !('error' in descuentoDe(pedido, subtotal));
+function pintarTopeDescuento() {
+  $('descuento-valor').placeholder = `Máximo ${esDuenoEnCaja ? TOPE_DESCUENTO : TOPE_DESCUENTO_CAJERO}% del ticket`;
+  const tipo = $('descuento-tipo').value, escrito = Number($('descuento-valor').value);
+  const pasa = pasaDelTopeSinDueno({ tipo, valor: tipo === 'monto' ? Math.round(escrito * 100) : escrito }, totales(lineas).subtotal);
+  $('descuento-tope').hidden = !pasa;
+  $('descuento-tope').textContent = pasa ? AVISO_TOPE : '';
+  $('enviar-descuento').disabled = pasa;
+}
+$('descuento-valor').addEventListener('input', pintarTopeDescuento);
+$('descuento-tipo').addEventListener('change', pintarTopeDescuento);
+pintarTopeDescuento();
 
 function pintarSocio() {
   $('quitar-socio').hidden = !socio;
@@ -1809,7 +1837,7 @@ async function cobrar(forma) {
     $('codigo').focus();
     return;
   }
-  // Uno en pesos sobrevive a quitar piezas: si ya pasa del tope, no se cobra a escondidas sin él.
+  // Si ya pasa del tope, no se cobra a escondidas sin él.
   if (descuentoAplicado() && 'error' in descuentoDe(descuento, totales(lineas).subtotal)) {
     $('aviso').textContent = `El descuento pasa del ${TOPE_DESCUENTO}% del ticket. Agrega piezas o aprieta «Quitar descuento».`;
     $('aviso').style.color = '#D72B32';
@@ -3222,6 +3250,7 @@ $('cancelar').addEventListener('click', () => {
     return;
   }
   desarmarCancelar();
+  quitarDescuentoEnServidor(descuento);
   lineas = []; idVenta = null; pedidoCargado = null; descuento = null; sinPromo = false; pintarDescuento(); quitarSocio(); $('efectivo').value = ''; limpiarDatosTransferencia(); $('aviso').textContent = 'Venta cancelada';
   $('aviso').style.color = '#5b6478'; pintar(); $('codigo').focus();
 });

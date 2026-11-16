@@ -1,5 +1,5 @@
 import { resolverCancelacion } from './cancelaciones.ts';
-import { resolverDescuento } from './descuentos.ts';
+import { resolverDescuento, limiteVigencia } from './descuentos.ts';
 import { avisarDueno } from './avisos.ts';
 
 /**
@@ -200,7 +200,7 @@ export function permiso(pathname: string, metodo: string): Regla {
   if (ruta === '/api/cajeros' || ruta === '/api/cajeros/entrar' || ruta === '/api/cajeros/salir') return CAJA;
   // Contar piezas de alto valor (Issue #219): cualquier cuenta de piso. Ajustar y ver el rastro es del dueno (default).
   if (ruta === '/api/conteo') return TODOS;
-  if (ruta === '/api/descuentos' || ruta === '/api/descuentos/duenos') return CAJA;   // pedir un descuento (Issue #119, descuentos.ts)
+  if (ruta === '/api/descuentos' || ruta === '/api/descuentos/duenos' || (metodo === 'POST' && /^\/api\/descuentos\/[^/]+\/quitar$/.test(ruta))) return CAJA;   // pedir un descuento (Issue #119, descuentos.ts)
   // Cancelar una venta completa: el cajero solo en los primeros minutos; despues
   // pide aprobacion del dueno (Issue #200, cancelaciones.ts).
   if (ruta === '/api/solicitudes/cancelaciones' || ruta === '/api/solicitudes/descuentos') return DUENO;
@@ -483,8 +483,8 @@ export async function listarCuentas(env: Env): Promise<Response> {
   ).all<FilaUsuario & { creado_en: string; tiene_pin: number }>();
   const { results: solicitudes } = await env.DB.prepare(
     `select id, tipo, correo, nombre, justificacion, datos, creado_en from solicitudes
-     where estado = 'pendiente' order by creado_en`,
-  ).all();
+     where estado = 'pendiente' and not (tipo = 'descuento' and creado_en < ?) order by creado_en`,   // un descuento pendiente vence a los 30 minutos (#845)
+  ).bind(limiteVigencia()).all();
   const usuarios = filas.map((f) => ({ ...f, roles: leerRoles(f.roles), activo: f.activo === 1,
     editar_inventario: f.editar_inventario === 1, tiene_pin: f.tiene_pin === 1 }));
   const tiendas = Object.entries(TIENDAS).map(([clave, { nombre, cajas }]) => ({ clave, nombre, cajas }));

@@ -6,6 +6,7 @@
  * (devoluciones.ts).
  */
 import { cajaDe, nombreCaja } from './corte.ts';
+import { estadoVigente } from './descuentos.ts';
 import { sentenciasMover } from './existencias.ts';
 import { leerUsuario, leerRoles, TIENDA_CENTRAL, tiendaDeCaja } from './cuentas.ts';
 import { verificarPin } from './cajeros.ts';
@@ -237,12 +238,14 @@ export async function listarCancelaciones(env: Env): Promise<Response> {
 
 /** Para que la caja sepa como va su solicitud: solo la pide quien la hizo, o el dueno. */
 export async function estadoSolicitud(env: Env, id: string, correo: string): Promise<Response> {
-  const fila = await env.DB.prepare('select estado, correo, datos from solicitudes where id = ?')
+  const fila = await env.DB.prepare('select tipo, estado, correo, datos, creado_en, resuelto_en from solicitudes where id = ?')
     .bind(id)
-    .first<{ estado: string; correo: string; datos: string }>();
+    .first<{ tipo: string; estado: string; correo: string; datos: string; creado_en: string; resuelto_en: string | null }>();
   const usuario = fila && fila.correo !== correo ? await leerUsuario(env, correo) : null;
   if (!fila || (fila.correo !== correo && !usuario?.roles.includes('dueno'))) {
     return json({ error: 'La solicitud no existe.' }, 404);
   }
+  // Un descuento pendiente o aprobado de mas de 30 minutos ya es `vencida`; trae cuando vence (#845).
+  if (fila.tipo === 'descuento') return json({ ...estadoVigente(fila), venta_id: null });
   return json({ estado: fila.estado, venta_id: (JSON.parse(fila.datos) as { venta_id?: string }).venta_id ?? null });
 }

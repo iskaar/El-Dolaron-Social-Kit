@@ -7,14 +7,18 @@
 
 /** Tope de un descuento, en % del ticket (decision de Isaac del 28/09, Issue #119). */
 export const TOPE_DESCUENTO = 50;
+/** Lo que puede pedir un cajero (Issue #845, decision de Isaac del 16/11); mas, hasta el tope, solo el dueño. */
+export const TOPE_DESCUENTO_CAJERO = 10;
+/** Un descuento aprobado, o uno pendiente, vale 30 minutos (Issue #845). */
+export const VIGENCIA_DESCUENTO_MS = 30 * 60_000;
 
 /**
  * Cuanto se descuenta, en centavos, para un descuento pedido ({ tipo, valor }:
  * 'porcentaje' con valor en % entero, o 'monto' con valor en centavos) sobre un
  * ticket de `subtotal` centavos. La usan la caja (para mostrar) y el servidor
- * (para cobrar): ninguno acepta lo que el otro rechazaria.
+ * (para cobrar): ninguno acepta lo que el otro rechazaria. `tope` es el % maximo que aplica a quien pide.
  */
-export function descuentoDe({ tipo, valor }, subtotal) {
+export function descuentoDe({ tipo, valor }, subtotal, tope = TOPE_DESCUENTO) {
   if (!Number.isInteger(subtotal) || subtotal <= 0) return { error: 'El ticket esta vacio.' };
   if (tipo !== 'porcentaje' && tipo !== 'monto') return { error: 'Tipo de descuento invalido.' };
   if (!Number.isInteger(valor) || valor < 1) {
@@ -22,8 +26,18 @@ export function descuentoDe({ tipo, valor }, subtotal) {
   }
   const monto = tipo === 'porcentaje' ? Math.floor((subtotal * valor) / 100) : valor;
   if (monto < 1) return { error: 'El descuento es menor a un centavo.' };
-  if (monto * 100 > subtotal * TOPE_DESCUENTO) return { error: `El descuento no puede pasar de ${TOPE_DESCUENTO}% del ticket.` };
+  if (monto * 100 > subtotal * tope) return { error: `El descuento no puede pasar de ${tope}% del ticket.` };
   return { monto };
+}
+
+/**
+ * La huella de un ticket (Issue #845): piezas y cantidades mas el subtotal. Un descuento se pide para una
+ * huella y solo vale para esa; la calculan la caja (al pedirlo) y el servidor (al pedirlo y al cobrar).
+ */
+export function huellaTicket(lineas, subtotal) {
+  const piezas = new Map();
+  for (const l of lineas) piezas.set(String(l.producto_id), (piezas.get(String(l.producto_id)) ?? 0) + Number(l.cantidad));
+  return `${[...piezas].sort(([a], [b]) => (a < b ? -1 : 1)).map(([id, n]) => `${id}:${n}`).join(',')}|${subtotal}`;
 }
 
 /**

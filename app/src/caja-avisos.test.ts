@@ -482,7 +482,7 @@ function montarCancelar(lineas: any[], extra: Record<string, unknown> = {}) {
   };
   const rutinas = runInNewContext(`let cancelarArmado = null; ${entre('// Con descuento aprobado, pedido cargado', 'function pintarRed()')}
     ({ revisarCancelarArmado })`, {
-    $, totales, cancelarPideConfirmar, descuento: null, pedidoCargado: null, sinPromo: false, limpiarDatosTransferencia() {}, ...extra,
+    $, totales, cancelarPideConfirmar, descuento: null, pedidoCargado: null, sinPromo: false, limpiarDatosTransferencia() {}, quitarDescuentoEnServidor() {}, ...extra,
     get lineas() { return estado.lineas; }, set lineas(v) { estado.lineas = v; },
     idVenta: 'x', pintarDescuento() {}, quitarSocio() { estado.limpiadas++; }, pintar() {}, clearTimeout() {},
     setTimeout: (f: () => void) => { temporizadores.push(f); return temporizadores.length; },

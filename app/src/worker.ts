@@ -14,7 +14,7 @@ import { guardarImagenComoFoto, imagenGuardada, procesarRellenoImagenes, procesa
 import { PRENDAS_ROPA, PRECIOS_ROPA, nombreRopa, partesDeNombre, paqueteValido } from '../public/ropa.js';
 import { procesarColaRopa, rutaRopaAdmin } from './ropa-ia.ts';
 import { calcularPrecio, ajustarManual, esDestinoBanda, prefijoParaFamilia, MONTOS_BANDA, type Destino } from './precio.ts';
-import { efectivoAlcanza, promoInauguracion, CLAVE_DESDE, claveRastreoDe, precioBuenFin, ENVIO_ID } from '../public/venta.js';
+import { efectivoAlcanza, promoInauguracion, CLAVE_DESDE, claveRastreoDe, precioBuenFin, ENVIO_ID, huellaTicket } from '../public/venta.js';
 import { semanaIngreso } from '../public/semana.js';
 import { detalleVenta, cancelarPieza, devolverEnCupon, reimprimirCupon } from './devoluciones.ts';
 import { cancelarVenta, listarCancelaciones, estadoSolicitud } from './cancelaciones.ts';
@@ -70,7 +70,7 @@ import { catalogoPublico, revisionCatalogo } from './catalogo.ts';
 import { rescatarPendientes, esCorridaSemanal, reportarHuerfanosR2 } from './huerfanos.ts';
 import { procesarRecortes, revisarRecortes, ajustarRecortesViejos, reiniciarRecorte, rutaRecortesAdmin } from './recortes.ts';
 import { rutaML, recibirNotificacion, conciliarSeguro, sincronizar, publicacionViva, avisosPendientes, atenderVentaML } from './mercadolibre.ts';
-import { pedirDescuento, validarDescuento, listarDescuentos, listarDuenos, promoDe, promoRestantes, buenFinDe } from './descuentos.ts';
+import { pedirDescuento, quitarDescuento, validarDescuento, listarDescuentos, listarDuenos, promoDe, promoRestantes, buenFinDe } from './descuentos.ts';
 import { listarAltoValor, revisarConteo, ajustarExistencia, listarAjustes } from './conteo.ts';
 import { rutaPedidos, vencerPedidos, sentenciasDePedido, saldoDe, enPedido } from './pedidos.ts';
 import { leerTransferencia, sentenciaTransferencia, respuestaClaveUsada, esChoqueDeClave, excedenteDe } from './transferencias.ts';
@@ -2011,10 +2011,14 @@ async function registrarVenta(request: Request, env: Env, ctx: ExecutionContext,
   // Un descuento solo entra si el dueno lo aprobo (Issue #119); validarDescuento dice para que ticket.
   const descuentoId = venta.descuento_id ? String(venta.descuento_id) : null;
   let descuento = 0;
+  let guardaDescuento: D1PreparedStatement | null = null;
   if (descuentoId) {
-    const valido = await validarDescuento(env, descuentoId, subtotal);
+    // Atado a este ticket (piezas, cantidades, subtotal), a esta caja y a quien cobra; una venta sin red se mide a la hora de la caja.
+    const valido = await validarDescuento(env, descuentoId, { subtotal, huella: huellaTicket(venta.lineas as LineaVenta[], subtotal), correo, caja,
+      ahoraMs: venta.sin_red === true ? horaVenta : Date.now() });
     if (!valido.ok) return json({ error: valido.error }, valido.status);
     descuento = valido.monto;
+    guardaDescuento = valido.guarda;
   }
   // Promo de inauguracion con la hora de la venta en la caja (una venta encolada
   // sin red conserva la promo que vio el cliente). Se guarda sumada en
@@ -2084,6 +2088,8 @@ async function registrarVenta(request: Request, env: Env, ctx: ExecutionContext,
   }
 
   const sentencias = [
+    // Primero: si el descuento venció o dejó de ser de este ticket mientras tanto, la venta completa no se escribe (Issue #845).
+    ...(guardaDescuento ? [guardaDescuento] : []),
     env.DB.prepare(
       `insert into ventas (id, total, forma_pago, efectivo, cambio, creado_en, registrado_en, cliente_id, dolarones,
                            caja, cajero, pedido_hash, imprimir_en, descuento, descuento_id, promo, anticipo, pedido_id, vendedora, tienda)
@@ -2152,6 +2158,8 @@ async function registrarVenta(request: Request, env: Env, ctx: ExecutionContext,
     if (descuentoId && String(error).includes('descuento_id')) {
       return json({ error: 'Ese descuento ya se uso en otra venta.' }, 409);
     }
+    if (descuentoId && String(error).includes('solicitudes.datos'))
+      return json({ error: 'El descuento venció o ya no es de este ticket: pide otro.' }, 409);
     throw error;
   }
   // Si una pieza publicada en Mercado Libre se agoto, se pausa alla (D1 manda). Despues de responder.
@@ -2742,7 +2750,9 @@ export default {
         if (request.method === 'PUT') return await guardarCuenta(request, env);
         return json({ error: 'Metodo no permitido.' }, 405);
       }
-      if (pathname === '/api/descuentos' && request.method === 'POST') return await pedirDescuento(request, env, correo, ctx);
+      if (pathname === '/api/descuentos' && request.method === 'POST') return await pedirDescuento(request, env, correo, ctx, tienda);
+      const quitar = pathname.match(/^\/api\/descuentos\/([^/]+)\/quitar$/);
+      if (quitar && request.method === 'POST') return await quitarDescuento(env, quitar[1], correo);
       if (pathname === '/api/descuentos/duenos' && request.method === 'GET') return await listarDuenos(env);
       if (pathname === '/api/solicitudes/descuentos' && request.method === 'GET') return await listarDescuentos(env);
       if (pathname === '/api/solicitudes/cancelaciones' && request.method === 'GET') return await listarCancelaciones(env);
