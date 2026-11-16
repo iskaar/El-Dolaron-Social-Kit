@@ -1787,10 +1787,11 @@ async function reportarRechazadas() {
         body: JSON.stringify({ motivo: v.motivo, forma_pago: v.forma_pago, efectivo: v.efectivo, creado_en: v.creado_en, caja: v.caja,
           lineas: v.lineas.map(({ codigo, nombre, precio, cantidad }) => ({ codigo, nombre, precio, cantidad })) }),
       });
-      if (!r.ok) continue;
+      // 400/404: el servidor nunca lo va a aceptar (registro raro o servidor sin la ruta): no se reintenta y se puede descartar tras avisar en persona.
+      if (!r.ok && r.status !== 400 && r.status !== 404) continue;
       // Se vuelve a leer: otra sincronización pudo cambiar el registro mientras esperaba.
       const actual = await store('ventas', 'readonly', (s) => s.get(v.id));
-      if (actual?.estado === 'rechazada') await store('ventas', 'readwrite', (s) => s.put({ ...actual, reportada: true }));
+      if (actual?.estado === 'rechazada') await store('ventas', 'readwrite', (s) => s.put({ ...actual, reportada: r.ok ? true : 'fallo' }));
     } catch { /* sin red: se reintenta */ }
   }
 }
@@ -1816,7 +1817,7 @@ async function pintarRechazadas() {
     <div class="ticket">
       <div><b>${pesos(totales(v.lineas).total)}</b> rechazada — ${escapar(v.motivo)}</div>
       <div class="nota">${new Date(v.creado_en).toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' })} · ${escapar(v.forma_pago)} · ${totales(v.lineas).piezas} ${totales(v.lineas).piezas === 1 ? 'pieza' : 'piezas'} ·
-        ${v.reportada ? 'Ya se le avisó al dueño.' : 'Avisando al dueño… (necesita red)'}</div>
+        ${v.reportada === 'fallo' ? 'No se pudo avisar al dueño: avísale en persona antes de descartar.' : v.reportada ? 'Ya se le avisó al dueño.' : 'Avisando al dueño… (necesita red)'}</div>
       <div>
         <button type="button" data-reintentar="${v.id}">Reintentar</button>
         <button type="button" data-descartar="${v.id}" ${v.reportada ? '' : 'disabled'}>${descartarListo === v.id ? '¿Seguro? Descartar' : 'Descartar'}</button>
@@ -2571,7 +2572,8 @@ $('abrir-corte').addEventListener('click', async () => {
     $('corte-aviso').textContent = `Hay ${pendientes} ventas sin sincronizar. Espera a tener red antes del corte.`;
   } else if (rechazadas) {
     const sinAvisar = cola.some((v) => v.estado === 'rechazada' && !v.reportada);
-    $('corte-aviso').textContent = sinAvisar ? `Hay ${rechazadas} ventas rechazadas y aún no se le avisa al dueño: necesita red. Avísale en persona.`
+    $('corte-aviso').textContent = cola.some((v) => v.reportada === 'fallo') ? `Hay ${rechazadas} ventas rechazadas y no se pudo avisar al dueño. Avísale en persona antes de descartar.`
+      : sinAvisar ? `Hay ${rechazadas} ventas rechazadas y aún no se le avisa al dueño: necesita red. Avísale en persona.`
       : `Hay ${rechazadas} ventas rechazadas. Ya se le avisó al dueño; descártalas cuando te lo indique.`;
   } else {
     $('corte-registrar').disabled = false;

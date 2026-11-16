@@ -247,3 +247,32 @@ test('caja: al rechazarse una venta sin red se queda con el motivo completo, se 
   await sincronizar();
   assert.equal(llamadas.length, 2, 'ya reportada: no se vuelve a enviar');
 });
+
+test('caja: un 400 o 404 al reportar es definitivo (no se reintenta y se puede descartar tras avisar en persona); 500 y sin red siguen reintentando', async () => {
+  const fuente = readFileSync('public/caja.html', 'utf8');
+  const texto = fuente.slice(fuente.indexOf('let sincronizando = false;'), fuente.indexOf('async function pendientes()'));
+  const dibujo = fuente.slice(fuente.indexOf('let descartarListo = null;'), fuente.indexOf("$('rechazadas').addEventListener"));
+  for (const [respuesta, definitivo] of [[400, true], [404, true], [500, false], ['red', false], [401, false], [429, false]] as const) {
+    const venta = { id: crypto.randomUUID(), estado: 'rechazada', motivo: 'x', lineas: [{ codigo: 'A', nombre: 'A', precio: 100, cantidad: 2 }],
+      forma_pago: 'tarjeta', efectivo: 0, creado_en: '2026-11-16T15:30:00.000Z', caja: 'Caja 1' };
+    const cola = new Map<string, any>([[venta.id, venta]]);
+    let intentos = 0;
+    const el: Record<string, any> = {};
+    const almacen = async (a: string, _m: string, fn: any) => fn({
+      getAll: () => a === 'ventas' ? [...cola.values()] : [], get: (id: string) => cola.get(id), delete: (id: string) => cola.delete(id), put: (x: any) => cola.set(x.id, x),
+    });
+    const caja = runInNewContext(`${texto}\n${dibujo}; ({ sincronizar, pintarRechazadas })`, {
+      store: almacen, AbortSignal, JSON, encodeURIComponent, Date, $: (id: string) => el[id] ??= { textContent: '' },
+      fetch: async () => { intentos++; if (respuesta === 'red') throw new TypeError('sin red'); return { ok: false, status: respuesta, json: async () => ({}) }; },
+      dolares: String, pintarResultadosVales() {}, pendientes() {}, actualizarCorte() {}, pesos: String, escapar: String,
+      totales: (l: { cantidad: number }[]) => ({ total: 1, piezas: l.reduce((n, x) => n + x.cantidad, 0) }),
+    }) as { sincronizar: () => Promise<void>; pintarRechazadas: () => Promise<void> };
+    await caja.sincronizar();
+    await caja.sincronizar();
+    assert.equal(cola.get(venta.id).reportada, definitivo ? 'fallo' : undefined, String(respuesta));
+    assert.equal(intentos, definitivo ? 1 : 2, `${respuesta}: ${definitivo ? 'no se reintenta' : 'se reintenta'}`);
+    const html: string = el.rechazadas.innerHTML;
+    assert.equal(/data-descartar="[^"]+"\s+disabled/.test(html), !definitivo, `${respuesta}: Descartar ${definitivo ? 'habilitado' : 'deshabilitado'}`);
+    assert.equal(html.includes('No se pudo avisar al dueño: avísale en persona antes de descartar.'), definitivo);
+  }
+});
