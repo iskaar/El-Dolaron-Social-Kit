@@ -29,22 +29,26 @@ ${pie.frase} ${new URL(request.url).origin}${pie.ruta}`);
   }
 }
 
-/** Un correo a cada dueño activo, tal cual. Lo usa también la venta en Mercado Libre (Issue #427). */
-export async function correoADuenos(env: Env, asunto: string, texto: string): Promise<void> {
+/** Un correo a cada dueño activo, tal cual. Lo usa también la venta en Mercado Libre (Issue #427). Devuelve cuántos salieron (#819). */
+export async function correoADuenos(env: Env, asunto: string, texto: string): Promise<number> {
   const correo = env.CORREO;
-  if (!correo) return;
+  if (!correo) return 0;
   const { results } = await env.DB.prepare('select correo, roles from usuarios where activo = 1')
     .all<{ correo: string; roles: string }>();
   const prueba = env.AMBIENTE === 'sandbox' ? '[Sandbox] ' : '';
-  await Promise.all(results.filter((u) => leerRoles(u.roles).includes('dueno')).map((u) =>
+  const enviados = await Promise.all(results.filter((u) => leerRoles(u.roles).includes('dueno')).map((u) =>
     correo.send({
       from: { email: REMITENTE, name: 'El Dolarón' },
       to: u.correo,
       subject: `${prueba}${asunto}`,
       text: texto,
-    }).catch((error) => console.error(JSON.stringify({
-      mensaje: 'aviso por correo fallido', para: u.correo, asunto, codigo: error?.code ?? '', error: String(error),
-    })))));
+    }).then(() => true, (error) => {
+      console.error(JSON.stringify({
+        mensaje: 'aviso por correo fallido', para: u.correo, asunto, codigo: error?.code ?? '', error: String(error),
+      }));
+      return false;
+    })));
+  return enviados.filter(Boolean).length;
 }
 
 /** Sin ctx (pruebas que llaman al handler directo) el aviso no se manda. */

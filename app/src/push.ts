@@ -6,7 +6,7 @@
  * VAPID_JWK o sin dispositivos, la ayuda llega por correo (avisos.ts).
  */
 import { correoADuenos, REMITENTE } from './avisos.ts';
-import { leerRoles, leerUsuario, tiendaDe, CAJAS, type Rol, type Usuario } from './cuentas.ts';
+import { leerRoles, leerUsuario, tiendaDe, esTienda, TIENDAS, CAJAS, type Rol, type Usuario } from './cuentas.ts';
 
 const json = (cuerpo: unknown, status = 200) =>
   new Response(JSON.stringify(cuerpo), { status, headers: { 'content-type': 'application/json; charset=utf-8' } });
@@ -129,13 +129,18 @@ export async function pushA(env: Env, correo: string, titulo: string, cuerpo: st
 export async function rutaPush(request: Request, env: Env, pathname: string, correo: string, acceso = correo): Promise<Response | null> {
   if (pathname === '/api/ayuda' && request.method === 'POST') {
     const cuerpo = (await request.json().catch(() => ({}))) as Record<string, unknown>;
-    const caja = CAJAS.includes(String(cuerpo.caja)) ? ` en ${cuerpo.caja}` : '';
     const quien = (await leerUsuario(env, correo))?.nombre || correo;
-    const aviso = `${quien} pide ayuda${caja}.`;
+    // #819: la tienda es la de la cuenta de Access de la terminal (servidor), junto a la caja que dice la pantalla.
+    const t = tiendaDe(await leerUsuario(env, acceso));
+    const donde = [CAJAS.includes(String(cuerpo.caja)) ? String(cuerpo.caja) : '', esTienda(t) ? TIENDAS[t].nombre : ''].filter(Boolean).join(', ');
+    const aviso = `${quien} pide ayuda${donde ? ` en ${donde}` : ''}.`;
     const push = await pushADuenos(env, 'Ayuda en caja', aviso);
     // ponytail: sin dispositivo que lo reciba, el correo de siempre.
-    if (!push) await correoADuenos(env, 'Ayuda en caja', aviso);
-    return json({ ok: true, push });
+    const correos = push ? 0 : await correoADuenos(env, 'Ayuda en caja', aviso);
+    // Honesto (#819): 200 solo si a alguien le llegó; si no, 503 con el conteo (una caja con la página vieja lee `error` y no dice «avisada»).
+    if (push || correos) return json({ ok: true, push, correos, tienda: t });
+    return json({ ok: false, push: 0, correos: 0, tienda: t,
+      error: 'No hay celulares con avisos activos: llama al encargado.' }, 503);
   }
   if (pathname === '/api/push/clave' && request.method === 'GET') {
     if (!env.VAPID_JWK) return json({ error: 'Falta el secreto VAPID_JWK.' }, 503);
