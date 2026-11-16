@@ -22,6 +22,7 @@ Las instrucciones explícitas vigentes del usuario prevalecen. El plan describe 
 - Mantener rutas, respuestas API, almacenamiento de navegador y ventas pendientes compatibles. No borrar IndexedDB/caché para ocultar una falla. Respetar instalación/actualización del service worker y uso sin red.
 - Migraciones: archivo nuevo `app/migracion-NNN-*.sql`, aditivo, con la instrucción de ejecución en su encabezado; Isaac lo corre en sandbox y luego en prod ANTES del deploy. No hay tabla de registro. No editar SQL ya ejecutado ni renumerar. Las pruebas (`src/prueba-d1.ts`) y `npm run db:local` aplican schema + todas las migraciones: una base vacía debe quedar completa.
 - Conservar manejo de errores, validación, accesibilidad y calibración de hardware al mover código. Reutilizar venta.js y módulos existentes.
+- Quien cambie un flujo, botón o mensaje de la caja actualiza `app/public/ayuda-contenido.js` (guía «¿Cómo se hace?») en el mismo PR; `src/ayuda.test.ts` falla si un texto citado ya no existe en su pantalla.
 - Un PR por arreglo o extracción coherente. No añadir dependencias, servicios, automatización de publicación ni credenciales para implementar este plan; una propuesta de capacidad no es autorización.
 
 ## Validación y decisiones
