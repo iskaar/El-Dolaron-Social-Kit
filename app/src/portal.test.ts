@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import worker from './worker.ts';
-import { tienda, codigoPrueba, PRODUCTO } from './prueba-d1.ts';
+import { tienda, codigoPrueba, PRODUCTO, DUENO } from './prueba-d1.ts';
 import { readFileSync } from 'node:fs';
 import { vencerPedidos } from './pedidos.ts';
 import { viernesDeEnvio } from '../public/venta.js';
@@ -215,6 +215,82 @@ test('la llegada rechaza el código vencido, usado o cerrado desde la cuenta (#8
     p.db.prepare('update codigos_cliente set creado_en = ? where cliente_id = ?').run('2020-01-01T00:00:00.000Z', a.body.id);
     // El mismo código vigente sí acredita, aunque antes lo hayan rechazado otra vez.
     assert.equal((await p.pedir('/api/portal/llegada', { codigo: await nuevo() })).status, 200);
+  } finally { p.cerrar(); }
+});
+
+test('un alta en la caja acredita su llegada con la prueba de un solo uso, sin código del portal (#844)', async () => {
+  const p = portalDePrueba();
+  try {
+    const OTRA = 'otra-caja@prueba.mx';
+    p.db.prepare(`insert into usuarios (correo, nombre, roles, activo, creado_en, actualizado_en) values (?, 'Otra', 'dueno', 1, '', '')`).run(OTRA);
+    const como = (correo: string) => { p.env.DEV_USUARIO = correo; };
+    const alta = async (telefono: string, id = crypto.randomUUID()) => ({ id, ...await p.pedir('/api/socios', { id, nombre: 'Cliente', telefono, acepta_bases: true, declara_mayor_edad: true }) });
+    const tienda = (id: string) => p.db.prepare("select count(*) as n from premios_apertura where canal = 'tienda' and cliente_id = ?").get(id)!.n;
+    const a = await alta('5551110041'), b = await alta('5551110042');
+    assert.equal(a.status, 201);
+    assert.match(a.cuerpo.prueba_llegada, /^DA-[A-Za-z0-9_-]{16}$/);
+    assert.equal(a.cuerpo.llegada_pendiente, true);
+    // Solo se guarda el hash, y la prueba no deja la tienda por ningún otro lado.
+    assert.ok(!JSON.stringify(p.db.prepare('select * from pruebas_alta').all()).includes(a.cuerpo.prueba_llegada));
+    // Un número, un id suelto o la prueba de otro socio no acreditan a este; sin prueba ni código, 400.
+    for (const cuerpo of [{ cliente_id: a.cuerpo.id }, { codigo: String(a.cuerpo.numero) }, { prueba: String(a.cuerpo.numero) }, { prueba: 'DC-AAAAAAAAAAAAAAAA' }, { prueba: 'DA-corta' }]) {
+      assert.equal((await p.pedir('/api/portal/llegada', cuerpo)).status, 400, JSON.stringify(cuerpo));
+    }
+    assert.equal((await p.pedir('/api/portal/llegada', { prueba: 'DA-AAAAAAAAAAAAAAAA' })).status, 403);
+    assert.equal(p.db.prepare('select count(*) as n from primera_llegada').get()!.n, 0);
+    // Otra sesión de caja (otro cajero) no puede usarla.
+    como(OTRA);
+    assert.equal((await p.pedir('/api/portal/llegada', { prueba: a.cuerpo.prueba_llegada })).status, 403);
+    como(DUENO);
+    assert.equal(tienda(a.cuerpo.id), 0);
+    // Vencida: no.
+    p.db.prepare("update pruebas_alta set expira_en = '2020-01-01T00:00:00.000Z' where cliente_id = ?").run(a.cuerpo.id);
+    assert.equal((await p.pedir('/api/portal/llegada', { prueba: a.cuerpo.prueba_llegada })).status, 403);
+    p.db.prepare("update pruebas_alta set expira_en = '2999-01-01T00:00:00.000Z' where cliente_id = ?").run(a.cuerpo.id);
+    // La prueba de A acredita a A (el cliente_id que mande la caja se ignora) y no a B.
+    const primera = await p.pedir('/api/portal/llegada', { cliente_id: b.cuerpo.id, prueba: a.cuerpo.prueba_llegada });
+    assert.equal(primera.status, 200);
+    assert.equal(primera.cuerpo.premio.canal, 'tienda');
+    assert.equal(tienda(a.cuerpo.id), 1);
+    assert.equal(tienda(b.cuerpo.id), 0);
+    assert.notEqual(p.db.prepare('select usada_en from pruebas_alta where cliente_id = ?').get(a.cuerpo.id)!.usada_en, '');
+    // Usada: se rechaza y no acredita otra vez.
+    assert.equal((await p.pedir('/api/portal/llegada', { prueba: a.cuerpo.prueba_llegada })).status, 403);
+    assert.equal(p.db.prepare("select count(*) as n from dolarones_movimientos where cliente_id = ? and tipo = 'regalo'").get(a.cuerpo.id)!.n, 1);
+    // Reintento antes de gastarla (se perdió la respuesta): mismo premio, un solo regalo.
+    p.db.prepare("update pruebas_alta set usada_en = '' where cliente_id = ?").run(a.cuerpo.id);
+    const reintento = await p.pedir('/api/portal/llegada', { prueba: a.cuerpo.prueba_llegada });
+    assert.equal(reintento.cuerpo.premio.lote_id, primera.cuerpo.premio.lote_id);
+    assert.equal(p.db.prepare("select count(*) as n from dolarones_movimientos where cliente_id = ? and tipo = 'regalo'").get(a.cuerpo.id)!.n, 1);
+    // Gastar Dolarones sigue pidiendo el código del portal: la prueba no autoriza ventas ni lecturas de socio.
+    assert.equal((await p.pedir('/api/socios/codigo', { codigo: b.cuerpo.prueba_llegada })).status, 400);
+    // El código del portal sigue funcionando para cualquier socio, también para uno dado de alta en la caja.
+    assert.equal((await p.pedir('/api/portal/llegada', { codigo: await codigoPrueba(p.db, b.cuerpo.id) })).status, 200);
+    assert.equal(tienda(b.cuerpo.id), 1);
+  } finally { p.cerrar(); }
+});
+
+test('reintentar el alta con el mismo id devuelve una prueba nueva solo a quien lo registró y mientras siga vigente (#844)', async () => {
+  const p = portalDePrueba();
+  try {
+    const OTRA = 'otra-caja@prueba.mx';
+    p.db.prepare(`insert into usuarios (correo, nombre, roles, activo, creado_en, actualizado_en) values (?, 'Otra', 'dueno', 1, '', '')`).run(OTRA);
+    const id = crypto.randomUUID();
+    const cuerpo = { id, nombre: 'Cliente', telefono: '5551110051', acepta_bases: true, declara_mayor_edad: true };
+    const primera = await p.pedir('/api/socios', cuerpo);
+    const segunda = await p.pedir('/api/socios', cuerpo);
+    assert.equal(segunda.status, 200);
+    assert.notEqual(segunda.cuerpo.prueba_llegada, primera.cuerpo.prueba_llegada);
+    // La primera quedó invalidada por la reemisión; la nueva sirve.
+    assert.equal((await p.pedir('/api/portal/llegada', { prueba: primera.cuerpo.prueba_llegada })).status, 403);
+    // Otra sesión que conozca el id no recibe prueba.
+    p.env.DEV_USUARIO = OTRA;
+    assert.equal((await p.pedir('/api/socios', cuerpo)).cuerpo.prueba_llegada, null);
+    p.env.DEV_USUARIO = DUENO;
+    // Vencido el alta (30 min) tampoco se reemite.
+    p.db.prepare("update clientes set creado_en = '2020-01-01T00:00:00.000Z' where id = ?").run(id);
+    assert.equal((await p.pedir('/api/socios', cuerpo)).cuerpo.prueba_llegada, null);
+    assert.equal((await p.pedir('/api/portal/llegada', { prueba: segunda.cuerpo.prueba_llegada })).status, 200);
   } finally { p.cerrar(); }
 });
 

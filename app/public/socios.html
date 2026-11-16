@@ -79,6 +79,7 @@
     <p id="listo-saldo"></p>
     <a id="listo-wa" class="boton" href="#" target="_blank" rel="noopener">Mandar por WhatsApp</a>
     <button id="acreditar-alta" type="button">Acreditar llegada física</button>
+    <div id="listo-llegada" role="status"></div>
     <button id="otro" type="button">Registrar a otro cliente</button>
     <button id="seguir" type="button" hidden>Seguir con la venta</button>
   </section>
@@ -120,6 +121,9 @@ const $ = (id) => document.getElementById(id);
 const d = (centavos) => `${(centavos / 100).toLocaleString('es-MX')} Dolarones`;
 // Un id por alta: si la red falla despues de guardar, reintentar no crea otro socio.
 let idAlta = crypto.randomUUID();
+// #844: la prueba de un solo uso que devuelve el alta (30 min, solo este socio, solo esta sesión de caja) acredita su llegada sin código.
+// Vive solo en memoria de la página: nunca en URL, almacenamiento ni mensajes a la caja.
+let pruebaAlta = '', numeroAlta = '';
 
 // Dentro de la caja (#820): se oculta el encabezado y se avisa del alta por postMessage al mismo origen.
 // Solo viaja el numero de socio. Suelto (pestaña propia, celular) nada de esto aplica.
@@ -176,6 +180,10 @@ $('alta').addEventListener('submit', async (e) => {
       ? `Se pueden usar desde hoy, completos o en partes, hasta el ${new Date(socio.regalo_vence).toLocaleDateString('es-MX')}.`
       : '';
     $('listo-saldo').textContent = `Saldo: ${d(socio.disponible)}`;
+    pruebaAlta = socio.llegada_pendiente ? socio.prueba_llegada ?? '' : '';
+    numeroAlta = `#${socio.numero}, ${socio.nombre}`;
+    $('listo-llegada').textContent = socio.llegada_pendiente ? '' : 'Este cliente no tiene una llegada por acreditar.';
+    $('acreditar-alta').disabled = !socio.llegada_pendiente;
     $('listo-wa').href = enlaceCliente(socio.telefono, textoBienvenidaSocio(socio));
     $('alta').hidden = true;
     $('listo').hidden = false;
@@ -191,6 +199,8 @@ $('otro').addEventListener('click', () => {
   $('alta').reset();
   idAlta = crypto.randomUUID();
   $('listo').hidden = true;
+  pruebaAlta = '';
+  $('listo-llegada').textContent = '';
   $('listo-wa').href = '#';
   $('alta').hidden = false;
   $('nombre').focus();
@@ -217,13 +227,32 @@ async function acreditar(texto, aviso) {
   if (!busqueda.ok) throw new Error(socio.error || 'No se pudo leer el código.');
   if (!socio.llegada_pendiente) { aviso.textContent = `#${socio.numero}, ${socio.nombre}: no tiene una llegada por acreditar.`; return false; }
   if (!await confirmar(`¿Confirmas la llegada física de #${socio.numero}, ${socio.nombre}? Si la promoción de apertura está activa, el premio que se otorgue no se puede cambiar desde esta pantalla.`)) return false;
-  const r = await fetch('/api/portal/llegada', { method:'POST', headers:{ 'content-type':'application/json' }, body:JSON.stringify({ codigo }) });
+  await enviarLlegada({ codigo }, aviso);
+  return true;
+}
+async function enviarLlegada(cuerpoPeticion, aviso) {
+  const r = await fetch('/api/portal/llegada', { method:'POST', headers:{ 'content-type':'application/json' }, body:JSON.stringify(cuerpoPeticion) });
   const cuerpo = await r.json();
   if (!r.ok) throw new Error(cuerpo.error || 'No se pudo acreditar. Intenta otra vez.');
   aviso.textContent = cuerpo.premio ? `Llegada acreditada. Premio: ${d(cuerpo.premio.importe)}, vigente hasta ${new Date(cuerpo.premio.vence_en).toLocaleDateString('es-MX')}.` : 'Llegada acreditada; sin premio nuevo disponible.';
   if (cuerpo.premio) aviso.textContent += ' Para gastar los Dolarones nuevos, el cliente genera un código nuevo en su cuenta.';
   if (incrustado) avisarCaja({ tipo: 'alta-llegada' });
-  return true;
+}
+// #844: recién dado de alta en esta caja, la llegada se acredita sin código. La confirmación en la página sigue (el Enter del lector no la acepta).
+async function acreditarAlta() {
+  if ($('acreditar-alta').disabled) return;
+  const aviso = $('listo-llegada');
+  if (!pruebaAlta) { pedirCodigo(); return; }
+  $('acreditar-alta').disabled = true;
+  aviso.textContent = '';
+  try {
+    if (!await confirmar(`¿Confirmas la llegada física de ${numeroAlta}? Si la promoción de apertura está activa, el premio que se otorgue no se puede cambiar desde esta pantalla.`)) { $('acreditar-alta').disabled = false; return; }
+    await enviarLlegada({ prueba: pruebaAlta }, aviso);
+    pruebaAlta = '';   // gastada: el botón queda apagado; si falla algo, se puede volver a intentar o usar el código del portal
+  } catch (e) {
+    aviso.textContent = e.message || 'Sin red. Intenta de nuevo.';
+    $('acreditar-alta').disabled = false;
+  }
 }
 async function acreditarDelCampo() {
   if ($('acreditar-llegada').disabled) return;   // un segundo escaneo con la primera petición en vuelo no hace nada
@@ -239,7 +268,7 @@ function pedirCodigo() {
   $('aviso-llegada').textContent = SIN_CODIGO;
   $('llegada-codigo').focus();
 }
-$('acreditar-alta').addEventListener('click', pedirCodigo);
+$('acreditar-alta').addEventListener('click', acreditarAlta);
 $('acreditar-llegada').addEventListener('click', acreditarDelCampo);
 $('llegada-codigo').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); acreditarDelCampo(); } });
 // La caja manda el código que ya escaneó en «Buscar socio» para acreditarlo aquí mismo (mismo origen, solo desde la caja).

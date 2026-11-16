@@ -1,4 +1,4 @@
-import { saldo, progresoDePromo, codigoAleatorio, hashCodigo, basesListas, promocionAbierta, clientePorCodigo } from './dolarones.ts';
+import { saldo, progresoDePromo, codigoAleatorio, hashCodigo, basesListas, promocionAbierta, clientePorCodigo, socioDePrueba, consumirPrueba } from './dolarones.ts';
 import { reclamarVale } from './vales.ts';
 import { programaActivo, revisarCodigo, resumenReferidos, sentenciasDeAlta, D_ALTA } from './referidos.ts';
 import { apartarPortal, apartadosDeSocio, cancelarDeSocio, telefonoDe } from './pedidos.ts';
@@ -167,11 +167,23 @@ export async function llegada(request: Request, env: Env, autor: string): Promis
   if (!promocionAbierta(env)) return json({ error: 'Promoción no disponible.' }, 503);
   // #839: la llegada se acredita con el código DC- que el cliente genera en su cuenta (el mismo que identifica y paga);
   // un número tecleado ya no basta. La lectura no consume el código, pero su `maximo` quedó fijo al generarlo: lo recién acreditado se gasta con un código nuevo.
-  const body = await request.json().then((c) => c ?? {}, () => ({})) as { codigo?: unknown };
+  // #844: justo después de un alta en la caja, la prueba DA- que devolvió el alta lo reemplaza, solo para ese socio y solo desde esa sesión.
+  const body = await request.json().then((c) => c ?? {}, () => ({})) as { codigo?: unknown; prueba?: unknown };
+  if (body.prueba !== undefined && body.prueba !== '') {
+    const socio = await socioDePrueba(env, body.prueba, autor);
+    if (socio === undefined) return json({ error: 'Prueba de alta inválida. Pide al cliente su código en su celular.' }, 400);
+    if (!socio) return json({ error: 'La prueba del alta venció, ya se usó o no es de esta sesión. Pide al cliente su código en su celular.' }, 403);
+    const respuesta = await acreditarLlegada(env, socio, autor);
+    if (respuesta.status === 200) await consumirPrueba(env, body.prueba, autor);
+    return respuesta;
+  }
   const dueno = await clientePorCodigo(env, body.codigo);
   if (dueno === undefined) return json({ error: 'Pide al cliente su código en su celular.' }, 400);
   if (!dueno) return json({ error: 'Código vencido o usado. Pide al cliente que genere otro.' }, 403);
-  const id = dueno.id;
+  return acreditarLlegada(env, dueno.id, autor);
+}
+
+async function acreditarLlegada(env: Env, id: string, autor: string): Promise<Response> {
   // #611: promoción de apertura apagada; no otorga ni registra primera llegada.
   if (env.PREMIOS_APERTURA !== 'si') return json({ premio: await premioActual(env, id) ?? null });
   if (await hayRegalosLegados(env)) return json({ error: 'Resolver premios anteriores antes de abrir la promoción.' }, 409);
