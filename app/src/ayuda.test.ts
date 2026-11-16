@@ -47,7 +47,7 @@ test('hay un escenario para cada cosa que la guía prometió, repartidos en los 
   for (const c of CATEGORIAS) assert.ok(escenarios.some((e) => e.categoria === c.id), `el tema «${c.titulo}» está vacío`);
   // Lo mínimo del Issue #818: cada uno con su ancla estable.
   for (const id of ['entrar-con-pin', 'elegir-caja', 'marcar-entrada', 'impresora-no-conectada', 'reloj-mal', 'cobrar-efectivo', 'cobrar-tarjeta', 'transferencia-menos-300',
-    'transferencia-desde-300', 'etiqueta-no-escanea', 'codigo-no-encontrado', 'pieza-sin-etiqueta', 'varias-iguales', 'bandas-de-precio', 'ya-se-vendio', 'pieza-caducada', 'es-un-bulto',
+    'transferencia-desde-300', 'etiqueta-no-escanea', 'codigo-no-encontrado', 'pieza-sin-etiqueta', 'varias-iguales', 'bandas-de-precio', 'ya-se-vendio', 'etiqueta-de-mas', 'pieza-caducada', 'es-un-bulto',
     'pago-mixto', 'buscar-socio', 'cliente-es-socio', 'alta-de-socio', 'pagar-con-dolarones', 'codigo-socio-usado', 'pagar-con-vale', 'socio-y-vale', 'reimprimir-vale', 'ya-uso-la-promo',
     'pedir-descuento', 'dueno-no-contesta', 'ticket-cambio-descuento', 'precio-no-coincide', 'cupon-de-dolarones', 'devolver-una-pieza', 'devolver-sin-ticket', 'cancelar-venta-reciente',
     'cancelar-despues-de-5-minutos', 'como-se-regresa-el-dinero', 'dolarones-ya-usados', 'ticket-con-vale-o-anticipo', 'apartar-una-pieza', 'recibir-abono', 'entregar-pedido',
@@ -204,6 +204,11 @@ test('/caja: un botón «¿Cómo se hace?», un cuadro modal con F1 y el foco re
   assert.match(caja, /guia\.showModal\(\)/);                          // modal: lo que se escanea no llega a la venta
   assert.match(caja, /e\.key !== 'F1'/);
   assert.match(caja, /guia\.addEventListener\('close', \(\) => document\.getElementById\('codigo'\)\.focus\(\)\)/);
+  // Los apartados se alcanzan desde el encabezado de la caja (la computadora de caja no ve el menú de inicio) y la guía lo dice.
+  assert.match(caja, /<a href="\/pedidos">Apartados<\/a>/);
+  for (const e of escenarios) assert.ok(!JSON.stringify(e).includes('/pedidos)') && !JSON.stringify(e).includes('dirección es'), `${e.id} manda a escribir la dirección /pedidos`);
+  for (const rol of ['cajero', 'computadora', 'dueno'] as Rol[]) assert.equal(puede(cuenta(rol), permiso('/pedidos', 'GET')), true, `/pedidos ${rol}`);
+  assert.equal(esDeCaja(permiso('/pedidos', 'GET')), true);
   // La caja no importa la guía de forma estática: sin ella, la caja abre igual.
   assert.ok(!/from '\/ayuda/.test(caja));
 });
