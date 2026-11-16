@@ -149,5 +149,6 @@
 
   for (const evento of ['keydown', 'pointerdown']) addEventListener(evento, tocar, true);
   tocar();
-  setInterval(() => { if (requiere && leer() && Date.now() - ultima() > INACTIVIDAD) salir(); }, 60_000);
+  // Dentro de un marco (alta de socio en la caja, #820) el reloj lo lleva la pantalla de arriba: dos relojes mostrarian dos PIN.
+  if (window === window.top) setInterval(() => { if (requiere && leer() && Date.now() - ultima() > INACTIVIDAD) salir(); }, 60_000);
 })();
