@@ -57,12 +57,26 @@
   label { display: block; font-size: 12px; color: #5b6478; margin: 10px 0 4px; }
   select, #efectivo { width: 100%; padding: 12px; font-size: 18px; border: 1px solid var(--linea);
     border-radius: 10px; }
+  /* Una sola fila (Exacto + hasta 3 billetes): el cobro no debe bajar de la pantalla de 768 px (#830). */
+  #rapidos { display: flex; flex-wrap: nowrap; gap: 6px; margin-top: 6px; }
+  #rapidos[hidden] { display: none; }
+  #rapidos button { flex: 1; min-width: 0; padding: 8px 2px; font-size: 15px; font-weight: 700; border: 1px solid var(--azul);
+    background: #fff; color: var(--azul); border-radius: 10px; cursor: pointer; }
+  #rapidos button:disabled { opacity: .5; cursor: not-allowed; }
   #cambio { font-size: 22px; font-weight: 700; margin-top: 10px; min-height: 30px; }
   #cambio.falta { color: var(--rojo); }
   #cambio.ok { color: var(--verde); }
-  #cobrar { width: 100%; margin-top: 12px; padding: 18px; font-size: 20px; font-weight: 800;
-    border: 0; border-radius: 12px; background: var(--verde); color: #fff; cursor: pointer; }
-  #cobrar:disabled { background: #c8cfda; cursor: not-allowed; }
+  /* Tres botones de cobro, sin ninguno por omisión (#830): el clic es a la vez la forma de pago y el cobro. */
+  #botones-cobro { margin-top: 8px; }
+  #botones-cobro [hidden] { display: none; }
+  #cobrar-en { font-size: 12px; color: #5b6478; margin-bottom: 4px; }
+  #fila-cobro { display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; gap: 6px; }   /* sin «Efectivo» (celular) quedan dos */
+  #botones-cobro button { width: 100%; min-height: 56px; padding: 6px 2px; font-size: 16px; font-weight: 800; border: 0; border-radius: 12px; color: #fff; cursor: pointer; }
+  #botones-cobro #cobrar-sin-dinero { font-size: 18px; }
+  #cobrar-efectivo, #cobrar-sin-dinero { background: var(--verde); }
+  #cobrar-tarjeta { background: var(--azul); }
+  #cobrar-transferencia { background: #7b3fa0; }
+  #botones-cobro button:disabled { background: #c8cfda; cursor: not-allowed; }
   #dev-lista { max-height: 50vh; overflow-y: auto; margin-top: 8px; }
   #abrir-cajon, #abrir-devolucion { width: 100%; margin-top: 8px; padding: 10px; font-size: 14px; border: 1px solid var(--azul);
     background: #fff; color: var(--azul); border-radius: 10px; cursor: pointer; }
@@ -268,13 +282,6 @@ if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw-caja.js'
     <label for="vendedora">¿Quién atendió?</label>
     <select id="vendedora"><option value="">— sin elegir —</option></select>
 
-    <label for="forma">Forma de pago</label>
-    <select id="forma">
-      <option value="efectivo">Efectivo</option>
-      <option value="tarjeta">Tarjeta (terminal)</option>
-      <option value="transferencia">Transferencia</option>
-    </select>
-
     <!-- Transferencia desde $300 (#593): la clave de rastreo y el monto salen del comprobante del cliente. -->
     <div id="datos-transferencia" hidden>
       <label for="clave-rastreo">Clave de rastreo</label>
@@ -292,9 +299,22 @@ if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw-caja.js'
 
     <label for="efectivo">Efectivo recibido</label>
     <input id="efectivo" type="number" min="0" step="5" inputmode="numeric" placeholder="0">
+    <div id="rapidos"></div>
 
     <div id="cambio"></div>
-    <button id="cobrar" type="button" disabled>Cobrar</button>
+    <!-- Sin forma por omision (17/10, #260, #830): ningun boton es el destino del Enter del lector; cada uno manda su forma y cobra. -->
+    <div id="botones-cobro">
+      <div id="botones-dinero">
+        <div id="cobrar-en">Cobrar en</div>
+        <div id="fila-cobro">
+          <button id="cobrar-efectivo" type="button" data-forma="efectivo" aria-label="Cobrar en efectivo" disabled>Efectivo</button>
+          <button id="cobrar-tarjeta" type="button" data-forma="tarjeta" aria-label="Cobrar con tarjeta" disabled>Tarjeta</button>
+          <button id="cobrar-transferencia" type="button" data-forma="transferencia" aria-label="Cobrar por transferencia" disabled>Transferencia</button>
+        </div>
+      </div>
+      <!-- Dolarones, vale o pedido cubren todo: no hay forma de pago que elegir, un solo botón cierra la venta. -->
+      <button id="cobrar-sin-dinero" type="button" data-forma="sin-dinero" hidden disabled>Cobrar: ya está pagado</button>
+    </div>
     <button id="cancelar" type="button">Cancelar venta</button>
     <button id="abrir-devolucion" type="button">Devolución</button>
     <button id="abrir-cajon" type="button">Abrir cajón</button>
@@ -452,18 +472,6 @@ if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw-caja.js'
   </div>
 </dialog>
 
-<dialog id="dlg-forma" aria-labelledby="dlg-forma-titulo">
-  <h2 id="dlg-forma-titulo">¿Efectivo o tarjeta?</h2>
-  <p id="dlg-forma-texto"></p>
-  <form method="dialog" class="dlg-botones">
-    <!-- Sin respuesta por omision: el Enter del lector o del teclado solo regresa (17/10, un pago con tarjeta quedo en efectivo). -->
-    <button value="efectivo">Efectivo</button>
-    <button value="tarjeta">Tarjeta</button>
-    <button value="transferencia">Transferencia</button>
-    <button value="" autofocus>Regresar</button>
-  </form>
-</dialog>
-
 <dialog id="dlg-socio" aria-labelledby="dlg-socio-titulo">
   <h2 id="dlg-socio-titulo">¿El cliente es socio?</h2>
   <p id="dlg-socio-texto"></p>
@@ -503,7 +511,7 @@ if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw-caja.js'
 </dialog>
 <script type="module">
 import { CATEGORIAS_GASTO } from '/categorias.js';
-import { totales, agregar, leerMultiplicador, efectivoAlcanza, dolaronesGanados, saldoCanjeable, maximoCanje, MINIMO_REGALO, descuentoDe, TOPE_DESCUENTO, DENOMINACIONES, contadoDe, promoInauguracion, letreroPromo, desfaseReloj, anticipoDePedido, transferenciaDe, CLAVE_DESDE, BANCOS, debePreguntarSocio, guiaVale, precioBuenFin, letreroBuenFin,
+import { totales, agregar, leerMultiplicador, efectivoAlcanza, montosRapidos, montoTransferidoRazonable, dolaronesGanados, saldoCanjeable, maximoCanje, MINIMO_REGALO, descuentoDe, TOPE_DESCUENTO, DENOMINACIONES, contadoDe, promoInauguracion, letreroPromo, desfaseReloj, anticipoDePedido, transferenciaDe, CLAVE_DESDE, BANCOS, debePreguntarSocio, guiaVale, precioBuenFin, letreroBuenFin,
   esBusquedaPorTexto, avisoExistencia, moverSugerencia, cancelarPideConfirmar, nVentas, avisoCorteSinEnviar, gastoRequiereDueno, pesosExactos, centavosDeTexto, alertaConteo } from '/venta.js';
 import { abrirCamara } from '/camara.js';
 import {
@@ -600,8 +608,10 @@ let idVenta = null;
 let creadoEnVenta = null;
 let cobrando = false;
 let cancelarArmado = null;      // { temporizador, firma }: «Cancelar venta» ya pidió el segundo toque (#817)
-let folioIncierto = null;       // folio de un cobro con Dolarones cuya respuesta no se supo: su reintento va con el mismo folio y código (#817)
-let formaElegida = false;       // la cajera tocó la forma de pago en esta venta (#260)
+let folioIncierto = null;       // folio de un cobro con Dolarones, pedido o clave de rastreo cuya respuesta no se supo: su reintento va con el mismo folio y código (#817)
+// Con el folio en duda, el reintento lleva EXACTAMENTE lo mismo (el servidor liga el folio a forma, efectivo y clave) y solo se deja tocar el mismo
+// botón: { id, boton, efectivo, transf } o null (#830). Se guarda con el ticket para que recargar la caja no lo pierda.
+let cobroIncierto = null;
 // Pedido por WhatsApp cargado en el ticket (Issue #269): { id, folio, saldo } o null. Su saldo solo
 // existe en el servidor, así que con pedido el cobro espera al servidor y nunca se encola.
 let pedidoCargado = null;
@@ -793,8 +803,8 @@ function pintarImpresionRemota() {
   $('destino-impresion').hidden = !remota;
   $('modo-remoto').disabled = cobrando;
   $('imprimir-en').disabled = cobrando;
-  $('forma').querySelector('[value="efectivo"]').disabled = remota;
-  if (remota && $('forma').value === 'efectivo') $('forma').value = 'tarjeta';
+  $('cobrar-efectivo').hidden = remota;
+  $('rapidos').hidden = remota;
   $('efectivo').disabled = cobrando || remota;
   for (const id of ['abrir-cajon', 'abrir-retiro', 'abrir-corte']) $(id).disabled = remota;
 }
@@ -951,12 +961,22 @@ function pintar() {
   // Con la respuesta de este folio en duda (#817), el código se sigue dando por bueno: el servidor contesta `duplicada` sin validarlo.
   const autorizado = !usados || (codigoSocio && usados <= socio.maximo && ((folioIncierto && folioIncierto === idVenta) || Date.parse(socio.expira_en) > Date.now()));
   $('usar-maximo').disabled = cobrando || !codigoSocio || maximoCanje(socio, t.total) === 0;
-  for (const id of ['codigo', 'socio', 'buscar-socio', 'quitar-socio', 'dolarones', 'efectivo', 'forma', 'cancelar', 'pedir-descuento', 'quitar-descuento', 'quitar-pedido', 'clave-rastreo', 'monto-transferido', 'banco-emisor', 'comprobante']) $(id).disabled = cobrando;
+  for (const id of ['codigo', 'socio', 'buscar-socio', 'quitar-socio', 'dolarones', 'efectivo', 'cancelar', 'pedir-descuento', 'quitar-descuento', 'quitar-pedido', 'clave-rastreo', 'monto-transferido', 'banco-emisor', 'comprobante']) $(id).disabled = cobrando;
   // Transferencia desde $300 (#593): aparecen la clave de rastreo y el monto del comprobante.
-  $('datos-transferencia').hidden = !($('forma').value === 'transferencia' && t.aPagar >= CLAVE_DESDE);
+  // Los datos aparecen con el primer clic en «Transferencia» (cobrar()); aquí se esconden si ya no hacen falta, y con el ticket vacío no queda nada de la anterior.
+  if (t.aPagar < CLAVE_DESDE) $('datos-transferencia').hidden = true;
+  if (!lineas.length) limpiarDatosTransferencia();
   pintarImpresionRemota();
-  $('cobrar').textContent = `Cobrar · ${$('forma').selectedOptions[0].textContent}`;
-  $('cobrar').disabled = cobrando || t.total === 0 || usados > t.total || usados > canjeable || !autorizado;
+  // Con Dolarones, vale o pedido cubriendo todo no hay forma de pago que elegir: un solo botón cierra la venta (#830).
+  const sinDinero = t.total > 0 && t.aPagar === 0;
+  $('botones-dinero').hidden = sinDinero;
+  $('cobrar-sin-dinero').hidden = !sinDinero;
+  const sinCobro = cobrando || t.total === 0 || usados > t.total || usados > canjeable || !autorizado;
+  // Con el folio en duda solo se deja tocar el mismo botón (#830): otro mandaría otra forma o efectivo con el mismo folio.
+  const incierto = idVenta && cobroIncierto?.id === idVenta ? cobroIncierto : null;
+  for (const id of ['cobrar-efectivo', 'cobrar-tarjeta', 'cobrar-transferencia', 'cobrar-sin-dinero']) $(id).disabled = sinCobro || (!!incierto && $(id).dataset.forma !== incierto.boton);
+  $('rapidos').innerHTML = montosRapidos(t.aPagar).map((m) =>
+    `<button type="button" data-centavos="${m.centavos}"${cobrando ? ' disabled' : ''}>${m.exacto ? 'Exacto' : pesos(m.centavos)}</button>`).join('');
   $('codigo-autorizacion').textContent = socio?.vale
     ? `${valesCargados.length > 1 ? `${valesCargados.length} vales impresos` : 'Vale impreso'}: ${dolares(socio.disponible)}.`
       + ` ${valesCargados.length > 1 ? 'El más próximo vence' : 'Vence'} ${new Date(socio.expira_en).toLocaleString('es-MX')}.`
@@ -972,7 +992,7 @@ function pintar() {
     : '';
 
   const cambio = $('cambio');
-  if (!efectivo || $('forma').value !== 'efectivo') {
+  if (!efectivo) {
     cambio.textContent = '';
   } else if (t.falta > 0) {
     cambio.textContent = `Faltan ${pesos(t.falta)}`;
@@ -1159,12 +1179,14 @@ try {
     idVenta = g.idVenta ?? null;
     creadoEnVenta = g.creadoEnVenta ?? null;
     pedidoCargado = g.pedidoCargado ?? null;
+    cobroIncierto = g.cobroIncierto?.id && g.cobroIncierto.id === idVenta ? g.cobroIncierto : null;
+    if (cobroIncierto) folioIncierto = idVenta;
     ticketRecuperado = true;
   }
 } catch { /* sin memoria: empieza vacío */ }
 function guardarTicket() {
   try {
-    localStorage.setItem(CLAVE_TICKET, JSON.stringify({ guardado: Date.now(), lineas, descuento, idVenta, creadoEnVenta, pedidoCargado }));
+    localStorage.setItem(CLAVE_TICKET, JSON.stringify({ guardado: Date.now(), lineas, descuento, idVenta, creadoEnVenta, pedidoCargado, cobroIncierto: cobroIncierto?.id === idVenta ? cobroIncierto : null }));
   } catch { /* sin memoria: no se recupera al recargar */ }
 }
 const descuentoAplicado = () => (descuento?.estado === 'aprobada' ? descuento.monto : 0);
@@ -1454,7 +1476,7 @@ $('usar-maximo').addEventListener('click', () => {
  * mostrar "cobrado" antes de confirmarlo dejaría gastar dos veces. El código
  * de autorización sólo vive en memoria; nunca se encola en el disco.
  */
-async function cobrarConDolarones(venta, t) {
+async function cobrarConDolarones(venta, t, boton = 'el mismo botón de cobro') {
   // Si la respuesta de este folio se perdió, reintentar va al servidor con el mismo folio y el mismo código aunque aquí parezca vencido
   // (#817): pedir un código nuevo cambiaría el folio y una venta ya registrada se registraría dos veces.
   const incierto = folioIncierto === venta.id;
@@ -1476,7 +1498,7 @@ async function cobrarConDolarones(venta, t) {
     // `duplicada` antes de validar el código del socio o del vale (#817).
     folioIncierto = venta.id;
     $('aviso').textContent = error?.name === 'TimeoutError' || error?.name === 'AbortError'
-      ? 'No se supo si se cobró. Toca Cobrar otra vez: con el mismo folio no se cobra dos veces. Si no avanza, abre Ventas de hoy antes de cobrar de nuevo.'
+      ? `No se supo si se cobró. Toca otra vez ${boton}: con el mismo folio no se cobra dos veces. Si no avanza, abre Ventas de hoy antes de cobrar de nuevo.`
       : 'Sin red: no se pudo cobrar con Dolarones. Intenta otra vez o cobra sin Dolarones.';
     $('aviso').style.color = '#D72B32';
     return false;
@@ -1586,7 +1608,7 @@ $('quitar-pedido').addEventListener('click', quitarPedido);
  * encolar la venta dejaría gastarlo dos veces. Un fallo de red deja el ticket abierto con el
  * mismo folio: reintentar no cobra doble.
  */
-async function cobrarConPedido(venta) {
+async function cobrarConPedido(venta, boton = 'el mismo botón de cobro') {
   let respuesta;
   try {
     respuesta = await fetch('/api/ventas', {
@@ -1594,9 +1616,11 @@ async function cobrarConPedido(venta) {
       signal: AbortSignal.timeout(15000),
     });
   } catch {
-    return avisoRojo('Sin red: una venta con pedido o con clave de rastreo no se cobra sin conexión. Intenta otra vez'
-      + (pedidoCargado ? ', o quita el pedido y cobra normal.' : '.'));
+    // Sin respuesta no se sabe si se cobró: el reintento va con el mismo folio, la misma forma y el mismo efectivo (#830).
+    folioIncierto = venta.id;
+    return avisoRojo(`Sin red: una venta con pedido o con clave de rastreo no se cobra sin conexión. Toca otra vez ${boton}: con el mismo folio no se cobra dos veces. Si no avanza, abre Ventas de hoy antes de cobrar de nuevo.`);
   }
+  folioIncierto = respuesta.status >= 500 ? venta.id : null;
   const cuerpo = await respuesta.json().catch(() => ({}));
   if (!respuesta.ok) {
     if (cuerpo.promo_agotada) promoAgotada();
@@ -1606,17 +1630,6 @@ async function cobrarConPedido(venta) {
 }
 
 /* ---------- cobro: primero al disco, luego a la red ---------- */
-
-// Ventana propia, no confirm() nativo (congela la pestaña). Devuelve la forma elegida o '' si regresa.
-function preguntarForma(aPagar, efectivo) {
-  const d = $('dlg-forma');
-  $('dlg-forma-texto').textContent = efectivo
-    ? `Cobrar ${pesos(aPagar)}. Si es efectivo: recibido ${pesos(efectivo)}, cambio ${pesos(Math.max(0, efectivo - aPagar))}.`
-    : `Cobrar ${pesos(aPagar)}. No escribiste el efectivo recibido: si es efectivo, se registra exacto, sin cambio.`;
-  d.returnValue = '';
-  d.showModal();
-  return new Promise((listo) => d.addEventListener('close', () => listo(d.returnValue), { once: true }));
-}
 
 // Sin socio real la venta no gana Dolarones y no se puede ligar despues (#730). Devuelve la opcion elegida o '' si cierra.
 function preguntarSocio() {
@@ -1646,17 +1659,38 @@ $('comprobante').addEventListener('change', async () => {
 // Banxico pide el banco emisor para verificar la transferencia despues (#603); «Otro banco» no se verifica sola.
 $('banco-emisor').append(...[...BANCOS, ['otro', 'Otro banco (no se verifica sola)']].map(([codigo, nombre]) => new Option(nombre, codigo)));
 
-async function cobrar() {
+/**
+ * Cobra con la forma que trae el botón tocado (#830): 'efectivo', 'tarjeta' o 'transferencia'; 'sin-dinero' solo cuando Dolarones, vale o pedido
+ * cubren todo el ticket. No hay forma por omisión ni estado entre toques: sin una de esas cuatro, no se cobra (17/10, #260).
+ */
+async function cobrar(forma) {
   if (cobrando) return;                 // doble clic: el primero ya va en camino
+  // El foco sale del botón desde el primer instante, pase lo que pase después: el Enter con el que el lector termina cada escaneo no lo pulsa otra vez.
+  $('codigo').focus();
+  const boton = forma;                  // lo que se tocó; `forma` pasa a ser lo que se registra
+  const sinDinero = forma === 'sin-dinero';
+  if (!sinDinero && !['efectivo', 'tarjeta', 'transferencia'].includes(forma)) return;
+  const nombres = { efectivo: 'el botón «Efectivo»', tarjeta: 'el botón «Tarjeta»', transferencia: 'el botón «Transferencia»', 'sin-dinero': 'el botón «Cobrar: ya está pagado»' };
+  // Folio en duda (#830): el servidor liga el folio a la forma, al efectivo y a la clave. El reintento sale con lo guardado, del mismo botón.
+  const previo = idVenta && cobroIncierto?.id === idVenta ? cobroIncierto : null;
+  if (previo && boton !== previo.boton) return avisoRojo(`El cobro anterior quedó en duda. Toca otra vez ${nombres[previo.boton]}: con el mismo folio no se cobra dos veces.`);
   if (!exigirCaja()) return;
-  let efectivo = Math.round(Number($('efectivo').value || 0) * 100);
-  let forma = $('forma').value;
+  let efectivo = previo ? previo.efectivo : Math.round(Number($('efectivo').value || 0) * 100);
+  if (previo) {
+    if (efectivo) $('efectivo').value = String(efectivo / 100);
+    if (previo.transf) { $('clave-rastreo').value = previo.transf.clave; $('monto-transferido').value = previo.transf.monto; $('banco-emisor').value = previo.transf.banco; }
+  }
+  // La forma elegida manda: tarjeta o transferencia borran lo que hubiera en «Efectivo recibido».
+  if (forma !== 'efectivo' && efectivo) { efectivo = 0; $('efectivo').value = ''; pintar(); }
+  if (forma !== 'transferencia') $('datos-transferencia').hidden = true;
   const imprimirEn = impresionRemota() ? $('imprimir-en').value : undefined;
   if (imprimirEn && forma === 'efectivo') {
     $('aviso').textContent = 'En el celular sólo tarjeta o transferencia';
     $('codigo').focus();   // en los retornos de aquí en adelante el foco sale de «Cobrar»: el Enter del lector no lo vuelve a pulsar (#817)
     return;
   }
+  // Un ticket ya pagado con Dolarones, vale o pedido se registra como siempre: efectivo sin dinero de por medio (en el celular, tarjeta).
+  if (sinDinero) forma = imprimirEn ? 'tarjeta' : 'efectivo';
   const usados = dolaronesPedidos();
   if (descuento?.estado === 'pendiente') {
     $('aviso').textContent = 'El descuento sigue esperando al dueño. Espera su respuesta o aprieta «Quitar descuento».';
@@ -1672,25 +1706,24 @@ async function cobrar() {
     return;
   }
   const anticipo = pedidoCargado ? anticipoDePedido(pedidoCargado.saldo, totalNeto(), usados) : 0;
-  let t = totales(lineas, efectivo, usados, descuentoAplicado() + promoActual(), anticipo);
+  const t = totales(lineas, efectivo, usados, descuentoAplicado() + promoActual(), anticipo);
   if (usados > saldoCanjeable(socio, t.total)) {
     $('aviso').textContent = 'Los regalos de apertura requieren un ticket de $1,000 MXN o más antes de descontar Dolarones. Revisa el importe solicitado.';
     $('aviso').style.color = '#D72B32';
     $('codigo').focus();
     return;
   }
-  // Si la cajera no eligió la forma en esta venta, se pregunta siempre (#260; 17/10, un pago con tarjeta quedó en
-  // efectivo y descuadró el corte). Efectivo sin monto es el importe exacto.
-  if (forma === 'efectivo' && t.aPagar > 0 && !formaElegida) {
-    const elegida = await preguntarForma(t.aPagar, efectivo);
-    if (!elegida) { $('efectivo').focus(); return; }
-    forma = $('forma').value = elegida;
-    if (forma !== 'efectivo') efectivo = 0;
+  // El botón solo existe con todo cubierto; con dinero por cobrar hay que elegir una forma.
+  if (sinDinero && t.aPagar !== 0) return avisoRojo('Todavía queda dinero por cobrar: toca «Efectivo», «Tarjeta» o «Transferencia».');
+  // Efectivo exige el monto recibido (17/10, #260, #830): vacío ya no es «exacto». El foco se queda en #codigo: lo que escanee el lector
+  // después no puede escribirse en #efectivo y volverse «lo que dio el cliente».
+  if (forma === 'efectivo' && t.aPagar > 0 && efectivo === 0) {
+    $('aviso').textContent = 'Escribe cuánto te dio el cliente: toca «Exacto», un billete o escríbelo en «Efectivo recibido».';
+    $('aviso').style.color = '#D72B32';
+    return;
   }
-  if (forma === 'efectivo' && efectivo === 0 && t.aPagar > 0) efectivo = t.aPagar;
-  t = totales(lineas, efectivo, usados, descuentoAplicado() + promoActual(), anticipo);
   if (!efectivoAlcanza({ formaPago: forma, total: t.aPagar, efectivo })) {
-    $('aviso').textContent = efectivo === 0 ? 'Falta el efectivo recibido.' : `Faltan ${pesos(t.falta)}`;
+    $('aviso').textContent = `Faltan ${pesos(t.falta)}`;
     $('aviso').style.color = '#D72B32';
     // Hoy no enfocaba nada y «Cobrar» seguía con el foco. #efectivo atraparía los dígitos del lector (los sumaría al importe), así que se
     // elige #codigo: el cajero toca el campo de efectivo para corregirlo.
@@ -1701,8 +1734,18 @@ async function cobrar() {
   // Con clave el cobro espera al servidor (como con pedido): la clave solo es unica si la ve la base de datos.
   let transf = null;
   if (forma === 'transferencia' && t.aPagar >= CLAVE_DESDE) {
+    // Con los datos escondidos el primer clic solo los muestra, aunque queden valores de antes: lo que se cobra se ve antes de cobrar.
+    // El foco se queda en #codigo: una pieza escaneada no puede volverse clave o monto.
+    if ($('datos-transferencia').hidden && !previo) {
+      $('datos-transferencia').hidden = false;
+      $('aviso').textContent = 'Llena la clave, el monto y el banco del comprobante y toca «Transferencia» otra vez.';
+      $('aviso').style.color = '#D72B32';
+      return;
+    }
+    $('datos-transferencia').hidden = false;
     transf = transferenciaDe({ clave: $('clave-rastreo').value, transferido: Math.round(Number($('monto-transferido').value || 0) * 100), debido: t.aPagar });
     if (!transf.ok) { pintar(); return errorClave(transf); }
+    if (!montoTransferidoRazonable(transf.transferido, t.aPagar)) { pintar(); return errorClave({ campo: 'monto', error: 'Revisa el monto del comprobante.' }); }
     if (!$('banco-emisor').value) { pintar(); return errorClave({ campo: 'banco', error: 'Elige el banco de donde salió la transferencia (viene en el comprobante).' }); }
   }
   $('clave-error').textContent = '';
@@ -1746,12 +1789,12 @@ async function cobrar() {
     let socioTicket = socio && !socio.vale && { numero: socio.numero, ganados: 0, saldo: socio.disponible };
     let excedente = 0;
     if (usados > 0) {
-      socioTicket = await cobrarConDolarones(venta, t);
+      socioTicket = await cobrarConDolarones(venta, t, nombres[boton]);
       if (!socioTicket) return;
       excedente = venta.excedente_transferencia ?? 0;
       if (socioTicket.vale) socioTicket = null;
     } else if (pedidoCargado || transf) {
-      const cuerpo = await cobrarConPedido(venta);
+      const cuerpo = await cobrarConPedido(venta, nombres[boton]);
       if (!cuerpo) return;
       excedente = cuerpo.excedente_transferencia ?? 0;
       if (Object.hasOwn(cuerpo, 'imprimir_en')) venta.imprimir_en = cuerpo.imprimir_en;
@@ -1806,7 +1849,7 @@ async function cobrar() {
     let nodoAviso = null;
     const fallo = (clave) => { const falla = textoFalla(clave); if (falla) (nodoAviso ? pintarFalla(falla, nodoAviso) : fallas.push(falla)); };
     if (!venta.imprimir_en) {
-      if (forma === 'efectivo') abrirCajon()?.then((abrio) => { if (!abrio) fallo('cajon'); });
+      if (forma === 'efectivo' && efectivo > 0) abrirCajon()?.then((abrio) => { if (!abrio) fallo('cajon'); });
       imprimirTicket({ ...venta, total: t.total, descuento: t.descuento, cambio: t.cambio, socio: socioTicket,
         ...(pedidoCargado ? { pedido_folio: pedidoCargado.folio } : {}) }, venta.lineas)
         .then((impreso) => { pintarImpresora(); if (!impreso) fallo('ticket'); });
@@ -1857,16 +1900,25 @@ async function cobrar() {
     pintarDescuento();
     quitarSocio();
     $('efectivo').value = '';
-    $('clave-rastreo').value = ''; $('monto-transferido').value = ''; $('banco-emisor').value = '';
-    $('comprobante').value = ''; if ($('comprobante').dataset) { $('comprobante').dataset.key = ''; $('comprobante-aviso').textContent = ''; }
-    $('forma').value = 'efectivo'; formaElegida = false;      // cada venta empieza en efectivo: la forma anterior descuadraba el corte (#260)
+    limpiarDatosTransferencia();
     sincronizar();
   } finally {
     cobrando = false;
+    // Si el folio quedó en duda se guarda qué botón y cuánto efectivo (y la clave) llevaba; una respuesta del servidor, o cobrar, lo suelta.
+    cobroIncierto = idVenta && folioIncierto === idVenta
+      ? (previo ?? { id: idVenta, boton, efectivo, transf: transf && { clave: $('clave-rastreo').value, monto: $('monto-transferido').value, banco: $('banco-emisor').value } })
+      : null;
     pintar();
     // Con el cobro hecho o fallido, el lector sigue: aquí #codigo ya no está deshabilitado (#817).
     $('codigo').focus();
   }
+}
+
+/** Clave, monto, banco y foto del comprobante: de una transferencia no sobrevive nada al ticket siguiente. */
+function limpiarDatosTransferencia() {
+  $('clave-rastreo').value = ''; $('monto-transferido').value = ''; $('banco-emisor').value = '';
+  $('comprobante').value = ''; if ($('comprobante').dataset) { $('comprobante').dataset.key = ''; $('comprobante-aviso').textContent = ''; }
+  $('clave-error').textContent = '';
 }
 
 let sincronizando = false;
@@ -2613,13 +2665,26 @@ $('ticket').addEventListener('click', (e) => {
   idVenta = null;
   pintar();
 });
-$('efectivo').addEventListener('input', () => {
-  // Si escribe lo que le dieron, la venta es en efectivo aunque olvidara cambiar la forma (#260).
-  if (Number($('efectivo').value) > 0) $('forma').value = 'efectivo';
+/* ---------- botones de cobro (#830) ---------- */
+// Escribir el efectivo no elige nada: el cobro sale solo de un clic en un botón de cobro. Enter en el campo no hace nada.
+$('efectivo').addEventListener('input', () => pintar());
+// Enter en el campo (lo manda el lector si algo lo dejó con el foco) no cobra ni agrega nada al monto: manda el foco al lector.
+$('efectivo').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); $('codigo').focus(); } });
+// Los rápidos tampoco son destino del Enter del lector.
+$('rapidos').addEventListener('keydown', (e) => { if (e.key === 'Enter') e.preventDefault(); });
+// «Exacto» y los billetes solo llenan el campo; el foco regresa a #codigo para que el lector siga.
+$('rapidos').addEventListener('click', (e) => {
+  const centavos = Number(e.target.dataset?.centavos);
+  if (!centavos) return;
+  $('efectivo').value = String(centavos / 100);
   pintar();
+  $('codigo').focus();
 });
-$('forma').addEventListener('change', () => { formaElegida = true; pintar(); });
-$('cobrar').addEventListener('click', cobrar);
+for (const boton of document.querySelectorAll('#botones-cobro button')) {
+  // El Enter del lector no pulsa un botón de cobro que tenga el foco: se cobra con el clic (o Espacio), nunca por un escaneo perdido.
+  boton.addEventListener('keydown', (e) => { if (e.key === 'Enter') e.preventDefault(); });
+  boton.addEventListener('click', () => cobrar(boton.dataset.forma));
+}
 // Para cambiar billetes sin cobrar nada. Abre sin esperar al servidor (tiene
 // que abrir aunque no haya red) y deja quien y cuando en /reportes: se encola
 // como una venta y sincronizar() la manda.
@@ -3038,7 +3103,7 @@ $('cancelar').addEventListener('click', () => {
     return;
   }
   desarmarCancelar();
-  lineas = []; idVenta = null; pedidoCargado = null; descuento = null; sinPromo = false; pintarDescuento(); quitarSocio(); $('efectivo').value = ''; $('clave-rastreo').value = ''; $('monto-transferido').value = ''; $('banco-emisor').value = ''; $('comprobante').value = ''; $('comprobante').dataset.key = ''; $('comprobante-aviso').textContent = ''; $('clave-error').textContent = ''; $('forma').value = 'efectivo'; formaElegida = false; $('aviso').textContent = 'Venta cancelada';
+  lineas = []; idVenta = null; pedidoCargado = null; descuento = null; sinPromo = false; pintarDescuento(); quitarSocio(); $('efectivo').value = ''; limpiarDatosTransferencia(); $('aviso').textContent = 'Venta cancelada';
   $('aviso').style.color = '#5b6478'; pintar(); $('codigo').focus();
 });
 

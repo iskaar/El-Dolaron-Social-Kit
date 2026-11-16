@@ -190,14 +190,14 @@ test('mismos permisos que cobrar y caja asignada prevalece para consultar y toma
 });
 
 const fuente = readFileSync('public/caja.html', 'utf8');
-const cobro = fuente.slice(fuente.indexOf('async function cobrar()'), fuente.indexOf('let sincronizando = false;'));
+const cobro = fuente.slice(fuente.indexOf('async function cobrar('), fuente.indexOf('let sincronizando = false;'));
 
-test('modo remoto sólo sin impresora: deshabilita efectivo y cajón, recuerda destino con storage restringido', () => {
+test('modo remoto sólo sin impresora: esconde «Cobrar en efectivo» y deshabilita efectivo y cajón, recuerda destino con storage restringido', () => {
   let conectada = false;
   const elementos = new Map<string, any>();
   const $ = (id: string) => {
-    if (!elementos.has(id)) elementos.set(id, { value:id === 'forma' ? 'efectivo' : '', checked:false,
-      options:[], add() {}, addEventListener() {}, querySelector:() => $('opcion-efectivo') });
+    if (!elementos.has(id)) elementos.set(id, { value:'', checked:false,
+      options:[], add() {}, addEventListener() {} });
     return elementos.get(id);
   };
   $('caja-nombre').options = ['', 'Caja 1', 'Caja 2', 'Caja 3'].map((value) => ({ value, cloneNode:() => ({ value }) }));
@@ -211,8 +211,8 @@ test('modo remoto sólo sin impresora: deshabilita efectivo y cajón, recuerda d
   $('modo-remoto').checked = true;
   modos.pintarImpresionRemota();
   assert.equal(modos.impresionRemota(), true);
-  assert.equal($('forma').value, 'tarjeta');
-  assert.equal($('opcion-efectivo').disabled, true);
+  assert.equal($('cobrar-efectivo').hidden, true);
+  assert.equal($('rapidos').hidden, true);
   assert.equal($('efectivo').disabled, true);
   assert.equal($('abrir-cajon').disabled, true);
   assert.equal($('destino-impresion').hidden, false);
@@ -220,18 +220,19 @@ test('modo remoto sólo sin impresora: deshabilita efectivo y cajón, recuerda d
   modos.pintarImpresionRemota();
   assert.equal(modos.impresionRemota(), false);
   assert.equal($('opcion-impresion-remota').hidden, true);
-  assert.equal($('opcion-efectivo').disabled, false);
+  assert.equal($('cobrar-efectivo').hidden, false);
+  assert.equal($('rapidos').hidden, false);
 });
 
 test('celular sin red guarda imprimir_en; no imprime localmente ni abre el cajón', async () => {
   const guardadas: any[] = [];
   const elementos = new Map<string, any>();
   const $ = (id: string) => {
-    if (!elementos.has(id)) elementos.set(id, { value:id === 'forma' ? 'tarjeta' : id === 'imprimir-en' ? 'Caja 2' : '',
+    if (!elementos.has(id)) elementos.set(id, { value:id === 'imprimir-en' ? 'Caja 2' : '',
       textContent:'', style:{}, focus() {} });
     return elementos.get(id);
   };
-  const cobrar = runInNewContext(`let idVenta = null, creadoEnVenta = null, cobrando = false;
+  const cobrar = runInNewContext(`let idVenta = null, creadoEnVenta = null, cobrando = false, folioIncierto = null, cobroIncierto = null;
     ${cobro}; cobrar`, {
     crypto, Date, $, AbortSignal, Object, debePreguntarSocio, navigator:{ onLine:false },   // sin red no se pregunta por el socio (#730)
     lineas:[{ producto_id:PRODUCTO, codigo:'ED-000001', nombre:'Ventilador', precio:25000, cantidad:1 }],
@@ -245,7 +246,7 @@ test('celular sin red guarda imprimir_en; no imprime localmente ni abre el cajó
     abrirCajon() { assert.fail('No se debe abrir el cajón'); },
     imprimirTicket() { assert.fail('No se debe imprimir en el celular'); },
   });
-  await cobrar();
+  await cobrar('tarjeta');
   assert.equal(guardadas.length, 1);
   assert.equal(guardadas[0].imprimir_en, 'Caja 2');
   assert.equal(guardadas[0].caja, 'Caja 1');
