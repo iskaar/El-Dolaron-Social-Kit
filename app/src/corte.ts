@@ -25,7 +25,8 @@
 
 import { lineasNetas } from './netas.ts';
 import { contadoDe } from '../public/venta.js';
-import { leerUsuario, cajasDe } from './cuentas.ts';
+import { leerUsuario, cajasDe, apruebaDinero } from './cuentas.ts';
+import { aprobadorConPin, aprobadoresDeDinero } from './cancelaciones.ts';
 import { CATEGORIAS_GASTO } from '../public/categorias.js';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -70,6 +71,15 @@ const texto = (valor: unknown, max: number) => String(valor ?? '').replace(/\s+/
  */
 export const LIMITE_GASTO_CAJERO = 10000;
 
+/** Clave de `config` con el tope de un retiro sin aprobacion, en centavos (#846). Solo la lee el servidor y la cambia el dueno en /reportes. */
+export const CLAVE_TOPE_RETIRO = 'tope_retiro';
+
+/** Un retiro de este importe necesita aprobacion: arriba del tope, o siempre si el tope no esta fijado (valor seguro por omision). */
+async function retiroNecesitaAprobacion(env: Env, importe: number): Promise<boolean> {
+  const fila = await env.DB.prepare('select valor from config where clave = ?').bind(CLAVE_TOPE_RETIRO).first<{ valor: string }>();
+  return !/^\d+$/.test(fila?.valor ?? '') || importe > Number(fila!.valor);
+}
+
 /**
  * Efectivo que sale del cajon a media jornada: un retiro (a la caja fuerte, al
  * banco) o un gasto. Se registra antes de abrir el cajon: nunca sale dinero sin
@@ -97,16 +107,43 @@ export async function registrarRetiro(request: Request, env: Env, correo: string
       return json({ error: `Los gastos de mas de $${LIMITE_GASTO_CAJERO / 100} los registra el dueno.` }, 403);
     }
   }
+  // La columna `aprobo_por` llega con la migracion 084. Si el codigo se despliega antes, todo sigue como antes de #846 salvo lo que exige aprobacion.
+  const tieneAprobo = await env.DB.prepare('select aprobo_por from retiros limit 0').first().then(() => true, () => false);
+  const leer = () => env.DB.prepare(`select id, tipo, caja, cajero, importe, motivo, creado_en, categoria${tieneAprobo ? ', aprobo_por' : ''} from retiros where id = ?`).bind(id).first<Record<string, unknown>>();
+  // Un reintento de un retiro ya registrado (red caida) devuelve el mismo: no vuelve a pedir el PIN ni a contar.
+  // Con otros datos con el mismo id no es un reintento: se rechaza para que lo registrado no se muestre como lo que se tecleo ahora.
+  const previo = await leer();
+  if (previo) {
+    if (previo.importe !== importe || previo.tipo !== tipo || previo.caja !== caja || previo.cajero !== correo)
+      return json({ error: 'Ese retiro ya se registró con otros datos. Cierra la ventana y vuelve a empezar.' }, 409);
+    return json(previo, 201);
+  }
+  // Retiro arriba del tope (#846): lo aprueba el dueno o un supervisor, con su PIN en la caja o registrandolo el en su propia sesion.
+  // Sin aprobacion no se registra nada y la caja no abre el cajon. Lo decide el servidor: la caja solo se entera de que hace falta, no del tope.
+  let aprobo: string | null = null;
+  if (tipo === 'retiro' && await retiroNecesitaAprobacion(env, importe)) {
+    if (!tieneAprobo) return json({ error: 'Falta actualizar el sistema: avisa al dueño.' }, 503);   // antes de pedir PIN: no gasta intentos
+    const usuario = await leerUsuario(env, correo);
+    if (usuario && apruebaDinero(usuario.roles)) aprobo = correo;
+    else if (cuerpo.aprobador) {
+      const aprobada = await aprobadorConPin(env, correo, cuerpo.aprobador, cuerpo.pin, caja);
+      if ('error' in aprobada) return json({ error: aprobada.error }, aprobada.status);
+      aprobo = aprobada.por;
+    } else {
+      return json({
+        requiere_aprobacion: true,
+        error: 'Este retiro necesita la aprobación del supervisor o del dueño: teclea su PIN en esta ventana.',
+        duenos: await aprobadoresDeDinero(env),
+      }, 403);
+    }
+  }
   await env.DB.prepare(
-    `insert into retiros (id, tipo, caja, cajero, importe, motivo, creado_en, categoria) values (?, ?, ?, ?, ?, ?, ?, ?)
-     on conflict (id) do nothing`,
+    `insert into retiros (id, tipo, caja, cajero, importe, motivo, creado_en, categoria${tieneAprobo ? ', aprobo_por' : ''})
+     values (?, ?, ?, ?, ?, ?, ?, ?${tieneAprobo ? ', ?' : ''}) on conflict (id) do nothing`,
   )
-    .bind(id, tipo, caja, correo, importe, motivo, new Date().toISOString(), categoria)
+    .bind(...[id, tipo, caja, correo, importe, motivo, new Date().toISOString(), categoria, ...(tieneAprobo ? [aprobo] : [])])
     .run();
-  const retiro = await env.DB.prepare('select id, tipo, caja, cajero, importe, motivo, creado_en, categoria from retiros where id = ?')
-    .bind(id)
-    .first();
-  return json(retiro, 201);
+  return json(await leer(), 201);
 }
 
 export interface Corte {

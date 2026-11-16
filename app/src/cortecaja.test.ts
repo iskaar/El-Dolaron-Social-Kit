@@ -168,9 +168,10 @@ test('gastos: el cajero registra hasta $100 sin aprobacion; mas de $100, solo el
   const mayor = await salida(pedir, 'gasto', 10001);                       // $100.01: no
   assert.equal(mayor.status, 403);
   assert.match(mayor.cuerpo.error, /dueno/);
-  assert.equal((await salida(pedir, 'retiro', 500000)).status, 201);       // un retiro no tiene tope
+  assert.equal((await salida(pedir, 'retiro', 500000)).status, 403);       // un retiro sin tope fijado pide aprobacion (#846; el tope y el PIN, en retiros-tope.test.ts)
 
   como(DUENO);
+  assert.equal((await salida(pedir, 'retiro', 500000)).status, 201);        // el dueno lo registra en su sesion
   assert.equal((await salida(pedir, 'gasto', 35000)).status, 201);          // el dueno registra el gasto mayor
 
   const r = (await pedir('/api/reportes?dias=1')).cuerpo;

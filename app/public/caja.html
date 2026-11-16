@@ -391,6 +391,13 @@ if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw-caja.js'
   <select id="retiro-categoria"></select>
   <label for="retiro-motivo" id="retiro-etiqueta-motivo">Concepto</label>
   <input id="retiro-motivo" type="text" maxlength="200">
+  <!-- #846: solo aparece cuando el servidor dice que este retiro necesita aprobacion (nunca dice el tope). Sin <form>: el Enter del lector no envia nada. -->
+  <div id="retiro-aprobacion" hidden>
+    <label for="retiro-aprobador">Aprueba (supervisor o dueño)</label>
+    <select id="retiro-aprobador"></select>
+    <label for="retiro-pin">PIN de quien aprueba</label>
+    <input id="retiro-pin" type="password" inputmode="numeric" maxlength="6" autocomplete="off" placeholder="6 dígitos">
+  </div>
   <div class="aviso-dialogo" id="retiro-aviso"></div>
   <div class="acciones">
     <button id="retiro-salir" type="button" class="secundario">Cancelar</button>
@@ -2940,12 +2947,16 @@ $('corte-abrir-cajon').addEventListener('click', async () => {
 // red. El id se genera al abrir el dialogo: reintentar no duplica la salida.
 // Gastos hasta $100 sin aprobacion (Isaac, 28/09); uno mayor lo registra el dueno.
 let idRetiro = null;
+let intentoRetiro = null;   // {importe, tipo} del último intento: si cambian, es otro retiro y lleva otro id (el servidor rechaza el mismo id con otros datos)
 const tipoSalida = () => document.querySelector('input[name="tipo-salida"]:checked').value;
 // Issue #515: el dueño de la terminal paga en efectivo lo cobrado con tarjeta; si entra al cajón, el corte lo suma.
+// #846: arriba del tope de retiros el servidor pide el PIN de un supervisor o del dueño; los campos salen solo entonces.
+function ocultarAprobacionRetiro() { $('retiro-aprobacion').hidden = true; $('retiro-pin').value = ''; }
 function pintarTipoSalida() {
   const tipo = tipoSalida();
   const gasto = tipo === 'gasto';
   $('retiro-titulo').textContent = tipo === 'terminal' ? 'Entra efectivo al cajón' : 'Sale efectivo del cajón';
+  ocultarAprobacionRetiro();   // cambió el tipo: si hace falta aprobación el servidor la vuelve a pedir
   $('retiro-etiqueta-categoria').hidden = !gasto;
   $('retiro-categoria').hidden = !gasto;
   $('retiro-nota').textContent = gasto
@@ -2980,12 +2991,14 @@ $('pedir-ayuda').addEventListener('click', async () => {
 $('abrir-retiro').addEventListener('click', () => {
   if (!exigirCaja()) return;
   idRetiro = crypto.randomUUID();
+  intentoRetiro = null;
   document.querySelector('input[name="tipo-salida"][value="gasto"]').checked = true;
   pintarTipoSalida();
   $('retiro-categoria').value = '';
   $('retiro-importe').value = '';
   $('retiro-motivo').value = '';
   $('retiro-aviso').textContent = '';
+  ocultarAprobacionRetiro();
   $('retiro-registrar').disabled = false;
   $('dialogo-retiro').showModal();
   $('retiro-importe').focus();
@@ -2996,7 +3009,7 @@ function avisarGastoGrande() {
   const grande = gastoRequiereDueno(tipoSalida(), Math.round(Number($('retiro-importe').value || 0) * 100));
   $('retiro-aviso').textContent = grande ? 'Más de $100: lo registra el dueño.' : '';
 }
-$('retiro-importe').addEventListener('input', avisarGastoGrande);
+$('retiro-importe').addEventListener('input', () => { ocultarAprobacionRetiro(); avisarGastoGrande(); });
 $('dialogo-retiro').addEventListener('change', (e) => { if (e.target.name === 'tipo-salida') avisarGastoGrande(); });
 $('retiro-registrar').addEventListener('click', async () => {
   const importe = Math.round(Number($('retiro-importe').value || 0) * 100);
@@ -3006,21 +3019,35 @@ $('retiro-registrar').addEventListener('click', async () => {
   const categoria = $('retiro-categoria').value;
   if (tipo === 'gasto' && !categoria) { $('retiro-aviso').textContent = 'Elige una categoría.'; return; }
   if (!motivo && tipo !== 'terminal') { $('retiro-aviso').textContent = tipo === 'gasto' ? 'Escribe en qué se gastó.' : 'Escribe el motivo.'; return; }
+  if (intentoRetiro && (intentoRetiro.importe !== importe || intentoRetiro.tipo !== tipo)) idRetiro = crypto.randomUUID();
+  intentoRetiro = { importe, tipo };
+  const pidiendoPin = tipo === 'retiro' && !$('retiro-aprobacion').hidden;
+  if (pidiendoPin && !/^\d{6}$/.test($('retiro-pin').value)) { $('retiro-aviso').textContent = 'Escribe el PIN de 6 dígitos de quien aprueba.'; return; }
   $('retiro-registrar').disabled = true;
   try {
     const r = await fetch('/api/retiros', {
       method: 'POST', headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ id: idRetiro, tipo, caja: cajaActual(), importe, motivo, categoria: tipo === 'gasto' ? categoria : undefined }),
+      body: JSON.stringify({ id: idRetiro, tipo, caja: cajaActual(), importe, motivo, categoria: tipo === 'gasto' ? categoria : undefined,
+        ...(pidiendoPin ? { aprobador: $('retiro-aprobador').value, pin: $('retiro-pin').value } : {}) }),
     });
     const retiro = await r.json();
-    if (!r.ok) { $('retiro-aviso').textContent = retiro.error ?? 'No se pudo registrar.'; return; }
+    if (r.status === 403 && retiro.requiere_aprobacion) {
+      const duenos = retiro.duenos ?? [];
+      $('retiro-aprobador').innerHTML = duenos.map((u) => `<option value="${escapar(u.correo)}">${escapar(u.nombre || u.correo)}</option>`).join('');
+      $('retiro-aprobacion').hidden = false;
+      $('retiro-aviso').textContent = duenos.length ? retiro.error : 'Este retiro necesita aprobación, pero nadie con permiso tiene PIN. Avisa al dueño.';
+      if (duenos.length) $('retiro-pin').focus();
+      return;
+    }
+    if (!r.ok) { $('retiro-aviso').textContent = retiro.error ?? 'No se pudo registrar.'; if (pidiendoPin) { $('retiro-pin').value = ''; $('retiro-pin').focus(); } return; }
     $('dialogo-retiro').close();
     await abrirCajon();
     imprimirRetiro(retiro).then(pintarImpresora);
-    $('aviso').textContent = tipo === 'gasto'
-      ? `Gasto de ${pesos(importe)} registrado.`
-      : tipo === 'terminal' ? `Pago de la terminal de ${pesos(importe)} registrado. Que firme el comprobante.`
-      : `Retiro de ${pesos(importe)} registrado. Firmen el comprobante.`;
+    // Lo que se muestra y se imprime es lo que el servidor registró, no lo que hay ahora en el campo.
+    $('aviso').textContent = retiro.tipo === 'gasto'
+      ? `Gasto de ${pesos(retiro.importe)} registrado.`
+      : retiro.tipo === 'terminal' ? `Pago de la terminal de ${pesos(retiro.importe)} registrado. Que firme el comprobante.`
+      : `Retiro de ${pesos(retiro.importe)} registrado. Firmen el comprobante.`;
     $('aviso').style.color = '#1f7a4d';
     $('codigo').focus();
   } catch {
