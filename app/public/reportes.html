@@ -677,7 +677,7 @@
           <span id="aviso-fondo"></span>
         </div>
         <div class="fondo-caja">
-          <label for="tope-retiro">Retiro del cajón sin aprobación: hasta cuánto puede sacar un cajero solo ($). Arriba de esto lo aprueba un supervisor o tú con su PIN en la caja. Vacío = todo retiro pide aprobación</label>
+          <label for="tope-retiro">Retiro del cajón sin aprobación: hasta cuánto puede sacar un cajero solo ($). Arriba de esto lo aprueba un supervisor o tú con su PIN en la caja. 0 = todo retiro pide aprobación (sin fijar, también)</label>
           <input id="tope-retiro" type="number" min="0" step="1" inputmode="numeric">
           <button id="guardar-tope" type="button">Guardar</button>
           <span id="aviso-tope" role="status"></span>
@@ -1930,7 +1930,9 @@ $('guardar-tope').addEventListener('click', async () => {
     method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ tope_retiro: Math.round(pesosTope * 100) }),
   });
   const cuerpo = await r.json().catch(() => ({}));
-  aviso.textContent = r.ok ? 'Guardado. Aplica desde el siguiente retiro.' : (cuerpo.error ?? 'No se pudo guardar.');
+  const guardado = Math.round(Number(cuerpo.tope_retiro) / 100);
+  if (r.ok) $('tope-retiro').value = guardado;   // lo guardado, en pesos
+  aviso.textContent = r.ok ? `Guardado: $${guardado.toLocaleString('es-MX')}. Aplica desde el siguiente retiro.` : (cuerpo.error ?? 'No se pudo guardar.');
   aviso.style.color = r.ok ? 'var(--bien)' : 'var(--mal)';
 });
 

@@ -3,7 +3,7 @@
 // El tope vive en `config` (clave tope_retiro, centavos): en el código y en el repositorio no hay ningún monto.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { tienda, DUENO } from './prueba-d1.ts';
 
 const TIENDA = 'tienda@prueba.mx';
@@ -15,7 +15,7 @@ const PIN_DUENO = '111222';
 const PIN_ANA = '482913';
 const PIN_SUP = '735190';
 const PIN_BETO = '264817';
-const TOPE = 150000;
+const TOPE = 123400;   // un valor cualquiera de prueba: no es, ni se parece a, la politica real del dueño
 
 async function montar(tope: number | null = TOPE) {
   const t = tienda();
@@ -24,7 +24,8 @@ async function montar(tope: number | null = TOPE) {
     ('${ANA}', 'Ana', 'cajero', 1, '', '', ''),
     ('${SUP}', 'Sara', 'cajero,supervisor', 1, '', '', ''),
     ('${BETO}', 'Beto', 'cajero', 1, '', '', ''),
-    ('${CAPTURA}', 'Cata', 'capturista', 1, '', '', '')`).run();
+    ('${CAPTURA}', 'Cata', 'capturista', 1, '', '', ''),
+    ('cs@prueba.mx', 'Cs', 'capturista,supervisor', 1, '', '', '')`).run();
   t.db.prepare(`update usuarios set tienda = 'soledad' where roles = 'computadora'`).run();
   for (const [correo, pin] of [[DUENO, PIN_DUENO], [ANA, PIN_ANA], [SUP, PIN_SUP], [BETO, PIN_BETO]]) await t.pedir('/api/cuentas/pin', { correo, pin }, 'PUT');
   // El dueño, que es la sesión de prueba, fija el tope como lo hace en /reportes.
@@ -55,7 +56,7 @@ test('arriba del tope sin PIN se rechaza sin registrar nada, y la respuesta no d
   assert.equal(r.status, 403);
   assert.equal(r.cuerpo.requiere_aprobacion, true);
   assert.deepEqual(r.cuerpo.duenos, [{ correo: DUENO, nombre: 'Isaac' }, { correo: SUP, nombre: 'Sara' }]);
-  assert.doesNotMatch(JSON.stringify(r.cuerpo), new RegExp(`${TOPE}|1,?500`), 'la caja solo se entera de que necesita aprobación');
+  assert.doesNotMatch(JSON.stringify(r.cuerpo), new RegExp(`${TOPE}|1,?234`), 'la caja solo se entera de que necesita aprobación');
   assert.equal(filas().length, 0);
 });
 
@@ -157,9 +158,78 @@ test('el dueño solo guarda centavos enteros en el tope', async () => {
   assert.equal((await pedir('/api/config', { tope_retiro: 200000 }, 'PUT')).status, 200);
 });
 
-test('ni el código ni la pantalla de la caja guardan el monto del tope', () => {
-  for (const archivo of ['src/corte.ts', 'public/caja.html', 'public/ayuda-contenido.js', 'migracion-084-retiro-aprobo.sql']) {
-    assert.doesNotMatch(readFileSync(archivo, 'utf8'), /tope_retiro\s*[:=]\s*\d|tope[^.\n]{0,40}\$\s?\d/i, archivo);
+test('el mismo id con otro importe, tipo, caja o cajero se rechaza con 409 y lo registrado no cambia; el reenvío igual sigue en 201', async () => {
+  const { retirar, filas, sup } = await montar();
+  const id = crypto.randomUUID();
+  const primero = await retirar(10000, { id });
+  assert.equal(primero.status, 201);
+  assert.equal((await retirar(10000, { id })).status, 201, 'reenvío idéntico');
+  for (const [cambio, extra] of [['importe', { importe: 20000 }], ['tipo', { tipo: 'gasto', categoria: 'agua' }], ['caja', { caja: 'Caja 2' }]] as const) {
+    const otro = await retirar((extra as { importe?: number }).importe ?? 10000, { id, ...extra });
+    assert.equal(otro.status, 409, cambio);
+    assert.match(otro.cuerpo.error, /ya se registró con otros datos/);
+  }
+  assert.equal((await retirar(10000, { id }, sup)).status, 409, 'otro cajero');
+  assert.deepEqual(filas().map((f) => [f.importe, f.tipo]), [[10000, 'retiro']]);
+});
+
+test('antes de la migración 084 el retiro chico, el gasto y la entrada de la terminal funcionan como antes; lo que pide aprobación se rechaza claro', async () => {
+  const { db, retirar, como } = await montar();
+  db.exec('alter table retiros drop column aprobo_por');
+  const chico = await retirar(10000);
+  assert.equal(chico.status, 201, JSON.stringify(chico.cuerpo));
+  assert.equal('aprobo_por' in chico.cuerpo, false);
+  assert.equal((await retirar(10000, { id: chico.cuerpo.id })).status, 201, 'el reintento también');
+  assert.equal((await retirar(5000, { tipo: 'gasto', categoria: 'agua', motivo: 'garrafon' })).status, 201);
+  assert.equal((await retirar(TOPE * 10, { tipo: 'terminal', motivo: '' })).status, 201);
+  for (const extra of [{}, { aprobador: SUP, pin: PIN_SUP }]) {
+    const grande = await retirar(TOPE + 1, extra);
+    assert.equal(grande.status, 503);
+    assert.equal(grande.cuerpo.error, 'Falta actualizar el sistema: avisa al dueño.');
+  }
+  como(DUENO);
+  assert.equal((await retirar(TOPE + 1, {}, {})).status, 503, 'ni el dueño: no habría dónde guardar quién aprobó');
+  assert.equal((db.prepare('select count(*) as n from retiros').get() as { n: number }).n, 3);
+  assert.equal((db.prepare('select count(*) as n from intentos_aprobacion').get() as { n: number }).n, 0, 'no se gastaron intentos de PIN');
+});
+
+test('los PIN fallidos al aprobar un retiro cuentan por aprobador y por caja, y a los 5 bloquean; el acceso del supervisor sigue libre', async () => {
+  const { db, retirar, filas, pedir } = await montar();
+  const fallos = () => db.prepare(`select fallos, bloqueo from intentos_aprobacion where correo = ? and caja = 'Caja 1'`).get(SUP) as { fallos: number; bloqueo: string } | undefined;
+  for (let i = 1; i <= 4; i++) {
+    assert.equal((await retirar(TOPE + 1, { aprobador: SUP, pin: '000000' })).status, 403);
+    assert.equal(fallos()?.fallos, i);
+  }
+  const quinto = await retirar(TOPE + 1, { aprobador: SUP, pin: '000000' });
+  assert.equal(quinto.status, 403);
+  assert.match(quinto.cuerpo.error, /bloque/i);
+  assert.ok(fallos()!.bloqueo > new Date().toISOString());
+  assert.equal((await retirar(TOPE + 1, { aprobador: SUP, pin: PIN_SUP })).status, 423, 'bloqueado aunque el PIN sea el bueno');
+  assert.equal(filas().length, 0);
+  assert.equal((await pedir('/api/cajeros/entrar', { correo: SUP, pin: PIN_SUP })).status, 201, 'su acceso a la caja no se bloqueó');
+});
+
+test('un supervisor no lee el tope por /api/config: ni en una computadora de caja ni con otro rol de lectura', async () => {
+  const { pedir, como, sup } = await montar();
+  assert.equal((await pedir('/api/config', undefined, 'GET', sup)).status, 403);
+  como(SUP);
+  assert.equal((await pedir('/api/config')).status, 403);
+  como('cs@prueba.mx');   // supervisor que además captura: puede leer config, pero no esa clave
+  const r = await pedir('/api/config');
+  assert.equal(r.status, 200);
+  assert.equal('tope_retiro' in r.cuerpo, false);
+  assert.equal((await pedir('/api/config', { tope_retiro: 1 }, 'PUT')).status, 403, 'ni cambiarlo');
+});
+
+const archivos = (carpeta: string): string[] => readdirSync(carpeta, { withFileTypes: true }).flatMap((e) =>
+  e.isDirectory() ? archivos(`${carpeta}/${e.name}`) : /\.test\.ts$/.test(e.name) ? [] : [`${carpeta}/${e.name}`]);
+
+test('ningún archivo de la app asigna un monto literal al tope (el repositorio es público)', () => {
+  const lista = [...archivos('src'), ...archivos('public'), 'migracion-084-retiro-aprobo.sql'];
+  assert.ok(lista.includes('src/corte.ts') && lista.includes('public/caja.html'));
+  for (const archivo of lista) {
+    if (!/\.(ts|js|html|sql|json|css)$/.test(archivo)) continue;
+    assert.doesNotMatch(readFileSync(archivo, 'utf8'), /(?:tope_retiro|TOPE_RETIRO)['"\]]*\s*[:=]\s*['"]?\d/i, archivo);
   }
   // La pantalla de caja no pide la clave a /api/config: solo reacciona a la respuesta del servidor.
   assert.doesNotMatch(readFileSync('public/caja.html', 'utf8'), /tope_retiro/);

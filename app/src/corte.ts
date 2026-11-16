@@ -107,14 +107,22 @@ export async function registrarRetiro(request: Request, env: Env, correo: string
       return json({ error: `Los gastos de mas de $${LIMITE_GASTO_CAJERO / 100} los registra el dueno.` }, 403);
     }
   }
-  const leer = () => env.DB.prepare('select id, tipo, caja, cajero, importe, motivo, creado_en, categoria, aprobo_por from retiros where id = ?').bind(id).first();
+  // La columna `aprobo_por` llega con la migracion 084. Si el codigo se despliega antes, todo sigue como antes de #846 salvo lo que exige aprobacion.
+  const tieneAprobo = await env.DB.prepare('select aprobo_por from retiros limit 0').first().then(() => true, () => false);
+  const leer = () => env.DB.prepare(`select id, tipo, caja, cajero, importe, motivo, creado_en, categoria${tieneAprobo ? ', aprobo_por' : ''} from retiros where id = ?`).bind(id).first<Record<string, unknown>>();
   // Un reintento de un retiro ya registrado (red caida) devuelve el mismo: no vuelve a pedir el PIN ni a contar.
+  // Con otros datos con el mismo id no es un reintento: se rechaza para que lo registrado no se muestre como lo que se tecleo ahora.
   const previo = await leer();
-  if (previo) return json(previo, 201);
+  if (previo) {
+    if (previo.importe !== importe || previo.tipo !== tipo || previo.caja !== caja || previo.cajero !== correo)
+      return json({ error: 'Ese retiro ya se registró con otros datos. Cierra la ventana y vuelve a empezar.' }, 409);
+    return json(previo, 201);
+  }
   // Retiro arriba del tope (#846): lo aprueba el dueno o un supervisor, con su PIN en la caja o registrandolo el en su propia sesion.
   // Sin aprobacion no se registra nada y la caja no abre el cajon. Lo decide el servidor: la caja solo se entera de que hace falta, no del tope.
   let aprobo: string | null = null;
   if (tipo === 'retiro' && await retiroNecesitaAprobacion(env, importe)) {
+    if (!tieneAprobo) return json({ error: 'Falta actualizar el sistema: avisa al dueño.' }, 503);   // antes de pedir PIN: no gasta intentos
     const usuario = await leerUsuario(env, correo);
     if (usuario && apruebaDinero(usuario.roles)) aprobo = correo;
     else if (cuerpo.aprobador) {
@@ -130,10 +138,10 @@ export async function registrarRetiro(request: Request, env: Env, correo: string
     }
   }
   await env.DB.prepare(
-    `insert into retiros (id, tipo, caja, cajero, importe, motivo, creado_en, categoria, aprobo_por) values (?, ?, ?, ?, ?, ?, ?, ?, ?)
-     on conflict (id) do nothing`,
+    `insert into retiros (id, tipo, caja, cajero, importe, motivo, creado_en, categoria${tieneAprobo ? ', aprobo_por' : ''})
+     values (?, ?, ?, ?, ?, ?, ?, ?${tieneAprobo ? ', ?' : ''}) on conflict (id) do nothing`,
   )
-    .bind(id, tipo, caja, correo, importe, motivo, new Date().toISOString(), categoria, aprobo)
+    .bind(...[id, tipo, caja, correo, importe, motivo, new Date().toISOString(), categoria, ...(tieneAprobo ? [aprobo] : [])])
     .run();
   return json(await leer(), 201);
 }
