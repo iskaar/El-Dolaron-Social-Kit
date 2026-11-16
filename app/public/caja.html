@@ -90,6 +90,8 @@
   #rechazadas .ticket { border: 1px solid var(--rojo); border-radius: 8px; padding: 8px;
     margin-bottom: 6px; font-size: 13px; color: var(--rojo); }
   #rechazadas .ticket button { margin-left: 6px; }
+  #rechazadas .ticket .nota { color: #5b6478; }
+  .renglon.sin-existencia { outline: 2px solid var(--rojo); background: #fdecec; }
   #pie { padding: 8px 18px 14px; font-size: 13px; color: #5b6478; display: flex; gap: 18px; flex-wrap: wrap; }
   #tickets { margin-top: 14px; border-top: 1px solid var(--linea); padding-top: 10px; }
   #tickets summary { font-size: 13px; color: #5b6478; cursor: pointer; }
@@ -182,7 +184,7 @@ if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw-caja.js'
   <button id="marcar-entrada" type="button" hidden>Marcar entrada</button>
   <button id="abrir-retiro" type="button">Gasto / retiro</button>
   <button id="abrir-corte" type="button">Corte</button>
-  <a href="/socios">Alta de socios</a>
+  <a href="/socios" id="alta-socios">Alta de socios</a>
   <a href="/bultos">Bultos</a>
   <a href="/admin">Cola de revisión</a>
   <a href="/avisos" id="avisos-ml" target="_blank" hidden></a>
@@ -471,6 +473,13 @@ if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw-caja.js'
   </form>
 </dialog>
 
+<dialog id="dlg-alta" aria-labelledby="dlg-alta-titulo">
+  <h2 id="dlg-alta-titulo">Alta de socio</h2>
+  <div class="aviso-dialogo" id="dlg-alta-sinred" role="alert" hidden>Sin red: el alta necesita conexión.</div>
+  <iframe id="dlg-alta-marco" title="Alta de socio" style="width:100%;height:70vh;border:0"></iframe>
+  <div class="acciones"><button id="dlg-alta-cerrar" type="button" class="secundario">Cerrar y volver a la venta</button></div>
+</dialog>
+
 <dialog id="dlg-reemplazo" aria-labelledby="dlg-reemplazo-titulo">
   <h2 id="dlg-reemplazo-titulo">Socio y vale no se juntan</h2>
   <p id="dlg-reemplazo-texto"></p>
@@ -504,6 +513,7 @@ import {
 } from '/ticket.js';
 import { imprimirDevolucion } from '/impresora.js';
 import { codigoDeDigitos } from '/code128.js';
+import { leerMensajeAlta } from '/venta.js';
 
 // Tonos de la caja (#817): agudo al agregar una pieza, grave y doble al rechazar un código. Sin archivos de audio.
 // Para calibrar en la tienda con el parlante real: frecuencia (Hz), duración (ms) y volumen (0 a 1) de cada tono.
@@ -891,7 +901,7 @@ function pintar() {
   guardarTicket();
 
   $('ticket').innerHTML = lineas.map((l, i) => `
-    <div class="renglon">
+    <div class="renglon${l.sin_existencia ? ' sin-existencia' : ''}">
       ${l.producto_id ? `<img class="foto" src="/api/foto/${encodeURIComponent(l.producto_id)}" alt="" loading="lazy" onerror="this.style.visibility='hidden'">` : '<div></div>'}
       <div><div class="nombre">${escapar(l.nombre)}</div><div class="codigo">${escapar(l.codigo)}${l.precio_lista > l.precio ? ` · Descuento, antes <s>${pesos(l.precio_lista)}</s>` : ''}</div></div>
       <div>x${l.cantidad}</div>
@@ -1358,6 +1368,43 @@ async function buscarSocio() {
 $('buscar-socio').addEventListener('click', buscarSocio);
 $('socio').addEventListener('keydown', (e) => { if (e.key === 'Enter') buscarSocio(); });
 $('quitar-socio').addEventListener('click', () => { quitarSocio(); idVenta = null; pintar(); });
+
+// Alta de socio en una ventana (#820): la misma pantalla /socios, incrustada. Al terminar solo avisa su numero
+// (mismo origen y desde ese marco); el socio se liga al ticket al cerrar la ventana, con el mismo camino que «Buscar».
+let numeroAlta = null;
+function abrirAlta() {
+  const d = $('dlg-alta');
+  if (d.open) return;
+  const sinRed = !navigator.onLine;
+  $('dlg-alta-sinred').hidden = !sinRed;
+  $('dlg-alta-marco').hidden = sinRed;
+  if (!sinRed) $('dlg-alta-marco').src = '/socios?incrustado=1';
+  numeroAlta = null;
+  d.showModal();
+}
+$('alta-socios').addEventListener('click', (e) => { if (!(e.ctrlKey || e.metaKey || e.shiftKey)) { e.preventDefault(); abrirAlta(); } });
+$('dlg-alta-cerrar').addEventListener('click', () => $('dlg-alta').close());
+$('dlg-alta-marco').addEventListener('load', () => { if ($('dlg-alta').open) $('dlg-alta-marco').contentWindow.focus(); });
+addEventListener('message', (e) => {
+  if (e.origin !== location.origin || e.source !== $('dlg-alta-marco').contentWindow) return;
+  const m = leerMensajeAlta(e.data);
+  if (m?.tipo === 'alta') numeroAlta = m.numero;
+  else if (m?.tipo === 'cerrar') $('dlg-alta').close();
+});
+$('dlg-alta').addEventListener('close', async () => {
+  $('dlg-alta-marco').src = 'about:blank';   // no deja datos del cliente anterior en la ventana
+  const numero = numeroAlta;
+  numeroAlta = null;
+  if (numero) {
+    $('socio').value = String(numero);
+    await buscarSocio();
+    if (socio?.numero !== numero) {
+      $('socio-info').textContent = `Socio #${numero} registrado, pero no se pudo poner en el ticket. Escribe ${numero} en «Buscar socio» y presiona Buscar.`;
+      $('socio-info').style.color = '#D72B32';
+    }
+  }
+  $('codigo').focus();
+});
 $('dolarones').addEventListener('input', () => { usarTodos = false; idVenta = null; pintar(); });
 
 /** Pop-up al cargar socio con código o vale: sólo si realmente puede gastar. */
@@ -1552,7 +1599,7 @@ function preguntarSocio() {
   const d = $('dlg-socio');
   $('dlg-socio-texto').textContent = 'Esta venta no tiene socio, así que no ganaría Dolarones.'
     + (socio?.vale ? ` Los vales no se juntan con una membresía: si buscas al socio, ${valesCargados.length > 1 ? 'los vales salen' : 'el vale sale'} del ticket (puedes volver a escanear${valesCargados.length > 1 ? 'los' : 'lo'}). ${guiaVale(valesCargados)}` : '')
-    + ' Para darlo de alta se abre otra pestaña y esta venta se queda aquí.';
+    + ' Para darlo de alta se abre una ventana y esta venta se queda aquí.';
   d.querySelector('[value="cobrar"]').textContent = socio?.vale ? (valesCargados.length > 1 ? 'Usar los vales sin socio' : 'Usar el vale sin socio') : 'No quiere ser socio: cobrar así';
   d.returnValue = '';
   d.showModal();
@@ -1633,7 +1680,7 @@ async function cobrar() {
   if (debePreguntarSocio(socio, navigator.onLine)) {
     const r = await preguntarSocio();
     if (r !== 'cobrar') {
-      if (r === 'alta') window.open('/socios', '_blank');
+      if (r === 'alta') abrirAlta();
       $('socio').focus();
       return;
     }
@@ -1696,6 +1743,9 @@ async function cobrar() {
       } catch { /* respuesta desconocida: reintento idempotente al sincronizar */ }
       if (r && cuerpo && !r.ok && r.status < 500) {
         if (cuerpo.promo_agotada) promoAgotada();
+        // #819: el servidor dice qué pieza ya no está («Quita X: ya no está disponible.»): ese renglón se resalta y el resto del ticket sigue.
+        const faltan = new Set((cuerpo.faltantes ?? []).map((f) => f.producto_id));
+        for (const l of lineas) l.sin_existencia = faltan.has(l.producto_id);
         $('aviso').textContent = cuerpo.error || 'No se pudo confirmar la venta.';
         $('aviso').style.color = '#D72B32';
         return;
@@ -1855,8 +1905,31 @@ async function sincronizar() {
   } finally {
     sincronizando = false;
     await pendientes();
+    await reportarRechazadas();
     await pintarRechazadas();
     await actualizarCorte();
+  }
+}
+
+/**
+ * #819: una venta rechazada ya estaba cobrada. Se le avisa al servidor (idempotente por el folio; la tienda y el cajero salen de la sesión)
+ * y solo entonces se deja descartar. Sin red o sin sesión se reintenta en la siguiente sincronización.
+ */
+async function reportarRechazadas() {
+  const sinAvisar = (await store('ventas', 'readonly', (s) => s.getAll())).filter((v) => v.estado === 'rechazada' && !v.reportada);
+  for (const v of sinAvisar) {
+    try {
+      const r = await fetch(`/api/ventas/${encodeURIComponent(v.id)}/rechazo`, {
+        method: 'POST', headers: { 'content-type': 'application/json' }, signal: AbortSignal.timeout(10000),
+        body: JSON.stringify({ motivo: v.motivo, forma_pago: v.forma_pago, efectivo: v.efectivo, creado_en: v.creado_en, caja: v.caja,
+          lineas: v.lineas.map(({ codigo, nombre, precio, cantidad }) => ({ codigo, nombre, precio, cantidad })) }),
+      });
+      // 400/404: el servidor nunca lo va a aceptar (registro raro o servidor sin la ruta): no se reintenta y se puede descartar tras avisar en persona.
+      if (!r.ok && r.status !== 400 && r.status !== 404) continue;
+      // Se vuelve a leer: otra sincronización pudo cambiar el registro mientras esperaba.
+      const actual = await store('ventas', 'readonly', (s) => s.get(v.id));
+      if (actual?.estado === 'rechazada') await store('ventas', 'readwrite', (s) => s.put({ ...actual, reportada: r.ok ? true : 'fallo' }));
+    } catch { /* sin red: se reintenta */ }
   }
 }
 
@@ -1873,15 +1946,18 @@ async function pendientes() {
 }
 
 /** Ventas que el servidor rechazo: visibles con su motivo, y recuperables a mano. */
+let descartarListo = null;   // folio al que ya se le dio el primer clic de «Descartar»
 async function pintarRechazadas() {
   const rechazadas = (await store('ventas', 'readonly', (s) => s.getAll()))
     .filter((v) => v.estado === 'rechazada');
   $('rechazadas').innerHTML = rechazadas.map((v) => `
     <div class="ticket">
       <div><b>${pesos(totales(v.lineas).total)}</b> rechazada — ${escapar(v.motivo)}</div>
+      <div class="nota">${new Date(v.creado_en).toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' })} · ${escapar(v.forma_pago)} · ${totales(v.lineas).piezas} ${totales(v.lineas).piezas === 1 ? 'pieza' : 'piezas'} ·
+        ${v.reportada === 'fallo' ? 'No se pudo avisar al dueño: avísale en persona antes de descartar.' : v.reportada ? 'Ya se le avisó al dueño.' : 'Avisando al dueño… (necesita red)'}</div>
       <div>
         <button type="button" data-reintentar="${v.id}">Reintentar</button>
-        <button type="button" data-descartar="${v.id}">Descartar</button>
+        <button type="button" data-descartar="${v.id}" ${v.reportada ? '' : 'disabled'}>${descartarListo === v.id ? '¿Seguro? Descartar' : 'Descartar'}</button>
       </div>
     </div>`).join('');
 }
@@ -1893,7 +1969,13 @@ $('rechazadas').addEventListener('click', async (e) => {
     await store('ventas', 'readwrite', (s) => s.put({ ...venta, estado: undefined, motivo: undefined }));
     await pintarRechazadas();
     sincronizar();
+  } else if (descartar && descartarListo !== descartar) {
+    // Es el único registro de dinero ya cobrado: un segundo clic confirma.
+    descartarListo = descartar;
+    setTimeout(() => { if (descartarListo === descartar) { descartarListo = null; pintarRechazadas(); } }, 5000);
+    await pintarRechazadas();
   } else if (descartar) {
+    descartarListo = null;
     await store('ventas', 'readwrite', (s) => s.delete(descartar));
     await pintarRechazadas();
   }
@@ -2502,16 +2584,20 @@ document.querySelector('.tipo-salida').addEventListener('change', pintarTipoSali
 $('pedir-ayuda').addEventListener('click', async () => {
   const boton = $('pedir-ayuda');
   boton.disabled = true;
+  let avisada = false;
   try {
     const r = await fetch('/api/ayuda', {
       method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ caja: $('caja-nombre').value }),
     });
+    // #819: el servidor solo responde 200 si a un celular o un correo del dueño le llegó; si no, dice por qué.
+    avisada = r.ok;
     boton.textContent = r.ok ? 'Ayuda avisada ✓' : ((await r.json().catch(() => ({}))).error ?? 'No se pudo avisar');
   } catch {
     boton.textContent = 'Sin red: no se pudo avisar';
   }
-  // ponytail: 30 s sin repetir para no llenar el celular de avisos.
-  setTimeout(() => { boton.textContent = 'Ayuda'; boton.disabled = false; }, 30_000);
+  // ponytail: 30 s sin repetir solo si el aviso salió (para no llenar el celular); tras un fallo se puede volver a intentar de inmediato.
+  if (!avisada) boton.disabled = false;
+  setTimeout(() => { boton.textContent = 'Ayuda'; boton.disabled = false; }, avisada ? 30_000 : 8_000);
 });
 
 $('abrir-retiro').addEventListener('click', () => {
@@ -2692,7 +2778,10 @@ $('abrir-corte').addEventListener('click', async () => {
   if (sinEnviar) {
     $('corte-aviso').textContent = sinEnviar;
   } else if (rechazadas) {
-    $('corte-aviso').textContent = `Hay ${rechazadas} ventas rechazadas: reintenta o descarta cada una antes del corte.`;
+    const sinAvisar = cola.some((v) => v.estado === 'rechazada' && !v.reportada);
+    $('corte-aviso').textContent = cola.some((v) => v.reportada === 'fallo') ? `Hay ${rechazadas} ventas rechazadas y no se pudo avisar al dueño. Avísale en persona antes de descartar.`
+      : sinAvisar ? `Hay ${rechazadas} ventas rechazadas y aún no se le avisa al dueño: necesita red. Avísale en persona.`
+      : `Hay ${rechazadas} ventas rechazadas. Ya se le avisó al dueño; descártalas cuando te lo indique.`;
   } else {
     $('corte-registrar').disabled = false;
   }

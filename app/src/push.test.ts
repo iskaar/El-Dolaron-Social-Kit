@@ -69,7 +69,7 @@ test('el dueño activa push: se guarda, recibe una prueba con VAPID válido; la 
   t.db.prepare("insert into usuarios(correo, nombre, roles, activo, creado_en, actualizado_en) values ('ana@prueba.mx', 'Ana', 'cajero', 1, '', '')").run();
   t.env.DEV_USUARIO = 'ana@prueba.mx';
   const ayuda = await t.pedir('/api/ayuda', { caja: 'Caja 2' });
-  assert.deepEqual(ayuda.cuerpo, { ok: true, push: 1 });
+  assert.deepEqual(ayuda.cuerpo, { ok: true, push: 1, correos: 0, tienda: 'soledad' });
   assert.equal(t.llegadas.length, 2);
   assert.equal(t.correos.length, 0);
 
@@ -86,11 +86,11 @@ test('suscripción vencida (410) se borra y la ayuda cae al correo; datos invál
 
   t.responder(410);
   const ayuda = await t.pedir('/api/ayuda', { caja: 'no existe' });
-  assert.deepEqual(ayuda.cuerpo, { ok: true, push: 0 });
+  assert.deepEqual(ayuda.cuerpo, { ok: true, push: 0, correos: 1, tienda: 'soledad' });
   assert.equal((t.db.prepare('select count(*) n from push_suscripciones').get() as { n: number }).n, 0);
   assert.equal(t.correos.length, 1);
   assert.equal(t.correos[0].to, DUENO);
-  assert.equal(t.correos[0].text, 'Isaac pide ayuda.');
+  assert.equal(t.correos[0].text, 'Isaac pide ayuda en Soledad.');
 });
 
 test('solicitud de acceso (#607): llega por push sin correo; si el dispositivo ya no sirve, correo con el enlace a /avisos', async () => {

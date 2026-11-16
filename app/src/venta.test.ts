@@ -188,7 +188,7 @@ const cobroPedido = (fetchSimulado: () => Promise<unknown>, respuestaForma = 'ef
     crypto, Date, $, AbortSignal, Object, Math, totales, efectivoAlcanza, saldoCanjeable, dolaronesGanados, anticipoDePedido, transferenciaDe, CLAVE_DESDE,
     lineas: [{ producto_id: 'p1', codigo: 'ED-000001', nombre: 'Ventilador', precio: 30000, cantidad: 1 }],
     socio: opciones.socio ?? null, valesCargados: [], catalogo: new Map(), debePreguntarSocio, navigator: { onLine: !opciones.sinRed },
-    preguntarSocio: async () => { preguntasSocio.push(1); return opciones.respuestaSocio ?? 'cobrar'; }, window: { open: (ruta: string) => abiertas.push(ruta) }, pedidoCargado: opciones.sinPedido ? null : { id: 'ped-1', folio: 17, saldo: 10000 },
+    preguntarSocio: async () => { preguntasSocio.push(1); return opciones.respuestaSocio ?? 'cobrar'; }, abrirAlta: () => abiertas.push('/socios'), pedidoCargado: opciones.sinPedido ? null : { id: 'ped-1', folio: 17, saldo: 10000 },
     preguntarForma: async (aPagar: number) => { preguntas.push(aPagar); return respuestaForma; },
     impresionRemota: () => false, exigirCaja: () => true, cajaActual: () => 'Caja 1', dolaronesPedidos: () => 0,
     descuento: null, descuentoAplicado: () => 0, promoActual: () => 0, totalNeto: () => 30000, pintarDescuento() {},

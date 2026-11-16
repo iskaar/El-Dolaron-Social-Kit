@@ -74,6 +74,11 @@
     <h2 id="t-precios"></h2>
     <div id="l-precios" aria-live="polite"></div>
   </section>
+  <section id="rechazadas" class="grupo" hidden>
+    <h2 id="t-rechazadas"></h2>
+    <div class="nota">Ventas que la caja cobró sin red y el servidor rechazó al sincronizar: el dinero ya está cobrado y no hay venta. Aquí no se mueve nada solo; resuélvela a mano y deja una nota.</div>
+    <div id="l-rechazadas" aria-live="polite"></div>
+  </section>
   <section id="apartados" class="grupo" hidden>
     <h2 id="t-apartados">Apartados de tu tienda</h2>
     <div class="nota">Piezas apartadas en línea o por otra tienda que pasan por aquí: sepáralas, mándalas o recíbelas y marca cada paso con un toque.</div>
@@ -173,7 +178,7 @@ function filaTransferencia(t) {
 // Cada sección se lee por separado: si una falla, las demás se siguen pintando.
 const erroresFila = {};   // por id de solicitud: sobrevive a un repintado
 const firmas = {};        // JSON de lo último pintado: si nada cambió no se repinta (y no se borra un error a la vista)
-const conteos = { ml: 0, apartados: 0, descuentos: 0, cancelaciones: 0, acceso: 0, precios: 0 };
+const conteos = { ml: 0, apartados: 0, descuentos: 0, cancelaciones: 0, acceso: 0, precios: 0, rechazadas: 0 };
 const fallas = {};
 let ultimaFalla = '';
 function mostrarFallas() {
@@ -278,12 +283,28 @@ function filaPrecio(s) {
     ], botones);
 }
 
+// Ventas cobradas sin red que el servidor rechazó (#819): se resuelven con una nota; no mueven existencias ni dinero.
+function filaRechazada(s) {
+  const nota = h('input', { type: 'text', maxlength: '300', placeholder: 'Cómo se resolvió (obligatorio)', 'aria-label': 'Nota de resolución', style: 'width:100%;min-height:44px;font:inherit;padding:0 10px' });
+  return tarjeta(s.id, null, [
+    h('div', { class: 'nombre' }, `${pesos(s.total)} · ${s.forma_pago} · ${s.piezas} ${s.piezas === 1 ? 'pieza' : 'piezas'}`),
+    h('div', { class: 'nota' }, `${[s.caja, s.tienda_nombre].filter(Boolean).join(', ')} · cajero ${s.cajero} · vendida ${fecha(s.creado_en)} · reportada ${fecha(s.reportada_en)}`),
+    h('div', { class: 'accion' }, s.registrada ? 'Ya quedó registrada al reintentarla: solo falta cerrar este aviso.' : s.motivo),
+    h('ul', {}, s.lineas.map((l) => h('li', {}, `${l.cantidad} × ${l.nombre || l.codigo} · ${pesos(l.precio)}`))),
+    nota,
+  ], [boton('Resuelta', 'relleno', (f) => {
+    if (!nota.value.trim()) { f.querySelector('.aviso-fila').textContent = 'Escribe una nota de cómo se resolvió.'; return; }
+    enviar(s.id, f, `/api/ventas-rechazadas/${encodeURIComponent(s.id)}/resolver`, { nota: nota.value }, 'Venta rechazada marcada como resuelta.');
+  })]);
+}
+
 const SECCIONES = {
   descuentos: { url: '/api/solicitudes/descuentos', titulo: 'Descuentos por aprobar', fila: filaDescuento },
   cancelaciones: { url: '/api/solicitudes/cancelaciones', titulo: 'Cancelaciones por aprobar', fila: filaCancelacion },
   // acceso viene dentro de /api/cuentas (ahí también están los usuarios; aquí solo importan las solicitudes)
   acceso: { url: '/api/cuentas', titulo: 'Solicitudes de acceso', fila: filaAcceso, lista: (d) => d.solicitudes.filter((x) => x.tipo === 'acceso') },
   precios: { url: '/api/solicitudes-precio?estado=pendiente', titulo: 'Precios por revisar', fila: filaPrecio, lista: (d) => d.solicitudes },
+  rechazadas: { url: '/api/ventas-rechazadas', titulo: 'Ventas cobradas y rechazadas', fila: filaRechazada },
 };
 
 async function cargarSeccion(clave) {

@@ -58,6 +58,22 @@ export async function unidadesEn(env: Env, tienda: string, productoId: string): 
     .first<{ unidades: number }>())?.unidades ?? 0;
 }
 
+/**
+ * Solo lectura, DESPUÉS de que el batch de una venta abortó por existencia (#819): las piezas del ticket que ya no alcanzan en esa tienda
+ * (se suma lo pedido por pieza). No decide nada ni cambia la atomicidad; si la existencia ya se movió otra vez, puede salir vacía.
+ */
+export async function piezasSinExistencia(
+  env: Env, tienda: string, lineas: { producto_id: string; codigo: string; nombre: string; cantidad: number; sinInventario: boolean }[],
+): Promise<{ producto_id: string; codigo: string; nombre: string }[]> {
+  const pedidas = new Map<string, (typeof lineas)[number] & { total: number }>();
+  for (const l of lineas.filter((x) => !x.sinInventario))
+    pedidas.set(l.producto_id, { ...l, total: (pedidas.get(l.producto_id)?.total ?? 0) + l.cantidad });
+  const faltan = [];
+  for (const l of pedidas.values())
+    if (await unidadesEn(env, tienda, l.producto_id) < l.total) faltan.push({ producto_id: l.producto_id, codigo: l.codigo, nombre: l.nombre });
+  return faltan;
+}
+
 /** Las sucursales (todas las tiendas menos la central), en el orden de TIENDAS. Constantes del código: seguras para armar SQL. */
 // Función y no constante: cuentas.ts importa (en cadena) este módulo y TIENDAS aún no existe al cargarlo.
 export const sucursales = () => (Object.keys(TIENDAS) as Tienda[]).filter((t) => t !== TIENDA_CENTRAL);

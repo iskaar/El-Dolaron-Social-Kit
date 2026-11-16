@@ -216,6 +216,16 @@ export function maximoCanje(socio, total, ahora = Date.now()) {
 export const debePreguntarSocio = (socio, enLinea) => !!enLinea && (!socio || !!socio.vale);
 
 /**
+ * Mensaje que `/socios?incrustado=1` manda a la caja (#820). Solo viaja el número de socio: ningún dato personal.
+ * Devuelve `{ tipo: 'alta', numero }`, `{ tipo: 'cerrar' }` o null si no es de la forma esperada.
+ */
+export function leerMensajeAlta(datos) {
+  if (datos?.tipo === 'alta-socio' && Number.isSafeInteger(datos.numero) && datos.numero > 0) return { tipo: 'alta', numero: datos.numero };
+  if (datos?.tipo === 'alta-cerrar') return { tipo: 'cerrar' };
+  return null;
+}
+
+/**
  * Guía para la cajera cuando hay vale(s) en el ticket y el cliente quiere ser socio (#758). Los vales no se
  * juntan con una membresía; solo uno de compra, completo, sin usar y vigente (`completo`, lo dice el servidor)
  * puede pasar a una cuenta (bases, punto 6 ter). '' si no hay vales.
