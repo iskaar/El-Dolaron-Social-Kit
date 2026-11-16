@@ -1,12 +1,15 @@
 // node --test src/reportes-inventario-js.test.ts
 // Las funciones puras de la vista Inventario: del JSON de la API a HTML, sin navegador.
-import test from 'node:test';
+import test, { mock } from 'node:test';
 import assert from 'node:assert/strict';
 import { tienda } from './prueba-d1.ts';
 import {
   tarjetasInventario, avisoTienda, tablaCohortes, leyendaCohortes, maximoCohortes, panelFlujo, panelCohortes, panelRebajas, vistaInventario, graficas,
   datosFlujo, tablaFlujo, resumenFlujo, textoMediana, comparacionRebajas,
 } from '../public/reportes-inventario.js';
+
+// Reloj fijo: las cohortes maduran por semana calendario, asi que el resultado dependia del dia en que corria la prueba (#823).
+mock.timers.enable({ apis: ['Date'], now: Date.parse('2026-11-16T20:47:00Z') });
 
 const hace = (dias: number) => new Date(Date.now() - dias * 86_400_000).toISOString();
 
@@ -75,7 +78,7 @@ test('la tabla de cohortes: guion donde no ha madurado, 0.0 % donde si y nada se
   const { r, vacia } = await respuestas();
   const html = tablaCohortes(r);
   assert.match(html, /<td class="num sin"[^>]*>—<\/td>/, 'las semanas inmaduras son guion');
-  assert.equal(html.includes('0.0 %'), false);
+  assert.doesNotMatch(html, /(?<![\d.])0\.0 %/, 'ninguna celda inmadura dice 0.0 %; «50.0 %» no cuenta');
   assert.match(html, /Aún no pasan 8 semanas desde que cerró la semana/);
   assert.match(html, /class="num p\d"/);
   assert.equal((html.match(/<tr>/g)!.length) - 1 >= 8, true, 'al menos ocho semanas de captura');
