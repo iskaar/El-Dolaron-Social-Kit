@@ -2952,7 +2952,7 @@ export default {
       }
       // #831: corregir efectivo/tarjeta/transferencia de un ticket que no ha entrado a un corte; la regla de rol es la de /api/ventas/... (permiso()).
       const correccionPago = pathname.match(/^\/api\/ventas\/([^/]+)\/corregir-pago$/);
-      if (correccionPago && request.method === 'POST') return await corregirFormaPago(correccionPago[1], request, env, correo, tienda);
+      if (correccionPago && request.method === 'POST') return await corregirFormaPago(correccionPago[1], request, env, ctx, correo, tienda);
       const cancelacionPieza = pathname.match(/^\/api\/ventas\/([^/]+)\/lineas\/(\d+)\/cancelar$/);
       if (cancelacionPieza && request.method === 'POST') {
         return await cancelarPieza(cancelacionPieza[1], Number(cancelacionPieza[2]), request, env, correo, tienda);
@@ -2965,7 +2965,8 @@ export default {
       if (pathname === '/api/cupones' && request.method === 'POST') return await emitirCuponManual(request, env, correo);
       const ticket = pathname.match(/^\/api\/ventas\/([^/]+)$/);
       if (ticket && request.method === 'GET') {
-        return await detalleVenta(ticket[1], env, url.searchParams.get('imprimir') === '1', tienda);
+        return await detalleVenta(ticket[1], env, url.searchParams.get('imprimir') === '1',
+          { tienda, dueno: !!(await leerUsuario(env, correo))?.roles.includes('dueno'), caja: await cajaDe(env, correo, url.searchParams.get('caja'), tienda).catch(() => '') });
       }
 
       if (pathname === '/api/tablero') return await rutaTablero(request, env, ctx);

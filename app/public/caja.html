@@ -2127,7 +2127,7 @@ async function abrirTicket(id, resaltar = encontradas.get(id) ?? []) {
   $('ticket-contenido').innerHTML = '<p class="nota">Cargando…</p>';
   if (!$('dialogo-ticket').open) $('dialogo-ticket').showModal();
   try {
-    const r = await fetch(`/api/ventas/${id}`);
+    const r = await fetch(`/api/ventas/${id}?caja=${encodeURIComponent(cajaActual())}`);   // la caja decide si aqui se puede corregir su forma de pago (#831)
     const cuerpo = await r.json();
     if (!r.ok) throw new Error(cuerpo.error ?? 'No se pudo abrir el ticket.');
     ticketAbierto = cuerpo;

@@ -84,7 +84,7 @@ test('tarjeta o transferencia (menos de $300, sin clave) a efectivo: queda lo pa
   assert.equal(c.cuerpo.efectivo_ventas, 0);
   assert.equal(c.cuerpo.tarjeta_sistema, 0);
   assert.equal(c.cuerpo.transferencias, 25000);
-  assert.equal(c.cuerpo.formas_corregidas, 2);
+  assert.equal(c.cuerpo.formas_corregidas, 1, 'una venta corregida dos veces cuenta una');
 });
 
 test('lo pagado con Dolarones y con el saldo de un pedido no cambia de forma: solo el dinero', async () => {
@@ -383,4 +383,126 @@ test('caja.html: la corrección manda el id de la caja, la caja y el motivo; ref
   assert.match(caja, /ticketAbierto = null; idCancelacion = null; idCorreccion = null;[^}]*\$\('codigo'\)\)\.focus\(\)/);
   // El resumen del corte trae el renglón solo cuando hubo correcciones.
   assert.match(caja, /\$\{c\.formas_corregidas \? renglon\('Formas de pago corregidas', c\.formas_corregidas\) : ''\}/);
+});
+
+// ---- Revisión de #833: día, caja propia, transferencia del dueño, aviso al dueño y cuenta del corte ----
+
+test('solo ventas de hoy: un ticket de otro día no se corrige, ni por el dueño, y no aparece como corregible', async () => {
+  const t = montar();
+  const id = await t.vender();
+  t.db.prepare(`update ventas set creado_en = '2026-01-05T18:00:00.000Z' where id = ?`).run(id);
+  for (const quien of [DUENO, CAJERO]) {
+    t.como(quien);
+    const r = await t.corregir(id, 'tarjeta');
+    assert.deepEqual([r.status, r.cuerpo.error], [409, 'Solo se corrigen ventas de hoy. Avísale al dueño.'], quien);
+    assert.deepEqual((await t.pedir(`/api/ventas/${id}?caja=Caja%201`)).cuerpo.corregible, [], quien);
+  }
+  assert.equal(t.venta(id).forma_pago, 'efectivo');
+  assert.equal(t.rastros().length, 0);
+});
+
+test('la condición del día va dentro de la sentencia: un ticket que deja de ser de hoy entre la lectura y la escritura no se corrige', async () => {
+  const t = montar();
+  const id = await t.vender();
+  t.entreLecturaYBatch(async () => { t.db.prepare(`update ventas set creado_en = '2026-01-05T18:00:00.000Z' where id = ?`).run(id); });
+  const r = await t.corregir(id, 'tarjeta');
+  assert.equal(r.status, 409);
+  assert.equal(t.venta(id).forma_pago, 'efectivo');
+  assert.equal(t.rastros().length, 0);
+});
+
+test('un ticket sin caja no se corrige (nunca recibe un corte), ni por el dueño', async () => {
+  const t = montar();
+  const id = await t.vender({ caja: '' });
+  assert.equal((t.db.prepare('select caja from ventas where id = ?').get(id) as { caja: string }).caja, '');
+  const r = await t.corregir(id, 'tarjeta', { caja: '' });
+  assert.deepEqual([r.status, r.cuerpo.error], [409, 'Este ticket no tiene caja: su forma de pago no se puede corregir aquí. Avísale al dueño.']);
+  assert.deepEqual((await t.pedir(`/api/ventas/${id}`)).cuerpo.corregible, []);
+  assert.equal(t.rastros().length, 0);
+});
+
+test('cada cajero corrige desde su caja: otra caja es 403 con el nombre de la caja; el dueño no tiene esa regla', async () => {
+  const t = montar();
+  const id = await t.vender({ caja: 'Caja 2' });
+  t.como(CAJERO);
+  const r = await t.corregir(id, 'tarjeta', { caja: 'Caja 1' });
+  assert.deepEqual([r.status, r.cuerpo.error], [403, 'Este ticket es de Caja 2: corrígelo desde esa caja.']);
+  assert.deepEqual((await t.pedir(`/api/ventas/${id}?caja=Caja%201`)).cuerpo.corregible, []);
+  assert.deepEqual((await t.pedir(`/api/ventas/${id}?caja=Caja%202`)).cuerpo.corregible, ['tarjeta']);
+  assert.equal(t.rastros().length, 0);
+  assert.equal((await t.corregir(id, 'tarjeta', { caja: 'Caja 2' })).status, 201);
+  // El dueño, desde cualquier caja; el rastro guarda la caja de quien corrigió.
+  const otro = await t.vender({ caja: 'Caja 2' });
+  t.como(DUENO);
+  assert.equal((await t.corregir(otro, 'tarjeta', { caja: 'Caja 1' })).status, 201);
+  assert.equal(t.rastros(otro)[0].caja, 'Caja 1');
+});
+
+test('de o hacia transferencia solo lo hace el dueño; el cajero entre efectivo y tarjeta', async () => {
+  const t = montar();
+  const efectivo = await t.vender();
+  const transferencia = await t.vender({ forma_pago: 'transferencia', efectivo: 0 });   // menos de $300: sin clave
+  t.como(CAJERO);
+  const mensaje = 'Cambiar a o desde transferencia lo hace el dueño.';
+  let r = await t.corregir(efectivo, 'transferencia');
+  assert.deepEqual([r.status, r.cuerpo.error], [403, mensaje]);
+  r = await t.corregir(transferencia, 'tarjeta');
+  assert.deepEqual([r.status, r.cuerpo.error], [403, mensaje]);
+  assert.deepEqual((await t.pedir(`/api/ventas/${efectivo}?caja=Caja%201`)).cuerpo.corregible, ['tarjeta']);
+  assert.deepEqual((await t.pedir(`/api/ventas/${transferencia}?caja=Caja%201`)).cuerpo.corregible, []);
+  assert.equal(t.rastros().length, 0);
+  assert.equal((await t.corregir(efectivo, 'tarjeta')).status, 201);
+  assert.equal((await t.corregir(efectivo, 'efectivo')).status, 201);
+
+  t.como(DUENO);
+  assert.deepEqual((await t.pedir(`/api/ventas/${transferencia}`)).cuerpo.corregible, ['efectivo', 'tarjeta']);
+  assert.equal((await t.corregir(transferencia, 'tarjeta')).status, 201);
+  assert.equal((await t.corregir(efectivo, 'transferencia')).status, 201);
+});
+
+test('cada corrección le avisa al dueño una sola vez, con caja, tienda, ticket, importe, formas y motivo; un reenvío o un rechazo no avisan', async () => {
+  const t = montar();
+  const correos: { to: string; subject: string; text: string }[] = [];
+  t.env.CORREO = { async send(m: { to: string; subject: string; text: string }) { correos.push(m); return { messageId: 'x' }; } } as never;
+  const id = await t.vender();
+  t.como(CAJERO);
+  const corrId = crypto.randomUUID();
+  assert.equal((await t.corregir(id, 'tarjeta', { id: corrId, motivo: 'Era con tarjeta' })).status, 201);
+  await t.esperar();
+  assert.equal(correos.length, 1);
+  assert.equal(correos[0].to, DUENO);
+  assert.equal(correos[0].subject, 'Forma de pago corregida');
+  assert.ok(correos[0].text.startsWith(`Ana corrigió el ticket ${id.slice(0, 8).toUpperCase()} de $250.00 en Caja 1, `), correos[0].text);
+  assert.match(correos[0].text, /: efectivo → tarjeta\.\nMotivo: Era con tarjeta\n/);
+
+  assert.equal((await t.corregir(id, 'tarjeta', { id: corrId })).status, 200);       // reenvío
+  assert.equal((await t.corregir(id, 'transferencia')).status, 403);                 // rechazo
+  await t.esperar();
+  assert.equal(correos.length, 1);
+  assert.equal((await t.corregir(id, 'efectivo')).status, 201);
+  await t.esperar();
+  assert.equal(correos.length, 2);
+});
+
+test('«Formas de pago corregidas»: A a B a A no cuenta, una venta con varias correcciones cuenta una, y una cancelada antes del corte no cuenta', async () => {
+  const t = montar();
+  const abA = await t.vender();                 // efectivo, tarjeta, efectivo: queda como estaba
+  const abc = await t.vender();                 // efectivo, tarjeta, transferencia: cuenta una vez
+  const cancelada = await t.vender();           // corregida y cancelada antes del corte
+  const simple = await t.vender();
+  for (const [id, formas] of [[abA, ['tarjeta', 'efectivo']], [abc, ['tarjeta', 'transferencia']], [cancelada, ['tarjeta']], [simple, ['tarjeta']]] as [string, string[]][])
+    for (const f of formas) assert.equal((await t.corregir(id, f)).status, 201);
+  assert.equal((await t.pedir(`/api/ventas/${cancelada}/cancelar`, { motivo: 'prueba', caja: 'Caja 1' })).status, 200);
+  const corte = await t.cortar();
+  assert.equal(corte.cuerpo.formas_corregidas, 2);
+  assert.equal((await t.pedir('/api/cortes?caja=Caja%201')).cuerpo.formas_corregidas, 2);
+});
+
+test('una cancelación después del corte no cambia la cuenta de un corte ya hecho (reimpresión igual)', async () => {
+  const t = montar();
+  const id = await t.vender();
+  await t.corregir(id, 'tarjeta');
+  assert.equal((await t.cortar()).cuerpo.formas_corregidas, 1);
+  assert.equal((await t.pedir(`/api/ventas/${id}/cancelar`, { motivo: 'prueba', caja: 'Caja 1' })).status, 200);
+  assert.equal((await t.pedir('/api/cortes?caja=Caja%201')).cuerpo.formas_corregidas, 1);
 });
