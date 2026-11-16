@@ -75,7 +75,7 @@ test('estructura: ids únicos y estables, de 2 a 6 pasos, ver apunta a escenario
     assert.ok(fuentes[e.pantalla], `${e.id}: pantalla desconocida ${e.pantalla}`);
     assert.ok(Array.isArray(e.textos), `${e.id}: falta textos`);
     for (const t of e.textos) assert.ok(typeof t === 'string' ? t : (fuentes[t[0]] && t[1]), `${e.id}: texto mal declarado ${JSON.stringify(t)}`);
-    if (e.pendiente !== undefined) assert.match(e.pendiente, /^¿.{15,}\?$/, `${e.id}: la pendiente es una pregunta para el dueño`);
+    if (e.pendiente !== undefined) assert.match(e.pendiente, /^(?:¿.{15,}\?|Falta en la caja: .{15,}\.)$/, `${e.id}: la pendiente es una pregunta para el dueño o «Falta en la caja: …»`);
   }
   for (const [, ruta] of Object.entries(fuentes)) assert.ok(existsSync(ruta), `${ruta} no existe`);
 });
