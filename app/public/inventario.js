@@ -53,7 +53,7 @@ export function resultado(p, alElegir = () => ficha.abrir(p.id), reimprimir = fa
   imagen.onerror = () => { foto.textContent = 'Sin foto'; };
   const texto = nodo('span', undefined, 'texto-pieza'), codigo = nodo(p.codigo ? 'code' : 'small', p.codigo || 'Sin código');
   texto.append(codigo, nodo('b', p.nombre || 'Sin nombre'), nodo('small', `${pesos(p.precio)}${p.upc ? ` · ${p.upc}` : ''}${p.talla ? ` · talla ${p.talla}` : ''}${!conFoto ? ' · sin foto' : ''}`));
-  b.append(foto, texto, nodo('span', `×${p.stock}`, 'insignia')); li.append(b);
+  b.append(foto, texto, nodo('span', `×${p.stock}${p.existencia && p.existencia.total !== p.stock ? ` (total ${p.existencia.total})` : ''}`, 'insignia')); li.append(b);
   if (reimprimir) li.className = 'fila-busqueda';
   if (reimprimir && p.codigo && etiquetable(p)) {
     const imprimir = boton('', async (boton) => {
@@ -80,7 +80,7 @@ async function buscar(mas = false, abrir = false) {
   cargando = true; bloquear($('mas'), 'Cargando piezas'); $('resultados').setAttribute('aria-busy', 'true');
   mensaje('Buscando…');
   try {
-    const datos = await api(`/api/piezas?${new URLSearchParams({ q:consulta, ...(mas && siguiente ? { cursor:siguiente } : {}) })}`);
+    const datos = await api(`/api/piezas?${new URLSearchParams({ q:consulta, ...($('tienda')?.value ? { tienda:$('tienda').value } : {}), ...(mas && siguiente ? { cursor:siguiente } : {}) })}`);
     if (turno !== generacion) return;
     siguiente = datos.siguiente; $('mas').hidden = !siguiente;
     $('resultados').append(...datos.piezas.map((p) => resultado(p, undefined, true)));
@@ -173,6 +173,7 @@ async function recibir({ codigo, origen }) {
 const lector=escucharLector((lectura) => recibir(lectura).catch(e=>mensaje(e.message,'error')), { caja:$('consulta') });
 contexto.recibir=(codigo,origen)=>lector.recibir(codigo,origen);
 $('busqueda').onsubmit = (e) => { e.preventDefault(); void lector.recibir($('consulta').value,'caja'); };
+$('tienda')?.addEventListener('change', () => void buscar());   // #798: filtrar por dónde está la pieza
 $('consulta').addEventListener('input', () => {
   if (modo !== 'buscar') return;
   clearTimeout(filtroTimer); ficha.cerrar(); piezaActual = null; document.body.classList.remove('con-ficha');

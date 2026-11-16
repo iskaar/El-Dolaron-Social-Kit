@@ -211,6 +211,7 @@
 
 <div class="filtros"><div>
   <div class="segmentos" id="rango" role="group" aria-label="Periodo"></div>
+  <select id="f-tienda" aria-label="Tienda de las ventas" hidden></select>
   <div class="periodo"><span>Del <b id="p-texto">—</b></span><span id="p-anterior"></span></div>
   <button type="button" class="imprimir" id="imprimir">Imprimir o guardar PDF</button>
 </div></div>
@@ -400,6 +401,7 @@
       <article class="panel" id="p-piso">
         <header><h3>Inventario en piso <span class="subtitulo">piezas individuales con etiqueta y existencia</span></h3></header>
         <div class="tarjetas" id="piso-resumen"></div>
+        <div id="piso-por-tienda" hidden></div>
         <p class="nota">Foto del momento: no depende del periodo de arriba. No incluye bandas (no tienen fecha de captura propia) ni piezas agotadas
           o aún sin etiqueta. Las dañadas sí cuentan: siguen en piso. El valor es precio de tienda × existencia.</p>
       </article>
@@ -479,6 +481,7 @@ const nombreCat = (c) => NOMBRES_CAT.get(c) ?? mayuscula(c === 'sin categoria' ?
 const decimal = (n) => n.toLocaleString('es-MX', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
 
 let diasActual = 30;
+let tiendaActual = '';    // #798: '' = el negocio completo; si no, la clave de una tienda (ventas.tienda)
 let datosDias = [];        // los dias del rango, con ceros, para la grafica
 let diaElegido = null;     // un dia (clic en su columna) que filtra los tickets
 let ultimoReporte = null;
@@ -498,6 +501,24 @@ $('rango').addEventListener('click', (e) => {
   cargar();
   cargarTickets();
 });
+// #798: las ventas, el corte, los retiros y los tickets se acotan a una tienda; el inventario es la foto de todo el negocio.
+$('f-tienda').addEventListener('change', () => {
+  tiendaActual = $('f-tienda').value;
+  diaElegido = null;
+  cargar();
+  cargarTickets();
+});
+function pintarTiendas(r) {
+  // Solo se ofrece cuando hay más de una tienda en el servidor; un cliente viejo en caché simplemente no la ve.
+  if (!Array.isArray(r.tiendas) || r.tiendas.length < 2) return;
+  const selector = $('f-tienda');
+  selector.hidden = false;
+  if (selector.options.length !== r.tiendas.length + 1) {
+    selector.innerHTML = '<option value="">Todas las tiendas</option>' +
+      r.tiendas.map((t) => `<option value="${escapar(t.clave)}">${escapar(t.nombre)}</option>`).join('');
+  }
+  selector.value = tiendaActual;
+}
 $('imprimir').addEventListener('click', () => window.print());
 
 /* ---------- tarjetas ---------- */
@@ -720,6 +741,18 @@ function pintarRevendedoras(r) {
            <td class="num">${x.piezas.toLocaleString('es-MX')}</td><td class="num">${pesos(x.importe)}</td></tr>`).join('')}</tbody></table>`;
 }
 
+// #798: dónde está lo que vale el inventario. Soledad, cada sucursal y lo que va en camino (bulto abierto o cerrado). Sin sucursales ni bultos,
+// todo es de Soledad y el bloque no se muestra: la pantalla queda como siempre.
+const NOMBRES_LUGAR = { soledad: 'Soledad', salk: 'Avenida Salk', romero: 'Coronel Romero', en_camino: 'En camino' };
+function pintarPisoPorTienda(por) {
+  const caja = $('piso-por-tienda');
+  const hayFuera = por && Object.entries(por).some(([clave, x]) => clave !== 'soledad' && x.unidades > 0);
+  caja.hidden = !hayFuera;
+  if (!hayFuera) { caja.innerHTML = ''; return; }
+  caja.innerHTML = tabla(['Dónde', 'Unidades', 'Valor'],
+    Object.entries(por).map(([clave, x]) => [NOMBRES_LUGAR[clave] ?? clave, x.unidades.toLocaleString('es-MX'), pesos(x.valor)]), [1, 2]);
+}
+
 // El inventario en piso es una foto de ahora (Issue #174): no cambia con el periodo.
 function pintarPiso(inv) {
   const vacio = '<div class="vacio">No hay piezas con etiqueta y existencia en piso.</div>';
@@ -730,6 +763,7 @@ function pintarPiso(inv) {
     tarjeta('Unidades', inv.unidades.toLocaleString('es-MX'), '<div class="delta">suma de las existencias</div>'),
     tarjeta('Valor a precio de tienda', pesos(inv.valor)),
   ].join('');
+  pintarPisoPorTienda(inv.por_tienda);
 
   // Categorias ordenadas: una sola escala secuencial, del paso mas claro (nuevas) al mas fuerte (viejas), no un tono por tramo.
   const tramos = TRAMOS_ANTIGUEDAD.map(([clave, nombre], i) => {
@@ -848,8 +882,9 @@ $('bono-semanas').addEventListener('click', async (ev) => {
 async function cargar() {
   $('principal').classList.add('cargando');   // se queda el cuadro anterior, atenuado: sin saltos
   try {
-    const r = await (await fetch(`/api/reportes?dias=${diasActual}`)).json();
+    const r = await (await fetch(`/api/reportes?dias=${diasActual}${tiendaActual ? `&tienda=${encodeURIComponent(tiendaActual)}` : ''}`)).json();
     ultimoReporte = r;
+    pintarTiendas(r);
     pintarResumen(r); pintarVentas(r); pintarCuadre(r); pintarCaja(r); pintarCancelaciones(r); pintarDescuentos(r); pintarRevendedoras(r); pintarInventario(r);
     cargarEquipo();
   } finally {
@@ -968,6 +1003,7 @@ function opciones(selector, todas, valores) {
 async function cargarTickets(mas = false) {
   paginaTickets = mas ? paginaTickets + 1 : 0;
   const params = new URLSearchParams({ dias: diasActual, pagina: paginaTickets });
+  if (tiendaActual) params.set('tienda', tiendaActual);
   for (const [campo, id] of [['forma_pago', 'f-forma'], ['caja', 'f-caja'], ['cajero', 'f-cajero'], ['estado', 'f-estado']]) {
     if ($(id).value) params.set(campo, $(id).value);
   }

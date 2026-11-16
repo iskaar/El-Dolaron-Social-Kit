@@ -8,7 +8,7 @@
  * transición (`bultos.transicion`): un reintento no mueve existencia dos veces.
  */
 import { TIENDAS, TIENDA_CENTRAL, esTienda, leerUsuario, type Usuario } from './cuentas.ts';
-import { sentenciasMover } from './existencias.ts';
+import { sentenciasMover, unidadesEn } from './existencias.ts';
 import { conciliarSeguro } from './mercadolibre.ts';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -45,12 +45,15 @@ const lineasDe = async (env: Env, bultoId: string) => (await env.DB.prepare(
 /** El bulto como lo ve la pantalla: sin tokens, con nombres de tienda, piezas y valor (centavos, a precio de hoy). */
 async function vista(env: Env, b: Bulto, conLineas: boolean) {
   const lineas = await lineasDe(env, b.id);
+  // #798: en un bulto recibido, lo que hay AHORA de cada pieza en la tienda destino: es la `esperado` del ajuste de faltante o sobrante.
+  const ajustable = conLineas && b.estado === 'recibido'
+    ? await Promise.all(lineas.map(async (l) => ({ ...l, existencia_destino: await unidadesEn(env, b.destino, l.producto_id) }))) : lineas;
   const piezas = lineas.reduce((n, l) => n + l.cantidad, 0);
   const valor = lineas.reduce((n, l) => n + l.cantidad * l.precio, 0);
   const { transicion: _t, ...publico } = b;
   return {
     ...publico, origen_nombre: nombreTienda(b.origen), destino_nombre: nombreTienda(b.destino), piezas, valor,
-    ...(conLineas ? { lineas } : {}),
+    ...(conLineas ? { lineas: ajustable } : {}),
     etiqueta: { folio: b.folio, destino: nombreTienda(b.destino), origen: nombreTienda(b.origen), piezas,
       fecha: new Date(b.cerrado_en ?? b.creado_en).toLocaleDateString('es-MX', { timeZone: 'America/Mexico_City', day: '2-digit', month: '2-digit', year: 'numeric' }) },
   };

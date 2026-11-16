@@ -1,6 +1,6 @@
 /** Consulta y ajuste de inventario con rastro (#441). */
 import { propietarioDe, puedeEditarInventario, esTienda, TIENDA_CENTRAL, type Usuario } from './cuentas.ts';
-import { fueraDeSoledad, unidadesEn, tieneUnidadesFuera, MENSAJE_FUERA_DE_SOLEDAD } from './existencias.ts';
+import { fueraDeSoledad, unidadesEn, tieneUnidadesFuera, MENSAJE_FUERA_DE_SOLEDAD, sucursales, enCaminoSql, enTiendaSql, desglosePieza } from './existencias.ts';
 import { MOTIVOS } from './conteo.ts';
 import { conciliarSeguro } from './mercadolibre.ts';
 import { pendienteDe } from './solicitudes-precio.ts';
@@ -37,6 +37,33 @@ const COLUMNAS = `p.id, p.codigo, p.nombre, p.marca, p.talla, p.categoria, p.pre
   p.creado_en, p.actualizado_en`;
 const VISIBLE = "p.sin_inventario = 0 and p.estado_analisis <> 'descartado'";
 const publica = ({ fila, elegible, ...p }: Candidata) => p;
+
+/**
+ * #798: filtro de /inventario por dónde está la pieza: `soledad`, una sucursal o `en_camino` (bulto abierto o cerrado). Devuelve la condición
+ * SQL (sobre `p`), '' sin filtro, o null si la clave no existe. Las claves salen de constantes del código, no del navegador.
+ */
+function condicionTienda(valor: string | null): string | null {
+  if (!valor) return '';
+  if (valor === TIENDA_CENTRAL) return 'p.stock > 0';
+  if (valor === 'en_camino') return `${enCaminoSql('p.id')} > 0`;
+  return esTienda(valor) ? `${enTiendaSql('p.id', valor)} > 0` : null;
+}
+
+/** #798: agrega `existencia` (Soledad, cada sucursal, en camino y total) a las piezas de una página. Un solo viaje para toda la página. */
+async function conExistencia<T extends { id: string }>(env: Env, piezas: T[]) {
+  if (!piezas.length) return piezas as (T & { existencia: Awaited<ReturnType<typeof desglosePieza>> })[];
+  const { results } = await env.DB.prepare(`select id, stock as soledad, ${enCaminoSql('productos.id')} as en_camino,
+      ${sucursales().map((t) => `${enTiendaSql('productos.id', t)} as t_${t}`).join(', ')}
+    from productos where id in (${piezas.map(() => '?').join(',')})`).bind(...piezas.map((p) => p.id)).all<Record<string, number | string>>();
+  const porId = new Map(results.map((f) => [f.id as string, f]));
+  return piezas.map((p) => {
+    const f = porId.get(p.id);
+    if (!f) return { ...p, existencia: null };
+    const porTienda = Object.fromEntries(sucursales().map((t) => [t, f[`t_${t}`] as number]));
+    const soledad = f.soledad as number, en_camino = f.en_camino as number;
+    return { ...p, existencia: { soledad, sucursales: porTienda, en_camino, total: soledad + en_camino + Object.values(porTienda).reduce((a, n) => a + n, 0) } };
+  });
+}
 
 /**
  * ¿Puede esta persona fijar el precio de esta pieza directamente? (#479, decisión de Isaac en #478.) El dueño siempre.
@@ -105,11 +132,13 @@ export async function buscarPiezas(env: Env, url: URL, propietario: string): Pro
   }
   if (q.length > 80 || (q && !codigo && !upc && q.length < 3) || (crudo !== null && !cursor))
     return json({ error: 'Escribe un código o al menos 3 caracteres (máximo 80); revisa el cursor.' }, 400);
+  const dondeTienda = condicionTienda(url.searchParams.get('tienda'));
+  if (dondeTienda === null) return json({ error: 'Tienda inválida.' }, 400);
 
   if (codigo && !cursor) {
     const p = await env.DB.prepare(`select ${COLUMNAS} from productos p
-      where p.codigo = ? and p.propietario = ? and ${VISIBLE}`).bind(codigo, propietario).first<Pieza>();
-    if (p || !upc) return json({ piezas: p ? [p] : [], siguiente: null });
+      where p.codigo = ? and p.propietario = ? and ${VISIBLE} ${dondeTienda ? `and ${dondeTienda}` : ''}`).bind(codigo, propietario).first<Pieza>();
+    if (p || !upc) return json({ piezas: p ? await conExistencia(env, [p]) : [], siguiente: null });
   }
   if (codigo && !upc) return json({ piezas: [], siguiente: null });
 
@@ -129,7 +158,7 @@ export async function buscarPiezas(env: Env, url: URL, propietario: string): Pro
     // Sin filtro casi toda candidata es elegible: leer una página, no un tramo de 200 (cuota de D1).
     const limite = Math.min(upc || palabras.length ? TRAMO : PAGINA, restantes);
     const { results } = await env.DB.prepare(`select p.rowid as fila, ${COLUMNAS},
-        (${VISIBLE} ${upc ? 'and p.propietario = ?' : ''} ${coincide.length ? 'and ' + coincide.join(' and ') : ''}) as elegible
+        (${VISIBLE} ${upc ? 'and p.propietario = ?' : ''} ${coincide.length ? 'and ' + coincide.join(' and ') : ''} ${dondeTienda ? `and ${dondeTienda}` : ''}) as elegible
       from productos p indexed by ${upc ? 'productos_upc' : 'productos_propietario_creado'}
       where ${upc ? `p.upc in (${variantes.map(() => '?').join(',')})` : 'p.propietario = ?'}
         ${cursor ? empate
@@ -157,7 +186,7 @@ export async function buscarPiezas(env: Env, url: URL, propietario: string): Pro
     }
     empate = true;
   }
-  return json({ piezas, siguiente });
+  return json({ piezas: await conExistencia(env, piezas), siguiente });
 }
 
 async function fichaPieza(env: Env, id: string, usuario: Usuario | null): Promise<Response> {
@@ -181,7 +210,13 @@ async function fichaPieza(env: Env, id: string, usuario: Usuario | null): Promis
     from movimientos_existencia where producto_id = ? and tipo like 'bulto\_%' escape '\\' order by en desc limit 20`).bind(id).all();
   const { results: en_sucursales } = await env.DB.prepare('select tienda, unidades from existencia_tienda where producto_id = ? and unidades > 0 order by tienda')
     .bind(id).all();
-  return json({ pieza, historial, movimientos_bulto, en_sucursales, puede_editar: puedeEditarInventario(usuario), puede_precio: !!usuario?.activo && usuario.roles.includes('dueno'),
+  const existencia = await desglosePieza(env, id);
+  // #798: la tienda de los ajustes que NO son de Soledad, aparte de `historial` para que sus renglones conserven su forma (#795).
+  const enSucursal = ajustes.length
+    ? (await env.DB.prepare(`select id, tienda from conteo_ajustes where tienda <> 'soledad' and id in (${ajustes.map(() => '?').join(',')})`)
+      .bind(...ajustes.map((a) => a.id)).all<{ id: string; tienda: string }>()).results : [];
+  const tienda_de_ajustes = Object.fromEntries(enSucursal.map((a) => [a.id, a.tienda]));
+  return json({ pieza, historial, movimientos_bulto, en_sucursales, existencia, tienda_de_ajustes, puede_editar: puedeEditarInventario(usuario), puede_precio: !!usuario?.activo && usuario.roles.includes('dueno'),
     solicitud_precio: await pendienteDe(env, id) });
 }
 
@@ -227,7 +262,7 @@ export async function escribirExistencia(env: Env, ctx: ExecutionContext, a: {
  * Ajuste de faltante o sobrante en una sucursal (R3 de #793): la existencia propia de esa tienda, con renglón en `conteo_ajustes` (con
  * tienda), condicional en SQL y con folio idempotente, como el de Soledad. Solo el dueño; nunca toca productos.stock.
  */
-async function ajustarSucursal(env: Env, id: string, tienda: string, cuerpo: Record<string, unknown>, usuario: Usuario | null,
+export async function ajustarSucursal(env: Env, id: string, tienda: string, cuerpo: Record<string, unknown>, usuario: Usuario | null,
   delta: number, motivo: string, esperado: number | undefined): Promise<Response> {
   const folio = cuerpo.id as string;
   const guardado = () => env.DB.prepare(`select id, producto_id, motivo, cantidad, antes, despues, ajustado_por, ajustado_en, tienda

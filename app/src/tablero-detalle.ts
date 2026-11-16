@@ -151,6 +151,7 @@ async function mercancia(env: Env, cal: Calendario) {
     inventario: {
       piezas: inventario.unidades,
       valor: inventario.valor,
+      por_tienda: inventario.por_tienda,   // #798
       por_categoria: inventario.por_categoria.map(({ categoria, unidades, valor }) => ({ categoria, piezas: unidades, valor })),
       por_antiguedad: porTramo,
       // Piezas con existencia pero sin fecha de captura valida: no se adivina su edad.

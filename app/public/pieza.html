@@ -73,6 +73,7 @@
     <form id="busqueda">
       <label for="consulta">Código, UPC o nombre</label>
       <div class="acciones"><input id="consulta" type="search" maxlength="80" autocomplete="off" autofocus style="flex:1;width:auto"><button type="submit">Buscar</button></div>
+      <select id="tienda" aria-label="Dónde está la pieza"><option value="">En cualquier tienda</option><option value="soledad">En Soledad</option><option value="salk">En Avenida Salk</option><option value="romero">En Coronel Romero</option><option value="en_camino">En camino (bulto)</option></select>
     </form>
     <div id="visor" hidden></div>
     <p id="resumen" class="ayuda">El lector puede usarse con cualquier ficha abierta.</p>
@@ -86,6 +87,7 @@
       <div class="datos"><h2 id="nombre"></h2><p id="detalles" class="ayuda"></p><p id="upc" class="ayuda"></p><p><strong id="precio"></strong><span id="precio-lista"></span></p>
         <h3>Existencia</h3>
         <div class="acciones"><button id="menos" type="button" aria-label="Bajar existencia en uno" hidden>−</button><output id="stock" aria-label="Existencia actual"></output><button id="sumar" type="button" aria-label="Subir existencia en uno" hidden>+</button></div>
+        <p id="desglose" class="ayuda" hidden></p>
         <div id="existencia" hidden>
           <label for="motivo">Motivo</label>
           <select id="motivo">

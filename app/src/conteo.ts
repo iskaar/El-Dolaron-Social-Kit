@@ -7,7 +7,9 @@
  * ver el rastro, solo el dueno.
  */
 
-import { ajusteGuardado, escribirExistencia } from './piezas.ts';
+import { ajusteGuardado, escribirExistencia, ajustarSucursal } from './piezas.ts';
+import { TIENDA_CENTRAL, type Usuario } from './cuentas.ts';
+import { unidadesEn } from './existencias.ts';
 
 /** $300 en centavos, si la configuracion no trae CONTEO_UMBRAL. */
 const UMBRAL_POR_OMISION = 30000;
@@ -23,19 +25,31 @@ export function umbralConteo(env: Env): number {
   return Number.isInteger(umbral) && umbral > 0 ? umbral : UMBRAL_POR_OMISION;
 }
 
-/** Las piezas que se cuentan cada noche: en existencia y de precio alto. FEP es otro inquilino: cada cuenta ve solo las suyas (#480). */
-export async function listarAltoValor(env: Env, propietario: string): Promise<Response> {
+/**
+ * La existencia que se cuenta en una tienda, como expresión SQL sobre `productos` (#798): Soledad es `productos.stock`; una sucursal
+ * cuenta SU existencia (`existencia_tienda`). `tienda` sale de la cuenta (nunca del navegador) y se pasa como parámetro enlazado.
+ */
+const existenciaDe = (tienda: string) => tienda === TIENDA_CENTRAL ? 'stock'
+  : 'coalesce((select e.unidades from existencia_tienda e where e.producto_id = productos.id and e.tienda = ?), 0)';
+const enlazar = (tienda: string) => tienda === TIENDA_CENTRAL ? [] : [tienda];
+
+/**
+ * Las piezas que se cuentan cada noche: en existencia y de precio alto. FEP es otro inquilino: cada cuenta ve solo las suyas (#480).
+ * Una cuenta de sucursal cuenta las de SU existencia; `stock` de cada renglón es lo que el sistema dice que hay ahí.
+ */
+export async function listarAltoValor(env: Env, propietario: string, tienda = TIENDA_CENTRAL as string): Promise<Response> {
+  const existencia = existenciaDe(tienda);
   const { results } = await env.DB.prepare(
-    `select id, codigo, nombre, precio, stock from productos
-     where sin_inventario = 0 and stock >= 1 and precio >= ? and propietario = ? order by precio desc, codigo`,
+    `select id, codigo, nombre, precio, ${existencia} as stock from productos
+     where sin_inventario = 0 and ${existencia} >= 1 and precio >= ? and propietario = ? order by precio desc, codigo`,
   )
-    .bind(umbralConteo(env), propietario)
+    .bind(...enlazar(tienda), ...enlazar(tienda), umbralConteo(env), propietario)
     .all();
   return json(results);
 }
 
 /** Compara lo contado con lo que dice el sistema. No cambia nada: solo devuelve los faltantes. */
-export async function revisarConteo(request: Request, env: Env, propietario: string): Promise<Response> {
+export async function revisarConteo(request: Request, env: Env, propietario: string, tienda = TIENDA_CENTRAL as string): Promise<Response> {
   const cuerpo = (await request.json().catch(() => ({}))) as { conteos?: unknown };
   if (!Array.isArray(cuerpo.conteos) || cuerpo.conteos.length > 200) return json({ error: 'Falta el conteo.' }, 400);
 
@@ -48,9 +62,9 @@ export async function revisarConteo(request: Request, env: Env, propietario: str
     }
     // Lo que no esta en la lista de alto valor no se cuenta aqui.
     const pieza = await env.DB.prepare(
-      `select codigo, nombre, stock from productos where id = ? and sin_inventario = 0 and precio >= ? and propietario = ?`,
+      `select codigo, nombre, ${existenciaDe(tienda)} as stock from productos where id = ? and sin_inventario = 0 and precio >= ? and propietario = ?`,
     )
-      .bind(id, umbralConteo(env), propietario)
+      .bind(...enlazar(tienda), id, umbralConteo(env), propietario)
       .first<{ codigo: string; nombre: string; stock: number }>();
     if (pieza && pieza.stock > contado) {
       faltantes.push({
@@ -66,7 +80,8 @@ export async function revisarConteo(request: Request, env: Env, propietario: str
  * Baja las existencias por un faltante y lo anota, por escribirExistencia (#480): el folio lo manda el cliente (`id`), así que
  * reintentar no descuenta dos veces; `esperado` es la existencia que vio quien cuenta, y solo se escribe si sigue igual.
  */
-export async function ajustarExistencia(request: Request, env: Env, correo: string, ctx: ExecutionContext, propietario: string): Promise<Response> {
+export async function ajustarExistencia(request: Request, env: Env, correo: string, ctx: ExecutionContext, propietario: string,
+  tienda = TIENDA_CENTRAL as string, usuario: Usuario | null = null): Promise<Response> {
   const cuerpo = (await request.json().catch(() => ({}))) as Record<string, unknown>;
   const id = String(cuerpo.producto_id ?? '');
   const folio = String(cuerpo.id ?? '');
@@ -93,6 +108,17 @@ export async function ajustarExistencia(request: Request, env: Env, correo: stri
     .first<{ stock: number; sin_inventario: number }>();
   if (!pieza) return json({ error: 'La pieza no existe.' }, 404);
   if (pieza.sin_inventario) return json({ error: 'Esa pieza no lleva inventario.' }, 400);
+  // #798: en una sucursal el faltante baja SU existencia (existencia_tienda) con renglón en conteo_ajustes con su tienda; nunca toca
+  // productos.stock. Es el mismo ajuste auditado de /api/piezas/:id/existencia (condicional a `esperado`, folio idempotente).
+  if (tienda !== TIENDA_CENTRAL) {
+    if (!usuario) return json({ error: 'Cuenta no encontrada.' }, 403);
+    const aqui = await unidadesEn(env, tienda, id);
+    if (aqui < cantidad) return json({ error: 'No hay tantas piezas en existencia.', stock: aqui }, 409);
+    const respuesta = await ajustarSucursal(env, id, tienda, { id: folio }, usuario, -cantidad, motivo, esperado);
+    if (!respuesta.ok) return respuesta;
+    const guardado = await respuesta.json() as { antes: number; despues: number };
+    return json({ producto_id: id, antes: guardado.antes, despues: guardado.despues, tienda }, 201);
+  }
   if (pieza.stock < cantidad) return json({ error: 'No hay tantas piezas en existencia.', stock: pieza.stock }, 409);
 
   const ajuste = await escribirExistencia(env, ctx, { id, propietario, folio, delta: -cantidad, motivo, correo, esperado });
