@@ -430,6 +430,7 @@ export function imprimirRetiro(retiro) {
     ...encabezado(gasto ? 'GASTO DE CAJA' : retiro.tipo === 'terminal' ? 'PAGO DE LA TERMINAL' : 'RETIRO DE EFECTIVO'),
     linea(`Caja: ${sinAcentos(retiro.caja)}`),
     linea(`Cajero: ${sinAcentos(retiro.cajero)}`.slice(0, COLUMNAS)),
+    ...(retiro.aprobo_por ? [linea(`Aprobo: ${sinAcentos(retiro.aprobo_por)}`.slice(0, COLUMNAS))] : []),   // #846: retiro arriba del tope
     linea(`Fecha: ${fechaHora(retiro.creado_en)}`),
     separador(),
     negritas(true),
