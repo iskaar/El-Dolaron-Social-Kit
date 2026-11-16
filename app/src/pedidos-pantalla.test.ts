@@ -120,7 +120,7 @@ test('Por enviar separa los viernes confirmados de los paquetes pendientes y mue
   assert.match(envios, /Liquidado: no vence/);
 });
 
-test('un apartado de revendedora (anticipo 0) dice «Sin anticipo · vence … · nombre» y trae su botón de abono; el normal no (#575)', () => {
+test('un apartado de revendedora (anticipo 0) dice «Sin anticipo · vence … · nombre» y trae su botón de abono; el normal con anticipo también, sin Sin anticipo (#575, #838)', () => {
   const html = new Map<string, any>();
   const $ = (id: string) => { if (!html.has(id)) html.set(id, {}); return html.get(id); };
   const base = { cliente: 'Ana', telefono: '4441234567', entrega: 'tienda', estado: 'apartado', guia: '', liquidado_en: null, envio: 0,
@@ -144,7 +144,10 @@ pintarLista`, {
   assert.match(reventa, /data-mover="1" data-tipo="abono"/);
   assert.match(reventa, /Pagado \$0 de \$200 · Falta \$200/);
   assert.match(reventa, /data-cancelar="1"/);
-  assert.doesNotMatch(normal, /Sin anticipo|data-mover/);
+  assert.doesNotMatch(normal, /Sin anticipo/);
+  // #838: el apartado normal también recibe abonos, dice cuántos días quedan y que el abono no los alarga.
+  assert.match(normal, /data-mover="2" data-tipo="abono"/);
+  assert.match(normal, /Vence (?:hoy,|el) 2030-01-01 \(quedan \d+ días; los abonos no lo alargan\)/);
   assert.match(normal, /data-cancelar="2"/);
   assert.match($('lista-envios').innerHTML, /Sin anticipo · Vence el 2030-01-01 · Bety; cada pieza/);
 });

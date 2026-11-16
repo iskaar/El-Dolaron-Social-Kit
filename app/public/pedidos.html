@@ -551,6 +551,8 @@ async function cargarLista() {
 const vendedoraDe = (p) => p.vendedora === 'portal' ? 'Portal' : escapar(String(p.vendedora ?? '').split('@')[0]);
 // Apartado de revendedora (#575): sin anticipo, dura 48 h y el pago lo registra la tienda con un abono.
 const sinAnticipo = (p) => p.estado === 'apartado' && p.anticipo === 0 && !p.liquidado_en;
+// #838: días que le quedan a un apartado para recogerlo (un abono no los alarga).
+const diasQuedan = (p) => Math.max(0, Math.ceil((Date.parse(p.vence_en) - Date.now()) / 86400000));
 const revendedoraNombre = (p) => p.vendedora === 'portal' ? 'Portal' : escapar(p.vendedora_nombre || String(p.vendedora ?? '').split('@')[0]);
 
 // Pago que reporto la revendedora (#609): se acepta registrando el abono (llena la ventana de abono) o se rechaza con motivo.
@@ -598,10 +600,10 @@ function pintarLista() {
     const urgente = vencido || dia(Date.parse(p.vence_en)) === hoy;
     const reventa = sinAnticipo(p);
     return filaPedido(p, {
-      vence: `<div class="vence ${urgente ? 'urgente' : ''}">${reventa ? 'Sin anticipo · ' : ''}${vencido ? 'Venció el' : dia(Date.parse(p.vence_en)) === hoy ? 'Vence hoy,' : 'Vence el'} ${fecha(p.vence_en)}${reventa ? ` · ${revendedoraNombre(p)}` : ''}</div>`,
+      vence: `<div class="vence ${urgente ? 'urgente' : ''}">${reventa ? 'Sin anticipo · ' : ''}${vencido ? 'Venció el' : dia(Date.parse(p.vence_en)) === hoy ? 'Vence hoy,' : 'Vence el'} ${fecha(p.vence_en)}${vencido || reventa ? '' : ` (${diasQuedan(p) === 1 ? 'queda 1 día' : `quedan ${diasQuedan(p)} días`}; los abonos no lo alargan)`}${reventa ? ` · ${revendedoraNombre(p)}` : ''}</div>`,
       botones: botonWa(p, mensajeRecordar(p), 'WhatsApp: recordar')
         + (p.lista_para_entregar && p.lineas.some((l) => l.desde_nombre) ? botonWa(p, mensajeLista(p), 'WhatsApp: ya llegó a la tienda') : '')
-        + (reventa ? `<button class="boton chico relleno" type="button" data-mover="${p.folio}" data-tipo="abono">Recibir abono</button>` : '')
+        + (!reventa && (vencido || p.faltante <= 0) ? '' : `<button class="boton chico relleno" type="button" data-mover="${p.folio}" data-tipo="abono">Recibir abono</button>`)
         + `<button class="boton chico rojo" type="button" data-cancelar="${p.folio}">Cancelar apartado</button>`,
     });
   }).join('') || '<p class="vacio">No hay apartados.</p>';

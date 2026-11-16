@@ -624,13 +624,14 @@ async function moverPaquete(folio: number, tipo: 'pieza' | 'abono', request: Req
   if (!pedido) return json({ error: 'El pedido no existe.' }, 404);
   const momento = new Date();
   const ahora = momento.toISOString();
-  // #575: el apartado de revendedora (tienda, anticipo 0) recibe abonos como un paquete, pero no se liquida:
-  // lo que falte se cobra en caja al recoger. Un apartado normal (anticipo > 0) sigue sin aceptarlos.
-  const sinAnticipo = tipo === 'abono' && pedido.entrega === 'tienda' && Number(pedido.anticipo) === 0;
+  // #575 / #838: un apartado para recoger (con o sin anticipo) recibe abonos como un paquete, pero no se liquida: lo que falte
+  // se cobra en caja al recoger. Con anticipo, el abono NO mueve el plazo (#838); sin anticipo (revendedora/portal) lo renueva, como siempre.
+  const abonoEnTienda = tipo === 'abono' && pedido.entrega === 'tienda';
+  const mismoPlazo = abonoEnTienda && Number(pedido.anticipo) > 0;
   // #609: un apartado con pago reportado sin revisar no vence (el cron lo salta); su abono se registra aunque el plazo ya pasara.
   const vencido = String(pedido.vence_en) <= ahora;
   const reportado = tipo === 'abono' && vencido && !!await env.DB.prepare("select 1 as x from pagos_reportados where pedido_id = ? and estado = 'pendiente'").bind(pedido.id).first();
-  if ((pedido.entrega !== 'envio' && !sinAnticipo) || pedido.estado !== 'apartado' || pedido.liquidado_en || (vencido && !reportado))
+  if ((pedido.entrega !== 'envio' && !abonoEnTienda) || pedido.estado !== 'apartado' || pedido.liquidado_en || (vencido && !reportado))
     return json({ error: 'El paquete ya no está abierto o venció. Actualiza la lista.' }, 409);
   const vence = new Date(momento.getTime() + DIAS_APARTADO * 86_400_000);
   let precio = 0;
@@ -662,7 +663,7 @@ async function moverPaquete(folio: number, tipo: 'pieza' | 'abono', request: Req
     await env.DB.batch([
       // La revisión y el estado se comprueban DENTRO del batch. Un WHERE que no modifica filas no lo aborta.
       env.DB.prepare(`update pedidos set saldo = case when revision = ?1 and estado = 'apartado'
-        and (entrega = 'envio'${sinAnticipo ? " or (entrega = 'tienda' and anticipo = 0)" : ''})
+        and (entrega = 'envio'${abonoEnTienda ? " or entrega = 'tienda'" : ''})
         and liquidado_en is null and (vence_en > ?2 or ${tipo === 'abono' ? hayReportePendiente('pedidos.id') : '0'}) ${tipo === 'pieza' ? `and exists (select 1 from productos
           where id = ?4 and propietario = 'dolaron' and sin_inventario = 0 and codigo is not null and codigo != ''
           and ${origen === TIENDA_CENTRAL ? 'stock' : enTiendaSql('productos.id', origen as Tienda)} >= ?5 and precio = ?6)` : ''} then saldo else -1 end where id = ?3`)
@@ -684,7 +685,8 @@ async function moverPaquete(folio: number, tipo: 'pieza' | 'abono', request: Req
       ] : []),
       env.DB.prepare(`update pedidos set saldo = saldo + ?1, envio = ?2, vence_en = ?3,
         saldo_vence_en = ?4, actualizado_en = ?5, revision = revision + 1 where id = ?6`)
-        .bind(tipo === 'abono' ? importe : 0, envio, vence.toISOString(), sumarMeses(vence, 1), ahora, pedido.id),
+        .bind(tipo === 'abono' ? importe : 0, envio, mismoPlazo ? pedido.vence_en : vence.toISOString(),
+          mismoPlazo ? pedido.saldo_vence_en : sumarMeses(vence, 1), ahora, pedido.id),
       ...(liquidado ? await ventaDePaquete(env, pedido.id, id, total, ahora, correo,
         tipo === 'abono' ? caja : pedido.caja, tipo === 'abono' ? formaPago : String(pedido.forma_pago)) : []),
       // La respuesta se guarda en el mismo batch: conserva el resultado original incluso después de otros movimientos.
