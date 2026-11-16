@@ -1,4 +1,4 @@
-import { saldo, progresoDePromo, codigoAleatorio, hashCodigo, basesListas, promocionIniciada } from './dolarones.ts';
+import { saldo, progresoDePromo, codigoAleatorio, hashCodigo, basesListas, promocionAbierta, clientePorCodigo } from './dolarones.ts';
 import { reclamarVale } from './vales.ts';
 import { programaActivo, revisarCodigo, resumenReferidos, sentenciasDeAlta, D_ALTA } from './referidos.ts';
 import { apartarPortal, apartadosDeSocio, cancelarDeSocio, telefonoDe } from './pedidos.ts';
@@ -14,10 +14,6 @@ const json = (body: unknown, status = 200) => new Response(JSON.stringify(body),
 
 type Identidad = { uid: string; telefono: string };
 type Cliente = { id: string; numero: number; nombre: string; telefono: string; bases_version: string };
-
-function promocionAbierta(env: Env): boolean {
-  return env.PORTAL_REGISTRO_ABIERTO === 'si' && basesListas(env) && promocionIniciada(env, new Date());
-}
 
 // Sólo el motivo (nunca token ni teléfono): para saber por qué alguien ve «Sesión inválida».
 const rechazo = (motivo: string) => { console.warn(`portal: sesión rechazada (${motivo})`); return null; };
@@ -169,10 +165,13 @@ export async function registro(request: Request, env: Env, auth: Identidad): Pro
 
 export async function llegada(request: Request, env: Env, autor: string): Promise<Response> {
   if (!promocionAbierta(env)) return json({ error: 'Promoción no disponible.' }, 503);
-  const body = await request.json().then((c) => c ?? {}, () => ({})) as { cliente_id?: unknown };
-  const id = String(body.cliente_id ?? '');
-  if (!UUID.test(id)) return json({ error: 'Socio inválido.' }, 400);
-  if (!await env.DB.prepare('select 1 from clientes where id = ?').bind(id).first()) return json({ error: 'Socio no encontrado.' }, 404);
+  // #839: la llegada se acredita con el código DC- que el cliente genera en su cuenta (el mismo que identifica y paga);
+  // un número tecleado ya no basta. La lectura no consume el código, pero su `maximo` quedó fijo al generarlo: lo recién acreditado se gasta con un código nuevo.
+  const body = await request.json().then((c) => c ?? {}, () => ({})) as { codigo?: unknown };
+  const dueno = await clientePorCodigo(env, body.codigo);
+  if (dueno === undefined) return json({ error: 'Pide al cliente su código en su celular.' }, 400);
+  if (!dueno) return json({ error: 'Código vencido o usado. Pide al cliente que genere otro.' }, 403);
+  const id = dueno.id;
   // #611: promoción de apertura apagada; no otorga ni registra primera llegada.
   if (env.PREMIOS_APERTURA !== 'si') return json({ premio: await premioActual(env, id) ?? null });
   if (await hayRegalosLegados(env)) return json({ error: 'Resolver premios anteriores antes de abrir la promoción.' }, 409);

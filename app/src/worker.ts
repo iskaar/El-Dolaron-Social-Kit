@@ -2076,7 +2076,7 @@ async function registrarVenta(request: Request, env: Env, ctx: ExecutionContext,
     return json({ error:vale.error }, vale.status);
   }
 
-  const conPedido = pedidoId ? await sentenciasDePedido(env, { pedidoId, ventaId: id, anticipo, ahora, tienda, total, lineas: preparado.lineas }) : null;
+  const conPedido = pedidoId ? await sentenciasDePedido(env, { pedidoId, ventaId: id, anticipo, ahora, tienda, total, porPagar, lineas: preparado.lineas }) : null;
   if (conPedido && !conPedido.ok) {
     const concurrente = await reintento();
     if (concurrente) return concurrente;

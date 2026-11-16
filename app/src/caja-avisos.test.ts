@@ -322,7 +322,7 @@ test('#817 Dolarones: reintentar el mismo folio con el mismo código de socio re
     const { db } = t;
     const socio = (await t.pedir('/api/socios', { id: crypto.randomUUID(), nombre: 'Cliente', telefono: '4449990000', pin: '1234',
       acepta_bases: true, declara_mayor_edad: true })).cuerpo;
-    assert.equal((await t.pedir('/api/portal/llegada', { cliente_id: socio.id })).status, 200);
+    assert.equal((await t.pedir('/api/portal/llegada', { codigo: await codigoPrueba(db, socio.id) })).status, 200);
     const venta = { id: crypto.randomUUID(), lineas: [{ producto_id: PRODUCTO, cantidad: 4 }], forma_pago: 'efectivo', efectivo: 1000_00, caja: 'Caja 1',
       cliente_id: socio.id, dolarones: 5000, codigo_socio: await codigoPrueba(db, socio.id) };
     assert.equal((await t.pedir('/api/ventas', venta)).status, 201);

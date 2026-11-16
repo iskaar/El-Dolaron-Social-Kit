@@ -57,7 +57,7 @@ function abrir(encendida = true) {
   const precio = (centavos: number) => t.db.prepare('update productos set precio = ? where id = ?').run(centavos, PRODUCTO);
   const alta = async () => {
     const r = await t.pedir('/api/socios', { id: crypto.randomUUID(), nombre: 'Cliente', telefono: String(telefonos++), acepta_bases: true, declara_mayor_edad: true });
-    await t.pedir('/api/portal/llegada', { cliente_id: r.cuerpo.id });
+    await t.pedir('/api/portal/llegada', { codigo: await codigoPrueba(t.db, r.cuerpo.id) });
     return r.cuerpo;
   };
   /** Una venta con el socio; `precio` es lo que cuesta la pieza (1 pieza) y `dolarones` lo que se paga con saldo. */

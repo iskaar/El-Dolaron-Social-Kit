@@ -23,7 +23,7 @@ test('con ventas de todo tipo, el reporte cuadra al centavo y bruto - devolucion
   const socio = (await pedir('/api/socios', {
     id: crypto.randomUUID(), nombre: 'Cliente', telefono: '4449990000', pin: '1234', acepta_bases: true, declara_mayor_edad: true,
   })).cuerpo;
-  assert.equal((await pedir('/api/portal/llegada', { cliente_id: socio.id })).status, 200);
+  assert.equal((await pedir('/api/portal/llegada', { codigo: await codigoPrueba(db, socio.id) })).status, 200);
 
   await vender(pedir, 'Caja 1');                                                    // efectivo $250
   await vender(pedir, 'Caja 1', { forma_pago: 'tarjeta', efectivo: 0 });            // tarjeta $250

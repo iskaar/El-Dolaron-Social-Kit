@@ -445,15 +445,18 @@ test('abono del personal a un apartado de revendedora: entra al corte de su caja
   t.db.close();
 });
 
-test('el abono a un apartado normal de tienda (con anticipo) sigue rechazado; la pieza y el envio de la tienda no cambian', async () => {
+test('el abono a un apartado normal de tienda (con anticipo) se acepta sin mover su plazo (#838); la pieza y el envio de la tienda no cambian', async () => {
   const t = mundo();
   const p = pieza(t.db);
   const normal = await t.pedir('/api/pedidos', { id: crypto.randomUUID(), lineas: [{ producto_id: p.id, cantidad: 1 }], cliente: 'Z',
     telefono: '4441234567', entrega: 'tienda', anticipo: 10000, forma_pago: 'efectivo', caja: 'Caja 1' });
   assert.equal(normal.status, 201);
-  assert.equal((await abonar(t, normal.cuerpo.pedido.folio, 100)).status, 409);
-  assert.equal(fila(t.db, 'select saldo from pedidos where id = ?', normal.id ?? normal.cuerpo.pedido.id).saldo, 10000);
-  assert.equal((t.db.prepare('select count(*) as n from pedido_movimientos').get() as any).n, 0);
+  assert.equal((await abonar(t, normal.cuerpo.pedido.folio, 100)).status, 200);
+  const despues = fila(t.db, 'select saldo, vence_en, saldo_vence_en from pedidos where id = ?', normal.cuerpo.pedido.id);
+  assert.equal(despues.saldo, 10100);
+  assert.equal(despues.vence_en, normal.cuerpo.pedido.vence_en);
+  assert.equal(despues.saldo_vence_en, normal.cuerpo.pedido.saldo_vence_en);
+  assert.equal((t.db.prepare('select count(*) as n from pedido_movimientos').get() as any).n, 1);
   // agregar piezas sigue siendo solo de paquetes de envio, tambien para el apartado de revendedora
   comoUsuario(t.env, ANA);
   const q = pieza(t.db);
@@ -635,7 +638,7 @@ test('/api/reportes: por revendedora, pedidos vendidos, piezas e importe de lo q
   await cobra(pa.cuerpo.pedido, [a, b]);          // Ana: 2 piezas, $500
   const cancelada = await cobra(pb.cuerpo.pedido, [c]);   // Ana: se cancela despues
   await cobra(pc.cuerpo.pedido, [d]);             // Bety: 1 pieza, $400
-  await cobra(normal.cuerpo.pedido, [e], 800);
+  await cobra(normal.cuerpo.pedido, [e], 5000);   // #838: un apartado vigente gasta todo su saldo (min(saldo, total))
   t.db.prepare('update ventas set cancelada = 1 where id = ?').run(fila(t.db, 'select id from ventas where pedido_id = ?', pb.cuerpo.pedido.id).id);
   void cancelada;
 
@@ -697,3 +700,23 @@ test('todo pago que la tienda registra de una revendedora por transferencia llev
   t.db.close();
 });
 const saldoDelFolio = (db: DatabaseSync, folio: number) => (db.prepare('select saldo from pedidos where folio = ?').get(folio) as { saldo: number }).saldo;
+
+test('#838 el primer pago de un apartado de revendedora da sus 7 días; el segundo abono no mueve vence_en', async () => {
+  const t = mundo();
+  const p = pieza(t.db, { precio: 30000 });
+  comoUsuario(t.env, ANA);
+  const ped = (await apartar(t, [p.id as string])).cuerpo.pedido;
+  comoUsuario(t.env, DUENO);
+  assert.equal((await abonar(t, ped.folio, 5000)).status, 200);
+  const dias = (Date.parse(fila(t.db, 'select vence_en from pedidos where id = ?', ped.id).vence_en) - Date.now()) / 86_400_000;
+  assert.ok(dias > 6.9 && dias < 7.1, String(dias));
+  const corto = new Date(Date.now() + 3_600_000).toISOString();
+  t.db.prepare('update pedidos set vence_en = ? where id = ?').run(corto, ped.id);
+  const saldoVence = fila(t.db, 'select saldo_vence_en from pedidos where id = ?', ped.id).saldo_vence_en;
+  assert.equal((await abonar(t, ped.folio, 5000)).status, 200);
+  const despues = fila(t.db, 'select saldo, vence_en, saldo_vence_en from pedidos where id = ?', ped.id);
+  assert.equal(despues.saldo, 10000);
+  assert.equal(despues.vence_en, corto);
+  assert.equal(despues.saldo_vence_en, saldoVence);
+  t.db.close();
+});
