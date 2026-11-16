@@ -149,6 +149,27 @@ test('el corte impreso trae lo esperado, lo contado, el faltante en negritas y d
   assert.match(texto, /Entrega: _+\n +caja@prueba\.mx[\s\S]*Recibe: +_+/);
 });
 
+test('el corte impreso dice cuantas formas de pago se corrigieron solo si hubo (#831)', async () => {
+  const { pedazos } = impresoraFalsa();
+  const { reconectarImpresora, imprimirCorte } = await import('../public/impresora.js');
+  await reconectarImpresora();
+  const corte = {
+    caja: 'Caja 1', cajero: 'caja@prueba.mx', desde: null, hasta: '2026-10-03T02:05:00Z', tickets: 3,
+    fondo_inicial: 50000, efectivo_ventas: 25000, efectivo_devoluciones: 0, retiros: 0, gastos: 0,
+    efectivo_esperado: 75000, efectivo_contado: 75000, diferencia: 0,
+    tarjeta_sistema: 0, tarjeta_terminal: 0, transferencias: 0, dolarones: 0,
+    fondo_siguiente: 50000, entregado: 25000, notas: '', conteo: '{}',
+  };
+  const imprimir = async (c: object) => {
+    const antes = pedazos.length;
+    await imprimirCorte(c);
+    return new TextDecoder().decode(Uint8Array.from(pedazos.slice(antes).flatMap((p) => [...p])));
+  };
+  assert.match(await imprimir({ ...corte, formas_corregidas: 2 }), /Ventas cobradas: 3\nFormas de pago corregidas: 2\n/);
+  assert.doesNotMatch(await imprimir({ ...corte, formas_corregidas: 0 }), /Formas de pago corregidas/);
+  assert.doesNotMatch(await imprimir(corte), /Formas de pago corregidas/);
+});
+
 test('el retiro impreso trae importe, motivo y firmas', async () => {
   const { pedazos } = impresoraFalsa();
   const { reconectarImpresora, imprimirRetiro } = await import('../public/impresora.js');

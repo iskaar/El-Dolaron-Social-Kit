@@ -117,11 +117,14 @@ export interface Corte {
   fondo_siguiente: number; entregado: number; conteo: string; notas: string; creado_en: string;
   fep_por_pagar: number;   // lo cobrado de piezas de FEP en esta caja, a pagarle a FEP (Issue #298)
   entrada_terminal: number;   // efectivo que entrego el dueno de la terminal a este cajon (Issue #515)
+  formas_corregidas: number;   // correcciones de forma de pago de los tickets de este corte (Issue #831)
 }
 
-// Sin columna en `cortes` (sin migracion): sale de los retiros 'terminal' que marco el corte.
+// Sin columna en `cortes` (sin migracion): sale de los retiros 'terminal' que marco el corte, y de las correcciones de forma
+// de pago (#831) de los tickets que el corte conto: una correccion solo cabe antes del corte, asi que el numero no cambia al reimprimir.
 const CON_TERMINAL = `select c.*, (select coalesce(sum(importe), 0) from retiros
-  where corte_id = c.id and tipo = 'terminal') as entrada_terminal from cortes c`;
+  where corte_id = c.id and tipo = 'terminal') as entrada_terminal,
+  (select count(*) from correcciones_pago p join ventas v on v.id = p.venta_id where v.corte_id = c.id) as formas_corregidas from cortes c`;
 const leerCorte = (env: Env, id: string) =>
   env.DB.prepare(`${CON_TERMINAL} where c.id = ?`).bind(id).first<Corte>();
 
