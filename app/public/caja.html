@@ -39,6 +39,7 @@
     font-size: 15px; border: 1px solid var(--linea); border-radius: 8px; background: #fff; cursor: pointer;
     text-align: left; }
   #sugerencias button:active { background: #eef1f6; }
+  #sugerencias button.activa { background: #e3ecff; border-color: var(--azul); outline: 2px solid var(--azul); }
   #sugerencias .codigo { font-family: ui-monospace, monospace; color: #78839a; }
   #ticket { flex: 1; overflow-y: auto; margin-top: 4px; }
   .renglon { display: grid; grid-template-columns: 64px 1fr 52px 90px 32px; gap: 8px; align-items: center;
@@ -80,7 +81,8 @@
   #descuento-pin { display: grid; gap: 6px; border-top: 1px solid var(--linea); padding-top: 8px; }
   #descuento-pin h3 { margin: 0; font-size: 13px; color: #5b6478; }
   #descuento-pin[hidden] { display: none; }
-  #aviso { min-height: 20px; font-size: 14px; margin-top: 8px; }
+  /* Junto al campo de escaneo (#817): la respuesta a cada escaneo no puede quedar fuera de la pantalla. */
+  #aviso { min-height: 24px; font-size: 16px; font-weight: 600; margin-top: 8px; }
   #datos-transferencia[hidden] { display: none; }
   #clave-ayuda { font-size: 12px; color: #5b6478; margin: 4px 0; }
   #clave-error { min-height: 18px; font-size: 14px; color: var(--rojo); margin: 4px 0; }
@@ -88,6 +90,8 @@
   #rechazadas .ticket { border: 1px solid var(--rojo); border-radius: 8px; padding: 8px;
     margin-bottom: 6px; font-size: 13px; color: var(--rojo); }
   #rechazadas .ticket button { margin-left: 6px; }
+  #rechazadas .ticket .nota { color: #5b6478; }
+  .renglon.sin-existencia { outline: 2px solid var(--rojo); background: #fdecec; }
   #pie { padding: 8px 18px 14px; font-size: 13px; color: #5b6478; display: flex; gap: 18px; flex-wrap: wrap; }
   #tickets { margin-top: 14px; border-top: 1px solid var(--linea); padding-top: 10px; }
   #tickets summary { font-size: 13px; color: #5b6478; cursor: pointer; }
@@ -141,12 +145,14 @@
   #corte-denominaciones { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
   #corte-denominaciones td { padding: 3px 4px; font-size: 15px; }
   #corte-denominaciones td:last-child { text-align: right; color: #5b6478; }
+  #corte-denominaciones td.dudoso { color: var(--rojo); font-weight: 700; }
+  #corte-contaste { font-size: 36px; font-weight: 800; text-align: center; margin: 14px 0; font-variant-numeric: tabular-nums; }
   #corte-denominaciones input { width: 90px; padding: 6px 8px; font-size: 16px; }
   .total-contado { font-size: 22px; margin: 10px 0 4px; text-align: right; }
-  .tipo-salida { display: flex; gap: 8px; margin: 4px 0 6px; }
-  .tipo-salida label { flex: 1; display: flex; align-items: center; gap: 8px; margin: 0; padding: 10px 12px; font-size: 15px;
+  .tipo-salida, .forma-conteo { display: flex; gap: 8px; margin: 4px 0 6px; }
+  .tipo-salida label, .forma-conteo label { flex: 1; display: flex; align-items: center; gap: 8px; margin: 0; padding: 10px 12px; font-size: 15px;
     color: #1a1f2b; border: 1px solid var(--linea); border-radius: 10px; cursor: pointer; }
-  .tipo-salida input { width: auto; }
+  .tipo-salida input, .forma-conteo input { width: auto; }
   #corte-resumen table { width: 100%; border-collapse: collapse; font-size: 15px; font-variant-numeric: tabular-nums; }
   #corte-resumen td { padding: 4px 2px; border-bottom: 1px solid var(--linea); }
   #corte-resumen td:last-child { text-align: right; }
@@ -193,6 +199,7 @@ if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw-caja.js'
       <input id="codigo" placeholder="Escanea el código, escribe P-17 de un pedido, o busca por descripción" autocomplete="off" autofocus>
       <button id="abrir-camara" type="button">Cámara</button>
     </div>
+    <div id="aviso" role="status"></div>
     <div id="sugerencias"></div>
     <div id="ticket"></div>
   </section>
@@ -290,7 +297,6 @@ if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw-caja.js'
     <button id="cancelar" type="button">Cancelar venta</button>
     <button id="abrir-devolucion" type="button">Devolución</button>
     <button id="abrir-cajon" type="button">Abrir cajón</button>
-    <div id="aviso"></div>
     <div id="impresiones-destino" hidden></div>
     <div id="impresiones-aviso" role="alert"></div>
     <button id="abrir-impresion-fallida" type="button" hidden>Abrir venta para reimprimir</button>
@@ -367,10 +373,21 @@ if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw-caja.js'
   <div id="corte-paso-conteo">
     <p class="nota">Cuenta <b>todo</b> el efectivo del cajón, fondo incluido. Lo que el sistema esperaba se ve
       después de registrar el conteo, y el conteo ya no se puede cambiar.</p>
+    <div id="corte-formulario">
+    <div class="forma-conteo" role="radiogroup" aria-label="Cómo reportar el efectivo">
+      <label><input type="radio" name="corte-forma" value="denominaciones" checked> Contar por denominación</label>
+      <label><input type="radio" name="corte-forma" value="total"> Escribir el total</label>
+    </div>
     <button id="corte-abrir-cajon" type="button" class="abrir-para-contar">Abrir cajón para contar</button>
     <div class="aviso-dialogo" id="corte-aviso-cajon"></div>
-    <table id="corte-denominaciones"></table>
-    <div class="total-contado">Contado: <b id="corte-contado">$0</b></div>
+    <div id="corte-por-denominacion">
+      <table id="corte-denominaciones"></table>
+      <div class="total-contado">Contado: <b id="corte-contado">$0</b></div>
+    </div>
+    <div id="corte-por-total" hidden>
+      <label for="corte-total">Total del efectivo contado, con centavos ($)</label>
+      <input id="corte-total" type="number" min="0" step="0.01" inputmode="decimal" placeholder="0.00">
+    </div>
     <label for="corte-terminal">Total de tarjeta según el cierre de la terminal ($)</label>
     <input id="corte-terminal" type="number" min="0" step="0.01" inputmode="decimal" placeholder="0">
     <label for="corte-notas">Notas (opcional)</label>
@@ -380,6 +397,15 @@ if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw-caja.js'
       <button id="corte-reimprimir" type="button" class="secundario">Reimprimir el último corte</button>
       <button id="corte-salir" type="button" class="secundario">Cancelar</button>
       <button id="corte-registrar" type="button">Registrar conteo</button>
+    </div>
+    </div>
+    <div id="corte-confirmar" hidden>
+      <p class="nota">Revisa que sea lo que contaste: después ya no se puede cambiar.</p>
+      <div id="corte-contaste" role="status"></div>
+      <div class="acciones">
+        <button id="corte-volver" type="button" class="secundario">Volver a contar</button>
+        <button id="corte-confirmar-ok" type="button"></button>
+      </div>
     </div>
   </div>
   <div id="corte-paso-resultado" hidden>
@@ -476,7 +502,8 @@ if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw-caja.js'
 </dialog>
 <script type="module">
 import { CATEGORIAS_GASTO } from '/categorias.js';
-import { totales, agregar, leerMultiplicador, efectivoAlcanza, dolaronesGanados, saldoCanjeable, maximoCanje, MINIMO_REGALO, descuentoDe, TOPE_DESCUENTO, DENOMINACIONES, contadoDe, promoInauguracion, letreroPromo, desfaseReloj, anticipoDePedido, transferenciaDe, CLAVE_DESDE, BANCOS, debePreguntarSocio, guiaVale, precioBuenFin, letreroBuenFin } from '/venta.js';
+import { totales, agregar, leerMultiplicador, efectivoAlcanza, dolaronesGanados, saldoCanjeable, maximoCanje, MINIMO_REGALO, descuentoDe, TOPE_DESCUENTO, DENOMINACIONES, contadoDe, promoInauguracion, letreroPromo, desfaseReloj, anticipoDePedido, transferenciaDe, CLAVE_DESDE, BANCOS, debePreguntarSocio, guiaVale, precioBuenFin, letreroBuenFin,
+  esBusquedaPorTexto, avisoExistencia, moverSugerencia, cancelarPideConfirmar, nVentas, avisoCorteSinEnviar, gastoRequiereDueno, pesosExactos, centavosDeTexto, alertaConteo } from '/venta.js';
 import { abrirCamara } from '/camara.js';
 import {
   reconectarImpresora, conectarImpresora, impresoraLista, imprimirTicket, abrirCajon, explicarErrorUsb, errorImpresora,
@@ -488,6 +515,30 @@ import {
 import { imprimirDevolucion } from '/impresora.js';
 import { codigoDeDigitos } from '/code128.js';
 import { leerMensajeAlta } from '/venta.js';
+
+// Tonos de la caja (#817): agudo al agregar una pieza, grave y doble al rechazar un código. Sin archivos de audio.
+// Para calibrar en la tienda con el parlante real: frecuencia (Hz), duración (ms) y volumen (0 a 1) de cada tono.
+const TONO_PIEZA = { hz: 1500, ms: 70, volumen: 0.25, veces: 1, pausaMs: 0 };
+const TONO_RECHAZO = { hz: 280, ms: 110, volumen: 0.35, veces: 2, pausaMs: 70 };
+let audio = null;
+/** Si el navegador no deja sonar (sin audio, o aún sin un gesto del cajero), no pasa nada. */
+function sonar({ hz, ms, volumen, veces, pausaMs }) {
+  try {
+    audio ??= new AudioContext();
+    if (audio.state === 'suspended') audio.resume().catch(() => {});
+    for (let i = 0; i < veces; i++) {
+      const inicio = audio.currentTime + (i * (ms + pausaMs)) / 1000;
+      const oscilador = audio.createOscillator();
+      const ganancia = audio.createGain();
+      oscilador.frequency.value = hz;
+      ganancia.gain.setValueAtTime(volumen, inicio);
+      ganancia.gain.exponentialRampToValueAtTime(0.001, inicio + ms / 1000);   // sin el «clic» del corte seco
+      oscilador.connect(ganancia).connect(audio.destination);
+      oscilador.start(inicio);
+      oscilador.stop(inicio + ms / 1000);
+    }
+  } catch { /* sin sonido */ }
+}
 
 // Issue #326: la categoria del gasto sale de la lista compartida con el servidor.
 document.getElementById('retiro-categoria').innerHTML = '<option value="">Elige categoría</option>' + CATEGORIAS_GASTO
@@ -547,6 +598,8 @@ let sinPromo = false;
 let idVenta = null;
 let creadoEnVenta = null;
 let cobrando = false;
+let cancelarArmado = null;      // { temporizador, firma }: «Cancelar venta» ya pidió el segundo toque (#817)
+let folioIncierto = null;       // folio de un cobro con Dolarones cuya respuesta no se supo: su reintento va con el mismo folio y código (#817)
 let formaElegida = false;       // la cajera tocó la forma de pago en esta venta (#260)
 // Pedido por WhatsApp cargado en el ticket (Issue #269): { id, folio, saldo } o null. Su saldo solo
 // existe en el servidor, así que con pedido el cobro espera al servidor y nunca se encola.
@@ -819,7 +872,7 @@ async function cargarCatalogo() {
     await store('catalogo', 'readwrite', (s) => s.put({ clave: 'piezas', datos, fecha: Date.now() }));
     $('catalogo-info').textContent = `${catalogo.size} códigos · actualizado`;
   } catch {
-    $('catalogo-info').textContent += ' · sin actualizar';
+    $('catalogo-info').textContent = `${catalogo.size} códigos · sin actualizar`;   // asignado completo: con `+=` se repetía cada minuto sin red
   }
 }
 
@@ -837,6 +890,7 @@ function pintarPromoCupo() {
 }
 function pintar() {
   pintarPromoCupo();
+  revisarCancelarArmado();
   // Uno en % se aprueba para ese ticket exacto: si cambia, hay que pedir otro. Uno en
   // pesos se queda en el ticket hasta vaciarlo o quitarlo (Isaac, 17/10).
   const subtotal = totales(lineas).subtotal;
@@ -851,12 +905,12 @@ function pintar() {
   guardarTicket();
 
   $('ticket').innerHTML = lineas.map((l, i) => `
-    <div class="renglon">
+    <div class="renglon${l.sin_existencia ? ' sin-existencia' : ''}">
       ${l.producto_id ? `<img class="foto" src="/api/foto/${encodeURIComponent(l.producto_id)}" alt="" loading="lazy" onerror="this.style.visibility='hidden'">` : '<div></div>'}
       <div><div class="nombre">${escapar(l.nombre)}</div><div class="codigo">${escapar(l.codigo)}${l.precio_lista > l.precio ? ` · Descuento, antes <s>${pesos(l.precio_lista)}</s>` : ''}</div></div>
       <div>x${l.cantidad}</div>
       <div class="importe">${pesos(l.precio * l.cantidad)}</div>
-      <button type="button" data-quitar="${i}" aria-label="Quitar" ${cobrando ? 'disabled' : ''}>✕</button>
+      <button type="button" data-quitar="${i}" aria-label="Quitar ${escapar(l.nombre)}"${l.cantidad > 1 ? ' title="Quita una pieza; Mayús + clic quita el renglón entero"' : ''} ${cobrando ? 'disabled' : ''}>✕</button>
     </div>`).join('') + (descuento && descuento.estado !== 'rechazada' ? `
     <div class="renglon">
       <div></div>
@@ -893,7 +947,8 @@ function pintar() {
     usados || anticipo ? `A pagar ${pesos(t.aPagar)}` : '',
   ].filter(Boolean).join(' · ');
   const canjeable = saldoCanjeable(socio, t.total);
-  const autorizado = !usados || (codigoSocio && usados <= socio.maximo && Date.parse(socio.expira_en) > Date.now());
+  // Con la respuesta de este folio en duda (#817), el código se sigue dando por bueno: el servidor contesta `duplicada` sin validarlo.
+  const autorizado = !usados || (codigoSocio && usados <= socio.maximo && ((folioIncierto && folioIncierto === idVenta) || Date.parse(socio.expira_en) > Date.now()));
   $('usar-maximo').disabled = cobrando || !codigoSocio || maximoCanje(socio, t.total) === 0;
   for (const id of ['codigo', 'socio', 'buscar-socio', 'quitar-socio', 'dolarones', 'efectivo', 'forma', 'cancelar', 'pedir-descuento', 'quitar-descuento', 'quitar-pedido', 'clave-rastreo', 'monto-transferido', 'banco-emisor', 'comprobante']) $(id).disabled = cobrando;
   // Transferencia desde $300 (#593): aparecen la clave de rastreo y el monto del comprobante.
@@ -969,7 +1024,9 @@ function agregarCodigo(leido, reintento = false) {
     return false;
   }
   if (!pieza) {
-    $('aviso').textContent = `Código no encontrado: ${codigo}`;
+    $('aviso').textContent = catalogo.size === 0
+      ? 'El catálogo no ha cargado. Recarga la página con red (F5).'
+      : `Código no encontrado: ${codigo}`;
     $('aviso').style.color = '#D72B32';
     // La pieza pudo etiquetarse después de abrir la caja: se baja el catálogo y se reintenta una vez.
     if (!reintento && navigator.onLine) cargarCatalogo().then(() => { if (buscarPieza(codigo)) agregarCodigo(leido, true); });
@@ -989,11 +1046,13 @@ function agregarCodigo(leido, reintento = false) {
     const enTicket = lineas
       .filter((l) => l.codigo === pieza.codigo)
       .reduce((suma, l) => suma + l.cantidad, 0);
-    if (pieza.stock - enTicket < cantidad) {
-      $('aviso').textContent = enTicket > 0 || (cantidad > 1 && pieza.stock > 0)
-        ? `${pieza.nombre}: solo hay ${pieza.stock} en existencia.`
-        : `${pieza.nombre} ya se vendió o está apartada. Revisa la etiqueta.`;
+    const sinExistencia = avisoExistencia(pieza.nombre, pieza.stock, enTicket, cantidad);
+    if (sinExistencia) {
+      $('aviso').textContent = sinExistencia;
       $('aviso').style.color = '#D72B32';
+      // La existencia local puede estar vieja (otra caja, una devolución): se baja el catálogo una vez, como con «no encontrado», y si
+      // ahora sí hay, entra. El aviso ya está en pantalla: no se retrasa.
+      if (!reintento && navigator.onLine) cargarCatalogo().then(() => { if (catalogo.get(pieza.codigo)?.stock > pieza.stock) escanear(leido, true); });
       return false;
     }
   }
@@ -1029,9 +1088,27 @@ function buscarPorTexto(texto) {
     .slice(0, 10);
 }
 
+/** Agrega con sonido: agudo si entró la pieza, grave y doble si se rechazó. 'pedido' y 'socio' abren su propio aviso. */
+function escanear(leido, reintento = false) {
+  const r = agregarCodigo(leido, reintento);
+  if (r === true) sonar(TONO_PIEZA);
+  else if (r === false) sonar(TONO_RECHAZO);
+  return r;
+}
+
+// Sugerencia resaltada con las flechas (-1 = ninguna). Cualquier tecla que cambie el texto la quita: lo que escribe el
+// lector nunca elige una sugerencia por su cuenta (#817).
+let sugerenciaActiva = -1;
+function resaltarSugerencia(i) {
+  sugerenciaActiva = i;
+  [...$('sugerencias').children].forEach((b, j) => { b.classList.toggle('activa', j === i); b.setAttribute('aria-current', String(j === i)); });
+  $('sugerencias').children[i]?.scrollIntoView({ block: 'nearest' });
+}
+
 function pintarSugerencias() {
   const texto = leerMultiplicador($('codigo').value)?.codigo ?? '';
   const piezas = texto.trim().length >= 2 && !buscarPieza(texto) ? buscarPorTexto(texto) : [];
+  sugerenciaActiva = -1;
   $('sugerencias').innerHTML = piezas.map((p) => `
     <button type="button" data-codigo="${escapar(p.codigo)}">
       <span>${escapar(p.nombre)}</span><span class="codigo">${escapar(p.codigo)} · ${pesos(precioHoy(p))}</span>
@@ -1039,14 +1116,16 @@ function pintarSugerencias() {
 }
 
 $('codigo').addEventListener('input', pintarSugerencias);
-$('sugerencias').addEventListener('click', (e) => {
-  const codigo = e.target.closest('button')?.dataset.codigo;
-  if (!codigo) return;
+function elegirSugerencia(codigo) {
   // «3*juguetes» y clic en la sugerencia: tambien entran 3.
-  agregarCodigo(`${leerMultiplicador($('codigo').value)?.cantidad ?? 1}*${codigo}`);
+  escanear(`${leerMultiplicador($('codigo').value)?.cantidad ?? 1}*${codigo}`);
   $('codigo').value = '';
   pintarSugerencias();
   $('codigo').focus();
+}
+$('sugerencias').addEventListener('click', (e) => {
+  const codigo = e.target.closest('button')?.dataset.codigo;
+  if (codigo) elegirSugerencia(codigo);
 });
 
 /* ---------- socio y Dolarones ---------- */
@@ -1283,6 +1362,7 @@ async function buscarSocio() {
     $('socio-info').style.color = '';
     pintarSocio();
     pintar();
+    $('codigo').focus();   // el siguiente escaneo es una pieza, no otra búsqueda de socio (#817)
     preguntarDolarones();
   } catch {
     if (busqueda !== busquedaSocio) return;
@@ -1355,7 +1435,7 @@ function cerrarDialogo(usar) {
   idVenta = null;
   pintar();
   if (usar === 'otra') $('dolarones').focus();
-  else if (usar === 'no') $('codigo').focus();
+  else $('codigo').focus();   // «Usar todos» y «No usar»: el lector sigue escaneando piezas (#817)
 }
 $('dlg-todos').addEventListener('click', () => cerrarDialogo('todos'));
 $('dlg-otra').addEventListener('click', () => cerrarDialogo('otra'));
@@ -1374,7 +1454,10 @@ $('usar-maximo').addEventListener('click', () => {
  * de autorización sólo vive en memoria; nunca se encola en el disco.
  */
 async function cobrarConDolarones(venta, t) {
-  if (!codigoSocio || venta.dolarones > socio.maximo || Date.parse(socio.expira_en) <= Date.now()) {
+  // Si la respuesta de este folio se perdió, reintentar va al servidor con el mismo folio y el mismo código aunque aquí parezca vencido
+  // (#817): pedir un código nuevo cambiaría el folio y una venta ya registrada se registraría dos veces.
+  const incierto = folioIncierto === venta.id;
+  if (!codigoSocio || venta.dolarones > socio.maximo || (!incierto && Date.parse(socio.expira_en) <= Date.now())) {
     $('aviso').textContent = 'El cliente debe autorizar este importe y mostrar un código vigente desde su cuenta.';
     $('aviso').style.color = '#D72B32';
     return false;
@@ -1385,12 +1468,20 @@ async function cobrarConDolarones(venta, t) {
       method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ...venta,
         ...(socio.vale ? { codigo_vale:valesCargados.length > 1 ? valesCargados.map((v) => v.codigo) : codigoSocio }
           : { codigo_socio:codigoSocio }) }),
+      signal: AbortSignal.timeout(15000),
     });
-  } catch {
-    $('aviso').textContent = 'Sin red: no se pudo cobrar con Dolarones. Intenta otra vez o cobra sin Dolarones.';
+  } catch (error) {
+    // Sin respuesta en 15 s no se sabe si se cobró. Reintentar con el mismo folio es seguro: registrarVenta contesta
+    // `duplicada` antes de validar el código del socio o del vale (#817).
+    folioIncierto = venta.id;
+    $('aviso').textContent = error?.name === 'TimeoutError' || error?.name === 'AbortError'
+      ? 'No se supo si se cobró. Toca Cobrar otra vez: con el mismo folio no se cobra dos veces. Si no avanza, abre Ventas de hoy antes de cobrar de nuevo.'
+      : 'Sin red: no se pudo cobrar con Dolarones. Intenta otra vez o cobra sin Dolarones.';
     $('aviso').style.color = '#D72B32';
     return false;
   }
+  // Una respuesta del servidor (que no sea 5xx) cierra la duda: el folio vuelve a seguir las reglas de siempre.
+  folioIncierto = respuesta.status >= 500 ? venta.id : null;
   const cuerpo = await respuesta.json().catch(() => ({}));
   if (!respuesta.ok) {
     if (cuerpo.promo_agotada) promoAgotada();
@@ -1414,6 +1505,23 @@ async function cobrarConDolarones(venta, t) {
 /* ---------- pedidos por WhatsApp (Issue #269) ---------- */
 
 const avisoRojo = (texto) => { $('aviso').textContent = texto; $('aviso').style.color = '#D72B32'; return false; };
+/**
+ * Qué decir cuando el cajón no abrió o el ticket no salió (#817). Sin impresora conectada no es una falla nueva (el pie ya dice
+ * «Impresora no conectada»): una sola línea tranquila, y solo para el cajón. Con impresora que falló, cada cosa en rojo.
+ */
+function textoFalla(clave) {
+  const sinImpresora = !errorImpresora() || errorImpresora() === 'no conectada';
+  if (clave === 'cajon') return sinImpresora ? { texto: 'Sin impresora: abre el cajón con la llave.', calmo: true } : { texto: 'El cajón no abrió: ábrelo con la llave.' };
+  return sinImpresora ? null : { texto: 'El ticket no se imprimió: reimprímelo desde Ventas de hoy.' };
+}
+/** Agrega una falla al aviso del cobro `nodo`; si ya salió otro aviso, no se pega a ese (#817). */
+function pintarFalla({ texto, calmo }, nodo) {
+  if ($('aviso').firstChild !== nodo) return;
+  const falla = document.createElement('div');
+  falla.style.cssText = calmo ? 'color:#5b6478' : 'color:#D72B32;font-weight:700';
+  falla.textContent = texto;
+  $('aviso').append(falla);
+}
 
 /**
  * Escribir o escanear P-17: un apartado trae sus piezas al ticket (en el catálogo local ya están
@@ -1545,18 +1653,21 @@ async function cobrar() {
   const imprimirEn = impresionRemota() ? $('imprimir-en').value : undefined;
   if (imprimirEn && forma === 'efectivo') {
     $('aviso').textContent = 'En el celular sólo tarjeta o transferencia';
+    $('codigo').focus();   // en los retornos de aquí en adelante el foco sale de «Cobrar»: el Enter del lector no lo vuelve a pulsar (#817)
     return;
   }
   const usados = dolaronesPedidos();
   if (descuento?.estado === 'pendiente') {
     $('aviso').textContent = 'El descuento sigue esperando al dueño. Espera su respuesta o aprieta «Quitar descuento».';
     $('aviso').style.color = '#D72B32';
+    $('codigo').focus();
     return;
   }
   // Uno en pesos sobrevive a quitar piezas: si ya pasa del tope, no se cobra a escondidas sin él.
   if (descuentoAplicado() && 'error' in descuentoDe(descuento, totales(lineas).subtotal)) {
     $('aviso').textContent = `El descuento pasa del ${TOPE_DESCUENTO}% del ticket. Agrega piezas o aprieta «Quitar descuento».`;
     $('aviso').style.color = '#D72B32';
+    $('codigo').focus();
     return;
   }
   const anticipo = pedidoCargado ? anticipoDePedido(pedidoCargado.saldo, totalNeto(), usados) : 0;
@@ -1564,6 +1675,7 @@ async function cobrar() {
   if (usados > saldoCanjeable(socio, t.total)) {
     $('aviso').textContent = 'Los regalos de apertura requieren un ticket de $1,000 MXN o más antes de descontar Dolarones. Revisa el importe solicitado.';
     $('aviso').style.color = '#D72B32';
+    $('codigo').focus();
     return;
   }
   // Si la cajera no eligió la forma en esta venta, se pregunta siempre (#260; 17/10, un pago con tarjeta quedó en
@@ -1579,6 +1691,9 @@ async function cobrar() {
   if (!efectivoAlcanza({ formaPago: forma, total: t.aPagar, efectivo })) {
     $('aviso').textContent = efectivo === 0 ? 'Falta el efectivo recibido.' : `Faltan ${pesos(t.falta)}`;
     $('aviso').style.color = '#D72B32';
+    // Hoy no enfocaba nada y «Cobrar» seguía con el foco. #efectivo atraparía los dígitos del lector (los sumaría al importe), así que se
+    // elige #codigo: el cajero toca el campo de efectivo para corregirlo.
+    $('codigo').focus();
     return;
   }
   // Transferencia desde $300 (#593): clave de rastreo y monto del comprobante, validados igual que en el servidor.
@@ -1601,13 +1716,14 @@ async function cobrar() {
     }
   }
 
+  // El folio va ANTES del primer pintar(): pintar() guarda el ticket, y debe guardarlo con el folio con el que se envía (#817).
+  if (!idVenta) {
+    idVenta = crypto.randomUUID();
+    creadoEnVenta = new Date().toISOString();
+  }
   cobrando = true;
   pintar();
   try {
-    if (!idVenta) {
-      idVenta = crypto.randomUUID();
-      creadoEnVenta = new Date().toISOString();
-    }
     const venta = {
       id: idVenta,
       lineas: lineas.map(({ codigo, nombre, precio, precio_lista, cantidad, producto_id }) =>
@@ -1657,6 +1773,9 @@ async function cobrar() {
       } catch { /* respuesta desconocida: reintento idempotente al sincronizar */ }
       if (r && cuerpo && !r.ok && r.status < 500) {
         if (cuerpo.promo_agotada) promoAgotada();
+        // #819: el servidor dice qué pieza ya no está («Quita X: ya no está disponible.»): ese renglón se resalta y el resto del ticket sigue.
+        const faltan = new Set((cuerpo.faltantes ?? []).map((f) => f.producto_id));
+        for (const l of lineas) l.sin_existencia = faltan.has(l.producto_id);
         $('aviso').textContent = cuerpo.error || 'No se pudo confirmar la venta.';
         $('aviso').style.color = '#D72B32';
         return;
@@ -1681,11 +1800,15 @@ async function cobrar() {
     // El cajon primero: cajon y ticket van en fila por el mismo USB, y el cajero
     // no espera a que termine el logo. Una venta con tarjeta no toca el cajon.
     // Nada de esto espera al servidor ni bloquea el cobro; si falla, el pie lo dice.
+    // Lo que falle se agrega en rojo al aviso de «Cobrado» (#817), sin esperarlo: el cobro no se frena.
+    const fallas = [];
+    let nodoAviso = null;
+    const fallo = (clave) => { const falla = textoFalla(clave); if (falla) (nodoAviso ? pintarFalla(falla, nodoAviso) : fallas.push(falla)); };
     if (!venta.imprimir_en) {
-      if (forma === 'efectivo') abrirCajon();
+      if (forma === 'efectivo') abrirCajon()?.then((abrio) => { if (!abrio) fallo('cajon'); });
       imprimirTicket({ ...venta, total: t.total, descuento: t.descuento, cambio: t.cambio, socio: socioTicket,
         ...(pedidoCargado ? { pedido_folio: pedidoCargado.folio } : {}) }, venta.lineas)
-        .then(pintarImpresora);
+        .then((impreso) => { pintarImpresora(); if (!impreso) fallo('ticket'); });
     }
 
     // Un lugar menos del cupo: sin red, la caja no sigue dando la promo sin fin. La consulta de cada minuto corrige.
@@ -1723,6 +1846,8 @@ async function cobrar() {
       : ' · Se revisará si corresponde un vale al sincronizar; no se imprimió un código de gasto.';
     if (venta.recompensa_pendiente) $('aviso').textContent += ' · Se revisará si ganó Dolarones al sincronizar.';
     $('aviso').style.color = '#1f7a4d';
+    nodoAviso = $('aviso').firstChild;
+    for (const falla of fallas) pintarFalla(falla, nodoAviso);
     lineas = [];
     idVenta = null;
     pedidoCargado = null;
@@ -1734,11 +1859,12 @@ async function cobrar() {
     $('clave-rastreo').value = ''; $('monto-transferido').value = ''; $('banco-emisor').value = '';
     $('comprobante').value = ''; if ($('comprobante').dataset) { $('comprobante').dataset.key = ''; $('comprobante-aviso').textContent = ''; }
     $('forma').value = 'efectivo'; formaElegida = false;      // cada venta empieza en efectivo: la forma anterior descuadraba el corte (#260)
-    $('codigo').focus();
     sincronizar();
   } finally {
     cobrando = false;
     pintar();
+    // Con el cobro hecho o fallido, el lector sigue: aquí #codigo ya no está deshabilitado (#817).
+    $('codigo').focus();
   }
 }
 
@@ -1809,8 +1935,31 @@ async function sincronizar() {
   } finally {
     sincronizando = false;
     await pendientes();
+    await reportarRechazadas();
     await pintarRechazadas();
     await actualizarCorte();
+  }
+}
+
+/**
+ * #819: una venta rechazada ya estaba cobrada. Se le avisa al servidor (idempotente por el folio; la tienda y el cajero salen de la sesión)
+ * y solo entonces se deja descartar. Sin red o sin sesión se reintenta en la siguiente sincronización.
+ */
+async function reportarRechazadas() {
+  const sinAvisar = (await store('ventas', 'readonly', (s) => s.getAll())).filter((v) => v.estado === 'rechazada' && !v.reportada);
+  for (const v of sinAvisar) {
+    try {
+      const r = await fetch(`/api/ventas/${encodeURIComponent(v.id)}/rechazo`, {
+        method: 'POST', headers: { 'content-type': 'application/json' }, signal: AbortSignal.timeout(10000),
+        body: JSON.stringify({ motivo: v.motivo, forma_pago: v.forma_pago, efectivo: v.efectivo, creado_en: v.creado_en, caja: v.caja,
+          lineas: v.lineas.map(({ codigo, nombre, precio, cantidad }) => ({ codigo, nombre, precio, cantidad })) }),
+      });
+      // 400/404: el servidor nunca lo va a aceptar (registro raro o servidor sin la ruta): no se reintenta y se puede descartar tras avisar en persona.
+      if (!r.ok && r.status !== 400 && r.status !== 404) continue;
+      // Se vuelve a leer: otra sincronización pudo cambiar el registro mientras esperaba.
+      const actual = await store('ventas', 'readonly', (s) => s.get(v.id));
+      if (actual?.estado === 'rechazada') await store('ventas', 'readwrite', (s) => s.put({ ...actual, reportada: r.ok ? true : 'fallo' }));
+    } catch { /* sin red: se reintenta */ }
   }
 }
 
@@ -1821,21 +1970,24 @@ async function pendientes() {
   const desde = Math.min(...porSincronizar.map((v) => Date.parse(v.creado_en) || Date.now()));
   const atorada = porSincronizar.length && Date.now() - desde > 10 * 60_000;
   $('pendientes').textContent = !porSincronizar.length ? ''
-    : atorada ? `⚠ ${porSincronizar.length} ventas sin enviar desde las ${new Date(desde).toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' })}. Recarga la página (F5); si pide iniciar sesión, entra.`
-    : `${porSincronizar.length} ventas por sincronizar`;
+    : atorada ? `⚠ ${nVentas(porSincronizar.length)} sin enviar desde las ${new Date(desde).toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' })}. Recarga la página (F5); si pide iniciar sesión, entra.`
+    : `${nVentas(porSincronizar.length)} por sincronizar`;
   $('pendientes').style.cssText = atorada ? 'color:#D72B32;font-weight:700' : '';
 }
 
 /** Ventas que el servidor rechazo: visibles con su motivo, y recuperables a mano. */
+let descartarListo = null;   // folio al que ya se le dio el primer clic de «Descartar»
 async function pintarRechazadas() {
   const rechazadas = (await store('ventas', 'readonly', (s) => s.getAll()))
     .filter((v) => v.estado === 'rechazada');
   $('rechazadas').innerHTML = rechazadas.map((v) => `
     <div class="ticket">
       <div><b>${pesos(totales(v.lineas).total)}</b> rechazada — ${escapar(v.motivo)}</div>
+      <div class="nota">${new Date(v.creado_en).toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' })} · ${escapar(v.forma_pago)} · ${totales(v.lineas).piezas} ${totales(v.lineas).piezas === 1 ? 'pieza' : 'piezas'} ·
+        ${v.reportada === 'fallo' ? 'No se pudo avisar al dueño: avísale en persona antes de descartar.' : v.reportada ? 'Ya se le avisó al dueño.' : 'Avisando al dueño… (necesita red)'}</div>
       <div>
         <button type="button" data-reintentar="${v.id}">Reintentar</button>
-        <button type="button" data-descartar="${v.id}">Descartar</button>
+        <button type="button" data-descartar="${v.id}" ${v.reportada ? '' : 'disabled'}>${descartarListo === v.id ? '¿Seguro? Descartar' : 'Descartar'}</button>
       </div>
     </div>`).join('');
 }
@@ -1847,7 +1999,13 @@ $('rechazadas').addEventListener('click', async (e) => {
     await store('ventas', 'readwrite', (s) => s.put({ ...venta, estado: undefined, motivo: undefined }));
     await pintarRechazadas();
     sincronizar();
+  } else if (descartar && descartarListo !== descartar) {
+    // Es el único registro de dinero ya cobrado: un segundo clic confirma.
+    descartarListo = descartar;
+    setTimeout(() => { if (descartarListo === descartar) { descartarListo = null; pintarRechazadas(); } }, 5000);
+    await pintarRechazadas();
   } else if (descartar) {
+    descartarListo = null;
     await store('ventas', 'readwrite', (s) => s.delete(descartar));
     await pintarRechazadas();
   }
@@ -2331,14 +2489,29 @@ async function actualizarCorte() {
     const tickets = c.por_forma_pago.reduce((suma, f) => suma + f.tickets, 0);
     $('corte').textContent = `Hoy: ${tickets} ${tickets === 1 ? 'venta' : 'ventas'} · ${c.piezas} piezas`;
   } catch { /* sin red, se ve cuando vuelva */ }
+  cargarTickets();   // «Ventas de hoy» abierta se pone al día tras cobrar y sincronizar (#817)
 }
 
 /* ---------- eventos ---------- */
 
 // El lector de codigos escribe y manda Enter, como un teclado.
 $('codigo').addEventListener('keydown', (e) => {
+  if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+    const n = $('sugerencias').children.length;
+    if (n) { e.preventDefault(); resaltarSugerencia(moverSugerencia(sugerenciaActiva, n, e.key)); }
+    return;
+  }
   if (e.key !== 'Enter' || !e.target.value.trim()) return;
-  agregarCodigo(e.target.value);
+  // Solo una sugerencia resaltada con las flechas se agrega con Enter; sin resaltar es el Enter del lector, igual que siempre.
+  const elegida = sugerenciaActiva >= 0 ? $('sugerencias').children[sugerenciaActiva]?.dataset.codigo : null;
+  if (elegida) { e.preventDefault(); elegirSugerencia(elegida); return; }
+  // Texto para buscar por nombre sin pieza: se queda en el campo con sus sugerencias. Queda seleccionado: lo que escriba o escanee
+  // el lector después lo reemplaza y no se pega a un texto viejo. Lo que pueda ser un código (dígitos, ED-, bandas JU49, el QR de un vale)
+  // se trata como siempre, con su recarga de catálogo.
+  const escrito = leerMultiplicador(e.target.value)?.codigo ?? e.target.value;
+  const buscaTexto = esBusquedaPorTexto(codigoDeDigitos(escrito) ?? escrito) && !buscarPieza(escrito);
+  const resultado = escanear(e.target.value, buscaTexto);
+  if (buscaTexto && resultado === false) { e.target.select(); return; }
   e.target.value = '';
   pintarSugerencias();
 });
@@ -2360,7 +2533,7 @@ $('abrir-camara').addEventListener('click', async () => {
   $('dialogo-camara').showModal();
   try {
     apagarCamara = await abrirCamara('lector-camara', (codigo) => {
-      const ok = agregarCodigo(codigo);
+      const ok = escanear(codigo);
       navigator.vibrate?.(ok ? 60 : [80, 60, 80]);
       if (ok === 'socio' || ok === 'pedido') { cerrarCamara(); return; }
       info.className = ok ? '' : 'error';
@@ -2379,7 +2552,7 @@ $('ticket').addEventListener('click', (e) => {
   const i = e.target.dataset?.quitar;
   if (i === undefined) return;
   const linea = lineas[Number(i)];
-  if (linea.cantidad > 1) linea.cantidad -= 1;
+  if (linea.cantidad > 1 && !e.shiftKey) linea.cantidad -= 1;   // Mayús + clic: el renglón entero (#817)
   else lineas.splice(Number(i), 1);
   idVenta = null;
   pintar();
@@ -2413,7 +2586,7 @@ $('abrir-cajon').addEventListener('click', async () => {
 // (sugerencia de un cajero, 28/09). Queda registrado igual que el otro.
 $('corte-abrir-cajon').addEventListener('click', async () => {
   await abrirCajonRegistrado($('corte-aviso-cajon'));
-  document.querySelector('#corte-denominaciones input').focus();
+  enfocarConteo();
 });
 
 /* ---------- gasto o retiro de efectivo (Issue #100) ---------- */
@@ -2443,16 +2616,20 @@ document.querySelector('.tipo-salida').addEventListener('change', pintarTipoSali
 $('pedir-ayuda').addEventListener('click', async () => {
   const boton = $('pedir-ayuda');
   boton.disabled = true;
+  let avisada = false;
   try {
     const r = await fetch('/api/ayuda', {
       method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ caja: $('caja-nombre').value }),
     });
+    // #819: el servidor solo responde 200 si a un celular o un correo del dueño le llegó; si no, dice por qué.
+    avisada = r.ok;
     boton.textContent = r.ok ? 'Ayuda avisada ✓' : ((await r.json().catch(() => ({}))).error ?? 'No se pudo avisar');
   } catch {
     boton.textContent = 'Sin red: no se pudo avisar';
   }
-  // ponytail: 30 s sin repetir para no llenar el celular de avisos.
-  setTimeout(() => { boton.textContent = 'Ayuda'; boton.disabled = false; }, 30_000);
+  // ponytail: 30 s sin repetir solo si el aviso salió (para no llenar el celular); tras un fallo se puede volver a intentar de inmediato.
+  if (!avisada) boton.disabled = false;
+  setTimeout(() => { boton.textContent = 'Ayuda'; boton.disabled = false; }, avisada ? 30_000 : 8_000);
 });
 
 $('abrir-retiro').addEventListener('click', () => {
@@ -2469,6 +2646,13 @@ $('abrir-retiro').addEventListener('click', () => {
   $('retiro-importe').focus();
 });
 $('retiro-salir').addEventListener('click', () => { $('dialogo-retiro').close(); $('codigo').focus(); });
+// Gasto de más de $100 (#817): se avisa al escribir el importe, sin esperar al servidor. Quien decide sigue siendo el servidor.
+function avisarGastoGrande() {
+  const grande = gastoRequiereDueno(tipoSalida(), Math.round(Number($('retiro-importe').value || 0) * 100));
+  $('retiro-aviso').textContent = grande ? 'Más de $100: lo registra el dueño.' : '';
+}
+$('retiro-importe').addEventListener('input', avisarGastoGrande);
+$('dialogo-retiro').addEventListener('change', (e) => { if (e.target.name === 'tipo-salida') avisarGastoGrande(); });
 $('retiro-registrar').addEventListener('click', async () => {
   const importe = Math.round(Number($('retiro-importe').value || 0) * 100);
   const motivo = $('retiro-motivo').value.trim();
@@ -2510,6 +2694,20 @@ const CORTE_RECIENTE_MIN = 30;
 let corteReciente = null;   // minutos desde el ultimo corte de esta caja, si fue hace poco
 let corteConfirmado = false;
 let corteSinEfectivo = false;   // el cajero confirmo que el cajon esta vacio de verdad
+let corteMontoConfirmado = false;   // vio «Contaste $X» y lo confirmo (#817); cualquier cambio en el conteo lo vuelve a pedir
+
+// Dos formas de reportar el efectivo (#817): por denominación (lo de siempre) o un solo total con centavos.
+// La elegida se recuerda en esta computadora. El conteo sigue siendo a ciegas: nada de lo esperado se ve antes de registrar.
+const CLAVE_FORMA_CORTE = 'corte-forma';
+const formaCorte = () => document.querySelector('input[name="corte-forma"]:checked').value;
+function pintarFormaCorte() {
+  const total = formaCorte() === 'total';
+  $('corte-por-denominacion').hidden = total;
+  $('corte-por-total').hidden = !total;
+}
+function enfocarConteo() {
+  (formaCorte() === 'total' ? $('corte-total') : document.querySelector('#corte-denominaciones input')).focus();
+}
 
 function conteoCorte() {
   const conteo = {};
@@ -2523,8 +2721,11 @@ function conteoCorte() {
 function pintarContado() {
   for (const campo of document.querySelectorAll('#corte-denominaciones input')) {
     const piezas = Number(campo.value || 0);
-    campo.closest('tr').lastElementChild.textContent = Number.isInteger(piezas) && piezas > 0
-      ? pesos(piezas * Number(campo.dataset.denominacion)) : '';
+    const celda = campo.closest('tr').lastElementChild;
+    // Una cantidad improbable se resalta («¿Seguro? 250 × $5.00 = $1,250.00») pero no bloquea.
+    const alerta = alertaConteo(Number(campo.dataset.denominacion), piezas);
+    celda.textContent = alerta || (Number.isInteger(piezas) && piezas > 0 ? pesos(piezas * Number(campo.dataset.denominacion)) : '');
+    celda.classList.toggle('dudoso', !!alerta);
   }
   const contado = contadoDe(conteoCorte());
   $('corte-contado').textContent = contado === null ? 'revisa las piezas' : pesos(contado);
@@ -2535,9 +2736,31 @@ $('corte-denominaciones').innerHTML = DENOMINACIONES.map((d) => `
     <td><input type="number" min="0" step="1" inputmode="numeric" data-denominacion="${d}" placeholder="0"></td>
     <td></td></tr>`).join('');
 $('corte-denominaciones').addEventListener('input', pintarContado);
+$('corte-formulario').addEventListener('input', () => { corteMontoConfirmado = false; });
+$('corte-formulario').addEventListener('change', (e) => {
+  if (e.target.name !== 'corte-forma') return;
+  try { localStorage.setItem(CLAVE_FORMA_CORTE, formaCorte()); } catch { /* se elige cada vez */ }
+  pintarFormaCorte();
+  enfocarConteo();
+});
+
+// La rueda del ratón no cambia los números (#817): en un campo numérico con foco, Chrome la toma como girar el valor y descuadraba
+// el conteo. Se le quita el foco justo antes de que la actúe y se le devuelve enseguida; la página sigue desplazándose.
+document.addEventListener('wheel', (e) => {
+  const campo = e.target;
+  if (!(campo instanceof HTMLInputElement) || campo.type !== 'number' || document.activeElement !== campo) return;
+  campo.blur();
+  setTimeout(() => campo.focus(), 0);
+}, { passive: true });
+// Y en el corte, las flechas arriba y abajo tampoco cambian lo contado.
+$('dialogo-corte').addEventListener('keydown', (e) => {
+  if ((e.key === 'ArrowUp' || e.key === 'ArrowDown') && e.target.type === 'number') e.preventDefault();
+});
 
 $('cerrar-sesion').addEventListener('click', async () => {
-  const { cerrarSesion } = await import('/cerrar-sesion.js');
+  let cerrarSesion;
+  try { ({ cerrarSesion } = await import('/cerrar-sesion.js')); }
+  catch { avisoRojo('Sin red: no se puede cerrar sesión.'); return; }   // sin red el módulo puede no estar en caché (#817)
   // Sólo las que siguen por enviar: las rechazadas ya están a la vista y no se pierden al salir.
   await cerrarSesion({ ventas: async () => (await store('ventas', 'readonly', (s) => s.getAll())).filter((v) => v.estado !== 'rechazada').length });
 });
@@ -2556,12 +2779,21 @@ $('abrir-corte').addEventListener('click', async () => {
   corteReciente = null;
   corteConfirmado = false;
   corteSinEfectivo = false;
+  corteMontoConfirmado = false;
+  let forma = 'denominaciones';
+  try { if (localStorage.getItem(CLAVE_FORMA_CORTE) === 'total') forma = 'total'; } catch { /* sin memoria: por denominación */ }
+  document.querySelector(`input[name="corte-forma"][value="${forma}"]`).checked = true;
+  $('corte-total').value = '';
+  $('corte-formulario').hidden = false;
+  $('corte-confirmar').hidden = true;
+  pintarFormaCorte();
   pintarContado();
   $('dialogo-corte').showModal();
 
   // Lo que no llego al servidor no entra en el corte: primero se sincroniza, y
   // si algo sigue pendiente o rechazado no se puede cortar.
   $('corte-registrar').disabled = true;
+  $('corte-aviso').textContent = 'Enviando las ventas pendientes…';
   try {
     const previo = await fetch(`/api/cortes?caja=${encodeURIComponent(cajaActual())}`);
     if (previo.ok) {
@@ -2570,17 +2802,22 @@ $('abrir-corte').addEventListener('click', async () => {
     }
   } catch { /* sin red el corte tampoco se puede registrar; el aviso de abajo lo dice */ }
   await sincronizar();
+  $('corte-aviso').textContent = '';
   const cola = await store('ventas', 'readonly', (s) => s.getAll());
   const rechazadas = cola.filter((v) => v.estado === 'rechazada').length;
   const pendientes = cola.length - rechazadas;
-  if (!navigator.onLine || pendientes) {
-    $('corte-aviso').textContent = `Hay ${pendientes} ventas sin sincronizar. Espera a tener red antes del corte.`;
+  const sinEnviar = avisoCorteSinEnviar(pendientes, navigator.onLine);
+  if (sinEnviar) {
+    $('corte-aviso').textContent = sinEnviar;
   } else if (rechazadas) {
-    $('corte-aviso').textContent = `Hay ${rechazadas} ventas rechazadas: reintenta o descarta cada una antes del corte.`;
+    const sinAvisar = cola.some((v) => v.estado === 'rechazada' && !v.reportada);
+    $('corte-aviso').textContent = cola.some((v) => v.reportada === 'fallo') ? `Hay ${rechazadas} ventas rechazadas y no se pudo avisar al dueño. Avísale en persona antes de descartar.`
+      : sinAvisar ? `Hay ${rechazadas} ventas rechazadas y aún no se le avisa al dueño: necesita red. Avísale en persona.`
+      : `Hay ${rechazadas} ventas rechazadas. Ya se le avisó al dueño; descártalas cuando te lo indique.`;
   } else {
     $('corte-registrar').disabled = false;
   }
-  document.querySelector('#corte-denominaciones input').focus();
+  enfocarConteo();
 });
 
 $('corte-salir').addEventListener('click', () => { $('dialogo-corte').close(); $('codigo').focus(); });
@@ -2613,9 +2850,38 @@ function pintarResultado(c) {
   </table>`;
 }
 
+/** «Contaste $X» en grande antes de registrar (#817): el conteo ya no se puede cambiar y el error de dedo es la falla más común. */
+function pedirConfirmacionCorte(contado) {
+  $('corte-contaste').textContent = `Contaste ${pesosExactos(contado)}`;
+  $('corte-confirmar-ok').textContent = `Registrar ${pesosExactos(contado)}`;
+  $('corte-formulario').hidden = true;
+  $('corte-confirmar').hidden = false;
+  // El foco queda en «Volver a contar»: un Enter perdido (el lector manda uno por escaneo) nunca registra el corte.
+  $('corte-volver').focus();
+}
+$('corte-confirmar-ok').addEventListener('click', () => {
+  corteMontoConfirmado = true;
+  $('corte-confirmar').hidden = true;
+  $('corte-formulario').hidden = false;
+  $('corte-registrar').click();
+});
+$('corte-volver').addEventListener('click', () => {
+  corteMontoConfirmado = false; corteSinEfectivo = false; corteConfirmado = false;
+  $('corte-registrar').textContent = 'Registrar conteo';
+  $('corte-aviso').textContent = '';
+  $('corte-confirmar').hidden = true;
+  $('corte-formulario').hidden = false;
+  enfocarConteo();
+});
+
 $('corte-registrar').addEventListener('click', async () => {
-  const conteo = conteoCorte();
-  if (contadoDe(conteo) === null) { $('corte-aviso').textContent = 'Revisa las piezas: solo números enteros.'; return; }
+  const total = formaCorte() === 'total';
+  const conteo = total ? undefined : conteoCorte();
+  const contado = total ? centavosDeTexto($('corte-total').value) : contadoDe(conteo);
+  if (contado === null) {
+    $('corte-aviso').textContent = total ? 'Escribe el total contado en pesos, con centavos si hay (pon 0 si el cajón está vacío).' : 'Revisa las piezas: solo números enteros.';
+    return;
+  }
   const terminal = Math.round(Number($('corte-terminal').value || 0) * 100);
   if (!(terminal >= 0)) { $('corte-aviso').textContent = 'Revisa el total de la terminal.'; return; }
   // 24/10: un corte sin contar y sin terminal descuadro el fondo y las tarjetas del dia siguiente.
@@ -2624,7 +2890,7 @@ $('corte-registrar').addEventListener('click', async () => {
     $('corte-terminal').focus();
     return;
   }
-  if (contadoDe(conteo) === 0 && !corteSinEfectivo) {
+  if (contado === 0 && !corteSinEfectivo) {
     corteSinEfectivo = true;
     $('corte-aviso').textContent = 'No contaste efectivo: el corte quedaría en $0 y el fondo de mañana también. Cuenta billetes y monedas; si el cajón de verdad está vacío, vuelve a registrar.';
     $('corte-registrar').textContent = 'Registrar con el cajón vacío';
@@ -2636,12 +2902,14 @@ $('corte-registrar').addEventListener('click', async () => {
     $('corte-registrar').textContent = 'Registrar otro corte';
     return;
   }
+  if (!corteMontoConfirmado) { pedirConfirmacionCorte(contado); return; }
   $('corte-registrar').disabled = true;
   try {
     const r = await fetch('/api/cortes', {
       method: 'POST', headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ id: idCorte, caja: cajaActual(), conteo, tarjeta_terminal: terminal, notas: $('corte-notas').value,
-        sin_efectivo: contadoDe(conteo) === 0 }),
+      // Por total, el servidor recibe `efectivo_contado` en centavos en lugar de `conteo` (corte.ts acepta las dos).
+      body: JSON.stringify({ id: idCorte, caja: cajaActual(), ...(total ? { efectivo_contado: contado } : { conteo }), tarjeta_terminal: terminal,
+        notas: $('corte-notas').value, sin_efectivo: contado === 0 }),
     });
     const corte = await r.json();
     if (!r.ok) { $('corte-aviso').textContent = corte.error ?? 'No se pudo registrar el corte.'; $('corte-registrar').disabled = false; return; }
@@ -2691,7 +2959,28 @@ document.addEventListener('keydown', (e) => {
   if (lineas.length) { $('aviso').textContent = 'Esc otra vez para borrar el ticket.'; $('aviso').style.color = '#5b6478'; }
 });
 
+// Con descuento aprobado, pedido cargado o 3 piezas o más, «Cancelar venta» (y doble Esc) pide un segundo toque (#817). El toque queda
+// armado 4 s sobre ESTE ticket: si el ticket cambia (otra pieza, un cobro) se desarma, y pintar() lo revisa en cada cambio.
+const firmaTicket = () => JSON.stringify([lineas.map((l) => [l.codigo, l.cantidad]), descuento?.estado ?? '', pedidoCargado?.id ?? '']);
+function desarmarCancelar() {
+  if (!cancelarArmado) return;
+  clearTimeout(cancelarArmado.temporizador);
+  cancelarArmado = null;
+  $('cancelar').textContent = 'Cancelar venta';
+}
+function revisarCancelarArmado() {
+  if (cancelarArmado && cancelarArmado.firma !== firmaTicket()) desarmarCancelar();
+}
 $('cancelar').addEventListener('click', () => {
+  if (!cancelarArmado && cancelarPideConfirmar({ piezas: totales(lineas).piezas, descuentoAprobado: descuento?.estado === 'aprobada', pedido: !!pedidoCargado })) {
+    $('cancelar').textContent = 'Toca otra vez para borrar el ticket';
+    $('aviso').textContent = 'Toca otra vez para borrar el ticket.'; $('aviso').style.color = '#D72B32';
+    cancelarArmado = { firma: firmaTicket(), temporizador: setTimeout(desarmarCancelar, 4000) };
+    // El foco sale del botón: el Enter con el que el lector termina cada escaneo lo pulsaría otra vez y borraría el ticket (#817).
+    $('codigo').focus();
+    return;
+  }
+  desarmarCancelar();
   lineas = []; idVenta = null; pedidoCargado = null; descuento = null; sinPromo = false; pintarDescuento(); quitarSocio(); $('efectivo').value = ''; $('clave-rastreo').value = ''; $('monto-transferido').value = ''; $('banco-emisor').value = ''; $('comprobante').value = ''; $('comprobante').dataset.key = ''; $('comprobante-aviso').textContent = ''; $('clave-error').textContent = ''; $('forma').value = 'efectivo'; formaElegida = false; $('aviso').textContent = 'Venta cancelada';
   $('aviso').style.color = '#5b6478'; pintar(); $('codigo').focus();
 });

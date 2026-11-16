@@ -293,16 +293,70 @@ async function recuperarReclamos() {
 }
 // Piezas cuyo envio se corto con etiquetas ya impresas: lo que falta se manda como reimpresion, para que el reclamo
 // (que pudo no soltarse) las siga cubriendo y no se confunda con lo que saco otro dispositivo.
-const parciales = new Set();
+// id -> etiquetas que ya salieron en esos envios cortados: cuentan contra la existencia al continuar (#825).
+const parciales = new Map();
 document.getElementById('imprimir').addEventListener('click', () => {
   if (automaticaActiva) return;
   const ids = [...lista.querySelectorAll('input[type=checkbox]:checked')].map((c) => c.value);
-  // Cuantas etiquetas pidio el usuario por pieza. Solo se imprimen: la existencia
-  // no cambia aqui, se corrige en la cola de revision.
+  // Cuantas etiquetas pidio el usuario por pieza. Si piden mas que la existencia, `imprimir` pregunta cuantas piezas hay (#825).
   const pedidas = new Map([...lista.querySelectorAll('.copias')]
     .map((c) => [c.dataset.id, Math.min(99, Math.max(1, Math.round(Number(c.value)) || 1))]));
   return imprimir(ids, pedidas, false, { deLista: true });
 });
+
+/**
+ * #825: cada etiqueta que sale es una unidad contada. Pedir mas copias que la existencia (descontando las que ya salieron en un envio
+ * cortado) pregunta cuantas piezas hay: «Hay N» suma la diferencia por el ajuste auditado de siempre (quien y cuando, `fijar_a` con
+ * `esperado`, folio idempotente, sin `etiquetas` para no dejar una deuda que las repita) y entonces imprime; «Hay M» imprime solo lo
+ * contado. La existencia nunca cambia sin esa confirmacion. Devuelve las copias a imprimir (0 = ninguna) o null si no se imprime nada.
+ */
+const folios = new Map();   // pieza|existencia|total -> folio del ajuste: repetir «Hay N» tras una falla de red no suma dos veces
+async function copiasContadas(p, pedida) {
+  const salieron = parciales.get(p.id) ?? 0, total = salieron + pedida;
+  if (total <= p.stock) return pedida;
+  const contadas = Math.max(0, p.stock - salieron);
+  const piezas = (n) => `${n} ${n === 1 ? 'pieza' : 'piezas'}`;
+  const respuesta = await (vista?.preguntarExistencia ?? preguntarEnPagina)({
+    pieza: p, pedida, contadas,
+    texto: `Vas a imprimir ${pedida} ${pedida === 1 ? 'etiqueta' : 'etiquetas'}${salieron ? ` (ya salieron ${salieron})` : ''} y el sistema tiene ${piezas(p.stock)} de ${p.nombre || 'esta pieza'}. ¿Cuántas piezas hay?`,
+    sumar: `Hay ${total}: sumar ${total - p.stock} a la existencia e imprimir`,
+    imprimir: contadas ? `Hay ${p.stock}: imprimir ${contadas}` : `Hay ${p.stock}: no imprimir más`,
+  });
+  if (respuesta === 'contadas') return contadas;
+  if (respuesta !== 'sumar') {
+    resumen.textContent = 'No se imprimió: no se confirmó cuántas piezas hay. La existencia no cambió.';
+    return null;
+  }
+  const llave = `${p.id}|${p.stock}|${total}`, folio = folios.get(llave) ?? crypto.randomUUID();
+  folios.set(llave, folio);
+  try {
+    const r = await fetch(`/api/piezas/${p.id}/existencia`, { method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ id: folio, fijar_a: total, esperado: p.stock, motivo: 'entrada' }), signal: AbortSignal.timeout(15000) });
+    const cuerpo = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(cuerpo.error ?? `Error HTTP ${r.status}. Revisa la red y la sesión.`);
+    folios.delete(llave);
+    p.stock = cuerpo.despues ?? total;
+    return pedida;
+  } catch (error) {
+    resumen.textContent = `No se imprimió: no se pudo sumar a la existencia (${error.message}). Revisa la pieza y vuelve a intentar.`;
+    return null;
+  }
+}
+// Sin `vista.preguntarExistencia` (la pantalla /etiquetas) la pregunta es un recuadro de la propia página; sin recuadro (página vieja en caché) se imprime solo lo contado.
+function preguntarEnPagina({ texto, sumar, imprimir }) {
+  const caja = document.getElementById('existencia-pregunta');
+  if (!caja) return Promise.resolve('contadas');
+  return new Promise((resolver) => {
+    const decidir = (respuesta) => { caja.hidden = true; resolver(respuesta); };
+    document.getElementById('existencia-texto').textContent = texto;
+    const botonSumar = document.getElementById('existencia-sumar'), botonImprimir = document.getElementById('existencia-imprimir');
+    botonSumar.textContent = sumar; botonImprimir.textContent = imprimir;
+    botonSumar.onclick = () => decidir('sumar');
+    botonImprimir.onclick = () => decidir('contadas');
+    document.getElementById('existencia-cancelar').onclick = () => decidir(null);
+    caja.hidden = false;
+  });
+}
 
 /**
  * `opciones.reimprimir`: reimpresion explicita (Reimprimir de Buscar y de la ficha, +1 de un lote nuevo): sale aunque
@@ -319,7 +373,7 @@ async function imprimir(ids, pedidas = new Map(), automatico = false, opciones =
   imprimiendo = true;
   pintarControles();
   if (!automatico) detenerEnvio(false);
-  let terminadas = 0, omitidas = 0, rechazadas = 0, sinSoltar = false;
+  let terminadas = 0, omitidas = 0, rechazadas = 0, sinContar = 0, sinSoltar = false;
   const sinEnviar = new Map();   // id -> hora del reclamo propio, de lo reclamado y aun sin mandar
   const soltarCandado = retenerCandado();
   try {
@@ -350,6 +404,18 @@ async function imprimir(ids, pedidas = new Map(), automatico = false, opciones =
       for (const p of preparadas) if (reclamos.get(p.id).reclamada) sinEnviar.set(p.id, reclamos.get(p.id).etiqueta_en);
       guardarSinEnviar(sinEnviar);
 
+      // #825: antes de mandar nada, lo pedido contra lo contado; la pregunta sale aqui, con la persona presente, y no a media tanda.
+      // Cancelar o fallar la suma regresa false: el `finally` suelta lo reclamado y no sale ninguna etiqueta de este tramo.
+      const copiasPor = new Map();
+      if (!automatico) {
+        for (const p of preparadas) {
+          if (!reclamos.get(p.id).reclamada) continue;   // rechazada, omitida o cambiada: el ciclo de abajo la resuelve
+          const aprobadas = await copiasContadas(p, pedidas.get(p.id) ?? copiasDe(p));
+          if (aprobadas === null) return false;
+          copiasPor.set(p.id, aprobadas);
+        }
+      }
+
       for (const p of preparadas) {
         if (envioDetenido()) return false;
         if (automatico && (!p.nombre?.trim() || p.precio <= 0 || p.stock <= 0 || p.destino !== 'etiqueta')) {
@@ -366,11 +432,12 @@ async function imprimir(ids, pedidas = new Map(), automatico = false, opciones =
           omitidas += 1;
           continue;
         }
+        // Las que se pidieron en la columna Etiquetas (de inicio, una por pieza en existencia), topadas a lo contado (#825).
+        const copias = automatico ? p.stock : copiasPor.get(p.id);
+        if (copias === 0) { sinContar += 1; continue; }   // «Hay M» con las M ya impresas: nada que sacar; el `finally` suelta el reclamo
         // Desde aqui lo que pase con esta pieza lo decide su envio, no el cierre del lote.
         sinEnviar.delete(p.id);
         guardarSinEnviar(sinEnviar);
-        // Las que se pidieron en la columna Etiquetas; de inicio, una por pieza en existencia.
-        const copias = automatico ? p.stock : pedidas.get(p.id) ?? copiasDe(p);
         const detalle = `pieza ${terminadas + 1} de ${ids.length}`;
         resumen.textContent = `Imprimiendo ${detalle}: ${copias} ${copias === 1 ? 'etiqueta' : 'etiquetas'}…`;
         // Si se cierra la página durante BLE, no se reenvía una etiqueta incierta a ciegas.
@@ -388,7 +455,7 @@ async function imprimir(ids, pedidas = new Map(), automatico = false, opciones =
           // reimpresión forzada (las etiquetas anteriores siguen pegadas) ni un envío parcial (ya hay etiquetas pegadas
           // y otra pantalla podría reclamar entre liberar y continuar): se conserva el reclamo y lo que falta se
           // continúa como reimpresión.
-          if (hechasDePieza > 0) parciales.add(p.id);
+          if (hechasDePieza > 0) parciales.set(p.id, (parciales.get(p.id) ?? 0) + hechasDePieza);
           const liberada = reclamo.forzada || hechasDePieza > 0 || await liberarEnvio([p.id], { [p.id]: reclamo.etiqueta_en });
           resumen.textContent = (envioDetenido()
             ? `Detenido en la pieza ${terminadas + 1} de ${ids.length}. Las que faltan siguen en la lista.`
@@ -409,7 +476,7 @@ async function imprimir(ids, pedidas = new Map(), automatico = false, opciones =
     // Nada salió y no fue por falla de la impresora: se dice por qué, sin presentarlo como envío (#713).
     resumen.textContent = terminadas + omitidas === 0 && rechazadas > 0
       ? `No se imprimió: ${rechazadas === 1 ? 'la pieza ya no se puede imprimir' : 'las piezas ya no se pueden imprimir'} (vendidas o cambiaron).`
-      : `${terminadas} piezas enviadas${omitidas ? `; ${omitidas} ya las había enviado otro dispositivo y no se repitieron` : ''}${rechazadas ? `; ${rechazadas} ${rechazadas === 1 ? 'pieza ya no se puede imprimir' : 'piezas ya no se pueden imprimir'} (vendidas o cambiaron)` : ''}. Si alguna no salió, usa «Mostrar impresas» y «No salió desde aquí».`;
+      : `${terminadas} piezas enviadas${omitidas ? `; ${omitidas} ya las había enviado otro dispositivo y no se repitieron` : ''}${rechazadas ? `; ${rechazadas} ${rechazadas === 1 ? 'pieza ya no se puede imprimir' : 'piezas ya no se pueden imprimir'} (vendidas o cambiaron)` : ''}${sinContar ? `; ${sinContar} sin etiquetas nuevas: ya salieron todas las piezas contadas` : ''}. Si alguna no salió, usa «Mostrar impresas» y «No salió desde aquí».`;
     // true solo si salió alguna etiqueta o ya la había sacado otro dispositivo; si todo se rechazó (vendidas o cambiaron), nada salió.
     // Excepción (#468): la automática no se pausa si la única pieza se descartó entre listar y preparar (el servidor devuelve []):
     // no hubo falla de impresión. A mano sigue siendo false: nada salió y quien llama no debe decir «Etiqueta enviada».

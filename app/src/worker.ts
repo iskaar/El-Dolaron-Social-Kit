@@ -27,6 +27,7 @@ import {
 } from './cuentas.ts';
 import { cajeroEnTurno, listarCajeros, listarVendedoras, esVendedora, entrar, salir, ponerPin } from './cajeros.ts';
 import { rutaPush } from './push.ts';
+import { reportarRechazo, listarRechazadas, resolverRechazada } from './ventas-rechazadas.ts';
 import { avisosDePedidos, marcarRenglon, type Accion } from './avisos-pedidos.ts';
 import { rutaCep, transferenciasPorValidar, validarTransferencia } from './cep.ts';
 import { subirComprobante, verComprobante } from './comprobante.ts';
@@ -34,7 +35,7 @@ import { verFotoReportada } from './pagos-reportados.ts';
 import { registrarSocio, buscarSocio, buscarPorCodigo, basesListas, sentenciasDeVenta, saldo } from './dolarones.ts';
 import { registrarCorte, registrarRetiro, rutaTerminal, ultimoCorte, cajaDe, CajaAjena } from './corte.ts';
 import { rutaGastos } from './gastos.ts';
-import { sentenciasMover, esExistenciaInsuficiente, fueraDeSoledad, tieneUnidadesFuera, MENSAJE_FUERA_DE_SOLEDAD, sucursales, enCaminoSql, enTiendaSql, existenciaTotalSql } from './existencias.ts';
+import { sentenciasMover, esExistenciaInsuficiente, piezasSinExistencia, fueraDeSoledad, tieneUnidadesFuera, MENSAJE_FUERA_DE_SOLEDAD, sucursales, enCaminoSql, enTiendaSql, existenciaTotalSql } from './existencias.ts';
 import { rutaBultos } from './bultos.ts';
 import { rutaPiezas, buscarPiezas, escribirExistencia, autorizarPrecio } from './piezas.ts';
 import { rutaSolicitudesPrecio, crearSolicitud } from './solicitudes-precio.ts';
@@ -2122,8 +2123,13 @@ async function registrarVenta(request: Request, env: Env, ctx: ExecutionContext,
       return json({ error: 'Código de socio usado, vencido o actualizado. Pide otro al cliente.' }, 409);
     }
     if (esExistenciaInsuficiente(error)) {
-      return json({ error: tienda === TIENDA_CENTRAL ? 'No hay existencia suficiente para completar la venta.'
-        : 'No hay existencia suficiente en esta sucursal para completar la venta.' }, 409);
+      const base = tienda === TIENDA_CENTRAL ? 'No hay existencia suficiente para completar la venta.'
+        : 'No hay existencia suficiente en esta sucursal para completar la venta.';
+      // #819: qué pieza ya no está (lectura aparte, después del aborto; no cambia si se acepta la venta). Con pedido las apartadas vuelven a la
+      // existencia dentro del batch, así que una lectura posterior no distingue cuál faltó: se queda el mensaje general.
+      const faltantes = pedidoId ? [] : await piezasSinExistencia(env, tienda, preparado.lineas).catch(() => []);
+      const quita = faltantes.map((f) => f.nombre || f.codigo).join(', ');
+      return json({ error: quita ? `${base} Quita ${quita}: ya no está disponible.` : base, ...faltantes[0], faltantes }, 409);
     }
     if (String(error).includes('saldo insuficiente')) {
       return json({ error: 'El saldo de Dolarones cambio. Vuelve a buscar al socio.' }, 409);
@@ -2931,6 +2937,13 @@ export default {
       if (pathname === '/api/cajon' && request.method === 'POST') {
         return await registrarAperturaCajon(request, env, correo, tienda);
       }
+
+      // #819: la caja avisa de una venta cobrada sin red que el servidor rechazó; listarla y resolverla es del dueño (permiso()).
+      const rechazo = pathname.match(/^\/api\/ventas\/([^/]+)\/rechazo$/);
+      if (rechazo && request.method === 'POST') return await reportarRechazo(rechazo[1], request, env, ctx, correo, tienda);
+      if (pathname === '/api/ventas-rechazadas' && request.method === 'GET') return await listarRechazadas(env);
+      const resolverRechazo = pathname.match(/^\/api\/ventas-rechazadas\/([^/]+)\/resolver$/);
+      if (resolverRechazo && request.method === 'POST') return await resolverRechazada(resolverRechazo[1], request, env, correo);
 
       const cancelacion = pathname.match(/^\/api\/ventas\/([^/]+)\/cancelar$/);
       if (cancelacion && request.method === 'POST') {
