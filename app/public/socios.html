@@ -92,6 +92,13 @@
     <button id="llegada-camara" type="button">Escanear con la cámara</button>
     <div id="aviso-llegada" role="status"></div>
   </details>
+  <dialog id="dlg-confirmar" aria-labelledby="dlg-confirmar-texto">
+    <form method="dialog">
+      <p id="dlg-confirmar-texto"></p>
+      <button id="dlg-confirmar-no" value="no">Cancelar</button>
+      <button id="dlg-confirmar-si" value="si">Sí, acreditar la llegada</button>
+    </form>
+  </dialog>
   <dialog id="dialogo-camara">
     <h2>Escanear el código del cliente</h2>
     <div id="lector-camara" style="width:100%;min-height:240px"></div>
@@ -126,7 +133,7 @@ if (incrustado) {
   // El lector escribe digitos y Enter: Enter dentro de un campo no registra (solo el boton), y Esc cierra la ventana de la caja.
   $('alta').addEventListener('keydown', (e) => { if (e.key === 'Enter' && e.target.tagName === 'INPUT') e.preventDefault(); });
   addEventListener('keydown', (e) => {
-    if (e.key === 'Escape' && !document.querySelector('#dialogo-cajero[open], #dialogo-camara[open]')) avisarCaja({ tipo: 'alta-cerrar' });
+    if (e.key === 'Escape' && !document.querySelector('#dialogo-cajero[open], #dialogo-camara[open], #dlg-confirmar[open]')) avisarCaja({ tipo: 'alta-cerrar' });
   });
 }
 
@@ -192,6 +199,16 @@ $('otro').addEventListener('click', () => {
 // #839: la llegada se acredita con el código DC- que el cliente muestra en su cuenta; el servidor decide el socio por el código.
 // El lector escribe dígitos y Enter: sin un código válido no se acredita nada.
 const SIN_CODIGO = 'Pide al cliente su código en su celular.';
+// Confirmación en la página: el Enter del lector no la acepta (el botón «Sí» ignora Enter; solo clic o Espacio) y el foco empieza en «Cancelar».
+function confirmar(texto) {
+  const dlg = $('dlg-confirmar');
+  $('dlg-confirmar-texto').textContent = texto;
+  dlg.returnValue = '';
+  dlg.showModal();
+  $('dlg-confirmar-no').focus();
+  return new Promise((listo) => dlg.addEventListener('close', () => listo(dlg.returnValue === 'si'), { once: true }));
+}
+$('dlg-confirmar-si').addEventListener('keydown', (e) => { if (e.key === 'Enter') e.preventDefault(); });
 async function acreditar(texto, aviso) {
   const codigo = codigoDeDigitos(texto) ?? String(texto).trim();
   if (!/^DC-[A-Za-z0-9_-]{16}$/.test(codigo)) { aviso.textContent = SIN_CODIGO; return false; }
@@ -199,15 +216,17 @@ async function acreditar(texto, aviso) {
   const socio = await busqueda.json();
   if (!busqueda.ok) throw new Error(socio.error || 'No se pudo leer el código.');
   if (!socio.llegada_pendiente) { aviso.textContent = `#${socio.numero}, ${socio.nombre}: no tiene una llegada por acreditar.`; return false; }
-  if (!confirm(`¿Confirmas la llegada física de #${socio.numero}, ${socio.nombre}? Si la promoción de apertura está activa, el premio que se otorgue no se puede cambiar desde esta pantalla.`)) return false;
+  if (!await confirmar(`¿Confirmas la llegada física de #${socio.numero}, ${socio.nombre}? Si la promoción de apertura está activa, el premio que se otorgue no se puede cambiar desde esta pantalla.`)) return false;
   const r = await fetch('/api/portal/llegada', { method:'POST', headers:{ 'content-type':'application/json' }, body:JSON.stringify({ codigo }) });
   const cuerpo = await r.json();
   if (!r.ok) throw new Error(cuerpo.error || 'No se pudo acreditar. Intenta otra vez.');
   aviso.textContent = cuerpo.premio ? `Llegada acreditada. Premio: ${d(cuerpo.premio.importe)}, vigente hasta ${new Date(cuerpo.premio.vence_en).toLocaleDateString('es-MX')}.` : 'Llegada acreditada; sin premio nuevo disponible.';
+  if (cuerpo.premio) aviso.textContent += ' Para gastar los Dolarones nuevos, el cliente genera un código nuevo en su cuenta.';
   if (incrustado) avisarCaja({ tipo: 'alta-llegada' });
   return true;
 }
 async function acreditarDelCampo() {
+  if ($('acreditar-llegada').disabled) return;   // un segundo escaneo con la primera petición en vuelo no hace nada
   const campo = $('llegada-codigo'), aviso = $('aviso-llegada');
   $('acreditar-llegada').disabled = true;
   aviso.textContent = '';

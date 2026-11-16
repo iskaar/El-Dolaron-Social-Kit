@@ -1489,7 +1489,34 @@ $('dlg-alta-marco').addEventListener('load', () => {
   if (llegadaAEnviar) $('dlg-alta-marco').contentWindow.postMessage({ tipo: 'llegada-codigo', codigo: llegadaAEnviar }, location.origin);
   llegadaAEnviar = '';
 });
-$('llegada-pendiente').addEventListener('click', () => { if (codigoLlegada) abrirAlta(codigoLlegada); });
+// #839: con el cobro en duda el ticket no se toca (#832): el botón solo repite el aviso de terminar el cobro.
+function abrirLlegadaPendiente() {
+  if (ticketEnDuda() || !codigoLlegada) return;
+  abrirAlta(codigoLlegada);
+}
+// Tras acreditar solo se refresca el SALDO mostrado: socio, código y folio de la venta no se tocan, aunque el código (5 min) ya no valga.
+async function refrescarSaldoTrasLlegada() {
+  const codigo = codigoLlegada;
+  llegadaAcreditada = false;
+  codigoLlegada = '';
+  if (ticketEnDuda() || !codigo) return;
+  let aviso = 'Llegada acreditada. El saldo se actualiza en la próxima búsqueda.';
+  try {
+    const r = await fetch('/api/socios/codigo', { method:'POST', headers:{ 'content-type':'application/json' }, body:JSON.stringify({ codigo }) });
+    const nuevo = await r.json();
+    // El código sigue siendo el de este socio del ticket; su tope (`maximo`) quedó fijo al generarlo, así que lo recién acreditado
+    // no se gasta con él: el cliente genera un código nuevo.
+    if (r.ok && socio && codigoSocio === codigo && nuevo.id === socio.id) {
+      socio = { ...socio, disponible:nuevo.disponible, por_liberar:nuevo.por_liberar, regalo_disponible:nuevo.regalo_disponible };
+      aviso = 'Llegada acreditada. Para gastar los Dolarones nuevos, el cliente genera un código nuevo en su cuenta.';
+    }
+  } catch { /* sin red: el aviso tranquilo de arriba */ }
+  pintarSocio();
+  pintar();
+  $('aviso').textContent = aviso;
+  $('aviso').style.color = '';
+}
+$('llegada-pendiente').addEventListener('click', abrirLlegadaPendiente);
 addEventListener('message', (e) => {
   if (e.origin !== location.origin || e.source !== $('dlg-alta-marco').contentWindow) return;
   const m = leerMensajeAlta(e.data);
@@ -1501,12 +1528,7 @@ $('dlg-alta').addEventListener('close', async () => {
   $('dlg-alta-marco').src = 'about:blank';   // no deja datos del cliente anterior en la ventana
   const numero = numeroAlta;
   numeroAlta = null;
-  // Llegada acreditada con el código escaneado: se vuelve a buscar con ese mismo código para traer el saldo nuevo.
-  if (llegadaAcreditada && codigoLlegada && !numero) {
-    llegadaAcreditada = false;
-    $('socio').value = codigoLlegada;
-    await buscarSocio();
-  }
+  if (llegadaAcreditada && !numero) await refrescarSaldoTrasLlegada();
   if (numero) {
     $('socio').value = String(numero);
     await buscarSocio();

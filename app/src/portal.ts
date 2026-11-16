@@ -166,7 +166,7 @@ export async function registro(request: Request, env: Env, auth: Identidad): Pro
 export async function llegada(request: Request, env: Env, autor: string): Promise<Response> {
   if (!promocionAbierta(env)) return json({ error: 'Promoción no disponible.' }, 503);
   // #839: la llegada se acredita con el código DC- que el cliente genera en su cuenta (el mismo que identifica y paga);
-  // un número tecleado ya no basta. La lectura no consume el código: el cliente puede usarlo luego para pagar.
+  // un número tecleado ya no basta. La lectura no consume el código, pero su `maximo` quedó fijo al generarlo: lo recién acreditado se gasta con un código nuevo.
   const body = await request.json().then((c) => c ?? {}, () => ({})) as { codigo?: unknown };
   const dueno = await clientePorCodigo(env, body.codigo);
   if (dueno === undefined) return json({ error: 'Pide al cliente su código en su celular.' }, 400);

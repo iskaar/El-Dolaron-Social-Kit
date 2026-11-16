@@ -218,16 +218,53 @@ test('la llegada rechaza el código vencido, usado o cerrado desde la cuenta (#8
   } finally { p.cerrar(); }
 });
 
-test('dos cajas acreditando la misma llegada a la vez dan un solo premio de tienda (#839)', async () => {
+test('tres cajas acreditando la misma llegada a la vez, con todas las lecturas antes de cualquier escritura, dan un solo premio (#839)', async () => {
   const p = portalDePrueba();
   try {
-    await p.registrar('uid-a', '+524441110004');
-    const codigo = (await p.llamar('/api/portal/codigo', token('uid-a', '+524441110004'), undefined, 'POST')).body.codigo as string;
-    const respuestas = await Promise.all([1, 2, 3].map(() => p.pedir('/api/portal/llegada', { codigo })));
-    assert.deepEqual(respuestas.map((r) => r.status), [200, 200, 200]);
-    assert.equal(new Set(respuestas.map((r) => r.cuerpo.premio.lote_id)).size, 1);
-    assert.equal(p.db.prepare("select count(*) as n from premios_apertura where canal = 'tienda' and cliente_id is not null").get()!.n, 1);
-    assert.equal(p.db.prepare('select count(*) as n from primera_llegada').get()!.n, 1);
+    const alta = async (telefono: string) => {
+      const r = await p.pedir('/api/socios', { id: crypto.randomUUID(), nombre: 'Cliente', telefono, acepta_bases: true, declara_mayor_edad: true });
+      return { id: r.cuerpo.id as string, codigo: await codigoPrueba(p.db, r.cuerpo.id) };
+    };
+    // Cada acreditación llega a su batch con lo que leyó antes de que otra escriba: el batch espera a que lleguen todas.
+    const entrelazadas = async (codigo: string, n = 3) => {
+      const batch = p.env.DB.batch.bind(p.env.DB);
+      let llegadas = 0;
+      let soltar!: () => void;
+      const todas = new Promise<void>((ok) => { soltar = ok; });
+      const reloj = setTimeout(soltar, 2000);
+      p.env.DB.batch = async (sentencias) => { if (++llegadas === n) soltar(); await todas; return batch(sentencias); };
+      try {
+        const respuestas = await Promise.all(Array.from({ length: n }, () => p.pedir('/api/portal/llegada', { codigo })));
+        assert.equal(llegadas, n, 'las tres leyeron antes de que cualquiera escribiera');
+        return respuestas;
+      } finally { clearTimeout(reloj); p.env.DB.batch = batch; }
+    };
+    const cuenta = (sql: string, id: string) => p.db.prepare(sql).get(id)!.n;
+    for (const [orden, socio] of [['primera llegada', await alta('5551110011')], ['llegada que no es la primera', await alta('5551110012')]] as const) {
+      const respuestas = await entrelazadas(socio.codigo);
+      for (const r of respuestas) assert.ok([200, 409].includes(r.status), `${orden}: ${r.status}`);
+      assert.ok(respuestas.some((r) => r.status === 200), orden);
+      assert.equal(cuenta('select count(*) as n from premios_apertura where cliente_id = ?', socio.id), 1, orden);
+      assert.equal(cuenta("select count(*) as n from dolarones_lotes where origen = 'regalo' and cliente_id = ?", socio.id), 1, orden);
+      assert.equal(cuenta("select count(*) as n from dolarones_movimientos where tipo = 'regalo' and cliente_id = ?", socio.id), 1, orden);
+      assert.equal(p.db.prepare('select count(*) as n from primera_llegada').get()!.n, 1, orden);
+    }
+  } finally { p.cerrar(); }
+});
+
+test('el premio recién acreditado no se gasta con el mismo código: su tope se fijó al generarlo (#839)', async () => {
+  const p = portalDePrueba();
+  try {
+    const socio = await p.registrar('uid-tope', '+524441110020');   // premio online de 300 D
+    p.db.prepare('update productos set precio = 100000 where id = ?').run(PRODUCTO);
+    const codigo = (await p.llamar('/api/portal/codigo', token('uid-tope', '+524441110020'), undefined, 'POST')).body.codigo as string;
+    assert.equal(p.db.prepare('select maximo from codigos_cliente where cliente_id = ?').get(socio.body.id)!.maximo, 300_00);
+    // Llega: el premio pasa a 500 D, pero el código sigue autorizando solo los 300 D con que se generó, y sigue vivo.
+    assert.equal((await p.pedir('/api/portal/llegada', { codigo })).cuerpo.premio.importe, 500_00);
+    const pagar = (dolarones: number) => p.pedir('/api/ventas', { id: crypto.randomUUID(), cliente_id: socio.body.id,
+      lineas: [{ producto_id: PRODUCTO, cantidad: 1 }], forma_pago: 'efectivo', efectivo: 100000 - dolarones, dolarones, codigo_socio: codigo });
+    assert.equal((await pagar(300_01)).status, 403);
+    assert.equal((await pagar(300_00)).status, 201);
   } finally { p.cerrar(); }
 });
 
