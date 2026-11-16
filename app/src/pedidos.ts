@@ -147,7 +147,7 @@ export async function enPedido(env: Env, productoId: string): Promise<boolean> {
  */
 export async function sentenciasDePedido(env: Env, p: {
   pedidoId: string; ventaId: string; anticipo: number; ahora: string; tienda: string;
-  total: number; lineas: { producto_id: string; cantidad: number; precio: number }[];
+  total: number; porPagar: number; lineas: { producto_id: string; cantidad: number; precio: number }[];
 }): Promise<{ ok: true; sentencias: D1PreparedStatement[] } | { ok: false; error: string; status: number }> {
   const pedido = await env.DB.prepare('select saldo, saldo_vence_en, estado, entrega, revision, liquidado_en, recoge_en from pedidos where id = ?')
     .bind(p.pedidoId).first<{ saldo: number; saldo_vence_en: string; estado: string; entrega: string; revision: number; liquidado_en: string | null; recoge_en: string }>();
@@ -181,6 +181,11 @@ export async function sentenciasDePedido(env: Env, p: {
   }
   if (pedido.saldo < p.anticipo || (!envioApartado && pedido.saldo_vence_en <= p.ahora))
     return { ok: false, status: 409, error: 'El saldo del pedido cambió o venció. Vuelve a cargarlo.' };
+  // #838: un apartado para recoger puede recibir un abono entre que la caja cargó P-n y cobra. Aplicar menos que el saldo vigente
+  // (o que lo que se cobra) deja dinero del cliente sin gastar y le cobra de más: se vuelve a cargar. También se comprueba en el UPDATE.
+  const recoger = pedido.estado === 'apartado' && pedido.entrega === 'tienda';
+  if (recoger && p.anticipo < Math.min(pedido.saldo, p.porPagar))
+    return { ok: false, status: 409, error: 'El saldo del pedido cambió. Vuelve a cargarlo.' };
   return {
     ok: true,
     sentencias: [
@@ -188,12 +193,13 @@ export async function sentenciasDePedido(env: Env, p: {
       env.DB.prepare(
         `update pedidos set saldo = case when revision = ?5 and (saldo_vence_en > ?1
                               or (estado = 'apartado' and entrega = 'envio' and liquidado_en is not null))
+                              and not (estado = 'apartado' and entrega = 'tienda' and ?2 < min(saldo, ?6))
                               then saldo - ?2 else -1 end,
                             estado = case when estado = 'apartado' then 'vendido' else estado end,
                             venta_id = case when estado = 'apartado' then ?3 else venta_id end,
                             actualizado_en = ?1, revision = revision + 1
          where id = ?4`,
-      ).bind(p.ahora, p.anticipo, p.ventaId, p.pedidoId, pedido.revision),
+      ).bind(p.ahora, p.anticipo, p.ventaId, p.pedidoId, pedido.revision, p.porPagar),
     ],
   };
 }
@@ -625,9 +631,10 @@ async function moverPaquete(folio: number, tipo: 'pieza' | 'abono', request: Req
   const momento = new Date();
   const ahora = momento.toISOString();
   // #575 / #838: un apartado para recoger (con o sin anticipo) recibe abonos como un paquete, pero no se liquida: lo que falte
-  // se cobra en caja al recoger. Con anticipo, el abono NO mueve el plazo (#838); sin anticipo (revendedora/portal) lo renueva, como siempre.
+  // se cobra en caja al recoger. Un abono NO reinicia los días para recoger (#838); solo el primer pago de uno sin pagar
+  // (revendedora/portal, saldo 0) le da sus 7 días (#668).
   const abonoEnTienda = tipo === 'abono' && pedido.entrega === 'tienda';
-  const mismoPlazo = abonoEnTienda && Number(pedido.anticipo) > 0;
+  const mismoPlazo = abonoEnTienda && Number(pedido.saldo) > 0;
   // #609: un apartado con pago reportado sin revisar no vence (el cron lo salta); su abono se registra aunque el plazo ya pasara.
   const vencido = String(pedido.vence_en) <= ahora;
   const reportado = tipo === 'abono' && vencido && !!await env.DB.prepare("select 1 as x from pagos_reportados where pedido_id = ? and estado = 'pendiente'").bind(pedido.id).first();

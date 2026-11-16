@@ -147,7 +147,7 @@ pintarLista`, {
   assert.doesNotMatch(normal, /Sin anticipo/);
   // #838: el apartado normal también recibe abonos, dice cuántos días quedan y que el abono no los alarga.
   assert.match(normal, /data-mover="2" data-tipo="abono"/);
-  assert.match(normal, /Vence (?:hoy,|el) 2030-01-01 \(quedan \d+ días; los abonos no lo alargan\)/);
+  assert.match(normal, /Vence (?:hoy,|el) 2030-01-01 \((?:quedan \d+ días; )?los abonos no lo alargan\)/);
   assert.match(normal, /data-cancelar="2"/);
   assert.match($('lista-envios').innerHTML, /Sin anticipo · Vence el 2030-01-01 · Bety; cada pieza/);
 });
@@ -228,4 +228,68 @@ pintarLista`, {
   assert.match(apartados, /Tienda · Portal/);
   assert.match(apartados, /data-mover="4" data-tipo="abono"/);
   assert.doesNotMatch(apartados, /portal</);
+});
+
+/* ---------- #838: días que quedan, en días de calendario de la tienda ---------- */
+
+function apartadosEn(ahoraIso: string, pedidos: any[]) {
+  const html = new Map<string, any>();
+  const $ = (id: string) => { if (!html.has(id)) html.set(id, {}); return html.get(id); };
+  const fijo = Date.parse(ahoraIso);
+  class FechaFija extends Date { static now() { return fijo; } }
+  const base = { cliente: 'Ana', telefono: '4441234567', entrega: 'tienda', estado: 'apartado', guia: '', liquidado_en: null, envio: 0,
+    subtotal: 25000, lineas: [], vendedora: 'caja@prueba.mx', vendedora_nombre: 'Marta', anticipo: 10000, saldo: 10000, faltante: 15000 };
+  const bloque = fuente.slice(fuente.indexOf('const vendedoraDe ='), fuente.indexOf("$('actualizar').addEventListener"));
+  const pintar = runInNewContext(`${bloque}\npintarLista`, {
+    $, pedidos: pedidos.map((p, i) => ({ ...base, folio: i + 1, ...p })), Date: FechaFija, guardadas: new Map(), escapar: String, pesos: (n: number) => `$${n / 100}`,
+    dia: (t: number) => new Date(t).toLocaleDateString('en-CA', { timeZone: 'America/Mexico_City' }),
+    fecha: (s: string) => s.slice(0, 10), piezasDe: () => 'Prenda', totalDe: () => 25000,
+    enlaceWhatsApp: () => '#', mensajeConfirmar: () => '', mensajeRecordar: () => '', mensajeGuia: () => '', mensajeSaldo: () => '',
+  });
+  pintar();
+  return ($('lista-apartados').innerHTML as string).split('<div class="pedido">').slice(1);
+}
+
+test('días que quedan: de calendario en hora de tienda, no ventanas de 24 horas; el día del plazo dice «Vence hoy» sin «queda 1 día»', () => {
+  const [manana, finDeDia, hoy, cinco, mananaTarde] = apartadosEn('2026-11-22T08:00:00-06:00', [
+    { vence_en: '2026-11-23T10:00:00-06:00' },          // mañana: 1 día
+    { vence_en: '2026-11-22T23:30:00-06:00' },          // hoy mismo, tarde
+    { vence_en: '2026-11-22T20:00:00-06:00' },
+    { vence_en: '2026-11-27T10:00:00-06:00' },          // 5 días
+    { vence_en: '2026-11-23T23:00:00-06:00' },          // 39 h después, pero sigue siendo mañana: 1 día
+  ]);
+  assert.match(manana, /\(queda 1 día; los abonos no lo alargan\)/);
+  assert.match(mananaTarde, /\(queda 1 día; los abonos no lo alargan\)/);
+  assert.match(cinco, /\(quedan 5 días; los abonos no lo alargan\)/);
+  for (const c of [finDeDia, hoy]) {
+    assert.match(c, /Vence hoy, /);
+    assert.doesNotMatch(c, /queda/);
+    assert.match(c, /\(los abonos no lo alargan\)/);
+  }
+});
+
+test('«Recibir abono» se oculta en un apartado normal vencido o sin faltante; el de revendedora sigue con su botón', () => {
+  const [vigente, vencido, pagado, reventa] = apartadosEn('2026-11-22T08:00:00-06:00', [
+    { vence_en: '2026-11-25T10:00:00-06:00' },
+    { vence_en: '2026-11-22T07:00:00-06:00' },
+    { vence_en: '2026-11-25T10:00:00-06:00', saldo: 25000, faltante: 0 },
+    { vence_en: '2026-11-22T20:00:00-06:00', anticipo: 0, saldo: 0, faltante: 25000, vendedora: 'ana@revende.mx', vendedora_nombre: 'Ana' },
+  ]);
+  assert.match(vigente, /data-tipo="abono"/);
+  assert.doesNotMatch(vencido, /data-tipo="abono"/);
+  assert.match(vencido, /Venció el/);
+  assert.doesNotMatch(vencido, /los abonos no lo alargan/);
+  assert.doesNotMatch(pagado, /data-tipo="abono"/);
+  assert.match(reventa, /data-tipo="abono"/);
+});
+
+test('revendedora o portal sin pago no dice «los abonos no lo alargan»; con un pago sí y con sus días', () => {
+  const [sinPago, conPago] = apartadosEn('2026-11-22T08:00:00-06:00', [
+    { vence_en: '2026-11-23T10:00:00-06:00', anticipo: 0, saldo: 0, faltante: 25000, vendedora: 'portal' },
+    { vence_en: '2026-11-28T10:00:00-06:00', anticipo: 0, saldo: 5000, faltante: 20000, vendedora: 'portal' },
+  ]);
+  assert.doesNotMatch(sinPago, /los abonos no lo alargan/);
+  assert.match(sinPago, /Sin anticipo · Vence el/);
+  assert.match(conPago, /\(quedan 6 días; los abonos no lo alargan\)/);
+  assert.match(conPago, /data-tipo="abono"/);
 });

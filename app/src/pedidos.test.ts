@@ -283,6 +283,9 @@ test('cancelar devuelve el stock una vez y el saldo se usa en otra venta; vencid
 test('saldo parcial: lo que sobra del anticipo sigue a favor del cliente despues de la venta', async () => {
   const { pedir } = tienda();
   const ped = await apartar(pedir, { anticipo: 20000 });
+  // Un apartado vigente gasta todo su saldo (#838); el saldo a favor de uno cancelado se puede gastar en parte.
+  assert.equal((await vender(pedir, { pedido_id: ped.id, anticipo: 5000, efectivo: 20000 })).status, 409);
+  assert.equal((await pedir(`/api/pedidos/${ped.cuerpo.pedido.folio}/cancelar`, {})).status, 200);
   const v = await vender(pedir, { pedido_id: ped.id, anticipo: 5000, efectivo: 20000 });
   assert.equal(v.status, 201);
   assert.equal(v.cuerpo.saldo_pedido, 15000);
@@ -1300,4 +1303,80 @@ test('#838 sin cambio: el abono a un paquete de envío sigue renovando 7 días y
   assert.ok(dias > 6.9 && dias <= 7, String(dias));
   const local = await apartar(pedir);
   assert.equal((await agregarAPaquete(pedir, local.cuerpo.pedido.folio, PRODUCTO)).status, 409);
+});
+
+test('#838 el primer pago de un apartado del portal da sus 7 días; los abonos siguientes no mueven vence_en ni saldo_vence_en', async () => {
+  const t = tienda();
+  const { db, pedir } = t;
+  const a = vendible(db, 25000, 1);
+  assert.equal((await apartarEnPortal(t, a.codigo)).status, 201);
+  assert.equal((await abonar(pedir, 1, 5000)).status, 200);
+  const primero = filaPedido(db, 1);
+  assert.ok(Math.abs(Date.parse(primero.vence_en) - Date.now() - 7 * 86_400_000) < 60_000, primero.vence_en);
+  const corto = new Date(Date.now() + 2 * 3_600_000).toISOString();
+  db.prepare('update pedidos set vence_en = ? where folio = 1').run(corto);
+  const saldoVence = filaPedido(db, 1).saldo_vence_en;
+  assert.equal((await abonar(pedir, 1, 5000)).status, 200);
+  const segundo = filaPedido(db, 1);
+  assert.equal(segundo.saldo, 10000);
+  assert.equal(segundo.vence_en, corto);
+  assert.equal(segundo.saldo_vence_en, saldoVence);
+});
+
+test('#838 vence_en > ahora también se comprueba dentro del batch: si vence entre la lectura y el batch, el abono se rechaza', async () => {
+  const { db, env, pedir } = tienda();
+  const p = await apartar(pedir);
+  const folio = p.cuerpo.pedido.folio;
+  db.prepare('update pedidos set vence_en = ? where id = ?').run(new Date(Date.now() + 3_600_000).toISOString(), p.id);
+  const batch = env.DB.batch.bind(env.DB);
+  env.DB.batch = (async (sentencias: D1PreparedStatement[]) => {
+    env.DB.batch = batch;
+    db.prepare("update pedidos set vence_en = '2020-01-01T00:00:00.000Z' where id = ?").run(p.id);   // sin tocar revision
+    return batch(sentencias);
+  }) as typeof env.DB.batch;
+  assert.equal((await abonar(pedir, folio, 5000)).status, 409);
+  assert.equal((db.prepare('select count(*) as n from pedido_movimientos').get() as any).n, 0);
+  assert.equal(filaPedido(db, folio).saldo, 10000);
+});
+
+test('#838 dos abonos a la vez a un apartado para recoger: uno gana y el otro recibe 409 sin cobrarse', async () => {
+  const { db, env, pedir } = tienda();
+  const p = await apartar(pedir);
+  const folio = p.cuerpo.pedido.folio;
+  juntarDosBatches(env);
+  const rs = await Promise.all([abonar(pedir, folio, 10000), abonar(pedir, folio, 10000, { caja: 'Caja 2' })]);
+  assert.deepEqual(rs.map((r) => r.status).sort(), [200, 409]);
+  assert.equal(filaPedido(db, folio).saldo, 20000);
+  assert.equal((db.prepare('select count(*) as n from pedido_movimientos').get() as any).n, 1);
+});
+
+test('#838 un abono entre cargar P-n y cobrar: la venta con el anticipo viejo se rechaza (409) y con el saldo nuevo pasa', async () => {
+  const { db, pedir } = tienda();
+  const p = await apartar(pedir);   // la caja cargó saldo $100
+  const folio = p.cuerpo.pedido.folio;
+  assert.equal((await abonar(pedir, folio, 5000)).status, 200);   // llega otro abono: saldo $150
+  const viejo = await vender(pedir, { pedido_id: p.id, anticipo: 10000, efectivo: 25000 });
+  assert.equal(viejo.status, 409);
+  assert.equal(viejo.cuerpo.error, 'El saldo del pedido cambió. Vuelve a cargarlo.');
+  assert.equal((db.prepare('select count(*) as n from ventas').get() as any).n, 0);
+  assert.equal(filaPedido(db, folio).saldo, 15000);
+  assert.equal(filaPedido(db, folio).estado, 'apartado');
+  assert.equal((await vender(pedir, { pedido_id: p.id, anticipo: 15000, efectivo: 10000 })).status, 201);
+});
+
+test('#838 el abono llega justo entre la lectura del pedido y el batch de la venta: la venta no pasa con el anticipo viejo', async () => {
+  const { db, env, pedir } = tienda();
+  const p = await apartar(pedir);
+  const folio = p.cuerpo.pedido.folio;
+  const batch = env.DB.batch.bind(env.DB);
+  let enBatch = false;
+  env.DB.batch = (async (sentencias: D1PreparedStatement[]) => {
+    if (!enBatch) { enBatch = true; env.DB.batch = batch; assert.equal((await abonar(pedir, folio, 5000)).status, 200); }
+    return batch(sentencias);
+  }) as typeof env.DB.batch;
+  const v = await vender(pedir, { pedido_id: p.id, anticipo: 10000, efectivo: 25000 });
+  assert.equal(v.status, 409);
+  assert.equal((db.prepare('select count(*) as n from ventas').get() as any).n, 0);
+  assert.equal(filaPedido(db, folio).saldo, 15000);
+  assert.equal(stockDe(db, PRODUCTO), 49);
 });
