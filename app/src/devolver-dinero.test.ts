@@ -9,6 +9,10 @@ const TIENDA = 'tienda@prueba.mx';
 const ANA = 'ana@prueba.mx';
 const PIN_DUENO = '111222';
 const PIN_ANA = '482913';
+const SUP = 'sup@prueba.mx';
+const BETO = 'beto@prueba.mx';
+const PIN_SUP = '735190';
+const PIN_BETO = '264817';
 const VIEJA = VENTANA_CANCELACION_MS + 60_000;
 
 async function montar() {
@@ -17,10 +21,14 @@ async function montar() {
   t.env.CORREO = { async send(m: { to: string; subject: string; text: string }) { correos.push(m); return { messageId: 'x' }; } } as never;
   t.db.prepare(`insert into usuarios (correo, nombre, roles, activo, caja, creado_en, actualizado_en) values
     ('${TIENDA}', 'Computadora', 'computadora', 1, '', '', ''),
-    ('${ANA}', 'Ana', 'cajero', 1, 'Caja 2', '', '')`).run();
+    ('${ANA}', 'Ana', 'cajero', 1, 'Caja 2', '', ''),
+    ('${SUP}', 'Sara', 'cajero,supervisor', 1, '', '', ''),
+    ('${BETO}', 'Beto', 'cajero', 1, '', '', '')`).run();
   t.db.prepare(`update usuarios set tienda = 'soledad' where roles = 'computadora'`).run();
   await t.pedir('/api/cuentas/pin', { correo: DUENO, pin: PIN_DUENO }, 'PUT');
   await t.pedir('/api/cuentas/pin', { correo: ANA, pin: PIN_ANA }, 'PUT');
+  await t.pedir('/api/cuentas/pin', { correo: SUP, pin: PIN_SUP }, 'PUT');
+  await t.pedir('/api/cuentas/pin', { correo: BETO, pin: PIN_BETO }, 'PUT');
   const como = (correo: string) => { (t.env as unknown as { DEV_USUARIO: string }).DEV_USUARIO = correo; };
   como(TIENDA);
   const token = (await t.pedir('/api/cajeros/entrar', { correo: ANA, pin: PIN_ANA })).cuerpo.token as string;
@@ -73,9 +81,9 @@ test('el cajero que pide dinero por pieza recibe la exigencia de aprobación: no
     const r = await devolver(id, await linea(id));
     assert.equal(r.status, 403);
     assert.equal(r.cuerpo.requiere_aprobacion, true);
-    assert.match(r.cuerpo.error, /aprobación del dueño/);
+    assert.match(r.cuerpo.error, /aprobación del supervisor o del dueño/);
     assert.match(r.cuerpo.error, /cupón/);
-    assert.deepEqual(r.cuerpo.duenos, [{ correo: DUENO, nombre: 'Isaac' }]);
+    assert.deepEqual(r.cuerpo.duenos, [{ correo: DUENO, nombre: 'Isaac' }, { correo: SUP, nombre: 'Sara' }]);
     assert.equal(stock(), antes);
     assert.deepEqual(venta(id), { devuelto: 0, dolarones_devueltos: 0, devuelto_cupon: 0, cancelada: 0 });
   }
@@ -88,9 +96,9 @@ test('compatibilidad: una caja con la página anterior (sin aprobador ni solicit
   const id = await vender();
   const r = await devolver(id, await linea(id), { devolver_en: 'efectivo' });   // el cuerpo exacto de la página anterior
   assert.equal(r.status, 403);
-  assert.match(r.cuerpo.error, /Devolver dinero necesita la aprobación del dueño/);
+  assert.match(r.cuerpo.error, /Devolver dinero necesita la aprobación del supervisor o del dueño/);
   assert.match(r.cuerpo.error, /Devolver en cupón/);
-  assert.match(r.cuerpo.error, /PIN del dueño/);
+  assert.match(r.cuerpo.error, /PIN del supervisor o del dueño/);
   assert.equal(devoluciones().length, 0);
 });
 
@@ -324,4 +332,110 @@ test('cancelar el ticket completo no cambia: el cajero lo hace solo dentro de 5 
   const r = await pedir(`/api/ventas/${vieja}/cancelar`, { motivo: 'error de cobro', caja: 'Caja 1' }, 'POST', ana);
   assert.equal(r.status, 403);
   assert.equal(r.cuerpo.requiere_aprobacion, true);
+});
+
+/* ---------- supervisor (alcance agregado a #837 el 16/11/2026) ---------- */
+
+test('un supervisor aprueba con su PIN devolver dinero: queda como quien aprobó y la solicitud lleva su cuenta', async () => {
+  const { vender, linea, devolver, stock, solicitudes, devoluciones } = await montar();
+  const id = await vender(VIEJA);
+  const antes = stock();
+  const r = await devolver(id, await linea(id), { aprobador: SUP.toUpperCase(), pin: PIN_SUP });
+  assert.equal(r.status, 201, JSON.stringify(r.cuerpo));
+  assert.equal(stock(), antes + 1);
+  assert.equal(devoluciones()[0].autor, ANA);
+  assert.equal(solicitudes()[0].resuelto_por, SUP);
+  assert.equal(solicitudes()[0].estado, 'aprobada');
+});
+
+test('un supervisor aprueba con su PIN la cancelación pasados 5 minutos', async () => {
+  const { vender, ana, pedir, stock, solicitudes } = await montar();
+  const id = await vender(VIEJA);
+  const antes = stock();
+  const r = await pedir(`/api/ventas/${id}/cancelar`, { motivo: 'error de cobro', caja: 'Caja 1', aprobador: SUP, pin: PIN_SUP }, 'POST', ana);
+  assert.equal(r.status, 200, JSON.stringify(r.cuerpo));
+  assert.equal(stock(), antes + 2);
+  assert.equal(solicitudes()[0].tipo, 'cancelacion');
+  assert.equal(solicitudes()[0].resuelto_por, SUP);
+});
+
+test('la caja ofrece como aprobadores al dueño y a los supervisores con PIN, no a los cajeros', async () => {
+  const { vender, linea, devolver, ana, pedir } = await montar();
+  const id = await vender(VIEJA);
+  const esperados = [{ correo: DUENO, nombre: 'Isaac' }, { correo: SUP, nombre: 'Sara' }];
+  const pieza = await devolver(id, await linea(id));
+  assert.deepEqual(pieza.cuerpo.duenos, esperados);
+  const ticket = await pedir(`/api/ventas/${id}/cancelar`, { motivo: 'x', caja: 'Caja 1' }, 'POST', ana);
+  assert.equal(ticket.status, 403);
+  assert.deepEqual(ticket.cuerpo.duenos, esperados);
+  assert.match(ticket.cuerpo.error, /supervisor o del dueño/);
+});
+
+test('el PIN de un supervisor no vale para descuentos ni cupones (siguen siendo del dueño)', async () => {
+  const { pedir, ana } = await montar();
+  const descuento = await pedir('/api/descuentos', { tipo: 'porcentaje', valor: 10, motivo: 'cliente frecuente', subtotal: 25000, aprobador: SUP, pin: PIN_SUP }, 'POST', ana);
+  assert.equal(descuento.status, 404, JSON.stringify(descuento.cuerpo));
+  const cupon = await pedir('/api/cupones', { id: crypto.randomUUID(), importe: 10000, motivo: 'cortesía', aprobador: SUP, pin: PIN_SUP }, 'POST', ana);
+  assert.equal(cupon.status, 404, JSON.stringify(cupon.cuerpo));
+  assert.deepEqual((await pedir('/api/descuentos/duenos', undefined, 'GET', ana)).cuerpo, [{ correo: DUENO, nombre: 'Isaac' }]);
+});
+
+test('el PIN de otro cajero no aprueba, y nadie se aprueba a sí mismo', async () => {
+  const { vender, linea, devolver, devoluciones, pedir, ana } = await montar();
+  const id = await vender(VIEJA);
+  const l = await linea(id);
+  assert.equal((await devolver(id, l, { aprobador: BETO, pin: PIN_BETO })).status, 404);   // cajero sin rol de supervisor
+  assert.equal((await devolver(id, l, { aprobador: ANA, pin: PIN_ANA })).status, 404);     // la propia cajera que cobra
+  const ticket = await pedir(`/api/ventas/${id}/cancelar`, { motivo: 'x', caja: 'Caja 1', aprobador: ANA, pin: PIN_ANA }, 'POST', ana);
+  assert.equal(ticket.status, 404);
+  assert.equal(devoluciones().length, 0);
+});
+
+test('el bloqueo por PIN malos es el mismo de siempre, también para un supervisor', async () => {
+  const { vender, linea, devolver, devoluciones } = await montar();
+  const id = await vender(VIEJA);
+  const l = await linea(id);
+  for (let i = 0; i < 5; i++) await devolver(id, l, { aprobador: SUP, pin: '000000' });
+  const r = await devolver(id, l, { aprobador: SUP, pin: PIN_SUP });
+  assert.equal(r.status, 423);
+  assert.equal(devoluciones().length, 0);
+});
+
+test('si quien cobra es supervisor, devuelve y cancela directo, como el dueño, sin solicitud', async () => {
+  const { como, pedir, vender, linea, devolver, stock, solicitudes, devoluciones } = await montar();
+  como(TIENDA);
+  const token = (await pedir('/api/cajeros/entrar', { correo: SUP, pin: PIN_SUP })).cuerpo.token as string;
+  const sup = { 'x-cajero': token };
+  const id = await vender(VIEJA);
+  const antes = stock();
+  const r = await devolver(id, await linea(id), {}, sup);
+  assert.equal(r.status, 201, JSON.stringify(r.cuerpo));
+  assert.equal(devoluciones()[0].autor, SUP);
+  const completa = await pedir(`/api/ventas/${id}/cancelar`, { motivo: 'error', caja: 'Caja 1' }, 'POST', sup);
+  assert.equal(completa.status, 200, JSON.stringify(completa.cuerpo));
+  assert.equal(stock(), antes + 2);
+  assert.equal(solicitudes().length, 0);
+});
+
+test('solo el dueño asigna el rol de supervisor; la solicitud a distancia sigue siendo del dueño', async () => {
+  const { como, pedir, ana, vender, linea, devolver } = await montar();
+  const asignar = (encabezados: Record<string, string>) =>
+    pedir('/api/cuentas', { correo: BETO, nombre: 'Beto', roles: ['cajero', 'supervisor'] }, 'PUT', encabezados);
+  assert.equal((await asignar(ana)).status, 403);                       // un cajero no se asigna ni asigna a otro
+  como(SUP);
+  assert.equal((await asignar({})).status, 403);                        // ni un supervisor
+  como(DUENO);
+  const r = await asignar({});
+  assert.equal(r.status, 200, JSON.stringify(r.cuerpo));
+  assert.deepEqual(r.cuerpo.roles, ['cajero', 'supervisor']);
+  assert.ok((await pedir('/api/cuentas', undefined, 'GET')).cuerpo.roles.includes('supervisor'));
+
+  // Un supervisor no resuelve solicitudes a distancia (/avisos): esas siguen siendo del dueño.
+  como(TIENDA);
+  const id = await vender(VIEJA);
+  const idDev = crypto.randomUUID();
+  await devolver(id, await linea(id), { id: idDev, solicitar: true });
+  como(SUP);
+  assert.equal((await pedir(`/api/solicitudes/${idDev}/resolver`, { aprobar: true }, 'POST')).status, 403);
+  void ana;
 });

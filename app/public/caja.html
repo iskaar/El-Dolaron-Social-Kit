@@ -2607,11 +2607,11 @@ async function terminarCancelacion(r, cuerpo, { linea, cantidad }) {
 function panelAprobacion({ error, duenos = [] }, conVolver = false) {
   return `<div class="aprobacion form-cancelar">
     <p class="nota" style="color:#D72B32;margin:0">${escapar(error)}</p>
-    <h3>Aprobar aquí con PIN del dueño</h3>
+    <h3>Aprobar aquí con PIN del supervisor o del dueño</h3>
     ${duenos.length === 0
-      ? '<p class="nota">Ningún dueño tiene PIN. Usa «Enviar al dueño».</p>'
+      ? '<p class="nota">Nadie con permiso tiene PIN. Usa «Enviar al dueño».</p>'
       : `<select class="aprobador">${duenos.map((u) => `<option value="${escapar(u.correo)}">${escapar(u.nombre || u.correo)}</option>`).join('')}</select>
-         <input type="password" class="pin-dueno" inputmode="numeric" maxlength="6" autocomplete="off" placeholder="PIN del dueño (6 dígitos)">
+         <input type="password" class="pin-dueno" inputmode="numeric" maxlength="6" autocomplete="off" placeholder="PIN de quien aprueba (6 dígitos)">
          <div class="botones"><button type="button" class="quitar" data-aprobar-pin>Aprobar con PIN</button></div>`}
     <h3>O que lo apruebe a distancia</h3>
     <div class="botones"><button type="button" class="secundario" data-enviar-dueno>Enviar al dueño</button></div>

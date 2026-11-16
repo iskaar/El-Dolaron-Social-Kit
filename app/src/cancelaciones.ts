@@ -1,13 +1,13 @@
 /**
- * Cancelar una venta completa (Issue #200). El dueno cancela directo; el cajero,
+ * Cancelar una venta completa (Issue #200). El dueno (o un supervisor, #837) cancela directo; el cajero,
  * solo dentro de los primeros minutos de la venta. Pasado ese tiempo necesita la
- * aprobacion del dueno: con su PIN en la misma caja, o a distancia desde /cuentas
+ * aprobacion del dueno o de un supervisor: con su PIN en la misma caja, o a distancia desde /cuentas
  * (tabla `solicitudes`, tipo `cancelacion`). Cancelar una pieza suelta no cambia
  * (devoluciones.ts).
  */
 import { cajaDe, nombreCaja } from './corte.ts';
 import { sentenciasMover } from './existencias.ts';
-import { leerUsuario, leerRoles, TIENDA_CENTRAL, tiendaDeCaja } from './cuentas.ts';
+import { leerUsuario, leerRoles, apruebaDinero, TIENDA_CENTRAL, tiendaDeCaja } from './cuentas.ts';
 import { verificarPin } from './cajeros.ts';
 import { sentenciasDeReverso } from './reversos.ts';
 import { TICKET_CON_ANTICIPO } from './pedidos.ts';
@@ -104,6 +104,27 @@ export async function cancelarCore(
   };
 }
 
+/** Los que pueden aprobar con PIN en la caja que salga dinero (dueño y supervisores con PIN): lo que ofrece el 403 de cancelar y de devolver dinero. Los descuentos y cupones siguen usando solo duenos. */
+export async function aprobadoresDeDinero(env: Env): Promise<{ correo: string; nombre: string }[]> {
+  const { results } = await env.DB.prepare(
+    `select correo, nombre, roles from usuarios where activo = 1 and pin_hash != '' order by nombre`,
+  ).all<{ correo: string; nombre: string; roles: string }>();
+  return results.filter((u) => apruebaDinero(leerRoles(u.roles))).map(({ correo, nombre }) => ({ correo, nombre }));
+}
+
+/**
+ * Aprobacion con PIN en la caja (#837): el PIN de otra cuenta con rol de dueño o supervisor, con el mismo bloqueo por intentos
+ * de siempre (verificarPin). Quien cobra no se aprueba a si mismo: si ya es dueño o supervisor, ni llega aqui (cancela directo).
+ */
+export async function aprobadorConPin(env: Env, solicitante: string, aprobador: unknown, pin: unknown):
+  Promise<{ por: string } | { error: string; status: number }> {
+  const por = String(aprobador).trim().toLowerCase();
+  const verificado = await verificarPin(env, por, String(pin ?? ''), apruebaDinero);
+  if ('error' in verificado) return verificado;
+  if (por === solicitante) return { error: 'No puedes aprobar tu propia devolución: pide a otra persona.', status: 403 };
+  return { por };
+}
+
 /** Una fila de aprobacion del dueno; tipo 'devolucion' es la de devolver dinero de una pieza (devoluciones.ts, #837). */
 export const insertarSolicitud = (
   env: Env, id: string, correo: string, nombre: string, motivo: string, datos: object, ahora: string,
@@ -150,7 +171,7 @@ export async function cancelarVenta(id: string, request: Request, env: Env, corr
   // Una hora ilegible o del futuro no abre la ventana: cae en pedir aprobacion.
   const edad = Date.now() - Date.parse(venta.creado_en);
   const enVentana = edad > -VENTANA_CANCELACION_MS && edad <= VENTANA_CANCELACION_MS;
-  if (usuario?.roles.includes('dueno') || enVentana) {
+  if ((usuario && apruebaDinero(usuario.roles)) || enVentana) {
     return responder(await cancelarCore(env, id, motivo, correo, cuerpo.caja, tienda));
   }
 
@@ -159,11 +180,10 @@ export async function cancelarVenta(id: string, request: Request, env: Env, corr
 
   // Aprobada en la caja con el PIN del dueno: se cancela y se deja el rastro en el mismo batch.
   if (cuerpo.aprobador) {
-    const dueno = String(cuerpo.aprobador).trim().toLowerCase();
-    const verificado = await verificarPin(env, dueno, String(cuerpo.pin ?? ''), (roles) => roles.includes('dueno'));
-    if ('error' in verificado) return json({ error: verificado.error }, verificado.status);
+    const aprobo = await aprobadorConPin(env, correo, cuerpo.aprobador, cuerpo.pin);
+    if ('error' in aprobo) return json({ error: aprobo.error }, aprobo.status);
     return responder(await cancelarCore(env, id, motivo, correo, cuerpo.caja, tienda, (ahora) => [
-      insertarSolicitud(env, crypto.randomUUID(), correo, nombre, motivo, { ...datos, via: 'pin' }, ahora, dueno),
+      insertarSolicitud(env, crypto.randomUUID(), correo, nombre, motivo, { ...datos, via: 'pin' }, ahora, aprobo.por),
     ]));
   }
 
@@ -182,13 +202,10 @@ export async function cancelarVenta(id: string, request: Request, env: Env, corr
     return json({ pendiente: true, solicitud_id: solicitudId }, 202);
   }
 
-  const { results } = await env.DB.prepare(
-    `select correo, nombre, roles from usuarios where activo = 1 and pin_hash != '' order by nombre`,
-  ).all<{ correo: string; nombre: string; roles: string }>();
   return json({
     requiere_aprobacion: true,
-    error: `Pasaron más de ${VENTANA_CANCELACION_MS / 60_000} minutos: necesita aprobación del dueño.`,
-    duenos: results.filter((u) => leerRoles(u.roles).includes('dueno')).map(({ correo, nombre }) => ({ correo, nombre })),
+    error: `Pasaron más de ${VENTANA_CANCELACION_MS / 60_000} minutos: necesita aprobación del supervisor o del dueño.`,
+    duenos: await aprobadoresDeDinero(env),   // dueño y supervisores con PIN; la solicitud a distancia sigue yendo al dueño
   }, 403);
 }
 

@@ -517,6 +517,29 @@ test('devolver una pieza suelta de una venta anterior también avisa', async () 
   assert.equal(t.correos.at(-1)!.subject, 'Revisa la existencia: Devolución de una pieza');
 });
 
+test('la devolución de dinero que el dueño aprueba a distancia (#837) también avisa; pedirla, no', async () => {
+  const t = montar();
+  const token = await t.entrar();
+  t.db.prepare('update productos set stock = 1 where id = ?').run(CERO);
+  const anterior = t.cuerpo([{ producto_id: CERO, cantidad: 1 }]);
+  await t.vender(token, anterior);
+  t.db.prepare('update ventas set registrado_en = ? where id = ?').run(new Date(Date.now() - 3600_000).toISOString(), anterior.id);
+  await t.vender(token, t.cuerpo([mano()]));
+  await t.esperar();
+  const lineaId = (t.db.prepare('select id from venta_lineas where venta_id = ?').get(anterior.id) as { id: number }).id;
+  const idDev = crypto.randomUUID();
+  const pedida = await t.pedir(`/api/ventas/${anterior.id}/lineas/${lineaId}/cancelar`,
+    { id: idDev, cantidad: 1, motivo: 'se arrepintió', caja: 'Caja 1', solicitar: true }, 'POST', { 'x-cajero': token });
+  assert.equal(pedida.status, 202, JSON.stringify(pedida.cuerpo));
+  await t.esperar();
+  assert.ok(t.correos.every((c) => !c.subject.startsWith('Revisa la existencia')), 'pedirla no regresa ninguna unidad');
+  t.como(DUENO);
+  const r = await t.pedir(`/api/solicitudes/${idDev}/resolver`, { aprobar: true });
+  assert.equal(r.status, 200, JSON.stringify(r.cuerpo));
+  await t.esperar();
+  assert.equal(t.correos.at(-1)!.subject, 'Revisa la existencia: Devolución aprobada de una pieza');
+});
+
 test('un reintento del mismo folio no vuelve a avisar al dueño', async () => {
   const t = montar();
   const token = await t.entrar();

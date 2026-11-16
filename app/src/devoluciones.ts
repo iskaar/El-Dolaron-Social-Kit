@@ -9,7 +9,7 @@
  * Reglas de Isaac (30/09):
  * - Dinero primero: la pieza se devuelve en dinero hasta lo que el cliente pago
  *   en dinero; solo el excedente regresa como Dolarones al saldo.
- * - La cancela cualquier cajero, con motivo, como el ticket completo.
+ * - Con motivo. Devolver en cupon lo hace el cajero solo; devolver DINERO lo aprueba el dueno o un supervisor (#837, 16/11/2026): ver cancelarPieza.
  */
 
 import { cajaDe, nombreCaja } from './corte.ts';
@@ -19,9 +19,8 @@ import { saldo } from './dolarones.ts';
 import { sentenciasDeReverso } from './reversos.ts';
 import { TICKET_CON_ANTICIPO } from './pedidos.ts';
 import { datosCorreccion } from './correcciones-pago.ts';
-import { insertarSolicitud } from './cancelaciones.ts';
-import { leerUsuario, leerRoles, TIENDA_CENTRAL, tiendaDeCaja } from './cuentas.ts';
-import { verificarPin } from './cajeros.ts';
+import { insertarSolicitud, aprobadorConPin, aprobadoresDeDinero } from './cancelaciones.ts';
+import { leerUsuario, apruebaDinero, TIENDA_CENTRAL, tiendaDeCaja } from './cuentas.ts';
 import { avisarDueno } from './avisos.ts';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -213,8 +212,8 @@ const pesos = (centavos: number) => `$${(centavos / 100).toFixed(2)}`;
  * Cancela `cantidad` piezas de una linea. Idempotente por `id`, que la caja
  * genera al abrir el formulario: un reintento tras red caida no devuelve dos veces.
  *
- * Devolver DINERO (efectivo, tarjeta o transferencia) lo autoriza el dueno (#837, regla de Isaac del 16/11/2026): el dueno
- * devuelve directo; el cajero lo hace con el PIN del dueno en la misma caja, o a distancia (`solicitudes`, tipo `devolucion`,
+ * Devolver DINERO (efectivo, tarjeta o transferencia) lo autoriza el dueno o un supervisor (#837, regla de Isaac del 16/11/2026):
+ * ellos devuelven directo; el cajero lo hace con el PIN de uno de ellos en la misma caja, o a distancia (`solicitudes`, tipo `devolucion`,
  * con el id de esta devolucion como id de la solicitud). Lo que no es dinero (pieza pagada toda con Dolarones) no pide a nadie.
  * Devolver en cupon es otra ruta (devolverEnCupon) y la hace el cajero solo.
  */
@@ -245,7 +244,7 @@ export async function cancelarPieza(
   if ('res' in prep) return responder(prep.res);
 
   const usuario = await leerUsuario(env, correo);
-  if (prep.reparto.dinero === 0 || usuario?.roles.includes('dueno')) {
+  if (prep.reparto.dinero === 0 || (usuario && apruebaDinero(usuario.roles))) {
     return responder(await escribirPieza(env, ventaId, pedido, prep, correo, tienda));
   }
 
@@ -255,11 +254,10 @@ export async function cancelarPieza(
 
   // Aprobada en la caja con el PIN del dueno: se devuelve y se deja el rastro en el mismo batch.
   if (cuerpo.aprobador) {
-    const dueno = String(cuerpo.aprobador).trim().toLowerCase();
-    const verificado = await verificarPin(env, dueno, String(cuerpo.pin ?? ''), (roles) => roles.includes('dueno'));
-    if ('error' in verificado) return json({ error: verificado.error }, verificado.status);
+    const aprobo = await aprobadorConPin(env, correo, cuerpo.aprobador, cuerpo.pin);
+    if ('error' in aprobo) return json({ error: aprobo.error }, aprobo.status);
     return responder(await escribirPieza(env, ventaId, pedido, prep, correo, tienda, (ahora) => [
-      insertarSolicitud(env, id, correo, nombre, motivo, { ...datos, via: 'pin' }, ahora, dueno, 'devolucion'),
+      insertarSolicitud(env, id, correo, nombre, motivo, { ...datos, via: 'pin' }, ahora, aprobo.por, 'devolucion'),
     ]));
   }
 
@@ -279,14 +277,11 @@ export async function cancelarPieza(
     return json({ pendiente: true, solicitud_id: id }, 202);
   }
 
-  const { results } = await env.DB.prepare(
-    `select correo, nombre, roles from usuarios where activo = 1 and pin_hash != '' order by nombre`,
-  ).all<{ correo: string; nombre: string; roles: string }>();
   return json({
     requiere_aprobacion: true,
-    error: 'Devolver dinero necesita la aprobación del dueño. Ofrece primero «Devolver en cupón» (lo haces tú). '
-      + 'Si el cliente insiste en dinero: aprueba con el PIN del dueño o envíale la solicitud (si esta pantalla no lo ofrece, recarga la caja).',
-    duenos: results.filter((u) => leerRoles(u.roles).includes('dueno')).map(({ correo, nombre }) => ({ correo, nombre })),
+    error: 'Devolver dinero necesita la aprobación del supervisor o del dueño. Ofrece primero «Devolver en cupón» (lo haces tú). '
+      + 'Si el cliente insiste en dinero: aprueba con el PIN del supervisor o del dueño, o envía la solicitud al dueño (si esta pantalla no lo ofrece, recarga la caja).',
+    duenos: await aprobadoresDeDinero(env),   // dueño y supervisores con PIN
   }, 403);
 }
 
