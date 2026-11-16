@@ -333,9 +333,12 @@ const productoDe = (p: Pieza) => ({
 
 // Lo que se puede publicar: pieza individual, revisada, con foto y existencias; nunca bandas, dañadas (B)
 // ni liquidación (C, solo en tienda, #371) ni caducidad (D, merma que nunca se vende, #733). `<> 'danado'` se queda literal: lo exige el índice parcial de recortes.
-export const PUBLICABLE = `p.destino = 'etiqueta' and p.sin_inventario = 0 and p.estado_analisis = 'listo' and p.stock > 0
+// #800: la existencia va aparte para que el catálogo en línea (VENDIBLE) cuente también las sucursales; Mercado Libre sigue publicando
+// y descontando solo `p.stock` (lo que hay en Soledad), así que PUBLICABLE conserva `p.stock > 0`.
+export const PUBLICABLE_SIN_EXISTENCIA = `p.destino = 'etiqueta' and p.sin_inventario = 0 and p.estado_analisis = 'listo'
   and p.foto_key <> '' and p.codigo like 'ED-%' and p.estado_fisico <> 'danado' and p.estado_fisico <> 'liquidacion'
   and p.estado_fisico <> 'caducado' and p.propietario = 'dolaron'`;
+export const PUBLICABLE = `${PUBLICABLE_SIN_EXISTENCIA} and p.stock > 0`;
 
 // Menos de este stock exige confirmacion fisica en piso (#724); la migracion 068 la borra si el stock cambia.
 export const PISO_MINIMO = 3;

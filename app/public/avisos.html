@@ -47,6 +47,7 @@
   button.peligro { border-color: var(--rojo); color: var(--rojo); }
   .motivo { margin-top: 6px; white-space: pre-wrap; }
   .grupo { display: grid; gap: 8px; }
+  h3 { margin: 10px 0 6px; font-size: 15px; color: var(--azul); }
 </style>
 <script src="/cajero.js"></script>
 </head>
@@ -72,6 +73,11 @@
   <section id="precios" class="grupo" hidden>
     <h2 id="t-precios"></h2>
     <div id="l-precios" aria-live="polite"></div>
+  </section>
+  <section id="apartados" class="grupo" hidden>
+    <h2 id="t-apartados">Apartados de tu tienda</h2>
+    <div class="nota">Piezas apartadas en línea o por otra tienda que pasan por aquí: sepáralas, mándalas o recíbelas y marca cada paso con un toque.</div>
+    <div id="l-apartados" aria-live="polite"></div>
   </section>
   <section id="transferencias" hidden>
     <h2>Transferencias por validar</h2>
@@ -167,7 +173,7 @@ function filaTransferencia(t) {
 // Cada sección se lee por separado: si una falla, las demás se siguen pintando.
 const erroresFila = {};   // por id de solicitud: sobrevive a un repintado
 const firmas = {};        // JSON de lo último pintado: si nada cambió no se repinta (y no se borra un error a la vista)
-const conteos = { ml: 0, descuentos: 0, cancelaciones: 0, acceso: 0, precios: 0 };
+const conteos = { ml: 0, apartados: 0, descuentos: 0, cancelaciones: 0, acceso: 0, precios: 0 };
 const fallas = {};
 let ultimaFalla = '';
 function mostrarFallas() {
@@ -299,12 +305,53 @@ async function cargarSeccion(clave) {
   }
 }
 
+// Apartados de la tienda (#800): cada aviso se cierra con un toque; el servidor condiciona el paso en SQL, así que dos cajas a la vez cuentan una.
+const PASOS = {
+  por_separar: ['separar', 'Ya la aparté', (a) => `Separa esta pieza para el pedido P-${a.folio}. Se recoge en ${a.recoge_en_nombre}.`],
+  por_mandar: ['mandar', 'Ya la mandé', (a) => `Manda esta pieza a ${a.recoge_en_nombre} (pedido P-${a.folio}). Ya hay dinero registrado.`],
+  por_llegar: ['llego', 'Ya llegó', (a) => `Llega de ${a.desde_nombre} para el pedido P-${a.folio}. Cuando la tengas en la mano, márcala.`],
+  por_regresar: ['regreso', 'Ya la regresé', (a) => `El pedido P-${a.folio} se canceló o venció: regresa la pieza al piso.`],
+};
+async function marcarApartado(a, accion, boton) {
+  boton.disabled = true;
+  $('error').textContent = '';
+  try {
+    const r = await fetch(`/api/avisos/pedidos/${a.folio}/${encodeURIComponent(a.producto_id)}/${accion}`, { method: 'POST' });
+    if (!r.ok && r.status !== 409) throw new Error((await r.json().catch(() => ({}))).error ?? `Error ${r.status}`);
+  } catch (error) {
+    $('error').textContent = `No se pudo marcar: ${error.message}. Intenta otra vez.`;
+  }
+  await cargar();
+}
+function filaApartado(clave, a) {
+  const [accion, etiqueta, texto] = PASOS[clave];
+  const boton = h('button', { type: 'button', class: 'relleno' }, etiqueta);
+  boton.addEventListener('click', () => marcarApartado(a, accion, boton));
+  return h('div', { class: 'venta' },
+    h('img', { src: `/api/foto/${encodeURIComponent(a.producto_id)}`, alt: '', loading: 'lazy', onerror: "this.style.visibility='hidden'" }),
+    h('div', {},
+      h('div', { class: 'nombre' }, h('span', { class: 'codigo' }, a.codigo), ' · ', a.nombre),
+      h('div', { class: 'nota' }, `${a.cantidad} ${a.cantidad === 1 ? 'pieza' : 'piezas'} · P-${a.folio} · ${a.canal} · ahora en ${a.tienda_nombre}`),
+      h('div', { class: 'accion' }, texto(a)),
+      h('div', { class: 'botones' }, boton)));
+}
+function pintarApartados(listas) {
+  const grupos = Object.keys(PASOS).filter((k) => (listas[k] ?? []).length);
+  conteos.apartados = grupos.reduce((n, k) => n + listas[k].length, 0);
+  $('apartados').hidden = grupos.length === 0;
+  $('t-apartados').textContent = `Apartados de tu tienda (${conteos.apartados})`;
+  const titulos = { por_separar: 'Por separar', por_mandar: 'Por mandar a otra tienda', por_llegar: 'Por llegar', por_regresar: 'Por regresar al piso' };
+  $('l-apartados').replaceChildren(...grupos.flatMap((k) => [h('h3', {}, `${titulos[k]} (${listas[k].length})`), ...listas[k].map((a) => filaApartado(k, a))]));
+}
+
 async function cargarMl() {
   try {
     const r = await fetch('/api/avisos');
     if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error ?? `Error ${r.status}`);
-    const { ventas_ml, transferencias = [] } = await r.json();
+    const cuerpo = await r.json();
+    const { ventas_ml, transferencias = [] } = cuerpo;
     fallas.ml = '';
+    pintarApartados(cuerpo);
     $('transferencias').hidden = transferencias.length === 0;
     $('lista-transferencias').replaceChildren(...transferencias.map(filaTransferencia));
     $('lista').replaceChildren(...(ventas_ml.length ? ventas_ml.map(fila)
@@ -327,11 +374,11 @@ cargar();
 // El dueño revisa cada 10 s: en la caja hay alguien esperando su descuento o cancelación.
 setInterval(cargar, esDueno ? 10_000 : 30_000);
 
-// Notificaciones push al dueño (Issue #600): el botón «Ayuda» de la caja llega aquí.
+// Notificaciones push (Issue #600): el botón «Ayuda» de la caja llega al dueño. #800: también las cuentas de cada tienda las activan para sus avisos de apartados.
 // En iPhone solo existen dentro de la app agregada a la pantalla de inicio (iOS 16.4+).
 async function prepararPush() {
   const r = await fetch('/api/push/clave').catch(() => null);
-  if (!r || r.status === 403) return;   // solo el dueño
+  if (!r || r.status === 403) return;   // una cuenta sin permiso de caja
   const { clave, error } = await r.json().catch(() => ({}));
   $('push').hidden = false;
   const estado = (texto) => { $('push-estado').textContent = texto; };

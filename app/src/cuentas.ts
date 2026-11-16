@@ -213,7 +213,9 @@ export function permiso(pathname: string, metodo: string): Regla {
   if (ruta === '/api/avisos' || ruta.startsWith('/api/avisos/')) return CAJA;   // centro de avisos (Issue #429)
   if (ruta === '/api/plano') return metodo === 'GET' ? RETOS : DUENO;   // Issue #756
   if (ruta === '/api/retos/mios') return RETOS;   // solo lo propio de quien pregunta (Issue #752)
-  if (ruta === '/api/ayuda') return CAJA;   // botón «Ayuda» (Issue #600); /api/push/* es del dueño, por omisión
+  if (ruta === '/api/ayuda') return CAJA;   // botón «Ayuda» (Issue #600)
+  // #800: las cuentas de una tienda activan notificaciones para recibir los avisos de apartados; el resto de /api/push/* sigue siendo del dueño.
+  if (ruta === '/api/push/clave' || ruta === '/api/push/suscripcion') return CAJA;
   if (ruta === '/api/impresiones' || ruta.startsWith('/api/impresiones/')) return CAJA;
 
   return DUENO;
@@ -436,6 +438,7 @@ export async function yo(env: Env, correo: string, cajero: Usuario | null = null
   const cajas = cajasDe(tienda);
   return json({ correo, usuario, solicitud, vendedor, revendedora: esRevendedora(usuario), modos_inventario: modos,
     tienda, tienda_nombre: esTienda(tienda) ? TIENDAS[tienda].nombre : '', cajas,
+    tiendas: (Object.keys(TIENDAS) as Tienda[]).map((clave) => ({ clave, nombre: TIENDAS[clave].nombre })),   // #800: dónde puede recoger un cliente
     cajero: cajero && { correo: cajero.correo, nombre: cajero.nombre, caja: cajas.includes(cajero.caja) ? cajero.caja : '' } });
 }
 

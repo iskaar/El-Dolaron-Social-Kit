@@ -28,6 +28,7 @@
   .opciones input { width: auto; }
   #codigo { font-family: ui-monospace, monospace; font-size: 18px; border: 2px solid var(--azul); }
   .fila { display: flex; gap: 8px; }
+  .ubicacion { font-size: 13px; color: #5b6478; margin: 4px 0; }
   .fila input { flex: 1; min-width: 0; }
   button { font: inherit; cursor: pointer; }
   button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible { outline: 3px solid var(--amarillo); outline-offset: 2px; }
@@ -124,6 +125,11 @@
             <label><input type="radio" name="entrega" value="envio"> Envío</label>
           </div>
         </fieldset>
+        <div id="recoge-bloque">
+          <label for="recoge-en">¿En qué tienda recoge el cliente?</label>
+          <select id="recoge-en"><option value="soledad">Soledad</option></select>
+          <div class="nota" id="recoge-nota">Si la pieza está en otra tienda, esa tienda la manda y se avisa al llegar.</div>
+        </div>
 
         <table class="cifras" aria-live="polite">
           <tr><td>Piezas</td><td id="c-subtotal">$0</td></tr>
@@ -289,8 +295,23 @@ $('caja-nombre').addEventListener('change', () => {
 });
 // La caja asignada por el dueño (o la del cajero que entró con PIN) manda sobre la elegida aquí.
 let esDueno = false;   // solo el dueño ve la foto del comprobante que manda una revendedora (#609)
-fetch('/api/yo').then((r) => r.json()).then(({ usuario, cajero }) => {
+// Las cajas son las de la tienda de esta computadora (#793, #800): las manda /api/yo y se recuerda la última lista (la misma que usa /caja).
+function pintarCajas(lista) {
+  let guardada = '';
+  try { guardada = localStorage.getItem(CLAVE_CAJA) ?? ''; } catch { /* sin memoria */ }
+  const elegida = $('caja-nombre').value || guardada;
+  $('caja-nombre').innerHTML = '<option value="">— elige —</option>' + lista.map((c) => `<option>${escapar(c)}</option>`).join('');
+  $('caja-nombre').value = lista.includes(elegida) ? elegida : '';
+}
+try { const g = JSON.parse(localStorage.getItem('cajas-tienda')); if (Array.isArray(g) && g.length && g.every((c) => typeof c === 'string')) pintarCajas(g); } catch { /* sin lista guardada: las de Soledad */ }
+fetch('/api/yo').then((r) => r.json()).then(({ usuario, cajero, cajas, tienda, tiendas }) => {
   esDueno = !!usuario?.roles?.includes('dueno');
+  if (Array.isArray(cajas) && cajas.length) pintarCajas(cajas);
+  // ¿Dónde recoge el cliente?: por omisión, la tienda de esta terminal. Una respuesta sin `tiendas` (servidor anterior) deja solo Soledad.
+  if (Array.isArray(tiendas) && tiendas.length) {
+    $('recoge-en').innerHTML = tiendas.map((t) => `<option value="${escapar(t.clave)}">${escapar(t.nombre)}</option>`).join('');
+    $('recoge-en').value = tiendas.some((t) => t.clave === tienda) ? tienda : 'soledad';
+  }
   pintarLista();
   const caja = (cajero ?? usuario)?.caja;
   if (!caja) return;
@@ -390,6 +411,7 @@ function pintar() {
       <button type="button" data-quitar="${i}" aria-label="Quitar ${escapar(p.nombre)}">✕</button>
     </div>`).join('');
   const envioElegido = entrega() === 'envio';
+  $('recoge-bloque').hidden = envioElegido;   // un envío siempre sale de la tienda que envía (hoy Soledad)
   // En tienda se puede recibir más de $100; el paquete abre con $100 y sigue con abonos.
   $('anticipo').readOnly = envioElegido;
   const minimo = anticipoMinimoDe(piezas.reduce((s, p) => s + p.precio * p.cantidad, 0));
@@ -429,7 +451,9 @@ const mensajeConfirmar = (p) => `¡Hola ${nombreDe(p)}! Tu apartado P-${p.folio}
     ? (p.liquidado_en ? `Liquidado. Sale el viernes ${fecha(p.viernes_envio + 'T12:00:00-06:00')}. ` : `Faltan ${pesos(p.faltante)}. Abres con ${pesos(p.anticipo)} y puedes agregar piezas sin otro anticipo. `)
       + 'Liquida piezas + envío antes del jueves a las 20:00 para salir ese viernes; desde esa hora sale el viernes siguiente. Envío $99, gratis desde $1,000 en piezas. '
       + (p.liquidado_en ? '' : `Tu paquete vence el ${fecha(p.vence_en)}; cada pieza o abono renueva 7 días. Al vencer, lo pagado queda como saldo a favor por 1 mes.`)
-    : `Anticipo de al menos $100 (o el total si la pieza cuesta menos). Recógelo en Jardín Hidalgo #129 a más tardar el ${fecha(p.vence_en)}. Si no lo recoges a tiempo, tu anticipo queda como saldo a favor por 1 mes.`);
+    : `Anticipo de al menos $100 (o el total si la pieza cuesta menos). Recógelo en ${p.recoge_en === 'soledad' ? 'Jardín Hidalgo #129' : `la tienda ${p.recoge_en_nombre}`} a más tardar el ${fecha(p.vence_en)}. Si no lo recoges a tiempo, tu anticipo queda como saldo a favor por 1 mes.`);
+// #800: la pieza vino de otra tienda; se le avisa al cliente cuando ya está donde la recoge. Sin direcciones ni horarios: no se inventan.
+const mensajeLista = (p) => `Hola ${nombreDe(p)}, tu pedido P-${p.folio} ya está en ${p.recoge_en === 'soledad' ? 'Soledad (Jardín Hidalgo #129)' : p.recoge_en_nombre}. Recógelo a más tardar el ${fecha(p.vence_en)}; menciona P-${p.folio} en caja.`;
 const mensajeRecordar = (p) => `Hola ${nombreDe(p)}, te recordamos que tu apartado P-${p.folio} vence el ${fecha(p.vence_en)}. ¡Te esperamos!`;
 const mensajeSaldo = (p) => `Hola ${nombreDe(p)}, tu apartado P-${p.folio} venció. Tu anticipo quedó como saldo a favor de ${pesos(p.saldo)} hasta el ${fecha(p.saldo_vence_en)}: menciona P-${p.folio} en caja.`;
 const mensajeGuia = (p) => `Hola ${nombreDe(p)}, tu pedido P-${p.folio} ya va en camino. Número de guía: ${p.guia}.`;
@@ -447,7 +471,7 @@ $('form-apartado').addEventListener('submit', async (e) => {
   const cuerpo = {
     id: idIntento,
     lineas: piezas.map((p) => ({ producto_id: p.id, cantidad: p.cantidad })),
-    cliente: $('cliente').value.trim(), telefono: telefonoLimpio(), entrega: entrega(),
+    cliente: $('cliente').value.trim(), telefono: telefonoLimpio(), entrega: entrega(), recoge_en: $('recoge-en').value,
     anticipo: c.anticipo, forma_pago: $('forma').value, caja: $('caja-nombre').value,
   };
   decir('clave-error', '');
@@ -541,10 +565,18 @@ function reporteHtml(p) {
 const botonesReporte = (p) => p.reporte
   ? `<button class="boton chico relleno" type="button" data-registrar="${p.folio}">Registrar pago</button><button class="boton chico rojo" type="button" data-rechazar="${p.folio}">Rechazar</button>` : '';
 
+// #800: dónde se recoge y dónde está cada pieza. Solo de lo que sigue por entregar.
+function ubicacionHtml(p) {
+  if (p.estado !== 'apartado' && !(p.estado === 'vendido' && p.entrega === 'envio' && !p.guia)) return '';
+  const donde = p.entrega === 'envio' ? `Sale de ${escapar(p.recoge_en_nombre)}` : `Recoge en ${escapar(p.recoge_en_nombre)}`;
+  const faltan = p.lineas.filter((l) => !l.lista).map((l) => `${escapar(l.nombre)}: ${l.en_camino ? `viene de ${escapar(l.desde_nombre ?? '')}, falta marcar «Ya llegó»` : `está en ${escapar(l.tienda_nombre)}`}`);
+  return `<div class="ubicacion"><b>${donde}</b> · ${faltan.length ? `Faltan por llegar: ${faltan.join('; ')}.` : 'Todas las piezas ya están ahí: lista para entregar.'}</div>`;
+}
 function filaPedido(p, { botones, vence, saldo = false }) {
   return `<div class="pedido">
     <div class="cabeza"><span class="folio">P-${p.folio}</span><span><b>${escapar(p.cliente)}</b> · ${escapar(p.telefono)}</span></div>
     <div class="piezas">${escapar(piezasDe(p))}</div>
+    ${ubicacionHtml(p)}
     <div>${saldo ? `Saldo ${pesos(p.saldo)}` : p.estado === 'apartado' ? `Pagado ${pesos(p.saldo)} de ${pesos(totalDe(p))} · Falta ${pesos(p.faltante)}` : p.estado === 'vendido' && p.entrega === 'envio' ? `Liquidado · Falta $0 · Total ${pesos(totalDe(p))}` : `Saldo ${pesos(p.saldo)}`} · ${p.entrega === 'envio' ? 'Envío' : 'Tienda'} · ${vendedoraDe(p)}</div>
     ${vence}
     ${reporteHtml(p)}
@@ -568,6 +600,7 @@ function pintarLista() {
     return filaPedido(p, {
       vence: `<div class="vence ${urgente ? 'urgente' : ''}">${reventa ? 'Sin anticipo · ' : ''}${vencido ? 'Venció el' : dia(Date.parse(p.vence_en)) === hoy ? 'Vence hoy,' : 'Vence el'} ${fecha(p.vence_en)}${reventa ? ` · ${revendedoraNombre(p)}` : ''}</div>`,
       botones: botonWa(p, mensajeRecordar(p), 'WhatsApp: recordar')
+        + (p.lista_para_entregar && p.lineas.some((l) => l.desde_nombre) ? botonWa(p, mensajeLista(p), 'WhatsApp: ya llegó a la tienda') : '')
         + (reventa ? `<button class="boton chico relleno" type="button" data-mover="${p.folio}" data-tipo="abono">Recibir abono</button>` : '')
         + `<button class="boton chico rojo" type="button" data-cancelar="${p.folio}">Cancelar apartado</button>`,
     });

@@ -5,7 +5,7 @@
 // (VENDIBLE, #204). Nunca datos de clientes, costos, existencias exactas ni codigos internos.
 import { CLAVES_CATEGORIA } from '../public/categorias.js';
 import { PROMO_DESCUENTO, PROMO_MINIMO } from '../public/venta.js';
-import { VENDIBLE } from './catalogo.ts';
+import { VENDIBLE, A_LA_VENTA } from './catalogo.ts';
 import { promoDe, promoRestantes } from './descuentos.ts';
 
 const encoder = new TextEncoder();
@@ -44,10 +44,10 @@ export async function buscarProductos(db: D1Database, filtros: Filtros, hostFoto
   if (filtros.talla) { condiciones.push(`(upper(p.talla) = upper(?) or upper(p.talla) like upper(?) escape '\\')`); args.push(filtros.talla, `${escapar(filtros.talla)} / %`); }
   if (filtros.min !== undefined) { condiciones.push('p.precio >= ?'); args.push(filtros.min); }
   if (filtros.max !== undefined) { condiciones.push('p.precio <= ?'); args.push(filtros.max); }
-  const { results } = await db.prepare(`select p.nombre, p.precio, p.codigo, p.talla, p.stock, p.sin_inventario, (${VENDIBLE}) as vendible
+  const { results } = await db.prepare(`select p.nombre, p.precio, p.codigo, p.talla, ${A_LA_VENTA} as stock, p.sin_inventario, (${VENDIBLE}) as vendible
     from productos p
     where p.estado_fisico = 'nuevo' and p.estado_analisis = 'listo' and p.nombre <> ''
-      and (p.stock > 0 or p.sin_inventario = 1)${condiciones.map((c) => ` and ${c}`).join('')}
+      and (${A_LA_VENTA} > 0 or p.sin_inventario = 1)${condiciones.map((c) => ` and ${c}`).join('')}
     order by p.actualizado_en desc limit 5`).bind(...args)
     .all<{ nombre: string; precio: number; codigo: string; talla: string | null; stock: number; sin_inventario: number; vendible: number }>();
   return results.map((p) => {

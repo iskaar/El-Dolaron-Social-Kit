@@ -9,7 +9,8 @@
 
 import { CLAVES_CATEGORIA } from '../public/categorias.js';
 import { TALLAS } from '../public/tallas.js';
-import { PUBLICABLE } from './mercadolibre.ts';
+import { PUBLICABLE_SIN_EXISTENCIA } from './mercadolibre.ts';
+import { TIENDAS, TIENDA_CENTRAL, esTienda } from './cuentas.ts';
 
 const POR_PAGINA = 24;
 const DESTACADOS = 6;
@@ -28,7 +29,21 @@ const NOMBRE_INTERNO = `((p.nombre glob '*[0-9]*' and upper(p.nombre) = p.nombre
   or (instr(trim(p.nombre), ' ') > 0 and ${RESTO_NOMBRE} glob '[0-9$]*' and not ${RESTO_NOMBRE} glob '*[A-Za-zÁÉÍÓÚÑáéíóúñ]*'))`;
 const PRESENTABLE = `p.precio > 0 and p.foto_key <> '' and trim(p.nombre) <> '' and not ${NOMBRE_INTERNO}`;
 // Lo mismo que se publica en Mercado Libre, mas presentable: el sitio nunca muestra $0, sin foto ni nombre interno.
-export const VENDIBLE = `${PUBLICABLE} and ${PRESENTABLE}`;
+// #800: en línea se vende la mercancía de cualquier tienda: hay unidades en Soledad (`p.stock`) o en alguna sucursal (`existencia_tienda`).
+// Lo que va dentro de un bulto abierto o cerrado no está en ninguna de las dos: nadie puede separarlo. Mercado Libre NO cambia: su
+// PUBLICABLE conserva `p.stock > 0`. Escrito aquí y no con existencias.ts: ese módulo y este se importan en cadena y los dos son constantes.
+export const HAY_EN_SUCURSAL = `exists (select 1 from existencia_tienda e where e.producto_id = p.id and e.unidades > 0)`;
+export const VENDIBLE = `${PUBLICABLE_SIN_EXISTENCIA} and (p.stock > 0 or ${HAY_EN_SUCURSAL}) and ${PRESENTABLE}`;
+// Unidades a la venta en línea (Soledad + sucursales; sin lo que viaja en bultos) y en qué sucursales hay: solo para la marca `ultima` y la ficha.
+export const A_LA_VENTA = `(p.stock + coalesce((select sum(e.unidades) from existencia_tienda e where e.producto_id = p.id), 0))`;
+const SUCURSALES_CON_UNIDADES = `(select group_concat(e.tienda) from existencia_tienda e where e.producto_id = p.id and e.unidades > 0)`;
+/** Las columnas que `aPieza` necesita para decir dónde está la pieza y si queda una sola. */
+export const COLUMNAS_UBICACION = `${A_LA_VENTA} as a_la_venta, p.stock > 0 as en_soledad, ${SUCURSALES_CON_UNIDADES} as sucursales`;
+/** Nombres de las tiendas donde hay unidades a la venta (nunca cuántas): Soledad primero, luego el orden de TIENDAS. */
+export function tiendasDe(p: { en_soledad?: unknown; sucursales?: unknown }): string[] {
+  const con = new Set(String(p.sucursales ?? '').split(',').filter(esTienda));
+  return (Object.keys(TIENDAS) as (keyof typeof TIENDAS)[]).filter((t) => t === TIENDA_CENTRAL ? !!p.en_soledad : con.has(t)).map((t) => TIENDAS[t].nombre);
+}
 
 const CORS = {
   'access-control-allow-origin': ORIGEN_SITIO,
@@ -51,6 +66,7 @@ function aPieza(p: Record<string, any>, url: URL) {
     foto: `${url.origin}/api/catalogo/foto/${p.codigo}`,
     recorte: p.recorte_estado === 'listo' && p.recorte_revision === 'ok' ? `${url.origin}/api/catalogo/recorte/${p.codigo}` : null,
     llegado_en: String(p.creado_en).slice(0, 10), // solo el dia (Issue #646): "Llego esta semana", sin hora
+    tiendas: tiendasDe(p), // #800: en qué tienda está (nombre), nunca cuántas hay
   };
 }
 
@@ -61,12 +77,12 @@ function aPieza(p: Record<string, any>, url: URL) {
  */
 async function destacados(env: Env, url: URL): Promise<Response> {
   if (url.searchParams.get('orden') === 'precio') {
-    const filas = await env.DB.prepare(`select p.codigo, p.nombre, p.marca, p.categoria, p.talla, p.precio, p.precio_lista, p.stock, p.creado_en, p.recorte_estado, p.recorte_revision from productos p
+    const filas = await env.DB.prepare(`select p.codigo, p.nombre, p.marca, p.categoria, p.talla, p.precio, p.precio_lista, ${COLUMNAS_UBICACION}, p.creado_en, p.recorte_estado, p.recorte_revision from productos p
       where ${VENDIBLE} order by p.precio desc, p.creado_en desc, p.codigo limit ?`).bind(DESTACADOS).all<Record<string, any>>();
-    return json({ piezas: filas.results.map((p) => ({ ...aPieza(p, url), ultima: p.stock === 1 })) }, 200, { 'cache-control': 'public, max-age=300' });
+    return json({ piezas: filas.results.map((p) => ({ ...aPieza(p, url), ultima: p.a_la_venta === 1 })) }, 200, { 'cache-control': 'public, max-age=300' });
   }
   const desde = new Date(Date.now() - DIAS_DESTACADOS * 86_400_000).toISOString();
-  const filas = await env.DB.prepare(`select p.codigo, p.nombre, p.marca, p.categoria, p.talla, p.precio, p.precio_lista, p.creado_en, p.recorte_estado, p.recorte_revision from productos p
+  const filas = await env.DB.prepare(`select p.codigo, p.nombre, p.marca, p.categoria, p.talla, p.precio, p.precio_lista, ${COLUMNAS_UBICACION}, p.creado_en, p.recorte_estado, p.recorte_revision from productos p
     left join (select l.codigo, sum(l.cantidad) as n from venta_lineas l join ventas v on v.id = l.venta_id
       where v.cancelada = 0 and v.creado_en >= ? group by l.codigo) s on s.codigo = p.codigo
     where ${VENDIBLE} order by coalesce(s.n, 0) desc, p.creado_en desc, p.codigo limit ?`)
@@ -74,13 +90,13 @@ async function destacados(env: Env, url: URL): Promise<Response> {
   return json({ piezas: filas.results.map((p) => aPieza(p, url)) }, 200, { 'cache-control': 'public, max-age=300' });
 }
 
-/** Staff (Issue #220): en existencia pero no presentable, con el motivo. Mismo universo que PUBLICABLE, sin el filtro de foto. */
+/** Staff (Issue #220): en existencia pero no presentable, con el motivo. Mismo universo que VENDIBLE (#800: Soledad o sucursal), sin el filtro de foto. */
 export async function revisionCatalogo(env: Env): Promise<Response> {
   const filas = await env.DB.prepare(`select p.id, p.codigo, p.nombre, p.marca, p.categoria, p.estado_fisico, p.estado_analisis,
       p.precio_lista, p.precio, p.stock, p.destino, p.semana_ingreso, p.creado_en, p.foto_key, p.propietario, p.upc,
       (p.foto_key = '') as sin_foto, (p.precio <= 0) as sin_precio, (trim(p.nombre) = '') as sin_nombre, ${NOMBRE_INTERNO} as nombre_interno
     from productos p
-    where p.destino = 'etiqueta' and p.sin_inventario = 0 and p.estado_analisis = 'listo' and p.stock > 0
+    where p.destino = 'etiqueta' and p.sin_inventario = 0 and p.estado_analisis = 'listo' and (p.stock > 0 or ${HAY_EN_SUCURSAL})
       and p.estado_fisico = 'nuevo' and p.codigo like 'ED-%'
       and (p.precio <= 0 or p.foto_key = '' or trim(p.nombre) = '' or ${NOMBRE_INTERNO})
     order by p.creado_en desc, p.codigo`).all<Record<string, any>>();
@@ -128,9 +144,9 @@ async function listar(env: Env, url: URL): Promise<Response> {
   const codigo = url.searchParams.get('codigo');
   if (codigo !== null) {
     if (!CODIGO.test(codigo)) return json({ error: 'Código no válido.' }, 400);
-    const p = await env.DB.prepare(`select p.codigo, p.nombre, p.marca, p.categoria, p.talla, p.precio, p.precio_lista, p.stock, p.creado_en, p.recorte_estado, p.recorte_revision from productos p
+    const p = await env.DB.prepare(`select p.codigo, p.nombre, p.marca, p.categoria, p.talla, p.precio, p.precio_lista, ${COLUMNAS_UBICACION}, p.creado_en, p.recorte_estado, p.recorte_revision from productos p
       where ${VENDIBLE} and p.codigo = ?`).bind(codigo).first<Record<string, any>>();
-    return json({ piezas: p ? [{ ...aPieza(p, url), ultima: p.stock === 1 }] : [] }, 200, { 'cache-control': 'public, max-age=300' });
+    return json({ piezas: p ? [{ ...aPieza(p, url), ultima: p.a_la_venta === 1 }] : [] }, 200, { 'cache-control': 'public, max-age=300' });
   }
   const categoria = url.searchParams.get('categoria');
   if (categoria !== null && !CLAVES_CATEGORIA.includes(categoria)) return json({ error: 'Categoría no válida.' }, 400);
@@ -169,7 +185,7 @@ async function listar(env: Env, url: URL): Promise<Response> {
   const args: unknown[] = [...argsBase, ...(talla ? [talla] : [])];
   const desde = cursor ? ' and (p.creado_en < ? or (p.creado_en = ? and p.codigo > ?))' : '';
   const [filas, cuenta, tallas] = await Promise.all([
-    env.DB.prepare(`select p.codigo, p.nombre, p.marca, p.categoria, p.talla, p.precio, p.precio_lista, p.stock, p.creado_en, p.recorte_estado, p.recorte_revision from productos p
+    env.DB.prepare(`select p.codigo, p.nombre, p.marca, p.categoria, p.talla, p.precio, p.precio_lista, ${COLUMNAS_UBICACION}, p.creado_en, p.recorte_estado, p.recorte_revision from productos p
       where ${filtro}${desde} order by p.creado_en desc, p.codigo limit ? offset ?`)
       .bind(...args, ...(cursor ? [cursor[1], cursor[1], cursor[2]] : []), POR_PAGINA + 1, cursor ? 0 : (pagina - 1) * POR_PAGINA)
       .all<Record<string, any>>(),
@@ -179,7 +195,7 @@ async function listar(env: Env, url: URL): Promise<Response> {
   ]);
   const hayMas = filas.results.length > POR_PAGINA;
   const ultima = filas.results[POR_PAGINA - 1];
-  const piezas = filas.results.slice(0, POR_PAGINA).map((p) => ({ ...aPieza(p, url), ultima: p.stock === 1 })); // solo la marca, nunca stock
+  const piezas = filas.results.slice(0, POR_PAGINA).map((p) => ({ ...aPieza(p, url), ultima: p.a_la_venta === 1 })); // solo la marca, nunca stock
   return json({ piezas, pagina, hay_mas: hayMas, siguiente: hayMas ? `${ultima.creado_en}~${ultima.codigo}` : null, total: cuenta?.n ?? 0,
     ...(tallas ? { tallas: tallas.results.map((r) => r.talla).sort(porTalla) } : {}) }, 200,
     { 'cache-control': 'public, max-age=300' });

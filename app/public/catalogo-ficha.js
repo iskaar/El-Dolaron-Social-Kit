@@ -291,7 +291,9 @@ export function iniciarCatalogo(opciones = {}) {
     dialogTitle.textContent = pieza.nombre;
     dialogImg.src = pieza.foto; dialogImg.alt = pieza.nombre;   // siempre la foto completa, no el recorte
     const rubro = rubroDe(pieza);
-    dialogMeta.textContent = [rubro && rubro !== 'Otros' ? rubro : '', pieza.talla ? `Talla ${pieza.talla}` : '', pieza.codigo].filter(Boolean).join(' · ');
+    dialogMeta.textContent = [rubro && rubro !== 'Otros' ? rubro : '', pieza.talla ? `Talla ${pieza.talla}` : '', pieza.codigo,
+      // #800: en qué tienda está (nombre; nunca cuántas hay). Sin el campo (servidor anterior) no se dice nada.
+      pieza.tiendas?.length ? `Está en ${pieza.tiendas.join(' y ')}` : ''].filter(Boolean).join(' · ');
     pintarPrecio(dialogPrice, pieza);
     if (pieza.precio_lista > pieza.precio) dialogPrice.append(el('b', '', `Ahorras ${precio(pieza.precio_lista - pieza.precio)}`));
     precioBarra.textContent = precio(pieza.precio);

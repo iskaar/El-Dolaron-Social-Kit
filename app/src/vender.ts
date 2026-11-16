@@ -1,5 +1,5 @@
 /** Vender por WhatsApp (#431): lecturas acotadas e interesados sin reservar existencias. */
-import { VENDIBLE } from './catalogo.ts';
+import { VENDIBLE, A_LA_VENTA, COLUMNAS_UBICACION, tiendasDe } from './catalogo.ts';
 import { CLAVES_CATEGORIA } from '../public/categorias.js';
 import { telefonoInteresado } from '../public/vender.js';
 import { apartarRevendedora, pedidosDeRevendedora, cancelarDeRevendedora } from './pedidos.ts';
@@ -25,6 +25,7 @@ interface Pieza {
   fila: number; id: string; codigo: string; nombre: string; marca: string; talla: string | null;
   categoria: string; precio: number; precio_lista: number; estado_fisico: string; creado_en: string;
   recorte_estado: string | null; recorte_revision: string | null; elegible: number;
+  en_soledad: number; sucursales: string | null; a_la_venta: number;
 }
 interface Interesado {
   id: string; producto_id: string; cliente: string; telefono: string; nota: string;
@@ -51,7 +52,7 @@ async function listarPiezas(env: Env, url: URL, correo: string, revendedora: boo
   for (let tramo = 0; tramo < 10 && piezas.length < PAGINA; tramo++) {
     const { results } = await env.DB.prepare(`select p.rowid as fila, p.id, p.codigo, p.nombre, p.marca,
         p.talla, p.categoria, p.precio, p.precio_lista, p.estado_fisico, p.creado_en,
-        p.recorte_estado, p.recorte_revision,
+        p.recorte_estado, p.recorte_revision, ${COLUMNAS_UBICACION},
         (${VENDIBLE} ${categoria ? 'and p.categoria = ?' : ''}
           ${q && !codigo ? "and instr(lower(p.nombre), lower(?)) > 0" : ''}) as elegible
       from productos p ${codigo ? '' : 'indexed by productos_propietario_creado'}
@@ -78,11 +79,11 @@ async function listarPiezas(env: Env, url: URL, correo: string, revendedora: boo
     where i.producto_id in (${piezas.map(() => '?').join(',')}) and i.estado = 'abierto' and i.creado_en >= ?
     order by i.creado_en, i.rowid`).bind(...piezas.map((p) => p.id), desdeInteresados())
     .all<{ producto_id: string; cliente: string; vendedora: string; vendedora_nombre: string; creado_en: string }>()).results : [];
-  return json({ piezas: piezas.map(({ fila, elegible, recorte_estado, recorte_revision, ...p }) => {
+  return json({ piezas: piezas.map(({ fila, elegible, recorte_estado, recorte_revision, en_soledad, sucursales, a_la_venta, ...p }) => {
     // #575: una revendedora ve la posicion en la cola, no los clientes ni las vendedoras ajenas.
     const cola = interesados.filter((i) => i.producto_id === p.id).map(({ producto_id, ...i }) =>
       revendedora && i.vendedora !== correo ? { ...i, cliente: '', vendedora: '', vendedora_nombre: 'Otra vendedora' } : i);
-    return { ...p, foto: recorte_estado === 'listo' && recorte_revision === 'ok'
+    return { ...p, tiendas: tiendasDe({ en_soledad, sucursales }), foto: recorte_estado === 'listo' && recorte_revision === 'ok'
       ? `/api/recortes/${p.id}/imagen` : `/api/foto/${p.id}`, interesados: cola.length, cola };
   }), siguiente: hayMas && cursor ? `${cursor.fecha}~${cursor.fila}` : null });
 }
@@ -96,7 +97,7 @@ async function listarInteresados(env: Env, url: URL, correo: string, revendedora
   const { results } = await env.DB.prepare(`select i.rowid as fila, i.*,
       coalesce(nullif(u.nombre, ''), i.vendedora) as vendedora_nombre,
       p.codigo, p.nombre, p.precio,
-      case when p.stock > 0 then 'Disponible'
+      case when ${A_LA_VENTA} > 0 then 'Disponible'
         when exists (select 1 from pedido_lineas l join pedidos d on d.id = l.pedido_id
           where l.producto_id = p.id and d.estado = 'apartado') then 'Apartada'
         else 'Vendida' end as disponibilidad
