@@ -519,7 +519,7 @@ import {
   imprimirCorte, imprimirRetiro, imprimirVale,
 } from '/impresora.js';
 import {
-  renglonTicket, pintarDetalle, formularioPieza, formularioTodo, comprobanteDevolucion, comprobanteCancelacion,
+  renglonTicket, pintarDetalle, formularioPieza, formularioTodo, formularioCorreccion, comprobanteDevolucion, comprobanteCancelacion,
 } from '/ticket.js';
 import { imprimirDevolucion } from '/impresora.js';
 import { codigoDeDigitos } from '/code128.js';
@@ -2162,6 +2162,8 @@ let encontradas = new Map();
 // al abrir el formulario, asi un doble clic o un reintento no devuelven dos veces.
 let ticketAbierto = null;
 let idCancelacion = null;
+// Corregir la forma de pago (#831): el id de la correccion en curso, como idCancelacion (un reintento no la duplica).
+let idCorreccion = null;
 // Cancelacion de ticket completo que paso los 5 minutos y espera al dueño (Issue #200).
 let aprobacionCancelar = null;
 let esperando = null;
@@ -2177,7 +2179,7 @@ async function abrirTicket(id, resaltar = encontradas.get(id) ?? []) {
   $('ticket-contenido').innerHTML = '<p class="nota">Cargando…</p>';
   if (!$('dialogo-ticket').open) $('dialogo-ticket').showModal();
   try {
-    const r = await fetch(`/api/ventas/${id}`);
+    const r = await fetch(`/api/ventas/${id}?caja=${encodeURIComponent(cajaActual())}`);   // la caja decide si aqui se puede corregir su forma de pago (#831)
     const cuerpo = await r.json();
     if (!r.ok) throw new Error(cuerpo.error ?? 'No se pudo abrir el ticket.');
     ticketAbierto = cuerpo;
@@ -2191,7 +2193,7 @@ async function abrirTicket(id, resaltar = encontradas.get(id) ?? []) {
 
 $('ticket-cerrar').addEventListener('click', () => $('dialogo-ticket').close());
 $('dialogo-ticket').addEventListener('close', () => {
-  ticketAbierto = null; idCancelacion = null; aprobacionCancelar = null;
+  ticketAbierto = null; idCancelacion = null; idCorreccion = null; aprobacionCancelar = null;
   ($('dialogo-devolucion').open ? $('dev-q') : $('codigo')).focus();
 });
 
@@ -2278,6 +2280,59 @@ $('ticket-contenido').addEventListener('click', async (e) => {
     return;
   }
   if (d.volver !== undefined) { cerrarFormularios(); return; }
+
+  // Corregir la forma de pago (#831): solo antes del corte; el servidor es quien dice si todavia se puede.
+  if (d.corregirPago !== undefined) {
+    cerrarFormularios();
+    idCorreccion = crypto.randomUUID();
+    $('form-pago').innerHTML = formularioCorreccion(ticketAbierto.corregible);
+    $('form-pago').hidden = false;
+    $('form-pago').querySelector('.forma-nueva').focus();
+    return;
+  }
+  if (d.confirmarPago !== undefined) {
+    const form = boton.closest('.form-cancelar');
+    const campoForma = form.querySelector('.forma-nueva');
+    const campoMotivo = form.querySelector('.motivo-pago');
+    const motivo = campoMotivo.value.trim();
+    if (!campoForma.value) { campoForma.style.borderColor = 'var(--rojo)'; campoForma.focus(); return; }
+    if (!motivo) { campoMotivo.style.borderColor = 'var(--rojo)'; campoMotivo.focus(); return; }
+    if (!cajaActual()) {
+      $('ticket-aviso').textContent = 'Elige arriba qué caja es esta computadora.';
+      $('ticket-aviso').style.color = '#D72B32';
+      return;
+    }
+    boton.disabled = true;
+    const ticketId = ticketAbierto.id;
+    let r, cuerpo;
+    try {
+      r = await fetch(`/api/ventas/${ticketId}/corregir-pago`, {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ id: idCorreccion, forma_pago: campoForma.value, motivo, caja: cajaActual() }),
+      });
+      cuerpo = await r.json();
+    } catch {
+      boton.disabled = false;
+      $('ticket-aviso').textContent = 'Sin red: no se pudo confirmar la corrección. Vuelve a tocar «Confirmar corrección»: si ya se hizo, no se repite.';
+      $('ticket-aviso').style.color = '#D72B32';
+      return;
+    }
+    if (!r.ok && ![403, 404, 409].includes(r.status)) {
+      boton.disabled = false;
+      $('ticket-aviso').textContent = cuerpo.error ?? 'No se pudo corregir la forma de pago.';
+      $('ticket-aviso').style.color = '#D72B32';
+      return;
+    }
+    if (r.ok) idCorreccion = null;
+    // Ticket al dia: con la forma nueva y su rastro, o sin el boton si ya no se puede (un corte o una devolucion se adelantaron).
+    await abrirTicket(ticketId);
+    $('ticket-aviso').textContent = r.ok
+      ? `Forma de pago corregida: ahora ${cuerpo.forma_pago}. No se abre el cajón: el dinero ya está donde está.`
+      : (cuerpo.error ?? 'No se pudo corregir la forma de pago.');
+    $('ticket-aviso').style.color = r.ok ? '#1f7a4d' : '#D72B32';
+    if (r.ok) await actualizarCorte();   // «Ventas de hoy» y el resumen se ponen al dia
+    return;
+  }
   if (d.imprimirDevolucion !== undefined || d.imprimirCancelacion !== undefined) {
     $('ticket-aviso').textContent = '';
     boton.disabled = true;
@@ -2531,7 +2586,7 @@ async function imprimirComprobante(datos) {
 }
 
 function cerrarFormularios() {
-  for (const f of $('ticket-contenido').querySelectorAll('.form-linea, #form-todo')) f.hidden = true;
+  for (const f of $('ticket-contenido').querySelectorAll('.form-linea, #form-todo, #form-pago')) f.hidden = true;
 }
 
 // Sin importes a la vista: el conteo del corte es ciego (Issue #100). El dueno
@@ -2897,6 +2952,7 @@ function pintarResultado(c) {
   const tarjeta = c.tarjeta_terminal - c.tarjeta_sistema;
   $('corte-resumen').innerHTML = `<table>
     ${renglon('Ventas cobradas', c.tickets)}
+    ${c.formas_corregidas ? renglon('Formas de pago corregidas', c.formas_corregidas) : ''}
     ${renglon('Fondo inicial', pesos(c.fondo_inicial))}
     ${renglon('+ Ventas en efectivo', pesos(c.efectivo_ventas))}
     ${c.entrada_terminal ? renglon('+ Pago de la terminal', pesos(c.entrada_terminal)) : ''}

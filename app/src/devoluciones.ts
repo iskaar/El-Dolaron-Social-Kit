@@ -18,6 +18,7 @@ import { leerCupon, nuevoCupon, porcentajeCupon, usadosEnVenta, valeDeVenta } fr
 import { saldo } from './dolarones.ts';
 import { sentenciasDeReverso } from './reversos.ts';
 import { TICKET_CON_ANTICIPO } from './pedidos.ts';
+import { datosCorreccion } from './correcciones-pago.ts';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -68,8 +69,8 @@ const leerVenta = (env: Env, id: string) =>
      from ventas where id = ?`,
   ).bind(id).first<VentaFila>();
 
-/** El ticket con sus piezas y lo que ya se devolvio: para la ventana de la caja y de reportes. */
-export async function detalleVenta(id: string, env: Env, paraImprimir = false): Promise<Response> {
+/** El ticket con sus piezas y lo que ya se devolvio: para la ventana de la caja y de reportes. `sesion`: tienda, rol y caja de quien mira, para saber si aqui se puede corregir su forma de pago (#831). */
+export async function detalleVenta(id: string, env: Env, paraImprimir = false, sesion?: { tienda: string; dueno: boolean; caja: string }): Promise<Response> {
   if (!UUID.test(id)) return json({ error: 'Identificador de venta invalido.' }, 400);
   const venta = await leerVenta(env, id);
   if (!venta) return json({ error: 'La venta no existe.' }, 404);
@@ -90,7 +91,7 @@ export async function detalleVenta(id: string, env: Env, paraImprimir = false): 
   const folio = venta.pedido_id
     ? (await env.DB.prepare('select folio from pedidos where id = ?').bind(venta.pedido_id).first<{ folio:number }>())?.folio ?? null
     : null;
-  if (!paraImprimir) return json({ ...venta, cliente_id:undefined, pedido_id:undefined, pedido_folio:folio, socio, lineas, devoluciones });
+  if (!paraImprimir) return json({ ...venta, cliente_id:undefined, pedido_id:undefined, pedido_folio:folio, socio, lineas, devoluciones, ...(await datosCorreccion(env, id, sesion)) });
   const ganados = socio ? await env.DB.prepare(`select coalesce(sum(importe), 0) as importe
     from dolarones_movimientos where venta_id = ? and tipo = 'compra'`).bind(id).first<{ importe:number }>() : null;
   const bono = socio ? await env.DB.prepare(`select coalesce(sum(importe), 0) as importe

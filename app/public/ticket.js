@@ -84,6 +84,14 @@ export function pintarDetalle(t, { editable = false, resaltar = [], fechas = { f
         <div>${fecha(d.creado_en)} ${hora(d.creado_en)} · ${escapar(d.caja || 'sin caja')} · ${escapar(d.autor)} · «${escapar(d.motivo)}»</div></li>`).join('')}
     </ul>`;
 
+  // Corregir la forma de pago (#831): `corregible` (el servidor) trae a cuales formas se puede cambiar; vacio o ausente: ningun boton.
+  const corregida = (t.correcciones ?? []).length === 0 ? '' : `
+    <ul class="historial">${t.correcciones.map((c) => `
+      <li><b>Forma de pago corregida: antes ${FORMAS[c.forma_anterior] ?? escapar(c.forma_anterior)}</b>
+        <div>${fecha(c.creado_en)} ${hora(c.creado_en)} · ${escapar(c.caja || 'sin caja')} · ${escapar(c.autor)} · «${escapar(c.motivo)}»</div></li>`).join('')}
+    </ul>`;
+  const puedeCorregir = editable && !t.cancelada && (t.corregible ?? []).length > 0;
+
   return `
     <h2>Ticket de las ${hora(t.creado_en)}</h2>
     <p class="nota">${fecha(t.creado_en)} · ${FORMAS[t.forma_pago] ?? escapar(t.forma_pago)} · ${escapar(t.caja || 'sin caja')}
@@ -97,6 +105,8 @@ export function pintarDetalle(t, { editable = false, resaltar = [], fechas = { f
     </table>
     <table class="cifras">${cifras.map(([a, b, clase = '']) => `<tr class="${clase}"><td>${a}</td><td class="num">${b}</td></tr>`).join('')}</table>
     ${historial}
+    ${corregida}
+    ${puedeCorregir ? `<div class="corregir-pago"><button type="button" class="secundario" data-corregir-pago>Corregir forma de pago</button><div id="form-pago" hidden></div></div>` : ''}
     ${editable && !t.cancelada && !t.socio ? '<button type="button" class="secundario" data-imprimir-vale>Imprimir vale</button>' : ''}
     ${puedeCancelar ? `
       <div class="cancelar-todo">
@@ -166,6 +176,22 @@ export function formularioTodo(cupon = null) {
     </div>`;
 }
 
+/** El formulario de corregir la forma de pago (#831): a cual cambia y por que. `formas` son las que el servidor permite. */
+export function formularioCorreccion(formas) {
+  return `
+    <div class="form-cancelar">
+      <select class="forma-nueva" aria-label="Forma de pago correcta">
+        <option value="">¿Con qué se pagó en realidad?</option>
+        ${formas.map((f) => `<option value="${escapar(f)}">${FORMAS[f] ?? escapar(f)}</option>`).join('')}
+      </select>
+      <input type="text" class="motivo-pago" maxlength="200" placeholder="Motivo de la corrección">
+      <div class="botones">
+        <button type="button" class="secundario" data-volver>Volver</button>
+        <button type="button" class="quitar" data-confirmar-pago>Confirmar corrección</button>
+      </div>
+    </div>`;
+}
+
 let estilos = false;
 function asegurarEstilos() {
   if (estilos) return;
@@ -200,7 +226,7 @@ function asegurarEstilos() {
     .ventana-ticket .form-cancelar label { display: flex; align-items: center; gap: 8px; font-size: 13px; color: #5b6478; margin: 0; }
     .ventana-ticket .form-cancelar label input { width: 90px; }
     .ventana-ticket .botones { display: flex; flex-wrap: wrap; gap: 6px; justify-content: flex-end; }
-    .ventana-ticket .cancelar-todo { margin-top: 14px; }
+    .ventana-ticket .cancelar-todo, .ventana-ticket .corregir-pago { margin-top: 14px; }
     .ventana-ticket .historial { margin: 0; padding-left: 18px; font-size: 13px; }
     .ventana-ticket .historial div { color: #5b6478; font-size: 12px; }
     .ventana-ticket .historial li { margin-bottom: 6px; }
