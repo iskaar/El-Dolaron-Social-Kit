@@ -321,7 +321,7 @@ test('un socio dado de alta por otra cuenta no recibe prueba de quien solo reint
   } finally { p.cerrar(); }
 });
 
-test('sin la migración 082 el alta sigue funcionando, sin prueba, y la llegada va por el código del portal (#844)', async () => {
+test('sin la migración 083 el alta sigue funcionando, sin prueba, y la llegada va por el código del portal (#844)', async () => {
   const p = portalDePrueba();
   try {
     p.db.exec('drop table pruebas_alta');

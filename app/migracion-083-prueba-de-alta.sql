@@ -5,8 +5,8 @@
 -- Una prueba por socio: reemitirla (reintento del alta con el mismo id) invalida la anterior.
 -- Repetible (create ... if not exists).
 -- Isaac ejecuta ANTES del deploy, primero en sandbox y luego en produccion:
--- npx wrangler d1 execute el-dolaron-sandbox --remote --config wrangler.sandbox.jsonc --file=migracion-082-prueba-de-alta.sql
--- npx wrangler d1 execute el-dolaron --remote --file=migracion-082-prueba-de-alta.sql
+-- npx wrangler d1 execute el-dolaron-sandbox --remote --config wrangler.sandbox.jsonc --file=migracion-083-prueba-de-alta.sql
+-- npx wrangler d1 execute el-dolaron --remote --file=migracion-083-prueba-de-alta.sql
 
 create table if not exists pruebas_alta (
   cliente_id text primary key references clientes(id),

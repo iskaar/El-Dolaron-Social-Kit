@@ -215,7 +215,7 @@ const VIGENCIA_PRUEBA_ALTA = 30 * 60_000;
 async function emitirPruebaAlta(env: Env, clienteId: string, autor: string, ahora: Date): Promise<string | null> {
   const prueba = codigoAleatorio('DA');
   // El vencimiento sale del alta (creado_en + 30 min), no de la emisión: reintentar el alta no alarga la vida de la prueba.
-  // Sin la migración 082 (tabla ausente) o ante cualquier fallo, el alta sigue y la llegada se acredita con el código del portal.
+  // Sin la migración 083 (tabla ausente) o ante cualquier fallo, el alta sigue y la llegada se acredita con el código del portal.
   try {
     const { meta } = await env.DB.prepare(`insert into pruebas_alta (cliente_id, token_hash, autor, creado_en, expira_en)
       select id, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', creado_en, '+30 minutes') from clientes
