@@ -18,6 +18,7 @@ import { efectivoAlcanza, promoInauguracion, CLAVE_DESDE, claveRastreoDe, precio
 import { semanaIngreso } from '../public/semana.js';
 import { detalleVenta, cancelarPieza, devolverEnCupon, reimprimirCupon } from './devoluciones.ts';
 import { cancelarVenta, listarCancelaciones, estadoSolicitud } from './cancelaciones.ts';
+import { corregirFormaPago } from './correcciones-pago.ts';
 import { BASES, AVISO } from './legal.ts';
 import { CLAVES_CATEGORIA } from '../public/categorias.js';
 import { tallaValida, esCalzado } from '../public/tallas.js';
@@ -2973,6 +2974,9 @@ export default {
       if (cancelacion && request.method === 'POST') {
         return await conAvisoReverso(await cancelarVenta(cancelacion[1], request, env, correo, tienda, ctx), cancelacion[1], 'Cancelación de una venta');
       }
+      // #831: corregir efectivo/tarjeta/transferencia de un ticket que no ha entrado a un corte; la regla de rol es la de /api/ventas/... (permiso()).
+      const correccionPago = pathname.match(/^\/api\/ventas\/([^/]+)\/corregir-pago$/);
+      if (correccionPago && request.method === 'POST') return await corregirFormaPago(correccionPago[1], request, env, ctx, correo, tienda);
       const cancelacionPieza = pathname.match(/^\/api\/ventas\/([^/]+)\/lineas\/(\d+)\/cancelar$/);
       if (cancelacionPieza && request.method === 'POST') {
         return await conAvisoReverso(await cancelarPieza(cancelacionPieza[1], Number(cancelacionPieza[2]), request, env, correo, tienda), cancelacionPieza[1],
@@ -2986,7 +2990,8 @@ export default {
       if (pathname === '/api/cupones' && request.method === 'POST') return await emitirCuponManual(request, env, correo);
       const ticket = pathname.match(/^\/api\/ventas\/([^/]+)$/);
       if (ticket && request.method === 'GET') {
-        return await detalleVenta(ticket[1], env, url.searchParams.get('imprimir') === '1');
+        return await detalleVenta(ticket[1], env, url.searchParams.get('imprimir') === '1',
+          { tienda, dueno: !!(await leerUsuario(env, correo))?.roles.includes('dueno'), caja: await cajaDe(env, correo, url.searchParams.get('caja'), tienda).catch(() => '') });
       }
 
       if (pathname === '/api/tablero') return await rutaTablero(request, env, ctx);

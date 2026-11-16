@@ -382,6 +382,7 @@ export function imprimirCorte(corte) {
     linea(`Desde: ${corte.desde ? fechaHora(corte.desde) : 'primer corte de esta caja'}`),
     linea(`Hasta: ${fechaHora(corte.hasta)}`),
     linea(`Ventas cobradas: ${corte.tickets}`),
+    ...(corte.formas_corregidas ? [linea(`Formas de pago corregidas: ${corte.formas_corregidas}`)] : []),
     separador(),
     centrado('EFECTIVO'),
     renglonMonto('Fondo inicial', importe(corte.fondo_inicial)),
