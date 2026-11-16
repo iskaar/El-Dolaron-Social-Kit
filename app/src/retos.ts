@@ -69,7 +69,7 @@ async function candidatosDelDia(env: Env, cfg: ConfigRetos, dia: string): Promis
     `select e.correo, l.id as ref,
        coalesce(julianday(v.creado_en) - julianday(p.creado_en) >= ?, 0) as viejo,
        p.stock + l.cantidad - coalesce((select sum(m.cantidad) from movimientos_existencia m
-         where m.producto_id = l.producto_id and m.en > v.registrado_en), 0) >= ? as alto
+         where m.producto_id = l.producto_id and m.tienda = 'soledad' and m.en > v.registrado_en), 0) >= ? as alto
      from venta_lineas l join ventas v on v.id = l.venta_id join productos p on p.id = l.producto_id
        join empleados e on e.correo = v.vendedora
      where e.activo = 1 and e.correo <> '' and ${VENTA_VALIDA} and v.creado_en >= ? and v.creado_en < ?

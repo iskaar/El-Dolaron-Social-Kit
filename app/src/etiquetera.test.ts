@@ -4,7 +4,7 @@
 // etiqueta, que es donde se rompio todo lo anterior.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { tsplEtiqueta, tsplBanda, tsplMarco, tsplPruebaCodigo, tsplPruebaLargos, partirNombre, NOMBRE_MAX, NOMBRE_MAX_PIEZA, TSPL_REGLA, TSPL_CALIBRAR, tsplCodigo, leerCodigos,
+import { tsplEtiqueta, tsplBanda, tsplMarco, tsplPruebaCodigo, tsplPruebaLargos, partirNombre, NOMBRE_MAX, NOMBRE_MAX_PIEZA, TSPL_REGLA, TSPL_CALIBRAR, tsplCodigo, tsplBulto, leerCodigos,
   reconectarEtiquetera, etiqueteraLista, reclamarEtiquetas, soltarEtiquetas, adoptarMarca, adoptarMarcas, olvidarMarca, marcarImpresa, impresas, desmarcarDesde } from '../public/etiquetera.js';
 
 // El letrero (#737) es la unica linea que cambia con la categoria: TEXT x,y,"3",0,2,2,"11".
@@ -639,4 +639,16 @@ test('el letrero sale de la categoria, el nombre, la marca y la talla de la piez
   assert.equal(numero({ categoria: 'ropa', nombre: 'Playera', marca: 'Cat & Jack' }), '23');
   assert.equal(numero({ categoria: 'hogar', nombre: 'Toalla de playa' }), '35');
   assert.equal(numero({}), '25');   // sin categoria, como la pieza de prueba antigua
+});
+
+test('etiqueta del bulto (#795): destino, folio en Code 128 y en letras, y pie con origen, piezas y fecha', () => {
+  const t = tsplBulto({ folio: 'BU-K7Q2M', destino: 'Coronel Romero', origen: 'Soledad', piezas: 48, fecha: '14/11/2026' }, 0, 4);
+  assert.match(t, /TEXT \d+,8,"3",0,1,1,"A: CORONEL ROMERO"/);
+  assert.match(t, /BARCODE \d+,44,"128",72,0,0,3,6,"BU-K7Q2M"/);   // 8 caracteres: de 4 baja a 3 para caber
+  assert.match(t, /TEXT \d+,124,"3",0,2,2,"BU-K7Q2M"/);
+  assert.match(t, /TEXT \d+,176,"2",0,1,1,"Soledad 48 pzas 14\/11\/2026"/);
+  assert.ok(t.startsWith('SIZE 50.8 mm,25.4 mm') && t.endsWith('PRINT 1,1\r\n'));
+  assert.ok(!/ED-/.test(t));
+  assert.match(tsplBulto({ folio: 'BU-K7Q2M', destino: 'Avenida Salk', origen: 'Soledad', piezas: 1, fecha: 'x' }, 0, 4), /"A: AVENIDA SALK"/);
+  assert.throws(() => tsplBulto({ folio: 'BU "2', destino: 'x', origen: 'y', piezas: 1, fecha: 'z' }));
 });

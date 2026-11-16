@@ -58,6 +58,9 @@ export const TIENDA_CENTRAL: Tienda = 'soledad';
 export const esTienda = (valor: unknown): valor is Tienda => typeof valor === 'string' && Object.hasOwn(TIENDAS, valor);
 /** Las cajas de una tienda; [] si la clave no existe (no se cobra en una tienda desconocida). */
 export const cajasDe = (tienda: string): readonly string[] => esTienda(tienda) ? TIENDAS[tienda].cajas : [];
+/** La tienda a la que pertenece una caja (los nombres son únicos entre tiendas); Soledad si no es de ninguna (ventas viejas, caja vacía). */
+export const tiendaDeCaja = (caja: unknown): Tienda =>
+  (Object.keys(TIENDAS) as Tienda[]).find((t) => (TIENDAS[t].cajas as readonly string[]).includes(String(caja ?? ''))) ?? TIENDA_CENTRAL;
 /** Todas las cajas que se pueden asignar, de cualquier tienda. */
 export const CAJAS: string[] = Object.values(TIENDAS).flatMap((t) => [...t.cajas]);
 
@@ -104,6 +107,7 @@ const PANTALLAS: Record<string, Rol[]> = {
   '/caja': CAJA,
   '/socios': CAJA,
   '/pedidos': CAJA,
+  '/bultos': [...CAPTURA, ...CAJA],   // #795: arman dueño y capturista; reciben dueño y cajero (la API distingue; la computadora pide PIN para recibir)
   '/vender': VENDER,
   '/manual': VENDER,   // manual interactivo de la revendedora (#594): practica con datos de ejemplo, sin API
   '/retos': RETOS,   // Mis retos (Issue #752)
@@ -174,6 +178,9 @@ export function permiso(pathname: string, metodo: string): Regla {
   if (metodo === 'POST' && /^\/api\/piezas\/[^/]+\/solicitud-precio$/.test(ruta)) return CAPTURA;
   if (ruta === '/api/marketplace' || /^\/api\/marketplace\/foto\/[^/]+$/.test(ruta)) return CAPTURA;
   if (ruta === '/api/catalogo') return CAJA;
+  // Bultos (#795): recibir y ver lo que viene en camino lo hace la caja de la sucursal (la computadora con PIN); armar, cerrar y cancelar, dueño y capturista.
+  if ((ruta === '/api/bultos/entrantes' && metodo === 'GET') || (ruta === '/api/bultos/recibir' && metodo === 'POST')) return CAJA;
+  if (ruta === '/api/bultos' || ruta.startsWith('/api/bultos/')) return CAPTURA;
   if (ruta === '/api/vender' || ruta === '/api/interesados' || ruta.startsWith('/api/interesados/')) return VENDER;
   // Revendedora (#575): apartar 48 h sin anticipo, ver y cancelar lo suyo. vender.ts exige ademas que no sea personal de caja.
   // #609: ademas, mandar el pago (foto del comprobante y clave) de uno suyo; ver la foto despues es solo del dueño (/api/pagos-reportados/:id/comprobante, por omisión).

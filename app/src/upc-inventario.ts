@@ -7,7 +7,7 @@ export const UPC_VISIBLE = "sin_inventario = 0 and estado_analisis <> 'descartad
 export const MISMO_UPC = `${UPC_VISIBLE} and propietario = ? and ltrim(upc, '0') = ? and estado_fisico = ? and coalesce(talla, '') = ?`;
 /** Talla como clave de identidad: texto recortado, '' si no hay. */
 export const claveTalla = (talla: unknown): string => typeof talla === 'string' ? talla.trim() : '';
-export const CAPTURA_SUMADA = "exists (select 1 from conteo_ajustes where producto_id = productos.id and motivo = 'entrada')";
+export const CAPTURA_SUMADA = "exists (select 1 from conteo_ajustes where producto_id = productos.id and motivo = 'entrada' and tienda = 'soledad')";
 
 export async function conflictoCapturaSumada(env: Env, id: string, correo: string) {
   const sumada = await env.DB.prepare(`select id from productos where id = ? and capturado_por = ? and ${CAPTURA_SUMADA}`)

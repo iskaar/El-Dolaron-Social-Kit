@@ -5,8 +5,9 @@
  * (tabla `solicitudes`, tipo `cancelacion`). Cancelar una pieza suelta no cambia
  * (devoluciones.ts).
  */
-import { cajaDe } from './corte.ts';
-import { leerUsuario, leerRoles, TIENDA_CENTRAL } from './cuentas.ts';
+import { cajaDe, nombreCaja } from './corte.ts';
+import { sentenciasMover } from './existencias.ts';
+import { leerUsuario, leerRoles, TIENDA_CENTRAL, tiendaDeCaja } from './cuentas.ts';
 import { verificarPin } from './cajeros.ts';
 import { sentenciasDeReverso } from './reversos.ts';
 import { TICKET_CON_ANTICIPO } from './pedidos.ts';
@@ -35,7 +36,7 @@ const responder = (r: Resultado) => json(r.cuerpo, r.status);
  * se cancela y se registra quien aprobo, o ninguna de las dos.
  */
 export async function cancelarCore(
-  env: Env, id: string, motivo: string, canceladaPor: string, cajaPedida: unknown,
+  env: Env, id: string, motivo: string, canceladaPor: string, cajaPedida: unknown, tienda: string,
   extra: (ahora: string) => D1PreparedStatement[] = () => [],
 ): Promise<Resultado> {
   const venta = await env.DB.prepare(
@@ -72,15 +73,11 @@ export async function cancelarCore(
       // Candado de migracion 020: si una pieza se cancelo entre la lectura y aqui, aborta todo.
       env.DB.prepare('update ventas set revision = ? where id = ?').bind(venta.revision + 1, id),
       env.DB.prepare(
-        `update ventas set cancelada = 1, cancelada_en = ?, cancelada_por = ?, motivo_cancelacion = ?, cancelada_caja = ?
+        `update ventas set cancelada = 1, cancelada_en = ?, cancelada_por = ?, motivo_cancelacion = ?, cancelada_caja = ?, cancelada_tienda = ?
          where id = ?`,
-      ).bind(ahora, canceladaPor, motivo, await cajaDe(env, canceladaPor, cajaPedida, TIENDA_CENTRAL), id),   // sucursal aun no cancela (#793, PR 2); el corte de esa caja cuenta la devolucion
-      ...lineas.map((l) =>
-        env.DB.prepare(
-          `update productos set stock = stock + ?, actualizado_en = ?
-           where id = ? and sin_inventario = 0`,
-        ).bind(l.cantidad, ahora, l.producto_id),
-      ),
+      ).bind(ahora, canceladaPor, motivo, await cajaDe(env, canceladaPor, cajaPedida, tienda), tienda, id),   // el corte de esa caja cuenta la devolucion
+      // R3 de #793: la pieza entra a la existencia de la tienda donde se cancela (el dinero ya sale de esa caja), aunque se vendiera en otra.
+      ...lineas.flatMap((l) => sentenciasMover(env, tienda, l.producto_id, l.cantidad, ahora, true)),
       ...(await sentenciasDeReverso(env, { ventaId: id, clienteId: null, autor: canceladaPor, ahora, completa: true })),
       ...extra(ahora),
     ]);
@@ -122,7 +119,7 @@ const insertarSolicitud = (
  * La venta no se borra, se marca: el corte del dia tiene que seguir explicando
  * todo lo que paso, incluido lo que se deshizo. Las piezas vuelven al inventario.
  */
-export async function cancelarVenta(id: string, request: Request, env: Env, correo: string, ctx?: ExecutionContext): Promise<Response> {
+export async function cancelarVenta(id: string, request: Request, env: Env, correo: string, tienda: string, ctx?: ExecutionContext): Promise<Response> {
   if (!UUID.test(id)) {
     return json({ error: 'Identificador de venta invalido.' }, 400);
   }
@@ -146,23 +143,25 @@ export async function cancelarVenta(id: string, request: Request, env: Env, corr
   // Antes de pedir aprobacion: no tiene caso mandar al dueno una solicitud que cancelarCore rechazaria.
   if (venta.anticipo > 0) return json({ error: TICKET_CON_ANTICIPO }, 409);
 
+  // Una terminal de sucursal debe decir su caja: de ella sale la tienda donde entra la pieza si el dueño aprueba a distancia.
+  if (tienda !== TIENDA_CENTRAL && !nombreCaja(cuerpo.caja)) return json({ error: 'Elige arriba qué caja es esta computadora.' }, 400);
   const usuario = await leerUsuario(env, correo);
   // Una hora ilegible o del futuro no abre la ventana: cae en pedir aprobacion.
   const edad = Date.now() - Date.parse(venta.creado_en);
   const enVentana = edad > -VENTANA_CANCELACION_MS && edad <= VENTANA_CANCELACION_MS;
   if (usuario?.roles.includes('dueno') || enVentana) {
-    return responder(await cancelarCore(env, id, motivo, correo, cuerpo.caja));
+    return responder(await cancelarCore(env, id, motivo, correo, cuerpo.caja, tienda));
   }
 
   const nombre = usuario?.nombre ?? '';
-  const datos = { venta_id: id, caja: String(cuerpo.caja ?? '') };
+  const datos = { venta_id: id, caja: String(cuerpo.caja ?? '') };   // al aprobarse a distancia la tienda sale de la caja (nombres únicos entre tiendas)
 
   // Aprobada en la caja con el PIN del dueno: se cancela y se deja el rastro en el mismo batch.
   if (cuerpo.aprobador) {
     const dueno = String(cuerpo.aprobador).trim().toLowerCase();
     const verificado = await verificarPin(env, dueno, String(cuerpo.pin ?? ''), (roles) => roles.includes('dueno'));
     if ('error' in verificado) return json({ error: verificado.error }, verificado.status);
-    return responder(await cancelarCore(env, id, motivo, correo, cuerpo.caja, (ahora) => [
+    return responder(await cancelarCore(env, id, motivo, correo, cuerpo.caja, tienda, (ahora) => [
       insertarSolicitud(env, crypto.randomUUID(), correo, nombre, motivo, { ...datos, via: 'pin' }, ahora, dueno),
     ]));
   }
@@ -213,7 +212,8 @@ export async function resolverCancelacion(env: Env, id: string, aprobar: boolean
   // ese hueco queda aprobada sin cancelar y se ve en /cuentas como aprobada.
   if (!(await marcar('aprobada').run()).meta.changes) return yaResuelta();
   const datos = JSON.parse(solicitud.datos) as { venta_id: string; caja?: string };
-  const r = await cancelarCore(env, datos.venta_id, solicitud.justificacion, solicitud.correo, datos.caja);
+  // La pieza entra a la tienda de la terminal que pidió la cancelación: su caja lo dice (los nombres de caja son únicos entre tiendas); las solicitudes anteriores a #795 son de Soledad.
+  const r = await cancelarCore(env, datos.venta_id, solicitud.justificacion, solicitud.correo, datos.caja, tiendaDeCaja(datos.caja));
   if (r.status !== 200) {
     await env.DB.prepare(
       `update solicitudes set estado = 'pendiente', resuelto_en = null, resuelto_por = null
