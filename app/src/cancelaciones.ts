@@ -8,13 +8,20 @@
 import { cajaDe, nombreCaja } from './corte.ts';
 import { sentenciasMover } from './existencias.ts';
 import { leerUsuario, leerRoles, apruebaDinero, TIENDA_CENTRAL, tiendaDeCaja } from './cuentas.ts';
-import { verificarPin } from './cajeros.ts';
+import { verificarPinAprobacion } from './cajeros.ts';
 import { sentenciasDeReverso } from './reversos.ts';
 import { TICKET_CON_ANTICIPO } from './pedidos.ts';
 import { avisarDueno } from './avisos.ts';
 
 /** Lo que tiene el cajero para cancelar solo, contado desde la hora de la venta. */
 export const VENTANA_CANCELACION_MS = 5 * 60_000;
+
+/** Mientras una devolución de dinero espera al dueño, el ticket no cambia por otro camino (#837): la solicitud quedó atada a cómo estaba. */
+export const HAY_DEVOLUCION = 'Hay una devolución esperando al dueño en este ticket.';
+export const devolucionPendiente = async (env: Env, ventaId: string): Promise<{ id: string; correo: string; resumen: string | null } | null> =>
+  env.DB.prepare(`select id, correo, json_extract(datos, '$.resumen') as resumen from solicitudes
+    where tipo = 'devolucion' and estado = 'pendiente' and json_extract(datos, '$.venta_id') = ? limit 1`)
+    .bind(ventaId).first<{ id: string; correo: string; resumen: string | null }>();
 
 const hora = (iso: string) => new Date(iso).toLocaleString('es-MX', { timeZone: 'America/Mexico_City', dateStyle: 'short', timeStyle: 'short' });
 
@@ -56,6 +63,7 @@ export async function cancelarCore(
   if (venta.devuelto_cupon > 0) {
     return { status: 409, cuerpo: { error: 'Este ticket ya tiene piezas devueltas en cupón: devuelve lo que queda pieza por pieza.' } };
   }
+  if (await devolucionPendiente(env, id)) return { status: 409, cuerpo: { error: HAY_DEVOLUCION } };
 
   const ahora = new Date().toISOString();
   // Solo lo que sigue en el ticket: las piezas ya canceladas sueltas (Issue #138) ya regresaron.
@@ -113,13 +121,14 @@ export async function aprobadoresDeDinero(env: Env): Promise<{ correo: string; n
 }
 
 /**
- * Aprobacion con PIN en la caja (#837): el PIN de otra cuenta con rol de dueño o supervisor, con el mismo bloqueo por intentos
- * de siempre (verificarPin). Quien cobra no se aprueba a si mismo: si ya es dueño o supervisor, ni llega aqui (cancela directo).
+ * Aprobacion con PIN en la caja (#837): el PIN de otra cuenta con rol de dueño o supervisor, con 5 intentos y 15 minutos por aprobador
+ * y por caja (verificarPinAprobacion). Quien cobra no se aprueba a si mismo: si ya es dueño o supervisor, ni llega aqui (cancela directo).
  */
-export async function aprobadorConPin(env: Env, solicitante: string, aprobador: unknown, pin: unknown):
+export async function aprobadorConPin(env: Env, solicitante: string, aprobador: unknown, pin: unknown, caja = ''):
   Promise<{ por: string } | { error: string; status: number }> {
   const por = String(aprobador).trim().toLowerCase();
-  const verificado = await verificarPin(env, por, String(pin ?? ''), apruebaDinero);
+  // Los fallos se cuentan aparte de los del acceso a la caja (verificarPinAprobacion, migración 082): equivocarse aquí no bloquea al supervisor.
+  const verificado = await verificarPinAprobacion(env, por, String(pin ?? ''), caja, apruebaDinero);
   if ('error' in verificado) return verificado;
   if (por === solicitante) return { error: 'No puedes aprobar tu propia devolución: pide a otra persona.', status: 403 };
   return { por };
@@ -164,6 +173,7 @@ export async function cancelarVenta(id: string, request: Request, env: Env, corr
   if (venta.cancelada) return json({ id, cancelada: true, ya_estaba: true });
   // Antes de pedir aprobacion: no tiene caso mandar al dueno una solicitud que cancelarCore rechazaria.
   if (venta.anticipo > 0) return json({ error: TICKET_CON_ANTICIPO }, 409);
+  if (await devolucionPendiente(env, id)) return json({ error: HAY_DEVOLUCION }, 409);
 
   // Una terminal de sucursal debe decir su caja: de ella sale la tienda donde entra la pieza si el dueño aprueba a distancia.
   if (tienda !== TIENDA_CENTRAL && !nombreCaja(cuerpo.caja)) return json({ error: 'Elige arriba qué caja es esta computadora.' }, 400);
@@ -176,11 +186,14 @@ export async function cancelarVenta(id: string, request: Request, env: Env, corr
   }
 
   const nombre = usuario?.nombre ?? '';
-  const datos = { venta_id: id, caja: String(cuerpo.caja ?? '') };   // al aprobarse a distancia la tienda sale de la caja (nombres únicos entre tiendas)
+  // La caja y la tienda se validan AQUÍ (una caja de otra tienda es 400) y es lo que se guarda: al aprobarse a distancia la pieza entra a esa tienda,
+  // no a la que diga un texto sin revisar. Las solicitudes anteriores a #837 solo traen la caja: su tienda sale de ella.
+  const caja = await cajaDe(env, correo, cuerpo.caja, tienda);
+  const datos = { venta_id: id, caja, tienda };
 
   // Aprobada en la caja con el PIN del dueno: se cancela y se deja el rastro en el mismo batch.
   if (cuerpo.aprobador) {
-    const aprobo = await aprobadorConPin(env, correo, cuerpo.aprobador, cuerpo.pin);
+    const aprobo = await aprobadorConPin(env, correo, cuerpo.aprobador, cuerpo.pin, caja);
     if ('error' in aprobo) return json({ error: aprobo.error }, aprobo.status);
     return responder(await cancelarCore(env, id, motivo, correo, cuerpo.caja, tienda, (ahora) => [
       insertarSolicitud(env, crypto.randomUUID(), correo, nombre, motivo, { ...datos, via: 'pin' }, ahora, aprobo.por),
@@ -229,9 +242,9 @@ export async function resolverCancelacion(env: Env, id: string, aprobar: boolean
   // ponytail: entre reclamar y cancelar no hay transaccion; si el Worker muere en
   // ese hueco queda aprobada sin cancelar y se ve en /cuentas como aprobada.
   if (!(await marcar('aprobada').run()).meta.changes) return yaResuelta();
-  const datos = JSON.parse(solicitud.datos) as { venta_id: string; caja?: string };
+  const datos = JSON.parse(solicitud.datos) as { venta_id: string; caja?: string; tienda?: string };
   // La pieza entra a la tienda de la terminal que pidió la cancelación: su caja lo dice (los nombres de caja son únicos entre tiendas); las solicitudes anteriores a #795 son de Soledad.
-  const r = await cancelarCore(env, datos.venta_id, solicitud.justificacion, solicitud.correo, datos.caja, tiendaDeCaja(datos.caja));
+  const r = await cancelarCore(env, datos.venta_id, solicitud.justificacion, solicitud.correo, datos.caja, datos.tienda ?? tiendaDeCaja(datos.caja));
   if (r.status !== 200) {
     await env.DB.prepare(
       `update solicitudes set estado = 'pendiente', resuelto_en = null, resuelto_por = null
@@ -262,5 +275,6 @@ export async function estadoSolicitud(env: Env, id: string, correo: string): Pro
   if (!fila || (fila.correo !== correo && !usuario?.roles.includes('dueno'))) {
     return json({ error: 'La solicitud no existe.' }, 404);
   }
-  return json({ estado: fila.estado, venta_id: (JSON.parse(fila.datos) as { venta_id?: string }).venta_id ?? null });
+  const datos = JSON.parse(fila.datos) as { venta_id?: string; rechazo?: string };
+  return json({ estado: fila.estado, venta_id: datos.venta_id ?? null, rechazo: datos.rechazo ?? null });
 }

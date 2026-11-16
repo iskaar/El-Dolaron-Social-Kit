@@ -3,7 +3,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { tienda, PRODUCTO, DUENO, codigoPrueba } from './prueba-d1.ts';
-import { VENTANA_CANCELACION_MS } from './cancelaciones.ts';
+import { VENTANA_CANCELACION_MS, aprobadorConPin, HAY_DEVOLUCION } from './cancelaciones.ts';
 
 const TIENDA = 'tienda@prueba.mx';
 const ANA = 'ana@prueba.mx';
@@ -175,8 +175,8 @@ test('solicitud remota: queda pendiente sin mover nada; el reintento devuelve la
   assert.equal(s.tipo, 'devolucion');
   assert.equal(s.estado, 'pendiente');
   assert.equal(s.correo, ANA);
-  assert.deepEqual(JSON.parse(s.datos), { venta_id: id, linea_id: l, cantidad: 1, devolver_en: 'efectivo', caja: 'Caja 1', dinero: 25000,
-    resumen: '1 × Ventilador por $250.00 (efectivo)', via: 'remoto' });
+  assert.deepEqual(JSON.parse(s.datos), { venta_id: id, linea_id: l, cantidad: 1, devolver_en: 'efectivo', caja: 'Caja 2', tienda: 'soledad', dinero: 25000,
+    revision: 0, resumen: '1 × Ventilador por $250.00 (efectivo)', via: 'remoto' });
 
   // El dueño la ve en la misma lista de /avisos y /cuentas, con su tipo; la lista de acceso de /cuentas no la mezcla.
   como(DUENO);
@@ -196,12 +196,10 @@ test('el dueño aprueba: se devuelve exactamente lo pedido una sola vez y el cor
   const antes = stock();
   const idDev = crypto.randomUUID();
   const l = await linea(id);
-  await devolver(id, l, { id: idDev, solicitar: true, devolver_en: 'efectivo', cantidad: 1 });
-
-  // Pendiente: el corte no resta nada (fondo $500 + venta $500) y la venta se lleva su corte.
+  // La venta se lleva su corte (fondo $500 + venta $500); la devolución se pide y se aprueba después, en el turno siguiente.
   const primero = (await pedir('/api/cortes', { id: crypto.randomUUID(), caja: 'Caja 2', efectivo_contado: 100000, tarjeta_terminal: 0 }, 'POST', ana)).cuerpo;
-  assert.equal(primero.efectivo_devoluciones, 0);
   assert.equal(primero.diferencia, 0);
+  await devolver(id, l, { id: idDev, solicitar: true, devolver_en: 'efectivo', cantidad: 1 });
 
   // Un cajero no la resuelve.
   assert.equal((await pedir(`/api/solicitudes/${idDev}/resolver`, { aprobar: true }, 'POST', ana)).status, 403);
@@ -277,20 +275,26 @@ test('el dueño rechaza: no se mueve nada, la caja se entera, y reenviar el mism
   assert.equal((await devolver(id, l, { solicitar: true })).status, 202);
 });
 
-test('si el ticket cambió mientras tanto (ya se canceló), aprobar da 409 y la solicitud sigue pendiente sin mover nada', async () => {
-  const { como, vender, linea, devolver, stock, devoluciones, solicitudes, pedir } = await montar();
+test('un 409 definitivo al aprobar (el ticket ya se canceló) deja la solicitud RECHAZADA con su razón, sin mover nada', async () => {
+  const { como, db, vender, linea, devolver, stock, devoluciones, solicitudes, pedir, ana } = await montar();
   const id = await vender(VIEJA);
   const idDev = crypto.randomUUID();
   await devolver(id, await linea(id), { id: idDev, solicitar: true });
-  como(DUENO);
-  assert.equal((await pedir(`/api/ventas/${id}/cancelar`, { motivo: 'error', caja: 'Caja 1' })).status, 200);
+  db.prepare('update ventas set cancelada = 1 where id = ?').run(id);   // ninguna ruta cancela con una solicitud pendiente: se fuerza el estado
   const despues = stock();
+  como(DUENO);
   const r = await pedir(`/api/solicitudes/${idDev}/resolver`, { aprobar: true });
   assert.equal(r.status, 409);
   assert.match(r.cuerpo.error, /cancelado/);
-  assert.equal(solicitudes()[0].estado, 'pendiente');
+  assert.equal(solicitudes()[0].estado, 'rechazada');
+  assert.match(JSON.parse(solicitudes()[0].datos).rechazo, /cancelado/);
   assert.equal(devoluciones().length, 0);
   assert.equal(stock(), despues);
+  // La caja se entera y sabe por qué.
+  como(TIENDA);
+  const estado = (await pedir(`/api/solicitudes/${idDev}`, undefined, 'GET', ana)).cuerpo;
+  assert.equal(estado.estado, 'rechazada');
+  assert.match(estado.rechazo, /cancelado/);
 });
 
 test('no se pide al dueño lo que la devolución no haría: pieza ajena, cantidad de más o sin motivo se rechazan antes de crear la solicitud', async () => {
@@ -380,25 +384,48 @@ test('el PIN de un supervisor no vale para descuentos ni cupones (siguen siendo 
   assert.deepEqual((await pedir('/api/descuentos/duenos', undefined, 'GET', ana)).cuerpo, [{ correo: DUENO, nombre: 'Isaac' }]);
 });
 
-test('el PIN de otro cajero no aprueba, y nadie se aprueba a sí mismo', async () => {
+test('el PIN de otro cajero (sin rol de supervisor) no aprueba, ni devolviendo ni cancelando', async () => {
   const { vender, linea, devolver, devoluciones, pedir, ana } = await montar();
   const id = await vender(VIEJA);
   const l = await linea(id);
-  assert.equal((await devolver(id, l, { aprobador: BETO, pin: PIN_BETO })).status, 404);   // cajero sin rol de supervisor
-  assert.equal((await devolver(id, l, { aprobador: ANA, pin: PIN_ANA })).status, 404);     // la propia cajera que cobra
-  const ticket = await pedir(`/api/ventas/${id}/cancelar`, { motivo: 'x', caja: 'Caja 1', aprobador: ANA, pin: PIN_ANA }, 'POST', ana);
+  assert.equal((await devolver(id, l, { aprobador: BETO, pin: PIN_BETO })).status, 404);
+  assert.equal((await devolver(id, l, { aprobador: ANA, pin: PIN_ANA })).status, 404);     // tampoco la propia cajera: no tiene el rol
+  const ticket = await pedir(`/api/ventas/${id}/cancelar`, { motivo: 'x', caja: 'Caja 1', aprobador: BETO, pin: PIN_BETO }, 'POST', ana);
   assert.equal(ticket.status, 404);
   assert.equal(devoluciones().length, 0);
 });
 
-test('el bloqueo por PIN malos es el mismo de siempre, también para un supervisor', async () => {
-  const { vender, linea, devolver, devoluciones } = await montar();
+test('nadie se aprueba a sí mismo: aunque su PIN y su rol sean válidos, quien cobra no es su propio aprobador', async () => {
+  const { env } = await montar();
+  const yo = await aprobadorConPin(env, SUP, SUP, PIN_SUP, 'Caja 1');   // la defensa del servidor, aislada: un supervisor que cobra ni llega aquí
+  assert.deepEqual({ status: (yo as { status: number }).status, error: (yo as { error: string }).error },
+    { status: 403, error: 'No puedes aprobar tu propia devolución: pide a otra persona.' });
+  assert.deepEqual(await aprobadorConPin(env, ANA, SUP, PIN_SUP, 'Caja 1'), { por: SUP });
+});
+
+test('el bloqueo por PIN malos de aprobación es de 5 intentos, también para un supervisor, y es por caja', async () => {
+  const { vender, linea, devolver, devoluciones, db } = await montar();
   const id = await vender(VIEJA);
   const l = await linea(id);
-  for (let i = 0; i < 5; i++) await devolver(id, l, { aprobador: SUP, pin: '000000' });
+  for (let i = 0; i < 5; i++) assert.equal((await devolver(id, l, { aprobador: SUP, pin: '000000' })).status, 403);
   const r = await devolver(id, l, { aprobador: SUP, pin: PIN_SUP });
   assert.equal(r.status, 423);
   assert.equal(devoluciones().length, 0);
+  const fila = db.prepare('select caja, fallos from intentos_aprobacion where correo = ?').get(SUP) as { caja: string; fallos: number };
+  assert.equal(fila.caja, 'Caja 2');
+});
+
+test('equivocarse al aprobar NO bloquea al supervisor fuera de su propio acceso a la caja', async () => {
+  const { como, db, pedir, vender, linea, devolver } = await montar();
+  const id = await vender(VIEJA);
+  const l = await linea(id);
+  for (let i = 0; i < 7; i++) await devolver(id, l, { aprobador: SUP, pin: '000000' });
+  assert.equal((await devolver(id, l, { aprobador: SUP, pin: PIN_SUP })).status, 423);   // la aprobación en esa caja sí queda bloqueada
+  const usuario = db.prepare('select pin_fallos, pin_bloqueo from usuarios where correo = ?').get(SUP) as { pin_fallos: number; pin_bloqueo: string };
+  assert.deepEqual({ ...usuario }, { pin_fallos: 0, pin_bloqueo: '' });                     // su acceso no se tocó
+  como(TIENDA);
+  const entrada = await pedir('/api/cajeros/entrar', { correo: SUP, pin: PIN_SUP });
+  assert.equal(entrada.status, 201, JSON.stringify(entrada.cuerpo));                       // y entra a su caja con su PIN
 });
 
 test('si quien cobra es supervisor, devuelve y cancela directo, como el dueño, sin solicitud', async () => {
@@ -438,4 +465,186 @@ test('solo el dueño asigna el rol de supervisor; la solicitud a distancia sigue
   como(SUP);
   assert.equal((await pedir(`/api/solicitudes/${idDev}/resolver`, { aprobar: true }, 'POST')).status, 403);
   void ana;
+});
+
+/* ---------- la solicitud atada al ticket (revisión de #843) ---------- */
+
+test('mientras una devolución espera al dueño el ticket no cambia por otro camino: cupón, otra devolución, corrección de pago y cancelar, todos rechazados', async () => {
+  const { como, vender, linea, devolver, cupon, pedir, ana, stock, venta, devoluciones, solicitudes, db } = await montar();
+  const id = await vender(0);                                    // reciente: aun dentro de los 5 minutos
+  const l = await linea(id);
+  const idDev = crypto.randomUUID();
+  assert.equal((await devolver(id, l, { id: idDev, solicitar: true })).status, 202);
+  const antes = stock();
+
+  // La reproducción de la revisión: pedir 1 pieza, dar cupón de la misma y luego aprobar devolvía dos veces. Ahora el cupón se rechaza.
+  const conCupon = await cupon(id, l);
+  assert.equal(conCupon.status, 409);
+  assert.equal(conCupon.cuerpo.error, HAY_DEVOLUCION);
+  // Otra solicitud de dinero (otro id) del mismo ticket; con el PIN del dueño también.
+  const otra = await devolver(id, l, { solicitar: true });
+  assert.equal(otra.status, 409);
+  assert.equal(otra.cuerpo.error, HAY_DEVOLUCION);
+  assert.equal((await devolver(id, l, { aprobador: DUENO, pin: PIN_DUENO })).status, 409);
+  // Corregir la forma de pago (#831).
+  const correccion = await pedir(`/api/ventas/${id}/corregir-pago`, { id: crypto.randomUUID(), forma_pago: 'tarjeta', motivo: 'era tarjeta', caja: 'Caja 2' }, 'POST', ana);
+  assert.equal(correccion.status, 409, JSON.stringify(correccion.cuerpo));
+  assert.equal(correccion.cuerpo.error, HAY_DEVOLUCION);
+  assert.deepEqual((await pedir(`/api/ventas/${id}`, undefined, 'GET', ana)).cuerpo.corregible, []);
+  // Cancelar el ticket completo: la cajera dentro de los 5 minutos, y el dueño también.
+  const cancelar = await pedir(`/api/ventas/${id}/cancelar`, { motivo: 'error', caja: 'Caja 1' }, 'POST', ana);
+  assert.equal(cancelar.status, 409);
+  assert.equal(cancelar.cuerpo.error, HAY_DEVOLUCION);
+  como(DUENO);
+  assert.equal((await pedir(`/api/ventas/${id}/cancelar`, { motivo: 'error', caja: 'Caja 1' })).status, 409);
+
+  assert.equal(stock(), antes);
+  assert.deepEqual(venta(id), { devuelto: 0, dolarones_devueltos: 0, devuelto_cupon: 0, cancelada: 0 });
+  assert.equal(devoluciones().length, 0);
+  assert.equal(solicitudes().length, 1);
+  assert.equal(db.prepare('select forma_pago from ventas where id = ?').get(id)!.forma_pago, 'efectivo');
+
+  // Y el dueño aprueba lo pedido, una sola pieza.
+  const r = await pedir(`/api/solicitudes/${idDev}/resolver`, { aprobar: true });
+  assert.equal(r.status, 200, JSON.stringify(r.cuerpo));
+  assert.equal(stock(), antes + 1);
+  assert.equal(venta(id).devuelto, 25000);
+});
+
+test('si el ticket cambió de verdad entre pedir y aprobar (una carrera que las guardas no vieron) la aprobación se rechaza y nada se mueve', async () => {
+  const { como, db, vender, linea, devolver, stock, venta, devoluciones, solicitudes, pedir } = await montar();
+  for (const [nombre, cambiar] of [
+    // lo que hace un cupón de la misma línea metido entre la lectura y la solicitud: sube \`revision\` y devuelve la pieza
+    ['cupón', (id: string, l: number) => db.exec(`update ventas set revision = revision + 1, devuelto = 25000, devuelto_cupon = 25000 where id = '${id}'; update venta_lineas set cancelada_cantidad = 1 where id = ${l}`)],
+    // lo que hace una corrección de forma de pago: otra forma y otra revisión
+    ['corrección de pago', (id: string) => db.exec(`update ventas set forma_pago = 'tarjeta', efectivo = 0, revision = revision + 1 where id = '${id}'`)],
+  ] as [string, (id: string, l: number) => void][]) {
+    const id = await vender(VIEJA);
+    const l = await linea(id);
+    const idDev = crypto.randomUUID();
+    assert.equal((await devolver(id, l, { id: idDev, solicitar: true })).status, 202, nombre);
+    cambiar(id, l);
+    const antes = { stock: stock(), venta: venta(id), devoluciones: devoluciones().length };
+    como(DUENO);
+    const r = await pedir(`/api/solicitudes/${idDev}/resolver`, { aprobar: true });
+    assert.equal(r.status, 409, `${nombre}: ${JSON.stringify(r.cuerpo)}`);
+    assert.match(r.cuerpo.error, /El ticket cambió desde que se pidió la devolución: vuelve a pedirla\.|ya estaba cancelada/);
+    assert.equal(solicitudes().find((s) => s.id === idDev)!.estado, 'rechazada', nombre);
+    assert.deepEqual({ stock: stock(), venta: venta(id), devoluciones: devoluciones().length }, antes, nombre);
+    como(TIENDA);
+  }
+});
+
+test('el cajero retira su propia solicitud desde el ticket: queda rechazada, ya no frena nada y el dueño ya no puede aprobarla', async () => {
+  const { como, vender, linea, devolver, pedir, ana, solicitudes, stock, devoluciones } = await montar();
+  const id = await vender(VIEJA);
+  const l = await linea(id);
+  const idDev = crypto.randomUUID();
+  await devolver(id, l, { id: idDev, solicitar: true });
+  const detalle = (await pedir(`/api/ventas/${id}`, undefined, 'GET', ana)).cuerpo;
+  assert.equal(detalle.devolucion_pendiente.id, idDev);
+  assert.match(detalle.devolucion_pendiente.resumen, /1 × Ventilador por \$250\.00/);
+
+  // Otra cajera no la retira; ella sí.
+  como(TIENDA);
+  const beto = { 'x-cajero': (await pedir('/api/cajeros/entrar', { correo: BETO, pin: PIN_BETO })).cuerpo.token as string };
+  assert.equal((await pedir(`/api/ventas/${id}/retirar-solicitud`, { id: idDev }, 'POST', beto)).status, 403);
+  assert.equal(solicitudes()[0].estado, 'pendiente');
+  const r = await pedir(`/api/ventas/${id}/retirar-solicitud`, { id: idDev }, 'POST', ana);
+  assert.equal(r.status, 200, JSON.stringify(r.cuerpo));
+  assert.equal(solicitudes()[0].estado, 'rechazada');
+  assert.equal(solicitudes()[0].resuelto_por, ANA);
+  assert.equal((await pedir(`/api/ventas/${id}`, undefined, 'GET', ana)).cuerpo.devolucion_pendiente, null);
+  assert.equal((await pedir(`/api/ventas/${id}/retirar-solicitud`, { id: idDev }, 'POST', ana)).status, 409);   // ya no hay nada que retirar
+
+  // El dueño ya no puede aprobarla (la aprobación la deja intacta) y el ticket vuelve a aceptar otra solicitud.
+  como(DUENO);
+  assert.equal((await pedir(`/api/solicitudes/${idDev}/resolver`, { aprobar: true })).status, 409);
+  assert.equal(devoluciones().length, 0);
+  como(TIENDA);
+  assert.equal((await devolver(id, l, { solicitar: true })).status, 202);
+  assert.equal(stock(), 48);
+});
+
+test('aprobar después del corte de su caja se rechaza (Pasó el corte) y queda rechazada', async () => {
+  const { como, vender, linea, devolver, pedir, ana, stock, devoluciones, solicitudes } = await montar();
+  const id = await vender(VIEJA);
+  const idDev = crypto.randomUUID();
+  await devolver(id, await linea(id), { id: idDev, solicitar: true });
+  await new Promise((resolve) => setTimeout(resolve, 5));
+  const corte = await pedir('/api/cortes', { id: crypto.randomUUID(), caja: 'Caja 2', efectivo_contado: 100000, tarjeta_terminal: 0 }, 'POST', ana);
+  assert.equal(corte.status, 201, JSON.stringify(corte.cuerpo));
+  const antes = stock();
+  como(DUENO);
+  const r = await pedir(`/api/solicitudes/${idDev}/resolver`, { aprobar: true });
+  assert.equal(r.status, 409);
+  assert.equal(r.cuerpo.error, 'Pasó el corte: vuelve a pedirla.');
+  assert.equal(solicitudes()[0].estado, 'rechazada');
+  assert.equal(JSON.parse(solicitudes()[0].datos).rechazo, 'Pasó el corte: vuelve a pedirla.');
+  assert.equal(devoluciones().length, 0);
+  assert.equal(stock(), antes);
+});
+
+test('aprobar al día siguiente de la tienda se rechaza (Pasó el día) y queda rechazada', async () => {
+  const { como, db, vender, linea, devolver, pedir, stock, devoluciones, solicitudes } = await montar();
+  const id = await vender(VIEJA);
+  const idDev = crypto.randomUUID();
+  await devolver(id, await linea(id), { id: idDev, solicitar: true });
+  db.prepare('update solicitudes set creado_en = ? where id = ?').run(new Date(Date.now() - 2 * 86_400_000).toISOString(), idDev);
+  const antes = stock();
+  como(DUENO);
+  const r = await pedir(`/api/solicitudes/${idDev}/resolver`, { aprobar: true });
+  assert.equal(r.status, 409);
+  assert.match(r.cuerpo.error, /Pasó el día de la tienda: vuelve a pedirla\./);
+  assert.equal(solicitudes()[0].estado, 'rechazada');
+  assert.equal(devoluciones().length, 0);
+  assert.equal(stock(), antes);
+});
+
+test('la caja pedida se valida antes de crear la solicitud: una caja de otra tienda es 400 (devolver y cancelar), y la de la cuenta manda', async () => {
+  const { como, db, vender, linea, devolver, pedir, ana, solicitudes } = await montar();
+  como(TIENDA);
+  const beto = { 'x-cajero': (await pedir('/api/cajeros/entrar', { correo: BETO, pin: PIN_BETO })).cuerpo.token as string };
+  const id = await vender(VIEJA);
+  const l = await linea(id);
+  // Beto no tiene caja asignada: la que pide debe ser de esta tienda.
+  const ajena = await devolver(id, l, { solicitar: true, caja: 'Salk 1' }, beto);
+  assert.equal(ajena.status, 400, JSON.stringify(ajena.cuerpo));
+  const cancelarAjena = await pedir(`/api/ventas/${id}/cancelar`, { motivo: 'x', caja: 'Salk 1', solicitar: true }, 'POST', beto);
+  assert.equal(cancelarAjena.status, 400, JSON.stringify(cancelarAjena.cuerpo));
+  assert.equal(solicitudes().length, 0);
+  // Ana tiene la Caja 2 asignada: pedir «Salk 1» no manda la pieza a Salk; se guarda su caja y su tienda.
+  const mandada = await devolver(id, l, { solicitar: true, caja: 'Salk 1' }, ana);
+  assert.equal(mandada.status, 202, JSON.stringify(mandada.cuerpo));
+  const datos = JSON.parse(solicitudes()[0].datos);
+  assert.deepEqual({ caja: datos.caja, tienda: datos.tienda }, { caja: 'Caja 2', tienda: 'soledad' });
+  como(DUENO);
+  assert.equal((await pedir(`/api/solicitudes/${solicitudes()[0].id}/resolver`, { aprobar: true })).status, 200);
+  assert.equal((db.prepare('select tienda, caja from devoluciones').get() as { tienda: string; caja: string }).tienda, 'soledad');
+});
+
+test('la caja recupera sus solicitudes tras recargar: pendiente, aprobada con su devolución (importe) y una aprobada SIN devolución no cuenta como hecha', async () => {
+  const { como, db, vender, linea, devolver, pedir, ana, solicitudes } = await montar();
+  const a = await vender(VIEJA), b = await vender(VIEJA);
+  const idA = crypto.randomUUID(), idB = crypto.randomUUID();
+  await devolver(a, await linea(a), { id: idA, solicitar: true });
+  await devolver(b, await linea(b), { id: idB, solicitar: true });
+  const listar = async (encabezados: Record<string, string> = ana) => (await pedir('/api/ventas/devoluciones-pedidas?caja=Caja%202', undefined, 'GET', encabezados)).cuerpo as
+    { id: string; estado: string; venta_id: string; hecha: boolean; importe: number | null; resumen: string }[];
+
+  assert.deepEqual((await listar()).map((x) => [x.id, x.estado, x.hecha]), [[idA, 'pendiente', false], [idB, 'pendiente', false]]);
+  como(DUENO);
+  assert.equal((await pedir(`/api/solicitudes/${idA}/resolver`, { aprobar: true })).status, 200);
+  // B queda «aprobada» sin su devolución: lo que deja un Worker que muere entre reclamar y escribir.
+  db.prepare(`update solicitudes set estado = 'aprobada' where id = ?`).run(idB);
+  como(TIENDA);
+  const lista = await listar();                                  // otra sesión de la misma caja (la página recién recargada)
+  const hecha = lista.find((x) => x.id === idA)!;
+  assert.deepEqual({ estado: hecha.estado, hecha: hecha.hecha, importe: hecha.importe, venta: hecha.venta_id }, { estado: 'aprobada', hecha: true, importe: 25000, venta: a });
+  assert.equal(lista.find((x) => x.id === idB)!.hecha, false);
+  assert.match(hecha.resumen, /Ventilador/);
+  // La lista de otra caja y de otra cajera no trae las de esta.
+  assert.equal(solicitudes().length, 2);
+  const beto = { 'x-cajero': (await pedir('/api/cajeros/entrar', { correo: BETO, pin: PIN_BETO })).cuerpo.token as string };
+  assert.deepEqual((await pedir('/api/ventas/devoluciones-pedidas?caja=Caja%203', undefined, 'GET', beto)).cuerpo, []);
 });

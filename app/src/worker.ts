@@ -16,7 +16,7 @@ import { procesarColaRopa, rutaRopaAdmin } from './ropa-ia.ts';
 import { calcularPrecio, ajustarManual, esDestinoBanda, prefijoParaFamilia, MONTOS_BANDA, type Destino } from './precio.ts';
 import { efectivoAlcanza, promoInauguracion, CLAVE_DESDE, claveRastreoDe, precioBuenFin, ENVIO_ID } from '../public/venta.js';
 import { semanaIngreso } from '../public/semana.js';
-import { detalleVenta, cancelarPieza, devolverEnCupon, reimprimirCupon } from './devoluciones.ts';
+import { detalleVenta, cancelarPieza, devolverEnCupon, reimprimirCupon, retirarSolicitud, listarSolicitudes } from './devoluciones.ts';
 import { cancelarVenta, listarCancelaciones, estadoSolicitud } from './cancelaciones.ts';
 import { corregirFormaPago } from './correcciones-pago.ts';
 import { BASES, AVISO } from './legal.ts';
@@ -2985,6 +2985,11 @@ export default {
         return await conAvisoReverso(await cancelarPieza(cancelacionPieza[1], Number(cancelacionPieza[2]), request, env, correo, tienda, ctx), cancelacionPieza[1],
           'Devolución de una pieza', Number(cancelacionPieza[2]));
       }
+      // #837: las devoluciones de dinero que esta caja pidio al dueño (pendientes y de las ultimas 24 h) y retirar la propia; antes de /api/ventas/:id.
+      if (pathname === '/api/ventas/devoluciones-pedidas' && request.method === 'GET')
+        return await listarSolicitudes(env, correo, await cajaDe(env, correo, url.searchParams.get('caja'), tienda).catch(() => ''));
+      const retiro = pathname.match(/^\/api\/ventas\/([^/]+)\/retirar-solicitud$/);
+      if (retiro && request.method === 'POST') return await retirarSolicitud(retiro[1], request, env, correo);
       // Cupones en lugar de devolver dinero (Issue #330).
       const cupon = pathname.match(/^\/api\/ventas\/([^/]+)\/cupon(?:\/([^/]+))?$/);
       if (cupon && request.method === 'POST') {

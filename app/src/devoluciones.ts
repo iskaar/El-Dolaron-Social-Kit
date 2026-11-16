@@ -19,7 +19,8 @@ import { saldo } from './dolarones.ts';
 import { sentenciasDeReverso } from './reversos.ts';
 import { TICKET_CON_ANTICIPO } from './pedidos.ts';
 import { datosCorreccion } from './correcciones-pago.ts';
-import { insertarSolicitud, aprobadorConPin, aprobadoresDeDinero } from './cancelaciones.ts';
+import { insertarSolicitud, aprobadorConPin, aprobadoresDeDinero, devolucionPendiente, HAY_DEVOLUCION } from './cancelaciones.ts';
+import { delDia, hoyTienda } from './reportes.ts';
 import { leerUsuario, apruebaDinero, TIENDA_CENTRAL, tiendaDeCaja } from './cuentas.ts';
 import { avisarDueno } from './avisos.ts';
 
@@ -94,7 +95,8 @@ export async function detalleVenta(id: string, env: Env, paraImprimir = false, s
   const folio = venta.pedido_id
     ? (await env.DB.prepare('select folio from pedidos where id = ?').bind(venta.pedido_id).first<{ folio:number }>())?.folio ?? null
     : null;
-  if (!paraImprimir) return json({ ...venta, cliente_id:undefined, pedido_id:undefined, pedido_folio:folio, socio, lineas, devoluciones, ...(await datosCorreccion(env, id, sesion)) });
+  if (!paraImprimir) return json({ ...venta, cliente_id:undefined, pedido_id:undefined, pedido_folio:folio, socio, lineas, devoluciones,
+    devolucion_pendiente: await devolucionPendiente(env, id), ...(await datosCorreccion(env, id, sesion)) });
   const ganados = socio ? await env.DB.prepare(`select coalesce(sum(importe), 0) as importe
     from dolarones_movimientos where venta_id = ? and tipo = 'compra'`).bind(id).first<{ importe:number }>() : null;
   const bono = socio ? await env.DB.prepare(`select coalesce(sum(importe), 0) as importe
@@ -239,6 +241,9 @@ export async function cancelarPieza(
   if (pedida) return pedida.estado === 'pendiente' ? json({ pendiente: true, solicitud_id: id }, 202)
     : json({ error: `Esa solicitud ya estaba ${pedida.estado}: abre el ticket otra vez.` }, 409);
 
+  // Mientras otra devolución de dinero espera al dueño el ticket no se toca por otro camino: la solicitud quedó atada a cómo estaba.
+  if (await devolucionPendiente(env, ventaId)) return json({ error: HAY_DEVOLUCION }, 409);
+
   const pedido: PedidoPieza = { id, cantidad, motivo, devolverEn: cuerpo.devolver_en, caja: cuerpo.caja };
   const prep = await prepararPieza(env, ventaId, lineaId, pedido);
   if ('res' in prep) return responder(prep.res);
@@ -249,12 +254,15 @@ export async function cancelarPieza(
   }
 
   const nombre = usuario?.nombre ?? '';
-  const datos = { venta_id: ventaId, linea_id: lineaId, cantidad, devolver_en: prep.devolverEn,
-    caja: String(cuerpo.caja ?? ''), dinero: prep.reparto.dinero };   // al aprobarse a distancia la tienda sale de la caja (nombres únicos entre tiendas)
+  // La caja y la tienda se validan aquí (una caja de otra tienda es 400) y es lo que se guarda: al aprobarse la pieza entra a esa tienda.
+  // `revision`, `devolver_en` y `dinero` atan la solicitud a como está el ticket ahora: si cambia, la aprobación se rechaza (resolverDevolucion).
+  const caja = await cajaDe(env, correo, cuerpo.caja, tienda);
+  const datos = { venta_id: ventaId, linea_id: lineaId, cantidad, devolver_en: prep.devolverEn, caja, tienda, dinero: prep.reparto.dinero,
+    revision: prep.venta.revision };
 
   // Aprobada en la caja con el PIN del dueno: se devuelve y se deja el rastro en el mismo batch.
   if (cuerpo.aprobador) {
-    const aprobo = await aprobadorConPin(env, correo, cuerpo.aprobador, cuerpo.pin);
+    const aprobo = await aprobadorConPin(env, correo, cuerpo.aprobador, cuerpo.pin, caja);
     if ('error' in aprobo) return json({ error: aprobo.error }, aprobo.status);
     return responder(await escribirPieza(env, ventaId, pedido, prep, correo, tienda, (ahora) => [
       insertarSolicitud(env, id, correo, nombre, motivo, { ...datos, via: 'pin' }, ahora, aprobo.por, 'devolucion'),
@@ -290,10 +298,12 @@ export async function cancelarPieza(
  * resolverCancelacion: se reclama la solicitud (solo gana uno si dos duenos la resuelven juntos), luego se escribe.
  * Una sola vez: el id de la devolucion es el id de la solicitud y `devoluciones.id` es unico, asi que un reintento
  * (o un dueno que la aprueba dos veces) no devuelve dos veces. Piezas, cantidad y forma salen de la solicitud, no de quien aprueba.
+ * La solicitud solo vale para el ticket como estaba al pedirla (misma `revision`, mismo monto y forma), el mismo dia de la tienda y
+ * mientras no cierre un corte de su caja; si no, la aprobacion responde 409 y la deja rechazada.
  */
 export async function resolverDevolucion(env: Env, id: string, aprobar: boolean, dueno: string): Promise<Response> {
-  const solicitud = await env.DB.prepare('select correo, justificacion, datos from solicitudes where id = ?')
-    .bind(id).first<{ correo: string; justificacion: string; datos: string }>();
+  const solicitud = await env.DB.prepare('select correo, justificacion, datos, creado_en from solicitudes where id = ?')
+    .bind(id).first<{ correo: string; justificacion: string; datos: string; creado_en: string }>();
   if (!solicitud) return json({ error: 'La solicitud no existe.' }, 404);
   const marcar = (estado: string) => env.DB.prepare(
     `update solicitudes set estado = ?, resuelto_en = ?, resuelto_por = ? where id = ? and estado = 'pendiente'`,
@@ -304,21 +314,76 @@ export async function resolverDevolucion(env: Env, id: string, aprobar: boolean,
     return json({ id, estado: 'rechazada' });
   }
   // ponytail: entre reclamar y escribir no hay transaccion (igual que resolverCancelacion); si el Worker muere en ese
-  // hueco queda aprobada sin devolver y se ve en /cuentas como aprobada. Si la escritura falla (409), la solicitud vuelve a pendiente.
+  // hueco queda aprobada sin devolver y se ve en /cuentas como aprobada (la caja no la da por hecha sin su devolucion: listarSolicitudes).
   if (!(await marcar('aprobada').run()).meta.changes) return yaResuelta();
-  const datos = JSON.parse(solicitud.datos) as { venta_id: string; linea_id: number; cantidad: number; devolver_en: string; caja?: string };
-  const pedido: PedidoPieza = { id, cantidad: datos.cantidad, motivo: solicitud.justificacion, devolverEn: datos.devolver_en, caja: datos.caja };
-  const prep = await prepararPieza(env, datos.venta_id, datos.linea_id, pedido);
-  // La pieza entra a la tienda de la terminal que pidio la devolucion: su caja lo dice (los nombres de caja son unicos entre tiendas).
-  const r = 'res' in prep ? prep.res : await escribirPieza(env, datos.venta_id, pedido, prep, solicitud.correo, tiendaDeCaja(datos.caja));
-  if (r.status >= 400) {
+  // Un 4xx al aprobar es definitivo (el ticket ya no es el que se pidio): queda RECHAZADA con la razon, no pendiente, para que deje de
+  // frenar el ticket y la venta «en la mano»; la caja la ve rechazada y la vuelve a pedir. Una excepcion (D1 caido) si la regresa a pendiente.
+  const rechazar = async (r: Resultado): Promise<Response> => {
     await env.DB.prepare(
-      `update solicitudes set estado = 'pendiente', resuelto_en = null, resuelto_por = null
-       where id = ? and estado = 'aprobada' and resuelto_por = ?`,
-    ).bind(id, dueno).run();
+      `update solicitudes set estado = 'rechazada', datos = json_set(datos, '$.rechazo', ?) where id = ? and estado = 'aprobada' and resuelto_por = ?`,
+    ).bind(String(r.cuerpo.error ?? 'No se pudo devolver.'), id, dueno).run();
     return responder(r);
+  };
+  try {
+    const datos = JSON.parse(solicitud.datos) as { venta_id: string; linea_id: number; cantidad: number; devolver_en: string; caja?: string; tienda?: string; dinero?: number; revision?: number };
+    // Solo vale el mismo dia de la tienda y mientras no se haya cerrado un corte de esa caja: el dinero de un corte ya cerrado no se mueve despues.
+    if (solicitud.creado_en < delDia(hoyTienda())[0]) return await rechazar({ status: 409, cuerpo: { error: 'Pasó el día de la tienda: vuelve a pedirla.' } });
+    if (datos.caja && await env.DB.prepare('select 1 as x from cortes where caja = ? and hasta > ? limit 1').bind(datos.caja, solicitud.creado_en).first())
+      return await rechazar({ status: 409, cuerpo: { error: 'Pasó el corte: vuelve a pedirla.' } });
+    const pedido: PedidoPieza = { id, cantidad: datos.cantidad, motivo: solicitud.justificacion, devolverEn: datos.devolver_en, caja: datos.caja };
+    const prep = await prepararPieza(env, datos.venta_id, datos.linea_id, pedido);
+    if ('res' in prep) return await rechazar(prep.res);
+    // El ticket tiene que seguir como estaba al pedirla: otra devolucion, un cupon, una correccion de pago o una cancelacion suben `revision`.
+    if (prep.venta.revision !== datos.revision || prep.reparto.dinero !== datos.dinero || prep.devolverEn !== datos.devolver_en)
+      return await rechazar({ status: 409, cuerpo: { error: 'El ticket cambió desde que se pidió la devolución: vuelve a pedirla.' } });
+    // La pieza entra a la tienda de la terminal que pidio la devolucion (la guardada; las anteriores a #837 la sacan de su caja).
+    const r = await escribirPieza(env, datos.venta_id, pedido, prep, solicitud.correo, datos.tienda ?? tiendaDeCaja(datos.caja));
+    if (r.status >= 400) return await rechazar(r);
+    return json({ ...r.cuerpo, id, solicitud_id: id, estado: 'aprobada', linea_id: datos.linea_id });
+  } catch (error) {
+    await env.DB.prepare(
+      `update solicitudes set estado = 'pendiente', resuelto_en = null, resuelto_por = null where id = ? and estado = 'aprobada' and resuelto_por = ?`,
+    ).bind(id, dueno).run();
+    throw error;
   }
-  return json({ ...r.cuerpo, id, solicitud_id: id, estado: 'aprobada', linea_id: datos.linea_id });
+}
+
+/**
+ * El cajero retira su solicitud pendiente desde la ventana del ticket (#837): queda rechazada, sin mover nada. La retira quien la pidio, o
+ * quien puede aprobar. Compite con la aprobacion por el mismo `update ... where estado = 'pendiente'`: gana una.
+ */
+export async function retirarSolicitud(ventaId: string, request: Request, env: Env, correo: string): Promise<Response> {
+  const cuerpo = (await request.json().catch(() => ({}))) as { id?: unknown };
+  const id = String(cuerpo.id ?? '');
+  if (!UUID.test(ventaId) || !UUID.test(id)) return json({ error: 'Identificador invalido.' }, 400);
+  const fila = await env.DB.prepare(`select correo, estado, json_extract(datos, '$.venta_id') as venta_id from solicitudes where id = ? and tipo = 'devolucion'`)
+    .bind(id).first<{ correo: string; estado: string; venta_id: string }>();
+  if (!fila || fila.venta_id !== ventaId) return json({ error: 'La solicitud no existe.' }, 404);
+  const usuario = await leerUsuario(env, correo);
+  if (fila.correo !== correo && !(usuario && apruebaDinero(usuario.roles))) return json({ error: 'Solo quien la pidió la puede retirar.' }, 403);
+  const gano = await env.DB.prepare(
+    `update solicitudes set estado = 'rechazada', resuelto_en = ?, resuelto_por = ?, datos = json_set(datos, '$.rechazo', 'La retiró quien la pidió.')
+     where id = ? and estado = 'pendiente'`,
+  ).bind(new Date().toISOString(), correo, id).run();
+  if (!gano.meta.changes) return json({ error: `Ya estaba ${fila.estado}.`, estado: fila.estado }, 409);
+  return json({ id, estado: 'rechazada' });
+}
+
+/**
+ * Las solicitudes de devolucion de dinero de esta caja (pedidas por quien tiene la sesion o desde esta caja): las pendientes y las resueltas
+ * en las ultimas 24 horas. La caja la pregunta al cargar y mientras espera, asi no depende de una ventana abierta ni de la memoria de la pagina.
+ * `hecha`: existe la devolucion con el mismo id; una `aprobada` sin ella NO esta hecha.
+ */
+export async function listarSolicitudes(env: Env, correo: string, caja: string): Promise<Response> {
+  const desde = new Date(Date.now() - 86_400_000).toISOString();
+  const { results } = await env.DB.prepare(
+    `select s.id, s.estado, s.creado_en, s.resuelto_en, json_extract(s.datos, '$.venta_id') as venta_id, json_extract(s.datos, '$.resumen') as resumen,
+       json_extract(s.datos, '$.rechazo') as rechazo, d.id is not null as hecha, d.importe
+     from solicitudes s left join devoluciones d on d.id = s.id
+     where s.tipo = 'devolucion' and (s.correo = ?1 or (?2 != '' and json_extract(s.datos, '$.caja') = ?2))
+       and (s.estado = 'pendiente' or s.creado_en >= ?3) order by s.creado_en`,
+  ).bind(correo, caja, desde).all();
+  return json(results.map((f) => ({ ...f, hecha: !!f.hecha })));
 }
 
 const piezasQueQuedan = async (env: Env, ventaId: string) => (await env.DB.prepare(
@@ -351,6 +416,7 @@ export async function devolverEnCupon(ventaId: string, request: Request, env: En
   if (venta.dolarones > 0 && !venta.cliente_id) {
     return json({ error: 'Este ticket se pagó con un vale: cancélalo completo, en dinero.' }, 409);
   }
+  if (await devolucionPendiente(env, ventaId)) return json({ error: HAY_DEVOLUCION }, 409);
 
   const { results: todas } = await env.DB.prepare(
     'select id, producto_id, precio, cantidad, cancelada_cantidad from venta_lineas where venta_id = ? order by id',

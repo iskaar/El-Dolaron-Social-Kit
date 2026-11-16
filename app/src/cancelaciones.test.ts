@@ -85,7 +85,8 @@ test('PIN del dueno equivocado: no cancela y cuenta el fallo; el de Ana o de otr
   const mal = await cancelar(id, { aprobador: DUENO, pin: '000000' });
   assert.equal(mal.status, 403);
   assert.equal(venta(id).cancelada, 0);
-  assert.equal((db.prepare('select pin_fallos from usuarios where correo = ?').get(DUENO) as any).pin_fallos, 1);
+  assert.equal((db.prepare('select fallos from intentos_aprobacion where correo = ?').get(DUENO) as any).fallos, 1);   // aparte de los del acceso (#837)
+  assert.equal((db.prepare('select pin_fallos from usuarios where correo = ?').get(DUENO) as any).pin_fallos, 0);
 
   // Ana (cajero) como aprobador, con su propio PIN correcto: no es dueno.
   const propio = await cancelar(id, { aprobador: ANA, pin: PIN_ANA });
@@ -122,7 +123,7 @@ test('PIN correcto del dueno: cancela a nombre de Ana y deja la solicitud aproba
   assert.equal(s.justificacion, 'error de cobro');
   assert.equal(s.resuelto_por, DUENO);
   assert.ok(s.resuelto_en);
-  assert.deepEqual(JSON.parse(s.datos), { venta_id: id, caja: 'Caja 1', via: 'pin' });
+  assert.deepEqual(JSON.parse(s.datos), { venta_id: id, caja: 'Caja 2', tienda: 'soledad', via: 'pin' });   // la caja de Ana y la tienda, validadas (#837)
 });
 
 test('solicitar: 202 pendiente, una segunda peticion devuelve la misma y nada se cancela', async () => {
@@ -140,7 +141,7 @@ test('solicitar: 202 pendiente, una segunda peticion devuelve la misma y nada se
   assert.equal(resto.length, 0);
   assert.equal(s.estado, 'pendiente');
   assert.equal(s.correo, ANA);
-  assert.deepEqual(JSON.parse(s.datos), { venta_id: id, caja: 'Caja 1', via: 'remoto' });
+  assert.deepEqual(JSON.parse(s.datos), { venta_id: id, caja: 'Caja 2', tienda: 'soledad', via: 'remoto' });
 
   // La caja puede preguntar como va; otro cajero no.
   const estado = await pedir(`/api/solicitudes/${r.cuerpo.solicitud_id}`, undefined, 'GET', ana);

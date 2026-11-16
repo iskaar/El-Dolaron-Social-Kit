@@ -2305,6 +2305,7 @@ async function abrirTicket(id, resaltar = encontradas.get(id) ?? []) {
     $('ticket-contenido').innerHTML = pintarDetalle(cuerpo, { editable: true, resaltar });
     if (!cuerpo.cancelada) $('ticket-contenido').insertAdjacentHTML('beforeend',
       `<p class="nota">Venta: ${escapar(cuerpo.id)}</p><button type="button" data-imprimir-ticket>Reimprimir ticket</button>`);
+    revisarDevoluciones();   // #837: si hay una devolución de dinero resuelta que esta caja no ha mostrado, aparece ahora
   } catch (error) {
     $('ticket-contenido').innerHTML = `<p class="nota" style="color:#D72B32">${escapar(error.message || 'Sin red: para ver el ticket hace falta conexión.')}</p>`;
   }
@@ -2400,6 +2401,24 @@ $('ticket-contenido').addEventListener('click', async (e) => {
   }
   if (d.volver !== undefined) { cerrarFormularios(); return; }
 
+  // Retirar la solicitud de devolución de dinero que esta caja pidió (#837): queda rechazada y el ticket vuelve a aceptar cambios.
+  if (d.retirarSolicitud) {
+    boton.disabled = true;
+    const ticketId = ticketAbierto.id;
+    try {
+      const r = await fetch(`/api/ventas/${ticketId}/retirar-solicitud`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id: d.retirarSolicitud }) });
+      const cuerpo = await r.json().catch(() => ({}));
+      await abrirTicket(ticketId);
+      $('ticket-aviso').textContent = r.ok ? 'Solicitud retirada: no se devolvió nada.' : (cuerpo.error ?? 'No se pudo retirar la solicitud.');
+      $('ticket-aviso').style.color = r.ok ? '#1f7a4d' : '#D72B32';
+    } catch {
+      boton.disabled = false;
+      $('ticket-aviso').textContent = 'Sin red: no se pudo retirar la solicitud. Intenta otra vez.';
+      $('ticket-aviso').style.color = '#D72B32';
+    }
+    return;
+  }
+
   // Corregir la forma de pago (#831): solo antes del corte; el servidor es quien dice si todavia se puede.
   if (d.corregirPago !== undefined) {
     cerrarFormularios();
@@ -2493,7 +2512,8 @@ $('ticket-contenido').addEventListener('click', async (e) => {
     if (r.status === 202) {
       panel.innerHTML = `<p class="esperando">Esperando aprobación del dueño…</p>
         <p class="nota">Puedes cerrar esta ventana: avisaremos aquí cuando responda.</p>`;
-      esperarAprobacion(cuerpo.solicitud_id, ticketAbierto.id, !!pieza);
+      if (pieza) revisarDevoluciones();   // la solicitud de una pieza se vigila con lo que dice el servidor (sobrevive a recargar y a varias a la vez)
+      else esperarAprobacion(cuerpo.solicitud_id, ticketAbierto.id);
       return;
     }
     if (!r.ok) {
@@ -2668,14 +2688,14 @@ function panelAprobacion({ error, duenos = [] }, conVolver = false) {
 }
 
 /** Pregunta cada 5 s si el dueño ya respondió; la caja puede seguir cobrando mientras tanto. */
-function esperarAprobacion(solicitudId, ticketId, pieza = false) {
+function esperarAprobacion(solicitudId, ticketId) {
   clearInterval(esperando?.timer);
-  esperando = { solicitudId, ticketId, pieza, consultando: false, timer: setInterval(consultarAprobacion, 5000) };
+  esperando = { solicitudId, ticketId, consultando: false, timer: setInterval(consultarAprobacion, 5000) };
 }
 
 async function consultarAprobacion() {
   if (!esperando || esperando.consultando) return;
-  const { solicitudId, ticketId, pieza } = esperando;
+  const { solicitudId, ticketId } = esperando;
   esperando.consultando = true;
   let estado;
   try {
@@ -2690,28 +2710,92 @@ async function consultarAprobacion() {
   clearInterval(esperando.timer);
   esperando = null;
   const aprobada = estado === 'aprobada';
-  const texto = pieza
-    ? (aprobada ? 'El dueño aprobó devolver el dinero de la pieza.'
-      : estado === 'rechazada' ? 'El dueño rechazó devolver el dinero: no se devolvió nada. Ofrece el cupón.'
-      : 'No se encontró la solicitud de devolución.')
-    : (aprobada ? 'El dueño aprobó la cancelación del ticket.'
-      : estado === 'rechazada' ? 'El dueño rechazó la cancelación: el ticket sigue vigente.'
-      : 'No se encontró la solicitud de cancelación.');
+  const texto = aprobada ? 'El dueño aprobó la cancelación del ticket.'
+    : estado === 'rechazada' ? 'El dueño rechazó la cancelación: el ticket sigue vigente.'
+    : 'No se encontró la solicitud de cancelación.';
   const abierto = $('dialogo-ticket').open && ticketAbierto?.id === ticketId;
   if (abierto) {
     await abrirTicket(ticketId);
-    // La devolución aprobada se llama igual que su solicitud (mismo id): de ahí sale lo que se devuelve y su comprobante.
-    const i = pieza ? (ticketAbierto?.devoluciones ?? []).findIndex((x) => x.id === solicitudId) : -1;
-    $('ticket-aviso').textContent = !aprobada ? texto
-      : pieza ? `${texto} Devuelve ${pesos(i >= 0 ? ticketAbierto.devoluciones[i].importe : 0)} y regresa la pieza al anaquel.`
-      : `${texto} Devuelve ${pesos(comprobanteCancelacion(ticketAbierto).dinero)} y regresa las piezas al anaquel.`;
+    $('ticket-aviso').textContent = aprobada
+      ? `${texto} Devuelve ${pesos(comprobanteCancelacion(ticketAbierto).dinero)} y regresa las piezas al anaquel.` : texto;
     $('ticket-aviso').style.color = aprobada ? '#1f7a4d' : '#D72B32';
-    if (aprobada && pieza && i >= 0) await imprimirComprobante(comprobanteDevolucion(ticketAbierto, i));
-    else if (aprobada && ticketAbierto?.cancelada) await imprimirComprobante(comprobanteCancelacion(ticketAbierto));
+    if (aprobada && ticketAbierto?.cancelada) await imprimirComprobante(comprobanteCancelacion(ticketAbierto));
   } else {
     $('aviso').textContent = `${texto} (ticket ${ticketId.slice(0, 8)})`;
   }
   if (aprobada) { await cargarTickets(); await actualizarCorte(); await cargarCatalogo(); }
+}
+
+/* ---------- devoluciones de dinero esperando al dueño (#837) ---------- */
+// La caja le pregunta al SERVIDOR por las solicitudes de esta caja (pendientes y de las ultimas 24 h), no recuerda en memoria: sobrevive a recargar la
+// pagina y a mas de una solicitud a la vez. Cada una resuelta se muestra y, si se aprobo, se imprime su comprobante UNA vez: lo ya mostrado
+// queda en localStorage (si no se puede, en memoria; tras una recarga sin eso solo avisa y no reimprime lo que resolvio hace mas de 30 minutos).
+// Una «aprobada» sin su devolucion (el servidor cayo entre reclamar y escribir) NO se da por hecha.
+let vigilanteDevoluciones = null;
+let revisandoDevoluciones = false;
+const mostradasEnMemoria = new Set();
+const leerMostradas = () => {
+  try { for (const id of JSON.parse(localStorage.getItem('devoluciones-mostradas') ?? '[]')) mostradasEnMemoria.add(id); } catch { /* sin almacenamiento: queda la memoria */ }
+  return mostradasEnMemoria;
+};
+const guardarMostrada = (id) => {
+  mostradasEnMemoria.add(id);
+  try { localStorage.setItem('devoluciones-mostradas', JSON.stringify([...mostradasEnMemoria].slice(-200))); } catch { /* idem */ }
+};
+
+async function mostrarSolicitudResuelta(s) {
+  const reciente = Date.now() - Date.parse(s.resuelto_en ?? s.creado_en) < 30 * 60_000;
+  const abierto = $('dialogo-ticket').open && ticketAbierto?.id === s.venta_id;
+  let texto;
+  let color = '#D72B32';
+  if (s.estado === 'aprobada') {
+    // La devolución sale del ticket: se busca la que se llama igual que la solicitud (mismo id) y de ahí el importe y el comprobante.
+    let ticket = null;
+    try { const r = await fetch(`/api/ventas/${s.venta_id}`); if (r.ok) ticket = await r.json(); } catch { return false; }   // sin red: se intenta de nuevo
+    const i = ticket ? ticket.devoluciones.findIndex((x) => x.id === s.id) : -1;
+    if (i < 0) return true;   // aprobada sin devolución: no está hecha, no se imprime nada
+    texto = `El dueño aprobó devolver el dinero: devuelve ${pesos(ticket.devoluciones[i].importe)} (${s.resumen ?? 'la pieza'}) y regresa la pieza al anaquel.`;
+    color = '#1f7a4d';
+    if (reciente && impresoraLista()) {
+      const ok = await imprimirDevolucion(comprobanteDevolucion(ticket, i));
+      texto += ok ? ' Comprobante impreso: que lo firme el cliente y guárdalo con el corte.' : ` No se imprimió el comprobante (${errorImpresora() || 'impresora no conectada'}): ábrelo en el ticket con «Imprimir comprobante».`;
+      pintarImpresora();
+    } else {
+      texto += ' El comprobante se imprime desde el ticket con «Imprimir comprobante».';
+    }
+    await cargarTickets(); await actualizarCorte(); await cargarCatalogo();
+  } else {
+    texto = s.rechazo ? `No se devolvió nada (${s.resumen ?? 'la pieza'}): ${s.rechazo}` : `El dueño rechazó devolver el dinero (${s.resumen ?? 'la pieza'}): no se devolvió nada. Ofrece el cupón.`;
+  }
+  if (abierto) {
+    await abrirTicket(s.venta_id);
+    $('ticket-aviso').textContent = texto;
+    $('ticket-aviso').style.color = color;
+  } else {
+    $('aviso').textContent = `${texto} (ticket ${String(s.venta_id).slice(0, 8)})`;
+  }
+  return true;
+}
+
+async function revisarDevoluciones() {
+  if (revisandoDevoluciones) return;
+  revisandoDevoluciones = true;
+  try {
+    let lista;
+    try {
+      const r = await fetch(`/api/ventas/devoluciones-pedidas?caja=${encodeURIComponent(cajaActual())}`);
+      if (!r.ok) return;
+      lista = await r.json();
+    } catch { return; }   // sin red: se vuelve a preguntar
+    const mostradas = leerMostradas();
+    for (const s of lista) {
+      if (s.estado === 'pendiente' || mostradas.has(s.id)) continue;
+      if (await mostrarSolicitudResuelta(s)) guardarMostrada(s.id);
+    }
+    const hayPendientes = lista.some((s) => s.estado === 'pendiente');
+    if (hayPendientes && !vigilanteDevoluciones) vigilanteDevoluciones = setInterval(revisarDevoluciones, 5000);
+    if (!hayPendientes && vigilanteDevoluciones) { clearInterval(vigilanteDevoluciones); vigilanteDevoluciones = null; }
+  } finally { revisandoDevoluciones = false; }
 }
 
 /** Hoja de la devolucion para que el cliente firme; se guarda con el corte. */
@@ -3334,6 +3418,7 @@ await pintarResultadosVales();
 await sincronizar();
 await reconectarImpresora();
 pintarImpresora();
+revisarDevoluciones();   // #837: las devoluciones de dinero que esta caja pidio y siguen esperando (o ya respondieron) tras recargar
 $('codigo').focus();
 </script>
 <dialog id="dialogo-guia" aria-labelledby="guia-titulo" style="width:min(760px,96vw);height:min(90vh,900px)">
